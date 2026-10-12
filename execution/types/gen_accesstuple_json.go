@@ -9,7 +9,7 @@ import (
 )
 
 // MarshalFastJSONTo writes the fields AccessTuple declares, in that order.
-func (x *AccessTuple) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (x *AccessTuple) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if x == nil {
 		s.WriteNil()
 		return nil
@@ -23,7 +23,7 @@ func (x *AccessTuple) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 }
 
 // writeJSONFields writes those fields without the enclosing object, for a type another object inlines.
-func (x *AccessTuple) writeJSONFields(s *jsonstream.StackStream) error {
+func (x *AccessTuple) writeJSONFields(s *jsonstream.Stream) error {
 	ethjson.Data(s, "address", x.Address[:])
 	ethjson.DataList(s, "storageKeys", x.StorageKeys)
 	return nil

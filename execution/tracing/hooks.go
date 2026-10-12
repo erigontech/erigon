@@ -258,6 +258,10 @@ func (h *Hooks) EmitEnter(depth int, typ byte, from accounts.Address, to account
 	}
 }
 
+func (h *Hooks) HasExitHook() bool {
+	return h != nil && (h.OnExitV2 != nil || h.OnExit != nil)
+}
+
 func (h *Hooks) EmitExit(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 	if h == nil {
 		return
@@ -452,6 +456,8 @@ const (
 	GasChangeTxAuthorization GasChangeReason = 20
 	// GasChangeRefundAccountCreation is state gas refunded for cancelled account creation.
 	GasChangeRefundAccountCreation GasChangeReason = 21
+	// gas charged to reach the transaction calldata floor.
+	GasChangeTxDataFloor GasChangeReason = 22
 
 	// GasChangeIgnored is a special value that can be used to indicate that the gas change should be ignored as
 	// it will be "manually" tracked by a direct emit of the gas change event.

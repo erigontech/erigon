@@ -49,12 +49,12 @@ type AccessList []AccessTuple
 
 // MarshalFastJSONTo writes the list as a bare array. The receiver must stay a value, so the
 // type itself satisfies the fast-JSON interface.
-func (al AccessList) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (al AccessList) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	jsonstream.ArrayValue(s, al, writeAccessTupleElem)
 	return nil
 }
 
-func writeAccessTupleElem(s *jsonstream.StackStream, a *AccessTuple) { _ = a.MarshalFastJSONTo(s) }
+func writeAccessTupleElem(s *jsonstream.Stream, a *AccessTuple) { _ = a.MarshalFastJSONTo(s) }
 
 // StorageKeys returns the total number of storage keys in the access list.
 func (al AccessList) StorageKeys() int {

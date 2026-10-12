@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
@@ -572,6 +573,20 @@ func TestExecutionWitnessCacheOnlyServe(t *testing.T) {
 		require.Same(t, sentinel, result, "a cached by-number request serves the stored pointer")
 	})
 
+	t.Run("by-number miss waits for the running build", func(t *testing.T) {
+		cache := newWitnessResultCache(96, 0, true, true)
+		registerFinishedBuild(cache, block1Hash, sentinel)
+		api.witnessCache = cache
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		hitBefore, awaitBefore := witnessCacheHitCounter.GetValueUint64(), witnessCacheAwaitCounter.GetValueUint64()
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		require.NoError(t, err)
+		require.Same(t, sentinel, result, "a cache-only miss must serve the running build, not out-of-window")
+		require.Equal(t, hitBefore, witnessCacheHitCounter.GetValueUint64(), "a joined build is not a resident hit")
+		require.Equal(t, awaitBefore+1, witnessCacheAwaitCounter.GetValueUint64(), "a joined build counts as an await")
+	})
+
 	t.Run("by-hash orphan is reorged-away, never serves the resident entry", func(t *testing.T) {
 		// Store a non-canonical fork header at height 1 so a by-hash request resolves to
 		// block 1 but the hash differs from the canonical one.
@@ -728,6 +743,27 @@ func TestGetWitness(t *testing.T) {
 		require.ErrorContains(t, err, "transaction index out of bounds")
 		require.Nil(t, got)
 	})
+
+	for _, tc := range []struct {
+		name            string
+		history, blocks prune.BlockAmount
+	}{
+		{"pruned history", prune.Distance(1), prune.KeepAllBlocksPruneMode},
+		{"pruned transactions", prune.KeepAllBlocksPruneMode, prune.Distance(1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := newBaseApiForTest(m)
+			base._pruneMode.Store(&prune.Mode{Initialised: true, History: tc.history, Blocks: tc.blocks})
+			api := newEthApiForTest(base, m.DB, nil, nil)
+
+			got, err := api.GetWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+			require.ErrorIs(t, err, state.ErrPruned)
+			require.Nil(t, got)
+			got, err = api.GetTxWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, 0)
+			require.ErrorIs(t, err, state.ErrPruned)
+			require.Nil(t, got)
+		})
+	}
 }
 
 // TestGetWitnessRequiresCommitmentHistory pins that eth_getWitness reports the missing

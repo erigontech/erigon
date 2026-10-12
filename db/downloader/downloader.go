@@ -338,7 +338,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger) (*Downl
 		}
 	}
 
-	m, torrentClient, err := newTorrentClient(ctx, cfg.Dirs.Snap, cfg.ClientConfig)
+	m, torrentClient, err := newTorrentClient(cfg.Dirs.Snap, cfg.ClientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("newTorrentClient: %w", err)
 	}
@@ -429,8 +429,7 @@ func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) (incompleteTorrent
 	return
 }
 
-// I haven't removed logSeeding yet because I think Alex will want it back at some point.
-func (d *Downloader) InitBackgroundLogger(logSeeding bool) {
+func (d *Downloader) InitBackgroundLogger() {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	if d.initedBackgroundLogger {
@@ -658,7 +657,7 @@ func (d *Downloader) newStats(prevStats AggStats, torrents []snapshot) AggStats 
 	stats.When = time.Now()
 	interval := stats.When.Sub(prevStats.When)
 	calculateRate := func(counter func(*AggStats) uint64, rate func(*AggStats) *uint64) {
-		*rate(&stats) = calculateRate(counter(&stats), counter(&prevStats), *rate(&prevStats), interval)
+		*rate(&stats) = calculateRate(counter(&stats), counter(&prevStats), interval)
 	}
 	calculateRate(func(s *AggStats) uint64 { return s.BytesDownload }, func(s *AggStats) *uint64 { return &s.DownloadRate })
 	calculateRate(func(s *AggStats) uint64 { return s.BytesHashed }, func(s *AggStats) *uint64 { return &s.HashRate })
@@ -674,8 +673,8 @@ func (d *Downloader) newStats(prevStats AggStats, torrents []snapshot) AggStats 
 	return stats
 }
 
-// Calculating rate with decay in order to avoid rate spikes
-func calculateRate(current, previous uint64, prevRate uint64, interval time.Duration) uint64 {
+// calculateRate returns the byte rate between two cumulative counters over interval.
+func calculateRate(current, previous uint64, interval time.Duration) uint64 {
 	if interval == 0 {
 		return math.MaxUint64
 	}
@@ -1618,7 +1617,6 @@ func openMdbx(
 // This used to return the MDBX database. Instead, that's opened separately now and should be passed
 // in if it's revived.
 func newTorrentClient(
-	ctx context.Context,
 	snapDir string,
 	cfg *torrent.ClientConfig,
 ) (

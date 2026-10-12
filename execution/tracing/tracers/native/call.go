@@ -54,7 +54,7 @@ type callLog struct {
 
 type callLogs []callLog
 
-func (ls callLogs) MarshalFastJSONTo(s *jsonstream.StackStream) error { return writeObjects(s, ls) }
+func (ls callLogs) MarshalFastJSONTo(s *jsonstream.Stream) error { return writeObjects(s, ls) }
 
 //go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type callFrame -out gen_callframe_fastjson.go
 
@@ -80,12 +80,12 @@ type callFrame struct {
 
 type callFrames []callFrame
 
-func (fs callFrames) MarshalFastJSONTo(s *jsonstream.StackStream) error { return writeObjects(s, fs) }
+func (fs callFrames) MarshalFastJSONTo(s *jsonstream.Stream) error { return writeObjects(s, fs) }
 
 func writeObjects[E any, P interface {
 	*E
 	jsonstream.Marshaler
-}](s *jsonstream.StackStream, items []E) error {
+}](s *jsonstream.Stream, items []E) error {
 	s.WriteArrayStart()
 	for i := range items {
 		if err := P(&items[i]).MarshalFastJSONTo(s); err != nil {
@@ -326,7 +326,7 @@ func (t *callTracer) GetResult() (json.RawMessage, error) {
 	return res, nil
 }
 
-func (t *callTracer) MarshalFastJSONTo(s jsonstream.Stream) error {
+func (t *callTracer) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	root, err := t.root()
 	if err != nil {
 		return err
@@ -338,7 +338,7 @@ func (t *callTracer) MarshalFastJSONTo(s jsonstream.Stream) error {
 	if p := t.reason.Load(); p != nil {
 		return *p
 	}
-	return root.MarshalFastJSONTo(s.Open())
+	return root.MarshalFastJSONTo(s)
 }
 
 // root is nil without an error when the top-level call went to a precompile and includePrecompiles is false.

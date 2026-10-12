@@ -90,8 +90,8 @@ func TestCallTraceOneByOne(t *testing.T) {
 	toBlock := rpc.BlockNumber(10)
 	toAddress1 := common.Address{1}
 	traceReq1 := TraceFilterRequest{
-		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &fromBlock},
-		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &toBlock},
+		FromBlock: &fromBlock,
+		ToBlock:   &toBlock,
 		ToAddress: []*common.Address{&toAddress1},
 	}
 	if err = api.Filter(context.Background(), traceReq1, new(bool), nil, stream); err != nil {
@@ -131,8 +131,8 @@ func TestCallTraceUnwind(t *testing.T) {
 	toBlock := rpc.BlockNumber(10)
 	toAddress1 := common.Address{1}
 	traceReq1 := TraceFilterRequest{
-		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &fromBlock},
-		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &toBlock},
+		FromBlock: &fromBlock,
+		ToBlock:   &toBlock,
 		ToAddress: []*common.Address{&toAddress1},
 	}
 	if err = api.Filter(context.Background(), traceReq1, new(bool), nil, stream); err != nil {
@@ -146,8 +146,8 @@ func TestCallTraceUnwind(t *testing.T) {
 	stream.Reset(nil)
 	toBlock = 12
 	traceReq2 := TraceFilterRequest{
-		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &fromBlock},
-		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &toBlock},
+		FromBlock: &fromBlock,
+		ToBlock:   &toBlock,
 		ToAddress: []*common.Address{&toAddress1},
 	}
 	if err = api.Filter(context.Background(), traceReq2, new(bool), nil, stream); err != nil {
@@ -162,8 +162,8 @@ func TestCallTraceUnwind(t *testing.T) {
 	fromBlock = 12
 	toBlock = 20
 	traceReq3 := TraceFilterRequest{
-		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &fromBlock},
-		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &toBlock},
+		FromBlock: &fromBlock,
+		ToBlock:   &toBlock,
 		ToAddress: []*common.Address{&toAddress1},
 	}
 	if err = api.Filter(context.Background(), traceReq3, new(bool), nil, stream); err != nil {
@@ -194,8 +194,8 @@ func TestFilterNoAddresses(t *testing.T) {
 	fromBlock := rpc.BlockNumber(1)
 	toBlock := rpc.BlockNumber(10)
 	traceReq1 := TraceFilterRequest{
-		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &fromBlock},
-		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &toBlock},
+		FromBlock: &fromBlock,
+		ToBlock:   &toBlock,
 	}
 	for _, mode := range []TraceFilterMode{"", TraceFilterModeIntersection, TraceFilterModeUnion} {
 		t.Run(string(mode), func(t *testing.T) {
@@ -228,8 +228,8 @@ func TestFilterGenesisHasNoReward(t *testing.T) {
 		t.Helper()
 		stream := jsonstream.New(nil)
 		req := TraceFilterRequest{
-			FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &from},
-			ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &to},
+			FromBlock: &from,
+			ToBlock:   &to,
 			ToAddress: toAddress,
 			After:     after,
 			Count:     count,
@@ -322,8 +322,8 @@ func TestFilterAddressIntersection(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := TraceFilterRequest{
-				FromBlock:   &rpc.BlockNumberOrHash{BlockNumber: &fromBlock},
-				ToBlock:     &rpc.BlockNumberOrHash{BlockNumber: &toBlock},
+				FromBlock:   &fromBlock,
+				ToBlock:     &toBlock,
 				FromAddress: tc.from, ToAddress: tc.to, Mode: tc.mode,
 			}
 			var result json.RawMessage
@@ -412,8 +412,8 @@ func TestFilterFailedCreateHasNoRecipient(t *testing.T) {
 		t.Helper()
 		stream := jsonstream.New(nil)
 		req := TraceFilterRequest{
-			FromBlock:   &rpc.BlockNumberOrHash{BlockNumber: &block},
-			ToBlock:     &rpc.BlockNumberOrHash{BlockNumber: &block},
+			FromBlock:   &block,
+			ToBlock:     &block,
 			FromAddress: from, ToAddress: to,
 		}
 		require.NoError(t, api.Filter(context.Background(), req, new(bool), nil, stream))
@@ -449,6 +449,39 @@ func TestFilterModeValidation(t *testing.T) {
 			require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
 		})
 	}
+}
+
+// TestFilterBoundPastHead checks that a bound past the executed head returns
+// -32602, as eth_getLogs does, instead of an empty result, and that the head
+// itself is still a valid bound.
+func TestFilterBoundPastHead(t *testing.T) {
+	m := execmoduletester.New(t)
+	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	require.NoError(t, server.RegisterName("trace", newTraceApiForTest(m)))
+	client := rpc.DialInProc(server, log.New())
+	t.Cleanup(func() { client.Close(); server.Stop() })
+
+	for name, req := range map[string]map[string]any{
+		"fromBlock next":          {"fromBlock": "0x1"},
+		"toBlock next":            {"fromBlock": "0x0", "toBlock": "0x1"},
+		"toBlock far":             {"fromBlock": "0x0", "toBlock": "0xfffffffff"},
+		"fromBlock far, reversed": {"fromBlock": "0xfffffffff", "toBlock": "0x0"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var result json.RawMessage
+			err := client.CallContext(t.Context(), &result, "trace_filter", req)
+			var rpcErr rpc.Error
+			require.ErrorAs(t, err, &rpcErr)
+			require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+			require.EqualError(t, err, ErrBlockRangeIntoFuture)
+		})
+	}
+
+	t.Run("head", func(t *testing.T) {
+		var result json.RawMessage
+		require.NoError(t, client.CallContext(t.Context(), &result, "trace_filter", map[string]any{"fromBlock": "0x0", "toBlock": "0x0"}))
+		require.JSONEq(t, "[]", string(result))
+	})
 }
 
 // An explicit null for an optional trace_filter member is the same as omitting it.
@@ -552,6 +585,172 @@ func TestFilterNullMembers(t *testing.T) {
 	})
 }
 
+// TestFilterBlockHash checks that blockHash selects exactly the canonical block
+// it names, as a single-block range does, and that a hash is not a range bound.
+func TestFilterBlockHash(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	relay, sink, other := common.Address{1}, common.Address{2}, common.Address{3}
+	// The relay calls the sink: GAS is the gas, and value, arguments and return data are zero.
+	relayCode := append([]byte{0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x73}, sink[:]...)
+	relayCode = append(relayCode, 0x5a, 0xf1, 0x00)
+	m := execmoduletester.New(t, execmoduletester.WithKey(key), execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: chain.TestChainBerlinConfig,
+		Alloc: types.GenesisAlloc{
+			sender: {Balance: big.NewInt(common.Ether)},
+			relay:  {Code: relayCode},
+		},
+	}))
+	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	require.NoError(t, server.RegisterName("trace", newTraceApiForTest(m)))
+	client := rpc.DialInProc(server, log.New())
+	t.Cleanup(func() { client.Close(); server.Stop() })
+
+	// Every block of branch a holds a call to the relay, which calls the sink, and a
+	// transfer to other. Branch b shares block 1, then replaces blocks 2 and 3 with
+	// empty blocks rewarding other, and grows past a.
+	signer := types.LatestSigner(m.ChainConfig)
+	addCalls := func(block *blockgen.BlockGen) {
+		for _, rcv := range []common.Address{relay, other} {
+			txn, err := types.SignTx(types.NewTransaction(block.TxNonce(sender), rcv, new(uint256.Int), 100_000, new(uint256.Int), nil), *signer, key)
+			require.NoError(t, err)
+			block.AddTx(txn)
+		}
+	}
+	a, err := m.GenerateChain(3, func(i int, block *blockgen.BlockGen) { addCalls(block) })
+	require.NoError(t, err)
+	b, err := m.GenerateChain(4, func(i int, block *blockgen.BlockGen) {
+		if i == 0 {
+			addCalls(block)
+			return
+		}
+		block.SetCoinbase(other)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(a))
+
+	call := func(req map[string]any) (json.RawMessage, error) {
+		var result json.RawMessage
+		err := client.CallContext(t.Context(), &result, "trace_filter", req)
+		return result, err
+	}
+	traces := func(t *testing.T, req map[string]any) string {
+		t.Helper()
+		result, err := call(req)
+		require.NoError(t, err)
+		return string(result)
+	}
+	with := func(req, members map[string]any) map[string]any {
+		req = maps.Clone(req)
+		maps.Copy(req, members)
+		return req
+	}
+	hash := a.Blocks[1].Hash()
+	byHash := map[string]any{"blockHash": hash}
+	block2 := map[string]any{"fromBlock": "0x2", "toBlock": "0x2"}
+
+	t.Run("selects the block", func(t *testing.T) {
+		var records []struct {
+			BlockHash   common.Hash `json:"blockHash"`
+			BlockNumber uint64      `json:"blockNumber"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(traces(t, byHash)), &records))
+		// Two relay traces, the transfer and the block reward. Block 2 is not the
+		// head, so an ignored blockHash would answer for block 3.
+		require.Len(t, records, 4)
+		for _, record := range records {
+			require.Equal(t, hash, record.BlockHash)
+			require.Equal(t, uint64(2), record.BlockNumber)
+		}
+	})
+
+	t.Run("as a single-block range", func(t *testing.T) {
+		for name, members := range map[string]map[string]any{
+			"all":          {},
+			"fromAddress":  {"fromAddress": []common.Address{relay}},
+			"toAddress":    {"toAddress": []common.Address{sink}},
+			"reward":       {"toAddress": []common.Address{{}}},
+			"union":        {"fromAddress": []common.Address{relay}, "toAddress": []common.Address{other}, "mode": TraceFilterModeUnion},
+			"page":         {"after": 1, "count": 2},
+			"past the end": {"after": 4},
+			"count zero":   {"count": 0},
+		} {
+			t.Run(name, func(t *testing.T) {
+				require.JSONEq(t, traces(t, with(block2, members)), traces(t, with(byHash, members)))
+			})
+		}
+	})
+
+	t.Run("null members are omitted", func(t *testing.T) {
+		require.JSONEq(t, traces(t, block2), traces(t, with(byHash, map[string]any{"fromBlock": nil, "toBlock": nil})))
+		require.JSONEq(t, traces(t, block2), traces(t, with(block2, map[string]any{"blockHash": nil})))
+	})
+
+	t.Run("genesis", func(t *testing.T) {
+		require.JSONEq(t, "[]", traces(t, map[string]any{"blockHash": a.Blocks[0].ParentHash()}))
+	})
+
+	t.Run("invalid params", func(t *testing.T) {
+		for name, req := range map[string]map[string]any{
+			"blockHash with fromBlock":       {"blockHash": hash, "fromBlock": "0x2"},
+			"blockHash with toBlock":         {"blockHash": hash, "toBlock": "latest"},
+			"blockHash with range and count": {"blockHash": hash, "fromBlock": "0x2", "toBlock": "0x2", "count": 0},
+			"short blockHash":                {"blockHash": "0x02"},
+			"object blockHash":               {"blockHash": map[string]any{"blockHash": hash}},
+			"hash fromBlock":                 {"fromBlock": hash, "toBlock": "0x2"},
+			"hash toBlock":                   {"fromBlock": "0x1", "toBlock": hash},
+			"object fromBlock":               {"fromBlock": map[string]any{"blockHash": hash}, "toBlock": "0x2"},
+			"object toBlock":                 {"fromBlock": "0x1", "toBlock": map[string]any{"blockHash": hash, "requireCanonical": true}},
+			"number object bound":            {"fromBlock": map[string]any{"blockNumber": "0x2"}, "toBlock": "0x2"},
+		} {
+			t.Run(name, func(t *testing.T) {
+				_, err := call(req)
+				var rpcErr rpc.Error
+				require.ErrorAs(t, err, &rpcErr)
+				require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+			})
+		}
+	})
+
+	t.Run("unknown", func(t *testing.T) {
+		for _, req := range []map[string]any{{"blockHash": common.Hash{0xff}}, {"blockHash": common.Hash{0xff}, "count": 0}} {
+			_, err := call(req)
+			requireResourceNotFound(t, err, "block not found")
+		}
+	})
+
+	t.Run("noncanonical", func(t *testing.T) {
+		require.NoError(t, m.InsertChain(b))
+		replacement := b.Blocks[1].Hash()
+		require.NotEqual(t, hash, replacement)
+		for _, req := range []map[string]any{byHash, with(byHash, map[string]any{"count": 0})} {
+			_, err := call(req)
+			requireResourceNotFound(t, err, "block not found")
+		}
+		require.Equal(t, []int{2}, blockNumbersFromTraces(t, []byte(traces(t, map[string]any{"blockHash": replacement}))))
+		require.JSONEq(t, traces(t, block2), traces(t, map[string]any{"blockHash": replacement}))
+	})
+}
+
+// TestFilterBlockHashAheadOfExecution pins that a blockHash naming
+// a canonical block that is not executed yet is not found (-32001), even with
+// count 0, rather than an empty result for a block the node cannot trace.
+func TestFilterBlockHashAheadOfExecution(t *testing.T) {
+	t.Parallel()
+	m, aheadHash := newBlockAheadOfExecutionTester(t)
+	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	require.NoError(t, server.RegisterName("trace", newTraceApiForTest(m)))
+	client := rpc.DialInProc(server, log.New())
+	t.Cleanup(func() { client.Close(); server.Stop() })
+
+	for _, req := range []map[string]any{{"blockHash": aheadHash}, {"blockHash": aheadHash, "count": 0}} {
+		var result json.RawMessage
+		err := client.CallContext(t.Context(), &result, "trace_filter", req)
+		requireResourceNotFound(t, err, "is not executed")
+	}
+}
+
 func TestFilterBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
@@ -564,8 +763,8 @@ func TestFilterBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 
 	n := rpc.BlockNumber(blockNumber)
 	traceReq := TraceFilterRequest{
-		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &n},
-		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &n},
+		FromBlock: &n,
+		ToBlock:   &n,
 		ToAddress: []*common.Address{&contractAddr},
 	}
 
@@ -595,8 +794,8 @@ func TestFilterBlockOverridesOtherFieldsAffectOpcodes(t *testing.T) {
 
 			n := rpc.BlockNumber(blockNumber)
 			traceReq := TraceFilterRequest{
-				FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &n},
-				ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &n},
+				FromBlock: &n,
+				ToBlock:   &n,
 				ToAddress: []*common.Address{&contractAddr},
 			}
 
@@ -624,8 +823,8 @@ func TestFilterRejectedBlockOverrideReturnsError(t *testing.T) {
 
 	n := rpc.BlockNumber(0)
 	traceReq := TraceFilterRequest{
-		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &n},
-		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &n},
+		FromBlock: &n,
+		ToBlock:   &n,
 	}
 
 	beaconRoot := common.HexToHash("0x01")
@@ -653,8 +852,8 @@ func TestFilterSignerReflectsBlockOverridesNumber(t *testing.T) {
 
 	n := rpc.BlockNumber(3)
 	traceReq := TraceFilterRequest{
-		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &n},
-		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &n},
+		FromBlock: &n,
+		ToBlock:   &n,
 		ToAddress: []*common.Address{&c.bankAddress},
 	}
 
@@ -682,8 +881,8 @@ func TestFilterErrorAfterExportedTracesKeepsValidJSON(t *testing.T) {
 
 	from, to := rpc.BlockNumber(1), rpc.BlockNumber(3)
 	traceReq := TraceFilterRequest{
-		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &from},
-		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &to},
+		FromBlock: &from,
+		ToBlock:   &to,
 	}
 
 	var buf bytes.Buffer
@@ -693,16 +892,12 @@ func TestFilterErrorAfterExportedTracesKeepsValidJSON(t *testing.T) {
 	stream.WriteString("2.0")
 	stream.Field("id")
 	stream.Int(1)
-	result := jsonstream.NewLazyFieldStream(stream, "result", false)
-
-	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
-		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(1))},
-	}, result)
+	err := rpc.WriteFieldOrError(stream, "result", func(*jsonstream.Stream) error {
+		return api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
+			BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(1))},
+		}, stream)
+	})
 	require.ErrorContains(t, err, "protected txn is not supported by signer")
-	require.True(t, result.Written(), "test needs traces exported before the failure")
-
-	result.CloseIfOpen()
-	rpc.HandleError(err, stream)
 	stream.WriteObjectEnd()
 	require.NoError(t, stream.Flush())
 
@@ -740,8 +935,8 @@ func TestFilterCountSatisfiedIgnoresLaterErrors(t *testing.T) {
 	from, to := rpc.BlockNumber(1), rpc.BlockNumber(3)
 	count := uint64(1)
 	traceReq := TraceFilterRequest{
-		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &from},
-		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &to},
+		FromBlock: &from,
+		ToBlock:   &to,
 		Count:     &count,
 	}
 
@@ -772,8 +967,8 @@ func TestFilterAfterSkipsTracesBeforeExporting(t *testing.T) {
 	from, to := rpc.BlockNumber(1), rpc.BlockNumber(2)
 	after, count := uint64(1), uint64(1)
 	traceReq := TraceFilterRequest{
-		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &from},
-		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &to},
+		FromBlock: &from,
+		ToBlock:   &to,
 		After:     &after,
 		Count:     &count,
 	}
@@ -803,8 +998,8 @@ func TestFilterZeroCountReturnsEmptyArray(t *testing.T) {
 	from, to := rpc.BlockNumber(1), rpc.BlockNumber(3)
 	count := uint64(0)
 	traceReq := TraceFilterRequest{
-		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &from},
-		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &to},
+		FromBlock: &from,
+		ToBlock:   &to,
 		Count:     &count,
 	}
 

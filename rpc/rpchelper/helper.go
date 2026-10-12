@@ -45,6 +45,13 @@ func (e nonCanonicalHashError) Error() string {
 	return fmt.Sprintf("hash %x is not currently canonical", e.hash)
 }
 
+// BlockNotExecutedError reports a block past the execution stage's progress.
+type BlockNotExecutedError struct{ Block, LastExecuted uint64 }
+
+func (e *BlockNotExecutedError) Error() string {
+	return fmt.Sprintf("block %d is not executed (last executed: %d)", e.Block, e.LastExecuted)
+}
+
 func CheckBlockExecuted(tx kv.Tx, blockNumber uint64) error {
 	lastExecutedBlock, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
@@ -52,7 +59,7 @@ func CheckBlockExecuted(tx kv.Tx, blockNumber uint64) error {
 	}
 
 	if blockNumber > lastExecutedBlock {
-		return fmt.Errorf("block %d is not executed (last executed: %d)", blockNumber, lastExecutedBlock)
+		return &BlockNotExecutedError{Block: blockNumber, LastExecuted: lastExecutedBlock}
 	}
 
 	return nil

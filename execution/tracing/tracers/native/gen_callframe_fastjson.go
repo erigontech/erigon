@@ -11,7 +11,7 @@ import (
 )
 
 // MarshalFastJSONTo writes the fields callFrame declares, in that order.
-func (x *callFrame) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (x *callFrame) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if x == nil {
 		s.WriteNil()
 		return nil
@@ -25,7 +25,7 @@ func (x *callFrame) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 }
 
 // writeJSONFields writes those fields without the enclosing object, for a type another object inlines.
-func (x *callFrame) writeJSONFields(s *jsonstream.StackStream) error {
+func (x *callFrame) writeJSONFields(s *jsonstream.Stream) error {
 	ethjson.Data(s, "from", x.From[:])
 	ethjson.Quantity(s, "gas", x.Gas)
 	if x.StateGas != 0 {

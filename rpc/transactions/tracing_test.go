@@ -180,10 +180,11 @@ func TestTraceTxCompletionV2(t *testing.T) {
 			msg := types.NewMessage(sender, recipient, 0, uint256.NewInt(0), gasLimit,
 				uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0), nil, nil, false, false, true, false, nil)
 			blockCtx := evmtypes.BlockContext{CanTransfer: protocol.CanTransfer, Transfer: misc.Transfer, GasLimit: 1_000_000}
-			gasUsed, err := TraceTx(t.Context(), nil, nil, msg, blockCtx, protocol.NewEVMTxContext(msg),
+			txnGasUsage, err := TraceTx(t.Context(), nil, nil, msg, blockCtx, protocol.NewEVMTxContext(msg),
 				uint256.NewInt(0), common.Hash{}, 0, ibs, &tracersConfig.TraceConfig{Tracer: &name},
 				chain.AllProtocolChanges, jsonstream.New(io.Discard), time.Second, nil)
 			require.Equal(t, 1, calls)
+			require.Equal(t, received, txnGasUsage)
 			if gasLimit == 100 {
 				require.Error(t, err)
 				require.ErrorIs(t, err, completionErr)
@@ -194,9 +195,8 @@ func TestTraceTxCompletionV2(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, completionErr)
 			require.NotNil(t, receivedReceipt)
-			require.Equal(t, gasUsed, receivedReceipt.GasUsed)
 			require.EqualValues(t, params.StateGasPerStorageSet, received.BlockStateGasUsed)
-			require.Equal(t, gasUsed, received.BlockExecutionGasUsed+received.BlockStateGasUsed)
+			require.Equal(t, receivedReceipt.GasUsed, received.BlockExecutionGasUsed+received.BlockStateGasUsed)
 			require.Zero(t, received.GasRefund)
 		})
 	}
@@ -215,13 +215,13 @@ func assembleWithLogConfig(t *testing.T, cfg *logger.LogConfig, tracerName *stri
 	return err
 }
 
-// A tracer that fails before writing leaves a lazy "result" field unwritten, so the response carries only "error".
-func TestWriteTracerResultKeepsLazyFieldUnwrittenOnError(t *testing.T) {
+// A tracer that fails before writing writes nothing, so the response's "result" can be taken back.
+func TestWriteTracerResultWritesNothingOnError(t *testing.T) {
 	var buf bytes.Buffer
-	result := jsonstream.NewLazyFieldStream(jsonstream.New(&buf), "result", false)
-	tracer := &tracers.Tracer{MarshalFastJSONTo: func(jsonstream.Stream) error { return errors.New("stopped") }}
-	require.EqualError(t, writeTracerResult(tracer, result), "stopped")
-	require.False(t, result.Written())
+	s := jsonstream.New(&buf)
+	tracer := &tracers.Tracer{MarshalFastJSONTo: func(*jsonstream.Stream) error { return errors.New("stopped") }}
+	require.EqualError(t, writeTracerResult(tracer, s), "stopped")
+	require.Empty(t, s.Buffer())
 }
 
 // execution-apis gives the opcode logger's limit a minimum of 0, and a negative

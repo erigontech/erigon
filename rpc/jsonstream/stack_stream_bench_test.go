@@ -25,7 +25,7 @@ import (
 
 func BenchmarkStreamAcquire(b *testing.B) {
 	result := strings.Repeat("0xabcdef", 512)
-	write := func(s Stream) {
+	write := func(s *Stream) {
 		s.WriteObjectStart()
 		s.Field("jsonrpc")
 		s.WriteString("2.0")

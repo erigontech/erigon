@@ -9,7 +9,7 @@ import (
 )
 
 // MarshalFastJSONTo writes the fields Withdrawal declares, in that order.
-func (x *Withdrawal) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (x *Withdrawal) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if x == nil {
 		s.WriteNil()
 		return nil
@@ -23,7 +23,7 @@ func (x *Withdrawal) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 }
 
 // writeJSONFields writes those fields without the enclosing object, for a type another object inlines.
-func (x *Withdrawal) writeJSONFields(s *jsonstream.StackStream) error {
+func (x *Withdrawal) writeJSONFields(s *jsonstream.Stream) error {
 	ethjson.Quantity(s, "index", x.Index)
 	ethjson.Quantity(s, "validatorIndex", x.Validator)
 	ethjson.Data(s, "address", x.Address[:])

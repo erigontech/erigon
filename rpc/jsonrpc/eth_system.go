@@ -367,7 +367,7 @@ type feeHistoryResult struct {
 }
 
 // MarshalFastJSONTo writes r in encoding/json's field order and number forms.
-func (r *feeHistoryResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (r *feeHistoryResult) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if r == nil {
 		s.WriteNil()
 		return nil
@@ -400,11 +400,11 @@ func (r *feeHistoryResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	return nil
 }
 
-func writeU256s(s *jsonstream.StackStream, vs *[]hexutil.U256) {
+func writeU256s(s *jsonstream.Stream, vs *[]hexutil.U256) {
 	jsonstream.ArrayValue(s, *vs, writeU256)
 }
 
-func writeU256(s *jsonstream.StackStream, v *hexutil.U256) { s.WriteQuotedText(v) }
+func writeU256(s *jsonstream.Stream, v *hexutil.U256) { s.WriteQuotedText(v) }
 
 func allFinite(fs []float64) bool {
 	for _, f := range fs {
@@ -417,7 +417,7 @@ func allFinite(fs []float64) bool {
 
 // writeJSONFloat writes f as encoding/json does: 'e' notation outside [1e-6, 1e21), and no
 // leading zero in a negative exponent.
-func writeJSONFloat(s *jsonstream.StackStream, f *float64) {
+func writeJSONFloat(s *jsonstream.Stream, f *float64) {
 	format := byte('f')
 	if abs := math.Abs(*f); abs != 0 && (abs < 1e-6 || abs >= 1e21) {
 		format = 'e'

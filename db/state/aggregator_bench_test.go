@@ -126,7 +126,7 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	comp := seg.CompressKeys | seg.CompressVals
 	buildBtreeIndex(b, dataPath, indexPath, comp, 1, logger, true)
 
-	kv, bt, err := btindex.OpenBtreeIndexAndDataFile(indexPath, dataPath, comp, false)
+	kv, bt, err := btindex.OpenBtreeIndexAndDataFile(indexPath, dataPath, comp)
 	require.NoError(b, err)
 	defer bt.Close()
 	defer kv.Close()
@@ -163,7 +163,7 @@ func benchInitBtreeIndex(b *testing.B, params bTreeParameters, compression seg.F
 
 	buildBtreeIndex(b, dataPath, indexPath, compression, 1, logger, true)
 
-	kv, bt, err := btindex.OpenBtreeIndexAndDataFile(indexPath, dataPath, compression, false)
+	kv, bt, err := btindex.OpenBtreeIndexAndDataFile(indexPath, dataPath, compression)
 	require.NoError(b, err)
 	b.Cleanup(func() { bt.Close() })
 	b.Cleanup(func() { kv.Close() })

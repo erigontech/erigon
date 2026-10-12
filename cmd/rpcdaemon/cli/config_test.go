@@ -17,13 +17,20 @@
 package cli
 
 import (
+	"context"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -69,4 +76,78 @@ func TestRemoteRulesEngineFinalizeDelegates(t *testing.T) {
 		_, err := e.Finalize(&chain.Config{}, header, nil, nil, nil, nil, nil, nil, false, log.New())
 		require.NoError(t, err)
 	})
+}
+
+func TestRegularRpcServerGraphQLHostAndCORS(t *testing.T) {
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := ln.Addr().(*net.TCPAddr).Port
+	cfg := &httpcfg.HttpCfg{
+		Enabled:           true,
+		HttpServerEnabled: true,
+		GraphQLEnabled:    true,
+		HttpListenAddress: "127.0.0.1",
+		HttpPort:          port,
+		HttpListener:      ln,
+		HttpCORSDomain:    []string{"https://dapp.example"},
+		HttpVirtualHost:   []string{"localhost"},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- StartRpcServer(ctx, cfg, nil, log.New()) }()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	query := func(t *testing.T, host, origin string) (int, http.Header) {
+		t.Helper()
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://"+ln.Addr().String()+"/graphql", strings.NewReader(`{"query":"{__typename}"}`))
+		require.NoError(t, err)
+		req.Host = host
+		req.Header.Set("Content-Type", "application/json")
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		return resp.StatusCode, resp.Header
+	}
+
+	status, _ := query(t, "rebind.example", "")
+	require.Equal(t, http.StatusForbidden, status)
+	status, header := query(t, "localhost", "https://dapp.example")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, "https://dapp.example", header.Get("Access-Control-Allow-Origin"))
+}
+
+func TestGraphQLHandlerAdmissionControl(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var calls atomic.Int32
+	blockFirst := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			close(started)
+			<-release
+		}
+	})
+	handler := newGraphQLHandler(&httpcfg.HttpCfg{HttpVirtualHost: []string{"*"}}, blockFirst, 1)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/graphql", nil))
+	}()
+	select {
+	case <-started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("first request did not reach the GraphQL handler")
+	}
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/graphql", nil))
+	close(release)
+	<-done
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 }

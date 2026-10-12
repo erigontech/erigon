@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
 // WitnessSubscriptionOpts are the optional debug_subscribe("executionWitnesses") params.
@@ -41,10 +42,10 @@ type WitnessNotification struct {
 	Witness     *ExecutionWitnessResult `json:"witness"`
 }
 
-func (n WitnessNotification) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (n WitnessNotification) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	s.WriteObjectStart()
 	jsonstream.Text(s, "blockNumber", &n.BlockNumber)
-	s.Field("blockHash").WriteHex(n.BlockHash[:])
+	ethjson.Data(s, "blockHash", n.BlockHash[:])
 	s.Field("witness")
 	if err := n.Witness.MarshalFastJSONTo(s); err != nil {
 		return err

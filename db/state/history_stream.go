@@ -348,7 +348,7 @@ func (hi *HistoryRangeAsOfDB) advanceSmallVals() error {
 				break
 			}
 			if k, _, err = hi.valsCDup.Seek(seek); err != nil {
-				panic(err)
+				return err
 			}
 			continue
 		}

@@ -36,7 +36,7 @@ import (
 
 var (
 	contextType      = reflect.TypeFor[context.Context]()
-	jsonStreamType   = reflect.TypeFor[jsonstream.Stream]()
+	jsonStreamType   = reflect.TypeFor[*jsonstream.Stream]()
 	errorType        = reflect.TypeFor[error]()
 	subscriptionType = reflect.TypeFor[Subscription]()
 	stringType       = reflect.TypeFor[string]()
@@ -187,7 +187,7 @@ func newCallback(receiver, fn reflect.Value, name string, logger log.Logger) *ca
 		}
 		c.errPos = 1
 	}
-	// If there is only one return value (error), and the last argument is jsonstream.Stream, mark it as streamable
+	// If there is only one return value (error), and the last argument is *jsonstream.Stream, mark it as streamable
 	if len(outs) != 1 && c.streamable {
 		log.Warn(fmt.Sprintf("Cannot register RPC callback [%s] - streamable method may only return 1 value (error)", name))
 		return nil
@@ -221,7 +221,7 @@ func (c *callback) makeArgTypes() {
 }
 
 // call invokes the callback.
-func (c *callback) call(ctx context.Context, method string, args []reflect.Value, stream jsonstream.Stream) (res any, errRes error) {
+func (c *callback) call(ctx context.Context, method string, args []reflect.Value, stream *jsonstream.Stream) (res any, errRes error) {
 	// Create the argument slice.
 	fullargs := make([]reflect.Value, 0, 2+len(args))
 	if c.rcvr.IsValid() {

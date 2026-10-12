@@ -56,6 +56,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/types"
@@ -1022,6 +1023,58 @@ func TestExecutionPayloadSourceAtGloasGenesis(t *testing.T) {
 	}
 }
 
+func TestTargetGasLimitForFirstSepoliaGloasSlot(t *testing.T) {
+	_, config := clparams.GetConfigsByNetwork(chainspec.SepoliaChainID)
+	baseState := state.New(config)
+	baseState.SetVersion(clparams.FuluVersion)
+	targetSlot := uint64(353024) * config.SlotsPerEpoch
+	require.NoError(t, baseState.SetSlot(targetSlot-1))
+	header := baseState.LatestExecutionPayloadHeader()
+	header.GasLimit = 60_000_000
+	baseState.SetLatestExecutionPayloadHeader(header)
+	handler := &ApiHandler{beaconChainCfg: config}
+
+	t.Run("before Gloas", func(t *testing.T) {
+		require.Nil(t, handler.targetGasLimitForProposal(baseState, targetSlot-1, 0, clparams.FuluVersion))
+	})
+	t.Run("scheduled default", func(t *testing.T) {
+		gasLimit := handler.targetGasLimitForProposal(baseState, targetSlot, 0, clparams.GloasVersion)
+		require.NotNil(t, gasLimit)
+		require.Equal(t, hexutil.Uint64(200_000_000), *gasLimit)
+	})
+	for _, preferenceGasLimit := range []uint64{100_000_000, 300_000_000} {
+		t.Run(fmt.Sprintf("preference %d", preferenceGasLimit), func(t *testing.T) {
+			dependentRoot, err := state.GetProposerDependentRoot(baseState, targetSlot/config.SlotsPerEpoch)
+			require.NoError(t, err)
+			handler := &ApiHandler{beaconChainCfg: config, epbsPool: pool.NewEpbsPool()}
+			handler.epbsPool.ProposerPreferences.Add(
+				pool.ProposerPreferencesKey{Slot: targetSlot, DependentRoot: dependentRoot},
+				&cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+					ProposalSlot: targetSlot, DependentRoot: dependentRoot, TargetGasLimit: preferenceGasLimit,
+				}},
+			)
+			gasLimit := handler.targetGasLimitForProposal(baseState, targetSlot, 0, clparams.GloasVersion)
+			require.NotNil(t, gasLimit)
+			require.Equal(t, hexutil.Uint64(preferenceGasLimit), *gasLimit)
+		})
+	}
+}
+
+func TestTargetGasLimitForLaterSepoliaGloasSlot(t *testing.T) {
+	_, config := clparams.GetConfigsByNetwork(chainspec.SepoliaChainID)
+	targetSlot := (config.GloasForkEpoch + 1) * config.SlotsPerEpoch
+	baseState := state.New(config)
+	baseState.SetVersion(clparams.GloasVersion)
+	require.NoError(t, baseState.SetSlot(targetSlot-1))
+	baseState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{GasLimit: 60_000_000})
+	handler := &ApiHandler{beaconChainCfg: config}
+
+	gasLimit := handler.targetGasLimitForProposal(baseState, targetSlot, 0, clparams.GloasVersion)
+
+	require.NotNil(t, gasLimit)
+	require.Equal(t, hexutil.Uint64(200_000_000), *gasLimit)
+}
+
 func TestPreparePayloadForFirstGloasSlotUsesPreForkInputsAfterPreferenceRemoval(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, syncedData, forkchoiceStore, validatorParams := setupTestingHandler(
@@ -1100,7 +1153,7 @@ func TestFirstGloasProductionRejectsChangedBeaconHead(t *testing.T) {
 		}).AnyTimes()
 	handler.engine = engine
 
-	_, _, err := handler.produceBeaconBody(t.Context(), 1, currentSlot, baseBlockRoot, baseState,
+	_, _, err := handler.produceBeaconBody(t.Context(), currentSlot, baseBlockRoot, baseState,
 		targetSlot, common.Bytes96{}, common.Hash{})
 
 	require.ErrorIs(t, err, errForkChoiceHeadChanged)
@@ -1139,7 +1192,7 @@ func TestFirstGloasProductionUsesTransitionWithdrawals(t *testing.T) {
 	handler.engine = engine
 
 	_, _, err = handler.produceBeaconBody(
-		t.Context(), 3, currentSlot, baseBlockRoot, baseState, targetSlot,
+		t.Context(), currentSlot, baseBlockRoot, baseState, targetSlot,
 		common.Bytes96{}, common.Hash{},
 	)
 
@@ -2202,7 +2255,7 @@ func TestProductionUsesTargetSlotRandao(t *testing.T) {
 	clock.EXPECT().GetCurrentEpoch().Times(0)
 	handler.ethClock = clock
 
-	_, _, err := handler.produceBeaconBody(t.Context(), 1, postState.Slot(), common.Hash{0x41}, postState,
+	_, _, err := handler.produceBeaconBody(t.Context(), postState.Slot(), common.Hash{0x41}, postState,
 		targetSlot, common.Bytes96{}, common.Hash{})
 
 	require.Error(t, err)
@@ -2260,7 +2313,7 @@ func requireProductionUsesPreparedWarmup(t *testing.T, postState *state.CachingB
 	clock.EXPECT().GetSlotTime(targetSlot).Return(slotStart)
 	handler.ethClock = clock
 
-	_, _, err = handler.produceBeaconBody(ctx, 1, postState.Slot(), baseBlockRoot, postState,
+	_, _, err = handler.produceBeaconBody(ctx, postState.Slot(), baseBlockRoot, postState,
 		targetSlot, common.Bytes96{}, common.Hash{})
 
 	require.ErrorIs(t, err, context.Canceled)
@@ -2291,7 +2344,7 @@ func TestProductionLogsPreparedPayloadIDMismatch(t *testing.T) {
 	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(-10 * time.Second))
 	handler.ethClock = clock
 
-	_, _, err := handler.produceBeaconBody(t.Context(), 1, postState.Slot(), productionHead, postState,
+	_, _, err := handler.produceBeaconBody(t.Context(), postState.Slot(), productionHead, postState,
 		targetSlot, common.Bytes96{}, common.Hash{})
 
 	require.Error(t, err)

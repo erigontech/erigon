@@ -915,7 +915,12 @@ var (
 	CaplinDiscoveryQUICPortFlag = cli.Uint64Flag{
 		Name:  "caplin.discovery.quicport",
 		Usage: "QUIC port for Caplin libp2p",
-		Value: 4001,
+		Value: 4002,
+	}
+	CaplinDisableQUICFlag = cli.BoolFlag{
+		Name:  "caplin.quic.disable",
+		Usage: "Disable the QUIC transport for Caplin libp2p, falling back to TCP only. Useful when the QUIC UDP port cannot be exposed (e.g. some Docker/Kubernetes setups)",
+		Value: false,
 	}
 	CaplinEnableUPNPlag = cli.BoolFlag{
 		Name:  "caplin.enable-upnp",
@@ -1954,6 +1959,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	cfg.CaplinConfig.CaplinDiscoveryPort = ctx.Uint64(CaplinDiscoveryPortFlag.Name)
 	cfg.CaplinConfig.CaplinDiscoveryTCPPort = ctx.Uint64(CaplinDiscoveryTCPPortFlag.Name)
 	cfg.CaplinConfig.CaplinDiscoveryQUICPort = ctx.Uint64(CaplinDiscoveryQUICPortFlag.Name)
+	cfg.CaplinConfig.CaplinDisableQUIC = ctx.Bool(CaplinDisableQUICFlag.Name)
 	if ctx.Bool(KeepExecutionProofsFlag.Name) {
 		cfg.KeepExecutionProofs = true
 	}

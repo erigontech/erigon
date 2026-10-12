@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
@@ -25,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -74,4 +76,65 @@ func TestGetTransactionByBlockNumberAndIndex_PendingBlockPricesWithBaseFee(t *te
 	require.NotNil(t, got)
 	require.Nil(t, got.BlockHash)
 	require.Equal(t, uint256.NewInt(17).ToBig(), got.GasPrice.ToInt())
+}
+
+// Index 0 is the first non-system transaction of the block, and an index past the
+// last transaction is not an error. Holds whether or not the block cache holds the block.
+func TestGetTransactionByIndexMatchesBlock(t *testing.T) {
+	m, chain, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	ctx := context.Background()
+
+	checked := 0
+	checkBlock := func(t *testing.T, b *types.Block) {
+		for i, want := range b.Transactions() {
+			byNum, err := api.GetTransactionByBlockNumberAndIndex(ctx, rpc.BlockNumber(b.NumberU64()), hexutil.Uint(i))
+			require.NoError(t, err)
+			require.NotNil(t, byNum)
+			require.Equal(t, want.Hash(), byNum.Hash)
+			require.Equal(t, b.Hash(), *byNum.BlockHash)
+			require.Equal(t, b.Time(), uint64(*byNum.BlockTimestamp))
+
+			byHash, err := api.GetTransactionByBlockHashAndIndex(ctx, b.Hash(), hexutil.Uint64(i))
+			require.NoError(t, err)
+			require.NotNil(t, byHash)
+			require.Equal(t, want.Hash(), byHash.Hash)
+
+			var buf bytes.Buffer
+			require.NoError(t, want.MarshalBinary(&buf))
+			raw, err := api.GetRawTransactionByBlockNumberAndIndex(ctx, rpc.BlockNumber(b.NumberU64()), hexutil.Uint(i))
+			require.NoError(t, err)
+			require.Equal(t, buf.Bytes(), []byte(raw))
+			rawByHash, err := api.GetRawTransactionByBlockHashAndIndex(ctx, b.Hash(), hexutil.Uint(i))
+			require.NoError(t, err)
+			require.Equal(t, buf.Bytes(), []byte(rawByHash))
+			checked++
+		}
+
+		for _, past := range []hexutil.Uint{hexutil.Uint(len(b.Transactions())), ^hexutil.Uint(0)} {
+			byNum, err := api.GetTransactionByBlockNumberAndIndex(ctx, rpc.BlockNumber(b.NumberU64()), past)
+			require.NoError(t, err)
+			require.Nil(t, byNum)
+			raw, err := api.GetRawTransactionByBlockNumberAndIndex(ctx, rpc.BlockNumber(b.NumberU64()), past)
+			require.NoError(t, err)
+			require.Nil(t, raw)
+			byHash, err := api.GetTransactionByBlockHashAndIndex(ctx, b.Hash(), hexutil.Uint64(past))
+			require.NoError(t, err)
+			require.Nil(t, byHash)
+		}
+	}
+
+	t.Run("block not cached", func(t *testing.T) {
+		for _, b := range chain.Blocks {
+			checkBlock(t, b)
+		}
+	})
+	t.Run("block cached", func(t *testing.T) {
+		for _, b := range chain.Blocks {
+			_, err := api.GetBlockByNumber(ctx, rpc.BlockNumber(b.NumberU64()), false)
+			require.NoError(t, err)
+			checkBlock(t, b)
+		}
+	})
+	require.NotZero(t, checked)
 }

@@ -29,11 +29,9 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/klauspost/compress/gzip"
 	"github.com/rs/cors"
 
 	"github.com/klauspost/compress/gzhttp"
-	"github.com/klauspost/compress/zstd"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -202,15 +200,22 @@ var (
 	zstdOutBytes = metrics.GetOrCreateCounter(`rpc_zstd_out_bytes_total{path="streaming"}`)
 )
 
+var (
+	gzipWritersInUse = metrics.GetOrCreateGauge(`rpc_gzip_writers_in_use`)
+	zstdWritersInUse = metrics.GetOrCreateGauge(`rpc_zstd_writers_in_use`)
+)
+
 // gzipWrapper compresses with klauspost's gzhttp middleware, which buffers only
 // minGzipBodySize -- enough to decide whether compressing pays -- then streams,
 // so no response is held whole.
 var gzipWrapper = func() func(http.Handler) http.HandlerFunc {
 	wrapper, err := gzhttp.NewWrapper(
 		gzhttp.MinSize(minGzipBodySize),
-		gzhttp.CompressionLevel(gzip.BestSpeed), // gzip only
+		gzhttp.CompressionLevel(gzipLevel), // gzip only
 		gzhttp.EnableZstd(true),
-		gzhttp.ZstdCompressionLevel(int(zstd.SpeedFastest)), // zstd only
+		gzhttp.ZstdCompressionLevel(int(zstdLevel)), // zstd only
+		gzhttp.Implementation(gzipWriterFactory),
+		gzhttp.ZstdImplementation(zstdWriterFactory),
 	)
 	if err != nil {
 		panic(fmt.Sprintf("rpc gzip wrapper: %v", err))

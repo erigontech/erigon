@@ -35,26 +35,26 @@ type TxPoolContent map[string]map[string]map[string]*ethapi.RPCTransaction
 // TxPoolContentFrom is txpool_contentFrom's answer: sub-pool, then nonce.
 type TxPoolContentFrom map[string]map[string]*ethapi.RPCTransaction
 
-func (c TxPoolContent) MarshalFastJSONTo(w *jsonstream.StackStream) error {
-	return writeSortedMap(w, c, func(w *jsonstream.StackStream, senders map[string]map[string]*ethapi.RPCTransaction) error {
+func (c TxPoolContent) MarshalFastJSONTo(w *jsonstream.Stream) error {
+	return writeSortedMap(w, c, func(w *jsonstream.Stream, senders map[string]map[string]*ethapi.RPCTransaction) error {
 		return writeSortedMap(w, senders, writeNonceMap)
 	})
 }
 
-func (c TxPoolContentFrom) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+func (c TxPoolContentFrom) MarshalFastJSONTo(w *jsonstream.Stream) error {
 	return writeSortedMap(w, c, writeNonceMap)
 }
 
 // A nil transaction writes itself as null, so the map's values go straight to the marshaller.
-func writeNonceMap(w *jsonstream.StackStream, byNonce map[string]*ethapi.RPCTransaction) error {
-	return writeSortedMap(w, byNonce, func(w *jsonstream.StackStream, txn *ethapi.RPCTransaction) error {
+func writeNonceMap(w *jsonstream.Stream, byNonce map[string]*ethapi.RPCTransaction) error {
+	return writeSortedMap(w, byNonce, func(w *jsonstream.Stream, txn *ethapi.RPCTransaction) error {
 		return txn.MarshalFastJSONTo(w)
 	})
 }
 
 // writeSortedMap writes a map as a JSON object with its keys in the order encoding/json
 // emits them, which is what keeps the answer byte-identical to the reflected one.
-func writeSortedMap[V any](w *jsonstream.StackStream, m map[string]V, value func(*jsonstream.StackStream, V) error) error {
+func writeSortedMap[V any](w *jsonstream.Stream, m map[string]V, value func(*jsonstream.Stream, V) error) error {
 	if m == nil {
 		w.WriteNil()
 		return nil
@@ -75,7 +75,7 @@ func writeSortedMap[V any](w *jsonstream.StackStream, m map[string]V, value func
 // StorageValues is eth_getStorageValues' answer: the slots asked for, per account.
 type StorageValues map[common.Address][]hexutil.Bytes
 
-func (v StorageValues) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+func (v StorageValues) MarshalFastJSONTo(w *jsonstream.Stream) error {
 	if v == nil {
 		w.WriteNil()
 		return nil

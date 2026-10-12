@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
@@ -539,7 +540,7 @@ type ExecutionWitnessResult struct {
 }
 
 // MarshalFastJSONTo writes the result field by field, in the order and form encoding/json uses.
-func (m *ExecutionWitnessResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (m *ExecutionWitnessResult) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if m == nil {
 		s.WriteNil()
 		return nil
@@ -561,7 +562,7 @@ func (m *ExecutionWitnessResult) MarshalFastJSONTo(s *jsonstream.StackStream) er
 	return nil
 }
 
-func writeHexElem(s *jsonstream.StackStream, b *hexutil.Bytes) { s.WriteHex(*b) }
+func writeHexElem(s *jsonstream.Stream, b *hexutil.Bytes) { s.WriteHex(*b) }
 
 func (m *ExecutionWitnessResult) getHashFn(blockNum uint64) (common.Hash, error) {
 	if header, ok := m.headerByNumber[blockNum]; ok {
@@ -755,14 +756,21 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 
-	return api.buildWitnessResult(ctx, tx, nil, info, resolvedMode)
+	build := func(ctx context.Context) (*ExecutionWitnessResult, error) {
+		return api.buildWitnessResult(ctx, tx, nil, info, resolvedMode)
+	}
+	if api.witnessCache == nil || resolvedMode != witnessModeLegacy {
+		return build(ctx)
+	}
+	return api.witnessCache.buildOnce(ctx, info.Block.Hash(), build, nil)
 }
 
 // serveFromWitnessCache returns a cached legacy-mode witness when the eager cache
-// is enabled and holds an exact (num, hash) match for the requested block. A nil
-// cache, a canonical request, an unresolvable block, or a miss all report hit=false
-// so the caller falls through to the unchanged on-demand build (or, in cache-only mode,
-// to the typed out-of-window error). A by-hash request whose block number is no longer
+// is enabled and holds an exact (num, hash) match for the requested block. On a
+// cache-only node a miss first waits for a running build of that hash. A nil cache,
+// a canonical request, an unresolvable block, or a miss all report hit=false so the
+// caller falls through to the on-demand build (or, in cache-only mode, to the typed
+// out-of-window error). A by-hash request whose block number is no longer
 // canonical never serves its still-resident entry; reorgedAway then flags the distinct
 // orphan case so the cache-only caller can report it separately from a plain miss.
 func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.TemporalTx, blockNrOrHash rpc.BlockNumberOrHash, mode witnessMode) (result *ExecutionWitnessResult, hit, reorgedAway bool) {
@@ -795,6 +803,12 @@ func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.Tempor
 		}
 	}
 	result, ok := api.witnessCache.Get(hash)
+	if !ok && api.witnessCache.CacheOnly() {
+		if result, ok = api.witnessCache.awaitBuild(ctx, hash); ok {
+			witnessCacheAwaitCounter.Inc()
+			return result, true, false
+		}
+	}
 	if ok {
 		witnessCacheHitCounter.Inc()
 	} else {
@@ -965,7 +979,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	// canonical omits it. Added after stateless verification, which rejects the bare node.
 	if mode == witnessModeLegacy {
 		for _, node := range result.State {
-			if bytes.Contains(node, trie.EmptyRoot[:]) {
+			if bytes.Contains(node, empty.RootHash[:]) {
 				result.State = append(result.State, hexutil.Bytes{0x80})
 				break
 			}
@@ -1906,7 +1920,7 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 	// Handle created contracts - clear their storage subtries
 	for addr := range s.created {
 		if account, ok := s.accountUpdates[addr]; ok && account != nil {
-			account.Root = trie.EmptyRoot
+			account.Root = empty.RootHash
 		}
 		addrHash := crypto.Keccak256Hash(addr[:])
 		s.t.DeleteSubtree(addrHash[:])
@@ -1997,7 +2011,7 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 			continue
 		}
 		if account, ok := s.accountUpdates[addr]; ok && account != nil {
-			account.Root = trie.EmptyRoot
+			account.Root = empty.RootHash
 		}
 		addrHash := crypto.Keccak256Hash(addr[:])
 		s.t.DeleteSubtree(addrHash[:])

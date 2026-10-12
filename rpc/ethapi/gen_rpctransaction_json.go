@@ -11,7 +11,7 @@ import (
 )
 
 // MarshalFastJSONTo writes the fields RPCTransaction declares, in that order.
-func (x *RPCTransaction) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (x *RPCTransaction) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if x == nil {
 		s.WriteNil()
 		return nil
@@ -25,7 +25,7 @@ func (x *RPCTransaction) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 }
 
 // writeJSONFields writes those fields without the enclosing object, for a type another object inlines.
-func (x *RPCTransaction) writeJSONFields(s *jsonstream.StackStream) error {
+func (x *RPCTransaction) writeJSONFields(s *jsonstream.Stream) error {
 	if x.BlockHash == nil {
 		s.Field("blockHash").WriteNil()
 	} else {

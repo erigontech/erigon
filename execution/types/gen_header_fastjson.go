@@ -11,7 +11,7 @@ import (
 )
 
 // MarshalFastJSONTo writes the fields Header declares, in that order.
-func (x *Header) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (x *Header) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if x == nil {
 		s.WriteNil()
 		return nil
@@ -25,7 +25,7 @@ func (x *Header) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 }
 
 // writeJSONFields writes those fields without the enclosing object, for a type another object inlines.
-func (x *Header) writeJSONFields(s *jsonstream.StackStream) error {
+func (x *Header) writeJSONFields(s *jsonstream.Stream) error {
 	ethjson.Data(s, "parentHash", x.ParentHash[:])
 	ethjson.Data(s, "sha3Uncles", x.UncleHash[:])
 	ethjson.Data(s, "miner", x.Coinbase[:])

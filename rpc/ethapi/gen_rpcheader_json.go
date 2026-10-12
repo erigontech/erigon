@@ -11,7 +11,7 @@ import (
 )
 
 // MarshalFastJSONTo writes the fields RPCHeader declares, in that order.
-func (x *RPCHeader) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (x *RPCHeader) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if x == nil {
 		s.WriteNil()
 		return nil
@@ -25,7 +25,7 @@ func (x *RPCHeader) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 }
 
 // writeJSONFields writes those fields without the enclosing object, for a type another object inlines.
-func (x *RPCHeader) writeJSONFields(s *jsonstream.StackStream) error {
+func (x *RPCHeader) writeJSONFields(s *jsonstream.Stream) error {
 	if x.Number == nil {
 		s.Field("number").WriteNil()
 	} else {

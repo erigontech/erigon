@@ -281,7 +281,7 @@ type overloadService struct{}
 
 func (*overloadService) Reject(context.Context) (string, error) { return "", kv.ErrReadTxLimitExceeded }
 
-func (*overloadService) RejectStreaming(_ context.Context, _ jsonstream.Stream) error {
+func (*overloadService) RejectStreaming(_ context.Context, _ *jsonstream.Stream) error {
 	return kv.ErrReadTxLimitExceeded
 }
 
@@ -575,4 +575,19 @@ func TestHTTPContentLengthForBufferedResponse(t *testing.T) {
 	length, encoding, _ = post(`{"jsonrpc":"2.0","id":2,"method":"big_largeResp"}`)
 	require.Equal(t, int64(-1), length)
 	require.Equal(t, []string{"chunked"}, encoding)
+}
+
+func TestBatchNotificationGetsNoReply(t *testing.T) {
+	srv := newTestServer(log.Root())
+	defer srv.Stop()
+
+	body := `[{"jsonrpc":"2.0","method":"test_streamEcho","params":["x"]},` +
+		`{"jsonrpc":"2.0","method":"test_echo","params":["x",1]},` +
+		`{"jsonrpc":"2.0","id":1,"method":"test_streamEcho","params":["y"]}]`
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	require.JSONEq(t, `[{"jsonrpc":"2.0","id":1,"result":"y"}]`, rec.Body.String())
 }

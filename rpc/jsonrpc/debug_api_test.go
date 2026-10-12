@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"reflect"
@@ -50,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
@@ -57,6 +59,7 @@ import (
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -169,6 +172,225 @@ func TestTraceBlockByNumber(t *testing.T) {
 	var er []ethapi.ExecutionResult
 	if err = json.Unmarshal(buf.Bytes(), &er); err != nil {
 		t.Fatalf("parsing result: %v", err)
+	}
+}
+
+func TestTraceBlockGasUsed(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		amsterdam bool
+		dataSize  int
+	}{
+		{name: "pre_amsterdam"},
+		{name: "state_bound", amsterdam: true},
+		{name: "execution_bound", amsterdam: true, dataSize: 10_000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := chain.AllProtocolChanges.Copy()
+			if !tc.amsterdam {
+				cfg.AmsterdamTime = nil
+			}
+			m, bankKey, bankAddress := fundedBankGenesis(t, cfg)
+			signer := types.LatestSignerForChainID(cfg.ChainID)
+			gasPrice := uint256.NewInt(1_000_000_000)
+			txns := []*types.LegacyTx{
+				types.NewTransaction(0, common.HexToAddress("0x2000"), uint256.NewInt(1), 1_000_000, gasPrice, nil),
+				types.NewTransaction(1, bankAddress, uint256.NewInt(0), 1_000_000, gasPrice, bytes.Repeat([]byte{1}, tc.dataSize)),
+			}
+			generated, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
+				gen.SetCoinbase(common.Address{1})
+				for _, txn := range txns {
+					signed, err := types.SignTx(txn, *signer, bankKey)
+					require.NoError(t, err)
+					gen.AddTx(signed)
+				}
+			})
+			require.NoError(t, err)
+			require.NoError(t, m.InsertChain(generated))
+			receiptGasUsed := generated.Receipts[0][1].CumulativeGasUsed
+			if tc.amsterdam {
+				require.NotEqual(t, receiptGasUsed, generated.TopBlock.GasUsed())
+			} else {
+				require.Equal(t, receiptGasUsed, generated.TopBlock.GasUsed())
+			}
+
+			previousAssert := dbg.AssertEnabled
+			dbg.AssertEnabled = true
+			t.Cleanup(func() { dbg.AssertEnabled = previousAssert })
+			var buf bytes.Buffer
+			stream := jsonstream.New(&buf)
+			api := newDebugApiForTest(m)
+			require.NotPanics(t, func() {
+				require.NoError(t, api.TraceBlockByNumber(m.Ctx, 1, &tracersConfig.TraceConfig{}, stream))
+			})
+			require.NoError(t, stream.Flush())
+			var traces []struct {
+				Result struct {
+					Gas uint64 `json:"gas"`
+				} `json:"result"`
+			}
+			require.NoError(t, json.Unmarshal(buf.Bytes(), &traces))
+			require.Len(t, traces, len(txns))
+			for i, trace := range traces {
+				require.Equal(t, generated.Receipts[0][i].GasUsed, trace.Result.Gas)
+			}
+		})
+	}
+}
+
+type traceGasUsage struct {
+	GasUsed        hexutil.Uint64  `json:"gasUsed"`
+	RegularGasUsed *hexutil.Uint64 `json:"regularGasUsed"`
+	StateGasUsed   *hexutil.Int64  `json:"stateGasUsed"`
+	GasRefund      *hexutil.Uint64 `json:"gasRefund"`
+}
+
+func gasTracingTestChain(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack, []ethapi.CallArgs) {
+	t.Helper()
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	contract := common.HexToAddress("0x2000")
+	m := execmoduletester.New(t, execmoduletester.WithKey(key), execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config:   chain.AllProtocolChanges.Copy(),
+		GasLimit: 60_000_000,
+		Alloc: types.GenesisAlloc{
+			sender: {Balance: big.NewInt(1e18)},
+			contract: {Nonce: 1, Code: []byte{
+				byte(vm.PUSH1), 0, byte(vm.CALLDATALOAD), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP),
+			}},
+			params.HistoryStorageAddress.Value(): {Nonce: 1, Code: sloadStub},
+		},
+	}))
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	gas := hexutil.Uint64(1_000_000)
+	gasPrice := uint256.NewInt(1_000_000_000)
+	calls := make([]ethapi.CallArgs, 0, 2)
+	generated, err := m.GenerateChain(2, func(i int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{1})
+		gen.AddWithdrawal(&types.Withdrawal{Index: hexutil.Uint64(i), Address: common.Address{0x30, byte(i)}, Amount: 1})
+		if i != 0 {
+			return
+		}
+		for nonce := range uint64(2) {
+			data := make(hexutil.Bytes, 32)
+			data[31] = byte(1 - nonce)
+			txn, err := types.SignTx(types.NewTransaction(nonce, contract, uint256.NewInt(0), uint64(gas), gasPrice, data), *signer, key)
+			require.NoError(t, err)
+			gen.AddTx(txn)
+			calls = append(calls, ethapi.CallArgs{
+				From: &sender, To: &contract, Gas: &gas, GasPrice: (*hexutil.U256)(gasPrice),
+				Nonce: new(hexutil.Uint64(nonce)), Data: &data,
+			})
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(generated))
+	return m, generated, calls
+}
+
+func readGasTrace(t *testing.T, result any, trace func(*jsonstream.Stream) error) {
+	t.Helper()
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	require.NoError(t, trace(stream))
+	require.NoError(t, stream.Flush())
+	require.NoError(t, json.Unmarshal(buf.Bytes(), result))
+}
+
+func TestTraceGasUsageAcrossRPCPaths(t *testing.T) {
+	m, generated, calls := gasTracingTestChain(t)
+	api := newDebugApiForTest(m)
+	tracer := "callTracer"
+	config := &tracersConfig.TraceConfig{Tracer: &tracer}
+	block := rpc.BlockNumberOrHashWithNumber(1)
+	var blockTraces []struct {
+		Result traceGasUsage `json:"result"`
+	}
+	readGasTrace(t, &blockTraces, func(stream *jsonstream.Stream) error {
+		return api.TraceBlockByNumber(m.Ctx, 1, config, stream)
+	})
+	require.Len(t, blockTraces, len(calls))
+	for i, trace := range blockTraces {
+		require.EqualValues(t, types.ReceiptStatusSuccessful, generated.Receipts[0][i].Status)
+		require.EqualValues(t, generated.Receipts[0][i].GasUsed, trace.Result.GasUsed)
+		require.NotNil(t, trace.Result.RegularGasUsed)
+		require.Positive(t, *trace.Result.RegularGasUsed)
+		require.NotNil(t, trace.Result.StateGasUsed)
+		require.NotNil(t, trace.Result.GasRefund)
+	}
+	require.EqualValues(t, params.StateGasPerStorageSet, *blockTraces[0].Result.StateGasUsed)
+	require.Zero(t, *blockTraces[0].Result.GasRefund)
+	require.Zero(t, *blockTraces[1].Result.StateGasUsed)
+	require.Positive(t, *blockTraces[1].Result.GasRefund)
+
+	var manyTraces [][]traceGasUsage
+	readGasTrace(t, &manyTraces, func(stream *jsonstream.Stream) error {
+		return api.TraceCallMany(m.Ctx, []Bundle{{Transactions: calls}}, StateContext{BlockNumber: block, TransactionIndex: new(0)}, config, stream)
+	})
+	require.Len(t, manyTraces, 1)
+	require.Len(t, manyTraces[0], len(calls))
+	for i, call := range calls {
+		var txnTrace traceGasUsage
+		readGasTrace(t, &txnTrace, func(stream *jsonstream.Stream) error {
+			return api.TraceTransaction(m.Ctx, generated.Blocks[0].Transactions()[i].Hash(), config, stream)
+		})
+		require.Equal(t, blockTraces[i].Result, txnTrace, "transaction %d", i)
+
+		callConfig := *config
+		callConfig.TxIndex = new(hexutil.Uint(i))
+		var callTrace traceGasUsage
+		readGasTrace(t, &callTrace, func(stream *jsonstream.Stream) error {
+			return api.TraceCall(m.Ctx, call, &block, &callConfig, stream)
+		})
+		require.Equal(t, txnTrace, callTrace, "call %d", i)
+		require.Equal(t, txnTrace, manyTraces[0][i], "call-many %d", i)
+	}
+}
+
+func TestTraceBlockGasExcludesSystemChanges(t *testing.T) {
+	m, generated, _ := gasTracingTestChain(t)
+	api := newDebugApiForTest(m)
+	ethAPI := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	previousAssert := dbg.AssertEnabled
+	dbg.AssertEnabled = true
+	t.Cleanup(func() { dbg.AssertEnabled = previousAssert })
+	for i, block := range generated.Blocks {
+		at := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(block.NumberU64()))
+		stored, err := ethAPI.GetStorageAt(m.Ctx, params.HistoryStorageAddress.Value(), hexutil.EncodeUint64(uint64(i)), &at)
+		require.NoError(t, err)
+		require.Equal(t, block.ParentHash(), stored)
+		require.NotEqual(t, common.Hash{}, stored)
+		require.Len(t, block.Withdrawals(), 1)
+		balance, err := ethAPI.GetBalance(m.Ctx, block.Withdrawals()[0].Address, &at)
+		require.NoError(t, err)
+		require.Equal(t, uint256.NewInt(1_000_000_000), (*uint256.Int)(balance))
+		var traces []struct {
+			TxHash common.Hash `json:"txHash"`
+			Result struct {
+				Gas            uint64 `json:"gas"`
+				RegularGasUsed uint64 `json:"regularGasUsed"`
+				StateGasUsed   uint64 `json:"stateGasUsed"`
+			} `json:"result"`
+		}
+		readGasTrace(t, &traces, func(stream *jsonstream.Stream) error {
+			return api.TraceBlockByNumber(m.Ctx, rpc.BlockNumber(block.NumberU64()), nil, stream)
+		})
+		require.Len(t, traces, len(block.Transactions()))
+		var executionGasUsed uint64
+		var stateGasUsed uint64
+		for j, trace := range traces {
+			require.Equal(t, block.Transactions()[j].Hash(), trace.TxHash)
+			require.Equal(t, generated.Receipts[i][j].GasUsed, trace.Result.Gas)
+			executionGasUsed += trace.Result.RegularGasUsed
+			stateGasUsed += trace.Result.StateGasUsed
+		}
+		require.Equal(t, max(executionGasUsed, stateGasUsed), block.GasUsed())
+		if i == 0 {
+			require.EqualValues(t, params.StateGasPerStorageSet, stateGasUsed)
+		} else {
+			require.Zero(t, block.GasUsed())
+		}
 	}
 }
 
@@ -335,7 +557,7 @@ func TestTraceErrorPathsWriteNoStream(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newDebugApiForTest(m)
 
-	newStream := func() (*bytes.Buffer, jsonstream.Stream) {
+	newStream := func() (*bytes.Buffer, *jsonstream.Stream) {
 		var buf bytes.Buffer
 		return &buf, jsonstream.New(&buf)
 	}
@@ -547,43 +769,8 @@ func TestPricedBlobsCompareFeeCapToBlobBaseFeeOverride(t *testing.T) {
 	})
 }
 
-// TestTxResultFieldStreamLazy verifies the lazy-write semantics of LazyFieldStream
-// with prependSeparator=true (the per-tx result field case).
-func TestTxResultFieldStreamLazy(t *testing.T) {
-	newInner := func() (*bytes.Buffer, jsonstream.Stream) {
-		var buf bytes.Buffer
-		return &buf, jsonstream.New(&buf)
-	}
-
-	t.Run("no_writes_when_unused", func(t *testing.T) {
-		buf, inner := newInner()
-		_ = jsonstream.NewLazyFieldStream(inner, "result", true)
-		require.NoError(t, inner.Flush())
-		require.Empty(t, buf.Bytes())
-	})
-
-	t.Run("writes_separator_and_field_on_first_value", func(t *testing.T) {
-		buf, inner := newInner()
-		lazy := jsonstream.NewLazyFieldStream(inner, "result", true)
-		lazy.WriteNil()
-		require.NoError(t, inner.Flush())
-		require.Equal(t, `,"result":null`, buf.String())
-	})
-
-	t.Run("field_written_only_once", func(t *testing.T) {
-		buf, inner := newInner()
-		lazy := jsonstream.NewLazyFieldStream(inner, "result", true)
-		lazy.WriteArrayStart()
-		lazy.WriteString("a")
-		lazy.WriteString("b")
-		lazy.WriteArrayEnd()
-		require.NoError(t, inner.Flush())
-		require.Equal(t, `,"result":["a","b"]`, buf.String())
-	})
-}
-
 // TestTraceBlockErrorBeforeWrite verifies traceBlock produces valid JSON when AssembleTracer fails
-// before any write (inner.Written stays false): each tx object has "error" but no "result" field.
+// before any write: each tx object has "error" but no "result" field.
 func TestTraceBlockErrorBeforeWrite(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newDebugApiForTest(m)
@@ -594,8 +781,7 @@ func TestTraceBlockErrorBeforeWrite(t *testing.T) {
 	require.NotNil(t, tx)
 	blockNum := rpc.BlockNumber(tx.BlockNumber.ToInt().Uint64())
 
-	// Invalid timeout makes AssembleTracer fail before any write to inner, so inner.Written stays
-	// false and the error handler writes only the "error" field inside the tx object.
+	// Invalid timeout makes AssembleTracer fail before any write, so the tx object gets only "error".
 	tracer := "callTracer"
 	timeout := "garbage"
 	cfg := &tracersConfig.TraceConfig{Tracer: &tracer, Timeout: &timeout}
@@ -617,30 +803,24 @@ func TestTraceBlockErrorBeforeWrite(t *testing.T) {
 	}
 }
 
-// TestTraceBlockErrorAfterWrite exercises the Written==true close path: when a tracer starts
-// writing to the result field before an error occurs, CloseIfOpen must seal the partial JSON
-// back to the tx-object level so the overall output remains valid.
+// TestTraceBlockErrorAfterWrite: when a tracer starts writing the result before an error occurs,
+// the partial result is sealed back to the tx-object level and "error" follows it.
 func TestTraceBlockErrorAfterWrite(t *testing.T) {
 	var buf bytes.Buffer
 	s := jsonstream.New(&buf)
-	inner := jsonstream.NewLazyFieldStream(s, "result", true)
 
 	// Replicate the per-tx structure of the traceBlock loop.
 	s.WriteArrayStart()
 	s.WriteObjectStart()
 	s.Field("txHash")
 	s.WriteString("0xdeadbeef")
-	inner.ResetField()
-
-	// Simulate TraceTx writing a partial result before returning an error:
-	// the first write to inner triggers ensure() and sets Written=true.
-	inner.WriteObjectStart()
-	inner.Field("from")
-	inner.WriteString("0xabcd")
-	// Replicate the traceBlock error handler.
-	inner.CloseIfOpen()
-	s.Field("error")
-	s.WriteString("partial write error")
+	err := rpc.WriteFieldOrError(s, "result", func(*jsonstream.Stream) error {
+		s.WriteObjectStart()
+		s.Field("from")
+		s.WriteString("0xabcd")
+		return errors.New("partial write error")
+	})
+	require.Error(t, err)
 	s.WriteObjectEnd()
 
 	s.WriteArrayEnd()
@@ -652,10 +832,10 @@ func TestTraceBlockErrorAfterWrite(t *testing.T) {
 	var obj map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(entries[0], &obj), "tx entry is not a JSON object")
 	require.Contains(t, obj, "txHash")
-	require.Contains(t, obj, "result", "result must be present when Written=true before error")
+	require.Contains(t, obj, "result", "a result the tracer started must be kept")
 	require.Contains(t, obj, "error", "error must be inside the tx object, not at array level")
 	var resultObj map[string]json.RawMessage
-	require.NoError(t, json.Unmarshal(obj["result"], &resultObj), "result must be valid JSON after CloseIfOpen: %s", obj["result"])
+	require.NoError(t, json.Unmarshal(obj["result"], &resultObj), "result must be valid JSON: %s", obj["result"])
 }
 
 func TestTraceTransactionNoRefund(t *testing.T) {
@@ -1618,6 +1798,35 @@ func TestExecutionWitnessCacheServe(t *testing.T) {
 		require.NotSame(t, sentinel, result)
 		require.NotNil(t, result.State, "miss must build a real witness on demand")
 		require.Equal(t, uint64(1), witnessCacheMissCounter.GetValueUint64()-missBefore, "a miss increments the miss counter once")
+	})
+
+	t.Run("legacy miss joins the running build", func(t *testing.T) {
+		cache := newWitnessResultCache(96, 0, false, false)
+		registerFinishedBuild(cache, block1Hash, sentinel)
+		api.witnessCache = cache
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		require.NoError(t, err)
+		require.Same(t, sentinel, result, "a legacy miss must take the running build's result, not build again")
+	})
+
+	t.Run("shared build survives its caller's cancellation", func(t *testing.T) {
+		cache := newWitnessResultCache(96, 0, false, false)
+		reqCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		tx, err := api.db.BeginTemporalRo(reqCtx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		info, err := api.resolveWitnessBlock(reqCtx, tx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+		require.NoError(t, err)
+		cancel()
+
+		result, err := cache.buildOnce(reqCtx, block1Hash, func(ctx context.Context) (*ExecutionWitnessResult, error) {
+			return api.buildWitnessResult(ctx, tx, nil, info, witnessModeLegacy)
+		}, nil)
+		require.NoError(t, err, "a canceled caller must not fail the build its waiters share")
+		require.NotEmpty(t, result.State)
 	})
 
 	t.Run("nil cache path unaffected", func(t *testing.T) {

@@ -83,12 +83,12 @@ type AuthorizationList []JsonAuthorization
 
 // MarshalFastJSONTo writes the list as a bare array. The receiver must stay a value, so the
 // type itself satisfies the fast-JSON interface.
-func (l AuthorizationList) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (l AuthorizationList) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	jsonstream.ArrayValue(s, l, writeAuthorizationElem)
 	return nil
 }
 
-func writeAuthorizationElem(s *jsonstream.StackStream, a *JsonAuthorization) {
+func writeAuthorizationElem(s *jsonstream.Stream, a *JsonAuthorization) {
 	_ = a.MarshalFastJSONTo(s)
 }
 

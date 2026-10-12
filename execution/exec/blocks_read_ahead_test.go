@@ -362,7 +362,7 @@ func TestBlockReadAheaderWarmsOverlayBlockAccessList(t *testing.T) {
 	baseTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer baseTx.Rollback()
-	overlay, err := membatchwithdb.NewMemoryBatch(baseTx, dirs.Tmp, log.New())
+	overlay, err := membatchwithdb.NewMemoryBatch(baseTx)
 	require.NoError(t, err)
 	require.NoError(t, rawdb.WriteBlockAccessListBytes(overlay, header.Hash(), header.Number.Uint64(), balBytes))
 	// The regression requires the BAL to be present only in BlockOverlay.
@@ -374,6 +374,9 @@ func TestBlockReadAheaderWarmsOverlayBlockAccessList(t *testing.T) {
 	}))
 	stateCache := newTestStateCache()
 	t.Cleanup(stateCache.Close)
+	stateVersion, err := rawdb.GetStateVersion(baseTx)
+	require.NoError(t, err)
+	stateCache.Applier().Initialize(stateVersion)
 	readAheader := NewBlockReadAheader()
 	readAheader.SetStateCache(stateCache)
 	readAheader.AddHeaderAndBody(ctx, db, overlay, header, body)

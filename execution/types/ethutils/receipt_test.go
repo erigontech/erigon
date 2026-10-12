@@ -227,7 +227,7 @@ func TestRPCReceiptMarshalFastJSONToOptionalFields(t *testing.T) {
 }
 
 func requireFastJSONMatches(t *testing.T, v interface {
-	MarshalFastJSONTo(*jsonstream.StackStream) error
+	MarshalFastJSONTo(*jsonstream.Stream) error
 },
 ) {
 	t.Helper()

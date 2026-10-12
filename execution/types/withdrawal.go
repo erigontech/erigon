@@ -113,12 +113,12 @@ type Withdrawals []*Withdrawal
 
 // MarshalFastJSONTo writes the withdrawals as a bare array. The receiver must stay a value, so
 // the type itself satisfies the fast-JSON interface.
-func (ws Withdrawals) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (ws Withdrawals) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	jsonstream.ArrayValue(s, ws, writeWithdrawalElem)
 	return nil
 }
 
-func writeWithdrawalElem(s *jsonstream.StackStream, w **Withdrawal) { _ = (*w).MarshalFastJSONTo(s) }
+func writeWithdrawalElem(s *jsonstream.Stream, w **Withdrawal) { _ = (*w).MarshalFastJSONTo(s) }
 
 func (ws Withdrawals) Len() int { return len(ws) }
 

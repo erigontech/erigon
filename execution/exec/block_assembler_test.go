@@ -146,3 +146,63 @@ func TestBlockAssemblerMinTxGasEarlyExit(t *testing.T) {
 		})
 	}
 }
+
+func TestAvailableRlpSpaceCoversFinalizedHeader(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name      string
+		amsterdam bool
+	}{
+		{name: "osaka", amsterdam: false},
+		{name: "amsterdam", amsterdam: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := chain.AllProtocolChanges.Copy()
+			if !tc.amsterdam {
+				cfg.AmsterdamTime = nil
+			}
+			beaconRoot := common.Hash{1}
+			header := &types.Header{
+				Number:                *uint256.NewInt(1),
+				Time:                  1,
+				GasLimit:              60_000_000,
+				BaseFee:               uint256.NewInt(params.InitialBaseFee),
+				BlobGasUsed:           new(uint64),
+				ExcessBlobGas:         new(uint64),
+				ParentBeaconBlockRoot: &beaconRoot,
+			}
+			if tc.amsterdam {
+				header.SlotNumber = new(uint64)
+			}
+			mb := &AssembledBlock{Header: header, Withdrawals: []*types.Withdrawal{}}
+
+			space := mb.AvailableRlpSpace(cfg)
+			var txn types.Transaction
+			for dataLen := space - 200; dataLen < space; dataLen++ {
+				candidate := types.NewTransaction(0, common.Address{2}, uint256.NewInt(0), 50_000_000, uint256.NewInt(params.InitialBaseFee), make([]byte, dataLen))
+				if post := mb.AvailableRlpSpace(cfg, candidate); post >= 0 && post < 8 {
+					txn = candidate
+					break
+				}
+			}
+			require.NotNil(t, txn)
+			require.GreaterOrEqual(t, mb.AvailableRlpSpace(cfg, txn), 0)
+			mb.AddTxn(txn)
+
+			header.GasUsed = 59_999_999
+			*header.BlobGasUsed = cfg.GetMaxBlobGasPerBlock(header.Time)
+			requestsHash := common.Hash{3}
+			header.RequestsHash = &requestsHash
+			if tc.amsterdam {
+				balHash := common.Hash{4}
+				header.BlockAccessListHash = &balHash
+			}
+			block := types.NewBlock(header, mb.Txns, nil, nil, mb.Withdrawals, nil)
+			rawBlock := types.RawBlock{Header: block.Header(), Body: block.RawBody()}
+			require.NoError(t, rawBlock.ValidateMaxRlpSize(cfg))
+		})
+	}
+}

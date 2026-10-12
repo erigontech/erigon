@@ -539,15 +539,16 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGasCost, av
 	rules := evm.ChainRules()
 	callContext.newAccountCharged = false
 	if rules.IsEIP161Enabled() {
-		empty, err := evm.IntraBlockState().Empty(address)
-		if err != nil {
-			return mdgas.MdGasCost{}, err
-		}
-		// Empty() reads account state for gas calculation — record for BAL
-		// tracking unconditionally, since the read happens regardless of
-		// whether the CALL proceeds or transfers value.
+		// The target is a BAL access even when no value moves and its emptiness is not read.
 		evm.IntraBlockState().MarkAddressAccess(address, false)
-		if transfersValue && empty {
+		empty := false
+		if transfersValue {
+			var err error
+			if empty, err = evm.IntraBlockState().Empty(address); err != nil {
+				return mdgas.MdGasCost{}, err
+			}
+		}
+		if empty {
 			if rules.IsAmsterdam {
 				gas.State += params.StateGasNewAccount
 				callContext.newAccountCharged = true

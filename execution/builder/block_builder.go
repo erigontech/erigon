@@ -33,6 +33,8 @@ import (
 // that can block - opening a read view, waiting on a transaction provider - has to honour it.
 type BlockBuilderFunc func(ctx context.Context, param *Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error)
 
+type InclusionListFunc func(ctx context.Context) (types.Transactions, error)
+
 // ErrDiscarded reports that the payload was abandoned before the build completed.
 var ErrDiscarded = errors.New("block builder discarded")
 

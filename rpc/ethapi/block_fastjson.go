@@ -19,14 +19,17 @@ package ethapi
 import (
 	"encoding/json"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
 // MarshalFastJSONTo writes the whole block. It must exist: RPCBlock embeds RPCHeader, so
 // without it the promoted header method would satisfy the fast-JSON interface and a block
 // would serialise as a bare header, losing its transactions.
-func (b *RPCBlock) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (b *RPCBlock) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if b == nil {
 		s.WriteNil()
 		return nil
@@ -54,7 +57,7 @@ func (b *RPCBlock) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 		return err
 	}
 
-	jsonstream.Text(s, "size", &b.Size)
+	ethjson.Quantity(s, "size", b.Size)
 
 	// omitempty on an `any` drops only a nil interface, so an empty list still shows.
 	switch {
@@ -79,7 +82,7 @@ func (b *RPCBlock) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 		s.Field("transactionCount").Uint(*b.TransactionCount)
 	}
 	if b.TotalDifficulty != nil {
-		jsonstream.Text(s, "totalDifficulty", b.TotalDifficulty)
+		ethjson.Quantity256(s, "totalDifficulty", (*uint256.Int)(b.TotalDifficulty))
 	}
 	if b.Calls != nil {
 		s.Field("calls").WriteArrayStart()
@@ -108,14 +111,14 @@ func marshalCallErrors(calls []CallResult) ([][]byte, error) {
 	return errs, nil
 }
 
-func (r *CallResult) writeTo(s *jsonstream.StackStream, callErr []byte) {
+func (r *CallResult) writeTo(s *jsonstream.Stream, callErr []byte) {
 	s.WriteObjectStart()
 	s.Field("returnData").WriteString(r.ReturnData)
 	s.Field("logs")
 	_ = r.Logs.MarshalFastJSONTo(s)
-	jsonstream.Text(s, "gasUsed", &r.GasUsed)
-	jsonstream.Text(s, "maxUsedGas", &r.MaxUsedGas)
-	jsonstream.Text(s, "status", &r.Status)
+	ethjson.Quantity(s, "gasUsed", r.GasUsed)
+	ethjson.Quantity(s, "maxUsedGas", r.MaxUsedGas)
+	ethjson.Quantity(s, "status", r.Status)
 	if callErr != nil {
 		s.Field("error").WriteRawBytes(callErr)
 	}
@@ -123,7 +126,7 @@ func (r *CallResult) writeTo(s *jsonstream.StackStream, callErr []byte) {
 }
 
 // writeTxElem never fails: RPCTransaction.MarshalFastJSONTo reports no error.
-func writeTxElem(s *jsonstream.StackStream, t **RPCTransaction) { _ = (*t).MarshalFastJSONTo(s) }
+func writeTxElem(s *jsonstream.Stream, t **RPCTransaction) { _ = (*t).MarshalFastJSONTo(s) }
 
 // marshalIfSet encodes v unless it is absent, so the caller states each field once.
 func marshalIfSet(v any) ([]byte, error) {
@@ -137,7 +140,7 @@ func marshalIfSet(v any) ([]byte, error) {
 // top-level result for a fast marshaller, so a plain slice would take the reflection path.
 type RPCBlocks []*RPCBlock
 
-func (bs RPCBlocks) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (bs RPCBlocks) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if bs == nil {
 		s.WriteNil()
 		return nil

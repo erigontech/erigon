@@ -336,16 +336,16 @@ params: [
   [
     [
       {
-        "from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
-        "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+        "from": "0x28c6c06298d514db089934071355e5743bf21d60",
+        "to": "0x000000000000000000000000000000000000dead",
         "value": "0x186a0"
       },
       ["trace"]
     ],
     [
       {
-        "from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
-        "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+        "from": "0x28c6c06298d514db089934071355e5743bf21d60",
+        "to": "0x000000000000000000000000000000000000dead",
         "value": "0x186a0"
       },
       ["trace"]
@@ -364,7 +364,7 @@ params: [
 Request
 
 ```bash
-curl --data '{"method":"trace_callMany","params":[[[{"from":"0x407d73d8a49eeb85d32cf465507dd71d507100c1","to":"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b","value":"0x186a0"},["trace"]],[{"from":"0x407d73d8a49eeb85d32cf465507dd71d507100c1","to":"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b","value":"0x186a0"},["trace"]]],"latest"],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
+curl --data '{"method":"trace_callMany","params":[[[{"from":"0x28c6c06298d514db089934071355e5743bf21d60","to":"0x000000000000000000000000000000000000dead","value":"0x186a0"},["trace"]],[{"from":"0x28c6c06298d514db089934071355e5743bf21d60","to":"0x000000000000000000000000000000000000dead","value":"0x186a0"},["trace"]]],"latest"],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
 
 
@@ -381,10 +381,10 @@ Response
       "trace": [{
         "action": {
           "callType": "call",
-          "from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
-          "gas": "0x1dcd12f8",
+          "from": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "gas": "0x2fa9e78",
           "input": "0x",
-          "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+          "to": "0x000000000000000000000000000000000000dead",
           "value": "0x186a0"
         },
         "result": {
@@ -403,10 +403,10 @@ Response
       "trace": [{
         "action": {
           "callType": "call",
-          "from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
-          "gas": "0x1dcd12f8",
+          "from": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "gas": "0x2fa9e78",
           "input": "0x",
-          "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+          "to": "0x000000000000000000000000000000000000dead",
           "value": "0x186a0"
         },
         "result": {
@@ -666,6 +666,7 @@ Returns traces matching given filter
 1. `Object` - The filter object
    * `fromBlock`: `Quantity` or `Tag` - (optional) From this block. Defaults to the latest executed block; send `"earliest"` to scan from genesis.
    * `toBlock`: `Quantity` or `Tag` - (optional) To this block. Defaults to the latest executed block. A `toBlock` below `fromBlock`, including the default start, returns `-32602`.
+   * `blockHash`: `Data`, 32 Bytes - (optional) Selects exactly the block with this hash, as in `eth_getLogs`, instead of a range. The result, including `[]`, is for that block, and address matching, `mode`, `after` and `count` apply as for a single-block range. Setting it together with `fromBlock` or `toBlock` returns `-32602`. A hash that does not name a canonical, executed block, including one reorganized out of the chain, returns `-32001`, even with `count` 0; a block below the prune boundary returns an error naming the boundary instead.
    * `fromAddress`: `Array` - (optional) Sent from these addresses.
    * `toAddress`: `Array` - (optional) Sent to these addresses.
    * `after`: `Quantity` - (optional) The offset trace number
@@ -673,6 +674,8 @@ Returns traces matching given filter
    * `mode`: `String` - (optional) Default is `"intersection"`: OR within each address list, AND between the two lists. An omitted, `null`, or empty list imposes no restriction. Set `"union"` to match either populated list and preserve the previous behavior when both lists are set. A `null` mode is the same as an omitted one. Other mode values, including `""`, return `-32602`.
 
    The `'pending'` tag is not supported for either block bound and returns `-32602`: `trace_filter` scans committed trace history, which has no pending block.
+
+   A bound past the latest executed block returns `-32602`, as in `eth_getLogs`, rather than an empty or truncated result. As in `eth_getLogs`, a bound is a block number or tag: a block hash or an EIP-1898 object returns `-32602`; use `blockHash` to select a block by hash. An explicit `null` for `blockHash`, `fromBlock` or `toBlock` is the same as omitting it.
 
 ```js
 params: [{
