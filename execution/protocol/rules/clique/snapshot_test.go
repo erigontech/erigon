@@ -101,6 +101,39 @@ func TestCliqueToPoSImport(t *testing.T) {
 	require.Equal(t, uint64(4), head.Number.Uint64())
 }
 
+func TestCliqueRejectsInvalidLondonGasLimit(t *testing.T) {
+	accounts := newTesterAccountPool()
+	signer := accounts.address("signer")
+	config := chainspec.AllCliqueProtocolChanges.Copy()
+	config.Clique = &chain.CliqueConfig{Period: 1, Epoch: 30000}
+	genesis := &types.Genesis{
+		Config:     config,
+		Difficulty: uint256.NewInt(1),
+		ExtraData:  make([]byte, clique.ExtraVanity+length.Addr+clique.ExtraSeal),
+	}
+	copy(genesis.ExtraData[clique.ExtraVanity:], signer[:])
+	engine := clique.New(config, chainspec.CliqueSnapshot, memdb.NewTestDB(t, dbcfg.ConsensusDB), log.New())
+	engine.FakeDiff = true
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithEngine(engine))
+	blocks, err := blockgen.GenerateChain(config, m.Genesis, engine, m.DB, 1, nil)
+	require.NoError(t, err)
+	header := blocks.Blocks[0].Header()
+	header.Difficulty.SetUint64(clique.DiffInTurn)
+	header.GasLimit = m.Genesis.GasLimit() * 2
+	header.Extra = make([]byte, clique.ExtraVanity+clique.ExtraSeal)
+	accounts.sign(header, "signer")
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+		chainReader := stagedsync.ChainReader{
+			Cfg:         config,
+			Db:          tx,
+			BlockReader: m.BlockReader,
+			Logger:      log.New(),
+		}
+		return engine.VerifyHeader(chainReader, header, false)
+	})
+	require.ErrorContains(t, err, "invalid gas limit")
+}
+
 type testerAccountPool struct {
 	accounts map[string]*ecdsa.PrivateKey
 }
