@@ -106,7 +106,7 @@ func TestOnPayloadAttestationMessageWireReliesOnIngressClockValidation(t *testin
 }
 
 func TestApplyValidatedPayloadAttestationAcceptsOnlyFirstGossipVote(t *testing.T) {
-	f := &ForkChoiceStore{}
+	f := &ForkChoiceStore{beaconCfg: &clparams.MainnetBeaconConfig}
 	root := common.HexToHash("0x1234")
 	first := &cltypes.PayloadAttestationData{PayloadPresent: true, BlobDataAvailable: true}
 	second := &cltypes.PayloadAttestationData{PayloadPresent: false, BlobDataAvailable: false}
@@ -120,8 +120,103 @@ func TestApplyValidatedPayloadAttestationAcceptsOnlyFirstGossipVote(t *testing.T
 	require.Equal(t, int8(1), availability[7])
 }
 
+func TestApplyValidatedPayloadAttestationInvalidatesGloasHeadCache(t *testing.T) {
+	f := &ForkChoiceStore{
+		beaconCfg:         &clparams.MainnetBeaconConfig,
+		headHash:          common.HexToHash("0xbeef"),
+		headPayloadStatus: cltypes.PayloadStatusFull,
+	}
+	f.time.Store(f.beaconCfg.SecondsPerSlot)
+
+	err := f.applyValidatedPayloadAttestation(
+		42,
+		[]int{7},
+		&cltypes.PayloadAttestationData{PayloadPresent: true, BlobDataAvailable: true},
+		common.HexToHash("0x1234"),
+		false,
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, common.Hash{}, f.headHash)
+	require.Equal(t, cltypes.PayloadStatusPending, f.headPayloadStatus)
+}
+
+func TestCurrentSlotPayloadVotesInvalidateHeadAtSlotBoundary(t *testing.T) {
+	root := common.Hash{0x12}
+	f := &ForkChoiceStore{
+		beaconCfg:         &clparams.MainnetBeaconConfig,
+		headHash:          root,
+		headPayloadStatus: cltypes.PayloadStatusFull,
+	}
+	f.time.Store(8 * f.beaconCfg.SecondsPerSlot)
+	data := &cltypes.PayloadAttestationData{Slot: 8, PayloadPresent: true, BlobDataAvailable: true}
+
+	require.NoError(t, f.applyValidatedPayloadAttestation(42, []int{7}, data, root, false))
+
+	require.Equal(t, root, f.headHash, "current-slot PTC votes do not affect the current head tiebreaker")
+	require.Equal(t, cltypes.PayloadStatusFull, f.headPayloadStatus)
+	require.Equal(t, int8(1), f.payloadTimelinessVoteValue(root)[7])
+	require.Equal(t, int8(1), f.payloadDataAvailabilityVoteValue(root)[7])
+
+	f.OnTick(9 * f.beaconCfg.SecondsPerSlot)
+
+	require.Equal(t, common.Hash{}, f.headHash, "the next slot must resolve its head using the recorded PTC votes")
+	require.Equal(t, cltypes.PayloadStatusPending, f.headPayloadStatus)
+	require.Equal(t, int8(1), f.payloadTimelinessVoteValue(root)[7])
+	require.Equal(t, int8(1), f.payloadDataAvailabilityVoteValue(root)[7])
+}
+
+func TestApplyValidatedPayloadAttestationKeepsHeadSnapshotConsistent(t *testing.T) {
+	root := common.HexToHash("0x1234")
+	f := &ForkChoiceStore{
+		beaconCfg:         &clparams.MainnetBeaconConfig,
+		headHash:          root,
+		headPayloadStatus: cltypes.PayloadStatusFull,
+	}
+	f.time.Store(f.beaconCfg.SecondsPerSlot)
+	oldVotes := [clparams.PtcSize]int8{7: 1}
+	f.payloadTimelinessVote.Store(root, oldVotes)
+	f.payloadDataAvailabilityVote.Store(root, oldVotes)
+
+	f.mu.RLock()
+	releaseHeadView := sync.OnceFunc(f.mu.RUnlock)
+	done := make(chan struct{})
+	var applyErr error
+	go func() {
+		defer close(done)
+		applyErr = f.applyValidatedPayloadAttestation(42, []int{7}, &cltypes.PayloadAttestationData{}, root, false)
+	}()
+	t.Cleanup(func() {
+		releaseHeadView()
+		<-done
+	})
+
+	// A queued writer blocks new readers. Wait for that point while the current
+	// head view stays open, so the vote update cannot race past these checks.
+	require.Eventually(t, func() bool {
+		if !f.mu.TryRLock() {
+			return true
+		}
+		f.mu.RUnlock()
+		return false
+	}, 5*time.Second, time.Millisecond, "payload vote update did not reach the store lock")
+	require.Equal(t, oldVotes, f.payloadTimelinessVoteValue(root))
+	require.Equal(t, oldVotes, f.payloadDataAvailabilityVoteValue(root))
+	require.Equal(t, root, f.headHash)
+	require.Equal(t, cltypes.PayloadStatusFull, f.headPayloadStatus)
+
+	releaseHeadView()
+	<-done
+	require.NoError(t, applyErr)
+	newVotes := [clparams.PtcSize]int8{7: -1}
+	require.Equal(t, newVotes, f.payloadTimelinessVoteValue(root))
+	require.Equal(t, newVotes, f.payloadDataAvailabilityVoteValue(root))
+	require.Equal(t, common.Hash{}, f.headHash)
+	require.Equal(t, cltypes.PayloadStatusPending, f.headPayloadStatus)
+}
+
 func TestApplyValidatedPayloadAttestationFromBlockOverwritesGossipVote(t *testing.T) {
-	f := &ForkChoiceStore{}
+	f := &ForkChoiceStore{beaconCfg: &clparams.MainnetBeaconConfig}
 	root := common.HexToHash("0x1234")
 
 	require.NoError(t, f.applyValidatedPayloadAttestation(42, []int{7}, &cltypes.PayloadAttestationData{
@@ -136,7 +231,7 @@ func TestApplyValidatedPayloadAttestationFromBlockOverwritesGossipVote(t *testin
 }
 
 func TestApplyValidatedPayloadAttestationResetsFirstValidAtNextSlot(t *testing.T) {
-	f := &ForkChoiceStore{}
+	f := &ForkChoiceStore{beaconCfg: &clparams.MainnetBeaconConfig}
 	data := &cltypes.PayloadAttestationData{Slot: 100, PayloadPresent: true}
 
 	require.NoError(t, f.applyValidatedPayloadAttestation(42, []int{7}, data, common.HexToHash("0x1234"), false))
@@ -146,7 +241,7 @@ func TestApplyValidatedPayloadAttestationResetsFirstValidAtNextSlot(t *testing.T
 }
 
 func TestApplyValidatedPayloadAttestationDoesNotRegressSeenSlot(t *testing.T) {
-	f := &ForkChoiceStore{}
+	f := &ForkChoiceStore{beaconCfg: &clparams.MainnetBeaconConfig}
 	root := common.HexToHash("0x1234")
 
 	require.NoError(t, f.applyValidatedPayloadAttestation(42, []int{7}, &cltypes.PayloadAttestationData{Slot: 101}, root, false))
@@ -155,7 +250,7 @@ func TestApplyValidatedPayloadAttestationDoesNotRegressSeenSlot(t *testing.T) {
 }
 
 func TestApplyValidatedPayloadAttestationConcurrentCandidatesHaveOneWinner(t *testing.T) {
-	f := &ForkChoiceStore{}
+	f := &ForkChoiceStore{beaconCfg: &clparams.MainnetBeaconConfig}
 	start := make(chan struct{})
 	results := make(chan error, 16)
 

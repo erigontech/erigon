@@ -631,6 +631,7 @@ func trackPeerStatistics(peerName string, peerID string, inbound bool, msgType s
 		diaglib.Send(stats)
 	}
 }
+
 func grpcSentryServer(ctx context.Context, sentryAddr string, ss *GrpcServer, healthCheck bool) (*grpc.Server, error) {
 	// STARTING GRPC SERVER
 	ss.logger.Info("Starting Sentry gRPC server", "on", sentryAddr)
@@ -752,7 +753,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			// TODO: remember handshake reply per peer ID and return eth-related Status info (see ethPeerInfo in geth)
 			return nil
 		},
-		//Attributes: []enr.Entry{eth.CurrentENREntry(chainConfig, genesisHash, headHeight)},
+		// Attributes: []enr.Entry{eth.CurrentENREntry(chainConfig, genesisHash, headHeight)},
 	})
 
 	return ss
@@ -1140,8 +1141,8 @@ func (ss *GrpcServer) SendMessageById(_ context.Context, inreq *sentryproto.Send
 	peerID := ConvertH512ToPeerID(inreq.PeerId)
 	peerInfo := ss.getPeer(peerID)
 	if peerInfo == nil {
-		//TODO: enable after support peer to sentry mapping
-		//return reply, fmt.Errorf("peer not found: %s", peerID)
+		// TODO: enable after support peer to sentry mapping
+		// return reply, fmt.Errorf("peer not found: %s", peerID)
 		return reply, nil
 	}
 

@@ -49,6 +49,21 @@ type embeddedPtcVoteForkGraph struct {
 	envelopes map[common.Hash]bool
 }
 
+func TestGloasAnchorStartsWithoutPtcVotes(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	anchor := state.New(&cfg)
+	anchor.SetVersion(clparams.GloasVersion)
+	root, err := anchor.BlockRoot()
+	require.NoError(t, err)
+	store, err := NewForkChoiceStore(nil, anchor, nil, pool.OperationsPool{}, nil, nil, nil, nil, public_keys_registry.NewInMemoryPublicKeysRegistry(), nil, false, nil)
+	require.NoError(t, err)
+	for _, votes := range []*sync.Map{&store.payloadTimelinessVote, &store.payloadDataAvailabilityVote} {
+		value, ok := votes.Load(common.Hash(root))
+		require.True(t, ok)
+		require.Equal(t, [clparams.PtcSize]int8{}, value)
+	}
+}
+
 func (g *embeddedPtcVoteForkGraph) AddChainSegment(block *cltypes.SignedBeaconBlock, _ bool) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
 	root, err := block.Block.HashSSZ()
 	if err != nil {
@@ -79,7 +94,7 @@ func TestOnBlockFromForwardSyncExpandsEmbeddedPtcVotesForDuplicateValidator(t *t
 	require.True(t, store.payloadTimeliness(anchorRoot, false))
 	require.True(t, store.payloadDataAvailability(anchorRoot, false))
 	require.False(t, store.ShouldBuildOnFull(ForkChoiceNode{Root: anchorRoot, PayloadStatus: cltypes.PayloadStatusFull}, 2))
-	head, err := store.GetHeadNode()
+	head, _, err := store.GetHeadNode()
 	require.NoError(t, err)
 	childRoot, err := child.Block.HashSSZ()
 	require.NoError(t, err)
@@ -99,7 +114,7 @@ func TestOnBlockFromForwardSyncAppliesEmbeddedPtcVotesForUniqueValidators(t *tes
 	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, committee, selectedPositions, true)
 	require.True(t, store.payloadTimeliness(anchorRoot, false))
 	require.True(t, store.payloadDataAvailability(anchorRoot, false))
-	head, err := store.GetHeadNode()
+	head, _, err := store.GetHeadNode()
 	require.NoError(t, err)
 	childRoot, err := child.Block.HashSSZ()
 	require.NoError(t, err)
@@ -115,7 +130,7 @@ func TestOnBlockFromForwardSyncUsesMaxPtcSizeForZeroConfig(t *testing.T) {
 	store, anchorRoot, _ := runEmbeddedPtcVoteBlock(t, 0, committee, []int{int(clparams.MaxPtcSize - 1)}, true)
 	votes := store.payloadTimelinessVoteValue(anchorRoot)
 	require.Equal(t, int8(-1), votes[clparams.MaxPtcSize-1])
-	require.Equal(t, int8(1), votes[clparams.MaxPtcSize-2])
+	require.Zero(t, votes[clparams.MaxPtcSize-2])
 }
 
 func TestOnBlockFromForwardSyncAcceptsPersistedParentEnvelopeWithoutEngineStatus(t *testing.T) {
@@ -228,6 +243,109 @@ func runEmbeddedPtcVoteBlock(
 	return store, anchorRoot, child
 }
 
+func TestNewForkChoiceStorePreservesAnchorExecutionPayloadBuilderIndex(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		version      clparams.StateVersion
+		builderIndex uint64
+		ok           bool
+	}{
+		{name: "pre-Gloas", version: clparams.FuluVersion},
+		{name: "zero index", version: clparams.GloasVersion, ok: true},
+		{name: "self build", version: clparams.GloasVersion, builderIndex: clparams.BuilderIndexSelfBuild, ok: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			cfg.GloasForkEpoch = 0
+			cfg.InitializeForkSchedule()
+			anchor := state.New(&cfg)
+			anchor.SetVersion(tc.version)
+			require.NoError(t, anchor.SetSlot(1))
+			if tc.ok {
+				anchor.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+					BuilderIndex:       tc.builderIndex,
+					BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
+				})
+			}
+			anchorRoot, err := anchor.BlockRoot()
+			require.NoError(t, err)
+			graph := &getFinalizedExecutionHashForkGraph{
+				headers:    map[common.Hash]*cltypes.BeaconBlockHeader{anchorRoot: {Slot: anchor.Slot()}},
+				anchorRoot: anchorRoot,
+				anchorSlot: anchor.Slot(),
+			}
+			store, err := NewForkChoiceStore(
+				eth_clock.NewEthereumClock(0, common.Hash{}, &cfg),
+				anchor,
+				nil,
+				pool.NewOperationsPool(&cfg),
+				graph,
+				beaconevents.NewEventEmitter(),
+				synced_data.NewSyncedDataManager(&cfg, true),
+				nil,
+				public_keys_registry.NewInMemoryPublicKeysRegistry(),
+				validator_params.NewValidatorParams(),
+				false,
+				nil,
+			)
+			require.NoError(t, err)
+
+			builderIndex, ok := store.AnchorExecutionPayloadBuilderIndex()
+			require.Equal(t, tc.ok, ok)
+			if tc.ok {
+				require.Equal(t, tc.builderIndex, builderIndex)
+			}
+		})
+	}
+}
+
+func TestNewForkChoiceStoreSeedsAnchorExecutionHash(t *testing.T) {
+	legacyHash := common.Hash{0x11}
+	latestHash := common.Hash{0x22}
+	for _, tc := range []struct {
+		name    string
+		version clparams.StateVersion
+		slot    uint64
+		want    common.Hash
+	}{
+		{name: "Fulu genesis", version: clparams.FuluVersion, want: legacyHash},
+		{name: "Gloas genesis", version: clparams.GloasVersion, want: latestHash},
+		{name: "Gloas checkpoint", version: clparams.GloasVersion, slot: 32, want: latestHash},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			cfg.GloasForkEpoch = 0
+			cfg.InitializeForkSchedule()
+			anchor := state.New(&cfg)
+			anchor.SetVersion(tc.version)
+			require.NoError(t, anchor.SetSlot(tc.slot))
+			legacyHeader := cltypes.NewEth1Header(tc.version)
+			legacyHeader.BlockHash = legacyHash
+			anchor.SetLatestExecutionPayloadHeader(legacyHeader)
+			anchor.SetLatestBlockHash(latestHash)
+			anchorRoot, err := anchor.BlockRoot()
+			require.NoError(t, err)
+			graph := &getFinalizedExecutionHashForkGraph{
+				headers:    map[common.Hash]*cltypes.BeaconBlockHeader{anchorRoot: {Slot: tc.slot}},
+				anchorRoot: anchorRoot,
+				anchorSlot: tc.slot,
+			}
+			store, err := NewForkChoiceStore(
+				eth_clock.NewEthereumClock(0, common.Hash{}, &cfg), anchor, nil,
+				pool.NewOperationsPool(&cfg), graph, beaconevents.NewEventEmitter(),
+				synced_data.NewSyncedDataManager(&cfg, true), nil,
+				public_keys_registry.NewInMemoryPublicKeysRegistry(), validator_params.NewValidatorParams(),
+				false, nil,
+			)
+			require.NoError(t, err)
+
+			require.Equal(t, tc.want, store.GetEth1Hash(anchorRoot))
+			require.Equal(t, tc.want, store.GetFinalizedExecutionHash(anchorRoot))
+			require.Equal(t, tc.want, store.GetFinalizedExecutionHash(common.Hash{}))
+		})
+	}
+}
+
 type headerOnlyAnchorForkGraph struct {
 	fork_graph.ForkGraph
 	root common.Hash
@@ -251,12 +369,13 @@ func TestGetHeadNodeCachesHeaderOnlyAnchorFallback(t *testing.T) {
 	}
 	store.justifiedCheckpoint.Store(solid.Checkpoint{Root: common.HexToHash("0xb2")})
 
-	node, err := store.GetHeadNode()
+	node, slot, err := store.GetHeadNode()
 	require.NoError(t, err)
 	require.Equal(t, anchorRoot, node.Root)
 	require.Equal(t, cltypes.PayloadStatusPending, node.PayloadStatus)
 	require.Equal(t, anchorRoot, store.headHash)
 	require.Equal(t, uint64(42), store.headSlot)
+	require.Equal(t, uint64(42), slot)
 }
 
 func TestGetHeadNodeDoesNotFailDuringCacheInvalidation(t *testing.T) {
@@ -267,7 +386,7 @@ func TestGetHeadNodeDoesNotFailDuringCacheInvalidation(t *testing.T) {
 	}
 	store.justifiedCheckpoint.Store(solid.Checkpoint{Root: common.HexToHash("0xb2")})
 	require.NoError(t, func() error {
-		_, err := store.GetHeadNode()
+		_, _, err := store.GetHeadNode()
 		return err
 	}())
 
@@ -294,10 +413,62 @@ func TestGetHeadNodeDoesNotFailDuringCacheInvalidation(t *testing.T) {
 	})
 
 	for range 1_000 {
-		node, err := store.GetHeadNode()
+		node, slot, err := store.GetHeadNode()
 		require.NoError(t, err)
 		require.Equal(t, anchorRoot, node.Root)
+		require.Equal(t, uint64(42), slot)
 	}
+}
+
+func TestBlockProcessingTracksQueuedAndOverlappingImports(t *testing.T) {
+	store := &ForkChoiceStore{}
+	require.False(t, store.BlockProcessing())
+	draining := make(chan struct{})
+	resume := make(chan struct{})
+	release := sync.OnceFunc(func() { close(resume) })
+	store.queuedEmits = []func(){func() {
+		close(draining)
+		<-resume
+	}}
+	store.mu.Lock()
+	unlock := sync.OnceFunc(store.mu.Unlock)
+	results := make(chan error, 2)
+	var imports sync.WaitGroup
+	t.Cleanup(func() {
+		unlock()
+		release()
+		imports.Wait()
+	})
+	for range 2 {
+		imports.Go(func() {
+			results <- store.OnBlock(t.Context(), nil, false, false, false)
+		})
+	}
+
+	require.Eventually(t, func() bool { return store.blocksProcessing.Load() == 2 }, 5*time.Second, time.Millisecond)
+	require.True(t, store.BlockProcessing(), "imports waiting for the store lock must be visible")
+	unlock()
+	select {
+	case <-draining:
+	case <-time.After(5 * time.Second):
+		t.Fatal("import did not drain its queued work")
+	}
+	select {
+	case err := <-results:
+		require.ErrorContains(t, err, "missing beacon block")
+	case <-time.After(5 * time.Second):
+		t.Fatal("overlapping import did not finish")
+	}
+	require.True(t, store.BlockProcessing(), "one completed import must not hide another active import")
+
+	release()
+	select {
+	case err := <-results:
+		require.ErrorContains(t, err, "missing beacon block")
+	case <-time.After(5 * time.Second):
+		t.Fatal("import did not finish after its queued work")
+	}
+	require.False(t, store.BlockProcessing(), "early returns must release the import count")
 }
 
 func TestGetFinalizedExecutionHash(t *testing.T) {
@@ -657,8 +828,8 @@ type getFinalizedExecutionHashForkGraph struct {
 	hasBlockEquivocation  bool
 }
 
-func (f *getFinalizedExecutionHashForkGraph) HasBlockEquivocation(uint64, uint64, common.Hash) bool {
-	return f.hasBlockEquivocation
+func (g *getFinalizedExecutionHashForkGraph) HasBlockEquivocation(uint64, uint64, common.Hash) bool {
+	return g.hasBlockEquivocation
 }
 
 func TestOnBlockWithEquivocationCheckRejectsKnownGloasConflict(t *testing.T) {

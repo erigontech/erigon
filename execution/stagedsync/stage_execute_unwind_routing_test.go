@@ -2,10 +2,10 @@ package stagedsync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -15,7 +15,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/types"
 )
 
 type recordingUnwinder struct {
@@ -35,102 +34,156 @@ func (r *recordingUnwinder) UnwindTo(point uint64, reason UnwindReason, tx kv.Tx
 func (r *recordingUnwinder) HasUnwindPoint() bool { return len(r.calls) > 0 }
 func (r *recordingUnwinder) LogPrefix() string    { return "test" }
 
-func headerAt(n uint64) *types.Header {
-	return &types.Header{Number: *uint256.NewInt(n)}
+func TestFinalizeExecV3Outcome(t *testing.T) {
+	t.Parallel()
+
+	exhausted := &ErrLoopExhausted{From: 1, To: 2}
+	boom := errors.New("finalization failed")
+
+	t.Run("failure clears the resumable boundary", func(t *testing.T) {
+		out, err := finalizeExecV3Outcome(execV3Outcome{exhausted: exhausted}, boom)
+		require.ErrorIs(t, err, boom)
+		require.Nil(t, out.exhausted)
+	})
+
+	t.Run("success preserves the resumable boundary", func(t *testing.T) {
+		out, err := finalizeExecV3Outcome(execV3Outcome{exhausted: exhausted}, nil)
+		require.NoError(t, err)
+		require.Same(t, exhausted, out.exhausted)
+	})
 }
 
-// TestUnwindOnExecError pins the stage-boundary error routing hoisted out of
-// ExecV3: a plain invalid block propagates without setting a stage unwind point
-// (the caller owns the unwind, so a fresh block at the same height can be
-// re-executed), while a wrong trie root routes to handleIncorrectRootHashError's
-// binary search keyed off the implicated block.
-func TestUnwindOnExecError(t *testing.T) {
+// TestRenderExecOutcome pins the stage boundary that converts typed executor
+// results back to legacy behavior: errors take precedence, verdicts retain
+// invalid-block routing, and exhaustion remains resumable. Only a healthy
+// non-initial-cycle wrong-root verdict enters the binary-search unwind path.
+func TestRenderExecOutcome(t *testing.T) {
 	t.Parallel()
 	logger := log.New()
 
-	plainInvalid := fmt.Errorf("%w: gas mismatch", rules.ErrInvalidBlock)
-	wrongRoot := fmt.Errorf("%w, block=5", ErrWrongTrieRoot)
+	plainInvalidVerdict := func(block uint64, hash common.Hash) *blockVerdict {
+		return &blockVerdict{blockNum: block, blockHash: hash, err: fmt.Errorf("%w: gas mismatch, block=%d", rules.ErrInvalidBlock, block)}
+	}
+	wrongRootVerdict := func(block uint64, hash common.Hash) *blockVerdict {
+		return &blockVerdict{blockNum: block, blockHash: hash, err: fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, block)}
+	}
 
-	t.Run("nil error unwinds nothing", func(t *testing.T) {
+	t.Run("clean outcome unwinds nothing", func(t *testing.T) {
 		u := &recordingUnwinder{}
 		s := &StageState{}
-		got := unwindOnExecError(nil, execV3Outcome{lastHeader: headerAt(20)}, ExecuteBlockCfg{}, s, u, logger)
+		got := renderExecOutcome(nil, execV3Outcome{}, ExecuteBlockCfg{}, s, u, logger)
 		require.NoError(t, got)
 		require.Empty(t, u.calls)
 	})
 
-	t.Run("ErrLoopExhausted unwinds nothing", func(t *testing.T) {
+	t.Run("resumable boundary renders as ErrLoopExhausted and unwinds nothing", func(t *testing.T) {
 		u := &recordingUnwinder{}
 		s := &StageState{}
-		err := &ErrLoopExhausted{From: 1, To: 2}
-		got := unwindOnExecError(err, execV3Outcome{lastHeader: headerAt(20)}, ExecuteBlockCfg{}, s, u, logger)
-		require.ErrorIs(t, got, err)
+		exhausted := &ErrLoopExhausted{From: 1, To: 2}
+		out := execV3Outcome{exhausted: exhausted}
+		got := renderExecOutcome(nil, out, ExecuteBlockCfg{}, s, u, logger)
+		require.Same(t, exhausted, got)
 		require.Empty(t, u.calls)
 	})
 
-	t.Run("plain invalid propagates without setting a stage unwind point (recorded failed block)", func(t *testing.T) {
+	t.Run("operational error wins over a resumable boundary", func(t *testing.T) {
 		u := &recordingUnwinder{}
 		s := &StageState{}
-		// A plain invalid block must not set a stage unwind point even with a
-		// recorded failed block: the caller owns the unwind, so a fresh canonical
-		// block at the same height can be re-executed on the next fork-choice.
-		out := execV3Outcome{lastHeader: headerAt(19), failedBlock: 20, failedHash: common.HexToHash("0xbad20")}
-		got := unwindOnExecError(plainInvalid, out, ExecuteBlockCfg{}, s, u, logger)
+		boom := errors.New("worker failed")
+		out := execV3Outcome{exhausted: &ErrLoopExhausted{From: 1, To: 2}}
+		got := renderExecOutcome(boom, out, ExecuteBlockCfg{}, s, u, logger)
+		require.Same(t, boom, got,
+			"a real failure must fail the stage, or the sync loop retries it as a clean partial batch forever")
+		require.Empty(t, u.calls)
+	})
+
+	t.Run("verdict wins over a resumable boundary", func(t *testing.T) {
+		u := &recordingUnwinder{}
+		s := &StageState{}
+		out := execV3Outcome{
+			verdict:   plainInvalidVerdict(12, common.HexToHash("0xbad12")),
+			exhausted: &ErrLoopExhausted{From: 1, To: 2},
+		}
+		got := renderExecOutcome(nil, out, ExecuteBlockCfg{}, s, u, logger)
+		require.ErrorIs(t, got, rules.ErrInvalidBlock)
+		require.NotErrorIs(t, got, &ErrLoopExhausted{})
+		require.Empty(t, u.calls)
+	})
+
+	t.Run("operational error passes through and is not a bad-block verdict", func(t *testing.T) {
+		u := &recordingUnwinder{}
+		s := &StageState{}
+		boom := errors.New("worker pool: exec.Worker panic: boom")
+		got := renderExecOutcome(boom, execV3Outcome{}, ExecuteBlockCfg{}, s, u, logger)
+		require.ErrorIs(t, got, boom)
+		require.NotErrorIs(t, got, rules.ErrInvalidBlock)
+		require.Empty(t, u.calls)
+	})
+
+	t.Run("operational error wins over a stale verdict in the outcome", func(t *testing.T) {
+		// execV3 never returns both (the executor withholds the verdict on a
+		// failed run); the renderer still must not turn a failure into a verdict.
+		u := &recordingUnwinder{}
+		s := &StageState{}
+		boom := errors.New("worker failed")
+		out := execV3Outcome{verdict: wrongRootVerdict(5, common.HexToHash("0xdead"))}
+		got := renderExecOutcome(boom, out, ExecuteBlockCfg{}, s, u, logger)
+		require.ErrorIs(t, got, boom)
+		require.NotErrorIs(t, got, rules.ErrInvalidBlock,
+			"an operational failure must not be reported as a bad block")
+		require.Empty(t, u.calls)
+	})
+
+	t.Run("plain invalid verdict propagates without setting a stage unwind point", func(t *testing.T) {
+		u := &recordingUnwinder{}
+		s := &StageState{}
+		// The caller owns the unwind for a plain invalid block: a stage unwind
+		// point here would leave a stale bad-block verdict that blocks a fresh
+		// canonical block at the same height on the next fork-choice.
+		out := execV3Outcome{verdict: plainInvalidVerdict(20, common.HexToHash("0xbad20"))}
+		got := renderExecOutcome(nil, out, ExecuteBlockCfg{}, s, u, logger)
 		require.ErrorIs(t, got, rules.ErrInvalidBlock)
 		require.Empty(t, u.calls)
 	})
 
-	t.Run("plain invalid propagates without unwinding when only lastHeader is set", func(t *testing.T) {
+	t.Run("plain invalid verdict on the first block of the batch propagates without unwinding", func(t *testing.T) {
 		u := &recordingUnwinder{}
 		s := &StageState{}
-		got := unwindOnExecError(plainInvalid, execV3Outcome{lastHeader: headerAt(20)}, ExecuteBlockCfg{}, s, u, logger)
+		out := execV3Outcome{verdict: plainInvalidVerdict(12, common.HexToHash("0xbad12"))}
+		got := renderExecOutcome(nil, out, ExecuteBlockCfg{}, s, u, logger)
 		require.ErrorIs(t, got, rules.ErrInvalidBlock)
 		require.Empty(t, u.calls)
 	})
 
-	t.Run("plain invalid propagates without unwinding when the first block in the batch fails", func(t *testing.T) {
-		u := &recordingUnwinder{}
-		s := &StageState{}
-		out := execV3Outcome{failedBlock: 12, failedHash: common.HexToHash("0xbad12")}
-		got := unwindOnExecError(plainInvalid, out, ExecuteBlockCfg{}, s, u, logger)
-		require.ErrorIs(t, got, rules.ErrInvalidBlock)
-		require.Empty(t, u.calls)
-	})
-
-	t.Run("plain invalid with neither failedBlock nor lastHeader unwinds nothing but propagates", func(t *testing.T) {
-		u := &recordingUnwinder{}
-		s := &StageState{}
-		got := unwindOnExecError(plainInvalid, execV3Outcome{}, ExecuteBlockCfg{}, s, u, logger)
-		require.ErrorIs(t, got, rules.ErrInvalidBlock)
-		require.Empty(t, u.calls)
-	})
-
-	t.Run("badBlockHalt suppresses unwind and propagates", func(t *testing.T) {
+	t.Run("badBlockHalt suppresses unwind and propagates the verdict", func(t *testing.T) {
 		u := &recordingUnwinder{}
 		s := &StageState{}
 		cfg := ExecuteBlockCfg{badBlockHalt: true}
-		got := unwindOnExecError(plainInvalid, execV3Outcome{lastHeader: headerAt(20)}, cfg, s, u, logger)
+		out := execV3Outcome{verdict: wrongRootVerdict(20, common.HexToHash("0xbad20"))}
+		got := renderExecOutcome(nil, out, cfg, s, u, logger)
 		require.ErrorIs(t, got, rules.ErrInvalidBlock)
+		require.ErrorIs(t, got, ErrWrongTrieRoot)
 		require.Empty(t, u.calls)
 	})
 
-	t.Run("nil unwinder suppresses unwind and propagates", func(t *testing.T) {
+	t.Run("nil unwinder suppresses unwind and propagates the verdict", func(t *testing.T) {
 		s := &StageState{}
-		got := unwindOnExecError(plainInvalid, execV3Outcome{lastHeader: headerAt(20)}, ExecuteBlockCfg{}, s, nil, logger)
+		out := execV3Outcome{verdict: wrongRootVerdict(20, common.HexToHash("0xbad20"))}
+		got := renderExecOutcome(nil, out, ExecuteBlockCfg{}, s, nil, logger)
 		require.ErrorIs(t, got, rules.ErrInvalidBlock)
 	})
 
 	t.Run("wrong root on non-initial cycle takes the binary-search path from the implicated block", func(t *testing.T) {
 		u := &recordingUnwinder{}
-		// failedBlock (5) <= s.BlockNumber (10) makes handleIncorrectRootHashError
+		// implicated block (5) <= s.BlockNumber (10) makes handleIncorrectRootHashError
 		// return nil at its guard, before touching applyTx. If the routing wrongly
-		// fell through to the plain branch it would UnwindTo(lastHeader-1)=19.
+		// fell through to the plain branch it would propagate the verdict error.
 		s := &StageState{BlockNumber: 10}
 		s.CurrentSyncCycle.IsInitialCycle = false
-		out := execV3Outcome{lastHeader: headerAt(20), failedBlock: 5, failedHash: common.HexToHash("0xdead")}
-		got := unwindOnExecError(wrongRoot, out, ExecuteBlockCfg{}, s, u, logger)
+		out := execV3Outcome{verdict: wrongRootVerdict(5, common.HexToHash("0xdead"))}
+		got := renderExecOutcome(nil, out, ExecuteBlockCfg{}, s, u, logger)
 		require.NoError(t, got)
-		require.Empty(t, u.calls, "must not take the plain lastHeader-1 unwind branch")
+		require.Empty(t, u.calls, "must not take any other unwind branch")
 	})
 
 	t.Run("wrong root on initial cycle is fatal (no fork to recover from)", func(t *testing.T) {
@@ -139,15 +192,15 @@ func TestUnwindOnExecError(t *testing.T) {
 		s.CurrentSyncCycle.IsInitialCycle = true
 		// Initial sync has no competing fork: the wrong root must propagate as a
 		// fatal error, not route to handleIncorrectRootHashError (which would return
-		// nil here — failedBlock (5) <= s.BlockNumber (10) — and swallow it).
-		out := execV3Outcome{lastHeader: headerAt(20), failedBlock: 5, failedHash: common.HexToHash("0xbad5")}
-		got := unwindOnExecError(wrongRoot, out, ExecuteBlockCfg{}, s, u, logger)
+		// nil here — implicated block (5) <= s.BlockNumber (10) — and swallow it).
+		out := execV3Outcome{verdict: wrongRootVerdict(5, common.HexToHash("0xbad5"))}
+		got := renderExecOutcome(nil, out, ExecuteBlockCfg{}, s, u, logger)
 		require.ErrorIs(t, got, ErrWrongTrieRoot, "initial-cycle wrong root must stay fatal")
 		require.Empty(t, u.calls, "must not schedule any unwind")
 	})
 
 	t.Run("wrong root on non-initial cycle schedules the binary-search unwind", func(t *testing.T) {
-		// failedBlock (15) > s.BlockNumber (5) takes handleIncorrectRootHashError's
+		// implicated block (15) > s.BlockNumber (5) takes handleIncorrectRootHashError's
 		// scheduled-unwind branch: jump = (15-5)/2 = 5 -> UnwindTo(10). Needs a real
 		// temporal tx: one 40-byte ChangeSets3 key pins the lowest unwindable block
 		// to 4, so CanUnwindToBlockNum = 3 <= 10 and the target is not clamped.
@@ -161,10 +214,10 @@ func TestUnwindOnExecError(t *testing.T) {
 		u := &recordingUnwinder{}
 		s := &StageState{BlockNumber: 5}
 		s.CurrentSyncCycle.IsInitialCycle = false
-		out := execV3Outcome{lastHeader: headerAt(20), failedBlock: 15, failedHash: common.HexToHash("0xf00d"), applyTx: tx}
-		got := unwindOnExecError(wrongRoot, out, ExecuteBlockCfg{}, s, u, logger)
+		out := execV3Outcome{verdict: wrongRootVerdict(15, common.HexToHash("0xf00d")), applyTx: tx}
+		got := renderExecOutcome(nil, out, ExecuteBlockCfg{}, s, u, logger)
 		require.NoError(t, got)
 		require.Len(t, u.calls, 1)
-		require.Equal(t, uint64(10), u.calls[0].point, "unwind target = failedBlock - (failedBlock-s.BlockNumber)/2")
+		require.Equal(t, uint64(10), u.calls[0].point, "unwind target = implicated - (implicated-s.BlockNumber)/2")
 	})
 }

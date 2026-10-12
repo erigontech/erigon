@@ -33,12 +33,16 @@ const (
 	singleAttestationIntervalTick = 10 * time.Millisecond
 	attestationJobsIntervalTick   = 100 * time.Millisecond
 	blockJobExpiry                = 30 * time.Second
+	blockRetryInitialDelay        = 250 * time.Millisecond
+	blockRetryMaxDelay            = 2 * time.Second
 	attestationJobExpiry          = 30 * time.Minute
 	singleAttestationJobExpiry    = 6 * time.Second
+	maximumGossipClockDisparity   = 500 * time.Millisecond
 )
 
 var (
 	ErrIgnore                          = errors.New("ignore") // ErrIgnore is used to indicate that the message should be ignored.
+	ErrProposerPreferenceAlreadySeen   = errors.New("already seen proposer preferences")
 	ErrAttestationQueued               = errors.New("attestation queued")
 	ErrBlockYoungerThanParent          = errors.New("block is younger than parent")
 	ErrInvalidCommitmentsCount         = errors.New("invalid commitments count")

@@ -17,13 +17,14 @@
 package handler
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 
@@ -42,7 +43,7 @@ const (
 func (a *ApiHandler) PostEthV1ValidatorBuilderPreferences(w http.ResponseWriter, r *http.Request) {
 	version, err := clparams.StringToClVersion(r.Header.Get("Eth-Consensus-Version"))
 	if err != nil || version != clparams.GloasVersion {
-		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("Gloas Eth-Consensus-Version header is required")).WriteTo(w)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("the Gloas Eth-Consensus-Version header is required")).WriteTo(w)
 		return
 	}
 	if a.builderClient == nil {
@@ -158,7 +159,7 @@ func (a *ApiHandler) PostEthV1ValidatorBuilderPreferences(w http.ResponseWriter,
 	for failure := range results {
 		failures = append(failures, failure)
 	}
-	sort.Slice(failures, func(i, j int) bool { return failures[i].Index < failures[j].Index })
+	slices.SortFunc(failures, func(a, b poolingFailure) int { return cmp.Compare(a.Index, b.Index) })
 	if len(failures) != 0 {
 		a.writePoolingFailures(w, failures)
 		return

@@ -32,6 +32,7 @@ const (
 	MaxBlockGasLimit     uint64 = 0x7fffffffffffffff // Maximum the block gas limit may ever be.
 	MaxTxnGasLimit       uint64 = 16_777_216         // See EIP-7825: Transaction Gas Limit Cap.
 	GenesisGasLimit      uint64 = 4712388            // Gas limit of the Genesis block.
+	MaxTxnTotalGasLimit  uint64 = 4_294_967_295      // See EIP-8037: TX_MAX_TOTAL_GAS_LIMIT.
 
 	MaximumExtraDataSize  uint64 = 32    // Maximum size extra data may be after Genesis.
 	CallValueTransferGas  uint64 = 9000  // Paid for CALL when the value transfer is non-zero.
@@ -202,8 +203,7 @@ const (
 	P256VerifyGasEIP7951 uint64 = 6900
 
 	// EIP-2935: Historical block hashes in state
-	BlockHashHistoryServeWindow uint64 = 8191
-	BlockHashOldWindow          uint64 = 256
+	BlockHashOldWindow uint64 = 256
 
 	// EIP-7702: Set EOA account code
 	SetCodeMagicPrefix  = byte(0x05)
@@ -257,8 +257,10 @@ const (
 )
 
 // EIP-7702: Set EOA account code
-var DelegatedDesignationPrefix = []byte{0xef, 0x01, 0x00}
-var DelegatedCodeHash = common.HexToHash("0xeadcdba66a79ab5dce91622d1d75c8cff5cff0b96944c3bf1072cd08ce018329")
+var (
+	DelegatedDesignationPrefix = []byte{0xef, 0x01, 0x00}
+	DelegatedCodeHash          = common.HexToHash("0xeadcdba66a79ab5dce91622d1d75c8cff5cff0b96944c3bf1072cd08ce018329")
+)
 
 // SystemAddress is where the system-transaction is sent from as per EIP-4788
 var SystemAddress = accounts.InternAddress(common.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe"))
@@ -280,9 +282,7 @@ var Bls12381MSMDiscountTableG1 = [128]uint64{1000, 949, 848, 797, 764, 750, 738,
 
 var Bls12381MSMDiscountTableG2 = [128]uint64{1000, 1000, 923, 884, 855, 832, 812, 796, 782, 770, 759, 749, 740, 732, 724, 717, 711, 704, 699, 693, 688, 683, 679, 674, 670, 666, 663, 659, 655, 652, 649, 646, 643, 640, 637, 634, 632, 629, 627, 624, 622, 620, 618, 615, 613, 611, 609, 607, 606, 604, 602, 600, 598, 597, 595, 593, 592, 590, 589, 587, 586, 584, 583, 582, 580, 579, 578, 576, 575, 574, 573, 571, 570, 569, 568, 567, 566, 565, 563, 562, 561, 560, 559, 558, 557, 556, 555, 554, 553, 552, 552, 551, 550, 549, 548, 547, 546, 545, 545, 544, 543, 542, 541, 541, 540, 539, 538, 537, 537, 536, 535, 535, 534, 533, 532, 532, 531, 530, 530, 529, 528, 528, 527, 526, 526, 525, 524, 524}
 
-var (
-	GenesisDifficulty = uint256.NewInt(131072) // Difficulty of the Genesis block.
-)
+var GenesisDifficulty = uint256.NewInt(131072) // Difficulty of the Genesis block.
 
 // EIP-8282 - The Builder Deposit Addresses
 // Nick's-method derived address from the builder deposit contract deployment transaction.

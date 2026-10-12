@@ -24,7 +24,6 @@ import (
 )
 
 func Bench2(erigon_url string) error {
-
 	setRoutes(erigon_url, "")
 	reqGen := &RequestGenerator{}
 
@@ -38,7 +37,7 @@ func Bench2(erigon_url string) error {
 	for bn := firstBn; bn <= lastBlock; bn++ {
 		var b EthBlockByNumber
 		if res := reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b); res.Err != nil {
-			return fmt.Errorf("Could not retrieve block %d: %w\n", bn, res.Err)
+			return fmt.Errorf("could not retrieve block %d: %w", bn, res.Err)
 		}
 		if b.Error != nil {
 			fmt.Printf("Error retrieving block: %d %s\n", b.Error.Code, b.Error.Message)
@@ -53,7 +52,7 @@ func Bench2(erigon_url string) error {
 				for nextKey != nil {
 					var sr DebugStorageRange
 					if res := reqGen.Erigon("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, txn.To, *nextKey), &sr); res.Err != nil {
-						return fmt.Errorf("Could not get storageRange: %x: %w\n", txn.Hash, res.Err)
+						return fmt.Errorf("could not get storageRange: %x: %w", txn.Hash, res.Err)
 					}
 					if sr.Error != nil {
 						fmt.Printf("Error getting storageRange: %d %s\n", sr.Error.Code, sr.Error.Message)
@@ -66,9 +65,9 @@ func Bench2(erigon_url string) error {
 							case v.Key == nil:
 								fmt.Printf("No key for sec key: %x\n", k)
 							case k != crypto.Keccak256Hash(v.Key[:]):
-								fmt.Printf("Different sec key: %x %x (%x), value %x\n", k, crypto.Keccak256Hash(v.Key[:]), *(v.Key), v.Value)
+								fmt.Printf("Different sec key: %x %x (%x), value %x\n", k, crypto.Keccak256Hash(v.Key[:]), *v.Key, v.Value)
 							default:
-								fmt.Printf("Keys: %x %x, value %x\n", *(v.Key), k, v.Value)
+								fmt.Printf("Keys: %x %x, value %x\n", *v.Key, k, v.Value)
 							}
 						}
 					}
@@ -81,10 +80,10 @@ func Bench2(erigon_url string) error {
 			// Checking modified accounts
 			var ma DebugModifiedAccounts
 			if res := reqGen.Erigon("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &ma); res.Err != nil {
-				return fmt.Errorf("Could not get modified accounts: %w\n", res.Err)
+				return fmt.Errorf("could not get modified accounts: %w", res.Err)
 			}
 			if ma.Error != nil {
-				return fmt.Errorf("Error getting modified accounts: %d %s\n", ma.Error.Code, ma.Error.Message)
+				return fmt.Errorf("error getting modified accounts: %d %s", ma.Error.Code, ma.Error.Message)
 			}
 			fmt.Printf("Done blocks %d-%d, modified accounts: %d\n", prevBn, bn, len(ma.Result))
 			prevBn = bn

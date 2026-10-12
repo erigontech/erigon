@@ -33,6 +33,7 @@ type SentinelCliCfg struct {
 	ServerAddr     string   `json:"server_addr"`
 	ServerProtocol string   `json:"server_protocol"`
 	ServerTcpPort  uint     `json:"server_tcp_port"`
+	ServerQUICPort uint     `json:"server_quic_port"`
 	LogLvl         uint     `json:"log_level"`
 	NoDiscovery    bool     `json:"no_discovery"`
 	LocalDiscovery bool     `json:"local_discovery"`
@@ -49,6 +50,7 @@ func SetupSentinelCli(ctx *cli.Command) (*SentinelCliCfg, error) {
 	cfg.Port = uint(ctx.Int(sentinelflags.SentinelDiscoveryPort.Name))
 	cfg.Addr = ctx.String(sentinelflags.SentinelDiscoveryAddr.Name)
 	cfg.ServerTcpPort = uint(ctx.Uint(sentinelflags.SentinelTcpPort.Name))
+	cfg.ServerQUICPort = uint(ctx.Uint(sentinelflags.SentinelQUICPort.Name))
 
 	verbosity := ctx.String(logging.LogVerbosityFlag.Name)
 	lvl, err := logging.GetLogLevel(verbosity)

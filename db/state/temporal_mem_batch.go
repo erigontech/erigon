@@ -21,7 +21,6 @@ import (
 	"cmp"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -99,7 +98,7 @@ type TemporalMemBatch struct {
 	metrics *kvmetrics.DomainMetrics
 }
 
-func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
+func NewTemporalMemBatch(tx kv.TemporalTx, db kv.RoDB, ioMetrics any) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
 		storage:           btree2.NewMap[string, []dataWithTxNum](128),
 		metrics:           ioMetrics.(*kvmetrics.DomainMetrics),
@@ -111,12 +110,12 @@ func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 	sd.iiWriters = make([]*InvertedIndexBufferedWriter, len(aggTx.iis))
 
 	for id, ii := range aggTx.iis {
-		sd.iiWriters[id] = ii.NewWriter()
+		sd.iiWriters[id] = ii.NewWriter(db)
 	}
 
 	for id, d := range aggTx.d {
 		sd.domains[id] = map[string][]dataWithTxNum{}
-		sd.domainWriters[id] = d.NewWriter()
+		sd.domainWriters[id] = d.NewWriter(db)
 	}
 
 	return sd
@@ -183,7 +182,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	sd.latestStateLocks[domain].Lock()
 	defer sd.latestStateLocks[domain].Unlock()
 
-	var updateMetrics = func(domain kv.Domain, putKeySize int, putValueSize int) {
+	updateMetrics := func(domain kv.Domain, putKeySize int, putValueSize int) {
 		sd.metrics.Lock()
 		defer sd.metrics.Unlock()
 		sd.metrics.CachePutCount++
@@ -271,7 +270,7 @@ func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, s
 // The caller must already hold the domain's lock (either RLock or Lock),
 // e.g. from within an IteratePrefix callback.
 func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
-	var unwoundLatest = func(domain kv.Domain, key string) (v []byte, step kv.Step, ok bool) {
+	unwoundLatest := func(domain kv.Domain, key string) (v []byte, step kv.Step, ok bool) {
 		if sd.unwindChangeset != nil {
 			if values := sd.unwindChangeset[domain]; values != nil {
 				if value, ok := values[key]; ok {
@@ -316,7 +315,7 @@ func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, s
 
 func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	if !sd.inMemHistoryReads && domain != kv.ReceiptDomain {
-		return nil, false, errors.New("GetAsOf called on TemporalMemBatch with inMemHistoryReads disabled")
+		return nil, false, kv.ErrInMemHistoryDisabled
 	}
 	sd.latestStateLocks[domain].RLock()
 	defer sd.latestStateLocks[domain].RUnlock()
@@ -629,7 +628,7 @@ func (sd *TemporalMemBatch) Close() {
 func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 	other, ok := o.(*TemporalMemBatch)
 	if !ok {
-		return fmt.Errorf("Can't merge %T into *TemporalMemBatch", o)
+		return fmt.Errorf("can't merge %T into *TemporalMemBatch", o)
 	}
 
 	for domain, otherEntries := range other.domains {
@@ -856,7 +855,7 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 		if err := w.Flush(ctx, tx); err != nil {
 			return err
 		}
-		aggTx.d[di].closeValsCursor() //TODO: why?
+		aggTx.d[di].closeValsCursor() // TODO: why?
 		w.Close()
 	}
 	for _, writer := range slices.Backward(sd.pastIIWriters) {

@@ -59,8 +59,7 @@ func PassThroughGenerator[T comparable]() IdGenerator[T] {
 	return &passThroughGenerator[T]{}
 }
 
-type passThroughGenerator[T comparable] struct {
-}
+type passThroughGenerator[T comparable] struct{}
 
 func (generator *passThroughGenerator[T]) GenerateId(generationContext context.Context, entity ...any) (T, error) {
 	return entity[0].(T), nil
@@ -80,10 +79,10 @@ func (generator *randomGenerator[T]) GenerateId(generationContext context.Contex
 
 	switch t.Kind() {
 	case reflect.String:
-		return ((any)(random.RandomString(generator.len))).(T), nil
+		return any(random.RandomString(generator.len)).(T), nil
 	case reflect.Slice:
 		if t.Elem().Kind() == reflect.Uint8 {
-			return ((any)(random.RandomBytes(generator.len))).(T), nil
+			return any(random.RandomBytes(generator.len)).(T), nil
 		}
 	}
 

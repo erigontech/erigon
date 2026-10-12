@@ -30,8 +30,13 @@ type MdGas struct {
 	State     uint64
 }
 
-func (g MdGas) Plus(other MdGas) MdGas {
-	return MdGas{
+type MdGasCost struct {
+	Execution uint64
+	State     int64 // Negative values refill state gas.
+}
+
+func (g MdGasCost) Plus(other MdGasCost) MdGasCost {
+	return MdGasCost{
 		Execution: g.Execution + other.Execution,
 		State:     g.State + other.State,
 	}
@@ -56,6 +61,13 @@ type MdGasUsage struct {
 	Execution  uint64
 	State      int64 // can be negative due to state clearing (e.g. SSTORE clear)
 	StateSpill uint64
+}
+
+// TxnGasUsage contains the settled transaction gas accounting.
+type TxnGasUsage struct {
+	BlockExecutionGasUsed uint64 // Execution contribution to block gas
+	BlockStateGasUsed     uint64 // State contribution to block gas
+	GasRefund             uint64 // Capped refund before applying the calldata floor
 }
 
 // PlusIntrinsic folds intrinsic execution gas into the frame-usage report.

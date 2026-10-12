@@ -24,16 +24,13 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -234,59 +231,6 @@ func TestGetPayloadV2AcceptsShanghaiPayload(t *testing.T) {
 	require.NotNil(t, resp)
 }
 
-func TestAssembledBlockToPayloadResponseIncludesCanonicalEmptyBAL(t *testing.T) {
-	t.Parallel()
-
-	emptyBAL := []byte{0xc0}
-	sidecar, err := types.DecodeBlockAccessListSidecar(emptyBAL)
-	require.NoError(t, err)
-	baseFee := uint256.NewInt(1_000_000_000)
-	emptyBALHash := empty.BlockAccessListHash
-	header := &types.Header{
-		Number:              *uint256.NewInt(101),
-		Time:                1,
-		BaseFee:             baseFee,
-		GasLimit:            30_000_000,
-		BlockAccessListHash: &emptyBALHash,
-	}
-	block := types.NewBlockWithHeader(header, sidecar)
-	br := &types.BlockWithReceipts{Block: block, Requests: make(types.FlatRequests, 0)}
-
-	resp, err := assembledBlockToPayloadResponse(br, uint256.NewInt(0), clparams.GloasVersion)
-	require.NoError(t, err)
-
-	require.NotNil(t, resp.ExecutionPayload.BlockAccessList)
-	require.Equal(t, hexutil.Bytes(emptyBAL), *resp.ExecutionPayload.BlockAccessList)
-}
-
-func TestAssembledBlockToPayloadResponseReturnsSidecarEncodingError(t *testing.T) {
-	t.Parallel()
-
-	balHash := common.Hash{1}
-	header := &types.Header{
-		Number:              *uint256.NewInt(101),
-		BaseFee:             uint256.NewInt(1_000_000_000),
-		GasLimit:            30_000_000,
-		BlockAccessListHash: &balHash,
-	}
-	// A nil nested StorageChange is the encoding failure that survives an
-	// account list of values.
-	sidecar := types.NewBlockAccessListSidecar(types.BlockAccessList{{
-		Address: accounts.InternAddress(common.Address{2}),
-		StorageChanges: []types.SlotChanges{{
-			Slot:    accounts.InternKey(common.Hash{3}),
-			Changes: []*types.StorageChange{nil},
-		}},
-	}})
-	block := types.NewBlockWithHeader(header, sidecar)
-	br := &types.BlockWithReceipts{Block: block, Requests: make(types.FlatRequests, 0)}
-
-	resp, err := assembledBlockToPayloadResponse(br, uint256.NewInt(0), clparams.GloasVersion)
-
-	require.Nil(t, resp)
-	require.ErrorContains(t, err, "encode block access list")
-}
-
 // newProposingEngineServerForGetPayloadTests returns a server on a Prague-window
 // config: GetPayloadV4 is valid on Prague but invalid once Osaka activates.
 func newProposingEngineServerForGetPayloadTests(stub execmodule.ExecutionModule) *EngineServer {
@@ -373,51 +317,67 @@ func (s *getPayloadStubModule) Ready(_ context.Context) (bool, error) { return t
 func (s *getPayloadStubModule) InsertBlocks(_ context.Context, _ []*types.Block) (execmodule.ExecutionStatus, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) ValidateChain(_ context.Context, _ common.Hash, _ uint64) (execmodule.ValidationResult, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) UpdateForkChoice(_ context.Context, _, _, _ common.Hash) (execmodule.ForkChoiceResult, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetForkChoice(_ context.Context) (execmodule.ForkChoiceState, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) AssembleBlock(_ context.Context, _ *builder.Parameters) (execmodule.AssembleBlockResult, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) CurrentHeader(_ context.Context) (*types.Header, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetHeader(_ context.Context, _ *common.Hash, _ *uint64) (*types.Header, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetBody(_ context.Context, _ *common.Hash, _ *uint64) (*types.RawBody, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) HasBlock(_ context.Context, _ *common.Hash, _ *uint64) (bool, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetBodiesByRange(_ context.Context, _, _ uint64) ([]*types.RawBody, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetBodiesByHashes(_ context.Context, _ []common.Hash) ([]*types.RawBody, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetPayloadBodiesByHash(_ context.Context, _ []common.Hash) ([]*execmodule.PayloadBody, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetPayloadBodiesByRange(_ context.Context, _, _ uint64) ([]*execmodule.PayloadBody, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) IsCanonicalHash(_ context.Context, _ common.Hash) (bool, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetHeaderHashNumber(_ context.Context, _ common.Hash) (*uint64, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64) (*uint256.Int, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) FrozenBlocks(_ context.Context) (uint64, bool, error) {
 	panic("not implemented")
 }

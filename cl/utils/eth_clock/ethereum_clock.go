@@ -195,9 +195,9 @@ func (t *ethereumClockImpl) ForkId() ([]byte, error) {
 	}
 
 	enrForkId := make([]byte, 16)
-	copy(enrForkId, digest[:])                                             // current fork digest
-	copy(enrForkId[4:], nextForkVersion[:])                                // next fork version
-	binary.BigEndian.PutUint64(enrForkId[8:], t.NextForkEpochIncludeBPO()) // next fork epoch
+	copy(enrForkId, digest[:])                                                // current fork digest
+	copy(enrForkId[4:], nextForkVersion[:])                                   // next fork version
+	binary.LittleEndian.PutUint64(enrForkId[8:], t.NextForkEpochIncludeBPO()) // next fork epoch
 	return enrForkId, nil
 }
 

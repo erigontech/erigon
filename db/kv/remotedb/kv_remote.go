@@ -50,8 +50,10 @@ type remoteOpts struct {
 	version     gointerfaces.Version
 }
 
-var _ kv.TemporalTx = (*tx)(nil)
-var _ kv.TemporalRoDB = (*DB)(nil)
+var (
+	_ kv.TemporalTx   = (*tx)(nil)
+	_ kv.TemporalRoDB = (*DB)(nil)
+)
 
 type DB struct {
 	remoteKV     remoteproto.KVClient

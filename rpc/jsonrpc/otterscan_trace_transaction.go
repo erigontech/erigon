@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -72,8 +73,8 @@ func NewTransactionTracer(ctx context.Context) *TransactionTracer {
 		stack:   make([]*TraceEntry, 0),
 	}
 	tracer.hooks = &tracing.Hooks{
-		OnEnter: tracer.OnEnter,
-		OnExit:  tracer.OnExit,
+		OnEnterV2: tracer.OnEnterV2,
+		OnExitV2:  tracer.OnExitV2,
 	}
 
 	return tracer
@@ -83,7 +84,7 @@ func (t *TransactionTracer) TracingHooks() *tracing.Hooks {
 	return t.hooks
 }
 
-func (t *TransactionTracer) OnEnter(depth int, typRaw byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (t *TransactionTracer) OnEnterV2(depth int, typRaw byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
 	t.depth = depth
 	typ := vm.OpCode(typRaw)
 
@@ -124,7 +125,7 @@ func (t *TransactionTracer) OnEnter(depth int, typRaw byte, from accounts.Addres
 	t.stack = append(t.stack, entry)
 }
 
-func (t *TransactionTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+func (t *TransactionTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 	t.depth = depth
 
 	lastIdx := len(t.stack) - 1

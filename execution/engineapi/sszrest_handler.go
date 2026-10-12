@@ -129,7 +129,8 @@ func readSSZBody(r *http.Request) ([]byte, error) {
 
 func writeSSZ(w http.ResponseWriter, obj interface {
 	EncodeSSZ([]byte) ([]byte, error)
-}) {
+},
+) {
 	out, err := obj.EncodeSSZ(nil)
 	if err != nil {
 		writeSSZError(w, http.StatusInternalServerError, err.Error())

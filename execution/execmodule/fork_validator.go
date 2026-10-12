@@ -139,7 +139,7 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 	defer fv.lock.Unlock()
 	start := time.Now()
 	if fv.sharedDom != nil {
-		if err := fv.sharedDom.FlushPendingUpdates(ctx, tx); err != nil {
+		if err := fv.sharedDom.FlushPendingUpdates(tx); err != nil {
 			return err
 		}
 		sdTxNum, _, err := sd.SeekCommitment(ctx, tx)
@@ -276,8 +276,7 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	fv.extendingForkNotifications = fv.executor.ValidationNotifications()
 	fv.extendingForkNotifications.Accumulator.Reset(0)
 	fv.extendingForkNotifications.RecentReceipts.Clear()
-	status, latestValidHash, validationError, criticalError =
-		fv.validateAndStorePayload(fv.ctx, fv.sharedDom, tx, header, body, unwindPoint, headersChain, bodiesChain)
+	status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(fv.sharedDom, tx, header, body, unwindPoint, headersChain, bodiesChain)
 
 	if fv.sharedDom != nil &&
 		(criticalError != nil || status == engine_types.InvalidStatus) {
@@ -308,7 +307,7 @@ func (fv *ForkValidator) ClearWithUnwind() {
 }
 
 // validateAndStorePayload validate and store a payload fork chain if such chain results valid.
-func (fv *ForkValidator) validateAndStorePayload(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
+func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 ) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
 	start := time.Now()
 	headersChain = append(headersChain, header)
@@ -320,7 +319,7 @@ func (fv *ForkValidator) validateAndStorePayload(ctx context.Context, sd *execct
 		sd.TakeCommitmentTime() // discard anything left by an earlier block
 		beforeIO = blockmetrics.Take(sd.Metrics(), sd.NonExecMetrics())
 	}
-	if err := fv.executor.ValidateBlock(ctx, sd, tx, unwindPoint, headersChain, bodiesChain); err != nil {
+	if err := fv.executor.ValidateBlock(sd, tx, unwindPoint, headersChain, bodiesChain); err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			validationError = err
 		} else {
@@ -330,7 +329,7 @@ func (fv *ForkValidator) validateAndStorePayload(ctx context.Context, sd *execct
 	}
 	validation := time.Since(start)
 	fv.timingsCache.Add(hash, BlockTimings{validation, 0})
-	fv.recordBlockMetrics(sd, header, body, hash, &beforeIO, len(headersChain), validation)
+	fv.recordBlockMetrics(sd, header, body, hash, &beforeIO, len(headersChain), validation, fv.executor.lastValidationExecStageTiming())
 
 	latestValidHash = hash
 	fv.extendingForkHeadHash = hash
@@ -377,7 +376,7 @@ func (fv *ForkValidator) GetTimings(hash common.Hash) BlockTimings {
 	return BlockTimings{}
 }
 
-func (fv *ForkValidator) recordBlockMetrics(sd *execctx.SharedDomains, header *types.Header, body *types.RawBody, hash common.Hash, beforeIO *blockmetrics.Sample, blocksValidated int, validation time.Duration) {
+func (fv *ForkValidator) recordBlockMetrics(sd *execctx.SharedDomains, header *types.Header, body *types.RawBody, hash common.Hash, beforeIO *blockmetrics.Sample, blocksValidated int, validation, execStage time.Duration) {
 	if fv.blockMetricsCache == nil {
 		return
 	}
@@ -398,7 +397,7 @@ func (fv *ForkValidator) recordBlockMetrics(sd *execctx.SharedDomains, header *t
 		rec.TxCount = len(body.Transactions)
 	}
 	rec.Accounts, rec.Storage, rec.Code, rec.CountersValid = blockmetrics.Take(sd.Metrics(), sd.NonExecMetrics()).Since(*beforeIO)
-	rec.Execution = max(fv.executor.lastValidationExecStageTiming()-stateHash, 0)
+	rec.Execution = max(execStage-stateHash, 0)
 	fv.blockMetricsCache.Add(hash, rec)
 }
 

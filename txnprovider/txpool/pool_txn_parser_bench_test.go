@@ -58,7 +58,8 @@ func BenchmarkParseTransaction(b *testing.B) {
 	thinBlobPayload := hexutil.MustDecodeHex("b9012b") // envelope prefix
 	thinBlobPayload = append(thinBlobPayload, BlobTxnType)
 	thinBlobPayload = append(thinBlobPayload, hexutil.MustDecodeHex(blobBodyRlpHex)...)
-	cases = append(cases,
+	cases = append(
+		cases,
 		benchCase{
 			name:    "blob/thin_envelope",
 			chainID: *uint256.NewInt(5),

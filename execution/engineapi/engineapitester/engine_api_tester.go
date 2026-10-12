@@ -31,7 +31,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
@@ -40,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/state"
@@ -103,13 +103,9 @@ func DefaultEngineApiTesterGenesis() (*types.Genesis, *ecdsa.PrivateKey, error) 
 	if err != nil {
 		return nil, nil, fmt.Errorf("decode beacon roots code: %w", err)
 	}
-	var chainConfig chain.Config
-	err = copier.CopyWithOption(&chainConfig, chain.AllProtocolChanges, copier.Option{DeepCopy: true})
-	if err != nil {
-		return nil, nil, fmt.Errorf("copy chain config: %w", err)
-	}
+	chainConfig := chain.AllProtocolChanges.Copy()
 	genesis := &types.Genesis{
-		Config:     &chainConfig,
+		Config:     chainConfig,
 		Coinbase:   coinbaseAddr,
 		Difficulty: merge.ProofOfStakeDifficulty,
 		GasLimit:   1_000_000_000,
@@ -443,6 +439,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		Node:                 ethNode,
 		NodeKey:              nodeKey,
 		StateAgg:             stateAgg,
+		ChainDB:              ethBackend.ChainDB().(kv.TemporalRoDB),
 		cleanup:              cleanup,
 	}, nil
 }
@@ -479,6 +476,7 @@ type EngineApiTester struct {
 	Node                 *node.Node
 	NodeKey              *ecdsa.PrivateKey
 	StateAgg             *state.Aggregator
+	ChainDB              kv.TemporalRoDB
 	cleanup              *cleanupHandle
 }
 

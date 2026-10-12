@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -34,6 +32,8 @@ const (
 )
 
 var (
+	errGloasSidecarBlockUnavailable = fmt.Errorf("%w: data column sidecar block unavailable", ErrIgnore)
+
 	verifyDataColumnSidecarInclusionProof           = das.VerifyDataColumnSidecarInclusionProof
 	verifyDataColumnSidecarKZGProofs                = das.VerifyDataColumnSidecarKZGProofs
 	verifyDataColumnSidecar                         = das.VerifyDataColumnSidecar
@@ -52,16 +52,9 @@ type dataColumnSidecarService struct {
 	columnSidecarStorage blob_storage.DataColumnStorage
 	emitters             *beaconevents.EventEmitter
 
-	// [New in Gloas:EIP7732] Pending sidecars waiting for block to arrive
-	pendingGloasSidecars     sync.Map // map[seenGloasSidecarKey]*pendingGloasSidecarJob
-	pendingGloasSidecarCount atomic.Int32
-}
-
-// pendingGloasSidecarJob holds a sidecar that is waiting for its block to arrive
-type pendingGloasSidecarJob struct {
-	sidecar      *cltypes.DataColumnSidecar
-	subnet       *uint64
-	creationTime time.Time
+	// Key by the full sidecar root so an unverified candidate cannot suppress
+	// another candidate for the same block and column.
+	pendingGloasSidecars *pendingJobQueue[common.Hash, *cltypes.DataColumnSidecar]
 }
 
 // seenSidecarKey is used for Fulu (pre-GLOAS) seen tracking
@@ -106,8 +99,23 @@ func NewDataColumnSidecarService(
 		columnSidecarStorage: columnSidecarStorage,
 		emitters:             emitters,
 	}
-	go s.loopPendingGloasSidecars(ctx)
+	s.pendingGloasSidecars = s.newPendingGloasSidecarQueue(ctx)
 	return s
+}
+
+func (s *dataColumnSidecarService) newPendingGloasSidecarQueue(ctx context.Context) *pendingJobQueue[common.Hash, *cltypes.DataColumnSidecar] {
+	return newPendingJobQueue(ctx, pendingJobQueueOptions{
+		name:          "gloas_data_column_sidecar",
+		capacity:      maxPendingGloasSidecars,
+		expiry:        pendingGloasSidecarExpiry,
+		checkInterval: pendingGloasSidecarTick,
+	},
+		s.tryProcessPendingGloasSidecar,
+		nil,
+		func(_ common.Hash, sidecar *cltypes.DataColumnSidecar) {
+			log.Debug("[dataColumnSidecarService] expired pending GLOAS sidecar",
+				"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index)
+		})
 }
 
 func (s *dataColumnSidecarService) Names() []string {
@@ -137,7 +145,11 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 
 	// Version-aware processing
 	if msg.Version() >= clparams.GloasVersion {
-		return s.processGloasMessage(ctx, subnet, msg)
+		err := s.processGloasMessage(ctx, subnet, msg)
+		if errors.Is(err, errGloasSidecarBlockUnavailable) {
+			s.scheduleSidecarForLaterProcessing(msg)
+		}
+		return err
 	}
 	return s.processFuluMessage(ctx, subnet, msg)
 }
@@ -270,6 +282,12 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 		return ErrIgnore
 	}
 
+	// [REJECT] Validate the subnet before queue admission so a wrong-subnet copy
+	// cannot suppress a later copy received on the correct subnet.
+	if subnet != nil && *subnet != computeSubnetForDataColumnSidecar(msg.Index) {
+		return fmt.Errorf("incorrect subnet %d for data column sidecar index %d", *subnet, msg.Index)
+	}
+
 	// [IGNORE] The sidecar is not from a future slot (with some tolerance for clock disparity)
 	if slot > s.ethClock.GetCurrentSlot() && !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(slot) {
 		return ErrIgnore
@@ -298,11 +316,9 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 
 	// [IGNORE] A valid block for the sidecar's slot has been seen.
 	// Only checks recent blocks in forkChoice memory - older blocks don't need sidecar validation.
-	// If not yet seen, queue for deferred validation.
 	block, ok := s.forkChoice.GetBlock(blockRoot)
 	if !ok {
-		s.scheduleSidecarForLaterProcessing(msg, subnet)
-		return ErrIgnore
+		return errGloasSidecarBlockUnavailable
 	}
 
 	// [REJECT] The sidecar's slot matches the slot of the block
@@ -326,11 +342,6 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 	// [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar, bid.blob_kzg_commitments)
 	if !verifyDataColumnSidecarWithCommitments(msg, kzgCommitments) {
 		return errors.New("invalid data column sidecar")
-	}
-
-	// [REJECT] The sidecar is for the correct subnet
-	if subnet != nil && *subnet != computeSubnetForDataColumnSidecar(msg.Index) {
-		return fmt.Errorf("incorrect subnet %d for data column sidecar index %d", *subnet, msg.Index)
 	}
 
 	// [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar, bid.blob_kzg_commitments)
@@ -383,91 +394,49 @@ func (s *dataColumnSidecarService) verifyProposerSignature(proposerIndex uint64,
 	return valid, nil
 }
 
-// scheduleSidecarForLaterProcessing queues a GLOAS sidecar for later processing when its block arrives
-func (s *dataColumnSidecarService) scheduleSidecarForLaterProcessing(sidecar *cltypes.DataColumnSidecar, subnet *uint64) {
-	if s.pendingGloasSidecarCount.Load() >= maxPendingGloasSidecars {
+// scheduleSidecarForLaterProcessing queues a GLOAS sidecar until its block arrives.
+func (s *dataColumnSidecarService) scheduleSidecarForLaterProcessing(sidecar *cltypes.DataColumnSidecar) {
+	// Bound hashing and retained data before the block's commitments are available.
+	// Failed admission keeps the missing-block IGNORE verdict from gossip validation.
+	blobParameters := s.cfg.GetBlobParameters(sidecar.Slot / s.cfg.SlotsPerEpoch)
+	if !verifyDataColumnSidecar(sidecar) || sidecar.Column.Len() > int(blobParameters.MaxBlobsPerBlock) {
+		return
+	}
+	err := s.pendingGloasSidecars.enqueueLazy(sidecar, func() (common.Hash, error) { return sidecar.HashSSZ() })
+	if errors.Is(err, errPendingJobQueueFull) {
 		log.Trace("[dataColumnSidecarService] pending GLOAS sidecars at capacity, dropping",
 			"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index)
-		return
+	} else if err != nil {
+		log.Warn("[dataColumnSidecarService] failed to hash pending GLOAS sidecar",
+			"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index, "err", err)
 	}
-
-	key := seenGloasSidecarKey{
-		beaconBlockRoot: sidecar.BeaconBlockRoot,
-		index:           sidecar.Index,
-	}
-
-	// Don't schedule if already pending
-	if _, loaded := s.pendingGloasSidecars.LoadOrStore(key, &pendingGloasSidecarJob{
-		sidecar:      sidecar,
-		subnet:       subnet,
-		creationTime: time.Now(),
-	}); loaded {
-		return
-	}
-	s.pendingGloasSidecarCount.Add(1)
-
-	log.Debug("[dataColumnSidecarService] scheduled GLOAS sidecar for later processing",
-		"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index)
 }
 
-// loopPendingGloasSidecars periodically retries processing pending sidecars
-func (s *dataColumnSidecarService) loopPendingGloasSidecars(ctx context.Context) {
-	ticker := time.NewTicker(pendingGloasSidecarTick)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-
-		s.pendingGloasSidecars.Range(func(key, value any) bool {
-			job := value.(*pendingGloasSidecarJob)
-			sidecarKey := key.(seenGloasSidecarKey)
-
-			// Check if expired
-			if time.Since(job.creationTime) > pendingGloasSidecarExpiry {
-				s.pendingGloasSidecars.Delete(sidecarKey)
-				s.pendingGloasSidecarCount.Add(-1)
-				log.Debug("[dataColumnSidecarService] expired pending GLOAS sidecar",
-					"slot", job.sidecar.Slot, "blockRoot", job.sidecar.BeaconBlockRoot.String(), "index", job.sidecar.Index)
-				return true
-			}
-
-			// Check if slot has become finalized while waiting
-			if job.sidecar.Slot <= s.forkChoice.FinalizedSlot() {
-				s.pendingGloasSidecars.Delete(sidecarKey)
-				s.pendingGloasSidecarCount.Add(-1)
-				log.Debug("[dataColumnSidecarService] pending GLOAS sidecar slot is now finalized",
-					"slot", job.sidecar.Slot, "blockRoot", job.sidecar.BeaconBlockRoot.String(), "index", job.sidecar.Index)
-				return true
-			}
-
-			// Only retry if block is now available in forkChoice (recent blocks only)
-			if _, ok := s.forkChoice.GetBlock(job.sidecar.BeaconBlockRoot); !ok {
-				// Block still not available, keep waiting
-				return true
-			}
-
-			// Block is available, try to process
-			if err := s.processGloasMessage(ctx, job.subnet, job.sidecar); err != nil {
-				// Processing failed for another reason (not block delay), remove from pending
-				s.pendingGloasSidecars.Delete(sidecarKey)
-				s.pendingGloasSidecarCount.Add(-1)
-				if !errors.Is(err, ErrIgnore) {
-					log.Trace("[dataColumnSidecarService] failed to process pending GLOAS sidecar",
-						"slot", job.sidecar.Slot, "blockRoot", job.sidecar.BeaconBlockRoot.String(), "index", job.sidecar.Index, "err", err)
-				}
-				return true
-			}
-
-			// Successfully processed, remove from pending
-			s.pendingGloasSidecars.Delete(sidecarKey)
-			s.pendingGloasSidecarCount.Add(-1)
-			log.Debug("[dataColumnSidecarService] successfully processed pending GLOAS sidecar",
-				"slot", job.sidecar.Slot, "blockRoot", job.sidecar.BeaconBlockRoot.String(), "index", job.sidecar.Index)
-			return true
-		})
+func (s *dataColumnSidecarService) tryProcessPendingGloasSidecar(
+	ctx context.Context,
+	_ common.Hash,
+	sidecar *cltypes.DataColumnSidecar,
+) pendingJobDecision {
+	if sidecar.Slot <= s.forkChoice.FinalizedSlot() {
+		log.Debug("[dataColumnSidecarService] pending GLOAS sidecar slot is now finalized",
+			"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index)
+		return pendingJobRemove
 	}
+	if _, ok := s.forkChoice.GetBlock(sidecar.BeaconBlockRoot); !ok {
+		return pendingJobKeep
+	}
+	// Subnet validation already ran before queue admission.
+	if err := s.processGloasMessage(ctx, nil, sidecar); err != nil {
+		if errors.Is(err, errGloasSidecarBlockUnavailable) {
+			return pendingJobKeep
+		}
+		if !errors.Is(err, ErrIgnore) {
+			log.Trace("[dataColumnSidecarService] failed to process pending GLOAS sidecar",
+				"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index, "err", err)
+		}
+		return pendingJobRemove
+	}
+	log.Debug("[dataColumnSidecarService] successfully processed pending GLOAS sidecar",
+		"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index)
+	return pendingJobRemove
 }

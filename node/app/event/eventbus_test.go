@@ -59,8 +59,7 @@ type testInterface2 interface {
 	test2() int
 }
 
-type testImpl struct {
-}
+type testImpl struct{}
 
 func (t *testImpl) test1() bool { return true }
 func (t *testImpl) test2() int  { return 10 }

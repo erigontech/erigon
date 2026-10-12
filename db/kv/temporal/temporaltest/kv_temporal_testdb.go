@@ -77,7 +77,7 @@ func newTestDB(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv.TemporalRwD
 		tb.Helper()
 	}
 
-	//TODO: create set of funcs for non-test code. Assert(tb == nil)
+	// TODO: create set of funcs for non-test code. Assert(tb == nil)
 
 	var rawDB kv.RwDB
 	ctx := context.Background()

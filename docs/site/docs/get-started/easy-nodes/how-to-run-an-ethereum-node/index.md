@@ -52,7 +52,8 @@ services:
       - "42069:42069/tcp"     # snapshot downloader (BitTorrent)
       - "42069:42069/udp"
       - "4000:4000/udp"       # Caplin consensus-layer discovery
-      - "4001:4001/tcp"       # Caplin consensus-layer p2p
+      - "4001:4001/tcp"       # Caplin consensus-layer p2p over TCP
+      - "4001:4001/udp"       # Caplin consensus-layer p2p over QUIC
     volumes:
       # *** IMPORTANT: CHANGE THIS PATH! ***
       # Replace the path below with an actual directory on your machine

@@ -189,7 +189,7 @@ func TestSize(t *testing.T) {
 
 	// Now add a signature.
 	nodeid := []byte{1, 2, 3, 4, 5, 6, 7, 8}
-	signTest(nodeid, &r)
+	require.NoError(t, signTest(nodeid, &r))
 	assert.Equal(t, uint64(45), r.Size())
 	enc, _ := rlp.EncodeToBytes(&r)
 	if r.Size() != uint64(len(enc)) {
@@ -206,7 +206,7 @@ func TestSeq(t *testing.T) {
 	assert.Equal(t, uint64(0), r.Seq())
 	r.Set(UDP(1))
 	assert.Equal(t, uint64(0), r.Seq())
-	signTest([]byte{5}, &r)
+	require.NoError(t, signTest([]byte{5}, &r))
 	assert.Equal(t, uint64(0), r.Seq())
 	r.Set(UDP(2))
 	assert.Equal(t, uint64(1), r.Seq())

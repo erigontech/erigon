@@ -110,25 +110,25 @@ func (r *BeaconResponse) WithVersion(version clparams.StateVersion) (out *Beacon
 	return out
 }
 
-func (b *BeaconResponse) MarshalJSON() ([]byte, error) {
+func (r *BeaconResponse) MarshalJSON() ([]byte, error) {
 	o := map[string]any{
-		"data": b.Data,
+		"data": r.Data,
 	}
-	if b.Finalized != nil {
-		o["finalized"] = *b.Finalized
+	if r.Finalized != nil {
+		o["finalized"] = *r.Finalized
 	}
-	if b.Version != nil {
-		o["version"] = b.Version.String()
+	if r.Version != nil {
+		o["version"] = r.Version.String()
 	}
-	if b.ExecutionOptimistic != nil {
-		o["execution_optimistic"] = *b.ExecutionOptimistic
+	if r.ExecutionOptimistic != nil {
+		o["execution_optimistic"] = *r.ExecutionOptimistic
 	}
-	maps.Copy(o, b.Extra)
+	maps.Copy(o, r.Extra)
 	return json.Marshal(o)
 }
 
-func (b *BeaconResponse) EncodeSSZ(xs []byte) ([]byte, error) {
-	marshaler, ok := b.Data.(ssz.Marshaler)
+func (r *BeaconResponse) EncodeSSZ(xs []byte) ([]byte, error) {
+	marshaler, ok := r.Data.(ssz.Marshaler)
 	if !ok {
 		return nil, NewEndpointError(http.StatusBadRequest, ErrorSszNotSupported)
 	}
@@ -139,8 +139,8 @@ func (b *BeaconResponse) EncodeSSZ(xs []byte) ([]byte, error) {
 	return encoded, nil
 }
 
-func (b *BeaconResponse) EncodingSizeSSZ() int {
-	marshaler, ok := b.Data.(ssz.Marshaler)
+func (r *BeaconResponse) EncodingSizeSSZ() int {
+	marshaler, ok := r.Data.(ssz.Marshaler)
 	if !ok {
 		return 9
 	}

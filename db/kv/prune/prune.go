@@ -55,7 +55,7 @@ type StorageMode int
 const (
 	DefaultStorageMode StorageMode = iota
 	KeyStorageMode
-	PrefixValStorageMode //TODO: change name
+	PrefixValStorageMode // TODO: change name
 	StepValueStorageMode
 	StepKeyStorageMode
 	ValueOffset8StorageMode // txNum at val[8:16], used by TxLookup
@@ -196,7 +196,6 @@ func TableScanningPrune(
 	logEvery *time.Ticker,
 	logger log.Logger,
 	keysCursor kv.RwCursorDupSort, valDelCursor kv.PseudoDupSortRwCursor,
-	asserts bool,
 	prevStat *Stat,
 	mode StorageMode,
 ) (stat *Stat, err error) {
@@ -223,7 +222,7 @@ func TableScanningPrune(
 		}
 	}
 
-	var keyCursorPosition = &StartPos{}
+	keyCursorPosition := &StartPos{}
 	if keysCursor != nil {
 		if prevStat.KeyProgress == InProgress {
 			keyCursorPosition.StartKey, keyCursorPosition.StartVal, err = keysCursor.Seek(prevStat.LastPrunedKey) //nolint:govet
@@ -296,7 +295,7 @@ func TableScanningPrune(
 		dupBound = hexutil.EncodeTs(txTo)
 	}
 
-	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, dupBound, valDelCursor, keysCursor, asserts, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue)
+	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, dupBound, valDelCursor, keysCursor, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue)
 	if err != nil {
 		return nil, err
 	}
@@ -321,7 +320,6 @@ func tableScanningPrune(
 	dupBound []byte,
 	valDelCursor kv.PseudoDupSortRwCursor,
 	keysCursor kv.RwCursorDupSort,
-	asserts bool,
 	throttling *time.Duration,
 	logEvery *time.Ticker,
 	logger log.Logger,

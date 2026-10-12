@@ -18,15 +18,25 @@ package rpc
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"reflect"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -159,6 +169,14 @@ var messageCorpus = []string{
 	// empty and odd values
 	`{"method":"","id":1}`,
 	`{"":1,"method":"m"}`,
+	// string fields that are not plain ASCII text, or not strings at all
+	`{"method":"a","method":null,"id":1}`,
+	`{"jsonrpc":"2.0","jsonrpc":null}`,
+	`{"method":5,"id":1}`,
+	`{"jsonrpc":2.0,"method":["m"]}`,
+	`{"method":"caf\u00e9","id":1}`,
+	"{\"method\":\"caf\u00e9\",\"id\":1}",
+	"{\"method\":\"\xff\",\"id\":1}",
 	// not an object at all
 	`1`,
 	`"str"`,
@@ -199,32 +217,46 @@ func TestParseMessage(t *testing.T) {
 		want  []*jsonrpcMessage
 	}{
 		{"empty object", `{}`, false, []*jsonrpcMessage{zero()}},
-		{"call", `{"jsonrpc":"2.0","id":1,"method":"m","params":[1,2]}`, false,
-			[]*jsonrpcMessage{testMessage("2.0", "m", "1", "[1,2]")}},
+		{
+			"call", `{"jsonrpc":"2.0","id":1,"method":"m","params":[1,2]}`, false,
+			[]*jsonrpcMessage{testMessage("2.0", "m", "1", "[1,2]")},
+		},
 		{"null message", `null`, false, []*jsonrpcMessage{nil}},
 		{"not an object", `1`, false, []*jsonrpcMessage{zero()}},
 		{"string", `"str"`, false, []*jsonrpcMessage{zero()}},
 		{"empty batch", `[]`, true, nil},
-		{"batch", `[{"method":"a","id":1},{"method":"b","id":2}]`, true,
-			[]*jsonrpcMessage{testMessage("", "a", "1", ""), testMessage("", "b", "2", "")}},
-		{"batch with null", `[{"method":"a","id":1},null]`, true,
-			[]*jsonrpcMessage{testMessage("", "a", "1", ""), nil}},
-		{"duplicate key, last wins", `{"method":"first","method":"second","id":1}`, false,
-			[]*jsonrpcMessage{testMessage("", "second", "1", "")}},
+		{
+			"batch", `[{"method":"a","id":1},{"method":"b","id":2}]`, true,
+			[]*jsonrpcMessage{testMessage("", "a", "1", ""), testMessage("", "b", "2", "")},
+		},
+		{
+			"batch with null", `[{"method":"a","id":1},null]`, true,
+			[]*jsonrpcMessage{testMessage("", "a", "1", ""), nil},
+		},
+		{
+			"duplicate key, last wins", `{"method":"first","method":"second","id":1}`, false,
+			[]*jsonrpcMessage{testMessage("", "second", "1", "")},
+		},
 
 		// field names have one spelling in the spec; any other spelling is an
 		// unknown key, but unicode escapes are unescaped first so they match the
 		// same way encoding/json map keys do
 		{"cased keys ignored", `{"Method":"m","ID":1,"Params":[1]}`, false, []*jsonrpcMessage{zero()}},
-		{"unicode-escaped method key", "{\"metho\\u0064\":\"m\",\"i\\u0064\":7}", false,
-			[]*jsonrpcMessage{testMessage("", "m", "7", "")}},
+		{
+			"unicode-escaped method key", "{\"metho\\u0064\":\"m\",\"i\\u0064\":7}", false,
+			[]*jsonrpcMessage{testMessage("", "m", "7", "")},
+		},
 		{"double-escaped key is not method", `{"metho\\u0064":"x"}`, false, []*jsonrpcMessage{zero()}},
 
 		// a string holding structural bytes must not end the value early
-		{"structural bytes in a string", `{"method":"m","params":["a\"},{\"b"],"id":1}`, false,
-			[]*jsonrpcMessage{testMessage("", "m", "1", `["a\"},{\"b"]`)}},
-		{"batch element with a brace in a string", `[{"method":"m","params":["},{"]}]`, true,
-			[]*jsonrpcMessage{testMessage("", "m", "", `["},{"]`)}},
+		{
+			"structural bytes in a string", `{"method":"m","params":["a\"},{\"b"],"id":1}`, false,
+			[]*jsonrpcMessage{testMessage("", "m", "1", `["a\"},{\"b"]`)},
+		},
+		{
+			"batch element with a brace in a string", `[{"method":"m","params":["},{"]}]`, true,
+			[]*jsonrpcMessage{testMessage("", "m", "", `["},{"]`)},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -476,6 +508,10 @@ func FuzzFillMessage(f *testing.F) {
 	})
 }
 
+func respond(s *jsonstream.Stream, id json.RawMessage, result any) {
+	_ = (&jsonrpcMessage{Version: vsn, ID: id}).writeResponse(s, result)
+}
+
 func blockResultFixture(n int) map[string]any {
 	txs := make([]any, n)
 	for i := range txs {
@@ -495,33 +531,6 @@ func blockResultFixture(n int) map[string]any {
 	}
 }
 
-// the two paths must be byte-identical
-func TestResponsePathsIdentical(t *testing.T) {
-	for _, n := range []int{0, 1, 150} {
-		res := blockResultFixture(n)
-		id := json.RawMessage(`1`)
-
-		enc, err := json.Marshal(res)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var oldBuf bytes.Buffer
-		s1 := jsonstream.Get(&oldBuf)
-		(&jsonrpcMessage{Version: vsn, ID: id, Result: enc}).writeTo(s1)
-		_ = s1.Flush()
-
-		var newBuf bytes.Buffer
-		s2 := jsonstream.Get(&newBuf)
-		(&jsonrpcMessage{Version: vsn, ID: id}).response(res).writeTo(s2)
-		_ = s2.Flush()
-
-		if oldBuf.String() != newBuf.String() {
-			t.Fatalf("n=%d differ:\n old: %.200s\n new: %.200s", n, oldBuf.String(), newBuf.String())
-		}
-	}
-	t.Log("byte-identical across 0/1/150 transactions")
-}
-
 // An unencodable result must come back as an error carrying the request id,
 // never as a success with a null result and never as a dropped reply.
 func TestResponseUnmarshalableResultBecomesError(t *testing.T) {
@@ -530,8 +539,7 @@ func TestResponseUnmarshalableResultBecomesError(t *testing.T) {
 	defer jsonstream.Put(s)
 
 	// a channel has no JSON representation
-	msg := (&jsonrpcMessage{Version: vsn, ID: json.RawMessage(`7`)}).response(make(chan int))
-	msg.writeTo(s)
+	respond(s, json.RawMessage(`7`), make(chan int))
 	require.NoError(t, s.Flush())
 
 	var got jsonrpcMessage
@@ -547,23 +555,69 @@ func TestResponseNilResultEmitsNull(t *testing.T) {
 	s := jsonstream.Get(&out)
 	defer jsonstream.Put(s)
 
-	req := &jsonrpcMessage{Version: vsn, ID: json.RawMessage(`7`)}
-	req.response(nil).writeTo(s)
+	respond(s, json.RawMessage(`7`), nil)
 	require.NoError(t, s.Flush())
 	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":null}`, out.String())
+}
+
+func TestResponseEmptyStreamedEmitsNull(t *testing.T) {
+	var out bytes.Buffer
+	s := jsonstream.Get(&out)
+	defer jsonstream.Put(s)
+
+	respond(s, json.RawMessage(`7`), emptyStreamed{})
+	require.NoError(t, s.Flush())
+	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":null}`, out.String())
+}
+
+func TestResponseWritesJSONToStream(t *testing.T) {
+	large := hexutil.Bytes(bytes.Repeat([]byte{0xab}, 2*jsonstream.FlushThreshold))
+	results := []any{
+		hexutil.Bytes("small"), large, hexutil.Bytes(nil), (*hexutil.Bytes)(nil),
+		hexutil.Uint64(0x1234), hexutil.Uint(7), (*hexutil.Uint)(nil),
+		common.HexToHash("0xdead"), common.HexToAddress("0xbeef"),
+		(*hexutil.U256)(uint256.NewInt(255)),
+	}
+	for _, result := range results {
+		want, err := json.Marshal(result)
+		require.NoError(t, err)
+		for _, out := range []io.Writer{new(bytes.Buffer), nil} {
+			s := jsonstream.Get(out)
+			respond(s, json.RawMessage(`7`), result)
+			require.NoError(t, s.Flush())
+			got := s.Buffer()
+			if b, ok := out.(*bytes.Buffer); ok {
+				got = b.Bytes()
+			}
+			require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":`+string(want)+`}`, string(got))
+			jsonstream.Put(s)
+		}
+	}
 }
 
 // WS/IPC reads the bytes back out of Buffer with no writer at all, so a failure
 // signalled only through Flush would be invisible there.
 func TestResponseEncodeFailureAcrossTransports(t *testing.T) {
-	bad := func() *jsonrpcMessage {
-		return (&jsonrpcMessage{Version: vsn, ID: json.RawMessage(`7`)}).response(make(chan int))
+	t.Run("json", func(t *testing.T) { testResponseEncodeFailure(t, make(chan int)) })
+	t.Run("fast", func(t *testing.T) { testResponseEncodeFailure(t, failingFastJSON{}) })
+}
+
+type failingFastJSON struct{}
+
+func (failingFastJSON) MarshalFastJSONTo(*jsonstream.Stream) error {
+	return errors.New("encode failed")
+}
+
+func testResponseEncodeFailure(t *testing.T, result any) {
+	bad := func(s *jsonstream.Stream) {
+		respond(s, json.RawMessage(`7`), result)
 	}
 	assertErrorResponse := func(t *testing.T, raw []byte) {
 		t.Helper()
 		var got jsonrpcMessage
 		require.NoError(t, json.Unmarshal(raw, &got), "must be valid JSON: %s", raw)
 		require.NotNil(t, got.Error, "must be an error response, got %s", raw)
+		require.Nil(t, got.Result, "a response carries error or result, never both: %s", raw)
 		require.Equal(t, `7`, string(got.ID))
 	}
 
@@ -571,7 +625,7 @@ func TestResponseEncodeFailureAcrossTransports(t *testing.T) {
 		// answerBuffered: no writer, the caller reads Buffer() directly
 		s := jsonstream.Get(nil)
 		defer jsonstream.Put(s)
-		bad().writeTo(s)
+		bad(s)
 		require.NotEmpty(t, s.Buffer(), "a dropped reply leaves the client waiting forever")
 		assertErrorResponse(t, s.Buffer())
 	})
@@ -581,7 +635,7 @@ func TestResponseEncodeFailureAcrossTransports(t *testing.T) {
 		var buf bytes.Buffer
 		s := jsonstream.Get(&buf)
 		defer jsonstream.Put(s)
-		bad().writeTo(s)
+		bad(s)
 		require.NoError(t, s.Flush())
 		require.NotZero(t, buf.Len(), "an empty buffer drops this entry from the batch array")
 		assertErrorResponse(t, buf.Bytes())
@@ -591,7 +645,7 @@ func TestResponseEncodeFailureAcrossTransports(t *testing.T) {
 		var out bytes.Buffer
 		s := jsonstream.Get(&out)
 		defer jsonstream.Put(s)
-		bad().writeTo(s)
+		bad(s)
 		require.NoError(t, s.Flush())
 		assertErrorResponse(t, out.Bytes())
 	})
@@ -616,8 +670,8 @@ func TestLargeResultStreamsAndStaysPoolable(t *testing.T) {
 	_ = s1.Flush()
 
 	s2 := jsonstream.Get(&got)
-	(&jsonrpcMessage{Version: vsn, ID: id}).response(res).writeTo(s2)
-	require.LessOrEqual(t, cap(s2.Buffer()), 16*jsonstream.FlushThreshold,
+	respond(s2, id, res)
+	require.LessOrEqual(t, cap(s2.Buffer()), jsonstream.MaxPooledBufferSize(),
 		"the result grew the stream buffer past the pool limit")
 	_ = s2.Flush()
 
@@ -635,7 +689,7 @@ func TestHugeRequestIDStillProducesValidJSON(t *testing.T) {
 
 		var out bytes.Buffer
 		s := jsonstream.Get(&out)
-		(&jsonrpcMessage{Version: vsn, ID: id}).response(map[string]int{"n": 1}).writeTo(s)
+		respond(s, id, map[string]int{"n": 1})
 		_ = s.Flush()
 		jsonstream.Put(s)
 
@@ -647,7 +701,7 @@ func TestHugeRequestIDStillProducesValidJSON(t *testing.T) {
 		// The same id with a result that cannot encode must yield one error object.
 		out.Reset()
 		s = jsonstream.Get(&out)
-		(&jsonrpcMessage{Version: vsn, ID: id}).response(make(chan int)).writeTo(s)
+		respond(s, id, make(chan int))
 		_ = s.Flush()
 		jsonstream.Put(s)
 
@@ -656,5 +710,69 @@ func TestHugeRequestIDStillProducesValidJSON(t *testing.T) {
 		require.Contains(t, back, "error")
 		require.NotContains(t, back, "result")
 	}
+}
 
+type failingAppender struct{}
+
+func (failingAppender) AppendText([]byte) ([]byte, error) { return nil, errors.New("append failed") }
+
+type failingMidWrite struct{}
+
+func (failingMidWrite) MarshalFastJSONTo(w *jsonstream.Stream) error {
+	w.WriteObjectStart()
+	w.Field("balance")
+	w.WriteQuotedText(failingAppender{})
+	w.WriteObjectEnd()
+	return nil
+}
+
+// A write that fails after the result opened keeps the response valid JSON: the partial result
+// stays, the error follows it, and the caller learns about it for its metrics and log.
+func TestResponseLatchedErrorKeepsValidJSON(t *testing.T) {
+	s := jsonstream.Get(nil)
+	defer jsonstream.Put(s)
+
+	err := (&jsonrpcMessage{Version: vsn, ID: json.RawMessage(`7`)}).writeResponse(s, failingMidWrite{})
+
+	require.Error(t, err)
+	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":{"balance":""},"error":{"code":-32000,"message":"append failed"}}`, string(s.Buffer()))
+	require.True(t, json.Valid(s.Buffer()))
+}
+
+// An IPC connection coalesces notifications like a websocket one does.
+func TestCodecCoalescedMessagesLeaveInOneWrite(t *testing.T) {
+	t.Parallel()
+	server, client := net.Pipe()
+	defer client.Close()
+	var writes atomic.Int64
+	codec := NewCodec(&heldConn{Conn: writeCountingConn{server, &writes}}).(*jsonCodec)
+	defer codec.Close()
+	read := make(chan string, 1)
+	go func() {
+		b, _ := io.ReadAll(io.LimitReader(client, int64(len("0\n1\n2\n"))))
+		read <- string(b)
+	}()
+
+	err := codec.coalesce(func() {
+		for i := range 3 {
+			if err := codec.WriteJSON(context.Background(), rawResponse(strconv.Itoa(i))); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), writes.Load(), "3 coalesced messages, socket writes")
+	require.Equal(t, "0\n1\n2\n", <-read)
+}
+
+func TestDecodeStringFieldMatchesUnmarshal(t *testing.T) {
+	t.Parallel()
+	for _, in := range []string{`"eth_chainId`, `"eth_chainId"`, `"a\"b"`, `null`, `"é"`, `"`} {
+		var want, got string = "prev", "prev"
+		if json.Unmarshal([]byte(in), &want) != nil {
+			want = ""
+		}
+		decodeStringField([]byte(in), &got)
+		require.Equal(t, want, got, in)
+	}
 }

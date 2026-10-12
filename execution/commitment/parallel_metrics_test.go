@@ -23,6 +23,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/length"
 )
 
 // buildNibbleSpread returns a corpus whose accounts land under distinct root
@@ -200,7 +202,7 @@ func TestBranchWritesArePublishedOnce(t *testing.T) {
 		"commitment_branch_write_bytes_total counts each write once")
 }
 
-func TestDeepFoldedStorageReachesRoundMetrics(t *testing.T) {
+func TestForkedStorageReachesRoundMetrics(t *testing.T) {
 	k1, u1, _, _ := buildSubsetTouchedWhale(20260707, nibs(3, 7), nil, 700, 0)
 	fk, fu := buildMixedCorpus(555, 200)
 	keys := append(append([][]byte{}, fk...), k1...)
@@ -220,8 +222,42 @@ func TestDeepFoldedStorageReachesRoundMetrics(t *testing.T) {
 	_, err := tr.Process(context.Background(), ut, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
-	require.Positive(t, tr.DeepLocalFolds(), "the whale must take the concurrent deep fold")
+	require.Positive(t, tr.Forks(), "the whale must take the fork walk")
 	v := tr.metrics.AsValues()
 	assert.GreaterOrEqual(t, v.AddressKeys+v.StorageKeys, uint64(len(keys)),
-		"every touched key is traversed at least once, deep-folded storage included")
+		"every touched key is traversed at least once, forked storage included")
+}
+
+func TestMountFoldsAreCounted(t *testing.T) {
+	keys, upds := buildNibbleSpread(t, 16, 4)
+
+	sms := NewMockState(t)
+	require.NoError(t, sms.applyPlainUpdates(keys, upds))
+	seq := NewHexPatriciaHashed(length.Addr, sms, DefaultTrieConfig())
+	defer seq.Release()
+	su := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, keys, upds)
+	defer su.Close()
+	_, err := seq.Process(context.Background(), su, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	want := seq.metrics.AsValues()
+
+	for _, grain := range []uint32{0, 2} {
+		ms := NewMockState(t)
+		require.NoError(t, ms.applyPlainUpdates(keys, upds))
+		tr := newParTrie(t, ms, 4)
+		tr.SetForkGrain(grain)
+		ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+		for _, k := range keys {
+			ut.TouchPlainKey(string(k), nil, nil)
+		}
+		_, err := tr.Process(context.Background(), ut, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+
+		v := tr.metrics.AsValues()
+		require.Positive(t, v.Folds, "the round folded at all")
+		assert.Equal(t, want.Folds, v.Folds, "grain %d, %d forks: the parallel round counts every fold the sequential engine counts", grain, tr.Forks())
+		assert.Equal(t, want.Unfolds, v.Unfolds, "grain %d, %d forks: a row a fork opens counts as the unfold the sequential engine performs", grain, tr.Forks())
+		ut.Close()
+		tr.Release()
+	}
 }

@@ -270,7 +270,7 @@ func TestStatePruneBacklog(t *testing.T) {
 func TestFloorStatePruneMarkers(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	ctx := context.Background()
-	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())
+	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, datadir.New(t.TempDir()), snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())
 	t.Cleanup(stateSn.Close)
 	a := NewAntiquary(ctx, nil, nil, nil, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, stateSn, nil, nil, nil, log.New(), true, true, true, false, nil)
 	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
@@ -289,7 +289,7 @@ func TestStatePruneKillSwitch(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	seedStateSlots(t, db, kv.BlockRoot, slotRange(0, 100))
 	ctx := context.Background()
-	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())
+	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, datadir.New(t.TempDir()), snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())
 	t.Cleanup(stateSn.Close)
 	a := NewAntiquary(ctx, nil, nil, nil, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, stateSn, nil, nil, nil, log.New(), true, true, true, false, nil)
 	a.statePruneBoundaryFn = func(string) uint64 { return 50 }
@@ -320,7 +320,7 @@ func TestPruneFrozenStateTablesCapsBoundaryToFlushed(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	seedStateSlots(t, db, kv.BlockRoot, slotRange(0, 100))
 	ctx := context.Background()
-	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())
+	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, datadir.New(t.TempDir()), snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())
 	t.Cleanup(stateSn.Close)
 	a := NewAntiquary(ctx, nil, nil, nil, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, stateSn, nil, nil, nil, log.New(), true, true, true, false, nil)
 	a.statePruneBoundaryFn = func(string) uint64 { return 80 }
@@ -355,7 +355,7 @@ func TestStatePruneWiredIntoAntiquaryCycle(t *testing.T) {
 		require.NoError(t, sn.OnHeadState(postState))
 		ctx := context.Background()
 		vt := state_accessors.NewStaticValidatorTable()
-		stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())
+		stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, datadir.New(t.TempDir()), snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())
 		t.Cleanup(stateSn.Close)
 		a := NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, stateSn, nil, reader, sn, log.New(), true, true, true, false, nil)
 		a.maxSlotsPerCommit = 8

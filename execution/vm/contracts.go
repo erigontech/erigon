@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto/secp256r1"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -260,20 +261,19 @@ func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
 // - the returned bytes,
 // - the _remaining_ gas,
 // - any error that occurred
-func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uint64, tracer *tracing.Hooks,
-) (ret []byte, remainingGas uint64, err error) {
+func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
 	gasCost := p.RequiredGas(input)
-	if suppliedGas < gasCost {
-		return nil, 0, ErrOutOfGas
+	if suppliedGas.Execution < gasCost {
+		return nil, suppliedGas, ErrOutOfGas
 	}
 
-	if tracer != nil && tracer.OnGasChange != nil {
-		tracer.OnGasChange(suppliedGas, suppliedGas-gasCost, tracing.GasChangeCallPrecompiledContract)
+	remaining := suppliedGas
+	remaining.Execution -= gasCost
+	if tracer.HasGasChangeHook() {
+		tracer.EmitGasChange(suppliedGas, remaining, tracing.GasChangeCallPrecompiledContract)
 	}
-
-	suppliedGas -= gasCost
 	output, err := p.Run(input)
-	return output, suppliedGas, err
+	return output, remaining, err
 }
 
 // ECRECOVER implemented as a native contract.
@@ -328,6 +328,7 @@ type sha256hash struct{}
 func (c *sha256hash) RequiredGas(input []byte) uint64 {
 	return ToWordSize(uint64(len(input)))*params.Sha256PerWordGas + params.Sha256BaseGas
 }
+
 func (c *sha256hash) Run(input []byte) ([]byte, error) {
 	h := sha256.Sum256(input)
 	return h[:], nil
@@ -347,6 +348,7 @@ type ripemd160hash struct{}
 func (c *ripemd160hash) RequiredGas(input []byte) uint64 {
 	return ToWordSize(uint64(len(input)))*params.Ripemd160PerWordGas + params.Ripemd160BaseGas
 }
+
 func (c *ripemd160hash) Run(input []byte) ([]byte, error) {
 	ripemd := ripemd160.New()
 	ripemd.Write(input)
@@ -369,6 +371,7 @@ type dataCopy struct{}
 func (c *dataCopy) RequiredGas(input []byte) uint64 {
 	return ToWordSize(uint64(len(input)))*params.IdentityPerWordGas + params.IdentityBaseGas
 }
+
 func (c *dataCopy) Run(in []byte) ([]byte, error) {
 	return bytes.Clone(in), nil
 }
@@ -439,7 +442,6 @@ func modExpMultComplexityEip198(x uint32) uint64 {
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bigModExp) RequiredGas(input []byte) uint64 {
-
 	var minGas uint64
 	var adjExpFactor uint64
 	var finalDivisor uint64

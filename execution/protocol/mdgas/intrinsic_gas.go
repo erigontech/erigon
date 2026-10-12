@@ -285,6 +285,15 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	return result, false
 }
 
+// MinTxGas is the least intrinsic gas of any non-AA transaction: the cost of a
+// zero-value self-transfer.
+func MinTxGas(isEIP2780 bool) uint64 {
+	if isEIP2780 {
+		return params.TxBaseEIP2780
+	}
+	return params.TxGas
+}
+
 // toWordSize returns the ceiled word size required for memory expansion.
 func toWordSize(size uint64) uint64 {
 	if size > math.MaxUint64-31 {
