@@ -26,6 +26,7 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/execution/cache/coherence"
@@ -62,17 +63,18 @@ type versionedAddressID struct {
 }
 
 type addrCodeHashEntry struct {
-	// addr is the full key; only its first 8 bytes pick the slot, so Get must
-	// compare it to reject a colliding address, as codeEntry.keyHash does for
-	// the content layers.
+	// addr is the full key; only 8 of its bytes pick the slot, so Get compares
+	// it to reject a colliding address.
 	addr  common.Address
 	hash  [32]byte
 	txNum uint64
 	epoch uint32
 }
 
-// addrSlot is the slot key for an addr-keyed lock-free layer.
-func addrSlot(a common.Address) uint64 { return binary.BigEndian.Uint64(a[:8]) }
+// addrSlot keys the lock-free layer by an address. It takes the low bytes
+// because precompile and test addresses share eight zero leading bytes, which
+// would collapse every one of them onto a single slot.
+func addrSlot(a common.Address) uint64 { return binary.BigEndian.Uint64(a[length.Addr-8:]) }
 
 // Per-entry residency of the two addr-keyed LRUs: a 20-byte key plus the
 // value struct (which carries codeHash/txNum/epoch, not just an 8-byte ID).
@@ -253,13 +255,10 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 	if err != nil {
 		panic(err)
 	}
-	// Its share of the shared addr budget, so the entry count matches what the
-	// combined per-slot cost allowed before.
-	addrCodeHashBytes := max(addrCapacityBytes*datasize.ByteSize(addrToCodeHashEntryBytes)/datasize.ByteSize(addrEntryBytes), 1)
 	cc := &CodeCache{
 		addrToHash: addrLRU,
-		addrToCodeHash: NewByteLRU(addrCodeHashBytes,
-			func(_ uint64, e addrCodeHashEntry) int64 { return int64(addrToCodeHashEntryBytes) }),
+		addrToCodeHash: NewByteLRU(max(addrCapacityBytes/2, 1),
+			func(uint64, addrCodeHashEntry) int64 { return int64(addrToCodeHashEntryBytes) }),
 		codeSizeCapEntries: DefaultCodeSizeCacheEntries,
 		addrCapacityB:      addrCapacityBytes,
 		codeCapacityB:      codeCapacityBytes,
