@@ -193,7 +193,7 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 	// Sample the epoch under the stripe, so the stamp cannot belong to a
 	// different generation from the one where the entry lands.
 	ep := c.coh.Epoch()
-	existing, hasExisting := c.data.Get(h)
+	existing, hasExisting := c.data.peek(h)
 	sameKey := hasExisting && bytes.Equal(existing.key, key)
 
 	if sameKey && !overwrite && !c.coh.IsStale(existing.txNum, existing.epoch) {
@@ -214,8 +214,10 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 		e.key = bytes.Clone(key)
 	}
 	// Add replaces in place whatever holds the hash: this key's older value or
-	// a 64-bit hash collision.
-	c.data.Add(h, e)
+	// a 64-bit hash collision. The put stripe already serializes writers of h.
+	if w := weighEntry(h, e); w <= c.data.maxBytes {
+		c.data.addLocked(h, e, w)
+	}
 	c.inserts.Add(1)
 }
 

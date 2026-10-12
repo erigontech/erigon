@@ -122,6 +122,13 @@ func newOtter[V any](maxWeight int64, weigh func(uint64, V) int64, onDeletion fu
 
 func (b *ByteLRU[V]) Get(key uint64) (V, bool) { return b.c.GetIfPresent(key) }
 
+// peek is Get for a writer: it leaves the access out of the frequency sketch, so
+// a write does not count as a read.
+func (b *ByteLRU[V]) peek(key uint64) (V, bool) {
+	e, ok := b.c.GetEntryQuietly(key)
+	return e.Value, ok
+}
+
 // Add reports that the value could be offered, not that it is resident: a
 // W-TinyLFU rejection also returns true. False means it was too big for the
 // whole budget, and no deletion fires for it.
@@ -134,13 +141,17 @@ func (b *ByteLRU[V]) Add(key uint64, value V) bool {
 	mu := &b.addStripes[key&(putStripeCount-1)]
 	mu.Lock()
 	defer mu.Unlock()
+	return b.addLocked(key, value, w)
+}
 
+// addLocked is Add for a caller that already serializes writers of key.
+func (b *ByteLRU[V]) addLocked(key uint64, value V, w int64) bool {
 	// Grow on the net change, and before the write: afterwards maintenance may
 	// have refunded the newcomer already and hidden the pressure. A cache that
 	// cannot grow skips the extra lookup.
 	if !b.unbudgeted && b.resident.Load()+w > b.limit.Load() && b.limit.Load() < b.ceiling.Load() {
 		delta := w
-		if prev, present := b.c.GetIfPresent(key); present {
+		if prev, present := b.peek(key); present {
 			delta -= b.weigh(key, prev)
 		}
 		if lim := b.limit.Load(); delta > 0 && b.resident.Load()+delta > lim && lim < b.ceiling.Load() {
