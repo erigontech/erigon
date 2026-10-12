@@ -48,7 +48,6 @@ import (
 	"github.com/erigontech/erigon/db/snaptype2"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -549,7 +548,7 @@ func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.Tempo
 		}
 		putter = &genesisCommitmentPutDel{putter: putter, contexts: contexts}
 	}
-	r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(putter, nil, txNum)
+	r, w := state.NewNoopReader(), state.NewWriter(putter, nil, txNum)
 
 	statedb := state.NewWithVersionMap(r, &state.VersionMap{})
 	statedb.SetTrace(false)
