@@ -880,3 +880,25 @@ func TestWebsocketClientNotifyKeepsConnection(t *testing.T) {
 	default:
 	}
 }
+
+func TestClientWebsocketMessageSizeLimit(t *testing.T) {
+	logger := log.New()
+	srv := NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, logger, 100)
+	defer srv.Stop()
+	httpsrv := httptest.NewServer(srv.WebsocketHandler(nil, nil, false, logger))
+	defer httpsrv.Close()
+	wsURL := "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
+	require.NoError(t, srv.RegisterName("test", largeRespService{1024}))
+
+	for _, tc := range []struct {
+		limit   int64
+		wantErr bool
+	}{{limit: 512, wantErr: true}, {limit: 4096}} {
+		c, err := DialOptions(context.Background(), wsURL, logger, WithWebsocketMessageSizeLimit(tc.limit))
+		require.NoError(t, err)
+		var r string
+		err = c.Call(&r, "test_largeResp")
+		c.Close()
+		require.Equal(t, tc.wantErr, err != nil, "limit %d: %v", tc.limit, err)
+	}
+}

@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 
 	"github.com/erigontech/erigon/common/crypto"
@@ -73,6 +74,7 @@ const seenAggregateCacheSize = 10_000
 type aggregateAndProofServiceImpl struct {
 	syncedDataManager      *synced_data.SyncedDataManager
 	forkchoiceStore        forkchoice.ForkChoiceStorage
+	ethClock               eth_clock.EthereumClock
 	beaconCfg              *clparams.BeaconChainConfig
 	opPool                 pool.OperationsPool
 	test                   bool
@@ -91,6 +93,7 @@ func NewAggregateAndProofService(
 	ctx context.Context,
 	syncedDataManager *synced_data.SyncedDataManager,
 	forkchoiceStore forkchoice.ForkChoiceStorage,
+	ethClock eth_clock.EthereumClock,
 	beaconCfg *clparams.BeaconChainConfig,
 	opPool pool.OperationsPool,
 	test bool,
@@ -108,6 +111,7 @@ func NewAggregateAndProofService(
 	a := &aggregateAndProofServiceImpl{
 		syncedDataManager:      syncedDataManager,
 		forkchoiceStore:        forkchoiceStore,
+		ethClock:               ethClock,
 		beaconCfg:              beaconCfg,
 		opPool:                 opPool,
 		test:                   test,
@@ -239,10 +243,9 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		// Note: uses epoch (from slot), not target.Epoch, so malformed messages
 		// with wrong target.Epoch still reach the reject check below.
 		// [IGNORE] the epoch of aggregate.data.slot is either the current or previous epoch
-		// When the head state lags behind (solo validator / genesis start), use the
-		// highest seen slot to widen the accepted epoch window.
-		highestSeen := a.forkchoiceStore.HighestSeen()
-		prevEpoch, currEpoch := validationEpochRange(headState, highestSeen, highestSeen, a.beaconCfg.SlotsPerEpoch)
+		// Use the wall-clock slot and highest seen slot to widen the accepted epoch
+		// window when the head state lags.
+		prevEpoch, currEpoch := validationEpochRange(headState, a.forkchoiceStore.HighestSeen(), a.ethClock.GetCurrentSlot(), a.beaconCfg.SlotsPerEpoch)
 		if epoch < prevEpoch || epoch > currEpoch {
 			return fmt.Errorf("%w: epoch outside validation range: %d (prev=%d, curr=%d)", ErrIgnore, epoch, prevEpoch, currEpoch)
 		}
