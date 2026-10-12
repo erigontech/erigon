@@ -255,7 +255,11 @@ func newHTTPServerConn(r *http.Request, w http.ResponseWriter) ServerCodec {
 func readAllBody(r io.Reader, hint int) ([]byte, error) {
 	// A byte past the hint, so a body of exactly hint bytes sees EOF without the
 	// buffer doubling right at the end.
-	buf := make([]byte, 0, max(hint+1, 512))
+	size := 512
+	if hint > 0 {
+		size = hint + 1
+	}
+	buf := make([]byte, 0, size)
 	for {
 		if len(buf) == cap(buf) {
 			buf = append(buf, 0)[:len(buf)]
