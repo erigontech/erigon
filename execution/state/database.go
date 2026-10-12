@@ -51,8 +51,6 @@ func HasAccount(r StateReader, address accounts.Address) (bool, error) {
 
 type StateReader interface {
 	ReadAccountData(address accounts.Address) (*accounts.Account, error)
-	// ReadAccountDataPlain is for one-shot reads: interning a fresh address per request
-	// (unique.Make) makes each GC cycle stall a loaded server.
 	ReadAccountDataPlain(address common.Address) (*accounts.Account, error)
 	ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error)
 	ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error)
