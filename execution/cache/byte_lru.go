@@ -48,10 +48,9 @@ type ByteLRU[V any] struct {
 	// cleanup, and a callback capturing the owner would keep the owner too.
 	onEvict atomic.Pointer[func(uint64, V)]
 
-	// resident is heap-allocated apart from the ByteLRU so the deletion handler
-	// can refund it without capturing the owner, which would keep the owner
-	// alive through otter's runtime cleanup.
-	resident *atomic.Int64
+	// resident is an upper bound for an unbudgeted layer, which has no deletion
+	// handler to refund a replaced value; a budgeted one refunds and stays exact.
+	resident atomic.Int64
 	limit    atomic.Int64 // otter's maximum; for a budgeted cache, the bytes reserved from the envelope
 	ceiling  atomic.Int64 // limit may still grow to this; drops to limit when the envelope refuses
 
@@ -77,7 +76,7 @@ const (
 )
 
 func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, onEvict func(uint64, V)) *ByteLRU[V] {
-	b := &ByteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1), resident: new(atomic.Int64)}
+	b := &ByteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1)}
 	if onEvict != nil {
 		b.onEvict.Store(&onEvict)
 	}
@@ -97,15 +96,10 @@ func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, 
 // NewByteLRU is a byte-bounded cache outside the shared cachebudget envelope. It may hold maxBytes
 // from the start and needs no Close, for owners that have no teardown.
 func NewByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64) *ByteLRU[V] {
-	b := &ByteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1), unbudgeted: true, resident: new(atomic.Int64)}
+	b := &ByteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1), unbudgeted: true}
 	b.limit.Store(b.maxBytes)
 	b.ceiling.Store(b.maxBytes)
-	// The handler captures resident alone, never b: a replacement refunds the
-	// value it displaced, which is what keeps the counter exact.
-	res := b.resident
-	b.c = newOtter(b.maxBytes, weigh, func(e otter.DeletionEvent[uint64, V]) {
-		res.Add(-weigh(e.Key, e.Value))
-	})
+	b.c = newOtter(b.maxBytes, weigh, nil) // a handler capturing b would keep it alive through otter's runtime cleanup
 	return b
 }
 

@@ -100,9 +100,6 @@ func TestByteLRUAddReplacesLiveKey(t *testing.T) {
 	v, ok := b.Get(1)
 	require.True(t, ok)
 	require.Equal(t, []byte("second"), v)
-	// The displaced value is refunded, so the counter holds one entry's bytes.
-	b.c.CleanUp()
-	require.Equal(t, int64(len("second")), b.resident.Load())
 }
 
 func TestByteLRUBudgetedAddReplacesLiveKey(t *testing.T) {
