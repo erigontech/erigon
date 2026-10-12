@@ -17,6 +17,7 @@
 package cache
 
 import (
+	"encoding/binary"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -25,6 +26,7 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/execution/cache/coherence"
@@ -61,17 +63,25 @@ type versionedAddressID struct {
 }
 
 type addrCodeHashEntry struct {
+	// addr is the full key; only 8 of its bytes pick the slot, so Get compares
+	// it to reject a colliding address.
+	addr  common.Address
 	hash  [32]byte
 	txNum uint64
 	epoch uint32
 }
+
+// addrSlot keys the lock-free layer by an address. It takes the low bytes
+// because precompile and test addresses share eight zero leading bytes, which
+// would collapse every one of them onto a single slot.
+func addrSlot(a common.Address) uint64 { return binary.BigEndian.Uint64(a[length.Addr-8:]) }
 
 // Per-entry residency of the two addr-keyed LRUs: a 20-byte key plus the
 // value struct (which carries codeHash/txNum/epoch, not just an 8-byte ID).
 // Used both to size the LRUs against the byte budget and to report residency.
 const (
 	addrToHashEntryBytes     = 20 + int(unsafe.Sizeof(versionedAddressID{}))
-	addrToCodeHashEntryBytes = 20 + int(unsafe.Sizeof(addrCodeHashEntry{}))
+	addrToCodeHashEntryBytes = int(unsafe.Sizeof(addrCodeHashEntry{})) + ByteLRUEntryOverheadBytes
 	addrEntryBytes           = addrToHashEntryBytes + addrToCodeHashEntryBytes
 )
 
@@ -130,7 +140,7 @@ type CodeCache struct {
 	// for bytes-lookup chaining). Used by SharedDomains.codeHashForAddr to
 	// skip a cold account-domain read when the EVM-known codeHash is
 	// already in cache. An addr → codeHash LRU.
-	addrToCodeHash *lru.Cache[common.Address, addrCodeHashEntry]
+	addrToCodeHash *ByteLRU[addrCodeHashEntry]
 
 	// codeHashToCode: 32-byte Ethereum codeHash (keccak256) → code bytes. Populated
 	// alongside L2 when the caller provides codeHash on Put. Independent
@@ -245,13 +255,10 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 	if err != nil {
 		panic(err)
 	}
-	addrCodeHashLRU, err := lru.New[common.Address, addrCodeHashEntry](addrEntries)
-	if err != nil {
-		panic(err)
-	}
 	cc := &CodeCache{
-		addrToHash:         addrLRU,
-		addrToCodeHash:     addrCodeHashLRU,
+		addrToHash: addrLRU,
+		addrToCodeHash: NewByteLRU(max(addrCapacityBytes/2, 1),
+			func(uint64, addrCodeHashEntry) int64 { return int64(addrToCodeHashEntryBytes) }),
 		codeSizeCapEntries: DefaultCodeSizeCacheEntries,
 		addrCapacityB:      addrCapacityBytes,
 		codeCapacityB:      codeCapacityBytes,
@@ -390,12 +397,12 @@ func (c *CodeCache) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 func (c *CodeCache) GetAddrCodeHashWithTxNum(addr []byte) ([32]byte, uint64, bool) {
 	k := common.BytesToAddress(addr)
 	coh := c.coh.Snapshot()
-	e, ok := c.addrToCodeHash.Get(k)
-	if !ok {
+	e, ok := c.addrToCodeHash.Get(addrSlot(k))
+	if !ok || e.addr != k {
 		return [32]byte{}, 0, false
 	}
 	if coh.IsStale(e.txNum, e.epoch) {
-		c.addrToCodeHash.Remove(k)
+		c.addrToCodeHash.Remove(addrSlot(k))
 		return [32]byte{}, 0, false
 	}
 	return e.hash, e.txNum, true
@@ -411,15 +418,21 @@ func (c *CodeCache) PutAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	stripe.Lock()
 	defer stripe.Unlock()
 
-	if e, ok := c.addrToCodeHash.Get(a); ok && !c.coh.IsStale(e.txNum, e.epoch) {
-		return
+	slot := addrSlot(a)
+	if e, ok := c.addrToCodeHash.Get(slot); ok {
+		if e.addr == a && !c.coh.IsStale(e.txNum, e.epoch) {
+			return
+		}
+		// Add is SetIfAbsent, so a stale mapping (or a colliding address) has to
+		// be removed before the replacement can land.
+		c.addrToCodeHash.Remove(slot)
 	}
-	c.addrToCodeHash.Add(a, addrCodeHashEntry{hash: h, txNum: txNum, epoch: c.coh.Epoch()})
+	c.addrToCodeHash.Add(slot, addrCodeHashEntry{addr: a, hash: h, txNum: txNum, epoch: c.coh.Epoch()})
 }
 
 // DeleteAddrCodeHash removes the mapping when its account record is invalidated.
 func (c *CodeCache) DeleteAddrCodeHash(addr []byte) {
-	c.addrToCodeHash.Remove(common.BytesToAddress(addr))
+	c.addrToCodeHash.Remove(addrSlot(common.BytesToAddress(addr)))
 }
 
 // GetByCodeHash retrieves contract code by its Ethereum codeHash (keccak256).
