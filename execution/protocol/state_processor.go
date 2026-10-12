@@ -46,7 +46,8 @@ func (gu *GasUsed) BlockGasUsed() uint64 { return max(gu.BlockExecution, gu.Bloc
 func SetGasUsed(h *types.Header, gu *GasUsed) {
 	h.GasUsed = gu.BlockGasUsed()
 	if h.BlobGasUsed != nil {
-		h.BlobGasUsed = &gu.Blob
+		blobGasUsed := gu.Blob
+		h.BlobGasUsed = &blobGasUsed
 	}
 }
 

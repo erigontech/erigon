@@ -507,6 +507,26 @@ func isBlobBacklog(from, to uint64) bool {
 	return to >= from && to-from >= 2*snaptype.CaplinMergeLimit
 }
 
+type blobRetirementSnapshots interface {
+	FrozenBlobs() uint64
+	VisibleSegmentsMaxTo(snaptype.Enum) uint64
+}
+
+// nextBlobSegment returns the dump bounds of the next blob segment to retire and the end of
+// the whole pending backlog, which decides the compression parallelism. Retiring one segment
+// per attempt publishes each segment as soon as it is written, instead of after the backlog.
+func nextBlobSegment(sn blobRetirementSnapshots, cfg *clparams.BeaconChainConfig) (from, to, backlogTo uint64, ok bool) {
+	// Both frontiers are exclusive segment ends: BlocksAvailable is the last frozen slot and
+	// would hold every blob segment back by one block segment.
+	frozenBlobs, frozenBlocks := sn.FrozenBlobs(), sn.VisibleSegmentsMaxTo(snaptype.BeaconBlocks.Enum())
+	minimumBlobsProgress := ((cfg.DenebForkEpoch * cfg.SlotsPerEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
+	from = max(frozenBlobs, minimumBlobsProgress)
+	if frozenBlocks < from+snaptype.CaplinMergeLimit {
+		return 0, 0, 0, false
+	}
+	return from, from + snaptype.CaplinMergeLimit, frozenBlocks, true
+}
+
 func (a *Antiquary) antiquateBlobs() error {
 	if !a.snapgen {
 		return nil
@@ -523,20 +543,12 @@ func (a *Antiquary) antiquateBlobs() error {
 	}
 	defer roTx.Rollback()
 	// perform blob antiquation if it is time to.
-	currentBlobsProgress := a.sn.FrozenBlobs()
-	// We should NEVER get ahead of the block snapshots.
-	if currentBlobsProgress >= a.sn.BlocksAvailable() {
-		return nil
-	}
-	minimunBlobsProgress := ((a.cfg.DenebForkEpoch * a.cfg.SlotsPerEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
-	currentBlobsProgress = max(currentBlobsProgress, minimunBlobsProgress)
-	// read the finalized head
-	to := a.sn.BlocksAvailable()
-	if to <= currentBlobsProgress || to-currentBlobsProgress < snaptype.CaplinMergeLimit {
+	currentBlobsProgress, to, backlogTo, ok := nextBlobSegment(a.sn, a.cfg)
+	if !ok {
 		return nil
 	}
 	roTx.Rollback()
-	a.logger.Info("[Antiquary] Antiquating blobs", "from", currentBlobsProgress, "to", to)
+	a.logger.Info("[Antiquary] Antiquating blobs", "from", currentBlobsProgress, "to", to, "backlogTo", backlogTo)
 	blobCountFn := func(slot uint64) (uint64, error) {
 		block, err := a.snReader.ReadBeaconBlockBodyBySlot(a.ctx, nil, slot)
 		if err != nil {
@@ -556,7 +568,7 @@ func (a *Antiquary) antiquateBlobs() error {
 	// The build slot is held for the compression only: opening the folder, seeding and pruning
 	// below draw nothing from the build budget, and EL retirement blocks on the same slot.
 	if err := func() error {
-		compressWorkers, releaseBuildSlot := a.blobCompressWorkers(currentBlobsProgress, to)
+		compressWorkers, releaseBuildSlot := a.blobCompressWorkers(currentBlobsProgress, backlogTo)
 		defer releaseBuildSlot()
 		return freezeblocks.DumpBlobsSidecar(a.ctx, a.blobStorage, a.mainDB, currentBlobsProgress, to, a.sn.Salt, a.dirs, compressWorkers, blobCountFn, log.LvlDebug, a.logger)
 	}(); err != nil {

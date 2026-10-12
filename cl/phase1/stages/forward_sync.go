@@ -342,6 +342,11 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 		}
 	}
 
+	if shouldInsert && ctx.Err() == nil {
+		if err := cfg.blockCollector.Flush(ctx); err != nil {
+			logger.Warn("[Caplin] Forward sync: failed to flush the block collector", "err", err)
+		}
+	}
 	return nil
 }
 
@@ -466,15 +471,21 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 }
 
 func validateAnchorPayloadWithExecutionClient(ctx context.Context, cfg *Cfg, anchorRoot common.Hash, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) error {
-	if !canValidateGloasPayloads(cfg) {
-		return nil
-	}
-	status, err := validateAnchorPayloadWithEL(ctx, cfg, bid, env)
-	if err != nil {
-		log.Warn("[Caplin] Anchor envelope EL validation failed", "anchorRoot", anchorRoot, "status", status, "err", err)
+	status := execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated)
+	if canValidateGloasPayloads(cfg) {
+		var err error
+		status, err = validateAnchorPayloadWithEL(ctx, cfg, bid, env)
+		if err != nil {
+			log.Warn("[Caplin] Anchor envelope EL validation failed", "anchorRoot", anchorRoot, "status", status, "err", err)
+		}
 	}
 	var retained bool
-	status, retained = cfg.forkChoice.MarkPayloadStatusIfRetained(anchorRoot, env.Message.Payload.BlockHash, status)
+	status, retained = cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(
+		anchorRoot,
+		env.Message.Payload.BlockHash,
+		status,
+		env.Message.Payload.GasLimit,
+	)
 	if !retained {
 		return nil
 	}

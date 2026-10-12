@@ -56,6 +56,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	mock_services "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -3518,7 +3519,8 @@ func TestPostValidatorProposerPreferencesGloasForkBoundary(t *testing.T) {
 			preferences := make([]*cltypes.SignedProposerPreferences, 0, 3)
 			for _, slot := range []uint64{95, 96, 100} {
 				preference := &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{ProposalSlot: slot, DependentRoot: root}}
-				domain, err := depState.GetDomain(cfg.DomainProposerPreferences, slot/cfg.SlotsPerEpoch)
+				forkVersion := cfg.GetForkVersionByVersion(cfg.GetCurrentStateVersion(slot / cfg.SlotsPerEpoch))
+				domain, err := fork.ComputeDomain(cfg.DomainProposerPreferences[:], utils.Uint32ToBytes4(forkVersion), depState.GenesisValidatorsRoot())
 				require.NoError(t, err)
 				signingRoot, err := fork.ComputeSigningRoot(preference.Message, domain)
 				require.NoError(t, err)

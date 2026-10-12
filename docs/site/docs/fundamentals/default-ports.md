@@ -56,7 +56,8 @@ Here is a comprehensive list of port-related options:
 
 * `--caplin.discovery.port [value]`: Port for Caplin DISCV5 protocol (default: `4000`)
 * `--caplin.discovery.tcpport [value]`: TCP port for Caplin libp2p (default: `4001`)
-* `--caplin.discovery.quicport [value]`: QUIC UDP port for Caplin libp2p (default: `4001`)
+* `--caplin.discovery.quicport [value]`: QUIC UDP port for Caplin libp2p (default: `4002`)
+* `--caplin.quic.disable`: Disables the QUIC transport for Caplin libp2p, falling back to TCP only (default: `false`)
 * `--sentinel.port [value]`: Port the Caplin sentinel gRPC service listens on (default: `7777`)
 
 ### BeaconAPI
