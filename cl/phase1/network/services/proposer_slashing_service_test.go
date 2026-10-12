@@ -27,9 +27,13 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 )
@@ -225,8 +229,8 @@ func (t *proposerSlashingTestSuite) TestProcessMessage() {
 				// )
 				t.ethClock.EXPECT().GetCurrentEpoch().Return(uint64(1)).Times(1)
 
-				t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "ComputeSigningRoot", mockMsg.Header1, gomock.Any()).Return([32]byte{}, nil).Times(1)
-				t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "ComputeSigningRoot", mockMsg.Header2, gomock.Any()).Return([32]byte{}, nil).Times(1)
+				t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "ComputeSigningRoot", mockMsg.Header1.Header, gomock.Any()).Return([32]byte{}, nil).Times(1)
+				t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "ComputeSigningRoot", mockMsg.Header2.Header, gomock.Any()).Return([32]byte{}, nil).Times(1)
 				t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "BlsVerify", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).Times(2)
 			},
 			msg:     mockMsg,
@@ -253,4 +257,43 @@ func (t *proposerSlashingTestSuite) TestProcessMessage() {
 
 func TestProposerSlashing(t *testing.T) {
 	suite.Run(t, new(proposerSlashingTestSuite))
+}
+
+func TestProposerSlashingServiceAcceptsSpecSignedHeaders(t *testing.T) {
+	saveSignatureGlobals(t)
+	computeSigningRoot = fork.ComputeSigningRoot
+	blsVerify = bls.Verify
+
+	_, st, _ := tests.GetBellatrixRandom()
+	cfg := st.BeaconConfig()
+	sk, err := bls.GenerateKey()
+	require.NoError(t, err)
+	var pubKey common.Bytes48
+	copy(pubKey[:], bls.CompressPublicKey(sk.PublicKey()))
+	proposerIndex := uint64(st.ValidatorLength())
+	require.NoError(t, st.AddValidator(solid.NewValidatorFromParameters(pubKey, common.Hash{}, cfg.MaxEffectiveBalance, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch), cfg.MaxEffectiveBalance))
+
+	signedHeader := func(root common.Hash) *cltypes.SignedBeaconBlockHeader {
+		header := &cltypes.BeaconBlockHeader{Slot: st.Slot(), ProposerIndex: proposerIndex, Root: root}
+		domain, err := st.GetDomain(cfg.DomainBeaconProposer, state.Epoch(st))
+		require.NoError(t, err)
+		signingRoot, err := fork.ComputeSigningRoot(header, domain)
+		require.NoError(t, err)
+		signed := &cltypes.SignedBeaconBlockHeader{Header: header}
+		copy(signed.Signature[:], sk.Sign(signingRoot[:]).Bytes())
+		return signed
+	}
+	msg := &cltypes.ProposerSlashing{Header1: signedHeader(common.Hash{1}), Header2: signedHeader(common.Hash{2})}
+
+	syncedData := synced_data.NewSyncedDataManager(cfg, true)
+	require.NoError(t, syncedData.OnHeadState(st))
+	ethClock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	ethClock.EXPECT().GetCurrentEpoch().Return(state.Epoch(st)).AnyTimes()
+	operationsPool := pool.OperationsPool{
+		ProposerSlashingsPool: pool.NewOperationPool[common.Bytes96, *cltypes.ProposerSlashing](10, "proposerSlashingsPool"),
+	}
+	service := NewProposerSlashingService(operationsPool, syncedData, cfg, ethClock, beaconevents.NewEventEmitter())
+
+	require.NoError(t, service.ProcessMessage(context.Background(), nil, msg))
+	require.True(t, operationsPool.ProposerSlashingsPool.Has(pool.ComputeKeyForProposerSlashing(msg)))
 }

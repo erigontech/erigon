@@ -125,7 +125,7 @@ func (s *proposerSlashingService) ProcessMessage(ctx context.Context, subnet *ui
 				return fmt.Errorf("unable to get domain: %w", err)
 			}
 			pk := proposer.PublicKey()
-			signingRoot, err := computeSigningRoot(signedHeader, domain)
+			signingRoot, err := computeSigningRoot(signedHeader.Header, domain)
 			if err != nil {
 				return fmt.Errorf("unable to compute signing root: %w", err)
 			}
