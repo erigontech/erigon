@@ -1749,6 +1749,16 @@ func TestReusedReadSetDropsSlotMapsItNoLongerUses(t *testing.T) {
 	}
 }
 
+// One outlier tx must not pin its overflow list on a set that keeps its slabs.
+func TestArenaBoundsTheOverflowListItKeeps(t *testing.T) {
+	var a vwArena[uint64]
+	for range vwMaxCells + vwMaxOverflow + 1 {
+		a.alloc(getVWNonce)
+	}
+	a.reset(releaseVWNonce)
+	require.LessOrEqual(t, cap(a.overflow), vwMaxOverflow)
+}
+
 // synthesizeCreatedAccountBase must allocate nothing when the version map holds
 // no cell for the address: every probe would miss and the account is dropped.
 func TestSynthesizeWithoutCellsAllocatesNothing(t *testing.T) {

@@ -366,8 +366,7 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.versionedReads = ReadSet{}
 	// Write side: VersionedWrites() returns Cloned snapshots, so the
 	// originals in ibs.versionedWrites are no longer referenced after the
-	// boundary call.  Walk the per-path maps and return every VW to its
-	// typed pool before resetting.
+	// boundary call, so recycle can take every VW back.
 	ibs.versionedWrites.recycle()
 	ibs.recordAccess = false
 	ibs.accountReadDuration = 0
@@ -380,7 +379,14 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.stateReadErr = nil
 }
 
-var ibsPool sync.Pool
+// statePool is sync.Pool's surface, so a test can substitute one that keeps
+// what it is given: sync.Pool may discard any item.
+type statePool interface {
+	Get() any
+	Put(any)
+}
+
+var ibsPool statePool = &sync.Pool{}
 
 // NewPooled is New over an IntraBlockState reused from an earlier call, whose
 // maps keep their capacity. Release it with ReleasePooled.
@@ -400,32 +406,26 @@ func ReleasePooled(ibs *IntraBlockState) {
 	if ibs.stateObjects == nil { // closed: its maps are gone
 		return
 	}
-	// Measured before the reset clears what it measures.
-	poolable := ibs.poolable()
-	ibs.resetForReuse()
-	if !poolable {
-		ibs.Close()
+	if ibs.resetForPool() {
+		ibsPool.Put(ibs)
 		return
 	}
-	ibsPool.Put(ibs)
+	ibs.Close()
 }
 
 // Maps never shrink, so a call that grew past this must not pin its capacity
 // for every later one.
 const maxPooledEntries = 16 * 1024
 
-// poolable reports whether this call stayed small enough to hand on. Call it
-// before resetForReuse, which clears what it counts.
-func (ibs *IntraBlockState) poolable() bool {
-	return len(ibs.stateObjects)+len(ibs.nilAccounts)+ibs.accessList.entries()+ibs.versionedReads.entries() <= maxPooledEntries
-}
-
-// resetForReuse clears everything one call left. Reset is the per-tx boundary
-// and keeps what the next tx re-establishes; a call handed to another caller
-// must keep nothing.
-func (ibs *IntraBlockState) resetForReuse() {
+// resetForPool clears everything one call left and reports whether ibs is
+// small enough to pool.
+func (ibs *IntraBlockState) resetForPool() bool {
 	reads := ibs.versionedReads
+	poolable := len(ibs.stateObjects)+len(ibs.nilAccounts)+ibs.accessList.entries()+reads.entries() <= maxPooledEntries
 	ibs.Reset()
+	if !poolable {
+		return false
+	}
 	// One call never hands its read set out, so the maps keep their capacity
 	// instead of the empty set Reset installs.
 	reads.clearForReuse()
@@ -441,6 +441,7 @@ func (ibs *IntraBlockState) resetForReuse() {
 	// Reset keeps the tx context and fork flags; New starts them at zero.
 	ibs.blockNum, ibs.version = 0, 0
 	ibs.eip8246, ibs.eip161, ibs.isAura = false, false, false
+	return true
 }
 
 // SetNoConflictDetection marks an execution that neither ValidateVersion checks
@@ -3125,7 +3126,7 @@ func (ibs *IntraBlockState) accountRead(addr accounts.Address, account *accounts
 // path: a repeat write to the same (addr[,key]) reuses the existing
 // *VersionedWrite[T] in place (no alloc, no map churn).  Only the first
 // write per (addr[,key]) per tx hits getVW* + SetX.  WriteSet.ReleaseAndReset
-// returns every VW to its pool.
+// takes every VW back.
 
 func (ibs *IntraBlockState) recordWriteBalance(addr accounts.Address, val uint256.Int) {
 	ibs.MarkAddressAccess(addr, true)
