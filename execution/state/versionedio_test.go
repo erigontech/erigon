@@ -134,8 +134,8 @@ func (r *minimalStateReader) ReadAccountByPlainAddr(address common.Address) (*ac
 	return r.ReadAccountData(accounts.InternAddress(address))
 }
 
-func (r *minimalStateReader) HasAccount(address accounts.Address) (bool, error) {
-	acc, err := r.ReadAccountData(address)
+func (r *minimalStateReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
 	return acc != nil, err
 }
 

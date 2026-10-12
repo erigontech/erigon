@@ -57,8 +57,8 @@ func (r *fakeStateReader) ReadAccountByPlainAddr(address common.Address) (*accou
 	return r.ReadAccountData(accounts.InternAddress(address))
 }
 
-func (r *fakeStateReader) HasAccount(address accounts.Address) (bool, error) {
-	acc, err := r.ReadAccountData(address)
+func (r *fakeStateReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
 	return acc != nil, err
 }
 

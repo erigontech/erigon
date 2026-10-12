@@ -222,14 +222,13 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 	}
 	defer tx.Rollback()
 
-	addr := accounts.InternAddress(address)
-	exists, err := reader.HasAccount(addr)
+	exists, err := reader.HasAccount(address)
 	if !exists || err != nil {
 		return common.Hash{}, err
 	}
 
 	location := accounts.InternKey(common.BytesToHash(indexBytes))
-	res, _, err := reader.ReadAccountStorage(addr, location)
+	res, _, err := reader.ReadAccountStorage(accounts.InternAddress(address), location)
 	if err != nil {
 		return common.Hash{}, err
 	}

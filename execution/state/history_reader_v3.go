@@ -213,8 +213,8 @@ func (hr *HistoryReaderV3) ReadAccountByPlainAddr(address common.Address) (*acco
 	return &a, nil
 }
 
-func (hr *HistoryReaderV3) HasAccount(address accounts.Address) (bool, error) {
-	hr.addr = address.Value()
+func (hr *HistoryReaderV3) HasAccount(address common.Address) (bool, error) {
+	hr.addr = address
 	enc, ok, err := hr.getAsOf(kv.AccountsDomain, hr.addr[:])
 	return ok && len(enc) > 0, err
 }

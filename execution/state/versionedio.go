@@ -1998,8 +1998,8 @@ func (vr *versionedStateReader) ReadAccountByPlainAddr(address common.Address) (
 	return vr.ReadAccountData(accounts.InternAddress(address))
 }
 
-func (vr *versionedStateReader) HasAccount(address accounts.Address) (bool, error) {
-	acc, err := vr.ReadAccountData(address)
+func (vr *versionedStateReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := vr.ReadAccountByPlainAddr(address)
 	return acc != nil, err
 }
 

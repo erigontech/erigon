@@ -292,9 +292,9 @@ func (hr *cachedHistoryReaderV3) ReadAccountByPlainAddr(address common.Address) 
 
 // HasAccount answers from the cached encoding's length, so a historical existence check
 // costs no DeserialiseV3 either.
-func (hr *cachedHistoryReaderV3) HasAccount(address accounts.Address) (bool, error) {
-	addressValue := address.Value()
-	enc, ok, err := hr.cache.GetAsOf(addressValue[:], hr.reader.GetTxNum())
+func (hr *cachedHistoryReaderV3) HasAccount(address common.Address) (bool, error) {
+	hr.addr = address
+	enc, ok, err := hr.cache.GetAsOf(hr.addr[:], hr.reader.GetTxNum())
 	if err != nil {
 		return false, err
 	}

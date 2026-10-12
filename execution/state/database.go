@@ -42,7 +42,7 @@ const (
 type StateReader interface {
 	ReadAccountData(address accounts.Address) (*accounts.Account, error)
 	ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error)
-	HasAccount(address accounts.Address) (bool, error)
+	HasAccount(address common.Address) (bool, error)
 	ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error)
 	ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error)
 	ReadAccountCode(address accounts.Address) ([]byte, error)
@@ -135,7 +135,7 @@ func (*NoopReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Acc
 	return nil, nil
 }
 
-func (*NoopReader) HasAccount(address accounts.Address) (bool, error) {
+func (*NoopReader) HasAccount(address common.Address) (bool, error) {
 	return false, nil
 }
 
