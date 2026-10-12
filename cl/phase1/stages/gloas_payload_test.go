@@ -1544,38 +1544,37 @@ func (t *testExecutionEngine) GetClientVersionV1(context.Context, *engine_types.
 
 var _ execution_client.ExecutionEngine = (*testExecutionEngine)(nil)
 
-// Forward sync persists an envelope without an EL verdict when the EL inserts the block itself.
-// The payload is then recorded as NotValidated, so fork choice sees the FULL variant right away.
-// It is not queued for the drain: an embedded EL answers NotValidated for any block well below
-// its head, so the queue would never empty; the at-tip sweep verifies the head region instead.
+// A payload forward sync persists without an EL verdict is recorded as NotValidated.
 func TestProcessDownloadedGloasEnvelopeRecordsNotValidatedWhenNotValidating(t *testing.T) {
 	root := common.HexToHash("0x1")
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
 	envelope.Message.BeaconBlockRoot = root
 	envelope.Message.Payload.BlockHash = common.HexToHash("0xe1")
 	block := &cltypes.BeaconBlock{Slot: 9}
+	notValidated := map[common.Hash]execution_client.PayloadStatus{root: execution_client.PayloadStatusNotValidated}
 
-	store := &envelopeReadTestStore{}
-	require.NoError(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, &gloasCollectorTest{}, block, root, envelope, true, false))
-	require.Equal(t, map[common.Hash]execution_client.PayloadStatus{root: execution_client.PayloadStatusNotValidated}, store.recorded)
-
-	// An already persisted copy is recorded the same way, so a resumed sync is not left without a status.
-	store = &envelopeReadTestStore{onErr: forkchoice.ErrIgnore, persisted: envelope}
-	require.NoError(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, &gloasCollectorTest{}, block, root, envelope, true, false))
-	require.Equal(t, map[common.Hash]execution_client.PayloadStatus{root: execution_client.PayloadStatusNotValidated}, store.recorded)
-
-	// A verdict already on record is kept.
-	store = &envelopeReadTestStore{known: map[common.Hash]execution_client.PayloadStatus{root: execution_client.PayloadStatusValidated}}
-	require.NoError(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, &gloasCollectorTest{}, block, root, envelope, true, false))
-	require.Empty(t, store.recorded)
-
-	// None is no verdict: it leaves the payload unavailable, so it moves to NotValidated.
-	store = &envelopeReadTestStore{known: map[common.Hash]execution_client.PayloadStatus{root: execution_client.PayloadStatusNone}}
-	require.NoError(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, &gloasCollectorTest{}, block, root, envelope, true, false))
-	require.Equal(t, map[common.Hash]execution_client.PayloadStatus{root: execution_client.PayloadStatusNotValidated}, store.recorded)
-
-	// When the apply validated with the EL, the verdict is already recorded; nothing is added.
-	store = &envelopeReadTestStore{}
-	require.NoError(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, &gloasCollectorTest{}, block, root, envelope, false, true))
-	require.Empty(t, store.recorded)
+	for _, tc := range []struct {
+		name     string
+		store    *envelopeReadTestStore
+		validate bool
+		recorded map[common.Hash]execution_client.PayloadStatus
+	}{
+		{name: "new payload", store: &envelopeReadTestStore{}, recorded: notValidated},
+		// A resumed sync meets the copy it persisted before the restart.
+		{name: "already persisted copy", store: &envelopeReadTestStore{onErr: forkchoice.ErrIgnore, persisted: envelope}, recorded: notValidated},
+		{name: "verdict on record is kept", store: &envelopeReadTestStore{known: map[common.Hash]execution_client.PayloadStatus{root: execution_client.PayloadStatusValidated}}},
+		// None is no verdict: it leaves the payload unavailable.
+		{name: "None moves to NotValidated", store: &envelopeReadTestStore{known: map[common.Hash]execution_client.PayloadStatus{root: execution_client.PayloadStatusNone}}, recorded: notValidated},
+		// Validating with the EL records the verdict itself.
+		{name: "validated apply adds nothing", store: &envelopeReadTestStore{}, validate: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NoError(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), tc.store, &gloasCollectorTest{}, block, root, envelope, !tc.validate, tc.validate))
+			if tc.recorded == nil {
+				require.Empty(t, tc.store.recorded)
+				return
+			}
+			require.Equal(t, tc.recorded, tc.store.recorded)
+		})
+	}
 }

@@ -284,6 +284,8 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 		results:   make(map[common.Hash]error),
 	}
 
+	// The reason a block of this batch was rejected also explains its children's missing parent.
+	rejected := make(map[common.Hash]error)
 	for _, block := range blocks {
 		if !ensureAnchorEnvelopeForChild(ctx, cfg.forkChoice, func(recoveryCtx context.Context) error {
 			return ensureAnchorEnvelopeOnce(recoveryCtx, cfg)
@@ -292,7 +294,7 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 			continue
 		}
 		if _, ok := cfg.forkChoice.GetHeader(block.Block.ParentRoot); !ok {
-			logChainTipRejection(cfg, "parent not in fork graph", block.Block.Slot, nil)
+			logChainTipRejection(cfg, "parent not in fork graph", block.Block.Slot, rejected[block.Block.ParentRoot])
 			time.Sleep(time.Millisecond)
 			continue
 		}
@@ -321,7 +323,7 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 				}
 				parentBlock := parentBlockByRoot(parentRoot)
 				if wasStored && parentEnvelopeRequired(block, parentBlock) {
-					if accepted, reason := payloadReplay.accepted(ctx, cfg, cfg.forkChoice, parentRoot, env, envErr); !accepted {
+					if reason := payloadReplay.rejection(ctx, cfg, cfg.forkChoice, parentRoot, env, envErr); reason != nil {
 						logChainTipRejection(cfg, "parent payload not accepted", block.Block.Slot, reason)
 						continue
 					}
@@ -332,6 +334,7 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 		// Process the block - DA can be downloaded later if we are behind (see blobHistoryDownloader)
 		if err := processBlock(ctx, cfg, cfg.indiciesDB, block, true, true, false); err != nil {
 			logChainTipRejection(cfg, "process block failed", block.Block.Slot, err)
+			rejected[blockRoot] = err
 			if rememberBlockAfterProcess(err) {
 				seenBlockRoots[blockRoot] = struct{}{}
 			}
@@ -937,30 +940,30 @@ func (r *storedParentPayloadReplay) attemptContext(ctx context.Context) (context
 	return context.WithDeadline(ctx, attemptDeadline)
 }
 
-// accepted reports whether the stored parent payload is accepted and, when it is not, why.
-func (r *storedParentPayloadReplay) accepted(
+// rejection returns why the stored parent payload is not accepted, or nil when it is.
+func (r *storedParentPayloadReplay) rejection(
 	ctx context.Context,
 	cfg *Cfg,
 	store storedParentPayloadStore,
 	root common.Hash,
 	envelope *cltypes.SignedExecutionPayloadEnvelope,
 	applyErr error,
-) (bool, error) {
+) error {
 	if reason, ok := r.results[root]; ok {
-		return reason == nil, reason
+		return reason
 	}
 	if applyErr != nil && !errors.Is(applyErr, forkchoice.ErrIgnore) && !errors.Is(applyErr, forkchoice.ErrPayloadValidationInterrupted) {
 		if r.remaining > 0 {
 			r.remaining--
 		}
 		r.results[root] = applyErr
-		return false, applyErr
+		return applyErr
 	}
 	retryCtx, cancel := r.attemptContext(ctx)
 	reason := ensureStoredParentPayloadAccepted(retryCtx, cfg, store, root, envelope)
 	cancel()
 	r.results[root] = reason
-	return reason == nil, reason
+	return reason
 }
 
 // ensureStoredParentPayloadAccepted returns nil when the parent payload has an accepted EL

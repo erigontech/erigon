@@ -795,7 +795,11 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelope(ctx context.Conte
 		return
 	}
 	if commitments := block.GetBlobKzgCommitments(); f.peerDas != nil && commitments != nil && commitments.Len() > 0 {
-		if available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot); err != nil || !available {
+		available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot)
+		if err != nil {
+			log.Debug("OnBlock: column availability check failed before a pending envelope retry", "blockRoot", blockRoot, "err", err)
+		}
+		if err != nil || !available {
 			return
 		}
 	}
@@ -972,7 +976,11 @@ func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot co
 		}
 	}
 	if err != nil {
-		log.Warn("OnBlock: failed to process pending envelope", "blockRoot", blockRoot, "local", local, "err", err)
+		logFn := log.Warn
+		if errors.Is(err, ErrPayloadValidationInterrupted) {
+			logFn = log.Debug // a retry budget ran out, not an apply failure
+		}
+		logFn("OnBlock: failed to process pending envelope", "blockRoot", blockRoot, "local", local, "err", err)
 		f.settlePendingEnvelopeError(blockRoot, pending, local, err)
 		return nil, false
 	}

@@ -2937,7 +2937,7 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
 	if a.ethClock != nil {
 		publishFields = append(publishFields, "sinceSlotStart", time.Since(a.ethClock.GetSlotTime(blk.Block.Slot)).Round(time.Millisecond))
 	}
-	log.Info("BlockPublishing: published", publishFields...)
+	a.logger.Info("BlockPublishing: published", publishFields...)
 
 	if blk.Version() >= clparams.GloasVersion {
 		if err := a.validateSelfBuildPayloadAvailable(blk); err != nil {
