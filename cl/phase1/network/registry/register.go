@@ -1,6 +1,8 @@
 package registry
 
 import (
+	"encoding/hex"
+	"strings"
 	"time"
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -11,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/network/gossip"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -61,7 +64,7 @@ func RegisterGossipServices(
 	// gloas
 	add(gossip.RegisterGossipService(gm, executionPayloadService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(2, 4)))
 	add(gossip.RegisterGossipService(gm, payloadAttestationService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(8, 16)))
-	add(gossip.RegisterGossipService(gm, proposerPreferencesService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(2, 4)))
+	add(gossip.RegisterGossipService(gm, proposerPreferencesService, waitReady, withTopicBeginVersion(ethClock, clparams.GloasVersion), withRateLimiterByPeer(2, 4)))
 	add(gossip.RegisterGossipService(gm, executionPayloadBidService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(8, 16)))
 
 	log.Info("[GossipManager] Registered services", "subscribed", subscribed, "expired", expired)
@@ -77,6 +80,23 @@ func withHeadSlotReady(forkChoiceReader forkchoice.ForkChoiceStorageReader, ethC
 func withBeginVersion(beginVersion clparams.StateVersion) gossip.ConditionFunc {
 	return func(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
 		return curVersion >= beginVersion
+	}
+}
+
+// withTopicBeginVersion is withBeginVersion for the fork of the topic's digest,
+// for topics that carry messages of the next fork before it activates.
+func withTopicBeginVersion(ethClock eth_clock.EthereumClock, beginVersion clparams.StateVersion) gossip.ConditionFunc {
+	return func(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
+		parts := strings.Split(msg.GetTopic(), "/")
+		var digest common.Bytes4
+		if len(parts) != 5 || len(parts[2]) != 2*len(digest) {
+			return false
+		}
+		if _, err := hex.Decode(digest[:], []byte(parts[2])); err != nil {
+			return false
+		}
+		version, err := ethClock.StateVersionByForkDigest(digest)
+		return err == nil && version >= beginVersion
 	}
 }
 
