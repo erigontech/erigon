@@ -856,6 +856,29 @@ func TestPostExecutionPayloadEnvelopeAcceptsGossipIntegrationError(t *testing.T)
 	require.Equal(t, beaconevents.OpExecutionPayloadGossip, (<-events).Event)
 }
 
+// A proposer's own envelope whose EL validation ran out of time is still published: the
+// interruption is no verdict, and the envelope stays parked for a retry.
+func TestPostExecutionPayloadEnvelopePublishesAnInterruptedValidation(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	fcu.OnExecutionPayloadErr = fmt.Errorf("%w: %w", forkchoice.ErrPayloadValidationInterrupted, context.DeadlineExceeded)
+	handler.emitters = beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 1)
+	subscription := handler.emitters.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+	fcu.Blocks[common.Hash{}] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 12, Body: cltypes.NewBeaconBody(handler.beaconChainCfg, clparams.GloasVersion)}}
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(`{}`))
+	request.Header.Set("Content-Type", "application/json; charset=utf-8")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
+	require.Equal(t, beaconevents.OpExecutionPayloadGossip, (<-events).Event)
+}
+
 func TestPostExecutionPayloadEnvelopeRejectsDuplicateAfterBroadcast(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)

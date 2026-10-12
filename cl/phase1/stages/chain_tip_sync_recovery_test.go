@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -968,6 +969,25 @@ func TestStoredParentPayloadReplayReservesBudgetForLaterRoots(t *testing.T) {
 		Payload:         secondPayload,
 	}}, nil))
 	require.Equal(t, []common.Hash{firstPayload.BlockHash, secondPayload.BlockHash}, validator.calls)
+}
+
+// An apply cut short by its context is no verdict, so the replay still validates the parent.
+func TestStoredParentPayloadReplayRetriesAnInterruptedApply(t *testing.T) {
+	root := common.Hash{1}
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
+	payload.BlockHash = common.Hash{3}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	store := &storedParentPayloadTestStore{has: true, block: block, markRetained: true}
+	validator := &orderedPayloadValidator{}
+	replay := storedParentPayloadReplay{deadline: time.Now().Add(time.Second), remaining: 1, results: make(map[common.Hash]error)}
+	cfg := &Cfg{beaconCfg: &clparams.MainnetBeaconConfig, executionClient: &testExecutionEngine{}, gloasPayloadValidator: validator}
+	interrupted := fmt.Errorf("%w: %w", forkchoice.ErrPayloadValidationInterrupted, context.DeadlineExceeded)
+
+	require.True(t, replay.acceptedOnly(t.Context(), cfg, store, root, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+		BeaconBlockRoot: root,
+		Payload:         payload,
+	}}, interrupted))
+	require.Equal(t, []common.Hash{payload.BlockHash}, validator.calls)
 }
 
 func TestStoredParentPayloadReplayRejectsApplyFailure(t *testing.T) {

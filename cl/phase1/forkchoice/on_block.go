@@ -919,7 +919,7 @@ func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot co
 	if !f.enterPendingEnvelopeApply(ctx, blockRoot) {
 		if ctx.Err() != nil && pending != nil {
 			log.Debug("OnBlock: pending envelope apply not admitted before the context ended", "blockRoot", blockRoot, "local", local, "err", ctx.Err())
-			f.settlePendingEnvelopeError(blockRoot, pending, local, fmt.Errorf("%w: execution payload validation interrupted for beacon_block_root %v: %w", ErrIgnore, blockRoot, ctx.Err()))
+			f.settlePendingEnvelopeError(blockRoot, pending, local, fmt.Errorf("%w: %w", ErrPayloadValidationInterrupted, ctx.Err()))
 		}
 		return nil, false
 	}
@@ -1018,7 +1018,7 @@ func (f *ForkChoiceStore) retryPendingEnvelopeError(err error, pending *cltypes.
 	if pending.Message == nil || pending.Message.Payload == nil {
 		return false
 	}
-	ageBounded := errors.Is(err, errPendingEnvelopeAgeBounded) || errors.Is(err, errPayloadValidationAdmission) || errors.Is(err, ErrIgnore) || errors.Is(err, ErrEIP7594ColumnDataNotAvailable)
+	ageBounded := errors.Is(err, errPendingEnvelopeAgeBounded) || errors.Is(err, ErrPayloadValidationInterrupted) || errors.Is(err, ErrIgnore) || errors.Is(err, ErrEIP7594ColumnDataNotAvailable)
 	if !ageBounded {
 		return true
 	}

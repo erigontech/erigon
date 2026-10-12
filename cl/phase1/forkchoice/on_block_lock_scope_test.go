@@ -655,7 +655,7 @@ func TestNewPayloadChecksAdmissionOnlyAfterWinningTheToken(t *testing.T) {
 
 	select {
 	case err := <-done:
-		require.ErrorIs(t, err, errPayloadValidationAdmission)
+		require.ErrorIs(t, err, ErrPayloadValidationInterrupted)
 	case <-time.After(lockScopeTimeout):
 		t.Fatal("the caller did not return after cancellation")
 	}

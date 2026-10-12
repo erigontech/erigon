@@ -643,8 +643,8 @@ func TestPendingEnvelopeErrorClassification(t *testing.T) {
 	stale.Message.Payload.SlotNumber = 63
 	require.True(t, f.retryPendingEnvelopeError(errors.New("temporary disk failure"), nil))
 	require.True(t, f.retryPendingEnvelopeError(errors.New("temporary disk failure"), stale))
-	require.True(t, f.retryPendingEnvelopeError(fmt.Errorf("%w: %w", errPayloadValidationAdmission, context.Canceled), recent))
-	require.False(t, f.retryPendingEnvelopeError(fmt.Errorf("%w: %w", errPayloadValidationAdmission, context.Canceled), stale))
+	require.True(t, f.retryPendingEnvelopeError(fmt.Errorf("%w: %w", ErrPayloadValidationInterrupted, context.Canceled), recent))
+	require.False(t, f.retryPendingEnvelopeError(fmt.Errorf("%w: %w", ErrPayloadValidationInterrupted, context.Canceled), stale))
 	require.True(t, f.retryPendingEnvelopeError(ErrEIP7594ColumnDataNotAvailable, recent))
 	require.False(t, f.retryPendingEnvelopeError(ErrEIP7594ColumnDataNotAvailable, stale))
 	require.False(t, f.retryPendingEnvelopeError(fmt.Errorf("%w: bad signature", ErrInvalidExecutionPayloadEnvelope), nil))
@@ -3280,7 +3280,7 @@ func TestValidatePayloadWithELAdmissionCancellationIsNotELBehind(t *testing.T) {
 	f.mu.Unlock()
 
 	require.EqualValues(t, execution_client.PayloadStatusNone, status)
-	require.ErrorIs(t, err, errPayloadValidationAdmission)
+	require.ErrorIs(t, err, ErrPayloadValidationInterrupted)
 	require.ErrorIs(t, err, context.Canceled)
 }
 
@@ -3311,9 +3311,10 @@ func TestExecutionPayloadAdmissionCancellationTransfersPendingOwnership(t *testi
 			} else {
 				err = f.OnExecutionPayload(ctx, envelope, false, true)
 			}
-			require.ErrorIs(t, err, errPayloadValidationAdmission)
+			require.ErrorIs(t, err, ErrPayloadValidationInterrupted)
 			require.ErrorIs(t, err, context.Canceled)
-			require.ErrorIs(t, err, ErrIgnore, "an interrupted apply is not a verdict and must not be treated as a rejection")
+			// Not an IGNORE: the REST publication of the proposer's own envelope takes the 202 + publish path.
+			require.NotErrorIs(t, err, ErrIgnore)
 			origin := pending
 			if local {
 				origin = pendingLocal
@@ -4454,7 +4455,7 @@ func TestExecutionPayloadAdmissionCancellationReconcilesConcurrentOwner(t *testi
 				f.mu.Unlock()
 
 				err = <-done
-				require.ErrorIs(t, err, errPayloadValidationAdmission)
+				require.ErrorIs(t, err, ErrPayloadValidationInterrupted)
 				queued, ok := origin.Peek(envelope.Message.BeaconBlockRoot)
 				require.True(t, ok)
 				if persisted {

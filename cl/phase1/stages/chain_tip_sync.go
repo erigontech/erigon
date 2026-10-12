@@ -949,7 +949,7 @@ func (r *storedParentPayloadReplay) accepted(
 	if reason, ok := r.results[root]; ok {
 		return reason == nil, reason
 	}
-	if applyErr != nil && !errors.Is(applyErr, forkchoice.ErrIgnore) {
+	if applyErr != nil && !errors.Is(applyErr, forkchoice.ErrIgnore) && !errors.Is(applyErr, forkchoice.ErrPayloadValidationInterrupted) {
 		if r.remaining > 0 {
 			r.remaining--
 		}

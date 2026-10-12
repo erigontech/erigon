@@ -48,7 +48,9 @@ import (
 // and queues the execution block for later EL insertion.
 var errELBehind = errors.New("EL behind: payload not processable yet")
 
-var errPayloadValidationAdmission = errors.New("payload validation admission canceled")
+// ErrPayloadValidationInterrupted marks a NewPayload that ended with its context, waiting for
+// admission or inside the EL call, instead of with an EL verdict.
+var ErrPayloadValidationInterrupted = errors.New("payload validation interrupted")
 
 // ErrExecutionPayloadEnvelopeIndicesPending reports a persisted envelope whose database indices are queued for retry.
 var ErrExecutionPayloadEnvelopeIndicesPending = errors.New("execution payload envelope indices pending")
@@ -577,11 +579,15 @@ func (f *ForkChoiceStore) withPayloadValidationAdmission(ctx context.Context, va
 	case f.payloadValidationAdmission <- struct{}{}:
 		defer func() { <-f.payloadValidationAdmission }()
 	case <-ctx.Done():
-		return execution_client.PayloadStatusNone, fmt.Errorf("%w: %w", errPayloadValidationAdmission, ctx.Err())
+		return execution_client.PayloadStatusNone, fmt.Errorf("%w: %w", ErrPayloadValidationInterrupted, ctx.Err())
 	}
 	timeStartExec := time.Now()
 	defer monitor.ObserveNewPayloadTime(timeStartExec)
-	return validate()
+	status, err := validate()
+	if execution_client.ValidationInterrupted(ctx, status, err) {
+		return status, fmt.Errorf("%w: %w", ErrPayloadValidationInterrupted, err)
+	}
+	return status, err
 }
 
 // NewPayloadWithAdmission serializes EL payload validation across fork-choice and stage retries.
@@ -1089,12 +1095,12 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 	var elBehind bool
 	if validatePayload && f.engine != nil {
 		payloadStatus, validationErr := f.validatePayloadWithEL(ctx, envelope, block, common.Hash(beaconBlockRoot))
-		if execution_client.ValidationInterrupted(ctx, payloadStatus, validationErr) {
+		if errors.Is(validationErr, ErrPayloadValidationInterrupted) {
 			// An expired context is not an EL verdict; keep the envelope pending.
 			if missingMode == queueMissingEnvelope && !f.forkGraph.HasEnvelope(beaconBlockRoot) {
 				f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
 			}
-			return false, fmt.Errorf("%w: execution payload validation interrupted for beacon_block_root %v: %w", ErrIgnore, common.Hash(beaconBlockRoot), validationErr)
+			return false, validationErr
 		}
 		if err := validatePayloadValidationResult(payloadStatus, validationErr); err != nil {
 			return false, err
@@ -1722,11 +1728,11 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 	var elBehind bool
 	if f.engine != nil {
 		payloadStatus, validationErr := f.validatePayloadWithEL(ctx, envelope, block, common.Hash(beaconBlockRoot))
-		if execution_client.ValidationInterrupted(ctx, payloadStatus, validationErr) {
+		if errors.Is(validationErr, ErrPayloadValidationInterrupted) {
 			if missingMode == queueMissingEnvelope && !f.forkGraph.HasEnvelope(beaconBlockRoot) {
 				f.pendingLocalSelfBuildEnvelopes.Add(beaconBlockRoot, signedEnvelope)
 			}
-			return false, fmt.Errorf("%w: execution payload validation interrupted for beacon_block_root %v: %w", ErrIgnore, common.Hash(beaconBlockRoot), validationErr)
+			return false, validationErr
 		}
 		if err := validatePayloadValidationResult(payloadStatus, validationErr); err != nil {
 			return false, err
