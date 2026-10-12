@@ -815,11 +815,8 @@ func (db *MdbxKV) Close() {
 
 func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	// don't try to acquire if the context is already done
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-		// otherwise carry on
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	if !db.trackTxBegin() {

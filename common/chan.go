@@ -27,16 +27,10 @@ var (
 	ErrUnwind  = errors.New("unwound")
 )
 
-// FastContextErr is faster than ctx.Err() because usually it doesn't lock an internal mutex.
-// It locks it only if the context is done and at the first call.
-// See implementation of cancelCtx in context/context.go.
+// FastContextErr is ctx.Err(): cancelCtx.Err is an atomic load, while selecting on Done
+// allocates the channel on first use.
 func FastContextErr(ctx context.Context) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-		return nil
-	}
+	return ctx.Err()
 }
 
 func Stopped(ch <-chan struct{}) error {
