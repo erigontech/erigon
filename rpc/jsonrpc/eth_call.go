@@ -276,7 +276,6 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if err != nil {
 			return 0, err
 		}
-		defer initialState.Close()
 	}
 
 	// Recap the highest gas limit with account's available balance.
@@ -1077,8 +1076,8 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 	// Convergence re-runs the whole message, so the state is reset per iteration
 	// rather than rebuilt: Reset keeps the reader and the pooled maps behind it.
-	ibs := state.New(stateReader)
-	defer ibs.Close()
+	ibs := state.NewPooled(stateReader)
+	defer state.ReleasePooled(ibs)
 
 	// One convergence iteration: a non-nil result means the access list converged,
 	// otherwise the returned tracer seeds the next iteration.
