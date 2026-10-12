@@ -3,7 +3,9 @@ package p2p
 import (
 	"crypto/ecdsa"
 	"fmt"
+	"math"
 	"net"
+	"net/netip"
 	"slices"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -11,6 +13,7 @@ import (
 	"github.com/libp2p/go-libp2p"
 	mplex "github.com/libp2p/go-libp2p-mplex"
 	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/network"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
@@ -139,17 +142,60 @@ func buildOptions(cfg *P2PConfig, privateKey *ecdsa.PrivateKey) ([]libp2p.Option
 	// Disable Ping Service.
 	options = append(options, libp2p.Ping(false))
 
-	// Enable libp2p resource manager with tightened per-peer inbound stream
-	// limits. The default PeerBaseLimit.StreamsInbound (256) is far too
-	// permissive; Lighthouse caps per-peer inbound substreams at 32.
-	limits := rcmgr.DefaultLimits
-	limits.PeerBaseLimit.StreamsInbound = 32
-	limits.PeerLimitIncrease.StreamsInbound = 0 // do not scale with memory
-	rm, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(limits.AutoScale()))
+	rm, err := newResourceManager(cfg.MaxPeerCount)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create libp2p resource manager: %w", err)
 	}
 	options = append(options, libp2p.ResourceManager(rm))
 
 	return options, nil
+}
+
+func newResourceManager(maxPeerCount uint64) (network.ResourceManager, error) {
+	// Tighten per-peer inbound stream limits. The default PeerBaseLimit.StreamsInbound (256) is
+	// far too permissive; Lighthouse caps per-peer inbound substreams at 32.
+	limits := rcmgr.DefaultLimits
+	limits.PeerBaseLimit.StreamsInbound = 32
+	limits.PeerLimitIncrease.StreamsInbound = 0 // do not scale with memory
+	perBlock24, perBlock16 := subnetConnLimits(maxPeerCount)
+	// The per-subnet lists replace go-libp2p's defaults, so they repeat them (8 per IPv4 address or
+	// IPv6 /56, 64 per IPv6 /48) before adding the larger blocks.
+	return rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(limits.AutoScale()),
+		rcmgr.WithLimitPerSubnet(
+			[]rcmgr.ConnLimitPerSubnet{
+				{PrefixLength: 32, ConnCount: 8},
+				{PrefixLength: 24, ConnCount: perBlock24},
+				{PrefixLength: 16, ConnCount: perBlock16},
+			},
+			[]rcmgr.ConnLimitPerSubnet{
+				{PrefixLength: 56, ConnCount: 8},
+				{PrefixLength: 48, ConnCount: 64},
+				{PrefixLength: 32, ConnCount: perBlock16},
+			},
+		),
+		rcmgr.WithNetworkPrefixLimit(
+			unlimitedNetworks(append([]string{"127.0.0.0/8"}, privateCIDRList...)...),
+			unlimitedNetworks("::1/128", "fc00::/7", "fe80::/10"),
+		),
+	)
+}
+
+// unlimitedNetworks exempts loopback and the networks the gater treats as private from the
+// per-subnet caps.
+func unlimitedNetworks(prefixes ...string) []rcmgr.NetworkPrefixLimit {
+	out := make([]rcmgr.NetworkPrefixLimit, 0, len(prefixes))
+	for _, p := range prefixes {
+		out = append(out, rcmgr.NetworkPrefixLimit{Network: netip.MustParsePrefix(p), ConnCount: math.MaxInt})
+	}
+	return out
+}
+
+// subnetConnLimits returns the connection caps per IPv4 /24 and per IPv4 /16 (IPv6 /32). A /24
+// may hold an eighth of the peer pool and a /16 half of it, so filling the pool takes several
+// blocks. The floor of two default per-IP caps keeps small pools from refusing two busy hosts.
+func subnetConnLimits(maxPeerCount uint64) (perBlock24, perBlock16 int) {
+	const floor = 16
+	perBlock24 = max(floor, int(maxPeerCount/8))
+	perBlock16 = max(perBlock24, int(maxPeerCount/2))
+	return perBlock24, perBlock16
 }
