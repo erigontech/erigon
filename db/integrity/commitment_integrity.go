@@ -295,6 +295,9 @@ func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *
 }
 
 func CheckCommitmentKvi(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, cache *IntegrityCache, failFast bool, logger log.Logger) error {
+	if skipsCommitmentV3Records("CommitmentKvi", logger) {
+		return nil
+	}
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -2428,6 +2431,6 @@ func skipsCommitmentV3Records(check string, logger log.Logger) bool {
 	if !statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).CommitmentV3Records {
 		return false
 	}
-	logger.Info("[integrity] " + check + " skipped: commitment v3 records carry no legacy branch data")
+	logger.Info("[integrity] " + check + " skipped: it checks legacy commitment files, not v3 records")
 	return true
 }

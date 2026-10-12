@@ -385,4 +385,5 @@ func TestCheckStateVerifyOnCommitmentV3Records(t *testing.T) {
 
 	require.NoError(t, integrity.CheckStateVerify(ctx, db, true, 0, logger))
 	require.NoError(t, integrity.CheckCommitmentKvDeref(ctx, db, nil, true, logger))
+	require.NoError(t, integrity.CheckCommitmentKvi(ctx, integrity.SamplerCfg{SampleRatio: 1}, db, nil, true, logger))
 }
