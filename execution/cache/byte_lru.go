@@ -48,6 +48,8 @@ type ByteLRU[V any] struct {
 	// cleanup, and a callback capturing the owner would keep the owner too.
 	onEvict atomic.Pointer[func(uint64, V)]
 
+	// resident is an upper bound for an unbudgeted layer, which has no deletion
+	// handler to refund a replaced value; a budgeted one refunds and stays exact.
 	resident atomic.Int64
 	limit    atomic.Int64 // otter's maximum; for a budgeted cache, the bytes reserved from the envelope
 	ceiling  atomic.Int64 // limit may still grow to this; drops to limit when the envelope refuses
@@ -114,9 +116,8 @@ func (b *ByteLRU[V]) Get(key uint64) (V, bool) { return b.c.GetIfPresent(key) }
 
 // Add reports that the value could be offered, not that it is resident: a
 // W-TinyLFU rejection also returns true. False means it was not taken -- too
-// big for the whole budget, or the key is already there -- and onEvict never
-// fires for it, so the caller must refund its charge. Replacing a live key is
-// left to Remove+Add.
+// big for the whole budget -- and no deletion fires for it. A live key is
+// replaced in place, its predecessor refunded by the deletion handler.
 func (b *ByteLRU[V]) Add(key uint64, value V) bool {
 	w := b.weigh(key, value)
 	if w > b.maxBytes {
@@ -126,12 +127,7 @@ func (b *ByteLRU[V]) Add(key uint64, value V) bool {
 		b.grow(w)
 	}
 	b.resident.Add(w)
-	// Never Set over a live key: otter loses a node Set before the key's first
-	// write drains, and counts its weight forever. https://github.com/maypok86/otter/pull/189
-	if _, added := b.c.SetIfAbsent(key, value); !added {
-		b.resident.Add(-w)
-		return false
-	}
+	b.c.Set(key, value)
 	return true
 }
 
