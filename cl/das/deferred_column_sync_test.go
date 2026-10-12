@@ -28,10 +28,14 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	blob_storage_mock_services "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
@@ -44,9 +48,9 @@ func TestDeferredColumnSyncDue(t *testing.T) {
 	require.True(t, deferredColumnSyncDue(slotStart.Add(time.Minute), slotStart, slotStart, delay))
 }
 
-// The backoff grows by a slot per failed round; once it would reach an epoch the root is given
-// up, which also releases a block that was orphaned and is never served.
-func TestDeferredColumnSyncQueueGivesUpOnceTheBackoffReachesAnEpoch(t *testing.T) {
+// The backoff grows by a slot per failed round and stays at an epoch once it gets there; the
+// queue reports that point, and the worker then gives up only a root that is no longer canonical.
+func TestDeferredColumnSyncQueueCapsTheBackoffAtAnEpoch(t *testing.T) {
 	const slotsPerEpoch = 8
 	queue := newDeferredColumnSyncQueue()
 	root := common.Hash{1}
@@ -57,13 +61,41 @@ func TestDeferredColumnSyncQueueGivesUpOnceTheBackoffReachesAnEpoch(t *testing.T
 	queue.start([]common.Hash{root})
 	require.False(t, queue.ready(root, now.Add(time.Hour)), "a root in a round is not picked again")
 
-	for attempt := 1; attempt < slotsPerEpoch; attempt++ {
-		require.False(t, queue.failed(root, now, slot, slotsPerEpoch), "attempt %d", attempt)
-		wait := slot * time.Duration(attempt)
+	for attempt := 1; attempt <= slotsPerEpoch+2; attempt++ {
+		require.Equal(t, attempt >= slotsPerEpoch, queue.failed(root, now, slot, slotsPerEpoch), "attempt %d", attempt)
+		wait := slot * time.Duration(min(attempt, slotsPerEpoch))
 		require.False(t, queue.ready(root, now.Add(wait-time.Millisecond)), "attempt %d", attempt)
 		require.True(t, queue.ready(root, now.Add(wait)), "attempt %d", attempt)
 	}
-	require.True(t, queue.failed(root, now, slot, slotsPerEpoch))
+}
+
+// A storage error says nothing about peers serving the root, so it waits a slot without
+// counting as an attempt.
+func TestDeferredColumnSyncQueueRetriesAStorageErrorWithoutAnAttempt(t *testing.T) {
+	queue := newDeferredColumnSyncQueue()
+	root := common.Hash{1}
+	now := time.Unix(1000, 0)
+	slot := 12 * time.Second
+	require.True(t, queue.ready(root, now))
+	for range 3 {
+		queue.retryLater(root, now, slot)
+		require.False(t, queue.ready(root, now.Add(slot-time.Millisecond)))
+		require.True(t, queue.ready(root, now.Add(slot)))
+	}
+	require.False(t, queue.failed(root, now, slot, 2), "storage errors did not count as attempts")
+}
+
+func TestStillCanonicalReadsTheBeaconIndices(t *testing.T) {
+	root, other := common.Hash{1}, common.Hash{2}
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.MarkRootCanonical(tx, 5, root)
+	}))
+	d := &peerdas{indiciesDB: db}
+	require.True(t, d.stillCanonical(5, root))
+	require.False(t, d.stillCanonical(5, other), "an orphaned root at a canonical slot")
+	require.False(t, d.stillCanonical(6, other), "a root at a slot with no canonical block")
+	require.True(t, (&peerdas{}).stillCanonical(5, other), "without indices the root is kept")
 }
 
 // A round that ends after its root was dropped must not bring the root back.

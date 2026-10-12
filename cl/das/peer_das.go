@@ -17,6 +17,7 @@ import (
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	gossipmgr "github.com/erigontech/erigon/cl/phase1/network/gossip"
@@ -1989,9 +1990,7 @@ type deferredColumnSyncEntry struct {
 }
 
 // deferredColumnSyncQueue paces the queued roots whose columns are still missing. A failed
-// round grows the root's backoff by one slot; a root whose backoff would reach an epoch is
-// given up, so a block nobody serves, such as an orphaned one, is not retried until it leaves
-// the serve range.
+// round grows the root's backoff by one slot, up to an epoch.
 type deferredColumnSyncQueue struct {
 	mu      sync.Mutex
 	entries map[common.Hash]*deferredColumnSyncEntry
@@ -2023,9 +2022,9 @@ func (q *deferredColumnSyncQueue) start(roots []common.Hash) {
 	}
 }
 
-// failed records a round that left columns missing and grows the backoff. It reports true once
-// the backoff would reach maxBackoffSlots, and the caller then gives the root up. A root
-// dropped meanwhile stays dropped.
+// failed records a round that left columns missing and grows the backoff, capped at
+// maxBackoffSlots. It reports whether the backoff has reached the cap. A root dropped meanwhile
+// stays dropped.
 func (q *deferredColumnSyncQueue) failed(root common.Hash, now time.Time, slot time.Duration, maxBackoffSlots uint64) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -2035,11 +2034,39 @@ func (q *deferredColumnSyncQueue) failed(root common.Hash, now time.Time, slot t
 	}
 	e.inFlight = false
 	e.attempts++
-	if uint64(e.attempts) >= maxBackoffSlots {
+	backoffSlots := min(uint64(e.attempts), maxBackoffSlots)
+	e.nextAttempt = now.Add(slot * time.Duration(backoffSlots))
+	return backoffSlots == maxBackoffSlots
+}
+
+// retryLater defers a root by one slot without counting an attempt, for a local storage error.
+func (q *deferredColumnSyncQueue) retryLater(root common.Hash, now time.Time, slot time.Duration) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if e := q.entries[root]; e != nil {
+		e.inFlight = false
+		e.nextAttempt = now.Add(slot)
+	}
+}
+
+// stillCanonical reports whether the beacon indices name root canonical at slot; without the
+// indices the root is kept.
+func (d *peerdas) stillCanonical(slot uint64, root common.Hash) bool {
+	if d.indiciesDB == nil {
 		return true
 	}
-	e.nextAttempt = now.Add(slot * time.Duration(e.attempts))
-	return false
+	canonical := true
+	if err := d.indiciesDB.View(context.Background(), func(tx kv.Tx) error {
+		canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+		if err != nil {
+			return err
+		}
+		canonical = canonicalRoot == root
+		return nil
+	}); err != nil {
+		return true
+	}
+	return canonical
 }
 
 func (q *deferredColumnSyncQueue) done(root common.Hash) {
@@ -2059,9 +2086,13 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 		d.blocksToCheckSync.Delete(root)
 		queue.done(root)
 	}
-	giveUp := func(root common.Hash, slot uint64) {
-		log.Debug("[syncColumnDataWorker] column data still missing after an epoch of retries, removing from sync queue", "slot", slot, "blockRoot", root)
-		forget(root)
+	// A root whose backoff reached an epoch is kept while it is canonical, since nothing queues
+	// it again; one that is not, such as an orphaned block nobody serves, is given up.
+	failed := func(root common.Hash, slot uint64, now time.Time) {
+		if queue.failed(root, now, d.slotDuration(), d.beaconConfig.SlotsPerEpoch) && !d.stillCanonical(slot, root) {
+			log.Debug("[syncColumnDataWorker] column data still missing for a non-canonical block, removing from sync queue", "slot", slot, "blockRoot", root)
+			forget(root)
+		}
 	}
 	for {
 		select {
@@ -2108,9 +2139,7 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 			switch {
 			case err != nil:
 				log.Warn("failed to check if data is available", "err", err)
-				if queue.failed(root, now, d.slotDuration(), d.beaconConfig.SlotsPerEpoch) {
-					giveUp(root, block.GetSlot())
-				}
+				queue.retryLater(root, now, d.slotDuration())
 			case available:
 				log.Trace("[syncColumnDataWorker] column data is already available, removing from sync queue", "slot", block.GetSlot(), "blockRoot", root)
 				forget(root)
@@ -2139,10 +2168,12 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 			}
 			for i, root := range roots {
 				available, err := d.IsDataAvailable(blocks[i].GetSlot(), root)
-				if err != nil || !available {
-					if queue.failed(root, time.Now(), d.slotDuration(), d.beaconConfig.SlotsPerEpoch) {
-						giveUp(root, blocks[i].GetSlot())
-					}
+				if err != nil {
+					queue.retryLater(root, time.Now(), d.slotDuration())
+					continue
+				}
+				if !available {
+					failed(root, blocks[i].GetSlot(), time.Now())
 					continue
 				}
 				forget(root)
