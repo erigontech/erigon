@@ -201,3 +201,23 @@ func TestByteLRUGrowsOnPositiveNetChange(t *testing.T) {
 	require.Greater(t, b.limit.Load(), start, "distinct keys past the floor must grow the limit")
 	require.LessOrEqual(t, b.resident.Load(), b.limit.Load())
 }
+
+// A newcomer W-TinyLFU refuses, or evicts straight away, must not leave its
+// weight charged: otter reports the insert as done, so the charge is only
+// returned by the deletion handler (CauseOverflow, not CauseReplacement).
+func TestByteLRURejectedNewcomerIsRefunded(t *testing.T) {
+	// A budget far smaller than the working set, so admission has to refuse.
+	val := make([]byte, 64*1024)
+	b := newByteLRU(datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
+	defer b.Close()
+
+	for key := range uint64(512) {
+		require.True(t, b.Add(key, val), "Add reports the value was offered")
+	}
+	b.c.CleanUp()
+
+	// The charge tracks what otter actually holds, however many were refused.
+	require.Equal(t, int64(b.c.WeightedSize()), b.resident.Load())
+	require.LessOrEqual(t, b.resident.Load(), b.limit.Load())
+	require.Positive(t, b.Len())
+}
