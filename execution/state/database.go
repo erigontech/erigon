@@ -24,6 +24,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -47,6 +48,18 @@ func HasAccount(r StateReader, address accounts.Address) (bool, error) {
 	acc, err := r.ReadAccountData(address)
 	return acc != nil, err
 }
+
+// AccountValueReader reads an account by plain address. One-shot RPC reads use it: interning
+// a fresh address per request (unique.Make) makes each GC cycle stall a loaded server.
+type AccountValueReader interface {
+	ReadAccountDataByValue(address common.Address) (*accounts.Account, error)
+}
+
+var (
+	_ AccountValueReader = (*CachedReader3)(nil)
+	_ AccountValueReader = (*ReaderV3)(nil)
+	_ AccountValueReader = (*HistoryReaderV3)(nil)
+)
 
 type StateReader interface {
 	ReadAccountData(address accounts.Address) (*accounts.Account, error)

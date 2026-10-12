@@ -48,7 +48,11 @@ func (r *CachedReader3) TracePrefix() string       { return "" }
 
 // ReadAccountData is called when an account needs to be fetched from the state
 func (r *CachedReader3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
-	r.addr = address.Value()
+	return r.ReadAccountDataByValue(address.Value())
+}
+
+func (r *CachedReader3) ReadAccountDataByValue(address common.Address) (*accounts.Account, error) {
+	r.addr = address
 	enc, err := r.cache.Get(r.addr[:])
 	if err != nil {
 		return nil, err

@@ -265,8 +265,13 @@ func (hr *cachedHistoryReaderV3) SetTxNum(txNum uint64) {
 }
 
 func (hr *cachedHistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
-	addressValue := address.Value()
-	enc, ok, err := hr.cache.GetAsOf(addressValue[:], hr.reader.GetTxNum())
+	return hr.ReadAccountDataByValue(address.Value())
+}
+
+var _ state.AccountValueReader = (*cachedHistoryReaderV3)(nil)
+
+func (hr *cachedHistoryReaderV3) ReadAccountDataByValue(address common.Address) (*accounts.Account, error) {
+	enc, ok, err := hr.cache.GetAsOf(address[:], hr.reader.GetTxNum())
 	if err != nil {
 		return nil, err
 	}
@@ -282,7 +287,7 @@ func (hr *cachedHistoryReaderV3) ReadAccountData(address accounts.Address) (*acc
 		return &a, nil
 	}
 
-	return hr.reader.ReadAccountData(address)
+	return hr.reader.ReadAccountDataByValue(address)
 }
 
 // HasAccount answers from the cached encoding's length, so a historical existence check

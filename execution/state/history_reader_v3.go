@@ -191,7 +191,11 @@ func StateHistoryStartTxNum(ttx kv.TemporalTx) uint64 {
 func (hr *HistoryReaderV3) DiscardReadList() {}
 
 func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
-	hr.addr = address.Value()
+	return hr.ReadAccountDataByValue(address.Value())
+}
+
+func (hr *HistoryReaderV3) ReadAccountDataByValue(address common.Address) (*accounts.Account, error) {
+	hr.addr = address
 	enc, ok, err := hr.getAsOf(kv.AccountsDomain, hr.addr[:])
 	if err != nil || !ok || len(enc) == 0 {
 		if hr.trace {
