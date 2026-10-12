@@ -35,8 +35,6 @@ func TestPayloadAttestationRateLimiterAdmitsFullCommitteeBurstFromOnePeer(t *tes
 	}
 }
 
-// Proposers publish their preferences for an epoch in bursts, and gossip drops every later copy
-// of a message the limiter ignored, so one peer must be able to relay both accepted epochs at once.
 func TestProposerPreferencesRateLimiterAcceptsTwoEpochsFromOnePeer(t *testing.T) {
 	condition := withProposerPreferencesRateLimiter()
 	pid := peer.ID("relaying-peer")
