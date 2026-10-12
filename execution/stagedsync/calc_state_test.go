@@ -420,8 +420,9 @@ func (r *preBlockReader) TracePrefix() string                                   
 // TestSDOfPreExistingContract_FullPipeline drives the production pipeline
 // end-to-end for an SD-of-pre-existing-contract scenario:
 //
-//	IBS.Selfdestruct (intra_block_state.go ~1430) emits via versionWritten:
-//	    IncarnationPath = original.Incarnation
+//	IBS.Selfdestruct emits via versionWritten:
+//	    IncarnationPath = 0 (the fixture writes a synthetic non-zero value
+//	                       to check that the calculator zeroes it)
 //	    SelfDestructPath = true
 //	    BalancePath = 0
 //	    StoragePath[k] = 0  for each k in stateObject.dirtyStorage
@@ -430,10 +431,8 @@ func (r *preBlockReader) TracePrefix() string                                   
 //	  → calcState.ApplyWrites(normalized)
 //	  → calcState.FlushToUpdates(updates)
 //
-// This test populates `vm` with the same versionWritten emits IBS.Selfdestruct
-// publishes in production (concern #1 from yperbasis review on PR #21032 —
-// the prior version of this test had an empty vm and so the completion
-// loop's vm.Read fallback never fired, masking the actual production flow).
+// This test also populates `vm` with these writes, so the completion loop's
+// vm.Read fallback runs as in production; only the incarnation value differs.
 //
 // What it locks in (post-#21088 corrected semantics):
 //  1. Normalize detects SD'd addresses by scanning for

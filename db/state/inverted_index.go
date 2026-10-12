@@ -78,6 +78,8 @@ type InvertedIndex struct {
 	logger log.Logger
 
 	checker *DependencyIntegrityChecker
+
+	_testBuildAccessorHook func(rs *recsplit.RecSplit)
 }
 
 type iiVisible struct {
@@ -1275,7 +1277,7 @@ func (ii *InvertedIndex) buildMapAccessorAt(ctx context.Context, idxPath string,
 	// each such non-existing key read `MPH` transforms to random
 	// key read. `LessFalsePositives=true` feature filtering-out such cases (with `1/256=0.3%` false-positives).
 
-	if err := buildHashMapAccessor(ctx, data, ii.Compression, idxPath, false, cfg, ps, ii.logger, nil); err != nil {
+	if err := buildHashMapAccessor(ctx, data, ii.Compression, idxPath, false, cfg, ps, ii.logger, ii._testBuildAccessorHook); err != nil {
 		return err
 	}
 	return nil

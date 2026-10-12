@@ -57,6 +57,8 @@ func (r *calcPBinReader) CloneForWorker(context.Context, kv.TemporalTx) commitme
 	return r
 }
 
+func (r *calcPBinReader) BindsWorkerTx() bool { return false }
+
 func calcPBinReaderKey(domain kv.Domain, key []byte) string { return fmt.Sprintf("%d:%x", domain, key) }
 
 func calcFeedState(account commitment.PBinFeedAccount) eip8297.State {

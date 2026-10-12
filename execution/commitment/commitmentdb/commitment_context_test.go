@@ -143,6 +143,7 @@ func (r *seekStateReader) Read(domain kv.Domain, key []byte, _ uint64) ([]byte, 
 func (r *seekStateReader) Clone(kv.TemporalTx) StateReader { return r }
 
 func (r *seekStateReader) CloneForWorker(context.Context, kv.TemporalTx) StateReader { return r }
+func (r *seekStateReader) BindsWorkerTx() bool                                       { return false }
 
 type seekSharedDomains struct {
 	sd
@@ -341,6 +342,8 @@ func (r *testStateReader) Read(d kv.Domain, key []byte, stepSize uint64) ([]byte
 func (r *testStateReader) Clone(kv.TemporalTx) StateReader { return r }
 
 func (r *testStateReader) CloneForWorker(context.Context, kv.TemporalTx) StateReader { return r }
+
+func (r *testStateReader) BindsWorkerTx() bool { return false }
 
 func Test_TrieContext_BranchCopiesData(t *testing.T) {
 	t.Parallel()

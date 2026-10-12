@@ -17,7 +17,7 @@ func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Ar
 	const blockPruneDistance = uint64(1_000_000)
 
 	if !cfg.caplinConfig.ArchiveBlocks && args.seenSlot > blockPruneDistance {
-		if err := beacon_indicies.PruneBlocks(ctx, tx, args.seenSlot-blockPruneDistance); err != nil {
+		if err := beacon_indicies.PruneBlocks(tx, args.seenSlot-blockPruneDistance); err != nil {
 			return err
 		}
 	}

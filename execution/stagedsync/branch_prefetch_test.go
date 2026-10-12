@@ -227,7 +227,7 @@ func TestHandleBlockRequestQueuesBALWrites(t *testing.T) {
 
 	p := &branchPrefetcher{work: make(chan prefetchItem, 16)}
 	cc := &commitmentCalculator{
-		state:         &calcState{prefetch: p},
+		state:         &calcState{branchPrefetch: p},
 		pending:       map[uint64]*pendingBlock{},
 		computedAhead: map[uint64]bool{},
 		balRoots:      map[uint64][]byte{},
@@ -276,7 +276,7 @@ func TestHandleBlockRequestQueuesBinaryBALKeys(t *testing.T) {
 		p.shards[i].records = make(map[string]prefetchedRecord)
 	}
 	cc := &commitmentCalculator{
-		state:         &calcState{prefetch: p},
+		state:         &calcState{branchPrefetch: p},
 		pending:       map[uint64]*pendingBlock{},
 		computedAhead: map[uint64]bool{},
 		balRoots:      map[uint64][]byte{},
@@ -331,7 +331,7 @@ func TestComputeAheadReadsPrefetchedBranches(t *testing.T) {
 	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out)
 	require.NoError(t, err)
 	defer cc.Stop()
-	p := cc.state.prefetch
+	p := cc.state.branchPrefetch
 	require.NotNil(t, p)
 	cc.hasFirstBlock, cc.firstBlockNum = true, 1
 

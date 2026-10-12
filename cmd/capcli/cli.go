@@ -323,7 +323,7 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 
 	log.Info("Starting with", "root", common.Hash(currentRoot), "slot", currentBlock.Block.Slot)
 	currentRoot = currentBlock.Block.ParentRoot
-	if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, currentBlock, true); err != nil {
+	if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, currentBlock, true); err != nil {
 		return err
 	}
 	if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, baseUriBlob, currentBlock); err != nil {
@@ -355,7 +355,7 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 		if err != nil {
 			return false, err
 		}
-		if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, currentBlock, true); err != nil {
+		if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, currentBlock, true); err != nil {
 			return false, err
 		}
 		if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, baseUriBlob, currentBlock); err != nil {
@@ -375,7 +375,7 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 				break
 			}
 
-			if err := beacon_indicies.MarkRootCanonical(ctx, tx, *slot, currentRoot); err != nil {
+			if err := beacon_indicies.MarkRootCanonical(tx, *slot, currentRoot); err != nil {
 				return false, err
 			}
 			if c.Blobs {
@@ -405,7 +405,7 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 				}
 
 			}
-			currentRoot, err = beacon_indicies.ReadParentBlockRoot(ctx, tx, currentRoot)
+			currentRoot, err = beacon_indicies.ReadParentBlockRoot(tx, currentRoot)
 			if err != nil {
 				return false, err
 			}
@@ -698,7 +698,7 @@ func (r *RetrieveHistoricalState) Run(ctx context.Context) error {
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}
-	if _, err := antiquary.FillStaticValidatorsTableIfNeeded(ctx, log.Root(), stateSn, vt); err != nil {
+	if _, err := antiquary.FillStaticValidatorsTableIfNeeded(log.Root(), stateSn, vt); err != nil {
 		return err
 	}
 

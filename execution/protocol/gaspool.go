@@ -205,9 +205,15 @@ func CheckBlockGasInclusion(gp *GasPool, executionGas, stateGas, blobGas uint64)
 //
 //	execution = min(MaxTxnGasLimit, tx.gas)
 //	state     = tx.gas
-func InclusionContributions(gas uint64, isAmsterdam bool) (uint64, uint64) {
+//
+// With skipExecutionGasCap (read-only RPC calls) the execution gas is not capped, so the
+// whole gas_limit is reserved in the execution dimension too.
+func InclusionContributions(gas uint64, isAmsterdam, skipExecutionGasCap bool) (uint64, uint64) {
 	if !isAmsterdam {
 		return gas, 0
+	}
+	if skipExecutionGasCap {
+		return gas, gas
 	}
 	return min(params.MaxTxnGasLimit, gas), gas
 }

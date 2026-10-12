@@ -63,6 +63,8 @@ func (r *calcStateReader) CloneForWorker(ctx context.Context, tx kv.TemporalTx) 
 	return &calcStateReader{state: r.state, fallback: r.fallback.CloneForWorker(ctx, tx)}
 }
 
+func (r *calcStateReader) BindsWorkerTx() bool { return r.fallback.BindsWorkerTx() }
+
 func (r *calcStateReader) Read(domain kv.Domain, key []byte, stepSize uint64) ([]byte, kv.Step, error) {
 	if domain == kv.AccountsDomain && len(key) == length.Addr {
 		addr := accounts.InternAddress(common.BytesToAddress(key))
@@ -178,7 +180,8 @@ type calcState struct {
 	feedSlots   []commitment.FeedSlot
 	feedValues  []byte
 
-	prefetch *branchPrefetcher
+	prefetch       func(plainKey []byte)
+	branchPrefetch *branchPrefetcher
 }
 
 // LazyLoadErr returns the first error encountered during ensureAccount
@@ -248,7 +251,10 @@ func (cs *calcState) markDirty(addr accounts.Address, acc *calcAccountState) {
 	acc.dirty = true
 	cs.dirtyAccounts = append(cs.dirtyAccounts, addr)
 	address := addr.Value()
-	cs.prefetch.add(prefetchItem{account: acc.hash, address: address})
+	cs.branchPrefetch.add(prefetchItem{account: acc.hash, address: address})
+	if cs.prefetch != nil {
+		cs.prefetch(address[:])
+	}
 }
 
 func (cs *calcState) markWiped(addr accounts.Address) {
@@ -319,7 +325,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		}
 		acc := cs.ensureAccount(addr, writes)
 		address := addr.Value()
-		cs.prefetch.add(prefetchItem{account: acc.hash, address: address, codeHash: vw.Val.Hash.Value(), codeChunks: (len(vw.Val.Bytes) + eip8297.ChunkDataLen - 1) / eip8297.ChunkDataLen, codeWritten: true})
+		cs.branchPrefetch.add(prefetchItem{account: acc.hash, address: address, codeHash: vw.Val.Hash.Value(), codeChunks: (len(vw.Val.Bytes) + eip8297.ChunkDataLen - 1) / eip8297.ChunkDataLen, codeWritten: true})
 		acc.CodeHash = vw.Val.Hash.Value()
 		cs.markDirty(addr, acc)
 		if clearsDeleted(addr, vw.Val.Len() > 0) {
@@ -345,7 +351,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		if dirty == nil {
 			dirty = make(map[accounts.StorageKey]bool)
 			cs.storageDirty[addr] = dirty
-			cs.prefetch.add(prefetchItem{account: st.hash, address: address})
+			cs.branchPrefetch.add(prefetchItem{account: st.hash, address: address})
 		}
 		for key, vw := range inner {
 			slot, ok := st.slots[key]
@@ -357,13 +363,18 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 			st.slots[key] = slot
 			if !dirty[key] {
 				dirty[key] = true
-				cs.prefetch.add(prefetchItem{account: st.hash, slot: slot.hash, address: address, plainSlot: key.Value(), storage: true})
+				cs.branchPrefetch.add(prefetchItem{account: st.hash, slot: slot.hash, address: address, plainSlot: key.Value(), storage: true})
+				if cs.prefetch != nil {
+					slotKey := key.Value()
+					cs.prefetch(append(address[:], slotKey[:]...))
+				}
 			}
 		}
 	}
 	// An account still Deleted after the field writes (no reviving non-zero
-	// write) must be all-zero — matching serial's DomainDel leaf removal — even
-	// though IBS emits the pre-SD IncarnationPath/BalancePath values.
+	// write) must be all-zero, matching serial's DomainDel leaf removal:
+	// Normalize drops its field writes, so it still holds the values loaded by
+	// ensureAccount or left by an earlier tx of the block.
 	for addr := range sdThisCall {
 		if acc, ok := cs.accounts[addr]; ok && acc.Deleted {
 			if !eip8246 {

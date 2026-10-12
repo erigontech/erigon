@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
@@ -56,11 +57,22 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			stateCreate = 0
 		}
 
-		slot := callContext.peekStorageKey(evm)
+		ibs := evm.IntraBlockState()
+		cached := -1
+		if callContext.slots.on {
+			cached = callContext.lookupSlot(evm)
+		}
+		var slot accounts.StorageKey
 		access := params.WarmStorageReadCostEIP2929
-		slotPresent := evm.IntraBlockState().SlotKnownWarm(callContext.Address(), slot)
-		if !slotPresent {
-			_, slotPresent = evm.IntraBlockState().SlotInAccessList(callContext.Address(), slot)
+		slotPresent := cached >= 0
+		if slotPresent {
+			slot = callContext.slots.key[cached]
+		} else {
+			slot = callContext.peekStorageKey(evm)
+			slotPresent = ibs.SlotKnownWarm(callContext.Address(), slot)
+			if !slotPresent {
+				_, slotPresent = ibs.SlotInAccessList(callContext.Address(), slot)
+			}
 		}
 		if !slotPresent {
 			access = coldAccess
@@ -69,11 +81,21 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			return mdgas.MdGasCost{}, ErrOutOfGas
 		}
 		if !slotPresent {
-			evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), slot)
+			ibs.AddSlotToAccessList(callContext.Address(), slot)
 		}
 		var value uint256.Int
 		value.Set(callContext.Stack.back(1))
-		current, _ := evm.IntraBlockState().GetState(callContext.Address(), slot)
+		var current uint256.Int
+		if cached >= 0 {
+			current = callContext.slots.val[cached]
+		} else {
+			word := *callContext.Stack.peek()
+			current, _ = ibs.GetState(callContext.Address(), slot)
+			if callContext.slots.on {
+				stamp, _ := ibs.ReadStamp()
+				callContext.slots.put(stamp, word, slot, current)
+			}
+		}
 
 		if current.Eq(&value) { // noop (1)
 			return mdgas.MdGasCost{Execution: access}, nil
@@ -117,6 +139,9 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 func gasSLoadEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
 	// If the caller cannot afford the cost, this change will be rolled back
 	// If he does afford it, we can skip checking the same thing later on, during execution
+	if callContext.slots.on && callContext.lookupSlot(evm) >= 0 {
+		return mdgas.MdGasCost{Execution: params.WarmStorageReadCostEIP2929}, nil
+	}
 	addr, slot := callContext.Address(), callContext.peekStorageKey(evm)
 	if evm.IntraBlockState().SlotKnownWarm(addr, slot) {
 		return mdgas.MdGasCost{Execution: params.WarmStorageReadCostEIP2929}, nil

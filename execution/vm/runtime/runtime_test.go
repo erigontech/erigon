@@ -20,17 +20,20 @@
 package runtime
 
 import (
+	"bytes"
 	"fmt"
 	"math/big"
 	"os"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -159,6 +162,127 @@ func TestCall(t *testing.T) {
 	if num.Cmp(big.NewInt(10)) != 0 {
 		t.Error("Expected 10, got", num)
 	}
+}
+
+func TestCallDoesNotCreateOrigin(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	origin := accounts.InternAddress(common.HexToAddress("0xbb"))
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	require.NoError(t, statedb.SetCode(address, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+
+	_, _, err := Call(address, nil, &Config{State: statedb, Origin: origin})
+	require.NoError(t, err)
+	exists, err := statedb.Exist(origin)
+	require.NoError(t, err)
+	require.False(t, exists)
+}
+
+// returnCalldata32 returns the first 32 bytes of its calldata.
+var returnCalldata32 = []byte{
+	byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.CALLDATACOPY),
+	byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN),
+}
+
+func TestCallReusesOutputBufferAcrossTransactions(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	require.NoError(t, statedb.SetCode(address, returnCalldata32, tracing.CodeChangeUnspecified))
+	cfg := &Config{State: statedb}
+
+	first, _, err := Call(address, nil, cfg)
+	require.NoError(t, err)
+	second, _, err := Call(address, nil, cfg)
+	require.NoError(t, err)
+	require.Same(t, unsafe.SliceData(first), unsafe.SliceData(second))
+}
+
+// A transaction that returned a large output does not leave its buffer to the next one.
+func TestCallDropsAnOversizedOutputBuffer(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	returnCalldataSize := []byte{byte(vm.PUSH1), 0, byte(vm.CALLDATALOAD), byte(vm.PUSH1), 0, byte(vm.RETURN)}
+	require.NoError(t, statedb.SetCode(address, returnCalldataSize, tracing.CodeChangeUnspecified))
+	cfg := &Config{State: statedb}
+	size := func(n int) []byte { return common.LeftPadBytes(big.NewInt(int64(n)).Bytes(), 32) }
+
+	large, _, err := Call(address, size(2*1024*1024), cfg)
+	require.NoError(t, err)
+	small, _, err := Call(address, size(32), cfg)
+	require.NoError(t, err)
+	require.NotSame(t, unsafe.SliceData(large), unsafe.SliceData(small))
+}
+
+// A system call runs without Prepare and keeps its output, as the EIP-7002 requests do.
+func TestCallWithoutPrepareGetsItsOwnOutput(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	require.NoError(t, statedb.SetCode(address, returnCalldata32, tracing.CodeChangeUnspecified))
+	cfg := &Config{State: statedb}
+	first, second := bytes.Repeat([]byte{1}, 32), bytes.Repeat([]byte{2}, 32)
+
+	out, _, err := Call(address, first, cfg)
+	require.NoError(t, err)
+	_, _, _, err = NewEnv(cfg).Call(cfg.Origin, address, second, mdgas.MdGas{Execution: cfg.GasLimit}, uint256.Int{}, false)
+	require.NoError(t, err)
+	require.Equal(t, first, out)
+}
+
+func TestCreatedCodeOutlivesNextTransaction(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	require.NoError(t, statedb.SetCode(address, returnCalldata32, tracing.CodeChangeUnspecified))
+	cfg := &Config{State: statedb}
+	setDefaults(cfg)
+	vmenv := NewEnv(cfg)
+	rules := vmenv.ChainRules()
+	gas := mdgas.MdGas{Execution: cfg.GasLimit}
+	code := bytes.Repeat([]byte{1}, 32)
+	initCode := append(append([]byte{byte(vm.PUSH32)}, code...),
+		byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN))
+
+	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil)
+	_, _, _, err := vmenv.Call(cfg.Origin, address, nil, gas, uint256.Int{}, false)
+	require.NoError(t, err)
+	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil)
+	_, created, _, _, err := vmenv.Create(cfg.Origin, initCode, gas, uint256.Int{}, nil, false)
+	require.NoError(t, err)
+	_, _, err = Call(address, bytes.Repeat([]byte{2}, 32), cfg)
+	require.NoError(t, err)
+
+	got, err := statedb.GetCode(created)
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+}
+
+func TestInnerCreatedCodeOutlivesNextCall(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	callee := common.HexToAddress("0xaa")
+	factory := accounts.InternAddress(common.HexToAddress("0xbb"))
+	code := bytes.Repeat([]byte{1}, 32)
+	require.NoError(t, statedb.SetCode(accounts.InternAddress(callee), returnCalldata32, tracing.CodeChangeUnspecified))
+	require.NoError(t, statedb.SetCode(factory, program.New().
+		Create2(program.New().ReturnData(code).Bytes(), 0).
+		Mstore(bytes.Repeat([]byte{2}, 32), 0).
+		Call(nil, callee, 0, 0, 32, 0, 32).Op(vm.POP).
+		Push(0).Op(vm.MSTORE).Return(0, 32).Bytes(), tracing.CodeChangeUnspecified))
+
+	ret, _, err := Call(factory, nil, &Config{State: statedb})
+	require.NoError(t, err)
+	got, err := statedb.GetCode(accounts.InternAddress(common.BytesToAddress(ret)))
+	require.NoError(t, err)
+	require.Equal(t, code, got)
 }
 
 func TestCreateInsufficientBalanceLeavesGasUntouched(t *testing.T) {
@@ -815,7 +939,7 @@ func runZeroValueSystemCall(t *testing.T, aura bool) (*state.IntraBlockState, ty
 		systemAddr,
 		target,
 		nil,
-		mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules),
+		mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules, false),
 		uint256.Int{}, // value = 0
 		false,
 	)
@@ -974,6 +1098,116 @@ func TestOpcodeMaskStillReportsFaults(t *testing.T) {
 			}
 			require.Empty(t, opcodes, "the mask excludes every opcode this code runs")
 			require.NotEmpty(t, faults, "an excluded opcode that faults must still reach OnFault")
+		})
+	}
+}
+
+// loadTo is SLOAD slot, MSTORE at.
+func loadTo(p *program.Program, slot, at int) *program.Program {
+	return p.Push(slot).Op(vm.SLOAD).Push(at).Op(vm.MSTORE)
+}
+
+// Repeat storage reads are served from caches on both the serial and the versioned path.
+// Both must match the versioned path with the caches off, in results and gas.
+func TestStorageCachesMatchVersionedPath(t *testing.T) {
+	writeThenRevert := program.New().Sstore(1, 7).Push(0).Push(0).Op(vm.REVERT).Bytes()
+	warmThenRevert := program.New().Push(2).Op(vm.SLOAD, vm.POP).Push(0).Push(0).Op(vm.REVERT).Bytes()
+	c1, c2 := common.HexToAddress("0x2001"), common.HexToAddress("0x2002")
+	p := program.New()
+	loadTo(p, 1, 0)
+	loadTo(p, 1, 32)
+	p.Sstore(1, 5)
+	loadTo(p, 1, 64)
+	p.Sstore(1, 5)
+	p.DelegateCall(nil, c1, 0, 0, 0, 0).Op(vm.POP)
+	loadTo(p, 1, 96)
+	p.DelegateCall(nil, c2, 0, 0, 0, 0).Op(vm.POP)
+	loadTo(p, 2, 128)
+	p.Sstore(1, 0)
+	loadTo(p, 1, 160)
+	p.Return(0, 192)
+
+	run := func(statedb *state.IntraBlockState) (uint64, []byte) {
+		t.Helper()
+		defer statedb.Close()
+		top := accounts.InternAddress(common.HexToAddress("0x2000"))
+		require.NoError(t, statedb.SetCode(top, p.Bytes(), tracing.CodeChangeUnspecified))
+		require.NoError(t, statedb.SetCode(accounts.InternAddress(c1), writeThenRevert, tracing.CodeChangeUnspecified))
+		require.NoError(t, statedb.SetCode(accounts.InternAddress(c2), warmThenRevert, tracing.CodeChangeUnspecified))
+		const gasLimit = 2_000_000
+		ret, left, err := Call(top, nil, &Config{State: statedb, GasLimit: gasLimit})
+		require.NoError(t, err)
+		return gasLimit - left.Total(), ret
+	}
+	versioned := func() *state.IntraBlockState {
+		ibs := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
+		ibs.SetNoMaterialize(true)
+		return ibs
+	}
+	was := dbg.TraceTransactionIO
+	t.Cleanup(func() { dbg.TraceTransactionIO = was })
+	dbg.TraceTransactionIO = true // turns the caches off
+	wantGas, want := run(versioned())
+	dbg.TraceTransactionIO = false
+	require.Equal(t, uint64(5), new(uint256.Int).SetBytes(want[96:128]).Uint64(), "a reverted DELEGATECALL wrote the slot")
+	for name, statedb := range map[string]*state.IntraBlockState{"versioned": versioned(), "serial": state.New(state.NewNoopReader())} {
+		gas, got := run(statedb)
+		require.Equal(t, want, got, name)
+		require.Equal(t, wantGas, gas, name)
+	}
+}
+
+// Frames reuse pooled contexts. A frame with another storage address must not read the
+// previous frame's slots, even when nothing changed the state in between.
+func TestStorageCacheIsPerFrame(t *testing.T) {
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	x, y := common.HexToAddress("0x2001"), common.HexToAddress("0x2002")
+	readSlot := program.New()
+	loadTo(readSlot, 1, 0).Return(0, 32)
+	for addr, v := range map[common.Address]uint64{x: 11, y: 22} {
+		require.NoError(t, statedb.SetCode(accounts.InternAddress(addr), readSlot.Bytes(), tracing.CodeChangeUnspecified))
+		require.NoError(t, statedb.SetState(accounts.InternAddress(addr), accounts.InternKey(common.BigToHash(big.NewInt(1))), *uint256.NewInt(v)))
+	}
+	// The first two calls warm both accounts and slots, so the last two change nothing.
+	p := program.New().StaticCall(nil, x, 0, 0, 0, 0).Op(vm.POP).StaticCall(nil, y, 0, 0, 0, 0).Op(vm.POP)
+	p.StaticCall(nil, x, 0, 0, 0, 32).Op(vm.POP).StaticCall(nil, y, 0, 0, 32, 32).Op(vm.POP).Return(0, 64)
+	top := accounts.InternAddress(common.HexToAddress("0x2000"))
+	require.NoError(t, statedb.SetCode(top, p.Bytes(), tracing.CodeChangeUnspecified))
+	ret, _, err := Call(top, nil, &Config{State: statedb, GasLimit: 1_000_000})
+	require.NoError(t, err)
+	require.Equal(t, []uint64{11, 22}, []uint64{new(uint256.Int).SetBytes(ret[:32]).Uint64(), new(uint256.Int).SetBytes(ret[32:]).Uint64()})
+}
+
+// Without EIP-161 an empty account survives in the post-state, so a zero-value
+// call has to leave its origin existing even though nothing transfers. A chain
+// past Spurious Dragon that disables EIP-161 keeps that behaviour.
+func TestCallCreatesItsOriginWithoutEIP161(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		cfg  *chain.Config
+	}{
+		{"pre-spurious-dragon", &chain.Config{ChainID: uint256.NewInt(1), HomesteadBlock: common.NewUint64(0)}},
+		{"eip161-disabled", &chain.Config{ChainID: uint256.NewInt(1), HomesteadBlock: common.NewUint64(0), SpuriousDragonBlock: common.NewUint64(0), DisabledEIPs: []int{161}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			tx, domains := temporaltest.NewTestTxSD(t, db)
+
+			ibs := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+			defer ibs.Close()
+			address := accounts.InternAddress(common.HexToAddress("0xaa"))
+			require.NoError(t, ibs.SetCode(address, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+
+			origin := accounts.InternAddress(common.HexToAddress("0xf00d"))
+			_, _, err := Call(address, nil, &Config{State: ibs, Origin: origin, ChainConfig: tc.cfg})
+			require.NoError(t, err)
+
+			exists, err := ibs.Exist(origin)
+			require.NoError(t, err)
+			require.True(t, exists, "the origin must exist in the post-state")
 		})
 	}
 }

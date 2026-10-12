@@ -48,6 +48,7 @@ func (r *pbinFeedReader) Read(domain kv.Domain, key []byte, _ uint64) ([]byte, k
 func (r *pbinFeedReader) Clone(kv.TemporalTx) StateReader { return r }
 
 func (r *pbinFeedReader) CloneForWorker(context.Context, kv.TemporalTx) StateReader { return r }
+func (r *pbinFeedReader) BindsWorkerTx() bool                                       { return false }
 
 func pbinReaderValue(domain kv.Domain, key []byte) string {
 	return fmt.Sprintf("%d:%x", domain, key)

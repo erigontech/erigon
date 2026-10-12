@@ -221,7 +221,7 @@ func (l *StructLogger) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsa
 	if depth != 0 {
 		return
 	}
-	l.output = output
+	l.output = slices.Clone(output)
 	l.err = err
 	if l.cfg.Debug {
 		fmt.Printf("0x%x\n", output)

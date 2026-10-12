@@ -96,8 +96,9 @@ type Domain struct {
 	// by block-access recency across all SharedDomains rather than per-SD.
 	adaptivePinController *commitment.AdaptivePinController
 
-	// _testBuildAccessorHook - test-only: called with the recsplit before the build loop in buildHashMapAccessor
-	_testBuildAccessorHook func(rs *recsplit.RecSplit)
+	// _testBuildAccessorHook - test-only: called with the recsplit and decompressor
+	// before the build loop in buildHashMapAccessor.
+	_testBuildAccessorHook func(rs *recsplit.RecSplit, data *seg.Decompressor)
 }
 
 type domainVisible struct {
@@ -1227,7 +1228,11 @@ func (d *Domain) buildHashMapAccessorAt(ctx context.Context, idxPath string, dat
 		NoFsync:    d.noFsync,
 		Workers:    d.BuildAccessorsWorkers,
 	}
-	return buildHashMapAccessor(ctx, data, d.Compression, idxPath, false, cfg, ps, d.logger, d._testBuildAccessorHook)
+	return buildHashMapAccessor(ctx, data, d.Compression, idxPath, false, cfg, ps, d.logger, func(rs *recsplit.RecSplit) {
+		if d._testBuildAccessorHook != nil {
+			d._testBuildAccessorHook(rs, data)
+		}
+	})
 }
 
 func (d *Domain) missedBtreeAccessors(source []*FilesItem, dl dirListing) (l []*FilesItem) {

@@ -106,6 +106,8 @@ func (r *pbinAbsentAccountReader) CloneForWorker(context.Context, kv.TemporalTx)
 	return r
 }
 
+func (r *pbinAbsentAccountReader) BindsWorkerTx() bool { return false }
+
 func TestPBinRebuildSkipsStorageForAbsentAccount(t *testing.T) {
 	address := bytes.Repeat([]byte{0x41}, length.Addr)
 	slot := bytes.Repeat([]byte{0x17}, length.Hash)
@@ -153,6 +155,8 @@ func (r *pbinExistingCodelessReader) Clone(kv.TemporalTx) commitmentdb.StateRead
 func (r *pbinExistingCodelessReader) CloneForWorker(context.Context, kv.TemporalTx) commitmentdb.StateReader {
 	return r
 }
+
+func (r *pbinExistingCodelessReader) BindsWorkerTx() bool { return false }
 
 func TestPBinRebuildFeedRewritesExistingCodelessCodeFields(t *testing.T) {
 	address := bytes.Repeat([]byte{0x42}, length.Addr)

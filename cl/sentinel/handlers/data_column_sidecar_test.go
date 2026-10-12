@@ -42,14 +42,13 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 )
 
 var initDataColumnSidecarTestConfig sync.Once
 
-func TestDataColumnSidecarsByRootMissingRootReturnsResourceUnavailable(t *testing.T) {
+func TestDataColumnSidecarsByRootMissingRootReturnsEmptySuccess(t *testing.T) {
 	ctx, host, host1, beaconCfg := setupDataColumnSidecarHandlerTest(t)
 
 	req := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](1)
@@ -67,7 +66,7 @@ func TestDataColumnSidecarsByRootMissingRootReturnsResourceUnavailable(t *testin
 	require.NoError(t, err)
 	t.Cleanup(func() { stream.Close() })
 
-	expectDataColumnSidecarResourceUnavailable(t, stream, reqBuf.Bytes())
+	expectDataColumnSidecarEmptyResponse(t, stream, reqBuf.Bytes())
 }
 
 func TestDataColumnSidecarsByRootBeforeFuluReturnsResourceUnavailable(t *testing.T) {
@@ -168,6 +167,43 @@ func TestDataColumnSidecarsByRootFoundSidecarReturnsSuccessWithoutTrailingResour
 	n, err := stream.Read(buf)
 	require.Zero(t, n)
 	require.Error(t, err)
+}
+
+func TestDataColumnSidecarsByRootMissingColumnReturnsEmptySuccess(t *testing.T) {
+	ctx, host, host1, beaconCfg, indiciesDB, columnStorage := setupDataColumnSidecarHandlerTestWithStore(t, 0)
+
+	tx, err := indiciesDB.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	blocks := populateDatabaseWithBlocks(t, tests.NewMockBlockReader(), tx, getEthClock(t).GetCurrentSlot(), 0)
+	require.NoError(t, tx.Commit())
+
+	header := blocks[0].SignedBeaconBlockHeader()
+	slot := header.Header.Slot
+	blockRoot, err := header.Header.HashSSZ()
+	require.NoError(t, err)
+	storedColumnIndex := uint64(0)
+	sidecar := cltypes.NewDataColumnSidecar()
+	sidecar.Index = storedColumnIndex
+	sidecar.SignedBlockHeader.Header.Slot = slot
+	require.NoError(t, columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(storedColumnIndex), sidecar))
+
+	req := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](1)
+	id := &cltypes.DataColumnsByRootIdentifier{
+		BlockRoot: blockRoot,
+		Columns:   solid.NewUint64ListSSZ(int(beaconCfg.NumberOfColumns)),
+	}
+	id.Columns.Append(1)
+	req.Append(id)
+
+	var reqBuf bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&reqBuf, req))
+
+	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.DataColumnSidecarsByRootProtocolV1))
+	require.NoError(t, err)
+	t.Cleanup(func() { stream.Close() })
+
+	expectDataColumnSidecarEmptyResponse(t, stream, reqBuf.Bytes())
 }
 
 func TestDataColumnSidecarsByRootEmptyRequestReturnsEmptySuccess(t *testing.T) {
@@ -464,7 +500,7 @@ func setupDataColumnSidecarHandlerTestWithStore(t *testing.T, fuluForkEpoch uint
 	_, mainnetCfg := clparams.GetConfigsByNetwork(1)
 	initDataColumnSidecarTestConfig.Do(func() {
 		if clparams.GetBeaconConfig() == nil {
-			clparams.InitGlobalStaticConfig(mainnetCfg, &clparams.CaplinConfig{})
+			clparams.InitGlobalStaticConfig(mainnetCfg)
 		}
 	})
 	beaconCfg := *mainnetCfg
@@ -476,7 +512,6 @@ func setupDataColumnSidecarHandlerTestWithStore(t *testing.T, fuluForkEpoch uint
 		tests.NewMockBlockReader(),
 		indiciesDB,
 		server,
-		peers.NewPool(server),
 		&clparams.NetworkConfig{},
 		nil,
 		&beaconCfg,
@@ -516,9 +551,8 @@ func expectDataColumnSidecarEmptyResponse(t *testing.T, stream network.Stream, r
 	_, err := stream.Write(reqData)
 	require.NoError(t, err)
 
-	require.NoError(t, stream.SetReadDeadline(time.Now().Add(200*time.Millisecond)))
 	buf := make([]byte, 1)
 	n, err := stream.Read(buf)
 	require.Zero(t, n)
-	require.Error(t, err)
+	require.ErrorIs(t, err, io.EOF)
 }

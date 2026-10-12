@@ -78,6 +78,7 @@ type Config struct {
 	PragueTime    *uint64 `json:"pragueTime,omitempty"`
 	OsakaTime     *uint64 `json:"osakaTime,omitempty"`
 	AmsterdamTime *uint64 `json:"amsterdamTime,omitempty"`
+	BogotaTime    *uint64 `json:"bogotaTime,omitempty"`
 
 	BinaryTrieTime *uint64 `json:"binaryTrieTime,omitempty"`
 
@@ -414,6 +415,11 @@ func (c *Config) IsBinaryTrieScheduled() bool {
 	return c.BinaryTrieTime != nil
 }
 
+// IsBogota returns whether time is either equal to the Bogota fork time or greater.
+func (c *Config) IsBogota(time uint64) bool {
+	return isForked(c.BogotaTime, time)
+}
+
 // IsPrague returns whether time is either equal to the Prague fork time or greater.
 func (c *Config) IsPrague(time uint64) bool {
 	return isForked(c.PragueTime, time)
@@ -647,6 +653,7 @@ func (c *Config) forkTimestamps() []forkTimestamp {
 		{name: "bpo4Time", what: "BPO4 fork timestamp", timestamp: c.Bpo4Time},
 		{name: "bpo5Time", what: "BPO5 fork timestamp", timestamp: c.Bpo5Time},
 		{name: "amsterdamTime", what: "Amsterdam fork timestamp", timestamp: c.AmsterdamTime, outOfOrder: true},
+		{name: "bogotaTime", what: "Bogota fork timestamp", timestamp: c.BogotaTime, outOfOrder: true},
 		{name: "balancerTime", what: "Balancer fork timestamp", timestamp: c.BalancerTime, outOfOrder: true},
 		{name: "binaryTrieTime", what: "Binary trie fork timestamp", timestamp: c.BinaryTrieTime, outOfOrder: true},
 	}
@@ -987,4 +994,11 @@ func isForked(s *uint64, head uint64) bool {
 
 func (c *Config) IsPreMerge(blockNumber uint64) bool {
 	return c.MergeHeight != nil && blockNumber < *c.MergeHeight
+}
+
+func (c *Config) IsPostMerge(number, time uint64) bool {
+	return (c.TerminalTotalDifficulty != nil && c.TerminalTotalDifficulty.IsZero()) ||
+		(c.MergeHeight != nil && number >= *c.MergeHeight) ||
+		(c.MergeNetsplitBlock != nil && number >= *c.MergeNetsplitBlock) ||
+		c.IsShanghai(time)
 }
