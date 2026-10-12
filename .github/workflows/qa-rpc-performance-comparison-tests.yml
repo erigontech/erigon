@@ -53,6 +53,7 @@ jobs:
         env:
           INPUT_RUN_GETH: ${{ github.event.inputs.run_geth }}
           INPUT_RUN_NETHERMIND: ${{ github.event.inputs.run_nethermind }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
         run: |
           set -euo pipefail
 
@@ -64,7 +65,7 @@ jobs:
           # - workflow_dispatch: controlled by inputs, at most one of them
           PEER=""
           if [ "${{ github.event_name }}" = "schedule" ]; then
-            if [ "${{ github.event.schedule }}" = "30 2 * * 0" ]; then
+            if [ "$EVENT_SCHEDULE" = "30 2 * * 0" ]; then
               PEER="nethermind"
             elif [ "$(date -u +%w)" = "0" ]; then  # Sunday, (0..6 = Sun..Sat)
               PEER="geth"
@@ -87,16 +88,12 @@ jobs:
             geth)       MATRIX+=',{"client":"geth","barrier_role":"geth","runs-on":["self-hosted","qa","Ethereum","rpc-latest-geth"],"install_dir":"/opt/go-ethereum"}' ;;
             nethermind) MATRIX+=',{"client":"nethermind","barrier_role":"geth","runs-on":["self-hosted","qa","Ethereum","rpc-latest-nethermind"],"install_dir":"/opt/nethermind"}' ;;
           esac
-          COORDINATED="false"
-          if [ -n "$PEER" ]; then
-            COORDINATED="true"
-          fi
 
           # Variables
           echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
           echo "network=${{ env.CHAIN }}" >> "$GITHUB_OUTPUT"
           echo "matrix={\"include\":[${MATRIX}]}" >> "$GITHUB_OUTPUT"
-          echo "coordinated=${COORDINATED}" >> "$GITHUB_OUTPUT"
+          echo "coordinated=$([ -n "$PEER" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
           echo "peer=${PEER}" >> "$GITHUB_OUTPUT"
 
       - name: Print configuration (for logs)
@@ -397,8 +394,10 @@ jobs:
 
           if [ "$CLIENT" == "erigon" ]; then
             commit=$(git -C "$RUNNER_WS/erigon" rev-parse --short HEAD)
+          elif [ "$CLIENT" == "geth" ]; then
+            commit=$(git -C "$CLIENT_INSTALL_DIR" rev-parse --short HEAD)
           else
-            commit=$(git -C "$CLIENT_INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo no-version)
+            commit=no-version  # the nethermind install is not a git checkout
           fi
           
           # Prepare historical test results directory
@@ -589,7 +588,7 @@ jobs:
           cat "$SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload test results
-        if: steps.test_step.outputs.test_executed == 'true'
+        if: always() && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: test-results-${{ env.CHAIN }}-${{ matrix.client }}${{ (matrix.client == 'erigon' && github.event.inputs.commitment_mode == 'parallel' && '-commitment-parallel') || (matrix.client == 'erigon' && github.event.inputs.commitment_mode == 'serial' && '-commitment-serial') || '' }}
