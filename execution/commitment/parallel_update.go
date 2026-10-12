@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"slices"
 	"sync"
 )
 
@@ -87,7 +88,7 @@ func resetEntries(c []touchEntry) []touchEntry {
 func (pu *parallelUpdate) handOff() {
 	pu.inflight.Wait()
 	c := pu.pending
-	pu.pending, pu.spare = pu.spare[:0], c
+	pu.pending, pu.spare = slices.Grow(pu.spare[:0], touchChunkKeys), c
 	pu.inflight.Go(func() {
 		pu.insertChunk(c)
 		clear(c)
