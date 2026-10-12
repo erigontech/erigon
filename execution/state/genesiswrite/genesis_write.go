@@ -175,9 +175,10 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		g := *genesis
 		g.Config = g.Config.Copy()
 		genesis = &g
+		genesisBinaryTrieTime := genesis.Config.BinaryTrieTime
 		applyOverrides(genesis.Config)
 		if overrideBinaryTrieTime != nil {
-			if err := checkBinaryTrieOverrideTime(*overrideBinaryTrieTime, genesis.Timestamp); err != nil {
+			if err := checkBinaryTrieOverrideTime(genesisBinaryTrieTime, *overrideBinaryTrieTime, genesis.Timestamp); err != nil {
 				return genesis.Config, nil, err
 			}
 		}
@@ -215,6 +216,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	// singleton -- chain.AllProtocolChanges, or a chainspec's own *chain.Config -- so the
 	// overrides go onto a copy or they rewrite the schedule for every later reader.
 	newCfg := configOrDefault(genesis, chainName, storedHash).Copy()
+	configuredBinaryTrieTime := newCfg.BinaryTrieTime
 	applyOverrides(newCfg)
 	storedCfg, storedErr := rawdb.ReadChainConfig(tx, storedHash)
 	if storedErr != nil {
@@ -225,7 +227,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 			return newCfg, nil, err
 		}
 		if overrideBinaryTrieTime != nil {
-			if err := checkBinaryTrieOverride(newCfg, storedBlock, dirs); err != nil {
+			if err := checkBinaryTrieOverride(newCfg, configuredBinaryTrieTime, storedBlock, dirs); err != nil {
 				return newCfg, nil, err
 			}
 		}
@@ -265,7 +267,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		return newCfg, nil, err
 	}
 	if overrideBinaryTrieTime != nil {
-		if err := checkBinaryTrieOverride(newCfg, storedBlock, dirs); err != nil {
+		if err := checkBinaryTrieOverride(newCfg, storedCfg.BinaryTrieTime, storedBlock, dirs); err != nil {
 			return newCfg, nil, err
 		}
 	}
@@ -515,7 +517,7 @@ func checkBinaryTrieSchedule(g *types.Genesis, settings *dbstate.ErigonDBSetting
 	return nil
 }
 
-func checkBinaryTrieOverride(cfg *chain.Config, genesisBlock *types.Block, dirs datadir.Dirs) error {
+func checkBinaryTrieOverride(cfg *chain.Config, previous *uint64, genesisBlock *types.Block, dirs datadir.Dirs) error {
 	settings, err := dbstate.ReadErigonDBSettings(dirs)
 	if errors.Is(err, fs.ErrNotExist) {
 		settings, err = &dbstate.ErigonDBSettings{}, nil
@@ -527,16 +529,20 @@ func checkBinaryTrieOverride(cfg *chain.Config, genesisBlock *types.Block, dirs 
 	if genesisBlock != nil {
 		g.Timestamp = genesisBlock.Time()
 	}
-	if err := checkBinaryTrieOverrideTime(*cfg.BinaryTrieTime, g.Timestamp); err != nil {
+	if err := checkBinaryTrieOverrideTime(previous, *cfg.BinaryTrieTime, g.Timestamp); err != nil {
 		return err
 	}
 	return checkBinaryTrieSchedule(g, settings)
 }
 
-func checkBinaryTrieOverrideTime(binaryTrieTime, genesisTime uint64) error {
+func checkBinaryTrieOverrideTime(previous *uint64, binaryTrieTime, genesisTime uint64) error {
 	if binaryTrieTime <= genesisTime {
 		return fmt.Errorf("--override.binary-trie %d is not after the genesis timestamp %d: a binary trie from genesis is scheduled by the genesis file",
 			binaryTrieTime, genesisTime)
+	}
+	if previous != nil && *previous <= genesisTime {
+		return fmt.Errorf("--override.binary-trie %d cannot reschedule a binary trie that starts at genesis (binaryTrieTime %d, genesis timestamp %d)",
+			binaryTrieTime, *previous, genesisTime)
 	}
 	return nil
 }
