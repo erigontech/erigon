@@ -21,15 +21,10 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
-		pc     = uint64(0) // program counter
-		t      *opTrace
-		res    []byte // result of the opcode execution function
-		tracer = evm.config.Tracer
+		pc  = uint64(0) // program counter
+		t   *opTrace
+		res []byte // result of the opcode execution function
 	)
-	if false {
-		t = &callContext.trace
-		*t = opTrace{debug: debug, trace: trace}
-	}
 	_, callContext.slots.on = evm.intraBlockState.ReadStamp()
 	callContext.slots.misses = 0
 
@@ -57,22 +52,6 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 		}
 		evm.depth--
 	}()
-
-	// Registered after the cleanup defer so LIFO runs it first: the tracer needs
-	// the stacks before callContext.put() returns them to the pool.
-	if false && debug {
-		defer func() {
-			if err == nil {
-				return
-			}
-			switch {
-			case !t.logged && tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)):
-				tracer.EmitOpcode(t.pc, byte(op), t.oldGas, t.cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-			case tracer.HasOpcodeHook() && tracer.HasFaultHook():
-				tracer.EmitFault(t.pc, byte(op), t.oldGas, t.cost, callContext, evm.depth, VMErrorFromErr(err))
-			}
-		}()
-	}
 
 	// The Interpreter main run loop (contextual). This loop runs until either an
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
@@ -160,7 +139,13 @@ run:
 						break run
 					}
 					pos := callContext.Stack.pop()
-					if !callContext.Contract.analysedJumpdest(pos) && !callContext.Contract.validJumpdest(pos) {
+					valid := callContext.Contract.analysedJumpdest(pos)
+					if !valid {
+						callContext.gas, callContext.savedPC = gasLeft, pc
+						valid = callContext.Contract.validJumpdest(pos)
+						gasLeft, pc = callContext.gas, callContext.savedPC
+					}
+					if !valid {
 						res, err = nil, ErrInvalidJump
 						break run
 					}
@@ -183,7 +168,13 @@ run:
 						pc++
 						continue run
 					}
-					if !callContext.Contract.analysedJumpdest(pos) && !callContext.Contract.validJumpdest(pos) {
+					valid := callContext.Contract.analysedJumpdest(pos)
+					if !valid {
+						callContext.gas, callContext.savedPC = gasLeft, pc
+						valid = callContext.Contract.validJumpdest(pos)
+						gasLeft, pc = callContext.gas, callContext.savedPC
+					}
+					if !valid {
 						res, err = nil, ErrInvalidJump
 						break run
 					}
@@ -205,7 +196,9 @@ run:
 				if sLen >= 2 && gasLeft >= GasFastStep {
 					gasLeft -= GasFastStep
 					x, y := callContext.Stack.pop1Peek1()
+					callContext.gas, callContext.savedPC = gasLeft, pc
 					y.Mul(x, y)
+					gasLeft, pc = callContext.gas, callContext.savedPC
 					pc++
 					continue run
 				}
@@ -213,7 +206,9 @@ run:
 				if sLen >= 2 && gasLeft >= GasFastStep {
 					gasLeft -= GasFastStep
 					x, y := callContext.Stack.pop1Peek1()
+					callContext.gas, callContext.savedPC = gasLeft, pc
 					y.Div(x, y)
+					gasLeft, pc = callContext.gas, callContext.savedPC
 					pc++
 					continue run
 				}
@@ -294,7 +289,9 @@ run:
 				if sLen < stackLimit && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
 					if end := pc + 1 + uint64(op-PUSH0); end <= uint64(len(callContext.Contract.Code)) {
+						callContext.gas, callContext.savedPC = gasLeft, pc
 						callContext.Stack.pushRef().SetBytes(callContext.Contract.Code[pc+1 : end])
+						gasLeft, pc = callContext.gas, callContext.savedPC
 						pc = pc + uint64(op-PUSH0)
 						pc++
 						continue run
@@ -305,10 +302,14 @@ run:
 					endMin := min(startMin+int(op-PUSH0), codeLen)
 
 					integer := callContext.Stack.pushRef()
+					callContext.gas, callContext.savedPC = gasLeft, pc
 					integer.SetBytes(callContext.Contract.Code[startMin:endMin])
+					gasLeft, pc = callContext.gas, callContext.savedPC
 
 					if missing := int(op-PUSH0) - (endMin - startMin); missing > 0 {
+						callContext.gas, callContext.savedPC = gasLeft, pc
 						integer.ILsh(uint(8 * missing))
+						gasLeft, pc = callContext.gas, callContext.savedPC
 					}
 
 					pc += uint64(op - PUSH0)
@@ -430,19 +431,11 @@ run:
 				continue run
 			}
 		}
-		if false && debug {
-			// Capture pre-execution values for tracing.
-			t.logged = false
-			t.pc = pc
-			t.oldGas = callContext.Gas()
-		}
+		callContext.savedPC = pc
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
 		operation := &jt[op]
 		cost := operation.constantGas
-		if false {
-			t.op, t.cost, t.forwarded = op, mdgas.MdGasCost{Execution: cost}, 0
-		}
 		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
 		// a stack shallower than numPop wraps negative and fails the compare.
 		if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
@@ -464,18 +457,8 @@ run:
 			continue run
 		}
 
-		if false && debug {
-			evm.traceOp(callContext, op, t)
-		}
-
-		// TODO - move this to a trace & set in the worker
-
-		if false && trace {
-			evm.tracePrint(callContext, op, pc, t)
-		}
-
 		// execute the operation
-		pc, res, err = operation.execute(pc, evm, callContext)
+		pc, res, err = operation.execute(callContext.savedPC, evm, callContext)
 		gasLeft = callContext.gas
 		if err != nil {
 			break run

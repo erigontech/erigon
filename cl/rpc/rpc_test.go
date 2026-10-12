@@ -115,7 +115,7 @@ func TestReqRespRequestsBoundContextsWithoutDeadline(t *testing.T) {
 func TestColumnSidecarsRequestSnapshotReflectsPeerMaskAndPreservesWrapper(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	if clparams.GetBeaconConfig() == nil {
-		clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+		clparams.InitGlobalStaticConfig(&cfg)
 	}
 	sentinel := &emptyColumnResponseSentinel{}
 	client := &BeaconRpcP2P{
@@ -163,7 +163,7 @@ func TestColumnSidecarsRequestRejectsOverCardinalityBeforeSidecarDecode(t *testi
 	cfg := clparams.MainnetBeaconConfig
 	cfg.InitializeForkSchedule()
 	if clparams.GetBeaconConfig() == nil {
-		clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+		clparams.InitGlobalStaticConfig(&cfg)
 	}
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
 	digest, err := clock.ComputeForkDigest(cfg.FuluForkEpoch)
@@ -214,7 +214,7 @@ func TestColumnSidecarsRequestAcceptsExactGloasForkDigest(t *testing.T) {
 	cfg.GloasForkEpoch = 2
 	cfg.InitializeForkSchedule()
 	if clparams.GetBeaconConfig() == nil {
-		clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+		clparams.InitGlobalStaticConfig(&cfg)
 	}
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
 	digest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
@@ -260,7 +260,7 @@ func TestColumnSidecarsRequestRejectsUnknownForkDigest(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.InitializeForkSchedule()
 	if clparams.GetBeaconConfig() == nil {
-		clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+		clparams.InitGlobalStaticConfig(&cfg)
 	}
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
 	unknownDigest := common.Bytes4{0xde, 0xad, 0xbe, 0xef}
@@ -300,7 +300,7 @@ func TestColumnSidecarsRequestRejectsUnknownForkDigest(t *testing.T) {
 func TestColumnSidecarsSparseMultiRootCapPreservesFilteredOrderAndWrapper(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	if clparams.GetBeaconConfig() == nil {
-		clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+		clparams.InitGlobalStaticConfig(&cfg)
 	}
 	sentinel := &emptyColumnResponseSentinel{}
 	client := &BeaconRpcP2P{

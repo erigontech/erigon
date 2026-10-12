@@ -80,7 +80,7 @@ func TestGetHeadersIncludesFinalized(t *testing.T) {
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	require.NoError(t, beacon_indicies.WriteBeaconBlockAndIndicies(context.Background(), tx, nonCanonicalBlock, false))
+	require.NoError(t, beacon_indicies.WriteBeaconBlockAndIndicies(tx, nonCanonicalBlock, false))
 	require.NoError(t, tx.Commit())
 
 	type expectedHeader struct {
@@ -173,7 +173,7 @@ func TestGetHeadHeaderIsCanonicalBeforeDatabasePromotion(t *testing.T) {
 	fcu.HeadSlotVal = head.Block.Slot
 
 	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
-		return beacon_indicies.TruncateCanonicalChain(context.Background(), tx, head.Block.Slot)
+		return beacon_indicies.TruncateCanonicalChain(tx, head.Block.Slot)
 	}))
 
 	server := httptest.NewServer(handler.mux)
