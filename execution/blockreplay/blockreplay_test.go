@@ -45,7 +45,8 @@ func TestCaptureReplayRoundTrip(t *testing.T) {
 			to := common.BytesToAddress([]byte{byte(i + 1), byte(j + 1), 0xab})
 			txn, txErr := types.SignTx(
 				types.NewTransaction(b.TxNonce(keyAddr), to, uint256.NewInt(1_000_000), params.TxGas, uint256.NewInt(1), nil),
-				*signer, key)
+				*signer, key,
+			)
 			require.NoError(t, txErr)
 			b.AddTx(txn)
 		}

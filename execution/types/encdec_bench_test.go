@@ -19,6 +19,7 @@ package types
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"math/rand"
 	"testing"
 
@@ -279,11 +280,8 @@ func BenchmarkLogJSON(b *testing.B) {
 		}
 	})
 
-	rpcLog := &RPCLog{
-		Log:            *log,
-		BlockTimestamp: hexutil.Uint64(1700000000),
-	}
-	b.Run("RPCLog/Single", func(b *testing.B) {
+	rpcLog := StampedLog(log, 1700000000)
+	b.Run("Log/Stamped", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
 			benchJSONSink, _ = json.Marshal(rpcLog)
@@ -315,11 +313,11 @@ func BenchmarkLogJSONUnmarshal(b *testing.B) {
 		}
 	})
 
-	rpcLog := &RPCLog{Log: *log, BlockTimestamp: hexutil.Uint64(1700000000)}
+	rpcLog := StampedLog(log, 1700000000)
 	rpcEncoded, err := json.Marshal(rpcLog)
 	require.NoError(b, err)
-	var rpcSink RPCLog
-	b.Run("RPCLog/Single", func(b *testing.B) {
+	var rpcSink Log
+	b.Run("Log/Stamped", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
 			_ = json.Unmarshal(rpcEncoded, &rpcSink)
@@ -375,3 +373,43 @@ var benchTxTypes = []struct {
 var benchJSONSink []byte
 
 var benchLogSink Log
+
+// Both readers, because only the slice-backed one can be pre-walked: a
+// *bytes.Reader leaves Peek empty, which is the path the txn pool takes.
+func BenchmarkDecodeAccessList(b *testing.B) {
+	for _, tuples := range []int{1, 10, 100} {
+		al := sampleAL(tuples, 2)
+		var buf bytes.Buffer
+		if err := rlp.EncodeListPrefix(accessListSize(al), &buf, make([]byte, 9)); err != nil {
+			b.Fatal(err)
+		}
+		if err := encodeAccessList(al, &buf, make([]byte, 33)); err != nil {
+			b.Fatal(err)
+		}
+		enc := buf.Bytes()
+
+		b.Run(fmt.Sprintf("slice/tuples%03d", tuples), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				s := rlp.NewBytesStream(enc)
+				var got AccessList
+				if err := decodeAccessList(&got, s); err != nil {
+					b.Fatal(err)
+				}
+				rlp.PutStream(s)
+			}
+		})
+
+		b.Run(fmt.Sprintf("streamed/tuples%03d", tuples), func(b *testing.B) {
+			b.ReportAllocs()
+			r := bytes.NewReader(nil)
+			for b.Loop() {
+				r.Reset(enc)
+				var got AccessList
+				if err := decodeAccessList(&got, rlp.NewStream(r, 0)); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}

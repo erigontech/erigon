@@ -26,8 +26,10 @@ import (
 
 type Address unique.Handle[common.Address]
 
-var ZeroAddress = InternAddress(common.Address{})
-var NilAddress = Address{}
+var (
+	ZeroAddress = InternAddress(common.Address{})
+	NilAddress  = Address{}
+)
 
 func InternAddress(a common.Address) Address {
 	return Address(unique.Make(a))
@@ -113,8 +115,10 @@ func (a Address) Cmp(o Address) int {
 
 type StorageKey unique.Handle[common.Hash]
 
-var ZeroKey = InternKey(common.Hash{})
-var NilKey = StorageKey{}
+var (
+	ZeroKey = InternKey(common.Hash{})
+	NilKey  = StorageKey{}
+)
 
 func InternKey(k common.Hash) StorageKey {
 	return StorageKey(unique.Make(k))
@@ -164,9 +168,11 @@ func (k StorageKey) Cmp(o StorageKey) int {
 
 type CodeHash unique.Handle[common.Hash]
 
-var ZeroCodeHash = InternCodeHash(common.Hash{})
-var NilCodeHash = CodeHash{}
-var EmptyCodeHash = InternCodeHash(empty.CodeHash)
+var (
+	ZeroCodeHash  = InternCodeHash(common.Hash{})
+	NilCodeHash   = CodeHash{}
+	EmptyCodeHash = InternCodeHash(empty.CodeHash)
+)
 
 func InternCodeHash(k common.Hash) CodeHash {
 	return CodeHash(unique.Make(k))

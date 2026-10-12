@@ -161,7 +161,6 @@ func TestApplyWithoutInit(t *testing.T) {
 		return err
 	}))
 	require.Equal(applied, applied2)
-
 }
 
 func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
@@ -348,7 +347,7 @@ func TestCommitCallRequired(t *testing.T) {
 		{
 			Name: "one",
 			Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
-				//don't call BeforeCommit
+				// don't call BeforeCommit
 				return nil
 			},
 		},

@@ -17,8 +17,6 @@
 package jsonrpc
 
 import (
-	"bytes"
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -126,8 +124,8 @@ func TestWitnessCacheWiringSharedFeed(t *testing.T) {
 	require.NotNil(t, sub)
 
 	hash := hashN(0x55)
-	enc := json.RawMessage(`{"state":["0xfeed"],"codes":[],"keys":[],"headers":[]}`)
-	builder.storeWitness(21, hash, enc)
+	result := &ExecutionWitnessResult{State: []hexutil.Bytes{{0xfe, 0xed}}}
+	builder.storeWitness(21, hash, result)
 
 	select {
 	case v := <-resc:
@@ -135,7 +133,7 @@ func TestWitnessCacheWiringSharedFeed(t *testing.T) {
 		require.Truef(t, ok, "notification payload must be WitnessNotification, got %T", v)
 		require.Equal(t, hexutil.Uint64(21), n.BlockNumber)
 		require.Equal(t, hash, n.BlockHash)
-		require.True(t, bytes.Equal(enc, n.Witness), "witness bytes must reach the serve-side subscriber verbatim")
+		require.Same(t, result, n.Witness, "the witness must reach the serve-side subscriber")
 	case <-time.After(2 * time.Second):
 		t.Fatal("builder publish did not reach the serve-side subscriber over the shared feed")
 	}

@@ -62,6 +62,7 @@ const (
 	// Use localItemKey to create those keys.
 	dbLocalSeq = "seq"
 )
+
 const (
 	dbNodeExpiration = 24 * time.Hour // Time after which an unseen node should be dropped.
 	dbCleanupCycle   = time.Hour      // Time period for running the expiration task.
@@ -71,9 +72,7 @@ const (
 	dbSyncPeriod         = 2 * time.Second // see BenchmarkNodeDBGeometry
 )
 
-var (
-	errInvalidIP = errors.New("invalid IP")
-)
+var errInvalidIP = errors.New("invalid IP")
 
 var zeroIP = netip.IPv6Unspecified()
 
@@ -304,6 +303,7 @@ func (db *DB) storeUint64(key []byte, n uint64) error {
 		return db._storeUint64(tx, key, n)
 	})
 }
+
 func (db *DB) _storeUint64(tx kv.RwTx, key []byte, n uint64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutUvarint(blob, n)]
@@ -451,7 +451,7 @@ func (db *DB) expireNodes() {
 		defer c.Close()
 		p := []byte(dbNodePrefix)
 		var prevId ID
-		var empty = true
+		empty := true
 		for k, v, err := c.Seek(p); bytes.HasPrefix(k, p); k, v, err = c.Next() {
 			if err != nil {
 				return err
@@ -570,7 +570,9 @@ func (db *DB) localSeq(id ID) uint64 {
 
 // storeLocalSeq stores the local record sequence counter.
 func (db *DB) storeLocalSeq(id ID, n uint64) {
-	db.storeUint64(localItemKey(id, dbLocalSeq), n)
+	if err := db.storeUint64(localItemKey(id, dbLocalSeq), n); err != nil {
+		log.Warn("[p2p] nodeDB.storeLocalSeq failed", "err", err)
+	}
 }
 
 // QuerySeeds retrieves random nodes to be used as potential seed nodes

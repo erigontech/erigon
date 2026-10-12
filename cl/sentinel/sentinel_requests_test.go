@@ -106,7 +106,7 @@ func getEthClock(t *testing.T) eth_clock.EthereumClock {
 func loadChain(t *testing.T) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, preState, postState *state.CachingBeaconState, reader *antiquarytests.MockBlockReader) {
 	blocks, preState, postState = antiquarytests.GetPhase0Random()
 	db = mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-	reader = antiquarytests.LoadChain(blocks, postState, db, t)
+	reader = antiquarytests.LoadChain(blocks, db, t)
 
 	sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 	noErr(sn.OnHeadState(postState))
@@ -181,9 +181,10 @@ func testSentinelBlocksByRange(t *testing.T) {
 	noErr(err)
 	defer stream.Close()
 
+	// The range must cover every block the test expects back: the test chain has gaps between blocks.
 	req := &cltypes.BeaconBlocksByRangeRequest{
 		StartSlot: blocks[0].Block.Slot,
-		Count:     6,
+		Count:     blocks[len(blocks)-1].Block.Slot - blocks[0].Block.Slot + 1,
 	}
 	noErr(ssz_snappy.EncodeAndWrite(stream, req))
 
@@ -209,7 +210,7 @@ func testSentinelBlocksByRange(t *testing.T) {
 			noErr(err)
 		}
 
-		encodedLn, _, err := ssz_snappy.ReadUvarint(r)
+		encodedLn, err := ssz_snappy.ReadUvarint(r)
 		noErr(err)
 
 		raw := make([]byte, encodedLn)
@@ -293,7 +294,7 @@ func testSentinelBlocksByRoots(t *testing.T) {
 			noErr(err)
 		}
 
-		encodedLn, _, err := ssz_snappy.ReadUvarint(r)
+		encodedLn, err := ssz_snappy.ReadUvarint(r)
 		noErr(err)
 
 		raw := make([]byte, encodedLn)

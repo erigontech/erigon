@@ -18,6 +18,7 @@ package commands
 
 import (
 	"math"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -218,5 +219,19 @@ func TestHistoryOffMatchesTheDefaultSchema(t *testing.T) {
 	}
 	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.ReceiptDomain} {
 		require.False(t, historyOff(statecfg.Schema.GetDomainCfg(d).Hist), "%s does write history, it must still be scanned", d)
+	}
+}
+
+func TestIsDefaultChaindata(t *testing.T) {
+	root := string(filepath.Separator)
+	for _, tc := range []struct {
+		chaindata, datadir string
+		want               bool
+	}{
+		{filepath.Join("data", "chaindata"), "data", true},
+		{filepath.Join(root, "data", "chaindata"), filepath.Join(root, "data"), true},
+		{filepath.Join("other", "chaindata"), "data", false},
+	} {
+		require.Equal(t, tc.want, isDefaultChaindata(tc.chaindata, tc.datadir), "%s in %s", tc.chaindata, tc.datadir)
 	}
 }

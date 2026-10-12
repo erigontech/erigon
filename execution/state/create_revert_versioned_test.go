@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -66,4 +67,54 @@ func TestNoMaterialize_RecreateRevertRestoresPrior(t *testing.T) {
 	ch, err = ibs.GetCodeHash(addr)
 	require.NoError(t, err)
 	require.Equal(t, committed.CodeHash, ch, "reverting the recreation restores the prior code hash")
+}
+
+// A touch creates the account without a balance read, so the creation records the
+// first one. After the revert the address must read as absent.
+func TestNoMaterialize_TouchFundCreateRevertReadsZeroBalance(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc0, 0x33})
+	ibs := NewWithVersionMap(&emptyReader{}, NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+
+	snap := ibs.PushSnapshot()
+	require.NoError(t, ibs.TouchAccount(addr))
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(91), tracing.BalanceChangeTransfer))
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	ibs.RevertToSnapshot(snap, nil)
+
+	balance, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.True(t, balance.IsZero(), "balance after revert: %s", balance.String())
+}
+
+// A credit in an earlier tx revives a destroyed account, and the creation records the
+// first balance read. After the revert the address must keep the credit.
+func TestNoMaterialize_RevivedCreateRevertReadsCellBalance(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc0, 0x44})
+	vm := NewVersionMap(nil)
+	newTx := func(txIndex int) *IntraBlockState {
+		ibs := NewWithVersionMap(&emptyReader{}, vm)
+		ibs.SetNoMaterialize(true)
+		ibs.SetTxContext(1, txIndex)
+		return ibs
+	}
+	ibs := newTx(0)
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	_, err := ibs.Selfdestruct(addr, false)
+	require.NoError(t, err)
+	vm.FlushVersionedWrites(ibs.VersionedWrites(), true)
+	ibs = newTx(1)
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
+	vm.FlushVersionedWrites(ibs.VersionedWrites(), true)
+
+	ibs = newTx(2)
+	snap := ibs.PushSnapshot()
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	ibs.RevertToSnapshot(snap, nil)
+
+	balance, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, uint64(5), balance.Uint64())
 }

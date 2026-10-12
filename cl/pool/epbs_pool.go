@@ -1,6 +1,7 @@
 package pool
 
 import (
+	"errors"
 	"sync"
 
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -26,6 +27,10 @@ func newSlotMap[K comparable, V any](slotFor func(K) uint64) *slotMap[K, V] {
 func (m *slotMap[K, V]) Add(key K, value V) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.add(key, value)
+}
+
+func (m *slotMap[K, V]) add(key K, value V) {
 	m.values[key] = value
 	slot := m.slotFor(key)
 	if m.bySlot[slot] == nil {
@@ -64,6 +69,10 @@ func (m *slotMap[K, V]) Keys() []K {
 func (m *slotMap[K, V]) Remove(key K) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.remove(key)
+}
+
+func (m *slotMap[K, V]) remove(key K) bool {
 	if _, ok := m.values[key]; !ok {
 		return false
 	}
@@ -79,6 +88,7 @@ func (m *slotMap[K, V]) Remove(key K) bool {
 func (m *slotMap[K, V]) PruneSlotsBefore(slot uint64) {
 	m.PruneSlots(func(entrySlot uint64) bool { return entrySlot < slot })
 }
+
 func (m *slotMap[K, V]) PruneSlots(remove func(uint64) bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -117,8 +127,7 @@ type HighestBidKey struct {
 // EpbsPool holds EPBS-related gossip data caches.
 // [New in Gloas:EIP7732]
 type EpbsPool struct {
-	highestBidUpdatesMu sync.Mutex
-	HighestBids         *slotMap[HighestBidKey, *cltypes.SignedExecutionPayloadBid]
+	HighestBids *slotMap[HighestBidKey, *cltypes.SignedExecutionPayloadBid]
 
 	// ProposerPreferences stores validated SignedProposerPreferences keyed by (slot, dependent_root).
 	// Written by the proposer_preferences gossip service, read by the execution_payload_bid service.
@@ -138,20 +147,18 @@ func (p *EpbsPool) HighestBidKeys() []HighestBidKey {
 
 // StoreHighestBid replaces the current entry for key.
 func (p *EpbsPool) StoreHighestBid(key HighestBidKey, bid *cltypes.SignedExecutionPayloadBid) {
-	p.highestBidUpdatesMu.Lock()
-	defer p.highestBidUpdatesMu.Unlock()
 	p.HighestBids.Add(key, bid)
 }
 
 // RemoveHighestBid preserves a concurrently stored replacement for the same key.
 func (p *EpbsPool) RemoveHighestBid(key HighestBidKey, bid *cltypes.SignedExecutionPayloadBid) bool {
-	p.highestBidUpdatesMu.Lock()
-	defer p.highestBidUpdatesMu.Unlock()
-	current, found := p.HighestBids.Get(key)
+	p.HighestBids.mu.Lock()
+	defer p.HighestBids.mu.Unlock()
+	current, found := p.HighestBids.values[key]
 	if !found || current != bid {
 		return false
 	}
-	return p.HighestBids.Remove(key)
+	return p.HighestBids.remove(key)
 }
 
 func NewEpbsPool() *EpbsPool {
@@ -184,4 +191,21 @@ func (p *EpbsPool) GetPreferencesForSlot(slot uint64) []*cltypes.SignedProposerP
 
 func (p *EpbsPool) GetPreference(slot uint64, dependentRoot common.Hash) (*cltypes.SignedProposerPreferences, bool) {
 	return p.ProposerPreferences.Get(ProposerPreferencesKey{Slot: slot, DependentRoot: dependentRoot})
+}
+
+// InsertProposerPreference keeps the first preference for a slot and dependent root.
+// It returns false without mutation for an identical signed retry, or an error for a conflict.
+func (p *EpbsPool) InsertProposerPreference(preference *cltypes.SignedProposerPreferences) (inserted bool, err error) {
+	preferences := p.ProposerPreferences
+	preferences.mu.Lock()
+	defer preferences.mu.Unlock()
+	key := ProposerPreferencesKey{Slot: preference.Message.ProposalSlot, DependentRoot: preference.Message.DependentRoot}
+	if stored, ok := preferences.values[key]; ok {
+		if stored != nil && stored.Message != nil && *stored.Message == *preference.Message && stored.Signature == preference.Signature {
+			return false, nil
+		}
+		return false, errors.New("different proposer preferences already stored for this slot and dependent root")
+	}
+	preferences.add(key, preference)
+	return true, nil
 }

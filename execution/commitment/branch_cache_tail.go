@@ -54,7 +54,8 @@ func newTailLRU(maxCapacity uint32) *tailLRU {
 
 func newTailShards(capacity uint32) *freelru.ShardedLRU[uint64, *branchCacheEntry] {
 	lru, err := freelru.NewShardedWithSize[uint64, *branchCacheEntry](
-		branchCacheTailShards, capacity, capacity+capacity/4, u64ident)
+		branchCacheTailShards, capacity, capacity+capacity/4, u64ident,
+	)
 	if err != nil {
 		panic(fmt.Sprintf("BranchCache tail: NewShardedWithSize(%d): %s", capacity, err))
 	}

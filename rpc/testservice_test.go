@@ -82,9 +82,9 @@ func (s *testService) Echo(str string, i int, args *echoArgs) echoResult {
 	return echoResult{str, i, args}
 }
 
-// StreamEcho is a streamable method (last arg jsonstream.Stream, returns only error): it writes its
+// StreamEcho is a streamable method (last arg *jsonstream.Stream, returns only error): it writes its
 // result directly to the stream rather than returning a value.
-func (s *testService) StreamEcho(str string, stream jsonstream.Stream) error {
+func (s *testService) StreamEcho(str string, stream *jsonstream.Stream) error {
 	stream.WriteString(str)
 	return nil
 }
@@ -128,29 +128,6 @@ func (s *testService) ReturnError() error {
 }
 
 func (s *testService) ReturnNull() any {
-	return nil
-}
-
-func (s *testService) CallMeBack(ctx context.Context, method string, args []any) (any, error) {
-	c, ok := ClientFromContext(ctx, log.New())
-	if !ok {
-		return nil, errors.New("no client")
-	}
-	var result any
-	err := c.Call(&result, method, args...)
-	return result, err
-}
-
-func (s *testService) CallMeBackLater(ctx context.Context, method string, args []any) error {
-	c, ok := ClientFromContext(ctx, log.New())
-	if !ok {
-		return errors.New("no client")
-	}
-	go func() {
-		<-ctx.Done()
-		var result any
-		c.Call(&result, method, args...)
-	}()
 	return nil
 }
 
@@ -212,7 +189,7 @@ func (s *notificationTestService) HangSubscription(ctx context.Context, val int)
 	subscription := notifier.CreateSubscription()
 
 	go func() {
-		notifier.Notify(subscription.ID, val)
+		_ = notifier.Notify(subscription.ID, val)
 	}()
 	return subscription, nil
 }

@@ -58,15 +58,27 @@ import (
 )
 
 const (
-	maxBlobBundleCacheSize    = 48 // 8 blocks worth of blobs
-	maxPendingBuilderPayloads = 4
+	minBlobBundleCacheSize             = 48
+	maxPendingBuilderPayloads          = 4
+	maxExecutionPayloadEnvelopeRetries = 1024
 )
 
-// Pre-fulu blob bundle structure to hold the commitment, blob, and KZG proof. (TODO: remove after electra fork)
+// BlobBundle holds a blob with its commitment and KZG proofs: one blob proof before Fulu, one proof
+// per cell from Fulu on.
 type BlobBundle struct {
 	Commitment common.Bytes48
 	Blob       *cltypes.Blob
 	KzgProofs  []common.Bytes48
+	Cells      []cltypes.Cell // the blob's cells, from Fulu on, when already computed
+}
+
+// blobBundleCacheSize fits two full blocks at the highest blob limit in the schedule, so the bundles
+// of one block are not evicted before that block is published.
+func blobBundleCacheSize(cfg *clparams.BeaconChainConfig) int {
+	if cfg == nil {
+		return minBlobBundleCacheSize
+	}
+	return max(minBlobBundleCacheSize, 2*int(cfg.MaxBlobsPerBlockUpperBound()))
 }
 
 type selfBuildPayload struct {
@@ -178,6 +190,16 @@ type selfBuildEnvelopeKey struct {
 	BeaconBlockRoot common.Hash
 }
 
+type executionPayloadEnvelopeGossipKey struct {
+	BeaconBlockRoot common.Hash
+	BuilderIndex    uint64
+}
+
+type executionPayloadEnvelopeRetry struct {
+	EnvelopeRoot   [32]byte
+	GossipRequired bool
+}
+
 type ApiHandler struct {
 	o   sync.Once
 	mux *chi.Mux
@@ -222,6 +244,8 @@ type ApiHandler struct {
 	engine                             execution_client.ExecutionEngine
 	elClientVersion                    atomic.Pointer[engine_types.ClientVersionV1] // Cached execution client version for default graffiti.
 	elClientVersionFetching            atomic.Bool                                  // Guards a single in-flight background elClientVersion fetch.
+	elIdentificationLogOnce            sync.Once                                    // Logs the resolved default graffiti identification exactly once.
+	graffitiTruncatedWarnOnce          sync.Once                                    // Warns that graffiti was truncated exactly once.
 	syncMessagePool                    sync_contribution_pool.SyncContributionPool
 	committeeSub                       committee_subscription.CommitteeSubscribe
 	attestationProducer                attestation_producer.AttestationDataProducer
@@ -253,8 +277,11 @@ type ApiHandler struct {
 	// GET /eth/v1/validator/execution_payload_envelope/{slot}/{builder_index}.
 	// Populated during block production alongside selfBuildPayloads.
 	// [New in Gloas:EIP7732]
-	selfBuildEnvelopes *lru.Cache[selfBuildEnvelopeKey, *cltypes.ExecutionPayloadEnvelope]
-	builderRoutes      *builderRouteStore
+	selfBuildEnvelopes                      *lru.Cache[selfBuildEnvelopeKey, *cltypes.ExecutionPayloadEnvelope]
+	executionPayloadEnvelopeRetryMu         sync.Mutex
+	executionPayloadEnvelopeRetries         *lru.Cache[executionPayloadEnvelopeGossipKey, executionPayloadEnvelopeRetry]
+	executionPayloadEnvelopeRetriesInFlight map[executionPayloadEnvelopeGossipKey]struct{}
+	builderRoutes                           *builderRouteStore
 }
 
 func NewApiHandler(
@@ -299,7 +326,7 @@ func NewApiHandler(
 	payloadAttestationService services.PayloadAttestationService,
 	proposerPreferencesService services.ProposerPreferencesService,
 ) *ApiHandler {
-	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", maxBlobBundleCacheSize)
+	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", blobBundleCacheSize(beaconChainConfig))
 	if err != nil {
 		panic(err)
 	}
@@ -321,6 +348,10 @@ func NewApiHandler(
 		panic(err)
 	}
 	selfBuildEnvelopes, err := lru.New[selfBuildEnvelopeKey, *cltypes.ExecutionPayloadEnvelope]("selfBuildEnvelopes", 4)
+	if err != nil {
+		panic(err)
+	}
+	executionPayloadEnvelopeRetries, err := lru.New[executionPayloadEnvelopeGossipKey, executionPayloadEnvelopeRetry]("executionPayloadEnvelopeRetries", maxExecutionPayloadEnvelopeRetries)
 	if err != nil {
 		panic(err)
 	}
@@ -376,8 +407,47 @@ func NewApiHandler(
 		selfBuildPayloads:                selfBuildPayloads,
 		pendingBuilderPayloads:           newPendingBuilderPayloadStore(maxPendingBuilderPayloads),
 		selfBuildEnvelopes:               selfBuildEnvelopes,
+		executionPayloadEnvelopeRetries:  executionPayloadEnvelopeRetries,
 		builderRoutes:                    builderRoutes,
 	}
+}
+
+func (a *ApiHandler) claimExecutionPayloadEnvelopeRetry(
+	key executionPayloadEnvelopeGossipKey,
+	envelopeRoot [32]byte,
+) (executionPayloadEnvelopeRetry, bool, bool) {
+	a.executionPayloadEnvelopeRetryMu.Lock()
+	defer a.executionPayloadEnvelopeRetryMu.Unlock()
+	retry, ok := a.executionPayloadEnvelopeRetries.Peek(key)
+	if !ok || retry.EnvelopeRoot != envelopeRoot {
+		return executionPayloadEnvelopeRetry{}, false, false
+	}
+	if _, ok := a.executionPayloadEnvelopeRetriesInFlight[key]; ok {
+		return executionPayloadEnvelopeRetry{}, true, false
+	}
+	if a.executionPayloadEnvelopeRetriesInFlight == nil {
+		a.executionPayloadEnvelopeRetriesInFlight = make(map[executionPayloadEnvelopeGossipKey]struct{})
+	}
+	a.executionPayloadEnvelopeRetriesInFlight[key] = struct{}{}
+	return retry, true, true
+}
+
+func (a *ApiHandler) finishExecutionPayloadEnvelopeRetry(key executionPayloadEnvelopeGossipKey) {
+	a.executionPayloadEnvelopeRetryMu.Lock()
+	defer a.executionPayloadEnvelopeRetryMu.Unlock()
+	delete(a.executionPayloadEnvelopeRetriesInFlight, key)
+}
+
+func (a *ApiHandler) recordExecutionPayloadEnvelopeRetry(key executionPayloadEnvelopeGossipKey, retry executionPayloadEnvelopeRetry) {
+	a.executionPayloadEnvelopeRetryMu.Lock()
+	defer a.executionPayloadEnvelopeRetryMu.Unlock()
+	a.executionPayloadEnvelopeRetries.Add(key, retry)
+}
+
+func (a *ApiHandler) clearExecutionPayloadEnvelopeRetry(key executionPayloadEnvelopeGossipKey) {
+	a.executionPayloadEnvelopeRetryMu.Lock()
+	defer a.executionPayloadEnvelopeRetryMu.Unlock()
+	a.executionPayloadEnvelopeRetries.Remove(key)
 }
 
 func (a *ApiHandler) Init() {

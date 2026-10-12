@@ -168,8 +168,8 @@ func compareTraces(trace, traceg *EthTxTrace) bool {
 }
 
 func compareJsonValues(prefix string, v, vg *fastjson.Value) error {
-	var vType = fastjson.TypeNull
-	var vgType = fastjson.TypeNull
+	vType := fastjson.TypeNull
+	vgType := fastjson.TypeNull
 	if v != nil {
 		vType = v.Type()
 	}
@@ -408,7 +408,7 @@ func requestAndCompareErigon(requestA, requestB string, methodNameA, methodNameB
 				}
 			}
 		} else {
-			//TODO fix for two methods
+			// TODO fix for two methods
 			return compareErrors(errVal, errValg, methodNameA, errCtx, errs)
 		}
 	} else if channel != nil && (!insertOnlyIfSuccess || errVal == nil) {
@@ -632,7 +632,7 @@ func compareProofs(proof, gethProof *EthGetProof) bool {
 	/*
 	   	Address      common.Address  `json:"address"`
 	   	AccountProof []string        `json:"accountProof"`
-	   	Balance      *hexutil.Big    `json:"balance"`
+	   	Balance      *hexutil.U256    `json:"balance"`
 	   	CodeHash     common.Hash     `json:"codeHash"`
 	   	Nonce        hexutil.Uint64  `json:"nonce"`
 	   	StorageHash  common.Hash     `json:"storageHash"`
@@ -640,7 +640,7 @@ func compareProofs(proof, gethProof *EthGetProof) bool {
 	   }
 	   type StorageResult struct {
 	   	Key   string       `json:"key"`
-	   	Value *hexutil.Big `json:"value"`
+	   	Value *hexutil.U256 `json:"value"`
 	   	Proof []string     `json:"proof"`
 	*/
 	equal := true

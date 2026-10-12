@@ -249,6 +249,7 @@ func printStages(tx kv.TemporalTx, snapshots *blocksnapshots.RoSnapshots) error 
 	//})
 	return nil
 }
+
 func u64or0(in []byte) (v uint64) {
 	if len(in) > 0 {
 		v = binary.BigEndian.Uint64(in)

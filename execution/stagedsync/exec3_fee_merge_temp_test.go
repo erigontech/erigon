@@ -300,23 +300,28 @@ func TestBlockResult_HandsSupersededToApplyLoop(t *testing.T) {
 
 	addr := feeMergeTestAddr("0x2222222222222222222222222222222222222222")
 
-	t.Run("invalid block result still carries them", func(t *testing.T) {
-		t.Parallel()
+	for name, result := range map[string]func(*blockExecutor, error) *blockResult{
+		"invalid block result still carries them": (*blockExecutor).invalidBlockResult,
+		"operational result still carries them":   (*blockExecutor).operationalBlockResult,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		be := feeMergeTestExecutor(t)
-		stale := feeMergeTestWrites(t, addr, 1)
-		be.superseded = append(be.superseded, stale)
+			be := feeMergeTestExecutor(t)
+			stale := feeMergeTestWrites(t, addr, 1)
+			be.superseded = append(be.superseded, stale)
 
-		res := be.invalidBlockResult(errors.New("invalid block"))
+			res := result(be, errors.New("execution failed"))
 
-		require.Equal(t, supersededWrites{stale}, res.superseded,
-			"a rejected block must still hand its superseded sets to the apply loop")
-		require.False(t, stale.Released(), "the exec loop hands the set over, it does not release it")
-		require.Nil(t, be.superseded, "the executor must drop the reference it handed off")
+			require.Equal(t, supersededWrites{stale}, res.superseded,
+				"a failed block must still hand its superseded sets to the apply loop")
+			require.False(t, stale.Released(), "the exec loop hands the set over, it does not release it")
+			require.Nil(t, be.superseded, "the executor must drop the reference it handed off")
 
-		res.superseded.release() // what the apply loop does, whatever the verdict
-		require.True(t, stale.Released())
-	})
+			res.superseded.release() // what the apply loop does, whatever the verdict
+			require.True(t, stale.Released())
+		})
+	}
 
 	t.Run("a set collected after the handoff stays with the executor", func(t *testing.T) {
 		t.Parallel()

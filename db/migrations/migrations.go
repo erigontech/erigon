@@ -63,16 +63,18 @@ var migrations = map[kv.Label][]Migration{
 	dbcfg.SentryDB: {},
 }
 
-type Callback func(tx kv.RwTx, progress []byte, isDone bool) error
-type Migration struct {
-	Name string
-	Up   func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) error
+type (
+	Callback  func(tx kv.RwTx, progress []byte, isDone bool) error
+	Migration struct {
+		Name string
+		Up   func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) error
 
-	// WipeDataIfMajorBelow, when non-zero, makes Apply wipe and reopen the DB
-	// when the stored DBSchemaVersion.Major is below this value, ignoring Up.
-	// Requires Migrator.ReopenDB to be set.
-	WipeDataIfMajorBelow uint32
-}
+		// WipeDataIfMajorBelow, when non-zero, makes Apply wipe and reopen the DB
+		// when the stored DBSchemaVersion.Major is below this value, ignoring Up.
+		// Requires Migrator.ReopenDB to be set.
+		WipeDataIfMajorBelow uint32
+	}
+)
 
 var (
 	ErrMigrationNonUniqueName   = errors.New("please provide unique migration name")

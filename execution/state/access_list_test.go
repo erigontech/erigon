@@ -31,7 +31,7 @@ func verifyAddrs(t *testing.T, s *IntraBlockState, astrings ...string) {
 	t.Helper()
 	// convert to common.Address form
 	addresses := make([]accounts.Address, 0, len(astrings))
-	var addressMap = make(map[accounts.Address]struct{})
+	addressMap := make(map[accounts.Address]struct{})
 	for _, astring := range astrings {
 		address := accounts.InternAddress(common.HexToAddress(astring))
 		addresses = append(addresses, address)
@@ -55,10 +55,10 @@ func verifySlots(t *testing.T, s *IntraBlockState, addrString string, slotString
 	if !s.AddressInAccessList(accounts.InternAddress(common.HexToAddress(addrString))) {
 		t.Fatalf("scope missing address/slots %v", addrString)
 	}
-	var address = accounts.InternAddress(common.HexToAddress(addrString))
+	address := accounts.InternAddress(common.HexToAddress(addrString))
 
 	slots := make([]accounts.StorageKey, 0, len(slotStrings))
-	var slotMap = make(map[accounts.StorageKey]struct{})
+	slotMap := make(map[accounts.StorageKey]struct{})
 	for _, slotString := range slotStrings {
 		s := accounts.InternKey(common.HexToHash(slotString))
 		slots = append(slots, s)

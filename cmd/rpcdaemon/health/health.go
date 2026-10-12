@@ -124,8 +124,8 @@ func processFromBody(w http.ResponseWriter, r *http.Request, netAPI NetAPI, ethA
 	body, errParse := parseHealthCheckBody(r.Body)
 	defer r.Body.Close()
 
-	var errMinPeerCount = errCheckDisabled
-	var errCheckBlock = errCheckDisabled
+	errMinPeerCount := errCheckDisabled
+	errCheckBlock := errCheckDisabled
 
 	if errParse != nil {
 		log.Root().Warn("unable to process healthcheck request", "err", errParse)
