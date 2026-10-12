@@ -149,7 +149,7 @@ Font: **Quantify**, weight 700, letter-spacing 0.04em (applied via CSS)
 
 Completely swizzled (`src/theme/Footer/index.tsx`) — not using the Docusaurus built-in footer at all.
 
-**This site uses the minimalistic docs footer**, not the full five-column one. Canonical description lives in `erigon-documents` → `public-docs/docusaurus-design-spec.md` §6.0–§6.3; do not duplicate it here. Summary only:
+**This site uses the minimalistic docs footer**, not the full five-column one. Canonical description lives in `erigon-documents` → `public-docs/01-docs-sites/shared/docusaurus-design-spec.md` §6.0–§6.3; do not duplicate it here. Summary only:
 
 - Single row: brand lockup → tagline → icon-only social buttons pushed right; then a divider and a bottom bar (copyright left, Privacy / Cookie / Contact / `hello@erigon.tech` right).
 - No link columns and no postal address. Those belong to the **full** footer, which is erigon.tech's, not a docs site's. Do not "fix" this footer by porting them back.
