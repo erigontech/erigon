@@ -150,6 +150,63 @@ func TestBinaryTrieOverrideNeedsDualDatadir(t *testing.T) {
 	}
 }
 
+func TestBinaryTrieOverrideMustFollowGenesis(t *testing.T) {
+	withCommitmentVariant(t, true, true)
+	g := delayedPBinGenesis()
+	g.Config.BinaryTrieTime = nil
+	atGenesis := g.Timestamp
+
+	t.Run("fresh", func(t *testing.T) {
+		dirs := datadir.New(t.TempDir())
+		db := temporaltest.NewTestDB(t, dirs)
+		_, _, err := genesiswrite.CommitGenesisBlockWithOverride(db, g, "", nil, nil, &atGenesis, false, dirs, log.New())
+		require.ErrorContains(t, err, "is not after the genesis timestamp")
+	})
+	t.Run("existing", func(t *testing.T) {
+		dirs := datadir.New(t.TempDir())
+		_, err := dbstate.ResolveErigonDBSettings(dirs, log.New(), true)
+		require.NoError(t, err)
+		db := temporaltest.NewTestDB(t, dirs)
+		_, _, err = genesiswrite.CommitGenesisBlockWithOverride(db, g, "", nil, nil, nil, false, dirs, log.New())
+		require.NoError(t, err)
+		_, _, err = genesiswrite.CommitGenesisBlockWithOverride(db, g, "", nil, nil, &atGenesis, false, dirs, log.New())
+		require.ErrorContains(t, err, "is not after the genesis timestamp")
+		require.Nil(t, readStoredChainConfig(t, db).BinaryTrieTime)
+	})
+}
+
+func TestBinaryTrieOverrideRefusedWithoutStoredChainConfig(t *testing.T) {
+	withCommitmentVariant(t, false, false)
+	dirs := datadir.New(t.TempDir())
+	_, err := dbstate.ResolveErigonDBSettings(dirs, log.New(), true)
+	require.NoError(t, err)
+	db := temporaltest.NewTestDB(t, dirs)
+	g := delayedPBinGenesis()
+	g.Config.BinaryTrieTime = nil
+	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(db, g, "", nil, nil, nil, false, dirs, log.New())
+	require.NoError(t, err)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			return err
+		}
+		return tx.Delete(kv.ConfigTable, genesisHash[:])
+	}))
+
+	binaryTrieTime := uint64(20)
+	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(db, g, "", nil, nil, &binaryTrieTime, false, dirs, log.New())
+	require.ErrorContains(t, err, "hex+bin")
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			return err
+		}
+		cfg, err := rawdb.ReadChainConfig(tx, genesisHash)
+		require.Nil(t, cfg)
+		return err
+	}))
+}
+
 func TestPBinGenesisComputesBothRootsAtBlockZero(t *testing.T) {
 	withCommitmentVariant(t, true, true)
 	g := delayedPBinGenesis()

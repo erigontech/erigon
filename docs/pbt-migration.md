@@ -130,9 +130,14 @@ global variant flag.
 
 The fork time is `binaryTrieTime` in the chain config. On a named chain, or
 to change it on an initialized datadir, start the node with
-`--override.binary-trie=<unix-time>`. The node refuses the override, and a
-genesis that schedules the fork after its timestamp, unless the datadir is
-hex+bin, so set it only after attach.
+`--override.binary-trie=<unix-time>`. The time must be after the genesis
+timestamp and no earlier than `amsterdamTime`; a chain config without
+`amsterdamTime` also needs `--override.amsterdam`. A post-genesis fork time
+needs a hex+bin datadir, so set it only after attach. A named chain rebuilds
+its stored config from the chain spec at every start unless
+`--keep.stored.chain.config` is set, so pass the override on every start:
+before the fork a start without it drops the fork time, and after the fork
+the node refuses to start.
 
 The hex shadow folds through the activation block plus the configured
 `MaxReorgDepth` window. It stops on the next block through

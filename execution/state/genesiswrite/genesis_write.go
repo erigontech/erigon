@@ -176,6 +176,11 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		g.Config = g.Config.Copy()
 		genesis = &g
 		applyOverrides(genesis.Config)
+		if overrideBinaryTrieTime != nil {
+			if err := checkBinaryTrieOverrideTime(*overrideBinaryTrieTime, genesis.Timestamp); err != nil {
+				return genesis.Config, nil, err
+			}
+		}
 		block, err1 := write(tx, genesis, dirs, logger)
 		if err1 != nil {
 			return genesis.Config, nil, err1
@@ -218,6 +223,11 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	if storedCfg == nil {
 		if err := newCfg.CheckConfigForkOrder(); err != nil {
 			return newCfg, nil, err
+		}
+		if overrideBinaryTrieTime != nil {
+			if err := checkBinaryTrieOverride(newCfg, storedBlock, dirs); err != nil {
+				return newCfg, nil, err
+			}
 		}
 		logger.Warn("Found genesis block without chain config")
 		err1 := rawdb.WriteChainConfig(tx, storedHash, newCfg)
@@ -517,10 +527,18 @@ func checkBinaryTrieOverride(cfg *chain.Config, genesisBlock *types.Block, dirs 
 	if genesisBlock != nil {
 		g.Timestamp = genesisBlock.Time()
 	}
-	if err := checkBinaryTrieSchedule(g, settings); err != nil {
+	if err := checkBinaryTrieOverrideTime(*cfg.BinaryTrieTime, g.Timestamp); err != nil {
 		return err
 	}
-	return checkBinaryTrieCommitment(g, settings)
+	return checkBinaryTrieSchedule(g, settings)
+}
+
+func checkBinaryTrieOverrideTime(binaryTrieTime, genesisTime uint64) error {
+	if binaryTrieTime <= genesisTime {
+		return fmt.Errorf("--override.binary-trie %d is not after the genesis timestamp %d: a binary trie from genesis is scheduled by the genesis file",
+			binaryTrieTime, genesisTime)
+	}
+	return nil
 }
 
 func checkBinaryTrieCommitment(g *types.Genesis, settings *dbstate.ErigonDBSettings) error {
