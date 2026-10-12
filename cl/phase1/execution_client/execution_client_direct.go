@@ -39,7 +39,9 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
-const reorgTooDeepDepth = 3
+// ReorgTooDeepDepth is how far below its head a block can be before NewPayload answers
+// NotValidated without validating it.
+const ReorgTooDeepDepth = 3
 
 type ExecutionClientDirect struct {
 	chainRW chainreader.ChainReaderWriterEth1
@@ -103,7 +105,7 @@ func (cc *ExecutionClientDirect) NewPayload(
 	}
 
 	// check if the block is too deep in the reorg accounting for underflow
-	if headHeader.Number.Uint64() > reorgTooDeepDepth && header.Number.Uint64() < headHeader.Number.Uint64()-reorgTooDeepDepth {
+	if headHeader.Number.Uint64() > ReorgTooDeepDepth && header.Number.Uint64() < headHeader.Number.Uint64()-ReorgTooDeepDepth {
 		// reorg too deep
 		return PayloadStatusNotValidated, nil
 	}

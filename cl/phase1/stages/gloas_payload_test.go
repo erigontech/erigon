@@ -1210,6 +1210,46 @@ func TestStoreAnchorEnvelopeRecordsNotValidatedWithAnExecutionClient(t *testing.
 	require.Equal(t, env.Message.Payload.GasLimit, gasLimit)
 }
 
+// The embedded EL answers NotValidated without validating for a block more than
+// ReorgTooDeepDepth below its head, and no retry changes that, so such a payload is not requeued.
+func TestDrainPendingGloasPayloadsDoesNotRequeueAPayloadDeepBelowTheEmbeddedELHead(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	const elHead = 100
+	for _, tc := range []struct {
+		number   uint64
+		requeued bool
+	}{
+		{number: elHead - execution_client.ReorgTooDeepDepth - 1, requeued: false},
+		{number: elHead - execution_client.ReorgTooDeepDepth, requeued: true},
+		{number: elHead + 2, requeued: true},
+	} {
+		fc := &forkchoice.ForkChoiceStore{}
+		engine := &testExecutionEngine{
+			head:             &types.Header{Number: *uint256.NewInt(elHead)},
+			supportInsertion: true,
+			payloadStatus:    execution_client.PayloadStatusNotValidated,
+		}
+		payload := cltypes.NewEth1Block(clparams.GloasVersion, &cfg)
+		payload.BlockHash = common.HexToHash("0x9abc")
+		payload.BlockNumber = tc.number
+		fc.RequeuePendingELPayload(forkchoice.PendingELPayload{
+			Block: &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 1, Body: &cltypes.BeaconBody{
+				Version: clparams.GloasVersion,
+				SignedExecutionPayloadBid: &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+					BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
+				}},
+			}}},
+			Envelope: &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: common.HexToHash("0x1234"), Payload: payload}},
+		})
+
+		drainPendingGloasPayloads(context.Background(), &Cfg{beaconCfg: &cfg, executionClient: engine, gloasPayloadValidator: engine, forkChoice: fc}, fc)
+
+		require.Equal(t, 1, engine.newPayloadCalls, "block %d", tc.number)
+		require.Equal(t, tc.requeued, len(fc.DrainPendingELPayloads()) == 1, "block %d", tc.number)
+	}
+}
+
 func TestDrainPendingGloasPayloadsRequeuesNotValidatedPayload(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	clparams.ApplyMinimalPreset(&cfg)
@@ -1436,6 +1476,7 @@ func anchorPayloadHeaderHash(t *testing.T, payload *cltypes.Eth1Block, parentRoo
 }
 
 type testExecutionEngine struct {
+	head             *types.Header
 	supportInsertion bool
 	notReady         bool
 	payloadStatus    execution_client.PayloadStatus
@@ -1467,7 +1508,7 @@ func (t *testExecutionEngine) InsertBlocks(context.Context, []*types.Block) erro
 
 func (t *testExecutionEngine) InsertBlock(context.Context, *types.Block) error { return nil }
 
-func (t *testExecutionEngine) CurrentHeader(context.Context) (*types.Header, error) { return nil, nil }
+func (t *testExecutionEngine) CurrentHeader(context.Context) (*types.Header, error) { return t.head, nil }
 
 func (t *testExecutionEngine) IsCanonicalHash(context.Context, common.Hash) (bool, error) {
 	return false, nil

@@ -1024,10 +1024,12 @@ func ensureStoredParentPayloadAccepted(
 	if err != nil {
 		log.Warn("[chainTipSync] persisted parent GLOAS NewPayload failed", "slot", block.Block.Slot, "blockRoot", root, "status", status, "err", err)
 	}
-	return acceptedStatus(recordGloasPayloadRetryResult(store, forkchoice.PendingELPayload{Block: block, Envelope: envelope}, status))
+	return acceptedStatus(recordGloasPayloadRetryResult(ctx, cfg.executionClient, store, forkchoice.PendingELPayload{Block: block, Envelope: envelope}, status))
 }
 
 func recordGloasPayloadRetryResult(
+	ctx context.Context,
+	el execution_client.ExecutionEngine,
 	store gloasPayloadRetryResultStore,
 	payload forkchoice.PendingELPayload,
 	status execution_client.PayloadStatus,
@@ -1038,10 +1040,26 @@ func recordGloasPayloadRetryResult(
 	beaconRoot := payload.Envelope.Message.BeaconBlockRoot
 	executionPayload := payload.Envelope.Message.Payload
 	status, retained := store.MarkPayloadStatusAndGasLimitIfRetained(beaconRoot, executionPayload.BlockHash, status, executionPayload.GasLimit)
-	if retained && (status == execution_client.PayloadStatusNone || status == execution_client.PayloadStatusNotValidated) {
+	retry := status == execution_client.PayloadStatusNone ||
+		status == execution_client.PayloadStatusNotValidated && !embeddedELAnswersNotValidatedFinally(ctx, el, executionPayload.BlockNumber)
+	if retained && retry {
 		store.RequeuePendingELPayload(payload)
 	}
 	return status, retained
+}
+
+// embeddedELAnswersNotValidatedFinally reports a block the embedded EL answers NotValidated for
+// without validating it, being more than ReorgTooDeepDepth below its head; a retry cannot change that.
+func embeddedELAnswersNotValidatedFinally(ctx context.Context, el execution_client.ExecutionEngine, blockNumber uint64) bool {
+	if el == nil || !el.SupportInsertion() {
+		return false
+	}
+	head, err := el.CurrentHeader(ctx)
+	if err != nil || head == nil {
+		return false
+	}
+	headNumber := head.Number.Uint64()
+	return headNumber > execution_client.ReorgTooDeepDepth && blockNumber < headNumber-execution_client.ReorgTooDeepDepth
 }
 
 func buildGloasNewPayloadArgs(cfg *Cfg, block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) ([]common.Hash, []hexutil.Bytes, error) {
@@ -1114,7 +1132,7 @@ func drainPendingGloasPayloads(ctx context.Context, cfg *Cfg, store gloasDrainSt
 		if err != nil {
 			log.Warn("[chainTipSync] pending GLOAS NewPayload failed", "slot", p.Block.Block.Slot, "status", status, "err", err)
 		}
-		status, retained := recordGloasPayloadRetryResult(store, p, status)
+		status, retained := recordGloasPayloadRetryResult(ctx, cfg.executionClient, store, p, status)
 		if !retained {
 			continue
 		}
@@ -1265,6 +1283,8 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 			return false
 		}
 		status, retained := recordGloasPayloadRetryResult(
+			ctx,
+			cfg.executionClient,
 			cfg.forkChoice,
 			forkchoice.PendingELPayload{Block: item.block, Envelope: envelope},
 			status,

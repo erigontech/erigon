@@ -200,8 +200,8 @@ func processDownloadedGloasEnvelope(ctx context.Context, logger log.Logger, stor
 }
 
 // recordUnvalidatedForwardSyncPayload gives a payload persisted without an EL verdict the
-// NotValidated status, so fork choice sees the FULL variant right away; the at-tip sweep
-// verifies the head region later. A verdict already on record is kept; None is not one.
+// NotValidated status, so fork choice sees the FULL variant right away. A verdict already on
+// record is kept; None is not one.
 func recordUnvalidatedForwardSyncPayload(store forwardSyncEnvelopeStore, root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) {
 	if envelope == nil || envelope.Message == nil || envelope.Message.Payload == nil {
 		return
