@@ -2459,6 +2459,7 @@ type AggregatorRoTx struct {
 	d        [kv.DomainLen]*DomainRoTx
 	iis      [kv.StandaloneIdxLen]*InvertedIndexRoTx
 	iisCount int
+	arena    *aggRoTxArena
 
 	_leakID uint64 // set only if TRACE_AGG=true
 }
@@ -2588,12 +2589,15 @@ type aggRoTxArena struct {
 	ii  [kv.StandaloneIdxLen]InvertedIndexRoTx
 }
 
+var aggRoTxArenaPool = sync.Pool{New: func() any { return new(aggRoTxArena) }}
+
 // beginFilesRoOn builds an AggregatorRoTx with fresh per-domain/per-index cursors
 // over the already-pinned visible generation v (caller owns the refcnt on v,
 // released by AggregatorRoTx.Close).
 func (a *Aggregator) beginFilesRoOn(v *aggregatorVisible) *AggregatorRoTx {
-	arena := &aggRoTxArena{}
+	arena := aggRoTxArenaPool.Get().(*aggRoTxArena)
 	ac := &arena.at
+	ac.arena = arena
 	ac.a = a
 	ac.visible = v
 	ac.iisCount = a.iisCount
@@ -2863,6 +2867,18 @@ func (at *AggregatorRoTx) Close() {
 		a.releaseVisibleFiles(at.visible)
 		at.visible = nil
 	}
+}
+
+// Release closes at and recycles its memory. Only a sole owner may call it, and
+// must not touch at afterwards: a second Close would hit the next tx.
+func (at *AggregatorRoTx) Release() {
+	if at == nil || at.a == nil {
+		return
+	}
+	arena := at.arena
+	at.Close()
+	*arena = aggRoTxArena{}
+	aggRoTxArenaPool.Put(arena)
 }
 
 func lastIdInDB(db kv.RoDB, domain *Domain) (lstInDb kv.Step) {

@@ -1634,21 +1634,11 @@ func (tx *MdbxTx) ResetSequence(bucket string, newValue uint64) error {
 }
 
 func (tx *MdbxTx) ReadSequence(bucket string) (uint64, error) {
-	c, err := tx.statelessCursor(kv.Sequence)
-	if err != nil {
+	v, err := tx.GetOne(kv.Sequence, []byte(bucket))
+	if err != nil || len(v) == 0 {
 		return 0, err
 	}
-	_, v, err := c.SeekExact([]byte(bucket))
-	if err != nil {
-		return 0, err
-	}
-
-	var currentV uint64
-	if len(v) > 0 {
-		currentV = binary.BigEndian.Uint64(v)
-	}
-
-	return currentV, nil
+	return binary.BigEndian.Uint64(v), nil
 }
 
 func (tx *MdbxTx) BucketSize(name string) (uint64, error) {

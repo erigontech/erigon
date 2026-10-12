@@ -563,7 +563,7 @@ func (tx *asyncClone) Rollback() {
 }
 
 func (tx *tx) closeFilesView() {
-	tx.aggtx.Close()
+	tx.aggtx.Release()
 	tx.aggtx = nil
 	tx.blocktx.Close()
 	tx.blocktx = nil
