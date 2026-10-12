@@ -125,7 +125,7 @@ func (b *BeaconState) ForEachValidator(fn func(v solid.Validator, idx int, total
 }
 
 func (b *BeaconState) ValidatorForValidatorIndex(index int) (solid.Validator, error) {
-	if index >= b.validators.Length() {
+	if index < 0 || index >= b.validators.Length() {
 		return nil, ErrInvalidValidatorIndex
 	}
 	return b.validators.Get(index), nil

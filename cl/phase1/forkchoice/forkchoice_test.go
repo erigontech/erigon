@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
@@ -700,6 +701,96 @@ func TestAttesterSlashingRejectsIndicesOverLimitBeforeSeenCheck(t *testing.T) {
 
 	require.Error(t, err)
 	require.NotErrorIs(t, err, ErrIgnore)
+}
+
+func TestAttesterSlashingSeenCheckHandlesHugeIndex(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	store := &ForkChoiceStore{}
+	slashing := &cltypes.AttesterSlashing{
+		Attestation_1: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, []uint64{1 << 63}),
+		},
+		Attestation_2: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, []uint64{1 << 63}),
+		},
+	}
+
+	var err error
+	require.NotPanics(t, func() {
+		err = store.onProcessAttesterSlashing(slashing, state.New(&cfg), false)
+	})
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
+}
+
+func TestAttesterSlashingHugeIndexFailsValidatorLookup(t *testing.T) {
+	for _, index := range []uint64{1 << 63, 1<<64 - 8} {
+		store, s, slashing := attesterSlashingFixture(t, false)
+		slashing.Attestation_1.AttestingIndices = solid.NewRawUint64List(2048, []uint64{index})
+		slashing.Attestation_2.AttestingIndices = solid.NewRawUint64List(2048, []uint64{index})
+
+		var err error
+		require.NotPanics(t, func() {
+			err = store.onProcessAttesterSlashing(slashing, s, true)
+		})
+		require.ErrorIs(t, err, raw.ErrInvalidValidatorIndex)
+	}
+}
+
+func TestAttesterSlashingRejectsWhenNoValidatorIsSlashable(t *testing.T) {
+	store, s, slashing := attesterSlashingFixture(t, true)
+
+	err := store.onProcessAttesterSlashing(slashing, s, true)
+
+	require.EqualError(t, err, "no slashable validators in intersection")
+	require.False(t, store.operationsPool.AttesterSlashingsPool.Has(pool.ComputeKeyForAttesterSlashing(slashing)))
+	require.True(t, store.isUnequivocating(0))
+	require.True(t, store.isUnequivocating(1))
+}
+
+func TestAttesterSlashingAcceptsWhenAnyValidatorIsSlashable(t *testing.T) {
+	store, s, slashing := attesterSlashingFixture(t, false)
+
+	err := store.onProcessAttesterSlashing(slashing, s, true)
+
+	require.NoError(t, err)
+	require.True(t, store.operationsPool.AttesterSlashingsPool.Has(pool.ComputeKeyForAttesterSlashing(slashing)))
+}
+
+func attesterSlashingFixture(t *testing.T, secondValidatorSlashed bool) (*ForkChoiceStore, *state.CachingBeaconState, *cltypes.AttesterSlashing) {
+	t.Helper()
+	cfg := clparams.MainnetBeaconConfig
+	s := state.New(&cfg)
+	for _, slashed := range []bool{true, secondValidatorSlashed} {
+		validator := solid.NewValidatorFromParameters(
+			common.Bytes48{},
+			common.Hash{},
+			cfg.MaxEffectiveBalance,
+			slashed,
+			0,
+			0,
+			cfg.FarFutureEpoch,
+			cfg.FarFutureEpoch,
+		)
+		require.NoError(t, s.AddValidator(validator, cfg.MaxEffectiveBalance))
+	}
+	slashing := &cltypes.AttesterSlashing{
+		Attestation_1: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, []uint64{0, 1}),
+			Data: &solid.AttestationData{
+				BeaconBlockRoot: common.Hash{1},
+				Target:          solid.Checkpoint{Epoch: 0},
+			},
+		},
+		Attestation_2: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, []uint64{0, 1}),
+			Data: &solid.AttestationData{
+				BeaconBlockRoot: common.Hash{2},
+				Target:          solid.Checkpoint{Epoch: 0},
+			},
+		},
+	}
+	return &ForkChoiceStore{operationsPool: pool.NewOperationsPool(&cfg)}, s, slashing
 }
 
 func TestOnAttesterSlashingRejectsIncompleteOperation(t *testing.T) {
