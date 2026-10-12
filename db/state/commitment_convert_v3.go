@@ -47,7 +47,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 const commitmentV3Batch = 1024
@@ -223,7 +222,8 @@ func convertCommitmentFileV3(
 				v, _, _, _, readErr := prevs.getLatestFromFiles(key, nil, stepTo-1)
 				return v, readErr
 			}}
-			delta := &legacyDelta{accounts: wat.d[kv.AccountsDomain], commitment: prevs, before: stepFrom - 1, after: stepTo - 1, keysV2: st.keysV2}
+			delta := &legacyDelta{commitment: prevs, before: stepFrom - 1, after: stepTo - 1, keysV2: st.keysV2}
+			delta.reachBefore = &legacyReach{keysV2: st.keysV2, read: func(key []byte) ([]byte, error) { return delta.read(key, delta.before) }}
 			for batch := range in {
 				res := convertedBatchPool.Get().(*convertedBatch)
 				res.buf, res.ents = res.buf[:0], res.ents[:0]
@@ -362,35 +362,44 @@ func convertLegacyPairV3(k, v []byte, incremental bool, stepFrom kv.Step, prevs 
 		}
 		return emit(commitment.KeyCommitmentV3State, state, v3.LegacyDirect)
 	}
-	var prev []byte
-	if incremental {
-		var err error
-		if prev, _, _, _, err = prevs.getLatestFromFiles(k, nil, stepFrom-1); err != nil {
-			return err
-		}
-		if err := delta.wipeStorage(prev, v, conv, reach, emit); err != nil {
-			return err
-		}
-	}
-	if live, err := reach.reachable(k, v); err != nil || !live {
+	live, err := reach.reachable(k, v)
+	if err != nil {
 		return err
 	}
-	if err := conv.Convert(k, v, prev, emit); err != nil || !incremental {
+	if !incremental {
+		if !live {
+			return nil
+		}
+		return conv.Convert(k, v, nil, emit)
+	}
+	prev, err := delta.read(k, stepFrom-1)
+	if err != nil {
 		return err
 	}
-	return delta.reconvertChildren(k, prev, v, conv, emit)
+	if !live {
+		if err := conv.Tombstone(k, emit); err != nil {
+			return err
+		}
+	} else if err := conv.Convert(k, v, prev, emit); err != nil {
+		return err
+	}
+	return delta.children(k, prev, v, live, conv, reach, emit)
 }
 
 type legacyDelta struct {
-	accounts, commitment   *DomainRoTx
-	before, after          kv.Step
-	keysV2                 bool
-	stack, children, prevs []legacyChild
-	kept                   [][2][]byte
-	before1, after1        accounts.Account
+	commitment         *DomainRoTx
+	before, after      kv.Step
+	keysV2             bool
+	reachBefore        *legacyReach
+	stack, kids, prevs []legacyChild
 }
 
-func (w *legacyDelta) reconvertChildren(k, prev, v []byte, conv *v3.LegacyConverter, emit v3.LegacyEmitFunc) error {
+func (w *legacyDelta) read(key []byte, step kv.Step) ([]byte, error) {
+	v, _, _, _, err := w.commitment.getLatestFromFiles(key, nil, step)
+	return v, err
+}
+
+func (w *legacyDelta) children(k, prev, v []byte, live bool, conv *v3.LegacyConverter, reach *legacyReach, emit v3.LegacyEmitFunc) error {
 	prefix, err := decodeLegacyPrefix(k, w.keysV2)
 	if err != nil {
 		return err
@@ -398,103 +407,104 @@ func (w *legacyDelta) reconvertChildren(k, prev, v []byte, conv *v3.LegacyConver
 	if w.prevs, err = appendLegacyChildren(w.prevs[:0], prefix, prev); err != nil {
 		return err
 	}
-	if w.children, err = appendLegacyChildren(w.children[:0], prefix, v); err != nil {
-		return err
+	w.kids = w.kids[:0]
+	if live {
+		if w.kids, err = appendLegacyChildren(w.kids, prefix, v); err != nil {
+			return err
+		}
 	}
-	for _, c := range w.children {
-		if i := slices.IndexFunc(w.prevs, func(p legacyChild) bool { return bytes.Equal(p.path, c.path) }); i >= 0 && w.prevs[i].hash == c.hash {
-			continue
-		}
-		key := encodeLegacyPrefix(c.path, w.keysV2)
-		value, _, _, _, err := w.commitment.getLatestFromFiles(key, nil, w.after)
-		if err != nil {
+	liveBefore := false
+	if len(w.prevs) != 0 {
+		if liveBefore, err = w.reachBefore.reachable(k, prev); err != nil {
 			return err
 		}
-		old, _, _, _, err := w.commitment.getLatestFromFiles(key, nil, w.before)
-		if err != nil {
-			return err
-		}
-		if !bytes.Equal(value, old) {
+	}
+	for _, c := range w.kids {
+		if liveBefore && slices.ContainsFunc(w.prevs, func(p legacyChild) bool { return p.hash == c.hash && bytes.Equal(p.path, c.path) }) {
 			continue
 		}
-		if err := conv.Convert(key, value, old, emit); err != nil {
+		if err := w.reemit(c.path, conv, emit); err != nil {
+			return err
+		}
+	}
+	for _, p := range w.prevs {
+		if slices.ContainsFunc(w.kids, func(c legacyChild) bool { return bytes.Equal(p.path, c.path) }) {
+			continue
+		}
+		if err := w.drop(p.path, conv, reach, emit); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (w *legacyDelta) wipeStorage(prev, v []byte, conv *v3.LegacyConverter, reach *legacyReach, emit v3.LegacyEmitFunc) error {
-	if len(prev) < 4 || binary.BigEndian.Uint16(prev[2:4]) == 0 {
-		return nil
-	}
-	w.kept = w.kept[:0]
-	if len(v) >= 4 && binary.BigEndian.Uint16(v[2:4]) != 0 {
-		if err := commitment.BranchData(v).ForEachCell(func(_ int, cell commitment.BranchCell) error {
-			if len(cell.AccountAddr) != 0 {
-				w.kept = append(w.kept, [2][]byte{cell.AccountAddr, cell.Hash})
+func (w *legacyDelta) reemit(path []byte, conv *v3.LegacyConverter, emit v3.LegacyEmitFunc) error {
+	w.stack = append(w.stack[:0], legacyChild{path: path})
+	for len(w.stack) > 0 {
+		path := w.stack[len(w.stack)-1].path
+		w.stack = w.stack[:len(w.stack)-1]
+		key := encodeLegacyPrefix(path, w.keysV2)
+		value, old, unchanged, err := w.unchanged(key)
+		if err != nil || !unchanged {
+			if err != nil {
+				return err
 			}
-			return nil
-		}); err != nil {
+			continue
+		}
+		if err := conv.Convert(key, value, old, emit); err != nil {
 			return err
 		}
-	}
-	return commitment.BranchData(prev).ForEachCell(func(_ int, cell commitment.BranchCell) error {
-		if len(cell.AccountAddr) == 0 || len(cell.StorageAddr) != 0 || len(cell.Hash) != length.Hash {
-			return nil
-		}
-		if slices.ContainsFunc(w.kept, func(k [2][]byte) bool { return bytes.Equal(k[0], cell.AccountAddr) && bytes.Equal(k[1], cell.Hash) }) {
-			return nil
-		}
-		if wiped, err := w.wiped(cell.AccountAddr); err != nil || !wiped {
+		liveBefore, err := w.reachBefore.reachable(key, old)
+		if err != nil {
 			return err
 		}
-		w.stack = append(w.stack[:0], legacyChild{path: append(commitment.KeyToNibblizedHash(cell.AccountAddr), cell.Extension...)})
-		for len(w.stack) > 0 {
-			path := w.stack[len(w.stack)-1].path
-			w.stack = w.stack[:len(w.stack)-1]
-			key := encodeLegacyPrefix(path, w.keysV2)
-			before, _, _, _, err := w.commitment.getLatestFromFiles(key, nil, w.before)
-			if err != nil {
-				return err
-			}
-			after, _, _, _, err := w.commitment.getLatestFromFiles(key, nil, w.after)
-			if err != nil {
-				return err
-			}
-			live, err := reach.reachable(key, after)
-			if err != nil {
-				return err
-			}
-			if !live {
-				if tombErr := conv.Tombstone(key, emit); tombErr != nil {
-					return tombErr
-				}
-			}
-			if w.stack, err = appendLegacyChildren(w.stack, path, before); err != nil {
+		if !liveBefore {
+			if w.stack, err = appendLegacyChildren(w.stack, path, value); err != nil {
 				return err
 			}
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
-func (w *legacyDelta) wiped(addr []byte) (bool, error) {
-	after, _, _, _, err := w.accounts.getLatestFromFiles(addr, nil, w.after)
-	if err != nil || len(after) == 0 {
-		return err == nil, err
+func (w *legacyDelta) drop(path []byte, conv *v3.LegacyConverter, reach *legacyReach, emit v3.LegacyEmitFunc) error {
+	w.stack = append(w.stack[:0], legacyChild{path: path})
+	for len(w.stack) > 0 {
+		path := w.stack[len(w.stack)-1].path
+		w.stack = w.stack[:len(w.stack)-1]
+		key := encodeLegacyPrefix(path, w.keysV2)
+		value, _, unchanged, err := w.unchanged(key)
+		if err != nil || !unchanged {
+			if err != nil {
+				return err
+			}
+			continue
+		}
+		live, err := reach.reachable(key, value)
+		if err != nil || live {
+			if err != nil {
+				return err
+			}
+			continue
+		}
+		if err := conv.Tombstone(key, emit); err != nil {
+			return err
+		}
+		if w.stack, err = appendLegacyChildren(w.stack, path, value); err != nil {
+			return err
+		}
 	}
-	before, _, _, _, err := w.accounts.getLatestFromFiles(addr, nil, w.before)
-	if err != nil || len(before) == 0 {
-		return false, err
+	return nil
+}
+
+func (w *legacyDelta) unchanged(key []byte) (value, old []byte, unchanged bool, err error) {
+	if value, err = w.read(key, w.after); err != nil {
+		return nil, nil, false, err
 	}
-	if err := accounts.DeserialiseV3(&w.before1, before); err != nil {
-		return false, err
+	if old, err = w.read(key, w.before); err != nil {
+		return nil, nil, false, err
 	}
-	if err := accounts.DeserialiseV3(&w.after1, after); err != nil {
-		return false, err
-	}
-	return w.before1.Incarnation != w.after1.Incarnation, nil
+	return value, old, len(value) != 0 && bytes.Equal(value, old), nil
 }
 
 type legacyReach struct {
