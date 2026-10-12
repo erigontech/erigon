@@ -598,62 +598,85 @@ func echoRequest(size int) string {
 	return head + strings.Repeat("x", size-len(head)-len(tail)) + tail
 }
 
-// TestHTTPBodyBudget pins that a declared body above smallBodyLimit is charged to the
-// server's ingress budget before it is read, that a small body is never charged, and that
-// the charge is released once the request is served.
+// TestHTTPBodyBudget pins that a body is charged for the bytes past smallBodyLimit it has
+// sent, that the charge is refused once the budget is full, that a small body is never
+// charged, and that the charge is released once the request is served.
 func TestHTTPBodyBudget(t *testing.T) {
 	srv := newTestServer(log.New())
 	defer srv.Stop()
-	const big = smallBodyLimit + 1
-	srv.ingress.limit = 2 * big
+	const sent = 2 * smallBodyLimit // what each stalled body sends; the first smallBodyLimit of it is free
+	srv.ingress.limit = 2 * (sent - smallBodyLimit)
 
-	newBigRequest := func(body io.Reader) *http.Request {
+	newRequest := func(body io.Reader, length int64) *http.Request {
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", body)
 		req.Header.Set("Content-Type", contentType)
-		req.ContentLength = big
+		req.ContentLength = length
 		return req
 	}
 
-	// Two bodies that never arrive fill the budget.
-	var wg sync.WaitGroup
+	// Two bodies send their bytes and then stall, so together they hold the whole budget.
+	var served sync.WaitGroup
 	var pipes []*io.PipeWriter
 	for range 2 {
 		pr, pw := io.Pipe()
 		pipes = append(pipes, pw)
-		wg.Go(func() { srv.ServeHTTP(httptest.NewRecorder(), newBigRequest(pr)) })
+		served.Go(func() { srv.ServeHTTP(httptest.NewRecorder(), newRequest(pr, maxRequestContentLength)) })
+		go func() { _, _ = pw.Write(make([]byte, sent)) }()
 	}
-	require.Eventually(t, func() bool { return srv.ingress.used.Load() == 2*big }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return srv.ingress.used.Load() == srv.ingress.limit }, 5*time.Second, time.Millisecond)
 
-	// The third is refused at the door: its body is never read.
+	// A third body is refused once its bytes past smallBodyLimit arrive.
 	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, newBigRequest(http.NoBody))
+	srv.ServeHTTP(rec, newRequest(strings.NewReader(echoRequest(int(smallBodyLimit)+1)), smallBodyLimit+1))
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 	require.Contains(t, rec.Body.String(), ErrMsgServerOverloaded)
-	require.Equal(t, 2*big, srv.ingress.used.Load())
 
 	// A small body is not charged.
 	rec = httptest.NewRecorder()
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(echoRequest(100)))
-	req.Header.Set("Content-Type", contentType)
-	srv.ServeHTTP(rec, req)
+	srv.ServeHTTP(rec, newRequest(strings.NewReader(echoRequest(100)), 100))
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), `"result"`)
 
 	// Serving a request releases its charge.
 	pipes[0].Close()
-	require.Eventually(t, func() bool { return srv.ingress.used.Load() == big }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return srv.ingress.used.Load() == srv.ingress.limit/2 }, 5*time.Second, time.Millisecond)
 	rec = httptest.NewRecorder()
-	srv.ServeHTTP(rec, newBigRequest(strings.NewReader(echoRequest(int(big)))))
+	srv.ServeHTTP(rec, newRequest(strings.NewReader(echoRequest(int(sent))), sent))
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), `"result"`)
 
 	pipes[1].Close()
-	wg.Wait()
+	served.Wait()
 	require.Zero(t, srv.ingress.used.Load())
 }
 
-// TestHTTPUndeclaredBodyBudget pins that a body without a content length is charged the
-// cap once it outgrows smallBodyLimit, and not before.
+// TestHTTPDeclaredBodyIsChargedAsRead pins that a body declaring the cap holds no budget
+// until its bytes arrive, so declaring a size costs nothing and buys nothing.
+func TestHTTPDeclaredBodyIsChargedAsRead(t *testing.T) {
+	srv := newTestServer(log.New())
+	defer srv.Stop()
+	pr, pw := io.Pipe()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", pr)
+	req.Header.Set("Content-Type", contentType)
+	req.ContentLength = maxRequestContentLength
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		srv.ServeHTTP(httptest.NewRecorder(), req)
+	}()
+
+	require.Zero(t, srv.ingress.used.Load())
+	_, err := pw.Write(make([]byte, smallBodyLimit+1))
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return srv.ingress.used.Load() == 1 }, 5*time.Second, time.Millisecond)
+
+	pw.Close()
+	<-served
+	require.Zero(t, srv.ingress.used.Load())
+}
+
+// TestHTTPUndeclaredBodyBudget pins that a body without a content length is charged for
+// its bytes past smallBodyLimit, and not before.
 func TestHTTPUndeclaredBodyBudget(t *testing.T) {
 	srv := newTestServer(log.New())
 	defer srv.Stop()

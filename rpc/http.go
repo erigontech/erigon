@@ -230,9 +230,11 @@ func newHTTPServerConn(r *http.Request, w http.ResponseWriter, body io.Reader) S
 	// The body holds one message, so it can be read in one go and checked once.
 	// ServeHTTP holds the body's budget charge for the whole request.
 	readFrame := func() ([]byte, func(), error) {
+		// The hint stops at the uncharged size: a declared size costs the peer nothing
+		// until the bytes arrive, so it must not drive an allocation.
 		hint := 0
 		if r.ContentLength > 0 {
-			hint = int(r.ContentLength)
+			hint = int(min(r.ContentLength, smallBodyLimit))
 		}
 		frame, err := readAllBody(conn, hint)
 		if err != nil {
@@ -299,7 +301,7 @@ func SetOverloadedFlag(ctx context.Context) {
 // overloadedBody is precomputed; id is null because the request has not been parsed yet.
 var overloadedBody = []byte(`{"jsonrpc":"2.0","id":null,"error":{"code":-32005,"message":"` + ErrMsgServerOverloaded + `"}}` + "\n")
 
-// WriteOverloadedResponse writes HTTP 503 + JSON-RPC -32005 for a request refused before it is read.
+// WriteOverloadedResponse writes HTTP 503 + JSON-RPC -32005 for the outer admission gate.
 func WriteOverloadedResponse(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Retry-After", "1")
@@ -325,11 +327,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, ok := s.ingress.admit(r.Body, r.ContentLength)
-	if !ok {
-		WriteOverloadedResponse(w)
-		return
-	}
+	body := s.ingress.reader(r.Body)
 	defer body.release()
 
 	// Create request-scoped context.

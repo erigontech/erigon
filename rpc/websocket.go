@@ -423,7 +423,7 @@ func (a *wsConnAdapter) readFrame() ([]byte, func(), error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	body, _ := a.budget.admit(r, -1)
+	body := a.budget.reader(r)
 	data, err := readAllBody(body, 0)
 	if err != nil {
 		body.release()

@@ -17,7 +17,6 @@
 package rpc
 
 import (
-	"errors"
 	"io"
 	"sync/atomic"
 
@@ -25,11 +24,17 @@ import (
 )
 
 // The ingress budget bounds the request bytes a server holds at once, summed over HTTP
-// bodies and websocket messages, which are otherwise only capped one at a time. A body up
-// to smallBodyLimit is not charged: the request concurrency limit bounds those.
+// bodies and websocket messages, which are otherwise only capped one at a time. The first
+// smallBodyLimit bytes of a body are not charged: the request concurrency limit bounds
+// those. The rest is charged as it arrives, never ahead of it, so holding budget costs a
+// peer the same bytes.
 const (
 	smallBodyLimit       = int64(1 * datasize.MB)
 	defaultIngressBudget = int64(256 * datasize.MB)
+	// A budgeted read returns at most this much: the websocket reader fills the slice it is
+	// given before it returns, so the charge would otherwise lag what a peer has sent by the
+	// buffer's free capacity.
+	maxBudgetedRead = 64 * datasize.KB
 )
 
 var errServerOverloaded = &CustomError{Code: ErrCodeServerOverloaded, Message: ErrMsgServerOverloaded}
@@ -52,21 +57,9 @@ func (b *ingressBudget) release(n int64) {
 	b.used.Add(-n)
 }
 
-// admit charges what is read from r to the budget: a declared size before the first read,
-// an undeclared one (declared < 0) the cap once it outgrows smallBodyLimit. A declared size
-// that does not fit is refused before anything is allocated for it.
-func (b *ingressBudget) admit(r io.Reader, declared int64) (*budgetedReader, bool) {
-	br := &budgetedReader{Reader: r, budget: b}
-	switch {
-	case declared < 0:
-		br.pending = maxRequestContentLength
-	case declared > smallBodyLimit:
-		if !b.acquire(declared) {
-			return nil, false
-		}
-		br.charged = declared
-	}
-	return br, true
+// reader charges what is read from r to the budget, until release.
+func (b *ingressBudget) reader(r io.Reader) *budgetedReader {
+	return &budgetedReader{Reader: r, budget: b}
 }
 
 type budgetedReader struct {
@@ -74,27 +67,16 @@ type budgetedReader struct {
 	budget  *ingressBudget
 	read    int64
 	charged int64
-	pending int64 // charged once the body outgrows smallBodyLimit
 }
 
 func (r *budgetedReader) Read(p []byte) (int, error) {
-	if r.pending > 0 {
-		// At most one byte past smallBodyLimit is read before the charge, so a body that
-		// ends within it is never charged.
-		p = p[:min(int64(len(p)), smallBodyLimit+1-r.read)]
-	}
-	n, err := r.Reader.Read(p)
+	n, err := r.Reader.Read(p[:min(len(p), int(maxBudgetedRead))])
 	r.read += int64(n)
-	if r.pending > 0 && r.read > smallBodyLimit {
-		if !r.budget.acquire(r.pending) {
+	if due := max(r.read-smallBodyLimit, 0) - r.charged; due > 0 {
+		if !r.budget.acquire(due) {
 			return n, errServerOverloaded
 		}
-		r.charged, r.pending = r.pending, 0
-	}
-	if errors.Is(err, io.EOF) && r.charged > r.read {
-		// The body is complete, so a charge at the cap settles to the body's size.
-		r.budget.release(r.charged - r.read)
-		r.charged = r.read
+		r.charged += due
 	}
 	return n, err
 }

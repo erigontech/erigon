@@ -24,22 +24,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestBudgetedReaderSettlesUndeclaredCharge pins that an undeclared body is charged the cap
-// while it is read and holds only its own size once it is read to the end.
-func TestBudgetedReaderSettlesUndeclaredCharge(t *testing.T) {
+// TestBudgetedReaderChargesBytesPastSmallBodyLimit pins that a body is charged exactly for
+// the bytes past smallBodyLimit it has delivered, and released as a whole.
+func TestBudgetedReaderChargesBytesPastSmallBodyLimit(t *testing.T) {
 	budget := &ingressBudget{limit: maxRequestContentLength}
-	size := int(smallBodyLimit) + 1
-	body, ok := budget.admit(bytes.NewReader(make([]byte, size)), -1)
-	require.True(t, ok)
+	size := int(smallBodyLimit) + 3
+	body := budget.reader(bytes.NewReader(make([]byte, size)))
 
 	buf := make([]byte, size)
-	_, err := io.ReadFull(body, buf)
+	_, err := io.ReadFull(body, buf[:smallBodyLimit])
 	require.NoError(t, err)
-	require.Equal(t, int64(maxRequestContentLength), budget.used.Load())
+	require.Zero(t, budget.used.Load())
 
+	_, err = io.ReadFull(body, buf[smallBodyLimit:smallBodyLimit+1])
+	require.NoError(t, err)
+	require.Equal(t, int64(1), budget.used.Load())
+
+	_, err = io.ReadFull(body, buf[smallBodyLimit+1:])
+	require.NoError(t, err)
 	_, err = body.Read(buf[:1])
 	require.ErrorIs(t, err, io.EOF)
-	require.Equal(t, int64(size), budget.used.Load())
+	require.Equal(t, int64(3), budget.used.Load())
 
 	body.release()
 	require.Zero(t, budget.used.Load())

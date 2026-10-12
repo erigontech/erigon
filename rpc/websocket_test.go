@@ -959,8 +959,8 @@ func TestWebsocketMessageBudgetDropsPartialFrame(t *testing.T) {
 
 	const (
 		frameHeaderSize     = 14
-		declaredPayloadSize = smallBodyLimit + 2
-		sentPayloadSize     = smallBodyLimit + 1
+		declaredPayloadSize = 2 * smallBodyLimit
+		sentPayloadSize     = smallBodyLimit + int64(maxBudgetedRead)
 	)
 	frame := make([]byte, frameHeaderSize+int(sentPayloadSize))
 	frame[0], frame[1] = 0x81, 0xff
@@ -994,8 +994,8 @@ func (s *holdService) Hold(string) {
 	<-s.release
 }
 
-// TestWebsocketMessageBudgetHeldUntilServed pins that a large message stays charged, at its
-// own size, while its call runs, and is released once the call is done.
+// TestWebsocketMessageBudgetHeldUntilServed pins that a large message stays charged, for its
+// bytes past smallBodyLimit, while its call runs, and is released once the call is done.
 func TestWebsocketMessageBudgetHeldUntilServed(t *testing.T) {
 	logger := log.New()
 	srv := newTestServer(logger)
@@ -1017,10 +1017,55 @@ func TestWebsocketMessageBudgetHeldUntilServed(t *testing.T) {
 	require.NoError(t, conn.Write(t.Context(), websocket.MessageText, []byte(msg)))
 
 	<-hold.started
-	require.Equal(t, int64(len(msg)), srv.ingress.used.Load())
+	require.Equal(t, int64(len(msg))-smallBodyLimit, srv.ingress.used.Load())
 
 	close(hold.release)
 	_, _, err = conn.Read(t.Context())
 	require.NoError(t, err)
 	require.Eventually(t, func() bool { return srv.ingress.used.Load() == 0 }, 5*time.Second, time.Millisecond)
+}
+
+// TestWebsocketStalledFragmentsHoldOnlyTheirBytes pins that peers who send the start of a
+// large message and then stall hold only the bytes they sent, so they cannot lock the
+// budget for the requests of other clients.
+func TestWebsocketStalledFragmentsHoldOnlyTheirBytes(t *testing.T) {
+	logger := log.New()
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	wssrv := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+	defer wssrv.Close()
+	httpsrv := httptest.NewServer(srv)
+	defer httpsrv.Close()
+
+	const peers, past = 8, 2 * int(maxBudgetedRead) // enough past the free size to complete a budgeted read
+	var conns []*websocket.Conn
+	defer func() {
+		for _, conn := range conns {
+			_ = conn.CloseNow()
+		}
+	}()
+	for range peers {
+		conn, resp, err := websocket.Dial(t.Context(), "ws:"+strings.TrimPrefix(wssrv.URL, "http:"), nil)
+		if err != nil {
+			if resp != nil && resp.Body != nil {
+				resp.Body.Close()
+			}
+			t.Fatalf("can't dial: %v", err)
+		}
+		conns = append(conns, conn)
+		w, err := conn.Writer(t.Context(), websocket.MessageText)
+		require.NoError(t, err)
+		_, err = w.Write(make([]byte, int(smallBodyLimit)+past)) // a non-final fragment, then silence
+		require.NoError(t, err)
+	}
+	require.Eventually(t, func() bool { return srv.ingress.used.Load() > 0 }, 5*time.Second, time.Millisecond)
+	require.LessOrEqual(t, srv.ingress.used.Load(), int64(peers*past))
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, httpsrv.URL, strings.NewReader(echoRequest(int(smallBodyLimit)+1)))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", contentType)
+	resp, err := httpsrv.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 }
