@@ -270,6 +270,8 @@ var DefaultFlags = []cli.Flag{
 	&GenerateOfflineBALsFlag,
 	&UseOfflineBALsFlag,
 	&OfflineBALDirFlag,
+	&TieringLookbackBlocksFlag,
+	&TieringColdDirFlag,
 	&SyncLoopBreakAfterFlag,
 	&SyncParallelStateFlushing,
 

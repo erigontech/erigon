@@ -464,6 +464,10 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		maxBlockNum:              to,
 	}
 
+	if err := reportTiering(ctx, cfg, doms, rwTx, blockNum, logger); err != nil {
+		return err
+	}
+
 	if !(dbg.Exec3Parallel || cfg.experimentalBAL) {
 		return execV3Serial(ctx, s, u, cfg, doms, rwTx, rng, logger)
 	}

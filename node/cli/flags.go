@@ -146,6 +146,22 @@ var (
 		Usage: "Offline-BAL store directory (default: <datadir>/offline-bal)",
 	}
 
+	TieringLookbackBlocksFlag = cli.Uint64Flag{
+		Name:  "tiering.lookback-blocks",
+		Usage: "Hot window in blocks below the head; state files fully below it are cold (216000..1296000, 0 = off)",
+		Validator: func(n uint64) error {
+			if n != 0 && (n < 216_000 || n > 1_296_000) {
+				return fmt.Errorf("--tiering.lookback-blocks=%d: want 0 or 216000..1296000", n)
+			}
+			return nil
+		},
+	}
+
+	TieringColdDirFlag = cli.StringFlag{
+		Name:  "tiering.cold-dir",
+		Usage: "Cold-tier directory: a state file whose resolved path is under it counts as cold-resident (default: no cold tier)",
+	}
+
 	SyncParallelStateFlushing = cli.BoolFlag{
 		Name:  "sync.parallel-state-flushing",
 		Usage: "Enables parallel state flushing",
@@ -348,6 +364,8 @@ func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 	if cfg.Sync.OfflineBALDir == "" {
 		cfg.Sync.OfflineBALDir = filepath.Join(cfg.Dirs.DataDir, "offline-bal")
 	}
+	cfg.Sync.TieringLookbackBlocks = ctx.Uint64(TieringLookbackBlocksFlag.Name)
+	cfg.Sync.TieringColdDir = ctx.String(TieringColdDirFlag.Name)
 	cfg.Sync.ParallelStateFlushing = ctx.Bool(SyncParallelStateFlushing.Name)
 	if d := ctx.Duration(utils.SlowBlockThresholdFlag.Name); d >= 0 {
 		cfg.Sync.SlowBlockThreshold = &d
