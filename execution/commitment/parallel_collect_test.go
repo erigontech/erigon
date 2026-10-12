@@ -126,10 +126,10 @@ func TestChunkBuild_BuffersSurviveBatches(t *testing.T) {
 
 	cases := randomTouchCases(777, touchChunkKeys+8, 0)
 	pu := newParallelUpdate()
-	buffers := func() []*touchEntry {
-		return []*touchEntry{unsafe.SliceData(pu.pending), unsafe.SliceData(pu.spare)}
+	buffers := func() []uintptr {
+		return []uintptr{uintptr(unsafe.Pointer(unsafe.SliceData(pu.pending))), uintptr(unsafe.Pointer(unsafe.SliceData(pu.spare)))}
 	}
-	var first []*touchEntry
+	var first []uintptr
 	for batch := range 3 {
 		pu.Reset()
 		collectAll(pu, cases)
@@ -142,6 +142,23 @@ func TestChunkBuild_BuffersSurviveBatches(t *testing.T) {
 	require.GreaterOrEqual(t, cap(pu.pending), touchChunkKeys, "a recycled buffer must keep its capacity")
 	require.GreaterOrEqual(t, cap(pu.spare), touchChunkKeys, "a recycled buffer must keep its capacity")
 	require.ElementsMatch(t, first, buffers(), "later batches must reuse the same two buffers")
+}
+
+func TestChunkBuild_KeyTouchedInSeveralChunksKeepsArrivalOrder(t *testing.T) {
+	t.Parallel()
+
+	cases := randomTouchCases(41, 2*touchChunkKeys+5, 0)
+	hk := bytes.Repeat([]byte{0x0a}, 64)
+	for i, at := range []int{touchChunkKeys - 1, touchChunkKeys, 2*touchChunkKeys + 1} {
+		cases[at] = touchEntry{hashedKey: hk, plainKey: []byte("pk"), update: &Update{Flags: BalanceUpdate, Balance: *uint256.NewInt(uint64(i) + 1)}}
+	}
+	want := collectWalk(buildReferenceTrie(cases))
+	reordered := slices.Concat(cases[touchChunkKeys:], cases[:touchChunkKeys])
+	require.NotEqual(t, want, collectWalk(buildReferenceTrie(reordered)), "the fixture must be sensitive to chunk order")
+
+	pu, backgrounded := buildChunked(cases)
+	require.True(t, backgrounded)
+	require.Equal(t, want, collectWalk(pu.trie), "a key touched in several chunks must keep its last update")
 }
 
 func TestChunkBuild_TouchHashedKeyCopiesCallerBuffer(t *testing.T) {
