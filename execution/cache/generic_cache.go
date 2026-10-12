@@ -17,7 +17,6 @@
 package cache
 
 import (
-	"bytes"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -38,10 +37,10 @@ const putStripeCount = 256
 // randomized stdlib hasher, so collisions are rare but not impossible. size is
 // the key and value bytes, so weighing needs no sizeFunc call.
 type entry[T any] struct {
-	key   []byte
+	key   string // a string header is 8 bytes smaller than a slice's
 	val   T
-	size  int
 	txNum uint64 // commit/read txNum the cached value reflects (upper bound)
+	size  uint32
 	epoch uint32 // unwind generation the entry was written in
 }
 
@@ -139,7 +138,7 @@ func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 	// generation before removing it.
 	coh := c.coh.Snapshot()
 	e, ok := c.data.Get(h)
-	if !ok || !bytes.Equal(e.key, key) {
+	if !ok || e.key != string(key) {
 		c.misses.Add(1)
 		var zero T
 		return zero, 0, false
@@ -194,24 +193,24 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 	// different generation from the one where the entry lands.
 	ep := c.coh.Epoch()
 	existing, hasExisting := c.data.peek(h)
-	sameKey := hasExisting && bytes.Equal(existing.key, key)
+	sameKey := hasExisting && existing.key == string(key)
 
 	if sameKey && !overwrite && !c.coh.IsStale(existing.txNum, existing.epoch) {
 		return
 	}
 	if c.mode == ModeNoOp && !sameKey {
 		// "Drop new keys when full": the lock-free layer would admit and evict.
-		if c.data.SizeBytes()+weighEntry(h, entry[T]{size: newSize}) > int64(c.capacityB) {
+		if c.data.SizeBytes()+weighEntry(h, entry[T]{size: uint32(newSize)}) > int64(c.capacityB) {
 			c.dropped.Add(1)
 			return
 		}
 	}
 
-	e := entry[T]{key: key, val: value, size: newSize, txNum: txNum, epoch: ep}
+	e := entry[T]{val: value, size: uint32(newSize), txNum: txNum, epoch: ep}
 	if sameKey {
 		e.key = existing.key // the stored buffer still holds this key
 	} else {
-		e.key = bytes.Clone(key)
+		e.key = string(key)
 	}
 	// Add replaces in place whatever holds the hash: this key's older value or
 	// a 64-bit hash collision. The put stripe already serializes writers of h.
@@ -229,7 +228,7 @@ func (c *GenericCache[T]) Delete(key []byte) {
 	mu := &c.putStripes[h&(putStripeCount-1)]
 	mu.Lock()
 	defer mu.Unlock()
-	if existing, ok := c.data.Get(h); ok && bytes.Equal(existing.key, key) {
+	if existing, ok := c.data.Get(h); ok && existing.key == string(key) {
 		c.data.Remove(h)
 	}
 }
@@ -241,7 +240,7 @@ func (c *GenericCache[T]) dropStale(h uint64, key []byte) {
 	mu := &c.putStripes[h&(putStripeCount-1)]
 	mu.Lock()
 	defer mu.Unlock()
-	if e, ok := c.data.Get(h); ok && bytes.Equal(e.key, key) && c.coh.IsStale(e.txNum, e.epoch) {
+	if e, ok := c.data.Get(h); ok && e.key == string(key) && c.coh.IsStale(e.txNum, e.epoch) {
 		c.data.Remove(h)
 	}
 }

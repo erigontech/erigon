@@ -71,7 +71,7 @@ func fixedGenericCache(t *testing.T, capacityBytes datasize.ByteSize, mode Mode)
 
 // oneEntryBytes is what one entry of key and value weighs.
 func oneEntryBytes(key, val []byte) datasize.ByteSize {
-	return datasize.ByteSize(weighEntry(0, entry[[]byte]{size: len(key) + len(val)}))
+	return datasize.ByteSize(weighEntry(0, entry[[]byte]{size: uint32(len(key) + len(val))}))
 }
 
 // A ModeNoOp admission must never observe the byte counter mid-update: the
