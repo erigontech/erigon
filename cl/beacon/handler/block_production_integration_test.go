@@ -51,7 +51,7 @@ import (
 func TestCaplinBlockProductionIntegration(t *testing.T) {
 	if clparams.GetBeaconConfig() == nil {
 		cfg := clparams.MainnetBeaconConfig
-		clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+		clparams.InitGlobalStaticConfig(&cfg)
 	}
 	for _, tc := range []struct {
 		name    string
@@ -252,7 +252,7 @@ func requireCaplinPublishesBlobData(t *testing.T, block *cltypes.BlindOrExecutio
 			require.Equal(t, *blob, sidecar.Blob)
 			require.Equal(t, common.Bytes48(*commitments.Get(i)), sidecar.KzgCommitment)
 			require.NoError(t, kzg.Ctx().VerifyBlobKZGProof((*goethkzg.Blob)(&sidecar.Blob), goethkzg.KZGCommitment(sidecar.KzgCommitment), goethkzg.KZGProof(sidecar.KzgProof)))
-			require.True(t, cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, version, sidecar.SignedBlockHeader.Header.BodyRoot))
+			require.True(t, cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, sidecar.SignedBlockHeader.Header.BodyRoot))
 			headerRoot, err := sidecar.SignedBlockHeader.Header.HashSSZ()
 			require.NoError(t, err)
 			require.Equal(t, blockRoot, headerRoot)
