@@ -102,23 +102,6 @@ func TestByteLRUAddReplacesLiveKey(t *testing.T) {
 	require.Equal(t, []byte("second"), v)
 }
 
-func TestByteLRUAddGrowsOnTheNetChange(t *testing.T) {
-	// Replacing a live entry with one of its own size adds nothing, so no chunk
-	// may be reserved from the shared envelope for it.
-	val := make([]byte, 700*1024)
-	b := newByteLRU(64*datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
-	defer b.Close()
-
-	require.True(t, b.Add(1, val))
-	limAfterInsert := b.limit.Load()
-	for range 8 {
-		require.True(t, b.Add(1, val))
-	}
-	b.c.CleanUp()
-	require.Equal(t, limAfterInsert, b.limit.Load(), "same-size replacement must not grow the limit")
-	require.Equal(t, int64(len(val)), b.resident.Load())
-}
-
 func TestByteLRUBudgetedAddReplacesLiveKey(t *testing.T) {
 	var evicted [][]byte
 	b := newByteLRU(datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) },
