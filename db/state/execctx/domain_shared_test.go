@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -2023,6 +2024,23 @@ func TestSeekCommitmentV3RejectsLegacyCommitmentState(t *testing.T) {
 	statecfg.ExperimentalCommitmentV3 = true
 	_, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.ErrorContains(t, err, "legacy commitment")
+}
+
+func TestSeekCommitmentLegacyRejectsV3CommitmentState(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	require.NoError(t, sd.DomainPut(kv.CommitmentDomain, rwTx, commitment.KeyCommitmentV3State, make([]byte, 32), 1, nil))
+	require.NoError(t, sd.Flush(ctx, rwTx))
+	sd.Close()
+
+	_, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.ErrorContains(t, err, "commitment v3 records")
 }
 
 func TestTouchChangedKeysFromHistoryRestoresTheStoredRoot(t *testing.T) {
