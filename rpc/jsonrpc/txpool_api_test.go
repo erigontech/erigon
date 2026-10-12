@@ -160,6 +160,49 @@ func TestTxPoolContentBaseFeeSubPool(t *testing.T) {
 	require.Equal(hexutil.Uint(1), status["queued"])
 }
 
+func TestTxPoolInspect(t *testing.T) {
+	require := require.New(t)
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	rlpOf := func(txn types.Transaction) []byte {
+		buf := bytes.NewBuffer(nil)
+		require.NoError(txn.MarshalBinary(buf))
+		return buf.Bytes()
+	}
+	dynamicFee := types.DynamicFeeTransaction{
+		CommonTx: types.CommonTx{Nonce: 1, GasLimit: 50000, To: &to, Value: *uint256.NewInt(7)},
+		ChainID:  *uint256.NewInt(1),
+		TipCap:   *uint256.NewInt(2),
+		FeeCap:   *uint256.NewInt(30),
+	}
+	blobRlp, _ := types.MakeBlobTxnRlp()
+
+	legacy := types.NewTransaction(0, to, uint256.NewInt(1234), params.TxGas, uint256.NewInt(10), nil)
+	creation := types.NewContractCreation(5, uint256.NewInt(0), 100000, uint256.NewInt(3), nil)
+
+	a1 := common.HexToAddress("0xfe00000000000000000000000000000000000001")
+	a2 := common.HexToAddress("0x0100000000000000000000000000000000000002")
+	s1, s2 := gointerfaces.ConvertAddressToH160(a1), gointerfaces.ConvertAddressToH160(a2)
+	pool := &stubPoolContentClient{all: &txpoolproto.AllReply{Txs: []*txpoolproto.AllReply_Tx{
+		{TxnType: txpoolproto.AllReply_PENDING, Sender: s1, RlpTx: rlpOf(legacy)},
+		{TxnType: txpoolproto.AllReply_BASE_FEE, Sender: s1, RlpTx: rlpOf(&dynamicFee)},
+		{TxnType: txpoolproto.AllReply_PENDING, Sender: s1, RlpTx: blobRlp},
+		{TxnType: txpoolproto.AllReply_QUEUED, Sender: s2, RlpTx: rlpOf(creation)},
+	}}}
+	api := NewTxPoolAPI(nil, pool)
+
+	inspect, err := api.Inspect(context.Background())
+	require.NoError(err)
+	require.Equal(map[string]map[string]map[string]string{
+		"pending": {a1.Hex(): {
+			"0": to.Hex() + ": 1234 wei + 21000 gas × 10 wei",
+			"1": to.Hex() + ": 7 wei + 50000 gas × 30 wei",
+		}},
+		"queued": {a2.Hex(): {
+			"5": "contract creation: 0 wei + 100000 gas × 3 wei",
+		}},
+	}, inspect)
+}
+
 func TestTxPoolStatusSumsCountsWithoutWrapping(t *testing.T) {
 	require := require.New(t)
 	pool := &stubPoolContentClient{

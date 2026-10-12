@@ -151,10 +151,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		ibs.SetVersionMap(state.NewVersionMap(nil))
 		// Versioned assembly commits from the write-set (BalIO) below, not from a
 		// materialized stateObject, and reads cross-tx state from the versionMap
-		// (flushed per tx). Keep the stateObject cache out of it: a cached object
-		// left empty by the cell-authoritative balance path would be marked
-		// deleted at finalize and then wrongly shadow the account on the next tx's
-		// existence read (spurious re-create → lost balance).
+		// (flushed per tx), so it does not need the stateObject cache.
 		ibs.SetNoMaterialize(true)
 	}
 

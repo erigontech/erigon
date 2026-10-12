@@ -56,6 +56,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	mock_services "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -1488,7 +1489,7 @@ func TestPostExecutionPayloadEnvelopeAttachesPendingLocalBlobData(t *testing.T) 
 	ctrl := gomock.NewController(t)
 	if clparams.GetBeaconConfig() == nil {
 		cfg := clparams.MainnetBeaconConfig
-		clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+		clparams.InitGlobalStaticConfig(&cfg)
 	}
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	currentSlot := handler.ethClock.GetCurrentSlot()
@@ -2175,7 +2176,7 @@ func TestGetExecutionPayloadEnvelopeDoesNotFinalizeSameSlotSideBranch(t *testing
 	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 2, Root: common.HexToHash("0xbeef")}
 	fcu.Ancestors[slot] = forkchoice.ForkChoiceNode{Root: common.HexToHash("0xbeef")}
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		return beacon_indicies.MarkRootCanonical(t.Context(), tx, slot, common.HexToHash("0xbeef"))
+		return beacon_indicies.MarkRootCanonical(tx, slot, common.HexToHash("0xbeef"))
 	}))
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/beacon/execution_payload_envelope/"+root.Hex(), http.NoBody)
 	recorder := httptest.NewRecorder()
@@ -3546,7 +3547,8 @@ func TestPostValidatorProposerPreferencesGloasForkBoundary(t *testing.T) {
 			preferences := make([]*cltypes.SignedProposerPreferences, 0, 3)
 			for _, slot := range []uint64{95, 96, 100} {
 				preference := &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{ProposalSlot: slot, DependentRoot: root}}
-				domain, err := depState.GetDomain(cfg.DomainProposerPreferences, slot/cfg.SlotsPerEpoch)
+				forkVersion := cfg.GetForkVersionByVersion(cfg.GetCurrentStateVersion(slot / cfg.SlotsPerEpoch))
+				domain, err := fork.ComputeDomain(cfg.DomainProposerPreferences[:], utils.Uint32ToBytes4(forkVersion), depState.GenesisValidatorsRoot())
 				require.NoError(t, err)
 				signingRoot, err := fork.ComputeSigningRoot(preference.Message, domain)
 				require.NoError(t, err)

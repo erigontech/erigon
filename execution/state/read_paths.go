@@ -1160,16 +1160,15 @@ func refreshIncarnation(s *IntraBlockState, addr accounts.Address, currentIncarn
 	}
 }
 
-// readCode returns the contract code with its hash. The commited flag selects whether
-// the version-aware lookup honours the committed-only contract.
-func readCode(s *IntraBlockState, addr accounts.Address, commited bool) (accounts.Code, ReadSource, Version, error) {
+// readCode returns the contract code with its hash.
+func readCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
 		if tr, ok := s.versionedReads.GetCode(addr); ok && warmSource(tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
 	}
 	var r readPathResult
-	versionedReadCore(s, addr, CodePath, accounts.NilKey, commited, false, &r)
+	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
 		s.recordStateReadError(r.err)
 		return accounts.Code{}, r.source, r.version, r.err
@@ -1218,25 +1217,29 @@ func readCode(s *IntraBlockState, addr accounts.Address, commited bool) (account
 
 // refreshCode is the in-memory-only variant for CodePath. CodePath is never recorded
 // via the skipStorage branch (the `path != CodePath` guard), so the default case records nothing.
-func refreshCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, ReadSource, Version, error) {
+func refreshCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, error) {
 	var r readPathResult
 	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, true, &r)
 	if r.err != nil {
-		return accounts.Code{}, r.source, r.version, r.err
+		return accounts.Code{}, r.err
 	}
+	var code accounts.Code
 	switch r.outcome {
 	case outcomeWriteSetHit:
-		return r.vwCode.Val, r.source, r.version, nil
+		code = r.vwCode.Val
 	case outcomeReadSetHit:
 		tr, _ := s.versionedReads.GetCode(addr)
-		return tr.Val, r.source, r.version, nil
+		code = tr.Val
 	case outcomeMapDone:
-		return r.mapCodeVal, r.source, r.version, nil
+		code = r.mapCodeVal
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
-		return accounts.Code{}, r.source, r.version, nil
 	default:
 		panic(fmt.Sprintf("refreshCode: unexpected outcome %d for %x", r.outcome, addr))
 	}
+	if dbg.AssertEnabled && code.Bytes != nil && code.Hash == accounts.NilCodeHash {
+		panic(fmt.Sprintf("refreshCode: code without hash for %x", addr))
+	}
+	return code, nil
 }
 
 // readCodeSize returns the contract code size.

@@ -242,6 +242,25 @@ func TestSetCodeParallel_NoMaterialize_DelegateThenRevoke(t *testing.T) {
 	assert.Empty(t, ibs.stateObjects, "noMaterialize SetCode must not cache a stateObject")
 }
 
+// Authorization processing reads an absent authority's code hash before the
+// first delegation creates it. The revoke is not net-zero for an account created
+// in this tx: folding its code writes away would expose that read.
+func TestSetCodeParallel_NoMaterialize_DelegateThenRevokeAbsentAccount(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xDE, 0xAD})
+	delegation := types.AddressToDelegation(accounts.InternAddress([20]byte{0x01}))
+	ibs := NewWithVersionMap(&emptyReader{}, NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+
+	_, err := ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	require.NoError(t, ibs.SetCode(addr, delegation, tracing.CodeChangeAuthorization))
+	require.NoError(t, ibs.SetCode(addr, nil, tracing.CodeChangeAuthorizationClear))
+
+	codeHash, err := ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	assert.Equal(t, accounts.EmptyCodeHash, codeHash)
+}
+
 // TestGetDelegatedDesignationParallel_NoMaterialize_OwnWrite pins the multi-hop
 // EIP-7702 case: a delegation set earlier in the same tx must be visible to
 // GetDelegatedDesignation (used for the auth state-gas refund). On the

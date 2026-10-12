@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -202,6 +203,35 @@ func TestFilters_SingleSubscription_WildcardOnlyTopicRowMatches(t *testing.T) {
 	if len(outChan) != 2 {
 		t.Error("expected wildcard-only topic row to continue matching subsequent logs")
 	}
+}
+
+func TestFilters_WildcardOnlyTopicsRequestAllTopicsFromRemote(t *testing.T) {
+	t.Parallel()
+	var lastFilterRequest *remoteproto.LogsFilterRequest
+	f := New(t.Context(), FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
+	f.logsRequestor.Store(func(r *remoteproto.LogsFilterRequest) error {
+		lastFilterRequest = r
+		return nil
+	})
+
+	outChan, _, err := f.SubscribeLogs(10, filters.FilterCriteria{
+		Addresses: []common.Address{address1},
+		Topics:    [][]common.Hash{nil, {}},
+	}, "")
+	require.NoError(t, err)
+
+	require.True(t, lastFilterRequest.AllTopics, "a filter with only wildcard topic positions must not narrow the remote topic set to nothing")
+
+	withTwoTopics := createLog()
+	withTwoTopics.Address = address1H160
+	withTwoTopics.Topics = append(withTwoTopics.Topics, gointerfaces.ConvertHashToH256(topic1))
+	f.OnNewLogs(withTwoTopics)
+	require.Len(t, outChan, 1)
+
+	withOneTopic := createLog()
+	withOneTopic.Address = address1H160
+	f.OnNewLogs(withOneTopic)
+	require.Len(t, outChan, 1, "two topic positions still require at least two topics")
 }
 
 func TestFilters_TwoSubscriptionsWithDifferentCriteria(t *testing.T) {

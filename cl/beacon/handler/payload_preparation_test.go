@@ -1153,7 +1153,7 @@ func TestFirstGloasProductionRejectsChangedBeaconHead(t *testing.T) {
 		}).AnyTimes()
 	handler.engine = engine
 
-	_, _, err := handler.produceBeaconBody(t.Context(), 1, currentSlot, baseBlockRoot, baseState,
+	_, _, err := handler.produceBeaconBody(t.Context(), currentSlot, baseBlockRoot, baseState,
 		targetSlot, common.Bytes96{}, common.Hash{})
 
 	require.ErrorIs(t, err, errForkChoiceHeadChanged)
@@ -1192,7 +1192,7 @@ func TestFirstGloasProductionUsesTransitionWithdrawals(t *testing.T) {
 	handler.engine = engine
 
 	_, _, err = handler.produceBeaconBody(
-		t.Context(), 3, currentSlot, baseBlockRoot, baseState, targetSlot,
+		t.Context(), currentSlot, baseBlockRoot, baseState, targetSlot,
 		common.Bytes96{}, common.Hash{},
 	)
 
@@ -2255,7 +2255,7 @@ func TestProductionUsesTargetSlotRandao(t *testing.T) {
 	clock.EXPECT().GetCurrentEpoch().Times(0)
 	handler.ethClock = clock
 
-	_, _, err := handler.produceBeaconBody(t.Context(), 1, postState.Slot(), common.Hash{0x41}, postState,
+	_, _, err := handler.produceBeaconBody(t.Context(), postState.Slot(), common.Hash{0x41}, postState,
 		targetSlot, common.Bytes96{}, common.Hash{})
 
 	require.Error(t, err)
@@ -2313,7 +2313,7 @@ func requireProductionUsesPreparedWarmup(t *testing.T, postState *state.CachingB
 	clock.EXPECT().GetSlotTime(targetSlot).Return(slotStart)
 	handler.ethClock = clock
 
-	_, _, err = handler.produceBeaconBody(ctx, 1, postState.Slot(), baseBlockRoot, postState,
+	_, _, err = handler.produceBeaconBody(ctx, postState.Slot(), baseBlockRoot, postState,
 		targetSlot, common.Bytes96{}, common.Hash{})
 
 	require.ErrorIs(t, err, context.Canceled)
@@ -2344,7 +2344,7 @@ func TestProductionLogsPreparedPayloadIDMismatch(t *testing.T) {
 	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(-10 * time.Second))
 	handler.ethClock = clock
 
-	_, _, err := handler.produceBeaconBody(t.Context(), 1, postState.Slot(), productionHead, postState,
+	_, _, err := handler.produceBeaconBody(t.Context(), postState.Slot(), productionHead, postState,
 		targetSlot, common.Bytes96{}, common.Hash{})
 
 	require.Error(t, err)

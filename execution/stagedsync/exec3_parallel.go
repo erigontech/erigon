@@ -1537,11 +1537,17 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	pe.cancelWorkers = cancelWorkers
 	pe.workersCtx = workersCtx
 
+	// The pool runs one worker beyond the configured count, except for a count
+	// of one (--exec.serial), which must run one transaction at a time.
+	poolSize := pe.workerCount + 1
+	if pe.workerCount <= 1 {
+		poolSize = 1
+	}
 	var err error
 	pe.execWorkers, _, pe.stopWorkers, err = exec.NewWorkersPool(
 		workersCtx, nil, true, pe.cfg.db, nil, nil, nil,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
-		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.logger,
+		poolSize, pe.taskExecMetrics, pe.cfg.dirs, pe.logger,
 	)
 	if err != nil {
 		return execLoopCtx, execLoopCtxCancel, err
@@ -2811,7 +2817,7 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 	}
 
 	if txn := txTask.Tx(); txn != nil {
-		regularContribution, stateContribution := protocol.InclusionContributions(txn.GetGasLimit(), txTask.Rules().IsAmsterdam)
+		regularContribution, stateContribution := protocol.InclusionContributions(txn.GetGasLimit(), txTask.Rules().IsAmsterdam, false)
 		if err := protocol.CheckBlockGasInclusion(be.gasPool, regularContribution, stateContribution, txn.GetBlobGas()); err != nil {
 			return be.invalidBlockResult(fmt.Errorf("%w: block gas used overflow at block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)), nil
 		}
