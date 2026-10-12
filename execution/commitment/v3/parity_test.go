@@ -110,7 +110,7 @@ var (
 
 func differential(t *testing.T, c commitmenttest.Case, specs []runner.RunSpec) ([][]byte, map[string][]byte, []int) {
 	t.Helper()
-	c.Assertions = commitmenttest.Assertions{TolerateHPHDrift: c.Assertions.TolerateHPHDrift, ProcessNoError: true, ZeroAccountReads: true, ZeroStorageReads: true, StateReadEngines: []string{"v3", "v3-reload", "fresh-v3"}}
+	c.Assertions = commitmenttest.Assertions{TolerateHPHDrift: c.Assertions.TolerateHPHDrift, ZeroAccountReads: true, ZeroStorageReads: true, StateReadEngines: []string{"v3", "v3-reload", "fresh-v3"}}
 	v3 := specs[0]
 	v3.Context.CheckPrevious = true
 	modes := []runner.RunSpec{v3, {Name: "fresh-v3", Mode: commitment.ModeCollect, Workers: 1, Fresh: true, Context: runner.ContextSpec{CheckPrevious: true}}, {Name: "fresh-hph", Mode: commitment.ModeUpdate, Fresh: true}}
@@ -211,8 +211,7 @@ func TestDifferential(t *testing.T) {
 	})
 
 	t.Run("incremental", func(t *testing.T) {
-		c, err := commitmenttest.Generate(commitmenttest.MathRand(0), commitmenttest.SequenceSpec{Kind: "incremental"})
-		require.NoError(t, err)
+		c := commitmenttest.Generate(commitmenttest.MathRand(0), commitmenttest.SequenceSpec{Kind: "incremental"})
 		state := make(commitmenttest.State)
 		for _, round := range c.Rounds {
 			state.Apply(round)
@@ -234,10 +233,8 @@ func TestDifferential(t *testing.T) {
 	})
 
 	t.Run("feed", func(t *testing.T) {
-		storage, err := commitmenttest.Generate(commitmenttest.MathRand(0), commitmenttest.SequenceSpec{Kind: "storage", Count: 300})
-		require.NoError(t, err)
-		whale, err := commitmenttest.Generate(commitmenttest.MathRand(424242), commitmenttest.SequenceSpec{Kind: "whale", Count: 3 * defaultStorageFanOutMin})
-		require.NoError(t, err)
+		storage := commitmenttest.Generate(commitmenttest.MathRand(0), commitmenttest.SequenceSpec{Kind: "storage", Count: 300})
+		whale := commitmenttest.Generate(commitmenttest.MathRand(424242), commitmenttest.SequenceSpec{Kind: "whale", Count: 3 * defaultStorageFanOutMin})
 		seed := storage.Rounds[0]
 		seed = append(seed, whale.Rounds[0]...)
 		var next []commitmenttest.Op
@@ -270,8 +267,7 @@ func TestDifferential(t *testing.T) {
 		for seed := int64(1); seed <= 40; seed++ {
 			for _, b1 := range []int{2, 3, 5} {
 				for _, b2 := range []int{1, 2, 3} {
-					c, err := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: "whale", BatchSizes: []int{b1, b2}})
-					require.NoError(t, err)
+					c := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: "whale", BatchSizes: []int{b1, b2}})
 					c.ID = fmt.Sprintf("whale/%d+%d", b1, b2)
 					differential(t, c, serialEngines)
 				}
@@ -284,8 +280,7 @@ func TestDifferential(t *testing.T) {
 			for seed := int64(1); seed <= 40; seed++ {
 				for _, n1 := range []int{2, 5, 20} {
 					for _, n2 := range []int{1, 2, 5} {
-						c, err := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: "one-slot", BatchSizes: []int{n1, n2}, Rewrite: rewrite})
-						require.NoError(t, err)
+						c := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: "one-slot", BatchSizes: []int{n1, n2}, Rewrite: rewrite})
 						c.ID = fmt.Sprintf("one-slot/%d+%d/rewrite=%t", n1, n2, rewrite)
 						differential(t, c, serialEngines)
 					}
@@ -297,8 +292,7 @@ func TestDifferential(t *testing.T) {
 	t.Run("E61/two-slot-seeds", func(t *testing.T) {
 		for seed := range int64(200) {
 			t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
-				c, err := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: "whale", Count: 2})
-				require.NoError(t, err)
+				c := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: "whale", Count: 2})
 				c.ID = "E61/two-slot-seeds"
 				differential(t, c, serialEngines[:1])
 			})
@@ -308,8 +302,7 @@ func TestDifferential(t *testing.T) {
 	t.Run("slot_threshold", func(t *testing.T) {
 		for _, seed := range []int64{424242, 1, 2, 3, 7, 99, 12345, 777, 31337, 5150} {
 			for n := 1; n <= 80; n++ {
-				c, err := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: "whale", Count: n})
-				require.NoError(t, err)
+				c := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: "whale", Count: n})
 				c.ID = fmt.Sprintf("slot-threshold/%d", n)
 				differential(t, c, serialEngines[:1])
 			}
@@ -414,8 +407,7 @@ func runWorlds(t *testing.T, spec commitmenttest.SequenceSpec, seeds int64) {
 	rounds, drifts := 0, 0
 	for seed := int64(1); seed <= seeds; seed++ {
 		t.Run(fmt.Sprintf("a%d_s%d/seed%d", spec.Accounts, spec.Slots, seed), func(t *testing.T) {
-			c, err := commitmenttest.Generate(commitmenttest.MathRand(seed), spec)
-			require.NoError(t, err)
+			c := commitmenttest.Generate(commitmenttest.MathRand(seed), spec)
 			c.Assertions.TolerateHPHDrift = true
 			roots, _, hphDrift := differential(t, c, parityEngines[:2])
 			require.Len(t, roots, spec.Rounds, "every configured round must be checked against v3")

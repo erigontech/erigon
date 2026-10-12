@@ -55,10 +55,7 @@ func benchEntries(shape string, n int) []parityUpdate {
 	default:
 		shape = "storage"
 	}
-	c, err := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: shape, Count: n})
-	if err != nil {
-		panic(err)
-	}
+	c := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: shape, Count: n})
 	return parityEntries(c.Rounds[0])
 }
 

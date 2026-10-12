@@ -58,37 +58,34 @@ func Key(spec KeySpec, number int) []byte {
 	return key
 }
 
-func Keys(seed Seed, spec KeySpec) ([][]byte, error) {
+func Keys(seed Seed, spec KeySpec) [][]byte {
 	if spec.Count < 0 || spec.Size < 1 {
-		return nil, fmt.Errorf("invalid key spec: %+v", spec)
+		panic(fmt.Sprintf("invalid key spec: %+v", spec))
 	}
 	keys := make([][]byte, 0, spec.Count)
 	if spec.Kind != "random-distinct" {
 		switch spec.Kind {
 		case "integer":
 			if spec.Size < 8 {
-				return nil, fmt.Errorf("integer key size %d", spec.Size)
+				panic(fmt.Sprintf("integer key size %d", spec.Size))
 			}
 		case "bench-address", "bench-slot":
 			if spec.Size < 16 {
-				return nil, fmt.Errorf("bench key size %d", spec.Size)
+				panic(fmt.Sprintf("bench key size %d", spec.Size))
 			}
 		case "wrapping-address", "wrapping-slot", "fold":
 		default:
-			return nil, fmt.Errorf("unknown key kind: %s", spec.Kind)
+			panic(fmt.Sprintf("unknown key kind: %s", spec.Kind))
 		}
 		for i := range spec.Count {
 			keys = append(keys, Key(spec, spec.Start+i))
 		}
-		return keys, nil
+		return keys
 	}
 	if spec.Size < 8 && uint64(spec.Count) > uint64(1)<<(8*spec.Size) {
-		return nil, fmt.Errorf("too many distinct keys for size %d", spec.Size)
+		panic(fmt.Sprintf("too many distinct keys for size %d", spec.Size))
 	}
-	rng, err := seed.rand()
-	if err != nil {
-		return nil, err
-	}
+	rng := seed.rand()
 	seen := make(map[string]struct{}, spec.Count)
 	for len(keys) < spec.Count {
 		key := make([]byte, spec.Size)
@@ -99,18 +96,18 @@ func Keys(seed Seed, spec KeySpec) ([][]byte, error) {
 		seen[string(key)] = struct{}{}
 		keys = append(keys, key)
 	}
-	return keys, nil
+	return keys
 }
 
 type Shape struct {
 	Prefixes [][]byte
 }
 
-func Paths(spec Shape) ([][]byte, error) {
+func Paths(spec Shape) [][]byte {
 	paths := make([][]byte, 0, len(spec.Prefixes))
 	for _, prefix := range spec.Prefixes {
 		if len(prefix) > 64 {
-			return nil, fmt.Errorf("prefix length %d", len(prefix))
+			panic(fmt.Sprintf("prefix length %d", len(prefix)))
 		}
 		fill := byte(0xd)
 		if len(prefix) != 0 {
@@ -126,9 +123,9 @@ func Paths(spec Shape) ([][]byte, error) {
 	for _, path := range paths {
 		for _, nib := range path {
 			if nib > 15 {
-				return nil, fmt.Errorf("invalid nibble %d", nib)
+				panic(fmt.Sprintf("invalid nibble %d", nib))
 			}
 		}
 	}
-	return paths, nil
+	return paths
 }

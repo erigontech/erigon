@@ -186,10 +186,7 @@ func foldUpdate(plane byte, number int) commitment.Update {
 }
 
 func distinctKeysAndPaths(plane byte, count int, seed int64) ([][]byte, [][]byte) {
-	keys, err := commitmenttest.Keys(commitmenttest.MathRand(seed), commitmenttest.KeySpec{Kind: "random-distinct", Size: 20, Count: count})
-	if err != nil {
-		panic(err)
-	}
+	keys := commitmenttest.Keys(commitmenttest.MathRand(seed), commitmenttest.KeySpec{Kind: "random-distinct", Size: 20, Count: count})
 	paths := make([][]byte, 0, len(keys))
 	for _, key := range keys {
 		paths = append(paths, commitment.KeyToHexNibbleHash(key))

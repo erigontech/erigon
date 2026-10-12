@@ -72,19 +72,15 @@ func TestSharedRunnerCatalogue(t *testing.T) {
 		{"E58-E101/process-100k-storage", "storage", 100000},
 	} {
 		t.Run(tc.id, func(t *testing.T) {
-			c, err := commitmenttest.Generate(commitmenttest.MathRand(0), commitmenttest.SequenceSpec{Kind: tc.kind, Count: tc.count})
-			require.NoError(t, err)
+			c := commitmenttest.Generate(commitmenttest.MathRand(0), commitmenttest.SequenceSpec{Kind: tc.kind, Count: tc.count})
 			c.ID = tc.id
-			c.Assertions = commitmenttest.Assertions{ProcessNoError: true}
-			require.True(t, c.Assertions.ProcessNoError)
 			runner.Run(t, c, runner.RunSpec{Name: "v3", Mode: commitment.ModeCollect, Context: runner.ContextSpec{ForbidStateReads: true}}, openTestTrie)
 		})
 	}
 }
 
 func TestProcessFeedReadsNoState(t *testing.T) {
-	c, err := commitmenttest.Generate(commitmenttest.MathRand(424242), commitmenttest.SequenceSpec{Kind: "whale", Count: 200})
-	require.NoError(t, err)
+	c := commitmenttest.Generate(commitmenttest.MathRand(424242), commitmenttest.SequenceSpec{Kind: "whale", Count: 200})
 	memory := runner.NewMemory(runner.ContextSpec{ForbidStateReads: true})
 	engine, err := openTestTrie(context.Background(), runner.RunSpec{Mode: commitment.ModeCollect, Memory: memory})
 	require.NoError(t, err)
@@ -135,10 +131,7 @@ func entryOf(path []byte, update *commitment.Update) storageEntry {
 }
 
 func slotPath(prefix ...byte) []byte {
-	paths, err := commitmenttest.Paths(commitmenttest.Shape{Prefixes: [][]byte{prefix}})
-	if err != nil {
-		panic(err)
-	}
+	paths := commitmenttest.Paths(commitmenttest.Shape{Prefixes: [][]byte{prefix}})
 	return paths[0]
 }
 

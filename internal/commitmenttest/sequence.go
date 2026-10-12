@@ -37,47 +37,44 @@ type SequenceSpec struct {
 	Rewrite     bool
 }
 
-func Generate(seed Seed, spec SequenceSpec) (Case, error) {
-	c := Case{ID: spec.Kind, Seed: seed, Assertions: Assertions{ProcessNoError: true}}
+func Generate(seed Seed, spec SequenceSpec) Case {
+	c := Case{ID: spec.Kind, Seed: seed}
 	if len(spec.BatchSizes) != 0 {
 		if spec.Count != 0 || (spec.Kind != "whale" && spec.Kind != "one-slot") {
-			return c, fmt.Errorf("batch sizes require whale or one-slot without a count")
+			panic("batch sizes require whale or one-slot without a count")
 		}
 		for _, size := range spec.BatchSizes {
 			if size < 0 {
-				return c, fmt.Errorf("negative batch size %d", size)
+				panic(fmt.Sprintf("negative batch size %d", size))
 			}
 			spec.Count += size
 		}
 	}
 	if spec.Count < 0 {
-		return c, fmt.Errorf("negative count %d", spec.Count)
+		panic(fmt.Sprintf("negative count %d", spec.Count))
 	}
-	rng, err := seed.rand()
-	if err != nil {
-		return c, err
-	}
+	rng := seed.rand()
 	if spec.Kind == "stress" || spec.Kind == "root-collapse" {
 		if spec.Rounds < 0 || spec.Accounts < 1 {
-			return c, fmt.Errorf("invalid stress dimensions")
+			panic("invalid stress dimensions")
 		}
 		if spec.Kind == "stress" {
 			if spec.Slots < 1 || spec.OpsPerRound < 1 {
-				return c, fmt.Errorf("invalid stress operations")
+				panic("invalid stress operations")
 			}
 			c.Rounds = stressRounds(rng, spec)
 		} else {
 			c.Rounds = collapseRounds(rng, spec)
 		}
-		return c, nil
+		return c
 	}
 	if spec.Kind == "incremental" {
 		c.Rounds = incrementalRounds()
-		return c, nil
+		return c
 	}
 	if spec.Kind == "one-slot" {
 		if len(spec.BatchSizes) != 2 {
-			return c, fmt.Errorf("one-slot requires two batch sizes")
+			panic("one-slot requires two batch sizes")
 		}
 		addrs, slots := make([][]byte, spec.Count), make([][]byte, spec.Count)
 		for i := range addrs {
@@ -100,7 +97,7 @@ func Generate(seed Seed, spec SequenceSpec) (Case, error) {
 			}
 			c.Rounds = append(c.Rounds, ops)
 		}
-		return c, nil
+		return c
 	}
 	ops := make([]Op, 0, spec.Count)
 	addAccount := func(key []byte, number int) {
@@ -126,7 +123,7 @@ func Generate(seed Seed, spec SequenceSpec) (Case, error) {
 			ops = append(ops, Op{Key: append(bytes.Clone(addr), slot...), Storage: Storage(StorageSpec{Number: i})})
 		}
 	default:
-		return c, fmt.Errorf("unknown sequence kind: %s", spec.Kind)
+		panic(fmt.Sprintf("unknown sequence kind: %s", spec.Kind))
 	}
 	c.Rounds = [][]Op{ops}
 	if len(spec.BatchSizes) != 0 {
@@ -140,7 +137,7 @@ func Generate(seed Seed, spec SequenceSpec) (Case, error) {
 			start += count
 		}
 	}
-	return c, nil
+	return c
 }
 
 func incrementalRounds() [][]Op {
