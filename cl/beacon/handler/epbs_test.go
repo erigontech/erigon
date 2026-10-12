@@ -3468,8 +3468,8 @@ func TestPostProposerPreferencesWithoutServiceConcurrentRequests(t *testing.T) {
 			epbsPool := pool.NewEpbsPool()
 			gossipManager := gossip_mock.NewMockGossip(ctrl)
 			var gossipCalls atomic.Uint32
-			gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameProposerPreferences, gomock.Any()).
-				DoAndReturn(func(context.Context, string, []byte) error {
+			gossipManager.EXPECT().PublishForEpoch(gomock.Any(), uint64(3), gossip.TopicNameProposerPreferences, gomock.Any()).
+				DoAndReturn(func(context.Context, uint64, string, []byte) error {
 					gossipCalls.Add(1)
 					return nil
 				}).AnyTimes()
@@ -3526,6 +3526,11 @@ func TestPostValidatorProposerPreferencesGloasForkBoundary(t *testing.T) {
 	for _, contentType := range []string{"application/json", "application/octet-stream"} {
 		t.Run(contentType, func(t *testing.T) {
 			_, _, _, _, _, handler, _, _, fc, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			gossipManager := gossip_mock.NewMockGossip(gomock.NewController(t))
+			gossipManager.EXPECT().PublishForEpoch(gomock.Any(), uint64(3), gossip.TopicNameProposerPreferences, gomock.Any()).Return(nil).Times(2)
+			gossipManager.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+			handler.gossipManager = gossipManager
+			handler.sentinel = &nonNilSentinelClient{}
 			cfg := handler.beaconChainCfg
 			cfg.GloasForkEpoch = 3
 			cfg.InitializeForkSchedule()

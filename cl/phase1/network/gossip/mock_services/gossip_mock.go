@@ -74,6 +74,20 @@ func (mr *MockGossipMockRecorder) PublishBackground(name, data, expiry any, logC
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PublishBackground", reflect.TypeOf((*MockGossip)(nil).PublishBackground), varargs...)
 }
 
+// PublishForEpoch mocks base method.
+func (m *MockGossip) PublishForEpoch(ctx context.Context, epoch uint64, name string, data []byte) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PublishForEpoch", ctx, epoch, name, data)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// PublishForEpoch indicates an expected call of PublishForEpoch.
+func (mr *MockGossipMockRecorder) PublishForEpoch(ctx, epoch, name, data any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PublishForEpoch", reflect.TypeOf((*MockGossip)(nil).PublishForEpoch), ctx, epoch, name, data)
+}
+
 // SubscribeWithExpiry mocks base method.
 func (m *MockGossip) SubscribeWithExpiry(name string, expiry time.Time) error {
 	m.ctrl.T.Helper()
