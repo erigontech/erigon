@@ -48,8 +48,6 @@ func (a *plainKeyArena) reset() { a.buf = a.buf[:0] }
 
 const touchChunkKeys = 16384
 
-const touchChunkBuffers = 2
-
 type touchEntry struct {
 	hashedKey []byte
 	plainKey  []byte
@@ -60,8 +58,7 @@ type parallelUpdate struct {
 	trie *prefixTrie
 
 	pending  []touchEntry
-	buildCh  chan []touchEntry
-	freeCh   chan []touchEntry
+	spare    []touchEntry
 	inflight sync.WaitGroup
 
 	deferredMu       sync.Mutex
@@ -82,39 +79,19 @@ func (pu *parallelUpdate) Collect(hashedKey, plainKey []byte, update *Update) {
 	}
 }
 
-func (pu *parallelUpdate) drainBuilder() {
-	pu.inflight.Wait()
-	if pu.buildCh != nil {
-		close(pu.buildCh)
-		pu.buildCh = nil
-	}
-}
-
 func resetEntries(c []touchEntry) []touchEntry {
 	clear(c)
 	return c[:0]
 }
 
 func (pu *parallelUpdate) handOff() {
-	if pu.buildCh == nil {
-		if pu.freeCh == nil {
-			pu.freeCh = make(chan []touchEntry, touchChunkBuffers)
-			for range touchChunkBuffers {
-				pu.freeCh <- make([]touchEntry, 0, touchChunkKeys)
-			}
-		}
-		pu.buildCh = make(chan []touchEntry, touchChunkBuffers)
-		go func(build <-chan []touchEntry, free chan<- []touchEntry) {
-			for c := range build {
-				pu.insertChunk(c)
-				free <- resetEntries(c)
-				pu.inflight.Done()
-			}
-		}(pu.buildCh, pu.freeCh)
-	}
-	pu.inflight.Add(1)
-	pu.buildCh <- pu.pending
-	pu.pending = <-pu.freeCh
+	pu.inflight.Wait()
+	c := pu.pending
+	pu.pending, pu.spare = pu.spare[:0], c
+	pu.inflight.Go(func() {
+		pu.insertChunk(c)
+		clear(c)
+	})
 }
 
 func (pu *parallelUpdate) insertChunk(c []touchEntry) {
@@ -124,15 +101,9 @@ func (pu *parallelUpdate) insertChunk(c []touchEntry) {
 }
 
 func (pu *parallelUpdate) Build() {
-	if len(pu.pending) > 0 {
-		if pu.buildCh != nil {
-			pu.handOff()
-		} else {
-			pu.insertChunk(pu.pending)
-			pu.pending = resetEntries(pu.pending)
-		}
-	}
-	pu.drainBuilder()
+	pu.inflight.Wait()
+	pu.insertChunk(pu.pending)
+	pu.pending = resetEntries(pu.pending)
 }
 
 func (pu *parallelUpdate) internKey(plainKey []byte) []byte {
@@ -149,7 +120,7 @@ func (pu *parallelUpdate) drainDeferred() {
 }
 
 func (pu *parallelUpdate) Reset() {
-	pu.drainBuilder()
+	pu.inflight.Wait()
 	pu.pending = resetEntries(pu.pending)
 	if pu.trie != nil {
 		pu.trie.Reset()
@@ -159,10 +130,8 @@ func (pu *parallelUpdate) Reset() {
 }
 
 func (pu *parallelUpdate) Close() {
-	pu.drainBuilder()
-	pu.freeCh = nil
-	clear(pu.pending)
-	pu.pending = nil
+	pu.inflight.Wait()
+	pu.pending, pu.spare = nil, nil
 	pu.trie = nil
 	pu.drainDeferred()
 	pu.keyArena.reset()

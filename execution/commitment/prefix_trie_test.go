@@ -31,6 +31,8 @@ type walkEntry struct {
 	prefix       []byte
 	subtreeCount uint32
 	bitmap       uint16
+	plainKey     []byte
+	update       *Update
 }
 
 func collectWalk(t *prefixTrie) []walkEntry {
@@ -43,7 +45,7 @@ func collectWalk(t *prefixTrie) []walkEntry {
 		prefix := make([]byte, len(accPrefix)+len(n.ext))
 		copy(prefix, accPrefix)
 		copy(prefix[len(accPrefix):], n.ext)
-		out = append(out, walkEntry{prefix: prefix, subtreeCount: n.subtreeCount, bitmap: n.bitmap})
+		out = append(out, walkEntry{prefix: prefix, subtreeCount: n.subtreeCount, bitmap: n.bitmap, plainKey: n.plainKey, update: n.update})
 		childIdx := 0
 		for bm := n.bitmap; bm != 0; {
 			nib := byte(bits.TrailingZeros16(bm))
