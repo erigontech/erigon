@@ -114,7 +114,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 	defer tx.Rollback()
 
 	nonce := hexutil.Uint64(0)
-	acc, err := reader.ReadAccountData(accounts.InternAddress(address))
+	acc, err := reader.ReadAccountByPlainAddr(address)
 	if acc == nil || err != nil {
 		return &nonce, err
 	}
@@ -244,5 +244,6 @@ func (api *APIImpl) Exist(ctx context.Context, address common.Address, blockNrOr
 	}
 	defer tx.Rollback()
 
-	return state.HasAccount(reader, accounts.InternAddress(address))
+	acc, err := reader.ReadAccountByPlainAddr(address)
+	return acc != nil, err
 }
