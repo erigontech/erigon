@@ -27,6 +27,7 @@ import (
 	"net"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -548,13 +549,15 @@ func TestSubscriptionLimitCountsPendingSubscribe(t *testing.T) {
 	t.Parallel()
 	server := newTestServer(log.New())
 	server.SetSubscriptionLimit(1)
-	service := &notificationTestService{gotHangSubscriptionReq: make(chan struct{}), unblockHangSubscription: make(chan struct{})}
+	service := &notificationTestService{gotHangSubscriptionReq: make(chan struct{}, 1), unblockHangSubscription: make(chan struct{})}
 	if err := server.RegisterName("nftest2", service); err != nil {
 		t.Fatal(err)
 	}
 	clientConn, serverConn := net.Pipe()
 	go server.ServeCodec(NewCodec(serverConn), 0)
 	defer server.Stop()
+	unblock := sync.OnceFunc(func() { close(service.unblockHangSubscription) })
+	defer unblock()
 	if err := clientConn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
 		t.Fatal(err)
 	}
@@ -563,7 +566,11 @@ func TestSubscriptionLimitCountsPendingSubscribe(t *testing.T) {
 	if _, err := clientConn.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"nftest2_subscribe","params":["hangSubscription",1]}`)); err != nil {
 		t.Fatal(err)
 	}
-	<-service.gotHangSubscriptionReq
+	select {
+	case <-service.gotHangSubscriptionReq:
+	case <-time.After(10 * time.Second):
+		t.Fatal("subscription callback did not start")
+	}
 	if _, err := clientConn.Write([]byte(`{"jsonrpc":"2.0","id":2,"method":"nftest2_subscribe","params":["someSubscription",0,0]}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -578,7 +585,7 @@ func TestSubscriptionLimitCountsPendingSubscribe(t *testing.T) {
 		t.Fatalf("second subscription accepted while the first held the only slot: %v", second.Error)
 	}
 
-	close(service.unblockHangSubscription)
+	unblock()
 	for {
 		var msg jsonrpcMessage
 		if err := in.Decode(&msg); err != nil {
