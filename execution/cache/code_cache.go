@@ -65,8 +65,7 @@ type versionedAddressID struct {
 }
 
 type addrCodeHashEntry struct {
-	// addr is the full key; only 8 of its bytes pick the slot, so Get compares
-	// it to reject a colliding address.
+	// addr is the full key -- see versionedAddressID.addr.
 	addr  common.Address
 	hash  [32]byte
 	txNum uint64
@@ -76,6 +75,11 @@ type addrCodeHashEntry struct {
 // addrSlot keys the lock-free layer by an address. It takes the low bytes
 // because precompile and test addresses share eight zero leading bytes, which
 // would collapse every one of them onto a single slot.
+//
+// ponytail: two addresses sharing their low 8 bytes evict each other on every
+// put. Reads stay correct (the entry carries the full address, so a collision
+// is a miss), and the odds are negligible for keccak-derived addresses; widen
+// the key to the full address if a workload ever shows the thrash.
 func addrSlot(a common.Address) uint64 { return binary.BigEndian.Uint64(a[length.Addr-8:]) }
 
 // Per-entry residency of the two addr-keyed LRUs: a 20-byte key plus the
@@ -308,7 +312,9 @@ func (c *CodeCache) GetWithTxNum(addr []byte) ([]byte, uint64, bool) {
 		return nil, 0, false
 	}
 	if coh.IsStale(vID.txNum, vID.epoch) {
-		c.dropStaleAddrBinding(k)
+		dropSlotIf(c.addrToHash, &c.addrBindMu, addrSlot(k), func(e versionedAddressID) bool {
+			return e.addr == k && c.coh.IsStale(e.txNum, e.epoch)
+		})
 		c.addrMisses.Add(1)
 		return nil, 0, false
 	}
@@ -337,8 +343,8 @@ func (c *CodeCache) GetWithTxNum(addr []byte) ([]byte, uint64, bool) {
 }
 
 // Put stores contract code for the given address, implementing the Cache interface.
-// Uses fast maphash to compute the code identifier. The
-// hashToCode bytes are content-addressed (immutable for a hash) but carry a
+// Uses fast maphash to compute the code identifier. The hashToCode bytes are
+// content-addressed (immutable for a hash) but carry a
 // (txNum, epoch) stamp so an unwound deployment's code stops being discoverable.
 func (c *CodeCache) Put(addr []byte, code []byte, txNum uint64) {
 	// No codeHash in hand here, so the entry is left unverified against maphash
@@ -410,7 +416,9 @@ func (c *CodeCache) GetAddrCodeHashWithTxNum(addr []byte) ([32]byte, uint64, boo
 		return [32]byte{}, 0, false
 	}
 	if coh.IsStale(e.txNum, e.epoch) {
-		c.dropStaleAddrCodeHash(k)
+		dropSlotIf(c.addrToCodeHash, &c.putStripes[k[length.Addr-1]], addrSlot(k), func(e addrCodeHashEntry) bool {
+			return e.addr == k && c.coh.IsStale(e.txNum, e.epoch)
+		})
 		return [32]byte{}, 0, false
 	}
 	return e.hash, e.txNum, true
@@ -441,41 +449,20 @@ func (c *CodeCache) PutAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 // DeleteAddrCodeHash removes the mapping when its account record is invalidated.
 func (c *CodeCache) DeleteAddrCodeHash(addr []byte) {
 	a := common.BytesToAddress(addr)
-	stripe := &c.putStripes[a[len(a)-1]]
-	stripe.Lock()
-	defer stripe.Unlock()
-
-	// The slot is shared, so only this address's own entry may be dropped.
-	slot := addrSlot(a)
-	if e, ok := c.addrToCodeHash.Get(slot); ok && e.addr == a {
-		c.addrToCodeHash.Remove(slot)
-	}
+	dropSlotIf(c.addrToCodeHash, &c.putStripes[a[length.Addr-1]], addrSlot(a), func(e addrCodeHashEntry) bool {
+		return e.addr == a
+	})
 }
 
-// dropStaleAddrBinding removes addr's binding under the lock its writers use,
-// re-reading the slot first: a live replacement -- for this address or for a
-// colliding one -- can be published between the read that found it stale and
-// this removal.
-func (c *CodeCache) dropStaleAddrBinding(a common.Address) {
-	c.addrBindMu.Lock()
-	defer c.addrBindMu.Unlock()
-
-	slot := addrSlot(a)
-	if e, ok := c.addrToHash.Get(slot); ok && e.addr == a && c.coh.IsStale(e.txNum, e.epoch) {
-		c.addrToHash.Remove(slot)
-	}
-}
-
-// dropStaleAddrCodeHash is dropStaleAddrBinding for the addr->codeHash layer,
-// under the stripe PutAddrCodeHash writes with.
-func (c *CodeCache) dropStaleAddrCodeHash(a common.Address) {
-	stripe := &c.putStripes[a[len(a)-1]]
-	stripe.Lock()
-	defer stripe.Unlock()
-
-	slot := addrSlot(a)
-	if e, ok := c.addrToCodeHash.Get(slot); ok && e.addr == a && c.coh.IsStale(e.txNum, e.epoch) {
-		c.addrToCodeHash.Remove(slot)
+// dropSlotIf removes a shared slot's entry when drop reports it belongs to this
+// caller and should go. It re-reads under the writers' lock, because a live
+// entry -- for this address or a colliding one -- can be published between the
+// read that condemned it and the removal.
+func dropSlotIf[V any](b *ByteLRU[V], mu sync.Locker, slot uint64, drop func(V) bool) {
+	mu.Lock()
+	defer mu.Unlock()
+	if e, ok := b.Get(slot); ok && drop(e) {
+		b.Remove(slot)
 	}
 }
 
@@ -640,14 +627,9 @@ func (c *CodeCache) putCodeSizeByCodeHashLocked(codeHash []byte, size int, hcs, 
 // Delete removes the address → code mapping for addr.
 func (c *CodeCache) Delete(addr []byte) {
 	a := common.BytesToAddress(addr)
-	c.addrBindMu.Lock()
-	defer c.addrBindMu.Unlock()
-
-	// The slot is shared, so only this address's own binding may be dropped.
-	slot := addrSlot(a)
-	if e, ok := c.addrToHash.Get(slot); ok && e.addr == a {
-		c.addrToHash.Remove(slot)
-	}
+	dropSlotIf(c.addrToHash, &c.addrBindMu, addrSlot(a), func(e versionedAddressID) bool {
+		return e.addr == a
+	})
 }
 
 // Clear removes every layer, resets accounting, and starts a new coherence
