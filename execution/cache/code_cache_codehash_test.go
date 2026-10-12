@@ -352,8 +352,8 @@ func TestCodeCache_DeleteAddrCodeHashKeepsCollidingEntry(t *testing.T) {
 
 // A colliding address's live mapping survives a read of its unwind-stale
 // sibling: the address guard answers the miss before the stale-drop path.
-// (The drop itself is serialized against writers in dropStaleAddrCodeHash; that
-// interleaving has no deterministic test.)
+// (dropSlotIf serializes the drop itself against writers; that interleaving has
+// no deterministic test.)
 func TestCodeCache_StaleSiblingReadKeepsCollidingMapping(t *testing.T) {
 	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 	a1 := append(bytes.Repeat([]byte{0x77}, 12), 0, 0, 0, 0, 0, 0, 0, 3)
