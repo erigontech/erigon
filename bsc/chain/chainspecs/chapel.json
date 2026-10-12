@@ -412,6 +412,7 @@
   "lorentzTime": 1744097580,
   "maxwellTime": 1748243100,
   "fermiTime": 1762741500,
+  "osakaTime": 1774319400,
   "mendelTime": 1774319400,
   "pasteurTime": 1784601000,
   "blobSchedule": {
@@ -421,6 +422,11 @@
       "baseFeeUpdateFraction": 3338477
     },
     "prague": {
+      "target": 3,
+      "max": 6,
+      "baseFeeUpdateFraction": 3338477
+    },
+    "osaka": {
       "target": 3,
       "max": 6,
       "baseFeeUpdateFraction": 3338477

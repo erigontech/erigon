@@ -75,6 +75,9 @@ func ActivePrecompiledContracts(chainRules *chain.Rules) PrecompiledContracts {
 func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
 	switch {
 	case chainRules.IsOsaka:
+		if chainRules.IsParlia {
+			return PrecompiledContractsOsakaForBSC
+		}
 		return PrecompiledContractsOsaka
 	case chainRules.IsPrague:
 		if chainRules.IsParlia {
@@ -304,6 +307,15 @@ var PrecompiledContractsPragueForBSC = func() PrecompiledContracts {
 	return m
 }()
 
+var PrecompiledContractsOsakaForBSC = func() PrecompiledContracts {
+	m := maps.Clone(PrecompiledContractsPragueForBSC)
+	for _, b := range [][]byte{{0x05}, {0x01, 0x00}} {
+		addr := accounts.InternAddress(common.BytesToAddress(b))
+		m[addr] = PrecompiledContractsOsaka[addr]
+	}
+	return m
+}()
+
 var (
 	PrecompiledAddressesOsaka          []accounts.Address
 	PrecompiledAddressesPrague         []accounts.Address
@@ -321,6 +333,7 @@ var (
 	PrecompiledAddressesCancunForBSC   []accounts.Address
 	PrecompiledAddressesHaberForBSC    []accounts.Address
 	PrecompiledAddressesPragueForBSC   []accounts.Address
+	PrecompiledAddressesOsakaForBSC    []accounts.Address
 	PrecompiledAddressesByzantium      []accounts.Address
 	PrecompiledAddressesHomestead      []accounts.Address
 )
@@ -368,6 +381,9 @@ func init() {
 	for k := range PrecompiledContractsPragueForBSC {
 		PrecompiledAddressesPragueForBSC = append(PrecompiledAddressesPragueForBSC, k)
 	}
+	for k := range PrecompiledContractsOsakaForBSC {
+		PrecompiledAddressesOsakaForBSC = append(PrecompiledAddressesOsakaForBSC, k)
+	}
 	for k := range PrecompiledContractsBerlin {
 		PrecompiledAddressesBerlin = append(PrecompiledAddressesBerlin, k)
 	}
@@ -386,6 +402,9 @@ func init() {
 func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
 	switch {
 	case rules.IsOsaka:
+		if rules.IsParlia {
+			return PrecompiledAddressesOsakaForBSC
+		}
 		return PrecompiledAddressesOsaka
 	case rules.IsPrague:
 		if rules.IsParlia {

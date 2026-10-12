@@ -17,6 +17,9 @@
 package chain_test
 
 import (
+	"maps"
+	"math/big"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -87,6 +90,68 @@ func TestChapelForkPrecompiles(t *testing.T) {
 			require.Contains(t, set, blsVerify)
 			require.Contains(t, set, cometBFT)
 			assert.Equal(t, tc.cometBFT, set[cometBFT].Name())
+		})
+	}
+}
+
+// TestChapelMendelActivatesOsaka pins that Mendel is BSC's Osaka: without
+// osakaTime the Mendel blocks run under Prague rules.
+func TestChapelMendelActivatesOsaka(t *testing.T) {
+	t.Parallel()
+
+	spec, err := chainspec.ChainSpecByName(networkname.Chapel)
+	require.NoError(t, err)
+	cfg := spec.Config
+
+	require.NotNil(t, cfg.MendelTime)
+	require.NotNil(t, cfg.OsakaTime)
+	assert.Equal(t, *cfg.MendelTime, *cfg.OsakaTime)
+	assert.False(t, cfg.IsOsaka(*cfg.MendelTime-1))
+	assert.True(t, cfg.IsOsaka(*cfg.MendelTime))
+
+	assert.Equal(t, &params.BlobConfig{Target: 3, Max: 6, BaseFeeUpdateFraction: 3338477}, cfg.GetBlobConfig(*cfg.MendelTime))
+}
+
+// TestChapelMendelPrecompiles pins BSC's Osaka precompile set: the Prague BSC set
+// with EIP-7823/7883 MODEXP and EIP-7951 P256VERIFY pricing.
+func TestChapelMendelPrecompiles(t *testing.T) {
+	t.Parallel()
+
+	spec, err := chainspec.ChainSpecByName(networkname.Chapel)
+	require.NoError(t, err)
+
+	addr := func(b ...byte) accounts.Address { return accounts.InternAddress(common.BytesToAddress(b)) }
+	modExp, p256Verify := addr(0x05), addr(0x01, 0x00)
+
+	// secp256k1 square root, as computed by VRF proof verification:
+	// base^((P+1)/4) mod P with 32-byte base, exponent and modulus.
+	secp256k1P, _ := new(big.Int).SetString("fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f", 16)
+	sqrtPower := new(big.Int).Rsh(new(big.Int).Add(secp256k1P, big.NewInt(1)), 2)
+	word := func(x *big.Int) []byte { return x.FillBytes(make([]byte, 32)) }
+	sqrtInput := slices.Concat(word(big.NewInt(32)), word(big.NewInt(32)), word(big.NewInt(32)),
+		word(big.NewInt(2)), word(sqrtPower), word(secp256k1P))
+
+	for _, tc := range []struct {
+		name      string
+		block     uint64
+		time      uint64
+		modExpGas uint64
+		p256Gas   uint64
+	}{
+		{"fermi", 97510088, 1774319399, 1349, params.P256VerifyGas},
+		{"mendel", 97510144, 1774319424, 4048, params.P256VerifyGasEIP7951},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			blockContext := evmtypes.BlockContext{BlockNumber: tc.block, Time: tc.time}
+			rules := blockContext.Rules(spec.Config)
+			set := vm.Precompiles(rules)
+			for b := byte(100); b <= 105; b++ {
+				require.Contains(t, set, addr(b))
+			}
+			assert.Equal(t, "CometBFTLightBlockValidateHertz", set[addr(103)].Name())
+			assert.Equal(t, tc.modExpGas, set[modExp].RequiredGas(sqrtInput))
+			assert.Equal(t, tc.p256Gas, set[p256Verify].RequiredGas(nil))
+			assert.ElementsMatch(t, slices.Collect(maps.Keys(set)), vm.ActivePrecompiles(rules))
 		})
 	}
 }
