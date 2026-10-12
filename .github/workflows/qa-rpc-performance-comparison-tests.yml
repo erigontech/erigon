@@ -111,6 +111,7 @@ jobs:
     timeout-minutes: 480
     permissions:
       contents: read
+      actions: read
     env:
       RUN_ID: ${{ needs.setup.outputs.run_id }}
       NETWORK: ${{ needs.setup.outputs.network }}
@@ -171,6 +172,9 @@ jobs:
           git -c advice.detachedHead=false clone --depth 1 --branch "$RPC_VERSION" https://github.com/erigontech/rpc-tests "$RUNNER_WS/rpc-tests"
           cd "$RUNNER_WS/rpc-tests"
           make rpc_perf
+          if [ "$CLIENT" = "erigon" ]; then
+            make rpc_pattern_gen
+          fi
 
       - name: Clean Erigon Build Directory
         if: matrix.client == 'erigon'
@@ -266,6 +270,87 @@ jobs:
             exit 1
           fi
 
+      - name: Wait for Erigon to reach the tip
+        if: matrix.client == 'erigon'
+        run: |
+          # Same tip condition as the barrier: not syncing and the latest block at most 2 slots old.
+          python3 - <<'EOF'
+          import json, os, sys, time, urllib.request
+
+          def rpc(method, params):
+              req = urllib.request.Request("http://localhost:8545", headers={"Content-Type": "application/json"},
+                                           data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode())
+              with urllib.request.urlopen(req, timeout=10) as rsp:
+                  return json.load(rsp)["result"]
+
+          deadline = time.time() + int(os.environ["TOTAL_TIME_SECONDS"])
+          while time.time() < deadline:
+              try:
+                  block = rpc("eth_getBlockByNumber", ["latest", False])
+                  age = time.time() - int(block["timestamp"], 16)
+                  if rpc("eth_syncing", []) is False and age <= 24:
+                      print(f"Erigon at the tip: block {int(block['number'], 16)}, {age:.0f}s old")
+                      sys.exit(0)
+                  print(f"Waiting for the tip: block {int(block['number'], 16)}, {age:.0f}s old")
+              except Exception as e:
+                  print(f"Waiting for the tip: {e}")
+              time.sleep(10)
+          print("::error::Erigon did not reach the tip in time")
+          sys.exit(1)
+          EOF
+
+      - name: Generate the latest patterns
+        if: matrix.client == 'erigon'
+        env:
+          RUNNER_WS: ${{ runner.workspace }}
+        run: |
+          # Generated once from Erigon and shared with the geth job, so both clients replay the same requests.
+          # Each count covers the largest step of its test: 20000:20 for eth_call, 5000:20 for mixed.
+          cd "$RUNNER_WS/rpc-tests"
+          ./build/bin/rpc_pattern_gen eth_call --url http://localhost:8545 \
+            --counts 400000 --block-tag latest --verify --keep ok --fees drop \
+            --out "perf/pattern/$CHAIN/stress_test_eth_call_gen_latest.tar"
+          ./build/bin/rpc_pattern_gen --profile "perf/pattern/$CHAIN/config/mixed.profile" --url http://localhost:8545 \
+            --counts 100000 --block-tag latest --verify --keep ok --fees drop --max-blocks 2500 \
+            --out "perf/pattern/$CHAIN/stress_test_mixed_gen_latest.tar"
+
+      - name: Share the latest patterns with the geth job
+        if: matrix.client == 'erigon' && needs.setup.outputs.run_geth == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: latest-patterns-${{ github.run_attempt }}
+          path: |
+            ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_call_gen_latest.tar
+            ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_mixed_gen_latest.tar
+          retention-days: 1
+
+      - name: Wait for the latest patterns from the erigon job
+        if: matrix.client == 'geth' && needs.setup.outputs.run_geth == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ARTIFACT: latest-patterns-${{ github.run_attempt }}
+        run: |
+          for i in {1..360}; do
+            count=$(curl -sf -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/$REPO/actions/runs/$GITHUB_RUN_ID/artifacts?name=$ARTIFACT" |
+              python3 -c "import json, sys; print(json.load(sys.stdin)['total_count'])" || true)
+            if [ "$count" = "1" ]; then
+              echo "Artifact $ARTIFACT available"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::Artifact $ARTIFACT not uploaded by the erigon job in time"
+          exit 1
+
+      - name: Download the latest patterns
+        if: matrix.client == 'geth' && needs.setup.outputs.run_geth == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: latest-patterns-${{ github.run_attempt }}
+          path: ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}
+
       - name: Find a consensus on a common time to run the benchmark
         if: needs.setup.outputs.run_geth == 'true'
         shell: bash
@@ -321,8 +406,15 @@ jobs:
             pattern=$4
             sequence=$5
             client=$6
-          
-            result_file=$client-$method-result.json            
+            label=${7:-$method} # names the results; set it to run the same method with another pattern
+            verbose=${8:-false}
+
+            verbose_flag=()
+            if [ "$verbose" == "true" ]; then
+              verbose_flag=(--verbose)
+            fi
+
+            result_file=$client-$label-result.json
           
             # clean temporary area
             cd $workspace/rpc-tests/perf
@@ -338,7 +430,9 @@ jobs:
                                       --client-build-dir "/" \
                                       --test-report \
                                       --json-report $result_dir/$result_file \
-                                      --testing-client $client 2>&1 | tee -a $output_log
+                                      --testing-client $client \
+                                      --more-percentiles \
+                                      "${verbose_flag[@]}" 2>&1 | tee -a $output_log
           
             # Capture test runner script exit status (use PIPESTATUS since we're piping to tee)
             perf_exit_status=${PIPESTATUS[0]}
@@ -365,9 +459,9 @@ jobs:
               echo "Execute Latency Percentile HDR Analysis"
               cd $result_dir
               python3 $ERIGON_QA_PATH/test_system/qa-tests/rpc-tests/perf_hdr_analysis.py \
-                --test_name $client-$method \
+                --test_name $client-$label \
                 --input_file ./$result_file \
-                --output_file ./$client-$method-latency_hdr_analysis.pdf
+                --output_file ./$client-$label-latency_hdr_analysis.pdf
               perf_hdr_status=$?
               if [ $perf_hdr_status -ne 0 ]; then
                 echo "::warning::perf_hdr_analysis.py failed with exit code $perf_hdr_status"
@@ -399,7 +493,7 @@ jobs:
               --repo $client \
               --branch $branch_name \
               --commit $commit_hash \
-              --test_name rpc-performance-test-latest${{ (matrix.client == 'erigon' && github.event.inputs.commitment_mode == 'parallel' && '-commitment-parallel') || (matrix.client == 'erigon' && github.event.inputs.commitment_mode == 'serial' && '-commitment-serial') || '' }}-$method \
+              --test_name rpc-performance-test-latest${{ (matrix.client == 'erigon' && github.event.inputs.commitment_mode == 'parallel' && '-commitment-parallel') || (matrix.client == 'erigon' && github.event.inputs.commitment_mode == 'serial' && '-commitment-serial') || '' }}-$label \
               --chain $CHAIN \
               --runner "$RUNNER_NAME" \
               --db_version $db_version \
@@ -421,9 +515,11 @@ jobs:
 
           # Launch the RPC performance test runner
 
-          #run_perf <workspace> <chain> <method> <pattern> <load-sequence> <client>
+          #run_perf <workspace> <chain> <method> <pattern> <load-sequence> <client> [label] [verbose]
           #run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_001_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
-          run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_002_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
+          run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_gen_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT eth_call_gen false
+          run_perf "$RUNNER_WS" $CHAIN mixed stress_test_mixed_gen_latest 1:1,100:30,1000:20,3000:20 $CLIENT mixed true
+          run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_002_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT eth_call false
           #run_perf "$RUNNER_WS" $CHAIN eth_getProof stress_test_eth_getProof_001_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
           
           # Move output.log to result_dir after all tests

@@ -411,8 +411,9 @@ func (s *simulator) sanitizeCall(
 		args.ChainID = (*hexutil.U256)(new(uint256.Int).Set(s.chainConfig.ChainID))
 	}
 	if baseFee == nil {
-		// If there's no base fee, then it must be a non-1559 execution
-		if args.GasPrice == nil {
+		// If there's no base fee, then it must be a non-1559 execution. Dynamic fee fields
+		// are left for execution to reject before London rather than paired with a gas price.
+		if args.GasPrice == nil && args.MaxFeePerGas == nil && args.MaxPriorityFeePerGas == nil {
 			args.GasPrice = new(hexutil.U256)
 		}
 	} else {
@@ -782,6 +783,9 @@ func (s *simulator) simulateCall(
 	_, storeEVM, cleanup := setupEVMTimeout(ctx, s.evmCallTimeout)
 	defer cleanup()
 
+	// sanitizeCall fills zero dynamic fees when the block has a base fee, even one overridden
+	// before London; only the fields the caller named make a dynamic fee call.
+	dynamicFeeArgs := call.MaxFeePerGas != nil || call.MaxPriorityFeePerGas != nil
 	err := s.sanitizeCall(call, intraBlockState, &blockCtx, header.BaseFee, *cumulativeGasUsed, s.gasPool.Gas())
 	if err != nil {
 		return nil, nil, nil, err
@@ -792,8 +796,11 @@ func (s *simulator) simulateCall(
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	msg.SetDynamicFeeArgs(dynamicFeeArgs)
 	msg.SetCheckGas(false) // EIP-7825 gas cap does not apply to simulated calls (matches Geth SkipTransactionChecks)
 	msg.SetCheckNonce(s.validation)
+	// Without validation the whole gas limit is available for execution, like eth_call.
+	msg.SetSkipExecutionGasCap(!s.validation)
 	// A call that pays no fee must not fund the burnt contract of a chain that has one.
 	if !s.validation && msg.FeeCap().IsZero() {
 		msg.SetIsFree(true)

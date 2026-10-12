@@ -35,8 +35,11 @@ import (
 const (
 	maxValidatorsPerCommittee  = 2048
 	aggregationBitsSizeDeneb   = maxValidatorsPerCommittee
-	aggregationBitsSizeElectra = 64 * maxValidatorsPerCommittee // mainnet MAX_COMMITTEES_PER_SLOT * MAX_VALIDATORS_PER_COMMITTEE
+	aggregationBitsSizeElectra = clparams.MaxSupportedCommitteesPerSlot * maxValidatorsPerCommittee
+	committeeBitsBytesElectra  = (clparams.MaxSupportedCommitteesPerSlot + 7) / 8
 )
+
+var errCommitteeBitsTooWide = errors.New("committee bits wider than the mainnet preset")
 
 // Attestation type represents a statement or confirmation of some occurrence or phenomenon.
 type Attestation struct {
@@ -151,8 +154,9 @@ func (a *Attestation) decodeSSZWithConfig(buf []byte, version int, cfg *clparams
 	a.version = clversion
 	if clversion.AfterOrEqual(clparams.ElectraVersion) {
 		// The CommitteeBits size depends on MAX_COMMITTEES_PER_SLOT which differs between
-		// mainnet (64) and the minimal preset (4). Instead of hardcoding 64, infer the
-		// CommitteeBits byte count from the SSZ offset table.
+		// mainnet (64) and the minimal preset (4). Without a config, infer the CommitteeBits
+		// byte count from the SSZ offset table, bounded by the mainnet width so a corrupt
+		// offset cannot size the allocation.
 		// Layout: [4-byte offset][AttestationData][Signature][CommitteeBits][AggregationBits]
 		const electraFixedHeaderSize = 4 + AttestationDataSize + length.Bytes96
 		if len(buf) < electraFixedHeaderSize+1 {
@@ -174,6 +178,8 @@ func (a *Attestation) decodeSSZWithConfig(buf []byte, version int, cfg *clparams
 			if committeeBitsBytes != expectedBytes {
 				return fmt.Errorf("invalid committee bits byte length: %d != %d", committeeBitsBytes, expectedBytes)
 			}
+		} else if committeeBitsBytes > committeeBitsBytesElectra {
+			return errCommitteeBitsTooWide
 		}
 		aggrBitsLimit := aggregationBitsSizeElectra
 		if cfg != nil && cfg.MaxCommitteesPerSlot > 0 {

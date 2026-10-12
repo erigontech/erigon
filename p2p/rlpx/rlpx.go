@@ -157,6 +157,10 @@ func (c *Conn) Read() (code uint64, data []byte, wireSize int, err error) {
 		if actualSize > maxUint24 {
 			return code, nil, 0, errPlainMessageTooLarge
 		}
+		// A 3-byte copy tag emits at most 64 bytes, so a valid block can't decode to more.
+		if actualSize > len(data)*64/3 {
+			return code, nil, 0, snappy.ErrCorrupt
+		}
 		c.snappyReadBuffer = slices.Grow(c.snappyReadBuffer[:0], actualSize)[:actualSize]
 		data, err = snappy.Decode(c.snappyReadBuffer, data)
 	}
