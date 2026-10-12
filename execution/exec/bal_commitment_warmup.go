@@ -111,7 +111,7 @@ func warmBALCommitment(ctx context.Context, db kv.RoDB, bal types.BlockAccessLis
 	factoryErrs := make(chan error, workers)
 	warmuper := commitment.NewWarmuper(ctx, commitment.WarmupConfig{
 		Enabled:    true,
-		CtxFactory: balCommitmentContextFactory(db, cacheStats, func(err error) { factoryErrs <- err }),
+		CtxFactory: balCommitmentContextFactory(db, cacheStats, func(err error) { factoryErrs <- err }, true),
 		NumWorkers: workers,
 		MaxDepth:   commitment.WarmupMaxDepth,
 		LogPrefix:  "BAL",
@@ -147,7 +147,7 @@ func warmBALCommitment(ctx context.Context, db kv.RoDB, bal types.BlockAccessLis
 	return err
 }
 
-func balCommitmentContextFactory(db kv.RoDB, cacheStats *balCommitmentCacheStats, onErr func(error)) commitment.TrieContextFactory {
+func balCommitmentContextFactory(db kv.RoDB, cacheStats *balCommitmentCacheStats, onErr func(error), canonical bool) commitment.TrieContextFactory {
 	return func(workerCtx context.Context) (commitment.PatriciaContext, func()) {
 		tx, err := db.BeginRo(kv.WithNonBlockingAcquire(workerCtx)) //nolint:gocritic // The returned cleanup owns Rollback.
 		if err != nil {
@@ -161,7 +161,7 @@ func balCommitmentContextFactory(db kv.RoDB, cacheStats *balCommitmentCacheStats
 			return nil, nil
 		}
 		domain := kv.CommitmentDomain
-		if provider, ok := txTemporal.AggTx().(interface{ CanonicalCommitmentDomain() kv.Domain }); ok {
+		if provider, ok := txTemporal.AggTx().(interface{ CanonicalCommitmentDomain() kv.Domain }); ok && canonical {
 			domain = provider.CanonicalCommitmentDomain()
 		}
 		var cache *commitment.BranchCache
@@ -180,7 +180,7 @@ func balCommitmentContextFactory(db kv.RoDB, cacheStats *balCommitmentCacheStats
 func StartBranchPrefetch(ctx context.Context, db kv.RoDB, workers int) *commitment.Warmuper {
 	prefetch := commitment.NewWarmuper(ctx, commitment.WarmupConfig{
 		Enabled:    true,
-		CtxFactory: balCommitmentContextFactory(db, new(balCommitmentCacheStats), func(error) {}),
+		CtxFactory: balCommitmentContextFactory(db, new(balCommitmentCacheStats), func(error) {}, false),
 		NumWorkers: workers,
 		MaxDepth:   commitment.WarmupMaxDepth,
 		LogPrefix:  "prefetch",
