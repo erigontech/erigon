@@ -42,10 +42,12 @@ type accessList struct {
 	lastSlots    map[accounts.StorageKey]struct{}
 	lastWarmSlot accounts.StorageKey
 
-	// peak is the largest each slot map at the same index has ever been. A
-	// cleared map keeps that capacity for addSlotSlow to reuse at its index, so
-	// this is what a pooled list pins, however little it holds right now.
-	peak []int
+	// peak is the largest each slot map at the same index has ever been, and
+	// addrPeak the same for the address map. A cleared or reverted map keeps its
+	// buckets, so these are what a pooled list pins, however little it holds
+	// right now.
+	peak     []int
+	addrPeak int
 }
 
 // newAccessList creates a new accessList.
@@ -59,9 +61,14 @@ func newAccessList() *accessList {
 // The slots backing array is retained; cleared inner maps are reused by
 // subsequent AddSlot calls without new allocations.
 func (al *accessList) Reset() {
-	for _, s := range al.slots {
+	for i, s := range al.slots {
+		// Record before clearing: estimateGas probes and access-list
+		// convergence reset between executions, and the capacity each map keeps
+		// outlives every one of them.
+		al.markPeak(i, len(s))
 		clear(s)
 	}
+	al.markAddrPeak()
 	al.slots = al.slots[:0]
 	clear(al.addresses)
 	al.dropMemo()
@@ -74,11 +81,19 @@ func (al *accessList) entries() int {
 	for i, s := range al.slots {
 		al.markPeak(i, len(s))
 	}
-	total := len(al.addresses)
+	al.markAddrPeak()
+	total := al.addrPeak
 	for _, n := range al.peak {
 		total += n
 	}
 	return total
+}
+
+// markAddrPeak remembers the largest the address map has been.
+func (al *accessList) markAddrPeak() {
+	if n := len(al.addresses); n > al.addrPeak {
+		al.addrPeak = n
+	}
 }
 
 // markPeak remembers the largest the map at idx has been.
@@ -238,5 +253,8 @@ func (al *accessList) DeleteAddress(address accounts.Address) {
 	if idx != -1 {
 		panic("reverting address change, address still has slots")
 	}
+	// Record before it shrinks: a reverted warm-up empties this map and its
+	// buckets stay.
+	al.markAddrPeak()
 	delete(al.addresses, address)
 }

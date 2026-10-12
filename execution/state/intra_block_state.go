@@ -380,7 +380,15 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.stateReadErr = nil
 }
 
-var ibsPool sync.Pool
+// statePool is sync.Pool's surface, so a test can hand the release path a
+// deterministic one: sync.Pool may discard any item, and under -race it drops
+// one in four.
+type statePool interface {
+	Get() any
+	Put(any)
+}
+
+var ibsPool statePool = &sync.Pool{}
 
 // NewPooled is New over an IntraBlockState reused from an earlier call, whose
 // maps keep their capacity. Release it with ReleasePooled.
