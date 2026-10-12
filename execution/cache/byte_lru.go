@@ -156,6 +156,9 @@ func (b *ByteLRU[V]) grow(w int64) {
 func (b *ByteLRU[V]) Remove(key uint64) { b.c.Invalidate(key) }
 func (b *ByteLRU[V]) Len() int          { return b.c.EstimatedSize() }
 
+// SizeBytes is the weighed residency the bound is applied against.
+func (b *ByteLRU[V]) SizeBytes() int64 { return b.resident.Load() }
+
 // Purge empties the cache. A budgeted cache also returns its grown reservation, keeping
 // the floor so it is never left disabled.
 func (b *ByteLRU[V]) Purge() {
