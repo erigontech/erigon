@@ -182,6 +182,18 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomai
 	return tx, sd, nil
 }
 
+type initialSyncPublicationError struct {
+	err error
+}
+
+func (e *initialSyncPublicationError) Error() string {
+	return e.err.Error()
+}
+
+func (e *initialSyncPublicationError) Unwrap() error {
+	return e.err
+}
+
 // ProcessFrozenBlocks runs the pipeline over snapshot blocks at startup.
 // It downloads block files, then executes them in a hasMore loop until
 // all frozen blocks are processed.
@@ -314,15 +326,25 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			}
 			return nil
 		}); err != nil {
-			return err
+			return &initialSyncPublicationError{err: err}
 		}
 	}
 	return nil
 }
 
+// lastValidationExecStageTiming reports the Execution stage duration of the most
+// recent ValidateBlock, so on a multi-header fork this is the last block's, not
+// the whole validation's.
+func (pe *PipelineExecutor) lastValidationExecStageTiming() time.Duration {
+	if pe.validationSync == nil {
+		return 0
+	}
+	return pe.validationSync.LastStageTiming(stages.Execution)
+}
+
 // ValidateBlock executes a fork validation by running the pipeline block-by-block
 // over a side fork. All pipeline execution goes through PipelineExecutor.
-func (pe *PipelineExecutor) ValidateBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) error {
+func (pe *PipelineExecutor) ValidateBlock(sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) error {
 	// Use a terse logger to suppress low-level noise during fork validation.
 	// Defaults to LvlWarn (matching the original hard-coded level), but can
 	// be overridden via dbg.ExecTerseLoggerLevel for debugging — Erigon's
@@ -340,7 +362,7 @@ func (pe *PipelineExecutor) ValidateBlock(ctx context.Context, sd *execctx.Share
 		return err
 	}
 
-	if err := stageloop.StateStep(ctx, chainReader, pe.engine, sd, tx, pe.validationSync, unwindPoint, headersChain, bodiesChain); err != nil {
+	if err := stageloop.StateStep(chainReader, pe.engine, sd, tx, pe.validationSync, unwindPoint, headersChain, bodiesChain); err != nil {
 		pe.logger.Warn("Could not validate block", "err", err)
 		return err
 	}

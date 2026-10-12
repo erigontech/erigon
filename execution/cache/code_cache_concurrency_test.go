@@ -26,8 +26,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/cachebudget"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/maphash"
+	"github.com/erigontech/erigon/common/math"
 )
 
 // Concurrent puts of the same cold code must account each content layer once.
@@ -49,9 +51,9 @@ func TestCodeCache_ConcurrentPutSameCode_NoSizeDrift(t *testing.T) {
 	}
 	wg.Wait()
 
-	require.Equal(t, int64(8+len(code)), cc.codeSize.Load(),
+	require.Equal(t, codeEntryBytes+int64(len(code)), cc.codeSize.Load(),
 		"hashToCode size must reflect exactly one insert after concurrent same-code Puts")
-	require.Equal(t, int64(len(codeHash)+len(code)), cc.codeHashCodeSize.Load(),
+	require.Equal(t, codeEntryBytes+int64(len(code)), cc.codeHashCodeSize.Load(),
 		"codeHashToCode size must reflect exactly one insert after concurrent same-code Puts")
 	require.Equal(t, int64(1), cc.codeSizeEntries.Load(),
 		"codeSizeByCodeHash must hold exactly one entry after concurrent same-code Puts")
@@ -88,9 +90,9 @@ func TestCodeCache_ByteCheckRejectsForeignKeyHash(t *testing.T) {
 }
 
 // TestCodeCache_ConcurrentDistinctPuts_RespectCap drives many workers putting
-// distinct codes whose combined size far exceeds a tiny cap. The freelru layer
-// evicts the coldest entries to stay within its entry cap (no freeze), and the
-// OnEvict-maintained byte counter must never drift negative under concurrency.
+// distinct codes whose combined size far exceeds a tiny budget. The layer
+// evicts to stay within its byte bound (no freeze), and the onEvict-maintained
+// byte counter must never drift negative under concurrency.
 func TestCodeCache_ConcurrentDistinctPuts_RespectCap(t *testing.T) {
 	const codeCap = 4 * datasize.KB
 	cc := closeOnCleanup(t, NewCodeCache(codeCap, 16*datasize.MB))
@@ -107,10 +109,12 @@ func TestCodeCache_ConcurrentDistinctPuts_RespectCap(t *testing.T) {
 	}
 	wg.Wait()
 
-	// The entry cap (codeCap/avgCodeEntryBytes) is the hard bound; residency
-	// settled far below the 128 distinct puts rather than freezing at the first.
+	// Residency settled far below the 128 distinct puts rather than freezing at
+	// the first. No byte assertion at this size: the layer holds single-digit
+	// entries here, where the admission granularity is the same order as the
+	// budget. TestCodeCacheStaysWithinByteBudget pins the bound at a realistic size.
 	require.Less(t, cc.codeHashToCode.Len(), workers,
-		"freelru must evict to its entry cap, not hold all 128 distinct codes")
+		"the layer must evict to its byte budget, not hold all 128 distinct codes")
 	require.GreaterOrEqual(t, cc.codeHashCodeSize.Load(), int64(0),
 		"byte counter must stay non-negative (OnEvict accounting must not double-subtract)")
 }
@@ -192,4 +196,103 @@ func TestCodeCache_ClearFencesStartedPut(t *testing.T) {
 
 	_, ok := cc.Get(addr)
 	require.False(t, ok, "Clear must remove a write that started in the retiring generation")
+}
+
+// The grow copy must carry the retiring generation over in Keys() order --
+// oldest first -- because insertion order alone sets the new generation's
+// recency. Reading each entry back with Get re-links it in the generation being
+// retired, so the order the copy observes shifts as the copy walks it.
+func TestGrowLRU_GrowCopyPreservesOrder(t *testing.T) {
+	key := func(i uint64) uint64 { return i * 0x9E3779B97F4A7C15 }
+
+	g := newGrowLRU[uint64](8*datasize.MB, 16, nil)
+	defer g.Close()
+	startCap := g.curCap.Load()
+
+	const warmup = genericCacheStartCapacity / 2
+	for i := range uint64(warmup) {
+		g.Add(key(i), i)
+	}
+	for i := uint64(0); i < warmup; i += 3 { // pull recency away from insertion order
+		g.Get(key(i))
+	}
+
+	var oldKeys, oldVals []uint64
+	var trigger uint64
+	grew := false
+	for i := uint64(warmup); i < 8*genericCacheStartCapacity && !grew; i++ {
+		old := g.cur.Load()
+		if g.curCap.Load() < g.maxCap && old.Len() >= int(g.curCap.Load()) {
+			oldKeys = old.Keys() // snapshot the generation this add is about to retire
+			oldVals = make([]uint64, len(oldKeys))
+			for j, k := range oldKeys {
+				oldVals[j], _ = old.Peek(k)
+			}
+		}
+		g.Add(key(i), i)
+		if grew = g.curCap.Load() > startCap; grew {
+			trigger = i // this add landed in the new generation, after the copy
+		}
+	}
+	require.True(t, grew, "the fill must have triggered a real grow")
+
+	// Replay the snapshot into the geometry the grow chose.
+	want := g.newShards(g.curCap.Load())
+	for j, k := range oldKeys {
+		want.Add(k, oldVals[j])
+	}
+	want.Add(key(trigger), trigger)
+
+	got := g.cur.Load()
+	require.Positive(t, want.Len())
+	require.Equal(t, want.Len(), got.Len(), "the grown generation must hold every copied entry")
+	require.Equal(t, want.Keys(), got.Keys(), "the grown generation must keep the pre-grow order")
+	for _, k := range got.Keys() {
+		wantV, ok := want.Peek(k)
+		require.True(t, ok)
+		gotV, ok := got.Peek(k)
+		require.True(t, ok)
+		require.Equal(t, wantV, gotV)
+	}
+}
+
+// A growLRU generation reserves no external payload for a value freelru stores
+// inline, so the slot and per-shard charges alone have to cover it.
+func TestGrowLRU_EnvelopeCoversInlineValueGeneration(t *testing.T) {
+	prevBudget := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prevBudget })
+	cachebudget.Global = cachebudget.New(math.MaxInt64)
+
+	sizeLayer := newGrowLRUEntries[codeSizeEntry](1<<20, 0, nil)
+	defer sizeLayer.Close()
+	require.Zero(t, sizeLayer.avgBytes, "the size layer must reserve no external payload")
+
+	// Zero payload so the assertion weighs the table and shard charge alone; the
+	// code bytes a real content layer also reserves would mask an undercharge.
+	contentLayer := newGrowLRUEntries[codeEntry](1<<20, 0, nil)
+	defer contentLayer.Close()
+
+	t.Run("codeSizeEntry", func(t *testing.T) { requireGenerationCovered(t, sizeLayer) })
+	t.Run("codeEntry", func(t *testing.T) { requireGenerationCovered(t, contentLayer) })
+}
+
+func requireGenerationCovered[V any](t *testing.T, g *growLRU[V]) {
+	t.Helper()
+	for _, capacity := range []uint32{1 << 12, 1 << 14, 1 << 16} {
+		// TotalAlloc rather than HeapAlloc: a collection inside the window would
+		// swamp a heap-size delta.
+		var before runtime.MemStats
+		runtime.ReadMemStats(&before)
+		gen := g.newShards(capacity)
+		var after runtime.MemStats
+		runtime.ReadMemStats(&after)
+		runtime.KeepAlive(gen)
+
+		allocated := int64(after.TotalAlloc) - int64(before.TotalAlloc)
+		charged := g.generationBytes(capacity)
+		require.Positive(t, allocated)
+		require.GreaterOrEqual(t, charged, allocated,
+			"envelope reserves %d B for %d slots but the generation allocates %d B",
+			charged, capacity, allocated)
+	}
 }

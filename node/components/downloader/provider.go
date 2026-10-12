@@ -136,7 +136,7 @@ func (p *Provider) initDownloader(ctx context.Context) (downloaderproto.Download
 	if err != nil {
 		return nil, fmt.Errorf("new grpc server: %w", err)
 	}
-	d.InitBackgroundLogger(true)
+	d.InitBackgroundLogger()
 
 	return dl.DirectGrpcServerClient(bittorrentServer), nil
 }

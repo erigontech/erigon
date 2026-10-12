@@ -24,9 +24,7 @@ import (
 	"github.com/erigontech/erigon/p2p/sentry"
 )
 
-var (
-	txChanSize = 5000
-)
+var txChanSize = 5000
 
 type TxMessage struct {
 	MessageID sentryproto.MessageId

@@ -123,12 +123,10 @@ func (c *CachedValue[T]) run(r *run[T], produce func() (T, bool, error)) (value 
 	}()
 
 	value, store, err = produce()
-	return value, err
+	return
 }
 
-// publish records the attempt, stores what is worth keeping, and ends the pass. Closing
-// done before clearing running keeps a caller from starting a pass of its own while this
-// one is still published as in flight.
+// publish records the attempt, stores what is worth keeping, and ends the pass.
 func (c *CachedValue[T]) publish(r *run[T], value T, store bool, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -23,8 +23,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -33,6 +35,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // precompiledTest defines the input/output pairs for precompiled contract tests.
@@ -107,7 +111,7 @@ func testPrecompiled(t *testing.T, addr string, test precompiledTest) {
 	gas := p.RequiredGas(in)
 	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, gas), func(t *testing.T) {
 		t.Parallel()
-		if res, _, err := RunPrecompiledContract(p, in, gas, nil); err != nil {
+		if res, _, err := RunPrecompiledContract(p, in, mdgas.MdGas{Execution: gas}, nil); err != nil {
 			t.Error(err)
 		} else if common.Bytes2Hex(res) != test.Expected {
 			t.Errorf("Expected %v, got %v", test.Expected, common.Bytes2Hex(res))
@@ -130,10 +134,10 @@ func testPrecompiledOOG(t *testing.T, addr string, test precompiledTest) {
 
 	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, gas), func(t *testing.T) {
 		t.Parallel()
-		_, _, err := RunPrecompiledContract(p, in, gas, nil)
-		if err.Error() != "out of gas" {
-			t.Errorf("Expected error [out of gas], got [%v]", err)
-		}
+		suppliedGas := mdgas.MdGas{Execution: gas, State: 50_000}
+		_, remaining, err := RunPrecompiledContract(p, in, suppliedGas, nil)
+		require.ErrorIs(t, err, ErrOutOfGas)
+		require.Equal(t, suppliedGas, remaining)
 		// Verify that the precompile did not touch the input buffer
 		exp := common.Hex2Bytes(test.Input)
 		if !bytes.Equal(in, exp) {
@@ -148,7 +152,7 @@ func testPrecompiledFailure(addr string, test precompiledFailureTest, t *testing
 	gas := p.RequiredGas(in)
 	t.Run(test.Name, func(t *testing.T) {
 		t.Parallel()
-		_, _, err := RunPrecompiledContract(p, in, gas, nil)
+		_, _, err := RunPrecompiledContract(p, in, mdgas.MdGas{Execution: gas}, nil)
 		if err == nil || err.Error() != test.ExpectedError {
 			t.Errorf("Expected error [%v], got [%v]", test.ExpectedError, err)
 		}
@@ -186,7 +190,7 @@ func TestPrecompiledModExpPotentialOutOfRange(t *testing.T) {
 	hexString := "0x0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000ffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000ee"
 	input := hexutil.MustDecode(hexString)
 	maxGas := uint64(math.MaxUint64)
-	_, _, err := RunPrecompiledContract(modExpContract, input, maxGas, nil)
+	_, _, err := RunPrecompiledContract(modExpContract, input, mdgas.MdGas{Execution: maxGas}, nil)
 	require.NoError(t, err)
 }
 
@@ -197,57 +201,58 @@ func TestPrecompiledModExpInputEip7823(t *testing.T) {
 	// length_of_EXPONENT = 1024; everything else is zero
 	in := common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000000")
 	gas := pragueModExp.RequiredGas(in)
-	res, _, err := RunPrecompiledContract(pragueModExp, in, gas, nil)
+	res, _, err := RunPrecompiledContract(pragueModExp, in, mdgas.MdGas{Execution: gas}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", common.Bytes2Hex(res))
 	gas = osakaModExp.RequiredGas(in)
-	_, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil)
+	_, _, err = RunPrecompiledContract(osakaModExp, in, mdgas.MdGas{Execution: gas}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", common.Bytes2Hex(res))
 
 	// length_of_EXPONENT = 1025; everything else is zero
 	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004010000000000000000000000000000000000000000000000000000000000000000")
 	gas = pragueModExp.RequiredGas(in)
-	res, _, err = RunPrecompiledContract(pragueModExp, in, gas, nil)
+	res, _, err = RunPrecompiledContract(pragueModExp, in, mdgas.MdGas{Execution: gas}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", common.Bytes2Hex(res))
 	gas = osakaModExp.RequiredGas(in)
-	_, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil)
+	_, _, err = RunPrecompiledContract(osakaModExp, in, mdgas.MdGas{Execution: gas}, nil)
 	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
 
 	// length_of_EXPONENT = 2048; everything else is zero
 	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000000")
 	gas = pragueModExp.RequiredGas(in)
-	res, _, err = RunPrecompiledContract(pragueModExp, in, gas, nil)
+	res, _, err = RunPrecompiledContract(pragueModExp, in, mdgas.MdGas{Execution: gas}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", common.Bytes2Hex(res))
 	gas = osakaModExp.RequiredGas(in)
-	_, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil)
+	_, _, err = RunPrecompiledContract(osakaModExp, in, mdgas.MdGas{Execution: gas}, nil)
 	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
 
 	// length_of_EXPONENT = 2^32; everything else is zero
 	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000")
 	gas = pragueModExp.RequiredGas(in)
-	res, _, err = RunPrecompiledContract(pragueModExp, in, gas, nil)
+	res, _, err = RunPrecompiledContract(pragueModExp, in, mdgas.MdGas{Execution: gas}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", common.Bytes2Hex(res))
 	gas = osakaModExp.RequiredGas(in)
-	_, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil)
+	_, _, err = RunPrecompiledContract(osakaModExp, in, mdgas.MdGas{Execution: gas}, nil)
 	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
 
 	// length_of_EXPONENT = 2^64; everything else is zero
 	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000")
 	gas = pragueModExp.RequiredGas(in)
-	res, _, err = RunPrecompiledContract(pragueModExp, in, gas, nil)
+	res, _, err = RunPrecompiledContract(pragueModExp, in, mdgas.MdGas{Execution: gas}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", common.Bytes2Hex(res))
 	gas = osakaModExp.RequiredGas(in)
-	_, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil)
+	_, _, err = RunPrecompiledContract(osakaModExp, in, mdgas.MdGas{Execution: gas}, nil)
 	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
 }
 
 // Tests the sample inputs from the elliptic curve scalar multiplication EIP 213.
 func TestPrecompiledBn254ScalarMul(t *testing.T) { testJson("bn254ScalarMul", "07", t) }
+
 func TestPrecompiledBn254ScalarMulFail(t *testing.T) {
 	testJsonFail("bn254ScalarMul", "07", t)
 }
@@ -440,5 +445,36 @@ func TestPrecompileOutputDoesNotAliasInput(t *testing.T) {
 			}
 			require.True(t, ran, "precompile %s produced no non-empty output, so it was never checked", p.Name())
 		}
+	}
+}
+
+func TestForkSetsCoverEveryTier(t *testing.T) {
+	for i := range int(forkTierCount) {
+		tier := forkTier(i)
+		require.NotEmpty(t, forkSets[tier].contracts, "forkSets[%d] has no contracts", tier)
+		require.NotEmpty(t, forkSets[tier].addresses, "forkSets[%d] has no addresses", tier)
+		require.Len(t, forkSets[tier].addresses, len(forkSets[tier].contracts),
+			"forkSets[%d] address list and contract map disagree", tier)
+	}
+}
+
+// TestDeprecatedForkAddressExportsTrackTheirSets pins the exported per-fork
+// address slices to the sets they name. Chains outside this repo compile
+// against them, so an empty or drifted slice is a break no in-repo grep sees.
+func TestDeprecatedForkAddressExportsTrackTheirSets(t *testing.T) {
+	for name, tc := range map[string]struct {
+		addrs     []accounts.Address
+		contracts PrecompiledContracts
+	}{
+		"homestead": {PrecompiledAddressesHomestead, PrecompiledContractsHomestead},
+		"byzantium": {PrecompiledAddressesByzantium, PrecompiledContractsByzantium},
+		"istanbul":  {PrecompiledAddressesIstanbul, PrecompiledContractsIstanbul},
+		"berlin":    {PrecompiledAddressesBerlin, PrecompiledContractsBerlin},
+		"cancun":    {PrecompiledAddressesCancun, PrecompiledContractsCancun},
+		"prague":    {PrecompiledAddressesPrague, PrecompiledContractsPrague},
+		"osaka":     {PrecompiledAddressesOsaka, PrecompiledContractsOsaka},
+	} {
+		require.NotEmpty(t, tc.addrs, name)
+		require.ElementsMatch(t, slices.Collect(maps.Keys(tc.contracts)), tc.addrs, name)
 	}
 }

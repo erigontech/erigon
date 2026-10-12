@@ -47,19 +47,28 @@ func (m *FeatureFlagBitmask) Set(flag FeatureFlag) {
 	*m |= FeatureFlagBitmask(flag)
 }
 
-func ParseFileCompression(s string) (FileCompression, error) {
+// FromString accepts both the short form used in file metadata ("k", "v",
+// "kv") and the long form CLI flags take ("keys", "values", "all").
+func (c *FileCompression) FromString(s string) error {
 	switch s {
 	case "none", "":
-		return CompressNone, nil
-	case "k":
-		return CompressKeys, nil
-	case "v":
-		return CompressVals, nil
-	case "kv":
-		return CompressKeys | CompressVals, nil
+		*c = CompressNone
+	case "k", "keys":
+		*c = CompressKeys
+	case "v", "values":
+		*c = CompressVals
+	case "kv", "all":
+		*c = CompressKeys | CompressVals
 	default:
-		return CompressNone, fmt.Errorf("invalid file compression type: %s", s)
+		return fmt.Errorf("invalid file compression type: %s", s)
 	}
+	return nil
+}
+
+func ParseFileCompression(s string) (FileCompression, error) {
+	var c FileCompression
+	err := c.FromString(s)
+	return c, err
 }
 
 func (c FileCompression) Has(flag FileCompression) bool {

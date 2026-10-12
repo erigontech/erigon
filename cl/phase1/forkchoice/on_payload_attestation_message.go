@@ -44,14 +44,6 @@ func (f *ForkChoiceStore) OnPayloadAttestationMessage(
 	data := msg.Data
 	blockRoot := data.BeaconBlockRoot
 
-	if !isFromBlock {
-		// Wall-clock time is authoritative for gossip because store time can lag OnTick.
-		currentSlot := f.ethClock.GetCurrentSlot()
-		if data.Slot != currentSlot {
-			return fmt.Errorf("%w: attestation slot %d is not current slot %d", ErrIgnore, data.Slot, currentSlot)
-		}
-	}
-
 	validationContext, err := f.payloadAttestationValidationContext(ctx, blockRoot, data.Slot)
 	if err != nil {
 		return err
@@ -72,6 +64,31 @@ func (f *ForkChoiceStore) OnPayloadAttestationMessage(
 }
 
 func (f *ForkChoiceStore) applyValidatedPayloadAttestation(
+	validatorIndex uint64,
+	ptcIndices []int,
+	data *cltypes.PayloadAttestationData,
+	blockRoot common.Hash,
+	isFromBlock bool,
+) error {
+	// Keep the votes and cached head decision consistent for head readers.
+	// The lock order is f.mu before ptcVoteMu.
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if err := f.recordPayloadAttestationVotes(validatorIndex, ptcIndices, data, blockRoot, isFromBlock); err != nil {
+		return err
+	}
+
+	// Current-slot votes affect the next slot's head tiebreaker. OnTick invalidates
+	// the cache at that boundary; votes arriving after it must invalidate it here.
+	if data.Slot < f.Slot() {
+		f.headHash = common.Hash{}
+		f.headPayloadStatus = cltypes.PayloadStatusPending
+	}
+	return nil
+}
+
+func (f *ForkChoiceStore) recordPayloadAttestationVotes(
 	validatorIndex uint64,
 	ptcIndices []int,
 	data *cltypes.PayloadAttestationData,

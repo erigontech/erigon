@@ -587,6 +587,9 @@ func (imp *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltype
 	if bid.ParentBlockHash != s.GetLatestBlockHash() {
 		return invalidExecutionPayloadBid("processExecutionPayloadBid: parent block hash mismatch")
 	}
+	if bid.BlockHash == bid.ParentBlockHash {
+		return invalidExecutionPayloadBid("processExecutionPayloadBid: block hash equals parent block hash")
+	}
 	parentBlockRoot, err := s.GetBlockRootAtSlot(s.Slot() - 1)
 	if err != nil {
 		return fmt.Errorf("processExecutionPayloadBid: failed to get parent block root: %w", err)
@@ -620,7 +623,6 @@ func (imp *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltype
 		s.SetBuilderPendingPayments(payments)
 	}
 
-	// Cache the execution payload bid
 	s.SetLatestExecutionPayloadBid(bid)
 
 	return nil
@@ -703,7 +705,7 @@ func (imp *impl) ApplyParentExecutionPayload(s abstract.BeaconState, requests *c
 
 	// Queue the builder payment using parent_slot (epoch-aware indexing per spec)
 	beaconConfig := s.BeaconConfig()
-	parentSlot := parentBid.Slot // spec: parent_bid.slot
+	parentSlot := s.LatestBlockHeader().Slot
 	slotsPerEpoch := beaconConfig.SlotsPerEpoch
 	parentEpoch := parentSlot / slotsPerEpoch
 	currentEpoch := state.Epoch(s)
@@ -1164,13 +1166,14 @@ func (imp *impl) ProcessBlsToExecutionChange(
 func (imp *impl) ProcessAttestations(
 	s abstract.BeaconState,
 	attestations *solid.ListSSZ[*solid.Attestation],
+	parentSlot uint64,
 ) error {
 	attestingIndiciesSet := make([][]uint64, attestations.Len())
 	baseRewardPerIncrement := s.BaseRewardPerIncrement()
 
 	var err error
 	if err := solid.RangeErr[*solid.Attestation](attestations, func(i int, a *solid.Attestation, _ int) error {
-		if attestingIndiciesSet[i], err = imp.processAttestation(s, a, baseRewardPerIncrement); err != nil {
+		if attestingIndiciesSet[i], err = imp.processAttestation(s, a, baseRewardPerIncrement, parentSlot); err != nil {
 			return err
 		}
 		return nil
@@ -1200,6 +1203,7 @@ func (imp *impl) processAttestationPostAltair(
 	s abstract.BeaconState,
 	attestation *solid.Attestation,
 	baseRewardPerIncrement uint64,
+	parentSlot uint64,
 ) ([]uint64, error) {
 	data := attestation.Data
 	currentEpoch := state.Epoch(s)
@@ -1251,6 +1255,7 @@ func (imp *impl) processAttestationPostAltair(
 	participationFlagsIndicies, err := s.GetAttestationParticipationFlagIndicies(
 		data,
 		stateSlot-data.Slot,
+		parentSlot,
 		false,
 	)
 	if err != nil {
@@ -1293,6 +1298,7 @@ func (imp *impl) processAttestationPostAltair(
 		}
 
 		baseReward := (val / beaconConfig.EffectiveBalanceIncrement) * baseRewardPerIncrement
+		hadNoParticipation := s.EpochParticipationForValidatorIndex(isCurrentEpoch, int(attesterIndex)) == 0
 		willSetNewFlag := false // [New in Gloas:EIP7732]
 		for flagIndex, weight := range beaconConfig.ParticipationWeights() {
 			flagParticipation := s.EpochParticipationForValidatorIndex(
@@ -1314,6 +1320,7 @@ func (imp *impl) processAttestationPostAltair(
 
 		if s.Version() >= clparams.GloasVersion &&
 			willSetNewFlag &&
+			hadNoParticipation &&
 			isSameSlot &&
 			payment != nil && payment.Withdrawal != nil && payment.Withdrawal.Amount > 0 {
 			paymentWeightDelta += val
@@ -1501,6 +1508,7 @@ func (imp *impl) processAttestation(
 	s abstract.BeaconState,
 	attestation *solid.Attestation,
 	baseRewardPerIncrement uint64,
+	parentSlot uint64,
 ) ([]uint64, error) {
 	// Prelimary checks.
 	if err := IsAttestationApplicable(s, attestation); err != nil {
@@ -1510,7 +1518,7 @@ func (imp *impl) processAttestation(
 	if s.Version() == clparams.Phase0Version {
 		return imp.processAttestationPhase0(s, attestation)
 	}
-	return imp.processAttestationPostAltair(s, attestation, baseRewardPerIncrement)
+	return imp.processAttestationPostAltair(s, attestation, baseRewardPerIncrement, parentSlot)
 }
 
 func verifyAttestations(

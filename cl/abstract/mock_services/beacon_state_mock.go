@@ -1767,18 +1767,18 @@ func (c *MockBeaconStateGetActiveValidatorsIndicesCall) DoAndReturn(f func(uint6
 }
 
 // GetAttestationParticipationFlagIndicies mocks base method.
-func (m *MockBeaconState) GetAttestationParticipationFlagIndicies(data *solid.AttestationData, inclusionDelay uint64, skipAssert bool) ([]uint8, error) {
+func (m *MockBeaconState) GetAttestationParticipationFlagIndicies(data *solid.AttestationData, inclusionDelay, parentSlot uint64, skipAssert bool) ([]uint8, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetAttestationParticipationFlagIndicies", data, inclusionDelay, skipAssert)
+	ret := m.ctrl.Call(m, "GetAttestationParticipationFlagIndicies", data, inclusionDelay, parentSlot, skipAssert)
 	ret0, _ := ret[0].([]uint8)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetAttestationParticipationFlagIndicies indicates an expected call of GetAttestationParticipationFlagIndicies.
-func (mr *MockBeaconStateMockRecorder) GetAttestationParticipationFlagIndicies(data, inclusionDelay, skipAssert any) *MockBeaconStateGetAttestationParticipationFlagIndiciesCall {
+func (mr *MockBeaconStateMockRecorder) GetAttestationParticipationFlagIndicies(data, inclusionDelay, parentSlot, skipAssert any) *MockBeaconStateGetAttestationParticipationFlagIndiciesCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAttestationParticipationFlagIndicies", reflect.TypeOf((*MockBeaconState)(nil).GetAttestationParticipationFlagIndicies), data, inclusionDelay, skipAssert)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAttestationParticipationFlagIndicies", reflect.TypeOf((*MockBeaconState)(nil).GetAttestationParticipationFlagIndicies), data, inclusionDelay, parentSlot, skipAssert)
 	return &MockBeaconStateGetAttestationParticipationFlagIndiciesCall{Call: call}
 }
 
@@ -1794,13 +1794,13 @@ func (c *MockBeaconStateGetAttestationParticipationFlagIndiciesCall) Return(arg0
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateGetAttestationParticipationFlagIndiciesCall) Do(f func(*solid.AttestationData, uint64, bool) ([]uint8, error)) *MockBeaconStateGetAttestationParticipationFlagIndiciesCall {
+func (c *MockBeaconStateGetAttestationParticipationFlagIndiciesCall) Do(f func(*solid.AttestationData, uint64, uint64, bool) ([]uint8, error)) *MockBeaconStateGetAttestationParticipationFlagIndiciesCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateGetAttestationParticipationFlagIndiciesCall) DoAndReturn(f func(*solid.AttestationData, uint64, bool) ([]uint8, error)) *MockBeaconStateGetAttestationParticipationFlagIndiciesCall {
+func (c *MockBeaconStateGetAttestationParticipationFlagIndiciesCall) DoAndReturn(f func(*solid.AttestationData, uint64, uint64, bool) ([]uint8, error)) *MockBeaconStateGetAttestationParticipationFlagIndiciesCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

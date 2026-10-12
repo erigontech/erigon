@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"sync"
 
 	communication2 "github.com/erigontech/erigon/cl/sentinel/communication"
@@ -170,9 +171,18 @@ func (h *HandShaker) ValidatePeer(ctx context.Context, id peer.ID) (bool, error)
 	}
 	defer resp.Body.Close()
 
-	if resp.Header.Get("REQRESP-RESPONSE-CODE") != "0" {
-		a, _ := io.ReadAll(resp.Body)
-		return false, fmt.Errorf("hand shake error: %s, %s", resp.Header.Get("REQRESP-RESPONSE-CODE"), string(a))
+	responseCodeText := resp.Header.Get("REQRESP-RESPONSE-CODE")
+	if responseCodeText != "0" {
+		code, err := strconv.Atoi(responseCodeText)
+		if err != nil {
+			message, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+			return false, fmt.Errorf("hand shake error: %s, %s", responseCodeText, message)
+		}
+		message, err := httpreqresp.ResponseCode(code).ErrorMessage(resp)
+		if err != nil {
+			return false, fmt.Errorf("hand shake error: %s, %w", responseCodeText, err)
+		}
+		return false, fmt.Errorf("hand shake error: %s, %s", responseCodeText, message)
 	}
 	responseStatus := &cltypes.Status{}
 

@@ -34,7 +34,7 @@ import (
 
 type txNumsIterFactory func(ctx context.Context, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, addr common.Address, fromTxNum int) (*rawdbv3.MapTxNum2BlockNumIter, error)
 
-func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, iterFactory txNumsIterFactory, addr common.Address, fromTxNum int, pageSize uint16) ([]*ethapi.RPCTransaction, []map[string]any, bool, error) {
+func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, iterFactory txNumsIterFactory, addr common.Address, fromTxNum int, pageSize uint16) ([]*ethapi.RPCTransaction, []ReceiptWithTimestamp, bool, error) {
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, nil, false, err
@@ -47,7 +47,7 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 
 	var block *types.Block
 	txs := make([]*ethapi.RPCTransaction, 0, pageSize)
-	receipts := make([]map[string]any, 0, pageSize)
+	receipts := make([]ReceiptWithTimestamp, 0, pageSize)
 	resultCount := uint16(0)
 
 	mustReadBlock := true
@@ -108,9 +108,10 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			return nil, nil, false, err
 		}
 
-		mReceipt := ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true, false)
-		mReceipt["timestamp"] = block.Time()
-		receipts = append(receipts, mReceipt)
+		receipts = append(receipts, ReceiptWithTimestamp{
+			RPCReceipt: ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), true, false),
+			Timestamp:  block.Time(),
+		})
 
 		resultCount++
 		if resultCount >= pageSize {

@@ -17,13 +17,14 @@ import (
 type emptyReader struct{}
 
 func (r *emptyReader) ReadAccountData(accounts.Address) (*accounts.Account, error) { return nil, nil }
+
 func (r *emptyReader) ReadAccountDataForDebug(accounts.Address) (*accounts.Account, error) {
 	return nil, nil
 }
+
 func (r *emptyReader) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
-func (r *emptyReader) HasStorage(accounts.Address) (bool, error)               { return false, nil }
 func (r *emptyReader) ReadAccountCode(accounts.Address) ([]byte, error)        { return nil, nil }
 func (r *emptyReader) ReadAccountCodeSize(accounts.Address) (int, error)       { return 0, nil }
 func (r *emptyReader) ReadAccountIncarnation(accounts.Address) (uint64, error) { return 0, nil }
@@ -203,9 +204,11 @@ func TestCodeReadFromVersionMap(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x55})
 
 	// Write EIP-7702 delegation code to versionMap at txIndex=5
-	delegationCode := []byte{0xef, 0x01, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+	delegationCode := []byte{
+		0xef, 0x01, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
 		0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
-		0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14}
+		0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14,
+	}
 	vm.WriteCode(addr, Version{TxIndex: 5, Incarnation: 0}, accounts.NewCode(delegationCode), true)
 
 	// Read at txIndex=10 should find the code

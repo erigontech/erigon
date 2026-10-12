@@ -2,18 +2,51 @@ package stages
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
+
+func TestPayloadAttributesUseSepoliaGasLimitScheduleAtGloas(t *testing.T) {
+	_, config := clparams.GetConfigsByNetwork(chainspec.SepoliaChainID)
+	headSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
+	headState := state.New(config)
+	headState.SetVersion(clparams.FuluVersion)
+	require.NoError(t, headState.SetSlot(headSlot))
+	emitter := beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 1)
+	subscription := emitter.State().Subscribe(events)
+	defer subscription.Unsubscribe()
+	cfg := &Cfg{
+		beaconCfg: config,
+		ethClock:  eth_clock.NewEthereumClock(0, common.Hash{}, config),
+		emitter:   emitter,
+	}
+
+	require.NoError(t, emitNextPaylodAttributesEvent(cfg, headSlot, common.Hash{}, headState))
+
+	require.Len(t, events, 1)
+	attrs := (<-events).Data.(*beaconevents.PayloadAttributesData).Data.PayloadAttributes
+	require.NotNil(t, attrs.TargetGasLimit)
+	require.Equal(t, hexutil.Uint64(200_000_000), *attrs.TargetGasLimit)
+}
 
 func TestUpdateCanonicalChainReorgEvent(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
@@ -39,10 +72,10 @@ func TestUpdateCanonicalChainReorgEvent(t *testing.T) {
 	writeBlock := func(root, parentRoot, stateRoot common.Hash, slot uint64, canonical bool) {
 		t.Helper()
 		require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, slot))
-		require.NoError(t, beacon_indicies.WriteParentBlockRoot(ctx, tx, root, parentRoot))
+		require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, root, parentRoot))
 		require.NoError(t, beacon_indicies.WriteStateRoot(tx, root, stateRoot))
 		if canonical {
-			require.NoError(t, beacon_indicies.MarkRootCanonical(ctx, tx, slot, root))
+			require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
 		}
 	}
 
@@ -53,7 +86,7 @@ func TestUpdateCanonicalChainReorgEvent(t *testing.T) {
 	writeBlock(root101b, root100, state101b, 101, false)
 	writeBlock(root102b, root101b, state102b, 102, false)
 
-	reorg := drainReorgEvent(t, ctx, tx, 102, root102b)
+	reorg := drainReorgEvent(t, tx, 102, root102b)
 	require.NotNil(t, reorg, "expected a chain_reorg event to be emitted")
 	require.Equal(t, uint64(102), reorg.Slot, "reorg Slot")
 	require.Equal(t, uint64(2), reorg.Depth, "reorg Depth should be oldHeadSlot - forkPointSlot")
@@ -86,10 +119,10 @@ func TestUpdateCanonicalChainReorgShorterFork(t *testing.T) {
 	writeBlock := func(root, parentRoot, stateRoot common.Hash, slot uint64, canonical bool) {
 		t.Helper()
 		require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, slot))
-		require.NoError(t, beacon_indicies.WriteParentBlockRoot(ctx, tx, root, parentRoot))
+		require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, root, parentRoot))
 		require.NoError(t, beacon_indicies.WriteStateRoot(tx, root, stateRoot))
 		if canonical {
-			require.NoError(t, beacon_indicies.MarkRootCanonical(ctx, tx, slot, root))
+			require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
 		}
 	}
 
@@ -101,7 +134,7 @@ func TestUpdateCanonicalChainReorgShorterFork(t *testing.T) {
 	writeBlock(root101b, root100, common.Hash{0xb1}, 101, false)
 	writeBlock(root102b, root101b, state102b, 102, false)
 
-	reorg := drainReorgEvent(t, ctx, tx, 102, root102b)
+	reorg := drainReorgEvent(t, tx, 102, root102b)
 	require.NotNil(t, reorg, "expected a chain_reorg event to be emitted")
 	require.Equal(t, uint64(102), reorg.Slot, "reorg Slot")
 	require.Equal(t, uint64(3), reorg.Depth, "reorg Depth: old tip 103 - fork point 100 = 3")
@@ -133,10 +166,10 @@ func TestUpdateCanonicalChainReorgLongerFork(t *testing.T) {
 	writeBlock := func(root, parentRoot, stateRoot common.Hash, slot uint64, canonical bool) {
 		t.Helper()
 		require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, slot))
-		require.NoError(t, beacon_indicies.WriteParentBlockRoot(ctx, tx, root, parentRoot))
+		require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, root, parentRoot))
 		require.NoError(t, beacon_indicies.WriteStateRoot(tx, root, stateRoot))
 		if canonical {
-			require.NoError(t, beacon_indicies.MarkRootCanonical(ctx, tx, slot, root))
+			require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
 		}
 	}
 
@@ -148,7 +181,7 @@ func TestUpdateCanonicalChainReorgLongerFork(t *testing.T) {
 	writeBlock(root102b, root101b, common.Hash{0xb2}, 102, false)
 	writeBlock(root103b, root102b, state103b, 103, false)
 
-	reorg := drainReorgEvent(t, ctx, tx, 103, root103b)
+	reorg := drainReorgEvent(t, tx, 103, root103b)
 	require.NotNil(t, reorg, "expected a chain_reorg event to be emitted")
 	require.Equal(t, uint64(103), reorg.Slot, "reorg Slot")
 	require.Equal(t, uint64(2), reorg.Depth, "reorg Depth: old tip 102 - fork point 100 = 2")
@@ -174,10 +207,10 @@ func TestUpdateCanonicalChainNoReorg(t *testing.T) {
 	writeBlock := func(root, parentRoot, stateRoot common.Hash, slot uint64, canonical bool) {
 		t.Helper()
 		require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, slot))
-		require.NoError(t, beacon_indicies.WriteParentBlockRoot(ctx, tx, root, parentRoot))
+		require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, root, parentRoot))
 		require.NoError(t, beacon_indicies.WriteStateRoot(tx, root, stateRoot))
 		if canonical {
-			require.NoError(t, beacon_indicies.MarkRootCanonical(ctx, tx, slot, root))
+			require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
 		}
 	}
 
@@ -186,7 +219,7 @@ func TestUpdateCanonicalChainNoReorg(t *testing.T) {
 
 	writeBlock(root102, root101, common.Hash{0xa2}, 102, false)
 
-	reorg := drainReorgEvent(t, ctx, tx, 102, root102)
+	reorg := drainReorgEvent(t, tx, 102, root102)
 	require.Nil(t, reorg, "chain extension should NOT emit a chain_reorg event")
 }
 
@@ -209,10 +242,10 @@ func TestUpdateCanonicalChainReorgOneSlot(t *testing.T) {
 	writeBlock := func(root, parentRoot, stateRoot common.Hash, slot uint64, canonical bool) {
 		t.Helper()
 		require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, slot))
-		require.NoError(t, beacon_indicies.WriteParentBlockRoot(ctx, tx, root, parentRoot))
+		require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, root, parentRoot))
 		require.NoError(t, beacon_indicies.WriteStateRoot(tx, root, stateRoot))
 		if canonical {
-			require.NoError(t, beacon_indicies.MarkRootCanonical(ctx, tx, slot, root))
+			require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
 		}
 	}
 
@@ -220,7 +253,7 @@ func TestUpdateCanonicalChainReorgOneSlot(t *testing.T) {
 	writeBlock(root101a, root100, state101a, 101, true)
 	writeBlock(root101b, root100, state101b, 101, false)
 
-	reorg := drainReorgEvent(t, ctx, tx, 101, root101b)
+	reorg := drainReorgEvent(t, tx, 101, root101b)
 	require.NotNil(t, reorg, "expected a chain_reorg event to be emitted")
 	require.Equal(t, uint64(101), reorg.Slot, "reorg Slot")
 	require.Equal(t, uint64(1), reorg.Depth, "reorg Depth: old tip 101 - fork point 100 = 1")
@@ -230,7 +263,7 @@ func TestUpdateCanonicalChainReorgOneSlot(t *testing.T) {
 	require.Equal(t, state101b, reorg.NewHeadState, "NewHeadState")
 }
 
-func drainReorgEvent(t *testing.T, ctx context.Context, tx kv.RwTx, headSlot uint64, headRoot common.Hash) *beaconevents.ChainReorgData {
+func drainReorgEvent(t *testing.T, tx kv.RwTx, headSlot uint64, headRoot common.Hash) *beaconevents.ChainReorgData {
 	t.Helper()
 	emitter := beaconevents.NewEventEmitter()
 	ch := make(chan *beaconevents.EventStream, 16)
@@ -242,7 +275,7 @@ func drainReorgEvent(t *testing.T, ctx context.Context, tx kv.RwTx, headSlot uin
 		beaconCfg: &clparams.MainnetBeaconConfig,
 	}
 
-	err := updateCanonicalChainInTheDatabase(ctx, tx, headSlot, headRoot, cfg)
+	err := updateCanonicalChainInTheDatabase(tx, headSlot, headRoot, cfg)
 	require.NoError(t, err)
 
 	for {
@@ -254,5 +287,242 @@ func drainReorgEvent(t *testing.T, ctx context.Context, tx kv.RwTx, headSlot uin
 		default:
 			return nil
 		}
+	}
+}
+
+type invalidatingEventHeadStore struct {
+	*mock_services.ForkChoiceStorageMock
+	reads           int
+	invalidateAfter int
+}
+
+func (s *invalidatingEventHeadStore) readHead() (forkchoice.ForkChoiceNode, uint64, error) {
+	s.reads++
+	s.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+	head := forkchoice.ForkChoiceNode{Root: s.HeadVal, PayloadStatus: s.HeadPayloadStatusVal}
+	// Invalidation after a head read must not change the status returned with that root.
+	if s.reads == s.invalidateAfter {
+		s.HeadPayloadStatusVal = cltypes.PayloadStatusPending
+	}
+	return head, s.HeadSlotVal, nil
+}
+
+func (s *invalidatingEventHeadStore) GetHead(*state.CachingBeaconState) (common.Hash, uint64, error) {
+	head, slot, err := s.readHead()
+	return head.Root, slot, err
+}
+
+func (s *invalidatingEventHeadStore) GetHeadNode() (forkchoice.ForkChoiceNode, uint64, error) {
+	return s.readHead()
+}
+
+func TestEmitHeadEventKeepsPayloadStatusWithHeadSnapshot(t *testing.T) {
+	for _, test := range []struct {
+		name            string
+		invalidateAfter int
+	}{
+		{name: "initial snapshot", invalidateAfter: 1},
+		{name: "publication recheck", invalidateAfter: 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			beaconCfg := clparams.MainnetBeaconConfig
+			headState := state.New(&beaconCfg)
+			headState.SetVersion(clparams.GloasVersion)
+			require.NoError(t, headState.SetSlot(1))
+			require.NoError(t, headState.SetBlockRootAt(0, common.Hash{1}))
+			store := &invalidatingEventHeadStore{
+				ForkChoiceStorageMock: &mock_services.ForkChoiceStorageMock{
+					HeadVal: common.Hash{2}, HeadSlotVal: 1,
+				},
+				invalidateAfter: test.invalidateAfter,
+			}
+			emitter := beaconevents.NewEventEmitter()
+			events := make(chan *beaconevents.EventStream, 2)
+			subscription := emitter.State().Subscribe(events)
+			defer subscription.Unsubscribe()
+			require.NoError(t, emitHeadEvent(&beaconCfg, store, emitter, store.HeadSlotVal, store.HeadVal, headState))
+
+			require.Equal(t, 2, store.reads)
+			require.Len(t, events, 2, "cache invalidation must not drop a matching FULL head event")
+			require.Equal(t, beaconevents.StateHead, (<-events).Event)
+			v2 := <-events
+			require.Equal(t, beaconevents.StateHeadV2, v2.Event)
+			require.Equal(t, "full", v2.Data.(*beaconevents.HeadV2Data).Data.PayloadStatus)
+		})
+	}
+}
+
+func TestEmitHeadEventsDropsStaleSnapshot(t *testing.T) {
+	emitter := beaconevents.NewEventEmitter()
+	ch := make(chan *beaconevents.EventStream, 2)
+	sub := emitter.State().Subscribe(ch)
+	defer sub.Unsubscribe()
+	headRoot := common.Hash{1}
+
+	err := emitHeadEventsIfCurrent(emitter, &beaconevents.HeadV2Data{}, 10, headRoot, common.Hash{2}, func() (common.Hash, uint64, string, bool, error) {
+		return common.Hash{3}, 11, "pending", false, nil
+	})
+	require.NoError(t, err)
+	require.Empty(t, ch)
+}
+
+func TestEmitHeadEventsDropsStalePayloadStatus(t *testing.T) {
+	emitter := beaconevents.NewEventEmitter()
+	ch := make(chan *beaconevents.EventStream, 2)
+	sub := emitter.State().Subscribe(ch)
+	defer sub.Unsubscribe()
+	headRoot := common.Hash{1}
+	headEvent := &beaconevents.HeadV2Data{Data: beaconevents.HeadV2Content{PayloadStatus: "pending"}}
+
+	err := emitHeadEventsIfCurrent(emitter, headEvent, 10, headRoot, common.Hash{2}, func() (common.Hash, uint64, string, bool, error) {
+		return headRoot, 10, "full", false, nil
+	})
+	require.NoError(t, err)
+	require.Empty(t, ch)
+}
+
+func TestEmitHeadEventsDoesNotHoldHeadEventLockWhileLegacySubscriberBlocks(t *testing.T) {
+	emitter := beaconevents.NewEventEmitter()
+	legacyEvents := make(chan *beaconevents.EventStream)
+	sub := emitter.State().Subscribe(legacyEvents)
+	defer sub.Unsubscribe()
+
+	headRoot := common.Hash{1}
+	headEvent := &beaconevents.HeadV2Data{Data: beaconevents.HeadV2Content{PayloadStatus: "pending"}}
+	validated := make(chan struct{})
+	emitDone := make(chan error, 1)
+	go func() {
+		emitDone <- emitHeadEventsIfCurrent(emitter, headEvent, 10, headRoot, common.Hash{2}, func() (common.Hash, uint64, string, bool, error) {
+			select {
+			case <-validated:
+			default:
+				close(validated)
+			}
+			return headRoot, 10, "pending", false, nil
+		})
+	}()
+	<-validated
+
+	lockAcquired := make(chan struct{})
+	go emitter.WithHeadEventLock(func() { close(lockAcquired) })
+	select {
+	case <-lockAcquired:
+	case <-time.After(time.Second):
+		t.Fatal("slow legacy subscriber held the shared head event lock")
+	}
+
+	sub.Unsubscribe()
+	require.NoError(t, <-emitDone)
+}
+
+func TestEmitHeadEventsKeepsPairOrderedAgainstConcurrentUpdate(t *testing.T) {
+	emitter := beaconevents.NewEventEmitter()
+	fastEvents := make(chan *beaconevents.EventStream, 3)
+	slowEvents := make(chan *beaconevents.EventStream)
+	fastSub := emitter.State().Subscribe(fastEvents)
+	defer fastSub.Unsubscribe()
+	slowSub := emitter.State().Subscribe(slowEvents)
+	defer slowSub.Unsubscribe()
+
+	headRoot := common.Hash{1}
+	newHeadRoot := common.Hash{2}
+	headEvent := &beaconevents.HeadV2Data{Data: beaconevents.HeadV2Content{
+		Slot:          10,
+		Block:         headRoot,
+		PayloadStatus: "pending",
+	}}
+	newHeadEvent := &beaconevents.HeadV2Data{Data: beaconevents.HeadV2Content{
+		Slot:          11,
+		Block:         newHeadRoot,
+		PayloadStatus: "full",
+	}}
+	validated := make(chan struct{})
+	var validationCalls atomic.Int32
+	var updated atomic.Bool
+	emitDone := make(chan error, 1)
+	go func() {
+		emitDone <- emitHeadEventsIfCurrent(emitter, headEvent, 10, headRoot, common.Hash{3}, func() (common.Hash, uint64, string, bool, error) {
+			if validationCalls.Add(1) == 1 {
+				close(validated)
+			}
+			if updated.Load() {
+				return newHeadRoot, 11, "full", false, nil
+			}
+			return headRoot, 10, "pending", false, nil
+		})
+	}()
+	<-validated
+
+	first := <-fastEvents
+	require.Equal(t, beaconevents.StateHead, first.Event)
+	require.Equal(t, headRoot, first.Data.(*beaconevents.HeadData).Block)
+
+	updated.Store(true)
+	updateDone := make(chan struct{})
+	go emitter.WithHeadEventLock(func() {
+		emitter.State().SendHeadV2(newHeadEvent)
+		close(updateDone)
+	})
+	select {
+	case <-updateDone:
+	case <-time.After(time.Second):
+		t.Fatal("concurrent head update did not complete")
+	}
+
+	second := <-fastEvents
+	require.Equal(t, beaconevents.StateHeadV2, second.Event)
+	require.Equal(t, headRoot, second.Data.(*beaconevents.HeadV2Data).Data.Block)
+
+	slowSub.Unsubscribe()
+	require.NoError(t, <-emitDone)
+	third := <-fastEvents
+	require.Equal(t, beaconevents.StateHeadV2, third.Event)
+	require.Equal(t, newHeadRoot, third.Data.(*beaconevents.HeadV2Data).Data.Block)
+}
+
+func TestEmitHeadEventsPreservesLegacyHeadFields(t *testing.T) {
+	emitter := beaconevents.NewEventEmitter()
+	ch := make(chan *beaconevents.EventStream, 2)
+	sub := emitter.State().Subscribe(ch)
+	defer sub.Unsubscribe()
+	headRoot := common.Hash{1}
+	headEvent := &beaconevents.HeadV2Data{Data: beaconevents.HeadV2Content{
+		PayloadStatus:             "pending",
+		EpochTransition:           false,
+		CurrentEpochDependentRoot: common.Hash{3},
+		NextEpochDependentRoot:    common.Hash{4},
+		ExecutionOptimistic:       true,
+	}}
+
+	err := emitHeadEventsIfCurrent(emitter, headEvent, 10, headRoot, common.Hash{2}, func() (common.Hash, uint64, string, bool, error) {
+		return headRoot, 10, "pending", true, nil
+	})
+	require.NoError(t, err)
+	legacy := (<-ch).Data.(*beaconevents.HeadData)
+	require.False(t, legacy.EpochTransition)
+	require.True(t, legacy.ExecutionOptimistic)
+	require.Equal(t, headEvent.Data.CurrentEpochDependentRoot, legacy.PreviousDutyDependentRoot)
+	require.Equal(t, headEvent.Data.NextEpochDependentRoot, legacy.CurrentDutyDependentRoot)
+}
+
+func TestEmitHeadEventsPreGloasEmitsHeadV2AsFull(t *testing.T) {
+	emitter := beaconevents.NewEventEmitter()
+	ch := make(chan *beaconevents.EventStream, 2)
+	sub := emitter.State().Subscribe(ch)
+	defer sub.Unsubscribe()
+	headRoot := common.Hash{1}
+	headEvent := &beaconevents.HeadV2Data{Data: beaconevents.HeadV2Content{PayloadStatus: "full"}}
+
+	err := emitHeadEventsIfCurrent(emitter, headEvent, 10, headRoot, common.Hash{2}, func() (common.Hash, uint64, string, bool, error) {
+		return headRoot, 10, "full", false, nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, beaconevents.StateHead, (<-ch).Event)
+	select {
+	case v2 := <-ch:
+		require.Equal(t, beaconevents.StateHeadV2, v2.Event)
+		require.Equal(t, "full", v2.Data.(*beaconevents.HeadV2Data).Data.PayloadStatus)
+	case <-time.After(time.Second):
+		t.Fatal("head_v2 event was not emitted")
 	}
 }

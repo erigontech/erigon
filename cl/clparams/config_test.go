@@ -17,6 +17,7 @@
 package clparams
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -68,6 +69,133 @@ func TestCustomConfigUsesConfiguredBlockRequestWindow(t *testing.T) {
 	beaconCfg, _, err := CustomConfig(configPath)
 	require.NoError(t, err)
 	require.Equal(t, uint64(12_345), beaconCfg.MinEpochsForBlockRequests())
+}
+
+func TestCustomConfigBoundsMaxCommitteesPerSlot(t *testing.T) {
+	for _, test := range []struct {
+		committees uint64
+		wantErr    bool
+	}{
+		{committees: 64},
+		{committees: 65, wantErr: true},
+		{committees: 72, wantErr: true},
+	} {
+		t.Run(fmt.Sprint(test.committees), func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), "config.yaml")
+			yamlContent := fmt.Sprintf("MAX_COMMITTEES_PER_SLOT: %d\n", test.committees)
+			require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0o644))
+
+			beaconCfg, _, err := CustomConfig(configPath)
+			if test.wantErr {
+				require.EqualError(t, err, fmt.Sprintf("MAX_COMMITTEES_PER_SLOT exceeds supported limit: %d > 64", test.committees))
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, test.committees, beaconCfg.MaxCommitteesPerSlot)
+		})
+	}
+}
+
+func TestCustomConfigGasLimitSchedule(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(`GLOAS_FORK_EPOCH: 10
+GAS_LIMIT_SCHEDULE:
+  - EPOCH: 20
+    GAS_LIMIT: 200000000
+  - EPOCH: 12
+    GAS_LIMIT: 100000000
+`), 0o644))
+	config, _, err := CustomConfig(configPath)
+	require.NoError(t, err)
+
+	for _, test := range []struct {
+		epoch    uint64
+		gasLimit uint64
+		active   bool
+	}{
+		{epoch: 9},
+		{epoch: 10},
+		{epoch: 11},
+		{epoch: 12, gasLimit: 100_000_000, active: true},
+		{epoch: 19, gasLimit: 100_000_000, active: true},
+		{epoch: 20, gasLimit: 200_000_000, active: true},
+		{epoch: 21, gasLimit: 200_000_000, active: true},
+	} {
+		gasLimit, active := config.GetScheduledGasLimit(test.epoch)
+		require.Equal(t, test.active, active, "epoch %d", test.epoch)
+		require.Equal(t, test.gasLimit, gasLimit, "epoch %d", test.epoch)
+	}
+}
+
+func TestScheduledGasLimitIsInactiveBeforeGloas(t *testing.T) {
+	config := BeaconChainConfig{
+		GloasForkEpoch: 10,
+		GasLimitSchedule: []GasLimitScheduleEntry{
+			{Epoch: 9, GasLimit: 60_000_000},
+		},
+	}
+
+	gasLimit, active := config.GetScheduledGasLimit(9)
+
+	require.False(t, active)
+	require.Zero(t, gasLimit)
+}
+
+func TestBlobSidecarServeRangeStartSlotUsesEpochBoundary(t *testing.T) {
+	cfg := BeaconChainConfig{
+		SlotsPerEpoch:                    32,
+		MinEpochsForBlobSidecarsRequests: 4_096,
+	}
+
+	require.Equal(t, uint64(9_984), cfg.BlobSidecarServeRangeStartSlot(141_087))
+}
+
+func TestBlobSidecarServeRangeStartSlotDoesNotCrossDenebFork(t *testing.T) {
+	cfg := BeaconChainConfig{
+		SlotsPerEpoch:                    32,
+		MinEpochsForBlobSidecarsRequests: 4,
+		DenebForkEpoch:                   10,
+	}
+
+	tests := []struct {
+		name         string
+		currentEpoch uint64
+		wantEpoch    uint64
+	}{
+		{name: "before Deneb", currentEpoch: 9, wantEpoch: 0},
+		{name: "at Deneb", currentEpoch: 10, wantEpoch: 10},
+		{name: "after Deneb", currentEpoch: 11, wantEpoch: 10},
+		{name: "window reaches Deneb", currentEpoch: 14, wantEpoch: 10},
+		{name: "window starts after Deneb", currentEpoch: 15, wantEpoch: 11},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.wantEpoch*cfg.SlotsPerEpoch, cfg.BlobSidecarServeRangeStartSlot(test.currentEpoch*cfg.SlotsPerEpoch))
+		})
+	}
+}
+
+func TestBlobSidecarServeRangeStartSlotHandlesShortAndInvalidChains(t *testing.T) {
+	cfg := BeaconChainConfig{
+		SlotsPerEpoch:                    32,
+		MinEpochsForBlobSidecarsRequests: math.MaxUint64,
+	}
+
+	require.Zero(t, cfg.BlobSidecarServeRangeStartSlot(141_087))
+	cfg.SlotsPerEpoch = 0
+	require.Zero(t, cfg.BlobSidecarServeRangeStartSlot(math.MaxUint64))
+}
+
+func TestDataColumnSidecarServeRangeStartSlotUsesFuluEpochBoundary(t *testing.T) {
+	cfg := BeaconChainConfig{
+		SlotsPerEpoch:                          16,
+		FuluForkEpoch:                          100,
+		MinEpochsForDataColumnSidecarsRequests: 4_096,
+	}
+
+	require.Zero(t, cfg.DataColumnSidecarServeRangeStartSlot(99*cfg.SlotsPerEpoch))
+	require.Equal(t, uint64(100*16), cfg.DataColumnSidecarServeRangeStartSlot(100*cfg.SlotsPerEpoch))
+	require.Equal(t, uint64(904*16), cfg.DataColumnSidecarServeRangeStartSlot(5_000*cfg.SlotsPerEpoch+15))
 }
 
 func TestCaplinConfigCanSetStaticPeers(t *testing.T) {

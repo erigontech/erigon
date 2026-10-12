@@ -47,7 +47,9 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 	}
 
 	// [New in Gloas:EIP7732] process_parent_execution_payload BEFORE process_block_header
+	var parentSlot uint64
 	if version >= clparams.GloasVersion {
+		parentSlot = s.LatestBlockHeader().Slot
 		if err := impl.ProcessParentExecutionPayload(s, block); err != nil {
 			return fmt.Errorf("processBlock: failed to process parent execution payload: %w", err)
 		}
@@ -111,7 +113,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 	}
 
 	// 6. process_operations
-	sigs, msgs, pubKeys, err = ProcessOperations(impl, s, body)
+	sigs, msgs, pubKeys, err = ProcessOperations(impl, s, body, parentSlot)
 	if err != nil {
 		return fmt.Errorf("processBlock: failed to process block body operations: %w", err)
 	}
@@ -139,7 +141,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 }
 
 // ProcessOperations is called by ProcessBlock and processes the block body operations
-func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blockBody cltypes.GenericBeaconBody) (signatures [][]byte, messages [][]byte, publicKeys [][]byte, err error) {
+func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blockBody cltypes.GenericBeaconBody, parentSlot uint64) (signatures [][]byte, messages [][]byte, publicKeys [][]byte, err error) {
 	switch {
 	case s.Version() <= clparams.DenebVersion:
 		maxDepositsAllowed := int(min(s.BeaconConfig().MaxDeposits, s.Eth1Data().DepositCount-s.Eth1DepositIndex()))
@@ -179,7 +181,7 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 	}
 
 	// Process each attestations
-	if err := impl.ProcessAttestations(s, blockBody.GetAttestations()); err != nil {
+	if err := impl.ProcessAttestations(s, blockBody.GetAttestations(), parentSlot); err != nil {
 		return nil, nil, nil, fmt.Errorf("ProcessAttestation: %w", err)
 	}
 
