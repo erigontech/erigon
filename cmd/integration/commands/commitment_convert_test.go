@@ -20,11 +20,21 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 func TestCommitmentConvertReturnsErrors(t *testing.T) {
-	t.Cleanup(func() { convertRestore, convertContinue = false, false })
+	enabled := statecfg.ExperimentalCommitmentV3
+	t.Cleanup(func() {
+		convertRestore, convertContinue, convertV3, statecfg.ExperimentalCommitmentV3 = false, false, false, enabled
+	})
 	root := RootCommand()
 	root.SetArgs([]string{"--log.dir.disable", "commitment", "convert", "--datadir", t.TempDir(), "--chain", "mainnet", "--restore", "--continue"})
 	require.ErrorContains(t, root.ExecuteContext(t.Context()), "--continue is mutually exclusive with --restore")
+
+	convertRestore, convertContinue = false, false
+	statecfg.ExperimentalCommitmentV3 = true
+	root.SetArgs([]string{"--log.dir.disable", "commitment", "convert", "--datadir", t.TempDir(), "--chain", "mainnet", "--v3"})
+	require.ErrorContains(t, root.ExecuteContext(t.Context()), "without COMMITMENT_V3=true")
 }
