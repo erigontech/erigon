@@ -221,3 +221,28 @@ func TestByteLRURejectedNewcomerIsRefunded(t *testing.T) {
 	require.LessOrEqual(t, b.resident.Load(), b.limit.Load())
 	require.Positive(t, b.Len())
 }
+
+// An unbudgeted layer holds maxBytes from the start, so it never grows and its
+// residency counter is not maintained. What it must still do is stay inside the
+// byte bound under eviction pressure and serve correct values.
+func TestByteLRUUnbudgetedStaysBoundedAndCorrect(t *testing.T) {
+	const maxBytes = datasize.ByteSize(1 << 20)
+	val := func(i uint64) []byte { return append(make([]byte, 64*1024-1), byte(i)) }
+	b := NewByteLRU(maxBytes, func(_ uint64, v []byte) int64 { return int64(len(v)) })
+
+	for key := range uint64(256) {
+		require.True(t, b.Add(key, val(key)))
+	}
+	b.c.CleanUp()
+
+	require.LessOrEqual(t, int64(b.c.WeightedSize()), int64(maxBytes), "bound holds without a refund path")
+	require.Positive(t, b.Len())
+	// Whatever survived answers with its own value.
+	for key := range uint64(256) {
+		if v, ok := b.Get(key); ok {
+			require.Equal(t, val(key), v, "key %d served the wrong value", key)
+		}
+	}
+	// The limit never moves: there is nothing to grow into.
+	require.Equal(t, int64(maxBytes), b.limit.Load())
+}

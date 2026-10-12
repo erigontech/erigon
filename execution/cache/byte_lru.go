@@ -48,6 +48,9 @@ type ByteLRU[V any] struct {
 	// cleanup, and a callback capturing the owner would keep the owner too.
 	onEvict atomic.Pointer[func(uint64, V)]
 
+	// resident is maintained for a budgeted layer only, which is the one that
+	// spends it: an unbudgeted layer holds maxBytes from the start, so it never
+	// grows and never reads this.
 	resident atomic.Int64
 	limit    atomic.Int64 // otter's maximum; for a budgeted cache, the bytes reserved from the envelope
 	ceiling  atomic.Int64 // limit may still grow to this; drops to limit when the envelope refuses
@@ -134,12 +137,14 @@ func (b *ByteLRU[V]) Add(key uint64, value V) bool {
 
 	// Grow on the net change, and before the write: afterwards maintenance may
 	// have refunded the newcomer already and hidden the pressure.
-	delta := w
-	if prev, present := b.c.GetIfPresent(key); present {
-		delta -= b.weigh(key, prev)
-	}
-	if lim := b.limit.Load(); delta > 0 && b.resident.Load()+delta > lim && lim < b.ceiling.Load() {
-		b.grow(delta)
+	if !b.unbudgeted {
+		delta := w
+		if prev, present := b.c.GetIfPresent(key); present {
+			delta -= b.weigh(key, prev)
+		}
+		if lim := b.limit.Load(); delta > 0 && b.resident.Load()+delta > lim && lim < b.ceiling.Load() {
+			b.grow(delta)
+		}
 	}
 
 	// Set returns (new value, true) for an absent key, (displaced value, false)
@@ -148,7 +153,11 @@ func (b *ByteLRU[V]) Add(key uint64, value V) bool {
 	if !inserted {
 		w -= b.weigh(key, prev)
 	}
-	b.resident.Add(w)
+	if !b.unbudgeted {
+		// Only a budgeted layer has the deletion handler that returns an
+		// evicted or refused weight, so only there does the counter balance.
+		b.resident.Add(w)
+	}
 	return true
 }
 
