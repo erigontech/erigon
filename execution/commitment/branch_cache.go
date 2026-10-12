@@ -36,6 +36,10 @@ func u64ident(k uint64) uint32 { return uint32(k) }
 // KeyCommitmentState must never enter the BranchCache: it changes every block.
 var KeyCommitmentState = []byte("state")
 
+func isCommitmentStateKey(prefix []byte) bool {
+	return bytes.Equal(prefix, KeyCommitmentState)
+}
+
 // BranchCache: writer stripes only make stamped publications atomic with
 // Clear; callers must still ensure one logical mutation per prefix.
 type BranchCache struct {
@@ -203,7 +207,14 @@ type AdaptivePinControllerProvider interface {
 const branchCacheTailShards = 256
 
 func (c *BranchCache) putStripe(prefix []byte) *sync.Mutex {
-	return &c.putStripes[uint8(maphash.Hash(prefix))]
+	if len(prefix) == 0 {
+		return &c.putStripes[0]
+	}
+	stripe := prefix[len(prefix)-1]
+	if len(prefix) > 1 {
+		stripe ^= prefix[0]
+	}
+	return &c.putStripes[stripe]
 }
 
 func (c *BranchCache) lockAllPutStripes() {
@@ -299,7 +310,7 @@ func (c *BranchCache) trunkSlot(prefix []byte, forWrite bool) *atomic.Pointer[br
 
 // storageRoute: ok=false means non-storage, caller falls through to the tail.
 func (c *BranchCache) storageRoute(prefix []byte, create bool, nibBuf *[4]byte) (st *trunk, n int, ok bool) {
-	if len(prefix) < 33 || prefix[0] >= 0x20 {
+	if len(prefix) < 33 || prefix[0]&0x20 != 0 {
 		return nil, 0, false
 	}
 	p := c.pinned.Load()
@@ -378,7 +389,8 @@ func storageNibbles(prefix []byte, nib *[4]byte) (n int) {
 
 // clearTrunk stores nil per-slot rather than swapping the pointer, since
 // lock-free readers deref c.accountTrunk concurrently.
-func clearTrunk(t *trunk) {
+func (c *BranchCache) clearTrunk() {
+	t := c.accountTrunk
 	t.d0.Store(nil)
 	for i := range t.d1 {
 		t.d1[i].Store(nil)
@@ -496,7 +508,7 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 
 // PinEntry copies data; safe to mutate the input after the call.
 func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
-	if IsCommitmentStateKey(prefix) {
+	if isCommitmentStateKey(prefix) {
 		return
 	}
 	dataCopy := make([]byte, len(data))
@@ -567,7 +579,7 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 
 // GetBefore rejects newer entries without evicting them from other readers.
 func (c *BranchCache) GetBefore(prefix []byte, txNum uint64) ([]byte, uint64, bool) {
-	if IsCommitmentStateKey(prefix) {
+	if isCommitmentStateKey(prefix) {
 		return nil, 0, false
 	}
 	coh := c.coh.Snapshot()
@@ -593,7 +605,7 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 }
 
 func (c *BranchCache) PutOwned(prefix []byte, data []byte, step, txN uint64) {
-	if IsCommitmentStateKey(prefix) {
+	if isCommitmentStateKey(prefix) {
 		return
 	}
 	entry := &branchCacheEntry{data: data, step: step, txN: txN}
@@ -604,21 +616,6 @@ func (c *BranchCache) PutOwned(prefix []byte, data []byte, step, txN uint64) {
 
 	entry.epoch = c.coh.Epoch()
 	c.store(prefix, entry)
-}
-
-func (c *BranchCache) TryPut(prefix []byte, data []byte, step, txN uint64, owned bool) {
-	if IsCommitmentStateKey(prefix) {
-		return
-	}
-	stripe := c.putStripe(prefix)
-	if !stripe.TryLock() {
-		return
-	}
-	defer stripe.Unlock()
-	if !owned {
-		data = bytes.Clone(data)
-	}
-	c.store(prefix, &branchCacheEntry{data: data, step: step, txN: txN, epoch: c.coh.Epoch()})
 }
 
 func (c *BranchCache) Invalidate(prefix []byte) {
@@ -657,7 +654,7 @@ func (c *BranchCache) Clear() {
 	defer c.unlockAllPutStripes()
 
 	c.root.Store(nil)
-	clearTrunk(c.accountTrunk)
+	c.clearTrunk()
 	c.pinned.Store(nil)
 	if tail := c.tail.Load(); tail != nil {
 		tail.reset()
