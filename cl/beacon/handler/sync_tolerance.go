@@ -23,15 +23,11 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 )
 
-// syncToleranceEpochs is how far the head may trail the highest imported block before the
-// node treats itself as syncing: it reports is_syncing and refuses blocks, attestation data,
-// duties and pool attestations. Only accepted blocks count, so neither a chain-wide gap nor a
-// rejected block trips the tolerance.
+// syncToleranceEpochs is how far blocks imported on top of the head may reach past it before
+// the node treats itself as syncing: it reports is_syncing and refuses blocks, attestation data,
+// duties and pool attestations. Only descendants of the head count, so neither a chain-wide gap
+// nor a lighter fork trips the tolerance.
 const syncToleranceEpochs = 1
-
-func headLagExceedsSyncTolerance(highestImported, headSlot, toleranceSlots uint64) bool {
-	return highestImported > headSlot+toleranceSlots
-}
 
 // refuseLaggingHead is the 503 a validator endpoint returns while headLagsBehind holds.
 func (a *ApiHandler) refuseLaggingHead() error {
@@ -42,10 +38,11 @@ func (a *ApiHandler) refuseLaggingHead() error {
 }
 
 // headLagsBehind is true without a head state and also when blocks more than the tolerance
-// beyond the head were imported, since a block built on such a head cannot become canonical.
+// beyond the head were imported on top of it, since get_head would have moved to them.
 func (a *ApiHandler) headLagsBehind() bool {
 	if a.syncedData.Syncing() {
 		return true
 	}
-	return headLagExceedsSyncTolerance(a.forkchoiceStore.HighestImported(), a.syncedData.HeadSlot(), syncToleranceEpochs*a.beaconChainCfg.SlotsPerEpoch)
+	headRoot, headSlot, ok := a.syncedData.StateHead()
+	return !ok || a.forkchoiceStore.HasImportedDescendantAfter(headRoot, headSlot+syncToleranceEpochs*a.beaconChainCfg.SlotsPerEpoch)
 }

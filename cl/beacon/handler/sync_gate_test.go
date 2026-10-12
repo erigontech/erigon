@@ -38,7 +38,7 @@ import (
 // The sync gate compares the head with the highest imported block, not with the clock or with
 // blocks merely seen, so neither a chain-wide gap nor a rejected block trips it, while a head
 // that stopped advancing behind imported blocks does.
-func TestSyncGateFollowsHighestImportedBlock(t *testing.T) {
+func TestSyncGateFollowsBlocksImportedOnTheHead(t *testing.T) {
 	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	headSlot := postState.Slot()
 	tolerance := handler.beaconChainCfg.SlotsPerEpoch
@@ -46,17 +46,28 @@ func TestSyncGateFollowsHighestImportedBlock(t *testing.T) {
 	// A block that was seen but never imported does not count.
 	fcu.HighestSeenVal = headSlot + 10*tolerance
 
-	fcu.HighestImportedVal = headSlot
+	fcu.HighestImportedDescendantVal = headSlot
 	require.False(t, handler.headLagsBehind())
-	fcu.HighestImportedVal = headSlot + tolerance
+	fcu.HighestImportedDescendantVal = headSlot + tolerance
 	require.False(t, handler.headLagsBehind())
-	fcu.HighestImportedVal = headSlot + tolerance + 1
+	fcu.HighestImportedDescendantVal = headSlot + tolerance + 1
 	require.True(t, handler.headLagsBehind())
+
+	// The gate asks about the served head, not about every imported branch.
+	headRoot, _, ok := handler.syncedData.StateHead()
+	require.True(t, ok)
+	var asked []common.Hash
+	fcu.HasImportedDescendantAfterFn = func(root common.Hash, _ uint64) bool {
+		asked = append(asked, root)
+		return false
+	}
+	require.False(t, handler.headLagsBehind())
+	require.Equal(t, []common.Hash{headRoot}, asked)
 }
 
 func TestNodeSyncingReportsHeadBehindImportedBlocks(t *testing.T) {
 	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-	fcu.HighestImportedVal = postState.Slot() + handler.beaconChainCfg.SlotsPerEpoch + 1
+	fcu.HighestImportedDescendantVal = postState.Slot() + handler.beaconChainCfg.SlotsPerEpoch + 1
 
 	resp, err := handler.GetEthV1NodeSyncing(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/node/syncing", http.NoBody))
 	require.NoError(t, err)
@@ -65,7 +76,7 @@ func TestNodeSyncingReportsHeadBehindImportedBlocks(t *testing.T) {
 
 func TestNodeHealthReportsHeadBehindImportedBlocks(t *testing.T) {
 	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-	fcu.HighestImportedVal = postState.Slot() + handler.beaconChainCfg.SlotsPerEpoch + 1
+	fcu.HighestImportedDescendantVal = postState.Slot() + handler.beaconChainCfg.SlotsPerEpoch + 1
 
 	recorder := httptest.NewRecorder()
 	handler.GetEthV1NodeHealth(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/node/health?syncing_status=206", http.NoBody))
@@ -74,7 +85,7 @@ func TestNodeHealthReportsHeadBehindImportedBlocks(t *testing.T) {
 
 func TestBlockProductionRefusesHeadBehindImportedBlocks(t *testing.T) {
 	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-	fcu.HighestImportedVal = postState.Slot() + handler.beaconChainCfg.SlotsPerEpoch + 1
+	fcu.HighestImportedDescendantVal = postState.Slot() + handler.beaconChainCfg.SlotsPerEpoch + 1
 	targetSlot := postState.Slot() + 1
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf(
@@ -123,7 +134,7 @@ func TestValidatorEndpointsRefuseHeadBehindImportedBlocks(t *testing.T) {
 	} {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
 			_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-			fcu.HighestImportedVal = postState.Slot() + handler.beaconChainCfg.SlotsPerEpoch + 1
+			fcu.HighestImportedDescendantVal = postState.Slot() + handler.beaconChainCfg.SlotsPerEpoch + 1
 
 			recorder := httptest.NewRecorder()
 			handler.mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), tc.method, tc.path, strings.NewReader(tc.body)))
