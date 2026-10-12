@@ -53,9 +53,8 @@ type ByteLRU[V any] struct {
 	ceiling  atomic.Int64 // limit may still grow to this; drops to limit when the envelope refuses
 
 	growMu sync.Mutex
-	// addStripes serialize same-key writers, so the net change a write is about
-	// to make can be read before the write without racing another writer to the
-	// same key. Readers never take them.
+	// addStripes serialize same-key writers so Add is correct on its own, not
+	// only under a caller's lock. Readers never take them.
 	addStripes [putStripeCount]sync.Mutex
 	closed     bool
 	// unbudgeted holds maxBytes from the start and never touches the envelope.
@@ -121,26 +120,20 @@ func newOtter[V any](maxWeight int64, weigh func(uint64, V) int64, onDeletion fu
 func (b *ByteLRU[V]) Get(key uint64) (V, bool) { return b.c.GetIfPresent(key) }
 
 // Add reports that the value could be offered, not that it is resident: a
-// W-TinyLFU rejection also returns true. False means it was not taken -- too
-// big for the whole budget -- and no deletion fires for it. A live key is
-// replaced in place and its predecessor refunded, by the deletion handler for a
-// budgeted layer and inline for an unbudgeted one, which has none.
+// W-TinyLFU rejection also returns true. False means it was too big for the
+// whole budget, and no deletion fires for it.
 func (b *ByteLRU[V]) Add(key uint64, value V) bool {
 	w := b.weigh(key, value)
 	if w > b.maxBytes {
 		return false
 	}
-	// The stripe makes the look-up, the growth step and the write one sequence
-	// for this key, so a concurrent writer to the same key cannot leave a stale
-	// predecessor weight behind.
+	// Look-up, growth step and write are one sequence per key.
 	mu := &b.addStripes[key&(putStripeCount-1)]
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Growth is decided on the net change, so replacing an entry with one of
-	// its own size reserves nothing, and it is decided before the write: after
-	// it, maintenance may already have evicted the newcomer and refunded its
-	// weight, hiding the pressure that called for the step.
+	// Grow on the net change, and before the write: afterwards maintenance may
+	// have refunded the newcomer already and hidden the pressure.
 	delta := w
 	if prev, present := b.c.GetIfPresent(key); present {
 		delta -= b.weigh(key, prev)
@@ -149,10 +142,8 @@ func (b *ByteLRU[V]) Add(key uint64, value V) bool {
 		b.grow(delta)
 	}
 
-	// Set returns (new value, true) for an absent key and (displaced value,
-	// false) for a present one, so the charge is the net change. A rejected or
-	// evicted newcomer is refunded by the deletion handler, which leaves
-	// replacements to this.
+	// Set returns (new value, true) for an absent key, (displaced value, false)
+	// for a present one, so the charge below is the net change.
 	prev, inserted := b.c.Set(key, value)
 	if !inserted {
 		w -= b.weigh(key, prev)
