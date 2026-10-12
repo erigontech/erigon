@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"testing"
+	"unique"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -421,4 +422,21 @@ func TestAccountCopyCopiesAllFields(t *testing.T) {
 	b.Copy(&a)
 	require.Equal(t, a, b)
 	require.Equal(t, a, *a.SelfCopy())
+}
+
+// Values that share an intern-table slot must each come back as their own canonical handle.
+func TestInternSlotCollision(t *testing.T) {
+	k1, k2 := common.Hash{1}, common.Hash{1}
+	k2[10] = 7
+	a1, a2 := common.Address{1}, common.Address{2}
+	for range 2 {
+		for _, k := range []common.Hash{k1, k2} {
+			require.Equal(t, StorageKey(unique.Make(k)), InternKey(k))
+			require.Equal(t, k, InternKey(k).Value())
+		}
+		for _, a := range []common.Address{a1, a2} {
+			require.Equal(t, Address(unique.Make(a)), InternAddress(a))
+			require.Equal(t, a, InternAddress(a).Value())
+		}
+	}
 }
