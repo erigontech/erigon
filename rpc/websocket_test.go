@@ -20,8 +20,12 @@
 package rpc
 
 import (
+	"bufio"
 	"context"
+	"encoding/binary"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -920,6 +924,63 @@ func TestWebsocketMessageBudget(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, resp, `"result"`)
 	require.Eventually(t, func() bool { return srv.ingress.used.Load() == 0 }, 5*time.Second, time.Millisecond)
+}
+
+func TestWebsocketMessageBudgetDropsPartialFrame(t *testing.T) {
+	const timeout = 5 * time.Second
+	logger := log.New()
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	srv.ingress.limit = maxRequestContentLength
+	require.True(t, srv.ingress.acquire(maxRequestContentLength))
+	defer srv.ingress.release(maxRequestContentLength)
+
+	handlerDone := make(chan struct{})
+	handler := srv.WebsocketHandler([]string{"*"}, nil, false, logger)
+	httpsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer close(handlerDone)
+		handler.ServeHTTP(w, r)
+	}))
+	defer httpsrv.Close()
+
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(t.Context(), "tcp", httpsrv.Listener.Addr().String())
+	require.NoError(t, err)
+	defer conn.Close()
+	require.NoError(t, conn.SetDeadline(time.Now().Add(timeout)))
+
+	_, err = fmt.Fprintf(conn, "GET / HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n", httpsrv.Listener.Addr())
+	require.NoError(t, err)
+	reader := bufio.NewReader(conn)
+	response, err := http.ReadResponse(reader, &http.Request{Method: http.MethodGet})
+	require.NoError(t, err)
+	defer response.Body.Close()
+	require.Equal(t, http.StatusSwitchingProtocols, response.StatusCode)
+
+	const (
+		frameHeaderSize     = 14
+		declaredPayloadSize = smallBodyLimit + 2
+		sentPayloadSize     = smallBodyLimit + 1
+	)
+	frame := make([]byte, frameHeaderSize+int(sentPayloadSize))
+	frame[0], frame[1] = 0x81, 0xff
+	binary.BigEndian.PutUint64(frame[2:10], uint64(declaredPayloadSize))
+	_, err = conn.Write(frame)
+	require.NoError(t, err)
+
+	data, err := io.ReadAll(reader)
+	if netErr, ok := errors.AsType[net.Error](err); ok {
+		require.False(t, netErr.Timeout(), "the refused partial frame kept the socket open")
+	} else {
+		require.NoError(t, err)
+	}
+	require.Empty(t, data)
+	select {
+	case <-handlerDone:
+	case <-time.After(timeout):
+		t.Fatal("the WebSocket handler did not stop after dropping the socket")
+	}
+	require.Equal(t, int64(maxRequestContentLength), srv.ingress.used.Load())
 }
 
 // holdService keeps a call running until the test releases it.
