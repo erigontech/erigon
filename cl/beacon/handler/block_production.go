@@ -3596,7 +3596,6 @@ func (a *ApiHandler) aggregatePayloadAttestations(
 	return aggregated
 }
 
-// newAttestationCandidate records, for every attester, the participation flags the attestation would newly set.
 func newAttestationCandidate(
 	s abstract.BeaconState,
 	attestation *solid.Attestation,
@@ -3630,9 +3629,6 @@ func newAttestationCandidate(
 	candidate := attestationCandidate{
 		attestation:  attestation,
 		currentEpoch: data.Target.Epoch == state.Epoch(s),
-		attesters:    make([]uint64, 0, len(attestingIndicies)),
-		baseRewards:  make([]uint64, 0, len(attestingIndicies)),
-		newFlags:     make([]uint8, 0, len(attestingIndicies)),
 	}
 	for _, attesterIndex := range attestingIndicies {
 		newFlags := attestationFlags &^ uint8(s.EpochParticipationForValidatorIndex(candidate.currentEpoch, int(attesterIndex)))
