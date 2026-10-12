@@ -16,7 +16,12 @@
 
 package tiering
 
-import "github.com/erigontech/erigon/db/kv"
+import (
+	"path/filepath"
+	"strings"
+
+	"github.com/erigontech/erigon/db/kv"
+)
 
 // ColdBoundary returns the first block of the hot window of the last lookback blocks before head.
 func ColdBoundary(head, lookback uint64) uint64 {
@@ -35,4 +40,40 @@ func ColdFiles(files kv.VisibleFiles, boundaryTxNum uint64) kv.VisibleFiles {
 		}
 	}
 	return cold
+}
+
+// File is a visible state file: its txnum range [Start, End), its size and its symlink-resolved path.
+type File struct {
+	Start, End, Size uint64
+	Path             string
+}
+
+type Usage struct {
+	Files int
+	Bytes uint64
+}
+
+// Lag splits the files that should be on the cold tier but are not, by reason.
+type Lag struct {
+	ColdResident, CopyPending, Straddling Usage
+}
+
+func ComputeLag(files []File, boundaryTxNum uint64, coldDir string) Lag {
+	var lag Lag
+	for _, f := range files {
+		var u *Usage
+		switch {
+		case coldDir != "" && strings.HasPrefix(f.Path, filepath.Clean(coldDir)+string(filepath.Separator)):
+			u = &lag.ColdResident
+		case f.End <= boundaryTxNum:
+			u = &lag.CopyPending
+		case f.Start < boundaryTxNum:
+			u = &lag.Straddling
+		default:
+			continue
+		}
+		u.Files++
+		u.Bytes += f.Size
+	}
+	return lag
 }

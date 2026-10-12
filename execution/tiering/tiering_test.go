@@ -46,3 +46,20 @@ func TestColdFiles(t *testing.T) {
 	require.Equal(t, kv.VisibleFiles{f0, f1}, ColdFiles(files, 159))
 	require.Equal(t, files, ColdFiles(files, 160))
 }
+
+func TestLag(t *testing.T) {
+	files := []File{
+		{Start: 0, End: 100, Size: 1000, Path: "/hdd/domain/a.kv"},
+		{Start: 100, End: 150, Size: 500, Path: "/ssd/domain/b.kv"},
+		{Start: 150, End: 160, Size: 100, Path: "/ssd/domain/c.kv"},
+		{Start: 160, End: 170, Size: 10, Path: "/ssd/domain/d.kv"},
+	}
+	require.Equal(t, Lag{
+		ColdResident: Usage{Files: 1, Bytes: 1000},
+		CopyPending:  Usage{Files: 1, Bytes: 500},
+		Straddling:   Usage{Files: 1, Bytes: 100},
+	}, ComputeLag(files, 155, "/hdd/domain"))
+
+	require.Equal(t, Lag{CopyPending: Usage{Files: 2, Bytes: 1500}}, ComputeLag(files, 150, ""), "no cold dir; end == boundary is fully cold")
+	require.Equal(t, Lag{CopyPending: Usage{Files: 1, Bytes: 1000}}, ComputeLag(files, 100, "/hdd/dom"), "prefix of a dir name is not the cold dir")
+}
