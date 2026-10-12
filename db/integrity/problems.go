@@ -17,6 +17,8 @@
 package integrity
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 
@@ -45,4 +47,10 @@ func (p *problems) verdict(check string) error {
 		return fmt.Errorf("%w: %s: found %d problem(s), listed above", ErrIntegrity, check, n)
 	}
 	return nil
+}
+
+// BudgetExhausted reports whether a check stopped only because its time budget ran out. A check
+// that also found problems returns them joined with the deadline, and must still fail the run.
+func BudgetExhausted(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, ErrIntegrity)
 }
