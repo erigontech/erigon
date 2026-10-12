@@ -23,6 +23,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -49,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/tiering"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -464,6 +467,10 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		maxBlockNum:              to,
 	}
 
+	if err := logColdBoundary(ctx, cfg, doms, rwTx, blockNum, logger); err != nil {
+		return err
+	}
+
 	if !(dbg.Exec3Parallel || cfg.experimentalBAL) {
 		return execV3Serial(ctx, s, u, cfg, doms, rwTx, rng, logger)
 	}
@@ -483,6 +490,30 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	}
 
 	return renderExecOutcome(execErr, out, cfg, s, u, logger)
+}
+
+var coldBoundaryLoggedAt atomic.Int64
+
+func logColdBoundary(ctx context.Context, cfg ExecuteBlockCfg, doms *execctx.SharedDomains, tx kv.TemporalTx, head uint64, logger log.Logger) error {
+	lookback := cfg.syncCfg.TieringLookbackBlocks
+	now := time.Now()
+	if lookback == 0 || now.Sub(time.Unix(0, coldBoundaryLoggedAt.Load())) < 30*time.Second {
+		return nil
+	}
+	coldBoundaryLoggedAt.Store(now.UnixNano())
+	boundary := tiering.ColdBoundary(head, lookback)
+	boundaryTxNum, err := cfg.blockReader.TxnumReader().Min(ctx, tx, boundary)
+	if err != nil {
+		return err
+	}
+	cold := tiering.ColdFiles(tx.Debug().DomainFiles(kv.CommitmentDomain), boundaryTxNum)
+	names := make([]string, len(cold))
+	for i, f := range cold {
+		names[i] = filepath.Base(f.Fullpath())
+	}
+	logger.Info("[tiering] cold boundary", "head", head, "lookback", lookback, "boundaryBlock", boundary,
+		"boundaryStep", boundaryTxNum/doms.StepSize(), "coldCommitmentFiles", names)
+	return nil
 }
 
 // renderExecOutcome maps executor outcomes to the stage's error and unwind contract.
