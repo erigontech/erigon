@@ -156,7 +156,7 @@ func applyStepRebasePlan(ctx context.Context, dirs datadir.Dirs, plan stepRebase
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE), settingsBytes, 0644)
+	return os.WriteFile(filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE), settingsBytes, 0o644)
 }
 
 func resetExecState(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {

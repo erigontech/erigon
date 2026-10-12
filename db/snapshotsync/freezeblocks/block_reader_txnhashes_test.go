@@ -57,7 +57,7 @@ func txnHashesTestTxns(t *testing.T, n int) []types.Transaction {
 		if i%2 == 0 {
 			unsigned = types.NewTransaction(uint64(i), to, &u256.Num1, 21000, &u256.Num1, []byte{byte(i)})
 		} else {
-			unsigned = types.NewEIP1559Transaction(*chainID, uint64(i), to, &u256.Num1, 21000, &u256.Num1, &u256.Num1, &u256.Num1, []byte{byte(i)})
+			unsigned = types.NewEIP1559Transaction(*chainID, uint64(i), to, &u256.Num1, 21000, &u256.Num1, &u256.Num1, []byte{byte(i)})
 		}
 		signed, err := types.SignTx(unsigned, *signer, key)
 		require.NoError(t, err)

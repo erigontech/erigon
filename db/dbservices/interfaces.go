@@ -64,7 +64,11 @@ type BodyReader interface {
 	// A nil slice means they could not be located - a missing body, segment or index -
 	// as distinct from an empty non-nil slice for a block that carries no txns.
 	TxnHashes(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (hashes []common.Hash, err error)
+	// BodyWithRawTransactions returns the body with its transactions in their binary (canonical
+	// EIP-2718) encoding, skipping the decode where the storage allows.
+	BodyWithRawTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.RawBody, err error)
 	BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bodyRlp rlp.RawValue, err error)
+	// Body reads body metadata and the user transaction count without loading transactions.
 	Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, txCount uint32, err error)
 	CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error)
 	HasSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error)

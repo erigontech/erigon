@@ -20,6 +20,7 @@
 package types
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -27,6 +28,8 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjsontest"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/stretchr/testify/require"
@@ -53,6 +56,19 @@ func TestLogsCopyPreservesNilEntries(t *testing.T) {
 	logs[1].Data[0] = 0xff
 	require.Equal(t, common.HexToHash("0xaa"), cp[1].Topics[0])
 	require.Equal(t, hexutil.Bytes{1, 2}, cp[1].Data)
+}
+
+// A copy owns its timestamp, so writing through one log's pointer cannot reach the other.
+func TestLogCopyOwnsItsTimestamp(t *testing.T) {
+	src := &Log{Address: common.HexToAddress("0x1"), BlockTimestamp: at(7)}
+
+	for name, cp := range map[string]*Log{"Log.Copy": src.Copy(), "Logs.Copy": Logs{src}.Copy()[0]} {
+		t.Run(name, func(t *testing.T) {
+			require.NotSame(t, src.BlockTimestamp, cp.BlockTimestamp)
+			*cp.BlockTimestamp = 9
+			require.Equal(t, at(7), src.BlockTimestamp)
+		})
+	}
 }
 
 // A LOG0 entry carries nil Topics. Both copy paths normalize that to an empty
@@ -206,7 +222,7 @@ func TestFilterLogsTopics(t *testing.T) {
 		filter [][]common.Hash  // the topic filter we want to use
 		want   []common.Address // slice of addresses that should pass the filter
 	}
-	var basicSet = Logs{
+	basicSet := Logs{
 		{
 			Address: a1,
 			Topics:  []common.Hash{F, F, F, F, F, B, B},
@@ -232,7 +248,7 @@ func TestFilterLogsTopics(t *testing.T) {
 			Topics:  []common.Hash{F, F, F, D},
 		},
 	}
-	var filterLogTests = map[string]filterLogTest{
+	filterLogTests := map[string]filterLogTest{
 		"1. no topics, should return all topics": {
 			input:  basicSet,
 			filter: [][]common.Hash{},
@@ -346,17 +362,15 @@ func TestFilterWithTopicMapEquivalence(t *testing.T) {
 	}
 }
 
-func TestRPCLogJSONBlockTimestamp(t *testing.T) {
+func TestLogJSONBlockTimestamp(t *testing.T) {
 	t.Parallel()
 
-	el := &RPCLog{
-		Log: Log{
-			Address: common.HexToAddress("0x1111111111111111111111111111111111111111"),
-			Topics:  []common.Hash{common.HexToHash("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")},
-			Data:    hexutil.MustDecode("0x112233"),
-			TxHash:  common.HexToHash("0x1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff"),
-		},
-		BlockTimestamp: hexutil.Uint64(1700000000),
+	el := &Log{
+		Address:        common.HexToAddress("0x1111111111111111111111111111111111111111"),
+		Topics:         []common.Hash{common.HexToHash("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")},
+		Data:           hexutil.MustDecode("0x112233"),
+		TxHash:         common.HexToHash("0x1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff"),
+		BlockTimestamp: at(1700000000),
 	}
 
 	b, err := json.Marshal(el)
@@ -366,36 +380,36 @@ func TestRPCLogJSONBlockTimestamp(t *testing.T) {
 	require.Contains(t, s, `"blockTimestamp":"0x6553f100"`)
 	require.NotContains(t, s, `"timestamp"`)
 
-	var decoded RPCLog
+	var decoded Log
 	require.NoError(t, json.Unmarshal(b, &decoded))
 	require.Equal(t, el.BlockTimestamp, decoded.BlockTimestamp)
 	require.Equal(t, el.Address, decoded.Address)
 	require.Equal(t, el.TxHash, decoded.TxHash)
 }
 
-func TestRPCLogUnmarshalJSONBlockTimestamp(t *testing.T) {
+func TestLogUnmarshalJSONBlockTimestamp(t *testing.T) {
 	t.Parallel()
 
 	input := `{"address":"0x2222222222222222222222222222222222222222","blockHash":"0x222233334444555566667777888899990000aaaabbbbccccddddeeeeffff1111","blockNumber":"0x200000","blockTimestamp":"0x60000000","data":"0x4455","logIndex":"0x5","topics":["0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],"transactionHash":"0x33334444555566667777888899990000aaaabbbbccccddddeeeeffff11112222","transactionIndex":"0x6"}`
 
-	var log RPCLog
+	var log Log
 	require.NoError(t, json.Unmarshal([]byte(input), &log))
-	require.Equal(t, hexutil.Uint64(0x60000000), log.BlockTimestamp)
+	require.Equal(t, at(0x60000000), log.BlockTimestamp)
 	require.Equal(t, common.HexToAddress("0x2222222222222222222222222222222222222222"), log.Address)
 }
 
-func TestRPCLogUnmarshalJSONLegacyTimestampIgnored(t *testing.T) {
+func TestLogUnmarshalJSONLegacyTimestampIgnored(t *testing.T) {
 	t.Parallel()
 
 	input := `{"address":"0x3333333333333333333333333333333333333333","blockHash":"0x4444555566667777888899990000aaaabbbbccccddddeeeeffff111122223333","blockNumber":"0x300000","timestamp":"0x70000000","data":"0x6677","logIndex":"0x8","topics":["0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"],"transactionHash":"0x555566667777888899990000aaaabbbbccccddddeeeeffff1111222233334444","transactionIndex":"0x9"}`
 
-	var log RPCLog
+	var log Log
 	require.NoError(t, json.Unmarshal([]byte(input), &log))
-	require.Equal(t, hexutil.Uint64(0), log.BlockTimestamp)
+	require.Nil(t, log.BlockTimestamp, "the legacy `timestamp` key is not blockTimestamp")
 	require.Equal(t, common.HexToAddress("0x3333333333333333333333333333333333333333"), log.Address)
 }
 
-func TestAppendFilteredRPCLogs(t *testing.T) {
+func TestAppendFilteredLogs(t *testing.T) {
 	t.Parallel()
 
 	logs := Logs{
@@ -423,29 +437,34 @@ func TestAppendFilteredRPCLogs(t *testing.T) {
 		},
 	}
 
-	rpcLogs := logs.AppendFilteredRPCLogs(nil, nil, nil, 1900000000, 0)
+	rpcLogs := logs.AppendFilteredLogs(nil, nil, nil, 1900000000, 0)
 
 	require.Len(t, rpcLogs, len(logs))
 	for i, rpcLog := range rpcLogs {
-		require.Equal(t, hexutil.Uint64(1900000000), rpcLog.BlockTimestamp)
-		require.Equal(t, *logs[i], rpcLog.Log)
+		require.Equal(t, at(1900000000), rpcLog.BlockTimestamp)
+		// Stamping must copy: the source keeps no timestamp and the reply is a distinct log.
+		require.Nil(t, logs[i].BlockTimestamp, "the source log must not be stamped in place")
+		require.NotSame(t, logs[i], rpcLog)
+		unstamped := *rpcLog
+		unstamped.BlockTimestamp = nil
+		require.Equal(t, *logs[i], unstamped, "only the timestamp differs")
 	}
 }
 
-func TestAppendFilteredRPCLogsEmpty(t *testing.T) {
+func TestAppendFilteredLogsEmpty(t *testing.T) {
 	t.Parallel()
 
 	// Appending nothing must leave dst as it was, so an empty eth_getLogs result
 	// stays non-nil and serialises `[]` and not `null`.
 	for _, logs := range []Logs{{}, nil} {
-		rpcLogs := logs.AppendFilteredRPCLogs(RPCLogs{}, nil, nil, 1, 0)
+		rpcLogs := logs.AppendFilteredLogs(Logs{}, nil, nil, 1, 0)
 		require.NotNil(t, rpcLogs)
 		require.Len(t, rpcLogs, 0)
 	}
 }
 
-// AppendFilteredRPCLogs must select exactly what FilterWithTopicMap selects.
-func TestAppendFilteredRPCLogsMatchesFilter(t *testing.T) {
+// AppendFilteredLogs must select exactly what FilterWithTopicMap selects.
+func TestAppendFilteredLogsMatchesFilter(t *testing.T) {
 	t.Parallel()
 
 	addrA := common.HexToAddress("0xaa")
@@ -478,15 +497,15 @@ func TestAppendFilteredRPCLogsMatchesFilter(t *testing.T) {
 			}
 			topicMap := BuildTopicMap(tc.topics)
 
-			var want RPCLogs
+			var want Logs
 			for _, l := range logs.FilterWithTopicMap(addrMap, topicMap, 0) {
-				want = append(want, &RPCLog{Log: *l, BlockTimestamp: 7})
+				want = append(want, StampedLog(l, 7))
 			}
-			require.Equal(t, want, logs.AppendFilteredRPCLogs(nil, addrMap, topicMap, 7, 0))
+			require.Equal(t, want, logs.AppendFilteredLogs(nil, addrMap, topicMap, 7, 0))
 
 			if len(want) > 1 {
 				// limit stops the walk, so an over-cap receipt is not fully converted.
-				require.Len(t, logs.AppendFilteredRPCLogs(nil, addrMap, topicMap, 7, 1), 1)
+				require.Len(t, logs.AppendFilteredLogs(nil, addrMap, topicMap, 7, 1), 1)
 			}
 		})
 	}
@@ -516,29 +535,26 @@ func TestFilterWithTopicMapMaxLogsCountsNonMatching(t *testing.T) {
 	require.Len(t, other.FilterWithTopicMap(addrMap, topicMap, 1), 1)
 }
 
-// MarshalFastJSON replaces json.Marshal for these results, so it must match it byte for byte and
-// allocate once. Malloc size-class slack can hide a short fastJSONLen from the allocation count,
-// so the bound is checked directly as well.
-func TestRPCLogsMarshalFastJSON(t *testing.T) {
-	maxed := func(topics []common.Hash, data []byte, removed bool) *RPCLog {
-		return &RPCLog{
-			Log: Log{
-				Address:     common.HexToAddress("0xdAC17F958D2ee523a2206206994597C13D831ec7"),
-				Topics:      topics,
-				Data:        data,
-				BlockNumber: hexutil.Uint64(^uint64(0)),
-				TxHash:      common.HexToHash("0xaabb"),
-				TxIndex:     hexutil.Uint(^uint(0)),
-				BlockHash:   common.HexToHash("0xccdd"),
-				Index:       hexutil.Uint(^uint(0)),
-				Removed:     removed,
-			},
-			BlockTimestamp: hexutil.Uint64(^uint64(0)),
+// MarshalFastJSONTo replaces json.Marshal for these results, so it must match it byte for byte,
+// maximal values included.
+func TestLogsMarshalFastJSON(t *testing.T) {
+	maxed := func(topics []common.Hash, data []byte, removed bool) *Log {
+		return &Log{
+			Address:        common.HexToAddress("0xdAC17F958D2ee523a2206206994597C13D831ec7"),
+			Topics:         topics,
+			Data:           data,
+			BlockNumber:    hexutil.Uint64(^uint64(0)),
+			TxHash:         common.HexToHash("0xaabb"),
+			TxIndex:        hexutil.Uint(^uint(0)),
+			BlockHash:      common.HexToHash("0xccdd"),
+			Index:          hexutil.Uint(^uint(0)),
+			Removed:        removed,
+			BlockTimestamp: at(^uint64(0)),
 		}
 	}
 	topic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
 
-	for name, logs := range map[string]RPCLogs{
+	for name, logs := range map[string]Logs{
 		"nil":                nil,
 		"empty":              {},
 		"zero":               {{}},
@@ -552,21 +568,97 @@ func TestRPCLogsMarshalFastJSON(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal(logs)
 			require.NoError(t, err)
-			got, err := logs.MarshalFastJSON()
+			got, err := jsonstream.Marshal(logs)
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(got))
-			if n := testing.AllocsPerRun(10, func() { _, _ = logs.MarshalFastJSON() }); n != 1 {
-				t.Fatalf("MarshalFastJSON allocated %v times, want 1", n)
-			}
 
 			for _, l := range logs {
 				want, err := json.Marshal(l)
 				require.NoError(t, err)
-				got, err := l.MarshalFastJSON()
+				got, err := jsonstream.Marshal(l)
 				require.NoError(t, err)
 				require.Equal(t, string(want), string(got))
-				require.LessOrEqual(t, len(got), l.fastJSONLen())
 			}
 		})
 	}
+}
+
+func TestLogsMarshalFastJSONTo(t *testing.T) {
+	full := &Log{
+		Address:        common.HexToAddress("0x1234567890123456789012345678901234567890"),
+		Topics:         []common.Hash{common.HexToHash("0xaa"), common.HexToHash("0xbb")},
+		Data:           hexutil.Bytes{0xde, 0xad, 0xbe, 0xef},
+		BlockNumber:    0x1234,
+		TxHash:         common.HexToHash("0xcc"),
+		TxIndex:        7,
+		BlockHash:      common.HexToHash("0xdd"),
+		Index:          3,
+		Removed:        true,
+		BlockTimestamp: at(0x64),
+	}
+	for name, logs := range map[string]Logs{
+		"nil":          nil,
+		"empty":        {},
+		"zero log":     {{}},
+		"nil element":  {nil},
+		"nil topics":   {{Data: hexutil.Bytes{}}},
+		"empty topics": {{Topics: []common.Hash{}}},
+		"full":         {full},
+		"several":      {full, {}, full},
+		"large": func() Logs {
+			out := make(Logs, 2*jsonstream.FlushThreshold/128)
+			for i := range out {
+				out[i] = full
+			}
+			return out
+		}(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			want, err := json.Marshal(logs)
+			require.NoError(t, err)
+			var sink bytes.Buffer
+			s := jsonstream.Get(&sink)
+			defer jsonstream.Put(s)
+			require.NoError(t, logs.MarshalFastJSONTo(s))
+			require.NoError(t, s.Flush())
+			require.NoError(t, s.Err())
+			require.Equal(t, string(want), sink.String())
+		})
+	}
+}
+
+// Every Log field says which of the spec's forms it is written as, and the encoder
+// is held to that: a dropped field, a wrong form or a reordered key fails here.
+func TestLogMatchesItsTags(t *testing.T) {
+	t.Parallel()
+	topic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+	for name, l := range map[string]*Log{
+		"every field set": {
+			Address:        common.HexToAddress("0xdAC17F958D2ee523a2206206994597C13D831ec7"),
+			Topics:         []common.Hash{topic, {}},
+			Data:           []byte{1, 2, 3},
+			BlockNumber:    hexutil.Uint64(^uint64(0)),
+			TxHash:         common.HexToHash("0xaabb"),
+			TxIndex:        hexutil.Uint(^uint(0)),
+			BlockHash:      common.HexToHash("0xccdd"),
+			Index:          hexutil.Uint(^uint(0)),
+			Removed:        true,
+			BlockTimestamp: at(^uint64(0)),
+		},
+		"zero": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			want, err := ethjsontest.ExpectedJSON(l)
+			require.NoError(t, err)
+			got, err := jsonstream.Marshal(l)
+			require.NoError(t, err)
+			require.Equal(t, string(want), string(got))
+		})
+	}
+}
+
+// at is a stamped timestamp, which a reply carries as a pointer so an unstamped log omits the key.
+func at(v uint64) *hexutil.Uint64 {
+	h := hexutil.Uint64(v)
+	return &h
 }

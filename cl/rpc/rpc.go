@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 	"time"
 
@@ -84,6 +85,7 @@ func NewBeaconRpcP2P(ctx context.Context, sentinel sentinelproto.SentinelClient,
 		ethClock:     ethClock,
 	}
 	rpc.columnDataPeers = newColumnPeers(
+		ctx,
 		sentinel,
 		beaconConfig,
 		ethClock,
@@ -148,7 +150,7 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReqWithSnapshot(
 	ctx context.Context,
 	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
 ) ([]*cltypes.DataColumnSidecar, string, *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier], error) {
-	filteredReq, pid, _, err := b.columnDataPeers.pickPeerRoundRobin(ctx, req)
+	filteredReq, pid, err := b.columnDataPeers.pickPeerRoundRobin(req)
 	if err != nil {
 		return nil, pid, nil, err
 	}
@@ -211,8 +213,8 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRangeReq(ctx context.Conte
 	if maxRequestPayloads == 0 {
 		return nil, "", errors.New("MAX_REQUEST_PAYLOADS is zero")
 	}
-	if count > maxRequestPayloads {
-		return nil, "", fmt.Errorf("execution payload envelopes by range count %d exceeds MAX_REQUEST_PAYLOADS %d", count, maxRequestPayloads)
+	if count > math.MaxUint64-start {
+		return nil, "", fmt.Errorf("execution payload envelopes by range start %d plus count %d overflows", start, count)
 	}
 	var buf buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buf, &cltypes.ExecutionPayloadEnvelopesByRangeRequest{
@@ -222,7 +224,8 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRangeReq(ctx context.Conte
 		return nil, "", err
 	}
 
-	responsePacket, pid, responseErr := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRangeProtocolV1, buf.Bytes(), communication.MaxWireResponseBytes(int(clparams.MaxChunkSize), count), count)
+	responseLimit := min(count, maxRequestPayloads)
+	responsePacket, pid, responseErr := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRangeProtocolV1, buf.Bytes(), communication.MaxWireResponseBytes(int(clparams.MaxChunkSize), responseLimit), responseLimit)
 	if responseErr != nil && len(responsePacket) == 0 {
 		return nil, pid, responseErr
 	}
@@ -427,7 +430,7 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData, ma
 			return responsePacket, message.Peer.Pid, fmt.Errorf("response contains more chunks than requested: limit %d", *maxChunks)
 		}
 		// Read varint for length of message.
-		encodedLn, _, err := ssz_snappy.ReadUvarint(r)
+		encodedLn, err := ssz_snappy.ReadUvarint(r)
 		if err != nil {
 			return responsePacket, message.Peer.Pid, fmt.Errorf("sendRequest failed. Unable to read varint from message prefix: %w", err)
 		}

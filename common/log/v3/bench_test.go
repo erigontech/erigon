@@ -172,7 +172,8 @@ func BenchmarkLog15AddingFields(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			logger.Info("Go fast.",
+			logger.Info(
+				"Go fast.",
 				"int", 1,
 				"int64", int64(1),
 				"float", 3.0,

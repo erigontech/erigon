@@ -172,6 +172,9 @@ func (s *payloadAttestationService) processMessage(ctx context.Context, msg *clt
 	slot := data.Slot
 	validatorIndex := msg.ValidatorIndex
 	blockRoot := data.BeaconBlockRoot
+	if s.ethClock.StateVersionByEpoch(s.ethClock.GetEpochAtSlot(slot)) < clparams.GloasVersion {
+		return fmt.Errorf("payload attestation slot %d is pre-Gloas", slot)
+	}
 
 	log.Trace("Received payload attestation message via gossip",
 		"slot", slot,
@@ -286,8 +289,8 @@ func isPayloadAttestationSlotCurrent(clock eth_clock.EthereumClock, now time.Tim
 	if expectedSlotUnix > math.MaxInt64 || slotUnix != int64(expectedSlotUnix) || uint64(nextSlotUnix)-expectedSlotUnix != secondsPerSlot {
 		return false
 	}
-	lowerBound := slotStart.Add(-gloasMaximumClockDisparity)
-	upperBound := nextSlotStart.Add(gloasMaximumClockDisparity)
+	lowerBound := slotStart.Add(-maximumGossipClockDisparity)
+	upperBound := nextSlotStart.Add(maximumGossipClockDisparity)
 	if lowerBound.After(slotStart) || upperBound.Before(nextSlotStart) {
 		return false
 	}

@@ -130,6 +130,7 @@ mdbx.lck
 # from the repo root drops them here, the real build writes to build/bin.
 /erigon
 /mcp
+/jsongen
 
 # place to store task-specific agent .md files that we do not want to commit to main repo
 agentspecs/

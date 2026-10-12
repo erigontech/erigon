@@ -161,12 +161,13 @@ func processModeBatchState(t *testing.T, ms *MockState, mode runMode, workers in
 	}
 }
 
-func parallelBatchDeepFolds(t *testing.T, ms *MockState, workers int, keys [][]byte, upds []Update, blob []byte) ([]byte, []byte, uint64) {
+func parallelBatchForks(t *testing.T, ms *MockState, workers int, grain uint32, keys [][]byte, upds []Update, blob []byte) ([]byte, []byte, uint64) {
 	t.Helper()
 	require.NoError(t, ms.applyPlainUpdates(keys, upds))
 
 	tr := newParTrie(t, ms, workers)
 	defer tr.Release()
+	tr.SetForkGrain(grain)
 	require.NoError(t, tr.RootTrie().SetState(blob))
 	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
 	defer ut.Close()
@@ -176,7 +177,7 @@ func parallelBatchDeepFolds(t *testing.T, ms *MockState, workers int, keys [][]b
 	root := processRoot(t, tr, ut)
 	encoded, err := tr.RootTrie().EncodeCurrentState(nil)
 	require.NoError(t, err)
-	return root, encoded, tr.DeepLocalFolds()
+	return root, encoded, tr.Forks()
 }
 
 func engineRoot(t *testing.T, mode runMode, workers int, keys [][]byte, upds []Update) ([]byte, *MockState) {
@@ -222,6 +223,7 @@ func requireAllEnginesParity(t *testing.T, k1 [][]byte, u1 []Update, k2 [][]byte
 		branchDiff(t, seqMs, parMs)
 	}
 	require.Equalf(t, seqRoot, parRoot, "parallel(workers=%d) vs sequential root mismatch", workers)
+	requireBranchParity(t, seqMs, parMs)
 }
 
 func requireBranchParity(t *testing.T, seq, got *MockState) {
@@ -245,7 +247,7 @@ func requireBranchParity(t *testing.T, seq, got *MockState) {
 		branchDiff(t, seq, got)
 	}
 	require.Equal(t, len(seq.cm), len(got.cm), "branch count must match")
-	require.Zero(t, mism, "stored branch metadata differs between streaming and sequential")
+	require.Zero(t, mism, "stored branch metadata differs from sequential")
 }
 
 func branchDiff(t *testing.T, seq, par *MockState) {

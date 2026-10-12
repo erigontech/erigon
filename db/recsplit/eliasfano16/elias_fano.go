@@ -337,9 +337,9 @@ func (ef *DoubleEliasFano) build(cumKeys []uint64, position []uint64) bool {
 		set(ef.upperBitsPosition, ((position[i]-bitDelta)>>ef.lPosition)+i)
 		//fmt.Printf("i=%d, set pos for %d = %d\n", i, position[i]-bitDelta, (position[i]-bitDelta)>>ef.lPosition+i)
 	}
-	//fmt.Printf("loweBits %b\n", ef.lowerBits)
-	//fmt.Printf("upperBitsCumKeys %b\n", ef.upperBitsCumKeys)
-	//fmt.Printf("upperBitsPosition %b\n", ef.upperBitsPosition)
+	// fmt.Printf("loweBits %b\n", ef.lowerBits)
+	// fmt.Printf("upperBitsCumKeys %b\n", ef.upperBitsCumKeys)
+	// fmt.Printf("upperBitsPosition %b\n", ef.upperBitsPosition)
 	// i iterates over the 64-bit words in the wordCumKeys vector
 	// c iterates over bits in the wordCumKeys
 	// lastSuperQ is the largest multiple of 2^14 (4096) which is no larger than c
@@ -427,7 +427,8 @@ func (ef *DoubleEliasFano) Data() []uint64 {
 }
 
 func (ef *DoubleEliasFano) get2(i uint64) (cumKeys, position uint64,
-	windowCumKeys uint64, selectCumKeys int, currWordCumKeys, lower, cumDelta uint64) {
+	windowCumKeys uint64, selectCumKeys int, currWordCumKeys, lower, cumDelta uint64,
+) {
 	posLower := i * (ef.lCumKeys + ef.lPosition)
 	idx64, shift := posLower/64, posLower%64
 	lower = ef.lowerBits[idx64] >> shift

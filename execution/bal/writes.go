@@ -43,7 +43,7 @@ func ToWriteSet(blockAccessList types.BlockAccessList, maxTxIndex uint32) *state
 	writes := &state.WriteSet{}
 	for i := range blockAccessList {
 		accountChanges := &blockAccessList[i]
-		addr := accountChanges.Address
+		addr := accounts.InternAddress(accountChanges.Address)
 		if balance, ok := finalChangeUpTo(accountChanges.BalanceChanges, maxTxIndex); ok {
 			writes.SetBalance(addr, &state.VersionedWrite[uint256.Int]{
 				WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}, Val: balance.Value,

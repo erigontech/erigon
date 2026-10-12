@@ -262,6 +262,7 @@ func generateTestDataForDomainCommitment(tb testing.TB, keySize1, keySize2, tota
 
 	return doms
 }
+
 func generateRandomKey(r *rndGen, size uint64) string {
 	return string(generateRandomKeyBytes(r, size))
 }
@@ -313,6 +314,7 @@ func generateArbitraryValueUpdates(r *rndGen, totalTx, keyTxsLimit, maxSize uint
 
 	return updates
 }
+
 func generateRandomTxNum(r *rndGen, maxTxNum uint64, usedTxNums map[uint64]bool) uint64 {
 	txNum := uint64(r.IntN(int(maxTxNum)))
 	for usedTxNums[txNum] {

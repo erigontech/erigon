@@ -19,7 +19,8 @@ type logTools struct {
 
 func registerLogTools(e *ErigonMCPServer) {
 	e.mcpServer.AddTool(
-		mcp.NewTool("logs_tail",
+		mcp.NewTool(
+			"logs_tail",
 			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDescription("Get last N lines from erigon or torrent logs"),
 			mcp.WithString("log_type", mcp.Description("Log type: 'erigon' or 'torrent' (default: erigon)")),
@@ -29,7 +30,8 @@ func registerLogTools(e *ErigonMCPServer) {
 		e.handleLogsTail,
 	)
 	e.mcpServer.AddTool(
-		mcp.NewTool("logs_head",
+		mcp.NewTool(
+			"logs_head",
 			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDescription("Get first N lines from erigon or torrent logs"),
 			mcp.WithString("log_type", mcp.Description("Log type: 'erigon' or 'torrent' (default: erigon)")),
@@ -39,7 +41,8 @@ func registerLogTools(e *ErigonMCPServer) {
 		e.handleLogsHead,
 	)
 	e.mcpServer.AddTool(
-		mcp.NewTool("logs_grep",
+		mcp.NewTool(
+			"logs_grep",
 			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDescription("Search for a pattern in erigon or torrent logs"),
 			mcp.WithString("log_type", mcp.Description("Log type: 'erigon' or 'torrent' (default: erigon)")),
@@ -50,7 +53,8 @@ func registerLogTools(e *ErigonMCPServer) {
 		e.handleLogsGrep,
 	)
 	e.mcpServer.AddTool(
-		mcp.NewTool("logs_stats",
+		mcp.NewTool(
+			"logs_stats",
 			mcp.WithReadOnlyHintAnnotation(true),
 			mcp.WithDescription("Get statistics about erigon or torrent logs"),
 			mcp.WithString("log_type", mcp.Description("Log type: 'erigon' or 'torrent' (default: erigon)")),

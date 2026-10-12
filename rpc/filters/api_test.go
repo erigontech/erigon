@@ -196,7 +196,8 @@ func TestUnmarshalJSONNewFilterArgs(t *testing.T) {
 		t.Fatalf("expected 2 topics, got %d topics", len(test7.Topics[0]))
 	}
 	if test7.Topics[0][0] != topic0 || test7.Topics[0][1] != topic1 {
-		t.Fatalf("invalid topics expected [%x,%x], got [%x,%x]",
+		t.Fatalf(
+			"invalid topics expected [%x,%x], got [%x,%x]",
 			topic0, topic1, test7.Topics[0][0], test7.Topics[0][1],
 		)
 	}

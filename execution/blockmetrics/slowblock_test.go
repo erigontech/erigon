@@ -182,8 +182,10 @@ func TestMgasPerSecWithoutTime(t *testing.T) {
 func TestStateReadIsInsideExecution(t *testing.T) {
 	t.Parallel()
 
-	rec := &Record{Validation: 20 * time.Millisecond, Commit: 4 * time.Millisecond,
-		Execution: 10 * time.Millisecond, StateHash: 5 * time.Millisecond}
+	rec := &Record{
+		Validation: 20 * time.Millisecond, Commit: 4 * time.Millisecond,
+		Execution: 10 * time.Millisecond, StateHash: 5 * time.Millisecond,
+	}
 	rec.Accounts = DomainCounts{ReadTime: 3 * time.Millisecond}
 	rec.Storage = DomainCounts{ReadTime: 2 * time.Millisecond}
 

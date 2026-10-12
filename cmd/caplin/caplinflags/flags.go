@@ -39,6 +39,7 @@ var CliFlags = []cli.Flag{
 	&CustomGenesisState,
 	&utils.DataDirFlag,
 	&utils.BeaconApiAllowCredentialsFlag,
+	&utils.BeaconApiPreserveGraffitiFlag,
 	&utils.BeaconApiAllowMethodsFlag,
 	&utils.BeaconApiAllowOriginsFlag,
 	&utils.CaplinCheckpointSyncUrlFlag,

@@ -112,7 +112,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	blockHeader := block.SignedBeaconBlockHeader().Header
 	blockHeader.Root = common.Hash{}
 	// Read the epoch and per-slot data.
-	slotData, err := state_accessors.ReadSlotData(kvGetter, slot, r.cfg)
+	slotData, err := state_accessors.ReadSlotData(kvGetter, slot)
 	if err != nil {
 		return nil, err
 	}
@@ -772,7 +772,7 @@ func (r *HistoricalStatesReader) ReconstructUint64ListDump(kvGetter state_access
 
 func (r *HistoricalStatesReader) ReadValidatorsForHistoricalState(tx kv.Tx, kvGetter state_accessors.GetValFn, slot uint64) (*solid.ValidatorSet, error) {
 	// Read the minimal beacon state which have the small fields.
-	sd, err := state_accessors.ReadSlotData(kvGetter, slot, r.cfg)
+	sd, err := state_accessors.ReadSlotData(kvGetter, slot)
 	if err != nil {
 		return nil, err
 	}
@@ -873,7 +873,7 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, kvGetter state_acc
 	}
 
 	// Read the minimal beacon state which have the small fields.
-	sd, err := state_accessors.ReadSlotData(kvGetter, slot, r.cfg)
+	sd, err := state_accessors.ReadSlotData(kvGetter, slot)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -920,7 +920,7 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, kvGetter state_acc
 			attestationEpoch := data.Slot / r.cfg.SlotsPerEpoch
 
 			mixPosition := (attestationEpoch + r.cfg.EpochsPerHistoricalVector - r.cfg.MinSeedLookahead - 1) % r.cfg.EpochsPerHistoricalVector
-			mix, err := r.ReadRandaoMixBySlotAndIndex(tx, kvGetter, data.Slot, mixPosition)
+			mix, err := r.ReadRandaoMixBySlotAndIndex(kvGetter, data.Slot, mixPosition)
 			if err != nil {
 				return false
 			}
@@ -931,7 +931,7 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, kvGetter state_acc
 				return false
 			}
 			var participationFlagsIndicies []uint8
-			participationFlagsIndicies, err = r.getAttestationParticipationFlagIndicies(tx, kvGetter, block.Version(), i, *data, i-data.Slot, true)
+			participationFlagsIndicies, err = r.getAttestationParticipationFlagIndicies(kvGetter, block.Version(), i, *data, i-data.Slot, true)
 			if err != nil {
 				return false
 			}
@@ -970,7 +970,7 @@ func (r *HistoricalStatesReader) computeRelevantEpochs(slot uint64) (uint64, uin
 }
 
 func (r *HistoricalStatesReader) ReadValidatorsBalances(tx kv.Tx, kvGetter state_accessors.GetValFn, slot uint64) (solid.Uint64ListSSZ, error) {
-	sd, err := state_accessors.ReadSlotData(kvGetter, slot, r.cfg)
+	sd, err := state_accessors.ReadSlotData(kvGetter, slot)
 	if err != nil {
 		return nil, err
 	}
@@ -988,7 +988,7 @@ func (r *HistoricalStatesReader) ReadValidatorsBalances(tx kv.Tx, kvGetter state
 	return balancesList, balancesList.DecodeSSZ(balances, 0)
 }
 
-func (r *HistoricalStatesReader) ReadRandaoMixBySlotAndIndex(tx kv.Tx, kvGetter state_accessors.GetValFn, slot, index uint64) (common.Hash, error) {
+func (r *HistoricalStatesReader) ReadRandaoMixBySlotAndIndex(kvGetter state_accessors.GetValFn, slot, index uint64) (common.Hash, error) {
 	epoch := slot / r.cfg.SlotsPerEpoch
 	epochSubIndex := epoch % r.cfg.EpochsPerHistoricalVector
 	if index == epochSubIndex {

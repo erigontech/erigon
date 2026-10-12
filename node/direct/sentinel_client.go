@@ -52,12 +52,15 @@ func (s *SentinelClientDirect) GetPeers(ctx context.Context, in *sentinelproto.E
 func (s *SentinelClientDirect) BanPeer(ctx context.Context, p *sentinelproto.Peer, opts ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
 	return s.server.BanPeer(ctx, p)
 }
+
 func (s *SentinelClientDirect) UnbanPeer(ctx context.Context, p *sentinelproto.Peer, opts ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
 	return s.server.UnbanPeer(ctx, p)
 }
+
 func (s *SentinelClientDirect) RewardPeer(ctx context.Context, p *sentinelproto.Peer, opts ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
 	return s.server.RewardPeer(ctx, p)
 }
+
 func (s *SentinelClientDirect) PenalizePeer(ctx context.Context, p *sentinelproto.Peer, opts ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
 	return s.server.PenalizePeer(ctx, p)
 }

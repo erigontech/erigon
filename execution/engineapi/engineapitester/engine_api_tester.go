@@ -31,7 +31,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
@@ -104,13 +103,9 @@ func DefaultEngineApiTesterGenesis() (*types.Genesis, *ecdsa.PrivateKey, error) 
 	if err != nil {
 		return nil, nil, fmt.Errorf("decode beacon roots code: %w", err)
 	}
-	var chainConfig chain.Config
-	err = copier.CopyWithOption(&chainConfig, chain.AllProtocolChanges, copier.Option{DeepCopy: true})
-	if err != nil {
-		return nil, nil, fmt.Errorf("copy chain config: %w", err)
-	}
+	chainConfig := chain.AllProtocolChanges.Copy()
 	genesis := &types.Genesis{
-		Config:     &chainConfig,
+		Config:     chainConfig,
 		Coinbase:   coinbaseAddr,
 		Difficulty: merge.ProofOfStakeDifficulty,
 		GasLimit:   1_000_000_000,

@@ -55,7 +55,7 @@ func aggRetire(t *testing.T, agg *Aggregator, cutoffs kv.RetireCutoffs) (int, er
 	t.Helper()
 	at := agg.BeginFilesRo()
 	defer at.Close()
-	return at.Retire(t.Context(), cutoffs)
+	return at.Retire(cutoffs)
 }
 
 // generateStandaloneIIFile writes mock .ef/.efi files for an inverted index
@@ -110,7 +110,7 @@ func TestRetire_RetiresFrozenFileEntirelyBelowCutoff(t *testing.T) {
 	// pin the current generation to assert deferred (not immediate) deletion
 	at := agg.BeginFilesRo()
 
-	n, err := at.Retire(t.Context(), kv.RetireCutoffs{Default: 2 * stepSize})
+	n, err := at.Retire(kv.RetireCutoffs{Default: 2 * stepSize})
 	require.NoError(t, err)
 	require.Positive(t, n)
 
@@ -245,7 +245,7 @@ func TestRetire_StandaloneII(t *testing.T) {
 	mustExist(t, recentIdx, true)
 
 	at := agg.BeginFilesRo()
-	n, err := at.Retire(t.Context(), kv.RetireCutoffs{Default: 2 * stepSize})
+	n, err := at.Retire(kv.RetireCutoffs{Default: 2 * stepSize})
 	require.NoError(t, err)
 	require.Positive(t, n)
 	at.Close()

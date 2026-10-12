@@ -143,15 +143,13 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	// Retry AssembleBlock if the EL is busy (semaphore contention with
 	// fork choice commits). This is common in single-process dev mode
 	// where the CL and EL share the same process.
-	idBytes := make([]byte, 8)
 	id, err := retryAssembleBlock(ctx, 30, 200*time.Millisecond, func(ctx context.Context) (uint64, error) {
 		return cc.chainRW.AssembleBlock(ctx, head, attr)
 	})
 	if err != nil {
 		return nil, err
 	}
-	binary.LittleEndian.PutUint64(idBytes, id)
-	return idBytes, nil
+	return encodeDirectPayloadID(id), nil
 }
 
 func (cc *ExecutionClientDirect) StartPayloadBuild(ctx context.Context, head common.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error) {
@@ -159,9 +157,19 @@ func (cc *ExecutionClientDirect) StartPayloadBuild(ctx context.Context, head com
 	if err != nil {
 		return nil, err
 	}
+	return encodeDirectPayloadID(id), nil
+}
+
+// Direct execution-module payload IDs use little-endian uint64 encoding. Engine API payload IDs
+// are a separate wire format.
+func encodeDirectPayloadID(id uint64) []byte {
 	idBytes := make([]byte, 8)
 	binary.LittleEndian.PutUint64(idBytes, id)
-	return idBytes, nil
+	return idBytes
+}
+
+func decodeDirectPayloadID(id []byte) uint64 {
+	return binary.LittleEndian.Uint64(id)
 }
 
 func retryAssembleBlock(ctx context.Context, attempts int, delay time.Duration, assemble func(context.Context) (uint64, error)) (uint64, error) {
@@ -245,7 +253,7 @@ func (cc *ExecutionClientDirect) HasBlock(ctx context.Context, hash common.Hash)
 }
 
 func (cc *ExecutionClientDirect) GetAssembledBlock(ctx context.Context, idBytes []byte, _ clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-	return cc.chainRW.GetAssembledBlock(ctx, binary.LittleEndian.Uint64(idBytes))
+	return cc.chainRW.GetAssembledBlock(ctx, decodeDirectPayloadID(idBytes))
 }
 
 func (cc *ExecutionClientDirect) HasGapInSnapshots(ctx context.Context) bool {

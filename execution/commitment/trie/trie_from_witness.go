@@ -5,6 +5,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -86,7 +87,7 @@ func BuildTrieFromWitness(witness *Witness, trace bool) (*Trie, error) {
 		fmt.Printf("\n")
 	}
 	if !hb.hasRoot() {
-		return New(EmptyRoot), nil
+		return New(empty.RootHash), nil
 	}
 	r := hb.root()
 	tr := New(hb.rootHash())

@@ -20,9 +20,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 
-	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -33,33 +33,10 @@ const (
 )
 
 var (
-	ErrExecutionPayloadEnvelopeAdmissionBusy = errors.New("execution payload envelope admission busy")
-	ErrExecutionPayloadEnvelopeAlreadySeen   = errors.New("execution payload envelope already seen")
+	ErrExecutionPayloadEnvelopeAdmissionBusy  = errors.New("execution payload envelope admission busy")
+	ErrExecutionPayloadEnvelopeAlreadySeen    = errors.New("execution payload envelope already seen")
+	ErrExecutionPayloadEnvelopeLookupRequired = fmt.Errorf("%w: persisted envelope lookup required", ErrExecutionPayloadEnvelopeAlreadySeen)
 )
-
-type executionPayloadEnvelopeAlreadySeenError struct {
-	persisted *cltypes.SignedExecutionPayloadEnvelope
-}
-
-func (e *executionPayloadEnvelopeAlreadySeenError) Error() string {
-	return ErrExecutionPayloadEnvelopeAlreadySeen.Error()
-}
-
-func (e *executionPayloadEnvelopeAlreadySeenError) Unwrap() error {
-	return ErrExecutionPayloadEnvelopeAlreadySeen
-}
-
-func NewExecutionPayloadEnvelopeAlreadySeenError(persisted *cltypes.SignedExecutionPayloadEnvelope) error {
-	return &executionPayloadEnvelopeAlreadySeenError{persisted: persisted}
-}
-
-func PersistedExecutionPayloadEnvelopeFromAlreadySeenError(err error) (*cltypes.SignedExecutionPayloadEnvelope, bool) {
-	var persistedErr *executionPayloadEnvelopeAlreadySeenError
-	if !errors.As(err, &persistedErr) {
-		return nil, false
-	}
-	return persistedErr.persisted, true
-}
 
 type executionPayloadEnvelopeIdentity struct {
 	beaconBlockRoot common.Hash
@@ -117,19 +94,39 @@ func (a *ExecutionPayloadEnvelopeAdmissions) Claim(
 				return ExecutionPayloadEnvelopeAdmissionToken{}, ctx.Err()
 			}
 		}
-		if len(a.inflight) >= maxInflightExecutionPayloadEnvelopes {
-			a.mu.Unlock()
-			return ExecutionPayloadEnvelopeAdmissionToken{}, fmt.Errorf("%w: too many execution payload envelopes are being published", ErrExecutionPayloadEnvelopeAdmissionBusy)
-		}
-		if a.inflight == nil {
-			a.inflight = make(map[executionPayloadEnvelopeIdentity]executionPayloadEnvelopeAdmission)
-		}
-		a.nextID++
-		id := a.nextID
-		a.inflight[identity] = executionPayloadEnvelopeAdmission{id: id, done: make(chan struct{})}
+		token, err := a.startClaimLocked(identity)
 		a.mu.Unlock()
-		return ExecutionPayloadEnvelopeAdmissionToken{identity: identity, id: id}, nil
+		return token, err
 	}
+}
+
+func (a *ExecutionPayloadEnvelopeAdmissions) TryClaim(
+	beaconBlockRoot common.Hash,
+	builderIndex uint64,
+) (ExecutionPayloadEnvelopeAdmissionToken, error) {
+	identity := executionPayloadEnvelopeIdentity{beaconBlockRoot: beaconBlockRoot, builderIndex: builderIndex}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if _, ok := a.seen[identity]; ok {
+		return ExecutionPayloadEnvelopeAdmissionToken{}, ErrExecutionPayloadEnvelopeAlreadySeen
+	}
+	if _, ok := a.inflight[identity]; ok {
+		return ExecutionPayloadEnvelopeAdmissionToken{}, fmt.Errorf("%w: execution payload envelope already being published", ErrExecutionPayloadEnvelopeAdmissionBusy)
+	}
+	return a.startClaimLocked(identity)
+}
+
+func (a *ExecutionPayloadEnvelopeAdmissions) startClaimLocked(identity executionPayloadEnvelopeIdentity) (ExecutionPayloadEnvelopeAdmissionToken, error) {
+	if len(a.inflight) >= maxInflightExecutionPayloadEnvelopes {
+		return ExecutionPayloadEnvelopeAdmissionToken{}, fmt.Errorf("%w: too many execution payload envelopes are being published", ErrExecutionPayloadEnvelopeAdmissionBusy)
+	}
+	if a.inflight == nil {
+		a.inflight = make(map[executionPayloadEnvelopeIdentity]executionPayloadEnvelopeAdmission)
+	}
+	a.nextID++
+	id := a.nextID
+	a.inflight[identity] = executionPayloadEnvelopeAdmission{id: id, done: make(chan struct{})}
+	return ExecutionPayloadEnvelopeAdmissionToken{identity: identity, id: id}, nil
 }
 
 func (a *ExecutionPayloadEnvelopeAdmissions) removeWaiter(identity executionPayloadEnvelopeIdentity, admissionID uint64) {
@@ -169,4 +166,23 @@ func (a *ExecutionPayloadEnvelopeAdmissions) Finish(token ExecutionPayloadEnvelo
 		a.seenFIFO = append(a.seenFIFO, token.identity)
 	}
 	a.seen[token.identity] = struct{}{}
+}
+
+func (a *ExecutionPayloadEnvelopeAdmissions) ForgetSeen(beaconBlockRoot common.Hash, builderIndex uint64) {
+	identity := executionPayloadEnvelopeIdentity{beaconBlockRoot: beaconBlockRoot, builderIndex: builderIndex}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if _, ok := a.seen[identity]; !ok {
+		return
+	}
+	delete(a.seen, identity)
+	start := 0
+	if len(a.seenFIFO) == maxSeenExecutionPayloadEnvelopes {
+		start = a.seenNext
+	}
+	ordered := slices.Concat(a.seenFIFO[start:], a.seenFIFO[:start])
+	a.seenFIFO = slices.DeleteFunc(ordered, func(entry executionPayloadEnvelopeIdentity) bool {
+		return entry == identity
+	})
+	a.seenNext = 0
 }

@@ -17,8 +17,9 @@
 package sentinel
 
 import (
+	"bytes"
 	"errors"
-	"sync"
+	"fmt"
 	"testing"
 	"time"
 
@@ -28,10 +29,14 @@ import (
 	"github.com/libp2p/go-libp2p/core/metrics"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/p2p/net/swarm"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
+	"github.com/erigontech/erigon/common/log/v3"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/p2p/discover"
 )
 
@@ -40,34 +45,34 @@ type stubP2P struct{ host host.Host }
 
 func (s stubP2P) Pubsub() *pubsub.PubSub                       { return nil }
 func (s stubP2P) Host() host.Host                              { return s.host }
+func (s stubP2P) SetDialPolicy(func(peer.ID) bool)             {}
 func (s stubP2P) BandwidthCounter() *metrics.BandwidthCounter  { return nil }
 func (s stubP2P) UDPv5Listener() *discover.UDPv5               { return nil }
 func (s stubP2P) UpdateENRAttSubnets(subnetIndex int, on bool) {}
 func (s stubP2P) UpdateENRSyncNets(subnetIndex int, on bool)   {}
 
-// testPeerPool is shared package-wide because every peers.NewPool starts two TTL-cache cleanup
-// goroutines that the upstream cache offers no way to stop. Sharing is safe because each test
-// creates its own hosts, so no two tests touch the same peer ID, and it carries no host because
-// nothing in this package reaches Pool.Request, the only method that needs one.
-var testPeerPool = sync.OnceValue(func() *peers.Pool { return peers.NewPool(nil) })
-
 func testSentinel(t *testing.T, h host.Host) *Sentinel {
 	t.Helper()
 	return &Sentinel{
-		peers: testPeerPool(),
-		p2p:   stubP2P{host: h},
-		cfg:   &SentinelConfig{P2PConfig: p2p.P2PConfig{MaxPeerCount: 100}},
+		peers:  peers.NewPool(h),
+		p2p:    stubP2P{host: h},
+		cfg:    &SentinelConfig{P2PConfig: p2p.P2PConfig{MaxPeerCount: 100}},
+		logger: log.New(),
 	}
 }
 
 // connectedPair returns a host acting as the local node and a peer connected to it.
 func connectedPair(t *testing.T) (host.Host, host.Host) {
+	return connectedPairWithListenAddr(t, "/ip4/127.0.0.1/tcp/0")
+}
+
+func connectedPairWithListenAddr(t *testing.T, listenAddr string) (host.Host, host.Host) {
 	t.Helper()
 	local, err := libp2p.New(libp2p.NoListenAddrs)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = local.Close() })
 
-	remote, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	remote, err := libp2p.New(libp2p.ListenAddrStrings(listenAddr))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = remote.Close() })
 
@@ -87,16 +92,12 @@ func waitDisconnected(t *testing.T, local host.Host, pid peer.ID) {
 	}
 }
 
-// ConnectWithPeer consults the ban list, but it only covers dials we initiate. A peer banned
-// for repeated handshake failures reconnects and its connection event must close it rather
-// than run another status handshake — otherwise the ban never takes effect on inbound
-// connections and the peer is handshaked again on every reconnect.
 func TestBannedPeerIsClosedInsteadOfHandshaked(t *testing.T) {
 	local, remote := connectedPair(t)
 	s := testSentinel(t, local)
 	s.peers.SetBanStatus(remote.ID(), true)
 
-	kept := s.handleNewConnection(remote.ID(), func() (bool, error) {
+	kept := s.handleNewConnection(remote.ID(), network.DirUnknown, nil, func() (bool, error) {
 		t.Error("a banned peer must not be handshaked")
 		return false, nil
 	})
@@ -118,35 +119,134 @@ func TestOnConnectionClosesABannedPeer(t *testing.T) {
 	waitDisconnected(t, local, remote.ID())
 }
 
-// Three handshake failures ban the peer, and the ban must then be honoured: the storm this
-// fixes was one peer handshaked repeatedly because its failures were recorded and never read.
-func TestRepeatedHandshakeFailuresStopBeingHandshaked(t *testing.T) {
+func TestOnConnectionLogsActualTransport(t *testing.T) {
+	tests := []struct {
+		name       string
+		listenAddr string
+		transport  string
+	}{
+		{name: "TCP", listenAddr: "/ip4/127.0.0.1/tcp/0", transport: "tcp"},
+		{name: "QUIC", listenAddr: "/ip4/127.0.0.1/udp/0/quic-v1", transport: "quic"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			local, remote := connectedPairWithListenAddr(t, tt.listenAddr)
+			s := testSentinel(t, local)
+			s.peers.SetBanStatus(remote.ID(), true)
+			var output bytes.Buffer
+			s.logger = log.New()
+			s.logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
+
+			conns := local.Network().ConnsToPeer(remote.ID())
+			require.NotEmpty(t, conns)
+			conn := conns[0]
+			s.onConnection(local.Network(), conn)
+			waitDisconnected(t, local, remote.ID())
+
+			logs := output.String()
+			require.Contains(t, logs, fmt.Sprintf("peer=%s", remote.ID()))
+			require.Contains(t, logs, "direction=Outbound")
+			require.Contains(t, logs, fmt.Sprintf("addr=%s", conn.RemoteMultiaddr()))
+			require.Contains(t, logs, fmt.Sprintf("transport=%s", tt.transport))
+			require.Contains(t, logs, "Closing refused peer connection")
+		})
+	}
+}
+
+func TestRepeatedHandshakeFailuresStopOutboundDials(t *testing.T) {
 	local, remote := connectedPair(t)
 	s := testSentinel(t, local)
 
-	validations := 0
 	failing := func() (bool, error) {
-		validations++
 		return false, errors.New("stream reset")
 	}
 
 	for range 3 {
-		require.True(t, s.handleNewConnection(remote.ID(), failing),
+		require.True(t, s.handleNewConnection(remote.ID(), network.DirUnknown, nil, failing),
 			"a transport error keeps the peer: it may still serve gossip")
 	}
-	require.Equal(t, 3, validations)
-	require.True(t, s.peers.BanStatus(remote.ID()), "three handshake failures must ban the peer")
-
-	require.False(t, s.handleNewConnection(remote.ID(), failing))
-	require.Equal(t, 3, validations, "a banned peer must not be handshaked again")
+	require.NoError(t, local.Network().ClosePeer(remote.ID()))
 	waitDisconnected(t, local, remote.ID())
+	require.False(t, s.peers.Dialable(remote.ID()))
+
+	err := s.ConnectWithPeer(t.Context(), peer.AddrInfo{ID: remote.ID(), Addrs: remote.Addrs()}, nil)
+	require.EqualError(t, err, "peer is not dialable")
+	require.Equal(t, network.NotConnected, local.Network().Connectedness(remote.ID()))
 }
 
-// Each pool leaves two cleanup goroutines running for the rest of the process, so building one
-// per test makes the count grow with the size of the suite.
-func TestFixtureReusesOnePeerPool(t *testing.T) {
-	local, _ := connectedPair(t)
-	require.Same(t, testSentinel(t, local).peers, testSentinel(t, local).peers)
+func TestNewInstallsDialPolicy(t *testing.T) {
+	ethClock := getEthClock(t)
+	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
+	manager := newTestP2PManager(t, ethClock)
+	sentinel, err := New(t.Context(), &SentinelConfig{
+		P2PConfig: p2p.P2PConfig{
+			NetworkConfig: networkConfig,
+			BeaconConfig:  beaconConfig,
+			MaxPeerCount:  100,
+		},
+	}, ethClock, nil, nil, nil, log.New(), nil, nil, nil, manager)
+	require.NoError(t, err)
+	t.Cleanup(sentinel.cancel)
+
+	remote, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, remote.Close()) })
+	for range 3 {
+		sentinel.peers.RecordHandshakeFailure(remote.ID())
+	}
+	require.False(t, sentinel.peers.Dialable(remote.ID()))
+
+	err = sentinel.Host().Connect(t.Context(), peer.AddrInfo{ID: remote.ID(), Addrs: remote.Addrs()})
+	require.ErrorIs(t, err, swarm.ErrGaterDisallowedConnection)
+	require.Equal(t, network.NotConnected, sentinel.Host().Network().Connectedness(remote.ID()))
+}
+
+func TestHandshakeFailuresDoNotRefuseThePeersLaterConnection(t *testing.T) {
+	local, remote := connectedPair(t)
+	s := testSentinel(t, local)
+
+	failing := func() (bool, error) {
+		return false, errors.New("stream reset")
+	}
+	for range 3 {
+		require.True(t, s.handleNewConnection(remote.ID(), network.DirUnknown, nil, failing))
+	}
+
+	validated := false
+	require.True(t, s.handleNewConnection(remote.ID(), network.DirUnknown, nil, func() (bool, error) {
+		validated = true
+		return true, nil
+	}))
+	require.True(t, validated)
+	require.Equal(t, network.Connected, local.Network().Connectedness(remote.ID()))
+	require.True(t, s.peers.Dialable(remote.ID()))
+}
+
+func TestHandshakeFailuresRefuseConnectionsAtLimit(t *testing.T) {
+	local, remote := connectedPair(t)
+	s := testSentinel(t, local)
+	failing := func() (bool, error) {
+		return false, errors.New("stream reset")
+	}
+	for range 9 {
+		require.True(t, s.handleNewConnection(remote.ID(), network.DirInbound, nil, failing))
+	}
+	require.Equal(t, network.Connected, local.Network().Connectedness(remote.ID()))
+
+	tenthHandshakeCalled := false
+	require.False(t, s.handleNewConnection(remote.ID(), network.DirInbound, nil, func() (bool, error) {
+		tenthHandshakeCalled = true
+		return false, errors.New("stream reset")
+	}))
+	require.True(t, tenthHandshakeCalled)
+	waitDisconnected(t, local, remote.ID())
+
+	followingHandshakeCalled := false
+	require.False(t, s.handleNewConnection(remote.ID(), network.DirInbound, nil, func() (bool, error) {
+		followingHandshakeCalled = true
+		return true, nil
+	}))
+	require.False(t, followingHandshakeCalled)
 }
 
 // A peer that is not banned still reaches its handshake and is kept.
@@ -155,7 +255,7 @@ func TestUnbannedPeerIsHandshakedAndKept(t *testing.T) {
 	s := testSentinel(t, local)
 
 	validations := 0
-	require.True(t, s.handleNewConnection(remote.ID(), func() (bool, error) {
+	require.True(t, s.handleNewConnection(remote.ID(), network.DirUnknown, nil, func() (bool, error) {
 		validations++
 		return true, nil
 	}))

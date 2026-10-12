@@ -67,7 +67,7 @@ import (
 	"github.com/erigontech/erigon/node/paths"
 	"github.com/erigontech/erigon/p2p/nat"
 
-	_ "github.com/erigontech/erigon/db/snaptype2" //hack
+	_ "github.com/erigontech/erigon/db/snaptype2" // hack
 )
 
 func main() {
@@ -113,7 +113,7 @@ var (
 
 var cobraFlagValues struct {
 	webseeds string
-	//preverifiedSource string
+	// preverifiedSource string
 	datadir      string
 	chainTomlURL string
 }
@@ -358,8 +358,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 		return fmt.Errorf("new server: %w", err)
 	}
 
-	// I'm kinda curious... but it was false before.
-	d.InitBackgroundLogger(true)
+	d.InitBackgroundLogger()
 	if seedbox {
 		var downloadItems []*downloaderproto.DownloadItem
 		snapCfg := snapcfg.KnownCfgOrDevnet(chain)
@@ -406,10 +405,7 @@ var printTorrentHashes = &cobra.Command{
 	Example: "go run ./cmd/downloader torrent_hashes --datadir <your_datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "downloader")
-		if err := doPrintTorrentHashes(cmd.Context(), logger); err != nil {
-			log.Error(err.Error())
-		}
-		return nil
+		return doPrintTorrentHashes(cmd.Context(), logger)
 	},
 }
 
@@ -481,6 +477,7 @@ var torrentCat = &cobra.Command{
 		return err
 	},
 }
+
 var torrentClean = &cobra.Command{
 	Use:     "torrent_clean",
 	Short:   "RemoveFile all .torrent files from datadir directory",
@@ -541,7 +538,7 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 	if len(webseedsList) == 0 { // fallback to default if exact list not passed
 		if known, ok := snapcfg.GetEmbeddedWebseeds(chain); ok {
 			for _, s := range known {
-				//TODO: enable validation of this buckets also. skipping to make CI useful.
+				// TODO: enable validation of this buckets also. skipping to make CI useful.
 				if strings.Contains(s, "erigon2-v2") {
 					continue
 				}
@@ -605,7 +602,7 @@ func manifest(ctx context.Context, logger log.Logger) error {
 		//".kv", ".kvi", ".bt", ".kvei", // e3 domain
 		//".v", ".vi", //e3 hist
 		//".ef", ".efi", //e3 idx
-		".txt", //salt-state.txt, salt-blocks.txt, manifest.txt
+		".txt", // salt-state.txt, salt-blocks.txt, manifest.txt
 	}
 	l, _ := dir.ListFiles(dirs.Snap, extList...)
 	for _, fPath := range l {
@@ -696,7 +693,7 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 		logger.Info("amount of lines in target file is equal or greater than amount of lines in snapshot dir", "old", len(oldLines), "new", len(res))
 		return nil
 	}
-	if err := os.WriteFile(targetFile, serialized, 0644); err != nil { // nolint
+	if err := os.WriteFile(targetFile, serialized, 0o644); err != nil { // nolint
 		return err
 	}
 	return nil

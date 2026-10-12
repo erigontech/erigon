@@ -265,7 +265,7 @@ func TestBlobBackfillDenebEmptyResponsesBackOffWithoutProgress(t *testing.T) {
 	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
 	request, err := BlobsIdentifiersFromBlocks([]*cltypes.SignedBeaconBlock{block}, &clparams.MainnetBeaconConfig)
 	require.NoError(t, err)
-	batch, err := newDenebRecoveryBatch([]*cltypes.SignedBeaconBlock{block}, request)
+	batch, err := newDenebRecoveryBatch(rootedBlocks(t, block), request)
 	require.NoError(t, err)
 
 	ticks := make(chan time.Time)

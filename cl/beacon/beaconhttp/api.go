@@ -47,8 +47,8 @@ type EndpointError struct {
 }
 
 var (
-	ErrorCantFindBeaconState = errors.New("Could not find beacon state")
-	ErrorSszNotSupported     = errors.New("This endpoint does not support SSZ response")
+	ErrorCantFindBeaconState = errors.New("could not find beacon state")
+	ErrorSszNotSupported     = errors.New("this endpoint does not support SSZ response")
 )
 
 func WrapEndpointError(err error) *EndpointError {
@@ -129,7 +129,7 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 				endpointError.WriteTo(w)
 			} else {
 				// Failsafe: If the error is nil, write a generic 500 error
-				NewEndpointError(http.StatusInternalServerError, errors.New("Internal Server Error")).WriteTo(w)
+				NewEndpointError(http.StatusInternalServerError, errors.New("internal server error")).WriteTo(w)
 			}
 			return
 		}

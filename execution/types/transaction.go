@@ -498,6 +498,9 @@ type Message struct {
 	isFree           bool
 	blobHashes       []common.Hash
 	authorizations   []Authorization
+	dynamicFeeArgs   bool
+
+	skipExecutionGasCap bool
 }
 
 func NewMessage(from accounts.Address, to accounts.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
@@ -546,6 +549,7 @@ func (m *Message) Authorizations() []Authorization { return m.authorizations }
 func (m *Message) SetBlobVersionedHashes(blobHashes []common.Hash) {
 	m.blobHashes = blobHashes
 }
+
 func (m *Message) SetAuthorizations(authorizations []Authorization) {
 	m.authorizations = authorizations
 }
@@ -561,6 +565,20 @@ func (m *Message) CheckGas() bool { return m.checkGas }
 func (m *Message) SetCheckGas(checkGas bool) {
 	m.checkGas = checkGas
 }
+func (m *Message) SkipExecutionGasCap() bool { return m.skipExecutionGasCap }
+func (m *Message) SetSkipExecutionGasCap(skip bool) {
+	m.skipExecutionGasCap = skip
+}
+
+// DynamicFeeArgs reports whether the message was built from call arguments that name
+// maxFeePerGas or maxPriorityFeePerGas, even as zero. A transaction is checked against
+// its fork by AsMessage instead.
+func (m *Message) DynamicFeeArgs() bool { return m.dynamicFeeArgs }
+
+func (m *Message) SetDynamicFeeArgs(dynamicFeeArgs bool) {
+	m.dynamicFeeArgs = dynamicFeeArgs
+}
+
 func (m *Message) IsFree() bool { return m.isFree }
 func (m *Message) SetIsFree(isFree bool) {
 	m.isFree = isFree

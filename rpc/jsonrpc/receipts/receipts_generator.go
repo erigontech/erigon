@@ -76,13 +76,13 @@ type ReceiptEnv struct {
 }
 
 var (
-	receiptsCacheLimit      = dbg.EnvInt("R_LRU", 1024) //ethmainnet: 1K receipts is ~200mb RAM
+	receiptsCacheLimit      = dbg.EnvInt("R_LRU", 1024) // ethmainnet: 1K receipts is ~200mb RAM
 	receiptsCacheTrace      = dbg.EnvBool("R_LRU_TRACE", false)
 	receiptsExecConcurrency = dbg.EnvInt("R_EXEC_CONCURRENCY", max(1, runtime.GOMAXPROCS(0)/2))
 )
 
 func NewGenerator(dirs datadir.Dirs, blockReader dbservices.FullBlockReader, engine rules.EngineReader, stateCache kvcache.Cache, evmTimeout time.Duration, filters ...*rpchelper.Filters) *Generator {
-	receiptsCache, err := lru.New[common.Hash, types.Receipts](receiptsCacheLimit) //TODO: is handling both of them a good idea though...?
+	receiptsCache, err := lru.New[common.Hash, types.Receipts](receiptsCacheLimit) // TODO: is handling both of them a good idea though...?
 	if err != nil {
 		panic(err)
 	}
@@ -194,7 +194,6 @@ func readPersistedReceipt(tx kv.TemporalTx, blockNum uint64, blockHash, txnHash 
 func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *chain.Config, tx kv.TemporalTx, txIndex int) (*ReceiptEnv, error) {
 	txNumsReader := g.blockReader.TxnumReader()
 	ibs, _, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, header, cfg, g.blockReader, g.stateCache, txNumsReader, tx, txIndex)
-
 	if err != nil {
 		return nil, fmt.Errorf("ReceiptsGen: PrepareEnv: bn=%d, %w", header.Number.Uint64(), err)
 	}
@@ -253,7 +252,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 	calculatePostState := postState != nil
 
-	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
+	// if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
 	var receiptFromDB, receipt *types.Receipt
 	var firstLogIndex, logIdxAfterTx uint32
 	var cumGasUsed uint64
@@ -342,10 +341,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 		ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 		defer cancel()
-		go func() {
-			<-ctx.Done()
-			evm.Cancel()
-		}()
+		defer context.AfterFunc(ctx, evm.Cancel)()
 
 		status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, genEnv.gp, evm, header, genEnv.ibs)
 		if err != nil {
@@ -391,10 +387,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			evm = protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vm.Config{})
 			ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 			defer cancel()
-			go func() {
-				<-ctx.Done()
-				evm.Cancel()
-			}()
+			defer context.AfterFunc(ctx, evm.Cancel)()
 
 			// re-run previous txs of the blocks
 			for txnIndex := range index {
@@ -426,10 +419,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		evm = protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vm.Config{})
 		ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 		defer cancel()
-		go func() {
-			<-ctx.Done()
-			evm.Cancel()
-		}()
+		defer context.AfterFunc(ctx, evm.Cancel)()
 
 		receipt, err = protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, vm.Config{}, evm)
 		if err != nil {
@@ -506,7 +496,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	blockHash := block.Hash()
 	blockNum := block.NumberU64()
 
-	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
+	// if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
 	var receiptsFromDB types.Receipts
 	receipts := make(types.Receipts, len(block.Transactions()))
 	defer func() {
@@ -625,27 +615,10 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			}
 
 			evm := protocol.CreateEVM(cfg, hashFn, g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vmCfg)
-			// txDone is a cancellation bridge: a goroutine watches for context
-			// cancellation (e.g. RPC timeout) and calls evm.Cancel() to abort the
-			// EVM mid-execution. Closing txDone signals that the transaction
-			// completed normally, so the goroutine can exit without cancelling.
-			// txDone signals the cancel-watcher goroutine to exit once the
-			// transaction finishes normally. Without it, the goroutine would
-			// leak (blocked on ctx.Done) for every successfully executed tx.
-			// On context cancellation, evm.Cancel() aborts the EVM mid-opcode
-			// so even gas-heavy transactions respond to RPC timeouts promptly.
-			txDone := make(chan struct{})
-			go func() {
-				select {
-				case <-ctx.Done():
-					evm.Cancel()
-				case <-txDone:
-				}
-			}()
-
 			genEnv.ibs.SetTxContext(blockNum, i)
-			receipt, err := protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, vmCfg, evm)
-			close(txDone)
+			receipt, err := applyCancellable(ctx, evm, func() (*types.Receipt, error) {
+				return protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, vmCfg, evm)
+			})
 			if err != nil {
 				return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", block.NumberU64(), i, err)
 			}
@@ -813,4 +786,12 @@ func (g *Generator) computeCommitmentFromStateHistory(ctx context.Context, tx kv
 	}
 	baseBlockNum := blockNum - 1
 	return g.commitmentReplay.ComputeCustomCommitmentFromStateHistory(ctx, tx, baseBlockNum, receiptComputeCommitment)
+}
+
+// applyCancellable runs apply with the EVM wired to ctx: a cancelled context aborts it
+// mid-opcode, so a gas-heavy transaction does not run on after the caller has given up. The
+// callback is deregistered when apply returns, which a defer in the caller's loop would not do.
+func applyCancellable(ctx context.Context, evm *vm.EVM, apply func() (*types.Receipt, error)) (*types.Receipt, error) {
+	defer context.AfterFunc(ctx, evm.Cancel)()
+	return apply()
 }
