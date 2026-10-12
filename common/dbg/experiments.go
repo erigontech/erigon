@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/metrics"
 	"runtime/pprof"
 	"strings"
 	"sync"
@@ -194,6 +195,17 @@ func ReadMemStats(m *runtime.MemStats) {
 		return
 	}
 	runtime.ReadMemStats(m)
+}
+
+// MemUsage returns MemStats.Alloc and MemStats.Sys without the stop-the-world
+// of runtime.ReadMemStats, so it is cheap enough for per-block logs.
+func MemUsage() (alloc, sys uint64) {
+	s := []metrics.Sample{
+		{Name: "/memory/classes/heap/objects:bytes"},
+		{Name: "/memory/classes/total:bytes"},
+	}
+	metrics.Read(s)
+	return s[0].Value.Uint64(), s[1].Value.Uint64()
 }
 
 func DiscardCommitment() bool       { return discardCommitment }
