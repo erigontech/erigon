@@ -1405,13 +1405,13 @@ func TestRoTxsLimiterUnderContention(t *testing.T) {
 	for w := range workers {
 		wg.Go(func() {
 			for i := range rounds {
-				ctx := t.Context()
+				ctx, cancel := t.Context(), func() {}
 				if (w+i)%7 == 0 {
-					var cancel context.CancelFunc
 					ctx, cancel = context.WithTimeout(ctx, time.Microsecond)
-					defer cancel()
 				}
-				if l.Acquire(ctx) != nil {
+				err := l.Acquire(ctx)
+				cancel()
+				if err != nil {
 					continue
 				}
 				n := held.Add(1)
