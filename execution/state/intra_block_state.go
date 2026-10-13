@@ -1219,12 +1219,9 @@ func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
 // existing-empty account is not gas-equivalent to a non-existent one. Non-Done
 // cells (racing worker estimates) and destroyed accounts return ok=false.
 func (ibs *IntraBlockState) synthesizeCreatedAccountBase(addr accounts.Address) (*accounts.Account, bool) {
-	if ibs.versionMap == nil || ibs.versionMap.load(addr) == nil {
-		return nil, false
-	}
 	// No cell for the address means every probe below misses, so the account
 	// this builds would be thrown away.
-	if ibs.versionMap.load(addr) == nil {
+	if ibs.versionMap == nil || ibs.versionMap.load(addr) == nil {
 		return nil, false
 	}
 	// A definitive nil record read means this tx already consumed the account's
