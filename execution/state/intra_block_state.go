@@ -3346,14 +3346,11 @@ func (ibs *IntraBlockState) versionedWriteSelfDestruct(addr accounts.Address) (b
 	if ibs.versionMap == nil {
 		return false, false
 	}
-	vw, ok := ibs.versionedWrites.GetSelfDestruct(addr)
-	if !ok {
+	r := ibs.versionedReads.dirtyRec(addr)
+	if r == nil || r.wSelfDestruct == nil {
 		return false, false
 	}
-	if _, isDirty := ibs.journal.dirties[addr]; !isDirty {
-		return false, false
-	}
-	return vw.Val, true
+	return r.wSelfDestruct.Val, true
 }
 
 // versionedWriteCreateContract reports whether this tx's own writes created a
@@ -3363,14 +3360,11 @@ func (ibs *IntraBlockState) versionedWriteCreateContract(addr accounts.Address) 
 	if ibs.versionMap == nil {
 		return false, false
 	}
-	if _, isDirty := ibs.journal.dirties[addr]; !isDirty {
+	r := ibs.versionedReads.dirtyRec(addr)
+	if r == nil || r.wCreateContract == nil {
 		return false, false
 	}
-	vw, ok := ibs.versionedWrites.GetCreateContract(addr)
-	if !ok {
-		return false, false
-	}
-	return vw.Val, true
+	return r.wCreateContract.Val, true
 }
 
 // reconstructCellFlags stamps the transient (uncached) stateObject's
@@ -3382,16 +3376,16 @@ func (ibs *IntraBlockState) reconstructCellFlags(obj *stateObject, addr accounts
 	if obj == nil {
 		return
 	}
-	if _, isDirty := ibs.journal.dirties[addr]; isDirty {
-		if vw, ok := ibs.versionedWrites.GetCreateContract(addr); ok && vw.Val {
+	if r := ibs.versionedReads.dirtyRec(addr); r != nil {
+		if r.wCreateContract != nil && r.wCreateContract.Val {
 			obj.createdContract = true
 		}
 		// An own AddressPath write means this tx created the account: createObject is
 		// the only writer, and reverting a creation drops or restores the write.
-		if _, ok := ibs.versionedWrites.GetAddress(addr); ok {
+		if r.wAddress != nil {
 			obj.newlyCreated = true
 		}
-		if vw, ok := ibs.versionedWrites.GetSelfDestruct(addr); ok && vw.Val {
+		if r.wSelfDestruct != nil && r.wSelfDestruct.Val {
 			obj.selfdestructed = true
 		}
 		// The AddressPath record's CodeHash can lag the Code cells, so seed the code

@@ -128,10 +128,8 @@ func (ibs *IntraBlockState) committedCodeDirect(addr accounts.Address) (accounts
 // this lets stateObject.SetCode compare against the current code (matching the
 // cached path) instead of the stale tx-start value.
 func (ibs *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts.CodeHash) (accounts.Code, error) {
-	if _, isDirty := ibs.journal.dirties[addr]; isDirty {
-		if vw, ok := ibs.versionedWrites.GetCode(addr); ok {
-			return vw.Val, nil
-		}
+	if r := ibs.versionedReads.dirtyRec(addr); r != nil && r.wCode != nil {
+		return r.wCode.Val, nil
 	}
 	if currentHash == accounts.EmptyCodeHash {
 		return accounts.Code{Hash: accounts.EmptyCodeHash}, nil

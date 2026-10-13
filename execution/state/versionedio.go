@@ -3150,6 +3150,14 @@ func (t *ioTable) clearReads() {
 	}
 }
 
+// dirtyRec returns addr's record when this tx has an unreverted write to it.
+func (t *ioTable) dirtyRec(addr accounts.Address) *acctIO {
+	if r := t.find(addr); r != nil && r.dirty > 0 {
+		return r
+	}
+	return nil
+}
+
 func (t *ioTable) isDirty(addr accounts.Address) bool {
 	r := t.find(addr)
 	return r != nil && r.dirty > 0
