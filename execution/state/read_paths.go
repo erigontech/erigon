@@ -824,12 +824,22 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		// account-field paths, else direct getStateObject fallback).
 		var so *stateObject
 		if path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath {
+			if fieldProbeMissHook != nil {
+				fieldProbeMissHook()
+			}
 			readAccount, accSource, accVersion, err := readAccountInternal(s, addr)
 			if err != nil {
 				r.err = err
 				r.outcome = outcomeReturnDefault
 				r.source = accSource
 				r.version = UnknownVersion
+				return
+			}
+			// The record may have been flushed after the field probe above,
+			// together with a field cell that supersedes the record's field.
+			if accSource == MapRead && s.versionMap.ReadStatus(addr, path, key, s.txIndex).Status() != MVReadResultNone {
+				*r = readPathResult{}
+				versionedReadCore(s, addr, path, key, commited, skipStorage, r)
 				return
 			}
 			if readAccount != nil {
@@ -949,6 +959,10 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	r.source = UnknownSource
 	r.version = UnknownVersion
 }
+
+// fieldProbeMissHook runs between a missed account-field probe and the account
+// record fallback. Tests set it to land a concurrent flush in that window.
+var fieldProbeMissHook func()
 
 // readAccountInternal performs an AddressPath versionedReadCore + typed
 // extraction of *accounts.Account.  Used internally by versionedReadCore
