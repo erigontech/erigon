@@ -454,7 +454,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		roTxsLimiter: opts.roTxsLimiter,
 		roTxPool:     make(chan *mdbx.Txn, roTxPoolSize),
 
-		txsDone: make(chan struct{}),
+		txsDone: make(chan struct{}, 1),
 		liveTxs: make(map[*MdbxTx]liveTxInfo),
 
 		syncerStop: make(chan struct{}),
@@ -552,17 +552,14 @@ type MdbxKV struct {
 	roTxPool chan *mdbx.Txn
 	opts     MdbxOpts
 	txSize   uint64
+	closed   atomic.Bool
 	path     string
 
 	syncerStop chan struct{}
 	syncerDone chan struct{} // nil when no background flush runs; closed when it has returned
 
-	// txState holds the open-tx count, with txClosed set once Close starts, so a
-	// begin checks closed and counts itself in one atomic step and read txs stay
-	// lock-free, as mdbx makes them. txsDone is closed by whoever brings it to
-	// exactly txClosed, which happens once.
-	txState atomic.Uint64
-	txsDone chan struct{}
+	txsCount atomic.Int64
+	txsDone  chan struct{} // wakes Close when txsCount drops to 0 after closed is set
 
 	// liveTxs tracks all currently-open chaindata txs so we can dump the
 	// stacks of concurrent txs when a commit observes openTxs > 1 — answering
@@ -648,21 +645,16 @@ type liveTxInfo struct {
 	stack    string
 }
 
-const txClosed = uint64(1) << 63
-
+// trackTxBegin counts the tx before it reads closed, and Close sets closed before it
+// reads the count: either the begin sees closed, or Close waits for the tx.
 func (db *MdbxKV) trackTxBegin() bool {
-	for {
-		s := db.txState.Load()
-		if s&txClosed != 0 {
-			return false
-		}
-		if db.txState.CompareAndSwap(s, s+1) {
-			return true
-		}
+	db.txsCount.Add(1)
+	if db.closed.Load() {
+		db.trackTxEnd()
+		return false
 	}
+	return true
 }
-
-func (db *MdbxKV) openTxs() uint64 { return db.txState.Load() &^ txClosed }
 
 // registerLiveTx records an open chaindata tx with its stack so concurrent-tx
 // dumps at commit time can identify it. No-op unless MDBX_TRACE_TX=true and
@@ -688,7 +680,7 @@ func (db *MdbxKV) registerLiveTx(tx *MdbxTx, readOnly bool) {
 		stack:    stack,
 	}
 	db.liveTxsMu.Unlock()
-	count := db.openTxs()
+	count := db.txsCount.Load()
 
 	db.log.Trace("MDBX_TX_OPEN", "id", id, "kind", kind, "count", count, "stack", stack)
 }
@@ -705,7 +697,7 @@ func (db *MdbxKV) unregisterLiveTx(tx *MdbxTx, event string) {
 		delete(db.liveTxs, tx)
 	}
 	db.liveTxsMu.Unlock()
-	count := db.openTxs()
+	count := db.txsCount.Load()
 
 	if !ok {
 		return
@@ -741,22 +733,23 @@ func (db *MdbxKV) dumpConcurrentTxs(committer *MdbxTx) {
 }
 
 func (db *MdbxKV) trackTxEnd() {
-	for {
-		s := db.txState.Load()
-		if s&^txClosed == 0 {
-			panic("MdbxKV: unmatched trackTxEnd")
+	n := db.txsCount.Add(-1)
+	if n < 0 {
+		panic("MdbxKV: unmatched trackTxEnd")
+	}
+	if n == 0 && db.closed.Load() {
+		select {
+		case db.txsDone <- struct{}{}:
+		default:
 		}
-		if !db.txState.CompareAndSwap(s, s-1) {
-			continue
-		}
-		if s-1 == txClosed {
-			close(db.txsDone)
-		}
-		return
 	}
 }
 
-func (db *MdbxKV) waitTxsAllDoneOnClose() { <-db.txsDone }
+func (db *MdbxKV) waitTxsAllDoneOnClose() {
+	for db.txsCount.Load() > 0 {
+		<-db.txsDone
+	}
+}
 
 // syncPoller enforces the sync deadline once writes stop: mdbx checks it only inside
 // mdbx_txn_commit and mdbx_env_sync.
@@ -782,12 +775,8 @@ func (db *MdbxKV) syncPoller(interval time.Duration) {
 // Close closes db
 // All transactions must be closed before closing the database.
 func (db *MdbxKV) Close() {
-	old := db.txState.Or(txClosed)
-	if old&txClosed != 0 {
+	if ok := db.closed.CompareAndSwap(false, true); !ok {
 		return
-	}
-	if old == 0 { // nothing open: no trackTxEnd is left to close it
-		close(db.txsDone)
 	}
 	db.waitTxsAllDoneOnClose()
 	// Only now is there nothing left to flush: stop the background flush, then take the one
@@ -1457,7 +1446,7 @@ func (tx *MdbxTx) Commit() error {
 	// investigating GC / openTxs behavior. Gated behind the same env var so
 	// production runs don't get a log line per chaindata commit.
 	if mdbxTraceTx && tx.db.opts.label == dbcfg.ChainDB {
-		openTxs := tx.db.openTxs()
+		openTxs := tx.db.txsCount.Load()
 		tx.db.opts.log.Info(
 			"[mdbx] commit",
 			"whole", latency.Whole,
