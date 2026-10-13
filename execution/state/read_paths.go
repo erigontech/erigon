@@ -340,11 +340,9 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	}
 
 	if coldReadPath(path, skipStorage) && s.versionMap.load(addr) == nil {
-		if _, resident := s.stateObjects[addr]; !resident {
-			if _, recorded := s.versionedReads.getHeader(addr, path, key); commited || !recorded {
-				s.coldRead(addr, path, key, r)
-				return
-			}
+		if _, resident := s.stateObjects[addr]; !resident && (commited || s.unreadUnwritten(addr, path, key)) {
+			s.coldRead(addr, path, key, commited, skipStorage, r)
+			return
 		}
 	}
 
@@ -958,16 +956,21 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	r.version = UnknownVersion
 }
 
-// coldReadPath reports the paths whose version-map miss on an address with no
-// cell and no resident object resolves straight from the committed state.
+// coldReadPath reports the reads whose version-map miss on an address with no
+// cell and no resident object needs nothing but the committed state; the
+// account fields resolve through the account record instead.
 func coldReadPath(path AccountPath, skipStorage bool) bool {
-	switch path {
-	case StoragePath, CodePath, CodeSizePath:
-		return true
-	case AddressPath:
-		return skipStorage
+	return skipStorage || path == StoragePath || path == CodePath || path == CodeSizePath
+}
+
+// unreadUnwritten reports that this tx has neither recorded a read of the path
+// nor written it; an own write counts only on a dirty address, as in versionedWriteHit.
+func (s *IntraBlockState) unreadUnwritten(addr accounts.Address, path AccountPath, key accounts.StorageKey) bool {
+	if _, recorded := s.versionedReads.getHeader(addr, path, key); recorded {
+		return false
 	}
-	return false
+	_, dirty := s.journal.dirties[addr]
+	return !dirty || !s.hasWrite(addr, path, key)
 }
 
 // coldReadHeader is the read versionedReadCore records for a version-map miss.
@@ -976,16 +979,19 @@ var coldReadHeader = ReadHeader{Source: StorageRead, Version: Version{TxIndex: U
 // coldRead resolves a path of an address no tx wrote a cell of: with no cell
 // and no resident object, the committed state is the answer, and the miss is
 // what validation checks the read against.
-func (s *IntraBlockState) coldRead(addr accounts.Address, path AccountPath, key accounts.StorageKey, r *readPathResult) {
-	var err error
-	switch path {
-	case AddressPath:
+func (s *IntraBlockState) coldRead(addr accounts.Address, path AccountPath, key accounts.StorageKey, commited, skipStorage bool, r *readPathResult) {
+	if skipStorage {
 		r.outcome = outcomeReturnDefault
 		r.source = UnknownSource
 		r.version = UnknownVersion
-		r.hdr = coldReadHeader
-		r.recordVR = true
+		if !commited && path != CodePath {
+			r.hdr = coldReadHeader
+			r.recordVR = true
+		}
 		return
+	}
+	var err error
+	switch path {
 	case StoragePath:
 		r.mapStorageVal, err = s.committedStorageDirect(addr, key)
 	case CodePath:
