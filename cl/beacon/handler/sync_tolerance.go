@@ -40,9 +40,6 @@ func (a *ApiHandler) refuseLaggingHead() error {
 // checkpoint get_head starts from, and when blocks more than the tolerance beyond the head were
 // imported on top of it, since get_head would have moved to them.
 func (a *ApiHandler) headLagsBehind() bool {
-	if a.syncedData.Syncing() {
-		return true
-	}
 	headRoot, headSlot, ok := a.syncedData.StateHead()
 	if !ok {
 		return true

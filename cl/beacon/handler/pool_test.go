@@ -354,7 +354,6 @@ func TestPoolV1AttestationsPublishesOnMessageEpochForkDigest(t *testing.T) {
 	messageDigest, err := messageClock.ComputeForkDigest(messageEpoch)
 	require.NoError(t, err)
 	clock.EXPECT().ComputeForkDigest(messageEpoch).Return(messageDigest, nil).Times(1)
-	syncedData.EXPECT().Syncing().Return(false).Times(1)
 	syncedData.EXPECT().StateHead().Return(common.Hash{}, uint64(0), true).Times(1)
 	syncedData.EXPECT().CommitteeCount(messageEpoch).Return(uint64(1)).Times(1)
 
@@ -419,7 +418,6 @@ func TestPoolV2AttestationsPublishesOnMessageEpochForkDigest(t *testing.T) {
 	messageDigest, err := messageClock.ComputeForkDigest(messageEpoch)
 	require.NoError(t, err)
 	clock.EXPECT().ComputeForkDigest(messageEpoch).Return(messageDigest, nil).Times(1)
-	syncedData.EXPECT().Syncing().Return(false).Times(1)
 	syncedData.EXPECT().StateHead().Return(common.Hash{}, uint64(0), true).Times(1)
 	syncedData.EXPECT().CommitteeCount(messageEpoch).Return(uint64(1)).Times(1)
 

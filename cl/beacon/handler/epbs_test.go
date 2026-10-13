@@ -473,7 +473,7 @@ func TestGetPayloadAttestationDataReportsSyncing(t *testing.T) {
 		t.Run(path, func(t *testing.T) {
 			_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 			handler.beaconChainCfg.GloasForkEpoch = 0
-			syncedData.(*sync_mock_services.MockSyncedData).EXPECT().Syncing().Return(true)
+			syncedData.(*sync_mock_services.MockSyncedData).EXPECT().StateHead().Return(common.Hash{}, uint64(0), false)
 
 			recorder := httptest.NewRecorder()
 			handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
@@ -488,7 +488,6 @@ func TestGetPayloadAttestationDataPreservesUnavailableHeadStatus(t *testing.T) {
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	handler.enableMemoizedHeadState = true
 	mockSyncedData := syncedData.(*sync_mock_services.MockSyncedData)
-	mockSyncedData.EXPECT().Syncing().Return(false)
 	mockSyncedData.EXPECT().StateHead().Return(common.Hash{}, uint64(0), false)
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/validator/payload_attestation_data?slot=64", http.NoBody)
