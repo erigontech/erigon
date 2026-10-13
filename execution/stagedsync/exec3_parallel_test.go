@@ -2040,12 +2040,28 @@ func newSchedulerTest(t *testing.T, deps map[int][]int, senders ...accounts.Addr
 	return s
 }
 
+func (s *schedulerTest) pop() (*taskVersion, bool) {
+	ctx, cancel := context.WithCancel(s.ctx)
+	cancel()
+	task, ok := s.pe.in.Next(ctx)
+	if !ok {
+		return nil, false
+	}
+	return task.(*taskVersion), true
+}
+
 func (s *schedulerTest) dispatched() *taskVersion {
 	s.t.Helper()
-	require.Positive(s.t, s.pe.in.Len())
-	task, ok := s.pe.in.Next(s.ctx)
-	require.True(s.t, ok)
-	return task.(*taskVersion)
+	tv, ok := s.pop()
+	require.True(s.t, ok, "nothing dispatched")
+	return tv
+}
+
+func (s *schedulerTest) queued() int {
+	if tv, ok := s.pop(); ok {
+		return tv.index
+	}
+	return -1
 }
 
 func (s *schedulerTest) deliver(tv *taskVersion, reads state.ReadSet, err error) {
@@ -2083,7 +2099,7 @@ func TestSameSenderSuccessorWaitsForPredecessorValidation(t *testing.T) {
 	require.Equal(t, 0, retry.index)
 	s.deliver(retry, state.ReadSet{}, nil)
 	require.True(t, s.be.validateTasks.checkComplete(1))
-	require.True(t, s.be.execTasks.checkInProgress(2), "successor not dispatched after its predecessor validated")
+	require.Equal(t, 2, s.queued(), "successor not dispatched after its predecessor validated")
 }
 
 func TestTxDependencyWaitsForBlockerValidation(t *testing.T) {
@@ -2100,7 +2116,7 @@ func TestTxDependencyWaitsForBlockerValidation(t *testing.T) {
 
 	s.deliver(first, state.ReadSet{}, nil)
 	require.True(t, s.be.validateTasks.checkComplete(1))
-	require.True(t, s.be.execTasks.checkInProgress(2), "dependent not dispatched after its blocker validated")
+	require.Equal(t, 2, s.queued(), "dependent not dispatched after its blocker validated")
 }
 
 func TestAbortDependentReleasedWhenBlockerExecutes(t *testing.T) {
@@ -2117,7 +2133,11 @@ func TestAbortDependentReleasedWhenBlockerExecutes(t *testing.T) {
 
 	s.deliver(blocker, state.ReadSet{}, nil)
 	require.False(t, s.be.validateTasks.checkComplete(1))
-	require.True(t, s.be.execTasks.checkInProgress(2), "aborted dependent not dispatched when its blocker executed")
+	require.False(t, s.be.execTasks.isBlocked(2), "aborted dependent still blocked after its blocker executed")
+	require.True(t, s.be.execTasks.checkPending(2), "aborted dependent not released when its blocker executed")
+
+	s.deliver(first, state.ReadSet{}, nil)
+	require.Equal(t, 2, s.queued(), "released dependent not dispatched once its predecessors validated")
 }
 
 func TestFrontierRetryDispatchedBeforeBatchTail(t *testing.T) {
