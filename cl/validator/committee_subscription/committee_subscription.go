@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/gossip"
 	gossipMgr "github.com/erigontech/erigon/cl/phase1/network/gossip"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
@@ -96,10 +95,4 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 		return err
 	}
 	return nil
-}
-
-// AggregateAttestation adds a verified attestation to the aggregation pool, whether or not a local
-// aggregator is assigned to its committee: block production packs these aggregates too.
-func (c *CommitteeSubscribeMgmt) AggregateAttestation(att *solid.Attestation) error {
-	return c.aggregationPool.AddAttestation(att)
 }

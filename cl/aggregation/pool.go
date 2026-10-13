@@ -27,6 +27,7 @@ type AggregationPool interface {
 	AddAttestation(att *solid.Attestation) error
 	GetAggregatationByRoot(root common.Hash) *solid.Attestation
 	GetAggregatationByRootAndCommittee(root common.Hash, committeeIndex uint64) *solid.Attestation
-	// Aggregates returns the live per-committee aggregates (Electra and later).
+	// Aggregates returns the current per-committee aggregates (Electra and later). The pool replaces
+	// an aggregate instead of changing it, so callers may keep them but must not modify them.
 	Aggregates() []*solid.Attestation
 }

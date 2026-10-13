@@ -177,9 +177,6 @@ type SignatureAggregator struct {
 
 // AddValidated adds a compressed signature that has already passed signature verification.
 func (a *SignatureAggregator) AddValidated(sig []byte) error {
-	if len(sig) != signatureLength {
-		return fmt.Errorf("bls(signature): invalid signature length. should be %d", signatureLength)
-	}
 	affine := new(blst.P2Affine).Uncompress(sig)
 	if affine == nil {
 		return ErrDeserializeSignature
@@ -190,7 +187,5 @@ func (a *SignatureAggregator) AddValidated(sig []byte) error {
 
 // Compressed returns the compressed aggregate of all added signatures.
 func (a *SignatureAggregator) Compressed() [96]byte {
-	var out [96]byte
-	copy(out[:], a.agg.ToAffine().Compress())
-	return out
+	return [96]byte(a.agg.ToAffine().Compress())
 }

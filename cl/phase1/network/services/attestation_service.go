@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/cl/aggregation"
@@ -36,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/cl/validator/committee_subscription"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
@@ -67,7 +67,7 @@ func validationEpochRange(headState *state.CachingBeaconState, highestSeenSlot, 
 type attestationService struct {
 	ctx                    context.Context
 	forkchoiceStore        forkchoice.ForkChoiceStorage
-	committeeSubscribe     committee_subscription.CommitteeSubscribe
+	aggregationPool        aggregation.AggregationPool
 	ethClock               eth_clock.EthereumClock
 	syncedDataManager      synced_data.SyncedData
 	beaconCfg              *clparams.BeaconChainConfig
@@ -76,6 +76,7 @@ type attestationService struct {
 	batchSignatureVerifier *BatchSignatureVerifier
 	// validatorAttestationSeen maps from epoch to validator index. This is used to ignore duplicate validator attestations in the same epoch.
 	validatorAttestationSeen *lru.CacheWithTTL[uint64, uint64] // validator index -> epoch
+	validatorClaimMu         sync.Mutex
 	// attestationProcessed           *lru.CacheWithTTL[[32]byte, struct{}]
 	// attestationsToBeLaterProcessed sync.Map
 }
@@ -97,7 +98,7 @@ func (a *AttestationForGossip) SetTopicForkDigest(digest common.Bytes4) {
 func NewAttestationService(
 	ctx context.Context,
 	forkchoiceStore forkchoice.ForkChoiceStorage,
-	committeeSubscribe committee_subscription.CommitteeSubscribe,
+	aggregationPool aggregation.AggregationPool,
 	ethClock eth_clock.EthereumClock,
 	syncedDataManager synced_data.SyncedData,
 	beaconCfg *clparams.BeaconChainConfig,
@@ -109,7 +110,7 @@ func NewAttestationService(
 	a := &attestationService{
 		ctx:                      ctx,
 		forkchoiceStore:          forkchoiceStore,
-		committeeSubscribe:       committeeSubscribe,
+		aggregationPool:          aggregationPool,
 		ethClock:                 ethClock,
 		syncedDataManager:        syncedDataManager,
 		beaconCfg:                beaconCfg,
@@ -368,20 +369,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		Pks:         [][]byte{pubKey[:]},
 		SendingPeer: att.Receiver,
 		F: func() {
-			start := time.Now()
-			defer monitor.ObserveAggregateAttestation(start)
-			// Claimed only now: a message dropped before its signature was
-			// verified must not consume the validator's slot for the epoch.
-			s.validatorAttestationSeen.Add(vIndex, targetEpoch)
-			if err := s.committeeSubscribe.AggregateAttestation(attestation); err != nil && !errors.Is(err, aggregation.ErrIsSuperset) {
-				log.Warn("could not check aggregate attestation", "err", err)
-			}
-			// send to subscribers
-			if att.Attestation != nil {
-				s.emitters.Operation().SendAttestation(att.Attestation)
-			} else if att.SingleAttestation != nil {
-				s.emitters.Operation().SendSingleAttestation(att.SingleAttestation)
-			}
+			s.onVerifiedAttestation(vIndex, targetEpoch, attestation, att)
 		},
 	}
 
@@ -444,4 +432,35 @@ func contains[T comparable](target T, slices []T) int {
 		}
 	}
 	return -1
+}
+
+func (s *attestationService) onVerifiedAttestation(vIndex, targetEpoch uint64, attestation *solid.Attestation, att *AttestationForGossip) {
+	start := time.Now()
+	defer monitor.ObserveAggregateAttestation(start)
+	// Claimed only now: a message dropped before its signature was
+	// verified must not consume the validator's slot for the epoch.
+	if !s.claimValidatorAttestation(vIndex, targetEpoch) {
+		return
+	}
+	if err := s.aggregationPool.AddAttestation(attestation); err != nil && !errors.Is(err, aggregation.ErrIsSuperset) && !errors.Is(err, aggregation.ErrPoolLimit) {
+		log.Warn("could not add attestation to the aggregation pool", "err", err)
+	}
+	// send to subscribers
+	if att.Attestation != nil {
+		s.emitters.Operation().SendAttestation(att.Attestation)
+	} else if att.SingleAttestation != nil {
+		s.emitters.Operation().SendSingleAttestation(att.SingleAttestation)
+	}
+}
+
+// claimValidatorAttestation records the validator's vote for the target epoch and reports whether
+// this call made the claim. Copies of one vote can pass the seen check before either is verified.
+func (s *attestationService) claimValidatorAttestation(vIndex, targetEpoch uint64) bool {
+	s.validatorClaimMu.Lock()
+	defer s.validatorClaimMu.Unlock()
+	if epoch, ok := s.validatorAttestationSeen.Get(vIndex); ok && epoch == targetEpoch {
+		return false
+	}
+	s.validatorAttestationSeen.Add(vIndex, targetEpoch)
+	return true
 }

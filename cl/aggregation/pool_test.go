@@ -124,6 +124,7 @@ func (t *PoolTestSuite) SetupTest() {
 	t.ctrl = gomock.NewController(t.T())
 	t.mockEthClock = eth_clock.NewMockEthereumClock(t.ctrl)
 	t.mockBeaconConfig = &clparams.BeaconChainConfig{
+		SlotsPerEpoch:             32,
 		MaxCommitteesPerSlot:      64,
 		MaxValidatorsPerCommittee: 2048,
 	}
@@ -475,6 +476,97 @@ func (t *PoolTestSuite) TestAddAttestationElectraKeepsAggregateOnSignatureError(
 	t.Equal(byte(0b00001001), aggregates[0].AggregationBits.Bytes()[0])
 }
 
+// electraAttestationWithSource gives each source root its own AttestationData, as an attester
+// alternating sources does.
+func (t *PoolTestSuite) electraAttestationWithSource(slot uint64, committee int, source byte) *solid.Attestation {
+	att := t.electraAttestation(slot, committee, 0b11)
+	att.Data.Source.Root = [32]byte{source}
+	return att
+}
+
+func (t *PoolTestSuite) TestAddAttestationElectraLimitsDataPerCommittee() {
+	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).DoAndReturn(func(slot uint64) uint64 { return slot / 32 }).AnyTimes()
+	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).AnyTimes()
+	t.mockEthClock.EXPECT().GetCurrentSlot().Return(uint64(1000)).AnyTimes()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := NewAggregationPool(ctx, t.mockBeaconConfig, &clparams.NetworkConfig{AttestationPropagationSlotRange: 32}, t.mockEthClock).(*aggregationPoolImpl)
+	for source := range maxDataPerCommittee {
+		att := t.electraAttestationWithSource(5, 1, byte(source))
+		att.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048*64) // two votes each
+		t.Require().NoError(pool.AddAttestation(att))
+	}
+	t.ErrorIs(pool.AddAttestation(t.electraAttestationWithSource(5, 1, 0xff)), ErrPoolLimit, "a single vote does not displace stronger data")
+	t.NoError(pool.AddAttestation(t.electraAttestationWithSource(5, 2, 0xff)), "other committees keep their own allowance")
+
+	pool.pruneStale() // current slot 1000: everything is pruned and the allowance comes back
+	t.NoError(pool.AddAttestation(t.electraAttestationWithSource(5, 1, 0xff)))
+}
+
+// Attesters voting for several data early must not lock the committee's honest data out: when the
+// committee is full, the data with the fewest votes gives way to data with at least as many.
+func (t *PoolTestSuite) TestAddAttestationElectraEvictsWeakestDataPerCommittee() {
+	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).AnyTimes()
+	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).AnyTimes()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
+	for source := range maxDataPerCommittee {
+		t.Require().NoError(pool.AddAttestation(t.electraAttestationWithSource(5, 1, byte(source))))
+	}
+	honest := func(bits byte) *solid.Attestation {
+		att := t.electraAttestationWithSource(5, 1, 0xaa)
+		att.AggregationBits = solid.BitlistFromBytes([]byte{bits}, 2048*64)
+		return att
+	}
+	t.Require().NoError(pool.AddAttestation(honest(0b1011)), "honest data displaces one single-vote entry")
+	t.Require().NoError(pool.AddAttestation(honest(0b1100)))
+	t.Require().NoError(pool.AddAttestation(t.electraAttestationWithSource(5, 1, 0xbb)), "a single vote displaces another single vote")
+
+	sources := map[byte]int{}
+	for _, att := range pool.Aggregates() {
+		sources[att.Data.Source.Root[0]]++
+	}
+	t.Len(pool.Aggregates(), maxDataPerCommittee)
+	t.Equal(1, sources[0xaa], "the honest data with the most votes survives")
+}
+
+func (t *PoolTestSuite) TestAddAttestationElectraLimitsTotalAggregates() {
+	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).AnyTimes()
+	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).AnyTimes()
+	t.mockEthClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
+	t.mockBeaconConfig.SlotsPerEpoch = 2
+	t.mockBeaconConfig.MaxCommitteesPerSlot = 2
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
+	limit := 2 * int(t.mockBeaconConfig.SlotsPerEpoch*t.mockBeaconConfig.MaxCommitteesPerSlot) * maxDataPerCommittee
+	for i := range limit {
+		t.Require().NoError(pool.AddAttestation(t.electraAttestationWithSource(uint64(i), 0, 1)))
+	}
+	t.ErrorIs(pool.AddAttestation(t.electraAttestationWithSource(uint64(limit), 0, 1)), ErrPoolLimit)
+	t.Len(pool.Aggregates(), limit)
+}
+
 func TestPool(t *testing.T) {
 	suite.Run(t, new(PoolTestSuite))
+}
+
+// Stale entries are only swept once a minute; a full pool prunes them before refusing new data.
+func (t *PoolTestSuite) TestAddAttestationElectraPrunesBeforeRefusingWhenFull() {
+	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).DoAndReturn(func(slot uint64) uint64 { return slot / 2 }).AnyTimes()
+	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).AnyTimes()
+	currentSlot := uint64(0)
+	t.mockEthClock.EXPECT().GetCurrentSlot().DoAndReturn(func() uint64 { return currentSlot }).AnyTimes()
+	t.mockBeaconConfig.SlotsPerEpoch = 2
+	t.mockBeaconConfig.MaxCommitteesPerSlot = 2
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := NewAggregationPool(ctx, t.mockBeaconConfig, &clparams.NetworkConfig{AttestationPropagationSlotRange: 32}, t.mockEthClock)
+	limit := 2 * int(t.mockBeaconConfig.SlotsPerEpoch*t.mockBeaconConfig.MaxCommitteesPerSlot) * maxDataPerCommittee
+	for i := range limit {
+		t.Require().NoError(pool.AddAttestation(t.electraAttestationWithSource(uint64(i/8), (i/4)%2, byte(i%4))))
+	}
+	currentSlot = 100 // the entries above are now outside the inclusion window
+	t.NoError(pool.AddAttestation(t.electraAttestationWithSource(100, 0, 1)))
 }
