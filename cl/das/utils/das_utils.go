@@ -4,10 +4,12 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"runtime"
 	"slices"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/holiman/uint256"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -88,41 +90,46 @@ func ComputeColumnsForCustodyGroup(custodyGroup CustodyIndex) ([]ColumnIndex, er
 }
 
 // RecoverMatrix takes a partial matrix and the total blob count and returns a complete matrix.
+// Rows are recovered in parallel: most of a row's recovery runs on a single core.
 func RecoverMatrix(partialMatrix []cltypes.MatrixEntry, blobCount uint64) ([][]cltypes.MatrixEntry, error) {
-	matrix := make([][]cltypes.MatrixEntry, 0, blobCount)
-
-	// Process each blob row
+	matrix := make([][]cltypes.MatrixEntry, blobCount)
+	var g errgroup.Group
+	g.SetLimit(runtime.GOMAXPROCS(0))
 	for blobIndex := range blobCount {
-		// Get cells and column indices for this blob row
-		var cellIndices []ColumnIndex
-		var cells []cltypes.Cell
-		for i := range partialMatrix {
-			entry := &partialMatrix[i]
-			if entry.RowIndex == blobIndex {
-				cellIndices = append(cellIndices, entry.ColumnIndex)
-				cells = append(cells, entry.Cell)
+		g.Go(func() error {
+			// Get cells and column indices for this blob row
+			var cellIndices []ColumnIndex
+			var cells []cltypes.Cell
+			for i := range partialMatrix {
+				entry := &partialMatrix[i]
+				if entry.RowIndex == blobIndex {
+					cellIndices = append(cellIndices, entry.ColumnIndex)
+					cells = append(cells, entry.Cell)
+				}
 			}
-		}
 
-		// Recover the full row of cells and proofs
-		recoveredCells, recoveredProofs, err := RecoverCellsAndKZGProofs(cellIndices, cells) // in kzg pkg
-		if err != nil {
-			return nil, fmt.Errorf("failed to recover cells and proofs for blob %d: %w", blobIndex, err)
-		}
+			// Recover the full row of cells and proofs
+			recoveredCells, recoveredProofs, err := RecoverCellsAndKZGProofs(cellIndices, cells) // in kzg pkg
+			if err != nil {
+				return fmt.Errorf("failed to recover cells and proofs for blob %d: %w", blobIndex, err)
+			}
 
-		// Add recovered entries to matrix
-		blobEntries := make([]cltypes.MatrixEntry, 0, len(recoveredCells))
-		for index := range recoveredCells {
-			blobEntries = append(blobEntries, cltypes.MatrixEntry{
-				Cell:        recoveredCells[index],
-				KzgProof:    recoveredProofs[index],
-				RowIndex:    blobIndex,
-				ColumnIndex: ColumnIndex(index),
-			})
-		}
-		matrix = append(matrix, blobEntries)
+			blobEntries := make([]cltypes.MatrixEntry, 0, len(recoveredCells))
+			for index := range recoveredCells {
+				blobEntries = append(blobEntries, cltypes.MatrixEntry{
+					Cell:        recoveredCells[index],
+					KzgProof:    recoveredProofs[index],
+					RowIndex:    blobIndex,
+					ColumnIndex: ColumnIndex(index),
+				})
+			}
+			matrix[blobIndex] = blobEntries
+			return nil
+		})
 	}
-
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
 	return matrix, nil
 }
 
