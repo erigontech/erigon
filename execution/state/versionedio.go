@@ -3105,23 +3105,27 @@ func (t *ioTable) entries() int {
 	return n
 }
 
-// maxReusedStorageAddrs bounds how many records a reused table keeps slot maps for.
+// maxReusedStorageAddrs bounds how many slot maps a reused table keeps.
 const maxReusedStorageAddrs = 64
 
 // reset keeps the slot maps of this call's records only, so the next call that
 // reads the same contracts does not regrow them, while a run of calls on
 // different contracts or one call on many cannot pin a map each.
 func (t *ioTable) reset() {
-	held := 0
+	held, maps := 0, 0
 	for i := range t.recs {
 		r := &t.recs[i]
+		if r.storage == nil && r.wStorage == nil {
+			continue
+		}
 		r.slotPeak = max(r.slotPeak, len(r.storage)+len(r.wStorage))
 		held += r.slotPeak
+		maps++
 		clear(r.storage)
 		clear(r.wStorage)
 	}
 	keep := len(t.recs)
-	if keep > maxReusedStorageAddrs || held > maxPooledEntries {
+	if maps > maxReusedStorageAddrs || held > maxPooledEntries {
 		keep = 0
 	}
 	all := t.recs[:max(t.mapped, len(t.recs))]
