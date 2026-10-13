@@ -35,9 +35,9 @@ func DefaultDBReadConcurrency() int {
 }
 
 // execPermanentReadTxs counts the long-lived read txs a parallel batch always
-// holds beyond the worker count: the extra pool worker, the exec-loop and
-// apply-loop txs, the block-loader tx and the commitment-calculator tx.
-const execPermanentReadTxs = 5
+// holds beyond its workers: the exec-loop and apply-loop txs, the block-loader
+// tx and the commitment-calculator tx.
+const execPermanentReadTxs = 4
 
 // execReadAheadTxs counts the block read-ahead txs held on non-initial applying
 // cycles — the steady tip-following mode — so they are counted with the fixed
@@ -56,7 +56,8 @@ func RoTxsLimit(dbReadConcurrency, execWorkers, parallelCommitmentReaders, warmu
 	if dbReadConcurrency > 0 {
 		limit = dbReadConcurrency
 	}
-	workerReaders := max(execWorkers, 0) + max(parallelCommitmentReaders, 0) + max(warmupWorkers, 0) + max(blockReadAheadWorkers, 0)
+	// The parallel-exec pool runs two workers per configured one.
+	workerReaders := 2*max(execWorkers, 0) + max(parallelCommitmentReaders, 0) + max(warmupWorkers, 0) + max(blockReadAheadWorkers, 0)
 	return int64(max(limit, workerReaders+execPermanentReadTxs+execReadAheadTxs+dbReadTxsReserved))
 }
 

@@ -730,7 +730,7 @@ func TestParallelExecutorWorkerPoolSize(t *testing.T) {
 		poolSize    int
 	}{
 		{workerCount: 1, poolSize: 1},
-		{workerCount: 4, poolSize: 5},
+		{workerCount: 4, poolSize: 8},
 	} {
 		t.Run(fmt.Sprintf("workers=%d", tc.workerCount), func(t *testing.T) {
 			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))

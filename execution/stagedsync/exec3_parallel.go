@@ -1808,9 +1808,11 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, func(erro
 		}
 	}
 
-	// The pool runs one worker beyond the configured count, except for a count
-	// of one (--exec.serial), which must run one transaction at a time.
-	poolSize := pe.workerCount + 1
+	// The pool runs two workers per configured one, except for a count of one
+	// (--exec.serial), which must run one transaction at a time. With more
+	// workers than cores, a block's transactions share the cores instead of
+	// leaving them idle while the last few run alone.
+	poolSize := 2 * pe.workerCount
 	if pe.workerCount <= 1 {
 		poolSize = 1
 	}
