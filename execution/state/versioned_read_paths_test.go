@@ -863,6 +863,34 @@ func TestVersionedRead_B_ColdSlotWithoutCellsMatchesCore(t *testing.T) {
 	assert.Equal(t, *uint256.NewInt(0x5a), fastV)
 }
 
+// The same for a cold code read.
+func TestVersionedRead_B_ColdCodeWithoutCellsMatchesCore(t *testing.T) {
+	t.Parallel()
+	code := []byte{0x60, 0x01, 0x60, 0x02}
+	read := func(cellElsewhere bool) (accounts.Code, VersionedRead[accounts.Code]) {
+		addr := accounts.InternAddress([20]byte{0xbd})
+		vm := NewVersionMap(nil)
+		if cellElsewhere {
+			vm.WriteBalance(addr, Version{TxIndex: 9}, *uint256.NewInt(1), true)
+		}
+		r := &refreshReader{account: &accounts.Account{Incarnation: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code))}, code: code}
+		ibs := NewWithVersionMap(r, vm)
+		defer ibs.Close()
+		ibs.SetNoMaterialize(true)
+		ibs.SetTxContext(1, 5)
+		v, _, _, err := readCode(ibs, addr)
+		require.NoError(t, err)
+		tr, ok := ibs.versionedReads.GetCode(addr)
+		require.True(t, ok, "the read is recorded")
+		return v, tr
+	}
+	fastV, fastTr := read(false)
+	coreV, coreTr := read(true)
+	assert.Equal(t, coreV, fastV)
+	assert.Equal(t, coreTr, fastTr)
+	assert.Equal(t, code, fastV.Bytes)
+}
+
 func TestVersionedRead_B_TouchReadsAnAbsentAccountOnce(t *testing.T) {
 	t.Parallel()
 	r := &refreshReader{}
