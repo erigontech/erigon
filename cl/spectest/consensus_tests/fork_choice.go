@@ -287,17 +287,6 @@ type ForkChoicePayloadStatus struct {
 type ForkChoice struct{}
 
 func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
-	// Skip GLOAS wrong_withdrawals fork choice test: the Python test generator modifies
-	// block_state.payload_expected_withdrawals at runtime (injecting a fake withdrawal)
-	// before applying the envelope, but this state modification is not captured in the
-	// serialized SSZ fixtures. The test uses identical fixtures to the valid test case,
-	// so there is no way to reproduce the expected mismatch from fixture data alone.
-	// TODO: remove if consensus-specs adds explicit fixture support for runtime state mutations.
-	if c.ForkPhaseName == "gloas" && c.HandlerName == "on_execution_payload_envelope" &&
-		c.CaseName == "on_execution_payload_envelope__wrong_withdrawals" {
-		t.Skip("fixture limitation: Python test modifies block_state.payload_expected_withdrawals at runtime; not representable in SSZ fixtures")
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel) // cancel PeerDas worker goroutines when the test finishes
 
