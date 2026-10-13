@@ -379,7 +379,7 @@ func (c *Collector) Close() {
 
 // mergeSortFiles feeds the providers' elements to loadFunc in globally sorted
 // order: sequential replay when runs don't overlap, k-way heap merge otherwise.
-func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs, runs []*sortedRun) (err error) {
+func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs, runs []*sortedRun) error {
 	for _, provider := range providers {
 		if err := provider.Wait(); err != nil {
 			return err
@@ -424,12 +424,11 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 		return nil
 	}
 
+	merge := mergeViaHeap
 	if canReplaySequentially(runs, len(providers)) {
-		err = replaySequentially(logPrefix, providers, process)
-	} else {
-		err = mergeViaHeap(logPrefix, providers, process)
+		merge = replaySequentially
 	}
-	if err != nil {
+	if err := merge(logPrefix, providers, process); err != nil {
 		return err
 	}
 
@@ -456,6 +455,7 @@ func replaySequentially(logPrefix string, providers []dataProvider, process func
 			if err := process(key, value); err != nil {
 				return err
 			}
+			var err error
 			key, value, err = provider.Next()
 			if err != nil {
 				if errors.Is(err, io.EOF) {
@@ -468,7 +468,7 @@ func replaySequentially(logPrefix string, providers []dataProvider, process func
 	return nil
 }
 
-func mergeViaHeap(logPrefix string, providers []dataProvider, process func(key, value []byte) error) (err error) {
+func mergeViaHeap(logPrefix string, providers []dataProvider, process func(key, value []byte) error) error {
 	h := &Heap{}
 	heapInit(h)
 	for i, provider := range providers {
@@ -487,6 +487,7 @@ func mergeViaHeap(logPrefix string, providers []dataProvider, process func(key, 
 		if err := process(element.Key, element.Value); err != nil {
 			return err
 		}
+		var err error
 		if element.Key, element.Value, err = provider.Next(); err == nil {
 			heapPush(h, element)
 		} else if !errors.Is(err, io.EOF) {
