@@ -406,7 +406,7 @@ func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 	// replacement generation before lifting the unwind floor, so an entry
 	// captured from the retiring generation is always judged by coherence that
 	// still carries its unwind. A replacement-generation entry judged by an old
-	// snapshot can only cause a safe miss because dropStale rechecks the current
+	// snapshot can only cause a safe miss because dropIf rechecks the current
 	// generation before removing it.
 	coh := c.coh.Snapshot()
 	lru := c.data.Load()
@@ -425,7 +425,7 @@ func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 	// tx — and must be dropped; >= not > (the surviving block's last txNum is
 	// floor-1, so this never drops a live entry).
 	if coh.IsStale(e.txNum, e.epoch) {
-		c.dropStale(h, key)
+		c.dropIf(h, key, func(e entry[T]) bool { return c.coh.IsStale(e.txNum, e.epoch) })
 		c.staleEvicted.Add(1)
 		c.misses.Add(1)
 		var zero T
@@ -538,25 +538,18 @@ func (c *GenericCache[T]) Delete(key []byte) {
 // deleteIfTxNum removes key's entry only if it is still the one stamped txNum,
 // so a fresher write survives.
 func (c *GenericCache[T]) deleteIfTxNum(key []byte, txNum uint64) {
-	h := maphash.Hash(key)
-	mu := &c.putStripes[h&(putStripeCount-1)]
-	mu.Lock()
-	defer mu.Unlock()
-	lru := c.data.Load()
-	if e, ok := lru.Get(h); ok && bytes.Equal(e.key, key) && e.txNum == txNum {
-		lru.Remove(h)
-	}
+	c.dropIf(maphash.Hash(key), key, func(e entry[T]) bool { return e.txNum == txNum })
 }
 
-// dropStale removes key's entry under its put stripe: the re-check keeps an
-// entry a concurrent put revived, and the stripe keeps the removal out of
-// generation swaps.
-func (c *GenericCache[T]) dropStale(h uint64, key []byte) {
+// dropIf removes key's entry under its put stripe if drop still holds for it:
+// the re-check keeps an entry a concurrent put revived, and the stripe keeps
+// the removal out of generation swaps.
+func (c *GenericCache[T]) dropIf(h uint64, key []byte, drop func(entry[T]) bool) {
 	mu := &c.putStripes[h&(putStripeCount-1)]
 	mu.Lock()
 	defer mu.Unlock()
 	lru := c.data.Load()
-	if e, ok := lru.Get(h); ok && bytes.Equal(e.key, key) && c.coh.IsStale(e.txNum, e.epoch) {
+	if e, ok := lru.Get(h); ok && bytes.Equal(e.key, key) && drop(e) {
 		lru.Remove(h)
 	}
 }

@@ -60,7 +60,8 @@ type StateCache struct {
 	applierMu sync.Mutex
 	// adm is what fills are admitted against. A fill re-loads it after writing
 	// and undoes its own entry if a publication, unwind or reset replaced it
-	// meanwhile, so neither side takes a lock.
+	// meanwhile, so neither side takes a lock. Writers store a new one before
+	// touching entries.
 	adm atomic.Pointer[admission]
 	// pendingEnd collects appliedEnd while a publication installs its batch.
 	pendingEnd [kv.DomainLen]uint64
@@ -84,18 +85,7 @@ type admission struct {
 	epoch uint64
 }
 
-// noAdmission is what a zero-value StateCache admits against. Writers copy it,
-// never mutate it.
-var noAdmission admission
-
-// admission returns the current admission; a zero-value StateCache has none
-// stored yet.
-func (c *StateCache) admission() *admission {
-	if a := c.adm.Load(); a != nil {
-		return a
-	}
-	return &noAdmission
-}
+func (c *StateCache) admission() *admission { return c.adm.Load() }
 
 func (a *admission) admits(viewEpoch, visibleEnd uint64, domain kv.Domain) bool {
 	return !a.publishing && viewEpoch == a.epoch && visibleEnd >= a.appliedEnd[domain]
@@ -108,6 +98,7 @@ func (a *admission) admits(viewEpoch, visibleEnd uint64, domain kv.Domain) bool 
 func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.ByteSize) *StateCache {
 	mode := stateCacheModeFromEnv()
 	sc := &StateCache{}
+	sc.adm.Store(&admission{})
 	if !dbg.EnvBool("STATE_CACHE_FILLS", true) {
 		sc.disableFills = true
 		log.Info("[cache] STATE_CACHE_FILLS=false — read fills disabled, only post-commit publication populates the cache")
@@ -437,13 +428,6 @@ func (c *StateCache) clearLocked() {
 	}
 }
 
-// admitted returns a copy of the current admission for a writer to edit and
-// store. Callers hold applierMu.
-func (c *StateCache) admitted() admission { return *c.admission() }
-
-// Writers store the new admission before touching entries: a fill that lands
-// after the store re-loads it and undoes itself.
-
 func (c *StateCache) resetForStateVersionLocked(a *admission) {
 	// Clearing entries is not enough: views bound to the previous state could
 	// otherwise refill them after continuity was lost.
@@ -471,7 +455,7 @@ func (c *StateCache) Close() {
 func (c *StateCache) unwind(unwindToTxNum uint64) {
 	c.applierMu.Lock()
 	defer c.applierMu.Unlock()
-	a := c.admitted()
+	a := *c.admission()
 	c.unwindLocked(&a, unwindToTxNum)
 }
 
@@ -495,7 +479,7 @@ func (a *admission) canAdvanceStateVersion(stateVersion uint64) bool {
 func (c *StateCache) initialize(stateVersion uint64) {
 	c.applierMu.Lock()
 	defer c.applierMu.Unlock()
-	a := c.admitted()
+	a := *c.admission()
 	if !a.canAdvanceStateVersion(stateVersion) {
 		return
 	}
@@ -508,7 +492,7 @@ func (c *StateCache) initialize(stateVersion uint64) {
 func (c *StateCache) beginPublication(sourceStateVersion, committedStateVersion, unwindToTxNum uint64,
 	hasUnwind bool,
 ) bool {
-	a := c.admitted()
+	a := *c.admission()
 	if committedStateVersion <= sourceStateVersion || !a.canAdvanceStateVersion(committedStateVersion) {
 		// PublishUnwind follows a durable commit, so its invalidation remains
 		// authoritative even when a newer cache generation rejects its updates.
@@ -534,7 +518,7 @@ func (c *StateCache) beginPublication(sourceStateVersion, committedStateVersion,
 }
 
 func (c *StateCache) finishPublication(committedStateVersion uint64) {
-	a := c.admitted()
+	a := *c.admission()
 	a.appliedEnd = c.pendingEnd
 	a.stateVersion = committedStateVersion
 	a.stateVersionKnown = true

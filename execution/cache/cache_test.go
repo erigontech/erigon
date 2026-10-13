@@ -54,7 +54,7 @@ func (c *StateCache) apply(domain kv.Domain, key, value []byte, txNum uint64) {
 	c.applierMu.Lock()
 	defer c.applierMu.Unlock()
 	// As publish does: fills see the batch begin before any entry changes.
-	a := c.admitted()
+	a := *c.admission()
 	a.publishing = true
 	c.adm.Store(&a)
 	c.pendingEnd = a.appliedEnd
@@ -1094,7 +1094,7 @@ func TestStateCache_PublicationDoesNotBlockViewBinding(t *testing.T) {
 		release: make(chan struct{}),
 		filled:  make(chan struct{}, 1),
 	}
-	sc := &StateCache{}
+	sc := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
 	sc.caches[kv.AccountsDomain] = cache
 	sc.Applier().Initialize(1)
 	existingView := sc.View(frontierAtVersion(21, 1))
