@@ -61,16 +61,13 @@ func (s *singleBlockSource) header(ctx context.Context, hash common.Hash, number
 
 func fixturePath(tb testing.TB) string {
 	tb.Helper()
-	p := os.Getenv("BLOCKREPLAY_FIXTURE")
-	if p == "" {
-		p = filepath.Join("..", "tests", "blockreplay", "testdata", "block-25604144.gob")
+	if p := os.Getenv("BLOCKREPLAY_FIXTURE"); p != "" {
+		return p
 	}
-	// The replay fixture is a large, local-only artifact (kept out of git); skip
-	// cleanly when it is absent (CI) rather than failing the benchmark.
-	if _, err := os.Stat(p); err != nil {
-		tb.Skipf("fixture %s not present: %v", p, err)
-	}
-	return p
+	// The fixture is committed to execution/blockreplay/testdata/; a missing file
+	// is a packaging regression, so callers fail loudly (via Load) rather than
+	// skip — skips also fall outside the repo's allowed test-skip cases.
+	return filepath.Join("..", "blockreplay", "testdata", "block-25604144.gob")
 }
 
 const ephemeralSeedTxNum = uint64(1) << 20
