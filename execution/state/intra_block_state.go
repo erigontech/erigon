@@ -1720,6 +1720,9 @@ func (ibs *IntraBlockState) setStateVersioned(addr accounts.Address, key account
 // SetStorage replaces the entire storage for the specified account with given
 // storage. This function should only be used for debugging.
 func (ibs *IntraBlockState) SetStorage(addr accounts.Address, storage Storage) error {
+	if dbg.AssertEnabled && ibs.noMaterialize {
+		panic("SetStorage: full state override is not kept on the noMaterialize path")
+	}
 	stateObject, err := ibs.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
@@ -2114,7 +2117,10 @@ func (ibs *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 		if ibs.versionMap != nil {
 			prevWrites = ibs.versionedWrites.snapshotCreateFields(addr)
 		}
-		ibs.journal.resetObjectChange(addr, previous, prevWrites)
+		// previous may be built from an account record that lags the cached
+		// object: journal the cache entry (nil when none) so the revert restores
+		// or drops it.
+		ibs.journal.resetObjectChange(addr, ibs.stateObjects[addr], prevWrites)
 	}
 	newobj.newlyCreated = true
 	if !ibs.noMaterialize {
@@ -2190,8 +2196,7 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 
 			// Reuse the cached stateObject as `previous` so the selfdestructed flag
 			// and accumulated incarnation carry into the new object's
-			// PrevIncarnation, and CommitBlock can still emit DeleteAccount after a
-			// REVERT.
+			// PrevIncarnation.
 			if !destructed {
 				if so, ok := ibs.stateObjects[addr]; ok && so.selfdestructed {
 					// Accumulated-IBS path (e.g. GenerateChain): the cache marks it

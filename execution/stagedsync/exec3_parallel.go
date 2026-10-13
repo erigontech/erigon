@@ -2216,8 +2216,10 @@ func (result *execResult) calcFees(
 	if nw, ok := result.TxOut.GetNonce(result.Coinbase); ok {
 		coinbaseNonce = nw.Val
 	}
-	if _, ok := result.TxOut.GetCodeHash(result.Coinbase); ok {
+	coinbaseCodeHash := accounts.EmptyCodeHash
+	if cw, ok := result.TxOut.GetCodeHash(result.Coinbase); ok {
 		coinbaseHasCodeHashWrite = true
+		coinbaseCodeHash = cw.Val
 	}
 	if sw, ok := result.TxOut.GetSelfDestruct(result.Coinbase); ok {
 		coinbaseSelfdestructed = sw.Val
@@ -2256,7 +2258,7 @@ func (result *execResult) calcFees(
 	// (the gas debit). calcFees must then re-materialize the coinbase (Balance + its
 	// AddressPath sibling) even when the net change is zero, else the worker's raw
 	// gas-debit value is left behind and a later whole-account read gets a stale balance.
-	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance || cbOverride
+	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance || (cbOverride && !coinbaseNetDestructed)
 
 	addWrites := &state.WriteSet{}
 	if emitCoinbase {
@@ -2284,6 +2286,7 @@ func (result *execResult) calcFees(
 				addrAcc.CodeHash = accounts.EmptyCodeHash
 				if !coinbaseNetDestructed {
 					addrAcc.Nonce = coinbaseNonce
+					addrAcc.CodeHash = coinbaseCodeHash
 				}
 			}
 			addWrites.SetAddress(result.Coinbase, &state.VersionedWrite[*accounts.Account]{

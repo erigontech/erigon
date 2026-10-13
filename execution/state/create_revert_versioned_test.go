@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -117,4 +118,66 @@ func TestNoMaterialize_RevivedCreateRevertReadsCellBalance(t *testing.T) {
 	balance, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	require.Equal(t, uint64(5), balance.Uint64())
+}
+
+// On a versioned IBS that caches state objects, a credit creates the account
+// with a zero balance in its record. A later tx credits it again and reverts a
+// creation at it: the next tx must still read both credits. The EIP-161 rules
+// matter: FinalizeTx deletes the stale empty object, which is what makes it
+// observable.
+func TestMaterialized_CreditedCreateRevertKeepsBalance(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc0, 0x55})
+	rules := &chain.Rules{IsSpuriousDragon: true}
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	finalizeTx := func() {
+		require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+		vm.FlushVersionedWrites(ibs.FinalizedWrites(rules), true, "")
+		ibs.ResetVersionedIO()
+	}
+
+	ibs.SetTxContext(1, 0)
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
+	finalizeTx()
+
+	ibs.SetTxContext(1, 1)
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(3), tracing.BalanceChangeTransfer))
+	snap := ibs.PushSnapshot()
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	ibs.RevertToSnapshot(snap, nil)
+	finalizeTx()
+
+	ibs.SetTxContext(1, 2)
+	balance, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, uint64(8), balance.Uint64())
+}
+
+// An IBS that has not cached the account journals no object for a creation
+// at it, and the revert must leave the cache without an entry.
+func TestMaterialized_UncachedCreateRevertKeepsBalance(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc0, 0x66})
+	rules := &chain.Rules{IsSpuriousDragon: true}
+	vm := NewVersionMap(nil)
+	funder := NewWithVersionMap(&emptyReader{}, vm)
+	funder.SetTxContext(1, 0)
+	require.NoError(t, funder.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
+	vm.FlushVersionedWrites(funder.FinalizedWrites(rules), true, "")
+
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	ibs.SetTxContext(1, 1)
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(3), tracing.BalanceChangeTransfer))
+	snap := ibs.PushSnapshot()
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	ibs.RevertToSnapshot(snap, nil)
+	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+	vm.FlushVersionedWrites(ibs.FinalizedWrites(rules), true, "")
+	ibs.ResetVersionedIO()
+
+	ibs.SetTxContext(1, 2)
+	balance, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, uint64(8), balance.Uint64())
 }
