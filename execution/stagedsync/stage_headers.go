@@ -44,11 +44,16 @@ func HeadersUnwind(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwT
 	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
 	// Delete canonical hashes that are being unwound
 	unwindBlock := (u.Reason.Block != nil)
-	badBlock := false
-	if unwindBlock {
-		badBlock = u.Reason.IsBadBlock()
+	if unwindBlock && u.Reason.IsBadBlock() {
+		badFrom := u.UnwindPoint + 1
+		if badNum := rawdb.ReadHeaderNumber(tx, *u.Reason.Block); badNum != nil {
+			badFrom = max(badFrom, *badNum)
+		}
+		if err := rawdb.TruncateCanonicalHash(tx, badFrom, true); err != nil {
+			return err
+		}
 	}
-	if err := rawdb.TruncateCanonicalHash(tx, u.UnwindPoint+1, badBlock); err != nil {
+	if err := rawdb.TruncateCanonicalHash(tx, u.UnwindPoint+1, false); err != nil {
 		return err
 	}
 	if unwindBlock {
