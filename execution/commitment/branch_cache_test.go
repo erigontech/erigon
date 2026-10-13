@@ -647,3 +647,47 @@ func TestBranchCache_GetBeforeDoesNotEvict(t *testing.T) {
 	_, _, ok = c.GetBefore(key, 101)
 	require.False(t, ok, "a local bound must still honor canonical invalidation")
 }
+
+func TestBranchCache_FillDropsViewsOlderThanCommittedUnwind(t *testing.T) {
+	c := NewBranchCache(100)
+	key := []byte{0x01, 0x02, 0x03, 0x04, 0x05}
+	c.UnwindCommitted(10, 7)
+
+	c.Fill(key, []byte("old-view"), 1, 20, 6)
+	_, _, ok := c.Get(key)
+	require.False(t, ok)
+
+	c.Fill(key, []byte("new-view"), 1, 20, 7)
+	got, _, ok := c.Get(key)
+	require.True(t, ok)
+	require.Equal(t, []byte("new-view"), got)
+}
+
+func TestBranchCache_FillRacingUnwindCommitted(t *testing.T) {
+	key := []byte{0x01, 0x02, 0x03, 0x04, 0x05}
+	for range 2000 {
+		c := NewBranchCache(100)
+		stop := make(chan struct{})
+		var wg sync.WaitGroup
+		for range 4 {
+			wg.Go(func() {
+				for {
+					select {
+					case <-stop:
+						return
+					default:
+						c.Fill(key, []byte("dead"), 1, 20, 1)
+					}
+				}
+			})
+		}
+		runtime.Gosched()
+		c.UnwindCommitted(10, 2)
+		for range 100 {
+			got, _, ok := c.Get(key)
+			require.False(t, ok, "served %q after the unwind committed", got)
+		}
+		close(stop)
+		wg.Wait()
+	}
+}
