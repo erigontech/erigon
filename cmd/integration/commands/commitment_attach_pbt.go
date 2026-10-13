@@ -985,7 +985,6 @@ func adoptPBTFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endTxNum uint
 	if err != nil {
 		return err
 	}
-	nodeFiles = pbtAttachVisibleFiles(nodeFiles)
 	touched := make(map[string]struct{})
 	for _, file := range nodeFiles {
 		if !pbtAttachAdoptsFile(file) {

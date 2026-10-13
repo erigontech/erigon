@@ -179,6 +179,19 @@ func TestAttachPBTRejectsHistorySpanningPointWithoutMutation(t *testing.T) {
 	require.Equal(t, before, snapshotTree(t, source.DataDir))
 }
 
+func TestAdoptPBTFilesRemovesSupersededNodeFiles(t *testing.T) {
+	node, published := newPBTAttachFileTrees(t, true)
+	superseded := []string{"v1.0-commitment-bin.0-4.kv", "v1.0-commitment-bin.0-2.kv", "v1.0-accounts.0-4.kv", "v1.0-accounts.0-2.kv"}
+	for _, name := range superseded {
+		require.NoError(t, os.WriteFile(filepath.Join(node.SnapDomain, name), []byte("node"), 0o644))
+	}
+	require.NoError(t, adoptPBTFiles(node, published, 8, 7))
+	for _, name := range superseded {
+		_, err := os.Stat(filepath.Join(node.SnapDomain, name))
+		require.ErrorIs(t, err, os.ErrNotExist, name)
+	}
+}
+
 func TestAdoptPBTFilesReplacesStateAndCommitmentFiles(t *testing.T) {
 	node, published := newPBTAttachFileTrees(t, true)
 	require.NoError(t, os.WriteFile(filepath.Join(node.SnapDomain, "v1.0-accounts.1-2.kv"), []byte("past"), 0o644))
