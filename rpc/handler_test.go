@@ -20,12 +20,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -255,4 +257,14 @@ func TestRunMethodReportsAnsweredError(t *testing.T) {
 			require.Contains(t, buf.String(), `"error":`)
 		})
 	}
+}
+
+// Internal errors stay visible at default log levels; an error that answers the request, such as a revert, does not.
+func TestServedLogLevel(t *testing.T) {
+	internal := &CustomError{Code: ErrCodeInternalError, Message: "encode"}
+	require.Equal(t, log.LvlWarn, servedLvl(internal))
+	require.Equal(t, log.LvlWarn, servedLvl(fmt.Errorf("stream: %w", internal)))
+	require.Equal(t, log.LvlWarn, servedLvl(&jsonError{Code: ErrCodeInternalError}))
+	require.Equal(t, log.LvlTrace, servedLvl(&jsonError{Code: 3, Message: "execution reverted", Data: "0x"}))
+	require.Equal(t, log.LvlTrace, servedLvl(errors.New("header not found")))
 }

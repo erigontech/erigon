@@ -634,12 +634,12 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 		if !errors.Is(ctx.ctx.Err(), context.Canceled) {
 			switch {
 			case answered != nil:
-				h.logger.Trace("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID), "err", answered)
+				h.logger.Log(servedLvl(answered), "[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID), "err", answered)
 			case resp != nil && resp.Error != nil && resp.Error.Data != nil:
-				h.logger.Trace("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
+				h.logger.Log(servedLvl(resp.Error), "[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
 					"err", resp.Error.Message, "errdata", resp.Error.Data)
 			case resp != nil && resp.Error != nil:
-				h.logger.Trace("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
+				h.logger.Log(servedLvl(resp.Error), "[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
 					"err", resp.Error.Message)
 			}
 		}
@@ -750,6 +750,15 @@ func remapDBOverload(ctx context.Context, err error) error {
 		return errServerOverloaded
 	}
 	return err
+}
+
+// servedLvl logs internal errors at warn; other errors, such as a revert, are a normal answer to the request.
+func servedLvl(err error) log.Lvl {
+	var coded Error
+	if errors.As(err, &coded) && coded.ErrorCode() == ErrCodeInternalError {
+		return log.LvlWarn
+	}
+	return log.LvlTrace
 }
 
 // runMethod runs the Go callback for an RPC method. It returns either a response for the caller to
