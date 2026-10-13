@@ -205,7 +205,11 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 			}
 			return pbtAttachFilesAheadError(nodeDirs.DataDir, chainName, firstStep, publishedSettings.StepSize, progress, blockNum, txNum)
 		}
-		if err := validatePBTAttachFiles(nodeDirs, publishedDirs, publishedSettings.StepSize, txNum); err != nil {
+		nodeBinStopped, stoppedErr := pbtAttachNodeBinStopped(ctx, nodeDirs)
+		if stoppedErr != nil {
+			return stoppedErr
+		}
+		if err := validatePBTAttachFiles(nodeDirs, publishedDirs, publishedSettings.StepSize, txNum, nodeBinStopped); err != nil {
 			return err
 		}
 	} else if err := validatePBTAttachPublishedFiles(publishedDirs, publishedSettings.StepSize, txNum); err != nil {
@@ -556,6 +560,24 @@ func pbtAttachFilesAheadError(dataDir, chainName string, firstStep, stepSize, ex
 	return fmt.Errorf("commitment attach-pbt: node files extend past conversion point block %d txNum %d; remove state from step %d onward with erigon snapshots rm-state --datadir=%s --chain=%s --step=%d+ --experimental.commitment-v3, then run %s (execution progress is block %d)", blockNum, txNum, firstStep, dataDir, chainName, firstStep, reset, executionProgress)
 }
 
+func pbtAttachNodeBinStopped(ctx context.Context, nodeDirs datadir.Dirs) (bool, error) {
+	if exists, err := dir.FileExist(filepath.Join(nodeDirs.Chaindata, "mdbx.dat")); err != nil || !exists {
+		return false, err
+	}
+	nodeDB, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, nodeDirs.Chaindata), true)
+	if err != nil {
+		return false, err
+	}
+	defer nodeDB.Close()
+	var stopped bool
+	err = nodeDB.View(ctx, func(tx kv.Tx) error {
+		var err error
+		stopped, err = rawdb.ReadCommitmentDomainStopped(tx, kv.CommitmentBinDomain)
+		return err
+	})
+	return stopped, err
+}
+
 func validatePBTAttachGenesis(ctx context.Context, nodeDirs, publishedDirs datadir.Dirs, logger log.Logger) error {
 	nodeDB, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, nodeDirs.Chaindata), true)
 	if err != nil {
@@ -722,7 +744,7 @@ func configuredPBTNodeHash(settings *dbstate.ErigonDBSettings) string {
 	return commitment.PBinHashSuiteName()
 }
 
-func validatePBTAttachFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endTxNum uint64) error {
+func validatePBTAttachFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endTxNum uint64, nodeBinStopped bool) error {
 	if stepSize == 0 {
 		return errors.New("commitment attach-pbt: step size is zero")
 	}
@@ -751,7 +773,7 @@ func validatePBTAttachFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endT
 		return err
 	}
 	for _, domain := range pbtAttachDomains {
-		if domain == kv.CommitmentBinDomain && len(nodeRanges[domain]) == 0 {
+		if domain == kv.CommitmentBinDomain && (nodeBinStopped || len(nodeRanges[domain]) == 0) {
 			continue
 		}
 		if !slices.Equal(nodeRanges[domain], publishedRanges[domain]) {

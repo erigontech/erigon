@@ -1815,7 +1815,7 @@ func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.Tempor
 // resolve at txNum, so a worker view past the caller's cannot change the answer.
 func (r *asOfStateReader) BindsWorkerTx() bool { return true }
 
-const binaryShadowStoppedRemedy = "run integration commitment convert-pbt and attach-pbt on this datadir"
+const binaryShadowStoppedRemedy = "convert this datadir with integration commitment convert-pbt --keep-hex --output.datadir=<new dir>, then run integration commitment attach-pbt --from=<new dir>"
 
 func CheckBinaryShadowRunning(tx kv.Getter, config *chain.Config) error {
 	if config == nil || !config.IsBinaryTrieScheduled() {
