@@ -37,6 +37,7 @@ func TestTemporalDBClose_KeepsFilesUntilOpenTxIsDone(t *testing.T) {
 
 	tx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
+	defer tx.Rollback()
 
 	closed := make(chan struct{})
 	go func() {
@@ -47,7 +48,7 @@ func TestTemporalDBClose_KeepsFilesUntilOpenTxIsDone(t *testing.T) {
 	// Close is in progress once the underlying mdbx db refuses new read txs.
 	raw := db.(*temporal.DB).InternalDB()
 	for {
-		rtx, err := raw.BeginRo(t.Context())
+		rtx, err := raw.BeginRo(t.Context()) //nolint:gocritic
 		if err != nil {
 			break
 		}
