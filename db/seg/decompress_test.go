@@ -579,7 +579,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		binary.BigEndian.PutUint64(aux[16:24], ^uint64(0)) // pattern dict size in bytes
 
 		fpath := filepath.Join(tmpDir, "patternDictionarySizeOverflows")
-		err := os.WriteFile(fpath, aux, 0644)
+		err := os.WriteFile(fpath, aux, 0o644)
 		require.NoError(t, err)
 
 		d, err := NewDecompressor(fpath)
