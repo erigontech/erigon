@@ -549,3 +549,21 @@ func TestArenaRetentionStaysBounded(t *testing.T) {
 	held := slotBytes + len(ibs.logs.pool)*304 + ibs.logs.poolBytes
 	require.Less(t, held, 3<<20, "an arena holds %dKB after mixed traffic", held/1024)
 }
+
+// Topics an entry has to grow come from chunks, not one allocation per log.
+func TestAllocLogGrowsTopicsInChunks(t *testing.T) {
+	addr := common.HexToAddress("0x1")
+	allocs := testing.AllocsPerRun(5, func() {
+		ibs := New(nil)
+		ibs.SetTxContext(1, 0)
+		for range 1024 {
+			ibs.AllocLog(addr, 0, 0)
+		}
+		ibs.Reset() // the pool now holds 1024 entries with no topic capacity
+		ibs.SetTxContext(1, 1)
+		for range 1024 {
+			ibs.AllocLog(addr, 2, 0)
+		}
+	})
+	require.Less(t, allocs, 1024.0*1.5, "%v allocations for 1024 entries and 1024 topic pairs", allocs)
+}
