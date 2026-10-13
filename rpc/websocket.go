@@ -112,6 +112,8 @@ func wsHandshakeValidator(allowedOrigins []string, logger log.Logger) func(*http
 	// allow localhost if no allowedOrigins are specified.
 	if len(origins.ToSlice()) == 0 {
 		origins.Add("http://localhost")
+		origins.Add("http://127.0.0.1")
+		origins.Add("http://[::1]")
 		if hostname, err := os.Hostname(); err == nil {
 			origins.Add("http://" + hostname)
 		}

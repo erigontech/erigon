@@ -77,6 +77,9 @@ func TestRegularRpcServerWebsocketOrigin(t *testing.T) {
 
 	require.Equal(t, http.StatusForbidden, handshake(t, nil, "https://evil.example"))
 	require.Equal(t, http.StatusSwitchingProtocols, handshake(t, nil, "http://localhost:3000"))
+	require.Equal(t, http.StatusSwitchingProtocols, handshake(t, nil, "http://127.0.0.1:3000"))
+	require.Equal(t, http.StatusSwitchingProtocols, handshake(t, nil, "http://[::1]:8545"))
+	require.Equal(t, http.StatusForbidden, handshake(t, nil, "http://127.0.0.2:3000"))
 	require.Equal(t, http.StatusSwitchingProtocols, handshake(t, []string{"https://dapp.example"}, "https://dapp.example"))
 	require.Equal(t, http.StatusForbidden, handshake(t, []string{"https://dapp.example"}, "https://evil.example"))
 	require.Equal(t, http.StatusForbidden, handshake(t, []string{"https://dapp.example"}, "https://dapp.example:8443"))
