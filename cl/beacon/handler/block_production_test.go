@@ -135,6 +135,32 @@ func TestNewAttestationCandidateRecordsOnlyNewFlags(t *testing.T) {
 	require.Equal(t, []uint8{0b110, 0b111}, candidate.newFlags)
 }
 
+func TestNewAttestationCandidateReservesNothingWithoutNewFlags(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	s := state_mock.NewMockBeaconState(ctrl)
+	cfg := clparams.MainnetBeaconConfig
+	data := &solid.AttestationData{Slot: 32, Target: solid.Checkpoint{Epoch: 1}}
+	attestation := &solid.Attestation{Data: data}
+	attesters := make([]uint64, 425)
+	for i := range attesters {
+		attesters[i] = uint64(i)
+	}
+
+	s.EXPECT().BaseRewardPerIncrement().Return(uint64(10))
+	s.EXPECT().BeaconConfig().Return(&cfg).AnyTimes()
+	s.EXPECT().Slot().Return(uint64(33)).AnyTimes()
+	s.EXPECT().Version().Return(clparams.ElectraVersion).AnyTimes()
+	s.EXPECT().GetAttestationParticipationFlagIndicies(data, uint64(1), uint64(0), false).Return([]uint8{0, 1, 2}, nil)
+	s.EXPECT().GetAttestingIndicies(attestation, true).Return(attesters, nil)
+	s.EXPECT().EpochParticipationForValidatorIndex(true, gomock.Any()).Return(cltypes.ParticipationFlags(0b111)).Times(len(attesters))
+
+	candidate, err := newAttestationCandidate(s, attestation)
+	require.NoError(t, err)
+	require.Zero(t, cap(candidate.attesters))
+	require.Zero(t, cap(candidate.baseRewards))
+	require.Zero(t, cap(candidate.newFlags))
+}
+
 func TestNewAttestationCandidateReadsPreviousEpochParticipation(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	s := state_mock.NewMockBeaconState(ctrl)
@@ -1091,6 +1117,24 @@ func TestProductionUsesLocalPayloadWhenBuilderWithdrawalsRootIsWrong(t *testing.
 		builderClient.EXPECT().GetHeader(gomock.Any(), int64(targetSlot), parentHash, gomock.Any()).Return(header, nil)
 		handler.builderClient = builderClient
 	})
+}
+
+func TestProcessBlockForProductionRejectsUnexpectedPayloadWithdrawal(t *testing.T) {
+	blocks, s, _ := tests.GetCapellaRandom()
+	block := blocks[0].Block
+	block.Body.ExecutionPayload.Withdrawals.Clear()
+	block.Body.ExecutionPayload.Withdrawals.Append(&cltypes.Withdrawal{Validator: ^uint64(0), Amount: 1})
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(s, block.Slot))
+
+	_, err := processBlockForProduction(s, &cltypes.BlindOrExecutionBeaconBlock{
+		Slot:          block.Slot,
+		ProposerIndex: block.ProposerIndex,
+		ParentRoot:    block.ParentRoot,
+		BeaconBody:    block.Body,
+		Cfg:           s.BeaconConfig(),
+	})
+
+	require.ErrorContains(t, err, "withdrawals root mismatch")
 }
 
 func TestProductionUsesValidBuilderPayloadAfterSlotAdvance(t *testing.T) {
@@ -4845,4 +4889,78 @@ func TestProduceBeaconBodyIncludesPTCVotesReceivedDuringPayloadWait(t *testing.T
 	require.Equal(t, baseBlockRoot, attestation.Data.BeaconBlockRoot)
 	require.Equal(t, targetSlot-1, attestation.Data.Slot)
 	require.Contains(t, attestation.AggregationBits.GetOnIndices(), 0)
+}
+
+type cachedAttestationDataProducer struct {
+	data   solid.AttestationData
+	cached bool
+}
+
+func (p cachedAttestationDataProducer) ProduceAndCacheAttestationData(kv.Tx, *state.CachingBeaconState, common.Hash, uint64) (solid.AttestationData, error) {
+	return p.data, nil
+}
+
+func (p cachedAttestationDataProducer) CachedAttestationData(uint64) (solid.AttestationData, bool, error) {
+	return p.data, p.cached, nil
+}
+
+// Gloas attestation data uses index 1 for FULL blocks in the head's chain, 0 for EMPTY blocks or blocks from the
+// attestation slot, and returns 503 for a FULL block whose payload is not verified.
+func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
+	const attestationSlot = uint64(10)
+	root := common.HexToHash("0xabcd")
+	for _, tt := range []struct {
+		name       string
+		blockSlot  uint64
+		status     cltypes.PayloadStatus
+		verified   bool
+		childHead  bool // the head is a child of the served root, as when attestation data was cached earlier in the slot
+		cached     bool
+		wantStatus int
+		wantIndex  string
+	}{
+		{name: "older FULL head", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, verified: true, cached: true, wantStatus: http.StatusOK, wantIndex: "1"},
+		{name: "older EMPTY head", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusEmpty, cached: true, wantStatus: http.StatusOK, wantIndex: "0"},
+		{name: "block of the attestation slot", blockSlot: attestationSlot, status: cltypes.PayloadStatusFull, verified: true, cached: true, wantStatus: http.StatusOK, wantIndex: "0"},
+		{name: "FULL in the head's chain", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, verified: true, childHead: true, cached: true, wantStatus: http.StatusOK, wantIndex: "1"},
+		{name: "EMPTY in the head's chain", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusEmpty, childHead: true, cached: true, wantStatus: http.StatusOK, wantIndex: "0"},
+		{name: "optimistic FULL head", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, cached: true, wantStatus: http.StatusServiceUnavailable},
+		{name: "optimistic FULL in the head's chain", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, childHead: true, wantStatus: http.StatusServiceUnavailable},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+			cfg := handler.beaconChainCfg
+			cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch, cfg.GloasForkEpoch = 0, 0, 0, 0, 0, 0, 0
+			cfg.InitializeForkSchedule()
+			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+			clock.EXPECT().GetCurrentSlot().Return(attestationSlot).AnyTimes()
+			handler.ethClock = clock
+			handler.attestationProducer = cachedAttestationDataProducer{
+				data:   solid.AttestationData{Slot: attestationSlot, BeaconBlockRoot: root},
+				cached: tt.cached,
+			}
+			fcu.Headers[root] = &cltypes.BeaconBlockHeader{Slot: tt.blockSlot}
+			fcu.VerifiedPayloads = map[common.Hash]bool{root: tt.verified}
+			fcu.HeadVal = root
+			fcu.HeadSlotVal = tt.blockSlot
+			fcu.HeadPayloadStatusVal = tt.status
+			if tt.childHead {
+				fcu.HeadVal = common.HexToHash("0xbeef")
+				fcu.HeadSlotVal = tt.blockSlot + 1
+				fcu.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+				fcu.Ancestors = map[uint64]forkchoice.ForkChoiceNode{tt.blockSlot: {Root: root, PayloadStatus: tt.status}}
+			}
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+				fmt.Sprintf("/eth/v1/validator/attestation_data?slot=%d&committee_index=3", attestationSlot), http.NoBody)
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+
+			require.Equal(t, tt.wantStatus, recorder.Code, recorder.Body.String())
+			if tt.wantStatus == http.StatusOK {
+				require.Contains(t, recorder.Body.String(), `"index":"`+tt.wantIndex+`"`)
+			} else {
+				require.Contains(t, recorder.Body.String(), "payload of the beacon block root is not verified")
+			}
+		})
+	}
 }

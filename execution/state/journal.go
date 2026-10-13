@@ -70,7 +70,7 @@ const (
 // journalExtra holds the fields needed only by the infrequent entry kinds,
 // kept out of line so the common entry stays small (see TestJournalEntrySize).
 type journalExtra struct {
-	prevObj              *stateObject         // kindResetObject
+	prevObj              *stateObject         // kindResetObject: the cached object, nil if none
 	prevWrites           *createWriteSnapshot // kindResetObject
 	bi                   *BalanceIncrease     // kindBalanceIncreaseTransfer
 	prevhash             accounts.CodeHash    // kindCode
@@ -313,7 +313,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		if current, ok := s.stateObjects[je.account]; ok && current != prev {
 			current.release()
 		}
-		if s.noMaterialize {
+		if prev == nil {
 			delete(s.stateObjects, je.account)
 		} else {
 			s.setStateObject(je.account, prev)
@@ -356,7 +356,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 			} else {
 				s.versionedWrites.DelBalance(je.account)
 			}
-			// selfdestructVersioned clears the incarnation cell on both paths. Restore
+			// selfdestructVersioned resets the incarnation cell to 0 on both paths. Restore
 			// it to its pre-destruct versioned value, or drop the write if the
 			// self-destruct created it.
 			if je.flags&flagSelfdestructHadIncarnation != 0 {

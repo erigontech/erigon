@@ -2721,12 +2721,12 @@ func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx)
 	return v, ok, err
 }
 
-func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.Step, txNum uint64) {
+func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.Step, txNum uint64, tx kv.Tx) {
 	if !enabled || len(v) == 0 {
 		return
 	}
 	if branchCache := at.BranchCache(); branchCache != nil {
-		branchCache.Put(k, v, uint64(step), txNum)
+		branchCache.Fill(k, v, uint64(step), txNum, tx.ViewID())
 	}
 }
 
@@ -2748,7 +2748,7 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 		if opts.Owned() {
 			v = bytes.Clone(v)
 		}
-		at.cacheLatestBranch(cacheBranch, k, v, step, step.LastTxNum(at.StepSize()))
+		at.cacheLatestBranch(cacheBranch, k, v, step, step.LastTxNum(at.StepSize()), tx)
 		return v, step, true, nil
 	}
 	var found bool
@@ -2767,7 +2767,7 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 	}
 	step = kv.Step(fileEndTxNum / at.StepSize())
 	if err == nil {
-		at.cacheLatestBranch(cacheBranch, k, v, step, fileEndTxNum)
+		at.cacheLatestBranch(cacheBranch, k, v, step, fileEndTxNum, tx)
 	}
 	return v, step, found, err
 }

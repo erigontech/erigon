@@ -422,6 +422,48 @@ func Test_DeleteStateSnaps_StepRange_FromPlus(t *testing.T) {
 	confirmExist(t, file)
 }
 
+func Test_DeleteStateSnaps_EmptyStepRange(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		stepRange    string
+		removeLatest bool
+	}{
+		{name: "from plus at latest", stepRange: "224+"},
+		{name: "from plus past latest", stepRange: "225+"},
+		{name: "equal bounds", stepRange: "224-224"},
+		{name: "zero bounds", stepRange: "0-0"},
+		{name: "reversed bounds", stepRange: "225-224"},
+		{name: "step overrides latest", stepRange: "224+", removeLatest: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			b := bundle{}
+			b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(statecfg.Schema.ReceiptDomain, dirs, 1)
+			createFiles(t, dirs, 0, 224, &b)
+			file, _ := b.domain.DataFile(version.V1_0, 0, 224)
+			require.NoError(t, os.WriteFile(file+".torrent", []byte("torrent"), 0o644))
+			require.NoError(t, os.WriteFile(file+".123.tmp", []byte("tmp"), 0o644))
+			var files []string
+			require.NoError(t, filepath.WalkDir(dirs.Snap, func(path string, entry os.DirEntry, err error) error {
+				if err == nil && !entry.IsDir() {
+					files = append(files, path)
+				}
+				return err
+			}))
+
+			require.NoError(t, DeleteStateSnapshots(DeleteStateSnapshotsArgs{
+				Dirs:         dirs,
+				StepRange:    tc.stepRange,
+				RemoveLatest: tc.removeLatest,
+				DomainNames:  []string{"receipt"},
+			}))
+			for _, path := range files {
+				require.FileExists(t, path)
+			}
+		})
+	}
+}
+
 // Test_DeleteLatestStateSnaps_NoFalseSubsetRemoval verifies that sub-range files
 // of a non-removed merged file are NOT incorrectly removed by the subset pass.
 func Test_DeleteLatestStateSnaps_NoFalseSubsetRemoval(t *testing.T) {
