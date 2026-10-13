@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -103,4 +104,20 @@ func TestChiadoRollupCreated(t *testing.T) {
 	require.Len(t, r.Log.Topics, 3)
 	require.Equal(t, s.RollupManager, common.BytesToAddress(r.Log.Topics[2][12:]))
 	require.Len(t, r.Log.Data, 32)
+}
+
+// TestChiadoHeader requires the recorded header to hash to the settling block.
+func TestChiadoHeader(t *testing.T) {
+	enc, err := LoadChiadoHeader()
+	require.NoError(t, err)
+	s, err := LoadChiadoSettlement()
+	require.NoError(t, err)
+	var h types.Header
+	require.NoError(t, rlp.DecodeBytes(enc, &h))
+	require.Equal(t, s.L1BlockHash, h.Hash())
+	require.Equal(t, s.L1BlockNumber, h.Number.Uint64())
+	require.Equal(t, s.L1BlockTimestamp, h.Time)
+	reenc, err := rlp.EncodeToBytes(&h)
+	require.NoError(t, err)
+	require.Equal(t, enc, reenc)
 }

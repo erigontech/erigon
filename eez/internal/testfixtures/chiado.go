@@ -25,6 +25,7 @@ import (
 const (
 	ChiadoAnchorFile        = "anchor-23507949.json"
 	ChiadoRollupCreatedFile = "rollup-created-23413747.json"
+	ChiadoHeaderFile        = "header-23507949.rlp.hex"
 )
 
 // ChiadoSettlement is a settlement transaction mined on the Gnosis-hosted EEZ
@@ -128,4 +129,10 @@ func LoadChiadoRollupCreated() (*ChiadoLogRecord, error) {
 		return nil, err
 	}
 	return &r, nil
+}
+
+// LoadChiadoHeader returns the RLP of the header of the block holding the
+// recorded settlement.
+func LoadChiadoHeader() ([]byte, error) {
+	return readBlob(Path("chiado", ChiadoHeaderFile), true)
 }

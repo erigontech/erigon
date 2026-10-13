@@ -38,11 +38,14 @@ The loader test rebuilds the transaction from its fields and requires the mined 
 
 `rollup-created-23413747.json` is the `RollupCreated` log registering rollup 1, from `eth_getLogs` on `https://rpc.chiadochain.net` on 2026-10-14; `https://gnosis-chiado-rpc.publicnode.com` returned the same log. `https://eez.dev/rpc/l1` no longer serves that range.
 
+`header-23507949.rlp.hex` is the consensus RLP of the header of the settling block, rebuilt with Erigon's `types.Header` from `eth_getBlockByNumber` on `https://rpc.chiadochain.net` on 2026-10-14 and checked to hash to `l1BlockHash`; `https://gnosis-chiado-rpc.publicnode.com` returned the same header.
+
 ## SHA-256
 
 | File | SHA-256 |
 |---|---|
 | `chiado/anchor-23507949.json` | `9253ff31da86cbb86177d4058583a72223a5a7da162f6bd2d6d0187cd73a939d` |
+| `chiado/header-23507949.rlp.hex` | `b6c2ffc4aea6c879093cd6bf111dddf24807997d1b1b6bda485953950b22d373` |
 | `chiado/rollup-created-23413747.json` | `986dbf338aa6ed9b8bae098578d5421665aa298caddc72095ce7aa0cca2a953d` |
 | `vectors/public_inputs_hash_vectors.json` | `8a787a8e307089a5be0ec4a56d8bd0e1ef4d8862eb58bb6b5086347ff2745472` |
 | `vectors/rolling_hash_vectors.json` | `bc37e3a369c91dde689c586899a4f2cc49da50770032f24dfa5c313f5368b88d` |
