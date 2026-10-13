@@ -26,6 +26,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	clp2p "github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cmd/caplin/caplinflags"
 	"github.com/erigontech/erigon/cmd/sentinel/sentinelcli"
 	"github.com/erigontech/erigon/cmd/utils"
@@ -53,7 +54,7 @@ type CaplinCliCfg struct {
 	CustomConfig            string        `json:"custom_config"`
 	CustomGenesisState      string        `json:"custom_genesis_state"`
 	MaxPeerCount            uint64        `json:"max_peer_count"`
-	DisableSubnetLimits     bool          `json:"disable_subnet_limits"`
+	DisableIPBlockLimits    bool          `json:"disable_ip_block_limits"`
 	TrustedCIDRs            []string      `json:"trusted_cidrs"`
 	JwtSecret               []byte
 
@@ -80,8 +81,11 @@ func SetupCaplinCli(ctx *cli.Command) (cfg *CaplinCliCfg, err error) {
 	cfg.BeaconApiReadTimeout = time.Duration(ctx.Uint64(caplinflags.BeaconApiReadTimeout.Name)) * time.Second
 	cfg.BeaconApiWriteTimeout = time.Duration(ctx.Uint64(caplinflags.BeaconApiWriteTimeout.Name)) * time.Second
 	cfg.MaxPeerCount = ctx.Uint64(utils.CaplinMaxPeerCount.Name)
-	cfg.DisableSubnetLimits = ctx.Bool(utils.CaplinSubnetLimitsDisableFlag.Name)
-	cfg.TrustedCIDRs = ctx.StringSlice(utils.CaplinSubnetLimitsTrustedCIDRsFlag.Name)
+	cfg.DisableIPBlockLimits = ctx.Bool(utils.CaplinIPBlockLimitsDisableFlag.Name)
+	cfg.TrustedCIDRs = ctx.StringSlice(utils.CaplinIPBlockLimitsTrustedCIDRsFlag.Name)
+	if _, err := clp2p.ParseTrustedCIDRs(cfg.TrustedCIDRs); err != nil {
+		return nil, fmt.Errorf("option %s: %w", utils.CaplinIPBlockLimitsTrustedCIDRsFlag.Name, err)
+	}
 	cfg.BeaconAddr = fmt.Sprintf("%s:%d", ctx.String(caplinflags.BeaconApiAddr.Name), ctx.Uint(caplinflags.BeaconApiPort.Name))
 	cfg.AllowCredentials = ctx.Bool(utils.BeaconApiAllowCredentialsFlag.Name)
 	cfg.PreserveGraffiti = ctx.Bool(utils.BeaconApiPreserveGraffitiFlag.Name)

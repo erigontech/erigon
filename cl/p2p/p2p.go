@@ -56,12 +56,11 @@ type P2PConfig struct {
 	ExternalIP net.IP // resolved from NAT at startup; set by NewP2Pmanager
 
 	MaxPeerCount uint64
-	// TrustedCIDRs are treated like private networks: exempt from every per-address and per-subnet
-	// cap, with one shared connection limit per network.
+	// TrustedCIDRs are exempt from every per-address and per-block cap; each shares one limit.
 	TrustedCIDRs []string
-	// DisableSubnetLimits keeps only go-libp2p's per-address caps (IPv4 address, IPv6 /56 and /48).
-	DisableSubnetLimits bool
-	SubscribeAllTopics  bool // When true, advertise all attnets/syncnets in ENR
+	// DisableIPBlockLimits restores go-libp2p's default connection limits, as released.
+	DisableIPBlockLimits bool
+	SubscribeAllTopics   bool // When true, advertise all attnets/syncnets in ENR
 
 	DataDir string // persistent storage dir; used to save the node key so ENR is stable across restarts
 }
