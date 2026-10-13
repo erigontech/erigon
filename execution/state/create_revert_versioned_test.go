@@ -181,3 +181,28 @@ func TestMaterialized_UncachedCreateRevertKeepsBalance(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(8), balance.Uint64())
 }
+
+// SetCode of an account the tx created skips the transient stateObject on the
+// noMaterialize path; the code must still read back and land in the write set.
+func TestNoMaterialize_CreatedAccountSetCode(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc0, 0x44})
+	code := []byte("created-contract-code")
+	ibs := NewWithVersionMap(&emptyReader{}, NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(0, 0)
+	ibs.SetVersion(0)
+
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	require.NoError(t, ibs.SetCode(addr, code, tracing.CodeChangeContractCreation))
+
+	got, err := ibs.GetCode(addr)
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+	hash, err := ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	require.Equal(t, accounts.InternCodeHash(crypto.Keccak256Hash(code)), hash)
+	cw, ok := ibs.VersionedWrites().GetCode(addr)
+	require.True(t, ok, "the code is this tx's write")
+	require.Equal(t, code, cw.Val.Bytes)
+}
