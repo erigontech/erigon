@@ -361,7 +361,12 @@ func (a *ApiHandler) PostEthV1BeaconPoolProposerSlashings(w http.ResponseWriter,
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
-	if err := a.proposerSlashingService.ProcessMessage(r.Context(), nil, &req); err != nil && !errors.Is(err, services.ErrIgnore) {
+	err := a.proposerSlashingService.ProcessMessage(r.Context(), nil, &req)
+	if errors.Is(err, services.ErrIgnore) {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
