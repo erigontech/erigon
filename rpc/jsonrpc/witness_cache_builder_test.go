@@ -882,8 +882,11 @@ func TestWaitCommittedHeadPanicRollsBack(t *testing.T) {
 }
 
 func TestHeadCaptureOverCarriedRecordsMatchesDurablePerBlock(t *testing.T) {
-	previousSchema, previousV3 := statecfg.Schema, statecfg.ExperimentalCommitmentV3
-	t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousSchema, previousV3 })
+	previousAssert, previousSchema, previousV3 := dbg.AssertEnabled, statecfg.Schema, statecfg.ExperimentalCommitmentV3
+	t.Cleanup(func() {
+		dbg.AssertEnabled, statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousAssert, previousSchema, previousV3
+	})
+	dbg.AssertEnabled = true
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	statecfg.EnableHistoricalCommitment()

@@ -338,6 +338,11 @@ func newCommitmentCalculator(
 		}
 		calc.hashes = newCalcHashes()
 		if p := takeBranchCarry(db, readAtNum, readAtHash); p != nil {
+			if dbg.AssertEnabled {
+				if err := p.verifyAgainst(roTx); err != nil {
+					panic(err)
+				}
+			}
 			calc.branchPrefetch = p.start(workCtx, db, readAtNum+1)
 		} else {
 			calc.branchPrefetch = newBranchPrefetcher(workCtx, db, readAtNum+1)

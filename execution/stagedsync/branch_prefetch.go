@@ -19,6 +19,7 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"hash/maphash"
 	"sync"
 	"sync/atomic"
@@ -247,6 +248,22 @@ func (p *branchPrefetcher) put(key, data []byte, step kv.Step) []byte {
 	p.store(s, string(key), prefetchedRecord{data: data, step: step, refs: refs, block: p.block})
 	s.mu.Unlock()
 	return data
+}
+
+func (p *branchPrefetcher) verifyAgainst(tx kv.TemporalTx) error {
+	for i := range p.shards {
+		s := &p.shards[i]
+		s.mu.RLock()
+		for k, r := range s.records {
+			v, _, err := tx.GetLatest(kv.CommitmentDomain, []byte(k), kv.GetLatestOptions{})
+			if err != nil || !bytes.Equal(v, r.data) {
+				s.mu.RUnlock()
+				return fmt.Errorf("carried branch record %x diverges from the committed state: %x vs %x (err %v)", k, r.data, v, err)
+			}
+		}
+		s.mu.RUnlock()
+	}
+	return nil
 }
 
 func (p *branchPrefetcher) getAt(key []byte, gen uint64) ([]byte, kv.Step, bool) {
