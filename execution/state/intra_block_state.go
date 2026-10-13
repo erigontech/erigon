@@ -1304,9 +1304,8 @@ func (ibs *IntraBlockState) consumedAddressAbsence(addr accounts.Address) bool {
 // the EVM is about to consume that answer, so a later flush must conflict with
 // it instead of being silently adopted.
 func (ibs *IntraBlockState) finalizeProvisionalAddressRead(addr accounts.Address) {
-	if tr, ok := ibs.versionedReads.GetAddress(addr); ok && tr.Source == ProvisionalRead {
-		tr.Source = StorageRead
-		ibs.versionedReads.SetAddress(addr, tr)
+	if r := ibs.versionedReads.find(addr); r != nil && r.has&pathBit(AddressPath) != 0 && r.address.Source == ProvisionalRead {
+		r.address.Source = StorageRead
 	}
 }
 
@@ -1655,7 +1654,7 @@ func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 		ibs.lastCode = canonical
 	}
 	// A live account this tx created: no own self-destruct, and createObject wrote its AddressPath.
-	if ibs.noMaterialize && !ibs.warmReadable(addr) && ibs.hasWrite(addr, AddressPath, accounts.NilKey) && !ibs.accountLifecycle(addr) {
+	if r := ibs.versionedReads.dirtyRec(addr); ibs.noMaterialize && r != nil && r.wAddress != nil && !ibs.accountLifecycle(addr) {
 		return ibs.setCreatedCode(addr, canonical, reason)
 	}
 	stateObject, err := ibs.GetOrNewStateObject(addr)
@@ -1731,9 +1730,14 @@ func (ibs *IntraBlockState) writeCode(addr accounts.Address, code accounts.Code,
 		ibs.versionedWrites.DelCodeSize(addr)
 		return
 	}
-	ibs.recordWriteCode(addr, code)
-	ibs.recordWriteCodeHash(addr, code.Hash)
-	ibs.recordWriteCodeSize(addr, code.Len())
+	ibs.MarkAddressAccess(addr, true)
+	if ibs.versionMap == nil {
+		return
+	}
+	r, cells := ibs.versionedReads.get(addr), &ibs.versionedWrites.slabs
+	traceWrite(ibs, recordWrite(ibs, addr, CodePath, &r.wCode, &cells.code, code))
+	traceWrite(ibs, recordWrite(ibs, addr, CodeHashPath, &r.wCodeHash, &cells.codeHash, code.Hash))
+	traceWrite(ibs, recordWrite(ibs, addr, CodeSizePath, &r.wCodeSize, &cells.codeSize, code.Len()))
 }
 
 // journalCodeChange journals a code change and calls the tracing hooks.
