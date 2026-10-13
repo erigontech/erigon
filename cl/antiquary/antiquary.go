@@ -299,7 +299,7 @@ func indexBeaconSnapshots(ctx context.Context, db kv.RwDB, from, to, batchSize u
 		batchTo := nextBatchEnd(batchFrom, to, batchSize)
 		start := time.Now()
 		err := db.Update(ctx, func(tx kv.RwTx) error {
-			if err := indexBeaconSnapshotBatch(ctx, tx, batchFrom, batchTo, readHeader, onProgress); err != nil {
+			if err := indexBeaconSnapshotBatch(tx, batchFrom, batchTo, readHeader, onProgress); err != nil {
 				return err
 			}
 			if err := beacon_indicies.WriteLastBeaconSnapshot(tx, batchTo); err != nil {
@@ -324,7 +324,7 @@ func nextBatchEnd(from, to, batchSize uint64) uint64 {
 	return batchTo
 }
 
-func indexBeaconSnapshotBatch(ctx context.Context, tx kv.RwTx, from, to uint64, readHeader readBeaconSnapshotHeaderFunc, onProgress func(slot uint64)) error {
+func indexBeaconSnapshotBatch(tx kv.RwTx, from, to uint64, readHeader readBeaconSnapshotHeaderFunc, onProgress func(slot uint64)) error {
 	for slot := from; slot < to; slot++ {
 		header, elBlockNumber, elBlockHash, err := readHeader(slot, tx)
 		if err != nil {
@@ -337,7 +337,7 @@ func indexBeaconSnapshotBatch(ctx context.Context, tx kv.RwTx, from, to uint64, 
 		if err != nil {
 			return err
 		}
-		if err := beacon_indicies.MarkRootCanonical(ctx, tx, header.Header.Slot, blockRoot); err != nil {
+		if err := beacon_indicies.MarkRootCanonical(tx, header.Header.Slot, blockRoot); err != nil {
 			return err
 		}
 		if err := beacon_indicies.WriteHeaderSlot(tx, blockRoot, header.Header.Slot); err != nil {
@@ -346,7 +346,7 @@ func indexBeaconSnapshotBatch(ctx context.Context, tx kv.RwTx, from, to uint64, 
 		if err := beacon_indicies.WriteStateRoot(tx, blockRoot, header.Header.Root); err != nil {
 			return err
 		}
-		if err := beacon_indicies.WriteParentBlockRoot(ctx, tx, blockRoot, header.Header.ParentRoot); err != nil {
+		if err := beacon_indicies.WriteParentBlockRoot(tx, blockRoot, header.Header.ParentRoot); err != nil {
 			return err
 		}
 		if err := beacon_indicies.WriteExecutionBlockNumber(tx, blockRoot, elBlockNumber); err != nil {
@@ -372,7 +372,7 @@ func pruneBeaconBlocksAndWriteProgress(ctx context.Context, db kv.RwDB, pruneTo,
 		start := time.Now()
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
 			if pruneTo != 0 {
-				deleted, more, err := beacon_indicies.PruneBlocksLimit(ctx, tx, pruneTo, int(batchLimit))
+				deleted, more, err := beacon_indicies.PruneBlocksLimit(tx, pruneTo, int(batchLimit))
 				if err != nil {
 					return err
 				}
@@ -507,6 +507,26 @@ func isBlobBacklog(from, to uint64) bool {
 	return to >= from && to-from >= 2*snaptype.CaplinMergeLimit
 }
 
+type blobRetirementSnapshots interface {
+	FrozenBlobs() uint64
+	VisibleSegmentsMaxTo(snaptype.Enum) uint64
+}
+
+// nextBlobSegment returns the dump bounds of the next blob segment to retire and the end of
+// the whole pending backlog, which decides the compression parallelism. Retiring one segment
+// per attempt publishes each segment as soon as it is written, instead of after the backlog.
+func nextBlobSegment(sn blobRetirementSnapshots, cfg *clparams.BeaconChainConfig) (from, to, backlogTo uint64, ok bool) {
+	// Both frontiers are exclusive segment ends: BlocksAvailable is the last frozen slot and
+	// would hold every blob segment back by one block segment.
+	frozenBlobs, frozenBlocks := sn.FrozenBlobs(), sn.VisibleSegmentsMaxTo(snaptype.BeaconBlocks.Enum())
+	minimumBlobsProgress := ((cfg.DenebForkEpoch * cfg.SlotsPerEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
+	from = max(frozenBlobs, minimumBlobsProgress)
+	if frozenBlocks < from+snaptype.CaplinMergeLimit {
+		return 0, 0, 0, false
+	}
+	return from, from + snaptype.CaplinMergeLimit, frozenBlocks, true
+}
+
 func (s *Antiquary) antiquateBlobs() error {
 	if !s.snapgen {
 		return nil
@@ -523,20 +543,12 @@ func (s *Antiquary) antiquateBlobs() error {
 	}
 	defer roTx.Rollback()
 	// perform blob antiquation if it is time to.
-	currentBlobsProgress := s.sn.FrozenBlobs()
-	// We should NEVER get ahead of the block snapshots.
-	if currentBlobsProgress >= s.sn.BlocksAvailable() {
-		return nil
-	}
-	minimunBlobsProgress := ((s.cfg.DenebForkEpoch * s.cfg.SlotsPerEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
-	currentBlobsProgress = max(currentBlobsProgress, minimunBlobsProgress)
-	// read the finalized head
-	to := s.sn.BlocksAvailable()
-	if to <= currentBlobsProgress || to-currentBlobsProgress < snaptype.CaplinMergeLimit {
+	currentBlobsProgress, to, backlogTo, ok := nextBlobSegment(s.sn, s.cfg)
+	if !ok {
 		return nil
 	}
 	roTx.Rollback()
-	s.logger.Info("[Antiquary] Antiquating blobs", "from", currentBlobsProgress, "to", to)
+	s.logger.Info("[Antiquary] Antiquating blobs", "from", currentBlobsProgress, "to", to, "backlogTo", backlogTo)
 	blobCountFn := func(slot uint64) (uint64, error) {
 		block, err := s.snReader.ReadBeaconBlockBodyBySlot(s.ctx, nil, slot)
 		if err != nil {
@@ -556,7 +568,7 @@ func (s *Antiquary) antiquateBlobs() error {
 	// The build slot is held for the compression only: opening the folder, seeding and pruning
 	// below draw nothing from the build budget, and EL retirement blocks on the same slot.
 	if err := func() error {
-		compressWorkers, releaseBuildSlot := s.blobCompressWorkers(currentBlobsProgress, to)
+		compressWorkers, releaseBuildSlot := s.blobCompressWorkers(currentBlobsProgress, backlogTo)
 		defer releaseBuildSlot()
 		return freezeblocks.DumpBlobsSidecar(s.ctx, s.blobStorage, s.mainDB, currentBlobsProgress, to, s.sn.Salt, s.dirs, compressWorkers, blobCountFn, log.LvlDebug, s.logger)
 	}(); err != nil {

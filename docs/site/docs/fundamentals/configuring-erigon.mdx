@@ -114,8 +114,8 @@ These flags control database performance and memory usage. See [Database](/funda
 * `--erigondb.domain.steps-in-frozen-file value`: Overrides the `steps_in_frozen_file` setting from `erigondb.toml` for the domain merge cap only (history and inverted-index merges are unaffected). Pass a positive integer to set an explicit cap, or `Inf` to leave the domain merge unbounded.
   * Default: unset (uses the value from `erigondb.toml`)
   * Use with care — an incorrect value may affect database structure.
-* `--commitment.plainValues` *(New in v3.6)*: On the first start of a fresh datadir, write commitment values in plain form (no shortened key references). This is a one-time, per-datadir choice — it is ignored once `erigondb.toml` exists.
-  * Default: `false`
+* `--commitment.plainValues` *(New in v3.6)*: Chooses the commitment branch encoding recorded in `snapshots/erigondb.toml` at the moment Erigon creates that file. `true` writes commitment values in plain form (keys inline); `false` writes shortened key references. This is a one-time, per-datadir choice — it is ignored once `erigondb.toml` exists, and an `erigondb.toml` delivered by the downloader wins over it. See [Commitment Snapshot Format](/fundamentals/snapshots-management#commitment-snapshot-format).
+  * Default: plain. Leaving the flag out selects plain, which is v3.6's compiled default; passing `--commitment.plainValues=false` explicitly selects the older *referenced* encoding. Before v3.6 the compiled default was referenced.
 
 ### Pruning and Snapshots
 
@@ -245,7 +245,7 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
 * `--authrpc.port value`: The HTTP-RPC server listening port for the Engine API.
   * Default: `8551`
 * `--authrpc.jwtsecret value`: The path to the [JWT secret](/fundamentals/jwt) file for the consensus layer.
-* `--http.compression`: Enables compression over HTTP-RPC.
+* `--http.compression`: Compresses HTTP-RPC responses of 1 KiB or more with the encoding the client's `Accept-Encoding` allows: Zstandard (preferred) or gzip. A client that accepts neither gets an uncompressed response.
   * Default: `true`
 * `--http.corsdomain value`: A comma-separated list of domains for cross-origin requests.
 * `--http.vhosts value`: A comma-separated list of virtual hostnames.
@@ -301,6 +301,9 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `50000000`
 * `--rpc.batch.limit value`: Sets the maximum number of requests in a batch.
   * Default: `100`
+* `--rpc.subscription.limit value`: Maximum number of concurrent subscriptions per WebSocket or IPC connection.
+  * Default: `1024`
+  * Set to `0` for unlimited subscriptions.
 * `--rpc.blockrange.limit value`: Sets the maximum block range for `eth_getLogs` and similar range queries.
   * Default: `1000`
   * Applies to: `eth_getLogs`, `eth_getFilterLogs`, `erigon_getLogs`
@@ -545,9 +548,11 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
 * `--caplin.discovery.port value`: The port for the Caplin DISCV5 protocol.
   * Default: `4000`
 * `--caplin.discovery.tcpport value`: The TCP port for Caplin libp2p.
-	* Default: `4001`
+  * Default: `4001`
 * `--caplin.discovery.quicport value`: The QUIC UDP port for Caplin libp2p.
-	* Default: `4001`
+  * Default: `4002`
+* `--caplin.quic.disable`: Disables the QUIC transport for Caplin libp2p, falling back to TCP only. Useful when the QUIC UDP port cannot be exposed, for example in some Docker or Kubernetes setups.
+  * Default: `false`
 * `--caplin.checkpoint-sync-url value`: The checkpoint sync endpoint.
 * `--caplin.subscribe-all-topics`: Subscribes to all gossip topics.
   * Default: `false`
@@ -584,6 +589,8 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
 * `--caplin.snapgen`: Enables snapshot generation.
   * Default: `false`
 * `--caplin.mev-relay-url value`: The MEV relay endpoint.
+* `--caplin.builder.allow-private-urls`: Lets the builder URLs that validators submit as builder preferences resolve to private or loopback addresses, for a builder on the same host or LAN. Other non-public ranges stay blocked. Does not apply to `--caplin.mev-relay-url`.
+  * Default: `false`
 * `--caplin.validator-monitor`: Enables Caplin validator monitoring metrics.
   * Default: `false`
 * `--caplin.custom-config value`: Sets a custom config for Caplin.
@@ -674,7 +681,7 @@ Erigon's own variables — everything below except the [Docker](#docker-environm
 * `NO_PRUNE` - Disables pruning when set to true (flag equivalent: `--exec.no-prune`)
 * `NO_MERGE` - Disables merging operations (flag equivalent: `--exec.no-merge`)
 * `PRUNE_TOTAL_DIFFICULTY` - Controls total difficulty pruning (default: `true`)
-* `MAX_REORG_DEPTH` - Sets maximum reorganization depth (default: `96`)
+* `MAX_REORG_DEPTH` - Sets how many blocks behind the head Erigon keeps reorg data while no finalized block is known, and during the initial sync cycle (default: `96`). After that, once the consensus layer reports a finalized block, Erigon keeps changesets and holds snapshot retirement back to that block instead: during non-finality it can reorg deeper than this value — down to, but not below, the finalized block — and with normal finality it may keep fewer than 96 blocks. The value still caps how far a new payload's missing ancestors are downloaded and how far from the head a side fork is validated.
 * `CAPLIN_STATE_PRUNE_DISABLE` - Disables pruning of Caplin's state indexing DB after ranges are frozen into snapshots (default: `false`)
 * `CAPLIN_STATE_PRUNE_TIMEOUT` - Overrides the per-pass time budget for Caplin state pruning (a duration, e.g. `500ms`; default derived from the chain's slot time)
 

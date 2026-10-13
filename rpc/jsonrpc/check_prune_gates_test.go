@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"math"
 	"math/big"
 	"testing"
@@ -38,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 const (
@@ -656,8 +658,9 @@ func TestBlocksGateAppliesChainHistoryExpiry(t *testing.T) {
 }
 
 // TestLogsByBlockHashNamesThePruneBoundary pins that a filter pinned to a block
-// hash reports pruning rather than a missing block: the range is resolved from the
-// retained header, so the gate speaks before any body is read.
+// hash, in eth_getLogs or trace_filter, reports pruning rather than a missing
+// block: the range is resolved from the retained header, so the gate speaks
+// before any body is read.
 func TestLogsByBlockHashNamesThePruneBoundary(t *testing.T) {
 	t.Parallel()
 
@@ -684,6 +687,9 @@ func TestLogsByBlockHashNamesThePruneBoundary(t *testing.T) {
 		}},
 		{"overlay_getLogs", func() (any, error) {
 			return apis.overlay.GetLogs(ctx, filters.FilterCriteria{BlockHash: &hash}, nil, nil)
+		}},
+		{"trace_filter", func() (any, error) {
+			return nil, apis.trace.Filter(ctx, TraceFilterRequest{BlockHash: &hash}, new(bool), nil, jsonstream.New(io.Discard))
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

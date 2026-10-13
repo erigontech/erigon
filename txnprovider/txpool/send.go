@@ -72,7 +72,7 @@ func (f *Send) BroadcastPooledTxns(rlps [][]byte, maxPeers uint64) (txnSentTo []
 		size += len(rlps[i])
 		// Wait till the combined size of rlps so far is greater than a threshold and
 		// send them all at once. Then wait till end of array or this threshold hits again
-		if i == l-1 || size >= p2pTxPacketLimit {
+		if i == l-1 || size >= p2pTxPacketLimit || i-prev+1 >= maxTransactionsPerPacket {
 			txnsData := EncodeTransactions(rlps[prev:i+1], nil)
 			var txns66 *sentryproto.SendMessageToRandomPeersRequest
 			for _, sentryClient := range f.sentryClients {

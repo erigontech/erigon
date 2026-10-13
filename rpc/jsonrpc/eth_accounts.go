@@ -46,28 +46,27 @@ func (api *APIImpl) stateReaderAt(ctx context.Context, blockNrOrHash rpc.BlockNu
 	if err != nil {
 		return nil, nil, err
 	}
+	ok := false
+	defer kv.RollbackUnless(&ok, tx)
 
 	blockNumber, _, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
-		tx.Rollback()
 		return nil, nil, err
 	}
 
-	if err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber); err != nil {
-		tx.Rollback()
+	if err := api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber); err != nil {
 		return nil, nil, err
 	}
 
-	if err = rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
-		tx.Rollback()
+	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
 		return nil, nil, err
 	}
 
 	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, -1, api.stateCache, api._txNumReader)
 	if err != nil {
-		tx.Rollback()
 		return nil, nil, err
 	}
+	ok = true
 	return tx, reader, nil
 }
 
