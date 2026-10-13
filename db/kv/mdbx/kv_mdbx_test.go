@@ -1362,20 +1362,6 @@ func TestRoTxsLimiterAcquireWaitsForRelease(t *testing.T) {
 		synctest.Wait()
 		require.Empty(t, got, "Acquire passed a full limiter")
 		l.Release()
-		require.NoError(t, <-got)
-		require.False(t, l.TryAcquire(), "the permit went to the waiter")
-	})
-}
-
-// A released permit goes to the queued waiter, not to whoever calls next.
-func TestRoTxsLimiterReleaseServesTheWaiterFirst(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		l := mdbx.NewRoTxsLimiter(1)
-		require.True(t, l.TryAcquire())
-		got := make(chan error, 1)
-		go func() { got <- l.Acquire(t.Context()) }()
-		synctest.Wait()
-		l.Release()
 		require.False(t, l.TryAcquire(), "a newcomer took the permit from a queued waiter")
 		require.NoError(t, <-got)
 	})
@@ -1400,7 +1386,7 @@ func TestRoTxsLimiterReleaseBeyondTheBoundPanics(t *testing.T) {
 func TestRoTxsLimiterUnderContention(t *testing.T) {
 	const size, workers, rounds = 4, 32, 2000
 	l := mdbx.NewRoTxsLimiter(size)
-	var held, peak atomic.Int64
+	var held atomic.Int64
 	var wg sync.WaitGroup
 	for w := range workers {
 		wg.Go(func() {
@@ -1414,16 +1400,13 @@ func TestRoTxsLimiterUnderContention(t *testing.T) {
 				if err != nil {
 					continue
 				}
-				n := held.Add(1)
-				for p := peak.Load(); n > p && !peak.CompareAndSwap(p, n); p = peak.Load() {
-				}
+				assert.LessOrEqual(t, held.Add(1), int64(size), "more holders than permits")
 				held.Add(-1)
 				l.Release()
 			}
 		})
 	}
 	wg.Wait()
-	require.LessOrEqual(t, peak.Load(), int64(size))
 	for range size {
 		require.True(t, l.TryAcquire(), "a permit was lost")
 	}

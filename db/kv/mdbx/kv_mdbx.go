@@ -679,9 +679,8 @@ func (db *MdbxKV) registerLiveTx(tx *MdbxTx, readOnly bool) {
 		stack:    stack,
 	}
 	db.liveTxsMu.Unlock()
-	count := db.txsCount.Load()
 
-	db.log.Trace("MDBX_TX_OPEN", "id", id, "kind", kind, "count", count, "stack", stack)
+	db.log.Trace("MDBX_TX_OPEN", "id", id, "kind", kind, "count", db.txsCount.Load(), "stack", stack)
 }
 
 // unregisterLiveTx removes a tx from the live set and logs a close event.
@@ -696,12 +695,11 @@ func (db *MdbxKV) unregisterLiveTx(tx *MdbxTx, event string) {
 		delete(db.liveTxs, tx)
 	}
 	db.liveTxsMu.Unlock()
-	count := db.txsCount.Load()
 
 	if !ok {
 		return
 	}
-	db.log.Trace("MDBX_TX_"+event, "id", info.id, "kind", info.kind, "count", count, "stack", dbg.Stack())
+	db.log.Trace("MDBX_TX_"+event, "id", info.id, "kind", info.kind, "count", db.txsCount.Load(), "stack", dbg.Stack())
 }
 
 // dumpConcurrentTxs prints the stacks of all live chaindata txs EXCEPT the
