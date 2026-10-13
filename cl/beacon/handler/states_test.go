@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
@@ -645,9 +646,8 @@ func TestGetProposerLookaheadHistoricalReadsEpochData(t *testing.T) {
 	require.NoError(t, tx.Put(kv.EpochData, base_encoding.Encode64ToBytes4(epoch*cfg.SlotsPerEpoch), buf.Bytes()))
 	require.NoError(t, tx.Commit())
 
-	resp := getProposerLookahead(t, h, slot)
-	defer resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode)
+	resp := getProposerLookahead(t, h, strconv.FormatUint(slot, 10))
+	require.Equal(t, http.StatusOK, resp.Code)
 
 	var out struct {
 		Data []string `json:"data"`
@@ -669,17 +669,45 @@ func TestGetProposerLookaheadHistoricalWithoutEpochData(t *testing.T) {
 	require.NoError(t, tx.Delete(kv.EpochData, base_encoding.Encode64ToBytes4(cfg.RoundSlotToEpoch(slot))))
 	require.NoError(t, tx.Commit())
 
-	resp := getProposerLookahead(t, h, slot)
-	defer resp.Body.Close()
-	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+	resp := getProposerLookahead(t, h, strconv.FormatUint(slot, 10))
+	require.Equal(t, http.StatusNotFound, resp.Code)
 }
 
-func getProposerLookahead(t *testing.T, h *ApiHandler, slot uint64) *http.Response {
-	server := httptest.NewServer(h.mux)
-	t.Cleanup(server.Close)
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/eth/v1/beacon/states/"+strconv.FormatUint(slot, 10)+"/proposer_lookahead", nil)
+func TestGetProposerLookaheadHistoricalNonCanonicalState(t *testing.T) {
+	db, blocks, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	cfg := h.beaconChainCfg
+	cfg.FuluForkEpoch = 0
+	slot := blocks[len(blocks)-1].Block.Slot
+
+	// A side-branch block at the same slot, indexed but not canonical.
+	sideHeader := &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: slot, ParentRoot: common.Hash{1}, Root: common.Hash{2}}}
+	sideBlockRoot, err := sideHeader.Header.HashSSZ()
 	require.NoError(t, err)
-	resp, err := server.Client().Do(req)
+	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
-	return resp
+	defer tx.Rollback()
+	require.NoError(t, beacon_indicies.WriteBeaconBlockHeaderAndIndicies(tx, sideHeader, false))
+	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+	require.NoError(t, err)
+	require.NotEqual(t, canonicalRoot, sideBlockRoot)
+	require.NoError(t, tx.Commit())
+
+	resp := getProposerLookahead(t, h, sideHeader.Header.Root.String())
+	require.Equal(t, http.StatusNotFound, resp.Code)
+}
+
+func TestGetProposerLookaheadBeforeFulu(t *testing.T) {
+	_, blocks, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	slot := blocks[len(blocks)-1].Block.Slot
+
+	resp := getProposerLookahead(t, h, strconv.FormatUint(slot, 10))
+	require.Equal(t, http.StatusBadRequest, resp.Code)
+}
+
+func getProposerLookahead(t *testing.T, h *ApiHandler, stateID string) *httptest.ResponseRecorder {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/beacon/states/"+stateID+"/proposer_lookahead", nil)
+	h.mux.ServeHTTP(recorder, request)
+	return recorder
 }
