@@ -377,6 +377,7 @@ func (f *ForkChoiceStore) getHeadOnce(auxilliaryState *state.CachingBeaconState,
 }
 
 func (f *ForkChoiceStore) publishSelectedHead(root common.Hash, slot uint64) {
+	f.selectedHead.Store(&ForkChoiceNode{Root: root, PayloadStatus: f.headPayloadStatus})
 	if f.syncedDataManager != nil {
 		f.syncedDataManager.OnSelectedHead(root, slot)
 	}
