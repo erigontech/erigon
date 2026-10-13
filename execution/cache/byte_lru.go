@@ -52,8 +52,11 @@ type ByteLRU[V any] struct {
 	// spends it: an unbudgeted layer holds maxBytes from the start, so it never
 	// grows and never reads this.
 	resident atomic.Int64
-	limit    atomic.Int64 // otter's maximum; for a budgeted cache, the bytes reserved from the envelope
-	ceiling  atomic.Int64 // limit may still grow to this; drops to limit when the envelope refuses
+	limit    atomic.Int64 // for a budgeted cache, the bytes reserved from the envelope
+	// ceiling is otter's maximum: limit may grow to it, and it drops to limit when the envelope
+	// refuses. otter runs its frequency sketch from half its maximum, so a maximum that tracked
+	// limit would charge every write of a growing cache for it.
+	ceiling atomic.Int64
 
 	growMu sync.Mutex
 	// addStripes serialize same-key writers so Add is correct on its own, not
@@ -88,7 +91,7 @@ func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, 
 	cachebudget.Global.Take(floor)
 	b.limit.Store(floor)
 	b.ceiling.Store(b.maxBytes)
-	b.c = newOtter(floor, weigh, func(e otter.DeletionEvent[uint64, V]) {
+	b.c = newOtter(b.maxBytes, weigh, func(e otter.DeletionEvent[uint64, V]) {
 		// A replacement is refunded by Add, from the value Set displaced.
 		if e.Cause != otter.CauseReplacement {
 			b.resident.Add(-weigh(e.Key, e.Value))
@@ -186,10 +189,10 @@ func (b *ByteLRU[V]) grow(w int64) {
 	chunk := min(byteLRUChunkBytes, ceil-lim)
 	if !cachebudget.Global.Reserve(chunk) {
 		b.ceiling.Store(lim) // envelope full: stop asking until Purge/Close frees it
+		b.c.SetMaximum(uint64(lim))
 		return
 	}
 	b.limit.Store(lim + chunk)
-	b.c.SetMaximum(uint64(lim + chunk))
 }
 
 func (b *ByteLRU[V]) Remove(key uint64) { b.c.Invalidate(key) }
@@ -212,7 +215,7 @@ func (b *ByteLRU[V]) Purge() {
 	cachebudget.Global.Release(b.limit.Load() - floor)
 	b.limit.Store(floor)
 	b.ceiling.Store(b.maxBytes)
-	b.c.SetMaximum(uint64(floor))
+	b.c.SetMaximum(uint64(b.maxBytes))
 }
 
 // Close empties the cache and returns a budgeted cache's envelope reservation. Idempotent.

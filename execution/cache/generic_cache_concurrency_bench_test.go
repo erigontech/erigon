@@ -19,6 +19,8 @@ package cache
 import (
 	"encoding/binary"
 	"math/rand"
+	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -98,6 +100,39 @@ func BenchmarkGenericCacheFill(b *testing.B) {
 			c.Put(k, val, 1)
 		}
 		c.Close()
+	}
+}
+
+// Read-ahead workers filling distinct cold accounts into one cache at once. The
+// cache already holds 2M entries, so the timed fill grows no table.
+func BenchmarkGenericCacheParallelFill(b *testing.B) {
+	const ballast, keys = 2 * 1024 * 1024, 1024 * 1024
+	val := make([]byte, 40)
+	for b.Loop() {
+		b.StopTimer()
+		c := NewGenericCache[[]byte](1*datasize.GB, func(v []byte) int { return len(v) }, ModeEvictLRU)
+		k := make([]byte, 20)
+		for i := range uint64(ballast) {
+			binary.BigEndian.PutUint64(k, i*0x9E3779B97F4A7C15)
+			c.PutIfAbsent(k, val, 1)
+		}
+		var next atomic.Uint64
+		next.Store(ballast)
+		var wg sync.WaitGroup
+		b.StartTimer()
+		for range runtime.GOMAXPROCS(0) {
+			wg.Go(func() {
+				k := make([]byte, 20)
+				for i := next.Add(1); i <= ballast+keys; i = next.Add(1) {
+					binary.BigEndian.PutUint64(k, i*0x9E3779B97F4A7C15)
+					c.PutIfAbsent(k, val, 1)
+				}
+			})
+		}
+		wg.Wait()
+		b.StopTimer()
+		c.Close()
+		b.StartTimer()
 	}
 }
 
