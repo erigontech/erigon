@@ -1579,9 +1579,15 @@ func (ibs *IntraBlockState) SetNonce(addr accounts.Address, nonce uint64, reason
 // matching the materialized path's AddressPath-only footprint. Absent/destroyed
 // accounts still materialize (account creation).
 func (ibs *IntraBlockState) writeNonceVersioned(addr accounts.Address, nonce uint64, wasCommited bool, reason tracing.NonceChangeReason) error {
-	base, _, _, err := ibs.versionedAccountBase(addr, true)
-	if err != nil {
-		return err
+	var base *accounts.Account
+	// An account this tx created and has not destroyed: its record is this tx's own AddressPath write.
+	if r := ibs.versionedReads.dirtyRec(addr); r != nil && r.wAddress != nil && r.wSelfDestruct != nil && !r.wSelfDestruct.Val {
+		base = r.wAddress.Val
+	} else {
+		var err error
+		if base, _, _, err = ibs.versionedAccountBase(addr, true); err != nil {
+			return err
+		}
 	}
 	if base == nil || ibs.accountLifecycle(addr) {
 		stateObject, err := ibs.GetOrNewStateObject(addr)
@@ -1655,7 +1661,7 @@ func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 	}
 	// A live account this tx created: no own self-destruct, and createObject wrote its AddressPath.
 	if r := ibs.versionedReads.dirtyRec(addr); ibs.noMaterialize && r != nil && r.wAddress != nil && !ibs.accountLifecycle(addr) {
-		return ibs.setCreatedCode(addr, canonical, reason)
+		return ibs.setCreatedCode(r, addr, canonical, reason)
 	}
 	stateObject, err := ibs.GetOrNewStateObject(addr)
 	if err != nil {
@@ -1753,19 +1759,30 @@ func (ibs *IntraBlockState) journalCodeChange(addr accounts.Address, prevHash ac
 // setCreatedCode is SetCode for an account this tx created, on the noMaterialize
 // path: its prior code is this tx's own cells, so no transient stateObject is
 // rebuilt, and the net-zero check against the tx-start code does not apply.
-func (ibs *IntraBlockState) setCreatedCode(addr accounts.Address, code accounts.Code, reason tracing.CodeChangeReason) error {
-	baseCodeHash, err := ibs.GetCodeHash(addr)
-	if err != nil {
-		return err
+func (ibs *IntraBlockState) setCreatedCode(r *acctIO, addr accounts.Address, code accounts.Code, reason tracing.CodeChangeReason) error {
+	// The creation wrote the code hash, and an own code write carries one too.
+	baseCodeHash := accounts.EmptyCodeHash
+	if r.wCodeHash != nil {
+		baseCodeHash = r.wCodeHash.Val
+	} else {
+		var err error
+		if baseCodeHash, err = ibs.GetCodeHash(addr); err != nil {
+			return err
+		}
 	}
-	prev, err := ibs.codeSeed(addr, baseCodeHash)
-	if err != nil {
-		return err
+	prev, wasCommited := accounts.Code{Hash: accounts.EmptyCodeHash}, r.wCode == nil
+	if !wasCommited {
+		prev = r.wCode.Val
+	} else if baseCodeHash != accounts.EmptyCodeHash {
+		var err error
+		if prev, err = ibs.codeSeed(addr, baseCodeHash); err != nil {
+			return err
+		}
 	}
 	if prev.Hash == code.Hash && bytes.Equal(prev.Bytes, code.Bytes) {
 		return nil
 	}
-	ibs.journalCodeChange(addr, prev.Hash, prev.Bytes, code, !ibs.hasWrite(addr, CodePath, accounts.NilKey), reason)
+	ibs.journalCodeChange(addr, prev.Hash, prev.Bytes, code, wasCommited, reason)
 	ibs.writeCode(addr, code, code.Hash == baseCodeHash)
 	return nil
 }
