@@ -1748,19 +1748,29 @@ func (ibs *IntraBlockState) journalCodeChange(addr accounts.Address, prevHash ac
 // path: its prior code is this tx's own cells, so no transient stateObject is
 // rebuilt, and the net-zero check against the tx-start code does not apply.
 func (ibs *IntraBlockState) setCreatedCode(addr accounts.Address, code accounts.Code, reason tracing.CodeChangeReason) error {
-	baseCodeHash, err := ibs.GetCodeHash(addr)
-	if err != nil {
-		return err
-	}
-	prev, err := ibs.codeSeed(addr, baseCodeHash)
-	if err != nil {
-		return err
+	cw, hadCode := ibs.versionedWrites.GetCode(addr)
+	hw, hadHash := ibs.versionedWrites.GetCodeHash(addr)
+	var prev accounts.Code
+	switch {
+	case hadCode:
+		prev = cw.Val
+	case hadHash && hw.Val == accounts.EmptyCodeHash:
+		prev = accounts.Code{Hash: accounts.EmptyCodeHash}
+	default:
+		// An unchanged SetCode drops the code hash write createObject made.
+		baseCodeHash, err := ibs.GetCodeHash(addr)
+		if err != nil {
+			return err
+		}
+		if prev, err = ibs.codeSeed(addr, baseCodeHash); err != nil {
+			return err
+		}
 	}
 	if prev.Hash == code.Hash && bytes.Equal(prev.Bytes, code.Bytes) {
 		return nil
 	}
-	ibs.journalCodeChange(addr, prev.Hash, prev.Bytes, code, !ibs.hasWrite(addr, CodePath, accounts.NilKey), reason)
-	ibs.writeCode(addr, code, code.Hash == baseCodeHash)
+	ibs.journalCodeChange(addr, prev.Hash, prev.Bytes, code, !hadCode, reason)
+	ibs.writeCode(addr, code, code.Hash == prev.Hash)
 	return nil
 }
 
