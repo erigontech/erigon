@@ -311,10 +311,20 @@ func (so *stateObject) setState(key accounts.StorageKey, value uint256.Int) {
 func (so *stateObject) updateStorage(stateWriter StateWriter, useBlockOrigin bool) error {
 	// When using full state override, only the fake storage matters (see also SetStorage)
 	if so.fakeStorage != nil {
-		// First, delete the account to wipe out the original storage
-		err := stateWriter.DeleteAccount(so.address, &so.original)
+		// DeleteAccount also deletes the code, so read it first and write it back after.
+		code, err := so.CodeTyped()
 		if err != nil {
 			return err
+		}
+		// First, delete the account to wipe out the original storage
+		err = stateWriter.DeleteAccount(so.address, &so.original)
+		if err != nil {
+			return err
+		}
+		if len(code.Bytes) > 0 {
+			if err := stateWriter.UpdateAccountCode(so.address, so.data.Incarnation, code.Hash, code.Bytes); err != nil {
+				return err
+			}
 		}
 		// Then, we need to apply the fake storage changes to compute the state root correctly
 		err = so.applyStorageChanges(stateWriter, so.fakeStorage, useBlockOrigin)
