@@ -2917,11 +2917,17 @@ type acctIO struct {
 	committed    *accounts.Account
 	hasCommitted bool
 
-	// rd holds the per-path read values out of line, so a lookup touches a
-	// small record; has gates each value.
-	rd          *acctReads
-	sdWitnesses []VersionedRead[bool]
-	storage     map[accounts.StorageKey]VersionedRead[uint256.Int]
+	address        VersionedRead[AccountView]
+	balance        VersionedRead[uint256.Int]
+	nonce          VersionedRead[uint64]
+	incarnation    VersionedRead[uint64]
+	selfDestruct   VersionedRead[bool]
+	sdWitnesses    []VersionedRead[bool]
+	createContract VersionedRead[bool]
+	code           VersionedRead[accounts.Code]
+	codeHash       VersionedRead[accounts.CodeHash]
+	codeSize       VersionedRead[int]
+	storage        map[accounts.StorageKey]VersionedRead[uint256.Int]
 
 	wAddress        *VersionedWrite[*accounts.Account]
 	wBalance        *VersionedWrite[uint256.Int]
@@ -2935,20 +2941,6 @@ type acctIO struct {
 	wStorage        map[accounts.StorageKey]*VersionedWrite[uint256.Int]
 }
 
-type acctReads struct {
-	address        VersionedRead[AccountView]
-	balance        VersionedRead[uint256.Int]
-	nonce          VersionedRead[uint64]
-	incarnation    VersionedRead[uint64]
-	selfDestruct   VersionedRead[bool]
-	createContract VersionedRead[bool]
-	code           VersionedRead[accounts.Code]
-	codeHash       VersionedRead[accounts.CodeHash]
-	codeSize       VersionedRead[int]
-}
-
-const rdChunk = 64
-
 // ioTable is an IntraBlockState's own read and write set: records in a slice
 // reused across transactions, found through idx or the last-lookup memo. It is
 // copied into a ReadSet / WriteSet only when handed over.
@@ -2961,8 +2953,6 @@ type ioTable struct {
 	mapped int
 	// accts holds the accounts the AddressPath reads point to until reset.
 	accts acctSlab
-	// rds backs each record's rd; chunks never move, so rd stays valid.
-	rds [][]acctReads
 }
 
 func pathBit(p AccountPath) uint16 { return 1 << p }
@@ -2995,12 +2985,6 @@ func (t *ioTable) get(addr accounts.Address) *acctIO {
 		t.recs = append(t.recs, acctIO{})
 	}
 	r := &t.recs[i]
-	if r.rd == nil {
-		if i/rdChunk == len(t.rds) {
-			t.rds = append(t.rds, make([]acctReads, rdChunk))
-		}
-		r.rd = &t.rds[i/rdChunk][i%rdChunk]
-	}
 	// The per-path read values stay: has gates every one, and zeroing them would
 	// touch the whole record for each new address.
 	r.addr, r.has, r.dirty, r.accessed, r.access = addr, 0, 0, false, accessOptions{}
@@ -3142,15 +3126,15 @@ func setRead[T any](t *ioTable, addr accounts.Address, path AccountPath, pick fu
 	r.has |= pathBit(path)
 }
 
-func pickAddress(r *acctIO) *VersionedRead[AccountView]        { return &r.rd.address }
-func pickBalance(r *acctIO) *VersionedRead[uint256.Int]        { return &r.rd.balance }
-func pickNonce(r *acctIO) *VersionedRead[uint64]               { return &r.rd.nonce }
-func pickIncarnation(r *acctIO) *VersionedRead[uint64]         { return &r.rd.incarnation }
-func pickSelfDestruct(r *acctIO) *VersionedRead[bool]          { return &r.rd.selfDestruct }
-func pickCreateContract(r *acctIO) *VersionedRead[bool]        { return &r.rd.createContract }
-func pickCode(r *acctIO) *VersionedRead[accounts.Code]         { return &r.rd.code }
-func pickCodeHash(r *acctIO) *VersionedRead[accounts.CodeHash] { return &r.rd.codeHash }
-func pickCodeSize(r *acctIO) *VersionedRead[int]               { return &r.rd.codeSize }
+func pickAddress(r *acctIO) *VersionedRead[AccountView]        { return &r.address }
+func pickBalance(r *acctIO) *VersionedRead[uint256.Int]        { return &r.balance }
+func pickNonce(r *acctIO) *VersionedRead[uint64]               { return &r.nonce }
+func pickIncarnation(r *acctIO) *VersionedRead[uint64]         { return &r.incarnation }
+func pickSelfDestruct(r *acctIO) *VersionedRead[bool]          { return &r.selfDestruct }
+func pickCreateContract(r *acctIO) *VersionedRead[bool]        { return &r.createContract }
+func pickCode(r *acctIO) *VersionedRead[accounts.Code]         { return &r.code }
+func pickCodeHash(r *acctIO) *VersionedRead[accounts.CodeHash] { return &r.codeHash }
+func pickCodeSize(r *acctIO) *VersionedRead[int]               { return &r.codeSize }
 
 func (t *ioTable) GetAddress(addr accounts.Address) (VersionedRead[AccountView], bool) {
 	return getRead(t, addr, AddressPath, pickAddress)
@@ -3232,13 +3216,13 @@ func (t *ioTable) SetCodeSize(addr accounts.Address, tr VersionedRead[int]) {
 // ReadSet.SetSelfDestruct does.
 func (t *ioTable) SetSelfDestruct(addr accounts.Address, tr VersionedRead[bool]) {
 	r := t.get(addr)
-	if r.has&pathBit(SelfDestructPath) != 0 && r.rd.selfDestruct.Version != tr.Version {
-		prev := r.rd.selfDestruct
+	if r.has&pathBit(SelfDestructPath) != 0 && r.selfDestruct.Version != tr.Version {
+		prev := r.selfDestruct
 		if !slices.ContainsFunc(r.sdWitnesses, func(w VersionedRead[bool]) bool { return w.Version == prev.Version }) {
 			r.sdWitnesses = append(r.sdWitnesses, prev)
 		}
 	}
-	r.rd.selfDestruct = tr
+	r.selfDestruct = tr
 	r.has |= pathBit(SelfDestructPath)
 }
 
@@ -3264,23 +3248,23 @@ func (t *ioTable) getHeader(addr accounts.Address, path AccountPath, key account
 	}
 	switch path {
 	case AddressPath:
-		return r.rd.address.ReadHeader, true
+		return r.address.ReadHeader, true
 	case BalancePath:
-		return r.rd.balance.ReadHeader, true
+		return r.balance.ReadHeader, true
 	case NoncePath:
-		return r.rd.nonce.ReadHeader, true
+		return r.nonce.ReadHeader, true
 	case IncarnationPath:
-		return r.rd.incarnation.ReadHeader, true
+		return r.incarnation.ReadHeader, true
 	case SelfDestructPath:
-		return r.rd.selfDestruct.ReadHeader, true
+		return r.selfDestruct.ReadHeader, true
 	case CreateContractPath:
-		return r.rd.createContract.ReadHeader, true
+		return r.createContract.ReadHeader, true
 	case CodePath:
-		return r.rd.code.ReadHeader, true
+		return r.code.ReadHeader, true
 	case CodeHashPath:
-		return r.rd.codeHash.ReadHeader, true
+		return r.codeHash.ReadHeader, true
 	case CodeSizePath:
-		return r.rd.codeSize.ReadHeader, true
+		return r.codeSize.ReadHeader, true
 	}
 	return ReadHeader{}, false
 }
@@ -3323,15 +3307,15 @@ func (t *ioTable) ScanAddr(addr accounts.Address, fn func(path AccountPath, key 
 			n++
 		}
 	}
-	visit(AddressPath, &r.rd.address.ReadHeader)
-	visit(BalancePath, &r.rd.balance.ReadHeader)
-	visit(NoncePath, &r.rd.nonce.ReadHeader)
-	visit(IncarnationPath, &r.rd.incarnation.ReadHeader)
-	visit(SelfDestructPath, &r.rd.selfDestruct.ReadHeader)
-	visit(CreateContractPath, &r.rd.createContract.ReadHeader)
-	visit(CodePath, &r.rd.code.ReadHeader)
-	visit(CodeHashPath, &r.rd.codeHash.ReadHeader)
-	visit(CodeSizePath, &r.rd.codeSize.ReadHeader)
+	visit(AddressPath, &r.address.ReadHeader)
+	visit(BalancePath, &r.balance.ReadHeader)
+	visit(NoncePath, &r.nonce.ReadHeader)
+	visit(IncarnationPath, &r.incarnation.ReadHeader)
+	visit(SelfDestructPath, &r.selfDestruct.ReadHeader)
+	visit(CreateContractPath, &r.createContract.ReadHeader)
+	visit(CodePath, &r.code.ReadHeader)
+	visit(CodeHashPath, &r.codeHash.ReadHeader)
+	visit(CodeSizePath, &r.codeSize.ReadHeader)
 	for k, tr := range r.storage {
 		fn(StoragePath, k, &tr.ReadHeader)
 		r.storage[k] = tr
@@ -3347,23 +3331,23 @@ func (t *ioTable) toReadSet() ReadSet {
 		r := &t.recs[i]
 		a := r.addr
 		if r.has&pathBit(AddressPath) != 0 {
-			tr := r.rd.address
+			tr := r.address
 			if tr.Val != nil && !tr.Val.IsNil() {
 				tr.Val = NewAccountView(tr.Val.Account().SelfCopy())
 			}
 			readSetPut(&s.address, a, tr)
 		}
 		if r.has&pathBit(BalancePath) != 0 {
-			readSetPut(&s.balance, a, r.rd.balance)
+			readSetPut(&s.balance, a, r.balance)
 		}
 		if r.has&pathBit(NoncePath) != 0 {
-			readSetPut(&s.nonce, a, r.rd.nonce)
+			readSetPut(&s.nonce, a, r.nonce)
 		}
 		if r.has&pathBit(IncarnationPath) != 0 {
-			readSetPut(&s.incarnation, a, r.rd.incarnation)
+			readSetPut(&s.incarnation, a, r.incarnation)
 		}
 		if r.has&pathBit(SelfDestructPath) != 0 {
-			readSetPut(&s.selfDestruct, a, r.rd.selfDestruct)
+			readSetPut(&s.selfDestruct, a, r.selfDestruct)
 		}
 		if len(r.sdWitnesses) > 0 {
 			if s.selfDestructWitnesses == nil {
@@ -3372,16 +3356,16 @@ func (t *ioTable) toReadSet() ReadSet {
 			s.selfDestructWitnesses[a] = slices.Clone(r.sdWitnesses)
 		}
 		if r.has&pathBit(CreateContractPath) != 0 {
-			readSetPut(&s.createContract, a, r.rd.createContract)
+			readSetPut(&s.createContract, a, r.createContract)
 		}
 		if r.has&pathBit(CodePath) != 0 {
-			readSetPut(&s.code, a, r.rd.code)
+			readSetPut(&s.code, a, r.code)
 		}
 		if r.has&pathBit(CodeHashPath) != 0 {
-			readSetPut(&s.codeHash, a, r.rd.codeHash)
+			readSetPut(&s.codeHash, a, r.codeHash)
 		}
 		if r.has&pathBit(CodeSizePath) != 0 {
-			readSetPut(&s.codeSize, a, r.rd.codeSize)
+			readSetPut(&s.codeSize, a, r.codeSize)
 		}
 		if len(r.storage) > 0 {
 			if s.storage == nil {

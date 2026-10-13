@@ -962,7 +962,7 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 		if rec.dirty > 0 && rec.wAddress != nil {
 			return rec.wAddress.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, nil
 		}
-		if tr := rec.rd.address; rec.has&pathBit(AddressPath) != 0 && warmSource(tr.Source) {
+		if tr := rec.address; rec.has&pathBit(AddressPath) != 0 && warmSource(tr.Source) {
 			if tr.Val != nil {
 				return tr.Val.Account(), tr.Source, tr.Version, nil
 			}
