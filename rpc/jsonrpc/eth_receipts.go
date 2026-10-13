@@ -118,6 +118,10 @@ func usesLogIndex(crit filters.FilterCriteria) bool {
 	return false
 }
 
+// errBlockHashNotFound marks a by-hash selector that names no canonical block
+// with a body in the request's view.
+var errBlockHashNotFound = errors.New("block not found")
+
 // resolveLogsBlockHash resolves the block a by-hash log query names. The header-number
 // index also covers non-canonical headers and the log scan is by block number, so a
 // side-chain hash must not resolve to the canonical block at that height. Below the
@@ -130,14 +134,14 @@ func (api *BaseAPI) resolveLogsBlockHash(ctx context.Context, tx kv.Tx, hash com
 		return 0, err
 	}
 	if number == nil {
-		return 0, fmt.Errorf("block not found: %x", hash)
+		return 0, fmt.Errorf("%w: %x", errBlockHashNotFound, hash)
 	}
 	canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, *number)
 	if err != nil {
 		return 0, err
 	}
 	if !ok || canonicalHash != hash {
-		return 0, fmt.Errorf("block not found: %x", hash)
+		return 0, fmt.Errorf("%w: %x", errBlockHashNotFound, hash)
 	}
 	body, err := api._blockReader.CanonicalBodyForStorage(ctx, tx, *number)
 	if err != nil {
@@ -147,7 +151,7 @@ func (api *BaseAPI) resolveLogsBlockHash(ctx context.Context, tx kv.Tx, hash com
 		if err := api.checkPruneBlocks(ctx, tx, *number); err != nil {
 			return 0, err
 		}
-		return 0, fmt.Errorf("block not found: %x", hash)
+		return 0, fmt.Errorf("%w: %x", errBlockHashNotFound, hash)
 	}
 	return *number, nil
 }

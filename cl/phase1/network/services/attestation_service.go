@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -56,6 +57,10 @@ func validationEpochRange(headState *state.CachingBeaconState, highestSeenSlot, 
 	if currentSlot/slotsPerEpoch > headEpoch {
 		currEpoch = headEpoch + 1
 	}
+	// Shuffling for headEpoch+2 uses the head epoch's final RANDAO mix, provided no later block has been seen.
+	if currentSlot/slotsPerEpoch > headEpoch+1 && highestSeenSlot <= headState.Slot() {
+		currEpoch = headEpoch + 2
+	}
 	return state.PreviousEpoch(headState), currEpoch
 }
 
@@ -82,6 +87,11 @@ type AttestationForGossip struct {
 	Receiver          *sentinelproto.Peer
 	// ImmediateProcess indicates whether the attestation should be processed immediately or able to be scheduled for later processing.
 	ImmediateProcess bool
+	TopicForkDigest  *common.Bytes4
+}
+
+func (a *AttestationForGossip) SetTopicForkDigest(digest common.Bytes4) {
+	a.TopicForkDigest = &digest
 }
 
 func NewAttestationService(
@@ -154,6 +164,15 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 	attEpoch := s.ethClock.GetEpochAtSlot(slot)
 	clVersion := s.beaconCfg.GetCurrentStateVersion(attEpoch)
+	if att.TopicForkDigest != nil {
+		messageForkDigest, err := s.ethClock.ComputeForkDigest(attEpoch)
+		if err != nil {
+			return fmt.Errorf("%w: compute attestation fork digest: %w", ErrIgnore, err)
+		}
+		if messageForkDigest != *att.TopicForkDigest {
+			return fmt.Errorf("%w: attestation fork digest does not match topic", ErrIgnore)
+		}
+	}
 
 	var err error
 	if clVersion >= clparams.ElectraVersion {
@@ -291,7 +310,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		// [IGNORE] There has been no other valid attestation seen on an attestation subnet that has an identical attestation.data.target.epoch and participating validator index.
 		epochLastTime, ok := s.validatorAttestationSeen.Get(vIndex)
 		if ok && epochLastTime == targetEpoch {
-			return fmt.Errorf("validator already seen in target epoch %w", ErrIgnore)
+			return fmt.Errorf("%w: %w", ErrIgnore, ErrAttestationAlreadySeen)
 		}
 
 		// [REJECT] The signature of attestation is valid.
@@ -299,7 +318,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		if err != nil {
 			return fmt.Errorf("unable to get public key: %w", err)
 		}
-		domain, err = headState.GetDomain(s.beaconCfg.DomainBeaconAttester, targetEpoch)
+		domain, err = fork.ComputeDomainAtEpoch(s.beaconCfg, s.beaconCfg.DomainBeaconAttester, targetEpoch, headState.GenesisValidatorsRoot())
 		if err != nil {
 			return fmt.Errorf("unable to get the domain: %w", err)
 		}
@@ -373,14 +392,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
 	}
 
-	// push the signatures to verify asynchronously and run final functions after that.
-	s.batchSignatureVerifier.AsyncVerifyAttestation(aggregateVerificationData)
-
-	// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
-	// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
-	// in BatchSignatureVerifier service. After validating signatures, if they are valid we will publish the
-	// gossip ourselves or ban the peer which sent that particular invalid signature.
-	return nil
+	return s.batchSignatureVerifier.VerifyAttestation(ctx, aggregateVerificationData)
 }
 
 // type attestationJob struct {

@@ -759,7 +759,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			stagedsync.StageHeadersCfg(mock.BlockReader),
 			stagedsync.StageBlockHashesCfg(mock.Dirs.Tmp, blockWriter),
 			stagedsync.StageBodiesCfg(mock.BlockReader, blockWriter),
-			stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, pruneMode, mock.BlockReader, readAheader),
+			stagedsync.StageSendersCfg(mock.ChainConfig, false /* badBlockHalt */, dirs.Tmp, mock.BlockReader, readAheader),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,
 				pruneMode,
@@ -821,6 +821,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		1, // currentBlockNumber
 		mock.ChainConfig,
 		blkBuilder.Build,
+		blkBuilder.BuildInclusionList,
 		hook,
 		accum,
 		mock.StateCache,

@@ -197,7 +197,7 @@ func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
 		trieBatch := NewHexPatriciaHashed(keyLen, stateBatch, DefaultTrieConfig())
 
 		if sortHashedKeys {
-			plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
+			plainKeys, updates = sortUpdatesByHashIncrease(t, plainKeys, updates)
 		}
 
 		if trace {
@@ -227,7 +227,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 	trieSequential := NewHexPatriciaHashed(length.Addr, stateSeq, DefaultTrieConfig())
 	trieBatch := NewHexPatriciaHashed(length.Addr, stateBatch, DefaultTrieConfig())
 
-	plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
+	plainKeys, updates = sortUpdatesByHashIncrease(t, plainKeys, updates)
 
 	rSeq := processSeq(t, stateSeq, trieSequential, plainKeys, updates)
 	rBatch := processBatch(t, stateBatch, trieBatch, plainKeys, updates)
@@ -248,7 +248,7 @@ func Test_HexPatriciaHashed_DeferredBranchUpdates(t *testing.T) {
 	deferredCfg.DeferBranchUpdates = true
 	trieDeferred := NewHexPatriciaHashed(length.Addr, stateDeferred, deferredCfg)
 
-	plainKeys, updates = sortUpdatesByHashIncrease(t, trieNormal, plainKeys, updates)
+	plainKeys, updates = sortUpdatesByHashIncrease(t, plainKeys, updates)
 
 	err := stateNormal.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
@@ -821,7 +821,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation_AfterStateRestor
 	trieSequential := NewHexPatriciaHashed(length.Addr, stateSeq, DefaultTrieConfig())
 	trieBatch := NewHexPatriciaHashed(length.Addr, stateBatch, DefaultTrieConfig())
 
-	plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
+	plainKeys, updates = sortUpdatesByHashIncrease(t, plainKeys, updates)
 
 	var rSeq, rBatch []byte
 	{
@@ -914,7 +914,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 	sequential := NewHexPatriciaHashed(length.Addr, stateSeq, DefaultTrieConfig())
 	batch := NewHexPatriciaHashed(length.Addr, stateBatch, DefaultTrieConfig())
 
-	plainKeys, updates = sortUpdatesByHashIncrease(t, sequential, plainKeys, updates)
+	plainKeys, updates = sortUpdatesByHashIncrease(t, plainKeys, updates)
 
 	somewhere := 6
 	somewhereRoot := make([]byte, 0)
@@ -1338,7 +1338,7 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 		Build()
 
 	trieOne := NewHexPatriciaHashed(length.Addr, msOne, DefaultTrieConfig())
-	plainKeys, updates = sortUpdatesByHashIncrease(t, trieOne, plainKeys, updates)
+	plainKeys, updates = sortUpdatesByHashIncrease(t, plainKeys, updates)
 
 	trieTwo := NewHexPatriciaHashed(length.Addr, msTwo, DefaultTrieConfig())
 
@@ -1420,7 +1420,7 @@ func generatePlainKeysWithSameHashPrefix(tb testing.TB, constPrefixNibbles []byt
 	return plainKeys, hashedKeys
 }
 
-func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [][]byte, updates []Update) ([][]byte, []Update) {
+func sortUpdatesByHashIncrease(t *testing.T, plainKeys [][]byte, updates []Update) ([][]byte, []Update) {
 	t.Helper()
 
 	ku := make([]*KeyUpdate, len(plainKeys))
@@ -1975,7 +1975,7 @@ func TestComputeCellHashKeepsLeafPath(t *testing.T) {
 	hph.updateCell(acct[:], KeyToHexNibbleHash(acct[:]), &upd)
 	addStorageToCell(&hph.root, acct, common.Hash{}, []byte{0xaa})
 	hph.root.hashedExtLen = 0
-	require.NoError(t, hph.root.deriveHashedKeys(0, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]))
+	require.NoError(t, hph.root.deriveHashedKeys(0, hph.accountKeyLen, hph.cellHashBuf[:]))
 	path := bytes.Clone(hph.root.hashedExtension[:hph.root.hashedExtLen])
 
 	_, err := hph.computeCellHash(&hph.root, 0, nil)

@@ -194,21 +194,20 @@ func (e *EngineServer) Start(
 	return eg.Wait()
 }
 
-func (e *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.Withdrawals) error {
-	if e.isWithdrawalsPresenceValid(time, withdrawals) {
-		return nil
-	}
+func (e *EngineServer) checkWithdrawals(time uint64, withdrawals types.Withdrawals) error {
 	if !e.config.IsShanghai(time) {
-		return &rpc.InvalidParamsError{Message: "withdrawals before Shanghai"}
+		if withdrawals != nil {
+			return &rpc.InvalidParamsError{Message: "withdrawals before Shanghai"}
+		}
+	} else if withdrawals == nil {
+		return &rpc.InvalidParamsError{Message: "missing withdrawals list"}
 	}
-	return &rpc.InvalidParamsError{Message: "missing withdrawals list"}
-}
-
-func (e *EngineServer) isWithdrawalsPresenceValid(time uint64, withdrawals types.Withdrawals) bool {
-	if !e.config.IsShanghai(time) {
-		return withdrawals == nil
+	for i, withdrawal := range withdrawals {
+		if withdrawal == nil {
+			return &rpc.InvalidParamsError{Message: fmt.Sprintf("null withdrawal at index %d", i)}
+		}
 	}
-	return withdrawals != nil
+	return nil
 }
 
 // validatePayloadAttributesPreFCU runs the request-level "wrong version of the
@@ -227,8 +226,8 @@ func (e *EngineServer) validatePayloadAttributesPreFCU(version clparams.StateVer
 	if e.config.IsAmsterdam(timestamp) && version < clparams.GloasVersion { // V3 fcu at an Amsterdam timestamp
 		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
-	if version >= clparams.CapellaVersion && !e.isWithdrawalsPresenceValid(timestamp, payloadAttributes.Withdrawals) {
-		return &engine_helpers.InvalidPayloadAttributesErr // wrong V1/V2 withdrawals presence vs Shanghai
+	if version >= clparams.CapellaVersion && e.checkWithdrawals(timestamp, payloadAttributes.Withdrawals) != nil {
+		return &engine_helpers.InvalidPayloadAttributesErr
 	}
 	return nil
 }
@@ -360,7 +359,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if version >= clparams.CapellaVersion {
 		withdrawals = req.Withdrawals
 	}
-	if err := e.checkWithdrawalsPresence(header.Time, withdrawals); err != nil {
+	if err := e.checkWithdrawals(header.Time, withdrawals); err != nil {
 		return nil, err
 	}
 	if withdrawals != nil {
@@ -519,7 +518,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// via rlp.EncodeToBytes. Both slices reference the same underlying
 	// byte buffers from req.Transactions.
 	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessList)
-	payloadStatus, err := e.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
+	payloadStatus, err := e.HandleNewPayload(ctx, "NewPayload", block)
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			return &engine_types.PayloadStatus{
@@ -998,7 +997,6 @@ func (e *EngineServer) HandleNewPayload(
 	ctx context.Context,
 	logPrefix string,
 	block *types.Block,
-	versionedHashes []common.Hash,
 ) (*engine_types.PayloadStatus, error) {
 	e.engineLogSpamer.RecordRequest()
 
@@ -1136,56 +1134,9 @@ func convertGrpcStatusToEngineStatus(status execmodule.ExecutionStatus) engine_t
 // assembledBlockToPayloadResponse converts a native assembled block to an engine-API payload response.
 func assembledBlockToPayloadResponse(br *types.BlockWithReceipts, blockValue *uint256.Int, version clparams.StateVersion) (*engine_types.GetPayloadResponse, error) {
 	block := br.Block
-	header := block.Header()
-
-	encodedTxs, err := types.MarshalTransactionsBinary(block.Transactions())
+	ep, err := engine_types.ExecutionPayloadFromBlock(block)
 	if err != nil {
 		return nil, err
-	}
-	txs := make([]hexutil.Bytes, len(encodedTxs))
-	for i, tx := range encodedTxs {
-		txs[i] = tx
-	}
-
-	bloom := header.Bloom
-	ep := &engine_types.ExecutionPayload{
-		ParentHash:    header.ParentHash,
-		FeeRecipient:  header.Coinbase,
-		StateRoot:     header.Root,
-		ReceiptsRoot:  header.ReceiptHash,
-		LogsBloom:     bloom[:],
-		PrevRandao:    header.MixDigest,
-		BlockNumber:   hexutil.Uint64(header.Number.Uint64()),
-		GasLimit:      hexutil.Uint64(header.GasLimit),
-		GasUsed:       hexutil.Uint64(header.GasUsed),
-		Timestamp:     hexutil.Uint64(header.Time),
-		ExtraData:     header.Extra,
-		BaseFeePerGas: (*hexutil.U256)(header.BaseFee),
-		BlockHash:     block.Hash(),
-		Transactions:  txs,
-	}
-	if block.Withdrawals() != nil {
-		ep.Withdrawals = block.Withdrawals()
-	}
-	if header.BlobGasUsed != nil {
-		bgu := hexutil.Uint64(*header.BlobGasUsed)
-		ep.BlobGasUsed = &bgu
-	}
-	if header.ExcessBlobGas != nil {
-		ebg := hexutil.Uint64(*header.ExcessBlobGas)
-		ep.ExcessBlobGas = &ebg
-	}
-	if header.SlotNumber != nil {
-		sn := hexutil.Uint64(*header.SlotNumber)
-		ep.SlotNumber = &sn
-	}
-	if header.BlockAccessListHash != nil && block.BlockAccessListSidecar() != nil {
-		encoded, err := block.BlockAccessListSidecar().Bytes()
-		if err != nil {
-			return nil, fmt.Errorf("encode block access list: %w", err)
-		}
-		bal := hexutil.Bytes(encoded)
-		ep.BlockAccessList = &bal
 	}
 
 	blobsBundle, err := engine_types.BlobsBundleFromTransactions(block.Transactions())
@@ -1399,6 +1350,34 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 	default:
 		return nil, nil
 	}
+}
+
+func (e *EngineServer) getInclusionList(ctx context.Context) ([]hexutil.Bytes, error) {
+	if e.caplin {
+		e.logger.Crit(caplinEnabledLog)
+		return nil, errCaplinEnabled
+	}
+
+	txns, err := e.executionService.InclusionList(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	encodedTxns, err := types.MarshalTransactionsBinary(txns)
+	if err != nil {
+		return nil, err
+	}
+	list := make([]hexutil.Bytes, 0, len(encodedTxns))
+	total := 0
+	for i, tx := range encodedTxns {
+		if txns[i].Type() == types.BlobTxType || total+len(tx) > int(params.MaxTransactionsBytesPerInclusionListEIP7805) {
+			continue
+		}
+		list = append(list, tx)
+		total += len(tx)
+	}
+
+	return list, nil
 }
 
 func waitForResponse(ctx context.Context, maxWait time.Duration, waitCondnF func() (bool, error)) (bool, error) {

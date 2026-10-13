@@ -31,6 +31,14 @@ func (r *accountResolver) Storage(ctx context.Context, obj *model.Account, slot 
 	return r.GraphQLAPI.GetAccountStorage(ctx, addr, slot, rpc.BlockNumber(obj.BlockNum))
 }
 
+// Parent is the resolver for the parent field.
+func (r *blockResolver) Parent(ctx context.Context, obj *model.Block) (*model.Block, error) {
+	if obj.Parent == nil || obj.Number == 0 {
+		return nil, nil
+	}
+	return (&queryResolver{r.Resolver}).block(ctx, nil, &obj.Parent.Hash, blockTxsRequested(ctx))
+}
+
 // Miner is the resolver for the miner field.
 func (r *blockResolver) Miner(ctx context.Context, obj *model.Block, block *uint64) (*model.Account, error) {
 	// miner is non-nullable (Account!): a miner-less block must return an
@@ -65,7 +73,11 @@ func (r *blockResolver) Logs(ctx context.Context, obj *model.Block, filter model
 	if err != nil {
 		return nil, err
 	}
-	return rpcLogsToModel(logs), nil
+	result := rpcLogsToModel(logs)
+	if err := r.attachLogTransactions(ctx, result, obj); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // Account is the resolver for the account field.
@@ -292,7 +304,11 @@ func (r *queryResolver) Logs(ctx context.Context, filter model.FilterCriteria) (
 	if err != nil {
 		return nil, err
 	}
-	return rpcLogsToModel(logs), nil
+	result := rpcLogsToModel(logs)
+	if err := r.attachLogTransactions(ctx, result, nil); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // GasPrice is the resolver for the gasPrice field.

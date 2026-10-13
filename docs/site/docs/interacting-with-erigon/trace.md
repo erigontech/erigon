@@ -666,6 +666,7 @@ Returns traces matching given filter
 1. `Object` - The filter object
    * `fromBlock`: `Quantity` or `Tag` - (optional) From this block. Defaults to the latest executed block; send `"earliest"` to scan from genesis.
    * `toBlock`: `Quantity` or `Tag` - (optional) To this block. Defaults to the latest executed block. A `toBlock` below `fromBlock`, including the default start, returns `-32602`.
+   * `blockHash`: `Data`, 32 Bytes - (optional) Selects exactly the block with this hash, as in `eth_getLogs`, instead of a range. The result, including `[]`, is for that block, and address matching, `mode`, `after` and `count` apply as for a single-block range. Setting it together with `fromBlock` or `toBlock` returns `-32602`. A hash that does not name a canonical, executed block, including one reorganized out of the chain, returns `-32001`, even with `count` 0; a block below the prune boundary returns an error naming the boundary instead.
    * `fromAddress`: `Array` - (optional) Sent from these addresses.
    * `toAddress`: `Array` - (optional) Sent to these addresses.
    * `after`: `Quantity` - (optional) The offset trace number
@@ -674,7 +675,7 @@ Returns traces matching given filter
 
    The `'pending'` tag is not supported for either block bound and returns `-32602`: `trace_filter` scans committed trace history, which has no pending block.
 
-   A bound past the latest executed block returns `-32602`, as in `eth_getLogs`, rather than an empty or truncated result. A block hash that names no known block returns an error.
+   A bound past the latest executed block returns `-32602`, as in `eth_getLogs`, rather than an empty or truncated result. As in `eth_getLogs`, a bound is a block number or tag: a block hash or an EIP-1898 object returns `-32602`; use `blockHash` to select a block by hash. An explicit `null` for `blockHash`, `fromBlock` or `toBlock` is the same as omitting it.
 
 ```js
 params: [{

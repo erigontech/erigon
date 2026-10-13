@@ -87,31 +87,6 @@ func ComputeColumnsForCustodyGroup(custodyGroup CustodyIndex) ([]ColumnIndex, er
 	return columns, nil
 }
 
-// ComputeMatrix takes a slice of blobs and returns a flattened sequence of matrix entries.
-// This function is re-entrant and thread-safe.
-func ComputeMatrix(blobs [][]byte) ([]cltypes.MatrixEntry, error) {
-	numberOfColumns := clparams.GetBeaconConfig().NumberOfColumns
-	matrix := make([]cltypes.MatrixEntry, 0, len(blobs)*int(numberOfColumns))
-
-	for blobIndex, blob := range blobs {
-		cells, proofs, err := ComputeCellsAndKZGProofs(blob) // in kzg pkg
-		if err != nil {
-			return nil, fmt.Errorf("failed to compute cells and proofs for blob %d: %w", blobIndex, err)
-		}
-
-		for cellIndex := range cells {
-			matrix = append(matrix, cltypes.MatrixEntry{
-				Cell:        cells[cellIndex],
-				KzgProof:    proofs[cellIndex],
-				RowIndex:    uint64(blobIndex),
-				ColumnIndex: ColumnIndex(cellIndex),
-			})
-		}
-	}
-
-	return matrix, nil
-}
-
 // RecoverMatrix takes a partial matrix and the total blob count and returns a complete matrix.
 func RecoverMatrix(partialMatrix []cltypes.MatrixEntry, blobCount uint64) ([][]cltypes.MatrixEntry, error) {
 	matrix := make([][]cltypes.MatrixEntry, 0, blobCount)
