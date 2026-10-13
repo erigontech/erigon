@@ -178,6 +178,11 @@ func (s *notificationTestService) SomeSubscription(ctx context.Context, n, val i
 	return subscription, nil
 }
 
+// FailingSubscription refuses the subscription and so creates none.
+func (s *notificationTestService) FailingSubscription(ctx context.Context) (*Subscription, error) {
+	return nil, errors.New("refused")
+}
+
 // HangSubscription blocks on s.unblockHangSubscription before sending anything.
 func (s *notificationTestService) HangSubscription(ctx context.Context, val int) (*Subscription, error) {
 	notifier, supported := NotifierFromContext(ctx)
