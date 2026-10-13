@@ -437,11 +437,10 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		roTxPool: make(chan *mdbx.Txn, roTxPoolSize),
 
 		txsDone: make(chan struct{}, 1),
-		liveTxs: make(map[*MdbxTx]liveTxInfo),
 
 		syncerStop: make(chan struct{}),
 
-		leakDetector: dbg.NewLeakDetector("db."+string(opts.label), dbg.SlowTx()),
+		leakDetector: dbg.NewLeakDetector("db."+string(opts.label), leakThreshold(opts.label)),
 
 		MaxBatchSize:  DefaultMaxBatchSize,
 		MaxBatchDelay: DefaultMaxBatchDelay,
@@ -542,14 +541,6 @@ type MdbxKV struct {
 	txsCount atomic.Int64
 	txsDone  chan struct{} // wakes Close when txsCount drops to 0 after closed is set
 
-	// liveTxs tracks all currently-open chaindata txs so we can dump the
-	// stacks of concurrent txs when a commit observes openTxs > 1 — answering
-	// "who held a tx alive while I was committing?" for diagnostic purposes.
-	// Keyed by the *MdbxTx pointer. Protected by liveTxsMu.
-	liveTxsMu     sync.Mutex
-	liveTxs       map[*MdbxTx]liveTxInfo
-	liveTxCounter uint64
-
 	leakDetector *dbg.LeakDetector
 
 	// MaxBatchSize is the maximum size of a batch. Default value is
@@ -612,18 +603,15 @@ func (db *MdbxKV) openDBIs(buckets []string) error {
 	})
 }
 
-// mdbxTraceTx enables per-tx lifecycle logging and concurrent-tx stack dumps on
-// ChainDB. Read once at startup so enabling/disabling requires a restart.
-// When false, all tracer code paths early-return — zero overhead in production.
+// mdbxTraceTx keeps every ChainDB tx in the leak detector so a commit that sees
+// other open txs can dump their stacks.
 var mdbxTraceTx = os.Getenv("MDBX_TRACE_TX") == "true"
 
-// liveTxInfo is a diagnostic record for a currently-open chaindata tx.
-// Lets us dump the stacks of concurrent txs when a commit observes openTxs>1.
-type liveTxInfo struct {
-	id       uint64
-	kind     string // "ro" or "rw"
-	openedAt time.Time
-	stack    string
+func leakThreshold(label kv.Label) time.Duration {
+	if t := dbg.SlowTx(); t > 0 || !mdbxTraceTx || label != dbcfg.ChainDB {
+		return t
+	}
+	return 365 * 24 * time.Hour
 }
 
 // trackTxBegin counts the tx before it reads closed, and Close sets closed before it
@@ -635,80 +623,6 @@ func (db *MdbxKV) trackTxBegin() bool {
 		return false
 	}
 	return true
-}
-
-// registerLiveTx records an open chaindata tx with its stack so concurrent-tx
-// dumps at commit time can identify it. No-op unless MDBX_TRACE_TX=true and
-// the DB is ChainDB (avoids per-alloc overhead on every ancillary DB tx).
-func (db *MdbxKV) registerLiveTx(tx *MdbxTx, readOnly bool) {
-	if !mdbxTraceTx || db.opts.label != dbcfg.ChainDB {
-		return
-	}
-	kind := "rw"
-	if readOnly {
-		kind = "ro"
-	}
-	stack := dbg.Stack()
-	openedAt := time.Now()
-
-	db.liveTxsMu.Lock()
-	db.liveTxCounter++
-	id := db.liveTxCounter
-	db.liveTxs[tx] = liveTxInfo{
-		id:       id,
-		kind:     kind,
-		openedAt: openedAt,
-		stack:    stack,
-	}
-	db.liveTxsMu.Unlock()
-
-	db.log.Trace("MDBX_TX_OPEN", "id", id, "kind", kind, "count", db.txsCount.Load(), "stack", stack)
-}
-
-// unregisterLiveTx removes a tx from the live set and logs a close event.
-// No-op unless MDBX_TRACE_TX=true and the DB is ChainDB.
-func (db *MdbxKV) unregisterLiveTx(tx *MdbxTx, event string) {
-	if !mdbxTraceTx || db.opts.label != dbcfg.ChainDB {
-		return
-	}
-	db.liveTxsMu.Lock()
-	info, ok := db.liveTxs[tx]
-	if ok {
-		delete(db.liveTxs, tx)
-	}
-	db.liveTxsMu.Unlock()
-
-	if !ok {
-		return
-	}
-	db.log.Trace("MDBX_TX_"+event, "id", info.id, "kind", info.kind, "count", db.txsCount.Load(), "stack", dbg.Stack())
-}
-
-// dumpConcurrentTxs prints the stacks of all live chaindata txs EXCEPT the
-// one currently committing. Called only when a commit observes openTxs>1,
-// to pinpoint which other tx was held alive during the commit window.
-func (db *MdbxKV) dumpConcurrentTxs(committer *MdbxTx) {
-	if !mdbxTraceTx || db.opts.label != dbcfg.ChainDB {
-		return
-	}
-	db.liveTxsMu.Lock()
-	snapshot := make([]liveTxInfo, 0, len(db.liveTxs))
-	committerID := uint64(0)
-	if info, ok := db.liveTxs[committer]; ok {
-		committerID = info.id
-	}
-	for tx, info := range db.liveTxs {
-		if tx == committer {
-			continue
-		}
-		snapshot = append(snapshot, info)
-	}
-	db.liveTxsMu.Unlock()
-
-	now := time.Now()
-	for _, info := range snapshot {
-		db.log.Trace("CONCURRENT_TX", "committer_id", committerID, "id", info.id, "kind", info.kind, "alive", now.Sub(info.openedAt), "stack", info.stack)
-	}
 }
 
 func (db *MdbxKV) trackTxEnd() {
@@ -807,7 +721,6 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (kv.Tx, error) {
 		readOnly: true,
 		traceID:  db.leakDetector.Add(),
 	}
-	db.registerLiveTx(mt, true)
 	return mt, nil
 }
 
@@ -884,7 +797,6 @@ func (db *MdbxKV) beginRw(ctx context.Context, flags uint) (txn kv.RwTx, err err
 		ctx:     ctx,
 		traceID: db.leakDetector.Add(),
 	}
-	db.registerLiveTx(mt, false)
 	return mt, nil
 }
 
@@ -1375,7 +1287,6 @@ func (tx *MdbxTx) Commit() error {
 		return nil
 	}
 	defer func() {
-		tx.db.unregisterLiveTx(tx, "COMMIT")
 		tx.tx = nil
 		tx.db.trackTxEnd()
 		if !tx.readOnly {
@@ -1428,7 +1339,9 @@ func (tx *MdbxTx) Commit() error {
 		// tx was held alive during this commit. Dump its stack so we can
 		// identify the callsite.
 		if openTxs > 1 {
-			tx.db.dumpConcurrentTxs(tx)
+			for _, live := range tx.db.leakDetector.Live(tx.traceID) {
+				tx.db.log.Trace("CONCURRENT_TX", "committer", tx.traceID, "tx", live)
+			}
 		}
 	}
 
@@ -1449,7 +1362,6 @@ func (tx *MdbxTx) Rollback() {
 	} else {
 		t.Abort()
 	}
-	tx.db.unregisterLiveTx(tx, "ROLLBACK")
 	tx.db.trackTxEnd()
 	if !tx.readOnly {
 		runtime.UnlockOSThread()
