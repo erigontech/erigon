@@ -213,6 +213,8 @@ type GenericCache[T any] struct {
 	staleEvicted atomic.Uint64 // stale entries detected on read after an unwind; dropped unless a racing put revived them
 
 	sizeFunc func(T) int
+
+	gs growStats
 }
 
 func u64identity(k uint64) uint32 { return uint32(k) }
@@ -321,6 +323,7 @@ func (c *GenericCache[T]) fundGrow(oldCap, newCap uint32) bool {
 		return false
 	}
 	c.reservedBytes.Add(delta)
+	c.logGrow(oldCap, newCap, 1)
 	return true
 }
 
@@ -332,6 +335,7 @@ func (c *GenericCache[T]) refundGrow(oldCap, newCap uint32) {
 	delta := c.growBytes(oldCap, newCap)
 	cachebudget.Global.Release(delta)
 	c.reservedBytes.Add(-delta)
+	c.logGrow(oldCap, newCap, -1)
 }
 
 func (c *GenericCache[T]) growBytes(oldCap, newCap uint32) int64 {
