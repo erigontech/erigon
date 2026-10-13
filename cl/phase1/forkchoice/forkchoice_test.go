@@ -217,7 +217,7 @@ func runEmbeddedPtcVoteBlock(
 		nil,
 	)
 	require.NoError(t, err)
-	store.OnTick(2 * cfg.SecondsPerSlot)
+	store.OnTick(2 * cfg.SecondsPerSlot * 1000)
 	if payloadValidated {
 		store.payloadStatusByRoot.Add(anchorRoot, execution_client.PayloadStatusValidated)
 	}

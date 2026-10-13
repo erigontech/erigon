@@ -170,7 +170,7 @@ type ForkChoiceStorageWriter interface {
 	// need the envelope on disk to resolve their parent execution payload.
 	StoreAnchorEnvelope(blockRoot common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
 	AddPreverifiedBlobSidecar(blobSidecar *cltypes.BlobSidecar) error
-	OnTick(time uint64)
+	OnTick(timeMs uint64)
 	SetSynced(synced bool)
 	ProcessAttestingIndicies(attestation *solid.Attestation, attestionIndicies []uint64)
 }

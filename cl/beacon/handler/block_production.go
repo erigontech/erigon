@@ -3045,7 +3045,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		}
 	}
 	currentSlot := a.ethClock.GetCurrentSlot()
-	a.forkchoiceStore.OnTick(a.ethClock.GenesisTime() + currentSlot*a.beaconChainCfg.SecondsPerSlot)
+	a.forkchoiceStore.OnTick(utils.SecondsToMilliseconds(a.ethClock.GenesisTime() + currentSlot*a.beaconChainCfg.SecondsPerSlot))
 	if !knownBlock {
 		var blockErr error
 		if rejectEquivocation {

@@ -563,9 +563,9 @@ func (f *ForkChoiceStorageMock) OnPayloadAttestationMessage(ctx context.Context,
 	return nil
 }
 
-func (f *ForkChoiceStorageMock) OnTick(time uint64) {
+func (f *ForkChoiceStorageMock) OnTick(timeMs uint64) {
 	if f.OnTickFn != nil {
-		f.OnTickFn(time)
+		f.OnTickFn(timeMs)
 		return
 	}
 	panic("implement me")
