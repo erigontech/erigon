@@ -958,11 +958,18 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, nil
 		}
 	}
-	if tr, ok := s.versionedReads.GetAddress(addr); ok && warmSource(tr.Source) {
+	tr, recorded := s.versionedReads.GetAddress(addr)
+	if recorded && warmSource(tr.Source) {
 		if tr.Val != nil {
 			return tr.Val.Account(), tr.Source, tr.Version, nil
 		}
 		return nil, tr.Source, tr.Version, nil
+	}
+	if !recorded && s.coldAddr(addr) {
+		hdr := coldReadHeader
+		hdr.Source = ProvisionalRead
+		s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: hdr})
+		return nil, UnknownSource, UnknownVersion, nil
 	}
 	var r readPathResult
 	versionedReadCore(s, addr, AddressPath, accounts.NilKey, false, true, &r)
@@ -1061,6 +1068,20 @@ func (ibs *IntraBlockState) recordWipedRead(addr accounts.Address, path AccountP
 // warmSource reports whether a recorded read source is a plain committed/map
 // read that the wrapper-level read-once fast path can return directly.
 func warmSource(src ReadSource) bool { return src == MapRead || src == StorageRead }
+
+// coldAddr reports that no tx wrote a cell of addr and no state object is
+// resident for it: versionedReadCore would resolve its unrecorded paths from
+// the committed state and record them with coldReadHeader.
+func (ibs *IntraBlockState) coldAddr(addr accounts.Address) bool {
+	if ibs.versionMap == nil || ibs.versionMap.load(addr) != nil {
+		return false
+	}
+	_, resident := ibs.stateObjects[addr]
+	return !resident
+}
+
+// coldReadHeader is what versionedReadCore records for a version-map miss.
+var coldReadHeader = ReadHeader{Source: StorageRead, Version: Version{TxIndex: UnknownDep, Incarnation: -1}}
 
 // warmReadable reports whether addr has no own write this tx. When it has one,
 // the read-once fast paths check this tx's write set before the recorded read.
@@ -1323,6 +1344,14 @@ func readCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, ReadSou
 	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.code, s.versionedReads.code); ok {
 		return v, src, ver, nil
 	}
+	if _, recorded := s.versionedReads.GetCode(addr); !recorded && s.coldAddr(addr) {
+		v, err := s.committedCodeDirect(addr)
+		if err != nil {
+			return accounts.Code{}, StorageRead, UnknownVersion, err
+		}
+		s.versionedReads.SetCode(addr, VersionedRead[accounts.Code]{coldReadHeader, v})
+		return v, StorageRead, coldReadHeader.Version, nil
+	}
 	var r readPathResult
 	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
@@ -1562,6 +1591,16 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 			if tr, ok := s.versionedReads.GetStorage(addr, key); ok && warmSource(tr.Source) {
 				return tr.Val, tr.Source, tr.Version, false, nil
 			}
+		}
+	}
+	if s.coldAddr(addr) {
+		if _, recorded := s.versionedReads.GetStorage(addr, key); !recorded {
+			v, err := s.committedStorageDirect(addr, key)
+			if err != nil {
+				return uint256.Int{}, StorageRead, UnknownVersion, false, err
+			}
+			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{coldReadHeader, v})
+			return v, StorageRead, coldReadHeader.Version, true, nil
 		}
 	}
 	var r readPathResult
