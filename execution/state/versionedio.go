@@ -793,6 +793,44 @@ func (a *vwArena[T]) reset(release func(*VersionedWrite[T])) {
 	}
 }
 
+const acctChunk = 32
+
+// acctSlab holds an arena-backed set's AddressPath values; a value stays valid
+// until the arena resets, so Snapshot copies it out.
+type acctSlab struct {
+	chunks [][]accounts.Account
+	n      int
+}
+
+func (s *acctSlab) copyOf(a *accounts.Account) *accounts.Account {
+	i, j := s.n/acctChunk, s.n%acctChunk
+	if i == len(s.chunks) {
+		if s.n >= vwMaxCells {
+			return a.SelfCopy()
+		}
+		s.chunks = append(s.chunks, make([]accounts.Account, acctChunk))
+	}
+	p := &s.chunks[i][j]
+	*p = *a
+	s.n++
+	return p
+}
+
+func (s *acctSlab) reset() {
+	for i := 0; i*acctChunk < s.n; i++ {
+		clear(s.chunks[i][:min(acctChunk, s.n-i*acctChunk)])
+	}
+	s.n = 0
+}
+
+// copyAccount returns a copy of a for an AddressPath write.
+func (ws *WriteSet) copyAccount(a *accounts.Account) *accounts.Account {
+	if ws.cells != nil {
+		return ws.cells.accounts.copyOf(a)
+	}
+	return a.SelfCopy()
+}
+
 func (ws *WriteSet) newVWAddress() *VersionedWrite[*accounts.Account] {
 	if ws.cells != nil {
 		return ws.cells.address.alloc(getVWAddress)
@@ -896,9 +934,11 @@ type vwArenas struct {
 	codeHash       vwArena[accounts.CodeHash]
 	codeSize       vwArena[int]
 	storage        vwArena[uint256.Int]
+	accounts       acctSlab
 }
 
 func (a *vwArenas) reset() {
+	a.accounts.reset()
 	a.address.reset(releaseVWAddress)
 	a.balance.reset(releaseVWBalance)
 	a.nonce.reset(releaseVWNonce)
@@ -1235,7 +1275,11 @@ func (ws *WriteSet) Snapshot() *WriteSet {
 		}
 		if !sd {
 			if vw, ok := ws.address[addr]; ok {
-				out.SetAddress(addr, cloneVW(vw))
+				c := cloneVW(vw)
+				if ws.cells != nil && c.Val != nil {
+					c.Val = c.Val.SelfCopy()
+				}
+				out.SetAddress(addr, c)
 			}
 			if vw, ok := ws.nonce[addr]; ok {
 				out.SetNonce(addr, cloneVW(vw))
