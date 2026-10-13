@@ -3550,7 +3550,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			blockStateCache:  be.blockStateCache,
 			superseded:       be.takeSuperseded(),
 		}
-		if !isPartial && len(be.tasks) > 0 && commitmentdb.ParentReadsWanted() {
+		if !isPartial && len(be.tasks) > 0 && commitmentdb.ParentReadsWanted() && !slices.ContainsFunc(be.tasks, func(t *execTask) bool { return t.Task.IsHistoric() }) {
 			be.result.parentState = be.tasks[0].Task.GetBlockStateCache()
 		}
 		return be.result, nil
