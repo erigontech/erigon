@@ -783,6 +783,15 @@ func (r *refreshReader) ReadAccountData(accounts.Address) (*accounts.Account, er
 	return r.account, nil
 }
 
+func (r *refreshReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (r *refreshReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
 func (r *refreshReader) ReadAccountDataForDebug(accounts.Address) (*accounts.Account, error) {
 	return r.account, nil
 }
