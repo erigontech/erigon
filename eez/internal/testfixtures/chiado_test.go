@@ -19,10 +19,12 @@ package testfixtures
 import (
 	"testing"
 
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -120,4 +122,18 @@ func TestChiadoHeader(t *testing.T) {
 	reenc, err := rlp.EncodeToBytes(&h)
 	require.NoError(t, err)
 	require.Equal(t, enc, reenc)
+}
+
+// TestChiadoBlob requires the blob's KZG commitment to yield the settlement
+// transaction's only versioned hash.
+func TestChiadoBlob(t *testing.T) {
+	blob, err := LoadChiadoBlob()
+	require.NoError(t, err)
+	s, err := LoadChiadoSettlement()
+	require.NoError(t, err)
+	var b goethkzg.Blob
+	copy(b[:], blob)
+	commitment, err := kzg.Ctx().BlobToKZGCommitment(&b, 0)
+	require.NoError(t, err)
+	require.Equal(t, s.Transaction.BlobVersionedHashes, []common.Hash{common.Hash(kzg.KZGToVersionedHash(commitment))})
 }

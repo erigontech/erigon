@@ -17,6 +17,8 @@
 package testfixtures
 
 import (
+	"fmt"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 )
@@ -26,7 +28,11 @@ const (
 	ChiadoAnchorFile        = "anchor-23507949.json"
 	ChiadoRollupCreatedFile = "rollup-created-23413747.json"
 	ChiadoHeaderFile        = "header-23507949.rlp.hex"
+	ChiadoBlobFile          = "blob-23507949-0.hex"
 )
+
+// BlobSize is the size of an EIP-4844 blob.
+const BlobSize = 4096 * 32
 
 // ChiadoSettlement is a settlement transaction mined on the Gnosis-hosted EEZ
 // Chiado testnet, with its receipt logs and contract state read at the
@@ -135,4 +141,19 @@ func LoadChiadoRollupCreated() (*ChiadoLogRecord, error) {
 // recorded settlement.
 func LoadChiadoHeader() ([]byte, error) {
 	return readBlob(Path("chiado", ChiadoHeaderFile), true)
+}
+
+// LoadChiadoBlob returns the blob of the recorded settlement. The file holds
+// its leading field elements; the remaining ones are zero.
+func LoadChiadoBlob() ([]byte, error) {
+	prefix, err := readBlob(Path("chiado", ChiadoBlobFile), true)
+	if err != nil {
+		return nil, err
+	}
+	if len(prefix) > BlobSize || len(prefix)%32 != 0 {
+		return nil, fmt.Errorf("%s: %d bytes is not a run of field elements", ChiadoBlobFile, len(prefix))
+	}
+	blob := make([]byte, BlobSize)
+	copy(blob, prefix)
+	return blob, nil
 }

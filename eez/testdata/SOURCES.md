@@ -40,11 +40,14 @@ The loader test rebuilds the transaction from its fields and requires the mined 
 
 `header-23507949.rlp.hex` is the consensus RLP of the header of the settling block, rebuilt with Erigon's `types.Header` from `eth_getBlockByNumber` on `https://rpc.chiadochain.net` on 2026-10-14 and checked to hash to `l1BlockHash`; `https://gnosis-chiado-rpc.publicnode.com` returned the same header.
 
+`blob-23507949-0.hex` is the blob the settlement carries, from `/eth/v1/beacon/blob_sidecars/25306518` on `https://rpc-gbc.chiadochain.net` on 2026-10-14. The file holds its first two field elements; the other 4094 are zero. The loader test recomputes the KZG commitment and requires the transaction's versioned hash.
+
 ## SHA-256
 
 | File | SHA-256 |
 |---|---|
 | `chiado/anchor-23507949.json` | `9253ff31da86cbb86177d4058583a72223a5a7da162f6bd2d6d0187cd73a939d` |
+| `chiado/blob-23507949-0.hex` | `384eaae16ad11854a0b1b83c2ff67542b7903b86ecd1ee189444699242b76f40` |
 | `chiado/header-23507949.rlp.hex` | `b6c2ffc4aea6c879093cd6bf111dddf24807997d1b1b6bda485953950b22d373` |
 | `chiado/rollup-created-23413747.json` | `986dbf338aa6ed9b8bae098578d5421665aa298caddc72095ce7aa0cca2a953d` |
 | `vectors/public_inputs_hash_vectors.json` | `8a787a8e307089a5be0ec4a56d8bd0e1ef4d8862eb58bb6b5086347ff2745472` |
