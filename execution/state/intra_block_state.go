@@ -1766,7 +1766,7 @@ func (ibs *IntraBlockState) journalCodeChange(addr accounts.Address, prevHash ac
 // rebuilt, and the net-zero check against the tx-start code does not apply.
 func (ibs *IntraBlockState) setCreatedCode(r *acctIO, addr accounts.Address, code accounts.Code, reason tracing.CodeChangeReason) error {
 	// The creation wrote the code hash, and an own code write carries one too.
-	baseCodeHash := accounts.EmptyCodeHash
+	var baseCodeHash accounts.CodeHash
 	if r.wCodeHash != nil {
 		baseCodeHash = r.wCodeHash.Val
 	} else {
