@@ -13,6 +13,9 @@ import (
 // same budget, and log every grow step with cumulative migration counters.
 var dbgFreelruCap = dbg.EnvBool("SETASSOC_FREELRU_CAP", false)
 
+// dbg: allocate the key on its own (24 B for an address), as main does, instead of inside the entry.
+var dbgSeparateKey = dbg.EnvBool("SETASSOC_SEPARATE_KEY", false)
+
 type growStats struct {
 	steps, moved, tableBytes atomic.Int64
 }

@@ -149,6 +149,7 @@ type keyedEntry[T, K any] struct {
 
 func newEntry[T any](key []byte, e entry[T]) *entry[T] {
 	switch {
+	case dbgSeparateKey:
 	case len(key) <= 24:
 		return withKey[T, [24]byte](key, e)
 	case len(key) <= 32:
