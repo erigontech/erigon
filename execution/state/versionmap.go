@@ -586,6 +586,23 @@ func (vm *VersionMap) applySubFieldWrites(addr accounts.Address, txIdx int, acco
 	}
 }
 
+// preservedEOA derives the EOA an account collapses to when a self-destruct keeps
+// a non-zero balance (EIP-8246): nonce 0, empty code, incarnation 0, balance kept —
+// the same shape the commit path writes (updateAccount's sdPreserveBalance). The
+// caller must have established the account is net-absent; this only distinguishes a
+// balance-preserving destruct (non-zero floor balance → EOA) from a plain one (zero
+// balance → stays absent). It is fork-agnostic: a pre-Amsterdam self-destruct zeroes
+// the balance, so the non-zero test is never satisfied and no flag is needed.
+func (vm *VersionMap) preservedEOA(addr accounts.Address, txIdx int) (accounts.Account, bool) {
+	bal, ok := versionedUpdateBalance(vm, addr, txIdx)
+	if !ok || bal.IsZero() {
+		return accounts.Account{}, false
+	}
+	acc := accounts.NewAccount()
+	acc.Balance = bal
+	return acc, true
+}
+
 // lifecycleVerdict is accountLifecycleAt's result folded into a floor read so the
 // read path resolves both under a single RLock.
 type lifecycleVerdict struct {

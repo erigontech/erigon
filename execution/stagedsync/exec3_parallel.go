@@ -2137,7 +2137,7 @@ func (result *execResult) finalizeSystemTx(
 	// writes). result.TxIn may be stale if the system TX ran speculatively before the
 	// regular TXs completed, returning pre-block values instead of the post-block
 	// state syscalls (withdrawal/consolidation) need.
-	ibs := state.New(state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader, txTask.Rules().IsAmsterdam))
+	ibs := state.New(state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader))
 	defer ibs.Close()
 	ibs.SetTxContext(blockNum, txIndex)
 	ibs.SetVersion(txIncarnation)
@@ -2169,7 +2169,7 @@ func (result *execResult) calcFees(
 	// Read at txIndex (floor txIndex-1): strictly prior tx, excluding this tx's own
 	// prior incarnations that would double-apply the tip on re-execution. Current-tx
 	// worker writes are picked up below via TxOut.
-	vsReader := state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader, chainRules.IsAmsterdam)
+	vsReader := state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader)
 
 	coinbaseAcc, err := vsReader.ReadAccountData(result.Coinbase)
 	if err != nil {
@@ -2393,7 +2393,7 @@ func (result *execResult) runPostApplyMessageOnMinIBS(
 	txIndex := task.Version().TxIndex
 	chainRules := txTask.EvmBlockContext.Rules(txTask.Config)
 	execResult := result.ExecutionResult
-	cbReader := state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader, chainRules.IsAmsterdam)
+	cbReader := state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader)
 	coinbase, err := cbReader.ReadAccountData(result.Coinbase)
 	if err != nil {
 		return err
@@ -2405,7 +2405,7 @@ func (result *execResult) runPostApplyMessageOnMinIBS(
 	if err != nil {
 		return err
 	}
-	ibs := state.New(state.NewVersionedStateReader(txIndex, result.TxIn, vm, stateReader, chainRules.IsAmsterdam))
+	ibs := state.New(state.NewVersionedStateReader(txIndex, result.TxIn, vm, stateReader))
 	defer ibs.Close()
 	ibs.SetTxContext(blockNum, txIndex)
 	postApplyMessageFunc(ibs, message.From(), result.Coinbase, &execResult, chainRules)
