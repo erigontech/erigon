@@ -44,7 +44,11 @@ func TestGetNodeHealthWhileSyncing(t *testing.T) {
 		{"?syncing_status=42", http.StatusBadRequest},
 		{"?syncing_status=600", http.StatusBadRequest},
 	} {
-		t.Run(tc.query, func(t *testing.T) {
+		name := tc.query
+		if name == "" {
+			name = "default"
+		}
+		t.Run(name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/node/health"+tc.query, nil)
 			require.NotPanics(t, func() { a.GetEthV1NodeHealth(rec, req) })
@@ -81,7 +85,11 @@ func TestGetNodeHealthWhenSynced(t *testing.T) {
 		{"?syncing_status=503", http.StatusOK},
 		{"?syncing_status=42", http.StatusBadRequest},
 	} {
-		t.Run(tc.query, func(t *testing.T) {
+		name := tc.query
+		if name == "" {
+			name = "default"
+		}
+		t.Run(name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/node/health"+tc.query, nil)
 			a.GetEthV1NodeHealth(rec, req)
