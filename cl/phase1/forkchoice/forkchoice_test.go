@@ -150,6 +150,70 @@ func TestKnownForwardSyncBlockRequiresValidatedParentForLiveIngress(t *testing.T
 	require.NoError(t, store.OnBlock(t.Context(), child, true, true, false))
 }
 
+func dropJustifiedCheckpointState(store *ForkChoiceStore, anchorRoot common.Hash) {
+	delete(store.forkGraph.(*embeddedPtcVoteForkGraph).states, anchorRoot)
+	store.checkpointStates.Delete(store.JustifiedCheckpoint())
+	store.mu.Lock()
+	store.invalidateCachedHead()
+	store.mu.Unlock()
+}
+
+func TestGloasHeadFailsWithoutJustifiedCheckpointState(t *testing.T) {
+	store, anchorRoot, _ := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	dropJustifiedCheckpointState(store, anchorRoot)
+
+	_, _, err := store.GetHeadNode()
+	require.ErrorContains(t, err, "baseState not found")
+}
+
+func TestGloasCurrentSlotBlockFailsWithoutJustifiedCheckpointState(t *testing.T) {
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	dropJustifiedCheckpointState(store, anchorRoot)
+
+	sibling := cltypes.NewSignedBeaconBlock(store.beaconCfg, clparams.GloasVersion)
+	sibling.Block.Slot = child.Block.Slot
+	sibling.Block.ParentRoot = anchorRoot
+	sibling.Block.ProposerIndex = child.Block.ProposerIndex + 1
+	require.Equal(t, store.Slot(), sibling.Block.Slot)
+
+	err := store.OnBlock(context.Background(), sibling, false, false, false)
+	require.ErrorContains(t, err, "baseState not found")
+}
+
+func TestGloasCurrentSlotBlockUsesAnchorWhenJustifiedRootIsUnknown(t *testing.T) {
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	store.justifiedCheckpoint.Store(solid.Checkpoint{Epoch: store.JustifiedCheckpoint().Epoch, Root: common.Hash{0xee}})
+
+	sibling := cltypes.NewSignedBeaconBlock(store.beaconCfg, clparams.GloasVersion)
+	sibling.Block.Slot = child.Block.Slot
+	sibling.Block.ParentRoot = anchorRoot
+	sibling.Block.ProposerIndex = child.Block.ProposerIndex + 1
+	require.NoError(t, store.OnBlock(context.Background(), sibling, false, false, false))
+}
+
+type pruningStateForkGraph struct {
+	*embeddedPtcVoteForkGraph
+}
+
+func (g *pruningStateForkGraph) GetState(blockRoot common.Hash, _ bool) (*state.CachingBeaconState, error) {
+	delete(g.headers, blockRoot)
+	delete(g.states, blockRoot)
+	return nil, nil
+}
+
+func TestGloasHeadUsesAnchorWhenJustifiedRootIsPrunedDuringLookup(t *testing.T) {
+	store, anchorRoot, _ := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	store.forkGraph = &pruningStateForkGraph{store.forkGraph.(*embeddedPtcVoteForkGraph)}
+	store.checkpointStates.Delete(store.JustifiedCheckpoint())
+	store.mu.Lock()
+	store.invalidateCachedHead()
+	store.mu.Unlock()
+
+	head, _, err := store.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, anchorRoot, head.Root)
+}
+
 func runEmbeddedPtcVoteBlock(
 	t *testing.T,
 	configuredPtcSize uint64,
@@ -185,6 +249,8 @@ func runEmbeddedPtcVoteBlock(
 	anchorRoot, err := anchor.BlockRoot()
 	require.NoError(t, err)
 
+	baseState, err := anchor.Copy()
+	require.NoError(t, err)
 	postState, err := anchor.Copy()
 	require.NoError(t, err)
 	require.NoError(t, postState.SetSlot(2))
@@ -194,7 +260,7 @@ func runEmbeddedPtcVoteBlock(
 		getFinalizedExecutionHashForkGraph: &getFinalizedExecutionHashForkGraph{
 			blocks:     map[common.Hash]*cltypes.SignedBeaconBlock{anchorRoot: parent},
 			headers:    map[common.Hash]*cltypes.BeaconBlockHeader{anchorRoot: {Slot: 1}},
-			states:     make(map[common.Hash]*state.CachingBeaconState),
+			states:     map[common.Hash]*state.CachingBeaconState{anchorRoot: baseState},
 			anchorRoot: anchorRoot,
 			anchorSlot: 1,
 		},
