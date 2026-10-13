@@ -1138,10 +1138,16 @@ func (ibs *IntraBlockState) touchAccount(addr accounts.Address) {
 // TouchAccount materializes an empty account and records the zero-balance touch
 // needed for state clearing and trie consistency.
 func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
-	// An own balance write settles the touch: zero already is the touch, non-zero is a non-empty account.
-	if ibs.versionMap != nil && addr != ripemd {
-		if _, ok := ibs.versionedWrites.GetBalance(addr); ok {
-			return nil
+	var prev uint256.Int
+	had := false
+	if ibs.versionMap != nil {
+		var prevWrite *VersionedWrite[uint256.Int]
+		if prevWrite, had = ibs.versionedWrites.GetBalance(addr); had {
+			// An own balance write settles the touch: zero already is the touch, non-zero is a non-empty account.
+			if addr != ripemd {
+				return nil
+			}
+			prev = prevWrite.Val
 		}
 	}
 	markTouched := func() {
@@ -1152,15 +1158,6 @@ func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
 			// Versioned path: pair the BalancePath=0 write with a journal entry
 			// that reverts it, so the write-set stays in step through reverts
 			// without any dirties re-processing (deprecated on this path).
-			prevWrite, had := ibs.versionedWrites.GetBalance(addr)
-			var prev uint256.Int
-			if had {
-				prev = prevWrite.Val
-				// An own zero balance already is the touch; repeating it would journal a no-op.
-				if prev.IsZero() && addr != ripemd {
-					return
-				}
-			}
 			ibs.recordWriteBalance(addr, uint256.Int{})
 			ibs.journal.touchAccount(addr, !had, prev)
 			return
