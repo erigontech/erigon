@@ -2282,6 +2282,48 @@ func TestPostExecutionPayloadEnvelopesClassifiesIntegrationFailureByValidationMo
 	}
 }
 
+func TestPostExecutionPayloadEnvelopePublishesAnInterruptedValidation(t *testing.T) {
+	for _, path := range []string{
+		"/eth/v1/beacon/execution_payload_envelope",
+		"/eth/v1/beacon/execution_payload_envelopes?broadcast_validation=gossip",
+		"/eth/v1/beacon/execution_payload_envelopes?broadcast_validation=consensus",
+	} {
+		t.Run(path, func(t *testing.T) {
+			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			gossipManager := gossip_mock.NewMockGossip(gomock.NewController(t))
+			gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any()).Return(nil)
+			handler.gossipManager = gossipManager
+			handler.sentinel = &nonNilSentinelClient{}
+			fcu.OnExecutionPayloadErr = fmt.Errorf("%w: %w", forkchoice.ErrPayloadValidationInterrupted, context.DeadlineExceeded)
+			handler.emitters = beaconevents.NewEventEmitter()
+			events := make(chan *beaconevents.EventStream, 1)
+			subscription := handler.emitters.Operation().Subscribe(events)
+			defer subscription.Unsubscribe()
+			root := common.Hash{1}
+			fcu.Blocks[root] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 12, Body: cltypes.NewBeaconBody(handler.beaconChainCfg, clparams.GloasVersion)}}
+			envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+			envelope.Message.BeaconBlockRoot = root
+			body, err := json.Marshal(envelope)
+			require.NoError(t, err)
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, bytes.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Eth-Consensus-Version", "gloas")
+			request.Header.Set("Eth-Blob-Data-Included", "false")
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
+			select {
+			case event := <-events:
+				require.Equal(t, beaconevents.OpExecutionPayloadGossip, event.Event)
+			case <-time.After(time.Second):
+				t.Fatal("no execution payload gossip event")
+			}
+		})
+	}
+}
+
 func TestPostExecutionPayloadEnvelopeGossipsPersistenceFailureBeforeReturningError(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)

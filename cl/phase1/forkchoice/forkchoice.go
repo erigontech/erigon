@@ -1064,8 +1064,14 @@ func (f *ForkChoiceStore) markPayloadStatus(
 		}
 	}
 	if f.executionPayloadStatus != nil {
-		if executionStatus, ok := f.executionPayloadStatus.Get(executionBlockHash); ok && executionStatus == execution_client.PayloadStatusInvalidated {
-			effective = execution_client.PayloadStatusInvalidated
+		// An EL verdict belongs to the payload hash, whichever beacon root recorded it.
+		if executionStatus, ok := f.executionPayloadStatus.Get(executionBlockHash); ok {
+			switch {
+			case executionStatus == execution_client.PayloadStatusInvalidated:
+				effective = execution_client.PayloadStatusInvalidated
+			case executionStatus == execution_client.PayloadStatusValidated && effective != execution_client.PayloadStatusInvalidated:
+				effective = execution_client.PayloadStatusValidated
+			}
 		}
 	}
 	current, known := f.payloadStatusAuthorityWithRetention(blockRoot, isRetained != nil)

@@ -1024,6 +1024,8 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		switch {
 		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed):
 			persistenceErr = err
+		case errors.Is(err, forkchoice.ErrPayloadValidationInterrupted):
+			// The envelope passed every consensus check; only the EL verdict is pending.
 		case canonical && !blobDataIncluded && errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable):
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
@@ -1049,7 +1051,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 				status = http.StatusOK
 			}
 			gossipValidated = true
-		case errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable):
+		case errors.Is(err, forkchoice.ErrPayloadValidationInterrupted), errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable):
 			a.logger.Debug("[Beacon REST] OnExecutionPayload queued or ignored", "err", err)
 			status = http.StatusAccepted
 			gossipValidated = true

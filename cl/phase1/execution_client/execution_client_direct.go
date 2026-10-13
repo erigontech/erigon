@@ -209,6 +209,16 @@ func retryAssembleBlock(ctx context.Context, attempts int, delay time.Duration, 
 	return 0, err
 }
 
+// FinalNotValidatedBelow returns the block number below which NewPayload answers NotValidated
+// without validating, being more than reorgTooDeepDepth below the current head.
+func (cc *ExecutionClientDirect) FinalNotValidatedBelow(ctx context.Context) (uint64, bool) {
+	head := cc.chainRW.CurrentHeader(ctx)
+	if head == nil || head.Number.Uint64() <= reorgTooDeepDepth {
+		return 0, false
+	}
+	return head.Number.Uint64() - reorgTooDeepDepth, true
+}
+
 func (cc *ExecutionClientDirect) SupportInsertion() bool {
 	return true
 }

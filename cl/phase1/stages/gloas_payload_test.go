@@ -625,6 +625,21 @@ type envelopeReadTestStore struct {
 	onErr     error
 	persisted *cltypes.SignedExecutionPayloadEnvelope
 	readErr   error
+	known     map[common.Hash]execution_client.PayloadStatus
+	recorded  map[common.Hash]execution_client.PayloadStatus
+}
+
+func (s *envelopeReadTestStore) GetRecentExecutionPayloadStatusByRoot(root common.Hash) (execution_client.PayloadStatus, bool) {
+	status, ok := s.known[root]
+	return status, ok
+}
+
+func (s *envelopeReadTestStore) MarkPayloadStatusAndGasLimitIfRetained(root, _ common.Hash, status execution_client.PayloadStatus, _ uint64) (execution_client.PayloadStatus, bool) {
+	if s.recorded == nil {
+		s.recorded = map[common.Hash]execution_client.PayloadStatus{}
+	}
+	s.recorded[root] = status
+	return status, true
 }
 
 func (s *envelopeReadTestStore) OnExecutionPayload(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
@@ -1141,6 +1156,138 @@ func TestValidateAnchorPayloadWithAnyExecutionClient(t *testing.T) {
 	}
 }
 
+func newAnchorForkChoiceStore(t *testing.T, cfg *clparams.BeaconChainConfig, st *state2.CachingBeaconState, engine execution_client.ExecutionEngine) *forkchoice.ForkChoiceStore {
+	t.Helper()
+	forkGraph, err := fork_graph.NewForkGraphDisk(st, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	store, err := forkchoice.NewForkChoiceStore(nil, st, engine, pool.NewOperationsPool(cfg), forkGraph, beaconevents.NewEventEmitter(), nil, nil,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(), validator_params.NewValidatorParams(), false, nil)
+	require.NoError(t, err)
+	return store
+}
+
+// interruptingEngine cancels the caller's context inside NewPayload, as a budget expiry would.
+func interruptingEngine(cancel context.CancelFunc) *testExecutionEngine {
+	return &testExecutionEngine{newPayloadFn: func(ctx context.Context, _ *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
+		cancel()
+		return execution_client.PayloadStatusNone, ctx.Err()
+	}}
+}
+
+func TestValidateAnchorPayloadRecordsNoVerdictWhenInterrupted(t *testing.T) {
+	cfg, st, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
+	anchorRoot, err := st.BlockRoot()
+	require.NoError(t, err)
+	store := newAnchorForkChoiceStore(t, cfg, st, nil)
+	ctx, cancel := context.WithCancel(t.Context())
+	engine := interruptingEngine(cancel)
+
+	require.NoError(t, validateAnchorPayloadWithExecutionClient(ctx, &Cfg{beaconCfg: cfg, forkChoice: store, executionClient: engine, gloasPayloadValidator: engine}, anchorRoot, bid, env))
+	require.Equal(t, 1, engine.newPayloadCalls)
+	_, recorded := store.GetExecutionPayloadGasLimit(env.Message.Payload.BlockHash)
+	require.False(t, recorded)
+}
+
+// The anchor's payload is recorded as NotValidated when it is stored, also with an EL
+// configured, so an interrupted first validation does not leave the anchor hash without a status
+// or gas limit until the next retry.
+func TestStoreAnchorEnvelopeRecordsNotValidatedWithAnExecutionClient(t *testing.T) {
+	cfg, st, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
+	anchorRoot, err := st.BlockRoot()
+	require.NoError(t, err)
+	env.Message.BeaconBlockRoot = anchorRoot
+	privKey, err := bls.NewPrivateKeyFromIKM([]byte("01234567890123456789012345678901"))
+	require.NoError(t, err)
+	signAnchorEnvelope(t, st, privKey, env, bid.Slot)
+	store := newAnchorForkChoiceStore(t, cfg, st, &testExecutionEngine{})
+
+	require.NoError(t, store.StoreAnchorEnvelope(anchorRoot, env))
+	status, known := store.GetRecentExecutionPayloadStatusByRoot(anchorRoot)
+	require.True(t, known)
+	require.EqualValues(t, execution_client.PayloadStatusNotValidated, status)
+	gasLimit, ok := store.GetExecutionPayloadGasLimit(env.Message.Payload.BlockHash)
+	require.True(t, ok)
+	require.Equal(t, env.Message.Payload.GasLimit, gasLimit)
+}
+
+// finalNotValidatedEngine answers NotValidated finally below a block, as the direct EL client does.
+type finalNotValidatedEngine struct {
+	*testExecutionEngine
+	below uint64
+}
+
+func (e finalNotValidatedEngine) FinalNotValidatedBelow(context.Context) (uint64, bool) {
+	return e.below, true
+}
+
+// A NotValidated answer is requeued unless the EL reports it final for the block: the direct
+// client does not validate blocks deep below its head, and no retry changes that.
+func TestDrainPendingGloasPayloadsDoesNotRequeueAFinalNotValidated(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	const below = 97
+	for _, tc := range []struct {
+		name     string
+		number   uint64
+		final    bool
+		requeued bool
+	}{
+		{name: "deep below the direct EL head", number: below - 1, final: true, requeued: false},
+		{name: "at the direct EL boundary", number: below, final: true, requeued: true},
+		{name: "an EL without final answers", number: below - 1, final: false, requeued: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fc := &forkchoice.ForkChoiceStore{}
+			base := &testExecutionEngine{supportInsertion: true, payloadStatus: execution_client.PayloadStatusNotValidated}
+			var engine execution_client.ExecutionEngine = base
+			if tc.final {
+				engine = finalNotValidatedEngine{testExecutionEngine: base, below: below}
+			}
+			payload := cltypes.NewEth1Block(clparams.GloasVersion, &cfg)
+			payload.BlockHash = common.HexToHash("0x9abc")
+			payload.BlockNumber = tc.number
+			fc.RequeuePendingELPayload(forkchoice.PendingELPayload{
+				Block: &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 1, Body: &cltypes.BeaconBody{
+					Version: clparams.GloasVersion,
+					SignedExecutionPayloadBid: &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+						BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
+					}},
+				}}},
+				Envelope: &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: common.HexToHash("0x1234"), Payload: payload}},
+			})
+
+			drainPendingGloasPayloads(context.Background(), &Cfg{beaconCfg: &cfg, executionClient: engine, gloasPayloadValidator: base, forkChoice: fc}, fc)
+
+			require.Equal(t, 1, base.newPayloadCalls)
+			require.Equal(t, tc.requeued, len(fc.DrainPendingELPayloads()) == 1)
+		})
+	}
+}
+
+// The anchor retry does not ask the EL about an anchor it does not validate; the anchor keeps the
+// NotValidated status it was stored with.
+func TestRetryUnverifiedAnchorPayloadSkipsAFinalNotValidated(t *testing.T) {
+	cfg, st, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
+	cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch = 0, 0, 0
+	cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch = 0, 0, 0
+	st.SetLatestExecutionPayloadBid(bid)
+	anchorRoot, err := st.BlockRoot()
+	require.NoError(t, err)
+	env.Message.BeaconBlockRoot = anchorRoot
+	privKey, err := bls.NewPrivateKeyFromIKM([]byte("01234567890123456789012345678901"))
+	require.NoError(t, err)
+	signAnchorEnvelope(t, st, privKey, env, bid.Slot)
+	base := &testExecutionEngine{payloadStatus: execution_client.PayloadStatusValidated}
+	store := newAnchorForkChoiceStore(t, cfg, st, base)
+	require.NoError(t, store.StoreAnchorEnvelope(anchorRoot, env))
+
+	retryUnverifiedAnchorPayload(t.Context(), &Cfg{beaconCfg: cfg, forkChoice: store, executionClient: finalNotValidatedEngine{testExecutionEngine: base, below: env.Message.Payload.BlockNumber + 1}, gloasPayloadValidator: base})
+	require.Zero(t, base.newPayloadCalls)
+
+	retryUnverifiedAnchorPayload(t.Context(), &Cfg{beaconCfg: cfg, forkChoice: store, executionClient: base, gloasPayloadValidator: base})
+	require.Equal(t, 1, base.newPayloadCalls, "an EL without final answers is asked")
+}
+
 func TestDrainPendingGloasPayloadsRequeuesNotValidatedPayload(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	clparams.ApplyMinimalPreset(&cfg)
@@ -1183,7 +1330,7 @@ func TestDrainPendingGloasPayloadsRequeuesNotValidatedPayload(t *testing.T) {
 		executionClient:       engine,
 		gloasPayloadValidator: engine,
 		forkChoice:            fc,
-	})
+	}, fc)
 
 	require.Equal(t, 1, engine.newPayloadCalls)
 	queued := fc.DrainPendingELPayloads()
@@ -1218,7 +1365,7 @@ func TestDrainPendingGloasPayloadsStopsAfterCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	drainPendingGloasPayloads(ctx, &Cfg{beaconCfg: cfg, executionClient: engine, gloasPayloadValidator: engine, forkChoice: fc})
+	drainPendingGloasPayloads(ctx, &Cfg{beaconCfg: cfg, executionClient: engine, gloasPayloadValidator: engine, forkChoice: fc}, fc)
 
 	require.Equal(t, 1, engine.newPayloadCalls)
 	require.Len(t, fc.DrainPendingELPayloads(), 3)
@@ -1433,3 +1580,38 @@ func (t *testExecutionEngine) GetClientVersionV1(context.Context, *engine_types.
 }
 
 var _ execution_client.ExecutionEngine = (*testExecutionEngine)(nil)
+
+// A payload forward sync persists without an EL verdict is recorded as NotValidated.
+func TestProcessDownloadedGloasEnvelopeRecordsNotValidatedWhenNotValidating(t *testing.T) {
+	root := common.HexToHash("0x1")
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	envelope.Message.BeaconBlockRoot = root
+	envelope.Message.Payload.BlockHash = common.HexToHash("0xe1")
+	block := &cltypes.BeaconBlock{Slot: 9}
+	notValidated := map[common.Hash]execution_client.PayloadStatus{root: execution_client.PayloadStatusNotValidated}
+
+	for _, tc := range []struct {
+		name     string
+		store    *envelopeReadTestStore
+		validate bool
+		recorded map[common.Hash]execution_client.PayloadStatus
+	}{
+		{name: "new payload", store: &envelopeReadTestStore{}, recorded: notValidated},
+		// A resumed sync meets the copy it persisted before the restart.
+		{name: "already persisted copy", store: &envelopeReadTestStore{onErr: forkchoice.ErrIgnore, persisted: envelope}, recorded: notValidated},
+		{name: "verdict on record is kept", store: &envelopeReadTestStore{known: map[common.Hash]execution_client.PayloadStatus{root: execution_client.PayloadStatusValidated}}},
+		// None is no verdict: it leaves the payload unavailable.
+		{name: "None moves to NotValidated", store: &envelopeReadTestStore{known: map[common.Hash]execution_client.PayloadStatus{root: execution_client.PayloadStatusNone}}, recorded: notValidated},
+		// Validating with the EL records the verdict itself.
+		{name: "validated apply adds nothing", store: &envelopeReadTestStore{}, validate: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NoError(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), tc.store, &gloasCollectorTest{}, block, root, envelope, !tc.validate, tc.validate))
+			if tc.recorded == nil {
+				require.Empty(t, tc.store.recorded)
+				return
+			}
+			require.Equal(t, tc.recorded, tc.store.recorded)
+		})
+	}
+}

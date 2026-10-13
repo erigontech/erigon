@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -378,6 +379,25 @@ func TestVerifyUnverifiedGloasPayloadsDoesNotRecordTimeoutAsVerdict(t *testing.T
 	require.Equal(t, 2, engine.newPayloadCalls)
 	require.True(t, cfg.forkChoice.IsPayloadVerified(headRoot))
 	require.Zero(t, cfg.gloasVerificationCursor)
+}
+
+func TestVerifyUnverifiedGloasPayloadsSkipsAFinalNotValidated(t *testing.T) {
+	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	headBlock := graph.parents[headRoot]
+	payload := graph.envelopes[headRoot].Message.Payload
+	delete(graph.parents, headRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
+	cfg.gloasVerificationCursor = headRoot
+	cfg.executionClient = finalNotValidatedEngine{testExecutionEngine: engine, below: payload.BlockNumber + 1}
+
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+
+	require.Zero(t, engine.newPayloadCalls)
+	status, found := cfg.forkChoice.GetRecentExecutionPayloadStatusByRoot(headRoot)
+	require.True(t, found)
+	require.EqualValues(t, execution_client.PayloadStatusNotValidated, status)
+	require.Empty(t, cfg.forkChoice.DrainPendingELPayloads())
 }
 
 func TestVerifyUnverifiedGloasPayloadsChecksDirectExtensionWithEmptyCursor(t *testing.T) {
@@ -949,7 +969,7 @@ func TestStoredParentPayloadReplayReservesBudgetForLaterRoots(t *testing.T) {
 	secondStore := &storedParentPayloadTestStore{has: true, block: block, markRetained: true}
 	validator := &orderedPayloadValidator{slow: firstPayload.BlockHash}
 	replay := storedParentPayloadReplay{
-		deadline:  time.Now().Add(100 * time.Millisecond),
+		deadline:  time.Now().Add(time.Second),
 		remaining: 2,
 		results:   make(map[common.Hash]bool),
 	}
@@ -968,6 +988,25 @@ func TestStoredParentPayloadReplayReservesBudgetForLaterRoots(t *testing.T) {
 		Payload:         secondPayload,
 	}}, nil))
 	require.Equal(t, []common.Hash{firstPayload.BlockHash, secondPayload.BlockHash}, validator.calls)
+}
+
+// An apply cut short by its context is no verdict, so the replay still validates the parent.
+func TestStoredParentPayloadReplayRetriesAnInterruptedApply(t *testing.T) {
+	root := common.Hash{1}
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
+	payload.BlockHash = common.Hash{3}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	store := &storedParentPayloadTestStore{has: true, block: block, markRetained: true}
+	validator := &orderedPayloadValidator{}
+	replay := storedParentPayloadReplay{deadline: time.Now().Add(time.Second), remaining: 1, results: make(map[common.Hash]bool)}
+	cfg := &Cfg{beaconCfg: &clparams.MainnetBeaconConfig, executionClient: &testExecutionEngine{}, gloasPayloadValidator: validator}
+	interrupted := fmt.Errorf("%w: %w", forkchoice.ErrPayloadValidationInterrupted, context.DeadlineExceeded)
+
+	require.True(t, replay.accepted(t.Context(), cfg, store, root, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+		BeaconBlockRoot: root,
+		Payload:         payload,
+	}}, interrupted))
+	require.Equal(t, []common.Hash{payload.BlockHash}, validator.calls)
 }
 
 func TestStoredParentPayloadReplayRejectsApplyFailure(t *testing.T) {

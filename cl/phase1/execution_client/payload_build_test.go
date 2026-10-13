@@ -135,3 +135,24 @@ func TestDirectPreparationAndForkChoiceReuseTheSameExecutionBuild(t *testing.T) 
 	require.NotEmpty(t, preparedID)
 	require.Equal(t, preparedID, productionID)
 }
+
+func TestDirectFinalNotValidatedBelowTracksTheHead(t *testing.T) {
+	newClient := func(blocks int) *ExecutionClientDirect {
+		module := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+		if blocks > 0 {
+			chainPack, err := module.GenerateChain(blocks, nil)
+			require.NoError(t, err)
+			require.NoError(t, module.InsertChain(chainPack))
+		}
+		client, err := NewExecutionClientDirect(chainreader.NewChainReaderEth1(module.ChainConfig, module.ExecModule, time.Hour), nil)
+		require.NoError(t, err)
+		return client
+	}
+
+	_, ok := newClient(0).FinalNotValidatedBelow(t.Context())
+	require.False(t, ok)
+
+	below, ok := newClient(6).FinalNotValidatedBelow(t.Context())
+	require.True(t, ok)
+	require.Equal(t, uint64(6-reorgTooDeepDepth), below)
+}
