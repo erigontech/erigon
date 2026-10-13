@@ -339,6 +339,15 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		return
 	}
 
+	if coldReadPath(path, skipStorage) && s.versionMap.load(addr) == nil {
+		if _, resident := s.stateObjects[addr]; !resident {
+			if _, recorded := s.versionedReads.getHeader(addr, path, key); commited || !recorded {
+				s.coldRead(addr, path, key, r)
+				return
+			}
+		}
+	}
+
 	if so, ok := s.stateObjects[addr]; ok && so.deleted {
 		// When the in-memory deletion reflects a prior tx's selfdestruct, surface
 		// the SD version rather than UnknownVersion, so synthetic CreateAccount read
@@ -947,6 +956,55 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	r.outcome = outcomeReturnDefault
 	r.source = UnknownSource
 	r.version = UnknownVersion
+}
+
+// coldReadPath reports the paths whose version-map miss on an address with no
+// cell and no resident object resolves straight from the committed state.
+func coldReadPath(path AccountPath, skipStorage bool) bool {
+	switch path {
+	case StoragePath, CodePath, CodeSizePath:
+		return true
+	case AddressPath:
+		return skipStorage
+	}
+	return false
+}
+
+// coldReadHeader is the read versionedReadCore records for a version-map miss.
+var coldReadHeader = ReadHeader{Source: StorageRead, Version: Version{TxIndex: UnknownDep, Incarnation: -1}}
+
+// coldRead resolves a path of an address no tx wrote a cell of: with no cell
+// and no resident object, the committed state is the answer, and the miss is
+// what validation checks the read against.
+func (s *IntraBlockState) coldRead(addr accounts.Address, path AccountPath, key accounts.StorageKey, r *readPathResult) {
+	var err error
+	switch path {
+	case AddressPath:
+		r.outcome = outcomeReturnDefault
+		r.source = UnknownSource
+		r.version = UnknownVersion
+		r.hdr = coldReadHeader
+		r.recordVR = true
+		return
+	case StoragePath:
+		r.mapStorageVal, err = s.committedStorageDirect(addr, key)
+	case CodePath:
+		r.mapCodeVal, err = s.committedCodeDirect(addr)
+	case CodeSizePath:
+		r.mapCodeSizeVal, err = s.committedCodeSizeDirect(addr)
+	}
+	if err != nil {
+		r.err = err
+		r.outcome = outcomeReturnDefault
+		r.source = StorageRead
+		r.version = UnknownVersion
+		return
+	}
+	r.outcome = outcomeStorageRead
+	r.hdr = coldReadHeader
+	r.recordVR = true
+	r.source = coldReadHeader.Source
+	r.version = coldReadHeader.Version
 }
 
 // readAccountInternal performs an AddressPath versionedReadCore + typed
