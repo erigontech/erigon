@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type StateReader interface {
@@ -323,6 +324,12 @@ type ParentRecords struct {
 	ParentHash common.Hash
 	Deleted    [][]byte
 	Get        func(key []byte) ([]byte, kv.Step, bool)
+	State      ParentState
+}
+
+type ParentState interface {
+	GetCommittedAccount(addr accounts.Address) (*accounts.Account, bool)
+	GetCommittedStorage(addr accounts.Address, key accounts.StorageKey) ([]byte, bool)
 }
 
 var (

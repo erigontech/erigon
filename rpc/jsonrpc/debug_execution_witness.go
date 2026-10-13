@@ -21,6 +21,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -618,11 +619,15 @@ func (api *BaseAPI) buildAccessedState(
 	engine rules.EngineReader,
 	firstTxNumInBlock uint64,
 	mode witnessMode,
+	parent commitmentdb.ParentState,
 ) (accessed *accessedState, accessedBlockHashes []uint64, err error) {
 	blockNum := block.NumberU64()
 
 	// Create a state reader at the parent block state using the exact txnum
 	var stateReader state.StateReader = state.NewHistoryReaderV3(tx, firstTxNumInBlock)
+	if parent != nil {
+		stateReader = &parentStateReader{StateReader: stateReader, parent: parent}
+	}
 
 	// Create a combined recording state (reader + writer with in-memory overlay)
 	recordingState := NewRecordingState(stateReader)
@@ -714,6 +719,68 @@ func (api *BaseAPI) buildAccessedState(
 	}
 
 	return collectAccessedState(recordingState, mode), accessedBlockHashes, nil
+}
+
+var (
+	mxParentStateHit  = metrics.GetOrCreateCounter("witness_parent_state_hits_total")
+	mxParentStateMiss = metrics.GetOrCreateCounter("witness_parent_state_misses_total")
+)
+
+type parentStateReader struct {
+	state.StateReader
+	parent commitmentdb.ParentState
+}
+
+func (r *parentStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
+	acc, ok := r.parent.GetCommittedAccount(address)
+	if !ok {
+		mxParentStateMiss.Inc()
+		return r.StateReader.ReadAccountData(address)
+	}
+	mxParentStateHit.Inc()
+	var got *accounts.Account
+	if acc != nil {
+		c := *acc
+		got = &c
+	}
+	if dbg.AssertEnabled {
+		want, err := r.StateReader.ReadAccountData(address)
+		if err != nil {
+			return nil, err
+		}
+		if (want == nil) != (got == nil) || want != nil && *want != *got {
+			return nil, fmt.Errorf("parent state account %x: %+v, history %+v", address, got, want)
+		}
+	}
+	return got, nil
+}
+
+func (r *parentStateReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(address)
+}
+
+func (r *parentStateReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	val, ok := r.parent.GetCommittedStorage(address, key)
+	if !ok {
+		mxParentStateMiss.Inc()
+		return r.StateReader.ReadAccountStorage(address, key)
+	}
+	mxParentStateHit.Inc()
+	var v uint256.Int
+	v.SetBytes(val)
+	if dbg.AssertEnabled {
+		want, wantOK, err := r.StateReader.ReadAccountStorage(address, key)
+		if err != nil {
+			return v, false, err
+		}
+		if !wantOK {
+			want.Clear()
+		}
+		if want != v {
+			return v, false, fmt.Errorf("parent state slot %x %x: %x, history %x", address, key, &v, &want)
+		}
+	}
+	return v, len(val) > 0, nil
 }
 
 // ExecutionWitness implements debug_executionWitness.
@@ -905,7 +972,11 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 
 	engine := api.engine()
 
-	accessed, accessedBlockHashes, err := api.buildAccessedState(ctx, tx, block, chainConfig, engine, firstTxNumInBlock, mode)
+	var parent commitmentdb.ParentState
+	if hc != nil && hc.records != nil {
+		parent = hc.records.State
+	}
+	accessed, accessedBlockHashes, err := api.buildAccessedState(ctx, tx, block, chainConfig, engine, firstTxNumInBlock, mode, parent)
 	if err != nil {
 		return nil, err
 	}

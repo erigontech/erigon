@@ -1932,6 +1932,7 @@ type blockResult struct {
 	AllDeps          map[int]map[int]bool
 	Exhausted        *ErrLoopExhausted
 	blockStateCache  *state.BlockStateCache
+	parentState      *state.BlockStateCache
 	superseded       supersededWrites
 }
 
@@ -3548,6 +3549,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			Exhausted:        be.exhausted,
 			blockStateCache:  be.blockStateCache,
 			superseded:       be.takeSuperseded(),
+		}
+		if !isPartial && len(be.tasks) > 0 && commitmentdb.ParentReadsWanted() {
+			be.result.parentState = be.tasks[0].Task.GetBlockStateCache()
 		}
 		return be.result, nil
 	}

@@ -826,3 +826,82 @@ func TestWitnessStatelessVerifyOnlyRunsUnderAssert(t *testing.T) {
 	require.Error(t, api.verifyWitnessStateless(ctx, tx, bad, block, fullEngine),
 		"under the gate the stateless replay rejects a wrong witness")
 }
+
+type fixedParentState struct {
+	acc  map[accounts.Address]*accounts.Account
+	slot map[accounts.StorageKey][]byte
+}
+
+func (p fixedParentState) GetCommittedAccount(addr accounts.Address) (*accounts.Account, bool) {
+	a, ok := p.acc[addr]
+	return a, ok
+}
+
+func (p fixedParentState) GetCommittedStorage(_ accounts.Address, key accounts.StorageKey) ([]byte, bool) {
+	v, ok := p.slot[key]
+	return v, ok
+}
+
+type fixedHistory struct {
+	state.StateReader
+	acc  map[accounts.Address]*accounts.Account
+	slot map[accounts.StorageKey]uint256.Int
+}
+
+func (h fixedHistory) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	return h.acc[addr], nil
+}
+
+func (h fixedHistory) ReadAccountStorage(_ accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	v, ok := h.slot[key]
+	return v, ok, nil
+}
+
+func TestParentStateReaderServesTheValidationsParentState(t *testing.T) {
+	previous := dbg.AssertEnabled
+	t.Cleanup(func() { dbg.AssertEnabled = previous })
+	cached, absent, unseen := accounts.InternAddress(common.Address{1}), accounts.InternAddress(common.Address{2}), accounts.InternAddress(common.Address{3})
+	full, empty, other := accounts.InternKey(common.Hash{1}), accounts.InternKey(common.Hash{2}), accounts.InternKey(common.Hash{3})
+	history := fixedHistory{
+		acc:  map[accounts.Address]*accounts.Account{cached: {Nonce: 7}, unseen: {Nonce: 9}},
+		slot: map[accounts.StorageKey]uint256.Int{full: *uint256.NewInt(5), other: *uint256.NewInt(6)},
+	}
+	parent := fixedParentState{
+		acc:  map[accounts.Address]*accounts.Account{cached: {Nonce: 7}, absent: nil},
+		slot: map[accounts.StorageKey][]byte{full: {5}, empty: nil},
+	}
+	for _, asserts := range []bool{false, true} {
+		dbg.AssertEnabled = asserts
+		r := &parentStateReader{StateReader: history, parent: parent}
+		acc, err := r.ReadAccountData(cached)
+		require.NoError(t, err)
+		require.Equal(t, uint64(7), acc.Nonce)
+		acc.Nonce = 8
+		require.Equal(t, uint64(7), parent.acc[cached].Nonce, "callers get a copy")
+		acc, err = r.ReadAccountData(absent)
+		require.NoError(t, err)
+		require.Nil(t, acc)
+		acc, err = r.ReadAccountData(unseen)
+		require.NoError(t, err)
+		require.Equal(t, uint64(9), acc.Nonce, "a key the validation never read comes from history")
+		v, ok, err := r.ReadAccountStorage(cached, full)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, uint64(5), v.Uint64())
+		v, ok, err = r.ReadAccountStorage(cached, empty)
+		require.NoError(t, err)
+		require.False(t, ok)
+		require.True(t, v.IsZero())
+		v, _, err = r.ReadAccountStorage(cached, other)
+		require.NoError(t, err)
+		require.Equal(t, uint64(6), v.Uint64())
+	}
+
+	dbg.AssertEnabled = true
+	wrong := fixedParentState{acc: map[accounts.Address]*accounts.Account{cached: {Nonce: 1}}, slot: map[accounts.StorageKey][]byte{full: {4}}}
+	r := &parentStateReader{StateReader: history, parent: wrong}
+	_, err := r.ReadAccountData(cached)
+	require.Error(t, err, "asserts reject a cached account that differs from history")
+	_, _, err = r.ReadAccountStorage(cached, full)
+	require.Error(t, err, "asserts reject a cached slot that differs from history")
+}

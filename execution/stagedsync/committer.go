@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/state"
 )
 
 // commitmentResult is the outcome of a single commitment computation.
@@ -944,10 +945,11 @@ type commitTarget struct {
 	parentHash common.Hash
 	lastTxNum  uint64
 	stateRoot  common.Hash
+	parent     *state.BlockStateCache
 }
 
 func targetOf(br *blockResult) commitTarget {
-	return commitTarget{blockNum: br.Block.NumberU64(), blockHash: br.Block.Hash(), parentHash: br.Block.ParentHash(), lastTxNum: br.lastTxNum, stateRoot: br.Block.Root()}
+	return commitTarget{blockNum: br.Block.NumberU64(), blockHash: br.Block.Hash(), parentHash: br.Block.ParentHash(), lastTxNum: br.lastTxNum, stateRoot: br.Block.Root(), parent: br.parentState}
 }
 
 func (cc *commitmentCalculator) noteVerified(t commitTarget, deltas [][]commitment.BranchDelta) {
@@ -963,8 +965,12 @@ func (cc *commitmentCalculator) parentRecords() *commitmentdb.ParentRecords {
 		return nil
 	}
 	gen := p.gen.Load()
-	return &commitmentdb.ParentRecords{BlockNum: h.blockNum, BlockHash: h.blockHash, ParentHash: h.parentHash, Deleted: cc.handoffDel,
+	r := &commitmentdb.ParentRecords{BlockNum: h.blockNum, BlockHash: h.blockHash, ParentHash: h.parentHash, Deleted: cc.handoffDel,
 		Get: func(key []byte) ([]byte, kv.Step, bool) { return p.getAt(key, gen) }}
+	if h.parent != nil {
+		r.State = h.parent
+	}
+	return r
 }
 
 // computeMode selects compute's per-call behaviour; isolation is otherwise
