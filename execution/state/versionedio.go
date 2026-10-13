@@ -3103,10 +3103,7 @@ func (t *ioTable) dirtyRec(addr accounts.Address) *acctIO {
 	return nil
 }
 
-func (t *ioTable) isDirty(addr accounts.Address) bool {
-	r := t.find(addr)
-	return r != nil && r.dirty > 0
-}
+func (t *ioTable) isDirty(addr accounts.Address) bool { return t.dirtyRec(addr) != nil }
 
 func (t *ioTable) clearDirty() {
 	for i := range t.recs {
@@ -3843,17 +3840,8 @@ func (v *writeView) ReleaseAndReset() {
 
 func (v *writeView) Count() int {
 	n := 0
-	for i := range v.t.recs {
-		r := &v.t.recs[i]
-		for _, set := range []bool{
-			r.wAddress != nil, r.wBalance != nil, r.wNonce != nil, r.wIncarnation != nil,
-			r.wSelfDestruct != nil, r.wCreateContract != nil, r.wCode != nil, r.wCodeHash != nil, r.wCodeSize != nil,
-		} {
-			if set {
-				n++
-			}
-		}
-		n += len(r.wStorage)
+	for range v.AllHeaders() {
+		n++
 	}
 	return n
 }
