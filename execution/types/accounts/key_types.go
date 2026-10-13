@@ -36,13 +36,20 @@ var (
 // unique drops a value at the first GC after its last handle dies, so values the next request reads again are
 // allocated and registered again, and unique.Make parks its caller while a GC cycle finishes marking. These
 // direct-mapped tables keep the latest values alive and answer hits without unique.Make; a miss overwrites the slot.
+const (
+	addressTableSize = 256 * 1024
+	keyTableSize     = 1024 * 1024
+)
+
 var (
-	addressTable [1 << 18]atomic.Value // Address
-	keyTable     [1 << 20]atomic.Value // StorageKey
+	addressTable [addressTableSize]atomic.Value // Address
+	keyTable     [keyTableSize]atomic.Value     // StorageKey
+	_            = [1]struct{}{}[addressTableSize&(addressTableSize-1)]
+	_            = [1]struct{}{}[keyTableSize&(keyTableSize-1)]
 )
 
 func addressSlot(a common.Address) *atomic.Value {
-	return &addressTable[binary.BigEndian.Uint32(a[16:])&uint32(len(addressTable)-1)]
+	return &addressTable[binary.BigEndian.Uint32(a[16:])&(addressTableSize-1)]
 }
 
 func InternAddress(a common.Address) Address {
@@ -142,7 +149,7 @@ var (
 
 // keySlot mixes both ends of the key: keccak-derived slots differ everywhere, small scalar slots only at the end.
 func keySlot(k common.Hash) *atomic.Value {
-	return &keyTable[(binary.BigEndian.Uint32(k[:4])^binary.BigEndian.Uint32(k[28:]))&uint32(len(keyTable)-1)]
+	return &keyTable[(binary.BigEndian.Uint32(k[:4])^binary.BigEndian.Uint32(k[28:]))&(keyTableSize-1)]
 }
 
 func InternKey(k common.Hash) StorageKey {
