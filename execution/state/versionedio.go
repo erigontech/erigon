@@ -3124,27 +3124,35 @@ func pickCodeSize(r *acctIO) *VersionedRead[int]               { return &r.codeS
 func (t *ioTable) GetAddress(addr accounts.Address) (VersionedRead[AccountView], bool) {
 	return getRead(t, addr, AddressPath, pickAddress)
 }
+
 func (t *ioTable) GetBalance(addr accounts.Address) (VersionedRead[uint256.Int], bool) {
 	return getRead(t, addr, BalancePath, pickBalance)
 }
+
 func (t *ioTable) GetNonce(addr accounts.Address) (VersionedRead[uint64], bool) {
 	return getRead(t, addr, NoncePath, pickNonce)
 }
+
 func (t *ioTable) GetIncarnation(addr accounts.Address) (VersionedRead[uint64], bool) {
 	return getRead(t, addr, IncarnationPath, pickIncarnation)
 }
+
 func (t *ioTable) GetSelfDestruct(addr accounts.Address) (VersionedRead[bool], bool) {
 	return getRead(t, addr, SelfDestructPath, pickSelfDestruct)
 }
+
 func (t *ioTable) GetCreateContract(addr accounts.Address) (VersionedRead[bool], bool) {
 	return getRead(t, addr, CreateContractPath, pickCreateContract)
 }
+
 func (t *ioTable) GetCode(addr accounts.Address) (VersionedRead[accounts.Code], bool) {
 	return getRead(t, addr, CodePath, pickCode)
 }
+
 func (t *ioTable) GetCodeHash(addr accounts.Address) (VersionedRead[accounts.CodeHash], bool) {
 	return getRead(t, addr, CodeHashPath, pickCodeHash)
 }
+
 func (t *ioTable) GetCodeSize(addr accounts.Address) (VersionedRead[int], bool) {
 	return getRead(t, addr, CodeSizePath, pickCodeSize)
 }
@@ -3160,24 +3168,31 @@ func (t *ioTable) GetStorage(addr accounts.Address, key accounts.StorageKey) (Ve
 func (t *ioTable) SetAddress(addr accounts.Address, tr VersionedRead[AccountView]) {
 	setRead(t, addr, AddressPath, pickAddress, tr)
 }
+
 func (t *ioTable) SetBalance(addr accounts.Address, tr VersionedRead[uint256.Int]) {
 	setRead(t, addr, BalancePath, pickBalance, tr)
 }
+
 func (t *ioTable) SetNonce(addr accounts.Address, tr VersionedRead[uint64]) {
 	setRead(t, addr, NoncePath, pickNonce, tr)
 }
+
 func (t *ioTable) SetIncarnation(addr accounts.Address, tr VersionedRead[uint64]) {
 	setRead(t, addr, IncarnationPath, pickIncarnation, tr)
 }
+
 func (t *ioTable) SetCreateContract(addr accounts.Address, tr VersionedRead[bool]) {
 	setRead(t, addr, CreateContractPath, pickCreateContract, tr)
 }
+
 func (t *ioTable) SetCode(addr accounts.Address, tr VersionedRead[accounts.Code]) {
 	setRead(t, addr, CodePath, pickCode, tr)
 }
+
 func (t *ioTable) SetCodeHash(addr accounts.Address, tr VersionedRead[accounts.CodeHash]) {
 	setRead(t, addr, CodeHashPath, pickCodeHash, tr)
 }
+
 func (t *ioTable) SetCodeSize(addr accounts.Address, tr VersionedRead[int]) {
 	setRead(t, addr, CodeSizePath, pickCodeSize, tr)
 }
@@ -3443,30 +3458,39 @@ func updW[T any](v *writeView, addr accounts.Address, pick func(*acctIO) **Versi
 func (v *writeView) GetAddress(addr accounts.Address) (*VersionedWrite[*accounts.Account], bool) {
 	return getW(v, addr, pickWAddress)
 }
+
 func (v *writeView) GetBalance(addr accounts.Address) (*VersionedWrite[uint256.Int], bool) {
 	return getW(v, addr, pickWBalance)
 }
+
 func (v *writeView) GetNonce(addr accounts.Address) (*VersionedWrite[uint64], bool) {
 	return getW(v, addr, pickWNonce)
 }
+
 func (v *writeView) GetIncarnation(addr accounts.Address) (*VersionedWrite[uint64], bool) {
 	return getW(v, addr, pickWIncarnation)
 }
+
 func (v *writeView) GetSelfDestruct(addr accounts.Address) (*VersionedWrite[bool], bool) {
 	return getW(v, addr, pickWSelfDestruct)
 }
+
 func (v *writeView) GetCreateContract(addr accounts.Address) (*VersionedWrite[bool], bool) {
 	return getW(v, addr, pickWCreateContract)
 }
+
 func (v *writeView) GetCode(addr accounts.Address) (*VersionedWrite[accounts.Code], bool) {
 	return getW(v, addr, pickWCode)
 }
+
 func (v *writeView) GetCodeHash(addr accounts.Address) (*VersionedWrite[accounts.CodeHash], bool) {
 	return getW(v, addr, pickWCodeHash)
 }
+
 func (v *writeView) GetCodeSize(addr accounts.Address) (*VersionedWrite[int], bool) {
 	return getW(v, addr, pickWCodeSize)
 }
+
 func (v *writeView) GetStorage(addr accounts.Address, key accounts.StorageKey) (*VersionedWrite[uint256.Int], bool) {
 	if r := v.t.find(addr); r != nil {
 		w, ok := r.wStorage[key]
@@ -3478,30 +3502,39 @@ func (v *writeView) GetStorage(addr accounts.Address, key accounts.StorageKey) (
 func (v *writeView) SetAddress(addr accounts.Address, vw *VersionedWrite[*accounts.Account]) {
 	setW(v, addr, pickWAddress, vw)
 }
+
 func (v *writeView) SetBalance(addr accounts.Address, vw *VersionedWrite[uint256.Int]) {
 	setW(v, addr, pickWBalance, vw)
 }
+
 func (v *writeView) SetNonce(addr accounts.Address, vw *VersionedWrite[uint64]) {
 	setW(v, addr, pickWNonce, vw)
 }
+
 func (v *writeView) SetIncarnation(addr accounts.Address, vw *VersionedWrite[uint64]) {
 	setW(v, addr, pickWIncarnation, vw)
 }
+
 func (v *writeView) SetSelfDestruct(addr accounts.Address, vw *VersionedWrite[bool]) {
 	setW(v, addr, pickWSelfDestruct, vw)
 }
+
 func (v *writeView) SetCreateContract(addr accounts.Address, vw *VersionedWrite[bool]) {
 	setW(v, addr, pickWCreateContract, vw)
 }
+
 func (v *writeView) SetCode(addr accounts.Address, vw *VersionedWrite[accounts.Code]) {
 	setW(v, addr, pickWCode, vw)
 }
+
 func (v *writeView) SetCodeHash(addr accounts.Address, vw *VersionedWrite[accounts.CodeHash]) {
 	setW(v, addr, pickWCodeHash, vw)
 }
+
 func (v *writeView) SetCodeSize(addr accounts.Address, vw *VersionedWrite[int]) {
 	setW(v, addr, pickWCodeSize, vw)
 }
+
 func (v *writeView) SetStorage(addr accounts.Address, key accounts.StorageKey, vw *VersionedWrite[uint256.Int]) {
 	r := v.t.get(addr)
 	if r.wStorage == nil {
@@ -3515,6 +3548,7 @@ func (v *writeView) DelNonce(addr accounts.Address)   { delW(v, addr, pickWNonce
 func (v *writeView) DelIncarnation(addr accounts.Address) {
 	delW(v, addr, pickWIncarnation, &v.slabs.incarnation)
 }
+
 func (v *writeView) DelSelfDestruct(addr accounts.Address) {
 	delW(v, addr, pickWSelfDestruct, &v.slabs.selfDestruct)
 }
@@ -3522,9 +3556,11 @@ func (v *writeView) DelCode(addr accounts.Address) { delW(v, addr, pickWCode, &v
 func (v *writeView) DelCodeHash(addr accounts.Address) {
 	delW(v, addr, pickWCodeHash, &v.slabs.codeHash)
 }
+
 func (v *writeView) DelCodeSize(addr accounts.Address) {
 	delW(v, addr, pickWCodeSize, &v.slabs.codeSize)
 }
+
 func (v *writeView) DelStorage(addr accounts.Address, key accounts.StorageKey) {
 	if r := v.t.find(addr); r != nil {
 		if w, ok := r.wStorage[key]; ok {
@@ -3540,22 +3576,29 @@ func (v *writeView) DelStorage(addr accounts.Address, key accounts.StorageKey) {
 func (v *writeView) updateBalance(addr accounts.Address, val uint256.Int) {
 	updW(v, addr, pickWBalance, val)
 }
+
 func (v *writeView) updateNonce(addr accounts.Address, val uint64) { updW(v, addr, pickWNonce, val) }
+
 func (v *writeView) updateIncarnation(addr accounts.Address, val uint64) {
 	updW(v, addr, pickWIncarnation, val)
 }
+
 func (v *writeView) updateSelfDestruct(addr accounts.Address, val bool) {
 	updW(v, addr, pickWSelfDestruct, val)
 }
+
 func (v *writeView) updateCode(addr accounts.Address, val accounts.Code) {
 	updW(v, addr, pickWCode, val)
 }
+
 func (v *writeView) updateCodeHash(addr accounts.Address, val accounts.CodeHash) {
 	updW(v, addr, pickWCodeHash, val)
 }
+
 func (v *writeView) updateCodeSize(addr accounts.Address, val int) {
 	updW(v, addr, pickWCodeSize, val)
 }
+
 func (v *writeView) updateStorage(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
 	if w, ok := v.GetStorage(addr, key); ok {
 		w.Val = val
@@ -3763,8 +3806,10 @@ func (v *writeView) Count() int {
 	n := 0
 	for i := range v.t.recs {
 		r := &v.t.recs[i]
-		for _, set := range []bool{r.wAddress != nil, r.wBalance != nil, r.wNonce != nil, r.wIncarnation != nil,
-			r.wSelfDestruct != nil, r.wCreateContract != nil, r.wCode != nil, r.wCodeHash != nil, r.wCodeSize != nil} {
+		for _, set := range []bool{
+			r.wAddress != nil, r.wBalance != nil, r.wNonce != nil, r.wIncarnation != nil,
+			r.wSelfDestruct != nil, r.wCreateContract != nil, r.wCode != nil, r.wCodeHash != nil, r.wCodeSize != nil,
+		} {
 			if set {
 				n++
 			}
@@ -3779,8 +3824,10 @@ func (v *writeView) AllHeaders() iter.Seq[WriteHeader] {
 	return func(yield func(WriteHeader) bool) {
 		for i := range v.t.recs {
 			r := &v.t.recs[i]
-			for _, h := range []*WriteHeader{whdr(r.wAddress), whdr(r.wBalance), whdr(r.wNonce), whdr(r.wIncarnation),
-				whdr(r.wSelfDestruct), whdr(r.wCreateContract), whdr(r.wCode), whdr(r.wCodeHash), whdr(r.wCodeSize)} {
+			for _, h := range []*WriteHeader{
+				whdr(r.wAddress), whdr(r.wBalance), whdr(r.wNonce), whdr(r.wIncarnation),
+				whdr(r.wSelfDestruct), whdr(r.wCreateContract), whdr(r.wCode), whdr(r.wCodeHash), whdr(r.wCodeSize),
+			} {
 				if h != nil && !yield(*h) {
 					return
 				}

@@ -339,7 +339,6 @@ func TestWriteSetReleasedTripwire(t *testing.T) {
 	// A write checks fresh maps out of the pools, so the set is live again.
 	released.SetBalance(mergeAddr(0xd4), balanceWrite(mergeAddr(0xd4), 3, 0))
 	assert.Equal(t, 1, released.Count())
-
 }
 
 func drainSeq[V any](seq iter.Seq[V]) func() {

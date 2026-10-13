@@ -1759,8 +1759,9 @@ func TestReusedIOTableKeepsItsSlotMaps(t *testing.T) {
 
 // slotMaps counts the records, in use or not, that still hold a slot map.
 func slotMaps(tb *ioTable) (n, peak int) {
-	for _, r := range tb.recs[:cap(tb.recs)] {
-		if r.storage != nil || r.wStorage != nil {
+	recs := tb.recs[:cap(tb.recs)]
+	for i := range recs {
+		if r := &recs[i]; r.storage != nil || r.wStorage != nil {
 			n++
 			peak += r.slotPeak
 		}
