@@ -309,14 +309,9 @@ func (ibs *IntraBlockState) attachReads() {
 	if ibs.journal == nil {
 		return
 	}
-	if ibs.versionMap == nil {
-		ibs.journal.reads = nil
-		return
-	}
-	ibs.journal.reads = &ibs.versionedReads
-	ibs.versionedReads.clearDirty()
-	for addr, n := range ibs.journal.dirties {
-		ibs.versionedReads.get(addr).dirty = int32(n)
+	ibs.journal.detachReads()
+	if ibs.versionMap != nil {
+		ibs.journal.attachReads(&ibs.versionedReads)
 	}
 }
 
@@ -1172,7 +1167,7 @@ func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
 			return
 		}
 		ibs.recordWriteBalance(addr, uint256.Int{})
-		if _, ok := ibs.journal.dirties[addr]; !ok {
+		if !ibs.journal.isDirty(addr) {
 			ibs.touchAccount(addr)
 		}
 	}
@@ -2543,7 +2538,7 @@ func (ibs *IntraBlockState) PopSnapshot(snapshot int) {
 func (ibs *IntraBlockState) RevertToSnapshot(revid int, err error) {
 	var traced bool
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TracingAccounts()) {
-		for addr := range ibs.journal.dirties {
+		for addr := range ibs.journal.dirtyAddrs() {
 			if ibs.trace || dbg.TraceAccount(addr.Handle()) {
 				traced = true
 				if err == nil {
@@ -2672,7 +2667,7 @@ func (ibs *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			}
 		}
 	}
-	for addr := range ibs.journal.dirties {
+	for addr := range ibs.journal.dirtyAddrs() {
 		so, exist := ibs.stateObjects[addr]
 		if !exist {
 			// ripeMD is 'touched' at block 1714175, in txn 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
@@ -2723,7 +2718,7 @@ func (ibs *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 }
 
 func (ibs *IntraBlockState) SoftFinalise() {
-	for addr := range ibs.journal.dirties {
+	for addr := range ibs.journal.dirtyAddrs() {
 		// versionMap (parallel) path: a write can be recorded to versionedWrites
 		// without materializing a stateObject, so dirtiness must come from the
 		// journal (populated alongside every recordWrite), not stateObject
@@ -2793,7 +2788,7 @@ func (ibs *IntraBlockState) BalanceIncreaseSet() map[accounts.Address]uint256.In
 }
 
 func (ibs *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter StateWriter) error {
-	for addr := range ibs.journal.dirties {
+	for addr := range ibs.journal.dirtyAddrs() {
 		ibs.stateObjectsDirty[addr] = struct{}{}
 	}
 	for addr, stateObject := range ibs.stateObjects {
@@ -2895,7 +2890,7 @@ func (ibs *IntraBlockState) FlushWritesToVersionMap(writes *WriteSet) {
 func (ibs *IntraBlockState) Print(chainRules chain.Rules, all bool) {
 	for addr, stateObject := range ibs.stateObjects {
 		_, isDirty := ibs.stateObjectsDirty[addr]
-		_, isDirty2 := ibs.journal.dirties[addr]
+		isDirty2 := ibs.journal.isDirty(addr)
 
 		printAccount(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr, stateObject, all || isDirty || isDirty2)
 	}
@@ -3423,6 +3418,9 @@ func (ibs *IntraBlockState) VersionedReads() ReadSet {
 }
 
 func (ibs *IntraBlockState) resetReads() {
+	if ibs.journal != nil {
+		ibs.journal.detachReads()
+	}
 	ibs.versionedReads.reset()
 	ibs.attachReads()
 }

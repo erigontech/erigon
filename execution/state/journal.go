@@ -21,6 +21,7 @@ package state
 
 import (
 	"fmt"
+	"iter"
 	"sync"
 
 	"github.com/holiman/uint256"
@@ -96,8 +97,8 @@ type journalEntry struct {
 // commit. These are tracked to be able to be reverted in case of an execution
 // exception or revertal request.
 type journal struct {
-	dirties map[accounts.Address]int // Dirty accounts and the number of changes
-	reads   *ioTable                 // mirrors dirties' counts while the state is versioned
+	dirties map[accounts.Address]int // Dirty accounts and the number of changes, unless reads keeps them
+	reads   *ioTable                 // keeps the dirty counts while the state is versioned
 	entries []journalEntry           // Current changes tracked by the journal
 	epoch   uint64                   // Moves on every revert, reset and unjournalled state change
 }
@@ -137,13 +138,12 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 
 		// Drop any dirty tracking induced by the change
 		if addr, isdirty := j.entries[i].dirtied(); isdirty {
-			if j.dirties[addr]--; j.dirties[addr] == 0 {
-				delete(j.dirties, addr)
-			}
 			if j.reads != nil {
 				if r := j.reads.find(addr); r != nil {
 					r.dirty--
 				}
+			} else if j.dirties[addr]--; j.dirties[addr] == 0 {
+				delete(j.dirties, addr)
 			}
 		}
 	}
@@ -161,10 +161,61 @@ func (j *journal) dirty(addr accounts.Address) {
 }
 
 func (j *journal) markDirty(addr accounts.Address) {
-	j.dirties[addr]++
 	if j.reads != nil {
 		j.reads.get(addr).dirty++
+		return
 	}
+	j.dirties[addr]++
+}
+
+func (j *journal) isDirty(addr accounts.Address) bool {
+	if j.reads != nil {
+		return j.reads.isDirty(addr)
+	}
+	_, ok := j.dirties[addr]
+	return ok
+}
+
+// dirtyAddrs yields every address with unreverted changes.
+func (j *journal) dirtyAddrs() iter.Seq[accounts.Address] {
+	return func(yield func(accounts.Address) bool) {
+		if j.reads == nil {
+			for addr := range j.dirties {
+				if !yield(addr) {
+					return
+				}
+			}
+			return
+		}
+		for i := 0; i < len(j.reads.recs); i++ {
+			if r := &j.reads.recs[i]; r.dirty > 0 && !yield(r.addr) {
+				return
+			}
+		}
+	}
+}
+
+// attachReads hands the dirty counts to t.
+func (j *journal) attachReads(t *ioTable) {
+	t.clearDirty()
+	for addr, n := range j.dirties {
+		t.get(addr).dirty = int32(n)
+	}
+	clear(j.dirties)
+	j.reads = t
+}
+
+// detachReads takes the dirty counts back from the table.
+func (j *journal) detachReads() {
+	if j.reads == nil {
+		return
+	}
+	for i := range j.reads.recs {
+		if r := &j.reads.recs[i]; r.dirty > 0 {
+			j.dirties[r.addr] = int(r.dirty)
+		}
+	}
+	j.reads = nil
 }
 
 // length returns the current number of entries in the journal.
