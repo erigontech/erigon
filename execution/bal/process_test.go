@@ -281,12 +281,6 @@ func TestBALBlock943ViaVersionedIO(t *testing.T) {
 
 	// === txIndex=-1: Initialize system calls (EIP-4788, EIP-2935) ===
 
-	// System address balance reads/writes (from SubBalance with Gnosis exception)
-	// Balance is 0x24ac0a — read and write same value (no-op write filtered)
-	systemBalance := uint256.NewInt(0x24ac0a)
-	addBalanceRead(readSets, -1, systemAddr, systemBalance.Uint64())
-	addBalanceWrite(writeSets, -1, systemAddr, systemBalance.Uint64())
-
 	// EIP-4788 contract: balance read+write (no-op), 2 storage writes
 	addBalanceRead(readSets, -1, eip4788Addr, 0)
 	addBalanceWrite(writeSets, -1, eip4788Addr, 0)
@@ -325,10 +319,6 @@ func TestBALBlock943ViaVersionedIO(t *testing.T) {
 	addStorageWrite(writeSets, 0, eip7251Addr, slot2, 0)
 	addStorageWrite(writeSets, 0, eip7251Addr, slot3, 0)
 
-	// System address balance from Finalize Transfer calls (no-op)
-	addBalanceRead(readSets, 0, systemAddr, systemBalance.Uint64())
-	addBalanceWrite(writeSets, 0, systemAddr, systemBalance.Uint64())
-
 	recordAll(vio, readSets, writeSets)
 
 	bal := balpkg.Create(943, vio, "", log.New())
@@ -356,10 +346,10 @@ func TestBALBlock943ViaVersionedIO(t *testing.T) {
 		t.Fatalf("BAL hash mismatch:\n  got:      %s\n  expected: %s", got.Hex(), expectedHash.Hex())
 	}
 
-	// Verify system address was filtered out
+	// Verify system address is absent
 	for _, ac := range bal {
 		if ac.Address == systemAddr.Value() {
-			t.Fatal("system address should have been filtered from BAL")
+			t.Fatal("system address should be absent from BAL")
 		}
 	}
 

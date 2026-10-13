@@ -636,8 +636,10 @@ func (s *envelopeReadTestStore) ReadEnvelopeFromDisk(common.Hash) (*cltypes.Sign
 }
 
 type gloasCollectorTest struct {
-	calls int
-	err   error
+	calls      int
+	flushCalls int
+	err        error
+	flushErr   error
 }
 
 func (c *gloasCollectorTest) AddGloasBlock(*cltypes.BeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) error {
@@ -651,7 +653,8 @@ func (c *gloasCollectorTest) AddBlock(*cltypes.BeaconBlock) error {
 }
 
 func (c *gloasCollectorTest) Flush(context.Context) error {
-	return nil
+	c.flushCalls++
+	return c.flushErr
 }
 
 func (c *gloasCollectorTest) HasBlock(uint64) bool {
@@ -1091,31 +1094,51 @@ func TestForwardSyncValidatesOnlyWhenInsertionIsUnavailable(t *testing.T) {
 }
 
 func TestValidateAnchorPayloadWithAnyExecutionClient(t *testing.T) {
-	cfg, _, bid, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)
-	remoteEL := &testExecutionEngine{
-		supportInsertion: false,
-		payloadStatus:    execution_client.PayloadStatusValidated,
-	}
+	cfg, st, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
+	anchorRoot, err := st.BlockRoot()
+	require.NoError(t, err)
 
-	require.NoError(t, validateAnchorPayloadWithExecutionClient(context.Background(), &Cfg{
-		beaconCfg:             cfg,
-		executionClient:       remoteEL,
-		gloasPayloadValidator: remoteEL,
-		forkChoice:            &forkchoice.ForkChoiceStore{},
-	}, anchorRoot, bid, env))
-	require.Equal(t, 1, remoteEL.newPayloadCalls)
+	for _, test := range []struct {
+		name   string
+		engine *testExecutionEngine
+	}{
+		{name: "remote EL", engine: &testExecutionEngine{payloadStatus: execution_client.PayloadStatusValidated}},
+		{name: "local EL", engine: &testExecutionEngine{supportInsertion: true, payloadStatus: execution_client.PayloadStatusValidated}},
+		{name: "no EL"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			forkGraph, err := fork_graph.NewForkGraphDisk(st, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+			require.NoError(t, err)
+			store, err := forkchoice.NewForkChoiceStore(
+				nil,
+				st,
+				nil,
+				pool.NewOperationsPool(cfg),
+				forkGraph,
+				beaconevents.NewEventEmitter(),
+				nil,
+				nil,
+				public_keys_registry.NewInMemoryPublicKeysRegistry(),
+				validator_params.NewValidatorParams(),
+				false,
+				nil,
+			)
+			require.NoError(t, err)
 
-	localEL := &testExecutionEngine{
-		supportInsertion: true,
-		payloadStatus:    execution_client.PayloadStatusValidated,
+			stageCfg := &Cfg{beaconCfg: cfg, forkChoice: store}
+			if test.engine != nil {
+				stageCfg.executionClient = test.engine
+				stageCfg.gloasPayloadValidator = test.engine
+			}
+			require.NoError(t, validateAnchorPayloadWithExecutionClient(context.Background(), stageCfg, anchorRoot, bid, env))
+			if test.engine != nil {
+				require.Equal(t, 1, test.engine.newPayloadCalls)
+			}
+			gasLimit, ok := store.GetExecutionPayloadGasLimit(env.Message.Payload.BlockHash)
+			require.True(t, ok)
+			require.Equal(t, env.Message.Payload.GasLimit, gasLimit)
+		})
 	}
-	require.NoError(t, validateAnchorPayloadWithExecutionClient(context.Background(), &Cfg{
-		beaconCfg:             cfg,
-		executionClient:       localEL,
-		gloasPayloadValidator: localEL,
-		forkChoice:            &forkchoice.ForkChoiceStore{},
-	}, anchorRoot, bid, env))
-	require.Equal(t, 1, localEL.newPayloadCalls)
 }
 
 func TestDrainPendingGloasPayloadsRequeuesNotValidatedPayload(t *testing.T) {
@@ -1171,7 +1194,7 @@ func TestDrainPendingGloasPayloadsRequeuesNotValidatedPayload(t *testing.T) {
 func TestDrainPendingGloasPayloadsStopsAfterCancellation(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	engine := &testExecutionEngine{supportInsertion: false}
-	engine.newPayloadFn = func(ctx context.Context) (execution_client.PayloadStatus, error) {
+	engine.newPayloadFn = func(ctx context.Context, _ *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
 		<-ctx.Done()
 		return execution_client.PayloadStatusNone, ctx.Err()
 	}
@@ -1345,15 +1368,16 @@ func anchorPayloadHeaderHash(t *testing.T, payload *cltypes.Eth1Block, parentRoo
 
 type testExecutionEngine struct {
 	supportInsertion bool
+	notReady         bool
 	payloadStatus    execution_client.PayloadStatus
 	newPayloadCalls  int
-	newPayloadFn     func(context.Context) (execution_client.PayloadStatus, error)
+	newPayloadFn     func(context.Context, *cltypes.Eth1Block) (execution_client.PayloadStatus, error)
 }
 
-func (t *testExecutionEngine) NewPayload(ctx context.Context, _ *cltypes.Eth1Block, _ *common.Hash, _ []common.Hash, _ []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+func (t *testExecutionEngine) NewPayload(ctx context.Context, payload *cltypes.Eth1Block, _ *common.Hash, _ []common.Hash, _ []hexutil.Bytes) (execution_client.PayloadStatus, error) {
 	t.newPayloadCalls++
 	if t.newPayloadFn != nil {
-		return t.newPayloadFn(ctx)
+		return t.newPayloadFn(ctx, payload)
 	}
 	return t.payloadStatus, nil
 }
@@ -1380,7 +1404,7 @@ func (t *testExecutionEngine) IsCanonicalHash(context.Context, common.Hash) (boo
 	return false, nil
 }
 
-func (t *testExecutionEngine) Ready(context.Context) (bool, error) { return true, nil }
+func (t *testExecutionEngine) Ready(context.Context) (bool, error) { return !t.notReady, nil }
 
 func (t *testExecutionEngine) GetBodiesByRange(context.Context, uint64, uint64) ([]*types.RawBody, error) {
 	return nil, nil
