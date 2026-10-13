@@ -3059,6 +3059,8 @@ type ioTable struct {
 	last int32
 	// mapped bounds the records that may still hold slot maps from earlier calls.
 	mapped int
+	// accts holds the accounts the AddressPath reads point to until reset.
+	accts acctSlab
 }
 
 func pathBit(p AccountPath) uint16 { return 1 << p }
@@ -3133,6 +3135,7 @@ func (t *ioTable) reset() {
 		all[i].storage, all[i].wStorage, all[i].slotPeak = nil, nil, 0
 	}
 	t.mapped = keep
+	t.accts.reset()
 	t.recs = t.recs[:0]
 	clear(t.idx)
 	t.last = 0
@@ -3394,7 +3397,11 @@ func (t *ioTable) toReadSet() ReadSet {
 		r := &t.recs[i]
 		a := r.addr
 		if r.has&pathBit(AddressPath) != 0 {
-			readSetPut(&s.address, a, r.address)
+			tr := r.address
+			if tr.Val != nil && !tr.Val.IsNil() {
+				tr.Val = NewAccountView(tr.Val.Account().SelfCopy())
+			}
+			readSetPut(&s.address, a, tr)
 		}
 		if r.has&pathBit(BalancePath) != 0 {
 			readSetPut(&s.balance, a, r.balance)
@@ -3468,8 +3475,8 @@ func (v *writeView) recycler() *wsSlabs { return &v.slabs }
 
 const acctChunk = 32
 
-// acctSlab holds this tx's AddressPath write records; a record stays valid
-// until reset, so a write handed out of the tx carries its own copy.
+// acctSlab holds this tx's AddressPath records; a record stays valid until
+// reset, so a read or write handed out of the tx carries its own copy.
 type acctSlab struct {
 	chunks [][]accounts.Account
 	n      int

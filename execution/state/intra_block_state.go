@@ -3105,7 +3105,7 @@ func (ibs *IntraBlockState) accountRead(addr accounts.Address, account *accounts
 			// synthetic tx-reads source into validation, which rejects it.
 			return
 		}
-		data := *account
+		data := ibs.versionedReads.accts.copyOf(account)
 		// Demote a sub-field MapRead promotion when AddressPath itself has no cell,
 		// or the validator non-converges on its recursive AddressPath check.
 		if source == MapRead {
@@ -3116,7 +3116,7 @@ func (ibs *IntraBlockState) accountRead(addr accounts.Address, account *accounts
 		}
 		ibs.versionedReads.SetAddress(addr, VersionedRead[AccountView]{
 			ReadHeader: ReadHeader{Source: source, Version: version},
-			Val:        NewAccountView(&data),
+			Val:        NewAccountView(data),
 		})
 	}
 }

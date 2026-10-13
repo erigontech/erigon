@@ -1714,6 +1714,23 @@ func TestPublishedAddressWriteOutlivesTheSlab(t *testing.T) {
 	require.Equal(t, *uint256.NewInt(9), vw.Val.Balance)
 }
 
+// AddressPath reads point into the table's slab, so a handed-over read set
+// must keep its own accounts once the state moves on to the next tx.
+func TestHandedOverAddressReadOutlivesTheSlab(t *testing.T) {
+	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
+	defer ibs.Close()
+	addr := accounts.InternAddress(common.HexToAddress("0xacc8"))
+	ibs.accountRead(addr, &accounts.Account{Nonce: 7}, StorageRead, UnknownVersion)
+
+	reads := ibs.VersionedReads()
+	ibs.ResetVersionedIO()
+	ibs.accountRead(addr, &accounts.Account{Nonce: 1}, StorageRead, UnknownVersion)
+
+	tr, ok := reads.GetAddress(addr)
+	require.True(t, ok)
+	require.Equal(t, uint64(7), tr.Val.Account().Nonce)
+}
+
 // A reused table keeps its records' slot maps, so a call that reads the same
 // contract's slots again does not regrow the map from scratch.
 func TestReusedIOTableKeepsItsSlotMaps(t *testing.T) {
