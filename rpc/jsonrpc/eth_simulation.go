@@ -407,7 +407,8 @@ func (s *simulator) sanitizeCall(
 	}
 	executionContribution, stateContribution := protocol.InclusionContributions(uint64(*args.Gas), s.chainConfig.IsAmsterdam(blockContext.Time), !s.validation)
 	if err := protocol.CheckBlockGasInclusion(blockGas, executionContribution, stateContribution, 0); err != nil {
-		return blockGasLimitReachedError(fmt.Sprintf("block gas limit reached: gas %d, left %v", uint64(*args.Gas), blockGas))
+		return blockGasLimitReachedError(fmt.Sprintf("block gas limit reached: gas %d, execution gas left %d, state gas left %d",
+			uint64(*args.Gas), blockGas.ExecutionGasAvailable(), blockGas.StateGasAvailable()))
 	}
 
 	if err := ethapi.ChainIDMismatch(args.ChainID, s.chainConfig.ChainID); err != nil {
@@ -1188,9 +1189,8 @@ func (s *simulator) computeCommitmentFromStateHistory(
 	return replay.ComputeCustomCommitmentFromStateHistory(ctx, tx, baseBlockNum, simBlockComputeCommitment)
 }
 
-// gasLeft is what remains of limit after used, floored at zero: with the
-// EIP-7825 check off, a calldata floor can push a call's execution gas past
-// what the block admitted.
+// gasLeft is what remains of limit after used. CheckBlockGasInclusion admits
+// every call, so used stays within limit; the floor at zero is only a guard.
 func gasLeft(limit, used uint64) uint64 {
 	return limit - min(used, limit)
 }

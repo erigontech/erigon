@@ -1059,10 +1059,9 @@ func TestSimulateV1AmsterdamBlockGasUsed(t *testing.T) {
 	require.Less(t, uint64(result[1].GasUsed), receipts)
 }
 
-// TestSimulateV1AmsterdamGlobalGasBudget checks the request-wide gas budget is
-// read as the scarcer EIP-8037 dimension. After a new account drains most of its
-// state side, a call left to the default must get a gas limit the budget still
-// admits; sized from the execution side alone, the EVM's precheck rejects it.
+// TestSimulateV1AmsterdamGlobalGasBudget checks that a call left to the default
+// gas fits what earlier calls left of the request-wide gas cap: after a call that
+// creates an account takes its receipt gas off the cap, the next call still runs.
 func TestSimulateV1AmsterdamGlobalGasBudget(t *testing.T) {
 	api := newAmsterdamSimulateAPI(t)
 	api.GasCap = 300_000
