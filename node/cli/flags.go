@@ -212,6 +212,11 @@ var (
 		Usage: "Timeout before idle filters are evicted. Defaults to 5m; set to 0 to disable eviction.",
 		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersTimeout,
 	}
+	RpcSubscriptionFiltersMaxSubscriptionsFlag = cli.IntFlag{
+		Name:  "rpc.subscription.filters.maxsubscriptions",
+		Usage: "Maximum number of live filters and subscriptions across all clients. Set to 0 to disable the limit.",
+		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxSubscriptions,
+	}
 )
 
 // BuildEthConfig applies all CLI flags to the ethconfig.Config. This is the single
@@ -486,12 +491,13 @@ func setEmbeddedRpcDaemon(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logg
 		WsMaxConnections:          ctx.Int(utils.WsMaxConnectionsFlag.Name),
 		RpcAllowListFilePath:      ctx.String(utils.RpcAccessListFlag.Name),
 		RpcFiltersConfig: rpchelper.FiltersConfig{
-			RpcSubscriptionFiltersMaxLogs:      ctx.Int(RpcSubscriptionFiltersMaxLogsFlag.Name),
-			RpcSubscriptionFiltersMaxHeaders:   ctx.Int(RpcSubscriptionFiltersMaxHeadersFlag.Name),
-			RpcSubscriptionFiltersMaxTxs:       ctx.Int(RpcSubscriptionFiltersMaxTxsFlag.Name),
-			RpcSubscriptionFiltersMaxAddresses: ctx.Int(RpcSubscriptionFiltersMaxAddressesFlag.Name),
-			RpcSubscriptionFiltersMaxTopics:    ctx.Int(RpcSubscriptionFiltersMaxTopicsFlag.Name),
-			RpcSubscriptionFiltersTimeout:      ctx.Duration(RpcSubscriptionFiltersTimeoutFlag.Name),
+			RpcSubscriptionFiltersMaxLogs:          ctx.Int(RpcSubscriptionFiltersMaxLogsFlag.Name),
+			RpcSubscriptionFiltersMaxHeaders:       ctx.Int(RpcSubscriptionFiltersMaxHeadersFlag.Name),
+			RpcSubscriptionFiltersMaxTxs:           ctx.Int(RpcSubscriptionFiltersMaxTxsFlag.Name),
+			RpcSubscriptionFiltersMaxAddresses:     ctx.Int(RpcSubscriptionFiltersMaxAddressesFlag.Name),
+			RpcSubscriptionFiltersMaxTopics:        ctx.Int(RpcSubscriptionFiltersMaxTopicsFlag.Name),
+			RpcSubscriptionFiltersTimeout:          ctx.Duration(RpcSubscriptionFiltersTimeoutFlag.Name),
+			RpcSubscriptionFiltersMaxSubscriptions: ctx.Int(RpcSubscriptionFiltersMaxSubscriptionsFlag.Name),
 		},
 		Gascap:                  utils.RpcGasCap(ctx),
 		BlockRangeLimit:         ctx.Int(utils.RpcBlockRangeLimit.Name),
