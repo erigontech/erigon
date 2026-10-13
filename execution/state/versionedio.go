@@ -2985,7 +2985,13 @@ func (t *ioTable) get(addr accounts.Address) *acctIO {
 		t.recs = append(t.recs, acctIO{})
 	}
 	r := &t.recs[i]
-	*r = acctIO{addr: addr, storage: r.storage, sdWitnesses: r.sdWitnesses[:0], wStorage: r.wStorage, slotPeak: r.slotPeak}
+	// The per-path read values stay: has gates every one, and zeroing them would
+	// touch the whole record for each new address.
+	r.addr, r.has, r.dirty, r.accessed, r.access = addr, 0, 0, false, accessOptions{}
+	r.sdWitnesses = r.sdWitnesses[:0]
+	r.committed, r.hasCommitted = nil, false
+	r.wAddress, r.wBalance, r.wNonce, r.wIncarnation, r.wSelfDestruct = nil, nil, nil, nil, nil
+	r.wCreateContract, r.wCode, r.wCodeHash, r.wCodeSize = nil, nil, nil, nil
 	t.idx[addr] = int32(i)
 	t.last = int32(i)
 	return r
