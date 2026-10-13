@@ -141,9 +141,26 @@ func before[T cmp.Ordered](a, b T, asc bool) bool {
 	return (asc && a < b) || (!asc && a > b)
 }
 
+// linearSteps is how many elements skipTo reads one by one before seeking: when the two streams
+// are dense alike the target is a few elements away, and a step is cheaper than a seek.
+const linearSteps = 8
+
 // skipTo moves a stream whose head, already taken out with Next, is *k (has: there is one) to the
-// first element not before v: with a seek when the stream supports it, else one element at a time.
+// first element not before v: a few elements one at a time, then with a seek when the stream
+// supports it, else on one element at a time.
 func skipTo[T cmp.Ordered](it Uno[T], k *T, has *bool, v T, asc bool) error {
+	for range linearSteps {
+		if !*has || !before(*k, v, asc) {
+			return nil
+		}
+		*has = it.HasNext()
+		if *has {
+			var err error
+			if *k, err = it.Next(); err != nil {
+				return err
+			}
+		}
+	}
 	if !*has || !before(*k, v, asc) {
 		return nil
 	}

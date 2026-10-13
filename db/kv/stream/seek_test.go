@@ -127,5 +127,5 @@ func TestIntersectSeeksPastTheLargeStream(t *testing.T) {
 	got, err := stream.ToArrayU64(it)
 	require.NoError(t, err)
 	require.Equal(t, []uint64{10, 50_000, 99_999}, got)
-	require.Less(t, nexts, 10, "the large stream should be skipped, not iterated")
+	require.Less(t, nexts, 40, "the large stream should be skipped, not iterated")
 }
