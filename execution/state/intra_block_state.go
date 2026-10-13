@@ -185,14 +185,9 @@ type IntraBlockState struct {
 	// at the block level.  Per-path typed maps give single-level lookups for
 	// non-storage paths; the AccountKey{Path,Key} struct allocation is gone
 	// from the probe hot path.
-	versionMap      *VersionMap
-	versionedWrites writeView
-	versionedReads  ioTable
-	// committedBase memoizes the committed (pre-block) account that
-	// versionedAccountBase and committedCodeHash read from the state reader.
-	// The committed view is block-immutable, so the cached pointer is safe to
-	// share across the tx's read-only callers. Reset per tx.
-	committedBase       map[accounts.Address]*accounts.Account
+	versionMap          *VersionMap
+	versionedWrites     writeView
+	versionedReads      ioTable
 	accountReadDuration time.Duration
 	accountReadCount    int64
 	storageReadDuration time.Duration
@@ -378,7 +373,6 @@ func (ibs *IntraBlockState) Reset() {
 	// both right after Reset; the block assembler never calls Reset mid-block.
 	ibs.noMaterialize = false
 	ibs.noConflictDetection = false
-	clear(ibs.committedBase)
 	ibs.resetReads()
 	// Write side: VersionedWrites() returns Cloned snapshots, so the
 	// originals in ibs.versionedWrites are no longer referenced after the
@@ -1439,7 +1433,7 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 
 	if readAccount == nil {
 		if readStorage {
-			if cached, ok := ibs.committedBase[addr]; ok {
+			if cached, ok := ibs.versionedReads.committedAcc(addr); ok {
 				readAccount = cached
 			} else {
 				if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
@@ -1457,7 +1451,7 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 				ibs.stateReader.SetTrace(false, "")
 				ibs.recordStateReadError(err)
 				if err == nil {
-					ibs.rememberCommitted(addr, readAccount)
+					ibs.versionedReads.setCommitted(addr, readAccount)
 				}
 			}
 			source = StorageRead
@@ -2146,7 +2140,7 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	ibs.stateReader.SetTrace(false, "")
 	ibs.recordStateReadError(err)
 	if err == nil && ibs.versionMap != nil {
-		ibs.rememberCommitted(addr, readAccount)
+		ibs.versionedReads.setCommitted(addr, readAccount)
 	}
 
 	accountSource := StorageRead
@@ -2269,14 +2263,6 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	}
 	ibs.setStateObject(addr, obj)
 	return obj, nil
-}
-
-// rememberCommitted keeps an account read from the state reader for the rest of the tx.
-func (ibs *IntraBlockState) rememberCommitted(addr accounts.Address, acc *accounts.Account) {
-	if ibs.committedBase == nil {
-		ibs.committedBase = make(map[accounts.Address]*accounts.Account)
-	}
-	ibs.committedBase[addr] = acc
 }
 
 func (ibs *IntraBlockState) setStateObject(addr accounts.Address, object *stateObject) {

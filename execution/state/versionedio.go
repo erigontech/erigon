@@ -3024,6 +3024,10 @@ type acctIO struct {
 	// slotPeak is the most slots this record's maps have held: a cleared map
 	// keeps the buckets it grew.
 	slotPeak int
+	// committed is the pre-block account the state reader returned this tx;
+	// the committed view is block-immutable, so read-only callers share it.
+	committed    *accounts.Account
+	hasCommitted bool
 
 	address        VersionedRead[AccountView]
 	balance        VersionedRead[uint256.Int]
@@ -3151,6 +3155,18 @@ func (t *ioTable) clearReads() {
 		r.accessed = false
 		r.access = accessOptions{}
 	}
+}
+
+func (t *ioTable) committedAcc(addr accounts.Address) (*accounts.Account, bool) {
+	if r := t.find(addr); r != nil && r.hasCommitted {
+		return r.committed, true
+	}
+	return nil, false
+}
+
+func (t *ioTable) setCommitted(addr accounts.Address, acc *accounts.Account) {
+	r := t.get(addr)
+	r.committed, r.hasCommitted = acc, true
 }
 
 // dirtyRec returns addr's record when this tx has an unreverted write to it.
