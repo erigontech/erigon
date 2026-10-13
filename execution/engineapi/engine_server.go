@@ -1210,11 +1210,11 @@ func (e *EngineServer) HandleForkChoice(
 	if status == execmodule.ExecutionStatusReorgTooDeep {
 		return nil, &engine_helpers.ReorgTooDeepErr
 	}
-	// engine_forkchoiceUpdated restricts payload statuses to VALID, INVALID, and SYNCING — never ACCEPTED.
 	if status == execmodule.ExecutionStatusMissingSegment && !e.test && result.MissingHash != (common.Hash{}) &&
 		e.blockDownloader.StartDownloading(result.MissingHash, nil, engine_block_downloader.FcuTrigger) {
 		e.logger.Warn(fmt.Sprintf("[%s] Fork choice: need to recover missing segment", logPrefix), "headerHash", headerHash, "missingHash", result.MissingHash)
 	}
+	// engine_forkchoiceUpdated restricts payload statuses to VALID, INVALID, and SYNCING — never ACCEPTED.
 	if status == execmodule.ExecutionStatusBusy ||
 		status == execmodule.ExecutionStatusMissingSegment ||
 		status == execmodule.ExecutionStatusTooFarAway {

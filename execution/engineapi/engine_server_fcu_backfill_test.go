@@ -35,11 +35,8 @@ import (
 )
 
 type initialHeaderRecorder struct {
+	p2p.Fetcher
 	requested chan common.Hash
-}
-
-func (f *initialHeaderRecorder) FetchHeaders(context.Context, uint64, uint64, *p2p.PeerId, ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Header], error) {
-	return p2p.FetcherResponse[[]*types.Header]{}, errors.New("not implemented")
 }
 
 func (f *initialHeaderRecorder) FetchHeadersBackwards(_ context.Context, hash common.Hash, _ uint64, _ *p2p.PeerId, _ ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Header], error) {
@@ -48,14 +45,6 @@ func (f *initialHeaderRecorder) FetchHeadersBackwards(_ context.Context, hash co
 	default:
 	}
 	return p2p.FetcherResponse[[]*types.Header]{}, errors.New("unknown header")
-}
-
-func (f *initialHeaderRecorder) FetchBodies(context.Context, []*types.Header, *p2p.PeerId, ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Body], error) {
-	return p2p.FetcherResponse[[]*types.Body]{}, errors.New("not implemented")
-}
-
-func (f *initialHeaderRecorder) FetchBlocksBackwardsByHash(context.Context, common.Hash, uint64, *p2p.PeerId, ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Block], error) {
-	return p2p.FetcherResponse[[]*types.Block]{}, errors.New("not implemented")
 }
 
 func TestForkchoiceMissingSegmentDownloadsMissingHash(t *testing.T) {
