@@ -738,16 +738,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 		p.logger.Trace("[txpool] Waiting for block", "expecting", onTopOf, "lastSeen", last, "txRequested", n, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
 		p.lastSeenCond.Wait()
 	}
-	// Important: poolDB.BeginRo has a RoTxsLimiter which is implemented using a weighted semaphore object. This means
-	// that we are dealing with 2 locks at a time. All other usages in the pool that use both p.lock and poolDB.BeginRo
-	// first acquire the RoTx and then acquire p.lock. However, here we do the opposite - we first acquire p.lock and
-	// then try to acquire a RoTx. This creates an opportunity for a deadlock if we've acquired p.lock but at the same
-	// time there has been a burst of goroutines (N=roTxsLimit) that have all acquired a RoTx and are now trying to
-	// acquire p.lock which we've acquired here (the goroutines processing announcements := <-p.newPendingTxns in p.Run
-	// are one example). One solution is to first acquire a RoTx here and then p.lock as everywhere else. However, this
-	// won't work well if we wait in the "Waiting for block" loop for a while since our RoTx will then see stale data.
-	// Instead, we can release p.lock once we're past "Waiting for block" -> try to acquire RoTx -> try to acquire
-	// p.lock again as everywhere else.
+	// Same lock order as the rest of the pool: the RoTx first, then p.lock.
 	p.lock.Unlock()
 	tx, err := p.poolDB.BeginRo(ctx)
 	if err != nil {

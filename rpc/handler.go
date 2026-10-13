@@ -34,7 +34,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
@@ -697,23 +696,13 @@ func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream *jso
 	return h.runMethod(ctx, msg, callb, args, stream)
 }
 
-// remapDBOverload converts kv.ErrReadTxLimitExceeded into a JSON-RPC -32005 error and sets
-// the HTTP 503 flag in ctx so ServeHTTP can write the correct status before flushing.
-func remapDBOverload(ctx context.Context, err error) error {
-	if errors.Is(err, kv.ErrReadTxLimitExceeded) {
-		SetOverloadedFlag(ctx)
-		return &CustomError{Code: ErrCodeServerOverloaded, Message: ErrMsgServerOverloaded}
-	}
-	return err
-}
-
 // runMethod runs the Go callback for an RPC method. It returns either a response for the caller to
 // write, or the error it already answered with in the stream.
 func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *callback, args []reflect.Value, stream *jsonstream.Stream) (*jsonrpcMessage, error) {
 	if !callb.streamable {
 		result, err := callb.call(ctx, msg.Method, args, stream)
 		if err != nil {
-			return msg.errorResponse(remapDBOverload(ctx, err)), nil
+			return msg.errorResponse(err), nil
 		}
 		if msg.isNotification() {
 			return nil, nil
@@ -722,10 +711,8 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 	}
 
 	return nil, writeResultResponse(stream, msg.ID, func(s *jsonstream.Stream) error {
-		if _, err := callb.call(ctx, msg.Method, args, s); err != nil {
-			return remapDBOverload(ctx, err)
-		}
-		return nil
+		_, err := callb.call(ctx, msg.Method, args, s)
+		return err
 	})
 }
 

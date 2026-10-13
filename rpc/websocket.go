@@ -41,7 +41,6 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/pool"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -84,13 +83,10 @@ func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, com
 			return
 		}
 		codec := newWebsocketCodec(conn, hw.conn, r.Host, r.Header, r.RemoteAddr)
-		// Tag the connection context so BeginRo fails fast (ErrReadTxLimitExceeded)
-		// instead of blocking indefinitely when the DB semaphore is full.
 		// r.Context() remains valid for the lifetime of the WebSocket session because
 		// the HTTP handler goroutine blocks inside ServeCodecWithContext until the
 		// connection closes.
-		ctx := kv.WithNonBlockingAcquire(r.Context())
-		s.ServeCodecWithContext(ctx, codec, 0)
+		s.ServeCodecWithContext(r.Context(), codec, 0)
 	})
 }
 

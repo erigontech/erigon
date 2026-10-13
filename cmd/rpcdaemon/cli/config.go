@@ -363,7 +363,6 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	// Configure DB first
 	var allSnapshots *blocksnapshots.RoSnapshots
 	onNewSnapshot := func() {}
-	roTxLimit := int64(cfg.DBReadConcurrency)
 
 	var cc *chain.Config
 
@@ -389,8 +388,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		}
 
 		logger.Warn("Opening chain db", "path", cfg.Dirs.Chaindata)
-		limiter := kv2.NewRoTxsLimiter(roTxLimit)
-		rawDB, err := kv2.New(dbcfg.ChainDB, logger).RoTxsLimiter(limiter).Path(cfg.Dirs.Chaindata).Accede(true).Open(ctx)
+		rawDB, err := kv2.New(dbcfg.ChainDB, logger).Path(cfg.Dirs.Chaindata).Accede(true).Open(ctx)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, err
 		}

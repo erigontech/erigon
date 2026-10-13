@@ -71,13 +71,11 @@ func growthStepFor(size int64) datasize.ByteSize {
 // exclusive makes mdbx refuse a src another process still has open. A nil tables
 // takes the set from src's file instead of the label's schema.
 func openPair(ctx context.Context, from, to string, label kv.Label, exclusive bool, targetPageSize, growthStep datasize.ByteSize, tables kv.TableCfg, logger log.Logger) (_ kv.RoDB, _ kv.RwDB, err error) {
-	const ThreadsHardLimit = 9_000
 	srcCfg := tables
 	if srcCfg == nil {
 		srcCfg = kv.TableCfg{} // src opens bare, then reports what the file holds
 	}
 	src, err := mdbx2.New(label, logger).Path(from).
-		RoTxsLimiter(mdbx2.NewRoTxsLimiter(ThreadsHardLimit)).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return srcCfg }).
 		GrowthStep(growthStep).
 		Accede(true).

@@ -54,11 +54,8 @@ func RootCommand() *cobra.Command {
 }
 
 func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
-	const ThreadsLimit = 9_000
-	limiterB := kv2.NewRoTxsLimiter(ThreadsLimit)
 	opts := kv2.New(label, log.New()).
 		Path(path).
-		RoTxsLimiter(limiterB).
 		WriteMap(dbWriteMap).
 		Accede(true) // integration tool: must not create db. must open db without stoping erigon.
 

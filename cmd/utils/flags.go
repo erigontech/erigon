@@ -62,7 +62,6 @@ import (
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -450,7 +449,7 @@ var (
 	}
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
-		Usage: "Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. In Erigon a lower value is raised to a floor of the parallel-exec workers (each holds a long-lived read tx, so a lower ceiling would deadlock), GOMAXPROCS + 1 parallel-commitment readers when --experimental.parallel-commitment is on, the warmup and read-ahead readers, and a fixed reserve; rpcdaemon uses the value as given. To actually reduce read concurrency, lower --exec.workers instead",
+		Usage: "HTTP RPC admission limit used when --rpc.max.concurrency is 0; DB read transactions are not limited. Default: min(max(10, GOMAXPROCS*64), 9000)",
 		Value: httpcfg.DefaultDBReadConcurrency(),
 	}
 	RpcMaxConcurrentRequestsFlag = cli.IntFlag{
@@ -2081,20 +2080,6 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		log.Warn("blocking async file I/O is set but io_uring is unavailable (unsupported kernel, or blocked by a seccomp sandbox such as Docker's default profile); disabling it — reads will use ordinary blocking faults")
 		dbg.FilesBlockingAsyncIO = false
 		dbg.FilesBlockingAsyncIOMultiPage = false
-	}
-	if c := ctx.Int(DBReadConcurrencyFlag.Name); c > 0 {
-		warmupWorkers := dbg.BALCommitmentWarmupReaders()
-		blockReadAheadWorkers := dbg.ReadAheadWorkerReaders()
-		parallelCommitmentReaders := 0
-		if statecfg.ExperimentalParallelCommitment {
-			parallelCommitmentReaders = commitment.ParallelCommitmentReadTxs()
-		}
-		if limit := httpcfg.RoTxsLimit(c, cfg.ExecWorkerCount, parallelCommitmentReaders, warmupWorkers, blockReadAheadWorkers); int64(c) < limit {
-			logger.Warn("db.read.concurrency below the exec read-tx floor; raising to avoid a parallel-exec deadlock",
-				"configured", c, "using", limit, "execWorkers", cfg.ExecWorkerCount,
-				"parallelCommitmentReaders", parallelCommitmentReaders, "warmupWorkers", warmupWorkers,
-				"blockReadAheadWorkers", blockReadAheadWorkers)
-		}
 	}
 	if ctx.IsSet(ExecNoMergeFlag.Name) {
 		dbg.SetNoMerge(ctx.Bool(ExecNoMergeFlag.Name))

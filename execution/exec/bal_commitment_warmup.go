@@ -148,7 +148,7 @@ func warmBALCommitment(ctx context.Context, db kv.RoDB, bal types.BlockAccessLis
 
 func balCommitmentContextFactory(db kv.RoDB, cacheStats *balCommitmentCacheStats, onErr func(error)) commitment.TrieContextFactory {
 	return func(workerCtx context.Context) (commitment.PatriciaContext, func()) {
-		tx, err := db.BeginRo(kv.WithNonBlockingAcquire(workerCtx)) //nolint:gocritic // The returned cleanup owns Rollback.
+		tx, err := db.BeginRo(workerCtx) //nolint:gocritic // The returned cleanup owns Rollback.
 		if err != nil {
 			onErr(err)
 			return nil, nil

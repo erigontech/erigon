@@ -1608,7 +1608,6 @@ func openMdbx(
 		GrowthStep(16 * datasize.MB).
 		MapSize(16 * datasize.GB).
 		PageSize(4 * datasize.KB).
-		RoTxsLimiter(mdbx.NewRoTxsLimiter(9_000)).
 		Path(dbDir).
 		WriteMap(writeMap)
 	return dbCfg.Open(ctx)

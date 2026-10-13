@@ -38,7 +38,7 @@ func newInvertedIndexPrefetcher(db kv.RoDB, table string, workers uint64) *inver
 func (p *invertedIndexPrefetcher) open(ctx context.Context) error {
 	p.txs = make([]kv.Tx, 0, p.workers)
 	for range p.workers {
-		tx, err := p.db.BeginRo(kv.WithNonBlockingAcquire(ctx)) //nolint:gocritic // owned until the flush closes the prefetcher.
+		tx, err := p.db.BeginRo(ctx) //nolint:gocritic // owned until the flush closes the prefetcher.
 		if err != nil {
 			p.close()
 			return err

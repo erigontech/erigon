@@ -165,9 +165,7 @@ func init() {
 }
 
 func mdbxTopDup(ctx context.Context, chaindata string, bucket string, logger log.Logger) error {
-	const ThreadsLimit = 5_000
-	dbOpts := mdbx2.New(dbcfg.ChainDB, logger).Path(chaindata).Accede(true).RoTxsLimiter(mdbx2.NewRoTxsLimiter(ThreadsLimit)).
-		WriteMap(dbWriteMap)
+	dbOpts := mdbx2.New(dbcfg.ChainDB, logger).Path(chaindata).Accede(true).WriteMap(dbWriteMap)
 
 	db := dbOpts.MustOpen()
 	defer db.Close()
