@@ -2291,10 +2291,17 @@ func TestPostExecutionPayloadEnvelopePublishesAnInterruptedValidation(t *testing
 		t.Run(path, func(t *testing.T) {
 			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 			gossipManager := gossip_mock.NewMockGossip(gomock.NewController(t))
-			gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any()).Return(nil)
+			// A topic publish gives up on a done context, as the request's is here.
+			gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any()).
+				DoAndReturn(func(ctx context.Context, _ string, _ []byte) error { return ctx.Err() })
 			handler.gossipManager = gossipManager
 			handler.sentinel = &nonNilSentinelClient{}
-			fcu.OnExecutionPayloadErr = fmt.Errorf("%w: %w", forkchoice.ErrPayloadValidationInterrupted, context.DeadlineExceeded)
+			requestCtx, cancelRequest := context.WithCancel(t.Context())
+			// The client gives up while the EL validates: the sentinel comes with a done context.
+			fcu.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+				cancelRequest()
+				return fmt.Errorf("%w: %w", forkchoice.ErrPayloadValidationInterrupted, context.Canceled)
+			}
 			handler.emitters = beaconevents.NewEventEmitter()
 			events := make(chan *beaconevents.EventStream, 1)
 			subscription := handler.emitters.Operation().Subscribe(events)
@@ -2305,7 +2312,7 @@ func TestPostExecutionPayloadEnvelopePublishesAnInterruptedValidation(t *testing
 			envelope.Message.BeaconBlockRoot = root
 			body, err := json.Marshal(envelope)
 			require.NoError(t, err)
-			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, bytes.NewReader(body))
+			request := httptest.NewRequestWithContext(requestCtx, http.MethodPost, path, bytes.NewReader(body))
 			request.Header.Set("Content-Type", "application/json")
 			request.Header.Set("Eth-Consensus-Version", "gloas")
 			request.Header.Set("Eth-Blob-Data-Included", "false")

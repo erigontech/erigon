@@ -1020,12 +1020,15 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	emitGossipEvent := false
 	emitIntegrationEvents := false
 	var persistenceErr error
+	publishCtx := r.Context()
 	if err := a.processExecutionPayloadEnvelope(r.Context(), signedEnvelope, canonical); err != nil {
 		switch {
 		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed):
 			persistenceErr = err
 		case errors.Is(err, forkchoice.ErrPayloadValidationInterrupted):
-			// The envelope passed every consensus check; only the EL verdict is pending.
+			// The envelope passed every consensus check; only the EL verdict is pending. The request
+			// context may be done by now, and the envelope must still be published.
+			publishCtx = context.WithoutCancel(r.Context())
 		case canonical && !blobDataIncluded && errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable):
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
@@ -1114,7 +1117,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		}
-		if err := a.publishGossip(r.Context(), gossip.TopicNameExecutionPayload, encodedSSZ); err != nil {
+		if err := a.publishGossip(publishCtx, gossip.TopicNameExecutionPayload, encodedSSZ); err != nil {
 			if envelopeRoot, hashErr := signedEnvelope.HashSSZ(); hashErr == nil {
 				a.recordExecutionPayloadEnvelopeRetry(gossipKey, executionPayloadEnvelopeRetry{
 					EnvelopeRoot: envelopeRoot, GossipRequired: true,

@@ -31,10 +31,10 @@ const (
 	PayloadStatusValidated
 )
 
-// ValidationInterrupted reports a NewPayload call that ended with the context instead of an EL
-// verdict; such a result must not be recorded as a payload status.
+// ValidationInterrupted reports a NewPayload call that ended with the context or the client's
+// own timeout instead of an EL verdict; such a result must not be recorded as a payload status.
 func ValidationInterrupted(ctx context.Context, status PayloadStatus, err error) bool {
-	return err != nil && status == PayloadStatusNone && ctx.Err() != nil
+	return err != nil && status == PayloadStatusNone && (ctx.Err() != nil || isDeadlineExceeded(err))
 }
 
 func newPayloadStatusByEngineStatus(status engine_types.EngineStatus) PayloadStatus {
