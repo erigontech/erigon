@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"net/url"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -108,16 +109,16 @@ func (l readYieldListener) Accept() (net.Conn, error) {
 
 type readYieldConn struct {
 	*net.TCPConn
-	drained bool // the last read returned less than asked, so the socket was empty
+	drained atomic.Bool // the last read returned less than asked, so the socket was empty
 }
 
 func (c *readYieldConn) Read(b []byte) (int, error) {
-	if c.drained {
+	if c.drained.Load() {
 		runtime.Gosched()
 	}
 	n, err := c.TCPConn.Read(b)
 	if err == nil {
-		c.drained = n < len(b)
+		c.drained.Store(n < len(b))
 	}
 	return n, err
 }

@@ -603,7 +603,9 @@ func TestNewWSConnectionLimiter(t *testing.T) {
 }
 
 func TestReadYieldConnKeepAlive(t *testing.T) {
+	var conns sync.Map
 	srv, addr, err := StartHTTPEndpoint("tcp://127.0.0.1:0", &HttpEndpointConfig{}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conns.Store(r.RemoteAddr, struct{}{})
 		body, _ := io.ReadAll(r.Body)
 		_, _ = w.Write(body)
 	}))
@@ -640,4 +642,7 @@ func TestReadYieldConnKeepAlive(t *testing.T) {
 	for err := range errs {
 		require.NoError(t, err)
 	}
+	distinct := 0
+	conns.Range(func(_, _ any) bool { distinct++; return true })
+	require.Less(t, distinct, 8*500/2, "keep-alive connections were not reused")
 }
