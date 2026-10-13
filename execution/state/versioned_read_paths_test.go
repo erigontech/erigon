@@ -891,6 +891,34 @@ func TestVersionedRead_B_ColdCodeWithoutCellsMatchesCore(t *testing.T) {
 	assert.Equal(t, code, fastV.Bytes)
 }
 
+// The same for a cold account read: a provisional nil read until the caller
+// resolves it from the state reader.
+func TestVersionedRead_B_ColdAccountWithoutCellsMatchesCore(t *testing.T) {
+	t.Parallel()
+	read := func(cellElsewhere bool) (*accounts.Account, ReadSource, Version, VersionedRead[AccountView]) {
+		addr := accounts.InternAddress([20]byte{0xbe})
+		vm := NewVersionMap(nil)
+		if cellElsewhere {
+			vm.WriteBalance(addr, Version{TxIndex: 9}, *uint256.NewInt(1), true)
+		}
+		ibs := NewWithVersionMap(&refreshReader{}, vm)
+		defer ibs.Close()
+		ibs.SetNoMaterialize(true)
+		ibs.SetTxContext(1, 5)
+		acc, src, ver, err := readAccountInternal(ibs, addr)
+		require.NoError(t, err)
+		tr, ok := ibs.versionedReads.GetAddress(addr)
+		require.True(t, ok, "the read is recorded")
+		return acc, src, ver, tr
+	}
+	fastAcc, fastSrc, fastVer, fastTr := read(false)
+	coreAcc, coreSrc, coreVer, coreTr := read(true)
+	assert.Equal(t, coreAcc, fastAcc)
+	assert.Equal(t, coreSrc, fastSrc)
+	assert.Equal(t, coreVer, fastVer)
+	assert.Equal(t, coreTr, fastTr)
+}
+
 func TestVersionedRead_B_TouchReadsAnAbsentAccountOnce(t *testing.T) {
 	t.Parallel()
 	r := &refreshReader{}

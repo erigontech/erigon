@@ -957,7 +957,8 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 // extraction of *accounts.Account.  Used internally by versionedReadCore
 // to resolve sibling-account reads without taking a typed callback.
 func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.Account, ReadSource, Version, error) {
-	if rec := s.versionedReads.find(addr); rec != nil {
+	rec := s.versionedReads.find(addr)
+	if rec != nil {
 		if rec.dirty > 0 && rec.wAddress != nil {
 			return rec.wAddress.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, nil
 		}
@@ -967,6 +968,12 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 			}
 			return nil, tr.Source, tr.Version, nil
 		}
+	}
+	if (rec == nil || rec.has&pathBit(AddressPath) == 0) && s.coldAddr(addr) {
+		hdr := coldReadHeader
+		hdr.Source = ProvisionalRead
+		s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: hdr})
+		return nil, UnknownSource, UnknownVersion, nil
 	}
 	var r readPathResult
 	versionedReadCore(s, addr, AddressPath, accounts.NilKey, false, true, &r)
