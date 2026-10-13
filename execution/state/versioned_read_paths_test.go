@@ -1014,6 +1014,62 @@ func TestVersionedRead_D1_StorageWriteSetHitWithStaleReadSetCaughtAtCommit(t *te
 	assert.Equal(t, VersionInvalid, mvhm.ValidateVersion(5, &io, validateEqualVersion, true, false, false, ""), "commit-time validation catches the stale read")
 }
 
+// E2 for a slot this tx did not write on an address it did: the repeat SLOAD
+// serves the recorded read, and commit-time validation catches it if stale.
+func TestVersionedRead_E2_StorageOnWrittenAddressCaughtAtCommit(t *testing.T) {
+	t.Parallel()
+	_, tx, domains := NewTestRwTx(t)
+	mvhm := NewVersionMap(nil)
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 5)
+
+	addr := accounts.InternAddress([20]byte{0xe3})
+	written, read := accounts.InternKey([32]byte{0x01}), accounts.InternKey([32]byte{0x02})
+	mvhm.WriteStorage(addr, read, Version{TxIndex: 3, Incarnation: 0}, *uint256.NewInt(30), true)
+
+	require.NoError(t, ibs.SetState(addr, written, *uint256.NewInt(77)))
+	ibs.versionedReads.SetStorage(addr, read, VersionedRead[uint256.Int]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
+		Val:        *uint256.NewInt(99),
+	})
+	got, err := ibs.GetState(addr, read)
+	require.NoError(t, err)
+	assert.EqualValues(t, 99, got.Uint64(), "read-once returns the recorded value")
+
+	var io VersionedIO
+	ibs.MergeTxIOInto(&io, ibs.VersionedWrites())
+	assert.Equal(t, VersionInvalid, mvhm.ValidateVersion(5, &io, validateEqualVersion, true, false, false, ""), "commit-time validation catches the stale read")
+}
+
+// E2 for the code size of an address this tx wrote another field of.
+func TestVersionedRead_E2_CodeSizeOnWrittenAddressCaughtAtCommit(t *testing.T) {
+	t.Parallel()
+	_, tx, domains := NewTestRwTx(t)
+	mvhm := NewVersionMap(nil)
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 5)
+
+	addr := accounts.InternAddress([20]byte{0xe4})
+	mvhm.WriteCodeSize(addr, Version{TxIndex: 3, Incarnation: 0}, 30, true)
+
+	require.NoError(t, ibs.SetBalance(addr, *uint256.NewInt(77), 0))
+	ibs.versionedReads.SetCodeSize(addr, VersionedRead[int]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
+		Val:        99,
+	})
+	got, err := ibs.GetCodeSize(addr)
+	require.NoError(t, err)
+	assert.Equal(t, 99, got, "read-once returns the recorded value")
+
+	var io VersionedIO
+	ibs.MergeTxIOInto(&io, ibs.VersionedWrites())
+	assert.Equal(t, VersionInvalid, mvhm.ValidateVersion(5, &io, validateEqualVersion, true, false, false, ""), "commit-time validation catches the stale read")
+}
+
 // The nil≡empty arm of readValueUnchanged carries the same gates as
 // validation's dead-equivalence: no equivalence pre-EIP-161, and none for
 // AuRa's retained SystemAddress.
