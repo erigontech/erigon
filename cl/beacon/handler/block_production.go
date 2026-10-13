@@ -460,6 +460,8 @@ func (a *ApiHandler) feeRecipientForProposal(proposerIndex, targetSlot uint64) c
 func reportProductionFailure(err error, targetSlot uint64) {
 	switch {
 	case err == nil:
+	case errors.Is(err, errForkChoiceHeadChanged):
+		log.Info("BlockProduction: fork choice head changed during production", "err", err, "slot", targetSlot)
 	case errors.Is(err, context.Canceled):
 		log.Debug("BlockProduction: abandoned by its caller", "err", err, "slot", targetSlot)
 	case execution_client.IsUnknownPayloadError(err):
@@ -467,6 +469,16 @@ func reportProductionFailure(err error, targetSlot uint64) {
 	default:
 		log.Error("BlockProduction: failed to produce block", "err", err, "slot", targetSlot)
 	}
+}
+
+// retryOnceOnHeadChange runs produce once more when fork choice moved to another head during
+// the first attempt, so the proposal builds on the new head instead of failing.
+func retryOnceOnHeadChange[T any](produce func() (T, error)) (T, error) {
+	result, err := produce()
+	if !errors.Is(err, errForkChoiceHeadChanged) {
+		return result, err
+	}
+	return produce()
 }
 
 func shouldRetryGetPayload(now, deadline time.Time) bool {
@@ -774,43 +786,45 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 
 	start := time.Now()
 
-	var (
-		baseBlockRoot common.Hash
-		baseState     *state.CachingBeaconState
-	)
-	if err := a.viewHeadStateWithIdentity(func(headState *state.CachingBeaconState, root common.Hash, _ uint64) error {
-		baseBlockRoot = root
-		baseState, err = headState.Copy()
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return nil, err
+	type producedBlock struct {
+		block     *cltypes.BlindOrExecutionBeaconBlock
+		baseState *state.CachingBeaconState
 	}
-
-	if err != nil {
-		return nil, err
-	}
-	if baseState == nil {
-		return nil, beaconhttp.NewEndpointError(
-			http.StatusNotFound,
-			fmt.Errorf("state not found %x", baseBlockRoot),
+	produced, err := retryOnceOnHeadChange(func() (producedBlock, error) {
+		var (
+			baseBlockRoot common.Hash
+			baseState     *state.CachingBeaconState
 		)
-	}
+		if err := a.viewHeadStateWithIdentity(func(headState *state.CachingBeaconState, root common.Hash, _ uint64) error {
+			var err error
+			baseBlockRoot = root
+			baseState, err = headState.Copy()
+			return err
+		}); err != nil {
+			return producedBlock{}, err
+		}
+		if baseState == nil {
+			return producedBlock{}, beaconhttp.NewEndpointError(
+				http.StatusNotFound,
+				fmt.Errorf("state not found %x", baseBlockRoot),
+			)
+		}
 
-	// Get the base block slot from the state header (avoids needing ReadBlockByRoot at genesis).
-	baseBlockSlot := baseState.LatestBlockHeader().Slot
+		// Get the base block slot from the state header (avoids needing ReadBlockByRoot at genesis).
+		baseBlockSlot := baseState.LatestBlockHeader().Slot
 
-	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
-		return nil, err
-	}
-	log.Info("[Beacon API] Found BeaconState object for block production", "slot", targetSlot, "duration", time.Since(start))
-	block, err := a.produceBlock(ctx, builderBoostFactor, baseBlockSlot, baseBlockRoot, baseState, targetSlot, randaoReveal, graffiti)
+		if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
+			return producedBlock{}, err
+		}
+		log.Info("[Beacon API] Found BeaconState object for block production", "slot", targetSlot, "duration", time.Since(start))
+		// produceBlock owns the failure record; repeating it here made one failure two.
+		block, err := a.produceBlock(ctx, builderBoostFactor, baseBlockSlot, baseBlockRoot, baseState, targetSlot, randaoReveal, graffiti)
+		return producedBlock{block: block, baseState: baseState}, err
+	})
 	if err != nil {
-		// produceBlock owns this record; repeating it here made one failure two.
 		return nil, err
 	}
+	block, baseState := produced.block, produced.baseState
 
 	startConsensusProcessing := time.Now()
 
@@ -1659,7 +1673,7 @@ func (a *ApiHandler) produceBeaconBody(
 	beaconBody.Graffiti = graffiti
 	beaconBody.Version = stateVersion
 
-	payloadSource, err := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
+	payloadSource, err := a.resolveProductionPayloadSource(ctx, baseState, baseBlockRoot, targetSlot, stateVersion)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -1075,6 +1075,8 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 			return false, fmt.Errorf("%w: OnExecutionPayload: envelope validation failed: %w", ErrInvalidExecutionPayloadEnvelope, err)
 		}
 		f.recordExecutionPayloadArrival(beaconBlockRoot, block.Block.Slot, receivedAt)
+		f.beginEnvelopeApply(beaconBlockRoot)
+		defer f.endEnvelopeApply(beaconBlockRoot)
 	}
 
 	// Check blob data availability
@@ -1179,6 +1181,33 @@ func (f *ForkChoiceStore) ExecutionPayloadReceivedBefore(blockRoot common.Hash, 
 	defer f.executionPayloadFirstSeenMu.Unlock()
 	arrival, ok := f.executionPayloadFirstSeen[blockRoot]
 	return ok && arrival.receivedAt.Before(deadline)
+}
+
+// ExecutionPayloadApplyInFlight reports an envelope for blockRoot that passed its signature check
+// and is still being applied; it stops counting when the apply returns, applied or rejected.
+func (f *ForkChoiceStore) ExecutionPayloadApplyInFlight(blockRoot common.Hash) bool {
+	f.envelopeAppliesMu.Lock()
+	defer f.envelopeAppliesMu.Unlock()
+	return f.envelopeApplies[blockRoot] > 0
+}
+
+func (f *ForkChoiceStore) beginEnvelopeApply(blockRoot common.Hash) {
+	f.envelopeAppliesMu.Lock()
+	defer f.envelopeAppliesMu.Unlock()
+	if f.envelopeApplies == nil {
+		f.envelopeApplies = make(map[common.Hash]int)
+	}
+	f.envelopeApplies[blockRoot]++
+}
+
+func (f *ForkChoiceStore) endEnvelopeApply(blockRoot common.Hash) {
+	f.envelopeAppliesMu.Lock()
+	defer f.envelopeAppliesMu.Unlock()
+	if f.envelopeApplies[blockRoot] <= 1 {
+		delete(f.envelopeApplies, blockRoot)
+		return
+	}
+	f.envelopeApplies[blockRoot]--
 }
 
 func (f *ForkChoiceStore) recordExecutionPayloadArrival(blockRoot common.Hash, slot uint64, receivedAt time.Time) {

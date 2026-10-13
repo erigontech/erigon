@@ -785,6 +785,9 @@ type executionPayloadSource struct {
 	parentExecutionRequests *cltypes.ExecutionRequests
 	gloasPath               gloasPayloadPath
 	fallbackCause           error
+	// envelopeParked: the EMPTY head has an envelope waiting for its data, which can still make
+	// it FULL. Preparation primes the EMPTY fallback; production waits for the decision.
+	envelopeParked bool
 }
 
 func withdrawalsStateForExecutionPayloadSource(
@@ -832,7 +835,18 @@ func (a *ApiHandler) resolveExecutionPayloadSource(
 	if baseState.GetLatestExecutionPayloadBid() != nil && !a.isPreGloasParent(baseState) {
 		path = a.gloasPayloadPathForHead(head, targetSlot)
 	}
-	return a.executionPayloadSourceForGloasPath(baseState, baseBlockRoot, path), nil
+	source := a.executionPayloadSourceForGloasPath(baseState, baseBlockRoot, path)
+	source.envelopeParked = path == gloasPayloadPathEmpty && a.envelopeParked(head.Root)
+	return source, nil
+}
+
+// envelopeParked reports an EMPTY head whose envelope has arrived but is not applied yet: parked
+// for its data, or with its apply still in flight. An envelope already persisted does not count.
+func (a *ApiHandler) envelopeParked(root common.Hash) bool {
+	if a.forkchoiceStore.HasEnvelope(root) {
+		return false
+	}
+	return a.forkchoiceStore.HasPendingExecutionPayloadEnvelope(root) || a.forkchoiceStore.ExecutionPayloadApplyInFlight(root)
 }
 
 func (a *ApiHandler) executionPayloadSourceForGloasPath(
