@@ -50,14 +50,23 @@ const (
 	// resets per block, so this is bounded by the memory it costs rather than by
 	// a transaction's budget: 32KB of pointers, holding a p99 block's ~1700.
 	maxRetainedLogSlots = 32 * 1024 / 8
+
+	// Entries one allocation carves once the pool runs dry: a transaction past the
+	// pool pays an allocation per chunk, not per log.
+	logChunk = 64
+
+	// Topics one allocation carves for entries whose Topics must grow.
+	logTopicChunk = 256
 )
 
 // logArena owns a block's log entries and recycles them through a pool, so what
 // it holds follows the largest transaction rather than the widest block.
 type logArena struct {
-	entries      types.Logs   // the block so far, in order — one transaction, for a caller that resets per transaction
-	pool         []*types.Log // entries taken back at reset, for any transaction to reuse
-	poolBytes    int          // Data the pool holds
+	entries      types.Logs    // the block so far, in order — one transaction, for a caller that resets per transaction
+	pool         []*types.Log  // entries taken back at reset, for any transaction to reuse
+	fresh        []types.Log   // the unused rest of the last chunk
+	freshTopics  []common.Hash // the unused rest of the last topic chunk
+	poolBytes    int           // Data the pool holds
 	indexInBlock uint
 }
 
@@ -76,7 +85,11 @@ func (a *logArena) alloc(j *journal, addr common.Address, txIndex, numTopics, da
 	lp := a.take()
 	entries[logIdx] = lp
 	lp.Address = addr
-	lp.Topics = slices.Grow(lp.Topics[:0], numTopics)[:numTopics]
+	if cap(lp.Topics) >= numTopics {
+		lp.Topics = lp.Topics[:numTopics]
+	} else {
+		lp.Topics = a.topics(numTopics)
+	}
 	lp.Data = slices.Grow(lp.Data[:0], dataSize)[:dataSize]
 	lp.Removed = false
 	lp.TxHash, lp.BlockHash = common.Hash{}, common.Hash{}
@@ -89,11 +102,27 @@ func (a *logArena) alloc(j *journal, addr common.Address, txIndex, numTopics, da
 	return lp
 }
 
+// topics carves n topics off the current chunk; the full slice expression keeps a
+// later append from running into the next entry's topics.
+func (a *logArena) topics(n int) []common.Hash {
+	if len(a.freshTopics) < n {
+		a.freshTopics = make([]common.Hash, logTopicChunk)
+	}
+	t := a.freshTopics[:n:n]
+	a.freshTopics = a.freshTopics[n:]
+	return t
+}
+
 // take returns a pooled entry, Topics and Data included for alloc to grow into.
 func (a *logArena) take() *types.Log {
 	n := len(a.pool) - 1
 	if n < 0 {
-		return &types.Log{}
+		if len(a.fresh) == 0 {
+			a.fresh = make([]types.Log, logChunk)
+		}
+		lp := &a.fresh[0]
+		a.fresh = a.fresh[1:]
+		return lp
 	}
 	lp := a.pool[n]
 	a.pool = a.pool[:n]
