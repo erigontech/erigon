@@ -3448,6 +3448,7 @@ func (t *ioTable) toReadSet() ReadSet {
 type writeView struct {
 	t     *ioTable
 	slabs wsSlabs
+	accts acctSlab
 }
 
 type wsSlabs struct {
@@ -3464,6 +3465,33 @@ type wsSlabs struct {
 }
 
 func (v *writeView) recycler() *wsSlabs { return &v.slabs }
+
+const acctChunk = 32
+
+// acctSlab holds this tx's AddressPath write records; a record stays valid
+// until reset, so a write handed out of the tx carries its own copy.
+type acctSlab struct {
+	chunks [][]accounts.Account
+	n      int
+}
+
+func (s *acctSlab) copyOf(a *accounts.Account) *accounts.Account {
+	i, j := s.n/acctChunk, s.n%acctChunk
+	if i == len(s.chunks) {
+		s.chunks = append(s.chunks, make([]accounts.Account, acctChunk))
+	}
+	p := &s.chunks[i][j]
+	*p = *a
+	s.n++
+	return p
+}
+
+func (s *acctSlab) reset() {
+	for i := 0; i*acctChunk < s.n; i++ {
+		clear(s.chunks[i][:min(acctChunk, s.n-i*acctChunk)])
+	}
+	s.n = 0
+}
 
 func pickWAddress(r *acctIO) **VersionedWrite[*accounts.Account]  { return &r.wAddress }
 func pickWBalance(r *acctIO) **VersionedWrite[uint256.Int]        { return &r.wBalance }
@@ -3765,7 +3793,11 @@ func (v *writeView) Snapshot() *WriteSet {
 			continue
 		}
 		if r.wAddress != nil {
-			out.SetAddress(a, cloneVW(r.wAddress))
+			c := cloneVW(r.wAddress)
+			if c.Val != nil {
+				c.Val = c.Val.SelfCopy()
+			}
+			out.SetAddress(a, c)
 		}
 		if r.wNonce != nil {
 			out.SetNonce(a, cloneVW(r.wNonce))
@@ -3804,6 +3836,7 @@ func (v *writeView) ReleaseAndReset() {
 		r.wSelfDestruct, r.wCreateContract, r.wCode, r.wCodeHash, r.wCodeSize = nil, nil, nil, nil, nil
 		clear(r.wStorage)
 	}
+	v.accts.reset()
 	s := &v.slabs
 	s.address.reset()
 	s.balance.reset()

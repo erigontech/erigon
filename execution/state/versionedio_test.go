@@ -1696,6 +1696,24 @@ func (a *referenceAccount) write(slot accounts.StorageKey, val uint256.Int, idx 
 	})
 }
 
+// AddressPath records live on the write view's slab, so a published write must
+// keep its own account once the state moves on to the next tx.
+func TestPublishedAddressWriteOutlivesTheSlab(t *testing.T) {
+	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
+	defer ibs.Close()
+	addr := accounts.InternAddress(common.HexToAddress("0xacc7"))
+	ibs.recordWriteAddress(addr, &accounts.Account{Nonce: 7, Balance: *uint256.NewInt(9)})
+
+	published := ibs.VersionedWrites()
+	ibs.versionedWrites.ReleaseAndReset()
+	ibs.recordWriteAddress(addr, &accounts.Account{Nonce: 1})
+
+	vw, ok := published.GetAddress(addr)
+	require.True(t, ok)
+	require.Equal(t, uint64(7), vw.Val.Nonce)
+	require.Equal(t, *uint256.NewInt(9), vw.Val.Balance)
+}
+
 // A reused table keeps its records' slot maps, so a call that reads the same
 // contract's slots again does not regrow the map from scratch.
 func TestReusedIOTableKeepsItsSlotMaps(t *testing.T) {
