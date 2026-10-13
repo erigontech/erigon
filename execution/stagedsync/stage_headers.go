@@ -20,7 +20,8 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/dbservices"
@@ -51,7 +52,7 @@ func HeadersUnwind(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwT
 		return err
 	}
 	if unwindBlock {
-		var maxTd big.Int
+		var maxTd uint256.Int
 		var maxHash common.Hash
 		var maxNum uint64 = 0
 
@@ -70,7 +71,7 @@ func HeadersUnwind(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwT
 			if len(k) != 40 {
 				return fmt.Errorf("key in TD table has to be 40 bytes long: %x", k)
 			}
-			var td big.Int
+			var td uint256.Int
 			if err := rlp.DecodeBytes(v, &td); err != nil {
 				return err
 			}
