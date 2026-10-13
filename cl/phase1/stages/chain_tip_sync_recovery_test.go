@@ -526,7 +526,7 @@ func TestChainTipBatchReplayBudgetSkipsParentsWithUsableVerdict(t *testing.T) {
 			}
 
 			seen := make(map[common.Hash]struct{})
-			processChainTipBatch(t.Context(), cfg, Args{targetSlot: childB.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{childA, childB}, seen)
+			processChainTipBatch(t.Context(), cfg, Args{targetSlot: childB.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{childA, childB}, seen, make(map[common.Hash]error))
 
 			require.Equal(t, 1, engine.newPayloadCalls)
 			require.Equal(t, graph.envelopes[parentARoot].Message.Payload.BlockHash, replayedPayload)
@@ -581,6 +581,7 @@ func TestChainTipBatchReplayBudgetStopsAtTarget(t *testing.T) {
 		Args{targetSlot: childA.Block.Slot},
 		[]*cltypes.SignedBeaconBlock{childA, childB},
 		make(map[common.Hash]struct{}),
+		make(map[common.Hash]error),
 	)
 
 	require.True(t, reachedTarget)
@@ -601,7 +602,7 @@ func TestChainTipBatchReplaysStoredParentPayload(t *testing.T) {
 		delete(graph.envelopes, parentRoot)
 		seen := make(map[common.Hash]struct{})
 
-		processChainTipBatch(t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{fullChild}, seen)
+		processChainTipBatch(t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{fullChild}, seen, make(map[common.Hash]error))
 
 		require.Equal(t, 1, sentinel.calls)
 		require.Equal(t, 1, engine.newPayloadCalls)
@@ -620,7 +621,7 @@ func TestChainTipBatchReplaysStoredParentPayload(t *testing.T) {
 		require.NoError(t, err)
 		seen := make(map[common.Hash]struct{})
 
-		reachedTarget := processChainTipBatch(t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{fullChild}, seen)
+		reachedTarget := processChainTipBatch(t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{fullChild}, seen, make(map[common.Hash]error))
 
 		require.False(t, reachedTarget)
 		require.Equal(t, 1, engine.newPayloadCalls)
@@ -637,7 +638,7 @@ func TestChainTipBatchReplaysStoredParentPayload(t *testing.T) {
 		require.NoError(t, err)
 		seen := make(map[common.Hash]struct{})
 
-		processChainTipBatch(t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{fullChild}, seen)
+		processChainTipBatch(t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{fullChild}, seen, make(map[common.Hash]error))
 
 		require.Equal(t, 1, engine.newPayloadCalls)
 		require.Zero(t, graph.added[common.Hash(fullRoot)])
@@ -663,7 +664,7 @@ func TestChainTipBatchReplaysStoredParentPayload(t *testing.T) {
 				blocks = []*cltypes.SignedBeaconBlock{emptyChild, fullChild}
 			}
 
-			processChainTipBatch(t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, blocks, seen)
+			processChainTipBatch(t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, blocks, seen, make(map[common.Hash]error))
 
 			require.Equal(t, 1, engine.newPayloadCalls)
 			require.Zero(t, graph.added[common.Hash(fullRoot)])
@@ -851,7 +852,7 @@ func TestEnsureStoredParentPayloadAcceptedReplaysMissingVerdict(t *testing.T) {
 		gloasPayloadValidator: engine,
 	}
 
-	accepted := ensureStoredParentPayloadAccepted(t.Context(), cfg, store, root, envelope)
+	accepted := ensureStoredParentPayloadAccepted(t.Context(), cfg, store, root, envelope) == nil
 
 	require.True(t, accepted)
 	require.Equal(t, 1, engine.newPayloadCalls)
@@ -874,7 +875,7 @@ func TestEnsureStoredParentPayloadAcceptedRejectsInvalidVerdict(t *testing.T) {
 		block:       cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion),
 	}
 
-	accepted := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope)
+	accepted := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope) == nil
 
 	require.False(t, accepted)
 	require.Empty(t, store.requeued)
@@ -896,7 +897,7 @@ func TestEnsureStoredParentPayloadAcceptedRestoresGasLimitForKnownVerdict(t *tes
 		markRetained: true,
 	}
 
-	accepted := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope)
+	accepted := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope) == nil
 
 	require.True(t, accepted)
 	require.Equal(t, payload.GasLimit, store.markedGas)
@@ -915,7 +916,7 @@ func TestEnsureStoredParentPayloadAcceptedWithoutExecutionClient(t *testing.T) {
 		markRetained: true,
 	}
 
-	accepted := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope)
+	accepted := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope) == nil
 
 	require.True(t, accepted)
 	require.EqualValues(t, execution_client.PayloadStatusNotValidated, store.marked)
@@ -936,7 +937,7 @@ func TestStoredParentPayloadReplaySharesBudgetAndCachesResult(t *testing.T) {
 	}
 	replay := storedParentPayloadReplay{
 		deadline: time.Now().Add(10 * time.Millisecond),
-		results:  make(map[common.Hash]bool),
+		results:  make(map[common.Hash]error),
 	}
 	engine := &testExecutionEngine{}
 	engine.newPayloadFn = func(ctx context.Context, _ *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
@@ -949,11 +950,8 @@ func TestStoredParentPayloadReplaySharesBudgetAndCachesResult(t *testing.T) {
 		gloasPayloadValidator: engine,
 	}
 
-	accepted := replay.accepted(t.Context(), cfg, store, root, envelope, forkchoice.ErrIgnore)
-	replayed := replay.accepted(t.Context(), cfg, store, root, envelope, forkchoice.ErrIgnore)
-
-	require.False(t, accepted)
-	require.False(t, replayed)
+	require.Error(t, replay.rejection(t.Context(), cfg, store, root, envelope, forkchoice.ErrIgnore))
+	require.Error(t, replay.rejection(t.Context(), cfg, store, root, envelope, forkchoice.ErrIgnore))
 	require.Equal(t, 1, engine.newPayloadCalls)
 }
 
@@ -971,7 +969,7 @@ func TestStoredParentPayloadReplayReservesBudgetForLaterRoots(t *testing.T) {
 	replay := storedParentPayloadReplay{
 		deadline:  time.Now().Add(time.Second),
 		remaining: 2,
-		results:   make(map[common.Hash]bool),
+		results:   make(map[common.Hash]error),
 	}
 	cfg := &Cfg{
 		beaconCfg:             &clparams.MainnetBeaconConfig,
@@ -979,11 +977,11 @@ func TestStoredParentPayloadReplayReservesBudgetForLaterRoots(t *testing.T) {
 		gloasPayloadValidator: validator,
 	}
 
-	require.False(t, replay.accepted(t.Context(), cfg, firstStore, firstRoot, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+	require.Error(t, replay.rejection(t.Context(), cfg, firstStore, firstRoot, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
 		BeaconBlockRoot: firstRoot,
 		Payload:         firstPayload,
 	}}, nil))
-	require.True(t, replay.accepted(t.Context(), cfg, secondStore, secondRoot, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+	require.NoError(t, replay.rejection(t.Context(), cfg, secondStore, secondRoot, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
 		BeaconBlockRoot: secondRoot,
 		Payload:         secondPayload,
 	}}, nil))
@@ -998,11 +996,11 @@ func TestStoredParentPayloadReplayRetriesAnInterruptedApply(t *testing.T) {
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
 	store := &storedParentPayloadTestStore{has: true, block: block, markRetained: true}
 	validator := &orderedPayloadValidator{}
-	replay := storedParentPayloadReplay{deadline: time.Now().Add(time.Second), remaining: 1, results: make(map[common.Hash]bool)}
+	replay := storedParentPayloadReplay{deadline: time.Now().Add(time.Second), remaining: 1, results: make(map[common.Hash]error)}
 	cfg := &Cfg{beaconCfg: &clparams.MainnetBeaconConfig, executionClient: &testExecutionEngine{}, gloasPayloadValidator: validator}
 	interrupted := fmt.Errorf("%w: %w", forkchoice.ErrPayloadValidationInterrupted, context.DeadlineExceeded)
 
-	require.True(t, replay.accepted(t.Context(), cfg, store, root, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+	require.NoError(t, replay.rejection(t.Context(), cfg, store, root, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
 		BeaconBlockRoot: root,
 		Payload:         payload,
 	}}, interrupted))
@@ -1012,9 +1010,9 @@ func TestStoredParentPayloadReplayRetriesAnInterruptedApply(t *testing.T) {
 func TestStoredParentPayloadReplayRejectsApplyFailure(t *testing.T) {
 	root := common.Hash{1}
 	store := &storedParentPayloadTestStore{has: true, markRetained: true}
-	replay := storedParentPayloadReplay{deadline: time.Now(), remaining: 1, results: make(map[common.Hash]bool)}
+	replay := storedParentPayloadReplay{deadline: time.Now(), remaining: 1, results: make(map[common.Hash]error)}
 
-	accepted := replay.accepted(
+	reason := replay.rejection(
 		t.Context(),
 		&Cfg{},
 		store,
@@ -1026,7 +1024,7 @@ func TestStoredParentPayloadReplayRejectsApplyFailure(t *testing.T) {
 		forkchoice.ErrInvalidExecutionPayloadEnvelope,
 	)
 
-	require.False(t, accepted)
+	require.ErrorIs(t, reason, forkchoice.ErrInvalidExecutionPayloadEnvelope)
 	require.EqualValues(t, execution_client.PayloadStatusNone, store.marked)
 	require.Zero(t, replay.remaining)
 }
@@ -1057,10 +1055,10 @@ func TestStoredParentPayloadReplayWithoutVerdictKeepsStatus(t *testing.T) {
 			budget:    gloasPayloadRetryBudget,
 			deadline:  time.Now().Add(-time.Millisecond),
 			remaining: 1,
-			results:   make(map[common.Hash]bool),
+			results:   make(map[common.Hash]error),
 		}
 
-		require.False(t, replay.accepted(t.Context(), cfg, store, root, envelope, forkchoice.ErrIgnore))
+		require.Error(t, replay.rejection(t.Context(), cfg, store, root, envelope, forkchoice.ErrIgnore))
 		require.Zero(t, engine.newPayloadCalls)
 		require.Equal(t, unchanged, store.marked)
 		require.Empty(t, store.requeued)
@@ -1076,9 +1074,42 @@ func TestStoredParentPayloadReplayWithoutVerdictKeepsStatus(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
 		defer cancel()
 
-		require.False(t, ensureStoredParentPayloadAccepted(ctx, cfg, store, root, envelope))
+		require.Error(t, ensureStoredParentPayloadAccepted(ctx, cfg, store, root, envelope))
 		require.Equal(t, 1, engine.newPayloadCalls)
 		require.Equal(t, unchanged, store.marked)
 		require.Empty(t, store.requeued)
 	})
+}
+
+// The cause of a rejected block is passed on to the descendants that cannot attach, across
+// batches of one run, instead of a bare missing parent.
+func TestChainTipBatchPassesARejectionToDescendants(t *testing.T) {
+	cfg, _, _, fullChild, _, _ := newChainTipBatchFixture(t, execution_client.PayloadStatusInvalidated)
+	fullRoot, err := fullChild.Block.HashSSZ()
+	require.NoError(t, err)
+	// Each descendant builds on the EMPTY variant, so no parent envelope is fetched for it.
+	child := func(parent *cltypes.SignedBeaconBlock) (*cltypes.SignedBeaconBlock, common.Hash) {
+		parentRoot, err := parent.Block.HashSSZ()
+		require.NoError(t, err)
+		block := cltypes.NewSignedBeaconBlock(cfg.beaconCfg, clparams.GloasVersion)
+		block.Block.Slot = parent.Block.Slot + 1
+		block.Block.ParentRoot = parentRoot
+		block.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = parent.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		return block, root
+	}
+	grandchild, grandchildRoot := child(fullChild)
+	greatGrandchild, greatGrandchildRoot := child(grandchild)
+	seen := make(map[common.Hash]struct{})
+	rejected := make(map[common.Hash]error)
+	args := Args{targetSlot: greatGrandchild.Block.Slot + 1}
+
+	processChainTipBatch(t.Context(), cfg, args, []*cltypes.SignedBeaconBlock{fullChild, grandchild}, seen, rejected)
+	reason := rejected[common.Hash(fullRoot)]
+	require.Error(t, reason)
+	require.Equal(t, reason, rejected[grandchildRoot])
+
+	processChainTipBatch(t.Context(), cfg, args, []*cltypes.SignedBeaconBlock{greatGrandchild}, seen, rejected)
+	require.Equal(t, reason, rejected[greatGrandchildRoot])
 }
