@@ -969,9 +969,12 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 		}
 	}
 	if (rec == nil || rec.has&pathBit(AddressPath) == 0) && s.coldAddr(addr) {
-		hdr := coldReadHeader
-		hdr.Source = ProvisionalRead
-		s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: hdr})
+		if rec == nil {
+			rec = s.versionedReads.add(addr)
+		}
+		rec.address = VersionedRead[AccountView]{ReadHeader: coldReadHeader}
+		rec.address.Source = ProvisionalRead
+		rec.has |= pathBit(AddressPath)
 		return nil, UnknownSource, UnknownVersion, nil
 	}
 	var r readPathResult
@@ -1610,7 +1613,10 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		if err != nil {
 			return uint256.Int{}, StorageRead, UnknownVersion, false, err
 		}
-		s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{coldReadHeader, v})
+		if rec == nil {
+			rec = s.versionedReads.add(addr)
+		}
+		rec.setStorageRead(key, VersionedRead[uint256.Int]{coldReadHeader, v})
 		return v, StorageRead, coldReadHeader.Version, true, nil
 	}
 	var r readPathResult

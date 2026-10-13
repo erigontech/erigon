@@ -2989,6 +2989,11 @@ func (t *ioTable) get(addr accounts.Address) *acctIO {
 	if r := t.find(addr); r != nil {
 		return r
 	}
+	return t.add(addr)
+}
+
+// add appends a record for addr, which must have none.
+func (t *ioTable) add(addr accounts.Address) *acctIO {
 	if t.idx == nil {
 		t.idx = make(map[accounts.Address]int32)
 	}
@@ -3247,7 +3252,10 @@ func (t *ioTable) SetSelfDestruct(addr accounts.Address, tr VersionedRead[bool])
 }
 
 func (t *ioTable) SetStorage(addr accounts.Address, key accounts.StorageKey, tr VersionedRead[uint256.Int]) {
-	r := t.get(addr)
+	t.get(addr).setStorageRead(key, tr)
+}
+
+func (r *acctIO) setStorageRead(key accounts.StorageKey, tr VersionedRead[uint256.Int]) {
 	if r.storage == nil {
 		r.storage = make(map[accounts.StorageKey]VersionedRead[uint256.Int])
 	}

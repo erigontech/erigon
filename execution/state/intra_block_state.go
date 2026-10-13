@@ -2553,13 +2553,15 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 		}
 		ibs.versionedReads.SetIncarnation(addr, VersionedRead[uint64]{ReadHeader{Source: incSource, Version: incVersion}, prevInc})
 	}
-	ibs.recordWriteBalance(addr, data.Balance)
-	ibs.recordWriteIncarnation(addr, data.Incarnation)
-	// A new object is never self-destructed.
-	if previous == nil || previous.selfdestructed {
-		ibs.recordWriteSelfDestruct(addr, false)
+	if ibs.versionMap != nil {
+		r, cells := ibs.versionedReads.get(addr), &ibs.versionedWrites.slabs
+		traceWrite(ibs, recordWrite(ibs, addr, BalancePath, &r.wBalance, &cells.balance, data.Balance))
+		traceWrite(ibs, recordWrite(ibs, addr, IncarnationPath, &r.wIncarnation, &cells.incarnation, data.Incarnation))
+		// A new object is never self-destructed.
+		if previous == nil || previous.selfdestructed {
+			traceWrite(ibs, recordWrite(ibs, addr, SelfDestructPath, &r.wSelfDestruct, &cells.selfDestruct, false))
+		}
 	}
-
 	return nil
 }
 
