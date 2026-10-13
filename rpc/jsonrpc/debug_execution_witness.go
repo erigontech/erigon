@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
 
 	"github.com/holiman/uint256"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	commitmentv3 "github.com/erigontech/erigon/execution/commitment/v3"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -916,7 +918,90 @@ var (
 // in-memory commitment fold.
 type headCaptureSource struct {
 	pinnedParentTx kv.TemporalTx
+	warmTxs        []kv.TemporalTx
 	records        *commitmentdb.ParentRecords
+	warm           *sync.Map
+}
+
+type warmRecord struct {
+	data []byte
+	step kv.Step
+}
+
+var mxWarmRecords = metrics.GetOrCreateCounter("witness_warm_records_total")
+
+func (hc *headCaptureSource) recordReader() *commitmentdb.ParentRecords {
+	if hc.warm == nil {
+		return hc.records
+	}
+	r := &commitmentdb.ParentRecords{}
+	if hc.records != nil {
+		*r = *hc.records
+	}
+	parent := r.Get
+	r.Get = func(key []byte) ([]byte, kv.Step, bool) {
+		if parent != nil {
+			if v, step, ok := parent(key); ok {
+				return v, step, true
+			}
+		}
+		if v, ok := hc.warm.Load(string(key)); ok {
+			rec := v.(warmRecord)
+			return rec.data, rec.step, true
+		}
+		return nil, 0, false
+	}
+	return r
+}
+
+func (hc *headCaptureSource) warmPaths(ctx context.Context, accessed *accessedState) {
+	type path struct{ account, slot []byte }
+	var paths []path
+	for addr := range accessed.Addresses {
+		paths = append(paths, path{account: crypto.Keccak256(addr[:])})
+	}
+	for addr := range accessed.CodeAddrs {
+		paths = append(paths, path{account: crypto.Keccak256(addr[:])})
+	}
+	for addr, slots := range accessed.Storage {
+		account := crypto.Keccak256(addr[:])
+		paths = append(paths, path{account: account})
+		for slot := range slots {
+			paths = append(paths, path{account: account, slot: crypto.Keccak256(slot[:])})
+		}
+	}
+	txs := append([]kv.TemporalTx{hc.pinnedParentTx}, hc.warmTxs...)
+	hc.warm = &sync.Map{}
+	var wg sync.WaitGroup
+	for w, tx := range txs {
+		wg.Go(func() {
+			read := func(key []byte) []byte {
+				if hc.records != nil {
+					if v, _, ok := hc.records.Get(key); ok {
+						return v
+					}
+				}
+				if v, ok := hc.warm.Load(string(key)); ok {
+					return v.(warmRecord).data
+				}
+				v, step, err := tx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
+				if err != nil {
+					return nil
+				}
+				hc.warm.Store(string(key), warmRecord{data: bytes.Clone(v), step: step})
+				mxWarmRecords.Inc()
+				return v
+			}
+			for i := w; i < len(paths) && ctx.Err() == nil; i += len(txs) {
+				if paths[i].slot == nil {
+					commitmentv3.PrefetchPath(read, paths[i].account, nil, 0)
+				} else {
+					commitmentv3.PrefetchPath(read, paths[i].account, paths[i].slot, 64)
+				}
+			}
+		})
+	}
+	wg.Wait()
 }
 
 // collapseReaderFor selects the collapse-detection state reader: plain state at block
@@ -924,7 +1009,7 @@ type headCaptureSource struct {
 // parent-block history txNum (durable).
 func collapseReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBlock, endTxNum uint64) commitmentdb.StateReader {
 	if hc != nil {
-		return commitmentdb.NewHeadCaptureStateReader(hc.pinnedParentTx, tx, endTxNum).WithParentRecords(hc.records)
+		return commitmentdb.NewHeadCaptureStateReader(hc.pinnedParentTx, tx, endTxNum).WithParentRecords(hc.recordReader())
 	}
 	return commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, endTxNum, false /* withHistory */)
 }
@@ -935,7 +1020,7 @@ func collapseReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBloc
 // WithHistory()==true so the read-only witness-capture fold does not write branches.
 func trieReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBlock uint64) commitmentdb.StateReader {
 	if hc != nil {
-		return commitmentdb.NewHeadCaptureTrieStateReader(hc.pinnedParentTx, tx, firstTxNumInBlock).WithParentRecords(hc.records)
+		return commitmentdb.NewHeadCaptureTrieStateReader(hc.pinnedParentTx, tx, firstTxNumInBlock).WithParentRecords(hc.recordReader())
 	}
 	return commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
 }
@@ -946,8 +1031,8 @@ func trieReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBlock ui
 // state is read from committedTx's history exactly as the durable path does; only the
 // commitment source changes. Direct tx.GetLatest reads keep the pinned commitment
 // state independent of the build's in-memory commitment fold.
-func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, committedTx, pinnedParentTx kv.TemporalTx, records *commitmentdb.ParentRecords, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
-	hc := &headCaptureSource{pinnedParentTx: pinnedParentTx, records: records}
+func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, committedTx kv.TemporalTx, pin *rollingPin, records *commitmentdb.ParentRecords, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
+	hc := &headCaptureSource{pinnedParentTx: pin.tx, warmTxs: pin.warm, records: records}
 	return api.buildWitnessResult(ctx, committedTx, hc, info, mode)
 }
 
@@ -1024,6 +1109,9 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 
 	if accessed.isEmpty() { // nothing touched, return empty witness
 		return result, nil
+	}
+	if hc != nil && len(hc.warmTxs) != 0 && sdCtx.Trie().Variant() == commitment.VariantCommitmentV3 {
+		hc.warmPaths(ctx, accessed)
 	}
 
 	siblingPaths, err := detectCollapseSiblings(ctx, tx, hc, domains, sdCtx,
