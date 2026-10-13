@@ -42,8 +42,8 @@ func TestCodeCache_PutAddrCodeHashKeepsLiveEntry(t *testing.T) {
 	freshHash := [32]byte{1}
 	staleHash := [32]byte{2}
 
-	c.PutAddrCodeHash(addr, freshHash, 20)
-	c.PutAddrCodeHash(addr, staleHash, 10)
+	c.PutAddrCodeHash(addr, freshHash, 20, nil)
+	c.PutAddrCodeHash(addr, staleHash, 10, nil)
 
 	got, ok := c.GetAddrCodeHash(addr)
 	require.True(t, ok)
@@ -56,9 +56,9 @@ func TestCodeCache_PutAddrCodeHashReplacesStaleEntry(t *testing.T) {
 	oldHash := [32]byte{1}
 	newHash := [32]byte{2}
 
-	c.PutAddrCodeHash(addr, oldHash, 100)
+	c.PutAddrCodeHash(addr, oldHash, 100, nil)
 	c.Unwind(50)
-	c.PutAddrCodeHash(addr, newHash, 100)
+	c.PutAddrCodeHash(addr, newHash, 100, nil)
 
 	got, ok := c.GetAddrCodeHash(addr)
 	require.True(t, ok)
@@ -69,7 +69,7 @@ func TestCodeCache_GetAddrCodeHashWithTxNumPreservesStamp(t *testing.T) {
 	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 	addr := makeAddr(1)
 	codeHash := [32]byte{1}
-	c.PutAddrCodeHash(addr, codeHash, 42)
+	c.PutAddrCodeHash(addr, codeHash, 42, nil)
 	gotHash, gotTxNum, ok := c.GetAddrCodeHashWithTxNum(addr)
 	require.True(t, ok)
 	require.Equal(t, codeHash, gotHash)
@@ -282,7 +282,7 @@ func TestCodeCache_AddrCodeHashSlotCollision(t *testing.T) {
 		"the two addresses must share a slot for this test to mean anything")
 	h1, h2 := [32]byte{1}, [32]byte{2}
 
-	c.PutAddrCodeHash(a1, h1, 100)
+	c.PutAddrCodeHash(a1, h1, 100, nil)
 	got, ok := c.GetAddrCodeHash(a1)
 	require.True(t, ok)
 	require.Equal(t, h1, got)
@@ -292,7 +292,7 @@ func TestCodeCache_AddrCodeHashSlotCollision(t *testing.T) {
 	require.False(t, ok)
 
 	// Replacement serves the address just inserted.
-	c.PutAddrCodeHash(a2, h2, 100)
+	c.PutAddrCodeHash(a2, h2, 100, nil)
 	got, ok = c.GetAddrCodeHash(a2)
 	require.True(t, ok)
 	require.Equal(t, h2, got)
@@ -341,41 +341,29 @@ func TestCodeCache_AddrCodeSlotCollision(t *testing.T) {
 	require.Equal(t, code2, got)
 }
 
-// A seed's undo removes only its own mapping, never a fresher one.
-func TestCodeCache_DropAddrCodeHashIfKeepsAFresherWrite(t *testing.T) {
+// A refused seed leaves no mapping.
+func TestCodeCache_PutAddrCodeHashRefusedByAdmit(t *testing.T) {
 	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 	addr := make([]byte, 20)
 	addr[19] = 7
-	seeded, fresher := [32]byte{1}, [32]byte{2}
 
-	c.PutAddrCodeHash(addr, seeded, 10)
-	c.DeleteAddrCodeHash(addr)
-	c.PutAddrCodeHash(addr, fresher, 12)
-	c.dropAddrCodeHashIf(addr, seeded, 10)
-	got, ok := c.GetAddrCodeHash(addr)
-	require.True(t, ok)
-	require.Equal(t, fresher, got)
-
-	c.dropAddrCodeHashIf(addr, fresher, 12)
-	_, ok = c.GetAddrCodeHash(addr)
+	c.PutAddrCodeHash(addr, [32]byte{1}, 10, func() bool { return false })
+	_, ok := c.GetAddrCodeHash(addr)
 	require.False(t, ok)
 }
 
-// A code fill's undo drops only its own addr binding.
-func TestCodeCache_UnbindAddrIfKeepsAFresherBinding(t *testing.T) {
+// A refused code fill leaves addr unbound; the code stays reachable by its hash.
+func TestCodeCache_PutWithCodeHashIfAbsentRefusedByAdmit(t *testing.T) {
 	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 	addr := make([]byte, 20)
 	addr[19] = 9
-	oldCode, newCode := []byte{0x60, 0x01}, []byte{0x60, 0x02}
-	oldHash, newHash := crypto.Keccak256(oldCode), crypto.Keccak256(newCode)
+	code := []byte{0x60, 0x01}
+	codeHash := crypto.Keccak256(code)
 
-	c.PutWithCodeHash(addr, newCode, newHash, 12)
-	c.unbindAddrIf(addr, oldHash, 10)
-	got, ok := c.Get(addr)
-	require.True(t, ok)
-	require.Equal(t, newCode, got)
-
-	c.unbindAddrIf(addr, newHash, 12)
-	_, ok = c.Get(addr)
+	c.PutWithCodeHashIfAbsent(addr, code, codeHash, 10, func() bool { return false })
+	_, ok := c.Get(addr)
 	require.False(t, ok)
+	got, ok := c.GetByCodeHash(codeHash)
+	require.True(t, ok)
+	require.Equal(t, code, got)
 }

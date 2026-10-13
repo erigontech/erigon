@@ -132,7 +132,7 @@ func TestCodeCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 		binary.BigEndian.PutUint64(addr[1:], uint64(round))
 		var wg sync.WaitGroup
 		wg.Go(func() { cc.Put(addr, fresh, 20) })
-		wg.Go(func() { cc.PutIfAbsent(addr, stale, 10) })
+		wg.Go(func() { cc.PutIfAbsent(addr, stale, 10, nil) })
 		wg.Wait()
 		v, ok := cc.Get(addr)
 		require.True(t, ok)

@@ -84,12 +84,14 @@ func (c *blockingPutCache) Put([]byte, []byte, uint64) {
 	c.once.Do(func() { close(c.started) })
 	<-c.release
 }
-func (c *blockingPutCache) PutIfAbsent([]byte, []byte, uint64) { c.filled <- struct{}{} }
-func (c *blockingPutCache) Delete([]byte)                      {}
-func (c *blockingPutCache) Clear()                             {}
-func (c *blockingPutCache) Unwind(uint64)                      {}
-func (c *blockingPutCache) Close()                             {}
-func (c *blockingPutCache) Len() int                           { return 0 }
+func (c *blockingPutCache) PutIfAbsent([]byte, []byte, uint64, func() bool) {
+	c.filled <- struct{}{}
+}
+func (c *blockingPutCache) Delete([]byte) {}
+func (c *blockingPutCache) Clear()        {}
+func (c *blockingPutCache) Unwind(uint64) {}
+func (c *blockingPutCache) Close()        {}
+func (c *blockingPutCache) Len() int      { return 0 }
 
 func makeHash(i int) common.Hash {
 	var h common.Hash
@@ -855,14 +857,14 @@ func TestDomainCache_PutIfAbsent(t *testing.T) {
 	stale := []byte("stale")
 
 	// Absent → inserts.
-	c.PutIfAbsent(addr, stale, 10)
+	c.PutIfAbsent(addr, stale, 10, nil)
 	v, ok := c.Get(addr)
 	require.True(t, ok)
 	assert.Equal(t, stale, v)
 
 	// Live entry → left untouched.
 	c.Put(addr, fresh, 20)
-	c.PutIfAbsent(addr, stale, 10)
+	c.PutIfAbsent(addr, stale, 10, nil)
 	v, ok = c.Get(addr)
 	require.True(t, ok)
 	assert.Equal(t, fresh, v, "PutIfAbsent must not replace a live entry")
@@ -871,13 +873,13 @@ func TestDomainCache_PutIfAbsent(t *testing.T) {
 	low := makeAddr(2)
 	c.Put(low, fresh, 3)
 	c.Unwind(5)
-	c.PutIfAbsent(low, stale, 4)
+	c.PutIfAbsent(low, stale, 4, nil)
 	v, ok = c.Get(low)
 	require.True(t, ok)
 	assert.Equal(t, fresh, v)
 
 	// Stale entry (at/above the floor, superseded epoch) → replaced.
-	c.PutIfAbsent(addr, stale, 10) // addr's entry was stamped txNum 20 >= floor 5
+	c.PutIfAbsent(addr, stale, 10, nil) // addr's entry was stamped txNum 20 >= floor 5
 	v, ok = c.Get(addr)
 	require.True(t, ok)
 	assert.Equal(t, stale, v, "PutIfAbsent must replace a stale entry")
@@ -889,20 +891,20 @@ func TestCodeCache_PutIfAbsentKeepsLiveAddrBinding(t *testing.T) {
 	fresh := []byte{0xaa, 1, 2, 3}
 	stale := []byte{0xbb, 4, 5, 6}
 
-	cc.PutIfAbsent(addr, stale, 10)
+	cc.PutIfAbsent(addr, stale, 10, nil)
 	v, ok := cc.Get(addr)
 	require.True(t, ok)
 	assert.Equal(t, stale, v)
 
 	cc.Put(addr, fresh, 20)
-	cc.PutIfAbsent(addr, stale, 10)
+	cc.PutIfAbsent(addr, stale, 10, nil)
 	v, ok = cc.Get(addr)
 	require.True(t, ok)
 	assert.Equal(t, fresh, v, "PutIfAbsent must not rebind a live addr entry")
 
 	// After an unwind marks the binding stale, PutIfAbsent may rebind.
 	cc.Unwind(5)
-	cc.PutIfAbsent(addr, stale, 4)
+	cc.PutIfAbsent(addr, stale, 4, nil)
 	v, ok = cc.Get(addr)
 	require.True(t, ok)
 	assert.Equal(t, stale, v)
@@ -917,7 +919,7 @@ func TestCodeCache_PutWithCodeHashIfAbsent(t *testing.T) {
 	staleHash := crypto.Keccak256(stale)
 
 	cc.PutWithCodeHash(addr, fresh, freshHash, 20)
-	cc.PutWithCodeHashIfAbsent(addr, stale, staleHash, 10)
+	cc.PutWithCodeHashIfAbsent(addr, stale, staleHash, 10, nil)
 
 	v, ok := cc.Get(addr)
 	require.True(t, ok)
@@ -947,7 +949,7 @@ func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 		binary.BigEndian.PutUint64(addr[1:], uint64(round))
 		var wg sync.WaitGroup
 		wg.Go(func() { c.Put(addr, fresh, 20) })
-		wg.Go(func() { c.PutIfAbsent(addr, stale, 10) })
+		wg.Go(func() { c.PutIfAbsent(addr, stale, 10, nil) })
 		wg.Wait()
 		v, ok := c.Get(addr)
 		require.True(t, ok)
@@ -1673,11 +1675,14 @@ func TestStateCache_OldForkViewMissesTheReplacementEntry(t *testing.T) {
 type unwindingFill struct {
 	*DomainCache
 	hook func()
+	// seen records whether a reader could get the key right after the fill's write.
+	seen bool
 }
 
-func (c *unwindingFill) PutIfAbsent(key, value []byte, txNum uint64) {
+func (c *unwindingFill) PutIfAbsent(key, value []byte, txNum uint64, admit func() bool) {
 	c.hook()
-	c.DomainCache.PutIfAbsent(key, value, txNum)
+	c.DomainCache.PutIfAbsent(key, value, txNum, admit)
+	_, c.seen = c.DomainCache.Get(key)
 }
 
 // A fill admitted before an unwind and written after it would be stamped with
@@ -1685,12 +1690,14 @@ func (c *unwindingFill) PutIfAbsent(key, value []byte, txNum uint64) {
 func TestStateCache_FillRacingUnwindLeavesNothing(t *testing.T) {
 	sc := closeOnCleanup(t, NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB))
 	inner := sc.caches[kv.StorageDomain].(*DomainCache)
-	sc.caches[kv.StorageDomain] = &unwindingFill{DomainCache: inner, hook: func() { sc.unwind(5) }}
+	racing := &unwindingFill{DomainCache: inner, hook: func() { sc.unwind(5) }}
+	sc.caches[kv.StorageDomain] = racing
 
 	key := []byte("slot")
 	adm := sc.admission()
 	sc.fillIfFresh(kv.StorageDomain, key, []byte("dead-fork"), 10, 11, adm.epoch)
 
+	require.False(t, racing.seen, "readers saw a dead-fork fill as live")
 	_, ok := inner.Get(key)
 	require.False(t, ok, "a fill that straddled an unwind left its value in the cache")
 }
@@ -1701,13 +1708,15 @@ func TestStateCache_FillRacingPublicationLeavesNothing(t *testing.T) {
 	sc.Applier().Initialize(1)
 	inner := sc.caches[kv.StorageDomain].(*DomainCache)
 	key := []byte("slot")
-	sc.caches[kv.StorageDomain] = &unwindingFill{DomainCache: inner, hook: func() {
+	racing := &unwindingFill{DomainCache: inner, hook: func() {
 		sc.publish(1, 2, 0, false, []StateUpdate{{Domain: kv.StorageDomain, Key: key, TxNum: 12}})
 	}}
+	sc.caches[kv.StorageDomain] = racing
 
 	adm := sc.admission()
 	sc.fillIfFresh(kv.StorageDomain, key, []byte("pre-delete"), 10, 11, adm.epoch)
 
+	require.False(t, racing.seen, "readers saw a value the publication had already deleted")
 	_, ok := inner.Get(key)
 	require.False(t, ok, "a fill that straddled a publication outlived the publication's delete")
 }

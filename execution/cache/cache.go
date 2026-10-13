@@ -52,8 +52,11 @@ type Cache interface {
 
 	// PutIfAbsent is Put except that a live entry for key is left untouched
 	// (a stale one is replaced) — for fill writers, whose read view may
-	// already be superseded by an authoritative Put.
-	PutIfAbsent(key []byte, value []byte, txNum uint64)
+	// already be superseded by an authoritative Put. A non-nil admit is checked
+	// under the key's write lock, after the entry's epoch is sampled, and
+	// refuses the write when it returns false: a writer that revokes admission
+	// before touching the key then always wins.
+	PutIfAbsent(key []byte, value []byte, txNum uint64, admit func() bool)
 
 	// Delete removes the data for the given key.
 	Delete(key []byte)

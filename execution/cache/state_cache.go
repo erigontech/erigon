@@ -58,10 +58,9 @@ type StateCache struct {
 	// applierMu serializes authoritative operations; adm is replaced only
 	// under it.
 	applierMu sync.Mutex
-	// adm is what fills are admitted against. A fill re-loads it after writing
-	// and undoes its own entry if a publication, unwind or reset replaced it
-	// meanwhile, so neither side takes a lock. Writers store a new one before
-	// touching entries.
+	// adm is what fills are admitted against. Writers store a new one before
+	// touching entries, and a fill re-checks it under the key's write lock, so
+	// a fill that raced a publication, unwind or reset never lands.
 	adm atomic.Pointer[admission]
 	// pendingEnd collects appliedEnd while a publication installs its batch.
 	pendingEnd [kv.DomainLen]uint64
@@ -254,10 +253,7 @@ func (c *StateCache) seedAddrCodeHash(addr []byte, h [32]byte, txNum, visibleEnd
 	if !adm.admits(viewEpoch, visibleEnd, kv.AccountsDomain) {
 		return
 	}
-	cc.PutAddrCodeHash(addr, h, txNum)
-	if c.admission() != adm {
-		cc.dropAddrCodeHashIf(addr, h, txNum)
-	}
+	cc.PutAddrCodeHash(addr, h, txNum, func() bool { return c.admission() == adm })
 }
 
 func (c *StateCache) deleteAddrCodeHash(addr []byte) {
@@ -290,12 +286,7 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 	if !adm.admits(viewEpoch, visibleEnd, domain) {
 		return
 	}
-	cache.PutIfAbsent(key, cloned, readTxNum)
-	if c.admission() != adm {
-		if u, ok := cache.(interface{ deleteIfTxNum([]byte, uint64) }); ok {
-			u.deleteIfTxNum(key, readTxNum)
-		}
-	}
+	cache.PutIfAbsent(key, cloned, readTxNum, func() bool { return c.admission() == adm })
 }
 
 // fillCodeIfFresh is fillIfFresh for the code domain. An addr-keyed code entry
@@ -325,10 +316,7 @@ func (c *StateCache) fillCodeWithHashIfFresh(key, value, codeHash []byte, readTx
 	if !adm.admits(viewEpoch, visibleEnd, kv.CodeDomain) || !adm.admits(viewEpoch, accountsVisibleEnd, kv.AccountsDomain) {
 		return
 	}
-	codeCache.PutWithCodeHashIfAbsent(key, value, codeHash, readTxNum)
-	if c.admission() != adm {
-		codeCache.unbindAddrIf(key, codeHash, readTxNum)
-	}
+	codeCache.PutWithCodeHashIfAbsent(key, value, codeHash, readTxNum, func() bool { return c.admission() == adm })
 }
 
 // deleteKey removes the data for the given domain and key. The authoritative
@@ -536,7 +524,7 @@ func (c *StateCache) publish(sourceStateVersion, committedStateVersion, unwindTo
 	}
 
 	// Sub-caches synchronize their own reads and writes. While publishing is
-	// set, admission-gated fills are refused or undone, so the serialized
+	// set, admission-gated fills are refused, so the serialized
 	// applier installs the batch without excluding readers.
 	// One at a time: preparing the batch up front clones every value at once.
 	for i := range updates {

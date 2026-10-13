@@ -406,7 +406,7 @@ func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 	// replacement generation before lifting the unwind floor, so an entry
 	// captured from the retiring generation is always judged by coherence that
 	// still carries its unwind. A replacement-generation entry judged by an old
-	// snapshot can only cause a safe miss because dropIf rechecks the current
+	// snapshot can only cause a safe miss because dropStale rechecks the current
 	// generation before removing it.
 	coh := c.coh.Snapshot()
 	lru := c.data.Load()
@@ -425,7 +425,7 @@ func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 	// tx — and must be dropped; >= not > (the surviving block's last txNum is
 	// floor-1, so this never drops a live entry).
 	if coh.IsStale(e.txNum, e.epoch) {
-		c.dropIf(h, key, func(e entry[T]) bool { return c.coh.IsStale(e.txNum, e.epoch) })
+		c.dropStale(h, key)
 		c.staleEvicted.Add(1)
 		c.misses.Add(1)
 		var zero T
@@ -440,22 +440,22 @@ func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 // In ModeNoOp inserts that would overflow the byte budget are dropped
 // (and counted via the dropped metric).
 func (c *GenericCache[T]) Put(key []byte, value T, txNum uint64) {
-	c.put(key, value, txNum, true)
+	c.put(key, value, txNum, true, nil)
 }
 
 // PutIfAbsent implements Cache.PutIfAbsent (live entry kept, stale one
 // replaced).
-func (c *GenericCache[T]) PutIfAbsent(key []byte, value T, txNum uint64) {
-	c.put(key, value, txNum, false)
+func (c *GenericCache[T]) PutIfAbsent(key []byte, value T, txNum uint64, admit func() bool) {
+	c.put(key, value, txNum, false, admit)
 }
 
-func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool) {
-	c.putStriped(key, value, txNum, overwrite)
+func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool, admit func() bool) {
+	c.putStriped(key, value, txNum, overwrite, admit)
 }
 
 // putStriped performs the write under the key's stripe, so a conditional put's
 // check and insert are atomic against a same-key writer.
-func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrite bool) {
+func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrite bool, admit func() bool) {
 	h := maphash.Hash(key)
 	valBytes := c.sizeFunc(value)
 	newSize := len(key) + valBytes + currentSizeEntryOverhead
@@ -468,6 +468,9 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 	// generation swap and coherence reset, so the stamp cannot belong to a
 	// different generation from the one where the entry lands.
 	ep := c.coh.Epoch()
+	if admit != nil && !admit() {
+		return
+	}
 	lru := c.data.Load()
 	existing, hasExisting := lru.Get(h)
 
@@ -535,21 +538,15 @@ func (c *GenericCache[T]) Delete(key []byte) {
 	}
 }
 
-// deleteIfTxNum removes key's entry only if it is still the one stamped txNum,
-// so a fresher write survives.
-func (c *GenericCache[T]) deleteIfTxNum(key []byte, txNum uint64) {
-	c.dropIf(maphash.Hash(key), key, func(e entry[T]) bool { return e.txNum == txNum })
-}
-
-// dropIf removes key's entry under its put stripe if drop still holds for it:
-// the re-check keeps an entry a concurrent put revived, and the stripe keeps
-// the removal out of generation swaps.
-func (c *GenericCache[T]) dropIf(h uint64, key []byte, drop func(entry[T]) bool) {
+// dropStale removes key's entry under its put stripe: the re-check keeps an
+// entry a concurrent put revived, and the stripe keeps the removal out of
+// generation swaps.
+func (c *GenericCache[T]) dropStale(h uint64, key []byte) {
 	mu := &c.putStripes[h&(putStripeCount-1)]
 	mu.Lock()
 	defer mu.Unlock()
 	lru := c.data.Load()
-	if e, ok := lru.Get(h); ok && bytes.Equal(e.key, key) && drop(e) {
+	if e, ok := lru.Get(h); ok && bytes.Equal(e.key, key) && c.coh.IsStale(e.txNum, e.epoch) {
 		lru.Remove(h)
 	}
 }

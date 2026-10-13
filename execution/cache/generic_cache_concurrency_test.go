@@ -244,7 +244,7 @@ func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 		require.NotEmpty(t, candidates, "round %d: writer never ran, the assertions below prove nothing", round)
 
 		for _, k := range candidates {
-			c.PutIfAbsent(k, stale, 5)
+			c.PutIfAbsent(k, stale, 5, nil)
 		}
 		for i, k := range candidates {
 			v, ok := c.Get(k)

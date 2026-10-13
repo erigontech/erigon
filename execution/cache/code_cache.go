@@ -348,19 +348,19 @@ func (c *CodeCache) GetWithTxNum(addr []byte) ([]byte, uint64, bool) {
 func (c *CodeCache) Put(addr []byte, code []byte, txNum uint64) {
 	// No codeHash in hand here, so the entry is left unverified against maphash
 	// collisions. The EVM read path uses PutWithCodeHash, which records it.
-	c.putCode(addr, code, [32]byte{}, txNum, true)
+	c.putCode(addr, code, [32]byte{}, txNum, true, nil)
 }
 
 // PutIfAbsent implements Cache.PutIfAbsent for the addr→code binding; the
 // content-addressed layers skip live entries regardless.
-func (c *CodeCache) PutIfAbsent(addr []byte, code []byte, txNum uint64) {
-	c.putCode(addr, code, [32]byte{}, txNum, false)
+func (c *CodeCache) PutIfAbsent(addr []byte, code []byte, txNum uint64, admit func() bool) {
+	c.putCode(addr, code, [32]byte{}, txNum, false, admit)
 }
 
 // putCode populates the addr→codeID and codeID→code layers. keyHash is the
 // code's keccak codeHash when known (zero otherwise), stored so Get can reject
 // a 64-bit maphash collision.
-func (c *CodeCache) putCode(addr []byte, code []byte, keyHash [32]byte, txNum uint64, overwriteAddr bool) {
+func (c *CodeCache) putCode(addr []byte, code []byte, keyHash [32]byte, txNum uint64, overwriteAddr bool, admit func() bool) {
 	if len(code) == 0 {
 		return
 	}
@@ -369,10 +369,12 @@ func (c *CodeCache) putCode(addr []byte, code []byte, keyHash [32]byte, txNum ui
 	stripe.Lock()
 	defer stripe.Unlock()
 
-	c.putCodeLocked(addr, code, keyHash, codeID, txNum, c.coh.Epoch(), overwriteAddr)
+	c.putCodeLocked(addr, code, keyHash, codeID, txNum, c.coh.Epoch(), overwriteAddr, admit)
 }
 
-func (c *CodeCache) putCodeLocked(addr []byte, code []byte, keyHash [32]byte, codeID, txNum uint64, ep uint32, overwriteAddr bool) {
+// putCodeLocked checks admit only for the addr binding: the content layers are
+// keyed by the code itself, so a refused fill may still populate them.
+func (c *CodeCache) putCodeLocked(addr []byte, code []byte, keyHash [32]byte, codeID, txNum uint64, ep uint32, overwriteAddr bool, admit func() bool) {
 	a := common.BytesToAddress(addr)
 	c.addrBindMu.Lock()
 	bindAddr := overwriteAddr
@@ -380,6 +382,9 @@ func (c *CodeCache) putCodeLocked(addr []byte, code []byte, keyHash [32]byte, co
 	e, resident := c.addrToHash.Get(slot)
 	if !bindAddr {
 		bindAddr = !resident || e.addr != a || c.coh.IsStale(e.txNum, e.epoch)
+	}
+	if bindAddr && admit != nil && !admit() {
+		bindAddr = false
 	}
 	if bindAddr {
 		if resident {
@@ -427,12 +432,16 @@ func (c *CodeCache) GetAddrCodeHashWithTxNum(addr []byte) ([32]byte, uint64, boo
 // existing live mapping remains authoritative until DeleteAddrCodeHash
 // invalidates it; an unwind-stale mapping can be replaced. txNum stamps the
 // mapping for unwind invalidation.
-func (c *CodeCache) PutAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
+func (c *CodeCache) PutAddrCodeHash(addr []byte, h [32]byte, txNum uint64, admit func() bool) {
 	a := common.BytesToAddress(addr)
 	stripe := &c.putStripes[a[len(a)-1]]
 	stripe.Lock()
 	defer stripe.Unlock()
 
+	ep := c.coh.Epoch()
+	if admit != nil && !admit() {
+		return
+	}
 	slot := addrSlot(a)
 	if e, ok := c.addrToCodeHash.Get(slot); ok {
 		if e.addr == a && !c.coh.IsStale(e.txNum, e.epoch) {
@@ -442,7 +451,7 @@ func (c *CodeCache) PutAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 		// goes before the replacement lands.
 		c.addrToCodeHash.Remove(slot)
 	}
-	c.addrToCodeHash.Add(slot, addrCodeHashEntry{addr: a, hash: h, txNum: txNum, epoch: c.coh.Epoch()})
+	c.addrToCodeHash.Add(slot, addrCodeHashEntry{addr: a, hash: h, txNum: txNum, epoch: ep})
 }
 
 // DeleteAddrCodeHash removes the mapping when its account record is invalidated.
@@ -463,25 +472,6 @@ func dropSlotIf[V any](b *ByteLRU[V], mu sync.Locker, slot uint64, drop func(V) 
 	if e, ok := b.Get(slot); ok && drop(e) {
 		b.Remove(slot)
 	}
-}
-
-// dropAddrCodeHashIf removes a mapping only if it is still the one written for
-// h at txNum, so a fresher authoritative write survives.
-func (c *CodeCache) dropAddrCodeHashIf(addr []byte, h [32]byte, txNum uint64) {
-	a := common.BytesToAddress(addr)
-	dropSlotIf(c.addrToCodeHash, &c.putStripes[a[length.Addr-1]], addrSlot(a), func(e addrCodeHashEntry) bool {
-		return e.addr == a && e.hash == h && e.txNum == txNum
-	})
-}
-
-// unbindAddrIf drops addr's code binding only if it still points at codeHash as
-// written at txNum. The content-addressed layers are immutable and stay.
-func (c *CodeCache) unbindAddrIf(addr, codeHash []byte, txNum uint64) {
-	a := common.BytesToAddress(addr)
-	kh := hash32(codeHash)
-	dropSlotIf(c.addrToHash, &c.addrBindMu, addrSlot(a), func(e versionedAddressID) bool {
-		return e.addr == a && e.codeHash == kh && e.txNum == txNum
-	})
 }
 
 // GetByCodeHash retrieves contract code by its Ethereum codeHash (keccak256).
@@ -523,13 +513,13 @@ func (c *CodeCache) GetByCodeHash(codeHash []byte) ([]byte, bool) {
 // addr may be empty to populate only codeHashToCode (e.g. when populating from a
 // codehash-only path that hasn't seen the addr yet).
 func (c *CodeCache) PutWithCodeHash(addr []byte, code []byte, codeHash []byte, txNum uint64) {
-	c.putWithCodeHash(addr, code, codeHash, txNum, true)
+	c.putWithCodeHash(addr, code, codeHash, txNum, true, nil)
 }
 
 // PutWithCodeHashIfAbsent is PutWithCodeHash with if-absent binding semantics
 // (see Cache.PutIfAbsent).
-func (c *CodeCache) PutWithCodeHashIfAbsent(addr []byte, code []byte, codeHash []byte, txNum uint64) {
-	c.putWithCodeHash(addr, code, codeHash, txNum, false)
+func (c *CodeCache) PutWithCodeHashIfAbsent(addr []byte, code []byte, codeHash []byte, txNum uint64, admit func() bool) {
+	c.putWithCodeHash(addr, code, codeHash, txNum, false, admit)
 }
 
 func (c *CodeCache) lockPutStripes(a, b uint8) {
@@ -564,7 +554,7 @@ func (c *CodeCache) unlockAllPutStripes() {
 	}
 }
 
-func (c *CodeCache) putWithCodeHash(addr []byte, code []byte, codeHash []byte, txNum uint64, overwriteAddr bool) {
+func (c *CodeCache) putWithCodeHash(addr []byte, code []byte, codeHash []byte, txNum uint64, overwriteAddr bool, admit func() bool) {
 	if len(code) == 0 || len(codeHash) == 0 {
 		return
 	}
@@ -580,7 +570,7 @@ func (c *CodeCache) putWithCodeHash(addr []byte, code []byte, codeHash []byte, t
 	kh := hash32(codeHash)
 
 	if len(addr) > 0 {
-		c.putCodeLocked(addr, code, kh, codeID, txNum, ep, overwriteAddr)
+		c.putCodeLocked(addr, code, kh, codeID, txNum, ep, overwriteAddr, admit)
 	}
 
 	// Populate the size-only layer alongside the bytes layer — every time
