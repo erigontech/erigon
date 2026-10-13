@@ -181,3 +181,60 @@ func TestMaterialized_UncachedCreateRevertKeepsBalance(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(8), balance.Uint64())
 }
+
+// Without EIP-8246 a credit received after SELFDESTRUCT in the same tx burns with
+// the account. A later re-creation must not bring it back after a revert.
+func TestNoMaterialize_BurnedCreditCreateRevertReadsZeroBalance(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc0, 0x55})
+	vm := NewVersionMap(nil)
+	newTx := func(txIndex int) *IntraBlockState {
+		ibs := NewWithVersionMap(&emptyReader{}, vm)
+		ibs.SetNoMaterialize(true)
+		ibs.SetTxContext(1, txIndex)
+		return ibs
+	}
+	ibs := newTx(0)
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	_, err := ibs.Selfdestruct(addr, false)
+	require.NoError(t, err)
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(9), tracing.BalanceChangeTransfer))
+	vm.FlushVersionedWrites(ibs.VersionedWrites(), true)
+
+	ibs = newTx(1)
+	snap := ibs.PushSnapshot()
+	require.NoError(t, ibs.CreateAccount(addr, false))
+	ibs.RevertToSnapshot(snap, nil)
+
+	balance, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.True(t, balance.IsZero(), "balance after revert: %s", balance.String())
+}
+
+// A destruct-only cell above a burned credit (a fee touch of an absent coinbase)
+// must not invalidate the creation's balance read on every validation.
+func TestNoMaterialize_CreateAfterBurnedCreditAndDestructValidates(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc0, 0x66})
+	vm := NewVersionMap(nil)
+	newTx := func(txIndex int) *IntraBlockState {
+		ibs := NewWithVersionMap(&emptyReader{}, vm)
+		ibs.SetNoMaterialize(true)
+		ibs.SetTxContext(1, txIndex)
+		return ibs
+	}
+	ibs := newTx(0)
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	_, err := ibs.Selfdestruct(addr, false)
+	require.NoError(t, err)
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(9), tracing.BalanceChangeTransfer))
+	vm.FlushVersionedWrites(ibs.VersionedWrites(), true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
+
+	ibs = newTx(2)
+	require.NoError(t, ibs.CreateAccount(addr, false))
+
+	io := NewVersionedIO(3)
+	io.RecordReads(Version{TxIndex: 2}, ibs.VersionedReads())
+	require.Equal(t, VersionValid, vm.ValidateVersion(2, io, validateEqualVersion, true, false, false, ""))
+}
