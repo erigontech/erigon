@@ -128,71 +128,12 @@ type ReadSet struct {
 	codeHash              map[accounts.Address]VersionedRead[accounts.CodeHash]
 	codeSize              map[accounts.Address]VersionedRead[int]
 	storage               map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int]
-	// slotMapPeak is the most slots each kept storage map has held: a cleared
-	// map keeps the buckets it grew.
-	slotMapPeak map[accounts.Address]int
 
 	// access carries EIP-7928 "address was accessed" marks (with the
 	// non-revertable "real EVM access" bit) on the read side, so the access set
 	// travels with the read-set rather than as a separate IntraBlockState cache.
 	access AccessSet
 }
-
-func (s *ReadSet) entries() int {
-	n := len(s.address) + len(s.balance) + len(s.nonce) + len(s.incarnation) + len(s.selfDestruct) +
-		len(s.selfDestructWitnesses) + len(s.createContract) + len(s.code) + len(s.codeHash) + len(s.codeSize)
-	// Slots, not addresses: one contract's slot map is what a reused set keeps,
-	// and a map never shrinks back.
-	for _, inner := range s.storage {
-		n += len(inner)
-	}
-	return n
-}
-
-func (s *ReadSet) clearForReuse() {
-	clear(s.address)
-	clear(s.balance)
-	clear(s.nonce)
-	clear(s.incarnation)
-	clear(s.selfDestruct)
-	clear(s.selfDestructWitnesses)
-	clear(s.createContract)
-	clear(s.code)
-	clear(s.codeHash)
-	clear(s.codeSize)
-	// Keep the per-address slot maps: a call that reads one contract's slots
-	// would otherwise regrow its map from scratch on every later call. Only
-	// this call's contracts stay, or a run of calls on different contracts
-	// would pin a map each while every entries() count looked small.
-	if len(s.storage) <= maxReusedStorageAddrs {
-		held := 0
-		for addr, inner := range s.storage {
-			if len(inner) == 0 {
-				delete(s.storage, addr)
-				delete(s.slotMapPeak, addr)
-				continue
-			}
-			if s.slotMapPeak == nil {
-				s.slotMapPeak = make(map[accounts.Address]int, len(s.storage))
-			}
-			peak := max(s.slotMapPeak[addr], len(inner))
-			s.slotMapPeak[addr] = peak
-			held += peak
-			clear(inner)
-		}
-		if held > maxPooledEntries {
-			s.storage, s.slotMapPeak = nil, nil
-		}
-	} else {
-		// Nil, not cleared: a cleared map keeps the buckets those addresses grew.
-		s.storage, s.slotMapPeak = nil, nil
-	}
-	s.access = nil
-}
-
-// maxReusedStorageAddrs bounds how many per-address slot maps a reused read set
-// keeps; past it the outer map is dropped with them.
-const maxReusedStorageAddrs = 64
 
 func readSetPut[T any](m *map[accounts.Address]VersionedRead[T], addr accounts.Address, tr VersionedRead[T]) {
 	if *m == nil {
@@ -655,213 +596,6 @@ func (w *VersionedWrite[T]) String() string {
 	return fmt.Sprintf("%s: %v", w.WriteHeader, w.Val)
 }
 
-// Per-path *VersionedWrite[T] pools.  Each pool sources fresh cleared
-// instances; callers fill the WriteHeader + Val before inserting into the
-// typed map on WriteSet.  Lifetime is per-tx — WriteSet.ReleaseAndReset
-// walks the maps at tx-finalize and returns every VW to its pool.
-//
-// Slice-valued payloads (CodePath) have their Val cleared on release to
-// avoid pinning external memory; same pattern as versionmap.go's WriteCell
-// pool (releaseCellCode).
-var (
-	vwPoolAddress        = sync.Pool{New: func() any { return &VersionedWrite[*accounts.Account]{} }}
-	vwPoolBalance        = sync.Pool{New: func() any { return &VersionedWrite[uint256.Int]{} }}
-	vwPoolNonce          = sync.Pool{New: func() any { return &VersionedWrite[uint64]{} }}
-	vwPoolIncarnation    = sync.Pool{New: func() any { return &VersionedWrite[uint64]{} }}
-	vwPoolSelfDestruct   = sync.Pool{New: func() any { return &VersionedWrite[bool]{} }}
-	vwPoolCreateContract = sync.Pool{New: func() any { return &VersionedWrite[bool]{} }}
-	vwPoolCode           = sync.Pool{New: func() any { return &VersionedWrite[accounts.Code]{} }}
-	vwPoolCodeHash       = sync.Pool{New: func() any { return &VersionedWrite[accounts.CodeHash]{} }}
-	vwPoolCodeSize       = sync.Pool{New: func() any { return &VersionedWrite[int]{} }}
-	vwPoolStorage        = sync.Pool{New: func() any { return &VersionedWrite[uint256.Int]{} }}
-)
-
-func getVWAddress() *VersionedWrite[*accounts.Account] {
-	return vwPoolAddress.Get().(*VersionedWrite[*accounts.Account])
-}
-
-func getVWBalance() *VersionedWrite[uint256.Int] {
-	return vwPoolBalance.Get().(*VersionedWrite[uint256.Int])
-}
-func getVWNonce() *VersionedWrite[uint64] { return vwPoolNonce.Get().(*VersionedWrite[uint64]) }
-func getVWIncarnation() *VersionedWrite[uint64] {
-	return vwPoolIncarnation.Get().(*VersionedWrite[uint64])
-}
-
-func getVWSelfDestruct() *VersionedWrite[bool] {
-	return vwPoolSelfDestruct.Get().(*VersionedWrite[bool])
-}
-
-func getVWCreateContract() *VersionedWrite[bool] {
-	return vwPoolCreateContract.Get().(*VersionedWrite[bool])
-}
-
-func getVWCode() *VersionedWrite[accounts.Code] {
-	return vwPoolCode.Get().(*VersionedWrite[accounts.Code])
-}
-
-func getVWCodeHash() *VersionedWrite[accounts.CodeHash] {
-	return vwPoolCodeHash.Get().(*VersionedWrite[accounts.CodeHash])
-}
-func getVWCodeSize() *VersionedWrite[int] { return vwPoolCodeSize.Get().(*VersionedWrite[int]) }
-func getVWStorage() *VersionedWrite[uint256.Int] {
-	return vwPoolStorage.Get().(*VersionedWrite[uint256.Int])
-}
-
-func releaseVWAddress(vw *VersionedWrite[*accounts.Account]) {
-	vw.Val = nil // unpin
-	vwPoolAddress.Put(vw)
-}
-func releaseVWBalance(vw *VersionedWrite[uint256.Int]) { vwPoolBalance.Put(vw) }
-func releaseVWNonce(vw *VersionedWrite[uint64])        { vwPoolNonce.Put(vw) }
-func releaseVWIncarnation(vw *VersionedWrite[uint64])  { vwPoolIncarnation.Put(vw) }
-func releaseVWSelfDestruct(vw *VersionedWrite[bool])   { vwPoolSelfDestruct.Put(vw) }
-func releaseVWCreateContract(vw *VersionedWrite[bool]) { vwPoolCreateContract.Put(vw) }
-func releaseVWCode(vw *VersionedWrite[accounts.Code]) {
-	vw.Val = accounts.Code{} // unpin bytecode
-	vwPoolCode.Put(vw)
-}
-func releaseVWCodeHash(vw *VersionedWrite[accounts.CodeHash]) { vwPoolCodeHash.Put(vw) }
-func releaseVWCodeSize(vw *VersionedWrite[int])               { vwPoolCodeSize.Put(vw) }
-func releaseVWStorage(vw *VersionedWrite[uint256.Int])        { vwPoolStorage.Put(vw) }
-
-// Slabs double from a small first one, so a path that writes a handful of cells
-// buys a handful and a path that writes thousands still amortizes. A reusing set
-// keeps its slabs, so the cap is what one outlier may pin on it; past the cap
-// the shared pools serve the cells, as they did before the arena, and the set
-// keeps its list of those cells only up to vwMaxOverflow.
-const (
-	vwFirstSlab   = 4
-	vwMaxCells    = 1024
-	vwMaxOverflow = 4 * vwMaxCells
-)
-
-// vwArena hands out VersionedWrite cells from append-only slabs and recycles
-// them on reset, which costs no atomics and no per-cell Put. A cell stays valid
-// only until that reset, so nothing outside the owning set may hold one. Every
-// cell it hands out is zero: a new slab starts zeroed, reset clears what it
-// rewinds, and alloc clears a pooled cell.
-type vwArena[T any] struct {
-	slabs    [][]VersionedWrite[T]
-	slab     int
-	idx      int
-	cap      int
-	overflow []*VersionedWrite[T]
-}
-
-func (a *vwArena[T]) alloc(get func() *VersionedWrite[T]) *VersionedWrite[T] {
-	if a.slab == len(a.slabs) {
-		if a.cap == vwMaxCells {
-			vw := get()
-			*vw = VersionedWrite[T]{} // the pools clear only what pins memory
-			a.overflow = append(a.overflow, vw)
-			return vw
-		}
-		a.slabs = append(a.slabs, make([]VersionedWrite[T], a.nextSlab()))
-		a.cap += len(a.slabs[a.slab])
-	}
-	vw := &a.slabs[a.slab][a.idx]
-	a.idx++
-	if a.idx == len(a.slabs[a.slab]) {
-		a.slab++
-		a.idx = 0
-	}
-	return vw
-}
-
-func (a *vwArena[T]) nextSlab() int {
-	return min(max(a.cap, vwFirstSlab), vwMaxCells-a.cap)
-}
-
-func (a *vwArena[T]) reset(release func(*VersionedWrite[T])) {
-	for s := 0; s <= a.slab && s < len(a.slabs); s++ {
-		used := a.slabs[s]
-		if s == a.slab {
-			used = used[:a.idx]
-		}
-		clear(used)
-	}
-	a.slab, a.idx = 0, 0
-	for _, vw := range a.overflow {
-		release(vw)
-	}
-	clear(a.overflow)
-	a.overflow = a.overflow[:0]
-	if cap(a.overflow) > vwMaxOverflow {
-		a.overflow = nil
-	}
-}
-
-func (ws *WriteSet) newVWAddress() *VersionedWrite[*accounts.Account] {
-	if ws.cells != nil {
-		return ws.cells.address.alloc(getVWAddress)
-	}
-	return getVWAddress()
-}
-
-func (ws *WriteSet) newVWBalance() *VersionedWrite[uint256.Int] {
-	if ws.cells != nil {
-		return ws.cells.balance.alloc(getVWBalance)
-	}
-	return getVWBalance()
-}
-
-func (ws *WriteSet) newVWNonce() *VersionedWrite[uint64] {
-	if ws.cells != nil {
-		return ws.cells.nonce.alloc(getVWNonce)
-	}
-	return getVWNonce()
-}
-
-func (ws *WriteSet) newVWIncarnation() *VersionedWrite[uint64] {
-	if ws.cells != nil {
-		return ws.cells.incarnation.alloc(getVWIncarnation)
-	}
-	return getVWIncarnation()
-}
-
-func (ws *WriteSet) newVWSelfDestruct() *VersionedWrite[bool] {
-	if ws.cells != nil {
-		return ws.cells.selfDestruct.alloc(getVWSelfDestruct)
-	}
-	return getVWSelfDestruct()
-}
-
-func (ws *WriteSet) newVWCreateContract() *VersionedWrite[bool] {
-	if ws.cells != nil {
-		return ws.cells.createContract.alloc(getVWCreateContract)
-	}
-	return getVWCreateContract()
-}
-
-func (ws *WriteSet) newVWCode() *VersionedWrite[accounts.Code] {
-	if ws.cells != nil {
-		return ws.cells.code.alloc(getVWCode)
-	}
-	return getVWCode()
-}
-
-func (ws *WriteSet) newVWCodeHash() *VersionedWrite[accounts.CodeHash] {
-	if ws.cells != nil {
-		return ws.cells.codeHash.alloc(getVWCodeHash)
-	}
-	return getVWCodeHash()
-}
-
-func (ws *WriteSet) newVWCodeSize() *VersionedWrite[int] {
-	if ws.cells != nil {
-		return ws.cells.codeSize.alloc(getVWCodeSize)
-	}
-	return getVWCodeSize()
-}
-
-func (ws *WriteSet) newVWStorage() *VersionedWrite[uint256.Int] {
-	if ws.cells != nil {
-		return ws.cells.storage.alloc(getVWStorage)
-	}
-	return getVWStorage()
-}
-
 // WriteSet is the cell-pipeline target shape for versionedWrites.
 // Symmetric with ReadSet — see that type for rationale.
 type WriteSet struct {
@@ -880,62 +614,6 @@ type WriteSet struct {
 	// maps leave the set reading as empty, so under assertions readers panic
 	// instead.
 	released bool
-
-	cells *vwArenas // nil until UseArena
-}
-
-type vwArenas struct {
-	address        vwArena[*accounts.Account]
-	balance        vwArena[uint256.Int]
-	nonce          vwArena[uint64]
-	incarnation    vwArena[uint64]
-	selfDestruct   vwArena[bool]
-	createContract vwArena[bool]
-	code           vwArena[accounts.Code]
-	codeHash       vwArena[accounts.CodeHash]
-	codeSize       vwArena[int]
-	storage        vwArena[uint256.Int]
-}
-
-func (a *vwArenas) reset() {
-	a.address.reset(releaseVWAddress)
-	a.balance.reset(releaseVWBalance)
-	a.nonce.reset(releaseVWNonce)
-	a.incarnation.reset(releaseVWIncarnation)
-	a.selfDestruct.reset(releaseVWSelfDestruct)
-	a.createContract.reset(releaseVWCreateContract)
-	a.code.reset(releaseVWCode)
-	a.codeHash.reset(releaseVWCodeHash)
-	a.codeSize.reset(releaseVWCodeSize)
-	a.storage.reset(releaseVWStorage)
-}
-
-func (ws *WriteSet) ArenaBacked() bool { return ws != nil && ws.cells != nil }
-
-// assertNotArena trips when a set that recycles its cells would hand one out.
-// Unreachable while every consumer takes a Snapshot clone; it is here so a
-// future caller that passes the live set fails loudly instead of silently.
-func (ws *WriteSet) assertNotArena(op string) {
-	if dbg.AssertEnabled && ws.ArenaBacked() {
-		panic("writeset: " + op + " of an arena-backed set")
-	}
-}
-
-// UseArena routes this set's cells to its own slabs. Only a set the state keeps
-// across txs may do it, and a set that shares its cells out must not (see
-// assertNotArena and recycle).
-func (ws *WriteSet) UseArena() {
-	if ws.cells == nil {
-		ws.cells = &vwArenas{}
-	}
-}
-
-// recycle resets the set and takes its cells from its own slabs from here on.
-// Slabs only pay off once the state outlives a tx: a one-shot state would buy
-// a slab per path it touches and throw it away.
-func (ws *WriteSet) recycle() {
-	ws.ReleaseAndReset()
-	ws.UseArena()
 }
 
 // Released reports whether ReleaseMaps pooled this set's maps and no later
@@ -1105,7 +783,6 @@ func (ws *WriteSet) Filter(keep func(WriteHeader) bool) *WriteSet {
 		return nil
 	}
 	ws.assertLive()
-	ws.assertNotArena("filter")
 	out := &WriteSet{}
 	for a, vw := range ws.address {
 		if keep(vw.WriteHeader) {
@@ -1656,59 +1333,8 @@ func (ws *WriteSet) AllHeaders() iter.Seq[WriteHeader] {
 	}
 }
 
-// ReleaseAndReset returns every *VersionedWrite[T] held by the set to its
-// typed sync.Pool, or rewinds the set's arena, then returns the per-path maps
-// to their map-pools.
-// Called at tx-finalize so both the VW values and the map buckets cycle
-// through pools rather than getting GC'd. The values must go back before
-// ReleaseMaps clears the maps that hold them.
-func (ws *WriteSet) ReleaseAndReset() {
-	if ws.cells != nil {
-		ws.ReleaseMaps()
-		ws.cells.reset()
-		ws.revive() // a reset hands the set back for reuse
-		return
-	}
-	for _, vw := range ws.address {
-		releaseVWAddress(vw)
-	}
-	for _, vw := range ws.balance {
-		releaseVWBalance(vw)
-	}
-	for _, vw := range ws.nonce {
-		releaseVWNonce(vw)
-	}
-	for _, vw := range ws.incarnation {
-		releaseVWIncarnation(vw)
-	}
-	for _, vw := range ws.selfDestruct {
-		releaseVWSelfDestruct(vw)
-	}
-	for _, vw := range ws.createContract {
-		releaseVWCreateContract(vw)
-	}
-	for _, vw := range ws.code {
-		releaseVWCode(vw)
-	}
-	for _, vw := range ws.codeHash {
-		releaseVWCodeHash(vw)
-	}
-	for _, vw := range ws.codeSize {
-		releaseVWCodeSize(vw)
-	}
-	for _, inner := range ws.storage {
-		for _, vw := range inner {
-			releaseVWStorage(vw)
-		}
-	}
-	ws.ReleaseMaps()
-	ws.revive() // a reset hands the set back for reuse
-}
-
-// ReleaseMaps returns the map containers to their pools without releasing the
-// VersionedWrite values, which stay owned by GC — they may be shared with other
-// sets after MergeInto. Use ReleaseAndReset only for sets whose VWs came from
-// the vwPools and are exclusively owned.
+// ReleaseMaps returns the map containers to their pools. The VersionedWrite
+// values stay owned by GC: they may be shared with other sets after MergeInto.
 func (ws *WriteSet) ReleaseMaps() {
 	if ws == nil {
 		return
@@ -1726,51 +1352,36 @@ func (ws *WriteSet) ReleaseMaps() {
 		wsPutStorageInner(inner)
 	}
 	wsPutStorageOuter(ws.storage)
-	cells := ws.cells
 	*ws = WriteSet{}
-	ws.cells = cells
 	ws.released = true
 }
 
-// delCell drops addr's cell, returning it to its pool unless the set recycles
-// its own cells.
-func delCell[K comparable, T any](ws *WriteSet, m map[K]*VersionedWrite[T], k K, release func(*VersionedWrite[T])) {
-	vw, ok := m[k]
-	if !ok {
-		return
-	}
-	if ws.cells == nil {
-		release(vw)
-	}
-	delete(m, k)
-}
-
 func (ws *WriteSet) DelBalance(addr accounts.Address) {
-	delCell(ws, ws.balance, addr, releaseVWBalance)
+	delete(ws.balance, addr)
 }
 
 func (ws *WriteSet) DelNonce(addr accounts.Address) {
-	delCell(ws, ws.nonce, addr, releaseVWNonce)
+	delete(ws.nonce, addr)
 }
 
 func (ws *WriteSet) DelIncarnation(addr accounts.Address) {
-	delCell(ws, ws.incarnation, addr, releaseVWIncarnation)
+	delete(ws.incarnation, addr)
 }
 
 func (ws *WriteSet) DelSelfDestruct(addr accounts.Address) {
-	delCell(ws, ws.selfDestruct, addr, releaseVWSelfDestruct)
+	delete(ws.selfDestruct, addr)
 }
 
 func (ws *WriteSet) DelCode(addr accounts.Address) {
-	delCell(ws, ws.code, addr, releaseVWCode)
+	delete(ws.code, addr)
 }
 
 func (ws *WriteSet) DelCodeHash(addr accounts.Address) {
-	delCell(ws, ws.codeHash, addr, releaseVWCodeHash)
+	delete(ws.codeHash, addr)
 }
 
 func (ws *WriteSet) DelCodeSize(addr accounts.Address) {
-	delCell(ws, ws.codeSize, addr, releaseVWCodeSize)
+	delete(ws.codeSize, addr)
 }
 
 func (ws *WriteSet) DelStorage(addr accounts.Address, key accounts.StorageKey) {
@@ -1778,7 +1389,7 @@ func (ws *WriteSet) DelStorage(addr accounts.Address, key accounts.StorageKey) {
 	if inner == nil {
 		return
 	}
-	delCell(ws, inner, key, releaseVWStorage)
+	delete(inner, key)
 	if len(inner) == 0 {
 		delete(ws.storage, addr)
 	}
@@ -2419,8 +2030,6 @@ func (ws *WriteSet) copyMissingFrom(src *WriteSet) {
 
 // Merge returns the union of prev and next, with next winning on (addr,path,key).
 func (ws *WriteSet) Merge(next *WriteSet) *WriteSet {
-	ws.assertNotArena("merge")
-	next.assertNotArena("merge")
 	if ws.IsEmpty() {
 		return next
 	}
@@ -2442,8 +2051,6 @@ func (ws *WriteSet) Merge(next *WriteSet) *WriteSet {
 // VersionedWrite in place afterwards; s's maps are never touched, so
 // map-level deletes on s stay safe.
 func (ws *WriteSet) MergeInto(next *WriteSet) *WriteSet {
-	ws.assertNotArena("merge")
-	next.assertNotArena("merge")
 	if ws.IsEmpty() {
 		return next
 	}
@@ -3414,6 +3021,9 @@ type acctIO struct {
 	dirty    int32
 	accessed bool
 	access   accessOptions
+	// slotPeak is the most slots this record's maps have held: a cleared map
+	// keeps the buckets it grew.
+	slotPeak int
 
 	address        VersionedRead[AccountView]
 	balance        VersionedRead[uint256.Int]
@@ -3447,6 +3057,8 @@ type ioTable struct {
 	idx  map[accounts.Address]int32
 	recs []acctIO
 	last int32
+	// mapped bounds the records that may still hold slot maps from earlier calls.
+	mapped int
 }
 
 func pathBit(p AccountPath) uint16 { return 1 << p }
@@ -3479,7 +3091,7 @@ func (t *ioTable) get(addr accounts.Address) *acctIO {
 		t.recs = append(t.recs, acctIO{})
 	}
 	r := &t.recs[i]
-	*r = acctIO{addr: addr, storage: r.storage, sdWitnesses: r.sdWitnesses[:0], wStorage: r.wStorage}
+	*r = acctIO{addr: addr, storage: r.storage, sdWitnesses: r.sdWitnesses[:0], wStorage: r.wStorage, slotPeak: r.slotPeak}
 	t.idx[addr] = int32(i)
 	t.last = int32(i)
 	return r
@@ -3493,11 +3105,30 @@ func (t *ioTable) entries() int {
 	return n
 }
 
+// maxReusedStorageAddrs bounds how many records a reused table keeps slot maps for.
+const maxReusedStorageAddrs = 64
+
+// reset keeps the slot maps of this call's records only, so the next call that
+// reads the same contracts does not regrow them, while a run of calls on
+// different contracts or one call on many cannot pin a map each.
 func (t *ioTable) reset() {
+	held := 0
 	for i := range t.recs {
-		clear(t.recs[i].storage)
-		clear(t.recs[i].wStorage)
+		r := &t.recs[i]
+		r.slotPeak = max(r.slotPeak, len(r.storage)+len(r.wStorage))
+		held += r.slotPeak
+		clear(r.storage)
+		clear(r.wStorage)
 	}
+	keep := len(t.recs)
+	if keep > maxReusedStorageAddrs || held > maxPooledEntries {
+		keep = 0
+	}
+	all := t.recs[:max(t.mapped, len(t.recs))]
+	for i := keep; i < len(all); i++ {
+		all[i].storage, all[i].wStorage, all[i].slotPeak = nil, nil, 0
+	}
+	t.mapped = keep
 	t.recs = t.recs[:0]
 	clear(t.idx)
 	t.last = 0

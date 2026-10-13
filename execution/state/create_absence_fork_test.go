@@ -125,7 +125,7 @@ func TestBALAbsenceRemainsValidAfterEmptyDestruct(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, destroyed)
 	writes := creator.FinalizedWrites(&chain.Rules{IsAmsterdam: true, IsSpuriousDragon: true})
-	defer writes.ReleaseAndReset()
+	defer writes.ReleaseMaps()
 
 	creatorIO := NewVersionedIO(2)
 	creator.MergeTxIOInto(creatorIO, writes)

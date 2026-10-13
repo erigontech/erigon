@@ -115,10 +115,7 @@ func codeSizeWrite(addr accounts.Address, val int) *VersionedWrite[int] {
 // three shapes: k1 conflicts, k2 is prev-only, k3 is next-only.
 //
 // b's writes are the ones a merged set shares with prev, so they are what a
-// release test must assert. Its address and code writes make an accidental
-// release of a shared value fail deterministically: releaseVWAddress nils Val
-// and releaseVWCode clears the bytecode, while the other release funcs are
-// bare pool-Puts that leave the value readable until reuse.
+// release test must assert.
 func mergeIntoFixture() (prev, next *WriteSet) {
 	a, b, c := mergeAddr(0xa1), mergeAddr(0xb2), mergeAddr(0xc3)
 	k1, k2, k3 := mergeKey(0x01), mergeKey(0x02), mergeKey(0x03)
@@ -343,10 +340,6 @@ func TestWriteSetReleasedTripwire(t *testing.T) {
 	released.SetBalance(mergeAddr(0xd4), balanceWrite(mergeAddr(0xd4), 3, 0))
 	assert.Equal(t, 1, released.Count())
 
-	// ReleaseAndReset resets for reuse, so it must leave the set readable.
-	reused := &WriteSet{}
-	reused.ReleaseAndReset()
-	assert.Zero(t, reused.Count())
 }
 
 func drainSeq[V any](seq iter.Seq[V]) func() {

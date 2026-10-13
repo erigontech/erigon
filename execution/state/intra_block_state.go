@@ -2894,7 +2894,6 @@ func (ibs *IntraBlockState) FlushWritesToVersionMap(writes *WriteSet) {
 	if ibs.versionMap == nil {
 		return
 	}
-	writes.assertNotArena("flush")
 	ibs.versionMap.FlushVersionedWrites(writes, true)
 }
 
@@ -3126,11 +3125,9 @@ func (ibs *IntraBlockState) accountRead(addr accounts.Address, account *accounts
 // directly into the typed per-path map.  No generic dispatcher / runtime
 // type switch — each helper is monomorphic by path.
 
-// recordWrite* — typed write recorders for each AccountPath.  Pool fast
-// path: a repeat write to the same (addr[,key]) reuses the existing
-// *VersionedWrite[T] in place (no alloc, no map churn).  Only the first
-// write per (addr[,key]) per tx hits getVW* + SetX.  WriteSet.ReleaseAndReset
-// takes every VW back.
+// recordWrite* — typed write recorders for each AccountPath. A repeat write
+// to the same (addr[,key]) reuses the existing *VersionedWrite[T] in place;
+// the first one per tx takes a cell from the write view's slab.
 
 func (ibs *IntraBlockState) recordWriteBalance(addr accounts.Address, val uint256.Int) {
 	ibs.MarkAddressAccess(addr, true)

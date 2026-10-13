@@ -628,14 +628,11 @@ func TestValidateRead_SDStaleness_RevivalDoesNotResurrectPreDestructRead(t *test
 	require.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, validateEqualVersion, true, false, false, ""))
 }
 
-// TestVersionedWritePoolReuse_NoStaleFields guards the *VersionedWrite[T] pool
-// invariant: getVW* returns a recycled cell that may still hold a prior write's
-// contents, so the record path MUST wholesale-overwrite it. It drives the
-// production recorder (recordWriteBalance → getVWBalance) after seeding the pool
-// with a fully-poisoned cell, asserting nothing from the prior write survives —
-// including Key/Reason, which a balance write omits and which a field-by-field
-// assignment would leak. Not parallel: it seeds the process-global vwPoolBalance,
-// so it must run without a concurrent pool user.
+// TestVersionedWritePoolReuse_NoStaleFields guards the write-slab invariant: a
+// reused cell may still hold a prior write's contents, so the record path MUST
+// wholesale-overwrite it. It seeds the slab with a fully-poisoned cell and
+// asserts nothing from the prior write survives — including Key/Reason, which
+// a balance write omits and which a field-by-field assignment would leak.
 func TestVersionedWritePoolReuse_NoStaleFields(t *testing.T) {
 	_, tx, domains := NewTestRwTx(t)
 	vm := NewVersionMap(nil)
@@ -643,8 +640,8 @@ func TestVersionedWritePoolReuse_NoStaleFields(t *testing.T) {
 	defer ibs.Close()
 	ibs.SetTxContext(0, 3)
 
-	// Seed the pool so the recorder's getVWBalance hands back a poisoned cell.
-	vwPoolBalance.Put(&VersionedWrite[uint256.Int]{
+	// Seed the slab so the recorder hands back a poisoned cell.
+	ibs.versionedWrites.slabs.balance.put(&VersionedWrite[uint256.Int]{
 		WriteHeader: WriteHeader{
 			Address: getAddress(1),
 			Path:    NoncePath,
