@@ -379,6 +379,8 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	// the dependency-wait is untouched); only a repeat read of a Done value skips
 	// the probe. Own writes take precedence via the dirty gate (the same gate
 	// versionedWriteHit uses), so a written path never takes this branch.
+	// No cell of addr and no resident object: every probe below misses, so an
+	// unrecorded, unwritten path is the committed state, recorded as that miss.
 	if !commited {
 		if _, dirty := s.journal.dirties[addr]; !dirty {
 			prHeader, recorded := s.versionedReads.getHeader(addr, path, key)
@@ -388,9 +390,12 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				r.version = prHeader.Version
 				return
 			}
-			// No cell of addr and no resident object: every probe below misses,
-			// so an unrecorded read is the committed state, recorded as that miss.
-			if !recorded && !resident && coldReadPath(path, skipStorage) && s.versionMap.load(addr) == nil {
+			if !recorded && s.coldMiss(addr, path, resident, skipStorage) {
+				s.coldRead(addr, path, key, skipStorage, r)
+				return
+			}
+		} else if s.coldMiss(addr, path, resident, skipStorage) && !s.hasWrite(addr, path, key) {
+			if _, recorded := s.versionedReads.getHeader(addr, path, key); !recorded {
 				s.coldRead(addr, path, key, skipStorage, r)
 				return
 			}
@@ -960,6 +965,10 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 // state alone; the account fields resolve through the account record instead.
 func coldReadPath(path AccountPath, skipStorage bool) bool {
 	return skipStorage || path == StoragePath || path == CodePath || path == CodeSizePath
+}
+
+func (s *IntraBlockState) coldMiss(addr accounts.Address, path AccountPath, resident, skipStorage bool) bool {
+	return !resident && coldReadPath(path, skipStorage) && s.versionMap.load(addr) == nil
 }
 
 // coldReadHeader is the read versionedReadCore records for a version-map miss.
