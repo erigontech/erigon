@@ -28,6 +28,7 @@ import (
 	"maps"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -376,6 +377,71 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.codeReadCount = 0
 	ibs.dep = UnknownDep
 	ibs.stateReadErr = nil
+}
+
+// statePool is sync.Pool's surface, so a test can substitute one that keeps
+// what it is given: sync.Pool may discard any item.
+type statePool interface {
+	Get() any
+	Put(any)
+}
+
+var ibsPool statePool = &sync.Pool{}
+
+// NewPooled is New over an IntraBlockState reused from an earlier call, whose
+// maps keep their capacity. Release it with ReleasePooled.
+func NewPooled(stateReader StateReader) *IntraBlockState {
+	ibs, ok := ibsPool.Get().(*IntraBlockState)
+	if !ok {
+		return New(stateReader)
+	}
+	ibs.stateReader = stateReader
+	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
+	return ibs
+}
+
+// ReleasePooled hands ibs to the next NewPooled, or closes it when it grew too
+// large to keep.
+func ReleasePooled(ibs *IntraBlockState) {
+	if ibs.stateObjects == nil { // closed: its maps are gone
+		return
+	}
+	if ibs.resetForPool() {
+		ibsPool.Put(ibs)
+		return
+	}
+	ibs.Close()
+}
+
+// Maps never shrink, so a call that grew past this must not pin its capacity
+// for every later one.
+const maxPooledEntries = 16 * 1024
+
+// resetForPool clears everything one call left and reports whether ibs is
+// small enough to pool.
+func (ibs *IntraBlockState) resetForPool() bool {
+	reads := ibs.versionedReads
+	poolable := len(ibs.stateObjects)+len(ibs.nilAccounts)+ibs.accessList.entries()+reads.entries() <= maxPooledEntries
+	ibs.Reset()
+	if !poolable {
+		return false
+	}
+	// One call never hands its read set out, so the maps keep their capacity
+	// instead of the empty set Reset installs.
+	reads.clearForReuse()
+	ibs.versionedReads = reads
+	// Reset only bumps the probe epoch; a pooled ibs would collect every
+	// address later calls touch.
+	clear(ibs.sdProbe)
+	ibs.tracingHooks = nil
+	ibs.trace = false
+	// The caller reads this call's output after the ibs goes back to the pool.
+	ibs.txOutput = nil
+	ibs.stateReader, ibs.codeAccess = nil, nil
+	// Reset keeps the tx context and fork flags; New starts them at zero.
+	ibs.blockNum, ibs.version = 0, 0
+	ibs.eip8246, ibs.eip161, ibs.isAura = false, false, false
+	return true
 }
 
 // SetNoConflictDetection marks an execution that neither ValidateVersion checks
@@ -1802,6 +1868,9 @@ func (ibs *IntraBlockState) setStateVersioned(addr accounts.Address, key account
 // SetStorage replaces the entire storage for the specified account with given
 // storage. This function should only be used for debugging.
 func (ibs *IntraBlockState) SetStorage(addr accounts.Address, storage Storage) error {
+	if dbg.AssertEnabled && ibs.noMaterialize {
+		panic("SetStorage: full state override is not kept on the noMaterialize path")
+	}
 	stateObject, err := ibs.GetOrNewStateObject(addr)
 	if err != nil {
 		return err

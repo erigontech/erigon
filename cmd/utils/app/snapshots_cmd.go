@@ -923,6 +923,9 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 			if err != nil {
 				return err
 			}
+			if minS >= maxS {
+				return nil
+			}
 			removeLatest = false // --step has higher priority
 		}
 

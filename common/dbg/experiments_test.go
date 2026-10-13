@@ -54,9 +54,12 @@ func TestBALCommitmentWarmupReaders(t *testing.T) {
 }
 
 func TestMemUsageMatchesMemStats(t *testing.T) {
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
+	// The runtime can map memory between the reads, so sys is bracketed rather than compared.
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
 	alloc, sys := MemUsage()
-	require.InEpsilon(t, m.Alloc, alloc, 0.05)
-	require.InEpsilon(t, m.Sys, sys, 0.05)
+	runtime.ReadMemStats(&after)
+	require.InEpsilon(t, before.Alloc, alloc, 0.05)
+	require.GreaterOrEqual(t, sys, before.Sys)
+	require.LessOrEqual(t, sys, after.Sys)
 }

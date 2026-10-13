@@ -79,6 +79,8 @@ type handler struct {
 
 	subLock             sync.Mutex
 	serverSubs          map[ID]*Subscription
+	subscriptionLimit   int // concurrent subscriptions a connection may hold; 0 = unlimited
+	pendingSubs         int // subscribe calls in flight, each holding one slot of subscriptionLimit
 	maxBatchConcurrency uint
 	traceRequests       bool
 
@@ -123,6 +125,7 @@ func newHandler(
 	idgen func() ID,
 	reg *serviceRegistry,
 	batchLimit int,
+	subscriptionLimit int,
 	allowList AllowList,
 	maxBatchConcurrency uint,
 	traceRequests bool,
@@ -147,6 +150,7 @@ func newHandler(
 		allowList:      allowList,
 		forbiddenList:  forbiddenList,
 
+		subscriptionLimit:   subscriptionLimit,
 		maxBatchConcurrency: maxBatchConcurrency,
 		traceRequests:       traceRequests,
 
@@ -220,22 +224,26 @@ func (h *handler) answerBatchCall(cp *callProc, msg *jsonrpcMessage) []byte {
 	return buf.Bytes()
 }
 
-// handleBatch executes all messages in a batch and returns the responses.
-func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
+// handleBatch handles a batch and calls done, when it is not nil, once the messages are
+// no longer needed.
+func (h *handler) handleBatch(msgs []*jsonrpcMessage, done func()) {
+	if done == nil {
+		done = func() {}
+	}
 	// Emit error response for empty batches:
 	if len(msgs) == 0 {
 		h.startCallProc(func(cp *callProc) {
 			if err := h.conn.WriteJSON(cp.ctx, errorMessage(&invalidRequestError{"empty batch"})); err != nil {
 				h.logger.Debug("Failed to write RPC error response", "err", err)
 			}
-		})
+		}, done)
 		return
 	}
 	// Apply limit on total number of requests.
 	if h.batchLimit != 0 && len(msgs) > h.batchLimit {
 		h.startCallProc(func(cp *callProc) {
 			h.respondWithBatchTooLarge(cp, msgs)
-		})
+		}, done)
 		return
 	}
 
@@ -245,6 +253,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 		calls = append(calls, msg)
 	})
 	if len(calls) == 0 {
+		done()
 		return
 	}
 
@@ -279,7 +288,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 				h.logger.Debug("Failed to activate RPC notifier", "err", err)
 			}
 		}
-	})
+	}, done)
 }
 
 // sendBatchAnswers sends the answers in request order, leaving out calls that have none.
@@ -336,9 +345,14 @@ func (h *handler) respondWithBatchTooLarge(cp *callProc, batch []*jsonrpcMessage
 	}
 }
 
-// handleMsg handles a single message.
-func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsonstream.Stream) {
+// handleMsg handles a single message and calls done, when it is not nil, once the message
+// is no longer needed.
+func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsonstream.Stream, done func()) {
+	if done == nil {
+		done = func() {}
+	}
 	if ok := h.handleImmediate(msg); ok {
+		done()
 		return
 	}
 	h.startCallProc(func(cp *callProc) {
@@ -355,7 +369,7 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsonstream.Stream) {
 				h.logger.Debug("Failed to activate RPC notifier", "err", err)
 			}
 		}
-	})
+	}, done)
 }
 
 // handleResponses processes method call responses.
@@ -461,10 +475,31 @@ func (h *handler) cancelAllRequests(err error, inflightReq *requestOp) {
 	}
 }
 
+// reserveSubscription takes a slot for a subscribe call about to run. Once the call has
+// returned, releaseSubscription gives the slot back when no subscription was created, and
+// addSubscriptions turns it into a registered subscription otherwise.
+func (h *handler) reserveSubscription() bool {
+	h.subLock.Lock()
+	defer h.subLock.Unlock()
+
+	if h.subscriptionLimit > 0 && len(h.serverSubs)+h.pendingSubs >= h.subscriptionLimit {
+		return false
+	}
+	h.pendingSubs++
+	return true
+}
+
+func (h *handler) releaseSubscription() {
+	h.subLock.Lock()
+	h.pendingSubs--
+	h.subLock.Unlock()
+}
+
 func (h *handler) addSubscriptions(nn []*RemoteNotifier) {
 	h.subLock.Lock()
 	defer h.subLock.Unlock()
 
+	h.pendingSubs -= len(nn)
 	for _, n := range nn {
 		if sub := n.takeSubscription(); sub != nil {
 			h.serverSubs[sub.ID] = sub
@@ -484,9 +519,11 @@ func (h *handler) cancelServerSubscriptions(err error) {
 	}
 }
 
-// startCallProc runs fn in a new goroutine tracked by h.callWG, or on the caller's goroutine when inlineCalls is set.
-func (h *handler) startCallProc(fn func(*callProc)) {
+// startCallProc runs fn in a new goroutine tracked by h.callWG, or on the caller's goroutine
+// when inlineCalls is set, and then done.
+func (h *handler) startCallProc(fn func(*callProc), done func()) {
 	run := func() {
+		defer done()
 		ctx, cancel := context.WithCancel(h.rootCtx)
 		defer cancel()
 		fn(&callProc{ctx: ctx})
@@ -688,12 +725,20 @@ func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream *jso
 	}
 	args = args[1:]
 
+	if !h.reserveSubscription() {
+		reason := fmt.Sprintf("subscription limit %d per connection exceeded (can increase by --rpc.subscription.limit)", h.subscriptionLimit)
+		return msg.errorResponse(&CustomError{Code: ErrCodeServerOverloaded, Message: reason}), nil
+	}
 	// Install notifier in context so the subscription handler can find it.
 	n := &RemoteNotifier{h: h, namespace: namespace}
-	cp.notifiers = append(cp.notifiers, n)
 	ctx := ContextWithNotifier(cp.ctx, n)
-
-	return h.runMethod(ctx, msg, callb, args, stream)
+	answer, answered := h.runMethod(ctx, msg, callb, args, stream)
+	if n.takeSubscription() == nil {
+		h.releaseSubscription()
+		return answer, answered
+	}
+	cp.notifiers = append(cp.notifiers, n)
+	return answer, answered
 }
 
 // runMethod runs the Go callback for an RPC method. It returns either a response for the caller to

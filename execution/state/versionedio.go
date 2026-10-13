@@ -128,12 +128,71 @@ type ReadSet struct {
 	codeHash              map[accounts.Address]VersionedRead[accounts.CodeHash]
 	codeSize              map[accounts.Address]VersionedRead[int]
 	storage               map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int]
+	// slotMapPeak is the most slots each kept storage map has held: a cleared
+	// map keeps the buckets it grew.
+	slotMapPeak map[accounts.Address]int
 
 	// access carries EIP-7928 "address was accessed" marks (with the
 	// non-revertable "real EVM access" bit) on the read side, so the access set
 	// travels with the read-set rather than as a separate IntraBlockState cache.
 	access AccessSet
 }
+
+func (s *ReadSet) entries() int {
+	n := len(s.address) + len(s.balance) + len(s.nonce) + len(s.incarnation) + len(s.selfDestruct) +
+		len(s.selfDestructWitnesses) + len(s.createContract) + len(s.code) + len(s.codeHash) + len(s.codeSize)
+	// Slots, not addresses: one contract's slot map is what a reused set keeps,
+	// and a map never shrinks back.
+	for _, inner := range s.storage {
+		n += len(inner)
+	}
+	return n
+}
+
+func (s *ReadSet) clearForReuse() {
+	clear(s.address)
+	clear(s.balance)
+	clear(s.nonce)
+	clear(s.incarnation)
+	clear(s.selfDestruct)
+	clear(s.selfDestructWitnesses)
+	clear(s.createContract)
+	clear(s.code)
+	clear(s.codeHash)
+	clear(s.codeSize)
+	// Keep the per-address slot maps: a call that reads one contract's slots
+	// would otherwise regrow its map from scratch on every later call. Only
+	// this call's contracts stay, or a run of calls on different contracts
+	// would pin a map each while every entries() count looked small.
+	if len(s.storage) <= maxReusedStorageAddrs {
+		held := 0
+		for addr, inner := range s.storage {
+			if len(inner) == 0 {
+				delete(s.storage, addr)
+				delete(s.slotMapPeak, addr)
+				continue
+			}
+			if s.slotMapPeak == nil {
+				s.slotMapPeak = make(map[accounts.Address]int, len(s.storage))
+			}
+			peak := max(s.slotMapPeak[addr], len(inner))
+			s.slotMapPeak[addr] = peak
+			held += peak
+			clear(inner)
+		}
+		if held > maxPooledEntries {
+			s.storage, s.slotMapPeak = nil, nil
+		}
+	} else {
+		// Nil, not cleared: a cleared map keeps the buckets those addresses grew.
+		s.storage, s.slotMapPeak = nil, nil
+	}
+	s.access = nil
+}
+
+// maxReusedStorageAddrs bounds how many per-address slot maps a reused read set
+// keeps; past it the outer map is dropped with them.
+const maxReusedStorageAddrs = 64
 
 func readSetPut[T any](m *map[accounts.Address]VersionedRead[T], addr accounts.Address, tr VersionedRead[T]) {
 	if *m == nil {
@@ -2052,6 +2111,30 @@ func SetAccountFieldFromMap(out *WriteSet, vm *VersionMap, addr accounts.Address
 		}
 	}
 	return false
+}
+
+// setAccountFieldLive is SetAccountFieldFromMap with the readers' destruct wipe
+// for the nonce and the code hash: a committed destruct after the last write
+// sets the zero value.
+func setAccountFieldLive(out *WriteSet, vm *VersionMap, addr accounts.Address, path AccountPath, ver Version, txIdx int) bool {
+	switch path {
+	case NoncePath:
+		v, found, wiped := vm.readNonceLive(addr, txIdx)
+		if found || wiped {
+			out.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: ver}, Val: v})
+		}
+		return found || wiped
+	case CodeHashPath:
+		v, found, wiped := vm.readCodeHashLive(addr, txIdx)
+		if wiped {
+			v = accounts.EmptyCodeHash
+		}
+		if found || wiped {
+			out.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: ver}, Val: v})
+		}
+		return found || wiped
+	}
+	return SetAccountFieldFromMap(out, vm, addr, path, ver, txIdx)
 }
 
 // NewAccountFieldZeroWrite returns a typed *VersionedWrite[T] for path
