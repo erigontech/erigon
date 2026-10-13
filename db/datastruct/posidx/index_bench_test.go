@@ -28,20 +28,22 @@ func benchIndex(b *testing.B, runs, perRun, pageSize uint64) *Index {
 	items := runs * perRun
 	pages := (items + pageSize - 1) / pageSize
 	path := filepath.Join(b.TempDir(), "bench.vi")
-	w, err := NewWriter(path, b.TempDir(), pageSize, runs, items, pages*64)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer w.Close()
-	w.NoFsync()
-	for range runs {
-		w.AddRun(perRun)
-	}
-	for p := range pages {
-		w.AddPage(p * 64)
-	}
-	if err := w.Build(); err != nil {
-		b.Fatal(err)
+	{
+		w, err := NewWriter(path, b.TempDir(), pageSize, runs, items, pages*64)
+		if err != nil {
+			b.Fatal(err)
+		}
+		defer w.Close()
+		w.NoFsync()
+		for range runs {
+			w.AddRun(perRun)
+		}
+		for p := range pages {
+			w.AddPage(p * 64)
+		}
+		if err := w.Build(); err != nil {
+			b.Fatal(err)
+		}
 	}
 	idx, err := Open(path)
 	if err != nil {

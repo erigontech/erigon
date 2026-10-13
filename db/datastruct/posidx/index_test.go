@@ -90,6 +90,7 @@ func TestOutOfRange(t *testing.T) {
 	_, ok = idx.Get(0, 1<<40)
 	require.False(t, ok, "item past the end")
 }
+
 func TestEmpty(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "empty")
 	w, err := NewWriter(path, t.TempDir(), 64, 0, 0, 0)
