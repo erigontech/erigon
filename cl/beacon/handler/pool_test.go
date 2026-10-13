@@ -160,6 +160,32 @@ func TestPoolProposerSlashings(t *testing.T) {
 	require.Equal(t, proposerSlashing, out.Data[0])
 }
 
+func TestPoolProposerSlashingDoesNotPublishIgnored(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service := services_mock.NewMockProposerSlashingService(ctrl)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	proposerSlashing := &cltypes.ProposerSlashing{
+		Header1: &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{}},
+		Header2: &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{}},
+	}
+	requestBody, err := json.Marshal(proposerSlashing)
+	require.NoError(t, err)
+	service.EXPECT().ProcessMessage(gomock.Any(), nil, gomock.Any()).Return(services.ErrIgnore).Times(1)
+	gossipManager.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	handler := &ApiHandler{
+		logger:                  log.Root(),
+		sentinel:                &nonNilSentinelClient{},
+		proposerSlashingService: service,
+		gossipManager:           gossipManager,
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/proposer_slashings", bytes.NewReader(requestBody))
+
+	handler.PostEthV1BeaconPoolProposerSlashings(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+}
+
 func TestPoolVoluntaryExits(t *testing.T) {
 	voluntaryExit := &cltypes.SignedVoluntaryExit{
 		VoluntaryExit: &cltypes.VoluntaryExit{
