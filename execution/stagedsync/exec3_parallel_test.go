@@ -1765,6 +1765,84 @@ func TestNextResult_NilVsEmptyRecordForkAware(t *testing.T) {
 	}
 }
 
+// A touch removes an empty account (EIP-161) and a credit in the same
+// validation pass creates a new one, which must have incarnation 0 as on serial.
+// Both the latest and the historic state reader must see the removal.
+func TestNextResult_SamePassCreditAfterEmptyAccountRemoval(t *testing.T) {
+	config := chain.TestChainBerlinConfig
+	empty := accounts.InternAddress(common.Address{0xee})
+	emptyKey := empty.Value()
+	for _, tc := range []struct {
+		name     string
+		historic bool
+		coinbase bool
+	}{
+		{"latest", false, false},
+		{"historic", true, false},
+		{"coinbase-tip", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newResumeTestDB(t)
+			seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
+				acc := accounts.Account{Incarnation: 1, CodeHash: accounts.EmptyCodeHash}
+				return putter.DomainPut(kv.AccountsDomain, emptyKey[:], accounts.SerialiseV3(&acc), 0, nil)
+			})
+			pe, roTx := newResumeTestExec(t, db, config)
+			pe.in = exec.NewQueueWithRetry(16)
+			t.Cleanup(pe.in.Close)
+
+			header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
+			txs := types.Transactions{signSelfSendTx(t, 0, 0, 1, 21_000, config, 0), signSelfSendTx(t, 1, 0, 1, 21_000, config, 0)}
+			be := newBlockExec(newParallelTestBlock(1), new(protocol.GasPool).AddGas(header.GasLimit), nil, make(chan applyResult, 8), nil, false, nil)
+			be.results = make([]*execResult, len(txs))
+			be.txIncarnations = make([]int, len(txs))
+			be.execFailed = make([]int, len(txs))
+			be.execAborted = make([]int, len(txs))
+			results := make([]*exec.TxResult, len(txs))
+			for i, balance := range []uint64{0, 1} {
+				version := state.Version{BlockNum: 1, TxNum: uint64(i + 1), TxIndex: i}
+				eTask := &execTask{Task: &exec.TxTask{
+					Header:           header,
+					TxNum:            version.TxNum,
+					TxIndex:          i,
+					Config:           config,
+					Txs:              txs,
+					EvmBlockContext:  evmtypes.BlockContext{BlockNumber: 1},
+					HistoryExecution: tc.historic,
+				}, index: i}
+				be.tasks = append(be.tasks, eTask)
+				be.execTasks.setInProgress(i)
+				results[i] = &exec.TxResult{
+					Task:            &taskVersion{execTask: eTask, version: version},
+					TxOut:           newWS().bal(empty, version, *uint256.NewInt(balance)).build(),
+					ExecutionResult: evmtypes.ExecutionResult{ReceiptGasUsed: 21_000},
+				}
+				if tc.coinbase {
+					results[i].TxOut = newWS().build()
+					results[i].Coinbase = empty
+					results[i].ExecutionResult.FeeTipped = *uint256.NewInt(balance)
+				}
+			}
+
+			// The credit completes first, so the touch's result validates both in one pass.
+			_, err := be.nextResult(t.Context(), pe, results[1], roTx)
+			require.NoError(t, err)
+			require.Nil(t, be.finalizedResults[1])
+			blockResult, err := be.nextResult(t.Context(), pe, results[0], roTx)
+			require.NoError(t, err)
+			require.NotNil(t, blockResult)
+			require.NoError(t, blockResult.Err)
+
+			enc, _, err := pe.rs.Domains().GetLatest(kv.AccountsDomain, roTx, emptyKey[:])
+			require.NoError(t, err)
+			var acc accounts.Account
+			require.NoError(t, accounts.DeserialiseV3(&acc, enc))
+			require.Equal(t, uint64(1), acc.Balance.Uint64())
+			require.Zero(t, acc.Incarnation)
+		})
+	}
+}
+
 func TestDispatchPendingCompaction(t *testing.T) {
 	cases := []struct {
 		name       string
