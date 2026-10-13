@@ -51,6 +51,8 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 )
 
 type failingUpdateDB struct {
@@ -3532,6 +3534,62 @@ func TestExecutionPayloadDerivedHashRejectionDoesNotInvalidateVerifiedSibling(t 
 	require.True(t, f.IsPayloadVerified(envelope.Message.BeaconBlockRoot))
 	require.True(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
 	require.False(t, graph.invalid.Load())
+}
+
+func TestExecutionPayloadBlobCommitmentMismatchPreservesVerifiedSibling(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	require.NoError(t, envelope.Message.Payload.BlockAccessList.SetBytes([]byte{0xc0}))
+	verifiedRoot := common.Hash(envelope.Message.BeaconBlockRoot)
+	executionHash := envelope.Message.Payload.BlockHash
+	block.Block.Body.SignedExecutionPayloadBid.Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{0xc0})
+	bodyRoot, err := block.Block.Body.HashSSZ()
+	require.NoError(t, err)
+	blockState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{
+		Slot: block.Block.Slot, ProposerIndex: block.Block.ProposerIndex,
+		ParentRoot: block.Block.ParentRoot, BodyRoot: bodyRoot,
+	})
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	require.NotEqual(t, verifiedRoot, common.Hash(blockRoot))
+	envelope.Message.BeaconBlockRoot = blockRoot
+	resignAdmissionEnvelope(t, cfg, blockState, envelope)
+
+	engine, err := execution_client.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, nil, time.Second), nil)
+	require.NoError(t, err)
+	verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](2)
+	require.NoError(t, err)
+	verifiedExecutionPayloadHashes, err := lru.New[common.Hash, common.Hash](2)
+	require.NoError(t, err)
+	executionPayloadStatus, err := lru.New[common.Hash, execution_client.PayloadStatus](2)
+	require.NoError(t, err)
+	payloadStatusByRoot, err := lru.New[common.Hash, execution_client.PayloadStatus](2)
+	require.NoError(t, err)
+	executionPayloadGasLimit, err := lru.New[common.Hash, uint64](2)
+	require.NoError(t, err)
+	graph := &persistingEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
+	f := &ForkChoiceStore{
+		beaconCfg:                      cfg,
+		engine:                         engine,
+		forkGraph:                      graph,
+		verifiedExecutionPayload:       verifiedExecutionPayload,
+		verifiedExecutionPayloadHashes: verifiedExecutionPayloadHashes,
+		executionPayloadStatus:         executionPayloadStatus,
+		payloadStatusByRoot:            payloadStatusByRoot,
+		executionPayloadGasLimit:       executionPayloadGasLimit,
+	}
+	f.finalizedCheckpoint.Store(solid.Checkpoint{})
+	f.MarkPayloadVerified(verifiedRoot, executionHash)
+
+	err = f.OnExecutionPayload(t.Context(), envelope, false, true)
+
+	require.ErrorIs(t, err, ErrInvalidExecutionPayloadEnvelope)
+	require.True(t, verifiedExecutionPayload.Contains(verifiedRoot))
+	require.False(t, f.IsPayloadVerified(envelope.Message.BeaconBlockRoot))
+	require.False(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
+	require.False(t, graph.invalid.Load())
+	status, ok := f.GetRecentExecutionPayloadStatus(executionHash)
+	require.True(t, ok)
+	require.EqualValues(t, execution_client.PayloadStatusValidated, status)
 }
 
 func TestAuthenticatedExecutionPayloadInvalidationRevokesVerifiedSibling(t *testing.T) {

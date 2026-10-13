@@ -20,6 +20,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 )
 
 const (
@@ -1010,7 +1011,7 @@ func ensureStoredParentPayloadAccepted(
 	if status == execution_client.PayloadStatusNone && ctx.Err() != nil {
 		return false
 	}
-	status, retained := recordGloasPayloadRetryResult(store, forkchoice.PendingELPayload{Block: block, Envelope: envelope}, status)
+	status, retained := recordGloasPayloadRetryResult(store, forkchoice.PendingELPayload{Block: block, Envelope: envelope}, status, err)
 	if !retained {
 		return false
 	}
@@ -1021,8 +1022,9 @@ func recordGloasPayloadRetryResult(
 	store gloasPayloadRetryResultStore,
 	payload forkchoice.PendingELPayload,
 	status execution_client.PayloadStatus,
+	validationErr error,
 ) (execution_client.PayloadStatus, bool) {
-	if !validPendingGloasPayload(payload) {
+	if !validPendingGloasPayload(payload) || errors.Is(validationErr, misc.ErrMismatchBlobHashes) {
 		return execution_client.PayloadStatusNone, false
 	}
 	beaconRoot := payload.Envelope.Message.BeaconBlockRoot
@@ -1092,7 +1094,7 @@ func drainPendingGloasPayloads(ctx context.Context, cfg *Cfg) {
 		if err != nil {
 			log.Warn("[chainTipSync] pending GLOAS NewPayload failed", "slot", p.Block.Block.Slot, "status", status, "err", err)
 		}
-		status, retained := recordGloasPayloadRetryResult(cfg.forkChoice, p, status)
+		status, retained := recordGloasPayloadRetryResult(cfg.forkChoice, p, status, err)
 		if !retained {
 			continue
 		}
@@ -1246,6 +1248,7 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 			cfg.forkChoice,
 			forkchoice.PendingELPayload{Block: item.block, Envelope: envelope},
 			status,
+			err,
 		)
 		if !retained {
 			return true
@@ -1309,23 +1312,8 @@ func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
 		log.Warn("[chainTipSync] invalid anchor envelope during payload retry", "anchorRoot", anchorRoot, "err", err)
 		return
 	}
-	status, err := validateAnchorPayloadWithEL(ctx, cfg, bid, envelope)
-	if err != nil {
-		log.Warn("[chainTipSync] anchor payload NewPayload retry failed", "anchorRoot", anchorRoot, "status", status, "err", err)
-	}
-	execHash := envelope.Message.Payload.BlockHash
-	var retained bool
-	status, retained = cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(
-		anchorRoot,
-		execHash,
-		status,
-		envelope.Message.Payload.GasLimit,
-	)
-	if !retained {
-		return
-	}
-	if status == execution_client.PayloadStatusInvalidated {
-		log.Warn("[chainTipSync] anchor payload invalidated by EL", "anchorRoot", anchorRoot)
+	if err := validateAnchorPayloadWithExecutionClient(ctx, cfg, anchorRoot, bid, envelope); err != nil {
+		log.Warn("[chainTipSync] anchor payload validation failed", "anchorRoot", anchorRoot, "err", err)
 	}
 }
 

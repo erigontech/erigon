@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
@@ -838,6 +839,36 @@ func TestEnsureStoredParentPayloadAcceptedReplaysMissingVerdict(t *testing.T) {
 	require.EqualValues(t, execution_client.PayloadStatusNotValidated, store.marked)
 	require.Equal(t, payload.GasLimit, store.markedGas)
 	require.Len(t, store.requeued, 1)
+}
+
+func TestEnsureStoredParentPayloadAcceptedDoesNotCacheBlobMismatch(t *testing.T) {
+	root := common.Hash{1}
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
+	payload.BlockHash = common.Hash{2}
+	payload.GasLimit = 36_000_000
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+		BeaconBlockRoot: root,
+		Payload:         payload,
+	}}
+	store := &storedParentPayloadTestStore{
+		has:          true,
+		block:        cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion),
+		markRetained: true,
+	}
+	engine := &testExecutionEngine{newPayloadFn: func(context.Context, *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
+		return execution_client.PayloadStatusInvalidated, misc.ErrMismatchBlobHashes
+	}}
+	cfg := &Cfg{
+		beaconCfg:             &clparams.MainnetBeaconConfig,
+		executionClient:       engine,
+		gloasPayloadValidator: engine,
+	}
+
+	require.False(t, ensureStoredParentPayloadAccepted(t.Context(), cfg, store, root, envelope))
+	require.Equal(t, 1, engine.newPayloadCalls)
+	require.Zero(t, store.markedGas)
+	require.Zero(t, store.marked)
+	require.Empty(t, store.requeued)
 }
 
 func TestEnsureStoredParentPayloadAcceptedRejectsInvalidVerdict(t *testing.T) {

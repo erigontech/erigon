@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 )
 
 // errELBehind is returned by validatePayloadWithEL when the EL cannot process
@@ -660,6 +661,9 @@ func (f *ForkChoiceStore) applyPayloadValidationResultLocked(
 }
 
 func validatePayloadValidationResult(payloadStatus execution_client.PayloadStatus, validationErr error) error {
+	if errors.Is(validationErr, misc.ErrMismatchBlobHashes) {
+		return fmt.Errorf("%w: %w", ErrInvalidExecutionPayloadEnvelope, validationErr)
+	}
 	if validationErr != nil && payloadStatus != execution_client.PayloadStatusNone && payloadStatus != execution_client.PayloadStatusInvalidated {
 		return fmt.Errorf("validatePayloadWithEL: newPayload failed: %w", validationErr)
 	}
