@@ -97,16 +97,16 @@ func (e *GenesisMismatchError) Error() string {
 //
 // The returned chain configuration is never nil.
 func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, chainName string, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
-	return CommitGenesisBlockWithOverride(db, genesis, chainName, nil, nil, false, dirs, logger)
+	return CommitGenesisBlockWithOverride(db, genesis, chainName, nil, nil, nil, false, dirs, logger)
 }
 
-func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime *uint64, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime, overrideBinaryTrieTime *uint64, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback()
-	c, b, err := WriteGenesisBlock(tx, genesis, chainName, overrideOsakaTime, overrideAmsterdamTime, keepStoredChainConfig, dirs, logger)
+	c, b, err := WriteGenesisBlock(tx, genesis, chainName, overrideOsakaTime, overrideAmsterdamTime, overrideBinaryTrieTime, keepStoredChainConfig, dirs, logger)
 	if err != nil {
 		return c, b, err
 	}
@@ -130,7 +130,7 @@ func configOrDefault(g *types.Genesis, chainName string, genesisHash common.Hash
 	return chain.AllProtocolChanges
 }
 
-func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime *uint64, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime, overrideBinaryTrieTime *uint64, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	if err := rawdb.WriteGenesisIfNotExist(tx, genesis); err != nil {
 		return nil, nil, err
 	}
@@ -157,6 +157,9 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		if overrideAmsterdamTime != nil {
 			config.AmsterdamTime = overrideAmsterdamTime
 		}
+		if overrideBinaryTrieTime != nil {
+			config.BinaryTrieTime = overrideBinaryTrieTime
+		}
 	}
 
 	if (storedHash == common.Hash{}) {
@@ -171,7 +174,13 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		g := *genesis
 		g.Config = g.Config.Copy()
 		genesis = &g
+		genesisBinaryTrieTime := genesis.Config.BinaryTrieTime
 		applyOverrides(genesis.Config)
+		if overrideBinaryTrieTime != nil {
+			if err := checkBinaryTrieOverrideTime(genesisBinaryTrieTime, *overrideBinaryTrieTime, genesis.Timestamp); err != nil {
+				return genesis.Config, nil, err
+			}
+		}
 		block, err1 := write(tx, genesis, dirs, logger)
 		if err1 != nil {
 			return genesis.Config, nil, err1
@@ -206,6 +215,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	// singleton -- chain.AllProtocolChanges, or a chainspec's own *chain.Config -- so the
 	// overrides go onto a copy or they rewrite the schedule for every later reader.
 	newCfg := configOrDefault(genesis, chainName, storedHash).Copy()
+	configuredBinaryTrieTime := newCfg.BinaryTrieTime
 	applyOverrides(newCfg)
 	storedCfg, storedErr := rawdb.ReadChainConfig(tx, storedHash)
 	if storedErr != nil {
@@ -214,6 +224,18 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	if storedCfg == nil {
 		if err := newCfg.CheckConfigForkOrder(); err != nil {
 			return newCfg, nil, err
+		}
+		if overrideBinaryTrieTime != nil {
+			storedGenesis, err := rawdb.ReadGenesis(tx)
+			if err != nil {
+				return newCfg, nil, err
+			}
+			if storedGenesis != nil && storedGenesis.Config != nil {
+				configuredBinaryTrieTime = storedGenesis.Config.BinaryTrieTime
+			}
+			if err := checkBinaryTrieOverride(newCfg, configuredBinaryTrieTime, storedBlock, dirs); err != nil {
+				return newCfg, nil, err
+			}
 		}
 		logger.Warn("Found genesis block without chain config")
 		err1 := rawdb.WriteChainConfig(tx, storedHash, newCfg)
@@ -249,6 +271,11 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	// the node never adopts and passes the one it does.
 	if err := newCfg.CheckConfigForkOrder(); err != nil {
 		return newCfg, nil, err
+	}
+	if overrideBinaryTrieTime != nil {
+		if err := checkBinaryTrieOverride(newCfg, storedCfg.BinaryTrieTime, storedBlock, dirs); err != nil {
+			return newCfg, nil, err
+		}
 	}
 	// Check config compatibility and write the config. Compatibility errors
 	// are returned to the caller unless we're already at block zero.
@@ -492,6 +519,36 @@ func checkBinaryTrieSchedule(g *types.Genesis, settings *dbstate.ErigonDBSetting
 	if *g.Config.BinaryTrieTime > g.Timestamp && settings.TrieVariantName() != dbstate.TrieVariantHexBin {
 		return fmt.Errorf("binaryTrieTime %d is after the genesis timestamp %d: a post-genesis binary trie needs a hex+bin datadir, initialized fresh with COMMITMENT_HEX_BIN=true",
 			*g.Config.BinaryTrieTime, g.Timestamp)
+	}
+	return nil
+}
+
+func checkBinaryTrieOverride(cfg *chain.Config, previous *uint64, genesisBlock *types.Block, dirs datadir.Dirs) error {
+	settings, err := dbstate.ReadErigonDBSettings(dirs)
+	if errors.Is(err, fs.ErrNotExist) {
+		settings, err = &dbstate.ErigonDBSettings{}, nil
+	}
+	if err != nil {
+		return err
+	}
+	g := &types.Genesis{Config: cfg}
+	if genesisBlock != nil {
+		g.Timestamp = genesisBlock.Time()
+	}
+	if err := checkBinaryTrieOverrideTime(previous, *cfg.BinaryTrieTime, g.Timestamp); err != nil {
+		return err
+	}
+	return checkBinaryTrieSchedule(g, settings)
+}
+
+func checkBinaryTrieOverrideTime(previous *uint64, binaryTrieTime, genesisTime uint64) error {
+	if binaryTrieTime <= genesisTime {
+		return fmt.Errorf("--override.binary-trie %d is not after the genesis timestamp %d: a binary trie from genesis is scheduled by the genesis file",
+			binaryTrieTime, genesisTime)
+	}
+	if previous != nil && *previous <= genesisTime {
+		return fmt.Errorf("--override.binary-trie %d cannot reschedule a binary trie that starts at genesis (binaryTrieTime %d, genesis timestamp %d)",
+			binaryTrieTime, *previous, genesisTime)
 	}
 	return nil
 }

@@ -50,6 +50,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		InternalCL                      bool
 		OverrideOsakaTime               *uint64 `toml:",omitempty"`
 		OverrideAmsterdamTime           *uint64 `toml:",omitempty"`
+		OverrideBinaryTrieTime          *uint64 `toml:",omitempty"`
 		KeepStoredChainConfig           bool
 		AllowAA                         bool
 		FcuTimeout                      time.Duration
@@ -87,6 +88,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.InternalCL = c.InternalCL
 	enc.OverrideOsakaTime = c.OverrideOsakaTime
 	enc.OverrideAmsterdamTime = c.OverrideAmsterdamTime
+	enc.OverrideBinaryTrieTime = c.OverrideBinaryTrieTime
 	enc.KeepStoredChainConfig = c.KeepStoredChainConfig
 	enc.AllowAA = c.AllowAA
 	enc.FcuTimeout = c.FcuTimeout
@@ -128,6 +130,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		InternalCL                      *bool
 		OverrideOsakaTime               *uint64 `toml:",omitempty"`
 		OverrideAmsterdamTime           *uint64 `toml:",omitempty"`
+		OverrideBinaryTrieTime          *uint64 `toml:",omitempty"`
 		KeepStoredChainConfig           *bool
 		AllowAA                         *bool
 		FcuTimeout                      *time.Duration
@@ -221,6 +224,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.OverrideAmsterdamTime != nil {
 		c.OverrideAmsterdamTime = dec.OverrideAmsterdamTime
+	}
+	if dec.OverrideBinaryTrieTime != nil {
+		c.OverrideBinaryTrieTime = dec.OverrideBinaryTrieTime
 	}
 	if dec.KeepStoredChainConfig != nil {
 		c.KeepStoredChainConfig = *dec.KeepStoredChainConfig

@@ -117,6 +117,151 @@ func TestPBinGenesisRejectsBinaryTrieBeforeAmsterdam(t *testing.T) {
 	require.ErrorContains(t, err, "needs amsterdamTime")
 }
 
+func TestBinaryTrieOverrideNeedsDualDatadir(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		hexBin  bool
+		wantErr bool
+	}{
+		{name: "hex", wantErr: true},
+		{name: "hex+bin", hexBin: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withCommitmentVariant(t, tc.hexBin, tc.hexBin)
+			dirs := datadir.New(t.TempDir())
+			_, err := dbstate.ResolveErigonDBSettings(dirs, log.New(), true)
+			require.NoError(t, err)
+			db := temporaltest.NewTestDB(t, dirs)
+			g := delayedPBinGenesis()
+			g.Config.BinaryTrieTime = nil
+			_, _, err = genesiswrite.CommitGenesisBlockWithOverride(db, g, "", nil, nil, nil, false, dirs, log.New())
+			require.NoError(t, err)
+
+			binaryTrieTime := uint64(20)
+			_, _, err = genesiswrite.CommitGenesisBlockWithOverride(db, g, "", nil, nil, &binaryTrieTime, false, dirs, log.New())
+			if tc.wantErr {
+				require.ErrorContains(t, err, "binaryTrieTime")
+				require.Nil(t, readStoredChainConfig(t, db).BinaryTrieTime)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, &binaryTrieTime, readStoredChainConfig(t, db).BinaryTrieTime)
+
+			postponed := uint64(30)
+			_, _, err = genesiswrite.CommitGenesisBlockWithOverride(db, g, "", nil, nil, &postponed, false, dirs, log.New())
+			require.NoError(t, err)
+			require.Equal(t, &postponed, readStoredChainConfig(t, db).BinaryTrieTime)
+		})
+	}
+}
+
+func TestBinaryTrieOverrideMustFollowGenesis(t *testing.T) {
+	withCommitmentVariant(t, true, true)
+	g := delayedPBinGenesis()
+	g.Config.BinaryTrieTime = nil
+	atGenesis := g.Timestamp
+
+	t.Run("fresh", func(t *testing.T) {
+		dirs := datadir.New(t.TempDir())
+		db := temporaltest.NewTestDB(t, dirs)
+		_, _, err := genesiswrite.CommitGenesisBlockWithOverride(db, g, "", nil, nil, &atGenesis, false, dirs, log.New())
+		require.ErrorContains(t, err, "is not after the genesis timestamp")
+	})
+	t.Run("existing", func(t *testing.T) {
+		dirs := datadir.New(t.TempDir())
+		_, err := dbstate.ResolveErigonDBSettings(dirs, log.New(), true)
+		require.NoError(t, err)
+		db := temporaltest.NewTestDB(t, dirs)
+		_, _, err = genesiswrite.CommitGenesisBlockWithOverride(db, g, "", nil, nil, nil, false, dirs, log.New())
+		require.NoError(t, err)
+		_, _, err = genesiswrite.CommitGenesisBlockWithOverride(db, g, "", nil, nil, &atGenesis, false, dirs, log.New())
+		require.ErrorContains(t, err, "is not after the genesis timestamp")
+		require.Nil(t, readStoredChainConfig(t, db).BinaryTrieTime)
+	})
+}
+
+func TestBinaryTrieOverrideKeepsAGenesisBinaryTrie(t *testing.T) {
+	withCommitmentVariant(t, true, true)
+	g := delayedPBinGenesis()
+	atGenesis := g.Timestamp
+	g.Config.BinaryTrieTime = &atGenesis
+	later := uint64(20)
+
+	t.Run("fresh", func(t *testing.T) {
+		dirs := datadir.New(t.TempDir())
+		db := temporaltest.NewTestDB(t, dirs)
+		_, _, err := genesiswrite.CommitGenesisBlockWithOverride(db, g, "", nil, nil, &later, false, dirs, log.New())
+		require.ErrorContains(t, err, "starts at genesis")
+	})
+	t.Run("existing", func(t *testing.T) {
+		dirs := datadir.New(t.TempDir())
+		_, err := dbstate.ResolveErigonDBSettings(dirs, log.New(), true)
+		require.NoError(t, err)
+		db := temporaltest.NewTestDB(t, dirs)
+		_, _, err = genesiswrite.CommitGenesisBlockWithOverride(db, g, "", nil, nil, nil, false, dirs, log.New())
+		require.NoError(t, err)
+		_, _, err = genesiswrite.CommitGenesisBlockWithOverride(db, g, "", nil, nil, &later, false, dirs, log.New())
+		require.ErrorContains(t, err, "starts at genesis")
+		require.Equal(t, &atGenesis, readStoredChainConfig(t, db).BinaryTrieTime)
+	})
+}
+
+func TestBinaryTrieOverrideReadsTheStoredGenesisWithoutStoredChainConfig(t *testing.T) {
+	withCommitmentVariant(t, true, true)
+	dirs := datadir.New(t.TempDir())
+	_, err := dbstate.ResolveErigonDBSettings(dirs, log.New(), true)
+	require.NoError(t, err)
+	db := temporaltest.NewTestDB(t, dirs)
+	g := delayedPBinGenesis()
+	atGenesis := g.Timestamp
+	g.Config.BinaryTrieTime = &atGenesis
+	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(db, g, "", nil, nil, nil, false, dirs, log.New())
+	require.NoError(t, err)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			return err
+		}
+		return tx.Delete(kv.ConfigTable, genesisHash[:])
+	}))
+
+	later := uint64(20)
+	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(db, nil, "", nil, nil, &later, false, dirs, log.New())
+	require.ErrorContains(t, err, "starts at genesis")
+}
+
+func TestBinaryTrieOverrideRefusedWithoutStoredChainConfig(t *testing.T) {
+	withCommitmentVariant(t, false, false)
+	dirs := datadir.New(t.TempDir())
+	_, err := dbstate.ResolveErigonDBSettings(dirs, log.New(), true)
+	require.NoError(t, err)
+	db := temporaltest.NewTestDB(t, dirs)
+	g := delayedPBinGenesis()
+	g.Config.BinaryTrieTime = nil
+	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(db, g, "", nil, nil, nil, false, dirs, log.New())
+	require.NoError(t, err)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			return err
+		}
+		return tx.Delete(kv.ConfigTable, genesisHash[:])
+	}))
+
+	binaryTrieTime := uint64(20)
+	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(db, g, "", nil, nil, &binaryTrieTime, false, dirs, log.New())
+	require.ErrorContains(t, err, "hex+bin")
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			return err
+		}
+		cfg, err := rawdb.ReadChainConfig(tx, genesisHash)
+		require.Nil(t, cfg)
+		return err
+	}))
+}
+
 func TestPBinGenesisComputesBothRootsAtBlockZero(t *testing.T) {
 	withCommitmentVariant(t, true, true)
 	g := delayedPBinGenesis()

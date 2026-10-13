@@ -427,7 +427,7 @@ func New(
 			genesisSpec = nil
 		}
 		var genesisErr error
-		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.Snapshot.ChainName, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
+		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.Snapshot.ChainName, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.OverrideBinaryTrieTime, config.KeepStoredChainConfig, dirs, logger)
 		if genesisErr != nil && !errors.As(genesisErr, &compatErr) {
 			return genesisErr
 		}
