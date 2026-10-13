@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -746,8 +747,10 @@ func TestVersionedRead_G4_RefreshRecordsTypedDefaultInReadSet(t *testing.T) {
 // for everything else.  Used by TestVersionedRead_G4 to exercise the
 // refresh path with non-zero typed defaultVs.
 type refreshReader struct {
-	account      *accounts.Account
-	accountReads int
+	account       *accounts.Account
+	code          []byte
+	accountReads  int
+	codeSizeReads int
 }
 
 func (r *refreshReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
@@ -762,8 +765,11 @@ func (r *refreshReader) ReadAccountDataForDebug(accounts.Address) (*accounts.Acc
 func (r *refreshReader) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
-func (r *refreshReader) ReadAccountCode(accounts.Address) ([]byte, error)        { return nil, nil }
-func (r *refreshReader) ReadAccountCodeSize(accounts.Address) (int, error)       { return 0, nil }
+func (r *refreshReader) ReadAccountCode(accounts.Address) ([]byte, error) { return r.code, nil }
+func (r *refreshReader) ReadAccountCodeSize(accounts.Address) (int, error) {
+	r.codeSizeReads++
+	return len(r.code), nil
+}
 func (r *refreshReader) ReadAccountIncarnation(accounts.Address) (uint64, error) { return 0, nil }
 func (r *refreshReader) SetTrace(bool, string)                                   {}
 func (r *refreshReader) Trace() bool                                             { return false }
@@ -787,6 +793,44 @@ func TestVersionedRead_B_CommittedCodeHashReusesCommittedBase(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, codeHash, got)
 	assert.Equal(t, reads, r.accountReads, "the committed account is read once per tx")
+}
+
+func TestVersionedRead_B_CommittedCodeHashReusesTheStateObjectRead(t *testing.T) {
+	t.Parallel()
+	codeHash := accounts.InternCodeHash([32]byte{0xac})
+	r := &refreshReader{account: &accounts.Account{Incarnation: 1, CodeHash: codeHash}}
+	ibs := NewWithVersionMap(r, NewVersionMap(nil))
+	defer ibs.Close()
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(1, 5)
+	addr := accounts.InternAddress([20]byte{0xba})
+
+	_, err := ibs.getStateObject(addr, true)
+	require.NoError(t, err)
+	reads := r.accountReads
+	got, err := ibs.committedCodeHash(addr)
+	require.NoError(t, err)
+	assert.Equal(t, codeHash, got)
+	assert.Equal(t, reads, r.accountReads, "the committed account is read once per tx")
+}
+
+func TestVersionedRead_B_CodeSizeComesFromTheCodeRead(t *testing.T) {
+	t.Parallel()
+	code := []byte{0x60, 0x00, 0x60, 0x00}
+	r := &refreshReader{account: &accounts.Account{Incarnation: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code))}, code: code}
+	ibs := NewWithVersionMap(r, NewVersionMap(nil))
+	defer ibs.Close()
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(1, 5)
+	addr := accounts.InternAddress([20]byte{0xbb})
+
+	got, err := ibs.GetCode(addr)
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+	size, err := ibs.GetCodeSize(addr)
+	require.NoError(t, err)
+	assert.Equal(t, len(code), size)
+	assert.Zero(t, r.codeSizeReads, "the code read already has the size")
 }
 
 func TestVersionedRead_B_TouchReadsAnAbsentAccountOnce(t *testing.T) {

@@ -1457,10 +1457,7 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 				ibs.stateReader.SetTrace(false, "")
 				ibs.recordStateReadError(err)
 				if err == nil {
-					if ibs.committedBase == nil {
-						ibs.committedBase = make(map[accounts.Address]*accounts.Account)
-					}
-					ibs.committedBase[addr] = readAccount
+					ibs.rememberCommitted(addr, readAccount)
 				}
 			}
 			source = StorageRead
@@ -2148,6 +2145,9 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	}
 	ibs.stateReader.SetTrace(false, "")
 	ibs.recordStateReadError(err)
+	if err == nil && ibs.versionMap != nil {
+		ibs.rememberCommitted(addr, readAccount)
+	}
 
 	accountSource := StorageRead
 	// A DB-loaded record is pre-block state — older than any in-block cell.
@@ -2269,6 +2269,14 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	}
 	ibs.setStateObject(addr, obj)
 	return obj, nil
+}
+
+// rememberCommitted keeps an account read from the state reader for the rest of the tx.
+func (ibs *IntraBlockState) rememberCommitted(addr accounts.Address, acc *accounts.Account) {
+	if ibs.committedBase == nil {
+		ibs.committedBase = make(map[accounts.Address]*accounts.Account)
+	}
+	ibs.committedBase[addr] = acc
 }
 
 func (ibs *IntraBlockState) setStateObject(addr accounts.Address, object *stateObject) {

@@ -154,10 +154,7 @@ func (ibs *IntraBlockState) committedCodeHash(addr accounts.Address) (accounts.C
 		if err != nil {
 			return accounts.EmptyCodeHash, err
 		}
-		if ibs.committedBase == nil {
-			ibs.committedBase = make(map[accounts.Address]*accounts.Account)
-		}
-		ibs.committedBase[addr] = acc
+		ibs.rememberCommitted(addr, acc)
 	}
 	if acc == nil || acc.CodeHash.IsEmpty() {
 		return accounts.EmptyCodeHash, nil
@@ -1407,6 +1404,10 @@ func refreshCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, erro
 func readCodeSize(s *IntraBlockState, addr accounts.Address) (int, ReadSource, Version, error) {
 	if v, src, ver, ok := warmField(s, addr, pickWCodeSize, CodeSizePath, pickCodeSize); ok {
 		return v, src, ver, nil
+	}
+	// The code this tx already read has the size; an own code write carries a size write.
+	if code, src, ver, ok := warmField(s, addr, pickWCode, CodePath, pickCode); ok {
+		return code.Len(), src, ver, nil
 	}
 	var r readPathResult
 	versionedReadCore(s, addr, CodeSizePath, accounts.NilKey, false, false, &r)
