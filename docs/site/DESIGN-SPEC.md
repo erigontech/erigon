@@ -18,7 +18,7 @@ Complete specification of every customization applied to this site relative to a
 | `typescript` | ~6.0.2 |
 | `@easyops-cn/docusaurus-search-local` | ^0.55.1 |
 | `prism-react-renderer` | ^2.3.0 |
-| Node requirement | `>=20.0` |
+| Node requirement | `>=24.0` |
 
 ---
 
@@ -413,7 +413,7 @@ help-center/
 **Workflow:** `.github/workflows/docs-deploy.yml`
 
 - Trigger: push to `release/3.4` (or manual via `workflow_dispatch`)
-- Node: 20, with npm cache (`docs/site/package-lock.json`)
+- Node: 24, with npm cache (`docs/site/package-lock.json`)
 - Build: `npm ci` → `npm run build` (with `GITHUB_TOKEN` forwarded for authenticated API calls)
 - Target: GitHub Pages → `docs.erigon.tech`
 - Permissions: `contents:read`, `pages:write`, `id-token:write`
