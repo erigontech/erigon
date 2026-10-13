@@ -25,7 +25,9 @@ import (
 
 	keccak "github.com/erigontech/fastkeccak"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/types"
@@ -37,6 +39,7 @@ const (
 	branchPrefetchPerTx    = 256
 	branchPrefetchShards   = 64
 	branchPrefetchMaxBytes = 1 << 30
+	branchCarryBlocks      = 64
 )
 
 type prefetchItem struct {
@@ -46,14 +49,24 @@ type prefetchItem struct {
 }
 
 type prefetchedRecord struct {
-	data []byte
-	step kv.Step
-	refs *commitment.LeafRefs
+	data  []byte
+	step  kv.Step
+	refs  *commitment.LeafRefs
+	block uint64
+}
+
+func (r prefetchedRecord) size(key string) int64 {
+	n := len(key) + len(r.data)
+	if r.refs != nil {
+		n += 32 * len(r.refs.Refs)
+	}
+	return int64(n)
 }
 
 type prefetchedShard struct {
 	mu      sync.RWMutex
 	records map[string]prefetchedRecord
+	byBlock map[uint64][]string
 }
 
 type branchPrefetcher struct {
@@ -63,21 +76,79 @@ type branchPrefetcher struct {
 	seed   maphash.Seed
 	shards [branchPrefetchShards]prefetchedShard
 	bytes  atomic.Int64
+	block  uint64
+	gen    atomic.Uint64
 
 	pausing                        atomic.Bool
 	hits, misses, dropped, drained atomic.Uint64
 }
 
-func newBranchPrefetcher(ctx context.Context, db kv.TemporalRoDB) *branchPrefetcher {
-	p := &branchPrefetcher{work: make(chan prefetchItem, branchPrefetchQueue), seed: maphash.MakeSeed()}
+func newBranchPrefetcher(ctx context.Context, db kv.TemporalRoDB, block uint64) *branchPrefetcher {
+	return newPrefetchRecords().start(ctx, db, block)
+}
+
+func newPrefetchRecords() *branchPrefetcher {
+	p := &branchPrefetcher{seed: maphash.MakeSeed()}
 	for i := range p.shards {
 		p.shards[i].records = make(map[string]prefetchedRecord)
+		p.shards[i].byBlock = make(map[uint64][]string)
 	}
+	return p
+}
+
+func (p *branchPrefetcher) start(ctx context.Context, db kv.TemporalRoDB, block uint64) *branchPrefetcher {
+	p.work, p.block = make(chan prefetchItem, branchPrefetchQueue), block
+	p.hits.Store(0)
+	p.misses.Store(0)
+	p.dropped.Store(0)
+	p.drained.Store(0)
 	ctx = kv.WithNonBlockingAcquire(ctx)
 	for range branchPrefetchWorkers {
 		p.wg.Go(func() { p.run(ctx, db) })
 	}
 	return p
+}
+
+func (p *branchPrefetcher) store(s *prefetchedShard, key string, r prefetchedRecord) {
+	if old, ok := s.records[key]; ok {
+		p.bytes.Add(-old.size(key))
+	}
+	s.records[key] = r
+	s.byBlock[r.block] = append(s.byBlock[r.block], key)
+	p.bytes.Add(r.size(key))
+}
+
+func (p *branchPrefetcher) adopt(deltas [][]commitment.BranchDelta, block uint64, step kv.Step) {
+	p.gen.Add(1)
+	for _, part := range deltas {
+		for i := range part {
+			s := p.shard(part[i].Key)
+			s.mu.Lock()
+			p.store(s, string(part[i].Key), prefetchedRecord{data: bytes.Clone(part[i].Data), step: step, block: block})
+			s.mu.Unlock()
+		}
+	}
+	p.evictBefore(block + 1 - min(block+1, branchCarryBlocks))
+}
+
+func (p *branchPrefetcher) evictBefore(block uint64) {
+	for i := range p.shards {
+		s := &p.shards[i]
+		s.mu.Lock()
+		for b, keys := range s.byBlock {
+			if b >= block {
+				continue
+			}
+			for _, k := range keys {
+				if r, ok := s.records[k]; ok && r.block == b {
+					p.bytes.Add(-r.size(k))
+					delete(s.records, k)
+				}
+			}
+			delete(s.byBlock, b)
+		}
+		s.mu.Unlock()
+	}
 }
 
 func (p *branchPrefetcher) add(it prefetchItem) {
@@ -173,14 +244,66 @@ func (p *branchPrefetcher) put(key, data []byte, step kv.Step) []byte {
 	refs := v3.ComputeLeafRefs(key, data)
 	s := p.shard(key)
 	s.mu.Lock()
-	s.records[string(key)] = prefetchedRecord{data: data, step: step, refs: refs}
+	p.store(s, string(key), prefetchedRecord{data: data, step: step, refs: refs, block: p.block})
 	s.mu.Unlock()
-	size := len(key) + len(data)
-	if refs != nil {
-		size += 32 * len(refs.Refs)
-	}
-	p.bytes.Add(int64(size))
 	return data
+}
+
+func (p *branchPrefetcher) getAt(key []byte, gen uint64) ([]byte, kv.Step, bool) {
+	s := p.shard(key)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if p.gen.Load() != gen {
+		return nil, 0, false
+	}
+	r, ok := s.records[string(key)]
+	return r.data, r.step, ok
+}
+
+var (
+	mxBranchCarryAdopted = metrics.GetOrCreateCounter("commitment_branch_carry_adopted_total")
+	mxBranchCarryDropped = metrics.GetOrCreateCounter("commitment_branch_carry_dropped_total")
+)
+
+var branchCarry struct {
+	sync.Mutex
+	db     kv.TemporalRoDB
+	p      *branchPrefetcher
+	head   commitTarget
+	deltas [][]commitment.BranchDelta
+	step   kv.Step
+}
+
+func storeBranchCarry(db kv.TemporalRoDB, p *branchPrefetcher, head commitTarget, deltas [][]commitment.BranchDelta, step kv.Step) {
+	branchCarry.Lock()
+	defer branchCarry.Unlock()
+	branchCarry.db, branchCarry.p, branchCarry.head, branchCarry.deltas, branchCarry.step = db, p, head, deltas, step
+}
+
+func takeBranchCarry(db kv.TemporalRoDB, headNum uint64, headHash common.Hash) *branchPrefetcher {
+	branchCarry.Lock()
+	defer branchCarry.Unlock()
+	p, head, deltas, step := branchCarry.p, branchCarry.head, branchCarry.deltas, branchCarry.step
+	match := p != nil && branchCarry.db == db && head.blockNum == headNum && head.blockHash == headHash
+	branchCarry.db, branchCarry.p, branchCarry.deltas = nil, nil, nil
+	if !match {
+		if p != nil {
+			mxBranchCarryDropped.Inc()
+		}
+		return nil
+	}
+	p.adopt(deltas, headNum, step)
+	mxBranchCarryAdopted.Inc()
+	return p
+}
+
+func dropBranchCarry() {
+	branchCarry.Lock()
+	defer branchCarry.Unlock()
+	if branchCarry.p != nil {
+		mxBranchCarryDropped.Inc()
+	}
+	branchCarry.db, branchCarry.p, branchCarry.deltas = nil, nil, nil
 }
 
 func (p *branchPrefetcher) run(ctx context.Context, db kv.TemporalRoDB) {

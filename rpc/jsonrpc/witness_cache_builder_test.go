@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -878,4 +879,50 @@ func TestWaitCommittedHeadPanicRollsBack(t *testing.T) {
 	tx := &panicGetTx{}
 	require.Panics(t, func() { _, _, _ = waitCommittedHead(context.Background(), panicGetDB{tx: tx}, 1, common.Hash{}) })
 	require.True(t, tx.rolledBack)
+}
+
+func TestHeadCaptureOverCarriedRecordsMatchesDurablePerBlock(t *testing.T) {
+	previousSchema, previousV3 := statecfg.Schema, statecfg.ExperimentalCommitmentV3
+	t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousSchema, previousV3 })
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	statecfg.EnableHistoricalCommitment()
+
+	m, testChain := rpcdaemontest.CreateTestExecModuleNoInsert(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	require.NoError(t, m.InsertChain(testChain.Slice(0, 1)))
+
+	adopted := metrics.GetOrCreateCounter("commitment_branch_carry_adopted_total").GetValueUint64()
+	used := witnessCacheParentRecordsCounter.GetValueUint64()
+	onDemand := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	for n := uint64(2); n <= uint64(testChain.Length()); n++ {
+		pin, err := openRollingPin(ctx, m.DB)
+		require.NoError(t, err)
+		require.NoError(t, m.InsertChain(testChain.Slice(int(n)-1, int(n))), "block %d", n)
+		hash, _ := buildTestChainHeader(t, m, n)
+
+		api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+		api.witnessCache = newWitnessResultCache(96, 0, true, true)
+		committedTx, err := m.DB.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		api.tryHeadCaptureBuild(ctx, committedTx, pin, n, hash)
+		committedTx.Rollback()
+		pin.close()
+		got, ok := api.witnessCache.Get(hash)
+		require.True(t, ok, "block %d head-capture build", n)
+
+		bn := rpc.BlockNumber(n)
+		want, err := onDemand.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		require.NoError(t, err)
+		wantBytes, err := jsonstream.Marshal(want)
+		require.NoError(t, err)
+		gotBytes, err := jsonstream.Marshal(got)
+		require.NoError(t, err)
+		require.Equal(t, wantBytes, gotBytes, "block %d", n)
+	}
+	require.Positive(t, metrics.GetOrCreateCounter("commitment_branch_carry_adopted_total").GetValueUint64()-adopted, "blocks validated one at a time adopt the carried records")
+	require.Positive(t, witnessCacheParentRecordsCounter.GetValueUint64()-used, "head-capture builds read the published records")
 }
