@@ -1102,6 +1102,7 @@ func TestFlushToFeedCarriesWhatFlushToUpdatesEmits(t *testing.T) {
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
+	require.Nil(t, cs.deleted, "a flush to updates leaves the deletions unknown")
 	want := map[string]commitment.Update{}
 	wantDeleted := map[string]struct{}{}
 	for plainKey, u := range emittedUpdates(t, updates) {

@@ -480,7 +480,7 @@ func headCaptureReadsParentRecords(t *testing.T, commitmentV3 bool) {
 	wantBytes, err := jsonstream.Marshal(want)
 	require.NoError(t, err)
 
-	build := func(pinTx kv.TemporalTx, get func(k []byte) ([]byte, kv.Step, bool), deleted ...[]byte) (*ExecutionWitnessResult, bool) {
+	build := func(pinTx kv.TemporalTx, get func(k []byte) ([]byte, kv.Step, bool), deleted [][]byte) (*ExecutionWitnessResult, bool) {
 		commitmentdb.PublishParentRecords(&commitmentdb.ParentRecords{BlockNum: buildNum, BlockHash: hash, ParentHash: parentHash, Deleted: deleted, Get: get})
 		committedTx, err := m.DB.BeginTemporalRo(ctx)
 		require.NoError(t, err)
@@ -498,14 +498,14 @@ func headCaptureReadsParentRecords(t *testing.T, commitmentV3 bool) {
 		served++
 		return v, step, true
 	}
-	got, ok := build(pinA, parentGet)
+	got, ok := build(pinA, parentGet, [][]byte{})
 	require.True(t, ok, "a build over correct parent records is cached")
 	require.NotZero(t, served, "the build reads commitment through the parent records")
 	gotBytes, err := jsonstream.Marshal(got)
 	require.NoError(t, err)
 	require.Equal(t, wantBytes, gotBytes, "the witness over parent records matches the durable build")
 
-	_, ok = build(pinB, func(k []byte) ([]byte, kv.Step, bool) { return []byte{0x01, 0x02}, 0, true })
+	_, ok = build(pinB, func(k []byte) ([]byte, kv.Step, bool) { return []byte{0x01, 0x02}, 0, true }, nil)
 	require.False(t, ok, "wrong parent records fail a gate and cache nothing")
 
 	var kept []byte
@@ -519,7 +519,7 @@ func headCaptureReadsParentRecords(t *testing.T, commitmentV3 bool) {
 		}
 	}
 	require.NotNil(t, kept, "an account the block reads and keeps")
-	_, ok = build(pinC, parentGet, kept)
+	_, ok = build(pinC, parentGet, [][]byte{kept})
 	require.False(t, ok, "a verified deletion the collapse trace does not delete fails the build")
 }
 

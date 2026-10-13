@@ -1299,7 +1299,7 @@ func detectCollapseSiblings(
 		})
 	}
 	traced := false
-	if mode == witnessModeLegacy && hc != nil && hc.records != nil {
+	if mode == witnessModeLegacy && hc != nil && hc.records != nil && hc.records.Deleted != nil {
 		if err := checkTracedDeletes(hc.records.Deleted, touchedDeletes, preReader, domains.StepSize()); err != nil {
 			return nil, err
 		}

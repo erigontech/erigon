@@ -446,7 +446,7 @@ func (cs *calcState) FlushToFeed(feed *commitment.Feed) {
 	for _, dirty := range cs.storageDirty {
 		slots += len(dirty)
 	}
-	cs.deleted = nil
+	cs.deleted = [][]byte{}
 	feed.Keys = len(cs.dirtyAccounts) + slots
 	feed.Accounts = slices.Grow(feed.Accounts[:0], len(cs.dirtyAccounts)+len(cs.storageDirty))
 	cs.feedUpdates = slices.Grow(cs.feedUpdates[:0], len(cs.dirtyAccounts))
