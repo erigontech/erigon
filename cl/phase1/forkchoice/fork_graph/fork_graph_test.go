@@ -1934,3 +1934,40 @@ func TestPreviousHeadFastPathUsesAuthoritativePriorRoot(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, ok)
 }
+
+type publishOnHeadRoot struct {
+	*synced_data.SyncedDataManager
+	publish func()
+}
+
+func (s *publishOnHeadRoot) HeadRoot() common.Hash {
+	root := s.SyncedDataManager.HeadRoot()
+	if s.publish != nil {
+		s.publish()
+		s.publish = nil
+	}
+	return root
+}
+
+func TestHeadFastPathRechecksRootAfterHeadMoves(t *testing.T) {
+	manager := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	first := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, first.SetSlot(1))
+	firstRoot, err := first.BlockRoot()
+	require.NoError(t, err)
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(first, firstRoot))
+
+	second := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, second.SetSlot(2))
+	graph := &forkGraphDisk{syncedData: &publishOnHeadRoot{
+		SyncedDataManager: manager,
+		publish: func() {
+			require.NoError(t, manager.OnHeadStateWithBlockRoot(second, common.Hash{0x02}))
+		},
+	}}
+
+	out, ok, err := graph.useCachedStateIfPossible(firstRoot, nil)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, uint64(1), out.Slot())
+}
