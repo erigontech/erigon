@@ -26,10 +26,21 @@ Recorded L2 block windows with their execution witnesses, from `eez-association/
 
 License: `MIT OR Apache-2.0` (eez-rollup0).
 
+## chiado/
+
+`anchor-23507949.json` is a settlement mined on the eez.dev Chiado testnet (L1 Gnosis Chiado, chain id 10200; L2 chain id 699069), read from `https://eez.dev/rpc/l1` on 2026-10-14. The file is curated, not a raw RPC dump:
+
+- `transaction`: the settling transaction from `eth_getTransactionByBlockHashAndIndex`. It is a type-3 transaction carrying one blob; the blob is not recorded.
+- `logs` and `receiptStatus`: from `eth_getTransactionReceipt`.
+- `stateAtBlock`: `eth_call` results at block 23507949 for `signer()` on the proof system, `verificationKey(address)` and `threshold()` on the rollup manager, and `rollups(1)` on the registry.
+
+The loader test rebuilds the transaction from its fields and requires the mined hash and the recovered sender.
+
 ## SHA-256
 
 | File | SHA-256 |
 |---|---|
+| `chiado/anchor-23507949.json` | `9253ff31da86cbb86177d4058583a72223a5a7da162f6bd2d6d0187cd73a939d` |
 | `vectors/public_inputs_hash_vectors.json` | `8a787a8e307089a5be0ec4a56d8bd0e1ef4d8862eb58bb6b5086347ff2745472` |
 | `vectors/rolling_hash_vectors.json` | `bc37e3a369c91dde689c586899a4f2cc49da50770032f24dfa5c313f5368b88d` |
 | `windows/captured-devnet-window-84/README.md` | `d356d9d06c28ad34f07d92a32e6931633ef6ef802fdec82e9f45a22bebb1ae6e` |
