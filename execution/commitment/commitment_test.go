@@ -43,6 +43,7 @@ func (n *noopPatriciaContext) Branch(prefix []byte) ([]byte, kv.Step, error) { r
 func (n *noopPatriciaContext) BranchNoCopy(prefix []byte) ([]byte, kv.Step, error) {
 	return nil, 0, nil
 }
+
 func (n *noopPatriciaContext) PutBranch(prefix, data, prevData []byte) error {
 	return nil
 }
@@ -727,9 +728,11 @@ func (r *recordingCtx) Branch(_ []byte) ([]byte, kv.Step, error) {
 	r.branchCalls++
 	return nil, 0, nil
 }
+
 func (r *recordingCtx) BranchNoCopy(prefix []byte) ([]byte, kv.Step, error) {
 	return r.Branch(prefix)
 }
+
 func (r *recordingCtx) PutBranch(prefix, data, prev []byte) error {
 	r.puts = append(r.puts, struct{ prefix, data, prev []byte }{
 		bytes.Clone(prefix), bytes.Clone(data), bytes.Clone(prev),
