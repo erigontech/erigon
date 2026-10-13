@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/common/empty"
@@ -130,6 +131,23 @@ func (t *Trie) Process(
 	return t.round(ctx, onProgress, func() ([]storageTask, []accountEntry, int, error) {
 		return partitionUpdates(ctx, updates, t.scheduleWorkers, sorted)
 	})
+}
+
+func (t *Trie) TraceCollapses(ctx context.Context, updates *commitment.Updates, tracer commitment.CollapseTracer) error {
+	if t.ctx == nil {
+		return errTrieContext
+	}
+	if updates == nil || updates.Mode() != commitment.ModeCollect {
+		return errors.New("commitment v3: TraceCollapses requires ModeCollect updates")
+	}
+	items, err := drainFeed(ctx, updates, t.scheduleWorkers)
+	if err != nil {
+		return err
+	}
+	slices.SortFunc(items, compareFeed)
+	cache := &recordCache{PatriciaContext: t.ctx, recs: make(map[string][]byte)}
+	t.preRecs, t.preRoot = cache.recs, bytes.Clone(t.root)
+	return traceCollapses(cache, items, tracer)
 }
 
 func (t *Trie) ProcessFeed(ctx context.Context, feed *commitment.Feed, onProgress func(*commitment.CommitProgress)) ([]byte, error) {

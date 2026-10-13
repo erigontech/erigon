@@ -956,7 +956,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 
 	siblingPaths, err := detectCollapseSiblings(ctx, tx, hc, domains, sdCtx,
 		firstTxNumInBlock, endTxNum, blockNum, parentNum,
-		block.Root(), accessed, mode)
+		block.Root(), accessed, mode, true)
 	if err != nil {
 		return nil, err
 	}
@@ -1254,6 +1254,7 @@ func detectCollapseSiblings(
 	expectedBlockRoot common.Hash,
 	accessed *accessedState,
 	mode witnessMode,
+	traceOnly bool,
 ) (siblingPaths [][]byte, err error) {
 	// Set up split reader: commitment from block beginning (durable) or the pinned
 	// parent snapshot (head-capture), plain state from block end. withHistory=false
@@ -1283,21 +1284,30 @@ func detectCollapseSiblings(
 		branchPrefix []byte
 	}
 	var candidates []collapseCandidate
-	sdCtx.SetCollapseTracer(func(hashedKeyPath, branchPrefix []byte) {
+	trace := func(hashedKeyPath, branchPrefix []byte) {
 		candidates = append(candidates, collapseCandidate{
 			siblingPath:  bytes.Clone(hashedKeyPath),
 			branchPrefix: bytes.Clone(branchPrefix),
 		})
-	})
-	defer sdCtx.SetCollapseTracer(nil)
-
-	computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
-	if err != nil {
-		return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %w", err)
 	}
+	traced := false
+	if traceOnly && mode == witnessModeLegacy {
+		if traced, err = sdCtx.TraceCollapses(ctx, tx, blockNum, firstTxNumInBlock, trace); err != nil {
+			return nil, fmt.Errorf("[debug_executionWitness] collapse detection via TraceCollapses failed: %w", err)
+		}
+	}
+	if !traced {
+		sdCtx.SetCollapseTracer(trace)
+		defer sdCtx.SetCollapseTracer(nil)
 
-	if common.Hash(computedRootHash) != expectedBlockRoot {
-		return nil, fmt.Errorf("[debug_executionWitness] computedRootHash(%x)!= expectedRootHash(%x)", computedRootHash, expectedBlockRoot)
+		computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
+		if err != nil {
+			return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %w", err)
+		}
+
+		if common.Hash(computedRootHash) != expectedBlockRoot {
+			return nil, fmt.Errorf("[debug_executionWitness] computedRootHash(%x)!= expectedRootHash(%x)", computedRootHash, expectedBlockRoot)
+		}
 	}
 
 	// The canonical witness (insert-before-delete order) does not touch the sibling of

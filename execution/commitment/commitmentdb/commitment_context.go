@@ -457,6 +457,19 @@ func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.C
 	}
 }
 
+type collapseTracingTrie interface {
+	TraceCollapses(ctx context.Context, updates *commitment.Updates, tracer commitment.CollapseTracer) error
+}
+
+func (sdc *SharedDomainsCommitmentContext) TraceCollapses(ctx context.Context, tx kv.TemporalTx, blockNum, txNum uint64, tracer commitment.CollapseTracer) (bool, error) {
+	t, ok := sdc.patriciaTrie.(collapseTracingTrie)
+	if !ok {
+		return false, nil
+	}
+	sdc.trieContext(tx, blockNum, txNum, ctx, nil)
+	return true, t.TraceCollapses(ctx, sdc.updates, tracer)
+}
+
 // BranchChildCount returns a branch's child count from the post-compute view.
 // It reads branches written during computation from domain memory and falls
 // back to the installed state reader for unchanged branches.
