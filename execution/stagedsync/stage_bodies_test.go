@@ -255,3 +255,36 @@ func TestBadBlockUnwindKeepsValidAncestorsIndexed(t *testing.T) {
 	require.NotNil(t, badNum)
 	require.Equal(t, uint64(n), *badNum)
 }
+
+func TestBadBlockUnwindWithoutHashIndexMarksWholeRangeBad(t *testing.T) {
+	m := execmoduletester.New(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const n = 5
+	hashes := make([]common.Hash, n+1)
+	for i := uint64(1); i <= n; i++ {
+		h := &types.Header{ParentHash: hashes[i-1]}
+		h.Number.SetUint64(i)
+		hashes[i] = h.Hash()
+		require.NoError(t, rawdb.WriteHeader(tx, h))
+		require.NoError(t, rawdb.WriteCanonicalHash(tx, hashes[i], i))
+	}
+	require.NoError(t, tx.Delete(kv.HeaderNumber, hashes[n][:]))
+
+	u := &stagedsync.UnwindState{ID: stages.Headers, UnwindPoint: n - 3, Reason: stagedsync.BadBlock(hashes[n], errors.New("bad"))}
+	s := &stagedsync.StageState{ID: stages.Headers}
+	require.NoError(t, stagedsync.HeadersUnwind(m.Ctx, u, s, tx, stagedsync.StageHeadersCfg(m.BlockReader)))
+
+	for _, i := range []uint64{n - 2, n - 1, n} {
+		require.Nil(t, rawdb.ReadHeaderNumber(tx, hashes[i]), "block %d kept its hash index", i)
+		badNum, err := rawdb.ReadBadHeaderNumber(tx, hashes[i])
+		require.NoError(t, err)
+		require.NotNil(t, badNum, "block %d not marked bad", i)
+		require.Equal(t, i, *badNum)
+	}
+	num := rawdb.ReadHeaderNumber(tx, hashes[n-3])
+	require.NotNil(t, num)
+	require.Equal(t, uint64(n-3), *num)
+}
