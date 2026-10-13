@@ -391,6 +391,15 @@ type preBlockReader struct {
 	acc  *accounts.Account
 }
 
+func (r *preBlockReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (r *preBlockReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
 func (r *preBlockReader) ReadAccountData(a accounts.Address) (*accounts.Account, error) {
 	if a == r.addr {
 		return r.acc, nil

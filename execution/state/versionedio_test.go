@@ -128,6 +128,15 @@ func (r *minimalStateReader) ReadAccountData(addr accounts.Address) (*accounts.A
 	return nil, nil
 }
 
+func (r *minimalStateReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (r *minimalStateReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
 func (r *minimalStateReader) ReadAccountDataForDebug(addr accounts.Address) (*accounts.Account, error) {
 	return nil, nil
 }
