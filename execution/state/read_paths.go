@@ -339,7 +339,8 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		return
 	}
 
-	if so, ok := s.stateObjects[addr]; ok && so.deleted {
+	so, resident := s.stateObjects[addr]
+	if resident && so.deleted {
 		// When the in-memory deletion reflects a prior tx's selfdestruct, surface
 		// the SD version rather than UnknownVersion, so synthetic CreateAccount read
 		// records match later SD-zero-path reads and don't force a version conflict.
@@ -380,11 +381,17 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	// versionedWriteHit uses), so a written path never takes this branch.
 	if !commited {
 		if _, dirty := s.journal.dirties[addr]; !dirty {
-			if prHeader, ok := s.versionedReads.getHeader(addr, path, key); ok &&
-				(prHeader.Source == MapRead || prHeader.Source == StorageRead) {
+			prHeader, recorded := s.versionedReads.getHeader(addr, path, key)
+			if recorded && (prHeader.Source == MapRead || prHeader.Source == StorageRead) {
 				r.outcome = outcomeReadSetHit
 				r.source = prHeader.Source
 				r.version = prHeader.Version
+				return
+			}
+			// No cell of addr and no resident object: every probe below misses,
+			// so an unrecorded read is the committed state, recorded as that miss.
+			if !recorded && !resident && coldReadPath(path, skipStorage) && s.versionMap.load(addr) == nil {
+				s.coldRead(addr, path, key, skipStorage, r)
 				return
 			}
 		}
@@ -947,6 +954,51 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	r.outcome = outcomeReturnDefault
 	r.source = UnknownSource
 	r.version = UnknownVersion
+}
+
+// coldReadPath reports the reads a version-map miss answers from the committed
+// state alone; the account fields resolve through the account record instead.
+func coldReadPath(path AccountPath, skipStorage bool) bool {
+	return skipStorage || path == StoragePath || path == CodePath || path == CodeSizePath
+}
+
+// coldReadHeader is the read versionedReadCore records for a version-map miss.
+var coldReadHeader = ReadHeader{Source: StorageRead, Version: Version{TxIndex: UnknownDep, Incarnation: -1}}
+
+// coldRead is versionedReadCore's answer for a path of an address no tx wrote a
+// cell of, read for the first time by a tx that did not write it.
+func (s *IntraBlockState) coldRead(addr accounts.Address, path AccountPath, key accounts.StorageKey, skipStorage bool, r *readPathResult) {
+	if skipStorage {
+		r.outcome = outcomeReturnDefault
+		r.source = UnknownSource
+		r.version = UnknownVersion
+		if path != CodePath {
+			r.hdr = coldReadHeader
+			r.recordVR = true
+		}
+		return
+	}
+	var err error
+	switch path {
+	case StoragePath:
+		r.mapStorageVal, err = s.committedStorageDirect(addr, key)
+	case CodePath:
+		r.mapCodeVal, err = s.committedCodeDirect(addr)
+	case CodeSizePath:
+		r.mapCodeSizeVal, err = s.committedCodeSizeDirect(addr)
+	}
+	if err != nil {
+		r.err = err
+		r.outcome = outcomeReturnDefault
+		r.source = StorageRead
+		r.version = UnknownVersion
+		return
+	}
+	r.outcome = outcomeStorageRead
+	r.hdr = coldReadHeader
+	r.recordVR = true
+	r.source = coldReadHeader.Source
+	r.version = coldReadHeader.Version
 }
 
 // readAccountInternal performs an AddressPath versionedReadCore + typed
