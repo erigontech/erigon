@@ -500,52 +500,108 @@ func (t *PoolTestSuite) TestAddAttestationElectraLimitsDataPerCommittee() {
 		att.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048*64) // two votes each
 		t.Require().NoError(pool.AddAttestation(att))
 	}
-	t.ErrorIs(pool.AddAttestation(t.electraAttestationWithSource(5, 1, 0xff)), ErrPoolLimit, "a single vote does not displace stronger data")
+	t.NoError(pool.AddAttestation(t.electraAttestationWithSource(5, 1, 0xff)))
+	t.Len(pool.Aggregates(), maxDataPerCommittee, "a single vote does not displace stronger data")
 	t.NoError(pool.AddAttestation(t.electraAttestationWithSource(5, 2, 0xff)), "other committees keep their own allowance")
 
 	pool.pruneStale() // current slot 1000: everything is pruned and the allowance comes back
-	t.Empty(pool.refusedVotes)
+	t.Empty(pool.refused)
 	t.NoError(pool.AddAttestation(t.electraAttestationWithSource(5, 1, 0xff)))
 }
 
-// Attesters voting early for several data must not lock the committee's honest data out. Votes
-// arrive one at a time, so a full committee counts the votes it refuses for each data, and the
-// data with the fewest votes gives way once a refused data has more.
+// singleVote is one committee member's vote, as the attestation service adds it: a committee of 15
+// members, each source root giving its own AttestationData.
+func (t *PoolTestSuite) singleVote(source byte, member int) *solid.Attestation {
+	att := t.electraAttestationWithSource(5, 1, source)
+	bits := []byte{0, 0x80}
+	bits[member/8] |= 1 << (member % 8)
+	att.AggregationBits = solid.BitlistFromBytes(bits, 2048*64)
+	return att
+}
+
+// fillCommitteeWithTwoVoteData stores maxDataPerCommittee data with two votes each from members 0-7.
+func (t *PoolTestSuite) fillCommitteeWithTwoVoteData(pool AggregationPool) {
+	member := 0
+	for source := range maxDataPerCommittee {
+		for range 2 {
+			t.Require().NoError(pool.AddAttestation(t.singleVote(byte(source), member)))
+			member++
+		}
+	}
+}
+
+func (t *PoolTestSuite) committeeAggregateBits(pool AggregationPool, source byte) []byte {
+	for _, att := range pool.Aggregates() {
+		if att.Data.Source.Root[0] == source {
+			return att.AggregationBits.Bytes()
+		}
+	}
+	return nil
+}
+
+// Attesters voting early for several data must not lock the committee's honest data out. A full
+// committee keeps the votes of refused data, and that data replaces the weakest stored data, with
+// all its votes, once it has more voters.
 func (t *PoolTestSuite) TestAddAttestationElectraEvictsWeakestDataPerCommittee() {
 	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).AnyTimes()
 	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).AnyTimes()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
-	vote := func(source byte, member int) *solid.Attestation {
-		att := t.electraAttestationWithSource(5, 1, source)
-		bits := []byte{0, 0x80} // a committee of 15 members
-		bits[member/8] |= 1 << (member % 8)
-		att.AggregationBits = solid.BitlistFromBytes(bits, 2048*64)
-		return att
-	}
-	member := 0
-	for source := range maxDataPerCommittee {
-		for range 2 {
-			t.Require().NoError(pool.AddAttestation(vote(byte(source), member)))
-			member++
-		}
-	}
+	t.fillCommitteeWithTwoVoteData(pool)
 
-	t.ErrorIs(pool.AddAttestation(vote(0xaa, member)), ErrPoolLimit, "one vote does not displace data with two")
-	t.ErrorIs(pool.AddAttestation(vote(0xaa, member+1)), ErrPoolLimit, "two votes do not displace data with two")
-	t.NoError(pool.AddAttestation(vote(0xaa, member+2)), "the third vote displaces the weakest data")
-	t.NoError(pool.AddAttestation(vote(0xaa, member+3)), "later votes merge into the honest data")
-
+	t.Require().NoError(pool.AddAttestation(t.singleVote(0xaa, 8)))
+	t.Require().NoError(pool.AddAttestation(t.singleVote(0xaa, 9)))
+	t.Nil(t.committeeAggregateBits(pool, 0xaa), "two voters do not displace data with two")
+	t.Require().NoError(pool.AddAttestation(t.singleVote(0xaa, 10)))
+	t.Equal([]byte{0, 0x87}, t.committeeAggregateBits(pool, 0xaa), "the third voter brings all three votes in")
+	t.Require().NoError(pool.AddAttestation(t.singleVote(0xaa, 11)))
+	t.Equal([]byte{0, 0x8f}, t.committeeAggregateBits(pool, 0xaa))
 	t.Len(pool.Aggregates(), maxDataPerCommittee)
-	honest := 0
-	for _, att := range pool.Aggregates() {
-		if att.Data.Source.Root[0] == 0xaa {
-			honest++
-			t.Equal([]byte{0, 0x8c}, att.AggregationBits.Bytes())
-		}
+
+	t.Nil(t.committeeAggregateBits(pool, 0), "the first data with the fewest votes was displaced")
+	t.Require().NoError(pool.AddAttestation(t.singleVote(0, 12)))
+	t.Equal([]byte{0x03, 0x90}, t.committeeAggregateBits(pool, 0), "displaced data keeps its votes and comes back with one more voter")
+}
+
+// A repeated delivery of one vote must not count as another voter.
+func (t *PoolTestSuite) TestAddAttestationElectraRefusedDataCountsVotersOnce() {
+	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).AnyTimes()
+	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).AnyTimes()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
+	t.fillCommitteeWithTwoVoteData(pool)
+
+	t.Require().NoError(pool.AddAttestation(t.singleVote(0xaa, 8)))
+	for range 3 {
+		t.ErrorIs(pool.AddAttestation(t.singleVote(0xaa, 8)), ErrIsSuperset)
 	}
-	t.Equal(1, honest)
+	t.Nil(t.committeeAggregateBits(pool, 0xaa))
+	for source := range maxDataPerCommittee {
+		t.NotNil(t.committeeAggregateBits(pool, byte(source)))
+	}
+}
+
+// Refused data is bounded per committee: new data replaces the refused data with the fewest voters
+// only when it has at least as many.
+func (t *PoolTestSuite) TestAddAttestationElectraBoundsRefusedDataPerCommittee() {
+	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).AnyTimes()
+	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).AnyTimes()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock).(*aggregationPoolImpl)
+	t.fillCommitteeWithTwoVoteData(pool)
+	t.Require().NoError(pool.AddAttestation(t.singleVote(0xaa, 8)))
+	t.Require().NoError(pool.AddAttestation(t.singleVote(0xaa, 9)))
+
+	for i := range maxDataPerCommittee {
+		t.Require().NoError(pool.AddAttestation(t.singleVote(byte(0xb0+i), 10+i)))
+	}
+	t.Len(pool.refused[slotCommittee{slot: 5, committee: 1}], maxDataPerCommittee)
+
+	t.Require().NoError(pool.AddAttestation(t.singleVote(0xaa, 14)), "the refused data kept its two voters")
+	t.Equal([]byte{0, 0xc3}, t.committeeAggregateBits(pool, 0xaa))
 }
 
 func (t *PoolTestSuite) TestAddAttestationElectraLimitsTotalAggregates() {

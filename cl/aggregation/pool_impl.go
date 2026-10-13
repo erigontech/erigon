@@ -37,8 +37,9 @@ var ErrIsSuperset = errors.New("attestation is superset of existing attestation"
 // ErrPoolLimit reports an attestation dropped because the pool holds as many aggregates as it may.
 var ErrPoolLimit = errors.New("aggregation pool limit reached")
 
-// maxDataPerCommittee bounds the distinct AttestationData kept per slot and committee. Honest
-// committees vote for one or two (during a fork); more come from attesters alternating votes.
+// maxDataPerCommittee bounds the distinct AttestationData kept per slot and committee, and also the
+// refused data tracked for it. Honest votes split by head block and, from Gloas, by payload status
+// (data.index), so a late block already gives up to three honest data; the fourth is a spare for a fork.
 const maxDataPerCommittee = 4
 
 var blsAggregate = bls.AggregateSignatures
@@ -67,8 +68,10 @@ type aggregationPoolImpl struct {
 	// aggregatesInCommittee holds the per-committee aggregates used after the electra upgrade
 	aggregatesInCommittee map[keyAggrInCommittee]*committeeAggregate
 	dataPerCommittee      map[slotCommittee][]keyAggrInCommittee
-	// refusedVotes counts the votes a full committee refused for each data root.
-	refusedVotes map[slotCommittee]map[common.Hash]int
+	// refused aggregates the votes a full committee refused, per data root, until that data has more
+	// voters than the committee's weakest data. Only full committees have entries, so the pool
+	// bound also bounds these.
+	refused map[slotCommittee]map[common.Hash]*committeeAggregate
 }
 
 type slotCommittee struct {
@@ -95,7 +98,7 @@ func NewAggregationPool(
 		aggregates:            make(map[common.Hash]*solid.Attestation),
 		aggregatesInCommittee: make(map[keyAggrInCommittee]*committeeAggregate),
 		dataPerCommittee:      make(map[slotCommittee][]keyAggrInCommittee),
-		refusedVotes:          make(map[slotCommittee]map[common.Hash]int),
+		refused:               make(map[slotCommittee]map[common.Hash]*committeeAggregate),
 	}
 	go p.sweepStaleAtt(ctx)
 	return p
@@ -176,35 +179,40 @@ func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation, ver
 	p.aggregatesLock.Lock()
 	defer p.aggregatesLock.Unlock()
 	entry, exist := p.aggregatesInCommittee[key]
-	if !exist {
-		// Decode the signature before making room, so a rejected attestation evicts nothing.
-		signature := newSignatureAggregator()
-		if err := signature.AddValidated(inAtt.Signature[:]); err != nil {
-			return err
-		}
-		perCommittee := slotCommittee{slot: inAtt.Data.Slot, committee: committeeIndex}
-		if len(p.dataPerCommittee[perCommittee]) >= maxDataPerCommittee {
-			votes := p.refusedVotes[perCommittee][hashRoot] + voteCount(inAtt)
-			if !p.evictWeakerData(perCommittee, votes) {
-				if p.refusedVotes[perCommittee] == nil {
-					p.refusedVotes[perCommittee] = make(map[common.Hash]int)
-				}
-				p.refusedVotes[perCommittee][hashRoot] = votes
-				return ErrPoolLimit
-			}
-		} else if len(p.aggregatesInCommittee) >= p.maxCommitteeAggregates() {
-			p.pruneStaleLocked()
-			if len(p.aggregatesInCommittee) >= p.maxCommitteeAggregates() {
-				return ErrPoolLimit
-			}
-		}
-		storedAttestation := inAtt.Copy()
-		storedAttestation.SetVersion(version)
-		p.aggregatesInCommittee[key] = &committeeAggregate{attestation: storedAttestation, signature: signature}
-		p.dataPerCommittee[perCommittee] = append(p.dataPerCommittee[perCommittee], key)
-		delete(p.refusedVotes[perCommittee], hashRoot)
-		return nil
+	if exist {
+		return entry.add(inAtt, version)
 	}
+	perCommittee := slotCommittee{slot: inAtt.Data.Slot, committee: committeeIndex}
+	if len(p.dataPerCommittee[perCommittee]) >= maxDataPerCommittee {
+		return p.addRefusedVote(perCommittee, key, inAtt, version)
+	}
+	// Decode the signature before making room, so a rejected attestation evicts nothing.
+	entry, err = newCommitteeAggregate(inAtt, version)
+	if err != nil {
+		return err
+	}
+	if len(p.aggregatesInCommittee) >= p.maxCommitteeAggregates() {
+		p.pruneStaleLocked()
+		if len(p.aggregatesInCommittee) >= p.maxCommitteeAggregates() {
+			return ErrPoolLimit
+		}
+	}
+	p.storeCommitteeAggregate(perCommittee, key, entry)
+	return nil
+}
+
+func newCommitteeAggregate(inAtt *solid.Attestation, version clparams.StateVersion) (*committeeAggregate, error) {
+	signature := newSignatureAggregator()
+	if err := signature.AddValidated(inAtt.Signature[:]); err != nil {
+		return nil, err
+	}
+	attestation := inAtt.Copy()
+	attestation.SetVersion(version)
+	return &committeeAggregate{attestation: attestation, signature: signature}, nil
+}
+
+// add merges a vote of the same data and committee into the aggregate.
+func (entry *committeeAggregate) add(inAtt *solid.Attestation, version clparams.StateVersion) error {
 	att := entry.attestation
 	if utils.IsOverlappingSSZBitlist(att.AggregationBits.Bytes(), inAtt.AggregationBits.Bytes()) {
 		// the on bit is already set, so ignore
@@ -229,6 +237,63 @@ func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation, ver
 	mergedAttestation.SetVersion(version)
 	entry.attestation = mergedAttestation
 	return nil
+}
+
+func (p *aggregationPoolImpl) storeCommitteeAggregate(perCommittee slotCommittee, key keyAggrInCommittee, entry *committeeAggregate) {
+	p.aggregatesInCommittee[key] = entry
+	p.dataPerCommittee[perCommittee] = append(p.dataPerCommittee[perCommittee], key)
+}
+
+// addRefusedVote adds a vote for data that a full committee does not store. The data replaces the
+// committee's weakest data once it has more voters; until then its votes are kept aside.
+func (p *aggregationPoolImpl) addRefusedVote(perCommittee slotCommittee, key keyAggrInCommittee, inAtt *solid.Attestation, version clparams.StateVersion) error {
+	refused := p.refused[perCommittee]
+	entry, exist := refused[key.dataRoot]
+	if exist {
+		if err := entry.add(inAtt, version); err != nil {
+			return err
+		}
+	} else {
+		var err error
+		if entry, err = newCommitteeAggregate(inAtt, version); err != nil {
+			return err
+		}
+		if !evictWeakestRefused(refused, voteCount(entry.attestation)) {
+			return ErrPoolLimit
+		}
+		if refused == nil {
+			refused = make(map[common.Hash]*committeeAggregate)
+			p.refused[perCommittee] = refused
+		}
+		refused[key.dataRoot] = entry
+	}
+	if displacedKey, displaced := p.evictWeakerData(perCommittee, voteCount(entry.attestation)); displaced != nil {
+		delete(refused, key.dataRoot)
+		refused[displacedKey.dataRoot] = displaced
+		p.storeCommitteeAggregate(perCommittee, key, entry)
+	}
+	return nil
+}
+
+// evictWeakestRefused makes room for new refused data with incomingVotes: the refused data with the
+// fewest voters gives way if it has no more. Ties go to the newer data, so early votes for other
+// data cannot hold the committee's slots for refused data.
+func evictWeakestRefused(refused map[common.Hash]*committeeAggregate, incomingVotes int) bool {
+	if len(refused) < maxDataPerCommittee {
+		return true
+	}
+	var weakest common.Hash
+	weakestVotes := -1
+	for root, entry := range refused {
+		if votes := voteCount(entry.attestation); weakestVotes < 0 || votes < weakestVotes {
+			weakest, weakestVotes = root, votes
+		}
+	}
+	if weakestVotes > incomingVotes {
+		return false
+	}
+	delete(refused, weakest)
+	return true
 }
 
 func (p *aggregationPoolImpl) GetAggregatationByRoot(root common.Hash) *solid.Attestation {
@@ -292,16 +357,16 @@ func (p *aggregationPoolImpl) pruneStaleLocked() {
 			p.removeCommitteeAggregate(key, entry)
 		}
 	}
-	for perCommittee := range p.refusedVotes {
+	for perCommittee := range p.refused {
 		if p.ethClock.GetEpochAtSlot(perCommittee.slot)+1 < currentEpoch {
-			delete(p.refusedVotes, perCommittee)
+			delete(p.refused, perCommittee)
 		}
 	}
 }
 
-// evictWeakerData removes the committee's data with the fewest votes if it has fewer than
-// incomingVotes, and reports whether it made room.
-func (p *aggregationPoolImpl) evictWeakerData(perCommittee slotCommittee, incomingVotes int) bool {
+// evictWeakerData removes and returns the committee's data with the fewest votes if it has fewer
+// than incomingVotes.
+func (p *aggregationPoolImpl) evictWeakerData(perCommittee slotCommittee, incomingVotes int) (keyAggrInCommittee, *committeeAggregate) {
 	var weakest keyAggrInCommittee
 	weakestVotes := -1
 	for _, key := range p.dataPerCommittee[perCommittee] {
@@ -310,10 +375,11 @@ func (p *aggregationPoolImpl) evictWeakerData(perCommittee slotCommittee, incomi
 		}
 	}
 	if weakestVotes < 0 || weakestVotes >= incomingVotes {
-		return false
+		return keyAggrInCommittee{}, nil
 	}
-	p.removeCommitteeAggregate(weakest, p.aggregatesInCommittee[weakest])
-	return true
+	entry := p.aggregatesInCommittee[weakest]
+	p.removeCommitteeAggregate(weakest, entry)
+	return weakest, entry
 }
 
 func (p *aggregationPoolImpl) removeCommitteeAggregate(key keyAggrInCommittee, entry *committeeAggregate) {
