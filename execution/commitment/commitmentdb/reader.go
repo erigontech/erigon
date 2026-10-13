@@ -320,6 +320,7 @@ type ParentRecords struct {
 	BlockNum   uint64
 	BlockHash  common.Hash
 	ParentHash common.Hash
+	Deleted    [][]byte
 	Get        func(key []byte) ([]byte, kv.Step, bool)
 }
 

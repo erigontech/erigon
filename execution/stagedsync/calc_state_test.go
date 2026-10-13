@@ -1103,7 +1103,11 @@ func TestFlushToFeedCarriesWhatFlushToUpdatesEmits(t *testing.T) {
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
 	want := map[string]commitment.Update{}
+	wantDeleted := map[string]struct{}{}
 	for plainKey, u := range emittedUpdates(t, updates) {
+		if u.Deleted() {
+			wantDeleted[plainKey] = struct{}{}
+		}
 		hash := crypto.Keccak256([]byte(plainKey)[:20])
 		if len(plainKey) > 20 {
 			hash = append(hash, crypto.Keccak256([]byte(plainKey)[20:])...)
@@ -1135,6 +1139,14 @@ func TestFlushToFeedCarriesWhatFlushToUpdatesEmits(t *testing.T) {
 	require.Len(t, distinct, len(feed.Accounts))
 	require.Equal(t, len(want), feed.Keys)
 	require.Equal(t, want, got)
+
+	gotDeleted := map[string]struct{}{}
+	for _, key := range cs.deleted {
+		gotDeleted[string(key)] = struct{}{}
+	}
+	require.NotEmpty(t, wantDeleted)
+	require.Len(t, cs.deleted, len(wantDeleted))
+	require.Equal(t, wantDeleted, gotDeleted, "the feed's deleted keys are the deletions FlushToUpdates emits")
 }
 
 func sdWrites(addr accounts.Address, postSDBalance uint256.Int, eip8246 bool) *state.WriteSet {

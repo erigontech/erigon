@@ -144,6 +144,7 @@ type calcState struct {
 	feedUpdates []commitment.Update
 	feedSlots   []commitment.FeedSlot
 	feedValues  []byte
+	deleted     [][]byte
 
 	prefetch       func(plainKey []byte)
 	branchPrefetch *branchPrefetcher
@@ -387,6 +388,7 @@ func (cs *calcState) LoadFromBALUpTo(blockAccessList types.BlockAccessList, maxT
 // always include the full current state (all fields) so the trie sees
 // complete values.
 func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
+	cs.deleted = nil
 	n := len(cs.dirtyAccounts)
 	for _, dirtySlots := range cs.storageDirty {
 		n += len(dirtySlots)
@@ -426,6 +428,7 @@ func (cs *calcState) FlushToFeed(feed *commitment.Feed) {
 	for _, dirty := range cs.storageDirty {
 		slots += len(dirty)
 	}
+	cs.deleted = nil
 	feed.Keys = len(cs.dirtyAccounts) + slots
 	feed.Accounts = slices.Grow(feed.Accounts[:0], len(cs.dirtyAccounts)+len(cs.storageDirty))
 	cs.feedUpdates = slices.Grow(cs.feedUpdates[:0], len(cs.dirtyAccounts))
@@ -440,13 +443,17 @@ func (cs *calcState) FlushToFeed(feed *commitment.Feed) {
 		for key := range dirty {
 			value := slots[key]
 			at, n := len(cs.feedValues), value.ByteLen()
+			if n == 0 {
+				address, slot := addr.Value(), key.Value()
+				cs.deleted = append(cs.deleted, append(address[:], slot[:]...))
+			}
 			cs.feedValues = cs.feedValues[:at+n]
 			value.WriteToSlice(cs.feedValues[at:])
 			cs.feedSlots = append(cs.feedSlots, commitment.FeedSlot{Hash: cs.hashes.slot(key), Value: cs.feedValues[at : at+n : at+n]})
 		}
 		account := commitment.FeedAccount{Hash: cs.hashes.account(addr), Slots: cs.feedSlots[start:len(cs.feedSlots):len(cs.feedSlots)]}
 		if acc := cs.accounts[addr]; acc != nil && acc.dirty {
-			account.Update = cs.feedUpdate(acc)
+			account.Update = cs.feedUpdate(addr, acc)
 		}
 		feed.Accounts = append(feed.Accounts, account)
 	}
@@ -455,13 +462,18 @@ func (cs *calcState) FlushToFeed(feed *commitment.Feed) {
 			continue
 		}
 		acc := cs.accounts[addr]
-		feed.Accounts = append(feed.Accounts, commitment.FeedAccount{Hash: cs.hashes.account(addr), Update: cs.feedUpdate(acc)})
+		feed.Accounts = append(feed.Accounts, commitment.FeedAccount{Hash: cs.hashes.account(addr), Update: cs.feedUpdate(addr, acc)})
 	}
 }
 
-func (cs *calcState) feedUpdate(acc *calcAccountState) *commitment.Update {
+func (cs *calcState) feedUpdate(addr accounts.Address, acc *calcAccountState) *commitment.Update {
 	cs.feedUpdates = append(cs.feedUpdates, accountUpdateOf(acc))
-	return &cs.feedUpdates[len(cs.feedUpdates)-1]
+	u := &cs.feedUpdates[len(cs.feedUpdates)-1]
+	if u.Deleted() {
+		address := addr.Value()
+		cs.deleted = append(cs.deleted, address[:])
+	}
+	return u
 }
 
 func accountUpdateOf(acc *calcAccountState) commitment.Update {

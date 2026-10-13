@@ -786,7 +786,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 
 	siblingPaths, err := detectCollapseSiblings(ctx, tx, nil, domains, sdCtx,
 		firstTxNumInBlock, endTxNum, blockNr, parentNum,
-		block.Root(), accessed, witnessModeLegacy, false)
+		block.Root(), accessed, witnessModeLegacy)
 	if err != nil {
 		return nil, err
 	}

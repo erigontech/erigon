@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
@@ -956,7 +957,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 
 	siblingPaths, err := detectCollapseSiblings(ctx, tx, hc, domains, sdCtx,
 		firstTxNumInBlock, endTxNum, blockNum, parentNum,
-		block.Root(), accessed, mode, true)
+		block.Root(), accessed, mode)
 	if err != nil {
 		return nil, err
 	}
@@ -1028,7 +1029,14 @@ func (a *accessedState) isEmpty() bool {
 
 // touchNonZeroKeys touches only keys whose value is non-zero in at least one of pre/post state,
 // skipping zero→zero no-ops that would corrupt the HPH trie's internal maps.
-func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommitmentContext, post, pre commitmentdb.StateReader, stepSize uint64) {
+func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommitmentContext, post, pre commitmentdb.StateReader, stepSize uint64) (deleted map[string]struct{}) {
+	deleted = make(map[string]struct{})
+	touch := func(d kv.Domain, plainKey, postEnc []byte) {
+		if len(postEnc) == 0 {
+			deleted[string(plainKey)] = struct{}{}
+		}
+		sdCtx.TouchKey(d, string(plainKey), postEnc)
+	}
 	for addr := range a.Addresses {
 		plainKey := addr[:]
 		postEnc, _, _ := post.Read(kv.AccountsDomain, plainKey, stepSize)
@@ -1038,11 +1046,11 @@ func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommit
 				continue
 			}
 		}
-		sdCtx.TouchKey(kv.AccountsDomain, string(plainKey), postEnc)
+		touch(kv.AccountsDomain, plainKey, postEnc)
 	}
 	for addr := range a.CodeAddrs {
 		postEnc, _, _ := post.Read(kv.AccountsDomain, addr[:], stepSize)
-		sdCtx.TouchKey(kv.AccountsDomain, string(addr[:]), postEnc)
+		touch(kv.AccountsDomain, addr[:], postEnc)
 	}
 	for addr, keys := range a.Storage {
 		for key := range keys {
@@ -1056,9 +1064,10 @@ func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommit
 					continue
 				}
 			}
-			sdCtx.TouchKey(kv.StorageDomain, string(plainKey), postEnc)
+			touch(kv.StorageDomain, plainKey, postEnc)
 		}
 	}
+	return deleted
 }
 
 // touchAll touches every accessed account, storage slot, and code address on the
@@ -1254,7 +1263,6 @@ func detectCollapseSiblings(
 	expectedBlockRoot common.Hash,
 	accessed *accessedState,
 	mode witnessMode,
-	traceOnly bool,
 ) (siblingPaths [][]byte, err error) {
 	// Set up split reader: commitment from block beginning (durable) or the pinned
 	// parent snapshot (head-capture), plain state from block end. withHistory=false
@@ -1277,7 +1285,7 @@ func detectCollapseSiblings(
 	}
 
 	preReader := commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
-	accessed.touchNonZeroKeys(sdCtx, splitStateReader, preReader, domains.StepSize())
+	touchedDeletes := accessed.touchNonZeroKeys(sdCtx, splitStateReader, preReader, domains.StepSize())
 
 	type collapseCandidate struct {
 		siblingPath  []byte
@@ -1291,7 +1299,10 @@ func detectCollapseSiblings(
 		})
 	}
 	traced := false
-	if traceOnly && mode == witnessModeLegacy {
+	if mode == witnessModeLegacy && hc != nil && hc.records != nil {
+		if err := checkTracedDeletes(hc.records.Deleted, touchedDeletes, preReader, domains.StepSize()); err != nil {
+			return nil, err
+		}
 		if traced, err = sdCtx.TraceCollapses(ctx, tx, blockNum, firstTxNumInBlock, trace); err != nil {
 			return nil, fmt.Errorf("[debug_executionWitness] collapse detection via TraceCollapses failed: %w", err)
 		}
@@ -1330,6 +1341,26 @@ func detectCollapseSiblings(
 		siblingPaths = append(siblingPaths, c.siblingPath)
 	}
 	return siblingPaths, nil
+}
+
+func checkTracedDeletes(verified [][]byte, traced map[string]struct{}, pre commitmentdb.StateReader, stepSize uint64) error {
+	for _, key := range verified {
+		if _, ok := traced[string(key)]; ok {
+			continue
+		}
+		d := kv.AccountsDomain
+		if len(key) != length.Addr {
+			d = kv.StorageDomain
+		}
+		preEnc, _, err := pre.Read(d, key, stepSize)
+		if err != nil {
+			return err
+		}
+		if len(preEnc) != 0 {
+			return fmt.Errorf("[debug_executionWitness] block deletes %x, which the collapse trace does not delete", key)
+		}
+	}
+	return nil
 }
 
 // buildWitnessTrie re-seeks the commitment against the parent-state reader, touches

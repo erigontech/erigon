@@ -120,6 +120,7 @@ type commitmentCalculator struct {
 	readAtHash    common.Hash
 	handoff       *commitTarget
 	handoffDeltas [][]commitment.BranchDelta
+	handoffDel    [][]byte
 	handoffMulti  bool
 	sawMidBlock   bool
 
@@ -952,7 +953,7 @@ func (cc *commitmentCalculator) noteVerified(t commitTarget, deltas [][]commitme
 	if cc.handoff != nil && cc.handoff.blockHash != t.blockHash {
 		cc.handoffMulti = true
 	}
-	cc.handoff, cc.handoffDeltas = &t, deltas
+	cc.handoff, cc.handoffDeltas, cc.handoffDel = &t, deltas, cc.state.deleted
 }
 
 func (cc *commitmentCalculator) parentRecords() *commitmentdb.ParentRecords {
@@ -961,7 +962,7 @@ func (cc *commitmentCalculator) parentRecords() *commitmentdb.ParentRecords {
 		return nil
 	}
 	gen := p.gen.Load()
-	return &commitmentdb.ParentRecords{BlockNum: h.blockNum, BlockHash: h.blockHash, ParentHash: h.parentHash,
+	return &commitmentdb.ParentRecords{BlockNum: h.blockNum, BlockHash: h.blockHash, ParentHash: h.parentHash, Deleted: cc.handoffDel,
 		Get: func(key []byte) ([]byte, kv.Step, bool) { return p.getAt(key, gen) }}
 }
 
