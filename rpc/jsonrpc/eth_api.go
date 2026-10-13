@@ -405,6 +405,16 @@ func (api *BaseAPI) headerByHashAndNumber(ctx context.Context, tx kv.Getter, has
 	return header, nil
 }
 
+// currentHeader is rawdb.ReadCurrentHeader served through the header caches.
+func (api *BaseAPI) currentHeader(ctx context.Context, tx kv.Getter) (*types.Header, error) {
+	hash := rawdb.ReadHeadHeaderHash(tx)
+	number := rawdb.ReadHeaderNumber(tx, hash)
+	if number == nil {
+		return nil, nil
+	}
+	return api.headerByHashAndNumber(ctx, tx, hash, *number)
+}
+
 func (api *BaseAPI) canonicalHeaderByNumber(ctx context.Context, tx kv.Getter, number uint64) (*types.Header, error) {
 	hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, number)
 	if err != nil {
