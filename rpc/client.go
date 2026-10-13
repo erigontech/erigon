@@ -117,7 +117,7 @@ type clientConn struct {
 func (c *Client) newClientConn(conn ServerCodec) *clientConn {
 	ctx := context.WithValue(context.Background(), clientContextKey{}, c)
 	ctx = context.WithValue(ctx, peerInfoContextKey{}, conn.peerInfo())
-	handler := newHandler(ctx, conn, randomIDGenerator(), c.services, 0, nil, 50, false /* traceRequests */, c.logger, 0)
+	handler := newHandler(ctx, conn, randomIDGenerator(), c.services, 0, 0, nil, 50, false /* traceRequests */, c.logger, 0)
 	return &clientConn{conn, handler}
 }
 
@@ -631,9 +631,9 @@ func (c *Client) dispatch(codec ServerCodec) {
 		// Read path:
 		case op := <-c.readOp:
 			if op.batch {
-				conn.handler.handleBatch(op.msgs)
+				conn.handler.handleBatch(op.msgs, nil)
 			} else {
-				conn.handler.handleMsg(op.msgs[0], nil)
+				conn.handler.handleMsg(op.msgs[0], nil, nil)
 			}
 
 		case err := <-c.readErr:

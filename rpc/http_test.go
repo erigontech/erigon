@@ -503,7 +503,7 @@ func TestReadAllBody(t *testing.T) {
 			want[i] = byte(i)
 		}
 		// an oversized hint is what a lying Content-Length produces
-		for _, hint := range []int{0, size, size * 2, 1, int(maxBodySizeHint)} {
+		for _, hint := range []int{0, size, size * 2, 1, int(smallBodyLimit)} {
 			got, err := readAllBody(bytes.NewReader(want), hint)
 			require.NoError(t, err)
 			require.Equal(t, want, got, "size %d hint %d", size, hint)
@@ -632,4 +632,118 @@ func TestBatchNotificationGetsNoReply(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 
 	require.JSONEq(t, `[{"jsonrpc":"2.0","id":1,"result":"y"}]`, rec.Body.String())
+}
+
+// echoRequest returns a test_echo call padded to exactly size bytes.
+func echoRequest(size int) string {
+	const head, tail = `{"jsonrpc":"2.0","id":1,"method":"test_echo","params":["`, `",3]}`
+	return head + strings.Repeat("x", size-len(head)-len(tail)) + tail
+}
+
+// TestHTTPBodyBudget pins that a body is charged for the bytes past smallBodyLimit it has
+// sent, that the charge is refused once the budget is full, that a small body is never
+// charged, and that the charge is released once the request is served.
+func TestHTTPBodyBudget(t *testing.T) {
+	srv := newTestServer(log.New())
+	defer srv.Stop()
+	const sent = 2 * smallBodyLimit // what each stalled body sends; the first smallBodyLimit of it is free
+	srv.ingress.limit = 2 * (sent - smallBodyLimit)
+
+	newRequest := func(body io.Reader, length int64) *http.Request {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", body)
+		req.Header.Set("Content-Type", contentType)
+		req.ContentLength = length
+		return req
+	}
+
+	// Two bodies send their bytes and then stall, so together they hold the whole budget.
+	var served sync.WaitGroup
+	var pipes []*io.PipeWriter
+	for range 2 {
+		pr, pw := io.Pipe()
+		pipes = append(pipes, pw)
+		served.Go(func() { srv.ServeHTTP(httptest.NewRecorder(), newRequest(pr, maxRequestContentLength)) })
+		go func() { _, _ = pw.Write(make([]byte, sent)) }()
+	}
+	require.Eventually(t, func() bool { return srv.ingress.used.Load() == srv.ingress.limit }, 5*time.Second, time.Millisecond)
+
+	// A third body is refused once its bytes past smallBodyLimit arrive.
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, newRequest(strings.NewReader(echoRequest(int(smallBodyLimit)+1)), smallBodyLimit+1))
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	require.Contains(t, rec.Body.String(), ErrMsgServerOverloaded)
+
+	// A small body is not charged.
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, newRequest(strings.NewReader(echoRequest(100)), 100))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"result"`)
+
+	// Serving a request releases its charge.
+	pipes[0].Close()
+	require.Eventually(t, func() bool { return srv.ingress.used.Load() == srv.ingress.limit/2 }, 5*time.Second, time.Millisecond)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, newRequest(strings.NewReader(echoRequest(int(sent))), sent))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"result"`)
+
+	pipes[1].Close()
+	served.Wait()
+	require.Zero(t, srv.ingress.used.Load())
+}
+
+// TestHTTPDeclaredBodyIsChargedAsRead pins that a body declaring the cap holds no budget
+// until its bytes arrive, so declaring a size costs nothing and buys nothing.
+func TestHTTPDeclaredBodyIsChargedAsRead(t *testing.T) {
+	srv := newTestServer(log.New())
+	defer srv.Stop()
+	pr, pw := io.Pipe()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", pr)
+	req.Header.Set("Content-Type", contentType)
+	req.ContentLength = maxRequestContentLength
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		srv.ServeHTTP(httptest.NewRecorder(), req)
+	}()
+
+	require.Zero(t, srv.ingress.used.Load())
+	_, err := pw.Write(make([]byte, smallBodyLimit+1))
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return srv.ingress.used.Load() == 1 }, 5*time.Second, time.Millisecond)
+
+	pw.Close()
+	<-served
+	require.Zero(t, srv.ingress.used.Load())
+}
+
+// TestHTTPUndeclaredBodyBudget pins that a body without a content length is charged for
+// its bytes past smallBodyLimit, and not before.
+func TestHTTPUndeclaredBodyBudget(t *testing.T) {
+	srv := newTestServer(log.New())
+	defer srv.Stop()
+	srv.ingress.limit = maxRequestContentLength
+	require.True(t, srv.ingress.acquire(maxRequestContentLength)) // another body holds the whole budget
+
+	serve := func(size int) *httptest.ResponseRecorder {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(echoRequest(size)))
+		req.Header.Set("Content-Type", contentType)
+		req.ContentLength = -1
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec
+	}
+	rec := serve(int(smallBodyLimit))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"result"`)
+
+	rec = serve(int(smallBodyLimit) + 1)
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	require.Contains(t, rec.Body.String(), ErrMsgServerOverloaded)
+
+	srv.ingress.release(maxRequestContentLength)
+	rec = serve(int(smallBodyLimit) + 1)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"result"`)
+	require.Zero(t, srv.ingress.used.Load())
 }
