@@ -3256,7 +3256,11 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 		}
 		if appendCandidate {
 			// no merge case, just append. It might be merged with other attestation later.
-			pool[dataRoot][candCommitteeBit] = append(pool[dataRoot][candCommitteeBit], candidate.Copy())
+			// Candidates it covers add nothing, whatever order the sources come in.
+			candidates := slices.DeleteFunc(pool[dataRoot][candCommitteeBit], func(curAtt *solid.Attestation) bool {
+				return utils.IsNonStrictSupersetBitlist(candAggrBits, curAtt.AggregationBits.Bytes())
+			})
+			pool[dataRoot][candCommitteeBit] = append(candidates, candidate.Copy())
 		}
 	}
 

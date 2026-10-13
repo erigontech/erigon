@@ -36,14 +36,15 @@ const packingCommitteeSize = 8
 // packingFixture builds Electra candidates from real BLS signatures: gossip aggregates in the
 // operations pool and single attestations aggregated by a real aggregation pool.
 type packingFixture struct {
-	t         *testing.T
-	cfg       *clparams.BeaconChainConfig
-	keys      map[int][]*bls.PrivateKey // committee -> members
-	data      *solid.AttestationData
-	msg       []byte
-	justified solid.Checkpoint
-	handler   *ApiHandler
-	state     *state_mock.MockBeaconState
+	t       *testing.T
+	cfg     *clparams.BeaconChainConfig
+	keys    map[int][]*bls.PrivateKey // committee -> members
+	data    *solid.AttestationData
+	msg     []byte
+	handler *ApiHandler
+	state   *state_mock.MockBeaconState
+	// The state is in epoch 1; votes of each target epoch need the matching justified checkpoint.
+	currentJustified, previousJustified solid.Checkpoint
 }
 
 func newPackingFixture(t *testing.T) *packingFixture {
@@ -54,21 +55,23 @@ func newPackingFixture(t *testing.T) *packingFixture {
 	clock.EXPECT().GetEpochAtSlot(gomock.Any()).DoAndReturn(func(slot uint64) uint64 { return slot / cfg.SlotsPerEpoch }).AnyTimes()
 	clock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).AnyTimes()
 
-	justified := solid.Checkpoint{Epoch: 0, Root: [32]byte{1}}
+	currentJustified := solid.Checkpoint{Epoch: 0, Root: [32]byte{1}}
+	previousJustified := solid.Checkpoint{Epoch: 0, Root: [32]byte{8}}
 	data := &solid.AttestationData{
 		Slot:            cfg.SlotsPerEpoch + 1,
 		BeaconBlockRoot: [32]byte{2},
-		Source:          justified,
+		Source:          currentJustified,
 		Target:          solid.Checkpoint{Epoch: 1, Root: [32]byte{3}},
 	}
 	f := &packingFixture{
-		t:         t,
-		cfg:       &cfg,
-		keys:      map[int][]*bls.PrivateKey{},
-		data:      data,
-		msg:       []byte("attestation data signing root"),
-		justified: justified,
-		state:     state_mock.NewMockBeaconState(ctrl),
+		t:                 t,
+		cfg:               &cfg,
+		keys:              map[int][]*bls.PrivateKey{},
+		data:              data,
+		msg:               []byte("attestation data signing root"),
+		state:             state_mock.NewMockBeaconState(ctrl),
+		currentJustified:  currentJustified,
+		previousJustified: previousJustified,
 	}
 	for committee := range 2 {
 		for range packingCommitteeSize {
@@ -81,8 +84,8 @@ func newPackingFixture(t *testing.T) *packingFixture {
 	f.state.EXPECT().BeaconConfig().Return(&cfg).AnyTimes()
 	f.state.EXPECT().Version().Return(clparams.ElectraVersion).AnyTimes()
 	f.state.EXPECT().CommitteeCount(gomock.Any()).Return(uint64(2)).AnyTimes()
-	f.state.EXPECT().CurrentJustifiedCheckpoint().Return(justified).AnyTimes()
-	f.state.EXPECT().PreviousJustifiedCheckpoint().Return(justified).AnyTimes()
+	f.state.EXPECT().CurrentJustifiedCheckpoint().Return(currentJustified).AnyTimes()
+	f.state.EXPECT().PreviousJustifiedCheckpoint().Return(previousJustified).AnyTimes()
 	f.handler = &ApiHandler{
 		beaconChainCfg: &cfg,
 		operationsPool: pool.NewOperationsPool(&cfg),
@@ -115,7 +118,11 @@ func (f *packingFixture) attestation(data *solid.AttestationData, committee int,
 }
 
 func (f *packingFixture) gossip(committee int, members ...int) {
-	att := f.attestation(f.data, committee, members...)
+	f.gossipData(f.data, committee, members...)
+}
+
+func (f *packingFixture) gossipData(data *solid.AttestationData, committee int, members ...int) {
+	att := f.attestation(data, committee, members...)
 	f.handler.operationsPool.AttestationsPool.Insert(att.Signature, att)
 }
 
@@ -192,4 +199,54 @@ func TestPackingDropsCandidatesWithForeignSource(t *testing.T) {
 	f.gossip(0, 0, 1)
 
 	require.Equal(t, []map[int][]int{{0: {0, 1}}}, f.packed())
+}
+
+// A vote of the current epoch needs the current justified checkpoint as its source, a vote of the
+// previous epoch the previous one.
+func TestPackingUsesJustifiedCheckpointOfTargetEpoch(t *testing.T) {
+	f := newPackingFixture(t)
+	previousEpoch := &solid.AttestationData{
+		Slot:            5,
+		BeaconBlockRoot: [32]byte{2},
+		Source:          f.previousJustified,
+		Target:          solid.Checkpoint{Epoch: 0, Root: [32]byte{4}},
+	}
+	currentWithPreviousSource, previousWithCurrentSource := *f.data, *previousEpoch
+	currentWithPreviousSource.Source, previousWithCurrentSource.Source = f.previousJustified, f.currentJustified
+	f.gossip(0, 0)
+	f.gossipData(&currentWithPreviousSource, 0, 1)
+	f.gossipData(previousEpoch, 1, 2)
+	f.gossipData(&previousWithCurrentSource, 1, 3)
+
+	require.ElementsMatch(t, []map[int][]int{{0: {0}}, {1: {2}}}, f.packed())
+}
+
+func TestDenebPackingDropsCandidatesWithForeignSource(t *testing.T) {
+	f := newPackingFixture(t)
+	f.cfg.ElectraForkEpoch = 100
+	foreign := *f.data
+	foreign.Source = solid.Checkpoint{Epoch: 0, Root: [32]byte{9}}
+	f.gossipData(&foreign, 0, 4)
+	f.gossip(0, 0, 1)
+
+	merged, err := f.handler.denebMergedAttestationCandidates(f.state)
+	require.NoError(t, err)
+	dataRoot, err := f.data.HashSSZ()
+	require.NoError(t, err)
+	require.Len(t, merged, 1)
+	require.Len(t, merged[dataRoot], 1)
+}
+
+func TestPackedLocalAggregateReplacesGossipSubset(t *testing.T) {
+	f := newPackingFixture(t)
+	f.gossip(0, 1, 2)
+	f.singles(0, 1, 2, 3)
+	require.Equal(t, []map[int][]int{{0: {1, 2, 3}}}, f.packed())
+}
+
+func TestPackedGossipSupersetCoversLocalAggregate(t *testing.T) {
+	f := newPackingFixture(t)
+	f.gossip(0, 1, 2, 3)
+	f.singles(0, 1, 2)
+	require.Equal(t, []map[int][]int{{0: {1, 2, 3}}}, f.packed())
 }

@@ -442,8 +442,12 @@ func (s *attestationService) onVerifiedAttestation(vIndex, targetEpoch uint64, a
 	if !s.claimValidatorAttestation(vIndex, targetEpoch) {
 		return
 	}
-	if err := s.aggregationPool.AddAttestation(attestation); err != nil && !errors.Is(err, aggregation.ErrIsSuperset) && !errors.Is(err, aggregation.ErrPoolLimit) {
-		log.Warn("could not add attestation to the aggregation pool", "err", err)
+	if err := s.aggregationPool.AddAttestation(attestation); errors.Is(err, aggregation.ErrPoolLimit) {
+		dataRoot, _ := attestation.Data.HashSSZ()
+		log.Debug("aggregation pool refused attestation", "slot", attestation.Data.Slot,
+			"committees", attestation.CommitteeBits.GetOnIndices(), "dataRoot", common.Hash(dataRoot))
+	} else if err != nil && !errors.Is(err, aggregation.ErrIsSuperset) {
+		log.Warn("could not add attestation to the aggregation pool", "slot", attestation.Data.Slot, "err", err)
 	}
 	// send to subscribers
 	if att.Attestation != nil {
