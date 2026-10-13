@@ -1427,6 +1427,11 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 		}
 	}
 
+	// A recorded DB absence is final for the tx: the committed record is nil
+	// and synthesizing from cells is only open to a provisional probe.
+	if readAccount == nil && readStorage && source == StorageRead {
+		return nil, StorageRead, UnknownVersion, nil
+	}
 	if readAccount == nil {
 		if readStorage {
 			if cached, ok := ibs.versionedReads.committedAcc(addr); ok {
