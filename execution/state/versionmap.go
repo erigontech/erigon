@@ -1484,16 +1484,17 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 		default:
 			if valid = checkVersion(version, version); valid == VersionValid {
 				// Cross-validate any account property read against AddressPath
-				// and SelfDestructPath.  A prior tx may have created or
+				// and scan for a destruct. A prior tx may have created or
 				// self-destructed the account, invalidating storage reads of
 				// any property (code, storage slots, balance, nonce, etc.).
 				if path != AddressPath && path != SelfDestructPath {
 					if valid = vm.validateReadImpl(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
 						version, vm.ReadStatus(addr, AddressPath, accounts.StorageKey{}, txIndex), nil, nil, absent, checkVersion, traceInvalid, tracePrefix, true); valid == VersionValid {
-						valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-							version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, nil, absent, checkVersion, traceInvalid, tracePrefix, true)
-						if valid == VersionInvalid {
-							invReason = "xval-sd"
+						// A storage read holds the pre-block value, which any destruct
+						// below this tx wiped, whether or not a credit revived the account.
+						if _, ok := vm.FindDoneSelfDestructInRange(addr, 0, txIndex, true); ok && !absent {
+							valid = VersionInvalid
+							invReason = "sd-stale"
 						}
 					} else {
 						invReason = "xval-addr"

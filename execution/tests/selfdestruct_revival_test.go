@@ -17,6 +17,7 @@
 package executiontests
 
 import (
+	"crypto/ecdsa"
 	"math/big"
 	"testing"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/program"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 // Before Cancun, a contract deployed and destroyed in the block is revived as a
@@ -112,4 +114,66 @@ func TestCreditRevivesDestroyedContract(t *testing.T) {
 			}))
 		})
 	}
+}
+
+// A pre-existing contract destroyed by a slow tx and revived by a later fee
+// credit is read by a fast tx before the destruct lands in the version map.
+// Commit-time validation must reject that read, so parallel execution accepts
+// the block built by the serial generator. Each tx has its own sender, so no
+// sender-nonce dependency serializes them.
+func TestFastReadRacesDestructOfPreexistingContract(t *testing.T) {
+	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+
+	factory := common.HexToAddress("0xaaaa")
+	initCode := []byte{byte(vm.STOP)}
+	contract := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+	config := chain.TestChainOsakaConfig.Copy()
+	config.CancunTime, config.PragueTime, config.OsakaTime = nil, nil, nil
+	signer := types.LatestSignerForChainID(config.ChainID)
+
+	alloc := types.GenesisAlloc{
+		factory:  {Code: countdown(1_000).Create2(initCode, 0).Op(vm.POP).Bytes()},
+		contract: {Nonce: 1, Code: countdown(50_000).Selfdestruct(common.HexToAddress("0xdddd")).Bytes()},
+	}
+	keys := make([]*ecdsa.PrivateKey, 3)
+	for i := range keys {
+		key, err := crypto.ToECDSA(common.LeftPadBytes([]byte{byte(i + 1)}, 32))
+		require.NoError(t, err)
+		keys[i] = key
+		alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: big.NewInt(1_000_000_000_000_000_000)}
+	}
+
+	dbg.Exec3Parallel = false
+	gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
+	chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+		b.SetCoinbase(contract)
+		for i, to := range []common.Address{contract, common.HexToAddress("0xbbbb"), factory} {
+			sender := crypto.PubkeyToAddress(keys[i].PublicKey)
+			txn, err := types.SignTx(types.NewTransaction(b.TxNonce(sender), to, uint256.NewInt(0), 2_000_000, uint256.NewInt(10_000_000_000), nil), *signer, keys[i])
+			require.NoError(t, err)
+			b.AddTx(txn)
+		}
+	})
+	require.NoError(t, err)
+
+	dbg.Exec3Parallel = true
+	ethconfig.Defaults.Sync.ExecWorkerCount = 4
+	require.NoError(t, m.InsertChain(chainPack))
+	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		hash, err := st.GetCodeHash(accounts.InternAddress(contract))
+		require.NoError(t, err)
+		require.Equal(t, accounts.EmptyCodeHash, hash)
+		return nil
+	}))
+}
+
+// countdown loops iterations times before the rest of the program runs.
+func countdown(iterations uint64) *program.Program {
+	p := program.New().Push(iterations)
+	_, loop := p.Jumpdest()
+	return p.Push(1).Op(vm.SWAP1, vm.SUB, vm.DUP1).Push(loop).Op(vm.JUMPI, vm.POP)
 }

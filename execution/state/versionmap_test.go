@@ -628,6 +628,40 @@ func TestValidateRead_SDStaleness_RevivalDoesNotResurrectPreDestructRead(t *test
 	require.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, validateEqualVersion, true, false, false, ""))
 }
 
+// A fee credit revives a destroyed account by writing only its balance and its
+// record, so the record looks alive. A pre-destruct nonce or code hash read
+// from storage is stale all the same and must invalidate.
+func TestValidateRead_SDStaleness_InvalidatesStorageReadAfterCreditRevival(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(76)
+	stale := ReadHeader{Source: StorageRead, Version: UnknownVersion}
+
+	for _, tc := range []struct {
+		name   string
+		record func(rs *ReadSet)
+	}{
+		{"nonce", func(rs *ReadSet) {
+			rs.SetNonce(addr, VersionedRead[uint64]{ReadHeader: stale, Val: 1})
+		}},
+		{"code-hash", func(rs *ReadSet) {
+			rs.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{ReadHeader: stale, Val: recreatedAccount(1).CodeHash})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			vm := NewVersionMap(nil)
+			writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 0}, true, true)
+			writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: 1}, *uint256.NewInt(7), true)
+			vm.WriteAddress(addr, Version{TxIndex: 1}, &accounts.Account{Balance: *uint256.NewInt(7)}, true)
+
+			io := NewVersionedIO(3)
+			rs := ReadSet{}
+			tc.record(&rs)
+			io.RecordReads(Version{TxIndex: 2}, rs)
+			require.Equal(t, VersionInvalid, vm.ValidateVersion(2, io, validateEqualVersion, true, false, false, ""))
+		})
+	}
+}
+
 // TestVersionedWritePoolReuse_NoStaleFields guards the *VersionedWrite[T] pool
 // invariant: getVW* returns a recycled cell that may still hold a prior write's
 // contents, so the record path MUST wholesale-overwrite it. It drives the
