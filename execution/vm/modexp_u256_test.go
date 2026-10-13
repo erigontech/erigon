@@ -162,6 +162,7 @@ func TestModexpU256Random(t *testing.T) {
 		}
 	}
 }
+
 func packModexpInput(base, exp, mod []byte) []byte {
 	out := make([]byte, 0, 96+len(base)+len(exp)+len(mod))
 	for _, n := range []int{len(base), len(exp), len(mod)} {
