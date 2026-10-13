@@ -826,6 +826,27 @@ func TestVersionedRead_B_CommittedCodeHashReusesCommittedBase(t *testing.T) {
 	assert.Equal(t, reads, r.accountReads, "the committed account is read once per tx")
 }
 
+// A slot of an address no tx wrote resolves from the committed state and is
+// recorded as a version-map miss, which is what validation checks it against.
+func TestVersionedRead_B_ColdSlotRecordsAMiss(t *testing.T) {
+	t.Parallel()
+	key := accounts.InternKey([32]byte{0x07})
+	acct := accounts.NewAccount()
+	addr := accounts.InternAddress([20]byte{0xbc})
+	ibs := NewWithVersionMap(&fallthroughStateReader{acct: &acct, storageKey: key, storageVal: *uint256.NewInt(0x5a)}, NewVersionMap(nil))
+	defer ibs.Close()
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(1, 5)
+
+	v, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	assert.Equal(t, *uint256.NewInt(0x5a), v)
+	tr, ok := ibs.versionedReads.GetStorage(addr, key)
+	require.True(t, ok, "the read is recorded")
+	miss := ReadHeader{Source: StorageRead, Version: Version{TxIndex: UnknownDep, Incarnation: -1}}
+	assert.Equal(t, VersionedRead[uint256.Int]{ReadHeader: miss, Val: v}, tr)
+}
+
 func TestVersionedRead_B_TouchReadsAnAbsentAccountOnce(t *testing.T) {
 	t.Parallel()
 	r := &refreshReader{}
