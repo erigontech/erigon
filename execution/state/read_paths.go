@@ -373,7 +373,10 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	// the dependency-wait is untouched); only a repeat read of a Done value skips
 	// the probe. Own writes take precedence via the dirty gate (the same gate
 	// versionedWriteHit uses), so a written path never takes this branch.
-	if !commited {
+	// An address with no record has no own write and no recorded read yet, and
+	// nothing below records one for this path before the probes that look.
+	fresh := s.versionedReads.find(addr) == nil
+	if !commited && !fresh {
 		if !s.versionedReads.isDirty(addr) {
 			if prHeader, ok := s.versionedReads.getHeader(addr, path, key); ok &&
 				(prHeader.Source == MapRead || prHeader.Source == StorageRead) {
@@ -391,7 +394,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		sdVer := Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}
 		// A tx's own same-tx write to this path is returned directly: it always
 		// observes its own write, even after a prior tx's self-destruct.
-		if !commited {
+		if !commited && !fresh {
 			if hasWrite := s.versionedWriteHit(addr, path, key, r); hasWrite {
 				r.outcome = outcomeWriteSetHit
 				r.source = WriteSetRead
@@ -510,7 +513,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 
 	hdr := ReadHeader{Version: Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}}
 
-	if !commited {
+	if !commited && !fresh {
 		if hasWrite := s.versionedWriteHit(addr, path, key, r); hasWrite {
 			if res.Status() == MVReadResultDone {
 				if prHeader, prOK := s.versionedReads.getHeader(addr, path, key); prOK {
@@ -562,7 +565,12 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		// A provisional prior read is this same load's nil probe: a cell flushed
 		// in between was never consumed, so adopt it below and let the load's
 		// reconciliation re-record the read.
-		if prHeader, ok := s.versionedReads.getHeader(addr, path, key); ok && prHeader.Source != ProvisionalRead {
+		var prHeader ReadHeader
+		var prOK bool
+		if !fresh {
+			prHeader, prOK = s.versionedReads.getHeader(addr, path, key)
+		}
+		if prOK && prHeader.Source != ProvisionalRead {
 			if prHeader.Version == hdr.Version {
 				if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
 					fmt.Printf("%d (%d.%d) RD (%s:%s) %x %s\n",
@@ -702,7 +710,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		panic(ErrDependency)
 
 	case MVReadResultNone:
-		if !commited {
+		if !commited && !fresh {
 			if prHeader, ok := s.versionedReads.getHeader(addr, path, key); ok {
 				if prHeader.Version == hdr.Version {
 					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
