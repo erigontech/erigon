@@ -374,6 +374,7 @@ func (m *Intersected[T]) advanceY() {
 		m.yNextK, m.err = m.y.Next()
 	}
 }
+
 func (m *Intersected[T]) Next() (res T, err error) {
 	if m.err != nil {
 		return res, m.err
@@ -599,6 +600,7 @@ func errNoPageProgress(err error, pageLen, emptyPages int, sent, got string) err
 	}
 	return nil
 }
+
 func (it *Paginated[T]) HasNext() bool {
 	for it.err == nil && it.i >= len(it.arr) {
 		if it.initialized && it.nextPageToken == "" {

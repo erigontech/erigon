@@ -103,6 +103,7 @@ func (m *TransformKV2U64Iter) Next() (n uint64, err error) {
 	n, m.err = m.transform(k, v)
 	return n, m.err
 }
+
 func (m *TransformKV2U64Iter) Close() {
 	m.it.Close()
 }
