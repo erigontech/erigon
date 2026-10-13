@@ -1363,6 +1363,8 @@ func initRulesEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.R
 	config := ethconfig.Defaults
 	var rulesConfig any
 	switch {
+	case cc.Clique != nil:
+		rulesConfig = cc.Clique
 	case cc.Aura != nil:
 		rulesConfig = &config.Aura
 	default:
