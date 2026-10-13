@@ -1089,7 +1089,7 @@ func testDomainKeyInFiles(t *testing.T) (*Domain, []byte, []byte) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	domainTx := d.beginForTests()
-	writer := domainTx.NewWriter()
+	writer := domainTx.NewWriter(db)
 	key, v0, v1 := []byte("key"), []byte("step-0"), []byte("step-1")
 	require.NoError(t, writer.PutWithPrev(key, v0, 5, nil))
 	require.NoError(t, writer.PutWithPrev(key, v1, 20, v0))
