@@ -50,7 +50,16 @@ const (
 	// resets per block, so this is bounded by the memory it costs rather than by
 	// a transaction's budget: 32KB of pointers, holding a p99 block's ~1700.
 	maxRetainedLogSlots = 32 * 1024 / 8
+
+	logChunkLen = 64
 )
+
+// logChunk is one allocation of entries for when the pool runs dry, each with
+// room for the four topics a LOG opcode can write.
+type logChunk struct {
+	logs   [logChunkLen]types.Log
+	topics [logChunkLen][4]common.Hash
+}
 
 // logArena owns a block's log entries and recycles them through a pool, so what
 // it holds follows the largest transaction rather than the widest block.
@@ -58,6 +67,8 @@ type logArena struct {
 	entries      types.Logs   // the block so far, in order — one transaction, for a caller that resets per transaction
 	pool         []*types.Log // entries taken back at reset, for any transaction to reuse
 	poolBytes    int          // Data the pool holds
+	chunk        *logChunk
+	carved       int // entries of chunk handed out
 	indexInBlock uint
 }
 
@@ -93,7 +104,7 @@ func (a *logArena) alloc(j *journal, addr common.Address, txIndex, numTopics, da
 func (a *logArena) take() *types.Log {
 	n := len(a.pool) - 1
 	if n < 0 {
-		return &types.Log{}
+		return a.carve()
 	}
 	lp := a.pool[n]
 	a.pool = a.pool[:n]
@@ -101,10 +112,21 @@ func (a *logArena) take() *types.Log {
 	return lp
 }
 
+func (a *logArena) carve() *types.Log {
+	if a.chunk == nil || a.carved == logChunkLen {
+		a.chunk, a.carved = new(logChunk), 0
+	}
+	lp := &a.chunk.logs[a.carved]
+	lp.Topics = a.chunk.topics[a.carved][:0]
+	a.carved++
+	return lp
+}
+
 // put keeps an entry for the next transaction, dropping the Data it may not
 // hold. The entry itself is small enough to keep either way.
 func (a *logArena) put(lp *types.Log) {
 	if len(a.pool) >= maxPooledLogEntries {
+		lp.Data = nil // the chunk may outlive the entry, held by the ones the pool keeps
 		return
 	}
 	if cap(lp.Data) > maxPooledLogDataCap || a.poolBytes+cap(lp.Data) > maxPooledLogBytes {
@@ -141,7 +163,14 @@ func (a *logArena) revertLast(txIndex int) {
 		panic(fmt.Sprintf("can't revert log of tx %d: none were emitted", txIndex))
 	}
 	if lp := entries[last]; lp != nil {
-		a.put(lp)
+		if a.carved > 0 && lp == &a.chunk.logs[a.carved-1] {
+			// Back to its chunk, not into the pool, where it would push out an entry
+			// of an older chunk. Its Data goes: the pool's budget does not count it.
+			lp.Data = nil
+			a.carved--
+		} else {
+			a.put(lp)
+		}
 		entries[last] = nil
 	}
 	a.entries = entries[:last]

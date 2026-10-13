@@ -549,3 +549,64 @@ func TestArenaRetentionStaysBounded(t *testing.T) {
 	held := slotBytes + len(ibs.logs.pool)*304 + ibs.logs.poolBytes
 	require.Less(t, held, 3<<20, "an arena holds %dKB after mixed traffic", held/1024)
 }
+
+// Past the pool, a transaction's logs and their topics come from chunks, not
+// from an allocation or two per log.
+func TestAllocLogPastThePoolAllocatesInChunks(t *testing.T) {
+	addr := common.HexToAddress("0x1")
+	allocs := testing.AllocsPerRun(5, func() {
+		ibs := New(nil)
+		ibs.SetTxContext(1, 0)
+		for range 1024 {
+			ibs.AllocLog(addr, 4, 0)
+		}
+	})
+	require.Less(t, allocs, 1024.0/8, "%v allocations for 1024 logs", allocs)
+}
+
+// An entry the pool drops may share its chunk with one the pool keeps, so it
+// must not hold on to its Data.
+func TestLogPoolDropsDataOfEntriesItCannotKeep(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(nil)
+	ibs.SetTxContext(1, 0)
+	logs := make([]*types.Log, maxPooledLogEntries+1)
+	for i := range logs {
+		logs[i] = ibs.AllocLog(common.HexToAddress("0x1"), 0, 32)
+	}
+	ibs.Reset()
+	require.Nil(t, logs[maxPooledLogEntries].Data)
+}
+
+// A transaction past the pool keeps the pool's entries even when it reverts its
+// last log, so the pool does not spread over more chunks than it fills.
+func TestLogPoolKeepsItsEntriesPastRevert(t *testing.T) {
+	t.Parallel()
+
+	addr := common.HexToAddress("0x1")
+	ibs := New(nil)
+	ibs.SetTxContext(1, 0)
+	for range maxPooledLogEntries {
+		ibs.AllocLog(addr, 0, 0)
+	}
+	ibs.Reset()
+	pooled := make(map[*types.Log]bool, len(ibs.logs.pool))
+	for _, lp := range ibs.logs.pool {
+		pooled[lp] = true
+	}
+
+	ibs.SetTxContext(1, 1)
+	for range maxPooledLogEntries + 1 {
+		ibs.AllocLog(addr, 0, 0)
+	}
+	snap := ibs.PushSnapshot()
+	ibs.AllocLog(addr, 0, 0)
+	ibs.RevertToSnapshot(snap, nil)
+	ibs.Reset()
+
+	require.Len(t, ibs.logs.pool, maxPooledLogEntries)
+	for _, lp := range ibs.logs.pool {
+		require.True(t, pooled[lp], "the pool took an entry it did not hold before")
+	}
+}
