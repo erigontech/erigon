@@ -156,8 +156,9 @@ func newEntry[T any](key []byte, e entry[T]) *entry[T] {
 	case len(key) <= 56:
 		return withKey[T, [56]byte](key, e)
 	}
-	e.key = string(key)
-	return &e
+	long := e // a fresh variable, so e itself stays off the heap on the paths above
+	long.key = string(key)
+	return &long
 }
 
 func withKey[T, K any](key []byte, e entry[T]) *entry[T] {
