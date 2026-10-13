@@ -752,10 +752,15 @@ func remapDBOverload(ctx context.Context, err error) error {
 	return err
 }
 
-// servedLvl logs internal errors at warn; other errors, such as a revert, are a normal answer to the request.
+// servedLvl logs an error the handler coded as an answer, such as a revert, at trace. Uncoded errors may be
+// infrastructure failures, so they stay at warn with internal and overload errors.
 func servedLvl(err error) log.Lvl {
 	var coded Error
-	if errors.As(err, &coded) && coded.ErrorCode() == ErrCodeInternalError {
+	if !errors.As(err, &coded) {
+		return log.LvlWarn
+	}
+	switch coded.ErrorCode() {
+	case ErrCodeDefault, ErrCodeInternalError, ErrCodeServerOverloaded:
 		return log.LvlWarn
 	}
 	return log.LvlTrace

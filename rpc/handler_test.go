@@ -259,12 +259,16 @@ func TestRunMethodReportsAnsweredError(t *testing.T) {
 	}
 }
 
-// Internal errors stay visible at default log levels; an error that answers the request, such as a revert, does not.
+// Internal and uncoded errors stay visible at default log levels; an error the handler coded as an answer, such as a
+// revert, does not.
 func TestServedLogLevel(t *testing.T) {
 	internal := &CustomError{Code: ErrCodeInternalError, Message: "encode"}
 	require.Equal(t, log.LvlWarn, servedLvl(internal))
 	require.Equal(t, log.LvlWarn, servedLvl(fmt.Errorf("stream: %w", internal)))
 	require.Equal(t, log.LvlWarn, servedLvl(&jsonError{Code: ErrCodeInternalError}))
 	require.Equal(t, log.LvlTrace, servedLvl(&jsonError{Code: 3, Message: "execution reverted", Data: "0x"}))
-	require.Equal(t, log.LvlTrace, servedLvl(errors.New("header not found")))
+	require.Equal(t, log.LvlTrace, servedLvl(&InvalidParamsError{Message: "bad block number"}))
+	require.Equal(t, log.LvlWarn, servedLvl(errors.New("begin tx: mdbx: MDBX_PANIC")))
+	require.Equal(t, log.LvlWarn, servedLvl(&jsonError{Code: ErrCodeDefault, Message: "begin tx: mdbx: MDBX_PANIC"}))
+	require.Equal(t, log.LvlWarn, servedLvl(&jsonError{Code: ErrCodeServerOverloaded}))
 }
