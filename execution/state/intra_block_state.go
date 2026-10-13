@@ -1586,15 +1586,16 @@ func (ibs *IntraBlockState) SetNonce(addr accounts.Address, nonce uint64, reason
 func (ibs *IntraBlockState) writeNonceVersioned(addr accounts.Address, nonce uint64, wasCommited bool, reason tracing.NonceChangeReason) error {
 	var base *accounts.Account
 	// An account this tx created and has not destroyed: its record is this tx's own AddressPath write.
+	live := false
 	if r := ibs.versionedReads.dirtyRec(addr); r != nil && r.wAddress != nil && r.wSelfDestruct != nil && !r.wSelfDestruct.Val {
-		base = r.wAddress.Val
+		base, live = r.wAddress.Val, true
 	} else {
 		var err error
 		if base, _, _, err = ibs.versionedAccountBase(addr, true); err != nil {
 			return err
 		}
 	}
-	if base == nil || ibs.accountLifecycle(addr) {
+	if base == nil || !live && ibs.accountLifecycle(addr) {
 		stateObject, err := ibs.GetOrNewStateObject(addr)
 		if err != nil {
 			return err
@@ -1665,7 +1666,7 @@ func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 		ibs.lastCode = canonical
 	}
 	// A live account this tx created: no own self-destruct, and createObject wrote its AddressPath.
-	if r := ibs.versionedReads.dirtyRec(addr); ibs.noMaterialize && r != nil && r.wAddress != nil && !ibs.accountLifecycle(addr) {
+	if r := ibs.versionedReads.dirtyRec(addr); ibs.noMaterialize && r != nil && r.wAddress != nil && !ibs.destroyed(r, addr) {
 		return ibs.setCreatedCode(r, addr, canonical, reason)
 	}
 	stateObject, err := ibs.GetOrNewStateObject(addr)
@@ -3297,9 +3298,18 @@ func traceWrite[T any](sdb *IntraBlockState, vw *VersionedWrite[T]) {
 // write). An own-tx SelfDestruct write is authoritative (newest): true after a
 // same-tx SD, false after a same-tx recreate. With no own write, the floor's
 // destroyed-and-not-revived verdict applies.
-func (ibs *IntraBlockState) accountLifecycle(addr accounts.Address) (destroyed bool) {
-	if own, ok := ibs.versionedWriteSelfDestruct(addr); ok {
-		return own
+// destroyed is accountLifecycle for an address whose dirty record r the caller holds.
+func (ibs *IntraBlockState) destroyed(r *acctIO, addr accounts.Address) bool {
+	if r.wSelfDestruct != nil {
+		return r.wSelfDestruct.Val
+	}
+	d, _, revived := ibs.versionMap.AccountLifecycle(addr, ibs.txIndex)
+	return d && !revived
+}
+
+func (ibs *IntraBlockState) accountLifecycle(addr accounts.Address) bool {
+	if r := ibs.versionedReads.dirtyRec(addr); r != nil {
+		return ibs.destroyed(r, addr)
 	}
 	d, _, revived := ibs.versionMap.AccountLifecycle(addr, ibs.txIndex)
 	return d && !revived
