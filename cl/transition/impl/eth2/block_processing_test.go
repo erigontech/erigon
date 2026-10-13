@@ -56,7 +56,7 @@ func TestProcessBlockRejectsUnexpectedPayloadWithdrawal(t *testing.T) {
 	block.Block.Body.ExecutionPayload.Withdrawals.Append(&cltypes.Withdrawal{Amount: 1})
 
 	require.NoError(t, transition.ValidatingMachine.ProcessSlots(s, block.Block.Slot))
-	require.ErrorContains(t, machine.ProcessBlock(transition.ValidatingMachine, s, block.Block), "withdrawals")
+	require.ErrorContains(t, machine.ProcessBlock(transition.ValidatingMachine, s, block.Block), "withdrawals root mismatch")
 }
 
 func TestProcessBlockRejectsUnexpectedBlindedWithdrawalsRoot(t *testing.T) {
@@ -66,5 +66,5 @@ func TestProcessBlockRejectsUnexpectedBlindedWithdrawalsRoot(t *testing.T) {
 	blinded.Body.ExecutionPayload.WithdrawalsRoot = common.Hash{1}
 
 	require.NoError(t, transition.ValidatingMachine.ProcessSlots(s, block.Block.Slot))
-	require.ErrorContains(t, machine.ProcessBlock(transition.ValidatingMachine, s, blinded), "withdrawals")
+	require.ErrorContains(t, machine.ProcessBlock(transition.ValidatingMachine, s, blinded), "withdrawals root mismatch")
 }

@@ -89,14 +89,12 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 				for i := range expect.Withdrawals {
 					expectWithdrawals.Append(expect.Withdrawals[i])
 				}
-				if impl.FullValidate() {
-					expectedRoot, err := expectWithdrawals.HashSSZ()
-					if err != nil {
-						return fmt.Errorf("processBlock: failed to hash expected withdrawals: %w", err)
-					}
-					if payloadHeader.WithdrawalsRoot != expectedRoot {
-						return fmt.Errorf("processBlock: withdrawals root mismatch: payload %x, expected %x", payloadHeader.WithdrawalsRoot, expectedRoot)
-					}
+				expectedRoot, err := expectWithdrawals.HashSSZ()
+				if err != nil {
+					return fmt.Errorf("processBlock: failed to hash expected withdrawals: %w", err)
+				}
+				if payloadHeader.WithdrawalsRoot != expectedRoot {
+					return fmt.Errorf("processBlock: withdrawals root mismatch: payload %x, expected %x", payloadHeader.WithdrawalsRoot, expectedRoot)
 				}
 				if err := impl.ProcessWithdrawals(s, expectWithdrawals); err != nil {
 					return fmt.Errorf("processBlock: failed to process withdrawals: %w", err)
