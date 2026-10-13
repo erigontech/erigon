@@ -981,20 +981,10 @@ func adoptPBTFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endTxNum uint
 	if err := removePBTFilesPastPoint(nodeDirs, stepSize, endTxNum); err != nil {
 		return err
 	}
-	nodeFiles, err := pbtAttachFiles(nodeDirs)
-	if err != nil {
+	if err := removePBTFiles(nodeDirs, pbtAttachAdoptsFile); err != nil {
 		return err
 	}
 	touched := make(map[string]struct{})
-	for _, file := range nodeFiles {
-		if !pbtAttachAdoptsFile(file) {
-			continue
-		}
-		if err := removePBTFileWithSidecar(file.path); err != nil {
-			return err
-		}
-		touched[filepath.Dir(file.path)] = struct{}{}
-	}
 	publishedFiles, err := pbtAttachFiles(publishedDirs)
 	if err != nil {
 		return err
