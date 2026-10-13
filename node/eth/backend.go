@@ -463,6 +463,9 @@ func New(
 	}
 	backend.blockSnapshots, backend.blockReader, backend.blockWriter = allSnapshots, blockReader, blockWriter
 	backend.chainDB = temporalDb
+	if err := temporalDb.View(ctx, func(tx kv.Tx) error { return stagedsync.CheckBinaryShadowRunning(tx, chainConfig) }); err != nil {
+		return nil, err
+	}
 
 	// Initialize extracted components.
 	//

@@ -1301,6 +1301,9 @@ func (cc *commitmentCalculator) computeDualFromUpdatesWithRole(ctx context.Conte
 	if cc.domainFrozenAfter(canonicalDomain, t.lastTxNum) {
 		return dualCommitmentResult{}, fmt.Errorf("commitment domain %s is frozen", canonicalDomain)
 	}
+	if canonicalDomain == kv.CommitmentDomain && cc.ShadowDomainStopped(kv.CommitmentBinDomain) && cc.logger != nil {
+		cc.logger.Error("["+cc.logPrefix+"] binary commitment domain is stopped; blocks from binaryTrieTime on will fail", "block", t.blockNum, "remedy", binaryShadowStoppedRemedy)
+	}
 	hexCtx.SetDeferCommitmentUpdates(false)
 	hexCtx.SetMetricsEnabled(canonicalDomain == kv.CommitmentDomain)
 	binCtx.SetMetricsEnabled(canonicalDomain == kv.CommitmentBinDomain)
@@ -1346,6 +1349,10 @@ func (cc *commitmentCalculator) finishDualFolds(canonicalDomain, shadowDomain kv
 			continue
 		}
 		if fold.err != nil {
+			if errors.Is(fold.err, context.Canceled) || errors.Is(fold.err, context.DeadlineExceeded) {
+				return result, fold.err
+			}
+			cc.logShadowStop(shadowDomain, fold.err)
 			cc.stopShadowDomain(shadowDomain)
 			continue
 		}
@@ -1353,6 +1360,7 @@ func (cc *commitmentCalculator) finishDualFolds(canonicalDomain, shadowDomain kv
 	}
 	if shadowArm.buffered != nil && result.shadowRoot != nil {
 		if err := shadowArm.buffered.Replay(); err != nil {
+			cc.logShadowStop(shadowDomain, err)
 			cc.stopShadowDomain(shadowDomain)
 			result.shadowRoot = nil
 		}
@@ -1443,6 +1451,12 @@ func (cc *commitmentCalculator) stopShadowDomain(domain kv.Domain) {
 		if ctx := cc.doms.GetCommitmentCtxForDomain(domain); ctx != nil {
 			ctx.ResetPendingUpdates()
 		}
+	}
+}
+
+func (cc *commitmentCalculator) logShadowStop(domain kv.Domain, err error) {
+	if cc.logger != nil {
+		cc.logger.Error("["+cc.logPrefix+"] shadow commitment domain stopped", "domain", domain, "err", err)
 	}
 }
 
@@ -1800,3 +1814,17 @@ func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.Tempor
 // BindsWorkerTx: CloneForWorker rebinds both roTx and getter, and state reads
 // resolve at txNum, so a worker view past the caller's cannot change the answer.
 func (r *asOfStateReader) BindsWorkerTx() bool { return true }
+
+const binaryShadowStoppedRemedy = "run integration commitment convert-pbt and attach-pbt on this datadir"
+
+func CheckBinaryShadowRunning(tx kv.Getter, config *chain.Config) error {
+	if config == nil || !config.IsBinaryTrieScheduled() {
+		return nil
+	}
+	stopped, err := rawdb.ReadCommitmentDomainStopped(tx, kv.CommitmentBinDomain)
+	if err != nil || !stopped {
+		return err
+	}
+	return fmt.Errorf("binary commitment domain is stopped and binaryTrieTime %d is scheduled, so every block from the fork on would fail: %s",
+		*config.BinaryTrieTime, binaryShadowStoppedRemedy)
+}

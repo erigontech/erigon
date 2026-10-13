@@ -148,6 +148,12 @@ the next block through `stopHexShadowAtWindow` and
 commitment. The stop survives restart, and an unwind below the activation
 block is refused.
 
+A binary domain that fails to fold before the fork stops for good. Each
+batch then logs an error, and a node whose chain config schedules
+`binaryTrieTime` refuses to start, because every block from the fork on would
+fail. Re-run `convert-pbt` and `attach-pbt`; attach resets execution and
+clears the stop. A cancelled batch never stops the domain.
+
 ## Export
 
 Export uses the block and transaction pin of the domain canonical at that

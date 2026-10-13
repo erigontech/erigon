@@ -18,7 +18,9 @@ package stagedsync
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"math"
 	"sort"
 	"sync/atomic"
@@ -198,6 +200,34 @@ func TestDualCompletionStopsShadowOnReplayError(t *testing.T) {
 			require.True(t, cc.ShadowDomainStopped(shadow))
 		})
 	}
+}
+
+func TestDualCompletionReturnsShadowCancellation(t *testing.T) {
+	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			cc := &commitmentCalculator{}
+			_, err := cc.finishDualFolds(kv.CommitmentDomain, kv.CommitmentBinDomain, []dualFoldResult{
+				{domain: kv.CommitmentDomain, root: []byte{4}},
+				{domain: kv.CommitmentBinDomain, err: fmt.Errorf("fold: %w", cause)},
+			}, &commitmentFoldArm{})
+			require.ErrorIs(t, err, cause)
+			require.False(t, cc.ShadowDomainStopped(kv.CommitmentBinDomain))
+		})
+	}
+}
+
+func TestCheckBinaryShadowRunningRefusesScheduledFork(t *testing.T) {
+	_, tx, _ := dualCalculatorTest(t)
+	scheduled := chain.AllProtocolChanges.Copy()
+	binaryTrieTime := uint64(100)
+	scheduled.BinaryTrieTime = &binaryTrieTime
+	unscheduled := chain.AllProtocolChanges.Copy()
+	unscheduled.BinaryTrieTime = nil
+
+	require.NoError(t, CheckBinaryShadowRunning(tx, scheduled))
+	require.NoError(t, rawdb.WriteCommitmentDomainStopped(tx, kv.CommitmentBinDomain))
+	require.ErrorContains(t, CheckBinaryShadowRunning(tx, scheduled), "attach-pbt")
+	require.NoError(t, CheckBinaryShadowRunning(tx, unscheduled))
 }
 
 func TestRecordStoppedCommitmentDomainsPersistsStop(t *testing.T) {
