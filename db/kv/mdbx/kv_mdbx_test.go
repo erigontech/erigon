@@ -1298,3 +1298,59 @@ func TestInMemKeepsUtterlyNoSync(t *testing.T) {
 	require.Equal(t, uint(mdbxgo.UtterlyNoSync), flags&mdbxgo.UtterlyNoSync,
 		"utterly-nosync lost a bit, and without all of them mdbx flushes on commit")
 }
+
+func TestRangeDupSortSeekValue(t *testing.T) {
+	db := BaseCaseDB(t)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	u64 := func(n uint64) []byte { return binary.BigEndian.AppendUint64(nil, n) }
+	for n := uint64(0); n < 1000; n += 2 { // even values 0..998
+		require.NoError(t, tx.Put("Table", []byte("key2"), u64(n)))
+	}
+	require.NoError(t, tx.Put("Table", []byte("key1"), u64(5)))
+	require.NoError(t, tx.Put("Table", []byte("key3"), u64(5)))
+
+	type seeker interface{ SeekValue(v []byte) error }
+	collect := func(it stream.KV) (out []uint64) {
+		for it.HasNext() {
+			_, v, err := it.Next()
+			require.NoError(t, err)
+			out = append(out, binary.BigEndian.Uint64(v))
+		}
+		return out
+	}
+	tests := []struct {
+		name     string
+		from, to []byte
+		asc      order.By
+		seeks    []uint64
+		want     []uint64
+	}{
+		{"asc", nil, nil, order.Asc, []uint64{500}, []uint64{500, 502}},
+		{"asc odd target", nil, nil, order.Asc, []uint64{501}, []uint64{502, 504}},
+		{"asc backwards is a no-op", u64(600), nil, order.Asc, []uint64{100}, []uint64{600, 602}},
+		{"asc past the end", nil, nil, order.Asc, []uint64{5000}, nil},
+		{"asc past the to bound", nil, u64(700), order.Asc, []uint64{701}, nil},
+		{"desc", nil, nil, order.Desc, []uint64{500}, []uint64{500, 498}},
+		{"desc odd target", nil, nil, order.Desc, []uint64{501}, []uint64{500, 498}},
+		{"desc above every value", u64(998), nil, order.Desc, []uint64{5000}, []uint64{998, 996}},
+		{"desc below every value", nil, nil, order.Desc, []uint64{0}, []uint64{0}},
+		{"two seeks", nil, nil, order.Asc, []uint64{100, 301}, []uint64{302, 304}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			it, err := tx.RangeDupSort("Table", []byte("key2"), tt.from, tt.to, tt.asc, -1)
+			require.NoError(t, err)
+			defer it.Close()
+			for _, v := range tt.seeks {
+				require.NoError(t, it.(seeker).SeekValue(u64(v)))
+			}
+			got := collect(it)
+			if len(got) > 2 {
+				got = got[:2]
+			}
+			require.Equal(t, tt.want, got)
+		})
+	}
+}

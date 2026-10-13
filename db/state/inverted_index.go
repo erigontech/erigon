@@ -722,8 +722,10 @@ func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNu
 	if err != nil {
 		return nil, err
 	}
-	return stream.TransformKV2U64(it, func(_, v []byte) (uint64, error) {
+	return stream.TransformKV2U64Seekable(it, func(_, v []byte) (uint64, error) {
 		return binary.BigEndian.Uint64(v), nil
+	}, func(n uint64) []byte {
+		return binary.BigEndian.AppendUint64(nil, n)
 	}), nil
 }
 

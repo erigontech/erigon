@@ -2437,6 +2437,38 @@ func (s *cursorDup2iter) advance() (err error) {
 	return nil
 }
 
+// SeekValue moves to the first value >= v (asc) or <= v (desc) with a B-tree search; it never moves backwards.
+func (s *cursorDup2iter) SeekValue(v []byte) (err error) {
+	if s.done {
+		return nil
+	}
+	if c := bytes.Compare(s.v, v); (s.orderAscend && c >= 0) || (!s.orderAscend && c <= 0) {
+		return nil
+	}
+	nv, err := s.c.SeekBothRange(s.key, v)
+	if err != nil {
+		return err
+	}
+	if s.orderAscend || (nv != nil && bytes.Equal(nv, v)) {
+		s.v, s.done = nv, nv == nil
+		return nil
+	}
+	// desc: the last value <= v is before the first value >= v, or the last one when every value is < v
+	if nv != nil {
+		_, nv, err = s.c.PrevDup()
+	} else {
+		var k []byte
+		if k, _, err = s.c.SeekExact(s.key); err == nil && k != nil {
+			nv, err = s.c.LastDup()
+		}
+	}
+	if err != nil {
+		return err
+	}
+	s.v, s.done = nv, nv == nil
+	return nil
+}
+
 func (s *cursorDup2iter) Close() {
 	if s == nil {
 		return
