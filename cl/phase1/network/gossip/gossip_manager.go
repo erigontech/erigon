@@ -611,7 +611,8 @@ func (g *GossipManager) goCheckForkAndResubscribe(ctx context.Context) {
 
 func (g *GossipManager) subscribeUpcomingProposerPreferences() {
 	// Preferences are sent up to one epoch ahead: join the next epoch's digest and,
-	// because the ticker is not slot-aligned, the digest one epoch and one slot ahead.
+	// because the ticker is not slot-aligned, the digest one epoch and two slots ahead,
+	// so that it is joined at least a slot before preferences for its epoch are accepted.
 	forkDigest, err := g.ethClock.CurrentForkDigest()
 	if err != nil {
 		log.Warn("[GossipManager] failed to get current fork digest for proposer preferences", "err", err)
@@ -620,7 +621,7 @@ func (g *GossipManager) subscribeUpcomingProposerPreferences() {
 	currentSlot := g.ethClock.GetCurrentSlot()
 	preferencesEpochs := [...]uint64{
 		g.ethClock.GetEpochAtSlot(currentSlot) + 1,
-		g.ethClock.GetEpochAtSlot(currentSlot + g.beaconConfig.SlotsPerEpoch + 1),
+		g.ethClock.GetEpochAtSlot(currentSlot + g.beaconConfig.SlotsPerEpoch + 2),
 	}
 	for _, preferencesEpoch := range preferencesEpochs {
 		preferencesForkDigest, err := g.ethClock.ComputeForkDigest(preferencesEpoch)
@@ -642,10 +643,18 @@ func (g *GossipManager) subscribeUpcomingTopics(digest common.Bytes4, names ...s
 		if name == "" || len(names) > 0 && !slices.Contains(names, name) {
 			continue
 		}
-		prevTopicHandle := g.subscriptions.Get(oldTopic)
-		// register and subscribe new newTopic
 		newTopic := composeTopic(digest, name)
-		if newTopic == oldTopic || g.subscriptions.Get(newTopic) != nil {
+		if newTopic == oldTopic {
+			continue
+		}
+		prevTopicHandle := g.subscriptions.Get(oldTopic)
+		if prevTopicHandle == nil {
+			continue
+		}
+		if g.subscriptions.Get(newTopic) != nil {
+			if err := g.subscriptions.SubscribeWithExpiry(newTopic, prevTopicHandle.expiry); err != nil && !errors.Is(err, ErrExpiryInThePast) {
+				return err
+			}
 			continue
 		}
 		topicHandle, err := g.p2p.Pubsub().Join(newTopic)

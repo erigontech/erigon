@@ -826,7 +826,7 @@ func (s *subscribeUpcomingTopicsTestSuite) TestSubscribeUpcomingTopics_MultipleT
 	}
 }
 
-func (s *subscribeUpcomingTopicsTestSuite) TestSubscribeUpcomingTopicsSkipsExistingTargetAndContinues() {
+func (s *subscribeUpcomingTopicsTestSuite) TestSubscribeUpcomingTopicsSubscribesExistingTargetAndContinues() {
 	oldDigestA := common.Bytes4{0x11, 0x22, 0x33, 0x44}
 	oldDigestB := common.Bytes4{0x55, 0x66, 0x77, 0x88}
 	newDigest := common.Bytes4{0xaa, 0xbb, 0xcc, 0xdd}
@@ -836,17 +836,19 @@ func (s *subscribeUpcomingTopicsTestSuite) TestSubscribeUpcomingTopicsSkipsExist
 		return pubsub.ValidationAccept
 	}
 	expiry := time.Now().Add(time.Hour)
-	addTopic := func(topic string) {
+	addTopic := func(topic string, subscribe bool) {
 		handle, err := s.gm.p2p.Pubsub().Join(topic)
 		s.Require().NoError(err)
 		s.Require().NoError(s.gm.subscriptions.Add(topic, handle, validator))
-		s.Require().NoError(s.gm.subscriptions.SubscribeWithExpiry(topic, expiry))
+		if subscribe {
+			s.Require().NoError(s.gm.subscriptions.SubscribeWithExpiry(topic, expiry))
+		}
 	}
 
-	addTopic(composeTopic(oldDigestA, existingName))
-	addTopic(composeTopic(oldDigestB, existingName))
-	addTopic(composeTopic(newDigest, existingName))
-	addTopic(composeTopic(oldDigestA, remainingName))
+	addTopic(composeTopic(oldDigestA, existingName), true)
+	addTopic(composeTopic(oldDigestB, existingName), true)
+	addTopic(composeTopic(newDigest, existingName), false)
+	addTopic(composeTopic(oldDigestA, remainingName), true)
 
 	s.Require().NoError(s.gm.subscribeUpcomingTopics(newDigest))
 	existing := s.gm.subscriptions.Get(composeTopic(newDigest, existingName))
@@ -899,7 +901,7 @@ func TestGossipManagerSubscribesProposerPreferencesOneEpochEarly(t *testing.T) {
 		slotsPerEpoch  = uint64(32)
 	)
 	var currentSlot atomic.Uint64
-	currentSlot.Store(gloasForkEpoch*slotsPerEpoch - slotsPerEpoch - 2)
+	currentSlot.Store(gloasForkEpoch*slotsPerEpoch - 35)
 	oldDigest := common.Bytes4{0x11, 0x22, 0x33, 0x44}
 	newDigest := common.Bytes4{0xaa, 0xbb, 0xcc, 0xdd}
 	clock := eth_clock.NewMockEthereumClock(ctrl)
@@ -914,7 +916,7 @@ func TestGossipManagerSubscribesProposerPreferencesOneEpochEarly(t *testing.T) {
 		}
 		return oldDigest, nil
 	}).AnyTimes()
-	gm := newScoredGossipManagerForTest(t, ctrl, clock, 1)
+	gm := newScoredGossipManagerForTest(t, ctrl, clock, 12)
 
 	service := &mockService{namesFunc: func() []string {
 		return []string{gossipnames.TopicNameProposerPreferences, gossipnames.TopicNameBeaconBlock}
@@ -923,12 +925,13 @@ func TestGossipManagerSubscribesProposerPreferencesOneEpochEarly(t *testing.T) {
 	require.NoError(t, err)
 
 	preferencesTopic := composeTopic(newDigest, gossipnames.TopicNameProposerPreferences)
+	gm.subscribeUpcomingProposerPreferences()
 	require.Nil(t, gm.subscriptions.Get(preferencesTopic))
-	currentSlot.Store(gloasForkEpoch*slotsPerEpoch - slotsPerEpoch - 1)
-	require.Eventually(t, func() bool {
-		subscription := gm.subscriptions.Get(preferencesTopic)
-		return subscription != nil && subscription.sub != nil
-	}, 2*time.Second, 10*time.Millisecond)
+	currentSlot.Store(gloasForkEpoch*slotsPerEpoch - 34)
+	gm.subscribeUpcomingProposerPreferences()
+	subscription := gm.subscriptions.Get(preferencesTopic)
+	require.NotNil(t, subscription)
+	require.NotNil(t, subscription.sub)
 	require.Nil(t, gm.subscriptions.Get(composeTopic(newDigest, gossipnames.TopicNameBeaconBlock)))
 }
 
