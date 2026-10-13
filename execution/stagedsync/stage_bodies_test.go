@@ -221,13 +221,7 @@ func TestBlockHashStageKeepsBadHeaderUnindexed(t *testing.T) {
 	require.Equal(t, uint64(1), progress)
 }
 
-func TestBadBlockUnwindKeepsValidAncestorsIndexed(t *testing.T) {
-	m := execmoduletester.New(t)
-	tx, err := m.DB.BeginRw(m.Ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	const n = 5
+func writeCanonicalChain(t *testing.T, tx kv.RwTx, n uint64) []common.Hash {
 	hashes := make([]common.Hash, n+1)
 	for i := uint64(1); i <= n; i++ {
 		h := &types.Header{ParentHash: hashes[i-1]}
@@ -236,6 +230,17 @@ func TestBadBlockUnwindKeepsValidAncestorsIndexed(t *testing.T) {
 		require.NoError(t, rawdb.WriteHeader(tx, h))
 		require.NoError(t, rawdb.WriteCanonicalHash(tx, hashes[i], i))
 	}
+	return hashes
+}
+
+func TestBadBlockUnwindKeepsValidAncestorsIndexed(t *testing.T) {
+	m := execmoduletester.New(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const n = 5
+	hashes := writeCanonicalChain(t, tx, n)
 
 	u := &stagedsync.UnwindState{ID: stages.Headers, UnwindPoint: n - 3, Reason: stagedsync.BadBlock(hashes[n], errors.New("bad"))}
 	s := &stagedsync.StageState{ID: stages.Headers}
@@ -252,7 +257,6 @@ func TestBadBlockUnwindKeepsValidAncestorsIndexed(t *testing.T) {
 	require.Nil(t, rawdb.ReadHeaderNumber(tx, hashes[n]))
 	badNum, err := rawdb.ReadBadHeaderNumber(tx, hashes[n])
 	require.NoError(t, err)
-	require.NotNil(t, badNum)
 	require.Equal(t, uint64(n), *badNum)
 }
 
@@ -263,14 +267,7 @@ func TestBadBlockUnwindWithoutHashIndexMarksWholeRangeBad(t *testing.T) {
 	defer tx.Rollback()
 
 	const n = 5
-	hashes := make([]common.Hash, n+1)
-	for i := uint64(1); i <= n; i++ {
-		h := &types.Header{ParentHash: hashes[i-1]}
-		h.Number.SetUint64(i)
-		hashes[i] = h.Hash()
-		require.NoError(t, rawdb.WriteHeader(tx, h))
-		require.NoError(t, rawdb.WriteCanonicalHash(tx, hashes[i], i))
-	}
+	hashes := writeCanonicalChain(t, tx, n)
 	require.NoError(t, tx.Delete(kv.HeaderNumber, hashes[n][:]))
 
 	u := &stagedsync.UnwindState{ID: stages.Headers, UnwindPoint: n - 3, Reason: stagedsync.BadBlock(hashes[n], errors.New("bad"))}
@@ -281,10 +278,7 @@ func TestBadBlockUnwindWithoutHashIndexMarksWholeRangeBad(t *testing.T) {
 		require.Nil(t, rawdb.ReadHeaderNumber(tx, hashes[i]), "block %d kept its hash index", i)
 		badNum, err := rawdb.ReadBadHeaderNumber(tx, hashes[i])
 		require.NoError(t, err)
-		require.NotNil(t, badNum, "block %d not marked bad", i)
-		require.Equal(t, i, *badNum)
+		require.Equal(t, i, *badNum, "block %d not marked bad", i)
 	}
-	num := rawdb.ReadHeaderNumber(tx, hashes[n-3])
-	require.NotNil(t, num)
-	require.Equal(t, uint64(n-3), *num)
+	require.Equal(t, uint64(n-3), *rawdb.ReadHeaderNumber(tx, hashes[n-3]))
 }
