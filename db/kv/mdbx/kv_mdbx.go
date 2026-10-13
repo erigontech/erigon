@@ -2314,6 +2314,14 @@ func (tx *MdbxTx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []
 		s.Close() // it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
+	if !s.done {
+		var err error
+		if _, s.v, err = s.c.Current(); err != nil {
+			s.Close()
+			return nil, err
+		}
+		s.done = s.v == nil
+	}
 	return s, nil
 }
 
@@ -2328,6 +2336,7 @@ type cursorDup2iter struct {
 	limit                int64
 	ctx                  context.Context
 	done                 bool
+	v                    []byte // value under the cursor, the next one to return: read once per move, not on every HasNext and Next
 }
 
 func (s *cursorDup2iter) init(table string, tx kv.Tx) error {
@@ -2417,9 +2426,9 @@ func (s *cursorDup2iter) init(table string, tx kv.Tx) error {
 func (s *cursorDup2iter) advance() (err error) {
 	var k []byte
 	if s.orderAscend {
-		k, _, err = s.c.NextDup()
+		k, s.v, err = s.c.NextDup()
 	} else {
-		k, _, err = s.c.PrevDup()
+		k, s.v, err = s.c.PrevDup()
 	}
 	if err != nil {
 		return err
@@ -2452,11 +2461,10 @@ func (s *cursorDup2iter) HasNext() bool {
 
 	// Asc:  [from, to) AND from < to
 	// Desc: [from, to) AND from > to
-	_, v, err := s.c.Current()
-	if err != nil || v == nil {
+	if s.v == nil {
 		return false
 	}
-	cmp := bytes.Compare(v, s.toPrefix)
+	cmp := bytes.Compare(s.v, s.toPrefix)
 	return (s.orderAscend && cmp < 0) || (!s.orderAscend && cmp > 0)
 }
 
@@ -2467,10 +2475,7 @@ func (s *cursorDup2iter) Next() (k, v []byte, err error) {
 	default:
 	}
 	s.limit--
-	_, v, err = s.c.Current()
-	if err != nil {
-		return nil, nil, err
-	}
+	v = s.v
 	if err := s.advance(); err != nil {
 		return nil, nil, err
 	}
