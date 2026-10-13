@@ -423,7 +423,7 @@ func TestRunPush0BeforeShanghai(t *testing.T) {
 	t.Parallel()
 	for _, hashed := range []bool{false, true} {
 		ibs := state.New(state.NewNoopReader())
-		defer ibs.Close()
+		t.Cleanup(ibs.Close)
 		evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, &chain.Config{ChainID: uint256.NewInt(1)}, Config{})
 		c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 		// The jump moves a hashed run to the decoded loop.
@@ -443,7 +443,7 @@ func TestRunDecodedShiftsBeforeConstantinople(t *testing.T) {
 	t.Parallel()
 	for _, op := range []OpCode{SHL, SHR, SAR} {
 		ibs := state.New(state.NewNoopReader())
-		defer ibs.Close()
+		t.Cleanup(ibs.Close)
 		evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, &chain.Config{ChainID: uint256.NewInt(1)}, Config{})
 		c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 		c.Code = []byte{byte(PUSH1), 3, byte(JUMP), byte(JUMPDEST), byte(PUSH1), 1, byte(PUSH1), 1, byte(op)}

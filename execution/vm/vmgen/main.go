@@ -617,8 +617,9 @@ func decoded(instructions []byte, ops []fastOp) string {
 			id.Name = "i"
 		}
 	}
-	var cases []string
-	for _, c := range f.Decls[0].(*ast.FuncDecl).Body.List[0].(*ast.SwitchStmt).Body.List {
+	list := f.Decls[0].(*ast.FuncDecl).Body.List[0].(*ast.SwitchStmt).Body.List
+	cases := make([]string, 0, len(list))
+	for _, c := range list {
 		cases = append(cases, text(fset, c))
 	}
 	return fmt.Sprintf(decodedRun, strings.TrimSpace(decodedCases)+"\n"+strings.Join(cases, "\n"))

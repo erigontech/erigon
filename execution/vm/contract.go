@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"bytes"
 	"encoding/binary"
 	"sync/atomic"
 
@@ -102,7 +103,7 @@ func decodedProgram(code []byte, hash accounts.CodeHash) *program {
 	if !ok {
 		p = decode(code)
 		p.hash = hash
-		programCache.Put(common.Copy(h[:]), p, 0)
+		programCache.Put(bytes.Clone(h[:]), p, 0)
 	}
 	slot.Store(p)
 	return p
