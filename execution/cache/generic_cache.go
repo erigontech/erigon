@@ -326,7 +326,7 @@ func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 		return zero, 0, false
 	}
 	b.touch(way)
-	c.hits.Add(1)
+	// dbg: hits counter removed to measure its cost
 	return e.val, e.txNum, true
 }
 
