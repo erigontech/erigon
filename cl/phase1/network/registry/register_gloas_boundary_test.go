@@ -41,22 +41,22 @@ import (
 )
 
 func TestRegisterGossipServicesProcessesGloasPreferencesOneEpochEarly(t *testing.T) {
+	fuluDigest := common.Bytes4{0x11, 0x22, 0x33, 0x44}
+	gloasDigest := common.Bytes4{0xaa, 0xbb, 0xcc, 0xdd}
 	tests := []struct {
-		name          string
-		topicDigest   common.Bytes4
-		topicVersion  clparams.StateVersion
-		wantProcessed bool
+		name         string
+		topicDigest  common.Bytes4
+		topicVersion clparams.StateVersion
 	}{
 		{
-			name:          "Gloas digest",
-			topicDigest:   common.Bytes4{0xaa, 0xbb, 0xcc, 0xdd},
-			topicVersion:  clparams.GloasVersion,
-			wantProcessed: true,
+			name:         "Fulu digest",
+			topicDigest:  fuluDigest,
+			topicVersion: clparams.FuluVersion,
 		},
 		{
-			name:         "Fulu digest",
-			topicDigest:  common.Bytes4{0x11, 0x22, 0x33, 0x44},
-			topicVersion: clparams.FuluVersion,
+			name:         "Gloas digest",
+			topicDigest:  gloasDigest,
+			topicVersion: clparams.GloasVersion,
 		},
 	}
 
@@ -90,16 +90,23 @@ func TestRegisterGossipServicesProcessesGloasPreferencesOneEpochEarly(t *testing
 			require.NoError(t, err)
 
 			clock := eth_clock.NewMockEthereumClock(ctrl)
-			clock.EXPECT().CurrentForkDigest().Return(tt.topicDigest, nil).AnyTimes()
-			clock.EXPECT().StateVersionByForkDigest(tt.topicDigest).Return(tt.topicVersion, nil).AnyTimes()
+			clock.EXPECT().CurrentForkDigest().Return(fuluDigest, nil).AnyTimes()
+			clock.EXPECT().StateVersionByForkDigest(fuluDigest).Return(clparams.FuluVersion, nil).AnyTimes()
+			clock.EXPECT().StateVersionByForkDigest(gloasDigest).Return(clparams.GloasVersion, nil).AnyTimes()
 			clock.EXPECT().GetCurrentEpoch().Return(uint64(2)).AnyTimes()
 			clock.EXPECT().GetCurrentSlot().Return(uint64(64)).AnyTimes()
 			clock.EXPECT().GetEpochAtSlot(gomock.Any()).DoAndReturn(func(slot uint64) uint64 {
 				return slot / cfg.SlotsPerEpoch
 			}).AnyTimes()
-			clock.EXPECT().ComputeForkDigest(gomock.Any()).Return(common.Bytes4{0xaa, 0xbb, 0xcc, 0xdd}, nil).AnyTimes()
+			clock.EXPECT().ComputeForkDigest(gomock.Any()).DoAndReturn(func(epoch uint64) (common.Bytes4, error) {
+				if epoch >= cfg.GloasForkEpoch {
+					return gloasDigest, nil
+				}
+				return fuluDigest, nil
+			}).AnyTimes()
 			p2pManager := p2p_mock.NewMockP2PManager(ctrl)
 			p2pManager.EXPECT().Pubsub().Return(ps).AnyTimes()
+			// A nil host makes local publishes run the validator like a peer's message.
 			p2pManager.EXPECT().Host().Return(nil).AnyTimes()
 			p2pManager.EXPECT().BandwidthCounter().Return(metrics.NewBandwidthCounter()).AnyTimes()
 			gm := gossip.NewGossipManager(
@@ -141,17 +148,13 @@ func TestRegisterGossipServicesProcessesGloasPreferencesOneEpochEarly(t *testing
 			executionPayloadBidService.EXPECT().Names().Return(nil)
 
 			preference := &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{ProposalSlot: 96}}
-			proposerPreferencesService.EXPECT().DecodeGossipMessage(gomock.Any(), []byte("preference"), tt.topicVersion).Return(preference, nil).MaxTimes(1)
+			proposerPreferencesService.EXPECT().DecodeGossipMessage(gomock.Any(), []byte("preference"), tt.topicVersion).Return(preference, nil)
 			processed := make(chan struct{})
-			processCall := proposerPreferencesService.EXPECT().ProcessMessage(gomock.Any(), gomock.Nil(), preference)
-			if tt.wantProcessed {
-				processCall.DoAndReturn(func(context.Context, *uint64, *cltypes.SignedProposerPreferences) error {
+			proposerPreferencesService.EXPECT().ProcessMessage(gomock.Any(), gomock.Nil(), preference).
+				DoAndReturn(func(context.Context, *uint64, *cltypes.SignedProposerPreferences) error {
 					close(processed)
 					return nil
 				})
-			} else {
-				processCall.Times(0)
-			}
 
 			forkChoice := forkchoice_mock.NewForkChoiceStorageMock(t)
 			forkChoice.HighestSeenVal = 64
@@ -162,11 +165,7 @@ func TestRegisterGossipServicesProcessesGloasPreferencesOneEpochEarly(t *testing
 				payloadAttestationService, proposerPreferencesService, executionPayloadBidService,
 			)
 
-			err = gm.Publish(t.Context(), clgossip.TopicNameProposerPreferences, []byte("preference"))
-			if !tt.wantProcessed {
-				require.EqualError(t, err, pubsub.RejectValidationIgnored)
-				return
-			}
+			err = gm.PublishToForkDigest(t.Context(), tt.topicDigest, clgossip.TopicNameProposerPreferences, []byte("preference"))
 			require.NoError(t, err)
 			select {
 			case <-processed:
