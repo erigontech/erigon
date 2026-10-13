@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -826,4 +827,28 @@ func TestBucketStoreEarliestStoredSlotFindsSidecarBehindManyTempFiles(t *testing
 	slot, err = b.EarliestStoredSlot()
 	require.NoError(t, err)
 	require.Equal(t, uint64(4*subdivisionSlot), slot)
+}
+
+type openFailingFs struct {
+	afero.Fs
+	name string
+}
+
+func (f openFailingFs) Open(name string) (afero.File, error) {
+	if name == f.name {
+		return nil, os.ErrPermission
+	}
+	return f.Fs.Open(name)
+}
+
+func TestBucketStoreEarliestStoredSlotSkipsAnUnreadableBucket(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	makeBuckets(t, mem, "2", "3")
+	require.NoError(t, afero.WriteFile(mem, "2/root_0", []byte{1}, 0o644))
+	require.NoError(t, afero.WriteFile(mem, "3/root_0", []byte{1}, 0o644))
+	b := newBucketStore(t, openFailingFs{Fs: mem, name: "2"})
+
+	slot, err := b.EarliestStoredSlot()
+	require.NoError(t, err)
+	require.Equal(t, uint64(3*subdivisionSlot), slot)
 }

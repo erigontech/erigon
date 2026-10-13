@@ -292,14 +292,19 @@ func TestPeerDasPruneBelowUpdatesEarliestAvailableSlot(t *testing.T) {
 		name           string
 		initial, floor uint64
 		stored         uint64
+		storedErr      error
 		pruneErr       error
 		want           uint64
 	}{
 		{name: "advances", initial: 0, floor: 100, want: 100},
 		{name: "advances to the lowest stored bucket above the floor", initial: 0, floor: 100, stored: 150, want: 150},
 		{name: "ignores a stored bucket below the floor", initial: 0, floor: 100, stored: 50, want: 100},
-		{name: "does not move backwards", initial: 100, floor: 50, want: 100},
-		{name: "zero floor resets", initial: 100, floor: 0, want: 0},
+		{name: "follows the lowest stored bucket down", initial: 300, floor: 100, stored: 150, want: 150},
+		{name: "does not move backwards on a store error", initial: 100, floor: 50, storedErr: errors.New("readdir failed"), want: 100},
+		{name: "advances to the floor on a store error", initial: 0, floor: 100, storedErr: errors.New("readdir failed"), want: 100},
+		{name: "zero floor resets to the lowest stored bucket", initial: 100, floor: 0, stored: 150, want: 150},
+		{name: "zero floor resets on an empty store", initial: 100, floor: 0, want: 0},
+		{name: "zero floor resets on a store error", initial: 100, floor: 0, stored: 150, storedErr: errors.New("readdir failed"), want: 0},
 		{name: "advances after prune error", initial: 100, floor: 200, pruneErr: errors.New("prune failed"), want: 200},
 		{name: "does not advance when prune did not start", initial: 100, floor: 200, pruneErr: fmt.Errorf("readdir: %w", blob_storage.ErrPruneNotStarted), want: 100},
 	}
@@ -309,7 +314,7 @@ func TestPeerDasPruneBelowUpdatesEarliestAvailableSlot(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
 			columnStorage.EXPECT().PruneBelow(test.floor).Return(test.pruneErr)
-			columnStorage.EXPECT().EarliestStoredSlot().Return(test.stored, nil).AnyTimes()
+			columnStorage.EXPECT().EarliestStoredSlot().Return(test.stored, test.storedErr).AnyTimes()
 			cfg := clparams.MainnetBeaconConfig
 			state := peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{})
 			state.SetEarliestAvailableSlot(test.initial)
@@ -339,6 +344,28 @@ func TestPeerDasPruneBelowDoesNotAdvertiseColumnsPrunedUnderAShorterWindow(t *te
 	require.NoError(t, d.PruneBelow(5_000))
 
 	require.Equal(t, uint64(30_000), state.GetEarliestAvailableSlot())
+}
+
+func TestPeerDasPruneBelowFollowsBackfilledColumnsDown(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	store := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	write := func(slot uint64) {
+		sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion)
+		sidecar.SignedBlockHeader = &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: slot}}
+		require.NoError(t, store.WriteColumnSidecars(t.Context(), common.Hash{byte(slot / 10_000)}, 0, sidecar))
+	}
+	state := peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{})
+	d := &peerdas{state: state, columnStorage: store}
+
+	write(35_000)
+	require.NoError(t, d.PruneBelow(5_000))
+	require.Equal(t, uint64(30_000), state.GetEarliestAvailableSlot())
+
+	write(25_000)
+	write(15_000)
+	require.NoError(t, d.PruneBelow(5_000))
+	require.Equal(t, uint64(10_000), state.GetEarliestAvailableSlot())
 }
 
 func TestPeerDasPruneBelowUpdatesRecoveryOwnership(t *testing.T) {

@@ -214,7 +214,8 @@ func (b *bucketStore) stream(w io.Writer, slot uint64, root common.Hash, idx uin
 }
 
 // EarliestStoredSlot returns where the lowest bucket holding a sidecar starts, which can be
-// below the first sidecar actually stored in it, or 0 when nothing is stored.
+// below the first sidecar actually stored in it, or 0 when nothing is stored. A bucket that
+// cannot be read is skipped, since its sidecars cannot be served either.
 func (b *bucketStore) EarliestStoredSlot() (uint64, error) {
 	entries, err := afero.ReadDir(b.fs, ".")
 	if err != nil {
@@ -236,7 +237,8 @@ func (b *bucketStore) EarliestStoredSlot() (uint64, error) {
 	for _, bucket := range buckets {
 		stored, err := b.holdsSidecar(strconv.FormatUint(bucket, 10))
 		if err != nil {
-			return 0, err
+			log.Warn("[blob_storage] skipping unreadable column bucket", "bucket", bucket, "err", err)
+			continue
 		}
 		if stored {
 			return bucket * subdivisionSlot, nil
