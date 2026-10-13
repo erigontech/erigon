@@ -18,7 +18,6 @@ package txpool
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"testing"
@@ -33,31 +32,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
-
-type stateReadProbeDB struct {
-	kv.TemporalRoDB
-	onRead func()
-}
-
-func (db *stateReadProbeDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
-	//nolint:gocritic // The caller owns the read transaction.
-	tx, err := db.TemporalRoDB.BeginTemporalRo(ctx)
-	if err == nil && db.onRead != nil {
-		callback := db.onRead
-		db.onRead = nil
-		callback()
-	}
-	return tx, err
-}
-
-func (db *stateReadProbeDB) ViewTemporal(ctx context.Context, f func(kv.TemporalTx) error) error {
-	tx, err := db.BeginTemporalRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	return f(tx)
-}
 
 func TestPoolReopensStateAfterNewBlock(t *testing.T) {
 	for _, mode := range []string{"local", "remote", "reload"} {
@@ -86,9 +60,9 @@ func TestPoolReopensStateAfterNewBlock(t *testing.T) {
 					}))
 				}
 
-				probe := &stateReadProbeDB{TemporalRoDB: coreDB}
-				pool._chainDB = probe
-				probe.onRead = func() {
+				probe := &stateViewProbe{Cache: pool._stateCache}
+				pool._stateCache = probe
+				probe.onView = func() {
 					require.True(t, pool.lock.TryLock(), "opening state must allow block updates")
 					pool.lock.Unlock()
 					account := accounts.Account{
@@ -130,7 +104,7 @@ func TestPoolReopensStateAfterNewBlock(t *testing.T) {
 				case "reload":
 					require.NoError(t, pool.start(ctx))
 				}
-				require.Nil(t, probe.onRead, "the new block must overtake the old state transaction")
+				require.Nil(t, probe.onView, "the new block must overtake the old state view")
 				checkPool := func() {
 					pending, baseFee, queued := pool.CountContent()
 					require.Equal(t, 1, pending)
