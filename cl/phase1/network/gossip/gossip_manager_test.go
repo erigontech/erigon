@@ -974,52 +974,8 @@ func TestRegisterGossipServiceSubscribesProposerPreferencesForNextEpochImmediate
 	if assert.NotNil(t, bpoSubscription) {
 		assert.NotNil(t, bpoSubscription.sub)
 	}
-	require.NoError(t, gm.PublishForEpoch(t.Context(), gloasForkEpoch, gossipnames.TopicNameProposerPreferences, []byte("preference")))
-	require.NoError(t, gm.PublishForEpoch(t.Context(), gloasForkEpoch+1, gossipnames.TopicNameProposerPreferences, []byte("preference")))
-}
-
-func TestPublishForEpochUsesEpochForkDigest(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	currentDigest := common.Bytes4{0x11, 0x22, 0x33, 0x44}
-	epochDigest := common.Bytes4{0xaa, 0xbb, 0xcc, 0xdd}
-	clock := eth_clock.NewMockEthereumClock(ctrl)
-	clock.EXPECT().CurrentForkDigest().Return(currentDigest, nil).AnyTimes()
-	clock.EXPECT().ComputeForkDigest(uint64(3)).Return(epochDigest, nil)
-	h, err := libp2p.New(libp2p.NoListenAddrs)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, h.Close()) })
-	ps, err := pubsub.NewGossipSub(t.Context(), h)
-	require.NoError(t, err)
-	p2pManager := mock_services.NewMockP2PManager(ctrl)
-	p2pManager.EXPECT().Pubsub().Return(ps).AnyTimes()
-	p2pManager.EXPECT().Host().Return(h).AnyTimes()
-	p2pManager.EXPECT().BandwidthCounter().Return(metrics.NewBandwidthCounter()).AnyTimes()
-	beaconConfig := &clparams.BeaconChainConfig{SlotsPerEpoch: 32, SecondsPerSlot: 12}
-	gm := NewGossipManager(
-		t.Context(), p2pManager, beaconConfig, &clparams.NetworkConfig{}, clock, false, 0,
-		datasize.MB, datasize.MB, false,
-	)
-	t.Cleanup(func() { require.NoError(t, gm.Close()) })
-
-	const topicName = "epoch_topic"
-	topic := composeTopic(epochDigest, topicName)
-	topicHandle, err := ps.Join(topic)
-	require.NoError(t, err)
-	require.NoError(t, gm.subscriptions.Add(topic, topicHandle, func(context.Context, peer.ID, *pubsub.Message) pubsub.ValidationResult {
-		return pubsub.ValidationAccept
-	}))
-	subscription, err := topicHandle.Subscribe()
-	require.NoError(t, err)
-	t.Cleanup(subscription.Cancel)
-
-	require.NoError(t, gm.PublishForEpoch(t.Context(), 3, topicName, []byte("preference")))
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	message, err := subscription.Next(ctx)
-	require.NoError(t, err)
-	data, err := utils.DecompressSnappy(message.GetData(), true)
-	require.NoError(t, err)
-	require.Equal(t, []byte("preference"), data)
+	require.NoError(t, gm.PublishToForkDigest(t.Context(), gloasDigest, gossipnames.TopicNameProposerPreferences, []byte("preference")))
+	require.NoError(t, gm.PublishToForkDigest(t.Context(), bpoDigest, gossipnames.TopicNameProposerPreferences, []byte("preference")))
 }
 
 // TestRegisterGossipService_ConditionsForwarded is a regression test for a bug

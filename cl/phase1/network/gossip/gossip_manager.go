@@ -430,14 +430,6 @@ func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) e
 	return g.PublishToForkDigest(ctx, forkDigest, name, data)
 }
 
-func (g *GossipManager) PublishForEpoch(ctx context.Context, epoch uint64, name string, data []byte) error {
-	forkDigest, err := g.ethClock.ComputeForkDigest(epoch)
-	if err != nil {
-		return err
-	}
-	return g.PublishToForkDigest(ctx, forkDigest, name, data)
-}
-
 func (g *GossipManager) PublishToForkDigest(ctx context.Context, forkDigest common.Bytes4, name string, data []byte) error {
 	compressedData := utils.CompressSnappy(data)
 	topic := composeTopic(forkDigest, name)

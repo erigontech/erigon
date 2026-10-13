@@ -783,7 +783,11 @@ func (a *ApiHandler) postProposerPreferences(w http.ResponseWriter, r *http.Requ
 				return
 			}
 			proposalEpoch := state.GetEpochAtSlot(a.beaconChainCfg, req.Message.ProposalSlot)
-			if err := a.gossipManager.PublishForEpoch(r.Context(), proposalEpoch, gossip.TopicNameProposerPreferences, encodedSSZ); err != nil {
+			forkDigest, err := a.ethClock.ComputeForkDigest(proposalEpoch)
+			if err == nil {
+				err = a.gossipManager.PublishToForkDigest(r.Context(), forkDigest, gossip.TopicNameProposerPreferences, encodedSSZ)
+			}
+			if err != nil {
 				a.logger.Debug("[Beacon REST] failed to publish proposer preferences to gossip", "err", err)
 			}
 		}

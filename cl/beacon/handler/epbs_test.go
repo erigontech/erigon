@@ -3463,13 +3463,15 @@ func TestPostProposerPreferencesWithoutServiceConcurrentRequests(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			config := clparams.MainnetBeaconConfig
 			clock := eth_clock.NewMockEthereumClock(ctrl)
+			forkDigest := common.Bytes4{0xaa, 0xbb, 0xcc, 0xdd}
 			clock.EXPECT().GetCurrentSlot().Return(uint64(95)).AnyTimes()
 			clock.EXPECT().GetCurrentEpoch().Return(uint64(2)).AnyTimes()
+			clock.EXPECT().ComputeForkDigest(uint64(3)).Return(forkDigest, nil)
 			epbsPool := pool.NewEpbsPool()
 			gossipManager := gossip_mock.NewMockGossip(ctrl)
 			var gossipCalls atomic.Uint32
-			gossipManager.EXPECT().PublishForEpoch(gomock.Any(), uint64(3), gossip.TopicNameProposerPreferences, gomock.Any()).
-				DoAndReturn(func(context.Context, uint64, string, []byte) error {
+			gossipManager.EXPECT().PublishToForkDigest(gomock.Any(), forkDigest, gossip.TopicNameProposerPreferences, gomock.Any()).
+				DoAndReturn(func(context.Context, common.Bytes4, string, []byte) error {
 					gossipCalls.Add(1)
 					return nil
 				}).AnyTimes()
@@ -3527,11 +3529,13 @@ func TestPostValidatorProposerPreferencesGloasForkBoundary(t *testing.T) {
 		t.Run(contentType, func(t *testing.T) {
 			_, _, _, _, _, handler, _, _, fc, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 			gossipManager := gossip_mock.NewMockGossip(gomock.NewController(t))
-			gossipManager.EXPECT().PublishForEpoch(gomock.Any(), uint64(3), gossip.TopicNameProposerPreferences, gomock.Any()).Return(nil).Times(2)
-			gossipManager.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 			handler.gossipManager = gossipManager
 			handler.sentinel = &nonNilSentinelClient{}
 			cfg := handler.beaconChainCfg
+			cfg.CapellaForkEpoch = 1
+			cfg.DenebForkEpoch = 1
+			cfg.ElectraForkEpoch = 1
+			cfg.FuluForkEpoch = 2
 			cfg.GloasForkEpoch = 3
 			cfg.InitializeForkSchedule()
 			root := common.Hash{1}
@@ -3548,6 +3552,14 @@ func TestPostValidatorProposerPreferencesGloasForkBoundary(t *testing.T) {
 			fc.HeadVal = root
 			handler.epbsPool = pool.NewEpbsPool()
 			clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix())-64*cfg.SecondsPerSlot, common.Hash{}, cfg)
+			proposalForkDigest, err := clock.ComputeForkDigest(3)
+			require.NoError(t, err)
+			currentForkDigest, err := clock.CurrentForkDigest()
+			require.NoError(t, err)
+			require.NotEqual(t, currentForkDigest, proposalForkDigest)
+			gossipManager.EXPECT().PublishToForkDigest(gomock.Any(), proposalForkDigest, gossip.TopicNameProposerPreferences, gomock.Any()).Return(nil).Times(2)
+			gossipManager.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+			handler.ethClock = clock
 			handler.proposerPreferencesService = services.NewProposerPreferencesService(nil, fc, clock, cfg, handler.epbsPool, nil)
 			preferences := make([]*cltypes.SignedProposerPreferences, 0, 3)
 			for _, slot := range []uint64{95, 96, 100} {

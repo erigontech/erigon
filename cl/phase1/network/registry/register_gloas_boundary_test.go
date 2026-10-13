@@ -141,7 +141,7 @@ func TestRegisterGossipServicesProcessesGloasPreferencesOneEpochEarly(t *testing
 			executionPayloadBidService.EXPECT().Names().Return(nil)
 
 			preference := &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{ProposalSlot: 96}}
-			proposerPreferencesService.EXPECT().DecodeGossipMessage(gomock.Any(), []byte("preference"), clparams.FuluVersion).Return(preference, nil).MaxTimes(1)
+			proposerPreferencesService.EXPECT().DecodeGossipMessage(gomock.Any(), []byte("preference"), tt.topicVersion).Return(preference, nil).MaxTimes(1)
 			processed := make(chan struct{})
 			processCall := proposerPreferencesService.EXPECT().ProcessMessage(gomock.Any(), gomock.Nil(), preference)
 			if tt.wantProcessed {
