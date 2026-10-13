@@ -1199,10 +1199,11 @@ func (e *EngineServer) HandleForkChoice(
 	}
 
 	// Call forkchoice here
-	status, validationErr, latestValidHash, err := e.chainRW.UpdateForkChoice(ctx, forkChoice.HeadHash, forkChoice.SafeBlockHash, forkChoice.FinalizedBlockHash)
+	result, err := e.chainRW.UpdateForkChoiceResult(ctx, forkChoice.HeadHash, forkChoice.SafeBlockHash, forkChoice.FinalizedBlockHash)
 	if err != nil {
 		return nil, err
 	}
+	status := result.Status
 	if status == execmodule.ExecutionStatusInvalidForkchoice {
 		return nil, &engine_helpers.InvalidForkchoiceStateErr
 	}
@@ -1210,6 +1211,10 @@ func (e *EngineServer) HandleForkChoice(
 		return nil, &engine_helpers.ReorgTooDeepErr
 	}
 	// engine_forkchoiceUpdated restricts payload statuses to VALID, INVALID, and SYNCING — never ACCEPTED.
+	if status == execmodule.ExecutionStatusMissingSegment && !e.test && result.MissingHash != (common.Hash{}) &&
+		e.blockDownloader.StartDownloading(result.MissingHash, nil, engine_block_downloader.FcuTrigger) {
+		e.logger.Warn(fmt.Sprintf("[%s] Fork choice: need to recover missing segment", logPrefix), "headerHash", headerHash, "missingHash", result.MissingHash)
+	}
 	if status == execmodule.ExecutionStatusBusy ||
 		status == execmodule.ExecutionStatusMissingSegment ||
 		status == execmodule.ExecutionStatusTooFarAway {
@@ -1220,11 +1225,11 @@ func (e *EngineServer) HandleForkChoice(
 	}
 	payloadStatus := &engine_types.PayloadStatus{
 		Status:          convertGrpcStatusToEngineStatus(status),
-		LatestValidHash: &latestValidHash,
+		LatestValidHash: &result.LatestValidHash,
 	}
 
-	if validationErr != nil {
-		payloadStatus.ValidationError = engine_types.NewStringifiedErrorFromString(*validationErr)
+	if result.ValidationError != "" {
+		payloadStatus.ValidationError = engine_types.NewStringifiedErrorFromString(result.ValidationError)
 	}
 	return payloadStatus, nil
 }

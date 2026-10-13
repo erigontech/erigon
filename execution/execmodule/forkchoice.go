@@ -267,6 +267,7 @@ func (e *ExecModule) unwindIfNeeded(
 				return &ForkChoiceResult{
 					LatestValidHash: common.Hash{},
 					Status:          ExecutionStatusMissingSegment,
+					MissingHash:     currentParentHash,
 				}, nil
 			}
 			currentParentHash = currentHeader.ParentHash

@@ -278,3 +278,23 @@ func assertPersistedForkchoice(t *testing.T, db kv.RoDB, head, safe, finalized c
 		return nil
 	}))
 }
+
+func TestForkchoiceMissingSegmentReportsMissingHeader(t *testing.T) {
+	m := execmoduletester.New(t)
+	chain, err := m.GenerateChain(4, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+		for _, b := range chain.Blocks[2:] {
+			if err := rawdb.WriteHeader(tx, b.Header()); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	missing := chain.Blocks[1]
+
+	result, err := m.ExecModule.UpdateForkChoice(t.Context(), chain.TopBlock.Hash(), common.Hash{}, common.Hash{})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusMissingSegment, result.Status)
+	require.Equal(t, missing.Hash(), result.MissingHash)
+}
