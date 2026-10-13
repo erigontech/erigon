@@ -448,24 +448,23 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 						ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
 						Val:        true,
 					})
+					readVersion := sdVersion
+					if pathRead.Status() == MVReadResultDone {
+						readVersion = pathRead.Version()
+					}
 					if path == StoragePath || path == AddressPath {
-						readVersion := sdVersion
-						if pathRead.Status() == MVReadResultDone {
-							readVersion = pathRead.Version()
-						}
 						s.recordWipedRead(addr, path, key, readVersion)
 					}
-					// Per-path revival misses account-level life: a balance-only
-					// credit (fee, transfer) revives the account without writing a
-					// CodeHash entry, and a live account's wiped code hash is
-					// keccak(''), not the nil hash of a nonexistent one.
+					// Per-path revival misses account-level life: a fee credit revives the
+					// account without writing a CodeHash entry, and a live account's wiped code
+					// hash is keccak(''), not the nil hash of a nonexistent one.
 					if path == CodeHashPath && !s.versionMap.destroyedAndUnrevived(addr, s.txIndex) {
 						r.outcome = outcomeMapDone
 						r.mapCodeHashVal = accounts.EmptyCodeHash
-						r.hdr = ReadHeader{Source: MapRead, Version: sdVersion}
+						r.hdr = ReadHeader{Source: MapRead, Version: readVersion}
 						r.recordVR = !commited
 						r.source = MapRead
-						r.version = sdVersion
+						r.version = readVersion
 						return
 					}
 					r.outcome = outcomeReturnZero

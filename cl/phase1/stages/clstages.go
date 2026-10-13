@@ -83,6 +83,8 @@ type Cfg struct {
 	gloasPayloadValidator        gloasPayloadValidator
 	gloasVerificationCursor      common.Hash
 	gloasVerificationHead        common.Hash
+	sleepForSlotLastWake         sleepForSlotWake
+	sleepForSlotHeadChanged      bool
 }
 
 type Args struct {
@@ -418,13 +420,21 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 					if x := MetaCatchingUp(args); x != "" {
 						return x
 					}
+					if cfg.sleepForSlotHeadChanged {
+						return ForkChoice
+					}
 					return ChainTipSync
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					nextSlot := args.seenSlot + 1
-					nextSlotTime := cfg.ethClock.GetSlotTime(nextSlot)
-					time.Sleep(time.Until(nextSlotTime))
-					return nil
+					wake, headChanged, err := waitForNextSlotOrHeadChange(
+						ctx, nextSlot, cfg.beaconCfg, cfg.forkChoice, cfg.syncedData, cfg.ethClock, cfg.sleepForSlotLastWake,
+					)
+					cfg.sleepForSlotHeadChanged = headChanged
+					if headChanged {
+						cfg.sleepForSlotLastWake = wake
+					}
+					return err
 				},
 			},
 		},
