@@ -848,6 +848,49 @@ func TestCreateAccessList(t *testing.T) {
 	})
 }
 
+// A state override on a precompile applies to the access list run as it does
+// to eth_call: a code override replaces the precompile, and a move is accepted
+// on every pass of the convergence loop.
+func TestCreateAccessListStateOverridePrecompile(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	identity := common.HexToAddress("0x0000000000000000000000000000000000000004")
+	moveTo := common.HexToAddress("0x00000000000000000000000000000000000000ee")
+	revert := hexutil.Bytes(hexutil.MustDecode("0x60006000fd"))
+	input := hexutil.Bytes{0xde, 0xad, 0xbe, 0xef}
+
+	t.Run("code replaces the precompile", func(t *testing.T) {
+		res, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+			From: &bankAddr,
+			To:   &identity,
+			Data: &input,
+		}, nil, &ethapi.StateOverrides{
+			accounts.InternAddress(identity): {Code: &revert},
+		}, nil)
+		require.NoError(t, err)
+		require.Equal(t, "execution reverted", res.Error)
+	})
+
+	t.Run("move is accepted on every pass", func(t *testing.T) {
+		// The storage read adds a slot to the list, so the call runs twice and
+		// the move is applied twice.
+		reader := common.HexToAddress("0x00000000000000000000000000000000000000cc")
+		sload := hexutil.Bytes(hexutil.MustDecode("0x60005450"))
+		res, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+			From: &bankAddr,
+			To:   &reader,
+		}, nil, &ethapi.StateOverrides{
+			accounts.InternAddress(reader):   {Code: &sload},
+			accounts.InternAddress(identity): {MovePrecompileTo: &moveTo},
+		}, nil)
+		require.NoError(t, err)
+		require.Empty(t, res.Error)
+		require.Len(t, *res.Accesslist, 1)
+		require.Equal(t, reader, (*res.Accesslist)[0].Address)
+	})
+}
+
 // Init code that reads slot 0 of the contract being created and returns that contract's
 // address, so the access list and eth_call both reveal the nonce the creation used.
 const createdAddressProbe = "0x600054503060005260206000f3"
