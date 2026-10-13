@@ -80,6 +80,8 @@ type branchPrefetcher struct {
 	block  uint64
 	gen    atomic.Uint64
 
+	refless [][]commitment.BranchDelta
+
 	pausing                        atomic.Bool
 	hits, misses, dropped, drained atomic.Uint64
 }
@@ -107,7 +109,42 @@ func (p *branchPrefetcher) start(ctx context.Context, db kv.TemporalRoDB, block 
 	for range branchPrefetchWorkers {
 		p.wg.Go(func() { p.run(ctx, db) })
 	}
+	if deltas := p.refless; deltas != nil {
+		p.refless = nil
+		p.wg.Go(func() { p.fillRefs(deltas) })
+	}
 	return p
+}
+
+func (p *branchPrefetcher) fillRefs(deltas [][]commitment.BranchDelta) {
+	for _, part := range deltas {
+		for i := range part {
+			if p.pausing.Load() {
+				return
+			}
+			key := part[i].Key
+			s := p.shard(key)
+			s.mu.RLock()
+			r, ok := s.records[string(key)]
+			s.mu.RUnlock()
+			if !ok || r.refs != nil || len(r.data) == 0 {
+				continue
+			}
+			refs := v3.ComputeLeafRefs(key, r.data)
+			if refs == nil {
+				continue
+			}
+			s.mu.Lock()
+			if cur, ok := s.records[string(key)]; ok && cur.refs == nil && len(cur.data) == len(r.data) && &cur.data[0] == &r.data[0] {
+				p.bytes.Add(-cur.size(string(key)))
+				cur.refs = refs
+				s.records[string(key)] = cur
+				p.bytes.Add(cur.size(string(key)))
+				mxBranchCarryRefsFilled.Inc()
+			}
+			s.mu.Unlock()
+		}
+	}
 }
 
 func (p *branchPrefetcher) store(s *prefetchedShard, key string, r prefetchedRecord) {
@@ -130,6 +167,7 @@ func (p *branchPrefetcher) adopt(deltas [][]commitment.BranchDelta, block uint64
 		}
 	}
 	p.evictBefore(block + 1 - min(block+1, branchCarryBlocks))
+	p.refless = deltas
 }
 
 func (p *branchPrefetcher) evictBefore(block uint64) {
@@ -278,8 +316,9 @@ func (p *branchPrefetcher) getAt(key []byte, gen uint64) ([]byte, kv.Step, bool)
 }
 
 var (
-	mxBranchCarryAdopted = metrics.GetOrCreateCounter("commitment_branch_carry_adopted_total")
-	mxBranchCarryDropped = metrics.GetOrCreateCounter("commitment_branch_carry_dropped_total")
+	mxBranchCarryAdopted    = metrics.GetOrCreateCounter("commitment_branch_carry_adopted_total")
+	mxBranchCarryDropped    = metrics.GetOrCreateCounter("commitment_branch_carry_dropped_total")
+	mxBranchCarryRefsFilled = metrics.GetOrCreateCounter("commitment_branch_carry_refs_filled_total")
 )
 
 var branchCarry struct {

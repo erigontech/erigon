@@ -899,6 +899,7 @@ func TestHeadCaptureOverCarriedRecordsMatchesDurablePerBlock(t *testing.T) {
 	require.NoError(t, m.InsertChain(testChain.Slice(0, 1)))
 
 	adopted := metrics.GetOrCreateCounter("commitment_branch_carry_adopted_total").GetValueUint64()
+	filled := metrics.GetOrCreateCounter("commitment_branch_carry_refs_filled_total").GetValueUint64()
 	used := witnessCacheParentRecordsCounter.GetValueUint64()
 	onDemand := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
 	for n := uint64(2); n <= uint64(testChain.Length()); n++ {
@@ -928,4 +929,5 @@ func TestHeadCaptureOverCarriedRecordsMatchesDurablePerBlock(t *testing.T) {
 	}
 	require.Positive(t, metrics.GetOrCreateCounter("commitment_branch_carry_adopted_total").GetValueUint64()-adopted, "blocks validated one at a time adopt the carried records")
 	require.Positive(t, witnessCacheParentRecordsCounter.GetValueUint64()-used, "head-capture builds read the published records")
+	require.Positive(t, metrics.GetOrCreateCounter("commitment_branch_carry_refs_filled_total").GetValueUint64()-filled, "records adopted from a block's deltas get their leaf refs")
 }
