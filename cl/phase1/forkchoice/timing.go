@@ -287,7 +287,7 @@ func (f *ForkChoiceStore) isHeadWeakWith(root common.Hash, checkpointState *chec
 	if checkpointState == nil {
 		return false
 	}
-	committeeWeight := checkpointState.activeBalance / f.beaconCfg.SlotsPerEpoch
+	committeeWeight := checkpointState.unslashedActiveBalance / f.beaconCfg.SlotsPerEpoch
 	reorgThreshold := committeeWeight * clparams.ReorgHeadWeightThreshold / 100
 	weight := headWeight(root)
 	headBlock, ok := f.forkGraph.GetBlock(root)

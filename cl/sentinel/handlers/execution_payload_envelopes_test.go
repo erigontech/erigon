@@ -68,15 +68,40 @@ type executionPayloadEnvelopesByRangeTestCase struct {
 	allPayloadsEmpty    bool
 	incompleteBlockAt   uint64
 	startAtGenesis      bool
+	serveUnfinalized    bool
 	verifyRateLimit     bool
 	wantEnvelopeCount   int
 	wantResponsePrefix  byte
+}
+
+func TestExecutionPayloadServeEpochIncludesUnfinalizedHistory(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.GloasForkEpoch = 10
+	currentEpoch := cfg.MinEpochsForBlockRequests() + 100
+
+	for _, tc := range []struct {
+		name           string
+		currentEpoch   uint64
+		finalizedEpoch uint64
+		want           uint64
+	}{
+		{name: "finalized before request window", currentEpoch: currentEpoch, finalizedEpoch: 20, want: 20},
+		{name: "finalized before Gloas", currentEpoch: currentEpoch, finalizedEpoch: 5, want: 10},
+		{name: "finalized at request window", currentEpoch: currentEpoch, finalizedEpoch: 100, want: 100},
+		{name: "finalized after request window", currentEpoch: currentEpoch, finalizedEpoch: 101, want: 100},
+		{name: "current epoch inside request window", currentEpoch: 50, finalizedEpoch: 5, want: 10},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, minExecutionPayloadServeEpoch(&cfg, tc.currentEpoch, tc.finalizedEpoch))
+		})
+	}
 }
 
 func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 	for _, tc := range []executionPayloadEnvelopesByRangeTestCase{
 		{name: "empty head payload", headPayloadStatus: cltypes.PayloadStatusEmpty},
 		{name: "full head payload", headPayloadStatus: cltypes.PayloadStatusFull},
+		{name: "unfinalized history before request window", headPayloadStatus: cltypes.PayloadStatusFull, serveUnfinalized: true},
 		{name: "pending head payload", headPayloadStatus: cltypes.PayloadStatusPending},
 		{name: "unavailable history", headPayloadStatus: cltypes.PayloadStatusFull, unavailable: true, wantResponsePrefix: ResourceUnavailablePrefix},
 		{name: "overflowing range", headPayloadStatus: cltypes.PayloadStatusFull, overflow: true, wantResponsePrefix: InvalidRequestPrefix},
@@ -179,13 +204,19 @@ func testExecutionPayloadEnvelopesByRangeHandler(
 
 	ethClock, beaconCfg := getGloasEthClockAndConfig(t)
 
-	// Use a startSlot near the current slot so blocks fall within the serve range
-	// (the handler enforces minServeEpoch based on the current epoch).
+	// Keep the default range inside the request window.
 	count := tc.canonicalBlockCount
 	if count == 0 {
 		count = 5
 	}
 	startSlot := ethClock.GetCurrentSlot() - count - 5
+	finalizedEpoch := ethClock.GetCurrentEpoch()
+	if tc.serveUnfinalized {
+		require.Greater(t, finalizedEpoch, beaconCfg.MinEpochsForBlockRequests()+2)
+		windowLowerBound := finalizedEpoch - beaconCfg.MinEpochsForBlockRequests()
+		startSlot = (windowLowerBound - 1) * beaconCfg.SlotsPerEpoch
+		finalizedEpoch = windowLowerBound - 2
+	}
 
 	// Populate database with blocks (needed for canonical root lookup)
 	expBlocks := populateDatabaseWithBlocks(t, store, tx, startSlot, count-1)
@@ -193,6 +224,7 @@ func testExecutionPayloadEnvelopesByRangeHandler(
 
 	// Create mock fork choice with envelopes
 	fcMock := mock_services.NewForkChoiceStorageMock(t)
+	fcMock.FinalizedCheckpointVal = solid.Checkpoint{Epoch: finalizedEpoch}
 
 	// Create envelopes for each block and store them in mock.
 	// The canonical block root is HashSSZ(header), computed by WriteBeaconBlockHeaderAndIndicies.
@@ -436,8 +468,7 @@ func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
 
 	ethClock, beaconCfg := getGloasEthClockAndConfig(t)
 
-	// Use a startSlot near the current slot so blocks fall within the serve range
-	// (the handler enforces minServeEpoch based on the current epoch).
+	// Keep the requested roots inside the request window.
 	startSlot := ethClock.GetCurrentSlot() - 10
 	count := uint64(5)
 
@@ -445,6 +476,7 @@ func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
 	require.NoError(t, tx.Commit())
 
 	fcMock := mock_services.NewForkChoiceStorageMock(t)
+	fcMock.FinalizedCheckpointVal = solid.Checkpoint{Epoch: ethClock.GetCurrentEpoch()}
 
 	// Create envelopes keyed by block root
 	expEnvelopes := make([]*cltypes.SignedExecutionPayloadEnvelope, 0, count)
