@@ -3471,8 +3471,6 @@ type wsSlabs struct {
 	storage        vwSlab[uint256.Int]
 }
 
-func (v *writeView) recycler() *wsSlabs { return &v.slabs }
-
 const acctChunk = 32
 
 // acctSlab holds this tx's AddressPath records; a record stays valid until

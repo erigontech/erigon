@@ -3130,177 +3130,86 @@ func (ibs *IntraBlockState) accountRead(addr accounts.Address, account *accounts
 	}
 }
 
-// recordWriteX helpers record a versioned write at the specified path
-// directly into the typed per-path map.  No generic dispatcher / runtime
-// type switch — each helper is monomorphic by path.
-
-// recordWrite* — typed write recorders for each AccountPath. A repeat write
-// to the same (addr[,key]) reuses the existing *VersionedWrite[T] in place;
-// the first one per tx takes a cell from the write view's slab.
+// recordWrite sets this tx's write at addr's path. A repeat write reuses the
+// earlier cell; the first one takes a cell from the write view's slab.
+func recordWrite[T any](ibs *IntraBlockState, addr accounts.Address, path AccountPath, pick func(*acctIO) **VersionedWrite[T], slab *vwSlab[T], val T) *VersionedWrite[T] {
+	p := pick(ibs.versionedReads.get(addr))
+	vw := *p
+	if vw == nil {
+		vw = slab.get()
+		vw.WriteHeader = WriteHeader{Address: addr, Path: path}
+		*p = vw
+	}
+	vw.Version = ibs.Version()
+	vw.Val = val
+	return vw
+}
 
 func (ibs *IntraBlockState) recordWriteBalance(addr accounts.Address, val uint256.Int) {
 	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap == nil {
-		return
+	if ibs.versionMap != nil {
+		traceWrite(ibs, recordWrite(ibs, addr, BalancePath, pickWBalance, &ibs.versionedWrites.slabs.balance, val))
 	}
-	if vw, ok := ibs.versionedWrites.GetBalance(addr); ok {
-		vw.Version = ibs.Version()
-		vw.Val = val
-		traceWrite(ibs, vw)
-		return
-	}
-	vw := ibs.versionedWrites.recycler().balance.get()
-	vw.WriteHeader = WriteHeader{Address: addr, Path: BalancePath, Version: ibs.Version()}
-	vw.Val = val
-	ibs.versionedWrites.SetBalance(addr, vw)
-	traceWrite(ibs, vw)
 }
 
 func (ibs *IntraBlockState) recordWriteNonce(addr accounts.Address, val uint64, reason tracing.NonceChangeReason) {
 	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap == nil {
-		return
-	}
-	if vw, ok := ibs.versionedWrites.GetNonce(addr); ok {
-		vw.Version = ibs.Version()
-		vw.Val = val
+	if ibs.versionMap != nil {
+		vw := recordWrite(ibs, addr, NoncePath, pickWNonce, &ibs.versionedWrites.slabs.nonce, val)
 		vw.NonceReason = reason
 		traceWrite(ibs, vw)
-		return
 	}
-	vw := ibs.versionedWrites.recycler().nonce.get()
-	vw.WriteHeader = WriteHeader{Address: addr, Path: NoncePath, Version: ibs.Version(), NonceReason: reason}
-	vw.Val = val
-	ibs.versionedWrites.SetNonce(addr, vw)
-	traceWrite(ibs, vw)
 }
 
 func (ibs *IntraBlockState) recordWriteIncarnation(addr accounts.Address, val uint64) {
 	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap == nil {
-		return
+	if ibs.versionMap != nil {
+		traceWrite(ibs, recordWrite(ibs, addr, IncarnationPath, pickWIncarnation, &ibs.versionedWrites.slabs.incarnation, val))
 	}
-	if vw, ok := ibs.versionedWrites.GetIncarnation(addr); ok {
-		vw.Version = ibs.Version()
-		vw.Val = val
-		traceWrite(ibs, vw)
-		return
-	}
-	vw := ibs.versionedWrites.recycler().incarnation.get()
-	vw.WriteHeader = WriteHeader{Address: addr, Path: IncarnationPath, Version: ibs.Version()}
-	vw.Val = val
-	ibs.versionedWrites.SetIncarnation(addr, vw)
-	traceWrite(ibs, vw)
 }
 
 func (ibs *IntraBlockState) recordWriteSelfDestruct(addr accounts.Address, val bool) {
 	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap == nil {
-		return
+	if ibs.versionMap != nil {
+		traceWrite(ibs, recordWrite(ibs, addr, SelfDestructPath, pickWSelfDestruct, &ibs.versionedWrites.slabs.selfDestruct, val))
 	}
-	if vw, ok := ibs.versionedWrites.GetSelfDestruct(addr); ok {
-		vw.Version = ibs.Version()
-		vw.Val = val
-		traceWrite(ibs, vw)
-		return
-	}
-	vw := ibs.versionedWrites.recycler().selfDestruct.get()
-	vw.WriteHeader = WriteHeader{Address: addr, Path: SelfDestructPath, Version: ibs.Version()}
-	vw.Val = val
-	ibs.versionedWrites.SetSelfDestruct(addr, vw)
-	traceWrite(ibs, vw)
 }
 
 func (ibs *IntraBlockState) recordWriteCreateContract(addr accounts.Address, val bool) {
 	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap == nil {
-		return
+	if ibs.versionMap != nil {
+		traceWrite(ibs, recordWrite(ibs, addr, CreateContractPath, pickWCreateContract, &ibs.versionedWrites.slabs.createContract, val))
 	}
-	if vw, ok := ibs.versionedWrites.GetCreateContract(addr); ok {
-		vw.Version = ibs.Version()
-		vw.Val = val
-		traceWrite(ibs, vw)
-		return
-	}
-	vw := ibs.versionedWrites.recycler().createContract.get()
-	vw.WriteHeader = WriteHeader{Address: addr, Path: CreateContractPath, Version: ibs.Version()}
-	vw.Val = val
-	ibs.versionedWrites.SetCreateContract(addr, vw)
-	traceWrite(ibs, vw)
 }
 
 func (ibs *IntraBlockState) recordWriteCode(addr accounts.Address, val accounts.Code) {
 	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap == nil {
-		return
+	if ibs.versionMap != nil {
+		traceWrite(ibs, recordWrite(ibs, addr, CodePath, pickWCode, &ibs.versionedWrites.slabs.code, val))
 	}
-	if vw, ok := ibs.versionedWrites.GetCode(addr); ok {
-		vw.Version = ibs.Version()
-		vw.Val = val
-		traceWrite(ibs, vw)
-		return
-	}
-	vw := ibs.versionedWrites.recycler().code.get()
-	vw.WriteHeader = WriteHeader{Address: addr, Path: CodePath, Version: ibs.Version()}
-	vw.Val = val
-	ibs.versionedWrites.SetCode(addr, vw)
-	traceWrite(ibs, vw)
 }
 
 func (ibs *IntraBlockState) recordWriteCodeHash(addr accounts.Address, val accounts.CodeHash) {
 	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap == nil {
-		return
+	if ibs.versionMap != nil {
+		traceWrite(ibs, recordWrite(ibs, addr, CodeHashPath, pickWCodeHash, &ibs.versionedWrites.slabs.codeHash, val))
 	}
-	if vw, ok := ibs.versionedWrites.GetCodeHash(addr); ok {
-		vw.Version = ibs.Version()
-		vw.Val = val
-		traceWrite(ibs, vw)
-		return
-	}
-	vw := ibs.versionedWrites.recycler().codeHash.get()
-	vw.WriteHeader = WriteHeader{Address: addr, Path: CodeHashPath, Version: ibs.Version()}
-	vw.Val = val
-	ibs.versionedWrites.SetCodeHash(addr, vw)
-	traceWrite(ibs, vw)
 }
 
 func (ibs *IntraBlockState) recordWriteCodeSize(addr accounts.Address, val int) {
 	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap == nil {
-		return
+	if ibs.versionMap != nil {
+		traceWrite(ibs, recordWrite(ibs, addr, CodeSizePath, pickWCodeSize, &ibs.versionedWrites.slabs.codeSize, val))
 	}
-	if vw, ok := ibs.versionedWrites.GetCodeSize(addr); ok {
-		vw.Version = ibs.Version()
-		vw.Val = val
-		traceWrite(ibs, vw)
-		return
-	}
-	vw := ibs.versionedWrites.recycler().codeSize.get()
-	vw.WriteHeader = WriteHeader{Address: addr, Path: CodeSizePath, Version: ibs.Version()}
-	vw.Val = val
-	ibs.versionedWrites.SetCodeSize(addr, vw)
-	traceWrite(ibs, vw)
 }
 
 func (ibs *IntraBlockState) recordWriteAddress(addr accounts.Address, account *accounts.Account) {
 	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap == nil {
-		return
+	if ibs.versionMap != nil {
+		// A copy, made only here: the caller's account keeps changing.
+		val := ibs.versionedWrites.accts.copyOf(account)
+		traceWrite(ibs, recordWrite(ibs, addr, AddressPath, pickWAddress, &ibs.versionedWrites.slabs.address, val))
 	}
-	// A copy, made only here: the caller's account keeps changing.
-	val := ibs.versionedWrites.accts.copyOf(account)
-	if vw, ok := ibs.versionedWrites.GetAddress(addr); ok {
-		vw.Version = ibs.Version()
-		vw.Val = val
-		traceWrite(ibs, vw)
-		return
-	}
-	vw := ibs.versionedWrites.recycler().address.get()
-	vw.WriteHeader = WriteHeader{Address: addr, Path: AddressPath, Version: ibs.Version()}
-	vw.Val = val
-	ibs.versionedWrites.SetAddress(addr, vw)
-	traceWrite(ibs, vw)
 }
 
 func (ibs *IntraBlockState) recordWriteStorage(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
@@ -3308,16 +3217,18 @@ func (ibs *IntraBlockState) recordWriteStorage(addr accounts.Address, key accoun
 	if ibs.versionMap == nil {
 		return
 	}
-	if vw, ok := ibs.versionedWrites.GetStorage(addr, key); ok {
-		vw.Version = ibs.Version()
-		vw.Val = val
-		traceWrite(ibs, vw)
-		return
+	r := ibs.versionedReads.get(addr)
+	vw, ok := r.wStorage[key]
+	if !ok {
+		vw = ibs.versionedWrites.slabs.storage.get()
+		vw.WriteHeader = WriteHeader{Address: addr, Path: StoragePath, Key: key}
+		if r.wStorage == nil {
+			r.wStorage = make(map[accounts.StorageKey]*VersionedWrite[uint256.Int])
+		}
+		r.wStorage[key] = vw
 	}
-	vw := ibs.versionedWrites.recycler().storage.get()
-	vw.WriteHeader = WriteHeader{Address: addr, Path: StoragePath, Key: key, Version: ibs.Version()}
+	vw.Version = ibs.Version()
 	vw.Val = val
-	ibs.versionedWrites.SetStorage(addr, key, vw)
 	traceWrite(ibs, vw)
 }
 
