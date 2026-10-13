@@ -2291,9 +2291,15 @@ func TestPostExecutionPayloadEnvelopePublishesAnInterruptedValidation(t *testing
 		t.Run(path, func(t *testing.T) {
 			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 			gossipManager := gossip_mock.NewMockGossip(gomock.NewController(t))
-			// A topic publish gives up on a done context, as the request's is here.
+			// A topic publish gives up on a done context, as the request's is here, and may otherwise
+			// block for as long as its context allows.
 			gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any()).
-				DoAndReturn(func(ctx context.Context, _ string, _ []byte) error { return ctx.Err() })
+				DoAndReturn(func(ctx context.Context, _ string, _ []byte) error {
+					if _, bounded := ctx.Deadline(); !bounded {
+						return errors.New("publish without a deadline")
+					}
+					return ctx.Err()
+				})
 			handler.gossipManager = gossipManager
 			handler.sentinel = &nonNilSentinelClient{}
 			requestCtx, cancelRequest := context.WithCancel(t.Context())
