@@ -399,7 +399,7 @@ func (s *simulator) sanitizeCall(
 
 	if args.Gas == nil {
 		// Default to remaining block gas, but capped by the node's effective gas cap.
-		remaining := min(blockGas.BlockGasRemaining(), effectiveCap)
+		remaining := min(blockGas.ExecutionGasAvailable(), blockGas.StateGasAvailable(), effectiveCap)
 		args.Gas = (*hexutil.Uint64)(&remaining)
 	} else if globalGasCap > 0 && globalGasCap < uint64(*args.Gas) {
 		log.Warn("Caller gas above allowance, capping", "requested", args.Gas, "cap", globalGasCap)
