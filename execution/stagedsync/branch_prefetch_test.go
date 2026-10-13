@@ -76,6 +76,18 @@ func TestBranchPrefetcherCountsDroppedAndDrained(t *testing.T) {
 	require.Equal(t, uint64(1), p.drained.Load(), "an item still queued when compute starts is drained")
 }
 
+func TestBranchPrefetcherChunkStopsOnPause(t *testing.T) {
+	p := &branchPrefetcher{work: make(chan prefetchItem, 2*branchPrefetchPerTx)}
+	for i := range 2 * branchPrefetchPerTx {
+		p.add(prefetchItem{account: common.Hash{byte(i), byte(i >> 8)}})
+	}
+	read := func([]byte) []byte { return nil }
+	require.Equal(t, branchPrefetchPerTx, p.walkChunk(<-p.work, read), "an unpaused worker walks a full chunk")
+	p.pausing.Store(true)
+	require.Equal(t, 1, p.walkChunk(<-p.work, read), "a pending pause stops the chunk after the item in hand")
+	require.Len(t, p.work, branchPrefetchPerTx-1)
+}
+
 func TestHandleBlockRequestQueuesBALWrites(t *testing.T) {
 	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
 	dbg.IgnoreBAL = false

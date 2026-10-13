@@ -64,6 +64,7 @@ type branchPrefetcher struct {
 	shards [branchPrefetchShards]prefetchedShard
 	bytes  atomic.Int64
 
+	pausing                        atomic.Bool
 	hits, misses, dropped, drained atomic.Uint64
 }
 
@@ -112,6 +113,7 @@ func (p *branchPrefetcher) pause() {
 	if p == nil {
 		return
 	}
+	p.pausing.Store(true)
 	p.gate.Lock()
 	p.drained.Add(uint64(p.drain()))
 }
@@ -129,6 +131,7 @@ func (p *branchPrefetcher) drain() (n int) {
 
 func (p *branchPrefetcher) resume() {
 	if p != nil {
+		p.pausing.Store(false)
 		p.gate.Unlock()
 	}
 }
@@ -198,22 +201,26 @@ func (p *branchPrefetcher) run(ctx context.Context, db kv.TemporalRoDB) {
 			}
 			return p.put(key, data, step)
 		}
-		it.touch(read)
-	chunk:
-		for range branchPrefetchPerTx - 1 {
-			select {
-			case next, ok := <-p.work:
-				if !ok {
-					break chunk
-				}
-				next.touch(read)
-			default:
-				break chunk
-			}
-		}
+		p.walkChunk(it, read)
 		tx.Rollback()
 		p.gate.RUnlock()
 	}
+}
+
+func (p *branchPrefetcher) walkChunk(it prefetchItem, read func(key []byte) []byte) (n int) {
+	it.touch(read)
+	for n = 1; n < branchPrefetchPerTx && !p.pausing.Load(); n++ {
+		select {
+		case next, ok := <-p.work:
+			if !ok {
+				return n
+			}
+			next.touch(read)
+		default:
+			return n
+		}
+	}
+	return n
 }
 
 func (it *prefetchItem) touch(read func(key []byte) []byte) {
