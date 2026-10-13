@@ -1746,6 +1746,18 @@ func TestReusedIOTableDropsTooManySlotMaps(t *testing.T) {
 	require.Zero(t, n, "too many addresses must drop every slot map")
 }
 
+// Addresses read without slots hold no map, so they do not count toward the bound.
+func TestReusedIOTableKeepsSlotMapsAmongManyAddresses(t *testing.T) {
+	var tb ioTable
+	for i := range maxReusedStorageAddrs + 1 {
+		tb.SetBalance(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i+1)))), VersionedRead[uint256.Int]{})
+	}
+	tb.SetStorage(accounts.InternAddress(common.HexToAddress("0xc0de")), accounts.InternKey(common.HexToHash("0x01")), VersionedRead[uint256.Int]{})
+	tb.reset()
+	n, _ := slotMaps(&tb)
+	require.Equal(t, 1, n, "the one slot map stays")
+}
+
 // Slot maps from earlier calls go, so a sequence of calls on different
 // contracts cannot pin one map each.
 func TestReusedIOTableDropsSlotMapsItNoLongerUses(t *testing.T) {
