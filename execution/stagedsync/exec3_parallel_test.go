@@ -3,6 +3,7 @@ package stagedsync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"math/rand"
@@ -582,8 +583,6 @@ func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.
 		return nil, nil
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-
 	applyResults := make(chan applyResult, 1000)
 	consumers := newResultStream()
 	consumers.register("applyResults", applyResults)
@@ -599,11 +598,18 @@ func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.
 		}
 	}
 
-	cancel()
-	_ = pe.wait(ctx)
+	// Mirror production shutdown (executorCancel then wait): cancel the exec loop
+	// and harvest its verdict. The old throwaway-ctx wait dropped a real execLoop
+	// error as nil, so a swallowed failure left this sweep green.
+	if pe.cancelExecLoop != nil {
+		pe.cancelExecLoop(nil)
+	}
+	err = pe.wait()
 
 	if check != nil {
-		err = check(pe)
+		if cerr := check(pe); cerr != nil {
+			err = errors.Join(err, cerr)
+		}
 	}
 
 	return result, err

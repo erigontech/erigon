@@ -2,7 +2,6 @@ package stagedsync
 
 import (
 	"context"
-	"errors"
 	"testing"
 )
 
@@ -103,49 +102,6 @@ func TestResultStream_CloseOrderCommitBeforeApply(t *testing.T) {
 	}
 }
 
-func TestResultStream_CloseIsIdempotent(t *testing.T) {
-	t.Parallel()
-	apply := make(chan applyResult)
-	commit := make(chan applyResult)
-	s := newResultStream()
-	s.register("applyResults", apply)
-	s.register("commitResults", commit)
-
-	_ = s.close()
-	if order := s.close(); len(order) != 0 {
-		t.Errorf("second close must be a no-op; got %v", order)
-	}
-}
-
-func TestResultStream_CloseRecoversExternalDoubleClose(t *testing.T) {
-	t.Parallel()
-	apply := make(chan applyResult)
-	commit := make(chan applyResult)
-	s := newResultStream()
-	s.register("applyResults", apply)
-	s.register("commitResults", commit)
-	// A racing shutdown path closed them first.
-	close(apply)
-	close(commit)
-
-	order := s.close() // must not panic
-	if len(order) != 0 {
-		t.Errorf("externally-closed sinks must not count as freshly closed; got %v", order)
-	}
-}
-
-func TestResultStream_PublishOnClosedIsCanceled(t *testing.T) {
-	t.Parallel()
-	apply := make(chan applyResult, 1)
-	s := newResultStream()
-	s.register("applyResults", apply)
-	_ = s.close()
-
-	if err := s.publish(context.Background(), "r", false); !errors.Is(err, context.Canceled) {
-		t.Fatalf("publish on a closed sink must return context.Canceled; got %v", err)
-	}
-}
-
 func TestResultStream_SendControlTargetsOneSink(t *testing.T) {
 	t.Parallel()
 	apply := make(chan applyResult, 1)
@@ -163,14 +119,4 @@ func TestResultStream_SendControlTargetsOneSink(t *testing.T) {
 		t.Fatalf("control message must not reach the apply sink; got %v", got)
 	default:
 	}
-}
-
-func TestResultStream_SendControlOnClosedIsDropped(t *testing.T) {
-	t.Parallel()
-	commit := make(chan applyResult, 1)
-	s := newResultStream()
-	s.register("commitResults", commit)
-	_ = s.close()
-	// Must not panic — a closed target during shutdown drops the control message.
-	s.sendControl("commitResults", "ctrl")
 }

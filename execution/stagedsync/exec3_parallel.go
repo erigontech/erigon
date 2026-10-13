@@ -565,15 +565,23 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// that would otherwise mask it. A deferred commit wrong-root does its
 					// unwind here (not inline) so a !initialCycle reorg marks the bad
 					// block with the implicated block's OWN hash.
+					opStop, _ := stopCauseOf(executorContext)
 					if fail.set {
+						// A generic commit wrong-root can be a symptom of a concurrent
+						// operational abort (incomplete state manufactures a wrong root):
+						// surface the operational error instead so a valid block is not
+						// marked bad. An authoritative exec verdict is returned regardless.
+						if deferVerdictToOperational(fail.exec, opStop) {
+							return opStop.err
+						}
 						pe.failedBlock, pe.failedHash = fail.block, fail.blockHash
 						return fail.err
 					}
 					// An operational abort is an infrastructure failure, not a block
 					// verdict: return it raw (retryable, no unwind) before the missing-block
 					// guard, since it legitimately leaves later blocks unexecuted.
-					if sc, ok := stopCauseOf(executorContext); ok && sc.kind == stopOperational {
-						return sc.err
+					if opStop != nil && opStop.kind == stopOperational {
+						return opStop.err
 					}
 					// A plain (non-stopCause) context cancellation — shutdown, or the CL
 					// cancelling the payload — is operational, not a block verdict: return
@@ -836,7 +844,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	}
 
 	// Wait for all goroutines to complete before reading shared state.
-	if waitErr := pe.wait(ctx); waitErr != nil {
+	if waitErr := pe.wait(); waitErr != nil {
 		if execErr == nil {
 			execErr = waitErr
 		} else {
@@ -1369,6 +1377,15 @@ func (fc *failCandidate) consider(block uint64, blockHash common.Hash, exec bool
 	}
 }
 
+// deferVerdictToOperational reports whether a recorded failure should yield to a
+// concurrent operational abort instead of surfacing as a block verdict. A generic
+// commit wrong-root (failExec false) can be a symptom of an infrastructure failure
+// that left state incomplete, so an in-flight operational stop supersedes it (the
+// error is retryable, no bad block). An authoritative exec verdict never yields.
+func deferVerdictToOperational(failExec bool, stop *stopCause) bool {
+	return !failExec && stop != nil && stop.kind == stopOperational
+}
+
 // execLoopExitDecision is the result of evaluating the exec-loop's
 // per-blockResult exit conditions. Values are ordered by precedence:
 // later conditions only matter if no earlier one fired.
@@ -1598,30 +1615,22 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		pe.mintedWorkers = nil
 		pe.mintMu.Unlock()
 
-		_ = pe.wait(ctx)
+		_ = pe.wait()
 	}, nil
 }
 
-func (pe *parallelExecutor) wait(ctx context.Context) error {
-	doneCh := make(chan error, 1)
-
-	go func() {
-		if pe.execLoopGroup != nil {
-			err := pe.execLoopGroup.Wait()
-			if err != nil && !errors.Is(err, context.Canceled) {
-				doneCh <- err
-				return
-			}
-		}
-		doneCh <- nil
-	}()
-
-	select {
-	case <-ctx.Done():
+// wait blocks for the exec-loop group and returns its verdict. The caller
+// cancels the executor context before calling wait, so the group is already
+// unwinding; blocking on it (rather than racing a ctx.Done escape that returned
+// nil) is what surfaces a real execLoop failure instead of hiding it.
+func (pe *parallelExecutor) wait() error {
+	if pe.execLoopGroup == nil {
 		return nil
-	case err := <-doneCh:
+	}
+	if err := pe.execLoopGroup.Wait(); err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}
+	return nil
 }
 
 type applyResult any

@@ -2,16 +2,13 @@ package stagedsync
 
 import (
 	"context"
-	"runtime"
 	"slices"
-	"strings"
 )
 
 // resultSink is one fan-out destination for the exec loop's result stream.
 type resultSink struct {
-	name   string
-	ch     chan applyResult
-	closed bool // touched only by resultStream.close; publish never reads it
+	name string
+	ch   chan applyResult
 }
 
 // resultStream is the exec loop's fan-out registry, owning result delivery to
@@ -19,6 +16,11 @@ type resultSink struct {
 // are registered in publish order; close walks them in reverse so the commitment
 // calculator's channel closes before the apply loop's, or the trailing
 // commitment write lands on a closed channel.
+//
+// publish, sendControl and close all run on the single exec-loop goroutine (close
+// is its deferred closeApplyChannels; the sends come from the exec loop and
+// processSingleResult), so a send after close or a double close cannot happen and
+// needs no recover — if one ever did it would be a bug worth the panic.
 type resultStream struct {
 	sinks []*resultSink
 }
@@ -36,18 +38,8 @@ func (s *resultStream) register(name string, ch chan applyResult) {
 // blocks unconditionally on each (the terminal blockResult must reach every
 // consumer even after ctx is cancelled); otherwise it only honours ctx.Done once
 // a consumer's buffer is full, so a truly-gone consumer cannot deadlock the
-// producer. A send on a channel closed during shutdown is reported as
-// context.Canceled.
-func (s *resultStream) publish(ctx context.Context, r applyResult, mustDeliver bool) (err error) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			if e, ok := rec.(runtime.Error); ok && strings.Contains(e.Error(), "send on closed channel") {
-				err = context.Canceled
-				return
-			}
-			panic(rec)
-		}
-	}()
+// producer.
+func (s *resultStream) publish(ctx context.Context, r applyResult, mustDeliver bool) error {
 	for _, sink := range s.sinks {
 		if sink.ch == nil {
 			continue
@@ -70,16 +62,8 @@ func (s *resultStream) publish(ctx context.Context, r applyResult, mustDeliver b
 }
 
 // sendControl delivers an out-of-band message to a single named consumer,
-// blocking until it lands. A closed target during shutdown drops the message.
+// blocking until it lands.
 func (s *resultStream) sendControl(name string, r applyResult) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			if e, ok := rec.(runtime.Error); ok && strings.Contains(e.Error(), "send on closed channel") {
-				return
-			}
-			panic(rec)
-		}
-	}()
 	for _, sink := range s.sinks {
 		if sink.name == name && sink.ch != nil {
 			sink.ch <- r
@@ -88,29 +72,15 @@ func (s *resultStream) sendControl(name string, r applyResult) {
 	}
 }
 
-// close closes every registered consumer's channel in reverse registration
-// order and returns the names closed, in order. Safe to call repeatedly: an
-// already-closed sink is skipped and a concurrent close by a racing shutdown
-// path is recovered.
+// close closes every registered consumer's channel in reverse registration order
+// and returns the names closed, in order.
 func (s *resultStream) close() (closedOrder []string) {
 	for _, sink := range slices.Backward(s.sinks) {
-		if sink.ch == nil || sink.closed {
+		if sink.ch == nil {
 			continue
 		}
-		func() {
-			defer func() {
-				if rec := recover(); rec != nil {
-					if e, ok := rec.(runtime.Error); ok && strings.Contains(e.Error(), "close of closed channel") {
-						sink.closed = true
-						return
-					}
-					panic(rec)
-				}
-			}()
-			close(sink.ch)
-			sink.closed = true
-			closedOrder = append(closedOrder, sink.name)
-		}()
+		close(sink.ch)
+		closedOrder = append(closedOrder, sink.name)
 	}
 	return
 }
