@@ -137,13 +137,18 @@ func TestBranchCarryAdoptsVerifiedDeltasOnlyAtItsHead(t *testing.T) {
 	storeBranchCarry(db, p, head, deltas, 5)
 	got := takeBranchCarry(db, 10, common.Hash{10})
 	require.Same(t, p, got)
-	for key, want := range map[byte]string{0x01: "kept", 0x02: "new", 0x03: "born"} {
-		data, _, ok := got.get([]byte{key})
-		require.True(t, ok)
-		require.Equal(t, want, string(data))
+	want := map[byte]string{0x01: "kept", 0x02: "new", 0x03: "born"}
+	for _, stage := range []string{"attached", "merged"} {
+		for key, w := range want {
+			data, _, ok := got.get([]byte{key})
+			require.True(t, ok, stage)
+			require.Equal(t, w, string(data), stage)
+		}
+		_, step, _ := got.get([]byte{0x02})
+		require.Equal(t, kv.Step(5), step, stage)
+		got.mergeOverlay()
 	}
-	_, step, _ := got.get([]byte{0x02})
-	require.Equal(t, kv.Step(5), step)
+	require.Nil(t, got.overlay.Load())
 	require.Nil(t, takeBranchCarry(db, 10, common.Hash{10}), "a carry is taken once")
 }
 
@@ -157,7 +162,10 @@ func TestBranchCarryEvictsRecordsOlderThanTheWindow(t *testing.T) {
 	p.put([]byte{0x03}, []byte("refreshed"), 0)
 	before := p.bytes.Load()
 
-	p.adopt(nil, 1+branchCarryBlocks, 0)
+	ov := map[string]prefetchedRecord{}
+	p.overlay.Store(&ov)
+	p.overlayBlock = 1 + branchCarryBlocks
+	p.mergeOverlay()
 
 	_, _, ok := p.get([]byte{0x01})
 	require.False(t, ok, "a record last filled more than the window ago is evicted")
@@ -180,7 +188,12 @@ func TestParentRecordsStopServingOnceTheCarryMovesOn(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, []byte("parent"), data)
 
-	p.adopt([][]commitment.BranchDelta{{{Key: key, Data: []byte("child")}}}, 10, 2)
+	ov := overlayOf([][]commitment.BranchDelta{{{Key: key, Data: []byte("child")}}}, 10, 2)
+	p.overlay.Store(&ov)
+	data, _, ok = r.Get(key)
+	require.True(t, ok)
+	require.Equal(t, []byte("parent"), data, "an attached overlay does not reach block 10's witness")
+	p.mergeOverlay()
 	_, _, ok = r.Get(key)
 	require.False(t, ok, "records handed to block 10's witness stop serving once the carry holds block 10's own writes")
 }

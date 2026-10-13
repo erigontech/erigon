@@ -80,7 +80,8 @@ type branchPrefetcher struct {
 	block  uint64
 	gen    atomic.Uint64
 
-	refless [][]commitment.BranchDelta
+	overlay      atomic.Pointer[map[string]prefetchedRecord]
+	overlayBlock uint64
 
 	pausing                        atomic.Bool
 	hits, misses, dropped, drained atomic.Uint64
@@ -109,42 +110,45 @@ func (p *branchPrefetcher) start(ctx context.Context, db kv.TemporalRoDB, block 
 	for range branchPrefetchWorkers {
 		p.wg.Go(func() { p.run(ctx, db) })
 	}
-	if deltas := p.refless; deltas != nil {
-		p.refless = nil
-		p.wg.Go(func() { p.fillRefs(deltas) })
+	if p.overlay.Load() != nil {
+		p.wg.Go(p.mergeOverlay)
 	}
 	return p
 }
 
-func (p *branchPrefetcher) fillRefs(deltas [][]commitment.BranchDelta) {
+func overlayOf(deltas [][]commitment.BranchDelta, block uint64, step kv.Step) map[string]prefetchedRecord {
+	n := 0
+	for _, part := range deltas {
+		n += len(part)
+	}
+	ov := make(map[string]prefetchedRecord, n)
 	for _, part := range deltas {
 		for i := range part {
-			if p.pausing.Load() {
-				return
-			}
-			key := part[i].Key
-			s := p.shard(key)
-			s.mu.RLock()
-			r, ok := s.records[string(key)]
-			s.mu.RUnlock()
-			if !ok || r.refs != nil || len(r.data) == 0 {
-				continue
-			}
-			refs := v3.ComputeLeafRefs(key, r.data)
-			if refs == nil {
-				continue
-			}
-			s.mu.Lock()
-			if cur, ok := s.records[string(key)]; ok && cur.refs == nil && len(cur.data) == len(r.data) && &cur.data[0] == &r.data[0] {
-				p.bytes.Add(-cur.size(string(key)))
-				cur.refs = refs
-				s.records[string(key)] = cur
-				p.bytes.Add(cur.size(string(key)))
+			data := bytes.Clone(part[i].Data)
+			refs := v3.ComputeLeafRefs(part[i].Key, data)
+			if refs != nil {
 				mxBranchCarryRefsFilled.Inc()
 			}
-			s.mu.Unlock()
+			ov[string(part[i].Key)] = prefetchedRecord{data: data, step: step, refs: refs, block: block}
 		}
 	}
+	return ov
+}
+
+func (p *branchPrefetcher) mergeOverlay() {
+	ov := p.overlay.Load()
+	if ov == nil {
+		return
+	}
+	p.gen.Add(1)
+	for k, r := range *ov {
+		s := &p.shards[maphash.String(p.seed, k)%branchPrefetchShards]
+		s.mu.Lock()
+		p.store(s, k, r)
+		s.mu.Unlock()
+	}
+	p.overlay.Store(nil)
+	p.evictBefore(p.overlayBlock + 1 - min(p.overlayBlock+1, branchCarryBlocks))
 }
 
 func (p *branchPrefetcher) store(s *prefetchedShard, key string, r prefetchedRecord) {
@@ -154,20 +158,6 @@ func (p *branchPrefetcher) store(s *prefetchedShard, key string, r prefetchedRec
 	s.records[key] = r
 	s.byBlock[r.block] = append(s.byBlock[r.block], key)
 	p.bytes.Add(r.size(key))
-}
-
-func (p *branchPrefetcher) adopt(deltas [][]commitment.BranchDelta, block uint64, step kv.Step) {
-	p.gen.Add(1)
-	for _, part := range deltas {
-		for i := range part {
-			s := p.shard(part[i].Key)
-			s.mu.Lock()
-			p.store(s, string(part[i].Key), prefetchedRecord{data: bytes.Clone(part[i].Data), step: step, block: block})
-			s.mu.Unlock()
-		}
-	}
-	p.evictBefore(block + 1 - min(block+1, branchCarryBlocks))
-	p.refless = deltas
 }
 
 func (p *branchPrefetcher) evictBefore(block uint64) {
@@ -257,6 +247,11 @@ func (p *branchPrefetcher) shard(key []byte) *prefetchedShard {
 }
 
 func (p *branchPrefetcher) get(key []byte) ([]byte, kv.Step, bool) {
+	if ov := p.overlay.Load(); ov != nil {
+		if r, ok := (*ov)[string(key)]; ok {
+			return r.data, r.step, true
+		}
+	}
 	s := p.shard(key)
 	s.mu.RLock()
 	r, ok := s.records[string(key)]
@@ -265,10 +260,16 @@ func (p *branchPrefetcher) get(key []byte) ([]byte, kv.Step, bool) {
 }
 
 func (p *branchPrefetcher) leafRefs(key, data []byte) *commitment.LeafRefs {
-	s := p.shard(key)
-	s.mu.RLock()
-	r, ok := s.records[string(key)]
-	s.mu.RUnlock()
+	r, ok := prefetchedRecord{}, false
+	if ov := p.overlay.Load(); ov != nil {
+		r, ok = (*ov)[string(key)]
+	}
+	if !ok {
+		s := p.shard(key)
+		s.mu.RLock()
+		r, ok = s.records[string(key)]
+		s.mu.RUnlock()
+	}
 	if !ok || len(r.data) != len(data) || &r.data[0] != &data[0] {
 		return nil
 	}
@@ -289,14 +290,32 @@ func (p *branchPrefetcher) put(key, data []byte, step kv.Step) []byte {
 }
 
 func (p *branchPrefetcher) verifyAgainst(tx kv.TemporalTx) error {
+	check := func(k string, data []byte) error {
+		v, _, err := tx.GetLatest(kv.CommitmentDomain, []byte(k), kv.GetLatestOptions{})
+		if err != nil || !bytes.Equal(v, data) {
+			return fmt.Errorf("carried branch record %x diverges from the committed state: %x vs %x (err %v)", k, data, v, err)
+		}
+		return nil
+	}
+	var ov map[string]prefetchedRecord
+	if o := p.overlay.Load(); o != nil {
+		ov = *o
+	}
+	for k, r := range ov {
+		if err := check(k, r.data); err != nil {
+			return err
+		}
+	}
 	for i := range p.shards {
 		s := &p.shards[i]
 		s.mu.RLock()
 		for k, r := range s.records {
-			v, _, err := tx.GetLatest(kv.CommitmentDomain, []byte(k), kv.GetLatestOptions{})
-			if err != nil || !bytes.Equal(v, r.data) {
+			if _, shadowed := ov[k]; shadowed {
+				continue
+			}
+			if err := check(k, r.data); err != nil {
 				s.mu.RUnlock()
-				return fmt.Errorf("carried branch record %x diverges from the committed state: %x vs %x (err %v)", k, r.data, v, err)
+				return err
 			}
 		}
 		s.mu.RUnlock()
@@ -321,45 +340,56 @@ var (
 	mxBranchCarryRefsFilled = metrics.GetOrCreateCounter("commitment_branch_carry_refs_filled_total")
 )
 
+type carriedRecords struct {
+	db   kv.TemporalRoDB
+	p    *branchPrefetcher
+	head commitTarget
+	ov   map[string]prefetchedRecord
+	done chan struct{}
+}
+
 var branchCarry struct {
 	sync.Mutex
-	db     kv.TemporalRoDB
-	p      *branchPrefetcher
-	head   commitTarget
-	deltas [][]commitment.BranchDelta
-	step   kv.Step
+	c *carriedRecords
 }
 
 func storeBranchCarry(db kv.TemporalRoDB, p *branchPrefetcher, head commitTarget, deltas [][]commitment.BranchDelta, step kv.Step) {
+	c := &carriedRecords{db: db, p: p, head: head, done: make(chan struct{})}
+	go func() {
+		defer close(c.done)
+		c.ov = overlayOf(deltas, head.blockNum, step)
+	}()
 	branchCarry.Lock()
 	defer branchCarry.Unlock()
-	branchCarry.db, branchCarry.p, branchCarry.head, branchCarry.deltas, branchCarry.step = db, p, head, deltas, step
+	branchCarry.c = c
 }
 
 func takeBranchCarry(db kv.TemporalRoDB, headNum uint64, headHash common.Hash) *branchPrefetcher {
 	branchCarry.Lock()
-	defer branchCarry.Unlock()
-	p, head, deltas, step := branchCarry.p, branchCarry.head, branchCarry.deltas, branchCarry.step
-	match := p != nil && branchCarry.db == db && head.blockNum == headNum && head.blockHash == headHash
-	branchCarry.db, branchCarry.p, branchCarry.deltas = nil, nil, nil
-	if !match {
-		if p != nil {
-			mxBranchCarryDropped.Inc()
-		}
+	c := branchCarry.c
+	branchCarry.c = nil
+	branchCarry.Unlock()
+	if c == nil {
 		return nil
 	}
-	p.adopt(deltas, headNum, step)
+	if c.db != db || c.head.blockNum != headNum || c.head.blockHash != headHash {
+		mxBranchCarryDropped.Inc()
+		return nil
+	}
+	<-c.done
+	c.p.overlayBlock = headNum
+	c.p.overlay.Store(&c.ov)
 	mxBranchCarryAdopted.Inc()
-	return p
+	return c.p
 }
 
 func dropBranchCarry() {
 	branchCarry.Lock()
 	defer branchCarry.Unlock()
-	if branchCarry.p != nil {
+	if branchCarry.c != nil {
 		mxBranchCarryDropped.Inc()
 	}
-	branchCarry.db, branchCarry.p, branchCarry.deltas = nil, nil, nil
+	branchCarry.c = nil
 }
 
 func (p *branchPrefetcher) run(ctx context.Context, db kv.TemporalRoDB) {
