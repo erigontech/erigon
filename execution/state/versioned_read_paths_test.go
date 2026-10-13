@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -824,6 +825,92 @@ func TestVersionedRead_B_CommittedCodeHashReusesCommittedBase(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, codeHash, got)
 	assert.Equal(t, reads, r.accountReads, "the committed account is read once per tx")
+}
+
+// A cold slot of an address no tx wrote skips versionedReadCore; it must return
+// and record exactly what the core does for the same slot.
+func TestVersionedRead_B_ColdSlotWithoutCellsMatchesCore(t *testing.T) {
+	t.Parallel()
+	key := accounts.InternKey([32]byte{0x07})
+	acct := accounts.NewAccount()
+	read := func(cellElsewhere bool) (uint256.Int, VersionedRead[uint256.Int]) {
+		addr := accounts.InternAddress([20]byte{0xbc})
+		vm := NewVersionMap(nil)
+		if cellElsewhere {
+			// A cell this tx cannot see sends the read through versionedReadCore.
+			vm.WriteBalance(addr, Version{TxIndex: 9}, *uint256.NewInt(1), true)
+		}
+		ibs := NewWithVersionMap(&fallthroughStateReader{acct: &acct, storageKey: key, storageVal: *uint256.NewInt(0x5a)}, vm)
+		defer ibs.Close()
+		ibs.SetNoMaterialize(true)
+		ibs.SetTxContext(1, 5)
+		v, err := ibs.GetState(addr, key)
+		require.NoError(t, err)
+		tr, ok := ibs.versionedReads.GetStorage(addr, key)
+		require.True(t, ok, "the read is recorded")
+		return v, tr
+	}
+	fastV, fastTr := read(false)
+	coreV, coreTr := read(true)
+	assert.Equal(t, coreV, fastV)
+	assert.Equal(t, coreTr, fastTr)
+	assert.Equal(t, *uint256.NewInt(0x5a), fastV)
+}
+
+// The same for a cold code read.
+func TestVersionedRead_B_ColdCodeWithoutCellsMatchesCore(t *testing.T) {
+	t.Parallel()
+	code := []byte{0x60, 0x01, 0x60, 0x02}
+	read := func(cellElsewhere bool) (accounts.Code, VersionedRead[accounts.Code]) {
+		addr := accounts.InternAddress([20]byte{0xbd})
+		vm := NewVersionMap(nil)
+		if cellElsewhere {
+			vm.WriteBalance(addr, Version{TxIndex: 9}, *uint256.NewInt(1), true)
+		}
+		acc := &accounts.Account{Incarnation: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code))}
+		ibs := NewWithVersionMap(&fieldReader{addr: addr, account: acc, code: code}, vm)
+		defer ibs.Close()
+		ibs.SetNoMaterialize(true)
+		ibs.SetTxContext(1, 5)
+		v, _, _, err := readCode(ibs, addr)
+		require.NoError(t, err)
+		tr, ok := ibs.versionedReads.GetCode(addr)
+		require.True(t, ok, "the read is recorded")
+		return v, tr
+	}
+	fastV, fastTr := read(false)
+	coreV, coreTr := read(true)
+	assert.Equal(t, coreV, fastV)
+	assert.Equal(t, coreTr, fastTr)
+	assert.Equal(t, code, fastV.Bytes)
+}
+
+// The same for a cold account read: a provisional nil read until the caller
+// resolves it from the state reader.
+func TestVersionedRead_B_ColdAccountWithoutCellsMatchesCore(t *testing.T) {
+	t.Parallel()
+	read := func(cellElsewhere bool) (*accounts.Account, ReadSource, Version, VersionedRead[AccountView]) {
+		addr := accounts.InternAddress([20]byte{0xbe})
+		vm := NewVersionMap(nil)
+		if cellElsewhere {
+			vm.WriteBalance(addr, Version{TxIndex: 9}, *uint256.NewInt(1), true)
+		}
+		ibs := NewWithVersionMap(&refreshReader{}, vm)
+		defer ibs.Close()
+		ibs.SetNoMaterialize(true)
+		ibs.SetTxContext(1, 5)
+		acc, src, ver, err := readAccountInternal(ibs, addr)
+		require.NoError(t, err)
+		tr, ok := ibs.versionedReads.GetAddress(addr)
+		require.True(t, ok, "the read is recorded")
+		return acc, src, ver, tr
+	}
+	fastAcc, fastSrc, fastVer, fastTr := read(false)
+	coreAcc, coreSrc, coreVer, coreTr := read(true)
+	assert.Equal(t, coreAcc, fastAcc)
+	assert.Equal(t, coreSrc, fastSrc)
+	assert.Equal(t, coreVer, fastVer)
+	assert.Equal(t, coreTr, fastTr)
 }
 
 func TestVersionedRead_B_TouchReadsAnAbsentAccountOnce(t *testing.T) {
