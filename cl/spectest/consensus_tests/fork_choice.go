@@ -429,7 +429,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 			msg := &cltypes.PayloadAttestationMessage{Data: &cltypes.PayloadAttestationData{}}
 			err := spectest.ReadSsz(root, c.Version(), *step.PayloadAttestationMessage+".ssz_snappy", msg)
 			require.NoError(t, err, stepstr)
-			err = forkStore.OnPayloadAttestationMessage(ctx, msg, false)
+			err = forkStore.OnPayloadAttestationMessage(ctx, msg)
 			if step.GetValid() {
 				require.NoError(t, err, stepstr)
 			} else {
@@ -511,11 +511,13 @@ func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e 
 		}
 	}
 	if e.PayloadTimelinessVote != nil {
-		timeliness, _ := store.PayloadAttestationVotes(e.PayloadTimelinessVote.BlockRoot)
+		timeliness, _, present, _ := store.PayloadAttestationVotes(e.PayloadTimelinessVote.BlockRoot)
+		require.True(t, present, "payload timeliness vote entry missing for %x: %s", e.PayloadTimelinessVote.BlockRoot, stepstr)
 		assert.Equal(t, expectedPTCVotes(t, stepstr, e.PayloadTimelinessVote), timeliness, stepstr)
 	}
 	if e.PayloadDataAvailabilityVote != nil {
-		_, dataAvailability := store.PayloadAttestationVotes(e.PayloadDataAvailabilityVote.BlockRoot)
+		_, dataAvailability, _, present := store.PayloadAttestationVotes(e.PayloadDataAvailabilityVote.BlockRoot)
+		require.True(t, present, "payload data availability vote entry missing for %x: %s", e.PayloadDataAvailabilityVote.BlockRoot, stepstr)
 		assert.Equal(t, expectedPTCVotes(t, stepstr, e.PayloadDataAvailabilityVote), dataAvailability, stepstr)
 	}
 }

@@ -30,15 +30,13 @@ import (
 // choice does not count because its slot is before the store's current slot.
 var ErrPayloadAttestationNotCurrentSlot = errors.New("payload attestation is not for the current slot")
 
-// OnPayloadAttestationMessage implements on_payload_attestation_message: it updates
-// the PTC votes for a message from a block or from the wire.
+// OnPayloadAttestationMessage implements on_payload_attestation_message for a wire message.
 // Returns ErrIgnore for IGNORE conditions, other errors for REJECT conditions.
 func (f *ForkChoiceStore) OnPayloadAttestationMessage(
 	ctx context.Context,
 	msg *cltypes.PayloadAttestationMessage,
-	isFromBlock bool,
 ) error {
-	return f.onPayloadAttestationMessage(ctx, msg, isFromBlock, false)
+	return f.onPayloadAttestationMessage(ctx, msg, false)
 }
 
 // OnGossipPayloadAttestationMessage is OnPayloadAttestationMessage for a gossip message,
@@ -47,13 +45,12 @@ func (f *ForkChoiceStore) OnGossipPayloadAttestationMessage(
 	ctx context.Context,
 	msg *cltypes.PayloadAttestationMessage,
 ) error {
-	return f.onPayloadAttestationMessage(ctx, msg, false, true)
+	return f.onPayloadAttestationMessage(ctx, msg, true)
 }
 
 func (f *ForkChoiceStore) onPayloadAttestationMessage(
 	ctx context.Context,
 	msg *cltypes.PayloadAttestationMessage,
-	isFromBlock bool,
 	firstValidOnly bool,
 ) error {
 	if msg == nil || msg.Data == nil {
@@ -75,9 +72,6 @@ func (f *ForkChoiceStore) onPayloadAttestationMessage(
 		return err
 	}
 
-	if isFromBlock {
-		return f.applyValidatedPayloadAttestation(msg.ValidatorIndex, ptcIndices, data, blockRoot, false)
-	}
 	if err := validationContext.validateSignature(msg); err != nil {
 		return err
 	}
@@ -113,31 +107,6 @@ func (f *ForkChoiceStore) applyWirePayloadAttestation(
 		}
 	}
 	return fmt.Errorf("%w: %w: slot %d, current slot %d", ErrIgnore, ErrPayloadAttestationNotCurrentSlot, data.Slot, currentSlot)
-}
-
-func (f *ForkChoiceStore) applyValidatedPayloadAttestation(
-	validatorIndex uint64,
-	ptcIndices []int,
-	data *cltypes.PayloadAttestationData,
-	blockRoot common.Hash,
-	firstValidOnly bool,
-) error {
-	// Keep the votes and cached head decision consistent for head readers.
-	// The lock order is f.mu before ptcVoteMu.
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	if err := f.recordPayloadAttestationVotes(validatorIndex, ptcIndices, data, blockRoot, firstValidOnly); err != nil {
-		return err
-	}
-
-	// Current-slot votes affect the next slot's head tiebreaker. OnTick invalidates
-	// the cache at that boundary; votes arriving after it must invalidate it here.
-	if data.Slot < f.Slot() {
-		f.headHash = common.Hash{}
-		f.headPayloadStatus = cltypes.PayloadStatusPending
-	}
-	return nil
 }
 
 func (f *ForkChoiceStore) recordPayloadAttestationVotes(

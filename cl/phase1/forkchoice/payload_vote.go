@@ -143,17 +143,22 @@ func (f *ForkChoiceStore) applyPayloadAttestationVotes(
 }
 
 // PayloadAttestationVotes returns the PTC timeliness and data availability votes
-// for the block root (1=true, -1=false, 0=no vote).
-func (f *ForkChoiceStore) PayloadAttestationVotes(root common.Hash) (timeliness, dataAvailability [clparams.PtcSize]int8) {
+// for the block root (1=true, -1=false, 0=no vote), and whether each vote entry exists.
+func (f *ForkChoiceStore) PayloadAttestationVotes(root common.Hash) (
+	timeliness, dataAvailability [clparams.PtcSize]int8,
+	timelinessPresent, dataAvailabilityPresent bool,
+) {
 	f.ptcVoteMu.Lock()
 	defer f.ptcVoteMu.Unlock()
 	if votes, ok := f.payloadTimelinessVote.Load(root); ok {
 		timeliness = votes.([clparams.PtcSize]int8)
+		timelinessPresent = true
 	}
 	if votes, ok := f.payloadDataAvailabilityVote.Load(root); ok {
 		dataAvailability = votes.([clparams.PtcSize]int8)
+		dataAvailabilityPresent = true
 	}
-	return timeliness, dataAvailability
+	return timeliness, dataAvailability, timelinessPresent, dataAvailabilityPresent
 }
 
 // payloadTimeliness returns whether the PTC voted the payload as timely (timely=true)
