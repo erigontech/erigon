@@ -51,11 +51,6 @@ func TestChainTipRejectionsReportsFirstThenPerInterval(t *testing.T) {
 	require.Nil(t, r.record("process block failed", 104, nil))
 }
 
-func TestLogChainTipRejectionTolerantOfNilCfg(t *testing.T) {
-	logChainTipRejection(nil, "process block failed", 1, nil)
-	logChainTipRejection(&Cfg{}, "process block failed", 1, nil)
-}
-
 // A block that arrives early or ahead of its parent's envelope is imported moments later by
 // gossip, so it does not count as a rejection.
 func TestLogChainTipRejectionSkipsTransientErrors(t *testing.T) {

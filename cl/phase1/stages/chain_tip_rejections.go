@@ -18,10 +18,9 @@ package stages
 
 import (
 	"errors"
-	"sort"
-	"strconv"
-	"strings"
-	"sync"
+	"fmt"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -39,14 +38,13 @@ var (
 type chainTipRejection struct {
 	count    int
 	lastSlot uint64
-	lastErr  string
+	lastErr  error
 }
 
 // chainTipRejections aggregates why chain-tip blocks are not imported and reports the
 // summary at Warn level at most once per interval, so a stuck head is visible at the
-// default log level without logging every rejected block.
+// default log level without logging every rejected block. Only the stage goroutine uses it.
 type chainTipRejections struct {
-	mu       sync.Mutex
 	interval time.Duration
 	now      func() time.Time
 	lastLog  time.Time
@@ -63,11 +61,6 @@ func newChainTipRejections(interval time.Duration, now func() time.Time) *chainT
 // record notes one rejected block. It returns the Warn summary once the interval has elapsed,
 // or nil when the rejection is only aggregated. The returned fields are ready for logging.
 func (r *chainTipRejections) record(reason string, slot uint64, err error) []any {
-	if r == nil {
-		return nil
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	entry := r.reasons[reason]
 	if entry == nil {
 		entry = &chainTipRejection{}
@@ -75,19 +68,8 @@ func (r *chainTipRejections) record(reason string, slot uint64, err error) []any
 	}
 	entry.count++
 	entry.lastSlot = slot
-	entry.lastErr = ""
-	if err != nil {
-		entry.lastErr = err.Error()
-	}
-	now := r.now()
-	if r.lastLog.IsZero() {
-		r.lastLog = now.Add(-r.interval)
-	}
-	if now.Sub(r.lastLog) < r.interval {
-		return nil
-	}
-	r.lastLog = now
-	return r.flushLocked()
+	entry.lastErr = err
+	return r.flushIfDue()
 }
 
 // flushIfDue returns the summary of the rejections aggregated since the last one once the
@@ -96,35 +78,19 @@ func (r *chainTipRejections) flushIfDue() []any {
 	if r == nil {
 		return nil
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	now := r.now()
 	if len(r.reasons) == 0 || now.Sub(r.lastLog) < r.interval {
 		return nil
 	}
 	r.lastLog = now
-	return r.flushLocked()
-}
-
-func (r *chainTipRejections) flushLocked() []any {
-	reasons := make([]string, 0, len(r.reasons))
-	for reason := range r.reasons {
-		reasons = append(reasons, reason)
-	}
-	sort.Strings(reasons)
-	fields := make([]any, 0, 2*len(reasons))
-	for _, reason := range reasons {
+	fields := make([]any, 0, 2*len(r.reasons))
+	for _, reason := range slices.Sorted(maps.Keys(r.reasons)) {
 		entry := r.reasons[reason]
-		detail := strings.Builder{}
-		detail.WriteString("count=")
-		detail.WriteString(strconv.Itoa(entry.count))
-		detail.WriteString(" lastSlot=")
-		detail.WriteString(strconv.FormatUint(entry.lastSlot, 10))
-		if entry.lastErr != "" {
-			detail.WriteString(" err=")
-			detail.WriteString(entry.lastErr)
+		detail := fmt.Sprintf("count=%d lastSlot=%d", entry.count, entry.lastSlot)
+		if entry.lastErr != nil {
+			detail += " err=" + entry.lastErr.Error()
 		}
-		fields = append(fields, reason, detail.String())
+		fields = append(fields, reason, detail)
 	}
 	r.reasons = map[string]*chainTipRejection{}
 	return fields
@@ -132,9 +98,6 @@ func (r *chainTipRejections) flushLocked() []any {
 
 // logChainTipRejectionSummary emits the periodic Warn summary when due, without a new rejection.
 func logChainTipRejectionSummary(cfg *Cfg) {
-	if cfg == nil {
-		return
-	}
 	if fields := cfg.chainTipRejections.flushIfDue(); fields != nil {
 		log.Warn("[Caplin] chain tip blocks are not being imported", fields...)
 	}
@@ -144,7 +107,7 @@ func logChainTipRejectionSummary(cfg *Cfg) {
 // block that is early or waits for its parent's envelope is retried by gossip and not counted.
 func logChainTipRejection(cfg *Cfg, reason string, slot uint64, err error) {
 	log.Debug("[chainTipSync] block not imported", "reason", reason, "slot", slot, "err", err)
-	if cfg == nil || cfg.chainTipRejections == nil ||
+	if cfg.chainTipRejections == nil ||
 		errors.Is(err, forkchoice.ErrBlockTooEarly) || errors.Is(err, forkchoice.ErrParentEnvelopePending) {
 		return
 	}
