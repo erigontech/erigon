@@ -205,11 +205,7 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 			}
 			return pbtAttachFilesAheadError(nodeDirs.DataDir, chainName, firstStep, publishedSettings.StepSize, progress, blockNum, txNum)
 		}
-		nodeBinStopped, stoppedErr := pbtAttachNodeBinStopped(ctx, nodeDirs)
-		if stoppedErr != nil {
-			return stoppedErr
-		}
-		if err := validatePBTAttachFiles(nodeDirs, publishedDirs, publishedSettings.StepSize, txNum, nodeBinStopped); err != nil {
+		if err := validatePBTAttachFiles(nodeDirs, publishedDirs, publishedSettings.StepSize, txNum); err != nil {
 			return err
 		}
 	} else if err := validatePBTAttachPublishedFiles(publishedDirs, publishedSettings.StepSize, txNum); err != nil {
@@ -250,7 +246,7 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	if err != nil {
 		return err
 	}
-	if err := verifyPBTAttachPublishedBin(ctx, nodeDirs, publishedDirs, publishedSettings, publishedPbtRoot, logger); err != nil {
+	if err := verifyPBTAttachPublishedBin(ctx, publishedDirs, publishedSettings, pbinConversionPoint{BlockNum: blockNum, TxNum: txNum}, publishedPbtRoot, logger); err != nil {
 		return err
 	}
 	var publishedHexRoot common.Hash
@@ -560,24 +556,6 @@ func pbtAttachFilesAheadError(dataDir, chainName string, firstStep, stepSize, ex
 	return fmt.Errorf("commitment attach-pbt: node files extend past conversion point block %d txNum %d; remove state from step %d onward with erigon snapshots rm-state --datadir=%s --chain=%s --step=%d+ --experimental.commitment-v3, then run %s (execution progress is block %d)", blockNum, txNum, firstStep, dataDir, chainName, firstStep, reset, executionProgress)
 }
 
-func pbtAttachNodeBinStopped(ctx context.Context, nodeDirs datadir.Dirs) (bool, error) {
-	if exists, err := dir.FileExist(filepath.Join(nodeDirs.Chaindata, "mdbx.dat")); err != nil || !exists {
-		return false, err
-	}
-	nodeDB, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, nodeDirs.Chaindata), true)
-	if err != nil {
-		return false, err
-	}
-	defer nodeDB.Close()
-	var stopped bool
-	err = nodeDB.View(ctx, func(tx kv.Tx) error {
-		var err error
-		stopped, err = rawdb.ReadCommitmentDomainStopped(tx, kv.CommitmentBinDomain)
-		return err
-	})
-	return stopped, err
-}
-
 func validatePBTAttachGenesis(ctx context.Context, nodeDirs, publishedDirs datadir.Dirs, logger log.Logger) error {
 	nodeDB, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, nodeDirs.Chaindata), true)
 	if err != nil {
@@ -706,14 +684,8 @@ func validatePBTAttachPublishedPointWithLeafStamps(ctx context.Context, dirs dat
 	})
 }
 
-func verifyPBTAttachPublishedBin(ctx context.Context, nodeDirs, publishedDirs datadir.Dirs, settings *dbstate.ErigonDBSettings, wantRoot common.Hash, logger log.Logger) error {
-	rawDB, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, nodeDirs.Chaindata), true)
-	if err != nil {
-		return err
-	}
-	defer rawDB.Close()
-	configurePBTSourceVariant(settings)
-	root, err := verifyPBTRows(ctx, rawDB, rawDB, publishedDirs, settings, kv.CommitmentBinDomain, "commitment attach-pbt: verify published binary rows", logger)
+func verifyPBTAttachPublishedBin(ctx context.Context, publishedDirs datadir.Dirs, settings *dbstate.ErigonDBSettings, point pbinConversionPoint, wantRoot common.Hash, logger log.Logger) error {
+	root, err := verifyPBTRowsInScratchDB(ctx, publishedDirs, settings, kv.CommitmentBinDomain, point, "commitment attach-pbt: verify published binary rows", logger)
 	if err != nil {
 		return err
 	}
@@ -744,7 +716,7 @@ func configuredPBTNodeHash(settings *dbstate.ErigonDBSettings) string {
 	return commitment.PBinHashSuiteName()
 }
 
-func validatePBTAttachFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endTxNum uint64, nodeBinStopped bool) error {
+func validatePBTAttachFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endTxNum uint64) error {
 	if stepSize == 0 {
 		return errors.New("commitment attach-pbt: step size is zero")
 	}
@@ -773,7 +745,7 @@ func validatePBTAttachFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endT
 		return err
 	}
 	for _, domain := range pbtAttachDomains {
-		if domain == kv.CommitmentBinDomain && (nodeBinStopped || len(nodeRanges[domain]) == 0) {
+		if domain == kv.CommitmentBinDomain {
 			continue
 		}
 		if !slices.Equal(nodeRanges[domain], publishedRanges[domain]) {

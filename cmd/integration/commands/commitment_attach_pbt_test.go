@@ -49,14 +49,14 @@ import (
 
 func TestValidatePBTAttachFilesRequiresBothCommitmentDomains(t *testing.T) {
 	node, published := newPBTAttachFileTrees(t, true)
-	require.NoError(t, validatePBTAttachFiles(node, published, 8, 7, false))
-	require.NoError(t, validatePBTAttachFiles(node, published, 8, 6, false))
-	require.ErrorContains(t, validatePBTAttachFiles(node, published, 8, 8, false), "do not cover conversion txNum")
+	require.NoError(t, validatePBTAttachFiles(node, published, 8, 7))
+	require.NoError(t, validatePBTAttachFiles(node, published, 8, 6))
+	require.ErrorContains(t, validatePBTAttachFiles(node, published, 8, 8), "do not cover conversion txNum")
 	require.NoError(t, dir.RemoveFile(filepath.Join(published.SnapDomain, "v1.0-commitment-bin.0-1.kv")))
-	require.ErrorContains(t, validatePBTAttachFiles(node, published, 8, 7, false), "commitment-bin")
+	require.ErrorContains(t, validatePBTAttachFiles(node, published, 8, 7), "commitment-bin")
 }
 
-func TestValidatePBTAttachFilesAcceptsAStoppedNodeBinDomain(t *testing.T) {
+func TestValidatePBTAttachFilesAcceptsStaleNodeBinFiles(t *testing.T) {
 	node, published := newPBTAttachFileTrees(t, true)
 	for _, dirs := range []datadir.Dirs{node, published} {
 		for _, name := range []string{"v1.0-accounts.1-2.kv", "v1.0-storage.1-2.kv", "v1.0-code.1-2.kv", "v1.0-commitment.1-2.kv"} {
@@ -64,24 +64,7 @@ func TestValidatePBTAttachFilesAcceptsAStoppedNodeBinDomain(t *testing.T) {
 		}
 	}
 	require.NoError(t, os.WriteFile(filepath.Join(published.SnapDomain, "v1.0-commitment-bin.1-2.kv"), []byte("published"), 0o644))
-	require.ErrorContains(t, validatePBTAttachFiles(node, published, 8, 15, false), "commitment-bin")
-	require.NoError(t, validatePBTAttachFiles(node, published, 8, 15, true))
-}
-
-func TestPBTAttachNodeBinStoppedReadsTheMarker(t *testing.T) {
-	node := datadir.New(t.TempDir())
-	stopped, err := pbtAttachNodeBinStopped(t.Context(), node)
-	require.NoError(t, err)
-	require.False(t, stopped)
-
-	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(node.Chaindata).MustOpen()
-	require.NoError(t, rawDB.Update(t.Context(), func(tx kv.RwTx) error {
-		return rawdb.WriteCommitmentDomainStopped(tx, kv.CommitmentBinDomain)
-	}))
-	rawDB.Close()
-	stopped, err = pbtAttachNodeBinStopped(t.Context(), node)
-	require.NoError(t, err)
-	require.True(t, stopped)
+	require.NoError(t, validatePBTAttachFiles(node, published, 8, 15))
 }
 
 func TestValidatePBTAttachLeafStampsRejectsAfterConversion(t *testing.T) {
@@ -155,7 +138,7 @@ func TestValidatePBTAttachFilesRejectsUncutStateHistory(t *testing.T) {
 	node, published := newPBTAttachFileTrees(t, true)
 	require.NoError(t, os.MkdirAll(node.SnapHistory, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(node.SnapHistory, "v1.0-accounts.0-2.v"), []byte("history"), 0o644))
-	require.ErrorContains(t, validatePBTAttachFiles(node, published, 8, 7, false), "spans conversion txNum 7")
+	require.ErrorContains(t, validatePBTAttachFiles(node, published, 8, 7), "spans conversion txNum 7")
 }
 
 func TestValidatePBTAttachFilesRejectsHistoryBelowStateFrontier(t *testing.T) {

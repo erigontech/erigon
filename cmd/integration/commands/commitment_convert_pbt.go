@@ -511,10 +511,15 @@ func verifyPBTOutputStandalone(ctx context.Context, dirs datadir.Dirs, settings 
 }
 
 func verifyPBTOutputRows(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, domain kv.Domain, point pbinConversionPoint, logger log.Logger) error {
+	_, err := verifyPBTRowsInScratchDB(ctx, dirs, settings, domain, point, "commitment convert-pbt: verify written rows", logger)
+	return err
+}
+
+func verifyPBTRowsInScratchDB(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, domain kv.Domain, point pbinConversionPoint, what string, logger log.Logger) (common.Hash, error) {
 	configurePBTSourceVariant(settings)
-	chaindataDir, err := os.MkdirTemp("", "convert-pbt-chaindata-")
+	chaindataDir, err := os.MkdirTemp("", "pbt-verify-chaindata-")
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	defer func() { _ = dir.RemoveAll(chaindataDir) }()
 	rawDB := mdbx.New(dbcfg.ChainDB, logger).Path(chaindataDir).MustOpen()
@@ -531,10 +536,9 @@ func verifyPBTOutputRows(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 		}
 		return nil
 	}); err != nil {
-		return err
+		return common.Hash{}, err
 	}
-	_, err = verifyPBTRows(ctx, rawDB, nil, dirs, settings, domain, "commitment convert-pbt: verify written rows", logger)
-	return err
+	return verifyPBTRows(ctx, rawDB, nil, dirs, settings, domain, what, logger)
 }
 
 func requirePBinSourceEnd(agg *dbstate.Aggregator, endTxNum uint64) error {
