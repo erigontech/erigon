@@ -634,12 +634,12 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 		if !errors.Is(ctx.ctx.Err(), context.Canceled) {
 			switch {
 			case answered != nil:
-				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID), "err", answered)
+				h.logger.Trace("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID), "err", answered)
 			case resp != nil && resp.Error != nil && resp.Error.Data != nil:
-				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
+				h.logger.Trace("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
 					"err", resp.Error.Message, "errdata", resp.Error.Data)
 			case resp != nil && resp.Error != nil:
-				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
+				h.logger.Trace("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
 					"err", resp.Error.Message)
 			}
 		}

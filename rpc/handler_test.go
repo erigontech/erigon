@@ -228,7 +228,7 @@ func TestRunMethodStreamableEnvelope(t *testing.T) {
 }
 
 // runMethod answers inside the stream, so the error it reports is the only signal left for the
-// failure metric and the "[rpc] served" warning.
+// failure metric and the "[rpc] served" log.
 func TestRunMethodReportsAnsweredError(t *testing.T) {
 	msg := jsonrpcMessage{Version: vsn, ID: []byte("1"), Method: "test_test"}
 	for name, cb := range map[string]*callback{
