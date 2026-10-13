@@ -429,7 +429,7 @@ func (cc *commitmentCalculator) Stop() {
 			"hits", p.hits.Load(), "misses", p.misses.Load(), "dropped", p.dropped.Load(), "drained", p.drained.Load())
 		if r := cc.parentRecords(); r != nil {
 			commitmentdb.PublishParentRecords(r)
-			if !cc.sawMidBlock && cc.handoffDeltas != nil {
+			if dbg.CommitmentBranchCarry && !cc.sawMidBlock && cc.handoffDeltas != nil {
 				storeBranchCarry(cc.db, p, *cc.handoff, cc.handoffDeltas, kv.Step(cc.handoff.lastTxNum/cc.doms.StepSize()))
 			}
 		}
