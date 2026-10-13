@@ -98,6 +98,7 @@ func runParallelBenchWith(b *testing.B, pk [][]byte, updates []Update, workers i
 			upds = NewUpdates(ModeParallel, "", KeyToHexNibbleHash)
 		} else {
 			upds = WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, pk, updates)
+			upds.parallel.Build()
 		}
 		b.StartTimer()
 
@@ -418,6 +419,7 @@ func runParallelBenchGrain(b *testing.B, pk [][]byte, updates []Update, workers 
 		pph.SetForkGrain(grain)
 		pph.RootTrie().Reset()
 		upds := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, pk, updates)
+		upds.parallel.Build()
 		b.StartTimer()
 
 		_, err := pph.Process(ctx, upds, "", nil, WarmupConfig{})
@@ -463,6 +465,7 @@ func runIncrementalParallelBenchGrain(b *testing.B, batch1, batch2 engineBatch, 
 
 		require.NoError(b, ms.applyPlainUpdates(batch2.keys, batch2.upds))
 		u2 := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, batch2.keys, batch2.upds)
+		u2.parallel.Build()
 		b.StartTimer()
 
 		_, err = pph.Process(ctx, u2, "", nil, WarmupConfig{})
@@ -579,6 +582,7 @@ func runIncrementalParallelBench(b *testing.B, batch1, batch2 engineBatch, worke
 
 		require.NoError(b, ms.applyPlainUpdates(batch2.keys, batch2.upds))
 		u2 := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, batch2.keys, batch2.upds)
+		u2.parallel.Build()
 		b.StartTimer()
 
 		_, err = pph.Process(ctx, u2, "", nil, WarmupConfig{})
