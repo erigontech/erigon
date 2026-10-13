@@ -147,7 +147,7 @@ const linearSteps = 8
 
 // skipTo moves a stream whose head, already taken out with Next, is *k (has: there is one) to the
 // first element not before v: a few elements one at a time, then with a seek when the stream
-// supports it, else on one element at a time.
+// supports it, else still one element at a time.
 func skipTo[T cmp.Ordered](it Uno[T], k *T, has *bool, v T, asc bool) error {
 	for range linearSteps {
 		if !*has || !before(*k, v, asc) {
