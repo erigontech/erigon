@@ -1740,6 +1740,43 @@ func TestHandedOverAddressReadOutlivesTheSlab(t *testing.T) {
 	require.Equal(t, uint64(7), tr.Val.Account().Nonce)
 }
 
+// A pooled state must pin nothing of the call it served.
+func TestResetIOTablePinsNothing(t *testing.T) {
+	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
+	defer ibs.Close()
+	addr := accounts.InternAddress(common.HexToAddress("0xacc9"))
+	code := accounts.Code{Bytes: []byte{0x60, 0x00}}
+	ibs.recordWriteCode(addr, code)
+	ibs.versionedReads.SetCode(addr, VersionedRead[accounts.Code]{Val: code})
+	ibs.accountRead(addr, &accounts.Account{Nonce: 1}, StorageRead, UnknownVersion)
+	ibs.versionedReads.setCommitted(addr, &accounts.Account{})
+
+	ibs.ResetVersionedIO()
+
+	r := &ibs.versionedReads.recs[:1][0]
+	require.Nil(t, r.code.Val.Bytes, "read code")
+	require.Nil(t, r.address.Val, "read account")
+	require.Nil(t, r.committed, "committed account")
+	require.Nil(t, r.wCode, "write")
+	for _, vw := range ibs.versionedWrites.slabs.code.items {
+		require.Nil(t, vw.Val.Bytes, "slab cell")
+	}
+}
+
+// Writes reverted away still leave their map's buckets, so the pool bound must see them.
+func TestIOTableCountsRevertedSlots(t *testing.T) {
+	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
+	defer ibs.Close()
+	addr := accounts.InternAddress(common.HexToAddress("0xacca"))
+	for i := range 100 {
+		ibs.recordWriteStorage(addr, accounts.InternKey(common.BigToHash(big.NewInt(int64(i)))), uint256.Int{})
+	}
+	for i := range 100 {
+		ibs.versionedWrites.DelStorage(addr, accounts.InternKey(common.BigToHash(big.NewInt(int64(i)))))
+	}
+	require.GreaterOrEqual(t, ibs.versionedReads.entries(), 100)
+}
+
 // A reused table keeps its records' slot maps, so a call that reads the same
 // contract's slots again does not regrow the map from scratch.
 func TestReusedIOTableKeepsItsSlotMaps(t *testing.T) {

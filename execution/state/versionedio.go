@@ -2905,7 +2905,11 @@ func (s *vwSlab[T]) get() *VersionedWrite[T] {
 
 func (s *vwSlab[T]) put(vw *VersionedWrite[T]) { s.free = append(s.free, vw) }
 
+// reset clears the cells it hands out again, so a pooled state pins no payload.
 func (s *vwSlab[T]) reset() {
+	for _, vw := range s.items[:s.used] {
+		*vw = VersionedWrite[T]{}
+	}
 	s.used = 0
 	s.free = s.free[:0]
 }
@@ -2995,24 +2999,28 @@ func (t *ioTable) get(addr accounts.Address) *acctIO {
 		t.recs = append(t.recs, acctIO{})
 	}
 	r := &t.recs[i]
-	// The per-path read values stay: has gates every one, and zeroing them would
-	// touch the whole record for each new address.
+	// reset already cleared what holds pointers; has gates the rest.
 	r.addr, r.has, r.dirty, r.accessed, r.access = addr, 0, 0, false, accessOptions{}
 	r.sdWitnesses = r.sdWitnesses[:0]
-	r.committed, r.hasCommitted = nil, false
-	r.wAddress, r.wBalance, r.wNonce, r.wIncarnation, r.wSelfDestruct = nil, nil, nil, nil, nil
-	r.wCreateContract, r.wCode, r.wCodeHash, r.wCodeSize = nil, nil, nil, nil
 	t.idx[addr] = int32(i)
 	t.last = int32(i)
 	return r
 }
 
+// entries counts records and the most slots their maps held: a cleared map
+// keeps the buckets it grew.
 func (t *ioTable) entries() int {
 	n := len(t.recs)
 	for i := range t.recs {
-		n += len(t.recs[i].storage) + len(t.recs[i].wStorage)
+		n += t.recs[i].slotPeak
 	}
 	return n
+}
+
+func (r *acctIO) noteSlots() {
+	if n := len(r.storage) + len(r.wStorage); n > r.slotPeak {
+		r.slotPeak = n
+	}
 }
 
 // maxReusedStorageAddrs bounds how many slot maps a reused table keeps.
@@ -3025,10 +3033,15 @@ func (t *ioTable) reset() {
 	held, maps := 0, 0
 	for i := range t.recs {
 		r := &t.recs[i]
+		// A pooled table must pin no account, code or write of this call.
+		r.address, r.code, r.codeHash = VersionedRead[AccountView]{}, VersionedRead[accounts.Code]{}, VersionedRead[accounts.CodeHash]{}
+		r.committed, r.hasCommitted = nil, false
+		r.wAddress, r.wBalance, r.wNonce, r.wIncarnation, r.wSelfDestruct = nil, nil, nil, nil, nil
+		r.wCreateContract, r.wCode, r.wCodeHash, r.wCodeSize = nil, nil, nil, nil
 		if r.storage == nil && r.wStorage == nil {
 			continue
 		}
-		r.slotPeak = max(r.slotPeak, len(r.storage)+len(r.wStorage))
+		r.noteSlots()
 		held += r.slotPeak
 		maps++
 		clear(r.storage)
@@ -3242,6 +3255,7 @@ func (t *ioTable) SetStorage(addr accounts.Address, key accounts.StorageKey, tr 
 		r.storage = make(map[accounts.StorageKey]VersionedRead[uint256.Int])
 	}
 	r.storage[key] = tr
+	r.noteSlots()
 }
 
 func (t *ioTable) getHeader(addr accounts.Address, path AccountPath, key accounts.StorageKey) (ReadHeader, bool) {

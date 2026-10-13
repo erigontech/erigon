@@ -3210,6 +3210,7 @@ func (ibs *IntraBlockState) recordWriteStorage(addr accounts.Address, key accoun
 	}
 	vw.Version = ibs.Version()
 	vw.Val = val
+	r.noteSlots()
 	traceWrite(ibs, vw)
 }
 
@@ -3409,10 +3410,8 @@ func (ibs *IntraBlockState) Version() Version {
 	}
 }
 
-// VersionedReads returns the in-flight per-path read set.  The returned
-// value shares the underlying maps with the IBS; it is handed over at
-// end of tx (RecordReads / TxIn), after which ResetVersionedIO rebinds
-// the IBS field to a fresh set.
+// VersionedReads returns a copy of this tx's reads that stays valid after the
+// state moves on to the next tx.
 func (ibs *IntraBlockState) VersionedReads() ReadSet {
 	return ibs.versionedReads.toReadSet()
 }
