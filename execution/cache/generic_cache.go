@@ -104,6 +104,8 @@ type GenericCache[T any] struct {
 	staleEvicted atomic.Uint64 // stale entries detected on read after an unwind; dropped unless a racing put revived them
 
 	sizeFunc func(T) int
+
+	gs growStats
 }
 
 // initialShardCount gives a cache of this capacity ~64 slots per shard,
@@ -152,6 +154,9 @@ func NewGenericCacheWithAvg[T any](capacityBytes datasize.ByteSize, avgBytes uin
 	shards := max(initialShardCount(max(uint32(approx), genericCacheStartCapacity), shardCeil()), 1)
 	start := max((genericCacheStartCapacity+bucketWays*shards-1)/(bucketWays*shards), 1)
 	ceiling := min(uint64(capacityBytes)/(uint64(shards)*uint64(c.bucketBytes())), uint64(maxCacheSlots/bucketWays/shards))
+	if dbgFreelruCap {
+		ceiling = min(ceiling, uint64(freelruCeiling[T](capacityBytes, avgBytes)/(bucketWays*shards)))
+	}
 	// A budget too small to buy the start capacity keeps it anyway: the byte
 	// accounting a cache evicts and drops on has to stay usable at any budget.
 	c.init(shards, start, max(uint32(ceiling), start))
@@ -233,6 +238,7 @@ func (c *GenericCache[T]) growLocked(s *shard[T]) bool {
 		return false
 	}
 	t := newTable[T](next)
+	moved := int64(0)
 	for i := range old {
 		for way := range bucketWays {
 			e := old[i].slots[way].Load()
@@ -244,6 +250,7 @@ func (c *GenericCache[T]) growLocked(s *shard[T]) bool {
 			// Only a last step that is not a whole multiple can overfill a bucket.
 			if w := b.freeWay(); w >= 0 {
 				b.store(w, tagOf(h), e)
+				moved++
 			} else {
 				c.currentSize.Add(-int64(e.size))
 				s.n.Add(-1)
@@ -252,6 +259,7 @@ func (c *GenericCache[T]) growLocked(s *shard[T]) bool {
 		}
 	}
 	s.tbl.Store(t)
+	c.logGrow(moved, int64(next)*int64(unsafe.Sizeof(bucket[T]{})))
 	return true
 }
 
