@@ -99,6 +99,53 @@ func TestLogFilterEndpointsRejectTooManyTopicPositions(t *testing.T) {
 	}
 }
 
+// Every method that installs a filter or subscription answers -32005 once the node-wide budget is used up.
+func TestFilterAndSubscriptionCreationRejectedAtSubscriptionLimit(t *testing.T) {
+	config := rpchelper.FiltersConfig{RpcSubscriptionFiltersMaxSubscriptions: 1}
+	filterManager := rpchelper.New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
+	api := &APIImpl{
+		BaseAPI:                  &BaseAPI{filters: filterManager},
+		SubscribeLogsChannelSize: 1,
+	}
+	syncingAPI := NewEthSyncingSubscriptionAPI(filterManager, log.New())
+
+	closeNotifications := make(chan any)
+	t.Cleanup(func() { close(closeNotifications) })
+	subscriptionContext := rpc.ContextWithNotifier(t.Context(), rpc.NewLocalNotifier("eth", make(chan any, 1), closeNotifications))
+
+	_, err := api.NewBlockFilter(t.Context())
+	require.NoError(t, err)
+
+	tests := []struct {
+		name string
+		call func() error
+	}{
+		{"eth_newBlockFilter", func() error { _, err := api.NewBlockFilter(t.Context()); return err }},
+		{"eth_newPendingTransactionFilter", func() error { _, err := api.NewPendingTransactionFilter(t.Context()); return err }},
+		{"eth_newFilter", func() error { _, err := api.NewFilter(t.Context(), filters.FilterCriteria{}); return err }},
+		{`eth_subscribe("newHeads")`, func() error { _, err := api.NewHeads(subscriptionContext); return err }},
+		{`eth_subscribe("newPendingTransactions")`, func() error {
+			_, err := api.NewPendingTransactions(subscriptionContext, nil)
+			return err
+		}},
+		{`eth_subscribe("logs")`, func() error { _, err := api.Logs(subscriptionContext, filters.FilterCriteria{}); return err }},
+		{`eth_subscribe("transactionReceipts")`, func() error {
+			_, err := api.TransactionReceipts(subscriptionContext, nil)
+			return err
+		}},
+		{`eth_subscribe("syncing")`, func() error { _, err := syncingAPI.Syncing(subscriptionContext); return err }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := test.call()
+			var rpcErr rpc.Error
+			require.ErrorAs(t, err, &rpcErr)
+			require.Equal(t, rpc.ErrCodeServerOverloaded, rpcErr.ErrorCode())
+			require.EqualError(t, err, "too many filters and subscriptions")
+		})
+	}
+}
+
 func TestSubscriptionsRequireFiltersAndNotifier(t *testing.T) {
 	m := execmoduletester.New(t)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
