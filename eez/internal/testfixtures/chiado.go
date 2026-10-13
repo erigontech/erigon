@@ -21,8 +21,11 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 )
 
-// ChiadoAnchorFile is the live Chiado settlement recorded in chiado/.
-const ChiadoAnchorFile = "anchor-23507949.json"
+// Live Chiado recordings in chiado/.
+const (
+	ChiadoAnchorFile        = "anchor-23507949.json"
+	ChiadoRollupCreatedFile = "rollup-created-23413747.json"
+)
 
 // ChiadoSettlement is a settlement transaction mined on the Gnosis-hosted EEZ
 // Chiado testnet, with its receipt logs and contract state read at the
@@ -100,4 +103,29 @@ func LoadChiadoSettlement() (*ChiadoSettlement, error) {
 		return nil, err
 	}
 	return &s, nil
+}
+
+// ChiadoLogRecord is one receipt log read back from Chiado with the position
+// of the transaction that emitted it.
+type ChiadoLogRecord struct {
+	Source           string         `json:"source"`
+	CapturedAt       string         `json:"capturedAt"`
+	Network          string         `json:"network"`
+	L1ChainID        uint64         `json:"l1ChainId"`
+	L1BlockNumber    uint64         `json:"l1BlockNumber"`
+	L1BlockHash      common.Hash    `json:"l1BlockHash"`
+	L1BlockTimestamp uint64         `json:"l1BlockTimestamp"`
+	TransactionHash  common.Hash    `json:"transactionHash"`
+	TransactionIndex hexutil.Uint64 `json:"transactionIndex"`
+	Log              ChiadoLog      `json:"log"`
+}
+
+// LoadChiadoRollupCreated loads chiado/rollup-created-23413747.json, the
+// registration of rollup 1 in the registry.
+func LoadChiadoRollupCreated() (*ChiadoLogRecord, error) {
+	var r ChiadoLogRecord
+	if err := readStrict(Path("chiado", ChiadoRollupCreatedFile), &r); err != nil {
+		return nil, err
+	}
+	return &r, nil
 }

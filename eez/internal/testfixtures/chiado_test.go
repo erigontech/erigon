@@ -88,3 +88,19 @@ func TestChiadoSettlement(t *testing.T) {
 	require.Equal(t, s.RollupManager, v.RollupContract)
 	require.NotZero(t, v.ManagerThreshold)
 }
+
+// TestChiadoRollupCreated checks the registration record against the
+// settlement recorded later from the same registry.
+func TestChiadoRollupCreated(t *testing.T) {
+	r, err := LoadChiadoRollupCreated()
+	require.NoError(t, err)
+	s, err := LoadChiadoSettlement()
+	require.NoError(t, err)
+	require.Equal(t, s.L1ChainID, r.L1ChainID)
+	require.Less(t, r.L1BlockNumber, s.L1BlockNumber)
+	require.Less(t, r.L1BlockTimestamp, s.L1BlockTimestamp)
+	require.Equal(t, s.Registry, r.Log.Address)
+	require.Len(t, r.Log.Topics, 3)
+	require.Equal(t, s.RollupManager, common.BytesToAddress(r.Log.Topics[2][12:]))
+	require.Len(t, r.Log.Data, 32)
+}
