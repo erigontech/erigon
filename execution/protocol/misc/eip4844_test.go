@@ -23,6 +23,12 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func TestFakeExponential(t *testing.T) {
@@ -58,5 +64,37 @@ func TestFakeExponential(t *testing.T) {
 		if tt.want != result.ToBig().Uint64() {
 			t.Errorf("got %v want %v", result, tt.want)
 		}
+	}
+}
+
+// TestCalcExcessBlobGasParliaSkipsEIP7918 pins that BSC activates Osaka without
+// EIP-7918's reserve-price excess formula.
+func TestCalcExcessBlobGasParliaSkipsEIP7918(t *testing.T) {
+	blobSchedule := map[string]*params.BlobConfig{
+		"osaka": {Target: 3, Max: 6, BaseFeeUpdateFraction: 3338477},
+	}
+	parent := &types.Header{
+		ExcessBlobGas: common.NewUint64(3 * params.GasPerBlob),
+		BlobGasUsed:   common.NewUint64(3 * params.GasPerBlob),
+		BaseFee:       uint256.NewInt(common.GWei),
+	}
+	for _, tc := range []struct {
+		name   string
+		parlia *chain.ParliaConfig
+		want   uint64
+	}{
+		{"ethereum", nil, 3*params.GasPerBlob + 3*params.GasPerBlob*3/6},
+		{"parlia", &chain.ParliaConfig{}, 3 * params.GasPerBlob},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			config := &chain.Config{
+				CancunTime:   common.NewUint64(0),
+				PragueTime:   common.NewUint64(0),
+				OsakaTime:    common.NewUint64(0),
+				BlobSchedule: blobSchedule,
+				Parlia:       tc.parlia,
+			}
+			require.Equal(t, tc.want, CalcExcessBlobGas(config, parent, 1))
+		})
 	}
 }

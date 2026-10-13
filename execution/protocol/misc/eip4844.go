@@ -63,8 +63,8 @@ func CalcExcessBlobGas(config *chain.Config, parent *types.Header, currentHeader
 	if parentExcessBlobGas+parentBlobGasUsed < targetBlobGas {
 		return 0
 	}
-	if config.IsOsaka(currentHeaderTime) {
-		// EIP-7918: Blob base fee bounded by execution cost
+	if config.IsOsaka(currentHeaderTime) && config.Parlia == nil {
+		// EIP-7918: Blob base fee bounded by execution cost; BSC does not adopt it.
 		max := config.GetMaxBlobsPerBlock(currentHeaderTime)
 		refBlobBaseFee, err := GetBlobGasPrice(config, parentExcessBlobGas, currentHeaderTime)
 		if err != nil {

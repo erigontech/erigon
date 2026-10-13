@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/bsc/parlia/seal"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -122,6 +123,53 @@ func TestInitializeStoresParentHashFromPrague(t *testing.T) {
 			got, err := ibs.GetState(params.HistoryStorageAddress, slot)
 			require.NoError(t, err)
 			require.Equal(t, tc.want, common.Hash(got.Bytes32()))
+		})
+	}
+}
+
+func TestInitializeUpgradesSystemContractsOnFirstPasteurBlock(t *testing.T) {
+	t.Parallel()
+
+	spec, err := chainspec.ChainSpecByName(networkname.Chapel)
+	require.NoError(t, err)
+	p := New(spec.Config, log.New())
+
+	stakeHub := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000002002"))
+	governor := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000002004"))
+	const forkBlock, forkTime = 120346349, 1784601000
+	require.Equal(t, uint64(forkTime), *spec.Config.PasteurTime)
+
+	for _, tc := range []struct {
+		name       string
+		parentTime uint64
+		time       uint64
+		upgraded   bool
+	}{
+		{"first pasteur block", forkTime - 1, forkTime, true},
+		{"later pasteur block", forkTime, forkTime + 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			header := &types.Header{Number: *uint256.NewInt(forkBlock), Time: tc.time}
+			parent := &types.Header{Number: *uint256.NewInt(forkBlock - 1), Time: tc.parentTime}
+
+			ibs := state.New(state.NewNoopReader())
+			require.NoError(t, p.Initialize(spec.Config, parentReader{parent: parent}, header, ibs, nil, log.New(), nil))
+
+			for _, c := range []struct {
+				addr accounts.Address
+				hash common.Hash
+			}{
+				{stakeHub, common.HexToHash("0xdd27dda318f66bdc14973b8a35e7681ead1c1f75228696c2e75f0483bd6ecc64")},
+				{governor, common.HexToHash("0xcdd25ea38f919daff75f4dbd708e43ac7443ceb7603f57afb2e3777507512d4b")},
+			} {
+				code, err := ibs.GetCode(c.addr)
+				require.NoError(t, err)
+				if !tc.upgraded {
+					require.Empty(t, code)
+					continue
+				}
+				require.Equal(t, c.hash, crypto.Keccak256Hash(code))
+			}
 		})
 	}
 }
