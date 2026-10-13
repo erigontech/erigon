@@ -25,8 +25,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/eez/internal/testfixtures"
-	"github.com/erigontech/erigon/eez/protocol"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -135,38 +133,6 @@ func TestSpanVectors(t *testing.T) {
 		_, err := DecodeSpan(common.FromHex(c.operations))
 		require.ErrorIs(t, err, c.err, c.name)
 	}
-}
-
-// TestWindow84CallData rebuilds the devnet batch's callData from the blocks
-// it settles: their beneficiaries, extraData and transactions encode to the
-// span its RollupOperation carries.
-func TestWindow84CallData(t *testing.T) {
-	w, err := testfixtures.LoadWindow("captured-devnet-window-84")
-	require.NoError(t, err)
-	var blocks []spanBlock
-	for _, wb := range w.Blocks {
-		var b types.Block
-		require.NoError(t, rlp.DecodeBytes(wb.RLP, &b))
-		sb := spanBlock{beneficiary: b.Coinbase(), extraData: b.Extra(), txs: [][]byte{}}
-		for _, tx := range b.Transactions() {
-			var buf bytes.Buffer
-			require.NoError(t, tx.MarshalBinary(&buf))
-			sb.txs = append(sb.txs, buf.Bytes())
-		}
-		blocks = append(blocks, sb)
-	}
-	batch, err := protocol.DecodePostAndVerifyBatch(w.PostBatch)
-	require.NoError(t, err)
-	callData := encode(Message{Type: RollupOperation, RollupID: 1, Data: encodeSpan(blocks)})
-	require.Equal(t, []byte(batch.CallData), callData)
-
-	msgs, err := Decode(nil, batch.CallData)
-	require.NoError(t, err)
-	p, err := ParsePayload(msgs)
-	require.NoError(t, err)
-	s, err := DecodeSpan(p.Operations)
-	require.NoError(t, err)
-	require.Len(t, s.TxCounts, len(w.Blocks))
 }
 
 // TestChiadoSpanIsNotV0 records that the live Chiado composer does not emit

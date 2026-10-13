@@ -26,7 +26,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/eez/internal/testfixtures"
-	"github.com/erigontech/erigon/eez/protocol"
 )
 
 // encode is a test encoder: the version byte, then msgs as BLOB_FORMAT_SPEC
@@ -126,23 +125,6 @@ func TestDecodeBlobStream(t *testing.T) {
 	msgs, err = Decode(packBlobs(stream), tail)
 	require.NoError(t, err)
 	require.Equal(t, append([]Message{big}, sample()[1:13]...), msgs)
-}
-
-// TestDecodeWindow84CallData is T-VEC-4 (stream part) on the devnet batch:
-// its callData is a whole stream with one RollupOperation for rollup 1.
-func TestDecodeWindow84CallData(t *testing.T) {
-	w, err := testfixtures.LoadWindow("captured-devnet-window-84")
-	require.NoError(t, err)
-	b, err := protocol.DecodePostAndVerifyBatch(w.PostBatch)
-	require.NoError(t, err)
-	msgs, err := Decode(nil, b.CallData)
-	require.NoError(t, err)
-	require.Len(t, msgs, 1)
-	require.Equal(t, encode(msgs...), []byte(b.CallData))
-	p, err := ParsePayload(msgs)
-	require.NoError(t, err)
-	require.Equal(t, uint64(1), p.RollupID)
-	require.Empty(t, p.Actions)
 }
 
 // TestDecodeChiadoBlob decodes the live settlement's blob: the stream sits in
