@@ -175,19 +175,21 @@ func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation, ver
 	defer p.aggregatesLock.Unlock()
 	entry, exist := p.aggregatesInCommittee[key]
 	if !exist {
-		perCommittee := slotCommittee{slot: inAtt.Data.Slot, committee: committeeIndex}
-		if len(p.dataPerCommittee[perCommittee]) >= maxDataPerCommittee && !p.evictWeakestData(perCommittee, setBits(inAtt)) {
-			return ErrPoolLimit
+		// Decode the signature before making room, so a rejected attestation evicts nothing.
+		signature := newSignatureAggregator()
+		if err := signature.AddValidated(inAtt.Signature[:]); err != nil {
+			return err
 		}
-		if len(p.aggregatesInCommittee) >= p.maxCommitteeAggregates() {
+		perCommittee := slotCommittee{slot: inAtt.Data.Slot, committee: committeeIndex}
+		if len(p.dataPerCommittee[perCommittee]) >= maxDataPerCommittee {
+			if !p.evictWeakestData(perCommittee, setBits(inAtt)) {
+				return ErrPoolLimit
+			}
+		} else if len(p.aggregatesInCommittee) >= p.maxCommitteeAggregates() {
 			p.pruneStaleLocked()
 			if len(p.aggregatesInCommittee) >= p.maxCommitteeAggregates() {
 				return ErrPoolLimit
 			}
-		}
-		signature := newSignatureAggregator()
-		if err := signature.AddValidated(inAtt.Signature[:]); err != nil {
-			return err
 		}
 		storedAttestation := inAtt.Copy()
 		storedAttestation.SetVersion(version)

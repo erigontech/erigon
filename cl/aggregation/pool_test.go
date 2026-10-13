@@ -96,10 +96,14 @@ type fakeSignatureAggregator struct {
 	sigs     [][]byte
 	delay    time.Duration
 	failNext error
+	failAll  error
 }
 
 func (f *fakeSignatureAggregator) AddValidated(sig []byte) error {
 	time.Sleep(f.delay)
+	if f.failAll != nil {
+		return f.failAll
+	}
 	if len(f.sigs) > 0 && f.failNext != nil {
 		return f.failNext
 	}
@@ -550,6 +554,24 @@ func (t *PoolTestSuite) TestAddAttestationElectraLimitsTotalAggregates() {
 
 func TestPool(t *testing.T) {
 	suite.Run(t, new(PoolTestSuite))
+}
+
+// A full committee makes room only for an attestation that is added; one whose signature cannot be
+// decoded must not evict anything.
+func (t *PoolTestSuite) TestAddAttestationElectraKeepsFullCommitteeOnSignatureError() {
+	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).AnyTimes()
+	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).AnyTimes()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
+	for source := range maxDataPerCommittee {
+		t.Require().NoError(pool.AddAttestation(t.electraAttestationWithSource(5, 1, byte(source))))
+	}
+	errBadSignature := errors.New("bad signature")
+	newSignatureAggregator = func() signatureAggregator { return &fakeSignatureAggregator{failAll: errBadSignature} }
+
+	t.ErrorIs(pool.AddAttestation(t.electraAttestationWithSource(5, 1, 0xbb)), errBadSignature)
+	t.Len(pool.Aggregates(), maxDataPerCommittee)
 }
 
 // Stale entries are only swept once a minute; a full pool prunes them before refusing new data.

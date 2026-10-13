@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -43,26 +42,23 @@ var (
 )
 
 type CommitteeSubscribeMgmt struct {
-	beaconConfig    *clparams.BeaconChainConfig
-	netConfig       *clparams.NetworkConfig
-	syncedData      *synced_data.SyncedDataManager
-	gossipManager   *gossipMgr.GossipManager
-	aggregationPool aggregation.AggregationPool
+	beaconConfig  *clparams.BeaconChainConfig
+	netConfig     *clparams.NetworkConfig
+	syncedData    *synced_data.SyncedDataManager
+	gossipManager *gossipMgr.GossipManager
 }
 
 func NewCommitteeSubscribeManagement(
 	beaconConfig *clparams.BeaconChainConfig,
 	netConfig *clparams.NetworkConfig,
-	aggregationPool aggregation.AggregationPool,
 	syncedData *synced_data.SyncedDataManager,
 	gossipManager *gossipMgr.GossipManager,
 ) *CommitteeSubscribeMgmt {
 	c := &CommitteeSubscribeMgmt{
-		beaconConfig:    beaconConfig,
-		netConfig:       netConfig,
-		aggregationPool: aggregationPool,
-		syncedData:      syncedData,
-		gossipManager:   gossipManager,
+		beaconConfig:  beaconConfig,
+		netConfig:     netConfig,
+		syncedData:    syncedData,
+		gossipManager: gossipManager,
 	}
 	return c
 }
