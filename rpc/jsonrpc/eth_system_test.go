@@ -453,7 +453,7 @@ func TestGasPrice(t *testing.T) {
 
 	for _, testCase := range cases {
 		t.Run(testCase.description, func(t *testing.T) {
-			m := createGasPriceTestKV(t, testCase.chainSize)
+			m := createGasPriceTestKV(t, chain.TestChainBerlinConfig, testCase.chainSize)
 			defer m.DB.Close()
 			eth := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 
@@ -468,6 +468,31 @@ func TestGasPrice(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGasPriceAddsHeadBaseFee(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m := createGasPriceTestKV(t, chain.TestChainOsakaConfig, 30)
+	defer m.DB.Close()
+	eth := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	ctx := t.Context()
+
+	tx, err := m.DB.BeginRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	head := rawdb.ReadCurrentHeader(tx)
+	require.NotNil(t, head)
+	require.NotNil(t, head.BaseFee)
+	require.False(t, head.BaseFee.IsZero())
+
+	tip, err := eth.MaxPriorityFeePerGas(ctx)
+	require.NoError(t, err)
+	price, err := eth.GasPrice(ctx)
+	require.NoError(t, err)
+	want := new(uint256.Int).Add((*uint256.Int)(tip), head.BaseFee)
+	require.Equal(t, want, (*uint256.Int)(price))
 }
 
 func TestEthConfig(t *testing.T) {
@@ -659,12 +684,12 @@ func TestBlobBaseFee(t *testing.T) {
 	})
 }
 
-func createGasPriceTestKV(t *testing.T, chainSize int) *execmoduletester.ExecModuleTester {
+func createGasPriceTestKV(t testing.TB, config *chain.Config, chainSize int) *execmoduletester.ExecModuleTester {
 	var (
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr   = crypto.PubkeyToAddress(key.PublicKey)
 		gspec  = &types.Genesis{
-			Config: chain.TestChainBerlinConfig,
+			Config: config,
 			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
 		}
 		signer = types.LatestSigner(gspec.Config)
