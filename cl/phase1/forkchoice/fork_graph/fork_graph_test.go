@@ -1923,7 +1923,14 @@ func TestPreviousHeadFastPathUsesAuthoritativePriorRoot(t *testing.T) {
 	require.NoError(t, manager.OnHeadStateWithBlockRoot(first, firstRoot))
 	require.NoError(t, manager.OnHeadStateWithBlockRoot(state.New(&clparams.MainnetBeaconConfig), common.Hash{0x02}))
 
-	_, ok, err := graph.useCachedStateIfPossible(firstRoot, nil)
+	out, ok, err := graph.useCachedStateIfPossible(firstRoot, nil)
 	require.NoError(t, err)
 	require.True(t, ok, "previous-head fast path must resolve the authoritative prior root")
+	outRoot, err := out.BlockRoot()
+	require.NoError(t, err)
+	require.Equal(t, firstRoot, outRoot)
+
+	_, ok, err = graph.useCachedStateIfPossible(recomputedRoot, nil)
+	require.NoError(t, err)
+	require.False(t, ok)
 }

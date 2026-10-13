@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -141,12 +142,12 @@ func TestFailedHeadUpdateKeepsHead(t *testing.T) {
 	}
 
 	broken := state.New(&clparams.MainnetBeaconConfig)
-	require.NoError(t, broken.SetSlot(100))
+	require.NoError(t, broken.SetSlot(150))
 	broken.AddPreviousEpochAttestation(&solid.PendingAttestation{
 		AggregationBits: solid.NewBitList(0, 2048),
 		Data:            &solid.AttestationData{Slot: 200},
 	})
-	require.Error(t, manager.OnHeadStateWithBlockRoot(broken, common.Hash{0xff}))
+	require.ErrorIs(t, manager.OnHeadStateWithBlockRoot(broken, common.Hash{0xff}), raw.ErrGetBlockRootAtSlotFuture)
 
 	root, slot, ok := manager.StateHead()
 	require.True(t, ok)
