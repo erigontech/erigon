@@ -852,3 +852,13 @@ func TestBucketStoreEarliestStoredSlotSkipsAnUnreadableBucket(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(3*subdivisionSlot), slot)
 }
+
+func TestBucketStoreEarliestStoredSlotErrorsWhenTheOnlyBucketIsUnreadable(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	makeBuckets(t, mem, "3")
+	require.NoError(t, afero.WriteFile(mem, "3/root_0", []byte{1}, 0o644))
+	b := newBucketStore(t, openFailingFs{Fs: mem, name: "3"})
+
+	_, err := b.EarliestStoredSlot()
+	require.ErrorIs(t, err, os.ErrPermission)
+}
