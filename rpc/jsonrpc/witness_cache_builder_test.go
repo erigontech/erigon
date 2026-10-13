@@ -903,6 +903,8 @@ func TestHeadCaptureOverCarriedRecordsMatchesDurablePerBlock(t *testing.T) {
 		dbg.AssertEnabled, dbg.CommitmentBranchCarry, statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousAssert, previousCarry, previousSchema, previousV3
 	})
 	dbg.AssertEnabled, dbg.CommitmentBranchCarry = true, true
+	commitmentdb.WantParentReads(true)
+	t.Cleanup(func() { commitmentdb.WantParentReads(false) })
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	statecfg.EnableHistoricalCommitment()
@@ -917,6 +919,7 @@ func TestHeadCaptureOverCarriedRecordsMatchesDurablePerBlock(t *testing.T) {
 	adopted := metrics.GetOrCreateCounter("commitment_branch_carry_adopted_total").GetValueUint64()
 	filled := metrics.GetOrCreateCounter("commitment_branch_carry_refs_filled_total").GetValueUint64()
 	used := witnessCacheParentRecordsCounter.GetValueUint64()
+	reads := metrics.GetOrCreateCounter("commitment_branch_prefetch_read_items_total").GetValueUint64()
 	onDemand := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
 	deletions := 0
 	for n := uint64(2); n <= uint64(testChain.Length()); n++ {
@@ -951,5 +954,6 @@ func TestHeadCaptureOverCarriedRecordsMatchesDurablePerBlock(t *testing.T) {
 	require.Positive(t, metrics.GetOrCreateCounter("commitment_branch_carry_adopted_total").GetValueUint64()-adopted, "blocks validated one at a time adopt the carried records")
 	require.Positive(t, witnessCacheParentRecordsCounter.GetValueUint64()-used, "head-capture builds read the published records")
 	require.Positive(t, deletions, "some blocks hand their verified deletions to head-capture")
+	require.Positive(t, metrics.GetOrCreateCounter("commitment_branch_prefetch_read_items_total").GetValueUint64()-reads, "with head-capture on, executed reads reach the branch prefetcher")
 	require.Positive(t, metrics.GetOrCreateCounter("commitment_branch_carry_refs_filled_total").GetValueUint64()-filled, "records adopted from a block's deltas get their leaf refs")
 }

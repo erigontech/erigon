@@ -220,6 +220,24 @@ func (cs *calcState) markDirty(addr accounts.Address, acc *calcAccountState) {
 	}
 }
 
+func (cs *calcState) prefetchReads(reads []readKey) {
+	if cs.hashes == nil {
+		return
+	}
+	for _, r := range reads {
+		_, queued := cs.hashes.accounts[r.addr]
+		account := cs.hashes.account(r.addr)
+		if !queued {
+			cs.branchPrefetch.add(prefetchItem{account: account})
+			mxBranchPrefetchReads.Inc()
+		}
+		if r.storage {
+			cs.branchPrefetch.add(prefetchItem{account: account, slot: cs.hashes.slot(r.key), storage: true})
+			mxBranchPrefetchReads.Inc()
+		}
+	}
+}
+
 // ApplyWrites folds a tx's typed write collections into the local state.
 //
 // Self-destruct is applied before the field writes so the priority is explicit

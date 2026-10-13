@@ -600,6 +600,29 @@ func eachHeaderOf[T any](m map[accounts.Address]VersionedRead[T], yield func(Rea
 	return true
 }
 
+func eachAddrOf[T any](m map[accounts.Address]VersionedRead[T], fn func(accounts.Address, accounts.StorageKey, bool)) {
+	for addr := range m {
+		fn(addr, accounts.NilKey, false)
+	}
+}
+
+func (s ReadSet) EachKey(fn func(addr accounts.Address, key accounts.StorageKey, storage bool)) {
+	eachAddrOf(s.address, fn)
+	eachAddrOf(s.balance, fn)
+	eachAddrOf(s.nonce, fn)
+	eachAddrOf(s.incarnation, fn)
+	eachAddrOf(s.selfDestruct, fn)
+	eachAddrOf(s.createContract, fn)
+	eachAddrOf(s.code, fn)
+	eachAddrOf(s.codeHash, fn)
+	eachAddrOf(s.codeSize, fn)
+	for addr, inner := range s.storage {
+		for key := range inner {
+			fn(addr, key, true)
+		}
+	}
+}
+
 // eachHeader visits the type-agnostic header of every read; the callback
 // returns false to stop early.
 func (s ReadSet) eachHeader(yield func(ReadHeader) bool) {

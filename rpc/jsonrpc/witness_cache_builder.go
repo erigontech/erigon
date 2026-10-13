@@ -249,6 +249,10 @@ func RunWitnessCacheBuilder(ctx context.Context, dbg *DebugAPIImpl, headerCh <-c
 		return
 	}
 	headCapture := dbg.witnessCache.HeadCapture()
+	if headCapture {
+		commitmentdb.WantParentReads(true)
+		defer commitmentdb.WantParentReads(false)
+	}
 	// pin is the one-block-lag parent snapshot for head-capture builds; nil in the
 	// durable path. The deferred close releases whichever pin is held at shutdown.
 	var pin *rollingPin

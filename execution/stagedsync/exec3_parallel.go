@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -1966,6 +1967,7 @@ type txResult struct {
 	traceFroms            map[accounts.Address]struct{}
 	traceTos              map[accounts.Address]struct{}
 	writes                *state.WriteSet
+	reads                 []readKey
 	rules                 *chain.Rules
 }
 
@@ -3330,6 +3332,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if result.writes != nil {
 				applyResult.writes = result.writes
 				be.applyCount += applyResult.writes.Count()
+			}
+			if commitmentdb.ParentReadsWanted() {
+				applyResult.reads = readKeysOf(result.TxIn)
 			}
 
 			// Apply per-tx indexes (logs, traces, receipt cache) here in the
