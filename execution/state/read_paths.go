@@ -949,16 +949,16 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 // extraction of *accounts.Account.  Used internally by versionedReadCore
 // to resolve sibling-account reads without taking a typed callback.
 func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.Account, ReadSource, Version, error) {
-	if !s.warmReadable(addr) {
-		if vw, ok := s.versionedWrites.GetAddress(addr); ok {
-			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, nil
+	if rec := s.versionedReads.find(addr); rec != nil {
+		if rec.dirty > 0 && rec.wAddress != nil {
+			return rec.wAddress.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, nil
 		}
-	}
-	if tr, ok := s.versionedReads.GetAddress(addr); ok && warmSource(tr.Source) {
-		if tr.Val != nil {
-			return tr.Val.Account(), tr.Source, tr.Version, nil
+		if tr := rec.address; rec.has&pathBit(AddressPath) != 0 && warmSource(tr.Source) {
+			if tr.Val != nil {
+				return tr.Val.Account(), tr.Source, tr.Version, nil
+			}
+			return nil, tr.Source, tr.Version, nil
 		}
-		return nil, tr.Source, tr.Version, nil
 	}
 	var r readPathResult
 	versionedReadCore(s, addr, AddressPath, accounts.NilKey, false, true, &r)
@@ -1555,15 +1555,17 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		v, clean, err := so.GetState(key)
 		return v, StorageRead, UnknownVersion, clean, err
 	}
-	if !s.warmReadable(addr) {
-		if vw, ok := s.versionedWrites.GetStorage(addr, key); ok {
-			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, false, nil
+	if rec := s.versionedReads.find(addr); rec != nil {
+		if rec.dirty > 0 {
+			if vw, ok := rec.wStorage[key]; ok {
+				return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, false, nil
+			}
 		}
-	}
-	// A resident deleted object outranks the read set, as in versionedReadCore.
-	if so, ok := s.stateObjects[addr]; !ok || !so.deleted {
-		if tr, ok := s.versionedReads.GetStorage(addr, key); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, false, nil
+		// A resident deleted object outranks the read set, as in versionedReadCore.
+		if so, ok := s.stateObjects[addr]; !ok || !so.deleted {
+			if tr, ok := rec.storage[key]; ok && warmSource(tr.Source) {
+				return tr.Val, tr.Source, tr.Version, false, nil
+			}
 		}
 	}
 	var r readPathResult
