@@ -371,7 +371,7 @@ func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool)
 		c.dropped.Add(1)
 		return
 	}
-	// A full bucket grows the shard, so below its ceiling a put never evicts.
+	// A full bucket grows its shard; only a shard at its own ceiling evicts.
 	way := b.freeWay()
 	for way < 0 && c.growLocked(s) {
 		b = s.bucket(h)
