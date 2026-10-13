@@ -254,6 +254,14 @@ func TestBadBlockUnwindKeepsValidAncestorsIndexed(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, badNum, "valid ancestor %d marked bad", i)
 	}
+	for _, i := range []uint64{n - 2, n - 1, n} {
+		canonical, err := rawdb.ReadCanonicalHash(tx, i)
+		require.NoError(t, err)
+		require.Equal(t, common.Hash{}, canonical, "block %d still canonical", i)
+	}
+	canonical, err := rawdb.ReadCanonicalHash(tx, n-3)
+	require.NoError(t, err)
+	require.Equal(t, hashes[n-3], canonical)
 	require.Nil(t, rawdb.ReadHeaderNumber(tx, hashes[n]))
 	badNum, err := rawdb.ReadBadHeaderNumber(tx, hashes[n])
 	require.NoError(t, err)
