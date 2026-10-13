@@ -61,6 +61,9 @@ func TestMarkPayloadStatusKeepsAValidatedPayloadHash(t *testing.T) {
 	byHash, ok := store.executionPayloadStatus.Get(hash)
 	require.True(t, ok)
 	require.EqualValues(t, execution_client.PayloadStatusValidated, byHash)
+	byRoot, ok := store.GetRecentExecutionPayloadStatusByRoot(anchorRoot)
+	require.True(t, ok)
+	require.EqualValues(t, execution_client.PayloadStatusValidated, byRoot, "the sibling's write leaves the verified root alone")
 }
 
 func TestGloasAnchorStartsWithoutPtcVotes(t *testing.T) {
