@@ -51,7 +51,7 @@ const (
 	// a transaction's budget: 32KB of pointers, holding a p99 block's ~1700.
 	maxRetainedLogSlots = 32 * 1024 / 8
 
-	logChunkLen = 64
+	logChunkLen = 60
 )
 
 // logChunk is one allocation of entries for when the pool runs dry, each with
