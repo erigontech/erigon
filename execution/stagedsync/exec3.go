@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/bal/offlinebal"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -512,12 +513,12 @@ type txExecutor struct {
 
 	execLoopGroup *commonerrors.Group
 
-	execRequests chan *execRequest
-	execCount    atomic.Int64
-	abortCount   atomic.Int64
-	invalidCount atomic.Int64
-	readCount    atomic.Int64
-	writeCount   atomic.Int64
+	execRequests   chan *execRequest
+	dispatchCounts parallelDispatchCounts
+	abortCount     atomic.Int64
+	invalidCount   atomic.Int64
+	readCount      atomic.Int64
+	writeCount     atomic.Int64
 
 	enableChaosMonkey bool
 	chaosFaults       chaos_monkey.Faults
@@ -634,8 +635,13 @@ func (te *txExecutor) onBlockStart(ctx context.Context, block *types.Block) {
 	}
 }
 
-func blockAccessList(blockTx kv.Getter, block *types.Block, blockNum uint64) (types.BlockAccessList, error) {
+func blockAccessList(blockTx kv.Getter, block *types.Block, blockNum uint64, offlineBAL *offlinebal.Reader) (types.BlockAccessList, error) {
 	bal := block.BlockAccessList()
+	if bal == nil && offlineBAL != nil {
+		if data, ok := offlineBAL.Get(blockNum, block.Hash()); ok {
+			return types.DecodeBlockAccessListBytes(data)
+		}
+	}
 	if bal == nil && block.HeaderNoCopy().HasNonEmptyBAL() {
 		return rawdb.ReadBlockAccessList(blockTx, block.Hash(), blockNum)
 	}

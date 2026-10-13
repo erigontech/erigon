@@ -60,6 +60,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/stats"
+	"github.com/erigontech/erigon/execution/bal/offlinebal"
 	"github.com/erigontech/erigon/execution/blockreplay"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/cache"
@@ -329,6 +330,7 @@ func init() {
 	withLimit(cmdStageExec)
 	withTraceFlags(cmdStageExec)
 	withChainTipMode(cmdStageExec)
+	withOfflineBAL(cmdStageExec)
 	withErigondbDomainStepsInFrozenFile(cmdStageExec)
 	withExperimentalCommitment(cmdStageExec)
 	rootCmd.AddCommand(cmdStageExec)
@@ -730,11 +732,38 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	genesis := readGenesis(chain)
 	br, _ := blocksIO(db, logger)
 
+	if generateOfflineBAL && useOfflineBAL {
+		return errors.New("--generate-offline-bals and --use-offline-bals are mutually exclusive")
+	}
+
 	notifications := shards.NewNotifications(nil)
+	// Generating offline BALs requires the experimental-BAL exec path (pre-Amsterdam
+	// blocks otherwise skip BAL computation entirely).
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications,
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ true,
-		dirs, br, genesis, syncCfg, false /*experimentalBAL*/, exec.NewBlockReadAheader())
+		dirs, br, genesis, syncCfg, generateOfflineBAL /*experimentalBAL*/, exec.NewBlockReadAheader())
+
+	balDir := offlineBALDir
+	if balDir == "" {
+		balDir = filepath.Join(dirs.DataDir, "offline-bal")
+	}
+	if generateOfflineBAL {
+		w, err := offlinebal.NewWriter(balDir)
+		if err != nil {
+			return err
+		}
+		defer w.Close()
+		cfg = cfg.WithOfflineBAL(w, nil)
+	}
+	if useOfflineBAL {
+		r, err := offlinebal.OpenReader(balDir)
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		cfg = cfg.WithOfflineBAL(nil, r)
+	}
 
 	if unwind > 0 {
 		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
