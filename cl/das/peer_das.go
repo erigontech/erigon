@@ -459,14 +459,11 @@ func (d *peerdas) PruneBelow(slot uint64) error {
 	}
 	// The prune floor does not mean the columns above it are stored, so never advertise
 	// below the lowest stored bucket.
-	earliest := slot
-	stored, ok, storedErr := d.columnStorage.EarliestStoredSlot()
+	stored, storedErr := d.columnStorage.EarliestStoredSlot()
 	if storedErr != nil {
 		log.Debug("[peerdas] failed to read the earliest stored column slot", "err", storedErr)
-	} else if ok && stored > earliest {
-		earliest = stored
 	}
-	if earliest > d.state.GetEarliestAvailableSlot() {
+	if earliest := max(slot, stored); earliest > d.state.GetEarliestAvailableSlot() {
 		d.state.SetEarliestAvailableSlot(earliest)
 	}
 	return err

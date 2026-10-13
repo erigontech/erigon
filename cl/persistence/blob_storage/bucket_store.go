@@ -37,6 +37,7 @@ import (
 
 const (
 	subdivisionSlot = 10_000
+	listBatch       = 64
 	rwLocksCount    = 64
 	tmpSuffix       = ".tmp"
 )
@@ -212,12 +213,12 @@ func (b *bucketStore) stream(w io.Writer, slot uint64, root common.Hash, idx uin
 	return err
 }
 
-// The returned slot is where the lowest non-empty bucket starts, which can be below the
-// first sidecar actually stored in it.
-func (b *bucketStore) lowestStoredSlot() (uint64, bool, error) {
+// EarliestStoredSlot returns where the lowest bucket holding a sidecar starts, which can be
+// below the first sidecar actually stored in it, or 0 when nothing is stored.
+func (b *bucketStore) EarliestStoredSlot() (uint64, error) {
 	entries, err := afero.ReadDir(b.fs, ".")
 	if err != nil {
-		return 0, false, err
+		return 0, err
 	}
 	buckets := make([]uint64, 0, len(entries))
 	for _, entry := range entries {
@@ -233,15 +234,37 @@ func (b *bucketStore) lowestStoredSlot() (uint64, bool, error) {
 	}
 	slices.Sort(buckets)
 	for _, bucket := range buckets {
-		files, err := afero.ReadDir(b.fs, strconv.FormatUint(bucket, 10))
+		stored, err := b.holdsSidecar(strconv.FormatUint(bucket, 10))
 		if err != nil {
-			return 0, false, err
+			return 0, err
 		}
-		if slices.ContainsFunc(files, isStoredSidecar) {
-			return bucket * subdivisionSlot, true, nil
+		if stored {
+			return bucket * subdivisionSlot, nil
 		}
 	}
-	return 0, false, nil
+	return 0, nil
+}
+
+// holdsSidecar reads the bucket in small batches and stops at the first entry that is a
+// stored sidecar, since a bucket holds one file per root and column.
+func (b *bucketStore) holdsSidecar(dir string) (bool, error) {
+	f, err := b.fs.Open(dir)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	for {
+		files, err := f.Readdir(listBatch)
+		if slices.ContainsFunc(files, isStoredSidecar) {
+			return true, nil
+		}
+		if errors.Is(err, io.EOF) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+	}
 }
 
 func isStoredSidecar(f os.FileInfo) bool {

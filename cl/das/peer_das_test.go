@@ -292,13 +292,12 @@ func TestPeerDasPruneBelowUpdatesEarliestAvailableSlot(t *testing.T) {
 		name           string
 		initial, floor uint64
 		stored         uint64
-		storedOK       bool
 		pruneErr       error
 		want           uint64
 	}{
 		{name: "advances", initial: 0, floor: 100, want: 100},
-		{name: "advances to the lowest stored bucket above the floor", initial: 0, floor: 100, stored: 150, storedOK: true, want: 150},
-		{name: "ignores a stored bucket below the floor", initial: 0, floor: 100, stored: 50, storedOK: true, want: 100},
+		{name: "advances to the lowest stored bucket above the floor", initial: 0, floor: 100, stored: 150, want: 150},
+		{name: "ignores a stored bucket below the floor", initial: 0, floor: 100, stored: 50, want: 100},
 		{name: "does not move backwards", initial: 100, floor: 50, want: 100},
 		{name: "zero floor resets", initial: 100, floor: 0, want: 0},
 		{name: "advances after prune error", initial: 100, floor: 200, pruneErr: errors.New("prune failed"), want: 200},
@@ -310,7 +309,7 @@ func TestPeerDasPruneBelowUpdatesEarliestAvailableSlot(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
 			columnStorage.EXPECT().PruneBelow(test.floor).Return(test.pruneErr)
-			columnStorage.EXPECT().EarliestStoredSlot().Return(test.stored, test.storedOK, nil).AnyTimes()
+			columnStorage.EXPECT().EarliestStoredSlot().Return(test.stored, nil).AnyTimes()
 			cfg := clparams.MainnetBeaconConfig
 			state := peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{})
 			state.SetEarliestAvailableSlot(test.initial)
@@ -357,7 +356,7 @@ func TestPeerDasPruneBelowUpdatesRecoveryOwnership(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
 			columnStorage.EXPECT().PruneBelow(uint64(10)).Return(test.err)
-			columnStorage.EXPECT().EarliestStoredSlot().Return(uint64(0), false, nil).AnyTimes()
+			columnStorage.EXPECT().EarliestStoredSlot().Return(uint64(0), nil).AnyTimes()
 			cfg := clparams.MainnetBeaconConfig
 			state := peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{})
 			d := &peerdas{state: state, columnStorage: columnStorage, recoverBlobsQueue: make(chan recoverBlobsRequest, 8)}
@@ -398,7 +397,7 @@ func TestPeerDasPruneBelowHandlesQueuedAndActiveRecovery(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
 	columnStorage.EXPECT().PruneBelow(uint64(10)).Return(nil)
-	columnStorage.EXPECT().EarliestStoredSlot().Return(uint64(0), false, nil).AnyTimes()
+	columnStorage.EXPECT().EarliestStoredSlot().Return(uint64(0), nil).AnyTimes()
 	cfg := clparams.MainnetBeaconConfig
 	state := peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{})
 	d := &peerdas{state: state, columnStorage: columnStorage, recoverBlobsQueue: make(chan recoverBlobsRequest, 2)}

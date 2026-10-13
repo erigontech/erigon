@@ -18,6 +18,7 @@ package blob_storage
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"path/filepath"
 	"slices"
@@ -793,9 +794,9 @@ func TestBucketStoreLowestStoredSlotSkipsEmptyBuckets(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	b := newBucketStore(t, fs)
 
-	_, ok, err := b.lowestStoredSlot()
+	slot, err := b.EarliestStoredSlot()
 	require.NoError(t, err)
-	require.False(t, ok)
+	require.Zero(t, slot)
 
 	makeBuckets(t, fs, "1/sub", "2", "3", "5", "07")
 	require.NoError(t, afero.WriteFile(fs, "2/root_0"+tmpSuffix, []byte{1}, 0o644))
@@ -804,8 +805,25 @@ func TestBucketStoreLowestStoredSlotSkipsEmptyBuckets(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, "07/root_0", []byte{1}, 0o644))
 	require.NoError(t, afero.WriteFile(fs, "4", []byte{1}, 0o644))
 
-	slot, ok, err := b.lowestStoredSlot()
+	slot, err = b.EarliestStoredSlot()
 	require.NoError(t, err)
-	require.True(t, ok)
 	require.Equal(t, uint64(3*subdivisionSlot), slot)
+}
+
+func TestBucketStoreEarliestStoredSlotFindsSidecarBehindManyTempFiles(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	b := newBucketStore(t, fs)
+
+	makeBuckets(t, fs, "4")
+	for i := range 3 * listBatch {
+		require.NoError(t, afero.WriteFile(fs, fmt.Sprintf("4/a_%03d%s", i, tmpSuffix), []byte{1}, 0o644))
+	}
+	slot, err := b.EarliestStoredSlot()
+	require.NoError(t, err)
+	require.Zero(t, slot)
+
+	require.NoError(t, afero.WriteFile(fs, "4/z_0", []byte{1}, 0o644))
+	slot, err = b.EarliestStoredSlot()
+	require.NoError(t, err)
+	require.Equal(t, uint64(4*subdivisionSlot), slot)
 }

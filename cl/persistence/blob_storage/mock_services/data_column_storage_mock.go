@@ -83,13 +83,12 @@ func (c *MockDataColumnStorageColumnSidecarExistsCall) DoAndReturn(f func(contex
 }
 
 // EarliestStoredSlot mocks base method.
-func (m *MockDataColumnStorage) EarliestStoredSlot() (uint64, bool, error) {
+func (m *MockDataColumnStorage) EarliestStoredSlot() (uint64, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "EarliestStoredSlot")
 	ret0, _ := ret[0].(uint64)
-	ret1, _ := ret[1].(bool)
-	ret2, _ := ret[2].(error)
-	return ret0, ret1, ret2
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // EarliestStoredSlot indicates an expected call of EarliestStoredSlot.
@@ -105,19 +104,19 @@ type MockDataColumnStorageEarliestStoredSlotCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockDataColumnStorageEarliestStoredSlotCall) Return(arg0 uint64, arg1 bool, arg2 error) *MockDataColumnStorageEarliestStoredSlotCall {
-	c.Call = c.Call.Return(arg0, arg1, arg2)
+func (c *MockDataColumnStorageEarliestStoredSlotCall) Return(arg0 uint64, arg1 error) *MockDataColumnStorageEarliestStoredSlotCall {
+	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockDataColumnStorageEarliestStoredSlotCall) Do(f func() (uint64, bool, error)) *MockDataColumnStorageEarliestStoredSlotCall {
+func (c *MockDataColumnStorageEarliestStoredSlotCall) Do(f func() (uint64, error)) *MockDataColumnStorageEarliestStoredSlotCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockDataColumnStorageEarliestStoredSlotCall) DoAndReturn(f func() (uint64, bool, error)) *MockDataColumnStorageEarliestStoredSlotCall {
+func (c *MockDataColumnStorageEarliestStoredSlotCall) DoAndReturn(f func() (uint64, error)) *MockDataColumnStorageEarliestStoredSlotCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
