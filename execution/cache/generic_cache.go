@@ -44,8 +44,9 @@ const currentSizeEntryOverhead = 24
 // maxCacheSlots caps the slot count whatever the byte budget says.
 const maxCacheSlots = 16_000_000
 
-// sizeClassSlack covers the allocator rounding an entry up to its size class.
-const sizeClassSlack = 16
+// sizeClassSlack covers the allocator rounding an entry and its key up to their
+// size classes.
+const sizeClassSlack = 32
 
 // entry is immutable once published. key holds the full key, so reads detect
 // 64-bit hash collisions. size carries the entry's currentSize charge.

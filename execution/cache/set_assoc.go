@@ -19,7 +19,6 @@ package cache
 import (
 	"sync"
 	"sync/atomic"
-	"unsafe"
 )
 
 // bucketWays is how many entries share a bucket: 7 pointers and the meta word
@@ -140,31 +139,10 @@ func newTable[T any](buckets uint32) *[]bucket[T] {
 	return &t
 }
 
-// keyedEntry holds an entry and its key bytes in one allocation, so a Put
-// allocates once.
-type keyedEntry[T, K any] struct {
-	e entry[T]
-	k K
-}
-
+// newEntry allocates the key on its own. Co-allocating it with the entry made
+// the address interner slower: interned addresses share the key's 24 B size
+// class, and spans holding only them make every weak-handle insert walk longer.
 func newEntry[T any](key []byte, e entry[T]) *entry[T] {
-	switch {
-	case len(key) <= 24:
-		return withKey[T, [24]byte](key, e)
-	case len(key) <= 32:
-		return withKey[T, [32]byte](key, e)
-	case len(key) <= 56:
-		return withKey[T, [56]byte](key, e)
-	}
-	long := e // a fresh variable, so e itself stays off the heap on the paths above
-	long.key = string(key)
-	return &long
-}
-
-func withKey[T, K any](key []byte, e entry[T]) *entry[T] {
-	p := &keyedEntry[T, K]{e: e}
-	buf := unsafe.Slice((*byte)(unsafe.Pointer(&p.k)), len(key))
-	copy(buf, key)
-	p.e.key = unsafe.String(unsafe.SliceData(buf), len(buf))
-	return &p.e
+	e.key = string(key)
+	return &e
 }

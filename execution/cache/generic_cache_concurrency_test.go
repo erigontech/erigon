@@ -1039,8 +1039,8 @@ func TestGenericCache_GrowsInsteadOfEvicting(t *testing.T) {
 	}
 }
 
-// Keys are stored inside the entry allocation up to 56 bytes and beside it
-// above that; every length has to read back as the key it was stored under.
+// Every key length, empty included, has to read back as the key it was stored
+// under.
 func TestGenericCache_KeyLengths(t *testing.T) {
 	c := closeOnCleanup(t, NewGenericCache[int](1*datasize.MB, func(int) int { return 8 }, ModeEvictLRU))
 	key := make([]byte, 80)
