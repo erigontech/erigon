@@ -1531,3 +1531,25 @@ func TestResetForPoolCountsMapsLostToAnIntermediateReset(t *testing.T) {
 	ibs.AddSlotToAccessList(addr, accounts.InternKey(common.BigToHash(big2(0))))
 	require.False(t, ibs.resetForPool(), "a map lost to an intermediate reset must still count")
 }
+
+// Reverting a nonce write on the noMaterialize path restores the tx's earlier
+// write, not the committed nonce.
+func TestNoMaterialize_NonceRevertRestoresOwnWrite(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc0, 0x55})
+	committed := accounts.NewAccount()
+	committed.Nonce = 1
+	ibs := NewWithVersionMap(&fieldReader{addr: addr, account: &committed}, NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(0, 0)
+	ibs.SetVersion(0)
+
+	require.NoError(t, ibs.SetNonce(addr, 5, tracing.NonceChangeUnspecified))
+	snap := ibs.PushSnapshot()
+	require.NoError(t, ibs.SetNonce(addr, 6, tracing.NonceChangeUnspecified))
+	ibs.RevertToSnapshot(snap, nil)
+
+	nonce, err := ibs.GetNonce(addr)
+	require.NoError(t, err)
+	require.Equal(t, uint64(5), nonce)
+}
