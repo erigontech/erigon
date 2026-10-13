@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -1180,4 +1181,38 @@ func TestReadValueUnchanged_NilEmptyArmGated(t *testing.T) {
 	require.False(t, newIBS(sys, true, true).readValueUnchanged(sys, AddressPath, accounts.NilKey, r))
 	require.True(t, newIBS(sys, true, false).readValueUnchanged(sys, AddressPath, accounts.NilKey, r))
 	require.True(t, newIBS(other, true, true).readValueUnchanged(other, AddressPath, accounts.NilKey, r))
+}
+
+type countingFieldReader struct {
+	fieldReader
+	accountReads int
+}
+
+func (r *countingFieldReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	r.accountReads++
+	return r.fieldReader.ReadAccountData(addr)
+}
+
+// Every noMaterialize read path shares the tx's one read of a committed account.
+func TestNoMaterialize_CommittedAccountReadOnce(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc0, 0x66})
+	committed := accounts.NewAccount()
+	committed.Nonce = 3
+	reader := &countingFieldReader{fieldReader: fieldReader{addr: addr, account: &committed}}
+	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(0, 0)
+	ibs.SetVersion(0)
+
+	nonce, err := ibs.GetNonce(addr)
+	require.NoError(t, err)
+	require.Equal(t, uint64(3), nonce)
+	_, err = ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	exist, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exist)
+	require.NoError(t, ibs.SetCode(addr, []byte{0x60, 0x00}, tracing.CodeChangeUnspecified))
+	require.Equal(t, 1, reader.accountReads)
 }

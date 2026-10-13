@@ -143,23 +143,49 @@ func (ibs *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts
 	return accounts.Code{Hash: currentHash, Bytes: code.Bytes}, nil
 }
 
+// committedAccount returns the committed (pre-block) account, read from the
+// state reader once per tx and shared through committedBase.
+func (ibs *IntraBlockState) committedAccount(addr accounts.Address) (*accounts.Account, error) {
+	if acc, ok := ibs.committedBase[addr]; ok {
+		return acc, nil
+	}
+	acc, err := ibs.readAccountData(addr)
+	if err != nil {
+		return nil, err
+	}
+	if ibs.committedBase == nil {
+		ibs.committedBase = make(map[accounts.Address]*accounts.Account)
+	}
+	ibs.committedBase[addr] = acc
+	return acc, nil
+}
+
+func (ibs *IntraBlockState) readAccountData(addr accounts.Address) (*accounts.Account, error) {
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
+		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
+	}
+	var readStart time.Time
+	if dbg.KVReadLevelledMetrics {
+		readStart = time.Now()
+	}
+	acc, err := ibs.stateReader.ReadAccountData(addr)
+	if dbg.KVReadLevelledMetrics {
+		ibs.accountReadDuration += time.Since(readStart)
+		ibs.accountReadCount++
+	}
+	ibs.stateReader.SetTrace(false, "")
+	ibs.recordStateReadError(err)
+	return acc, err
+}
+
 // committedCodeHash returns the tx-start code hash from the committed reader
 // (normalised to EmptyCodeHash for an absent or code-less account), without
 // recording an OCC read. Used on the noMaterialize path where the rebuilt
 // transient's original reflects this tx's own code cell rather than tx start.
 func (ibs *IntraBlockState) committedCodeHash(addr accounts.Address) (accounts.CodeHash, error) {
-	acc, ok := ibs.committedBase[addr]
-	if !ok {
-		var err error
-		acc, err = ibs.stateReader.ReadAccountData(addr)
-		ibs.recordStateReadError(err)
-		if err != nil {
-			return accounts.EmptyCodeHash, err
-		}
-		if ibs.committedBase == nil {
-			ibs.committedBase = make(map[accounts.Address]*accounts.Account)
-		}
-		ibs.committedBase[addr] = acc
+	acc, err := ibs.committedAccount(addr)
+	if err != nil {
+		return accounts.EmptyCodeHash, err
 	}
 	if acc == nil || acc.CodeHash.IsEmpty() {
 		return accounts.EmptyCodeHash, nil

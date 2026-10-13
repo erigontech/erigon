@@ -1427,30 +1427,7 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 
 	if readAccount == nil {
 		if readStorage {
-			if cached, ok := ibs.committedBase[addr]; ok {
-				readAccount = cached
-			} else {
-				if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
-					ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
-				}
-				var readStart time.Time
-				if dbg.KVReadLevelledMetrics {
-					readStart = time.Now()
-				}
-				readAccount, err = ibs.stateReader.ReadAccountData(addr)
-				if dbg.KVReadLevelledMetrics {
-					ibs.accountReadDuration += time.Since(readStart)
-					ibs.accountReadCount++
-				}
-				ibs.stateReader.SetTrace(false, "")
-				ibs.recordStateReadError(err)
-				if err == nil {
-					if ibs.committedBase == nil {
-						ibs.committedBase = make(map[accounts.Address]*accounts.Account)
-					}
-					ibs.committedBase[addr] = readAccount
-				}
-			}
+			readAccount, err = ibs.committedAccount(addr)
 			source = StorageRead
 		}
 
@@ -2132,20 +2109,12 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		return ibs.stateObjectForAccount(addr, account), nil
 	}
 
-	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
-		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
+	var readAccount *accounts.Account
+	if ibs.versionMap != nil {
+		readAccount, err = ibs.committedAccount(addr)
+	} else {
+		readAccount, err = ibs.readAccountData(addr)
 	}
-	var readStart time.Time
-	if dbg.KVReadLevelledMetrics {
-		readStart = time.Now()
-	}
-	readAccount, err := ibs.stateReader.ReadAccountData(addr)
-	if dbg.KVReadLevelledMetrics {
-		ibs.accountReadDuration += time.Since(readStart)
-		ibs.accountReadCount++
-	}
-	ibs.stateReader.SetTrace(false, "")
-	ibs.recordStateReadError(err)
 
 	accountSource := StorageRead
 	// A DB-loaded record is pre-block state — older than any in-block cell.
