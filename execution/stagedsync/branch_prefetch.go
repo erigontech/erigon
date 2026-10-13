@@ -31,9 +31,7 @@ import (
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 const (
@@ -49,20 +47,6 @@ type prefetchItem struct {
 	account [32]byte
 	slot    [32]byte
 	storage bool
-}
-
-type readKey struct {
-	addr    accounts.Address
-	key     accounts.StorageKey
-	storage bool
-}
-
-func readKeysOf(rs state.ReadSet) []readKey {
-	var keys []readKey
-	rs.EachKey(func(addr accounts.Address, key accounts.StorageKey, storage bool) {
-		keys = append(keys, readKey{addr: addr, key: key, storage: storage})
-	})
-	return keys
 }
 
 type prefetchedRecord struct {
@@ -354,7 +338,6 @@ var (
 	mxBranchCarryAdopted    = metrics.GetOrCreateCounter("commitment_branch_carry_adopted_total")
 	mxBranchCarryDropped    = metrics.GetOrCreateCounter("commitment_branch_carry_dropped_total")
 	mxBranchCarryRefsFilled = metrics.GetOrCreateCounter("commitment_branch_carry_refs_filled_total")
-	mxBranchPrefetchReads   = metrics.GetOrCreateCounter("commitment_branch_prefetch_read_items_total")
 )
 
 type carriedRecords struct {

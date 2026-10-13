@@ -533,7 +533,6 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// computeAndPublish overwrites this back to lastTxNum+1 right
 		// before ComputeCommitment, so the per-tx setting only affects
 		// the lazy-load path and never leaks into the trie fold path.
-		cc.state.prefetchReads(r.reads)
 		if !r.writes.IsEmpty() {
 			cc.asOfReader.txNum = r.txNum
 			cc.balBlock = r.rules.IsAmsterdam

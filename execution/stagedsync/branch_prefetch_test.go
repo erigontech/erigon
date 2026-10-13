@@ -296,20 +296,3 @@ func TestRaiseGCPercentOverlappingComputesRestore(t *testing.T) {
 	second()
 	require.Equal(t, 150, debug.SetGCPercent(150), "the last compute to finish restores the percent the first one saw")
 }
-
-func TestPrefetchReadsQueuesEachAccountOnceAndEverySlot(t *testing.T) {
-	p := newPrefetchRecords()
-	p.work = make(chan prefetchItem, 16)
-	cs := &calcState{hashes: newCalcHashes(), branchPrefetch: p}
-	a, b := accounts.InternAddress(common.Address{0xa}), accounts.InternAddress(common.Address{0xb})
-	k := accounts.InternKey(common.Hash{1})
-	cs.markDirty(b, &calcAccountState{})
-	cs.prefetchReads([]readKey{{addr: a}, {addr: a, key: k, storage: true}, {addr: a}, {addr: b}, {addr: b, key: k, storage: true}})
-	close(p.work)
-	var got []prefetchItem
-	for it := range p.work {
-		got = append(got, it)
-	}
-	ha, hb, hk := cs.hashes.account(a), cs.hashes.account(b), cs.hashes.slot(k)
-	require.Equal(t, []prefetchItem{{account: hb}, {account: ha}, {account: ha, slot: hk, storage: true}, {account: hb, slot: hk, storage: true}}, got)
-}

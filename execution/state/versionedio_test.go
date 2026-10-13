@@ -2002,35 +2002,3 @@ func TestSynthesizeWithoutCellsAllocatesNothing(t *testing.T) {
 	})
 	require.Zero(t, allocs)
 }
-
-func TestReadSetEachKeyVisitsEveryPath(t *testing.T) {
-	addr := func(b byte) accounts.Address { return accounts.InternAddress(common.Address{b}) }
-	key := accounts.InternKey(common.Hash{7})
-	var rs ReadSet
-	rs.SetAddress(addr(1), VersionedRead[AccountView]{})
-	rs.SetBalance(addr(2), VersionedRead[uint256.Int]{})
-	rs.SetNonce(addr(3), VersionedRead[uint64]{})
-	rs.SetIncarnation(addr(4), VersionedRead[uint64]{})
-	rs.SetSelfDestruct(addr(5), VersionedRead[bool]{})
-	rs.SetCreateContract(addr(6), VersionedRead[bool]{})
-	rs.SetCode(addr(7), VersionedRead[accounts.Code]{})
-	rs.SetCodeHash(addr(8), VersionedRead[accounts.CodeHash]{})
-	rs.SetCodeSize(addr(9), VersionedRead[int]{})
-	rs.SetStorage(addr(10), key, VersionedRead[uint256.Int]{})
-
-	got := map[accounts.Address]bool{}
-	var slots []accounts.StorageKey
-	rs.EachKey(func(a accounts.Address, k accounts.StorageKey, storage bool) {
-		if storage {
-			require.Equal(t, addr(10), a)
-			slots = append(slots, k)
-			return
-		}
-		got[a] = true
-	})
-	for b := byte(1); b <= 9; b++ {
-		require.True(t, got[addr(b)], "path %d", b)
-	}
-	require.Len(t, got, 9)
-	require.Equal(t, []accounts.StorageKey{key}, slots)
-}
