@@ -174,13 +174,13 @@ func TestSenders(t *testing.T) {
 		cnt, _ := tx.Count(kv.EthTx)
 		assert.Equal(t, 5, int(cnt))
 
-		txs, err := rawdb.CanonicalTransactions(tx, 1, 2)
+		txs, err := rawdb.CanonicalTransactions(tx, 3, 2)
 		require.NoError(err)
 		assert.Len(t, txs, 2)
-		txs, err = rawdb.CanonicalTransactions(tx, 5, 3)
+		txs, err = rawdb.CanonicalTransactions(tx, 7, 3)
 		require.NoError(err)
 		assert.Len(t, txs, 3)
-		txs, err = rawdb.CanonicalTransactions(tx, 5, 1024)
+		txs, err = rawdb.CanonicalTransactions(tx, 7, 1024)
 		require.NoError(err)
 		assert.Len(t, txs, 3)
 	}
