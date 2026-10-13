@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -167,7 +166,7 @@ func init() {
 
 func mdbxTopDup(ctx context.Context, chaindata string, bucket string, logger log.Logger) error {
 	const ThreadsLimit = 5_000
-	dbOpts := mdbx2.New(dbcfg.ChainDB, logger).Path(chaindata).Accede(true).RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).
+	dbOpts := mdbx2.New(dbcfg.ChainDB, logger).Path(chaindata).Accede(true).RoTxsLimiter(mdbx2.NewRoTxsLimiter(ThreadsLimit)).
 		WriteMap(dbWriteMap)
 
 	db := dbOpts.MustOpen()

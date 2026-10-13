@@ -35,7 +35,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 	stack2 "github.com/go-stack/stack"
-	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
@@ -94,7 +93,7 @@ type MdbxOpts struct {
 	// roTxsLimiter - without this limiter - it's possible to reach 10K threads (if 10K rotx will wait for IO) - and golang will crush https://groups.google.com/g/golang-dev/c/igMoDruWNwo
 	// most of db must set explicit `roTxsLimiter <= 9K`.
 	// There is way to increase the 10,000 thread limit: https://golang.org/pkg/runtime/debug/#SetMaxThreads
-	roTxsLimiter *semaphore.Weighted
+	roTxsLimiter *RoTxsLimiter
 
 	metrics bool
 }
@@ -154,11 +153,11 @@ func (opts MdbxOpts) GetPageSize() datasize.ByteSize { return opts.pageSize }
 // Setters
 func (opts MdbxOpts) DirtySpace(s uint64) MdbxOpts { opts.dirtySpace = s; return opts }
 
-func (opts MdbxOpts) RoTxsLimiter(l *semaphore.Weighted) MdbxOpts { opts.roTxsLimiter = l; return opts }
-func (opts MdbxOpts) PageSize(v datasize.ByteSize) MdbxOpts       { opts.pageSize = v; return opts }
-func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts     { opts.growthStep = v; return opts }
-func (opts MdbxOpts) Path(path string) MdbxOpts                   { opts.path = path; return opts }
-func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts    { opts.syncPeriod = period; return opts }
+func (opts MdbxOpts) RoTxsLimiter(l *RoTxsLimiter) MdbxOpts    { opts.roTxsLimiter = l; return opts }
+func (opts MdbxOpts) PageSize(v datasize.ByteSize) MdbxOpts    { opts.pageSize = v; return opts }
+func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts  { opts.growthStep = v; return opts }
+func (opts MdbxOpts) Path(path string) MdbxOpts                { opts.path = path; return opts }
+func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts { opts.syncPeriod = period; return opts }
 
 // SafeNoSync flushes once DefaultSyncBytes is unflushed or DefaultSyncPeriod has passed,
 // instead of on every commit. Mdbx keeps the last flushed commit-point explicitly, so a crash
@@ -442,7 +441,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		// RoTx doesn't create thread, but if user's goroutine facing PageFault in RoTx - such goroutine gets out of CPU-bounded-threads-pool (to unlimited-IO-bounded-threads-pool).
 		// So, 9K goroutines can produce 0 new threads (if no PageFaults) - or 9K io-threads (if read only cold data).
 		targetSemCount := int64(9_000)
-		opts.roTxsLimiter = semaphore.NewWeighted(targetSemCount) // 1 less than max to allow unlocking to happen
+		opts.roTxsLimiter = NewRoTxsLimiter(targetSemCount) // 1 less than max to allow unlocking to happen
 	}
 
 	db := &MdbxKV{
@@ -547,7 +546,7 @@ type MdbxKV struct {
 	log          log.Logger
 	env          *mdbx.Env
 	buckets      kv.TableCfg
-	roTxsLimiter *semaphore.Weighted // does limit amount of concurrent Ro transactions - in most casess runtime.NumCPU() is good value for this channel capacity - this channel can be shared with other components (like Decompressor)
+	roTxsLimiter *RoTxsLimiter // does limit amount of concurrent Ro transactions - in most casess runtime.NumCPU() is good value for this channel capacity - this channel can be shared with other components (like Decompressor)
 	// roTxPool holds reset read txns: Renew reuses their bound reader slot, BeginTxn locks the reader table to bind one.
 	roTxPool chan *mdbx.Txn
 	opts     MdbxOpts
@@ -816,12 +815,12 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	}
 
 	if kv.IsNonBlockingAcquire(ctx) {
-		if !db.roTxsLimiter.TryAcquire(1) {
+		if !db.roTxsLimiter.TryAcquire() {
 			db.trackTxEnd()
 			dbRoTxOverloaded.Inc()
 			return nil, kv.ErrReadTxLimitExceeded
 		}
-	} else if semErr := db.roTxsLimiter.Acquire(ctx, 1); semErr != nil {
+	} else if semErr := db.roTxsLimiter.Acquire(ctx); semErr != nil {
 		db.trackTxEnd()
 		return nil, fmt.Errorf("mdbx.MdbxKV.BeginRo: roTxsLimiter error %w", semErr)
 	}
@@ -830,7 +829,7 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		if txn == nil {
 			// on error, or if there is whatever reason that we don't return a tx,
 			// we need to free up the limiter slot, otherwise it could lead to deadlocks
-			db.roTxsLimiter.Release(1)
+			db.roTxsLimiter.Release()
 			db.trackTxEnd()
 		}
 	}()
@@ -1419,7 +1418,7 @@ func (tx *MdbxTx) Commit() error {
 		tx.tx = nil
 		tx.db.trackTxEnd()
 		if tx.readOnly {
-			tx.db.roTxsLimiter.Release(1)
+			tx.db.roTxsLimiter.Release()
 		} else {
 			runtime.UnlockOSThread()
 		}
@@ -1494,7 +1493,7 @@ func (tx *MdbxTx) Rollback() {
 	tx.db.unregisterLiveTx(tx, "ROLLBACK")
 	tx.db.trackTxEnd()
 	if tx.readOnly {
-		tx.db.roTxsLimiter.Release(1)
+		tx.db.roTxsLimiter.Release()
 	} else {
 		runtime.UnlockOSThread()
 	}

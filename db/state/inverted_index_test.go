@@ -30,7 +30,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -1587,7 +1586,7 @@ func TestInvertedIndexPrefetchCancellation(t *testing.T) {
 func TestInvertedIndexPrefetchReadLimit(t *testing.T) {
 	for _, slots := range []int64{0, 1} {
 		t.Run(fmt.Sprintf("slots=%d", slots), func(t *testing.T) {
-			limiter := semaphore.NewWeighted(slots)
+			limiter := mdbx.NewRoTxsLimiter(slots)
 			db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).
 				RoTxsLimiter(limiter).MustOpen()
 			t.Cleanup(db.Close)
@@ -1619,8 +1618,9 @@ func TestInvertedIndexPrefetchReadLimit(t *testing.T) {
 			require.Equal(t, pairs[0][0], key)
 			require.EqualValues(t, slots+1, cursor.prefetchCalls.Load())
 			require.EqualValues(t, slots, cursor.rollbacks.Load())
-			require.True(t, limiter.TryAcquire(slots), "release all partially opened readers")
-			limiter.Release(slots)
+			for range slots {
+				require.True(t, limiter.TryAcquire(), "release all partially opened readers")
+			}
 		})
 	}
 }

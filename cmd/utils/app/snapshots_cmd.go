@@ -1967,7 +1967,7 @@ func doVerifyState(ctx context.Context, cliCtx *cli.Command, logger log.Logger) 
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 
 	// Open MDBX without Accede so it creates the DB if needed (memState-only setups have no chaindata).
-	limiterB := semaphore.NewWeighted(threadsLimit)
+	limiterB := mdbx.NewRoTxsLimiter(threadsLimit)
 	chainDB := mdbx.New(dbcfg.ChainDB, logger).Path(dirs.Chaindata).RoTxsLimiter(limiterB).MustOpen()
 	defer chainDB.Close()
 
@@ -1987,7 +1987,7 @@ func doVerifyState(ctx context.Context, cliCtx *cli.Command, logger log.Logger) 
 func doVerifyHistory(ctx context.Context, cliCtx *cli.Command, logger log.Logger) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 
-	limiterB := semaphore.NewWeighted(threadsLimit)
+	limiterB := mdbx.NewRoTxsLimiter(threadsLimit)
 	chainDB := mdbx.New(dbcfg.ChainDB, logger).Path(dirs.Chaindata).RoTxsLimiter(limiterB).MustOpen()
 	defer chainDB.Close()
 
@@ -3658,7 +3658,7 @@ func doCompareIdx(ctx context.Context, cliCtx *cli.Command) error {
 }
 
 func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
-	limiterB := semaphore.NewWeighted(threadsLimit)
+	limiterB := mdbx.NewRoTxsLimiter(threadsLimit)
 	return mdbx.New(label, log.New()).Path(path).
 		RoTxsLimiter(limiterB).
 		Accede(true) // integration tool: open db without creation and without blocking erigon

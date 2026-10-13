@@ -33,7 +33,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/gofrs/flock"
-	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils"
@@ -337,7 +336,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 
 	logger.Info("Opening Database", "label", name, "path", dbPath)
 	openFunc := func(exclusive bool) (kv.RwDB, error) {
-		roTxsLimiter := semaphore.NewWeighted(httpcfg.RoTxsLimit(
+		roTxsLimiter := mdbx.NewRoTxsLimiter(httpcfg.RoTxsLimit(
 			config.Http.DBReadConcurrency,
 			execWorkerCount(config),
 			parallelCommitmentReaders(),

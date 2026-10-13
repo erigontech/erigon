@@ -24,6 +24,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -1341,4 +1342,90 @@ func TestCloseRacingBeginRo(t *testing.T) {
 		require.Zero(t, live.Load(), "Close returned while a read was still running")
 		wg.Wait()
 	}
+}
+
+func TestRoTxsLimiterBoundsHolders(t *testing.T) {
+	l := mdbx.NewRoTxsLimiter(2)
+	require.True(t, l.TryAcquire())
+	require.True(t, l.TryAcquire())
+	require.False(t, l.TryAcquire(), "a third holder must not pass a bound of two")
+	l.Release()
+	require.True(t, l.TryAcquire())
+}
+
+func TestRoTxsLimiterAcquireWaitsForRelease(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		l := mdbx.NewRoTxsLimiter(1)
+		require.NoError(t, l.Acquire(t.Context()))
+		got := make(chan error, 1)
+		go func() { got <- l.Acquire(t.Context()) }()
+		synctest.Wait()
+		require.Empty(t, got, "Acquire passed a full limiter")
+		l.Release()
+		require.NoError(t, <-got)
+		require.False(t, l.TryAcquire(), "the permit went to the waiter")
+	})
+}
+
+// A released permit goes to the queued waiter, not to whoever calls next.
+func TestRoTxsLimiterReleaseServesTheWaiterFirst(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		l := mdbx.NewRoTxsLimiter(1)
+		require.True(t, l.TryAcquire())
+		got := make(chan error, 1)
+		go func() { got <- l.Acquire(t.Context()) }()
+		synctest.Wait()
+		l.Release()
+		require.False(t, l.TryAcquire(), "a newcomer took the permit from a queued waiter")
+		require.NoError(t, <-got)
+	})
+}
+
+func TestRoTxsLimiterCancelledAcquireKeepsNoPermit(t *testing.T) {
+	l := mdbx.NewRoTxsLimiter(1)
+	require.True(t, l.TryAcquire())
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, l.Acquire(ctx), context.DeadlineExceeded)
+	l.Release()
+	require.True(t, l.TryAcquire())
+	require.False(t, l.TryAcquire(), "a cancelled waiter left a permit behind")
+}
+
+func TestRoTxsLimiterReleaseBeyondTheBoundPanics(t *testing.T) {
+	l := mdbx.NewRoTxsLimiter(1)
+	require.Panics(t, l.Release)
+}
+
+func TestRoTxsLimiterUnderContention(t *testing.T) {
+	const size, workers, rounds = 4, 32, 2000
+	l := mdbx.NewRoTxsLimiter(size)
+	var held, peak atomic.Int64
+	var wg sync.WaitGroup
+	for w := range workers {
+		wg.Go(func() {
+			for i := range rounds {
+				ctx := t.Context()
+				if (w+i)%7 == 0 {
+					var cancel context.CancelFunc
+					ctx, cancel = context.WithTimeout(ctx, time.Microsecond)
+					defer cancel()
+				}
+				if l.Acquire(ctx) != nil {
+					continue
+				}
+				n := held.Add(1)
+				for p := peak.Load(); n > p && !peak.CompareAndSwap(p, n); p = peak.Load() {
+				}
+				held.Add(-1)
+				l.Release()
+			}
+		})
+	}
+	wg.Wait()
+	require.LessOrEqual(t, peak.Load(), int64(size))
+	for range size {
+		require.True(t, l.TryAcquire(), "a permit was lost")
+	}
+	require.False(t, l.TryAcquire(), "a permit was minted")
 }

@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -78,7 +77,7 @@ func openPair(ctx context.Context, from, to string, label kv.Label, exclusive bo
 		srcCfg = kv.TableCfg{} // src opens bare, then reports what the file holds
 	}
 	src, err := mdbx2.New(label, logger).Path(from).
-		RoTxsLimiter(semaphore.NewWeighted(ThreadsHardLimit)).
+		RoTxsLimiter(mdbx2.NewRoTxsLimiter(ThreadsHardLimit)).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return srcCfg }).
 		GrowthStep(growthStep).
 		Accede(true).
