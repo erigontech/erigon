@@ -38,7 +38,7 @@ func (f *ForkChoiceStore) OnTick(time uint64) {
 	}
 	f.onTickPerSlot(time)
 	next, _ := f.unrealizedJustifiedCheckpoint.Load().(solid.Checkpoint)
-	if slot := f.Slot(); slot > startSlot && next.Epoch > justified.Epoch && f.highestSeen.Load()+2*f.beaconCfg.SlotsPerEpoch >= slot {
+	if slot := f.Slot(); slot > startSlot && next.Epoch > justified.Epoch && f.nearChainTip(slot) {
 		go func() { _, _ = f.getCheckpointState(next) }()
 	}
 }
@@ -64,8 +64,12 @@ func (f *ForkChoiceStore) onTickPerSlot(time uint64) {
 		// can jump the realized finalized checkpoint ahead of the blocks the fork
 		// graph actually contains, causing Ancestor() to fail with
 		// ErrNotFinalizedDescendant for subsequent blocks.
-		if f.highestSeen.Load()+2*f.beaconCfg.SlotsPerEpoch >= currentSlot {
+		if f.nearChainTip(currentSlot) {
 			f.updateCheckpoints(f.unrealizedJustifiedCheckpoint.Load().(solid.Checkpoint), f.unrealizedFinalizedCheckpoint.Load().(solid.Checkpoint))
 		}
 	}
+}
+
+func (f *ForkChoiceStore) nearChainTip(slot uint64) bool {
+	return f.highestSeen.Load()+2*f.beaconCfg.SlotsPerEpoch >= slot
 }

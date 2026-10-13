@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
@@ -177,6 +178,116 @@ func TestConcurrentCheckpointStateMissesBuildOnce(t *testing.T) {
 	_, ok := f.checkpointStates.Load(next)
 	require.True(t, ok)
 	require.Equal(t, int32(1), graph.calls.Load())
+}
+
+func TestFinalizationDropsCheckpointStateBelowIt(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		pruneFirst bool
+	}{
+		{name: "store then prune"},
+		{name: "prune then store", pruneFirst: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := buildExAnteStore(t)
+			_, root := decodeDiffBlock(t, diffBlockc2Enc)
+			next := solid.Checkpoint{Epoch: f.JustifiedCheckpoint().Epoch + 1, Root: root}
+			graph := &blockingStateForkGraph{ForkGraph: f.forkGraph, root: root, release: make(chan struct{})}
+			f.forkGraph = graph
+			release := sync.OnceFunc(func() { close(graph.release) })
+			defer release()
+			finalize := func() {
+				f.mu.Lock()
+				defer f.mu.Unlock()
+				f.updateCheckpoints(f.JustifiedCheckpoint(), solid.Checkpoint{Epoch: next.Epoch + 1, Root: root})
+			}
+
+			built := make(chan error, 1)
+			go func() {
+				_, err := f.getCheckpointState(next)
+				built <- err
+			}()
+			if tt.pruneFirst {
+				require.Eventually(t, func() bool { return graph.calls.Load() == 1 }, 10*time.Second, time.Millisecond)
+				finalize()
+				release()
+				require.NoError(t, <-built)
+			} else {
+				release()
+				require.NoError(t, <-built)
+				_, ok := f.checkpointStates.Load(next)
+				require.True(t, ok)
+				finalize()
+			}
+
+			_, ok := f.checkpointStates.Load(next)
+			require.False(t, ok)
+		})
+	}
+}
+
+type pausingHeaderForkGraph struct {
+	*blockingStateForkGraph
+	armed  atomic.Bool
+	pause  sync.Once
+	paused chan struct{}
+	resume chan struct{}
+}
+
+func (g *pausingHeaderForkGraph) GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	if g.armed.Load() {
+		g.pause.Do(func() {
+			close(g.paused)
+			<-g.resume
+		})
+	}
+	return g.blockingStateForkGraph.GetHeader(blockRoot)
+}
+
+func TestCheckpointStateStoredDuringFinalizationIsDropped(t *testing.T) {
+	f := buildExAnteStore(t)
+	_, root := decodeDiffBlock(t, diffBlockc2Enc)
+	next := solid.Checkpoint{Epoch: f.JustifiedCheckpoint().Epoch + 1, Root: root}
+	graph := &pausingHeaderForkGraph{
+		blockingStateForkGraph: &blockingStateForkGraph{ForkGraph: f.forkGraph, root: root, release: make(chan struct{})},
+		paused:                 make(chan struct{}),
+		resume:                 make(chan struct{}),
+	}
+	f.forkGraph = graph
+	f.unrealizedJustifications.Store(root, next)
+	releaseBuild := sync.OnceFunc(func() { close(graph.release) })
+	defer releaseBuild()
+	resumeFinalization := sync.OnceFunc(func() { close(graph.resume) })
+	defer resumeFinalization()
+
+	built := make(chan error, 1)
+	go func() {
+		_, err := f.getCheckpointState(next)
+		built <- err
+	}()
+	require.Eventually(t, func() bool { return graph.calls.Load() == 1 }, 10*time.Second, time.Millisecond)
+
+	graph.armed.Store(true)
+	finalized := make(chan struct{})
+	go func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.updateCheckpoints(f.JustifiedCheckpoint(), solid.Checkpoint{Epoch: next.Epoch + 1, Root: root})
+		close(finalized)
+	}()
+	select {
+	case <-graph.paused:
+	case <-time.After(10 * time.Second):
+		t.Fatal("finalization did not reach a header lookup")
+	}
+
+	releaseBuild()
+	require.NoError(t, <-built)
+	resumeFinalization()
+	<-finalized
+
+	_, ok := f.checkpointStates.Load(next)
+	require.False(t, ok)
 }
 
 type blockingPruneForkGraph struct {

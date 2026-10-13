@@ -122,9 +122,9 @@ func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckp
 		f.justifiedCheckpoint.Store(justifiedCheckpoint)
 	}
 	if finalizedCheckpoint.Epoch > f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch {
+		f.finalizedCheckpoint.Store(finalizedCheckpoint)
 		f.queueOperationPrune(finalizedCheckpoint)
 		f.onNewFinalized(finalizedCheckpoint)
-		f.finalizedCheckpoint.Store(finalizedCheckpoint)
 
 		blockRoot := finalizedCheckpoint.Root
 		blockHeader, ok := f.forkGraph.GetHeader(blockRoot)
@@ -301,7 +301,6 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 }
 
 func (f *ForkChoiceStore) buildCheckpointState(checkpoint solid.Checkpoint) (*checkpointState, error) {
-	// If it is not in cache compute it and then put in cache.
 	if f.forkGraph == nil {
 		return nil, errors.New("getCheckpointState: forkGraph not initialized")
 	}
@@ -332,5 +331,8 @@ func (f *ForkChoiceStore) buildCheckpointState(checkpoint solid.Checkpoint) (*ch
 		mixes, baseState.GenesisValidatorsRoot(), baseState.Fork(), baseState.GetTotalActiveBalance(), state.Epoch(baseState.BeaconState), checkpoint)
 	// Cache in memory what we are left with.
 	f.checkpointStates.Store(checkpoint, checkpointState)
+	if finalized, ok := f.finalizedCheckpoint.Load().(solid.Checkpoint); ok && checkpoint.Epoch < finalized.Epoch {
+		f.checkpointStates.Delete(checkpoint)
+	}
 	return checkpointState, nil
 }
