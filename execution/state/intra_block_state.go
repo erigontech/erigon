@@ -1193,7 +1193,7 @@ func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
 		}
 		// No cell and no committed record: getStateObject would resolve the same absence again.
 		if ibs.noMaterialize && ibs.versionMap.load(addr) == nil {
-			ibs.createObject(addr, nil)
+			ibs.createVersioned(addr, nil)
 			markTouched()
 			return nil
 		}
@@ -2288,40 +2288,61 @@ func (ibs *IntraBlockState) GetOrNewStateObject(addr accounts.Address) (*stateOb
 // createObject creates a new state object. If there is an existing account with
 // the given address, it is overwritten.
 func (ibs *IntraBlockState) createObject(addr accounts.Address, previous *stateObject) (newobj *stateObject) {
-	account := &accounts.Account{}
 	var original *accounts.Account
 	if previous == nil {
 		original = &accounts.Account{}
 	} else {
 		original = &previous.original
 	}
-
-	account.Root.SetBytes(empty.RootHash[:]) // old storage should be ignored
-	newobj = newObject(ibs, addr, account, original)
+	created := createdRecord()
+	newobj = newObject(ibs, addr, &created, original)
 	newobj.setNonce(0) // sets the object to dirty
-	if previous == nil {
-		ibs.journal.createObjectChange(addr)
-	} else {
-		var prevWrites *createWriteSnapshot
-		if ibs.versionMap != nil {
-			prevWrites = ibs.versionedWrites.snapshotCreateFields(addr)
-		}
-		// previous may be built from an account record that lags the cached
-		// object: journal the cache entry (nil when none) so the revert restores
-		// or drops it.
-		ibs.journal.resetObjectChange(addr, ibs.stateObjects[addr], prevWrites)
-	}
+	ibs.journalCreate(addr, previous)
 	newobj.newlyCreated = true
 	if !ibs.noMaterialize {
 		ibs.setStateObject(addr, newobj)
 	}
-	ibs.recordWriteAddress(addr, &newobj.data)
+	ibs.recordCreated(addr, &newobj.data)
+	return newobj
+}
+
+// createVersioned is createObject for the noMaterialize path, where nothing
+// keeps the stateObject: it journals and records the creation, and returns the
+// record.
+func (ibs *IntraBlockState) createVersioned(addr accounts.Address, previous *stateObject) accounts.Account {
+	ibs.journalCreate(addr, previous)
+	created := createdRecord()
+	ibs.recordCreated(addr, &created)
+	return created
+}
+
+// createdRecord is a new account's record: no balance, nonce or code, and its
+// old storage ignored.
+func createdRecord() accounts.Account {
+	return accounts.Account{Root: empty.RootHash, CodeHash: accounts.EmptyCodeHash}
+}
+
+func (ibs *IntraBlockState) journalCreate(addr accounts.Address, previous *stateObject) {
+	if previous == nil {
+		ibs.journal.createObjectChange(addr)
+		return
+	}
+	var prevWrites *createWriteSnapshot
+	if ibs.versionMap != nil {
+		prevWrites = ibs.versionedWrites.snapshotCreateFields(addr)
+	}
+	// previous may be built from an account record that lags the cached
+	// object: journal the cache entry (nil when none) so the revert restores
+	// or drops it.
+	ibs.journal.resetObjectChange(addr, ibs.stateObjects[addr], prevWrites)
+}
+
+func (ibs *IntraBlockState) recordCreated(addr accounts.Address, data *accounts.Account) {
+	ibs.recordWriteAddress(addr, data)
 	// Write CodeHashPath so that any stale versionedReads cache entry
 	// (e.g. from the pre-creation GetCodeHash check in EVM create()) is
-	// invalidated.  newObject normalises the zero-value CodeHash to
-	// EmptyCodeHash, so this records keccak256("") for a fresh account.
-	ibs.recordWriteCodeHash(addr, newobj.data.CodeHash)
-	return newobj
+	// invalidated: keccak256("") for a fresh account.
+	ibs.recordWriteCodeHash(addr, data.CodeHash)
 }
 
 // CreateAccount explicitly creates a state object. If a state object with the address
@@ -2474,7 +2495,15 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 		}
 		carryBalance = b
 	}
-	newObj := ibs.createObject(addr, previous)
+	var newObj *stateObject
+	var created accounts.Account
+	data := &created
+	if ibs.noMaterialize {
+		created = ibs.createVersioned(addr, previous)
+	} else {
+		newObj = ibs.createObject(addr, previous)
+		data = &newObj.data
+	}
 	if previous != nil && previous.selfdestructed {
 		// The reset-object journal entry already marks addr dirty, but that
 		// mark is dropped if the entry is reverted; this un-journalled
@@ -2484,21 +2513,23 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 		ibs.journal.dirty(addr)
 	}
 	if carryBalanceValid {
-		newObj.data.Balance.Set(&carryBalance)
+		data.Balance.Set(&carryBalance)
 	}
-	newObj.data.PrevIncarnation = prevInc
+	data.PrevIncarnation = prevInc
 
 	if contractCreation {
-		newObj.createdContract = true
-		newObj.data.Incarnation = prevInc + 1
+		if newObj != nil {
+			newObj.createdContract = true
+		}
+		data.Incarnation = prevInc + 1
 		// Record contract creation in the versioned writes so that
 		// Normalize knows this address was created (prevents
 		// empty account deletion for newly deployed contracts).
 		ibs.recordWriteCreateContract(addr, true)
 		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
-			fmt.Printf("%d (%d.%d) New Incarnation %x: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, newObj.data.Incarnation)
+			fmt.Printf("%d (%d.%d) New Incarnation %x: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, data.Incarnation)
 		}
-	} else {
+	} else if newObj != nil {
 		newObj.selfdestructed = false
 	}
 
@@ -2516,9 +2547,10 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 		}
 		ibs.versionedReads.SetIncarnation(addr, VersionedRead[uint64]{ReadHeader{Source: incSource, Version: incVersion}, prevInc})
 	}
-	ibs.recordWriteBalance(addr, newObj.Balance())
-	ibs.recordWriteIncarnation(addr, newObj.data.Incarnation)
-	if previous == nil || previous.selfdestructed && !newObj.selfdestructed {
+	ibs.recordWriteBalance(addr, data.Balance)
+	ibs.recordWriteIncarnation(addr, data.Incarnation)
+	// A new object is never self-destructed.
+	if previous == nil || previous.selfdestructed {
 		ibs.recordWriteSelfDestruct(addr, false)
 	}
 
