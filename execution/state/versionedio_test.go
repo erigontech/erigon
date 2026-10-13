@@ -23,12 +23,14 @@ import (
 	"math/rand"
 	"sort"
 	"testing"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -126,6 +128,15 @@ type minimalStateReader struct{}
 
 func (r *minimalStateReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
 	return nil, nil
+}
+
+func (r *minimalStateReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (r *minimalStateReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
 }
 
 func (r *minimalStateReader) ReadAccountDataForDebug(addr accounts.Address) (*accounts.Account, error) {
@@ -1694,6 +1705,283 @@ func (a *referenceAccount) write(slot accounts.StorageKey, val uint256.Int, idx 
 		Slot:    slot,
 		Changes: []*types.StorageChange{{Index: idx, Value: val}},
 	})
+}
+
+// Fresh states and the sets Snapshot returns never use an arena, so they must
+// not carry its metadata.
+func TestWriteSetKeepsTheArenaOutOfLine(t *testing.T) {
+	require.Less(t, unsafe.Sizeof(WriteSet{}), unsafe.Sizeof(vwArenas{}))
+}
+
+// An arena-backed write set hands out distinct cells and keeps its slabs across
+// resets, so a reused set allocates nothing after the first call.
+func TestWriteSetArenaReusesItsCells(t *testing.T) {
+	var ws WriteSet
+	ws.UseArena()
+	addrs := make([]accounts.Address, vwFirstSlab*4+3)
+	for i := range addrs {
+		addrs[i] = accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+	}
+
+	first := make(map[*VersionedWrite[uint64]]struct{}, len(addrs))
+	for _, a := range addrs {
+		vw := ws.newVWNonce()
+		_, dup := first[vw]
+		require.False(t, dup, "a live cell must not be handed out twice")
+		first[vw] = struct{}{}
+		vw.WriteHeader = WriteHeader{Address: a, Path: NoncePath}
+		vw.Val = 7
+		ws.SetNonce(a, vw)
+	}
+	require.Equal(t, len(addrs), ws.Count())
+
+	ws.ReleaseAndReset()
+	require.Zero(t, ws.Count())
+
+	allocs := testing.AllocsPerRun(20, func() {
+		for _, a := range addrs {
+			vw := ws.newVWNonce()
+			vw.WriteHeader = WriteHeader{Address: a, Path: NoncePath}
+			ws.SetNonce(a, vw)
+		}
+		ws.ReleaseAndReset()
+	})
+	require.Less(t, allocs, float64(len(addrs)), "cells must come from the slabs, not the heap")
+}
+
+// A reset cell carries nothing from the call that used it.
+func TestWriteSetArenaCellsComeBackZeroed(t *testing.T) {
+	var ws WriteSet
+	ws.UseArena()
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+
+	vw := ws.newVWNonce()
+	vw.WriteHeader = WriteHeader{Address: addr, Path: NoncePath, Version: Version{TxIndex: 3}}
+	vw.Val = 42
+	ws.SetNonce(addr, vw)
+	ws.ReleaseAndReset()
+
+	again := ws.newVWNonce()
+	require.Same(t, vw, again, "the slab hands the same cell back")
+	require.Zero(t, again.Val)
+	require.Equal(t, WriteHeader{}, again.WriteHeader)
+}
+
+// A delete must not hand an arena cell to the shared pool: the arena reuses and
+// zeroes that memory, so another set holding it would be corrupted. SetCode's
+// revert-to-base path and journal rollback both delete cells.
+func TestArenaDeleteKeepsItsCellOutOfThePool(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+
+	var arena WriteSet
+	arena.UseArena()
+	arena.SetNonce(addr, arena.newVWNonce())
+	arena.SetStorage(addr, key, arena.newVWStorage())
+
+	delCell(&arena, arena.nonce, addr, func(*VersionedWrite[uint64]) { t.Fatal("a deleted arena cell reached the shared pool") })
+	delCell(&arena, arena.storage[addr], key, func(*VersionedWrite[uint256.Int]) { t.Fatal("a deleted arena cell reached the shared pool") })
+	require.Empty(t, arena.nonce)
+	require.Empty(t, arena.storage[addr])
+}
+
+// An arena-backed set must not hand its cells to another set: the arena reuses
+// and zeroes them, so the other set would read freed memory.
+func TestArenaBackedSetRefusesToShareItsCells(t *testing.T) {
+	was := dbg.AssertEnabled
+	dbg.AssertEnabled = true
+	t.Cleanup(func() { dbg.AssertEnabled = was })
+
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	newArenaSet := func() *WriteSet {
+		ws := &WriteSet{}
+		ws.UseArena()
+		vw := ws.newVWNonce()
+		vw.WriteHeader = WriteHeader{Address: addr, Path: NoncePath}
+		ws.SetNonce(addr, vw)
+		return ws
+	}
+
+	require.Panics(t, func() { newArenaSet().MergeInto(&WriteSet{}) })
+	require.Panics(t, func() { (&WriteSet{}).MergeInto(newArenaSet()) })
+	require.Panics(t, func() { newArenaSet().Filter(func(WriteHeader) bool { return true }) })
+	// Merge returns an input directly when the other side is empty.
+	require.Panics(t, func() { newArenaSet().Merge(&WriteSet{}) })
+	require.Panics(t, func() { (&WriteSet{}).Merge(newArenaSet()) })
+	require.Panics(t, func() { newArenaSet().Merge(newArenaSet()) })
+	// Normalize also takes cell pointers straight from the receiver.
+	require.Panics(t, func() {
+		_, _ = newArenaSet().Normalize(NewVersionMap(nil), 0, 0, NewNoopReader(), nil, false, false, false)
+	})
+}
+
+// ReleaseMaps zeroes the set; the arena must survive it, or a reused set
+// silently falls back to the shared pools and leaks its slabs.
+func TestReleaseMapsKeepsTheArena(t *testing.T) {
+	ws := &WriteSet{}
+	ws.UseArena()
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	vw := ws.newVWNonce()
+	vw.WriteHeader = WriteHeader{Address: addr, Path: NoncePath}
+	ws.SetNonce(addr, vw)
+
+	ws.ReleaseMaps()
+	require.True(t, ws.ArenaBacked(), "the arena must outlive the map release")
+}
+
+// The arena stops growing at its cap, so one outlier call cannot pin an
+// unbounded footprint on a set that keeps its slabs across resets.
+func TestArenaStopsGrowingAtItsCap(t *testing.T) {
+	ws := &WriteSet{}
+	ws.UseArena()
+	for range vwMaxCells + vwFirstSlab {
+		require.NotNil(t, ws.newVWNonce())
+	}
+	require.Equal(t, vwMaxCells, ws.cells.nonce.cap, "the arena must not grow past its cap")
+
+	slabs := len(ws.cells.nonce.slabs)
+	ws.ReleaseAndReset()
+	require.Len(t, ws.cells.nonce.slabs, slabs, "a reset keeps the slabs for the next call")
+}
+
+func TestArenaOverflowCellsReturnToThePool(t *testing.T) {
+	const overflow = 64
+	var a vwArena[uint64]
+
+	taken := make([]*VersionedWrite[uint64], 0, vwMaxCells+overflow)
+	for range vwMaxCells + overflow {
+		taken = append(taken, a.alloc(getVWNonce))
+	}
+	require.Len(t, a.overflow, overflow, "cells past the cap must be tracked")
+
+	var released []*VersionedWrite[uint64]
+	a.reset(func(vw *VersionedWrite[uint64]) { released = append(released, vw) })
+	require.Equal(t, taken[vwMaxCells:], released, "a reset must hand every overflow cell back")
+	require.Empty(t, a.overflow)
+
+	// The pools clear only what pins memory, so the arena has to finish the job.
+	dirty := &VersionedWrite[uint64]{WriteHeader: WriteHeader{Path: NoncePath}, Val: 7}
+	for range vwMaxCells {
+		a.alloc(getVWNonce)
+	}
+	require.Zero(t, *a.alloc(func() *VersionedWrite[uint64] { return dirty }))
+}
+
+// One outlier tx must not pin its overflow list on a set that keeps its slabs.
+func TestArenaBoundsTheOverflowListItKeeps(t *testing.T) {
+	var a vwArena[uint64]
+	for range vwMaxCells + vwMaxOverflow + 1 {
+		a.alloc(getVWNonce)
+	}
+	a.reset(releaseVWNonce)
+	require.LessOrEqual(t, cap(a.overflow), vwMaxOverflow)
+}
+
+func TestOnlyAReusedStateOwnsItsCells(t *testing.T) {
+	ibs := New(NewNoopReader())
+	require.False(t, ibs.versionedWrites.ArenaBacked(), "a one-shot state buys no slabs")
+
+	ibs.ResetVersionedIO()
+	require.True(t, ibs.versionedWrites.ArenaBacked(), "a state that outlives a tx owns its cells")
+}
+
+// A path that writes a handful of cells must buy a handful: the first slab is
+// what the first tx on a reused state pays for, and it grows as writes keep
+// coming.
+func TestArenaSlabsGrowWithTheWrites(t *testing.T) {
+	ws := &WriteSet{}
+	ws.UseArena()
+
+	require.NotNil(t, ws.newVWNonce())
+	require.Equal(t, vwFirstSlab, ws.cells.nonce.cap, "one write must not buy more than the first slab")
+
+	for range vwMaxCells - 1 {
+		require.NotNil(t, ws.newVWNonce())
+	}
+	require.Equal(t, vwMaxCells, ws.cells.nonce.cap)
+	require.Less(t, len(ws.cells.nonce.slabs), 12, "doubling must reach the cap in a few slabs")
+}
+
+// A reused read set keeps its per-address slot maps, so a call that reads the
+// same contract's slots again does not regrow the map from scratch.
+func TestReusedReadSetKeepsItsSlotMaps(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	keys := make([]accounts.StorageKey, 256)
+	for i := range keys {
+		keys[i] = accounts.InternKey(common.BigToHash(big.NewInt(int64(i))))
+	}
+	var rs ReadSet
+	for _, k := range keys {
+		rs.SetStorage(addr, k, VersionedRead[uint256.Int]{})
+	}
+	require.Len(t, rs.storage[addr], len(keys))
+
+	rs.clearForReuse()
+	require.Empty(t, rs.storage[addr], "the slots are gone")
+
+	allocs := testing.AllocsPerRun(10, func() {
+		for _, k := range keys {
+			rs.SetStorage(addr, k, VersionedRead[uint256.Int]{})
+		}
+		rs.clearForReuse()
+	})
+	require.Zero(t, allocs, "refilling a kept slot map must not allocate")
+}
+
+// Past the bound the outer map is dropped, so one call that touches many
+// contracts cannot pin a slot map for each of them.
+func TestReusedReadSetDropsTooManySlotMaps(t *testing.T) {
+	var rs ReadSet
+	for i := range maxReusedStorageAddrs + 1 {
+		a := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+		rs.SetStorage(a, accounts.InternKey(common.HexToHash("0x01")), VersionedRead[uint256.Int]{})
+	}
+	rs.clearForReuse()
+	// Nil, not empty: clear would keep the buckets the many addresses grew.
+	require.Nil(t, rs.storage, "too many addresses must drop the outer map")
+}
+
+// Slot maps from earlier calls go, so a sequence of calls on different
+// contracts cannot pin one map each while every entries() count stays small.
+func TestReusedReadSetDropsSlotMapsItNoLongerUses(t *testing.T) {
+	var rs ReadSet
+	for i := range maxReusedStorageAddrs {
+		a := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+		rs.SetStorage(a, accounts.InternKey(common.HexToHash("0x01")), VersionedRead[uint256.Int]{})
+		rs.clearForReuse()
+		require.LessOrEqual(t, len(rs.storage), 1, "only the contract this call read stays")
+	}
+}
+
+// A cleared slot map keeps the buckets it grew, so reading one slot of every
+// kept contract while another one grows must not pile up their capacities.
+func TestReusedReadSetBoundsTheSlotsItsMapsHeld(t *testing.T) {
+	var rs ReadSet
+	addrs := make([]accounts.Address, 4)
+	for i := range addrs {
+		addrs[i] = accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+	}
+	held := map[accounts.Address]int{}
+	for call := range addrs {
+		for _, a := range addrs {
+			if _, kept := rs.storage[a]; !kept {
+				held[a] = 0
+			}
+			rs.SetStorage(a, accounts.InternKey(common.HexToHash("0x01")), VersionedRead[uint256.Int]{})
+		}
+		for j := range maxPooledEntries / 2 {
+			rs.SetStorage(addrs[call], accounts.InternKey(common.BigToHash(big.NewInt(int64(j+2)))), VersionedRead[uint256.Int]{})
+		}
+		for _, a := range addrs {
+			held[a] = max(held[a], len(rs.storage[a]))
+		}
+		rs.clearForReuse()
+		kept := 0
+		for a := range rs.storage {
+			kept += held[a]
+		}
+		require.LessOrEqual(t, kept, maxPooledEntries, "call %d: kept slot maps once held too many slots", call)
+	}
 }
 
 // synthesizeCreatedAccountBase must allocate nothing when the version map holds

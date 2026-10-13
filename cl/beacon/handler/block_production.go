@@ -100,6 +100,9 @@ const (
 const (
 	minPayloadPollingWindow     = 100 * time.Millisecond
 	builderHandoffRetryInterval = 500 * time.Millisecond
+	// A published block is normally stored within one block service tick (50 ms) plus OnBlock; the bound only caps
+	// how long a stalled store can delay the block's data columns.
+	publishedBlockStoreWaitBeforeColumns = time.Second
 )
 
 // Polling for the assembled payload stops attestationDeadline/payloadPublicationDivisor before the
@@ -2899,6 +2902,13 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
 	}
 
 	if blk.Version() >= clparams.FuluVersion && len(columnsSidecars) > 0 {
+		// A Gloas column has no signed block header. Lighthouse requests an unknown block from the column's peer
+		// and penalizes that peer if it cannot serve the block.
+		if blk.Version() >= clparams.GloasVersion && job != nil {
+			storeCtx, cancel := context.WithTimeout(ctx, publishedBlockStoreWaitBeforeColumns)
+			_ = job.Wait(storeCtx) // a failed or slow store must not hold back the columns of an already gossiped block
+			cancel()
+		}
 		for _, column := range columnsSidecars {
 			columnSSZ, err := column.EncodeSSZ(nil)
 			if err != nil {
@@ -3587,7 +3597,6 @@ func (a *ApiHandler) aggregatePayloadAttestations(
 	return aggregated
 }
 
-// newAttestationCandidate records, for every attester, the participation flags the attestation would newly set.
 func newAttestationCandidate(
 	s abstract.BeaconState,
 	attestation *solid.Attestation,
@@ -3621,9 +3630,6 @@ func newAttestationCandidate(
 	candidate := attestationCandidate{
 		attestation:  attestation,
 		currentEpoch: data.Target.Epoch == state.Epoch(s),
-		attesters:    make([]uint64, 0, len(attestingIndicies)),
-		baseRewards:  make([]uint64, 0, len(attestingIndicies)),
-		newFlags:     make([]uint8, 0, len(attestingIndicies)),
 	}
 	for _, attesterIndex := range attestingIndicies {
 		newFlags := attestationFlags &^ uint8(s.EpochParticipationForValidatorIndex(candidate.currentEpoch, int(attesterIndex)))
