@@ -205,3 +205,57 @@ func (e *ExecutionEntry) validate() error {
 func (e *StaticExecutionEntry) validate() error {
 	return validateCalls("l2ToL1Calls", e.L2ToL1Calls)
 }
+
+// L2ExecutionTable holds the arguments of loadExecutionTable and
+// executeIncomingCrossChainCall.
+type L2ExecutionTable struct {
+	Entries       []L2ExecutionEntry       `abi:"entries"`
+	StaticEntries []L2StaticExecutionEntry `abi:"staticEntries"`
+}
+
+func (b *ProofSystemBatch) validate() error {
+	for i := range b.Entries {
+		if err := b.Entries[i].validate(); err != nil {
+			return fmt.Errorf("entries[%d].%w", i, err)
+		}
+	}
+	for i := range b.StaticEntries {
+		if err := b.StaticEntries[i].validate(); err != nil {
+			return fmt.Errorf("staticEntries[%d].%w", i, err)
+		}
+	}
+	if err := checkUint256(b.ImmediateEntryCount); err != nil {
+		return fmt.Errorf("immediateEntryCount: %w", err)
+	}
+	if err := checkUint256(b.ImmediateStaticEntryCount); err != nil {
+		return fmt.Errorf("immediateStaticEntryCount: %w", err)
+	}
+	for i, v := range b.BlobIndices {
+		if err := checkUint256(v); err != nil {
+			return fmt.Errorf("blobIndices[%d]: %w", i, err)
+		}
+	}
+	return nil
+}
+
+func (t *L2ExecutionTable) validate() error {
+	for i := range t.Entries {
+		e := &t.Entries[i]
+		if err := validateCalls(fmt.Sprintf("entries[%d].incomingCalls", i), e.IncomingCalls); err != nil {
+			return err
+		}
+		if err := validateExpectedCalls(fmt.Sprintf("entries[%d].expectedOutgoingCalls", i), e.ExpectedOutgoingCalls); err != nil {
+			return err
+		}
+	}
+	for i := range t.StaticEntries {
+		e := &t.StaticEntries[i]
+		if err := checkUint256(e.ExpectedEntryIndex); err != nil {
+			return fmt.Errorf("staticEntries[%d].expectedEntryIndex: %w", i, err)
+		}
+		if err := validateCalls(fmt.Sprintf("staticEntries[%d].incomingCalls", i), e.IncomingCalls); err != nil {
+			return err
+		}
+	}
+	return nil
+}
