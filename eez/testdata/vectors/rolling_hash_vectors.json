@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "protocolCommit": "855fe0602484750861b4c31502a1a91355d33ed6",
+  "solidityOracle": "contracts/test/RollingHashVectors.t.sol",
+  "l1Seed": "0xbccdfc431d3828e701fd170dd3c01a56fdcadfa6ac3c8bddae8a7e9b1bbff90b",
+  "l2Seed": "0x44496df070da3f045064f6d6f394484a8de10d5710290d619b67d975ec89320f",
+  "afterCallBegin": "0xe4f4cd44333ceae020b8bd8a009d7f36764ed6e17034e712246d9044a7095b5f",
+  "afterCallEnd": "0x0bb23fd1152f649e205070c2e3ce9b87c1eaf307e91050d283ae623288ba5653",
+  "afterNestedBegin": "0xe12d741005d0ef78d3a5789786f2a71f5ebeb6c4db6bf1588ca03ca1eb104e79",
+  "afterNestedEnd": "0x4c93c6bbe364d4725275e853cd4fc9bb76683740a3d722dbbaa243b75d047298",
+  "afterCallNotFound": "0xc1168e0ae843595280dec49290baca909088f6e5c97910c308afdf8d5410b3fc",
+  "afterStaticSuccess": "0x3ae2d1487308bbcef1156971182173344cb714be7b2583d95463d05e1e8257c4",
+  "afterStaticFailure": "0x4bdf2bdbf63bd9ba318a5bddc8075fd93cb7f8c7d8d489d2a38a4680098d2b3b"
+}
