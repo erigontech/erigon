@@ -22,59 +22,29 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
-	"github.com/erigontech/erigon/common"
 )
 
 func TestDrainPendingGloasPayloadsRequeuesWithoutVerdictWhenNewPayloadIsInterrupted(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	clparams.ApplyMinimalPreset(&cfg)
-	blockRoot := common.HexToHash("0x1234")
-	fc := &forkchoice.ForkChoiceStore{}
-	ctx, cancel := context.WithCancel(context.Background())
-	engine := &testExecutionEngine{supportInsertion: true}
+	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	headBlock := graph.parents[headRoot]
+	delete(graph.parents, headRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
+	ctx, cancel := context.WithCancel(t.Context())
 	engine.newPayloadFn = func(context.Context, *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
 		cancel()
 		return execution_client.PayloadStatusNone, ctx.Err()
 	}
-	payload := cltypes.NewEth1Block(clparams.GloasVersion, &cfg)
-	payload.BlockHash = common.HexToHash("0x9abc")
-	fc.RequeuePendingELPayload(forkchoice.PendingELPayload{
-		Block: &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{
-			Slot:       1,
-			ParentRoot: common.HexToHash("0x5678"),
-			Body: &cltypes.BeaconBody{
-				Version: clparams.GloasVersion,
-				SignedExecutionPayloadBid: &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
-					BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
-				}},
-			},
-		}},
-		Envelope: &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
-			BeaconBlockRoot: blockRoot,
-			Payload:         payload,
-		}},
-	})
-	stageCfg := &Cfg{beaconCfg: &cfg, executionClient: engine, gloasPayloadValidator: engine, forkChoice: fc}
-	store := &verdictRecordingStore{ForkChoiceStore: fc, verdicts: map[common.Hash]execution_client.PayloadStatus{}}
+	cfg.forkChoice.RequeuePendingELPayload(forkchoice.PendingELPayload{Block: headBlock, Envelope: graph.envelopes[headRoot]})
 
-	drainPendingGloasPayloads(ctx, stageCfg, store)
+	drainPendingGloasPayloads(ctx, cfg)
 
 	require.Equal(t, 1, engine.newPayloadCalls)
-	require.Empty(t, store.verdicts, "an interrupted NewPayload is not a verdict")
-	require.Len(t, fc.DrainPendingELPayloadsLimit(10), 1)
-}
-
-type verdictRecordingStore struct {
-	*forkchoice.ForkChoiceStore
-	verdicts map[common.Hash]execution_client.PayloadStatus
-}
-
-func (s *verdictRecordingStore) MarkPayloadStatusAndGasLimitIfRetained(root, _ common.Hash, status execution_client.PayloadStatus, _ uint64) (execution_client.PayloadStatus, bool) {
-	s.verdicts[root] = status
-	return status, true
+	_, found := cfg.forkChoice.GetRecentExecutionPayloadStatusByRoot(headRoot)
+	require.False(t, found, "an interrupted NewPayload is not a verdict")
+	require.False(t, graph.IsPayloadUnavailable(headRoot))
+	require.Len(t, cfg.forkChoice.DrainPendingELPayloads(), 1)
 }

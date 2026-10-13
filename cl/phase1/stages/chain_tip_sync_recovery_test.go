@@ -400,6 +400,27 @@ func TestVerifyUnverifiedGloasPayloadsSkipsAFinalNotValidated(t *testing.T) {
 	require.Empty(t, cfg.forkChoice.DrainPendingELPayloads())
 }
 
+// The engine client's own HTTP timeout ends a NewPayload while the caller's context is alive;
+// that is no verdict either.
+func TestVerifyUnverifiedGloasPayloadsDoesNotRecordAClientTimeout(t *testing.T) {
+	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	headBlock := graph.parents[headRoot]
+	delete(graph.parents, headRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
+	engine.newPayloadFn = func(context.Context, *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
+		return execution_client.PayloadStatusNone, fmt.Errorf("engine NewPayload failed: %w", context.DeadlineExceeded)
+	}
+	cfg.gloasVerificationCursor = headRoot
+
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+
+	require.Equal(t, 1, engine.newPayloadCalls)
+	_, found := cfg.forkChoice.GetRecentExecutionPayloadStatusByRoot(headRoot)
+	require.False(t, found)
+	require.False(t, graph.IsPayloadUnavailable(headRoot))
+}
+
 func TestVerifyUnverifiedGloasPayloadsChecksDirectExtensionWithEmptyCursor(t *testing.T) {
 	cfg, graph, oldHeadRoot, newHead, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
 	oldHead := graph.parents[oldHeadRoot]
@@ -986,25 +1007,6 @@ func TestStoredParentPayloadReplayReservesBudgetForLaterRoots(t *testing.T) {
 		Payload:         secondPayload,
 	}}, nil))
 	require.Equal(t, []common.Hash{firstPayload.BlockHash, secondPayload.BlockHash}, validator.calls)
-}
-
-// An apply cut short by its context is no verdict, so the replay still validates the parent.
-func TestStoredParentPayloadReplayRetriesAnInterruptedApply(t *testing.T) {
-	root := common.Hash{1}
-	payload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
-	payload.BlockHash = common.Hash{3}
-	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
-	store := &storedParentPayloadTestStore{has: true, block: block, markRetained: true}
-	validator := &orderedPayloadValidator{}
-	replay := storedParentPayloadReplay{deadline: time.Now().Add(time.Second), remaining: 1, results: make(map[common.Hash]error)}
-	cfg := &Cfg{beaconCfg: &clparams.MainnetBeaconConfig, executionClient: &testExecutionEngine{}, gloasPayloadValidator: validator}
-	interrupted := fmt.Errorf("%w: %w", forkchoice.ErrPayloadValidationInterrupted, context.DeadlineExceeded)
-
-	require.NoError(t, replay.rejection(t.Context(), cfg, store, root, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
-		BeaconBlockRoot: root,
-		Payload:         payload,
-	}}, interrupted))
-	require.Equal(t, []common.Hash{payload.BlockHash}, validator.calls)
 }
 
 func TestStoredParentPayloadReplayRejectsApplyFailure(t *testing.T) {

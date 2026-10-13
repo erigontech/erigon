@@ -3313,6 +3313,8 @@ func TestExecutionPayloadAdmissionCancellationTransfersPendingOwnership(t *testi
 			}
 			require.ErrorIs(t, err, ErrPayloadValidationInterrupted)
 			require.ErrorIs(t, err, context.Canceled)
+			// Not an IGNORE: the REST publication of the proposer's own envelope takes the 202 + publish path.
+			require.NotErrorIs(t, err, ErrIgnore)
 			origin := pending
 			if local {
 				origin = pendingLocal

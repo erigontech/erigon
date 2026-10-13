@@ -957,7 +957,7 @@ func (r *storedParentPayloadReplay) rejection(
 	if reason, ok := r.results[root]; ok {
 		return reason
 	}
-	if applyErr != nil && !errors.Is(applyErr, forkchoice.ErrIgnore) && !errors.Is(applyErr, forkchoice.ErrPayloadValidationInterrupted) {
+	if applyErr != nil && !errors.Is(applyErr, forkchoice.ErrIgnore) {
 		if r.remaining > 0 {
 			r.remaining--
 		}
@@ -1111,18 +1111,12 @@ func isGloasPayloadKnownInvalid(cfg *Cfg, envelope *cltypes.SignedExecutionPaylo
 	return ok && status == execution_client.PayloadStatusInvalidated
 }
 
-type gloasDrainStore interface {
-	gloasPayloadRetryResultStore
-	DrainPendingELPayloadsLimit(int) []forkchoice.PendingELPayload
-	IsPayloadVerified(common.Hash) bool
-}
-
-func drainPendingGloasPayloads(ctx context.Context, cfg *Cfg, store gloasDrainStore) {
-	pending := store.DrainPendingELPayloadsLimit(maxPendingGloasPayloadsPerCycle)
+func drainPendingGloasPayloads(ctx context.Context, cfg *Cfg) {
+	pending := cfg.forkChoice.DrainPendingELPayloadsLimit(maxPendingGloasPayloadsPerCycle)
 	for i, p := range pending {
 		if ctx.Err() != nil {
 			for _, deferred := range pending[i:] {
-				store.RequeuePendingELPayload(deferred)
+				cfg.forkChoice.RequeuePendingELPayload(deferred)
 			}
 			return
 		}
@@ -1130,20 +1124,20 @@ func drainPendingGloasPayloads(ctx context.Context, cfg *Cfg, store gloasDrainSt
 			continue
 		}
 		beaconRoot := p.Envelope.Message.BeaconBlockRoot
-		if store.IsPayloadVerified(beaconRoot) {
+		if cfg.forkChoice.IsPayloadVerified(beaconRoot) {
 			continue
 		}
 		status, err := retryGloasPayloadWithEL(ctx, cfg, p.Block, p.Envelope)
 		if execution_client.ValidationInterrupted(ctx, status, err) {
 			for _, deferred := range pending[i:] {
-				store.RequeuePendingELPayload(deferred)
+				cfg.forkChoice.RequeuePendingELPayload(deferred)
 			}
 			return
 		}
 		if err != nil {
 			log.Warn("[chainTipSync] pending GLOAS NewPayload failed", "slot", p.Block.Block.Slot, "status", status, "err", err)
 		}
-		status, retained := recordGloasPayloadRetryResult(ctx, cfg.executionClient, store, p, status)
+		status, retained := recordGloasPayloadRetryResult(ctx, cfg.executionClient, cfg.forkChoice, p, status)
 		if !retained {
 			continue
 		}
@@ -1294,8 +1288,8 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 		if err != nil {
 			log.Warn("[chainTipSync] GLOAS verification sweep NewPayload failed", "slot", item.block.Block.Slot, "blockRoot", item.root, "status", status, "err", err)
 		}
-		if status == execution_client.PayloadStatusNone && ctx.Err() != nil {
-			return false
+		if execution_client.ValidationInterrupted(ctx, status, err) {
+			return ctx.Err() == nil
 		}
 		status, retained := recordGloasPayloadRetryResult(
 			ctx,
@@ -1424,7 +1418,7 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 				cfg.forkChoice.RetryPendingExecutionPayloadEnvelopes(retryCtx, maxPendingGloasPayloadsPerCycle)
 			},
 			func(retryCtx context.Context) {
-				drainPendingGloasPayloads(retryCtx, cfg, cfg.forkChoice)
+				drainPendingGloasPayloads(retryCtx, cfg)
 			},
 			func(retryCtx context.Context) {
 				retryUnverifiedAnchorPayload(retryCtx, cfg)

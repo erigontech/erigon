@@ -1256,7 +1256,7 @@ func TestDrainPendingGloasPayloadsDoesNotRequeueAFinalNotValidated(t *testing.T)
 				Envelope: &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: common.HexToHash("0x1234"), Payload: payload}},
 			})
 
-			drainPendingGloasPayloads(context.Background(), &Cfg{beaconCfg: &cfg, executionClient: engine, gloasPayloadValidator: base, forkChoice: fc}, fc)
+			drainPendingGloasPayloads(context.Background(), &Cfg{beaconCfg: &cfg, executionClient: engine, gloasPayloadValidator: base, forkChoice: fc})
 
 			require.Equal(t, 1, base.newPayloadCalls)
 			require.Equal(t, tc.requeued, len(fc.DrainPendingELPayloads()) == 1)
@@ -1330,7 +1330,7 @@ func TestDrainPendingGloasPayloadsRequeuesNotValidatedPayload(t *testing.T) {
 		executionClient:       engine,
 		gloasPayloadValidator: engine,
 		forkChoice:            fc,
-	}, fc)
+	})
 
 	require.Equal(t, 1, engine.newPayloadCalls)
 	queued := fc.DrainPendingELPayloads()
@@ -1365,7 +1365,7 @@ func TestDrainPendingGloasPayloadsStopsAfterCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	drainPendingGloasPayloads(ctx, &Cfg{beaconCfg: cfg, executionClient: engine, gloasPayloadValidator: engine, forkChoice: fc}, fc)
+	drainPendingGloasPayloads(ctx, &Cfg{beaconCfg: cfg, executionClient: engine, gloasPayloadValidator: engine, forkChoice: fc})
 
 	require.Equal(t, 1, engine.newPayloadCalls)
 	require.Len(t, fc.DrainPendingELPayloads(), 3)
