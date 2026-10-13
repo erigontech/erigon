@@ -69,6 +69,15 @@ func (r *mapStateReader) ReadAccountData(addr accounts.Address) (*accounts.Accou
 	return nil, nil
 }
 
+func (r *mapStateReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (r *mapStateReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
 func (r *mapStateReader) ReadAccountDataForDebug(addr accounts.Address) (*accounts.Account, error) {
 	return r.ReadAccountData(addr)
 }
