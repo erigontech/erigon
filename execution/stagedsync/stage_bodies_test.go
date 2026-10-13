@@ -30,6 +30,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -190,4 +192,30 @@ func TestBodiesUnwind(t *testing.T) {
 		require.Equal(11, int(lastBlockNum))
 		require.Equal(1+11*(3+2), int(lastTxNum))
 	}
+}
+
+func TestBlockHashStageKeepsBadHeaderUnindexed(t *testing.T) {
+	m := execmoduletester.New(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	bad := &types.Header{Extra: []byte("bad")}
+	bad.Number.SetUint64(1)
+	require.NoError(t, rawdb.WriteHeader(tx, bad))
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, bad.Hash(), 1))
+	require.NoError(t, rawdb.TruncateCanonicalHash(tx, 1, true))
+
+	good := &types.Header{}
+	good.Number.SetUint64(1)
+	require.NoError(t, rawdb.WriteHeader(tx, good))
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Headers, 1))
+
+	s := &stagedsync.StageState{ID: stages.BlockHashes}
+	require.NoError(t, stagedsync.SpawnBlockHashStage(s, tx))
+
+	require.Nil(t, rawdb.ReadHeaderNumber(tx, bad.Hash()))
+	progress, err := stages.GetStageProgress(tx, stages.BlockHashes)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), progress)
 }
