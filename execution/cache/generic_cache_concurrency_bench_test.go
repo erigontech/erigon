@@ -62,7 +62,7 @@ func BenchmarkGenericCacheParallelMixed(b *testing.B) {
 		}
 	}
 
-	hits0, misses0 := c.hits.Load(), c.misses.Load()
+	misses0 := c.misses.Load()
 	var stream atomic.Uint64
 	b.SetParallelism(64)
 	b.ResetTimer()
@@ -80,8 +80,8 @@ func BenchmarkGenericCacheParallelMixed(b *testing.B) {
 		}
 	})
 	b.StopTimer()
-	hits, misses := c.hits.Load()-hits0, c.misses.Load()-misses0
-	b.ReportMetric(100*float64(hits)/float64(hits+misses), "hit%")
+	misses := c.misses.Load() - misses0
+	b.ReportMetric(100*(1-float64(misses)/float64(b.N)), "hit%")
 }
 
 // Filling a cache from cold to a large working set. On main this pays whole-

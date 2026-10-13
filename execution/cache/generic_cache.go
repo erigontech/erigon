@@ -97,7 +97,7 @@ type GenericCache[T any] struct {
 	// floor. See execution/cache/coherence.
 	coh coherence.Gen
 
-	hits         atomic.Uint64
+	// No hit counter: one shared atomic per hit serializes the readers of a hot key.
 	misses       atomic.Uint64
 	inserts      atomic.Uint64
 	evictions    atomic.Uint64 // capacity evictions only
@@ -327,7 +327,6 @@ func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 		return zero, 0, false
 	}
 	b.touch(way)
-	c.hits.Add(1)
 	return e.val, e.txNum, true
 }
 
@@ -525,22 +524,16 @@ func (c *GenericCache[T]) CapacityBytes() datasize.ByteSize {
 
 // PrintStatsAndReset prints cache statistics and resets counters.
 func (c *GenericCache[T]) PrintStatsAndReset(name string) {
-	hits := c.hits.Swap(0)
 	misses := c.misses.Swap(0)
 	inserts := c.inserts.Swap(0)
 	evictions := c.evictions.Swap(0)
 	dropped := c.dropped.Swap(0)
 	staleEvicted := c.staleEvicted.Swap(0)
-	total := hits + misses
-	var hitRate float64
-	if total > 0 {
-		hitRate = float64(hits) / float64(total) * 100
-	}
 	sizeBytes := c.currentSize.Load()
 	log.Debug(
 		name+" cache stats",
 		"mode", c.mode.String(),
-		"hits", hits, "misses", misses, "hit_rate", hitRate,
+		"misses", misses,
 		"inserts", inserts, "evictions", evictions, "dropped", dropped,
 		"stale_evicted", staleEvicted, "epoch", c.coh.Epoch(),
 		"entries", c.Len(), "size_mb", sizeBytes/(1024*1024),
