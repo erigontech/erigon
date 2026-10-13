@@ -180,19 +180,19 @@ func newResourceManager(cfg *P2PConfig) (network.ResourceManager, error) {
 		}
 	}
 	if len(trusted) > 0 {
-		var exemptV4, exemptV6 []netip.Prefix
+		// Exempt networks skip the per-subnet caps and share one connection count each.
+		// WithNetworkPrefixLimit sorts the lists in place, so the defaults are cloned.
+		v4, v6 := slices.Clone(rcmgr.DefaultNetworkPrefixLimitV4), slices.Clone(rcmgr.DefaultNetworkPrefixLimitV6)
+		connCount := exemptNetworkConnLimit(cfg.MaxPeerCount)
 		for _, prefix := range trusted {
+			limit := rcmgr.NetworkPrefixLimit{Network: prefix, ConnCount: connCount}
 			if prefix.Addr().Is4() {
-				exemptV4 = append(exemptV4, prefix)
+				v4 = append(v4, limit)
 			} else {
-				exemptV6 = append(exemptV6, prefix)
+				v6 = append(v6, limit)
 			}
 		}
-		connCount := exemptNetworkConnLimit(cfg.MaxPeerCount)
-		opts = append(opts, rcmgr.WithNetworkPrefixLimit(
-			slices.Concat(rcmgr.DefaultNetworkPrefixLimitV4, networkLimits(connCount, exemptV4)),
-			slices.Concat(rcmgr.DefaultNetworkPrefixLimitV6, networkLimits(connCount, exemptV6)),
-		))
+		opts = append(opts, rcmgr.WithNetworkPrefixLimit(v4, v6))
 	}
 	rm, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(limits.AutoScale()), opts...)
 	if err != nil {
@@ -208,16 +208,6 @@ func newResourceManager(cfg *P2PConfig) (network.ResourceManager, error) {
 // go-libp2p uses half of it as the network's QUIC source-address verification burst.
 func exemptNetworkConnLimit(maxPeerCount uint64) int {
 	return max(32, 8*int(maxPeerCount))
-}
-
-// networkLimits exempts each prefix from the per-subnet caps and counts all its connections
-// against one connCount instead.
-func networkLimits(connCount int, prefixes []netip.Prefix) []rcmgr.NetworkPrefixLimit {
-	out := make([]rcmgr.NetworkPrefixLimit, 0, len(prefixes))
-	for _, p := range prefixes {
-		out = append(out, rcmgr.NetworkPrefixLimit{Network: p, ConnCount: connCount})
-	}
-	return out
 }
 
 // ParseTrustedCIDRs parses --caplin.ip-block-limits.trusted-cidrs. Empty entries are skipped.

@@ -28,7 +28,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -1880,7 +1879,7 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 	if _, err := clp2p.ParseTrustedCIDRs(trustedCIDRs); err != nil {
 		Fatalf("Option %s: %v", CaplinIPBlockLimitsTrustedCIDRsFlag.Name, err)
 	}
-	cfg.CaplinConfig.TrustedCIDRs = slices.DeleteFunc(trustedCIDRs, func(c string) bool { return strings.TrimSpace(c) == "" })
+	cfg.CaplinConfig.TrustedCIDRs = trustedCIDRs
 
 	// Caplin's block's backfilling is enabled if any of the following flags are set
 	if !cfg.CaplinConfig.EnableEngineAPI {

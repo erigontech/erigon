@@ -391,7 +391,7 @@ func TestCaplinIPBlockLimitFlagsReachConfig(t *testing.T) {
 
 	cfg = parse("--caplin.ip-block-limits.disable", "--caplin.ip-block-limits.trusted-cidrs=203.0.113.0/24,2001:db8::/32,")
 	require.True(t, cfg.CaplinConfig.DisableIPBlockLimits)
-	require.Equal(t, []string{"203.0.113.0/24", "2001:db8::/32"}, cfg.CaplinConfig.TrustedCIDRs)
+	require.Equal(t, []string{"203.0.113.0/24", "2001:db8::/32", ""}, cfg.CaplinConfig.TrustedCIDRs)
 }
 
 func TestCommitmentPlainValuesFromCtx(t *testing.T) {
