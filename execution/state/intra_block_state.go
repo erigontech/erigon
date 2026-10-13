@@ -1558,11 +1558,11 @@ func (ibs *IntraBlockState) SetNonce(addr accounts.Address, nonce uint64, reason
 		fmt.Printf("%d (%d.%d) SetNonce %x, %d\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, nonce)
 	}
 
-	wasCommited := !ibs.hasWrite(addr, NoncePath, accounts.NilKey)
 	if ibs.versionMap != nil {
-		return ibs.writeNonceVersioned(addr, nonce, wasCommited, reason)
+		return ibs.writeNonceVersioned(addr, nonce, reason)
 	}
 
+	wasCommited := !ibs.hasWrite(addr, NoncePath, accounts.NilKey)
 	stateObject, err := ibs.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
@@ -1579,7 +1579,12 @@ func (ibs *IntraBlockState) SetNonce(addr accounts.Address, nonce uint64, reason
 // read (versionedWrites for this tx's own prior write, else the base record) —
 // matching the materialized path's AddressPath-only footprint. Absent/destroyed
 // accounts still materialize (account creation).
-func (ibs *IntraBlockState) writeNonceVersioned(addr accounts.Address, nonce uint64, wasCommited bool, reason tracing.NonceChangeReason) error {
+func (ibs *IntraBlockState) writeNonceVersioned(addr accounts.Address, nonce uint64, reason tracing.NonceChangeReason) error {
+	var own uint64
+	vw, hadOwn := ibs.versionedWrites.GetNonce(addr)
+	if hadOwn {
+		own = vw.Val
+	}
 	base, _, _, err := ibs.versionedAccountBase(addr, true)
 	if err != nil {
 		return err
@@ -1591,10 +1596,10 @@ func (ibs *IntraBlockState) writeNonceVersioned(addr accounts.Address, nonce uin
 		}
 		// The object is built from the base record and can lag this tx's own
 		// nonce write: seed it so a revert restores the live nonce.
-		if vw, ok := ibs.versionedWrites.GetNonce(addr); ok {
-			stateObject.setNonce(vw.Val)
+		if hadOwn {
+			stateObject.setNonce(own)
 		}
-		stateObject.SetNonce(nonce, wasCommited, reason)
+		stateObject.SetNonce(nonce, !hadOwn, reason)
 		ibs.recordWriteNonce(addr, nonce, reason)
 		return nil
 	}
@@ -1609,10 +1614,10 @@ func (ibs *IntraBlockState) writeNonceVersioned(addr accounts.Address, nonce uin
 	// The tx's own nonce cell is authoritative for the journal prev: it records
 	// every prior same-tx write, whereas so.data can lag if the object was
 	// materialized after those writes. Prefer it over so.data and base.
-	if vw, ok := ibs.versionedWrites.GetNonce(addr); ok {
-		prev = vw.Val
+	if hadOwn {
+		prev = own
 	}
-	ibs.journal.nonceChange(addr, prev, wasCommited)
+	ibs.journal.nonceChange(addr, prev, !hadOwn)
 	if ibs.tracingHooks != nil {
 		if ibs.tracingHooks.OnNonceChangeV2 != nil {
 			ibs.tracingHooks.OnNonceChangeV2(addr, prev, nonce, reason)
