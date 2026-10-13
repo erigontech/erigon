@@ -552,6 +552,8 @@ func TestArenaRetentionStaysBounded(t *testing.T) {
 
 // Past the pool, a transaction's logs come from chunks, not one heap entry each.
 func TestAllocLogPastThePoolAllocatesInChunks(t *testing.T) {
+// Topics an entry has to grow come from chunks, not one allocation per log.
+func TestAllocLogGrowsTopicsInChunks(t *testing.T) {
 	addr := common.HexToAddress("0x1")
 	allocs := testing.AllocsPerRun(5, func() {
 		ibs := New(nil)
@@ -561,4 +563,29 @@ func TestAllocLogPastThePoolAllocatesInChunks(t *testing.T) {
 		}
 	})
 	require.Less(t, allocs, 1024.0/8, "%v allocations for 1024 logs", allocs)
+		ibs.Reset() // the pool now holds 1024 entries with no topic capacity
+		ibs.SetTxContext(1, 1)
+		for range 1024 {
+			ibs.AllocLog(addr, 2, 0)
+		}
+	})
+	require.Less(t, allocs, 1024.0*1.5, "%v allocations for 1024 entries and 1024 topic pairs", allocs)
+}
+
+// A reused entry that needs more topics than it had must not grow into the
+// topics of the entry carved next to it.
+func TestAllocLogTopicsDoNotOverlap(t *testing.T) {
+	addr := common.HexToAddress("0x1")
+	ibs := New(nil)
+	ibs.SetTxContext(1, 0)
+	ibs.AllocLog(addr, 1, 0)
+	ibs.AllocLog(addr, 1, 0)
+	ibs.Reset()
+
+	ibs.SetTxContext(1, 1)
+	x := ibs.AllocLog(addr, 1, 0)
+	x.Topics[0] = common.HexToHash("0x11")
+	y := ibs.AllocLog(addr, 2, 0)
+	y.Topics[0], y.Topics[1] = common.HexToHash("0x22"), common.HexToHash("0x33")
+	require.Equal(t, common.HexToHash("0x11"), x.Topics[0])
 }
