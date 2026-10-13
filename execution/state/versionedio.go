@@ -957,66 +957,6 @@ type createWriteSnapshot struct {
 	codeHash       *VersionedWrite[accounts.CodeHash]
 }
 
-// snapshotCreateFields clones the account-record writes that a subsequent
-// createObject/createAccount will overwrite, so a reverted recreation can
-// restore them. Fields creation never writes (nonce/code/codeSize/storage) are
-// not captured — they survive the recreation untouched.
-func (ws *WriteSet) snapshotCreateFields(addr accounts.Address) *createWriteSnapshot {
-	snap := &createWriteSnapshot{}
-	if vw, ok := ws.address[addr]; ok {
-		snap.address = cloneVW(vw)
-	}
-	if vw, ok := ws.balance[addr]; ok {
-		snap.balance = cloneVW(vw)
-	}
-	if vw, ok := ws.incarnation[addr]; ok {
-		snap.incarnation = cloneVW(vw)
-	}
-	if vw, ok := ws.selfDestruct[addr]; ok {
-		snap.selfDestruct = cloneVW(vw)
-	}
-	if vw, ok := ws.createContract[addr]; ok {
-		snap.createContract = cloneVW(vw)
-	}
-	if vw, ok := ws.codeHash[addr]; ok {
-		snap.codeHash = cloneVW(vw)
-	}
-	return snap
-}
-
-// restoreCreateFields reverts the account-record writes overwritten by a
-// recreation back to snap (nil entries in snap become deletions). Only the
-// fields creation writes are touched.
-func (ws *WriteSet) restoreCreateFields(addr accounts.Address, snap *createWriteSnapshot) {
-	delete(ws.address, addr)
-	delete(ws.balance, addr)
-	delete(ws.incarnation, addr)
-	delete(ws.selfDestruct, addr)
-	delete(ws.createContract, addr)
-	delete(ws.codeHash, addr)
-	if snap == nil {
-		return
-	}
-	if snap.address != nil {
-		ws.SetAddress(addr, snap.address)
-	}
-	if snap.balance != nil {
-		ws.SetBalance(addr, snap.balance)
-	}
-	if snap.incarnation != nil {
-		ws.SetIncarnation(addr, snap.incarnation)
-	}
-	if snap.selfDestruct != nil {
-		ws.SetSelfDestruct(addr, snap.selfDestruct)
-	}
-	if snap.createContract != nil {
-		ws.SetCreateContract(addr, snap.createContract)
-	}
-	if snap.codeHash != nil {
-		ws.SetCodeHash(addr, snap.codeHash)
-	}
-}
-
 // assertSelfDestructNormalized panics if a self-destructed address still carries
 // the account fields Normalize is required to drop. Any of them makes Apply
 // compute pureDelete=false and take the cleanup-before-recreate branch, which
@@ -1392,58 +1332,6 @@ func (ws *WriteSet) DelStorage(addr accounts.Address, key accounts.StorageKey) {
 	delete(inner, key)
 	if len(inner) == 0 {
 		delete(ws.storage, addr)
-	}
-}
-
-// updateBalance, updateNonce etc. are typed in-place mutations on the
-// existing per-path entry.  No-op when no entry exists for addr.
-func (ws *WriteSet) updateBalance(addr accounts.Address, val uint256.Int) {
-	if vw, ok := ws.balance[addr]; ok {
-		vw.Val = val
-	}
-}
-
-func (ws *WriteSet) updateStorage(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
-	if inner := ws.storage[addr]; inner != nil {
-		if vw, ok := inner[key]; ok {
-			vw.Val = val
-		}
-	}
-}
-
-func (ws *WriteSet) updateNonce(addr accounts.Address, val uint64) {
-	if vw, ok := ws.nonce[addr]; ok {
-		vw.Val = val
-	}
-}
-
-func (ws *WriteSet) updateIncarnation(addr accounts.Address, val uint64) {
-	if vw, ok := ws.incarnation[addr]; ok {
-		vw.Val = val
-	}
-}
-
-func (ws *WriteSet) updateSelfDestruct(addr accounts.Address, val bool) {
-	if vw, ok := ws.selfDestruct[addr]; ok {
-		vw.Val = val
-	}
-}
-
-func (ws *WriteSet) updateCode(addr accounts.Address, val accounts.Code) {
-	if vw, ok := ws.code[addr]; ok {
-		vw.Val = val
-	}
-}
-
-func (ws *WriteSet) updateCodeHash(addr accounts.Address, val accounts.CodeHash) {
-	if vw, ok := ws.codeHash[addr]; ok {
-		vw.Val = val
-	}
-}
-
-func (ws *WriteSet) updateCodeSize(addr accounts.Address, val int) {
-	if vw, ok := ws.codeSize[addr]; ok {
-		vw.Val = val
 	}
 }
 
