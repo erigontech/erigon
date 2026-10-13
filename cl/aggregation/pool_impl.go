@@ -19,7 +19,6 @@ package aggregation
 import (
 	"context"
 	"errors"
-	"math/bits"
 	"slices"
 	"sync"
 	"time"
@@ -68,6 +67,8 @@ type aggregationPoolImpl struct {
 	// aggregatesInCommittee holds the per-committee aggregates used after the electra upgrade
 	aggregatesInCommittee map[keyAggrInCommittee]*committeeAggregate
 	dataPerCommittee      map[slotCommittee][]keyAggrInCommittee
+	// refusedVotes counts the votes a full committee refused for each data root.
+	refusedVotes map[slotCommittee]map[common.Hash]int
 }
 
 type slotCommittee struct {
@@ -94,6 +95,7 @@ func NewAggregationPool(
 		aggregates:            make(map[common.Hash]*solid.Attestation),
 		aggregatesInCommittee: make(map[keyAggrInCommittee]*committeeAggregate),
 		dataPerCommittee:      make(map[slotCommittee][]keyAggrInCommittee),
+		refusedVotes:          make(map[slotCommittee]map[common.Hash]int),
 	}
 	go p.sweepStaleAtt(ctx)
 	return p
@@ -182,7 +184,12 @@ func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation, ver
 		}
 		perCommittee := slotCommittee{slot: inAtt.Data.Slot, committee: committeeIndex}
 		if len(p.dataPerCommittee[perCommittee]) >= maxDataPerCommittee {
-			if !p.evictWeakestData(perCommittee, setBits(inAtt)) {
+			votes := p.refusedVotes[perCommittee][hashRoot] + voteCount(inAtt)
+			if !p.evictWeakerData(perCommittee, votes) {
+				if p.refusedVotes[perCommittee] == nil {
+					p.refusedVotes[perCommittee] = make(map[common.Hash]int)
+				}
+				p.refusedVotes[perCommittee][hashRoot] = votes
 				return ErrPoolLimit
 			}
 		} else if len(p.aggregatesInCommittee) >= p.maxCommitteeAggregates() {
@@ -195,6 +202,7 @@ func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation, ver
 		storedAttestation.SetVersion(version)
 		p.aggregatesInCommittee[key] = &committeeAggregate{attestation: storedAttestation, signature: signature}
 		p.dataPerCommittee[perCommittee] = append(p.dataPerCommittee[perCommittee], key)
+		delete(p.refusedVotes[perCommittee], hashRoot)
 		return nil
 	}
 	att := entry.attestation
@@ -284,19 +292,24 @@ func (p *aggregationPoolImpl) pruneStaleLocked() {
 			p.removeCommitteeAggregate(key, entry)
 		}
 	}
+	for perCommittee := range p.refusedVotes {
+		if p.ethClock.GetEpochAtSlot(perCommittee.slot)+1 < currentEpoch {
+			delete(p.refusedVotes, perCommittee)
+		}
+	}
 }
 
-// evictWeakestData removes the committee's data with the fewest votes if it has no more than
+// evictWeakerData removes the committee's data with the fewest votes if it has fewer than
 // incomingVotes, and reports whether it made room.
-func (p *aggregationPoolImpl) evictWeakestData(perCommittee slotCommittee, incomingVotes int) bool {
+func (p *aggregationPoolImpl) evictWeakerData(perCommittee slotCommittee, incomingVotes int) bool {
 	var weakest keyAggrInCommittee
 	weakestVotes := -1
 	for _, key := range p.dataPerCommittee[perCommittee] {
-		if votes := setBits(p.aggregatesInCommittee[key].attestation); weakestVotes < 0 || votes < weakestVotes {
+		if votes := voteCount(p.aggregatesInCommittee[key].attestation); weakestVotes < 0 || votes < weakestVotes {
 			weakest, weakestVotes = key, votes
 		}
 	}
-	if weakestVotes < 0 || weakestVotes > incomingVotes {
+	if weakestVotes < 0 || weakestVotes >= incomingVotes {
 		return false
 	}
 	p.removeCommitteeAggregate(weakest, p.aggregatesInCommittee[weakest])
@@ -314,13 +327,8 @@ func (p *aggregationPoolImpl) removeCommitteeAggregate(key keyAggrInCommittee, e
 	}
 }
 
-// setBits counts the votes in an attestation's aggregation bits, without the length bit.
-func setBits(att *solid.Attestation) int {
-	votes := 0
-	for _, b := range att.AggregationBits.Bytes() {
-		votes += bits.OnesCount8(b)
-	}
-	return max(votes-1, 0)
+func voteCount(att *solid.Attestation) int {
+	return utils.BitsOnCount(att.AggregationBits.Bytes()) - 1 // without the length bit
 }
 
 // maxCommitteeAggregates bounds the per-committee aggregates: the two epochs that stay includable,

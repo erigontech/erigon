@@ -504,35 +504,48 @@ func (t *PoolTestSuite) TestAddAttestationElectraLimitsDataPerCommittee() {
 	t.NoError(pool.AddAttestation(t.electraAttestationWithSource(5, 2, 0xff)), "other committees keep their own allowance")
 
 	pool.pruneStale() // current slot 1000: everything is pruned and the allowance comes back
+	t.Empty(pool.refusedVotes)
 	t.NoError(pool.AddAttestation(t.electraAttestationWithSource(5, 1, 0xff)))
 }
 
-// Attesters voting for several data early must not lock the committee's honest data out: when the
-// committee is full, the data with the fewest votes gives way to data with at least as many.
+// Attesters voting early for several data must not lock the committee's honest data out. Votes
+// arrive one at a time, so a full committee counts the votes it refuses for each data, and the
+// data with the fewest votes gives way once a refused data has more.
 func (t *PoolTestSuite) TestAddAttestationElectraEvictsWeakestDataPerCommittee() {
 	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).AnyTimes()
 	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).AnyTimes()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
-	for source := range maxDataPerCommittee {
-		t.Require().NoError(pool.AddAttestation(t.electraAttestationWithSource(5, 1, byte(source))))
-	}
-	honest := func(bits byte) *solid.Attestation {
-		att := t.electraAttestationWithSource(5, 1, 0xaa)
-		att.AggregationBits = solid.BitlistFromBytes([]byte{bits}, 2048*64)
+	vote := func(source byte, member int) *solid.Attestation {
+		att := t.electraAttestationWithSource(5, 1, source)
+		bits := []byte{0, 0x80} // a committee of 15 members
+		bits[member/8] |= 1 << (member % 8)
+		att.AggregationBits = solid.BitlistFromBytes(bits, 2048*64)
 		return att
 	}
-	t.Require().NoError(pool.AddAttestation(honest(0b1011)), "honest data displaces one single-vote entry")
-	t.Require().NoError(pool.AddAttestation(honest(0b1100)))
-	t.Require().NoError(pool.AddAttestation(t.electraAttestationWithSource(5, 1, 0xbb)), "a single vote displaces another single vote")
-
-	sources := map[byte]int{}
-	for _, att := range pool.Aggregates() {
-		sources[att.Data.Source.Root[0]]++
+	member := 0
+	for source := range maxDataPerCommittee {
+		for range 2 {
+			t.Require().NoError(pool.AddAttestation(vote(byte(source), member)))
+			member++
+		}
 	}
+
+	t.ErrorIs(pool.AddAttestation(vote(0xaa, member)), ErrPoolLimit, "one vote does not displace data with two")
+	t.ErrorIs(pool.AddAttestation(vote(0xaa, member+1)), ErrPoolLimit, "two votes do not displace data with two")
+	t.NoError(pool.AddAttestation(vote(0xaa, member+2)), "the third vote displaces the weakest data")
+	t.NoError(pool.AddAttestation(vote(0xaa, member+3)), "later votes merge into the honest data")
+
 	t.Len(pool.Aggregates(), maxDataPerCommittee)
-	t.Equal(1, sources[0xaa], "the honest data with the most votes survives")
+	honest := 0
+	for _, att := range pool.Aggregates() {
+		if att.Data.Source.Root[0] == 0xaa {
+			honest++
+			t.Equal([]byte{0, 0x8c}, att.AggregationBits.Bytes())
+		}
+	}
+	t.Equal(1, honest)
 }
 
 func (t *PoolTestSuite) TestAddAttestationElectraLimitsTotalAggregates() {
