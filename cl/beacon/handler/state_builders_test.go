@@ -22,6 +22,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -30,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -149,4 +151,37 @@ func TestPostStateBuildersRejectsPreGloasAndMissingState(t *testing.T) {
 	resp, _ = postStateBuilders(t, handler, "finalized", `{}`)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+// advancedBuildersState puts a copy of the head state, moved one slot past its
+// block, into fork choice for the head root and finalized checkpoint.
+func advancedBuildersState(t *testing.T) (*ApiHandler, *state.CachingBeaconState, [3]*cltypes.Builder) {
+	t.Helper()
+	handler, postState, builders := setupStateBuildersHandler(t)
+	fcu := handler.forkchoiceStore.(*mock_services.ForkChoiceStorageMock)
+	advanced, err := postState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, advanced.SetSlot(postState.Slot()+1))
+	fcu.StateAtBlockRootVal[fcu.HeadVal] = advanced
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: postState.Slot() / 32, Root: fcu.HeadVal}
+	return handler, postState, builders
+}
+
+func TestPostStateBuildersSkipsAdvancedForkchoiceStateForSlot(t *testing.T) {
+	handler, postState, _ := advancedBuildersState(t)
+	resp, decoded := postStateBuilders(t, handler, strconv.FormatUint(postState.Slot(), 10), `{}`)
+	defer resp.Body.Close()
+	require.NotEqual(t, http.StatusOK, resp.StatusCode)
+	require.Empty(t, decoded.Data)
+}
+
+func TestPostStateBuildersServesAdvancedForkchoiceStateForFinalized(t *testing.T) {
+	handler, _, builders := advancedBuildersState(t)
+	resp, decoded := postStateBuilders(t, handler, "finalized", `{}`)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Len(t, decoded.Data, 3)
+	for i, builder := range builders {
+		require.Equal(t, builder.Pubkey, decoded.Data[i].Builder.Pubkey)
+	}
 }

@@ -218,7 +218,7 @@ func (a *ApiHandler) PostEthV1BeaconStatesBuilders(w http.ResponseWriter, r *htt
 	if slot == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("state not found"))
 	}
-	requestedState, err := a.forkchoiceStateAtBlockSlot(root, *slot)
+	requestedState, err := a.forkchoiceStateAtBlockSlot(stateID, root, *slot)
 	if err != nil && !errors.Is(err, fork_graph.ErrStateNotFound) {
 		return nil, err
 	}
@@ -358,12 +358,16 @@ func (a *ApiHandler) PostEthV1BuilderRegisterValidator(w http.ResponseWriter, r 
 	return newBeaconResponse(nil), nil
 }
 
-// forkchoiceStateAtBlockSlot returns the fork choice state of blockRoot, or nil
-// if that state was advanced past the block's slot, as an anchor state can be.
-func (a *ApiHandler) forkchoiceStateAtBlockSlot(blockRoot common.Hash, blockSlot uint64) (*state.CachingBeaconState, error) {
+// forkchoiceStateAtBlockSlot returns the fork choice state of blockRoot. For a
+// slot or state-root stateID it returns nil if that state was advanced past the
+// block's slot, as an anchor state can be; named ids get the state as it is.
+func (a *ApiHandler) forkchoiceStateAtBlockSlot(stateID *beaconhttp.SegmentID, blockRoot common.Hash, blockSlot uint64) (*state.CachingBeaconState, error) {
 	st, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, true)
-	if err != nil || st == nil || st.Slot() != blockSlot {
+	if err != nil || st == nil {
 		return nil, err
+	}
+	if (stateID.GetSlot() != nil || stateID.GetRoot() != nil) && st.Slot() != blockSlot {
+		return nil, nil
 	}
 	return st, nil
 }

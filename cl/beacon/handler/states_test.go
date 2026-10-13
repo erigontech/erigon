@@ -360,6 +360,45 @@ func TestGetStateFullSkipsForkchoiceStateAtLaterSlot(t *testing.T) {
 	}
 }
 
+// TestGetStateFullFinalizedServesAdvancedForkchoiceState pins that a named
+// state_id still gets the fork choice state when it was advanced past its
+// block, as the anchor checkpoint state can be.
+func TestGetStateFullFinalizedServesAdvancedForkchoiceState(t *testing.T) {
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+
+	var err error
+	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
+
+	advanced, err := postState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(advanced, postState.Slot()+1))
+	advancedRoot, err := advanced.HashSSZ()
+	require.NoError(t, err)
+	fcu.StateAtBlockRootVal[fcu.HeadVal] = advanced
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v2/debug/beacon/states/finalized", nil)
+	require.NoError(t, err)
+	req.Header.Set("Accept", "application/octet-stream")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	out, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	got := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, got.DecodeSSZ(out, int(clparams.Phase0Version)))
+	require.Equal(t, advanced.Slot(), got.Slot())
+	gotRoot, err := got.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, advancedRoot, gotRoot)
+}
+
 func TestGetStateSyncCommittees(t *testing.T) {
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
