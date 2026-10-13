@@ -3147,8 +3147,7 @@ func (ibs *IntraBlockState) accountRead(addr accounts.Address, account *accounts
 
 // recordWrite sets this tx's write at addr's path. A repeat write reuses the
 // earlier cell; the first one takes a cell from the write view's slab.
-func recordWrite[T any](ibs *IntraBlockState, addr accounts.Address, path AccountPath, pick func(*acctIO) **VersionedWrite[T], slab *vwSlab[T], val T) *VersionedWrite[T] {
-	p := pick(ibs.versionedReads.get(addr))
+func recordWrite[T any](ibs *IntraBlockState, addr accounts.Address, path AccountPath, p **VersionedWrite[T], slab *vwSlab[T], val T) *VersionedWrite[T] {
 	vw := *p
 	if vw == nil {
 		vw = slab.get()
@@ -3163,14 +3162,14 @@ func recordWrite[T any](ibs *IntraBlockState, addr accounts.Address, path Accoun
 func (ibs *IntraBlockState) recordWriteBalance(addr accounts.Address, val uint256.Int) {
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap != nil {
-		traceWrite(ibs, recordWrite(ibs, addr, BalancePath, pickWBalance, &ibs.versionedWrites.slabs.balance, val))
+		traceWrite(ibs, recordWrite(ibs, addr, BalancePath, &ibs.versionedReads.get(addr).wBalance, &ibs.versionedWrites.slabs.balance, val))
 	}
 }
 
 func (ibs *IntraBlockState) recordWriteNonce(addr accounts.Address, val uint64, reason tracing.NonceChangeReason) {
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap != nil {
-		vw := recordWrite(ibs, addr, NoncePath, pickWNonce, &ibs.versionedWrites.slabs.nonce, val)
+		vw := recordWrite(ibs, addr, NoncePath, &ibs.versionedReads.get(addr).wNonce, &ibs.versionedWrites.slabs.nonce, val)
 		vw.NonceReason = reason
 		traceWrite(ibs, vw)
 	}
@@ -3179,42 +3178,42 @@ func (ibs *IntraBlockState) recordWriteNonce(addr accounts.Address, val uint64, 
 func (ibs *IntraBlockState) recordWriteIncarnation(addr accounts.Address, val uint64) {
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap != nil {
-		traceWrite(ibs, recordWrite(ibs, addr, IncarnationPath, pickWIncarnation, &ibs.versionedWrites.slabs.incarnation, val))
+		traceWrite(ibs, recordWrite(ibs, addr, IncarnationPath, &ibs.versionedReads.get(addr).wIncarnation, &ibs.versionedWrites.slabs.incarnation, val))
 	}
 }
 
 func (ibs *IntraBlockState) recordWriteSelfDestruct(addr accounts.Address, val bool) {
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap != nil {
-		traceWrite(ibs, recordWrite(ibs, addr, SelfDestructPath, pickWSelfDestruct, &ibs.versionedWrites.slabs.selfDestruct, val))
+		traceWrite(ibs, recordWrite(ibs, addr, SelfDestructPath, &ibs.versionedReads.get(addr).wSelfDestruct, &ibs.versionedWrites.slabs.selfDestruct, val))
 	}
 }
 
 func (ibs *IntraBlockState) recordWriteCreateContract(addr accounts.Address, val bool) {
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap != nil {
-		traceWrite(ibs, recordWrite(ibs, addr, CreateContractPath, pickWCreateContract, &ibs.versionedWrites.slabs.createContract, val))
+		traceWrite(ibs, recordWrite(ibs, addr, CreateContractPath, &ibs.versionedReads.get(addr).wCreateContract, &ibs.versionedWrites.slabs.createContract, val))
 	}
 }
 
 func (ibs *IntraBlockState) recordWriteCode(addr accounts.Address, val accounts.Code) {
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap != nil {
-		traceWrite(ibs, recordWrite(ibs, addr, CodePath, pickWCode, &ibs.versionedWrites.slabs.code, val))
+		traceWrite(ibs, recordWrite(ibs, addr, CodePath, &ibs.versionedReads.get(addr).wCode, &ibs.versionedWrites.slabs.code, val))
 	}
 }
 
 func (ibs *IntraBlockState) recordWriteCodeHash(addr accounts.Address, val accounts.CodeHash) {
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap != nil {
-		traceWrite(ibs, recordWrite(ibs, addr, CodeHashPath, pickWCodeHash, &ibs.versionedWrites.slabs.codeHash, val))
+		traceWrite(ibs, recordWrite(ibs, addr, CodeHashPath, &ibs.versionedReads.get(addr).wCodeHash, &ibs.versionedWrites.slabs.codeHash, val))
 	}
 }
 
 func (ibs *IntraBlockState) recordWriteCodeSize(addr accounts.Address, val int) {
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap != nil {
-		traceWrite(ibs, recordWrite(ibs, addr, CodeSizePath, pickWCodeSize, &ibs.versionedWrites.slabs.codeSize, val))
+		traceWrite(ibs, recordWrite(ibs, addr, CodeSizePath, &ibs.versionedReads.get(addr).wCodeSize, &ibs.versionedWrites.slabs.codeSize, val))
 	}
 }
 
@@ -3223,7 +3222,7 @@ func (ibs *IntraBlockState) recordWriteAddress(addr accounts.Address, account *a
 	if ibs.versionMap != nil {
 		// A copy, made only here: the caller's account keeps changing.
 		val := ibs.versionedWrites.accts.copyOf(account)
-		traceWrite(ibs, recordWrite(ibs, addr, AddressPath, pickWAddress, &ibs.versionedWrites.slabs.address, val))
+		traceWrite(ibs, recordWrite(ibs, addr, AddressPath, &ibs.versionedReads.get(addr).wAddress, &ibs.versionedWrites.slabs.address, val))
 	}
 }
 
