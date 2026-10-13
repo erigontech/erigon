@@ -549,3 +549,16 @@ func TestArenaRetentionStaysBounded(t *testing.T) {
 	held := slotBytes + len(ibs.logs.pool)*304 + ibs.logs.poolBytes
 	require.Less(t, held, 3<<20, "an arena holds %dKB after mixed traffic", held/1024)
 }
+
+// Past the pool, a transaction's logs come from chunks, not one heap entry each.
+func TestAllocLogPastThePoolAllocatesInChunks(t *testing.T) {
+	addr := common.HexToAddress("0x1")
+	allocs := testing.AllocsPerRun(5, func() {
+		ibs := New(nil)
+		ibs.SetTxContext(1, 0)
+		for range 1024 {
+			ibs.AllocLog(addr, 0, 0)
+		}
+	})
+	require.Less(t, allocs, 1024.0/8, "%v allocations for 1024 logs", allocs)
+}

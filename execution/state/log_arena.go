@@ -50,6 +50,10 @@ const (
 	// resets per block, so this is bounded by the memory it costs rather than by
 	// a transaction's budget: 32KB of pointers, holding a p99 block's ~1700.
 	maxRetainedLogSlots = 32 * 1024 / 8
+
+	// Entries one allocation carves once the pool runs dry: a transaction past the
+	// pool pays an allocation per chunk, not per log.
+	logChunk = 64
 )
 
 // logArena owns a block's log entries and recycles them through a pool, so what
@@ -57,6 +61,7 @@ const (
 type logArena struct {
 	entries      types.Logs   // the block so far, in order — one transaction, for a caller that resets per transaction
 	pool         []*types.Log // entries taken back at reset, for any transaction to reuse
+	fresh        []types.Log  // the unused rest of the last chunk
 	poolBytes    int          // Data the pool holds
 	indexInBlock uint
 }
@@ -93,7 +98,12 @@ func (a *logArena) alloc(j *journal, addr common.Address, txIndex, numTopics, da
 func (a *logArena) take() *types.Log {
 	n := len(a.pool) - 1
 	if n < 0 {
-		return &types.Log{}
+		if len(a.fresh) == 0 {
+			a.fresh = make([]types.Log, logChunk)
+		}
+		lp := &a.fresh[0]
+		a.fresh = a.fresh[1:]
+		return lp
 	}
 	lp := a.pool[n]
 	a.pool = a.pool[:n]
