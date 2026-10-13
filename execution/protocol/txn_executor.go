@@ -142,6 +142,7 @@ type Message interface {
 	TipCap() *uint256.Int
 	Gas() uint64
 	CheckGas() bool
+	SkipExecutionGasCap() bool
 	BlobGas() uint64
 	MaxFeePerBlobGas() *uint256.Int
 	Value() *uint256.Int
@@ -153,6 +154,7 @@ type Message interface {
 	AccessList() types.AccessList
 	BlobHashes() []common.Hash
 	Authorizations() []types.Authorization
+	DynamicFeeArgs() bool
 
 	IsFree() bool // service transactions on Gnosis are exempt from EIP-1559 mandatory fees
 	SetIsFree(bool)
@@ -315,7 +317,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 
 	gas := st.msg.Gas()
 	blobGas := st.msg.BlobGas()
-	executionContribution, stateContribution := InclusionContributions(gas, rules.IsAmsterdam)
+	executionContribution, stateContribution := InclusionContributions(gas, rules.IsAmsterdam, st.msg.SkipExecutionGasCap())
 	if err := CheckBlockGasInclusion(st.gp, executionContribution, stateContribution, blobGas); err != nil {
 		return upfrontTxnFees{}, err
 	}
@@ -333,6 +335,9 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 	// eth_call builds a Message directly, bypassing the per-type AsMessage gates.
 	if st.msg.AccessList() != nil && !rules.IsBerlin {
 		return upfrontTxnFees{}, types.ErrAccessListPreBerlin
+	}
+	if st.msg.DynamicFeeArgs() && !rules.IsLondon {
+		return upfrontTxnFees{}, types.ErrDynamicFeePreLondon
 	}
 	if st.msg.BlobHashes() != nil {
 		if err := types.ValidateBlobPrerequisites(st.msg.BlobHashes(), st.msg.To().IsNil(), rules.IsCancun); err != nil {
@@ -362,14 +367,14 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 			if gas > params.MaxTxnTotalGasLimit {
 				return upfrontTxnFees{}, fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, gas)
 			}
-			// EIP-8037: TX_MAX_GAS_LIMIT applies to the execution gas dimension only.
-			if requiredIntrinsicGas > params.MaxTxnGasLimit {
-				return upfrontTxnFees{}, fmt.Errorf("%w: execution gas cap %d exceeds TX_MAX_GAS_LIMIT %d",
-					ErrIntrinsicGas, requiredIntrinsicGas, params.MaxTxnGasLimit)
-			}
 		} else if gas > params.MaxTxnGasLimit {
 			return upfrontTxnFees{}, fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, gas)
 		}
+	}
+	// EIP-8037: TX_MAX_GAS_LIMIT applies to the execution gas dimension only.
+	if rules.IsAmsterdam && !st.msg.SkipExecutionGasCap() && requiredIntrinsicGas > params.MaxTxnGasLimit {
+		return upfrontTxnFees{}, fmt.Errorf("%w: execution gas cap %d exceeds TX_MAX_GAS_LIMIT %d",
+			ErrIntrinsicGas, requiredIntrinsicGas, params.MaxTxnGasLimit)
 	}
 
 	// Match geth's EIP-7702 prerequisite precedence: after fee caps, before
@@ -481,8 +486,11 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	if err := validateSetCodePrerequisites(auths, contractCreation, rules.IsPrague); err != nil {
 		return nil, err
 	}
-	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), intrinsicGas, rules)
+	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), intrinsicGas, rules, st.msg.SkipExecutionGasCap())
 	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples)
+	if st.evm.Config().NoBAL {
+		st.state.StopAccessRecording()
+	}
 	var (
 		gasUsed         runtimeGasAccounting
 		runtimeGas      mdgas.MdGas
@@ -616,7 +624,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	}
 
 	intrinsicGas := intrinsicGasResult.ExecutionGas
-	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), intrinsicGas, rules)
+	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), intrinsicGas, rules, st.msg.SkipExecutionGasCap())
 
 	if tracer := st.evm.Config().Tracer; tracer.HasGasChangeHook() {
 		tracer.EmitGasChange(mdgas.MdGas{Execution: st.msg.Gas()}, st.gasRemaining, tracing.GasChangeTxIntrinsicGas)
@@ -644,6 +652,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		createNonce     uint64
 	)
 	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples)
+	if st.evm.Config().NoBAL {
+		st.state.StopAccessRecording()
+	}
 	if rules.IsAmsterdam {
 		runtimeGas = st.gasRemaining
 		runtimeSnapshot = st.state.PushSnapshot()

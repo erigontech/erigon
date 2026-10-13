@@ -199,3 +199,10 @@ func TestRecordBlockMetricsTakesCommitmentTimeFromSharedDomains(t *testing.T) {
 func (fv *ForkValidator) LastValidationExecStageTiming() time.Duration {
 	return fv.executor.lastValidationExecStageTiming()
 }
+
+func TestBeginOverlayOrRoPanicReleasesLock(t *testing.T) {
+	e := &ExecModule{publishedSD: func() *execctx.SharedDomains { panic("boom") }}
+	require.Panics(t, func() { _, _, _ = e.beginOverlayOrRo(context.Background()) })
+	require.True(t, e.lock.TryLock(), "the read lock is still held after the panic")
+	e.lock.Unlock()
+}

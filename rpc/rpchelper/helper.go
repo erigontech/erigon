@@ -45,6 +45,13 @@ func (e nonCanonicalHashError) Error() string {
 	return fmt.Sprintf("hash %x is not currently canonical", e.hash)
 }
 
+// BlockNotExecutedError reports a block past the execution stage's progress.
+type BlockNotExecutedError struct{ Block, LastExecuted uint64 }
+
+func (e *BlockNotExecutedError) Error() string {
+	return fmt.Sprintf("block %d is not executed (last executed: %d)", e.Block, e.LastExecuted)
+}
+
 func CheckBlockExecuted(tx kv.Tx, blockNumber uint64) error {
 	lastExecutedBlock, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
@@ -52,7 +59,7 @@ func CheckBlockExecuted(tx kv.Tx, blockNumber uint64) error {
 	}
 
 	if blockNumber > lastExecutedBlock {
-		return fmt.Errorf("block %d is not executed (last executed: %d)", blockNumber, lastExecutedBlock)
+		return &BlockNotExecutedError{Block: blockNumber, LastExecuted: lastExecutedBlock}
 	}
 
 	return nil
@@ -235,6 +242,7 @@ type cachedHistoryReaderV3 struct {
 	cache     asOfView
 	reader    *state.HistoryReaderV3
 	composite []byte
+	addr      common.Address
 }
 
 func (hr *cachedHistoryReaderV3) SetTrace(trace bool, tracePrefix string) {
@@ -258,8 +266,12 @@ func (hr *cachedHistoryReaderV3) SetTxNum(txNum uint64) {
 }
 
 func (hr *cachedHistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
-	addressValue := address.Value()
-	enc, ok, err := hr.cache.GetAsOf(addressValue[:], hr.reader.GetTxNum())
+	return hr.ReadAccountByPlainAddr(address.Value())
+}
+
+func (hr *cachedHistoryReaderV3) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	hr.addr = address
+	enc, ok, err := hr.cache.GetAsOf(hr.addr[:], hr.reader.GetTxNum())
 	if err != nil {
 		return nil, err
 	}
@@ -275,14 +287,14 @@ func (hr *cachedHistoryReaderV3) ReadAccountData(address accounts.Address) (*acc
 		return &a, nil
 	}
 
-	return hr.reader.ReadAccountData(address)
+	return hr.reader.ReadAccountByPlainAddr(address)
 }
 
 // HasAccount answers from the cached encoding's length, so a historical existence check
 // costs no DeserialiseV3 either.
-func (hr *cachedHistoryReaderV3) HasAccount(address accounts.Address) (bool, error) {
-	addressValue := address.Value()
-	enc, ok, err := hr.cache.GetAsOf(addressValue[:], hr.reader.GetTxNum())
+func (hr *cachedHistoryReaderV3) HasAccount(address common.Address) (bool, error) {
+	hr.addr = address
+	enc, ok, err := hr.cache.GetAsOf(hr.addr[:], hr.reader.GetTxNum())
 	if err != nil {
 		return false, err
 	}

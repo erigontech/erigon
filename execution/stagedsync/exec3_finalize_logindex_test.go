@@ -68,7 +68,7 @@ func TestSerialBlockEndLogsReachLogIndex(t *testing.T) {
 	require.NoError(t, putLogEmittingContract(se.doms.AsPutDel(rwTx), logIndexContract))
 
 	block := types.NewBlockFromStorage(common.Hash{}, task.Header, nil, nil, nil, nil)
-	_, err := se.executeBlock(t.Context(), block, []exec.Task{task}, true, false)
+	_, err := se.executeBlock(t.Context(), block, []exec.Task{task}, true)
 	require.NoError(t, err)
 	require.NoError(t, se.doms.Flush(t.Context(), rwTx))
 

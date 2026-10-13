@@ -48,12 +48,18 @@ type ByteLRU[V any] struct {
 	// cleanup, and a callback capturing the owner would keep the owner too.
 	onEvict atomic.Pointer[func(uint64, V)]
 
+	// resident is maintained for a budgeted layer only, which is the one that
+	// spends it: an unbudgeted layer holds maxBytes from the start, so it never
+	// grows and never reads this.
 	resident atomic.Int64
 	limit    atomic.Int64 // otter's maximum; for a budgeted cache, the bytes reserved from the envelope
 	ceiling  atomic.Int64 // limit may still grow to this; drops to limit when the envelope refuses
 
 	growMu sync.Mutex
-	closed bool
+	// addStripes serialize same-key writers so Add is correct on its own, not
+	// only under a caller's lock. Readers never take them.
+	addStripes [putStripeCount]sync.Mutex
+	closed     bool
 	// unbudgeted holds maxBytes from the start and never touches the envelope.
 	unbudgeted bool
 }
@@ -83,7 +89,11 @@ func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, 
 	b.limit.Store(floor)
 	b.ceiling.Store(b.maxBytes)
 	b.c = newOtter(floor, weigh, func(e otter.DeletionEvent[uint64, V]) {
-		b.resident.Add(-weigh(e.Key, e.Value))
+		// A replacement is refunded by Add, synchronously with the Set that
+		// displaced the value; this path can run later, off the writer.
+		if e.Cause != otter.CauseReplacement {
+			b.resident.Add(-weigh(e.Key, e.Value))
+		}
 		if fn := b.onEvict.Load(); fn != nil {
 			(*fn)(e.Key, e.Value)
 		}
@@ -113,18 +123,42 @@ func newOtter[V any](maxWeight int64, weigh func(uint64, V) int64, onDeletion fu
 func (b *ByteLRU[V]) Get(key uint64) (V, bool) { return b.c.GetIfPresent(key) }
 
 // Add reports that the value could be offered, not that it is resident: a
-// W-TinyLFU rejection also returns true. False means it exceeds the whole
-// budget, and onEvict never fires for it, so the caller must refund its charge.
+// W-TinyLFU rejection also returns true. False means it was too big for the
+// whole budget, and no deletion fires for it.
 func (b *ByteLRU[V]) Add(key uint64, value V) bool {
 	w := b.weigh(key, value)
 	if w > b.maxBytes {
 		return false
 	}
-	if lim := b.limit.Load(); b.resident.Load()+w > lim && lim < b.ceiling.Load() {
-		b.grow(w)
+	// Look-up, growth step and write are one sequence per key.
+	mu := &b.addStripes[key&(putStripeCount-1)]
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Grow on the net change, and before the write: afterwards maintenance may
+	// have refunded the newcomer already and hidden the pressure. A cache that
+	// cannot grow skips the extra lookup.
+	if !b.unbudgeted && b.resident.Load()+w > b.limit.Load() && b.limit.Load() < b.ceiling.Load() {
+		delta := w
+		if prev, present := b.c.GetIfPresent(key); present {
+			delta -= b.weigh(key, prev)
+		}
+		if lim := b.limit.Load(); delta > 0 && b.resident.Load()+delta > lim && lim < b.ceiling.Load() {
+			b.grow(delta)
+		}
 	}
-	b.resident.Add(w)
-	b.c.Set(key, value)
+
+	// Set returns (new value, true) for an absent key, (displaced value, false)
+	// for a present one, so the charge below is the net change.
+	prev, inserted := b.c.Set(key, value)
+	if !inserted {
+		w -= b.weigh(key, prev)
+	}
+	if !b.unbudgeted {
+		// Only a budgeted layer has the deletion handler that returns an
+		// evicted or refused weight, so only there does the counter balance.
+		b.resident.Add(w)
+	}
 	return true
 }
 

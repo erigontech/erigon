@@ -46,28 +46,27 @@ func (api *APIImpl) stateReaderAt(ctx context.Context, blockNrOrHash rpc.BlockNu
 	if err != nil {
 		return nil, nil, err
 	}
+	ok := false
+	defer kv.RollbackUnless(&ok, tx)
 
 	blockNumber, _, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
-		tx.Rollback()
 		return nil, nil, err
 	}
 
-	if err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber); err != nil {
-		tx.Rollback()
+	if err := api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber); err != nil {
 		return nil, nil, err
 	}
 
-	if err = rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
-		tx.Rollback()
+	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
 		return nil, nil, err
 	}
 
 	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, -1, api.stateCache, api._txNumReader)
 	if err != nil {
-		tx.Rollback()
 		return nil, nil, err
 	}
+	ok = true
 	return tx, reader, nil
 }
 
@@ -80,7 +79,7 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 	}
 	defer tx.Rollback()
 
-	acc, err := reader.ReadAccountData(accounts.InternAddress(address))
+	acc, err := reader.ReadAccountByPlainAddr(address)
 	if err != nil {
 		return nil, fmt.Errorf("cant get a balance for account %x: %w", address.String(), err)
 	}
@@ -115,7 +114,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 	defer tx.Rollback()
 
 	nonce := hexutil.Uint64(0)
-	acc, err := reader.ReadAccountData(accounts.InternAddress(address))
+	acc, err := reader.ReadAccountByPlainAddr(address)
 	if acc == nil || err != nil {
 		return &nonce, err
 	}
@@ -223,14 +222,13 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 	}
 	defer tx.Rollback()
 
-	addr := accounts.InternAddress(address)
-	exists, err := state.HasAccount(reader, addr)
+	exists, err := reader.HasAccount(address)
 	if !exists || err != nil {
 		return common.Hash{}, err
 	}
 
 	location := accounts.InternKey(common.BytesToHash(indexBytes))
-	res, _, err := reader.ReadAccountStorage(addr, location)
+	res, _, err := reader.ReadAccountStorage(accounts.InternAddress(address), location)
 	if err != nil {
 		return common.Hash{}, err
 	}
@@ -245,5 +243,5 @@ func (api *APIImpl) Exist(ctx context.Context, address common.Address, blockNrOr
 	}
 	defer tx.Rollback()
 
-	return state.HasAccount(reader, accounts.InternAddress(address))
+	return reader.HasAccount(address)
 }

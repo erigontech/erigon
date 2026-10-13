@@ -86,13 +86,14 @@ func TestTracingRejectsPendingTag(t *testing.T) {
 		requirePendingRejected(t, err)
 	})
 
+	pending := rpc.PendingBlockNumber
 	t.Run("trace_filter fromBlock", func(t *testing.T) {
-		err := traceAPI.Filter(ctx, TraceFilterRequest{FromBlock: &pendingNrOrHash}, nil, nil, jsonstream.New(io.Discard))
+		err := traceAPI.Filter(ctx, TraceFilterRequest{FromBlock: &pending}, nil, nil, jsonstream.New(io.Discard))
 		requirePendingRejected(t, err)
 	})
 
 	t.Run("trace_filter toBlock", func(t *testing.T) {
-		err := traceAPI.Filter(ctx, TraceFilterRequest{ToBlock: &pendingNrOrHash}, nil, nil, jsonstream.New(io.Discard))
+		err := traceAPI.Filter(ctx, TraceFilterRequest{ToBlock: &pending}, nil, nil, jsonstream.New(io.Discard))
 		requirePendingRejected(t, err)
 	})
 }

@@ -449,6 +449,16 @@ jobs:
             ethereum_package_branch: "erigontech/fix-caplin-launcher"
             test_timeout_minutes: 20
             commitment_mode: parallel
+          - suite: glamsterdam-caplin
+            package_args: .github/workflows/kurtosis/glamsterdam-caplin.io
+            ethereum_package_branch: "6.1.0"
+            test_timeout_minutes: 20
+            commitment_mode: serial
+          - suite: glamsterdam-caplin
+            package_args: .github/workflows/kurtosis/glamsterdam-caplin.io
+            ethereum_package_branch: "6.1.0"
+            test_timeout_minutes: 20
+            commitment_mode: parallel
 
     steps:
       - name: Fast checkout git repository
@@ -617,6 +627,18 @@ jobs:
           docker save "${KURTOSIS_SNOOPER_IMAGE}" -o /tmp/docker-cache/rpc-snooper.tar
           docker save "${KURTOSIS_PYTHON_IMAGE}" -o /tmp/docker-cache/python.tar
 
+      - name: Prepare Caplin Glamsterdam test from this revision
+        if: matrix.suite == 'glamsterdam-caplin'
+        env:
+          TEST_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          TEST_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          config=.github/workflows/kurtosis/glamsterdam-caplin.io
+          export TEST_URL="https://raw.githubusercontent.com/${TEST_REPOSITORY}/${TEST_REF}/.github/workflows/kurtosis/caplin-glamsterdam-block-production.io"
+          yq -i '.assertoor_params.tests[0].file = strenv(TEST_URL)' "$config"
+          images=$(yq -r '[.participants[].vc_image, .ethereum_genesis_generator_params.image, .assertoor_params.image] | join(" ")' "$config")
+          echo "UNCACHED_IMAGES=${UNCACHED_IMAGES} ${images}" >> "$GITHUB_ENV"
+
       # An uncovered tag would otherwise be pulled inside `kurtosis run`, where a
       # registry blip fails the whole test step. Fetch it here instead, with the
       # same retries the cached images get; kurtosis still pulls it if this fails.
@@ -624,6 +646,7 @@ jobs:
         if: env.UNCACHED_IMAGES != ''
         run: |
           for image in ${UNCACHED_IMAGES}; do
+            if docker image inspect "$image" >/dev/null 2>&1; then continue; fi
             for n in 1 2 3; do
               if docker pull "$image"; then continue 2; fi
               echo "docker pull $image failed (attempt $n of 3)"

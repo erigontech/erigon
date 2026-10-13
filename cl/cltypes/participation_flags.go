@@ -33,20 +33,6 @@ func (f ParticipationFlags) HasFlag(index int) bool {
 
 type ParticipationFlagsList []ParticipationFlags
 
-func (p ParticipationFlagsList) Bytes() []byte {
-	b := make([]byte, len(p))
-	for i := range p {
-		b[i] = byte(p[i])
-	}
-	return b
-}
-
-func (p ParticipationFlagsList) Copy() ParticipationFlagsList {
-	c := make(ParticipationFlagsList, len(p))
-	copy(c, p)
-	return c
-}
-
 func ParticipationFlagsListFromBytes(buf []byte) ParticipationFlagsList {
 	flagsList := make([]ParticipationFlags, len(buf))
 	for i := range flagsList {
