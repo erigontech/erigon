@@ -38,6 +38,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -1436,6 +1437,17 @@ func TestResetForPoolDropsARevertedAddressWarmUp(t *testing.T) {
 
 func big2(i int) *big.Int { return big.NewInt(int64(i)) }
 
+// Slots, not just addresses, decide poolability: one contract's slot map is
+// what a reused read set keeps, and Go maps never shrink.
+func TestResetForPoolDropsAStateWithTooManySlots(t *testing.T) {
+	ibs := New(NewNoopReader())
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	for i := range maxPooledEntries + 1 {
+		ibs.versionedReads.SetStorage(addr, accounts.InternKey(common.BigToHash(big.NewInt(int64(i)))), VersionedRead[uint256.Int]{})
+	}
+	require.False(t, ibs.resetForPool(), "one address with that many slots must not be pooled")
+}
+
 // On a versioned IBS that caches state objects, an account touched and then
 // credited in the same tx is not empty and must survive FinalizeTx.
 func TestFinalizeTxKeepsTouchedThenCreditedAccount(t *testing.T) {
@@ -1457,6 +1469,24 @@ func TestFinalizeTxKeepsTouchedThenCreditedAccount(t *testing.T) {
 	bal, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	require.Equal(t, *uint256.NewInt(5), bal)
+}
+
+func TestSetStorageRejectsNoMaterialize(t *testing.T) {
+	prev := dbg.AssertEnabled
+	dbg.AssertEnabled = true
+	t.Cleanup(func() { dbg.AssertEnabled = prev })
+
+	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(0, 0)
+	ibs.SetVersion(0)
+	defer ibs.Close()
+
+	addr := accounts.InternAddress([20]byte{0xaa})
+	key := accounts.InternKey([32]byte{0x01})
+	require.Panics(t, func() {
+		_ = ibs.SetStorage(addr, Storage{key: *uint256.NewInt(7)})
+	})
 }
 
 // Each call stays under the bound on its own, yet leaves a grown slot map at

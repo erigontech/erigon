@@ -173,8 +173,9 @@ func (ws *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stat
 			// First check versionMap floor (prior TX's write in this block).
 			// Then fall back to stateReader (pre-block value from domain).
 			originVal, origin, originOK := vm.ReadStorage(h.Address, h.Key, txIndex)
+			// A destruct also wipes the slots its own tx wrote.
 			originValid := originOK && origin.Status() == MVReadResultDone &&
-				!(sdOk && sdTxIdx > origin.Version().TxIndex)
+				!(sdOk && sdTxIdx >= origin.Version().TxIndex)
 			switch {
 			case originValid:
 				if writeVal.Eq(&originVal) {
@@ -303,28 +304,16 @@ func (ws *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stat
 		}
 		ver := Version{TxIndex: txIndex, Incarnation: incarnation}
 
-		// If addr was self-destructed by an earlier TX in this block and this
-		// TX re-creates it (it isn't in sdSet — this TX didn't re-destruct it),
-		// missing account fields are the post-destruction defaults, NOT the
-		// pre-SD values still sitting in the versionMap. IBS.Selfdestruct only
-		// records SelfDestructPath/BalancePath/IncarnationPath, so a re-creation
-		// via a plain value transfer (no CREATE) leaves the stale pre-SD nonce
-		// and codeHash in the map — reading them back here resurrects a phantom
-		// contract (wrong trie root: TestSelfDestructReceive, TestCVE2020_26265).
-		// If a later TX between the SD and this one re-created addr via CREATE2,
-		// vm.Read returns that recreate's SelfDestructPath=false, so we correctly
-		// fall through to the normal versionMap lookup.
+		// Missing fields of an account destroyed earlier in this block must not take
+		// their pre-destruct values. A CREATE resets every field; a revival by a
+		// credit writes no nonce, and one by a fee credit no code hash either, so
+		// both follow the readers: zero when a committed destruct follows their last
+		// write, else the map or state reader.
 		sdEarlier := false
 		if v, sd, _ := vm.ReadSelfDestruct(addr, txIndex); sd.Status() == MVReadResultDone && v {
 			sdEarlier = true
 		}
 
-		// Only emit post-SD defaults when this TX created a new contract
-		// (CREATE/CREATE2). A value-transfer resurrect (no CreateContractPath)
-		// inherits the pre-SD account fields via the versionMap last-write-wins
-		// chain — that matches GenerateChain's accumulate-across-txs behaviour
-		// (no per-tx FinalizeTx). Forcing defaults here resets nonce/codeHash
-		// against that canonical state (TestSelfDestructReceive).
 		hasCreateContract := false
 		if vw, ok := ws.GetCreateContract(addr); ok && vw.Val {
 			hasCreateContract = true
@@ -345,7 +334,7 @@ func (ws *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stat
 				SetAccountFieldZero(filtered, addr, path, ver)
 				continue
 			}
-			if SetAccountFieldFromMap(filtered, vm, addr, path, ver, txIndex+1) {
+			if setAccountFieldLive(filtered, vm, addr, path, ver, txIndex+1) {
 				continue
 			}
 			// Fall back to stateReader for pre-block account

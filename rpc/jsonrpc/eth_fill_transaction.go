@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
@@ -51,7 +50,7 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 		return nil, errors.New("maxFeePerBlobGas, if specified, must be non-zero")
 	}
 
-	// The pinned view keeps ReadCurrentHeader and the gas-oracle fee defaults
+	// The pinned view keeps the current header and the gas-oracle fee defaults
 	// on one head (including the in-flight overlay block); the nonce and
 	// gas-estimate sub-calls still open their own txs.
 	overlayTx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
@@ -64,7 +63,10 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 	if err != nil {
 		return nil, err
 	}
-	head := rawdb.ReadCurrentHeader(overlayTx)
+	head, err := api.currentHeader(ctx, overlayTx)
+	if err != nil {
+		return nil, err
+	}
 	if head == nil {
 		return nil, errors.New("missing current header")
 	}

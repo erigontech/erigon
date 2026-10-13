@@ -1111,6 +1111,15 @@ type TraceFilterRequest struct {
 	Count       *uint64           `json:"count"`
 }
 
+// UnmarshalJSON rejects unknown fields, so a misspelled filter member fails
+// instead of silently widening the match.
+func (r *TraceFilterRequest) UnmarshalJSON(data []byte) error {
+	type plain TraceFilterRequest
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	return dec.Decode((*plain)(r))
+}
+
 type TraceFilterMode string
 
 const (
