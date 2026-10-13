@@ -140,11 +140,13 @@ its stored config from the chain spec at every start unless
 before the fork a start without it drops the fork time, and after the fork
 the node refuses to start.
 
-The hex shadow folds through the activation block plus the configured
-`MaxReorgDepth` window. It stops on the next block through
-`stopHexShadowAtWindow` and `recordStoppedCommitmentDomains`, in the same
-transaction as that block's commitment. The stop survives restart, and an
-unwind below the activation window is refused.
+The hex shadow keeps folding after activation until the activation block is
+finalized and more than `MAX_REORG_DEPTH` plus 32 blocks (128 at the default
+depth of 96) have passed; `shouldStopHexShadow` checks both. It then stops on
+the next block through `stopHexShadowAtWindow` and
+`recordStoppedCommitmentDomains`, in the same transaction as that block's
+commitment. The stop survives restart, and an unwind below the activation
+block is refused.
 
 ## Export
 
