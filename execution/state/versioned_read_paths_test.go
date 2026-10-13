@@ -833,6 +833,36 @@ func TestVersionedRead_B_CodeSizeComesFromTheCodeRead(t *testing.T) {
 	assert.Zero(t, r.codeSizeReads, "the code read already has the size")
 }
 
+// A cold slot of an address no tx wrote skips versionedReadCore; it must return
+// and record exactly what the core does for the same slot.
+func TestVersionedRead_B_ColdSlotWithoutCellsMatchesCore(t *testing.T) {
+	t.Parallel()
+	key := accounts.InternKey([32]byte{0x07})
+	acct := accounts.NewAccount()
+	read := func(cellElsewhere bool) (uint256.Int, VersionedRead[uint256.Int]) {
+		addr := accounts.InternAddress([20]byte{0xbc})
+		vm := NewVersionMap(nil)
+		if cellElsewhere {
+			// A cell this tx cannot see sends the read through versionedReadCore.
+			vm.WriteBalance(addr, Version{TxIndex: 9}, *uint256.NewInt(1), true)
+		}
+		ibs := NewWithVersionMap(&fallthroughStateReader{acct: &acct, storageKey: key, storageVal: *uint256.NewInt(0x5a)}, vm)
+		defer ibs.Close()
+		ibs.SetNoMaterialize(true)
+		ibs.SetTxContext(1, 5)
+		v, err := ibs.GetState(addr, key)
+		require.NoError(t, err)
+		tr, ok := ibs.versionedReads.GetStorage(addr, key)
+		require.True(t, ok, "the read is recorded")
+		return v, tr
+	}
+	fastV, fastTr := read(false)
+	coreV, coreTr := read(true)
+	assert.Equal(t, coreV, fastV)
+	assert.Equal(t, coreTr, fastTr)
+	assert.Equal(t, *uint256.NewInt(0x5a), fastV)
+}
+
 func TestVersionedRead_B_TouchReadsAnAbsentAccountOnce(t *testing.T) {
 	t.Parallel()
 	r := &refreshReader{}

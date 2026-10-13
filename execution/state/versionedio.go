@@ -3057,6 +3057,15 @@ func (t *ioTable) setCommitted(addr accounts.Address, acc *accounts.Account) {
 	r.committed, r.hasCommitted = acc, true
 }
 
+// storageRead returns the recorded read of a slot; r may be nil.
+func (r *acctIO) storageRead(key accounts.StorageKey) (VersionedRead[uint256.Int], bool) {
+	if r == nil {
+		return VersionedRead[uint256.Int]{}, false
+	}
+	tr, ok := r.storage[key]
+	return tr, ok
+}
+
 // dirtyRec returns addr's record when this tx has an unreverted write to it.
 func (t *ioTable) dirtyRec(addr accounts.Address) *acctIO {
 	if r := t.find(addr); r != nil && r.dirty > 0 {

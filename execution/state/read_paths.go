@@ -1563,7 +1563,8 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		v, clean, err := so.GetState(key)
 		return v, StorageRead, UnknownVersion, clean, err
 	}
-	if rec := s.versionedReads.find(addr); rec != nil {
+	rec := s.versionedReads.find(addr)
+	if rec != nil {
 		if rec.dirty > 0 {
 			if vw, ok := rec.wStorage[key]; ok {
 				return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, false, nil
@@ -1573,6 +1574,21 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		if so, ok := s.stateObjects[addr]; !ok || !so.deleted {
 			if tr, ok := rec.storage[key]; ok && warmSource(tr.Source) {
 				return tr.Val, tr.Source, tr.Version, false, nil
+			}
+		}
+	}
+	// No tx wrote a cell of addr, so a slot nothing recorded is its committed value,
+	// recorded as versionedReadCore records a version-map miss.
+	if s.versionMap.load(addr) == nil {
+		if _, resident := s.stateObjects[addr]; !resident {
+			if _, recorded := rec.storageRead(key); !recorded {
+				v, err := s.committedStorageDirect(addr, key)
+				if err != nil {
+					return uint256.Int{}, StorageRead, UnknownVersion, false, err
+				}
+				hdr := ReadHeader{Source: StorageRead, Version: Version{TxIndex: UnknownDep, Incarnation: -1}}
+				s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{hdr, v})
+				return v, StorageRead, hdr.Version, true, nil
 			}
 		}
 	}
