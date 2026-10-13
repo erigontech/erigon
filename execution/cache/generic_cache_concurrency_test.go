@@ -18,13 +18,13 @@ package cache
 
 import (
 	"encoding/binary"
-	"fmt"
 	"math"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
@@ -37,56 +37,54 @@ import (
 // sweeps; the code layers themselves are byte-bounded and no longer use it.
 const largeCodePayloadBytes = 12 * 1024
 
-// The envelope must cover what a cache actually allocates: freelru wraps every
-// value in an element and over-allocates the table by 25%, neither of which the
-// payload estimate accounts for.
-func TestGenericCache_EnvelopeCoversSlotArray(t *testing.T) {
+// The byte bound holds by construction: a cache filled far past its ceiling
+// holds no more heap than the envelope reserved for it, entries and payload
+// included, for a value behind a pointer and for one held inline.
+func TestGenericCache_HeapStaysInsideItsReservation(t *testing.T) {
 	prevBudget := cachebudget.Global
 	t.Cleanup(func() { cachebudget.Global = prevBudget })
 	cachebudget.Global = cachebudget.New(math.MaxInt64)
 
-	c := closeOnCleanup(t, NewGenericCacheWithAvg[[]byte](1*datasize.GB, avgStoragePayloadBytes,
-		func(v []byte) int { return len(v) }, ModeEvictLRU))
+	const keyLen = 52
+	t.Run("bytes", func(t *testing.T) {
+		requireHeapInsideReservation(t, keyLen, avgStoragePayloadBytes, func() []byte { return make([]byte, avgStoragePayloadBytes-keyLen) })
+	})
+	t.Run("inline", func(t *testing.T) {
+		requireHeapInsideReservation(t, keyLen, keyLen, func() [128]byte { return [128]byte{} })
+	})
+}
 
-	// The production ceiling, not a power of two: that would land on the cheapest
-	// table ratio and never observe the rounding a fixed charge gets wrong.
-	for _, shards := range []uint32{128, 256, 512} {
-		t.Run(fmt.Sprintf("shards=%d", shards), func(t *testing.T) {
-			slots := c.maxCap
-			require.Positive(t, slots)
-
-			runtime.GC()
-			var before runtime.MemStats
-			runtime.ReadMemStats(&before)
-			gen := c.newShards(slots, slots, shards)
-			runtime.GC()
-			var after runtime.MemStats
-			runtime.ReadMemStats(&after)
-			runtime.KeepAlive(gen)
-
-			allocated := int64(after.HeapAlloc) - int64(before.HeapAlloc)
-			// Only the overhead share may cover the table: the payload estimate pays
-			// for values the table does not hold, and would mask an undercharge.
-			overhead := shardArrayBytes(slots, shards, c.elemBytes)
-			require.Positive(t, allocated)
-			require.GreaterOrEqual(t, overhead, allocated,
-				"envelope reserves %d B of slot overhead for %d slots across %d shards but the table allocates %d B",
-				overhead, slots, shards, allocated)
-		})
+func requireHeapInsideReservation[T any](t *testing.T, keyLen int, payload uint32, value func() T) {
+	const budget = 16 * datasize.MB
+	runtime.GC()
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+	c := NewGenericCacheWithAvg[T](budget, payload, func(T) int { return 0 }, ModeEvictLRU)
+	defer c.Close()
+	key := make([]byte, keyLen)
+	for i := range 4 * int(c.maxCap) {
+		binary.BigEndian.PutUint64(key, uint64(i))
+		c.Put(key, value(), 1)
 	}
+	runtime.GC()
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+
+	require.Equal(t, int(c.maxCap), c.allocatedSlots(), "the fill has to reach the ceiling")
+	held := int64(after.HeapAlloc) - int64(before.HeapAlloc)
+	require.Positive(t, held)
+	require.LessOrEqual(t, held, c.reservedBytes.Load(), "a full cache holds more heap than it reserved")
+	require.LessOrEqual(t, c.reservedBytes.Load(), int64(budget))
 }
 
 // grownShards counts the shards that have grown past their birth size, so a
 // test can assert the grow it exercises actually happened.
 func grownShards[T any](c *GenericCache[T]) int {
-	g := c.data.Load()
 	n := 0
-	for i := range g.shards {
-		g.mus[i].Lock()
-		if g.curCap[i] > g.startCapPerShard {
+	for i := range c.shards {
+		if uint32(len(*c.shards[i].tbl.Load())) > c.startBuckets {
 			n++
 		}
-		g.mus[i].Unlock()
 	}
 	return n
 }
@@ -256,25 +254,23 @@ func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 	}
 }
 
-// A ModeNoOp admission must never observe the byte counter mid-update: the
-// update path removes the old entry before adding the new one, and a
-// concurrent insert on another stripe that reads the transient dip passes the
+// A ModeNoOp admission must never observe the byte counter mid-update: a
+// concurrent insert on another shard that reads a transient dip passes the
 // budget check and lands over capacity — breaking "drop new keys when full"
-// with a key that should never have been admitted. The counter is reserved
-// before the removal, so the budget is transiently over-stated (at worst
-// dropping a new key) and never under-stated.
+// with a key that should never have been admitted.
 func TestGenericCache_ModeNoOpAdmissionAtomicWithUpdate(t *testing.T) {
+	v := []byte("valuevalu") // entry size 20+9+24 = 53: the budget fits exactly one entry
+	c := newGenericCacheEntries(datasize.ByteSize(53), 128, func(v []byte) int { return len(v) }, ModeNoOp)
+	require.Greater(t, len(c.shards), 1)
 	a := []byte("key-a-aaaaaaaaaaaaaa")
 	var b []byte
 	for i := 0; ; i++ {
 		cand := []byte("key-b-bbbbbbbbbbbbb" + string(rune('a'+i%26)))
-		if maphash.Hash(a)&(putStripeCount-1) != maphash.Hash(cand)&(putStripeCount-1) {
+		if c.shard(maphash.Hash(a)) != c.shard(maphash.Hash(cand)) {
 			b = cand
 			break
 		}
 	}
-	v := []byte("valuevalu") // entry size 20+9+24 = 53: the budget fits exactly one entry
-	c := newGenericCacheEntries(datasize.ByteSize(53), 8, func(v []byte) int { return len(v) }, ModeNoOp)
 	c.Put(a, v, 1)
 	for round := range 200000 {
 		var wg sync.WaitGroup
@@ -288,39 +284,32 @@ func TestGenericCache_ModeNoOpAdmissionAtomicWithUpdate(t *testing.T) {
 	}
 }
 
-// A shard grow must migrate every entry of that shard. The rebuild copies
-// Keys() oldest-first into a strictly larger table, so nothing can be evicted
-// on the way; shard count is fixed for the life of the cache, so a grow can
-// never re-shard and drop keys clustered on the selection bits.
+// A shard grow must migrate every entry of that shard: growing by a whole
+// factor sends each old bucket into its own set of new buckets, so nothing can
+// be evicted on the way, and the shard count is fixed for the life of the cache.
 func TestGenericCache_GrowMigrationLossless(t *testing.T) {
 	c := NewGenericCacheWithAvg[[]byte](4*datasize.MB, 256, func(v []byte) int { return len(v) }, ModeEvictLRU)
 	defer c.Close()
-	gen := c.data.Load()
+	target := &c.shards[3]
+	buckets := func() int { return len(*target.tbl.Load()) }
 
-	const target = 3
-	shardCap := func() uint32 {
-		gen.mus[target].Lock()
-		defer gen.mus[target].Unlock()
-		return gen.curCap[target]
-	}
-
-	// Keys that select the target shard; one more than it can hold, so the last
-	// insert is what forces the grow.
+	// One key more than the target shard has slots, so the last insert at the
+	// latest is what forces the grow.
 	var keys [][]byte
-	want := int(shardCap()) + 1
+	want := buckets()*bucketWays + 1
 	for i := 0; len(keys) < want; i++ {
 		k := make([]byte, 8)
 		binary.BigEndian.PutUint64(k, uint64(i))
-		if gen.idx(maphash.Hash(k)) == target {
+		if c.shard(maphash.Hash(k)) == target {
 			keys = append(keys, k)
 		}
 	}
 
-	before := shardCap()
+	before := buckets()
 	for _, k := range keys {
 		c.Put(k, []byte("fresh"), 10)
 	}
-	require.Greater(t, shardCap(), before, "shard did not grow")
+	require.Greater(t, buckets(), before, "shard did not grow")
 
 	for i, k := range keys {
 		v, ok := c.Get(k)
@@ -329,34 +318,29 @@ func TestGenericCache_GrowMigrationLossless(t *testing.T) {
 	}
 }
 
-// A capacity eviction is a size-subtracting writer the put stripes cannot
-// serialize: the victim is picked per shard (hash bits 16+), so an insert
-// on one stripe can evict a key whose own update — on another stripe — is
-// between its Get and Add; delta accounting against the pre-eviction size then
-// double-subtracts. Capacity 1 collapses freelru to a single shard, making any
-// two keys same-shard; the keys are chosen to differ in their put stripe. Each
-// hit leaks negative size; drift accumulates and shows after the settle
-// deletes.
+// A capacity eviction subtracts its victim's size while a same-key update of
+// that victim may run next to it; both happen under the shard mutex, so the
+// byte counter cannot drift. Capacity 1 is a single bucket, so once it is full
+// every insert of a new key evicts.
 func TestGenericCache_CapacityEvictionAtomicWithPut_NoSizeDrift(t *testing.T) {
 	c := newGenericCacheEntries(1*datasize.MB, 1, func(v []byte) int { return len(v) }, ModeEvictLRU)
-	a := makeAddr(1)
-	var b []byte
-	for i := 2; ; i++ {
-		b = makeAddr(i)
-		if maphash.Hash(a)&(putStripeCount-1) != maphash.Hash(b)&(putStripeCount-1) {
-			break
-		}
-	}
 	v := []byte("value-one")
-	for range 100000 {
+	var keys [][]byte
+	for i := 1; i <= 16; i++ {
+		keys = append(keys, makeAddr(i))
+	}
+	for i := range 100000 {
+		a, b := keys[i%len(keys)], keys[(i+1)%len(keys)]
 		c.Put(b, v, 10)
 		var wg sync.WaitGroup
-		wg.Go(func() { c.Put(a, v, 10) }) // insert → evicts b (cap 1)
+		wg.Go(func() { c.Put(a, v, 10) }) // insert → evicts once the bucket is full
 		wg.Go(func() { c.Put(b, v, 20) }) // same-key update path
 		wg.Wait()
 	}
-	c.Delete(a)
-	c.Delete(b)
+	require.Positive(t, c.evictions.Load(), "nothing was evicted, so the race under test never happened")
+	for _, k := range keys {
+		c.Delete(k)
+	}
 	require.Zero(t, c.SizeBytes(), "capacity eviction raced the update-path delta")
 }
 
@@ -364,9 +348,9 @@ func TestGenericCache_CapacityEvictionAtomicWithPut_NoSizeDrift(t *testing.T) {
 // reused that epoch value, a later unwind could reach the same value and treat
 // the entry as current even though its txNum is above the unwind floor.
 //
-// The test holds the key's stripe, then queues Clear before Put. Waiting beyond
-// the mutex starvation threshold makes the unlock hand the stripe to Clear
-// first. Clear must keep the stripe through the data and coherence generation
+// The test holds the key's shard mutex, then queues Clear before Put. Waiting
+// beyond the mutex starvation threshold makes the unlock hand the mutex to Clear
+// first. Clear must keep it through the table and coherence generation
 // changes, so Put stamps the post-Clear epoch and a later unwind invalidates it.
 func TestGenericCache_ClearRacingPut_EpochAlias(t *testing.T) {
 	c := NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
@@ -374,7 +358,7 @@ func TestGenericCache_ClearRacingPut_EpochAlias(t *testing.T) {
 	c.Unwind(300) // epoch 0 -> 1
 
 	key := []byte("epoch-alias-key")
-	mu := &c.putStripes[maphash.Hash(key)&(putStripeCount-1)]
+	mu := &c.shard(maphash.Hash(key)).mu
 	mu.Lock()
 
 	var wg sync.WaitGroup
@@ -398,21 +382,22 @@ func TestGenericCache_ClearRacingPut_EpochAlias(t *testing.T) {
 // before the generation load, so an old-generation entry is always judged by
 // pre-Reset coherence that still carries the unwind.
 //
-// The reader gates on the fence reaching the key's stripe — the last one the
+// The reader gates on the fence reaching the key's shard — the last one the
 // sweep locks — so its Get lands next to the Reset that follows.
 func TestGenericCache_ClearRacingGet_DeadEntryStaysDead(t *testing.T) {
+	dead := []byte("dead-fork-value")
+	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
+	defer c.Close()
+	last := &c.shards[len(c.shards)-1]
 	var key []byte
 	for i := 0; ; i++ {
 		k := make([]byte, 8)
 		binary.BigEndian.PutUint64(k, uint64(i))
-		if maphash.Hash(k)&(putStripeCount-1) == putStripeCount-1 {
+		if c.shard(maphash.Hash(k)) == last {
 			key = k
 			break
 		}
 	}
-	dead := []byte("dead-fork-value")
-	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
-	defer c.Close()
 	for round := range 2000 {
 		c.Put(key, dead, 200)
 		c.Unwind(150) // the entry is dead-fork state; it must never be served again
@@ -420,7 +405,7 @@ func TestGenericCache_ClearRacingGet_DeadEntryStaysDead(t *testing.T) {
 		var wg sync.WaitGroup
 		wg.Go(func() { c.Clear() })
 		wg.Go(func() {
-			mu := &c.putStripes[putStripeCount-1]
+			mu := &last.mu
 			for range 1 << 16 {
 				if mu.TryLock() {
 					mu.Unlock()
@@ -475,8 +460,7 @@ func TestGenericCache_StatsResetAtomicWithDelete_NoPhantomEvictions(t *testing.T
 	require.Zero(t, total, "intentional removals surfaced in the evictions metric")
 }
 
-// The entry count is derived from each shard's own length under that shard's
-// lock, so an insert/evict mix can neither drive it negative nor let it drift
+// The entry count is kept per shard under that shard's lock, so an insert/evict mix can neither drive it negative nor let it drift
 // from the shards it counts. A negative count breaks the ModeNoOp admission
 // guard and panics any make() sized from it.
 func TestGenericCache_LenTracksShards(t *testing.T) {
@@ -516,10 +500,16 @@ func TestGenericCache_LenTracksShards(t *testing.T) {
 	sampler.Wait()
 	require.False(t, negative.Load(), "entry count went negative")
 
-	g := c.data.Load()
 	sum := 0
-	for i := range g.shards {
-		sum += g.shards[i].Len()
+	for i := range c.shards {
+		t := *c.shards[i].tbl.Load()
+		for b := range t {
+			for way := range bucketWays {
+				if t[b].slots[way].Load() != nil {
+					sum++
+				}
+			}
+		}
 	}
 	require.Equal(t, sum, c.Len(), "entry count drifted from the shards it counts")
 }
@@ -549,42 +539,6 @@ func TestGenericCache_CloseSettlesAgainstConcurrentGrow(t *testing.T) {
 	require.Equal(t, before, cachebudget.Global.Used(), "envelope not restored after Close raced a grow")
 }
 
-// Walks the grow ladder, not just the fitted ceiling: a generation's capacity is
-// a power of two, which rounds to a 2x table, so a charge fitted to the ceiling's
-// 5/4 under-reserves every step below it.
-func TestGenericCache_EnvelopeCoversIntermediateGeneration(t *testing.T) {
-	prevBudget := cachebudget.Global
-	t.Cleanup(func() { cachebudget.Global = prevBudget })
-	cachebudget.Global = cachebudget.New(math.MaxInt64)
-
-	c := closeOnCleanup(t, NewGenericCacheWithAvg[[]byte](1*datasize.GB, avgStoragePayloadBytes,
-		func(v []byte) int { return len(v) }, ModeEvictLRU))
-
-	for _, perShardCap := range []uint32{256, 1024, 4096} {
-		t.Run(fmt.Sprintf("perShard=%d", perShardCap), func(t *testing.T) {
-			slots := perShardCap * c.shardCount
-
-			// TotalAlloc rather than HeapAlloc: a collection inside the window would
-			// swamp a heap-size delta.
-			var before runtime.MemStats
-			runtime.ReadMemStats(&before)
-			gen := c.newShards(slots, slots, c.shardCount)
-			var after runtime.MemStats
-			runtime.ReadMemStats(&after)
-			runtime.KeepAlive(gen)
-
-			allocated := int64(after.TotalAlloc) - int64(before.TotalAlloc)
-			// generationBytes charges the payload estimate too, which buys values the
-			// table does not hold, so compare only its slot-array share.
-			charged := c.generationBytes(slots) - int64(slots)*c.payloadBytes
-			require.Positive(t, allocated)
-			require.GreaterOrEqual(t, charged, allocated,
-				"envelope reserves %d B of slot overhead for %d slots across %d shards but the generation allocates %d B",
-				charged, slots, c.shardCount, allocated)
-		})
-	}
-}
-
 // A byte budget whose slot quotient exceeds a uint32 must clamp to the ceiling,
 // not wrap into a tiny cache.
 func TestSlotCeilingClampsAboveUint32(t *testing.T) {
@@ -596,17 +550,17 @@ func TestSlotCeilingClampsAboveUint32(t *testing.T) {
 	// used to be applied after.
 	overflow := func(perSlot uint64) datasize.ByteSize { return datasize.ByteSize(perSlot << 32) }
 
-	elem := elemBytesFor[entry[[]byte]]()
-	maxCap, shards := budgetedSlots(overflow(uint64(slotChargeBytes(elem))), 0, elem)
-	require.Positive(t, shards)
-	require.Equal(t, maxCacheSlots/shards*shards, maxCap)
+	c := closeOnCleanup(t, NewGenericCacheWithAvg[[]byte](overflow(uint64(unsafe.Sizeof(entry[[]byte]{}))), 0,
+		func(v []byte) int { return len(v) }, ModeEvictLRU))
+	require.LessOrEqual(t, c.maxCap, uint32(maxCacheSlots))
+	require.Greater(t, c.maxCap, uint32(maxCacheSlots/2))
 
 	g := newGrowLRU[codeSizeEntry](overflow(avgBytesPerEntry+uint64(slotChargeBytes(elemBytesFor[codeSizeEntry]()))), 0, nil)
 	t.Cleanup(g.Close)
 	require.Equal(t, uint32(maxCacheSlots), g.maxCap)
 }
 
-// The reservation counts bytes outside freelru's element; the usage report counts
+// The reservation counts bytes outside the entry; the usage report counts
 // currentSize, which adds bookkeeping living inside it. Folding that into the
 // estimate charges it twice.
 func TestGenericCache_PayloadEstimateExcludesEntryBookkeeping(t *testing.T) {
@@ -617,11 +571,10 @@ func TestGenericCache_PayloadEstimateExcludesEntryBookkeeping(t *testing.T) {
 
 	external := closeOnCleanup(t, NewGenericCacheWithAvg(budget, avgStoragePayloadBytes, sizeFunc, ModeEvictLRU))
 	doubled := closeOnCleanup(t, NewGenericCacheWithAvg(budget, avgStoragePayloadBytes+currentSizeEntryOverhead, sizeFunc, ModeEvictLRU))
-	require.Equal(t, external.maxCap, doubled.maxCap, "same ceiling, so the reservations are comparable")
 	require.Equal(t,
-		int64(external.maxCap)*currentSizeEntryOverhead,
-		doubled.generationBytes(doubled.maxCap)-external.generationBytes(external.maxCap),
-		"charging the in-element bookkeeping again takes that much extra from the shared envelope")
+		int64(bucketWays)*currentSizeEntryOverhead,
+		doubled.bucketBytes()-external.bucketBytes(),
+		"charging the in-entry bookkeeping again takes that much extra per bucket from the shared envelope")
 
 	// currentSize carries the in-element bookkeeping the estimate leaves out.
 	key := make([]byte, 52)
@@ -630,26 +583,19 @@ func TestGenericCache_PayloadEstimateExcludesEntryBookkeeping(t *testing.T) {
 	require.Equal(t, int64(avgStoragePayloadBytes+currentSizeEntryOverhead), external.currentSize.Load())
 }
 
-// The ceiling is the largest capacity that fits, not the largest one whose table
-// sits on freelru's 5/4 boundary. One boundary per power-of-two band, so rounding
-// to it strands most of a band: 39% of the code cache's ceiling, 17% of the
-// account cache's.
+// The ceiling is the largest bucket count per shard whose full cost fits the
+// budget: one bucket more on every shard has to be over it.
 func TestCeilingLeavesNoAffordableSlot(t *testing.T) {
 	t.Parallel()
 
-	elem := elemBytesFor[entry[[]byte]]()
 	for _, budget := range []datasize.ByteSize{16 * datasize.MB, 150 * datasize.MB, 512 * datasize.MB, 1 * datasize.GB} {
 		for _, payload := range []uint32{0, 64, avgStoragePayloadBytes, avgAccountPayloadBytes, 12288} {
-			maxCap, shards := budgetedSlots(budget, payload, elem)
-			cost := func(total uint32) int64 {
-				return generationBytesFor(total, shards, int64(payload), elem)
-			}
-			require.LessOrEqual(t, cost(maxCap), int64(budget),
-				"budgetedSlots(%s, %d) ceiling %d is outside its own budget", budget, payload, maxCap)
-			if maxCap < maxCacheSlots/shards*shards {
-				require.Greater(t, cost(maxCap+shards), int64(budget),
-					"budgetedSlots(%s, %d) stopped at %d over %d shards with a step still affordable",
-					budget, payload, maxCap, shards)
+			c := closeOnCleanup(t, NewGenericCacheWithAvg[[]byte](budget, payload, func(v []byte) int { return len(v) }, ModeEvictLRU))
+			require.LessOrEqual(t, c.generationBytes(c.maxBuckets), int64(budget),
+				"ceiling of %d buckets per shard for (%s, %d) is outside its own budget", c.maxBuckets, budget, payload)
+			if c.maxCap+uint32(len(c.shards))*bucketWays <= maxCacheSlots {
+				require.Greater(t, c.generationBytes(c.maxBuckets+1), int64(budget),
+					"(%s, %d) stopped at %d buckets per shard with a step still affordable", budget, payload, c.maxBuckets)
 			}
 		}
 	}
@@ -686,36 +632,6 @@ func TestGrowLRUCeilingLeavesNoAffordableSlot(t *testing.T) {
 			}
 		}
 	}
-}
-
-// NewGenericCacheWithAvg is exported and generic. A value type larger than the
-// state caches' own grows every freelru element, so the reservation has to follow
-// T rather than assume the sizes this package happens to instantiate.
-func TestGenericCache_EnvelopeCoversLargeValueType(t *testing.T) {
-	prevBudget := cachebudget.Global
-	t.Cleanup(func() { cachebudget.Global = prevBudget })
-	cachebudget.Global = cachebudget.New(math.MaxInt64)
-
-	c := closeOnCleanup(t, NewGenericCacheWithAvg[[128]byte](1*datasize.GB, 8,
-		func([128]byte) int { return 128 }, ModeEvictLRU))
-
-	slots := 4096 * c.shardCount
-
-	// TotalAlloc rather than HeapAlloc: a collection inside the window would
-	// swamp a heap-size delta.
-	var before runtime.MemStats
-	runtime.ReadMemStats(&before)
-	gen := c.newShards(slots, slots, c.shardCount)
-	var after runtime.MemStats
-	runtime.ReadMemStats(&after)
-	runtime.KeepAlive(gen)
-
-	allocated := int64(after.TotalAlloc) - int64(before.TotalAlloc)
-	charged := c.generationBytes(slots) - int64(slots)*c.payloadBytes
-	require.Positive(t, allocated)
-	require.GreaterOrEqual(t, charged, allocated,
-		"envelope reserves %d B of slot overhead for %d slots across %d shards but the generation allocates %d B",
-		charged, slots, c.shardCount, allocated)
 }
 
 // avgBytes counts only what an entry points at, so it cannot also be the
@@ -757,7 +673,7 @@ func TestGenericCache_UsageReportCountsAllocatedSlots(t *testing.T) {
 	c := closeOnCleanup(t, NewGenericCacheWithAvg[[]byte](1*datasize.GB, 8,
 		func(v []byte) int { return len(v) }, ModeEvictLRU))
 
-	allocated := c.data.Load().Cap()
+	allocated := c.allocatedSlots()
 	require.Less(t, uint32(allocated), c.maxCap/16, "the ceiling has to stay out of reach")
 
 	key := make([]byte, 32)
@@ -766,7 +682,7 @@ func TestGenericCache_UsageReportCountsAllocatedSlots(t *testing.T) {
 		c.Put(key, []byte{1}, 1)
 	}
 
-	require.Equal(t, allocated, c.data.Load().Cap(), "every grow step is refused at a zero envelope")
+	require.Equal(t, allocated, c.allocatedSlots(), "every grow step is refused at a zero envelope")
 	require.InDelta(t, 100.0, c.slotsPct(), 5.0,
 		"a cache evicting at its allocated %d slots reports %.2f%%", allocated, c.slotsPct())
 }
@@ -827,10 +743,10 @@ func requireCeilingFitsBudget[T any](t *testing.T, procs int, payload uint32, bu
 	require.Positive(t, c.maxCap)
 	// A budget below the start capacity buys it anyway, so that is the bound
 	// there; above it the fitted ceiling has to fit the budget it came from.
-	require.LessOrEqual(t, c.generationBytes(c.maxCap),
-		max(int64(budget), c.generationBytes(genericCacheStartCapacity)),
+	require.LessOrEqual(t, c.generationBytes(c.maxBuckets),
+		max(int64(budget), c.generationBytes(c.startBuckets)),
 		"procs=%d payload=%d budget=%s: a full %d slots over %d shards costs more than the budget it came from",
-		procs, payload, budget, c.maxCap, c.shardCount)
+		procs, payload, budget, c.maxCap, len(c.shards))
 }
 
 // Every reservation path has to be paired: the birth generation, each funded
@@ -858,12 +774,12 @@ func TestGenericCache_BudgetSettlesAcrossTheLifecycle(t *testing.T) {
 			at("construction")
 
 			// Enough puts to fund several grow steps on the same shard.
-			born := c.data.Load().Cap()
+			born := c.allocatedSlots()
 			for i := range 32 * int(c.startCap) {
 				binary.BigEndian.PutUint64(key, uint64(i))
 				c.Put(key, key[:8], 1)
 			}
-			require.Greater(t, c.data.Load().Cap(), born,
+			require.Greater(t, c.allocatedSlots(), born,
 				"procs=%d budget=%s: the fill funded no grow step, so the walk weighs nothing", procs, budget)
 			at("grow")
 
@@ -990,17 +906,16 @@ func TestGenericCache_StepAndGenerationCostsAgreeAtTheCeiling(t *testing.T) {
 			// Shards grow independently, so fill until the last one reaches the
 			// ceiling. The bound is only there to fail the assertion below rather
 			// than spin if a regression stops the climb.
-			lru := c.data.Load()
-			for i := 0; lru.Cap() < int(c.maxCap) && i < 40*int(c.maxCap); i++ {
+			for i := 0; c.allocatedSlots() < int(c.maxCap) && i < 40*int(c.maxCap); i++ {
 				binary.BigEndian.PutUint64(key, uint64(i))
 				c.Put(key, key[:8], 1)
 			}
-			require.Equal(t, int(c.maxCap), lru.Cap(),
+			require.Equal(t, int(c.maxCap), c.allocatedSlots(),
 				"procs=%d budget=%s: the fill left a shard below the ceiling, so the sums are not comparable",
 				procs, budget)
-			require.Equal(t, c.generationBytes(c.maxCap), c.reservedBytes.Load(),
+			require.Equal(t, c.generationBytes(c.maxBuckets), c.reservedBytes.Load(),
 				"procs=%d budget=%s: the steps charged %d B for a generation costing %d B",
-				procs, budget, c.reservedBytes.Load(), c.generationBytes(c.maxCap))
+				procs, budget, c.reservedBytes.Load(), c.generationBytes(c.maxBuckets))
 			c.Close()
 		}
 	}
@@ -1012,10 +927,132 @@ func TestGenericCache_StepAndGenerationCostsAgreeAtTheCeiling(t *testing.T) {
 func TestFlooredCeilingKeepsShardGranularity(t *testing.T) {
 	c := closeOnCleanup(t, NewGenericCacheWithAvg[[]byte](1*datasize.KB, avgStoragePayloadBytes,
 		func(v []byte) int { return len(v) }, ModeEvictLRU))
-	if c.maxCap != genericCacheStartCapacity {
-		t.Fatalf("maxCap=%d, want the %d floor", c.maxCap, uint32(genericCacheStartCapacity))
+	require.Equal(t, c.startBuckets, c.maxBuckets, "the ceiling has to be the floor")
+	require.Equal(t, int(initialShardCount(genericCacheStartCapacity, shardCeil())), len(c.shards))
+}
+
+// Writers and readers on one key: a reader must only ever see a whole entry
+// some writer stored, so its value and txNum always belong together.
+func TestGenericCache_SameKeyConcurrentGetPut(t *testing.T) {
+	c := closeOnCleanup(t, NewGenericCache[[]byte](1*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU))
+	key := []byte("same-key")
+	stop := make(chan struct{})
+	var torn atomic.Bool
+	var writers, readers sync.WaitGroup
+	for w := range 4 {
+		writers.Go(func() {
+			for i := uint64(w) << 32; ; i++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				v := make([]byte, 8)
+				binary.BigEndian.PutUint64(v, i)
+				c.Put(key, v, i)
+			}
+		})
 	}
-	if want := initialShardCount(c.maxCap, shardCeil()); c.shardCount != want {
-		t.Errorf("shardCount=%d, want %d", c.shardCount, want)
+	for range 4 {
+		readers.Go(func() {
+			for range 200_000 {
+				if v, txNum, ok := c.GetWithTxNum(key); ok && (len(v) != 8 || binary.BigEndian.Uint64(v) != txNum) {
+					torn.Store(true)
+				}
+			}
+		})
+	}
+	readers.Wait()
+	close(stop)
+	writers.Wait()
+	require.False(t, torn.Load(), "a reader saw a value and txNum from different writes")
+	require.Equal(t, 1, c.Len())
+}
+
+// A full bucket evicts its own unreferenced entry and leaves other buckets
+// alone.
+func TestGenericCache_EvictionStaysInsideTheBucket(t *testing.T) {
+	c := newGenericCacheEntries(1*datasize.MB, 2*bucketWays, func(v []byte) int { return len(v) }, ModeEvictLRU)
+	require.Len(t, c.shards, 1)
+	require.Len(t, *c.shards[0].tbl.Load(), 2)
+
+	var full, other [][]byte
+	for i := 0; len(full) < bucketWays+1 || len(other) < 3; i++ {
+		k := make([]byte, 8)
+		binary.BigEndian.PutUint64(k, uint64(i))
+		if bucketOf(maphash.Hash(k), 2) == 0 {
+			full = append(full, k)
+		} else {
+			other = append(other, k)
+		}
+	}
+	other = other[:3]
+	for _, k := range append(full[:bucketWays], other...) {
+		c.Put(k, k, 1)
+	}
+	const cold = 3
+	for i, k := range full[:bucketWays] {
+		if i != cold {
+			_, ok := c.Get(k)
+			require.True(t, ok)
+		}
+	}
+
+	c.Put(full[bucketWays], full[bucketWays], 1)
+	require.Equal(t, uint64(1), c.evictions.Load())
+	for i, k := range full {
+		_, ok := c.Get(k)
+		require.Equal(t, i != cold, ok, "key %d", i)
+	}
+	for i, k := range other {
+		_, ok := c.Get(k)
+		require.True(t, ok, "the eviction reached key %d of another bucket", i)
+	}
+	require.Equal(t, bucketWays+3, c.Len())
+}
+
+// Below its ceiling a cache grows instead of evicting, however its keys
+// cluster in buckets.
+func TestGenericCache_GrowsInsteadOfEvicting(t *testing.T) {
+	prevBudget := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prevBudget })
+	cachebudget.Global = cachebudget.New(math.MaxInt64)
+
+	c := closeOnCleanup(t, NewGenericCacheWithAvg[[]byte](1*datasize.GB, avgStoragePayloadBytes,
+		func(v []byte) int { return len(v) }, ModeEvictLRU))
+	const keys = 64 * 1024
+	key := make([]byte, 52)
+	for i := range keys {
+		binary.BigEndian.PutUint64(key, uint64(i))
+		c.Put(key, key[:8], 1)
+	}
+	for i := range c.shards {
+		require.Less(t, uint32(len(*c.shards[i].tbl.Load())), c.maxBuckets, "shard %d reached the ceiling", i)
+	}
+	require.Positive(t, grownShards(c))
+	require.Zero(t, c.evictions.Load())
+	require.Equal(t, keys, c.Len())
+	for i := range keys {
+		binary.BigEndian.PutUint64(key, uint64(i))
+		_, ok := c.Get(key)
+		require.True(t, ok, "key %d", i)
+	}
+}
+
+// Keys are stored inside the entry allocation up to 56 bytes and beside it
+// above that; every length has to read back as the key it was stored under.
+func TestGenericCache_KeyLengths(t *testing.T) {
+	c := closeOnCleanup(t, NewGenericCache[int](1*datasize.MB, func(int) int { return 8 }, ModeEvictLRU))
+	key := make([]byte, 80)
+	for i := range key {
+		key[i] = byte(i + 1)
+	}
+	for n := range len(key) + 1 {
+		c.Put(key[:n], n, 1)
+	}
+	for n := range len(key) + 1 {
+		v, ok := c.Get(key[:n])
+		require.True(t, ok, "len %d", n)
+		require.Equal(t, n, v)
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/elastic/go-freelru"
@@ -216,3 +217,63 @@ func (g *growLRU[V]) Close() {
 	cachebudget.Global.Release(g.reserved)
 	g.reserved = 0
 }
+
+// freelruElem mirrors freelru's element, which is unexported: the stored value
+// with a hashed key, five uint32 list indices and an expiry around it. The
+// caches are generic over their value, so the slot cost has to follow that
+// value rather than the sizes this package happens to instantiate.
+//
+//nolint:unused // layout mirror: only unsafe.Sizeof reads it
+type freelruElem[T any] struct {
+	key                                           uint64
+	value                                         T
+	nextBucket, prevBucket, bucketPos, next, prev uint32
+	expire                                        int64
+}
+
+// elemBytesFor is what one table slot costs: the element plus its uint32 bucket
+// index in the parallel table.
+func elemBytesFor[T any]() int64 {
+	var e freelruElem[T]
+	return int64(unsafe.Sizeof(e)) + 4
+}
+
+// slotChargeBytes is a slot at freelru's best table ratio, 5/4, so it is a lower
+// bound: a capacity off that ratio costs up to 5/2. It seeds the ceiling search
+// only.
+func slotChargeBytes(elemBytes int64) int64 { return elemBytes*5/4 + 1 }
+
+// freelruShardBytes covers a shard beyond its two arrays: the LRU struct and the
+// slice headers. Measured at 239-359 B; charged high to stay covering. The zero
+// key and value it also holds scale with the value type, so shardChargeBytes
+// adds a slot on top.
+const freelruShardBytes = 512
+
+func shardChargeBytes(elemBytes int64) int64 { return freelruShardBytes + elemBytes }
+
+// fitCeiling is the largest capacity up to ceiling whose exact cost is inside the
+// budget. estimate only seeds the search and may sit on either side of the answer.
+// cost must be non-decreasing in capacity, as both callers' are: the payload term
+// grows with it and the table it rounds up to never shrinks.
+func fitCeiling(estimate, ceiling uint32, budget datasize.ByteSize, cost func(uint32) int64) uint32 {
+	if cost(1) > int64(budget) {
+		return 1
+	}
+	ceiling = max(ceiling, 1)
+	hi := max(min(estimate, ceiling), 1)
+	for hi < ceiling && cost(hi) <= int64(budget) {
+		hi = uint32(min(uint64(hi)*2, uint64(ceiling)))
+	}
+	lo := uint32(1)
+	for lo < hi {
+		mid := lo + (hi-lo+1)/2
+		if cost(mid) <= int64(budget) {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	return lo
+}
+
+func u64identity(k uint64) uint32 { return uint32(k) }

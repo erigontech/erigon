@@ -68,6 +68,10 @@ type ByteLRU[V any] struct {
 // value. Omitting it undercounts a cache of small entries ~1.6x.
 const otterEntryOverheadBytes = 64
 
+// putStripeCount sizes the same-key write-serialization stripes; power of two
+// so the stripe index is a mask of the key hash.
+const putStripeCount = 256
+
 // ByteLRUEntryOverheadBytes is what an entry costs beyond its value's own bytes:
 // the uint64 key and otter's bookkeeping. Weighers add it to every entry.
 const ByteLRUEntryOverheadBytes = 8 + otterEntryOverheadBytes

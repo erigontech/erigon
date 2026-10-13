@@ -17,9 +17,8 @@
 package cache
 
 import (
-	"bytes"
+	"math/bits"
 	"runtime"
-	"sync"
 	"sync/atomic"
 	"unsafe"
 
@@ -32,161 +31,57 @@ import (
 	"github.com/erigontech/erigon/execution/cache/coherence"
 )
 
-// putStripeCount sizes the same-key write-serialization stripes; power of two
-// so the stripe index is a mask of the key hash.
-const putStripeCount = 256
-
-// avgBytesPerEntry is the assumption used to translate a byte budget into
-// the entry-count cap the sharded LRU is sized against. 256 B
-// approximates account-record + key overhead and storage-slot value+key
-// overhead in the same order of magnitude. Actual residency tracked in
+// avgBytesPerEntry is the default estimate of the bytes an entry points at, used
+// to translate a byte budget into a slot ceiling. Actual residency is tracked in
 // currentSize and reported via PrintStatsAndReset.
 const avgBytesPerEntry = 256
 
-// currentSizeEntryOverhead is currentSize's per-entry bookkeeping. It lives
-// inside freelru's element, already charged by the slot cost, so only the usage
-// report adds it — never a reservation estimate.
+// currentSizeEntryOverhead is currentSize's per-entry bookkeeping. The slot
+// cost already charges the entry, so only the usage report adds it — never a
+// reservation estimate.
 const currentSizeEntryOverhead = 24
 
-// freelruElem mirrors freelru's element, which is unexported: the stored value
-// with a hashed key, five uint32 list indices and an expiry around it. The
-// caches are generic over their value, so the slot cost has to follow that
-// value rather than the sizes this package happens to instantiate.
-//
-//nolint:unused // layout mirror: only unsafe.Sizeof reads it
-type freelruElem[T any] struct {
-	key                                           uint64
-	value                                         T
-	nextBucket, prevBucket, bucketPos, next, prev uint32
-	expire                                        int64
-}
-
-// elemBytesFor is what one table slot costs: the element plus its uint32 bucket
-// index in the parallel table.
-func elemBytesFor[T any]() int64 {
-	var e freelruElem[T]
-	return int64(unsafe.Sizeof(e)) + 4
-}
-
-// slotChargeBytes is a slot at freelru's best table ratio, 5/4, so it is a lower
-// bound: a capacity off that ratio costs up to 5/2. It seeds the ceiling search
-// only; every reservation charges the exact table through tableSlots.
-func slotChargeBytes(elemBytes int64) int64 { return elemBytes*5/4 + 1 }
-
-// tableSlots is the array length freelru allocates for a capacity. It sizes both
-// the element array and the bucket array at the result.
-func tableSlots(capacity uint32) uint64 {
-	if capacity == 0 {
-		return 0
-	}
-	return math.NextPowerOfTwo(uint64(capacity) + uint64(capacity)/4)
-}
-
-// freelruShardBytes covers a shard beyond its two arrays: the LRU struct and the
-// slice headers. Measured at 239-359 B; charged high to stay covering. The zero
-// key and value it also holds scale with the value type, so shardChargeBytes
-// adds a slot on top.
-const freelruShardBytes = 512
-
-func shardChargeBytes(elemBytes int64) int64 { return freelruShardBytes + elemBytes }
-
-func slotArrayBytes(capacity uint32, elemBytes int64) int64 {
-	return int64(tableSlots(capacity)) * elemBytes
-}
-
-func shardArrayBytes(totalCap, shards uint32, elemBytes int64) int64 {
-	return int64(shards) * (slotArrayBytes(perShard(totalCap, shards), elemBytes) + shardChargeBytes(elemBytes))
-}
-
-// maxCacheSlots caps the slot array whatever the byte budget says.
+// maxCacheSlots caps the slot count whatever the byte budget says.
 const maxCacheSlots = 16_000_000
 
-// budgetedSlots splits a byte budget into a slot ceiling and the shard count it
-// is divided by, the ceiling being the largest one whose exact cost fits.
-func budgetedSlots(capacityBytes datasize.ByteSize, payloadBytes uint32, elemBytes int64) (maxCap, shards uint32) {
-	perSlot := uint64(payloadBytes) + uint64(slotChargeBytes(elemBytes))
-	approx := uint32(min(uint64(capacityBytes)/perSlot, maxCacheSlots))
-	shards = max(initialShardCount(approx, shardCeil()), 1)
-	perShardCap := fitCeiling(approx/shards, maxCacheSlots/shards, capacityBytes, func(c uint32) int64 {
-		return generationBytesFor(c*shards, shards, int64(payloadBytes), elemBytes)
-	})
-	return perShardCap * shards, shards
-}
+// sizeClassSlack covers the allocator rounding an entry up to its size class.
+const sizeClassSlack = 16
 
-// fitCeiling is the largest capacity up to ceiling whose exact cost is inside the
-// budget. estimate only seeds the search and may sit on either side of the answer.
-// cost must be non-decreasing in capacity, as both callers' are: the payload term
-// grows with it and the table it rounds up to never shrinks.
-func fitCeiling(estimate, ceiling uint32, budget datasize.ByteSize, cost func(uint32) int64) uint32 {
-	if cost(1) > int64(budget) {
-		return 1
-	}
-	ceiling = max(ceiling, 1)
-	hi := max(min(estimate, ceiling), 1)
-	for hi < ceiling && cost(hi) <= int64(budget) {
-		hi = uint32(min(uint64(hi)*2, uint64(ceiling)))
-	}
-	lo := uint32(1)
-	for lo < hi {
-		mid := lo + (hi-lo+1)/2
-		if cost(mid) <= int64(budget) {
-			lo = mid
-		} else {
-			hi = mid - 1
-		}
-	}
-	return lo
-}
-
-// minShardStart keeps a shard's initial table off a handful of slots, which a
-// shard count derived from a large GOMAXPROCS would otherwise produce.
-const minShardStart = 16
-
-// entry stores the full key alongside the value so callers can detect
-// hash collisions (the freelru shard key is the uint64 maphash of the
-// byte-string key — Go's randomized stdlib hasher, so collisions are
-// rare but not impossible). size carries the byte cost of the entry so
-// the OnEvict callback can update currentSize without re-running
-// sizeFunc.
+// entry is immutable once published. key holds the full key, so reads detect
+// 64-bit hash collisions. size carries the entry's currentSize charge.
 type entry[T any] struct {
-	key   []byte
+	key   string
 	val   T
-	size  int
 	txNum uint64 // commit/read txNum the cached value reflects (upper bound)
+	size  uint32
 	epoch uint32 // unwind generation the entry was written in
 }
 
-// GenericCache is a sharded, LRU-evicting bounded cache for key-value
-// data. Eviction mode is fixed at construction (see policy.go).
+// GenericCache is a sharded, set-associative bounded cache for key-value data.
+// Reads take no lock; writers serialize on the key's shard mutex. Eviction mode
+// is fixed at construction (see policy.go).
 type GenericCache[T any] struct {
-	// data is replaced wholesale only by Clear, with every put stripe held.
-	// Growth happens inside it, one shard at a time (see shardedLRU.Add).
-	data      atomic.Pointer[shardedLRU[entry[T]]]
-	capacityB datasize.ByteSize
-	mode      Mode
+	shards     []shard[T]
+	shardShift uint8
+	capacityB  datasize.ByteSize
+	mode       Mode
 
-	// Each shard starts at startCap/shards slots and grows ×genericCacheGrowFactor
-	// toward maxCap/shards on demand, so a cache with a small working set stays
-	// far below its configured budget. startCap is floored at
-	// shardCount×minShardStart and shardCount follows GOMAXPROCS, so the birth
-	// footprint is single-digit MB per cache on a large host, not the low KB a
-	// single-shard start would cost.
-	//
-	// reservedBytes is atomic: it is adjusted from the grow path, which runs
-	// with a put stripe held, and Clear takes resizeMu before every stripe -- a
-	// lock here would invert that.
-	startCap      uint32
-	maxCap        uint32
-	payloadBytes  int64 // per-slot payload held outside the freelru element
-	elemBytes     int64 // one table slot: the freelru element around entry[T], plus its bucket index
-	resizeMu      sync.Mutex
+	// Each shard starts at startBuckets and grows ×genericCacheGrowFactor toward
+	// maxBuckets on demand, funding each step from the shared envelope, so a cache
+	// with a small working set stays far below its configured budget.
+	startBuckets uint32
+	maxBuckets   uint32
+	startCap     uint32 // slots across all shards at birth
+	maxCap       uint32 // slots across all shards at the ceiling
+	payloadBytes int64  // per-slot payload held outside the entry
+	entryBytes   int64  // one entry allocation without its payload
+
+	// reservedBytes is atomic: grows add to it under one shard mutex while
+	// Clear and Close settle it under all of them.
 	reservedBytes atomic.Int64
 
-	shardCount uint32
-
 	// currentSize is the logical payload held, a statistic — it is well under
-	// capacityB, which reservedBytes (payload plus slot arrays) is measured
-	// against instead.
+	// capacityB, which reservedBytes (payload plus slots) is measured against.
 	currentSize atomic.Int64
 
 	// enveloped is set only when the cache draws from the shared envelope (via
@@ -201,29 +96,24 @@ type GenericCache[T any] struct {
 	// floor. See execution/cache/coherence.
 	coh coherence.Gen
 
-	// putStripes serialize same-key writers so PutIfAbsent's check+insert is
-	// atomic w.r.t. a concurrent Put (freelru offers no conditional insert).
-	putStripes [putStripeCount]sync.Mutex
-
 	hits         atomic.Uint64
 	misses       atomic.Uint64
 	inserts      atomic.Uint64
-	evictions    atomic.Uint64 // capacity evictions only, counted from Add's evicted return (see newShards)
+	evictions    atomic.Uint64 // capacity evictions only
 	dropped      atomic.Uint64
 	staleEvicted atomic.Uint64 // stale entries detected on read after an unwind; dropped unless a racing put revived them
 
 	sizeFunc func(T) int
 }
 
-func u64identity(k uint64) uint32 { return uint32(k) }
-
-// initialShardCount starts a lineage at ~64 entries per shard (freelru's own
-// small-cache geometry), bounded by ceil.
+// initialShardCount gives a cache of this capacity ~64 slots per shard,
+// bounded by ceil.
 func initialShardCount(capacity, ceil uint32) uint32 {
 	return min(uint32(math.NextPowerOfTwo(uint64(capacity/64))), ceil)
 }
 
-// shardCeil caps the shard count at freelru's own choice for a sharded LRU.
+// shardCeil caps the shard count so writers on different cores rarely share a
+// shard mutex.
 func shardCeil() uint32 {
 	return uint32(math.NextPowerOfTwo(uint64(runtime.GOMAXPROCS(0) * 16)))
 }
@@ -244,41 +134,27 @@ func NewGenericCache[T any](capacityBytes datasize.ByteSize, sizeFunc func(T) in
 }
 
 // NewGenericCacheWithAvg is NewGenericCache with an explicit per-domain average
-// for the bytes an entry points at — what a slice or string header refers to,
-// not T's own inline bytes, which the slot cost already charges along with the
-// element and its bookkeeping (accounts ≈ 70 B, storage ≈ 64 B). Folding either
-// in charges them twice and shrinks the ceiling. It starts small and jump-grows
+// for the bytes an entry points at — its key and what a slice or string header
+// refers to (accounts ≈ 70 B, storage ≈ 64 B), not T's own inline bytes, which
+// the entry cost already charges. avgBytes of 0 is meaningful: an inline-only T
+// with an empty key points at nothing. The cache starts small and jump-grows
 // toward the ceiling on demand, funding each step from the shared envelope.
-// avgBytes of 0 is meaningful, not a request for the default: an inline-only T
-// points at nothing outside its slot.
 func NewGenericCacheWithAvg[T any](capacityBytes datasize.ByteSize, avgBytes uint32, sizeFunc func(T) int, mode Mode) *GenericCache[T] {
-	elemBytes := elemBytesFor[entry[T]]()
-	// A shard grows on its own, so its share of maxCap bounds one grow's copy.
-	budgeted, shards := budgetedSlots(capacityBytes, avgBytes, elemBytes)
-	// A budget too small to buy the start capacity keeps it anyway: the byte
-	// accounting a cache evicts and drops on has to stay usable at any budget.
-	maxCap := max(budgeted, genericCacheStartCapacity)
-	if maxCap != budgeted {
-		// Shard granularity follows the ceiling, so the floor has to re-derive it.
-		shards = max(initialShardCount(maxCap, shardCeil()), 1)
-	}
-	// The start size is raised to keep each shard off a one-slot table, which a
-	// large GOMAXPROCS would otherwise produce.
-	start := min(max(uint32(genericCacheStartCapacity), shards*minShardStart), maxCap)
 	c := &GenericCache[T]{
 		capacityB:    capacityBytes,
-		startCap:     start,
-		maxCap:       maxCap,
 		payloadBytes: int64(avgBytes),
-		elemBytes:    elemBytes,
-		shardCount:   shards,
+		entryBytes:   int64(unsafe.Sizeof(entry[T]{})) + sizeClassSlack,
 		enveloped:    true,
 		mode:         mode,
 		sizeFunc:     sizeFunc,
 	}
-	c.data.Store(c.newShards(start, maxCap, shards))
-	// Take the initial slot array unconditionally so no cache is born unable to
-	// hold anything, even when the envelope is already spoken for.
+	approx := min(uint64(capacityBytes)/uint64(c.bucketBytes())*bucketWays, maxCacheSlots)
+	shards := max(initialShardCount(max(uint32(approx), genericCacheStartCapacity), shardCeil()), 1)
+	start := max((genericCacheStartCapacity+bucketWays*shards-1)/(bucketWays*shards), 1)
+	ceiling := min(uint64(capacityBytes)/(uint64(shards)*uint64(c.bucketBytes())), uint64(maxCacheSlots/bucketWays/shards))
+	// A budget too small to buy the start capacity keeps it anyway: the byte
+	// accounting a cache evicts and drops on has to stay usable at any budget.
+	c.init(shards, start, max(uint32(ceiling), start))
 	c.reservedBytes.Store(c.generationBytes(start))
 	cachebudget.Global.Take(c.reservedBytes.Load())
 	return c
@@ -288,26 +164,46 @@ func NewGenericCacheWithAvg[T any](capacityBytes datasize.ByteSize, avgBytes uin
 // cap (no jump-grow, no envelope). Used by tests that want to exercise eviction
 // with small capacities; production constructs via NewGenericCache.
 func newGenericCacheEntries[T any](capacityBytes datasize.ByteSize, capacityEntries uint32, sizeFunc func(T) int, mode Mode) *GenericCache[T] {
-	if capacityEntries == 0 {
-		capacityEntries = 1
-	}
 	c := &GenericCache[T]{
 		capacityB:    capacityBytes,
-		startCap:     capacityEntries,
-		maxCap:       capacityEntries,
 		payloadBytes: avgBytesPerEntry,
-		elemBytes:    elemBytesFor[entry[T]](),
+		entryBytes:   int64(unsafe.Sizeof(entry[T]{})) + sizeClassSlack,
 		mode:         mode,
 		sizeFunc:     sizeFunc,
 	}
-	c.shardCount = initialShardCount(capacityEntries, shardCeil())
-	c.data.Store(c.newShards(capacityEntries, capacityEntries, c.shardCount))
+	shards := max(initialShardCount(capacityEntries, shardCeil()), 1)
+	buckets := max((capacityEntries+bucketWays*shards-1)/(bucketWays*shards), 1)
+	c.init(shards, buckets, buckets)
 	return c
 }
 
+func (c *GenericCache[T]) init(shards, startBuckets, maxBuckets uint32) {
+	c.shards = make([]shard[T], shards)
+	c.shardShift = uint8(64 - bits.TrailingZeros32(shards))
+	c.startBuckets, c.maxBuckets = startBuckets, maxBuckets
+	c.startCap = shards * startBuckets * bucketWays
+	c.maxCap = shards * maxBuckets * bucketWays
+	for i := range c.shards {
+		c.shards[i].tbl.Store(newTable[T](startBuckets))
+	}
+}
+
+// bucketBytes is what a full bucket costs: its cache line plus every way's
+// entry and payload.
+func (c *GenericCache[T]) bucketBytes() int64 {
+	return int64(unsafe.Sizeof(bucket[T]{})) + bucketWays*(c.entryBytes+c.payloadBytes)
+}
+
+// generationBytes is what the cache costs with every shard at this many buckets.
+func (c *GenericCache[T]) generationBytes(buckets uint32) int64 {
+	return int64(len(c.shards)) * int64(buckets) * c.bucketBytes()
+}
+
+func (c *GenericCache[T]) shard(h uint64) *shard[T] { return &c.shards[h>>c.shardShift] }
+
 // fundGrow reserves a shard's grow step from the shared envelope, refusing when
-// it is exhausted so the cache stops growing and evicts within its current size.
-func (c *GenericCache[T]) fundGrow(oldCap, newCap uint32) bool {
+// it is exhausted so the shard stops growing and evicts within its current size.
+func (c *GenericCache[T]) fundGrow(oldBuckets, newBuckets uint32) bool {
 	if !c.enveloped {
 		return true
 	}
@@ -316,7 +212,7 @@ func (c *GenericCache[T]) fundGrow(oldCap, newCap uint32) bool {
 	if c.closed.Load() {
 		return false
 	}
-	delta := c.growBytes(oldCap, newCap)
+	delta := int64(newBuckets-oldBuckets) * c.bucketBytes()
 	if !cachebudget.Global.Reserve(delta) {
 		return false
 	}
@@ -324,40 +220,39 @@ func (c *GenericCache[T]) fundGrow(oldCap, newCap uint32) bool {
 	return true
 }
 
-// refundGrow returns a reservation whose grow lost the race to another writer.
-func (c *GenericCache[T]) refundGrow(oldCap, newCap uint32) {
-	if !c.enveloped {
-		return
+// growLocked rebuilds s one step larger. Readers keep using the old table, which
+// no writer touches once s.mu is held, until the new one is published.
+func (c *GenericCache[T]) growLocked(s *shard[T]) bool {
+	old := *s.tbl.Load()
+	n := uint32(len(old))
+	if n >= c.maxBuckets {
+		return false
 	}
-	delta := c.growBytes(oldCap, newCap)
-	cachebudget.Global.Release(delta)
-	c.reservedBytes.Add(-delta)
-}
-
-func (c *GenericCache[T]) growBytes(oldCap, newCap uint32) int64 {
-	return int64(newCap-oldCap)*c.payloadBytes + slotArrayBytes(newCap, c.elemBytes) - slotArrayBytes(oldCap, c.elemBytes)
-}
-
-func (c *GenericCache[T]) generationBytes(totalCap uint32) int64 {
-	return generationBytesFor(totalCap, max(c.shardCount, 1), c.payloadBytes, c.elemBytes)
-}
-
-// generationBytesFor is what a generation of totalCap slots costs: the payload
-// estimate plus the exact shard arrays.
-func generationBytesFor(totalCap, shards uint32, payloadBytes, elemBytes int64) int64 {
-	return int64(totalCap)*payloadBytes + shardArrayBytes(totalCap, shards, elemBytes)
-}
-
-// newShards builds the shard array with this cache's evict callback wired.
-// The callback is the sole subtractor of currentSize — every removal (capacity
-// eviction, Remove) accounts through it. Eviction victims are picked per shard
-// (hash bits 16+), which the put stripes (bits 0-7) don't cover, so any
-// subtraction computed outside the callback races a cross-stripe eviction of
-// the same entry.
-func (c *GenericCache[T]) newShards(startCap, maxCap, shards uint32) *shardedLRU[entry[T]] {
-	return newShardedLRU[entry[T]](startCap, maxCap, shards, func(_ uint64, e entry[T]) {
-		c.currentSize.Add(-int64(e.size))
-	}, c.fundGrow, c.refundGrow)
+	next := min(n*genericCacheGrowFactor, c.maxBuckets)
+	if !c.fundGrow(n, next) {
+		return false
+	}
+	t := newTable[T](next)
+	for i := range old {
+		for way := range bucketWays {
+			e := old[i].slots[way].Load()
+			if e == nil {
+				continue
+			}
+			h := maphash.Hash(unsafe.Slice(unsafe.StringData(e.key), len(e.key)))
+			b := &(*t)[bucketOf(h, len(*t))]
+			// Only a last step that is not a whole multiple can overfill a bucket.
+			if w := b.freeWay(); w >= 0 {
+				b.store(w, tagOf(h), e)
+			} else {
+				c.currentSize.Add(-int64(e.size))
+				s.n.Add(-1)
+				c.evictions.Add(1)
+			}
+		}
+	}
+	s.tbl.Store(t)
+	return true
 }
 
 // DomainCache wraps GenericCache[[]byte] to implement the Cache interface.
@@ -402,16 +297,15 @@ func (c *GenericCache[T]) Get(key []byte) (T, bool) {
 // maxStep — the same coherence the BranchCache read applies for commitment.
 func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 	h := maphash.Hash(key)
-	// Snapshot coherence before loading the generation. Clear publishes the
-	// replacement generation before lifting the unwind floor, so an entry
-	// captured from the retiring generation is always judged by coherence that
-	// still carries its unwind. A replacement-generation entry judged by an old
-	// snapshot can only cause a safe miss because dropStale rechecks the current
-	// generation before removing it.
+	// Snapshot coherence before loading the table. Clear publishes the
+	// replacement tables before lifting the unwind floor, so an entry captured
+	// from a retiring table is always judged by coherence that still carries its
+	// unwind. A replacement-table entry judged by an old snapshot can only cause
+	// a safe miss because dropStale rechecks the current table before removing it.
 	coh := c.coh.Snapshot()
-	lru := c.data.Load()
-	e, ok := lru.Get(h)
-	if !ok || !bytes.Equal(e.key, key) {
+	b := c.shard(h).bucket(h)
+	way, e := b.find(h, key)
+	if e == nil {
 		c.misses.Add(1)
 		var zero T
 		return zero, 0, false
@@ -431,14 +325,14 @@ func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 		var zero T
 		return zero, 0, false
 	}
+	b.touch(way)
 	c.hits.Add(1)
 	return e.val, e.txNum, true
 }
 
-// Put stores data for the given key. In ModeEvictLRU the underlying
-// sharded LRU evicts cold entries when its entry-count cap is reached.
-// In ModeNoOp inserts that would overflow the byte budget are dropped
-// (and counted via the dropped metric).
+// Put stores data for the given key. In ModeEvictLRU a full bucket evicts its
+// CLOCK victim. In ModeNoOp inserts that would overflow the byte budget are
+// dropped (and counted via the dropped metric).
 func (c *GenericCache[T]) Put(key []byte, value T, txNum uint64) {
 	c.put(key, value, txNum, true)
 }
@@ -449,141 +343,132 @@ func (c *GenericCache[T]) PutIfAbsent(key []byte, value T, txNum uint64) {
 	c.put(key, value, txNum, false)
 }
 
-func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool) {
-	c.putStriped(key, value, txNum, overwrite)
-}
-
-// putStriped performs the write under the key's stripe, so a conditional put's
+// put performs the write under the key's shard mutex, so a conditional put's
 // check and insert are atomic against a same-key writer.
-func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrite bool) {
+func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool) {
 	h := maphash.Hash(key)
-	valBytes := c.sizeFunc(value)
-	newSize := len(key) + valBytes + currentSizeEntryOverhead
+	size := len(key) + c.sizeFunc(value) + currentSizeEntryOverhead
 
-	mu := &c.putStripes[h&(putStripeCount-1)]
-	mu.Lock()
-	defer mu.Unlock()
+	s := c.shard(h)
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	// Sample the epoch under the stripe. Clear holds every stripe across the
-	// generation swap and coherence reset, so the stamp cannot belong to a
+	// Sample the epoch under the shard mutex. Clear holds every shard mutex
+	// across the table swap and coherence reset, so the stamp cannot belong to a
 	// different generation from the one where the entry lands.
-	ep := c.coh.Epoch()
-	lru := c.data.Load()
-	existing, hasExisting := lru.Get(h)
-
-	// Existing key — update by remove-then-add (see newShards for why a size
-	// delta would be wrong). Reuse the stored key buffer to avoid an extra
-	// allocation; the freshly-decoded value replaces the old one.
-	if hasExisting && bytes.Equal(existing.key, key) {
-		if !overwrite && !c.coh.IsStale(existing.txNum, existing.epoch) {
+	e := entry[T]{val: value, txNum: txNum, size: uint32(size), epoch: c.coh.Epoch()}
+	b := s.bucket(h)
+	if way, old := b.find(h, key); old != nil {
+		if !overwrite && !c.coh.IsStale(old.txNum, old.epoch) {
 			return
 		}
-		// Reserve the new size before the removal: the byte counter must never
-		// transiently under-state usage, or a concurrent ModeNoOp admission on
-		// another stripe over-admits past the budget. Over-stating is safe — at
-		// worst a new key is dropped, which is within "drop new keys when full".
-		c.currentSize.Add(int64(newSize))
-		if lru.Replace(h, entry[T]{key: existing.key, val: value, size: newSize, txNum: txNum, epoch: ep}) {
-			c.evictions.Add(1)
-		}
+		c.currentSize.Add(int64(size) - int64(old.size))
+		b.slots[way].Store(newEntry(key, e))
 		return
 	}
 
-	if c.mode == ModeNoOp {
-		// Refuse once full by either bound — freelru would otherwise evict at the
-		// entry-count cap, which ModeNoOp ("drop new keys when full") must not do.
-		if c.currentSize.Load()+int64(newSize) > int64(c.capacityB) || lru.Len() >= int(c.maxCap) {
-			c.dropped.Add(1)
-			return
-		}
+	if c.mode == ModeNoOp && (c.currentSize.Load()+int64(size) > int64(c.capacityB) || c.Len() >= int(c.maxCap)) {
+		c.dropped.Add(1)
+		return
 	}
-
-	// ModeEvictLRU has no currentSize check: the budget is enforced by maxCap,
-	// which budgetedSlots derives from capacityB counting both the payload and
-	// the slot arrays. freelru exposes no evict-until-bytes-fit primitive, and
-	// eviction is per-shard rather than globally-LRU — the same trade-off
-	// code_cache.go / balcache.go / db/state/cache.go accept.
-
-	// hasExisting here means a 64-bit maphash collision (different key, same
-	// hash): the colliding entry has to be displaced through Replace so its
-	// size is accounted. The size is reserved first (see the update path above).
-	c.currentSize.Add(int64(newSize))
-	e := entry[T]{key: bytes.Clone(key), val: value, size: newSize, txNum: txNum, epoch: ep}
-	var evicted bool
-	if hasExisting {
-		evicted = lru.Replace(h, e)
-	} else {
-		evicted = lru.Add(h, e)
+	// A full bucket grows the shard, so below its ceiling a put never evicts.
+	way := b.freeWay()
+	for way < 0 && c.growLocked(s) {
+		b = s.bucket(h)
+		way = b.freeWay()
 	}
-	if evicted {
+	if way < 0 && c.mode == ModeNoOp {
+		c.dropped.Add(1)
+		return
+	}
+	// Add before subtracting, so a concurrent ModeNoOp admission never reads a
+	// transient under-statement of the bytes held.
+	c.currentSize.Add(int64(size))
+	if way < 0 {
+		way = b.victim(h)
+		c.currentSize.Add(-int64(b.slots[way].Load().size))
 		c.evictions.Add(1)
+	} else {
+		s.n.Add(1)
 	}
+	b.store(way, tagOf(h), newEntry(key, e))
 	c.inserts.Add(1)
 }
 
-// Delete removes the data for the given key. Runs under the key's put stripe
+// Delete removes the data for the given key. Runs under the key's shard mutex
 // so the check-then-remove is atomic against same-key puts and excluded from
-// the generation swap in Clear, which fences via the stripes.
+// the table swap in Clear.
 func (c *GenericCache[T]) Delete(key []byte) {
 	h := maphash.Hash(key)
-	mu := &c.putStripes[h&(putStripeCount-1)]
-	mu.Lock()
-	defer mu.Unlock()
-	lru := c.data.Load()
-	if existing, ok := lru.Get(h); ok && bytes.Equal(existing.key, key) {
-		lru.Remove(h)
+	s := c.shard(h)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b := s.bucket(h)
+	if way, e := b.find(h, key); e != nil {
+		c.removeLocked(s, b, way, e)
 	}
 }
 
-// dropStale removes key's entry under its put stripe: the re-check keeps an
-// entry a concurrent put revived, and the stripe keeps the removal out of
-// generation swaps.
+// dropStale removes key's entry under its shard mutex: the re-check keeps an
+// entry a concurrent put revived, and the mutex keeps the removal out of
+// table swaps.
 func (c *GenericCache[T]) dropStale(h uint64, key []byte) {
-	mu := &c.putStripes[h&(putStripeCount-1)]
-	mu.Lock()
-	defer mu.Unlock()
-	lru := c.data.Load()
-	if e, ok := lru.Get(h); ok && bytes.Equal(e.key, key) && c.coh.IsStale(e.txNum, e.epoch) {
-		lru.Remove(h)
+	s := c.shard(h)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b := s.bucket(h)
+	if way, e := b.find(h, key); e != nil && c.coh.IsStale(e.txNum, e.epoch) {
+		c.removeLocked(s, b, way, e)
+	}
+}
+
+func (c *GenericCache[T]) removeLocked(s *shard[T], b *bucket[T], way int, e *entry[T]) {
+	b.clear(way)
+	s.n.Add(-1)
+	c.currentSize.Add(-int64(e.size))
+}
+
+func (c *GenericCache[T]) lockAll() {
+	for i := range c.shards {
+		c.shards[i].mu.Lock()
+	}
+}
+
+func (c *GenericCache[T]) unlockAll() {
+	for i := range c.shards {
+		c.shards[i].mu.Unlock()
 	}
 }
 
 // Clear removes all entries and restores the starting capacity. It starts an
 // empty coherence generation by advancing the epoch and lifting the unwind
 // floor, so subsequent puts are not constrained by an unwind that belongs to
-// the retired data. The accounting reset, data swap, and coherence reset run
-// with every put stripe held, so a racing writer cannot split those
+// the retired data. The accounting reset, table swap, and coherence reset run
+// with every shard mutex held, so a racing writer cannot split those
 // publications.
 func (c *GenericCache[T]) Clear() {
-	// Shrink back to the start size and return the grown budget to the envelope,
-	// keeping the cache adaptive across fork-validation/reset (it regrows on
-	// demand). A no-op Purge would leave the grown slot array resident.
-	c.resizeMu.Lock()
-	defer c.resizeMu.Unlock()
-	next := c.newShards(c.startCap, c.maxCap, c.shardCount) // allocate before excluding writers
-	for i := range c.putStripes {
-		c.putStripes[i].Lock()
+	fresh := make([]*[]bucket[T], len(c.shards)) // allocate before excluding writers
+	for i := range fresh {
+		fresh[i] = newTable[T](c.startBuckets)
 	}
-	// Settle the reservation only behind the fence: a writer holding a stripe
-	// can be mid-grow, and outside it that grow would either attach a
-	// reservation to the generation being retired or refund bytes already
-	// released here.
+	c.lockAll()
+	defer c.unlockAll()
 	// Close settles reservedBytes once; a rebuild charged after that would hold
 	// envelope bytes nothing releases.
 	if c.enveloped && !c.closed.Load() {
-		start := c.generationBytes(c.startCap)
+		start := c.generationBytes(c.startBuckets)
 		cachebudget.Global.Release(c.reservedBytes.Swap(start) - start)
 	}
 	c.currentSize.Store(0)
-	c.data.Store(next)
-	// Reset coherence only after publishing the empty generation. Paired with
-	// GetWithTxNum's snapshot-before-load ordering, this ensures an entry from
-	// the retiring generation is judged by pre-Reset coherence that still
-	// carries the unwind.
-	c.coh.Reset()
-	for i := range c.putStripes {
-		c.putStripes[i].Unlock()
+	for i := range c.shards {
+		c.shards[i].tbl.Store(fresh[i])
+		c.shards[i].n.Store(0)
 	}
+	// Reset coherence only after publishing the empty tables. Paired with
+	// GetWithTxNum's snapshot-before-load ordering, this ensures an entry from
+	// a retiring table is judged by pre-Reset coherence that still carries the
+	// unwind.
+	c.coh.Reset()
 }
 
 // Close returns this cache's envelope reservation so later caches can grow into
@@ -592,19 +477,11 @@ func (c *GenericCache[T]) Close() {
 	if !c.enveloped || !c.closed.CompareAndSwap(false, true) {
 		return
 	}
-	// Settle behind the same stripe fence Clear uses: a writer holding a stripe
-	// can be mid-grow, and outside it that grow would either refund bytes
-	// already released here or attach a reservation nothing will release.
-	// closed is set first, so a writer arriving after the fence cannot fund one.
-	c.resizeMu.Lock()
-	for i := range c.putStripes {
-		c.putStripes[i].Lock()
-	}
+	// Settle behind the shard mutexes a grow runs under; closed is set first, so
+	// a writer arriving after the fence cannot fund one.
+	c.lockAll()
 	reserved := c.reservedBytes.Swap(0)
-	for i := range c.putStripes {
-		c.putStripes[i].Unlock()
-	}
-	c.resizeMu.Unlock()
+	c.unlockAll()
 	cachebudget.Global.Release(reserved)
 }
 
@@ -618,7 +495,21 @@ func (c *GenericCache[T]) Unwind(unwindToTxNum uint64) {
 
 // Len returns the number of entries in the cache.
 func (c *GenericCache[T]) Len() int {
-	return c.data.Load().Len()
+	n := int64(0)
+	for i := range c.shards {
+		n += c.shards[i].n.Load()
+	}
+	return int(n)
+}
+
+// allocatedSlots is the slots the shards hold right now, which is below maxCap
+// for every shard still growing or refused a step.
+func (c *GenericCache[T]) allocatedSlots() int {
+	n := 0
+	for i := range c.shards {
+		n += len(*c.shards[i].tbl.Load()) * bucketWays
+	}
+	return n
 }
 
 // SizeBytes returns the current size of the cache in bytes.
@@ -651,7 +542,7 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 		"hits", hits, "misses", misses, "hit_rate", hitRate,
 		"inserts", inserts, "evictions", evictions, "dropped", dropped,
 		"stale_evicted", staleEvicted, "epoch", c.coh.Epoch(),
-		"entries", c.data.Load().Len(), "size_mb", sizeBytes/(1024*1024),
+		"entries", c.Len(), "size_mb", sizeBytes/(1024*1024),
 		"capacity_mb", int64(c.capacityB/datasize.MB), "slots_pct", c.slotsPct(),
 		"reserved_mb", c.reservedBytes.Load()/int64(datasize.MB),
 	)
@@ -659,15 +550,11 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 
 // slotsPct is how full the cache is against the slots it has allocated, not
 // against maxCap: a shard refused a grow step evicts at its current size.
-// currentSize is not the numerator for a payloadBytes denominator: that
-// estimate counts only what an entry points at, so for a value held inline in T
-// the two disagree by the whole value. Bytes are reported as size_mb.
 func (c *GenericCache[T]) slotsPct() float64 {
-	d := c.data.Load()
-	// Length first: capacity only rises within a generation, so a capacity read
-	// after it can only make the ratio smaller, never report over 100%.
-	held := d.Len()
-	allocated := d.Cap()
+	// Length first: allocation only rises between Clears, so a read after it can
+	// only make the ratio smaller, never report over 100%.
+	held := c.Len()
+	allocated := c.allocatedSlots()
 	if allocated == 0 {
 		return 0
 	}
