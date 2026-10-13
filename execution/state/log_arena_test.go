@@ -567,3 +567,21 @@ func TestAllocLogGrowsTopicsInChunks(t *testing.T) {
 	})
 	require.Less(t, allocs, 1024.0*1.5, "%v allocations for 1024 entries and 1024 topic pairs", allocs)
 }
+
+// A reused entry that needs more topics than it had must not grow into the
+// topics of the entry carved next to it.
+func TestAllocLogTopicsDoNotOverlap(t *testing.T) {
+	addr := common.HexToAddress("0x1")
+	ibs := New(nil)
+	ibs.SetTxContext(1, 0)
+	ibs.AllocLog(addr, 1, 0)
+	ibs.AllocLog(addr, 1, 0)
+	ibs.Reset()
+
+	ibs.SetTxContext(1, 1)
+	x := ibs.AllocLog(addr, 1, 0)
+	x.Topics[0] = common.HexToHash("0x11")
+	y := ibs.AllocLog(addr, 2, 0)
+	y.Topics[0], y.Topics[1] = common.HexToHash("0x22"), common.HexToHash("0x33")
+	require.Equal(t, common.HexToHash("0x11"), x.Topics[0])
+}
