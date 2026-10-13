@@ -341,7 +341,7 @@ func (ibs *IntraBlockState) SetTrace(trace bool) {
 }
 
 func (ibs *IntraBlockState) hasWrite(addr accounts.Address, path AccountPath, key accounts.StorageKey) bool {
-	return ibs.versionedWrites.Has(WriteHeader{Address: addr, Path: path, Key: key})
+	return ibs.versionedWrites.has(addr, path, key)
 }
 
 // Reset clears out all ephemeral state objects from the state db, but keeps
@@ -884,9 +884,11 @@ func (ibs *IntraBlockState) GetCodeHash(addr accounts.Address) (accounts.CodeHas
 	// SELFDESTRUCT cleared the CodeHashPath cell (that clear is for later-tx reads,
 	// where extraction drops the path), but the code itself is still present —
 	// recompute the hash from it, matching the materialized path's resident object.
-	if hash == accounts.EmptyCodeHash && ibs.hasWrite(addr, SelfDestructPath, accounts.NilKey) {
-		if cw, ok := ibs.versionedWrites.GetCode(addr); ok && len(cw.Val.Bytes) > 0 {
-			return accounts.InternCodeHash(crypto.Keccak256Hash(cw.Val.Bytes)), nil
+	if hash == accounts.EmptyCodeHash {
+		if sd, ok := ibs.versionedWriteSelfDestruct(addr); ok && sd {
+			if cw, ok := ibs.versionedWrites.GetCode(addr); ok && len(cw.Val.Bytes) > 0 {
+				return accounts.InternCodeHash(crypto.Keccak256Hash(cw.Val.Bytes)), nil
+			}
 		}
 	}
 	if ibs.eip8246 && hash == accounts.NilCodeHash {

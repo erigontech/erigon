@@ -3641,12 +3641,12 @@ func (v *writeView) updateStorage(addr accounts.Address, key accounts.StorageKey
 	}
 }
 
-func (v *writeView) Has(h WriteHeader) bool {
-	r := v.t.find(h.Address)
+func (v *writeView) has(addr accounts.Address, path AccountPath, key accounts.StorageKey) bool {
+	r := v.t.find(addr)
 	if r == nil {
 		return false
 	}
-	switch h.Path {
+	switch path {
 	case AddressPath:
 		return r.wAddress != nil
 	case BalancePath:
@@ -3666,7 +3666,7 @@ func (v *writeView) Has(h WriteHeader) bool {
 	case CodeSizePath:
 		return r.wCodeSize != nil
 	case StoragePath:
-		_, ok := r.wStorage[h.Key]
+		_, ok := r.wStorage[key]
 		return ok
 	}
 	return false
