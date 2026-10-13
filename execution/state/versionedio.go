@@ -3805,7 +3805,6 @@ func (t *ioTable) toReadSet() ReadSet {
 type writeView struct {
 	t     *ioTable
 	slabs wsSlabs
-	tmp   WriteSet
 }
 
 type wsSlabs struct {
@@ -4096,46 +4095,6 @@ func (v *writeView) restoreCreateFields(addr accounts.Address, snap *createWrite
 	r.wCodeHash = snap.codeHash
 }
 
-// live fills the reusable tmp set with the live writes, sharing their pointers.
-func (v *writeView) live() *WriteSet {
-	ws := &v.tmp
-	for i := range v.t.recs {
-		r := &v.t.recs[i]
-		a := r.addr
-		if r.wAddress != nil {
-			ws.SetAddress(a, r.wAddress)
-		}
-		if r.wBalance != nil {
-			ws.SetBalance(a, r.wBalance)
-		}
-		if r.wNonce != nil {
-			ws.SetNonce(a, r.wNonce)
-		}
-		if r.wIncarnation != nil {
-			ws.SetIncarnation(a, r.wIncarnation)
-		}
-		if r.wSelfDestruct != nil {
-			ws.SetSelfDestruct(a, r.wSelfDestruct)
-		}
-		if r.wCreateContract != nil {
-			ws.SetCreateContract(a, r.wCreateContract)
-		}
-		if r.wCode != nil {
-			ws.SetCode(a, r.wCode)
-		}
-		if r.wCodeHash != nil {
-			ws.SetCodeHash(a, r.wCodeHash)
-		}
-		if r.wCodeSize != nil {
-			ws.SetCodeSize(a, r.wCodeSize)
-		}
-		for k, w := range r.wStorage {
-			ws.SetStorage(a, k, w)
-		}
-	}
-	return ws
-}
-
 // Snapshot returns a detached copy with WriteSet.Snapshot's self-destruct rules.
 func (v *writeView) Snapshot() *WriteSet {
 	out := &WriteSet{}
@@ -4232,5 +4191,27 @@ func (v *writeView) Count() int {
 
 // AllHeaders visits the header of every live write.
 func (v *writeView) AllHeaders() iter.Seq[WriteHeader] {
-	return v.live().AllHeaders()
+	return func(yield func(WriteHeader) bool) {
+		for i := range v.t.recs {
+			r := &v.t.recs[i]
+			for _, h := range []*WriteHeader{whdr(r.wAddress), whdr(r.wBalance), whdr(r.wNonce), whdr(r.wIncarnation),
+				whdr(r.wSelfDestruct), whdr(r.wCreateContract), whdr(r.wCode), whdr(r.wCodeHash), whdr(r.wCodeSize)} {
+				if h != nil && !yield(*h) {
+					return
+				}
+			}
+			for _, w := range r.wStorage {
+				if !yield(w.WriteHeader) {
+					return
+				}
+			}
+		}
+	}
+}
+
+func whdr[T any](w *VersionedWrite[T]) *WriteHeader {
+	if w == nil {
+		return nil
+	}
+	return &w.WriteHeader
 }

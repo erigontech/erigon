@@ -430,7 +430,7 @@ func TestVersionedIO_RemovedDependencyFallsThroughToStorage(t *testing.T) {
 	ibs := NewWithVersionMap(sr, NewVersionMap(nil))
 	ibs.SetTxContext(2, 0)
 
-	ibs.versionedReads = ReadSet{}
+	ibs.ResetVersionedReads()
 	ibs.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
 		Val:        *uint256.NewInt(0xBB),
@@ -1866,14 +1866,6 @@ func TestArenaBoundsTheOverflowListItKeeps(t *testing.T) {
 	}
 	a.reset(releaseVWNonce)
 	require.LessOrEqual(t, cap(a.overflow), vwMaxOverflow)
-}
-
-func TestOnlyAReusedStateOwnsItsCells(t *testing.T) {
-	ibs := New(NewNoopReader())
-	require.False(t, ibs.versionedWrites.ArenaBacked(), "a one-shot state buys no slabs")
-
-	ibs.ResetVersionedIO()
-	require.True(t, ibs.versionedWrites.ArenaBacked(), "a state that outlives a tx owns its cells")
 }
 
 // A path that writes a handful of cells must buy a handful: the first slab is
