@@ -848,6 +848,7 @@ var (
 // in-memory commitment fold.
 type headCaptureSource struct {
 	pinnedParentTx kv.TemporalTx
+	records        *commitmentdb.ParentRecords
 }
 
 // collapseReaderFor selects the collapse-detection state reader: plain state at block
@@ -855,7 +856,7 @@ type headCaptureSource struct {
 // parent-block history txNum (durable).
 func collapseReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBlock, endTxNum uint64) commitmentdb.StateReader {
 	if hc != nil {
-		return commitmentdb.NewHeadCaptureStateReader(hc.pinnedParentTx, tx, endTxNum)
+		return commitmentdb.NewHeadCaptureStateReader(hc.pinnedParentTx, tx, endTxNum).WithParentRecords(hc.records)
 	}
 	return commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, endTxNum, false /* withHistory */)
 }
@@ -866,7 +867,7 @@ func collapseReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBloc
 // WithHistory()==true so the read-only witness-capture fold does not write branches.
 func trieReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBlock uint64) commitmentdb.StateReader {
 	if hc != nil {
-		return commitmentdb.NewHeadCaptureTrieStateReader(hc.pinnedParentTx, tx, firstTxNumInBlock)
+		return commitmentdb.NewHeadCaptureTrieStateReader(hc.pinnedParentTx, tx, firstTxNumInBlock).WithParentRecords(hc.records)
 	}
 	return commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
 }
@@ -877,8 +878,8 @@ func trieReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBlock ui
 // state is read from committedTx's history exactly as the durable path does; only the
 // commitment source changes. Direct tx.GetLatest reads keep the pinned commitment
 // state independent of the build's in-memory commitment fold.
-func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, committedTx, pinnedParentTx kv.TemporalTx, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
-	hc := &headCaptureSource{pinnedParentTx: pinnedParentTx}
+func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, committedTx, pinnedParentTx kv.TemporalTx, records *commitmentdb.ParentRecords, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
+	hc := &headCaptureSource{pinnedParentTx: pinnedParentTx, records: records}
 	return api.buildWitnessResult(ctx, committedTx, hc, info, mode)
 }
 

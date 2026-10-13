@@ -88,6 +88,39 @@ func TestBranchPrefetcherChunkStopsOnPause(t *testing.T) {
 	require.Len(t, p.work, branchPrefetchPerTx-1)
 }
 
+func TestParentRecordsOnlyForOneVerifiedChildOfTheReadHead(t *testing.T) {
+	p := &branchPrefetcher{seed: maphash.MakeSeed()}
+	for i := range p.shards {
+		p.shards[i].records = make(map[string]prefetchedRecord)
+	}
+	p.put([]byte{0x12}, []byte("parent-record"), 4)
+	head := common.Hash{9}
+	child := commitTarget{blockNum: 10, blockHash: common.Hash{10}, parentHash: head}
+	calc := func() *commitmentCalculator {
+		return &commitmentCalculator{state: &calcState{branchPrefetch: p}, readAtNum: 9, readAtHash: head}
+	}
+
+	cc := calc()
+	require.Nil(t, cc.parentRecords(), "nothing verified")
+	cc.noteVerified(child)
+	r := cc.parentRecords()
+	require.NotNil(t, r)
+	require.Equal(t, child.blockHash, r.BlockHash)
+	data, step, ok := r.Get([]byte{0x12})
+	require.True(t, ok)
+	require.Equal(t, []byte("parent-record"), data)
+	require.Equal(t, kv.Step(4), step)
+
+	cc = calc()
+	cc.noteVerified(commitTarget{blockNum: 10, blockHash: common.Hash{10}, parentHash: common.Hash{8}})
+	require.Nil(t, cc.parentRecords(), "a block whose parent is not the head the records were read at")
+
+	cc = calc()
+	cc.noteVerified(child)
+	cc.noteVerified(commitTarget{blockNum: 11, blockHash: common.Hash{11}, parentHash: child.blockHash})
+	require.Nil(t, cc.parentRecords(), "a calculator that verified two blocks")
+}
+
 func TestHandleBlockRequestQueuesBALWrites(t *testing.T) {
 	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
 	dbg.IgnoreBAL = false

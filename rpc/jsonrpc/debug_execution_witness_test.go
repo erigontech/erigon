@@ -488,7 +488,7 @@ func TestBuildWitnessResultHeadCapture_FailsClosedOnBadParent(t *testing.T) {
 	info, err := api.resolveWitnessBlock(ctx, tx, rpc.BlockNumberOrHash{BlockNumber: &bn})
 	require.NoError(t, err)
 
-	result, err := api.buildWitnessResultHeadCapture(ctx, tx, tx, info, witnessModeLegacy)
+	result, err := api.buildWitnessResultHeadCapture(ctx, tx, tx, nil, info, witnessModeLegacy)
 	require.Error(t, err, "a mispinned parent must fail a validation gate")
 	require.Nil(t, result, "no witness is produced on gate failure")
 }
@@ -522,7 +522,7 @@ func TestHeadCaptureFailClosedYieldsOutOfWindow(t *testing.T) {
 	require.NoError(t, err)
 
 	// The tip-pinned tx carries block 13's commitment, not parent(3): a validation gate fails.
-	result, err := api.buildWitnessResultHeadCapture(ctx, tx, tx, info, witnessModeLegacy)
+	result, err := api.buildWitnessResultHeadCapture(ctx, tx, tx, nil, info, witnessModeLegacy)
 	require.Error(t, err, "a stale parent view must fail a validation gate")
 	require.Nil(t, result, "no wrong witness is produced on gate failure")
 	require.Equal(t, 0, api.witnessCache.Len(), "a gate failure caches nothing")

@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -472,8 +473,12 @@ func (api *DebugAPIImpl) tryHeadCaptureBuild(ctx context.Context, committedTx kv
 		witnessCacheBuildFailOtherCounter.Inc()
 		return false
 	}
+	records := commitmentdb.ParentRecordsFor(num, hash, parentHash)
+	if records != nil {
+		witnessCacheParentRecordsCounter.Inc()
+	}
 	if _, err = api.witnessCache.buildOnce(ctx, hash, func(ctx context.Context) (*ExecutionWitnessResult, error) {
-		return api.buildWitnessResultHeadCapture(ctx, committedTx, pin.tx, info, witnessModeLegacy)
+		return api.buildWitnessResultHeadCapture(ctx, committedTx, pin.tx, records, info, witnessModeLegacy)
 	}, api.storeBuiltWitness(num, hash)); err != nil {
 		if errors.Is(err, errWitnessVerifyFailed) {
 			witnessCacheBuildFailVerifyCounter.Inc()

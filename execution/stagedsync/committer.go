@@ -16,6 +16,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
@@ -23,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
 // commitmentResult is the outcome of a single commitment computation.
@@ -113,6 +115,11 @@ type commitmentCalculator struct {
 	// roTx is a persistent read-only transaction for domain reads.
 	// Opened at start, lives for the calculator's lifetime.
 	roTx kv.TemporalTx
+
+	readAtNum    uint64
+	readAtHash   common.Hash
+	handoff      *commitTarget
+	handoffMulti bool
 
 	// commitProgress holds the most recent CommitProgress the trie reported,
 	// and firstCommitAtNs the wall time of the first round. The parallel
@@ -349,6 +356,13 @@ func newCommitmentCalculator(
 		done:                 make(chan struct{}),
 		processedWake:        make(chan struct{}),
 	}
+	if calc.branchPrefetch != nil {
+		if n, err := stages.GetStageProgress(roTx, stages.Execution); err == nil {
+			if h, err := rawdb.ReadCanonicalHash(roTx, n); err == nil {
+				cc.readAtNum, cc.readAtHash = n, h
+			}
+		}
+	}
 	if dbg.BALCommitmentWarmupReaders() > 0 && !doms.GetCommitmentContext().AcceptsFeed() {
 		cc.state.prefetch = func(plainKey []byte) {
 			if !cc.balBlock {
@@ -400,6 +414,9 @@ func (cc *commitmentCalculator) Stop() {
 		p.close()
 		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", p.bytes.Load(),
 			"hits", p.hits.Load(), "misses", p.misses.Load(), "dropped", p.dropped.Load(), "drained", p.drained.Load())
+		if r := cc.parentRecords(); r != nil {
+			commitmentdb.PublishParentRecords(r)
+		}
 	}
 	if cc.prefetch != nil {
 		cc.prefetch.CloseAndWait()
@@ -904,14 +921,30 @@ func (cc *commitmentCalculator) shouldComputeOnRequest() bool {
 // commitTarget is the block identity a compute needs; a mid-block checkpoint has
 // no StateRoot, so it carries a zero one and never sets checkRoot.
 type commitTarget struct {
-	blockNum  uint64
-	blockHash common.Hash
-	lastTxNum uint64
-	stateRoot common.Hash
+	blockNum   uint64
+	blockHash  common.Hash
+	parentHash common.Hash
+	lastTxNum  uint64
+	stateRoot  common.Hash
 }
 
 func targetOf(br *blockResult) commitTarget {
-	return commitTarget{blockNum: br.Block.NumberU64(), blockHash: br.Block.Hash(), lastTxNum: br.lastTxNum, stateRoot: br.Block.Root()}
+	return commitTarget{blockNum: br.Block.NumberU64(), blockHash: br.Block.Hash(), parentHash: br.Block.ParentHash(), lastTxNum: br.lastTxNum, stateRoot: br.Block.Root()}
+}
+
+func (cc *commitmentCalculator) noteVerified(t commitTarget) {
+	if cc.handoff != nil && cc.handoff.blockHash != t.blockHash {
+		cc.handoffMulti = true
+	}
+	cc.handoff = &t
+}
+
+func (cc *commitmentCalculator) parentRecords() *commitmentdb.ParentRecords {
+	h, p := cc.handoff, cc.state.branchPrefetch
+	if h == nil || p == nil || cc.handoffMulti || h.blockNum != cc.readAtNum+1 || h.parentHash != cc.readAtHash {
+		return nil
+	}
+	return &commitmentdb.ParentRecords{BlockNum: h.blockNum, BlockHash: h.blockHash, ParentHash: h.parentHash, Get: p.get}
 }
 
 // computeMode selects compute's per-call behaviour; isolation is otherwise
@@ -1039,6 +1072,9 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	if !m.midBlock {
 		cc.lastComputedBlock = t.blockNum
 		cc.hasComputed = true
+		if m.checkRoot && !mismatch {
+			cc.noteVerified(t)
+		}
 	}
 
 	if !m.checkRoot {

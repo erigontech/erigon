@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -437,6 +438,74 @@ func TestBuildAndCacheHeadCaptureHappyPath(t *testing.T) {
 // TestNewWitnessCacheBuilderAPISelectsMode pins that the head-capture argument routes
 // straight into the shared cache's mode fields: head-capture construction yields a
 // cache-only, head-capture cache; durable construction yields a recompute-capable one.
+func TestBuildAndCacheHeadCaptureReadsParentRecords(t *testing.T) {
+	t.Run("legacy", func(t *testing.T) { headCaptureReadsParentRecords(t, false) })
+	t.Run("v3", func(t *testing.T) { headCaptureReadsParentRecords(t, true) })
+}
+
+func headCaptureReadsParentRecords(t *testing.T, commitmentV3 bool) {
+	previousSchema, previousV3 := statecfg.Schema, statecfg.ExperimentalCommitmentV3
+	t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousSchema, previousV3 })
+	statecfg.ExperimentalCommitmentV3 = commitmentV3
+	if commitmentV3 {
+		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	}
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { commitmentdb.PublishParentRecords(nil) })
+
+	m, testChain := rpcdaemontest.CreateTestExecModuleNoInsert(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	const buildNum = uint64(6)
+	require.NoError(t, m.InsertChain(testChain.Slice(0, int(buildNum)-1)))
+	parentHash, _ := buildTestChainHeader(t, m, buildNum-1)
+	parentTx := func() kv.TemporalTx {
+		tx, err := m.DB.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		t.Cleanup(tx.Rollback)
+		return tx
+	}
+	pinA, recsA, pinB := parentTx(), parentTx(), parentTx()
+	require.NoError(t, m.InsertChain(testChain.Slice(int(buildNum)-1, int(buildNum))))
+	hash, _ := buildTestChainHeader(t, m, buildNum)
+
+	onDemand := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	bn := rpc.BlockNumber(buildNum)
+	want, err := onDemand.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+	require.NoError(t, err)
+	wantBytes, err := jsonstream.Marshal(want)
+	require.NoError(t, err)
+
+	build := func(pinTx kv.TemporalTx, get func(k []byte) ([]byte, kv.Step, bool)) (*ExecutionWitnessResult, bool) {
+		commitmentdb.PublishParentRecords(&commitmentdb.ParentRecords{BlockNum: buildNum, BlockHash: hash, ParentHash: parentHash, Get: get})
+		committedTx, err := m.DB.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		defer committedTx.Rollback()
+		api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+		api.witnessCache = newWitnessResultCache(96, 0, true, true)
+		api.tryHeadCaptureBuild(ctx, committedTx, &rollingPin{tx: pinTx, num: buildNum - 1, hash: parentHash}, buildNum, hash)
+		return api.witnessCache.Get(hash)
+	}
+
+	served := 0
+	got, ok := build(pinA, func(k []byte) ([]byte, kv.Step, bool) {
+		v, step, err := recsA.GetLatest(kv.CommitmentDomain, k, kv.GetLatestOptions{})
+		require.NoError(t, err)
+		served++
+		return v, step, true
+	})
+	require.True(t, ok, "a build over correct parent records is cached")
+	require.NotZero(t, served, "the build reads commitment through the parent records")
+	gotBytes, err := jsonstream.Marshal(got)
+	require.NoError(t, err)
+	require.Equal(t, wantBytes, gotBytes, "the witness over parent records matches the durable build")
+
+	_, ok = build(pinB, func(k []byte) ([]byte, kv.Step, bool) { return []byte{0x01, 0x02}, 0, true })
+	require.False(t, ok, "wrong parent records fail a gate and cache nothing")
+}
+
 func TestNewWitnessCacheBuilderAPISelectsMode(t *testing.T) {
 	m, _ := rpcdaemontest.CreateTestExecModuleNoInsert(t)
 	cfg := &httpcfg.HttpCfg{WitnessCacheBlocks: 8, Dirs: m.Dirs}
