@@ -398,7 +398,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// stopCause. Separating them lets a clean-stop cancel signal the calculator
 	// without aborting an in-flight commitment.
 	commitDomainReader := state.NewLayeredDomainReader(pe.rs.Domains(), nil, pe.prevBlocks)
-	calculator, err := newCommitmentCalculator(ctx, executorContext, pe.rs.Domains(), pe.cfg.db, pe.cfg.chainConfig, pe.logPrefix, pe.logger, forcePerBlockCompute, pe.changesetWindowStart, commitResults, blockRequests, rootResults, commitDomainReader)
+	// committedTransactions=0: handleCommitResult already stored the absolute
+	// lastCommittedTxNum, so the commit log must not re-add a delta.
+	logCommit := func(p commitment.CommitProgress) { pe.LogCommitments(0, stepsInDb, p) }
+	calculator, err := newCommitmentCalculator(ctx, executorContext, pe.rs.Domains(), pe.cfg.db, pe.cfg.chainConfig, pe.logPrefix, pe.logger, forcePerBlockCompute, pe.changesetWindowStart, commitResults, blockRequests, rootResults, commitDomainReader, logCommit)
 	if err != nil {
 		return nil, nil, err
 	}
