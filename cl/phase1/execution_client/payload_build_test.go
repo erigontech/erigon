@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/builder"
@@ -155,4 +156,36 @@ func TestDirectFinalNotValidatedBelowTracksTheHead(t *testing.T) {
 	below, ok := newClient(6).FinalNotValidatedBelow(t.Context())
 	require.True(t, ok)
 	require.Equal(t, uint64(6-reorgTooDeepDepth), below)
+}
+
+// insertThenCancelModule stores nothing and ends the caller's context once the insert returns, as
+// a client that gives up while the payload is being inserted does.
+type insertThenCancelModule struct {
+	execmodule.ExecutionModule
+	cancel context.CancelFunc
+}
+
+func (m insertThenCancelModule) InsertBlocks(context.Context, []*types.Block) (execmodule.ExecutionStatus, error) {
+	m.cancel()
+	return execmodule.ExecutionStatusSuccess, nil
+}
+
+// A head read that fails because the caller's context ended is no reason to answer NotValidated.
+func TestDirectNewPayloadReportsAnEndedContextAsNoVerdict(t *testing.T) {
+	module := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	ctx, cancel := context.WithCancel(t.Context())
+	chainRW := chainreader.NewChainReaderEth1(module.ChainConfig, insertThenCancelModule{ExecutionModule: module.ExecModule, cancel: cancel}, time.Hour)
+	client, err := NewExecutionClientDirect(chainRW, nil)
+	require.NoError(t, err)
+
+	payload := gloas(&clparams.MainnetBeaconConfig, nil)
+	parentRoot := common.Hash{}
+	payload.BlockHash, err = payload.ComputeBlockHash(&parentRoot, cltypes.ComputeExecutionRequestHash(nil), nil)
+	require.NoError(t, err)
+
+	status, err := client.NewPayload(ctx, payload, &parentRoot, nil, nil)
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.EqualValues(t, PayloadStatusNone, status)
+	require.True(t, ValidationInterrupted(ctx, status, err))
 }

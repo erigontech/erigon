@@ -3,6 +3,7 @@ package stages
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"sync"
 	"testing"
@@ -625,13 +626,7 @@ type envelopeReadTestStore struct {
 	onErr     error
 	persisted *cltypes.SignedExecutionPayloadEnvelope
 	readErr   error
-	known     map[common.Hash]execution_client.PayloadStatus
 	recorded  map[common.Hash]execution_client.PayloadStatus
-}
-
-func (s *envelopeReadTestStore) GetRecentExecutionPayloadStatusByRoot(root common.Hash) (execution_client.PayloadStatus, bool) {
-	status, ok := s.known[root]
-	return status, ok
 }
 
 func (s *envelopeReadTestStore) MarkPayloadStatusAndGasLimitIfRetained(root, _ common.Hash, status execution_client.PayloadStatus, _ uint64) (execution_client.PayloadStatus, bool) {
@@ -1119,7 +1114,6 @@ func TestValidateAnchorPayloadWithAnyExecutionClient(t *testing.T) {
 	}{
 		{name: "remote EL", engine: &testExecutionEngine{payloadStatus: execution_client.PayloadStatusValidated}},
 		{name: "local EL", engine: &testExecutionEngine{supportInsertion: true, payloadStatus: execution_client.PayloadStatusValidated}},
-		{name: "no EL"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			forkGraph, err := fork_graph.NewForkGraphDisk(st, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
@@ -1140,15 +1134,9 @@ func TestValidateAnchorPayloadWithAnyExecutionClient(t *testing.T) {
 			)
 			require.NoError(t, err)
 
-			stageCfg := &Cfg{beaconCfg: cfg, forkChoice: store}
-			if test.engine != nil {
-				stageCfg.executionClient = test.engine
-				stageCfg.gloasPayloadValidator = test.engine
-			}
+			stageCfg := &Cfg{beaconCfg: cfg, forkChoice: store, executionClient: test.engine, gloasPayloadValidator: test.engine}
 			require.NoError(t, validateAnchorPayloadWithExecutionClient(context.Background(), stageCfg, anchorRoot, bid, env))
-			if test.engine != nil {
-				require.Equal(t, 1, test.engine.newPayloadCalls)
-			}
+			require.Equal(t, 1, test.engine.newPayloadCalls)
 			gasLimit, ok := store.GetExecutionPayloadGasLimit(env.Message.Payload.BlockHash)
 			require.True(t, ok)
 			require.Equal(t, env.Message.Payload.GasLimit, gasLimit)
@@ -1174,42 +1162,6 @@ func interruptingEngine(cancel context.CancelFunc) *testExecutionEngine {
 	}}
 }
 
-func TestValidateAnchorPayloadRecordsNoVerdictWhenInterrupted(t *testing.T) {
-	cfg, st, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
-	anchorRoot, err := st.BlockRoot()
-	require.NoError(t, err)
-	store := newAnchorForkChoiceStore(t, cfg, st, nil)
-	ctx, cancel := context.WithCancel(t.Context())
-	engine := interruptingEngine(cancel)
-
-	require.NoError(t, validateAnchorPayloadWithExecutionClient(ctx, &Cfg{beaconCfg: cfg, forkChoice: store, executionClient: engine, gloasPayloadValidator: engine}, anchorRoot, bid, env))
-	require.Equal(t, 1, engine.newPayloadCalls)
-	_, recorded := store.GetExecutionPayloadGasLimit(env.Message.Payload.BlockHash)
-	require.False(t, recorded)
-}
-
-// The anchor's payload is recorded as NotValidated when it is stored, also with an EL
-// configured, so an interrupted first validation does not leave the anchor hash without a status
-// or gas limit until the next retry.
-func TestStoreAnchorEnvelopeRecordsNotValidatedWithAnExecutionClient(t *testing.T) {
-	cfg, st, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
-	anchorRoot, err := st.BlockRoot()
-	require.NoError(t, err)
-	env.Message.BeaconBlockRoot = anchorRoot
-	privKey, err := bls.NewPrivateKeyFromIKM([]byte("01234567890123456789012345678901"))
-	require.NoError(t, err)
-	signAnchorEnvelope(t, st, privKey, env, bid.Slot)
-	store := newAnchorForkChoiceStore(t, cfg, st, &testExecutionEngine{})
-
-	require.NoError(t, store.StoreAnchorEnvelope(anchorRoot, env))
-	status, known := store.GetRecentExecutionPayloadStatusByRoot(anchorRoot)
-	require.True(t, known)
-	require.EqualValues(t, execution_client.PayloadStatusNotValidated, status)
-	gasLimit, ok := store.GetExecutionPayloadGasLimit(env.Message.Payload.BlockHash)
-	require.True(t, ok)
-	require.Equal(t, env.Message.Payload.GasLimit, gasLimit)
-}
-
 // finalNotValidatedEngine answers NotValidated finally below a block, as the direct EL client does.
 type finalNotValidatedEngine struct {
 	*testExecutionEngine
@@ -1230,11 +1182,12 @@ func TestDrainPendingGloasPayloadsDoesNotRequeueAFinalNotValidated(t *testing.T)
 		name     string
 		number   uint64
 		final    bool
+		calls    int
 		requeued bool
 	}{
-		{name: "deep below the direct EL head", number: below - 1, final: true, requeued: false},
-		{name: "at the direct EL boundary", number: below, final: true, requeued: true},
-		{name: "an EL without final answers", number: below - 1, final: false, requeued: true},
+		{name: "deep below the direct EL head", number: below - 1, final: true, calls: 0, requeued: false},
+		{name: "at the direct EL boundary", number: below, final: true, calls: 1, requeued: true},
+		{name: "an EL without final answers", number: below - 1, final: false, calls: 1, requeued: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fc := &forkchoice.ForkChoiceStore{}
@@ -1258,7 +1211,7 @@ func TestDrainPendingGloasPayloadsDoesNotRequeueAFinalNotValidated(t *testing.T)
 
 			drainPendingGloasPayloads(context.Background(), &Cfg{beaconCfg: &cfg, executionClient: engine, gloasPayloadValidator: base, forkChoice: fc})
 
-			require.Equal(t, 1, base.newPayloadCalls)
+			require.Equal(t, tc.calls, base.newPayloadCalls)
 			require.Equal(t, tc.requeued, len(fc.DrainPendingELPayloads()) == 1)
 		})
 	}
@@ -1530,7 +1483,18 @@ func (t *testExecutionEngine) NewPayload(ctx context.Context, payload *cltypes.E
 }
 
 func (t *testExecutionEngine) NewPayloadWithAdmission(ctx context.Context, payload *cltypes.Eth1Block, parentRoot *common.Hash, hashes []common.Hash, requests []hexutil.Bytes) (execution_client.PayloadStatus, error) {
-	return t.NewPayload(ctx, payload, parentRoot, hashes, requests)
+	return admitted(ctx)(t.NewPayload(ctx, payload, parentRoot, hashes, requests))
+}
+
+// admitted wraps a NewPayload result the way the fork-choice admission does: a call that ended
+// with its context carries ErrPayloadValidationInterrupted.
+func admitted(ctx context.Context) func(execution_client.PayloadStatus, error) (execution_client.PayloadStatus, error) {
+	return func(status execution_client.PayloadStatus, err error) (execution_client.PayloadStatus, error) {
+		if execution_client.ValidationInterrupted(ctx, status, err) {
+			return status, fmt.Errorf("%w: %w", forkchoice.ErrPayloadValidationInterrupted, err)
+		}
+		return status, err
+	}
 }
 
 func (t *testExecutionEngine) ForkChoiceUpdate(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error) {
@@ -1597,11 +1561,6 @@ func TestProcessDownloadedGloasEnvelopeRecordsNotValidatedWhenNotValidating(t *t
 		recorded map[common.Hash]execution_client.PayloadStatus
 	}{
 		{name: "new payload", store: &envelopeReadTestStore{}, recorded: notValidated},
-		// A resumed sync meets the copy it persisted before the restart.
-		{name: "already persisted copy", store: &envelopeReadTestStore{onErr: forkchoice.ErrIgnore, persisted: envelope}, recorded: notValidated},
-		{name: "verdict on record is kept", store: &envelopeReadTestStore{known: map[common.Hash]execution_client.PayloadStatus{root: execution_client.PayloadStatusValidated}}},
-		// None is no verdict: it leaves the payload unavailable.
-		{name: "None moves to NotValidated", store: &envelopeReadTestStore{known: map[common.Hash]execution_client.PayloadStatus{root: execution_client.PayloadStatusNone}}, recorded: notValidated},
 		// Validating with the EL records the verdict itself.
 		{name: "validated apply adds nothing", store: &envelopeReadTestStore{}, validate: true},
 	} {

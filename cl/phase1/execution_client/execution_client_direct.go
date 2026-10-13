@@ -97,13 +97,15 @@ func (cc *ExecutionClientDirect) NewPayload(
 	monitor.ObserveExecutionClientInsertingBlocks(startInsertBlock)
 
 	headHeader := cc.chainRW.CurrentHeader(ctx)
+	if headHeader == nil && ctx.Err() != nil {
+		return PayloadStatusNone, ctx.Err()
+	}
 	if headHeader == nil || header.Number.Uint64() > headHeader.Number.Uint64()+1 {
 		// can't validate yet
 		return PayloadStatusNotValidated, nil
 	}
 
-	// check if the block is too deep in the reorg accounting for underflow
-	if headHeader.Number.Uint64() > reorgTooDeepDepth && header.Number.Uint64() < headHeader.Number.Uint64()-reorgTooDeepDepth {
+	if below, ok := notValidatedBelow(headHeader); ok && header.Number.Uint64() < below {
 		// reorg too deep
 		return PayloadStatusNotValidated, nil
 	}
@@ -210,9 +212,14 @@ func retryAssembleBlock(ctx context.Context, attempts int, delay time.Duration, 
 }
 
 // FinalNotValidatedBelow returns the block number below which NewPayload answers NotValidated
-// without validating, being more than reorgTooDeepDepth below the current head.
+// without validating.
 func (cc *ExecutionClientDirect) FinalNotValidatedBelow(ctx context.Context) (uint64, bool) {
-	head := cc.chainRW.CurrentHeader(ctx)
+	return notValidatedBelow(cc.chainRW.CurrentHeader(ctx))
+}
+
+// notValidatedBelow returns the block number below which a block is more than reorgTooDeepDepth
+// below head, too deep to validate.
+func notValidatedBelow(head *types.Header) (uint64, bool) {
 	if head == nil || head.Number.Uint64() <= reorgTooDeepDepth {
 		return 0, false
 	}

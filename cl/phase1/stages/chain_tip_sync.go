@@ -1001,16 +1001,20 @@ func ensureStoredParentPayloadAccepted(
 	if ctx.Err() != nil {
 		return false
 	}
+	if elAnswersNotValidatedFinally(ctx, cfg.executionClient, envelope.Message.Payload.BlockNumber) {
+		status, retained := store.MarkPayloadStatusAndGasLimitIfRetained(root, envelope.Message.Payload.BlockHash, execution_client.PayloadStatusNotValidated, envelope.Message.Payload.GasLimit)
+		return retained && (status == execution_client.PayloadStatusNotValidated || status == execution_client.PayloadStatusValidated)
+	}
 	status, err := retryGloasPayloadWithEL(ctx, cfg, block, envelope)
 	// Running out of replay budget is not an EL verdict; recording None would mark a
 	// locally available payload unavailable.
-	if execution_client.ValidationInterrupted(ctx, status, err) {
+	if errors.Is(err, forkchoice.ErrPayloadValidationInterrupted) {
 		return false
 	}
 	if err != nil {
 		log.Warn("[chainTipSync] persisted parent GLOAS NewPayload failed", "slot", block.Block.Slot, "blockRoot", root, "status", status, "err", err)
 	}
-	status, retained := recordGloasPayloadRetryResult(ctx, cfg.executionClient, store, forkchoice.PendingELPayload{Block: block, Envelope: envelope}, status)
+	status, retained := recordGloasPayloadRetryResult(store, forkchoice.PendingELPayload{Block: block, Envelope: envelope}, status)
 	if !retained {
 		return false
 	}
@@ -1018,8 +1022,6 @@ func ensureStoredParentPayloadAccepted(
 }
 
 func recordGloasPayloadRetryResult(
-	ctx context.Context,
-	el execution_client.ExecutionEngine,
 	store gloasPayloadRetryResultStore,
 	payload forkchoice.PendingELPayload,
 	status execution_client.PayloadStatus,
@@ -1030,9 +1032,7 @@ func recordGloasPayloadRetryResult(
 	beaconRoot := payload.Envelope.Message.BeaconBlockRoot
 	executionPayload := payload.Envelope.Message.Payload
 	status, retained := store.MarkPayloadStatusAndGasLimitIfRetained(beaconRoot, executionPayload.BlockHash, status, executionPayload.GasLimit)
-	retry := status == execution_client.PayloadStatusNone ||
-		status == execution_client.PayloadStatusNotValidated && !elAnswersNotValidatedFinally(ctx, el, executionPayload.BlockNumber)
-	if retained && retry {
+	if retained && (status == execution_client.PayloadStatusNone || status == execution_client.PayloadStatusNotValidated) {
 		store.RequeuePendingELPayload(payload)
 	}
 	return status, retained
@@ -1094,11 +1094,14 @@ func isGloasPayloadKnownInvalid(cfg *Cfg, envelope *cltypes.SignedExecutionPaylo
 
 func drainPendingGloasPayloads(ctx context.Context, cfg *Cfg) {
 	pending := cfg.forkChoice.DrainPendingELPayloadsLimit(maxPendingGloasPayloadsPerCycle)
+	requeueFrom := func(i int) {
+		for _, deferred := range pending[i:] {
+			cfg.forkChoice.RequeuePendingELPayload(deferred)
+		}
+	}
 	for i, p := range pending {
 		if ctx.Err() != nil {
-			for _, deferred := range pending[i:] {
-				cfg.forkChoice.RequeuePendingELPayload(deferred)
-			}
+			requeueFrom(i)
 			return
 		}
 		if !validPendingGloasPayload(p) {
@@ -1108,17 +1111,20 @@ func drainPendingGloasPayloads(ctx context.Context, cfg *Cfg) {
 		if cfg.forkChoice.IsPayloadVerified(beaconRoot) {
 			continue
 		}
+		payload := p.Envelope.Message.Payload
+		if elAnswersNotValidatedFinally(ctx, cfg.executionClient, payload.BlockNumber) {
+			cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(beaconRoot, payload.BlockHash, execution_client.PayloadStatusNotValidated, payload.GasLimit)
+			continue
+		}
 		status, err := retryGloasPayloadWithEL(ctx, cfg, p.Block, p.Envelope)
-		if execution_client.ValidationInterrupted(ctx, status, err) {
-			for _, deferred := range pending[i:] {
-				cfg.forkChoice.RequeuePendingELPayload(deferred)
-			}
+		if errors.Is(err, forkchoice.ErrPayloadValidationInterrupted) {
+			requeueFrom(i)
 			return
 		}
 		if err != nil {
 			log.Warn("[chainTipSync] pending GLOAS NewPayload failed", "slot", p.Block.Block.Slot, "status", status, "err", err)
 		}
-		status, retained := recordGloasPayloadRetryResult(ctx, cfg.executionClient, cfg.forkChoice, p, status)
+		status, retained := recordGloasPayloadRetryResult(cfg.forkChoice, p, status)
 		if !retained {
 			continue
 		}
@@ -1170,6 +1176,14 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 	}
 
 	finalizedSlot := cfg.forkChoice.FinalizedSlot()
+	if cfg.gloasFinalNotValidated == nil {
+		cfg.gloasFinalNotValidated = make(map[common.Hash]uint64)
+	}
+	for root, slot := range cfg.gloasFinalNotValidated {
+		if slot <= finalizedSlot {
+			delete(cfg.gloasFinalNotValidated, root)
+		}
+	}
 	var blocks []gloasVerificationItem
 	var immediateHead *gloasVerificationItem
 
@@ -1233,6 +1247,11 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 			completedScan = true
 			break
 		}
+		// Ancestors of a payload the EL answers finally are deeper, so their answer is final too.
+		if _, final := cfg.gloasFinalNotValidated[root]; final {
+			completedScan = true
+			break
+		}
 		if cfg.forkChoice.HasEnvelope(root) && !cfg.forkChoice.IsPayloadVerified(root) {
 			blocks = append(blocks, gloasVerificationItem{root: root, block: block})
 		}
@@ -1263,18 +1282,17 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 		}
 		if elAnswersNotValidatedFinally(ctx, cfg.executionClient, envelope.Message.Payload.BlockNumber) {
 			cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(item.root, execHash, execution_client.PayloadStatusNotValidated, envelope.Message.Payload.GasLimit)
+			cfg.gloasFinalNotValidated[item.root] = item.block.Block.Slot
 			return true
 		}
 		status, err := retryGloasPayloadWithEL(ctx, cfg, item.block, envelope)
+		if errors.Is(err, forkchoice.ErrPayloadValidationInterrupted) {
+			return false
+		}
 		if err != nil {
 			log.Warn("[chainTipSync] GLOAS verification sweep NewPayload failed", "slot", item.block.Block.Slot, "blockRoot", item.root, "status", status, "err", err)
 		}
-		if execution_client.ValidationInterrupted(ctx, status, err) {
-			return ctx.Err() == nil
-		}
 		status, retained := recordGloasPayloadRetryResult(
-			ctx,
-			cfg.executionClient,
 			cfg.forkChoice,
 			forkchoice.PendingELPayload{Block: item.block, Envelope: envelope},
 			status,
@@ -1323,6 +1341,14 @@ func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
 	if status, ok := cfg.forkChoice.GetRecentExecutionPayloadStatusByRoot(anchorRoot); ok && status == execution_client.PayloadStatusInvalidated {
 		return
 	}
+	envelope, err := cfg.forkChoice.ReadEnvelopeFromDisk(anchorRoot)
+	if err != nil || envelope == nil || envelope.Message == nil || envelope.Message.Payload == nil {
+		log.Debug("[chainTipSync] failed to read anchor envelope for payload retry", "anchorRoot", anchorRoot, "err", err)
+		return
+	}
+	if elAnswersNotValidatedFinally(ctx, cfg.executionClient, envelope.Message.Payload.BlockNumber) {
+		return // the anchor keeps the NotValidated status StoreAnchorEnvelope recorded
+	}
 	anchorState, err := cfg.forkChoice.GetStateAtBlockRoot(anchorRoot, true)
 	if err != nil || anchorState == nil {
 		log.Debug("[chainTipSync] anchor state not available for payload retry", "anchorRoot", anchorRoot, "err", err)
@@ -1332,22 +1358,11 @@ func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
 	if bid == nil {
 		return
 	}
-	envelope, err := cfg.forkChoice.ReadEnvelopeFromDisk(anchorRoot)
-	if err != nil {
-		log.Debug("[chainTipSync] failed to read anchor envelope for payload retry", "anchorRoot", anchorRoot, "err", err)
-		return
-	}
 	if err := validateAnchorEnvelope(cfg.beaconCfg, anchorState, anchorRoot, bid, envelope); err != nil {
 		log.Warn("[chainTipSync] invalid anchor envelope during payload retry", "anchorRoot", anchorRoot, "err", err)
 		return
 	}
-	if elAnswersNotValidatedFinally(ctx, cfg.executionClient, envelope.Message.Payload.BlockNumber) {
-		return // the anchor keeps the NotValidated status StoreAnchorEnvelope recorded
-	}
 	status, err := validateAnchorPayloadWithEL(ctx, cfg, bid, envelope)
-	if execution_client.ValidationInterrupted(ctx, status, err) {
-		return
-	}
 	if err != nil {
 		log.Warn("[chainTipSync] anchor payload NewPayload retry failed", "anchorRoot", anchorRoot, "status", status, "err", err)
 	}

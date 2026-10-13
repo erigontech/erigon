@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -49,10 +48,10 @@ func (v *orderedPayloadValidator) NewPayloadWithAdmission(ctx context.Context, p
 	v.calls = append(v.calls, payload.BlockHash)
 	if payload.BlockHash == v.slow {
 		<-ctx.Done()
-		return execution_client.PayloadStatusNone, ctx.Err()
+		return admitted(ctx)(execution_client.PayloadStatusNone, ctx.Err())
 	}
 	if err := ctx.Err(); err != nil {
-		return execution_client.PayloadStatusNone, err
+		return admitted(ctx)(execution_client.PayloadStatusNone, err)
 	}
 	return execution_client.PayloadStatusNotValidated, nil
 }
@@ -398,27 +397,12 @@ func TestVerifyUnverifiedGloasPayloadsSkipsAFinalNotValidated(t *testing.T) {
 	require.True(t, found)
 	require.EqualValues(t, execution_client.PayloadStatusNotValidated, status)
 	require.Empty(t, cfg.forkChoice.DrainPendingELPayloads())
-}
 
-// The engine client's own HTTP timeout ends a NewPayload while the caller's context is alive;
-// that is no verdict either.
-func TestVerifyUnverifiedGloasPayloadsDoesNotRecordAClientTimeout(t *testing.T) {
-	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
-	headBlock := graph.parents[headRoot]
-	delete(graph.parents, headRoot)
-	graph.insertOnAdd = true
-	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
-	engine.newPayloadFn = func(context.Context, *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
-		return execution_client.PayloadStatusNone, fmt.Errorf("engine NewPayload failed: %w", context.DeadlineExceeded)
-	}
-	cfg.gloasVerificationCursor = headRoot
-
+	// A later pass stops at the root known final instead of collecting it again. An EL without
+	// final answers would be asked if the root were collected.
+	cfg.executionClient = engine
 	verifyUnverifiedGloasPayloads(t.Context(), cfg)
-
-	require.Equal(t, 1, engine.newPayloadCalls)
-	_, found := cfg.forkChoice.GetRecentExecutionPayloadStatusByRoot(headRoot)
-	require.False(t, found)
-	require.False(t, graph.IsPayloadUnavailable(headRoot))
+	require.Zero(t, engine.newPayloadCalls)
 }
 
 func TestVerifyUnverifiedGloasPayloadsChecksDirectExtensionWithEmptyCursor(t *testing.T) {
@@ -990,7 +974,7 @@ func TestStoredParentPayloadReplayReservesBudgetForLaterRoots(t *testing.T) {
 	secondStore := &storedParentPayloadTestStore{has: true, block: block, markRetained: true}
 	validator := &orderedPayloadValidator{slow: firstPayload.BlockHash}
 	replay := storedParentPayloadReplay{
-		deadline:  time.Now().Add(time.Second),
+		deadline:  time.Now().Add(100 * time.Millisecond),
 		remaining: 2,
 		results:   make(map[common.Hash]bool),
 	}

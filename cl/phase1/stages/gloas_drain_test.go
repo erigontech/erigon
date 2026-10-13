@@ -39,6 +39,8 @@ func TestDrainPendingGloasPayloadsRequeuesWithoutVerdictWhenNewPayloadIsInterrup
 		return execution_client.PayloadStatusNone, ctx.Err()
 	}
 	cfg.forkChoice.RequeuePendingELPayload(forkchoice.PendingELPayload{Block: headBlock, Envelope: graph.envelopes[headRoot]})
+	// Through the store's own admission, which classifies the interrupted call.
+	cfg.gloasPayloadValidator = cfg.forkChoice
 
 	drainPendingGloasPayloads(ctx, cfg)
 

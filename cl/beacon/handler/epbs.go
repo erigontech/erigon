@@ -1020,17 +1020,16 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	emitGossipEvent := false
 	emitIntegrationEvents := false
 	var persistenceErr error
-	publishCtx := r.Context()
+	// The client may give up while the EL validates; the envelope must still be published within
+	// its slot, whatever the outcome.
+	publishCtx, cancelPublish := context.WithTimeout(context.WithoutCancel(r.Context()), time.Duration(a.beaconChainCfg.SecondsPerSlot)*time.Second)
+	defer cancelPublish()
 	if err := a.processExecutionPayloadEnvelope(r.Context(), signedEnvelope, canonical); err != nil {
 		switch {
 		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed):
 			persistenceErr = err
 		case errors.Is(err, forkchoice.ErrPayloadValidationInterrupted):
-			// The envelope passed every consensus check; only the EL verdict is pending. The request
-			// context may be done by now, and the envelope must still be published within its slot.
-			var cancelPublish context.CancelFunc
-			publishCtx, cancelPublish = context.WithTimeout(context.WithoutCancel(r.Context()), time.Duration(a.beaconChainCfg.SecondsPerSlot)*time.Second)
-			defer cancelPublish()
+			// The envelope passed every consensus check; only the EL verdict is pending.
 		case canonical && !blobDataIncluded && errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable):
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return

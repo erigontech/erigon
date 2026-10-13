@@ -379,17 +379,47 @@ func gloas(cfg *clparams.BeaconChainConfig, balData []byte) *cltypes.Eth1Block {
 	return block
 }
 
-// A NewPayload cut short by the client's own timeout, with the caller's context still alive, is
-// no EL verdict either.
+type newPayloadEngineStub struct {
+	engineapi.EngineAPI
+	err error
+}
+
+func (s *newPayloadEngineStub) NewPayloadV5(context.Context, *engine_types.ExecutionPayload, []common.Hash, *common.Hash, []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
+	return nil, s.err
+}
+
+// The client's own timeout ends a NewPayload without a verdict while the caller still waits: the
+// payload stays available as NotValidated and is retried. A caller whose context ended keeps the
+// error.
+func TestNewPayloadTreatsAClientTimeoutAsNotValidated(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	payload := gloas(&cfg, nil)
+	clientTimeout := fmt.Errorf("Post: %w (Client.Timeout exceeded while awaiting headers)", context.DeadlineExceeded)
+	newClient := func(err error) *ExecutionClientEngine {
+		return &ExecutionClientEngine{engine: &newPayloadEngineStub{err: err}, beaconCfg: &cfg}
+	}
+
+	status, err := newClient(clientTimeout).NewPayload(t.Context(), payload, nil, nil, nil)
+	require.NoError(t, err)
+	require.EqualValues(t, PayloadStatusNotValidated, status)
+
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+	status, err = newClient(clientTimeout).NewPayload(cancelled, payload, nil, nil, nil)
+	require.Error(t, err)
+	require.EqualValues(t, PayloadStatusNone, status)
+
+	status, err = newClient(errors.New("connection refused")).NewPayload(t.Context(), payload, nil, nil, nil)
+	require.Error(t, err)
+	require.EqualValues(t, PayloadStatusNone, status)
+}
+
 func TestValidationInterrupted(t *testing.T) {
 	cancelled, cancel := context.WithCancel(t.Context())
 	cancel()
-	clientTimeout := fmt.Errorf("engine NewPayload failed: %w", fmt.Errorf("Post: %w (Client.Timeout exceeded while awaiting headers)", context.DeadlineExceeded))
 
 	require.True(t, ValidationInterrupted(cancelled, PayloadStatusNone, context.Canceled))
-	require.True(t, ValidationInterrupted(t.Context(), PayloadStatusNone, clientTimeout))
-	require.True(t, ValidationInterrupted(t.Context(), PayloadStatusNone, status.Error(codes.DeadlineExceeded, "deadline")))
 	require.False(t, ValidationInterrupted(t.Context(), PayloadStatusNone, errors.New("connection refused")))
-	require.False(t, ValidationInterrupted(t.Context(), PayloadStatusInvalidated, clientTimeout))
+	require.False(t, ValidationInterrupted(cancelled, PayloadStatusInvalidated, context.Canceled))
 	require.False(t, ValidationInterrupted(cancelled, PayloadStatusNone, nil))
 }
