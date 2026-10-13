@@ -1991,10 +1991,15 @@ func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
 type senderTask struct {
 	*exec.TxTask
 	sender accounts.Address
+	deps   []int
 }
 
 func (t *senderTask) TxSender() (accounts.Address, error) {
 	return t.sender, nil
+}
+
+func (t *senderTask) Dependencies() []int {
+	return t.deps
 }
 
 type schedulerTest struct {
@@ -2005,7 +2010,7 @@ type schedulerTest struct {
 	roTx kv.TemporalTx
 }
 
-func newSchedulerTest(t *testing.T, senders ...accounts.Address) *schedulerTest {
+func newSchedulerTest(t *testing.T, deps map[int][]int, senders ...accounts.Address) *schedulerTest {
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
 	signedTx := signSelfSendTx(t, 0, 0, 1, 21000, chainSpec.Config, 0)
 	txs := make([]types.Transaction, len(senders))
@@ -2027,7 +2032,7 @@ func newSchedulerTest(t *testing.T, senders ...accounts.Address) *schedulerTest 
 			TxIndex:         i,
 			Config:          chainSpec.Config,
 			Txs:             txs,
-		}, sender: from}
+		}, sender: from, deps: deps[i]}
 	}
 	s := &schedulerTest{t: t, ctx: context.Background(), pe: pe, be: be, roTx: roTx}
 	require.NoError(t, pe.processRequest(s.ctx, &execRequest{block: be.block, tasks: tasks}))
@@ -2057,7 +2062,7 @@ func (s *schedulerTest) parked(tx int) bool {
 func TestSameSenderSuccessorWaitsForPredecessorValidation(t *testing.T) {
 	raced := accounts.InternAddress([20]byte{0xfa, 0xde})
 	sender := accounts.InternAddress(common.HexToAddress("0x5e4d"))
-	s := newSchedulerTest(t, raced, sender, sender)
+	s := newSchedulerTest(t, nil, raced, sender, sender)
 	s.be.versionMap.WriteAddress(raced, state.Version{TxIndex: -1}, &accounts.Account{CodeHash: accounts.EmptyCodeHash}, true)
 	racedRead := state.ReadSet{}
 	racedRead.SetAddress(raced, state.VersionedRead[state.AccountView]{
@@ -2081,8 +2086,25 @@ func TestSameSenderSuccessorWaitsForPredecessorValidation(t *testing.T) {
 	require.True(t, s.be.execTasks.checkInProgress(2), "successor not dispatched after its predecessor validated")
 }
 
-func TestAbortDependentWaitsForBlockerValidation(t *testing.T) {
-	s := newSchedulerTest(t,
+func TestTxDependencyWaitsForBlockerValidation(t *testing.T) {
+	s := newSchedulerTest(t, map[int][]int{2: {0}},
+		accounts.InternAddress(common.HexToAddress("0xa0")),
+		accounts.InternAddress(common.HexToAddress("0xb1")),
+		accounts.InternAddress(common.HexToAddress("0xc2")))
+	first, blocker := s.dispatched(), s.dispatched()
+	require.Equal(t, []int{0, 1}, []int{first.index, blocker.index})
+	require.True(t, s.parked(2), "dependent dispatched alongside its blocker")
+
+	s.deliver(blocker, state.ReadSet{}, nil)
+	require.True(t, s.parked(2), "dependent released when its blocker executed")
+
+	s.deliver(first, state.ReadSet{}, nil)
+	require.True(t, s.be.validateTasks.checkComplete(1))
+	require.True(t, s.be.execTasks.checkInProgress(2), "dependent not dispatched after its blocker validated")
+}
+
+func TestAbortDependentReleasedWhenBlockerExecutes(t *testing.T) {
+	s := newSchedulerTest(t, nil,
 		accounts.InternAddress(common.HexToAddress("0xa0")),
 		accounts.InternAddress(common.HexToAddress("0xb1")),
 		accounts.InternAddress(common.HexToAddress("0xc2")))
@@ -2094,11 +2116,8 @@ func TestAbortDependentWaitsForBlockerValidation(t *testing.T) {
 	require.True(t, s.parked(2), "aborted dependent rescheduled while its blocker ran")
 
 	s.deliver(blocker, state.ReadSet{}, nil)
-	require.True(t, s.parked(2), "dependent released when its blocker executed")
-
-	s.deliver(first, state.ReadSet{}, nil)
-	require.True(t, s.be.validateTasks.checkComplete(1))
-	require.True(t, s.be.execTasks.checkInProgress(2), "dependent not dispatched after its blocker validated")
+	require.False(t, s.be.validateTasks.checkComplete(1))
+	require.True(t, s.be.execTasks.checkInProgress(2), "aborted dependent not dispatched when its blocker executed")
 }
 
 func TestFrontierRetryDispatchedBeforeBatchTail(t *testing.T) {
