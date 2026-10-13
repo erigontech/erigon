@@ -3061,6 +3061,7 @@ type ioTable struct {
 	idx  map[accounts.Address]int32
 	recs []acctIO
 	last int32
+	prev int32
 	// mapped bounds the records that may still hold slot maps from earlier calls.
 	mapped int
 	// accts holds the accounts the AddressPath reads point to until reset.
@@ -3069,15 +3070,21 @@ type ioTable struct {
 
 func pathBit(p AccountPath) uint16 { return 1 << p }
 
+// find memoizes the last two addresses: a caller and its callee, or a factory
+// and the account it creates, alternate.
 func (t *ioTable) find(addr accounts.Address) *acctIO {
 	if int(t.last) < len(t.recs) && t.recs[t.last].addr == addr {
+		return &t.recs[t.last]
+	}
+	if int(t.prev) < len(t.recs) && t.recs[t.prev].addr == addr {
+		t.last, t.prev = t.prev, t.last
 		return &t.recs[t.last]
 	}
 	i, ok := t.idx[addr]
 	if !ok {
 		return nil
 	}
-	t.last = i
+	t.prev, t.last = t.last, i
 	return &t.recs[i]
 }
 
@@ -3099,7 +3106,7 @@ func (t *ioTable) get(addr accounts.Address) *acctIO {
 	r := &t.recs[i]
 	*r = acctIO{addr: addr, storage: r.storage, sdWitnesses: r.sdWitnesses[:0], wStorage: r.wStorage, slotPeak: r.slotPeak}
 	t.idx[addr] = int32(i)
-	t.last = int32(i)
+	t.prev, t.last = t.last, int32(i)
 	return r
 }
 
@@ -3142,7 +3149,7 @@ func (t *ioTable) reset() {
 	t.accts.reset()
 	t.recs = t.recs[:0]
 	clear(t.idx)
-	t.last = 0
+	t.last, t.prev = 0, 0
 }
 
 // clearReads drops the reads and access marks but keeps writes and dirty counts.
