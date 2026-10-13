@@ -52,7 +52,7 @@ const (
 	sampleBasis  = 80
 )
 
-func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, checkpointState *checkpointState, auxilliaryState *state.CachingBeaconState) map[common.Hash]uint64 {
+func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, justificationState *checkpointState, auxilliaryState *state.CachingBeaconState) map[common.Hash]uint64 {
 	votes := make(map[common.Hash]uint64)
 	// make an rng generator
 	gen := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -75,12 +75,18 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, che
 		}
 		boostRoot := f.proposerBoostRoot.Load().(common.Hash)
 		if boostRoot != (common.Hash{}) {
-			boost := auxilliaryState.GetTotalActiveBalance() / auxilliaryState.BeaconConfig().SlotsPerEpoch
-			votes[boostRoot] += (boost * auxilliaryState.BeaconConfig().ProposerScoreBoost) / 100
+			activeBalance := uint64(0)
+			if cachedState, ok := f.checkpointStates.Load(justifiedCheckpoint); ok {
+				activeBalance = cachedState.(*checkpointState).unslashedActiveBalance
+			} else {
+				activeBalance = getUnslashedActiveBalance(auxilliaryState)
+			}
+			boost := activeBalance / f.beaconCfg.SlotsPerEpoch
+			votes[boostRoot] += (boost * f.beaconCfg.ProposerScoreBoost) / 100
 		}
 	} else {
 		for validatorIndex := 0; validatorIndex < f.latestMessages.latestMessagesCount(); validatorIndex++ {
-			message, balance, ok := f.countableVote(checkpointState, validatorIndex)
+			message, balance, ok := f.countableVote(justificationState, validatorIndex)
 			if !ok {
 				continue
 			}
@@ -88,8 +94,8 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, che
 		}
 		boostRoot := f.proposerBoostRoot.Load().(common.Hash)
 		if boostRoot != (common.Hash{}) {
-			boost := checkpointState.activeBalance / checkpointState.beaconConfig.SlotsPerEpoch
-			votes[boostRoot] += (boost * checkpointState.beaconConfig.ProposerScoreBoost) / 100
+			boost := justificationState.unslashedActiveBalance / justificationState.beaconConfig.SlotsPerEpoch
+			votes[boostRoot] += (boost * justificationState.beaconConfig.ProposerScoreBoost) / 100
 		}
 	}
 
@@ -125,7 +131,7 @@ func (f *ForkChoiceStore) getHeadNode(auxilliaryState *state.CachingBeaconState)
 	// After checkpoint sync the justified root may predate the anchor and
 	// not exist in the fork graph. Both getHead and getHeadGloas depend on
 	// the justified root being present (for getCheckpointState and
-	// getFilteredBlockTree respectively). Return the anchor as head until
+	// getFilteredNodeTree respectively). Return the anchor as head until
 	// forward sync produces a resolvable justified checkpoint.
 	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
 	if _, hasJustified := f.forkGraph.GetHeader(justifiedCheckpoint.Root); !hasJustified {
@@ -217,8 +223,17 @@ func (f *ForkChoiceStore) computeHeadGloas(justifiedCheckpoint solid.Checkpoint,
 	// OnTick updates time before taking f.mu. Keep viability checks, weights, and
 	// payload tiebreakers on the same slot even when the clock advances during this walk.
 	currentSlot := f.Slot()
-	// Get filtered block tree
-	blocks := f.getFilteredBlockTree(justifiedCheckpoint.Root, justifiedCheckpoint, currentSlot)
+	nodes, nodeChildren := f.getFilteredNodeTree(justifiedCheckpoint.Root, justifiedCheckpoint, currentSlot)
+	if len(nodes) == 0 {
+		header, hasHeader := f.forkGraph.GetHeader(justifiedCheckpoint.Root)
+		if !hasHeader {
+			return ForkChoiceNode{}, 0, errors.New("no slot for head is stored")
+		}
+		return ForkChoiceNode{
+			Root:          justifiedCheckpoint.Root,
+			PayloadStatus: cltypes.PayloadStatusEmpty,
+		}, header.Slot, nil
+	}
 
 	// Start from justified checkpoint with PENDING status
 	head := ForkChoiceNode{
@@ -229,7 +244,12 @@ func (f *ForkChoiceStore) computeHeadGloas(justifiedCheckpoint solid.Checkpoint,
 	ws := f.gloasWeightTree.prepare(justifiedCheckpoint, cs)
 
 	for {
-		children := f.getNodeChildren(head, blocks)
+		children := make([]ForkChoiceNode, 0, 2)
+		for _, child := range nodeChildren[head] {
+			if _, ok := nodes[child]; ok {
+				children = append(children, child)
+			}
+		}
 		if len(children) == 0 {
 			// No children, head is the result
 			header, hasHeader := f.forkGraph.GetHeader(head.Root)
@@ -274,6 +294,67 @@ func (f *ForkChoiceStore) computeHeadGloas(justifiedCheckpoint solid.Checkpoint,
 
 		head = bestChild
 	}
+}
+
+func (f *ForkChoiceStore) getFilteredNodeTree(base common.Hash, justifiedCheckpoint solid.Checkpoint, currentSlot uint64) (map[ForkChoiceNode]struct{}, map[ForkChoiceNode][]ForkChoiceNode) {
+	nodes := make(map[ForkChoiceNode]struct{})
+	nodeChildren := make(map[ForkChoiceNode][]ForkChoiceNode)
+	currentEpoch := f.computeEpochAtSlot(currentSlot)
+	baseHeader, hasBase := f.forkGraph.GetHeader(base)
+	if !hasBase {
+		return nodes, nodeChildren
+	}
+	finalizedCheckpoint := f.finalizedCheckpoint.Load().(solid.Checkpoint)
+	genesisEpoch := f.beaconCfg.GenesisEpoch
+	finalizedSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
+	checkpointRoot := base
+	if finalizedCheckpoint.Epoch != genesisEpoch && baseHeader.Slot > finalizedSlot {
+		checkpointRoot = f.Ancestor(base, finalizedSlot).Root
+	}
+	type frame struct {
+		node           ForkChoiceNode
+		children       []ForkChoiceNode
+		checkpointRoot common.Hash
+	}
+	stack := []frame{{
+		node:           ForkChoiceNode{Root: base, PayloadStatus: cltypes.PayloadStatusPending},
+		checkpointRoot: checkpointRoot,
+	}}
+	for len(stack) > 0 {
+		last := len(stack) - 1
+		current := stack[last]
+		stack = stack[:last]
+		if current.children != nil {
+			for _, child := range current.children {
+				if _, viable := nodes[child]; viable {
+					nodes[current.node] = struct{}{}
+					break
+				}
+			}
+			continue
+		}
+		header, hasHeader := f.forkGraph.GetHeader(current.node.Root)
+		if !hasHeader {
+			continue
+		}
+		if finalizedCheckpoint.Epoch != genesisEpoch && header.Slot <= finalizedSlot {
+			current.checkpointRoot = current.node.Root
+		}
+		children := f.getNodeChildren(current.node)
+		nodeChildren[current.node] = children
+		if len(children) == 0 {
+			finalizedOK := finalizedCheckpoint.Epoch == genesisEpoch || finalizedCheckpoint.Root == current.checkpointRoot
+			if finalizedOK && f.hasCorrectJustification(current.node.Root, header, currentEpoch, justifiedCheckpoint) {
+				nodes[current.node] = struct{}{}
+			}
+			continue
+		}
+		stack = append(stack, frame{node: current.node, children: children, checkpointRoot: current.checkpointRoot})
+		for _, child := range slices.Backward(children) {
+			stack = append(stack, frame{node: child, checkpointRoot: current.checkpointRoot})
+		}
+	}
+	return nodes, nodeChildren
 }
 
 // getHead returns the head using pre-GLOAS fork choice rules.
@@ -398,7 +479,6 @@ func (f *ForkChoiceStore) getFilterBlockTree(blockRoot common.Hash, blocks map[c
 	if !has {
 		return false
 	}
-	finalizedCheckpoint := f.finalizedCheckpoint.Load().(solid.Checkpoint)
 	children := f.children(blockRoot)
 	// If there are children iterate down recursively and see which branches are viable.
 	if len(children) > 0 {
@@ -413,13 +493,35 @@ func (f *ForkChoiceStore) getFilterBlockTree(blockRoot common.Hash, blocks map[c
 		}
 		return isAnyViable
 	}
-	// Leaf node — viability per spec filter_block_tree.
+	if f.isViableLeaf(blockRoot, header, currentEpoch, justifiedCheckpoint) {
+		blocks[blockRoot] = header
+		return true
+	}
+	return false
+}
 
-	// Spec get_voting_source: pick unrealized only for prior-epoch blocks
-	// (pull-up justification view); current/future-epoch blocks use the
-	// block's realized state checkpoint.
+func (f *ForkChoiceStore) isViableLeaf(blockRoot common.Hash, header *cltypes.BeaconBlockHeader, currentEpoch uint64, justifiedCheckpoint solid.Checkpoint) bool {
+	finalizedCheckpoint := f.finalizedCheckpoint.Load().(solid.Checkpoint)
+	justifiedOk := f.hasCorrectJustification(blockRoot, header, currentEpoch, justifiedCheckpoint)
+
+	genesisEpoch := f.beaconCfg.GenesisEpoch
+
+	// Spec correct_finalized:
+	//   store.finalized_checkpoint.epoch == GENESIS_EPOCH
+	//   || store.finalized_checkpoint.root == get_checkpoint_block(block_root, finalized.epoch)
+	finalizedOk := finalizedCheckpoint.Epoch == genesisEpoch
+	if !finalizedOk {
+		finalizedSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
+		finalizedOk = finalizedCheckpoint.Root == f.Ancestor(blockRoot, finalizedSlot).Root
+	}
+
+	return justifiedOk && finalizedOk
+}
+
+func (f *ForkChoiceStore) hasCorrectJustification(blockRoot common.Hash, header *cltypes.BeaconBlockHeader, currentEpoch uint64, justifiedCheckpoint solid.Checkpoint) bool {
 	blockEpoch := f.computeEpochAtSlot(header.Slot)
 	var votingSource solid.Checkpoint
+	var has bool
 	if currentEpoch > blockEpoch {
 		votingSource, has = f.getUnrealizedJustification(blockRoot)
 	} else {
@@ -438,19 +540,5 @@ func (f *ForkChoiceStore) getFilterBlockTree(blockRoot common.Hash, blocks map[c
 	justifiedOk := justifiedCheckpoint.Epoch == genesisEpoch ||
 		votingSource.Epoch == justifiedCheckpoint.Epoch ||
 		votingSource.Epoch+2 >= currentEpoch
-
-	// Spec correct_finalized:
-	//   store.finalized_checkpoint.epoch == GENESIS_EPOCH
-	//   || store.finalized_checkpoint.root == get_checkpoint_block(block_root, finalized.epoch)
-	finalizedOk := finalizedCheckpoint.Epoch == genesisEpoch
-	if !finalizedOk {
-		finalizedSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
-		finalizedOk = finalizedCheckpoint.Root == f.Ancestor(blockRoot, finalizedSlot).Root
-	}
-
-	if justifiedOk && finalizedOk {
-		blocks[blockRoot] = header
-		return true
-	}
-	return false
+	return justifiedOk
 }

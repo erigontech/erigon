@@ -385,6 +385,7 @@ func TestPreGloasHeadReadCrossesGloasBoundary(t *testing.T) {
 			cs, _ := store.checkpointStates.LoadAndDelete(checkpoint)
 			store.unrealizedJustifiedCheckpoint.Store(checkpoint)
 			store.unrealizedFinalizedCheckpoint.Store(solid.Checkpoint{})
+			store.unrealizedJustifications.Store(checkpoint.Root, checkpoint)
 			graph.states = map[common.Hash]*state2.CachingBeaconState{checkpoint.Root: state2.New(store.beaconCfg)}
 			graph.getStateStarted = make(chan common.Hash, 1)
 			graph.getStateRelease = make(chan struct{})
@@ -661,12 +662,75 @@ func TestComputeVotesAuxStateSkipsMessagesBeyondValidatorSet(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, s)
 	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+	cs, err := f.getCheckpointState(justified)
+	require.NoError(t, err)
 
 	f.latestMessages.set(s.ValidatorLength(), LatestMessage{Root: common.HexToHash("0x01"), Slot: 5})
 
-	votes := f.computeVotes(justified, nil, s)
+	votes := f.computeVotes(justified, cs, s)
 
 	require.NotNil(t, votes)
+}
+
+func TestPreGloasHeadWithAuxiliaryStateDoesNotRequireCheckpointState(t *testing.T) {
+	store, _ := newHeadSnapshotTestStore()
+	store.beaconCfg.GloasForkEpoch = 100
+	store.beaconCfg.InitializeForkSchedule()
+	checkpoint := store.justifiedCheckpoint.Load().(solid.Checkpoint)
+	store.checkpointStates.Delete(checkpoint)
+
+	head, slot, err := store.GetHead(state2.New(store.beaconCfg))
+
+	require.NoError(t, err)
+	require.Equal(t, checkpoint.Root, head)
+	require.Equal(t, uint64(11), slot)
+}
+
+func TestComputeVotesAuxStateUsesCachedJustifiedBalanceForProposerBoost(t *testing.T) {
+	f := newGloasWeightTreeTestStore()
+	root := common.HexToHash("0x01")
+	checkpoint := solid.Checkpoint{Epoch: 1, Root: common.HexToHash("0x02")}
+	f.proposerBoostRoot.Store(root)
+	f.checkpointStates.Store(checkpoint, &checkpointState{
+		unslashedActiveBalance: 64_000_000_000,
+		beaconConfig:           &clparams.MainnetBeaconConfig,
+	})
+	auxiliaryState := state2.New(&clparams.MainnetBeaconConfig)
+	active := solid.NewValidator()
+	active.SetActivationEpoch(0)
+	active.SetExitEpoch(clparams.MainnetBeaconConfig.FarFutureEpoch)
+	active.SetEffectiveBalance(32_000_000_000)
+	require.NoError(t, auxiliaryState.AddValidator(active, 32_000_000_000))
+
+	votes := f.computeVotes(checkpoint, nil, auxiliaryState)
+
+	require.Equal(t, uint64(800_000_000), votes[root])
+}
+
+func TestComputeVotesAuxStateExcludesSlashedBalanceFromProposerBoost(t *testing.T) {
+	f := newGloasWeightTreeTestStore()
+	root := common.HexToHash("0x01")
+	f.proposerBoostRoot.Store(root)
+	checkpointState := &checkpointState{
+		unslashedActiveBalance: 96_000_000_000,
+		beaconConfig:           &clparams.MainnetBeaconConfig,
+	}
+	auxiliaryState := state2.New(&clparams.MainnetBeaconConfig)
+	active := solid.NewValidator()
+	active.SetActivationEpoch(0)
+	active.SetExitEpoch(clparams.MainnetBeaconConfig.FarFutureEpoch)
+	active.SetEffectiveBalance(32_000_000_000)
+	require.NoError(t, auxiliaryState.AddValidator(active, 32_000_000_000))
+	slashed := solid.NewValidator()
+	slashed.SetActivationEpoch(0)
+	slashed.SetExitEpoch(clparams.MainnetBeaconConfig.FarFutureEpoch)
+	slashed.SetEffectiveBalance(64_000_000_000)
+	slashed.SetSlashed(true)
+	require.NoError(t, auxiliaryState.AddValidator(slashed, 64_000_000_000))
+
+	votes := f.computeVotes(solid.Checkpoint{}, checkpointState, auxiliaryState)
+
+	require.Equal(t, uint64(400_000_000), votes[root])
 }
 
 func TestVoteSampleBoundsUsesClampedCount(t *testing.T) {
@@ -705,7 +769,7 @@ func TestComputeVotesProbabilisticAuxStateUsesClampedCount(t *testing.T) {
 	v.SetEffectiveBalance(32_000_000_000)
 	require.NoError(t, s.AddValidator(v, 32_000_000_000))
 
-	votes := f.computeVotes(solid.Checkpoint{}, nil, s)
+	votes := f.computeVotes(solid.Checkpoint{}, &checkpointState{}, s)
 
 	require.Equal(t, uint64(32_000_000_000), votes[root])
 }

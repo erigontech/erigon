@@ -389,9 +389,8 @@ func (f *ForkChoiceStore) getPayloadStatusTiebreaker(node ForkChoiceNode, curren
 // getNodeChildren returns the children of a fork choice node.
 // For PENDING nodes, returns EMPTY and possibly FULL variants of the same root.
 // For EMPTY/FULL nodes, returns child blocks with PENDING status.
-// blocks is the filtered block tree from get_head.
 // [New in Gloas:EIP7732]
-func (f *ForkChoiceStore) getNodeChildren(node ForkChoiceNode, blocks map[common.Hash]*cltypes.BeaconBlockHeader) []ForkChoiceNode {
+func (f *ForkChoiceStore) getNodeChildren(node ForkChoiceNode) []ForkChoiceNode {
 	if node.PayloadStatus == cltypes.PayloadStatusPending {
 		children := []ForkChoiceNode{
 			{Root: node.Root, PayloadStatus: cltypes.PayloadStatusEmpty},
@@ -404,14 +403,8 @@ func (f *ForkChoiceStore) getNodeChildren(node ForkChoiceNode, blocks map[common
 		return children
 	}
 
-	// EMPTY or FULL → find child blocks from filtered block tree
 	result := make([]ForkChoiceNode, 0)
-	for root, header := range blocks {
-		// Use header.ParentRoot directly from blocks map
-		if header.ParentRoot != node.Root {
-			continue
-		}
-		// Need full block for getParentPayloadStatus
+	for _, root := range f.children(node.Root) {
 		block, ok := f.forkGraph.GetBlock(root)
 		if !ok || block == nil {
 			continue
