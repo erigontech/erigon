@@ -1,7 +1,6 @@
 package peerdasstate
 
 import (
-	"math/big"
 	"sync"
 	"sync/atomic"
 
@@ -59,11 +58,11 @@ func (s *PeerDasState) SetCustodyGroupCount(cgc uint64) bool {
 	s.cgcMutex.Lock()
 	defer s.cgcMutex.Unlock()
 	s.realCgc = cgc
+	// A decrease is deliberately not advertised: fulu/validator.md requires a node to
+	// keep advertising the previous (highest) count and to keep serving it.
 	if cgc > s.advertisedCgc {
 		if node := s.localNode.Load(); node != nil {
-			// update cgc
-			encodedCgc := new(big.Int).SetUint64(cgc).Bytes()
-			node.Set(enr.WithEntry(s.networkConfig.CgcKey, encodedCgc))
+			node.Set(enr.WithEntry(s.networkConfig.CgcKey, EncodeCgc(cgc)))
 		}
 		s.advertisedCgc = cgc
 		s.custodyColumnsCache.Store(nil) // clear the cache

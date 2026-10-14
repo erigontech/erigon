@@ -30,7 +30,7 @@ import (
 
 func TestValidatorSlashing(t *testing.T) {
 	state := New(&clparams.MainnetBeaconConfig)
-	utils.DecodeSSZSnappy(state, stateEncoded, int(clparams.DenebVersion))
+	require.NoError(t, utils.DecodeSSZSnappy(state, stateEncoded, int(clparams.Phase0Version)))
 	_, err := state.SlashValidator(1, nil)
 	require.NoError(t, err)
 	_, err = state.SlashValidator(2, nil)
@@ -54,7 +54,7 @@ func TestValidatorFromDeposit(t *testing.T) {
 
 func TestSyncReward(t *testing.T) {
 	state := New(&clparams.MainnetBeaconConfig)
-	utils.DecodeSSZSnappy(state, stateEncoded, int(clparams.Phase0Version))
+	require.NoError(t, utils.DecodeSSZSnappy(state, stateEncoded, int(clparams.Phase0Version)))
 
 	propReward, partReward, err := state.SyncRewards()
 	require.NoError(t, err)

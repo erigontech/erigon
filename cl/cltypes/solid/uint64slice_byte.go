@@ -27,15 +27,6 @@ import (
 	"github.com/erigontech/erigon/common/ssz"
 )
 
-func convertDepthToChunkSize(d int) int {
-	return (1 << d) // just power of 2
-}
-
-func getTreeCacheSize(listLen int, cacheDepth int) int {
-	treeChunks := convertDepthToChunkSize(cacheDepth)
-	return (listLen + treeChunks - 1) / treeChunks
-}
-
 // byteBasedUint64Slice represents a dynamic Uint64Slice data type that is byte-backed.
 // The underlying storage for the slice is a byte array. This approach allows for efficient
 // memory usage, especially when dealing with large slices.
@@ -151,7 +142,7 @@ func (arr *byteBasedUint64Slice) Append(v uint64) {
 
 // Get returns the element at the given index.
 func (arr *byteBasedUint64Slice) Get(index int) uint64 {
-	if index >= arr.l {
+	if index < 0 || index >= arr.l {
 		panic("index out of range")
 	}
 	offset := index * 8
@@ -160,6 +151,9 @@ func (arr *byteBasedUint64Slice) Get(index int) uint64 {
 
 // Set replaces the element at the given index with a new value.
 func (arr *byteBasedUint64Slice) Set(index int, v uint64) {
+	if index < 0 || index >= arr.l {
+		panic("index out of range")
+	}
 	if arr.MerkleTree != nil {
 		arr.MerkleTree.MarkLeafAsDirty(index / 4)
 	}

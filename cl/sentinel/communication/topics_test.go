@@ -24,6 +24,8 @@ import (
 
 	"github.com/golang/snappy"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/snappypool"
 )
 
 func TestMaxWireResponseBytes(t *testing.T) {
@@ -44,7 +46,7 @@ func TestMaxWireResponseBytes(t *testing.T) {
 }
 
 // TestMaxWireResponseBytesBoundsStreamEncoding proves the cap never truncates: the responder writes
-// each chunk with snappy.NewBufferedWriter (stream framing: a 10-byte stream identifier plus a
+// each chunk with a snappy buffered writer (stream framing: a 10-byte stream identifier plus a
 // header+CRC per ~64 KiB frame), and snappy.MaxEncodedLen — a snappy *block* bound — must dominate
 // that stream output for every item size up to MAX_CHUNK_SIZE, so a compliant chunk is never 413'd.
 func TestMaxWireResponseBytesBoundsStreamEncoding(t *testing.T) {
@@ -64,10 +66,11 @@ func TestMaxWireResponseBytesBoundsStreamEncoding(t *testing.T) {
 		fill(payload)
 
 		var buf bytes.Buffer
-		sw := snappy.NewBufferedWriter(&buf)
+		sw := snappypool.Writer(&buf)
 		_, err := sw.Write(payload)
 		require.NoError(t, err)
 		require.NoError(t, sw.Flush())
+		snappypool.PutWriter(sw)
 		streamLen := uint64(buf.Len())
 
 		require.LessOrEqualf(t, streamLen, uint64(snappy.MaxEncodedLen(raw)),

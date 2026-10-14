@@ -74,7 +74,6 @@ func (t Transactor) CreateSimpleTransfer(
 		return nil, fmt.Errorf("failed to get gas price: %w", err)
 	}
 
-	gasPriceU256, _ := uint256.FromBig(gasPrice)
 	gasLimit, err := t.rpcApiClient.EstimateGas(bind.CallMsg{From: fromAddr, To: &to, Value: amountU256}, requests.BlockNumbers.Pending)
 	if err != nil {
 		return nil, fmt.Errorf("failed to estimate gas: %w", err)
@@ -87,7 +86,7 @@ func (t Transactor) CreateSimpleTransfer(
 			To:       &to,
 			Value:    *amountU256,
 		},
-		GasPrice: *gasPriceU256,
+		GasPrice: *gasPrice,
 	}
 
 	signer := types.LatestSignerForChainID(t.chainId)

@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package rawdb
+package rawdb_test
 
 import (
 	"testing"
@@ -22,8 +22,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type testL2Config struct {
@@ -39,9 +43,9 @@ func TestChainConfigL2JSONRoundTrip(t *testing.T) {
 	hash := common.Hash{1}
 
 	cfg := &chain.Config{L2: &testL2Config{Stack: "testl2"}}
-	require.NoError(t, WriteChainConfig(tx, hash, cfg))
+	require.NoError(t, rawdb.WriteChainConfig(tx, hash, cfg))
 
-	got, err := ReadChainConfig(tx, hash)
+	got, err := rawdb.ReadChainConfig(tx, hash)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"stack":"testl2"}`, string(got.L2JSON))
 	require.True(t, got.IsL2())
@@ -52,10 +56,55 @@ func TestChainConfigL2JSONNullBackfill(t *testing.T) {
 	hash := common.Hash{2}
 
 	cfg := &chain.Config{L2JSON: []byte("null"), L2: &testL2Config{Stack: "testl2"}}
-	require.NoError(t, WriteChainConfig(tx, hash, cfg))
+	require.NoError(t, rawdb.WriteChainConfig(tx, hash, cfg))
 
-	got, err := ReadChainConfig(tx, hash)
+	got, err := rawdb.ReadChainConfig(tx, hash)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"stack":"testl2"}`, string(got.L2JSON))
 	require.True(t, got.IsL2())
+}
+
+// A stored Polygon config must fail loudly: chain.Config has no Bor field to
+// rehydrate into, so accepting it would run the chain under the wrong rules.
+func TestChainConfigRejectsStoredBorSection(t *testing.T) {
+	_, tx := mdbxtest.NewTestTx(t)
+	hash := common.Hash{2}
+
+	require.NoError(t, tx.Put(kv.ConfigTable, hash[:], []byte(`{"chainId":137,"bor":{"sprint":{"0":64}}}`)))
+
+	_, err := rawdb.ReadChainConfig(tx, hash)
+	require.ErrorContains(t, err, "Polygon is not supported")
+}
+
+func TestChainConfigAcceptsNullBorSection(t *testing.T) {
+	_, tx := mdbxtest.NewTestTx(t)
+	hash := common.Hash{3}
+
+	require.NoError(t, tx.Put(kv.ConfigTable, hash[:], []byte(`{"chainId":1,"bor":null}`)))
+
+	got, err := rawdb.ReadChainConfig(tx, hash)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+}
+
+// A spec with no difficulty must still be readable back: the field is
+// gencodec:"required", so storing it as null makes ReadGenesis fail.
+func TestGenesisWithoutDifficultyRoundTrip(t *testing.T) {
+	_, tx := mdbxtest.NewTestTx(t)
+
+	spec := &types.Genesis{Config: chain.AllProtocolChanges}
+	require.NoError(t, rawdb.WriteGenesisIfNotExist(tx, spec))
+
+	got, err := rawdb.ReadGenesis(tx)
+	require.NoError(t, err)
+	require.Equal(t, params.GenesisDifficulty, got.Difficulty)
+}
+
+func TestWriteGenesisDoesNotMutateSpec(t *testing.T) {
+	_, tx := mdbxtest.NewTestTx(t)
+
+	spec := &types.Genesis{Config: chain.AllProtocolChanges}
+	require.NoError(t, rawdb.WriteGenesisIfNotExist(tx, spec))
+
+	require.Nil(t, spec.Difficulty)
 }

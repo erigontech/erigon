@@ -8,6 +8,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/spf13/afero"
@@ -25,7 +26,8 @@ func TestGetState_InfiniteLoopOnMissingStateFile(t *testing.T) {
 	anchorState := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
 
-	fg := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	fg, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
 	graph := fg.(*forkGraphDisk)
 
 	// Craft a fake root and header at a dump slot (slot % dumpSlotFrequency == 0).
@@ -39,16 +41,90 @@ func TestGetState_InfiniteLoopOnMissingStateFile(t *testing.T) {
 	graph.headers.Store(fakeRoot, fakeHeader)
 
 	done := make(chan struct{})
+	var gotState *state.CachingBeaconState
+	var gotErr error
 	go func() {
 		defer close(done)
 		// getState should return (nil, nil), not loop forever.
-		graph.getState(fakeRoot, false, false)
+		gotState, gotErr = graph.getState(fakeRoot, false, false)
 	}()
 
 	select {
 	case <-done:
-		// getState returned — no infinite loop.
+		require.Nil(t, gotState)
+		require.NoError(t, gotErr)
 	case <-time.After(3 * time.Second):
 		t.Fatal("getState did not return within 3s — infinite loop detected")
+	}
+}
+
+// offDumpSlotAnchor returns blockB and blockA's post-state, optionally
+// advanced through empty slots, as an anchor whose block is off the dump grid.
+func offDumpSlotAnchor(t *testing.T, advanceTo uint64) (*cltypes.SignedBeaconBlock, *state.CachingBeaconState) {
+	t.Helper()
+	blockA := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	blockB := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	require.NoError(t, utils.DecodeSSZSnappy(blockA, block1, int(clparams.Phase0Version)))
+	require.NoError(t, utils.DecodeSSZSnappy(blockB, block2, int(clparams.Phase0Version)))
+	genesis := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(genesis, anchor, int(clparams.Phase0Version)))
+
+	g0, err := NewForkGraphDisk(genesis, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	postA, status, err := g0.AddChainSegment(blockA, true)
+	require.NoError(t, err)
+	require.Equal(t, Success, status)
+	anchorState, err := postA.Copy()
+	require.NoError(t, err)
+	if advanceTo > anchorState.Slot() {
+		require.NoError(t, transition.DefaultMachine.ProcessSlots(anchorState, advanceTo))
+	}
+	require.NotZero(t, anchorState.LatestBlockHeader().Slot%dumpSlotFrequency)
+	return blockB, anchorState
+}
+
+// TestGetState_AnchorOffDumpSlot pins that the anchor state is reloaded from
+// disk when its block is off the dump grid and currentState has moved on.
+func TestGetState_AnchorOffDumpSlot(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		advanceTo uint64
+	}{
+		{name: "post-block state", advanceTo: 0},
+		{name: "state advanced through empty slots", advanceTo: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			blockB, anchorState := offDumpSlotAnchor(t, tc.advanceTo)
+			wantRoot, err := anchorState.HashSSZ()
+			require.NoError(t, err)
+			wantSlot := anchorState.Slot()
+
+			fg, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+			require.NoError(t, err)
+			graph := fg.(*forkGraphDisk)
+
+			_, status, err := graph.AddChainSegment(blockB, true)
+			require.NoError(t, err)
+			require.Equal(t, Success, status)
+
+			got, err := graph.GetState(graph.anchorRoot, true)
+			require.NoError(t, err)
+			require.NotNil(t, got)
+			require.Equal(t, wantSlot, got.Slot())
+			gotRoot, err := got.HashSSZ()
+			require.NoError(t, err)
+			require.Equal(t, common.Hash(wantRoot), common.Hash(gotRoot))
+
+			// Without currentState, blockB's state must be rebuilt by replaying it on the anchor file.
+			bRoot, err := blockB.Block.HashSSZ()
+			require.NoError(t, err)
+			graph.currentState = nil
+			desc, err := graph.GetState(bRoot, true)
+			require.NoError(t, err)
+			require.NotNil(t, desc)
+			descRoot, err := desc.HashSSZ()
+			require.NoError(t, err)
+			require.Equal(t, blockB.Block.StateRoot, common.Hash(descRoot))
+		})
 	}
 }

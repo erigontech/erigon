@@ -202,7 +202,6 @@ func TestGenerateChain(t *testing.T) {
 	if len(block2Receipts) > 1 && block2Receipts[1].CumulativeGasUsed != 42000 {
 		t.Errorf("block 2 receipt 2 cumulative gas: got %d, want 42000", block2Receipts[1].CumulativeGasUsed)
 	}
-
 }
 
 func TestGenerateChainAttachesBlockAccessList(t *testing.T) {
@@ -215,12 +214,9 @@ func TestGenerateChainAttachesBlockAccessList(t *testing.T) {
 	}
 
 	block := chainPack.TopBlock
-	if len(block.BlockAccessList()) == 0 {
+	bal := block.BlockAccessList()
+	if bal == nil {
 		t.Fatal("generated block does not carry its block access list")
-	}
-	bal, err := types.DecodeBlockAccessListBytes(block.BlockAccessList())
-	if err != nil {
-		t.Fatal(err)
 	}
 	if got, want := bal.Hash(), block.BlockAccessListHash(); want == nil || got != *want {
 		t.Fatalf("block access list hash mismatch: got %s, want %v", got, want)

@@ -47,7 +47,7 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 
 	var idxsStr []string
 	if err := json.NewDecoder(r.Body).Decode(&idxsStr); err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("could not decode request body: %w. request body is required.", err))
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("could not decode request body: %w. request body is required", err))
 	}
 	if len(idxsStr) == 0 {
 		return newBeaconResponse([]string{}).WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()), nil
@@ -121,7 +121,7 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 	for idx, committeeParticipantPublicKey := range syncCommittee.GetCommittee() {
 		committeeParticipantIndex, _, err := a.syncedData.ValidatorIndexByPublicKey(committeeParticipantPublicKey)
 		if err != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find validator with public key %x: %s", committeeParticipantPublicKey, err))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find validator with public key %x: %w", committeeParticipantPublicKey, err))
 		}
 		if _, ok := dutiesSet[committeeParticipantIndex]; !ok {
 			continue

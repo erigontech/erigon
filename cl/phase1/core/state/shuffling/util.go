@@ -70,7 +70,7 @@ func ComputeShuffledIndexPreInputs(conf *clparams.BeaconChainConfig, seed [32]by
 	return ret
 }
 
-func GetSeed(beaconConfig *clparams.BeaconChainConfig, mix common.Hash, epoch uint64, domain [4]byte) common.Hash {
+func GetSeed(mix common.Hash, epoch uint64, domain [4]byte) common.Hash {
 	epochByteArray := make([]byte, 8)
 	binary.LittleEndian.PutUint64(epochByteArray, epoch)
 	input := append(domain[:], epochByteArray...)
@@ -81,7 +81,7 @@ func GetSeed(beaconConfig *clparams.BeaconChainConfig, mix common.Hash, epoch ui
 func ComputeShuffledIndicies(beaconConfig *clparams.BeaconChainConfig, mix common.Hash, out, indicies []uint64, slot uint64) []uint64 {
 	copy(out, indicies)
 	epoch := slot / beaconConfig.SlotsPerEpoch
-	seed := GetSeed(beaconConfig, mix, epoch, beaconConfig.DomainBeaconAttester)
+	seed := GetSeed(mix, epoch, beaconConfig.DomainBeaconAttester)
 	var hashed common.Hash
 	eth2ShuffleHashFunc := func(data []byte) []byte {
 		hashed = crypto.Sha256(data)

@@ -18,7 +18,6 @@ package execmoduletester
 
 import (
 	"context"
-	"errors"
 	"math/big"
 	"testing"
 
@@ -33,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -71,7 +71,6 @@ func TestFromZero_GenesisAllocPreservedAfterResetReExec(t *testing.T) {
 }
 
 func runFromZeroGenesisAllocPreservedAfterResetReExec(t *testing.T) {
-
 	// Untouched-after-genesis address mirroring 0xA1E4380A's role on mainnet.
 	dormantAddr := accounts.InternAddress(common.HexToAddress("0xA1E4380A3B1f749673E270229993eE55F35663b4"))
 	dormantFunds := new(big.Int).Mul(big.NewInt(2000), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)) // 2000 ETH
@@ -115,7 +114,7 @@ func runFromZeroGenesisAllocPreservedAfterResetReExec(t *testing.T) {
 				return err
 			}
 			defer doms.Close()
-			r := state.NewReaderV3(doms.AsGetter(rTx))
+			r := state.NewReaderV3(doms.AsStateGetter(rTx, execctxapi.StateGetterOptions{}))
 			st := state.New(r)
 			defer st.Close()
 			b, err := st.GetBalance(dormantAddr)
@@ -221,7 +220,7 @@ func execOneBatch(ctx context.Context, emt *ExecModuleTester, cfg stagedsync.Exe
 	}
 
 	err = stagedsync.SpawnExecuteBlocksStage(s, emt.Sync, doms, tx, toBlock, ctx, cfg, logger)
-	if err != nil && !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
+	if err != nil && !stagedsync.IsOnlyLoopExhausted(err) {
 		return 0, err
 	}
 
@@ -285,7 +284,8 @@ func runBranchCacheCoherentAcrossBatches(t *testing.T) {
 			to := common.BytesToAddress([]byte{byte(i + 1), byte(j + 1), 0xab})
 			tx, txErr := types.SignTx(
 				types.NewTransaction(b.TxNonce(keyAddr), to, uint256.NewInt(1_000_000), params.TxGas, uint256.NewInt(1), nil),
-				*signer, key)
+				*signer, key,
+			)
 			require.NoError(t, txErr)
 			b.AddTx(tx)
 		}
@@ -329,7 +329,8 @@ func TestExec_RestoresCommitmentStateReader(t *testing.T) {
 		to := common.BytesToAddress([]byte{byte(i + 1), 0xab})
 		tx, txErr := types.SignTx(
 			types.NewTransaction(b.TxNonce(keyAddr), to, uint256.NewInt(1_000_000), params.TxGas, uint256.NewInt(1), nil),
-			*signer, key)
+			*signer, key,
+		)
 		require.NoError(t, txErr)
 		b.AddTx(tx)
 	})
@@ -356,7 +357,7 @@ func TestExec_RestoresCommitmentStateReader(t *testing.T) {
 	s, err := emt.Sync.StageState(stages.Execution, tx, true, false)
 	require.NoError(t, err)
 	err = stagedsync.SpawnExecuteBlocksStage(s, emt.Sync, doms, tx, gen.TopBlock.NumberU64(), ctx, cfg, logger)
-	if err != nil && !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
+	if err != nil && !stagedsync.IsOnlyLoopExhausted(err) {
 		require.NoError(t, err)
 	}
 	require.NoError(t, doms.Commit(ctx, tx))

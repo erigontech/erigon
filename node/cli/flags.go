@@ -199,18 +199,23 @@ var (
 	}
 	RpcSubscriptionFiltersMaxAddressesFlag = cli.IntFlag{
 		Name:  "rpc.subscription.filters.maxaddresses",
-		Usage: "Maximum number of addresses per subscription to filter logs by.",
+		Usage: "Maximum number of addresses accepted per log subscription.",
 		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxAddresses,
 	}
 	RpcSubscriptionFiltersMaxTopicsFlag = cli.IntFlag{
 		Name:  "rpc.subscription.filters.maxtopics",
-		Usage: "Maximum number of topics per subscription to filter logs by.",
+		Usage: "Maximum number of topic alternatives accepted across all positions per log subscription.",
 		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxTopics,
 	}
 	RpcSubscriptionFiltersTimeoutFlag = cli.DurationFlag{
 		Name:  "rpc.subscription.filters.timeout",
 		Usage: "Timeout before idle filters are evicted. Defaults to 5m; set to 0 to disable eviction.",
 		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersTimeout,
+	}
+	RpcSubscriptionFiltersMaxSubscriptionsFlag = cli.IntFlag{
+		Name:  "rpc.subscription.filters.maxsubscriptions",
+		Usage: "Maximum number of live filters and subscriptions across all clients. Set to 0 to disable the limit.",
+		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxSubscriptions,
 	}
 )
 
@@ -301,6 +306,9 @@ func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 		cfg.Sync.LoopBlockLimit = limit
 	}
 	cfg.Sync.ParallelStateFlushing = ctx.Bool(SyncParallelStateFlushing.Name)
+	if d := ctx.Duration(utils.SlowBlockThresholdFlag.Name); d >= 0 {
+		cfg.Sync.SlowBlockThreshold = &d
+	}
 
 	if ctx.String(BadBlockFlag.Name) != "" {
 		bytes, err := hexutil.Decode(ctx.String(BadBlockFlag.Name))
@@ -483,12 +491,13 @@ func setEmbeddedRpcDaemon(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logg
 		WsMaxConnections:          ctx.Int(utils.WsMaxConnectionsFlag.Name),
 		RpcAllowListFilePath:      ctx.String(utils.RpcAccessListFlag.Name),
 		RpcFiltersConfig: rpchelper.FiltersConfig{
-			RpcSubscriptionFiltersMaxLogs:      ctx.Int(RpcSubscriptionFiltersMaxLogsFlag.Name),
-			RpcSubscriptionFiltersMaxHeaders:   ctx.Int(RpcSubscriptionFiltersMaxHeadersFlag.Name),
-			RpcSubscriptionFiltersMaxTxs:       ctx.Int(RpcSubscriptionFiltersMaxTxsFlag.Name),
-			RpcSubscriptionFiltersMaxAddresses: ctx.Int(RpcSubscriptionFiltersMaxAddressesFlag.Name),
-			RpcSubscriptionFiltersMaxTopics:    ctx.Int(RpcSubscriptionFiltersMaxTopicsFlag.Name),
-			RpcSubscriptionFiltersTimeout:      ctx.Duration(RpcSubscriptionFiltersTimeoutFlag.Name),
+			RpcSubscriptionFiltersMaxLogs:          ctx.Int(RpcSubscriptionFiltersMaxLogsFlag.Name),
+			RpcSubscriptionFiltersMaxHeaders:       ctx.Int(RpcSubscriptionFiltersMaxHeadersFlag.Name),
+			RpcSubscriptionFiltersMaxTxs:           ctx.Int(RpcSubscriptionFiltersMaxTxsFlag.Name),
+			RpcSubscriptionFiltersMaxAddresses:     ctx.Int(RpcSubscriptionFiltersMaxAddressesFlag.Name),
+			RpcSubscriptionFiltersMaxTopics:        ctx.Int(RpcSubscriptionFiltersMaxTopicsFlag.Name),
+			RpcSubscriptionFiltersTimeout:          ctx.Duration(RpcSubscriptionFiltersTimeoutFlag.Name),
+			RpcSubscriptionFiltersMaxSubscriptions: ctx.Int(RpcSubscriptionFiltersMaxSubscriptionsFlag.Name),
 		},
 		Gascap:                  utils.RpcGasCap(ctx),
 		BlockRangeLimit:         ctx.Int(utils.RpcBlockRangeLimit.Name),
@@ -502,6 +511,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logg
 		WitnessCacheHeadCapture: ctx.Bool(utils.WitnessCacheHeadCaptureFlag.Name),
 		WitnessCacheMaxMB:       ctx.Uint(utils.WitnessCacheMaxMBFlag.Name),
 		BatchLimit:              ctx.Int(utils.RpcBatchLimit.Name),
+		SubscriptionLimit:       ctx.Int(utils.RpcSubscriptionLimit.Name),
 		ReturnDataLimit:         ctx.Int(utils.RpcReturnDataLimit.Name),
 		AllowUnprotectedTxs:     ctx.Bool(utils.AllowUnprotectedTxs.Name),
 

@@ -47,7 +47,7 @@ Location: `/erigon/mark/hive/`
 ### Dockerfile.local (full)
 
 ```dockerfile
-FROM golang:1.25.0-trixie as builder
+FROM golang:1.26.0-trixie as builder
 ARG local_path=erigon
 COPY $local_path erigon
 RUN apt-get update && apt-get install -y bash build-essential ca-certificates git \

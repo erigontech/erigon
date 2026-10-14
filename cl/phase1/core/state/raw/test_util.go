@@ -28,6 +28,8 @@ var denebState []byte
 
 func GetTestState() *BeaconState {
 	state := New(&clparams.MainnetBeaconConfig)
-	utils.DecodeSSZSnappy(state, denebState, int(clparams.DenebVersion))
+	if err := utils.DecodeSSZSnappy(state, denebState, int(clparams.DenebVersion)); err != nil {
+		panic(err)
+	}
 	return state
 }

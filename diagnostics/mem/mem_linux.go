@@ -56,9 +56,7 @@ func ReadVirtualMemStats() (process.MemoryMapsStat, error) {
 
 	// convert from kilobytes to bytes
 	val := reflect.ValueOf(&m).Elem()
-	for i := 0; i < val.NumField(); i++ {
-		field := val.Field(i)
-
+	for _, field := range val.Fields() {
 		if field.Kind() == reflect.Uint64 {
 			field.SetUint(field.Interface().(uint64) * 1024)
 		}

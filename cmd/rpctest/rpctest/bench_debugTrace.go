@@ -38,7 +38,7 @@ func BenchDebugTraceBlockByNumber(erigonUrl, gethUrl string, needCompare bool, b
 
 	reqGen := &RequestGenerator{}
 
-	var nBlocks = 0
+	nBlocks := 0
 	for bn := blockFrom; bn < blockTo; bn++ {
 		nBlocks++
 
@@ -71,7 +71,7 @@ func BenchDebugTraceBlockByHash(erigonUrl, gethUrl string, needCompare bool, blo
 
 	reqGen := &RequestGenerator{}
 
-	var nBlocks = 0
+	nBlocks := 0
 	for bn := blockFrom; bn < blockTo; bn++ {
 		b, skip, err := fetchBlock(reqGen, bn, false, nil)
 		if err != nil {
@@ -120,8 +120,8 @@ func BenchDebugTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blo
 
 	reqGen := &RequestGenerator{}
 
-	var nBlocks = 0
-	var nTransactions = 0
+	nBlocks := 0
+	nTransactions := 0
 	for bn := blockFrom; bn < blockTo; bn++ {
 		if nBlocks%50 == 0 {
 			fmt.Println("Processing Block: ", bn)
@@ -175,20 +175,14 @@ func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom 
 
 	reqGen := &RequestGenerator{}
 
-	var res CallResult
-
-	var blockNumber EthBlockNumber
-	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
-	if res.Err != nil {
-		return fmt.Errorf("Could not get block number: %v\n", res.Err)
+	lastBlock, err := reqGen.latestBlockNumber()
+	if err != nil {
+		return err
 	}
-	if blockNumber.Error != nil {
-		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
-	}
-	fmt.Printf("Last block: %d\n", blockNumber.Number)
+	fmt.Printf("Last block: %d\n", lastBlock)
 
-	var nBlocks = 0
-	var nTransactions = 0
+	nBlocks := 0
+	nTransactions := 0
 	for bn := blockFrom; bn <= blockTo; bn++ {
 		b, skip, err := fetchBlock(reqGen, bn, needCompare, nil)
 		if err != nil {

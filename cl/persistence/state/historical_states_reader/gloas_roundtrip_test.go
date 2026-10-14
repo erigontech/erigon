@@ -366,9 +366,9 @@ func TestReadCompressedSSZ_ExecutionPayloadAvailability(t *testing.T) {
 	slotsPerHistoricalRoot := int(clparams.MainnetBeaconConfig.SlotsPerHistoricalRoot)
 	bv := solid.NewBitVector(slotsPerHistoricalRoot)
 	// Set a few bits
-	bv.SetBitAt(0, true)
-	bv.SetBitAt(42, true)
-	bv.SetBitAt(slotsPerHistoricalRoot-1, true)
+	require.NoError(t, bv.SetBitAt(0, true))
+	require.NoError(t, bv.SetBitAt(42, true))
+	require.NoError(t, bv.SetBitAt(slotsPerHistoricalRoot-1, true))
 
 	sszData, err := bv.EncodeSSZ(nil)
 	require.NoError(t, err)
@@ -518,8 +518,8 @@ func TestReadHistoricalState_GloasFieldsReconstruction(t *testing.T) {
 
 	// ExecutionPayloadAvailability bit-vector — seed two non-zero bits
 	expectedEPA := solid.NewBitVector(int(cfg.SlotsPerHistoricalRoot))
-	expectedEPA.SetBitAt(7, true)
-	expectedEPA.SetBitAt(100, true)
+	require.NoError(t, expectedEPA.SetBitAt(7, true))
+	require.NoError(t, expectedEPA.SetBitAt(100, true))
 
 	// BuilderPendingPayments vector — seed a non-zero entry at index 3
 	expectedBPP := solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](int(2 * cfg.SlotsPerEpoch))

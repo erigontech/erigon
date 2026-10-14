@@ -53,7 +53,22 @@ func (t *TopicSubscriptions) AllTopics() []string {
 func (t *TopicSubscriptions) Get(topic string) *TopicSubscription {
 	t.mutex.RLock()
 	defer t.mutex.RUnlock()
-	return t.subs[topic]
+	sub := t.subs[topic]
+	if sub == nil {
+		return nil
+	}
+	result := *sub
+	return &result
+}
+
+func (t *TopicSubscriptions) GetTopic(topic string) *pubsub.Topic {
+	t.mutex.RLock()
+	defer t.mutex.RUnlock()
+	sub := t.subs[topic]
+	if sub == nil {
+		return nil
+	}
+	return sub.topic
 }
 
 func (t *TopicSubscriptions) Add(topic string, topicHandle *pubsub.Topic, validator pubsub.ValidatorEx) error {

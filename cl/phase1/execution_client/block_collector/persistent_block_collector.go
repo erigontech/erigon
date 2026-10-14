@@ -463,14 +463,14 @@ func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, error) {
 		return nil, nil
 	}
 
-	header, err := executionPayload.RlpHeader(&parentRoot, requestsHash)
+	bal, err := execution_client.DecodeAndValidateBlockAccessList(executionPayload)
 	if err != nil {
 		return nil, err
 	}
 
-	var bal []byte
-	if executionPayload.BlockAccessList != nil {
-		bal = executionPayload.BlockAccessList.Bytes()
+	header, err := executionPayload.RlpHeader(&parentRoot, requestsHash, bal)
+	if err != nil {
+		return nil, err
 	}
 
 	return types.NewBlockFromStorageWithBinaryTxs(executionPayload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals, bal), nil
@@ -510,7 +510,8 @@ func (p *PersistentBlockCollector) doForkChoiceUpdate(ctx context.Context, lastB
 	if lastBlock.HeaderNoCopy().SlotNumber != nil {
 		fcuVersion = clparams.GloasVersion
 	}
-	if _, err := p.engine.ForkChoiceUpdate(ctx, lastBlockHash, lastBlockHash, lastBlockHash, nil, fcuVersion); err != nil {
+	// Only consensus checkpoints may set safe and finalized; zero hashes leave the EL's markers unchanged.
+	if _, err := p.engine.ForkChoiceUpdate(ctx, common.Hash{}, common.Hash{}, lastBlockHash, nil, fcuVersion); err != nil {
 		p.logger.Warn("[BlockCollector] Failed to update fork choice", "err", err)
 	}
 }

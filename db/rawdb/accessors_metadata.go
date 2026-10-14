@@ -22,6 +22,7 @@ package rawdb
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 
 	jsoniter "github.com/json-iterator/go"
@@ -29,12 +30,10 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
-
-var json = jsoniter.ConfigFastest
 
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
 func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, error) {
@@ -51,12 +50,13 @@ func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, error) {
 		return nil, fmt.Errorf("invalid chain config JSON: %x, %w", hash, err)
 	}
 
-	if config.BorJSON != nil {
-		borConfig := &borcfg.BorConfig{}
-		if err := jsoniter.ConfigFastest.Unmarshal(config.BorJSON, borConfig); err != nil {
-			return nil, fmt.Errorf("invalid chain config 'bor' JSON: %x, %w", hash, err)
-		}
-		config.Bor = borConfig
+	// chain.Config no longer has a 'bor' field, so a stored Polygon config would
+	// otherwise load with its consensus settings silently dropped.
+	var probe struct {
+		Bor json.RawMessage `json:"bor"`
+	}
+	if err := jsoniter.ConfigFastest.Unmarshal(data, &probe); err == nil && len(probe.Bor) > 0 && !bytes.Equal(probe.Bor, []byte("null")) {
+		return nil, fmt.Errorf("chain config %x carries a 'bor' section: Polygon is not supported, see https://github.com/0xPolygon/erigon", hash)
 	}
 	return &config, nil
 }
@@ -65,14 +65,6 @@ func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, error) {
 func WriteChainConfig(db kv.Putter, hash common.Hash, cfg *chain.Config) error {
 	if cfg == nil {
 		return nil
-	}
-
-	if cfg.Bor != nil {
-		borJSON, err := jsoniter.ConfigFastest.Marshal(cfg.Bor)
-		if err != nil {
-			return fmt.Errorf("failed to JSON encode chain config 'bor': %w", err)
-		}
-		cfg.BorJSON = borJSON
 	}
 
 	// L2 resolution from L2JSON is owned by the registering L2 package, so
@@ -108,7 +100,14 @@ func WriteGenesisIfNotExist(db kv.RwTx, g *types.Genesis) error {
 		return nil
 	}
 
-	// Marshal json g
+	// Difficulty is required on read, and genesiswrite defaults it into the
+	// header only, so a spec without one would write a record it cannot read.
+	if g != nil && g.Difficulty == nil {
+		spec := *g
+		spec.Difficulty = params.GenesisDifficulty
+		g = &spec
+	}
+
 	val, err := jsoniter.ConfigFastest.Marshal(g)
 	if err != nil {
 		return err

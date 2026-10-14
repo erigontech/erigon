@@ -212,24 +212,24 @@ func (sc *sendersBatch) getOrCreateID(addr common.Address, logger log.Logger) (u
 	return id, traced
 }
 
-func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (uint64, uint256.Int, error) {
+func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (uint64, uint256.Int, accounts.CodeHash, error) {
 	addr, ok := sc.senderID2Addr[id]
 	if !ok {
 		panic("must not happen")
 	}
 	encoded, err := cacheView.Get(addr[:])
 	if err != nil {
-		return 0, uint256.Int{}, err
+		return 0, uint256.Int{}, accounts.EmptyCodeHash, err
 	}
 	if len(encoded) == 0 {
-		return 0, uint256.Int{}, nil
+		return 0, uint256.Int{}, accounts.EmptyCodeHash, nil
 	}
 	acc := accounts.Account{}
 	err = accounts.DeserialiseV3(&acc, encoded)
 	if err != nil {
-		return 0, uint256.Int{}, err
+		return 0, uint256.Int{}, accounts.EmptyCodeHash, err
 	}
-	return acc.Nonce, acc.Balance, nil
+	return acc.Nonce, acc.Balance, acc.CodeHash, nil
 }
 
 func (sc *sendersBatch) registerNewSenders(newTxns *TxnSlots, logger log.Logger) (err error) {
@@ -277,8 +277,8 @@ func EncodeSenderLengthForStorage(nonce uint64, balance uint256.Int) uint {
 
 // Encode the details of txn sender into the given "buffer" byte-slice that should be big enough
 func EncodeSender(nonce uint64, balance uint256.Int, buffer []byte) {
-	var fieldSet = 0 // start with first bit set to 0
-	var pos = 1
+	fieldSet := 0 // start with first bit set to 0
+	pos := 1
 	if nonce > 0 {
 		fieldSet = 1
 		nonceBytes := common.BitLenToByteLen(bits.Len64(nonce))

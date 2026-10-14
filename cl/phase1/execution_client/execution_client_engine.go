@@ -24,11 +24,8 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -53,7 +50,7 @@ func checkPayloadStatus(payloadStatus *engine_types.PayloadStatus) error {
 	}
 	validationErr := payloadStatus.ValidationError
 	if validationErr != nil {
-		return fmt.Errorf("engine payload status error: %s", validationErr.Error())
+		return fmt.Errorf("engine payload status error: %w", validationErr.Error())
 	}
 	return nil
 }
@@ -193,14 +190,20 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 		resp, err = cc.engine.ForkchoiceUpdatedV4(ctx, forkChoiceState, attributes, nil)
 	}
 	if err != nil {
-		if err.Error() == errContextExceeded {
-			return nil, nil
+		if isDeadlineExceeded(err) {
+			return nil, fmt.Errorf("%w: %w", ErrForkChoiceUpdateTimeout, err)
 		}
 		return nil, fmt.Errorf("engine ForkchoiceUpdated failed: %w", err)
 	}
 
 	if resp.PayloadId == nil {
-		return []byte{}, checkPayloadStatus(resp.PayloadStatus)
+		if err := checkPayloadStatus(resp.PayloadStatus); err != nil {
+			return nil, err
+		}
+		if attributes != nil {
+			return nil, ErrForkChoiceUpdateNoPayloadID
+		}
+		return []byte{}, nil
 	}
 	return *resp.PayloadId, checkPayloadStatus(resp.PayloadStatus)
 }
@@ -248,7 +251,7 @@ func (cc *ExecutionClientEngine) IsCanonicalHash(ctx context.Context, hash commo
 	// eth_getBlockByHash returns non-canonical blocks too — verify canonicality
 	// by fetching the canonical block at this height and comparing hashes.
 	var canonical *types.Header
-	if err := cc.rpcClient.CallContext(ctx, &canonical, "eth_getBlockByNumber", hexutil.EncodeBig(header.Number.ToBig()), false); err != nil {
+	if err := cc.rpcClient.CallContext(ctx, &canonical, "eth_getBlockByNumber", hexutil.EncodeUint64(header.Number.Uint64()), false); err != nil {
 		return false, fmt.Errorf("eth_getBlockByNumber failed: %w", err)
 	}
 	return canonical != nil && canonical.Hash() == hash, nil
@@ -345,10 +348,13 @@ func (cc *ExecutionClientEngine) getAssembledBlockV3(ctx context.Context, id []b
 		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV3 failed: %w", err)
 	}
 	if resp.ExecutionPayload == nil {
-		return nil, nil, nil, nil, errors.New("GetPayloadV3 returned nil execution payload")
+		return nil, nil, nil, nil, fmt.Errorf("%w: GetPayloadV3 returned nil execution payload", ErrInvalidGetPayloadResponse)
+	}
+	if resp.BlobsBundle == nil {
+		return nil, nil, nil, nil, fmt.Errorf("%w: GetPayloadV3 returned missing blobs bundle", ErrInvalidGetPayloadResponse)
 	}
 
-	block, err := executionPayloadToEth1Block(resp.ExecutionPayload, version, cc.beaconCfg)
+	block, err := resp.ExecutionPayload.ToEth1Block(version, cc.beaconCfg)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -365,13 +371,16 @@ func (cc *ExecutionClientEngine) getAssembledBlockV3(ctx context.Context, id []b
 // block-production values.
 func (cc *ExecutionClientEngine) getAssembledBlockFromResponse(resp *engine_types.GetPayloadResponse, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	if resp.ExecutionPayload == nil {
-		return nil, nil, nil, nil, errors.New("GetPayload returned nil execution payload")
+		return nil, nil, nil, nil, fmt.Errorf("%w: GetPayload returned nil execution payload", ErrInvalidGetPayloadResponse)
+	}
+	if resp.BlobsBundle == nil {
+		return nil, nil, nil, nil, fmt.Errorf("%w: GetPayload returned missing blobs bundle", ErrInvalidGetPayloadResponse)
 	}
 	if cc.beaconCfg == nil {
 		return nil, nil, nil, nil, errors.New("beaconCfg not set — call SetBeaconChainConfig before GetAssembledBlock")
 	}
 
-	block, err := executionPayloadToEth1Block(resp.ExecutionPayload, version, cc.beaconCfg)
+	block, err := resp.ExecutionPayload.ToEth1Block(version, cc.beaconCfg)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -416,82 +425,6 @@ func (cc *ExecutionClientEngine) getAssembledBlockV6(ctx context.Context, id []b
 		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV6 failed: %w", err)
 	}
 	return cc.getAssembledBlockFromResponse(resp, version)
-}
-
-func executionPayloadToEth1Block(ep *engine_types.ExecutionPayload, version clparams.StateVersion, beaconCfg *clparams.BeaconChainConfig) (*cltypes.Eth1Block, error) {
-	block := cltypes.NewEth1Block(version, beaconCfg)
-	block.ParentHash = ep.ParentHash
-	block.FeeRecipient = ep.FeeRecipient
-	block.StateRoot = ep.StateRoot
-	block.ReceiptsRoot = ep.ReceiptsRoot
-	block.PrevRandao = ep.PrevRandao
-	block.BlockNumber = uint64(ep.BlockNumber)
-	block.GasLimit = uint64(ep.GasLimit)
-	block.GasUsed = uint64(ep.GasUsed)
-	block.Time = uint64(ep.Timestamp)
-	block.BlockHash = ep.BlockHash
-
-	if len(ep.LogsBloom) == 256 {
-		copy(block.LogsBloom[:], ep.LogsBloom)
-	}
-
-	if ep.ExtraData != nil {
-		block.Extra = solid.NewExtraData()
-		block.Extra.SetBytes(ep.ExtraData)
-	}
-
-	if ep.BaseFeePerGas != nil {
-		baseFee := uint256.MustFromBig(ep.BaseFeePerGas.ToInt())
-		_, _ = baseFee.MarshalSSZAppend(block.BaseFeePerGas[:0])
-	}
-
-	if ep.BlobGasUsed != nil {
-		block.BlobGasUsed = uint64(*ep.BlobGasUsed)
-	}
-	if ep.ExcessBlobGas != nil {
-		block.ExcessBlobGas = uint64(*ep.ExcessBlobGas)
-	}
-
-	// Keep transactions encoded while rebuilding their SSZ container.
-	txBytes := make([][]byte, len(ep.Transactions))
-	for i, tx := range ep.Transactions {
-		txBytes[i] = tx
-	}
-	block.Transactions = solid.NewTransactionsSSZFromTransactions(txBytes)
-
-	// Use the chain preset's withdrawal limit when rebuilding the SSZ list.
-	if ep.Withdrawals != nil {
-		maxWithdrawals := 16
-		if beaconCfg != nil {
-			maxWithdrawals = int(beaconCfg.MaxWithdrawalsPerPayload)
-		}
-		block.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](maxWithdrawals, 44)
-		for _, w := range ep.Withdrawals {
-			block.Withdrawals.Append(&cltypes.Withdrawal{
-				Index:     w.Index,
-				Validator: w.Validator,
-				Address:   w.Address,
-				Amount:    w.Amount,
-			})
-		}
-	}
-
-	// Gloas extends the payload with the slot number and block access list.
-	if ep.SlotNumber != nil {
-		block.SlotNumber = uint64(*ep.SlotNumber)
-	}
-	if ep.BlockAccessList != nil && len(*ep.BlockAccessList) > 0 {
-		maxBytes := uint64(1073741824) // MAX_BYTES_PER_TRANSACTION default
-		if beaconCfg != nil {
-			maxBytes = beaconCfg.MaxBytesPerTransaction
-		}
-		block.BlockAccessList = solid.NewByteListSSZ(maxBytes)
-		if err := block.BlockAccessList.SetBytes(*ep.BlockAccessList); err != nil {
-			return nil, err
-		}
-	}
-
-	return block, nil
 }
 
 func (cc *ExecutionClientEngine) HasGapInSnapshots(ctx context.Context) bool {

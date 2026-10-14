@@ -18,14 +18,12 @@ package getters
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types"
@@ -71,35 +69,6 @@ func (r *ExecutionSnapshotReader) Transactions(number uint64, hash common.Hash) 
 	return solid.NewTransactionsSSZFromTransactions(txs), nil
 }
 
-func convertTxsToBytesSSZ(txs [][]byte) []byte {
-	sumLenTxs := 0
-	for _, txn := range txs {
-		sumLenTxs += len(txn)
-	}
-	flat := make([]byte, 0, 4*len(txs)+sumLenTxs)
-	offset := len(txs) * 4
-	for _, txn := range txs {
-		flat = append(flat, ssz.OffsetSSZ(uint32(offset))...)
-		offset += len(txn)
-	}
-	for _, txn := range txs {
-		flat = append(flat, txn...)
-	}
-	return flat
-}
-
-func convertWithdrawalsToBytesSSZ(ws []*types.Withdrawal) []byte {
-	ret := make([]byte, 44*len(ws))
-	for i, w := range ws {
-		currentPos := i * 44
-		binary.LittleEndian.PutUint64(ret[currentPos:currentPos+8], w.Index)
-		binary.LittleEndian.PutUint64(ret[currentPos+8:currentPos+16], w.Validator)
-		copy(ret[currentPos+16:currentPos+36], w.Address[:])
-		binary.LittleEndian.PutUint64(ret[currentPos+36:currentPos+44], w.Amount)
-	}
-	return ret
-}
-
 func (r *ExecutionSnapshotReader) Withdrawals(number uint64, hash common.Hash) (*solid.ListSSZ[*cltypes.Withdrawal], error) {
 	tx, err := r.db.BeginRo(r.ctx)
 	if err != nil {
@@ -117,10 +86,10 @@ func (r *ExecutionSnapshotReader) Withdrawals(number uint64, hash common.Hash) (
 	ret := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(r.beaconCfg.MaxWithdrawalsPerPayload), 44)
 	for _, w := range body.Withdrawals {
 		ret.Append(&cltypes.Withdrawal{
-			Index:     w.Index,
-			Validator: w.Validator,
+			Index:     uint64(w.Index),
+			Validator: uint64(w.Validator),
 			Address:   w.Address,
-			Amount:    w.Amount,
+			Amount:    uint64(w.Amount),
 		})
 	}
 	return ret, nil

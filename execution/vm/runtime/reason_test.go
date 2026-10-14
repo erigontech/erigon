@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -77,7 +78,7 @@ func newTestIBS(t *testing.T, tracer *tracing.Hooks) *Config {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	ibs := state.New(state.NewReaderV3(sd.AsGetter(tx)))
+	ibs := state.New(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	ibs.SetHooks(tracer)
 
 	cfg := new(Config)
@@ -103,7 +104,7 @@ func TestCreateEmitsNonceChangeContractCreator(t *testing.T) {
 	cfg := newTestIBS(t, recordingTracer(&nonceEvents, &codeEvents))
 	defer cfg.State.Close()
 
-	_, _, _, err := Create(initCode, cfg, 0)
+	_, _, _, err := Create(initCode, cfg)
 	require.NoError(t, err)
 
 	// Filter for NonceChangeContractCreator events.
@@ -139,7 +140,7 @@ func TestCreateEmitsNonceChangeNewContract(t *testing.T) {
 	cfg := newTestIBS(t, recordingTracer(&nonceEvents, &codeEvents))
 	defer cfg.State.Close()
 
-	_, contractAddr, _, err := Create(initCode, cfg, 0)
+	_, contractAddr, _, err := Create(initCode, cfg)
 	require.NoError(t, err)
 
 	newContractAddr := accounts.InternAddress(contractAddr)
@@ -191,7 +192,7 @@ func TestCreateEmitsCodeChangeContractCreation(t *testing.T) {
 	cfg := newTestIBS(t, recordingTracer(&nonceEvents, &codeEvents))
 	defer cfg.State.Close()
 
-	_, contractAddr, _, err := Create(initCode, cfg, 0)
+	_, contractAddr, _, err := Create(initCode, cfg)
 	require.NoError(t, err)
 
 	newContractAddr := accounts.InternAddress(contractAddr)
@@ -240,7 +241,7 @@ func TestCreateReasonOrdering(t *testing.T) {
 	cfg := newTestIBS(t, tracer)
 	defer cfg.State.Close()
 
-	_, _, _, err := Create(initCode, cfg, 0)
+	_, _, _, err := Create(initCode, cfg)
 	require.NoError(t, err)
 
 	expected := []event{

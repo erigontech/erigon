@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -35,7 +36,7 @@ func TestGetAccount(t *testing.T) {
 		Nonce:       1,
 		Incarnation: 1,
 		Balance:     u256.U64(100),
-		Root:        EmptyRoot,
+		Root:        empty.RootHash,
 	}
 	acc2 := &accounts.Account{
 		Nonce:       2,
@@ -101,7 +102,10 @@ func TestAddSomeValuesToAccountAndCheckDeepHashForThem(t *testing.T) {
 	expectedTrie.Update(storageKey1[:], value1)
 	expectedTrie.Update(storageKey2[:], value2)
 
-	_, h1 := trie.DeepHash(addrHash[:])
+	_, h1, err := trie.DeepHash(addrHash[:])
+	if err != nil {
+		t.Fatal(err)
+	}
 	h2 := expectedTrie.Hash()
 	if h1 != h2 {
 		t.Fatal("not equals", h1.String(), h2.String())

@@ -61,7 +61,11 @@ func New(cfg *clparams.BeaconChainConfig) *CachingBeaconState {
 	state := &CachingBeaconState{
 		BeaconState: raw.New(cfg),
 	}
-	state.InitBeaconState()
+	// An empty, default-version state cannot fail to initialize: the caches have
+	// constant positive sizes and there are no validators to walk.
+	if err := state.InitBeaconState(); err != nil {
+		panic(err)
+	}
 	return state
 }
 
@@ -106,7 +110,7 @@ func (b *CachingBeaconState) _updateProposerIndex() (err error) {
 		beaconConfig.EpochsPerHistoricalVector
 	// Input for the seed hash.
 	mix := b.GetRandaoMix(int(mixPosition))
-	input := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainBeaconProposer)
+	input := shuffling.GetSeed(mix, epoch, b.BeaconConfig().DomainBeaconProposer)
 	slotByteArray := make([]byte, 8)
 	binary.LittleEndian.PutUint64(slotByteArray, b.Slot())
 
@@ -285,7 +289,9 @@ func (b *CachingBeaconState) InitBeaconState() error {
 	b.totalActiveBalanceCache = nil
 	b._refreshActiveBalancesIfNeeded()
 	b.previousStateRoot = common.Hash{}
-	b.initCaches()
+	if err := b.initCaches(); err != nil {
+		return err
+	}
 	if err := b._updateProposerIndex(); err != nil {
 		return err
 	}

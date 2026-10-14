@@ -22,10 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sync"
 	"time"
-
-	"github.com/klauspost/compress/zstd"
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -115,7 +112,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	blockHeader := block.SignedBeaconBlockHeader().Header
 	blockHeader.Root = common.Hash{}
 	// Read the epoch and per-slot data.
-	slotData, err := state_accessors.ReadSlotData(kvGetter, slot, r.cfg)
+	slotData, err := state_accessors.ReadSlotData(kvGetter, slot)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +135,9 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetVersion(slotData.Version)
 	ret.SetGenesisTime(r.genesisState.GenesisTime())
 	ret.SetGenesisValidatorsRoot(r.genesisState.GenesisValidatorsRoot())
-	ret.SetSlot(slot)
+	if err := ret.SetSlot(slot); err != nil {
+		return nil, fmt.Errorf("failed to set slot: %w", err)
+	}
 	ret.SetFork(slotData.Fork)
 	// History
 	stateRoots, blockRoots := solid.NewHashVector(int(r.cfg.SlotsPerHistoricalRoot)), solid.NewHashVector(int(r.cfg.SlotsPerHistoricalRoot))
@@ -264,8 +263,12 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	if nextSyncCommittee == nil {
 		nextSyncCommittee = r.genesisState.NextSyncCommittee()
 	}
-	ret.SetCurrentSyncCommittee(currentSyncCommittee)
-	ret.SetNextSyncCommittee(nextSyncCommittee)
+	if err := ret.SetCurrentSyncCommittee(currentSyncCommittee); err != nil {
+		return nil, fmt.Errorf("failed to set current sync committee: %w", err)
+	}
+	if err := ret.SetNextSyncCommittee(nextSyncCommittee); err != nil {
+		return nil, fmt.Errorf("failed to set next sync committee: %w", err)
+	}
 	// Execution
 	if ret.Version() < clparams.BellatrixVersion {
 		return ret, nil
@@ -582,14 +585,14 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, kvGetter 
 	}
 
 	// Read the diff file
-	zstdReader, err := zstd.NewReader(bytes.NewReader(compressed))
+	zstdReader, err := base_encoding.GetZstdReader(bytes.NewReader(compressed))
 	if err != nil {
 		return nil, err
 	}
-	defer zstdReader.Close()
-
 	currentList := make([]byte, validatorSetLength*8)
-	if _, err = io.ReadFull(zstdReader, currentList); err != nil && err != io.ErrUnexpectedEOF {
+	_, err = io.ReadFull(zstdReader, currentList)
+	base_encoding.PutZstdReader(zstdReader)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return nil, err
 	}
 
@@ -667,13 +670,14 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, kvGetter state_ac
 	if len(compressed) == 0 {
 		return nil, fmt.Errorf("dump not found for slot %d", freshDumpSlot)
 	}
-	zstdReader, err := zstd.NewReader(bytes.NewReader(compressed))
+	zstdReader, err := base_encoding.GetZstdReader(bytes.NewReader(compressed))
 	if err != nil {
 		return nil, err
 	}
-	defer zstdReader.Close()
 	currentList := make([]byte, validatorSetLength*8)
-	if _, err = io.ReadFull(zstdReader, currentList); err != nil && err != io.ErrUnexpectedEOF {
+	_, err = io.ReadFull(zstdReader, currentList)
+	base_encoding.PutZstdReader(zstdReader)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return nil, err
 	}
 
@@ -752,14 +756,14 @@ func (r *HistoricalStatesReader) ReconstructUint64ListDump(kvGetter state_access
 		return err
 	}
 	// Read the diff file
-	zstdReader, err := zstd.NewReader(&b)
+	zstdReader, err := base_encoding.GetZstdReader(&b)
 	if err != nil {
 		return err
 	}
-	defer zstdReader.Close()
 	currentList := make([]byte, size*8)
-
-	if _, err = io.ReadFull(zstdReader, currentList); err != nil && !errors.Is(err, io.EOF) {
+	_, err = io.ReadFull(zstdReader, currentList)
+	base_encoding.PutZstdReader(zstdReader)
+	if err != nil && !errors.Is(err, io.EOF) {
 		return fmt.Errorf("failed to read dump: %w, len: %d", err, len(v))
 	}
 
@@ -768,7 +772,7 @@ func (r *HistoricalStatesReader) ReconstructUint64ListDump(kvGetter state_access
 
 func (r *HistoricalStatesReader) ReadValidatorsForHistoricalState(tx kv.Tx, kvGetter state_accessors.GetValFn, slot uint64) (*solid.ValidatorSet, error) {
 	// Read the minimal beacon state which have the small fields.
-	sd, err := state_accessors.ReadSlotData(kvGetter, slot, r.cfg)
+	sd, err := state_accessors.ReadSlotData(kvGetter, slot)
 	if err != nil {
 		return nil, err
 	}
@@ -869,7 +873,7 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, kvGetter state_acc
 	}
 
 	// Read the minimal beacon state which have the small fields.
-	sd, err := state_accessors.ReadSlotData(kvGetter, slot, r.cfg)
+	sd, err := state_accessors.ReadSlotData(kvGetter, slot)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -916,7 +920,7 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, kvGetter state_acc
 			attestationEpoch := data.Slot / r.cfg.SlotsPerEpoch
 
 			mixPosition := (attestationEpoch + r.cfg.EpochsPerHistoricalVector - r.cfg.MinSeedLookahead - 1) % r.cfg.EpochsPerHistoricalVector
-			mix, err := r.ReadRandaoMixBySlotAndIndex(tx, kvGetter, data.Slot, mixPosition)
+			mix, err := r.ReadRandaoMixBySlotAndIndex(kvGetter, data.Slot, mixPosition)
 			if err != nil {
 				return false
 			}
@@ -927,7 +931,7 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, kvGetter state_acc
 				return false
 			}
 			var participationFlagsIndicies []uint8
-			participationFlagsIndicies, err = r.getAttestationParticipationFlagIndicies(tx, kvGetter, block.Version(), i, *data, i-data.Slot, true)
+			participationFlagsIndicies, err = r.getAttestationParticipationFlagIndicies(kvGetter, block.Version(), i, *data, i-data.Slot, true)
 			if err != nil {
 				return false
 			}
@@ -965,26 +969,8 @@ func (r *HistoricalStatesReader) computeRelevantEpochs(slot uint64) (uint64, uin
 	return epoch, epoch - 1
 }
 
-func (r *HistoricalStatesReader) tryCachingEpochsInParallell(tx kv.Tx, kvGetter state_accessors.GetValFn, activeIdxs [][]uint64, epochs []uint64) error {
-	var wg sync.WaitGroup
-	for i, epoch := range epochs {
-		mixPosition := (epoch + r.cfg.EpochsPerHistoricalVector - r.cfg.MinSeedLookahead - 1) % r.cfg.EpochsPerHistoricalVector
-		mix, err := r.ReadRandaoMixBySlotAndIndex(tx, kvGetter, epochs[0]*r.cfg.SlotsPerEpoch, mixPosition)
-		if err != nil {
-			return err
-		}
-
-		idxs := activeIdxs[i]
-		wg.Go(func() {
-			_, _ = r.ComputeCommittee(mix, idxs, epoch*r.cfg.SlotsPerEpoch, r.cfg.TargetCommitteeSize, 0)
-		})
-	}
-	wg.Wait()
-	return nil
-}
-
 func (r *HistoricalStatesReader) ReadValidatorsBalances(tx kv.Tx, kvGetter state_accessors.GetValFn, slot uint64) (solid.Uint64ListSSZ, error) {
-	sd, err := state_accessors.ReadSlotData(kvGetter, slot, r.cfg)
+	sd, err := state_accessors.ReadSlotData(kvGetter, slot)
 	if err != nil {
 		return nil, err
 	}
@@ -1002,7 +988,7 @@ func (r *HistoricalStatesReader) ReadValidatorsBalances(tx kv.Tx, kvGetter state
 	return balancesList, balancesList.DecodeSSZ(balances, 0)
 }
 
-func (r *HistoricalStatesReader) ReadRandaoMixBySlotAndIndex(tx kv.Tx, kvGetter state_accessors.GetValFn, slot, index uint64) (common.Hash, error) {
+func (r *HistoricalStatesReader) ReadRandaoMixBySlotAndIndex(kvGetter state_accessors.GetValFn, slot, index uint64) (common.Hash, error) {
 	epoch := slot / r.cfg.SlotsPerEpoch
 	epochSubIndex := epoch % r.cfg.EpochsPerHistoricalVector
 	if index == epochSubIndex {
@@ -1055,13 +1041,12 @@ func ReadQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValF
 	}
 
 	if len(compressed) != 0 {
-		zstdReader, err := zstd.NewReader(bytes.NewReader(compressed))
+		zstdReader, err := base_encoding.GetZstdReader(bytes.NewReader(compressed))
 		if err != nil {
 			return err
 		}
-		defer zstdReader.Close()
-
 		sszEnc, err := io.ReadAll(zstdReader)
+		base_encoding.PutZstdReader(zstdReader)
 		if err != nil {
 			return err
 		}
@@ -1106,12 +1091,12 @@ func ReadRequiredQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors
 	}
 
 	// Decompress and decode the dump.
-	zstdReader, err := zstd.NewReader(bytes.NewReader(compressed))
+	zstdReader, err := base_encoding.GetZstdReader(bytes.NewReader(compressed))
 	if err != nil {
 		return err
 	}
-	defer zstdReader.Close()
 	sszEnc, err := io.ReadAll(zstdReader)
+	base_encoding.PutZstdReader(zstdReader)
 	if err != nil {
 		return err
 	}
@@ -1167,13 +1152,12 @@ func readCompressedSSZ[T interface {
 		return fmt.Errorf("%w: table %s, slot %d", ErrMissingGloasData, table, slot)
 	}
 
-	zstdReader, err := zstd.NewReader(bytes.NewReader(compressed))
+	zstdReader, err := base_encoding.GetZstdReader(bytes.NewReader(compressed))
 	if err != nil {
 		return err
 	}
-	defer zstdReader.Close()
-
 	sszEnc, err := io.ReadAll(zstdReader)
+	base_encoding.PutZstdReader(zstdReader)
 	if err != nil {
 		return err
 	}

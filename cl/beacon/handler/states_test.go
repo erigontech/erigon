@@ -23,6 +23,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -30,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -91,11 +94,6 @@ func TestGetStateFork(t *testing.T) {
 			require.Equal(t, "0", data["epoch"])
 		})
 	}
-}
-
-func stringRPCErr(r io.Reader) string {
-	b, _ := io.ReadAll(r)
-	return string(b)
 }
 
 func TestGetStateRoot(t *testing.T) {
@@ -315,6 +313,90 @@ func TestGetStateFullForkchoice(t *testing.T) {
 			require.Equal(t, postRoot, otherRoot)
 		})
 	}
+}
+
+// TestGetStateFullSkipsForkchoiceStateAtLaterSlot pins that a fork choice state
+// advanced past its block, as an anchor state can be, is not served for that
+// block's slot or root.
+func TestGetStateFullSkipsForkchoiceStateAtLaterSlot(t *testing.T) {
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+
+	postRoot, err := postState.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
+
+	advanced, err := postState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(advanced, postState.Slot()+1))
+	fcu.StateAtBlockRootVal[fcu.HeadVal] = advanced
+
+	for _, stateID := range []string{
+		"0x" + common.Bytes2Hex(postRoot[:]),
+		strconv.FormatUint(postState.Slot(), 10),
+	} {
+		t.Run(stateID, func(t *testing.T) {
+			server := httptest.NewServer(handler.mux)
+			defer server.Close()
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v2/debug/beacon/states/"+stateID, nil)
+			require.NoError(t, err)
+			req.Header.Set("Accept", "application/octet-stream")
+			resp, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+
+			out, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			got := state.New(&clparams.MainnetBeaconConfig)
+			require.NoError(t, got.DecodeSSZ(out, int(clparams.Phase0Version)))
+			require.Equal(t, postState.Slot(), got.Slot())
+			gotRoot, err := got.HashSSZ()
+			require.NoError(t, err)
+			require.Equal(t, postRoot, gotRoot)
+		})
+	}
+}
+
+// TestGetStateFullFinalizedServesAdvancedForkchoiceState pins that a named
+// state_id still gets the fork choice state when it was advanced past its
+// block, as the anchor checkpoint state can be.
+func TestGetStateFullFinalizedServesAdvancedForkchoiceState(t *testing.T) {
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+
+	var err error
+	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
+
+	advanced, err := postState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(advanced, postState.Slot()+1))
+	advancedRoot, err := advanced.HashSSZ()
+	require.NoError(t, err)
+	fcu.StateAtBlockRootVal[fcu.HeadVal] = advanced
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v2/debug/beacon/states/finalized", nil)
+	require.NoError(t, err)
+	req.Header.Set("Accept", "application/octet-stream")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	out, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	got := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, got.DecodeSSZ(out, int(clparams.Phase0Version)))
+	require.Equal(t, advanced.Slot(), got.Slot())
+	gotRoot, err := got.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, advancedRoot, gotRoot)
 }
 
 func TestGetStateSyncCommittees(t *testing.T) {
@@ -595,4 +677,23 @@ func TestGetPendingQueuesConsensusVersionHeader(t *testing.T) {
 	}
 	require.Equal(t, versions["pending_partial_withdrawals"], versions["pending_consolidations"])
 	require.Equal(t, versions["pending_partial_withdrawals"], versions["pending_deposits"])
+}
+
+// The response can be hundreds of MB on mainnet, so it must not stay in the pool.
+func TestResponseValidatorsDoesNotParkResponseInPool(t *testing.T) {
+	seed := new(strings.Builder)
+	saved := stringsBuilderPool
+	stringsBuilderPool = &sync.Pool{New: func() any { return seed }}
+	t.Cleanup(func() { stringsBuilderPool = saved })
+
+	const count = 16
+	validators := solid.NewValidatorSetWithLength(count, count)
+	balances := solid.NewUint64ListSSZ(count)
+	for i := range count {
+		balances.Append(uint64(i))
+	}
+
+	responseValidators(httptest.NewRecorder(), nil, nil, 0, balances, validators, true, false)
+
+	require.Zero(t, seed.Len(), "pooled builder still holds the whole response")
 }

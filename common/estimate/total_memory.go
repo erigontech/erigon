@@ -20,7 +20,7 @@ import (
 	"runtime/debug"
 	"sync"
 
-	"github.com/pbnjay/memory"
+	"github.com/shirou/gopsutil/v4/mem"
 )
 
 var (
@@ -28,19 +28,39 @@ var (
 	totalMemoryCached uint64
 )
 
+var startupGoMemLimit = debug.SetMemoryLimit(-1)
+
+// memoryBound folds the probes into the tightest one. A zero means the probe
+// failed, not a bound of zero, so it is skipped — otherwise an unreadable
+// /proc/meminfo would discard a cgroup limit that was read fine.
+func memoryBound(bounds ...uint64) uint64 {
+	var total uint64
+	for _, b := range bounds {
+		if b > 0 && (total == 0 || b < total) {
+			total = b
+		}
+	}
+	return total
+}
+
 func TotalMemory() uint64 {
 	totalMemoryOnce.Do(func() {
-		mem := memory.TotalMemory()
-
-		if cgroupsMemLimit, err := cgroupsMemoryLimit(); (err == nil) && (cgroupsMemLimit > 0) {
-			mem = min(mem, cgroupsMemLimit)
+		var system uint64
+		if vm, err := mem.VirtualMemory(); err == nil {
+			system = vm.Total
 		}
 
-		if goMemLimit := debug.SetMemoryLimit(-1); goMemLimit > 0 {
-			mem = min(mem, uint64(goMemLimit))
+		var cgroup uint64
+		if cgroupsMemLimit, err := cgroupsMemoryLimit(); err == nil {
+			cgroup = cgroupsMemLimit
 		}
 
-		totalMemoryCached = mem
+		var goMemLimit uint64
+		if startupGoMemLimit > 0 {
+			goMemLimit = uint64(startupGoMemLimit)
+		}
+
+		totalMemoryCached = memoryBound(system, cgroup, goMemLimit)
 	})
 	return totalMemoryCached
 }

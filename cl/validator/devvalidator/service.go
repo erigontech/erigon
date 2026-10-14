@@ -8,7 +8,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -18,6 +20,8 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 )
+
+const envelopeSubmissionRetryInterval = 500 * time.Millisecond
 
 // Service is the embedded dev validator. It runs as a goroutine inside
 // Caplin, producing blocks and attestations for all configured validators.
@@ -29,7 +33,10 @@ type Service struct {
 	genesisValidatorsRoot common.Hash
 	genesisTime           uint64
 	logger                log.Logger
+	lifecycleMu           sync.Mutex
+	lifecycleCtx          context.Context
 	cancel                context.CancelFunc
+	envelopeSubmissions   sync.Map
 }
 
 // NewService creates a dev validator service.
@@ -52,7 +59,8 @@ func NewService(beaconAPIURL string, seed string, validatorCount int,
 
 // Start begins the validator duty loop. It blocks until the context is cancelled.
 func (s *Service) Start(ctx context.Context) {
-	ctx, s.cancel = context.WithCancel(ctx)
+	ctx = s.beginLifecycle(ctx)
+	defer s.Stop()
 
 	// Wait for the beacon node to be ready.
 	s.waitForReady(ctx)
@@ -79,9 +87,34 @@ func (s *Service) Start(ctx context.Context) {
 
 // Stop cancels the validator service.
 func (s *Service) Stop() {
-	if s.cancel != nil {
-		s.cancel()
+	s.lifecycleMu.Lock()
+	cancel := s.cancel
+	s.lifecycleMu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
+}
+
+func (s *Service) beginLifecycle(parent context.Context) context.Context {
+	ctx, cancel := context.WithCancel(parent)
+	s.lifecycleMu.Lock()
+	previous := s.cancel
+	s.lifecycleCtx = ctx
+	s.cancel = cancel
+	s.lifecycleMu.Unlock()
+	if previous != nil {
+		previous()
+	}
+	return ctx
+}
+
+func (s *Service) retryOwnerContext() context.Context {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.lifecycleCtx == nil {
+		s.lifecycleCtx, s.cancel = context.WithCancel(context.Background())
+	}
+	return s.lifecycleCtx
 }
 
 // waitForReady polls the beacon node until it responds, then fetches
@@ -268,10 +301,10 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 	path := fmt.Sprintf("/eth/v3/validator/blocks/%d?randao_reveal=%s",
 		slot, hexutil.Encode(randaoReveal[:]))
 
-	var blockResponse json.RawMessage
+	var response *beaconResponse
 	var getErr error
 	for range 5 {
-		getErr = s.client.get(ctx, path, &blockResponse)
+		response, getErr = s.client.getResponse(ctx, path)
 		if getErr == nil {
 			break
 		}
@@ -281,8 +314,8 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 		return fmt.Errorf("get block template: %w", getErr)
 	}
 
-	// Parse the block template. The v3 response is a DenebBeaconBlock
-	// ({"block": {...}, "kzg_proofs": [...], "blobs": [...]}).
+	blockResponse := response.Data
+
 	version := s.cfg.GetCurrentStateVersion(epoch)
 	var denebBlock struct {
 		Block     json.RawMessage `json:"block"`
@@ -303,6 +336,10 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 		return fmt.Errorf("parse block template: %w", err)
 	}
 
+	if block.Block.Body == nil {
+		return fmt.Errorf("block template body is missing")
+	}
+
 	// Ensure execution payload sub-fields are initialized (the JSON response
 	// may leave some nil which causes HashSSZ to panic).
 	if block.Block.Body.ExecutionPayload != nil {
@@ -317,6 +354,17 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 		}
 	}
 
+	var signedEnvelope *cltypes.SignedExecutionPayloadEnvelope
+	if version >= clparams.GloasVersion {
+		if block.Block.Slot != slot {
+			return fmt.Errorf("block template slot %d does not match requested slot %d", block.Block.Slot, slot)
+		}
+		signedEnvelope, err = s.signExecutionPayloadEnvelope(block.Block, response.ExecutionPayloadEnvelope, key)
+		if err != nil {
+			return err
+		}
+	}
+
 	// Sign the block.
 	sig, err := signBlock(key, block.Block, slot, s.cfg, s.genesisValidatorsRoot)
 	if err != nil {
@@ -324,11 +372,9 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 	}
 	block.Signature = sig
 
-	// Submit the signed block. For Deneb+, wrap in DenebSignedBeaconBlock
-	// with empty blob sidecars.
 	versionStr := version.String()
 	var submitBody any = block
-	if version >= clparams.DenebVersion {
+	if version >= clparams.DenebVersion && version < clparams.GloasVersion {
 		submitBody = &cltypes.DenebSignedBeaconBlock{
 			SignedBlock: block,
 			KZGProofs:   solid.NewStaticListSSZ[*cltypes.KZGProof](cltypes.MaxBlobsCommittmentsPerBlock*int(s.cfg.NumberOfColumns), cltypes.BYTES_KZG_PROOF),
@@ -339,8 +385,135 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 		return fmt.Errorf("submit block: %w", err)
 	}
 
+	if signedEnvelope != nil {
+		headers := http.Header{
+			"Eth-Consensus-Version":  {versionStr},
+			"Eth-Blob-Data-Included": {"false"},
+		}
+		s.submitExecutionPayloadEnvelope(ctx, slot, signedEnvelope, headers)
+	}
+
 	s.logger.Info("[dev-validator] proposed block", "slot", slot, "validator", key.ValidatorIndex)
 	return nil
+}
+
+func (s *Service) submitExecutionPayloadEnvelope(
+	ctx context.Context,
+	slot uint64,
+	envelope *cltypes.SignedExecutionPayloadEnvelope,
+	headers http.Header,
+) {
+	root := common.Hash(envelope.Message.BeaconBlockRoot)
+	if _, loaded := s.envelopeSubmissions.LoadOrStore(root, struct{}{}); loaded {
+		return
+	}
+	deadline := s.executionPayloadEnvelopeDeadline(slot)
+	initialCtx, cancel := context.WithDeadline(ctx, deadline)
+	err := s.client.postJSONWithHeaders(initialCtx, "/eth/v1/beacon/execution_payload_envelopes", envelope, headers)
+	cancel()
+	if err == nil {
+		s.expireEnvelopeSubmission(root, deadline)
+		return
+	}
+	if !time.Now().Before(deadline) {
+		s.envelopeSubmissions.Delete(root)
+		return
+	}
+	retryOwner := s.retryOwnerContext()
+	go func() {
+		retryCtx, cancel := context.WithDeadline(retryOwner, deadline)
+		defer cancel()
+		for {
+			timer := time.NewTimer(min(envelopeSubmissionRetryInterval, time.Until(deadline)))
+			select {
+			case <-timer.C:
+			case <-retryCtx.Done():
+				timer.Stop()
+				s.envelopeSubmissions.Delete(root)
+				return
+			}
+			if retryCtx.Err() != nil {
+				s.envelopeSubmissions.Delete(root)
+				return
+			}
+			if err := s.client.postJSONWithHeaders(retryCtx, "/eth/v1/beacon/execution_payload_envelopes", envelope, headers); err == nil {
+				s.expireEnvelopeSubmission(root, deadline)
+				return
+			}
+			if retryCtx.Err() != nil {
+				s.logger.Warn("[dev-validator] failed to submit execution payload envelope", "slot", slot)
+				s.envelopeSubmissions.Delete(root)
+				return
+			}
+		}
+	}()
+}
+
+func (s *Service) executionPayloadEnvelopeDeadline(slot uint64) time.Time {
+	slotDuration := time.Duration(s.cfg.SecondsPerSlot) * time.Second
+	slotStart := time.Unix(int64(s.genesisTime), 0).Add(time.Duration(slot) * slotDuration)
+	return slotStart.Add(slotDuration * time.Duration(s.cfg.PayloadDueBps) / time.Duration(clparams.BpsFactor))
+}
+
+func (s *Service) expireEnvelopeSubmission(root common.Hash, deadline time.Time) {
+	delay := time.Until(deadline)
+	if delay <= 0 {
+		s.envelopeSubmissions.Delete(root)
+		return
+	}
+	time.AfterFunc(delay, func() { s.envelopeSubmissions.Delete(root) })
+}
+
+func (s *Service) signExecutionPayloadEnvelope(block *cltypes.BeaconBlock, data json.RawMessage, key *ValidatorKey) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	if block.Body.SignedExecutionPayloadBid == nil || block.Body.SignedExecutionPayloadBid.Message == nil {
+		return nil, fmt.Errorf("block template execution payload bid is missing")
+	}
+	bid := block.Body.SignedExecutionPayloadBid.Message
+	if bid.BuilderIndex != clparams.BuilderIndexSelfBuild {
+		if len(data) != 0 {
+			return nil, fmt.Errorf("external builder template includes an unsigned execution payload envelope")
+		}
+		return nil, nil
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("self-build template execution payload envelope is missing")
+	}
+	envelope := cltypes.NewExecutionPayloadEnvelope(s.cfg)
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return nil, fmt.Errorf("parse execution payload envelope: %w", err)
+	}
+	if envelope == nil || envelope.Payload == nil || envelope.ExecutionRequests == nil {
+		return nil, fmt.Errorf("execution payload envelope is incomplete")
+	}
+	if withdrawals := envelope.Payload.Withdrawals; withdrawals != nil {
+		for i := 0; i < withdrawals.Len(); i++ {
+			if withdrawals.Get(i) == nil {
+				return nil, fmt.Errorf("execution payload withdrawal %d is null", i)
+			}
+		}
+	}
+	blockRoot, err := block.HashSSZ()
+	if err != nil {
+		return nil, fmt.Errorf("hash block template: %w", err)
+	}
+	if envelope.BeaconBlockRoot != blockRoot || envelope.ParentBeaconBlockRoot != block.ParentRoot ||
+		envelope.BuilderIndex != bid.BuilderIndex || envelope.Payload.BlockHash != bid.BlockHash ||
+		envelope.Payload.SlotNumber != block.Slot {
+		return nil, fmt.Errorf("execution payload envelope does not match block template")
+	}
+	requestsRoot, err := envelope.ExecutionRequests.HashSSZ()
+	if err != nil {
+		return nil, fmt.Errorf("hash execution requests: %w", err)
+	}
+	if requestsRoot != bid.ExecutionRequestsRoot {
+		return nil, fmt.Errorf("execution requests do not match block template")
+	}
+	epoch := block.Slot / s.cfg.SlotsPerEpoch
+	signature, err := signObject(key, envelope, s.cfg.DomainBeaconBuilder, epoch, s.cfg, s.genesisValidatorsRoot)
+	if err != nil {
+		return nil, fmt.Errorf("sign execution payload envelope: %w", err)
+	}
+	return &cltypes.SignedExecutionPayloadEnvelope{Message: envelope, Signature: signature}, nil
 }
 
 // maybeAttest submits attestations for validators with duties at this slot.

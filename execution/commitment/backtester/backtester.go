@@ -150,7 +150,7 @@ func (bt Backtester) run(ctx context.Context, tx kv.TemporalTx, fromBlock uint64
 		start:      start,
 	}
 	runOutputDir := path.Join(bt.outputDir, ri.String())
-	err = os.MkdirAll(runOutputDir, 0755)
+	err = os.MkdirAll(runOutputDir, 0o755)
 	if err != nil {
 		return err
 	}
@@ -182,7 +182,7 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	start := time.Now()
 	bt.logger.Info("backtesting block commitment", "block", block)
 	blockOutputDir := deriveBlockOutputDir(runOutputDir, block)
-	err := os.MkdirAll(blockOutputDir, 0755)
+	err := os.MkdirAll(blockOutputDir, 0o755)
 	if err != nil {
 		return err
 	}

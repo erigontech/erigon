@@ -190,20 +190,21 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 		fieldBits := branchData[pos]
 		pos++
 
-		if cellFields(fieldBits)&(fieldAccountAddr|fieldStorageAddr) != 0 {
-			break
-		}
-
-		hasExtension := (fieldBits & 1) != 0
-		if hasExtension && pos < len(branchData) {
-			extLen, n := binary.Uvarint(branchData[pos:])
-			if n > 0 && extLen > 0 {
-				depth += int(extLen)
-				continue
+		fields := cellFields(fieldBits)
+		extLen := 0
+		if fields&fieldExtension != 0 {
+			if l, n := binary.Uvarint(branchData[pos:]); n > 0 {
+				extLen = int(l)
 			}
 		}
-
-		depth++
+		switch {
+		case fields&(fieldAccountAddr|fieldStorageAddr|fieldHash) == fieldAccountAddr|fieldHash && depth < 64 && len(hashedKey) > 64:
+			depth = 64 + extLen
+		case fields&(fieldAccountAddr|fieldStorageAddr) != 0:
+			return
+		default:
+			depth += 1 + extLen
+		}
 	}
 }
 
@@ -245,15 +246,6 @@ func (w *Warmuper) WaitBufferFree(slot int) error {
 	return nil
 }
 
-func (w *Warmuper) Wait() error {
-	if !w.started.Load() || w.numWorkers <= 0 {
-		return nil
-	}
-	w.Close()
-	w.g.Wait()
-	return nil
-}
-
 func (w *Warmuper) Stats() WarmupStats {
 	duration := time.Duration(0)
 	if !w.startTime.IsZero() {
@@ -290,8 +282,7 @@ func (w *Warmuper) Close() {
 	if w.closed.Swap(true) {
 		return
 	}
+	// w.work is never closed: that would race a concurrent WarmKey send into a
+	// panic and make DrainPending spin. ctx cancellation is the sole shutdown signal.
 	w.cancel()
-	if w.work != nil {
-		close(w.work)
-	}
 }

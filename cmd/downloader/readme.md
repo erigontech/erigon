@@ -16,7 +16,7 @@
   incentives). StageSenders results are included into blocks snaps - means new node can skip it.
 
 - How network benefit? - Serve immutable snapshots can use cheaper infrastructure: Bittorrent/S3/R2/etc... - because
-  there is no incentive. Polygon mainnet is 12Tb now. Also Beacon network is very bad in serving old data.
+  there is no incentive. Also Beacon network is very bad in serving old data.
 
 - How does it benefit current nodes? - Erigon's db is 1-file (multiple TB of NVME) - which is not friendly for
   maintenance. Can't mount `hot` data to 1 type of disk and `cold` to another. Erigon2 moving only Blocks to snaps

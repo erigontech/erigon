@@ -96,10 +96,7 @@ func (u *BitList) CopyTo(target IterableSSZ[byte]) {
 }
 
 func (u *BitList) Copy() *BitList {
-	n := NewBitList(u.l, u.c)
-	n.u = make([]byte, len(u.u), cap(u.u))
-	copy(n.u, u.u)
-	return n
+	return &BitList{u: slices.Clone(u.u), l: u.l, c: u.c}
 }
 
 // Range allows us to do something to each bit in the list, just like a Power Rangers roll call.
@@ -133,46 +130,6 @@ func (u *BitList) Get(index int) byte {
 // Set is like the Red Ranger giving an order - we set a bit to a certain value.
 func (u *BitList) Set(index int, v byte) {
 	u.u[index] = v
-}
-
-// removeMsb removes the most significant bit from the list, but doesn't change the length l.
-func (u *BitList) removeMsb() {
-	for i := len(u.u) - 1; i >= 0; i-- {
-		if u.u[i] != 0 {
-			// find last bit, make a mask and clear it
-			u.u[i] &= ^(1 << uint(bits.Len8(u.u[i])-1))
-			break
-		}
-	}
-}
-
-// addMsb adds a most significant bit to the list, but doesn't change the length l.
-func (u *BitList) addMsb() int {
-	byteLen := len(u.u)
-	found := false
-	for i := len(u.u) - 1; i >= 0; i-- {
-		if u.u[i] != 0 {
-			msb := bits.Len8(u.u[i])
-			if msb == 8 {
-				if i == len(u.u)-1 {
-					u.u = append(u.u, 0)
-				}
-				byteLen++
-				u.u[i+1] |= 1
-			} else {
-				u.u[i] |= 1 << uint(msb)
-			}
-			found = true
-			break
-		}
-		byteLen--
-	}
-	if !found {
-		u.u[0] = 1
-		byteLen = 1
-	}
-	u.l = byteLen
-	return byteLen
 }
 
 // Length gives us the length of the bitlist, just like a roll call tells us how many Rangers there are.

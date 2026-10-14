@@ -58,17 +58,6 @@ type EpochTransition struct {
 	ProofRlp []byte
 }
 
-type epochReader interface {
-	GetEpoch(blockHash common.Hash, blockN uint64) (transitionProof []byte, err error)
-	GetPendingEpoch(blockHash common.Hash, blockN uint64) (transitionProof []byte, err error)
-	FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash common.Hash, transitionProof []byte, err error)
-}
-type epochWriter interface {
-	epochReader
-	PutEpoch(blockHash common.Hash, blockN uint64, transitionProof []byte) (err error)
-	PutPendingEpoch(blockHash common.Hash, blockN uint64, transitionProof []byte) (err error)
-}
-
 type PermissionedStep struct {
 	inner      *Step
 	canPropose atomic.Bool

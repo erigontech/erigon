@@ -17,7 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package bind
+package bind_test
 
 import (
 	"context"
@@ -29,6 +29,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/execution/abi/bind"
 )
 
 var bindTests = []struct {
@@ -117,7 +118,8 @@ var bindTests = []struct {
 	},
 	// Test that named and anonymous inputs are handled correctly
 	{
-		`InputChecker`, ``, []string{``},
+		`InputChecker`, ``,
+		[]string{``},
 		[]string{`
 			[
 				{"type":"function","name":"noInput","constant":true,"inputs":[],"outputs":[]},
@@ -154,7 +156,8 @@ var bindTests = []struct {
 	},
 	// Test that named and anonymous outputs are handled correctly
 	{
-		`OutputChecker`, ``, []string{``},
+		`OutputChecker`, ``,
+		[]string{``},
 		[]string{`
 			[
 				{"type":"function","name":"noOutput","constant":true,"inputs":[],"outputs":[]},
@@ -194,7 +197,8 @@ var bindTests = []struct {
 	},
 	// Tests that named, anonymous and indexed events are handled correctly
 	{
-		`EventChecker`, ``, []string{``},
+		`EventChecker`, ``,
+		[]string{``},
 		[]string{`
 			[
 				{"type":"event","name":"empty","inputs":[]},
@@ -533,7 +537,6 @@ var bindTests = []struct {
 	},
 	// Tests that structs are correctly unpacked
 	{
-
 		`Structs`,
 		`
 		pragma solidity ^0.6.5;
@@ -739,7 +742,8 @@ var bindTests = []struct {
 					return msg.sender;
 				}
 			}
-		`, []string{`6060604052346000575b6086806100176000396000f300606060405263ffffffff60e060020a60003504166349f8e98281146022575b6000565b34600057602c6055565b6040805173ffffffffffffffffffffffffffffffffffffffff9092168252519081900360200190f35b335b905600a165627a7a72305820aef6b7685c0fa24ba6027e4870404a57df701473fe4107741805c19f5138417c0029`},
+		`,
+		[]string{`6060604052346000575b6086806100176000396000f300606060405263ffffffff60e060020a60003504166349f8e98281146022575b6000565b34600057602c6055565b6040805173ffffffffffffffffffffffffffffffffffffffff9092168252519081900360200190f35b335b905600a165627a7a72305820aef6b7685c0fa24ba6027e4870404a57df701473fe4107741805c19f5138417c0029`},
 		[]string{`[{"constant":true,"inputs":[],"name":"callFrom","outputs":[{"name":"","type":"address"}],"payable":false,"type":"function"}]`},
 		`
 			"math/big"
@@ -814,7 +818,8 @@ var bindTests = []struct {
 				return 0;
 			}
 		}
-		`, []string{`6060604052341561000f57600080fd5b6103858061001e6000396000f30060606040526004361061008e576000357c0100000000000000000000000000000000000000000000000000000000900463ffffffff16806303a592131461009357806346546dbe146100c357806367e6633d146100ec5780639df4848514610181578063af7486ab146101b1578063b564b34d146101e1578063e02ab24d14610211578063e409ca4514610241575b600080fd5b341561009e57600080fd5b6100a6610271565b604051808381526020018281526020019250505060405180910390f35b34156100ce57600080fd5b6100d6610286565b6040518082815260200191505060405180910390f35b34156100f757600080fd5b6100ff61028e565b6040518083815260200180602001828103825283818151815260200191508051906020019080838360005b8381101561014557808201518184015260208101905061012a565b50505050905090810190601f1680156101725780820380516001836020036101000a031916815260200191505b50935050505060405180910390f35b341561018c57600080fd5b6101946102dc565b604051808381526020018281526020019250505060405180910390f35b34156101bc57600080fd5b6101c46102f1565b604051808381526020018281526020019250505060405180910390f35b34156101ec57600080fd5b6101f4610306565b604051808381526020018281526020019250505060405180910390f35b341561021c57600080fd5b61022461031b565b604051808381526020018281526020019250505060405180910390f35b341561024c57600080fd5b610254610330565b604051808381526020018281526020019250505060405180910390f35b60008060016002819150809050915091509091565b600080905090565b6000610298610345565b61013a8090506040805190810160405280600281526020017f7069000000000000000000000000000000000000000000000000000000000000815250915091509091565b60008060016002819150809050915091509091565b60008060016002819150809050915091509091565b60008060016002819150809050915091509091565b60008060016002819150809050915091509091565b60008060016002819150809050915091509091565b6020604051908101604052806000815250905600a165627a7a72305820d1a53d9de9d1e3d55cb3dc591900b63c4f1ded79114f7b79b332684840e186a40029`},
+		`,
+		[]string{`6060604052341561000f57600080fd5b6103858061001e6000396000f30060606040526004361061008e576000357c0100000000000000000000000000000000000000000000000000000000900463ffffffff16806303a592131461009357806346546dbe146100c357806367e6633d146100ec5780639df4848514610181578063af7486ab146101b1578063b564b34d146101e1578063e02ab24d14610211578063e409ca4514610241575b600080fd5b341561009e57600080fd5b6100a6610271565b604051808381526020018281526020019250505060405180910390f35b34156100ce57600080fd5b6100d6610286565b6040518082815260200191505060405180910390f35b34156100f757600080fd5b6100ff61028e565b6040518083815260200180602001828103825283818151815260200191508051906020019080838360005b8381101561014557808201518184015260208101905061012a565b50505050905090810190601f1680156101725780820380516001836020036101000a031916815260200191505b50935050505060405180910390f35b341561018c57600080fd5b6101946102dc565b604051808381526020018281526020019250505060405180910390f35b34156101bc57600080fd5b6101c46102f1565b604051808381526020018281526020019250505060405180910390f35b34156101ec57600080fd5b6101f4610306565b604051808381526020018281526020019250505060405180910390f35b341561021c57600080fd5b61022461031b565b604051808381526020018281526020019250505060405180910390f35b341561024c57600080fd5b610254610330565b604051808381526020018281526020019250505060405180910390f35b60008060016002819150809050915091509091565b600080905090565b6000610298610345565b61013a8090506040805190810160405280600281526020017f7069000000000000000000000000000000000000000000000000000000000000815250915091509091565b60008060016002819150809050915091509091565b60008060016002819150809050915091509091565b60008060016002819150809050915091509091565b60008060016002819150809050915091509091565b60008060016002819150809050915091509091565b6020604051908101604052806000815250905600a165627a7a72305820d1a53d9de9d1e3d55cb3dc591900b63c4f1ded79114f7b79b332684840e186a40029`},
 		[]string{`[{"constant":true,"inputs":[],"name":"LowerUpperCollision","outputs":[{"name":"_res","type":"int256"},{"name":"Res","type":"int256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[],"name":"_under_scored_func","outputs":[{"name":"_int","type":"int256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[],"name":"UnderscoredOutput","outputs":[{"name":"_int","type":"int256"},{"name":"_string","type":"string"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[],"name":"PurelyUnderscoredOutput","outputs":[{"name":"_","type":"int256"},{"name":"res","type":"int256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[],"name":"UpperLowerCollision","outputs":[{"name":"_Res","type":"int256"},{"name":"res","type":"int256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[],"name":"AllPurelyUnderscoredOutput","outputs":[{"name":"_","type":"int256"},{"name":"__","type":"int256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[],"name":"UpperUpperCollision","outputs":[{"name":"_Res","type":"int256"},{"name":"Res","type":"int256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[],"name":"LowerLowerCollision","outputs":[{"name":"_res","type":"int256"},{"name":"res","type":"int256"}],"payable":false,"stateMutability":"view","type":"function"}]`},
 		`
 			"fmt"
@@ -1192,7 +1197,8 @@ var bindTests = []struct {
 				"stateMutability": "nonpayable",
 				"type": "function"
 			}
-		]`}, `
+		]`},
+		`
 			"strings"
 		`,
 		`
@@ -1208,7 +1214,8 @@ var bindTests = []struct {
 		nil,
 		nil,
 		nil,
-	}, {
+	},
+	{
 		`Tuple`,
 		`
 		pragma solidity >=0.4.19 <0.6.0;
@@ -1422,7 +1429,8 @@ var bindTests = []struct {
 		},
 		nil,
 		[]string{"UseLibrary", "Math"},
-	}, {
+	},
+	{
 		"Overload",
 		`
 		pragma solidity ^0.5.10;
@@ -2064,7 +2072,7 @@ func TestGolangBindings(t *testing.T) {
 	ws := t.TempDir()
 
 	pkg := filepath.Join(ws, "bindtest")
-	if err := os.MkdirAll(pkg, 0700); err != nil {
+	if err := os.MkdirAll(pkg, 0o700); err != nil {
 		t.Fatalf("failed to create package: %v", err)
 	}
 	// Generate the test suite for all the contracts
@@ -2076,11 +2084,11 @@ func TestGolangBindings(t *testing.T) {
 			types = []string{tt.name}
 		}
 		// Generate the binding and create a Go source file in the workspace
-		bind, err := Bind(types, tt.abi, tt.bytecode, tt.fsigs, "bindtest", LangGo, tt.libs, tt.aliases)
+		bind, err := bind.Bind(types, tt.abi, tt.bytecode, tt.fsigs, "bindtest", bind.LangGo, tt.libs, tt.aliases)
 		if err != nil {
 			t.Fatalf("test %d: failed to generate binding: %v", i, err)
 		}
-		if err = os.WriteFile(filepath.Join(pkg, strings.ToLower(tt.name)+".go"), []byte(bind), 0600); err != nil {
+		if err = os.WriteFile(filepath.Join(pkg, strings.ToLower(tt.name)+".go"), []byte(bind), 0o600); err != nil {
 			t.Fatalf("test %d: failed to write binding: %v", i, err)
 		}
 		// Generate the test file with the injected test code
@@ -2096,7 +2104,7 @@ func TestGolangBindings(t *testing.T) {
 				%s
 			}
 		`, tt.imports, tt.name, tt.tester)
-		if err := os.WriteFile(filepath.Join(pkg, strings.ToLower(tt.name)+"_test.go"), []byte(code), 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(pkg, strings.ToLower(tt.name)+"_test.go"), []byte(code), 0o600); err != nil {
 			t.Fatalf("test %d: failed to write tests: %v", i, err)
 		}
 	}
@@ -2118,7 +2126,7 @@ func TestGolangBindings(t *testing.T) {
 	if out, err := tidier.CombinedOutput(); err != nil {
 		t.Fatalf("failed to tidy Go module file: %v\n%s", err, out)
 	}
-	//Test the entire package and report any failures
+	// Test the entire package and report any failures
 	cmd := exec.CommandContext(context.Background(), gocmd, "test", "-v", "-count", "1")
 	cmd.Dir = pkg
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -2132,7 +2140,7 @@ func TestJavaBindings(t *testing.T) {
 		t.Skip()
 	}
 
-	var cases = []struct {
+	cases := []struct {
 		name     string
 		contract string
 		abi      string
@@ -2510,7 +2518,7 @@ public class Test {
 		},
 	}
 	for i, c := range cases {
-		binding, err := Bind([]string{c.name}, []string{c.abi}, []string{c.bytecode}, nil, "bindtest", LangJava, nil, nil)
+		binding, err := bind.Bind([]string{c.name}, []string{c.abi}, []string{c.bytecode}, nil, "bindtest", bind.LangJava, nil, nil)
 		if err != nil {
 			t.Fatalf("test %d: failed to generate binding: %v", i, err)
 		}

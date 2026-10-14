@@ -50,7 +50,7 @@ func Epoch(b abstract.BeaconStateBasic) uint64 {
 	return GetEpochAtSlot(b.BeaconConfig(), b.Slot())
 }
 
-func IsAggregator(cfg *clparams.BeaconChainConfig, committeeLength, committeeIndex uint64, slotSignature common.Bytes96) bool {
+func IsAggregator(cfg *clparams.BeaconChainConfig, committeeLength uint64, slotSignature common.Bytes96) bool {
 	modulo := max(1, committeeLength/cfg.TargetAggregatorsPerCommittee)
 	hashSlotSignatue := crypto.Sha256(slotSignature[:])
 	return binary.LittleEndian.Uint64(hashSlotSignatue[:8])%modulo == 0
@@ -148,7 +148,9 @@ func EligibleValidatorsIndicies(b abstract.BeaconState) (eligibleValidators []ui
 			return nil
 		})
 	}
-	wp.Execute()
+	// Every job above returns nil unconditionally (the only fallible op inside
+	// panics instead), so Execute can never return a non-nil error here.
+	_ = wp.Execute()
 	// Merge the results from all threads.
 	total := 0
 	for i := range eligibleValidatorsShards {
@@ -186,17 +188,17 @@ func IsValidIndexedAttestation(b abstract.BeaconStateBasic, att *cltypes.Indexed
 
 	domain, err := b.GetDomain(b.BeaconConfig().DomainBeaconAttester, att.Data.Target.Epoch)
 	if err != nil {
-		return false, fmt.Errorf("unable to get the domain: %v", err)
+		return false, fmt.Errorf("unable to get the domain: %w", err)
 	}
 
 	signingRoot, err := fork.ComputeSigningRoot(att.Data, domain)
 	if err != nil {
-		return false, fmt.Errorf("unable to get signing root: %v", err)
+		return false, fmt.Errorf("unable to get signing root: %w", err)
 	}
 
 	valid, err := bls.VerifyAggregate(att.Signature[:], signingRoot[:], pks)
 	if err != nil {
-		return false, fmt.Errorf("error while validating signature: %v", err)
+		return false, fmt.Errorf("error while validating signature: %w", err)
 	}
 	if !valid {
 		return false, errors.New("invalid aggregate signature")
@@ -551,7 +553,7 @@ func GetNextSyncCommitteeIndices(b *CachingBeaconState) ([]uint64, error) {
 	mixPosition := (epoch + conf.EpochsPerHistoricalVector - conf.MinSeedLookahead - 1) %
 		conf.EpochsPerHistoricalVector
 	mix := b.GetRandaoMix(int(mixPosition))
-	seed := shuffling.GetSeed(conf, mix, epoch, conf.DomainSyncCommittee)
+	seed := shuffling.GetSeed(mix, epoch, conf.DomainSyncCommittee)
 
 	indices := b.GetActiveValidatorsIndices(epoch)
 	return shuffling.ComputeBalanceWeightedSelection(b.BeaconState, indices, seed, conf.SyncCommitteeSize, true)

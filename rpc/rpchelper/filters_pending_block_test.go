@@ -52,7 +52,7 @@ func TestFilters_PendingBlockInvalidatedByNewHeader(t *testing.T) {
 	t.Parallel()
 
 	parent := &types.Header{Number: *uint256.NewInt(9), Extra: []byte("parent")}
-	pending := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(10), ParentHash: parent.Hash()})
+	pending := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(10), ParentHash: parent.Hash()}, nil)
 
 	cases := []struct {
 		name     string
@@ -90,7 +90,7 @@ func TestFilters_PendingBlockKeptOnUnparseablePayload(t *testing.T) {
 	t.Parallel()
 
 	f := New(t.Context(), FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
-	pending := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(10)})
+	pending := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(10)}, nil)
 	handlePendingBlock(t, f, pending)
 
 	f.HandlePendingBlock(&txpoolproto.OnPendingBlockReply{RplBlock: []byte("garbage")})

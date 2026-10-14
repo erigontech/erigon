@@ -107,7 +107,7 @@ func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, publicKeysRegi
 	}
 	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
 		beaconConfig.EpochsPerHistoricalVector
-	activeIndicies := c.getActiveIndicies(epoch)
+	activeIndicies := c.getActiveIndicies()
 	monitor.ObserveActiveValidatorsCount(len(activeIndicies))
 	c.shuffledSet = make([]uint64, len(activeIndicies))
 	start := time.Now()
@@ -133,7 +133,7 @@ func (c *checkpointState) getAttestingIndicies(attestation *solid.Attestation, a
 
 	// Compute shuffled indicies
 	lenIndicies := uint64(len(c.shuffledSet))
-	committeesPerSlot := c.committeeCount(epoch, lenIndicies)
+	committeesPerSlot := c.committeeCount(lenIndicies)
 	count := committeesPerSlot * c.beaconConfig.SlotsPerEpoch
 	index := (slot%c.beaconConfig.SlotsPerEpoch)*committeesPerSlot + cIndex
 	start := (lenIndicies * index) / count
@@ -155,7 +155,7 @@ func (c *checkpointState) getAttestingIndicies(attestation *solid.Attestation, a
 	return attestingIndices, nil
 }
 
-func (c *checkpointState) getActiveIndicies(epoch uint64) (activeIndicies []uint64) {
+func (c *checkpointState) getActiveIndicies() (activeIndicies []uint64) {
 	for i := 0; i < c.validatorSetSize; i++ {
 		if !readFromBitset(c.actives, i) {
 			continue
@@ -166,7 +166,7 @@ func (c *checkpointState) getActiveIndicies(epoch uint64) (activeIndicies []uint
 }
 
 // committeeCount retrieves size of sync committee
-func (c *checkpointState) committeeCount(epoch, lenIndicies uint64) uint64 {
+func (c *checkpointState) committeeCount(lenIndicies uint64) uint64 {
 	committeCount := max(min(c.beaconConfig.MaxCommitteesPerSlot, lenIndicies/c.beaconConfig.SlotsPerEpoch/c.beaconConfig.TargetCommitteeSize), 1)
 	return committeCount
 }
@@ -188,17 +188,17 @@ func (c *checkpointState) isValidIndexedAttestation(att *cltypes.IndexedAttestat
 
 	domain, err := c.getDomain(c.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch)
 	if err != nil {
-		return false, fmt.Errorf("unable to get the domain: %v", err)
+		return false, fmt.Errorf("unable to get the domain: %w", err)
 	}
 
 	signingRoot, err := fork.ComputeSigningRoot(att.Data, domain)
 	if err != nil {
-		return false, fmt.Errorf("unable to get signing root: %v", err)
+		return false, fmt.Errorf("unable to get signing root: %w", err)
 	}
 
 	valid, err := c.publicKeysRegistry.VerifyAggregateSignature(c.checkpoint, inds, signingRoot[:], att.Signature)
 	if err != nil {
-		return false, fmt.Errorf("error while validating signature: %v", err)
+		return false, fmt.Errorf("error while validating signature: %w", err)
 	}
 	if !valid {
 		return false, errors.New("invalid aggregate signature")

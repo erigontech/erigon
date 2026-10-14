@@ -8,6 +8,10 @@ inputs:
   key:
     description: "Cache key to save under (from restore-build-cache outputs.primary-key)"
     required: true
+  clean-fuzzcache:
+    description: "Set to 'false' to keep $GOCACHE/fuzz instead of dropping it before the save"
+    required: false
+    default: 'true'
 
 runs:
   using: composite
@@ -22,9 +26,11 @@ runs:
       shell: bash
       run: df -h
 
-    # TODO(TBD): we may not want to clean the fuzz cache here if we want fuzzing results to persist across runs.
+    # Fuzz corpora are dead weight in the build cache entry of a job that doesn't
+    # fuzz, so drop them by default. The fuzz workflow opts out: it persists
+    # $GOCACHE/fuzz in its own cache entry, which is saved after this step runs.
     - name: Clean fuzz cache
-      if: ${{ always() }}
+      if: ${{ always() && inputs.clean-fuzzcache != 'false' }}
       shell: bash
       run: go clean -fuzzcache
 

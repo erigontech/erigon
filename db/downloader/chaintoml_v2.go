@@ -91,13 +91,6 @@ func GenerateV2(inv *snapshotinv.Inventory) *ChainTomlV2 {
 			continue
 		}
 
-		// Build the layout from local files and check canonicity.
-		var layout snapshotinv.StepRanges
-		for _, f := range files {
-			layout = append(layout, f.Range())
-		}
-		layout = layout.Normalize()
-
 		dm := &DomainManifest{}
 
 		// Only include files at canonical boundaries with a torrent hash.

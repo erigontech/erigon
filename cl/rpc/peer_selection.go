@@ -48,6 +48,7 @@ type columnDataPeers struct {
 }
 
 func newColumnPeers(
+	ctx context.Context,
 	sentinel sentinelproto.SentinelClient,
 	beaconConfig *clparams.BeaconChainConfig,
 	ethClock eth_clock.EthereumClock,
@@ -63,7 +64,8 @@ func newColumnPeers(
 		peersIndex:    0,
 	}
 
-	go s.refreshPeers(context.Background())
+	// The refresh loop lives as long as the owning client's ctx.
+	go s.refreshPeers(ctx)
 	return s
 }
 
@@ -173,16 +175,9 @@ func (c *columnDataPeers) simpleReuqest(ctx context.Context, pid string, topic s
 	return nil
 }
 
-func (c *columnDataPeers) availablePeerCount() int {
-	c.peersMutex.RLock()
-	defer c.peersMutex.RUnlock()
-	return len(c.peersQueue)
-}
-
 func (c *columnDataPeers) pickPeerRoundRobin(
-	ctx context.Context,
 	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
-) (*solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier], string, uint64, error) {
+) (*solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier], string, error) {
 	c.peersMutex.Lock()
 	defer c.peersMutex.Unlock()
 
@@ -218,9 +213,9 @@ func (c *columnDataPeers) pickPeerRoundRobin(
 			// no matching columns
 			continue
 		}
-		return newReq, peer.pid, uint64(len(peer.mask)), nil
+		return newReq, peer.pid, nil
 	}
 
 	log.Trace("no good peer found", "peerCount", len(c.peersQueue))
-	return nil, "", 0, ErrNoGoodPeer
+	return nil, "", ErrNoGoodPeer
 }

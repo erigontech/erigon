@@ -43,6 +43,10 @@ type RouterConfiguration struct {
 	Node       bool
 	Validator  bool
 	Lighthouse bool
+
+	// PreserveGraffiti uses caller-supplied graffiti verbatim instead of prefixing it with
+	// the EL+CL identification segment.
+	PreserveGraffiti bool
 }
 
 func (r *RouterConfiguration) UnwrapEndpointsList(l []string) error {

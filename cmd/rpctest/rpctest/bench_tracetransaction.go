@@ -40,8 +40,8 @@ func BenchTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blockFro
 
 	reqGen := &RequestGenerator{}
 
-	var nBlocks = 0
-	var nTransactions = 0
+	nBlocks := 0
+	nTransactions := 0
 
 	for bn := blockFrom; bn < blockTo; bn++ {
 		if nBlocks%50 == 0 {

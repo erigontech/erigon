@@ -63,10 +63,10 @@ service KV {
   rpc IndexRange(IndexRangeReq) returns (IndexRangeReply);
   rpc HistoryRange(HistoryRangeReq) returns (Pairs);
   rpc RangeAsOf(RangeAsOfReq) returns (Pairs);
-  rpc HasPrefix(HasPrefixReq) returns (HasPrefixReply);
   rpc HistoryStartFrom(HistoryStartFromReq) returns (HistoryStartFromReply);
   rpc CurrentDomainVersion(CurrentDomainVersionReq) returns (CurrentDomainVersionReply);
   rpc StepSize(StepSizeReq) returns (StepSizeReply);
+  rpc MaxPrunableStepsBacklog(google.protobuf.Empty) returns (MaxPrunableStepsBacklogReply);
 }
 
 enum Op {
@@ -209,6 +209,8 @@ message GetLatestReq {
   uint64 ts = 4;
   bytes k2 = 5;
   bool latest = 6; // if true, then `ts` ignored and return latest state (without history lookup)
+  optional uint64 max_step = 7; // absent means unbounded; zero bounds the read at step 0
+  bool branch_cache = 8;
 }
 
 message GetLatestReply{
@@ -303,18 +305,6 @@ message IndexPagination {
   sint64 limit = 2;
 }
 
-message HasPrefixReq {
-  uint64 tx_id = 1;
-  string table = 2;
-  bytes prefix = 3;
-}
-
-message HasPrefixReply {
-  bytes first_key = 1;
-  bytes first_val = 2;
-  bool has_prefix = 3;
-}
-
 message HistoryStartFromReq {
   uint32 domain = 1;
   uint64 tx_id = 2; // returned by .Tx()
@@ -342,3 +332,6 @@ message StepSizeReply {
   uint64 step = 1;
 }
 
+message MaxPrunableStepsBacklogReply {
+  uint64 steps = 1;
+}

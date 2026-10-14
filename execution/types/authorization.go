@@ -200,7 +200,7 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 		}
 		i++
 	}
-	if !errors.Is(err, rlp.EOL) {
+	if err != rlp.EOL { //nolint:errorlint // intentional bare sentinel check
 		return fmt.Errorf("open authorizations: %d %w", i, err)
 	}
 	if err = s.ListEnd(); err != nil {
