@@ -1205,12 +1205,18 @@ func TestGetVersionedAccount_NoSynthesisFromEstimate(t *testing.T) {
 	assert.Nil(t, acc)
 }
 
-// A destroyed account (SelfDestruct floor true) must not be synthesized.
+// A burn (SELFDESTRUCT with preserveBalance=false) must not be synthesized: the
+// balance write is stamped ValueDeleted, so even a non-zero pre-destruct balance
+// reads as absent — the reader keys on the stamp, not the cell value.
 func TestGetVersionedAccount_NoSynthesisAfterSelfDestruct(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	addr := accounts.InternAddress([20]byte{0xba, 0x05})
-	mvhm.WriteBalance(addr, Version{TxIndex: 2}, *uint256.NewInt(500), true)
-	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 3}, true, true)
+	runRevivalTx(t, mvhm, 2, func(ibs *IntraBlockState) {
+		require.NoError(t, ibs.CreateAccount(addr, true))
+		require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(500), tracing.BalanceChangeTransfer))
+		_, err := ibs.Selfdestruct(addr, false)
+		require.NoError(t, err)
+	})
 	ibs := NewWithVersionMap(&minimalStateReader{}, mvhm)
 	defer ibs.Release(false)
 	ibs.txIndex = 5

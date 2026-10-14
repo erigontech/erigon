@@ -194,6 +194,32 @@ func TestEIP8246_VersionedStateReader_PreserveNotBurned(t *testing.T) {
 	require.Equal(t, preserved, acc.Balance)
 }
 
+// The burn counterpart to TestEIP8246_VersionedStateReader_PreserveNotBurned, and
+// the case Alexey's revert flagged: a non-preserving SELFDESTRUCT must read as
+// absent even though it had a non-zero balance before destruct. The burn stamps
+// its balance write ValueDeleted, so the whole-account reader keys on the stamp
+// — not the cell value — and cannot mistake the burn for a preserve.
+func TestEIP8246_VersionedStateReader_BurnReadsAbsent(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x8246CC"))
+
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(newAccountStateReader(), vm)
+	defer ibs.Close()
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(0, 5)
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(500), tracing.BalanceChangeTransfer))
+	_, err := ibs.Selfdestruct(addr, false /* burn */)
+	require.NoError(t, err)
+	vm.FlushVersionedWrites(ibs.FinalizedWrites(&chain.Rules{IsAmsterdam: true}), true, "")
+
+	vsr := NewVersionedStateReader(6, ReadSet{}, vm, nil)
+	acc, err := vsr.ReadAccountData(addr)
+	require.NoError(t, err)
+	require.Nil(t, acc, "a burn stamps its balance ValueDeleted; the account must read absent, not as a preserved EOA")
+}
+
 // The persisted balance-only record has incarnation 0, so a later CREATE2 over
 // a preserved account must compute incarnation 1 in every execution mode.
 // Selfdestruct publishes the pre-destruct IncarnationPath and extraction keeps

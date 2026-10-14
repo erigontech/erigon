@@ -293,26 +293,22 @@ func TestApplyWrites_IncarnationPath(t *testing.T) {
 		"Deleted+isAllZero routes through the EIP-161 DeleteUpdate branch (matches serial's DomainDel)")
 }
 
-// TestApplyWrites_SelfDestructBalanceNotRevived verifies that a post-SD balance
-// write does NOT revive a finally-self-destructed account pre-EIP-8246: the
-// balance is burned and the leaf is deleted. This matches Normalize (which drops
-// the BalancePath for SD'd addresses pre-8246) — the raw-view calculator must
-// agree. A non-zero balance received after a SELFDESTRUCT that is not followed by
-// a same-tx recreate (SelfDestructPath stays true) is burned at end of tx.
+// TestApplyWrites_SelfDestructBalanceNotRevived verifies a burn (SELFDESTRUCT
+// with preserveBalance=false) is not revived by its balance write: the write is
+// stamped ValueDeleted, so the calculator keeps the account Deleted and deletes
+// the leaf regardless of the pre-destruct balance. The burn writeset comes from
+// a real IntraBlockState.Selfdestruct so the stamp — not a hand-crafted cell —
+// drives the decision.
 func TestApplyWrites_SelfDestructBalanceNotRevived(t *testing.T) {
 	cs := newTestCalcState()
 	addr := accounts.InternAddress([20]byte{0xd1})
 
-	writes := newWS().
-		selfDestruct(addr, state.Version{}, true).
-		bal(addr, state.Version{}, *uint256.NewInt(42)).
-		build()
-	cs.ApplyWrites(writes)
+	cs.ApplyWrites(selfDestructBurnWrites(t, addr, *uint256.NewInt(42)))
 
 	acc, ok := cs.accounts[addr]
 	require.True(t, ok)
-	assert.True(t, acc.Deleted, "finally-SD'd account is not revived by a post-SD balance pre-8246")
-	assert.True(t, acc.Balance.IsZero(), "post-SD balance is burned pre-8246")
+	assert.True(t, acc.Deleted, "a burn (ValueDeleted stamp) is not revived by its balance write")
+	assert.True(t, acc.Balance.IsZero(), "a burned balance is zeroed")
 }
 
 // TestApplyWrites_SelfDestructBalanceRetained_EIP8246 verifies the EIP-8246
@@ -374,38 +370,12 @@ func TestApplyWrites_SelfDestructBalanceRetained_EIP8246(t *testing.T) {
 func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x40, 0x55, 0xca, 0xe5})
 
-	// Only the pre-block incarnation is consumed (IBS.Selfdestruct emits it as
-	// IncarnationPath); the calc zeroes every field for a pure SD, so the other
-	// pre-block fields would need a seeded domain to matter and aren't used here.
-	preBlockIncarnation := uint64(3)
-
-	// Build the raw writeset that IBS.Selfdestruct produces in production
-	// (intra_block_state.go around line 1430). LightCollector.DeleteAccount
-	// also runs, but its CollectorWrites output is NOT the source for
-	// rawWrites — exec3_parallel.go:2478 reads be.blockIO.WriteSet, which
-	// is fed by versionWritten. So these are the writes the calc actually
-	// sees.
-	ver := state.Version{TxIndex: 0, Incarnation: 0}
-	rawWrites := newWS().
-		inc(addr, ver, preBlockIncarnation).
-		selfDestruct(addr, ver, true).
-		bal(addr, ver, uint256.Int{}).
-		build()
-
-	// Populate vm with the same writes — IBS.Selfdestruct calls versionWritten
-	// which goes through the version map, so by the time the calc's completion
-	// loop runs, vm.Read sees these values.
-	vm := state.NewVersionMap(nil)
-	vm.WriteIncarnation(addr, ver, preBlockIncarnation, true)
-	vm.WriteSelfDestruct(addr, ver, true, true)
-	vm.WriteBalance(addr, ver, uint256.Int{}, true)
-
-	// Feed the RAW versionMap view (the writes IBS.Selfdestruct emitted). The
-	// calc's SelfDestructPath handling drops the inc/balance field writes and
-	// marks the account deleted — the SD-aware collapse Normalize used to do up
-	// front. The assertions below pin that result.
+	// A real burn of a pre-existing contract (incarnation 3, balance 1M). The
+	// calc's SelfDestructPath handling drops the field writes and marks the
+	// account deleted — the SD-aware collapse Normalize used to do up front. The
+	// assertions below pin that result.
 	cs := newTestCalcState()
-	cs.ApplyWrites(state.NewVersionMapWriteView(rawWrites, vm, 0))
+	cs.ApplyWrites(sdPreExistingWrites(t, addr, *uint256.NewInt(1_000_000), false))
 
 	acc, ok := cs.accounts[addr]
 	require.True(t, ok)
@@ -453,10 +423,6 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 	preSDValue1 := *uint256.NewInt(0xaaaa)
 	preSDValue2 := *uint256.NewInt(0xbbbb)
 
-	// Only the pre-block incarnation is consumed (emitted as IncarnationPath);
-	// the cascade under test comes from the pre-loaded cs.storageState below.
-	preBlockIncarnation := uint64(5)
-
 	// Pre-load cs.storageState with the pre-SD slot values, simulating IBS
 	// having read those slots earlier in the block. The load-bearing question
 	// is whether the SD path zeroes these touched slots (zeroTouchedStorage) so
@@ -467,25 +433,11 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 		slot2: preSDValue2,
 	}
 
-	// Populate vm with the SD tx's writes so the raw view resolves them (the
-	// touched slots that drive the cascade come from cs.storageState above).
-	ver := state.Version{TxIndex: 0, Incarnation: 0}
-	vm := state.NewVersionMap(nil)
-	vm.WriteIncarnation(addr, ver, preBlockIncarnation, true)
-	vm.WriteSelfDestruct(addr, ver, true, true)
-	vm.WriteBalance(addr, ver, uint256.Int{}, true)
-
-	rawWrites := newWS().
-		inc(addr, ver, preBlockIncarnation).
-		selfDestruct(addr, ver, true).
-		bal(addr, ver, uint256.Int{}).
-		build()
-
 	// SD'd account with touched slots: the calc's zeroTouchedStorage zeroes and
 	// dirties the touched slots (the cascade Normalize did via vm.StorageKeys),
 	// so FlushToUpdates below emits a DeleteUpdate per slot rather than leaking
 	// the pre-SD value.
-	cs.ApplyWrites(state.NewVersionMapWriteView(rawWrites, vm, 0))
+	cs.ApplyWrites(sdPreExistingWrites(t, addr, *uint256.NewInt(1_000_000), false))
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -666,29 +618,15 @@ func sdEIP8246Original() *accounts.Account {
 
 // buildSDWithPostBalance runs the production normalize+apply pipeline for a
 // pre-existing contract that self-destructs and ends the block holding
-// postSDBalance, under the given eip8246 flag. It returns the resulting
-// calcState so callers can inspect the account and flush to updates.
-func buildSDWithPostBalance(t *testing.T, addr accounts.Address, postSDBalance uint256.Int, eip8246 bool) *calcState {
+// postSDBalance, with preserve selecting the EIP-8246 balance-preserving
+// destruct. It returns the resulting calcState so callers can inspect the
+// account and flush to updates. The preserve/burn decision reaches calc_state as
+// the balance write's valStatus stamp — produced by the real IBS.Selfdestruct,
+// not a hand-crafted cell.
+func buildSDWithPostBalance(t *testing.T, addr accounts.Address, postSDBalance uint256.Int, preserve bool) *calcState {
 	t.Helper()
-	original := sdEIP8246Original()
-	ver := state.Version{TxIndex: 0, Incarnation: 0}
-
-	// IBS.Selfdestruct emits IncarnationPath, SelfDestructPath=true and
-	// BalancePath=postSDBalance (pre-8246 that balance is 0; EIP-8246 leaves the
-	// moved-in/retained balance). A non-zero incarnation checks that it is zeroed.
-	rawWrites := newWS().
-		inc(addr, ver, original.Incarnation).
-		selfDestruct(addr, ver, true).
-		bal(addr, ver, postSDBalance).
-		build()
-
-	vm := state.NewVersionMap(nil)
-	vm.WriteIncarnation(addr, ver, original.Incarnation, true)
-	vm.WriteSelfDestruct(addr, ver, true, true)
-	vm.WriteBalance(addr, ver, postSDBalance, true)
-
 	cs := newTestCalcState()
-	cs.ApplyWrites(state.NewVersionMapWriteView(rawWrites, vm, 0))
+	cs.ApplyWrites(sdPreExistingWrites(t, addr, postSDBalance, preserve))
 	cs.ApplyEIP161Removal(true /*emptyRemoval*/, false /*isAura*/)
 	return cs
 }
@@ -800,17 +738,7 @@ func applySDToDomains(t *testing.T, postSDBalance uint256.Int) []byte {
 	original := sdEIP8246Original()
 	addrVal := addr.Value()
 	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrVal[:], accounts.SerialiseV3(original), 0, nil))
-	ver := state.Version{TxIndex: 0, Incarnation: 0}
-	rawWrites := newWS().
-		inc(addr, ver, original.Incarnation).
-		selfDestruct(addr, ver, true).
-		bal(addr, ver, postSDBalance).
-		build()
-	vm := state.NewVersionMap(nil)
-	vm.WriteIncarnation(addr, ver, original.Incarnation, true)
-	vm.WriteSelfDestruct(addr, ver, true, true)
-	vm.WriteBalance(addr, ver, postSDBalance, true)
-	rawView := state.NewVersionMapWriteView(rawWrites, vm, 0)
+	rawView := sdPreExistingWrites(t, addr, postSDBalance, true)
 	rs := state.NewStateV3(domains, false, log.New())
 	err := rs.ApplyStateWrites(context.Background(), tx, 1, 1, rawView, nil, &chain.Rules{IsAmsterdam: true})
 	require.NoError(t, err)

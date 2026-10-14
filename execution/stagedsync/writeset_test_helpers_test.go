@@ -1,11 +1,68 @@
 package stagedsync
 
 import (
-	"github.com/holiman/uint256"
+	"testing"
 
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+// selfDestructBurnWrites drives a real SELFDESTRUCT burn (preserveBalance=false)
+// through IntraBlockState and returns the writeset it emits. The burn stamps the
+// balance write ValueDeleted; tests use this instead of hand-crafting cells so
+// the stamp — not the cell value — carries the preserve/burn decision.
+func selfDestructBurnWrites(t *testing.T, addr accounts.Address, balance uint256.Int) *state.WriteSet {
+	t.Helper()
+	vm := state.NewVersionMap(nil)
+	ibs := state.NewWithVersionMap(state.NewNoopReader(), vm)
+	ibs.SetTxContext(100, 0)
+	ibs.SetNoMaterialize(true)
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	require.NoError(t, ibs.AddBalance(addr, balance, tracing.BalanceChangeTransfer))
+	_, err := ibs.Selfdestruct(addr, false)
+	require.NoError(t, err)
+	return ibs.FinalizedWrites(&chain.Rules{})
+}
+
+// seededReader returns one pre-existing account; every other address is absent.
+type seededReader struct {
+	*state.NoopReader
+	addr accounts.Address
+	acc  *accounts.Account
+}
+
+func (r *seededReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
+	if address == r.addr {
+		cp := *r.acc
+		return &cp, nil
+	}
+	return nil, nil
+}
+
+// sdPreExistingWrites drives a real SELFDESTRUCT of a pre-existing contract
+// (seeded via the base reader) holding `balance` at destruct time, and returns
+// the writeset IBS emits. preserve selects the EIP-8246 balance-preserving
+// destruct: with a non-zero balance it keeps the balance (ValueChanged → EOA);
+// a burn, or a preserve with zero balance, stamps the balance ValueDeleted — the
+// same preserveBalance-driven decision production makes.
+func sdPreExistingWrites(t *testing.T, addr accounts.Address, balance uint256.Int, preserve bool) *state.WriteSet {
+	t.Helper()
+	original := sdEIP8246Original()
+	original.Balance = balance
+	reader := &seededReader{NoopReader: state.NewNoopReader(), addr: addr, acc: original}
+	vm := state.NewVersionMap(nil)
+	ibs := state.NewWithVersionMap(reader, vm)
+	ibs.SetTxContext(1, 0)
+	ibs.SetNoMaterialize(true)
+	_, err := ibs.Selfdestruct(addr, preserve)
+	require.NoError(t, err)
+	return ibs.FinalizedWrites(&chain.Rules{})
+}
 
 // countViewPath counts the writes a read-only WriteSetView yields for the given
 // path. The view exposes no AddressPath/CodeSizePath accessor, so those paths
