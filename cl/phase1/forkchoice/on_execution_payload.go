@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/cl/abstract"
@@ -41,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // errELBehind is returned by validatePayloadWithEL when the EL cannot process
@@ -406,9 +408,7 @@ func (f *ForkChoiceStore) newPayloadWhileYieldingForkChoiceLock(
 ) (execution_client.PayloadStatus, error) {
 	f.mu.Unlock()
 	defer f.mu.Lock()
-	return f.withPayloadValidationAdmission(ctx, func() (execution_client.PayloadStatus, error) {
-		return f.engine.NewPayload(ctx, payload, parentBlockRoot, versionedHashes, executionRequestsList)
-	})
+	return f.NewPayloadWithAdmission(ctx, payload, parentBlockRoot, versionedHashes, executionRequestsList)
 }
 
 // executionHashMarkedInvalid reports whether this execution payload is already known bad.
@@ -597,6 +597,23 @@ func (f *ForkChoiceStore) NewPayloadWithAdmission(
 		return execution_client.PayloadStatusNone, errors.New("execution client is not configured")
 	}
 	return f.withPayloadValidationAdmission(ctx, func() (execution_client.PayloadStatus, error) {
+		if payload != nil && payload.Version() >= clparams.GloasVersion && versionedHashes != nil {
+			transactions, err := types.DecodeTransactions(payload.Transactions.UnderlyngReference())
+			if err != nil {
+				return execution_client.PayloadStatusInvalidated, err
+			}
+			actualHashes := make([]common.Hash, 0, len(versionedHashes))
+			for _, transaction := range transactions {
+				actualHashes = append(actualHashes, transaction.GetBlobHashes()...)
+			}
+			if !slices.Equal(actualHashes, versionedHashes) {
+				requestsHash := cltypes.ComputeExecutionRequestHash(executionRequestsList)
+				if _, err := payload.RlpHeader(parentBlockRoot, requestsHash, nil); err != nil {
+					return execution_client.PayloadStatusInvalidated, err
+				}
+				return execution_client.PayloadStatusInvalidated, misc.ErrMismatchBlobHashes
+			}
+		}
 		return f.engine.NewPayload(ctx, payload, parentBlockRoot, versionedHashes, executionRequestsList)
 	})
 }

@@ -52,7 +52,12 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/engineapi"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type failingUpdateDB struct {
@@ -3013,6 +3018,7 @@ func TestValidatePayloadWithELReleasesForkChoiceMuDuringNewPayload(t *testing.T)
 	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Body: body}}
 	envelope := cltypes.NewExecutionPayloadEnvelope(cfg)
 	envelope.Payload.BlockHash = common.HexToHash("0xabcd")
+	envelope.Payload.Transactions = solid.NewProgressiveTransactionsSSZ()
 
 	done := make(chan error, 1)
 	go func() {
@@ -3227,6 +3233,7 @@ func TestValidatePayloadWithELDoesNotWaitForUnrelatedForkChoiceWriter(t *testing
 	}}
 	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Body: body}}
 	envelope := cltypes.NewExecutionPayloadEnvelope(cfg)
+	envelope.Payload.Transactions = solid.NewProgressiveTransactionsSSZ()
 
 	done := make(chan struct{})
 	validationLocked := make(chan struct{})
@@ -3536,60 +3543,97 @@ func TestExecutionPayloadDerivedHashRejectionDoesNotInvalidateVerifiedSibling(t 
 	require.False(t, graph.invalid.Load())
 }
 
+type acceptingPayloadModule struct {
+	execmodule.ExecutionModule
+}
+
+func (*acceptingPayloadModule) InsertBlocks(context.Context, []*types.Block) (execmodule.ExecutionStatus, error) {
+	return execmodule.ExecutionStatusSuccess, nil
+}
+
+func (*acceptingPayloadModule) CurrentHeader(context.Context) (*types.Header, error) {
+	return nil, nil
+}
+
+type blobMismatchEngineAPI struct {
+	engineapi.EngineAPI
+	calls int
+}
+
+func (s *blobMismatchEngineAPI) NewPayloadV5(context.Context, *engine_types.ExecutionPayload, []common.Hash, *common.Hash, []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
+	s.calls++
+	return &engine_types.PayloadStatus{
+		Status:          engine_types.InvalidStatus,
+		ValidationError: engine_types.NewStringifiedErrorFromString(misc.ErrMismatchBlobHashes.Error()),
+	}, nil
+}
+
 func TestExecutionPayloadBlobCommitmentMismatchPreservesVerifiedSibling(t *testing.T) {
-	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
-	require.NoError(t, envelope.Message.Payload.BlockAccessList.SetBytes([]byte{0xc0}))
-	verifiedRoot := common.Hash(envelope.Message.BeaconBlockRoot)
-	executionHash := envelope.Message.Payload.BlockHash
-	block.Block.Body.SignedExecutionPayloadBid.Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{0xc0})
-	bodyRoot, err := block.Block.Body.HashSSZ()
-	require.NoError(t, err)
-	blockState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{
-		Slot: block.Block.Slot, ProposerIndex: block.Block.ProposerIndex,
-		ParentRoot: block.Block.ParentRoot, BodyRoot: bodyRoot,
-	})
-	blockRoot, err := block.Block.HashSSZ()
-	require.NoError(t, err)
-	require.NotEqual(t, verifiedRoot, common.Hash(blockRoot))
-	envelope.Message.BeaconBlockRoot = blockRoot
-	resignAdmissionEnvelope(t, cfg, blockState, envelope)
+	for _, mode := range []string{"direct", "engine API"} {
+		t.Run(mode, func(t *testing.T) {
+			cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+			require.NoError(t, envelope.Message.Payload.BlockAccessList.SetBytes([]byte{0xc0}))
+			verifiedRoot := common.Hash(envelope.Message.BeaconBlockRoot)
+			executionHash := envelope.Message.Payload.BlockHash
+			block.Block.Body.SignedExecutionPayloadBid.Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{0xc0})
+			bodyRoot, err := block.Block.Body.HashSSZ()
+			require.NoError(t, err)
+			blockState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{
+				Slot: block.Block.Slot, ProposerIndex: block.Block.ProposerIndex,
+				ParentRoot: block.Block.ParentRoot, BodyRoot: bodyRoot,
+			})
+			blockRoot, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			require.NotEqual(t, verifiedRoot, common.Hash(blockRoot))
+			envelope.Message.BeaconBlockRoot = blockRoot
+			resignAdmissionEnvelope(t, cfg, blockState, envelope)
 
-	engine, err := execution_client.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, nil, time.Second), nil)
-	require.NoError(t, err)
-	verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](2)
-	require.NoError(t, err)
-	verifiedExecutionPayloadHashes, err := lru.New[common.Hash, common.Hash](2)
-	require.NoError(t, err)
-	executionPayloadStatus, err := lru.New[common.Hash, execution_client.PayloadStatus](2)
-	require.NoError(t, err)
-	payloadStatusByRoot, err := lru.New[common.Hash, execution_client.PayloadStatus](2)
-	require.NoError(t, err)
-	executionPayloadGasLimit, err := lru.New[common.Hash, uint64](2)
-	require.NoError(t, err)
-	graph := &persistingEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
-	f := &ForkChoiceStore{
-		beaconCfg:                      cfg,
-		engine:                         engine,
-		forkGraph:                      graph,
-		verifiedExecutionPayload:       verifiedExecutionPayload,
-		verifiedExecutionPayloadHashes: verifiedExecutionPayloadHashes,
-		executionPayloadStatus:         executionPayloadStatus,
-		payloadStatusByRoot:            payloadStatusByRoot,
-		executionPayloadGasLimit:       executionPayloadGasLimit,
+			api := &blobMismatchEngineAPI{}
+			var engine execution_client.ExecutionEngine
+			if mode == "direct" {
+				engine, err = execution_client.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, &acceptingPayloadModule{}, time.Second), nil)
+				require.NoError(t, err)
+			} else {
+				engine, err = execution_client.NewExecutionClientEngineLocal(api, chainreader.ChainReaderWriterEth1{}, nil, cfg)
+				require.NoError(t, err)
+			}
+			verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](2)
+			require.NoError(t, err)
+			verifiedExecutionPayloadHashes, err := lru.New[common.Hash, common.Hash](2)
+			require.NoError(t, err)
+			executionPayloadStatus, err := lru.New[common.Hash, execution_client.PayloadStatus](2)
+			require.NoError(t, err)
+			payloadStatusByRoot, err := lru.New[common.Hash, execution_client.PayloadStatus](2)
+			require.NoError(t, err)
+			executionPayloadGasLimit, err := lru.New[common.Hash, uint64](2)
+			require.NoError(t, err)
+			graph := &persistingEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
+			f := &ForkChoiceStore{
+				beaconCfg:                      cfg,
+				engine:                         engine,
+				forkGraph:                      graph,
+				verifiedExecutionPayload:       verifiedExecutionPayload,
+				verifiedExecutionPayloadHashes: verifiedExecutionPayloadHashes,
+				executionPayloadStatus:         executionPayloadStatus,
+				payloadStatusByRoot:            payloadStatusByRoot,
+				executionPayloadGasLimit:       executionPayloadGasLimit,
+			}
+			f.finalizedCheckpoint.Store(solid.Checkpoint{})
+			f.MarkPayloadVerified(verifiedRoot, executionHash)
+
+			err = f.OnExecutionPayload(t.Context(), envelope, false, true)
+
+			require.ErrorIs(t, err, ErrInvalidExecutionPayloadEnvelope)
+			require.True(t, verifiedExecutionPayload.Contains(verifiedRoot))
+			require.False(t, f.IsPayloadVerified(envelope.Message.BeaconBlockRoot))
+			require.False(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
+			require.False(t, graph.invalid.Load())
+			status, ok := f.GetRecentExecutionPayloadStatus(executionHash)
+			require.True(t, ok)
+			require.EqualValues(t, execution_client.PayloadStatusValidated, status)
+			require.Zero(t, api.calls)
+		})
 	}
-	f.finalizedCheckpoint.Store(solid.Checkpoint{})
-	f.MarkPayloadVerified(verifiedRoot, executionHash)
-
-	err = f.OnExecutionPayload(t.Context(), envelope, false, true)
-
-	require.ErrorIs(t, err, ErrInvalidExecutionPayloadEnvelope)
-	require.True(t, verifiedExecutionPayload.Contains(verifiedRoot))
-	require.False(t, f.IsPayloadVerified(envelope.Message.BeaconBlockRoot))
-	require.False(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
-	require.False(t, graph.invalid.Load())
-	status, ok := f.GetRecentExecutionPayloadStatus(executionHash)
-	require.True(t, ok)
-	require.EqualValues(t, execution_client.PayloadStatusValidated, status)
 }
 
 func TestAuthenticatedExecutionPayloadInvalidationRevokesVerifiedSibling(t *testing.T) {
