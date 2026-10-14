@@ -607,10 +607,12 @@ func TestVersionedRead_G4_RefreshRecordsTypedDefaultInReadSet(t *testing.T) {
 // for everything else.  Used by TestVersionedRead_G4 to exercise the
 // refresh path with non-zero typed defaultVs.
 type refreshReader struct {
-	account *accounts.Account
+	account      *accounts.Account
+	accountReads int
 }
 
 func (r *refreshReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	r.accountReads++
 	return r.account, nil
 }
 
@@ -627,6 +629,22 @@ func (r *refreshReader) ReadAccountIncarnation(accounts.Address) (uint64, error)
 func (r *refreshReader) SetTrace(bool, string)                                   {}
 func (r *refreshReader) Trace() bool                                             { return false }
 func (r *refreshReader) TracePrefix() string                                     { return "" }
+
+func TestVersionedRead_B_TouchReadsAnAbsentAccountOnce(t *testing.T) {
+	t.Parallel()
+	r := &refreshReader{}
+	ibs := NewWithVersionMap(r, NewVersionMap(nil))
+	defer ibs.Close()
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(1, 5)
+	addr := accounts.InternAddress([20]byte{0xb9})
+
+	require.NoError(t, ibs.TouchAccount(addr))
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists)
+	assert.Equal(t, 1, r.accountReads)
+}
 
 // revival via NoncePath rewrite at a higher TxIdx than the SD.
 func TestVersionedRead_C2_RevivalViaNonce(t *testing.T) {

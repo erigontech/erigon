@@ -78,6 +78,7 @@ func newBenchEnv(t testing.TB, gasLimit uint64) *vm.EVM {
 
 	reader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	statedb := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
+	statedb.SetNoConflictDetection()
 	return envFor(statedb, gasLimit)
 }
 
@@ -139,7 +140,7 @@ func setStorage(tb testing.TB, statedb *state.IntraBlockState, addr accounts.Add
 func prepareAndCall(vmenv *vm.EVM, addr accounts.Address, input []byte) ([]byte, mdgas.MdGas, error) {
 	rules := vmenv.ChainRules()
 	vmenv.IntraBlockState().Prepare(rules, vmenv.Origin, vmenv.Context.Coinbase, addr, vm.ActivePrecompiles(rules), nil)
-	gas := mdgas.SplitTxnGasLimit(vmenv.Context.GasLimit, 0, rules)
+	gas := mdgas.SplitTxnGasLimit(vmenv.Context.GasLimit, 0, rules, false)
 	ret, left, _, err := vmenv.Call(vmenv.Origin, addr, input, gas, uint256.Int{}, false)
 	return ret, left, err
 }

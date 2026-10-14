@@ -222,8 +222,10 @@ func markCellComplete[T any](cells *btree.Map[int, *WriteCell[T]], addr accounts
 
 type VersionMap struct {
 	// address -> *AddressEntry; sync.Map so account lookup is lock-free. Each entry's RWMutex guards only its own cells.
-	s      sync.Map // accounts.Address -> *AddressEntry
-	HasBAL bool     // When true, all significant writes are pre-populated from BAL
+	s sync.Map // accounts.Address -> *AddressEntry
+	// nonEmpty latches before the first entry is taken: nothing removes entries.
+	nonEmpty atomic.Bool
+	HasBAL   bool // When true, all significant writes are pre-populated from BAL
 
 	// Origin layer: the pre-block committed base (state before any tx in the block). Immutable and
 	// write-once, so it lives in lock-free sync.Maps separate from the per-account e.mu-guarded cells
@@ -299,6 +301,9 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 
 // load returns the AddressEntry for addr, or nil when absent. Lock-free.
 func (vm *VersionMap) load(addr accounts.Address) *AddressEntry {
+	if !vm.nonEmpty.Load() {
+		return nil
+	}
 	if e, ok := vm.s.Load(addr); ok {
 		return e.(*AddressEntry)
 	}
@@ -472,6 +477,12 @@ func (vm *VersionMap) WriteStorage(addr accounts.Address, key accounts.StorageKe
 // entryOrCreate returns the AddressEntry for addr, creating it if absent. The returned
 // pointer is stable for the map's lifetime; the caller locks e.mu for the cell mutation.
 func (vm *VersionMap) entryOrCreate(addr accounts.Address) *AddressEntry {
+	// Latch before taking the entry, not after publishing it: a creator
+	// descheduled in between would otherwise let this writer finish a cell
+	// while load still answers from the empty fast path.
+	if !vm.nonEmpty.Load() {
+		vm.nonEmpty.Store(true)
+	}
 	if e, ok := vm.s.Load(addr); ok {
 		return e.(*AddressEntry)
 	}

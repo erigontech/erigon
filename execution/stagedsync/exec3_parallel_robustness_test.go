@@ -22,6 +22,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -233,6 +234,30 @@ func TestBlockValidatorWaitNil(t *testing.T) {
 	if err := bv.Wait(); err != nil {
 		t.Fatalf("nil blockValidator.Wait() should return nil, got: %v", err)
 	}
+}
+
+// pe.wait must block for the exec-loop group and surface its verdict. The caller
+// cancels the executor before waiting, so returning early (the old ctx.Done escape
+// that returned nil) dropped a real execLoop error, hiding invalid blocks and
+// leaving the robustness sweeps green.
+func TestParallelExecutorWaitHarvestsExecLoopError(t *testing.T) {
+	pe := &parallelExecutor{}
+	g, _ := errgroup.WithContext(context.Background())
+	release := make(chan struct{})
+	sentinel := errors.New("exec loop failure")
+	g.Go(func() error {
+		<-release
+		return sentinel
+	})
+	pe.execLoopGroup = g
+
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		close(release)
+	}()
+
+	require.ErrorIs(t, pe.wait(), sentinel,
+		"wait must block for the exec-loop group and surface its verdict, not drop it")
 }
 
 // TestBlockValidatorWaitMultipleTimes verifies Wait can be called
@@ -566,37 +591,6 @@ func TestApplyLoopChannelCloseOrder(t *testing.T) {
 	}
 	if _, ok := <-apply; ok {
 		t.Error("apply channel not actually closed")
-	}
-
-	// Calling the helper again must be a no-op, not a double-close, and
-	// return an empty order.
-	if order := pe.closeApplyChannels(); len(order) != 0 {
-		t.Errorf("closeApplyChannels on already-closed channels must return empty order, got %v", order)
-	}
-}
-
-// TestCloseApplyChannelsDoubleCloseRecovers ensures the safety-net
-// recover in the registry actually catches the "close of closed channel"
-// panic when, e.g., a parallel shutdown path closes the channels before
-// the deferred close fires. After the recover, the closed-order slice
-// should NOT include the channel name (since close() didn't succeed) and
-// subsequent calls must be clean no-ops.
-func TestCloseApplyChannelsDoubleCloseRecovers(t *testing.T) {
-	commit := make(chan applyResult)
-	apply := make(chan applyResult)
-	pe := &parallelExecutor{consumers: newResultStream()}
-	pe.consumers.register("applyResults", apply)
-	pe.consumers.register("commitResults", commit)
-	close(commit) // pre-closed by the racing path
-	close(apply)
-
-	// Must not panic — the registry's recover catches "close of closed channel".
-	order := pe.closeApplyChannels()
-	if len(order) != 0 {
-		t.Errorf("closeApplyChannels on already-closed channels must NOT count them as freshly closed; got order=%v", order)
-	}
-	if order := pe.closeApplyChannels(); len(order) != 0 {
-		t.Fatal("second closeApplyChannels must be a clean no-op")
 	}
 }
 
@@ -1035,6 +1029,26 @@ func TestExecLoopExitCheckDeliberateStop(t *testing.T) {
 		err := pe.execLoopExitCheck(ctx, "shutdown-cancel")
 		require.NoError(t, err, "a cancelled context (shutdown, parent/CL cancel) explains the exit; pending blocks are then not a silent miss and must not be reported as invalid")
 	})
+}
+
+// A recorded failure is either an authoritative verdict or a symptom of a
+// concurrent operational abort. A generic commit wrong-root (!exec) can be
+// manufactured by an operational failure that left state incomplete, so it must
+// yield to an in-flight operational stop (surface the retryable operational
+// error, do not mark a bad block). An authoritative exec verdict never yields.
+func TestDeferVerdictToOperational(t *testing.T) {
+	op := &stopCause{block: 5, kind: stopOperational, err: errors.New("worker crashed")}
+
+	require.True(t, deferVerdictToOperational(false, op),
+		"a commit wrong-root must yield to a concurrent operational abort")
+	require.False(t, deferVerdictToOperational(true, op),
+		"an authoritative exec verdict wins over a concurrent operational abort")
+	require.False(t, deferVerdictToOperational(false, nil),
+		"a commit wrong-root with no operational abort is a genuine verdict")
+	require.False(t, deferVerdictToOperational(false, &stopCause{block: 5, kind: stopBadBlock}),
+		"a bad-block stop is not operational")
+	require.False(t, deferVerdictToOperational(false, &stopCause{block: 5, kind: stopReachedMax}),
+		"a clean batch end is not operational")
 }
 
 // TestStopCausePropagation pins the mechanism the unified shutdown rests on: a

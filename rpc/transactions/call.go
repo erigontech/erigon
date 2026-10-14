@@ -64,14 +64,15 @@ func DoCall(
 		}
 	*/
 
-	ibs := state.New(stateReader)
+	ibs := state.NewPooled(stateReader)
+	defer state.ReleasePooled(ibs)
 	// Overrides end in FinalizeTx, which clears the journal; the versioned read
 	// path then serves this tx's own writes only from a resident stateObject.
 	if dbg.CallNoMaterialize && stateOverrides == nil {
 		ibs.SetVersionMap(state.NewVersionMap(nil))
 		ibs.SetTxContext(0, 0)
+		ibs.SetNoConflictDetection()
 	}
-	defer ibs.Close()
 
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
@@ -93,6 +94,7 @@ func DoCall(
 	if err != nil {
 		return nil, err
 	}
+	msg.SetSkipExecutionGasCap(true)
 	blockCtx := NewEVMBlockContext(engine, effectiveHeader, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
 	if blockOverrides != nil {
 		if err := blockOverrides.Override(&blockCtx); err != nil {
@@ -198,7 +200,7 @@ type ReusableCaller struct {
 // r.evm is never cleared: the timeout watcher goroutine reads it and is never awaited.
 func (r *ReusableCaller) Close() {
 	if ibs := r.evm.IntraBlockState(); ibs != nil {
-		ibs.Close()
+		state.ReleasePooled(ibs)
 	}
 }
 
@@ -214,7 +216,7 @@ func (r *ReusableCaller) Message() *types.Message { return r.message }
 func (r *ReusableCaller) InitialState() (*state.IntraBlockState, vm.PrecompiledContracts, error) {
 	ibs := r.evm.IntraBlockState()
 	if ibs == nil {
-		ibs = state.New(r.stateReader)
+		ibs = state.NewPooled(r.stateReader)
 	} else {
 		ibs.Reset()
 	}
@@ -323,7 +325,7 @@ func NewReusableCaller(
 	txCtx := protocol.NewEVMTxContext(msg)
 	vmConfig := vm.Config{NoBaseFee: true, NoReceipts: true, NoBAL: true}
 
-	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, state.New(stateReader), chainConfig, vmConfig)
+	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, state.NewPooled(stateReader), chainConfig, vmConfig)
 
 	return &ReusableCaller{
 		evm:            evm,

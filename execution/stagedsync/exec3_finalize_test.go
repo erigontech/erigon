@@ -1497,6 +1497,30 @@ func TestNormalizeWriteSet_PostSelfDestructZeroStorageDroppedViaHistory(t *testi
 		"a non-zero post-SD write is a real change and applies")
 }
 
+// A re-creation that writes back the value the destroying tx wrote is a change,
+// not a no-op.
+func TestNormalizeWriteSet_RecreateWritesBackSlotOfDestroyingTx(t *testing.T) {
+	vm := state.NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x3a})
+	slot := accounts.InternKey([32]byte{0x01})
+
+	destroyVer := state.Version{TxIndex: 2, Incarnation: 0}
+	destroy := newWS().
+		stor(addr, slot, destroyVer, *uint256.NewInt(77)).
+		selfDestruct(addr, destroyVer, true).
+		build()
+	vm.FlushVersionedWrites(destroy, true, "")
+	writeBack := newWS().stor(addr, slot, state.Version{TxIndex: 3, Incarnation: 0}, *uint256.NewInt(77)).build()
+	vm.FlushVersionedWrites(writeBack, true, "")
+
+	cs := newTestCalcState()
+	cs.ApplyWrites(state.NewVersionMapWriteView(destroy, vm, 2), false)
+	cs.ApplyWrites(state.NewVersionMapWriteView(writeBack, vm, 3), false)
+
+	assert.Equal(t, *uint256.NewInt(77), cs.storageState[addr][slot], "the write-back over the wiped slot applies")
+	assert.True(t, cs.storageDirty[addr][slot], "the write-back reaches the commitment")
+}
+
 // Applying an earlier-tx self-destruct then a later recreate in sequence: the
 // SD zeroes the account fields in the accumulated state, so the recreate sees
 // post-destruction zero defaults (nonce 0, empty codeHash) rather than the stale
@@ -1537,6 +1561,92 @@ func TestNormalizeWriteSet_SelfDestructEarlierThenCreateContractZeroesFields(t *
 	assert.Equal(t, *uint256.NewInt(100), acc.Balance, "recreate balance applies")
 	assert.Equal(t, uint64(0), acc.Nonce, "recreate after SD gets zero nonce, not the stale pre-SD 9")
 	assert.Equal(t, [32]byte(empty.CodeHash), acc.CodeHash, "recreate after SD gets empty codeHash, not the stale pre-SD hash")
+}
+
+// A value-transfer revival (no CreateContractPath) writes no nonce: it must not
+// take the pre-SD nonce.
+func TestNormalizeWriteSet_ValueTransferRevivalDropsPreDestructNonce(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0x36})
+	cs := newTestCalcState()
+	applyTxs(cs,
+		newWS().nonce(addr, state.Version{TxIndex: 1, Incarnation: 0}, 9).build(),
+		newWS().selfDestruct(addr, state.Version{TxIndex: 2, Incarnation: 0}, true).build(),
+		newWS().bal(addr, state.Version{TxIndex: 5, Incarnation: 0}, *uint256.NewInt(100)).build())
+	assert.Equal(t, uint64(0), cs.accounts[addr].Nonce, "value-transfer revival gets zero nonce, not the pre-SD 9")
+}
+
+// A fee credit revives a destroyed coinbase with only a balance and an account
+// record write: it must not take the pre-SD code hash.
+func TestNormalizeWriteSet_FeeCreditRevivalDropsPreDestructCodeHash(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0x38})
+	staleHash := accounts.InternCodeHash(common.HexToHash("0x11223344"))
+	creditVer := state.Version{TxIndex: 5, Incarnation: 0}
+	account := accounts.NewAccount()
+	account.Balance = *uint256.NewInt(100)
+	feeCredit := newWS().addr(addr, creditVer, &account).bal(addr, creditVer, account.Balance).build()
+	cs := newTestCalcState()
+	applyTxs(cs,
+		newWS().codeHash(addr, state.Version{TxIndex: 1, Incarnation: 0}, staleHash).build(),
+		newWS().selfDestruct(addr, state.Version{TxIndex: 2, Incarnation: 0}, true).build(),
+		feeCredit)
+	assert.Equal(t, [32]byte(empty.CodeHash), cs.accounts[addr].CodeHash, "fee-credit revival gets empty codeHash, not the pre-SD hash")
+}
+
+// The fee-credit revival must not take the pre-block code hash.
+func TestNormalizeWriteSet_FeeCreditRevivalDropsPreBlockCodeHash(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0x39})
+	creditVer := state.Version{TxIndex: 5, Incarnation: 0}
+	account := accounts.NewAccount()
+	account.Balance = *uint256.NewInt(100)
+	feeCredit := newWS().addr(addr, creditVer, &account).bal(addr, creditVer, account.Balance).build()
+	cs := newTestCalcState()
+	cs.accounts[addr] = &calcAccountState{Nonce: 1, CodeHash: common.HexToHash("0x11223344")}
+	applyTxs(cs,
+		newWS().selfDestruct(addr, state.Version{TxIndex: 2, Incarnation: 0}, true).build(),
+		feeCredit)
+	assert.Equal(t, [32]byte(empty.CodeHash), cs.accounts[addr].CodeHash, "fee-credit revival gets empty codeHash, not the pre-block hash")
+}
+
+// A later credit must not take the pre-SD nonce either: the revival
+// (SelfDestructPath=false) wrote no nonce.
+func TestNormalizeWriteSet_CreditAfterRevivalDropsPreDestructNonce(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0x35})
+	cs := newTestCalcState()
+	applyTxs(cs,
+		newWS().nonce(addr, state.Version{TxIndex: 1, Incarnation: 0}, 9).build(),
+		newWS().selfDestruct(addr, state.Version{TxIndex: 2, Incarnation: 0}, true).build(),
+		newWS().
+			selfDestruct(addr, state.Version{TxIndex: 3, Incarnation: 0}, false).
+			bal(addr, state.Version{TxIndex: 3, Incarnation: 0}, *uint256.NewInt(100)).
+			build(),
+		newWS().bal(addr, state.Version{TxIndex: 5, Incarnation: 0}, *uint256.NewInt(200)).build())
+	assert.Equal(t, uint64(0), cs.accounts[addr].Nonce, "credit after revival gets zero nonce, not the pre-SD 9")
+}
+
+// The revival must not take the pre-block nonce.
+func TestNormalizeWriteSet_RevivalDropsPreBlockNonce(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0x37})
+	cs := newTestCalcState()
+	cs.accounts[addr] = &calcAccountState{Nonce: 9, Balance: *uint256.NewInt(1), CodeHash: empty.CodeHash}
+	applyTxs(cs,
+		newWS().selfDestruct(addr, state.Version{TxIndex: 2, Incarnation: 0}, true).build(),
+		newWS().bal(addr, state.Version{TxIndex: 5, Incarnation: 0}, *uint256.NewInt(100)).build())
+	assert.Equal(t, uint64(0), cs.accounts[addr].Nonce, "revival gets zero nonce, not the pre-block 9")
+}
+
+// applyTxs flushes each single-tx write set to a version map, then applies them
+// to cs in order.
+func applyTxs(cs *calcState, txs ...*state.WriteSet) {
+	vm := state.NewVersionMap(nil)
+	for _, ws := range txs {
+		vm.FlushVersionedWrites(ws, true, "")
+	}
+	for _, ws := range txs {
+		for h := range ws.AllHeaders() {
+			cs.ApplyWrites(state.NewVersionMapWriteView(ws, vm, h.Version.TxIndex), false)
+			break
+		}
+	}
 }
 
 // A write-back of the pre-block storage value resolves to the same value
