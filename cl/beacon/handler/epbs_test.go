@@ -2347,18 +2347,67 @@ func TestPostExecutionPayloadEnvelopePublishesAfterTheClientGaveUp(t *testing.T)
 	}
 }
 
+// An interrupted validation parks the envelope without persisting it, so the client's re-POST
+// must be processed again instead of being refused as already seen.
+func TestPostExecutionPayloadEnvelopeAcceptsARepostAfterAnInterruptedValidation(t *testing.T) {
+	for _, path := range []string{
+		"/eth/v1/beacon/execution_payload_envelope",
+		"/eth/v1/beacon/execution_payload_envelopes?broadcast_validation=gossip",
+		"/eth/v1/beacon/execution_payload_envelopes?broadcast_validation=consensus",
+	} {
+		t.Run(path, func(t *testing.T) {
+			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			gossipManager := gossip_mock.NewMockGossip(gomock.NewController(t))
+			gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any()).Return(nil).AnyTimes()
+			handler.gossipManager = gossipManager
+			handler.sentinel = &nonNilSentinelClient{}
+			validationErr := fmt.Errorf("%w: %w", forkchoice.ErrPayloadValidationInterrupted, context.DeadlineExceeded)
+			fcu.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+				return validationErr
+			}
+			root := common.Hash{1}
+			fcu.Blocks[root] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 12, Body: cltypes.NewBeaconBody(handler.beaconChainCfg, clparams.GloasVersion)}}
+			envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+			envelope.Message.BeaconBlockRoot = root
+			body, err := json.Marshal(envelope)
+			require.NoError(t, err)
+			post := func() *httptest.ResponseRecorder {
+				request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, bytes.NewReader(body))
+				request.Header.Set("Content-Type", "application/json")
+				request.Header.Set("Eth-Consensus-Version", "gloas")
+				request.Header.Set("Eth-Blob-Data-Included", "false")
+				recorder := httptest.NewRecorder()
+				handler.ServeHTTP(recorder, request)
+				return recorder
+			}
+
+			first := post()
+			require.Equal(t, http.StatusAccepted, first.Code, first.Body.String())
+			validationErr = nil
+			second := post()
+			require.Equal(t, http.StatusOK, second.Code, second.Body.String())
+		})
+	}
+}
+
 // The publish window starts when publishing starts: a validation slower than a slot must not use
 // it up.
 func TestPostExecutionPayloadEnvelopePublishesAfterASlowValidation(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-	handler.beaconChainCfg.SecondsPerSlot = 1
+	slot := time.Duration(handler.beaconChainCfg.SecondsPerSlot) * time.Second
+	const validation = 100 * time.Millisecond
 	gossipManager := gossip_mock.NewMockGossip(gomock.NewController(t))
 	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any()).
-		DoAndReturn(func(ctx context.Context, _ string, _ []byte) error { return ctx.Err() })
+		DoAndReturn(func(ctx context.Context, _ string, _ []byte) error {
+			deadline, ok := ctx.Deadline()
+			require.True(t, ok)
+			require.Greater(t, time.Until(deadline), slot-validation/2, "the window must not include the validation")
+			return nil
+		})
 	handler.gossipManager = gossipManager
 	handler.sentinel = &nonNilSentinelClient{}
 	fcu.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
-		time.Sleep(1200 * time.Millisecond)
+		time.Sleep(validation)
 		return nil
 	}
 	root := common.Hash{1}

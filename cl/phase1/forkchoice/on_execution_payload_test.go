@@ -977,7 +977,18 @@ func TestInvalidPendingEnvelopeDoesNotPoisonLaterArrival(t *testing.T) {
 	require.False(t, f.ExecutionPayloadReceivedBefore(blockRoot, deadline))
 }
 
-func TestOnExecutionPayloadWithoutEngineMarksPayloadOptimistic(t *testing.T) {
+// A payload persisted without an EL call, with no EL or without validation (forward sync), counts
+// as NotValidated.
+func TestOnExecutionPayloadWithoutELValidationMarksPayloadOptimistic(t *testing.T) {
+	t.Run("no EL", func(t *testing.T) {
+		testOnExecutionPayloadMarksPayloadOptimistic(t, nil, true)
+	})
+	t.Run("not validating", func(t *testing.T) {
+		testOnExecutionPayloadMarksPayloadOptimistic(t, execution_client.NewMockExecutionEngine(gomock.NewController(t)), false)
+	})
+}
+
+func testOnExecutionPayloadMarksPayloadOptimistic(t *testing.T, engine execution_client.ExecutionEngine, validatePayload bool) {
 	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
 	envelope.Message.Payload.GasLimit = 36_000_000
 	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(cfg, envelope.Message.ExecutionRequests))
@@ -1005,12 +1016,13 @@ func TestOnExecutionPayloadWithoutEngineMarksPayloadOptimistic(t *testing.T) {
 	require.NoError(t, err)
 	f.executionPayloadGasLimit = gasLimits
 	f.beaconCfg = cfg
+	f.engine = engine
 	f.forkGraph = &persistedEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{
 		state: blockState,
 		block: block,
 	}}
 
-	require.NoError(t, f.OnExecutionPayload(t.Context(), envelope, false, true))
+	require.NoError(t, f.OnExecutionPayload(t.Context(), envelope, false, validatePayload))
 	require.True(t, f.isPayloadAvailable(root))
 	status, ok := f.GetRecentExecutionPayloadStatusByRoot(root)
 	require.True(t, ok)

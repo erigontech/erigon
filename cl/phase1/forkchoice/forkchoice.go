@@ -1130,10 +1130,7 @@ func (f *ForkChoiceStore) markPayloadStatus(
 		f.verifiedExecutionPayloadHashes.Add(blockRoot, executionBlockHash)
 	}
 	if f.executionPayloadStatus != nil {
-		// A sibling root's weaker answer for the same hash does not lower a Validated entry.
-		if executionStatus, ok := f.executionPayloadStatus.Get(executionBlockHash); !ok || executionStatus != execution_client.PayloadStatusValidated || effective == execution_client.PayloadStatusInvalidated {
-			f.executionPayloadStatus.Add(executionBlockHash, effective)
-		}
+		f.executionPayloadStatus.Add(executionBlockHash, effective)
 	}
 	if f.payloadStatusByRoot != nil {
 		f.payloadStatusByRoot.Add(blockRoot, effective)

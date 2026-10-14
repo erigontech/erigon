@@ -83,7 +83,8 @@ type Cfg struct {
 	gloasPayloadValidator        gloasPayloadValidator
 	gloasVerificationCursor      common.Hash
 	gloasVerificationHead        common.Hash
-	gloasSkippedValidation       map[common.Hash]skippedValidation // roots recorded NotValidated below the EL's validation depth
+	gloasSkippedValidation       map[common.Hash]skippedValidation // roots the EL answered NotValidated below its validation depth
+	gloasSkippedAnchorValidation skippedAnchorValidation
 	sleepForSlotLastWake         sleepForSlotWake
 	sleepForSlotHeadChanged      bool
 }
