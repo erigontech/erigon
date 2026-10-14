@@ -2910,3 +2910,52 @@ func (p *TxPool) deprecatedForEach(f func(rlp []byte, sender common.Address, t S
 		f(slotRlp, senders[i], subPoolTypes[i])
 	}
 }
+
+// QueuedBlockers reports WHY the queued sub-pool is not promotable, as a count of how many of its
+// transactions are missing each of the three bits promotion requires (NoNonceGaps + EnoughBalance +
+// NotTooMuchGas = BaseFeePoolBits), plus how many clear all three and are held back only by the
+// pending base fee.
+//
+// It exists because "pending 0, queued 698" is the same observation whatever the cause, and the causes
+// call for opposite fixes: a nonce gap is the SENDER's sequencing, an insufficient balance is funding, a
+// gas limit above the block's is an admission fault, and a fee cap below the base fee is pricing. Measured
+// on live302 the chain idled for two whole blocks mid-burst with hundreds queued, and none of the four
+// could be told apart from outside. Non-blocking like PendingHashes: consensus must not wait on the pool.
+func (p *TxPool) QueuedBlockers() (total, noGaps, balance, tooMuchGas, feeCap int, minNonce, senderNonce uint64, ok bool) {
+	if !p.lock.TryLock() {
+		return 0, 0, 0, 0, 0, 0, 0, false
+	}
+	defer p.lock.Unlock()
+	pendingBaseFee := p.pendingBaseFee.Load()
+	minNonce = ^uint64(0)
+	for _, mt := range p.queued.best.ms {
+		if mt == nil {
+			continue
+		}
+		total++
+		// The LOWEST queued nonce and the state nonce the pool is measuring it against. nonceDistance is
+		// txn.Nonce - senderNonce, so the sender's nonce AS THE POOL SEES IT falls straight out — and that
+		// is the number in question: a pool whose view of the sender lags the chain waits for nonces that
+		// have already been mined, and every transaction behind them reads as nonce-gapped.
+		if n := mt.TxnSlot.Nonce; n < minNonce {
+			minNonce = n
+			senderNonce = n - mt.nonceDistance
+		}
+		if mt.subPool&NoNonceGaps == 0 {
+			noGaps++
+		}
+		if mt.subPool&EnoughBalance == 0 {
+			balance++
+		}
+		if mt.subPool&NotTooMuchGas == 0 {
+			tooMuchGas++
+		}
+		if mt.subPool >= BaseFeePoolBits && mt.minFeeCap.LtUint64(pendingBaseFee) {
+			feeCap++
+		}
+	}
+	if total == 0 {
+		minNonce = 0
+	}
+	return total, noGaps, balance, tooMuchGas, feeCap, minNonce, senderNonce, true
+}

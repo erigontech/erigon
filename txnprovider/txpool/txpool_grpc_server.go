@@ -400,3 +400,13 @@ func StartGrpc(txPoolServer txpoolproto.TxpoolServer, miningServer txpoolproto.M
 	logger.Info("Started gRPC server", "on", addr)
 	return grpcServer, nil
 }
+
+// QueuedBlockers forwards the queued sub-pool's promotion diagnostic — see TxPool.QueuedBlockers.
+func (s *GrpcServer) QueuedBlockers() (total, noGaps, balance, tooMuchGas, feeCap int, minNonce, senderNonce uint64, ok bool) {
+	if qb, ok2 := s.txPool.(interface {
+		QueuedBlockers() (int, int, int, int, int, uint64, uint64, bool)
+	}); ok2 {
+		return qb.QueuedBlockers()
+	}
+	return 0, 0, 0, 0, 0, 0, 0, false
+}
