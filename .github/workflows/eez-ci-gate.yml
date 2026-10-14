@@ -83,12 +83,16 @@ jobs:
       - name: Short test suite
         run: make test-short
 
+      # Milestone branches (<prefix>/eez-mN) must carry eez/, so losing it
+      # fails here; other refs may predate it.
       - name: EEZ packages with -race
+        env:
+          REF: ${{ github.ref }}
         run: |
-          if [ -d eez ]; then
+          if [[ "$REF" == refs/heads/*/eez-m* ]] || [ -d eez ]; then
             go test -race -count=1 ./eez/...
           else
-            echo "No eez packages on this branch"
+            echo "::notice::No eez packages on $REF; race step skipped"
           fi
 
       - uses: ./.github/actions/cleanup-erigon
