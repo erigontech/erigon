@@ -625,7 +625,11 @@ func (s *KvServer) IndexRange(_ context.Context, req *remoteproto.IndexRangeReq)
 			limit--
 
 			if len(reply.Timestamps) == int(req.PageSize) && it.HasNext() {
-				reply.NextPageToken, err = marshalPagination(&remoteproto.IndexPagination{NextTimeStamp: int64(v), Limit: int64(limit)})
+				var next uint64
+				if next, err = it.Next(); err != nil {
+					return err
+				}
+				reply.NextPageToken, err = marshalPagination(&remoteproto.IndexPagination{NextTimeStamp: int64(next), Limit: int64(limit)})
 				if err != nil {
 					return err
 				}
@@ -705,7 +709,11 @@ func (s *KvServer) RangeAsOf(_ context.Context, req *remoteproto.RangeAsOfReq) (
 			limit--
 
 			if len(reply.Keys) == int(req.PageSize) && it.HasNext() {
-				reply.NextPageToken, err = marshalPagination(&remoteproto.PairsPagination{NextKey: k, Limit: int64(limit)})
+				var nextK []byte
+				if nextK, _, err = it.Next(); err != nil {
+					return err
+				}
+				reply.NextPageToken, err = marshalPagination(&remoteproto.PairsPagination{NextKey: nextK, Limit: int64(limit)})
 				if err != nil {
 					return err
 				}
