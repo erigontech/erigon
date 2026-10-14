@@ -703,6 +703,12 @@ func (h WriteHeader) String() string {
 	return fmt.Sprintf("%x %s (%d.%d)", h.Address, AccountKey{Path: h.Path, Key: h.Key}, h.Version.TxIndex, h.Version.Incarnation)
 }
 
+// Deletes reports whether this write instructs the reader/projection to delete the
+// leaf (nil), rather than write its value. It is the branch-agnostic signal the
+// writer stamps so a consumer need not re-derive the outcome from the value (or the
+// fork). Used by the commitment projection in another package.
+func (h WriteHeader) Deletes() bool { return h.valStatus == ValueDeleted }
+
 // VersionedWrite is a single versioned write.  The per-path map it lives
 // in fixes the address (map key), path — and, for storage, the slot key.
 // The struct carries the header and the path-typed value. orig is the committed
@@ -1891,14 +1897,10 @@ type versionedStateReader struct {
 	reads       ReadSet
 	versionMap  *VersionMap
 	stateReader StateReader
-	// eip8246 makes this whole-account reader honor an EIP-8246 balance-preserve:
-	// a self-destruct keeping a non-zero balance/nonce reads as present, not
-	// absent. Set from the block's rules.
-	eip8246 bool
 }
 
-func NewVersionedStateReader(txIndex int, reads ReadSet, versionMap *VersionMap, stateReader StateReader, eip8246 bool) *versionedStateReader {
-	return &versionedStateReader{txIndex, reads, versionMap, stateReader, eip8246}
+func NewVersionedStateReader(txIndex int, reads ReadSet, versionMap *VersionMap, stateReader StateReader) *versionedStateReader {
+	return &versionedStateReader{txIndex, reads, versionMap, stateReader}
 }
 
 func (vr *versionedStateReader) SetTrace(trace bool, tracePrefix string) {
@@ -1927,13 +1929,13 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 		// only if no subsequent write at a strictly higher TxIndex re-creates it,
 		// so a later tip to a pruned coinbase surfaces the re-created account.
 		if vr.versionMap.IsNetAbsent(address, vr.txIndex) {
-			// EIP-8246: a self-destruct may preserve a non-zero balance/nonce that
-			// IsNetAbsent reports as absent. On Amsterdam+ reconstruct it from the
-			// versionMap cells (the base stateReader predates the in-block destruct),
-			// else the balance is burned on the state-root composition path.
-			if vr.eip8246 {
-				// An EIP-8246 preserve only survives with a non-zero balance (an empty
-				// account is EIP-161-removed), so reconstruct only then.
+			// A self-destruct stamps its balance write ValueDeleted when it burns the
+			// account; a balance-preserving destruct (EIP-8246) leaves a non-deleting
+			// balance. Reconstruct the balance-only EOA only in the latter case — the
+			// delete/preserve decision rides the write, so no fork flag is needed. A
+			// net-absent account with a non-zero kept balance surfaces (an empty one is
+			// EIP-161-removed).
+			if _, res, ok := vr.versionMap.ReadBalance(address, vr.txIndex); ok && res.ValStatus() != ValueDeleted {
 				var synth accounts.Account
 				if updated := vr.applyVersionedUpdates(address, synth); !updated.Balance.IsZero() {
 					return &updated, nil

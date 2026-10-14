@@ -153,7 +153,7 @@ func (cs *calcState) markDirty(addr accounts.Address, acc *calcAccountState) {
 // non-zero field write revives it by clearing Deleted. A zero field write does
 // not revive a self-destructed address; for any other address a field write
 // (even zero) clears Deleted.
-func (cs *calcState) ApplyWrites(writes state.WriteSetView, eip8246 bool) {
+func (cs *calcState) ApplyWrites(writes state.WriteSetView) {
 	sdThisCall := make(map[accounts.Address]bool)
 	for addr, vw := range writes.SelfDestructs() {
 		sdThisCall[addr] = vw.Val
@@ -165,21 +165,21 @@ func (cs *calcState) ApplyWrites(writes state.WriteSetView, eip8246 bool) {
 			cs.zeroTouchedStorage(addr)
 		}
 	}
-	clearsDeleted := func(addr accounts.Address, nonZero bool) bool {
+	clearsDeleted := func(addr accounts.Address, deletes bool) bool {
 		if !sdThisCall[addr] {
 			return true
 		}
-		// A finally-self-destructed account is not revived by a post-SD balance
-		// write: pre-EIP-8246 the balance is burned and the leaf deleted; under
-		// EIP-8246 a non-zero balance survives as a balance-only account.
-		return eip8246 && nonZero
+		// A finally-self-destructed account is revived only by a balance write that
+		// does NOT delete the leaf. Whether a self-destruct deletes or preserves is
+		// the writer's branch-agnostic stamp (vw.Deletes()), not a fork rule here.
+		return !deletes
 	}
 	for addr, vw := range writes.Balances() {
 		acc := cs.ensureAccount(addr)
 		acc.Balance = vw.Val
 		cs.markDirty(addr, acc)
 		cs.fieldMask[addr] |= fieldBal
-		if clearsDeleted(addr, !acc.Balance.IsZero()) {
+		if clearsDeleted(addr, vw.Deletes()) {
 			acc.Deleted = false
 		}
 	}
@@ -256,9 +256,7 @@ func (cs *calcState) ApplyWrites(writes state.WriteSetView, eip8246 bool) {
 	// though IBS emits the pre-SD Incarnation/Balance values.
 	for addr := range sdThisCall {
 		if acc, ok := cs.accounts[addr]; ok && acc.Deleted {
-			if !eip8246 {
-				acc.Balance = uint256.Int{}
-			}
+			acc.Balance = uint256.Int{}
 			acc.Nonce = 0
 			acc.CodeHash = empty.CodeHash
 			acc.Incarnation = 0
@@ -292,15 +290,15 @@ func (cs *calcState) zeroTouchedStorage(addr accounts.Address) {
 // ApplyWrites. The BAL carries no deletion marker, so a touched account whose
 // block-end state is empty is reconstructed as a delete here. Storage reads are
 // ignored.
-func (cs *calcState) LoadFromBAL(blockAccessList types.BlockAccessList, emptyRemoval bool, isAura bool, eip8246 bool) {
-	cs.LoadFromBALUpTo(blockAccessList, math.MaxUint32, emptyRemoval, isAura, eip8246)
+func (cs *calcState) LoadFromBAL(blockAccessList types.BlockAccessList, emptyRemoval bool, isAura bool) {
+	cs.LoadFromBALUpTo(blockAccessList, math.MaxUint32, emptyRemoval, isAura)
 }
 
 // LoadFromBALUpTo is LoadFromBAL restricted to changes at tx index <= maxTxIndex,
 // i.e. the state as of that point in the block, used to fold up to a mid-block
 // step boundary. maxTxIndex == math.MaxUint32 is the whole block.
-func (cs *calcState) LoadFromBALUpTo(blockAccessList types.BlockAccessList, maxTxIndex uint32, emptyRemoval bool, isAura bool, eip8246 bool) {
-	cs.ApplyWrites(bal.ToWriteSet(blockAccessList, maxTxIndex), eip8246)
+func (cs *calcState) LoadFromBALUpTo(blockAccessList types.BlockAccessList, maxTxIndex uint32, emptyRemoval bool, isAura bool) {
+	cs.ApplyWrites(bal.ToWriteSet(blockAccessList, maxTxIndex))
 	cs.ApplyEIP161Removal(emptyRemoval, isAura)
 }
 

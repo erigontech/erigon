@@ -34,7 +34,6 @@ func TestEIP8246_PreservedSD_ReadsAsEmptyCodeAccountInLaterTx(t *testing.T) {
 	tx0.SetTxContext(0, 0)
 	tx0.SetVersion(0)
 	tx0.SetVersionMap(vm)
-	tx0.eip8246 = true
 	require.NoError(t, tx0.CreateAccount(addr, true))
 	require.NoError(t, tx0.SetBalance(addr, preserved, tracing.BalanceChangeUnspecified))
 	require.NoError(t, tx0.SetCode(addr, []byte("deployed runtime code"), tracing.CodeChangeUnspecified))
@@ -47,7 +46,6 @@ func TestEIP8246_PreservedSD_ReadsAsEmptyCodeAccountInLaterTx(t *testing.T) {
 	tx1.SetTxContext(0, 1)
 	tx1.SetVersion(0)
 	tx1.SetVersionMap(vm)
-	tx1.eip8246 = true
 	ch, err := tx1.GetCodeHash(addr)
 	require.NoError(t, err)
 	require.Equal(t, accounts.EmptyCodeHash, ch, "EXTCODEHASH of a preserved account must read empty, not the pre-destruct deployed hash")
@@ -74,7 +72,6 @@ func TestEIP8246_PreservedSD_WithEarlierAccountRecord(t *testing.T) {
 	t.Cleanup(ibs.Close)
 	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, 2)
-	ibs.eip8246 = true
 
 	exists, err := ibs.Exist(addr)
 	require.NoError(t, err)
@@ -122,7 +119,6 @@ func TestEIP8246_FinalizeTx_PreservesSameTxCredit(t *testing.T) {
 	vm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(newAccountStateReader(), vm)
 	defer ibs.Close()
-	ibs.eip8246 = true
 
 	ibs.SetTxContext(1, 0)
 	require.NoError(t, ibs.CreateAccount(addr, true))
@@ -162,7 +158,6 @@ func TestEIP8246_VersionedAccount_LaterBalanceWriteDoesNotSkipReconstruction(t *
 	ibs.SetTxContext(0, 2)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
-	ibs.eip8246 = true
 
 	exists, err := ibs.Exist(addr)
 	require.NoError(t, err)
@@ -190,14 +185,14 @@ func TestEIP8246_VersionedStateReader_PreserveNotBurned(t *testing.T) {
 	vm.WriteIncarnation(addr, sdVer, 0, true)
 
 	// Fork-aware reader at a later tx (the calcFees path) must surface the preserve.
-	vsr := NewVersionedStateReader(6, ReadSet{}, vm, nil, true /* eip8246 */)
+	vsr := NewVersionedStateReader(6, ReadSet{}, vm, nil)
 	acc, err := vsr.ReadAccountData(addr)
 	require.NoError(t, err)
 	require.NotNil(t, acc, "EIP-8246 preserved coinbase must not read as absent (calcFees would burn the balance)")
 	require.Equal(t, preserved, acc.Balance)
 
 	// A fork-unaware reader keeps pre-EIP-8246 semantics: a self-destruct is absent.
-	vsrOld := NewVersionedStateReader(6, ReadSet{}, vm, nil, false)
+	vsrOld := NewVersionedStateReader(6, ReadSet{}, vm, nil)
 	accOld, err := vsrOld.ReadAccountData(addr)
 	require.NoError(t, err)
 	require.Nil(t, accOld, "pre-EIP-8246 a self-destruct is fully absent")
@@ -223,7 +218,6 @@ func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *test
 		tx0.SetTxContext(0, 0)
 		tx0.SetVersion(0)
 		tx0.SetVersionMap(vm)
-		tx0.eip8246 = true
 		require.NoError(t, tx0.CreateAccount(addr, true))
 		require.NoError(t, tx0.SetBalance(addr, preserved, tracing.BalanceChangeUnspecified))
 		_, err := tx0.Selfdestruct(addr, true)
@@ -235,7 +229,6 @@ func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *test
 		tx1.SetTxContext(0, 1)
 		tx1.SetVersion(0)
 		tx1.SetVersionMap(vm)
-		tx1.eip8246 = true
 		bal, err := tx1.GetBalance(addr)
 		require.NoError(t, err)
 		require.Equal(t, preserved, bal, "concurrent reader must see the preserved balance before re-creation")
@@ -252,7 +245,6 @@ func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *test
 		reader := newAccountStateReader()
 		ibs := New(reader)
 		defer ibs.Close()
-		ibs.eip8246 = true
 		ibs.SetTxContext(1, 0)
 		require.NoError(t, ibs.CreateAccount(addr, true))
 		require.NoError(t, ibs.SetBalance(addr, preserved, tracing.BalanceChangeUnspecified))
@@ -293,7 +285,6 @@ func TestEIP8246_PreservedAccount_OverlaysLaterFieldWrites(t *testing.T) {
 	ibs.SetTxContext(0, 2)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
-	ibs.eip8246 = true
 	fieldNonce, err := ibs.GetNonce(addr)
 	require.NoError(t, err)
 	fieldCodeHash, err := ibs.GetCodeHash(addr)

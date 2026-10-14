@@ -126,7 +126,7 @@ func TestApplyWrites_CodeHashSingleSourced(t *testing.T) {
 		Val:         accounts.NewCode(nil),
 	})
 
-	cs.ApplyWrites(ws, false)
+	cs.ApplyWrites(ws)
 
 	require.Equal(t, realHash.Value(), common.Hash(cs.accounts[addr].CodeHash),
 		"codeHash must come from CodeHashes(), not be clobbered by an empty Codes() entry")
@@ -273,7 +273,7 @@ func TestApplyWrites_IncarnationPath(t *testing.T) {
 		inc(addr, state.Version{}, uint64(1)).
 		selfDestruct(addr, state.Version{}, true).
 		build()
-	cs.ApplyWrites(writes, false)
+	cs.ApplyWrites(writes)
 
 	acc, ok := cs.accounts[addr]
 	require.True(t, ok, "ensureAccount should have created an entry")
@@ -307,7 +307,7 @@ func TestApplyWrites_SelfDestructBalanceNotRevived(t *testing.T) {
 		selfDestruct(addr, state.Version{}, true).
 		bal(addr, state.Version{}, *uint256.NewInt(42)).
 		build()
-	cs.ApplyWrites(writes, false)
+	cs.ApplyWrites(writes)
 
 	acc, ok := cs.accounts[addr]
 	require.True(t, ok)
@@ -325,7 +325,7 @@ func TestApplyWrites_SelfDestructBalanceRetained_EIP8246(t *testing.T) {
 		selfDestruct(addr, state.Version{}, true).
 		bal(addr, state.Version{}, *uint256.NewInt(42)).
 		build()
-	cs.ApplyWrites(writes, true /*eip8246*/)
+	cs.ApplyWrites(writes)
 
 	acc, ok := cs.accounts[addr]
 	require.True(t, ok)
@@ -343,7 +343,7 @@ func TestApplyWrites_SelfDestructBalanceRetained_EIP8246(t *testing.T) {
 //	    BalancePath = 0
 //	    StoragePath[k] = 0  for each k in stateObject.dirtyStorage
 //	  → those land in blockIO.WriteSet → rawWrites → the raw versionMap view
-//	  → calcState.ApplyWrites(rawView, eip8246)
+//	  → calcState.ApplyWrites(rawView)
 //	  → calcState.FlushToUpdates(updates)
 //
 // This test also populates `vm` with these writes, so the completion loop's
@@ -405,7 +405,7 @@ func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 	// marks the account deleted — the SD-aware collapse Normalize used to do up
 	// front. The assertions below pin that result.
 	cs := newTestCalcState()
-	cs.ApplyWrites(state.NewVersionMapWriteView(rawWrites, vm, 0), false)
+	cs.ApplyWrites(state.NewVersionMapWriteView(rawWrites, vm, 0))
 
 	acc, ok := cs.accounts[addr]
 	require.True(t, ok)
@@ -485,7 +485,7 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 	// dirties the touched slots (the cascade Normalize did via vm.StorageKeys),
 	// so FlushToUpdates below emits a DeleteUpdate per slot rather than leaking
 	// the pre-SD value.
-	cs.ApplyWrites(state.NewVersionMapWriteView(rawWrites, vm, 0), false)
+	cs.ApplyWrites(state.NewVersionMapWriteView(rawWrites, vm, 0))
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -525,7 +525,7 @@ func TestSDOfPreExistingContract_MarksSubtreeReset(t *testing.T) {
 		inc(addr, state.Version{}, uint64(3)).
 		selfDestruct(addr, state.Version{}, true).
 		bal(addr, state.Version{}, uint256.Int{}).
-		build(), false)
+		build())
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -597,7 +597,7 @@ func TestNormalizeWriteSet_GenesisBypassRetainsEmptyAccount(t *testing.T) {
 	// emptyRemoval=false (genesis bypass): the empty account is retained, so no
 	// EIP-161 removal pass runs and the account is not deleted.
 	cs := newTestCalcState()
-	cs.ApplyWrites(state.NewVersionMapWriteView(rawWrites, vm, 0), false)
+	cs.ApplyWrites(state.NewVersionMapWriteView(rawWrites, vm, 0))
 	acc, ok := cs.accounts[zeroAddr]
 	require.True(t, ok)
 	assert.False(t, acc.Deleted)
@@ -632,7 +632,7 @@ func TestNormalizeWriteSet_PostGenesisEmptyAccountTriggersEIP161(t *testing.T) {
 	// account deleted (the removal Normalize used to synthesize as a
 	// SelfDestructPath entry up front).
 	cs := newTestCalcState()
-	cs.ApplyWrites(state.NewVersionMapWriteView(rawWrites, vm, 0), false)
+	cs.ApplyWrites(state.NewVersionMapWriteView(rawWrites, vm, 0))
 	cs.ApplyEIP161Removal(true /*emptyRemoval*/, false /*isAura*/)
 	acc, ok := cs.accounts[addr]
 	require.True(t, ok)
@@ -688,7 +688,7 @@ func buildSDWithPostBalance(t *testing.T, addr accounts.Address, postSDBalance u
 	vm.WriteBalance(addr, ver, postSDBalance, true)
 
 	cs := newTestCalcState()
-	cs.ApplyWrites(state.NewVersionMapWriteView(rawWrites, vm, 0), eip8246)
+	cs.ApplyWrites(state.NewVersionMapWriteView(rawWrites, vm, 0))
 	cs.ApplyEIP161Removal(true /*emptyRemoval*/, false /*isAura*/)
 	return cs
 }

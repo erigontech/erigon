@@ -349,9 +349,11 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		}
 		if !revived && path != CodePath {
 			sdVersion := Version{TxIndex: destructTxIndex, Incarnation: sdRes.Incarnation()}
-			if s.eip8246 && path == BalancePath {
-				// EIP-8246 preserves only the balance across SELFDESTRUCT; code, nonce and
-				// incarnation clear as in a normal destruct (they take the wiped path below).
+			if path == BalancePath && pathRead.ValStatus() != ValueDeleted {
+				// A balance-preserving SELFDESTRUCT keeps the balance (its write is not
+				// stamped ValueDeleted); code, nonce and incarnation clear as in a normal
+				// destruct (they take the wiped path below). Branch-agnostic: a burn stamps
+				// the balance ValueDeleted and takes the wiped path.
 				s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
 					ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
 					Val:        true,

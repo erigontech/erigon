@@ -1047,7 +1047,7 @@ func TestNormalizeWriteSet_StorageNoOp(t *testing.T) {
 	vm.FlushVersionedWrites(writeSet, true, "")
 
 	cs := newTestCalcState()
-	cs.ApplyWrites(state.NewVersionMapWriteView(writeSet, vm, 1), false)
+	cs.ApplyWrites(state.NewVersionMapWriteView(writeSet, vm, 1))
 	assert.Equal(t, val100, cs.storageState[addr][slotA],
 		"a write-back of the prior value resolves to the same value (idempotent no-op; the redundant-write elision is the domain applier's job)")
 }
@@ -1143,7 +1143,7 @@ func TestNormalizeWriteSet_SelfDestruct(t *testing.T) {
 	cs := newTestCalcState()
 	cs.storageState[addr] = map[accounts.StorageKey]uint256.Int{slotA: val100, slotB: val200}
 
-	cs.ApplyWrites(state.NewVersionMapWriteView(writeSet, vm, 1), false)
+	cs.ApplyWrites(state.NewVersionMapWriteView(writeSet, vm, 1))
 
 	acc, ok := cs.accounts[addr]
 	require.True(t, ok)
@@ -1212,7 +1212,7 @@ func TestNormalizeWriteSet_StorageOnlyAddress(t *testing.T) {
 
 	cs := newTestCalcState()
 	cs.accounts[addr] = &calcAccountState{Balance: *uint256.NewInt(500), Nonce: 3, CodeHash: empty.CodeHash}
-	cs.ApplyWrites(state.NewVersionMapWriteView(writeSet, vm, 0), false)
+	cs.ApplyWrites(state.NewVersionMapWriteView(writeSet, vm, 0))
 
 	assert.Equal(t, val100, cs.storageState[addr][slotA], "storage write is applied")
 	acc, ok := cs.accounts[addr]
@@ -1241,7 +1241,7 @@ func TestNormalizeWriteSet_StorageAllNoOps(t *testing.T) {
 	cs := newTestCalcState()
 	cs.accounts[addr] = &calcAccountState{Balance: *uint256.NewInt(500), Nonce: 3, CodeHash: empty.CodeHash}
 	cs.storageState[addr] = map[accounts.StorageKey]uint256.Int{slotA: val100}
-	cs.ApplyWrites(state.NewVersionMapWriteView(writeSet, vm, 1), false)
+	cs.ApplyWrites(state.NewVersionMapWriteView(writeSet, vm, 1))
 
 	acc, ok := cs.accounts[addr]
 	require.True(t, ok)
@@ -1270,7 +1270,7 @@ func TestNormalizeWriteSet_CreateContract(t *testing.T) {
 	vm.FlushVersionedWrites(writeSet, true, "")
 
 	cs := newTestCalcState()
-	cs.ApplyWrites(state.NewVersionMapWriteView(writeSet, vm, 0), false)
+	cs.ApplyWrites(state.NewVersionMapWriteView(writeSet, vm, 0))
 	cs.ApplyEIP161Removal(true /*emptyRemoval*/, false /*isAura*/)
 
 	acc, ok := cs.accounts[addr]
@@ -1292,7 +1292,7 @@ func TestNormalizeWriteSet_NewAccount(t *testing.T) {
 	vm.FlushVersionedWrites(writeSet, true, "")
 
 	cs := newTestCalcState() // no pre-load: the account doesn't exist yet
-	cs.ApplyWrites(state.NewVersionMapWriteView(writeSet, vm, 0), false)
+	cs.ApplyWrites(state.NewVersionMapWriteView(writeSet, vm, 0))
 	cs.ApplyEIP161Removal(true, false)
 
 	acc, ok := cs.accounts[addr]
@@ -1321,7 +1321,7 @@ func TestNormalizeWriteSet_EmptyAccountRemoval(t *testing.T) {
 
 	cs := newTestCalcState()
 	cs.accounts[addr] = &calcAccountState{Balance: *uint256.NewInt(1400000000000000), Nonce: 2, CodeHash: empty.CodeHash}
-	cs.ApplyWrites(state.NewVersionMapWriteView(writeSet, vm, 5), false)
+	cs.ApplyWrites(state.NewVersionMapWriteView(writeSet, vm, 5))
 	cs.ApplyEIP161Removal(true /*emptyRemoval*/, false /*isAura*/)
 
 	acc, ok := cs.accounts[addr]
@@ -1345,7 +1345,7 @@ func TestNormalizeWriteSet_AuraSystemAddressRetained(t *testing.T) {
 
 		cs := newTestCalcState()
 		cs.accounts[params.SystemAddress] = &calcAccountState{Balance: *uint256.NewInt(1400000000000000), Nonce: 2, CodeHash: empty.CodeHash}
-		cs.ApplyWrites(state.NewVersionMapWriteView(writeSet, vm, 5), false)
+		cs.ApplyWrites(state.NewVersionMapWriteView(writeSet, vm, 5))
 		cs.ApplyEIP161Removal(true, isAura)
 		return cs.accounts[params.SystemAddress].Deleted
 	}
@@ -1405,7 +1405,7 @@ func TestNormalizeWriteSet_CodePathRecoveredFromStateReader(t *testing.T) {
 	// account's accumulated state.
 	cs := newTestCalcState()
 	cs.accounts[authority] = &calcAccountState{Nonce: 1, CodeHash: designatorHash.Value()}
-	cs.ApplyWrites(state.NewVersionMapWriteView(writeSet, vm, 5), false)
+	cs.ApplyWrites(state.NewVersionMapWriteView(writeSet, vm, 5))
 
 	acc, ok := cs.accounts[authority]
 	require.True(t, ok)
@@ -1431,7 +1431,7 @@ func TestNormalizeWriteSet_MetamorphicSameTxRecreateKeepsWrites(t *testing.T) {
 	vm.FlushVersionedWrites(ws, true, "")
 
 	cs := newTestCalcState()
-	cs.ApplyWrites(state.NewVersionMapWriteView(ws, vm, 1), false)
+	cs.ApplyWrites(state.NewVersionMapWriteView(ws, vm, 1))
 
 	acc, ok := cs.accounts[addr]
 	require.True(t, ok)
@@ -1455,7 +1455,7 @@ func TestNormalizeWriteSet_StaleIncarnationSelfDestructIgnored(t *testing.T) {
 	vm.FlushVersionedWrites(validated, true, "")
 
 	cs := newTestCalcState()
-	cs.ApplyWrites(state.NewVersionMapWriteView(validated, vm, 5), false)
+	cs.ApplyWrites(state.NewVersionMapWriteView(validated, vm, 5))
 
 	acc, ok := cs.accounts[addr]
 	require.True(t, ok)
@@ -1482,8 +1482,8 @@ func TestNormalizeWriteSet_PostSelfDestructZeroStorageDroppedViaHistory(t *testi
 		stor := newWS().stor(addr, slot, storVer, postSDValue).build()
 
 		cs := newTestCalcState()
-		cs.ApplyWrites(state.NewVersionMapWriteView(sd, vm, 2), false)
-		cs.ApplyWrites(state.NewVersionMapWriteView(stor, vm, 5), false)
+		cs.ApplyWrites(state.NewVersionMapWriteView(sd, vm, 2))
+		cs.ApplyWrites(state.NewVersionMapWriteView(stor, vm, 5))
 		return cs
 	}
 
@@ -1514,8 +1514,8 @@ func TestNormalizeWriteSet_RecreateWritesBackSlotOfDestroyingTx(t *testing.T) {
 	vm.FlushVersionedWrites(writeBack, true, "")
 
 	cs := newTestCalcState()
-	cs.ApplyWrites(state.NewVersionMapWriteView(destroy, vm, 2), false)
-	cs.ApplyWrites(state.NewVersionMapWriteView(writeBack, vm, 3), false)
+	cs.ApplyWrites(state.NewVersionMapWriteView(destroy, vm, 2))
+	cs.ApplyWrites(state.NewVersionMapWriteView(writeBack, vm, 3))
 
 	assert.Equal(t, *uint256.NewInt(77), cs.storageState[addr][slot], "the write-back over the wiped slot applies")
 	assert.True(t, cs.storageDirty[addr][slot], "the write-back reaches the commitment")
@@ -1551,9 +1551,9 @@ func TestNormalizeWriteSet_SelfDestructEarlierThenCreateContractZeroesFields(t *
 		build()
 
 	cs := newTestCalcState()
-	cs.ApplyWrites(state.NewVersionMapWriteView(pre, vm, 1), false)
-	cs.ApplyWrites(state.NewVersionMapWriteView(sd, vm, 2), false)
-	cs.ApplyWrites(state.NewVersionMapWriteView(created, vm, 5), false)
+	cs.ApplyWrites(state.NewVersionMapWriteView(pre, vm, 1))
+	cs.ApplyWrites(state.NewVersionMapWriteView(sd, vm, 2))
+	cs.ApplyWrites(state.NewVersionMapWriteView(created, vm, 5))
 
 	acc, ok := cs.accounts[addr]
 	require.True(t, ok)
@@ -1643,7 +1643,7 @@ func applyTxs(cs *calcState, txs ...*state.WriteSet) {
 	}
 	for _, ws := range txs {
 		for h := range ws.AllHeaders() {
-			cs.ApplyWrites(state.NewVersionMapWriteView(ws, vm, h.Version.TxIndex), false)
+			cs.ApplyWrites(state.NewVersionMapWriteView(ws, vm, h.Version.TxIndex))
 			break
 		}
 	}
@@ -1666,7 +1666,7 @@ func TestNormalizeWriteSet_StorageNoOpViaStateReaderPreBlock(t *testing.T) {
 
 		cs := newTestCalcState()
 		cs.storageState[addr] = map[accounts.StorageKey]uint256.Int{slot: *uint256.NewInt(100)}
-		cs.ApplyWrites(state.NewVersionMapWriteView(ws, vm, 1), false)
+		cs.ApplyWrites(state.NewVersionMapWriteView(ws, vm, 1))
 		return cs
 	}
 

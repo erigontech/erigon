@@ -50,7 +50,7 @@ func TestDestructWipe_ReaderRangeScansHiddenDestruct(t *testing.T) {
 	vm.WriteIncarnation(addr, Version{TxIndex: 1}, 1, true)
 	vm.WriteSelfDestruct(addr, Version{TxIndex: 2}, false, true) // revival hides the destruct from latest-only
 	vm.WriteAddress(addr, Version{TxIndex: 2}, &accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}, true)
-	vr := NewVersionedStateReader(3, ReadSet{}, vm, &emptyReader{}, false)
+	vr := NewVersionedStateReader(3, ReadSet{}, vm, &emptyReader{})
 	val, _, err := vr.ReadAccountStorage(addr, key)
 	require.NoError(t, err)
 	require.True(t, val.IsZero(), "slot wiped by destruct hidden under a revival must read 0, got %s", val.String())
@@ -66,7 +66,7 @@ func TestDestructWipe_ReaderKeepsPostDestructWrite(t *testing.T) {
 	vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
 	vm.WriteIncarnation(addr, Version{TxIndex: 1}, 1, true)
 	vm.WriteStorage(addr, key, Version{TxIndex: 2}, *uint256.NewInt(9), true) // revival-era write
-	vr := NewVersionedStateReader(3, ReadSet{}, vm, &emptyReader{}, false)
+	vr := NewVersionedStateReader(3, ReadSet{}, vm, &emptyReader{})
 	val, _, err := vr.ReadAccountStorage(addr, key)
 	require.NoError(t, err)
 	require.Equal(t, *uint256.NewInt(9), val, "a write above the destruct must survive the wipe")

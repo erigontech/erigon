@@ -713,7 +713,7 @@ func TestApplyVersionedWrites_BalanceWriteGeneratesBalanceRead(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xE000"))
 	reader := newAccountStateReader(addr)
 	vm := NewVersionMap(nil)
-	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, reader, false))
+	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, reader))
 	ibs.SetTxContext(1, 0)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
@@ -736,7 +736,7 @@ func TestApplyVersionedWrites_StorageWriteNoBalanceRead(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xF000"))
 	reader := newAccountStateReader(addr)
 	vm := NewVersionMap(nil)
-	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, reader, false))
+	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, reader))
 	ibs.SetTxContext(1, 0)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
@@ -764,7 +764,7 @@ func TestApplyVersionedWrites_NonceWriteNoBalanceRead(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xF100"))
 	reader := newAccountStateReader(addr)
 	vm := NewVersionMap(nil)
-	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, reader, false))
+	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, reader))
 	ibs.SetTxContext(1, 0)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
@@ -792,7 +792,7 @@ func TestApplyVersionedWrites_MultipleAccountsOnlyBalanceWriteReadsBalance(t *te
 	addrC := accounts.InternAddress(common.HexToAddress("0xF400"))
 	reader := newAccountStateReader(addrA, addrB, addrC)
 	vm := NewVersionMap(nil)
-	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, reader, false))
+	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, reader))
 	ibs.SetTxContext(1, 0)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
@@ -824,7 +824,7 @@ func TestApplyVersionedWrites_NewAccountNoBalanceRead(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xF500"))
 	vm := NewVersionMap(nil)
 	// Use minimalStateReader — returns nil for all accounts.
-	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, &minimalStateReader{}, false))
+	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, &minimalStateReader{}))
 	ibs.SetTxContext(1, 0)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
@@ -874,7 +874,7 @@ func TestAccountRead_BalancePathPromotion_DoesNotInvalidate(t *testing.T) {
 		Version{TxIndex: 0, Incarnation: 0},
 		postWithdrawalBalance, true)
 
-	ibs := New(NewVersionedStateReader(1, ReadSet{}, vm, reader, false))
+	ibs := New(NewVersionedStateReader(1, ReadSet{}, vm, reader))
 	ibs.SetTxContext(0, 1)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
@@ -925,7 +925,7 @@ func TestCreateAccount_SyntheticIncarnationStamp_DoesNotInvalidate(t *testing.T)
 		Version{TxIndex: 0, Incarnation: 0},
 		postWithdrawalBalance, true)
 
-	ibs := New(NewVersionedStateReader(1, ReadSet{}, vm, reader, false))
+	ibs := New(NewVersionedStateReader(1, ReadSet{}, vm, reader))
 	ibs.SetTxContext(0, 1)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
@@ -1022,7 +1022,7 @@ func TestGetVersionedAccount_SameTxMetamorphicRecreate_ReturnsAccount(t *testing
 	// Tx 4 reads addr. Strict-greater on subfields wouldn't see the
 	// same-TxIdx Balance/Nonce/CodeHash; the AddressPath >= destructTxIndex
 	// branch is what surfaces the re-created account.
-	ibs := New(NewVersionedStateReader(4, ReadSet{}, vm, reader, false))
+	ibs := New(NewVersionedStateReader(4, ReadSet{}, vm, reader))
 	ibs.SetTxContext(0, 4)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
@@ -1058,7 +1058,6 @@ func TestVersionedRead_EIP8246_PriorTxSelfDestructReadsAsPreserved(t *testing.T)
 		tx3.SetTxContext(0, 3)
 		tx3.SetVersion(0)
 		tx3.SetVersionMap(vm)
-		tx3.eip8246 = eip8246
 		require.NoError(t, tx3.CreateAccount(addr, true))
 		require.NoError(t, tx3.SetBalance(addr, preserved, tracing.BalanceChangeUnspecified))
 		require.NoError(t, tx3.SetCode(addr, []byte("deployed runtime code"), tracing.CodeChangeUnspecified))
@@ -1071,7 +1070,6 @@ func TestVersionedRead_EIP8246_PriorTxSelfDestructReadsAsPreserved(t *testing.T)
 		ibs.SetTxContext(0, 4)
 		ibs.SetVersion(0)
 		ibs.SetVersionMap(vm)
-		ibs.eip8246 = eip8246
 		return ibs
 	}
 
@@ -1227,7 +1225,7 @@ func TestVersionedUpdates_EstimateCellConsumed(t *testing.T) {
 	vm.WriteCodeHash(addr, ver, newCodeHash, false)
 	vm.WriteStorage(addr, key, ver, newStorage, false)
 
-	vr := NewVersionedStateReader(5, ReadSet{}, vm, nil, false)
+	vr := NewVersionedStateReader(5, ReadSet{}, vm, nil)
 
 	stale := accounts.NewAccount()
 	stale.Balance = *uint256.NewInt(0x01)
@@ -1499,7 +1497,7 @@ func TestApplyVersionedWrites_SelfDestructDominatesCreateContract(t *testing.T) 
 
 	addr := accounts.InternAddress(common.HexToAddress("0xF600"))
 	vm := NewVersionMap(nil)
-	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, &minimalStateReader{}, false))
+	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, &minimalStateReader{}))
 	ibs.SetTxContext(1, 0)
 	ibs.SetVersionMap(vm)
 

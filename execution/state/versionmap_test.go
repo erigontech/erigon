@@ -900,7 +900,7 @@ func TestGetCodeAfterDestructThenRevivalIsEmpty(t *testing.T) {
 	writeFor(vm, addr, IncarnationPath, accounts.NilKey, Version{TxIndex: 2}, uint64(2), true)
 
 	reader := newAccountStateReader(addr)
-	ibs := NewWithVersionMap(NewVersionedStateReader(3, ReadSet{}, vm, reader, false), vm)
+	ibs := NewWithVersionMap(NewVersionedStateReader(3, ReadSet{}, vm, reader), vm)
 	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(0, 3)
 	ibs.SetVersion(0)
@@ -1268,7 +1268,6 @@ func TestCodeHashReadAfterSelfDestruct(t *testing.T) {
 			t.Cleanup(ibs.Close)
 			ibs.SetNoMaterialize(true)
 			ibs.SetTxContext(1, 2)
-			ibs.eip8246 = tc.eip8246
 			codeHash, err := ibs.GetCodeHash(addr)
 			require.NoError(t, err)
 			require.Equal(t, accounts.EmptyCodeHash, codeHash)
