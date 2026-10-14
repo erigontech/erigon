@@ -386,3 +386,17 @@ func TestResourceManagerStaticPeerInTrustedNetworkKeepsTrustedLimit(t *testing.T
 		require.NoError(t, o.open("/ip4/203.0.113.7"))
 	}
 }
+
+// A static peer on loopback must not replace go-libp2p's unlimited loopback entry with a cap.
+func TestResourceManagerDoesNotCapLoopbackStaticPeers(t *testing.T) {
+	netCfg := &clparams.NetworkConfig{StaticPeers: []string{
+		staticPeer(t, "ip4", "127.0.0.1"),
+		staticPeer(t, "ip6", "::1"),
+	}}
+	o := newConnOpenerWithConfig(t, &P2PConfig{MaxPeerCount: testMaxPeerCount, NetworkConfig: netCfg})
+	for _, addr := range []string{"/ip4/127.0.0.1", "/ip6/::1"} {
+		for range 20 {
+			require.NoError(t, o.open(addr), addr)
+		}
+	}
+}

@@ -221,8 +221,8 @@ func exemptNetworkConnLimit(maxPeerCount uint64) int {
 }
 
 // staticPeerPrefixes returns the per-address prefixes (IPv4 /32, IPv6 /56, as go-libp2p counts
-// them) of the static peers that no exempt network contains: the most specific prefix matches
-// first, so an entry inside an exempt network would lower that network's allowance. Peers given
+// them) of the static peers outside loopback and the exempt networks: the most specific prefix
+// matches first, so an entry inside one would lower that network's allowance. Peers given
 // by DNS name are skipped; invalid ones are reported when the sentinel dials them.
 func staticPeerPrefixes(staticPeers []string, exempt []netip.Prefix) []netip.Prefix {
 	var out []netip.Prefix
@@ -241,6 +241,9 @@ func staticPeerPrefixes(staticPeers []string, exempt []netip.Prefix) []netip.Pre
 				continue
 			}
 			addr = addr.Unmap()
+			if addr.IsLoopback() {
+				continue
+			}
 			bits := 32
 			if addr.Is6() {
 				bits = 56
