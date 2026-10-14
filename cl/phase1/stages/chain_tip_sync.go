@@ -986,10 +986,14 @@ func ensureStoredParentPayloadAccepted(
 		return false
 	}
 	if !canValidateGloasPayloads(cfg) || elSkipsValidation(ctx, cfg.executionClient, envelope.Message.Payload.BlockNumber) {
+		status := execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated)
+		if canValidateGloasPayloads(cfg) {
+			status = skippedValidationStatus(cfg, envelope)
+		}
 		status, retained := store.MarkPayloadStatusAndGasLimitIfRetained(
 			root,
 			envelope.Message.Payload.BlockHash,
-			execution_client.PayloadStatusNotValidated,
+			status,
 			envelope.Message.Payload.GasLimit,
 		)
 		return retained && (status == execution_client.PayloadStatusNotValidated || status == execution_client.PayloadStatusValidated)
@@ -1053,6 +1057,18 @@ func elValidationDepth(ctx context.Context, el execution_client.ExecutionEngine)
 		return 0, false
 	}
 	return depthEL.SkipsValidationBelow(ctx)
+}
+
+// skippedValidationStatus is the status a payload below the EL's validation depth gets without the
+// call: NotValidated, or Invalidated when it fails the checks the EL makes before that answer.
+func skippedValidationStatus(cfg *Cfg, envelope *cltypes.SignedExecutionPayloadEnvelope) execution_client.PayloadStatus {
+	message := envelope.Message
+	requests := gloasExecutionRequestsList(cfg.beaconCfg, message.ExecutionRequests)
+	if err := execution_client.CheckPayloadBeforeInsertion(message.Payload, &message.ParentBeaconBlockRoot, requests); err != nil {
+		log.Warn("[chainTipSync] invalid GLOAS payload below the EL validation depth", "blockRoot", message.BeaconBlockRoot, "err", err)
+		return execution_client.PayloadStatusInvalidated
+	}
+	return execution_client.PayloadStatusNotValidated
 }
 
 // elSkipsValidation reports a block the EL answers NotValidated without validating.
@@ -1120,7 +1136,7 @@ func drainPendingGloasPayloads(ctx context.Context, cfg *Cfg) {
 		}
 		payload := p.Envelope.Message.Payload
 		if elSkipsValidation(ctx, cfg.executionClient, payload.BlockNumber) {
-			cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(beaconRoot, payload.BlockHash, execution_client.PayloadStatusNotValidated, payload.GasLimit)
+			cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(beaconRoot, payload.BlockHash, skippedValidationStatus(cfg, p.Envelope), payload.GasLimit)
 			continue
 		}
 		status, err := retryGloasPayloadWithEL(ctx, cfg, p.Block, p.Envelope)
@@ -1293,8 +1309,11 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 			return true
 		}
 		if elSkipsValidation(ctx, cfg.executionClient, envelope.Message.Payload.BlockNumber) {
-			cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(item.root, execHash, execution_client.PayloadStatusNotValidated, envelope.Message.Payload.GasLimit)
-			cfg.gloasSkippedValidation[item.root] = skippedValidation{slot: item.block.Block.Slot, blockNumber: envelope.Message.Payload.BlockNumber}
+			status := skippedValidationStatus(cfg, envelope)
+			cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(item.root, execHash, status, envelope.Message.Payload.GasLimit)
+			if status == execution_client.PayloadStatusNotValidated {
+				cfg.gloasSkippedValidation[item.root] = skippedValidation{slot: item.block.Block.Slot, blockNumber: envelope.Message.Payload.BlockNumber}
+			}
 			return true
 		}
 		status, err := retryGloasPayloadWithEL(ctx, cfg, item.block, envelope)
@@ -1363,7 +1382,11 @@ func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
 		return
 	}
 	if elSkipsValidation(ctx, cfg.executionClient, envelope.Message.Payload.BlockNumber) {
-		return // the anchor keeps the NotValidated status StoreAnchorEnvelope recorded
+		// The anchor keeps the NotValidated status StoreAnchorEnvelope recorded, unless it is invalid.
+		if skippedValidationStatus(cfg, envelope) == execution_client.PayloadStatusInvalidated {
+			cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(anchorRoot, envelope.Message.Payload.BlockHash, execution_client.PayloadStatusInvalidated, envelope.Message.Payload.GasLimit)
+		}
+		return
 	}
 	anchorState, err := cfg.forkChoice.GetStateAtBlockRoot(anchorRoot, true)
 	if err != nil || anchorState == nil {

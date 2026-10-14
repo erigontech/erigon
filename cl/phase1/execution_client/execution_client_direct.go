@@ -64,28 +64,12 @@ func (cc *ExecutionClientDirect) NewPayload(
 		return PayloadStatusValidated, nil
 	}
 
-	var requestsHash common.Hash
-	if payload.Version() >= clparams.ElectraVersion {
-		requestsHash = cltypes.ComputeExecutionRequestHash(executionRequestsList)
-	}
-
-	bal, err := DecodeAndValidateBlockAccessList(payload)
-	if err != nil {
-		return PayloadStatusInvalidated, err
-	}
-
-	header, err := payload.RlpHeader(beaconParentRoot, requestsHash, bal)
+	header, txs, bal, err := decodePayloadForInsertion(payload, beaconParentRoot, executionRequestsList)
 	if err != nil {
 		// invalid block
 		return PayloadStatusInvalidated, err
 	}
-
 	body := payload.Body()
-	txs, err := types.DecodeTransactions(body.Transactions)
-	if err != nil {
-		// invalid block
-		return PayloadStatusInvalidated, err
-	}
 
 	startInsertBlock := time.Now()
 	if err := cc.chainRW.InsertBlock(ctx, types.NewBlockFromStorageWithBinaryTxs(payload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals, bal)); err != nil {
@@ -209,6 +193,33 @@ func retryAssembleBlock(ctx context.Context, attempts int, delay time.Duration, 
 		}
 	}
 	return 0, err
+}
+
+// CheckPayloadBeforeInsertion runs the checks NewPayload makes before it inserts the block: the
+// block access list, the header and its block hash, and the transactions. A failure means INVALID.
+func CheckPayloadBeforeInsertion(payload *cltypes.Eth1Block, beaconParentRoot *common.Hash, executionRequestsList []hexutil.Bytes) error {
+	_, _, _, err := decodePayloadForInsertion(payload, beaconParentRoot, executionRequestsList)
+	return err
+}
+
+func decodePayloadForInsertion(payload *cltypes.Eth1Block, beaconParentRoot *common.Hash, executionRequestsList []hexutil.Bytes) (*types.Header, []types.Transaction, *types.BlockAccessListSidecar, error) {
+	var requestsHash common.Hash
+	if payload.Version() >= clparams.ElectraVersion {
+		requestsHash = cltypes.ComputeExecutionRequestHash(executionRequestsList)
+	}
+	bal, err := DecodeAndValidateBlockAccessList(payload)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	header, err := payload.RlpHeader(beaconParentRoot, requestsHash, bal)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	txs, err := types.DecodeTransactions(payload.Body().Transactions)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return header, txs, bal, nil
 }
 
 // SkipsValidationBelow returns the block number below which NewPayload answers NotValidated

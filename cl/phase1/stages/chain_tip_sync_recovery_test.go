@@ -391,6 +391,7 @@ func TestVerifyUnverifiedGloasPayloadsSkipsPayloadsBelowTheELValidationDepth(t *
 	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
 	headBlock := graph.parents[headRoot]
 	payload := graph.envelopes[headRoot].Message.Payload
+	deriveBlockHash(t, cfg.beaconCfg, graph.envelopes[headRoot])
 	delete(graph.parents, headRoot)
 	graph.insertOnAdd = true
 	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
@@ -415,6 +416,29 @@ func TestVerifyUnverifiedGloasPayloadsSkipsPayloadsBelowTheELValidationDepth(t *
 	cfg.executionClient = validationDepthEngine{testExecutionEngine: engine, below: payload.BlockNumber}
 	verifyUnverifiedGloasPayloads(t.Context(), cfg)
 	require.Equal(t, 1, engine.newPayloadCalls)
+	require.NotContains(t, cfg.gloasSkippedValidation, headRoot)
+}
+
+// Below the validation depth the EL is not asked, but the checks it makes before answering still
+// apply: a payload whose block access list is malformed is invalid, not NotValidated.
+func TestVerifyUnverifiedGloasPayloadsInvalidatesAMalformedPayloadBelowTheELValidationDepth(t *testing.T) {
+	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	headBlock := graph.parents[headRoot]
+	payload := graph.envelopes[headRoot].Message.Payload
+	payload.BlockAccessList = solid.NewByteListSSZ(cfg.beaconCfg.MaxBytesPerTransaction)
+	require.NoError(t, payload.BlockAccessList.SetBytes([]byte{0xff, 0xff, 0xff}))
+	delete(graph.parents, headRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
+	cfg.gloasVerificationCursor = headRoot
+	cfg.executionClient = validationDepthEngine{testExecutionEngine: engine, below: payload.BlockNumber + 1}
+
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+
+	require.Zero(t, engine.newPayloadCalls)
+	status, found := cfg.forkChoice.GetRecentExecutionPayloadStatusByRoot(headRoot)
+	require.True(t, found)
+	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
 	require.NotContains(t, cfg.gloasSkippedValidation, headRoot)
 }
 
@@ -1106,10 +1130,14 @@ func TestEnsureStoredParentPayloadAcceptedSkipsTheELBelowItsValidationDepth(t *t
 	root := common.Hash{1}
 	payload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
 	payload.BlockNumber = 10
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = &solid.TransactionsSSZ{}
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
 		BeaconBlockRoot: root,
 		Payload:         payload,
 	}}
+	deriveBlockHash(t, &clparams.MainnetBeaconConfig, envelope)
 	store := &storedParentPayloadTestStore{
 		has:          true,
 		block:        cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion),

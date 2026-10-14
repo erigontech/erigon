@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/builder"
@@ -188,4 +189,28 @@ func TestDirectNewPayloadReportsAnEndedContextAsNoVerdict(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	require.EqualValues(t, PayloadStatusNone, status)
 	require.True(t, ValidationInterrupted(ctx, status, err))
+}
+
+// The checks the direct client makes before inserting a payload fail for a malformed block access
+// list and for a block hash the payload does not derive.
+func TestCheckPayloadBeforeInsertion(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	parentRoot := common.Hash{0x11}
+	valid := func() *cltypes.Eth1Block {
+		payload := gloas(cfg, nil)
+		var err error
+		payload.BlockHash, err = payload.ComputeBlockHash(&parentRoot, cltypes.ComputeExecutionRequestHash(nil), nil)
+		require.NoError(t, err)
+		return payload
+	}
+	require.NoError(t, CheckPayloadBeforeInsertion(valid(), &parentRoot, nil))
+
+	malformedBAL := valid()
+	malformedBAL.BlockAccessList = solid.NewByteListSSZ(cfg.MaxBytesPerTransaction)
+	require.NoError(t, malformedBAL.BlockAccessList.SetBytes([]byte{0xff, 0xff, 0xff}))
+	require.Error(t, CheckPayloadBeforeInsertion(malformedBAL, &parentRoot, nil))
+
+	wrongHash := valid()
+	wrongHash.BlockHash = common.Hash{0x99}
+	require.Error(t, CheckPayloadBeforeInsertion(wrongHash, &parentRoot, nil))
 }

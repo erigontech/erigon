@@ -1211,10 +1211,28 @@ func TestDrainPendingGloasPayloadsDoesNotRequeueBelowTheELValidationDepth(t *tes
 
 // The anchor retry does not ask the EL about an anchor it does not validate; the anchor keeps the
 // NotValidated status it was stored with.
+// deriveBlockHash gives the envelope's payload the block hash it derives, as a well-formed payload
+// has, and returns it.
+func deriveBlockHash(t *testing.T, cfg *clparams.BeaconChainConfig, envelope *cltypes.SignedExecutionPayloadEnvelope) common.Hash {
+	t.Helper()
+	message := envelope.Message
+	if message.Payload.BlockAccessList != nil && message.Payload.BlockAccessList.Len() == 0 {
+		require.NoError(t, message.Payload.BlockAccessList.SetBytes([]byte{0xc0})) // an empty access list
+	}
+	bal, err := execution_client.DecodeAndValidateBlockAccessList(message.Payload)
+	require.NoError(t, err)
+	requestsHash := cltypes.ComputeExecutionRequestHash(gloasExecutionRequestsList(cfg, message.ExecutionRequests))
+	hash, err := message.Payload.ComputeBlockHash(&message.ParentBeaconBlockRoot, requestsHash, bal)
+	require.NoError(t, err)
+	message.Payload.BlockHash = hash
+	return hash
+}
+
 func TestRetryUnverifiedAnchorPayloadSkipsPayloadsBelowTheELValidationDepth(t *testing.T) {
 	cfg, st, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
 	cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch = 0, 0, 0
 	cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch = 0, 0, 0
+	bid.BlockHash = deriveBlockHash(t, cfg, env)
 	st.SetLatestExecutionPayloadBid(bid)
 	anchorRoot, err := st.BlockRoot()
 	require.NoError(t, err)
