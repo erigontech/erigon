@@ -1407,3 +1407,24 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 	c.largest = max(c.largest, len(p))
 	return c.w.Write(p)
 }
+
+type hexList [][]byte
+
+func (l hexList) MarshalFastJSONTo(s *Stream) error { WriteHexBytes(s, l); return nil }
+
+// MarshalTo is Marshal with a destination: same bytes, but a large value streams to the
+// writer instead of being held and copied.
+func TestMarshalToStreamsWhatMarshalBuffers(t *testing.T) {
+	l := make(hexList, 100_000)
+	for i := range l {
+		l[i] = []byte{byte(i), byte(i >> 8), 0xff}
+	}
+	want, err := Marshal(l)
+	require.NoError(t, err)
+
+	var got bytes.Buffer
+	out := &countingWriter{w: &got}
+	require.NoError(t, MarshalTo(out, l))
+	require.Equal(t, string(want), got.String())
+	require.Less(t, out.largest, 2*FlushThreshold)
+}
