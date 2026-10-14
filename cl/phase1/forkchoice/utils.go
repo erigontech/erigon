@@ -322,6 +322,12 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 	return checkpointState, nil
 }
 
+// LoadJustifiedCheckpointState loads the current justified checkpoint state into the cache.
+func (f *ForkChoiceStore) LoadJustifiedCheckpointState() error {
+	_, err := f.getCheckpointState(f.justifiedCheckpoint.Load().(solid.Checkpoint))
+	return err
+}
+
 func getUnslashedActiveBalance(beaconState *state.CachingBeaconState) uint64 {
 	epoch := state.Epoch(beaconState)
 	var total uint64
