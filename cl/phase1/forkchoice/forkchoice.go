@@ -1067,14 +1067,8 @@ func (f *ForkChoiceStore) markPayloadStatus(
 		}
 	}
 	if f.executionPayloadStatus != nil {
-		// An EL verdict belongs to the payload hash, whichever beacon root recorded it.
-		if executionStatus, ok := f.executionPayloadStatus.Get(executionBlockHash); ok {
-			switch {
-			case executionStatus == execution_client.PayloadStatusInvalidated:
-				effective = execution_client.PayloadStatusInvalidated
-			case executionStatus == execution_client.PayloadStatusValidated && effective != execution_client.PayloadStatusInvalidated:
-				effective = execution_client.PayloadStatusValidated
-			}
+		if executionStatus, ok := f.executionPayloadStatus.Get(executionBlockHash); ok && executionStatus == execution_client.PayloadStatusInvalidated {
+			effective = execution_client.PayloadStatusInvalidated
 		}
 	}
 	current, known := f.payloadStatusAuthorityWithRetention(blockRoot, isRetained != nil)
@@ -1139,7 +1133,10 @@ func (f *ForkChoiceStore) markPayloadStatus(
 		f.verifiedExecutionPayloadHashes.Add(blockRoot, executionBlockHash)
 	}
 	if f.executionPayloadStatus != nil {
-		f.executionPayloadStatus.Add(executionBlockHash, effective)
+		// A sibling root's weaker answer for the same hash does not lower a Validated entry.
+		if executionStatus, ok := f.executionPayloadStatus.Get(executionBlockHash); !ok || executionStatus != execution_client.PayloadStatusValidated || effective == execution_client.PayloadStatusInvalidated {
+			f.executionPayloadStatus.Add(executionBlockHash, effective)
+		}
 	}
 	if f.payloadStatusByRoot != nil {
 		f.payloadStatusByRoot.Add(blockRoot, effective)

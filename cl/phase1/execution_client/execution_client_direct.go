@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
@@ -64,28 +65,12 @@ func (cc *ExecutionClientDirect) NewPayload(
 		return PayloadStatusValidated, nil
 	}
 
-	var requestsHash common.Hash
-	if payload.Version() >= clparams.ElectraVersion {
-		requestsHash = cltypes.ComputeExecutionRequestHash(executionRequestsList)
-	}
-
-	bal, err := DecodeAndValidateBlockAccessList(payload)
-	if err != nil {
-		return PayloadStatusInvalidated, err
-	}
-
-	header, err := payload.RlpHeader(beaconParentRoot, requestsHash, bal)
+	header, txs, bal, err := decodePayloadForInsertion(payload, beaconParentRoot, executionRequestsList)
 	if err != nil {
 		// invalid block
 		return PayloadStatusInvalidated, err
 	}
-
 	body := payload.Body()
-	txs, err := types.DecodeTransactions(body.Transactions)
-	if err != nil {
-		// invalid block
-		return PayloadStatusInvalidated, err
-	}
 
 	startInsertBlock := time.Now()
 	if err := cc.chainRW.InsertBlock(ctx, types.NewBlockFromStorageWithBinaryTxs(payload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals, bal)); err != nil {
@@ -97,13 +82,15 @@ func (cc *ExecutionClientDirect) NewPayload(
 	monitor.ObserveExecutionClientInsertingBlocks(startInsertBlock)
 
 	headHeader := cc.chainRW.CurrentHeader(ctx)
+	if headHeader == nil && ctx.Err() != nil {
+		return PayloadStatusNone, ctx.Err()
+	}
 	if headHeader == nil || header.Number.Uint64() > headHeader.Number.Uint64()+1 {
 		// can't validate yet
 		return PayloadStatusNotValidated, nil
 	}
 
-	// check if the block is too deep in the reorg accounting for underflow
-	if headHeader.Number.Uint64() > reorgTooDeepDepth && header.Number.Uint64() < headHeader.Number.Uint64()-reorgTooDeepDepth {
+	if below, ok := notValidatedBelow(headHeader); ok && header.Number.Uint64() < below {
 		// reorg too deep
 		return PayloadStatusNotValidated, nil
 	}
@@ -209,10 +196,53 @@ func retryAssembleBlock(ctx context.Context, attempts int, delay time.Duration, 
 	return 0, err
 }
 
-// FinalNotValidatedBelow returns the block number below which NewPayload answers NotValidated
-// without validating, being more than reorgTooDeepDepth below the current head.
-func (cc *ExecutionClientDirect) FinalNotValidatedBelow(ctx context.Context) (uint64, bool) {
-	head := cc.chainRW.CurrentHeader(ctx)
+// CheckPayloadBeforeInsertion runs the checks the direct client makes before and while inserting a
+// block: the block access list, the header and its block hash, the transactions and, with a chain
+// config, the maximum RLP size. A failure means INVALID.
+func CheckPayloadBeforeInsertion(chainConfig *chain.Config, payload *cltypes.Eth1Block, beaconParentRoot *common.Hash, executionRequestsList []hexutil.Bytes) error {
+	header, txs, bal, err := decodePayloadForInsertion(payload, beaconParentRoot, executionRequestsList)
+	if err != nil || chainConfig == nil {
+		return err
+	}
+	body := payload.Body()
+	block := types.NewBlockFromStorageWithBinaryTxs(payload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals, bal)
+	return types.RawBlock{Header: block.HeaderNoCopy(), Body: block.RawBody()}.ValidateMaxRlpSize(chainConfig)
+}
+
+// CheckPayloadBeforeInsertion runs CheckPayloadBeforeInsertion with the EL's chain config.
+func (cc *ExecutionClientDirect) CheckPayloadBeforeInsertion(payload *cltypes.Eth1Block, beaconParentRoot *common.Hash, executionRequestsList []hexutil.Bytes) error {
+	return CheckPayloadBeforeInsertion(cc.chainRW.Config(), payload, beaconParentRoot, executionRequestsList)
+}
+
+func decodePayloadForInsertion(payload *cltypes.Eth1Block, beaconParentRoot *common.Hash, executionRequestsList []hexutil.Bytes) (*types.Header, []types.Transaction, *types.BlockAccessListSidecar, error) {
+	var requestsHash common.Hash
+	if payload.Version() >= clparams.ElectraVersion {
+		requestsHash = cltypes.ComputeExecutionRequestHash(executionRequestsList)
+	}
+	bal, err := DecodeAndValidateBlockAccessList(payload)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	header, err := payload.RlpHeader(beaconParentRoot, requestsHash, bal)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	txs, err := types.DecodeTransactions(payload.Body().Transactions)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return header, txs, bal, nil
+}
+
+// SkipsValidationBelow returns the block number below which NewPayload answers NotValidated
+// without validating. It follows the EL head.
+func (cc *ExecutionClientDirect) SkipsValidationBelow(ctx context.Context) (uint64, bool) {
+	return notValidatedBelow(cc.chainRW.CurrentHeader(ctx))
+}
+
+// notValidatedBelow returns the block number below which a block is more than reorgTooDeepDepth
+// below head, too deep to validate.
+func notValidatedBelow(head *types.Header) (uint64, bool) {
 	if head == nil || head.Number.Uint64() <= reorgTooDeepDepth {
 		return 0, false
 	}

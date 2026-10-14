@@ -3313,6 +3313,8 @@ func TestExecutionPayloadAdmissionCancellationTransfersPendingOwnership(t *testi
 			}
 			require.ErrorIs(t, err, ErrPayloadValidationInterrupted)
 			require.ErrorIs(t, err, context.Canceled)
+			// Not an IGNORE: the REST publication of the proposer's own envelope takes the 202 + publish path.
+			require.NotErrorIs(t, err, ErrIgnore)
 			origin := pending
 			if local {
 				origin = pendingLocal
@@ -3375,6 +3377,73 @@ func TestExecutionPayloadApplyInFlightEndsWithARejectedEnvelope(t *testing.T) {
 
 	require.False(t, f.ExecutionPayloadApplyInFlight(root))
 	require.True(t, f.ExecutionPayloadReceivedBefore(root, time.Now().Add(time.Second)), "the arrival stays recorded")
+}
+
+// availabilityRecordingForkGraph keeps the payload availability fork choice marks.
+type availabilityRecordingForkGraph struct {
+	*persistingEnvelopeForkGraph
+	unavailable map[common.Hash]bool
+}
+
+func (g availabilityRecordingForkGraph) IsPayloadUnavailable(root common.Hash) bool {
+	return g.unavailable[root]
+}
+
+func (g availabilityRecordingForkGraph) MarkPayloadAvailable(root common.Hash) {
+	delete(g.unavailable, root)
+}
+
+func (g availabilityRecordingForkGraph) MarkPayloadUnavailable(root common.Hash) {
+	g.unavailable[root] = true
+}
+
+// A NewPayload whose context ends inside the EL call is no verdict: the envelope stays pending
+// and no status is recorded, where recording None would hide a locally available payload.
+func TestExecutionPayloadInterruptedInsideTheELCallStaysPending(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, _ *cltypes.Eth1Block, _ *common.Hash, _ []common.Hash, _ []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+			cancel()
+			return execution_client.PayloadStatusNone, ctx.Err()
+		})
+	byHash, err := lru.New[common.Hash, execution_client.PayloadStatus](queueCacheSize)
+	require.NoError(t, err)
+	byRoot, err := lru.New[common.Hash, execution_client.PayloadStatus](queueCacheSize)
+	require.NoError(t, err)
+	graph := availabilityRecordingForkGraph{
+		persistingEnvelopeForkGraph: &persistingEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}},
+		unavailable:                 map[common.Hash]bool{},
+	}
+	f := &ForkChoiceStore{
+		beaconCfg:              cfg,
+		engine:                 engine,
+		forkGraph:              graph,
+		pendingEnvelopes:       pending,
+		executionPayloadStatus: byHash,
+		payloadStatusByRoot:    byRoot,
+		optimisticStore:        optimistic.NewOptimisticStore(),
+	}
+	f.executionPayloadGasLimit, err = lru.New[common.Hash, uint64](queueCacheSize)
+	require.NoError(t, err)
+	f.eth2Roots, err = lru.New[common.Hash, common.Hash](queueCacheSize)
+	require.NoError(t, err)
+	f.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 9})
+	root := envelope.Message.BeaconBlockRoot
+
+	err = f.OnExecutionPayload(ctx, envelope, false, true)
+
+	require.ErrorIs(t, err, ErrPayloadValidationInterrupted)
+	queued, ok := pending.Peek(root)
+	require.True(t, ok)
+	require.Same(t, envelope, queued)
+	_, recorded := f.GetRecentExecutionPayloadStatusByRoot(root)
+	require.False(t, recorded)
+	require.False(t, graph.IsPayloadUnavailable(root))
+	require.False(t, graph.HasEnvelope(root))
 }
 
 func TestLocalSelfBuildPersistenceFailureIsRetryable(t *testing.T) {

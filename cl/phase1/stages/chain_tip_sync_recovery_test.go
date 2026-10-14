@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -49,10 +48,10 @@ func (v *orderedPayloadValidator) NewPayloadWithAdmission(ctx context.Context, p
 	v.calls = append(v.calls, payload.BlockHash)
 	if payload.BlockHash == v.slow {
 		<-ctx.Done()
-		return execution_client.PayloadStatusNone, ctx.Err()
+		return admitted(ctx)(execution_client.PayloadStatusNone, ctx.Err())
 	}
 	if err := ctx.Err(); err != nil {
-		return execution_client.PayloadStatusNone, err
+		return admitted(ctx)(execution_client.PayloadStatusNone, err)
 	}
 	return execution_client.PayloadStatusNotValidated, nil
 }
@@ -76,6 +75,7 @@ type chainTipBatchForkGraph struct {
 	envelopes   map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	added       map[common.Hash]int
 	insertOnAdd bool
+	envReads    map[common.Hash]int
 }
 
 type chainTipBatchEnvelopeSentinel struct {
@@ -145,8 +145,12 @@ func (g *chainTipBatchForkGraph) HasEnvelope(root common.Hash) bool {
 }
 
 func (g *chainTipBatchForkGraph) ReadEnvelopeFromDisk(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
-	g.envelopesMu.RLock()
-	defer g.envelopesMu.RUnlock()
+	g.envelopesMu.Lock()
+	defer g.envelopesMu.Unlock()
+	if g.envReads == nil {
+		g.envReads = map[common.Hash]int{}
+	}
+	g.envReads[root]++
 	if envelope, ok := g.envelopes[root]; ok {
 		return envelope, nil
 	}
@@ -361,6 +365,8 @@ func TestVerifyUnverifiedGloasPayloadsDoesNotRecordTimeoutAsVerdict(t *testing.T
 		return execution_client.PayloadStatusNone, ctx.Err()
 	}
 	cfg.gloasVerificationCursor = headRoot
+	// Through the store's own admission, which classifies the interrupted call.
+	cfg.gloasPayloadValidator = cfg.forkChoice
 
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer cancel()
@@ -381,15 +387,16 @@ func TestVerifyUnverifiedGloasPayloadsDoesNotRecordTimeoutAsVerdict(t *testing.T
 	require.Zero(t, cfg.gloasVerificationCursor)
 }
 
-func TestVerifyUnverifiedGloasPayloadsSkipsAFinalNotValidated(t *testing.T) {
+func TestVerifyUnverifiedGloasPayloadsSkipsPayloadsBelowTheELValidationDepth(t *testing.T) {
 	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
 	headBlock := graph.parents[headRoot]
 	payload := graph.envelopes[headRoot].Message.Payload
+	deriveBlockHash(t, cfg.beaconCfg, graph.envelopes[headRoot])
 	delete(graph.parents, headRoot)
 	graph.insertOnAdd = true
 	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
 	cfg.gloasVerificationCursor = headRoot
-	cfg.executionClient = finalNotValidatedEngine{testExecutionEngine: engine, below: payload.BlockNumber + 1}
+	cfg.executionClient = validationDepthEngine{testExecutionEngine: engine, below: payload.BlockNumber + 1}
 
 	verifyUnverifiedGloasPayloads(t.Context(), cfg)
 
@@ -398,6 +405,57 @@ func TestVerifyUnverifiedGloasPayloadsSkipsAFinalNotValidated(t *testing.T) {
 	require.True(t, found)
 	require.EqualValues(t, execution_client.PayloadStatusNotValidated, status)
 	require.Empty(t, cfg.forkChoice.DrainPendingELPayloads())
+
+	// A later pass stops at the root while it is still below the depth, without reading it again.
+	reads := graph.envReads[headRoot]
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+	require.Equal(t, reads, graph.envReads[headRoot])
+	require.Contains(t, cfg.gloasSkippedValidation, headRoot)
+
+	// The depth follows the EL head; once the payload is back above it, the root is checked again.
+	cfg.executionClient = validationDepthEngine{testExecutionEngine: engine, below: payload.BlockNumber}
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+	require.Equal(t, 1, engine.newPayloadCalls)
+	require.NotContains(t, cfg.gloasSkippedValidation, headRoot)
+}
+
+// Below the validation depth the EL is not asked, but the checks it makes before answering still
+// apply: a payload whose block access list is malformed is invalid, not NotValidated.
+func TestVerifyUnverifiedGloasPayloadsInvalidatesAMalformedPayloadBelowTheELValidationDepth(t *testing.T) {
+	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	headBlock := graph.parents[headRoot]
+	payload := graph.envelopes[headRoot].Message.Payload
+	payload.BlockAccessList = solid.NewByteListSSZ(cfg.beaconCfg.MaxBytesPerTransaction)
+	require.NoError(t, payload.BlockAccessList.SetBytes([]byte{0xff, 0xff, 0xff}))
+	delete(graph.parents, headRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
+	cfg.gloasVerificationCursor = headRoot
+	cfg.executionClient = validationDepthEngine{testExecutionEngine: engine, below: payload.BlockNumber + 1}
+
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+
+	require.Zero(t, engine.newPayloadCalls)
+	status, found := cfg.forkChoice.GetRecentExecutionPayloadStatusByRoot(headRoot)
+	require.True(t, found)
+	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
+	require.NotContains(t, cfg.gloasSkippedValidation, headRoot)
+}
+
+// The roots recorded below the EL's validation depth are forgotten once finalized.
+func TestVerifyUnverifiedGloasPayloadsPrunesSkippedRootsAtFinalization(t *testing.T) {
+	cfg, _, _, _, _, _ := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	finalizedSlot := cfg.forkChoice.FinalizedSlot()
+	finalized, live := common.Hash{0xf1}, common.Hash{0xf2}
+	cfg.gloasSkippedValidation = map[common.Hash]skippedValidation{
+		finalized: {slot: finalizedSlot},
+		live:      {slot: finalizedSlot + 1},
+	}
+
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+
+	require.NotContains(t, cfg.gloasSkippedValidation, finalized)
+	require.Contains(t, cfg.gloasSkippedValidation, live)
 }
 
 func TestVerifyUnverifiedGloasPayloadsChecksDirectExtensionWithEmptyCursor(t *testing.T) {
@@ -969,7 +1027,7 @@ func TestStoredParentPayloadReplayReservesBudgetForLaterRoots(t *testing.T) {
 	secondStore := &storedParentPayloadTestStore{has: true, block: block, markRetained: true}
 	validator := &orderedPayloadValidator{slow: firstPayload.BlockHash}
 	replay := storedParentPayloadReplay{
-		deadline:  time.Now().Add(time.Second),
+		deadline:  time.Now().Add(100 * time.Millisecond),
 		remaining: 2,
 		results:   make(map[common.Hash]bool),
 	}
@@ -988,25 +1046,6 @@ func TestStoredParentPayloadReplayReservesBudgetForLaterRoots(t *testing.T) {
 		Payload:         secondPayload,
 	}}, nil))
 	require.Equal(t, []common.Hash{firstPayload.BlockHash, secondPayload.BlockHash}, validator.calls)
-}
-
-// An apply cut short by its context is no verdict, so the replay still validates the parent.
-func TestStoredParentPayloadReplayRetriesAnInterruptedApply(t *testing.T) {
-	root := common.Hash{1}
-	payload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
-	payload.BlockHash = common.Hash{3}
-	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
-	store := &storedParentPayloadTestStore{has: true, block: block, markRetained: true}
-	validator := &orderedPayloadValidator{}
-	replay := storedParentPayloadReplay{deadline: time.Now().Add(time.Second), remaining: 1, results: make(map[common.Hash]bool)}
-	cfg := &Cfg{beaconCfg: &clparams.MainnetBeaconConfig, executionClient: &testExecutionEngine{}, gloasPayloadValidator: validator}
-	interrupted := fmt.Errorf("%w: %w", forkchoice.ErrPayloadValidationInterrupted, context.DeadlineExceeded)
-
-	require.True(t, replay.accepted(t.Context(), cfg, store, root, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
-		BeaconBlockRoot: root,
-		Payload:         payload,
-	}}, interrupted))
-	require.Equal(t, []common.Hash{payload.BlockHash}, validator.calls)
 }
 
 func TestStoredParentPayloadReplayRejectsApplyFailure(t *testing.T) {
@@ -1068,11 +1107,13 @@ func TestStoredParentPayloadReplayWithoutVerdictKeepsStatus(t *testing.T) {
 
 	t.Run("deadline during validation", func(t *testing.T) {
 		store := newStore()
-		engine := &testExecutionEngine{newPayloadFn: func(ctx context.Context, _ *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
+		// The EL call goes through a real store's admission, which classifies the interrupted call.
+		fixture, _, _, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+		engine.newPayloadFn = func(ctx context.Context, _ *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
 			<-ctx.Done()
 			return execution_client.PayloadStatusNone, ctx.Err()
-		}}
-		cfg := &Cfg{beaconCfg: &clparams.MainnetBeaconConfig, executionClient: engine, gloasPayloadValidator: engine}
+		}
+		cfg := &Cfg{beaconCfg: &clparams.MainnetBeaconConfig, executionClient: engine, gloasPayloadValidator: fixture.forkChoice}
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
 		defer cancel()
 
@@ -1081,4 +1122,36 @@ func TestStoredParentPayloadReplayWithoutVerdictKeepsStatus(t *testing.T) {
 		require.Equal(t, unchanged, store.marked)
 		require.Empty(t, store.requeued)
 	})
+}
+
+// A stored parent below the EL's validation depth is recorded NotValidated without a NewPayload,
+// which the EL would answer the same way, and is not requeued.
+func TestEnsureStoredParentPayloadAcceptedSkipsTheELBelowItsValidationDepth(t *testing.T) {
+	root := common.Hash{1}
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
+	payload.BlockNumber = 10
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = &solid.TransactionsSSZ{}
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+		BeaconBlockRoot: root,
+		Payload:         payload,
+	}}
+	deriveBlockHash(t, &clparams.MainnetBeaconConfig, envelope)
+	store := &storedParentPayloadTestStore{
+		has:          true,
+		block:        cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion),
+		markRetained: true,
+	}
+	engine := &testExecutionEngine{supportInsertion: true, payloadStatus: execution_client.PayloadStatusNotValidated}
+	cfg := &Cfg{
+		beaconCfg:             &clparams.MainnetBeaconConfig,
+		executionClient:       validationDepthEngine{testExecutionEngine: engine, below: payload.BlockNumber + 1},
+		gloasPayloadValidator: engine,
+	}
+
+	require.True(t, ensureStoredParentPayloadAccepted(t.Context(), cfg, store, root, envelope))
+	require.Zero(t, engine.newPayloadCalls)
+	require.EqualValues(t, execution_client.PayloadStatusNotValidated, store.marked)
+	require.Empty(t, store.requeued)
 }
