@@ -307,6 +307,9 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 		if err != nil {
 			return nil, err
 		}
+		if blk == nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("next block body not found"))
+		}
 		// [Modified in Gloas:EIP7732] GLOAS blocks have no ExecutionPayload; withdrawals are in the envelope
 		if blk.Version() >= clparams.GloasVersion {
 			continue
