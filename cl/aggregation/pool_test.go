@@ -584,8 +584,8 @@ func (t *PoolTestSuite) TestAddAttestationElectraRefusedDataCountsVotersOnce() {
 	}
 }
 
-// Refused data is bounded per committee: new data replaces the refused data with the fewest voters
-// only when it has at least as many.
+// Refused data is bounded per committee. New data always enters, and the refused data with the
+// fewest voters gives way, so data that already gathered more voters stays.
 func (t *PoolTestSuite) TestAddAttestationElectraBoundsRefusedDataPerCommittee() {
 	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).AnyTimes()
 	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).AnyTimes()
