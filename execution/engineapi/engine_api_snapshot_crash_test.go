@@ -19,10 +19,9 @@ package engineapi_test
 import (
 	"context"
 	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"maps"
-	"net"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -36,17 +35,20 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-const snapshotCrashChild = "ERIGON_SNAPSHOT_CRASH_CHILD"
+const (
+	snapshotCrashChild      = "ERIGON_SNAPSHOT_CRASH_CHILD"
+	snapshotCrashReorgDepth = 32
+)
 
 type snapshotCrashRequest struct {
 	Genesis        *types.Genesis
@@ -61,7 +63,7 @@ type snapshotCrashRequest struct {
 
 func configureSnapshotCrashRecovery(config *ethconfig.Config) {
 	configureCrashRecovery(config)
-	config.MaxReorgDepth = 32
+	config.MaxReorgDepth = snapshotCrashReorgDepth
 	config.Snapshot.ProduceE3 = true
 }
 
@@ -110,6 +112,10 @@ func TestEngineApiSnapshotCrashRecovery(t *testing.T) {
 	assertCrashRecoveryState(t, prefix.state, sidePrefix.state)
 	assertCrashRecoveryReference(t, canonical)
 	assertCrashRecoveryReference(t, side)
+	for _, chain := range []crashRecoveryChain{canonical, side} {
+		require.Less(t, chain.state.CommitmentBlock-prefix.state.CommitmentBlock, uint64(snapshotCrashReorgDepth),
+			"replayed forks must stay inside the newPayload validation and changeset retention limits")
+	}
 	require.Equal(t, canonicalCounts, sideCounts, "the filed step must belong to the shared prefix")
 	for table, count := range canonicalCounts {
 		require.Positive(t, count, "%s must contain prunable records", table)
@@ -146,12 +152,15 @@ func TestEngineApiSnapshotCrashRecovery(t *testing.T) {
 			// Inspect before node startup can rebuild files or execute downloaded blocks.
 			inspectCrashRecoveryDataDir(t, request.DataDir, func(db kv.TemporalRoDB) {
 				assertSnapshotCrashState(t, db, want.state)
-				for table, count := range snapshotCrashTableCounts(t, db) {
-					if window.pruneCommitted {
-						require.Less(t, count, canonicalCounts[table], "%s must have lost MDBX copies", table)
-					} else {
-						require.Equal(t, canonicalCounts[table], count, "%s pruning must not be durable yet", table)
-					}
+				counts := snapshotCrashTableCounts(t, db)
+				t.Logf("step-0 MDBX copies: before %v, recovered %v", canonicalCounts, counts)
+				for table, count := range counts {
+					require.LessOrEqual(t, count, canonicalCounts[table], "%s pruning must not add rows", table)
+				}
+				if window.pruneCommitted {
+					require.True(t, snapshotPruneProgress(canonicalCounts, counts), "pruning must have removed MDBX copies")
+				} else {
+					require.Equal(t, canonicalCounts, counts, "pruning must not be durable yet")
 				}
 			})
 			args := baseArgs
@@ -177,68 +186,83 @@ func TestEngineApiSnapshotCrashRecovery(t *testing.T) {
 	}
 }
 
+func snapshotPruneProgress(before, after map[string]uint64) bool {
+	for table, count := range before {
+		if after[table] < count {
+			return true
+		}
+	}
+	return false
+}
+
+func TestSnapshotPruneProgress(t *testing.T) {
+	before := map[string]uint64{kv.TblAccountVals: 7, kv.TblStorageVals: 10}
+	for _, tc := range []struct {
+		name  string
+		after map[string]uint64
+		want  bool
+	}{
+		{"none", before, false},
+		{"partial", map[string]uint64{kv.TblAccountVals: 5, kv.TblStorageVals: 10}, true},
+		{"complete", map[string]uint64{kv.TblAccountVals: 0, kv.TblStorageVals: 0}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, snapshotPruneProgress(before, tc.after))
+		})
+	}
+}
+
 func snapshotCrashTableCounts(t *testing.T, db kv.TemporalRoDB) map[string]uint64 {
 	t.Helper()
-	counts := make(map[string]uint64)
+	var counts map[string]uint64
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
-		// Compare only the first filed step. Reorgs may add tombstones in later
-		// steps, so total table sizes need not match a straight-chain reference.
-		for _, table := range []string{kv.TblAccountVals, kv.TblStorageVals, kv.TblCodeVals, kv.TblAccountHistoryKeys, kv.TblStorageHistoryKeys} {
-			counts[table] = 0
-			if err := tx.ForEach(table, nil, func(key, value []byte) error {
-				var firstStep bool
-				switch table {
-				case kv.TblCodeVals:
-					firstStep = ^binary.BigEndian.Uint64(key[len(key)-8:]) == 0
-				case kv.TblAccountVals, kv.TblStorageVals:
-					firstStep = ^binary.BigEndian.Uint64(value[:8]) == 0
-				default:
-					firstStep = binary.BigEndian.Uint64(key) < db.StepSize()
-				}
-				if firstStep {
-					counts[table]++
-				}
-				return nil
-			}); err != nil {
-				return err
-			}
-		}
-		return nil
+		var err error
+		counts, err = snapshotCrashTableCountsTx(tx, db.StepSize())
+		return err
 	}))
 	return counts
+}
+
+func snapshotCrashTableCountsTx(tx kv.Tx, stepSize uint64) (map[string]uint64, error) {
+	counts := make(map[string]uint64)
+	// Compare only the first filed step. Reorgs may add tombstones in later
+	// steps, so total table sizes need not match a straight-chain reference.
+	for _, table := range []string{kv.TblAccountVals, kv.TblStorageVals, kv.TblCodeVals, kv.TblAccountHistoryKeys, kv.TblStorageHistoryKeys} {
+		counts[table] = 0
+		if err := tx.ForEach(table, nil, func(key, value []byte) error {
+			var firstStep bool
+			switch table {
+			case kv.TblCodeVals:
+				firstStep = ^binary.BigEndian.Uint64(key[len(key)-8:]) == 0
+			case kv.TblAccountVals, kv.TblStorageVals:
+				firstStep = ^binary.BigEndian.Uint64(value[:8]) == 0
+			default:
+				firstStep = binary.BigEndian.Uint64(key) < stepSize
+			}
+			if firstStep {
+				counts[table]++
+			}
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return counts, nil
 }
 
 func assertSnapshotCrashState(t *testing.T, db kv.TemporalRoDB, want crashRecoveryState) {
 	t.Helper()
 	require.NoError(t, db.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
-		for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain} {
+		for _, domain := range kv.StateDomains {
 			require.NotEmpty(t, tx.Debug().DomainFiles(domain), "recovery must read %s files", domain)
 		}
 		got := readCrashRecoveryTx(t, tx)
 		want.Domains = maps.Clone(want.Domains)
-		want.Domains[kv.CommitmentDomain] = snapshotCrashCommitment(t, want.Domains[kv.CommitmentDomain])
-		got.Domains[kv.CommitmentDomain] = snapshotCrashCommitment(t, got.Domains[kv.CommitmentDomain])
+		want.Domains[kv.CommitmentDomain] = crashRecoveryLiveCommitment(t, want.Domains[kv.CommitmentDomain])
+		got.Domains[kv.CommitmentDomain] = crashRecoveryLiveCommitment(t, got.Domains[kv.CommitmentDomain])
 		assertCrashRecoveryState(t, want, got)
 		return nil
 	}))
-}
-
-func snapshotCrashCommitment(t *testing.T, entries map[string]string) map[string]string {
-	t.Helper()
-	entries = maps.Clone(entries)
-	for key, value := range entries {
-		if key == hex.EncodeToString(commitmentdb.KeyCommitmentState) {
-			continue
-		}
-		encoded, err := hex.DecodeString(value)
-		require.NoError(t, err)
-		require.GreaterOrEqual(t, len(encoded), 4, "commitment branch %s", key)
-		// Empty branches can be deletion records or absent after unwind/compaction.
-		if len(encoded) == 4 && commitment.BranchData(encoded).ChildCount() == 0 {
-			delete(entries, key)
-		}
-	}
-	return entries
 }
 
 func runSnapshotCrashChild(t *testing.T) {
@@ -251,20 +275,19 @@ func runSnapshotCrashChild(t *testing.T) {
 	transitions := newStateTransitionController()
 	clientTimeout := time.Until(request.Deadline)
 	require.Positive(t, clientTimeout)
-	eat, err := engineapitester.InitialiseEngineApiTester(context.Background(), engineapitester.EngineApiTesterInitArgs{
-		Logger: testlog.Logger(t, log.LvlError), DataDir: request.DataDir,
-		Genesis: request.Genesis, CoinbaseKey: key, NoEmptyBlock1: true,
-		EngineApiClientTimeout: &clientTimeout, StateTransitionObserver: transitions.observe,
-		EthConfigTweaker: configureSnapshotCrashRecovery,
-	})
-	require.NoError(t, err)
 	buildStarted, buildAllowed, crashReached := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	observerError := make(chan error, 1)
 	var firstBuild, firstCrash sync.Once
-	var pruneArmed atomic.Bool
+	var pruneArmed, pruneProgress atomic.Bool
+	var filesDone <-chan struct{}
+	var beforePrune map[string]uint64
+	var stepSize uint64
 	pruneWindow := request.Boundary == state.MaintenancePruneReady || request.Boundary == state.MaintenancePruneCommitted
-	eat.StateAgg.SetMaintenanceObserver(func(ctx context.Context, point state.MaintenancePoint) {
+	observe := func(ctx context.Context, event state.MaintenanceEvent) {
+		point := event.Point
 		if point == state.MaintenanceBuildStarted {
 			firstBuild.Do(func() {
+				filesDone = event.FilesDone
 				close(buildStarted)
 				select {
 				case <-buildAllowed:
@@ -272,14 +295,37 @@ func runSnapshotCrashChild(t *testing.T) {
 				}
 			})
 		}
-		if point != request.Boundary || pruneWindow && !pruneArmed.Load() {
+		if pruneWindow {
+			if !pruneArmed.Load() {
+				return
+			}
+			if point == state.MaintenancePruneReady {
+				counts, err := snapshotCrashTableCountsTx(event.PruneTx, stepSize)
+				if err != nil {
+					observerError <- err
+					return
+				}
+				pruneProgress.Store(snapshotPruneProgress(beforePrune, counts))
+			}
+			if !pruneProgress.Load() {
+				return
+			}
+		}
+		if point != request.Boundary {
 			return
 		}
 		firstCrash.Do(func() {
 			close(crashReached)
 			<-ctx.Done()
 		})
+	}
+	eat, err := engineapitester.InitialiseEngineApiTester(context.Background(), engineapitester.EngineApiTesterInitArgs{
+		Logger: testlog.Logger(t, log.LvlError), DataDir: request.DataDir,
+		Genesis: request.Genesis, CoinbaseKey: key, NoEmptyBlock1: true,
+		EngineApiClientTimeout: &clientTimeout, StateTransitionObserver: transitions.observe,
+		EthConfigTweaker: configureSnapshotCrashRecovery, MaintenanceObserver: observe,
 	})
+	require.NoError(t, err)
 	t.Log("importing canonical blocks with the first file build held")
 	for _, payload := range request.Canonical {
 		insertCrashRecoveryPayloads(ctx, t, eat, []*engineapitester.MockClPayload{payload})
@@ -290,6 +336,9 @@ func runSnapshotCrashChild(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatalf("file building did not start: %v", ctx.Err())
 	}
+	require.NotNil(t, filesDone, "the held build must identify its completion signal")
+	beforePrune = snapshotCrashTableCounts(t, eat.ChainDB)
+	stepSize = eat.ChainDB.StepSize()
 	insertCrashRecoveryPayloads(ctx, t, eat, request.Replacement)
 	t.Log("holding the reorg after unwind")
 	unwound := transitions.hold(t, execmodule.StateTransitionUnwindComplete, 1)
@@ -302,7 +351,7 @@ func runSnapshotCrashChild(t *testing.T) {
 	t.Logf("waiting for maintenance boundary %d", request.Boundary)
 	if pruneWindow {
 		select {
-		case <-eat.StateAgg.WaitForBuildAndMerge(ctx):
+		case <-filesDone:
 		case <-ctx.Done():
 			t.Fatalf("file building did not finish: %v", ctx.Err())
 		}
@@ -311,6 +360,7 @@ func runSnapshotCrashChild(t *testing.T) {
 		pruneArmed.Store(true)
 		unwound.release()
 	}
+	pruneError := make(chan error, 1)
 	waiting := true
 	for waiting {
 		select {
@@ -320,16 +370,43 @@ func runSnapshotCrashChild(t *testing.T) {
 			require.NoError(t, err, "replacement FCU before crash boundary")
 			require.True(t, pruneWindow, "file publication must leave the reorg held")
 			response = nil
+			go func() { pruneError <- continueSnapshotPruning(ctx, eat) }()
+		case err := <-pruneError:
+			t.Fatalf("pruning ended before the crash boundary: %v", err)
+		case err := <-observerError:
+			t.Fatalf("reading pending prune progress: %v", err)
 		case <-ctx.Done():
 			t.Fatalf("snapshot crash boundary %d was not reached: %v", request.Boundary, ctx.Err())
 		}
 	}
-	var dialer net.Dialer
-	conn, err := dialer.DialContext(ctx, "tcp", request.ControlAddress)
-	require.NoError(t, err)
-	defer conn.Close()
-	require.NoError(t, conn.SetWriteDeadline(request.Deadline))
-	require.NoError(t, json.NewEncoder(conn).Encode(request.Boundary))
-	<-ctx.Done()
-	t.Fatalf("parent did not kill the child: %v", ctx.Err())
+	waitForCrashKill(t, ctx, request.ControlAddress, request.Deadline, int(request.Boundary))
+}
+
+// A time-budgeted FCU pass may leave all state pruning for a later pass.
+// Repeat the same commit/build path while execution is idle until pruning makes progress.
+func continueSnapshotPruning(ctx context.Context, eat engineapitester.EngineApiTester) error {
+	eat.ExecutionModule.WaitIdle(ctx)
+	db, ok := eat.ChainDB.(kv.TemporalRwDB)
+	if !ok {
+		return fmt.Errorf("snapshot pruning requires a writable temporal database")
+	}
+	for ctx.Err() == nil {
+		_, finished, err := eat.StateAgg.CollateAndPrune(context.Background(), db, func(tx kv.TemporalRwTx) (kv.FinalityContext, error) {
+			finality, err := execfinality.Resolve(tx, snapshotCrashReorgDepth, false, rawdbv3.TxNums)
+			if err != nil {
+				return nil, err
+			}
+			_, err = tx.PruneSmallBatches(ctx, time.Second)
+			return finality, err
+		})
+		if err != nil {
+			return err
+		}
+		select {
+		case <-finished:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return ctx.Err()
 }

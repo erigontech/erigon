@@ -16,12 +16,16 @@
 
 package state
 
-import "context"
+import (
+	"context"
+
+	"github.com/erigontech/erigon/db/kv"
+)
 
 type MaintenancePoint uint8
 
 const (
-	// MaintenanceBuildStarted marks an eligible collation attempt, before worker locks that could block execution.
+	// MaintenanceBuildStarted marks an eligible collation attempt.
 	MaintenanceBuildStarted MaintenancePoint = iota
 	// MaintenanceFilesBuilt precedes integration after all builders for a step have succeeded.
 	MaintenanceFilesBuilt
@@ -33,9 +37,20 @@ const (
 	MaintenancePruneCommitted
 )
 
-// MaintenanceObserver is an inline integration-test hook. Calls may overlap;
-// a blocking observer must return when its context ends. Nil disables observation.
-type MaintenanceObserver func(context.Context, MaintenancePoint)
+type MaintenanceEvent struct {
+	Point MaintenancePoint
+	// FilesDone is set at BuildStarted for BuildFilesInBackground jobs.
+	// It closes after the job and its merge finish, including failure paths.
+	FilesDone <-chan struct{}
+	// PruneTx is a read-only view of the pending transaction at PruneReady.
+	// It is valid only during the observer call.
+	PruneTx kv.Tx
+}
+
+// MaintenanceObserver is an inline integration-test hook. Calls may overlap.
+// Its context ends when the operation is cancelled or Aggregator.Close starts;
+// a blocking observer must then return. Nil disables observation.
+type MaintenanceObserver func(context.Context, MaintenanceEvent)
 
 func (a *Aggregator) SetMaintenanceObserver(observer MaintenanceObserver) {
 	if observer == nil {
@@ -45,8 +60,12 @@ func (a *Aggregator) SetMaintenanceObserver(observer MaintenanceObserver) {
 	a.maintenanceObserver.Store(&observer)
 }
 
-func (a *Aggregator) observeMaintenance(ctx context.Context, point MaintenancePoint) {
+func (a *Aggregator) observeMaintenance(ctx context.Context, event MaintenanceEvent) {
 	if observer := a.maintenanceObserver.Load(); observer != nil {
-		(*observer)(ctx, point)
+		observerCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		stop := context.AfterFunc(a.observerCtx, cancel)
+		defer stop()
+		(*observer)(observerCtx, event)
 	}
 }
