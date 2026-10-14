@@ -32,6 +32,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"maps"
 	"math/big"
 	"net"
 	"net/http"
@@ -608,9 +609,7 @@ func TestCorsHandlerRefusesCrossSiteGet(t *testing.T) {
 
 	get := func(h http.Handler, header http.Header) int {
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost:8545/?method=debug_setHead&params=[1]", nil)
-		for k, v := range header {
-			req.Header[k] = v
-		}
+		maps.Copy(req.Header, header)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 		return rec.Code
