@@ -68,3 +68,11 @@ func TestProcessBlockRejectsUnexpectedBlindedWithdrawalsRoot(t *testing.T) {
 	require.NoError(t, transition.ValidatingMachine.ProcessSlots(s, block.Block.Slot))
 	require.ErrorContains(t, machine.ProcessBlock(transition.ValidatingMachine, s, blinded), "withdrawals root mismatch")
 }
+
+// A sync aggregate whose signing domain cannot be computed is rejected, not accepted unverified.
+func TestProcessSyncAggregateRejectsUnresolvableDomain(t *testing.T) {
+	s, block := loadCapellaFixture(t)
+	require.NoError(t, transition.ValidatingMachine.ProcessSlots(s, block.Block.Slot))
+	s.SetFork(nil)
+	require.Error(t, transition.ValidatingMachine.ProcessSyncAggregate(s, block.Block.Body.SyncAggregate))
+}
