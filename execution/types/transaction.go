@@ -143,6 +143,22 @@ func CalcEffectiveGasTip(baseFee *uint256.Int, getTipCap func() *uint256.Int, ge
 	return effectiveFee
 }
 
+// EffectiveGasPrice returns the gas price txn pays in a block with the given
+// base fee. A registered type pays min(baseFee+tipCap, feeCap), so a fee-free
+// type reports zero; built-in types keep baseFee plus their effective tip.
+func EffectiveGasPrice(txn Transaction, baseFee *uint256.Int) uint256.Int {
+	var price uint256.Int
+	if _, ok := registeredTxType(txn.Type()); ok {
+		price.Add(baseFee, txn.GetTipCap())
+		if feeCap := txn.GetFeeCap(); feeCap.Lt(&price) {
+			price.Set(feeCap)
+		}
+		return price
+	}
+	tip := txn.GetEffectiveGasTip(baseFee)
+	return *price.Add(baseFee, &tip)
+}
+
 // RLP-marshalled legacy transactions and binary-marshalled (not wrapped into an RLP string) typed (EIP-2718) transactions
 type BinaryTransactions [][]byte
 
