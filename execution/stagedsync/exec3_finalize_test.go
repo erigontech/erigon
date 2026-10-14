@@ -801,6 +801,41 @@ func TestFinalizeTxSimple_LondonBurntFees(t *testing.T) {
 		"burnt contract should be existing balance + FeeBurnt")
 }
 
+func TestFinalizeTxSimple_CoinbaseIsBurntContract(t *testing.T) {
+	t.Parallel()
+	s := londonTransferScenario()
+	s.burntAddr = s.coinbase
+	priorBalance := uint256.NewInt(1_000_000)
+	writes := s.runFinalizeTx(t, priorBalance)
+
+	expected := new(uint256.Int).Add(priorBalance, &s.feeTipped)
+	expected.Add(expected, &s.feeBurnt)
+	coinbaseWrite := findBalance(writes, s.coinbase)
+	require.NotNil(t, coinbaseWrite)
+	assert.Equal(t, *expected, coinbaseWrite.Val, "coinbase balance must get both the tip and the burnt fee")
+	coinbaseAcc := findAddress(writes, s.coinbase)
+	require.NotNil(t, coinbaseAcc)
+	assert.Equal(t, *expected, coinbaseAcc.Val.Balance)
+}
+
+func TestFinalizeTxSimple_CoinbaseIsBurntContractRecordedCredit(t *testing.T) {
+	t.Parallel()
+	s := londonTransferScenario()
+	s.burntAddr = s.coinbase
+	result := s.buildExecResult()
+	vm := state.NewVersionMap(nil)
+	reader := s.makeReader()
+	task := result.Task.(*taskVersion)
+
+	credited, outcome, err := result.calcFees(task, vm, reader, s.rules, nil)
+	require.NoError(t, err)
+	require.Equal(t, feeCreditNew, outcome)
+
+	_, outcome, err = result.calcFees(task, vm, reader, s.rules, credited)
+	require.NoError(t, err)
+	assert.Equal(t, feeCreditRecorded, outcome)
+}
+
 // TestFinalizeTxSimple_NoCoinbaseInVersionMap verifies that when there's no
 // prior coinbase entry in the versionMap, the finalize reads from the
 // stateReader and adds FeeTipped.

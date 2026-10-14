@@ -2133,6 +2133,12 @@ func (result *execResult) calcFees(
 	// A burnt write can only differ from the pre-state when London adds a
 	// non-zero FeeBurnt, so skip the whole read otherwise.
 	hasBurnt := !burntAddr.IsNil() && chainRules.IsLondon && !result.ExecutionResult.FeeBurnt.IsZero()
+	coinbaseFee := result.ExecutionResult.FeeTipped
+	// Two entries for one account would overwrite each other, so a single entry carries both fees.
+	if hasBurnt && burntAddr == result.Coinbase {
+		coinbaseFee.Add(&coinbaseFee, &result.ExecutionResult.FeeBurnt)
+		hasBurnt = false
+	}
 	var newBurntBalance uint256.Int
 	var burntAcc *accounts.Account
 	if hasBurnt {
@@ -2184,7 +2190,7 @@ func (result *execResult) calcFees(
 	coinbaseWasContract := !coinbaseEmptyCodeHash || coinbaseHasCodeHashWrite || coinbaseCreatedContract
 	burnCoinbaseTip := !chainRules.IsAmsterdam && coinbaseSelfdestructed && coinbaseWasContract
 	if !burnCoinbaseTip {
-		newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
+		newCoinbaseBalance.Add(&newCoinbaseBalance, &coinbaseFee)
 	}
 	oldBurntBalance := newBurntBalance
 	if hasBurnt {
@@ -2236,7 +2242,7 @@ func (result *execResult) calcFees(
 	// The credit only moves when a prior tx's writes moved under it, so most
 	// rounds would rebuild the set the tx already carries.
 	if coinbaseEntry.shapeRecordedIn(credited, taskVersion, result.Coinbase) &&
-		burntEntry.shapeRecordedIn(credited, taskVersion, burntAddr) {
+		(burntAddr == result.Coinbase || burntEntry.shapeRecordedIn(credited, taskVersion, burntAddr)) {
 		return nil, feeCreditRecorded, nil
 	}
 
