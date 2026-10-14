@@ -253,7 +253,7 @@ func validateBALResponse(reqs []BALRequest, response []rlp.RawValue) (map[common
 			responseErr = fmt.Errorf("%w: req %d wanted %x got %x", ErrBadBALResponse, i, expected, hash)
 			continue
 		}
-		if err = bal.ValidateForBlock(reqs[i].GasLimit); err != nil {
+		if err = bal.ValidateForHeader(reqs[i].GasLimit); err != nil {
 			badPeer = true
 			responseErr = fmt.Errorf("%w: req %d returned invalid BAL: %w", ErrBadBALResponse, i, err)
 			continue

@@ -52,4 +52,14 @@ func TestDecodeAndValidateBlockAccessList(t *testing.T) {
 	payload.GasLimit = types.BalItemCost - 1
 	_, err = DecodeAndValidateBlockAccessList(payload)
 	require.ErrorContains(t, err, "block access list too large")
+
+	outOfRange, err := types.EncodeBlockAccessListBytes(types.BlockAccessList{{
+		Address:      common.Address{1},
+		NonceChanges: []*types.NonceChange{{Index: 2}},
+	}})
+	require.NoError(t, err)
+	require.NoError(t, payload.BlockAccessList.SetBytes(outOfRange))
+	payload.GasLimit = types.BalItemCost
+	_, err = DecodeAndValidateBlockAccessList(payload)
+	require.ErrorContains(t, err, "block access index")
 }

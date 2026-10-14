@@ -115,22 +115,65 @@ func TestBlockAccessListSidecarMemoizesRLP(t *testing.T) {
 
 func TestBlockAccessListSidecarMemoizesValidation(t *testing.T) {
 	sidecar := NewBlockAccessListSidecar(BlockAccessList{{
-		Address: common.Address{1},
+		Address:      common.Address{1},
+		NonceChanges: []*NonceChange{{Index: 2}},
 	}})
-	if sidecar.validated.Load() {
+	if sidecar.validatedGasLimit.Load() != nil || sidecar.validatedTxCount.Load() != nil {
 		t.Fatal("new sidecar is already validated")
 	}
-	if err := sidecar.ValidateForBlock(BalItemCost); err != nil {
+	if err := sidecar.ValidateForBlock(BalItemCost, 1); err != nil {
 		t.Fatalf("validate sidecar: %v", err)
 	}
-	if !sidecar.validated.Load() {
-		t.Fatal("successful validation was not memoized")
+	if got := sidecar.validatedGasLimit.Load(); got == nil || *got != BalItemCost {
+		t.Fatalf("validated gas limit = %v, want %d", got, BalItemCost)
 	}
-	if got := sidecar.validatedGasLimit.Load(); got != BalItemCost {
-		t.Fatalf("validated gas limit = %d, want %d", got, BalItemCost)
+	if got := sidecar.validatedTxCount.Load(); got == nil || *got != 1 {
+		t.Fatalf("validated tx count = %v, want 1", got)
 	}
-	if err := sidecar.ValidateForBlock(BalItemCost - 1); !errors.Is(err, ErrInvalidBlockAccessList) {
+	if err := sidecar.ValidateForBlock(BalItemCost-1, 1); !errors.Is(err, ErrInvalidBlockAccessList) {
 		t.Fatalf("validation with a different gas limit returned %v, want ErrInvalidBlockAccessList", err)
+	}
+	if err := sidecar.ValidateForBlock(BalItemCost, 0); !errors.Is(err, ErrInvalidBlockAccessList) {
+		t.Fatalf("validation with a different tx count returned %v, want ErrInvalidBlockAccessList", err)
+	}
+}
+
+func TestBlockAccessListValidateForBlockBoundsIndices(t *testing.T) {
+	const txCount = 2
+	const gasLimit = 10 * BalItemCost
+	accountWith := map[string]func(index uint32) AccountChanges{
+		"storage change": func(index uint32) AccountChanges {
+			return AccountChanges{Address: common.Address{1}, StorageChanges: []SlotChanges{{
+				Slot:    accounts.InternKey(common.Hash{1}),
+				Changes: []*StorageChange{{Index: index}},
+			}}}
+		},
+		"balance change": func(index uint32) AccountChanges {
+			return AccountChanges{Address: common.Address{1}, BalanceChanges: []*BalanceChange{{Index: index}}}
+		},
+		"nonce change": func(index uint32) AccountChanges {
+			return AccountChanges{Address: common.Address{1}, NonceChanges: []*NonceChange{{Index: index}}}
+		},
+		"code change": func(index uint32) AccountChanges {
+			return AccountChanges{Address: common.Address{1}, CodeChanges: []*CodeChange{{Index: index, Bytecode: []byte{1}}}}
+		},
+	}
+	for name, account := range accountWith {
+		t.Run(name, func(t *testing.T) {
+			if err := (BlockAccessList{account(txCount + 1)}).ValidateForBlock(gasLimit, txCount); err != nil {
+				t.Fatalf("post-execution index rejected: %v", err)
+			}
+			err := (BlockAccessList{account(txCount + 2)}).ValidateForBlock(gasLimit, txCount)
+			if !errors.Is(err, ErrInvalidBlockAccessList) {
+				t.Fatalf("ValidateForBlock() error = %v, want ErrInvalidBlockAccessList", err)
+			}
+			if !strings.Contains(err.Error(), "block access index") {
+				t.Fatalf("ValidateForBlock() error = %v, want it to name the block access index", err)
+			}
+			if err := (BlockAccessList{account(txCount + 2)}).ValidateForHeader(gasLimit); err != nil {
+				t.Fatalf("header-only validation cannot know the transaction count: %v", err)
+			}
+		})
 	}
 }
 
@@ -276,7 +319,7 @@ func TestBlockAccessListCodecLeavesSemanticValidationToValidateForBlock(t *testi
 			if !reflect.DeepEqual(decoded, tt.bal) {
 				t.Fatalf("round trip differs: got %v, want %v", decoded, tt.bal)
 			}
-			err = decoded.ValidateForBlock(^uint64(0))
+			err = decoded.ValidateForBlock(^uint64(0), 1)
 			if !errors.Is(err, ErrInvalidBlockAccessList) {
 				t.Fatalf("ValidateForBlock() error = %v, want ErrInvalidBlockAccessList", err)
 			}
