@@ -101,7 +101,7 @@ type ForkChoiceStore struct {
 	headHash                           common.Hash
 	headSlot                           uint64
 	headPayloadStatus                  cltypes.PayloadStatus
-	selectedHead                       atomic.Pointer[ForkChoiceNode] // the head last published, for lock-free readers
+	selectedHead                       atomic.Pointer[ForkChoiceNode] // the head last published, for lock-free readers; nil after a payload decision changes
 	genesisTime                        uint64
 	genesisValidatorsRoot              common.Hash
 	anchorExecutionPayloadBuilderIndex uint64
@@ -1178,13 +1178,15 @@ func (f *ForkChoiceStore) markPayloadStatus(
 	if !known || current != effective {
 		f.headHash = common.Hash{}
 		f.headPayloadStatus = cltypes.PayloadStatusPending
+		// The decision can rule out the published variant; get_head publishes again.
+		f.selectedHead.Store(nil)
 	}
 	return effective
 }
 
 // reachableFromSelectedHead reports whether get_head could reach child from root when root is
 // the selected head: a child on the other payload variant counts only while that variant is not
-// a candidate, that is, an unavailable FULL.
+// a candidate, that is, an unavailable FULL. Without a published head every child counts.
 func (f *ForkChoiceStore) reachableFromSelectedHead(root, child common.Hash) bool {
 	head := f.selectedHead.Load()
 	if head == nil || head.Root != root || (head.PayloadStatus != cltypes.PayloadStatusEmpty && head.PayloadStatus != cltypes.PayloadStatusFull) {

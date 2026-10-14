@@ -1357,6 +1357,22 @@ func TestHasImportedDescendantAfterFollowsTheServedVariant(t *testing.T) {
 	})
 }
 
+// A changed payload decision can rule out the served variant before get_head runs again; until it
+// does, the gate counts the children of both variants.
+func TestHasImportedDescendantAfterCountsBothVariantsAfterAPayloadDecisionChanges(t *testing.T) {
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	anchorBlock, ok := store.forkGraph.GetBlock(anchorRoot)
+	require.True(t, ok)
+	anchorBlock.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = common.Hash{0xe1}
+	require.Equal(t, cltypes.PayloadStatusEmpty, store.getParentPayloadStatus(child.Block))
+	store.selectedHead.Store(&ForkChoiceNode{Root: anchorRoot, PayloadStatus: cltypes.PayloadStatusFull})
+	require.False(t, store.HasImportedDescendantAfter(anchorRoot, 0))
+
+	store.MarkPayloadStatus(anchorRoot, common.Hash{0xe1}, execution_client.PayloadStatusInvalidated)
+
+	require.True(t, store.HasImportedDescendantAfter(anchorRoot, 0), "the FULL head is ruled out, so its EMPTY child counts")
+}
+
 func TestGetHeadPublishesTheSelectedNode(t *testing.T) {
 	store, _, _ := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
 	head, _, err := store.GetHeadNode()
