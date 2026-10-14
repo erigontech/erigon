@@ -702,6 +702,82 @@ func TestAttesterSlashingRejectsIndicesOverLimitBeforeSeenCheck(t *testing.T) {
 	require.NotErrorIs(t, err, ErrIgnore)
 }
 
+func TestAttesterSlashingSeenCheckHandlesHugeIndex(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	store := &ForkChoiceStore{}
+	slashing := &cltypes.AttesterSlashing{
+		Attestation_1: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, []uint64{1 << 63}),
+		},
+		Attestation_2: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, []uint64{1 << 63}),
+		},
+	}
+
+	var err error
+	require.NotPanics(t, func() {
+		err = store.onProcessAttesterSlashing(slashing, state.New(&cfg), false)
+	})
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
+}
+
+func TestAttesterSlashingRejectsWhenNoValidatorIsSlashable(t *testing.T) {
+	store, s, slashing := attesterSlashingFixture(t, true)
+
+	err := store.onProcessAttesterSlashing(slashing, s, true)
+
+	require.EqualError(t, err, "no slashable validators in intersection")
+	require.False(t, store.operationsPool.AttesterSlashingsPool.Has(pool.ComputeKeyForAttesterSlashing(slashing)))
+	require.True(t, store.isUnequivocating(0))
+	require.True(t, store.isUnequivocating(1))
+}
+
+func TestAttesterSlashingAcceptsWhenAnyValidatorIsSlashable(t *testing.T) {
+	store, s, slashing := attesterSlashingFixture(t, false)
+
+	err := store.onProcessAttesterSlashing(slashing, s, true)
+
+	require.NoError(t, err)
+	require.True(t, store.operationsPool.AttesterSlashingsPool.Has(pool.ComputeKeyForAttesterSlashing(slashing)))
+}
+
+func attesterSlashingFixture(t *testing.T, secondValidatorSlashed bool) (*ForkChoiceStore, *state.CachingBeaconState, *cltypes.AttesterSlashing) {
+	t.Helper()
+	cfg := clparams.MainnetBeaconConfig
+	s := state.New(&cfg)
+	for _, slashed := range []bool{true, secondValidatorSlashed} {
+		validator := solid.NewValidatorFromParameters(
+			common.Bytes48{},
+			common.Hash{},
+			cfg.MaxEffectiveBalance,
+			slashed,
+			0,
+			0,
+			cfg.FarFutureEpoch,
+			cfg.FarFutureEpoch,
+		)
+		require.NoError(t, s.AddValidator(validator, cfg.MaxEffectiveBalance))
+	}
+	slashing := &cltypes.AttesterSlashing{
+		Attestation_1: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, []uint64{0, 1}),
+			Data: &solid.AttestationData{
+				BeaconBlockRoot: common.Hash{1},
+				Target:          solid.Checkpoint{Epoch: 0},
+			},
+		},
+		Attestation_2: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, []uint64{0, 1}),
+			Data: &solid.AttestationData{
+				BeaconBlockRoot: common.Hash{2},
+				Target:          solid.Checkpoint{Epoch: 0},
+			},
+		},
+	}
+	return &ForkChoiceStore{operationsPool: pool.NewOperationsPool(&cfg)}, s, slashing
+}
+
 func TestOnAttesterSlashingRejectsIncompleteOperation(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	store := &ForkChoiceStore{
@@ -711,6 +787,149 @@ func TestOnAttesterSlashingRejectsIncompleteOperation(t *testing.T) {
 	require.NotPanics(t, func() {
 		require.Error(t, store.OnAttesterSlashing(&cltypes.AttesterSlashing{}, false))
 	})
+}
+
+func TestOnAttesterSlashingIgnoresMissingJustifiedStateWhileSyncing(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	root := common.Hash{1}
+	loadErr := errors.New("state storage unavailable")
+	slashing := &cltypes.AttesterSlashing{
+		Attestation_1: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, []uint64{1}),
+			Data: &solid.AttestationData{
+				Slot:   1,
+				Target: solid.Checkpoint{Epoch: 1},
+			},
+		},
+		Attestation_2: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, []uint64{1}),
+			Data: &solid.AttestationData{
+				Slot:   2,
+				Target: solid.Checkpoint{Epoch: 1},
+			},
+		},
+	}
+	largeIndices := make([]uint64, int(cfg.MaxValidatorsPerCommittee)+1)
+	for i := range largeIndices {
+		largeIndices[i] = uint64(i)
+	}
+	largeSlashing := &cltypes.AttesterSlashing{
+		Attestation_1: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(int(cfg.MaxValidatorsPerCommittee*cfg.MaxCommitteesPerSlot), largeIndices),
+			Data:             slashing.Attestation_1.Data,
+		},
+		Attestation_2: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(int(cfg.MaxValidatorsPerCommittee*cfg.MaxCommitteesPerSlot), largeIndices),
+			Data:             slashing.Attestation_2.Data,
+		},
+	}
+	slashings := []struct {
+		name     string
+		slashing *cltypes.AttesterSlashing
+	}{
+		{name: "single index", slashing: slashing},
+		{name: "electra capacity with pre-electra target", slashing: largeSlashing},
+	}
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "missing"},
+		{name: "load error", err: loadErr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &ForkChoiceStore{
+				forkGraph:         &getFinalizedExecutionHashForkGraph{getStateErr: tc.err},
+				operationsPool:    pool.NewOperationsPool(&cfg),
+				syncedDataManager: synced_data.NewSyncedDataManager(&cfg, true),
+			}
+			store.justifiedCheckpoint.Store(solid.Checkpoint{Root: root})
+
+			for _, slashingCase := range slashings {
+				t.Run(slashingCase.name, func(t *testing.T) {
+					err := store.OnAttesterSlashing(slashingCase.slashing, true)
+					require.ErrorIs(t, err, synced_data.ErrNotSynced)
+				})
+			}
+		})
+	}
+}
+
+func TestOnAttesterSlashingRejectsInvalidSlashingWhileSyncing(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	root := common.Hash{1}
+	data := &solid.AttestationData{}
+	for _, slashingCase := range []struct {
+		name          string
+		slashing      *cltypes.AttesterSlashing
+		errorContains string
+	}{
+		{
+			name: "non-slashable data",
+			slashing: &cltypes.AttesterSlashing{
+				Attestation_1: &cltypes.IndexedAttestation{
+					AttestingIndices: solid.NewRawUint64List(2048, []uint64{1}),
+					Data:             data,
+				},
+				Attestation_2: &cltypes.IndexedAttestation{
+					AttestingIndices: solid.NewRawUint64List(2048, []uint64{1}),
+					Data:             data,
+				},
+			},
+			errorContains: "attestation data is not slashable",
+		},
+		{
+			name: "unsorted indices",
+			slashing: &cltypes.AttesterSlashing{
+				Attestation_1: &cltypes.IndexedAttestation{
+					AttestingIndices: solid.NewRawUint64List(2048, []uint64{2, 1}),
+					Data: &solid.AttestationData{
+						Slot:   1,
+						Target: solid.Checkpoint{Epoch: 1},
+					},
+				},
+				Attestation_2: &cltypes.IndexedAttestation{
+					AttestingIndices: solid.NewRawUint64List(2048, []uint64{1}),
+					Data: &solid.AttestationData{
+						Slot:   2,
+						Target: solid.Checkpoint{Epoch: 1},
+					},
+				},
+			},
+			errorContains: "attesting indices are not sorted or are null",
+		},
+	} {
+		t.Run(slashingCase.name, func(t *testing.T) {
+			loadErr := errors.New("state storage unavailable")
+			for _, tc := range []struct {
+				name      string
+				forkGraph *getFinalizedExecutionHashForkGraph
+			}{
+				{
+					name: "available",
+					forkGraph: &getFinalizedExecutionHashForkGraph{
+						states: map[common.Hash]*state.CachingBeaconState{root: state.New(&cfg)},
+					},
+				},
+				{name: "missing", forkGraph: &getFinalizedExecutionHashForkGraph{}},
+				{name: "load error", forkGraph: &getFinalizedExecutionHashForkGraph{getStateErr: loadErr}},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					store := &ForkChoiceStore{
+						forkGraph:         tc.forkGraph,
+						operationsPool:    pool.NewOperationsPool(&cfg),
+						syncedDataManager: synced_data.NewSyncedDataManager(&cfg, true),
+					}
+					store.justifiedCheckpoint.Store(solid.Checkpoint{Root: root})
+
+					err := store.OnAttesterSlashing(slashingCase.slashing, true)
+					require.ErrorContains(t, err, slashingCase.errorContains)
+					require.NotErrorIs(t, err, ErrIgnore)
+					require.NotErrorIs(t, err, synced_data.ErrNotSynced)
+				})
+			}
+		})
+	}
 }
 
 func TestDrainQueuedWorkRetainsOperationsWhenFinalizedStateIsUnavailable(t *testing.T) {
@@ -817,6 +1036,7 @@ type getFinalizedExecutionHashForkGraph struct {
 	getStateAlwaysCopy    []bool
 	getStateStarted       chan common.Hash
 	getStateRelease       chan struct{}
+	getStateErr           error
 	beforeUpdate          *cltypes.LightClientUpdate
 	afterUpdate           *cltypes.LightClientUpdate
 	addChainSegmentStatus fork_graph.ChainSegmentInsertionResult
@@ -881,6 +1101,9 @@ func (g *getFinalizedExecutionHashForkGraph) GetState(blockRoot common.Hash, alw
 	}
 	if g.getStateRelease != nil {
 		<-g.getStateRelease
+	}
+	if g.getStateErr != nil {
+		return nil, g.getStateErr
 	}
 	state := g.states[blockRoot]
 	return state, nil

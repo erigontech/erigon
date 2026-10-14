@@ -1903,7 +1903,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.Bytes, traceTypes []string) (*TraceCallResult, error) {
 	txn, err := types.DecodeWrappedTransaction(encodedTx)
 	if err != nil {
-		return nil, err
+		return nil, &rpc.InvalidParamsError{Message: "invalid raw transaction: " + err.Error()}
 	}
 	if api.gasCap != 0 && txn.GetGasLimit() > api.gasCap {
 		return nil, clientLimitExceededError(fmt.Sprintf("transaction gas limit %d exceeds the RPC gas cap %d", txn.GetGasLimit(), api.gasCap))

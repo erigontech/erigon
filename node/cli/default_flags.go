@@ -114,6 +114,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.RpcGetLogsMaxResults,
 	&utils.RpcLogQueryLimit,
 	&utils.RpcBatchLimit,
+	&utils.RpcSubscriptionLimit,
 	&utils.RpcReturnDataLimit,
 	&utils.AllowUnprotectedTxs,
 	&utils.RPCGlobalTxFeeCapFlag,
@@ -137,6 +138,7 @@ var DefaultFlags = []cli.Flag{
 	&RpcSubscriptionFiltersMaxAddressesFlag,
 	&RpcSubscriptionFiltersMaxTopicsFlag,
 	&RpcSubscriptionFiltersTimeoutFlag,
+	&RpcSubscriptionFiltersMaxSubscriptionsFlag,
 
 	&utils.SnapKeepBlocksFlag,
 	&utils.SnapStopFlag,

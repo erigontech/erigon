@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -46,7 +47,7 @@ func NextKey(key []byte) ([]byte, error) {
 		return key, errors.New("could not apply NextKey for the empty key")
 	}
 	nextKey := bytes.Clone(key)
-	for i := len(key) - 1; i >= 0; i-- {
+	for i := range slices.Backward(key) {
 		b := nextKey[i]
 		if b < 0xFF {
 			nextKey[i] = b + 1

@@ -282,15 +282,7 @@ func (p *TxPool) start(ctx context.Context) error {
 	}
 
 	return p.poolDB.View(ctx, func(tx kv.Tx) error {
-		coreDb, _ := p.chainDB()
-		coreTx, err := coreDb.BeginTemporalRo(ctx)
-		if err != nil {
-			return err
-		}
-
-		defer coreTx.Rollback()
-
-		if err := p.fromDB(ctx, tx, coreTx); err != nil {
+		if err := p.fromDB(ctx, tx); err != nil {
 			return fmt.Errorf("loading pool from DB: %w", err)
 		}
 
@@ -1363,7 +1355,7 @@ func (p *TxPool) recoverAuthorizations(tx *TxnSlot) {
 	tx.AuthAndNonces = authorities
 }
 
-func (p *TxPool) withLockedState(ctx context.Context, txns *TxnSlots, f func(kvcache.CacheView) error) error {
+func (p *TxPool) withLockedState(ctx context.Context, txns *TxnSlots, f func(kv.TemporalTx, kvcache.CacheView) error) error {
 	for {
 		p.lock.Lock()
 		coreDB, cache, generation := p._chainDB, p._stateCache, p.stateGeneration
@@ -1382,11 +1374,13 @@ func (p *TxPool) withLockedState(ctx context.Context, txns *TxnSlots, f func(kvc
 				retry = true
 				return nil
 			}
-			if err := p.senders.registerNewSenders(txns, p.logger); err != nil {
-				return err
+			if txns != nil {
+				if err := p.senders.registerNewSenders(txns, p.logger); err != nil {
+					return err
+				}
+				defer p.forgetUnusedSenders(senderIDsOf(txns))
 			}
-			defer p.forgetUnusedSenders(senderIDsOf(txns))
-			return f(view)
+			return f(coreTx, view)
 		})
 		if err != nil || !retry {
 			return err
@@ -1415,7 +1409,7 @@ func (p *TxPool) prepareAuthorizations(ctx context.Context, txns TxnSlots) ([]tx
 
 	var precheckReasons []txpoolcfg.DiscardReason
 	var goodTxns TxnSlots
-	err := p.withLockedState(ctx, &setCode, func(view kvcache.CacheView) error {
+	err := p.withLockedState(ctx, &setCode, func(_ kv.TemporalTx, view kvcache.CacheView) error {
 		var err error
 		precheckReasons, goodTxns, err = p.validateTxns(&setCode, view, nil, nil)
 		return err
@@ -1536,7 +1530,7 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, fromRemoteQue
 	if err != nil {
 		return nil, err
 	}
-	err = p.withLockedState(ctx, &newTxns, func(cacheView kvcache.CacheView) error {
+	err = p.withLockedState(ctx, &newTxns, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
 		var sources []remoteSource
 		if fromRemoteQueue {
 			sources = p.unprocessedRemotePeers[:len(newTxns.Txns)]
@@ -2729,12 +2723,13 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 	return nil
 }
 
-func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) error {
-	// The state-changes stream is already live when the pool loads, so OnNewBlock can
-	// write the same senders maps and sub-pools while this runs.
-	p.lock.Lock()
-	defer p.lock.Unlock()
+func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx) error {
+	return p.withLockedState(ctx, nil, func(coreTx kv.TemporalTx, cacheView kvcache.CacheView) error {
+		return p.fromDBLocked(tx, coreTx, cacheView)
+	})
+}
 
+func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.CacheView) error {
 	if p.lastSeenBlock.Load() == 0 {
 		lastSeenBlock, err := LastSeenBlock(tx)
 		if err != nil {
@@ -2760,10 +2755,6 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) err
 		p.lastSeenBlock.Store(lastSeenProgress)
 	}
 
-	cacheView, err := p._stateCache.View(ctx, coreTx)
-	if err != nil {
-		return err
-	}
 	it, err := tx.Range(kv.RecentLocalTransaction, nil, nil, order.Asc, kv.Unlim)
 	if err != nil {
 		return err

@@ -135,6 +135,32 @@ func TestNewAttestationCandidateRecordsOnlyNewFlags(t *testing.T) {
 	require.Equal(t, []uint8{0b110, 0b111}, candidate.newFlags)
 }
 
+func TestNewAttestationCandidateReservesNothingWithoutNewFlags(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	s := state_mock.NewMockBeaconState(ctrl)
+	cfg := clparams.MainnetBeaconConfig
+	data := &solid.AttestationData{Slot: 32, Target: solid.Checkpoint{Epoch: 1}}
+	attestation := &solid.Attestation{Data: data}
+	attesters := make([]uint64, 425)
+	for i := range attesters {
+		attesters[i] = uint64(i)
+	}
+
+	s.EXPECT().BaseRewardPerIncrement().Return(uint64(10))
+	s.EXPECT().BeaconConfig().Return(&cfg).AnyTimes()
+	s.EXPECT().Slot().Return(uint64(33)).AnyTimes()
+	s.EXPECT().Version().Return(clparams.ElectraVersion).AnyTimes()
+	s.EXPECT().GetAttestationParticipationFlagIndicies(data, uint64(1), uint64(0), false).Return([]uint8{0, 1, 2}, nil)
+	s.EXPECT().GetAttestingIndicies(attestation, true).Return(attesters, nil)
+	s.EXPECT().EpochParticipationForValidatorIndex(true, gomock.Any()).Return(cltypes.ParticipationFlags(0b111)).Times(len(attesters))
+
+	candidate, err := newAttestationCandidate(s, attestation)
+	require.NoError(t, err)
+	require.Zero(t, cap(candidate.attesters))
+	require.Zero(t, cap(candidate.baseRewards))
+	require.Zero(t, cap(candidate.newFlags))
+}
+
 func TestNewAttestationCandidateReadsPreviousEpochParticipation(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	s := state_mock.NewMockBeaconState(ctrl)
@@ -1091,6 +1117,24 @@ func TestProductionUsesLocalPayloadWhenBuilderWithdrawalsRootIsWrong(t *testing.
 		builderClient.EXPECT().GetHeader(gomock.Any(), int64(targetSlot), parentHash, gomock.Any()).Return(header, nil)
 		handler.builderClient = builderClient
 	})
+}
+
+func TestProcessBlockForProductionRejectsUnexpectedPayloadWithdrawal(t *testing.T) {
+	blocks, s, _ := tests.GetCapellaRandom()
+	block := blocks[0].Block
+	block.Body.ExecutionPayload.Withdrawals.Clear()
+	block.Body.ExecutionPayload.Withdrawals.Append(&cltypes.Withdrawal{Validator: ^uint64(0), Amount: 1})
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(s, block.Slot))
+
+	_, err := processBlockForProduction(s, &cltypes.BlindOrExecutionBeaconBlock{
+		Slot:          block.Slot,
+		ProposerIndex: block.ProposerIndex,
+		ParentRoot:    block.ParentRoot,
+		BeaconBody:    block.Body,
+		Cfg:           s.BeaconConfig(),
+	})
+
+	require.ErrorContains(t, err, "withdrawals root mismatch")
 }
 
 func TestProductionUsesValidBuilderPayloadAfterSlotAdvance(t *testing.T) {

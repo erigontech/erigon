@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -346,7 +345,11 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.U256, error) {
 	}
 	gasResult := uint256.NewInt(0)
 	gasResult.Set(tipcap)
-	if head := rawdb.ReadCurrentHeader(tx); head != nil && head.BaseFee != nil {
+	head, err := api.currentHeader(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if head != nil && head.BaseFee != nil {
 		gasResult.Add(tipcap, head.BaseFee)
 	}
 
@@ -471,7 +474,10 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.U256, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	header := rawdb.ReadCurrentHeader(tx)
+	header, err := api.currentHeader(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	if header == nil || header.ExcessBlobGas == nil {
 		return nil, nil
 	}
@@ -497,7 +503,10 @@ func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.U256, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	header := rawdb.ReadCurrentHeader(tx)
+	header, err := api.currentHeader(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	if header == nil {
 		return nil, nil
 	}
