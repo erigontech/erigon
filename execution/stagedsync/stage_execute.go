@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -291,7 +292,8 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 
 	if changeset != nil {
 		accountDiffs := changeset[kv.AccountsDomain]
-		for _, entry := range accountDiffs {
+		// The collector keeps the first value, while diffs sort newer steps first.
+		for _, entry := range slices.Backward(accountDiffs) {
 			if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.AccountsDomain)) {
 				address := entry.Key[:len(entry.Key)-8]
 				keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
@@ -307,22 +309,38 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 					fmt.Printf("unwind (Block:%d,Tx:%d): del acc: %x, step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
 				}
 			}
-			// nil = "different step" (see DomainEntryDiff.Value): the account reverts to
-			// a value at another step, not a deletion. Skip it — the collect->load below
-			// can't preserve nil vs empty, so a kept nil would DeleteAccount a live account.
-			if entry.Value == nil {
-				continue
+			key := common.ToBytesZeroCopy(entry.Key)[:length.Addr]
+			value := entry.Value
+			if value == nil {
+				if accumulator == nil {
+					continue
+				}
+				// The pending unwind has not removed the discarded values from the database yet.
+				var err error
+				value, _, err = tx.GetAsOf(kv.AccountsDomain, key, txUnwindTo)
+				if err != nil {
+					return err
+				}
 			}
-			if err := stateChanges.Collect(common.ToBytesZeroCopy(entry.Key)[:length.Addr], entry.Value); err != nil {
+			if err := stateChanges.Collect(key, value); err != nil {
 				return err
 			}
 		}
 		storageDiffs := changeset[kv.StorageDomain]
 		for _, entry := range storageDiffs {
-			if entry.Value == nil {
-				continue // "different step", not a slot change — skip (see accounts loop)
+			key := common.ToBytesZeroCopy(entry.Key)
+			value := entry.Value
+			if value == nil {
+				if accumulator == nil {
+					continue
+				}
+				var err error
+				value, _, err = tx.GetAsOf(kv.StorageDomain, key[:len(key)-8], txUnwindTo)
+				if err != nil {
+					return err
+				}
 			}
-			if err := stateChanges.Collect(common.ToBytesZeroCopy(entry.Key), entry.Value); err != nil {
+			if err := stateChanges.Collect(key, value); err != nil {
 				return err
 			}
 		}
