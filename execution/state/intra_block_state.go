@@ -3286,7 +3286,7 @@ func (ibs *IntraBlockState) recordWriteAddress(addr accounts.Address, account *a
 		return
 	}
 	// A copy, made only here: the caller's account keeps changing.
-	val := account.SelfCopy()
+	val := ibs.versionedWrites.copyAccount(account)
 	if vw, ok := ibs.versionedWrites.GetAddress(addr); ok {
 		vw.Version = ibs.Version()
 		vw.Val = val
