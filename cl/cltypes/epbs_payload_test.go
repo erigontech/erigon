@@ -3,7 +3,6 @@ package cltypes
 import (
 	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -390,7 +389,7 @@ func TestSignedExecutionPayloadBidDecodePreservesMessageLimit(t *testing.T) {
 	require.NoError(t, err)
 
 	err = target.DecodeSSZ(encoded, 0)
-	require.True(t, errors.Is(err, ssz.ErrTooBigList), err)
+	require.ErrorIs(t, err, ssz.ErrTooBigList, err)
 	require.Same(t, message, target.Message)
 }
 
