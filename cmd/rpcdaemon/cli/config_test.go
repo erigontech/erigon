@@ -36,11 +36,18 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -136,6 +143,52 @@ func TestRemoteRulesEngineFinalizeDelegates(t *testing.T) {
 		_, err := e.Finalize(&chain.Config{}, header, nil, nil, nil, nil, nil, nil, false, log.New())
 		require.NoError(t, err)
 	})
+}
+
+type rpcdaemonTestL2 struct{}
+
+func (rpcdaemonTestL2) Name() string                                                       { return "rpcdaemontestl2" }
+func (rpcdaemonTestL2) ResolveRules(l2Version, blockNum, blockTime uint64, r *chain.Rules) {}
+
+var rpcdaemonTestL2Engine = ethash.NewFaker()
+
+func init() {
+	chain.RegisterL2Config("rpcdaemontestl2", func(json.RawMessage) (chain.L2Config, error) {
+		return rpcdaemonTestL2{}, nil
+	})
+	rulesconfig.RegisterL2Engine("rpcdaemontestl2", func(context.Context, *chain.Config, log.Logger) rules.Engine {
+		return rpcdaemonTestL2Engine
+	})
+}
+
+func TestRemoteRulesEngineInitL2(t *testing.T) {
+	for _, tc := range []struct {
+		name, l2 string
+		err      string
+	}{
+		{"registered", `{"name":"rpcdaemontestl2"}`, ""},
+		{"unregistered", `{"name":"otherl2"}`, "no L2 config registered"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			genesisHash := common.Hash{1}
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				if err := rawdb.WriteCanonicalHash(tx, genesisHash, 0); err != nil {
+					return err
+				}
+				return tx.Put(kv.ConfigTable, genesisHash[:], []byte(`{"chainId":1,"terminalTotalDifficulty":0,"l2":`+tc.l2+`}`))
+			}))
+
+			e := &remoteRulesEngine{}
+			err := e.init(db, nil, nil, log.New())
+			if tc.err != "" {
+				require.ErrorContains(t, err, tc.err)
+				return
+			}
+			require.NoError(t, err)
+			require.Same(t, rpcdaemonTestL2Engine, e.engine)
+		})
+	}
 }
 
 func TestRegularRpcServerGraphQLHostAndCORS(t *testing.T) {

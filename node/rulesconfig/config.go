@@ -18,6 +18,7 @@ package rulesconfig
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/davecgh/go-spew/spew"
@@ -77,24 +78,35 @@ func l2Engine(name string) (L2EngineFunc, bool) {
 	return newEngine, ok
 }
 
+// NewL2RulesEngine builds the registered rules engine of an L2 chain config,
+// or returns nil for a chain config without an l2 section.
+func NewL2RulesEngine(ctx context.Context, chainConfig *chain.Config, logger log.Logger) (rules.Engine, error) {
+	if !chainConfig.IsL2() {
+		return nil, nil
+	}
+	// An l2 section without a linked-in decoder must not fall back to ethash.
+	if err := chainConfig.ResolveL2(); err != nil {
+		return nil, err
+	}
+	newEngine, ok := l2Engine(chainConfig.L2.Name())
+	if !ok {
+		return nil, fmt.Errorf("no L2 rules engine registered for: %s", chainConfig.L2.Name())
+	}
+	// An L2 engine owns its complete behavior; the merge (PoS) wrap in
+	// CreateRulesEngine is for L1-family engines even when the L2 chain config
+	// carries a terminal total difficulty.
+	return newEngine(ctx, chainConfig, logger), nil
+}
+
 func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainConfig *chain.Config, config any, noVerify bool,
 	blockReader dbservices.FullBlockReader, readonly bool, logger log.Logger,
 ) rules.Engine {
-	var eng rules.Engine
-
-	// An l2 section without a linked-in decoder must not fall back to ethash.
-	if err := chainConfig.ResolveL2(); err != nil {
+	eng, err := NewL2RulesEngine(ctx, chainConfig, logger)
+	if err != nil {
 		panic(err.Error())
 	}
-	if chainConfig.L2 != nil {
-		newEngine, ok := l2Engine(chainConfig.L2.Name())
-		if !ok {
-			panic("no L2 rules engine registered for: " + chainConfig.L2.Name())
-		}
-		// An L2 engine owns its complete behavior; the merge (PoS) wrap below
-		// is for L1-family engines even when the L2 chain config carries a
-		// terminal total difficulty.
-		return newEngine(ctx, chainConfig, logger)
+	if eng != nil {
+		return eng
 	}
 	switch consensusCfg := config.(type) {
 	case *ethashcfg.Config:

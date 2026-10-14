@@ -82,6 +82,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -540,7 +541,13 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	var remoteCE *remoteRulesEngine
 
 	if cfg.WithDatadir {
+		l2Engine, err := rulesconfig.NewL2RulesEngine(ctx, cc, logger)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, ff, err
+		}
 		switch {
+		case l2Engine != nil:
+			engine = l2Engine
 		case cc != nil && cc.Aura != nil:
 			consensusDB, err := kv2.New(dbcfg.ConsensusDB, logger).Path(filepath.Join(cfg.DataDir, "aura")).Accede(true).Open(ctx)
 			if err != nil {
@@ -1010,6 +1017,15 @@ func (e *remoteRulesEngine) init(db kv.RoDB, blockReader dbservices.FullBlockRea
 	cc, err := readChainConfigFromDB(context.Background(), db)
 	if err != nil {
 		return err
+	}
+
+	l2Engine, err := rulesconfig.NewL2RulesEngine(context.Background(), cc, logger)
+	if err != nil {
+		return err
+	}
+	if l2Engine != nil {
+		e.engine = l2Engine
+		return nil
 	}
 
 	// TODO(yperbasis): try to unify with CreateRulesEngine
