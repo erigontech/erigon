@@ -2021,6 +2021,11 @@ func TestArenaAddressWritesOutliveTheSlab(t *testing.T) {
 	require.Equal(t, uint64(7), vw.Val.Nonce)
 	require.Equal(t, *uint256.NewInt(9), vw.Val.Balance)
 
+	// Prime the slab past the measured count, so the measurement sees steady-state writes, not chunk growth.
+	for i := range 128 {
+		ibs.recordWriteAddress(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i+1)))), &accounts.Account{Nonce: uint64(i)})
+	}
+	ibs.versionedWrites.ReleaseAndReset()
 	acc := &accounts.Account{Nonce: 3}
 	require.Zero(t, testing.AllocsPerRun(100, func() { ibs.recordWriteAddress(addr, acc) }), "no allocation per AddressPath write")
 }
