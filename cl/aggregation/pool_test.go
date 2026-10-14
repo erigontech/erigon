@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 )
@@ -602,6 +603,61 @@ func (t *PoolTestSuite) TestAddAttestationElectraBoundsRefusedDataPerCommittee()
 
 	t.Require().NoError(pool.AddAttestation(t.singleVote(0xaa, 14)), "the refused data kept its two voters")
 	t.Equal([]byte{0, 0xc3}, t.committeeAggregateBits(pool, 0xaa))
+}
+
+// A full set of refused data must not lock out new data: each new data root starts with one voter,
+// so it takes the place of the weakest refused data and gathers its votes from there.
+func (t *PoolTestSuite) TestAddAttestationElectraNewDataEntersAFullRefusedSet() {
+	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).AnyTimes()
+	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).AnyTimes()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock).(*aggregationPoolImpl)
+	// A committee of 31 members.
+	vote := func(source byte, member int) *solid.Attestation {
+		att := t.electraAttestationWithSource(5, 1, source)
+		bits := []byte{0, 0, 0, 0x80}
+		bits[member/8] |= 1 << (member % 8)
+		att.AggregationBits = solid.BitlistFromBytes(bits, 2048*64)
+		return att
+	}
+	member := 0
+	for source := range 2 * maxDataPerCommittee { // stored data, then refused data, two voters each
+		for range 2 {
+			t.Require().NoError(pool.AddAttestation(vote(byte(source), member)))
+			member++
+		}
+	}
+	t.Require().Len(pool.refused[slotCommittee{slot: 5, committee: 1}], maxDataPerCommittee)
+
+	for range 3 {
+		t.Require().NoError(pool.AddAttestation(vote(0xcc, member)))
+		member++
+	}
+	bits := t.committeeAggregateBits(pool, 0xcc)
+	t.Require().NotNil(bits, "the new data gathered three voters and displaced stored data with two")
+	t.Equal(3, utils.BitsOnCount(bits)-1)
+}
+
+// Among refused data with as many voters, the data that went longest without a new voter gives way.
+func (t *PoolTestSuite) TestAddAttestationElectraEvictsTheStalestOfEquallyWeakRefusedData() {
+	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).AnyTimes()
+	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).AnyTimes()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock).(*aggregationPoolImpl)
+	t.fillCommitteeWithTwoVoteData(pool)
+	for i := range maxDataPerCommittee {
+		t.Require().NoError(pool.AddAttestation(t.singleVote(byte(0xb0+i), 8+i)))
+	}
+
+	t.Require().NoError(pool.AddAttestation(t.singleVote(0xcc, 12)))
+
+	refused := pool.refused[slotCommittee{slot: 5, committee: 1}]
+	t.Len(refused, maxDataPerCommittee)
+	for _, entry := range refused {
+		t.NotEqual(byte(0xb0), entry.attestation.Data.Source.Root[0], "the oldest single-vote data gave way")
+	}
 }
 
 func (t *PoolTestSuite) TestAddAttestationElectraLimitsTotalAggregates() {

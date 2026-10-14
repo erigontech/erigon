@@ -56,6 +56,7 @@ var newSignatureAggregator = func() signatureAggregator { return &bls.SignatureA
 type committeeAggregate struct {
 	attestation *solid.Attestation
 	signature   signatureAggregator
+	lastVote    uint64 // refused data only: when it last gained a voter
 }
 
 type aggregationPoolImpl struct {
@@ -72,6 +73,8 @@ type aggregationPoolImpl struct {
 	// voters than the committee's weakest data. Only full committees have entries, so the pool
 	// bound also bounds these.
 	refused map[slotCommittee]map[common.Hash]*committeeAggregate
+	// refusedVotes orders the votes added to refused data.
+	refusedVotes uint64
 }
 
 type slotCommittee struct {
@@ -258,15 +261,15 @@ func (p *aggregationPoolImpl) addRefusedVote(perCommittee slotCommittee, key key
 		if entry, err = newCommitteeAggregate(inAtt, version); err != nil {
 			return err
 		}
-		if !evictWeakestRefused(refused, voteCount(entry.attestation)) {
-			return ErrPoolLimit
-		}
+		evictWeakestRefused(refused)
 		if refused == nil {
 			refused = make(map[common.Hash]*committeeAggregate)
 			p.refused[perCommittee] = refused
 		}
 		refused[key.dataRoot] = entry
 	}
+	p.refusedVotes++
+	entry.lastVote = p.refusedVotes
 	if displacedKey, displaced := p.evictWeakerData(perCommittee, voteCount(entry.attestation)); displaced != nil {
 		delete(refused, key.dataRoot)
 		refused[displacedKey.dataRoot] = displaced
@@ -275,25 +278,28 @@ func (p *aggregationPoolImpl) addRefusedVote(perCommittee slotCommittee, key key
 	return nil
 }
 
-// evictWeakestRefused makes room for new refused data with incomingVotes: the refused data with the
-// fewest voters gives way if it has no more. Ties go to the newer data, so early votes for other
-// data cannot hold the committee's slots for refused data.
-func evictWeakestRefused(refused map[common.Hash]*committeeAggregate, incomingVotes int) bool {
+// evictWeakestRefused makes room for new refused data, which always enters: every new data starts
+// with one voter, so refusing it would lock any new data out of a full set. The refused data with
+// the fewest voters gives way, and among those the one that went longest without a new voter.
+func evictWeakestRefused(refused map[common.Hash]*committeeAggregate) {
 	if len(refused) < maxDataPerCommittee {
-		return true
+		return
 	}
-	var weakest common.Hash
-	weakestVotes := -1
+	var weakest *committeeAggregate
+	var weakestRoot common.Hash
 	for root, entry := range refused {
-		if votes := voteCount(entry.attestation); weakestVotes < 0 || votes < weakestVotes {
-			weakest, weakestVotes = root, votes
+		if weakest == nil || weaker(entry, weakest) {
+			weakest, weakestRoot = entry, root
 		}
 	}
-	if weakestVotes > incomingVotes {
-		return false
+	delete(refused, weakestRoot)
+}
+
+func weaker(a, b *committeeAggregate) bool {
+	if votesA, votesB := voteCount(a.attestation), voteCount(b.attestation); votesA != votesB {
+		return votesA < votesB
 	}
-	delete(refused, weakest)
-	return true
+	return a.lastVote < b.lastVote
 }
 
 func (p *aggregationPoolImpl) GetAggregatationByRoot(root common.Hash) *solid.Attestation {
