@@ -290,7 +290,10 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 			job.logStorageErrorOnce(err)
 			return fmt.Errorf("%w: %w", ErrIgnore, err)
 		}
-		return err
+		if errors.Is(err, forkchoice.ErrBlockInvalid) {
+			return err
+		}
+		return fmt.Errorf("%w: %w", ErrIgnore, err)
 	}
 	return nil
 }
@@ -516,6 +519,9 @@ func (b *blockService) validateGossip(ctx context.Context, msg *cltypes.SignedBe
 	}
 	epoch := msg.Block.Slot / b.beaconCfg.SlotsPerEpoch
 	blockVersion := b.beaconCfg.GetCurrentStateVersion(epoch)
+	if msg.Version() != blockVersion {
+		return fmt.Errorf("%w: block schema does not match slot", ErrIgnore)
+	}
 	if blockVersion >= clparams.GloasVersion {
 		if err := validateGloasBlockBodyLimits(b.beaconCfg, msg.Block.Body); err != nil {
 			return err

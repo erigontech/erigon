@@ -31,6 +31,7 @@ import (
 	"go/token"
 	"log"
 	"os"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -153,7 +154,73 @@ func inlineBody(instructions []byte, o fastOp) string {
 			id.Name = rename[id.Name]
 		}
 	}
+	saveAroundCalls(body)
 	return inlineReturns(text(fset, body), o)
+}
+
+// outOfLine are the funcs run's inlined bodies call that Go does not inline.
+var outOfLine = []string{"Mul", "Div", "SetBytes", "ILsh", "validJumpdest"}
+
+// saveAroundCalls stores gasLeft and pc in callContext before each statement of body
+// that calls an outOfLine func, and loads them back after it. Neither is then live
+// across a call, so Go does not spill them at the top of run's loop, on every op.
+func saveAroundCalls(body *ast.BlockStmt) {
+	save := mustStmt("callContext.gas, callContext.savedPC = gasLeft, pc")
+	load := mustStmt("gasLeft, pc = callContext.gas, callContext.savedPC")
+	ast.Inspect(body, func(n ast.Node) bool {
+		block, ok := n.(*ast.BlockStmt)
+		if !ok {
+			return true
+		}
+		var list []ast.Stmt
+		for _, s := range block.List {
+			switch s.(type) {
+			case *ast.ExprStmt, *ast.AssignStmt:
+				if callsOutOfLine(s) {
+					list = append(list, save, s, load)
+					continue
+				}
+			}
+			list = append(list, s)
+		}
+		block.List = list
+		return true
+	})
+}
+
+func callsOutOfLine(s ast.Stmt) (found bool) {
+	ast.Inspect(s, func(n ast.Node) bool {
+		if c, ok := n.(*ast.CallExpr); ok {
+			if sel, ok := c.Fun.(*ast.SelectorExpr); ok && slices.Contains(outOfLine, sel.Sel.Name) {
+				found = true
+			}
+		}
+		return !found
+	})
+	return found
+}
+
+// mustStmt parses src as a statement without positions, so the printer lays it
+// out on its own line wherever it lands.
+func mustStmt(src string) ast.Stmt {
+	f, err := parser.ParseFile(token.NewFileSet(), "", "package p\nfunc _() {\n"+src+"\n}", 0)
+	if err != nil {
+		log.Fatal(err)
+	}
+	s := f.Decls[0].(*ast.FuncDecl).Body.List[0]
+	ast.Inspect(s, func(n ast.Node) bool {
+		if n == nil {
+			return false
+		}
+		v := reflect.ValueOf(n).Elem()
+		for _, f := range v.Fields() {
+			if f.Type() == reflect.TypeFor[token.Pos]() {
+				f.SetInt(int64(token.NoPos))
+			}
+		}
+		return true
+	})
+	return s
 }
 
 // closure returns the type and body of the func literal that fn returns.

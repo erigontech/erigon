@@ -301,6 +301,48 @@ func (t *voluntaryExitTestSuite) TestSeenValidatorIsIgnoredAfterPoolPrune() {
 	t.Require().True(t.gomockCtrl.Satisfied())
 }
 
+func (t *voluntaryExitTestSuite) TestVoluntaryExitGossipNotAcceptedBeforeSignatureVerification() {
+	const validatorIndex = uint64(10)
+	service := t.voluntaryExitService.(*voluntaryExitService)
+	cfg := clparams.MainnetBeaconConfig
+	cfg.ShardCommitteePeriod = 0
+	service.beaconCfg = &cfg
+	clock := eth_clock.NewEthereumClock(1000, common.Hash{}, &cfg)
+	service.ethClock = clock
+	service.now = func() time.Time {
+		return clock.GetSlotTime(100 * cfg.SlotsPerEpoch)
+	}
+
+	_, st, _ := tests.GetBellatrixRandom()
+	t.Require().NoError(st.SetSlot(100 * cfg.SlotsPerEpoch))
+	st.ValidatorSet().Set(int(validatorIndex), solid.NewValidatorFromParameters(
+		common.Bytes48{},
+		common.Hash{},
+		0,
+		false,
+		0,
+		0,
+		cfg.FarFutureEpoch,
+		cfg.FarFutureEpoch,
+	))
+	t.Require().NoError(t.syncedData.OnHeadState(st))
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		return false, nil
+	}
+
+	msg := &SignedVoluntaryExitForGossip{
+		SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{
+			VoluntaryExit: &cltypes.VoluntaryExit{
+				Epoch:          1,
+				ValidatorIndex: validatorIndex,
+			},
+		},
+		ImmediateVerification: false,
+	}
+	err := service.ProcessMessage(context.Background(), nil, msg)
+	t.Require().ErrorIs(err, ErrInvalidBlsSignature)
+}
+
 func (t *voluntaryExitTestSuite) TestIncompleteMessageReturnsError() {
 	for _, msg := range []*SignedVoluntaryExitForGossip{
 		nil,
