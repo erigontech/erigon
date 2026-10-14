@@ -19,7 +19,7 @@ func layerVersionMaps(base StateReader, prevBlocks []*VersionMap) StateReader {
 		if vm == nil {
 			continue
 		}
-		r = NewVersionedStateReader(finalTxIdx, ReadSet{}, vm, r)
+		r = newPrevBlockLayerReader(finalTxIdx, vm, r)
 	}
 	return r
 }
