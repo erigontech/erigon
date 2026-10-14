@@ -394,18 +394,19 @@ func (s *simulator) sanitizeCall(
 		effectiveCap = uint64(math.MaxUint64 / 2)
 	}
 
+	isAmsterdam := s.chainConfig.IsAmsterdam(blockContext.Time)
 	blockGas := protocol.NewBlockGasPool(gasLeft(blockContext.GasLimit, gasUsed.BlockExecution),
 		gasLeft(blockContext.GasLimit, gasUsed.BlockState), 0)
 
 	if args.Gas == nil {
-		// Default to remaining block gas, but capped by the node's effective gas cap.
-		remaining := min(blockGas.ExecutionGasAvailable(), blockGas.StateGasAvailable(), effectiveCap)
+		// Default to the largest gas the block can still include, capped by the node's effective gas cap.
+		remaining := min(protocol.MaxInclusionGas(blockGas, isAmsterdam, !s.validation), effectiveCap)
 		args.Gas = (*hexutil.Uint64)(&remaining)
 	} else if globalGasCap > 0 && globalGasCap < uint64(*args.Gas) {
 		log.Warn("Caller gas above allowance, capping", "requested", args.Gas, "cap", globalGasCap)
 		args.Gas = (*hexutil.Uint64)(&globalGasCap)
 	}
-	executionContribution, stateContribution := protocol.InclusionContributions(uint64(*args.Gas), s.chainConfig.IsAmsterdam(blockContext.Time), !s.validation)
+	executionContribution, stateContribution := protocol.InclusionContributions(uint64(*args.Gas), isAmsterdam, !s.validation)
 	if err := protocol.CheckBlockGasInclusion(blockGas, executionContribution, stateContribution, 0); err != nil {
 		return blockGasLimitReachedError(fmt.Sprintf("block gas limit reached: gas %d, execution gas left %d, state gas left %d",
 			uint64(*args.Gas), blockGas.ExecutionGasAvailable(), blockGas.StateGasAvailable()))

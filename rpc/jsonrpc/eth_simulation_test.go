@@ -1002,6 +1002,31 @@ func TestSanitizeCallDefaultGasBoundedByState(t *testing.T) {
 	assert.Equal(t, uint64(2_000_000), uint64(*args.Gas))
 }
 
+// With validation the execution side of a call is capped at MaxTxnGasLimit, so the
+// default gas is the remaining state gas while a full cap of execution gas remains.
+func TestSanitizeCallDefaultGasPerValidationMode(t *testing.T) {
+	tests := []struct {
+		name       string
+		validation bool
+		gasUsed    protocol.GasUsed
+		want       uint64
+	}{
+		{"validation, execution holds a cap", true, protocol.GasUsed{BlockExecution: 12_000}, 30_000_000},
+		{"no validation, smaller remainder", false, protocol.GasUsed{BlockExecution: 12_000}, 29_988_000},
+		{"validation, execution below a cap", true, protocol.GasUsed{BlockExecution: 20_000_000}, 10_000_000},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			args := callArgs()
+			bc := blockCtx(30_000_000)
+			sim := amsterdamSimulator()
+			sim.validation = tc.validation
+			require.NoError(t, sim.sanitizeCall(&args, nil, &bc, nil, tc.gasUsed, 0))
+			assert.Equal(t, tc.want, uint64(*args.Gas))
+		})
+	}
+}
+
 func newAmsterdamSimulateAPI(t *testing.T) *APIImpl {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: chain.AllProtocolChanges}))
 	return newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
