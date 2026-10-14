@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -38,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/datastruct/posidx"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -49,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -261,7 +264,6 @@ func TestHistoryCollationBuild(t *testing.T) {
 			valWords = append(valWords, string(w))
 		}
 		require.Equal([]string{"", "value1.1", "", "value2.1", "value2.2", ""}, valWords)
-		require.Equal(6, int(sf.historyIdx.KeyCount()))
 		ge := sf.efHistoryDecomp.MakeGetter()
 		ge.Reset(0)
 		var keyWords []string
@@ -297,21 +299,16 @@ func TestHistoryCollationBuild(t *testing.T) {
 			w, _ := ge.Next(nil)
 			require.Equal(keyWords[i], string(w))
 		}
-		r = recsplit.NewIndexReader(sf.historyIdx)
-		defer r.Close()
-
 		gh = seg.NewPagedReader(h.dataReader(sf.historyDecomp), compressedPageValuesCount, true)
 		var vi int
 		for i := 0; i < len(keyWords); i++ {
 			ints := intArrs[i]
 			for j := range ints {
-				var txKey [8]byte
-				binary.BigEndian.PutUint64(txKey[:], ints[j])
-				offset, ok := r.Lookup2(txKey[:], []byte(keyWords[i]))
-				if !ok {
-					continue
-				}
-				gh.Reset(offset)
+				// .ef is walked in key order, so keyWords index is the key ordinal
+				// and j the rank of that txNum in the key's list
+				off, ok := sf.historyIdx.Get(uint64(i), uint64(j))
+				require.True(ok)
+				gh.Reset(off)
 				w, _ := gh.Next(nil)
 				require.Equal(valWords[vi], string(w))
 				vi++
@@ -325,41 +322,6 @@ func TestHistoryCollationBuild(t *testing.T) {
 	t.Run("small_values", func(t *testing.T) {
 		db, h := testDbAndHistory(t, false, logger)
 		test(t, h, db)
-	})
-}
-
-// TestHistoryBuildVI_PageCounterResetOnCollisionRetry verifies that the page
-// counter 'i' used for paged history files is reset when buildVI retries due
-// to a recsplit collision. Without the reset, the .vi index would contain
-// incorrect offsets on the retry pass.
-//
-// The bug only manifests when compressedPageValuesCount > 0 (paged history),
-// which happens during merge (not initial collation). This test forces a
-// collision retry during merge and verifies history lookups remain correct.
-func TestHistoryBuildVI_PageCounterResetOnCollisionRetry(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
-	t.Parallel()
-
-	logger := log.New()
-
-	test := func(t *testing.T, largeValues bool) {
-		t.Helper()
-		db, h, txs := filledHistory(t, largeValues, logger)
-
-		// Force collision retries during buildVI calls.
-		// Set the hook AFTER collation but BEFORE merge, so only merge's
-		// buildVI calls get the forced collision.
-		collateAndMergeHistoryWithCollisionRetry(t, db, h, txs)
-		checkHistoryHistory(t, h, txs)
-	}
-	t.Run("large_values", func(t *testing.T) {
-		test(t, true)
-	})
-	t.Run("small_values", func(t *testing.T) {
-		test(t, false)
 	})
 }
 
@@ -416,9 +378,115 @@ func TestIntegrityHistoryValueIndex(t *testing.T) {
 	// a .v they were not built from
 	require.GreaterOrEqual(t, len(ht.files), 2)
 	a, b := ht.files[0].src, ht.files[1].src
-	a.index, b.index = b.index, a.index
-	defer func() { a.index, b.index = b.index, a.index }()
+	a.posIdx, b.posIdx = b.posIdx, a.posIdx
+	defer func() { a.posIdx, b.posIdx = b.posIdx, a.posIdx }()
 	require.Error(t, ht.IntegrityHistoryValueIndex(t.Context(), true, 0))
+}
+
+// A v2 .vi is addressed by position: the key's ordinal in .ef and the rank of
+// its txNum in that key's list.
+func TestHistoryValueIndexV2(t *testing.T) {
+	valuesPerKey := []uint64{3, 1, 2}
+	const pageSize = 2
+	offsets := []uint64{0, 40, 90} // one per page of 2 values
+
+	path := filepath.Join(t.TempDir(), "v2.vi")
+	w, err := posidx.NewWriter(path, t.TempDir(), pageSize, uint64(len(valuesPerKey)), 6, offsets[len(offsets)-1])
+	require.NoError(t, err)
+	defer w.Close()
+	w.NoFsync()
+	for _, n := range valuesPerKey {
+		w.AddRun(n)
+	}
+	for _, off := range offsets {
+		w.AddPage(off)
+	}
+	require.NoError(t, w.Build())
+
+	var item FilesItem
+	require.NoError(t, openHistoryValueIndex(&item, path, version.V2_0))
+	defer item.posIdx.Close()
+
+	var ordinal uint64
+	for keyOrdinal, n := range valuesPerKey {
+		for rank := range n {
+			// txNum and key are ignored by a v2 index
+			off, ok := historyValueOffset(&item, uint64(keyOrdinal), rank, 0, nil)
+			require.True(t, ok)
+			require.Equal(t, offsets[ordinal/pageSize], off, "key %d rank %d", keyOrdinal, rank)
+			ordinal++
+		}
+	}
+}
+
+// A v1 .vi is a perfect hash over txNum+key. Read-only consumers cannot rebuild
+// accessors, so a datadir holding them has to keep working.
+func TestHistoryValueIndexV1(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "v1.vi")
+	keys := [][]byte{[]byte("aaa"), []byte("bbb"), []byte("ccc")}
+	txNums := []uint64{5, 9, 11}
+
+	salt := uint32(1)
+	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+		KeyCount: len(keys), BucketSize: 10, Salt: &salt, TmpDir: tmpDir,
+		IndexFile: path, LeafSize: 8, NoFsync: true,
+	}, log.New())
+	require.NoError(t, err)
+	defer rs.Close()
+	for i, k := range keys {
+		require.NoError(t, rs.AddKey(historyKey(txNums[i], k, nil), uint64(i)*100))
+	}
+	require.NoError(t, rs.Build(t.Context()))
+
+	var item FilesItem
+	require.NoError(t, openHistoryValueIndex(&item, path, version.V1_0))
+	defer item.index.Close()
+
+	for i, k := range keys {
+		// the position arguments are ignored by a v1 index
+		off, ok := historyValueOffset(&item, 0, 0, txNums[i], k)
+		require.True(t, ok)
+		require.Equal(t, uint64(i)*100, off)
+	}
+}
+
+// An empty v1 index has no keys, and its Lookup panics.
+func TestHistoryValueIndexV1Empty(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "empty.vi")
+	salt := uint32(1)
+	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+		KeyCount: 0, BucketSize: 10, Salt: &salt, TmpDir: tmpDir,
+		IndexFile: path, LeafSize: 8, NoFsync: true,
+	}, log.New())
+	require.NoError(t, err)
+	defer rs.Close()
+	require.NoError(t, rs.Build(t.Context()))
+
+	var item FilesItem
+	require.NoError(t, openHistoryValueIndex(&item, path, version.V1_0))
+	defer item.index.Close()
+	_, ok := historyValueOffset(&item, 0, 0, 0, []byte("aaa"))
+	require.False(t, ok)
+}
+
+// The II and history file lists are chosen independently, so a positional .vi
+// can be reached from an .ef built over another range. Answering that would
+// return a different key's value, so the .v file has to be found by pairing the
+// range rather than by covering the txNum.
+func TestPairedFileRejectsUnpairedRange(t *testing.T) {
+	ht := &HistoryRoTx{files: visibleFiles{
+		{startTxNum: 0, endTxNum: 128, i: 0},
+		{startTxNum: 128, endTxNum: 192, i: 1},
+	}}
+
+	f, ok := ht.pairedFile(visibleFile{startTxNum: 128, endTxNum: 192})
+	require.True(t, ok)
+	require.Equal(t, 1, f.i)
+
+	_, ok = ht.pairedFile(visibleFile{startTxNum: 128, endTxNum: 256})
+	require.False(t, ok, "an .ef covering a different range must not be answered positionally")
 }
 
 func TestHistoryAfterPrune(t *testing.T) {
@@ -1286,64 +1354,6 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 			break
 		}
 	}
-
-	err = tx.Commit()
-	require.NoError(err)
-}
-
-// collateAndMergeHistoryWithCollisionRetry is like collateAndMergeHistory
-// but forces a recsplit collision retry on every buildVI call during merge.
-func collateAndMergeHistoryWithCollisionRetry(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
-	tb.Helper()
-	require := require.New(tb)
-
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-	ctx := tb.Context()
-	tx, err := db.BeginRwNosync(ctx)
-	require.NoError(err)
-	defer tx.Rollback()
-
-	// Collate without collision forcing
-	for step := kv.Step(0); step < kv.Step(txs/h.stepSize)-1; step++ {
-		require.NoError(h.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
-
-		hc := h.beginForTests()
-		_, err = hc.Prune(ctx, tx, step.ToTxNum(h.stepSize), (step + 1).ToTxNum(h.stepSize), math.MaxUint64, false, logEvery)
-		hc.Close()
-		require.NoError(err)
-	}
-
-	// Enable collision forcing for merge phase only
-	collisionRetries := 0
-	h._testBuildVIHook = func(rs *recsplit.RecSplit) {
-		rs.ForceCollisionOnce()
-		collisionRetries++
-	}
-
-	var r HistoryRanges
-	maxSpan := h.stepSize * config3.DefaultStepsInFrozenFile
-
-	for {
-		if stop := func() bool {
-			hc := h.beginForTests()
-			defer hc.Close()
-			r = hc.findMergeRange(hc.files.EndTxNum(), maxSpan)
-			if !r.any() {
-				return true
-			}
-			indexOuts, historyOuts, err := hc.staticFilesInRange(r)
-			require.NoError(err)
-			indexIn, historyIn, err := hc.mergeFiles(ctx, indexOuts, historyOuts, r, background.NewProgressSet())
-			require.NoError(err)
-			h.integrateMergedDirtyFiles(indexIn, historyIn)
-			return false
-		}(); stop {
-			break
-		}
-	}
-
-	require.Greater(collisionRetries, 0, "expected at least one buildVI collision retry during merge")
 
 	err = tx.Commit()
 	require.NoError(err)

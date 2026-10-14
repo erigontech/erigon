@@ -145,7 +145,8 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 		hi.nextKey = key
 		offset, ok := historyValueOffset(historyItem.src, keyOrdinal, rank, txNum, hi.nextKey)
 		if !ok {
-			continue
+			return fmt.Errorf("%s holds no value for key %x at txNum %d, which %s indexes",
+				historyItem.src.decompressor.FileName(), hi.nextKey, txNum, top.g.FileName())
 		}
 
 		compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
@@ -473,7 +474,8 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		hi.nextKey = key
 		offset, ok := historyValueOffset(historyItem.src, keyOrdinal, rank, txNum, hi.nextKey)
 		if !ok {
-			continue
+			return fmt.Errorf("%s holds no value for key %x at txNum %d, which %s indexes",
+				historyItem.src.decompressor.FileName(), hi.nextKey, txNum, top.g.FileName())
 		}
 
 		compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
@@ -767,7 +769,6 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 		ht.histReader = nil
 	}
 	for ht.fileIdx < len(ht.hc.iit.files) {
-		historyItem := ht.hc.files[ht.fileIdx]
 		item := ht.hc.iit.files[ht.fileIdx]
 		if ht.fromTxNum > item.endTxNum {
 			moveToNextFileFn()
@@ -777,6 +778,11 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 			// done
 			ht.hasNext = false
 			return nil
+		}
+		historyItem, ok := ht.hc.pairedFile(item)
+		if !ok {
+			moveToNextFileFn()
+			continue
 		}
 
 		if ht.seqItr == nil {
@@ -828,7 +834,7 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 		}
 
 		if ht.histReader == nil {
-			getter := ht.hc.statelessGetter(ht.fileIdx)
+			getter := ht.hc.statelessGetter(historyItem.i)
 			getter.Reset(0)
 			ht.histReader = seg.NewPagedReader(
 				getter,

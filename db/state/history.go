@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/existence"
+	"github.com/erigontech/erigon/db/datastruct/posidx"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
@@ -65,8 +66,8 @@ type History struct {
 	// readers against that snapshot in zero-copy way.
 	dirtyFiles *DirtyFiles
 
-	// _testBuildVIHook - test-only: called with the recsplit before the build loop in buildVI
-	_testBuildVIHook func(rs *recsplit.RecSplit)
+	// _testBuildVIHook - test-only: called before the build loop in buildVI
+	_testBuildVIHook func()
 }
 
 func NewHistory(cfg statecfg.HistCfg, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*History, error) {
@@ -115,14 +116,6 @@ func (h *History) vFileNameMask(fromStep, toStep kv.Step) string {
 
 func (h *History) vAccessorFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.vi", h.FilenameBase, fromStep, toStep)
-}
-
-func (h *History) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
-	accessor, err := recsplit.OpenIndex(fPath)
-	if err != nil {
-		return nil, err
-	}
-	return accessor, nil
 }
 
 // openList - main method to open list of files.
@@ -231,9 +224,6 @@ func (h *History) buildVi(ctx context.Context, item *FilesItem, ps *background.P
 }
 
 func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHist *seg.Decompressor, efBaseTxNum uint64, ps *background.ProgressSet) error {
-	var histKey []byte
-	var valOffset uint64
-
 	var iiReader, histReader *seg.Reader
 	{
 		histView, err := hist.OpenSequentialView()
@@ -251,12 +241,21 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		histReader = seg.NewReader(histView.MakeGetter(), h.Compression)
 	}
 
-	var keyBuf, valBuf []byte
-	cnt := uint64(0)
+	pageSize := uint64(hist.CompressedPageValuesCount())
+	if hist.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+		pageSize = uint64(h.HistoryValuesOnCompressedPage)
+	}
+	if pageSize == 0 { // unpaged .v: every value has its own offset
+		pageSize = 1
+	}
+
+	var valBuf []byte
+	var keyCount, valueCount uint64
 	for i := 0; iiReader.HasNext(); i++ {
-		keyBuf, _ = iiReader.Next(keyBuf[:0]) // skip key
+		iiReader.Skip() // the count needs the txNum lists, not the keys
 		valBuf, _ = iiReader.Next(valBuf[:0])
-		cnt += multiencseq.Count(valBuf)
+		keyCount++
+		valueCount += multiencseq.Count(valBuf)
 		if i%1024 == 0 {
 			select {
 			case <-ctx.Done():
@@ -267,101 +266,58 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	}
 
 	_, fName := filepath.Split(historyIdxPath)
-	p := ps.AddNew(fName, uint64(efHist.Count())/2)
+	p := ps.AddNew(fName, keyCount)
 	defer ps.Delete(p)
-	var rs *recsplit.RecSplit
-	{
-		var err error
-		rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
-			KeyCount:   int(cnt),
-			Enums:      false,
-			BucketSize: recsplit.DefaultBucketSize,
-			LeafSize:   recsplit.DefaultLeafSize,
-			TmpDir:     h.dirs.Tmp,
-			IndexFile:  historyIdxPath,
-			Salt:       h.salt.Load(),
-			NoFsync:    h.noFsync,
-			Workers:    h.BuildAccessorsWorkers,
-		}, h.logger)
-		if err != nil {
-			return fmt.Errorf("create recsplit: %w", err)
-		}
-		defer rs.Close()
-		rs.LogLvl(log.LvlTrace)
-		if h._testBuildVIHook != nil {
-			h._testBuildVIHook(rs)
-		}
+
+	w, err := posidx.NewWriter(historyIdxPath, h.dirs.Tmp, pageSize, keyCount, valueCount, uint64(hist.Size()))
+	if err != nil {
+		return err
+	}
+	defer w.Close()
+	if h.noFsync {
+		w.NoFsync()
+	}
+
+	histReader.Reset(0)
+	iiReader.Reset(0)
+	if h._testBuildVIHook != nil {
+		h._testBuildVIHook()
 	}
 
 	var seq multiencseq.SequenceReader
 	var it multiencseq.SequenceIterator
+	var valOffset, value uint64
+	for keys := uint64(0); iiReader.HasNext(); keys++ {
+		iiReader.Skip() // the value index is addressed by position, not by key
+		valBuf, _ = iiReader.Next(valBuf[:0])
 
-	for {
-		histReader.Reset(0)
-		iiReader.Reset(0)
-		rs.SetProgress(p)
+		w.AddRun(multiencseq.Count(valBuf))
 
-		i := 0
-
-		valOffset = 0
-		for keys := 0; iiReader.HasNext(); keys++ {
-			keyBuf, _ = iiReader.Next(keyBuf[:0])
-			valBuf, _ = iiReader.Next(valBuf[:0])
-
-			// fmt.Printf("ef key %x\n", keyBuf)
-
-			seq.Reset(efBaseTxNum, valBuf)
-			it.Reset(&seq, 0)
-			for it.HasNext() {
-				txNum, err := it.Next()
-				if err != nil {
-					return err
-				}
-				histKey = historyKey(txNum, keyBuf, histKey[:0])
-				if err := rs.AddKey(histKey, valOffset); err != nil {
-					return err
-				}
-
-				// file not the config is the source of truth for the .v file compression state
-				compressedPageValuesCount := hist.CompressedPageValuesCount()
-
-				if hist.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-					compressedPageValuesCount = h.HistoryValuesOnCompressedPage
-				}
-
-				if compressedPageValuesCount == 0 {
-					valOffset, _ = histReader.Skip()
-				} else {
-					i++
-					if i%compressedPageValuesCount == 0 {
-						valOffset, _ = histReader.Skip()
-					}
-				}
+		seq.Reset(efBaseTxNum, valBuf)
+		it.Reset(&seq, 0)
+		for it.HasNext() {
+			if _, err := it.Next(); err != nil {
+				return err
 			}
-
-			if keys%1024 == 0 {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				default:
-				}
+			if value%pageSize == 0 {
+				w.AddPage(valOffset)
+			}
+			value++
+			if value%pageSize == 0 {
+				valOffset, _ = histReader.Skip()
 			}
 		}
 
-		if err := rs.Build(ctx); err != nil {
-			if rs.Collision() {
-				log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
-				if err := rs.ResetNextSalt(); err != nil {
-					return err
-				}
-			} else {
-				return fmt.Errorf("build idx: %w", err)
+		if keys%1024 == 0 {
+			p.Processed.Store(keys)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
 			}
-		} else {
-			break
 		}
 	}
-	return nil
+	return w.Build()
 }
 
 func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet, historyFiles *MissedAccessorHistoryFiles) {
@@ -757,7 +713,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 
 type HistoryFiles struct {
 	historyDecomp   *seg.Decompressor
-	historyIdx      *recsplit.Index
+	historyIdx      *posidx.Index
 	efHistoryDecomp *seg.Decompressor
 	efHistoryIdx    *recsplit.Index
 	efExistence     *existence.Filter
@@ -795,7 +751,8 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 	}
 	var (
 		historyDecomp, efHistoryDecomp *seg.Decompressor
-		historyIdx, efHistoryIdx       *recsplit.Index
+		efHistoryIdx                   *recsplit.Index
+		historyIdx                     *posidx.Index
 
 		efExistence *existence.Filter
 		closeComp   = true
@@ -865,7 +822,7 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 		return HistoryFiles{}, fmt.Errorf("build %s .vi: %w", h.FilenameBase, err)
 	}
 
-	if historyIdx, err = h.openHashMapAccessor(historyIdxPath); err != nil {
+	if historyIdx, err = posidx.Open(historyIdxPath); err != nil {
 		return HistoryFiles{}, fmt.Errorf("open idx: %w", err)
 	}
 	closeComp = false
@@ -897,7 +854,7 @@ func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64
 
 	fi := newFilesItem(txNumFrom, txNumTo)
 	fi.decompressor = sf.historyDecomp
-	fi.index = sf.historyIdx
+	fi.posIdx = sf.historyIdx
 	h.dirtyFiles.Set(fi)
 }
 
@@ -1134,10 +1091,25 @@ func (ht *HistoryRoTx) pairedFile(efItem visibleFile) (it visibleFile, ok bool) 
 	return it, false
 }
 
+// openHistoryValueIndex opens a .vi in the format its version names. v1 files
+// stay readable: rpcdaemon and other read-only consumers cannot rebuild them.
+func openHistoryValueIndex(item *FilesItem, path string, fileVer version.Version) (err error) {
+	if fileVer.Less(version.V2_0) {
+		item.index, err = recsplit.OpenIndex(path)
+	} else {
+		item.posIdx, err = posidx.Open(path)
+	}
+	return err
+}
+
 // historyValueOffset returns the offset in the .v file of the page holding the
-// value of key at txNum. keyOrdinal and rank locate that value in the .ef file
-// the key was found in.
+// value of key at txNum. A v2 .vi is addressed by keyOrdinal and rank in the .ef
+// file it was built from, so f must be paired with the .ef the key was found in.
+// A v1 .vi is a perfect hash over txNum+key.
 func historyValueOffset(f *FilesItem, keyOrdinal, rank, txNum uint64, key []byte) (uint64, bool) {
+	if f.posIdx != nil {
+		return f.posIdx.Get(keyOrdinal, rank)
+	}
 	if f.index.Empty() { // recsplit Lookup panics on a keyless index
 		return 0, false
 	}
@@ -1166,14 +1138,16 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 		return nil, false, nil
 	}
 	histTxNum := seek.txNum
-	historyItem, ok := ht.getFile(histTxNum)
+	efItem := ht.iit.files[seek.fileIdx]
+	historyItem, ok := ht.pairedFile(efItem)
 	if !ok {
 		log.Warn("historySeekInFiles: file not found", "key", key, "txNum", txNum, "histTxNum", histTxNum, "ssize", ht.h.stepSize)
 		return nil, false, fmt.Errorf("hist file not found: key=%x, %s.%d-%d", key, ht.h.FilenameBase, histTxNum/ht.h.stepSize, histTxNum/ht.h.stepSize)
 	}
 	offset, ok := historyValueOffset(historyItem.src, seek.keyOrdinal, seek.rank, histTxNum, key)
 	if !ok {
-		return nil, false, nil
+		return nil, false, fmt.Errorf("%s holds no value for key %x at txNum %d, which %s indexes",
+			historyItem.src.decompressor.FileName(), key, histTxNum, efItem.src.decompressor.FileName())
 	}
 	historyKey := ht.encodeTs(histTxNum, key)
 	compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
@@ -1457,6 +1431,11 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 			break
 		}
 
+		viFile, ok := ht.pairedFile(item)
+		if !ok {
+			return fmt.Errorf("HistoryDump: no .v file paired with %s", item.src.decompressor.FileName())
+		}
+
 		efGetter := ht.iit.dataReader(item.src.decompressor)
 		efGetter.Reset(0)
 
@@ -1473,11 +1452,6 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 
 			for rank := uint64(0); ss.HasNext(); rank++ {
 				txNum, _ := ss.Next()
-
-				viFile, ok := ht.getFile(txNum)
-				if !ok {
-					return fmt.Errorf("HistoryDump: no .vi %s file found for [%x]", ht.iit.name, txNum)
-				}
 
 				vOffset, ok := historyValueOffset(viFile.src, keyOrdinal, rank, txNum, key)
 				if !ok {
