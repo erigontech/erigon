@@ -1018,6 +1018,9 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 		return nil
 	}
 	amount := field(p)
+	if onDiskFloor == nil && !amount.Enabled() {
+		return nil
+	}
 	latest, err := rpchelper.GetLatestBlockNumber(tx)
 	if err != nil {
 		return err

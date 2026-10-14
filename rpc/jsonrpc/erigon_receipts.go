@@ -285,6 +285,12 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	var blockHash common.Hash
 	var header *types.Header
 	var logCount, blockCount, timestamp uint64
+	checkRange := api.checkPruneBlocksRange
+	// Block-count queries must not return a partial block when older
+	// log-index entries are missing.
+	if logOptions.BlockCount != 0 {
+		checkRange = api.checkBlockHistoryRangeAvailable
+	}
 
 	for it.HasNext() {
 		if err := ctx.Err(); err != nil {
@@ -304,15 +310,8 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 				return rpcLogs, nil
 			}
 			if rangeErr != nil {
-				if err := api.checkPruneBlocksRange(ctx, tx, blockNum, end); err != nil {
+				if err := checkRange(ctx, tx, blockNum, end); err != nil {
 					return nil, err
-				}
-				// Block-count queries must not return a partial block when older
-				// log-index entries are missing.
-				if logOptions.BlockCount != 0 {
-					if err := api.checkPruneTransactionHistory(ctx, tx, blockNum); err != nil {
-						return nil, err
-					}
 				}
 			}
 			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {

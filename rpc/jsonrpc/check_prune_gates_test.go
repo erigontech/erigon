@@ -149,6 +149,17 @@ func TestPruneGateArchive(t *testing.T) {
 	require.NoError(t, apis.eth.checkReceiptsAvailable(ctx, tx, 0))
 }
 
+func TestHistoryRetentionKeepAllDoesNotReadHead(t *testing.T) {
+	t.Parallel()
+	api := &BaseAPI{}
+	mode := prune.ArchiveMode
+	api._pruneMode.Store(&mode)
+
+	require.NotPanics(t, func() {
+		require.NoError(t, api.checkHistoryRetention(&panicGetTx{}, 0))
+	}, "an unbounded policy-only check needs no database reads")
+}
+
 func TestBlocksGateIncludesGenesisWithoutSnapshots(t *testing.T) {
 	t.Parallel()
 
