@@ -549,3 +549,100 @@ func TestArenaRetentionStaysBounded(t *testing.T) {
 	held := slotBytes + len(ibs.logs.pool)*304 + ibs.logs.poolBytes
 	require.Less(t, held, 3<<20, "an arena holds %dKB after mixed traffic", held/1024)
 }
+
+// Past the pool, a transaction's logs come from chunks, not one heap entry each.
+func TestAllocLogPastThePoolAllocatesInChunks(t *testing.T) {
+	addr := common.HexToAddress("0x1")
+	allocs := testing.AllocsPerRun(5, func() {
+		ibs := New(nil)
+		ibs.SetTxContext(1, 0)
+		for range 1024 {
+			ibs.AllocLog(addr, 0, 0)
+		}
+	})
+	require.Less(t, allocs, 1024.0/8, "%v allocations for 1024 logs", allocs)
+}
+
+// Topics an entry has to grow come from chunks, not one allocation per log.
+func TestAllocLogGrowsTopicsInChunks(t *testing.T) {
+	addr := common.HexToAddress("0x1")
+	allocs := testing.AllocsPerRun(5, func() {
+		ibs := New(nil)
+		ibs.SetTxContext(1, 0)
+		for range 1024 {
+			ibs.AllocLog(addr, 0, 0)
+		}
+		ibs.Reset() // the pool now holds 1024 entries with no topic capacity
+		ibs.SetTxContext(1, 1)
+		for range 1024 {
+			ibs.AllocLog(addr, 2, 0)
+		}
+	})
+	require.Less(t, allocs, 1024.0*1.5, "%v allocations for 1024 entries and 1024 topic pairs", allocs)
+}
+
+// A reused entry that needs more topics than it had must not grow into the
+// topics of the entry carved next to it.
+func TestAllocLogTopicsDoNotOverlap(t *testing.T) {
+	addr := common.HexToAddress("0x1")
+	ibs := New(nil)
+	ibs.SetTxContext(1, 0)
+	ibs.AllocLog(addr, 1, 0)
+	ibs.AllocLog(addr, 1, 0)
+	ibs.Reset()
+
+	ibs.SetTxContext(1, 1)
+	x := ibs.AllocLog(addr, 1, 0)
+	x.Topics[0] = common.HexToHash("0x11")
+	y := ibs.AllocLog(addr, 2, 0)
+	y.Topics[0], y.Topics[1] = common.HexToHash("0x22"), common.HexToHash("0x33")
+	require.Equal(t, common.HexToHash("0x11"), x.Topics[0])
+}
+
+// An entry the pool drops may share its chunk with one the pool keeps, so it
+// must not hold on to its Data or topics.
+func TestLogPoolDropsBuffersOfEntriesItCannotKeep(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(nil)
+	ibs.SetTxContext(1, 0)
+	logs := make([]*types.Log, maxPooledLogEntries+1)
+	for i := range logs {
+		logs[i] = ibs.AllocLog(common.HexToAddress("0x1"), 2, 32)
+	}
+	ibs.Reset()
+	require.Nil(t, logs[maxPooledLogEntries].Data)
+	require.Nil(t, logs[maxPooledLogEntries].Topics)
+}
+
+// A transaction past the pool keeps the pool's entries even when it reverts its
+// last log, so the pool does not spread over more chunks than it fills.
+func TestLogPoolKeepsItsEntriesPastRevert(t *testing.T) {
+	t.Parallel()
+
+	addr := common.HexToAddress("0x1")
+	ibs := New(nil)
+	ibs.SetTxContext(1, 0)
+	for range maxPooledLogEntries {
+		ibs.AllocLog(addr, 0, 0)
+	}
+	ibs.Reset()
+	pooled := make(map[*types.Log]bool, len(ibs.logs.pool))
+	for _, lp := range ibs.logs.pool {
+		pooled[lp] = true
+	}
+
+	ibs.SetTxContext(1, 1)
+	for range maxPooledLogEntries + 1 {
+		ibs.AllocLog(addr, 0, 0)
+	}
+	snap := ibs.PushSnapshot()
+	ibs.AllocLog(addr, 0, 0)
+	ibs.RevertToSnapshot(snap, nil)
+	ibs.Reset()
+
+	require.Len(t, ibs.logs.pool, maxPooledLogEntries)
+	for _, lp := range ibs.logs.pool {
+		require.True(t, pooled[lp], "the pool took an entry it did not hold before")
+	}
+}

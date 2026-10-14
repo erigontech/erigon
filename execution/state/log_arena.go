@@ -50,14 +50,24 @@ const (
 	// resets per block, so this is bounded by the memory it costs rather than by
 	// a transaction's budget: 32KB of pointers, holding a p99 block's ~1700.
 	maxRetainedLogSlots = 32 * 1024 / 8
+
+	// Entries one allocation carves once the pool runs dry: a transaction past the
+	// pool pays an allocation per chunk, not per log.
+	logChunk = 64
+
+	// Topics one allocation carves for entries whose Topics must grow.
+	logTopicChunk = 256
 )
 
 // logArena owns a block's log entries and recycles them through a pool, so what
 // it holds follows the largest transaction rather than the widest block.
 type logArena struct {
-	entries      types.Logs   // the block so far, in order — one transaction, for a caller that resets per transaction
-	pool         []*types.Log // entries taken back at reset, for any transaction to reuse
-	poolBytes    int          // Data the pool holds
+	entries      types.Logs    // the block so far, in order — one transaction, for a caller that resets per transaction
+	pool         []*types.Log  // entries taken back at reset, for any transaction to reuse
+	chunk        []types.Log   // the last chunk of entries
+	carved       int           // entries of chunk handed out
+	freshTopics  []common.Hash // the unused rest of the last topic chunk
+	poolBytes    int           // Data the pool holds
 	indexInBlock uint
 }
 
@@ -76,7 +86,11 @@ func (a *logArena) alloc(j *journal, addr common.Address, txIndex, numTopics, da
 	lp := a.take()
 	entries[logIdx] = lp
 	lp.Address = addr
-	lp.Topics = slices.Grow(lp.Topics[:0], numTopics)[:numTopics]
+	if cap(lp.Topics) >= numTopics {
+		lp.Topics = lp.Topics[:numTopics]
+	} else {
+		lp.Topics = a.topics(numTopics)
+	}
 	lp.Data = slices.Grow(lp.Data[:0], dataSize)[:dataSize]
 	lp.Removed = false
 	lp.TxHash, lp.BlockHash = common.Hash{}, common.Hash{}
@@ -89,11 +103,26 @@ func (a *logArena) alloc(j *journal, addr common.Address, txIndex, numTopics, da
 	return lp
 }
 
+// topics carves n topics off the current chunk; the full slice expression keeps a
+// later append from running into the next entry's topics.
+func (a *logArena) topics(n int) []common.Hash {
+	if len(a.freshTopics) < n {
+		a.freshTopics = make([]common.Hash, logTopicChunk)
+	}
+	t := a.freshTopics[:n:n]
+	a.freshTopics = a.freshTopics[n:]
+	return t
+}
+
 // take returns a pooled entry, Topics and Data included for alloc to grow into.
 func (a *logArena) take() *types.Log {
 	n := len(a.pool) - 1
 	if n < 0 {
-		return &types.Log{}
+		if a.carved == len(a.chunk) {
+			a.chunk, a.carved = make([]types.Log, logChunk), 0
+		}
+		a.carved++
+		return &a.chunk[a.carved-1]
 	}
 	lp := a.pool[n]
 	a.pool = a.pool[:n]
@@ -105,6 +134,7 @@ func (a *logArena) take() *types.Log {
 // hold. The entry itself is small enough to keep either way.
 func (a *logArena) put(lp *types.Log) {
 	if len(a.pool) >= maxPooledLogEntries {
+		lp.Data, lp.Topics = nil, nil // its chunks may outlive it, held by the entries the pool keeps
 		return
 	}
 	if cap(lp.Data) > maxPooledLogDataCap || a.poolBytes+cap(lp.Data) > maxPooledLogBytes {
@@ -141,7 +171,14 @@ func (a *logArena) revertLast(txIndex int) {
 		panic(fmt.Sprintf("can't revert log of tx %d: none were emitted", txIndex))
 	}
 	if lp := entries[last]; lp != nil {
-		a.put(lp)
+		if a.carved > 0 && lp == &a.chunk[a.carved-1] {
+			// Back to its chunk, not into the pool, where it would push out an entry
+			// of an older chunk. Its Data goes: the pool's budget does not count it.
+			lp.Data = nil
+			a.carved--
+		} else {
+			a.put(lp)
+		}
 		entries[last] = nil
 	}
 	a.entries = entries[:last]
