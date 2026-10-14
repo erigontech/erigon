@@ -129,6 +129,28 @@ func TestVersionedRead_B_DeletedStateObjectBeatsWarmStorageRead(t *testing.T) {
 	assert.True(t, v.IsZero(), "slot of a destructed account reads as zero, not as the recorded value")
 }
 
+func TestVersionedRead_B_DeletedStateObjectBeatsWarmCodeSizeRead(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xb4})
+	ibs, mvhm := warmReadIBS(t, addr)
+
+	mvhm.WriteCodeSize(addr, Version{TxIndex: 1, Incarnation: 0}, 7, true)
+	size, err := ibs.GetCodeSize(addr)
+	require.NoError(t, err)
+	require.Equal(t, 7, size, "first read resolves from the version map")
+
+	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 2, Incarnation: 0}, true, true)
+	so, err := ibs.getStateObject(addr, true)
+	require.NoError(t, err)
+	require.Nil(t, so)
+	parked, ok := ibs.stateObjects[addr]
+	require.True(t, ok && parked.deleted, "getStateObject must park a deleted object")
+
+	size, err = ibs.GetCodeSize(addr)
+	require.NoError(t, err)
+	assert.Zero(t, size, "code size of a destructed account reads as zero, not as the recorded value")
+}
+
 // The read-once fast path must return exactly what the read-set-hit branch it
 // replaces returns: same value, source, version and clean flag.
 func TestVersionedRead_B_WarmStorageReadReturnsReadSetTuple(t *testing.T) {
@@ -1008,6 +1030,62 @@ func TestVersionedRead_D1_StorageWriteSetHitWithStaleReadSetCaughtAtCommit(t *te
 	got, err := ibs.GetState(addr, key)
 	require.NoError(t, err)
 	assert.EqualValues(t, 77, got.Uint64(), "the own write wins")
+
+	var io VersionedIO
+	ibs.MergeTxIOInto(&io, ibs.VersionedWrites())
+	assert.Equal(t, VersionInvalid, mvhm.ValidateVersion(5, &io, validateEqualVersion, true, false, false, ""), "commit-time validation catches the stale read")
+}
+
+// E2 for a slot this tx did not write on an address it did: the repeat SLOAD
+// serves the recorded read, and commit-time validation catches it if stale.
+func TestVersionedRead_E2_StorageOnWrittenAddressCaughtAtCommit(t *testing.T) {
+	t.Parallel()
+	_, tx, domains := NewTestRwTx(t)
+	mvhm := NewVersionMap(nil)
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 5)
+
+	addr := accounts.InternAddress([20]byte{0xe3})
+	written, read := accounts.InternKey([32]byte{0x01}), accounts.InternKey([32]byte{0x02})
+	mvhm.WriteStorage(addr, read, Version{TxIndex: 3, Incarnation: 0}, *uint256.NewInt(30), true)
+
+	require.NoError(t, ibs.SetState(addr, written, *uint256.NewInt(77)))
+	ibs.versionedReads.SetStorage(addr, read, VersionedRead[uint256.Int]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
+		Val:        *uint256.NewInt(99),
+	})
+	got, err := ibs.GetState(addr, read)
+	require.NoError(t, err)
+	assert.EqualValues(t, 99, got.Uint64(), "read-once returns the recorded value")
+
+	var io VersionedIO
+	ibs.MergeTxIOInto(&io, ibs.VersionedWrites())
+	assert.Equal(t, VersionInvalid, mvhm.ValidateVersion(5, &io, validateEqualVersion, true, false, false, ""), "commit-time validation catches the stale read")
+}
+
+// E2 for the code size of an address this tx wrote another field of.
+func TestVersionedRead_E2_CodeSizeOnWrittenAddressCaughtAtCommit(t *testing.T) {
+	t.Parallel()
+	_, tx, domains := NewTestRwTx(t)
+	mvhm := NewVersionMap(nil)
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 5)
+
+	addr := accounts.InternAddress([20]byte{0xe4})
+	mvhm.WriteCodeSize(addr, Version{TxIndex: 3, Incarnation: 0}, 30, true)
+
+	require.NoError(t, ibs.SetBalance(addr, *uint256.NewInt(77), 0))
+	ibs.versionedReads.SetCodeSize(addr, VersionedRead[int]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
+		Val:        99,
+	})
+	got, err := ibs.GetCodeSize(addr)
+	require.NoError(t, err)
+	assert.Equal(t, 99, got, "read-once returns the recorded value")
 
 	var io VersionedIO
 	ibs.MergeTxIOInto(&io, ibs.VersionedWrites())
