@@ -1372,7 +1372,7 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 
 	if canValidatePayloads {
 		if cfg.executionClient.SupportInsertion() {
-			if err := cfg.blockCollector.Flush(context.Background()); err != nil {
+			if err := cfg.blockCollector.Flush(ctx); err != nil {
 				log.Warn("[chainTipSync] blockCollector.Flush failed (EL may still be catching up)", "err", err)
 			}
 		}

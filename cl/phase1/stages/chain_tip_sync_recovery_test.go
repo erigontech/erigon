@@ -1043,3 +1043,22 @@ func TestStoredParentPayloadReplayWithoutVerdictKeepsStatus(t *testing.T) {
 		require.Empty(t, store.requeued)
 	})
 }
+
+type stageCtxKey struct{}
+
+func TestChainTipSyncFlushesCollectorWithStageContext(t *testing.T) {
+	cfg, _, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	engine.supportInsertion = true
+	collector := &gloasCollectorTest{}
+	cfg.blockCollector = collector
+	header, ok := cfg.forkChoice.GetHeader(headRoot)
+	require.True(t, ok)
+	targetSlot := header.Slot + 1
+
+	ctx, cancel := context.WithTimeout(context.WithValue(t.Context(), stageCtxKey{}, true), time.Second)
+	defer cancel()
+	_ = chainTipSync(ctx, log.Root(), cfg, Args{seenSlot: targetSlot - 1, targetSlot: targetSlot})
+
+	require.Equal(t, 1, collector.flushCalls)
+	require.Equal(t, true, collector.flushCtx.Value(stageCtxKey{}))
+}
