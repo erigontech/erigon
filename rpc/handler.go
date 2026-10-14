@@ -303,17 +303,18 @@ func (h *handler) sendBatchAnswers(ctx context.Context, answers [][]byte) {
 	}
 }
 
-// answerToConn serves a call for a transport that has no stream of its own: the
-// response goes out as one message on the connection, streamed as it is produced.
-func (h *handler) answerToConn(cp *callProc, msg *jsonrpcMessage) {
+// answerBuffered serves a call for a transport that has no stream to write
+// through: the whole response is built in a pooled stream and sent in one piece.
+// It owns the stream, so the pool gets it back on any exit.
+func (h *handler) answerBuffered(cp *callProc, msg *jsonrpcMessage) {
+	stream := jsonstream.Get(nil)
+	defer jsonstream.Put(stream)
+
+	h.answerInto(cp, msg, stream)
 	if msg.isNotification() {
-		discard := jsonstream.Get(io.Discard)
-		defer jsonstream.Put(discard)
-		h.answerInto(cp, msg, discard)
 		return
 	}
-	err := h.conn.WriteStream(cp.ctx, func(stream *jsonstream.Stream) { h.answerInto(cp, msg, stream) })
-	if err != nil {
+	if err := h.conn.WriteJSON(cp.ctx, rawResponse(stream.Buffer())); err != nil {
 		h.logger.Debug("Failed to write RPC response", "err", err)
 	}
 }
@@ -357,7 +358,7 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsonstream.Stream, done
 	}
 	h.startCallProc(func(cp *callProc) {
 		if stream == nil {
-			h.answerToConn(cp, msg)
+			h.answerBuffered(cp, msg)
 		} else {
 			h.answerInto(cp, msg, stream)
 			if !msg.isNotification() {

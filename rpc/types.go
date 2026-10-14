@@ -33,8 +33,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/rpc/jsonstream"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 )
@@ -80,8 +78,6 @@ type ServerCodec interface {
 // Implementations must be safe for concurrent use.
 type jsonWriter interface {
 	WriteJSON(context.Context, any) error
-	// WriteStream sends one message produced into a stream, flushing it as it grows.
-	WriteStream(context.Context, func(*jsonstream.Stream)) error
 	// Closed returns a channel which is closed when the connection is closed.
 	closed() <-chan any
 	// RemoteAddr returns the peer address of the connection.

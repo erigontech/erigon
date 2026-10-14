@@ -624,7 +624,7 @@ func testResponseEncodeFailure(t *testing.T, result any) {
 	}
 
 	t.Run("ws-ipc", func(t *testing.T) {
-		// a batch item is built without a writer and read back from Buffer()
+		// answerBuffered: no writer, the caller reads Buffer() directly
 		s := jsonstream.Get(nil)
 		defer jsonstream.Put(s)
 		bad(s)
