@@ -402,6 +402,17 @@ func (d *Domain) retireFilesNotInList(fNames []string) retiredFiles {
 	return retireFilesNotInList(mvcc.RetireReasonWasDeletedFromDisk, d.dirtyFiles, fNames, d.FilenameBase, d.logger)
 }
 
+// replaceDirtyFile swaps old for nu (same range, freshly opened) and retires old close-only.
+// Caller holds dirtyFilesLock and attaches the returned item to the outgoing visible generation.
+func (d *Domain) replaceDirtyFile(old, nu *FilesItem) (retiredFiles, error) {
+	if cur, ok := d.dirtyFiles.Get(old); !ok || cur != old {
+		return nil, fmt.Errorf("Domain(%s).replaceDirtyFile: %d-%d is no longer a dirty file", d.FilenameBase, old.startTxNum, old.endTxNum)
+	}
+	retire(mvcc.RetireReasonDemoted, d.dirtyFiles, []*FilesItem{old}, d.FilenameBase, d.logger)
+	d.dirtyFiles.Set(nu)
+	return retiredFiles{old}, nil
+}
+
 // calcVisibleFiles is pure — it does not mutate d, d.History, or d.History.InvertedIndex.
 // Aggregator.recalcVisibleFiles uses it to assemble a cross-entity consistent
 // snapshot that is published via a single atomic store.
