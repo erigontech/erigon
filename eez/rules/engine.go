@@ -18,7 +18,9 @@
 package rules
 
 import (
+	"context"
 	"fmt"
+	"sync"
 
 	"github.com/holiman/uint256"
 
@@ -26,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez/config"
+	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -34,11 +37,28 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/rulesconfig"
 )
 
 // ErrInvalidHeader reports a header that breaks an EEZ rule. It wraps
 // rules.ErrInvalidBlock.
 var ErrInvalidHeader = fmt.Errorf("%w: invalid eez header", rules.ErrInvalidBlock)
+
+var registerOnce sync.Once
+
+// Register makes CreateRulesEngine build this engine for EEZ chains.
+func Register() {
+	registerOnce.Do(func() {
+		rulesconfig.RegisterL2Engine(config.Name, func(_ context.Context, chainConfig *chain.Config, _ log.Logger) rules.Engine {
+			e, err := New(chainConfig)
+			if err != nil {
+				panic(fmt.Sprintf("eez rules engine: %v", err))
+			}
+			return e
+		})
+	})
+}
 
 // Engine is the EEZ rules engine. The embedded Merge engine provides the
 // post-merge block processing; the overrides drop its total-difficulty
@@ -48,7 +68,11 @@ type Engine struct {
 	l2 *config.L2Config
 }
 
-var _ rules.Engine = (*Engine)(nil)
+var (
+	_ rules.Engine = (*Engine)(nil)
+
+	systemAddress = accounts.InternAddress(protocol.SystemAddress)
+)
 
 // New returns the engine of an EEZ chain configuration.
 func New(chainConfig *chain.Config) (*Engine, error) {
@@ -146,6 +170,25 @@ func (e *Engine) FinalizeAndAssemble(config *chain.Config, header *types.Header,
 		return nil, nil, fmt.Errorf("%w: %w: %d withdrawals", rules.ErrInvalidBlock, rules.ErrUnexpectedWithdrawals, len(withdrawals))
 	}
 	return e.Merge.FinalizeAndAssemble(config, header, ibs, txs, uncles, receipts, withdrawals, chain, syscall, call, logger)
+}
+
+// IsServiceTransaction reports whether sender is the EEZ system address,
+// whose transactions execute fee-free.
+func (e *Engine) IsServiceTransaction(sender accounts.Address, _ rules.SystemCall) bool {
+	return sender == systemAddress
+}
+
+// ValidateBlockPostExecution applies the default checks and rejects blob
+// transactions, which EEZ chains do not support.
+func (e *Engine) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header, gasUsed, blobGasUsed uint64,
+	checkReceipts, checkBloom bool, receipts types.Receipts, txns types.Transactions, logger log.Logger,
+) error {
+	for i, txn := range txns {
+		if txn.Type() == types.BlobTxType {
+			return fmt.Errorf("%w: block %d: blob transaction %d", rules.ErrInvalidBlock, header.Number.Uint64(), i)
+		}
+	}
+	return e.Merge.ValidateBlockPostExecution(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 }
 
 // Prepare sets the proof-of-stake difficulty.
