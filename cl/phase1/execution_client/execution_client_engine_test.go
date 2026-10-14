@@ -384,34 +384,31 @@ type newPayloadEngineStub struct {
 	err error
 }
 
+func (s *newPayloadEngineStub) NewPayloadV4(context.Context, *engine_types.ExecutionPayload, []common.Hash, *common.Hash, []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
+	return nil, s.err
+}
+
 func (s *newPayloadEngineStub) NewPayloadV5(context.Context, *engine_types.ExecutionPayload, []common.Hash, *common.Hash, []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
 	return nil, s.err
 }
 
-// The client's own timeout ends a NewPayload without a verdict while the caller still waits: the
-// payload stays available as NotValidated and is retried. A caller whose context ended keeps the
-// error.
-func TestNewPayloadTreatsAClientTimeoutAsNotValidated(t *testing.T) {
+// A timeout of the client's own request is no EL verdict, whatever the fork: the caller must not
+// import the payload on it (optimistic sync, "Execution Engine Errors").
+func TestNewPayloadReportsAClientTimeoutAsNoVerdict(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
-	payload := gloas(&cfg, nil)
 	clientTimeout := fmt.Errorf("Post: %w (Client.Timeout exceeded while awaiting headers)", context.DeadlineExceeded)
-	newClient := func(err error) *ExecutionClientEngine {
-		return &ExecutionClientEngine{engine: &newPayloadEngineStub{err: err}, beaconCfg: &cfg}
+	electra := cltypes.NewEth1Block(clparams.ElectraVersion, &cfg)
+	electra.Extra = solid.NewExtraData()
+	electra.Transactions = &solid.TransactionsSSZ{}
+	electra.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+	for _, payload := range []*cltypes.Eth1Block{gloas(&cfg, nil), electra} {
+		t.Run(payload.Version().String(), func(t *testing.T) {
+			client := &ExecutionClientEngine{engine: &newPayloadEngineStub{err: clientTimeout}, beaconCfg: &cfg}
+			status, err := client.NewPayload(t.Context(), payload, nil, nil, nil)
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			require.EqualValues(t, PayloadStatusNone, status)
+		})
 	}
-
-	status, err := newClient(clientTimeout).NewPayload(t.Context(), payload, nil, nil, nil)
-	require.NoError(t, err)
-	require.EqualValues(t, PayloadStatusNotValidated, status)
-
-	cancelled, cancel := context.WithCancel(t.Context())
-	cancel()
-	status, err = newClient(clientTimeout).NewPayload(cancelled, payload, nil, nil, nil)
-	require.Error(t, err)
-	require.EqualValues(t, PayloadStatusNone, status)
-
-	status, err = newClient(errors.New("connection refused")).NewPayload(t.Context(), payload, nil, nil, nil)
-	require.Error(t, err)
-	require.EqualValues(t, PayloadStatusNone, status)
 }
 
 func TestValidationInterrupted(t *testing.T) {

@@ -1020,10 +1020,6 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	emitGossipEvent := false
 	emitIntegrationEvents := false
 	var persistenceErr error
-	// The client may give up while the EL validates; the envelope must still be published within
-	// its slot, whatever the outcome.
-	publishCtx, cancelPublish := context.WithTimeout(context.WithoutCancel(r.Context()), time.Duration(a.beaconChainCfg.SecondsPerSlot)*time.Second)
-	defer cancelPublish()
 	if err := a.processExecutionPayloadEnvelope(r.Context(), signedEnvelope, canonical); err != nil {
 		switch {
 		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed):
@@ -1118,7 +1114,11 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		}
-		if err := a.publishGossip(publishCtx, gossip.TopicNameExecutionPayload, encodedSSZ); err != nil {
+		// The client may give up while the EL validates; the envelope is still published, within a slot.
+		publishCtx, cancelPublish := context.WithTimeout(context.WithoutCancel(r.Context()), time.Duration(a.beaconChainCfg.SecondsPerSlot)*time.Second)
+		err = a.publishGossip(publishCtx, gossip.TopicNameExecutionPayload, encodedSSZ)
+		cancelPublish()
+		if err != nil {
 			if envelopeRoot, hashErr := signedEnvelope.HashSSZ(); hashErr == nil {
 				a.recordExecutionPayloadEnvelopeRetry(gossipKey, executionPayloadEnvelopeRetry{
 					EnvelopeRoot: envelopeRoot, GossipRequired: true,

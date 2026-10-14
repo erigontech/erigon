@@ -83,7 +83,7 @@ type Cfg struct {
 	gloasPayloadValidator        gloasPayloadValidator
 	gloasVerificationCursor      common.Hash
 	gloasVerificationHead        common.Hash
-	gloasFinalNotValidated       map[common.Hash]uint64 // roots the EL answers NotValidated finally, by slot
+	gloasSkippedValidation       map[common.Hash]skippedValidation // roots recorded NotValidated below the EL's validation depth
 	sleepForSlotLastWake         sleepForSlotWake
 	sleepForSlotHeadChanged      bool
 	chainTipRejections           *chainTipRejections

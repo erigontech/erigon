@@ -17,15 +17,18 @@
 package execution_client
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/builder"
@@ -34,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -137,7 +141,7 @@ func TestDirectPreparationAndForkChoiceReuseTheSameExecutionBuild(t *testing.T) 
 	require.Equal(t, preparedID, productionID)
 }
 
-func TestDirectFinalNotValidatedBelowTracksTheHead(t *testing.T) {
+func TestDirectSkipsValidationBelowTracksTheHead(t *testing.T) {
 	newClient := func(blocks int) *ExecutionClientDirect {
 		module := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 		if blocks > 0 {
@@ -150,10 +154,10 @@ func TestDirectFinalNotValidatedBelowTracksTheHead(t *testing.T) {
 		return client
 	}
 
-	_, ok := newClient(0).FinalNotValidatedBelow(t.Context())
+	_, ok := newClient(0).SkipsValidationBelow(t.Context())
 	require.False(t, ok)
 
-	below, ok := newClient(6).FinalNotValidatedBelow(t.Context())
+	below, ok := newClient(6).SkipsValidationBelow(t.Context())
 	require.True(t, ok)
 	require.Equal(t, uint64(6-reorgTooDeepDepth), below)
 }
@@ -188,4 +192,45 @@ func TestDirectNewPayloadReportsAnEndedContextAsNoVerdict(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	require.EqualValues(t, PayloadStatusNone, status)
 	require.True(t, ValidationInterrupted(ctx, status, err))
+}
+
+// The checks the direct client makes before inserting a payload fail for a malformed block access
+// list and for a block hash the payload does not derive.
+func TestCheckPayloadBeforeInsertion(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	parentRoot := common.Hash{0x11}
+	valid := func() *cltypes.Eth1Block {
+		payload := gloas(cfg, nil)
+		var err error
+		payload.BlockHash, err = payload.ComputeBlockHash(&parentRoot, cltypes.ComputeExecutionRequestHash(nil), nil)
+		require.NoError(t, err)
+		return payload
+	}
+	require.NoError(t, CheckPayloadBeforeInsertion(nil, valid(), &parentRoot, nil))
+
+	malformedBAL := valid()
+	malformedBAL.BlockAccessList = solid.NewByteListSSZ(cfg.MaxBytesPerTransaction)
+	require.NoError(t, malformedBAL.BlockAccessList.SetBytes([]byte{0xff, 0xff, 0xff}))
+	require.Error(t, CheckPayloadBeforeInsertion(nil, malformedBAL, &parentRoot, nil))
+
+	wrongHash := valid()
+	wrongHash.BlockHash = common.Hash{0x99}
+	require.Error(t, CheckPayloadBeforeInsertion(nil, wrongHash, &parentRoot, nil))
+}
+
+// A block over the maximum RLP size is rejected at insertion, so the checks before it reject it too.
+func TestCheckPayloadBeforeInsertionRejectsAnOversizedBlock(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	parentRoot := common.Hash{0x11}
+	var raw bytes.Buffer
+	txn := types.NewTransaction(0, common.Address{}, uint256.NewInt(0), 21000, uint256.NewInt(1), make([]byte, params.MaxRlpBlockSize+1))
+	require.NoError(t, txn.MarshalBinary(&raw))
+	payload := gloas(cfg, nil)
+	payload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{raw.Bytes()})
+	var err error
+	payload.BlockHash, err = payload.ComputeBlockHash(&parentRoot, cltypes.ComputeExecutionRequestHash(nil), nil)
+	require.NoError(t, err)
+
+	require.ErrorIs(t, CheckPayloadBeforeInsertion(chain.AllProtocolChanges, payload, &parentRoot, nil), types.ErrBlockExceedsMaxRlpSize)
+	require.NoError(t, CheckPayloadBeforeInsertion(nil, payload, &parentRoot, nil), "no chain config, no size limit")
 }
