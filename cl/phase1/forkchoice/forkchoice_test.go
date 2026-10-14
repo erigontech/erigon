@@ -1027,6 +1027,158 @@ func waitForStateLoad(t *testing.T, started <-chan common.Hash) common.Hash {
 	}
 }
 
+func TestCheckpointStatesBoundedWithoutFinalization(t *testing.T) {
+	checkpoints := checkpointStateCacheTestCheckpoints(maxCheckpointStates + 1)
+	store := newCheckpointStateCacheTestStore(t, checkpoints, solid.Checkpoint{})
+
+	for _, checkpoint := range checkpoints {
+		_, err := store.getCheckpointState(checkpoint)
+		require.NoError(t, err)
+	}
+
+	require.Equal(t, maxCheckpointStates, checkpointStateCacheLen(store))
+	_, ok := store.checkpointStates.Load(checkpoints[0])
+	require.False(t, ok)
+}
+
+func TestCheckpointStatesKeepJustStoredState(t *testing.T) {
+	checkpoints := checkpointStateCacheTestCheckpoints(maxCheckpointStates + 1)
+	justStored := checkpoints[0]
+	store := newCheckpointStateCacheTestStore(t, checkpoints, solid.Checkpoint{})
+
+	for _, checkpoint := range checkpoints[1:] {
+		_, err := store.getCheckpointState(checkpoint)
+		require.NoError(t, err)
+	}
+	justStoredState, err := store.getCheckpointState(justStored)
+	require.NoError(t, err)
+
+	cached, ok := store.checkpointStates.Load(justStored)
+	require.True(t, ok)
+	require.Same(t, justStoredState, cached)
+	require.Equal(t, maxCheckpointStates, checkpointStateCacheLen(store))
+}
+
+func TestCheckpointStatesKeepCurrentJustified(t *testing.T) {
+	checkpoints := checkpointStateCacheTestCheckpoints(maxCheckpointStates + 2)
+	justified := checkpoints[0]
+	store := newCheckpointStateCacheTestStore(t, checkpoints, justified)
+
+	justifiedState, err := store.getCheckpointState(justified)
+	require.NoError(t, err)
+	for _, checkpoint := range checkpoints[1:] {
+		_, err := store.getCheckpointState(checkpoint)
+		require.NoError(t, err)
+	}
+
+	cached, ok := store.checkpointStates.Load(justified)
+	require.True(t, ok)
+	require.Same(t, justifiedState, cached)
+	require.Equal(t, maxCheckpointStates, checkpointStateCacheLen(store))
+}
+
+func TestJustifiedPromotionWaitsForCheckpointStateEviction(t *testing.T) {
+	current := solid.Checkpoint{Epoch: 1, Root: common.Hash{1}}
+	promoted := solid.Checkpoint{Epoch: 2, Root: common.Hash{2}}
+	store := newCheckpointStateCacheTestStore(t, nil, current)
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+
+	requireWaitsForCheckpointStatesMu(t, store, func() {
+		store.updateCheckpoints(promoted, solid.Checkpoint{})
+	}, func() {
+		require.Equal(t, current, store.justifiedCheckpoint.Load().(solid.Checkpoint))
+	})
+	require.Equal(t, promoted, store.justifiedCheckpoint.Load().(solid.Checkpoint))
+}
+
+func TestCheckpointStateEvictionWaitsForJustifiedPromotion(t *testing.T) {
+	checkpoint := checkpointStateCacheTestCheckpoints(1)[0]
+	store := newCheckpointStateCacheTestStore(t, []solid.Checkpoint{checkpoint}, solid.Checkpoint{})
+	var loadedState *checkpointState
+	var err error
+
+	requireWaitsForCheckpointStatesMu(t, store, func() {
+		loadedState, err = store.getCheckpointState(checkpoint)
+	}, nil)
+	require.NoError(t, err)
+
+	cached, ok := store.checkpointStates.Load(checkpoint)
+	require.True(t, ok)
+	require.Same(t, loadedState, cached)
+}
+
+func requireWaitsForCheckpointStatesMu(t *testing.T, store *ForkChoiceStore, fn, whileBlocked func()) {
+	t.Helper()
+	store.checkpointStatesMu.Lock()
+	unlocked := false
+	defer func() {
+		if !unlocked {
+			store.checkpointStatesMu.Unlock()
+		}
+	}()
+
+	started := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		close(started)
+		fn()
+		close(done)
+	}()
+	<-started
+
+	select {
+	case <-done:
+		t.Fatal("operation completed while checkpointStatesMu was held")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if whileBlocked != nil {
+		whileBlocked()
+	}
+
+	store.checkpointStatesMu.Unlock()
+	unlocked = true
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("operation did not finish after checkpointStatesMu was released")
+	}
+}
+
+func checkpointStateCacheTestCheckpoints(count int) []solid.Checkpoint {
+	checkpoints := make([]solid.Checkpoint, count)
+	for i := range checkpoints {
+		checkpoints[i] = solid.Checkpoint{Epoch: uint64(i + 1), Root: common.Hash{byte(i + 1)}}
+	}
+	return checkpoints
+}
+
+func newCheckpointStateCacheTestStore(t *testing.T, checkpoints []solid.Checkpoint, justified solid.Checkpoint) *ForkChoiceStore {
+	t.Helper()
+	cfg := clparams.MainnetBeaconConfig
+	graph := &getFinalizedExecutionHashForkGraph{states: make(map[common.Hash]*state.CachingBeaconState, len(checkpoints))}
+	for _, checkpoint := range checkpoints {
+		checkpointState := state.New(&cfg)
+		require.NoError(t, checkpointState.SetSlot(checkpoint.Epoch*cfg.SlotsPerEpoch))
+		graph.states[checkpoint.Root] = checkpointState
+	}
+	store := &ForkChoiceStore{
+		beaconCfg:          &cfg,
+		forkGraph:          graph,
+		publicKeysRegistry: public_keys_registry.NewInMemoryPublicKeysRegistry(),
+	}
+	store.justifiedCheckpoint.Store(justified)
+	return store
+}
+
+func checkpointStateCacheLen(store *ForkChoiceStore) int {
+	count := 0
+	store.checkpointStates.Range(func(_, _ any) bool {
+		count++
+		return true
+	})
+	return count
+}
+
 type getFinalizedExecutionHashForkGraph struct {
 	blocks                map[common.Hash]*cltypes.SignedBeaconBlock
 	headers               map[common.Hash]*cltypes.BeaconBlockHeader

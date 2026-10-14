@@ -118,7 +118,9 @@ func (f *ForkChoiceStore) runOperationPruner() {
 // updateCheckpoints updates the justified and finalized checkpoints if new checkpoints have higher epochs.
 func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckpoint solid.Checkpoint) {
 	if justifiedCheckpoint.Epoch > f.justifiedCheckpoint.Load().(solid.Checkpoint).Epoch {
+		f.checkpointStatesMu.Lock()
 		f.justifiedCheckpoint.Store(justifiedCheckpoint)
+		f.checkpointStatesMu.Unlock()
 	}
 	if finalizedCheckpoint.Epoch > f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch {
 		f.queueOperationPrune(finalizedCheckpoint)
@@ -318,6 +320,38 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 	checkpointState := newCheckpointState(f.beaconCfg, f.publicKeysRegistry, validators,
 		mixes, baseState.GenesisValidatorsRoot(), baseState.Fork(), baseState.GetTotalActiveBalance(), state.Epoch(baseState.BeaconState), checkpoint)
 	// Cache in memory what we are left with.
-	f.checkpointStates.Store(checkpoint, checkpointState)
+	f.storeCheckpointState(checkpoint, checkpointState)
 	return checkpointState, nil
+}
+
+// storeCheckpointState stores the state, then evicts the lowest-epoch entries
+// above maxCheckpointStates, but never the current justified state, which is read
+// to compute the head, or the state just stored.
+func (f *ForkChoiceStore) storeCheckpointState(checkpoint solid.Checkpoint, checkpointState *checkpointState) {
+	f.checkpointStatesMu.Lock()
+	defer f.checkpointStatesMu.Unlock()
+
+	f.checkpointStates.Store(checkpoint, checkpointState)
+	for {
+		justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+		count := 0
+		var oldest solid.Checkpoint
+		hasOldest := false
+		f.checkpointStates.Range(func(key, _ any) bool {
+			count++
+			candidate := key.(solid.Checkpoint)
+			if candidate == justified || candidate == checkpoint {
+				return true
+			}
+			if !hasOldest || candidate.Epoch < oldest.Epoch {
+				oldest = candidate
+				hasOldest = true
+			}
+			return true
+		})
+		if count <= maxCheckpointStates || !hasOldest {
+			return
+		}
+		f.checkpointStates.Delete(oldest)
+	}
 }
