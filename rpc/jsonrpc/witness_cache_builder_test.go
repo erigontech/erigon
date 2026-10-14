@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -985,16 +986,22 @@ func TestHeadCaptureWarmPanicIsContained(t *testing.T) {
 	require.NoError(t, m.InsertChain(testChain.Slice(1, 2)))
 	hash, _ := buildTestChainHeader(t, m, 2)
 	parentHash, _ := buildTestChainHeader(t, m, 1)
+	var panicked atomic.Bool
 	commitmentdb.PublishParentRecords(&commitmentdb.ParentRecords{BlockNum: 2, BlockHash: hash, ParentHash: parentHash, Get: func([]byte) ([]byte, kv.Step, bool) {
-		panic("simulated parent records panic")
+		if panicked.CompareAndSwap(false, true) {
+			panic("simulated parent records panic")
+		}
+		return nil, 0, false
 	}})
+	failed := witnessCacheBuildFailOtherCounter.GetValueUint64()
 
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
 	api.witnessCache = newWitnessResultCache(96, 0, true, true)
 	committedTx, err := m.DB.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer committedTx.Rollback()
-	require.False(t, api.tryHeadCaptureBuild(ctx, committedTx, pin, 2, hash), "a panicking build caches nothing")
+	require.False(t, api.tryHeadCaptureBuild(ctx, committedTx, pin, 2, hash), "a warm worker panic fails the build")
 	_, ok := api.witnessCache.Get(hash)
 	require.False(t, ok)
+	require.Equal(t, failed+1, witnessCacheBuildFailOtherCounter.GetValueUint64(), "the failed build is counted once")
 }

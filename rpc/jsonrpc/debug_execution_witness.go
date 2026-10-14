@@ -954,7 +954,7 @@ func (hc *headCaptureSource) recordReader() *commitmentdb.ParentRecords {
 	return r
 }
 
-func (hc *headCaptureSource) warmPaths(ctx context.Context, blockNum uint64, accessed *accessedState) {
+func (hc *headCaptureSource) warmPaths(ctx context.Context, accessed *accessedState) {
 	type path struct{ account, slot []byte }
 	var paths []path
 	for addr := range accessed.Addresses {
@@ -973,9 +973,15 @@ func (hc *headCaptureSource) warmPaths(ctx context.Context, blockNum uint64, acc
 	txs := append([]kv.TemporalTx{hc.pinnedParentTx}, hc.warmTxs...)
 	hc.warm = &sync.Map{}
 	var wg sync.WaitGroup
+	var crash sync.Once
+	var crashed any
 	for w, tx := range txs {
 		wg.Go(func() {
-			defer recoverWitnessBuild(blockNum)
+			defer func() {
+				if r := recover(); r != nil {
+					crash.Do(func() { crashed = fmt.Sprintf("%v\n%s", r, dbg.Stack()) })
+				}
+			}()
 			read := func(key []byte) []byte {
 				if hc.records != nil {
 					if v, _, ok := hc.records.Get(key); ok {
@@ -1003,6 +1009,9 @@ func (hc *headCaptureSource) warmPaths(ctx context.Context, blockNum uint64, acc
 		})
 	}
 	wg.Wait()
+	if crashed != nil {
+		panic(crashed)
+	}
 }
 
 // collapseReaderFor selects the collapse-detection state reader: plain state at block
@@ -1112,7 +1121,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 		return result, nil
 	}
 	if hc != nil && len(hc.warmTxs) != 0 && sdCtx.Trie().Variant() == commitment.VariantCommitmentV3 {
-		hc.warmPaths(ctx, blockNum, accessed)
+		hc.warmPaths(ctx, accessed)
 	}
 
 	siblingPaths, err := detectCollapseSiblings(ctx, tx, hc, domains, sdCtx,
