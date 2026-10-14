@@ -125,47 +125,53 @@ type TxPool struct {
 	pending                 *PendingPool
 	baseFee                 *SubPool
 	queued                  *SubPool
-	minedBlobTxnsByBlock    map[uint64][]*metaTxn            // (blockNum => slice): cache of recently mined blobs
-	minedBlobTxnsByHash     map[string]*metaTxn              // (hash => mt): map of recently mined blobs
-	isLocalLRU              *simplelru.LRU[string, struct{}] // txn_hash => is_local : to restore isLocal flag of unwinded transactions
-	newPendingTxns          chan Announcements               // notifications about new txns in Pending sub-pool
-	all                     *BySenderAndNonce                // senderID => (sorted map of txn nonce => *metaTxn)
-	deletedTxns             []*metaTxn                       // list of discarded txns since last db commit
-	promoted                Announcements
-	cfg                     txpoolcfg.Config
-	chainID                 uint256.Int
-	chainConfig             *chain.Config
-	lastSeenBlock           atomic.Uint64
-	lastSeenCond            *sync.Cond
-	lastFinalizedBlock      atomic.Uint64
-	started                 atomic.Bool
-	pendingBaseFee          atomic.Uint64
-	pendingBlobFee          atomic.Uint64 // For gas accounting for blobs, which has its own dimension
-	blockGasLimit           atomic.Uint64
-	totalBlobsInPool        atomic.Uint64
-	shanghaiTime            *uint64
-	isPostShanghai          atomic.Bool
-	agraBlock               *uint64
-	isPostAgra              atomic.Bool
-	bhilaiBlock             *uint64
-	isPostBhilai            atomic.Bool
-	cancunTime              *uint64
-	isPostCancun            atomic.Bool
-	pragueTime              *uint64
-	isPostPrague            atomic.Bool
-	osakaTime               *uint64
-	isPostOsaka             atomic.Bool
-	amsterdamTime           *uint64
-	isPostAmsterdam         atomic.Bool
-	feeCalculator           FeeCalculator
-	p2pFetcher              *Fetch
-	p2pSender               *Send
-	newSlotsStreams         *NewSlotsStreams
-	ethBackend              remoteproto.ETHBACKENDClient
-	builderNotifyNewTxns    func()
-	logger                  log.Logger
-	auths                   map[AuthAndNonce]*metaTxn // All authority accounts with a pooled authorization
-	blobs                   *blobStore
+	// builderNonce is the highest nonce per sender that the LOCAL BLOCK BUILDER has already taken into
+	// the block it is building. The pool's own view of a sender tracks the COMMITTED head, which does not
+	// move until that block seals — so without this, every remaining transaction from a sender whose
+	// transactions are in the open block reads as nonce-gapped and nothing is promotable. See the seed in
+	// onSenderStateChange.
+	builderNonce         map[uint64]uint64
+	minedBlobTxnsByBlock map[uint64][]*metaTxn            // (blockNum => slice): cache of recently mined blobs
+	minedBlobTxnsByHash  map[string]*metaTxn              // (hash => mt): map of recently mined blobs
+	isLocalLRU           *simplelru.LRU[string, struct{}] // txn_hash => is_local : to restore isLocal flag of unwinded transactions
+	newPendingTxns       chan Announcements               // notifications about new txns in Pending sub-pool
+	all                  *BySenderAndNonce                // senderID => (sorted map of txn nonce => *metaTxn)
+	deletedTxns          []*metaTxn                       // list of discarded txns since last db commit
+	promoted             Announcements
+	cfg                  txpoolcfg.Config
+	chainID              uint256.Int
+	chainConfig          *chain.Config
+	lastSeenBlock        atomic.Uint64
+	lastSeenCond         *sync.Cond
+	lastFinalizedBlock   atomic.Uint64
+	started              atomic.Bool
+	pendingBaseFee       atomic.Uint64
+	pendingBlobFee       atomic.Uint64 // For gas accounting for blobs, which has its own dimension
+	blockGasLimit        atomic.Uint64
+	totalBlobsInPool     atomic.Uint64
+	shanghaiTime         *uint64
+	isPostShanghai       atomic.Bool
+	agraBlock            *uint64
+	isPostAgra           atomic.Bool
+	bhilaiBlock          *uint64
+	isPostBhilai         atomic.Bool
+	cancunTime           *uint64
+	isPostCancun         atomic.Bool
+	pragueTime           *uint64
+	isPostPrague         atomic.Bool
+	osakaTime            *uint64
+	isPostOsaka          atomic.Bool
+	amsterdamTime        *uint64
+	isPostAmsterdam      atomic.Bool
+	feeCalculator        FeeCalculator
+	p2pFetcher           *Fetch
+	p2pSender            *Send
+	newSlotsStreams      *NewSlotsStreams
+	ethBackend           remoteproto.ETHBACKENDClient
+	builderNotifyNewTxns func()
+	logger               log.Logger
+	auths                map[AuthAndNonce]*metaTxn // All authority accounts with a pooled authorization
+	blobs                *blobStore
 
 	// Dormancy eviction: tracks the block number of the last on-chain state change (nonce or
 	// balance) for each sender that has transactions in the queued sub-pool. Senders absent
@@ -237,6 +243,7 @@ func New(
 		pending:                 NewPendingSubPool(PendingSubPool, cfg.PendingSubPoolLimit),
 		baseFee:                 NewSubPool(BaseFeeSubPool, cfg.BaseFeeSubPoolLimit),
 		queued:                  NewSubPool(QueuedSubPool, cfg.QueuedSubPoolLimit),
+		builderNonce:            make(map[uint64]uint64),
 		newPendingTxns:          newTxns,
 		_stateCache:             cache,
 		senders:                 newSendersBatch(tracedSenders),
@@ -2213,6 +2220,21 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		// the sender is M, and there are transactions for all nonces between M and N from the same
 		// sender. Set to 0 is the transaction's nonce is divided from the state nonce by one or more nonce gaps.
 		mt.subPool &^= NoNonceGaps
+		// A HOLE THE OPEN BLOCK IS ALREADY HOLDING IS NOT A GAP. The walk starts at the COMMITTED nonce,
+		// but the local builder has usually taken a run of this sender's transactions into the block it is
+		// building, and that block does not seal for another slot. Measured on live304: the chain's nonce
+		// was 231, the pool's lowest queued was 345, and the 114 in between were sitting in the open block
+		// — so all 796 behind them read as gapped, PendingHashes returned nothing, and the next TWO blocks
+		// sealed EMPTY while the work was in hand. With one sponsor paying for every order that serialises
+		// the whole chain to one block's worth per seal.
+		//
+		// Only the walk is moved, never senderNonce: the discard above keys on senderNonce and would
+		// DESTROY these transactions as NonceTooLow if the block were cut. Skipping forward can promote
+		// more and can never discard, and a cut block's transactions come back below builderNonce, where
+		// the walk still reaches them from the committed nonce as before.
+		if bn, held := p.builderNonce[senderID]; held && mt.TxnSlot.Nonce > noGapsNonce && mt.TxnSlot.Nonce <= bn+1 {
+			noGapsNonce = mt.TxnSlot.Nonce
+		}
 		if noGapsNonce == mt.TxnSlot.Nonce {
 			mt.subPool |= NoNonceGaps
 			noGapsNonce++
@@ -2958,4 +2980,63 @@ func (p *TxPool) QueuedBlockers() (total, noGaps, balance, tooMuchGas, feeCap in
 		minNonce = 0
 	}
 	return total, noGaps, balance, tooMuchGas, feeCap, minNonce, senderNonce, true
+}
+
+// OnBuilderNonces tells the pool which nonces the LOCAL BLOCK BUILDER has already taken into the block
+// it is building, per sender. It is what lets the pool release the rest of that sender's run instead of
+// holding it until the block seals — see the seed in onSenderStateChange for what the holding costs.
+//
+// It recomputes only the NoNonceGaps bit and then promotes. It deliberately does NOT go through
+// onSenderStateChange: that reads the sender's committed state to redo balance and gas, and it DISCARDS
+// transactions below the committed nonce. Nothing here is grounds for discarding anything — the builder's
+// block may yet be cut, and those transactions must come back.
+func (p *TxPool) OnBuilderNonces(byAddr map[common.Address]uint64) {
+	if len(byAddr) == 0 {
+		return
+	}
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	changed := false
+	for addr, nonce := range byAddr {
+		senderID, ok := p.senders.getID(addr)
+		if !ok {
+			continue
+		}
+		// NEVER BACKWARDS. A block that was cut leaves the builder holding less than it did, but a
+		// transaction already promoted on the strength of the higher number must not be withdrawn: the
+		// feed has it, and the exec filter drops anything that does not continue the body anyway.
+		if prev, had := p.builderNonce[senderID]; had && nonce <= prev {
+			continue
+		}
+		p.builderNonce[senderID] = nonce
+		changed = true
+
+		noGapsNonce := uint64(0)
+		first := true
+		p.all.ascend(senderID, func(mt *metaTxn) bool {
+			if first {
+				noGapsNonce = mt.TxnSlot.Nonce - mt.nonceDistance
+				first = false
+			}
+			mt.subPool &^= NoNonceGaps
+			if mt.TxnSlot.Nonce > noGapsNonce && mt.TxnSlot.Nonce <= nonce+1 {
+				noGapsNonce = mt.TxnSlot.Nonce
+			}
+			if noGapsNonce == mt.TxnSlot.Nonce {
+				mt.subPool |= NoNonceGaps
+				noGapsNonce++
+			}
+			p.updateInSubPool(mt)
+			return true
+		})
+	}
+	if !changed {
+		return
+	}
+	// The pool's OWN prices, not the caller's. promote() prices every candidate against them, and a
+	// caller passing zeros would promote regardless of fee cap — which looks right on a chain whose base
+	// fee is zero and is wrong everywhere else.
+	var announcements Announcements
+	p.promote(p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), &announcements, p.logger)
+	p.pending.EnforceBestInvariants()
 }

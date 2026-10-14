@@ -679,3 +679,25 @@ func orderBySenderNonce(newTxRLPs [][]byte, signer *types.Signer) ([]txCandidate
 	})
 	return cands, bad
 }
+
+// BuilderNonces is the highest nonce per sender that the in-progress block body already holds. The txpool
+// needs it because its own view of a sender tracks the COMMITTED head: until this block seals, every
+// transaction behind the ones taken here reads as nonce-gapped and will not be handed back to the feed.
+// See TxPool.OnBuilderNonces.
+// ⚠ KEYED BY common.Address, NOT accounts.Address. The body indexes senders by the interned
+// accounts.Address, which is a distinct type (unique.Handle[common.Address]) — and the consumer reaches
+// this through a type assertion, so returning the interned form does not fail to compile, it fails to
+// MATCH, and the caller silently does nothing. That cost a whole run: the pool went on withholding and
+// the drain log looked exactly as it had before the fix.
+func (e *ExecModule) BuilderNonces() map[common.Address]uint64 {
+	e.flash.mu.Lock()
+	defer e.flash.mu.Unlock()
+	if len(e.flash.bodyNonce) == 0 {
+		return nil
+	}
+	out := make(map[common.Address]uint64, len(e.flash.bodyNonce))
+	for a, n := range e.flash.bodyNonce {
+		out[a.Value()] = n
+	}
+	return out
+}

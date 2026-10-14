@@ -410,3 +410,12 @@ func (s *GrpcServer) QueuedBlockers() (total, noGaps, balance, tooMuchGas, feeCa
 	}
 	return 0, 0, 0, 0, 0, 0, 0, false
 }
+
+// OnBuilderNonces forwards the local builder's reserved nonces — see TxPool.OnBuilderNonces.
+func (s *GrpcServer) OnBuilderNonces(byAddr map[common.Address]uint64) {
+	if ob, ok := s.txPool.(interface {
+		OnBuilderNonces(map[common.Address]uint64)
+	}); ok {
+		ob.OnBuilderNonces(byAddr)
+	}
+}
