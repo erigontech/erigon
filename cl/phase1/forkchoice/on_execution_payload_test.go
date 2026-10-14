@@ -977,62 +977,65 @@ func TestInvalidPendingEnvelopeDoesNotPoisonLaterArrival(t *testing.T) {
 	require.False(t, f.ExecutionPayloadReceivedBefore(blockRoot, deadline))
 }
 
-// A payload persisted without an EL call, with no EL or without validation (forward sync), counts
-// as NotValidated.
-func TestOnExecutionPayloadWithoutELValidationMarksPayloadOptimistic(t *testing.T) {
-	t.Run("no EL", func(t *testing.T) {
-		testOnExecutionPayloadMarksPayloadOptimistic(t, nil, true)
-	})
-	t.Run("not validating", func(t *testing.T) {
-		testOnExecutionPayloadMarksPayloadOptimistic(t, execution_client.NewMockExecutionEngine(gomock.NewController(t)), false)
-	})
-}
+func TestOnExecutionPayloadWithoutEngineMarksPayloadOptimistic(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		withEngine      bool
+		validatePayload bool
+	}{
+		{name: "without engine", validatePayload: true},
+		{name: "without EL validation", withEngine: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+			envelope.Message.Payload.GasLimit = 36_000_000
+			requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(cfg, envelope.Message.ExecutionRequests))
+			payloadHash, err := envelope.Message.Payload.ComputeBlockHash(&envelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
+			require.NoError(t, err)
+			envelope.Message.Payload.BlockHash = payloadHash
+			parentBid := block.Block.Body.GetSignedExecutionPayloadBid().Message
+			parentBid.BlockHash = payloadHash
+			parentBid.GasLimit = envelope.Message.Payload.GasLimit
+			bodyRoot, err := block.Block.Body.HashSSZ()
+			require.NoError(t, err)
+			blockState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{
+				Slot:          block.Block.Slot,
+				ProposerIndex: block.Block.ProposerIndex,
+				ParentRoot:    block.Block.ParentRoot,
+				BodyRoot:      bodyRoot,
+			})
+			blockRoot, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			root := common.Hash(blockRoot)
+			envelope.Message.BeaconBlockRoot = root
+			resignAdmissionEnvelope(t, cfg, blockState, envelope)
+			f := newPayloadVoteTestStore(t, root, false, false)
+			gasLimits, err := lru.New[common.Hash, uint64](1)
+			require.NoError(t, err)
+			f.executionPayloadGasLimit = gasLimits
+			f.beaconCfg = cfg
+			f.forkGraph = &persistingEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{
+				state: blockState,
+				block: block,
+			}}
+			if tc.withEngine {
+				f.engine = execution_client.NewMockExecutionEngine(gomock.NewController(t))
+			}
 
-func testOnExecutionPayloadMarksPayloadOptimistic(t *testing.T, engine execution_client.ExecutionEngine, validatePayload bool) {
-	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
-	envelope.Message.Payload.GasLimit = 36_000_000
-	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(cfg, envelope.Message.ExecutionRequests))
-	payloadHash, err := envelope.Message.Payload.ComputeBlockHash(&envelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
-	require.NoError(t, err)
-	envelope.Message.Payload.BlockHash = payloadHash
-	parentBid := block.Block.Body.GetSignedExecutionPayloadBid().Message
-	parentBid.BlockHash = payloadHash
-	parentBid.GasLimit = envelope.Message.Payload.GasLimit
-	bodyRoot, err := block.Block.Body.HashSSZ()
-	require.NoError(t, err)
-	blockState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{
-		Slot:          block.Block.Slot,
-		ProposerIndex: block.Block.ProposerIndex,
-		ParentRoot:    block.Block.ParentRoot,
-		BodyRoot:      bodyRoot,
-	})
-	blockRoot, err := block.Block.HashSSZ()
-	require.NoError(t, err)
-	root := common.Hash(blockRoot)
-	envelope.Message.BeaconBlockRoot = root
-	resignAdmissionEnvelope(t, cfg, blockState, envelope)
-	f := newPayloadVoteTestStore(t, root, false, false)
-	gasLimits, err := lru.New[common.Hash, uint64](1)
-	require.NoError(t, err)
-	f.executionPayloadGasLimit = gasLimits
-	f.beaconCfg = cfg
-	f.engine = engine
-	f.forkGraph = &persistedEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{
-		state: blockState,
-		block: block,
-	}}
-
-	require.NoError(t, f.OnExecutionPayload(t.Context(), envelope, false, validatePayload))
-	require.True(t, f.isPayloadAvailable(root))
-	status, ok := f.GetRecentExecutionPayloadStatusByRoot(root)
-	require.True(t, ok)
-	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated), status)
-	gasLimit, ok := f.GetExecutionPayloadGasLimit(envelope.Message.Payload.BlockHash)
-	require.True(t, ok)
-	require.Equal(t, envelope.Message.Payload.GasLimit, gasLimit)
-	exits, ok := f.GetCachedParentBuilderExitRequests(root)
-	require.True(t, ok)
-	require.Empty(t, exits)
+			require.NoError(t, f.OnExecutionPayload(t.Context(), envelope, false, tc.validatePayload))
+			require.True(t, f.isPayloadAvailable(root))
+			status, ok := f.GetRecentExecutionPayloadStatusByRoot(root)
+			require.True(t, ok)
+			require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated), status)
+			require.False(t, f.IsPayloadVerified(root))
+			gasLimit, ok := f.GetExecutionPayloadGasLimit(envelope.Message.Payload.BlockHash)
+			require.True(t, ok)
+			require.Equal(t, envelope.Message.Payload.GasLimit, gasLimit)
+			exits, ok := f.GetCachedParentBuilderExitRequests(root)
+			require.True(t, ok)
+			require.Empty(t, exits)
+		})
+	}
 }
 
 func TestRetryPendingExecutionPayloadEnvelopesDropsStaleStorageFailure(t *testing.T) {

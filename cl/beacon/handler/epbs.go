@@ -747,17 +747,17 @@ func (a *ApiHandler) postProposerPreferences(w http.ResponseWriter, r *http.Requ
 
 		if a.proposerPreferencesService != nil {
 			if err := a.proposerPreferencesService.ProcessMessage(r.Context(), nil, req); err != nil {
-				// Gossip deduplicates by slot and dependent root before checking the signature.
-				// Only the identical signed preference is a successful REST retry.
+				// The service deduplicates by slot and dependent root, so only an identical signed preference is a retry.
+				identicalRetry := false
 				if errors.Is(err, clservices.ErrProposerPreferenceAlreadySeen) && a.epbsPool != nil {
 					stored, ok := a.epbsPool.GetPreference(req.Message.ProposalSlot, req.Message.DependentRoot)
-					if ok && stored != nil && stored.Message != nil &&
-						*stored.Message == *req.Message && stored.Signature == req.Signature {
-						continue
-					}
+					identicalRetry = ok && stored != nil && stored.Message != nil &&
+						*stored.Message == *req.Message && stored.Signature == req.Signature
 				}
-				failures = append(failures, poolingFailure{Index: i, Message: err.Error()})
-				continue
+				if !identicalRetry {
+					failures = append(failures, poolingFailure{Index: i, Message: err.Error()})
+					continue
+				}
 			}
 		}
 
@@ -782,8 +782,22 @@ func (a *ApiHandler) postProposerPreferences(w http.ResponseWriter, r *http.Requ
 				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 				return
 			}
-			if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameProposerPreferences, encodedSSZ); err != nil {
+			proposalEpoch := state.GetEpochAtSlot(a.beaconChainCfg, req.Message.ProposalSlot)
+			currentEpoch := a.ethClock.GetCurrentEpoch()
+			// Use the proposal epoch before Gloas; afterwards, use the current digest because some peers join the next one late.
+			digestEpoch := proposalEpoch
+			if a.beaconChainCfg.GetCurrentStateVersion(currentEpoch) >= clparams.GloasVersion {
+				digestEpoch = currentEpoch
+			}
+			forkDigest, err := a.ethClock.ComputeForkDigest(digestEpoch)
+			if err != nil {
+				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+				return
+			}
+			if err := a.gossipManager.PublishToForkDigest(r.Context(), forkDigest, gossip.TopicNameProposerPreferences, encodedSSZ); err != nil {
 				a.logger.Debug("[Beacon REST] failed to publish proposer preferences to gossip", "err", err)
+				failures = append(failures, poolingFailure{Index: i, Message: err.Error()})
+				continue
 			}
 		}
 	}
