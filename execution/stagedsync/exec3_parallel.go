@@ -2119,6 +2119,7 @@ func (result *execResult) calcFees(
 	// own prior incarnations that would double-apply the tip on re-execution.
 	// Worker writes for the current tx are picked up below via TxOut.
 	vsReader := state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader)
+	vsReader.SetEIP8246(chainRules.IsAmsterdam)
 
 	coinbaseAcc, err := vsReader.ReadAccountData(result.Coinbase)
 	if err != nil {
