@@ -17,14 +17,19 @@
 package p2p
 
 import (
+	"crypto/rand"
 	"fmt"
 	"net"
 	"net/netip"
 	"testing"
 
+	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/clparams"
 )
 
 // The tests use a small peer pool, where the /16 cap is still larger than the /24 cap.
@@ -328,4 +333,56 @@ func TestResourceManagerCloseTwice(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, rm.Close())
 	require.NotPanics(t, func() { _ = rm.Close() })
+}
+
+// staticPeer returns a direct TCP libp2p address for ip, as --sentinel.staticpeers takes it.
+func staticPeer(t *testing.T, proto, ip string) string {
+	key, _, err := crypto.GenerateSecp256k1Key(rand.Reader)
+	require.NoError(t, err)
+	id, err := peer.IDFromPrivateKey(key)
+	require.NoError(t, err)
+	return fmt.Sprintf("/%s/%s/tcp/9000/p2p/%s", proto, ip, id)
+}
+
+// The operator configured these peers; a full block must not keep refusing them.
+func TestResourceManagerDoesNotCapStaticPeersByBlock(t *testing.T) {
+	netCfg := &clparams.NetworkConfig{StaticPeers: []string{
+		staticPeer(t, "ip4", "203.0.113.200"),
+		staticPeer(t, "ip6", "2001:db8:1:ff00::1"),
+	}}
+	o := newConnOpenerWithConfig(t, &P2PConfig{MaxPeerCount: testMaxPeerCount, NetworkConfig: netCfg})
+	perBlock24, _ := ipBlockConnLimits(testMaxPeerCount)
+	for i := range perBlock24 {
+		require.NoError(t, o.open(fmt.Sprintf("/ip4/203.0.113.%d", i+1)))
+	}
+	require.NoError(t, o.open("/ip4/203.0.113.200"))
+	require.ErrorContains(t, o.open("/ip4/203.0.113.201"), errPerSubnetLimit, "other addresses in the block stay capped")
+	o.closeAll()
+
+	for i := range perBlock24 {
+		require.NoError(t, o.open(fmt.Sprintf("/ip6/2001:db8:1:%x00::1", i)))
+	}
+	require.NoError(t, o.open("/ip6/2001:db8:1:ff00::1"))
+	require.ErrorContains(t, o.open("/ip6/2001:db8:1:fe00::1"), errPerSubnetLimit)
+}
+
+func TestResourceManagerKeepsPerAddressCapForStaticPeers(t *testing.T) {
+	netCfg := &clparams.NetworkConfig{StaticPeers: []string{staticPeer(t, "ip4", "203.0.113.200")}}
+	o := newConnOpenerWithConfig(t, &P2PConfig{MaxPeerCount: testMaxPeerCount, NetworkConfig: netCfg})
+	for range 8 {
+		require.NoError(t, o.open("/ip4/203.0.113.200"))
+	}
+	require.Error(t, o.open("/ip4/203.0.113.200"))
+}
+
+// go-libp2p matches the most specific network first, so a static peer's own entry must not
+// lower the allowance of a trusted network that contains it.
+func TestResourceManagerStaticPeerInTrustedNetworkKeepsTrustedLimit(t *testing.T) {
+	netCfg := &clparams.NetworkConfig{StaticPeers: []string{staticPeer(t, "ip4", "203.0.113.7")}}
+	o := newConnOpenerWithConfig(t, &P2PConfig{
+		MaxPeerCount: testMaxPeerCount, NetworkConfig: netCfg, TrustedCIDRs: []string{"203.0.113.0/24"},
+	})
+	for range 12 {
+		require.NoError(t, o.open("/ip4/203.0.113.7"))
+	}
 }

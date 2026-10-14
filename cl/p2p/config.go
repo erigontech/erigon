@@ -166,6 +166,7 @@ func newResourceManager(cfg *P2PConfig) (network.ResourceManager, error) {
 		return nil, err
 	}
 	var opts []rcmgr.Option
+	var staticPeers []netip.Prefix
 	if !cfg.DisableIPBlockLimits {
 		perBlock24, perBlock16 := ipBlockConnLimits(cfg.MaxPeerCount)
 		// The lists replace go-libp2p's defaults, so they repeat the per-address caps (8 per IPv4
@@ -178,19 +179,28 @@ func newResourceManager(cfg *P2PConfig) (network.ResourceManager, error) {
 		if cfg.LocalDiscovery {
 			trusted = append(trusted, mustParsePrefixes(append([]string{"fc00::/7", "fe80::/10"}, privateCIDRList...)...)...)
 		}
+		if cfg.NetworkConfig != nil {
+			staticPeers = staticPeerPrefixes(cfg.NetworkConfig.StaticPeers, trusted)
+		}
 	}
-	if len(trusted) > 0 {
-		// Exempt networks skip the per-subnet caps and share one connection count each.
+	if len(trusted) > 0 || len(staticPeers) > 0 {
+		// A network prefix limit replaces the per-subnet caps for its addresses. Exempt networks
+		// share one connection count each; a static peer's address keeps the released cap of 8.
 		// WithNetworkPrefixLimit sorts the lists in place, so the defaults are cloned.
 		v4, v6 := slices.Clone(rcmgr.DefaultNetworkPrefixLimitV4), slices.Clone(rcmgr.DefaultNetworkPrefixLimitV6)
-		connCount := exemptNetworkConnLimit(cfg.MaxPeerCount)
-		for _, prefix := range trusted {
+		add := func(prefix netip.Prefix, connCount int) {
 			limit := rcmgr.NetworkPrefixLimit{Network: prefix, ConnCount: connCount}
 			if prefix.Addr().Is4() {
 				v4 = append(v4, limit)
 			} else {
 				v6 = append(v6, limit)
 			}
+		}
+		for _, prefix := range trusted {
+			add(prefix, exemptNetworkConnLimit(cfg.MaxPeerCount))
+		}
+		for _, prefix := range staticPeers {
+			add(prefix, 8)
 		}
 		opts = append(opts, rcmgr.WithNetworkPrefixLimit(v4, v6))
 	}
@@ -208,6 +218,41 @@ func newResourceManager(cfg *P2PConfig) (network.ResourceManager, error) {
 // go-libp2p uses half of it as the network's QUIC source-address verification burst.
 func exemptNetworkConnLimit(maxPeerCount uint64) int {
 	return max(32, 8*int(maxPeerCount))
+}
+
+// staticPeerPrefixes returns the per-address prefixes (IPv4 /32, IPv6 /56, as go-libp2p counts
+// them) of the static peers that no exempt network contains: the most specific prefix matches
+// first, so an entry inside an exempt network would lower that network's allowance. Peers given
+// by DNS name are skipped; invalid ones are reported when the sentinel dials them.
+func staticPeerPrefixes(staticPeers []string, exempt []netip.Prefix) []netip.Prefix {
+	var out []netip.Prefix
+	for _, staticPeer := range staticPeers {
+		addrs, err := ParseStaticPeerAddrs(staticPeer)
+		if err != nil {
+			continue
+		}
+		for _, maddr := range addrs {
+			ip, err := manet.ToIP(maddr)
+			if err != nil {
+				continue
+			}
+			addr, ok := netip.AddrFromSlice(ip)
+			if !ok {
+				continue
+			}
+			addr = addr.Unmap()
+			bits := 32
+			if addr.Is6() {
+				bits = 56
+			}
+			prefix := netip.PrefixFrom(addr, bits).Masked()
+			covered := slices.ContainsFunc(exempt, func(p netip.Prefix) bool { return p.Contains(addr) })
+			if !covered && !slices.Contains(out, prefix) {
+				out = append(out, prefix)
+			}
+		}
+	}
+	return out
 }
 
 // ParseTrustedCIDRs parses --caplin.ip-block-limits.trusted-cidrs. Empty entries are skipped.
