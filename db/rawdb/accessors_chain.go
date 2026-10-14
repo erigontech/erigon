@@ -514,7 +514,7 @@ func CanonicalTransactions(db kv.Getter, txnID uint64, amount uint32) ([]types.T
 	}
 	txs := make([]types.Transaction, amount)
 	i := uint32(0)
-	if err := db.ForAmount(kv.EthTx, hexutil.EncodeTs(txnID), amount, func(k, v []byte) error {
+	if err := forBlockTxns(db, txnID, amount, func(k, v []byte) error {
 		var err error
 		if txs[i], err = types.UnmarshalTransactionFromBinary(v, false /* blobTxnsAreWrappedWithBlobs */); err != nil {
 			return err
@@ -526,6 +526,24 @@ func CanonicalTransactions(db kv.Getter, txnID uint64, amount uint32) ([]types.T
 	}
 	txs = txs[:i] // user may request big "amount", but db can return small "amount". Return as much as we found.
 	return txs, nil
+}
+
+var errPastBlockTxns = errors.New("past the block's txns")
+
+// forBlockTxns walks the stored txns of [txnID, txnID+amount). A body can claim more
+// txns than EthTx holds, and a walk by count would then run into other blocks' txns.
+func forBlockTxns(db kv.Getter, txnID uint64, amount uint32, walker func(k, v []byte) error) error {
+	end := txnID + uint64(amount)
+	err := db.ForAmount(kv.EthTx, hexutil.EncodeTs(txnID), amount, func(k, v []byte) error {
+		if binary.BigEndian.Uint64(k) >= end {
+			return errPastBlockTxns
+		}
+		return walker(k, v)
+	})
+	if errors.Is(err, errPastBlockTxns) {
+		return nil
+	}
+	return err
 }
 
 // Write transactions into DB and use txnID as first identifier
@@ -583,7 +601,7 @@ func ReadRawBody(db kv.Getter, hash common.Hash, number uint64) (*types.RawBody,
 		return nil, nil
 	}
 	txs := make([][]byte, 0, txCount)
-	if err := db.ForAmount(kv.EthTx, hexutil.EncodeTs(firstTxId), txCount, func(_, v []byte) error {
+	if err := forBlockTxns(db, firstTxId, txCount, func(_, v []byte) error {
 		txn, err := types.BinaryFromStoredTxn(v)
 		if err != nil {
 			return err
@@ -628,8 +646,7 @@ func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err erro
 
 		// TxCount counts the two system txns, which have no kv.EthTx entries;
 		// reading from the system slot drifts into neighbouring blocks' txns.
-		binary.BigEndian.PutUint64(encNum, baseTxnID.First())
-		if err := db.ForAmount(kv.EthTx, encNum, txCount-2, func(k, v []byte) error {
+		if err := forBlockTxns(db, baseTxnID.First(), txCount-2, func(k, v []byte) error {
 			res = append(res, v)
 			return nil
 		}); err != nil {

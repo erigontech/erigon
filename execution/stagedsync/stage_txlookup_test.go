@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -35,9 +36,11 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 const (
@@ -363,4 +366,45 @@ func mustGet(t *testing.T, tx kv.Tx, k []byte) []byte {
 	v, err := tx.GetOne(kv.TxLookup, k)
 	require.NoError(t, err)
 	return v
+}
+
+type txlBodyReader struct{ txlBlockReader }
+
+func (txlBodyReader) BodyWithTransactions(_ context.Context, tx kv.Getter, hash common.Hash, n uint64) (*types.Body, error) {
+	return rawdb.ReadBodyWithTransactions(tx, hash, n)
+}
+
+// A body can claim more txns than EthTx holds. TxLookup must index only the
+// block's own range, not the txns stored after the gap, which belong to other blocks.
+func TestTxLookupStaysInTheBlocksTxnRange(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	h0, h1 := common.Hash{0xa0}, common.Hash{0xa1}
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, h0, 0))
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, h1, 1))
+	// block 0 claims txnIDs 1..5, none stored; block 1 owns txnID 8
+	require.NoError(t, rawdb.WriteBodyForStorage(tx, h0, 0, &types.BodyForStorage{BaseTxnID: 0, TxCount: 5 + 2}))
+	require.NoError(t, rawdb.WriteBodyForStorage(tx, h1, 1, &types.BodyForStorage{BaseTxnID: 7, TxCount: 1 + 2}))
+	own := types.NewTransaction(1, common.Address{1}, uint256.NewInt(0), 21000, uint256.NewInt(1), nil)
+	stray := types.NewTransaction(2, common.Address{2}, uint256.NewInt(0), 21000, uint256.NewInt(1), nil)
+	require.NoError(t, rawdb.WriteTransactions(tx, []types.Transaction{own}, 7))
+	require.NoError(t, rawdb.WriteTransactions(tx, []types.Transaction{stray}, 11)) // an unwound sibling's txn
+	txNums := freezeblocks.NewBlockReader(nil).TxnumReader()
+	require.NoError(t, txNums.Append(tx, 0, 6))
+	require.NoError(t, txNums.Append(tx, 1, 9))
+
+	cfg := StageTxLookupCfg(prune.Mode{}, t.TempDir(), txlBodyReader{})
+	require.NoError(t, txnLookupTransform("test", tx, 0, 2, context.Background(), cfg, log.New()))
+
+	strayHash, ownHash := stray.Hash(), own.Hash()
+	v, err := tx.GetOne(kv.TxLookup, strayHash[:])
+	require.NoError(t, err)
+	require.Nil(t, v, "a txn of no canonical block was indexed")
+	v, err = tx.GetOne(kv.TxLookup, ownHash[:])
+	require.NoError(t, err)
+	require.Len(t, v, 16)
+	require.Equal(t, uint64(1), binary.BigEndian.Uint64(v[:8]))
 }
