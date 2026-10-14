@@ -292,8 +292,11 @@ func (p *branchPrefetcher) put(key, data []byte, step kv.Step) []byte {
 func (p *branchPrefetcher) verifyAgainst(tx kv.TemporalTx) error {
 	check := func(k string, data []byte) error {
 		v, _, err := tx.GetLatest(kv.CommitmentDomain, []byte(k), kv.GetLatestOptions{})
-		if err != nil || !bytes.Equal(v, data) {
-			return fmt.Errorf("carried branch record %x diverges from the committed state: %x vs %x (err %v)", k, data, v, err)
+		if err != nil {
+			return fmt.Errorf("carried branch record %x: %w", k, err)
+		}
+		if !bytes.Equal(v, data) {
+			return fmt.Errorf("carried branch record %x diverges from the committed state: %x vs %x", k, data, v)
 		}
 		return nil
 	}

@@ -779,7 +779,8 @@ func (r *parentStateReader) ReadAccountStorage(address accounts.Address, key acc
 			want.Clear()
 		}
 		if want != v {
-			return v, false, fmt.Errorf("parent state slot %x %x: %x, history %x", address, key, &v, &want)
+			err = fmt.Errorf("parent state slot %x %x: %x, history %x", address, key, &v, &want)
+			return v, false, err
 		}
 	}
 	return v, len(val) > 0, nil

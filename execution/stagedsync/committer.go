@@ -964,8 +964,10 @@ func (cc *commitmentCalculator) parentRecords() *commitmentdb.ParentRecords {
 		return nil
 	}
 	gen := p.gen.Load()
-	r := &commitmentdb.ParentRecords{BlockNum: h.blockNum, BlockHash: h.blockHash, ParentHash: h.parentHash, Deleted: cc.handoffDel,
-		Get: func(key []byte) ([]byte, kv.Step, bool) { return p.getAt(key, gen) }}
+	r := &commitmentdb.ParentRecords{
+		BlockNum: h.blockNum, BlockHash: h.blockHash, ParentHash: h.parentHash, Deleted: cc.handoffDel,
+		Get: func(key []byte) ([]byte, kv.Step, bool) { return p.getAt(key, gen) },
+	}
 	if h.parent != nil {
 		r.State = h.parent
 	}

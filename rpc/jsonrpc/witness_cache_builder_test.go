@@ -940,10 +940,12 @@ func TestHeadCaptureOverCarriedRecordsMatchesDurablePerBlock(t *testing.T) {
 
 		api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
 		api.witnessCache = newWitnessResultCache(96, 0, true, true)
-		committedTx, err := m.DB.BeginTemporalRo(ctx)
-		require.NoError(t, err)
-		api.tryHeadCaptureBuild(ctx, committedTx, pin, n, hash)
-		committedTx.Rollback()
+		func() {
+			committedTx, err := m.DB.BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			defer committedTx.Rollback()
+			api.tryHeadCaptureBuild(ctx, committedTx, pin, n, hash)
+		}()
 		pin.close()
 		got, ok := api.witnessCache.Get(hash)
 		require.True(t, ok, "block %d head-capture build", n)
