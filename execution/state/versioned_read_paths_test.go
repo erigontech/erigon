@@ -635,7 +635,6 @@ func TestVersionedRead_B_TouchReadsAnAbsentAccountOnce(t *testing.T) {
 	r := &refreshReader{}
 	ibs := NewWithVersionMap(r, NewVersionMap(nil))
 	defer ibs.Close()
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, 5)
 	addr := accounts.InternAddress([20]byte{0xb9})
 

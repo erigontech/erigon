@@ -62,7 +62,6 @@ func runRevivalTx(t *testing.T, vm *VersionMap, txIdx int, f func(ibs *IntraBloc
 	t.Helper()
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
 	ibs.SetTxContext(100, txIdx)
-	ibs.SetNoMaterialize(true)
 	f(ibs)
 	writes := ibs.FinalizedWrites(&chain.Rules{})
 	vm.FlushVersionedWrites(writes, true, "")

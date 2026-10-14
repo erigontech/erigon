@@ -246,7 +246,6 @@ func TestSetCodeParallel_NoMaterialize_DelegateThenRevokeAbsentAccount(t *testin
 	addr := accounts.InternAddress([20]byte{0xDE, 0xAD})
 	delegation := types.AddressToDelegation(accounts.InternAddress([20]byte{0x01}))
 	ibs := NewWithVersionMap(&emptyReader{}, NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 
 	_, err := ibs.GetCodeHash(addr)
 	require.NoError(t, err)
@@ -271,7 +270,6 @@ func TestSetCodeParallel_NoMaterialize_DelegateThenRevokeBALCreatedAccount(t *te
 	vm := NewVersionMap(bal)
 	vm.WriteAddress(addr, Version{TxIndex: 0}, &accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}, true)
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(100, 1)
 
 	require.NoError(t, ibs.SetCode(addr, delegation, tracing.CodeChangeAuthorization))

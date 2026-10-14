@@ -95,7 +95,6 @@ func TestRefreshCodeAssertsHashPresent(t *testing.T) {
 	vm.WriteCode(addr, Version{TxIndex: 2, Incarnation: 0}, accounts.Code{Bytes: []byte{0x60, 0x00}}, true)
 
 	ibs := NewWithVersionMap(&codeReader{addr: addr, account: &acc, code: nil}, vm)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(100, 7)
 	ibs.SetVersion(0)
 

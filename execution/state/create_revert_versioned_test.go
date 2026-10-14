@@ -74,7 +74,6 @@ func TestNoMaterialize_TouchFundCreateRevertReadsZeroBalance(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xc0, 0x33})
 	ibs := NewWithVersionMap(&emptyReader{}, NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 
 	snap := ibs.PushSnapshot()
 	require.NoError(t, ibs.TouchAccount(addr))
@@ -95,7 +94,6 @@ func TestNoMaterialize_RevivedCreateRevertReadsCellBalance(t *testing.T) {
 	vm := NewVersionMap(nil)
 	newTx := func(txIndex int) *IntraBlockState {
 		ibs := NewWithVersionMap(&emptyReader{}, vm)
-		ibs.SetNoMaterialize(true)
 		ibs.SetTxContext(1, txIndex)
 		return ibs
 	}

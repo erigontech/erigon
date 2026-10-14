@@ -1528,7 +1528,6 @@ func TestSetStorageRejectsNoMaterialize(t *testing.T) {
 	t.Cleanup(func() { dbg.AssertEnabled = prev })
 
 	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(0, 0)
 	ibs.SetVersion(0)
 	defer ibs.Close()
