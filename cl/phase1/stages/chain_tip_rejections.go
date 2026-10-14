@@ -17,33 +17,45 @@
 package stages
 
 import (
+	"context"
 	"errors"
-	"fmt"
 	"maps"
 	"slices"
 	"time"
 
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-// chainTipRejectionLogInterval bounds how often rejected chain-tip blocks are reported.
 const chainTipRejectionLogInterval = 30 * time.Second
 
 var (
 	errAnchorEnvelopeUnavailable = errors.New("anchor envelope unavailable")
-	errParentNotInForkGraph      = errors.New("parent not in fork graph")
+	errParentEnvelopeUnavailable = errors.New("parent envelope unavailable")
 )
 
+// chainTipRejection is what one reason gathered since the last summary. The last error keeps the
+// block it came from, so a later rejection without an error does not hide it.
 type chainTipRejection struct {
-	count    int
-	lastSlot uint64
-	lastErr  error
+	attempts    int
+	lastSlot    uint64
+	lastRoot    common.Hash
+	lastSeen    time.Time
+	lastErr     error
+	lastErrSlot uint64
+	lastErrRoot common.Hash
 }
 
-// chainTipRejections aggregates why chain-tip blocks are not imported and reports the
-// summary at Warn level at most once per interval, so a stuck head is visible at the
-// default log level without logging every rejected block. Only the stage goroutine uses it.
+type chainTipRejectionSummary struct {
+	reason string
+	chainTipRejection
+}
+
+// chainTipRejections aggregates why chain-tip blocks are not imported and logs a Warn per reason
+// at most once per interval, so the cause of a stuck head shows at the default log level. Only
+// the stage goroutine uses it.
 type chainTipRejections struct {
 	interval time.Duration
 	now      func() time.Time
@@ -58,23 +70,23 @@ func newChainTipRejections(interval time.Duration, now func() time.Time) *chainT
 	return &chainTipRejections{interval: interval, now: now, reasons: map[string]*chainTipRejection{}}
 }
 
-// record notes one rejected block. It returns the Warn summary once the interval has elapsed,
-// or nil when the rejection is only aggregated. The returned fields are ready for logging.
-func (r *chainTipRejections) record(reason string, slot uint64, err error) []any {
+// record notes one attempt to import a block; a block retried on every poll counts each time.
+func (r *chainTipRejections) record(reason string, slot uint64, root common.Hash, err error) {
 	entry := r.reasons[reason]
 	if entry == nil {
 		entry = &chainTipRejection{}
 		r.reasons[reason] = entry
 	}
-	entry.count++
-	entry.lastSlot = slot
-	entry.lastErr = err
-	return r.flushIfDue()
+	entry.attempts++
+	entry.lastSlot, entry.lastRoot, entry.lastSeen = slot, root, r.now()
+	if err != nil {
+		entry.lastErr, entry.lastErrSlot, entry.lastErrRoot = err, slot, root
+	}
 }
 
-// flushIfDue returns the summary of the rejections aggregated since the last one once the
-// interval has elapsed, so a burst that stops is still reported.
-func (r *chainTipRejections) flushIfDue() []any {
+// flushIfDue returns the reasons gathered since the last summary once the interval has elapsed,
+// leaving out those not seen for two intervals, such as rejections from before a forward sync.
+func (r *chainTipRejections) flushIfDue() []chainTipRejectionSummary {
 	if r == nil {
 		return nil
 	}
@@ -83,35 +95,52 @@ func (r *chainTipRejections) flushIfDue() []any {
 		return nil
 	}
 	r.lastLog = now
-	fields := make([]any, 0, 2*len(r.reasons))
+	var summaries []chainTipRejectionSummary
 	for _, reason := range slices.Sorted(maps.Keys(r.reasons)) {
-		entry := r.reasons[reason]
-		detail := fmt.Sprintf("count=%d lastSlot=%d", entry.count, entry.lastSlot)
-		if entry.lastErr != nil {
-			detail += " err=" + entry.lastErr.Error()
+		if entry := r.reasons[reason]; now.Sub(entry.lastSeen) <= 2*r.interval {
+			summaries = append(summaries, chainTipRejectionSummary{reason: reason, chainTipRejection: *entry})
 		}
-		fields = append(fields, reason, detail)
 	}
 	r.reasons = map[string]*chainTipRejection{}
-	return fields
+	return summaries
 }
 
-// logChainTipRejectionSummary emits the periodic Warn summary when due, without a new rejection.
-func logChainTipRejectionSummary(cfg *Cfg) {
-	if fields := cfg.chainTipRejections.flushIfDue(); fields != nil {
-		log.Warn("[Caplin] chain tip blocks are not being imported", fields...)
+func (r *chainTipRejections) logIfDue(headSlot uint64) {
+	summaries := r.flushIfDue()
+	for i := range summaries {
+		s := &summaries[i]
+		fields := []any{"reason", s.reason, "attempts", s.attempts, "lastSlot", s.lastSlot, "lastBlockRoot", s.lastRoot, "headSlot", headSlot}
+		if s.lastErr != nil {
+			fields = append(fields, "lastErr", s.lastErr, "lastErrSlot", s.lastErrSlot, "lastErrBlockRoot", s.lastErrRoot)
+		}
+		log.Warn("[Caplin] chain tip blocks rejected", fields...)
 	}
 }
 
-// logChainTipRejection records a rejection and emits the periodic Warn summary when due. A
-// block that is early or waits for its parent's envelope is retried by gossip and not counted.
-func logChainTipRejection(cfg *Cfg, reason string, slot uint64, err error) {
-	log.Debug("[chainTipSync] block not imported", "reason", reason, "slot", slot, "err", err)
+func chainTipHeadSlot(cfg *Cfg) uint64 {
+	if cfg.syncedData == nil {
+		return 0
+	}
+	return cfg.syncedData.HeadSlot()
+}
+
+// rejectChainTipBlock records why a block was not imported: as the cause its descendants report,
+// and in the summary. Blocks that are early or wait for their parent's envelope are imported
+// moments later by gossip, and a failure of the stage's own context is not the block's; neither is
+// counted.
+func rejectChainTipBlock(ctx context.Context, cfg *Cfg, rejected map[common.Hash]error, block *cltypes.SignedBeaconBlock, root common.Hash, reason string, cause error) {
+	if prev, seen := rejected[root]; !seen || !errors.Is(prev, cause) {
+		log.Debug("[chainTipSync] block not imported", "reason", reason, "slot", block.Block.Slot, "blockRoot", root, "err", cause)
+	}
+	rejected[root] = cause
 	if cfg.chainTipRejections == nil ||
-		errors.Is(err, forkchoice.ErrBlockTooEarly) || errors.Is(err, forkchoice.ErrParentEnvelopePending) {
+		errors.Is(cause, forkchoice.ErrBlockTooEarly) || errors.Is(cause, forkchoice.ErrParentEnvelopePending) ||
+		ctx.Err() != nil && (errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded)) {
 		return
 	}
-	if fields := cfg.chainTipRejections.record(reason, slot, err); fields != nil {
-		log.Warn("[Caplin] chain tip blocks are not being imported", fields...)
+	if cause != nil && cause.Error() == reason {
+		cause = nil
 	}
+	cfg.chainTipRejections.record(reason, block.Block.Slot, root, cause)
+	cfg.chainTipRejections.logIfDue(chainTipHeadSlot(cfg))
 }

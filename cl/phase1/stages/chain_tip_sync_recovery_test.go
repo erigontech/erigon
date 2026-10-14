@@ -857,9 +857,9 @@ func TestEnsureStoredParentPayloadAcceptedReplaysMissingVerdict(t *testing.T) {
 		gloasPayloadValidator: engine,
 	}
 
-	accepted := ensureStoredParentPayloadAccepted(t.Context(), cfg, store, root, envelope) == nil
+	reason := ensureStoredParentPayloadAccepted(t.Context(), cfg, store, root, envelope)
 
-	require.True(t, accepted)
+	require.NoError(t, reason)
 	require.Equal(t, 1, engine.newPayloadCalls)
 	require.EqualValues(t, execution_client.PayloadStatusNotValidated, store.marked)
 	require.Equal(t, payload.GasLimit, store.markedGas)
@@ -880,9 +880,9 @@ func TestEnsureStoredParentPayloadAcceptedRejectsInvalidVerdict(t *testing.T) {
 		block:       cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion),
 	}
 
-	accepted := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope) == nil
+	reason := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope)
 
-	require.False(t, accepted)
+	require.Error(t, reason)
 	require.Empty(t, store.requeued)
 }
 
@@ -902,9 +902,9 @@ func TestEnsureStoredParentPayloadAcceptedRestoresGasLimitForKnownVerdict(t *tes
 		markRetained: true,
 	}
 
-	accepted := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope) == nil
+	reason := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope)
 
-	require.True(t, accepted)
+	require.NoError(t, reason)
 	require.Equal(t, payload.GasLimit, store.markedGas)
 }
 
@@ -921,9 +921,9 @@ func TestEnsureStoredParentPayloadAcceptedWithoutExecutionClient(t *testing.T) {
 		markRetained: true,
 	}
 
-	accepted := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope) == nil
+	reason := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope)
 
-	require.True(t, accepted)
+	require.NoError(t, reason)
 	require.EqualValues(t, execution_client.PayloadStatusNotValidated, store.marked)
 	require.Empty(t, store.requeued)
 }
@@ -1090,12 +1090,46 @@ func TestChainTipBatchPassesARejectionToDescendants(t *testing.T) {
 	seen := make(map[common.Hash]struct{})
 	rejected := make(map[common.Hash]error)
 	args := Args{targetSlot: greatGrandchild.Block.Slot + 1}
+	// A recent summary keeps the rejections aggregated, so the recorded labels can be read.
+	cfg.chainTipRejections = newChainTipRejections(time.Hour, nil)
+	cfg.chainTipRejections.lastLog = time.Now()
 
 	processChainTipBatch(t.Context(), cfg, args, []*cltypes.SignedBeaconBlock{fullChild, grandchild}, seen, rejected)
 	reason := rejected[common.Hash(fullRoot)]
-	require.Error(t, reason)
+	require.ErrorContains(t, reason, "parent payload invalid")
 	require.Equal(t, reason, rejected[grandchildRoot])
 
 	processChainTipBatch(t.Context(), cfg, args, []*cltypes.SignedBeaconBlock{greatGrandchild}, seen, rejected)
 	require.Equal(t, reason, rejected[greatGrandchildRoot])
+
+	replay := cfg.chainTipRejections.reasons["parent payload not accepted"]
+	require.NotNil(t, replay)
+	require.Equal(t, common.Hash(fullRoot), replay.lastErrRoot)
+	missing := cfg.chainTipRejections.reasons["parent not in fork graph"]
+	require.NotNil(t, missing)
+	require.Equal(t, 2, missing.attempts)
+	require.Equal(t, greatGrandchildRoot, missing.lastRoot)
+	require.ErrorIs(t, missing.lastErr, reason)
+}
+
+// A parent envelope that no peer serves stalls the batch until its deadline; the child is reported
+// under the missing envelope, not under the deadline that ended its processing.
+func TestChainTipBatchReportsAParentEnvelopeNoPeerServes(t *testing.T) {
+	cfg, graph, parentRoot, fullChild, _, _ := newChainTipBatchFixture(t, execution_client.PayloadStatusNone)
+	fullRoot, err := fullChild.Block.HashSSZ()
+	require.NoError(t, err)
+	delete(graph.envelopes, parentRoot)
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg.beaconCfg)
+	cfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), &chainTipBatchEnvelopeSentinel{}, cfg.beaconCfg, clock, nil)
+	cfg.chainTipRejections = newChainTipRejections(time.Hour, nil)
+	cfg.chainTipRejections.lastLog = time.Now()
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+	rejected := make(map[common.Hash]error)
+
+	processChainTipBatch(ctx, cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{fullChild}, make(map[common.Hash]struct{}), rejected)
+
+	require.ErrorIs(t, rejected[common.Hash(fullRoot)], errParentEnvelopeUnavailable)
+	require.Contains(t, cfg.chainTipRejections.reasons, errParentEnvelopeUnavailable.Error())
+	require.NotContains(t, cfg.chainTipRejections.reasons, "process block failed")
 }
