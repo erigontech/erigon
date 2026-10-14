@@ -327,16 +327,19 @@ jobs:
           RUNNER_WS: ${{ runner.workspace }}
         run: |
           # Generated once from Erigon and shared with the other clients' jobs, so all clients replay the same requests.
-          # Each count covers the largest step of its test: 20000:20 for eth_call, 10000:20 for eth_getLogs, 3000:20 for mixed.
+          # Each count covers the largest step of its test: 30000:20 for eth_call, 10000:20 for eth_getLogs, 10000:20 for mixed.
           cd "$RUNNER_WS/rpc-tests"
           ./build/bin/rpc_pattern_gen eth_call --url http://localhost:8545 \
-            --counts 400000 --block-tag latest --verify --keep ok --fees drop \
+            --counts 600000 --block-tag latest --verify --keep ok --fees drop \
             --out "perf/pattern/$CHAIN/stress_test_eth_call_gen_latest.tar"
           ./build/bin/rpc_pattern_gen eth_getLogs --url http://localhost:8545 \
             --counts 200000 --block-tag latest --verify --keep ok --fees drop \
             --out "perf/pattern/$CHAIN/stress_test_eth_getLogs_gen_latest.tar"
+          # Pruned clients keep only ~128 blocks of state: the traced blocks plus the blocks mined until the end of the mixed run must fit.
+          sed -i 's/blocks=100/blocks=50/' "perf/pattern/$CHAIN/config/mixed.profile"
+          grep -q '^debug_traceBlockByHash .*blocks=50' "perf/pattern/$CHAIN/config/mixed.profile"
           ./build/bin/rpc_pattern_gen --profile "perf/pattern/$CHAIN/config/mixed.profile" --url http://localhost:8545 \
-            --counts 100000 --block-tag latest --verify --keep ok --fees drop --max-blocks 2500 \
+            --counts 200000 --block-tag latest --verify --keep ok --fees drop --max-blocks 2500 \
             --out "perf/pattern/$CHAIN/stress_test_mixed_gen_latest.tar"
 
       - name: Share the latest patterns with the other clients' jobs
@@ -544,9 +547,9 @@ jobs:
 
           #run_perf <workspace> <chain> <method> <pattern> <load-sequence> <client> [label] [verbose]
           #run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_001_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
-          run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_gen_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT eth_call_gen false
-          run_perf "$RUNNER_WS" $CHAIN eth_getLogs stress_test_eth_getLogs_gen_latest 1:1,100:30,1000:20,10000:20 $CLIENT eth_getLogs_gen false
-          run_perf "$RUNNER_WS" $CHAIN mixed stress_test_mixed_gen_latest 1:1,100:30,1000:20,3000:20 $CLIENT mixed true
+          run_perf "$RUNNER_WS" $CHAIN mixed stress_test_mixed_gen_latest 100:20,1000:20,3000:20,10000:20 $CLIENT mixed true
+          run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_gen_latest 100:30,1000:20,10000:20,20000:20,30000:20 $CLIENT eth_call_gen false
+          run_perf "$RUNNER_WS" $CHAIN eth_getLogs stress_test_eth_getLogs_gen_latest 100:30,1000:20,3000:20,5000:20,10000:20 $CLIENT eth_getLogs_gen false
           #run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_002_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT eth_call false
           #run_perf "$RUNNER_WS" $CHAIN eth_getProof stress_test_eth_getProof_001_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
           
