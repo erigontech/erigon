@@ -954,7 +954,7 @@ func (hc *headCaptureSource) recordReader() *commitmentdb.ParentRecords {
 	return r
 }
 
-func (hc *headCaptureSource) warmPaths(ctx context.Context, accessed *accessedState) {
+func (hc *headCaptureSource) warmPaths(ctx context.Context, blockNum uint64, accessed *accessedState) {
 	type path struct{ account, slot []byte }
 	var paths []path
 	for addr := range accessed.Addresses {
@@ -975,6 +975,7 @@ func (hc *headCaptureSource) warmPaths(ctx context.Context, accessed *accessedSt
 	var wg sync.WaitGroup
 	for w, tx := range txs {
 		wg.Go(func() {
+			defer recoverWitnessBuild(blockNum)
 			read := func(key []byte) []byte {
 				if hc.records != nil {
 					if v, _, ok := hc.records.Get(key); ok {
@@ -1111,7 +1112,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 		return result, nil
 	}
 	if hc != nil && len(hc.warmTxs) != 0 && sdCtx.Trie().Variant() == commitment.VariantCommitmentV3 {
-		hc.warmPaths(ctx, accessed)
+		hc.warmPaths(ctx, blockNum, accessed)
 	}
 
 	siblingPaths, err := detectCollapseSiblings(ctx, tx, hc, domains, sdCtx,

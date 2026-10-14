@@ -963,3 +963,38 @@ func TestHeadCaptureOverCarriedRecordsMatchesDurablePerBlock(t *testing.T) {
 	require.Positive(t, mxWarmRecords.GetValueUint64()-warmed, "head-capture warms accessed paths the validation's records miss")
 	require.Positive(t, metrics.GetOrCreateCounter("commitment_branch_carry_refs_filled_total").GetValueUint64()-filled, "records adopted from a block's deltas get their leaf refs")
 }
+
+func TestHeadCaptureWarmPanicIsContained(t *testing.T) {
+	previousSchema, previousV3 := statecfg.Schema, statecfg.ExperimentalCommitmentV3
+	t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousSchema, previousV3 })
+	t.Cleanup(func() { commitmentdb.PublishParentRecords(nil) })
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	statecfg.EnableHistoricalCommitment()
+
+	m, testChain := rpcdaemontest.CreateTestExecModuleNoInsert(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	require.NoError(t, m.InsertChain(testChain.Slice(0, 1)))
+	pin, err := openRollingPin(ctx, m.DB)
+	require.NoError(t, err)
+	t.Cleanup(pin.close)
+	require.NotEmpty(t, pin.warm, "the pin opens warm txs")
+	require.NoError(t, m.InsertChain(testChain.Slice(1, 2)))
+	hash, _ := buildTestChainHeader(t, m, 2)
+	parentHash, _ := buildTestChainHeader(t, m, 1)
+	commitmentdb.PublishParentRecords(&commitmentdb.ParentRecords{BlockNum: 2, BlockHash: hash, ParentHash: parentHash, Get: func([]byte) ([]byte, kv.Step, bool) {
+		panic("simulated parent records panic")
+	}})
+
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	api.witnessCache = newWitnessResultCache(96, 0, true, true)
+	committedTx, err := m.DB.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer committedTx.Rollback()
+	require.False(t, api.tryHeadCaptureBuild(ctx, committedTx, pin, 2, hash), "a panicking build caches nothing")
+	_, ok := api.witnessCache.Get(hash)
+	require.False(t, ok)
+}
