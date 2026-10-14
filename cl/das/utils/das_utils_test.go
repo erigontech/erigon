@@ -19,6 +19,7 @@ package peerdasutils
 import (
 	"slices"
 	"testing"
+	"time"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/stretchr/testify/require"
@@ -86,4 +87,26 @@ func TestRecoverMatrixReportsTheLowestBrokenRow(t *testing.T) {
 		_, err := RecoverMatrix(half, uint64(len(full)))
 		require.ErrorContains(t, err, "blob 1")
 	}
+}
+
+// The row slots are shared by all calls: with every slot taken, no row starts, and each row gives
+// its slot back when it finishes.
+func TestRecoverMatrixWaitsForAFreeRowSlot(t *testing.T) {
+	full, half := testMatrix(t, 1)
+	for range cap(rowRecoverySlots) {
+		rowRecoverySlots <- struct{}{}
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := RecoverMatrix(half, uint64(len(full)))
+		done <- err
+	}()
+	time.Sleep(time.Second)
+	returnedWithoutSlot := len(done) > 0
+	for range cap(rowRecoverySlots) {
+		<-rowRecoverySlots
+	}
+	require.False(t, returnedWithoutSlot, "a row ran while every slot was taken")
+	require.NoError(t, <-done)
+	require.Zero(t, len(rowRecoverySlots))
 }

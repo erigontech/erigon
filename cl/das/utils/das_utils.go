@@ -89,8 +89,7 @@ func ComputeColumnsForCustodyGroup(custodyGroup CustodyIndex) ([]ColumnIndex, er
 	return columns, nil
 }
 
-// rowRecoverySlots bounds the blob rows recovered at once across all callers: most of a row's
-// recovery runs on a single core.
+// rowRecoverySlots bounds the blob rows recovered at once across all callers.
 var rowRecoverySlots = make(chan struct{}, runtime.GOMAXPROCS(0))
 
 // RecoverMatrix takes a partial matrix and the total blob count and returns a complete matrix.
