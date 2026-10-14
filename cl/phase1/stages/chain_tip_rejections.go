@@ -126,15 +126,17 @@ func chainTipHeadSlot(cfg *Cfg) uint64 {
 
 // rejectChainTipBlock records why a block was not imported: as the cause its descendants report,
 // and in the summary. Blocks that are early or wait for their parent's envelope are imported
-// moments later by gossip, and a failure of the stage's own context is not the block's; neither is
-// counted.
+// moments later by gossip, and neither a failure caused by the stage's own context nor any failure
+// during shutdown is the block's; none of them is counted. A required envelope still missing at the
+// stage deadline is counted under its own reason.
 func rejectChainTipBlock(ctx context.Context, cfg *Cfg, rejected map[common.Hash]error, block *cltypes.SignedBeaconBlock, root common.Hash, reason string, cause error) {
-	if prev, seen := rejected[root]; !seen || !errors.Is(prev, cause) {
+	if prev, seen := rejected[root]; !seen || !sameCause(prev, cause) {
 		log.Debug("[chainTipSync] block not imported", "reason", reason, "slot", block.Block.Slot, "blockRoot", root, "err", cause)
 	}
 	rejected[root] = cause
 	if cfg.chainTipRejections == nil ||
 		errors.Is(cause, forkchoice.ErrBlockTooEarly) || errors.Is(cause, forkchoice.ErrParentEnvelopePending) ||
+		errors.Is(ctx.Err(), context.Canceled) ||
 		ctx.Err() != nil && (errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded)) {
 		return
 	}
@@ -143,4 +145,12 @@ func rejectChainTipBlock(ctx context.Context, cfg *Cfg, rejected map[common.Hash
 	}
 	cfg.chainTipRejections.record(reason, block.Block.Slot, root, cause)
 	cfg.chainTipRejections.logIfDue(chainTipHeadSlot(cfg))
+}
+
+// sameCause compares causes by message, since a retry builds the same cause as a new error.
+func sameCause(a, b error) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Error() == b.Error()
 }

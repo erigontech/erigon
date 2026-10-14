@@ -98,8 +98,10 @@ func TestRejectChainTipBlockSkipsTransientAndOwnContextFailures(t *testing.T) {
 	rejectChainTipBlock(t.Context(), cfg, rejected, testRejectedBlock(1), common.Hash{1}, "process block failed", fmt.Errorf("on block: %w", forkchoice.ErrBlockTooEarly))
 	rejectChainTipBlock(t.Context(), cfg, rejected, testRejectedBlock(2), common.Hash{2}, "process block failed", fmt.Errorf("on block: %w", forkchoice.ErrParentEnvelopePending))
 	rejectChainTipBlock(ended, cfg, rejected, testRejectedBlock(3), common.Hash{3}, "process block failed", fmt.Errorf("update: %w", context.Canceled))
+	// During shutdown, the sentinel of a stopped anchor recovery or envelope fetch is not counted either.
+	rejectChainTipBlock(ended, cfg, rejected, testRejectedBlock(5), common.Hash{5}, errAnchorEnvelopeUnavailable.Error(), errAnchorEnvelopeUnavailable)
 	require.Empty(t, cfg.chainTipRejections.reasons)
-	require.Len(t, rejected, 3)
+	require.Len(t, rejected, 4)
 
 	// A deadline that is the block's own, with the stage context alive, counts.
 	rejectChainTipBlock(t.Context(), cfg, rejected, testRejectedBlock(4), common.Hash{4}, "parent payload not accepted", fmt.Errorf("replay budget exhausted: %w", context.DeadlineExceeded))
@@ -116,4 +118,12 @@ func TestRejectChainTipBlockDoesNotRepeatTheReasonAsTheError(t *testing.T) {
 
 	require.Equal(t, errAnchorEnvelopeUnavailable, rejected[common.Hash{1}])
 	require.Nil(t, cfg.chainTipRejections.reasons[errAnchorEnvelopeUnavailable.Error()].lastErr)
+}
+
+// A retry builds the same cause as a new error; it must not count as a changed cause.
+func TestSameCauseComparesByMessage(t *testing.T) {
+	require.True(t, sameCause(errors.New("parent payload invalid"), errors.New("parent payload invalid")))
+	require.True(t, sameCause(nil, nil))
+	require.False(t, sameCause(nil, errors.New("parent payload invalid")))
+	require.False(t, sameCause(errors.New("parent payload invalid"), errors.New("parent payload has no EL verdict")))
 }
