@@ -1044,9 +1044,10 @@ type skippedValidation struct {
 }
 
 // validationDepthEL is an EL client that answers NotValidated without validating for blocks below
-// a number, deep under its head.
+// a number, deep under its head, after the checks it makes before inserting a block.
 type validationDepthEL interface {
 	SkipsValidationBelow(ctx context.Context) (uint64, bool)
+	CheckPayloadBeforeInsertion(payload *cltypes.Eth1Block, beaconParentRoot *common.Hash, executionRequestsList []hexutil.Bytes) error
 }
 
 // elValidationDepth returns the block number below which el answers NotValidated without
@@ -1062,9 +1063,13 @@ func elValidationDepth(ctx context.Context, el execution_client.ExecutionEngine)
 // skippedValidationStatus is the status a payload below the EL's validation depth gets without the
 // call: NotValidated, or Invalidated when it fails the checks the EL makes before that answer.
 func skippedValidationStatus(cfg *Cfg, envelope *cltypes.SignedExecutionPayloadEnvelope) execution_client.PayloadStatus {
+	depthEL, ok := cfg.executionClient.(validationDepthEL)
+	if !ok {
+		return execution_client.PayloadStatusNotValidated
+	}
 	message := envelope.Message
 	requests := gloasExecutionRequestsList(cfg.beaconCfg, message.ExecutionRequests)
-	if err := execution_client.CheckPayloadBeforeInsertion(message.Payload, &message.ParentBeaconBlockRoot, requests); err != nil {
+	if err := depthEL.CheckPayloadBeforeInsertion(message.Payload, &message.ParentBeaconBlockRoot, requests); err != nil {
 		log.Warn("[chainTipSync] invalid GLOAS payload below the EL validation depth", "blockRoot", message.BeaconBlockRoot, "err", err)
 		return execution_client.PayloadStatusInvalidated
 	}

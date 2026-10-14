@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
@@ -195,11 +196,22 @@ func retryAssembleBlock(ctx context.Context, attempts int, delay time.Duration, 
 	return 0, err
 }
 
-// CheckPayloadBeforeInsertion runs the checks NewPayload makes before it inserts the block: the
-// block access list, the header and its block hash, and the transactions. A failure means INVALID.
-func CheckPayloadBeforeInsertion(payload *cltypes.Eth1Block, beaconParentRoot *common.Hash, executionRequestsList []hexutil.Bytes) error {
-	_, _, _, err := decodePayloadForInsertion(payload, beaconParentRoot, executionRequestsList)
-	return err
+// CheckPayloadBeforeInsertion runs the checks the direct client makes before and while inserting a
+// block: the block access list, the header and its block hash, the transactions and, with a chain
+// config, the maximum RLP size. A failure means INVALID.
+func CheckPayloadBeforeInsertion(chainConfig *chain.Config, payload *cltypes.Eth1Block, beaconParentRoot *common.Hash, executionRequestsList []hexutil.Bytes) error {
+	header, txs, bal, err := decodePayloadForInsertion(payload, beaconParentRoot, executionRequestsList)
+	if err != nil || chainConfig == nil {
+		return err
+	}
+	body := payload.Body()
+	block := types.NewBlockFromStorageWithBinaryTxs(payload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals, bal)
+	return types.RawBlock{Header: block.HeaderNoCopy(), Body: block.RawBody()}.ValidateMaxRlpSize(chainConfig)
+}
+
+// CheckPayloadBeforeInsertion runs CheckPayloadBeforeInsertion with the EL's chain config.
+func (cc *ExecutionClientDirect) CheckPayloadBeforeInsertion(payload *cltypes.Eth1Block, beaconParentRoot *common.Hash, executionRequestsList []hexutil.Bytes) error {
+	return CheckPayloadBeforeInsertion(cc.chainRW.Config(), payload, beaconParentRoot, executionRequestsList)
 }
 
 func decodePayloadForInsertion(payload *cltypes.Eth1Block, beaconParentRoot *common.Hash, executionRequestsList []hexutil.Bytes) (*types.Header, []types.Transaction, *types.BlockAccessListSidecar, error) {

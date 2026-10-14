@@ -1154,6 +1154,9 @@ func newAnchorForkChoiceStore(t *testing.T, cfg *clparams.BeaconChainConfig, st 
 	return store
 }
 
+// The direct client must keep implementing the capability, or the depth rule silently turns off.
+var _ validationDepthEL = (*execution_client.ExecutionClientDirect)(nil)
+
 // validationDepthEngine reports a validation depth, as the direct EL client does.
 type validationDepthEngine struct {
 	*testExecutionEngine
@@ -1162,6 +1165,10 @@ type validationDepthEngine struct {
 
 func (e validationDepthEngine) SkipsValidationBelow(context.Context) (uint64, bool) {
 	return e.below, true
+}
+
+func (validationDepthEngine) CheckPayloadBeforeInsertion(payload *cltypes.Eth1Block, beaconParentRoot *common.Hash, executionRequestsList []hexutil.Bytes) error {
+	return execution_client.CheckPayloadBeforeInsertion(nil, payload, beaconParentRoot, executionRequestsList)
 }
 
 // A NotValidated answer is requeued unless the block is below the EL's validation depth: the direct

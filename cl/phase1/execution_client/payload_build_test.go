@@ -17,11 +17,13 @@
 package execution_client
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -35,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -203,14 +206,31 @@ func TestCheckPayloadBeforeInsertion(t *testing.T) {
 		require.NoError(t, err)
 		return payload
 	}
-	require.NoError(t, CheckPayloadBeforeInsertion(valid(), &parentRoot, nil))
+	require.NoError(t, CheckPayloadBeforeInsertion(nil, valid(), &parentRoot, nil))
 
 	malformedBAL := valid()
 	malformedBAL.BlockAccessList = solid.NewByteListSSZ(cfg.MaxBytesPerTransaction)
 	require.NoError(t, malformedBAL.BlockAccessList.SetBytes([]byte{0xff, 0xff, 0xff}))
-	require.Error(t, CheckPayloadBeforeInsertion(malformedBAL, &parentRoot, nil))
+	require.Error(t, CheckPayloadBeforeInsertion(nil, malformedBAL, &parentRoot, nil))
 
 	wrongHash := valid()
 	wrongHash.BlockHash = common.Hash{0x99}
-	require.Error(t, CheckPayloadBeforeInsertion(wrongHash, &parentRoot, nil))
+	require.Error(t, CheckPayloadBeforeInsertion(nil, wrongHash, &parentRoot, nil))
+}
+
+// A block over the maximum RLP size is rejected at insertion, so the checks before it reject it too.
+func TestCheckPayloadBeforeInsertionRejectsAnOversizedBlock(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	parentRoot := common.Hash{0x11}
+	var raw bytes.Buffer
+	txn := types.NewTransaction(0, common.Address{}, uint256.NewInt(0), 21000, uint256.NewInt(1), make([]byte, params.MaxRlpBlockSize+1))
+	require.NoError(t, txn.MarshalBinary(&raw))
+	payload := gloas(cfg, nil)
+	payload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{raw.Bytes()})
+	var err error
+	payload.BlockHash, err = payload.ComputeBlockHash(&parentRoot, cltypes.ComputeExecutionRequestHash(nil), nil)
+	require.NoError(t, err)
+
+	require.ErrorIs(t, CheckPayloadBeforeInsertion(chain.AllProtocolChanges, payload, &parentRoot, nil), types.ErrBlockExceedsMaxRlpSize)
+	require.NoError(t, CheckPayloadBeforeInsertion(nil, payload, &parentRoot, nil), "no chain config, no size limit")
 }
