@@ -20,34 +20,31 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/common/crypto/kzg"
 )
 
-// testMatrix builds the full extended matrix of blobCount distinct blobs and the half of it a node
-// needs for recovery: the even columns, listed last row first.
+// testMatrix builds the full extended matrix of blobCount distinct dense blobs (sparse ones recover
+// faster and would flatter the benchmark) and the half of it a node needs for recovery: the even
+// columns, listed last row first.
 func testMatrix(tb testing.TB, blobCount int) (full [][]cltypes.MatrixEntry, half []cltypes.MatrixEntry) {
 	tb.Helper()
-	kzg.InitKZGCtx()
 	for row := range blobCount {
 		var blob goethkzg.Blob
-		for i := 0; i < len(blob); i += goethkzg.SerializedScalarSize {
-			var e fr.Element
-			e.SetUint64(uint64(row*len(blob) + i + 1))
-			b := e.Bytes()
-			copy(blob[i:], b[:])
+		for i := range blob {
+			if i%goethkzg.SerializedScalarSize != 0 { // a zero top byte keeps each field element canonical
+				blob[i] = byte(row + i)
+			}
 		}
-		cells, proofs, err := kzg.Ctx().ComputeCellsAndKZGProofs(&blob, 0)
+		cells, proofs, err := ComputeCellsAndKZGProofs(blob[:])
 		require.NoError(tb, err)
 		entries := make([]cltypes.MatrixEntry, 0, len(cells))
 		for column := range cells {
 			entries = append(entries, cltypes.MatrixEntry{
-				Cell:        cltypes.Cell(*cells[column]),
-				KzgProof:    cltypes.KZGProof(proofs[column]),
+				Cell:        cells[column],
+				KzgProof:    proofs[column],
 				ColumnIndex: ColumnIndex(column),
 				RowIndex:    RowIndex(row),
 			})
@@ -78,4 +75,15 @@ func TestRecoverMatrixReportsTheRowThatCannotBeRecovered(t *testing.T) {
 	_, err := RecoverMatrix(half, uint64(len(full)))
 
 	require.ErrorContains(t, err, "blob 1")
+}
+
+// With several broken rows the error names the lowest one, whichever row fails first.
+func TestRecoverMatrixReportsTheLowestBrokenRow(t *testing.T) {
+	full, half := testMatrix(t, 3)
+	half = slices.DeleteFunc(half, func(e cltypes.MatrixEntry) bool { return e.RowIndex > 0 && e.ColumnIndex > 10 })
+
+	for range 20 {
+		_, err := RecoverMatrix(half, uint64(len(full)))
+		require.ErrorContains(t, err, "blob 1")
+	}
 }

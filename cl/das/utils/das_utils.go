@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"runtime"
 	"slices"
+	"sync"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/holiman/uint256"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -89,15 +89,20 @@ func ComputeColumnsForCustodyGroup(custodyGroup CustodyIndex) ([]ColumnIndex, er
 	return columns, nil
 }
 
+// rowRecoverySlots bounds the blob rows recovered at once across all callers: most of a row's
+// recovery runs on a single core.
+var rowRecoverySlots = make(chan struct{}, runtime.GOMAXPROCS(0))
+
 // RecoverMatrix takes a partial matrix and the total blob count and returns a complete matrix.
-// Rows are recovered in parallel: most of a row's recovery runs on a single core.
+// Rows are recovered in parallel; an error names the lowest row that cannot be recovered.
 func RecoverMatrix(partialMatrix []cltypes.MatrixEntry, blobCount uint64) ([][]cltypes.MatrixEntry, error) {
 	matrix := make([][]cltypes.MatrixEntry, blobCount)
-	var g errgroup.Group
-	g.SetLimit(runtime.GOMAXPROCS(0))
+	errs := make([]error, blobCount)
+	var wg sync.WaitGroup
 	for blobIndex := range blobCount {
-		g.Go(func() error {
-			// Get cells and column indices for this blob row
+		rowRecoverySlots <- struct{}{}
+		wg.Go(func() {
+			defer func() { <-rowRecoverySlots }()
 			var cellIndices []ColumnIndex
 			var cells []cltypes.Cell
 			for i := range partialMatrix {
@@ -107,13 +112,11 @@ func RecoverMatrix(partialMatrix []cltypes.MatrixEntry, blobCount uint64) ([][]c
 					cells = append(cells, entry.Cell)
 				}
 			}
-
-			// Recover the full row of cells and proofs
-			recoveredCells, recoveredProofs, err := RecoverCellsAndKZGProofs(cellIndices, cells) // in kzg pkg
+			recoveredCells, recoveredProofs, err := RecoverCellsAndKZGProofs(cellIndices, cells)
 			if err != nil {
-				return fmt.Errorf("failed to recover cells and proofs for blob %d: %w", blobIndex, err)
+				errs[blobIndex] = fmt.Errorf("failed to recover cells and proofs for blob %d: %w", blobIndex, err)
+				return
 			}
-
 			blobEntries := make([]cltypes.MatrixEntry, 0, len(recoveredCells))
 			for index := range recoveredCells {
 				blobEntries = append(blobEntries, cltypes.MatrixEntry{
@@ -124,11 +127,13 @@ func RecoverMatrix(partialMatrix []cltypes.MatrixEntry, blobCount uint64) ([][]c
 				})
 			}
 			matrix[blobIndex] = blobEntries
-			return nil
 		})
 	}
-	if err := g.Wait(); err != nil {
-		return nil, err
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			return nil, err
+		}
 	}
 	return matrix, nil
 }
