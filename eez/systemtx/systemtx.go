@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/execution/chain"
+	execprotocol "github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -63,6 +64,7 @@ func Register() {
 			},
 			StandardReceiptPayload: true,
 		})
+		execprotocol.RegisterMessageHook(protocol.SystemTxType, mintHook{})
 	})
 }
 
@@ -137,9 +139,10 @@ func (tx *Transaction) Sender(sg types.Signer) (accounts.Address, error) {
 	return systemAddress, nil
 }
 
-// AsMessage returns a fee-free message from protocol.SystemAddress. The nonce
-// is checked; the EIP-3607 sender check and the EIP-7825 gas cap are not.
-// Outside an EEZ chain the type is not supported.
+// AsMessage returns a fee-free message from protocol.SystemAddress whose
+// value is minted before execution. The nonce is checked; the EIP-3607 sender
+// check and the EIP-7825 gas cap are not. Outside an EEZ chain the type is
+// not supported.
 func (tx *Transaction) AsMessage(s types.Signer, _ *uint256.Int, rules *chain.Rules) (*types.Message, error) {
 	if rules == nil || rules.L2Version < config.ProtocolVersion {
 		return nil, fmt.Errorf("%w: 0x%x outside an EEZ chain", types.ErrTxTypeNotSupported, protocol.SystemTxType)
@@ -149,9 +152,11 @@ func (tx *Transaction) AsMessage(s types.Signer, _ *uint256.Int, rules *chain.Ru
 		return nil, err
 	}
 	var zero uint256.Int
-	return types.NewMessage(from, accounts.InternAddress(tx.body.To), tx.body.Nonce, &tx.body.Value,
+	msg := types.NewMessage(from, accounts.InternAddress(tx.body.To), tx.body.Nonce, &tx.body.Value,
 		protocol.SystemTxGasLimit, &zero, &zero, &zero, tx.body.Input, nil,
-		true /* checkNonce */, false /* checkTransaction */, false /* checkGas */, true /* isFree */, nil), nil
+		true /* checkNonce */, false /* checkTransaction */, false /* checkGas */, true /* isFree */, nil)
+	msg.SetTxType(protocol.SystemTxType)
+	return msg, nil
 }
 
 func (tx *Transaction) Hash() common.Hash {
