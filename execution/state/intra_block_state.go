@@ -1870,12 +1870,14 @@ func (ibs *IntraBlockState) selfdestructVersioned(addr accounts.Address, preserv
 	ibs.recordWriteSelfDestruct(addr, true)
 	// A later revival or re-creation starts from incarnation 0, as in serial.
 	ibs.recordWriteIncarnation(addr, 0)
-	// Stamp the balance with the branch-agnostic delete/preserve instruction: a
-	// non-zero balance-preserving destruct (EIP-8246) keeps the balance (clears
-	// Deleted → EOA); every other destruct deletes it (ValueDeleted → nil). Derived
-	// from preserveBalance, not the value, so a burn that happens to leave a non-zero
-	// balance (e.g. a pre-Cancun self-beneficiary) still reads deleted.
-	if preserveBalance && !prevBalance.IsZero() {
+	// Stamp the balance with the branch-agnostic delete/preserve instruction. A
+	// balance-preserving destruct (EIP-8246) keeps the account alive — even at zero
+	// balance, so a later same-tx credit still lands on an existing account and
+	// end-of-tx EIP-161 removes it only if it stays empty. Every other destruct
+	// deletes the leaf (ValueDeleted → nil). Derived from preserveBalance, not the
+	// value, so a burn that happens to leave a non-zero balance (e.g. a pre-Cancun
+	// self-beneficiary) still reads deleted.
+	if preserveBalance {
 		ibs.recordWriteBalance(addr, prevBalance)
 	} else {
 		ibs.recordWriteBalanceDeleted(addr)
