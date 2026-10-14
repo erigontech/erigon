@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,10 +31,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 func TestGetStateFork(t *testing.T) {
@@ -611,4 +616,52 @@ func TestResponseValidatorsDoesNotParkResponseInPool(t *testing.T) {
 	responseValidators(httptest.NewRecorder(), nil, nil, 0, balances, validators, true, false)
 
 	require.Zero(t, seed.Len(), "pooled builder still holds the whole response")
+}
+
+// A state that left the fork-choice cache is served from the epoch data stored under the
+// epoch's start slot. States before Fulu have no proposer lookahead.
+func TestGetStateProposerLookaheadHistorical(t *testing.T) {
+	db, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	cfg := handler.beaconChainCfg
+	epoch := postState.Slot() / cfg.SlotsPerEpoch
+	require.NotZero(t, epoch%cfg.SlotsPerEpoch, "the epoch must not also be an epoch-start slot")
+	postRoot, err := postState.HashSSZ()
+	require.NoError(t, err)
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	get := func() (int, []string) {
+		req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/0x"+common.Bytes2Hex(postRoot[:])+"/proposer_lookahead", nil)
+		require.NoError(t, err)
+		resp, err := server.Client().Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		var body struct {
+			Data []string `json:"data"`
+		}
+		if resp.StatusCode == http.StatusOK {
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+		}
+		return resp.StatusCode, body.Data
+	}
+
+	code, _ := get()
+	require.Equal(t, http.StatusBadRequest, code)
+
+	cfg.FuluForkEpoch = epoch
+	lookahead := solid.NewUint64VectorSSZ(int((1 + cfg.MinSeedLookahead) * cfg.SlotsPerEpoch))
+	for i := range lookahead.Length() {
+		lookahead.Set(i, uint64(i))
+	}
+	epochData := &state_accessors.EpochData{JustificationBits: &cltypes.JustificationBits{}, ProposerLookahead: lookahead, BeaconConfig: cfg, Version: clparams.FuluVersion}
+	var buf bytes.Buffer
+	require.NoError(t, epochData.WriteTo(&buf))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Put(kv.EpochData, base_encoding.Encode64ToBytes4(cfg.RoundSlotToEpoch(postState.Slot())), buf.Bytes())
+	}))
+
+	code, data := get()
+	require.Equal(t, http.StatusOK, code)
+	require.Len(t, data, lookahead.Length())
+	require.Equal(t, strconv.Itoa(lookahead.Length()-1), data[len(data)-1])
 }
