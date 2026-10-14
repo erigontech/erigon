@@ -17,36 +17,61 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/common"
 )
+
+// errHeadBehindForkChoice tells a stuck fork-choice head apart from a node without a head state.
+var errHeadBehindForkChoice = errors.New("served head is behind fork choice")
 
 // syncToleranceEpochs is how far blocks imported on top of the head may reach past it before the
 // node treats itself as syncing. Only descendants of the head count, so neither a chain-wide gap
-// nor a lighter fork trips it.
+// nor a lighter fork trips it. The head state is republished only after the stage processes a
+// block, and a child of a FULL parent attaches only once that payload is applied, so a healthy head
+// can trail its descendants by a few slots; an epoch absorbs that without hiding a stuck head.
 const syncToleranceEpochs = 1
 
-// refuseLaggingHead is the 503 a validator endpoint returns while headLagsBehind holds.
+// refuseLaggingHead is the 503 a validator endpoint returns while the head lags.
 func (a *ApiHandler) refuseLaggingHead() error {
-	if a.headLagsBehind() {
-		return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, synced_data.ErrNotSynced)
+	if err := a.headLag(); err != nil {
+		return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err)
 	}
 	return nil
 }
 
-// headLagsBehind is true without a head state, when the head is older than the justified
-// checkpoint get_head starts from, and when blocks more than the tolerance beyond the head were
-// imported on top of it, since get_head would have moved to them.
 func (a *ApiHandler) headLagsBehind() bool {
+	return a.headLag() != nil
+}
+
+// headLag reports why the served head cannot be built on: no head state; a head that does not
+// descend from the justified checkpoint get_head starts from; or blocks more than the tolerance
+// beyond the head imported on top of it, since get_head would have moved to them.
+func (a *ApiHandler) headLag() error {
 	headRoot, headSlot, ok := a.syncedData.StateHead()
 	if !ok {
-		return true
+		return synced_data.ErrNotSynced
 	}
+	if !a.descendsFromJustified(headRoot) {
+		return errHeadBehindForkChoice
+	}
+	if a.forkchoiceStore.HasImportedDescendantAfter(headRoot, headSlot+syncToleranceEpochs*a.beaconChainCfg.SlotsPerEpoch) {
+		return errHeadBehindForkChoice
+	}
+	return nil
+}
+
+// descendsFromJustified reports whether root's ancestor at the justified checkpoint is the
+// checkpoint block. A checkpoint block or a path the fork graph cannot resolve, as after a
+// checkpoint sync or a prune, counts as descending.
+func (a *ApiHandler) descendsFromJustified(root common.Hash) bool {
 	justified := a.forkchoiceStore.JustifiedCheckpoint()
-	if headRoot != justified.Root && headSlot < justified.Epoch*a.beaconChainCfg.SlotsPerEpoch {
+	if _, ok := a.forkchoiceStore.GetHeader(justified.Root); !ok {
 		return true
 	}
-	return a.forkchoiceStore.HasImportedDescendantAfter(headRoot, headSlot+syncToleranceEpochs*a.beaconChainCfg.SlotsPerEpoch)
+	ancestor := a.forkchoiceStore.Ancestor(root, justified.Epoch*a.beaconChainCfg.SlotsPerEpoch).Root
+	return ancestor == (common.Hash{}) || ancestor == justified.Root
 }

@@ -137,10 +137,6 @@ func (a *ApiHandler) GetEthV2BeaconPoolAttestations(w http.ResponseWriter, r *ht
 }
 
 func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *http.Request) {
-	if a.headLagsBehind() {
-		beaconhttp.NewEndpointError(http.StatusServiceUnavailable, synced_data.ErrNotSynced).WriteTo(w)
-		return
-	}
 	req := []*solid.Attestation{}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
@@ -149,6 +145,10 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 
 	failures := []poolingFailure{}
 	for i, attestation := range req {
+		if a.syncedData.Syncing() {
+			beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("head state not available")).WriteTo(w)
+			return
+		}
 		var (
 			slot                      = attestation.Data.Slot
 			epoch                     = slot / a.beaconChainCfg.SlotsPerEpoch
@@ -211,10 +211,6 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 }
 
 func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *http.Request) {
-	if a.headLagsBehind() {
-		beaconhttp.NewEndpointError(http.StatusServiceUnavailable, synced_data.ErrNotSynced).WriteTo(w)
-		return
-	}
 	log.Debug("[Beacon REST] posting attestations")
 	v := r.Header.Get("Eth-Consensus-Version")
 	if v == "" {
@@ -239,6 +235,10 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 	}
 	failures := []poolingFailure{}
 	for i, attestation := range req {
+		if a.syncedData.Syncing() {
+			beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("head state not available")).WriteTo(w)
+			return
+		}
 		var (
 			slot                      = attestation.AttestationData().Slot
 			epoch                     = slot / a.beaconChainCfg.SlotsPerEpoch

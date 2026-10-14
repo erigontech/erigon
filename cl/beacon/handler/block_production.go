@@ -757,10 +757,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		)
 	}
 
-	log.Debug("[Beacon API] Producing block", "slot", targetSlot)
-	if err := a.refuseLaggingHead(); err != nil {
-		return nil, err
-	}
 	builderBoostFactor := uint64(100)
 	if options := gloasBlockOptionsFromContext(ctx); options != nil {
 		builderBoostFactor = options.builderConfig.BuilderBoostFactor
@@ -775,6 +771,10 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			)
 		}
 	}
+	if err := a.refuseLaggingHead(); err != nil {
+		return nil, err
+	}
+	log.Debug("[Beacon API] Producing block", "slot", targetSlot)
 	finishBlockWork := a.payloadPreparationGate.beginBlockWork()
 	defer finishBlockWork()
 

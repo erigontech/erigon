@@ -497,6 +497,19 @@ func TestGetPayloadAttestationDataPreservesUnavailableHeadStatus(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
 }
 
+// The stale-head gate answers before a gated endpoint reads the head, so the selected-head
+// lookup keeps its own test for a missing head state.
+func TestGetSelectedHeadReportsAMissingHeadStateAsUnavailable(t *testing.T) {
+	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	handler.enableMemoizedHeadState = true
+	syncedData.(*sync_mock_services.MockSyncedData).EXPECT().StateHead().Return(common.Hash{}, uint64(0), false)
+
+	_, _, statusCode, err := handler.getSelectedHead()
+
+	require.Error(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, statusCode)
+}
+
 func TestGetPayloadAttestationDataRejectsInvalidCanonicalSlotQuery(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0

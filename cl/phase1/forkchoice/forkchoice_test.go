@@ -19,6 +19,7 @@ package forkchoice
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"sync"
 	"testing"
@@ -1361,4 +1362,41 @@ func TestGetHeadPublishesTheSelectedNode(t *testing.T) {
 	head, _, err := store.GetHeadNode()
 	require.NoError(t, err)
 	require.Equal(t, &head, store.selectedHead.Load())
+}
+
+// The case behind the stuck head: a child imported on the FULL variant of a parent whose payload
+// has no recorded status. get_head stays on the parent, and the gate must see the child.
+func TestHasImportedDescendantAfterSeesAChildGetHeadCannotReach(t *testing.T) {
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	require.Equal(t, cltypes.PayloadStatusFull, store.getParentPayloadStatus(child.Block))
+
+	head, headSlot, err := store.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, anchorRoot, head.Root)
+	require.Less(t, headSlot, child.Block.Slot)
+	require.True(t, store.HasImportedDescendantAfter(head.Root, child.Block.Slot-1))
+}
+
+// A head get_head selects has no imported descendant past it, on either payload variant.
+func TestHasImportedDescendantAfterIsFalseForTheSelectedHead(t *testing.T) {
+	for _, onFull := range []bool{true, false} {
+		t.Run(fmt.Sprintf("child on FULL=%t", onFull), func(t *testing.T) {
+			store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+			if onFull {
+				store.MarkPayloadStatus(anchorRoot, common.Hash{0xe1}, execution_client.PayloadStatusValidated)
+			} else {
+				anchorBlock, ok := store.forkGraph.GetBlock(anchorRoot)
+				require.True(t, ok)
+				anchorBlock.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = common.Hash{0xe1}
+			}
+			childRoot, err := child.Block.HashSSZ()
+			require.NoError(t, err)
+
+			head, headSlot, err := store.GetHeadNode()
+			require.NoError(t, err)
+			require.Equal(t, common.Hash(childRoot), head.Root)
+			require.False(t, store.HasImportedDescendantAfter(head.Root, headSlot))
+			require.False(t, store.HasImportedDescendantAfter(head.Root, 0))
+		})
+	}
 }
