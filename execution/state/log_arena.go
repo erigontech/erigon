@@ -19,6 +19,9 @@ package state
 import (
 	"fmt"
 	"slices"
+	"sync/atomic"
+
+	"github.com/erigontech/erigon/common/log/v3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -59,6 +62,26 @@ type logArena struct {
 	pool         []*types.Log // entries taken back at reset, for any transaction to reuse
 	poolBytes    int          // Data the pool holds
 	indexInBlock uint
+
+	dbgID                                     uint64
+	dbgServed, dbgFromPool, dbgFresh, dbgDrop int
+	dbgResets                                 int
+}
+
+var dbgArenaIDs atomic.Uint64
+
+// dbgFlush logs what the arena served since the last flush, then clears the counters.
+func (a *logArena) dbgFlush(what string, block uint64, txIndex int) {
+	a.dbgResets++
+	if a.dbgServed == 0 && a.dbgDrop == 0 && (what != "close" || a.dbgID == 0) {
+		return
+	}
+	if a.dbgID == 0 {
+		a.dbgID = dbgArenaIDs.Add(1)
+	}
+	log.Info("[dbg-arena] "+what, "id", a.dbgID, "blk", block, "tx", txIndex, "logs", a.dbgServed, "pool", a.dbgFromPool,
+		"fresh", a.dbgFresh, "drop", a.dbgDrop, "poolAfter", len(a.pool), "poolBytes", a.poolBytes, "resets", a.dbgResets)
+	a.dbgServed, a.dbgFromPool, a.dbgFresh, a.dbgDrop = 0, 0, 0, 0
 }
 
 // alloc journals the allocation for revertLast, then returns txIndex's next
@@ -91,10 +114,13 @@ func (a *logArena) alloc(j *journal, addr common.Address, txIndex, numTopics, da
 
 // take returns a pooled entry, Topics and Data included for alloc to grow into.
 func (a *logArena) take() *types.Log {
+	a.dbgServed++
 	n := len(a.pool) - 1
 	if n < 0 {
+		a.dbgFresh++
 		return &types.Log{}
 	}
+	a.dbgFromPool++
 	lp := a.pool[n]
 	a.pool = a.pool[:n]
 	a.poolBytes -= cap(lp.Data)
@@ -105,6 +131,7 @@ func (a *logArena) take() *types.Log {
 // hold. The entry itself is small enough to keep either way.
 func (a *logArena) put(lp *types.Log) {
 	if len(a.pool) >= maxPooledLogEntries {
+		a.dbgDrop++
 		return
 	}
 	if cap(lp.Data) > maxPooledLogDataCap || a.poolBytes+cap(lp.Data) > maxPooledLogBytes {

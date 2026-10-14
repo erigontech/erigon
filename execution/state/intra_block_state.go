@@ -345,7 +345,9 @@ func (ibs *IntraBlockState) Reset() {
 	}
 	clear(ibs.stateObjects)
 	clear(ibs.stateObjectsDirty)
+	blk, txi := ibs.blockNum, ibs.txIndex
 	ibs.logs.reset()
+	ibs.logs.dbgFlush("reset", blk, txi)
 	clear(ibs.balanceInc)
 	ibs.clearJournalAndRefund()
 	ibs.txIndex = 0
@@ -465,6 +467,7 @@ func (ibs *IntraBlockState) Close() {
 	stateObjects, journal := ibs.stateObjects, ibs.journal
 	ibs.stateObjects, ibs.journal = nil, nil
 	ibs.stateObjectArena.release()
+	ibs.logs.dbgFlush("close", ibs.blockNum, ibs.txIndex)
 	ibs.logs.release()
 	ibs.revisions.reset()
 	// Safe to pool: VersionedWrites/FinalizedWrites hand out deep clones, and the
@@ -2927,6 +2930,7 @@ func (ibs *IntraBlockState) ResumeLogIndexAt(idx uint32) {
 // keeping the state changes Reset would drop.
 func (ibs *IntraBlockState) ResetLogs() {
 	ibs.logs.reset()
+	ibs.logs.dbgFlush("resetlogs", ibs.blockNum, ibs.txIndex)
 }
 
 // no not lock
