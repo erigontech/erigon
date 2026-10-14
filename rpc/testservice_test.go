@@ -89,6 +89,16 @@ func (s *testService) StreamEcho(str string, stream *jsonstream.Stream) error {
 	return nil
 }
 
+// StreamHexes writes n hashes, a result far past the stream's flush threshold.
+func (s *testService) StreamHexes(n int, stream *jsonstream.Stream) error {
+	items := make([][]byte, n)
+	for i := range items {
+		items[i] = []byte{byte(i), byte(i >> 8), byte(i >> 16), 0xaa, 0xbb, 0xcc, 0xdd, 0xee}
+	}
+	jsonstream.WriteHexBytes(stream, items)
+	return nil
+}
+
 func (s *testService) PeerInfo(ctx context.Context) PeerInfo {
 	return PeerInfoFromContext(ctx)
 }

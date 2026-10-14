@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"net/http"
@@ -388,6 +389,53 @@ func (a *wsConnAdapter) Close() error {
 	return a.conn.Close(websocket.StatusNormalClosure, "")
 }
 
+// openMessage starts one text message. Each write arms the socket deadline the codec set,
+// as encode does for a whole message, and a write that fails closes the connection.
+func (a *wsConnAdapter) openMessage(ctx context.Context) (io.WriteCloser, error) {
+	if a.netConn != nil {
+		ctx = context.Background()
+	}
+	w, err := a.conn.Writer(ctx, websocket.MessageText)
+	if err != nil {
+		return nil, err
+	}
+	return &wsMessage{a: a, w: w}, nil
+}
+
+type wsMessage struct {
+	a *wsConnAdapter
+	w io.WriteCloser
+}
+
+func (m *wsMessage) Write(p []byte) (int, error) {
+	return m.a.withSocketDeadline(func() (int, error) { return m.w.Write(p) })
+}
+
+func (m *wsMessage) Close() error {
+	_, err := m.a.withSocketDeadline(func() (int, error) { return 0, m.w.Close() })
+	return err
+}
+
+func (a *wsConnAdapter) withSocketDeadline(op func() (int, error)) (int, error) {
+	if a.netConn == nil {
+		return op()
+	}
+	a.mu.Lock()
+	dl := a.deadline
+	a.mu.Unlock()
+	if !dl.IsZero() {
+		if err := a.netConn.SetWriteDeadline(dl); err != nil {
+			return 0, err
+		}
+		defer a.netConn.SetWriteDeadline(time.Time{}) //nolint:errcheck
+	}
+	n, err := op()
+	if err != nil {
+		_ = a.conn.CloseNow()
+	}
+	return n, err
+}
+
 func (a *wsConnAdapter) SetWriteDeadline(t time.Time) error {
 	a.mu.Lock()
 	a.deadline = t
@@ -421,11 +469,6 @@ func (a *wsConnAdapter) encode(v any) error {
 	switch r := v.(type) {
 	case rawResponse:
 		data = r
-	case rawBatch:
-		s := jsonstream.Get(nil)
-		defer jsonstream.Put(s)
-		r.writeTo(s)
-		data = s.Buffer()
 	default:
 		marshaled, err := json.Marshal(v)
 		if err != nil {
@@ -488,7 +531,7 @@ func newWebsocketCodec(conn *websocket.Conn, netConn *heldConn, budget *ingressB
 	conn.SetReadLimit(wsMessageSizeLimit)
 	adapter := &wsConnAdapter{conn: conn, netConn: netConn, budget: budget}
 	wc := &websocketCodec{
-		jsonCodec: newFuncCodec(adapter, adapter.encode, nil, adapter.readFrame),
+		jsonCodec: newFuncCodec(adapter, adapter.encode, adapter.openMessage, nil, adapter.readFrame),
 		conn:      conn,
 		info: PeerInfo{
 			Transport:  "ws",
@@ -522,6 +565,15 @@ func (wc *websocketCodec) peerInfo() PeerInfo {
 func (wc *websocketCodec) WriteJSON(ctx context.Context, v any) error {
 	wc.resetPing()
 	err := wc.jsonCodec.WriteJSON(ctx, v)
+	if err == nil {
+		wc.resetPing()
+	}
+	return err
+}
+
+func (wc *websocketCodec) WriteStream(ctx context.Context, write func(*jsonstream.Stream)) error {
+	wc.resetPing()
+	err := wc.jsonCodec.WriteStream(ctx, write)
 	if err == nil {
 		wc.resetPing()
 	}
