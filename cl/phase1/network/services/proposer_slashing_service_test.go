@@ -268,10 +268,10 @@ func (t *proposerSlashingTestSuite) TestProcessMessage() {
 		if tt.wantErr {
 			t.Error(err)
 			if tt.errIs != nil {
-				t.True(errors.Is(err, tt.errIs))
+				t.ErrorIs(err, tt.errIs)
 			}
 			if tt.errIsNot != nil {
-				t.False(errors.Is(err, tt.errIsNot))
+				t.NotErrorIs(err, tt.errIsNot)
 			}
 		} else {
 			t.NoError(err)
