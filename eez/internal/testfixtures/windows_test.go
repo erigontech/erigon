@@ -22,6 +22,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/eez/protocol"
+	"github.com/erigontech/erigon/eez/systemtx"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -30,6 +32,7 @@ import (
 // requires the re-encoding to reproduce the recorded bytes.
 func decodeBlock(t *testing.T, w *Window, b WindowBlock) *types.Block {
 	t.Helper()
+	systemtx.Register() // block 468 of window 468 carries type-0x76 transactions
 	var block types.Block
 	require.NoError(t, rlp.DecodeBytes(b.RLP, &block), "%s block %d", w.Name, b.Number)
 	require.Equal(t, b.Number, block.NumberU64(), "%s block %d", w.Name, b.Number)
@@ -105,5 +108,21 @@ func TestWindowOracles(t *testing.T) {
 		require.Equal(t, oracle(w, "window_pre_block_hash"), blocks[0].ParentHash())
 		require.Equal(t, oracle(w, "window_post_block_hash"), blocks[len(blocks)-1].Hash())
 		require.NotEmpty(t, w.PostBatch)
+	})
+	for _, name := range []string{"captured-devnet-window-468", "captured-devnet-anchor-402"} {
+		t.Run(name, func(t *testing.T) {
+			w, blocks := load(name)
+			require.Equal(t, oracle(w, "window_pre_block_hash"), blocks[0].ParentHash())
+			require.Equal(t, oracle(w, "window_post_block_hash"), blocks[len(blocks)-1].Hash())
+			require.Equal(t, protocol.PostAndVerifyBatchSelector[:], w.PostBatch[:4])
+		})
+	}
+	t.Run("captured-devnet-window-468 system transactions", func(t *testing.T) {
+		_, blocks := load("captured-devnet-window-468")
+		var types_ []byte
+		for _, txn := range blocks[len(blocks)-1].Transactions() {
+			types_ = append(types_, txn.Type())
+		}
+		require.Equal(t, []byte{protocol.SystemTxType, types.DynamicFeeTxType, protocol.SystemTxType, types.DynamicFeeTxType, protocol.SystemTxType}, types_)
 	})
 }

@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/internal/testfixtures"
+	"github.com/erigontech/erigon/eez/systemtx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -50,16 +51,19 @@ func (r headerReader) GetHeader(hash common.Hash, number uint64) *types.Header {
 // windowTiming is the block interval and L1 block time of the deployment
 // each window was recorded on: the Kurtosis devnet, or 1 s Chiado ones.
 var windowTiming = map[string][2]uint64{
-	"stateless-block-13":        {1, 5},
-	"stateless-checkpoint-2175": {1, 5},
-	"nonzero-outbound-630":      {1, 5},
-	"captured-devnet-window-84": {2, 12},
+	"stateless-block-13":         {1, 5},
+	"stateless-checkpoint-2175":  {1, 5},
+	"nonzero-outbound-630":       {1, 5},
+	"captured-devnet-window-84":  {2, 12},
+	"captured-devnet-window-468": {2, 12},
+	"captured-devnet-anchor-402": {2, 12},
 }
 
 // windowHeaders returns the headers of a recorded window, preceded by the
 // parent of its first block from that block's witness.
 func windowHeaders(t *testing.T, name string) (*chain.Config, []*types.Header) {
 	t.Helper()
+	systemtx.Register() // window 468 carries type-0x76 transactions
 	w, err := testfixtures.LoadWindow(name)
 	require.NoError(t, err)
 	var cfg chain.Config
