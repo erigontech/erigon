@@ -124,7 +124,9 @@ func (s *BlockAccessListSidecar) ValidateForHeader(gasLimit uint64) error {
 	return nil
 }
 
-// ValidateForBlock also bounds the block access indices, once for each distinct transaction count.
+// ValidateForBlock also rejects block access indices beyond len(transactions)+1, the
+// post-execution index, so a spurious change fails before the block executes. The
+// index pass is memoized for each distinct transaction count.
 func (s *BlockAccessListSidecar) ValidateForBlock(gasLimit uint64, txCount int) error {
 	if s == nil {
 		return nil
@@ -956,15 +958,6 @@ func (bal BlockAccessList) ValidateForHeader(gasLimit uint64) error {
 		return fmt.Errorf("%w: %w", ErrInvalidBlockAccessList, err)
 	}
 	return nil
-}
-
-// ValidateForBlock also rejects block access indices beyond len(transactions)+1,
-// the post-execution index, so a spurious change fails before the block executes.
-func (bal BlockAccessList) ValidateForBlock(gasLimit uint64, txCount int) error {
-	if err := bal.ValidateForHeader(gasLimit); err != nil {
-		return err
-	}
-	return bal.validateBlockAccessIndices(txCount)
 }
 
 func (bal BlockAccessList) validateBlockAccessIndices(txCount int) error {

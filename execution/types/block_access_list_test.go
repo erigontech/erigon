@@ -160,18 +160,19 @@ func TestBlockAccessListValidateForBlockBoundsIndices(t *testing.T) {
 	}
 	for name, account := range accountWith {
 		t.Run(name, func(t *testing.T) {
-			if err := (BlockAccessList{account(txCount + 1)}).ValidateForBlock(gasLimit, txCount); err != nil {
+			if err := NewBlockAccessListSidecar(BlockAccessList{account(txCount + 1)}).ValidateForBlock(gasLimit, txCount); err != nil {
 				t.Fatalf("post-execution index rejected: %v", err)
 			}
-			err := (BlockAccessList{account(txCount + 2)}).ValidateForBlock(gasLimit, txCount)
+			outOfRange := NewBlockAccessListSidecar(BlockAccessList{account(txCount + 2)})
+			if err := outOfRange.ValidateForHeader(gasLimit); err != nil {
+				t.Fatalf("header-only validation cannot know the transaction count: %v", err)
+			}
+			err := outOfRange.ValidateForBlock(gasLimit, txCount)
 			if !errors.Is(err, ErrInvalidBlockAccessList) {
 				t.Fatalf("ValidateForBlock() error = %v, want ErrInvalidBlockAccessList", err)
 			}
 			if !strings.Contains(err.Error(), "block access index") {
 				t.Fatalf("ValidateForBlock() error = %v, want it to name the block access index", err)
-			}
-			if err := (BlockAccessList{account(txCount + 2)}).ValidateForHeader(gasLimit); err != nil {
-				t.Fatalf("header-only validation cannot know the transaction count: %v", err)
 			}
 		})
 	}
@@ -319,7 +320,7 @@ func TestBlockAccessListCodecLeavesSemanticValidationToValidateForBlock(t *testi
 			if !reflect.DeepEqual(decoded, tt.bal) {
 				t.Fatalf("round trip differs: got %v, want %v", decoded, tt.bal)
 			}
-			err = decoded.ValidateForBlock(^uint64(0), 1)
+			err = NewBlockAccessListSidecar(decoded).ValidateForBlock(^uint64(0), 1)
 			if !errors.Is(err, ErrInvalidBlockAccessList) {
 				t.Fatalf("ValidateForBlock() error = %v, want ErrInvalidBlockAccessList", err)
 			}

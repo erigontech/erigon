@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -53,13 +54,23 @@ func TestDecodeAndValidateBlockAccessList(t *testing.T) {
 	_, err = DecodeAndValidateBlockAccessList(payload)
 	require.ErrorContains(t, err, "block access list too large")
 
-	outOfRange, err := types.EncodeBlockAccessListBytes(types.BlockAccessList{{
-		Address:      common.Address{1},
-		NonceChanges: []*types.NonceChange{{Index: 2}},
-	}})
-	require.NoError(t, err)
-	require.NoError(t, payload.BlockAccessList.SetBytes(outOfRange))
+	withNonceChangeAt := func(index uint32) {
+		encoded, err := types.EncodeBlockAccessListBytes(types.BlockAccessList{{
+			Address:      common.Address{1},
+			NonceChanges: []*types.NonceChange{{Index: index}},
+		}})
+		require.NoError(t, err)
+		require.NoError(t, payload.BlockAccessList.SetBytes(encoded))
+	}
 	payload.GasLimit = types.BalItemCost
+	withNonceChangeAt(2)
+	_, err = DecodeAndValidateBlockAccessList(payload)
+	require.ErrorContains(t, err, "block access index", "a payload without a transaction list only has the two system indices")
+
+	payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions([][]byte{{1}})
+	_, err = DecodeAndValidateBlockAccessList(payload)
+	require.NoError(t, err, "len(transactions)+1 is the post-execution index")
+	withNonceChangeAt(3)
 	_, err = DecodeAndValidateBlockAccessList(payload)
 	require.ErrorContains(t, err, "block access index")
 }
