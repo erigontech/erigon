@@ -265,6 +265,9 @@ type ExecModule struct {
 	// upper-quartile to bound how many txs it feeds into a block, so a block always seals within the CL's assemble
 	// timeout (never miss the boundary / strand work). Lazily created on first use so a nil field is safe.
 	execCost *execCostWindow
+	// gasOut is the asked-vs-used table: what transactions declaring a given gas limit actually spend. It
+	// supplies the batch sizer's per-tx gas, sampled once per TRANSACTION rather than once per sealed block.
+	gasOut *gasOutturn
 
 	// Changes accumulator
 	hook  *stageloop.Hook
@@ -337,6 +340,7 @@ func NewExecModule(
 		config:                  config,
 		semaphore:               semaphore.NewWeighted(1),
 		execCost:                newExecCostWindow(64),
+		gasOut:                  newGasOutturn(256),
 		hook:                    hook,
 		accum:                   accum,
 		engine:                  engine,
@@ -764,9 +768,15 @@ func (e *ExecModule) validateChainLocked(ctx context.Context, blockHash common.H
 		// The output side of this validation's own execution, off the receipts it produced.
 		receipts := doms.FlashblockReceipts()
 		var cum uint64
-		for _, r := range receipts {
+		for i, r := range receipts {
 			cum += r.GasUsed
 			r.CumulativeGasUsed = cum
+			// What this transaction ASKED for against what it SPENT. Both halves are already in hand here and
+			// nowhere else — body.Transactions is decoded and the receipts are in the same order — so the table
+			// costs one map lookup per transaction and no decoding.
+			if i < len(body.Transactions) && body.Transactions[i] != nil {
+				e.gasOut.record(body.Transactions[i].GetGasLimit(), r.GasUsed)
+			}
 		}
 		result.FlashblockReceiptCount = len(receipts)
 		result.GasUsed = cum

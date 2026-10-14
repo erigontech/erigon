@@ -560,6 +560,19 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock
 		for _, r := range receipts {
 			res.GasUsed += r.GasUsed
 		}
+		// What each of this round's transactions ASKED for against what it SPENT. THE ROUND IS THE ONLY
+		// PLACE THIS CAN BE SAMPLED HONESTLY: the seal-time window the sizer used before took one sample per
+		// sealed BLOCK, so 64 samples was 64 blocks and a burst of ten or twenty never displaced the idle
+		// blocks already in it — measured, it reported the same value to the last digit for a whole run.
+		//
+		// From prefixLen on, because the body is CUMULATIVE across rounds: everything before it was already
+		// recorded by the round that executed it, and re-recording it would weight a block's first
+		// transactions by how many rounds happened to follow them.
+		for i := prefixLen; i < len(receipts) && i < len(body.Transactions); i++ {
+			if body.Transactions[i] != nil {
+				e.gasOut.record(body.Transactions[i].GetGasLimit(), receipts[i].GasUsed)
+			}
+		}
 	}
 	return res, nil
 }

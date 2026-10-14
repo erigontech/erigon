@@ -462,7 +462,23 @@ func (e *ExecModule) ExecCostUpperQuartile() (time.Duration, uint64) {
 	if e.execCost == nil {
 		return 0, 0
 	}
-	return e.execCost.upperQuartile()
+	uqTime, uqGas := e.execCost.upperQuartile()
+	// ⚠ PREFER THE PER-TRANSACTION SAMPLES. execCost's gas window takes ONE sample per sealed block — that
+	// block's mean — so 64 samples is 64 BLOCKS, and a burst lasting ten or twenty of them never displaces
+	// the idle blocks already in the window. Measured on live298 and live299 it reported the same value to
+	// the last digit for an entire run, 1,001,635 and 1,512,066, while the loaded blocks it was describing
+	// ran at 451,870 gas per transaction. The time window does not have this problem because it samples per
+	// ROUND, many per block. gasOut samples per TRANSACTION, so it tracks a burst from inside it.
+	if perTx := e.gasOut.perTxUpperQuartile(); perTx > 0 {
+		uqGas = perTx
+	}
+	return uqTime, uqGas
+}
+
+// EffectiveGas reports what a transaction declaring askedGas should be SIZED at, given the gas the block has
+// left. See gasOutturn.effective: the outturn while there is room, the declared maximum as the block fills.
+func (e *ExecModule) EffectiveGas(askedGas, gasRoom, gasLimit uint64) uint64 {
+	return e.gasOut.effective(askedGas, gasRoom, gasLimit)
 }
 
 // builtAttrsMatchParams reports whether an in-progress block's stamped inputs carry the same proposer attrs as
