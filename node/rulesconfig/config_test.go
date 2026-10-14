@@ -18,6 +18,7 @@ package rulesconfig
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -30,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/node/nodecfg"
 )
 
@@ -106,4 +108,41 @@ func TestCreateRulesEngineL2NotMergeWrapped(t *testing.T) {
 		true, nil, false, log.New())
 
 	assert.Same(t, want, got)
+}
+
+func init() {
+	chain.RegisterL2Config("jsonl2", func(raw json.RawMessage) (chain.L2Config, error) {
+		return fakeL2Config{name: "jsonl2"}, nil
+	})
+}
+
+func TestCreateRulesEngineResolvesL2JSON(t *testing.T) {
+	want := ethash.NewFaker()
+	RegisterL2Engine("jsonl2", func(ctx context.Context, chainConfig *chain.Config, logger log.Logger) rules.Engine {
+		return want
+	})
+	t.Cleanup(func() { unregisterL2Engine("jsonl2") })
+
+	chainConfig := &chain.Config{L2JSON: json.RawMessage(`{"name":"jsonl2"}`), TerminalTotalDifficulty: uint256.NewInt(0)}
+	got := CreateRulesEngine(context.Background(), &nodecfg.Config{}, chainConfig, &ethashcfg.Config{PowMode: ethashcfg.ModeFake},
+		true, nil, false, log.New())
+
+	assert.Same(t, want, got)
+	assert.Equal(t, fakeL2Config{name: "jsonl2"}, chainConfig.L2)
+}
+
+func TestCreateRulesEngineUndecodableL2JSONPanics(t *testing.T) {
+	chainConfig := &chain.Config{L2JSON: json.RawMessage(`{"name":"undecodablel2"}`)}
+
+	require.PanicsWithValue(t, `no L2 config registered: chain config l2 name "undecodablel2"`, func() {
+		CreateRulesEngineBareBones(context.Background(), chainConfig, log.New())
+	})
+}
+
+func TestCreateRulesEngineWithoutL2(t *testing.T) {
+	got := CreateRulesEngineBareBones(context.Background(), &chain.Config{}, log.New())
+	assert.IsType(t, &ethash.FakeEthash{}, got)
+
+	got = CreateRulesEngineBareBones(context.Background(), &chain.Config{TerminalTotalDifficulty: uint256.NewInt(0)}, log.New())
+	assert.IsType(t, &merge.Merge{}, got)
 }

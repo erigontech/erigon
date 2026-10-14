@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	jsoniter "github.com/json-iterator/go"
@@ -58,7 +59,19 @@ func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, error) {
 	if err := jsoniter.ConfigFastest.Unmarshal(data, &probe); err == nil && len(probe.Bor) > 0 && !bytes.Equal(probe.Bor, []byte("null")) {
 		return nil, fmt.Errorf("chain config %x carries a 'bor' section: Polygon is not supported, see https://github.com/0xPolygon/erigon", hash)
 	}
+	if err := resolveL2(&config); err != nil {
+		return nil, fmt.Errorf("chain config %x: %w", hash, err)
+	}
 	return &config, nil
+}
+
+// resolveL2 leaves the l2 section of a stack not linked into this binary
+// opaque; CreateRulesEngine refuses such a config.
+func resolveL2(config *chain.Config) error {
+	if err := config.ResolveL2(); err != nil && !errors.Is(err, chain.ErrUnknownL2) {
+		return err
+	}
+	return nil
 }
 
 // WriteChainConfig writes the chain config settings to the database.
@@ -126,6 +139,9 @@ func ReadGenesis(db kv.Getter) (*types.Genesis, error) {
 	var g types.Genesis
 	if err := jsoniter.ConfigFastest.Unmarshal(val, &g); err != nil {
 		return nil, err
+	}
+	if err := resolveL2(g.Config); err != nil {
+		return nil, fmt.Errorf("genesis: %w", err)
 	}
 	return &g, nil
 }

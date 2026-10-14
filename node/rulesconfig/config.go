@@ -82,6 +82,10 @@ func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainCon
 ) rules.Engine {
 	var eng rules.Engine
 
+	// An l2 section without a linked-in decoder must not fall back to ethash.
+	if err := chainConfig.ResolveL2(); err != nil {
+		panic(err.Error())
+	}
 	if chainConfig.L2 != nil {
 		newEngine, ok := l2Engine(chainConfig.L2.Name())
 		if !ok {
