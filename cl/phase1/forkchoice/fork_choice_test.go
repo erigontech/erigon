@@ -91,7 +91,9 @@ func TestOnBlockHashMismatchPreservesVerifiedPayload(t *testing.T) {
 			require.True(t, ok)
 			require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusValidated), status)
 
-			require.ErrorContains(t, store.OnBlock(t.Context(), invalid, true, true, false), "OnBlock: invalid execution payload hash")
+			err = store.OnBlock(t.Context(), invalid, true, true, false)
+			require.ErrorContains(t, err, "OnBlock: invalid execution payload hash")
+			require.ErrorIs(t, err, forkchoice.ErrBlockInvalid)
 
 			status, ok = store.GetRecentExecutionPayloadStatus(executionHash)
 			require.True(t, ok)
@@ -105,7 +107,9 @@ func TestOnBlockHashMismatchPreservesVerifiedPayload(t *testing.T) {
 			require.NoError(t, err)
 			mockEngine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusInvalidated, nil)
 			require.ErrorContains(t, store.OnBlock(t.Context(), invalid, true, true, false), "execution payload is invalid")
-			require.ErrorContains(t, store.OnBlock(t.Context(), invalid, true, true, false), "block is invalid")
+			err = store.OnBlock(t.Context(), invalid, true, true, false)
+			require.ErrorContains(t, err, "block is invalid")
+			require.ErrorIs(t, err, forkchoice.ErrBlockInvalid)
 		})
 	}
 }

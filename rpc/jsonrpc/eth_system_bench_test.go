@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,27 +14,26 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package utils
+package jsonrpc
 
-func IntersectionOfSortedSets(v1, v2 []uint64) []uint64 {
-	intersection := []uint64{}
-	// keep track of v1 and v2 element iteration
-	var i, j int
-	// Note that v1 and v2 are both sorted.
-	for i < len(v1) && j < len(v2) {
-		if v1[i] == v2[j] {
-			intersection = append(intersection, v1[i])
-			// Change both iterators
-			i++
-			j++
-			continue
-		}
-		// increase i and j accordingly
-		if v1[i] > v2[j] {
-			j++
-		} else {
-			i++
+import (
+	"testing"
+
+	"github.com/erigontech/erigon/execution/chain"
+)
+
+func BenchmarkGasPriceCached(b *testing.B) {
+	m := createGasPriceTestKV(b, chain.TestChainOsakaConfig, 30)
+	defer m.DB.Close()
+	eth := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	ctx := b.Context()
+	if _, err := eth.GasPrice(ctx); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := eth.GasPrice(ctx); err != nil {
+			b.Fatal(err)
 		}
 	}
-	return intersection
 }

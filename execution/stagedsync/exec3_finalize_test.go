@@ -69,6 +69,15 @@ func (r *mapStateReader) ReadAccountData(addr accounts.Address) (*accounts.Accou
 	return nil, nil
 }
 
+func (r *mapStateReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (r *mapStateReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
 func (r *mapStateReader) ReadAccountDataForDebug(addr accounts.Address) (*accounts.Account, error) {
 	return r.ReadAccountData(addr)
 }
@@ -1518,11 +1527,28 @@ func TestNormalizeWriteSet_PostSelfDestructZeroStorageDroppedViaHistory(t *testi
 	assert.Equal(t, *uint256.NewInt(77), s.Val)
 }
 
+// A re-creation that writes back the value the destroying tx wrote is a change,
+// not a no-op.
+func TestNormalizeWriteSet_RecreateWritesBackSlotOfDestroyingTx(t *testing.T) {
+	vm := state.NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x3a})
+	slot := accounts.InternKey([32]byte{0x01})
+	vm.FlushVersionedWrites(newWS().
+		stor(addr, slot, state.Version{TxIndex: 2, Incarnation: 0}, *uint256.NewInt(77)).
+		selfDestruct(addr, state.Version{TxIndex: 2, Incarnation: 0}, true).
+		build(), true)
+
+	writeBack := newWS().stor(addr, slot, state.Version{TxIndex: 3, Incarnation: 0}, *uint256.NewInt(77)).build()
+	res, _ := writeBack.Normalize(vm, 3, 0, nil, nil, true, false, false)
+	s, ok := res.GetStorage(addr, slot)
+	require.True(t, ok, "the write-back over the wiped slot must survive")
+	assert.Equal(t, *uint256.NewInt(77), s.Val)
+}
+
 // Backfill after an earlier-tx self-destruct: when THIS tx re-creates via
 // CREATE(2) (CreateContractPath=true), the missing account fields are the
 // post-destruction zero defaults — NOT the stale pre-SD nonce/codeHash still in
-// the versionMap. A value-transfer resurrect (no CreateContractPath) instead
-// inherits the pre-SD fields via the map's last-write-wins chain.
+// the versionMap.
 func TestNormalizeWriteSet_SelfDestructEarlierThenCreateContractZeroesFields(t *testing.T) {
 	vm := state.NewVersionMap(nil)
 	addr := accounts.InternAddress([20]byte{0x33})
@@ -1548,14 +1574,98 @@ func TestNormalizeWriteSet_SelfDestructEarlierThenCreateContractZeroesFields(t *
 	ch, ok := res.GetCodeHash(addr)
 	require.True(t, ok)
 	assert.Equal(t, accounts.EmptyCodeHash, ch.Val, "CREATE2 after SD gets empty codeHash, not the stale pre-SD hash")
+}
 
-	// Control: value-transfer resurrect (no CreateContractPath) inherits pre-SD
-	// fields from the versionMap.
-	resurrect := newWS().bal(addr, state.Version{TxIndex: 5, Incarnation: 0}, *uint256.NewInt(100)).build()
-	res2, _ := resurrect.Normalize(vm, 5, 0, nil, nil, true, false, false)
-	n2, ok := res2.GetNonce(addr)
+// A value-transfer revival (no CreateContractPath) writes no nonce: it must not
+// take the pre-SD nonce from the versionMap.
+func TestNormalizeWriteSet_ValueTransferRevivalDropsPreDestructNonce(t *testing.T) {
+	vm := state.NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x36})
+	vm.FlushVersionedWrites(newWS().nonce(addr, state.Version{TxIndex: 1, Incarnation: 0}, 9).build(), true)
+	vm.FlushVersionedWrites(newWS().selfDestruct(addr, state.Version{TxIndex: 2, Incarnation: 0}, true).build(), true)
+
+	revival := newWS().bal(addr, state.Version{TxIndex: 5, Incarnation: 0}, *uint256.NewInt(100)).build()
+	res, _ := revival.Normalize(vm, 5, 0, nil, nil, true, false, false)
+	n, ok := res.GetNonce(addr)
 	require.True(t, ok)
-	assert.Equal(t, uint64(9), n2.Val, "value-transfer resurrect inherits the pre-SD nonce")
+	assert.Equal(t, uint64(0), n.Val, "value-transfer revival gets zero nonce, not the pre-SD 9")
+}
+
+// A fee credit revives a destroyed coinbase with only a balance and an account
+// record write: it must not take the pre-SD code hash from the versionMap.
+func TestNormalizeWriteSet_FeeCreditRevivalDropsPreDestructCodeHash(t *testing.T) {
+	vm := state.NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x38})
+	staleHash := accounts.InternCodeHash(common.HexToHash("0x11223344"))
+	vm.FlushVersionedWrites(newWS().codeHash(addr, state.Version{TxIndex: 1, Incarnation: 0}, staleHash).build(), true)
+	vm.FlushVersionedWrites(newWS().selfDestruct(addr, state.Version{TxIndex: 2, Incarnation: 0}, true).build(), true)
+
+	account := accounts.NewAccount()
+	account.Balance = *uint256.NewInt(100)
+	credit := newWS().
+		addr(addr, state.Version{TxIndex: 5, Incarnation: 0}, &account).
+		bal(addr, state.Version{TxIndex: 5, Incarnation: 0}, account.Balance).
+		build()
+	res, _ := credit.Normalize(vm, 5, 0, nil, nil, true, false, false)
+	ch, ok := res.GetCodeHash(addr)
+	require.True(t, ok)
+	assert.Equal(t, accounts.EmptyCodeHash, ch.Val, "fee-credit revival gets empty codeHash, not the pre-SD hash")
+}
+
+// The fee-credit revival must not take the pre-block code hash from a state
+// reader that has not applied the destruct.
+func TestNormalizeWriteSet_FeeCreditRevivalDropsPreBlockCodeHash(t *testing.T) {
+	vm := state.NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x39})
+	reader := newMapStateReader()
+	reader.accounts[addr] = &accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(common.HexToHash("0x11223344"))}
+	vm.FlushVersionedWrites(newWS().selfDestruct(addr, state.Version{TxIndex: 2, Incarnation: 0}, true).build(), true)
+
+	account := accounts.NewAccount()
+	account.Balance = *uint256.NewInt(100)
+	credit := newWS().
+		addr(addr, state.Version{TxIndex: 5, Incarnation: 0}, &account).
+		bal(addr, state.Version{TxIndex: 5, Incarnation: 0}, account.Balance).
+		build()
+	res, _ := credit.Normalize(vm, 5, 0, reader, nil, true, false, false)
+	ch, ok := res.GetCodeHash(addr)
+	require.True(t, ok)
+	assert.Equal(t, accounts.EmptyCodeHash, ch.Val, "fee-credit revival gets empty codeHash, not the pre-block hash")
+}
+
+// A later credit must not take the pre-SD nonce either: the revival
+// (SelfDestructPath=false) wrote no nonce.
+func TestNormalizeWriteSet_CreditAfterRevivalDropsPreDestructNonce(t *testing.T) {
+	vm := state.NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x35})
+	vm.FlushVersionedWrites(newWS().nonce(addr, state.Version{TxIndex: 1, Incarnation: 0}, 9).build(), true)
+	vm.FlushVersionedWrites(newWS().selfDestruct(addr, state.Version{TxIndex: 2, Incarnation: 0}, true).build(), true)
+	vm.FlushVersionedWrites(newWS().
+		selfDestruct(addr, state.Version{TxIndex: 3, Incarnation: 0}, false).
+		bal(addr, state.Version{TxIndex: 3, Incarnation: 0}, *uint256.NewInt(100)).
+		build(), true)
+
+	credit := newWS().bal(addr, state.Version{TxIndex: 5, Incarnation: 0}, *uint256.NewInt(200)).build()
+	res, _ := credit.Normalize(vm, 5, 0, nil, nil, true, false, false)
+	n, ok := res.GetNonce(addr)
+	require.True(t, ok)
+	assert.Equal(t, uint64(0), n.Val, "credit after revival gets zero nonce, not the pre-SD 9")
+}
+
+// The revival must not take the pre-block nonce from a state reader that has
+// not applied the destruct.
+func TestNormalizeWriteSet_RevivalDropsPreBlockNonce(t *testing.T) {
+	vm := state.NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x37})
+	reader := newMapStateReader()
+	reader.accounts[addr] = &accounts.Account{Nonce: 9, Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}
+	vm.FlushVersionedWrites(newWS().selfDestruct(addr, state.Version{TxIndex: 2, Incarnation: 0}, true).build(), true)
+
+	revival := newWS().bal(addr, state.Version{TxIndex: 5, Incarnation: 0}, *uint256.NewInt(100)).build()
+	res, _ := revival.Normalize(vm, 5, 0, reader, nil, true, false, false)
+	n, ok := res.GetNonce(addr)
+	require.True(t, ok)
+	assert.Equal(t, uint64(0), n.Val, "revival gets zero nonce, not the pre-block 9")
 }
 
 // Storage no-op detected via the stateReader's pre-block value (no prior in-block
@@ -2119,4 +2229,65 @@ func TestCalcFees_EstimateBalanceAloneDoesNotPruneCoinbase(t *testing.T) {
 	_, pruned := writes.GetSelfDestruct(coinbase)
 	require.False(t, pruned, "a funded coinbase must not be deleted on an in-flight zero balance")
 	require.True(t, writes.IsEmpty(), "a live coinbase with no tip needs no write at all")
+}
+
+// Under EIP-8246 a contract created and self-destructed in an earlier tx keeps
+// its balance: the destruct's own balance cell is the live account's balance.
+func TestCalcFees_EIP8246PreservedCoinbase(t *testing.T) {
+	t.Parallel()
+	const kept = 1000
+	for _, tc := range []struct {
+		name  string
+		rules *chain.Rules
+		tip   uint64
+		want  uint64
+	}{
+		{"tip", &chain.Rules{IsSpuriousDragon: true, IsAmsterdam: true}, 3, kept + 3},
+		{"zero tip", &chain.Rules{IsSpuriousDragon: true, IsAmsterdam: true}, 0, 0},
+		{"pre-EIP-8246 burns", &chain.Rules{IsSpuriousDragon: true}, 3, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			coinbase := fAddr("coinbase")
+
+			header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, GasUsed: 21000}
+			version := state.Version{BlockNum: 1, TxNum: 2, TxIndex: 1}
+			txTask := &exec.TxTask{
+				Header: header, TxNum: version.TxNum, TxIndex: version.TxIndex,
+				Config:          chain.TestChainBerlinConfig,
+				EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+			}
+			task := &taskVersion{
+				execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true},
+				version:  version,
+			}
+			result := &execResult{TxResult: &exec.TxResult{
+				Task: task,
+				ExecutionResult: evmtypes.ExecutionResult{
+					FeeTipped:            *uint256.NewInt(tc.tip),
+					BurntContractAddress: accounts.NilAddress,
+				},
+				Coinbase: coinbase,
+			}}
+			result.TxOut = &state.WriteSet{}
+
+			vm := state.NewVersionMap(nil)
+			destruct := state.Version{TxIndex: 0}
+			vm.WriteSelfDestruct(coinbase, destruct, true, true)
+			vm.WriteBalance(coinbase, destruct, *uint256.NewInt(kept), true)
+			vm.WriteIncarnation(coinbase, destruct, 0, true)
+
+			writes, _, err := result.calcFees(task, vm, newMapStateReader(), tc.rules, nil)
+			require.NoError(t, err)
+			_, deleted := writes.GetSelfDestruct(coinbase)
+			require.False(t, deleted, "the coinbase must not be deleted")
+			if tc.want == 0 {
+				require.True(t, writes.IsEmpty(), "a live coinbase with no tip needs no write at all")
+				return
+			}
+			bw := findBalance(writes, coinbase)
+			require.NotNil(t, bw, "coinbase balance write")
+			require.Equal(t, *uint256.NewInt(tc.want), bw.Val)
+		})
+	}
 }

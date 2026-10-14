@@ -448,24 +448,24 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 						ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
 						Val:        true,
 					})
-					if path == StoragePath || path == AddressPath {
-						readVersion := sdVersion
-						if pathRead.Status() == MVReadResultDone {
-							readVersion = pathRead.Version()
-						}
+					readVersion := sdVersion
+					if pathRead.Status() == MVReadResultDone {
+						readVersion = pathRead.Version()
+					}
+					if path == StoragePath || path == AddressPath ||
+						path == BalancePath || path == NoncePath || path == CodeSizePath {
 						s.recordWipedRead(addr, path, key, readVersion)
 					}
-					// Per-path revival misses account-level life: a balance-only
-					// credit (fee, transfer) revives the account without writing a
-					// CodeHash entry, and a live account's wiped code hash is
-					// keccak(''), not the nil hash of a nonexistent one.
+					// Per-path revival misses account-level life: a fee credit revives the
+					// account without writing a CodeHash entry, and a live account's wiped code
+					// hash is keccak(''), not the nil hash of a nonexistent one.
 					if path == CodeHashPath && !s.versionMap.destroyedAndUnrevived(addr, s.txIndex) {
 						r.outcome = outcomeMapDone
 						r.mapCodeHashVal = accounts.EmptyCodeHash
-						r.hdr = ReadHeader{Source: MapRead, Version: sdVersion}
+						r.hdr = ReadHeader{Source: MapRead, Version: readVersion}
 						r.recordVR = !commited
 						r.source = MapRead
-						r.version = sdVersion
+						r.version = readVersion
 						return
 					}
 					r.outcome = outcomeReturnZero
@@ -1319,20 +1319,13 @@ func refreshIncarnation(s *IntraBlockState, addr accounts.Address, currentIncarn
 	}
 }
 
-// readCode returns the contract code with its hash. The commited flag selects whether
-// the version-aware lookup honours the committed-only contract.
-func readCode(s *IntraBlockState, addr accounts.Address, commited bool) (accounts.Code, ReadSource, Version, error) {
-	if !commited {
-		if v, src, ver, ok := warmField(s, addr, s.versionedWrites.code, s.versionedReads.code); ok {
-			return v, src, ver, nil
-		}
-	} else if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetCode(addr); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, nil
-		}
+// readCode returns the contract code with its hash.
+func readCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, ReadSource, Version, error) {
+	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.code, s.versionedReads.code); ok {
+		return v, src, ver, nil
 	}
 	var r readPathResult
-	versionedReadCore(s, addr, CodePath, accounts.NilKey, commited, false, &r)
+	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
 		return accounts.Code{}, r.source, r.version, r.err
 	}

@@ -76,38 +76,39 @@ func appendAdvertisedAddresses(addrs []multiaddr.Multiaddr, host multiaddr.Multi
 }
 
 func buildOptions(cfg *P2PConfig, privateKey *ecdsa.PrivateKey) ([]libp2p.Option, error) {
-	tcpListen, err := multiAddressBuilder(cfg.IpAddr, cfg.TCPPort)
-	if err != nil {
-		return nil, err
-	}
-	quicListen, err := quicAddressBuilder(cfg.IpAddr, cfg.QUICPort)
-	if err != nil {
-		return nil, err
-	}
+	listenIP := cfg.IpAddr
 	if cfg.LocalIP != "" {
 		if net.ParseIP(cfg.LocalIP) == nil {
 			return nil, fmt.Errorf("invalid local ip provided: %s", cfg.LocalIP)
 		}
-		tcpListen, err = multiAddressBuilder(cfg.LocalIP, cfg.TCPPort)
-		if err != nil {
-			return nil, err
-		}
-		quicListen, err = quicAddressBuilder(cfg.LocalIP, cfg.QUICPort)
-		if err != nil {
-			return nil, err
-		}
+		listenIP = cfg.LocalIP
+	}
+	tcpListen, err := multiAddressBuilder(listenIP, cfg.TCPPort)
+	if err != nil {
+		return nil, err
 	}
 
-	options := []libp2p.Option{
+	listenAddrs := []multiaddr.Multiaddr{tcpListen}
+	transports := []libp2p.Option{libp2p.Transport(tcp.NewTCPTransport)}
+	if !cfg.DisableQUIC {
+		quicListen, err := quicAddressBuilder(listenIP, cfg.QUICPort)
+		if err != nil {
+			return nil, err
+		}
+		listenAddrs = append([]multiaddr.Multiaddr{quicListen}, listenAddrs...)
+		transports = append([]libp2p.Option{libp2p.Transport(libp2pquic.NewTransport)}, transports...)
+	}
+
+	options := append([]libp2p.Option{
 		privKeyOption(privateKey),
-		libp2p.ListenAddrs(quicListen, tcpListen),
+		libp2p.ListenAddrs(listenAddrs...),
 		libp2p.UserAgent("erigon/caplin/" + version.NodeVersion()),
-		libp2p.Transport(libp2pquic.NewTransport),
-		libp2p.Transport(tcp.NewTCPTransport),
+	}, transports...)
+	options = append(options,
 		libp2p.Muxer("/mplex/6.7.0", mplex.DefaultTransport),
 		libp2p.DefaultMuxers,
 		libp2p.Ping(false),
-	}
+	)
 	if cfg.EnableUPnP {
 		options = append(options, libp2p.NATPortMap())
 	}

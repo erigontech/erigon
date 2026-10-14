@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,28 +14,19 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package building
+package sentinelflags
 
 import (
-	"sync"
+	"testing"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/stretchr/testify/require"
 )
 
-type State struct {
-	feeRecipients map[int]common.Address
-
-	mu sync.RWMutex
-}
-
-func NewState() *State {
-	return &State{
-		feeRecipients: map[int]common.Address{},
-	}
-}
-
-func (s *State) SetFeeRecipient(idx int, address common.Address) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.feeRecipients[idx] = address
+// The upstream ethereum-package Caplin launcher starts the standalone sentinel with
+// --sentinel.tcp.port=4001 --discovery.port=4001, so the default QUIC port must not
+// collide with either of those, or with the standalone sentinel's own defaults.
+func TestSentinelQUICPortDefaultAvoidsUpstreamLauncherConflict(t *testing.T) {
+	require.Equal(t, uint(4002), SentinelQUICPort.Value)
+	require.NotEqual(t, uint(SentinelDiscoveryPort.Value), SentinelQUICPort.Value)
+	require.NotEqual(t, SentinelTcpPort.Value, SentinelQUICPort.Value)
 }

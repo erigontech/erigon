@@ -17,6 +17,7 @@
 package clparams
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -56,6 +57,15 @@ func TestGnosisNetworksUseConfiguredBlockRequestWindow(t *testing.T) {
 	require.Equal(t, uint64(33_024), chiado.MinEpochsForBlockRequests())
 }
 
+func TestGnosisNetworksUseConfiguredDataColumnRequestWindow(t *testing.T) {
+	for _, id := range []NetworkType{chainspec.GnosisChainID, chainspec.ChiadoChainID} {
+		cfg := BeaconConfigs[id]
+		require.Equal(t, uint64(16_384), cfg.MinEpochsForDataColumnSidecarsRequests, cfg.ConfigName)
+		currentSlot := (cfg.FuluForkEpoch + 20_000) * cfg.SlotsPerEpoch
+		require.Equal(t, (cfg.FuluForkEpoch+20_000-16_384)*cfg.SlotsPerEpoch, cfg.DataColumnSidecarServeRangeStartSlot(currentSlot), cfg.ConfigName)
+	}
+}
+
 func TestBlockRequestWindowFallsBackToSpecFormula(t *testing.T) {
 	cfg := BeaconChainConfig{MinValidatorWithdrawabilityDelay: 256, ChurnLimitQuotient: 65_536}
 	require.Equal(t, uint64(33_024), cfg.MinEpochsForBlockRequests())
@@ -68,6 +78,31 @@ func TestCustomConfigUsesConfiguredBlockRequestWindow(t *testing.T) {
 	beaconCfg, _, err := CustomConfig(configPath)
 	require.NoError(t, err)
 	require.Equal(t, uint64(12_345), beaconCfg.MinEpochsForBlockRequests())
+}
+
+func TestCustomConfigBoundsMaxCommitteesPerSlot(t *testing.T) {
+	for _, test := range []struct {
+		committees uint64
+		wantErr    bool
+	}{
+		{committees: 64},
+		{committees: 65, wantErr: true},
+		{committees: 72, wantErr: true},
+	} {
+		t.Run(fmt.Sprint(test.committees), func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), "config.yaml")
+			yamlContent := fmt.Sprintf("MAX_COMMITTEES_PER_SLOT: %d\n", test.committees)
+			require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0o644))
+
+			beaconCfg, _, err := CustomConfig(configPath)
+			if test.wantErr {
+				require.EqualError(t, err, fmt.Sprintf("MAX_COMMITTEES_PER_SLOT exceeds supported limit: %d > 64", test.committees))
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, test.committees, beaconCfg.MaxCommitteesPerSlot)
+		})
+	}
 }
 
 func TestCustomConfigGasLimitSchedule(t *testing.T) {

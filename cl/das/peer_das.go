@@ -243,7 +243,7 @@ func (d *peerdas) extractGloasData(block *cltypes.SignedBeaconBlock) *gloasBlock
 // getKzgCommitmentsForGloas retrieves kzg_commitments for GLOAS sidecar verification.
 // For GLOAS, kzg_commitments come from block.body.signed_execution_payload_bid.message.blob_kzg_commitments.
 // [New in Gloas:EIP7732]
-func (d *peerdas) getKzgCommitmentsForGloas(slot uint64, blockRoot common.Hash) (*solid.ListSSZ[*cltypes.KZGCommitment], error) {
+func (d *peerdas) getKzgCommitmentsForGloas(blockRoot common.Hash) (*solid.ListSSZ[*cltypes.KZGCommitment], error) {
 	data, err := d.getGloasData(blockRoot)
 	if err != nil {
 		return nil, err
@@ -453,9 +453,15 @@ func (d *peerdas) PruneBelow(slot uint64) error {
 	d.pruneBlobRecoveriesBelow(slot)
 	// A partial failure still advances the floor: pruneBelow attempts every bucket, so it
 	// leaves stragglers rather than an untouched store, and the floor only understates them.
-	if slot == 0 {
-		d.state.SetEarliestAvailableSlot(0)
-	} else if slot > d.state.GetEarliestAvailableSlot() {
+	// The prune floor does not mean the columns above it are stored, so advertise the lowest
+	// stored bucket when it is higher. It drops when a backfill fills lower buckets.
+	stored, storedErr := d.columnStorage.EarliestStoredSlot()
+	if storedErr == nil {
+		d.state.SetEarliestAvailableSlot(max(slot, stored))
+		return err
+	}
+	log.Warn("[peerdas] failed to read the earliest stored column slot", "err", storedErr)
+	if slot == 0 || slot > d.state.GetEarliestAvailableSlot() {
 		d.state.SetEarliestAvailableSlot(slot)
 	}
 	return err
@@ -987,7 +993,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				var kzgCommitmentsFromBlock *solid.ListSSZ[*cltypes.KZGCommitment]
 				var signedBlockHeaderFromBlock *cltypes.SignedBeaconBlockHeader
 				if isGloas {
-					kzgCommitmentsFromBlock, err = d.getKzgCommitmentsForGloas(slot, blockRoot)
+					kzgCommitmentsFromBlock, err = d.getKzgCommitmentsForGloas(blockRoot)
 					if err != nil {
 						log.Warn("[blobsRecover] failed to get kzg commitments for GLOAS", "err", err, "slot", slot, "blockRoot", blockRoot)
 						return
@@ -1614,7 +1620,7 @@ mainloop:
 					// [Modified in Gloas:EIP7732] Version-aware verification
 					if isGloasSidecar {
 						// GLOAS: kzg_commitments come from block
-						kzgCommitments, err := d.getKzgCommitmentsForGloas(slot, blockRoot)
+						kzgCommitments, err := d.getKzgCommitmentsForGloas(blockRoot)
 						if err != nil {
 							log.Debug("failed to get kzg commitments for GLOAS", "err", err, "blockRoot", blockRoot)
 							return

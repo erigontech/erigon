@@ -305,7 +305,6 @@ func (f *ForkChoiceStore) verifyEnvelopeBuilderSignature(
 // For GLOAS, blob_kzg_commitments are in the committed bid, not directly in BeaconBlock.
 // Returns nil if data is available, ErrEIP7594ColumnDataNotAvailable if not available yet.
 func (f *ForkChoiceStore) checkDataAvailability(
-	ctx context.Context,
 	block *cltypes.SignedBeaconBlock,
 	beaconBlockRoot common.Hash,
 ) error {
@@ -910,7 +909,7 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForConsensus(ctx conte
 	if err := f.validateEnvelopeAgainstBlock(signedEnvelope, block, blockState); err != nil {
 		return fmt.Errorf("execution payload envelope failed gossip validation: %w", err)
 	}
-	if err := f.checkDataAvailability(ctx, block, root); err != nil {
+	if err := f.checkDataAvailability(block, root); err != nil {
 		return err
 	}
 	blockState.SetPreviousStateRoot(block.Block.StateRoot)
@@ -1074,7 +1073,7 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 
 	// Check blob data availability
 	if checkBlobData {
-		if err := f.checkDataAvailability(ctx, block, common.Hash(beaconBlockRoot)); err != nil {
+		if err := f.checkDataAvailability(block, common.Hash(beaconBlockRoot)); err != nil {
 			if missingMode == queueMissingEnvelope && errors.Is(err, ErrEIP7594ColumnDataNotAvailable) {
 				f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
 			}
@@ -1150,8 +1149,12 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 	if envelope.Payload != nil {
 		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
 	}
-	if f.engine == nil && envelope.Payload != nil {
-		if _, retained := f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusNotValidated, &envelope.Payload.GasLimit); !retained {
+	if (f.engine == nil || !validatePayload) && envelope.Payload != nil {
+		payloadStatus := execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated)
+		if f.payloadValidatedLocked(beaconBlockRoot, envelope.Payload.BlockHash) {
+			payloadStatus = execution_client.PayloadStatusValidated
+		}
+		if _, retained := f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, payloadStatus, &envelope.Payload.GasLimit); !retained {
 			return false, fmt.Errorf("%w: block disappeared while storing payload status for beacon_block_root %v", ErrIgnore, beaconBlockRoot)
 		}
 	}
