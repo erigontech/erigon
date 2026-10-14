@@ -1560,7 +1560,7 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 	// A resident deleted object outranks the read set, as in versionedReadCore.
 	if so, ok := s.stateObjects[addr]; !ok || !so.deleted {
 		if tr, ok := s.versionedReads.GetStorage(addr, key); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, false, nil
+			return tr.Val, tr.Source, tr.Version, true, nil
 		}
 	}
 	var r readPathResult
@@ -1573,7 +1573,7 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		return r.vwStorage.Val, r.source, r.version, false, nil
 	case outcomeReadSetHit:
 		tr, _ := s.versionedReads.GetStorage(addr, key)
-		return tr.Val, r.source, r.version, false, nil
+		return tr.Val, r.source, r.version, true, nil
 	case outcomeMapDone:
 		v := r.mapStorageVal
 		if r.recordVR {
