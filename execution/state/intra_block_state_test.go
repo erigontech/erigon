@@ -1309,11 +1309,13 @@ func TestResetForPoolCarriesNothingToTheNextCall(t *testing.T) {
 	require.NotNil(t, ibs.versionedReads.address)
 	ibs.SetTxContext(5, 2)
 	ibs.SetVersion(3)
+	ibs.eip8246 = true
 
 	require.True(t, ibs.resetForPool())
 	require.Nil(t, ibs.stateReader)
 	require.Zero(t, ibs.blockNum)
 	require.Zero(t, ibs.version)
+	require.False(t, ibs.eip8246, "fork flags are the next call's to set")
 	require.Empty(t, ibs.sdProbe)
 	require.NotNil(t, ibs.versionedReads.address, "the read set keeps its maps")
 	require.Empty(t, ibs.versionedReads.address)

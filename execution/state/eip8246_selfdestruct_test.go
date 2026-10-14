@@ -34,6 +34,7 @@ func TestEIP8246_PreservedSD_ReadsAsEmptyCodeAccountInLaterTx(t *testing.T) {
 	tx0.SetTxContext(0, 0)
 	tx0.SetVersion(0)
 	tx0.SetVersionMap(vm)
+	tx0.eip8246 = true
 	require.NoError(t, tx0.CreateAccount(addr, true))
 	require.NoError(t, tx0.SetBalance(addr, preserved, tracing.BalanceChangeUnspecified))
 	require.NoError(t, tx0.SetCode(addr, []byte("deployed runtime code"), tracing.CodeChangeUnspecified))
@@ -46,6 +47,7 @@ func TestEIP8246_PreservedSD_ReadsAsEmptyCodeAccountInLaterTx(t *testing.T) {
 	tx1.SetTxContext(0, 1)
 	tx1.SetVersion(0)
 	tx1.SetVersionMap(vm)
+	tx1.eip8246 = true
 	ch, err := tx1.GetCodeHash(addr)
 	require.NoError(t, err)
 	require.Equal(t, accounts.EmptyCodeHash, ch, "EXTCODEHASH of a preserved account must read empty, not the pre-destruct deployed hash")
@@ -72,6 +74,7 @@ func TestEIP8246_PreservedSD_WithEarlierAccountRecord(t *testing.T) {
 	t.Cleanup(ibs.Close)
 	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, 2)
+	ibs.eip8246 = true
 
 	exists, err := ibs.Exist(addr)
 	require.NoError(t, err)
@@ -119,6 +122,7 @@ func TestEIP8246_FinalizeTx_PreservesSameTxCredit(t *testing.T) {
 	vm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(newAccountStateReader(), vm)
 	defer ibs.Close()
+	ibs.eip8246 = true
 
 	ibs.SetTxContext(1, 0)
 	require.NoError(t, ibs.CreateAccount(addr, true))
@@ -158,6 +162,7 @@ func TestEIP8246_VersionedAccount_LaterBalanceWriteDoesNotSkipReconstruction(t *
 	ibs.SetTxContext(0, 2)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
+	ibs.eip8246 = true
 
 	exists, err := ibs.Exist(addr)
 	require.NoError(t, err)
@@ -169,15 +174,10 @@ func TestEIP8246_VersionedAccount_LaterBalanceWriteDoesNotSkipReconstruction(t *
 
 // EIP-8246: the whole-account versionedStateReader — used by calcFees to read the
 // coinbase / burnt fee recipient on the state-root composition path — must not drop
-// a self-destruct-preserved balance. IsNetAbsent reports a preserve as absent, so the
-// reader reconstructs the preserved value from the versionMap cells, or calcFees
-// credits the tip onto 0 and burns the preserved balance (a parallel-only
-// wrong-state-root divergence vs serial).
-//
-// The reconstruction is fork-agnostic: a self-destruct cell with a non-zero floor
-// balance is only ever produced by a balance-preserving destruct (Amsterdam+), so the
-// reader needs no rules flag to tell a preserve from a pre-Amsterdam burn — the latter
-// zeroes the balance cell at the write side (see the pre-Amsterdam case below).
+// a self-destruct-preserved balance. IsNetAbsent is fork-agnostic and reports a
+// preserve as absent; a fork-aware reader must reconstruct the preserved value from
+// the versionMap cells, or calcFees credits the tip onto 0 and burns the preserved
+// balance (a parallel-only wrong-state-root divergence vs serial).
 func TestEIP8246_VersionedStateReader_PreserveNotBurned(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x8246CB"))
@@ -189,58 +189,18 @@ func TestEIP8246_VersionedStateReader_PreserveNotBurned(t *testing.T) {
 	vm.WriteBalance(addr, sdVer, preserved, true)
 	vm.WriteIncarnation(addr, sdVer, 0, true)
 
-	vsr := NewVersionedStateReader(6, ReadSet{}, vm, nil)
+	// Fork-aware reader at a later tx (the calcFees path) must surface the preserve.
+	vsr := NewVersionedStateReader(6, ReadSet{}, vm, nil, true /* eip8246 */)
 	acc, err := vsr.ReadAccountData(addr)
 	require.NoError(t, err)
-	require.NotNil(t, acc, "a self-destruct-preserved balance must surface with no read-side rules flag")
+	require.NotNil(t, acc, "EIP-8246 preserved coinbase must not read as absent (calcFees would burn the balance)")
 	require.Equal(t, preserved, acc.Balance)
-}
 
-// The reconstructed preserve is a balance-only EOA (nonce 0, empty code, incarnation 0),
-// matching the shape the commit path writes. Even a stale code/nonce cell left at the
-// destruct tx must not resurrect the destroyed contract: the reader derives the EOA from
-// the kept balance alone.
-func TestEIP8246_VersionedStateReader_PreserveIsEOAShaped(t *testing.T) {
-	t.Parallel()
-	addr := accounts.InternAddress(common.HexToAddress("0x8246CE"))
-	preserved := *uint256.NewInt(321)
-	staleCodeHash := accounts.InternCodeHash(common.HexToHash("0x31537ad3f3619e1f93aac0ddfdb0d8a0013bd170b427d81dd5abbee4f3f5248e"))
-
-	vm := NewVersionMap(nil)
-	sdVer := Version{TxIndex: 2}
-	vm.WriteSelfDestruct(addr, sdVer, true, true)
-	vm.WriteBalance(addr, sdVer, preserved, true)
-	vm.WriteCodeHash(addr, sdVer, staleCodeHash, true)
-	vm.WriteNonce(addr, sdVer, 9, true)
-	vm.WriteIncarnation(addr, sdVer, 4, true)
-
-	vsr := NewVersionedStateReader(3, ReadSet{}, vm, nil)
-	acc, err := vsr.ReadAccountData(addr)
+	// A fork-unaware reader keeps pre-EIP-8246 semantics: a self-destruct is absent.
+	vsrOld := NewVersionedStateReader(6, ReadSet{}, vm, nil, false)
+	accOld, err := vsrOld.ReadAccountData(addr)
 	require.NoError(t, err)
-	require.NotNil(t, acc)
-	require.Equal(t, preserved, acc.Balance, "preserved balance is kept")
-	require.EqualValues(t, 0, acc.Nonce, "preserve is EOA-shaped: nonce 0")
-	require.Equal(t, accounts.EmptyCodeHash, acc.CodeHash, "preserve is EOA-shaped: empty code, not the destroyed contract's hash")
-	require.EqualValues(t, 0, acc.Incarnation, "preserve is EOA-shaped: incarnation 0")
-}
-
-// A pre-Amsterdam (non-preserving) self-destruct zeroes the balance cell at the write
-// side, so the fork-agnostic reconstruction yields no account — the discriminator is the
-// non-zero balance, not a rules flag.
-func TestEIP8246_VersionedStateReader_ZeroBalanceDestructIsAbsent(t *testing.T) {
-	t.Parallel()
-	addr := accounts.InternAddress(common.HexToAddress("0x8246CZ"))
-
-	vm := NewVersionMap(nil)
-	sdVer := Version{TxIndex: 5}
-	vm.WriteSelfDestruct(addr, sdVer, true, true)
-	vm.WriteBalance(addr, sdVer, uint256.Int{}, true)
-	vm.WriteIncarnation(addr, sdVer, 0, true)
-
-	vsr := NewVersionedStateReader(6, ReadSet{}, vm, nil)
-	acc, err := vsr.ReadAccountData(addr)
-	require.NoError(t, err)
-	require.Nil(t, acc, "a zeroed-balance self-destruct is fully absent with no read-side rules flag")
+	require.Nil(t, accOld, "pre-EIP-8246 a self-destruct is fully absent")
 }
 
 // The persisted balance-only record has incarnation 0, so a later CREATE2 over
@@ -263,6 +223,7 @@ func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *test
 		tx0.SetTxContext(0, 0)
 		tx0.SetVersion(0)
 		tx0.SetVersionMap(vm)
+		tx0.eip8246 = true
 		require.NoError(t, tx0.CreateAccount(addr, true))
 		require.NoError(t, tx0.SetBalance(addr, preserved, tracing.BalanceChangeUnspecified))
 		_, err := tx0.Selfdestruct(addr, true)
@@ -274,6 +235,7 @@ func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *test
 		tx1.SetTxContext(0, 1)
 		tx1.SetVersion(0)
 		tx1.SetVersionMap(vm)
+		tx1.eip8246 = true
 		bal, err := tx1.GetBalance(addr)
 		require.NoError(t, err)
 		require.Equal(t, preserved, bal, "concurrent reader must see the preserved balance before re-creation")
@@ -290,6 +252,7 @@ func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *test
 		reader := newAccountStateReader()
 		ibs := New(reader)
 		defer ibs.Close()
+		ibs.eip8246 = true
 		ibs.SetTxContext(1, 0)
 		require.NoError(t, ibs.CreateAccount(addr, true))
 		require.NoError(t, ibs.SetBalance(addr, preserved, tracing.BalanceChangeUnspecified))
@@ -330,6 +293,7 @@ func TestEIP8246_PreservedAccount_OverlaysLaterFieldWrites(t *testing.T) {
 	ibs.SetTxContext(0, 2)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
+	ibs.eip8246 = true
 	fieldNonce, err := ibs.GetNonce(addr)
 	require.NoError(t, err)
 	fieldCodeHash, err := ibs.GetCodeHash(addr)

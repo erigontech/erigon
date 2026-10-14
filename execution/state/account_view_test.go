@@ -55,7 +55,7 @@ func TestVersionedAccountView_MatchesMaterialized(t *testing.T) {
 			tc.setup(vm, addr)
 
 			view := NewVersionedAccountView(addr, txIdx, vm, nil)
-			mat, err := NewVersionedStateReader(txIdx, ReadSet{}, vm, nil).ReadAccountData(addr)
+			mat, err := NewVersionedStateReader(txIdx, ReadSet{}, vm, nil, false).ReadAccountData(addr)
 			require.NoError(t, err)
 
 			if mat == nil {
@@ -119,7 +119,7 @@ func TestVersionedAccountView_GetCode_MatchesMaterialized(t *testing.T) {
 			}
 
 			view := NewVersionedAccountView(addr, txIdx, vm, base)
-			want, err := NewVersionedStateReader(txIdx, ReadSet{}, vm, base).ReadAccountCode(addr)
+			want, err := NewVersionedStateReader(txIdx, ReadSet{}, vm, base, false).ReadAccountCode(addr)
 			require.NoError(t, err)
 
 			got, err := view.GetCode()

@@ -12,7 +12,7 @@ import (
 func TestVersionedStateReaderReadAccountDataForDebugNilAccount(t *testing.T) {
 	t.Parallel()
 	vm := NewVersionMap(nil)
-	vr := NewVersionedStateReader(0, ReadSet{}, vm, &minimalStateReader{})
+	vr := NewVersionedStateReader(0, ReadSet{}, vm, &minimalStateReader{}, false)
 
 	acc, err := vr.ReadAccountDataForDebug(accounts.InternAddress(accounts.Address{}.Value()))
 	if err != nil {

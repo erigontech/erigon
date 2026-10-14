@@ -900,7 +900,7 @@ func TestGetCodeAfterDestructThenRevivalIsEmpty(t *testing.T) {
 	writeFor(vm, addr, IncarnationPath, accounts.NilKey, Version{TxIndex: 2}, uint64(2), true)
 
 	reader := newAccountStateReader(addr)
-	ibs := NewWithVersionMap(NewVersionedStateReader(3, ReadSet{}, vm, reader), vm)
+	ibs := NewWithVersionMap(NewVersionedStateReader(3, ReadSet{}, vm, reader, false), vm)
 	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(0, 3)
 	ibs.SetVersion(0)
@@ -1209,12 +1209,7 @@ func TestGetVersionedAccount_NoSynthesisFromEstimate(t *testing.T) {
 func TestGetVersionedAccount_NoSynthesisAfterSelfDestruct(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	addr := accounts.InternAddress([20]byte{0xba, 0x05})
-	// A non-preserving self-destruct zeroes the balance at the destruct tx (the
-	// write side always records Balance(0) when !preserveBalance), so the floor
-	// read resolves to 0 and nothing is synthesized — distinguishing a burn from a
-	// balance-preserving destruct purely from the cells, with no fork flag.
 	mvhm.WriteBalance(addr, Version{TxIndex: 2}, *uint256.NewInt(500), true)
-	mvhm.WriteBalance(addr, Version{TxIndex: 3}, uint256.Int{}, true)
 	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 3}, true, true)
 	ibs := NewWithVersionMap(&minimalStateReader{}, mvhm)
 	defer ibs.Release(false)
@@ -1249,18 +1244,16 @@ func TestValidateRead_NilReadOfDestroyedAccountStaysValid(t *testing.T) {
 	require.Equal(t, VersionInvalid, valid)
 }
 
-// A code-hash read recorded before a self-destruct stays valid only if the destruct
-// preserves a non-zero balance; a zeroed (burned) destruct invalidates it. The verdict
-// is driven by the balance cell the destruct leaves, not by a fork flag — a destruct
-// that zeroes the balance reads as deleted whether or not Amsterdam is active.
 func TestCodeHashReadAfterSelfDestruct(t *testing.T) {
 	for _, tc := range []struct {
 		name             string
+		eip8246          bool
 		preservedBalance uint64
 		want             VersionValidity
 	}{
-		{"deleted", 0, VersionInvalid},
-		{"preserved", 7, VersionValid},
+		{"pre_amsterdam", false, 0, VersionInvalid},
+		{"amsterdam_deleted", true, 0, VersionInvalid},
+		{"amsterdam_preserved", true, 7, VersionValid},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			addr := accounts.InternAddress([20]byte{0xc0, 1})
@@ -1275,6 +1268,7 @@ func TestCodeHashReadAfterSelfDestruct(t *testing.T) {
 			t.Cleanup(ibs.Close)
 			ibs.SetNoMaterialize(true)
 			ibs.SetTxContext(1, 2)
+			ibs.eip8246 = tc.eip8246
 			codeHash, err := ibs.GetCodeHash(addr)
 			require.NoError(t, err)
 			require.Equal(t, accounts.EmptyCodeHash, codeHash)

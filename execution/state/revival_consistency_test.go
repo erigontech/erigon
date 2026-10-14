@@ -67,7 +67,7 @@ func TestRevivalConsistency_SameTxMetamorphic_ReaderAndValidatorAgree(t *testing
 
 	// Reader: tx4 sees the re-created account (AddressPath >= destructTx arm).
 	reader := newAccountStateReader(addr)
-	ibs := New(NewVersionedStateReader(4, ReadSet{}, vm, reader))
+	ibs := New(NewVersionedStateReader(4, ReadSet{}, vm, reader, false))
 	ibs.SetTxContext(0, 4)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
@@ -107,7 +107,7 @@ func TestRevivalConsistency_AddressPathOnly_ReaderAndValidatorDiverge(t *testing
 	vm.WriteAddress(addr, Version{TxIndex: 2}, recreatedAccount(2), true)
 
 	reader := newAccountStateReader(addr)
-	ibs := New(NewVersionedStateReader(5, ReadSet{}, vm, reader))
+	ibs := New(NewVersionedStateReader(5, ReadSet{}, vm, reader, false))
 	ibs.SetTxContext(0, 5)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)

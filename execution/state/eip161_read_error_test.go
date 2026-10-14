@@ -51,7 +51,7 @@ func TestEncodeExistingEmptyRemovals_BailsOnBaseReadError(t *testing.T) {
 	reader := &failingBaseReader{err: readErr}
 	vm := NewVersionMap(nil)
 
-	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, reader))
+	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, reader, false))
 	ibs.SetTxContext(1, 0)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)

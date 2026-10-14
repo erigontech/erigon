@@ -1891,10 +1891,14 @@ type versionedStateReader struct {
 	reads       ReadSet
 	versionMap  *VersionMap
 	stateReader StateReader
+	// eip8246 makes this whole-account reader honor an EIP-8246 balance-preserve:
+	// a self-destruct keeping a non-zero balance/nonce reads as present, not
+	// absent. Set from the block's rules.
+	eip8246 bool
 }
 
-func NewVersionedStateReader(txIndex int, reads ReadSet, versionMap *VersionMap, stateReader StateReader) *versionedStateReader {
-	return &versionedStateReader{txIndex, reads, versionMap, stateReader}
+func NewVersionedStateReader(txIndex int, reads ReadSet, versionMap *VersionMap, stateReader StateReader, eip8246 bool) *versionedStateReader {
+	return &versionedStateReader{txIndex, reads, versionMap, stateReader, eip8246}
 }
 
 func (vr *versionedStateReader) SetTrace(trace bool, tracePrefix string) {
@@ -1923,14 +1927,17 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 		// only if no subsequent write at a strictly higher TxIndex re-creates it,
 		// so a later tip to a pruned coinbase surfaces the re-created account.
 		if vr.versionMap.IsNetAbsent(address, vr.txIndex) {
-			// A self-destruct that keeps a non-zero balance (EIP-8246) reads as
-			// net-absent but collapses to a balance-only EOA, matching the shape the
-			// commit path writes. Derive it from the kept balance alone — composing
-			// the floor code/nonce cells would resurrect the destroyed contract's
-			// code. Fork-agnostic: a pre-Amsterdam destruct zeroes the balance, so
-			// this yields no account.
-			if acc, ok := vr.versionMap.preservedEOA(address, vr.txIndex); ok {
-				return &acc, nil
+			// EIP-8246: a self-destruct may preserve a non-zero balance/nonce that
+			// IsNetAbsent reports as absent. On Amsterdam+ reconstruct it from the
+			// versionMap cells (the base stateReader predates the in-block destruct),
+			// else the balance is burned on the state-root composition path.
+			if vr.eip8246 {
+				// An EIP-8246 preserve only survives with a non-zero balance (an empty
+				// account is EIP-161-removed), so reconstruct only then.
+				var synth accounts.Account
+				if updated := vr.applyVersionedUpdates(address, synth); !updated.Balance.IsZero() {
+					return &updated, nil
+				}
 			}
 			return nil, nil
 		}

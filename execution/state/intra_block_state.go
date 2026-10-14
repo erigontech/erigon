@@ -218,6 +218,10 @@ type IntraBlockState struct {
 	noMaterialize       bool
 	noConflictDetection bool
 
+	// eip8246 pins whether SELFDESTRUCT preserves the account (EIP-8246 removes
+	// the balance burn). Set per-tx from the block rules in Prepare.
+	eip8246 bool
+
 	revisions revisions
 
 	lastCode accounts.Code // last code stored by SetCode
@@ -437,8 +441,9 @@ func (ibs *IntraBlockState) resetForPool() bool {
 	// The caller reads this call's output after the ibs goes back to the pool.
 	ibs.txOutput = nil
 	ibs.stateReader, ibs.codeAccess = nil, nil
-	// Reset keeps the tx context; New starts it at zero.
+	// Reset keeps the tx context and fork flags; New starts them at zero.
 	ibs.blockNum, ibs.version = 0, 0
+	ibs.eip8246 = false
 	return true
 }
 
@@ -889,13 +894,11 @@ func (ibs *IntraBlockState) GetCodeHash(addr accounts.Address) (accounts.CodeHas
 			return accounts.InternCodeHash(crypto.Keccak256Hash(cw.Val.Bytes)), nil
 		}
 	}
-	if hash == accounts.NilCodeHash {
-		// A prior tx's balance-preserving SELFDESTRUCT (EIP-8246) leaves an
-		// empty-code account, but its CodeHashPath is dropped from the version
-		// map, so recover the codehash from the reconstructed account
-		// (EmptyCodeHash), distinguishing it from a genuinely absent account
-		// (NilCodeHash). Fork-agnostic: with no preserve the reconstruction is
-		// nil and this returns NilCodeHash unchanged.
+	if ibs.eip8246 && hash == accounts.NilCodeHash {
+		// A prior tx's EIP-8246 SELFDESTRUCT leaves an existing empty-code
+		// account, but its CodeHashPath is dropped from the version map, so
+		// recover the codehash from the reconstructed account (EmptyCodeHash),
+		// distinguishing it from a genuinely absent account (NilCodeHash).
 		acc, _, _, err := ibs.getVersionedAccount(addr, false)
 		if err != nil {
 			return accounts.NilCodeHash, err
@@ -1238,13 +1241,11 @@ func (ibs *IntraBlockState) readSelfDestructMemo(addr accounts.Address) (bool, R
 }
 
 // eip8246PreservedAccount reconstructs the live account a prior tx left behind
-// when a SELFDESTRUCT kept a non-zero balance (EIP-8246): the balance survives, code
-// and nonce are cleared at destruction, and any later per-field map writes overlay the
-// reconstruction so account-level reads agree with the field-level ones. The field
-// reads go through the per-path wipe/revival logic, so a destroyed-not-revived
-// nonce/codehash reads as the fresh zero/empty (never the pre-destruct contract's).
-// Returns nil when the balance was moved out, leaving an empty account that EIP-161
-// removes.
+// when EIP-8246 removed the SELFDESTRUCT burn: the balance survives, code and
+// nonce are cleared at destruction, and any later per-field map writes overlay
+// the reconstruction so account-level reads agree with the field-level ones.
+// Returns nil when the balance was moved out, leaving an empty account that
+// EIP-161 removes.
 func (ibs *IntraBlockState) eip8246PreservedAccount(addr accounts.Address) (*accounts.Account, error) {
 	bal, _, _, err := readBalance(ibs, addr)
 	if err != nil {
@@ -1289,13 +1290,12 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 		return nil, UnknownSource, UnknownVersion, err
 	}
 
-	// A prior tx's SELFDESTRUCT that kept a non-zero balance (EIP-8246) leaves a
-	// balance-only EOA, but AddressPath reads zero under SD, so reconstruct it from
-	// the version map here, covering both committed and in-block-created accounts —
-	// unless a later tx re-created it, in which case fall through to the normal read.
-	// Fork-agnostic: a pre-Amsterdam destruct zeroes the balance, so the
-	// reconstruction yields nil and this falls through unchanged.
-	if readAccount == nil {
+	// EIP-8246: a prior tx's SELFDESTRUCT preserves the account (balance kept,
+	// code/nonce cleared) rather than destroying it. AddressPath reads zero
+	// under SD, so reconstruct the surviving account from the version map here,
+	// covering both committed and in-block-created accounts — unless a later tx
+	// re-created it, in which case fall through to the normal read.
+	if ibs.eip8246 && readAccount == nil {
 		if destructed, sdRes, ok := ibs.versionMap.ReadSelfDestruct(addr, ibs.txIndex); ok && sdRes.resolved() && destructed {
 			destructTxIndex := sdRes.DepIdx()
 			// Only a genuine re-creation (a later CreateAccount writing AddressPath)
@@ -1310,9 +1310,7 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 				if err != nil {
 					return nil, StorageRead, UnknownVersion, err
 				}
-				if preserved != nil {
-					return preserved, MapRead, Version{TxIndex: destructTxIndex}, nil
-				}
+				return preserved, MapRead, Version{TxIndex: destructTxIndex}, nil
 			}
 		}
 	}
@@ -2843,6 +2841,7 @@ func (ibs *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(sender.Handle()) || !dst.IsNil() && dbg.TraceAccount(dst.Handle())) {
 		fmt.Printf("%d (%d.%d) ibs.Prepare: sender: %x, coinbase: %x, dest: %x, %x, %v, %v\n", ibs.blockNum, ibs.txIndex, ibs.version, sender, coinbase, dst, precompiles, list, rules)
 	}
+	ibs.eip8246 = rules.IsAmsterdam
 	ibs.txOutputFree = true
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions

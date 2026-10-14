@@ -62,6 +62,7 @@ func TestEIP8246_SelfdestructVersioned_PreservesBumpedNonce(t *testing.T) {
 	ibs.SetTxContext(0, 0)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
+	ibs.eip8246 = true
 
 	require.NoError(t, ibs.CreateAccount(addr, true))
 	require.NoError(t, ibs.SetCode(addr, []byte("twenty-two-byte-code!!"), tracing.CodeChangeUnspecified))
