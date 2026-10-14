@@ -18,6 +18,7 @@
 package systemtx
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/protocol"
@@ -49,6 +51,13 @@ func Register() {
 	registerOnce.Do(func() {
 		types.RegisterTxType(protocol.SystemTxType, types.TxTypeSpec{
 			New: func() types.Transaction { return new(Transaction) },
+			UnmarshalJSON: func(input []byte) (types.Transaction, error) {
+				tx := new(Transaction)
+				if err := tx.UnmarshalJSON(input); err != nil {
+					return nil, err
+				}
+				return tx, nil
+			},
 			Sender: func(txn types.Transaction, sg types.Signer) (accounts.Address, error) {
 				return txn.Sender(sg)
 			},
@@ -242,6 +251,62 @@ func (tx *Transaction) DecodeRLP(s *rlp.Stream) error {
 	}
 	if err := s.ListEnd(); err != nil {
 		return err
+	}
+	if body.To != protocol.EEZL2Address {
+		return fmt.Errorf("%w: target %v is not EEZL2", protocol.ErrSystemTx, body.To)
+	}
+	tx.body = body
+	return nil
+}
+
+// txJSON is the reference client's rendering: the body, the fixed gas
+// fields and zero signature placeholders.
+type txJSON struct {
+	Type     hexutil.Uint64  `json:"type"`
+	Hash     common.Hash     `json:"hash"`
+	ChainID  *hexutil.Uint64 `json:"chainId"`
+	Nonce    *hexutil.Uint64 `json:"nonce"`
+	To       *common.Address `json:"to"`
+	Value    *hexutil.U256   `json:"value"`
+	Input    *hexutil.Bytes  `json:"input"`
+	Gas      hexutil.Uint64  `json:"gas"`
+	GasPrice hexutil.U256    `json:"gasPrice"`
+	V        hexutil.U256    `json:"v"`
+	R        hexutil.U256    `json:"r"`
+	S        hexutil.U256    `json:"s"`
+}
+
+func (tx *Transaction) MarshalJSON() ([]byte, error) {
+	chainID, nonce := hexutil.Uint64(tx.body.ChainID), hexutil.Uint64(tx.body.Nonce)
+	input := hexutil.Bytes(tx.body.Input)
+	return json.Marshal(txJSON{
+		Type:    hexutil.Uint64(protocol.SystemTxType),
+		Hash:    tx.Hash(),
+		ChainID: &chainID,
+		Nonce:   &nonce,
+		To:      tx.GetTo(),
+		Value:   (*hexutil.U256)(&tx.body.Value),
+		Input:   &input,
+		Gas:     hexutil.Uint64(protocol.SystemTxGasLimit),
+	})
+}
+
+// UnmarshalJSON reads the body fields; like the reference client it ignores
+// the fixed gas fields and signature placeholders.
+func (tx *Transaction) UnmarshalJSON(input []byte) error {
+	var dec txJSON
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
+	}
+	if dec.ChainID == nil || dec.Nonce == nil || dec.To == nil || dec.Value == nil || dec.Input == nil {
+		return fmt.Errorf("%w: chainId, nonce, to, value and input are required", protocol.ErrSystemTx)
+	}
+	body := protocol.SystemTx{
+		ChainID: uint64(*dec.ChainID),
+		Nonce:   uint64(*dec.Nonce),
+		To:      *dec.To,
+		Value:   uint256.Int(*dec.Value),
+		Input:   *dec.Input,
 	}
 	if body.To != protocol.EEZL2Address {
 		return fmt.Errorf("%w: target %v is not EEZL2", protocol.ErrSystemTx, body.To)
