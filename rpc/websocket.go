@@ -563,17 +563,17 @@ func (wc *websocketCodec) peerInfo() PeerInfo {
 }
 
 func (wc *websocketCodec) WriteJSON(ctx context.Context, v any) error {
-	wc.resetPing()
-	err := wc.jsonCodec.WriteJSON(ctx, v)
-	if err == nil {
-		wc.resetPing()
-	}
-	return err
+	return wc.pinged(func() error { return wc.jsonCodec.WriteJSON(ctx, v) })
 }
 
 func (wc *websocketCodec) WriteStream(ctx context.Context, write func(*jsonstream.Stream)) error {
+	return wc.pinged(func() error { return wc.jsonCodec.WriteStream(ctx, write) })
+}
+
+// pinged runs a write with the idle ping timer re-armed around it.
+func (wc *websocketCodec) pinged(write func() error) error {
 	wc.resetPing()
-	err := wc.jsonCodec.WriteStream(ctx, write)
+	err := write()
 	if err == nil {
 		wc.resetPing()
 	}

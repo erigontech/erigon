@@ -448,24 +448,19 @@ func (c *jsonCodec) WriteStream(ctx context.Context, write func(*jsonstream.Stre
 
 // messageWriter opens the message and takes the write lock at the first write, so an answer
 // under the flush threshold holds the connection only for its one write, and a larger one
-// from its first flush until it is complete.
+// from its first flush until it is complete. The stream stops writing at the first error.
 type messageWriter struct {
 	c   *jsonCodec
 	ctx context.Context
 	w   io.WriteCloser
-	err error
 }
 
 func (m *messageWriter) Write(p []byte) (int, error) {
-	if m.err != nil {
-		return 0, m.err
-	}
 	if m.w == nil {
 		m.c.encMu.Lock()
 		w, err := m.c.openMessage(m.ctx)
 		if err != nil {
 			m.c.encMu.Unlock()
-			m.err = err
 			return 0, err
 		}
 		m.w = w
@@ -478,15 +473,11 @@ func (m *messageWriter) Write(p []byte) (int, error) {
 
 func (m *messageWriter) Close() error {
 	if m.w == nil {
-		return m.err
+		return nil
 	}
 	defer m.c.encMu.Unlock()
-	err := m.w.Close()
-	m.w, m.err = nil, errMessageClosed
-	return err
+	return m.w.Close()
 }
-
-var errMessageClosed = errors.New("rpc: write after the message was closed")
 
 // coalesce runs send with the socket held, so the messages it writes leave in one socket write.
 func (c *jsonCodec) coalesce(send func()) (err error) {
