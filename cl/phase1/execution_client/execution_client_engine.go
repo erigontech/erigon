@@ -149,11 +149,6 @@ func (cc *ExecutionClientEngine) NewPayload(
 		payloadStatus, err = cc.engine.NewPayloadV5(ctx, request, versionedHashes, beaconParentRoot, executionRequestsList)
 	}
 	if err != nil {
-		if ctx.Err() == nil && isDeadlineExceeded(err) {
-			// The client's own timeout is no verdict; keep the payload available until a retry gets one.
-			log.Warn("[ExecutionClientEngine] NewPayload timed out, treating it as not validated", "err", err)
-			return PayloadStatusNotValidated, nil
-		}
 		return PayloadStatusNone, fmt.Errorf("engine NewPayload failed: %w", err)
 	}
 	if payloadStatus == nil {

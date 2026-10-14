@@ -49,15 +49,16 @@ type embeddedPtcVoteForkGraph struct {
 	envelopes map[common.Hash]bool
 }
 
-// An EL verdict belongs to the execution payload, so a NotValidated recorded for a sibling root
-// that shares the payload hash must not lower a Validated one.
+// A NotValidated recorded for a sibling root that shares the payload hash must not lower the hash's
+// Validated entry. Nor does the sibling inherit it: from Gloas the block hash does not bind the
+// bid's blob commitments, so each root needs its own EL answer.
 func TestMarkPayloadStatusKeepsAValidatedPayloadHash(t *testing.T) {
 	store, anchorRoot, _ := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
 	hash := common.Hash{0xe1}
 	store.MarkPayloadStatus(anchorRoot, hash, execution_client.PayloadStatusValidated)
 
 	sibling := common.Hash{0x51}
-	require.EqualValues(t, execution_client.PayloadStatusValidated, store.MarkPayloadStatus(sibling, hash, execution_client.PayloadStatusNotValidated))
+	require.EqualValues(t, execution_client.PayloadStatusNotValidated, store.MarkPayloadStatus(sibling, hash, execution_client.PayloadStatusNotValidated))
 	byHash, ok := store.executionPayloadStatus.Get(hash)
 	require.True(t, ok)
 	require.EqualValues(t, execution_client.PayloadStatusValidated, byHash)

@@ -211,9 +211,9 @@ func retryAssembleBlock(ctx context.Context, attempts int, delay time.Duration, 
 	return 0, err
 }
 
-// FinalNotValidatedBelow returns the block number below which NewPayload answers NotValidated
-// without validating.
-func (cc *ExecutionClientDirect) FinalNotValidatedBelow(ctx context.Context) (uint64, bool) {
+// SkipsValidationBelow returns the block number below which NewPayload answers NotValidated
+// without validating. It follows the EL head.
+func (cc *ExecutionClientDirect) SkipsValidationBelow(ctx context.Context) (uint64, bool) {
 	return notValidatedBelow(cc.chainRW.CurrentHeader(ctx))
 }
 
