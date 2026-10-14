@@ -257,9 +257,11 @@ type jsonCodec struct {
 	// and are handled asynchronously, so they outlive the call that read them. A
 	// frame that holds resources comes with what releases them, nil otherwise.
 	readFrame    func() ([]byte, func(), error)
-	release      func()            // releases the last frame read, until taken
-	encMu        sync.Mutex        // guards the encoder
-	encode       func(v any) error // encoder to allow multiple transports
+	release      func()                                            // releases the last frame read, until taken
+	encMu        sync.Mutex                                        // guards the encoder
+	encode       func(v any) error                                 // encoder to allow multiple transports
+	openMessage  func(ctx context.Context) (io.WriteCloser, error) // one message on the connection, closed when complete
+	msgEnd       string                                            // what delimits a message on the connection, if anything
 	conn         deadlineCloser
 	writeTimeout time.Duration // used if the context has no deadline, counted once the write holds the connection
 	held         *heldConn     // the socket, when the transport can hold writes back; nil otherwise
@@ -269,10 +271,11 @@ type jsonCodec struct {
 // implements ConnRemoteAddr, log messages include the remote address. decode must reject
 // invalid JSON, reading a message relies on it. A transport with a frame reader never calls
 // decode, so it may be nil.
-func newFuncCodec(conn deadlineCloser, encode, decode func(v any) error, readFrame func() ([]byte, func(), error)) *jsonCodec {
+func newFuncCodec(conn deadlineCloser, encode func(v any) error, openMessage func(ctx context.Context) (io.WriteCloser, error), decode func(v any) error, readFrame func() ([]byte, func(), error)) *jsonCodec {
 	codec := &jsonCodec{
 		closeCh:      make(chan any),
 		encode:       encode,
+		openMessage:  openMessage,
 		decode:       decode,
 		readFrame:    readFrame,
 		conn:         conn,
@@ -305,7 +308,8 @@ func (b rawBatch) writeTo(s *jsonstream.Stream) {
 func NewCodec(conn Conn) ServerCodec {
 	dec := json.NewDecoder(conn)
 	dec.UseNumber()
-	c := newFuncCodec(conn, newJSONEncoder(conn), dec.Decode, nil)
+	c := newFuncCodec(conn, newJSONEncoder(conn), newlineMessages(conn), dec.Decode, nil)
+	c.msgEnd = "\n"
 	c.held, _ = conn.(*heldConn)
 	return c
 }
@@ -318,17 +322,21 @@ func newJSONEncoder(conn Conn) func(v any) error {
 		case rawResponse:
 			_, err := conn.Write(append(r, '\n'))
 			return err
-		case rawBatch:
-			s := jsonstream.Get(conn)
-			defer jsonstream.Put(s)
-			r.writeTo(s)
-			s.WriteRaw("\n")
-			return s.Flush()
 		default:
 			return enc.Encode(v)
 		}
 	}
 }
+
+// newlineMessages opens messages on a newline-delimited connection: the newline is part of
+// the message's last write, so the writer itself has nothing to close.
+func newlineMessages(conn io.Writer) func(ctx context.Context) (io.WriteCloser, error) {
+	return func(context.Context) (io.WriteCloser, error) { return nopCloser{conn}, nil }
+}
+
+type nopCloser struct{ io.Writer }
+
+func (nopCloser) Close() error { return nil }
 
 func (c *jsonCodec) remoteAddr() string {
 	return c.remote
@@ -403,18 +411,82 @@ func (c *jsonCodec) releaseFrame() {
 }
 
 func (c *jsonCodec) WriteJSON(ctx context.Context, v any) error {
+	if r, ok := v.(rawBatch); ok {
+		return c.WriteStream(ctx, r.writeTo)
+	}
 	c.encMu.Lock()
 	defer c.encMu.Unlock()
 
-	deadline, ok := ctx.Deadline()
-	if !ok {
-		deadline = time.Now().Add(c.writeTimeout)
-	}
-	if err := c.conn.SetWriteDeadline(deadline); err != nil {
+	if err := c.conn.SetWriteDeadline(c.writeDeadline(ctx)); err != nil {
 		return err
 	}
 	return c.encode(v)
 }
+
+func (c *jsonCodec) writeDeadline(ctx context.Context) time.Time {
+	if deadline, ok := ctx.Deadline(); ok {
+		return deadline
+	}
+	return time.Now().Add(c.writeTimeout)
+}
+
+// WriteStream sends what write produces as one message, streaming it a threshold at a time.
+func (c *jsonCodec) WriteStream(ctx context.Context, write func(*jsonstream.Stream)) error {
+	w := &messageWriter{c: c, ctx: ctx}
+	s := jsonstream.Get(w)
+	defer jsonstream.Put(s)
+	write(s)
+	if c.msgEnd != "" {
+		s.WriteRaw(c.msgEnd)
+	}
+	err := s.Flush()
+	if closeErr := w.Close(); err == nil {
+		err = closeErr
+	}
+	return err
+}
+
+// messageWriter opens the message and takes the write lock at the first write, so an answer
+// under the flush threshold holds the connection only for its one write, and a larger one
+// from its first flush until it is complete.
+type messageWriter struct {
+	c   *jsonCodec
+	ctx context.Context
+	w   io.WriteCloser
+	err error
+}
+
+func (m *messageWriter) Write(p []byte) (int, error) {
+	if m.err != nil {
+		return 0, m.err
+	}
+	if m.w == nil {
+		m.c.encMu.Lock()
+		w, err := m.c.openMessage(m.ctx)
+		if err != nil {
+			m.c.encMu.Unlock()
+			m.err = err
+			return 0, err
+		}
+		m.w = w
+	}
+	if err := m.c.conn.SetWriteDeadline(m.c.writeDeadline(m.ctx)); err != nil {
+		return 0, err
+	}
+	return m.w.Write(p)
+}
+
+func (m *messageWriter) Close() error {
+	if m.w == nil {
+		return m.err
+	}
+	defer m.c.encMu.Unlock()
+	err := m.w.Close()
+	m.w, m.err = nil, errMessageClosed
+	return err
+}
+
+var errMessageClosed = errors.New("rpc: write after the message was closed")
 
 // coalesce runs send with the socket held, so the messages it writes leave in one socket write.
 func (c *jsonCodec) coalesce(send func()) (err error) {

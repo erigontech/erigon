@@ -71,6 +71,10 @@ func (hc *httpConn) WriteJSON(context.Context, any) error {
 	panic("writeJSON called on httpConn")
 }
 
+func (hc *httpConn) WriteStream(context.Context, func(*jsonstream.Stream)) error {
+	panic("WriteStream called on httpConn")
+}
+
 func (hc *httpConn) peerInfo() PeerInfo {
 	panic("peerInfo called on httpConn")
 }
@@ -292,7 +296,9 @@ func newHTTPServerConn(r *http.Request, w http.ResponseWriter, body io.Reader) S
 		}
 		return frame, nil, nil
 	}
-	return newFuncCodec(conn, newJSONEncoder(conn), nil, readFrame)
+	codec := newFuncCodec(conn, newJSONEncoder(conn), newlineMessages(conn), nil, readFrame)
+	codec.msgEnd = "\n"
+	return codec
 }
 
 // readAllBody reads r to the end, sizing the buffer from the hint when there is

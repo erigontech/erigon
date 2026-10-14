@@ -22,16 +22,22 @@ package rpc
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func TestServerRegisterName(t *testing.T) {
@@ -52,7 +58,7 @@ func TestServerRegisterName(t *testing.T) {
 		t.Fatalf("Expected service calc to be registered")
 	}
 
-	wantCallbacks := 10
+	wantCallbacks := 11
 	if len(svc.callbacks) != wantCallbacks {
 		t.Errorf("Expected %d callbacks for service 'service', got %d", wantCallbacks, len(svc.callbacks))
 	}
@@ -178,4 +184,49 @@ func TestServerShortLivedConn(t *testing.T) {
 		}
 		conn.Close()
 	}
+}
+
+// largestWriteConn records the largest single write to the socket: a transport that streams
+// never hands over more than a threshold's worth at once.
+type largestWriteConn struct {
+	net.Conn
+	largest atomic.Int64
+}
+
+func (c *largestWriteConn) Write(p []byte) (int, error) {
+	for {
+		prev := c.largest.Load()
+		if int64(len(p)) <= prev || c.largest.CompareAndSwap(prev, int64(len(p))) {
+			break
+		}
+	}
+	return c.Conn.Write(p)
+}
+
+// A codec with no stream of its own (IPC, websocket) must still hand a large answer to the
+// socket as it is produced, instead of holding the whole answer in memory first.
+func TestLargeAnswerStreamsOverCodec(t *testing.T) {
+	server := newTestServer(log.New())
+	defer server.Stop()
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	conn := &largestWriteConn{Conn: serverConn}
+	go server.ServeCodec(NewCodec(conn), 0)
+
+	const n = 400_000
+	lines := make(chan string, 1)
+	go func() {
+		line, err := bufio.NewReaderSize(clientConn, 1<<20).ReadString('\n')
+		require.NoError(t, err)
+		lines <- line
+	}()
+	_, err := io.WriteString(clientConn, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"test_streamHexes","params":[%d]}`+"\n", n))
+	require.NoError(t, err)
+
+	var resp struct {
+		Result []string `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(<-lines), &resp))
+	require.Len(t, resp.Result, n)
+	require.Less(t, conn.largest.Load(), int64(2*jsonstream.FlushThreshold), "the answer reached the socket in one piece")
 }

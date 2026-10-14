@@ -407,14 +407,25 @@ func (w *captureWriter) WriteJSON(_ context.Context, v any) error {
 	w.got = bytes.Clone(v.(rawResponse))
 	return nil
 }
-func (*captureWriter) closed() <-chan any { return nil }
-func (*captureWriter) remoteAddr() string { return "" }
+func (w *captureWriter) WriteStream(_ context.Context, write func(*jsonstream.Stream)) error {
+	return jsonstream.MarshalTo(w, marshalFunc(write))
+}
+func (w *captureWriter) Write(p []byte) (int, error) { w.got = append(w.got, p...); return len(p), nil }
+func (*captureWriter) closed() <-chan any            { return nil }
+func (*captureWriter) remoteAddr() string            { return "" }
+
+type marshalFunc func(*jsonstream.Stream)
+
+func (f marshalFunc) MarshalFastJSONTo(s *jsonstream.Stream) error { f(s); return nil }
 
 type discardWriter struct{}
 
 func (discardWriter) WriteJSON(context.Context, any) error { return nil }
-func (discardWriter) closed() <-chan any                   { return nil }
-func (discardWriter) remoteAddr() string                   { return "" }
+func (discardWriter) WriteStream(context.Context, func(*jsonstream.Stream)) error {
+	return nil
+}
+func (discardWriter) closed() <-chan any { return nil }
+func (discardWriter) remoteAddr() string { return "" }
 
 // Every subscriber gets the same encoded result, so wrapping it for one subscriber must not
 // allocate its size: at 2000 subscribers a block's receipts would be allocated 2000 times.

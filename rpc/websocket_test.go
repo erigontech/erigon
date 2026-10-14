@@ -21,6 +21,7 @@ package rpc
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -42,6 +43,7 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func TestWebsocketClientHeaders(t *testing.T) {
@@ -1090,4 +1092,59 @@ func TestClientWebsocketMessageSizeLimit(t *testing.T) {
 		c.Close()
 		require.Equal(t, tc.wantErr, err != nil, "limit %d: %v", tc.limit, err)
 	}
+}
+
+// A large answer over websocket leaves as one message in many frames, so the socket never
+// sees more than a threshold's worth at once and the client still reads it whole.
+func TestWebsocketLargeAnswerStreamsInFrames(t *testing.T) {
+	t.Parallel()
+
+	codecs := make(chan *websocketCodec, 1)
+	conns := make(chan *largestWriteConn, 1)
+	httpsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hw := &hijackRecorder{ResponseWriter: w}
+		conn, err := websocket.Accept(hw, r, nil)
+		if err != nil {
+			return
+		}
+		lw := &largestWriteConn{Conn: hw.conn.Conn}
+		hw.conn.Conn = lw
+		conns <- lw
+		wc := newWebsocketCodec(conn, hw.conn, nil, r.Host, r.Header, r.RemoteAddr)
+		defer wc.Close()
+		codecs <- wc
+		for {
+			if _, _, err := conn.Read(context.Background()); err != nil {
+				return
+			}
+		}
+	}))
+	defer httpsrv.Close()
+
+	conn, resp, err := websocket.Dial(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), nil)
+	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+		t.Fatalf("can't dial: %v", err)
+	}
+	defer func() { _ = conn.CloseNow() }()
+	conn.SetReadLimit(64 << 20)
+
+	wc := <-codecs
+	lw := <-conns
+	const n = 400_000
+	var want bytes.Buffer
+	require.NoError(t, jsonstream.MarshalTo(&want, marshalFunc(func(s *jsonstream.Stream) { require.NoError(t, (&testService{}).StreamHexes(n, s)) })))
+
+	done := make(chan error, 1)
+	go func() {
+		done <- wc.WriteStream(context.Background(), func(s *jsonstream.Stream) { _ = (&testService{}).StreamHexes(n, s) })
+	}()
+	_, data, err := conn.Read(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, <-done)
+	require.Equal(t, want.Len(), len(data))
+	require.Equal(t, want.Bytes(), data)
+	require.Less(t, lw.largest.Load(), int64(2*jsonstream.FlushThreshold), "the message reached the socket in one write")
 }
