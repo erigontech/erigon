@@ -70,9 +70,9 @@ func TestStateChangesStreamAtUnwind(t *testing.T) {
 			require.NoError(t, err)
 			defer tx.Rollback()
 
-			doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+			writer, err := execctx.NewSharedDomains(ctx, tx, logger)
 			require.NoError(t, err)
-			defer doms.Close()
+			defer writer.Close()
 
 			addr := common.Address{19: 1}
 			loc := common.Hash{31: 2}
@@ -82,10 +82,15 @@ func TestStateChangesStreamAtUnwind(t *testing.T) {
 				cacheKey = append(append(bytes.Clone(addr[:]), make([]byte, 8)...), loc[:]...)
 			}
 			if tc.previous != nil {
-				require.NoError(t, doms.DomainPut(tc.domain, tx, key, tc.previous, 5, nil))
+				require.NoError(t, writer.DomainPut(tc.domain, tx, key, tc.previous, 5, nil))
 			}
-			require.NoError(t, doms.DomainPut(tc.domain, tx, key, tc.current, 20, tc.previous))
-			require.NoError(t, doms.Flush(ctx, tx))
+			require.NoError(t, writer.DomainPut(tc.domain, tx, key, tc.current, 20, tc.previous))
+			require.NoError(t, writer.Flush(ctx, tx))
+
+			doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+			require.NoError(t, err)
+			defer doms.Close()
+			require.NoError(t, doms.InitBlockOverlay(tx))
 
 			cache := kvcache.New(kvcache.DefaultCoherentConfig)
 			acc := notifications.NewAccumulator()
@@ -100,13 +105,17 @@ func TestStateChangesStreamAtUnwind(t *testing.T) {
 			var diffs [kv.DomainLen][]kv.DomainEntryDiff
 			diffs[tc.domain] = []kv.DomainEntryDiff{{Key: diffKey(key, 1), Value: tc.diff}}
 			doms.Unwind(16, &diffs)
-			got, _, err := tx.GetLatest(tc.domain, key, kv.GetLatestOptions{})
+			got, found, err := doms.GetAsOf(tc.domain, key, 16)
+			require.NoError(t, err)
+			require.Equal(t, tc.diff != nil, found, "nil diffs require a backing history lookup")
+			require.True(t, bytes.Equal(tc.diff, got))
+			got, _, err = tx.GetLatest(tc.domain, key, kv.GetLatestOptions{})
 			require.NoError(t, err)
 			require.Equal(t, tc.current, got, "database unwind is still pending")
 
 			acc.Reset(2)
 			acc.StartChange(makeHeader(1, common.Hash{}), nil, true)
-			require.NoError(t, stateChangesStreamAtUnwind(ctx, tx, 1, 16, acc, &diffs, logger))
+			require.NoError(t, stateChangesStreamAtUnwind(ctx, doms.BlockOverlay(), 1, 16, acc, &diffs, logger))
 			cache.OnNewBlock((&notifications.BlockBatchNotification{StateVersionID: 2, Changes: acc.Changes()}).ToProtoBatch())
 			got, err = cache.Get(cacheKey, tx, 2)
 			require.NoError(t, err)
@@ -120,41 +129,73 @@ func TestStateChangesStreamAtUnwind(t *testing.T) {
 	}
 }
 
-func TestStateChangesStreamAtUnwind_AccountAcrossSteps(t *testing.T) {
+func TestStateChangesStreamAtUnwind_AcrossSteps(t *testing.T) {
 	t.Parallel()
 
-	ctx := t.Context()
-	logger := log.New()
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
-	tx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
-	require.NoError(t, err)
-	defer doms.Close()
-
-	addr := common.Address{19: 1}
 	oldVal := accounts.SerialiseV3(&accounts.Account{Nonce: 1})
 	middleVal := accounts.SerialiseV3(&accounts.Account{Nonce: 2})
 	newVal := accounts.SerialiseV3(&accounts.Account{Nonce: 3})
-	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addr[:], oldVal, 5, nil))
-	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addr[:], middleVal, 20, oldVal))
-	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addr[:], newVal, 40, middleVal))
-	require.NoError(t, doms.Flush(ctx, tx))
+	for _, tc := range []struct {
+		name       string
+		domain     kv.Domain
+		previous   []byte
+		middle     []byte
+		current    []byte
+		oldestDiff []byte
+	}{
+		{"account", kv.AccountsDomain, oldVal, middleVal, newVal, oldVal},
+		{"legacy account", kv.AccountsDomain, oldVal, middleVal, newVal, nil},
+		{"storage", kv.StorageDomain, []byte{1}, []byte{2}, []byte{3}, []byte{1}},
+		{"legacy storage", kv.StorageDomain, []byte{1}, []byte{2}, []byte{3}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			logger := log.New()
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
+			tx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer tx.Rollback()
+			writer, err := execctx.NewSharedDomains(ctx, tx, logger)
+			require.NoError(t, err)
+			defer writer.Close()
 
-	var diffs [kv.DomainLen][]kv.DomainEntryDiff
-	diffs[kv.AccountsDomain] = []kv.DomainEntryDiff{
-		{Key: diffKey(addr[:], 2), Value: middleVal},
-		{Key: diffKey(addr[:], 1), Value: nil},
+			addr := common.Address{19: 1}
+			loc := common.Hash{31: 2}
+			key := addr[:]
+			if tc.domain == kv.StorageDomain {
+				key = dbutils.GenerateStoragePlainKey(addr, loc)
+			}
+			require.NoError(t, writer.DomainPut(tc.domain, tx, key, tc.previous, 5, nil))
+			require.NoError(t, writer.DomainPut(tc.domain, tx, key, tc.middle, 20, tc.previous))
+			require.NoError(t, writer.DomainPut(tc.domain, tx, key, tc.current, 40, tc.middle))
+			require.NoError(t, writer.Flush(ctx, tx))
+
+			doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+			require.NoError(t, err)
+			defer doms.Close()
+			require.NoError(t, doms.InitBlockOverlay(tx))
+			var diffs [kv.DomainLen][]kv.DomainEntryDiff
+			diffs[tc.domain] = []kv.DomainEntryDiff{
+				{Key: diffKey(key, 2), Value: tc.middle},
+				{Key: diffKey(key, 1), Value: tc.oldestDiff},
+			}
+			doms.Unwind(16, &diffs)
+
+			acc := notifications.NewAccumulator()
+			acc.StartChange(makeHeader(1, common.Hash{}), nil, true)
+			require.NoError(t, stateChangesStreamAtUnwind(ctx, doms.BlockOverlay(), 1, 16, acc, &diffs, logger))
+			require.Len(t, acc.Changes(), 1)
+			require.Len(t, acc.Changes()[0].Changes, 1)
+			change := acc.Changes()[0].Changes[0]
+			if tc.domain == kv.AccountsDomain {
+				require.Equal(t, tc.previous, change.Data)
+			} else {
+				require.Len(t, change.StorageChanges, 1)
+				require.Equal(t, loc, change.StorageChanges[0].Location)
+				require.Equal(t, tc.previous, change.StorageChanges[0].Data)
+			}
+		})
 	}
-	doms.Unwind(16, &diffs)
-
-	acc := notifications.NewAccumulator()
-	acc.StartChange(makeHeader(1, common.Hash{}), nil, true)
-	require.NoError(t, stateChangesStreamAtUnwind(ctx, tx, 1, 16, acc, &diffs, logger))
-	require.Len(t, acc.Changes(), 1)
-	require.Len(t, acc.Changes()[0].Changes, 1)
-	require.Equal(t, oldVal, acc.Changes()[0].Changes[0].Data)
 }
 
 type unwindHistoryErrorTx struct {

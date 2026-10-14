@@ -349,7 +349,7 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 			return nil, false, nil
 		}
 		value, found := values[key]
-		if !found {
+		if !found || value.Value == nil {
 			return nil, false, nil
 		}
 		if len(value.Value) == 0 {

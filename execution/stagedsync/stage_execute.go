@@ -243,6 +243,9 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 	accumulator *shards.Accumulator,
 	changeset *[kv.DomainLen][]kv.DomainEntryDiff, logger log.Logger,
 ) error {
+	if accumulator == nil && !dbg.TraceUnwinds {
+		return nil
+	}
 	var currentInc uint64
 
 	// TODO: why we don't call accumulator.ChangeCode???
@@ -276,13 +279,6 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 		if accumulator != nil {
 			accumulator.ChangeStorage(address, currentInc, location, bytes.Clone(v))
 		}
-		if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.StorageDomain)) {
-			if v == nil {
-				fmt.Printf("unwind (Block:%d,Tx:%d): storage [%x %x] => [empty]\n", blockUnwindTo, txUnwindTo, address, location)
-			} else {
-				fmt.Printf("unwind (Block:%d,Tx:%d): storage [%x %x] => [%x]\n", blockUnwindTo, txUnwindTo, address, location, v)
-			}
-		}
 		return nil
 	}
 
@@ -315,7 +311,7 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 				if accumulator == nil {
 					continue
 				}
-				// The pending unwind has not removed the discarded values from the database yet.
+				// Legacy diffs omit the previous value, and the pending unwind still leaves discarded database rows.
 				var err error
 				value, _, err = tx.GetAsOf(kv.AccountsDomain, key, txUnwindTo)
 				if err != nil {
@@ -327,9 +323,21 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 			}
 		}
 		storageDiffs := changeset[kv.StorageDomain]
+		// Full keys sort newer steps first; the accumulator keeps the last update per slot.
 		for _, entry := range storageDiffs {
 			key := common.ToBytesZeroCopy(entry.Key)
 			value := entry.Value
+			if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.StorageDomain)) {
+				address, location := key[:length.Addr], key[length.Addr:len(key)-8]
+				switch {
+				case value == nil:
+					fmt.Printf("unwind (Block:%d,Tx:%d): storage [%x %x] => [different step]\n", blockUnwindTo, txUnwindTo, address, location)
+				case len(value) == 0:
+					fmt.Printf("unwind (Block:%d,Tx:%d): storage [%x %x] => [empty]\n", blockUnwindTo, txUnwindTo, address, location)
+				default:
+					fmt.Printf("unwind (Block:%d,Tx:%d): storage [%x %x] => [%x]\n", blockUnwindTo, txUnwindTo, address, location, value)
+				}
+			}
 			if value == nil {
 				if accumulator == nil {
 					continue

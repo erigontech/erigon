@@ -250,7 +250,7 @@ func IncrementKey(tx RwTx, table string, k []byte) error {
 
 type DomainEntryDiff struct {
 	Key   string
-	Value []byte // nil means "delete only" (prev value was at a different step), non-nil means "restore this value"
+	Value []byte // nil is a legacy delete-only diff; non-nil restores the value (empty means absence)
 }
 
 // DomainDiff represents a domain of state changes.
@@ -273,10 +273,7 @@ func (d *DomainDiff) Len() int {
 	return len(d.prevValues)
 }
 
-// RecordDelta records a state change.
-// prevValue is the previous value at the key. If prevStep != step, the previous value lives
-// at a different step position in the DB and doesn't need restoring on unwind (just delete current).
-// We encode this as nil in prevValues. If prevStep == step, we store the actual prevValue.
+// DomainUpdate records the first previous value for a key and step, using an empty tombstone for absence.
 func (d *DomainDiff) DomainUpdate(k []byte, step Step, prevValue []byte) {
 	if d.prevValues == nil {
 		d.prevValues = make(map[string][]byte, 16)
