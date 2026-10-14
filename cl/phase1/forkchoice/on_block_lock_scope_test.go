@@ -127,12 +127,13 @@ func TestOnBlockResetsCachedHeadAfterNewPayload(t *testing.T) {
 	awaitSignal(t, elEntered, "NewPayload to start")
 
 	headCached := make(chan struct{})
+	var headErr error
 	go func() {
 		defer close(headCached)
-		_, _, err := store.GetHead(nil)
-		require.NoError(t, err)
+		_, _, headErr = store.GetHead(nil)
 	}()
 	awaitSignal(t, headCached, "GetHead to populate the head cache")
+	require.NoError(t, headErr)
 
 	store.mu.RLock()
 	cachedHead := store.headHash
@@ -731,13 +732,14 @@ func TestNewPayloadDoesNotWaitForTheLockWhileHoldingTheToken(t *testing.T) {
 	store.payloadValidationAdmission <- struct{}{}
 
 	var checked atomic.Bool
+	blockRoot := mustRoot(t, block)
 	locked, done := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(done)
 		store.mu.Lock()
 		close(locked)
 		_, _, _ = store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
-			mustRoot(t, block), func() error {
+			blockRoot, func() error {
 				checked.Store(true)
 				return nil
 			}, noDerivedHash, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)

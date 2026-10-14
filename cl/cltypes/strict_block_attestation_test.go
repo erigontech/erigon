@@ -19,7 +19,6 @@ package cltypes
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -50,5 +49,5 @@ func TestSignedBeaconBlockDecodeSSZStrictRejectsNestedAttestationOffsetPastBuffe
 
 	decoded := NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
 	err = decoded.DecodeSSZStrict(encoded, int(clparams.GloasVersion))
-	require.True(t, errors.Is(err, ssz.ErrBadOffset), err)
+	require.ErrorIs(t, err, ssz.ErrBadOffset, err)
 }
