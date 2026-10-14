@@ -432,6 +432,9 @@ type Message struct {
 	dynamicFeeArgs   bool
 
 	skipExecutionGasCap bool
+
+	// txType is set only for registered transaction types.
+	txType byte
 }
 
 func NewMessage(from accounts.Address, to accounts.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
@@ -508,6 +511,14 @@ func (m *Message) DynamicFeeArgs() bool { return m.dynamicFeeArgs }
 
 func (m *Message) SetDynamicFeeArgs(dynamicFeeArgs bool) {
 	m.dynamicFeeArgs = dynamicFeeArgs
+}
+
+// TxType returns the registered transaction type the message was built
+// from, or zero.
+func (m *Message) TxType() byte { return m.txType }
+
+func (m *Message) SetTxType(txType byte) {
+	m.txType = txType
 }
 
 func (m *Message) IsFree() bool { return m.isFree }

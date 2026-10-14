@@ -73,6 +73,12 @@ func RegisterTxType(id byte, spec TxTypeSpec) {
 	txTypeRegistry[id] = spec
 }
 
+// IsRegisteredTxType reports whether id was registered with RegisterTxType.
+func IsRegisteredTxType(id byte) bool {
+	_, ok := registeredTxType(id)
+	return ok
+}
+
 func registeredTxType(id byte) (TxTypeSpec, bool) {
 	txTypeRegistryMu.RLock()
 	defer txTypeRegistryMu.RUnlock()

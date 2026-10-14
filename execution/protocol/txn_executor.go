@@ -202,9 +202,22 @@ func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 		}
 		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 	}
+	hook := messageHook(msg)
+	if hook != nil {
+		if err := hook.BeforeExecute(evm.IntraBlockState(), msg); err != nil {
+			return nil, err
+		}
+	}
 	st := NewTxnExecutor(evm, msg, gp)
 	st.noFeeBurnAndTip = noFeeBurnAndTip
-	return st.Execute(refunds, gasBailout)
+	res, err := st.Execute(refunds, gasBailout)
+	if err != nil || hook == nil {
+		return res, err
+	}
+	if err := hook.AfterExecute(evm.IntraBlockState(), msg, res.Failed()); err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
 func ApplyMessageNoFeeBurnOrTip(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, engine rules.EngineReader) (*evmtypes.ExecutionResult, error) {
