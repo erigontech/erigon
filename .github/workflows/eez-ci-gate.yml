@@ -118,8 +118,9 @@ jobs:
       contents: read
       actions: write
 
-  # Named ci-gate so ci-gate-check.sh excludes this job from its own report.
-  ci-gate:
+  # Not ci-gate: main requires that check, and two jobs of that name on one
+  # commit make it ambiguous. ci-gate-check.sh excludes this job by GITHUB_JOB.
+  eez-ci-gate:
     if: always()
     needs:
       - tier
