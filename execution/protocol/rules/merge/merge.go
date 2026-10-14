@@ -68,17 +68,33 @@ var (
 type Merge struct {
 	eth1Engine rules.Engine // Original rules engine used in eth1, e.g. ethash
 
+	optionalRequestSources bool
+
 	// Reusable buffer for collecting logs in Finalize - protected by logsBufMu
 	logsBufMu sync.Mutex
 	logsBuf   types.Logs
 }
 
+// Option configures a Merge engine.
+type Option func(*Merge)
+
+// WithOptionalRequestSources is for chains without a beacon chain: an unset
+// deposit contract and request contracts without code yield no requests, as
+// an empty system call does in reth, instead of invalidating the block.
+func WithOptionalRequestSources() Option {
+	return func(s *Merge) { s.optionalRequestSources = true }
+}
+
 // New creates a new instance of the Merge Engine with the given embedded eth1 engine.
-func New(eth1Engine rules.Engine) *Merge {
+func New(eth1Engine rules.Engine, opts ...Option) *Merge {
 	if _, ok := eth1Engine.(*Merge); ok {
 		panic("nested rules engine")
 	}
-	return &Merge{eth1Engine: eth1Engine}
+	s := &Merge{eth1Engine: eth1Engine}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // InnerEngine returns the embedded eth1 rules engine.
@@ -223,7 +239,10 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 			}
 			allLogs = append(allLogs, rec.Logs...)
 		}
-		depositReqs, err := misc.ParseDepositLogs(allLogs, config.DepositContract)
+		var depositReqs *types.FlatRequest
+		if !s.optionalRequestSources || config.DepositContract != (common.Address{}) {
+			depositReqs, err = misc.ParseDepositLogs(allLogs, config.DepositContract)
+		}
 		if reuseBuffer {
 			s.logsBuf = allLogs // save back (might have grown)
 			s.logsBufMu.Unlock()
@@ -234,14 +253,14 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		if depositReqs != nil {
 			rs = append(rs, *depositReqs)
 		}
-		withdrawalReq, err := misc.DequeueWithdrawalRequests7002(syscall, state, config.GetWithdrawalRequestContract())
+		withdrawalReq, err := s.dequeueRequests(misc.DequeueWithdrawalRequests7002, syscall, state, config.GetWithdrawalRequestContract())
 		if err != nil {
 			return nil, err
 		}
 		if withdrawalReq != nil {
 			rs = append(rs, *withdrawalReq)
 		}
-		consolidations, err := misc.DequeueConsolidationRequests7251(syscall, state, config.GetConsolidationRequestContract())
+		consolidations, err := s.dequeueRequests(misc.DequeueConsolidationRequests7251, syscall, state, config.GetConsolidationRequestContract())
 		if err != nil {
 			return nil, err
 		}
@@ -251,7 +270,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 
 		if config.IsAmsterdam(header.Time) {
 			// EIP-8282
-			builderDepositReq, err := misc.DequeueBuilderDepositRequests(syscall, state, config.GetBuilderDepositContract())
+			builderDepositReq, err := s.dequeueRequests(misc.DequeueBuilderDepositRequests, syscall, state, config.GetBuilderDepositContract())
 			if err != nil {
 				return nil, err
 			}
@@ -260,7 +279,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 			}
 
 			// EIP-8282
-			builderExitReq, err := misc.DequeueBuilderExitRequests(syscall, state, config.GetBuilderExitContract())
+			builderExitReq, err := s.dequeueRequests(misc.DequeueBuilderExitRequests, syscall, state, config.GetBuilderExitContract())
 			if err != nil {
 				return nil, err
 			}
@@ -277,6 +296,21 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 	}
 
 	return rs, nil
+}
+
+type requestDequeuer func(rules.SystemCall, *state.IntraBlockState, accounts.Address) (*types.FlatRequest, error)
+
+func (s *Merge) dequeueRequests(dequeue requestDequeuer, syscall rules.SystemCall, ibs *state.IntraBlockState, contract accounts.Address) (*types.FlatRequest, error) {
+	if s.optionalRequestSources {
+		codeSize, err := ibs.GetCodeSize(contract)
+		if err != nil {
+			return nil, err
+		}
+		if codeSize == 0 {
+			return nil, nil
+		}
+	}
+	return dequeue(syscall, ibs, contract)
 }
 
 func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,

@@ -18,6 +18,7 @@ package merge
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -324,4 +325,43 @@ func TestInitializeTracesHistoryStorageCall(t *testing.T) {
 	}
 	require.NoError(t, New(nil).Initialize(chainConfig, readerMock{config: chainConfig}, header, &intraBlockState, syscall, log.New(), &tracer))
 	require.Equal(t, []string{"start", "call", "end"}, callOrder)
+}
+
+func TestFinalizeOptionalRequestSources(t *testing.T) {
+	chainConfig := chain.TestChainOsakaConfig.Copy()
+	chainConfig.DepositContract = common.Address{}
+	requestsHash := empty.RequestsHash
+	header := &types.Header{Difficulty: *ProofOfStakeDifficulty, Time: 1, RequestsHash: &requestsHash}
+	logger := log.New()
+	finalize := func(engine *Merge, ibs *state.IntraBlockState, syscall rules.SystemCall) (types.FlatRequests, error) {
+		return engine.Finalize(chainConfig, header, ibs, nil, nil, nil,
+			consensuschain.NewReader(chainConfig, nil, nil, logger), syscall, false, logger)
+	}
+	noCall := func(contract accounts.Address, _ []byte) ([]byte, error) {
+		return nil, fmt.Errorf("unexpected system call to %x", contract)
+	}
+
+	var eth1Engine rules.Engine
+	_, err := finalize(New(eth1Engine), state.New(state.NewNoopReader()), noCall)
+	require.ErrorContains(t, err, "Empty Code")
+
+	optional := New(eth1Engine, WithOptionalRequestSources())
+	requests, err := finalize(optional, state.New(state.NewNoopReader()), noCall)
+	require.NoError(t, err)
+	require.Empty(t, requests)
+	require.Equal(t, empty.RequestsHash, *requests.Hash())
+
+	// A request contract with code is still called.
+	ibs := state.New(state.NewNoopReader())
+	withdrawals := chainConfig.GetWithdrawalRequestContract()
+	require.NoError(t, ibs.SetCode(withdrawals, []byte{0x00}, tracing.CodeChangeUnspecified))
+	header.RequestsHash = nil
+	requests, err = finalize(optional, ibs, func(contract accounts.Address, _ []byte) ([]byte, error) {
+		if contract != withdrawals {
+			return nil, fmt.Errorf("unexpected system call to %x", contract)
+		}
+		return []byte{1}, nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, types.FlatRequests{{Type: types.WithdrawalRequestType, RequestData: []byte{1}}}, requests)
 }
