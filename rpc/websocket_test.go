@@ -95,7 +95,7 @@ func TestWebsocketOriginCheck(t *testing.T) {
 func TestWebsocketOriginCheckDoesNotLeakGoroutines(t *testing.T) {
 	logger := log.New()
 	validate := wsHandshakeValidator([]string{"http://localhost", "http://localhost:3000", "localhost"}, logger)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	req.Header.Set("Origin", "http://localhost:3000")
 
 	before := runtime.NumGoroutine()

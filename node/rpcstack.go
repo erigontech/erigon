@@ -134,17 +134,38 @@ func NewWSOriginHandler(allowedOrigins []string, next http.Handler) http.Handler
 }
 
 func newCorsHandler(srv http.Handler, allowedOrigins []string) http.Handler {
-	// disable CORS support if user has not specified a custom CORS configuration
-	if len(allowedOrigins) == 0 {
-		return srv
+	var c *cors.Cors
+	next := srv
+	// CORS support stays disabled if the user has not specified a custom CORS configuration
+	if len(allowedOrigins) > 0 {
+		c = cors.New(cors.Options{
+			AllowedOrigins: allowedOrigins,
+			AllowedMethods: []string{http.MethodPost, http.MethodGet},
+			AllowedHeaders: []string{"*"},
+			MaxAge:         600,
+		})
+		next = c.Handler(srv)
 	}
-	c := cors.New(cors.Options{
-		AllowedOrigins: allowedOrigins,
-		AllowedMethods: []string{http.MethodPost, http.MethodGet},
-		AllowedHeaders: []string{"*"},
-		MaxAge:         600,
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && fromOtherSite(r) && !(c != nil && r.Header.Get("Origin") != "" && c.OriginAllowed(r)) {
+			http.Error(w, "cross-site GET requests are not allowed", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
-	return c.Handler(srv)
+}
+
+// fromOtherSite reports whether a browser sent r on behalf of another site's page. A GET needs no
+// CORS preflight, so such a page could otherwise call any method through the query.
+func fromOtherSite(r *http.Request) bool {
+	switch r.Header.Get("Sec-Fetch-Site") {
+	case "same-origin", "none":
+		return false
+	case "":
+		return r.Header.Get("Origin") != ""
+	default:
+		return true
+	}
 }
 
 // virtualHostHandler is a handler which validates the Host-header of incoming requests.
