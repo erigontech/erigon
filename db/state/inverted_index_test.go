@@ -1296,6 +1296,61 @@ func TestInvertedIndexDisabledDiscardsWrites(t *testing.T) {
 	}
 }
 
+// A cached miss is stored as found=0. txNum=0 also satisfies txNum<=found, so
+// testing the hit first turns the cached miss into a hit at txNum 0.
+func TestSeekInFilesCacheMissAtTxNumZero(t *testing.T) {
+	t.Parallel()
+
+	db, h, txs := filledHistory(t, false, log.New())
+	collateAndMergeHistory(t, db, h, txs, true)
+
+	hc := h.beginForTests()
+	defer hc.Close()
+
+	absent := []byte("no-such-key-at-all")
+	ok, _, err := hc.iit.seekInFiles(absent, 0)
+	require.NoError(t, err)
+	require.False(t, ok)
+	ok, _, err = hc.iit.seekInFiles(absent, 0) // served from the seek cache
+	require.NoError(t, err)
+	require.False(t, ok)
+}
+
+// The seek cache is keyed on the first half of the key hash. An entry that
+// another key left under the same half must not answer for this one.
+func TestSeekInFilesCacheIgnoresOtherKeysEntry(t *testing.T) {
+	t.Parallel()
+
+	db, h, txs := filledHistory(t, false, log.New())
+	collateAndMergeHistory(t, db, h, txs, true)
+
+	hc := h.beginForTests()
+	defer hc.Close()
+	iit := hc.iit
+
+	item := iit.files[0]
+	g := iit.dataReader(item.src.decompressor)
+	g.Reset(0)
+	key, _ := g.Next(nil)
+	encodedSeq, _ := g.Next(nil)
+	txNum := multiencseq.ReadMultiEncSeq(item.startTxNum, encodedSeq).Min()
+
+	absent := []byte("no-such-key-at-all")
+	ok, _, err := iit.seekInFiles(absent, txNum)
+	require.NoError(t, err)
+	require.False(t, ok)
+	absentHi, _ := iit.hashKey(absent)
+	miss, ok := iit.seekInFilesCache.Get(absentHi)
+	require.True(t, ok)
+	hi, _ := iit.hashKey(key)
+	iit.seekInFilesCache.Add(hi, miss) // what a key colliding on hi leaves behind
+
+	ok, found, err := iit.seekInFiles(key, txNum)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, txNum, found)
+}
+
 type prefetchIndexTx struct {
 	kv.RwTx
 	table  string

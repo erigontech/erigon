@@ -105,6 +105,7 @@ type IISeekInFilesCache struct {
 }
 type iiSeekInFilesCacheItem struct {
 	requested, found uint64
+	lo               uint64 // second half of the key hash: the map is keyed on the first half alone
 }
 
 func NewIISeekInFilesCache() *IISeekInFilesCache {
