@@ -423,7 +423,6 @@ func openDirtyAccessor(mask string, dirEntries []string, dirPath string, ver ver
 }
 
 func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) error {
-	const tag = "Domain.openDirtyFiles"
 	var invalidFileItems []*FilesItem
 	iter := d.dirtyFiles.Iter()
 	for ok := iter.First(); ok; ok = iter.Next() {
@@ -433,32 +432,8 @@ func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) error 
 			return ctx.Err()
 		default:
 		}
-		item := iter.Item()
-		fromStep, toStep := item.StepRange(d.stepSize)
-		if item.decompressor == nil {
-			if !openDirtyDataFile(item, d.kvFileNameMask(fromStep, toStep), dirEntries, d.dirs.SnapDomain, d.FileVersion.DataKV, tag, d.logger) {
-				invalidFileItems = append(invalidFileItems, item)
-				continue
-			}
-		}
-
-		if item.index == nil && d.Accessors.Has(statecfg.AccessorHashMap) {
-			openDirtyAccessor(d.kviAccessorFileNameMask(fromStep, toStep), dirEntries, d.dirs.SnapDomain, d.FileVersion.AccessorKVI, func(fPath string) (err error) {
-				item.index, err = d.openHashMapAccessor(fPath)
-				return err
-			}, tag, d.logger)
-		}
-		if item.bindex == nil && d.Accessors.Has(statecfg.AccessorBTree) {
-			openDirtyAccessor(d.kvBtAccessorFileNameMask(fromStep, toStep), dirEntries, d.dirs.SnapDomain, d.FileVersion.AccessorBT, func(fPath string) (err error) {
-				item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(fPath, d.dataReader(item.decompressor))
-				return err
-			}, tag, d.logger)
-		}
-		if item.existence == nil && d.Accessors.Has(statecfg.AccessorExistence) {
-			openDirtyAccessor(d.kvExistenceIdxFileNameMask(fromStep, toStep), dirEntries, d.dirs.SnapDomain, d.FileVersion.AccessorKVEI, func(fPath string) (err error) {
-				item.existence, err = d.openExistenceFilter(fPath)
-				return err
-			}, tag, d.logger)
+		if item := iter.Item(); !d.openDirtyItem(item, dirEntries) {
+			invalidFileItems = append(invalidFileItems, item)
 		}
 	}
 	iter.Release()
@@ -466,6 +441,38 @@ func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) error 
 	d.dirtyFiles.CloseItems(invalidFileItems) // just close, not remove from disk
 
 	return nil
+}
+
+// openDirtyItem opens the item's data file and accessors that are not open yet.
+// A false result means the data file is unusable.
+func (d *Domain) openDirtyItem(item *FilesItem, dirEntries []string) bool {
+	const tag = "Domain.openDirtyFiles"
+	fromStep, toStep := item.StepRange(d.stepSize)
+	if item.decompressor == nil {
+		if !openDirtyDataFile(item, d.kvFileNameMask(fromStep, toStep), dirEntries, d.dirs.SnapDomain, d.FileVersion.DataKV, tag, d.logger) {
+			return false
+		}
+	}
+
+	if item.index == nil && d.Accessors.Has(statecfg.AccessorHashMap) {
+		openDirtyAccessor(d.kviAccessorFileNameMask(fromStep, toStep), dirEntries, d.dirs.SnapDomain, d.FileVersion.AccessorKVI, func(fPath string) (err error) {
+			item.index, err = d.openHashMapAccessor(fPath)
+			return err
+		}, tag, d.logger)
+	}
+	if item.bindex == nil && d.Accessors.Has(statecfg.AccessorBTree) {
+		openDirtyAccessor(d.kvBtAccessorFileNameMask(fromStep, toStep), dirEntries, d.dirs.SnapDomain, d.FileVersion.AccessorBT, func(fPath string) (err error) {
+			item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(fPath, d.dataReader(item.decompressor))
+			return err
+		}, tag, d.logger)
+	}
+	if item.existence == nil && d.Accessors.Has(statecfg.AccessorExistence) {
+		openDirtyAccessor(d.kvExistenceIdxFileNameMask(fromStep, toStep), dirEntries, d.dirs.SnapDomain, d.FileVersion.AccessorKVEI, func(fPath string) (err error) {
+			item.existence, err = d.openExistenceFilter(fPath)
+			return err
+		}, tag, d.logger)
+	}
+	return true
 }
 
 func (h *History) openDirtyFiles(ctx context.Context, dataEntries, accessorEntries []string) error {
