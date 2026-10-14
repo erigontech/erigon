@@ -229,3 +229,21 @@ func TestWarmBALCommitmentUsesAvailableBranchCache(t *testing.T) {
 	require.Positive(t, tx.calls)
 	require.True(t, tx.opts.BranchCache())
 }
+
+func TestBranchPrefetchReadsTouchedKeysThroughBranchCache(t *testing.T) {
+	cache := commitment.NewBranchCache(100)
+	defer cache.Close()
+	tx := &commitmentBranchLookupTx{
+		data:  []byte("database"),
+		step:  9,
+		aggTx: commitmentBranchCacheProvider{cache: cache},
+	}
+	prefetch := StartBranchPrefetch(t.Context(), &singleTxRoDB{tx: tx}, 1)
+	address := common.Address{19: 2}
+	prefetch.WarmKey(commitment.KeyToHexNibbleHash(address[:]), 0, 0)
+	require.NoError(t, prefetch.WaitBufferFree(0))
+	prefetch.CloseAndWait()
+
+	require.Positive(t, tx.calls, "a touched key's path is read")
+	require.True(t, tx.opts.BranchCache(), "reads fill the shared BranchCache the calculator consults")
+}

@@ -82,6 +82,8 @@ models:
       - github.com/99designs/gqlgen/graphql.Uint64
   Block:
     fields:
+      parent:
+        resolver: true
       transactionAt:
         resolver: true
       account:

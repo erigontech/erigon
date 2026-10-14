@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/golang/snappy"
 	"github.com/spf13/afero"
@@ -1905,4 +1906,68 @@ func writeEnvelopeTestFile(t *testing.T, fs afero.Fs, root common.Hash, version 
 	require.NoError(t, err)
 	require.NoError(t, writer.Close())
 	require.NoError(t, afero.WriteFile(fs, getEnvelopeFilename(root), compressed.Bytes(), 0o644))
+}
+
+func TestPreviousHeadFastPathUsesAuthoritativePriorRoot(t *testing.T) {
+	manager := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	graph := &forkGraphDisk{syncedData: manager}
+
+	first := state.New(&clparams.MainnetBeaconConfig)
+	recomputedRoot, err := first.BlockRoot()
+	require.NoError(t, err)
+	first.SetPreviousStateRoot(common.Hash{0xaa, 0xbb, 0xcc})
+	firstRoot, err := first.BlockRoot()
+	require.NoError(t, err)
+	require.NotEqual(t, recomputedRoot, firstRoot, "fixture must make previousStateRoot authoritative, not recomputable")
+
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(first, firstRoot))
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(state.New(&clparams.MainnetBeaconConfig), common.Hash{0x02}))
+
+	out, ok, err := graph.useCachedStateIfPossible(firstRoot, nil)
+	require.NoError(t, err)
+	require.True(t, ok, "previous-head fast path must resolve the authoritative prior root")
+	outRoot, err := out.BlockRoot()
+	require.NoError(t, err)
+	require.Equal(t, firstRoot, outRoot)
+
+	_, ok, err = graph.useCachedStateIfPossible(recomputedRoot, nil)
+	require.NoError(t, err)
+	require.False(t, ok)
+}
+
+type publishOnHeadRoot struct {
+	*synced_data.SyncedDataManager
+	publish func()
+}
+
+func (s *publishOnHeadRoot) HeadRoot() common.Hash {
+	root := s.SyncedDataManager.HeadRoot()
+	if s.publish != nil {
+		s.publish()
+		s.publish = nil
+	}
+	return root
+}
+
+func TestHeadFastPathRechecksRootAfterHeadMoves(t *testing.T) {
+	manager := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	first := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, first.SetSlot(1))
+	firstRoot, err := first.BlockRoot()
+	require.NoError(t, err)
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(first, firstRoot))
+
+	second := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, second.SetSlot(2))
+	graph := &forkGraphDisk{syncedData: &publishOnHeadRoot{
+		SyncedDataManager: manager,
+		publish: func() {
+			require.NoError(t, manager.OnHeadStateWithBlockRoot(second, common.Hash{0x02}))
+		},
+	}}
+
+	out, ok, err := graph.useCachedStateIfPossible(firstRoot, nil)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, uint64(1), out.Slot())
 }

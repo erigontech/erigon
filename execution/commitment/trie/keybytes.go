@@ -20,10 +20,7 @@
 package trie
 
 import (
-	"io"
-
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
-	"github.com/erigontech/erigon/execution/rlp"
 )
 
 // Keybytes represent a packed encoding of hex sequences
@@ -33,15 +30,6 @@ type Keybytes struct {
 	Data        []byte
 	Odd         bool
 	Terminating bool
-}
-
-// Nibbles returns the number of nibbles.
-func (x *Keybytes) Nibbles() int {
-	n := len(x.Data) * 2
-	if x.Odd {
-		n--
-	}
-	return n
 }
 
 // ToHex translates from KEYBYTES to HEX encoding.
@@ -92,19 +80,4 @@ func CompactToKeybytes(c []byte) Keybytes {
 	}
 
 	return k
-}
-
-// EncodeRLP implements rlp.Encoder and encodes Keybytes in the COMPACT encoding.
-func (x *Keybytes) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, x.ToCompact())
-}
-
-// DecodeRLP implements rlp.Decoder and decodes Keybytes from the COMPACT encoding.
-func (x *Keybytes) DecodeRLP(s *rlp.Stream) error {
-	var compact []byte
-	if err := s.Decode(&compact); err != nil {
-		return err
-	}
-	*x = CompactToKeybytes(compact)
-	return nil
 }

@@ -9,7 +9,6 @@ import {test} from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-// import.meta.dirname would need Node 20.11; package.json declares >=20.0.
 import {fileURLToPath} from 'node:url'
 import {fromMarkdown} from 'mdast-util-from-markdown'
 import {gfm} from 'micromark-extension-gfm'

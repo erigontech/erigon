@@ -163,7 +163,9 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	// Figure out the prestate alloc
 	if allocStr == stdinSelector || envStr == stdinSelector || txStr == stdinSelector {
 		decoder := json.NewDecoder(os.Stdin)
-		decoder.Decode(inputData) //nolint:errcheck
+		if err := decoder.Decode(inputData); err != nil {
+			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling stdin: %w", err))
+		}
 	}
 	if allocStr != stdinSelector {
 		inFile, err1 := os.Open(allocStr)
@@ -192,6 +194,9 @@ func Main(_ context.Context, ctx *cli.Command) error {
 			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling env-file: %w", err))
 		}
 		inputData.Env = &env
+	}
+	if inputData.Env == nil {
+		return NewError(ErrorJson, errors.New("missing 'env' section in input"))
 	}
 	prestate.Env = *inputData.Env
 

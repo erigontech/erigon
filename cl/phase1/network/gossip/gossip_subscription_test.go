@@ -27,6 +27,7 @@ import (
 	pb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 )
@@ -493,4 +494,37 @@ func (s *TopicSubscriptionsTestSuite) TestConcurrentAccess() {
 
 func TestTopicSubscriptions(t *testing.T) {
 	suite.Run(t, new(TopicSubscriptionsTestSuite))
+}
+
+func TestTopicSubscriptionsGetTopicReturnsSnapshot(t *testing.T) {
+	topicHandle := new(pubsub.Topic)
+	subscriptions := &TopicSubscriptions{
+		subs: map[string]*TopicSubscription{
+			"topic": {topic: topicHandle},
+		},
+	}
+
+	result := subscriptions.GetTopic("topic")
+	subscriptions.mutex.Lock()
+	subscriptions.subs["topic"].topic = nil
+	delete(subscriptions.subs, "topic")
+	subscriptions.mutex.Unlock()
+
+	require.Same(t, topicHandle, result)
+}
+
+func TestTopicSubscriptionsGetReturnsSnapshot(t *testing.T) {
+	expiry := time.Now().Add(time.Hour)
+	subscriptions := &TopicSubscriptions{
+		subs: map[string]*TopicSubscription{
+			"topic": {expiry: expiry},
+		},
+	}
+
+	result := subscriptions.Get("topic")
+	subscriptions.mutex.Lock()
+	subscriptions.subs["topic"].expiry = expiry.Add(time.Hour)
+	subscriptions.mutex.Unlock()
+
+	require.Equal(t, expiry, result.expiry)
 }

@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -11,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
@@ -54,4 +56,33 @@ func TestGasSelfdestructWithRefunds_StillRefundsAndRecordsRead(t *testing.T) {
 	_, tracked := reads.GetSelfDestruct(self)
 	require.True(t, tracked)
 	require.Equal(t, params.SelfdestructRefundGas, ibs.GetRefund())
+}
+
+// A zero-value CALL prices the target without reading its emptiness, so gas
+// records no read of it; the target is still a BAL access either way.
+func TestStatefulGasCallReadsEmptinessOnlyWithValue(t *testing.T) {
+	t.Parallel()
+	target := accounts.InternAddress(common.HexToAddress("0x5555555555555555555555555555555555555555"))
+	for _, transfersValue := range []bool{false, true} {
+		ibs := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
+		t.Cleanup(func() { ibs.Release(false) })
+		ibs.SetTxContext(1, 5)
+		ibs.StartAccessRecording()
+		evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, Config{})
+		scope := &CallContext{}
+		targetVal := target.Value()
+		scope.Stack.push(*new(uint256.Int).SetBytes(targetVal[:]))
+		scope.Stack.push(uint256.Int{})
+		_, err := statefulGasCall(evm, scope, mdgas.MdGasCost{}, mdgas.MdGas{Execution: 1_000_000}, transfersValue)
+		require.NoError(t, err)
+
+		reads := ibs.VersionedReads()
+		_, read := reads.GetAddress(target)
+		require.Equal(t, transfersValue, read, "transfersValue=%v", transfersValue)
+
+		var io state.VersionedIO
+		ibs.MergeTxIOInto(&io, ibs.VersionedWrites())
+		require.True(t, slices.ContainsFunc(io.AsBlockAccessList(), func(a types.AccountChanges) bool { return a.Address == target.Value() }),
+			"transfersValue=%v: the target must stay a BAL access", transfersValue)
+	}
 }
