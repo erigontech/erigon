@@ -187,7 +187,7 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.C
 func (f *forkGraphDisk) HasEnvelope(blockRoot common.Hash) bool {
 	f.lifecycleMu.RLock()
 	defer f.lifecycleMu.RUnlock()
-	if !f.retainedBlock(blockRoot) {
+	if !f.retainedBlock(blockRoot) || f.IsEnvelopeRejected(blockRoot) {
 		return false
 	}
 	if _, invalid := f.invalidEnvelopes.Load(blockRoot); invalid {
@@ -195,6 +195,26 @@ func (f *forkGraphDisk) HasEnvelope(blockRoot common.Hash) bool {
 	}
 	_, ok := f.envelopeExists.Load(blockRoot)
 	return ok
+}
+
+func (f *forkGraphDisk) RejectEnvelope(blockRoot common.Hash) bool {
+	f.lifecycleMu.RLock()
+	defer f.lifecycleMu.RUnlock()
+	if !f.retainedBlock(blockRoot) {
+		return false
+	}
+	f.stateDumpLock.Lock()
+	defer f.stateDumpLock.Unlock()
+	f.rejectedEnvelopes.Store(blockRoot, struct{}{})
+	f.envelopeExists.Delete(blockRoot)
+	f.ClearPayloadAccepted(blockRoot)
+	f.MarkPayloadUnavailable(blockRoot)
+	return true
+}
+
+func (f *forkGraphDisk) IsEnvelopeRejected(blockRoot common.Hash) bool {
+	_, rejected := f.rejectedEnvelopes.Load(blockRoot)
+	return rejected
 }
 
 // ReadEnvelopeFromDisk reads an execution payload envelope from disk.
@@ -213,6 +233,9 @@ func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *c
 func (f *forkGraphDisk) readEnvelopeFromDiskLocked(blockRoot common.Hash) (envelope *cltypes.SignedExecutionPayloadEnvelope, err error) {
 	var file afero.File
 	var corrupt bool
+	if f.IsEnvelopeRejected(blockRoot) {
+		return nil, fmt.Errorf("execution payload envelope rejected for root %x", blockRoot)
+	}
 	if _, invalid := f.invalidEnvelopes.Load(blockRoot); invalid {
 		return nil, fmt.Errorf("cannot read known invalid envelope for root %x", blockRoot)
 	}
@@ -356,6 +379,10 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 	}
 	f.stateDumpLock.Lock()
 	defer f.stateDumpLock.Unlock()
+
+	if f.IsEnvelopeRejected(blockRoot) {
+		return fmt.Errorf("execution payload envelope rejected for root %x", blockRoot)
+	}
 
 	// Populate in-memory cache on successful write
 	defer func() {

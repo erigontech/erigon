@@ -691,6 +691,9 @@ func validatePayloadValidationResult(payloadStatus execution_client.PayloadStatu
 }
 
 func (f *ForkChoiceStore) rejectKnownInvalidPayloadStatusLocked(payloadStatus execution_client.PayloadStatus, blockRoot, executionBlockHash common.Hash) error {
+	if f.IsEnvelopeRejected(blockRoot) {
+		return fmt.Errorf("%w: envelope previously rejected for root %x", ErrInvalidExecutionPayloadEnvelope, blockRoot)
+	}
 	if payloadStatus == execution_client.PayloadStatusInvalidated || !f.payloadInvalidatedLocked(blockRoot, executionBlockHash) {
 		return nil
 	}
@@ -747,6 +750,9 @@ func (f *ForkChoiceStore) applyTerminalPayloadValidationResultLocked(
 }
 
 func (f *ForkChoiceStore) refreshEnvelopeBlockLocked(beaconBlockRoot common.Hash) (*cltypes.SignedBeaconBlock, error) {
+	if f.IsEnvelopeRejected(beaconBlockRoot) {
+		return nil, fmt.Errorf("%w: envelope previously rejected for root %x", ErrInvalidExecutionPayloadEnvelope, beaconBlockRoot)
+	}
 	block, ok := f.forkGraph.GetBlock(beaconBlockRoot)
 	if !ok || block == nil {
 		return nil, fmt.Errorf("%w: block disappeared during payload validation for beacon_block_root %v", ErrIgnore, beaconBlockRoot)
@@ -1031,6 +1037,9 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 	beaconBlockRoot := envelope.BeaconBlockRoot
 
 	// Skip if envelope already processed and persisted
+	if f.IsEnvelopeRejected(beaconBlockRoot) {
+		return false, fmt.Errorf("%w: envelope previously rejected for root %x", ErrInvalidExecutionPayloadEnvelope, beaconBlockRoot)
+	}
 	if f.forkGraph.HasEnvelope(beaconBlockRoot) {
 		return false, nil
 	}
@@ -1299,6 +1308,10 @@ func (f *ForkChoiceStore) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvel
 	}
 
 	f.mu.Lock()
+	if f.IsEnvelopeRejected(blockRoot) {
+		f.mu.Unlock()
+		return fmt.Errorf("%w: envelope previously rejected for root %x", ErrInvalidExecutionPayloadEnvelope, blockRoot)
+	}
 	applied := true
 	if f.forkGraph.HasEnvelope(blockRoot) {
 		persisted, readErr := f.forkGraph.ReadEnvelopeFromDisk(blockRoot)
@@ -1707,6 +1720,9 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 	envelope := signedEnvelope.Message
 	beaconBlockRoot := envelope.BeaconBlockRoot
 
+	if f.IsEnvelopeRejected(beaconBlockRoot) {
+		return false, fmt.Errorf("%w: envelope previously rejected for root %x", ErrInvalidExecutionPayloadEnvelope, beaconBlockRoot)
+	}
 	if f.forkGraph.HasEnvelope(beaconBlockRoot) {
 		return false, nil
 	}

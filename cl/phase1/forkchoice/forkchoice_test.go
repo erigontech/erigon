@@ -994,6 +994,9 @@ func (g *getFinalizedExecutionHashForkGraph) IsBlockInvalid(common.Hash) bool {
 	return false
 }
 
+func (g *getFinalizedExecutionHashForkGraph) IsEnvelopeRejected(common.Hash) bool { return false }
+func (g *getFinalizedExecutionHashForkGraph) RejectEnvelope(common.Hash) bool     { return false }
+
 func (g *getFinalizedExecutionHashForkGraph) MarkPayloadUnavailable(common.Hash) {}
 func (g *getFinalizedExecutionHashForkGraph) MarkPayloadAvailable(common.Hash)   {}
 func (g *getFinalizedExecutionHashForkGraph) IsPayloadUnavailable(common.Hash) bool {

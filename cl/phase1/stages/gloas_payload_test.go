@@ -47,13 +47,17 @@ type selectedHeadEnvelopeTestStore struct {
 	envelopes             map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	onExecutionPayloadErr error
 	onExecutionPayload    func(*cltypes.SignedExecutionPayloadEnvelope) error
+	rejected              bool
 }
 
 type anchorEnvelopeTestStore struct {
 	root     common.Hash
 	state    *state2.CachingBeaconState
 	envelope *cltypes.SignedExecutionPayloadEnvelope
+	rejected bool
 }
+
+func (s *anchorEnvelopeTestStore) IsEnvelopeRejected(common.Hash) bool { return s.rejected }
 
 func (s *anchorEnvelopeTestStore) AnchorRoot() common.Hash {
 	return s.root
@@ -74,6 +78,20 @@ func (s *selectedHeadEnvelopeTestStore) HasEnvelope(root common.Hash) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.envelopes[root] != nil
+}
+
+func (s *selectedHeadEnvelopeTestStore) IsEnvelopeRejected(common.Hash) bool { return s.rejected }
+
+func TestWaitForSelectedHeadEnvelopeSkipsRejectedRoot(t *testing.T) {
+	store := &selectedHeadEnvelopeTestStore{rejected: true}
+	requests := 0
+	done := make(chan struct{})
+	waitForSelectedHeadEnvelope(t.Context(), store, func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+		requests++
+		return nil, nil
+	}, common.Hash{1}, time.Second, true, true, selectedHeadEnvelopeRequestHooks{done: func() { close(done) }})
+	<-done
+	require.Zero(t, requests)
 }
 
 func (s *selectedHeadEnvelopeTestStore) OnExecutionPayload(_ context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope, _, _ bool) error {
@@ -423,6 +441,10 @@ func TestChainTipAnchorEnvelopeRetriesAfterUnavailableResponse(t *testing.T) {
 	require.False(t, store.HasEnvelope(anchorRoot))
 	require.True(t, ensureAnchorEnvelopeForChild(context.Background(), store, recoverAnchor, child))
 	require.True(t, store.HasEnvelope(anchorRoot))
+	require.Equal(t, 2, requests)
+	store.envelope = nil
+	store.rejected = true
+	require.False(t, ensureAnchorEnvelopeForChild(t.Context(), store, recoverAnchor, child))
 	require.Equal(t, 2, requests)
 }
 
@@ -1181,16 +1203,35 @@ func TestRetryUnverifiedAnchorPayloadDoesNotCacheBlobMismatch(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, store.StoreAnchorEnvelope(anchorRoot, env))
 
-	retryUnverifiedAnchorPayload(t.Context(), &Cfg{
+	stageCfg := &Cfg{
 		beaconCfg:             beaconCfg,
 		forkChoice:            store,
 		executionClient:       engine,
 		gloasPayloadValidator: engine,
-	})
+	}
+	retryUnverifiedAnchorPayload(t.Context(), stageCfg)
+	retryUnverifiedAnchorPayload(t.Context(), stageCfg)
 
 	require.Equal(t, 1, engine.newPayloadCalls)
 	_, ok := store.GetRecentExecutionPayloadStatus(env.Message.Payload.BlockHash)
 	require.False(t, ok)
+	require.False(t, store.HasEnvelope(anchorRoot))
+	require.False(t, graph.IsBlockInvalid(anchorRoot))
+
+	t.Run("late validation", func(t *testing.T) {
+		status, retained := store.MarkPayloadStatusAndGasLimitIfRetained(anchorRoot, env.Message.Payload.BlockHash, execution_client.PayloadStatusValidated, env.Message.Payload.GasLimit)
+		require.EqualValues(t, execution_client.PayloadStatusNone, status)
+		require.False(t, retained)
+		require.True(t, graph.IsPayloadUnavailable(anchorRoot))
+	})
+	t.Run("redelivery", func(t *testing.T) {
+		err := store.OnExecutionPayload(t.Context(), env, false, false)
+		require.ErrorIs(t, err, forkchoice.ErrInvalidExecutionPayloadEnvelope)
+		err = store.StoreAnchorEnvelope(anchorRoot, env)
+		require.ErrorIs(t, err, forkchoice.ErrInvalidExecutionPayloadEnvelope)
+		err = store.ApplyLocalSelfBuildEnvelope(t.Context(), env)
+		require.ErrorIs(t, err, forkchoice.ErrInvalidExecutionPayloadEnvelope)
+	})
 }
 
 func TestDrainPendingGloasPayloadsRequeuesNotValidatedPayload(t *testing.T) {

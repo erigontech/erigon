@@ -74,6 +74,7 @@ type chainTipBatchForkGraph struct {
 	parentState *state2.CachingBeaconState
 	envelopesMu sync.RWMutex
 	envelopes   map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+	rejected    map[common.Hash]bool
 	added       map[common.Hash]int
 	insertOnAdd bool
 }
@@ -138,10 +139,34 @@ func (g *chainTipBatchForkGraph) GetCurrentJustifiedCheckpoint(root common.Hash)
 }
 
 func (g *chainTipBatchForkGraph) HasEnvelope(root common.Hash) bool {
+	if g.IsEnvelopeRejected(root) {
+		return false
+	}
 	g.envelopesMu.RLock()
 	defer g.envelopesMu.RUnlock()
 	_, ok := g.envelopes[root]
 	return ok || g.ForkGraph.HasEnvelope(root)
+}
+
+func (g *chainTipBatchForkGraph) RejectEnvelope(root common.Hash) bool {
+	if !g.IsBlockRetained(root) {
+		return false
+	}
+	g.envelopesMu.Lock()
+	defer g.envelopesMu.Unlock()
+	if g.rejected == nil {
+		g.rejected = make(map[common.Hash]bool)
+	}
+	g.rejected[root] = true
+	g.ClearPayloadAccepted(root)
+	g.MarkPayloadUnavailable(root)
+	return true
+}
+
+func (g *chainTipBatchForkGraph) IsEnvelopeRejected(root common.Hash) bool {
+	g.envelopesMu.RLock()
+	defer g.envelopesMu.RUnlock()
+	return g.rejected[root] || g.ForkGraph.IsEnvelopeRejected(root)
 }
 
 func (g *chainTipBatchForkGraph) ReadEnvelopeFromDisk(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
@@ -177,6 +202,8 @@ func (g *chainTipBatchForkGraph) WithRetainedBlock(root common.Hash, fn func(fun
 }
 
 func (s *storedParentPayloadTestStore) HasEnvelope(common.Hash) bool { return s.has }
+
+func (s *storedParentPayloadTestStore) RejectEnvelope(common.Hash) { s.has = false }
 
 func (s *storedParentPayloadTestStore) GetRecentExecutionPayloadStatusByRoot(common.Hash) (execution_client.PayloadStatus, bool) {
 	return s.status, s.statusFound
@@ -379,6 +406,34 @@ func TestVerifyUnverifiedGloasPayloadsDoesNotRecordTimeoutAsVerdict(t *testing.T
 	require.Equal(t, 2, engine.newPayloadCalls)
 	require.True(t, cfg.forkChoice.IsPayloadVerified(headRoot))
 	require.Zero(t, cfg.gloasVerificationCursor)
+}
+
+func TestVerifyUnverifiedGloasPayloadsRejectsBlobMismatch(t *testing.T) {
+	cfg, graph, headRoot, child, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	headBlock := graph.parents[headRoot]
+	delete(graph.parents, headRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
+	engine.newPayloadFn = func(context.Context, *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
+		return execution_client.PayloadStatusInvalidated, misc.ErrMismatchBlobHashes
+	}
+	pending := forkchoice.PendingELPayload{Block: headBlock, Envelope: graph.envelopes[headRoot]}
+	cfg.forkChoice.RequeuePendingELPayload(pending)
+
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+	drainPendingGloasPayloads(t.Context(), cfg)
+
+	require.Equal(t, 1, engine.newPayloadCalls)
+	require.False(t, cfg.forkChoice.HasEnvelope(headRoot))
+	require.False(t, graph.IsBlockInvalid(headRoot))
+	require.True(t, graph.IsPayloadUnavailable(headRoot))
+	_, found := cfg.forkChoice.GetRecentExecutionPayloadStatus(pending.Envelope.Message.Payload.BlockHash)
+	require.False(t, found)
+	cfg.forkChoice.RequeuePendingELPayload(pending)
+	require.Empty(t, cfg.forkChoice.DrainPendingELPayloads())
+	roots, _ := determineParentEnvelopeRoots(cfg, []*cltypes.SignedBeaconBlock{child})
+	require.Empty(t, roots)
 }
 
 func TestVerifyUnverifiedGloasPayloadsChecksDirectExtensionWithEmptyCursor(t *testing.T) {
@@ -864,6 +919,7 @@ func TestEnsureStoredParentPayloadAcceptedDoesNotCacheBlobMismatch(t *testing.T)
 		gloasPayloadValidator: engine,
 	}
 
+	require.False(t, ensureStoredParentPayloadAccepted(t.Context(), cfg, store, root, envelope))
 	require.False(t, ensureStoredParentPayloadAccepted(t.Context(), cfg, store, root, envelope))
 	require.Equal(t, 1, engine.newPayloadCalls)
 	require.Zero(t, store.markedGas)

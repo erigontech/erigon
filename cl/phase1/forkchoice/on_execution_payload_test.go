@@ -82,8 +82,11 @@ type panickingUpdateDB struct {
 
 type blockRefreshForkGraph struct {
 	fork_graph.ForkGraph
-	block *cltypes.SignedBeaconBlock
+	block    *cltypes.SignedBeaconBlock
+	rejected bool
 }
+
+func (g blockRefreshForkGraph) IsEnvelopeRejected(common.Hash) bool { return g.rejected }
 
 type dataAvailabilityForkGraph struct {
 	fork_graph.ForkGraph
@@ -91,6 +94,8 @@ type dataAvailabilityForkGraph struct {
 	stateErr *error
 	block    *cltypes.SignedBeaconBlock
 }
+
+func (g dataAvailabilityForkGraph) IsEnvelopeRejected(common.Hash) bool { return false }
 
 type persistedEnvelopeForkGraph struct {
 	dataAvailabilityForkGraph
@@ -231,6 +236,8 @@ type interleavingIndexRepairForkGraph struct {
 }
 
 func (g *interleavingIndexRepairForkGraph) HasEnvelope(common.Hash) bool { return true }
+
+func (g *interleavingIndexRepairForkGraph) IsEnvelopeRejected(common.Hash) bool { return false }
 
 func (g *interleavingIndexRepairForkGraph) DumpEnvelopeOnDisk(_ common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
 	g.envelope = envelope
@@ -529,7 +536,8 @@ func (g replacingPendingForkGraph) GetState(common.Hash, bool) (*state2.CachingB
 	return nil, nil
 }
 
-func (g replacingPendingForkGraph) HasEnvelope(common.Hash) bool { return false }
+func (g replacingPendingForkGraph) HasEnvelope(common.Hash) bool        { return false }
+func (g replacingPendingForkGraph) IsEnvelopeRejected(common.Hash) bool { return false }
 
 func (g missingBlockForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
 	return g.state, nil
@@ -574,7 +582,8 @@ func validIngressEnvelope(cfg *clparams.BeaconChainConfig, blockRoot common.Hash
 	return envelope
 }
 
-func (g pendingRetryForkGraph) HasEnvelope(root common.Hash) bool { return root == g.completed }
+func (g pendingRetryForkGraph) HasEnvelope(root common.Hash) bool   { return root == g.completed }
+func (g pendingRetryForkGraph) IsEnvelopeRejected(common.Hash) bool { return false }
 func (g pendingRetryForkGraph) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool) {
 	return nil, false
 }
@@ -3107,6 +3116,9 @@ func TestRefreshEnvelopeBlockDoesNotReplayState(t *testing.T) {
 		require.NoError(t, err)
 	})
 	require.Same(t, want, got)
+	f.forkGraph = blockRefreshForkGraph{block: want, rejected: true}
+	_, err := f.refreshEnvelopeBlockLocked(common.Hash{1})
+	require.ErrorIs(t, err, ErrInvalidExecutionPayloadEnvelope)
 }
 
 func TestNewPayloadWithAdmissionSerializesCallers(t *testing.T) {

@@ -918,6 +918,26 @@ func (f *ForkChoiceStore) HasEnvelope(blockRoot common.Hash) bool {
 	return f.forkGraph.HasEnvelope(blockRoot)
 }
 
+func (f *ForkChoiceStore) RejectEnvelope(blockRoot common.Hash) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.forkGraph.RejectEnvelope(blockRoot) {
+		return
+	}
+	if f.verifiedExecutionPayload != nil {
+		f.verifiedExecutionPayload.Remove(blockRoot)
+	}
+	if f.payloadStatusByRoot != nil {
+		f.payloadStatusByRoot.Remove(blockRoot)
+	}
+	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
+}
+
+func (f *ForkChoiceStore) IsEnvelopeRejected(blockRoot common.Hash) bool {
+	return f.forkGraph != nil && f.forkGraph.IsEnvelopeRejected(blockRoot)
+}
+
 // IsPayloadVerified returns whether the execution payload for the beacon block root
 // has been accepted by the execution layer.
 // [New in Gloas:EIP7732]
@@ -1018,6 +1038,9 @@ func (f *ForkChoiceStore) markPayloadStatusIfRetainedLocked(
 	status execution_client.PayloadStatus,
 	gasLimit *uint64,
 ) (execution_client.PayloadStatus, bool) {
+	if f.IsEnvelopeRejected(blockRoot) {
+		return execution_client.PayloadStatusNone, false
+	}
 	guard, ok := f.forkGraph.(retainedBlockGuard)
 	if !ok {
 		effective := f.markPayloadStatusLocked(blockRoot, executionBlockHash, status)
@@ -1056,6 +1079,9 @@ func (f *ForkChoiceStore) markPayloadStatus(
 	status execution_client.PayloadStatus,
 	isRetained func(common.Hash) bool,
 ) execution_client.PayloadStatus {
+	if f.IsEnvelopeRejected(blockRoot) {
+		return execution_client.PayloadStatusNone
+	}
 	f.trackExecutionPayloadRootLocked(blockRoot, executionBlockHash)
 	effective := status
 	if f.invalidatedExecutionPayloads != nil {
@@ -1413,6 +1439,9 @@ func (f *ForkChoiceStore) addPendingELPayload(block *cltypes.SignedBeaconBlock, 
 	defer f.pendingELPayloadsMu.Unlock()
 	root, ok := pendingELPayloadRoot(PendingELPayload{Block: block, Envelope: envelope})
 	if ok {
+		if f.IsEnvelopeRejected(root) {
+			return
+		}
 		for _, p := range f.pendingELPayloads {
 			if existingRoot, existingOk := pendingELPayloadRoot(p); existingOk && existingRoot == root {
 				return
