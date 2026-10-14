@@ -28,12 +28,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Reusable leaves inherit these from the caller; actions: write and checks: read
-# serve ci-gate-check.sh as in ci-gate.yml.
-permissions:
-  actions: write
-  checks: read
-  contents: read
+# Grants are per job. The called workflows require actions: write from their
+# caller, though only their merge_group cancel step uses it.
+permissions: {}
 
 jobs:
   # Milestone branches get the short tier; canepat/eez, which receives the
@@ -61,12 +58,17 @@ jobs:
   lint:
     needs: [tier]
     uses: ./.github/workflows/lint.yml
+    permissions:
+      contents: read
+      actions: write
 
   short-tests:
     needs: [tier]
     if: needs.tier.outputs.full != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -96,16 +98,25 @@ jobs:
     needs: [tier]
     if: needs.tier.outputs.full == 'true'
     uses: ./.github/workflows/test-all-erigon.yml
+    permissions:
+      contents: read
+      actions: write
 
   race-tests:
     needs: [tier]
     if: needs.tier.outputs.full == 'true'
     uses: ./.github/workflows/test-all-erigon-race.yml
+    permissions:
+      contents: read
+      actions: write
 
   eest-spec-tests:
     needs: [tier]
     if: needs.tier.outputs.full == 'true'
     uses: ./.github/workflows/test-eest-spec.yml
+    permissions:
+      contents: read
+      actions: write
 
   # Named ci-gate so ci-gate-check.sh excludes this job from its own report.
   ci-gate:
@@ -119,6 +130,11 @@ jobs:
       - eest-spec-tests
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # ci-gate-check.sh reads the run's jobs and their annotations.
+    permissions:
+      contents: read
+      actions: read
+      checks: read
     steps:
       # cancelled() is only valid in `if:`, so capture it for the check below.
       - name: Detect run cancellation

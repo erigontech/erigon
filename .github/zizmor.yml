@@ -26,7 +26,6 @@ rules:
   excessive-permissions:
     ignore:
       - ci-gate.yml
-      - eez-ci-gate.yml
       - cache-warming.yml
       - sonar-branch-scan.yml
       - cache-warming-kurtosis-cl-images.yml
