@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -58,7 +59,7 @@ func New(chainConfig *chain.Config) (*Engine, error) {
 	if err := l2.Validate(); err != nil {
 		return nil, err
 	}
-	return &Engine{Merge: merge.New(ethash.NewFaker()), l2: l2}, nil
+	return &Engine{Merge: merge.New(ethash.NewFaker(), merge.WithOptionalRequestSources()), l2: l2}, nil
 }
 
 // VerifyHeader checks header against its parent. Beyond the post-merge
@@ -123,6 +124,28 @@ func (e *Engine) verifyHeader(config *chain.Config, header, parent *types.Header
 		return invalid("Amsterdam fields")
 	}
 	return nil
+}
+
+// Finalize rejects withdrawals, which only a beacon chain could issue, and
+// collects the requests of the contracts present in state.
+func (e *Engine) Finalize(config *chain.Config, header *types.Header, ibs *state.IntraBlockState,
+	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
+	chain rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
+) (types.FlatRequests, error) {
+	if len(withdrawals) > 0 {
+		return nil, fmt.Errorf("%w: %w: %d withdrawals", rules.ErrInvalidBlock, rules.ErrUnexpectedWithdrawals, len(withdrawals))
+	}
+	return e.Merge.Finalize(config, header, ibs, uncles, receipts, withdrawals, chain, syscall, skipReceiptsEval, logger)
+}
+
+func (e *Engine) FinalizeAndAssemble(config *chain.Config, header *types.Header, ibs *state.IntraBlockState,
+	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
+	chain rules.ChainReader, syscall rules.SystemCall, call rules.Call, logger log.Logger,
+) (*types.Block, types.FlatRequests, error) {
+	if len(withdrawals) > 0 {
+		return nil, nil, fmt.Errorf("%w: %w: %d withdrawals", rules.ErrInvalidBlock, rules.ErrUnexpectedWithdrawals, len(withdrawals))
+	}
+	return e.Merge.FinalizeAndAssemble(config, header, ibs, txs, uncles, receipts, withdrawals, chain, syscall, call, logger)
 }
 
 // Prepare sets the proof-of-stake difficulty.
