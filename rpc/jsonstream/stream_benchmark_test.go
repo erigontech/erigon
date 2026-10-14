@@ -18,9 +18,13 @@ package jsonstream
 
 import (
 	"bytes"
+	"fmt"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/erigontech/erigon/common/length"
 )
 
 // benchmarkSimpleObject is used to compare writing a simple JSON object
@@ -171,4 +175,27 @@ func benchmarkIncompleteStructure(b *testing.B, s *Stream) {
 
 func BenchmarkIncompleteStructure_Stream(b *testing.B) {
 	benchmarkIncompleteStructure(b, newStream(nil, InitialBufferSize))
+}
+
+// BenchmarkHexesField covers the two shapes the field serves on hot paths: a block's
+// transaction hashes and a log's topics, with the writer a served response has and without one.
+func BenchmarkHexesField(b *testing.B) {
+	for _, n := range []int{4, 300} {
+		hashes := make([][length.Hash]byte, n)
+		for i := range hashes {
+			hashes[i][0], hashes[i][1] = byte(i), byte(i>>8)
+		}
+		for name, out := range map[string]io.Writer{"discard": io.Discard, "nowriter": nil} {
+			b.Run(fmt.Sprintf("hashes=%d/%s", n, name), func(b *testing.B) {
+				s := New(out)
+				b.ReportAllocs()
+				for b.Loop() {
+					s.Reset(out)
+					s.WriteObjectStart()
+					HexesField(s, "transactions", hashes)
+					s.WriteObjectEnd()
+				}
+			})
+		}
+	}
 }
