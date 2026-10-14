@@ -249,7 +249,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	if txnIndex >= block.Transactions().Len() {
 		return fmt.Errorf("transaction %#x not found", hash)
 	}
-	if err := api.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNum, uint64(txnIndex)); err != nil {
+	if err := api.checkHistoryRetention(tx, blockNum); err != nil {
 		return err
 	}
 	engine := api.engine()
@@ -323,7 +323,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 
 	postState := config == nil || config.TxIndex == nil || isLatest
 	if postState {
-		err = api.BaseAPI.checkPruneState(ctx, dbtx, blockNumber)
+		err = api.BaseAPI.checkHistoryRetention(dbtx, blockNumber)
 	} else {
 		err = api.BaseAPI.checkPruneTransactionHistoryAtIndex(ctx, dbtx, blockNumber, uint64(*config.TxIndex))
 	}
@@ -438,7 +438,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 	postState := simulateContext.TransactionIndex == nil || *simulateContext.TransactionIndex == -1 || isLatest
 	if postState {
-		err = api.BaseAPI.checkPruneState(ctx, tx, blockNum)
+		err = api.BaseAPI.checkHistoryRetention(tx, blockNum)
 	} else {
 		err = api.BaseAPI.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNum, uint64(*simulateContext.TransactionIndex))
 	}

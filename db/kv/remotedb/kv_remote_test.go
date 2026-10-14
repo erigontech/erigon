@@ -87,11 +87,16 @@ func TestCursorReplyUpdatesTransactionView(t *testing.T) {
 		replyViewID       uint64
 		replyGeneration   *uint64
 		wantViewID        uint64
+		wantHistoryStart  uint64
 	}{
-		{"identified_view", new(uint64(42)), 6, new(uint64(43)), 6},
-		{"view_id_only", nil, 6, nil, 6},
-		{"legacy_server", nil, 0, nil, 5},
-		{"generation_removed", new(uint64(42)), 6, nil, 6},
+		{"identified_view", new(uint64(42)), 6, new(uint64(43)), 6, 456},
+		{"same_view", new(uint64(42)), 5, new(uint64(42)), 5, 123},
+		{"same_zero_generation", new(uint64(0)), 5, new(uint64(0)), 5, 123},
+		{"new_files_only", new(uint64(42)), 5, new(uint64(43)), 5, 456},
+		{"new_database_only", new(uint64(42)), 6, new(uint64(42)), 6, 456},
+		{"view_id_only", nil, 6, nil, 6, 456},
+		{"legacy_server", nil, 0, nil, 5, 456},
+		{"generation_removed", new(uint64(42)), 6, nil, 6, 456},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			client := remoteproto.NewMockKVClient(gomock.NewController(t))
@@ -99,12 +104,19 @@ func TestCursorReplyUpdatesTransactionView(t *testing.T) {
 				{TxId: 7, ViewId: 5, HistoryFilesGeneration: tc.initialGeneration},
 				{CursorId: 1, ViewId: tc.replyViewID, HistoryFilesGeneration: tc.replyGeneration},
 			}}, nil)
+			first := client.EXPECT().HistoryStartFrom(gomock.Any(), gomock.Any()).Return(&remoteproto.HistoryStartFromReply{StartFrom: 123}, nil)
+			if tc.wantHistoryStart != 123 {
+				client.EXPECT().HistoryStartFrom(gomock.Any(), gomock.Any()).Return(&remoteproto.HistoryStartFromReply{StartFrom: tc.wantHistoryStart}, nil).After(first.Call)
+			}
 			db, err := NewRemote(gointerfaces.Version{}, log.New(), client).Open()
 			require.NoError(t, err)
 			t.Cleanup(db.Close)
 			tx, err := db.BeginTemporalRo(t.Context())
 			require.NoError(t, err)
 			defer tx.Rollback()
+			start, err := tx.Debug().HistoryStartFrom(kv.StorageDomain)
+			require.NoError(t, err)
+			require.Equal(t, uint64(123), start)
 			cursor, err := tx.Cursor(kv.MaxTxNum)
 			require.NoError(t, err)
 			defer cursor.Close()
@@ -114,6 +126,9 @@ func TestCursorReplyUpdatesTransactionView(t *testing.T) {
 			if ok {
 				require.Equal(t, *tc.replyGeneration, files.HistoryFilesGeneration())
 			}
+			start, err = tx.Debug().HistoryStartFrom(kv.StorageDomain)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantHistoryStart, start)
 		})
 	}
 }
@@ -139,16 +154,33 @@ func TestHistoryStartFromPreservesFloor(t *testing.T) {
 	require.Equal(t, uint64(123), start)
 }
 
+func TestCachedHistoryStartHonoursCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	client := remoteproto.NewMockKVClient(gomock.NewController(t))
+	client.EXPECT().HistoryStartFrom(ctx, gomock.Any()).Return(&remoteproto.HistoryStartFromReply{}, nil)
+	tx := &tx{ctx: ctx, db: &DB{remoteKV: client}, id: 7, historyFilesGeneration: new(uint64(0))}
+	_, err := tx.HistoryStartFrom(kv.StorageDomain)
+	require.NoError(t, err)
+	cancel()
+	_, err = tx.HistoryStartFrom(kv.StorageDomain)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
 func TestHistoryStartFromPropagatesTransportError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	client := remoteproto.NewMockKVClient(ctrl)
 	wantErr := status.Error(codes.Unavailable, "history unavailable")
 	client.EXPECT().HistoryStartFrom(gomock.Any(), gomock.Any()).Return(nil, wantErr)
-	tx := &tx{ctx: t.Context(), db: &DB{remoteKV: client}, id: 7}
+	client.EXPECT().HistoryStartFrom(gomock.Any(), gomock.Any()).Return(&remoteproto.HistoryStartFromReply{StartFrom: 123}, nil)
+	tx := &tx{ctx: t.Context(), db: &DB{remoteKV: client}, id: 7, historyFilesGeneration: new(uint64(0))}
 
 	start, err := tx.HistoryStartFrom(kv.StorageDomain)
 	require.ErrorIs(t, err, wantErr)
 	require.Zero(t, start)
+	start, err = tx.HistoryStartFrom(kv.StorageDomain)
+	require.NoError(t, err)
+	require.Equal(t, uint64(123), start)
 }
 
 func TestGetLatestForwardsMaxStep(t *testing.T) {

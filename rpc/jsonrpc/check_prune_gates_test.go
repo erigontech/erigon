@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
@@ -95,7 +96,7 @@ func TestPruneGateBoundary(t *testing.T) {
 		{"blocks", func(b uint64) error { return apis.eth.checkPruneBlocks(ctx, tx, b) }, "blocks are available"},
 		{"history", func(b uint64) error { return apis.eth.checkPruneHistory(ctx, tx, b) }, "history is available"},
 		{"state", func(b uint64) error { return apis.eth.checkPruneState(ctx, tx, b) }, "history is available"},
-		{"state_after_system_tx", func(b uint64) error { return apis.eth.checkPruneStateAfterSystemTx(ctx, tx, b) }, "history is available"},
+		{"retention", func(b uint64) error { return apis.eth.checkHistoryRetention(tx, b) }, "history is available"},
 		{"replay", func(b uint64) error { return apis.eth.checkPruneTransactionHistory(ctx, tx, b) }, "history is available"},
 		{"indexed_history", func(b uint64) error { return apis.eth.checkPruneTransactionHistoryAtIndex(ctx, tx, b, 1) }, "history is available"},
 	} {
@@ -144,7 +145,7 @@ func TestPruneGateArchive(t *testing.T) {
 	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, 0))
 	require.NoError(t, apis.eth.checkPruneHistory(ctx, tx, 0))
 	require.NoError(t, apis.eth.checkPruneState(ctx, tx, 0))
-	require.NoError(t, apis.eth.checkPruneStateAfterSystemTx(ctx, tx, 0))
+	require.NoError(t, apis.eth.checkHistoryRetention(tx, 0))
 	require.NoError(t, apis.eth.checkReceiptsAvailable(ctx, tx, 0))
 }
 
@@ -216,6 +217,34 @@ func TestBlocksGateUsesPhysicalFloorWithChainHistoryPolicy(t *testing.T) {
 	require.ErrorIs(t, apis.eth.checkPruneBlocks(ctx, tx, 8), state.ErrPruned)
 }
 
+func TestTraceReadersCheckHistory(t *testing.T) {
+	t.Parallel()
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
+	ctx := t.Context()
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	block, err := apis.eth.blockByNumberWithSenders(ctx, tx, chainInfo.old.num)
+	require.NoError(t, err)
+	start, err := apis.eth._txNumReader.Min(ctx, tx, block.NumberU64())
+	require.NoError(t, err)
+	config, err := apis.eth.chainConfig(ctx, tx)
+	require.NoError(t, err)
+	view := historyFloorTx{TemporalTx: tx, startTxNum: start + 2}
+	t.Run("trace_worker", func(t *testing.T) {
+		worker := exec.NewTraceWorker(view, config, apis.eth.engine(), apis.eth._blockReader, nil)
+		defer worker.Close()
+		worker.ChangeBlock(block.HeaderNoCopy())
+		require.ErrorIs(t, worker.ExecTxn(start+1, 0, block.Transactions()[0], false), state.ErrPruned)
+	})
+	t.Run("trace_filter", func(t *testing.T) {
+		_, err := streamedResult(func(stream *jsonstream.Stream) error {
+			return apis.trace.filterV3(ctx, view, block.NumberU64(), block.NumberU64(), TraceFilterRequest{}, stream, false, nil)
+		})
+		require.ErrorIs(t, err, state.ErrPruned)
+	})
+}
+
 func TestStateGateMatchesReaderAtHistoryStart(t *testing.T) {
 	t.Parallel()
 
@@ -255,7 +284,7 @@ func TestStateGateMatchesReaderAtHistoryStart(t *testing.T) {
 	block = rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(floorBlock - 2))
 	_, err = apis.eth.GetBalance(ctx, testAddr, &block)
 	require.ErrorIs(t, err, state.ErrPruned)
-	require.Contains(t, err.Error(), fmt.Sprintf("history is available from block %d", floorBlock-1))
+	require.Contains(t, err.Error(), fmt.Sprintf("history is available from txNum %d", startTxNum))
 }
 
 func TestReplayGateMatchesReaderAtHistoryStart(t *testing.T) {
@@ -479,8 +508,6 @@ func TestCallGateMatchesReaderAfterSystemTransaction(t *testing.T) {
 	require.NoError(t, err)
 	view := historyFloorTx{TemporalTx: tx, startTxNum: startTxNum + 1}
 
-	require.NoError(t, apis.eth.checkPruneStateAfterSystemTx(ctx, view, blockNumber))
-	require.ErrorIs(t, apis.eth.checkPruneStateAfterSystemTx(ctx, view, blockNumber-1), state.ErrPruned)
 	reader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, view, blockNumber, false, 0, apis.eth._txNumReader)
 	require.NoError(t, err)
 	account, err := reader.ReadAccountData(accounts.InternAddress(testAddr))
@@ -725,8 +752,6 @@ func TestHistoryGateKeepsLatestWithoutHistoricalState(t *testing.T) {
 	require.ErrorIs(t, apis.eth.checkPruneHistory(ctx, view, chainInfo.head-1), state.ErrPruned)
 	require.NoError(t, apis.eth.checkPruneState(ctx, view, chainInfo.head))
 	require.ErrorIs(t, apis.eth.checkPruneState(ctx, view, chainInfo.head-1), state.ErrPruned)
-	require.NoError(t, apis.eth.checkPruneStateAfterSystemTx(ctx, view, chainInfo.head))
-	require.ErrorIs(t, apis.eth.checkPruneStateAfterSystemTx(ctx, view, chainInfo.head-1), state.ErrPruned)
 	require.NoError(t, apis.eth.checkPruneTransactionHistory(ctx, view, chainInfo.head))
 	require.ErrorIs(t, apis.eth.checkPruneTransactionHistory(ctx, view, chainInfo.head-1), state.ErrPruned)
 	require.ErrorIs(t, apis.eth.checkPruneTransactionHistoryAtIndex(ctx, view, chainInfo.head-1, 1), state.ErrPruned)
@@ -939,7 +964,6 @@ func TestPruneGatesSkipPhysicalFloorsAtHead(t *testing.T) {
 
 	require.NoError(t, apis.eth.checkPruneHistory(ctx, historyTx, chainInfo.head))
 	require.NoError(t, apis.eth.checkPruneState(ctx, historyTx, chainInfo.head))
-	require.NoError(t, apis.eth.checkPruneStateAfterSystemTx(ctx, historyTx, chainInfo.head))
 	require.NoError(t, apis.eth.checkPruneTransactionHistory(ctx, historyTx, chainInfo.head))
 	require.NoError(t, apis.eth.checkPruneTransactionHistoryAtIndex(ctx, historyTx, chainInfo.head, 1))
 	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, chainInfo.head))
@@ -966,7 +990,6 @@ func TestPruneGatesSkipPhysicalFloorsBelowConfiguredCutoff(t *testing.T) {
 
 	require.ErrorIs(t, apis.eth.checkPruneHistory(ctx, historyTx, configuredFloor-1), state.ErrPruned)
 	require.ErrorIs(t, apis.eth.checkPruneState(ctx, historyTx, configuredFloor-1), state.ErrPruned)
-	require.ErrorIs(t, apis.eth.checkPruneStateAfterSystemTx(ctx, historyTx, configuredFloor-1), state.ErrPruned)
 	require.ErrorIs(t, apis.eth.checkPruneTransactionHistory(ctx, historyTx, configuredFloor-1), state.ErrPruned)
 	require.ErrorIs(t, apis.eth.checkPruneTransactionHistoryAtIndex(ctx, historyTx, configuredFloor-1, 1), state.ErrPruned)
 	require.ErrorIs(t, apis.eth.checkPruneBlocks(ctx, tx, configuredFloor-1), state.ErrPruned)
@@ -996,7 +1019,6 @@ func TestPruneGatesReusePhysicalFloorsAtSameHead(t *testing.T) {
 	for range 2 {
 		require.NoError(t, apis.eth.checkPruneHistory(ctx, historyTx, chainInfo.head-1))
 		require.NoError(t, apis.eth.checkPruneState(ctx, historyTx, chainInfo.head-1))
-		require.NoError(t, apis.eth.checkPruneStateAfterSystemTx(ctx, historyTx, chainInfo.head-1))
 		require.NoError(t, apis.eth.checkPruneTransactionHistory(ctx, historyTx, chainInfo.head-1))
 		require.NoError(t, apis.eth.checkPruneTransactionHistoryAtIndex(ctx, historyTx, chainInfo.head-1, 1))
 		require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, chainInfo.head-1))

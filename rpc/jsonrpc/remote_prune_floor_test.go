@@ -44,7 +44,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
-func remoteHistoryDB(t *testing.T, db kv.TemporalRoDB) (*remotedb.DB, *atomic.Int64) {
+func remoteHistoryDB(t testing.TB, db kv.TemporalRoDB) (*remotedb.DB, *atomic.Int64) {
 	t.Helper()
 	var calls atomic.Int64
 	server := grpc.NewServer(grpc.UnaryInterceptor(func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {

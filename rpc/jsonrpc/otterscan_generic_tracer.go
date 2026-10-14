@@ -37,7 +37,7 @@ func (api *OtterscanAPIImpl) genericTracer(tx kv.TemporalTx, ctx context.Context
 	if err := api.checkPruneBlocks(ctx, tx, blockNum); err != nil {
 		return err
 	}
-	if err := api.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNum, uint64(txIndex)); err != nil {
+	if err := api.checkHistoryRetention(tx, blockNum); err != nil {
 		return err
 	}
 	executor := exec.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, tracer)

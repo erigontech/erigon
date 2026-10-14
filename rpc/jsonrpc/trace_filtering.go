@@ -504,8 +504,12 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	isPos := false
 
 	traceFilterTxn := func(blockNum, txNum uint64, txIndex int, txn types.Transaction, msg *types.Message) (*TraceCallResult, error) {
+		historyReader := state.NewHistoryReaderV3(dbtx, txNum)
+		if err := historyReader.CheckHistory(); err != nil {
+			return nil, err
+		}
 		stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
-		cachedReader := state.NewCachedReader(state.NewHistoryReaderV3(dbtx, txNum), stateCache)
+		cachedReader := state.NewCachedReader(historyReader, stateCache)
 		cachedWriter := state.NewCachedWriter(noop, stateCache)
 
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
@@ -966,6 +970,9 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 				// Copy is needed since each worker has its own independent state.
 				// workerReader reads state up to but not including the current transaction.
 				workerReader := state.NewHistoryReaderV3(workerTx, baseTxNum+uint64(job.txIndex))
+				if err := workerReader.CheckHistory(); err != nil {
+					return err
+				}
 				workerIbs := state.New(workerReader)
 				defer workerIbs.Close()
 
