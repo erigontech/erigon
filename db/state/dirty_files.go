@@ -290,8 +290,14 @@ func (i *FilesItem) closeFilesAndRemove() {
 	}
 	if i.decompressor != nil {
 		i.decompressor.Close()
+		coldTarget, _ := os.Readlink(i.decompressor.FilePath()) // a demoted file is a symlink to its cold copy
 		if err := dir.RemoveFile(i.decompressor.FilePath()); err != nil {
 			log.Trace("remove after close", "err", err, "file", i.decompressor.FileName())
+		}
+		if coldTarget != "" {
+			if err := dir.RemoveFile(coldTarget); err != nil {
+				log.Trace("remove after close", "err", err, "file", coldTarget)
+			}
 		}
 		if err := dir.RemoveFile(i.decompressor.FilePath() + ".torrent"); err != nil {
 			log.Trace("remove after close", "err", err, "file", i.decompressor.FileName()+".torrent")

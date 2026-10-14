@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/mvcc"
 )
 
 func testAggWithThreeSteps(t *testing.T) (kv.RwDB, *Aggregator) {
@@ -135,6 +136,32 @@ func procSelfFdHas(t *testing.T, s string) bool {
 		}
 	}
 	return false
+}
+
+func retireDirtyCommitmentFile(t *testing.T, agg *Aggregator, reason mvcc.RetireReason, from, to kv.Step) {
+	t.Helper()
+	d := agg.d[kv.CommitmentDomain]
+	agg.dirtyFilesLock.Lock()
+	defer agg.dirtyFilesLock.Unlock()
+	item, ok := d.dirtyFiles.Get(newFilesItem(uint64(from)*d.stepSize, uint64(to)*d.stepSize))
+	require.True(t, ok)
+	retire(reason, d.dirtyFiles, []*FilesItem{item}, d.FilenameBase, d.logger)
+	agg.recalcVisibleFiles(retiredFiles{item})
+}
+
+func TestAggregatorDeletingDemotedFileRemovesColdTarget(t *testing.T) {
+	t.Parallel()
+	_, agg := testAggWithThreeSteps(t)
+	ssdPath := domainFileBySuffix(t, agg.Dirs().SnapDomain, "commitment.1-2.kv")
+	coldDir := t.TempDir()
+	require.NoError(t, agg.DemoteFile(t.Context(), kv.CommitmentDomain, 1, 2, coldDir))
+
+	retireDirtyCommitmentFile(t, agg, mvcc.RetireReasonMerged, 1, 2)
+
+	_, err := os.Lstat(ssdPath)
+	require.ErrorIs(t, err, fs.ErrNotExist)
+	_, err = os.Lstat(filepath.Join(coldDir, filepath.Base(ssdPath)))
+	require.ErrorIs(t, err, fs.ErrNotExist)
 }
 
 func TestAggregatorReclaimAfterDemoteIsCloseOnly(t *testing.T) {
