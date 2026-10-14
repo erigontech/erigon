@@ -1,4 +1,9 @@
 version: "2"
+issues:
+  # Cached issues load in map order; these caps would then keep a random subset per run.
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
 run:
   allow-parallel-runners: true
 linters:
