@@ -2230,3 +2230,64 @@ func TestCalcFees_EstimateBalanceAloneDoesNotPruneCoinbase(t *testing.T) {
 	require.False(t, pruned, "a funded coinbase must not be deleted on an in-flight zero balance")
 	require.True(t, writes.IsEmpty(), "a live coinbase with no tip needs no write at all")
 }
+
+// Under EIP-8246 a contract created and self-destructed in an earlier tx keeps
+// its balance: the destruct's own balance cell is the live account's balance.
+func TestCalcFees_EIP8246PreservedCoinbase(t *testing.T) {
+	t.Parallel()
+	const kept = 1000
+	for _, tc := range []struct {
+		name  string
+		rules *chain.Rules
+		tip   uint64
+		want  uint64
+	}{
+		{"tip", &chain.Rules{IsSpuriousDragon: true, IsAmsterdam: true}, 3, kept + 3},
+		{"zero tip", &chain.Rules{IsSpuriousDragon: true, IsAmsterdam: true}, 0, 0},
+		{"pre-EIP-8246 burns", &chain.Rules{IsSpuriousDragon: true}, 3, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			coinbase := fAddr("coinbase")
+
+			header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, GasUsed: 21000}
+			version := state.Version{BlockNum: 1, TxNum: 2, TxIndex: 1}
+			txTask := &exec.TxTask{
+				Header: header, TxNum: version.TxNum, TxIndex: version.TxIndex,
+				Config:          chain.TestChainBerlinConfig,
+				EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+			}
+			task := &taskVersion{
+				execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true},
+				version:  version,
+			}
+			result := &execResult{TxResult: &exec.TxResult{
+				Task: task,
+				ExecutionResult: evmtypes.ExecutionResult{
+					FeeTipped:            *uint256.NewInt(tc.tip),
+					BurntContractAddress: accounts.NilAddress,
+				},
+				Coinbase: coinbase,
+			}}
+			result.TxOut = &state.WriteSet{}
+
+			vm := state.NewVersionMap(nil)
+			destruct := state.Version{TxIndex: 0}
+			vm.WriteSelfDestruct(coinbase, destruct, true, true)
+			vm.WriteBalance(coinbase, destruct, *uint256.NewInt(kept), true)
+			vm.WriteIncarnation(coinbase, destruct, 0, true)
+
+			writes, _, err := result.calcFees(task, vm, newMapStateReader(), tc.rules, nil)
+			require.NoError(t, err)
+			_, deleted := writes.GetSelfDestruct(coinbase)
+			require.False(t, deleted, "the coinbase must not be deleted")
+			if tc.want == 0 {
+				require.True(t, writes.IsEmpty(), "a live coinbase with no tip needs no write at all")
+				return
+			}
+			bw := findBalance(writes, coinbase)
+			require.NotNil(t, bw, "coinbase balance write")
+			require.Equal(t, *uint256.NewInt(tc.want), bw.Val)
+		})
+	}
+}
