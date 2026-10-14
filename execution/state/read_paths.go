@@ -1078,8 +1078,11 @@ func warmField[T any](s *IntraBlockState, addr accounts.Address, writes map[acco
 			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, true
 		}
 	}
-	if tr, ok := reads[addr]; ok && warmSource(tr.Source) {
-		return tr.Val, tr.Source, tr.Version, true
+	// A resident deleted object outranks the read set, as in versionedReadCore.
+	if so, ok := s.stateObjects[addr]; !ok || !so.deleted {
+		if tr, ok := reads[addr]; ok && warmSource(tr.Source) {
+			return tr.Val, tr.Source, tr.Version, true
+		}
 	}
 	var zero T
 	return zero, UnknownSource, UnknownVersion, false

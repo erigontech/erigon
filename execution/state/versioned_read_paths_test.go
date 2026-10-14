@@ -129,6 +129,28 @@ func TestVersionedRead_B_DeletedStateObjectBeatsWarmStorageRead(t *testing.T) {
 	assert.True(t, v.IsZero(), "slot of a destructed account reads as zero, not as the recorded value")
 }
 
+func TestVersionedRead_B_DeletedStateObjectBeatsWarmCodeSizeRead(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xb4})
+	ibs, mvhm := warmReadIBS(t, addr)
+
+	mvhm.WriteCodeSize(addr, Version{TxIndex: 1, Incarnation: 0}, 7, true)
+	size, err := ibs.GetCodeSize(addr)
+	require.NoError(t, err)
+	require.Equal(t, 7, size, "first read resolves from the version map")
+
+	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 2, Incarnation: 0}, true, true)
+	so, err := ibs.getStateObject(addr, true)
+	require.NoError(t, err)
+	require.Nil(t, so)
+	parked, ok := ibs.stateObjects[addr]
+	require.True(t, ok && parked.deleted, "getStateObject must park a deleted object")
+
+	size, err = ibs.GetCodeSize(addr)
+	require.NoError(t, err)
+	assert.Zero(t, size, "code size of a destructed account reads as zero, not as the recorded value")
+}
+
 // The read-once fast path must return exactly what the read-set-hit branch it
 // replaces returns: same value, source, version and clean flag.
 func TestVersionedRead_B_WarmStorageReadReturnsReadSetTuple(t *testing.T) {
