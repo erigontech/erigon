@@ -19,10 +19,12 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 const devnetL2 = `{"name":"eez","rollupId":1,"l1ChainId":7331,"eezRegistry":"0x5fbdb2315678afecb367f032d93f642f64180aa3","registryDeployBlock":12,"blockInterval":2,"l1BlockTime":12,"blockGasLimit":30000000}`
@@ -128,4 +130,15 @@ func TestChainConfigResolvesL2(t *testing.T) {
 	invalid := chain.Config{L2JSON: json.RawMessage(`{"name":"eez","rollupId":1}`)}
 	require.ErrorIs(t, invalid.ResolveL2(), ErrInvalid)
 	require.Nil(t, invalid.L2)
+}
+
+func TestResolveRules(t *testing.T) {
+	c, err := FromJSON([]byte(devnetL2))
+	require.NoError(t, err)
+	cfg := &chain.Config{ChainID: uint256.NewInt(6290), L2: c}
+	rules := (&evmtypes.BlockContext{BlockNumber: 7, Time: 14}).Rules(cfg)
+	require.Equal(t, ProtocolVersion, rules.L2Version)
+
+	rules = (&evmtypes.BlockContext{BlockNumber: 7, Time: 14}).Rules(&chain.Config{ChainID: uint256.NewInt(1)})
+	require.Zero(t, rules.L2Version)
 }

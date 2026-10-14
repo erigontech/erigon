@@ -62,9 +62,15 @@ var _ chain.L2Config = (*L2Config)(nil)
 // Name returns the EEZ stack name.
 func (c *L2Config) Name() string { return Name }
 
-// ResolveRules keeps the standard rules: EEZ networks activate forks by the
-// timestamps of their genesis, without a version ladder of their own.
-func (c *L2Config) ResolveRules(l2Version, blockNum, blockTime uint64, rules *chain.Rules) {}
+// ProtocolVersion is the L2Version of every EEZ block. Transaction types EEZ
+// registers process-wide are valid only where it is set.
+const ProtocolVersion uint64 = 1
+
+// ResolveRules sets ProtocolVersion. Forks activate by the genesis
+// timestamps; EEZ has no version ladder of its own.
+func (c *L2Config) ResolveRules(l2Version, blockNum, blockTime uint64, rules *chain.Rules) {
+	rules.L2Version = ProtocolVersion
+}
 
 // BlocksPerL1Block is the number of L2 blocks one L1 block spans.
 func (c *L2Config) BlocksPerL1Block() uint64 { return c.L1BlockTime / c.BlockInterval }
