@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestConfigValueLookup(t *testing.T) {
@@ -250,6 +251,33 @@ func TestConfigL2JSONRoundTrip(t *testing.T) {
 
 	var nilCfg *Config
 	a.False(nilCfg.IsL2())
+}
+
+func TestFeeCollector(t *testing.T) {
+	collector := common.HexToAddress("0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266")
+
+	var c Config
+	require.NoError(t, json.Unmarshal([]byte(`{"chainId":6290,"feeCollector":"0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"}`), &c))
+	require.NotNil(t, c.FeeCollector)
+	require.Equal(t, collector, *c.FeeCollector)
+	require.Equal(t, accounts.InternAddress(collector), c.GetFeeCollector())
+	require.True(t, c.GetBurntContract(0).IsNil())
+	enc, err := json.Marshal(&c)
+	require.NoError(t, err)
+	require.Contains(t, string(enc), `"feeCollector":"0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"`)
+
+	var none Config
+	require.NoError(t, json.Unmarshal([]byte(`{"chainId":1}`), &none))
+	require.Nil(t, none.FeeCollector)
+	require.True(t, none.GetFeeCollector().IsNil())
+	enc, err = json.Marshal(&none)
+	require.NoError(t, err)
+	require.NotContains(t, string(enc), "feeCollector")
+
+	burnt := common.HexToAddress("0x1559000000000000000000000000000000000000")
+	both := Config{BurntContract: map[string]common.Address{"10": burnt}, FeeCollector: &collector}
+	require.True(t, both.GetBurntContract(9).IsZero())
+	require.Equal(t, accounts.InternAddress(burnt), both.GetBurntContract(10))
 }
 
 type fakeL2 struct{}
