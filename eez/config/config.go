@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
@@ -114,6 +115,21 @@ func FromJSON(raw []byte) (*L2Config, error) {
 		return nil, err
 	}
 	return &v.L2Config, nil
+}
+
+var registerOnce sync.Once
+
+// Register makes chain configurations resolve their eez l2 section.
+func Register() {
+	registerOnce.Do(func() {
+		chain.RegisterL2Config(Name, func(raw json.RawMessage) (chain.L2Config, error) {
+			c, err := FromJSON(raw)
+			if err != nil {
+				return nil, err
+			}
+			return c, nil
+		})
+	})
 }
 
 // MarshalJSON encodes the section with its name, as FromJSON reads it.

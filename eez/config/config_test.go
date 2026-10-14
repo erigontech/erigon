@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 const devnetL2 = `{"name":"eez","rollupId":1,"l1ChainId":7331,"eezRegistry":"0x5fbdb2315678afecb367f032d93f642f64180aa3","registryDeployBlock":12,"blockInterval":2,"l1BlockTime":12,"blockGasLimit":30000000}`
@@ -113,4 +114,18 @@ func TestValidate(t *testing.T) {
 			require.ErrorIs(t, err, ErrInvalid)
 		})
 	}
+}
+
+func TestChainConfigResolvesL2(t *testing.T) {
+	Register()
+	Register()
+	var c chain.Config
+	require.NoError(t, json.Unmarshal([]byte(`{"chainId":6290,"l2":`+devnetL2+`}`), &c))
+	require.NoError(t, c.ResolveL2())
+	require.IsType(t, &L2Config{}, c.L2)
+	require.Equal(t, uint64(1), c.L2.(*L2Config).RollupID)
+
+	invalid := chain.Config{L2JSON: json.RawMessage(`{"name":"eez","rollupId":1}`)}
+	require.ErrorIs(t, invalid.ResolveL2(), ErrInvalid)
+	require.Nil(t, invalid.L2)
 }
