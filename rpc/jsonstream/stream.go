@@ -113,20 +113,20 @@ func HexesField[S ~[]E, E ~[length.Hash]byte](s *Stream, name string, items S) {
 	s.beforeValue()
 	per := hexutil.QuotedLen(length.Hash) + 1
 	buf, start := s.growArray(len(items) * per)
+	if len(items) > 0 {
+		buf = hexutil.AppendQuoted(buf, items[0][:])
+	}
 	// Elements are fixed-size, so a chunk of them is known to fill a threshold: the inner
 	// loop stays free of per-element checks.
-	for next := 0; next < len(items); {
-		end := len(items)
+	for next := 1; next < len(items); {
+		chunk := items[next:]
 		if s.out != nil {
-			end = min(end, next+FlushThreshold/per+1)
+			chunk = chunk[:min(len(chunk), FlushThreshold/per+1)]
 		}
-		for i := next; i < end; i++ {
-			if i > 0 {
-				buf = append(buf, ',')
-			}
-			buf = hexutil.AppendQuoted(buf, items[i][:])
+		for i := range chunk {
+			buf = hexutil.AppendQuoted(append(buf, ','), chunk[i][:])
 		}
-		next = end
+		next += len(chunk)
 		if s.out != nil && len(buf)-start >= FlushThreshold {
 			buf, start = s.flushArray(buf, start)
 		}
