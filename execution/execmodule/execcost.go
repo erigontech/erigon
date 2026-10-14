@@ -26,7 +26,71 @@ import (
 type execCostWindow struct {
 	mu    sync.Mutex
 	times costRing[time.Duration]
+	sizes costRing[int] // the round size each times sample came from, pushed in step
 	gases costRing[uint64]
+}
+
+// roundCost fits elapsed = flat + perTx*n over the window, by least squares. Measured per round on
+// live309, one drain's eighteen rounds:
+//
+//	22:93 36:105 30:68 26:62 23:60 20:55 17:51 14:44 12:33 10:29 8:32 6:25 5:18 4:15 3:16 2:15 1:15 1:14
+//
+// which fits flat=9.2ms, perTx=2.43ms — and a 1-transaction round does cost 14-15ms while a 30-transaction
+// round costs 2.3ms each. A round therefore has a cost that does not scale with its size, and charging
+// that flat part to every transaction is what collapses the end of a drain: the caller's clamp is
+// left/perTx with perTx a p75 of total/n, which the small rounds drag to 18ms, so 100ms of budget is
+// said to fit 5 transactions where it fits about 37. The back half of every block was then spent paying
+// the flat cost again and again for one or two transactions at a time.
+//
+// Returns (0,0) when there is not enough to fit, or when the fit comes out degenerate — the caller keeps
+// its own estimate then rather than acting on a slope invented from four points.
+func (w *execCostWindow) roundCost() (flat, perTx time.Duration) {
+	if w == nil {
+		return 0, 0
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n := w.times.capn
+	if !w.times.filled {
+		n = w.times.next
+	}
+	if n < 8 {
+		return 0, 0
+	}
+	var sx, sy, sxx, sxy float64
+	cnt := 0
+	for i := range n {
+		sz := w.sizes.vals[i]
+		if sz <= 0 {
+			continue
+		}
+		x := float64(sz)
+		// times holds total/n, so the round's own elapsed is that back times its size. Fitting the
+		// per-tx figure directly would fit a hyperbola with a straight line and report nonsense.
+		y := float64(w.times.vals[i]) * x
+		sx += x
+		sy += y
+		sxx += x * x
+		sxy += x * y
+		cnt++
+	}
+	if cnt < 8 {
+		return 0, 0
+	}
+	n = cnt
+	den := float64(n)*sxx - sx*sx
+	if den == 0 {
+		return 0, 0
+	}
+	p := (float64(n)*sxy - sx*sy) / den
+	f := (sy - p*sx) / float64(n)
+	if p <= 0 {
+		return 0, 0
+	}
+	if f < 0 {
+		f = 0
+	}
+	return time.Duration(f), time.Duration(p)
 }
 
 func newExecCostWindow(capacity int) *execCostWindow {
@@ -35,6 +99,7 @@ func newExecCostWindow(capacity int) *execCostWindow {
 	}
 	return &execCostWindow{
 		times: newCostRing[time.Duration](capacity),
+		sizes: newCostRing[int](capacity),
 		gases: newCostRing[uint64](capacity),
 	}
 }
@@ -46,7 +111,10 @@ func (w *execCostWindow) recordRoundTime(total time.Duration, txs int) {
 		return
 	}
 	w.mu.Lock()
+	// The ROUND's elapsed and its size, in step, so roundCost can separate the flat part from the
+	// marginal one. times keeps total/n because upperQuartile still reports that.
 	w.times.push(total / time.Duration(txs))
+	w.sizes.push(txs)
 	w.mu.Unlock()
 }
 

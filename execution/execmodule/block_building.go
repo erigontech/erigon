@@ -877,3 +877,14 @@ func (e *ExecModule) restampWithdrawalsLocked(ctx context.Context, params *build
 		"block", num, "txs", len(body), "withdrawals", len(in.Withdrawals))
 	return nil
 }
+
+// ExecRoundCost reports what a pre-exec round costs: a flat part paid once however many transactions the
+// round carries, and a marginal part per transaction. The batch sizer needs both — charging the flat part
+// to every transaction is what makes the end of a drain collapse into 1-transaction rounds. (0,0) means
+// the window cannot fit it yet and the caller should keep its own estimate.
+func (e *ExecModule) ExecRoundCost() (flat, perTx time.Duration) {
+	if e.execCost == nil {
+		return 0, 0
+	}
+	return e.execCost.roundCost()
+}

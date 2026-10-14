@@ -68,3 +68,58 @@ func TestExecCostWindow_NilIsSafe(t *testing.T) {
 	require.Zero(t, uqTime)
 	require.Zero(t, uqGas)
 }
+
+// The eighteen rounds of one real drain on live309. A round costs a flat part plus a marginal part, and
+// the flat part is what makes a 1-transaction round cost 14ms while a 30-transaction round costs 2.3ms
+// each. Charging the flat part to every transaction — which left/perTx does — says 100ms of budget fits
+// 5 transactions when it fits about 37, and that is what collapses the end of every drain.
+func TestExecCostWindow_SeparatesFlatRoundCostFromMarginal(t *testing.T) {
+	drain := []struct {
+		n  int
+		ms int
+	}{
+		{22, 93}, {36, 105}, {30, 68}, {26, 62}, {23, 60}, {20, 55}, {17, 51}, {14, 44}, {12, 33},
+		{10, 29}, {8, 32}, {6, 25}, {5, 18}, {4, 15}, {3, 16}, {2, 15}, {1, 15}, {1, 14},
+	}
+	w := newExecCostWindow(64)
+	for _, r := range drain {
+		w.recordRoundTime(time.Duration(r.ms)*time.Millisecond, r.n)
+	}
+
+	flat, perTx := w.roundCost()
+	require.InDelta(t, float64(9*time.Millisecond), float64(flat), float64(3*time.Millisecond),
+		"the flat part is real: a 1-tx round costs 14-15ms")
+	require.InDelta(t, float64(2400*time.Microsecond), float64(perTx), float64(600*time.Microsecond),
+		"and the marginal part is what another transaction actually adds")
+
+	// What the budget really holds, against what charging the flat cost to every transaction claims. The
+	// gap here is modest because this window holds ONE clean drain; live it is far wider, because the 64
+	// samples span many drains and their 1- and 2-transaction tails drag the p75 to 18.4ms — 5 transactions
+	// in 100ms against the 37 that fit.
+	left := 100 * time.Millisecond
+	modelled := int((left - flat) / perTx)
+	uq, _ := w.upperQuartile()
+	naive := int(left / uq)
+	require.Greater(t, modelled, naive, "charging the flat cost per transaction under-counts what fits")
+}
+
+// Too few rounds to fit, or a degenerate fit, must say so rather than hand back a slope invented from a
+// handful of points — the caller keeps its own estimate then.
+func TestExecCostWindow_RoundCostRefusesWhenItCannotFit(t *testing.T) {
+	w := newExecCostWindow(64)
+	for range 4 {
+		w.recordRoundTime(20*time.Millisecond, 5)
+	}
+	flat, perTx := w.roundCost()
+	require.Zero(t, flat)
+	require.Zero(t, perTx)
+
+	// Every round the same size: no spread to fit a slope through.
+	w2 := newExecCostWindow(64)
+	for range 20 {
+		w2.recordRoundTime(50*time.Millisecond, 10)
+	}
+	f2, p2 := w2.roundCost()
+	require.Zero(t, f2)
+	require.Zero(t, p2)
+}
