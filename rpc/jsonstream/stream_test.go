@@ -33,6 +33,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 )
 
 func (s *Stream) closeAllPendingElements() error {
@@ -1351,4 +1352,58 @@ func TestRewindField(t *testing.T) {
 			require.Equal(t, tc.want, out.String())
 		})
 	}
+}
+
+// The single-growth array writers must hand their bytes to the writer as they go, like a
+// value write does, or a large array sits in memory in full before the first byte leaves.
+func TestHexArraysStreamAtTheThreshold(t *testing.T) {
+	const n = 100_000
+	hashes := make([][length.Hash]byte, n)
+	bytesOf := make([][]byte, n)
+	for i := range n {
+		hashes[i][0], hashes[i][31] = byte(i), byte(i>>8)
+		bytesOf[i] = hashes[i][:]
+	}
+	for name, write := range map[string]func(s *Stream){
+		"HexesField":    func(s *Stream) { s.WriteObjectStart(); HexesField(s, "h", hashes); s.WriteObjectEnd() },
+		"WriteHexBytes": func(s *Stream) { WriteHexBytes(s, bytesOf) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			var want bytes.Buffer
+			ref := New(&want)
+			if name == "HexesField" {
+				ref.WriteObjectStart()
+				ref.Field("h")
+			}
+			ref.WriteArrayStart()
+			for i := range n {
+				ref.WriteHex(bytesOf[i])
+			}
+			ref.WriteArrayEnd()
+			if name == "HexesField" {
+				ref.WriteObjectEnd()
+			}
+			require.NoError(t, ref.Flush())
+
+			var got bytes.Buffer
+			out := &countingWriter{w: &got}
+			s := New(out)
+			write(s)
+			require.NoError(t, s.Flush())
+			require.Less(t, out.largest, 2*FlushThreshold, "the array reached the writer in one piece; its bytes sat in memory in full")
+			require.Equal(t, want.String(), got.String())
+		})
+	}
+}
+
+// countingWriter records the largest single Write: a bounded stream never hands over more
+// than a threshold's worth at once.
+type countingWriter struct {
+	w       io.Writer
+	largest int
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	c.largest = max(c.largest, len(p))
+	return c.w.Write(p)
 }

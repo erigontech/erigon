@@ -111,15 +111,9 @@ func HexesField[S ~[]E, E ~[length.Hash]byte](s *Stream, name string, items S) {
 		return
 	}
 	s.beforeValue()
-	buf := slices.Grow(s.stream.Buffer(), 2+len(items)*(hexutil.QuotedLen(length.Hash)+1))
-	buf = append(buf, '[')
-	for i := range items {
-		if i > 0 {
-			buf = append(buf, ',')
-		}
-		buf = hexutil.AppendQuoted(buf, items[i][:])
-	}
-	s.stream.SetBuffer(append(buf, ']'))
+	writeHexArray(s, len(items), len(items)*(hexutil.QuotedLen(length.Hash)+1), func(buf []byte, i int) []byte {
+		return hexutil.AppendQuoted(buf, items[i][:])
+	})
 	s.afterValue()
 }
 
@@ -127,20 +121,40 @@ func HexesField[S ~[]E, E ~[length.Hash]byte](s *Stream, name string, items S) {
 // and so are summed before the single growth.
 func WriteHexBytes[S ~[]E, E ~[]byte](s *Stream, items S) {
 	s.beforeValue()
-	size := 2 + len(items)
+	size := len(items)
 	for i := range items {
 		size += hexutil.QuotedLen(len(items[i]))
 	}
-	buf := slices.Grow(s.stream.Buffer(), size)
+	writeHexArray(s, len(items), size, func(buf []byte, i int) []byte {
+		return hexutil.AppendQuoted(buf, items[i])
+	})
+	s.afterValue()
+}
+
+// writeHexArray appends n elements as one array. Without a writer it grows once for the
+// whole array; with one it grows a threshold at a time and hands each full threshold to the
+// writer, so a large array streams the way a sequence of value writes does.
+func writeHexArray(s *Stream, n, size int, appendElem func([]byte, int) []byte) {
+	grow := size + 2
+	if s.out != nil {
+		grow = min(grow, 2*FlushThreshold)
+	}
+	buf := slices.Grow(s.stream.Buffer(), grow)
+	start := len(buf)
 	buf = append(buf, '[')
-	for i := range items {
+	for i := range n {
 		if i > 0 {
 			buf = append(buf, ',')
 		}
-		buf = hexutil.AppendQuoted(buf, items[i])
+		buf = appendElem(buf, i)
+		if s.out != nil && len(buf)-start >= FlushThreshold {
+			s.stream.SetBuffer(buf[:start])
+			s.writeThrough(buf[start:])
+			buf = s.stream.Buffer()
+			start = len(buf)
+		}
 	}
 	s.stream.SetBuffer(append(buf, ']'))
-	s.afterValue()
 }
 
 // WriteQuotedText writes v.AppendText's output as a JSON string, without an escape scan: it is
