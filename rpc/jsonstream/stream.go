@@ -124,19 +124,34 @@ func HexesField[S ~[]E, E ~[length.Hash]byte](s *Stream, name string, items S) {
 }
 
 // WriteHexBytes is WriteHexes for elements that are already byte slices, whose lengths vary
-// and so are summed before the growth. Without a writer the array is grown once in full;
-// with one it is grown a threshold at a time and each full threshold is handed to the
-// writer, so a large array streams the way a sequence of value writes does.
+// and so are summed before the single growth. An array that would cross the flush threshold
+// on a stream with a writer is handed over a threshold at a time instead, so it never sits in
+// memory in full; every smaller array takes the single-growth path unchanged.
 func WriteHexBytes[S ~[]E, E ~[]byte](s *Stream, items S) {
 	s.beforeValue()
 	size := 2 + len(items)
 	for i := range items {
 		size += hexutil.QuotedLen(len(items[i]))
 	}
-	if s.out != nil {
-		size = min(size, 2*FlushThreshold)
+	if s.out != nil && size >= FlushThreshold {
+		streamHexBytes(s, items)
+		s.afterValue()
+		return
 	}
 	buf := slices.Grow(s.stream.Buffer(), size)
+	buf = append(buf, '[')
+	for i := range items {
+		if i > 0 {
+			buf = append(buf, ',')
+		}
+		buf = hexutil.AppendQuoted(buf, items[i])
+	}
+	s.stream.SetBuffer(append(buf, ']'))
+	s.afterValue()
+}
+
+func streamHexBytes[S ~[]E, E ~[]byte](s *Stream, items S) {
+	buf := slices.Grow(s.stream.Buffer(), 2*FlushThreshold)
 	start := len(buf)
 	buf = append(buf, '[')
 	for i := range items {
@@ -144,7 +159,7 @@ func WriteHexBytes[S ~[]E, E ~[]byte](s *Stream, items S) {
 			buf = append(buf, ',')
 		}
 		buf = hexutil.AppendQuoted(buf, items[i])
-		if s.out != nil && len(buf)-start >= FlushThreshold {
+		if len(buf)-start >= FlushThreshold {
 			s.stream.SetBuffer(buf[:start])
 			s.writeThrough(buf[start:])
 			buf = s.stream.Buffer()
@@ -152,7 +167,6 @@ func WriteHexBytes[S ~[]E, E ~[]byte](s *Stream, items S) {
 		}
 	}
 	s.stream.SetBuffer(append(buf, ']'))
-	s.afterValue()
 }
 
 // WriteQuotedText writes v.AppendText's output as a JSON string, without an escape scan: it is
