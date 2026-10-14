@@ -25,109 +25,131 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-const (
-	// Fractions of the slot: the wait budget, the point in the slot after which a proposal
-	// must not wait any longer, and the budget of one retry, which the wait always allows.
-	gloasPendingParentMaxWaitDivisor     = 8
-	gloasPendingParentSlotCutoffDivisor  = 6
-	gloasPendingParentRetryBudgetDivisor = 24
-	gloasPendingParentPollInterval       = 100 * time.Millisecond
-)
+// proposalWaitPollInterval paces the re-checks of a proposal wait: whether the parked envelope was
+// applied, whether the head moved and whether the new head state was published. Each is a lookup,
+// so the interval only bounds how late the wait notices a change.
+const proposalWaitPollInterval = 100 * time.Millisecond
 
-// gloasPendingParentDeadline bounds how long a proposal may wait for the parent payload
-// decision: at most the wait budget and not past the in-slot cutoff, but always long enough
-// for one retry, so a request that arrives near or after the cutoff waits past it.
-func gloasPendingParentDeadline(now, slotStart time.Time, slotDuration time.Duration) time.Time {
-	deadline := now.Add(slotDuration / gloasPendingParentMaxWaitDivisor)
-	if cutoff := slotStart.Add(slotDuration / gloasPendingParentSlotCutoffDivisor); cutoff.Before(deadline) {
-		deadline = cutoff
-	}
-	if floor := now.Add(slotDuration / gloasPendingParentRetryBudgetDivisor); deadline.Before(floor) {
-		return floor
-	}
-	return deadline
+// proposalWaitCutoff is the point in the slot after which a proposal no longer waits: one
+// publication margin before the payload collection deadline, so the payload built after the wait
+// still has that margin.
+func proposalWaitCutoff(slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion) time.Time {
+	due := attestationDue(cfg, stateVersion)
+	return slotStart.Add(unpreparedGrabOffset(due) - payloadPublicationMargin(due))
 }
 
-// resolveProductionPayloadSource resolves the payload source for a proposal and, when the EMPTY
-// head has a parked envelope, waits for its decision.
-func (a *ApiHandler) resolveProductionPayloadSource(ctx context.Context, baseState *state.CachingBeaconState, baseBlockRoot common.Hash, targetSlot uint64, stateVersion clparams.StateVersion) (executionPayloadSource, error) {
-	source, err := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
-	if err != nil || !source.envelopeParked {
-		return source, err
-	}
-	return a.awaitPendingParentPayload(ctx, baseState, baseBlockRoot, targetSlot, stateVersion)
-}
-
-// awaitGloasPayloadSource polls parked until it reports false or the deadline passes, then
-// resolves the source once, so a resolve racing an envelope commit cannot end the wait early.
-// A head change seen on any poll ends the wait at once. The retry runs on its own goroutine, so
-// a blocked retry cannot hold the wait past the cutoff.
-func awaitGloasPayloadSource(
+// awaitParkedEnvelope polls parked until it reports false or the deadline passes. A head change
+// seen on any poll ends the wait at once. retry runs on its own goroutine until the wait returns,
+// so a blocked apply cannot hold the wait past the deadline.
+func awaitParkedEnvelope(
 	ctx context.Context,
 	deadline time.Time,
 	interval time.Duration,
 	parked func() bool,
 	headErr func() error,
-	retry func(),
-	resolve func() (executionPayloadSource, error),
-) (executionPayloadSource, error) {
+	retry func(stop <-chan struct{}),
+) error {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	cutoff := time.NewTimer(time.Until(deadline))
 	defer cutoff.Stop()
-	retryDone := make(chan struct{})
-	go func() {
-		defer close(retryDone)
-		retry()
-	}()
-wait:
+	stop := make(chan struct{})
+	defer close(stop)
+	go retry(stop)
 	for parked() {
 		if err := headErr(); err != nil {
-			return executionPayloadSource{}, err
+			return err
 		}
 		select {
-		case <-retryDone:
-			retryDone = nil
 		case <-ticker.C:
 		case <-ctx.Done():
-			break wait
+			return ctx.Err()
 		case <-cutoff.C:
-			break wait
+			return nil
 		}
 	}
-	return resolve()
+	return nil
 }
 
-// awaitPendingParentPayload gives the parent's payload a bounded chance to be applied before
-// the proposal falls back to the EMPTY parent. A pending envelope is only re-applied by an
-// explicit retry, so the wait starts one; it owns a context that outlives the deadline by one
-// retry budget, so a retry in flight at the cutoff is not cut short.
+// retryParkedEnvelope retries the envelope parked for root until stop closes or nothing is
+// parked, at the pace fork choice sets per root. An apply in flight when stop closes runs on
+// until the payload collection deadline, so ending the wait does not waste its EL call.
+func (a *ApiHandler) retryParkedEnvelope(ctx context.Context, root common.Hash, collectBy time.Time, stop <-chan struct{}) {
+	applyCtx, cancel := context.WithDeadline(context.WithoutCancel(ctx), collectBy)
+	defer cancel()
+	for {
+		select {
+		case <-stop:
+			return
+		default:
+		}
+		next := a.forkchoiceStore.RetryPendingExecutionPayloadEnvelope(applyCtx, root)
+		if next.IsZero() {
+			return
+		}
+		timer := time.NewTimer(time.Until(next))
+		select {
+		case <-stop:
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+	}
+}
+
+// awaitPendingParentPayload gives an envelope parked for the EMPTY head a bounded chance to be
+// applied before the proposal builds on the EMPTY parent. Nothing else re-applies a parked
+// envelope at the start of the slot, so the wait retries it.
 func (a *ApiHandler) awaitPendingParentPayload(
 	ctx context.Context,
 	baseState *state.CachingBeaconState,
 	baseBlockRoot common.Hash,
 	targetSlot uint64,
 	stateVersion clparams.StateVersion,
-) (executionPayloadSource, error) {
-	slotDuration := time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second
-	deadline := gloasPendingParentDeadline(time.Now(), a.ethClock.GetSlotTime(targetSlot), slotDuration)
-	a.logger.Info("BlockProduction: waiting for parent payload decision", "slot", targetSlot, "head", baseBlockRoot, "budget", time.Until(deadline).Round(time.Millisecond))
-	retry := func() {
-		budget := max(time.Until(deadline), 0) + slotDuration/gloasPendingParentRetryBudgetDivisor
-		retryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), budget)
-		defer cancel()
-		a.forkchoiceStore.RetryPendingExecutionPayloadEnvelope(retryCtx, baseBlockRoot)
+) error {
+	if stateVersion.Before(clparams.GloasVersion) {
+		return nil
 	}
-	parked := func() bool { return a.envelopeParked(baseBlockRoot) }
-	headErr := func() error {
-		_, err := a.resolveProposalHead(baseBlockRoot)
+	parked, err := a.parentEnvelopeParked(baseState, baseBlockRoot, targetSlot)
+	if err != nil || !parked {
 		return err
 	}
-	source, err := awaitGloasPayloadSource(ctx, deadline, gloasPendingParentPollInterval, parked, headErr, retry, func() (executionPayloadSource, error) {
-		return a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
-	})
-	if err != nil {
-		a.logger.Warn("BlockProduction: parent payload wait stopped", "slot", targetSlot, "head", baseBlockRoot, "err", err)
+	slotStart := a.ethClock.GetSlotTime(targetSlot)
+	deadline := proposalWaitCutoff(slotStart, a.beaconChainCfg, stateVersion)
+	if !time.Now().Before(deadline) {
+		return nil
 	}
-	return source, err
+	a.logger.Info("BlockProduction: waiting for parent payload decision", "slot", targetSlot, "head", baseBlockRoot, "budget", time.Until(deadline).Round(time.Millisecond))
+	collectBy := slotStart.Add(unpreparedGrabOffset(attestationDue(a.beaconChainCfg, stateVersion)))
+	return awaitParkedEnvelope(ctx, deadline, proposalWaitPollInterval,
+		func() bool { return a.envelopeParked(baseBlockRoot) },
+		func() error {
+			_, err := a.resolveProposalHead(baseBlockRoot)
+			return err
+		},
+		func(stop <-chan struct{}) { a.retryParkedEnvelope(ctx, baseBlockRoot, collectBy, stop) },
+	)
+}
+
+// awaitHeadStateAfter waits until the published head state is no longer staleRoot, so production
+// retried after a head change builds on the new head instead of the state it just failed on. It
+// gives up at the proposal wait cutoff.
+func (a *ApiHandler) awaitHeadStateAfter(ctx context.Context, staleRoot common.Hash, targetSlot uint64) bool {
+	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch)
+	cutoff := time.NewTimer(time.Until(proposalWaitCutoff(a.ethClock.GetSlotTime(targetSlot), a.beaconChainCfg, stateVersion)))
+	defer cutoff.Stop()
+	ticker := time.NewTicker(proposalWaitPollInterval)
+	defer ticker.Stop()
+	for {
+		if root, _, ok := a.syncedData.StateHead(); ok && root != staleRoot {
+			return true
+		}
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			return false
+		case <-cutoff.C:
+			return false
+		}
+	}
 }

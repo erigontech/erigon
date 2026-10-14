@@ -18,6 +18,7 @@ package forkchoice
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -67,11 +68,14 @@ func newRetryPendingStore(t *testing.T, peerDas *das_mock.MockPeerDas) (*ForkCho
 		}},
 	}}}
 	block.Block.Body.SignedExecutionPayloadBid.Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+	retryAt, err := lru.New[common.Hash, time.Time](2)
+	require.NoError(t, err)
 	f := &ForkChoiceStore{
 		forkGraph:                      retryPendingForkGraph{block: block},
 		pendingEnvelopes:               pending,
 		pendingLocalSelfBuildEnvelopes: local,
 		peerDas:                        peerDas,
+		dataAvailableEnvelopeRetryAt:   retryAt,
 	}
 	return f, pending
 }
@@ -80,22 +84,26 @@ func TestRetryPendingExecutionPayloadEnvelopeIgnoresRootsWithoutPendingEnvelope(
 	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
 	f, _ := newRetryPendingStore(t, peerDas)
 
-	f.RetryPendingExecutionPayloadEnvelope(t.Context(), common.HexToHash("0x1"))
+	require.True(t, f.RetryPendingExecutionPayloadEnvelope(t.Context(), common.HexToHash("0x1")).IsZero())
 }
 
-func TestRetryPendingExecutionPayloadEnvelopeWaitsForColumnData(t *testing.T) {
+// While the columns are missing, the retry probes them once per probe interval, and a caller
+// that comes earlier gets the time of the next probe.
+func TestRetryPendingExecutionPayloadEnvelopeProbesMissingColumnDataOncePerInterval(t *testing.T) {
 	root := common.HexToHash("0x1")
 	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
-	peerDas.EXPECT().IsDataAvailable(uint64(7), root).Return(false, nil)
+	peerDas.EXPECT().IsDataAvailable(uint64(7), root).Return(false, nil).Times(1)
 	f, pending := newRetryPendingStore(t, peerDas)
 	pending.Add(root, &cltypes.SignedExecutionPayloadEnvelope{})
 
-	f.RetryPendingExecutionPayloadEnvelope(t.Context(), root)
-
+	start := time.Now()
+	next := f.RetryPendingExecutionPayloadEnvelope(t.Context(), root)
+	require.WithinDuration(t, start.Add(missingEnvelopeDataProbeInterval), next, 100*time.Millisecond)
+	require.Equal(t, next, f.RetryPendingExecutionPayloadEnvelope(t.Context(), root))
 	require.True(t, pending.Contains(root))
 }
 
-func TestRetryPendingExecutionPayloadEnvelopeAppliesOnceColumnDataIsAvailable(t *testing.T) {
+func TestRetryPendingExecutionPayloadEnvelopeAppliesOnceColumnDataBecomesAvailable(t *testing.T) {
 	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
 	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(cfg, envelope.Message.ExecutionRequests))
 	payloadHash, err := envelope.Message.Payload.ComputeBlockHash(&envelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
@@ -104,6 +112,7 @@ func TestRetryPendingExecutionPayloadEnvelopeAppliesOnceColumnDataIsAvailable(t 
 	parentBid := block.Block.Body.GetSignedExecutionPayloadBid().Message
 	parentBid.BlockHash = payloadHash
 	parentBid.GasLimit = envelope.Message.Payload.GasLimit
+	parentBid.BlobKzgCommitments.Append(&cltypes.KZGCommitment{}) // the apply waits for the columns
 	bodyRoot, err := block.Block.Body.HashSSZ()
 	require.NoError(t, err)
 	blockState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{
@@ -132,10 +141,20 @@ func TestRetryPendingExecutionPayloadEnvelopeAppliesOnceColumnDataIsAvailable(t 
 	pending.Add(root, envelope)
 	f.pendingEnvelopes = pending
 	f.pendingLocalSelfBuildEnvelopes = local
+	retryAt, err := lru.New[common.Hash, time.Time](2)
+	require.NoError(t, err)
+	f.dataAvailableEnvelopeRetryAt = retryAt
 	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
-	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).Return(true, nil).AnyTimes()
+	gomock.InOrder(
+		peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).Return(false, nil),
+		peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).Return(true, nil),
+	)
 	f.peerDas = peerDas
 
+	// The columns are still missing at the first retry and complete by the next one.
+	require.False(t, f.RetryPendingExecutionPayloadEnvelope(t.Context(), root).IsZero())
+	require.True(t, pending.Contains(root))
+	retryAt.Remove(root) // the probe interval has passed
 	f.RetryPendingExecutionPayloadEnvelope(t.Context(), root)
 
 	require.True(t, graph.HasEnvelope(root))
@@ -146,37 +165,61 @@ func TestRetryPendingExecutionPayloadEnvelopeAppliesOnceColumnDataIsAvailable(t 
 	require.False(t, pending.Contains(root))
 }
 
-func TestRetryPendingExecutionPayloadEnvelopeWaitsForInFlightRetry(t *testing.T) {
+// A caller that comes while an attempt is in flight is not admitted: it gets the time of the next
+// attempt, one retry interval after the one in flight started.
+func TestRetryPendingExecutionPayloadEnvelopeAdmitsOneAttemptPerInterval(t *testing.T) {
 	root := common.HexToHash("0x1")
 	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
-	peerDas.EXPECT().IsDataAvailable(uint64(7), root).Return(true, nil).AnyTimes()
+	peerDas.EXPECT().IsDataAvailable(uint64(7), root).Return(true, nil).Times(1)
 	f, pending := newRetryPendingStore(t, peerDas)
 	release := make(chan struct{})
 	f.forkGraph = retryPendingForkGraph{block: f.forkGraph.(retryPendingForkGraph).block, gate: release}
 	pending.Add(root, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: root}})
 
+	start := time.Now()
 	first := make(chan struct{})
 	go func() {
 		f.RetryPendingExecutionPayloadEnvelope(t.Context(), root)
 		close(first)
 	}()
 	require.Eventually(t, func() bool {
-		_, busy := f.retryingEnvelopes.Load(root)
+		_, busy := f.pendingEnvelopeApplyGate.Load(root)
 		return busy
 	}, 5*time.Second, time.Millisecond)
-	second := make(chan struct{})
-	go func() {
-		f.RetryPendingExecutionPayloadEnvelope(t.Context(), root)
-		close(second)
-	}()
-	select {
-	case <-second:
-		t.Fatal("second retry returned while the first was still in flight")
-	case <-time.After(50 * time.Millisecond):
-	}
+
+	next := f.RetryPendingExecutionPayloadEnvelope(t.Context(), root)
+	require.WithinDuration(t, start.Add(dataAvailableEnvelopeRetryInterval), next, 500*time.Millisecond)
+	_, busy := f.pendingEnvelopeApplyGate.Load(root)
+	require.True(t, busy, "the first attempt is still in flight")
 	close(release)
 	awaitSignal(t, first, "the first retry")
-	awaitSignal(t, second, "the second retry")
+}
+
+// gateWaitSignal closes waiting when the apply under test starts to wait at a busy per-root gate:
+// before admission, only that branch of enterPendingEnvelopeApply calls Done.
+type gateWaitSignal struct {
+	context.Context
+	waiting chan struct{}
+	once    sync.Once
+}
+
+func (c *gateWaitSignal) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.waiting) })
+	return c.Context.Done()
+}
+
+// applyWaitingAtTheGate starts an apply while the test holds the gate and returns once it waits
+// there, so the test changes the queue only after the apply is blocked.
+func applyWaitingAtTheGate(t *testing.T, f *ForkChoiceStore, root common.Hash) <-chan struct{} {
+	t.Helper()
+	ctx := &gateWaitSignal{Context: t.Context(), waiting: make(chan struct{})}
+	done := make(chan struct{})
+	go func() {
+		f.applyPendingEnvelope(ctx, root, false)
+		close(done)
+	}()
+	awaitSignal(t, ctx.waiting, "the apply waiting at the gate")
+	return done
 }
 
 func TestEnterPendingEnvelopeApplyAdmitsAWaiterAfterTheHolderLeaves(t *testing.T) {
@@ -220,7 +263,7 @@ func TestEnterPendingEnvelopeApplyRefusesADeadContextAtAnIdleGate(t *testing.T) 
 	cancel()
 
 	require.False(t, f.enterPendingEnvelopeApply(ctx, root))
-	_, busy := f.retryingEnvelopes.Load(root)
+	_, busy := f.pendingEnvelopeApplyGate.Load(root)
 	require.False(t, busy)
 }
 
@@ -241,12 +284,12 @@ func TestApplyPendingEnvelopeHoldsThePerRootGate(t *testing.T) {
 		close(done)
 	}()
 	require.Eventually(t, func() bool {
-		_, busy := f.retryingEnvelopes.Load(root)
+		_, busy := f.pendingEnvelopeApplyGate.Load(root)
 		return busy
 	}, 5*time.Second, time.Millisecond)
 	close(release)
 	awaitSignal(t, done, "the waiting apply")
-	_, busy := f.retryingEnvelopes.Load(root)
+	_, busy := f.pendingEnvelopeApplyGate.Load(root)
 	require.False(t, busy)
 }
 
@@ -274,11 +317,7 @@ func TestApplyPendingEnvelopeSkipsACopyTheHolderSettled(t *testing.T) {
 	pending.Add(root, envelope)
 
 	require.True(t, f.enterPendingEnvelopeApply(t.Context(), root))
-	done := make(chan struct{})
-	go func() {
-		f.applyPendingEnvelope(t.Context(), root, false)
-		close(done)
-	}()
+	done := applyWaitingAtTheGate(t, f, root)
 	pending.Remove(root) // the holder settled the copy
 	f.leavePendingEnvelopeApply(root)
 	awaitSignal(t, done, "the waiting apply")
@@ -302,11 +341,7 @@ func TestApplyPendingEnvelopeAppliesANewerParkedCopy(t *testing.T) {
 	pending.Add(root, older)
 
 	require.True(t, f.enterPendingEnvelopeApply(t.Context(), root))
-	done := make(chan struct{})
-	go func() {
-		f.applyPendingEnvelope(t.Context(), root, false)
-		close(done)
-	}()
+	done := applyWaitingAtTheGate(t, f, root)
 	pending.Add(root, newer) // the holder parked a newer copy
 	f.leavePendingEnvelopeApply(root)
 	awaitSignal(t, done, "the waiting apply")
@@ -328,11 +363,7 @@ func TestApplyPendingEnvelopePicksTheQueueOnceAdmitted(t *testing.T) {
 	f.pendingLocalSelfBuildEnvelopes.Add(root, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: root}})
 
 	require.True(t, f.enterPendingEnvelopeApply(t.Context(), root))
-	done := make(chan struct{})
-	go func() {
-		f.applyPendingEnvelope(t.Context(), root, false)
-		close(done)
-	}()
+	done := applyWaitingAtTheGate(t, f, root)
 	f.pendingLocalSelfBuildEnvelopes.Remove(root) // the holder settled the self-built copy
 	pending.Add(root, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: root, BuilderIndex: 1}})
 	f.leavePendingEnvelopeApply(root)

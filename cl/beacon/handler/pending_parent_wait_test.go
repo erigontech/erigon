@@ -18,7 +18,6 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync/atomic"
 	"testing"
@@ -27,15 +26,20 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func noHeadChange() error { return nil }
+
+func noRetry(<-chan struct{}) {}
 
 // parkedFor reports the envelope parked for the first n polls.
 func parkedFor(n int) func() bool {
@@ -46,57 +50,23 @@ func parkedFor(n int) func() bool {
 	}
 }
 
-func TestAwaitGloasPayloadSourceResolvesOnceTheEnvelopeIsNoLongerParked(t *testing.T) {
-	resolves := 0
-	resolve := func() (executionPayloadSource, error) {
-		resolves++
-		return executionPayloadSource{gloasPath: gloasPayloadPathFull}, nil
-	}
-	src, err := awaitGloasPayloadSource(context.Background(), time.Now().Add(time.Second), time.Millisecond, parkedFor(3), noHeadChange, func() {}, resolve)
-	require.NoError(t, err)
-	require.Equal(t, gloasPayloadPathFull, src.gloasPath)
-	require.Equal(t, 1, resolves)
+func TestAwaitParkedEnvelopeEndsOnceTheEnvelopeIsNoLongerParked(t *testing.T) {
+	start := time.Now()
+	require.NoError(t, awaitParkedEnvelope(t.Context(), start.Add(5*time.Second), time.Millisecond, parkedFor(3), noHeadChange, noRetry))
+	require.Less(t, time.Since(start), time.Second)
 }
 
-// A resolve that races an envelope commit can read the head before the commit and the envelope
-// after it, and report EMPTY with nothing parked. The wait must not take that as the decision
-// while the cheap parked check still holds.
-func TestAwaitGloasPayloadSourceDoesNotEndOnARacedResolve(t *testing.T) {
-	resolves := 0
-	resolve := func() (executionPayloadSource, error) {
-		resolves++
-		return executionPayloadSource{gloasPath: gloasPayloadPathEmpty}, nil
-	}
+func TestAwaitParkedEnvelopeEndsAtTheDeadline(t *testing.T) {
 	start := time.Now()
 	deadline := start.Add(50 * time.Millisecond)
-	_, err := awaitGloasPayloadSource(context.Background(), deadline, time.Millisecond, func() bool { return true }, noHeadChange, func() {}, resolve)
-	require.NoError(t, err)
-	require.False(t, time.Now().Before(deadline), "the wait ended before the cutoff")
-	require.Equal(t, 1, resolves, "only the cutoff resolves")
+	// A poll interval far longer than the deadline: the deadline itself must end the wait.
+	require.NoError(t, awaitParkedEnvelope(t.Context(), deadline, time.Hour, func() bool { return true }, noHeadChange, noRetry))
+	require.False(t, time.Now().Before(deadline), "the wait ended before the deadline")
+	require.Less(t, time.Since(start), time.Second)
 }
 
-func TestAwaitGloasPayloadSourceResolvesOnceMoreAtTheCutoff(t *testing.T) {
-	start := time.Now()
-	// A poll interval far longer than the deadline: the cutoff itself must end the wait.
-	src, err := awaitGloasPayloadSource(context.Background(), start.Add(20*time.Millisecond), time.Second, func() bool { return true }, noHeadChange, func() {}, func() (executionPayloadSource, error) {
-		return executionPayloadSource{gloasPath: gloasPayloadPathFull}, nil
-	})
-	require.NoError(t, err)
-	require.Equal(t, gloasPayloadPathFull, src.gloasPath, "a decision that lands at the cutoff is picked up")
-	require.Less(t, time.Since(start), 500*time.Millisecond)
-}
-
-// Without a resolved source the proposal must not fall back to the one seen before the wait.
-func TestAwaitGloasPayloadSourceReturnsAResolveError(t *testing.T) {
-	resolveErr := errors.New("state unavailable")
-	_, err := awaitGloasPayloadSource(context.Background(), time.Now().Add(time.Second), time.Millisecond, parkedFor(0), noHeadChange, func() {}, func() (executionPayloadSource, error) {
-		return executionPayloadSource{}, resolveErr
-	})
-	require.ErrorIs(t, err, resolveErr)
-}
-
-// A block that becomes head during the wait ends it at once instead of at the cutoff.
-func TestAwaitGloasPayloadSourceReturnsAHeadChangeMidWait(t *testing.T) {
+// A block that becomes head during the wait ends it at once instead of at the deadline.
+func TestAwaitParkedEnvelopeReturnsAHeadChangeMidWait(t *testing.T) {
 	checks := 0
 	headErr := func() error {
 		checks++
@@ -106,119 +76,155 @@ func TestAwaitGloasPayloadSourceReturnsAHeadChangeMidWait(t *testing.T) {
 		return fmt.Errorf("%w: proposal parent a, current head b", errForkChoiceHeadChanged)
 	}
 	start := time.Now()
-	_, err := awaitGloasPayloadSource(context.Background(), start.Add(3*time.Second), time.Millisecond, func() bool { return true }, headErr, func() {}, func() (executionPayloadSource, error) {
-		t.Error("a head change must not wait for the cutoff resolve")
-		return executionPayloadSource{}, nil
-	})
+	err := awaitParkedEnvelope(t.Context(), start.Add(5*time.Second), time.Millisecond, func() bool { return true }, headErr, noRetry)
 	require.ErrorIs(t, err, errForkChoiceHeadChanged)
 	require.Less(t, time.Since(start), time.Second)
 }
 
-func TestAwaitGloasPayloadSourceReturnsAHeadChange(t *testing.T) {
-	_, err := awaitGloasPayloadSource(context.Background(), time.Now().Add(time.Second), time.Millisecond, parkedFor(0), noHeadChange, func() {}, func() (executionPayloadSource, error) {
-		return executionPayloadSource{}, fmt.Errorf("%w: proposal parent a, current head b", errForkChoiceHeadChanged)
-	})
-	require.ErrorIs(t, err, errForkChoiceHeadChanged)
+func TestAwaitParkedEnvelopeReturnsTheCallerCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	err := awaitParkedEnvelope(ctx, time.Now().Add(5*time.Second), time.Hour, func() bool { return true }, noHeadChange, noRetry)
+	require.ErrorIs(t, err, context.Canceled)
 }
 
-func TestGloasPendingParentDeadline(t *testing.T) {
-	slotStart := time.Unix(1000, 0)
-	slot := 12 * time.Second
-	require.Equal(t, slotStart.Add(1500*time.Millisecond), gloasPendingParentDeadline(slotStart, slotStart, slot))
-	require.Equal(t, slotStart.Add(1000*time.Millisecond), gloasPendingParentDeadline(slotStart.Add(-500*time.Millisecond), slotStart, slot))
-	require.Equal(t, slotStart.Add(2*time.Second), gloasPendingParentDeadline(slotStart.Add(time.Second), slotStart, slot))
-	// Past the cutoff the wait still allows one retry.
-	require.Equal(t, slotStart.Add(3500*time.Millisecond), gloasPendingParentDeadline(slotStart.Add(3*time.Second), slotStart, slot))
-
-	shortSlot := 6 * time.Second
-	require.Equal(t, slotStart.Add(750*time.Millisecond), gloasPendingParentDeadline(slotStart, slotStart, shortSlot))
-	require.Equal(t, slotStart.Add(time.Second), gloasPendingParentDeadline(slotStart.Add(500*time.Millisecond), slotStart, shortSlot))
-}
-
-func TestAwaitGloasPayloadSourceDoesNotWaitForABlockedRetry(t *testing.T) {
+// A blocked retry does not hold the wait, and the retry is told to stop when the wait returns.
+func TestAwaitParkedEnvelopeDoesNotWaitForABlockedRetry(t *testing.T) {
 	release := make(chan struct{})
 	defer close(release)
-	last := executionPayloadSource{gloasPath: gloasPayloadPathEmpty, envelopeParked: true}
+	stopped := make(chan struct{})
+	retry := func(stop <-chan struct{}) {
+		<-stop
+		close(stopped)
+		<-release
+	}
 	start := time.Now()
-	src, err := awaitGloasPayloadSource(context.Background(), start.Add(20*time.Millisecond), time.Millisecond, func() bool { return true }, noHeadChange, func() { <-release }, func() (executionPayloadSource, error) { return last, nil })
-	require.NoError(t, err)
-	require.Equal(t, last, src)
-	require.Less(t, time.Since(start), 500*time.Millisecond)
+	require.NoError(t, awaitParkedEnvelope(t.Context(), start.Add(20*time.Millisecond), time.Millisecond, func() bool { return true }, noHeadChange, retry))
+	require.Less(t, time.Since(start), time.Second)
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the retry was not told to stop")
+	}
 }
 
-// Availability changes trigger their own retries, so the wait starts one retry and then only
-// polls.
-func TestAwaitGloasPayloadSourceStartsOneRetry(t *testing.T) {
-	var retries atomic.Int32
-	pending := executionPayloadSource{gloasPath: gloasPayloadPathEmpty, envelopeParked: true}
-	_, err := awaitGloasPayloadSource(context.Background(), time.Now().Add(30*time.Millisecond), time.Millisecond, func() bool { return true }, noHeadChange, func() { retries.Add(1) }, func() (executionPayloadSource, error) { return pending, nil })
-	require.NoError(t, err)
-	require.Equal(t, int32(1), retries.Load())
+// On 12 s slots the Gloas attestation is due at 3 s and the payload is collected by 2.25 s; the
+// wait ends one publication margin (750 ms) before that.
+func TestProposalWaitCutoff(t *testing.T) {
+	slotStart := time.Unix(1000, 0)
+	require.Equal(t, slotStart.Add(1500*time.Millisecond), proposalWaitCutoff(slotStart, &clparams.MainnetBeaconConfig, clparams.GloasVersion))
 }
 
-// The retry outlives the wait: a retry in flight at the cutoff keeps its budget instead of
-// being cut short by the wait's return.
-func TestAwaitPendingParentPayloadLetsTheRetryOutliveTheWait(t *testing.T) {
-	ctrl := gomock.NewController(t)
+// pendingParentWaitFixture is an EMPTY head with a parked envelope, whose slot started so that
+// the wait cutoff is remaining away. The envelope counts as applied once applied is set.
+func pendingParentWaitFixture(t *testing.T, remaining time.Duration) (*ApiHandler, *mock_services.ForkChoiceStorageMock, *state.CachingBeaconState, common.Hash, *atomic.Bool) {
+	t.Helper()
 	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
 	baseBlockRoot := common.Hash{0x41}
 	forkchoiceStore.HeadVal = baseBlockRoot
 	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
 	forkchoiceStore.PendingEnvelopeRoots = map[common.Hash]struct{}{baseBlockRoot: {}}
+	applied := &atomic.Bool{}
+	forkchoiceStore.HasEnvelopeFunc = func(common.Hash) bool { return applied.Load() }
 	postState.SetLatestBlockHash(common.Hash{0xa1})
 	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{BlockHash: common.Hash{0xb2}, Slot: postState.Slot()})
-	// Past the cutoff the wait lasts one retry budget (slot/24, 500 ms), and the retry keeps as much again.
 	handler.beaconChainCfg.SecondsPerSlot = 12
-	clock := eth_clock.NewMockEthereumClock(ctrl)
-	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(-time.Hour)).AnyTimes()
+	sinceCutoff := proposalWaitCutoff(time.Unix(0, 0), handler.beaconChainCfg, clparams.GloasVersion).Sub(time.Unix(0, 0))
+	slotStart := time.Now().Add(remaining - sinceCutoff)
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetSlotTime(gomock.Any()).Return(slotStart).AnyTimes()
 	handler.ethClock = clock
+	return handler, forkchoiceStore, postState, baseBlockRoot, applied
+}
 
-	release := make(chan struct{})
-	retryCtxErr := make(chan error, 1)
-	forkchoiceStore.RetryPendingEnvelopeFunc = func(ctx context.Context, _ common.Hash) {
-		<-release
-		retryCtxErr <- ctx.Err()
+// Columns that complete after the first retry: the wait retries at the pace fork choice sets and
+// ends as soon as the envelope is applied.
+func TestAwaitPendingParentPayloadRetriesUntilTheEnvelopeIsApplied(t *testing.T) {
+	handler, forkchoiceStore, postState, baseBlockRoot, applied := pendingParentWaitFixture(t, 5*time.Second)
+	var retries atomic.Int32
+	forkchoiceStore.RetryPendingEnvelopeFunc = func(context.Context, common.Hash) time.Time {
+		if retries.Add(1) == 1 {
+			return time.Now().Add(20 * time.Millisecond) // the columns are still missing
+		}
+		applied.Store(true)
+		return time.Time{}
 	}
-	source, err := handler.resolveExecutionPayloadSource(postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion)
-	require.NoError(t, err)
-	require.True(t, source.envelopeParked)
+
+	start := time.Now()
+	require.NoError(t, handler.awaitPendingParentPayload(t.Context(), postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion))
+	require.Less(t, time.Since(start), 2*time.Second)
+	require.Equal(t, int32(2), retries.Load())
+}
+
+// An apply that keeps failing is retried at its pace until the cutoff, and no longer after it.
+func TestAwaitPendingParentPayloadRetriesAFailingApplyUntilTheCutoff(t *testing.T) {
+	handler, forkchoiceStore, postState, baseBlockRoot, _ := pendingParentWaitFixture(t, 300*time.Millisecond)
+	var retries atomic.Int32
+	forkchoiceStore.RetryPendingEnvelopeFunc = func(context.Context, common.Hash) time.Time {
+		retries.Add(1)
+		return time.Now().Add(50 * time.Millisecond)
+	}
+
+	start := time.Now()
+	require.NoError(t, handler.awaitPendingParentPayload(t.Context(), postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion))
+	require.GreaterOrEqual(t, time.Since(start), 250*time.Millisecond)
+	atCutoff := retries.Load()
+	require.GreaterOrEqual(t, atCutoff, int32(3))
+	require.LessOrEqual(t, atCutoff, int32(8), "the retries keep their pace")
+	time.Sleep(150 * time.Millisecond)
+	require.LessOrEqual(t, retries.Load(), atCutoff+1, "the retries stop with the wait")
+}
+
+// At or after the cutoff a proposal does not wait at all.
+func TestAwaitPendingParentPayloadDoesNotWaitPastTheCutoff(t *testing.T) {
+	handler, forkchoiceStore, postState, baseBlockRoot, _ := pendingParentWaitFixture(t, -time.Millisecond)
+	var retries atomic.Int32
+	forkchoiceStore.RetryPendingEnvelopeFunc = func(context.Context, common.Hash) time.Time {
+		retries.Add(1)
+		return time.Now().Add(time.Millisecond)
+	}
+
+	start := time.Now()
+	require.NoError(t, handler.awaitPendingParentPayload(t.Context(), postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion))
+	require.Less(t, time.Since(start), 100*time.Millisecond)
+	require.Zero(t, retries.Load())
+}
+
+// An apply in flight at the cutoff is not cut short by the wait's return or by the request.
+func TestAwaitPendingParentPayloadLetsTheApplyOutliveTheWait(t *testing.T) {
+	handler, forkchoiceStore, postState, baseBlockRoot, _ := pendingParentWaitFixture(t, 50*time.Millisecond)
+	release := make(chan struct{})
+	applyCtxErr := make(chan error, 1)
+	forkchoiceStore.RetryPendingEnvelopeFunc = func(ctx context.Context, _ common.Hash) time.Time {
+		<-release
+		applyCtxErr <- ctx.Err()
+		return time.Time{}
+	}
 
 	requestCtx, cancelRequest := context.WithCancel(t.Context())
-	_, err = handler.awaitPendingParentPayload(requestCtx, postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion)
-	require.NoError(t, err)
+	require.NoError(t, handler.awaitPendingParentPayload(requestCtx, postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion))
 	cancelRequest()
 	close(release)
 
 	select {
-	case err := <-retryCtxErr:
-		require.NoError(t, err, "the wait's return must not cancel the retry")
+	case err := <-applyCtxErr:
+		require.NoError(t, err, "the wait's return must not cancel the apply")
 	case <-time.After(5 * time.Second):
-		t.Fatal("the retry did not finish")
+		t.Fatal("the apply did not finish")
 	}
 }
 
-func TestResolveProductionPayloadSourceWaitsOnlyForAParkedEnvelope(t *testing.T) {
-	for _, parked := range []bool{false, true} {
-		postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
-		baseBlockRoot := common.Hash{0x41}
-		forkchoiceStore.HeadVal = baseBlockRoot
-		forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
-		if parked {
-			forkchoiceStore.PendingEnvelopeRoots = map[common.Hash]struct{}{baseBlockRoot: {}}
-		}
-		postState.SetLatestBlockHash(common.Hash{0xa1})
-		postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{BlockHash: common.Hash{0xb2}, Slot: postState.Slot()})
-		clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
-		clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(-time.Hour)).AnyTimes()
-		handler.ethClock = clock
-		var retries atomic.Int32
-		forkchoiceStore.RetryPendingEnvelopeFunc = func(context.Context, common.Hash) { retries.Add(1) }
-
-		source, err := handler.resolveProductionPayloadSource(t.Context(), postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion)
-		require.NoError(t, err)
-		require.Equal(t, parked, source.envelopeParked)
-		require.Equal(t, parked, retries.Load() > 0, "parked=%v", parked)
+func TestAwaitPendingParentPayloadWaitsOnlyForAParkedEnvelope(t *testing.T) {
+	handler, forkchoiceStore, postState, baseBlockRoot, _ := pendingParentWaitFixture(t, 5*time.Second)
+	forkchoiceStore.PendingEnvelopeRoots = nil
+	var retries atomic.Int32
+	forkchoiceStore.RetryPendingEnvelopeFunc = func(context.Context, common.Hash) time.Time {
+		retries.Add(1)
+		return time.Time{}
 	}
+
+	require.NoError(t, handler.awaitPendingParentPayload(t.Context(), postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion))
+	require.Zero(t, retries.Load())
 }
 
 // An EMPTY head whose envelope is parked is an open decision, so production waits for it
@@ -250,33 +256,31 @@ func TestEnvelopeParkedFlagsOnlyAnUnpersistedParkedEnvelope(t *testing.T) {
 	require.False(t, handler.envelopeParked(rejected))
 }
 
-// A head change ends the parent wait; production then runs once more from the new head.
-func TestRetryOnceOnHeadChange(t *testing.T) {
-	headChanged := fmt.Errorf("%w: proposal parent a, current head b", errForkChoiceHeadChanged)
-	for _, tc := range []struct {
-		name  string
-		errs  []error
-		calls int
-		err   error
-	}{
-		{name: "success", errs: []error{nil}, calls: 1},
-		{name: "other error", errs: []error{errors.New("boom")}, calls: 1, err: errors.New("boom")},
-		{name: "head change then success", errs: []error{headChanged, nil}, calls: 2},
-		{name: "head change twice", errs: []error{headChanged, headChanged}, calls: 2, err: errForkChoiceHeadChanged},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			calls := 0
-			result, err := retryOnceOnHeadChange(func() (int, error) {
-				calls++
-				return calls, tc.errs[calls-1]
-			})
-			require.Equal(t, tc.calls, calls)
-			if tc.err == nil {
-				require.NoError(t, err)
-				require.Equal(t, tc.calls, result)
-				return
-			}
-			require.ErrorContains(t, err, tc.err.Error())
-		})
-	}
+// After a head change, production is retried only once the new head's state is published:
+// the state it failed on would fail the same way.
+func TestAwaitHeadStateAfterWaitsForTheNewHeadState(t *testing.T) {
+	handler, _, postState, staleRoot, _ := pendingParentWaitFixture(t, 5*time.Second)
+	handler.syncedData = synced_data.NewSyncedDataManager(handler.beaconChainCfg, true)
+	require.NoError(t, handler.syncedData.OnHeadStateWithBlockRoot(postState, staleRoot))
+	newRoot := common.Hash{0x42}
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		_ = handler.syncedData.OnHeadStateWithBlockRoot(postState, newRoot)
+	}()
+
+	start := time.Now()
+	require.True(t, handler.awaitHeadStateAfter(t.Context(), staleRoot, postState.Slot()+1))
+	require.GreaterOrEqual(t, time.Since(start), 40*time.Millisecond)
+	root, _, _ := handler.syncedData.StateHead()
+	require.Equal(t, newRoot, root)
+}
+
+func TestAwaitHeadStateAfterGivesUpAtTheCutoff(t *testing.T) {
+	handler, _, postState, staleRoot, _ := pendingParentWaitFixture(t, 50*time.Millisecond)
+	handler.syncedData = synced_data.NewSyncedDataManager(handler.beaconChainCfg, true)
+	require.NoError(t, handler.syncedData.OnHeadStateWithBlockRoot(postState, staleRoot))
+
+	start := time.Now()
+	require.False(t, handler.awaitHeadStateAfter(t.Context(), staleRoot, postState.Slot()+1))
+	require.Less(t, time.Since(start), time.Second)
 }

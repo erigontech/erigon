@@ -785,9 +785,6 @@ type executionPayloadSource struct {
 	parentExecutionRequests *cltypes.ExecutionRequests
 	gloasPath               gloasPayloadPath
 	fallbackCause           error
-	// envelopeParked: the EMPTY head has an envelope waiting for its data, which can still make
-	// it FULL. Preparation primes the EMPTY fallback; production waits for the decision.
-	envelopeParked bool
 }
 
 func withdrawalsStateForExecutionPayloadSource(
@@ -831,13 +828,25 @@ func (a *ApiHandler) resolveExecutionPayloadSource(
 	if err != nil {
 		return executionPayloadSource{}, err
 	}
-	path := gloasPayloadPathPreFork
-	if baseState.GetLatestExecutionPayloadBid() != nil && !a.isPreGloasParent(baseState) {
-		path = a.gloasPayloadPathForHead(head, targetSlot)
+	return a.executionPayloadSourceForGloasPath(baseState, baseBlockRoot, a.proposalGloasPath(baseState, head, targetSlot)), nil
+}
+
+func (a *ApiHandler) proposalGloasPath(baseState *state.CachingBeaconState, head forkchoice.ForkChoiceNode, targetSlot uint64) gloasPayloadPath {
+	if baseState.GetLatestExecutionPayloadBid() == nil || a.isPreGloasParent(baseState) {
+		return gloasPayloadPathPreFork
 	}
-	source := a.executionPayloadSourceForGloasPath(baseState, baseBlockRoot, path)
-	source.envelopeParked = path == gloasPayloadPathEmpty && a.envelopeParked(head.Root)
-	return source, nil
+	return a.gloasPayloadPathForHead(head, targetSlot)
+}
+
+// parentEnvelopeParked reports a proposal that would build on the EMPTY head while that head's
+// envelope is parked, which can still make it FULL. Preparation primes the EMPTY fallback;
+// production waits for the decision.
+func (a *ApiHandler) parentEnvelopeParked(baseState *state.CachingBeaconState, baseBlockRoot common.Hash, targetSlot uint64) (bool, error) {
+	head, err := a.resolveProposalHead(baseBlockRoot)
+	if err != nil {
+		return false, err
+	}
+	return a.proposalGloasPath(baseState, head, targetSlot) == gloasPayloadPathEmpty && a.envelopeParked(head.Root), nil
 }
 
 // envelopeParked reports an EMPTY head whose envelope has arrived but is not applied yet: parked

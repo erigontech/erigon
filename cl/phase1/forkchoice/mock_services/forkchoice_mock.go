@@ -120,7 +120,7 @@ type ForkChoiceStorageMock struct {
 	ShouldExtendPayloadVal bool
 	ShouldBuildOnFullVal   *bool
 
-	RetryPendingEnvelopeFunc func(ctx context.Context, blockRoot common.Hash)
+	RetryPendingEnvelopeFunc func(ctx context.Context, blockRoot common.Hash) time.Time
 	PendingEnvelopeRoots     map[common.Hash]struct{}
 	ApplyInFlightRoots       map[common.Hash]struct{}
 
@@ -670,10 +670,11 @@ func (f *ForkChoiceStorageMock) HasPendingExecutionPayloadEnvelope(blockRoot com
 	return ok
 }
 
-func (f *ForkChoiceStorageMock) RetryPendingExecutionPayloadEnvelope(ctx context.Context, blockRoot common.Hash) {
+func (f *ForkChoiceStorageMock) RetryPendingExecutionPayloadEnvelope(ctx context.Context, blockRoot common.Hash) time.Time {
 	if f.RetryPendingEnvelopeFunc != nil {
-		f.RetryPendingEnvelopeFunc(ctx, blockRoot)
+		return f.RetryPendingEnvelopeFunc(ctx, blockRoot)
 	}
+	return time.Time{}
 }
 
 func (f *ForkChoiceStorageMock) HasEnvelope(blockRoot common.Hash) bool {

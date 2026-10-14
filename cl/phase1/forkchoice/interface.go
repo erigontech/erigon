@@ -156,9 +156,10 @@ type ForkChoiceStorageWriter interface {
 	// checkBlobData: verify blob data availability via PeerDAS
 	// validatePayload: call engine.NewPayload() to validate with EL
 	OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error
-	// [New in Gloas:EIP7732] RetryPendingExecutionPayloadEnvelope re-applies the envelope queued
-	// for blockRoot once its data is available.
-	RetryPendingExecutionPayloadEnvelope(ctx context.Context, blockRoot common.Hash)
+	// [New in Gloas:EIP7732] RetryPendingExecutionPayloadEnvelope applies the envelope queued for
+	// blockRoot when its data is available and its retry is due, and returns when the next retry
+	// is due, or zero when nothing is queued.
+	RetryPendingExecutionPayloadEnvelope(ctx context.Context, blockRoot common.Hash) time.Time
 	ValidateExecutionPayloadEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
 	ClaimExecutionPayloadEnvelopeForGossip(context.Context, common.Hash, uint64) (ExecutionPayloadEnvelopeAdmissionToken, error)
 	TryClaimExecutionPayloadEnvelopeForGossip(common.Hash, uint64) (ExecutionPayloadEnvelopeAdmissionToken, error)

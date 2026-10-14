@@ -743,19 +743,28 @@ func (f *ForkChoiceStore) RetryDataAvailablePendingExecutionPayloadEnvelopes(ctx
 		if !ok || block == nil || block.Block == nil || block.Block.Slot < minSlot {
 			continue
 		}
-		now := time.Now()
-		if retryAt, ok := f.dataAvailableEnvelopeRetryAt.Get(root); ok && now.Before(retryAt) {
-			continue
-		}
-		if commitments := block.GetBlobKzgCommitments(); commitments != nil && commitments.Len() > 0 {
-			if available, err := f.peerDas.IsDataAvailable(block.Block.Slot, root); err != nil || !available {
-				f.dataAvailableEnvelopeRetryAt.Add(root, now.Add(missingEnvelopeDataProbeInterval))
-				continue
-			}
-		}
-		f.dataAvailableEnvelopeRetryAt.Add(root, now.Add(dataAvailableEnvelopeRetryInterval))
-		f.processPendingEnvelopeAfterBlock(ctx, root, true)
+		f.retryPendingEnvelopeWhenDue(ctx, root, block, true)
 	}
+}
+
+// retryPendingEnvelopeWhenDue applies the envelope queued for root when its pacing allows and its
+// columns are available, and returns when the next attempt is due.
+func (f *ForkChoiceStore) retryPendingEnvelopeWhenDue(ctx context.Context, root common.Hash, block *cltypes.SignedBeaconBlock, checkDataAvailability bool) time.Time {
+	now := time.Now()
+	if retryAt, ok := f.dataAvailableEnvelopeRetryAt.Get(root); ok && now.Before(retryAt) {
+		return retryAt
+	}
+	if commitments := block.GetBlobKzgCommitments(); f.peerDas != nil && commitments != nil && commitments.Len() > 0 {
+		if available, err := f.peerDas.IsDataAvailable(block.Block.Slot, root); err != nil || !available {
+			retryAt := now.Add(missingEnvelopeDataProbeInterval)
+			f.dataAvailableEnvelopeRetryAt.Add(root, retryAt)
+			return retryAt
+		}
+	}
+	retryAt := now.Add(dataAvailableEnvelopeRetryInterval)
+	f.dataAvailableEnvelopeRetryAt.Add(root, retryAt)
+	f.processPendingEnvelopeAfterBlock(ctx, root, checkDataAvailability)
+	return retryAt
 }
 
 func (f *ForkChoiceStore) HasPendingExecutionPayloadEnvelope(blockRoot common.Hash) bool {
@@ -763,27 +772,19 @@ func (f *ForkChoiceStore) HasPendingExecutionPayloadEnvelope(blockRoot common.Ha
 		f.pendingLocalSelfBuildEnvelopes != nil && f.pendingLocalSelfBuildEnvelopes.Contains(blockRoot)
 }
 
-// RetryPendingExecutionPayloadEnvelope re-applies the envelope queued for blockRoot as soon as
-// its data columns are available, so the payload can be used before the next slot boundary.
-// The availability check runs once here, outside the store lock.
-func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelope(ctx context.Context, blockRoot common.Hash) {
+// RetryPendingExecutionPayloadEnvelope applies the envelope queued for blockRoot when its data
+// columns are available, paced per root together with the background retry, and returns when the
+// next attempt is due, or zero when nothing is queued for blockRoot. The availability check runs
+// here, outside the store lock.
+func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelope(ctx context.Context, blockRoot common.Hash) time.Time {
 	if !f.HasPendingExecutionPayloadEnvelope(blockRoot) {
-		return
+		return time.Time{}
 	}
 	block, ok := f.forkGraph.GetBlock(blockRoot)
-	if !ok || block == nil {
-		return
+	if !ok || block == nil || block.Block == nil {
+		return time.Time{}
 	}
-	if commitments := block.GetBlobKzgCommitments(); f.peerDas != nil && commitments != nil && commitments.Len() > 0 {
-		available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot)
-		if err != nil {
-			log.Debug("OnBlock: column availability check failed before a pending envelope retry", "blockRoot", blockRoot, "err", err)
-		}
-		if err != nil || !available {
-			return
-		}
-	}
-	f.processPendingEnvelopeAfterBlock(ctx, blockRoot, false)
+	return f.retryPendingEnvelopeWhenDue(ctx, blockRoot, block, false)
 }
 
 func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopeIndices(ctx context.Context, limit int) {
@@ -873,7 +874,7 @@ func (f *ForkChoiceStore) enterPendingEnvelopeApply(ctx context.Context, blockRo
 		if ctx.Err() != nil {
 			return false
 		}
-		inFlight, busy := f.retryingEnvelopes.LoadOrStore(blockRoot, done)
+		inFlight, busy := f.pendingEnvelopeApplyGate.LoadOrStore(blockRoot, done)
 		if !busy {
 			return true
 		}
@@ -886,7 +887,7 @@ func (f *ForkChoiceStore) enterPendingEnvelopeApply(ctx context.Context, blockRo
 }
 
 func (f *ForkChoiceStore) leavePendingEnvelopeApply(blockRoot common.Hash) {
-	if done, ok := f.retryingEnvelopes.LoadAndDelete(blockRoot); ok {
+	if done, ok := f.pendingEnvelopeApplyGate.LoadAndDelete(blockRoot); ok {
 		close(done.(chan struct{}))
 	}
 }
