@@ -52,12 +52,27 @@ type Witness struct {
 // Result is the outcome of executing a block on its witness.
 type Result struct {
 	StateRoot common.Hash
-	Receipts  types.Receipts
+	// TxStateRoots holds the state root after each transaction, with
+	// WithTxStateRoots.
+	TxStateRoots []common.Hash
+	Receipts     types.Receipts
+}
+
+// Option configures Execute.
+type Option func(*options)
+
+type options struct {
+	txStateRoots bool
+}
+
+// WithTxStateRoots records the state root after each transaction.
+func WithTxStateRoots() Option {
+	return func(o *options) { o.txStateRoots = true }
 }
 
 // Verify executes block on its witness and requires the header's state root.
-func Verify(chainConfig *chain.Config, engine rules.Engine, block *types.Block, w *Witness) (*Result, error) {
-	res, err := Execute(chainConfig, engine, block, w)
+func Verify(chainConfig *chain.Config, engine rules.Engine, block *types.Block, w *Witness, opts ...Option) (*Result, error) {
+	res, err := Execute(chainConfig, engine, block, w, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +85,11 @@ func Verify(chainConfig *chain.Config, engine rules.Engine, block *types.Block, 
 // Execute runs block on the parent state its witness proves: header
 // verification, block initialization, the transactions, the post-execution
 // checks and finalization. It returns the post-state root.
-func Execute(chainConfig *chain.Config, engine rules.Engine, block *types.Block, w *Witness) (*Result, error) {
+func Execute(chainConfig *chain.Config, engine rules.Engine, block *types.Block, w *Witness, opts ...Option) (*Result, error) {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
 	header := block.HeaderNoCopy()
 	headers, err := newHeaderReader(chainConfig, block, w.Headers)
 	if err != nil {
@@ -109,6 +128,13 @@ func Execute(chainConfig *chain.Config, engine rules.Engine, block *types.Block,
 			return nil, fmt.Errorf("block %d: transaction %d: %w", block.NumberU64(), i, err)
 		}
 		res.Receipts = append(res.Receipts, receipt)
+		if o.txStateRoots {
+			root, err := ws.flush()
+			if err != nil {
+				return nil, err
+			}
+			res.TxStateRoots = append(res.TxStateRoots, root)
+		}
 	}
 	if err := engine.ValidateBlockPostExecution(chainConfig, header, gasUsed.BlockGasUsed(), gasUsed.Blob, true, true,
 		res.Receipts, block.Transactions(), logger); err != nil {
