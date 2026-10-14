@@ -661,6 +661,10 @@ func (c *gloasCollectorTest) HasBlock(uint64) bool {
 	return false
 }
 
+func (c *gloasCollectorTest) Close() error {
+	return nil
+}
+
 func TestProcessDownloadedGloasEnvelopeCollectorReconciliation(t *testing.T) {
 	root := common.HexToHash("0x1234")
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
