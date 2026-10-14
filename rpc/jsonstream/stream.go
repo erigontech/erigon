@@ -111,9 +111,17 @@ func HexesField[S ~[]E, E ~[length.Hash]byte](s *Stream, name string, items S) {
 		return
 	}
 	s.beforeValue()
-	writeHexArray(s, len(items), len(items)*(hexutil.QuotedLen(length.Hash)+1), func(buf []byte, i int) []byte {
-		return hexutil.AppendQuoted(buf, items[i][:])
-	})
+	buf, start := s.growArray(len(items) * (hexutil.QuotedLen(length.Hash) + 1))
+	for i := range items {
+		if i > 0 {
+			buf = append(buf, ',')
+		}
+		buf = hexutil.AppendQuoted(buf, items[i][:])
+		if s.out != nil && len(buf)-start >= FlushThreshold {
+			buf, start = s.flushArray(buf, start)
+		}
+	}
+	s.stream.SetBuffer(append(buf, ']'))
 	s.afterValue()
 }
 
@@ -125,36 +133,37 @@ func WriteHexBytes[S ~[]E, E ~[]byte](s *Stream, items S) {
 	for i := range items {
 		size += hexutil.QuotedLen(len(items[i]))
 	}
-	writeHexArray(s, len(items), size, func(buf []byte, i int) []byte {
-		return hexutil.AppendQuoted(buf, items[i])
-	})
+	buf, start := s.growArray(size)
+	for i := range items {
+		if i > 0 {
+			buf = append(buf, ',')
+		}
+		buf = hexutil.AppendQuoted(buf, items[i])
+		if s.out != nil && len(buf)-start >= FlushThreshold {
+			buf, start = s.flushArray(buf, start)
+		}
+	}
+	s.stream.SetBuffer(append(buf, ']'))
 	s.afterValue()
 }
 
-// writeHexArray appends n elements as one array. Without a writer it grows once for the
-// whole array; with one it grows a threshold at a time and hands each full threshold to the
-// writer, so a large array streams the way a sequence of value writes does.
-func writeHexArray(s *Stream, n, size int, appendElem func([]byte, int) []byte) {
+// growArray opens an array of about size bytes: grown once in full without a writer, and a
+// threshold at a time with one, where flushArray hands each full threshold to the writer so a
+// large array streams the way a sequence of value writes does.
+func (s *Stream) growArray(size int) (buf []byte, start int) {
 	grow := size + 2
 	if s.out != nil {
 		grow = min(grow, 2*FlushThreshold)
 	}
-	buf := slices.Grow(s.stream.Buffer(), grow)
-	start := len(buf)
-	buf = append(buf, '[')
-	for i := range n {
-		if i > 0 {
-			buf = append(buf, ',')
-		}
-		buf = appendElem(buf, i)
-		if s.out != nil && len(buf)-start >= FlushThreshold {
-			s.stream.SetBuffer(buf[:start])
-			s.writeThrough(buf[start:])
-			buf = s.stream.Buffer()
-			start = len(buf)
-		}
-	}
-	s.stream.SetBuffer(append(buf, ']'))
+	buf = slices.Grow(s.stream.Buffer(), grow)
+	return append(buf, '['), len(buf)
+}
+
+func (s *Stream) flushArray(buf []byte, start int) ([]byte, int) {
+	s.stream.SetBuffer(buf[:start])
+	s.writeThrough(buf[start:])
+	buf = s.stream.Buffer()
+	return buf, len(buf)
 }
 
 // WriteQuotedText writes v.AppendText's output as a JSON string, without an escape scan: it is
