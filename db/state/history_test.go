@@ -363,6 +363,64 @@ func TestHistoryBuildVI_PageCounterResetOnCollisionRetry(t *testing.T) {
 	})
 }
 
+// seekInFiles has to report the position buildVI gave the value in .v: the key's
+// ordinal in .ef and the txNum's rank in its list. The integrity check proves
+// that position resolves to the offset the .vi holds.
+func TestSeekInFilesPositionMatchesValueIndex(t *testing.T) {
+	t.Parallel()
+
+	db, h, txs := filledHistory(t, false, log.New())
+	collateAndMergeHistory(t, db, h, txs, true)
+
+	ht := h.beginForTests()
+	defer ht.Close()
+	require.NoError(t, ht.IntegrityHistoryValueIndex(t.Context(), true, 0))
+
+	for fileIdx, item := range ht.iit.files {
+		g := ht.iit.dataReader(item.src.decompressor)
+		g.Reset(0)
+		for keyOrdinal := uint64(0); g.HasNext(); keyOrdinal++ {
+			key, _ := g.Next(nil)
+			encodedSeq, _ := g.Next(nil)
+			it := multiencseq.ReadMultiEncSeq(item.startTxNum, encodedSeq).Iterator(0)
+			from := item.startTxNum
+			for rank := uint64(0); it.HasNext(); rank++ {
+				txNum, err := it.Next()
+				require.NoError(t, err)
+				want := iiSeekResult{txNum: txNum, keyOrdinal: keyOrdinal, rank: rank, fileIdx: fileIdx}
+				for range 2 { // the second seek is served from the seek cache
+					ok, got, err := ht.iit.seekInFiles(key, from)
+					require.NoError(t, err)
+					require.True(t, ok)
+					require.Equal(t, want, got)
+				}
+				from = txNum + 1
+			}
+		}
+	}
+}
+
+// The check has to agree with buildVI on every offset of a real file set, and
+// has to reject a .vi that does not describe its .v.
+func TestIntegrityHistoryValueIndex(t *testing.T) {
+	t.Parallel()
+
+	db, h, txs := filledHistory(t, false, log.New())
+	collateAndMergeHistory(t, db, h, txs, true)
+
+	ht := h.beginForTests()
+	defer ht.Close()
+	require.NoError(t, ht.IntegrityHistoryValueIndex(t.Context(), true, 0))
+
+	// hand each file the neighbour's .vi: both open fine, and both then describe
+	// a .v they were not built from
+	require.GreaterOrEqual(t, len(ht.files), 2)
+	a, b := ht.files[0].src, ht.files[1].src
+	a.index, b.index = b.index, a.index
+	defer func() { a.index, b.index = b.index, a.index }()
+	require.Error(t, ht.IntegrityHistoryValueIndex(t.Context(), true, 0))
+}
+
 func TestHistoryAfterPrune(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)

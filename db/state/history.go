@@ -943,7 +943,6 @@ type HistoryRoTx struct {
 	files        visibleFiles // have no garbage (canDelete=true, overlaps, etc...)
 	getters      []*seg.Reader
 	pagedGetters []*seg.PagedReader
-	readers      []*recsplit.IndexReader
 	stepSize     uint64
 
 	valsC    kv.Cursor
@@ -999,26 +998,6 @@ func (ht *HistoryRoTx) pagedGetter(i, pageSize int) *seg.PagedReader {
 		ht.pagedGetters[i] = seg.NewPagedReader(ht.dataReader(ht.files[i].src.decompressor), pageSize, true)
 	}
 	return ht.pagedGetters[i]
-}
-
-func (ht *HistoryRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
-	if ht.readers == nil {
-		ht.readers = make([]*recsplit.IndexReader, len(ht.files))
-	}
-	{
-		// assert
-		for _, f := range ht.files {
-			if f.src.index == nil {
-				panic("assert: file has nil index " + f.src.decompressor.FileName())
-			}
-		}
-	}
-	r := ht.readers[i]
-	if r == nil {
-		r = ht.files[i].src.index.Reader()
-		ht.readers[i] = r
-	}
-	return r
 }
 
 func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
@@ -1142,11 +1121,29 @@ func (ht *HistoryRoTx) Close() {
 		return
 	}
 	ht.files = nil
-	for _, r := range ht.readers {
-		r.Close()
-	}
-
 	ht.iit.Close()
+}
+
+// pairedFile returns the history file built from the given .ef file.
+func (ht *HistoryRoTx) pairedFile(efItem visibleFile) (it visibleFile, ok bool) {
+	for i := range ht.files {
+		if ht.files[i].startTxNum == efItem.startTxNum && ht.files[i].endTxNum == efItem.endTxNum {
+			return ht.files[i], true
+		}
+	}
+	return it, false
+}
+
+// historyValueOffset returns the offset in the .v file of the page holding the
+// value of key at txNum. keyOrdinal and rank locate that value in the .ef file
+// the key was found in.
+func historyValueOffset(f *FilesItem, keyOrdinal, rank, txNum uint64, key []byte) (uint64, bool) {
+	if f.index.Empty() { // recsplit Lookup panics on a keyless index
+		return 0, false
+	}
+	var txNumKey [8]byte
+	binary.BigEndian.PutUint64(txNumKey[:], txNum)
+	return f.index.Reader().Lookup2(txNumKey[:], key)
 }
 
 func (ht *HistoryRoTx) getFile(txNum uint64) (it visibleFile, ok bool) {
@@ -1161,27 +1158,24 @@ func (ht *HistoryRoTx) getFile(txNum uint64) (it visibleFile, ok bool) {
 func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, bool, error) {
 	// Files list of II and History is different
 	// it means II can't return index of file, but can return TxNum which History will use to find own file
-	ok, histTxNum, err := ht.iit.seekInFiles(key, txNum)
+	ok, seek, err := ht.iit.seekInFiles(key, txNum)
 	if err != nil {
 		return nil, false, err
 	}
 	if !ok {
 		return nil, false, nil
 	}
+	histTxNum := seek.txNum
 	historyItem, ok := ht.getFile(histTxNum)
 	if !ok {
 		log.Warn("historySeekInFiles: file not found", "key", key, "txNum", txNum, "histTxNum", histTxNum, "ssize", ht.h.stepSize)
 		return nil, false, fmt.Errorf("hist file not found: key=%x, %s.%d-%d", key, ht.h.FilenameBase, histTxNum/ht.h.stepSize, histTxNum/ht.h.stepSize)
 	}
-	reader := ht.statelessIdxReader(historyItem.i)
-	if reader.Empty() {
-		return nil, false, nil
-	}
-	historyKey := ht.encodeTs(histTxNum, key)
-	offset, ok := reader.Lookup(historyKey)
+	offset, ok := historyValueOffset(historyItem.src, seek.keyOrdinal, seek.rank, histTxNum, key)
 	if !ok {
 		return nil, false, nil
 	}
+	historyKey := ht.encodeTs(histTxNum, key)
 	compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
 	if historyItem.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
 		compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
@@ -1362,11 +1356,8 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 				val, _ = g.Next(nil)
 			}
 			histFileIdx := -1
-			for j := range ht.files {
-				if ht.files[j].startTxNum == item.startTxNum && ht.files[j].endTxNum == item.endTxNum {
-					histFileIdx = j
-					break
-				}
+			if f, ok := ht.pairedFile(item); ok {
+				histFileIdx = f.i
 			}
 			heap.Push(&s.h, &ReconItem{g: g, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, histFileIdx: histFileIdx})
 		}
@@ -1469,7 +1460,7 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 		efGetter := ht.iit.dataReader(item.src.decompressor)
 		efGetter.Reset(0)
 
-		for efGetter.HasNext() {
+		for keyOrdinal := uint64(0); efGetter.HasNext(); keyOrdinal++ {
 			key, _ := efGetter.Next(nil)
 			val, _ := efGetter.Next(nil) // encoded EF sequence
 
@@ -1480,19 +1471,15 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 			seq := multiencseq.ReadMultiEncSeq(item.startTxNum, val)
 			ss := seq.Iterator(0)
 
-			for ss.HasNext() {
+			for rank := uint64(0); ss.HasNext(); rank++ {
 				txNum, _ := ss.Next()
-
-				var txNumKey [8]byte
-				binary.BigEndian.PutUint64(txNumKey[:], txNum)
 
 				viFile, ok := ht.getFile(txNum)
 				if !ok {
 					return fmt.Errorf("HistoryDump: no .vi %s file found for [%x]", ht.iit.name, txNum)
 				}
 
-				viReader := ht.statelessIdxReader(viFile.i)
-				vOffset, ok := viReader.Lookup2(txNumKey[:], key)
+				vOffset, ok := historyValueOffset(viFile.src, keyOrdinal, rank, txNum, key)
 				if !ok {
 					return fmt.Errorf("HistoryDump: failed to resolve offset in .vi %s file for key [%x]", viFile.Fullpath(), key)
 				}

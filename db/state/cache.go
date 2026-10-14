@@ -105,6 +105,10 @@ type IISeekInFilesCache struct {
 }
 type iiSeekInFilesCacheItem struct {
 	requested, found uint64
+	// caching a file index is safe because newIIVisible builds each cache pool
+	// together with the one file list it serves
+	keyOrdinal, rank uint64
+	fileIdx          int
 }
 
 func NewIISeekInFilesCache() *IISeekInFilesCache {
