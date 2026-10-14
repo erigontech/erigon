@@ -386,6 +386,8 @@ func (f *ForkChoiceStore) getHeadOnce(auxilliaryState *state.CachingBeaconState,
 		if err != nil {
 			return ForkChoiceNode{}, 0, false, err
 		}
+	} else if _, cached := f.checkpointStates.Load(justifiedCheckpoint); !cached {
+		_, _ = f.getCheckpointState(justifiedCheckpoint)
 	}
 	f.mu.Lock()
 	currentSlot := f.Slot()
