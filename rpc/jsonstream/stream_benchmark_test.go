@@ -199,3 +199,27 @@ func BenchmarkHexesField(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkWriteHexBytes covers its two callers: an account proof's trie nodes and a txpool
+// account's slots, with the writer a served response has and without one.
+func BenchmarkWriteHexBytes(b *testing.B) {
+	for _, shape := range []struct {
+		name  string
+		n, sz int
+	}{{"proof", 9, 532}, {"slots", 2000, 32}} {
+		items := make([][]byte, shape.n)
+		for i := range items {
+			items[i] = bytes.Repeat([]byte{byte(i)}, shape.sz)
+		}
+		for name, out := range map[string]io.Writer{"discard": io.Discard, "nowriter": nil} {
+			b.Run(fmt.Sprintf("%s/%s", shape.name, name), func(b *testing.B) {
+				s := New(out)
+				b.ReportAllocs()
+				for b.Loop() {
+					s.Reset(out)
+					WriteHexBytes(s, items)
+				}
+			})
+		}
+	}
+}
