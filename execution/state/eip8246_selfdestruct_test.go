@@ -184,18 +184,14 @@ func TestEIP8246_VersionedStateReader_PreserveNotBurned(t *testing.T) {
 	vm.WriteBalance(addr, sdVer, preserved, true)
 	vm.WriteIncarnation(addr, sdVer, 0, true)
 
-	// Fork-aware reader at a later tx (the calcFees path) must surface the preserve.
+	// The versionedStateReader (the calcFees path) must surface the preserve as a
+	// balance-only EOA. Branch-agnostic: it keys on the balance's non-deleted stamp
+	// (a burn would stamp it ValueDeleted), not a fork flag.
 	vsr := NewVersionedStateReader(6, ReadSet{}, vm, nil)
 	acc, err := vsr.ReadAccountData(addr)
 	require.NoError(t, err)
-	require.NotNil(t, acc, "EIP-8246 preserved coinbase must not read as absent (calcFees would burn the balance)")
+	require.NotNil(t, acc, "a balance-preserving self-destruct must not read as absent (calcFees would burn the balance)")
 	require.Equal(t, preserved, acc.Balance)
-
-	// A fork-unaware reader keeps pre-EIP-8246 semantics: a self-destruct is absent.
-	vsrOld := NewVersionedStateReader(6, ReadSet{}, vm, nil)
-	accOld, err := vsrOld.ReadAccountData(addr)
-	require.NoError(t, err)
-	require.Nil(t, accOld, "pre-EIP-8246 a self-destruct is fully absent")
 }
 
 // The persisted balance-only record has incarnation 0, so a later CREATE2 over
