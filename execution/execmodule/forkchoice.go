@@ -71,6 +71,34 @@ func sendForkchoiceErrorWithoutWaiting(logger log.Logger, ch chan forkchoiceOutc
 	return err
 }
 
+// forkchoiceRefusal says why a forkchoice state cannot be adopted. The engine
+// API requires refusing a state whose finalized or safe block is not on the
+// head's chain, and the caller retries the same state every slot — so when a
+// refusal repeats, this is the only thing separating a reorg that will settle
+// from a node that can no longer move.
+type forkchoiceRefusal struct {
+	ref       string
+	canonical bool
+	headNum   uint64
+	refNum    uint64
+}
+
+func (r *forkchoiceRefusal) String() string {
+	if !r.canonical {
+		return fmt.Sprintf("%s block %d is not on the head's chain (head %d)", r.ref, r.refNum, r.headNum)
+	}
+	return fmt.Sprintf("head %d is not above %s block %d", r.headNum, r.ref, r.refNum)
+}
+
+// checkForkchoiceRef reports why head cannot be adopted against this reference
+// block, or nil when it can.
+func checkForkchoiceRef(ref string, headNumber, refNumber uint64, canonical bool) *forkchoiceRefusal {
+	if canonical && headNumber > refNumber {
+		return nil
+	}
+	return &forkchoiceRefusal{ref: ref, canonical: canonical, headNum: headNumber, refNum: refNumber}
+}
+
 // verifyForkchoiceHashes verifies the finalized and safe hash of the forkchoice state
 func (e *ExecModule) verifyForkchoiceHashes(ctx context.Context, tx kv.Tx, blockHash, finalizedHash, safeHash common.Hash) (bool, error) {
 	// Client software MUST return -38002: Invalid forkchoice state error if the payload referenced by
@@ -94,18 +122,18 @@ func (e *ExecModule) verifyForkchoiceHashes(ctx context.Context, tx kv.Tx, block
 		if err != nil {
 			return false, err
 		}
-		if !canonical || *headNumber <= *finalizedNumber {
+		if why := checkForkchoiceRef("finalized", *headNumber, *finalizedNumber, canonical); why != nil {
+			e.logger.Warn("[forkchoice] refusing state", "why", why.String(), "head", blockHash, "finalized", finalizedHash)
 			return false, nil
 		}
-
 	}
 	if safeHash != (common.Hash{}) && safeHash != blockHash {
 		canonical, err := e.isCanonicalHash(ctx, tx, safeHash)
 		if err != nil {
 			return false, err
 		}
-
-		if !canonical || *headNumber <= *safeNumber {
+		if why := checkForkchoiceRef("safe", *headNumber, *safeNumber, canonical); why != nil {
+			e.logger.Warn("[forkchoice] refusing state", "why", why.String(), "head", blockHash, "safe", safeHash)
 			return false, nil
 		}
 	}
