@@ -335,9 +335,6 @@ jobs:
           ./build/bin/rpc_pattern_gen eth_getLogs --url http://localhost:8545 \
             --counts 200000 --block-tag latest --verify --keep ok --fees drop \
             --out "perf/pattern/$CHAIN/stress_test_eth_getLogs_gen_latest.tar"
-          # Pruned clients keep only ~128 blocks of state: the traced blocks plus the blocks mined until the end of the mixed run must fit.
-          sed -i 's/blocks=100/blocks=50/' "perf/pattern/$CHAIN/config/mixed.profile"
-          grep -q '^debug_traceBlockByHash .*blocks=50' "perf/pattern/$CHAIN/config/mixed.profile"
           ./build/bin/rpc_pattern_gen --profile "perf/pattern/$CHAIN/config/mixed.profile" --url http://localhost:8545 \
             --counts 120000 --block-tag latest --verify --keep ok --fees drop --max-blocks 2500 \
             --out "perf/pattern/$CHAIN/stress_test_mixed_gen_latest.tar"
