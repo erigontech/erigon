@@ -818,24 +818,6 @@ func TestFinalizeTxSimple_CoinbaseIsBurntContract(t *testing.T) {
 	assert.Equal(t, *expected, coinbaseAcc.Val.Balance)
 }
 
-func TestFinalizeTxSimple_CoinbaseIsBurntContractRecordedCredit(t *testing.T) {
-	t.Parallel()
-	s := londonTransferScenario()
-	s.burntAddr = s.coinbase
-	result := s.buildExecResult()
-	vm := state.NewVersionMap(nil)
-	reader := s.makeReader()
-	task := result.Task.(*taskVersion)
-
-	credited, outcome, err := result.calcFees(task, vm, reader, s.rules, nil)
-	require.NoError(t, err)
-	require.Equal(t, feeCreditNew, outcome)
-
-	_, outcome, err = result.calcFees(task, vm, reader, s.rules, credited)
-	require.NoError(t, err)
-	assert.Equal(t, feeCreditRecorded, outcome)
-}
-
 // TestFinalizeTxSimple_NoCoinbaseInVersionMap verifies that when there's no
 // prior coinbase entry in the versionMap, the finalize reads from the
 // stateReader and adds FeeTipped.
@@ -1982,6 +1964,17 @@ func TestCalcFees_SkipsRedundantReCreditWithBurntContract(t *testing.T) {
 
 	require.Nil(t, r.run(t),
 		"both halves of the credit are already recorded, so the round is a no-op")
+}
+
+func TestCalcFees_SkipsRedundantReCreditWhenCoinbaseIsBurntContract(t *testing.T) {
+	t.Parallel()
+	s := londonTransferScenario()
+	s.burntAddr = s.coinbase
+	r := newFeeCreditRound(t, s)
+
+	require.NotNil(t, r.run(t), "the first round must credit both fees")
+	require.Nil(t, r.run(t),
+		"the single credit carrying both fees is already recorded, so the round is a no-op")
 }
 
 func TestCalcFees_SkipsRedundantReCreditOnEmptyRemoval(t *testing.T) {
