@@ -47,13 +47,9 @@ func (f *initialHeaderRecorder) FetchHeadersBackwards(_ context.Context, hash co
 	return p2p.FetcherResponse[[]*types.Header]{}, errors.New("unknown header")
 }
 
-func TestForkchoiceMissingSegmentDownloadsMissingHash(t *testing.T) {
-	t.Parallel()
-
+func newMissingSegmentServer(t *testing.T, missingHash common.Hash) (*EngineServer, *engine_block_downloader.EngineBlockDownloader, *initialHeaderRecorder, *types.Header) {
 	head := makeParentHeader(1000)
 	headNumber := head.Number.Uint64()
-	missingHash := common.Hash{0x42}
-
 	stub := &stubExecutionModule{
 		getHeaderFunc: getHeaderReturning(head.Hash(), head),
 		headerNumberFunc: func(context.Context, common.Hash) (*uint64, error) {
@@ -73,6 +69,14 @@ func TestForkchoiceMissingSegmentDownloadsMissingHash(t *testing.T) {
 	cfg := preCancunChainConfig()
 	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), logger, stub, nil, nil, cfg, ethconfig.Sync{}, bbd)
 	srv := NewEngineServer(logger, cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+	return srv, downloader, fetcher, head
+}
+
+func TestForkchoiceMissingSegmentDownloadsMissingHash(t *testing.T) {
+	t.Parallel()
+
+	missingHash := common.Hash{0x42}
+	srv, _, fetcher, head := newMissingSegmentServer(t, missingHash)
 
 	status, err := srv.HandleForkChoice(t.Context(), "test", &engine_types.ForkChoiceState{HeadHash: head.Hash()})
 	require.NoError(t, err)
@@ -84,4 +88,20 @@ func TestForkchoiceMissingSegmentDownloadsMissingHash(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("no backward download started for the missing hash")
 	}
+}
+
+func TestForkchoiceMissingSegmentOfBadBlockIsInvalid(t *testing.T) {
+	t.Parallel()
+
+	missingHash := common.Hash{0x42}
+	lastValidHash := common.Hash{0x41}
+	srv, downloader, fetcher, head := newMissingSegmentServer(t, missingHash)
+	downloader.ReportBadHeader(missingHash, lastValidHash, "invalid state root")
+
+	status, err := srv.HandleForkChoice(t.Context(), "test", &engine_types.ForkChoiceState{HeadHash: head.Hash()})
+	require.NoError(t, err)
+	require.Equal(t, engine_types.InvalidStatus, status.Status)
+	require.Equal(t, lastValidHash, *status.LatestValidHash)
+	require.Equal(t, engine_block_downloader.Idle, downloader.Status())
+	require.Empty(t, fetcher.requested)
 }
