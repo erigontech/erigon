@@ -358,7 +358,7 @@ func retire(reason mvcc.RetireReason, dirtyFiles *DirtyFiles, outs []*FilesItem,
 	switch reason {
 	case mvcc.RetireReasonMerged, mvcc.RetireReasonAged:
 		canDelete = true // our merge/prune output is still on disk and must be removed
-	case mvcc.RetireReasonWasDeletedFromDisk:
+	case mvcc.RetireReasonWasDeletedFromDisk, mvcc.RetireReasonDemoted:
 		canDelete = false // an external actor already deleted it: close only, never re-delete
 	default:
 		panic(fmt.Sprintf("retire: unknown reason %d", reason))
