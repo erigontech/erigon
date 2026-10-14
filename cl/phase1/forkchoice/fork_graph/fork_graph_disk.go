@@ -624,7 +624,8 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 			if ok && (bHeader.Slot%dumpSlotFrequency == 0 || currentIteratorRoot == f.anchorRoot) {
 				copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot)
 				if err != nil {
-					log.Trace("Could not retrieve state", "missing", currentIteratorRoot, "err", err)
+					// Only the anchor has a header without a block; its file is the last copy of its state.
+					log.Warn("Could not read the anchor state file", "root", currentIteratorRoot, "err", err)
 					return nil, nil
 				}
 				continue
