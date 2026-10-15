@@ -155,18 +155,18 @@ func TestSyncGateRemembersTheResolvedJustifiedAncestry(t *testing.T) {
 
 	require.False(t, handler.headLagsBehind())
 	require.False(t, handler.headLagsBehind())
-	require.Equal(t, 2, fcu.AncestorCalls, "an unresolved path is walked each time")
+	require.Equal(t, int64(2), fcu.AncestorCalls.Load(), "an unresolved path is walked each time")
 
 	fcu.Ancestors = map[uint64]forkchoice.ForkChoiceNode{checkpointSlot: {Root: justifiedRoot}}
 	require.False(t, handler.headLagsBehind())
 	require.False(t, handler.headLagsBehind())
-	require.Equal(t, 3, fcu.AncestorCalls)
+	require.Equal(t, int64(3), fcu.AncestorCalls.Load())
 
 	otherRoot := common.Hash{0x99}
 	fcu.JustifiedCheckpointVal = solid.Checkpoint{Epoch: epoch, Root: otherRoot}
 	fcu.Headers[otherRoot] = &cltypes.BeaconBlockHeader{Slot: checkpointSlot}
 	require.True(t, handler.headLagsBehind(), "a new checkpoint is checked again")
-	require.Equal(t, 4, fcu.AncestorCalls)
+	require.Equal(t, int64(4), fcu.AncestorCalls.Load())
 }
 
 func TestSyncGateReportsAMissingHeadStateAsNotSynced(t *testing.T) {
