@@ -22,6 +22,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -80,6 +81,45 @@ type Follower struct {
 	// the L1 head to scan to and l1Finalized the latest finalized L1 block.
 	scanned, target, l1Finalized uint64
 	resumed                      bool
+
+	statusMu sync.Mutex
+	status   Status
+}
+
+// Status is a snapshot of a follower's progress.
+type Status struct {
+	// L1Scanned is the last L1 block whose settlements are derived,
+	// L1Finalized the latest finalized L1 block seen.
+	L1Scanned, L1Finalized uint64
+	// Cursor is the L2 block the latest settlement ended at; Safe and
+	// Finalized are the safe and finalized L2 blocks.
+	Cursor, Safe, Finalized uint64
+	// Last is the latest derived settlement.
+	Last *deriver.Record
+}
+
+// Status returns the follower's progress as of its latest step. It is safe
+// to call concurrently with Run.
+func (f *Follower) Status() Status {
+	f.statusMu.Lock()
+	defer f.statusMu.Unlock()
+	return f.status
+}
+
+func (f *Follower) publish() {
+	s := Status{
+		L1Scanned:   f.scanned,
+		L1Finalized: f.l1Finalized,
+		Cursor:      f.deriver.Cursor(),
+		Safe:        f.deriver.Safe(),
+		Finalized:   f.deriver.Finalized(),
+	}
+	if r, ok := f.deriver.Last(); ok {
+		s.Last = &r
+	}
+	f.statusMu.Lock()
+	f.status = s
+	f.statusMu.Unlock()
 }
 
 // New returns a follower of the EEZ chain cfg, local in chain, settled on
@@ -273,6 +313,7 @@ func (f *Follower) Handle(ctx context.Context, e l1.Event) error {
 // Sync reconciles the batches of the L1 blocks up to the target and applies
 // L1 finality.
 func (f *Follower) Sync(ctx context.Context) error {
+	defer f.publish()
 	if err := f.revalidate(ctx); err != nil {
 		return err
 	}
@@ -308,6 +349,7 @@ func (f *Follower) revalidate(ctx context.Context) error {
 
 // rewind drops what derivation took from the L1 blocks above ancestor.
 func (f *Follower) rewind(ctx context.Context, ancestor uint64) error {
+	defer f.publish()
 	f.scanned = min(f.scanned, ancestor)
 	return f.deriver.OnReorg(ctx, ancestor)
 }

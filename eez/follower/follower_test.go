@@ -145,6 +145,11 @@ func TestFollow(t *testing.T) {
 	n := newNode(t, c.L1)
 	require.NoError(t, n.follower.Boot(t.Context()))
 	n.requireBlocks(t, first.Blocks...)
+	status := n.follower.Status()
+	require.Equal(t, l1First, status.L1Scanned)
+	require.Equal(t, uint64(2), status.Cursor)
+	require.Equal(t, uint64(2), status.Safe)
+	require.Equal(t, l1First, status.Last.L1Block)
 
 	cancel, done := n.run(t)
 	second := c.Compose([]da.Action{{
@@ -159,6 +164,13 @@ func TestFollow(t *testing.T) {
 		fc, err := n.m.ExecModule.GetForkChoice(context.Background())
 		return err == nil && fc.FinalizedHash == first.Blocks[1].Hash() && fc.SafeHash == second.Blocks[0].Hash()
 	}, 10*time.Second, 5*time.Millisecond)
+	require.Eventually(t, func() bool {
+		s := n.follower.Status()
+		return s.Finalized == 2 && s.Safe == 3 && s.L1Finalized == l1First
+	}, 10*time.Second, 5*time.Millisecond)
+	r, ok := n.follower.Deriver().Settlement(3)
+	require.True(t, ok)
+	require.Equal(t, l1First+1, r.L1Block)
 
 	cancel()
 	require.ErrorIs(t, <-done, context.Canceled)

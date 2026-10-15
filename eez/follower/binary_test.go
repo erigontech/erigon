@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez/deriver/derivertest"
 	"github.com/erigontech/erigon/eez/l1/l1test"
@@ -47,33 +48,48 @@ func freePort(t *testing.T) string {
 	return strconv.Itoa(l.Addr().(*net.TCPAddr).Port)
 }
 
-func blockHash(ctx context.Context, url, tag string) (common.Hash, error) {
-	body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "eth_getBlockByNumber", "params": []any{tag, false}})
+// call makes a JSON-RPC call to url and decodes its result into out.
+func call(ctx context.Context, url, method string, out any, params ...any) error {
+	body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": append([]any{}, params...)})
 	if err != nil {
-		return common.Hash{}, err
+		return err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return common.Hash{}, err
+		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return common.Hash{}, err
+		return err
 	}
 	defer resp.Body.Close()
-	var out struct {
-		Result *struct {
-			Hash common.Hash `json:"hash"`
-		} `json:"result"`
+	var reply struct {
+		Result json.RawMessage `json:"result"`
+		Error  *struct {
+			Message string `json:"message"`
+		} `json:"error"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&reply); err != nil {
+		return err
+	}
+	if reply.Error != nil {
+		return fmt.Errorf("%s: %s", method, reply.Error.Message)
+	}
+	return json.Unmarshal(reply.Result, out)
+}
+
+func blockHash(ctx context.Context, url, tag string) (common.Hash, error) {
+	var b *struct {
+		Hash common.Hash `json:"hash"`
+	}
+	if err := call(ctx, url, "eth_getBlockByNumber", &b, tag, false); err != nil {
 		return common.Hash{}, err
 	}
-	if out.Result == nil {
+	if b == nil {
 		return common.Hash{}, fmt.Errorf("no block %s", tag)
 	}
-	return out.Result.Hash, nil
+	return b.Hash, nil
 }
 
 // TestFollowerBinary runs the erigon binary named by EEZ_ERIGON in follower
@@ -103,7 +119,7 @@ func TestFollowerBinary(t *testing.T) {
 	dir := t.TempDir()
 	httpPort, authPort := freePort(t), freePort(t)
 	cmd := exec.CommandContext(t.Context(), bin, "--eez.enabled", "--eez.follower", "--chain=eez-devnet", "--datadir", dir,
-		"--eez.l1.rpc", l1.URL, "--eez.l1.poll=200ms", "--http.port", httpPort, "--authrpc.port", authPort,
+		"--eez.l1.rpc", l1.URL, "--eez.l1.poll=200ms", "--http.port", httpPort, "--http.api=eth,eez", "--authrpc.port", authPort,
 		"--private.api.addr", "127.0.0.1:"+freePort(t), "--port", freePort(t), "--torrent.port", freePort(t))
 	var output bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &output, &output
@@ -138,6 +154,13 @@ func TestFollowerBinary(t *testing.T) {
 	waitFor("latest", second.Blocks[0].Hash())
 	waitFor("safe", second.Blocks[0].Hash())
 	require.DirExists(t, filepath.Join(dir, "eez", "chaindata"))
+	var status struct {
+		Cursor hexutil.Uint64 `json:"cursor"`
+		Safe   hexutil.Uint64 `json:"safe"`
+	}
+	require.NoError(t, call(t.Context(), url, "eez_followerStatus", &status))
+	require.Equal(t, hexutil.Uint64(3), status.Cursor)
+	require.Equal(t, hexutil.Uint64(3), status.Safe)
 	_, err = (&net.Dialer{Timeout: time.Second}).DialContext(t.Context(), "tcp", "127.0.0.1:"+authPort)
 	require.Error(t, err, "the engine API is down")
 

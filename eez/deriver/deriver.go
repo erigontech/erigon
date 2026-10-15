@@ -73,9 +73,13 @@ func New(chain Chain, cfg *chain.Config, dir string, logger log.Logger) (*Derive
 // Seed starts derivation after settlement r, whose block the local chain
 // holds, before any batch is reconciled.
 func (d *Deriver) Seed(r Record) {
-	d.index.Append(r)
+	d.index.Seed(r)
 	d.safe, d.seed = r.LastL2Block, &r
 }
+
+// Settlement returns the settlement that settled L2 block number. It is
+// safe to call concurrently with derivation.
+func (d *Deriver) Settlement(number uint64) (Record, bool) { return d.index.Covering(number) }
 
 // Last returns the latest derived settlement.
 func (d *Deriver) Last() (Record, bool) { return d.index.Last() }

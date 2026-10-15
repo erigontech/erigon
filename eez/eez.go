@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/networks"
+	eezrpc "github.com/erigontech/erigon/eez/rpc"
 	"github.com/erigontech/erigon/eez/rules"
 	"github.com/erigontech/erigon/eez/systemtx"
 )
@@ -34,11 +35,12 @@ var EnabledFlag = cli.BoolFlag{
 }
 
 // Register adds the EEZ networks, the eez l2 config section, transaction
-// type 0x76 and the EEZ rules engine to the process-wide registries. It is
-// idempotent.
+// type 0x76 with its RPC rendering and the EEZ rules engine to the
+// process-wide registries. It is idempotent.
 func Register() {
 	config.Register()
 	networks.Register()
 	systemtx.Register()
+	eezrpc.Register()
 	rules.Register()
 }

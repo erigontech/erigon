@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/eez/deriver"
 	"github.com/erigontech/erigon/eez/follower"
 	"github.com/erigontech/erigon/eez/l1"
+	eezrpc "github.com/erigontech/erigon/eez/rpc"
 	eezrules "github.com/erigontech/erigon/eez/rules"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
@@ -87,7 +88,7 @@ func configureFollowerEth(cfg *ethconfig.Config) {
 
 // startFollower registers the follower of the node's EEZ chain. halted
 // receives the error it stops with on its own, after which the node closes.
-func startFollower(ctx context.Context, n *node.ErigonNode, cfg *eez.Config, dirs datadir.Dirs, logger log.Logger) (*follower.Service, error) {
+func startFollower(ctx context.Context, n *node.ErigonNode, cfg *eez.Config, api *eezrpc.API, dirs datadir.Dirs, logger log.Logger) (*follower.Service, error) {
 	backend := n.Backend()
 	chainConfig := backend.ChainConfig()
 	if err := cfg.L2.Check(chainConfig); err != nil {
@@ -114,6 +115,7 @@ func startFollower(ctx context.Context, n *node.ErigonNode, cfg *eez.Config, dir
 	if err != nil {
 		return nil, err
 	}
+	api.Attach(f)
 	svc := follower.NewService(f, func(err error) {
 		logger.Error("[eez] follower halted, stopping the node", "err", err)
 		go n.Close()
