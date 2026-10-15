@@ -1950,10 +1950,17 @@ type versionedStateReader struct {
 	reads       ReadSet
 	versionMap  *VersionMap
 	stateReader StateReader
+	eip8246     bool
 }
 
 func NewVersionedStateReader(txIndex int, reads ReadSet, versionMap *VersionMap, stateReader StateReader) *versionedStateReader {
-	return &versionedStateReader{txIndex, reads, versionMap, stateReader}
+	return &versionedStateReader{txIndex: txIndex, reads: reads, versionMap: versionMap, stateReader: stateReader}
+}
+
+// SetEIP8246 makes an account self-destructed by a prior tx read as live while
+// it keeps a non-zero balance.
+func (vr *versionedStateReader) SetEIP8246(enabled bool) {
+	vr.eip8246 = enabled
 }
 
 func (vr *versionedStateReader) SetTrace(trace bool, tracePrefix string) {
@@ -1992,7 +1999,7 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 		// coinbase re-creates it, and we must surface the re-created
 		// account so finalize accumulates the prior cumulative value.
 		if destroyed, _, revived := vr.versionMap.AccountLifecycle(address, vr.txIndex); destroyed && !revived {
-			return nil, nil
+			return vr.preservedAccount(address), nil
 		}
 		if acc, ok := versionedUpdateAddress(vr.versionMap, address, vr.txIndex); ok && acc != nil {
 			updated := vr.applyVersionedUpdates(address, *acc)
@@ -2036,6 +2043,23 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 	}
 
 	return nil, nil
+}
+
+// preservedAccount is what remains of a self-destructed account under EIP-8246:
+// the kept balance with no code and a zero nonce, or nil when nothing was kept.
+// Without a revival no balance cell sits above the destruct, so the floor cell is
+// the post-destruct balance.
+func (vr *versionedStateReader) preservedAccount(address accounts.Address) *accounts.Account {
+	if !vr.eip8246 {
+		return nil
+	}
+	balance, _, ok := vr.versionMap.ReadBalance(address, vr.txIndex)
+	if !ok || balance.IsZero() {
+		return nil
+	}
+	acc := accounts.NewAccount()
+	acc.Balance = balance
+	return &acc
 }
 
 func (vr *versionedStateReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
