@@ -930,7 +930,7 @@ var (
 	}
 	CaplinIPBlockLimitsDisableFlag = cli.BoolFlag{
 		Name:  "caplin.ip-block-limits.disable",
-		Usage: "Restore the released connection limits: drop Caplin's caps per IPv4 /24 and /16 and per IPv6 /48 and /32, and the exemption of private networks with --caplin.local-discovery. Networks in --caplin.ip-block-limits.trusted-cidrs stay exempt",
+		Usage: "Restore the released connection limits: drop Caplin's caps per IPv4 /24 and /16 and per IPv6 /48 and /32, and the exemption of private networks when local discovery is enabled. Networks in --caplin.ip-block-limits.trusted-cidrs stay exempt",
 		Value: false,
 	}
 	CaplinIPBlockLimitsTrustedCIDRsFlag = cli.StringSliceFlag{

@@ -165,17 +165,12 @@ func newResourceManager(cfg *P2PConfig) (network.ResourceManager, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Loopback is already unlimited; a trusted entry there would match first and cap it.
+	trusted = slices.DeleteFunc(trusted, func(prefix netip.Prefix) bool { return prefix.Addr().IsLoopback() })
 	var opts []rcmgr.Option
 	var staticPeers []netip.Prefix
 	if !cfg.DisableIPBlockLimits {
-		perBlock24, perBlock16 := ipBlockConnLimits(cfg.MaxPeerCount)
-		// The lists replace go-libp2p's defaults, so they repeat the per-address caps (8 per IPv4
-		// address or IPv6 /56). Broadest first: go-libp2p stores a zero count for every prefix it
-		// checks before the one that refuses, and only a closed connection removes it again.
-		opts = append(opts, rcmgr.WithLimitPerSubnet(
-			[]rcmgr.ConnLimitPerSubnet{{PrefixLength: 16, ConnCount: perBlock16}, {PrefixLength: 24, ConnCount: perBlock24}, {PrefixLength: 32, ConnCount: 8}},
-			[]rcmgr.ConnLimitPerSubnet{{PrefixLength: 32, ConnCount: perBlock16}, {PrefixLength: 48, ConnCount: perBlock24}, {PrefixLength: 56, ConnCount: 8}},
-		))
+		opts = append(opts, rcmgr.WithLimitPerSubnet(ipBlockLimits(cfg.MaxPeerCount)))
 		if cfg.LocalDiscovery {
 			trusted = append(trusted, mustParsePrefixes(append([]string{"fc00::/7", "fe80::/10"}, privateCIDRList...)...)...)
 		}
@@ -209,7 +204,7 @@ func newResourceManager(cfg *P2PConfig) (network.ResourceManager, error) {
 		return nil, err
 	}
 	counter := newRefusalCounter(rm)
-	go counter.logSummaries(time.Minute)
+	go counter.logSummaries()
 	return counter, nil
 }
 
@@ -293,14 +288,27 @@ func mustParsePrefixes(cidrs ...string) []netip.Prefix {
 	return out
 }
 
-// ipBlockConnLimits returns the connection caps per IPv4 /24 or IPv6 /48 and per IPv4 /16 or IPv6
-// /32. A /24 may hold an eighth of the peer pool and a /16 half of it, so filling the pool takes
-// several blocks. The floor of two per-address caps keeps small pools from refusing two busy hosts.
+// ipBlockConnLimits returns the connection caps per IPv4 /24 and per IPv4 /16, which ipBlockLimits
+// also applies to an IPv6 /48 and /32. A /24 may hold an eighth of the peer pool and a /16 half of
+// it, so filling the pool takes several blocks. The floor of two per-address caps keeps small pools
+// from refusing two busy hosts.
 func ipBlockConnLimits(maxPeerCount uint64) (perBlock24, perBlock16 int) {
 	const floor = 16
 	perBlock24 = max(floor, int(maxPeerCount/8))
 	perBlock16 = max(perBlock24, int(maxPeerCount/2))
 	return perBlock24, perBlock16
+}
+
+// ipBlockLimits returns the per-subnet caps for IPv4 and IPv6. They replace go-libp2p's defaults,
+// so they repeat its caps per IPv4 address and IPv6 /56 and keep its IPv6 /48 cap as an upper bound.
+// Broadest first: go-libp2p stores a zero count for every prefix it checks before the one that
+// refuses, and only a closed connection removes it again.
+func ipBlockLimits(maxPeerCount uint64) (v4, v6 []rcmgr.ConnLimitPerSubnet) {
+	const perAddress, libp2pPerSlash48 = 8, 64
+	perBlock24, perBlock16 := ipBlockConnLimits(maxPeerCount)
+	v4 = []rcmgr.ConnLimitPerSubnet{{PrefixLength: 16, ConnCount: perBlock16}, {PrefixLength: 24, ConnCount: perBlock24}, {PrefixLength: 32, ConnCount: perAddress}}
+	v6 = []rcmgr.ConnLimitPerSubnet{{PrefixLength: 32, ConnCount: perBlock16}, {PrefixLength: 48, ConnCount: min(perBlock24, libp2pPerSlash48)}, {PrefixLength: 56, ConnCount: perAddress}}
+	return v4, v6
 }
 
 // refusalCounter counts connections refused by the per-address and per-block caps. go-libp2p
@@ -355,23 +363,23 @@ func (c *refusalCounter) flush() (int, string) {
 		}
 		return a.Addr().Compare(b.Addr())
 	})
-	top := make([]string, 0, min(5, len(blocks)))
+	mostRefusedBlocks := make([]string, 0, min(5, len(blocks)))
 	for _, ipBlock := range blocks[:min(5, len(blocks))] {
-		top = append(top, fmt.Sprintf("%s: %d", ipBlock, counts[ipBlock]))
+		mostRefusedBlocks = append(mostRefusedBlocks, fmt.Sprintf("%s: %d", ipBlock, counts[ipBlock]))
 	}
-	return total, strings.Join(top, ", ")
+	return total, strings.Join(mostRefusedBlocks, ", ")
 }
 
-func (c *refusalCounter) logSummaries(interval time.Duration) {
-	ticker := time.NewTicker(interval)
+func (c *refusalCounter) logSummaries() {
+	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-c.stop:
 			return
 		case <-ticker.C:
-			if total, top := c.flush(); total > 0 {
-				log.Info("[p2p] Connections refused by the per-address and per-IP-block limits; see --caplin.ip-block-limits.*", "refused", total, "interval", interval, "top", top)
+			if total, mostRefusedBlocks := c.flush(); total > 0 {
+				log.Info("[p2p] Connections refused in the last minute by the per-address and per-IP-block limits; see --caplin.ip-block-limits.*", "refused", total, "mostRefusedBlocks", mostRefusedBlocks)
 			}
 		}
 	}
