@@ -159,6 +159,9 @@ jobs:
           echo "ERIGON_REFERENCE_DIR=${ERIGON_REFERENCE_DIR}" >> $GITHUB_ENV
           echo "ERIGON_REFERENCE_DATA_DIR=${ERIGON_REFERENCE_DIR}/datadir" >> $GITHUB_ENV
 
+      - name: Clean workspace
+        run: find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
       - name: Checkout Erigon repository
         if: matrix.client == 'erigon'
         uses: actions/checkout@v7
@@ -324,13 +327,16 @@ jobs:
           RUNNER_WS: ${{ runner.workspace }}
         run: |
           # Generated once from Erigon and shared with the other clients' jobs, so all clients replay the same requests.
-          # Each count covers the largest step of its test: 20000:20 for eth_call, 5000:20 for mixed.
+          # Each count covers the largest step of its test: 30000:20 for eth_call, 10000:20 for eth_getLogs, 6000:20 for mixed.
           cd "$RUNNER_WS/rpc-tests"
           ./build/bin/rpc_pattern_gen eth_call --url http://localhost:8545 \
-            --counts 400000 --block-tag latest --verify --keep ok --fees drop \
+            --counts 600000 --block-tag latest --verify --keep ok --fees drop \
             --out "perf/pattern/$CHAIN/stress_test_eth_call_gen_latest.tar"
+          ./build/bin/rpc_pattern_gen eth_getLogs --url http://localhost:8545 \
+            --counts 200000 --block-tag latest --verify --keep ok --fees drop \
+            --out "perf/pattern/$CHAIN/stress_test_eth_getLogs_gen_latest.tar"
           ./build/bin/rpc_pattern_gen --profile "perf/pattern/$CHAIN/config/mixed.profile" --url http://localhost:8545 \
-            --counts 100000 --block-tag latest --verify --keep ok --fees drop --max-blocks 2500 \
+            --counts 120000 --block-tag latest --verify --keep ok --fees drop --max-blocks 2500 \
             --out "perf/pattern/$CHAIN/stress_test_mixed_gen_latest.tar"
 
       - name: Share the latest patterns with the other clients' jobs
@@ -340,6 +346,7 @@ jobs:
           name: latest-patterns-${{ github.run_attempt }}
           path: |
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_call_gen_latest.tar
+            ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getLogs_gen_latest.tar
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_mixed_gen_latest.tar
           retention-days: 1
 
@@ -387,6 +394,7 @@ jobs:
         id: test_step
         env:
           RUNNER_WS: ${{ runner.workspace }}
+          COORDINATED: ${{ needs.setup.outputs.coordinated }}
         run: |
           set +e # Disable exit on error
 
@@ -446,7 +454,8 @@ jobs:
                                       --test-type "$method" \
                                       --pattern-file perf/pattern/"$network"/"$pattern".tar \
                                       --test-sequence "$sequence" \
-                                      --repetitions 5 \
+                                      --repetitions 4 \
+                                      --response-timeout 30s \
                                       --client-build-dir "/" \
                                       --test-report \
                                       --json-report $result_dir/$result_file \
@@ -533,12 +542,25 @@ jobs:
             fi
           }
 
+          # Each pattern starts on the same block in all clients, otherwise a saturated client runs the later patterns on a newer chain head.
+          sync_clients () {
+            if [ "$COORDINATED" != "true" ]; then
+              return 0
+            fi
+            (cd "$ERIGON_QA_PATH/test_system/qa-tests/rpc-tests" &&
+              python3 coordinated_start.py --client "$BARRIER_ROLE" --run-id "$RUN_ID-$1" --chain "$NETWORK") ||
+              { echo "::error::No agreement with the other clients before $1"; exit 1; }
+          }
+
           # Launch the RPC performance test runner
 
           #run_perf <workspace> <chain> <method> <pattern> <load-sequence> <client> [label] [verbose]
           #run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_001_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
-          run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_gen_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT eth_call_gen false
-          run_perf "$RUNNER_WS" $CHAIN mixed stress_test_mixed_gen_latest 1:1,100:30,1000:20,3000:20 $CLIENT mixed true
+          run_perf "$RUNNER_WS" $CHAIN mixed stress_test_mixed_gen_latest 100:20,1000:20,3000:20,6000:20 $CLIENT mixed true
+          sync_clients eth_call_gen
+          run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_gen_latest 100:30,1000:20,10000:20,20000:20,30000:20 $CLIENT eth_call_gen false
+          sync_clients eth_getLogs_gen
+          run_perf "$RUNNER_WS" $CHAIN eth_getLogs stress_test_eth_getLogs_gen_latest 100:30,1000:20,3000:20,5000:20,10000:20 $CLIENT eth_getLogs_gen false
           #run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_002_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT eth_call false
           #run_perf "$RUNNER_WS" $CHAIN eth_getProof stress_test_eth_getProof_001_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
           
@@ -629,7 +651,9 @@ jobs:
         shell: bash
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
-          python3 coordinated_start.py --client "$BARRIER_ROLE" --run-id "$RUN_ID" --chain "$NETWORK" --signal-error "workflow failed"
+          for run_id in "$RUN_ID" "$RUN_ID-eth_call_gen" "$RUN_ID-eth_getLogs_gen"; do
+            python3 coordinated_start.py --client "$BARRIER_ROLE" --run-id "$run_id" --chain "$NETWORK" --signal-error "workflow failed"
+          done
 
   compare:
     name: Compare clients
@@ -639,6 +663,9 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Clean workspace
+        run: find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
       - name: Checkout the comparison script
         uses: actions/checkout@v7
         with:

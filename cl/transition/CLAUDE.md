@@ -42,7 +42,7 @@ Use this map when reviewing `cl/transition/impl/eth2/operations.go`.
 | Go file/function | Spec section |
 | --- | --- |
 | `operations.go`: `FullValidate` | Local validation-mode switch; affects signature and Merkle proof assertions around spec processing |
-| `operations.go`: `ProcessProposerSlashing` | Phase0 `process_proposer_slashing`; Gloas builder pending-payment removal for slashed proposer window |
+| `operations.go`: `ProcessProposerSlashing` | Phase0 `process_proposer_slashing` |
 | `operations.go`: `ProcessAttesterSlashing` | Phase0 `process_attester_slashing`; `is_slashable_attestation_data`; `is_valid_indexed_attestation` |
 | `operations.go`: `ProcessDeposit` | Phase0 `process_deposit`; Electra modified deposit queuing through `pending_deposits` |
 | `operations.go`: `getPendingBalanceToWithdraw` | Electra helper for `process_withdrawal_request`, `process_consolidation_request`, voluntary exits, and pending partial withdrawals |
