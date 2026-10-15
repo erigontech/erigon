@@ -41,6 +41,42 @@ func (m *MockAggregationPool) EXPECT() *MockAggregationPoolMockRecorder {
 	return m.recorder
 }
 
+// AddAggregatorDuty mocks base method.
+func (m *MockAggregationPool) AddAggregatorDuty(slot, committeeIndex uint64) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "AddAggregatorDuty", slot, committeeIndex)
+}
+
+// AddAggregatorDuty indicates an expected call of AddAggregatorDuty.
+func (mr *MockAggregationPoolMockRecorder) AddAggregatorDuty(slot, committeeIndex any) *MockAggregationPoolAddAggregatorDutyCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddAggregatorDuty", reflect.TypeOf((*MockAggregationPool)(nil).AddAggregatorDuty), slot, committeeIndex)
+	return &MockAggregationPoolAddAggregatorDutyCall{Call: call}
+}
+
+// MockAggregationPoolAddAggregatorDutyCall wrap *gomock.Call
+type MockAggregationPoolAddAggregatorDutyCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockAggregationPoolAddAggregatorDutyCall) Return() *MockAggregationPoolAddAggregatorDutyCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockAggregationPoolAddAggregatorDutyCall) Do(f func(uint64, uint64)) *MockAggregationPoolAddAggregatorDutyCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockAggregationPoolAddAggregatorDutyCall) DoAndReturn(f func(uint64, uint64)) *MockAggregationPoolAddAggregatorDutyCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // AddAttestation mocks base method.
 func (m *MockAggregationPool) AddAttestation(att *solid.Attestation) error {
 	m.ctrl.T.Helper()

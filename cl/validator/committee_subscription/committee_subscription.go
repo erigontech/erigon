@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -42,10 +43,11 @@ var (
 )
 
 type CommitteeSubscribeMgmt struct {
-	beaconConfig  *clparams.BeaconChainConfig
-	netConfig     *clparams.NetworkConfig
-	syncedData    *synced_data.SyncedDataManager
-	gossipManager *gossipMgr.GossipManager
+	beaconConfig    *clparams.BeaconChainConfig
+	netConfig       *clparams.NetworkConfig
+	syncedData      *synced_data.SyncedDataManager
+	gossipManager   *gossipMgr.GossipManager
+	aggregationPool aggregation.AggregationPool
 }
 
 func NewCommitteeSubscribeManagement(
@@ -53,12 +55,14 @@ func NewCommitteeSubscribeManagement(
 	netConfig *clparams.NetworkConfig,
 	syncedData *synced_data.SyncedDataManager,
 	gossipManager *gossipMgr.GossipManager,
+	aggregationPool aggregation.AggregationPool,
 ) *CommitteeSubscribeMgmt {
 	c := &CommitteeSubscribeMgmt{
-		beaconConfig:  beaconConfig,
-		netConfig:     netConfig,
-		syncedData:    syncedData,
-		gossipManager: gossipManager,
+		beaconConfig:    beaconConfig,
+		netConfig:       netConfig,
+		syncedData:      syncedData,
+		gossipManager:   gossipManager,
+		aggregationPool: aggregationPool,
 	}
 	return c
 }
@@ -68,6 +72,9 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 		slot   = p.Slot
 		cIndex = p.CommitteeIndex
 	)
+	if p.IsAggregator {
+		c.aggregationPool.AddAggregatorDuty(slot, cIndex)
+	}
 
 	if c.syncedData.Syncing() {
 		return synced_data.ErrNotSynced

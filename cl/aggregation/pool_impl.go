@@ -73,8 +73,11 @@ type aggregationPoolImpl struct {
 	dataPerCommittee      map[slotCommittee][]keyAggrInCommittee
 	// refused aggregates the votes a full committee refused, per data root, until that data has more
 	// voters than the committee's weakest data. Only full committees have entries, so the pool
-	// bound also bounds these.
+	// bound also bounds these, together with refusedLimit.
 	refused map[slotCommittee]map[common.Hash]*committeeAggregate
+	// aggregatorDuties holds the committees with a local aggregator. An aggregator may get its data
+	// from another beacon node, so these committees keep the refused data of every voter.
+	aggregatorDuties map[slotCommittee]struct{}
 	// pinned holds the data roots the node served its validators, with their slot for pruning. Gossip
 	// cannot displace them.
 	pinned map[common.Hash]uint64
@@ -105,6 +108,7 @@ func NewAggregationPool(
 		aggregatesInCommittee: make(map[keyAggrInCommittee]*committeeAggregate),
 		dataPerCommittee:      make(map[slotCommittee][]keyAggrInCommittee),
 		refused:               make(map[slotCommittee]map[common.Hash]*committeeAggregate),
+		aggregatorDuties:      make(map[slotCommittee]struct{}),
 		pinned:                make(map[common.Hash]uint64),
 	}
 	go p.sweepStaleAtt(ctx)
@@ -257,8 +261,9 @@ func (p *aggregationPoolImpl) storeCommitteeAggregate(perCommittee slotCommittee
 	p.dataPerCommittee[perCommittee] = append(p.dataPerCommittee[perCommittee], key)
 }
 
-// PinAttestationData marks data the node serves its validators. Our aggregators ask for exactly this
-// data, so its votes are always stored, and votes refused before are moved into the store.
+// PinAttestationData marks data the node serves its validators, which our aggregators ask for. Once
+// it is stored, gossip votes for other data cannot displace it. Votes refused before the pin move
+// into the store if the committee stores unpinned data it can take the place of.
 func (p *aggregationPoolImpl) PinAttestationData(data *solid.AttestationData) error {
 	root, err := data.HashSSZ()
 	if err != nil {
@@ -300,9 +305,8 @@ func (p *aggregationPoolImpl) storePinnedAggregate(perCommittee slotCommittee, k
 			refused = make(map[common.Hash]*committeeAggregate)
 			p.refused[perCommittee] = refused
 		}
-		if p.evictWeakestRefused(refused) {
-			refused[displacedKey.dataRoot] = displaced
-		}
+		p.evictWeakestRefused(refused, p.refusedLimit(perCommittee))
+		refused[displacedKey.dataRoot] = displaced
 	}
 	p.storeCommitteeAggregate(perCommittee, key, entry)
 }
@@ -321,7 +325,7 @@ func (p *aggregationPoolImpl) addRefusedVote(perCommittee slotCommittee, key key
 		if entry, err = newCommitteeAggregate(inAtt, version); err != nil {
 			return err
 		}
-		if !p.evictWeakestRefused(refused) {
+		if !p.evictWeakestRefused(refused, p.refusedLimit(perCommittee)) {
 			return ErrPoolLimit
 		}
 		if refused == nil {
@@ -341,12 +345,34 @@ func (p *aggregationPoolImpl) addRefusedVote(perCommittee slotCommittee, key key
 // refusedTieBreak picks which of n equally weak refused data gives way.
 var refusedTieBreak = rand.IntN
 
-// evictWeakestRefused makes room for new refused data, which enters unless every refused data is
-// pinned: every new data starts with one voter, so refusing it would lock any new data out of a full
-// set. One of the unpinned refused data with the fewest voters gives way, picked at random: a
-// predictable pick would let a stream of fresh one-vote data flush data that is gathering voters.
-func (p *aggregationPoolImpl) evictWeakestRefused(refused map[common.Hash]*committeeAggregate) bool {
-	if len(refused) < maxDataPerCommittee {
+// AddAggregatorDuty marks a committee with a local aggregator, from the previous epoch to the next.
+func (p *aggregationPoolImpl) AddAggregatorDuty(slot, committeeIndex uint64) {
+	currentEpoch := p.ethClock.GetEpochAtSlot(p.ethClock.GetCurrentSlot())
+	epoch := p.ethClock.GetEpochAtSlot(slot)
+	if committeeIndex >= p.beaconConfig.MaxCommitteesPerSlot || epoch+1 < currentEpoch || epoch > currentEpoch+1 {
+		return
+	}
+	p.aggregatesLock.Lock()
+	defer p.aggregatesLock.Unlock()
+	p.aggregatorDuties[slotCommittee{slot: slot, committee: committeeIndex}] = struct{}{}
+}
+
+// refusedLimit bounds the refused data of a committee. With a local aggregator it is the committee
+// size: a validator votes once per epoch, so every data that got a vote keeps it.
+func (p *aggregationPoolImpl) refusedLimit(perCommittee slotCommittee) int {
+	if _, ok := p.aggregatorDuties[perCommittee]; ok {
+		return int(p.beaconConfig.MaxValidatorsPerCommittee)
+	}
+	return maxDataPerCommittee
+}
+
+// evictWeakestRefused makes room for new refused data once the set holds limit data. The new data
+// enters unless every refused data is pinned: every new data starts with one voter, so refusing it
+// would lock any new data out of a full set. One of the unpinned refused data with the fewest voters
+// gives way, picked at random: a predictable pick would let a stream of fresh one-vote data flush
+// data that is gathering voters.
+func (p *aggregationPoolImpl) evictWeakestRefused(refused map[common.Hash]*committeeAggregate, limit int) bool {
+	if len(refused) < limit {
 		return true
 	}
 	var weakest []common.Hash
@@ -443,6 +469,11 @@ func (p *aggregationPoolImpl) pruneStaleLocked() {
 	for root, slot := range p.pinned {
 		if p.ethClock.GetEpochAtSlot(slot)+1 < currentEpoch {
 			delete(p.pinned, root)
+		}
+	}
+	for perCommittee := range p.aggregatorDuties {
+		if p.ethClock.GetEpochAtSlot(perCommittee.slot)+1 < currentEpoch {
+			delete(p.aggregatorDuties, perCommittee)
 		}
 	}
 }
