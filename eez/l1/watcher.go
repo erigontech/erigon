@@ -89,10 +89,15 @@ func (w *Watcher) Seed(ctx context.Context, number uint64) error {
 func (w *Watcher) Tip() Header { return w.ring[len(w.ring)-1] }
 
 // ancestors returns head and up to depth-1 of its ancestors, oldest first.
+// The window ends early at an ancestor the source does not serve, as a
+// recording's first block.
 func (w *Watcher) ancestors(ctx context.Context, head Header) ([]Header, error) {
 	window := []Header{head}
 	for len(window) < w.depth && window[0].Number > 0 {
 		parent, err := w.reader.HeaderByHash(ctx, window[0].ParentHash)
+		if errors.Is(err, ErrNotFound) {
+			break
+		}
 		if err != nil {
 			return nil, err
 		}

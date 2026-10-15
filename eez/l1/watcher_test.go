@@ -221,3 +221,20 @@ func TestWatcherRun(t *testing.T) {
 	fork(t, c, 0, 5, 1)
 	require.ErrorIs(t, <-done, l1.ErrReorgTooDeep)
 }
+
+// TestSeedAtFirstServedBlock seeds the ring with the ancestors the source
+// serves, as a recording that starts above genesis does.
+func TestSeedAtFirstServedBlock(t *testing.T) {
+	c, err := recording.NewMemoryChain(1, &recording.Block{Header: l1.Header{Number: 5, Hash: hashOf(5, 0), ParentHash: hashOf(4, 0)}})
+	require.NoError(t, err)
+	for n := uint64(6); n <= 8; n++ {
+		require.NoError(t, c.Append(&recording.Block{Header: l1.Header{Number: n, Hash: hashOf(n, 0), ParentHash: hashOf(n-1, 0)}}))
+	}
+	w := l1.NewWatcher(c, l1.DefaultReorgDepth)
+	require.NoError(t, w.Seed(context.Background(), 8))
+	require.Equal(t, hashOf(8, 0), w.Tip().Hash)
+	require.NoError(t, c.Reorg(6, &recording.Block{Header: l1.Header{Number: 7, Hash: hashOf(7, 1), ParentHash: hashOf(6, 0)}}))
+	events, err := w.Poll(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, uint64(6), events[0].(l1.Reorg).Ancestor.Number)
+}
