@@ -51,6 +51,7 @@ func TestCreditRevivesDestroyedContract(t *testing.T) {
 	initCode := program.New().ReturnViaCodeCopy(runtime).Bytes()
 	factory := common.HexToAddress("0xaaaa")
 	contract := types.CreateAddress2(factory, [32]byte{31: 1}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+	observer := common.HexToAddress("0xcccc")
 	config := chain.TestChainOsakaConfig.Copy()
 	config.CancunTime, config.PragueTime, config.OsakaTime = nil, nil, nil
 	signer := types.LatestSignerForChainID(config.ChainID)
@@ -70,12 +71,20 @@ func TestCreditRevivesDestroyedContract(t *testing.T) {
 			send(contract)
 			send(common.HexToAddress("0xbbbb"))
 		}},
+		{"coinbase-tip-extcodehash", func(b *blockgen.BlockGen, send func(common.Address)) {
+			b.SetCoinbase(contract)
+			send(factory)
+			send(contract)
+			send(common.HexToAddress("0xbbbb"))
+			send(observer)
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dbg.Exec3Parallel = false
 			gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: types.GenesisAlloc{
-				sender:  {Balance: big.NewInt(1_000_000_000_000_000_000)},
-				factory: {Code: program.New().Create2(initCode, 1).Op(vm.POP).Bytes()},
+				sender:   {Balance: big.NewInt(1_000_000_000_000_000_000)},
+				factory:  {Code: program.New().Create2(initCode, 1).Op(vm.POP).Bytes()},
+				observer: {Code: program.New().Push(contract).Op(vm.EXTCODEHASH).Push(0).Op(vm.SSTORE).Bytes()},
 			}}
 			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 			chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {

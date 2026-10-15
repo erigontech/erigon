@@ -1329,5 +1329,27 @@ func TestEngineApiNewPayloadBALInvalid(t *testing.T) {
 		require.Equal(t, enginetypes.InvalidStatus, status.Status)
 		require.NotNil(t, status.ValidationError)
 		require.ErrorContains(t, status.ValidationError.Error(), "gas limit reached")
+
+		balWithNonceChangeAt := func(index uint32) hexutil.Bytes {
+			encoded, err := types.EncodeBlockAccessListBytes(types.BlockAccessList{{
+				Address:      common.Address{1},
+				NonceChanges: []*types.NonceChange{{Index: index}},
+			}})
+			require.NoError(t, err)
+			return encoded
+		}
+		postExecutionIndex := uint32(len(payload.ExecutionPayload.Transactions)) + 1
+		status, err = sendWithBAL(balWithNonceChangeAt(postExecutionIndex + 1))
+		require.NoError(t, err)
+		require.Equal(t, enginetypes.InvalidStatus, status.Status)
+		require.NotNil(t, status.ValidationError)
+		require.ErrorContains(t, status.ValidationError.Error(), "block access index",
+			"an index beyond len(transactions)+1 must be rejected before the block is inserted or executed")
+		status, err = sendWithBAL(balWithNonceChangeAt(postExecutionIndex))
+		require.NoError(t, err)
+		require.Equal(t, enginetypes.InvalidStatus, status.Status)
+		require.NotNil(t, status.ValidationError)
+		require.ErrorContains(t, status.ValidationError.Error(), "block access list mismatch",
+			"an in-range index is only refuted by the post-execution comparison")
 	})
 }

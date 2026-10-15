@@ -174,13 +174,7 @@ type gloasBlockCollector interface {
 	AddGloasBlock(*cltypes.BeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) error
 }
 
-// forwardSyncEnvelopeStore is fork choice plus the status recording forward sync needs.
-type forwardSyncEnvelopeStore interface {
-	forkchoice.ForkChoiceStorage
-	MarkPayloadStatusAndGasLimitIfRetained(common.Hash, common.Hash, execution_client.PayloadStatus, uint64) (execution_client.PayloadStatus, bool)
-}
-
-func processDownloadedGloasEnvelope(ctx context.Context, logger log.Logger, store forwardSyncEnvelopeStore, collector gloasBlockCollector, block *cltypes.BeaconBlock, blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, shouldInsert, validate bool) error {
+func processDownloadedGloasEnvelope(ctx context.Context, logger log.Logger, store forkchoice.ForkChoiceStorage, collector gloasBlockCollector, block *cltypes.BeaconBlock, blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, shouldInsert, validate bool) error {
 	err := store.OnExecutionPayload(ctx, envelope, false, validate)
 	persisted := errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending) ||
 		(errors.Is(err, forkchoice.ErrIgnore) && persistedEnvelopeMatches(store, blockRoot, envelope))
@@ -188,26 +182,12 @@ func processDownloadedGloasEnvelope(ctx context.Context, logger log.Logger, stor
 		logger.Warn("[Caplin] forward sync: failed to process GLOAS envelope", "slot", block.Slot, "err", err)
 		return err
 	}
-	if !validate {
-		recordUnvalidatedForwardSyncPayload(store, blockRoot, envelope)
-	}
 	if shouldInsert {
 		if err := collector.AddGloasBlock(block, envelope); err != nil {
 			return fmt.Errorf("failed to add gloas block to collector: %w", err)
 		}
 	}
 	return nil
-}
-
-// recordUnvalidatedForwardSyncPayload gives a payload persisted without an EL verdict the
-// NotValidated status, so fork choice sees the FULL variant right away. A verdict already on
-// record is kept; None is not one.
-func recordUnvalidatedForwardSyncPayload(store forwardSyncEnvelopeStore, root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) {
-	if envelope == nil || envelope.Message == nil || envelope.Message.Payload == nil {
-		return
-	}
-	payload := envelope.Message.Payload
-	store.MarkPayloadStatusAndGasLimitIfRetained(root, payload.BlockHash, execution_client.PayloadStatusNotValidated, payload.GasLimit)
 }
 
 func persistedEnvelopeMatches(store forkchoice.ForkChoiceStorage, root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) bool {
@@ -495,6 +475,9 @@ func validateAnchorPayloadWithExecutionClient(ctx context.Context, cfg *Cfg, anc
 		return nil // StoreAnchorEnvelope recorded NotValidated
 	}
 	status, err := validateAnchorPayloadWithEL(ctx, cfg, bid, env)
+	if errors.Is(err, forkchoice.ErrPayloadValidationInterrupted) {
+		return nil // not an EL verdict
+	}
 	if err != nil {
 		log.Warn("[Caplin] Anchor envelope EL validation failed", "anchorRoot", anchorRoot, "status", status, "err", err)
 	}

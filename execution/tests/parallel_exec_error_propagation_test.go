@@ -65,7 +65,7 @@ func TestParallelExec_PreDispatchFailure_SurfacesInsteadOfInfiniteLoop(t *testin
 	require.ErrorIs(t, err, chaosErr,
 		"the pre-dispatch failure must surface as a hard error, wrapping the original")
 	var exhausted *stagedsync.ErrLoopExhausted
-	require.False(t, errors.As(err, &exhausted),
+	require.NotErrorAs(t, err, &exhausted,
 		"pre-dispatch failure classified as ErrLoopExhausted → runStage loops forever with zero progress")
 }
 
@@ -168,7 +168,7 @@ func TestParallelExec_WorkerPoolDeath_SurfacesInsteadOfHanging(t *testing.T) {
 	require.ErrorIs(t, err, chaosErr,
 		"a dead worker pool must surface its error through the executor group")
 	var exhausted *stagedsync.ErrLoopExhausted
-	require.False(t, errors.As(err, &exhausted),
+	require.NotErrorAs(t, err, &exhausted,
 		"worker-pool death classified as ErrLoopExhausted → runStage retries forever with zero progress")
 }
 
@@ -264,7 +264,7 @@ func TestParallelExec_ExecLoopPanic_SurfacesInsteadOfRetrying(t *testing.T) {
 		"a recovered exec-loop panic must surface as a hard error")
 	require.ErrorContains(t, err, chaosErr.Error())
 	var exhausted *stagedsync.ErrLoopExhausted
-	require.False(t, errors.As(err, &exhausted),
+	require.NotErrorAs(t, err, &exhausted,
 		"exec-loop panic classified as ErrLoopExhausted → runStage retries forever with zero progress")
 }
 
@@ -282,6 +282,6 @@ func TestParallelExec_TaskPanic_SurfacesAsOperationalError(t *testing.T) {
 	require.ErrorContains(t, err, "exec task panic")
 	require.ErrorContains(t, err, chaosErr.Error())
 	var exhausted *stagedsync.ErrLoopExhausted
-	require.False(t, errors.As(err, &exhausted),
+	require.NotErrorAs(t, err, &exhausted,
 		"task panic classified as ErrLoopExhausted → runStage retries forever with zero progress")
 }
