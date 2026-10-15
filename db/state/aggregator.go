@@ -74,6 +74,8 @@ type Aggregator struct {
 	// Note: this is a SOFT limit applied during the merge process. If you apply a smaller limit to
 	// an existing datadir, the existing domain files containing more steps will be unaffected.
 	erigondbDomainStepsInFrozenFile uint64
+	// commitmentHotMaxMergeSteps caps commitment merges (0 = no extra cap): with 1, commitment files on the hot tier stay 1-step.
+	commitmentHotMaxMergeSteps uint64
 
 	dirtyFilesLock sync.Mutex
 	// commitmentRefsMu guards the runtime-mutable commitment ReferencesInCommitmentBranches
@@ -1953,7 +1955,11 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 		if !d.d.Enabled {
 			continue
 		}
-		r.domain[id] = d.findMergeRange(maxEndTxNum, domainMaxSpan, maxSpan)
+		span := domainMaxSpan
+		if kv.Domain(id) == kv.CommitmentDomain && at.a.commitmentHotMaxMergeSteps > 0 {
+			span = min(span, stepSize*at.a.commitmentHotMaxMergeSteps)
+		}
+		r.domain[id] = d.findMergeRange(maxEndTxNum, span, maxSpan)
 	}
 
 	if commitmentMergeReferencing && r.domain[kv.CommitmentDomain].values.needMerge {
