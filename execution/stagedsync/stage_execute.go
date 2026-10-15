@@ -246,25 +246,33 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 	if accumulator == nil && !dbg.TraceUnwinds {
 		return nil
 	}
+	var currentAddress common.Address
 	var currentInc uint64
+	var incarnationKnown bool
 
 	// TODO: why we don't call accumulator.ChangeCode???
 	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		var address common.Address
+		copy(address[:], k[:length.Addr])
+		if address != currentAddress {
+			currentAddress = address
+			currentInc = 0
+			incarnationKnown = false
+		}
 		if len(k) == length.Addr {
+			incarnationKnown = true
 			if len(v) > 0 {
 				var account accounts.Account
 				if err := accounts.DeserialiseV3(&account, v); err != nil {
 					return fmt.Errorf("%w, %x", err, v)
 				}
-				var address common.Address
-				copy(address[:], k)
+				currentInc = account.Incarnation
 				newV := accounts.SerialiseV3(&account)
 				if accumulator != nil {
 					accumulator.ChangeAccount(address, account.Incarnation, newV)
 				}
 			} else {
-				var address common.Address
-				copy(address[:], k)
+				currentInc = 0
 				if accumulator != nil {
 					accumulator.DeleteAccount(address)
 				}
@@ -272,11 +280,23 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 			return nil
 		}
 
-		var address common.Address
 		var location common.Hash
-		copy(address[:], k[:length.Addr])
 		copy(location[:], k[length.Addr:])
 		if accumulator != nil {
+			if !incarnationKnown {
+				accountData, _, err := tx.GetAsOf(kv.AccountsDomain, address[:], txUnwindTo)
+				if err != nil {
+					return err
+				}
+				if len(accountData) > 0 {
+					var account accounts.Account
+					if err := accounts.DeserialiseV3(&account, accountData); err != nil {
+						return fmt.Errorf("%w, %x", err, accountData)
+					}
+					currentInc = account.Incarnation
+				}
+				incarnationKnown = true
+			}
 			accumulator.ChangeStorage(address, currentInc, location, bytes.Clone(v))
 		}
 		return nil

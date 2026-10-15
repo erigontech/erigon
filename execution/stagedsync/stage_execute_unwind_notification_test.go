@@ -129,6 +129,83 @@ func TestStateChangesStreamAtUnwind(t *testing.T) {
 	}
 }
 
+func TestStateChangesStreamAtUnwind_StorageIncarnation(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	logger := log.New()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	writer, err := execctx.NewSharedDomains(ctx, tx, logger)
+	require.NoError(t, err)
+	defer writer.Close()
+
+	loc := common.Hash{31: 2}
+	contracts := []struct {
+		name           string
+		address        common.Address
+		incarnation    uint64
+		accountChanged bool
+	}{
+		{"storage only at zero address", common.Address{}, 2, false},
+		{"account and storage", common.Address{19: 1}, 1, true},
+		{"storage only after account", common.Address{19: 2}, 3, false},
+	}
+	acc := notifications.NewAccumulator()
+	acc.StartChange(makeHeader(2, common.Hash{}), nil, false)
+	var diffs [kv.DomainLen][]kv.DomainEntryDiff
+	for _, contract := range contracts {
+		key := dbutils.GenerateStoragePlainKey(contract.address, loc)
+		oldAccount := accounts.SerialiseV3(&accounts.Account{Nonce: 1, Incarnation: contract.incarnation})
+		newAccount := oldAccount
+		require.NoError(t, writer.DomainPut(kv.AccountsDomain, tx, contract.address[:], oldAccount, 5, nil))
+		if contract.accountChanged {
+			newAccount = accounts.SerialiseV3(&accounts.Account{Nonce: 2, Incarnation: contract.incarnation})
+			require.NoError(t, writer.DomainPut(kv.AccountsDomain, tx, contract.address[:], newAccount, 20, oldAccount))
+			diffs[kv.AccountsDomain] = append(diffs[kv.AccountsDomain], kv.DomainEntryDiff{Key: diffKey(contract.address[:], 1), Value: oldAccount})
+		}
+		require.NoError(t, writer.DomainPut(kv.StorageDomain, tx, key, []byte{1}, 5, nil))
+		require.NoError(t, writer.DomainPut(kv.StorageDomain, tx, key, []byte{2}, 20, []byte{1}))
+		diffs[kv.StorageDomain] = append(diffs[kv.StorageDomain], kv.DomainEntryDiff{Key: diffKey(key, 1), Value: []byte{1}})
+		acc.ChangeAccount(contract.address, contract.incarnation, newAccount)
+		acc.ChangeStorage(contract.address, contract.incarnation, loc, []byte{2})
+	}
+	require.NoError(t, writer.Flush(ctx, tx))
+
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+	require.NoError(t, err)
+	defer doms.Close()
+	require.NoError(t, doms.InitBlockOverlay(tx))
+
+	cache := kvcache.New(kvcache.DefaultCoherentConfig)
+	cache.OnNewBlock((&notifications.BlockBatchNotification{StateVersionID: 1, Changes: acc.Changes()}).ToProtoBatch())
+
+	doms.Unwind(16, &diffs)
+	acc.Reset(2)
+	acc.StartChange(makeHeader(1, common.Hash{}), nil, true)
+	require.NoError(t, stateChangesStreamAtUnwind(ctx, doms.BlockOverlay(), 1, 16, acc, &diffs, logger))
+	require.Len(t, acc.Changes(), 1)
+	require.Len(t, acc.Changes()[0].Changes, len(contracts))
+	cache.OnNewBlock((&notifications.BlockBatchNotification{StateVersionID: 2, Changes: acc.Changes()}).ToProtoBatch())
+	for i, contract := range contracts {
+		t.Run(contract.name, func(t *testing.T) {
+			change := acc.Changes()[0].Changes[i]
+			require.Equal(t, contract.address, change.Address)
+			require.Equal(t, contract.incarnation, change.Incarnation)
+			if contract.accountChanged {
+				oldAccount := accounts.SerialiseV3(&accounts.Account{Nonce: 1, Incarnation: contract.incarnation})
+				require.Equal(t, oldAccount, change.Data)
+			}
+			cacheKey := append(binary.BigEndian.AppendUint64(bytes.Clone(contract.address[:]), contract.incarnation), loc[:]...)
+			got, err := cache.Get(cacheKey, tx, 2)
+			require.NoError(t, err)
+			require.Equal(t, []byte{1}, got)
+		})
+	}
+}
+
 func TestStateChangesStreamAtUnwind_AcrossSteps(t *testing.T) {
 	t.Parallel()
 
