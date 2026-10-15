@@ -97,6 +97,11 @@ type parallelExecutor struct {
 	applyResultsCh  chan applyResult
 	commitResultsCh chan applyResult
 	maxBlockNum     uint64 // set before execLoop; exec loop exits when reached
+	// roundStop is the ROUND's own cancellation, held apart from the context the workers, the apply loop
+	// and the commitment calculator run under. Closed means the caller wants no further transaction
+	// scheduled; everything already executing finishes and is kept. nil outside a stoppable round.
+	// See exec3_stop.go.
+	roundStop <-chan struct{}
 	// reachedMaxBlock is set by the exec loop when it exits cleanly because
 	// blockResult.BlockNum >= maxBlockNum (i.e. all requested work is done),
 	// as opposed to sizeEst > batchLimit (more work pending). The apply loop
@@ -221,11 +226,21 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	// Set accumulator before pe.run() so execLoop sees it without a race.
 	pe.accumulator = accumulator
 
-	// A round whose results are disposable gives the executor back as soon as it is cancelled; once it has, what is
+	// A round whose results are disposable gives the executor back as soon as it is ABANDONED; once it has, what is
 	// left of this run belongs to the SD's owner and none of the deferred teardown below may touch it.
 	detachable := pe.isForkValidation && pe.doms != nil && pe.doms.CanDetachOnCancel()
 	var detached bool
-	executorContext, executorCancel, err := pe.run(ctx)
+	// THE ROUND'S OWN CANCELLATION IS NOT AN ABORT. The workers, the apply loop and the commitment
+	// calculator run for as long as the ABORT does — keeping every value the round attached, so its commit
+	// claim and its per-transaction progress hook still resolve — and a caller stopping the round leaves
+	// them to finish what is in flight and drain normally. Only the dispatch loop watches the round's own
+	// cancellation, and what it does with it is stop handing out work (exec3_stop.go).
+	outer := exec.Outer(ctx)
+	if outer != ctx {
+		pe.roundStop = ctx.Done()
+		defer func() { pe.roundStop = nil }()
+	}
+	executorContext, executorCancel, err := pe.run(exec.UntilAbort(ctx))
 	defer func() {
 		if !detached {
 			executorCancel(nil)
@@ -449,16 +464,18 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		// loop owns shutdown sequencing. Adding context checks here causes
 		// the apply loop to exit before the calculator finishes, leaving
 		// sd.mem inconsistent with the commitment boundary.
-		// The one exception: a detachable round stops at its deadline. Its results are discarded, so there is no
-		// commitment boundary left to keep consistent, and waiting for the calculator is exactly the wait it must not do.
+		// The one exception: a detachable round that is ABORTED. Its results are discarded, so there is no
+		// commitment boundary left to keep consistent, and waiting for the calculator is exactly the wait it
+		// must not do. A round the caller merely STOPPED is not that: it keeps the prefix it executed, so it
+		// has a boundary like any other block and the calculator has to finish. Hence the OUTER context.
 		var abandoned <-chan struct{}
 		if detachable {
-			abandoned = ctx.Done()
+			abandoned = outer.Done()
 		}
 		for {
 			select {
 			case <-abandoned:
-				return ctx.Err()
+				return outer.Err()
 			case applyResult, ok := <-applyResults:
 				if !ok {
 					// Exec loop closed the channel — batch is complete.
@@ -778,7 +795,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		}()
 		select {
 		case <-done:
-		case <-ctx.Done():
+		case <-outer.Done():
+			// The OUTER context: a round the caller STOPPED has a committed prefix behind it and must
+			// shut down properly like any other. Detaching is for a round whose results are discarded —
+			// only an abort does that now.
 			detached = true
 			pe.doms.DetachOnCancel(func() {
 				<-done
@@ -787,7 +807,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 				}
 				calculator.Stop()
 			})
-			return nil, rwTx, ctx.Err()
+			return nil, rwTx, outer.Err()
 		}
 	}
 
@@ -2287,6 +2307,9 @@ type blockExecutor struct {
 	result      *blockResult
 	applyCount  int
 	exhausted   *ErrLoopExhausted
+	// cut marks a round the caller STOPPED and that has been shortened to the transactions which
+	// completed. See exec3_stop.go.
+	cut bool
 
 	// blockStateCache provides a stable pre-block snapshot of account data
 	// for GetCommittedState reads, unaffected by intra-block ApplyStateWrites.
@@ -2924,6 +2947,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 	}
 
+	// A stopped round shortens itself here, once everything it dispatched has come back, so the block it
+	// completes below is the prefix that executed rather than the body it was given.
+	be.cutIfStopped(pe)
+
 	if be.publishTasks.countComplete() == len(be.tasks) && be.execTasks.countComplete() == len(be.tasks) {
 		var allDeps map[int]map[int]bool
 
@@ -2963,8 +2990,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		// Block finalize: run engine.Finalize + MakeWriteSet on the producer
 		// side so finalize writes go to the BlockStateCache before the Flush.
+		// A CUT round has no block-end task left to run it on — it ends at a transaction, and its last
+		// task is that transaction. Running this against that task would re-record its reads as the
+		// block-end's (empty) ones. The block-end belongs to the round that completes the body.
 		var finalizeWrites state.VersionedWrites
-		if be.blockNum > 0 {
+		if be.blockNum > 0 && !be.cut {
 			lastResult := be.results[len(be.results)-1]
 			finalTask := be.tasks[len(be.tasks)-1].Task
 			finalVersion := finalTask.Version()
@@ -3113,6 +3143,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 }
 
 func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExecutor) {
+	// A round the caller stopped hands out no more work. What is already executing finishes, and the round
+	// then ends at the last transaction that completed — see exec3_stop.go.
+	if be.stopping(pe) {
+		return
+	}
 	// Drain deferred tx N when its predecessor is validated AND no worker
 	// at index < N is in flight. Lower-indexed workers' flushes land at
 	// indices visible to N's reads via vm.Read's floor(N-1); higher-indexed

@@ -108,10 +108,14 @@ func (h *roundHarness) sealAndAdopt(params *builder.Parameters, wantTxs int) *ty
 	return hdr
 }
 
-// A round cut at its deadline gives the executor back at the deadline, not when its workers have finished shutting
-// down: its results are never used, so nothing has to wait for them — least of all the seal. live40: a round cut on
+// A round the caller ABANDONS gives the executor back at once, not when its workers have finished shutting down:
+// its results are never used, so nothing has to wait for them — least of all the seal. live40: a round cut on
 // time still held the executor through a 2.3s shutdown, the seal behind it missed its slot, and the same heavy
 // heights were orphaned over and over.
+//
+// Abandoning is the HARDER of a round's two endings, and the only one that detaches. The ordinary ending is the
+// STOP, which commits the prefix it executed and therefore has to shut down properly like any other block — see
+// TestRoundStopsAtItsDeadline. A caller reaches for this one when a round did not stop in the time it allowed.
 func TestAbandonedRoundReleasesTheExecutorAtItsDeadline(t *testing.T) {
 	h := newRoundHarness(t)
 	head, err := h.m.ExecModule.CurrentHeader(h.ctx)
@@ -125,22 +129,27 @@ func TestAbandonedRoundReleasesTheExecutorAtItsDeadline(t *testing.T) {
 	restore := func() { dbg.ExecShutdownStall, dbg.ExecShutdownStallEvery = prevStall, prevEvery }
 	defer restore()
 
-	// As the driver runs it: on its own goroutine, with a deadline and a commit claim the caller takes when it
-	// stops waiting.
+	// As the driver runs it: on its own goroutine, under two nested cancels — the inner one stops the round,
+	// the outer one abandons it — and a commit claim the caller takes when it gives up.
 	var outcome atomic.Int32
-	roundCtx, cancel := context.WithTimeout(h.ctx, 200*time.Millisecond)
+	abandonCtx, abandon := context.WithCancelCause(h.ctx)
+	defer abandon(nil)
+	roundCtx, cancel := context.WithTimeout(abandonCtx, 200*time.Millisecond)
 	defer cancel()
-	claimed := execmodule.WithRoundCommit(roundCtx, func() bool { return outcome.CompareAndSwap(0, 1) })
+	claimed := execmodule.WithAbandon(roundCtx, abandonCtx)
+	claimed = execmodule.WithRoundCommit(claimed, func() bool { return outcome.CompareAndSwap(0, 1) })
 	result := make(chan error, 1)
 	go func() { result <- h.round(claimed, in, 1, 0) }()
 	<-roundCtx.Done()
 	require.True(t, outcome.CompareAndSwap(0, 2), "the round committed before its deadline: the stall never held it")
+	// It did not stop within the grace, so it is taken away from it.
+	abandon(context.DeadlineExceeded)
 	restore()
 
 	start := time.Now()
 	hdr := h.sealAndAdopt(params, 1)
 	took := time.Since(start)
-	require.Less(t, took, stall/2, "the seal waited %s behind a round abandoned at its deadline", took)
+	require.Less(t, took, stall/2, "the seal waited %s behind an abandoned round", took)
 
 	select {
 	case err := <-result:

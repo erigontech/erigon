@@ -123,7 +123,10 @@ func ExecV3(ctx context.Context,
 	// Run under the round's own context, not the swappable one the pipeline was built with (execmodule.RoundContext):
 	// contexts derived from it outlive the round when a cut execution detaches, and must not see the swap back.
 	if round, ok := ctx.(interface{ Current() context.Context }); ok {
-		ctx = round.Current()
+		// Carry the ABORT across the unwrap. The round's context ending means the caller wants this round
+		// to stop, which is not the node going down — and execution keeps what it executed only if it can
+		// still tell the two apart. See exec3_stop.go.
+		ctx = exec.WithOuter(round.Current(), exec.Outer(ctx))
 	}
 	isForkValidation := execStage.SyncMode() == stages.ModeForkValidation
 

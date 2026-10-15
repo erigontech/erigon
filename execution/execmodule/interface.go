@@ -76,6 +76,9 @@ type ValidationResult struct {
 	// flashblock's rounds so far (== the number of body txs executed). Seal input; 0 off the
 	// flashblock path.
 	FlashblockReceiptCount int
+	// AppliedTxs is how many of the block's body transactions this call left executed. It equals the body
+	// it was given unless the round was STOPPED part way, in which case the body was cut to it.
+	AppliedTxs int
 	// GasUsed, ReceiptHash and Bloom are the SEALED output-side header fields the CLOSE derives
 	// over the accumulated flashblock receipts (doms.FlashblockReceipts()) with ZERO re-execution —
 	// the read-and-package seal. Set only at the close (FlashblockAccumulating unset, receipts present);

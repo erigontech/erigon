@@ -275,6 +275,8 @@ func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs Flas
 	body := append([][]byte(nil), e.flash.body...)
 	e.flash.mu.Unlock()
 	committed := false
+	// stopped is set when the round committed only a PREFIX of what it was fed. See ExecutionStopped.
+	var stopped *ExecutionStopped
 	defer func() {
 		if !committed {
 			e.rollbackRound(inputs.Number, roundBase)
@@ -288,20 +290,34 @@ func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs Flas
 	header := BuildFlashHeader(inputs, body, FlashblockOutputs{})
 	hash := header.Hash()
 	rawBlock := &types.RawBlock{Header: header, Body: &types.RawBody{Transactions: body, Withdrawals: inputs.Withdrawals}}
-	vr, err := e.preExecuteLocked(ctx, rawBlock)
-	// A round that WON its commit claim is committed, even if its deadline passed while it merged: the
-	// caller saw the claim taken and is waiting for this result, so reporting it abandoned now would be
-	// the duplicate return the claim exists to prevent.
-	claimWon := err == nil && vr.ValidationStatus == ExecutionStatusSuccess && roundCommitClaim(ctx) != nil
+	vr, err := e.preExecuteLocked(ctx, rawBlock, func(txs [][]byte) *types.Header {
+		return BuildFlashHeader(inputs, txs, FlashblockOutputs{})
+	})
+	// A STOPPED round keeps what it executed. Everything past that is as if it had never been fed: out of
+	// the maintained body, out of the header, and back to the caller to offer again.
+	if err == nil && vr.ValidationStatus == ExecutionStatusSuccess && vr.AppliedTxs < len(body) {
+		body = body[:vr.AppliedTxs]
+		header = BuildFlashHeader(inputs, body, FlashblockOutputs{})
+		hash = header.Hash()
+		e.rollbackRound(inputs.Number, vr.AppliedTxs)
+		stopped = &ExecutionStopped{
+			Reason: stopReasonOf(ctx), Num: inputs.Number, Txs: len(kept), Applied: vr.AppliedTxs - roundBase,
+		}
+	}
+	// A round that MERGED is committed, whatever the clock says. Its state is in the block, so reporting
+	// it abandoned would requeue transactions the block already holds — and when there is a commit claim,
+	// the caller saw it taken and is waiting for exactly this result.
+	merged := err == nil && vr.ValidationStatus == ExecutionStatusSuccess
 	// Otherwise, a round that ran out of the time its caller gave it is a DROP, not a failure, and it has
 	// to be recognised BEFORE the verdict below: execution cut off mid-round reports the block as INVALID,
 	// which is true of the half-executed body and says nothing about the transactions.
 	//
 	// Nothing is left behind: the deferred rollback takes the round's transactions back out of the body
 	// and the staged state was closed rather than merged, so the block is exactly what it was before.
-	if !claimWon && (errors.Is(err, ExecutionStopped{}) || ctx.Err() != nil) {
-		// Applied is 0: a stopped round is discarded whole today. The staged state was closed rather than
-		// merged, so nothing it executed survives — see ExecutionStopped.
+	if !merged && (errors.Is(err, ExecutionStopped{}) || ctx.Err() != nil) {
+		// Applied is 0: this round kept nothing. The staged state was closed rather than merged, so
+		// nothing it executed survives — see ExecutionStopped. A round that DID keep a prefix does not
+		// come through here; it succeeded, and says how much it kept in `stopped` below.
 		return nil, common.Hash{}, ValidationResult{}, ExecutionStopped{
 			Reason: stopReasonOf(ctx), Num: inputs.Number, Txs: len(kept),
 		}
@@ -341,6 +357,12 @@ func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs Flas
 	}
 	e.flash.mu.Unlock()
 	committed = true
+	// The round succeeded AND was stopped: it committed the prefix it executed and the caller takes the
+	// rest back. The error says which, and how many — there is nothing for the caller to work out from a
+	// body length it never sees.
+	if stopped != nil {
+		return &types.RawBody{Transactions: body, Withdrawals: inputs.Withdrawals}, hash, vr, *stopped
+	}
 	return &types.RawBody{Transactions: body, Withdrawals: inputs.Withdrawals}, hash, vr, nil
 }
 
@@ -353,8 +375,50 @@ func (e *ExecModule) rollbackRound(number uint64, base int) {
 		return
 	}
 	dropped := len(e.flash.body) - base
+	// The filter's record of the body has to come back with the body. A (sender,nonce) left marked `seen`
+	// is one the block can never be offered again — the filter treats seen as DECIDED and never reconsiders
+	// it — and a bodyNonce left pointing past the body makes the next round's continuity check read off
+	// transactions that are no longer there. Both used to be left behind, which only did not show because a
+	// rolled-back round took the whole block's remaining fill with it.
+	e.forgetBodyLocked(e.flash.body[base:])
 	e.flash.body = e.flash.body[:base]
+	e.rebuildBodyNoncesLocked()
 	e.logger.Debug("[intra-block] round rolled back out of the body", "block", number, "dropped", dropped, "bodyLen", base)
+}
+
+// senderOf resolves a raw transaction's sender, from the transaction itself or by recovery.
+func (e *ExecModule) senderOf(rlp []byte) (accounts.Address, uint64, bool) {
+	tx, derr := types.DecodeTransaction(rlp)
+	if derr != nil {
+		return accounts.Address{}, 0, false
+	}
+	s, ok := tx.GetSender()
+	if !ok {
+		if rec, serr := types.LatestSignerForChainID(e.config.ChainID).Sender(tx); serr == nil {
+			s, ok = rec, true
+		}
+	}
+	return s, tx.GetNonce(), ok
+}
+
+// forgetBodyLocked un-decides the transactions in txs, so the filter may consider them again.
+func (e *ExecModule) forgetBodyLocked(txs [][]byte) {
+	for _, rlp := range txs {
+		if s, nonce, ok := e.senderOf(rlp); ok {
+			delete(e.flash.seen, snKeyExec{addr: s, nonce: nonce})
+		}
+	}
+}
+
+// rebuildBodyNoncesLocked recomputes the per-sender last body nonce from the body itself, which is the only
+// place it can be read honestly once the body has changed length.
+func (e *ExecModule) rebuildBodyNoncesLocked() {
+	e.flash.bodyNonce = make(map[accounts.Address]uint64, len(e.flash.bodyNonce))
+	for _, rlp := range e.flash.body {
+		if s, nonce, ok := e.senderOf(rlp); ok {
+			e.flash.bodyNonce[s] = nonce
+		}
+	}
 }
 
 // reopenFlashblockLocked re-opens the CURRENT block under corrected attributes, restoring a body that was
@@ -397,7 +461,7 @@ func (e *ExecModule) reopenFlashblockLocked(ctx context.Context, inputs Flashblo
 	header := BuildFlashHeader(inputs, restored, FlashblockOutputs{})
 	hash := header.Hash()
 	rawBlock := &types.RawBlock{Header: header, Body: &types.RawBody{Transactions: restored, Withdrawals: inputs.Withdrawals}}
-	vr, err := e.preExecuteLocked(ctx, rawBlock)
+	vr, err := e.preExecuteLocked(ctx, rawBlock, nil)
 	if err != nil {
 		return nil, common.Hash{}, vr, err
 	}

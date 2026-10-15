@@ -30,6 +30,9 @@ type RoundContext struct {
 }
 
 func NewRoundContext(base context.Context) *RoundContext {
+	// The base is the ABORT: execution reaches it through exec.Outer whatever a round has pointed cur at,
+	// so a round's own cancellation can mean "stop here" without being read as the node going down.
+	base = exec.WithOuter(base, base)
 	return &RoundContext{base: base, cur: base}
 }
 
@@ -68,7 +71,19 @@ func (r *RoundContext) Err() error                  { return r.current().Err() }
 
 // Value answers from the BASE context: values are node-scoped, and a round's deadline context carries none
 // of its own. Reading them through the swap would make an unrelated lookup depend on round timing.
-func (r *RoundContext) Value(key any) any { return r.base.Value(key) }
+//
+// The ABORT is the exception, because it is the one value that belongs to the ROUND. A round has two
+// endings, not one: its own cancellation STOPS it, and a round that will not stop is ABANDONED by a second
+// cancellation it names itself. Answering that from the base would offer only the node's shutdown, and a
+// caller that gave up on a round would have no way to say so without taking the node down with it.
+func (r *RoundContext) Value(key any) any {
+	if exec.IsOuterKey(key) {
+		if v := r.current().Value(key); v != nil {
+			return v
+		}
+	}
+	return r.base.Value(key)
+}
 
 type roundCommitKey struct{}
 
@@ -94,4 +109,15 @@ func WithTxProgress(ctx context.Context, p TxProgress) context.Context {
 func roundCommitClaim(ctx context.Context) func() bool {
 	claim, _ := ctx.Value(roundCommitKey{}).(func() bool)
 	return claim
+}
+
+// WithAbandon names the context whose cancellation ABANDONS this round outright — its results discarded,
+// the executor handed back without waiting for the round's shutdown — as distinct from the round's own
+// cancellation, which merely STOPS it: execution schedules nothing more, finishes what is in flight and
+// commits that prefix.
+//
+// Both are needed because a stop is co-operative and co-operation can fail. A round that does not come
+// back within the time its caller allowed has to be taken away from it, and that is this.
+func WithAbandon(ctx, abandon context.Context) context.Context {
+	return exec.WithOuter(ctx, abandon)
 }

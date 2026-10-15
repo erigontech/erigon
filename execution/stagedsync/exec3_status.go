@@ -273,3 +273,45 @@ func (m *execStatusList) clearComplete(tx int) {
 func (m *execStatusList) clearPending(tx int) {
 	m.pending = removeFromList(m.pending, tx, false)
 }
+
+// truncate drops every task index at or above n from the list. It is how a ROUND THE CALLER STOPPED
+// shortens itself to the prefix that finished: the tasks above the cut were never dispatched, so their
+// pending/deferred entries, and the dependencies registered against them, describe work that will not
+// happen and would otherwise hold the block short of complete forever.
+func (m *execStatusList) truncate(n int) {
+	keep := func(l []int) []int {
+		out := l[:0]
+		for _, v := range l {
+			if v < n {
+				out = append(out, v)
+			}
+		}
+		return out
+	}
+	m.pending = keep(m.pending)
+	m.inProgress = keep(m.inProgress)
+	m.deferred = keep(m.deferred)
+	m.complete = keep(m.complete)
+	for blocker, deps := range m.dependency {
+		if blocker >= n {
+			delete(m.dependency, blocker)
+			continue
+		}
+		for dep := range deps {
+			if dep >= n {
+				delete(deps, dep)
+			}
+		}
+	}
+	for dependent, blockers := range m.blocker {
+		if dependent >= n {
+			delete(m.blocker, dependent)
+			continue
+		}
+		for b := range blockers {
+			if b >= n {
+				delete(blockers, b)
+			}
+		}
+	}
+}

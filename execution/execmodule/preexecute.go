@@ -226,6 +226,12 @@ func (e *ExecModule) closePreExecutedLocked(ctx context.Context, blockHash commo
 // generationOverlay returns the overlay of the pre-exec generation holding (hash, number), or nil when the frontier
 // holds no such block. Pre-exec reads a block's data only from here — never from the module context, which is the
 // canonical flow's.
+// reheaderFn rebuilds a round's header over the transactions that survived it. A round the caller STOPPED
+// keeps the prefix it executed, so the block it leaves is shorter than the body it was handed, and the
+// header the seal reads it back by has to be the one over that shorter body. A caller that passes nil is
+// one whose round may not be cut.
+type reheaderFn func(txs [][]byte) *types.Header
+
 func (e *ExecModule) generationOverlay(hash common.Hash, number uint64) *membatchwithdb.MemoryMutation {
 	if sd := e.preExec.Find(hash, number); sd != nil {
 		return sd.BlockOverlay()
@@ -244,7 +250,7 @@ func (e *ExecModule) generationOverlay(hash common.Hash, number uint64) *membatc
 //
 // Everything here is pre-exec space: the block goes into the round's own overlay, and nothing is read from or written to
 // the module context, which is the canonical flow's. Caller holds e.semaphore.
-func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock) (ValidationResult, error) {
+func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock, reheader reheaderFn) (ValidationResult, error) {
 	header := block.Header
 	blockNumber := header.Number.Uint64()
 	txs := make([]types.Transaction, 0, len(block.Body.Transactions))
@@ -489,6 +495,35 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock
 	if criticalError != nil {
 		return ValidationResult{}, criticalError
 	}
+
+	// HOW MUCH OF THE BODY ACTUALLY RAN. A round the caller STOPPED schedules nothing more and ends at the
+	// last transaction that completed, so it can come back having executed a PREFIX of what it was given.
+	// The receipts are the measure: one per transaction, in body order, accumulated across the block's
+	// rounds. The rest were never scheduled and are not in the state, so they may not be in the body either
+	// — the seal reads the in-progress block back by its header hash, and a body longer than its receipts
+	// would seal transactions nothing executed.
+	appliedTxs := len(body.Transactions)
+	if status == engine_types.ValidStatus {
+		if ran := prefixLen + len(doms.FlashblockReceipts()); ran < appliedTxs {
+			if reheader == nil {
+				return ValidationResult{}, fmt.Errorf("pre-exec round num=%d: stopped at %d of %d transactions, and this caller cannot be cut",
+					blockNumber, ran, appliedTxs)
+			}
+			appliedTxs = ran
+			block.Body.Transactions = block.Body.Transactions[:appliedTxs]
+			body = &types.Body{Transactions: body.Transactions[:appliedTxs], Uncles: body.Uncles, Withdrawals: body.Withdrawals}
+			header = reheader(block.Body.Transactions)
+			block.Header = header
+			// Re-key the in-progress block to the shortened body, in the same overlay the round's own insert
+			// wrote to. Rounds already rewrite the block under a new hash every time the body grows; this is
+			// the one that shrinks it.
+			if err = e.writePreExecBlock(tx, roTx, block); err != nil {
+				return ValidationResult{}, fmt.Errorf("pre-exec round num=%d: re-key the stopped round's block: %w", blockNumber, err)
+			}
+			e.logger.Debug("[intra-block] round stopped — block cut to what executed",
+				"block", blockNumber, "applied", appliedTxs, "prefix", prefixLen)
+		}
+	}
 	lvh := header.Hash()
 
 	// Record the block in the pre-exec frontier — its own space, keyed by the hash it currently carries
@@ -532,7 +567,7 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock
 	if status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil {
 		validationStatus = ExecutionStatusBadBlock
 	}
-	res := ValidationResult{ValidationStatus: validationStatus, LatestValidHash: lvh}
+	res := ValidationResult{ValidationStatus: validationStatus, LatestValidHash: lvh, AppliedTxs: appliedTxs}
 	if validationError != nil {
 		res.ValidationError = validationError.Error()
 	}
