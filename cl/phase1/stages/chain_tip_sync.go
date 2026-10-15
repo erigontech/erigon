@@ -1267,16 +1267,16 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 			completedScan = true
 			break
 		}
-		// Ancestors of a payload below the EL's validation depth are deeper still. The depth follows
-		// the EL head, so a payload back above it is checked again; an unknown depth (0) keeps it.
+		// A remembered root is skipped, not its ancestors: an interrupted batch may have left them
+		// unsent. The depth follows the EL head, so a payload back above it is checked again; an
+		// unknown depth (0) keeps it.
+		remembered := false
 		if skipped, ok := cfg.gloasSkippedValidation[root]; ok {
-			if depth == 0 || skipped.blockNumber < depth {
-				completedScan = true
-				break
+			if remembered = depth == 0 || skipped.blockNumber < depth; !remembered {
+				delete(cfg.gloasSkippedValidation, root)
 			}
-			delete(cfg.gloasSkippedValidation, root)
 		}
-		if cfg.forkChoice.HasEnvelope(root) && !cfg.forkChoice.IsPayloadVerified(root) {
+		if !remembered && cfg.forkChoice.HasEnvelope(root) && !cfg.forkChoice.IsPayloadVerified(root) {
 			blocks = append(blocks, gloasVerificationItem{root: root, block: block})
 		}
 		root = common.Hash(block.Block.ParentRoot)
@@ -1365,7 +1365,7 @@ func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
 		return
 	}
 	depth := elValidationDepth(ctx, cfg.executionClient)
-	if skipped := cfg.gloasSkippedAnchorValidation; skipped.root == anchorRoot && skipped.blockNumber < depth {
+	if skipped := cfg.gloasSkippedAnchorValidation; skipped.root == anchorRoot && (depth == 0 || skipped.blockNumber < depth) {
 		return
 	}
 	anchorState, err := cfg.forkChoice.GetStateAtBlockRoot(anchorRoot, true)

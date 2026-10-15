@@ -1219,9 +1219,14 @@ func TestRetryUnverifiedAnchorPayloadAsksTheELOnceBelowItsValidationDepth(t *tes
 	require.True(t, ok)
 	require.EqualValues(t, execution_client.PayloadStatusNotValidated, status)
 
-	stageCfg.executionClient = base
+	// An unreadable EL head (depth 0) keeps the remembered answer, as in the sweep.
+	stageCfg.executionClient = validationDepthEngine{testExecutionEngine: base}
 	retryUnverifiedAnchorPayload(t.Context(), stageCfg)
-	retryUnverifiedAnchorPayload(t.Context(), stageCfg)
+	require.Equal(t, 1, base.newPayloadCalls)
+
+	noDepth := &Cfg{beaconCfg: cfg, forkChoice: store, executionClient: base, gloasPayloadValidator: base}
+	retryUnverifiedAnchorPayload(t.Context(), noDepth)
+	retryUnverifiedAnchorPayload(t.Context(), noDepth)
 	require.Equal(t, 3, base.newPayloadCalls, "an EL without a validation depth is asked every time")
 }
 

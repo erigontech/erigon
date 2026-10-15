@@ -483,6 +483,42 @@ func TestVerifyUnverifiedGloasPayloadsRetriesAnErrorBelowTheELValidationDepth(t 
 	require.NotEmpty(t, cfg.forkChoice.DrainPendingELPayloads())
 }
 
+// A remembered root does not prove that its ancestors reached the EL, for example after a batch was
+// interrupted on an ancestor. The sweep skips only the remembered root and walks on.
+func TestVerifyUnverifiedGloasPayloadsWalksPastARememberedRoot(t *testing.T) {
+	cfg, graph, parentRoot, child, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusNotValidated, false)
+	parent := graph.parents[parentRoot]
+	parentEnvelope := graph.envelopes[parentRoot]
+	delete(graph.parents, parentRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), parent, false, false, false))
+	cfg.forkChoice.MarkPayloadStatus(parentRoot, parentEnvelope.Message.Payload.BlockHash, execution_client.PayloadStatusNotValidated)
+	childPayloadHash := common.Hash{2}
+	child.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = childPayloadHash
+	childRoot, err := child.Block.HashSSZ()
+	require.NoError(t, err)
+	encoded, err := parentEnvelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	childEnvelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg.beaconCfg)}
+	require.NoError(t, childEnvelope.DecodeSSZ(encoded, int(clparams.GloasVersion)))
+	childEnvelope.Message.BeaconBlockRoot = childRoot
+	childEnvelope.Message.Payload.BlockHash = childPayloadHash
+	graph.envelopes[childRoot] = childEnvelope
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), child, false, false, false))
+	selectedRoot, _, err := cfg.forkChoice.GetHead(nil)
+	require.NoError(t, err)
+	require.Equal(t, common.Hash(childRoot), selectedRoot)
+	cfg.gloasVerificationHead = childRoot
+	cfg.executionClient = validationDepthEngine{testExecutionEngine: engine, below: 1 << 30}
+	cfg.gloasSkippedValidation = map[common.Hash]skippedValidation{childRoot: {slot: child.Block.Slot, blockNumber: childEnvelope.Message.Payload.BlockNumber}}
+
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+
+	require.Equal(t, 1, engine.newPayloadCalls, "the parent reached the EL")
+	require.Equal(t, 1, graph.envReads[parentRoot])
+	require.Zero(t, graph.envReads[childRoot], "the remembered root is not read")
+}
+
 // The roots recorded below the EL's validation depth are forgotten once finalized.
 func TestVerifyUnverifiedGloasPayloadsPrunesSkippedRootsAtFinalization(t *testing.T) {
 	cfg, _, _, _, _, _ := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
