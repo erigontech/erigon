@@ -635,9 +635,9 @@ func (te *txExecutor) onBlockStart(ctx context.Context, block *types.Block) {
 	}
 }
 
-func blockAccessList(blockTx kv.Getter, block *types.Block, blockNum uint64, offlineBAL *offlinebal.Reader, logger log.Logger) (types.BlockAccessList, error) {
+func blockAccessList(blockTx kv.Getter, block *types.Block, blockNum uint64, offlineBAL offlinebal.Store, logger log.Logger) (types.BlockAccessList, error) {
 	bal := block.BlockAccessList()
-	if bal == nil && offlineBAL != nil {
+	if bal == nil && offlineBAL.Reader != nil {
 		if data, ok := offlineBAL.Get(blockNum, block.Hash()); ok {
 			return types.DecodeBlockAccessListBytes(data)
 		}

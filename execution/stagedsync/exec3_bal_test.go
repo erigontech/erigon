@@ -61,7 +61,7 @@ func TestBlockAccessList(t *testing.T) {
 			getter := &countingBlockAccessListGetter{data: test.storedBAL}
 			block := types.NewBlockFromStorage(common.Hash{}, &types.Header{BlockAccessListHash: test.hash}, nil, nil, nil, types.NewBlockAccessListSidecar(test.blockBAL))
 
-			got, err := blockAccessList(getter, block, 1, nil, log.New())
+			got, err := blockAccessList(getter, block, 1, offlinebal.Store{}, log.New())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -109,7 +109,7 @@ func TestBlockAccessListOfflineBAL(t *testing.T) {
 	logger := log.New()
 	logger.SetHandler(warns)
 
-	got, err := blockAccessList(getter, block, 7, reader, logger)
+	got, err := blockAccessList(getter, block, 7, offlinebal.Store{Reader: reader}, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestBlockAccessListOfflineBAL(t *testing.T) {
 		t.Fatalf("warnings for a stored block = %d, want 0", warns.warns)
 	}
 
-	if got, err := blockAccessList(getter, block, 8, reader, logger); err != nil || got != nil {
+	if got, err := blockAccessList(getter, block, 8, offlinebal.Store{Reader: reader}, logger); err != nil || got != nil {
 		t.Fatalf("block 8 = %v,%v, want nil,nil", got, err)
 	}
 	if warns.warns != 1 {
