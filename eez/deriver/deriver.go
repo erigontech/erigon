@@ -32,6 +32,10 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
+// ErrFinalizedReorged reports an L1 reorg that drops settlements the
+// follower finalized.
+var ErrFinalizedReorged = errors.New("L1 reorg drops a finalized settlement")
+
 // Deriver rebuilds the L2 chain from the batches L1 settled.
 type Deriver struct {
 	chain  Chain
@@ -41,6 +45,9 @@ type Deriver struct {
 	index  Index
 	dir    string
 	logger log.Logger
+	// safe is the latest settled block, finalized the latest one settled
+	// in a finalized L1 block; finalized never exceeds safe.
+	safe, finalized uint64
 }
 
 // New returns a deriver extending chain, an EEZ chain configured by cfg,
@@ -63,9 +70,16 @@ func New(chain Chain, cfg *chain.Config, dir string, logger log.Logger) (*Derive
 // Cursor is the L2 block the latest derived settlement ended at.
 func (d *Deriver) Cursor() uint64 { return d.index.Cursor() }
 
+// Safe is the safe L2 block.
+func (d *Deriver) Safe() uint64 { return d.safe }
+
+// Finalized is the finalized L2 block.
+func (d *Deriver) Finalized() uint64 { return d.finalized }
+
 // Reconcile derives the blocks of scanned batches in L1 order, skipping
-// those it derived already. The batches derived before an error stay
-// derived.
+// those it derived already, and makes the block the last one settled safe.
+// The batches derived before an error stay derived. Two batches of one L1
+// block can rewrite the same block, so batches come in whole L1 blocks.
 func (d *Deriver) Reconcile(ctx context.Context, batches []l1.ScannedBatch) (err error) {
 	var appended bool
 	defer func() {
@@ -92,7 +106,71 @@ func (d *Deriver) Reconcile(ctx context.Context, batches []l1.ScannedBatch) (err
 		d.index.Append(r)
 		appended = true
 	}
+	if cursor := d.index.Cursor(); cursor > d.safe {
+		d.safe = cursor
+		return d.forkChoice(ctx)
+	}
 	return nil
+}
+
+// OnFinalized finalizes the block settled by the L1 blocks up to
+// l1Finalized, bounded by the safe block.
+func (d *Deriver) OnFinalized(ctx context.Context, l1Finalized uint64) error {
+	n, ok := d.index.SettledAt(l1Finalized)
+	if n = min(n, d.safe); !ok || n <= d.finalized {
+		return nil
+	}
+	d.finalized = n
+	d.logger.Debug("[eez] finalized", "l1Finalized", l1Finalized, "l2Finalized", n)
+	return d.forkChoice(ctx)
+}
+
+// OnReorg drops the settlements of L1 blocks above ancestor and moves the
+// head and safe block back to the block the remaining ones settled.
+func (d *Deriver) OnReorg(ctx context.Context, ancestor uint64) error {
+	if d.index.RetreatOnReorg(ancestor) == 0 {
+		return nil
+	}
+	cursor := d.index.Cursor()
+	if cursor < d.finalized {
+		return fmt.Errorf("%w: L1 ancestor %d leaves L2 block %d settled, %d is finalized", ErrFinalizedReorged, ancestor, cursor, d.finalized)
+	}
+	head, err := d.canonicalHash(ctx, cursor)
+	if err != nil {
+		return err
+	}
+	d.safe = min(d.safe, cursor)
+	d.logger.Info("[eez] L1 reorg", "ancestor", ancestor, "cursor", cursor)
+	if err := d.forkChoiceTo(ctx, head); err != nil {
+		return err
+	}
+	return d.saveCheckpoint(ctx)
+}
+
+// forkChoice applies the safe and finalized blocks.
+func (d *Deriver) forkChoice(ctx context.Context) error {
+	head, err := d.chain.Head(ctx)
+	if err != nil {
+		return err
+	}
+	return d.forkChoiceTo(ctx, head.Hash())
+}
+
+func (d *Deriver) forkChoiceTo(ctx context.Context, head common.Hash) error {
+	safe, finalized, err := d.anchors(ctx)
+	if err != nil {
+		return err
+	}
+	return d.chain.ForkChoice(ctx, head, safe, finalized)
+}
+
+// anchors returns the hashes of the safe and finalized blocks.
+func (d *Deriver) anchors(ctx context.Context) (safe, finalized common.Hash, err error) {
+	if safe, err = d.canonicalHash(ctx, d.safe); err != nil {
+		return
+	}
+	finalized, err = d.canonicalHash(ctx, d.finalized)
+	return
 }
 
 func (d *Deriver) reconcileBatch(ctx context.Context, b *l1.ScannedBatch, p *Payload) (Record, error) {
@@ -235,13 +313,24 @@ func (d *Deriver) localBlock(ctx context.Context, in HeaderInputs, txs [][]byte)
 }
 
 // extend builds the block of txs on parent; a block the local chain refuses
-// is a divergence.
+// is a divergence. Rewriting the safe block or one below it moves safe
+// to parent, and the finalized block is never rewritten.
 func (d *Deriver) extend(ctx context.Context, b *l1.ScannedBatch, parent *types.Header, in HeaderInputs, encoded [][]byte) (*types.BlockWithReceipts, error) {
 	txs, err := DecodeTxs(encoded)
 	if err != nil {
 		return nil, d.diverged(b, in.Number, "%v", err)
 	}
-	built, err := d.chain.Extend(ctx, parent, in, txs, common.Hash{}, common.Hash{})
+	if in.Number <= d.safe {
+		if in.Number <= d.finalized {
+			return nil, d.diverged(b, in.Number, "rewrites a block at or below finalized block %d", d.finalized)
+		}
+		d.safe = in.Number - 1
+	}
+	safe, finalized, err := d.anchors(ctx)
+	if err != nil {
+		return nil, err
+	}
+	built, err := d.chain.Extend(ctx, parent, in, txs, safe, finalized)
 	if errors.Is(err, ErrRejected) {
 		return nil, d.diverged(b, in.Number, "%v", err)
 	}
@@ -319,11 +408,16 @@ func (d *Deriver) settledEnd(ctx context.Context, b *l1.ScannedBatch, r Range, r
 	return r.To, nil
 }
 
+// saveCheckpoint records the latest settlement, removing the checkpoint when
+// there is none.
 func (d *Deriver) saveCheckpoint(ctx context.Context) error {
 	if d.dir == "" {
 		return nil
 	}
-	last, _ := d.index.Last()
+	last, ok := d.index.Last()
+	if !ok {
+		return RemoveCheckpoint(d.dir)
+	}
 	hash, err := d.canonicalHash(ctx, last.LastL2Block)
 	if err != nil {
 		return err

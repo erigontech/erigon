@@ -106,6 +106,8 @@ type Composer struct {
 	// head is the composer's L2 head, settled the latest settled block.
 	head, settled *types.Header
 	nonce         uint64
+	// branch tells apart the L1 blocks of reorged branches.
+	branch uint64
 }
 
 // NewComposer returns a composer at the devnet genesis and an L1 chain of
@@ -113,7 +115,7 @@ type Composer struct {
 func NewComposer(t testing.TB) *Composer {
 	t.Helper()
 	m, chain := NewL2(t)
-	l1Chain, err := recording.NewMemoryChain(m.ChainConfig.L2.(*config.L2Config).L1ChainID, &recording.Block{Header: l1.Header{Hash: l1Hash(0)}})
+	l1Chain, err := recording.NewMemoryChain(m.ChainConfig.L2.(*config.L2Config).L1ChainID, &recording.Block{Header: l1.Header{Hash: l1Hash(0, 0)}})
 	require.NoError(t, err)
 	return &Composer{t: t, L1: l1Chain, L2: m, Chain: chain, l2: m.ChainConfig.L2.(*config.L2Config), head: m.Genesis.Header(), settled: m.Genesis.Header()}
 }
@@ -307,7 +309,7 @@ func (c *Composer) Post(postings ...Posting) *recording.Block {
 	head, err := c.L1.Head(context.Background())
 	require.NoError(c.t, err)
 	n := head.Number + 1
-	b := &recording.Block{Header: l1.Header{Number: n, Hash: l1Hash(n), ParentHash: head.Hash, Time: n * c.l2.L1BlockTime}}
+	b := &recording.Block{Header: l1.Header{Number: n, Hash: l1Hash(n, c.branch), ParentHash: head.Hash, Time: n * c.l2.L1BlockTime}}
 	for _, p := range postings {
 		input, err := protocol.EncodePostAndVerifyBatch(p.Batch.Batch)
 		require.NoError(c.t, err)
@@ -369,8 +371,25 @@ func (c *Composer) at(l *types.Log, txIndex int) *types.Log {
 	return l
 }
 
-func l1Hash(n uint64) common.Hash {
-	return crypto.Keccak256Hash(binary.BigEndian.AppendUint64([]byte("l1"), n))
+func l1Hash(n, branch uint64) common.Hash {
+	return crypto.Keccak256Hash(binary.BigEndian.AppendUint64(binary.BigEndian.AppendUint64([]byte("l1"), n), branch))
+}
+
+// ReorgL1 drops the L1 blocks above ancestor; later postings extend a new
+// branch.
+func (c *Composer) ReorgL1(ancestor uint64) {
+	c.t.Helper()
+	require.NoError(c.t, c.L1.Reorg(ancestor))
+	c.branch++
+}
+
+// Rewind makes h, a block of the composer's chain, its head and latest
+// settled block.
+func (c *Composer) Rewind(h *types.Header) {
+	c.t.Helper()
+	nonce, err := c.Chain.Nonce(context.Background(), h.Number.Uint64(), UserAddress())
+	require.NoError(c.t, err)
+	c.head, c.settled, c.nonce = h, h, nonce
 }
 
 // Scan returns every batch the L1 chain settled for the devnet rollup.

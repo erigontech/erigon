@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/erigontech/erigon/common"
+	commondir "github.com/erigontech/erigon/common/dir"
 )
 
 // CheckpointFile is the checkpoint's name in its directory, the reference
@@ -79,6 +80,15 @@ func (c *Checkpoint) Save(dir string) error {
 		d.Close()
 	}
 	return nil
+}
+
+// RemoveCheckpoint removes the checkpoint in dir, if any.
+func RemoveCheckpoint(dir string) error {
+	err := commondir.RemoveFile(filepath.Join(dir, CheckpointFile))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 // LoadCheckpoint reads the checkpoint in dir; it returns nil without one.

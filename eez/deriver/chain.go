@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
@@ -44,6 +45,8 @@ var ErrRejected = errors.New("block rejected by the local chain")
 // Chain is the local L2 chain that derivation reads and extends.
 type Chain interface {
 	HashReader
+	// Head returns the header of the head block.
+	Head(ctx context.Context) (*types.Header, error)
 	// HeaderByNumber returns the canonical header at number, nil when there
 	// is none.
 	HeaderByNumber(ctx context.Context, number uint64) (*types.Header, error)
@@ -100,6 +103,22 @@ func (c *ExecChain) CanonicalNumber(ctx context.Context, hash common.Hash) (numb
 	return number, ok, err
 }
 
+func (c *ExecChain) Head(ctx context.Context) (h *types.Header, err error) {
+	err = c.db.View(ctx, func(tx kv.Tx) error {
+		hash := rawdb.ReadHeadBlockHash(tx)
+		n, err := c.reader.HeaderNumber(ctx, tx, hash)
+		if err != nil {
+			return err
+		}
+		if n == nil {
+			return fmt.Errorf("head block %x has no header", hash)
+		}
+		h, err = c.reader.Header(ctx, tx, hash, *n)
+		return err
+	})
+	return h, err
+}
+
 func (c *ExecChain) HeaderByNumber(ctx context.Context, number uint64) (h *types.Header, err error) {
 	err = c.db.View(ctx, func(tx kv.Tx) error {
 		h, err = c.reader.HeaderByNumber(ctx, tx, number)
@@ -149,11 +168,11 @@ func (c *ExecChain) Receipts(ctx context.Context, block *types.Block) (rs types.
 
 func (c *ExecChain) Extend(ctx context.Context, parent *types.Header, in HeaderInputs, txs []types.Transaction, safe, finalized common.Hash) (*types.BlockWithReceipts, error) {
 	// The builder builds on the head only.
-	fc, err := c.exec.GetForkChoice(ctx)
+	head, err := c.Head(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if fc.HeadHash != parent.Hash() {
+	if head.Hash() != parent.Hash() {
 		if err := c.ForkChoice(ctx, parent.Hash(), safe, finalized); err != nil {
 			return nil, err
 		}

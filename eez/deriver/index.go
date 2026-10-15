@@ -36,6 +36,9 @@ type Index struct {
 	records []Record
 }
 
+// Len is the number of settlements.
+func (x *Index) Len() int { return len(x.records) }
+
 // Last returns the latest settlement.
 func (x *Index) Last() (Record, bool) {
 	if len(x.records) == 0 {

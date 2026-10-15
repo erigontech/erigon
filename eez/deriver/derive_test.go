@@ -29,6 +29,8 @@ import (
 	"github.com/erigontech/erigon/eez/deriver/derivertest"
 	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/eez/protocol/da"
+	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -49,6 +51,7 @@ func (c *countingChain) Extend(ctx context.Context, parent *types.Header, in der
 }
 
 type follower struct {
+	m       *execmoduletester.ExecModuleTester
 	chain   *countingChain
 	deriver *deriver.Deriver
 	dir     string
@@ -56,8 +59,18 @@ type follower struct {
 
 func newFollower(t *testing.T) *follower {
 	t.Helper()
-	_, chain := derivertest.NewL2(t)
-	return followerOn(t, chain)
+	m, chain := derivertest.NewL2(t)
+	f := followerOn(t, chain)
+	f.m = m
+	return f
+}
+
+// requireForkChoice checks the follower's head, safe and finalized blocks.
+func (f *follower) requireForkChoice(t *testing.T, head, safe, finalized common.Hash) {
+	t.Helper()
+	fc, err := f.m.ExecModule.GetForkChoice(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ForkChoiceState{HeadHash: head, SafeHash: safe, FinalizedHash: finalized}, fc)
 }
 
 // followerOn returns a follower deriving onto chain, an L2 at any height.
@@ -302,10 +315,14 @@ func TestResumedBatch(t *testing.T) {
 	require.Equal(t, protocol.SystemTxType, sync[2].Type())
 
 	f := newFollower(t)
-	require.NoError(t, f.deriver.Reconcile(t.Context(), batches))
+	require.NoError(t, f.deriver.Reconcile(t.Context(), batches[:1]))
+	f.requireForkChoice(t, rival.Syncs[1].Hash(), rival.Syncs[1].Hash(), f.m.Genesis.Hash())
+	// The rewrite moves safe off the block it replaces, then onto the new one.
+	require.NoError(t, f.deriver.Reconcile(t.Context(), batches[1:]))
 	derivertest.RequireChain(t, f.chain, rival.Blocks[0], resumed.Syncs[2])
 	require.Equal(t, uint64(2), f.deriver.Cursor())
 	require.Equal(t, 3, f.chain.built, "two blocks for the rival, one rewrite")
+	f.requireForkChoice(t, resumed.Syncs[2].Hash(), resumed.Syncs[2].Hash(), f.m.Genesis.Hash())
 
 	// Re-deriving from scratch rewrites the Sync block again, to the same
 	// end.
@@ -313,4 +330,73 @@ func TestResumedBatch(t *testing.T) {
 	require.NoError(t, again.deriver.Reconcile(t.Context(), batches))
 	derivertest.RequireChain(t, again.chain, rival.Blocks[0], resumed.Syncs[2])
 	require.Equal(t, 2, again.chain.built)
+}
+
+// TestResumedBatchBelowFinalized refuses to rewrite a finalized block.
+func TestResumedBatchBelowFinalized(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	rival := c.Compose([]da.Action{inbound(alice, 7), inbound(bob, 8)},
+		derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: [][]byte{c.Transfer(bob, 1)}},
+	)
+	resumed := c.Resume(rival, 2, derivertest.Block{Coinbase: bob, Extra: []byte{}, Txs: [][]byte{}})
+	c.Post(derivertest.Posting{Batch: rival, Applied: []int{0, 1}}, derivertest.Posting{Batch: resumed, Applied: []int{2}})
+	batches := c.Scan()
+
+	f := newFollower(t)
+	require.NoError(t, f.deriver.Reconcile(t.Context(), batches[:1]))
+	require.NoError(t, f.deriver.OnFinalized(t.Context(), 1))
+	require.Equal(t, uint64(1), f.deriver.Finalized())
+	err := f.deriver.Reconcile(t.Context(), batches[1:])
+	require.ErrorIs(t, err, deriver.ErrDiverged)
+	require.ErrorContains(t, err, "finalized")
+}
+
+// TestSafeAndFinalized is T-DRV-4: safe follows the settled blocks,
+// finalized the settlements of finalized L1 blocks, and an L1 reorg takes
+// the head and safe block back to what the surviving settlements settled.
+func TestSafeAndFinalized(t *testing.T) {
+	ctx := t.Context()
+	c := derivertest.NewComposer(t)
+	first := c.Compose(nil,
+		derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: [][]byte{c.Transfer(bob, 1)}},
+		derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: [][]byte{}},
+	)
+	c.Post(derivertest.Posting{Batch: first})
+	second := c.Compose(nil, derivertest.Block{Coinbase: bob, Extra: []byte{}, Txs: [][]byte{c.Transfer(bob, 2)}})
+	c.Post(derivertest.Posting{Batch: second})
+
+	f := newFollower(t)
+	genesis := f.m.Genesis.Hash()
+	require.NoError(t, f.deriver.Reconcile(ctx, c.Scan()))
+	require.Equal(t, uint64(3), f.deriver.Safe())
+	f.requireForkChoice(t, second.Blocks[0].Hash(), second.Blocks[0].Hash(), genesis)
+
+	// Finality of L1 block 1 finalizes what it settled and nothing after.
+	require.NoError(t, f.deriver.OnFinalized(ctx, 0))
+	require.Zero(t, f.deriver.Finalized())
+	require.NoError(t, f.deriver.OnFinalized(ctx, 1))
+	require.Equal(t, uint64(2), f.deriver.Finalized())
+	f.requireForkChoice(t, second.Blocks[0].Hash(), second.Blocks[0].Hash(), first.Blocks[1].Hash())
+
+	// L1 drops block 2: its settlement goes, and the head with it.
+	c.ReorgL1(1)
+	require.NoError(t, f.deriver.OnReorg(ctx, 1))
+	require.Equal(t, uint64(2), f.deriver.Cursor())
+	require.Equal(t, uint64(2), f.deriver.Safe())
+	f.requireForkChoice(t, first.Blocks[1].Hash(), first.Blocks[1].Hash(), first.Blocks[1].Hash())
+	cp, err := deriver.LoadCheckpoint(f.dir)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), cp.L1Block)
+
+	// The new branch settles another block 3.
+	c.Rewind(first.Blocks[1].Header())
+	replacement := c.Compose(nil, derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: [][]byte{c.Transfer(alice, 5)}})
+	require.NotEqual(t, second.Blocks[0].Hash(), replacement.Blocks[0].Hash())
+	c.Post(derivertest.Posting{Batch: replacement})
+	require.NoError(t, f.deriver.Reconcile(ctx, c.Scan()))
+	derivertest.RequireChain(t, f.chain, replacement.Blocks...)
+	f.requireForkChoice(t, replacement.Blocks[0].Hash(), replacement.Blocks[0].Hash(), first.Blocks[1].Hash())
+
+	// A reorg that drops a finalized settlement is refused.
+	require.ErrorIs(t, f.deriver.OnReorg(ctx, 0), deriver.ErrFinalizedReorged)
 }
