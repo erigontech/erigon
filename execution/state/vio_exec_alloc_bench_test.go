@@ -101,6 +101,7 @@ func BenchmarkVersionedExecReads(b *testing.B) {
 
 	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	ibs := NewWithVersionMap(reader, mvhm)
+	ibs.SetNoMaterialize(true)
 	defer ibs.Close()
 
 	b.ReportAllocs()
@@ -145,6 +146,7 @@ func BenchmarkWarmExtCodeHash(b *testing.B) {
 
 	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	ibs := NewWithVersionMap(reader, mvhm)
+	ibs.SetNoMaterialize(true)
 
 	b.ReportAllocs()
 	b.ResetTimer()
