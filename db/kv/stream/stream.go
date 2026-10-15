@@ -141,48 +141,31 @@ func before[T cmp.Ordered](a, b T, asc bool) bool {
 	return (asc && a < b) || (!asc && a > b)
 }
 
-// linearSteps is how many elements skipTo reads one by one before seeking: when the two streams
-// are dense alike the target is a few elements away, and a step is cheaper than a seek.
-const linearSteps = 8
-
 // skipTo moves a stream whose head, already taken out with Next, is *k (has: there is one) to the
-// first element not before v: a few elements one at a time, then with a seek when the stream
-// supports it, else still one element at a time.
-func skipTo[T cmp.Ordered](it Uno[T], k *T, has *bool, v T, asc bool) error {
-	for range linearSteps {
-		if !*has || !before(*k, v, asc) {
-			return nil
+// first element not before v. It steps once before seeking: a target that is the next element needs
+// no seek, and on MDBX a step costs about as much as a seek.
+func skipTo[T cmp.Ordered](it Uno[T], k *T, has *bool, v T, asc bool) (err error) {
+	next := func() error {
+		if *has = it.HasNext(); *has {
+			*k, err = it.Next()
 		}
-		*has = it.HasNext()
-		if *has {
-			var err error
-			if *k, err = it.Next(); err != nil {
-				return err
-			}
-		}
+		return err
 	}
 	if !*has || !before(*k, v, asc) {
 		return nil
+	}
+	if err = next(); err != nil || !*has || !before(*k, v, asc) {
+		return err
 	}
 	if s := seeker(it); s != nil {
 		if err := s.Seek(v); err != nil {
 			return err
 		}
-		*has = it.HasNext()
-		if *has {
-			var err error
-			*k, err = it.Next()
-			return err
-		}
-		return nil
+		return next()
 	}
 	for *has && before(*k, v, asc) {
-		*has = it.HasNext()
-		if *has {
-			var err error
-			if *k, err = it.Next(); err != nil {
-				return err
-			}
+		if err := next(); err != nil {
+			return err
 		}
 	}
 	return nil
