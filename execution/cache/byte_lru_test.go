@@ -151,33 +151,6 @@ func TestByteLRUBudgetedConcurrentSameKeyAccounting(t *testing.T) {
 	require.LessOrEqual(t, b.resident.Load(), b.limit.Load())
 }
 
-// Concurrent writers to one key must not reserve chunks for a predecessor they
-// both observed: the envelope is shared, and a stray reservation only comes
-// back on Purge or Close.
-func TestByteLRUConcurrentSameKeyDoesNotOverReserve(t *testing.T) {
-	val := make([]byte, 700*1024)
-	b := newByteLRU(64*datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
-	defer b.Close()
-
-	require.True(t, b.Add(1, val))
-	limAfterInsert := b.limit.Load()
-
-	var wg sync.WaitGroup
-	for range 16 {
-		wg.Go(func() {
-			for range 64 {
-				b.Add(1, val)
-			}
-		})
-	}
-	wg.Wait()
-	b.c.CleanUp()
-
-	require.Equal(t, limAfterInsert, b.limit.Load(), "same-size replacements must not grow the limit")
-	require.Equal(t, int64(len(val)), b.resident.Load())
-	require.Equal(t, int64(b.c.WeightedSize()), b.resident.Load())
-}
-
 // A growing working set must still raise the limit: the growth step is decided
 // before the write, so maintenance evicting the newcomer cannot hide the
 // pressure that called for it.

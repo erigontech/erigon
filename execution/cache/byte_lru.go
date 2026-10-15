@@ -50,10 +50,7 @@ type ByteLRU[V any] struct {
 	ceiling atomic.Int64 // limit may still grow to this; drops to limit when the envelope refuses
 
 	growMu sync.Mutex
-	// addStripes serialize same-key writers so Add is correct on its own, not
-	// only under a caller's lock. Readers never take them.
-	addStripes [putStripeCount]sync.Mutex
-	closed     bool
+	closed bool
 	// unbudgeted holds maxBytes from the start and never touches the envelope.
 	unbudgeted bool
 }
@@ -135,35 +132,15 @@ func (b *ByteLRU[V]) Add(key uint64, value V) bool {
 	if w > b.maxBytes {
 		return false
 	}
-	// Look-up, growth step and write are one sequence per key.
-	mu := &b.addStripes[key&(putStripeCount-1)]
-	mu.Lock()
-	defer mu.Unlock()
-
-	// Grow on the net change, and before the write: afterwards maintenance may
-	// have refunded the newcomer already and hidden the pressure. A cache that
-	// cannot grow skips the extra lookup.
-	if !b.unbudgeted && b.resident.Load()+w > b.limit.Load() && b.limit.Load() < b.ceiling.Load() {
-		delta := w
-		if prev, present := b.c.GetIfPresent(key); present {
-			delta -= b.weigh(key, prev)
-		}
-		if lim := b.limit.Load(); delta > 0 && b.resident.Load()+delta > lim && lim < b.ceiling.Load() {
-			b.grow(delta)
-		}
+	if lim := b.limit.Load(); b.resident.Load()+w > lim && lim < b.ceiling.Load() {
+		b.grow(w)
 	}
-
-	// Set returns (new value, true) for an absent key, (displaced value, false)
-	// for a present one, so the charge below is the net change.
+	// Set returns the displaced value for a present key, so the charge is the net change.
 	prev, inserted := b.c.Set(key, value)
 	if !inserted {
 		w -= b.weigh(key, prev)
 	}
-	if !b.unbudgeted {
-		// Only a budgeted layer has the deletion handler that returns an
-		// evicted or refused weight, so only there does the counter balance.
-		b.resident.Add(w)
-	}
+	b.resident.Add(w)
 	return true
 }
 
