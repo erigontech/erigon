@@ -27,9 +27,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
@@ -417,6 +420,48 @@ func Test_DeleteStateSnaps_StepRange_FromPlus(t *testing.T) {
 	confirmExist(t, file)
 	file, _ = b.domain.DataFile(version.V1_0, RootNum(128), RootNum(192))
 	confirmExist(t, file)
+}
+
+func Test_DeleteStateSnaps_EmptyStepRange(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		stepRange    string
+		removeLatest bool
+	}{
+		{name: "from plus at latest", stepRange: "224+"},
+		{name: "from plus past latest", stepRange: "225+"},
+		{name: "equal bounds", stepRange: "224-224"},
+		{name: "zero bounds", stepRange: "0-0"},
+		{name: "reversed bounds", stepRange: "225-224"},
+		{name: "step overrides latest", stepRange: "224+", removeLatest: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			b := bundle{}
+			b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(statecfg.Schema.ReceiptDomain, dirs, 1)
+			createFiles(t, dirs, 0, 224, &b)
+			file, _ := b.domain.DataFile(version.V1_0, 0, 224)
+			require.NoError(t, os.WriteFile(file+".torrent", []byte("torrent"), 0o644))
+			require.NoError(t, os.WriteFile(file+".123.tmp", []byte("tmp"), 0o644))
+			var files []string
+			require.NoError(t, filepath.WalkDir(dirs.Snap, func(path string, entry os.DirEntry, err error) error {
+				if err == nil && !entry.IsDir() {
+					files = append(files, path)
+				}
+				return err
+			}))
+
+			require.NoError(t, DeleteStateSnapshots(DeleteStateSnapshotsArgs{
+				Dirs:         dirs,
+				StepRange:    tc.stepRange,
+				RemoveLatest: tc.removeLatest,
+				DomainNames:  []string{"receipt"},
+			}))
+			for _, path := range files {
+				require.FileExists(t, path)
+			}
+		})
+	}
 }
 
 // Test_DeleteLatestStateSnaps_NoFalseSubsetRemoval verifies that sub-range files
@@ -1523,4 +1568,33 @@ func Test_removeAccessorsForRebuild(t *testing.T) {
 		confirmExist(t, f)
 	}
 	confirmExist(t, dataTorrent)
+}
+
+// Every commitment branch key sorts before "state", so a seek for it in a file
+// without the state key runs past the last key and finds no cursor.
+func TestCheckCommitmentFileHasRootWithoutStateKey(t *testing.T) {
+	dir := t.TempDir()
+	dataPath := filepath.Join(dir, "v1.0-commitment.0-1.kv")
+	compression := statecfg.Schema.CommitmentDomain.Compression
+	comp, err := seg.NewCompressor(t.Context(), t.Name(), dataPath, dir, seg.DefaultCfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+	defer comp.Close()
+	w := seg.NewWriter(comp, compression)
+	for _, word := range [][]byte{{0x01}, {0xaa}} {
+		_, err = w.Write(word)
+		require.NoError(t, err)
+	}
+	require.NoError(t, comp.Compress())
+
+	d, err := seg.NewDecompressor(dataPath)
+	require.NoError(t, err)
+	defer d.Close()
+	btPath := filepath.Join(dir, "v1.0-commitment.0-1.bt")
+	require.NoError(t, btindex.BuildBtreeIndexWithDecompressor(btPath, "", seg.NewReader(d.MakeGetter(), compression),
+		background.NewProgressSet(), dir, 1, log.New(), true, statecfg.AccessorBTree))
+
+	hasState, broken, _, err := checkCommitmentFileHasRoot(dataPath)
+	require.NoError(t, err)
+	require.False(t, hasState)
+	require.False(t, broken)
 }

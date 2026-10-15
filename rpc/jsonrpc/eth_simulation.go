@@ -216,13 +216,15 @@ type simulator struct {
 	txNumReader       rawdbv3.TxNumsReader
 	blockReader       dbservices.FullBlockReader
 	logger            log.Logger
-	gasPool           *protocol.GasPool
+	gasBudget         uint64
 	returnDataLimit   int
 	evmCallTimeout    time.Duration
 	commitmentHistory bool
 	traceTransfers    bool
 	validation        bool
 	fullTransactions  bool
+	// Without commitment history, each block's root is replayed from the base block, so it needs the keys of all earlier simulated blocks.
+	touchedKeys keysByAccount
 }
 
 func newSimulator(
@@ -239,10 +241,10 @@ func newSimulator(
 	evmCallTimeout time.Duration,
 	commitmentHistory bool,
 ) *simulator {
-	// The gas pool is intentionally shared across all simulated blocks as a global gas budget
-	// (similar to eth_call's gas cap). Per-block gas limits are enforced separately via
-	// blockContext.GasLimit in sanitizeCall. This prevents DoS by bounding the total gas
-	// consumed across the entire simulation request.
+	// The gas budget is intentionally shared across all simulated blocks (similar to eth_call's
+	// gas cap). Each call takes its receipt gas off it. Per-block gas limits are enforced
+	// separately via blockContext.GasLimit in sanitizeCall. This prevents DoS by bounding the
+	// total gas consumed across the entire simulation request.
 	return &simulator{
 		base:              header,
 		chainConfig:       chainConfig,
@@ -251,13 +253,14 @@ func newSimulator(
 		txNumReader:       txNumReader,
 		blockReader:       blockReader,
 		logger:            logger,
-		gasPool:           new(protocol.GasPool).AddGas(gasCap),
+		gasBudget:         gasCap,
 		returnDataLimit:   returnDataLimit,
 		evmCallTimeout:    evmCallTimeout,
 		commitmentHistory: commitmentHistory,
 		traceTransfers:    req.TraceTransfers,
 		validation:        req.Validation,
 		fullTransactions:  req.ReturnFullTransactions,
+		touchedKeys:       make(keysByAccount),
 	}
 }
 
@@ -374,7 +377,7 @@ func (s *simulator) sanitizeCall(
 	intraBlockState *state.IntraBlockState,
 	blockContext *evmtypes.BlockContext,
 	baseFee *uint256.Int,
-	gasUsed uint64,
+	gasUsed protocol.GasUsed,
 	globalGasCap uint64,
 ) error {
 	if args.Nonce == nil {
@@ -391,16 +394,22 @@ func (s *simulator) sanitizeCall(
 		effectiveCap = uint64(math.MaxUint64 / 2)
 	}
 
+	isAmsterdam := s.chainConfig.IsAmsterdam(blockContext.Time)
+	blockGas := protocol.NewBlockGasPool(gasLeft(blockContext.GasLimit, gasUsed.BlockExecution),
+		gasLeft(blockContext.GasLimit, gasUsed.BlockState), 0)
+
 	if args.Gas == nil {
-		// Default to remaining block gas, but capped by the node's effective gas cap.
-		remaining := min(blockContext.GasLimit-gasUsed, effectiveCap)
+		// Default to the largest gas the block can still include, capped by the node's effective gas cap.
+		remaining := min(protocol.MaxInclusionGas(blockGas, isAmsterdam, !s.validation), effectiveCap)
 		args.Gas = (*hexutil.Uint64)(&remaining)
 	} else if globalGasCap > 0 && globalGasCap < uint64(*args.Gas) {
 		log.Warn("Caller gas above allowance, capping", "requested", args.Gas, "cap", globalGasCap)
 		args.Gas = (*hexutil.Uint64)(&globalGasCap)
 	}
-	if gasUsed+uint64(*args.Gas) > blockContext.GasLimit {
-		return blockGasLimitReachedError(fmt.Sprintf("block gas limit reached: %d >= %d", gasUsed, blockContext.GasLimit))
+	executionContribution, stateContribution := protocol.InclusionContributions(uint64(*args.Gas), isAmsterdam, !s.validation)
+	if err := protocol.CheckBlockGasInclusion(blockGas, executionContribution, stateContribution, 0); err != nil {
+		return blockGasLimitReachedError(fmt.Sprintf("block gas limit reached: gas %d, execution gas left %d, state gas left %d",
+			uint64(*args.Gas), blockGas.ExecutionGasAvailable(), blockGas.StateGasAvailable()))
 	}
 
 	if err := ethapi.ChainIDMismatch(args.ChainID, s.chainConfig.ChainID); err != nil {
@@ -411,8 +420,9 @@ func (s *simulator) sanitizeCall(
 		args.ChainID = (*hexutil.U256)(new(uint256.Int).Set(s.chainConfig.ChainID))
 	}
 	if baseFee == nil {
-		// If there's no base fee, then it must be a non-1559 execution
-		if args.GasPrice == nil {
+		// If there's no base fee, then it must be a non-1559 execution. Dynamic fee fields
+		// are left for execution to reject before London rather than paired with a gas price.
+		if args.GasPrice == nil && args.MaxFeePerGas == nil && args.MaxPriorityFeePerGas == nil {
 			args.GasPrice = new(hexutil.U256)
 		}
 	} else {
@@ -444,10 +454,10 @@ type (
 
 var _ state.StateWriter = (*diffTrackingWriter)(nil)
 
-func newDiffTrackingWriter(tx kv.TemporalPutDel, txNum uint64) *diffTrackingWriter {
+func newDiffTrackingWriter(tx kv.TemporalPutDel, txNum uint64, touchedKeys keysByAccount) *diffTrackingWriter {
 	return &diffTrackingWriter{
 		delegate:    state.NewWriter(tx, nil, txNum),
-		touchedKeys: make(map[accounts.Address]storageKeys),
+		touchedKeys: touchedKeys,
 	}
 }
 
@@ -542,8 +552,8 @@ func (s *simulator) simulateBlock(
 	txnList := make([]types.Transaction, 0, len(bsc.Calls))
 	receiptList := make(types.Receipts, 0, len(bsc.Calls))
 	tracer := rpchelper.NewLogTracer(s.traceTransfers && !s.chainConfig.IsEIPEnabled(7708, header.Time), blockNumber, common.Hash{}, common.Hash{}, 0)
-	cumulativeGasUsed := uint64(0)
-	cumulativeBlobGasUsed := uint64(0)
+	// Receipts sum post-refund gas; the header takes the pre-refund block gas.
+	var gasUsed protocol.GasUsed
 
 	stateReader, minTxNum, firstMinTxNum, err := s.newStateReaderForBlock(ctx, tx, sharedDomains, blockNumber, ancestors, latest)
 	if err != nil {
@@ -570,6 +580,12 @@ func (s *simulator) simulateBlock(
 		// Snapshot and clear dirty set so CommitBlock won't apply EIP-161 to
 		// override-only accounts (they were not "touched" by any transaction).
 		overrideDirtyAccounts = intraBlockState.ExtractAndClearDirty()
+		for addr, account := range *stateOverrides {
+			// An empty storage replacement journals nothing, but must still clear the stored slots.
+			if account.State != nil {
+				overrideDirtyAccounts[addr] = struct{}{}
+			}
+		}
 	}
 
 	vmConfig := vm.Config{NoBaseFee: !s.validation}
@@ -597,12 +613,12 @@ func (s *simulator) simulateBlock(
 		return nil, nil, err
 	}
 
-	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(tx), minTxNum)
+	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(tx), minTxNum, s.touchedKeys)
 	callResults := make([]ethapi.CallResult, 0, len(bsc.Calls))
 	for callIndex := range bsc.Calls {
 		call := &bsc.Calls[callIndex]
 		callResult, txn, receipt, err := s.simulateCall(ctx, blockCtx, intraBlockState, callIndex, call, header,
-			&cumulativeGasUsed, &cumulativeBlobGasUsed, tracer, vmConfig, activePrecompiles)
+			&gasUsed, tracer, vmConfig, activePrecompiles)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -614,9 +630,9 @@ func (s *simulator) simulateBlock(
 			return nil, nil, err
 		}
 	}
-	header.GasUsed = cumulativeGasUsed
+	header.GasUsed = gasUsed.BlockGasUsed()
 	if s.chainConfig.IsCancun(header.Time) {
-		header.BlobGasUsed = &cumulativeBlobGasUsed
+		header.BlobGasUsed = &gasUsed.Blob
 	}
 
 	var withdrawals types.Withdrawals
@@ -645,7 +661,7 @@ func (s *simulator) simulateBlock(
 		}
 	}
 
-	if err := s.computeSimulatedStateRoot(ctx, tx, sharedDomains, bsc, block, parent, minTxNum, firstMinTxNum, stateWriter.touchedKeys, ancestors, latest); err != nil {
+	if err := s.computeSimulatedStateRoot(ctx, tx, sharedDomains, bsc, block, minTxNum, firstMinTxNum, stateWriter.touchedKeys, ancestors, latest); err != nil {
 		return nil, nil, err
 	}
 
@@ -712,7 +728,6 @@ func (s *simulator) computeSimulatedStateRoot(
 	sharedDomains *execctx.SharedDomains,
 	bsc *SimulatedBlock,
 	block *types.Block,
-	parent *types.Header,
 	minTxNum, firstMinTxNum uint64,
 	touchedKeys keysByAccount,
 	ancestors []*types.Header,
@@ -755,7 +770,7 @@ func (s *simulator) computeSimulatedStateRoot(
 	// No commitment history: compute from state history if blocks are not frozen, otherwise leave root as zero.
 	if frozen, observed := s.blockReader.FrozenBlocksObserved(); observed && frozen == 0 {
 		txNum := minTxNum + 1 + uint64(len(bsc.Calls))
-		stateRoot, err := s.computeCommitmentFromStateHistory(ctx, tx, sharedDomains, touchedKeys, parent.Number.Uint64(), txNum)
+		stateRoot, err := s.computeCommitmentFromStateHistory(ctx, tx, sharedDomains, touchedKeys, s.base.Number.Uint64(), block.NumberU64(), txNum)
 		if err != nil {
 			return err
 		}
@@ -773,8 +788,7 @@ func (s *simulator) simulateCall(
 	callIndex int,
 	call *ethapi.CallArgs,
 	header *types.Header,
-	cumulativeGasUsed *uint64,
-	cumulativeBlobGasUsed *uint64,
+	gasUsed *protocol.GasUsed,
 	logTracer *rpchelper.LogTracer,
 	vmConfig vm.Config,
 	precompiles vm.PrecompiledContracts,
@@ -782,24 +796,35 @@ func (s *simulator) simulateCall(
 	_, storeEVM, cleanup := setupEVMTimeout(ctx, s.evmCallTimeout)
 	defer cleanup()
 
-	err := s.sanitizeCall(call, intraBlockState, &blockCtx, header.BaseFee, *cumulativeGasUsed, s.gasPool.Gas())
+	// A zero budget would read as no cap below.
+	if s.gasBudget == 0 {
+		return nil, nil, nil, txValidationError(protocol.ErrGasLimitReached)
+	}
+	globalGasCap := s.gasBudget
+	// sanitizeCall fills zero dynamic fees when the block has a base fee, even one overridden
+	// before London; only the fields the caller named make a dynamic fee call.
+	dynamicFeeArgs := call.MaxFeePerGas != nil || call.MaxPriorityFeePerGas != nil
+	err := s.sanitizeCall(call, intraBlockState, &blockCtx, header.BaseFee, *gasUsed, globalGasCap)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
 	// Prepare the transaction message
-	msg, err := call.ToMessage(s.gasPool.Gas(), &blockCtx.BaseFee)
+	msg, err := call.ToMessage(globalGasCap, &blockCtx.BaseFee)
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	msg.SetDynamicFeeArgs(dynamicFeeArgs)
 	msg.SetCheckGas(false) // EIP-7825 gas cap does not apply to simulated calls (matches Geth SkipTransactionChecks)
 	msg.SetCheckNonce(s.validation)
+	// Without validation the whole gas limit is available for execution, like eth_call.
+	msg.SetSkipExecutionGasCap(!s.validation)
 	// A call that pays no fee must not fund the burnt contract of a chain that has one.
 	if !s.validation && msg.FeeCap().IsZero() {
 		msg.SetIsFree(true)
 	}
 	txCtx := protocol.NewEVMTxContext(msg)
-	txn, err := call.ToTransaction(s.gasPool.Gas(), &blockCtx.BaseFee)
+	txn, err := call.ToTransaction(globalGasCap, &blockCtx.BaseFee)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -813,8 +838,9 @@ func (s *simulator) simulateCall(
 	evm.SetPrecompiles(precompiles)
 	storeEVM(evm)
 
-	s.gasPool.AddBlobGas(msg.BlobGas())
-	result, err := protocol.ApplyMessage(evm, msg, s.gasPool, true, false, s.engine)
+	blockGas := protocol.NewBlockGasPool(gasLeft(blockCtx.GasLimit, gasUsed.BlockExecution),
+		gasLeft(blockCtx.GasLimit, gasUsed.BlockState), msg.BlobGas())
+	result, err := protocol.ApplyMessage(evm, msg, blockGas, true, false, s.engine)
 	if err != nil {
 		return nil, nil, nil, txValidationError(err)
 	}
@@ -822,9 +848,10 @@ func (s *simulator) simulateCall(
 	if evm.Cancelled() {
 		return nil, nil, nil, fmt.Errorf("execution aborted (timeout = %v)", s.evmCallTimeout)
 	}
-	*cumulativeGasUsed += result.ReceiptGasUsed
-	receipt := protocol.MakeReceipt(&header.Number, common.Hash{}, msg, txn, *cumulativeGasUsed, result, intraBlockState, evm)
-	*cumulativeBlobGasUsed += receipt.BlobGasUsed
+	gasUsed.AddResult(result)
+	s.gasBudget -= result.ReceiptGasUsed
+	receipt := protocol.MakeReceipt(&header.Number, common.Hash{}, msg, txn, gasUsed.Receipt, result, intraBlockState, evm)
+	gasUsed.Blob += receipt.BlobGasUsed
 
 	var logs []*types.Log
 	if s.traceTransfers {
@@ -1067,6 +1094,15 @@ func (r *simulationIntraBlockStateReader) ReadAccountData(address accounts.Addre
 	return &a, nil
 }
 
+func (r *simulationIntraBlockStateReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (r *simulationIntraBlockStateReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
 func (r *simulationIntraBlockStateReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	return r.ReadAccountData(address)
 }
@@ -1133,6 +1169,7 @@ func (s *simulator) computeCommitmentFromStateHistory(
 	sd *execctx.SharedDomains,
 	touched keysByAccount,
 	baseBlockNum uint64,
+	simBlockNum uint64,
 	simMaxTxNum uint64,
 ) ([]byte, error) {
 	replay := rpchelper.NewCommitmentReplay(s.dirs, s.txNumReader, s.logger)
@@ -1140,7 +1177,6 @@ func (s *simulator) computeCommitmentFromStateHistory(
 	// - use a custom state reader which uses both the primary db (tx, sd) and temporary commitment db (ttx, tsd)
 	// - touch the keys registered by diffTrackingWriter during IntraBlockState flush
 	simBlockComputeCommitment := func(ctx context.Context, ttx kv.TemporalTx, tsd *execctx.SharedDomains) ([]byte, error) {
-		simBlockNum := baseBlockNum + 1
 		tsd.GetCommitmentCtx().SetStateReader(newSimulateStateReader(ttx, tx, tsd, sd))
 		storageFullKey := make([]byte, length.Addr+length.Hash)
 		for address, locations := range touched {
@@ -1161,4 +1197,10 @@ func (s *simulator) computeCommitmentFromStateHistory(
 		return tsd.ComputeCommitment(ctx, ttx, false, simBlockNum, simMaxTxNum, "commitment-from-history", nil)
 	}
 	return replay.ComputeCustomCommitmentFromStateHistory(ctx, tx, baseBlockNum, simBlockComputeCommitment)
+}
+
+// gasLeft is what remains of limit after used. CheckBlockGasInclusion admits
+// every call, so used stays within limit; the floor at zero is only a guard.
+func gasLeft(limit, used uint64) uint64 {
+	return limit - min(used, limit)
 }

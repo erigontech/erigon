@@ -6,12 +6,16 @@
 #
 # Inputs (env): NEEDS (toJSON(needs)), RUN_CANCELLED ("true" when cancelled()),
 # GITHUB_EVENT_NAME (reshuffle fast-path is merge_group-only),
-# GH_TOKEN/GITHUB_REPOSITORY/GITHUB_RUN_ID to fetch the jobs list.
+# GH_TOKEN/GITHUB_REPOSITORY/GITHUB_RUN_ID to fetch the jobs list, GITHUB_JOB
+# to exclude the gate's own job from it (default ci-gate).
 # Test seam: CI_GATE_NO_FETCH=1 uses CI_GATE_JOBS_JSON verbatim instead of the
 # API (an empty value simulates a failed fetch) and CI_GATE_ANNOTATIONS_JSON
 # ({"<job id>": ["<message>"]}) instead of the per-job annotations endpoint;
 # CI_GATE_ANNOTATIONS_FAIL=1 simulates that endpoint erroring.
 set -eo pipefail
+
+# GITHUB_JOB is the gate job's id, which is also its name when it sets none.
+self="${GITHUB_JOB:-ci-gate}"
 
 needs="${NEEDS:-}"
 [ -n "$needs" ] || needs="{}"
@@ -38,7 +42,7 @@ fi
 
 # A leaf that fast-cancels the run on its own failure rolls up to "cancelled",
 # so a failed step still signals a real failure.
-failed_steps=$(jq -r '.jobs[] | select(.name != "ci-gate") | select(any(.steps[]?; .conclusion == "failure")) | .name' <<<"$jobs" 2>/dev/null || true)
+failed_steps=$(jq -r --arg self "$self" '.jobs[] | select(.name != $self) | select(any(.steps[]?; .conclusion == "failure")) | .name' <<<"$jobs" 2>/dev/null || true)
 
 # An Actions job id is also its check-run id (the job payload's check_run_url
 # ends in the same number), so the jobs list needs no extra lookup to reach the
@@ -75,7 +79,7 @@ while IFS=$'\t' read -r job_id job_name; do
     <<<"$jobs" 2>/dev/null || true)
   timed_out_names="${timed_out_names}${job_name}"$'\n'
   timeouts="${timeouts}::error title=CI timeout::${job_name} — exceeded its timeout-minutes budget${overran:+ while running: $overran}"$'\n'
-done < <(jq -r '.jobs[] | select(.name != "ci-gate") | select(.conclusion == "cancelled") | "\(.id)\t\(.name)"' <<<"$jobs" 2>/dev/null || true)
+done < <(jq -r --arg self "$self" '.jobs[] | select(.name != $self) | select(.conclusion == "cancelled") | "\(.id)\t\(.name)"' <<<"$jobs" 2>/dev/null || true)
 
 # Run cancelled with no failure = GitHub tore down a superseded merge group
 # (reshuffle); failing here would spuriously evict the PR. Scope to merge_group
@@ -103,7 +107,7 @@ root_cause='"::error title=CI root cause::" + .name + " — failed step: " + ([.
 not_timed_out='select(.name as $n | ($to | split("\n") | map(select(length > 0))) | index($n) | not)'
 root=$(jq -r --arg to "$timed_out_names" ".jobs[] | $not_timed_out | select(any(.steps[]?; .name == \"Cancel workflow run on failure\" and .conclusion == \"success\")) | $root_cause" <<<"$jobs" 2>/dev/null || true)
 if [ -z "$root" ]; then
-  root=$(jq -r --arg to "$timed_out_names" ".jobs[] | select(.name != \"ci-gate\") | $not_timed_out | select(any(.steps[]?; .conclusion == \"failure\")) | $root_cause" <<<"$jobs" 2>/dev/null || true)
+  root=$(jq -r --arg to "$timed_out_names" --arg self "$self" ".jobs[] | select(.name != \$self) | $not_timed_out | select(any(.steps[]?; .conclusion == \"failure\")) | $root_cause" <<<"$jobs" 2>/dev/null || true)
 fi
 if [ -n "$root" ]; then
   echo "Root-cause job(s):"

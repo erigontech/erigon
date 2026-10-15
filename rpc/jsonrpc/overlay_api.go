@@ -115,6 +115,9 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	if err != nil {
 		return nil, err
 	}
+	if creationData == nil {
+		return nil, fmt.Errorf("no contract at %x", address)
+	}
 
 	blockNum, _, ok, err := api.txnLookup(ctx, tx, creationData.Tx)
 	if err != nil {
@@ -256,7 +259,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	return nil, nil
 }
 
-func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria, stateOverride *ethapi.StateOverrides, rules *chain.Rules) ([]*types.Log, error) {
+func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria, stateOverride *ethapi.StateOverrides, _ *chain.Rules) ([]*types.Log, error) {
 	timeout := api.OverlayGetLogsTimeout
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
@@ -297,10 +300,6 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 		return nil, fmt.Errorf("%s: %d", errExceedBlockRange, api.blockRangeLimit)
 	}
 
-	// State overrides can flip an originally failed txn to success, so replayBlock
-	// must re-execute failed txns instead of trusting the original receipt.
-	hasStateOverrides := stateOverride != nil && len(*stateOverride) > 0
-
 	numBlocks := end - begin + 1
 	var (
 		results = make([]*blockReplayResult, numBlocks)
@@ -333,13 +332,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 				statedb := state.New(stateReader)
 				func() {
 					defer statedb.Close()
-					if hasStateOverrides {
-						if err := stateOverride.Override(statedb, nil, rules); err != nil {
-							results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
-							return
-						}
-					}
-					blockLogs, err := api.replayBlock(ctx, uint64(blockNumber), statedb, chainConfig, tx, hasStateOverrides)
+					blockLogs, err := api.replayBlock(ctx, uint64(blockNumber), statedb, chainConfig, tx, stateOverride)
 					if err != nil {
 						results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
 						return
@@ -427,7 +420,7 @@ func filterLogs(logs types.Logs, addresses []common.Address, topics [][]common.H
 	return logs.Filter(addrMap, topics, 0)
 }
 
-func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, statedb *state.IntraBlockState, chainConfig *chain.Config, tx kv.TemporalTx, replayFailedTxns bool) ([]*types.Log, error) {
+func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, statedb *state.IntraBlockState, chainConfig *chain.Config, tx kv.TemporalTx, stateOverride *ethapi.StateOverrides) ([]*types.Log, error) {
 	log.Debug("[replayBlock] begin", "block", blockNum)
 	var (
 		hash               common.Hash
@@ -472,6 +465,15 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
 	rules := blockCtx.Rules(chainConfig)
 
+	// State overrides can flip an originally failed txn to success, so failed
+	// txns must be re-executed instead of trusting the original receipt.
+	hasStateOverrides := stateOverride != nil && len(*stateOverride) > 0
+	if hasStateOverrides {
+		if err := stateOverride.Override(statedb, nil, rules); err != nil {
+			return nil, err
+		}
+	}
+
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
 	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
@@ -495,7 +497,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 
 		receipt := receipts[uint64(idx)]
 		log.Debug("[replayBlock]", "receipt.TransactionIndex", receipt.TransactionIndex, "receipt.TxHash", receipt.TxHash, "receipt.Status", receipt.Status)
-		if receipt.Status == types.ReceiptStatusFailed && !replayFailedTxns {
+		if receipt.Status == types.ReceiptStatusFailed && !hasStateOverrides {
 			log.Debug("[replayBlock] skipping transaction because it has status=failed", "transactionHash", txn.Hash())
 
 			contractCreation := msg.To().IsNil()
