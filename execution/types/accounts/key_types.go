@@ -17,7 +17,9 @@
 package accounts
 
 import (
+	"encoding/binary"
 	"fmt"
+	"sync/atomic"
 	"unique"
 
 	"github.com/erigontech/erigon/common"
@@ -31,8 +33,33 @@ var (
 	NilAddress  = Address{}
 )
 
+// unique drops a value at the first GC after its last handle dies, so values the next request reads again are
+// allocated and registered again, and unique.Make parks its caller while a GC cycle finishes marking. These
+// direct-mapped tables keep the latest values alive and answer hits without unique.Make; a miss overwrites the slot.
+const (
+	addressTableSize = 256 * 1024
+	keyTableSize     = 1024 * 1024
+)
+
+var (
+	addressTable [addressTableSize]atomic.Value // Address
+	keyTable     [keyTableSize]atomic.Value     // StorageKey
+	_            = [1]struct{}{}[addressTableSize&(addressTableSize-1)]
+	_            = [1]struct{}{}[keyTableSize&(keyTableSize-1)]
+)
+
+func addressSlot(a common.Address) *atomic.Value {
+	return &addressTable[binary.BigEndian.Uint32(a[16:])&(addressTableSize-1)]
+}
+
 func InternAddress(a common.Address) Address {
-	return Address(unique.Make(a))
+	slot := addressSlot(a)
+	if h, ok := slot.Load().(Address); ok && h.Value() == a {
+		return h
+	}
+	h := Address(unique.Make(a))
+	slot.Store(h)
+	return h
 }
 
 func (a Address) IsNil() bool {
@@ -120,8 +147,19 @@ var (
 	NilKey  = StorageKey{}
 )
 
+// keySlot mixes both ends of the key: keccak-derived slots differ everywhere, small scalar slots only at the end.
+func keySlot(k common.Hash) *atomic.Value {
+	return &keyTable[(binary.BigEndian.Uint32(k[:4])^binary.BigEndian.Uint32(k[28:]))&(keyTableSize-1)]
+}
+
 func InternKey(k common.Hash) StorageKey {
-	return StorageKey(unique.Make(k))
+	slot := keySlot(k)
+	if h, ok := slot.Load().(StorageKey); ok && h.Value() == k {
+		return h
+	}
+	h := StorageKey(unique.Make(k))
+	slot.Store(h)
+	return h
 }
 
 func (k StorageKey) IsNil() bool {

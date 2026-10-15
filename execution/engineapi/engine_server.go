@@ -467,7 +467,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return invalidTransactionStatus, nil
 	}
 	if blockAccessList != nil {
-		if err = blockAccessList.ValidateForBlock(header.GasLimit); err != nil {
+		if err = blockAccessList.ValidateForBlock(header.GasLimit, len(transactions)); err != nil {
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedError(err),

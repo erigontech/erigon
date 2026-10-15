@@ -2,20 +2,28 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
+	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
@@ -23,6 +31,105 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
+
+type checkpointLoadForkGraph struct {
+	fork_graph.ForkGraph
+	calls atomic.Int32
+	err   error
+}
+
+func (g *checkpointLoadForkGraph) GetState(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+	g.calls.Add(1)
+	if g.err != nil {
+		return nil, g.err
+	}
+	return g.ForkGraph.GetState(root, alwaysCopy)
+}
+
+type checkpointLoadSyncedData struct {
+	synced_data.SyncedData
+	beforeView func()
+	afterView  func()
+	headState  *state.CachingBeaconState
+	err        error
+}
+
+func (s *checkpointLoadSyncedData) ViewHeadState(fn synced_data.ViewHeadStateFn) error {
+	s.beforeView()
+	if s.headState != nil {
+		if err := fn(s.headState); err != nil {
+			return err
+		}
+		s.afterView()
+	}
+	return s.err
+}
+
+func TestComputeForkChoiceLoadsJustifiedStateBeforeViewingHeadState(t *testing.T) {
+	loadErr := errors.New("checkpoint state unavailable")
+	for _, test := range []struct {
+		name    string
+		loadErr error
+		useHead bool
+	}{
+		{name: "load succeeds", useHead: true},
+		{name: "load fails", loadErr: loadErr},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			beaconCfg := clparams.MainnetBeaconConfig
+			genesisTime := uint64(time.Now().Unix())
+			anchorState := state.New(&beaconCfg)
+			anchorState.SetGenesisTime(genesisTime)
+			baseGraph, err := fork_graph.NewForkGraphDisk(
+				anchorState,
+				nil,
+				afero.NewMemMapFs(),
+				beacon_router_configuration.RouterConfiguration{},
+			)
+			require.NoError(t, err)
+			graph := &checkpointLoadForkGraph{ForkGraph: baseGraph, err: test.loadErr}
+			store, err := forkchoice.NewForkChoiceStore(
+				eth_clock.NewEthereumClock(genesisTime, common.Hash{}, &beaconCfg),
+				anchorState,
+				nil,
+				pool.NewOperationsPool(&beaconCfg),
+				graph,
+				beaconevents.NewEventEmitter(),
+				nil,
+				nil,
+				public_keys_registry.NewInMemoryPublicKeysRegistry(),
+				validator_params.NewValidatorParams(),
+				false,
+				nil,
+			)
+			require.NoError(t, err)
+			errViewHeadState := errors.New("view head state")
+			var headState *state.CachingBeaconState
+			if test.useHead {
+				headState = anchorState
+			}
+			cfg := &Cfg{
+				beaconCfg:  &beaconCfg,
+				ethClock:   eth_clock.NewEthereumClock(genesisTime, common.Hash{}, &beaconCfg),
+				forkChoice: store,
+				syncedData: &checkpointLoadSyncedData{
+					beforeView: func() {
+						require.Equal(t, int32(1), graph.calls.Load(), "justified checkpoint state load must finish before ViewHeadState")
+					},
+					afterView: func() {
+						require.Equal(t, int32(1), graph.calls.Load(), "GetHead must use the preloaded checkpoint state")
+					},
+					headState: headState,
+					err:       errViewHeadState,
+				},
+			}
+
+			_, _, err = computeAndNotifyServicesOfNewForkChoice(t.Context(), nil, cfg)
+
+			require.ErrorIs(t, err, errViewHeadState)
+		})
+	}
+}
 
 func TestPayloadAttributesUseSepoliaGasLimitScheduleAtGloas(t *testing.T) {
 	_, config := clparams.GetConfigsByNetwork(chainspec.SepoliaChainID)
