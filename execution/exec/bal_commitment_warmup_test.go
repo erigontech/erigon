@@ -62,6 +62,28 @@ func (db *commitmentBeginErrorDB) BeginRo(context.Context) (kv.Tx, error) {
 	return nil, db.errs[db.next.Add(1)-1]
 }
 
+type commitmentBeginFuncDB struct {
+	kv.RoDB
+	begin func(context.Context) (kv.Tx, error)
+	calls atomic.Int64
+}
+
+func (db *commitmentBeginFuncDB) BeginRo(ctx context.Context) (kv.Tx, error) {
+	db.calls.Add(1)
+	return db.begin(ctx)
+}
+
+func threeAccountChanges() types.BlockAccessList {
+	var bal types.BlockAccessList
+	for i := range 3 {
+		bal = append(bal, types.AccountChanges{
+			Address:        common.Address{19: byte(i + 1)},
+			BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}},
+		})
+	}
+	return bal
+}
+
 type commitmentBranchLookupTx struct {
 	kv.TemporalTx
 	data  []byte
@@ -158,6 +180,47 @@ func TestWarmBALCommitmentCollectsWorkerFactoryErrors(t *testing.T) {
 	err := warmBALCommitment(t.Context(), db, bal, 2)
 	require.ErrorIs(t, err, firstErr)
 	require.ErrorIs(t, err, secondErr)
+}
+
+// A warmup whose context is already done does not open any read transaction.
+func TestWarmBALCommitmentSkipsAnEndedContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	db := &commitmentBeginFuncDB{begin: func(context.Context) (kv.Tx, error) { return nil, errors.New("unexpected BeginRo") }}
+
+	err := warmBALCommitment(ctx, db, threeAccountChanges(), 3)
+
+	require.Equal(t, context.Canceled, err)
+	require.Zero(t, db.calls.Load())
+}
+
+// A cancellation reaches every worker; it is reported once, not joined per worker.
+func TestWarmBALCommitmentReportsACancellationOnce(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	db := &commitmentBeginFuncDB{begin: func(context.Context) (kv.Tx, error) {
+		cancel()
+		return nil, context.Canceled
+	}}
+
+	err := warmBALCommitment(ctx, db, threeAccountChanges(), 3)
+
+	require.Equal(t, context.Canceled, err)
+}
+
+// The first worker error cancels the other workers. Their context errors are consequences, so only
+// the cause is reported, once.
+func TestWarmBALCommitmentReportsAWorkerErrorOnce(t *testing.T) {
+	db := &commitmentBeginFuncDB{begin: func(ctx context.Context) (kv.Tx, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return nil, kv.ErrReadTxLimitExceeded
+	}}
+
+	err := warmBALCommitment(t.Context(), db, threeAccountChanges(), 3)
+
+	require.Equal(t, int64(3), db.calls.Load())
+	require.Equal(t, kv.ErrReadTxLimitExceeded, err)
 }
 
 func TestBALCommitmentContextUsesAvailableBranchCache(t *testing.T) {
