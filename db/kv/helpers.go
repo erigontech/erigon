@@ -224,8 +224,8 @@ func LastKey(tx Tx, table string) ([]byte, error) {
 func NextSubtree(in []byte) ([]byte, bool) {
 	r := make([]byte, len(in))
 	copy(r, in)
-	for i := len(r) - 1; i >= 0; i-- {
-		if r[i] != 255 {
+	for i, v := range slices.Backward(r) {
+		if v != 255 {
 			r[i]++
 			return r, true
 		}

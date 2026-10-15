@@ -18,17 +18,12 @@ package blockio
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"time"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
-	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -43,28 +38,6 @@ type BlockWriter struct{}
 
 func NewBlockWriter() *BlockWriter {
 	return &BlockWriter{}
-}
-
-func (w *BlockWriter) FillHeaderNumberIndex(logPrefix string, tx kv.RwTx, tmpDir string, from, to uint64, ctx context.Context, logger log.Logger) error {
-	startKey := make([]byte, 8)
-	binary.BigEndian.PutUint64(startKey, from)
-	endKey := dbutils.HeaderKey(to, common.Hash{}) // etl.Tranform uses ExractEndKey as exclusive bound, therefore +1
-
-	return etl.Transform(
-		logPrefix,
-		tx,
-		kv.Headers,
-		kv.HeaderNumber,
-		tmpDir,
-		extractHeaders,
-		etl.IdentityLoadFunc,
-		etl.TransformArgs{
-			ExtractStartKey: startKey,
-			ExtractEndKey:   endKey,
-			Quit:            ctx.Done(),
-		},
-		logger,
-	)
 }
 
 func (w *BlockWriter) MakeBodiesCanonical(tx kv.RwTx, from uint64) error {
@@ -84,14 +57,6 @@ func (w *BlockWriter) MakeBodiesNonCanonical(tx kv.RwTx, from uint64) error {
 		return err
 	}
 	return nil
-}
-
-func extractHeaders(k []byte, _ []byte, next etl.ExtractNextFunc) error {
-	// We only want to extract entries composed by Block Number + Header Hash
-	if len(k) != 40 {
-		return nil
-	}
-	return next(k, k[8:], k[:8])
 }
 
 func (w *BlockWriter) TruncateBodies(db kv.RoDB, tx kv.RwTx, from uint64) error {

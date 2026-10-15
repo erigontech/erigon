@@ -675,6 +675,9 @@ func (api *BaseAPI) buildAccessedState(
 
 	// Execute all transactions in the block
 	for txIndex, txn := range block.Transactions() {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		msg, err := txn.AsMessage(*signer, header.BaseFee, blockRules)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to convert tx %d to message: %w", txIndex, err)

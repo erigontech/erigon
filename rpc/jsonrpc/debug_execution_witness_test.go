@@ -905,3 +905,23 @@ func TestParentStateReaderServesTheValidationsParentState(t *testing.T) {
 	_, _, err = r.ReadAccountStorage(cached, full)
 	require.Error(t, err, "asserts reject a cached slot that differs from history")
 }
+
+func TestBuildAccessedStateStopsOnCancelledContext(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	tx, err := api.db.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	bn := rpc.BlockNumber(3)
+	info, err := api.resolveWitnessBlock(m.Ctx, tx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+	require.NoError(t, err)
+	require.NotEmpty(t, info.Block.Transactions())
+	chainConfig, err := api.chainConfig(m.Ctx, tx)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(m.Ctx)
+	cancel()
+	_, _, err = api.buildAccessedState(ctx, tx, info.Block, chainConfig, api.engine(), info.FirstTxNumInBlock, witnessModeLegacy, nil)
+	require.ErrorIs(t, err, context.Canceled)
+}

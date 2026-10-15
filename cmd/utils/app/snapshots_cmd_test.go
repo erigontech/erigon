@@ -1608,3 +1608,32 @@ func TestCheckCommitmentFileHasRoot_Bt(t *testing.T) {
 		})
 	}
 }
+
+// Every commitment branch key sorts before "state", so a seek for it in a file
+// without the state key runs past the last key and finds no cursor.
+func TestCheckCommitmentFileHasRootWithoutStateKey(t *testing.T) {
+	dir := t.TempDir()
+	dataPath := filepath.Join(dir, "v1.0-commitment.0-1.kv")
+	compression := statecfg.Schema.CommitmentDomain.Compression
+	comp, err := seg.NewCompressor(t.Context(), t.Name(), dataPath, dir, seg.DefaultCfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+	defer comp.Close()
+	w := seg.NewWriter(comp, compression)
+	for _, word := range [][]byte{{0x01}, {0xaa}} {
+		_, err = w.Write(word)
+		require.NoError(t, err)
+	}
+	require.NoError(t, comp.Compress())
+
+	d, err := seg.NewDecompressor(dataPath)
+	require.NoError(t, err)
+	defer d.Close()
+	btPath := filepath.Join(dir, "v1.0-commitment.0-1.bt")
+	require.NoError(t, btindex.BuildBtreeIndexWithDecompressor(btPath, "", seg.NewReader(d.MakeGetter(), compression),
+		background.NewProgressSet(), dir, 1, log.New(), true, statecfg.AccessorBTree))
+
+	hasState, broken, _, err := checkCommitmentFileHasRoot(dataPath)
+	require.NoError(t, err)
+	require.False(t, hasState)
+	require.False(t, broken)
+}

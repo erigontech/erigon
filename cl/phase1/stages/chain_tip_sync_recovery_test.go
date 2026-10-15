@@ -332,6 +332,37 @@ func TestChainTipSyncVerifiesStoredGloasPayloadWhileBehind(t *testing.T) {
 	require.True(t, cfg.forkChoice.IsPayloadVerified(headRoot))
 }
 
+func TestForwardSyncReplayMakesGloasPayloadAvailableForHeadSelection(t *testing.T) {
+	cfg, graph, parentRoot, fullChild, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	engine.supportInsertion = true
+	parent := graph.parents[parentRoot]
+	envelope := graph.envelopes[parentRoot]
+	delete(graph.parents, parentRoot)
+	delete(graph.envelopes, parentRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), parent, false, false, false))
+	require.NoError(t, processDownloadedGloasEnvelope(
+		t.Context(),
+		log.Root(),
+		cfg.forkChoice,
+		&gloasCollectorTest{},
+		parent.Block,
+		parentRoot,
+		envelope,
+		true,
+		shouldValidateForwardSyncPayload(cfg, true),
+	))
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), fullChild, false, false, false))
+	fullChildRoot, err := fullChild.Block.HashSSZ()
+	require.NoError(t, err)
+
+	selectedRoot, _, err := cfg.forkChoice.GetHead(nil)
+	require.NoError(t, err)
+	require.Equal(t, common.Hash(fullChildRoot), selectedRoot)
+	require.Zero(t, engine.newPayloadCalls)
+	require.False(t, cfg.forkChoice.IsPayloadVerified(parentRoot))
+}
+
 func TestChainTipSyncDoesNotVerifyStoredGloasPayloadWhileExecutionEngineIsBusy(t *testing.T) {
 	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
 	headBlock := graph.parents[headRoot]
