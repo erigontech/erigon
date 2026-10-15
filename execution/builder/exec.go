@@ -58,6 +58,7 @@ type BuilderExecCfg struct {
 	interrupt    *atomic.Bool
 	payloadId    uint64
 	txnProvider  txnprovider.TxnProvider
+	strict       bool
 }
 
 func StageBuilderExecCfg(
@@ -70,6 +71,7 @@ func StageBuilderExecCfg(
 	payloadId uint64,
 	txnProvider txnprovider.TxnProvider,
 	blockReader dbservices.FullBlockReader,
+	strict bool,
 ) BuilderExecCfg {
 	return BuilderExecCfg{
 		builderState: builderState,
@@ -81,6 +83,7 @@ func StageBuilderExecCfg(
 		interrupt:    interrupt,
 		payloadId:    payloadId,
 		txnProvider:  txnProvider,
+		strict:       strict,
 	}
 }
 
@@ -144,6 +147,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		Engine:          cfg.engine,
 		BlockReader:     cfg.blockReader,
 		ExperimentalBAL: execCfg.IsExperimentalBAL(),
+		Strict:          cfg.strict,
 	}, current)
 	ba.SetStateWriter(stateWriter)
 
@@ -175,7 +179,18 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	interrupt := cfg.interrupt
 	const amount = 50
 	filtration := &filtrationStats{}
-	for {
+	if cfg.strict {
+		txns, err := cfg.txnProvider.ProvideTxns(ctx)
+		if err != nil {
+			return err
+		}
+		logs, _, err := ba.AddTransactions(ctx, getHeader, txns, coinbase, cfg.vmConfig, ibs, nil, logPrefix, logger)
+		if err != nil {
+			return err
+		}
+		NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
+	}
+	for !cfg.strict {
 		txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, filterReader, filterWriter, logger, filtration)
 		if err != nil {
 			return err

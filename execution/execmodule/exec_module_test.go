@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -3838,4 +3839,69 @@ func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
+}
+
+type onceTxnProvider struct {
+	txns []types.Transaction
+	done bool
+}
+
+func (p *onceTxnProvider) ProvideTxns(context.Context, ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	if p.done {
+		return nil, nil
+	}
+	p.done = true
+	return p.txns, nil
+}
+
+func TestAssembleBlockStrict(t *testing.T) {
+	ctx := t.Context()
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	genesis := &types.Genesis{
+		Config:   chain.AllProtocolChanges,
+		GasLimit: 30_000_000,
+		Alloc:    types.GenesisAlloc{crypto.PubkeyToAddress(key.PublicKey): {Balance: big.NewInt(common.Ether)}},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithChainConfig(chain.AllProtocolChanges), execmoduletester.WithKey(key))
+	parent := m.Genesis
+	transfer := func(nonce uint64) types.Transaction {
+		tx, err := types.SignTx(types.NewTransaction(nonce, common.Address{1}, uint256.NewInt(1), 21_000, uint256.NewInt(parent.BaseFee().Uint64()*2), nil),
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		require.NoError(t, err)
+		return tx
+	}
+	build := func(strict bool, txns ...types.Transaction) (*types.Block, error) {
+		beaconRoot := common.Hash{1}
+		id, err := m.AssembleBlock(ctx, &builder.Parameters{
+			ParentHash:            parent.Hash(),
+			Timestamp:             parent.Time() + 1,
+			SuggestedFeeRecipient: common.Address{4},
+			Withdrawals:           []*types.Withdrawal{},
+			ParentBeaconBlockRoot: &beaconRoot,
+			SlotNumber:            syntheticSlotNumber(parent),
+			CustomTxnProvider:     &onceTxnProvider{txns: txns},
+			Strict:                strict,
+		})
+		require.NoError(t, err)
+		return m.GetAssembledBlock(ctx, id)
+	}
+
+	// The filter would drop a transaction whose sender is not cached; strict
+	// assembly takes the list as given.
+	txs := []types.Transaction{transfer(0), transfer(1)}
+	built, err := build(true, txs...)
+	require.NoError(t, err)
+	require.Equal(t, []common.Hash{txs[0].Hash(), txs[1].Hash()}, []common.Hash{built.Transactions()[0].Hash(), built.Transactions()[1].Hash()})
+
+	gap := []types.Transaction{transfer(0), transfer(5)}
+	_, err = build(true, gap...)
+	require.ErrorContains(t, err, exec.ErrTxnNotIncluded.Error())
+	require.ErrorContains(t, err, "nonce too high")
+
+	gap[0].SetSender(accounts.InternAddress(m.Address))
+	gap[1].SetSender(accounts.InternAddress(m.Address))
+	built, err = build(false, gap...)
+	require.NoError(t, err)
+	require.Len(t, built.Transactions(), 1, "the default assembly skips what it cannot include")
 }
