@@ -935,7 +935,7 @@ var (
 	}
 	CaplinIPBlockLimitsTrustedCIDRsFlag = cli.StringSliceFlag{
 		Name:  "caplin.ip-block-limits.trusted-cidrs",
-		Usage: "Comma-separated networks in CIDR notation (at most an IPv4 /8 or an IPv6 /16 each, without host bits) exempt from every per-address and per-block connection cap. All connections of one network share a limit of 8 times --caplin.max-peer-count (at least 32). For trusted clusters on public addresses",
+		Usage: "Comma-separated networks in CIDR notation (at most an IPv4 /8 or an IPv6 /16 each, without host bits) exempt from every per-address and per-block connection cap. All connections of one network share a limit of 8 times --caplin.max-peer-count (at least 32); a loopback network stays unlimited. For trusted clusters on public addresses",
 	}
 	CaplinEnableUPNPlag = cli.BoolFlag{
 		Name:  "caplin.enable-upnp",

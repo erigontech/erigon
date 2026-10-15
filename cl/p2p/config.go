@@ -165,7 +165,7 @@ func newResourceManager(cfg *P2PConfig) (network.ResourceManager, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Loopback is already unlimited; a trusted entry there would match first and cap it.
+	// Loopback is already unlimited; a narrower IPv4 trusted entry there would match first and cap it.
 	trusted = slices.DeleteFunc(trusted, func(prefix netip.Prefix) bool { return prefix.Addr().IsLoopback() })
 	var opts []rcmgr.Option
 	var staticPeers []netip.Prefix
@@ -288,10 +288,9 @@ func mustParsePrefixes(cidrs ...string) []netip.Prefix {
 	return out
 }
 
-// ipBlockConnLimits returns the connection caps per IPv4 /24 and per IPv4 /16, which ipBlockLimits
-// also applies to an IPv6 /48 and /32. A /24 may hold an eighth of the peer pool and a /16 half of
-// it, so filling the pool takes several blocks. The floor of two per-address caps keeps small pools
-// from refusing two busy hosts.
+// ipBlockConnLimits returns the connection caps per IPv4 /24 and per IPv4 /16. A /24 may hold an
+// eighth of the peer pool and a /16 half of it, so filling the pool takes several blocks. The
+// floor of two per-address caps keeps small pools from refusing two busy hosts.
 func ipBlockConnLimits(maxPeerCount uint64) (perBlock24, perBlock16 int) {
 	const floor = 16
 	perBlock24 = max(floor, int(maxPeerCount/8))
