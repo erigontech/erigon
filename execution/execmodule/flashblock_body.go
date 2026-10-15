@@ -299,9 +299,12 @@ func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs Flas
 	//
 	// Nothing is left behind: the deferred rollback takes the round's transactions back out of the body
 	// and the staged state was closed rather than merged, so the block is exactly what it was before.
-	if !claimWon && (errors.Is(err, ErrRoundAbandoned) || ctx.Err() != nil) {
-		return nil, common.Hash{}, ValidationResult{}, fmt.Errorf("%w: num=%d roundTxs=%d after=%s", ErrRoundAbandoned,
-			inputs.Number, len(kept), time.Since(roundStart).Round(time.Millisecond))
+	if !claimWon && (errors.Is(err, ExecutionStopped{}) || ctx.Err() != nil) {
+		// Applied is 0: a stopped round is discarded whole today. The staged state was closed rather than
+		// merged, so nothing it executed survives — see ExecutionStopped.
+		return nil, common.Hash{}, ValidationResult{}, ExecutionStopped{
+			Reason: stopReasonOf(ctx), Num: inputs.Number, Txs: len(kept),
+		}
 	}
 	if err != nil {
 		return nil, common.Hash{}, vr, err
@@ -340,13 +343,6 @@ func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs Flas
 	committed = true
 	return &types.RawBody{Transactions: body, Withdrawals: inputs.Withdrawals}, hash, vr, nil
 }
-
-// ErrRoundAbandoned reports a pre-execution round cut short because the deadline its caller gave it
-// passed. The block is left exactly as it was before the round began — the round's transactions are out
-// of the maintained body again and its staged state was closed, not merged — so the caller may seal
-// immediately. The transactions themselves are the caller's to dispose of: they were not executed here
-// and this module does not know whether they are worth trying again.
-var ErrRoundAbandoned = errors.New("pre-exec round abandoned on deadline")
 
 // rollbackRound returns the maintained body to `base`, undoing this round's append. Guarded on the block
 // number so a round that outlived its block cannot truncate its successor's body.

@@ -32,7 +32,7 @@ func TestDroppedRoundLeavesTheBlockCommitmentIntact(t *testing.T) {
 		params, in := h.attrs(head)
 		require.NoError(t, h.round(h.ctx, in, 0, 0), "run %d round 1", run)
 		lost := execmodule.WithRoundCommit(h.ctx, func() bool { return false })
-		require.ErrorIs(t, h.round(lost, in, 1, 0), execmodule.ErrRoundAbandoned, "run %d round 2 is dropped", run)
+		require.ErrorIs(t, h.round(lost, in, 1, 0), execmodule.ExecutionStopped{}, "run %d round 2 is dropped", run)
 		require.NoError(t, h.round(h.ctx, in, 0, 1), "run %d round 3", run)
 		hdr := h.sealAndCheckElsewhere(other, params, 2, run)
 

@@ -497,7 +497,7 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock
 		// The caller may already have stopped waiting and requeued this round's transactions. Commit only
 		// if this round wins the claim; otherwise the deferred close drops the staged state untouched.
 		if claim := roundCommitClaim(ctx); claim != nil && !claim() {
-			return ValidationResult{}, fmt.Errorf("%w: num=%d lost the commit claim", ErrRoundAbandoned, blockNumber)
+			return ValidationResult{}, ExecutionStopped{Reason: StopLostCommit, Num: blockNumber}
 		}
 		if stagingBase != nil {
 			if merr := stagingBase.Merge(ctx, stagingBase.TxNum(), doms, doms.TxNum(), true); merr != nil {

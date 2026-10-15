@@ -84,7 +84,7 @@ func TestPreExecBlockIdsAreContiguousAndADroppedRoundLeavesNothing(t *testing.T)
 	require.NoError(t, h.round(ctx, in, 0, 0), "block 1 round 1 (kept)")
 	require.NoError(t, h.round(ctx, in, 0, 1), "block 1 round 2 (kept)")
 	dropped := execmodule.WithRoundCommit(ctx, func() bool { return false })
-	require.ErrorIs(t, h.round(dropped, in, 1, 0), execmodule.ErrRoundAbandoned, "block 1 round 3 must be dropped")
+	require.ErrorIs(t, h.round(dropped, in, 1, 0), execmodule.ExecutionStopped{}, "block 1 round 3 must be dropped")
 	first := h.sealAndAdopt(params, 2)
 
 	// The dropped round's transaction is still pending, so the successor carries it.

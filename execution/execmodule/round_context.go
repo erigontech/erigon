@@ -78,7 +78,7 @@ type roundCommitKey struct{}
 // its transactions. Without a single decision the round could still merge after that — its transactions
 // committed to the block AND back in the backlog. So commit and abandon go through one claim: the round
 // takes it immediately before merging, the caller takes it when it gives up, and whoever is first
-// decides. A round that loses closes its staged state and reports ErrRoundAbandoned.
+// decides. A round that loses closes its staged state and reports ExecutionStopped.
 func WithRoundCommit(ctx context.Context, claim func() bool) context.Context {
 	return context.WithValue(ctx, roundCommitKey{}, claim)
 }

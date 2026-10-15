@@ -73,7 +73,7 @@ func TestRoundCommitIsOneDecision(t *testing.T) {
 	// The caller took the claim first: the round must not commit.
 	lost := execmodule.WithRoundCommit(ctx, func() bool { return false })
 	_, _, _, err = exec.PreExecuteFlashblock(lost, inputs, [][]byte{sign(key, sender, 1)})
-	require.ErrorIs(t, err, execmodule.ErrRoundAbandoned)
+	require.ErrorIs(t, err, execmodule.ExecutionStopped{})
 	require.Len(t, exec.FlashBodyForTest(), 1, "a round that lost the claim is still in the body")
 	require.Equal(t, 1, exec.InProgressReceiptCount(), "a round that lost the claim merged its receipts")
 

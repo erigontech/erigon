@@ -144,7 +144,7 @@ func TestAbandonedRoundReleasesTheExecutorAtItsDeadline(t *testing.T) {
 
 	select {
 	case err := <-result:
-		require.ErrorIs(t, err, execmodule.ErrRoundAbandoned)
+		require.ErrorIs(t, err, execmodule.ExecutionStopped{})
 	case <-time.After(2 * stall):
 		t.Fatal("the abandoned round never returned")
 	}

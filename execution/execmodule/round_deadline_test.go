@@ -102,7 +102,7 @@ func TestRoundStopsAtItsDeadline(t *testing.T) {
 	_, _, _, err = exec.PreExecuteFlashblock(deadlined, inputs, round)
 	took := time.Since(start)
 
-	require.ErrorIs(t, err, execmodule.ErrRoundAbandoned,
+	require.ErrorIs(t, err, execmodule.ExecutionStopped{},
 		"a round cut off by its deadline must say so, not look like a failed block")
 	require.Less(t, took, time.Duration(burns/2)*perBurn,
 		"the round ran on past its deadline (%s for work budgeted at %s): the seal would wait for all of it",
