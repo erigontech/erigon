@@ -63,6 +63,7 @@ type ForkNode struct {
 
 const (
 	checkpointsPerCache        = 1024
+	maxCheckpointStates        = 10
 	allowedCachedStates        = 8
 	queueCacheSize             = 128
 	pendingELPayloadsShrinkCap = 256 // drain releases the backing array when cap exceeds this
@@ -134,6 +135,9 @@ type ForkChoiceStore struct {
 	// Per-block unrealized checkpoints (spec: store.unrealized_justifications)
 	unrealizedJustifications sync.Map // blockRoot -> solid.Checkpoint
 	unrealizedFinalizations  sync.Map // blockRoot -> solid.Checkpoint
+	// Serializes checkpointStates inserts and evictions with justified promotion,
+	// so an eviction pass never deletes the current justified state.
+	checkpointStatesMu sync.Mutex
 	// I use the cache due to the convenient auto-cleanup feauture.
 	checkpointStates   sync.Map // We keep ssz snappy of it as the full beacon state is full of rendundant data.
 	publicKeysRegistry public_keys_registry.PublicKeyRegistry
@@ -285,9 +289,16 @@ func NewForkChoiceStore(
 		return nil, err
 	}
 
+	slot := anchorState.Slot()
+	anchorEpoch := state.Epoch(anchorState.BeaconState)
+	if slot%anchorState.BeaconConfig().SlotsPerEpoch != 0 && anchorState.LatestBlockHeader().Slot == slot {
+		// A checkpoint block that is not at an epoch start is also the checkpoint at the next
+		// epoch start. A state advanced past its block keeps the epoch of its own slot.
+		anchorEpoch++
+	}
 	anchorCheckpoint := solid.Checkpoint{
 		Root:  anchorRoot,
-		Epoch: state.Epoch(anchorState.BeaconState),
+		Epoch: anchorEpoch,
 	}
 
 	verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](65536)
