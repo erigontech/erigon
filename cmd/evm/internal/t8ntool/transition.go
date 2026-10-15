@@ -523,7 +523,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 			Authorizations: auths,
 		}, nil
 	default:
-		return nil, nil
+		return nil, fmt.Errorf("unsupported transaction type %d", txJson.Type)
 	}
 }
 
