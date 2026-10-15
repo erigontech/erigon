@@ -72,7 +72,20 @@ var numOfBlobRecoveryWorkers = 8
 const (
 	blobRecoveryValidationRetryInterval = 500 * time.Millisecond
 	maxBlobRecoveryResultBytes          = 16 << 20
+
+	columnSyncTick = time.Second
+	// Gossip delivers almost every column within a second of its block or envelope. Fetching the rest after this
+	// grace period leaves time to complete the data before the PTC deadline and the next proposal.
+	columnSyncGracePeriod = 2 * time.Second
+	// Once a block is an epoch old its columns only serve custody, so a fetch that keeps failing is retried slowly.
+	oldBlockColumnSyncInterval = time.Minute
 )
+
+type columnSyncEntry struct {
+	block       cltypes.ColumnSyncableSignedBlock
+	queuedAt    time.Time
+	lastAttempt time.Time
+}
 
 type peerdas struct {
 	state             *peerdasstate.PeerDasState
@@ -104,7 +117,7 @@ type peerdas struct {
 	recoverySlots       map[uint64]*blobRecoverySlot
 	recoverySlotQueue   blobRecoverySlotHeap
 	recoveryPruneFloor  uint64
-	blocksToCheckSync   sync.Map // blockRoot -> ColumnSyncableSignedBlock (SignedBeaconBlock or SignedBlindedBeaconBlock)
+	blocksToCheckSync   sync.Map // blockRoot -> *columnSyncEntry
 
 	// [New in Gloas:EIP7732] For fetching blocks to get kzg_commitments
 	forkChoice     BlockGetter
@@ -1921,13 +1934,14 @@ func (d *peerdas) SyncColumnDataLater(block *cltypes.SignedBeaconBlock) error {
 		return err
 	}
 	// [Modified in Gloas:EIP7732] Store SignedBeaconBlock directly via ColumnSyncableSignedBlock interface
-	// instead of calling Blinded() which fails for GLOAS blocks
-	d.blocksToCheckSync.Store(common.Hash(blockRoot), block)
+	// instead of calling Blinded() which fails for GLOAS blocks. Envelopes waiting for data call this on every
+	// retry, so only the first call starts the grace period.
+	d.blocksToCheckSync.LoadOrStore(common.Hash(blockRoot), &columnSyncEntry{block: block, queuedAt: time.Now()})
 	return nil
 }
 
 func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
-	ticker := time.NewTicker(time.Minute)
+	ticker := time.NewTicker(columnSyncTick)
 	defer ticker.Stop()
 	for {
 		select {
@@ -1945,26 +1959,31 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 				}
 			}
 
-			// [Modified in Gloas:EIP7732] Use ColumnSyncableSignedBlock interface
+			now := time.Now()
+			curSlot := d.ethClock.GetCurrentSlot()
 			blocks := []cltypes.ColumnSyncableSignedBlock{}
 			roots := []common.Hash{}
 			d.blocksToCheckSync.Range(func(key, value any) bool {
 				root := key.(common.Hash)
-				block := value.(cltypes.ColumnSyncableSignedBlock)
-				curSlot := d.ethClock.GetCurrentSlot()
-				if curSlot-block.GetSlot() < 5 { // wait slow data from peers
-					// skip blocks that are too close to the current slot
+				entry := value.(*columnSyncEntry)
+				// Peers no longer have to serve these columns, so a fetch cannot succeed.
+				if entry.block.GetSlot() < d.beaconConfig.DataColumnSidecarServeRangeStartSlot(curSlot) {
+					d.blocksToCheckSync.Delete(root)
 					return true
 				}
-				available, err := d.IsDataAvailable(block.GetSlot(), root)
+				if !d.columnSyncDue(entry, now, curSlot) {
+					return true
+				}
+				available, err := d.IsDataAvailable(entry.block.GetSlot(), root)
 				switch {
 				case err != nil:
 					log.Warn("failed to check if data is available", "err", err)
 				case available:
-					log.Trace("[syncColumnDataWorker] column data is already available, removing from sync queue", "slot", block.GetSlot(), "blockRoot", root)
+					log.Trace("[syncColumnDataWorker] column data is already available, removing from sync queue", "slot", entry.block.GetSlot(), "blockRoot", root)
 					d.blocksToCheckSync.Delete(root)
 				default:
-					blocks = append(blocks, block)
+					entry.lastAttempt = now
+					blocks = append(blocks, entry.block)
 					roots = append(roots, root)
 				}
 				return true
@@ -1973,21 +1992,34 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 				continue
 			}
 			log.Debug("[syncColumnDataWorker] syncing column data", "blocks_count", len(blocks))
+			// A download only returns once every column arrived, so a bounded attempt keeps one unfetchable block
+			// from stalling the others.
+			attemptCtx, cancel := context.WithTimeout(ctx, time.Duration(d.beaconConfig.SecondsPerSlot)*time.Second)
+			var err error
 			if d.IsArchivedMode() {
-				if err := d.DownloadColumnsAndRecoverBlobs(ctx, blocks); err != nil {
-					log.Warn("failed to download columns and recover blobs", "err", err)
-					continue
-				}
+				err = d.DownloadColumnsAndRecoverBlobs(attemptCtx, blocks)
 			} else {
-				if err := d.DownloadOnlyCustodyColumns(ctx, blocks); err != nil {
-					log.Warn("failed to download only custody columns", "err", err)
-					continue
-				}
+				err = d.DownloadOnlyCustodyColumns(attemptCtx, blocks)
+			}
+			cancel()
+			if err != nil {
+				log.Warn("failed to download column data", "archived", d.IsArchivedMode(), "err", err)
+				continue
 			}
 			for i, root := range roots {
-				d.blocksToCheckSync.Delete(root)
-				log.Debug("[syncColumnDataWorker] column data is synced, removing from sync queue", "slot", blocks[i].GetSlot(), "blockRoot", root)
+				if available, err := d.IsDataAvailable(blocks[i].GetSlot(), root); err == nil && available {
+					d.blocksToCheckSync.Delete(root)
+					log.Debug("[syncColumnDataWorker] column data is synced, removing from sync queue", "slot", blocks[i].GetSlot(), "blockRoot", root)
+				}
 			}
 		}
 	}
+}
+
+func (d *peerdas) columnSyncDue(entry *columnSyncEntry, now time.Time, curSlot uint64) bool {
+	if now.Sub(entry.queuedAt) < columnSyncGracePeriod {
+		return false
+	}
+	isOld := curSlot > entry.block.GetSlot()+d.beaconConfig.SlotsPerEpoch
+	return !isOld || now.Sub(entry.lastAttempt) >= oldBlockColumnSyncInterval
 }

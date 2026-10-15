@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
@@ -44,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/p2p/enode"
 )
@@ -57,6 +59,7 @@ type maliciousColumnSentinel struct {
 	columnResponse   []byte
 	columnResponses  [][]byte
 	peerEnodeID      string
+	requestedRoots   chan common.Hash
 
 	metadataOnce    sync.Once
 	metadataReady   chan struct{}
@@ -72,6 +75,10 @@ func (s *maliciousColumnSentinel) PeersInfo(context.Context, *sentinelproto.Peer
 	return &sentinelproto.PeersInfoResponse{Peers: []*sentinelproto.Peer{{Pid: "malicious-peer", EnodeId: s.peerEnodeID}}}, nil
 }
 
+func (s *maliciousColumnSentinel) GetPeers(context.Context, *sentinelproto.EmptyMessage, ...grpc.CallOption) (*sentinelproto.PeerCount, error) {
+	return &sentinelproto.PeerCount{Active: 1}, nil
+}
+
 func (s *maliciousColumnSentinel) BanPeer(context.Context, *sentinelproto.Peer, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
 	s.banOnce.Do(func() { close(s.banned) })
 	return &sentinelproto.EmptyMessage{}, nil
@@ -85,6 +92,18 @@ func (s *maliciousColumnSentinel) SendPeerRequest(ctx context.Context, req *sent
 	}
 	if s.columnRequested != nil {
 		s.columnOnce.Do(func() { close(s.columnRequested) })
+	}
+	if s.requestedRoots != nil {
+		ids := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(clparams.MainnetBeaconConfig.MaxRequestBlocksDeneb))
+		if err := ssz_snappy.DecodeAndReadNoForkDigest(bytes.NewReader(req.Data), ids, clparams.GloasVersion); err == nil {
+			ids.Range(func(_ int, id *cltypes.DataColumnsByRootIdentifier, _ int) bool {
+				select {
+				case s.requestedRoots <- id.BlockRoot:
+				default:
+				}
+				return true
+			})
+		}
 	}
 	if s.releaseColumn != nil {
 		select {
@@ -1233,4 +1252,143 @@ func TestNewBlobRecoveryMetadataCarriesTheSignature(t *testing.T) {
 	wrapped, err := newBlobRecoveryMetadata(&blockHashCountingBlock{ColumnSyncableSignedBlock: block}, root)
 	require.NoError(t, err)
 	require.Equal(t, signature, wrapped.signature, "a wrapper must not drop the signature")
+}
+
+func newColumnSyncTestPeerDas(t *testing.T, cfg *clparams.BeaconChainConfig, currentSlot uint64, responses ...[]*cltypes.DataColumnSidecar) (*peerdas, *maliciousColumnSentinel) {
+	t.Helper()
+	rpcClient, sentinel := newColumnResponseRPCWithPeerAndForkEpoch(t, cfg, currentSlot, "", cfg.NumberOfColumns, cfg.GloasForkEpoch, responses...)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	nodeDB, err := enode.OpenDB("")
+	require.NoError(t, err)
+	t.Cleanup(func() { nodeDB.Close() })
+	state := peerdasstate.NewPeerDasState(cfg, &clparams.NetworkConfig{})
+	state.SetLocalNodeID(enode.NewLocalNode(nodeDB, key))
+	gloasDataCache, err := lru.New[common.Hash, *gloasBlockData]("gloasColumnSync", 4)
+	require.NoError(t, err)
+	return &peerdas{
+		rpc:            rpcClient,
+		beaconConfig:   cfg,
+		caplinConfig:   &clparams.CaplinConfig{},
+		state:          state,
+		columnStorage:  blob_storage.NewDataColumnStore(afero.NewMemMapFs(), cfg, beaconevents.NewEventEmitter()),
+		ethClock:       eth_clock.NewEthereumClock(uint64(time.Now().Unix())-currentSlot*cfg.SecondsPerSlot, common.Hash{}, cfg),
+		gloasDataCache: gloasDataCache,
+	}, sentinel
+}
+
+func columnSyncTestConfig() clparams.BeaconChainConfig {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 1
+	cfg.GloasForkEpoch = 2
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	return cfg
+}
+
+func TestSyncColumnDataLaterRequestsMissingCustodyColumnsWithinSeconds(t *testing.T) {
+	cfg := columnSyncTestConfig()
+	currentSlot := cfg.GloasForkEpoch * cfg.SlotsPerEpoch
+	block, _, columns := recoverableGloasColumns(t, &cfg, currentSlot)
+	d, sentinel := newColumnSyncTestPeerDas(t, &cfg, currentSlot, []*cltypes.DataColumnSidecar{columns[0]})
+	sentinel.columnRequested = make(chan struct{})
+	require.NoError(t, d.SyncColumnDataLater(block))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go d.syncColumnDataWorker(ctx)
+
+	select {
+	case <-sentinel.columnRequested:
+	case <-time.After(5 * time.Second):
+		t.Fatal("missing custody columns of a block in the current slot were not requested within 5 s")
+	}
+}
+
+func TestSyncColumnDataLaterRepeatedCallsKeepTheFirstQueueTime(t *testing.T) {
+	cfg := columnSyncTestConfig()
+	currentSlot := cfg.GloasForkEpoch * cfg.SlotsPerEpoch
+	block, _, columns := recoverableGloasColumns(t, &cfg, currentSlot)
+	d, sentinel := newColumnSyncTestPeerDas(t, &cfg, currentSlot, []*cltypes.DataColumnSidecar{columns[0]})
+	sentinel.columnRequested = make(chan struct{})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go d.syncColumnDataWorker(ctx)
+	retry := time.NewTicker(200 * time.Millisecond)
+	defer retry.Stop()
+	deadline := time.After(5 * time.Second)
+	for {
+		require.NoError(t, d.SyncColumnDataLater(block))
+		select {
+		case <-sentinel.columnRequested:
+			return
+		case <-deadline:
+			t.Fatal("repeated scheduling postponed the column request")
+		case <-retry.C:
+		}
+	}
+}
+
+func TestSyncColumnDataWorkerMovesOnFromUnfetchableBlock(t *testing.T) {
+	cfg := columnSyncTestConfig()
+	cfg.SecondsPerSlot = 1
+	currentSlot := cfg.GloasForkEpoch*cfg.SlotsPerEpoch + 1
+	unfetchable, unfetchableRoot, _ := recoverableGloasColumns(t, &cfg, currentSlot-1)
+	later, laterRoot, _ := recoverableGloasColumns(t, &cfg, currentSlot)
+	require.NotEqual(t, unfetchableRoot, laterRoot)
+	d, sentinel := newColumnSyncTestPeerDas(t, &cfg, currentSlot, []*cltypes.DataColumnSidecar{})
+	sentinel.requestedRoots = make(chan common.Hash, 1024)
+	require.NoError(t, d.SyncColumnDataLater(unfetchable))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go d.syncColumnDataWorker(ctx)
+	waitForRequestedRoot := func(root common.Hash, within time.Duration) bool {
+		deadline := time.After(within)
+		for {
+			select {
+			case got := <-sentinel.requestedRoots:
+				if got == root {
+					return true
+				}
+			case <-deadline:
+				return false
+			}
+		}
+	}
+	require.True(t, waitForRequestedRoot(unfetchableRoot, 5*time.Second), "the unfetchable block was never requested")
+
+	require.NoError(t, d.SyncColumnDataLater(later))
+	require.True(t, waitForRequestedRoot(laterRoot, 10*time.Second), "a block queued while an unfetchable download was running was never requested")
+}
+
+func TestSyncColumnDataWorkerDropsBlocksOutsideTheServeRange(t *testing.T) {
+	cfg := columnSyncTestConfig()
+	cfg.MinEpochsForDataColumnSidecarsRequests = 1
+	currentSlot := (cfg.GloasForkEpoch + 3) * cfg.SlotsPerEpoch
+	block, root, columns := recoverableGloasColumns(t, &cfg, cfg.GloasForkEpoch*cfg.SlotsPerEpoch)
+	require.Less(t, block.GetSlot(), cfg.DataColumnSidecarServeRangeStartSlot(currentSlot))
+	d, sentinel := newColumnSyncTestPeerDas(t, &cfg, currentSlot, []*cltypes.DataColumnSidecar{columns[0]})
+	sentinel.columnRequested = make(chan struct{})
+	require.NoError(t, d.SyncColumnDataLater(block))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go d.syncColumnDataWorker(ctx)
+
+	require.Eventually(t, func() bool {
+		_, queued := d.blocksToCheckSync.Load(root)
+		return !queued
+	}, 5*time.Second, 50*time.Millisecond, "a block outside the column serve range stayed queued")
+	select {
+	case <-sentinel.columnRequested:
+		t.Fatal("columns of a block outside the serve range were requested")
+	default:
+	}
 }
