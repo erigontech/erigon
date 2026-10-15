@@ -35,6 +35,7 @@ The text of every page listed below is also available as a single file: [llms-fu
 - [Supported Networks](https://docs.erigon.tech/fundamentals/supported-networks): Mainnet, testnets, Gnosis, and all other chains Erigon can sync.
 - [Layer 2 Networks](https://docs.erigon.tech/fundamentals/layer-2-networks): Using Erigon with an Optimism op-node, and the experimental Erigon Nitro client for Arbitrum.
 - [Default ports](https://docs.erigon.tech/fundamentals/default-ports): Default listening ports for each Erigon service and how to override them.
+- [EEZ Follower](https://docs.erigon.tech/fundamentals/eez-follower): Run Erigon as a follower of an EEZ chain, deriving it from its settlements on L1.
 - [NAT](https://docs.erigon.tech/fundamentals/nat): Configure NAT traversal settings for proper peer discovery behind routers and firewalls.
 - [Optimizing Storage](https://docs.erigon.tech/fundamentals/optimizing-storage): Pruning, snapshots, and techniques to minimize disk footprint.
 - [Performance Tricks](https://docs.erigon.tech/fundamentals/performance-tricks): OS-level tuning, memory settings, and tips to maximize sync throughput.
