@@ -55,6 +55,10 @@ type Config struct {
 	Retry, MaxRetry time.Duration
 	// BootAttempts is how many consecutive failures boot tolerates.
 	BootAttempts int
+	// Sequencer, when set, supplies the unsafe head: its latest block,
+	// read every SequencerPoll, while it descends from the safe block.
+	Sequencer     Sequencer
+	SequencerPoll time.Duration
 }
 
 // DefaultConfig is the reference client's tuning.
@@ -65,7 +69,11 @@ var DefaultConfig = Config{
 	Retry:         2 * time.Second,
 	MaxRetry:      30 * time.Second,
 	BootAttempts:  32,
+	SequencerPoll: time.Second,
 }
+
+// overlayLimit bounds the sequencer blocks one overlay step inserts.
+const overlayLimit = 256
 
 // Follower derives an EEZ chain from its settlements on L1.
 type Follower struct {
@@ -76,6 +84,7 @@ type Follower struct {
 	watcher *l1.Watcher
 	chain   deriver.Chain
 	deriver *deriver.Deriver
+	overlay *overlay
 	logger  log.Logger
 	// scanned is the last L1 block whose batches were reconciled, target
 	// the L1 head to scan to and l1Finalized the latest finalized L1 block.
@@ -146,7 +155,7 @@ func New(reader l1.ChainReader, chain deriver.Chain, cfg *chain.Config, c Config
 	if c.LogChunk > 0 {
 		scanner.SetChunk(c.LogChunk)
 	}
-	return &Follower{
+	f := &Follower{
 		cfg:     c,
 		l2:      l2,
 		reader:  reader,
@@ -155,7 +164,20 @@ func New(reader l1.ChainReader, chain deriver.Chain, cfg *chain.Config, c Config
 		chain:   chain,
 		deriver: d,
 		logger:  logger,
-	}, nil
+	}
+	if c.Sequencer != nil {
+		f.overlay = &overlay{seq: c.Sequencer, chain: chain, deriver: d, limit: overlayLimit, logger: logger}
+	}
+	return f, nil
+}
+
+// StepOverlay moves the head toward the sequencer's latest block, when
+// the follower has a sequencer.
+func (f *Follower) StepOverlay(ctx context.Context) error {
+	if f.overlay == nil {
+		return nil
+	}
+	return f.overlay.step(ctx)
 }
 
 // Deriver is the follower's deriver.
@@ -174,6 +196,12 @@ func (f *Follower) Run(ctx context.Context) error {
 	watched := make(chan error, 1)
 	go func() { watched <- f.watcher.Run(ctx, f.cfg.Poll, f.cfg.FinalityEvery, events) }()
 
+	var unsafeTick <-chan time.Time
+	if f.overlay != nil {
+		t := time.NewTicker(f.cfg.SequencerPoll)
+		defer t.Stop()
+		unsafeTick = t.C
+	}
 	var retry <-chan time.Time
 	pause := f.cfg.Retry
 	for {
@@ -187,6 +215,11 @@ func (f *Follower) Run(ctx context.Context) error {
 			err = f.Handle(ctx, e)
 		case <-retry:
 			err = f.Sync(ctx)
+		case <-unsafeTick:
+			if err := f.overlay.step(ctx); err != nil && ctx.Err() == nil {
+				f.logger.Warn("[eez] unsafe head step failed", "err", err)
+			}
+			continue
 		}
 		if err = f.recover(ctx, err); err != nil {
 			if halts(err) {

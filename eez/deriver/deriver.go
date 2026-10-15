@@ -186,6 +186,12 @@ func (d *Deriver) forkChoice(ctx context.Context) error {
 	return d.forkChoiceTo(ctx, head.Hash())
 }
 
+// ForkChoiceTo makes head the head block, keeping the safe and finalized
+// blocks; they must be its ancestors.
+func (d *Deriver) ForkChoiceTo(ctx context.Context, head common.Hash) error {
+	return d.forkChoiceTo(ctx, head)
+}
+
 func (d *Deriver) forkChoiceTo(ctx context.Context, head common.Hash) error {
 	safe, finalized, err := d.anchors(ctx)
 	if err != nil {

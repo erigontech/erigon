@@ -111,6 +111,11 @@ func startFollower(ctx context.Context, n *node.ErigonNode, cfg *eez.Config, api
 	}
 	fc := follower.DefaultConfig
 	fc.Dir, fc.Poll, fc.ReorgDepth, fc.LogChunk = dirs.DataDir, cfg.L1Poll, cfg.L1ReorgDepth, cfg.L1LogChunk
+	if cfg.SequencerRPC != "" {
+		if fc.Sequencer, err = follower.DialSequencer(ctx, cfg.SequencerRPC, logger); err != nil {
+			return nil, err
+		}
+	}
 	f, err := follower.New(reader, chain, chainConfig, fc, logger)
 	if err != nil {
 		return nil, err
