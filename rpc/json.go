@@ -485,12 +485,14 @@ func (m *messageWriter) Write(p []byte) (int, error) {
 	return m.w.Write(p)
 }
 
-// open takes the write lock, which Close releases, and arms the message's one deadline.
+// open takes the write lock, which Close releases, and arms the message's one deadline
+// before the message opens, so a transport without a socket can put it on the message.
 func (m *messageWriter) open() error {
 	m.c.encMu.Lock()
-	w, err := m.c.openMessage(m.ctx)
+	err := m.c.conn.SetWriteDeadline(m.c.writeDeadline(m.ctx))
+	var w io.WriteCloser
 	if err == nil {
-		err = m.c.conn.SetWriteDeadline(m.c.writeDeadline(m.ctx))
+		w, err = m.c.openMessage(m.ctx)
 	}
 	if err != nil {
 		m.c.encMu.Unlock()

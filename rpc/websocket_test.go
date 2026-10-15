@@ -1148,3 +1148,48 @@ func TestWebsocketLargeAnswerStreamsInFrames(t *testing.T) {
 	require.Equal(t, want.Bytes(), data)
 	require.Less(t, lw.largest.Load(), int64(messageBufferCap+2*jsonstream.FlushThreshold), "the message reached the socket in one write")
 }
+
+// A codec without a socket of its own (NewWebsocketCodec) still bounds a streamed message by
+// the codec's write timeout, so a peer that never reads cannot hold it open.
+func TestWebsocketStreamedAnswerWithoutSocketKeepsWriteTimeout(t *testing.T) {
+	t.Parallel()
+
+	codecs := make(chan ServerCodec, 1)
+	httpsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		wc := NewWebsocketCodec(conn, r.Host, r.Header, r.RemoteAddr)
+		defer wc.Close()
+		codecs <- wc
+		for {
+			if _, _, err := conn.Read(context.Background()); err != nil {
+				return
+			}
+		}
+	}))
+	defer httpsrv.Close()
+
+	conn, resp, err := websocket.Dial(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), nil)
+	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+		t.Fatalf("can't dial: %v", err)
+	}
+	defer func() { _ = conn.CloseNow() }()
+
+	wc := (<-codecs).(*websocketCodec)
+	wc.writeTimeout = 200 * time.Millisecond
+	done := make(chan error, 1)
+	go func() {
+		done <- wc.WriteStream(context.Background(), func(s *jsonstream.Stream) { _ = (&testService{}).StreamHexes(2_000_000, s) })
+	}()
+	select {
+	case err := <-done:
+		require.Error(t, err, "a peer that never reads must time the message out")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the streamed message outlived the write timeout")
+	}
+}

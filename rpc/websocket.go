@@ -389,22 +389,29 @@ func (a *wsConnAdapter) Close() error {
 	return a.conn.Close(websocket.StatusNormalClosure, "")
 }
 
-// openMessage starts one text message. Each write arms the socket deadline the codec set,
-// as encode does for a whole message, and a write that fails closes the connection.
-func (a *wsConnAdapter) openMessage(ctx context.Context) (io.WriteCloser, error) {
-	if a.netConn != nil {
-		ctx = context.Background()
+// openMessage starts one text message under the deadline the codec set: on the socket for
+// each write when there is one, as encode does, else on the message's context. A write that
+// fails closes the connection.
+func (a *wsConnAdapter) openMessage(context.Context) (io.WriteCloser, error) {
+	ctx, cancel := context.Background(), context.CancelFunc(func() {})
+	a.mu.Lock()
+	dl := a.deadline
+	a.mu.Unlock()
+	if a.netConn == nil && !dl.IsZero() {
+		ctx, cancel = context.WithDeadline(ctx, dl)
 	}
 	w, err := a.conn.Writer(ctx, websocket.MessageText)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
-	return &wsMessage{a: a, w: w}, nil
+	return &wsMessage{a: a, w: w, cancel: cancel}, nil
 }
 
 type wsMessage struct {
-	a *wsConnAdapter
-	w io.WriteCloser
+	a      *wsConnAdapter
+	w      io.WriteCloser
+	cancel context.CancelFunc
 }
 
 func (m *wsMessage) Write(p []byte) (int, error) {
@@ -412,6 +419,7 @@ func (m *wsMessage) Write(p []byte) (int, error) {
 }
 
 func (m *wsMessage) Close() error {
+	defer m.cancel()
 	_, err := m.a.withSocketDeadline(func() (int, error) { return 0, m.w.Close() })
 	return err
 }
