@@ -148,10 +148,10 @@ var (
 
 	TieringLookbackBlocksFlag = cli.Uint64Flag{
 		Name:  "tiering.lookback-blocks",
-		Usage: "Hot window in blocks below the head; state files fully below it are cold (216000..1296000, 0 = off)",
+		Usage: "Hot window in blocks below the head; state files fully below it are cold (>= 1000, 0 = off)",
 		Validator: func(n uint64) error {
-			if n != 0 && (n < 216_000 || n > 1_296_000) {
-				return fmt.Errorf("--tiering.lookback-blocks=%d: want 0 or 216000..1296000", n)
+			if n != 0 && n < 1_000 {
+				return fmt.Errorf("--tiering.lookback-blocks=%d: want 0 or >= 1000", n)
 			}
 			return nil
 		},
