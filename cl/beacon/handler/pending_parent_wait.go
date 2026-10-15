@@ -112,11 +112,11 @@ func (a *ApiHandler) awaitPendingParentPayload(
 	targetSlot uint64,
 	stateVersion clparams.StateVersion,
 ) error {
-	if stateVersion.Before(clparams.GloasVersion) || !a.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(targetSlot) {
+	if stateVersion.Before(clparams.GloasVersion) {
 		return nil
 	}
 	parked, err := a.parentEnvelopeParked(baseState, baseBlockRoot, targetSlot)
-	if err != nil || !parked {
+	if err != nil || !parked || !a.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(targetSlot) {
 		return err
 	}
 	if baseState.LatestBlockHeader().Slot+1 == targetSlot && a.forkchoiceStore.PayloadVotesRuleOutFull(baseBlockRoot) {
