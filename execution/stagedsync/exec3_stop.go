@@ -1,5 +1,10 @@
 package stagedsync
 
+import (
+	"context"
+	"fmt"
+)
+
 // A round the CALLER stopped is not a round that failed.
 //
 // The block builder runs pre-execution in ROUNDS, each one a batch of transactions fed into the block it
@@ -66,3 +71,20 @@ func (be *blockExecutor) cutIfStopped(pe *parallelExecutor) bool {
 	be.cut = true
 	return true
 }
+
+// nothingInFlight reports that no block this executor holds has a transaction out with a worker, so no
+// result is coming and nothing will drive the cut.
+func (pe *parallelExecutor) nothingInFlight() bool {
+	pe.RLock()
+	defer pe.RUnlock()
+	for _, be := range pe.blockExecutors {
+		if be.execTasks.inProgressCount() > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// errRoundStopped ends the exec loop for a round the caller stopped before it executed anything. It is a
+// cancellation, not a failure: the caller named the reason and reports it.
+var errRoundStopped = fmt.Errorf("pre-exec round stopped with nothing executed: %w", context.Canceled)

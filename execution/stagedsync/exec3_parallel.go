@@ -988,6 +988,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	applyTx := pe.applyTx
 	pe.RUnlock()
 
+	// Looked at ONCE. A stop that arrives while transactions are out is handled by their results, which
+	// drive the cut; a stop that arrives before any went out has no result coming and would otherwise sit
+	// here until the caller gave up on it. Re-arming would spin, since the channel stays closed.
+	roundStop := pe.roundStop
+
 	for {
 		err := func() error {
 			pe.Lock()
@@ -1030,6 +1035,16 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		}
 
 		select {
+		case <-roundStop:
+			roundStop = nil
+			// Stopped with nothing out: there is no prefix to keep and no result to come. A block the
+			// clock ran out on seals EMPTY — the first transaction is not exempt, because exempting it
+			// let one slow transaction hold the seal past the slot — so stop here rather than hold the
+			// seal behind a round that is going to keep nothing.
+			if pe.nothingInFlight() {
+				return errRoundStopped
+			}
+			continue
 		case exec := <-pendingCh:
 			if err := pe.processRequest(ctx, exec); err != nil {
 				return err
