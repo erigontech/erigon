@@ -17,6 +17,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -105,7 +106,12 @@ func startFollower(ctx context.Context, n *node.ErigonNode, cfg *eez.Config, api
 	blockReader, _ := backend.BlockIO()
 	chain := deriver.NewExecChain(backend.ExecutionModule(), db, blockReader,
 		receipts.NewGenerator(dirs, blockReader, engine, nil, time.Minute), chainConfig)
-	reader, err := l1.DialRPC(ctx, cfg.L1RPC, logger)
+	var reader l1.ChainReader
+	if cfg.L1KV != "" {
+		reader, err = l1.DialRemote(ctx, cfg.L1KV, dirs, logger)
+	} else {
+		reader, err = l1.DialRPC(ctx, cfg.L1RPC, logger)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -126,6 +132,6 @@ func startFollower(ctx context.Context, n *node.ErigonNode, cfg *eez.Config, api
 		go n.Close()
 	})
 	n.RegisterLifecycle(svc)
-	logger.Info("[eez] follower mode", "datadir", dirs.DataDir, "l1", cfg.L1RPC)
+	logger.Info("[eez] follower mode", "datadir", dirs.DataDir, "l1", cmp.Or(cfg.L1RPC, cfg.L1KV))
 	return svc, nil
 }

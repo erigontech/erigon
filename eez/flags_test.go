@@ -74,6 +74,10 @@ func TestConfigFromCLI(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, cfg, "EEZ off")
 
+	cfg, err = parse(t, "--eez.enabled", "--eez.follower", "--eez.l1.kv=127.0.0.1:9090")
+	require.NoError(t, err)
+	require.Equal(t, "127.0.0.1:9090", cfg.L1KV)
+
 	cfg, err = parse(t, "--eez.enabled", "--eez.follower", "--eez.l1.rpc=http://l1:8545", "--eez.l1.poll=1s",
 		"--eez.registry=0x5fbdb2315678afecb367f032d93f642f64180aa3", "--eez.rollupid=1", "--eez.l1.blocktime=12s", "--eez.l2.blocktime=2s")
 	require.NoError(t, err)
@@ -91,6 +95,7 @@ func TestConfigFromCLI(t *testing.T) {
 	for _, args := range [][]string{
 		{"--eez.follower"},
 		{"--eez.enabled", "--eez.follower"},
+		{"--eez.enabled", "--eez.follower", "--eez.l1.rpc=http://l1:8545", "--eez.l1.kv=l1:9090"},
 		{"--eez.enabled", "--eez.registry=0x12"},
 		{"--eez.enabled", "--eez.l2.blocktime=1500ms"},
 		{"--eez.enabled", "--eez.l1.reorgdepth=0"},

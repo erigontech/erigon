@@ -221,10 +221,11 @@ func (w *Watcher) PollFinalized(ctx context.Context) ([]Event, error) {
 	return []Event{Finalized{Head: *f}}, nil
 }
 
-// Run polls every interval and sends the events to out, reading finality
-// every finalityEvery polls, until ctx ends or a terminal error occurs.
-// Transient read errors are retried on the next poll.
-func (w *Watcher) Run(ctx context.Context, interval time.Duration, finalityEvery int, out chan<- Event) error {
+// Run polls every interval, and whenever heads delivers, and sends the
+// events to out, reading finality every finalityEvery polls, until ctx ends
+// or a terminal error occurs. Transient read errors are retried on the next
+// poll. heads may be nil.
+func (w *Watcher) Run(ctx context.Context, interval time.Duration, finalityEvery int, heads <-chan struct{}, out chan<- Event) error {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for n := 0; ; n++ {
@@ -246,6 +247,10 @@ func (w *Watcher) Run(ctx context.Context, interval time.Duration, finalityEvery
 		}
 		select {
 		case <-ticker.C:
+		case _, ok := <-heads:
+			if !ok {
+				heads = nil
+			}
 		case <-ctx.Done():
 			return ctx.Err()
 		}

@@ -194,7 +194,14 @@ func (f *Follower) Run(ctx context.Context) error {
 	defer cancel()
 	events := make(chan l1.Event, 64)
 	watched := make(chan error, 1)
-	go func() { watched <- f.watcher.Run(ctx, f.cfg.Poll, f.cfg.FinalityEvery, events) }()
+	var heads <-chan struct{}
+	if n, ok := f.reader.(l1.HeadNotifier); ok {
+		var err error
+		if heads, err = n.Heads(ctx); err != nil {
+			f.logger.Warn("[eez] L1 head notifications unavailable, polling", "err", err)
+		}
+	}
+	go func() { watched <- f.watcher.Run(ctx, f.cfg.Poll, f.cfg.FinalityEvery, heads, events) }()
 
 	var unsafeTick <-chan time.Time
 	if f.overlay != nil {

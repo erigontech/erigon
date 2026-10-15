@@ -42,6 +42,10 @@ var (
 		Name:  "eez.l1.rpc",
 		Usage: "JSON-RPC endpoint of the L1 node the follower reads",
 	}
+	L1KVFlag = cli.StringFlag{
+		Name:  "eez.l1.kv",
+		Usage: "Private API address (host:port) of the Erigon L1 node the follower reads",
+	}
 	L1PollFlag = cli.DurationFlag{
 		Name:  "eez.l1.poll",
 		Usage: "Interval between reads of the L1 head",
@@ -92,7 +96,7 @@ var (
 
 // Flags lists the EEZ command-line flags.
 var Flags = []cli.Flag{
-	&EnabledFlag, &FollowerFlag, &L1RPCFlag, &L1PollFlag, &L1LogChunkFlag, &L1ReorgDepthFlag, &SequencerRPCFlag,
+	&EnabledFlag, &FollowerFlag, &L1RPCFlag, &L1KVFlag, &L1PollFlag, &L1LogChunkFlag, &L1ReorgDepthFlag, &SequencerRPCFlag,
 	&L1ChainIDFlag, &RegistryFlag, &RegistryDeployBlockFlag, &RollupIDFlag, &L1BlockTimeFlag, &L2BlockTimeFlag,
 }
 
@@ -100,6 +104,7 @@ var Flags = []cli.Flag{
 type Config struct {
 	Follower     bool
 	L1RPC        string
+	L1KV         string
 	L1Poll       time.Duration
 	L1LogChunk   uint64
 	L1ReorgDepth int
@@ -131,6 +136,7 @@ func ConfigFromCLI(cmd *cli.Command) (*Config, error) {
 	c := &Config{
 		Follower:     cmd.Bool(FollowerFlag.Name),
 		L1RPC:        cmd.String(L1RPCFlag.Name),
+		L1KV:         cmd.String(L1KVFlag.Name),
 		L1Poll:       cmd.Duration(L1PollFlag.Name),
 		L1LogChunk:   cmd.Uint64(L1LogChunkFlag.Name),
 		L1ReorgDepth: int(cmd.Int(L1ReorgDepthFlag.Name)),
@@ -168,8 +174,8 @@ func ConfigFromCLI(cmd *cli.Command) (*Config, error) {
 		s := uint64(v / time.Second)
 		*d.out = &s
 	}
-	if c.Follower && c.L1RPC == "" {
-		return nil, fmt.Errorf("%w: --%s needs an L1 source, --%s", ErrConfig, FollowerFlag.Name, L1RPCFlag.Name)
+	if c.Follower && (c.L1RPC == "") == (c.L1KV == "") {
+		return nil, fmt.Errorf("%w: --%s needs one L1 source, --%s or --%s", ErrConfig, FollowerFlag.Name, L1RPCFlag.Name, L1KVFlag.Name)
 	}
 	if c.L1Poll <= 0 || c.L1LogChunk == 0 || c.L1ReorgDepth <= 0 {
 		return nil, fmt.Errorf("%w: --%s, --%s and --%s must be positive", ErrConfig, L1PollFlag.Name, L1LogChunkFlag.Name, L1ReorgDepthFlag.Name)
