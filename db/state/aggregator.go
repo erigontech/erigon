@@ -371,6 +371,9 @@ func (a *Aggregator) ReloadErigonDBSettings(noDownloader bool) error {
 	a.stepSize.Store(settings.StepSize)
 	a.stepsInFrozenFile.Store(settings.StepsInFrozenFile)
 	a.applyReferencesInCommitmentBranches(settings.RefsInCommitmentBranches())
+	if err := a.checkCommitmentTiering(); err != nil {
+		return err
+	}
 
 	if a.configured && (settings.StepSize != oldStepSize || settings.StepsInFrozenFile != oldStepsInFrozenFile) {
 		a.logger.Info("erigondb stepSize changed, propagating to domains/IIs",
@@ -590,7 +593,24 @@ func (a *Aggregator) OpenFolder(db kv.RoDB) error {
 	}(); err != nil {
 		return err
 	}
+	if err := a.checkCommitmentTiering(); err != nil {
+		return err
+	}
 	return a.checkFilesDBGap(db)
+}
+
+// checkCommitmentTiering refuses a commitment merge limit while commitment branches may reference
+// account/storage files: referencing ties the merge ranges of the three domains together.
+func (a *Aggregator) checkCommitmentTiering() error {
+	if a.commitmentHotMaxMergeSteps == 0 {
+		return nil
+	}
+	at := a.BeginFilesRo()
+	defer at.Close()
+	if a.referencesInCommitmentBranches() || at.commitmentVisibleFilesReferenced() {
+		return errors.New("tiering commitment merge limit needs commitment references off (references_in_commitment_branches=false, no referenced commitment files)")
+	}
+	return nil
 }
 
 // checkFilesDBGap refuses to open a datadir where the DB was pruned past where the

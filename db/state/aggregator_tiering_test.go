@@ -21,7 +21,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/version"
 )
 
 func TestCommitmentHotMaxMergeSteps(t *testing.T) {
@@ -57,4 +59,42 @@ func TestCommitmentHotMaxMergeSteps(t *testing.T) {
 		require.Equal(t, [2]uint64{0, 8}, span(r.domain[kv.StorageDomain].values), "hot=%d", tc.hotSteps)
 		require.Equal(t, tc.commitment, span(r.domain[kv.CommitmentDomain].values), "hot=%d", tc.hotSteps)
 	}
+}
+
+func TestCommitmentHotMaxMergeStepsRefusesReferencesFlag(t *testing.T) {
+	for _, hotSteps := range []uint64{0, 1} {
+		db, agg := testDbAndAggregatorv3(t, 10)
+		agg.commitmentHotMaxMergeSteps = hotSteps
+		agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
+		err := agg.OpenFolder(db)
+		if hotSteps == 0 {
+			require.NoError(t, err)
+		} else {
+			require.ErrorContains(t, err, "commitment references")
+		}
+	}
+}
+
+func TestCommitmentHotMaxMergeStepsRefusesReferencedFiles(t *testing.T) {
+	db, agg := testDbAndAggregatorv3(t, 10)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 2}})
+	require.NoError(t, agg.OpenFolder(db))
+	agg.d[kv.CommitmentDomain].dirtyFiles.Scan(func(it *FilesItem) bool {
+		it.version = version.V2_1
+		return true
+	})
+	require.NoError(t, agg.checkCommitmentTiering())
+	agg.commitmentHotMaxMergeSteps = 1
+	require.ErrorContains(t, agg.checkCommitmentTiering(), "commitment references")
+}
+
+func TestCommitmentHotMaxMergeStepsRefusesReloadToReferences(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	writeRefsToml(t, dirs, true)
+	agg := NewTest(dirs).MustOpen(t.Context())
+	t.Cleanup(agg.Close)
+	require.NoError(t, agg.ReloadErigonDBSettings(true))
+	agg.commitmentHotMaxMergeSteps = 1
+	require.ErrorContains(t, agg.ReloadErigonDBSettings(true), "commitment references")
 }
