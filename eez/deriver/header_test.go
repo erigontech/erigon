@@ -17,6 +17,7 @@ package deriver
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -47,7 +48,8 @@ func witnessOf(w *testfixtures.Witness) *stateless.Witness {
 
 // TestDeriveWindows is T-DRV-1: the blocks of a recorded settlement, derived
 // from its DA payload and executed on their recorded witnesses, hash to the
-// recorded blocks. Window 468 rebuilds a Sync block with system transactions.
+// recorded blocks. Window 468 rebuilds a Sync block with system transactions
+// whose outbound calls pass the outbound gate.
 func TestDeriveWindows(t *testing.T) {
 	systemtx.Register()
 	for _, name := range []string{"captured-devnet-window-84", "captured-devnet-anchor-402", "captured-devnet-window-468"} {
@@ -87,6 +89,8 @@ func deriveWindow(t *testing.T, name string) {
 	require.NoError(t, err)
 	require.Equal(t, pre, parent.Hash())
 
+	var outbound []protocol.ExecutionEntry
+	var logs []*types.Log
 	for i, recorded := range w.Blocks {
 		encoded := p.BlockTxs(i)
 		if i == len(w.Blocks)-1 && len(p.Actions) > 0 {
@@ -96,7 +100,7 @@ func deriveWindow(t *testing.T, name string) {
 			nonce := block.Transactions()[0].GetNonce()
 			sb, err := BuildSyncBlock(p, appliedAll(b), protocol.SyncTxContext{ChainID: cfg.ChainID.Uint64(), RollupID: l2.RollupID}, nonce)
 			require.NoError(t, err)
-			encoded = sb.Txs
+			encoded, outbound = sb.Txs, sb.Outbound
 		}
 		txs, err := DecodeTxs(encoded)
 		require.NoError(t, err)
@@ -108,6 +112,9 @@ func deriveWindow(t *testing.T, name string) {
 		h.Root, h.GasUsed = res.StateRoot, res.GasUsed
 		block := types.NewBlock(h, txs, nil, res.Receipts, []*types.Withdrawal{}, nil)
 		require.Equal(t, recorded.Hash, block.Hash(), "block %d", recorded.Number)
+		for _, r := range res.Receipts {
+			logs = append(logs, r.Logs...)
+		}
 		_, err = stateless.Verify(&cfg, engine, block, witness)
 		require.NoError(t, err, "block %d", recorded.Number)
 		parent = block.Header()
@@ -115,4 +122,16 @@ func deriveWindow(t *testing.T, name string) {
 	post, err := w.OracleHash("window_post_block_hash")
 	require.NoError(t, err)
 	require.Equal(t, post, parent.Hash())
+
+	// Each outbound entry is a call the Sync block made; a redirected one is
+	// not.
+	require.NoError(t, VerifyOutbound(outbound, logs, l2.RollupID))
+	if len(outbound) > 0 {
+		redirected := slices.Clone(outbound)
+		redirected[0].L2ToL1Calls = slices.Clone(redirected[0].L2ToL1Calls)
+		redirected[0].L2ToL1Calls[0].TargetAddress = common.Address{1}
+		require.ErrorIs(t, VerifyOutbound(redirected, logs, l2.RollupID), ErrOutboundUnauthorized)
+		require.ErrorIs(t, VerifyOutbound(append(outbound, outbound[0]), logs, l2.RollupID), ErrOutboundUnauthorized, "one call settles one entry")
+		require.ErrorIs(t, VerifyOutbound(outbound, logs, l2.RollupID+1), ErrOutboundUnauthorized)
+	}
 }
