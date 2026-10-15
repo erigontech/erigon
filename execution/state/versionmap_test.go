@@ -900,7 +900,7 @@ func TestGetCodeAfterDestructThenRevivalIsEmpty(t *testing.T) {
 	writeFor(vm, addr, IncarnationPath, accounts.NilKey, Version{TxIndex: 2}, uint64(2), true)
 
 	reader := newAccountStateReader(addr)
-	ibs := NewWithVersionMap(NewVersionedStateReader(3, ReadSet{}, vm, reader, false), vm)
+	ibs := NewWithVersionMap(NewVersionedStateReader(3, ReadSet{}, vm, reader), vm)
 	ibs.SetTxContext(0, 3)
 	ibs.SetVersion(0)
 
@@ -1204,12 +1204,18 @@ func TestGetVersionedAccount_NoSynthesisFromEstimate(t *testing.T) {
 	assert.Nil(t, acc)
 }
 
-// A destroyed account (SelfDestruct floor true) must not be synthesized.
+// A burn (SELFDESTRUCT with preserveBalance=false) must not be synthesized: the
+// balance write is stamped ValueDeleted, so even a non-zero pre-destruct balance
+// reads as absent — the reader keys on the stamp, not the cell value.
 func TestGetVersionedAccount_NoSynthesisAfterSelfDestruct(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	addr := accounts.InternAddress([20]byte{0xba, 0x05})
-	mvhm.WriteBalance(addr, Version{TxIndex: 2}, *uint256.NewInt(500), true)
-	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 3}, true, true)
+	runRevivalTx(t, mvhm, 2, func(ibs *IntraBlockState) {
+		require.NoError(t, ibs.CreateAccount(addr, true))
+		require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(500), tracing.BalanceChangeTransfer))
+		_, err := ibs.Selfdestruct(addr, false)
+		require.NoError(t, err)
+	})
 	ibs := NewWithVersionMap(&minimalStateReader{}, mvhm)
 	defer ibs.Release(false)
 	ibs.txIndex = 5
@@ -1266,7 +1272,6 @@ func TestCodeHashReadAfterSelfDestruct(t *testing.T) {
 			ibs := NewWithVersionMap(&minimalStateReader{}, vm)
 			t.Cleanup(ibs.Close)
 			ibs.SetTxContext(1, 2)
-			ibs.eip8246 = tc.eip8246
 			codeHash, err := ibs.GetCodeHash(addr)
 			require.NoError(t, err)
 			require.Equal(t, accounts.EmptyCodeHash, codeHash)

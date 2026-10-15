@@ -224,10 +224,6 @@ type IntraBlockState struct {
 	noMaterialize       bool
 	noConflictDetection bool
 
-	// eip8246 pins whether SELFDESTRUCT preserves the account (EIP-8246 removes
-	// the balance burn). Set per-tx from the block rules in Prepare.
-	eip8246 bool
-
 	revisions revisions
 
 	lastCode accounts.Code // last code stored by SetCode
@@ -463,9 +459,8 @@ func (ibs *IntraBlockState) resetForPool() bool {
 	// The caller reads this call's output after the ibs goes back to the pool.
 	ibs.txOutput = nil
 	ibs.stateReader, ibs.codeAccess = nil, nil
-	// Reset keeps the tx context and fork flags; New starts them at zero.
+	// Reset keeps the tx context; New starts it at zero.
 	ibs.blockNum, ibs.version = 0, 0
-	ibs.eip8246 = false
 	return true
 }
 
@@ -916,11 +911,12 @@ func (ibs *IntraBlockState) GetCodeHash(addr accounts.Address) (accounts.CodeHas
 			return accounts.InternCodeHash(crypto.Keccak256Hash(cw.Val.Bytes)), nil
 		}
 	}
-	if ibs.eip8246 && hash == accounts.NilCodeHash {
-		// A prior tx's EIP-8246 SELFDESTRUCT leaves an existing empty-code
-		// account, but its CodeHashPath is dropped from the version map, so
-		// recover the codehash from the reconstructed account (EmptyCodeHash),
-		// distinguishing it from a genuinely absent account (NilCodeHash).
+	if hash == accounts.NilCodeHash {
+		// A prior tx's balance-preserving SELFDESTRUCT leaves an empty-code account,
+		// but its CodeHashPath is dropped from the version map, so recover the
+		// codehash from the reconstructed account (EmptyCodeHash), distinguishing it
+		// from a genuinely absent account (NilCodeHash). Branch-agnostic: a burned
+		// account reconstructs as nil here and falls through to NilCodeHash.
 		acc, _, _, err := ibs.getVersionedAccount(addr, false)
 		if err != nil {
 			return accounts.NilCodeHash, err
@@ -1312,12 +1308,13 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 		return nil, UnknownSource, UnknownVersion, err
 	}
 
-	// EIP-8246: a prior tx's SELFDESTRUCT preserves the account (balance kept,
-	// code/nonce cleared) rather than destroying it. AddressPath reads zero
-	// under SD, so reconstruct the surviving account from the version map here,
-	// covering both committed and in-block-created accounts — unless a later tx
-	// re-created it, in which case fall through to the normal read.
-	if ibs.eip8246 && readAccount == nil {
+	// A prior tx's balance-preserving SELFDESTRUCT (EIP-8246) keeps the account
+	// alive (balance kept, code/nonce cleared); AddressPath reads zero under SD, so
+	// reconstruct the surviving account from the version map here, covering both
+	// committed and in-block-created accounts — unless a later tx re-created it, in
+	// which case fall through to the normal read. Branch-agnostic: a burn stamps the
+	// balance ValueDeleted, so the reconstruction yields nil and this falls through.
+	if readAccount == nil {
 		if destructed, sdRes, ok := ibs.versionMap.ReadSelfDestruct(addr, ibs.txIndex); ok && sdRes.resolved() && destructed {
 			destructTxIndex := sdRes.DepIdx()
 			// Only a genuine re-creation (a later CreateAccount writing AddressPath)
@@ -1332,7 +1329,9 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 				if err != nil {
 					return nil, StorageRead, UnknownVersion, err
 				}
-				return preserved, MapRead, Version{TxIndex: destructTxIndex}, nil
+				if preserved != nil {
+					return preserved, MapRead, Version{TxIndex: destructTxIndex}, nil
+				}
 			}
 		}
 	}
@@ -1826,9 +1825,11 @@ func (ibs *IntraBlockState) Selfdestruct(addr accounts.Address, preserveBalance 
 
 	ibs.recordWriteIncarnation(addr, stateObject.data.Incarnation)
 	ibs.recordWriteSelfDestruct(addr, stateObject.selfdestructed)
-	if !preserveBalance {
+	if preserveBalance && !prevBalance.IsZero() {
+		ibs.recordWriteBalance(addr, prevBalance)
+	} else {
 		stateObject.data.Balance.Clear()
-		ibs.recordWriteBalance(addr, uint256.Int{})
+		ibs.recordWriteBalanceDeleted(addr)
 	}
 
 	// Deliberately no StoragePath=0 writes for the dirty slots: the account
@@ -1891,9 +1892,17 @@ func (ibs *IntraBlockState) selfdestructVersioned(addr accounts.Address, preserv
 	ibs.recordWriteSelfDestruct(addr, true)
 	// A later revival or re-creation starts from incarnation 0, as in serial.
 	ibs.recordWriteIncarnation(addr, 0)
-	if !preserveBalance {
-		// Pre-EIP-8246: SELFDESTRUCT burns the balance and the account is deleted.
-		ibs.recordWriteBalance(addr, uint256.Int{})
+	// Stamp the balance with the branch-agnostic delete/preserve instruction. A
+	// balance-preserving destruct (EIP-8246) keeps the account alive — even at zero
+	// balance, so a later same-tx credit still lands on an existing account and
+	// end-of-tx EIP-161 removes it only if it stays empty. Every other destruct
+	// deletes the leaf (ValueDeleted → nil). Derived from preserveBalance, not the
+	// value, so a burn that happens to leave a non-zero balance (e.g. a pre-Cancun
+	// self-beneficiary) still reads deleted.
+	if preserveBalance {
+		ibs.recordWriteBalance(addr, prevBalance)
+	} else {
+		ibs.recordWriteBalanceDeleted(addr)
 	}
 	// Nonce and code hash are not written here — extraction drops them for a
 	// self-destructed account, and explicit zero cells would make a same-tx
@@ -2863,7 +2872,6 @@ func (ibs *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(sender.Handle()) || !dst.IsNil() && dbg.TraceAccount(dst.Handle())) {
 		fmt.Printf("%d (%d.%d) ibs.Prepare: sender: %x, coinbase: %x, dest: %x, %x, %v, %v\n", ibs.blockNum, ibs.txIndex, ibs.version, sender, coinbase, dst, precompiles, list, rules)
 	}
-	ibs.eip8246 = rules.IsAmsterdam
 	ibs.txOutputFree = true
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
@@ -3042,6 +3050,28 @@ func (ibs *IntraBlockState) recordWriteBalance(addr accounts.Address, val uint25
 	vw := ibs.versionedWrites.newVWBalance()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: BalancePath, Version: ibs.Version()}
 	vw.Val = val
+	ibs.versionedWrites.SetBalance(addr, vw)
+	traceWrite(ibs, vw)
+}
+
+// recordWriteBalanceDeleted records a balance write that deletes the account's
+// leaf (ValueDeleted ⇒ nil on the projection, absent to the reader). Used by the
+// self-destruct burn so the delete decision rides the write, not the balance value.
+func (ibs *IntraBlockState) recordWriteBalanceDeleted(addr accounts.Address) {
+	ibs.MarkAddressAccess(addr, true)
+	if ibs.versionMap == nil {
+		return
+	}
+	if vw, ok := ibs.versionedWrites.GetBalance(addr); ok {
+		vw.Version = ibs.Version()
+		vw.Val = uint256.Int{}
+		vw.valStatus = ValueDeleted
+		traceWrite(ibs, vw)
+		return
+	}
+	vw := ibs.versionedWrites.newVWBalance()
+	vw.WriteHeader = WriteHeader{Address: addr, Path: BalancePath, Version: ibs.Version(), valStatus: ValueDeleted}
+	vw.Val = uint256.Int{}
 	ibs.versionedWrites.SetBalance(addr, vw)
 	traceWrite(ibs, vw)
 }

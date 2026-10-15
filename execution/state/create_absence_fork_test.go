@@ -28,7 +28,6 @@ func TestCreateOverAbsenceConsumedBeforeDestructFlush(t *testing.T) {
 			ibs := NewWithVersionMap(&emptyReader{}, vm)
 			ibs.SetTxContext(0, 1)
 			ibs.SetVersion(0)
-			ibs.eip8246 = true
 
 			addr := getAddress(8246)
 
