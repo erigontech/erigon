@@ -64,6 +64,35 @@ func TestGloasAnchorStartsWithoutPtcVotes(t *testing.T) {
 	}
 }
 
+func TestNewForkChoiceStoreAnchorCheckpointEpoch(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	for _, tc := range []struct {
+		name       string
+		slot       uint64
+		headerSlot uint64
+		wantEpoch  uint64
+	}{
+		{name: "advanced to epoch start", slot: 96, headerSlot: 95, wantEpoch: 3},
+		{name: "block post-state", slot: 95, headerSlot: 95, wantEpoch: 3},
+		{name: "advanced mid-epoch", slot: 95, headerSlot: 94, wantEpoch: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			anchor := state.New(&cfg)
+			require.NoError(t, anchor.SetSlot(tc.slot))
+			anchor.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: tc.headerSlot})
+			anchorRoot, err := anchor.BlockRoot()
+			require.NoError(t, err)
+
+			store, err := NewForkChoiceStore(nil, anchor, nil, pool.OperationsPool{}, nil, nil, nil, nil, public_keys_registry.NewInMemoryPublicKeysRegistry(), nil, false, nil)
+			require.NoError(t, err)
+
+			want := solid.Checkpoint{Epoch: tc.wantEpoch, Root: anchorRoot}
+			require.Equal(t, want, store.FinalizedCheckpoint())
+			require.Equal(t, want, store.JustifiedCheckpoint())
+		})
+	}
+}
+
 func (g *embeddedPtcVoteForkGraph) AddChainSegment(block *cltypes.SignedBeaconBlock, _ bool) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
 	root, err := block.Block.HashSSZ()
 	if err != nil {

@@ -284,9 +284,16 @@ func NewForkChoiceStore(
 		return nil, err
 	}
 
+	slot := anchorState.Slot()
+	anchorEpoch := state.Epoch(anchorState.BeaconState)
+	if slot%anchorState.BeaconConfig().SlotsPerEpoch != 0 && anchorState.LatestBlockHeader().Slot == slot {
+		// A checkpoint block that is not at an epoch start is also the checkpoint at the next
+		// epoch start. A state advanced past its block keeps the epoch of its own slot.
+		anchorEpoch++
+	}
 	anchorCheckpoint := solid.Checkpoint{
 		Root:  anchorRoot,
-		Epoch: state.Epoch(anchorState.BeaconState),
+		Epoch: anchorEpoch,
 	}
 
 	verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](65536)
