@@ -18,6 +18,7 @@ package das
 
 import (
 	"context"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -48,39 +49,62 @@ func TestDeferredColumnSyncDue(t *testing.T) {
 	require.True(t, deferredColumnSyncDue(slotStart.Add(time.Minute), slotStart, slotStart, delay))
 }
 
+// fuluColumnBlock is a Fulu block with one blob commitment at slot.
+func fuluColumnBlock(t *testing.T, cfg *clparams.BeaconChainConfig, slot uint64) (*cltypes.SignedBeaconBlock, common.Hash) {
+	t.Helper()
+	block := cltypes.NewSignedBeaconBlock(cfg, clparams.FuluVersion)
+	block.Block.Slot = slot
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	return block, common.Hash(root)
+}
+
+// queuedRoot queues a root that is due as soon as it is not in a round and past its backoff.
+func queuedRoot(t *testing.T) (*deferredColumnSyncs, common.Hash) {
+	cfg := clparams.MainnetBeaconConfig
+	block, root := fuluColumnBlock(t, &cfg, 1)
+	queue := &deferredColumnSyncs{}
+	queue.add(root, block, time.Time{})
+	return queue, root
+}
+
+func isDue(queue *deferredColumnSyncs, root common.Hash, now time.Time) bool {
+	roots, _ := queue.due(now, 0, func(uint64) time.Time { return time.Time{} }, func(cltypes.ColumnSyncableSignedBlock) time.Duration { return 0 })
+	return slices.Contains(roots, root)
+}
+
 // The backoff grows by a slot per failed round and stays at an epoch once it gets there; the
 // queue reports that point, and the worker then gives up only a root that is no longer canonical.
 func TestDeferredColumnSyncQueueCapsTheBackoffAtAnEpoch(t *testing.T) {
 	const slotsPerEpoch = 8
-	queue := newDeferredColumnSyncQueue()
-	root := common.Hash{1}
+	queue, root := queuedRoot(t)
 	now := time.Unix(1000, 0)
 	slot := 12 * time.Second
 
-	require.True(t, queue.ready(root, now))
+	require.True(t, isDue(queue, root, now))
 	queue.start([]common.Hash{root})
-	require.False(t, queue.ready(root, now.Add(time.Hour)), "a root in a round is not picked again")
+	require.False(t, isDue(queue, root, now.Add(time.Hour)), "a root in a round is not picked again")
 
 	for attempt := 1; attempt <= slotsPerEpoch+2; attempt++ {
 		require.Equal(t, attempt >= slotsPerEpoch, queue.failed(root, now, slot, slotsPerEpoch), "attempt %d", attempt)
 		wait := slot * time.Duration(min(attempt, slotsPerEpoch))
-		require.False(t, queue.ready(root, now.Add(wait-time.Millisecond)), "attempt %d", attempt)
-		require.True(t, queue.ready(root, now.Add(wait)), "attempt %d", attempt)
+		require.False(t, isDue(queue, root, now.Add(wait-time.Millisecond)), "attempt %d", attempt)
+		require.True(t, isDue(queue, root, now.Add(wait)), "attempt %d", attempt)
 	}
 }
 
 // A storage error says nothing about peers serving the root, so it waits a slot without
 // counting as an attempt.
 func TestDeferredColumnSyncQueueRetriesAStorageErrorWithoutAnAttempt(t *testing.T) {
-	queue := newDeferredColumnSyncQueue()
-	root := common.Hash{1}
+	queue, root := queuedRoot(t)
 	now := time.Unix(1000, 0)
 	slot := 12 * time.Second
-	require.True(t, queue.ready(root, now))
+	require.True(t, isDue(queue, root, now))
 	for range 3 {
 		queue.retryLater(root, now, slot)
-		require.False(t, queue.ready(root, now.Add(slot-time.Millisecond)))
-		require.True(t, queue.ready(root, now.Add(slot)))
+		require.False(t, isDue(queue, root, now.Add(slot-time.Millisecond)))
+		require.True(t, isDue(queue, root, now.Add(slot)))
 	}
 	require.False(t, queue.failed(root, now, slot, 2), "storage errors did not count as attempts")
 }
@@ -107,30 +131,42 @@ func TestStillCanonicalReadsTheBeaconIndices(t *testing.T) {
 	require.True(t, d.stillCanonical(t.Context(), 5, other), "an index read error keeps the root")
 }
 
-// A storage error for a root dropped meanwhile must not bring the root back.
-func TestDeferredColumnSyncQueueRetryLaterAfterDoneLeavesNoEntry(t *testing.T) {
-	queue := newDeferredColumnSyncQueue()
-	root := common.Hash{1}
+// A storage error for a root dropped while in a round must not bring the root back.
+func TestDeferredColumnSyncQueueRetryLaterAfterForgetLeavesNoEntry(t *testing.T) {
+	queue, root := queuedRoot(t)
 	queue.start([]common.Hash{root})
-	queue.done(root)
+	queue.forget(root)
 
 	queue.retryLater(root, time.Unix(1000, 0), 12*time.Second)
 
 	require.Empty(t, queue.entries)
 }
 
-// A round that ends after its root was dropped must not bring the root back.
-func TestDeferredColumnSyncQueueFailedAfterDoneLeavesNoEntry(t *testing.T) {
-	queue := newDeferredColumnSyncQueue()
-	root := common.Hash{1}
+// A round that ends after its root was dropped must not bring the root back, and the due scan
+// does not either.
+func TestDeferredColumnSyncQueueFailedAfterForgetLeavesNoEntry(t *testing.T) {
+	queue, root := queuedRoot(t)
 	now := time.Unix(1000, 0)
 	queue.start([]common.Hash{root})
-	queue.done(root)
+	queue.forget(root)
 
 	queue.failed(root, now, 12*time.Second, 32)
 
+	require.False(t, isDue(queue, root, now))
 	require.Empty(t, queue.entries)
-	require.True(t, queue.ready(root, now))
+}
+
+// A custody node gives gossip half the time to the attestation deadline, which moves earlier
+// from Gloas; an archive node gives it a full slot.
+func TestDeferredColumnSyncDelay(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	fulu := cltypes.NewSignedBeaconBlock(&cfg, clparams.FuluVersion)
+	gloas := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	custody := &peerdas{beaconConfig: &cfg, caplinConfig: &clparams.CaplinConfig{}}
+	require.Equal(t, 2*time.Second, custody.deferredColumnSyncDelay(fulu))
+	require.Equal(t, 1500*time.Millisecond, custody.deferredColumnSyncDelay(gloas))
+	archive := &peerdas{beaconConfig: &cfg, caplinConfig: &clparams.CaplinConfig{ArchiveBlobs: true}}
+	require.Equal(t, 12*time.Second, archive.deferredColumnSyncDelay(gloas))
 }
 
 // Gossip gets the grace period from the later of the block's slot start and the moment the
@@ -160,14 +196,14 @@ func TestSyncColumnDataLaterRecordsTheEnqueueTime(t *testing.T) {
 	before := time.Now()
 	require.NoError(t, d.SyncColumnDataLater(block))
 	after := time.Now()
-	queued, ok := d.blocksToCheckSync.Load(common.Hash(root))
-	require.True(t, ok)
-	require.WithinRange(t, queued.(deferredColumnSync).queuedAt, before, after)
+	queued := d.blocksToCheckSync.entries[common.Hash(root)]
+	require.NotNil(t, queued)
+	queuedAt := queued.queuedAt
+	require.WithinRange(t, queuedAt, before, after)
 
 	// Queuing the root again keeps the first enqueue time.
 	require.NoError(t, d.SyncColumnDataLater(block))
-	requeued, _ := d.blocksToCheckSync.Load(common.Hash(root))
-	require.Equal(t, queued.(deferredColumnSync).queuedAt, requeued.(deferredColumnSync).queuedAt)
+	require.Equal(t, queuedAt, d.blocksToCheckSync.entries[common.Hash(root)].queuedAt)
 }
 
 func TestSyncColumnDataWorkerDropsRootsThatLeftTheServeRange(t *testing.T) {
@@ -189,8 +225,7 @@ func TestSyncColumnDataWorkerDropsRootsThatLeftTheServeRange(t *testing.T) {
 
 	go d.syncColumnDataWorker(t.Context())
 	require.Eventually(t, func() bool {
-		_, queued := d.blocksToCheckSync.Load(common.Hash(root))
-		return !queued
+		return !d.blocksToCheckSync.queued(common.Hash(root))
 	}, 5*time.Second, 10*time.Millisecond)
 }
 
@@ -223,16 +258,17 @@ func TestSyncColumnDataWorkerForgetsAnAvailableRoot(t *testing.T) {
 
 	go d.syncColumnDataWorker(t.Context())
 	require.Eventually(t, func() bool {
-		_, queued := d.blocksToCheckSync.Load(common.Hash(root))
-		return !queued
+		return !d.blocksToCheckSync.queued(common.Hash(root))
 	}, 5*time.Second, 10*time.Millisecond)
 }
 
 type peerlessSentinel struct {
 	sentinelproto.SentinelClient
+	calls atomic.Int32
 }
 
-func (peerlessSentinel) GetPeers(context.Context, *sentinelproto.EmptyMessage, ...grpc.CallOption) (*sentinelproto.PeerCount, error) {
+func (s *peerlessSentinel) GetPeers(context.Context, *sentinelproto.EmptyMessage, ...grpc.CallOption) (*sentinelproto.PeerCount, error) {
+	s.calls.Add(1)
 	return &sentinelproto.PeerCount{}, nil
 }
 
@@ -253,6 +289,7 @@ func TestSyncColumnDataWorkerSkipsTheAvailabilityScanWithoutPeers(t *testing.T) 
 	clock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.DenebVersion).AnyTimes()
 	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(-time.Hour)).AnyTimes()
 	var scans atomic.Int32
+	sentinel := &peerlessSentinel{}
 	columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
 	columnStorage.EXPECT().GetSavedColumnIndex(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 		func(context.Context, uint64, common.Hash) ([]uint64, error) {
@@ -267,14 +304,67 @@ func TestSyncColumnDataWorkerSkipsTheAvailabilityScanWithoutPeers(t *testing.T) 
 		caplinConfig:  &clparams.CaplinConfig{ArchiveBlobs: true},
 		columnStorage: columnStorage,
 		blobStorage:   blobStorage,
-		rpc:           rpc.NewBeaconRpcP2P(t.Context(), peerlessSentinel{}, &cfg, clock, nil),
+		rpc:           rpc.NewBeaconRpcP2P(t.Context(), sentinel, &cfg, clock, nil),
 	}
 	require.NoError(t, d.SyncColumnDataLater(block))
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	go d.syncColumnDataWorker(ctx)
-	// The root is due after one slot; two more ticks pass without peers.
-	time.Sleep(3 * time.Second)
+	// The worker asks for peers only once the root is due; let it find none a few times.
+	require.Eventually(t, func() bool { return sentinel.calls.Load() >= 3 }, 10*time.Second, 10*time.Millisecond)
 	require.Zero(t, scans.Load())
+}
+
+type silentPeerSentinel struct {
+	sentinelproto.SentinelClient
+}
+
+func (silentPeerSentinel) GetPeers(context.Context, *sentinelproto.EmptyMessage, ...grpc.CallOption) (*sentinelproto.PeerCount, error) {
+	return &sentinelproto.PeerCount{Active: 1}, nil
+}
+
+// A round that leaves columns missing ends at its deadline. Once the backoff reaches its cap, the
+// canonical check must still read the indices, so an orphaned root nobody serves is given up.
+func TestSyncColumnDataWorkerGivesUpAnOrphanAfterATimedOutRound(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.FuluForkEpoch = 0
+	cfg.SecondsPerSlot = 1
+	cfg.SlotsPerEpoch = 1 // the first failed round reaches the backoff cap
+	cfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.FuluVersion)
+	block.Block.Slot = 1
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.MarkRootCanonical(tx, 1, common.Hash{0xaa})
+	}))
+	ctrl := gomock.NewController(t)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(uint64(2)).AnyTimes()
+	// The RPC's column-peer refresher stays idle before Fulu, so no peer serves the columns.
+	clock.EXPECT().GetCurrentEpoch().Return(uint64(0)).AnyTimes()
+	clock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.DenebVersion).AnyTimes()
+	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(-time.Hour)).AnyTimes()
+	columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
+	columnStorage.EXPECT().GetSavedColumnIndex(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
+	blobStorage := blob_storage_mock_services.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil).AnyTimes()
+	d := &peerdas{
+		beaconConfig:  &cfg,
+		ethClock:      clock,
+		caplinConfig:  &clparams.CaplinConfig{ArchiveBlobs: true},
+		columnStorage: columnStorage,
+		blobStorage:   blobStorage,
+		indiciesDB:    db,
+		rpc:           rpc.NewBeaconRpcP2P(t.Context(), silentPeerSentinel{}, &cfg, clock, nil),
+	}
+	require.NoError(t, d.SyncColumnDataLater(block))
+
+	go d.syncColumnDataWorker(t.Context())
+	require.Eventually(t, func() bool {
+		return !d.blocksToCheckSync.queued(common.Hash(root))
+	}, 8*time.Second, 50*time.Millisecond)
 }
