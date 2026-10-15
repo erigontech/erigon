@@ -56,6 +56,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	mock_services "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -4155,4 +4156,79 @@ func newTestExecutionPayloadBid(slot, builderIndex, value uint64) *cltypes.Execu
 		ExecutionPayment:   0,
 		BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
 	}
+}
+
+func TestPostPtcDutiesNextEpochWhileHeadIsInPreviousEpoch(t *testing.T) {
+	_, _, _, _, headState, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	previousStateForkEpoch := headState.BeaconConfig().GloasForkEpoch
+	t.Cleanup(func() { headState.BeaconConfig().GloasForkEpoch = previousStateForkEpoch })
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	headState.BeaconConfig().GloasForkEpoch = 0
+	headState.SetVersion(clparams.GloasVersion)
+	slotsPerEpoch := handler.beaconChainCfg.SlotsPerEpoch
+	headEpoch := state.Epoch(headState)
+	require.NoError(t, headState.SetSlot((headEpoch+1)*slotsPerEpoch-1))
+	// The epoch transition drops the effective balance of the even validators to zero, so they leave the PTC.
+	for i := 0; i < headState.ValidatorLength(); i += 2 {
+		require.NoError(t, headState.SetValidatorBalance(i, 0))
+	}
+	require.NoError(t, headState.InitializePtcWindow())
+	publishPtcDutiesHead(t, syncedData, headState, common.Hash{0x51})
+
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentEpoch().Return(headEpoch + 1).AnyTimes()
+	handler.ethClock = clock
+
+	requestedEpoch := headEpoch + 2
+	advanced, err := headState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(advanced, (headEpoch+1)*slotsPerEpoch))
+	want := map[[2]uint64]struct{}{}
+	for slot := requestedEpoch * slotsPerEpoch; slot < (requestedEpoch+1)*slotsPerEpoch; slot++ {
+		ptc, err := advanced.GetPTC(slot)
+		require.NoError(t, err)
+		for _, idx := range ptc {
+			want[[2]uint64{idx, slot}] = struct{}{}
+		}
+	}
+	require.NotEmpty(t, want)
+	indices := make([]string, 0, headState.ValidatorLength())
+	for i := range headState.ValidatorLength() {
+		indices = append(indices, fmt.Sprintf(`"%d"`, i))
+	}
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
+		fmt.Sprintf("/eth/v1/validator/duties/ptc/%d", requestedEpoch), strings.NewReader("["+strings.Join(indices, ",")+"]"))
+	recorder := httptest.NewRecorder()
+	handler.mux.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var response struct {
+		DependentRoot common.Hash       `json:"dependent_root"`
+		Data          []ptcDutyResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Equal(t, common.Hash{0x51}, response.DependentRoot)
+	got := map[[2]uint64]struct{}{}
+	for _, duty := range response.Data {
+		got[[2]uint64{duty.ValidatorIndex, duty.Slot}] = struct{}{}
+	}
+	require.Equal(t, want, got)
+}
+
+func TestPostPtcDutiesUnavailableWhileHeadLagsMoreThanOneEpoch(t *testing.T) {
+	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	headEpoch := uint64(2)
+	publishPtcDutiesHead(t, syncedData, newPtcDutiesHeadState(t, handler.beaconChainCfg, (headEpoch+1)*handler.beaconChainCfg.SlotsPerEpoch-1), common.Hash{0x52})
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentEpoch().Return(headEpoch + 2).AnyTimes()
+	handler.ethClock = clock
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
+		fmt.Sprintf("/eth/v1/validator/duties/ptc/%d", headEpoch+3), strings.NewReader(`["0"]`))
+	recorder := httptest.NewRecorder()
+	handler.mux.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
 }
