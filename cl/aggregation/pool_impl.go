@@ -17,8 +17,11 @@
 package aggregation
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"math"
+	"math/rand/v2"
 	"slices"
 	"sync"
 	"time"
@@ -56,7 +59,6 @@ var newSignatureAggregator = func() signatureAggregator { return &bls.SignatureA
 type committeeAggregate struct {
 	attestation *solid.Attestation
 	signature   signatureAggregator
-	lastVote    uint64 // refused data only: when it last gained a voter
 }
 
 type aggregationPoolImpl struct {
@@ -73,8 +75,9 @@ type aggregationPoolImpl struct {
 	// voters than the committee's weakest data. Only full committees have entries, so the pool
 	// bound also bounds these.
 	refused map[slotCommittee]map[common.Hash]*committeeAggregate
-	// refusedVotes orders the votes added to refused data.
-	refusedVotes uint64
+	// pinned holds, by slot, the data roots the node served its validators. Gossip cannot displace
+	// them: their votes are always stored.
+	pinned map[common.Hash]uint64
 }
 
 type slotCommittee struct {
@@ -102,6 +105,7 @@ func NewAggregationPool(
 		aggregatesInCommittee: make(map[keyAggrInCommittee]*committeeAggregate),
 		dataPerCommittee:      make(map[slotCommittee][]keyAggrInCommittee),
 		refused:               make(map[slotCommittee]map[common.Hash]*committeeAggregate),
+		pinned:                make(map[common.Hash]uint64),
 	}
 	go p.sweepStaleAtt(ctx)
 	return p
@@ -186,13 +190,19 @@ func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation, ver
 		return entry.add(inAtt, version)
 	}
 	perCommittee := slotCommittee{slot: inAtt.Data.Slot, committee: committeeIndex}
-	if len(p.dataPerCommittee[perCommittee]) >= maxDataPerCommittee {
+	_, pinned := p.pinned[hashRoot]
+	full := len(p.dataPerCommittee[perCommittee]) >= maxDataPerCommittee
+	if full && !pinned {
 		return p.addRefusedVote(perCommittee, key, inAtt, version)
 	}
 	// Decode the signature before making room, so a rejected attestation evicts nothing.
 	entry, err = newCommitteeAggregate(inAtt, version)
 	if err != nil {
 		return err
+	}
+	if full {
+		p.storePinnedAggregate(perCommittee, key, entry)
+		return nil
 	}
 	if len(p.aggregatesInCommittee) >= p.maxCommitteeAggregates() {
 		p.pruneStaleLocked()
@@ -247,6 +257,45 @@ func (p *aggregationPoolImpl) storeCommitteeAggregate(perCommittee slotCommittee
 	p.dataPerCommittee[perCommittee] = append(p.dataPerCommittee[perCommittee], key)
 }
 
+// PinAttestationData marks data the node serves its validators. Our aggregators ask for exactly this
+// data, so its votes are always stored, and votes refused before are moved into the store.
+func (p *aggregationPoolImpl) PinAttestationData(data *solid.AttestationData) error {
+	root, err := data.HashSSZ()
+	if err != nil {
+		return err
+	}
+	p.aggregatesLock.Lock()
+	defer p.aggregatesLock.Unlock()
+	if _, ok := p.pinned[root]; ok {
+		return nil
+	}
+	p.pinned[root] = data.Slot
+	for perCommittee, refused := range p.refused {
+		entry, ok := refused[root]
+		if !ok || perCommittee.slot != data.Slot {
+			continue
+		}
+		delete(refused, root)
+		p.storePinnedAggregate(perCommittee, keyAggrInCommittee{dataRoot: root, committeeIndex: perCommittee.committee}, entry)
+	}
+	return nil
+}
+
+// storePinnedAggregate stores pinned data in a full committee in place of its weakest unpinned data,
+// which is kept aside with its votes.
+func (p *aggregationPoolImpl) storePinnedAggregate(perCommittee slotCommittee, key keyAggrInCommittee, entry *committeeAggregate) {
+	if displacedKey, displaced := p.evictWeakerData(perCommittee, math.MaxInt); displaced != nil {
+		refused := p.refused[perCommittee]
+		if refused == nil {
+			refused = make(map[common.Hash]*committeeAggregate)
+			p.refused[perCommittee] = refused
+		}
+		evictWeakestRefused(refused)
+		refused[displacedKey.dataRoot] = displaced
+	}
+	p.storeCommitteeAggregate(perCommittee, key, entry)
+}
+
 // addRefusedVote adds a vote for data that a full committee does not store. The data replaces the
 // committee's weakest data once it has more voters; until then its votes are kept aside.
 func (p *aggregationPoolImpl) addRefusedVote(perCommittee slotCommittee, key keyAggrInCommittee, inAtt *solid.Attestation, version clparams.StateVersion) error {
@@ -268,8 +317,6 @@ func (p *aggregationPoolImpl) addRefusedVote(perCommittee slotCommittee, key key
 		}
 		refused[key.dataRoot] = entry
 	}
-	p.refusedVotes++
-	entry.lastVote = p.refusedVotes
 	if displacedKey, displaced := p.evictWeakerData(perCommittee, voteCount(entry.attestation)); displaced != nil {
 		delete(refused, key.dataRoot)
 		refused[displacedKey.dataRoot] = displaced
@@ -278,28 +325,31 @@ func (p *aggregationPoolImpl) addRefusedVote(perCommittee slotCommittee, key key
 	return nil
 }
 
+// refusedTieBreak picks which of n equally weak refused data gives way.
+var refusedTieBreak = rand.IntN
+
 // evictWeakestRefused makes room for new refused data, which always enters: every new data starts
-// with one voter, so refusing it would lock any new data out of a full set. The refused data with
-// the fewest voters gives way, and among those the one that went longest without a new voter.
+// with one voter, so refusing it would lock any new data out of a full set. One of the refused data
+// with the fewest voters gives way, picked at random: a predictable pick would let a stream of fresh
+// one-vote data flush data that is gathering voters.
 func evictWeakestRefused(refused map[common.Hash]*committeeAggregate) {
 	if len(refused) < maxDataPerCommittee {
 		return
 	}
-	var weakest *committeeAggregate
-	var weakestRoot common.Hash
+	var weakest []common.Hash
+	weakestVotes := -1
 	for root, entry := range refused {
-		if weakest == nil || weaker(entry, weakest) {
-			weakest, weakestRoot = entry, root
+		votes := voteCount(entry.attestation)
+		if weakestVotes < 0 || votes < weakestVotes {
+			weakest, weakestVotes = weakest[:0], votes
+		}
+		if votes == weakestVotes {
+			weakest = append(weakest, root)
 		}
 	}
-	delete(refused, weakestRoot)
-}
-
-func weaker(a, b *committeeAggregate) bool {
-	if votesA, votesB := voteCount(a.attestation), voteCount(b.attestation); votesA != votesB {
-		return votesA < votesB
-	}
-	return a.lastVote < b.lastVote
+	// Sorted, so the pick depends on the tie-break only, not on the map order.
+	slices.SortFunc(weakest, func(a, b common.Hash) int { return bytes.Compare(a[:], b[:]) })
+	delete(refused, weakest[refusedTieBreak(len(weakest))])
 }
 
 func (p *aggregationPoolImpl) GetAggregatationByRoot(root common.Hash) *solid.Attestation {
@@ -368,6 +418,11 @@ func (p *aggregationPoolImpl) pruneStaleLocked() {
 			delete(p.refused, perCommittee)
 		}
 	}
+	for root, slot := range p.pinned {
+		if p.ethClock.GetEpochAtSlot(slot)+1 < currentEpoch {
+			delete(p.pinned, root)
+		}
+	}
 }
 
 // evictWeakerData removes and returns the committee's data with the fewest votes if it has fewer
@@ -376,6 +431,9 @@ func (p *aggregationPoolImpl) evictWeakerData(perCommittee slotCommittee, incomi
 	var weakest keyAggrInCommittee
 	weakestVotes := -1
 	for _, key := range p.dataPerCommittee[perCommittee] {
+		if _, pinned := p.pinned[key.dataRoot]; pinned {
+			continue
+		}
 		if votes := voteCount(p.aggregatesInCommittee[key].attestation); weakestVotes < 0 || votes < weakestVotes {
 			weakest, weakestVotes = key, votes
 		}

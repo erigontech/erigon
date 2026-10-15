@@ -686,6 +686,13 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	} else if committeeIndex != nil {
 		attestationData.CommitteeIndex = *committeeIndex
 	}
+	if a.aggregatePool != nil {
+		// Our aggregators ask for the aggregate of exactly this data; gossip votes for other data must
+		// not keep it out of the pool.
+		if err := a.aggregatePool.PinAttestationData(&attestationData); err != nil {
+			a.logger.Debug("Failed to pin attestation data", "slot", *slot, "err", err)
+		}
+	}
 	return newBeaconResponse(attestationData), nil
 }
 

@@ -17,9 +17,11 @@
 package aggregation
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -32,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 )
 
 var (
@@ -639,25 +642,120 @@ func (t *PoolTestSuite) TestAddAttestationElectraNewDataEntersAFullRefusedSet() 
 	t.Equal(3, utils.BitsOnCount(bits)-1)
 }
 
-// Among refused data with as many voters, the data that went longest without a new voter gives way.
-func (t *PoolTestSuite) TestAddAttestationElectraEvictsTheStalestOfEquallyWeakRefusedData() {
+// Among refused data with as many voters, the tie-break picks which gives way, so a stream of fresh
+// one-vote data cannot predictably flush data that is gathering voters.
+func (t *PoolTestSuite) TestAddAttestationElectraTieBreakPicksTheEvictedRefusedData() {
 	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).AnyTimes()
 	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).AnyTimes()
+	defer func(tieBreak func(int) int) { refusedTieBreak = tieBreak }(refusedTieBreak)
+	for pick := range maxDataPerCommittee {
+		ctx, cancel := context.WithCancel(context.Background())
+		pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock).(*aggregationPoolImpl)
+		t.fillCommitteeWithTwoVoteData(pool)
+		var roots []common.Hash
+		for i := range maxDataPerCommittee {
+			vote := t.singleVote(byte(0xb0+i), 8+i)
+			t.Require().NoError(pool.AddAttestation(vote))
+			root, err := vote.Data.HashSSZ()
+			t.Require().NoError(err)
+			roots = append(roots, root)
+		}
+		slices.SortFunc(roots, func(a, b common.Hash) int { return bytes.Compare(a[:], b[:]) })
+		refusedTieBreak = func(n int) int {
+			t.Equal(maxDataPerCommittee, n, "every single-vote data is a candidate")
+			return pick
+		}
+
+		t.Require().NoError(pool.AddAttestation(t.singleVote(0xcc, 12)))
+
+		refused := pool.refused[slotCommittee{slot: 5, committee: 1}]
+		t.Len(refused, maxDataPerCommittee)
+		t.NotContains(refused, roots[pick])
+		cancel()
+	}
+}
+
+// pinnedVote is a vote for the data the node serves its validators, from a committee member.
+func (t *PoolTestSuite) pinnedVote(member int) *solid.Attestation {
+	return t.singleVote(0xaa, member)
+}
+
+func (t *PoolTestSuite) newPinTestPool() *aggregationPoolImpl {
+	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).DoAndReturn(func(slot uint64) uint64 { return slot / 32 }).AnyTimes()
+	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).AnyTimes()
+	t.mockEthClock.EXPECT().GetCurrentSlot().Return(uint64(5)).AnyTimes()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.T().Cleanup(cancel)
+	return NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock).(*aggregationPoolImpl)
+}
+
+// Fresh one-vote data must not keep the data our validators attest to out of a full committee, or
+// our aggregators find nothing to aggregate: that data is stored from its first vote and keeps every
+// later vote.
+func (t *PoolTestSuite) TestAddAttestationElectraStoresPinnedDataInAFullCommittee() {
+	pool := t.newPinTestPool()
+	t.fillCommitteeWithTwoVoteData(pool)
+	t.Require().NoError(pool.PinAttestationData(t.pinnedVote(8).Data))
+
+	for round, member := range []int{8, 13} {
+		t.Require().NoError(pool.AddAttestation(t.pinnedVote(member)))
+		for i := range maxDataPerCommittee {
+			t.Require().NoError(pool.AddAttestation(t.singleVote(byte(0xb0+4*round+i), 9+i)))
+		}
+	}
+
+	t.Equal([]byte{0, 0xa1}, t.committeeAggregateBits(pool, 0xaa), "both votes are kept")
+	t.Len(pool.Aggregates(), maxDataPerCommittee, "pinned data takes the place of the weakest data")
+	t.Nil(t.committeeAggregateBits(pool, 0), "the first data with the fewest votes gave way")
+}
+
+// Votes refused before the data was pinned are kept: pinning moves them into the store.
+func (t *PoolTestSuite) TestAddAttestationElectraPinPromotesRefusedVotes() {
+	pool := t.newPinTestPool()
+	t.fillCommitteeWithTwoVoteData(pool)
+	t.Require().NoError(pool.AddAttestation(t.pinnedVote(8)))
+	t.Require().Nil(t.committeeAggregateBits(pool, 0xaa))
+
+	t.Require().NoError(pool.PinAttestationData(t.pinnedVote(8).Data))
+
+	t.Equal([]byte{0, 0x81}, t.committeeAggregateBits(pool, 0xaa))
+	t.Len(pool.Aggregates(), maxDataPerCommittee)
+	t.NotNil(pool.refused[slotCommittee{slot: 5, committee: 1}], "the displaced data keeps its votes aside")
+}
+
+// Data with more voters replaces the weakest unpinned data, never the pinned data.
+func (t *PoolTestSuite) TestAddAttestationElectraKeepsPinnedDataAgainstStrongerData() {
+	pool := t.newPinTestPool()
+	t.Require().NoError(pool.PinAttestationData(t.pinnedVote(0).Data))
+	t.Require().NoError(pool.AddAttestation(t.pinnedVote(0)))
+	member := 1
+	for source := range maxDataPerCommittee - 1 {
+		for range 2 {
+			t.Require().NoError(pool.AddAttestation(t.singleVote(byte(source), member)))
+			member++
+		}
+	}
+	for range 3 {
+		t.Require().NoError(pool.AddAttestation(t.singleVote(0xbb, member)))
+		member++
+	}
+
+	t.NotNil(t.committeeAggregateBits(pool, 0xbb), "stronger data came in")
+	t.Equal([]byte{0x01, 0x80}, t.committeeAggregateBits(pool, 0xaa), "the pinned data with one vote stayed")
+}
+
+func (t *PoolTestSuite) TestPruneStaleDropsPins() {
+	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).DoAndReturn(func(slot uint64) uint64 { return slot / 32 }).AnyTimes()
+	t.mockEthClock.EXPECT().GetCurrentSlot().Return(uint64(1000)).AnyTimes()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock).(*aggregationPoolImpl)
-	t.fillCommitteeWithTwoVoteData(pool)
-	for i := range maxDataPerCommittee {
-		t.Require().NoError(pool.AddAttestation(t.singleVote(byte(0xb0+i), 8+i)))
-	}
+	t.Require().NoError(pool.PinAttestationData(t.pinnedVote(0).Data))
+	t.Require().NoError(pool.PinAttestationData(&solid.AttestationData{Slot: 990, Source: attData1.Source, Target: attData1.Target}))
 
-	t.Require().NoError(pool.AddAttestation(t.singleVote(0xcc, 12)))
+	pool.pruneStale()
 
-	refused := pool.refused[slotCommittee{slot: 5, committee: 1}]
-	t.Len(refused, maxDataPerCommittee)
-	for _, entry := range refused {
-		t.NotEqual(byte(0xb0), entry.attestation.Data.Source.Root[0], "the oldest single-vote data gave way")
-	}
+	t.Len(pool.pinned, 1, "only the pin inside the inclusion window stays")
 }
 
 func (t *PoolTestSuite) TestAddAttestationElectraLimitsTotalAggregates() {

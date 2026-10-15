@@ -26,6 +26,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -39,6 +40,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	state_mock "github.com/erigontech/erigon/cl/abstract/mock_services"
+	aggregation_mock "github.com/erigontech/erigon/cl/aggregation/mock_services"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
@@ -4932,6 +4934,16 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 				fcu.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
 				fcu.Ancestors = map[uint64]forkchoice.ForkChoiceNode{tt.blockSlot: {Root: root, PayloadStatus: tt.status}}
 			}
+			// The served data is pinned in the aggregation pool, with the index the validator signs.
+			aggregatePool := aggregation_mock.NewMockAggregationPool(gomock.NewController(t))
+			var pinned *solid.AttestationData
+			if tt.wantStatus == http.StatusOK {
+				aggregatePool.EXPECT().PinAttestationData(gomock.Any()).DoAndReturn(func(data *solid.AttestationData) error {
+					pinned = data
+					return nil
+				})
+			}
+			handler.aggregatePool = aggregatePool
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
 				fmt.Sprintf("/eth/v1/validator/attestation_data?slot=%d&committee_index=3", attestationSlot), http.NoBody)
 			recorder := httptest.NewRecorder()
@@ -4940,6 +4952,9 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 			require.Equal(t, tt.wantStatus, recorder.Code, recorder.Body.String())
 			if tt.wantStatus == http.StatusOK {
 				require.Contains(t, recorder.Body.String(), `"index":"`+tt.wantIndex+`"`)
+				require.NotNil(t, pinned)
+				require.Equal(t, root, pinned.BeaconBlockRoot)
+				require.Equal(t, tt.wantIndex, strconv.FormatUint(pinned.CommitteeIndex, 10))
 			} else {
 				require.Contains(t, recorder.Body.String(), "payload of the beacon block root is not verified")
 			}

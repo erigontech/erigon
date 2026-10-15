@@ -30,4 +30,7 @@ type AggregationPool interface {
 	// Aggregates returns the current per-committee aggregates (Electra and later). The pool replaces
 	// an aggregate instead of changing it, so callers may keep them but must not modify them.
 	Aggregates() []*solid.Attestation
+	// PinAttestationData marks attestation data the node serves its validators: its votes are always
+	// stored, so gossip votes for other data cannot keep it out of a full committee.
+	PinAttestationData(data *solid.AttestationData) error
 }

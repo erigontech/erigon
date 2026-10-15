@@ -192,3 +192,41 @@ func (c *MockAggregationPoolGetAggregatationByRootAndCommitteeCall) DoAndReturn(
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
+
+// PinAttestationData mocks base method.
+func (m *MockAggregationPool) PinAttestationData(data *solid.AttestationData) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PinAttestationData", data)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// PinAttestationData indicates an expected call of PinAttestationData.
+func (mr *MockAggregationPoolMockRecorder) PinAttestationData(data any) *MockAggregationPoolPinAttestationDataCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PinAttestationData", reflect.TypeOf((*MockAggregationPool)(nil).PinAttestationData), data)
+	return &MockAggregationPoolPinAttestationDataCall{Call: call}
+}
+
+// MockAggregationPoolPinAttestationDataCall wrap *gomock.Call
+type MockAggregationPoolPinAttestationDataCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockAggregationPoolPinAttestationDataCall) Return(arg0 error) *MockAggregationPoolPinAttestationDataCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockAggregationPoolPinAttestationDataCall) Do(f func(*solid.AttestationData) error) *MockAggregationPoolPinAttestationDataCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockAggregationPoolPinAttestationDataCall) DoAndReturn(f func(*solid.AttestationData) error) *MockAggregationPoolPinAttestationDataCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
