@@ -188,7 +188,7 @@ func (s *BlockAccessListSidecar) copy() *BlockAccessListSidecar {
 	return cpy
 }
 
-const maxBlockAccessListBytes = 10 << 20
+const maxBlockAccessListBytes = 10 * 1024 * 1024
 
 // EIP-7928: bal_items <= block_gas_limit / BalItemCost
 const BalItemCost = 2000
