@@ -223,6 +223,16 @@ func TestWarmBALCommitmentReportsAWorkerErrorOnce(t *testing.T) {
 	require.Equal(t, kv.ErrReadTxLimitExceeded, err)
 }
 
+// Workers that fail with errors allocated per call, such as a closed database's, report the
+// message once.
+func TestWarmBALCommitmentReportsAnErrorMessageOnce(t *testing.T) {
+	db := &commitmentBeginFuncDB{begin: func(context.Context) (kv.Tx, error) { return nil, errors.New("db closed") }}
+
+	err := warmBALCommitment(t.Context(), db, threeAccountChanges(), 3)
+
+	require.EqualError(t, err, "db closed")
+}
+
 func TestBALCommitmentContextUsesAvailableBranchCache(t *testing.T) {
 	key := []byte{0x12, 0x34, 0x56}
 

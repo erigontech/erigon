@@ -135,19 +135,34 @@ func warmBALCommitment(ctx context.Context, db kv.RoDB, bal types.BlockAccessLis
 	close(factoryErrs)
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		// Every worker fails with the same cancellation; report it once.
-		log.Debug("[warmBAL] commitment warmup canceled", "keys", len(keys), "workers", workers, "elapsed", time.Since(started))
+		log.Debug(
+			"[warmBAL] commitment warmup canceled",
+			"keys", len(keys),
+			"workers", workers,
+			"cacheHits", cacheStats.hits.Load(),
+			"cacheMisses", cacheStats.misses.Load(),
+			"cacheFillRequests", cacheStats.fillRequests.Load(),
+			"elapsed", time.Since(started),
+		)
 		return ctxErr
 	}
 	// The first worker error cancels the other workers; their context errors are not causes.
 	if errors.Is(err, context.Canceled) {
 		err = nil
 	}
+	// Workers may fail with separately allocated errors that read the same.
+	reported := make(map[string]struct{}, workers)
+	if err != nil {
+		reported[err.Error()] = struct{}{}
+	}
 	for factoryErr := range factoryErrs {
-		switch {
-		case errors.Is(factoryErr, context.Canceled), errors.Is(err, factoryErr):
-		case err == nil:
+		if _, ok := reported[factoryErr.Error()]; ok || errors.Is(factoryErr, context.Canceled) {
+			continue
+		}
+		reported[factoryErr.Error()] = struct{}{}
+		if err == nil {
 			err = factoryErr
-		default:
+		} else {
 			err = errors.Join(err, factoryErr)
 		}
 	}
