@@ -300,8 +300,9 @@ func (p *aggregationPoolImpl) storePinnedAggregate(perCommittee slotCommittee, k
 			refused = make(map[common.Hash]*committeeAggregate)
 			p.refused[perCommittee] = refused
 		}
-		evictWeakestRefused(refused)
-		refused[displacedKey.dataRoot] = displaced
+		if p.evictWeakestRefused(refused) {
+			refused[displacedKey.dataRoot] = displaced
+		}
 	}
 	p.storeCommitteeAggregate(perCommittee, key, entry)
 }
@@ -320,7 +321,9 @@ func (p *aggregationPoolImpl) addRefusedVote(perCommittee slotCommittee, key key
 		if entry, err = newCommitteeAggregate(inAtt, version); err != nil {
 			return err
 		}
-		evictWeakestRefused(refused)
+		if !p.evictWeakestRefused(refused) {
+			return ErrPoolLimit
+		}
 		if refused == nil {
 			refused = make(map[common.Hash]*committeeAggregate)
 			p.refused[perCommittee] = refused
@@ -338,17 +341,20 @@ func (p *aggregationPoolImpl) addRefusedVote(perCommittee slotCommittee, key key
 // refusedTieBreak picks which of n equally weak refused data gives way.
 var refusedTieBreak = rand.IntN
 
-// evictWeakestRefused makes room for new refused data, which always enters: every new data starts
-// with one voter, so refusing it would lock any new data out of a full set. One of the refused data
-// with the fewest voters gives way, picked at random: a predictable pick would let a stream of fresh
-// one-vote data flush data that is gathering voters.
-func evictWeakestRefused(refused map[common.Hash]*committeeAggregate) {
+// evictWeakestRefused makes room for new refused data, which enters unless every refused data is
+// pinned: every new data starts with one voter, so refusing it would lock any new data out of a full
+// set. One of the unpinned refused data with the fewest voters gives way, picked at random: a
+// predictable pick would let a stream of fresh one-vote data flush data that is gathering voters.
+func (p *aggregationPoolImpl) evictWeakestRefused(refused map[common.Hash]*committeeAggregate) bool {
 	if len(refused) < maxDataPerCommittee {
-		return
+		return true
 	}
 	var weakest []common.Hash
 	weakestVotes := -1
 	for root, entry := range refused {
+		if _, pinned := p.pinned[root]; pinned {
+			continue
+		}
 		votes := voteCount(entry.attestation)
 		if weakestVotes < 0 || votes < weakestVotes {
 			weakest, weakestVotes = weakest[:0], votes
@@ -357,9 +363,13 @@ func evictWeakestRefused(refused map[common.Hash]*committeeAggregate) {
 			weakest = append(weakest, root)
 		}
 	}
+	if len(weakest) == 0 {
+		return false
+	}
 	// Sorted, so the pick depends on the tie-break only, not on the map order.
 	slices.SortFunc(weakest, func(a, b common.Hash) int { return bytes.Compare(a[:], b[:]) })
 	delete(refused, weakest[refusedTieBreak(len(weakest))])
+	return true
 }
 
 func (p *aggregationPoolImpl) GetAggregatationByRoot(root common.Hash) *solid.Attestation {

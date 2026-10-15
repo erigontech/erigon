@@ -756,6 +756,58 @@ func (t *PoolTestSuite) TestAddAttestationElectraKeepsPinnedDataWithinTheCommitt
 	t.NotNil(t.refusedBits(pool, byte(0xa0+maxDataPerCommittee+1)))
 }
 
+// pinStoredData fills the committee with pinned data, one vote each from members 0-3.
+func (t *PoolTestSuite) pinStoredData(pool *aggregationPoolImpl) {
+	for i := range maxDataPerCommittee {
+		t.Require().NoError(pool.PinAttestationData(t.singleVote(byte(0xa0+i), i).Data))
+		t.Require().NoError(pool.AddAttestation(t.singleVote(byte(0xa0+i), i)))
+	}
+}
+
+// Pinned data waiting with the refused data is never the refused data that gives way, even when it
+// has the fewest voters.
+func (t *PoolTestSuite) TestAddAttestationElectraKeepsWaitingPinnedDataInAFullRefusedSet() {
+	pool := t.newPinTestPool()
+	t.pinStoredData(pool)
+	waiting := t.singleVote(0xa4, 4)
+	t.Require().NoError(pool.PinAttestationData(waiting.Data))
+	t.Require().NoError(pool.AddAttestation(waiting))
+	member := 5
+	for source := range maxDataPerCommittee - 1 {
+		for range 2 {
+			t.Require().NoError(pool.AddAttestation(t.singleVote(byte(0xb0+source), member)))
+			member++
+		}
+	}
+
+	t.Require().NoError(pool.AddAttestation(t.singleVote(0xcc, member)))
+
+	t.Equal([]byte{0x10, 0x80}, t.refusedBits(pool, 0xa4))
+	t.Len(pool.refused[slotCommittee{slot: 5, committee: 1}], maxDataPerCommittee)
+	t.NotNil(t.refusedBits(pool, 0xcc), "an unpinned refused data gave way")
+}
+
+// When the stored and the refused data are all pinned, new data is refused: the bounds hold and the
+// pinned data keeps its votes.
+func (t *PoolTestSuite) TestAddAttestationElectraRefusesNewDataWhenEveryDataIsPinned() {
+	pool := t.newPinTestPool()
+	t.pinStoredData(pool)
+	for i := range maxDataPerCommittee {
+		waiting := t.singleVote(byte(0xa4+i), 4+i)
+		t.Require().NoError(pool.PinAttestationData(waiting.Data))
+		t.Require().NoError(pool.AddAttestation(waiting))
+	}
+	pinnedSources := t.refusedSources(pool)
+
+	t.ErrorIs(pool.AddAttestation(t.singleVote(0xcc, 8)), ErrPoolLimit)
+	late := t.singleVote(0xa8, 9)
+	t.Require().NoError(pool.PinAttestationData(late.Data))
+	t.ErrorIs(pool.AddAttestation(late), ErrPoolLimit)
+
+	t.Len(pool.Aggregates(), maxDataPerCommittee)
+	t.Equal(pinnedSources, t.refusedSources(pool))
+}
+
 // Pinned data keeps every vote against both sequences that flush unpinned data: fresh one-vote data
 // between its votes, and refused data as strong as the weakest stored data that leaves it the only
 // candidate for eviction.
