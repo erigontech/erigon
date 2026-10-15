@@ -1075,67 +1075,78 @@ func TestTargetGasLimitForLaterSepoliaGloasSlot(t *testing.T) {
 	require.Equal(t, hexutil.Uint64(200_000_000), *gasLimit)
 }
 
-func TestPreparePayloadForFirstGloasSlotUsesPreForkInputsAfterPreferenceRemoval(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	_, _, _, _, postState, handler, _, syncedData, forkchoiceStore, validatorParams := setupTestingHandler(
-		t, clparams.ElectraVersion, log.Root(), false,
-	)
-	preForkHead := common.Hash{0xa1}
-	const parentGasLimit = uint64(30_000_000)
-	headState, targetState, currentSlot, targetSlot, expectedWithdrawals := setupFirstGloasPayloadStates(
-		t, handler, postState, preForkHead, parentGasLimit,
-	)
-	config := handler.beaconChainCfg
+func TestPreparePayloadForFirstGloasSlotUsesProposalAttributes(t *testing.T) {
+	for _, removePreference := range []bool{false, true} {
+		t.Run(fmt.Sprintf("preference removed %t", removePreference), func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			_, _, _, _, postState, handler, _, syncedData, forkchoiceStore, validatorParams := setupTestingHandler(
+				t, clparams.ElectraVersion, log.Root(), false,
+			)
+			preForkHead := common.Hash{0xa1}
+			const parentGasLimit = uint64(30_000_000)
+			headState, targetState, currentSlot, targetSlot, expectedWithdrawals := setupFirstGloasPayloadStates(
+				t, handler, postState, preForkHead, parentGasLimit,
+			)
+			config := handler.beaconChainCfg
 
-	proposerIndex, err := headState.GetBeaconProposerIndexForSlot(targetSlot)
-	require.NoError(t, err)
-	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
-	dependentRoot, err := state.GetProposerDependentRoot(targetState, targetSlot/config.SlotsPerEpoch)
-	require.NoError(t, err)
+			proposerIndex, err := headState.GetBeaconProposerIndexForSlot(targetSlot)
+			require.NoError(t, err)
+			validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+			dependentRoot, err := state.GetProposerDependentRoot(targetState, targetSlot/config.SlotsPerEpoch)
+			require.NoError(t, err)
 
-	handler.epbsPool = pool.NewEpbsPool()
-	preferenceKey := pool.ProposerPreferencesKey{Slot: targetSlot, DependentRoot: dependentRoot}
-	handler.epbsPool.ProposerPreferences.Add(preferenceKey, &cltypes.SignedProposerPreferences{
-		Message: &cltypes.ProposerPreferences{
-			ProposalSlot: targetSlot, DependentRoot: dependentRoot, ValidatorIndex: proposerIndex,
-			TargetGasLimit: 36_000_000,
-		},
-	})
-	handler.epbsPool.ProposerPreferences.Remove(preferenceKey)
-	_, found := handler.epbsPool.GetPreference(targetSlot, dependentRoot)
-	require.False(t, found)
+			handler.epbsPool = pool.NewEpbsPool()
+			preferenceKey := pool.ProposerPreferencesKey{Slot: targetSlot, DependentRoot: dependentRoot}
+			handler.epbsPool.ProposerPreferences.Add(preferenceKey, &cltypes.SignedProposerPreferences{
+				Message: &cltypes.ProposerPreferences{
+					ProposalSlot: targetSlot, DependentRoot: dependentRoot, ValidatorIndex: proposerIndex,
+					TargetGasLimit: 36_000_000, FeeRecipient: common.Address{0x22},
+				},
+			})
+			wantFeeRecipient := common.Address{0x22}
+			wantGasLimit := hexutil.Uint64(36_000_000)
+			if removePreference {
+				handler.epbsPool.ProposerPreferences.Remove(preferenceKey)
+				_, found := handler.epbsPool.GetPreference(targetSlot, dependentRoot)
+				require.False(t, found)
+				wantFeeRecipient = common.Address{0x11}
+				wantGasLimit = hexutil.Uint64(parentGasLimit)
+			}
 
-	baseBlockRoot := common.Hash{0x41}
-	forkchoiceStore.HeadVal = baseBlockRoot
-	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusPending
-	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
-	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).DoAndReturn(
-		func(view synced_data.ViewHeadStateWithIdentityFn) error {
-			return view(headState, baseBlockRoot, currentSlot)
-		},
-	)
-	syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, currentSlot, true).AnyTimes()
-	clock := eth_clock.NewMockEthereumClock(ctrl)
-	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(time.Minute)).AnyTimes()
-	handler.ethClock = clock
+			baseBlockRoot := common.Hash{0x41}
+			forkchoiceStore.HeadVal = baseBlockRoot
+			forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusPending
+			syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+			syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).DoAndReturn(
+				func(view synced_data.ViewHeadStateWithIdentityFn) error {
+					return view(headState, baseBlockRoot, currentSlot)
+				},
+			)
+			syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, currentSlot, true).AnyTimes()
+			clock := eth_clock.NewMockEthereumClock(ctrl)
+			clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(time.Minute)).AnyTimes()
+			handler.ethClock = clock
 
-	engine := newPayloadBuildEngine(t, ctrl)
-	engine.startPayloadBuild = func(_ context.Context, head common.Hash, attrs *engine_types.PayloadAttributes) ([]byte, error) {
-		require.Equal(t, preForkHead, head)
-		requireExecutionWithdrawals(t, expectedWithdrawals, attrs.Withdrawals)
-		require.NotNil(t, attrs.SlotNumber)
-		require.Equal(t, hexutil.Uint64(targetSlot), *attrs.SlotNumber)
-		require.NotNil(t, attrs.TargetGasLimit)
-		require.Equal(t, hexutil.Uint64(parentGasLimit), *attrs.TargetGasLimit)
-		return []byte{1, 2, 3, 4, 5, 6, 7, 8}, nil
+			engine := newPayloadBuildEngine(t, ctrl)
+			engine.startPayloadBuild = func(_ context.Context, head common.Hash, attrs *engine_types.PayloadAttributes) ([]byte, error) {
+				require.Equal(t, preForkHead, head)
+				requireExecutionWithdrawals(t, expectedWithdrawals, attrs.Withdrawals)
+				require.NotNil(t, attrs.SlotNumber)
+				require.Equal(t, hexutil.Uint64(targetSlot), *attrs.SlotNumber)
+				require.NotNil(t, attrs.TargetGasLimit)
+				require.Equal(t, wantGasLimit, *attrs.TargetGasLimit)
+				require.Equal(t, wantFeeRecipient, attrs.SuggestedFeeRecipient)
+				return []byte{1, 2, 3, 4, 5, 6, 7, 8}, nil
+			}
+			handler.engine = engine
+
+			var scratch payloadPreparationScratch
+			result, err := handler.preparePayloadForWithScratch(t.Context(), preparationKey{targetSlot: targetSlot}, &scratch)
+
+			require.NoError(t, err)
+			require.Equal(t, baseBlockRoot, result.headRoot)
+		})
 	}
-	handler.engine = engine
-
-	var scratch payloadPreparationScratch
-	result, err := handler.preparePayloadForWithScratch(t.Context(), preparationKey{targetSlot: targetSlot}, &scratch)
-
-	require.NoError(t, err)
-	require.Equal(t, baseBlockRoot, result.headRoot)
 }
 
 func TestFirstGloasProductionRejectsChangedBeaconHead(t *testing.T) {
@@ -1199,7 +1210,7 @@ func TestFirstGloasProductionUsesTransitionWithdrawals(t *testing.T) {
 	require.ErrorIs(t, err, stopErr)
 }
 
-func TestPreparePayloadLoopMemoizesEffectiveGasLimit(t *testing.T) {
+func TestPreparePayloadLoopMemoizesEffectiveAttributes(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		config := payloadPreparationLoopConfig(1, 1, 2)
@@ -1221,8 +1232,11 @@ func TestPreparePayloadLoopMemoizesEffectiveGasLimit(t *testing.T) {
 		preference := func(root common.Hash, validator, gas uint64) *cltypes.SignedProposerPreferences {
 			return &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
 				ProposalSlot: targetSlot, DependentRoot: root, ValidatorIndex: validator, TargetGasLimit: gas,
+				FeeRecipient: common.Address{0x11},
 			}}
 		}
+		differentRecipient := preference(dependentRoot, 0, 40_000_000)
+		differentRecipient.Message.FeeRecipient = common.Address{0x22}
 		steps := []struct {
 			name         string
 			preference   *cltypes.SignedProposerPreferences
@@ -1239,6 +1253,9 @@ func TestPreparePayloadLoopMemoizesEffectiveGasLimit(t *testing.T) {
 			{name: "re-add different limit", preference: preference(dependentRoot, 0, 36_000_000), wantAttempts: 4},
 			{name: "replace same limit", preference: preference(dependentRoot, 0, 36_000_000), wantAttempts: 4},
 			{name: "prune and re-add before next tick", prune: true, preference: preference(dependentRoot, 0, 40_000_000), wantAttempts: 5},
+			{name: "different fee recipient", preference: differentRecipient, wantAttempts: 6},
+			{name: "same fee recipient", preference: differentRecipient, wantAttempts: 6},
+			{name: "restore registered recipient", preference: preference(dependentRoot, 0, 40_000_000), wantAttempts: 7},
 		}
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
@@ -1369,6 +1386,7 @@ func TestPreparePayloadLoopReusesPreFuluProposerIndex(t *testing.T) {
 			// Before Fulu, advancing the copied state can be needed to discover this proposer.
 			// Later ticks must reuse that index when reading the effective preference.
 			key.proposerIndex = proposerIndex
+			key.feeRecipient = common.Address{}
 			limit := gasLimit
 			key.setTargetGasLimit(&limit)
 			return key, nil

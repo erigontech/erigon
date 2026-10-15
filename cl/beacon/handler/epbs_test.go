@@ -2987,7 +2987,7 @@ func TestGetValidatorExecutionPayloadBidBuildsUnsignedBidWithoutGossip(t *testin
 		handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
 		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 	}
-	require.NotContains(t, logs(), "no fee recipient from prepare_beacon_proposer")
+	require.NotContains(t, logs(), "no fee recipient")
 }
 
 func TestGetValidatorExecutionPayloadBidRejectsChangedHeadBeforeBuilding(t *testing.T) {

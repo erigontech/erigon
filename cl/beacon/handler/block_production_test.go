@@ -634,6 +634,7 @@ func TestRequestConfiguredBuilderBidsAppliesLocalProposalPolicy(t *testing.T) {
 	}{
 		{name: "no P2P preference clamps toward latest bid target", feeRecipient: common.Address{0x42}, parentGas: 30_000_000, gasLimit: 30_029_295, want: 1},
 		{name: "wrong fee recipient", feeRecipient: common.Address{0x43}, parentGas: 30_000_000, gasLimit: 30_000_000},
+		{name: "preference overrides registration", feeRecipient: common.Address{0x43}, parentGas: 30_000_000, gasLimit: 30_000_000, preferenceGas: 30_000_000, want: 1},
 		{name: "high target clamps to parent maximum", feeRecipient: common.Address{0x42}, parentGas: 30_000_000, gasLimit: 30_029_295, preferenceGas: 40_000_000, want: 1},
 		{name: "high target rejects unclamped target", feeRecipient: common.Address{0x42}, parentGas: 30_000_000, gasLimit: 40_000_000, preferenceGas: 40_000_000},
 		{name: "low target clamps to parent minimum", feeRecipient: common.Address{0x42}, parentGas: 30_000_000, gasLimit: 29_970_705, preferenceGas: 20_000_000, want: 1},
@@ -664,7 +665,7 @@ func TestRequestConfiguredBuilderBidsAppliesLocalProposalPolicy(t *testing.T) {
 				handler.epbsPool.ProposerPreferences.Add(
 					pool.ProposerPreferencesKey{Slot: targetSlot, DependentRoot: dependentRoot},
 					&cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
-						ProposalSlot: targetSlot, ValidatorIndex: proposerIndex, FeeRecipient: common.Address{0x42},
+						ProposalSlot: targetSlot, ValidatorIndex: proposerIndex, FeeRecipient: tc.feeRecipient,
 						TargetGasLimit: tc.preferenceGas, DependentRoot: dependentRoot,
 					}},
 				)
@@ -972,6 +973,67 @@ func TestPublishBlindedBlocksRejectsGloas(t *testing.T) {
 	_, err := h.publishBlindedBlocks(req, 2)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), cltypes.ErrGloasCannotBlind.Error())
+}
+
+func TestGloasProductionUsesProposerPreferenceFeeRecipient(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		registered   bool
+		feeRecipient common.Address
+	}{
+		{name: "preferences only", feeRecipient: common.Address{0x22}},
+		{name: "preferences override registration", registered: true, feeRecipient: common.Address{0x22}},
+		{name: "explicit zero preference", registered: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			postState, handler, _, forkchoiceStore, params := setupGloasPreparationTest(t)
+			logs := captureProductionLogs(t)
+			baseBlockRoot := common.Hash{0x41}
+			forkchoiceStore.HeadVal = baseBlockRoot
+			forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+			targetSlot := postState.Slot() + 1
+			proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+			require.NoError(t, err)
+			dependentRoot, err := state.GetProposerDependentRoot(postState, targetSlot/handler.beaconChainCfg.SlotsPerEpoch)
+			require.NoError(t, err)
+			feeRecipient := tc.feeRecipient
+			if tc.registered {
+				params.SetFeeRecipient(proposerIndex, common.Address{0x11})
+			}
+			handler.epbsPool = pool.NewEpbsPool()
+			handler.epbsPool.ProposerPreferences.Add(
+				pool.ProposerPreferencesKey{Slot: targetSlot, DependentRoot: dependentRoot},
+				&cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+					ProposalSlot: targetSlot, DependentRoot: dependentRoot, ValidatorIndex: proposerIndex,
+					FeeRecipient: feeRecipient, TargetGasLimit: 30_000_000,
+				}},
+			)
+			var gotFeeRecipient common.Address
+			stopErr := errors.New("stop after fork-choice update")
+			engine := execution_client.NewMockExecutionEngine(ctrl)
+			engine.EXPECT().ForkChoiceUpdate(
+				gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), clparams.GloasVersion,
+			).DoAndReturn(func(
+				_ context.Context,
+				_, _, _ common.Hash,
+				attrs *engine_types.PayloadAttributes,
+				_ clparams.StateVersion,
+			) ([]byte, error) {
+				gotFeeRecipient = attrs.SuggestedFeeRecipient
+				return nil, stopErr
+			})
+			handler.engine = engine
+
+			_, _, err = handler.produceBeaconBody(
+				t.Context(), postState.Slot(), baseBlockRoot, postState, targetSlot, common.Bytes96{}, common.Hash{},
+			)
+
+			require.ErrorIs(t, err, stopErr)
+			require.Equal(t, feeRecipient, gotFeeRecipient)
+			require.NotContains(t, logs(), "no fee recipient")
+		})
+	}
 }
 
 func TestGloasProductionFallsBackToEmptyWithoutMEVBoost(t *testing.T) {
@@ -4620,6 +4682,45 @@ func TestPollAssembledPayloadStillReportsFailuresThatPrecededTheCancellation(t *
 	require.Contains(t, err.Error(), "boom")
 }
 
+func TestFeeRecipientForProposalIgnoresUnrelatedPreferences(t *testing.T) {
+	config := clparams.MainnetBeaconConfig
+	targetSlot := 3 * config.SlotsPerEpoch
+	baseState := state.New(&config)
+	baseState.SetVersion(clparams.FuluVersion)
+	require.NoError(t, baseState.SetSlot(targetSlot-1))
+	dependentRoot, err := state.GetProposerDependentRoot(baseState, targetSlot/config.SlotsPerEpoch)
+	require.NoError(t, err)
+	const proposerIndex = uint64(7)
+	registered := common.Address{0x11}
+	for _, tc := range []struct {
+		name          string
+		version       clparams.StateVersion
+		slot          uint64
+		validator     uint64
+		dependentRoot common.Hash
+	}{
+		{"before Gloas", clparams.FuluVersion, targetSlot, proposerIndex, dependentRoot},
+		{"other slot", clparams.GloasVersion, targetSlot + 1, proposerIndex, dependentRoot},
+		{"other validator", clparams.GloasVersion, targetSlot, proposerIndex + 1, dependentRoot},
+		{"other dependent root", clparams.GloasVersion, targetSlot, proposerIndex, common.Hash{0x33}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params := validator_params.NewValidatorParams()
+			params.SetFeeRecipient(proposerIndex, registered)
+			handler := &ApiHandler{beaconChainCfg: &config, validatorParams: params, epbsPool: pool.NewEpbsPool()}
+			handler.epbsPool.ProposerPreferences.Add(
+				pool.ProposerPreferencesKey{Slot: tc.slot, DependentRoot: tc.dependentRoot},
+				&cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+					ProposalSlot: tc.slot, DependentRoot: tc.dependentRoot, ValidatorIndex: tc.validator,
+					FeeRecipient: common.Address{0x22},
+				}},
+			)
+
+			require.Equal(t, registered, handler.feeRecipientForProposal(baseState, targetSlot, proposerIndex, tc.version))
+		})
+	}
+}
+
 func TestFeeRecipientWarnsOncePerProposer(t *testing.T) {
 	logs := captureProductionLogs(t)
 	warned, err := lru.New[uint64, struct{}]("unregisteredProposers", 8)
@@ -4629,20 +4730,20 @@ func TestFeeRecipientWarnsOncePerProposer(t *testing.T) {
 
 	registered := common.Address{0x11}
 	params.SetFeeRecipient(7, registered)
-	require.Equal(t, registered, a.feeRecipientForProposal(7, 1))
+	require.Equal(t, registered, a.feeRecipientForProposal(nil, 1, 7, clparams.FuluVersion))
 	require.NotContains(t, logs(), "lvl=warn", "a registered proposer must stay quiet")
 
 	// Giving the fees away is worth saying, but only once: a chain whose validator never registers
 	// one would otherwise warn on every proposal.
-	require.Equal(t, common.Address{}, a.feeRecipientForProposal(9, 2))
-	require.Equal(t, common.Address{}, a.feeRecipientForProposal(9, 3))
+	require.Equal(t, common.Address{}, a.feeRecipientForProposal(nil, 2, 9, clparams.FuluVersion))
+	require.Equal(t, common.Address{}, a.feeRecipientForProposal(nil, 3, 9, clparams.FuluVersion))
 	require.Equal(t, 1, strings.Count(logs(), "lvl=warn"))
 
-	require.Equal(t, common.Address{}, a.feeRecipientForProposal(10, 4))
+	require.Equal(t, common.Address{}, a.feeRecipientForProposal(nil, 4, 10, clparams.FuluVersion))
 	require.Equal(t, 2, strings.Count(logs(), "lvl=warn"), "a different proposer is worth saying again")
 
 	// Alternating proposers must not each reset the other: 9 has already been reported.
-	require.Equal(t, common.Address{}, a.feeRecipientForProposal(9, 5))
+	require.Equal(t, common.Address{}, a.feeRecipientForProposal(nil, 5, 9, clparams.FuluVersion))
 	require.Equal(t, 2, strings.Count(logs(), "lvl=warn"))
 }
 
@@ -4656,7 +4757,7 @@ func TestFeeRecipientWarnsOncePerProposerUnderConcurrentRequests(t *testing.T) {
 	// find the proposer absent and report it.
 	var wg sync.WaitGroup
 	for range 128 {
-		wg.Go(func() { a.feeRecipientForProposal(9, 2) })
+		wg.Go(func() { a.feeRecipientForProposal(nil, 2, 9, clparams.FuluVersion) })
 	}
 	wg.Wait()
 

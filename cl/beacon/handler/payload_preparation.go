@@ -443,15 +443,15 @@ func (a *ApiHandler) preparePayloadLoopWith(
 	}
 }
 
-// preparationKey identifies the inputs of a settled attempt. Comparing the effective gas limit
-// avoids repeating state work for unrelated preference updates. Attribute presence is part of
-// the key: an omitted gas limit and an explicit zero are different build requests.
+// preparationKey identifies the effective inputs of a settled attempt.
+// An omitted gas limit and an explicit zero are different build requests.
 type preparationKey struct {
 	targetSlot          uint64
 	headRoot            common.Hash
 	validatorGeneration uint64
 	gloasPath           gloasPayloadPath
 	proposerIndex       uint64
+	feeRecipient        common.Address
 	targetGasLimit      hexutil.Uint64
 	targetGasLimitSet   bool
 }
@@ -613,6 +613,10 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 		baseState, targetSlot, proposerIndex, stateVersion,
 	)
 	key.setTargetGasLimit(targetGasLimit)
+	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
+		feeRecipient = a.feeRecipientForProposal(baseState, targetSlot, proposerIndex, stateVersion)
+		key.feeRecipient = feeRecipient
+	}
 	// The loop-level path is an early filter. Resolve it again after state work because the Gloas
 	// decision can change without changing the beacon head root.
 	payloadSource, err := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
@@ -688,10 +692,15 @@ func (a *ApiHandler) precheckPreparationInputs(key preparationKey) (preparationK
 		// makes this check possible without copying or advancing the state.
 		if headState.Version().AfterOrEqual(clparams.FuluVersion) {
 			var err error
-			key.proposerIndex, _, err = a.registeredProposer(headState, key.targetSlot)
+			key.proposerIndex, key.feeRecipient, err = a.registeredProposer(headState, key.targetSlot)
 			if err != nil {
 				return err
 			}
+		} else {
+			key.feeRecipient, _ = a.validatorParams.GetFeeRecipient(key.proposerIndex)
+		}
+		if preference := a.proposerPreferencesForProposal(headState, key.targetSlot, key.proposerIndex, clparams.GloasVersion); preference != nil {
+			key.feeRecipient = preference.FeeRecipient
 		}
 		key.setTargetGasLimit(a.targetGasLimitForProposal(headState, key.targetSlot, key.proposerIndex, clparams.GloasVersion))
 		return nil
@@ -939,18 +948,29 @@ func (a *ApiHandler) targetGasLimitForProposal(
 		gasLimit := hexutil.Uint64(parentBid.GasLimit)
 		targetGasLimit = &gasLimit
 	}
-	if a.epbsPool == nil {
-		return targetGasLimit
+	if preference := a.proposerPreferencesForProposal(baseState, targetSlot, proposerIndex, stateVersion); preference != nil {
+		gasLimit := hexutil.Uint64(preference.TargetGasLimit)
+		return &gasLimit
 	}
-	dependentRoot, err := state.GetProposerDependentRoot(baseState, proposalEpoch)
+	return targetGasLimit
+}
+
+func (a *ApiHandler) proposerPreferencesForProposal(
+	baseState *state.CachingBeaconState,
+	targetSlot, proposerIndex uint64,
+	stateVersion clparams.StateVersion,
+) *cltypes.ProposerPreferences {
+	if stateVersion.Before(clparams.GloasVersion) || a.epbsPool == nil {
+		return nil
+	}
+	dependentRoot, err := state.GetProposerDependentRoot(baseState, state.GetEpochAtSlot(a.beaconChainCfg, targetSlot))
 	if err != nil {
-		log.Trace("Skipping proposer preferences target gas limit", "slot", targetSlot, "err", err)
-		return targetGasLimit
+		log.Trace("Skipping proposer preferences", "slot", targetSlot, "err", err)
+		return nil
 	}
 	preference, ok := a.epbsPool.GetPreference(targetSlot, dependentRoot)
 	if !ok || preference == nil || preference.Message == nil || preference.Message.ValidatorIndex != proposerIndex {
-		return targetGasLimit
+		return nil
 	}
-	gasLimit := hexutil.Uint64(preference.Message.TargetGasLimit)
-	return &gasLimit
+	return preference.Message
 }

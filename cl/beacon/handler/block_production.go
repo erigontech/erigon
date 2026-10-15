@@ -435,7 +435,14 @@ func (a *ApiHandler) expectedWithdrawals(
 
 // feeRecipientForProposal resolves the fee recipient, warning once per proposer when there is none:
 // building with the zero address gives that block's fees away.
-func (a *ApiHandler) feeRecipientForProposal(proposerIndex, targetSlot uint64) common.Address {
+func (a *ApiHandler) feeRecipientForProposal(
+	baseState *state.CachingBeaconState,
+	targetSlot, proposerIndex uint64,
+	stateVersion clparams.StateVersion,
+) common.Address {
+	if preference := a.proposerPreferencesForProposal(baseState, targetSlot, proposerIndex, stateVersion); preference != nil {
+		return preference.FeeRecipient
+	}
 	feeRecipient, registered := a.validatorParams.GetFeeRecipient(proposerIndex)
 	if registered {
 		return feeRecipient
@@ -448,7 +455,7 @@ func (a *ApiHandler) feeRecipientForProposal(proposerIndex, targetSlot uint64) c
 		firstTime = !alreadyWarned
 	}
 	if firstTime {
-		log.Warn("BlockProduction: no fee recipient from prepare_beacon_proposer, using zero address",
+		log.Warn("BlockProduction: no fee recipient for proposer, using zero address",
 			"proposerIndex", proposerIndex, "slot", targetSlot)
 	}
 	return common.Address{}
@@ -1425,7 +1432,7 @@ func (a *ApiHandler) requestConfiguredBuilderBids(
 	if err != nil {
 		return nil
 	}
-	expectedFeeRecipient := a.feeRecipientForProposal(proposerIndex, targetSlot)
+	expectedFeeRecipient := a.feeRecipientForProposal(baseState, targetSlot, proposerIndex, clparams.GloasVersion)
 	targetGasLimit := parentBid.GasLimit
 	if configured := a.targetGasLimitForProposal(baseState, targetSlot, proposerIndex, clparams.GloasVersion); configured != nil {
 		targetGasLimit = uint64(*configured)
@@ -1736,7 +1743,7 @@ func (a *ApiHandler) produceBeaconBody(
 		if options := gloasBlockOptionsFromContext(ctx); options != nil && options.payloadFeeRecipient != nil {
 			feeRecipient = *options.payloadFeeRecipient
 		} else {
-			feeRecipient = a.feeRecipientForProposal(proposerIndex, targetSlot)
+			feeRecipient = a.feeRecipientForProposal(baseState, targetSlot, proposerIndex, stateVersion)
 		}
 		withdrawals, err := a.expectedWithdrawals(baseState, gloasWithdrawalsState, targetSlot)
 		if err != nil {
