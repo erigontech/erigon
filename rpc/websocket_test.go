@@ -1146,5 +1146,5 @@ func TestWebsocketLargeAnswerStreamsInFrames(t *testing.T) {
 	require.NoError(t, <-done)
 	require.Equal(t, want.Len(), len(data))
 	require.Equal(t, want.Bytes(), data)
-	require.Less(t, lw.largest.Load(), int64(2*jsonstream.FlushThreshold), "the message reached the socket in one write")
+	require.Less(t, lw.largest.Load(), int64(messageBufferCap+2*jsonstream.FlushThreshold), "the message reached the socket in one write")
 }

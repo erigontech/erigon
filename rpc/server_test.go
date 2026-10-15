@@ -187,13 +187,21 @@ func TestServerShortLivedConn(t *testing.T) {
 }
 
 // largestWriteConn records the largest single write to the socket: a transport that streams
-// never hands over more than a threshold's worth at once.
+// never hands over more than the message cap and a threshold at once.
 type largestWriteConn struct {
 	net.Conn
-	largest atomic.Int64
+	largest   atomic.Int64
+	writes    atomic.Int64
+	deadlines atomic.Int64
+}
+
+func (c *largestWriteConn) SetWriteDeadline(t time.Time) error {
+	c.deadlines.Add(1)
+	return c.Conn.SetWriteDeadline(t)
 }
 
 func (c *largestWriteConn) Write(p []byte) (int, error) {
+	c.writes.Add(1)
 	for {
 		prev := c.largest.Load()
 		if int64(len(p)) <= prev || c.largest.CompareAndSwap(prev, int64(len(p))) {
@@ -228,5 +236,48 @@ func TestLargeAnswerStreamsOverCodec(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(<-lines), &resp))
 	require.Len(t, resp.Result, n)
-	require.Less(t, conn.largest.Load(), int64(2*jsonstream.FlushThreshold), "the answer reached the socket in one piece")
+	require.Less(t, conn.largest.Load(), int64(messageBufferCap+2*jsonstream.FlushThreshold), "the answer reached the socket in one piece")
+}
+
+// streamHexesOverCodec serves one test_streamHexes call of n items over a pipe and returns
+// the connection the server wrote to.
+func streamHexesOverCodec(t *testing.T, n int) *largestWriteConn {
+	t.Helper()
+	server := newTestServer(log.New())
+	defer server.Stop()
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	conn := &largestWriteConn{Conn: serverConn}
+	go server.ServeCodec(NewCodec(conn), 0)
+
+	lines := make(chan string, 1)
+	go func() {
+		line, err := bufio.NewReaderSize(clientConn, 1<<20).ReadString('\n')
+		require.NoError(t, err)
+		lines <- line
+	}()
+	_, err := fmt.Fprintf(clientConn, `{"jsonrpc":"2.0","id":1,"method":"test_streamHexes","params":[%d]}`+"\n", n)
+	require.NoError(t, err)
+	var resp struct {
+		Result []string `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(<-lines), &resp))
+	require.Len(t, resp.Result, n)
+	return conn
+}
+
+// An answer past the flush threshold but under the message cap is held and sent in one
+// write, so the connection is taken only for that write, not while the method runs.
+func TestAnswerUnderTheCapIsOneWrite(t *testing.T) {
+	conn := streamHexesOverCodec(t, 40_000)
+	require.Greater(t, conn.largest.Load(), int64(jsonstream.FlushThreshold), "the answer must be past the flush threshold")
+	require.Equal(t, int64(1), conn.writes.Load(), "an answer under the cap reaches the socket in one write")
+}
+
+// A streamed answer gets one write deadline for the whole message, so a slow reader cannot
+// keep the connection by draining one chunk per timeout.
+func TestStreamedAnswerKeepsOneDeadline(t *testing.T) {
+	conn := streamHexesOverCodec(t, 400_000)
+	require.Greater(t, conn.writes.Load(), int64(1), "the answer must stream")
+	require.Equal(t, int64(1), conn.deadlines.Load(), "one deadline per message")
 }

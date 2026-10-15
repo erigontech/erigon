@@ -32,6 +32,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -446,37 +448,78 @@ func (c *jsonCodec) WriteStream(ctx context.Context, write func(*jsonstream.Stre
 	return err
 }
 
-// messageWriter opens the message and takes the write lock at the first write, so an answer
-// under the flush threshold holds the connection only for its one write, and a larger one
-// from its first flush until it is complete. The stream stops writing at the first error.
+// messageWriter holds an answer up to messageBufferCap and sends it in one write when
+// complete, so the connection is taken only for that write; a larger answer opens the
+// message at the first chunk past the cap and streams until it is complete. One write
+// deadline covers the whole message. The stream stops writing at the first error.
 type messageWriter struct {
 	c   *jsonCodec
 	ctx context.Context
-	w   io.WriteCloser
+	buf []byte         // held until the message opens
+	w   io.WriteCloser // nil until the message opens
 }
+
+// messageBufferCap bounds what a response holds in memory before it streams. Past it the
+// connection is held until the method completes, so it is well above a typical answer.
+const messageBufferCap = int(4 * datasize.MB)
+
+var messageBuffers = sync.Pool{New: func() any { return make([]byte, 0, jsonstream.FlushThreshold) }}
 
 func (m *messageWriter) Write(p []byte) (int, error) {
 	if m.w == nil {
-		m.c.encMu.Lock()
-		w, err := m.c.openMessage(m.ctx)
-		if err != nil {
-			m.c.encMu.Unlock()
+		if len(m.buf)+len(p) <= messageBufferCap {
+			if m.buf == nil {
+				m.buf = messageBuffers.Get().([]byte)
+			}
+			m.buf = append(m.buf, p...)
+			return len(p), nil
+		}
+		if err := m.open(); err != nil {
 			return 0, err
 		}
-		m.w = w
-	}
-	if err := m.c.conn.SetWriteDeadline(m.c.writeDeadline(m.ctx)); err != nil {
-		return 0, err
+		if _, err := m.w.Write(m.buf); err != nil {
+			return 0, err
+		}
+		m.buf = m.buf[:0]
 	}
 	return m.w.Write(p)
 }
 
+// open takes the write lock, which Close releases, and arms the message's one deadline.
+func (m *messageWriter) open() error {
+	m.c.encMu.Lock()
+	w, err := m.c.openMessage(m.ctx)
+	if err == nil {
+		err = m.c.conn.SetWriteDeadline(m.c.writeDeadline(m.ctx))
+	}
+	if err != nil {
+		m.c.encMu.Unlock()
+		return err
+	}
+	m.w = w
+	return nil
+}
+
 func (m *messageWriter) Close() error {
+	defer m.release()
 	if m.w == nil {
-		return nil
+		if err := m.open(); err != nil {
+			return err
+		}
+		if _, err := m.w.Write(m.buf); err != nil {
+			m.c.encMu.Unlock()
+			return err
+		}
 	}
 	defer m.c.encMu.Unlock()
 	return m.w.Close()
+}
+
+func (m *messageWriter) release() {
+	if m.buf != nil && cap(m.buf) <= messageBufferCap+jsonstream.FlushThreshold {
+		messageBuffers.Put(m.buf[:0])
+	}
+	m.buf = nil
 }
 
 // coalesce runs send with the socket held, so the messages it writes leave in one socket write.
