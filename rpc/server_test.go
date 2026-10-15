@@ -220,7 +220,7 @@ func TestLargeAnswerStreamsOverCodec(t *testing.T) {
 		require.NoError(t, err)
 		lines <- line
 	}()
-	_, err := io.WriteString(clientConn, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"test_streamHexes","params":[%d]}`+"\n", n))
+	_, err := fmt.Fprintf(clientConn, `{"jsonrpc":"2.0","id":1,"method":"test_streamHexes","params":[%d]}`+"\n", n)
 	require.NoError(t, err)
 
 	var resp struct {

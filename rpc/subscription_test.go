@@ -407,9 +407,11 @@ func (w *captureWriter) WriteJSON(_ context.Context, v any) error {
 	w.got = bytes.Clone(v.(rawResponse))
 	return nil
 }
+
 func (w *captureWriter) WriteStream(_ context.Context, write func(*jsonstream.Stream)) error {
 	return jsonstream.MarshalTo(w, marshalFunc(write))
 }
+
 func (w *captureWriter) Write(p []byte) (int, error) { w.got = append(w.got, p...); return len(p), nil }
 func (*captureWriter) closed() <-chan any            { return nil }
 func (*captureWriter) remoteAddr() string            { return "" }
