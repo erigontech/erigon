@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -83,6 +82,11 @@ func (r *RemoteBlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx)
 		return 0, err
 	}
 
+	// Older servers report 1 for an unpruned MDBX range even though genesis
+	// is retained.
+	if reply.BlockNum == 1 {
+		return 0, nil
+	}
 	return reply.BlockNum, nil
 }
 
@@ -480,20 +484,28 @@ func (r *BlockReader) FrozenBlocksObserved() (uint64, bool) { return r.sn.Blocks
 // must ask the same generation it reads from, not the live set that may be ahead of it.
 func (r *BlockReader) FrozenBlocksInView(tx kv.Getter) uint64 { return r.view(tx).BlocksAvailable() }
 
+// MinimumBlockAvailable returns a best-effort block-availability floor from tx's
+// pinned snapshots, falling back to MDBX when the snapshot set is incomplete.
+// If MDBX has no body after genesis, it keeps the bound from the available snapshot
+// types; this does not guarantee that a complete block exists at that height.
+// tx must carry a pinned block-files view, even for MDBX-only reads.
+// A nil tx or a tx without that view causes a panic.
 func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error) {
+	view := r.view(tx)
 	var snapshotMin uint64
-	if r.FrozenBlocks() > 0 {
-		// Frozen segments that leave no block complete are not an answer on their own: the
-		// database is what still holds one, where it holds anything at all.
-		segmentsMin, complete := r.sn.SegmentsMin()
-		if complete {
-			return segmentsMin, nil
+	if view.BlocksAvailable() > 0 {
+		complete := true
+		for _, snapType := range snaptype2.BlockSnapshotTypes {
+			segments := view.Segments(snapType)
+			if len(segments) == 0 {
+				complete = false
+				continue
+			}
+			snapshotMin = max(snapshotMin, segments[0].From())
 		}
-		snapshotMin = segmentsMin
-	}
-
-	if tx == nil {
-		return 0, errors.New("MinimumBlockAvailable: no snapshot or DB available")
+		if complete {
+			return snapshotMin, nil
+		}
 	}
 
 	dbMinBlock, found, err := r.findFirstCompleteBlock(tx)
@@ -507,9 +519,8 @@ func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint
 	return dbMinBlock, nil
 }
 
-// findFirstCompleteBlock finds the first block (after genesis) where block body is
-// available, and whether there is one: a database holding nothing beyond genesis gives no
-// answer, which is not the same as answering genesis.
+// findFirstCompleteBlock reports the retained MDBX range, including genesis when
+// block 1 is present. Genesis alone gives no answer about the contiguous range.
 func (r *BlockReader) findFirstCompleteBlock(tx kv.Tx) (uint64, bool, error) {
 	secondKey, err := rawdbv3.SecondKey(tx, kv.BlockBody)
 	if err != nil {
@@ -521,6 +532,9 @@ func (r *BlockReader) findFirstCompleteBlock(tx kv.Tx) (uint64, bool, error) {
 	}
 
 	result := binary.BigEndian.Uint64(secondKey[:8])
+	if result == 1 {
+		result = 0
+	}
 	return result, true, nil
 }
 func (r *BlockReader) FreezingCfg() ethconfig.BlocksFreezing { return r.sn.Cfg() }

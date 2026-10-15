@@ -843,12 +843,16 @@ func (tx *tx) historyStartFrom(name kv.Domain, roTx kv.Tx) uint64 {
 	return tx.aggtx.HistoryStartFrom(name, roTx)
 }
 
-func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
-	return tx.historyStartFrom(name, tx.Tx)
+func (tx *Tx) HistoryStartFrom(name kv.Domain) (uint64, error) {
+	return tx.historyStartFrom(name, tx.Tx), nil
 }
 
-func (tx *RwTx) HistoryStartFrom(name kv.Domain) uint64 {
-	return tx.historyStartFrom(name, tx.RwTx)
+// HistoryFilesGeneration identifies pinned files, not the live aggregator view.
+// Combine it with ViewID when caching values that can also come from MDBX.
+func (tx *Tx) HistoryFilesGeneration() uint64 { return tx.aggtx.Generation() }
+
+func (tx *RwTx) HistoryStartFrom(name kv.Domain) (uint64, error) {
+	return tx.historyStartFrom(name, tx.RwTx), nil
 }
 
 func (tx *Tx) DomainProgress(domain kv.Domain) uint64 {

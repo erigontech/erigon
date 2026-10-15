@@ -234,6 +234,7 @@ type mockOracleBackend struct {
 	frozen         uint64
 	canonicalErr   error
 	prepareForkErr error
+	rewardsErr     error
 	headerCalls    atomic.Int32
 	forkCalls      atomic.Int32
 	pending        *types.Block
@@ -292,7 +293,7 @@ func (m *mockOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Recei
 }
 
 func (m *mockOracleBackend) CheckBlockRewardsAvailable(_ context.Context, _ uint64) error {
-	return nil
+	return m.rewardsErr
 }
 
 func (m *mockOracleBackend) CanonicalHashes(_ context.Context, from, to uint64) ([]common.Hash, error) {
@@ -339,6 +340,17 @@ func (m *mockOracleBackend) BlockByHashNumber(ctx context.Context, hash common.H
 func (m *mockOracleBackend) Fork(_ context.Context) (gasprice.OracleBackend, func(), error) {
 	m.forkCalls.Add(1)
 	return nil, nil, nil // sequential mode
+}
+
+func TestFeeHistoryPropagatesRewardAvailabilityError(t *testing.T) {
+	head := types.NewEmptyHeaderForAssembling()
+	head.Number.SetUint64(10)
+	wantErr := errors.New("history lookup failed")
+	backend := &mockOracleBackend{head: head, rewardsErr: wantErr}
+	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{}, jsonrpc.NewGasPriceCache(), gasprice.NewFeeHistoryCache(), log.New())
+
+	_, _, _, _, _, _, err := oracle.FeeHistory(t.Context(), 1, rpc.LatestBlockNumber, []float64{50})
+	require.ErrorIs(t, err, wantErr)
 }
 
 // TestFeeHistory_CanonicalHashErrorDegradesToUncached pins that a transient

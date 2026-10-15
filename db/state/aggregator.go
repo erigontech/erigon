@@ -1834,6 +1834,7 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 // FilesDelete flow: Merge/Prune can mark old files as "ready for delete". Then last reader traversing linked-list of aggregatorVisible objects and perform real FileDelete
 // See: docs/plans/20260525-lockfree-file-reclamation-spec.md
 type aggregatorVisible struct {
+	generation   uint64
 	d            [kv.DomainLen]*domainVisible
 	dh           [kv.DomainLen]visibleFiles      // per-domain History visible files
 	dhii         [kv.DomainLen]*iiVisible        // per-domain History.InvertedIndex visible
@@ -1891,6 +1892,7 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	}
 
 	old := a.visible.Load()
+	next.generation = old.generation + 1
 	old.retired = retired
 	old.next = next
 	a.visible.Store(next)
@@ -2462,6 +2464,9 @@ type AggregatorRoTx struct {
 
 	_leakID uint64 // set only if TRACE_AGG=true
 }
+
+// Generation identifies the immutable file view pinned by this transaction.
+func (at *AggregatorRoTx) Generation() uint64 { return at.visible.generation }
 
 // CheckFilesDBGap detects a gap between the snapshot files and the DB. It can arise from
 // snapshot/DB management operations — e.g. `seg rm-state --latest` and then starting
