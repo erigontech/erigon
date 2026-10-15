@@ -457,6 +457,32 @@ func TestVerifyUnverifiedGloasPayloadsAsksTheELOnceBelowItsValidationDepth(t *te
 	require.NotContains(t, cfg.gloasSkippedValidation, headRoot)
 }
 
+// Only the EL's own NotValidated answer is final below the depth. An error answer for a root already
+// recorded NotValidated keeps that status, but the payload is requeued and checked again.
+func TestVerifyUnverifiedGloasPayloadsRetriesAnErrorBelowTheELValidationDepth(t *testing.T) {
+	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	engine.newPayloadFn = func(context.Context, *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
+		return execution_client.PayloadStatusNone, errors.New("insert failed")
+	}
+	headBlock := graph.parents[headRoot]
+	payload := graph.envelopes[headRoot].Message.Payload
+	const number = 10
+	payload.BlockNumber = number
+	delete(graph.parents, headRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
+	cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(headRoot, payload.BlockHash, execution_client.PayloadStatusNotValidated, payload.GasLimit)
+	cfg.gloasVerificationCursor = headRoot
+	cfg.executionClient = validationDepthEngine{testExecutionEngine: engine, below: number + 1}
+
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+
+	require.Equal(t, 2, engine.newPayloadCalls)
+	require.NotContains(t, cfg.gloasSkippedValidation, headRoot)
+	require.NotEmpty(t, cfg.forkChoice.DrainPendingELPayloads())
+}
+
 // The roots recorded below the EL's validation depth are forgotten once finalized.
 func TestVerifyUnverifiedGloasPayloadsPrunesSkippedRootsAtFinalization(t *testing.T) {
 	cfg, _, _, _, _, _ := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)

@@ -1240,6 +1240,48 @@ func TestPostExecutionPayloadEnvelopeRetriesAfterBroadcastFailure(t *testing.T) 
 	require.EqualValues(t, 2, integrations.Load())
 }
 
+// A retried POST whose validation is interrupted keeps the retry record, so the client can retry the
+// persisted envelope again.
+func TestPostExecutionPayloadEnvelopeKeepsTheRetryRecordWhenARetryIsInterrupted(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.gossipManager = gossip_mock.NewMockGossip(gomock.NewController(t))
+	handler.sentinel = &nonNilSentinelClient{}
+	gomock.InOrder(
+		handler.gossipManager.(*gossip_mock.MockGossip).EXPECT().Publish(
+			gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any(),
+		).Return(errors.New("gossip unavailable")),
+		handler.gossipManager.(*gossip_mock.MockGossip).EXPECT().Publish(
+			gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any(),
+		).Return(nil).AnyTimes(),
+	)
+	var validationErr error
+	fcu.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+		return validationErr
+	}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	post := func() *httptest.ResponseRecorder {
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+		request.Header.Set("Eth-Blob-Data-Included", "false")
+		recorder := httptest.NewRecorder()
+		handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+		return recorder
+	}
+
+	first := post()
+	require.Equal(t, http.StatusInternalServerError, first.Code, first.Body.String())
+	fcu.Envelopes[common.Hash{}] = envelope
+	validationErr = fmt.Errorf("%w: %w", forkchoice.ErrPayloadValidationInterrupted, context.DeadlineExceeded)
+	interrupted := post()
+	require.Equal(t, http.StatusAccepted, interrupted.Code, interrupted.Body.String())
+	validationErr = nil
+	last := post()
+	require.Equal(t, http.StatusOK, last.Code, last.Body.String())
+}
+
 func TestPostExecutionPayloadEnvelopeBroadcastFailureDoesNotAuthorizeDifferentEnvelope(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.gossipManager = gossip_mock.NewMockGossip(gomock.NewController(t))

@@ -1019,11 +1019,11 @@ func ensureStoredParentPayloadAccepted(
 }
 
 // recordGloasPayloadRetryResult records the EL's answer and requeues a payload without a final
-// one. A NotValidated answer for a block below depth is final: the EL does not validate it.
+// status.
 func recordGloasPayloadRetryResult(
 	store gloasPayloadRetryResultStore,
 	payload forkchoice.PendingELPayload,
-	status execution_client.PayloadStatus,
+	answer execution_client.PayloadStatus,
 	depth uint64,
 ) (execution_client.PayloadStatus, bool) {
 	if !validPendingGloasPayload(payload) {
@@ -1031,11 +1031,19 @@ func recordGloasPayloadRetryResult(
 	}
 	beaconRoot := payload.Envelope.Message.BeaconBlockRoot
 	executionPayload := payload.Envelope.Message.Payload
-	status, retained := store.MarkPayloadStatusAndGasLimitIfRetained(beaconRoot, executionPayload.BlockHash, status, executionPayload.GasLimit)
-	if retained && (status == execution_client.PayloadStatusNone || status == execution_client.PayloadStatusNotValidated && executionPayload.BlockNumber >= depth) {
+	status, retained := store.MarkPayloadStatusAndGasLimitIfRetained(beaconRoot, executionPayload.BlockHash, answer, executionPayload.GasLimit)
+	pending := status == execution_client.PayloadStatusNone || status == execution_client.PayloadStatusNotValidated
+	if retained && pending && !notValidatedBelowDepth(answer, status, executionPayload.BlockNumber, depth) {
 		store.RequeuePendingELPayload(payload)
 	}
 	return status, retained
+}
+
+// notValidatedBelowDepth reports a block below the EL's validation depth that the EL itself answered
+// NotValidated, with that status recorded: the EL does not validate it, so a retry changes nothing.
+// A recorded NotValidated alone is not enough, because it outlives an error answer.
+func notValidatedBelowDepth(answer, recorded execution_client.PayloadStatus, blockNumber, depth uint64) bool {
+	return answer == execution_client.PayloadStatusNotValidated && recorded == execution_client.PayloadStatusNotValidated && blockNumber < depth
 }
 
 // skippedValidation is a payload the EL answered NotValidated below its validation depth.
@@ -1106,6 +1114,9 @@ func isGloasPayloadKnownInvalid(cfg *Cfg, envelope *cltypes.SignedExecutionPaylo
 
 func drainPendingGloasPayloads(ctx context.Context, cfg *Cfg) {
 	pending := cfg.forkChoice.DrainPendingELPayloadsLimit(maxPendingGloasPayloadsPerCycle)
+	if len(pending) == 0 {
+		return
+	}
 	depth := elValidationDepth(ctx, cfg.executionClient)
 	requeueFrom := func(i int) {
 		for _, deferred := range pending[i:] {
@@ -1293,23 +1304,23 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 			cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(item.root, execHash, execution_client.PayloadStatusInvalidated, envelope.Message.Payload.GasLimit)
 			return true
 		}
-		status, err := retryGloasPayloadWithEL(ctx, cfg, item.block, envelope)
+		answer, err := retryGloasPayloadWithEL(ctx, cfg, item.block, envelope)
 		if errors.Is(err, forkchoice.ErrPayloadValidationInterrupted) {
 			return false
 		}
 		if err != nil {
-			log.Warn("[chainTipSync] GLOAS verification sweep NewPayload failed", "slot", item.block.Block.Slot, "blockRoot", item.root, "status", status, "err", err)
+			log.Warn("[chainTipSync] GLOAS verification sweep NewPayload failed", "slot", item.block.Block.Slot, "blockRoot", item.root, "status", answer, "err", err)
 		}
 		status, retained := recordGloasPayloadRetryResult(
 			cfg.forkChoice,
 			forkchoice.PendingELPayload{Block: item.block, Envelope: envelope},
-			status,
+			answer,
 			depth,
 		)
 		if !retained {
 			return true
 		}
-		if blockNumber := envelope.Message.Payload.BlockNumber; status == execution_client.PayloadStatusNotValidated && blockNumber < depth {
+		if blockNumber := envelope.Message.Payload.BlockNumber; notValidatedBelowDepth(answer, status, blockNumber, depth) {
 			cfg.gloasSkippedValidation[item.root] = skippedValidation{slot: item.block.Block.Slot, blockNumber: blockNumber}
 		}
 		if status == execution_client.PayloadStatusInvalidated {
@@ -1375,22 +1386,23 @@ func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
 		log.Warn("[chainTipSync] invalid anchor envelope during payload retry", "anchorRoot", anchorRoot, "err", err)
 		return
 	}
-	status, err := validateAnchorPayloadWithEL(ctx, cfg, bid, envelope)
-	if err != nil {
-		log.Warn("[chainTipSync] anchor payload NewPayload retry failed", "anchorRoot", anchorRoot, "status", status, "err", err)
+	answer, err := validateAnchorPayloadWithEL(ctx, cfg, bid, envelope)
+	if errors.Is(err, forkchoice.ErrPayloadValidationInterrupted) {
+		return
 	}
-	execHash := envelope.Message.Payload.BlockHash
-	var retained bool
-	status, retained = cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(
+	if err != nil {
+		log.Warn("[chainTipSync] anchor payload NewPayload retry failed", "anchorRoot", anchorRoot, "status", answer, "err", err)
+	}
+	status, retained := cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(
 		anchorRoot,
-		execHash,
-		status,
+		envelope.Message.Payload.BlockHash,
+		answer,
 		envelope.Message.Payload.GasLimit,
 	)
 	if !retained {
 		return
 	}
-	if blockNumber := envelope.Message.Payload.BlockNumber; status == execution_client.PayloadStatusNotValidated && blockNumber < depth {
+	if blockNumber := envelope.Message.Payload.BlockNumber; notValidatedBelowDepth(answer, status, blockNumber, depth) {
 		cfg.gloasSkippedAnchorValidation = skippedAnchorValidation{root: anchorRoot, blockNumber: blockNumber}
 	}
 	if status == execution_client.PayloadStatusInvalidated {

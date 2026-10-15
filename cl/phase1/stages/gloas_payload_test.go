@@ -1119,10 +1119,25 @@ var _ validationDepthEL = (*execution_client.ExecutionClientDirect)(nil)
 type validationDepthEngine struct {
 	*testExecutionEngine
 	below uint64
+	reads *int
 }
 
 func (e validationDepthEngine) SkipsValidationBelow(context.Context) uint64 {
+	if e.reads != nil {
+		*e.reads++
+	}
 	return e.below
+}
+
+// An empty drain does not read the EL head for the depth.
+func TestDrainPendingGloasPayloadsSkipsTheDepthReadWithoutPayloads(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	reads := 0
+	engine := validationDepthEngine{testExecutionEngine: &testExecutionEngine{}, below: 1, reads: &reads}
+
+	drainPendingGloasPayloads(t.Context(), &Cfg{beaconCfg: &cfg, executionClient: engine, gloasPayloadValidator: engine, forkChoice: &forkchoice.ForkChoiceStore{}})
+
+	require.Zero(t, reads)
 }
 
 // A NotValidated answer is requeued unless the block is below the EL's validation depth: the direct
@@ -1208,6 +1223,55 @@ func TestRetryUnverifiedAnchorPayloadAsksTheELOnceBelowItsValidationDepth(t *tes
 	retryUnverifiedAnchorPayload(t.Context(), stageCfg)
 	retryUnverifiedAnchorPayload(t.Context(), stageCfg)
 	require.Equal(t, 3, base.newPayloadCalls, "an EL without a validation depth is asked every time")
+}
+
+// Only the EL's own NotValidated answer ends the anchor retries below the depth. A call cut short
+// by our own context, or an error answer, leaves the next cycle to ask the EL again.
+func TestRetryUnverifiedAnchorPayloadRetriesWithoutANotValidatedAnswer(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		interrupted bool
+	}{
+		{name: "interrupted", interrupted: true},
+		{name: "error answer"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, st, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
+			cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch = 0, 0, 0
+			cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch = 0, 0, 0
+			st.SetLatestExecutionPayloadBid(bid)
+			anchorRoot, err := st.BlockRoot()
+			require.NoError(t, err)
+			env.Message.BeaconBlockRoot = anchorRoot
+			privKey, err := bls.NewPrivateKeyFromIKM([]byte("01234567890123456789012345678901"))
+			require.NoError(t, err)
+			signAnchorEnvelope(t, st, privKey, env, bid.Slot)
+			ctx, cancel := context.WithCancel(t.Context())
+			base := &testExecutionEngine{newPayloadFn: func(context.Context, *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
+				if tc.interrupted {
+					cancel()
+					return execution_client.PayloadStatusNone, ctx.Err()
+				}
+				return execution_client.PayloadStatusNone, errors.New("insert failed")
+			}}
+			store := newAnchorForkChoiceStore(t, cfg, st, base)
+			require.NoError(t, store.StoreAnchorEnvelope(anchorRoot, env))
+			stageCfg := &Cfg{
+				beaconCfg:             cfg,
+				forkChoice:            store,
+				executionClient:       validationDepthEngine{testExecutionEngine: base, below: env.Message.Payload.BlockNumber + 1},
+				gloasPayloadValidator: base,
+			}
+
+			retryUnverifiedAnchorPayload(ctx, stageCfg)
+			require.Zero(t, stageCfg.gloasSkippedAnchorValidation)
+
+			base.newPayloadFn = nil
+			base.payloadStatus = execution_client.PayloadStatusNotValidated
+			retryUnverifiedAnchorPayload(t.Context(), stageCfg)
+			require.Equal(t, 2, base.newPayloadCalls, "the first call did not end the retries")
+		})
+	}
 }
 
 func TestDrainPendingGloasPayloadsRequeuesNotValidatedPayload(t *testing.T) {
