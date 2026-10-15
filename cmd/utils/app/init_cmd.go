@@ -54,6 +54,10 @@ participating.
 It expects the genesis file as argument.`,
 }
 
+// InitGenesisHook, when set, adjusts the genesis init writes, after it is
+// read and before it is committed.
+var InitGenesisHook func(cliCtx *cli.Command, genesis *types.Genesis) error
+
 // initGenesis will initialise the given JSON format genesis file and writes it as
 // the zero'd block (i.e. genesis) or will fail hard if it can't succeed.
 func initGenesis(ctx context.Context, cliCtx *cli.Command) error {
@@ -96,6 +100,11 @@ func initGenesis(ctx context.Context, cliCtx *cli.Command) error {
 	}
 	if err := json.Unmarshal(raw, &probe); err == nil && len(probe.Config.Bor) > 0 && string(probe.Config.Bor) != "null" {
 		return fmt.Errorf("%s carries a 'bor' config: Polygon is not supported, see https://github.com/0xPolygon/erigon", genesisPath)
+	}
+	if InitGenesisHook != nil {
+		if err := InitGenesisHook(cliCtx, genesis); err != nil {
+			return fmt.Errorf("genesis file %s: %w", genesisPath, err)
+		}
 	}
 
 	// Open and initialise both full and light databases
