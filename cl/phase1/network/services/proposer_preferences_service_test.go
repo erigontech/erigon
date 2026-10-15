@@ -282,7 +282,7 @@ func TestProposerPreferencesServiceLookaheadNotKnown(t *testing.T) {
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrIgnore)
 	require.Contains(t, err.Error(), "not yet known")
 }
 
@@ -319,7 +319,7 @@ func TestProposerPreferencesServiceSlotAlreadyPassed(t *testing.T) {
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrIgnore)
 	require.Contains(t, err.Error(), "already passed")
 }
 
@@ -475,7 +475,7 @@ func TestProposerPreferencesServiceDuplicate(t *testing.T) {
 
 	err = service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrIgnore)
 	require.ErrorIs(t, err, ErrProposerPreferenceAlreadySeen)
 	require.Contains(t, err.Error(), "already seen proposer preferences")
 }
@@ -539,7 +539,7 @@ func TestProposerPreferencesServiceDependentRootStateMissing(t *testing.T) {
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrIgnore)
 	require.Contains(t, err.Error(), "state for dependent_root")
 
 	// Should NOT be marked as seen (validation failed)
