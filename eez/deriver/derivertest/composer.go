@@ -23,6 +23,7 @@ import (
 	"context"
 	"encoding/binary"
 	"math/big"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -40,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/eez/protocol/da"
 	eezrules "github.com/erigontech/erigon/eez/rules"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -49,6 +51,12 @@ var UserKey, _ = crypto.HexToECDSA("59c6995e998f97a5a0044966f0945389dc9e86dae88c
 
 // UserAddress is the account of UserKey.
 func UserAddress() common.Address { return crypto.PubkeyToAddress(UserKey.PublicKey) }
+
+// Config is the devnet chain configuration.
+func Config() *chain.Config {
+	eez.Register()
+	return networks.Devnet.Config
+}
 
 // NewL2 returns the devnet L2 at genesis in a fresh execution module, and
 // the Chain derivation drives it through.
@@ -237,6 +245,53 @@ func AppliedAll(b *protocol.ProofSystemBatch) *protocol.Settlement {
 	return s
 }
 
+// Resume returns the batch of a composer that saw L1 apply rival's entries
+// before from and settles the rest in the Sync block of that applied run:
+// the batch's span is sync alone, and each of its later entries commits to
+// the rival's Sync block with the effects up to it and sync's own
+// transactions appended.
+func (c *Composer) Resume(rival *Batch, from int, sync Block) *Batch {
+	c.t.Helper()
+	ctx := context.Background()
+	span := &da.Span{
+		TxCounts:      []uint32{uint32(len(sync.Txs))},
+		Beneficiaries: []common.Address{sync.Coinbase},
+		ExtraData:     [][]byte{sync.Extra},
+		Transactions:  sync.Txs,
+	}
+	payload := &deriver.Payload{Span: span, Actions: rival.Payload.Actions}
+	batch := *rival.Batch
+	batch.Entries = slices.Clone(rival.Batch.Entries)
+	batch.CallData = da.Encode((&da.Payload{RollupID: c.l2.RollupID, Operations: span.Encode(), Actions: payload.Actions}).Messages()...)
+	out := &Batch{Batch: &batch, Payload: payload, Syncs: slices.Clone(rival.Syncs[:from])}
+
+	base := rival.Syncs[from-1]
+	parent, err := c.Chain.HeaderByNumber(ctx, base.NumberU64()-1)
+	require.NoError(c.t, err)
+	nonce, err := c.Chain.Nonce(ctx, parent.Number.Uint64(), protocol.SystemAddress)
+	require.NoError(c.t, err)
+	existing := make([][]byte, len(base.Transactions()))
+	for i, tx := range base.Transactions() {
+		var buf bytes.Buffer
+		require.NoError(c.t, tx.MarshalBinary(&buf))
+		existing[i] = buf.Bytes()
+	}
+	all := AppliedAll(&batch).Applied
+	prev := base.Hash()
+	for k := from; k < len(batch.Entries); k++ {
+		sb, err := deriver.BuildSyncBlock(payload, &protocol.Settlement{Applied: all[from : k+1]}, c.syncTxContext(), nonce)
+		require.NoError(c.t, err)
+		block := c.extend(parent, span, 0, append(slices.Clone(existing), sb.Txs...))
+		out.Syncs = append(out.Syncs, block)
+		e := &batch.Entries[k]
+		e.RollupUpdates = []protocol.RollupUpdate{{RollupID: c.l2.RollupID, EtherDelta: new(big.Int), CurrentRoot: prev, NewRoot: block.Hash()}}
+		prev = block.Hash()
+	}
+	out.Blocks = []*types.Block{out.Syncs[len(out.Syncs)-1]}
+	c.head = out.Blocks[0].Header()
+	return out
+}
+
 // Posting is a batch to post and the entries of it L1 applies.
 type Posting struct {
 	Batch *Batch
@@ -266,6 +321,14 @@ func (c *Composer) Post(postings ...Posting) *recording.Block {
 		}
 		var after []*types.Log
 		immediate := int(p.Batch.Batch.ImmediateEntryCount.Int64())
+		// An immediate entry that did not apply was skipped.
+		for i := range immediate {
+			if !slices.Contains(applied, i) {
+				skipped, err := protocol.L2TxSkippedLog(c.l2.Registry, big.NewInt(int64(i)), []byte{})
+				require.NoError(c.t, err)
+				b.Logs = append(b.Logs, c.at(skipped, index))
+			}
+		}
 		for _, i := range applied {
 			e := &p.Batch.Batch.Entries[i]
 			root, err := protocol.L2ExecutionPerformedLog(c.l2.Registry, c.l2.RollupID, e.RollupUpdates[0].NewRoot, new(big.Int))

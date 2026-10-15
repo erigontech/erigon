@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -161,12 +162,30 @@ func (d *Deriver) reconcileBlocks(ctx context.Context, b *l1.ScannedBatch, p *Pa
 			}
 		}
 	} else {
-		for i := 0; i <= last; i++ {
+		derived, err := d.rangeDerived(ctx, r, parent, b.Settlement.FinalState)
+		if err != nil {
+			return common.Hash{}, err
+		}
+		// Once a block is rebuilt, every block after it is rebuilt on it.
+		var replaying bool
+		for i := 0; i <= last && !derived; i++ {
 			txs := p.BlockTxs(i)
 			if i == last {
 				txs = sb.Txs
 			}
-			built, err := d.extend(ctx, b, parent, DeriveInputs(d.l2, parent, p.Span, i), txs)
+			in := DeriveInputs(d.l2, parent, p.Span, i)
+			if !replaying {
+				local, err := d.localBlock(ctx, in, txs)
+				if err != nil {
+					return common.Hash{}, err
+				}
+				if local != nil {
+					parent = local
+					continue
+				}
+				replaying = true
+			}
+			built, err := d.extend(ctx, b, parent, in, txs)
 			if err != nil {
 				return common.Hash{}, err
 			}
@@ -183,6 +202,36 @@ func (d *Deriver) reconcileBlocks(ctx context.Context, b *l1.ScannedBatch, p *Pa
 		return common.Hash{}, nil
 	}
 	return syncBlock.Block.Hash(), nil
+}
+
+// rangeDerived reports whether the local chain holds the range r settled at
+// finalState. The terminal block's hash commits to every block below it, so
+// its match proves the range; the range's first block must descend from
+// parent for the terminal to belong to it.
+func (d *Deriver) rangeDerived(ctx context.Context, r Range, parent *types.Header, finalState common.Hash) (bool, error) {
+	first, err := d.chain.HeaderByNumber(ctx, r.From)
+	if err != nil || first == nil || first.ParentHash != parent.Hash() {
+		return false, err
+	}
+	terminal, ok, err := d.chain.CanonicalHash(ctx, r.To)
+	return ok && terminal == finalState, err
+}
+
+// localBlock returns the header of the local block at in.Number when it is
+// the block of inputs in and transactions txs.
+func (d *Deriver) localBlock(ctx context.Context, in HeaderInputs, txs [][]byte) (*types.Header, error) {
+	b, err := d.chain.BlockByNumber(ctx, in.Number)
+	if err != nil || b == nil || !in.Matches(b.Header()) || len(b.Transactions()) != len(txs) {
+		return nil, err
+	}
+	local, err := encodeTxs(b.Transactions())
+	if err != nil {
+		return nil, err
+	}
+	if !slices.EqualFunc(local, txs, bytes.Equal) {
+		return nil, nil
+	}
+	return b.Header(), nil
 }
 
 // extend builds the block of txs on parent; a block the local chain refuses

@@ -37,19 +37,39 @@ var (
 	bob   = common.HexToAddress("0xb0b")
 )
 
+// countingChain counts the blocks derivation builds.
+type countingChain struct {
+	deriver.Chain
+	built int
+}
+
+func (c *countingChain) Extend(ctx context.Context, parent *types.Header, in deriver.HeaderInputs, txs []types.Transaction, safe, finalized common.Hash) (*types.BlockWithReceipts, error) {
+	c.built++
+	return c.Chain.Extend(ctx, parent, in, txs, safe, finalized)
+}
+
 type follower struct {
-	chain   *deriver.ExecChain
+	chain   *countingChain
 	deriver *deriver.Deriver
 	dir     string
 }
 
 func newFollower(t *testing.T) *follower {
 	t.Helper()
-	m, chain := derivertest.NewL2(t)
+	_, chain := derivertest.NewL2(t)
+	return followerOn(t, chain)
+}
+
+// followerOn returns a follower deriving onto chain, an L2 at any height.
+func followerOn(t *testing.T, chain deriver.Chain) *follower {
+	t.Helper()
+	counting := &countingChain{Chain: chain}
 	dir := t.TempDir()
-	d, err := deriver.New(chain, m.ChainConfig, dir, log.New())
+	logger := log.New()
+	logger.SetHandler(log.DiscardHandler())
+	d, err := deriver.New(counting, derivertest.Config(), dir, logger)
 	require.NoError(t, err)
-	return &follower{chain: chain, deriver: d, dir: dir}
+	return &follower{chain: counting, deriver: d, dir: dir}
 }
 
 // TestDeriveAnchorBatches is T-DRV-1 end to end: batches of user
@@ -187,4 +207,110 @@ func TestDeriveDivergence(t *testing.T) {
 	require.ErrorAs(t, err, &div)
 	require.Equal(t, uint64(1), div.L2Block)
 	require.Zero(t, f.deriver.Cursor())
+}
+
+// TestRederive is a no-op on a chain that holds the settled blocks.
+func TestRederive(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	first := c.Compose(nil,
+		derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: [][]byte{c.Transfer(bob, 1)}},
+		derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: [][]byte{}},
+	)
+	c.Post(derivertest.Posting{Batch: first})
+	second := c.Compose([]da.Action{inbound(alice, 7)},
+		derivertest.Block{Coinbase: bob, Extra: []byte{}, Txs: [][]byte{c.Transfer(bob, 2)}},
+	)
+	c.Post(derivertest.Posting{Batch: second})
+	batches := c.Scan()
+
+	f := newFollower(t)
+	require.NoError(t, f.deriver.Reconcile(t.Context(), batches))
+	require.Equal(t, 3, f.chain.built)
+
+	again := followerOn(t, f.chain.Chain)
+	require.NoError(t, again.deriver.Reconcile(t.Context(), batches))
+	require.Zero(t, again.chain.built)
+	require.Equal(t, uint64(3), again.deriver.Cursor())
+
+	composer := followerOn(t, c.Chain)
+	require.NoError(t, composer.deriver.Reconcile(t.Context(), batches))
+	require.Zero(t, composer.chain.built)
+	derivertest.RequireChain(t, composer.chain, append(first.Blocks, second.Blocks...)...)
+}
+
+// TestSuffixReplay rebuilds a range from its first differing block on.
+func TestSuffixReplay(t *testing.T) {
+	compose := func(c *derivertest.Composer, second common.Address) *derivertest.Batch {
+		return c.Compose(nil,
+			derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: [][]byte{c.Transfer(bob, 1)}},
+			derivertest.Block{Coinbase: second, Extra: []byte{}, Txs: [][]byte{c.Transfer(bob, 2)}},
+			derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: [][]byte{c.Transfer(bob, 3)}},
+		)
+	}
+	settled := derivertest.NewComposer(t)
+	b := compose(settled, alice)
+	settled.Post(derivertest.Posting{Batch: b})
+
+	// The local chain has the settled blocks' transactions, but its second
+	// block another beneficiary.
+	local := derivertest.NewComposer(t)
+	stale := compose(local, bob)
+	require.Equal(t, b.Blocks[0].Hash(), stale.Blocks[0].Hash())
+
+	f := followerOn(t, local.Chain)
+	require.NoError(t, f.deriver.Reconcile(t.Context(), settled.Scan()))
+	require.Equal(t, 2, f.chain.built, "the block that matches is kept, the ones from the differing block on are rebuilt")
+	derivertest.RequireChain(t, f.chain, b.Blocks...)
+	require.Equal(t, uint64(3), f.deriver.Cursor())
+}
+
+// TestOutboundGateOnLocalBlocks checks the outbound gate on a Sync block
+// the local chain already holds.
+func TestOutboundGateOnLocalBlocks(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	b := c.Compose([]da.Action{outbound(derivertest.UserAddress(), bob)},
+		derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: [][]byte{c.Transfer(bob, 1)}},
+	)
+	c.Post(derivertest.Posting{Batch: b})
+	f := followerOn(t, c.Chain)
+	err := f.deriver.Reconcile(t.Context(), c.Scan())
+	require.ErrorIs(t, err, deriver.ErrDiverged)
+	require.ErrorContains(t, err, deriver.ErrOutboundUnauthorized.Error())
+	require.Zero(t, f.chain.built)
+}
+
+// TestResumedBatch is T-DRV-2 for a batch resumed mid-chain: its effects
+// are appended to the Sync block of the rival batch L1 applied first in the
+// same L1 block.
+func TestResumedBatch(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	rival := c.Compose([]da.Action{inbound(alice, 7), inbound(bob, 8)},
+		derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: [][]byte{c.Transfer(bob, 1)}},
+		derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: [][]byte{c.Transfer(bob, 2)}},
+	)
+	resumed := c.Resume(rival, 2, derivertest.Block{Coinbase: bob, Extra: []byte("resumed"), Txs: [][]byte{c.Transfer(alice, 9)}})
+	c.Post(derivertest.Posting{Batch: rival, Applied: []int{0, 1}}, derivertest.Posting{Batch: resumed, Applied: []int{2}})
+	batches := c.Scan()
+	require.Len(t, batches, 2)
+	require.True(t, batches[1].Settlement.Resumed())
+
+	sync := resumed.Syncs[2].Transactions()
+	require.Len(t, sync, 4)
+	for i, tx := range rival.Syncs[1].Transactions() {
+		require.Equal(t, tx.Hash(), sync[i].Hash(), "the rival's block content stays in place")
+	}
+	require.Equal(t, protocol.SystemTxType, sync[2].Type())
+
+	f := newFollower(t)
+	require.NoError(t, f.deriver.Reconcile(t.Context(), batches))
+	derivertest.RequireChain(t, f.chain, rival.Blocks[0], resumed.Syncs[2])
+	require.Equal(t, uint64(2), f.deriver.Cursor())
+	require.Equal(t, 3, f.chain.built, "two blocks for the rival, one rewrite")
+
+	// Re-deriving from scratch rewrites the Sync block again, to the same
+	// end.
+	again := followerOn(t, f.chain.Chain)
+	require.NoError(t, again.deriver.Reconcile(t.Context(), batches))
+	derivertest.RequireChain(t, again.chain, rival.Blocks[0], resumed.Syncs[2])
+	require.Equal(t, 2, again.chain.built)
 }
