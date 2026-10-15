@@ -607,14 +607,15 @@ func (p *TxPool) idHashKnown(tx kv.Tx, hash []byte, hashS string) (bool, error) 
 	if _, ok := p.unprocessedRemoteByHash[hashS]; ok {
 		return true, nil
 	}
-	if _, ok := p.discardReasonsLRU.Get(hashS); ok {
-		return true, nil
-	}
 	if _, ok := p.byHash[hashS]; ok {
 		return true, nil
 	}
 	if _, ok := p.minedBlobTxnsByHash[hashS]; ok {
 		return true, nil
+	}
+	if reason, ok := p.discardReasonsLRU.Get(hashS); ok {
+		// A nonce gap can close before the discarded pool row is removed.
+		return reason != txpoolcfg.NonceTooDistant, nil
 	}
 	return tx.Has(kv.PoolTransaction, hash)
 }
