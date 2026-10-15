@@ -625,16 +625,21 @@ func (f *ForkChoiceStore) HighestSeen() uint64 {
 	return f.highestSeen.Load()
 }
 
-// HasImportedDescendantAfter reports whether a block imported on top of root, on a path an
-// invalidation did not cut off, is past slot. A correct head has no such descendant, since
-// get_head walks down to a leaf, so one means the head is stuck. When root is the selected head,
-// its children count only on a payload variant get_head could have walked to.
+// HasImportedDescendantAfter reports whether a block imported on top of root, on a branch that
+// passes get_head's justification and finalization filter and that an invalidation did not cut
+// off, is past slot. A correct head has no such descendant, since get_head walks down to a leaf,
+// so one means the head is stuck. When root is the selected head, its children count only on a
+// payload variant get_head could have walked to.
 func (f *ForkChoiceStore) HasImportedDescendantAfter(root common.Hash, slot uint64) bool {
+	if len(f.children(root)) == 0 {
+		return false
+	}
+	viable := f.getFilteredBlockTree(root, f.justifiedCheckpoint.Load().(solid.Checkpoint), f.Slot())
 	for stack := []common.Hash{root}; len(stack) > 0; {
 		parent := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
 		for _, child := range f.children(parent) {
-			header, ok := f.forkGraph.GetHeader(child)
+			header, ok := viable[child]
 			if !ok || f.cutOffByInvalidation(child) || (parent == root && !f.reachableFromSelectedHead(root, child)) {
 				continue
 			}

@@ -1538,6 +1538,65 @@ func TestHasImportedDescendantAfterFollowsTheServedVariant(t *testing.T) {
 	})
 }
 
+// A descendant on a branch get_head filters out for its justification does not make the head
+// lag; the same descendant with a viable justification does. The served head H/EMPTY at slot 64
+// has a viable FULL child at slot 65 and an EMPTY child at slot 98.
+func TestHasImportedDescendantAfterSkipsNonViableBranches(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		viable, lagging bool
+	}{
+		{name: "non-viable justification", viable: false, lagging: false},
+		{name: "viable justification", viable: true, lagging: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, graph := newHeadSnapshotTestStore()
+			justified := store.JustifiedCheckpoint()
+			justified.Epoch = 1
+			graph.blocks[justified.Root].Block.Slot = 32
+			graph.headers[justified.Root].Slot = 32
+			store.justifiedCheckpoint.Store(justified)
+			store.time.Store(128 * store.beaconCfg.SecondsPerSlot)
+			store.checkpointStates.Store(justified, &checkpointState{
+				beaconConfig: store.beaconCfg, validatorSetSize: 1,
+				balances: []uint64{32}, actives: []byte{1}, slasheds: []byte{0},
+			})
+			add := func(root, parent common.Hash, slot uint64, full bool) {
+				block := cltypes.NewSignedBeaconBlock(store.beaconCfg, clparams.GloasVersion)
+				block.Block.Slot = slot
+				block.Block.ParentRoot = parent
+				bid := block.Block.Body.GetSignedExecutionPayloadBid().Message
+				bid.BlockHash = root
+				parentBid := graph.blocks[parent].Block.Body.GetSignedExecutionPayloadBid().Message
+				bid.ParentBlockHash = parentBid.ParentBlockHash
+				if full {
+					bid.ParentBlockHash = parentBid.BlockHash
+				}
+				graph.blocks[root] = block
+				graph.headers[root] = block.SignedBeaconBlockHeader().Header
+				store.updateChildren(graph.headers[parent].Slot, parent, root)
+			}
+			headRoot, fullChild, emptyChild := common.Hash{0xbb}, common.Hash{0xcc}, common.Hash{0xdd}
+			add(headRoot, justified.Root, 64, true)
+			add(fullChild, headRoot, 65, true)
+			add(emptyChild, headRoot, 98, false)
+			store.unrealizedJustifications.Store(fullChild, justified)
+			emptyChildJustification := solid.Checkpoint{}
+			if tc.viable {
+				emptyChildJustification = justified
+			}
+			store.unrealizedJustifications.Store(emptyChild, emptyChildJustification)
+			store.setLatestMessage(0, LatestMessage{Slot: 100, Root: headRoot})
+
+			filtered := store.getFilteredBlockTree(justified.Root, justified, store.Slot())
+			require.Contains(t, filtered, fullChild)
+			require.Equal(t, tc.viable, filtered[emptyChild] != nil)
+			store.selectedHead.Store(&ForkChoiceNode{Root: headRoot, PayloadStatus: cltypes.PayloadStatusEmpty})
+			require.Equal(t, tc.lagging, store.HasImportedDescendantAfter(headRoot, 64+store.beaconCfg.SlotsPerEpoch))
+		})
+	}
+}
+
 // A changed payload decision can rule out the served variant before get_head runs again; until it
 // does, the gate counts the children of both variants.
 func TestHasImportedDescendantAfterCountsBothVariantsAfterAPayloadDecisionChanges(t *testing.T) {
