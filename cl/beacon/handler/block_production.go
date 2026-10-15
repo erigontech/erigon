@@ -1693,8 +1693,8 @@ func (a *ApiHandler) produceBeaconBody(
 	if err != nil {
 		return nil, nil, fmt.Errorf("produceBeaconBody: derive withdrawals state: %w", err)
 	}
-	if payloadSource.parentExecutionRequests != nil {
-		beaconBody.ParentExecutionRequests = payloadSource.parentExecutionRequests
+	if payloadSource.parentEnvelope != nil {
+		beaconBody.ParentExecutionRequests = payloadSource.parentEnvelope.ExecutionRequests
 	}
 	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(baseState.FinalizedCheckpoint().Root)
 	if finalizedHash == (common.Hash{}) {

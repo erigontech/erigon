@@ -299,6 +299,15 @@ func (f *ForkChoiceStorageMock) GetEth1Hash(eth2Root common.Hash) common.Hash {
 	return common.Hash{}
 }
 
+func (f *ForkChoiceStorageMock) GetExecutionHead(head forkchoice.ForkChoiceNode) (common.Hash, bool) {
+	current, _, err := f.GetHeadNode()
+	if err != nil || head != current || (head.PayloadStatus == cltypes.PayloadStatusFull && !f.IsPayloadVerified(head.Root)) {
+		return common.Hash{}, false
+	}
+	hash, ok := f.Eth1Hashes[head.Root]
+	return hash, ok
+}
+
 func (f *ForkChoiceStorageMock) GetFinalizedExecutionHash(eth2Root common.Hash) common.Hash {
 	return f.GetEth1Hash(eth2Root)
 }

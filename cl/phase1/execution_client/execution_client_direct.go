@@ -140,6 +140,12 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 		return nil, errors.New("bad block as forkchoice")
 	}
 	if attr == nil {
+		if status == execmodule.ExecutionStatusBusy {
+			return nil, ErrForkChoiceUpdateTimeout
+		}
+		if status != execmodule.ExecutionStatusSuccess {
+			return nil, fmt.Errorf("forkchoice update returned status %v", status)
+		}
 		return nil, nil
 	}
 	// Retry AssembleBlock if the EL is busy (semaphore contention with

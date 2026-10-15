@@ -59,6 +59,21 @@ func (s *payloadBuildModuleStub) AssembleBlock(context.Context, *builder.Paramet
 	return s.assembled, nil
 }
 
+type busyForkChoiceModule struct {
+	execmodule.ExecutionModule
+}
+
+func (busyForkChoiceModule) UpdateForkChoice(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
+	return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusBusy}, nil
+}
+
+func TestDirectCanonicalForkChoiceReportsBusy(t *testing.T) {
+	client, err := NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, busyForkChoiceModule{}, time.Second), nil)
+	require.NoError(t, err)
+	_, err = client.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{1}, nil, clparams.GloasVersion)
+	require.ErrorIs(t, err, ErrForkChoiceUpdateTimeout)
+}
+
 func TestDirectStartPayloadBuildDoesNotUpdateForkChoice(t *testing.T) {
 	head := common.Hash{0x41}
 	module := &payloadBuildModuleStub{
