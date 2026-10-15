@@ -196,14 +196,26 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 
 func readCrashRecoveryDataDir(t *testing.T, dataDir string, payloads []*engineapitester.MockClPayload) (crashRecoveryState, []crashRecoveryBlock) {
 	t.Helper()
+	var checkpoint crashRecoveryState
+	var blocks []crashRecoveryBlock
+	inspectCrashRecoveryDataDir(t, dataDir, func(db kv.TemporalRoDB) {
+		checkpoint = readCrashRecoveryCheckpoint(t, db)
+		blocks = readCrashRecoveryBlocks(t, db, payloads)
+	})
+	return checkpoint, blocks
+}
+
+func inspectCrashRecoveryDataDir(t *testing.T, dataDir string, inspect func(kv.TemporalRoDB)) {
+	t.Helper()
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlError)
 	dirs := datadir.New(dataDir)
 	require.FileExists(t, filepath.Join(dirs.Chaindata, "mdbx.dat"))
 	require.FileExists(t, filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE))
 	// MDBX needs a writable open for crash recovery. The inspection itself
-	// uses only read transactions, without node initialization or execution.
-	rawDB, err := mdbx.New(dbcfg.ChainDB, logger).Path(dirs.Chaindata).MapSize(datasize.GB).Open(ctx)
+	// uses only read transactions. Match the node's geometry so opening does
+	// not resize the crashed database before MDBX validates its checkpoints.
+	rawDB, err := mdbx.New(dbcfg.ChainDB, logger).Path(dirs.Chaindata).MapSize(datasize.GB).GrowthStep(16 * datasize.MB).Open(ctx)
 	require.NoError(t, err)
 	defer rawDB.Close()
 
@@ -219,7 +231,7 @@ func readCrashRecoveryDataDir(t *testing.T, dataDir string, payloads []*engineap
 	require.NoError(t, blockSnapshots.OpenFolder())
 	db, err := temporal.New(rawDB, agg, blockSnapshots)
 	require.NoError(t, err)
-	return readCrashRecoveryCheckpoint(t, db), readCrashRecoveryBlocks(t, db, payloads)
+	inspect(db)
 }
 
 func waitCrashRecoveryExecution(ctx context.Context, db kv.TemporalRoDB, head uint64) error {
@@ -257,23 +269,28 @@ func assertCatchupRecoveryState(t *testing.T, want, got crashRecoveryState) {
 	// Compare every live branch, including its child hashes and plain keys.
 	for _, state := range []*crashRecoveryState{&want, &got} {
 		domains := maps.Clone(state.Domains)
-		branches := make(map[string]string)
-		for key, value := range state.Domains[kv.CommitmentDomain] {
-			if key != hex.EncodeToString(commitmentdb.KeyCommitmentState) {
-				data, err := hex.DecodeString(value)
-				require.NoError(t, err)
-				require.GreaterOrEqual(t, len(data), 4)
-				if commitment.BranchData(data).ChildCount() == 0 {
-					require.Len(t, data, 4, "an empty branch must not contain cell data")
-					continue
-				}
-			}
-			branches[key] = value
-		}
-		domains[kv.CommitmentDomain] = branches
+		domains[kv.CommitmentDomain] = crashRecoveryLiveCommitment(t, state.Domains[kv.CommitmentDomain])
 		state.Domains = domains
 	}
 	assertCrashRecoveryState(t, want, got)
+}
+
+func crashRecoveryLiveCommitment(t *testing.T, entries map[string]string) map[string]string {
+	t.Helper()
+	entries = maps.Clone(entries)
+	for key, value := range entries {
+		if key == hex.EncodeToString(commitmentdb.KeyCommitmentState) {
+			continue
+		}
+		data, err := hex.DecodeString(value)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, len(data), 4, "commitment branch %s", key)
+		if commitment.BranchData(data).ChildCount() == 0 {
+			require.Len(t, data, 4, "an empty branch must not contain cell data")
+			delete(entries, key)
+		}
+	}
+	return entries
 }
 
 // An intermediate commit persists execution only through its batch, but block

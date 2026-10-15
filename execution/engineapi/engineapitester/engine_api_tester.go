@@ -364,6 +364,16 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("eth.New: %w", err)
 	}
+	var stateAgg *state.Aggregator
+	if aggHolder, ok := ethBackend.ChainDB().(state.HasAgg); ok {
+		stateAgg, _ = aggHolder.Agg().(*state.Aggregator)
+	}
+	if args.MaintenanceObserver != nil {
+		if stateAgg == nil {
+			return EngineApiTester{}, fmt.Errorf("maintenance observer requires a state aggregator")
+		}
+		stateAgg.SetMaintenanceObserver(args.MaintenanceObserver)
+	}
 	err = ethBackend.Init(ethNode, &ethConfig, genesis.Config)
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("ethBackend.Init: %w", err)
@@ -418,10 +428,6 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	// must be appended last) — that way ctx-watching background goroutines
 	// see Done before downstream resources (DB, node) are torn down.
 	addCleanup(func() error { cancel(); return nil })
-	var stateAgg *state.Aggregator
-	if aggHolder, ok := ethBackend.ChainDB().(state.HasAgg); ok {
-		stateAgg, _ = aggHolder.Agg().(*state.Aggregator)
-	}
 	success = true
 	return EngineApiTester{
 		GenesisBlock:         genesisBlock,
@@ -458,6 +464,7 @@ type EngineApiTesterInitArgs struct {
 	DisableSentry           bool
 	MdbxDBSizeLimit         datasize.ByteSize
 	StateTransitionObserver execmodule.StateTransitionObserver
+	MaintenanceObserver     state.MaintenanceObserver
 	EnableTestingAPI        bool
 }
 
@@ -478,7 +485,7 @@ type EngineApiTester struct {
 	NodeKey              *ecdsa.PrivateKey
 	StateAgg             *state.Aggregator
 	ChainDB              kv.TemporalRoDB
-	ExecutionModule      execmodule.ExecutionModule
+	ExecutionModule      *execmodule.ExecModule
 	cleanup              *cleanupHandle
 }
 
