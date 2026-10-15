@@ -32,18 +32,24 @@ import (
 // Block is an L1 block as the follower sees it.
 type Block struct {
 	Header l1.Header
-	Txs    []types.Transaction
-	// Logs are the block's logs in emission order, each with its TxIndex;
-	// the chain fills in the other position fields.
-	Logs []*types.Log
+	// Txs are the block's transactions by index; a nil entry is one the
+	// chain does not hold.
+	Txs []types.Transaction
+	// Logs are the block's logs in emission order, each with its TxIndex.
+	// The chain fills in the other position fields unless Recorded is set,
+	// in which case they are kept as given.
+	Logs     []*types.Log
+	Recorded bool
 }
 
 // MemoryChain is an l1.ChainReader over blocks held in memory. It backs recordings
 // and stands in for an L1 node in tests.
 type MemoryChain struct {
-	mu        sync.RWMutex
-	chainID   uint64
-	blocks    map[common.Hash]*Block
+	mu      sync.RWMutex
+	chainID uint64
+	blocks  map[common.Hash]*Block
+	// canonical holds the canonical hashes from base up.
+	base      uint64
 	canonical []common.Hash
 	finalized *uint64
 	// maxLogRange makes Logs refuse ranges of more blocks; zero accepts any.
@@ -52,14 +58,21 @@ type MemoryChain struct {
 
 var _ l1.ChainReader = (*MemoryChain)(nil)
 
-// NewMemoryChain returns a chain holding genesis, whose number must be zero.
-func NewMemoryChain(chainID uint64, genesis *Block) (*MemoryChain, error) {
-	if genesis.Header.Number != 0 {
-		return nil, fmt.Errorf("genesis at number %d", genesis.Header.Number)
-	}
-	c := &MemoryChain{chainID: chainID, blocks: map[common.Hash]*Block{}}
-	c.canonical = []common.Hash{c.store(genesis)}
+// NewMemoryChain returns a chain whose first canonical block is first;
+// nothing below it is served.
+func NewMemoryChain(chainID uint64, first *Block) (*MemoryChain, error) {
+	c := &MemoryChain{chainID: chainID, blocks: map[common.Hash]*Block{}, base: first.Header.Number}
+	c.canonical = []common.Hash{c.store(first)}
 	return c, nil
+}
+
+func (c *MemoryChain) head() uint64 { return c.base + uint64(len(c.canonical)) - 1 }
+
+func (c *MemoryChain) canonicalAt(number uint64) (common.Hash, bool) {
+	if number < c.base || number > c.head() {
+		return common.Hash{}, false
+	}
+	return c.canonical[number-c.base], true
 }
 
 // SetMaxLogRange makes Logs refuse ranges spanning more than n blocks with
@@ -71,13 +84,17 @@ func (c *MemoryChain) SetMaxLogRange(n uint64) {
 }
 
 func (c *MemoryChain) store(b *Block) common.Hash {
-	stored := &Block{Header: b.Header, Txs: b.Txs, Logs: make([]*types.Log, len(b.Logs))}
+	stored := &Block{Header: b.Header, Txs: b.Txs, Logs: make([]*types.Log, len(b.Logs)), Recorded: b.Recorded}
 	for i, l := range b.Logs {
 		cp := *l
+		if b.Recorded {
+			stored.Logs[i] = &cp
+			continue
+		}
 		cp.BlockNumber = hexutil.Uint64(b.Header.Number)
 		cp.BlockHash = b.Header.Hash
 		cp.Index = hexutil.Uint(i)
-		if int(cp.TxIndex) < len(b.Txs) {
+		if int(cp.TxIndex) < len(b.Txs) && b.Txs[cp.TxIndex] != nil {
 			cp.TxHash = b.Txs[cp.TxIndex].Hash()
 		}
 		stored.Logs[i] = &cp
@@ -107,13 +124,13 @@ func (c *MemoryChain) extend(b *Block) error {
 func (c *MemoryChain) Reorg(ancestor uint64, branch ...*Block) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if ancestor >= uint64(len(c.canonical)) {
-		return fmt.Errorf("ancestor %d above head %d", ancestor, len(c.canonical)-1)
+	if _, ok := c.canonicalAt(ancestor); !ok {
+		return fmt.Errorf("ancestor %d outside [%d, %d]", ancestor, c.base, c.head())
 	}
 	if c.finalized != nil && ancestor < *c.finalized {
 		return fmt.Errorf("reorg below finalized block %d", *c.finalized)
 	}
-	c.canonical = c.canonical[:ancestor+1]
+	c.canonical = c.canonical[:ancestor-c.base+1]
 	for _, b := range branch {
 		if err := c.extend(b); err != nil {
 			return err
@@ -126,8 +143,8 @@ func (c *MemoryChain) Reorg(ancestor uint64, branch ...*Block) error {
 func (c *MemoryChain) Finalize(number uint64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if number >= uint64(len(c.canonical)) {
-		return fmt.Errorf("finalized %d above head %d", number, len(c.canonical)-1)
+	if _, ok := c.canonicalAt(number); !ok {
+		return fmt.Errorf("finalized %d outside [%d, %d]", number, c.base, c.head())
 	}
 	c.finalized = &number
 	return nil
@@ -150,7 +167,7 @@ func (c *MemoryChain) Orphans() []*Block {
 	defer c.mu.RUnlock()
 	var out []*Block
 	for h, b := range c.blocks {
-		if b.Header.Number >= uint64(len(c.canonical)) || c.canonical[b.Header.Number] != h {
+		if canonical, ok := c.canonicalAt(b.Header.Number); !ok || canonical != h {
 			out = append(out, b)
 		}
 	}
@@ -162,10 +179,11 @@ func (c *MemoryChain) ChainID(context.Context) (uint64, error) { return c.chainI
 func (c *MemoryChain) HeaderByNumber(_ context.Context, number uint64) (*l1.Header, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if number >= uint64(len(c.canonical)) {
+	hash, ok := c.canonicalAt(number)
+	if !ok {
 		return nil, fmt.Errorf("%w: block %d", l1.ErrNotFound, number)
 	}
-	h := c.blocks[c.canonical[number]].Header
+	h := c.blocks[hash].Header
 	return &h, nil
 }
 
@@ -182,7 +200,7 @@ func (c *MemoryChain) HeaderByHash(_ context.Context, hash common.Hash) (*l1.Hea
 
 func (c *MemoryChain) Head(ctx context.Context) (*l1.Header, error) {
 	c.mu.RLock()
-	n := uint64(len(c.canonical) - 1)
+	n := c.head()
 	c.mu.RUnlock()
 	return c.HeaderByNumber(ctx, n)
 }
@@ -200,15 +218,15 @@ func (c *MemoryChain) Finalized(ctx context.Context) (*l1.Header, error) {
 func (c *MemoryChain) Logs(_ context.Context, from, to uint64, address common.Address, topics [][]common.Hash) ([]*types.Log, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if from > to || to >= uint64(len(c.canonical)) {
-		return nil, fmt.Errorf("%w: logs of [%d, %d] with head %d", l1.ErrNotFound, from, to, len(c.canonical)-1)
+	if from > to || from < c.base || to > c.head() {
+		return nil, fmt.Errorf("%w: logs of [%d, %d] outside [%d, %d]", l1.ErrNotFound, from, to, c.base, c.head())
 	}
 	if c.maxLogRange > 0 && to-from+1 > c.maxLogRange {
 		return nil, fmt.Errorf("%w: %d blocks, at most %d", l1.ErrRangeTooWide, to-from+1, c.maxLogRange)
 	}
 	var out []*types.Log
 	for n := from; n <= to; n++ {
-		for _, l := range c.blocks[c.canonical[n]].Logs {
+		for _, l := range c.blocks[c.canonical[n-c.base]].Logs {
 			if matchLog(l, address, topics) {
 				cp := *l
 				out = append(out, &cp)
@@ -222,7 +240,7 @@ func (c *MemoryChain) TransactionByBlockHashAndIndex(_ context.Context, blockHas
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	b, ok := c.blocks[blockHash]
-	if !ok || index >= uint64(len(b.Txs)) {
+	if !ok || index >= uint64(len(b.Txs)) || b.Txs[index] == nil {
 		return nil, fmt.Errorf("%w: transaction %d of block %x", l1.ErrNotFound, index, blockHash)
 	}
 	return b.Txs[index], nil
