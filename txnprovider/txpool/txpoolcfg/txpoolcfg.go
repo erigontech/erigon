@@ -36,11 +36,9 @@ type Config struct {
 	TotalBlobPoolLimit  uint64 // Total number of blobs (not txns) allowed within the txpool
 	PriceBump           uint64 // Price bump percentage to replace an already existing transaction
 	BlobPriceBump       uint64 // Price bump percentage to replace an existing 4844 blob txn (type-3)
-	// MaxNonceGap is the maximum allowed gap between a sender's on-chain nonce and the nonce of a
-	// queued transaction. Transactions whose nonce exceeds the on-chain nonce by more than this
-	// value are considered "zombie" transactions that can never become pending (they would require
-	// an impossibly large number of preceding transactions to fill the gap), and are evicted from
-	// the pool. A value of 0 disables this eviction. Default is 64.
+	// MaxNonceGap limits how far a transaction nonce may exceed the next nonce after consecutive pooled transactions.
+	// Larger gaps are evicted to bound queued transactions, but can shrink as the sender nonce advances or missing transactions arrive.
+	// A value of 0 disables this eviction. Default is 64.
 	MaxNonceGap uint64
 
 	// QueuedDormancyDuration is the duration after which queued transactions from a sender with no
@@ -132,7 +130,7 @@ const (
 	ErrAuthorityReserved DiscardReason = 34 // EIP-7702 transaction with authority already reserved
 	InvalidAA            DiscardReason = 35 // Invalid RIP-7560 transaction
 	ErrGetCode           DiscardReason = 36 // Error getting code during AA validation
-	NonceTooDistant      DiscardReason = 37 // Nonce gap between tx and on-chain nonce exceeds MaxNonceGap; tx can never become pending
+	NonceTooDistant      DiscardReason = 37 // Gap exceeds MaxNonceGap; the transaction can be retried after the gap shrinks
 	QueuedDormant        DiscardReason = 38 // Sender had no on-chain state change for longer than QueuedDormancyDuration
 	ErrGetSenderInfo     DiscardReason = 39 // Error getting sender nonce/balance from state during validation
 	TipAboveFeeCap       DiscardReason = 40 // EIP-1559: max priority fee per gas cannot exceed max fee per gas

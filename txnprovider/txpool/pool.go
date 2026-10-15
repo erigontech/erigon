@@ -2228,11 +2228,6 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			deleteAndContinueReasonLog = "delegated sender nonce gap"
 			discardReason = txpoolcfg.DelegatedNonceGap
 		case p.cfg.MaxNonceGap > 0 && mt.TxnSlot.Nonce > noGapsNonce && mt.TxnSlot.Nonce-noGapsNonce > p.cfg.MaxNonceGap:
-			// Evict "zombie" queued transactions whose nonce is so far ahead of the sender's
-			// on-chain nonce (accounting for any consecutive txns already in the pool) that they
-			// can practically never become pending. This prevents unbounded pool bloat from accounts
-			// that submitted transactions with impossibly large nonce gaps (e.g. nonce 144968 when
-			// on-chain nonce is 6398). The gap threshold is configurable via MaxNonceGap (default 64).
 			deleteAndContinueReasonLog = "nonce gap too large"
 			discardReason = txpoolcfg.NonceTooDistant
 		case mt.TxnSlot.Nonce != noGapsNonce && mt.TxnSlot.TxType() == BlobTxnType: // Discard nonce-gapped blob txns

@@ -130,7 +130,9 @@ func TestGrpcServerAddRetriesNonceGapAfterStateUpdate(t *testing.T) {
 			logger := log.New()
 			coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 			poolDB := mdbxtest.NewTestPoolDB(t)
-			pool, err := New(ctx, make(chan Announcements, 1), poolDB, coreDB, txpoolcfg.DefaultConfig, kvcache.NewLatestBatchCache(),
+			cfg := txpoolcfg.DefaultConfig
+			cfg.MaxNonceGap = 64
+			pool, err := New(ctx, make(chan Announcements, 1), poolDB, coreDB, cfg, kvcache.NewLatestBatchCache(),
 				chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 			require.NoError(t, err)
 			key, err := crypto.GenerateKey()
@@ -146,21 +148,16 @@ func TestGrpcServerAddRetriesNonceGapAfterStateUpdate(t *testing.T) {
 			server := NewGrpcServer(ctx, pool, poolDB, nil, pool.chainID, logger)
 			request := &txpoolproto.AddRequest{RlpTxs: [][]byte{encoded.Bytes()}}
 			account := accounts3.Account{Nonce: 61, Balance: *uint256.NewInt(common.Ether), CodeHash: accounts3.EmptyCodeHash}
-			initial := accounts3.SerialiseV3(&account)
-			writeTestSenderState(t, ctx, coreDB, logger, sender, initial, 0)
 			change := &remoteproto.StateChangeBatch{
-				StateVersionId: 0, PendingBlockBaseFee: 200_000, BlockGasLimit: 1_000_000,
+				PendingBlockBaseFee: 200_000, BlockGasLimit: 1_000_000,
 				ChangeBatch: []*remoteproto.StateChange{{
 					BlockHeight: 62, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{}),
 					Changes: []*remoteproto.AccountChange{{
-						Action: remoteproto.Action_UPSERT, Address: gointerfaces.ConvertAddressToH160(sender), Data: initial,
+						Action: remoteproto.Action_UPSERT, Address: gointerfaces.ConvertAddressToH160(sender), Data: accounts3.SerialiseV3(&account),
 					}},
 				}},
 			}
 			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
-			account.Nonce = 141
-			current := accounts3.SerialiseV3(&account)
-			writeTestSenderState(t, ctx, coreDB, logger, sender, current, 1)
 
 			first, err := server.Add(ctx, request)
 			require.NoError(t, err)
@@ -172,9 +169,9 @@ func TestGrpcServerAddRetriesNonceGapAfterStateUpdate(t *testing.T) {
 					return tx.Put(kv.PoolTransaction, hash[:], append(sender[:], encoded.Bytes()...))
 				}))
 			}
-			change.StateVersionId = 1
+			account.Nonce = 141
 			change.ChangeBatch[0].BlockHeight = 142
-			change.ChangeBatch[0].Changes[0].Data = current
+			change.ChangeBatch[0].Changes[0].Data = accounts3.SerialiseV3(&account)
 			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
 			retry, err := server.Add(ctx, request)
@@ -186,6 +183,16 @@ func TestGrpcServerAddRetriesNonceGapAfterStateUpdate(t *testing.T) {
 			duplicate, err := server.Add(ctx, request)
 			require.NoError(t, err)
 			require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS}, duplicate.Imported)
+			if persisted {
+				_, err = pool.flush(ctx)
+				require.NoError(t, err)
+				require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
+					row, err := tx.GetOne(kv.PoolTransaction, hash[:])
+					require.NoError(t, err)
+					require.Equal(t, append(sender[:], encoded.Bytes()...), row)
+					return nil
+				}))
+			}
 		})
 	}
 }
