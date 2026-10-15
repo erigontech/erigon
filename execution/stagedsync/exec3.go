@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -594,6 +595,9 @@ func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.T
 // block. task is any task of the block.
 func (te *txExecutor) replayResumedPrefix(ctx context.Context, applyTx kv.TemporalTx, task *exec.TxTask, startTxIndex int, io *state.VersionedIO) error {
 	blockStartTxNum := task.TxNum - uint64(task.TxIndex+1)
+	if err := requirePrefixHistory(applyTx.Debug(), blockStartTxNum, blockStartTxNum+uint64(startTxIndex)); err != nil {
+		return err
+	}
 	ibs := state.New(state.NewHistoryReaderV3(applyTx, blockStartTxNum))
 	defer ibs.Close()
 	ibs.SetVersionMap(state.NewVersionMap(nil))
@@ -603,6 +607,25 @@ func (te *txExecutor) replayResumedPrefix(ctx context.Context, applyTx kv.Tempor
 	}
 	_, err := bal.ReplayBlockPrefix(ctx, te.cfg.chainConfig, te.cfg.engine, chainReader, getHeader, task.Header, task.Txs[:startTxIndex], ibs, io, te.logger)
 	return err
+}
+
+// requirePrefixHistory refuses to replay a prefix whose history may be missing:
+// a history read silently answers from the latest state then, which turns the
+// prefix's writes into no-ops. A committed prefix always changes state (the
+// block-start system calls alone do), so its txNum range must hold a record.
+func requirePrefixHistory(dbg kv.TemporalDebugTx, fromTxNum, toTxNum uint64) error {
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		it, err := dbg.HistoryKeyTxNumRange(domain, int(fromTxNum), int(toTxNum+1), order.Asc, 1)
+		if err != nil {
+			return err
+		}
+		recorded := it.HasNext()
+		it.Close()
+		if recorded {
+			return nil
+		}
+	}
+	return fmt.Errorf("no state history recorded for txNums %d-%d", fromTxNum, toTxNum)
 }
 
 func (te *txExecutor) onBlockStart(ctx context.Context, block *types.Block) {

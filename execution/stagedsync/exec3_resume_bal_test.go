@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
@@ -41,24 +42,35 @@ import (
 
 // Genesis occupies txNums 0 and 1; block 1 then spans 2 (block start), 3 (tx0),
 // 4 (tx1), 5 (tx2) and 6 (block end). In the access list, index 0 is the block
-// start and transactions start at 1.
+// start and transactions start at 1, so access index i lives at txNum 2+i.
 const (
 	resumeBALGenesisTxNum    = uint64(1)
 	resumeBALBlockStartTxNum = uint64(2)
-	resumeBALTx0AccessIndex  = uint32(1)
 )
 
-// resumeBALFixture is a three-transaction Amsterdam block over a tiny genesis:
-// tx0 stores the target's balance, tx1 tops the target up and tx2 stores the
-// balance again, so the resumed prefix writes storage and the suffix changes
-// the same slot.
+// resumePoint is how far into block 1 the state is committed when execution
+// starts: the number of access indices already applied, or -1 for a run from
+// the block's start.
+type resumePoint int
+
+const (
+	fromBlockStart resumePoint = -1
+	afterBlockInit resumePoint = 0
+	afterTx0       resumePoint = 1
+)
+
+// resumeBALFixture is a three-transaction Amsterdam block over a tiny genesis.
+// The block-start system call writes storage, tx0 stores the target's balance,
+// tx1 tops the target up and tx2 stores the balance again, so every resumed
+// prefix writes storage and the suffix changes a slot the prefix wrote.
 type resumeBALFixture struct {
-	config  *chain.Config
-	engine  rules.Engine
-	alloc   types.GenesisAlloc
-	genesis *types.Block
-	block   *types.Block
-	senders []common.Address
+	config      *chain.Config
+	engine      rules.Engine
+	alloc       types.GenesisAlloc
+	genesis     *types.Block
+	block       *types.Block
+	senders     []common.Address
+	wipeHistory bool
 }
 
 func newResumeBALFixture(t *testing.T) *resumeBALFixture {
@@ -71,10 +83,13 @@ func newResumeBALFixture(t *testing.T) *resumeBALFixture {
 	observer := common.HexToAddress("0x0000000000000000000000000000000000000b22")
 	observerCode := append([]byte{byte(vm.PUSH20)}, target[:]...)
 	observerCode = append(observerCode, byte(vm.BALANCE), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP))
+	// Stands in for the EIP-4788 contract: the block-start system call stores 1 in slot 0.
+	beaconRootsCode := []byte{byte(vm.PUSH1), 1, byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP)}
 	alloc := types.GenesisAlloc{
-		sender:   {Balance: big.NewInt(1_000_000_000_000_000_000)},
-		target:   {Balance: big.NewInt(7)},
-		observer: {Balance: new(big.Int), Nonce: 1, Code: observerCode},
+		sender:                            {Balance: big.NewInt(1_000_000_000_000_000_000)},
+		target:                            {Balance: big.NewInt(7)},
+		observer:                          {Balance: new(big.Int), Nonce: 1, Code: observerCode},
+		params.BeaconRootsAddress.Value(): {Balance: new(big.Int), Nonce: 1, Code: beaconRootsCode},
 	}
 	for _, contract := range []accounts.Address{
 		config.GetWithdrawalRequestContract(), config.GetConsolidationRequestContract(),
@@ -103,7 +118,8 @@ func newResumeBALFixture(t *testing.T) *resumeBALFixture {
 		txs = append(txs, signed)
 	}
 	fx.block = fx.assembleBlock(t, txs, common.HexToAddress("0x000000000000000000000000000000000000c01b"))
-	require.True(t, hasStorageChangeAt(fx.block.BlockAccessList(), resumeBALTx0AccessIndex), "tx0 must write storage")
+	require.True(t, hasStorageChangeAt(fx.block.BlockAccessList(), 0), "the block start must write storage")
+	require.True(t, hasStorageChangeAt(fx.block.BlockAccessList(), 1), "tx0 must write storage")
 	return fx
 }
 
@@ -137,8 +153,9 @@ func allocAccount(ga types.GenesisAccount) accounts.Account {
 }
 
 // seed writes the genesis allocation as block 0 and, for a resumed run, the
-// state tx0 left behind, checkpointing the commitment where execution resumes.
-func (fx *resumeBALFixture) seed(t *testing.T, db kv.TemporalRwDB, resumeAfterTx0 bool) {
+// state the prefix left behind, each access index at its own txNum, and
+// checkpoints the commitment where execution resumes.
+func (fx *resumeBALFixture) seed(t *testing.T, db kv.TemporalRwDB, point resumePoint) {
 	t.Helper()
 	ctx := context.Background()
 	err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
@@ -148,11 +165,11 @@ func (fx *resumeBALFixture) seed(t *testing.T, db kv.TemporalRwDB, resumeAfterTx
 		}
 		defer domains.Close()
 		commitBlock, commitTxNum := uint64(0), resumeBALGenesisTxNum
-		if resumeAfterTx0 {
-			commitBlock, commitTxNum = 1, resumeBALBlockStartTxNum+1
+		if point != fromBlockStart {
+			commitBlock, commitTxNum = 1, resumeBALBlockStartTxNum+uint64(point)
 		}
 		domains.SetTxNum(commitTxNum)
-		put := func(addr common.Address, acc accounts.Account, code []byte, txNum uint64) error {
+		putAccount := func(addr common.Address, acc accounts.Account, code []byte, txNum uint64) error {
 			if len(code) > 0 {
 				if err := domains.DomainPut(kv.CodeDomain, tx, addr[:], code, txNum, nil); err != nil {
 					return err
@@ -161,31 +178,55 @@ func (fx *resumeBALFixture) seed(t *testing.T, db kv.TemporalRwDB, resumeAfterTx
 			return domains.DomainPut(kv.AccountsDomain, tx, addr[:], accounts.SerialiseV3(&acc), txNum, nil)
 		}
 		for addr, ga := range fx.alloc {
-			if err := put(addr, allocAccount(ga), ga.Code, resumeBALGenesisTxNum); err != nil {
+			if err := putAccount(addr, allocAccount(ga), ga.Code, resumeBALGenesisTxNum); err != nil {
 				return err
 			}
 		}
 		if err := rawdbv3.TxNums.Append(tx, 0, resumeBALGenesisTxNum); err != nil {
 			return err
 		}
-		if resumeAfterTx0 {
+		if point != fromBlockStart {
 			if err := rawdbv3.TxNums.Append(tx, 1, resumeBALBlockStartTxNum+uint64(len(fx.block.Transactions()))+1); err != nil {
 				return err
 			}
 			bal := fx.block.BlockAccessList()
 			for i := range bal {
-				if acc, changed := fx.postTx0Account(t, &bal[i]); changed {
-					if err := put(bal[i].Address, acc, nil, commitTxNum); err != nil {
-						return err
-					}
+				changes := &bal[i]
+				acc := accounts.NewAccount()
+				if ga, ok := fx.alloc[changes.Address]; ok {
+					acc = allocAccount(ga)
 				}
-				for _, slot := range bal[i].StorageChanges {
-					for _, change := range slot.Changes {
-						if change.Index != resumeBALTx0AccessIndex {
-							continue
+				for index := uint32(0); index <= uint32(point); index++ {
+					txNum := resumeBALBlockStartTxNum + uint64(index)
+					changed := false
+					for _, bc := range changes.BalanceChanges {
+						if bc.Index == index {
+							acc.Balance = bc.Value
+							changed = true
 						}
-						if err := domains.DomainPut(kv.StorageDomain, tx, storageKey(bal[i].Address, slot.Slot), change.Value.Bytes(), commitTxNum, nil); err != nil {
+					}
+					for _, nc := range changes.NonceChanges {
+						if nc.Index == index {
+							acc.Nonce = nc.Value
+							changed = true
+						}
+					}
+					for _, cc := range changes.CodeChanges {
+						require.NotEqual(t, index, cc.Index, "the prefix must not change code")
+					}
+					if changed {
+						if err := putAccount(changes.Address, acc, nil, txNum); err != nil {
 							return err
+						}
+					}
+					for _, slot := range changes.StorageChanges {
+						for _, change := range slot.Changes {
+							if change.Index != index {
+								continue
+							}
+							if err := domains.DomainPut(kv.StorageDomain, tx, storageKey(changes.Address, slot.Slot), change.Value.Bytes(), txNum, nil); err != nil {
+								return err
+							}
 						}
 					}
 				}
@@ -195,39 +236,12 @@ func (fx *resumeBALFixture) seed(t *testing.T, db kv.TemporalRwDB, resumeAfterTx
 		if err != nil {
 			return err
 		}
-		if !resumeAfterTx0 {
+		if point == fromBlockStart {
 			require.Equal(t, fx.genesis.Root(), common.BytesToHash(root))
 		}
 		return domains.Flush(ctx, tx)
 	})
 	require.NoError(t, err)
-}
-
-// postTx0Account derives an account's state after tx0 from the block access
-// list entries at tx0's access index; storage is seeded separately.
-func (fx *resumeBALFixture) postTx0Account(t *testing.T, changes *types.AccountChanges) (accounts.Account, bool) {
-	t.Helper()
-	acc := accounts.NewAccount()
-	if ga, ok := fx.alloc[changes.Address]; ok {
-		acc = allocAccount(ga)
-	}
-	changed := false
-	for _, bc := range changes.BalanceChanges {
-		if bc.Index == resumeBALTx0AccessIndex {
-			acc.Balance = bc.Value
-			changed = true
-		}
-	}
-	for _, nc := range changes.NonceChanges {
-		if nc.Index == resumeBALTx0AccessIndex {
-			acc.Nonce = nc.Value
-			changed = true
-		}
-	}
-	for _, cc := range changes.CodeChanges {
-		require.NotEqual(t, resumeBALTx0AccessIndex, cc.Index, "tx0 must not change code")
-	}
-	return acc, changed
 }
 
 // assembleBlock builds block 1 with the production block assembler, so the
@@ -237,7 +251,7 @@ func (fx *resumeBALFixture) assembleBlock(t *testing.T, txs types.Transactions, 
 	ctx := context.Background()
 	logger := log.New()
 	db := newResumeTestDB(t)
-	fx.seed(t, db, false)
+	fx.seed(t, db, fromBlockStart)
 	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
 		return rawdb.WriteTd(tx, fx.genesis.Hash(), 0, *uint256.NewInt(0))
 	}))
@@ -311,13 +325,10 @@ func (fx *resumeBALFixture) assembleBlock(t *testing.T, txs types.Transactions, 
 	return block
 }
 
-// tamperedBlock commits to an access list with an extra untouched account, so
-// the transactions and the state root stay unchanged and only the access list
-// check can tell the block apart.
-func (fx *resumeBALFixture) tamperedBlock(t *testing.T) *types.Block {
+// withAccessList commits block 1 to bal: transactions and state root stay
+// unchanged, so only the access list check can tell the block apart.
+func (fx *resumeBALFixture) withAccessList(t *testing.T, bal types.BlockAccessList) *types.Block {
 	t.Helper()
-	bal := append(fx.block.BlockAccessList().Copy(), types.AccountChanges{Address: common.HexToAddress("0x0000000000000000000000000000000000000c33")})
-	slices.SortFunc(bal, func(a, b types.AccountChanges) int { return bytes.Compare(a.Address[:], b.Address[:]) })
 	require.NotEqual(t, fx.block.BlockAccessList().Hash(), bal.Hash())
 	header := types.CopyHeader(fx.block.HeaderNoCopy())
 	balHash := bal.Hash()
@@ -331,15 +342,58 @@ func (fx *resumeBALFixture) tamperedBlock(t *testing.T) *types.Block {
 	return block
 }
 
-// exec runs block through the parallel executor, from its start or resumed
-// after tx0, and returns the invalid-block verdict, if any.
-func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, resumeAfterTx0 bool) *blockVerdict {
+// phantomAccountBlock lists an extra untouched account.
+func (fx *resumeBALFixture) phantomAccountBlock(t *testing.T) *types.Block {
+	t.Helper()
+	bal := append(fx.block.BlockAccessList().Copy(), types.AccountChanges{Address: common.HexToAddress("0x0000000000000000000000000000000000000c33")})
+	slices.SortFunc(bal, func(a, b types.AccountChanges) int { return bytes.Compare(a.Address[:], b.Address[:]) })
+	return fx.withAccessList(t, bal)
+}
+
+// droppedInitWritesBlock presents the block-start system call's storage writes
+// as mere reads, which is what a replay without history would compute.
+func (fx *resumeBALFixture) droppedInitWritesBlock(t *testing.T) *types.Block {
+	t.Helper()
+	bal := fx.block.BlockAccessList().Copy()
+	dropped := false
+	for i := range bal {
+		if bal[i].Address != params.BeaconRootsAddress.Value() {
+			continue
+		}
+		for _, slot := range bal[i].StorageChanges {
+			bal[i].StorageReads = append(bal[i].StorageReads, slot.Slot)
+		}
+		bal[i].StorageChanges = nil
+		dropped = true
+	}
+	require.True(t, dropped)
+	require.NoError(t, bal.Validate())
+	return fx.withAccessList(t, bal)
+}
+
+// exec runs block through the parallel executor from point and returns the
+// invalid-block verdict and the operational error, at most one of them set.
+func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumePoint) (*blockVerdict, error) {
 	t.Helper()
 	ctx := context.Background()
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
 	db := newResumeTestDB(t)
-	fx.seed(t, db, resumeAfterTx0)
+	fx.seed(t, db, point)
+	if fx.wipeHistory {
+		require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+			for _, table := range []string{
+				kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx,
+				kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx,
+				kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx,
+			} {
+				if err := tx.ClearTable(table); err != nil {
+					return err
+				}
+			}
+			return nil
+		}))
+	}
 
 	blockRLP, err := rlp.EncodeToBytes(block)
 	require.NoError(t, err)
@@ -369,25 +423,30 @@ func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, resumeAfterTx
 	domains.SetTxNum(resumeBALBlockStartTxNum)
 
 	rng := execRange{blockNum: 1, initialTxNum: resumeBALGenesisTxNum, inputTxNum: resumeBALBlockStartTxNum, maxBlockNum: 1}
-	if resumeAfterTx0 {
-		rng.initialTxNum = resumeBALBlockStartTxNum + 1
+	if point != fromBlockStart {
+		rng.initialTxNum = resumeBALBlockStartTxNum + uint64(point)
 		rng.offsetFromBlockBeginning = 1
 	}
 	src := &singleBlockSource{block: block, num: 1, parent: fx.genesis.Header(), bal: block.BlockAccessList()}
 	out, err := execV3(ctx, cfg, domains, rwTx, stages.ModeForkValidation, false, "resume-bal", rng, src, logger)
-	require.NoError(t, err)
-	return out.verdict
+	if err != nil {
+		require.Nil(t, out.verdict)
+		return nil, err
+	}
+	return out.verdict, nil
 }
 
-func requireAccepted(t *testing.T, verdict *blockVerdict, msg string) {
+func requireAccepted(t *testing.T, verdict *blockVerdict, err error, msg string) {
 	t.Helper()
+	require.NoError(t, err, msg)
 	if verdict != nil {
 		t.Fatalf("%s: %v", msg, verdict.err)
 	}
 }
 
-func requireAccessListMismatch(t *testing.T, verdict *blockVerdict, msg string) {
+func requireAccessListMismatch(t *testing.T, verdict *blockVerdict, err error, msg string) {
 	t.Helper()
+	require.NoError(t, err, msg)
 	require.NotNil(t, verdict, msg)
 	require.ErrorContains(t, verdict.err, "block access list mismatch", msg)
 }
@@ -397,13 +456,41 @@ func requireAccessListMismatch(t *testing.T, verdict *blockVerdict, msg string) 
 // the header, exactly like a block executed from its start.
 func TestResumedBlockValidatesBlockAccessList(t *testing.T) {
 	fx := newResumeBALFixture(t)
-	tampered := fx.tamperedBlock(t)
+	phantom := fx.phantomAccountBlock(t)
+	droppedInit := fx.droppedInitWritesBlock(t)
 
-	requireAccepted(t, fx.exec(t, fx.block, false), "full execution must accept the block")
-	requireAccessListMismatch(t, fx.exec(t, tampered, false), "full execution must reject the tampered access list")
+	verdict, err := fx.exec(t, fx.block, fromBlockStart)
+	requireAccepted(t, verdict, err, "full execution must accept the block")
+	verdict, err = fx.exec(t, phantom, fromBlockStart)
+	requireAccessListMismatch(t, verdict, err, "full execution must reject the phantom account")
+	verdict, err = fx.exec(t, droppedInit, fromBlockStart)
+	requireAccessListMismatch(t, verdict, err, "full execution must reject the dropped block-start writes")
 
-	requireAccepted(t, fx.exec(t, fx.block, true), "the resumed block must still be accepted")
-	requireAccessListMismatch(t, fx.exec(t, tampered, true), "the resumed block must reject the tampered access list")
+	verdict, err = fx.exec(t, fx.block, afterTx0)
+	requireAccepted(t, verdict, err, "the block resumed after tx0 must still be accepted")
+	verdict, err = fx.exec(t, phantom, afterTx0)
+	requireAccessListMismatch(t, verdict, err, "the block resumed after tx0 must reject the phantom account")
+
+	verdict, err = fx.exec(t, fx.block, afterBlockInit)
+	requireAccepted(t, verdict, err, "the block resumed after its start must still be accepted")
+	verdict, err = fx.exec(t, droppedInit, afterBlockInit)
+	requireAccessListMismatch(t, verdict, err, "the block resumed after its start must reject the dropped block-start writes")
+}
+
+// TestResumedBlockWithoutPrefixHistoryIsOperational pins that a resumed block
+// whose prefix cannot be replayed from history is neither accepted nor marked
+// invalid: a history read silently answers from the latest state, which would
+// turn the prefix's writes into no-ops.
+func TestResumedBlockWithoutPrefixHistoryIsOperational(t *testing.T) {
+	fx := newResumeBALFixture(t)
+	fx.wipeHistory = true
+
+	verdict, err := fx.exec(t, fx.block, afterBlockInit)
+	require.Error(t, err, "the real block must not be judged without history")
+	require.Nil(t, verdict)
+	verdict, err = fx.exec(t, fx.droppedInitWritesBlock(t), afterBlockInit)
+	require.Error(t, err, "the forged block must not be judged without history")
+	require.Nil(t, verdict)
 }
 
 // TestReplayResumedPrefixHonoursCancellation pins that a cancelled context
@@ -411,6 +498,12 @@ func TestResumedBlockValidatesBlockAccessList(t *testing.T) {
 func TestReplayResumedPrefixHonoursCancellation(t *testing.T) {
 	db := newResumeTestDB(t)
 	config := chain.TestChainBerlinConfig
+	// Fund the sender at tx0's txNum so the prefix range holds a history record.
+	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
+		acc := accounts.NewAccount()
+		acc.Balance = *uint256.NewInt(1_000_000_000)
+		return putter.DomainPut(kv.AccountsDomain, senderIsCoinbaseKey.rawAddress[:], accounts.SerialiseV3(&acc), 2, nil)
+	})
 	pe, roTx := newResumeTestExec(t, db, config)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
