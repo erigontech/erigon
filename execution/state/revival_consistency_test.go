@@ -101,6 +101,7 @@ func TestRevivalConsistency_AddressPathOnly_ReaderAndValidatorDiverge(t *testing
 
 	vm := NewVersionMap(nil)
 	writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: 0}, *uint256.NewInt(1_000), true)
+	vm.WriteNonce(addr, Version{TxIndex: 0}, 1, true)
 	writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2}, true, true)
 	// Revival writes ONLY AddressPath at the same tx as the destruct — no
 	// Balance/Nonce/CodeHash re-write. createObject never does this.
@@ -115,17 +116,13 @@ func TestRevivalConsistency_AddressPathOnly_ReaderAndValidatorDiverge(t *testing
 	require.NoError(t, err)
 	require.NotNil(t, account, "reader's AddressPath >= arm reports the account revived")
 
-	// The pre-destruct balance read still matches the latest balance write
-	// ({0,0}=1000, since revival wrote no balance), so checkVersion passes and
-	// the SD-staleness revival arm is actually reached — and the validator,
-	// lacking the AddressPath arm, invalidates where the reader revived.
 	io := NewVersionedIO(6)
 	rs := ReadSet{}
-	rs.SetBalance(addr, VersionedRead[uint256.Int]{
+	rs.SetNonce(addr, VersionedRead[uint64]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 0}},
-		Val:        *uint256.NewInt(1_000),
+		Val:        1,
 	})
 	io.RecordReads(Version{TxIndex: 5}, rs)
 	require.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, validateEqualVersion, true, false, false, ""),
-		"validator lacks the AddressPath >= revival arm, so it diverges from the reader on an AddressPath-only revival")
+		"an account record alone must not restore the pre-destruct nonce")
 }
