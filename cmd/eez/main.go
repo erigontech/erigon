@@ -14,12 +14,13 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// Command eez decodes EEZ batches.
+// Command eez decodes EEZ batches and compares EEZ chains.
 package main
 
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -27,6 +28,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez"
 	"github.com/erigontech/erigon/eez/tools"
 )
@@ -34,13 +36,24 @@ import (
 func main() {
 	app := &cli.Command{
 		Name:  "eez",
-		Usage: "EEZ batch tools",
+		Usage: "EEZ batch and chain tools",
 		Commands: []*cli.Command{
 			{
 				Name:      "decode",
 				Usage:     "Decode a postAndVerifyBatch input and its DA payload",
 				ArgsUsage: "<hex input | @file | ->",
 				Action:    decode,
+			},
+			{
+				Name:  "diff",
+				Usage: "Find the first block two EEZ chains disagree on",
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "a", Usage: "JSON-RPC endpoint of the first chain", Required: true},
+					&cli.StringFlag{Name: "b", Usage: "JSON-RPC endpoint of the second chain", Required: true},
+					&cli.Uint64Flag{Name: "from", Usage: "First block compared"},
+					&cli.Uint64Flag{Name: "to", Usage: "Last block compared", Required: true},
+				},
+				Action: diff,
 			},
 		},
 	}
@@ -82,4 +95,32 @@ func decode(_ context.Context, cmd *cli.Command) error {
 	}
 	_, err = os.Stdout.Write(out)
 	return err
+}
+
+func diff(ctx context.Context, cmd *cli.Command) error {
+	logger := log.New()
+	a, err := tools.DialSource(ctx, cmd.String("a"), logger)
+	if err != nil {
+		return err
+	}
+	defer a.Close()
+	b, err := tools.DialSource(ctx, cmd.String("b"), logger)
+	if err != nil {
+		return err
+	}
+	defer b.Close()
+	d, err := tools.Diff(ctx, a, b, cmd.Uint64("from"), cmd.Uint64("to"))
+	if err != nil {
+		return err
+	}
+	if d == nil {
+		fmt.Println("no difference")
+		return nil
+	}
+	out, err := json.MarshalIndent(map[string]any{"block": d.Block, "fields": d.Fields, "a": d.A, "b": d.B}, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(out))
+	return cli.Exit("", 2)
 }
