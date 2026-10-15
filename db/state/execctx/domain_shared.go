@@ -174,6 +174,13 @@ type SharedDomains struct {
 	// block/slot boundary. The SD is the carrier, not the decision-maker.
 	versionedIO VersionedIO
 	versionMap  VersionMap
+	// flashGas* track the in-progress flashblock's REMAINING gas across its rounds; see SetFlashGasRemaining.
+	flashGasRegular uint64
+	flashGasState   uint64
+	flashGasBlob    uint64
+	flashGasSet     bool
+	// roundGasFull marks a round the BLOCK's gas limit ended; see SetRoundGasFull.
+	roundGasFull bool
 }
 
 // PickTrieVariant returns the commitment trie variant selected by the
@@ -316,6 +323,12 @@ func (sd *SharedDomains) Merge(ctx context.Context, sdTxNum uint64, other *Share
 	// Receipts accumulate in BODY ORDER across rounds and the seal derives gas, receipt count and receipt
 	// root from them, so a staged round's receipts must fold with its state.
 	sd.flashblockReceipts = append(sd.flashblockReceipts, other.flashblockReceipts...)
+	// And so must the gas the round spent. The merge is the one commit point, so a round that is
+	// dropped instead takes its consumption with it — the block's budget is only ever reduced by a
+	// round that went into the block.
+	if other.flashGasSet {
+		sd.SetFlashGasRemaining(other.flashGasRegular, other.flashGasState, other.flashGasBlob)
+	}
 
 	sd.txNum = otherTxNum
 	sd.currentStep = kv.Step(otherTxNum / sd.stepSize)
@@ -1448,3 +1461,29 @@ func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxN
 	}
 	return changes, nil
 }
+
+// SetFlashGasRemaining records what the in-progress flashblock has LEFT of its gas, per dimension.
+//
+// A block is built over many rounds and each round is its own execution run, so a gas pool built per
+// run starts every round at the FULL block limit and the block's own budget is never tracked. This is
+// what carries it: a round starts its pool from here and writes back what it did not spend, and the
+// merge folds a committed round's figure into the block exactly as it folds the round's receipts. A
+// round that is dropped never merges, so its consumption goes with it.
+func (sd *SharedDomains) SetFlashGasRemaining(regular, state, blob uint64) {
+	sd.flashGasRegular, sd.flashGasState, sd.flashGasBlob = regular, state, blob
+	sd.flashGasSet = true
+}
+
+// FlashGasRemaining reports the in-progress flashblock's remaining gas, and whether it is tracked at
+// all. Not tracked means this is not a flashblock round, and the caller keeps the block's own limit.
+func (sd *SharedDomains) FlashGasRemaining() (regular, state, blob uint64, ok bool) {
+	return sd.flashGasRegular, sd.flashGasState, sd.flashGasBlob, sd.flashGasSet
+}
+
+// SetRoundGasFull marks a round that ended because the BLOCK had no room for its next transaction —
+// gas-full, which is not out-of-gas: the transaction was fine and the block was not. The caller reads
+// it to report the right reason and to requeue the transaction that did not fit.
+func (sd *SharedDomains) SetRoundGasFull(v bool) { sd.roundGasFull = v }
+
+// RoundGasFull reports whether this round ended gas-full.
+func (sd *SharedDomains) RoundGasFull() bool { return sd.roundGasFull }

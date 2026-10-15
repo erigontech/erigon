@@ -300,8 +300,15 @@ func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs Flas
 		header = BuildFlashHeader(inputs, body, FlashblockOutputs{})
 		hash = header.Hash()
 		e.rollbackRound(inputs.Number, vr.AppliedTxs)
+		// GAS-FULL does not come from the caller, so it is not in the caller's cancellation. It is the
+		// one reason where the transaction at the boundary was EXCLUDED rather than never reached —
+		// the block had no room for it — and the caller needs to know that to offer it again.
+		reason := stopReasonOf(ctx)
+		if vr.GasFull {
+			reason = StopGasFull
+		}
 		stopped = &ExecutionStopped{
-			Reason: stopReasonOf(ctx), Num: inputs.Number, Txs: len(kept), Applied: vr.AppliedTxs - roundBase,
+			Reason: reason, Num: inputs.Number, Txs: len(kept), Applied: vr.AppliedTxs - roundBase,
 		}
 	}
 	// A round that MERGED is committed, whatever the clock says. Its state is in the block, so reporting

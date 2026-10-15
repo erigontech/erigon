@@ -22,9 +22,30 @@ import (
 // Gas is NOT this. A block may never exceed its gas limit, so gas is checked BEFORE a transaction goes in.
 // The slot is a schedule, and a schedule is cut.
 
-// stopping reports that the caller has stopped this round, so no further task may be dispatched.
+// stoppableRound reports that this round may END AT A TRANSACTION rather than at its body.
+//
+// Only an ACCUMULATION round may: its block-end does not run, so what it leaves is the same shape as
+// what any other round leaves — a prefix the next round extends. A round that has to finalize cannot
+// stop part way, because the block it would leave claims a body it did not execute.
+func (be *blockExecutor) stoppableRound(pe *parallelExecutor) bool {
+	return pe.isForkValidation && pe.doms != nil && pe.doms.FlashblockAccumulating()
+}
+
+// stopping reports that this round takes no further transaction, so none may be dispatched.
+//
+// Two reasons, and they end the round the same way while meaning opposite things about the
+// transaction at the boundary. The CALLER stopping it (the slot closing, the seal asked for) is a
+// schedule running out: the last transaction that completed is good and is kept. GAS-FULL is the
+// block running out: the transaction that did not fit is excluded, and the round ends at the one
+// before it. Either way nothing new goes out and what is already running is finished.
 func (be *blockExecutor) stopping(pe *parallelExecutor) bool {
 	if be.cut {
+		return true
+	}
+	if !be.stoppableRound(pe) {
+		return false
+	}
+	if be.gasFull {
 		return true
 	}
 	if pe.roundStop == nil {
@@ -35,10 +56,7 @@ func (be *blockExecutor) stopping(pe *parallelExecutor) bool {
 	default:
 		return false
 	}
-	// Only an ACCUMULATION round may be cut. Its block-end does not run, so what it leaves is the same
-	// shape as what any other round leaves — a prefix the next round extends. A round that has to finalize
-	// cannot stop part way: the block it would leave claims a body it did not execute.
-	return pe.isForkValidation && pe.doms != nil && pe.doms.FlashblockAccumulating()
+	return true
 }
 
 // cutIfStopped shortens a stopped round to the transactions that completed, and reports whether it did.
@@ -88,3 +106,7 @@ func (pe *parallelExecutor) nothingInFlight() bool {
 // errRoundStopped ends the exec loop for a round the caller stopped before it executed anything. It is a
 // cancellation, not a failure: the caller named the reason and reports it.
 var errRoundStopped = fmt.Errorf("pre-exec round stopped with nothing executed: %w", context.Canceled)
+
+// errRoundGasFull ends a round whose FIRST transaction did not fit the block's remaining gas. There is
+// no prefix to keep, so there is nothing to cut to; the block is full and the round keeps nothing.
+var errRoundGasFull = fmt.Errorf("pre-exec round found the block gas-full with nothing executed: %w", context.Canceled)

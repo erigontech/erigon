@@ -79,6 +79,9 @@ type ValidationResult struct {
 	// AppliedTxs is how many of the block's body transactions this call left executed. It equals the body
 	// it was given unless the round was STOPPED part way, in which case the body was cut to it.
 	AppliedTxs int
+	// GasFull reports a round that ended because the BLOCK ran out of gas room, not because its
+	// caller stopped it. The transaction that did not fit is excluded and is the caller's to re-offer.
+	GasFull bool
 	// GasUsed, ReceiptHash and Bloom are the SEALED output-side header fields the CLOSE derives
 	// over the accumulated flashblock receipts (doms.FlashblockReceipts()) with ZERO re-execution —
 	// the read-and-package seal. Set only at the close (FlashblockAccumulating unset, receipts present);

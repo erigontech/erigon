@@ -402,6 +402,23 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock
 	// Mark this as a flashblock accumulation round → exec skips the per-round block-END (it belongs
 	// to the CLOSE, which runs once via ValidateChain over a fresh SD where this flag is unset).
 	doms.SetFlashblockAccumulating(true)
+	doms.SetRoundGasFull(false)
+
+	// THE BLOCK'S GAS BUDGET, CARRIED INTO THIS ROUND. Each round executes in its own run with its
+	// own gas pool, so without this it starts at the FULL block limit every time and the block's
+	// budget is never tracked across its rounds — a body could be built well past its gas limit and
+	// nothing in execution would say so. A staged round takes the block's remaining; the block takes
+	// its limit once, when it opens.
+	if _, _, _, tracked := doms.FlashGasRemaining(); !tracked {
+		if stagingBase != nil {
+			if r, st, b, ok := stagingBase.FlashGasRemaining(); ok {
+				doms.SetFlashGasRemaining(r, st, b)
+			}
+		}
+	}
+	if _, _, _, tracked := doms.FlashGasRemaining(); !tracked {
+		doms.SetFlashGasRemaining(header.GasLimit, header.GasLimit, e.config.GetMaxBlobGasPerBlock(header.Time))
+	}
 
 	tx := doms.BlockOverlay()
 
@@ -502,6 +519,7 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock
 	// rounds. The rest were never scheduled and are not in the state, so they may not be in the body either
 	// — the seal reads the in-progress block back by its header hash, and a body longer than its receipts
 	// would seal transactions nothing executed.
+	gasFull := doms.RoundGasFull()
 	appliedTxs := len(body.Transactions)
 	if status == engine_types.ValidStatus {
 		if ran := prefixLen + len(doms.FlashblockReceipts()); ran < appliedTxs {
@@ -567,7 +585,7 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock
 	if status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil {
 		validationStatus = ExecutionStatusBadBlock
 	}
-	res := ValidationResult{ValidationStatus: validationStatus, LatestValidHash: lvh, AppliedTxs: appliedTxs}
+	res := ValidationResult{ValidationStatus: validationStatus, LatestValidHash: lvh, AppliedTxs: appliedTxs, GasFull: gasFull}
 	if validationError != nil {
 		res.ValidationError = validationError.Error()
 	}

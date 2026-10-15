@@ -23,6 +23,13 @@ const (
 	StopLostCommit StopReason = "lost the commit claim"
 	// StopShutdown is the node going down under a round.
 	StopShutdown StopReason = "shutdown"
+	// StopGasFull is the BLOCK having no room for the round's next transaction. It is the one stop
+	// reason that does not come from the caller, and the one where the boundary transaction is
+	// EXCLUDED rather than kept: the round ends at the last transaction that FITTED.
+	//
+	// ⚠ IT IS NOT OUT OF GAS. A transaction that exhausts its own gas limit has simply failed, gets a
+	// receipt saying so and goes in the block like any other. Gas-full is about the block.
+	StopGasFull StopReason = "block gas full"
 )
 
 // ExecutionStopped reports a pre-execution round that the CALLER stopped, and why. The block is left as

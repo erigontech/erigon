@@ -2325,6 +2325,9 @@ type blockExecutor struct {
 	// cut marks a round the caller STOPPED and that has been shortened to the transactions which
 	// completed. See exec3_stop.go.
 	cut bool
+	// gasFull marks a round that ended because the BLOCK had no room for its next transaction —
+	// gas-full, which is not out-of-gas. See exec3_stop.go.
+	gasFull bool
 
 	// blockStateCache provides a stable pre-block snapshot of account data
 	// for GetCommittedState reads, unaffected by intra-block ApplyStateWrites.
@@ -2403,6 +2406,13 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 	if doms != nil {
 		doms.SetVersionedIO(blockIO)
 		doms.SetVersionMap(versionMap)
+		// THE BLOCK'S GAS, NOT THIS ROUND'S. A flashblock is built over many rounds and each round is
+		// its own execution run, so the pool handed in here was built for THIS run and starts at the
+		// full block limit. Starting every round there means the block's budget is never tracked and a
+		// body can be built well past its gas limit with nothing in execution saying so.
+		if regular, state, blob, ok := doms.FlashGasRemaining(); ok {
+			be.gasPool = protocol.NewBlockGasPool(regular, state, blob)
+		}
 	}
 
 	return be
@@ -2708,6 +2718,29 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		if valid {
 			if cntInvalid == 0 {
+				// GAS-FULL, WHICH IS NOT OUT OF GAS. The transaction is fine — it would execute
+				// anywhere with room — and the BLOCK is what has run out. Checked on the DECLARED
+				// limit, because that is the most this transaction could spend and a block may never
+				// exceed its limit; what it actually spent is what gets consumed below.
+				//
+				// A PRODUCER stops here: this transaction is not published, not consumed and not in
+				// the block, the round ends at the one before it, and the caller offers it again. A
+				// VALIDATOR has been handed a body that already exceeds the limit, which is a
+				// protocol violation and nothing it can decline — so for it this stays a bad block.
+				if txn := txTask.Tx(); txn != nil {
+					regularContribution, stateContribution := protocol.InclusionContributions(txn.GetGasLimit(), txResult.ExecutionResult.IntrinsicGas, txTask.Rules().IsAmsterdam)
+					if err := protocol.CheckBlockGasInclusion(be.gasPool, regularContribution, stateContribution); err != nil {
+						if !be.stoppableRound(pe) {
+							return be.invalidBlockResult(fmt.Errorf("%w: block gas used overflow at block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)), nil
+						}
+						be.gasFull = true
+						if pe.doms != nil {
+							pe.doms.SetRoundGasFull(true)
+						}
+						break
+					}
+				}
+
 				be.validateTasks.markComplete(tx)
 
 				be.finalizedResults[tx] = txResult
@@ -2716,13 +2749,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if txVersion.TxIndex > 0 && tx > 0 {
 					if prev := be.finalizedResults[tx-1]; prev != nil {
 						prevReceipt = prev.Receipt
-					}
-				}
-
-				if txn := txTask.Tx(); txn != nil {
-					regularContribution, stateContribution := protocol.InclusionContributions(txn.GetGasLimit(), txResult.ExecutionResult.IntrinsicGas, txTask.Rules().IsAmsterdam)
-					if err := protocol.CheckBlockGasInclusion(be.gasPool, regularContribution, stateContribution); err != nil {
-						return be.invalidBlockResult(fmt.Errorf("%w: block gas used overflow at block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)), nil
 					}
 				}
 
@@ -2965,6 +2991,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	// A stopped round shortens itself here, once everything it dispatched has come back, so the block it
 	// completes below is the prefix that executed rather than the body it was given.
 	be.cutIfStopped(pe)
+	if be.gasFull && !be.cut && be.execTasks.inProgressCount() == 0 {
+		// Gas-full with nothing to keep: the first transaction offered did not fit the block's
+		// remaining gas, so there is no prefix and nothing to cut to. End the round rather than wait
+		// for a result that is not coming.
+		return nil, errRoundGasFull
+	}
 
 	if be.publishTasks.countComplete() == len(be.tasks) && be.execTasks.countComplete() == len(be.tasks) {
 		var allDeps map[int]map[int]bool
@@ -3125,6 +3157,16 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		// Flush block state cache to sd.mem — all writes (per-TX + finalize) are now visible.
 		if err := be.blockStateCache.Flush(pe.rs.Domains(), applyTx); err != nil {
 			return nil, err
+		}
+
+		// HAND THE BLOCK BACK WHAT THIS ROUND DID NOT SPEND. The pool is the block's budget, not the
+		// round's, and the next round starts where this one left off. Only on the flashblock path,
+		// where the block is tracked across rounds at all.
+		if pe.doms != nil && be.gasPool != nil {
+			if _, _, _, tracked := pe.doms.FlashGasRemaining(); tracked {
+				pe.doms.SetFlashGasRemaining(be.gasPool.RegularGasAvailable(),
+					be.gasPool.StateGasAvailable(), be.gasPool.BlobGas())
+			}
 		}
 
 		be.result = &blockResult{
