@@ -17,6 +17,8 @@
 package mdbx_test
 
 import (
+	"encoding/binary"
+	"fmt"
 	"math/rand"
 	"testing"
 
@@ -26,6 +28,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/stream"
 
 	"github.com/stretchr/testify/require"
 
@@ -207,4 +211,47 @@ func BaseCaseDBForBenchmark(b *testing.B) kv.RwDB {
 	}).MapSize(128 * datasize.MB).MustOpen()
 	b.Cleanup(db.Close)
 	return db
+}
+
+func BenchmarkRangeDupSortIntersect(b *testing.B) {
+	const bigN = 200_000
+	db := BaseCaseDBForBenchmark(b)
+	tx, err := db.BeginRw(b.Context())
+	require.NoError(b, err)
+	defer tx.Rollback()
+	rnd := rand.New(rand.NewSource(1))
+	for n := range uint64(bigN) {
+		require.NoError(b, tx.Put("Table", []byte("big"), binary.BigEndian.AppendUint64(nil, n*10)))
+	}
+	ratios := []int{1, 1000}
+	for _, r := range ratios {
+		for range bigN / r {
+			v := uint64(rnd.Intn(bigN)) * 10
+			require.NoError(b, tx.Put("Table", fmt.Appendf(nil, "small%d", r), binary.BigEndian.AppendUint64(nil, v)))
+		}
+	}
+	decode := func(_, v []byte) (uint64, error) { return binary.BigEndian.Uint64(v), nil }
+	rangeU64 := func(key string, seek bool) stream.U64 {
+		it, err := tx.RangeDupSort("Table", []byte(key), nil, nil, order.Asc, -1)
+		require.NoError(b, err)
+		if seek {
+			return stream.TransformKV2U64Seekable(it, decode, binary.BigEndian.AppendUint64)
+		}
+		return stream.TransformKV2U64(it, decode)
+	}
+	for _, r := range ratios {
+		for _, seek := range []bool{false, true} {
+			b.Run(fmt.Sprintf("1:%d/seek=%t", r, seek), func(b *testing.B) {
+				for b.Loop() {
+					it := stream.Intersect[uint64](rangeU64(fmt.Sprintf("small%d", r), seek), rangeU64("big", seek), order.Asc, -1)
+					for it.HasNext() {
+						if _, err := it.Next(); err != nil {
+							b.Fatal(err)
+						}
+					}
+					it.Close()
+				}
+			})
+		}
+	}
 }
