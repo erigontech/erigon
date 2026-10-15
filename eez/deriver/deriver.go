@@ -48,6 +48,9 @@ type Deriver struct {
 	// safe is the latest settled block, finalized the latest one settled
 	// in a finalized L1 block; finalized never exceeds safe.
 	safe, finalized uint64
+	// seed is the settlement derivation started after; the batches of its
+	// L1 block up to it are behind the cursor.
+	seed *Record
 }
 
 // New returns a deriver extending chain, an EEZ chain configured by cfg,
@@ -66,6 +69,16 @@ func New(chain Chain, cfg *chain.Config, dir string, logger log.Logger) (*Derive
 		logger: logger,
 	}, nil
 }
+
+// Seed starts derivation after settlement r, whose block the local chain
+// holds, before any batch is reconciled.
+func (d *Deriver) Seed(r Record) {
+	d.index.Append(r)
+	d.safe, d.seed = r.LastL2Block, &r
+}
+
+// Last returns the latest derived settlement.
+func (d *Deriver) Last() (Record, bool) { return d.index.Last() }
 
 // Cursor is the L2 block the latest derived settlement ended at.
 func (d *Deriver) Cursor() uint64 { return d.index.Cursor() }
@@ -89,12 +102,22 @@ func (d *Deriver) Reconcile(ctx context.Context, batches []l1.ScannedBatch) (err
 	}()
 	for i := range batches {
 		b := &batches[i]
+		if d.seed != nil && b.L1Block >= d.seed.L1Block {
+			// Batches come in L1 order, the seed's own last of those skipped.
+			if b.L1Block == d.seed.L1Block {
+				if b.TxHash == d.seed.TxHash {
+					d.seed = nil
+				}
+				continue
+			}
+			d.seed = nil
+		}
 		if len(b.Settlement.Applied) == 0 || d.index.Contains(b.TxHash) {
 			continue
 		}
 		p, err := DecodePayload(b.Batch, d.l2.RollupID)
 		if err != nil {
-			return fmt.Errorf("batch %x in L1 block %d: %w", b.TxHash, b.L1Block, err)
+			return d.diverged(b, d.index.Cursor()+1, "DA payload: %w", err)
 		}
 		if p == nil {
 			continue
@@ -210,7 +233,7 @@ func (d *Deriver) reconcileBlocks(ctx context.Context, b *l1.ScannedBatch, p *Pa
 	}
 	sb, err := BuildSyncBlock(p, &b.Settlement, d.sync, nonce)
 	if errors.Is(err, ErrSyncBlock) {
-		return common.Hash{}, d.diverged(b, r.To, "%v", err)
+		return common.Hash{}, d.diverged(b, r.To, "%w", err)
 	}
 	if err != nil {
 		return common.Hash{}, err
@@ -318,7 +341,7 @@ func (d *Deriver) localBlock(ctx context.Context, in HeaderInputs, txs [][]byte)
 func (d *Deriver) extend(ctx context.Context, b *l1.ScannedBatch, parent *types.Header, in HeaderInputs, encoded [][]byte) (*types.BlockWithReceipts, error) {
 	txs, err := DecodeTxs(encoded)
 	if err != nil {
-		return nil, d.diverged(b, in.Number, "%v", err)
+		return nil, d.diverged(b, in.Number, "%w", err)
 	}
 	if in.Number <= d.safe {
 		if in.Number <= d.finalized {
@@ -332,7 +355,7 @@ func (d *Deriver) extend(ctx context.Context, b *l1.ScannedBatch, parent *types.
 	}
 	built, err := d.chain.Extend(ctx, parent, in, txs, safe, finalized)
 	if errors.Is(err, ErrRejected) {
-		return nil, d.diverged(b, in.Number, "%v", err)
+		return nil, d.diverged(b, in.Number, "%w", err)
 	}
 	return built, err
 }
@@ -363,7 +386,7 @@ func (d *Deriver) checkOutbound(ctx context.Context, b *l1.ScannedBatch, r Range
 		logs = append(logs, rc.Logs...)
 	}
 	if err := VerifyOutbound(outbound, logs, d.l2.RollupID); err != nil {
-		return d.diverged(b, r.To, "%v", err)
+		return d.diverged(b, r.To, "%w", err)
 	}
 	return nil
 }
@@ -449,7 +472,8 @@ func (d *Deriver) canonicalHash(ctx context.Context, number uint64) (common.Hash
 }
 
 func (d *Deriver) diverged(b *l1.ScannedBatch, l2Block uint64, format string, args ...any) error {
-	err := &DivergenceError{L1Block: b.L1Block, L1BlockHash: b.L1BlockHash, TxHash: b.TxHash, L2Block: l2Block, Reason: fmt.Sprintf(format, args...)}
+	cause := fmt.Errorf(format, args...)
+	err := &DivergenceError{L1Block: b.L1Block, L1BlockHash: b.L1BlockHash, TxHash: b.TxHash, L2Block: l2Block, Reason: cause.Error(), cause: cause}
 	d.logger.Error("[eez] local chain diverged from L1", "err", err)
 	return err
 }

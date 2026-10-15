@@ -33,10 +33,11 @@ type DivergenceError struct {
 	TxHash      common.Hash
 	L2Block     uint64
 	Reason      string
+	cause       error
 }
 
 func (e *DivergenceError) Error() string {
 	return fmt.Sprintf("%v at L2 block %d, batch %x in L1 block %d (%x): %s", ErrDiverged, e.L2Block, e.TxHash, e.L1Block, e.L1BlockHash, e.Reason)
 }
 
-func (e *DivergenceError) Unwrap() error { return ErrDiverged }
+func (e *DivergenceError) Unwrap() []error { return []error{ErrDiverged, e.cause} }

@@ -110,7 +110,7 @@ func TestDeriveAnchorBatches(t *testing.T) {
 
 	cp, err := deriver.LoadCheckpoint(f.dir)
 	require.NoError(t, err)
-	require.Equal(t, deriver.Checkpoint{L1Block: 2, L1BlockHash: batches[1].L1BlockHash, TxHash: batches[1].TxHash, L2Cursor: 5, L2BlockHash: second.Blocks[1].Hash()}, *cp)
+	require.Equal(t, deriver.Checkpoint{L1Block: batches[1].L1Block, L1BlockHash: batches[1].L1BlockHash, TxHash: batches[1].TxHash, L2Cursor: 5, L2BlockHash: second.Blocks[1].Hash()}, *cp)
 
 	// A batch derived already is not derived again.
 	require.NoError(t, f.deriver.Reconcile(t.Context(), batches))
@@ -344,7 +344,7 @@ func TestResumedBatchBelowFinalized(t *testing.T) {
 
 	f := newFollower(t)
 	require.NoError(t, f.deriver.Reconcile(t.Context(), batches[:1]))
-	require.NoError(t, f.deriver.OnFinalized(t.Context(), 1))
+	require.NoError(t, f.deriver.OnFinalized(t.Context(), batches[0].L1Block))
 	require.Equal(t, uint64(1), f.deriver.Finalized())
 	err := f.deriver.Reconcile(t.Context(), batches[1:])
 	require.ErrorIs(t, err, deriver.ErrDiverged)
@@ -361,7 +361,7 @@ func TestSafeAndFinalized(t *testing.T) {
 		derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: [][]byte{c.Transfer(bob, 1)}},
 		derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: [][]byte{}},
 	)
-	c.Post(derivertest.Posting{Batch: first})
+	l1First := c.Post(derivertest.Posting{Batch: first}).Header.Number
 	second := c.Compose(nil, derivertest.Block{Coinbase: bob, Extra: []byte{}, Txs: [][]byte{c.Transfer(bob, 2)}})
 	c.Post(derivertest.Posting{Batch: second})
 
@@ -371,22 +371,23 @@ func TestSafeAndFinalized(t *testing.T) {
 	require.Equal(t, uint64(3), f.deriver.Safe())
 	f.requireForkChoice(t, second.Blocks[0].Hash(), second.Blocks[0].Hash(), genesis)
 
-	// Finality of L1 block 1 finalizes what it settled and nothing after.
-	require.NoError(t, f.deriver.OnFinalized(ctx, 0))
+	// Finality of the first L1 block finalizes what it settled and nothing
+	// after.
+	require.NoError(t, f.deriver.OnFinalized(ctx, l1First-1))
 	require.Zero(t, f.deriver.Finalized())
-	require.NoError(t, f.deriver.OnFinalized(ctx, 1))
+	require.NoError(t, f.deriver.OnFinalized(ctx, l1First))
 	require.Equal(t, uint64(2), f.deriver.Finalized())
 	f.requireForkChoice(t, second.Blocks[0].Hash(), second.Blocks[0].Hash(), first.Blocks[1].Hash())
 
-	// L1 drops block 2: its settlement goes, and the head with it.
-	c.ReorgL1(1)
-	require.NoError(t, f.deriver.OnReorg(ctx, 1))
+	// L1 drops the second block: its settlement goes, and the head with it.
+	c.ReorgL1(l1First)
+	require.NoError(t, f.deriver.OnReorg(ctx, l1First))
 	require.Equal(t, uint64(2), f.deriver.Cursor())
 	require.Equal(t, uint64(2), f.deriver.Safe())
 	f.requireForkChoice(t, first.Blocks[1].Hash(), first.Blocks[1].Hash(), first.Blocks[1].Hash())
 	cp, err := deriver.LoadCheckpoint(f.dir)
 	require.NoError(t, err)
-	require.Equal(t, uint64(1), cp.L1Block)
+	require.Equal(t, l1First, cp.L1Block)
 
 	// The new branch settles another block 3.
 	c.Rewind(first.Blocks[1].Header())
@@ -398,5 +399,5 @@ func TestSafeAndFinalized(t *testing.T) {
 	f.requireForkChoice(t, replacement.Blocks[0].Hash(), replacement.Blocks[0].Hash(), first.Blocks[1].Hash())
 
 	// A reorg that drops a finalized settlement is refused.
-	require.ErrorIs(t, f.deriver.OnReorg(ctx, 0), deriver.ErrFinalizedReorged)
+	require.ErrorIs(t, f.deriver.OnReorg(ctx, l1First-1), deriver.ErrFinalizedReorged)
 }

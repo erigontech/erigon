@@ -110,14 +110,18 @@ type Composer struct {
 	branch uint64
 }
 
-// NewComposer returns a composer at the devnet genesis and an L1 chain of
-// one block.
+// NewComposer returns a composer at the devnet genesis and an L1 chain up to
+// the registry's deploy block.
 func NewComposer(t testing.TB) *Composer {
 	t.Helper()
 	m, chain := NewL2(t)
-	l1Chain, err := recording.NewMemoryChain(m.ChainConfig.L2.(*config.L2Config).L1ChainID, &recording.Block{Header: l1.Header{Hash: l1Hash(0, 0)}})
+	l2 := m.ChainConfig.L2.(*config.L2Config)
+	l1Chain, err := recording.NewMemoryChain(l2.L1ChainID, &recording.Block{Header: l1.Header{Hash: l1Hash(0, 0)}})
 	require.NoError(t, err)
-	return &Composer{t: t, L1: l1Chain, L2: m, Chain: chain, l2: m.ChainConfig.L2.(*config.L2Config), head: m.Genesis.Header(), settled: m.Genesis.Header()}
+	for n := uint64(1); n <= l2.RegistryDeployBlock; n++ {
+		require.NoError(t, l1Chain.Append(&recording.Block{Header: l1.Header{Number: n, Hash: l1Hash(n, 0), ParentHash: l1Hash(n-1, 0), Time: n * l2.L1BlockTime}}))
+	}
+	return &Composer{t: t, L1: l1Chain, L2: m, Chain: chain, l2: l2, head: m.Genesis.Header(), settled: m.Genesis.Header()}
 }
 
 // Registry is the devnet registry.
@@ -397,7 +401,7 @@ func (c *Composer) Scan() []l1.ScannedBatch {
 	c.t.Helper()
 	head, err := c.L1.Head(context.Background())
 	require.NoError(c.t, err)
-	batches, reached, err := l1.NewScanner(c.L1, c.l2.Registry, c.l2.RollupID).Scan(context.Background(), 0, head.Number)
+	batches, reached, err := l1.NewScanner(c.L1, c.l2.Registry, c.l2.RollupID).Scan(context.Background(), c.l2.RegistryDeployBlock, head.Number)
 	require.NoError(c.t, err)
 	require.Equal(c.t, head.Number, reached)
 	return batches
