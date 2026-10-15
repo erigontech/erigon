@@ -2986,3 +2986,40 @@ func TestPreparedPayloadCopiesTheID(t *testing.T) {
 	require.Positive(t, preparedWarmup(&p, 10, []byte{1, 2, 3, 4, 5, 6, 7, 8}, now.Add(time.Second)))
 	require.Zero(t, preparedWarmup(&p, 10, id, now.Add(time.Second)))
 }
+
+func TestBlockBuilderWindowGloasLateStartKeepsMinimumBuildTime(t *testing.T) {
+	cfg := &clparams.BeaconChainConfig{
+		SecondsPerSlot:   12,
+		IntervalsPerSlot: 3,
+	}
+	slotStart := time.Unix(100, 0)
+
+	for _, test := range []struct {
+		name      string
+		startedAt time.Duration
+		firstPoll time.Duration
+		pollUntil time.Duration
+	}{
+		{"after the unprepared collection point", 1300 * time.Millisecond, 1700 * time.Millisecond, 1800 * time.Millisecond},
+		{"capped at the prepared collection point", 2 * time.Second, 2150 * time.Millisecond, 2250 * time.Millisecond},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			window := computeBlockBuilderWindow(slotStart.Add(test.startedAt), slotStart, cfg, clparams.GloasVersion, 0)
+			require.Equal(t, slotStart.Add(test.firstPoll), window.firstGetAt)
+			require.Equal(t, slotStart.Add(test.pollUntil), window.pollUntil)
+		})
+	}
+}
+
+func TestBlockBuilderWindowShortGloasWarmupPollsNoLaterThanUnprepared(t *testing.T) {
+	cfg := &clparams.BeaconChainConfig{
+		SecondsPerSlot:   12,
+		IntervalsPerSlot: 3,
+	}
+	slotStart := time.Unix(100, 0)
+
+	window := computeBlockBuilderWindow(slotStart, slotStart, cfg, clparams.GloasVersion, 500*time.Millisecond)
+
+	require.Equal(t, slotStart.Add(900*time.Millisecond), window.firstGetAt)
+	require.Equal(t, slotStart.Add(2250*time.Millisecond), window.pollUntil)
+}

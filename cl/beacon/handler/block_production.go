@@ -112,6 +112,8 @@ const payloadPublicationDivisor = 4
 
 const gloasPayloadCollectionDivisor = 3
 
+const minimumPayloadBuildTime = 500 * time.Millisecond
+
 // identificationSegment builds the client-version graffiti standard's EL+CL code and commit
 // prefix segment, so client-diversity tooling can attribute proposed blocks. See
 // https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md
@@ -372,12 +374,24 @@ func maximumPreparedAdvance(cfg *clparams.BeaconChainConfig, stateVersion clpara
 // advances the first poll by the same duration, up to the prepared collection point.
 func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion, warmup time.Duration) blockBuilderWindow {
 	due := attestationDue(cfg, stateVersion)
+	preparedBy := slotStart.Add(preparedGrabOffset(due))
+	// A builder started after the unprepared collection point still gets a minimum build time, but
+	// is never collected later than the prepared collection point.
 	grabBy := slotStart.Add(unpreparedGrabOffset(due, stateVersion))
-	if warmup > 0 {
-		grabBy = slotStart.Add(preparedGrabOffset(due))
+	if lateGrab := now.Add(minimumPayloadBuildTime); lateGrab.After(grabBy) {
+		grabBy = lateGrab
+		if grabBy.After(preparedBy) {
+			grabBy = preparedBy
+		}
 	}
-	advance := min(max(warmup, 0), maximumPreparedAdvance(cfg, stateVersion))
-	firstGetAt := grabBy.Add(-minPayloadPollingWindow).Add(-advance)
+	firstGetAt := grabBy.Add(-minPayloadPollingWindow)
+	if warmup > 0 {
+		advance := min(warmup, maximumPreparedAdvance(cfg, stateVersion))
+		if preparedFirst := preparedBy.Add(-minPayloadPollingWindow).Add(-advance); preparedFirst.Before(firstGetAt) {
+			firstGetAt = preparedFirst
+		}
+		grabBy = preparedBy
+	}
 	if firstGetAt.Before(now) {
 		firstGetAt = now
 	}
