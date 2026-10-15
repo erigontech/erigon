@@ -381,6 +381,9 @@ func (r *Reader) Get(blockNum uint64, hash common.Hash) ([]byte, bool) {
 
 func (r *Reader) Len() int { return r.count }
 
+// End returns the block after the last indexed one.
+func (r *Reader) End() uint64 { return r.first + uint64(len(r.offsets)/8) }
+
 func (r *Reader) Close() error {
 	if r.data == nil {
 		return nil

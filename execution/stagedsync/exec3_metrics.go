@@ -53,6 +53,8 @@ var (
 		"parallel-exec re-executions, by sync mode")
 	mxDiscardsTotal = metrics.GetOrCreateCounterVec("exec_discards_total", []string{"mode", "reason"},
 		"parallel-exec tasks thrown away, by sync mode and reason")
+	mxOfflineBALBlocks = metrics.GetOrCreateCounterVec("exec_offline_bal_blocks_total", []string{"result"},
+		"blocks looked up in the offline-BAL store, by result (used, missing)")
 
 	mxExecDomainReads             = metrics.NewGauge(`exec_domain_read_rate{domain="all"}`)
 	mxExecDomainReadDuration      = metrics.NewGauge(`exec_domain_read_dur{domain="all"}`)

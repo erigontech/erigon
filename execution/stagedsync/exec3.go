@@ -639,9 +639,16 @@ func blockAccessList(blockTx kv.Getter, block *types.Block, blockNum uint64, off
 	bal := block.BlockAccessList()
 	if bal == nil && offlineBAL.Reader != nil {
 		if data, ok := offlineBAL.Get(blockNum, block.Hash()); ok {
+			mxOfflineBALBlocks.WithLabelValues("used").Inc()
 			return types.DecodeBlockAccessListBytes(data)
 		}
-		logger.Warn("[exec] offline BAL store has no record for block", "block", blockNum, "hash", block.Hash())
+		mxOfflineBALBlocks.WithLabelValues("missing").Inc()
+		switch end := offlineBAL.Reader.End(); {
+		case blockNum < end:
+			logger.Warn("[exec] offline BAL store has no record for block", "block", blockNum, "hash", block.Hash())
+		case blockNum == end:
+			logger.Info("[exec] offline BAL store exhausted, executing without BALs from here", "block", blockNum, "generating", offlineBAL.Writer != nil)
+		}
 	}
 	if bal == nil && block.HeaderNoCopy().HasNonEmptyBAL() {
 		return rawdb.ReadBlockAccessList(blockTx, block.Hash(), blockNum)
