@@ -995,11 +995,10 @@ func (bal BlockAccessList) Validate() error {
 
 // ValidateForHeader validates a block access list against its block gas limit.
 func (bal BlockAccessList) ValidateForHeader(gasLimit uint64) error {
-	err := bal.Validate()
-	if err != nil {
+	if err := bal.ValidateMaxItems(gasLimit); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidBlockAccessList, err)
 	}
-	if err = bal.ValidateMaxItems(gasLimit); err != nil {
+	if err := bal.Validate(); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidBlockAccessList, err)
 	}
 	return nil
@@ -1097,19 +1096,7 @@ func validateStorageChangeEntries(changes []*StorageChange) error {
 	if len(changes) == 0 {
 		return errors.New("empty slot changes")
 	}
-	var lastIdx uint32
-	var hasLast bool
-	for i, change := range changes {
-		if change == nil {
-			return fmt.Errorf("entry %d is nil", i)
-		}
-		if hasLast && change.Index <= lastIdx {
-			return fmt.Errorf("indices must be strictly increasing (index %d)", i)
-		}
-		lastIdx = change.Index
-		hasLast = true
-	}
-	return nil
+	return validateIndexedChanges(changes)
 }
 
 func validateStorageReads(reads []accounts.StorageKey) error {

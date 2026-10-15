@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -453,34 +454,6 @@ func TestBlockAccessListRLPEncoding(t *testing.T) {
 	}
 }
 
-func TestBlockAccessListLargeCodeRoundTrip(t *testing.T) {
-	code := bytes.Repeat([]byte{0x5b}, 64*1024)
-	bal := make(BlockAccessList, 65)
-	for i := range bal {
-		bal[i] = AccountChanges{
-			Address:     common.Address{0: 1, 19: byte(i)},
-			CodeChanges: []*CodeChange{{Index: uint32(i + 1), Bytecode: code}},
-		}
-	}
-	raw, err := EncodeBlockAccessListBytes(bal)
-	if err != nil {
-		t.Fatalf("encode BAL: %v", err)
-	}
-	if len(raw) <= 4<<20 {
-		t.Fatalf("BAL size = %d, want more than 4 MiB", len(raw))
-	}
-	sidecar, err := DecodeBlockAccessListSidecarForBlock(raw, 10_000_000_000, len(bal))
-	if err != nil {
-		t.Fatalf("decode BAL: %v", err)
-	}
-	if err := sidecar.ValidateForBlock(10_000_000_000, len(bal)); err != nil {
-		t.Fatalf("validate BAL: %v", err)
-	}
-	if !reflect.DeepEqual(sidecar.BlockAccessList(), bal) {
-		t.Fatal("decoded BAL differs")
-	}
-}
-
 func TestBlockAccessListRLPSizeLimit(t *testing.T) {
 	const limit = 10 << 20
 	code := make([]byte, limit)
@@ -507,7 +480,7 @@ func TestBlockAccessListRLPSizeLimit(t *testing.T) {
 			if len(raw) != tt.size {
 				t.Fatalf("RLP size = %d, want %d", len(raw), tt.size)
 			}
-			decoded, err := DecodeBlockAccessListBytes(raw)
+			sidecar, err := DecodeBlockAccessListSidecarForBlock(raw, 10_000_000_000, len(bal))
 			if tt.size > limit {
 				if err == nil || !strings.Contains(err.Error(), "block access list RLP exceeds maximum size") {
 					t.Fatalf("decode BAL: got %v, want RLP size error", err)
@@ -517,7 +490,10 @@ func TestBlockAccessListRLPSizeLimit(t *testing.T) {
 			if err != nil {
 				t.Fatalf("decode BAL: %v", err)
 			}
-			if !reflect.DeepEqual(decoded, bal) {
+			if err := sidecar.ValidateForBlock(10_000_000_000, len(bal)); err != nil {
+				t.Fatalf("validate BAL: %v", err)
+			}
+			if !reflect.DeepEqual(sidecar.BlockAccessList(), bal) {
 				t.Fatal("decoded BAL differs")
 			}
 		})
@@ -641,6 +617,29 @@ func TestBlockAccessListLargeLists(t *testing.T) {
 				t.Fatal("decoded BAL differs")
 			}
 		})
+	}
+}
+
+func TestBlockAccessListValidateForHeaderRejectsOversizedEarly(t *testing.T) {
+	slots := make([]SlotChanges, 100_000)
+	for i := range slots {
+		var key common.Hash
+		binary.BigEndian.PutUint64(key[24:], uint64(i+1))
+		slots[i] = SlotChanges{
+			Slot:    accounts.InternKey(key),
+			Changes: []*StorageChange{{Index: 1}},
+		}
+	}
+	bal := BlockAccessList{{StorageChanges: slots, StorageReads: []accounts.StorageKey{accounts.ZeroKey}}}
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	err := bal.ValidateForHeader(BalItemCost)
+	runtime.ReadMemStats(&after)
+	if !errors.Is(err, ErrInvalidBlockAccessList) || !strings.Contains(err.Error(), "block access list too large") {
+		t.Fatalf("validate BAL: got %v, want item limit error", err)
+	}
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated >= 1024*1024 {
+		t.Fatalf("validation allocated %d bytes for an oversized BAL", allocated)
 	}
 }
 
