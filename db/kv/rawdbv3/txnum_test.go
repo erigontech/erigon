@@ -17,6 +17,9 @@
 package rawdbv3
 
 import (
+	"context"
+	"math/rand"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -27,6 +30,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/stream"
 )
 
 func TestTxNum(t *testing.T) {
@@ -90,4 +95,126 @@ func TestMaxTxNumNilCursor(t *testing.T) {
 		require.Equal(99, int(maxTxNum))
 		return nil
 	}))
+}
+
+type blockSpan struct{ min, max uint64 }
+
+// newTxNumsDB writes blocks of 2..7 txNums (system txs included) and returns each block's txNum range.
+func newTxNumsDB(t *testing.T, blocks int) (kv.RwDB, []blockSpan) {
+	t.Helper()
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), datadir.New(t.TempDir()).Chaindata).MustOpen()
+	t.Cleanup(db.Close)
+	rnd := rand.New(rand.NewSource(1))
+	spans := make([]blockSpan, blocks)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		var next uint64
+		for b := range spans {
+			spans[b] = blockSpan{next, next + 1 + uint64(rnd.Intn(6))}
+			next = spans[b].max + 1
+			if err := TxNums.Append(tx, uint64(b), spans[b].max); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	return db, spans
+}
+
+func TestTxNums2BlockNums(t *testing.T) {
+	db, spans := newTxNumsDB(t, 3000)
+	rnd := rand.New(rand.NewSource(2))
+	var all, sparse, far []uint64
+	for b, s := range spans {
+		for n := s.min; n <= s.max; n++ {
+			all = append(all, n)
+			if rnd.Intn(40) == 0 {
+				sparse = append(sparse, n)
+			}
+		}
+		if b%997 == 0 {
+			far = append(far, s.max)
+		}
+	}
+	for name, txNums := range map[string][]uint64{"all": all, "sparse": sparse, "far": far} {
+		for _, asc := range []order.By{order.Asc, order.Desc} {
+			t.Run(name+"/"+map[order.By]string{order.Asc: "asc", order.Desc: "desc"}[asc], func(t *testing.T) {
+				in := slices.Clone(txNums)
+				if !asc {
+					slices.Reverse(in)
+				}
+				tx, err := db.BeginRo(t.Context())
+				require.NoError(t, err)
+				defer tx.Rollback()
+				it := TxNums2BlockNums(t.Context(), tx, TxNums, stream.Array(in), asc)
+				defer it.Close()
+				prevBlock := -1
+				for _, want := range in {
+					require.True(t, it.HasNext())
+					txNum, blockNum, txIndex, isFinal, changed, err := it.Next()
+					require.NoError(t, err)
+					b, _ := slices.BinarySearchFunc(spans, want, func(s blockSpan, n uint64) int { return int(s.max) - int(n) })
+					require.Equal(t, want, txNum)
+					require.Equal(t, uint64(b), blockNum, "txNum %d", want)
+					require.Equal(t, int(want)-int(spans[b].min)-1, txIndex)
+					require.Equal(t, bool(asc) && want == spans[b].max || !bool(asc) && want == spans[b].min, isFinal)
+					require.Equal(t, b != prevBlock, changed)
+					prevBlock = b
+				}
+				require.False(t, it.HasNext())
+			})
+		}
+	}
+}
+
+type countingTxBlockIndex struct {
+	TxBlockIndex
+	blockNumberCalls int
+}
+
+func (c *countingTxBlockIndex) BlockNumber(ctx context.Context, tx kv.Tx, txNum uint64) (uint64, bool, error) {
+	c.blockNumberCalls++
+	return c.TxBlockIndex.BlockNumber(ctx, tx, txNum)
+}
+
+// TestTxNums2BlockNumsSearchesOnce pins that sorted txNums are mapped by moving from the current
+// block, not with a search over the whole chain on every block change.
+func TestTxNums2BlockNumsSearchesOnce(t *testing.T) {
+	db, spans := newTxNumsDB(t, 1000)
+	index := &countingTxBlockIndex{TxBlockIndex: DefaultTxBlockIndexInstance}
+	reader := TxNums.WithCustomReadTxNumFunc(index)
+	txNums := make([]uint64, 0, len(spans))
+	for _, s := range spans {
+		txNums = append(txNums, s.min+1)
+	}
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	for _, asc := range []order.By{order.Asc, order.Desc} {
+		in := slices.Clone(txNums)
+		if !asc {
+			slices.Reverse(in)
+		}
+		index.blockNumberCalls = 0
+		it := TxNums2BlockNums(t.Context(), tx, reader, stream.Array(in), asc)
+		for it.HasNext() {
+			_, _, _, _, _, err := it.Next()
+			require.NoError(t, err)
+		}
+		it.Close()
+		require.Equal(t, 1, index.blockNumberCalls)
+	}
+}
+
+func TestTxNums2BlockNumsPastLastBlock(t *testing.T) {
+	db, spans := newTxNumsDB(t, 100)
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	it := TxNums2BlockNums(t.Context(), tx, TxNums, stream.Array([]uint64{spans[10].min, spans[99].max + 5}), order.Asc)
+	defer it.Close()
+	_, blockNum, _, _, _, err := it.Next()
+	require.NoError(t, err)
+	require.Equal(t, uint64(10), blockNum)
+	_, _, _, _, _, err = it.Next()
+	require.ErrorContains(t, err, "can't find blockNumber")
 }
