@@ -724,9 +724,7 @@ func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNu
 	}
 	return stream.TransformKV2U64Seekable(it, func(_, v []byte) (uint64, error) {
 		return binary.BigEndian.Uint64(v), nil
-	}, func(n uint64) []byte {
-		return binary.BigEndian.AppendUint64(nil, n)
-	}), nil
+	}, binary.BigEndian.AppendUint64), nil
 }
 
 // IdxRange is to be used in public API, therefore it relies on read-only transaction

@@ -1354,3 +1354,25 @@ func TestRangeDupSortSeekValue(t *testing.T) {
 		})
 	}
 }
+
+func TestRangeDupSortSeekDoesNotAllocate(t *testing.T) {
+	db := BaseCaseDB(t)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	for n := range uint64(10_000) {
+		require.NoError(t, tx.Put("Table", []byte("key"), binary.BigEndian.AppendUint64(nil, n)))
+	}
+	kvIt, err := tx.RangeDupSort("Table", []byte("key"), nil, nil, order.Asc, -1)
+	require.NoError(t, err)
+	it := stream.TransformKV2U64Seekable(kvIt, func(_, v []byte) (uint64, error) {
+		return binary.BigEndian.Uint64(v), nil
+	}, binary.BigEndian.AppendUint64)
+	defer it.Close()
+	target := uint64(0)
+	allocs := testing.AllocsPerRun(100, func() {
+		target += 50
+		require.NoError(t, it.Seek(target))
+	})
+	require.Zero(t, allocs)
+}
