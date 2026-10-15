@@ -22,6 +22,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -55,7 +56,7 @@ func (a *ApiHandler) headLag() error {
 	if !ok {
 		return synced_data.ErrNotSynced
 	}
-	if !a.descendsFromJustified(headRoot) {
+	if !a.descendsFromJustified(headRoot, headSlot) {
 		return errHeadBehindForkChoice
 	}
 	if a.forkchoiceStore.HasImportedDescendantAfter(headRoot, headSlot+syncToleranceEpochs*a.beaconChainCfg.SlotsPerEpoch) {
@@ -64,14 +65,34 @@ func (a *ApiHandler) headLag() error {
 	return nil
 }
 
-// descendsFromJustified reports whether root's ancestor at the justified checkpoint is the
-// checkpoint block. A checkpoint block or a path the fork graph cannot resolve, as after a
-// checkpoint sync or a prune, counts as descending.
-func (a *ApiHandler) descendsFromJustified(root common.Hash) bool {
+// justifiedDescent is a resolved descendsFromJustified answer. The parent links between a served
+// root and the justified block do not change, so the answer holds until either one changes.
+type justifiedDescent struct {
+	root      common.Hash
+	justified solid.Checkpoint
+	descends  bool
+}
+
+// descendsFromJustified reports whether the block root at slot descends from the justified block,
+// which get_head starts from. A justified block or a path the fork graph does not hold, as after a
+// checkpoint sync or a prune, counts as descending; a block below the justified block never does.
+func (a *ApiHandler) descendsFromJustified(root common.Hash, slot uint64) bool {
 	justified := a.forkchoiceStore.JustifiedCheckpoint()
-	if _, ok := a.forkchoiceStore.GetHeader(justified.Root); !ok {
+	if known := a.justifiedDescent.Load(); known != nil && known.root == root && known.justified == justified {
+		return known.descends
+	}
+	header, ok := a.forkchoiceStore.GetHeader(justified.Root)
+	if !ok {
 		return true
 	}
-	ancestor := a.forkchoiceStore.Ancestor(root, justified.Epoch*a.beaconChainCfg.SlotsPerEpoch).Root
-	return ancestor == (common.Hash{}) || ancestor == justified.Root
+	descends := slot >= header.Slot
+	if descends {
+		ancestor := a.forkchoiceStore.Ancestor(root, header.Slot).Root
+		if ancestor == (common.Hash{}) {
+			return true
+		}
+		descends = ancestor == justified.Root
+	}
+	a.justifiedDescent.Store(&justifiedDescent{root: root, justified: justified, descends: descends})
+	return descends
 }

@@ -45,6 +45,7 @@ import (
 
 type ForkChoiceStorageMock struct {
 	Ancestors                             map[uint64]forkchoice.ForkChoiceNode
+	AncestorCalls                         int
 	AnchorSlotVal                         uint64
 	AnchorRootVal                         common.Hash
 	AnchorExecutionPayloadBuilderIndexVal uint64
@@ -269,6 +270,7 @@ func (f *ForkChoiceStorageMock) GetPeerDas() das.PeerDas {
 }
 
 func (f *ForkChoiceStorageMock) Ancestor(root common.Hash, slot uint64) forkchoice.ForkChoiceNode {
+	f.AncestorCalls++
 	return f.Ancestors[slot]
 }
 

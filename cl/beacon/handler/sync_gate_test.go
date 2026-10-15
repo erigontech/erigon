@@ -58,6 +58,7 @@ func TestSyncGateFollowsBlocksImportedOnTheHead(t *testing.T) {
 	require.False(t, handler.headLagsBehind())
 	fcu.HighestImportedDescendantVal = headSlot + tolerance + 1
 	require.True(t, handler.headLagsBehind())
+	require.ErrorContains(t, handler.refuseLaggingHead(), errHeadBehindForkChoice.Error())
 
 	// The gate asks about the served head, not about every imported branch.
 	headRoot, _, ok := handler.syncedData.StateHead()
@@ -83,24 +84,89 @@ func TestSyncGateRefusesAHeadThatDoesNotDescendFromTheJustifiedCheckpoint(t *tes
 	checkpointSlot := epoch * handler.beaconChainCfg.SlotsPerEpoch
 	fcu.JustifiedCheckpointVal = solid.Checkpoint{Epoch: epoch, Root: justifiedRoot}
 	fcu.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{justifiedRoot: {Slot: checkpointSlot}}
+	// Each case is another fork graph, so the remembered answer of the previous one is dropped.
+	lags := func() bool {
+		handler.justifiedDescent.Store(nil)
+		return handler.headLagsBehind()
+	}
 
 	fcu.Ancestors = map[uint64]forkchoice.ForkChoiceNode{checkpointSlot: {Root: justifiedRoot}}
-	require.False(t, handler.headLagsBehind(), "a descendant of the justified block")
+	require.False(t, lags(), "a descendant of the justified block")
 
 	fcu.Ancestors = map[uint64]forkchoice.ForkChoiceNode{checkpointSlot: {Root: common.Hash{0x88}}}
-	require.True(t, handler.headLagsBehind(), "a head on a branch fork choice left")
+	require.True(t, lags(), "a head on a branch fork choice left")
 	err := handler.refuseLaggingHead()
 	require.ErrorContains(t, err, errHeadBehindForkChoice.Error())
 
 	fcu.Ancestors = map[uint64]forkchoice.ForkChoiceNode{checkpointSlot: {Root: headRoot}}
-	require.True(t, handler.headLagsBehind(), "a head older than the justified block")
+	require.True(t, lags(), "a head older than the justified block")
 
 	fcu.Ancestors = nil
-	require.False(t, handler.headLagsBehind(), "an ancestry the fork graph cannot resolve")
+	require.False(t, lags(), "an ancestry the fork graph cannot resolve")
 
 	fcu.Ancestors = map[uint64]forkchoice.ForkChoiceNode{checkpointSlot: {Root: common.Hash{0x88}}}
 	fcu.Headers = nil
-	require.False(t, handler.headLagsBehind(), "a justified block the fork graph does not hold")
+	require.False(t, lags(), "a justified block the fork graph does not hold")
+}
+
+// The justified block can come before its epoch start, when the epoch's first slots are empty. A head
+// that descends from it through a block at the epoch start is still a head get_head may select.
+func TestSyncGateComparesAtTheJustifiedBlock(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	_, headSlot, ok := handler.syncedData.StateHead()
+	require.True(t, ok)
+	justifiedRoot := common.Hash{0x77}
+	epoch := headSlot / handler.beaconChainCfg.SlotsPerEpoch
+	checkpointSlot := epoch * handler.beaconChainCfg.SlotsPerEpoch
+	fcu.JustifiedCheckpointVal = solid.Checkpoint{Epoch: epoch, Root: justifiedRoot}
+	fcu.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{justifiedRoot: {Slot: checkpointSlot - 1}}
+	fcu.Ancestors = map[uint64]forkchoice.ForkChoiceNode{
+		checkpointSlot - 1: {Root: justifiedRoot},
+		checkpointSlot:     {Root: common.Hash{0x88}},
+	}
+
+	require.False(t, handler.headLagsBehind())
+}
+
+// A head below the justified block cannot descend from it, also once the fork graph pruned its path.
+func TestSyncGateRefusesAHeadBelowTheJustifiedBlock(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	_, headSlot, ok := handler.syncedData.StateHead()
+	require.True(t, ok)
+	justifiedRoot := common.Hash{0x77}
+	epoch := headSlot/handler.beaconChainCfg.SlotsPerEpoch + 2
+	fcu.JustifiedCheckpointVal = solid.Checkpoint{Epoch: epoch, Root: justifiedRoot}
+	fcu.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{justifiedRoot: {Slot: epoch * handler.beaconChainCfg.SlotsPerEpoch}}
+
+	require.True(t, handler.headLagsBehind())
+}
+
+// The ancestry walk is remembered per served head and justified checkpoint once it resolves: the
+// parent links between them do not change. An unresolved path is walked again.
+func TestSyncGateRemembersTheResolvedJustifiedAncestry(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	_, headSlot, ok := handler.syncedData.StateHead()
+	require.True(t, ok)
+	justifiedRoot := common.Hash{0x77}
+	epoch := headSlot / handler.beaconChainCfg.SlotsPerEpoch
+	checkpointSlot := epoch * handler.beaconChainCfg.SlotsPerEpoch
+	fcu.JustifiedCheckpointVal = solid.Checkpoint{Epoch: epoch, Root: justifiedRoot}
+	fcu.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{justifiedRoot: {Slot: checkpointSlot}}
+
+	require.False(t, handler.headLagsBehind())
+	require.False(t, handler.headLagsBehind())
+	require.Equal(t, 2, fcu.AncestorCalls, "an unresolved path is walked each time")
+
+	fcu.Ancestors = map[uint64]forkchoice.ForkChoiceNode{checkpointSlot: {Root: justifiedRoot}}
+	require.False(t, handler.headLagsBehind())
+	require.False(t, handler.headLagsBehind())
+	require.Equal(t, 3, fcu.AncestorCalls)
+
+	otherRoot := common.Hash{0x99}
+	fcu.JustifiedCheckpointVal = solid.Checkpoint{Epoch: epoch, Root: otherRoot}
+	fcu.Headers[otherRoot] = &cltypes.BeaconBlockHeader{Slot: checkpointSlot}
+	require.True(t, handler.headLagsBehind(), "a new checkpoint is checked again")
+	require.Equal(t, 4, fcu.AncestorCalls)
 }
 
 func TestSyncGateReportsAMissingHeadStateAsNotSynced(t *testing.T) {
