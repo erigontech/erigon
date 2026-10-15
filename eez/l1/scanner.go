@@ -63,6 +63,9 @@ func NewScanner(reader ChainReader, registry common.Address, rollupID uint64) *S
 	return &Scanner{reader: reader, registry: registry, rollupID: rollupID, chunk: LogChunk}
 }
 
+// SetChunk sets the widest range the scanner asks for at once.
+func (s *Scanner) SetChunk(n uint64) { s.chunk = max(n, 1) }
+
 var registryTopics = [][]common.Hash{{
 	protocol.BatchPostedTopic,
 	protocol.L2ExecutionPerformedTopic,

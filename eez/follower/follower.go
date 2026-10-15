@@ -46,6 +46,9 @@ type Config struct {
 	FinalityEvery int
 	// ReorgDepth is the deepest L1 reorg the follower survives.
 	ReorgDepth int
+	// LogChunk is the widest block range of one log query; zero is
+	// l1.LogChunk.
+	LogChunk uint64
 	// Retry and MaxRetry bound the pause before retrying a failed step,
 	// which doubles from Retry up to MaxRetry.
 	Retry, MaxRetry time.Duration
@@ -90,11 +93,15 @@ func New(reader l1.ChainReader, chain deriver.Chain, cfg *chain.Config, c Config
 	if err != nil {
 		return nil, err
 	}
+	scanner := l1.NewScanner(reader, l2.Registry, l2.RollupID)
+	if c.LogChunk > 0 {
+		scanner.SetChunk(c.LogChunk)
+	}
 	return &Follower{
 		cfg:     c,
 		l2:      l2,
 		reader:  reader,
-		scanner: l1.NewScanner(reader, l2.Registry, l2.RollupID),
+		scanner: scanner,
 		watcher: l1.NewWatcher(reader, c.ReorgDepth),
 		chain:   chain,
 		deriver: d,
@@ -134,7 +141,6 @@ func (f *Follower) Run(ctx context.Context) error {
 		}
 		if err = f.recover(ctx, err); err != nil {
 			if halts(err) {
-				f.logger.Error("[eez] follower halted", "err", err)
 				return err
 			}
 			f.logger.Warn("[eez] follower step failed, retrying", "in", pause, "err", err)

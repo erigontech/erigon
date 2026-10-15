@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common"
 
 	"github.com/erigontech/erigon/cmd/erigon/node"
+	"github.com/erigontech/erigon/cmd/utils"
 	erigonapp "github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/backup"
@@ -35,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/diagnostics/syscheck"
 	"github.com/erigontech/erigon/eez"
+	eezconfig "github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/execution/types"
 	erigoncli "github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/debug"
@@ -59,16 +61,28 @@ func main() {
 }
 
 // eezGenesis writes the l2 section the EEZ flags set into the genesis init
-// commits.
+// commits, and an EEZ genesis under <datadir>/eez.
 func eezGenesis(cliCtx *cli.Command, genesis *types.Genesis) error {
 	cfg, err := eez.ConfigFromCLI(cliCtx)
 	if err != nil || cfg == nil {
 		return err
 	}
-	return cfg.L2.ApplyGenesis(genesis.Config, genesis.GasLimit)
+	if err := cfg.L2.ApplyGenesis(genesis.Config, genesis.GasLimit); err != nil {
+		return err
+	}
+	if _, ok := genesis.Config.L2.(*eezconfig.L2Config); !ok {
+		return nil
+	}
+	return cliCtx.Set(utils.DataDirFlag.Name, eezDataDir(cliCtx.String(utils.DataDirFlag.Name)))
 }
 
 func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
+	eezCfg, err := eez.ConfigFromCLI(cliCtx)
+	if err != nil {
+		return err
+	}
+	follows := eezCfg != nil && eezCfg.Follower
+
 	logger, tracer, metricsMux, pprofMux, err := debug.Setup(ctx, cliCtx, true /* rootLogger */)
 	if err != nil {
 		return
@@ -91,16 +105,31 @@ func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
 	if err != nil {
 		return err
 	}
+	if follows {
+		if err := configureFollowerNode(nodeCfg); err != nil {
+			return err
+		}
+	}
 	if err := backup.ApplyMigrations(ctx, nodeCfg.Dirs, logger); err != nil {
 		return err
 	}
 
 	ethCfg := node.NewEthConfigUrfave(ctx, cliCtx, nodeCfg, logger)
+	if follows {
+		configureFollowerEth(ethCfg)
+	}
 
 	ethNode, err := node.New(ctx, nodeCfg, ethCfg, logger, tracer)
 	if err != nil {
 		log.Error("Erigon startup", "err", err)
 		return err
+	}
+	var followerSvc interface{ Err() error }
+	if follows {
+		if followerSvc, err = startFollower(ctx, ethNode, eezCfg, nodeCfg.Dirs, logger); err != nil {
+			ethNode.Close()
+			return err
+		}
 	}
 
 	//diagnostics.Setup(cliCtx, ethNode, metricsMux, pprofMux)
@@ -108,6 +137,9 @@ func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
 	err = ethNode.Serve()
 	if err != nil {
 		log.Error("error while serving an Erigon node", "err", err)
+	}
+	if followerSvc != nil && err == nil {
+		err = haltError(followerSvc.Err())
 	}
 	return err
 }

@@ -49,6 +49,9 @@ import (
 // UserKey funds the devnet's second prefunded account.
 var UserKey, _ = crypto.HexToECDSA("59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d")
 
+// PosterKey signs the composer's L1 postings.
+var PosterKey, _ = crypto.HexToECDSA("5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a")
+
 // UserAddress is the account of UserKey.
 func UserAddress() common.Address { return crypto.PubkeyToAddress(UserKey.PublicKey) }
 
@@ -318,7 +321,10 @@ func (c *Composer) Post(postings ...Posting) *recording.Block {
 		input, err := protocol.EncodePostAndVerifyBatch(p.Batch.Batch)
 		require.NoError(c.t, err)
 		index := len(b.Txs)
-		b.Txs = append(b.Txs, types.NewTransaction(n*1000+uint64(index), c.l2.Registry, new(uint256.Int), 10_000_000, new(uint256.Int), input))
+		tx, err := types.SignTx(types.NewTransaction(n*1000+uint64(index), c.l2.Registry, new(uint256.Int), 10_000_000, new(uint256.Int), input),
+			*types.LatestSignerForChainID(uint256.NewInt(c.l2.L1ChainID)), PosterKey)
+		require.NoError(c.t, err)
+		b.Txs = append(b.Txs, tx)
 		applied := p.Applied
 		if applied == nil {
 			for i := range p.Batch.Batch.Entries {

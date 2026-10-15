@@ -64,6 +64,13 @@ func (eri *ErigonNode) Close() {
 	eri.stack.Close()
 }
 
+// Backend returns the node's execution backend.
+func (eri *ErigonNode) Backend() *eth.Ethereum { return eri.backend }
+
+// RegisterLifecycle adds l to the node; it starts after the backend and
+// stops before it.
+func (eri *ErigonNode) RegisterLifecycle(l node.Lifecycle) { eri.stack.RegisterLifecycle(l) }
+
 func (eri *ErigonNode) run() {
 	node.StartNode(eri.stack)
 	// we don't have accounts locally and we don't do mining
