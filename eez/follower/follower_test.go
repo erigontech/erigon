@@ -322,3 +322,41 @@ func TestWrongL1(t *testing.T) {
 	n := newNode(t, other)
 	require.ErrorIs(t, n.follower.Boot(t.Context()), follower.ErrL1ChainID)
 }
+
+// TestService runs the follower as a node service over a recording of L1,
+// and stops it with the node.
+func TestService(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	first := c.Compose(nil, derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: transfers(c, 2)})
+	c.Post(derivertest.Posting{Batch: first})
+	dir := t.TempDir()
+	require.NoError(t, recording.Write(dir, c.L1))
+	rec, err := recording.Load(dir)
+	require.NoError(t, err)
+
+	n := newNode(t, rec)
+	halted := make(chan error, 1)
+	s := follower.NewService(n.follower, func(err error) { halted <- err })
+	require.NoError(t, s.Start())
+	n.requireBlocks(t, first.Blocks...)
+	require.NoError(t, s.Stop())
+	require.NoError(t, s.Err())
+	require.Empty(t, halted)
+
+	// A follower that halts reports why.
+	c.Post(derivertest.Posting{Batch: tampered(c)})
+	require.NoError(t, recording.Write(dir, c.L1))
+	rec, err = recording.Load(dir)
+	require.NoError(t, err)
+	again := n.restart(t, rec, n.chain.Chain)
+	s = follower.NewService(again.follower, func(err error) { halted <- err })
+	require.NoError(t, s.Start())
+	select {
+	case err := <-halted:
+		require.ErrorIs(t, err, deriver.ErrDiverged)
+	case <-time.After(10 * time.Second):
+		t.Fatal("follower did not halt")
+	}
+	require.NoError(t, s.Stop())
+	require.ErrorIs(t, s.Err(), deriver.ErrDiverged)
+}
