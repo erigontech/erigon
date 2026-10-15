@@ -17,7 +17,6 @@ package da
 
 import (
 	"bytes"
-	"encoding/binary"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -35,44 +34,16 @@ type spanBlock struct {
 	txs         [][]byte
 }
 
-// encodeSpan is a test encoder for native_block_span_v0 with shortest
-// varints and maximal runs, so every valid span is its own encoding.
+// encodeSpan encodes blocks as one span.
 func encodeSpan(blocks []spanBlock) []byte {
-	out := []byte{SpanVersionV0}
-	out = binary.AppendUvarint(out, uint64(len(blocks)))
+	s := &Span{}
 	for i := range blocks {
-		out = binary.AppendUvarint(out, uint64(len(blocks[i].txs)))
+		s.TxCounts = append(s.TxCounts, uint32(len(blocks[i].txs)))
+		s.Beneficiaries = append(s.Beneficiaries, blocks[i].beneficiary)
+		s.ExtraData = append(s.ExtraData, blocks[i].extraData)
+		s.Transactions = append(s.Transactions, blocks[i].txs...)
 	}
-	for i := 0; i < len(blocks); {
-		j := i + 1
-		for j < len(blocks) && blocks[j].beneficiary == blocks[i].beneficiary {
-			j++
-		}
-		out = binary.AppendUvarint(out, uint64(j-i))
-		out = append(out, blocks[i].beneficiary[:]...)
-		i = j
-	}
-	for i := 0; i < len(blocks); {
-		j := i + 1
-		for j < len(blocks) && bytes.Equal(blocks[j].extraData, blocks[i].extraData) {
-			j++
-		}
-		out = binary.AppendUvarint(out, uint64(j-i))
-		out = append(out, byte(len(blocks[i].extraData)))
-		out = append(out, blocks[i].extraData...)
-		i = j
-	}
-	for i := range blocks {
-		for _, tx := range blocks[i].txs {
-			out = binary.AppendUvarint(out, uint64(len(tx)))
-		}
-	}
-	for i := range blocks {
-		for _, tx := range blocks[i].txs {
-			out = append(out, tx...)
-		}
-	}
-	return out
+	return s.Encode()
 }
 
 // spanBlocks regroups a decoded span by block.
