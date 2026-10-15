@@ -21,8 +21,10 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+	"weak"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/maypok86/otter/v2"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/cachebudget"
@@ -130,4 +132,18 @@ func TestCodeCacheClosedIsCollectable(t *testing.T) {
 	// Each held ~1.2MB while live.
 	require.Less(t, retained, float64(caches)*0.12,
 		"closed caches retained %.2f MB across %d caches", retained, caches)
+}
+
+// The real eviction callbacks capture the CodeCache, so this also checks that
+// nothing otter keeps alive after Close reaches back to the caches.
+func TestCodeCacheClosedLayersAreCollectable(t *testing.T) {
+	hashToCode, codeHashToCode := func() (weak.Pointer[otter.Cache[uint64, codeEntry]], weak.Pointer[otter.Cache[uint64, codeEntry]]) {
+		cc := NewCodeCache(datasize.MB, datasize.MB)
+		cc.Put(nil, make([]byte, 64), 1)
+		cc.Close()
+		return weak.Make(cc.hashToCode.c), weak.Make(cc.codeHashToCode.c)
+	}()
+	runtime.GC()
+	require.Nil(t, hashToCode.Value(), "a closed CodeCache's hash-to-code layer must be collected")
+	require.Nil(t, codeHashToCode.Value(), "a closed CodeCache's code-hash-to-code layer must be collected")
 }

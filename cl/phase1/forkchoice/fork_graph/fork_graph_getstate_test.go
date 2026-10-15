@@ -114,6 +114,17 @@ func TestGetState_AnchorOffDumpSlot(t *testing.T) {
 			gotRoot, err := got.HashSSZ()
 			require.NoError(t, err)
 			require.Equal(t, common.Hash(wantRoot), common.Hash(gotRoot))
+
+			// Without currentState, blockB's state must be rebuilt by replaying it on the anchor file.
+			bRoot, err := blockB.Block.HashSSZ()
+			require.NoError(t, err)
+			graph.currentState = nil
+			desc, err := graph.GetState(bRoot, true)
+			require.NoError(t, err)
+			require.NotNil(t, desc)
+			descRoot, err := desc.HashSSZ()
+			require.NoError(t, err)
+			require.Equal(t, blockB.Block.StateRoot, common.Hash(descRoot))
 		})
 	}
 }

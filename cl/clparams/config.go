@@ -91,6 +91,8 @@ type CaplinConfig struct {
 	SentinelPort                uint64
 	SubscribeAllTopics          bool
 	MaxPeerCount                uint64
+	DisableIPBlockLimits        bool
+	TrustedCIDRs                []string
 	EnableUPnP                  bool
 	CaplinNAT                   string // NAT mode for Caplin P2P (extip:<IP>|stun|upnp|pmp|none)
 	MaxInboundTrafficPerPeer    datasize.ByteSize
@@ -1381,6 +1383,8 @@ func hoodiConfig() BeaconChainConfig {
 	cfg.ElectraForkVersion = 0x60000910
 	cfg.FuluForkEpoch = 50688
 	cfg.FuluForkVersion = 0x70000910
+	cfg.GloasForkEpoch = 132352
+	cfg.GloasForkVersion = 0x80000910
 	cfg.TerminalTotalDifficulty = "0"
 	cfg.TerminalBlockHash = [32]byte{}
 	cfg.TerminalBlockHashActivationEpoch = math.MaxUint64
@@ -1400,6 +1404,9 @@ func hoodiConfig() BeaconChainConfig {
 	cfg.BlobSchedule = []BlobParameters{
 		{52480, 15},
 		{54016, 21},
+	}
+	cfg.GasLimitSchedule = []GasLimitScheduleEntry{
+		{Epoch: 132352, GasLimit: 200_000_000},
 	}
 
 	cfg.InitializeForkSchedule()
@@ -1503,6 +1510,7 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.MaxBlobsPerBlockElectra = 2
 	cfg.BlobSidecarSubnetCountElectra = 2
 	cfg.MinEpochsForBlobSidecarsRequests = 16384
+	cfg.MinEpochsForDataColumnSidecarsRequests = 16384
 	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
 	cfg.MaxRequestBlobSidecarsElectra = 256
@@ -1550,6 +1558,7 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.MaxBlobsPerBlockElectra = 2
 	cfg.BlobSidecarSubnetCountElectra = 2
 	cfg.MinEpochsForBlobSidecarsRequests = 16384
+	cfg.MinEpochsForDataColumnSidecarsRequests = 16384
 	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
 	cfg.MaxRequestBlobSidecarsElectra = 256

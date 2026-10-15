@@ -14,6 +14,7 @@ import (
 	"github.com/heimdalr/dag"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -128,6 +129,9 @@ type ReadSet struct {
 	codeHash              map[accounts.Address]VersionedRead[accounts.CodeHash]
 	codeSize              map[accounts.Address]VersionedRead[int]
 	storage               map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int]
+	// slotMapPeak is the most slots each kept storage map has held: a cleared
+	// map keeps the buckets it grew.
+	slotMapPeak map[accounts.Address]int
 
 	// access carries EIP-7928 "address was accessed" marks (with the
 	// non-revertable "real EVM access" bit) on the read side, so the access set
@@ -136,8 +140,14 @@ type ReadSet struct {
 }
 
 func (s *ReadSet) entries() int {
-	return len(s.address) + len(s.balance) + len(s.nonce) + len(s.incarnation) + len(s.selfDestruct) +
-		len(s.selfDestructWitnesses) + len(s.createContract) + len(s.code) + len(s.codeHash) + len(s.codeSize) + len(s.storage)
+	n := len(s.address) + len(s.balance) + len(s.nonce) + len(s.incarnation) + len(s.selfDestruct) +
+		len(s.selfDestructWitnesses) + len(s.createContract) + len(s.code) + len(s.codeHash) + len(s.codeSize)
+	// Slots, not addresses: one contract's slot map is what a reused set keeps,
+	// and a map never shrinks back.
+	for _, inner := range s.storage {
+		n += len(inner)
+	}
+	return n
 }
 
 func (s *ReadSet) clearForReuse() {
@@ -151,9 +161,39 @@ func (s *ReadSet) clearForReuse() {
 	clear(s.code)
 	clear(s.codeHash)
 	clear(s.codeSize)
-	clear(s.storage)
+	// Keep the per-address slot maps: a call that reads one contract's slots
+	// would otherwise regrow its map from scratch on every later call. Only
+	// this call's contracts stay, or a run of calls on different contracts
+	// would pin a map each while every entries() count looked small.
+	if len(s.storage) <= maxReusedStorageAddrs {
+		held := 0
+		for addr, inner := range s.storage {
+			if len(inner) == 0 {
+				delete(s.storage, addr)
+				delete(s.slotMapPeak, addr)
+				continue
+			}
+			if s.slotMapPeak == nil {
+				s.slotMapPeak = make(map[accounts.Address]int, len(s.storage))
+			}
+			peak := max(s.slotMapPeak[addr], len(inner))
+			s.slotMapPeak[addr] = peak
+			held += peak
+			clear(inner)
+		}
+		if held > maxPooledEntries {
+			s.storage, s.slotMapPeak = nil, nil
+		}
+	} else {
+		// Nil, not cleared: a cleared map keeps the buckets those addresses grew.
+		s.storage, s.slotMapPeak = nil, nil
+	}
 	s.access = nil
 }
+
+// maxReusedStorageAddrs bounds how many per-address slot maps a reused read set
+// keeps; past it the outer map is dropped with them.
+const maxReusedStorageAddrs = 64
 
 func readSetPut[T any](m *map[accounts.Address]VersionedRead[T], addr accounts.Address, tr VersionedRead[T]) {
 	if *m == nil {
@@ -753,6 +793,44 @@ func (a *vwArena[T]) reset(release func(*VersionedWrite[T])) {
 	}
 }
 
+const acctChunk = 32
+
+// acctSlab holds an arena-backed set's AddressPath values; a value stays valid
+// until the arena resets, so Snapshot copies it out.
+type acctSlab struct {
+	chunks [][]accounts.Account
+	n      int
+}
+
+func (s *acctSlab) copyOf(a *accounts.Account) *accounts.Account {
+	i, j := s.n/acctChunk, s.n%acctChunk
+	if i == len(s.chunks) {
+		if s.n >= vwMaxCells {
+			return a.SelfCopy()
+		}
+		s.chunks = append(s.chunks, make([]accounts.Account, acctChunk))
+	}
+	p := &s.chunks[i][j]
+	*p = *a
+	s.n++
+	return p
+}
+
+func (s *acctSlab) reset() {
+	for i := 0; i*acctChunk < s.n; i++ {
+		clear(s.chunks[i][:min(acctChunk, s.n-i*acctChunk)])
+	}
+	s.n = 0
+}
+
+// copyAccount returns a copy of a for an AddressPath write.
+func (ws *WriteSet) copyAccount(a *accounts.Account) *accounts.Account {
+	if ws.cells != nil {
+		return ws.cells.accounts.copyOf(a)
+	}
+	return a.SelfCopy()
+}
+
 func (ws *WriteSet) newVWAddress() *VersionedWrite[*accounts.Account] {
 	if ws.cells != nil {
 		return ws.cells.address.alloc(getVWAddress)
@@ -856,9 +934,11 @@ type vwArenas struct {
 	codeHash       vwArena[accounts.CodeHash]
 	codeSize       vwArena[int]
 	storage        vwArena[uint256.Int]
+	accounts       acctSlab
 }
 
 func (a *vwArenas) reset() {
+	a.accounts.reset()
 	a.address.reset(releaseVWAddress)
 	a.balance.reset(releaseVWBalance)
 	a.nonce.reset(releaseVWNonce)
@@ -1195,7 +1275,11 @@ func (ws *WriteSet) Snapshot() *WriteSet {
 		}
 		if !sd {
 			if vw, ok := ws.address[addr]; ok {
-				out.SetAddress(addr, cloneVW(vw))
+				c := cloneVW(vw)
+				if ws.cells != nil && c.Val != nil {
+					c.Val = c.Val.SelfCopy()
+				}
+				out.SetAddress(addr, c)
 			}
 			if vw, ok := ws.nonce[addr]; ok {
 				out.SetNonce(addr, cloneVW(vw))
@@ -1830,10 +1914,17 @@ type versionedStateReader struct {
 	reads       ReadSet
 	versionMap  *VersionMap
 	stateReader StateReader
+	eip8246     bool
 }
 
 func NewVersionedStateReader(txIndex int, reads ReadSet, versionMap *VersionMap, stateReader StateReader) *versionedStateReader {
-	return &versionedStateReader{txIndex, reads, versionMap, stateReader}
+	return &versionedStateReader{txIndex: txIndex, reads: reads, versionMap: versionMap, stateReader: stateReader}
+}
+
+// SetEIP8246 makes an account self-destructed by a prior tx read as live while
+// it keeps a non-zero balance.
+func (vr *versionedStateReader) SetEIP8246(enabled bool) {
+	vr.eip8246 = enabled
 }
 
 func (vr *versionedStateReader) SetTrace(trace bool, tracePrefix string) {
@@ -1872,7 +1963,7 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 		// coinbase re-creates it, and we must surface the re-created
 		// account so finalize accumulates the prior cumulative value.
 		if destroyed, _, revived := vr.versionMap.AccountLifecycle(address, vr.txIndex); destroyed && !revived {
-			return nil, nil
+			return vr.preservedAccount(address), nil
 		}
 		if acc, ok := versionedUpdateAddress(vr.versionMap, address, vr.txIndex); ok && acc != nil {
 			updated := vr.applyVersionedUpdates(address, *acc)
@@ -1916,6 +2007,32 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 	}
 
 	return nil, nil
+}
+
+// preservedAccount is what remains of a self-destructed account under EIP-8246:
+// the kept balance with no code and a zero nonce, or nil when nothing was kept.
+// Without a revival no balance cell sits above the destruct, so the floor cell is
+// the post-destruct balance.
+func (vr *versionedStateReader) preservedAccount(address accounts.Address) *accounts.Account {
+	if !vr.eip8246 {
+		return nil
+	}
+	balance, _, ok := vr.versionMap.ReadBalance(address, vr.txIndex)
+	if !ok || balance.IsZero() {
+		return nil
+	}
+	acc := accounts.NewAccount()
+	acc.Balance = balance
+	return &acc
+}
+
+func (vr *versionedStateReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return vr.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (vr *versionedStateReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := vr.ReadAccountByPlainAddr(address)
+	return acc != nil, err
 }
 
 // Per-path versionedUpdate helpers replace the legacy generic
@@ -2072,6 +2189,30 @@ func SetAccountFieldFromMap(out *WriteSet, vm *VersionMap, addr accounts.Address
 		}
 	}
 	return false
+}
+
+// setAccountFieldLive is SetAccountFieldFromMap with the readers' destruct wipe
+// for the nonce and the code hash: a committed destruct after the last write
+// sets the zero value.
+func setAccountFieldLive(out *WriteSet, vm *VersionMap, addr accounts.Address, path AccountPath, ver Version, txIdx int) bool {
+	switch path {
+	case NoncePath:
+		v, found, wiped := vm.readNonceLive(addr, txIdx)
+		if found || wiped {
+			out.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: ver}, Val: v})
+		}
+		return found || wiped
+	case CodeHashPath:
+		v, found, wiped := vm.readCodeHashLive(addr, txIdx)
+		if wiped {
+			v = accounts.EmptyCodeHash
+		}
+		if found || wiped {
+			out.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: ver}, Val: v})
+		}
+		return found || wiped
+	}
+	return SetAccountFieldFromMap(out, vm, addr, path, ver, txIdx)
 }
 
 // NewAccountFieldZeroWrite returns a typed *VersionedWrite[T] for path

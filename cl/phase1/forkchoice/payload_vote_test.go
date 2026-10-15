@@ -498,7 +498,7 @@ func TestGloasForkChoiceUsesPersistedPayload(t *testing.T) {
 			children := f.getNodeChildren(ForkChoiceNode{
 				Root:          root,
 				PayloadStatus: cltypes.PayloadStatusPending,
-			}, nil)
+			})
 			require.Equal(t, tt.wantFullChild, hasPayloadStatus(children, cltypes.PayloadStatusFull))
 			require.True(t, hasPayloadStatus(children, cltypes.PayloadStatusEmpty))
 
@@ -507,6 +507,20 @@ func TestGloasForkChoiceUsesPersistedPayload(t *testing.T) {
 			require.Equal(t, tt.wantFullChild, f.payloadDataAvailability(root, true))
 		})
 	}
+}
+
+func TestGetNodeChildrenUsesAllStoreBlocks(t *testing.T) {
+	parentRoot := common.HexToHash("0x1234")
+	childRoot := common.HexToHash("0x5678")
+	f := &ForkChoiceStore{
+		forkGraph: ptcVoteForkGraph{blocks: map[common.Hash]*cltypes.SignedBeaconBlock{
+			childRoot: {Block: &cltypes.BeaconBlock{ParentRoot: parentRoot}},
+		}},
+	}
+	f.updateChildren(0, parentRoot, childRoot)
+
+	children := f.getNodeChildren(ForkChoiceNode{Root: parentRoot, PayloadStatus: cltypes.PayloadStatusEmpty})
+	require.Equal(t, []ForkChoiceNode{{Root: childRoot, PayloadStatus: cltypes.PayloadStatusPending}}, children)
 }
 
 func TestIsPayloadVerifiedStrictSemantics(t *testing.T) {
@@ -567,7 +581,7 @@ func TestMarkPayloadInvalidRecordsELRejection(t *testing.T) {
 	f.MarkPayloadInvalid(root, execHash)
 
 	require.False(t, f.IsPayloadVerified(root))
-	children := f.getNodeChildren(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending}, nil)
+	children := f.getNodeChildren(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending})
 	require.False(t, hasPayloadStatus(children, cltypes.PayloadStatusFull))
 	status, ok := f.GetRecentExecutionPayloadStatus(execHash)
 	require.True(t, ok)

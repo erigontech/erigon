@@ -741,6 +741,9 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, label s
 	if err != nil {
 		return false, false, "", err
 	}
+	if c == nil {
+		return false, false, "", nil
+	}
 	defer c.Close()
 
 	if bytes.Equal(c.Key(), []byte(stateKey)) {
@@ -922,6 +925,9 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 			minS, maxS, err = parseStepRange(stepRange, maxAvailableStep)
 			if err != nil {
 				return err
+			}
+			if minS >= maxS {
+				return nil
 			}
 			removeLatest = false // --step has higher priority
 		}
