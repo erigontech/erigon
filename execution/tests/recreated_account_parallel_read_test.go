@@ -78,6 +78,7 @@ func TestParallelReadOfRecreatedAccountBeforeRecreatorCommits(t *testing.T) {
 	}
 
 	dbg.Exec3Parallel = false
+	ethconfig.Defaults.Sync.ExecWorkerCount = 4
 	gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
 	chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
@@ -102,7 +103,6 @@ func TestParallelReadOfRecreatedAccountBeforeRecreatorCommits(t *testing.T) {
 	}
 
 	dbg.Exec3Parallel = true
-	ethconfig.Defaults.Sync.ExecWorkerCount = 4
 	require.NoError(t, m.InsertChain(chainPack))
 	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
