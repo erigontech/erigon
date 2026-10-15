@@ -90,7 +90,7 @@ func getAggregateAndProofAndState() (*SignedAggregateAndProofForGossip, *state.C
 				// ), common.Bytes96{}),
 				// SelectionProof: common.Bytes96{},
 				Aggregate: &solid.Attestation{
-					AggregationBits: solid.BitlistFromBytes([]byte{1, 2}, 2048),
+					AggregationBits: solid.BitlistFromBytes([]byte{1, 1}, 2048),
 					Data: &solid.AttestationData{
 						Slot:            s.Slot(),
 						BeaconBlockRoot: br,
@@ -441,7 +441,7 @@ func getAggregateAndProofAndStateForVersion(t *testing.T, version clparams.State
 			Message: &cltypes.AggregateAndProof{
 				AggregatorIndex: 141,
 				Aggregate: &solid.Attestation{
-					AggregationBits: solid.BitlistFromBytes([]byte{1, 2}, 2048),
+					AggregationBits: solid.BitlistFromBytes([]byte{1, 1}, 2048),
 					Data: &solid.AttestationData{
 						Slot:            s.Slot(),
 						BeaconBlockRoot: br,
@@ -999,4 +999,171 @@ func TestAggregateAndProofElectraRejectIndexNot0(t *testing.T) {
 	err := aggService.ProcessMessage(context.Background(), nil, agg)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid committee_index in aggregate and proof")
+}
+
+func aggregationBitsWithLength(length int, trailingSet bool, limit int) *solid.BitList {
+	encoded := make([]byte, length/8+1)
+	encoded[0] = 1
+	if trailingSet {
+		encoded[(length-1)/8] |= 1 << uint((length-1)%8)
+	}
+	encoded[length/8] |= 1 << uint(length%8)
+	return solid.BitlistFromBytes(encoded, limit)
+}
+
+func TestAggregateAndProofRejectsAggregationBitsLengthMismatch(t *testing.T) {
+	_, _, fixtureState := tests.GetElectraRandom()
+	encodedState, err := fixtureState.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	forks := []struct {
+		name    string
+		version clparams.StateVersion
+	}{
+		{name: "Electra", version: clparams.ElectraVersion},
+		{name: "Fulu", version: clparams.FuluVersion},
+		{name: "Gloas", version: clparams.GloasVersion},
+	}
+	testCases := []struct {
+		name               string
+		lengthDelta        int
+		trailingSet        bool
+		wantError          bool
+		wantLengthMismatch bool
+	}{
+		{name: "n-1 bits", lengthDelta: -1, wantError: true},
+		{name: "n bits"},
+		{name: "n+1 bits trailing unset", lengthDelta: 1, wantError: true, wantLengthMismatch: true},
+		{name: "n+1 bits trailing set", lengthDelta: 1, trailingSet: true, wantError: true, wantLengthMismatch: true},
+	}
+
+	for _, fork := range forks {
+		t.Run(fork.name, func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			cfg.AltairForkEpoch = 0
+			cfg.BellatrixForkEpoch = 0
+			cfg.CapellaForkEpoch = 0
+			cfg.DenebForkEpoch = 0
+			cfg.ElectraForkEpoch = 0
+			cfg.FuluForkEpoch = cfg.FarFutureEpoch
+			cfg.GloasForkEpoch = cfg.FarFutureEpoch
+			if fork.version >= clparams.FuluVersion {
+				cfg.FuluForkEpoch = 0
+			}
+			if fork.version >= clparams.GloasVersion {
+				cfg.GloasForkEpoch = 0
+			}
+
+			headState := state.New(&cfg)
+			require.NoError(t, headState.DecodeSSZ(encodedState, int(clparams.ElectraVersion)))
+			epoch := headState.Slot() / cfg.SlotsPerEpoch
+			require.Equal(t, fork.version, cfg.GetCurrentStateVersion(epoch))
+
+			committee, err := headState.GetBeaconCommitee(headState.Slot(), 0)
+			require.NoError(t, err)
+			require.Len(t, committee, 13)
+
+			blockRoot, err := headState.BlockRoot()
+			require.NoError(t, err)
+			source := headState.CurrentJustifiedCheckpoint()
+			target := source
+			target.Epoch = epoch
+
+			service, syncedData, forkchoiceStore := setupAggregateAndProofTestWithConfig(t, &cfg)
+			require.NoError(t, syncedData.OnHeadState(headState))
+			forkchoiceStore.FinalizedCheckpointVal = headState.FinalizedCheckpoint()
+			forkchoiceStore.Ancestors[headState.FinalizedCheckpoint().Epoch*cfg.SlotsPerEpoch] = forkchoice.ForkChoiceNode{
+				Root: headState.FinalizedCheckpoint().Root,
+			}
+			forkchoiceStore.Ancestors[epoch*cfg.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: target.Root}
+			forkchoiceStore.Headers[blockRoot] = &cltypes.BeaconBlockHeader{}
+
+			for _, testCase := range testCases {
+				t.Run(testCase.name, func(t *testing.T) {
+					committeeBits := solid.NewBitVector(int(cfg.MaxCommitteesPerSlot))
+					require.NoError(t, committeeBits.SetBitAt(0, true))
+					aggregate := &SignedAggregateAndProofForGossip{
+						SignedAggregateAndProof: &cltypes.SignedAggregateAndProof{
+							Message: &cltypes.AggregateAndProof{
+								AggregatorIndex: committee[0],
+								Aggregate: &solid.Attestation{
+									AggregationBits: aggregationBitsWithLength(
+										len(committee)+testCase.lengthDelta,
+										testCase.trailingSet,
+										int(cfg.MaxCommitteesPerSlot*cfg.MaxValidatorsPerCommittee),
+									),
+									Data: &solid.AttestationData{
+										Slot:            headState.Slot(),
+										CommitteeIndex:  0,
+										BeaconBlockRoot: blockRoot,
+										Source:          source,
+										Target:          target,
+									},
+									CommitteeBits: committeeBits,
+								},
+							},
+						},
+					}
+
+					err := service.ProcessMessage(t.Context(), nil, aggregate)
+					if !testCase.wantError {
+						require.NoError(t, err)
+						return
+					}
+					require.Error(t, err)
+					require.NotErrorIs(t, err, ErrIgnore)
+					if testCase.wantLengthMismatch {
+						require.Contains(t, err.Error(), "aggregation bits length")
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestAggregateAndProofRejectsAggregationBitsLengthMismatchBeforeElectra(t *testing.T) {
+	testCases := []struct {
+		name        string
+		lengthDelta int
+		trailingSet bool
+	}{
+		{name: "n-1 bits", lengthDelta: -1},
+		{name: "n+1 bits trailing unset", lengthDelta: 1},
+		{name: "n+1 bits trailing set", lengthDelta: 1, trailingSet: true},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			aggregate, headState := getAggregateAndProofAndState()
+			epoch := headState.Slot() / clparams.MainnetBeaconConfig.SlotsPerEpoch
+			require.Equal(t, clparams.Phase0Version, clparams.MainnetBeaconConfig.GetCurrentStateVersion(epoch))
+			committee, err := headState.GetBeaconCommitee(
+				headState.Slot(),
+				aggregate.SignedAggregateAndProof.Message.Aggregate.Data.CommitteeIndex,
+			)
+			require.NoError(t, err)
+			require.Len(t, committee, 8)
+			aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = aggregationBitsWithLength(
+				len(committee)+testCase.lengthDelta,
+				testCase.trailingSet,
+				2048,
+			)
+
+			service, syncedData, forkchoiceStore := setupAggregateAndProofTest(t)
+			require.NoError(t, syncedData.OnHeadState(headState))
+			forkchoiceStore.FinalizedCheckpointVal = headState.FinalizedCheckpoint()
+			forkchoiceStore.Ancestors[headState.FinalizedCheckpoint().Epoch*clparams.MainnetBeaconConfig.SlotsPerEpoch] = forkchoice.ForkChoiceNode{
+				Root: headState.FinalizedCheckpoint().Root,
+			}
+			forkchoiceStore.Ancestors[aggregate.SignedAggregateAndProof.Message.Aggregate.Data.Slot] = forkchoice.ForkChoiceNode{
+				Root: aggregate.SignedAggregateAndProof.Message.Aggregate.Data.Target.Root,
+			}
+			forkchoiceStore.Headers[aggregate.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
+
+			err = service.ProcessMessage(t.Context(), nil, aggregate)
+			require.Error(t, err)
+			require.NotErrorIs(t, err, ErrIgnore)
+			require.Contains(t, err.Error(), "aggregation bits length")
+		})
+	}
 }

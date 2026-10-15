@@ -61,7 +61,7 @@ type Cfg struct {
 	dirs                         datadir.Dirs
 	blockReader                  freezeblocks.BeaconSnapshotReader
 	antiquary                    *antiquary.Antiquary
-	syncedData                   *synced_data.SyncedDataManager
+	syncedData                   synced_data.SyncedData
 	emitter                      *beaconevents.EventEmitter
 	blockCollector               block_collector.BlockCollector
 	sn                           *freezeblocks.CaplinSnapshots
