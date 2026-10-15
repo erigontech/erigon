@@ -164,6 +164,7 @@ type ForkChoiceStore struct {
 	proposerLookahead *lru.Cache[uint64, solid.Uint64VectorSSZ]
 
 	mu                             sync.RWMutex
+	payloadPreparation             PayloadPreparationImports
 	executionPayloadValidationOnce sync.Once
 	executionPayloadValidation     chan struct{}
 

@@ -232,8 +232,9 @@ type ApiHandler struct {
 	routerCfg *beacon_router_configuration.RouterConfiguration
 	logger    log.Logger
 
-	preparedPayload        preparedPayload
-	payloadPreparationGate payloadPreparationGate
+	preparedPayload         preparedPayload
+	payloadPreparationGate  payloadPreparationGate
+	parentExecutionRequests payloadRequestsCache
 
 	// Validator data structures
 	validatorParams *validator_params.ValidatorParams

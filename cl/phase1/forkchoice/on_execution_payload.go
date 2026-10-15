@@ -763,6 +763,10 @@ func (f *ForkChoiceStore) applyEnvelope(
 		log.Warn("[applyEnvelope] received signed envelope with nil message")
 		return false, fmt.Errorf("%w: signed envelope has nil message", ErrInvalidExecutionPayloadEnvelope)
 	}
+	if signedEnvelope.Message.Payload != nil {
+		finishImport := f.BeginPayloadImport(signedEnvelope.Message.Payload.SlotNumber)
+		defer finishImport()
+	}
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1368,6 +1372,8 @@ func (f *ForkChoiceStore) OnExecutionPayloadAt(ctx context.Context, signedEnvelo
 
 	envelope := signedEnvelope.Message
 	beaconBlockRoot := envelope.BeaconBlockRoot
+	finishImport := f.BeginPayloadImport(envelope.Payload.SlotNumber)
+	defer finishImport()
 	commitmentsValidated, err := f.validateKnownEnvelopeCommitments(signedEnvelope, validatePayload)
 	if err != nil {
 		return fmt.Errorf("%w: OnExecutionPayload: invalid execution payload envelope commitments: %w", ErrInvalidExecutionPayloadEnvelope, err)

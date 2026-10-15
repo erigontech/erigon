@@ -496,6 +496,27 @@ func TestStartPayloadPreparationStartsWithDirectBuilder(t *testing.T) {
 	handler.StartPayloadPreparation(ctx)
 }
 
+func TestStartPayloadPreparationCanBeDisabledIndependently(t *testing.T) {
+	for _, disabled := range []bool{false, true} {
+		t.Run(fmt.Sprint(disabled), func(t *testing.T) {
+			var output bytes.Buffer
+			logger := log.New()
+			logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
+			handler := &ApiHandler{
+				engine:         newPayloadBuildEngine(t, gomock.NewController(t)),
+				routerCfg:      &beacon_router_configuration.RouterConfiguration{Validator: true, DisablePayloadPreparation: disabled},
+				beaconChainCfg: &clparams.BeaconChainConfig{SecondsPerSlot: 12},
+				logger:         logger,
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			<-handler.StartPayloadPreparation(ctx)
+			require.Equal(t, !disabled, strings.Contains(output.String(), "watching for proposals"))
+			require.True(t, handler.routerCfg.Validator)
+		})
+	}
+}
+
 func TestPreparePayloadLoopStopsWithZeroSlotDuration(t *testing.T) {
 	handler := &ApiHandler{beaconChainCfg: &clparams.BeaconChainConfig{}, logger: log.Root()}
 	ctx, cancel := context.WithCancel(t.Context())
@@ -1736,6 +1757,120 @@ func TestPreparePayloadLoopMemoizesStableFailure(t *testing.T) {
 	handler.preparePayloadLoop(ctx)
 }
 
+func TestPreparePayloadLoopRetriesExecutionFailures(t *testing.T) {
+	for _, failure := range []error{errNoPayloadID, context.Canceled, errBlockWorkInFlight, errors.New("storage unavailable"), errors.New("execution unavailable")} {
+		t.Run(failure.Error(), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				config := payloadPreparationLoopConfig(1, 1, 2)
+				currentSlot := config.SlotsPerEpoch
+				handler, root, _, synced := newPayloadPreparationLoopHarness(t, gomock.NewController(t), &config, currentSlot, currentSlot, 750*time.Millisecond)
+				synced.EXPECT().SelectedHead().Return(root, currentSlot, true).AnyTimes()
+				ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+				defer cancel()
+				attempts := 0
+				handler.preparePayloadLoopWith(ctx, func(_ context.Context, key preparationKey, _ *payloadPreparationScratch) (preparationKey, error) {
+					attempts++
+					if attempts == 1 {
+						return key, failure
+					}
+					cancel()
+					return key, nil
+				})
+				require.Equal(t, 2, attempts)
+			})
+		})
+	}
+}
+
+func TestPreparePayloadLoopMemoizesWithdrawalFailureUntilHeadChanges(t *testing.T) {
+	_, _, _, _, head, handler, _, synced, _, validators := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	handler.beaconChainCfg.SecondsPerSlot = 1
+	targetSlot := head.Slot() + 1
+	proposer, err := head.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validators.SetFeeRecipient(proposer, common.Address{1})
+	head.SetNextWithdrawalValidatorIndex(uint64(head.ValidatorLength()))
+	root := common.Hash{1}
+	ticks, views := 0, 0
+	syncedMock := synced.(*sync_mock_services.MockSyncedData)
+	syncedMock.EXPECT().SelectedHead().DoAndReturn(func() (common.Hash, uint64, bool) {
+		ticks++
+		if ticks >= 3 {
+			root = common.Hash{2}
+		}
+		return root, head.Slot(), true
+	}).AnyTimes()
+	syncedMock.EXPECT().HeadRoot().DoAndReturn(func() common.Hash { return root }).AnyTimes()
+	syncedMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+		views++
+		return view(head, root, head.Slot())
+	}).AnyTimes()
+	synctest.Test(t, func(t *testing.T) {
+		clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+		clock.EXPECT().GetCurrentSlot().Return(head.Slot()).AnyTimes()
+		clock.EXPECT().GetSlotTime(targetSlot).DoAndReturn(func(uint64) time.Time { return time.Now().Add(750 * time.Millisecond) }).AnyTimes()
+		handler.ethClock = clock
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		handler.preparePayloadLoopWith(ctx, func(ctx context.Context, key preparationKey, scratch *payloadPreparationScratch) (preparationKey, error) {
+			outcome, err := handler.preparePayloadForWithScratch(ctx, key, scratch)
+			require.ErrorContains(t, err, "next_withdrawal_validator_index")
+			return outcome, err
+		})
+	})
+	require.GreaterOrEqual(t, ticks, 4)
+	require.Equal(t, 2, views)
+}
+
+func TestPayloadPreparationCountsOutcomes(t *testing.T) {
+	for _, tc := range []struct {
+		reason string
+		err    error
+	}{
+		{"success", nil},
+		{"unregistered", errNotOurProposal},
+		{"stale_head", errPreparationHeadChanged},
+		{"busy", errBlockWorkInFlight},
+		{"late", errPreparationTooLate},
+		{"needs_forkchoice", errGloasPathNeedsForkChoice},
+		{"error", errors.New("arbitrary error text must not become a label")},
+	} {
+		t.Run(tc.reason, func(t *testing.T) {
+			config := payloadPreparationLoopConfig(1, 1, 2)
+			currentSlot := config.SlotsPerEpoch
+			handler, root, _, synced := newPayloadPreparationLoopHarness(t, gomock.NewController(t), &config, currentSlot, currentSlot, 750*time.Millisecond)
+			synced.EXPECT().SelectedHead().Return(root, currentSlot, true).AnyTimes()
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			outcome := payloadPreparationOutcomes.WithLabelValues(tc.reason)
+			before := outcome.GetValue()
+			attempts := payloadPreparationAttempts.GetValue()
+			handler.preparePayloadLoopWith(ctx, func(_ context.Context, key preparationKey, _ *payloadPreparationScratch) (preparationKey, error) {
+				cancel()
+				return key, tc.err
+			})
+			require.Equal(t, before+1, outcome.GetValue())
+			require.Equal(t, attempts+1, payloadPreparationAttempts.GetValue())
+		})
+	}
+}
+
+func TestPayloadPreparationCountsCollectionReuse(t *testing.T) {
+	var prepared preparedPayload
+	for _, tc := range []struct {
+		reason string
+		id     []byte
+	}{
+		{"absent", []byte{1}}, {"reused", []byte{1}}, {"mismatch", []byte{2}},
+	} {
+		counter := payloadPreparationCollections.WithLabelValues(tc.reason)
+		before := counter.GetValue()
+		prepared.warmupAndMismatch(1, tc.id, time.Now())
+		require.Equal(t, before+1, counter.GetValue())
+		prepared.set(1, []byte{1}, common.Hash{}, time.Now())
+	}
+}
+
 func TestPreparePayloadForStartsBuildWithCompleteAttributes(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
@@ -1806,6 +1941,34 @@ func TestPreparePayloadForStartsBuildWithCompleteAttributes(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, baseBlockRoot, result.headRoot)
 	require.Positive(t, preparedWarmup(&handler.preparedPayload, targetSlot, payloadID, time.Now().Add(time.Second)))
+}
+
+func TestPayloadPreparationSeesImportAfterAdvisorySample(t *testing.T) {
+	store := mock_services.NewForkChoiceStorageMock(t)
+	require.False(t, store.BlockProcessing())
+	finishImport := store.BeginPayloadImport(10)
+	defer finishImport()
+	engine := newPayloadBuildEngine(t, gomock.NewController(t))
+	engine.startPayloadBuild = func(context.Context, common.Hash, *engine_types.PayloadAttributes) ([]byte, error) {
+		return []byte{1}, nil
+	}
+	handler := &ApiHandler{forkchoiceStore: store}
+	_, err := handler.startPayloadBuildAttempt(t.Context(), engine, 10, 10, common.Hash{}, nil)
+	require.ErrorIs(t, err, errBlockWorkInFlight)
+}
+
+func TestPayloadPreparationDiscardsImportInterruptedStartup(t *testing.T) {
+	store := mock_services.NewForkChoiceStorageMock(t)
+	engine := newPayloadBuildEngine(t, gomock.NewController(t))
+	engine.startPayloadBuild = func(ctx context.Context, _ common.Hash, _ *engine_types.PayloadAttributes) ([]byte, error) {
+		finishImport := store.BeginPayloadImport(10)
+		defer finishImport()
+		return []byte{1}, nil
+	}
+	handler := &ApiHandler{forkchoiceStore: store}
+	id, err := handler.startPayloadBuildAttempt(t.Context(), engine, 10, 10, common.Hash{}, nil)
+	require.ErrorIs(t, err, forkchoice.ErrPayloadImportInProgress)
+	require.Empty(t, id)
 }
 
 func TestPreparePayloadForSkipsGloasPaths(t *testing.T) {
@@ -1881,6 +2044,45 @@ func TestPreparePayloadForSkipsGloasPaths(t *testing.T) {
 			require.False(t, buildStarted)
 		})
 	}
+}
+
+func TestFullPayloadSourceReusesDecodedRequests(t *testing.T) {
+	beaconState, handler, _, store, _ := setupGloasPreparationTest(t)
+	reads := 0
+	requests := cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion)
+	store.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+		reads++
+		return &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{ExecutionRequests: requests}}, nil
+	}
+	for range 2 {
+		source := handler.executionPayloadSourceForGloasPath(beaconState, common.Hash{1}, gloasPayloadPathFull)
+		require.Nil(t, source.fallbackCause)
+		require.Same(t, requests, source.parentExecutionRequests)
+	}
+	require.Equal(t, 1, reads)
+}
+
+func TestFullPayloadSourceEvictsRequestsAndRetriesReadFailures(t *testing.T) {
+	beaconState, handler, _, store, _ := setupGloasPreparationTest(t)
+	reads := make(map[common.Hash]int)
+	requests := cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion)
+	store.ReadEnvelopeFromDiskFunc = func(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+		reads[root]++
+		if root == (common.Hash{1}) && reads[root] == 1 {
+			return nil, errors.New("temporary read failure")
+		}
+		return &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{ExecutionRequests: requests}}, nil
+	}
+	first := common.Hash{1}
+	require.Error(t, handler.executionPayloadSourceForGloasPath(beaconState, first, gloasPayloadPathFull).fallbackCause)
+	require.Nil(t, handler.executionPayloadSourceForGloasPath(beaconState, first, gloasPayloadPathFull).fallbackCause)
+	for i := 2; i <= maxCachedParentExecutionRequests+1; i++ {
+		source := handler.executionPayloadSourceForGloasPath(beaconState, common.Hash{byte(i)}, gloasPayloadPathFull)
+		require.Nil(t, source.fallbackCause)
+	}
+	require.Equal(t, maxCachedParentExecutionRequests, handler.parentExecutionRequests.entries.Len())
+	require.Nil(t, handler.executionPayloadSourceForGloasPath(beaconState, first, gloasPayloadPathFull).fallbackCause)
+	require.Equal(t, 3, reads[first])
 }
 
 func TestExecutionPayloadSourceMarksReorgToEmptyAfterNegativePtcDecision(t *testing.T) {
@@ -2524,7 +2726,7 @@ func TestPreparePayloadLoopRecoversAfterExecutionRetryCutoff(t *testing.T) {
 
 func TestPreparePayloadBuildBacksOffWhileExecutionHeadDiffers(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	handler := &ApiHandler{}
+	handler := &ApiHandler{forkchoiceStore: mock_services.NewForkChoiceStorageMock(t)}
 	baseBlockRoot := common.Hash{0x41}
 	syncedData := sync_mock_services.NewMockSyncedData(ctrl)
 	syncedData.EXPECT().SelectedHead().Return(baseBlockRoot, uint64(10), true).AnyTimes()

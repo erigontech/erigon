@@ -1071,12 +1071,39 @@ func TestScheduledBlockRepairsDatabaseWhenHeaderAlreadyExists(t *testing.T) {
 	}))
 }
 
+func TestScheduledBlockKeepsPayloadPreparationBehindRetries(t *testing.T) {
+	store := mock_services.NewForkChoiceStorageMock(t)
+	service := &blockService{forkchoiceStore: store}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	block.Block.Slot = 10
+	attempts := 0
+	job, _ := service.scheduleBlockForLaterProcessing(block, func(context.Context) error {
+		attempts++
+		if attempts == 1 {
+			return forkchoice.ErrNewPayloadNoStatus
+		}
+		return nil
+	})
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	service.processScheduledBlock(t.Context(), root, job, time.Now())
+	_, finish, ok := store.TryBeginPayloadPreparation(t.Context(), 10, 11)
+	if ok {
+		finish()
+	}
+	require.False(t, ok)
+	service.processScheduledBlock(t.Context(), root, job, time.Now().Add(time.Second))
+	_, finish, ok = store.TryBeginPayloadPreparation(t.Context(), 10, 11)
+	require.True(t, ok)
+	finish()
+}
+
 func TestPublishedBlockJobRetainsFullStoreUntilSuccess(t *testing.T) {
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-	service := &blockService{}
+	service := &blockService{forkchoiceStore: mock_services.NewForkChoiceStorageMock(t)}
 	attempts := 0
 	storedSidecars := false
 	imported := false
@@ -1118,7 +1145,7 @@ func TestPublishedBlockJobUpgradesBlockOnlyRecovery(t *testing.T) {
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
-	service := &blockService{}
+	service := &blockService{forkchoiceStore: mock_services.NewForkChoiceStorageMock(t)}
 	service.ScheduleBlockForLaterProcessing(block)
 	service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return nil })
 	jobValue, ok := service.blocksScheduledForLaterExecution.Load(root)
@@ -1147,7 +1174,7 @@ func TestPublishedBlockJobIsNotDowngradedByBlockOnlyRecovery(t *testing.T) {
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
-	service := &blockService{}
+	service := &blockService{forkchoiceStore: mock_services.NewForkChoiceStorageMock(t)}
 	calls := 0
 	failure := forkchoice.ErrNewPayloadNoStatus
 	handle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
@@ -1226,7 +1253,7 @@ func TestPublishedBlockRefreshSurvivesStaleFullStoreWorker(t *testing.T) {
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
-	service := &blockService{}
+	service := &blockService{forkchoiceStore: mock_services.NewForkChoiceStorageMock(t)}
 	service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
 		return errors.New("stale store should not run")
 	})
@@ -1649,7 +1676,7 @@ func TestPublishedBlockJobUpgradeKeepsWaiterOnRequiredStoreGeneration(t *testing
 		{name: "block-only storage failure", err: errors.New("database unavailable"), blockOnly: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			service := &blockService{}
+			service := &blockService{forkchoiceStore: mock_services.NewForkChoiceStorageMock(t)}
 			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 			root, err := block.Block.HashSSZ()
 			require.NoError(t, err)
@@ -1711,7 +1738,7 @@ func TestPublishedBlockJobUpgradeKeepsWaiterOnRequiredStoreGeneration(t *testing
 }
 
 func TestPublishedBlockJobTransientFailureKeepsWaiterUntilRetrySucceeds(t *testing.T) {
-	service := &blockService{}
+	service := &blockService{forkchoiceStore: mock_services.NewForkChoiceStorageMock(t)}
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
@@ -1788,7 +1815,7 @@ func TestPublishedBlockJobWaitersObserveCancellationIndependently(t *testing.T) 
 }
 
 func TestPublishedBlockJobRequestCancellationDoesNotCancelIntegration(t *testing.T) {
-	service := &blockService{}
+	service := &blockService{forkchoiceStore: mock_services.NewForkChoiceStorageMock(t)}
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
@@ -1819,7 +1846,7 @@ func TestPublishedBlockJobRequestCancellationDoesNotCancelIntegration(t *testing
 }
 
 func TestPublishedBlockJobPermanentFailureIsTerminal(t *testing.T) {
-	service := &blockService{}
+	service := &blockService{forkchoiceStore: mock_services.NewForkChoiceStorageMock(t)}
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
@@ -1875,7 +1902,7 @@ func TestPublishedBlockJobDetachedTerminalCannotReplaceCurrentJob(t *testing.T) 
 }
 
 func TestPublishedBlockJobExpiryRescheduleKeepsFreshStore(t *testing.T) {
-	service := &blockService{}
+	service := &blockService{forkchoiceStore: mock_services.NewForkChoiceStorageMock(t)}
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
@@ -1898,7 +1925,7 @@ func TestPublishedBlockJobExpiryRescheduleKeepsFreshStore(t *testing.T) {
 }
 
 func TestPublishedBlockJobRefreshSurvivesEarlierExpirySample(t *testing.T) {
-	service := &blockService{}
+	service := &blockService{forkchoiceStore: mock_services.NewForkChoiceStorageMock(t)}
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
@@ -1924,7 +1951,7 @@ func TestPublishedBlockJobRefreshSurvivesEarlierExpirySample(t *testing.T) {
 func TestPublishedBlockJobShutdownClosesQueuedWaitersAndRejectsNewSchedules(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := clparams.MainnetBeaconConfig
-	service := NewBlockService(ctx, nil, nil, nil, nil, &cfg, nil).(*blockService)
+	service := NewBlockService(ctx, nil, mock_services.NewForkChoiceStorageMock(t), nil, nil, &cfg, nil).(*blockService)
 	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.Phase0Version)
 	secondBlock := cltypes.NewSignedBeaconBlock(&cfg, clparams.Phase0Version)
 	secondBlock.Block.Slot = 1
@@ -1944,7 +1971,7 @@ func TestPublishedBlockJobShutdownClosesQueuedWaitersAndRejectsNewSchedules(t *t
 }
 
 func TestPublishedBlockJobShutdownOwnsRunningAttemptAndIgnoresLateResult(t *testing.T) {
-	service := &blockService{}
+	service := &blockService{forkchoiceStore: mock_services.NewForkChoiceStorageMock(t)}
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
@@ -1974,7 +2001,7 @@ func TestPublishedBlockJobShutdownOwnsRunningAttemptAndIgnoresLateResult(t *test
 }
 
 func TestPublishedBlockJobShutdownPreservesCompletedAttempt(t *testing.T) {
-	service := &blockService{}
+	service := &blockService{forkchoiceStore: mock_services.NewForkChoiceStorageMock(t)}
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
@@ -1988,7 +2015,7 @@ func TestPublishedBlockJobShutdownPreservesCompletedAttempt(t *testing.T) {
 }
 
 func TestPublishedBlockJobConcurrentSchedulesReturnWaitableHandles(t *testing.T) {
-	service := &blockService{}
+	service := &blockService{forkchoiceStore: mock_services.NewForkChoiceStorageMock(t)}
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)

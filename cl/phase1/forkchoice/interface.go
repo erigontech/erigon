@@ -51,6 +51,7 @@ type ForkChoiceStorageReader interface {
 	GetHeadNode() (ForkChoiceNode, uint64, error)
 	HighestSeen() uint64
 	BlockProcessing() bool
+	TryBeginPayloadPreparation(context.Context, uint64, uint64) (context.Context, func(), bool)
 	JustifiedCheckpoint() solid.Checkpoint
 	JustifiedSlot() uint64
 	ProposerBoostRoot() common.Hash
@@ -129,6 +130,7 @@ type ForkChoiceStorageReader interface {
 }
 
 type ForkChoiceStorageWriter interface {
+	BeginPayloadImport(uint64) func()
 	OnAttestation(attestation *solid.Attestation, fromBlock, insert bool) error
 	OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, test bool) error
 	OnBlock(
