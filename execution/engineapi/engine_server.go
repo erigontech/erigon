@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -404,6 +405,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	var blockAccessList *types.BlockAccessListSidecar
+	var blockAccessListErr error
 	if version < clparams.GloasVersion && req.SlotNumber != nil {
 		return nil, &rpc.InvalidParamsError{Message: "unexpected slotNumber before engine_newPayloadV5"}
 	}
@@ -419,17 +421,22 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}
 		balBytes := *req.BlockAccessList
-		blockAccessList, err = types.DecodeBlockAccessListSidecarOwned(balBytes)
-		if err != nil {
-			e.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(balBytes))
+		blockAccessList, blockAccessListErr = types.DecodeBlockAccessListSidecarForBlock(balBytes, header.GasLimit, len(transactions))
+		if blockAccessListErr != nil && !errors.Is(blockAccessListErr, types.ErrInvalidBlockAccessList) {
+			e.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", blockAccessListErr, "raw", hex.EncodeToString(balBytes))
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
-				ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("%v: decode failed: %v", types.ErrInvalidBlockAccessList, err)),
+				ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("%v: decode failed: %v", types.ErrInvalidBlockAccessList, blockAccessListErr)),
 			}, nil
 		}
-		hash, err := blockAccessList.Hash()
-		if err != nil {
-			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("cannot hash blockAccessList: %v", err)}
+		var hash common.Hash
+		if blockAccessListErr != nil {
+			hash = crypto.Keccak256Hash(balBytes)
+		} else {
+			hash, err = blockAccessList.Hash()
+			if err != nil {
+				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("cannot hash blockAccessList: %v", err)}
+			}
 		}
 		header.BlockAccessListHash = &hash
 		if req.SlotNumber != nil {
@@ -466,8 +473,14 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if invalidTransactionStatus != nil {
 		return invalidTransactionStatus, nil
 	}
+	if blockAccessListErr != nil {
+		return &engine_types.PayloadStatus{
+			Status:          engine_types.InvalidStatus,
+			ValidationError: engine_types.NewStringifiedError(blockAccessListErr),
+		}, nil
+	}
 	if blockAccessList != nil {
-		if err = blockAccessList.ValidateForBlock(header.GasLimit); err != nil {
+		if err = blockAccessList.ValidateForBlock(header.GasLimit, len(transactions)); err != nil {
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedError(err),

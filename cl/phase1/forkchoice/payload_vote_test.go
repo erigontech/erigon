@@ -7,6 +7,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -498,7 +499,7 @@ func TestGloasForkChoiceUsesPersistedPayload(t *testing.T) {
 			children := f.getNodeChildren(ForkChoiceNode{
 				Root:          root,
 				PayloadStatus: cltypes.PayloadStatusPending,
-			}, nil)
+			})
 			require.Equal(t, tt.wantFullChild, hasPayloadStatus(children, cltypes.PayloadStatusFull))
 			require.True(t, hasPayloadStatus(children, cltypes.PayloadStatusEmpty))
 
@@ -507,6 +508,20 @@ func TestGloasForkChoiceUsesPersistedPayload(t *testing.T) {
 			require.Equal(t, tt.wantFullChild, f.payloadDataAvailability(root, true))
 		})
 	}
+}
+
+func TestGetNodeChildrenUsesAllStoreBlocks(t *testing.T) {
+	parentRoot := common.HexToHash("0x1234")
+	childRoot := common.HexToHash("0x5678")
+	f := &ForkChoiceStore{
+		forkGraph: ptcVoteForkGraph{blocks: map[common.Hash]*cltypes.SignedBeaconBlock{
+			childRoot: {Block: &cltypes.BeaconBlock{ParentRoot: parentRoot}},
+		}},
+	}
+	f.updateChildren(0, parentRoot, childRoot)
+
+	children := f.getNodeChildren(ForkChoiceNode{Root: parentRoot, PayloadStatus: cltypes.PayloadStatusEmpty})
+	require.Equal(t, []ForkChoiceNode{{Root: childRoot, PayloadStatus: cltypes.PayloadStatusPending}}, children)
 }
 
 func TestIsPayloadVerifiedStrictSemantics(t *testing.T) {
@@ -567,7 +582,7 @@ func TestMarkPayloadInvalidRecordsELRejection(t *testing.T) {
 	f.MarkPayloadInvalid(root, execHash)
 
 	require.False(t, f.IsPayloadVerified(root))
-	children := f.getNodeChildren(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending}, nil)
+	children := f.getNodeChildren(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending})
 	require.False(t, hasPayloadStatus(children, cltypes.PayloadStatusFull))
 	status, ok := f.GetRecentExecutionPayloadStatus(execHash)
 	require.True(t, ok)
@@ -831,27 +846,35 @@ func TestPayloadStatusGetterUsesDurableAuthorityAfterEviction(t *testing.T) {
 	}
 }
 
-func TestStoreAnchorEnvelopeMarksPayloadOptimisticWithoutEngine(t *testing.T) {
-	root := common.HexToHash("0x5678")
-	execHash := common.HexToHash("0xabcd")
-	dumpedEnvelope := common.Hash{}
+// The anchor's payload counts as NotValidated until the EL answers, with or without an engine.
+func TestStoreAnchorEnvelopeMarksPayloadOptimistic(t *testing.T) {
+	for _, withEngine := range []bool{false, true} {
+		t.Run(fmt.Sprintf("engine=%t", withEngine), func(t *testing.T) {
+			root := common.HexToHash("0x5678")
+			execHash := common.HexToHash("0xabcd")
+			dumpedEnvelope := common.Hash{}
 
-	f := newPayloadVoteTestStore(t, root, true, false)
-	f.forkGraph = payloadVoteForkGraph{hasEnvelope: true, dumpedEnvelope: &dumpedEnvelope}
-	envelope := &cltypes.SignedExecutionPayloadEnvelope{
-		Message: &cltypes.ExecutionPayloadEnvelope{
-			BeaconBlockRoot: root,
-			Payload:         &cltypes.Eth1Block{BlockHash: execHash},
-		},
+			f := newPayloadVoteTestStore(t, root, true, false)
+			f.forkGraph = payloadVoteForkGraph{hasEnvelope: true, dumpedEnvelope: &dumpedEnvelope}
+			if withEngine {
+				f.engine = execution_client.NewMockExecutionEngine(gomock.NewController(t))
+			}
+			envelope := &cltypes.SignedExecutionPayloadEnvelope{
+				Message: &cltypes.ExecutionPayloadEnvelope{
+					BeaconBlockRoot: root,
+					Payload:         &cltypes.Eth1Block{BlockHash: execHash},
+				},
+			}
+
+			require.NoError(t, f.StoreAnchorEnvelope(root, envelope))
+			require.False(t, f.IsPayloadVerified(root))
+			status, ok := f.GetRecentExecutionPayloadStatus(execHash)
+			require.True(t, ok)
+			require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated), status)
+			require.True(t, f.isPayloadAvailable(root))
+			require.Equal(t, root, dumpedEnvelope)
+		})
 	}
-
-	require.NoError(t, f.StoreAnchorEnvelope(root, envelope))
-	require.False(t, f.IsPayloadVerified(root))
-	status, ok := f.GetRecentExecutionPayloadStatus(execHash)
-	require.True(t, ok)
-	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated), status)
-	require.True(t, f.isPayloadAvailable(root))
-	require.Equal(t, root, dumpedEnvelope)
 }
 
 func TestStoreAnchorEnvelopeDoesNotRestorePrunedPayloadStatus(t *testing.T) {
