@@ -91,7 +91,9 @@ func (a *ApiHandler) retryParkedEnvelope(ctx context.Context, root common.Hash, 
 		if next.IsZero() {
 			next = time.Now().Add(proposalWaitPollInterval)
 		}
-		timer := time.NewTimer(time.Until(next))
+		// next may be another caller's booking, which is dropped if its attempt is cut short, so check
+		// again at the poll interval at the latest.
+		timer := time.NewTimer(min(time.Until(next), proposalWaitPollInterval))
 		select {
 		case <-stop:
 			timer.Stop()
@@ -110,7 +112,7 @@ func (a *ApiHandler) awaitPendingParentPayload(
 	targetSlot uint64,
 	stateVersion clparams.StateVersion,
 ) error {
-	if stateVersion.Before(clparams.GloasVersion) {
+	if stateVersion.Before(clparams.GloasVersion) || !a.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(targetSlot) {
 		return nil
 	}
 	parked, err := a.parentEnvelopeParked(baseState, baseBlockRoot, targetSlot)
@@ -137,10 +139,14 @@ func (a *ApiHandler) awaitPendingParentPayload(
 	)
 }
 
-// awaitHeadStateAfter waits until the published head state is the state of the fork-choice head
-// and no longer staleRoot, so production retried after a head change builds on the new head
-// instead of the state it just failed on. It gives up at the proposal wait cutoff.
-func (a *ApiHandler) awaitHeadStateAfter(ctx context.Context, staleRoot common.Hash, targetSlot uint64) bool {
+// awaitHeadStateAfterChange waits until the published head state is the state of the fork-choice
+// head, so production retried after a head change builds on that head instead of the state it
+// just failed on. It gives up at the proposal wait cutoff, and does not wait for a slot that is
+// not current.
+func (a *ApiHandler) awaitHeadStateAfterChange(ctx context.Context, targetSlot uint64) bool {
+	if !a.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(targetSlot) {
+		return false
+	}
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch)
 	deadline := proposalWaitCutoff(a.ethClock.GetSlotTime(targetSlot), a.beaconChainCfg, stateVersion)
 	cutoff := time.NewTimer(time.Until(deadline))
@@ -148,7 +154,7 @@ func (a *ApiHandler) awaitHeadStateAfter(ctx context.Context, staleRoot common.H
 	ticker := time.NewTicker(proposalWaitPollInterval)
 	defer ticker.Stop()
 	for time.Now().Before(deadline) {
-		if root, _, ok := a.syncedData.StateHead(); ok && root != staleRoot {
+		if root, _, ok := a.syncedData.StateHead(); ok {
 			if head, _, err := a.forkchoiceStore.GetHeadNode(); err == nil && head.Root == root {
 				return true
 			}

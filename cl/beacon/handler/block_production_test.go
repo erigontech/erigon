@@ -3726,9 +3726,10 @@ func TestGetEthV3ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
 	require.True(t, found)
 }
 
-// The head changes while production waits for the parked envelope of the old head: production is
-// retried once the new head's state is published, and the block builds on the new head.
-func TestGetEthV3ValidatorBlockRetriesOnTheNewHeadAfterAHeadChange(t *testing.T) {
+// produceAcrossAHeadChange runs GetEthV3ValidatorBlock while the head changes during the wait for
+// the parked envelope of the old head. The new head's state is published only if publish is set.
+func produceAcrossAHeadChange(t *testing.T, publish bool) (*beaconhttp.BeaconResponse, error, common.Hash) {
+	t.Helper()
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{slotOffset: 1})
 	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg = fixture.block.Cfg
@@ -3780,7 +3781,7 @@ func TestGetEthV3ValidatorBlockRetriesOnTheNewHeadAfterAHeadChange(t *testing.T)
 	forkchoiceStore.PendingEnvelopeRoots = map[common.Hash]struct{}{oldRoot: {}}
 	published := make(chan error, 1)
 	forkchoiceStore.RetryPendingEnvelopeFunc = func(context.Context, common.Hash) time.Time {
-		if !headChanged.Swap(true) {
+		if !headChanged.Swap(true) && publish {
 			go func() {
 				time.Sleep(3 * proposalWaitPollInterval) // after the wait has seen the head change
 				published <- syncedData.OnHeadStateWithBlockRoot(newState, newRoot)
@@ -3789,11 +3790,15 @@ func TestGetEthV3ValidatorBlockRetriesOnTheNewHeadAfterAHeadChange(t *testing.T)
 		return time.Now().Add(time.Second)
 	}
 
+	builds := 0
+	if publish {
+		builds = 1
+	}
 	handler.epbsPool = pool.NewEpbsPool()
 	syncPool := sync_pool_mock.NewMockSyncContributionPool(gomock.NewController(t))
 	syncPool.EXPECT().GetSyncAggregate(gomock.Any(), gomock.Any()).
 		Return(cltypes.NewSyncAggregateWithSize(int(handler.beaconChainCfg.SyncCommitteeSize/8)), nil).
-		Times(1)
+		Times(builds)
 	handler.syncMessagePool = syncPool
 	payload := cltypes.NewEth1Block(clparams.GloasVersion, handler.beaconChainCfg)
 	payload.ParentHash = newState.GetLatestBlockHash()
@@ -3808,10 +3813,10 @@ func TestGetEthV3ValidatorBlockRetriesOnTheNewHeadAfterAHeadChange(t *testing.T)
 	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), clparams.GloasVersion).
 		Return([]byte{1}, nil).
-		Times(1)
+		Times(builds)
 	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.GloasVersion).
 		Return(payload, &engine_types.BlobsBundle{}, nil, big.NewInt(1), nil).
-		Times(1)
+		Times(builds)
 	handler.engine = engine
 	handler.elClientVersion.Store(elClientVersionUnavailable) // avoid mocking GetClientVersionV1
 
@@ -3824,12 +3829,43 @@ func TestGetEthV3ValidatorBlockRetriesOnTheNewHeadAfterAHeadChange(t *testing.T)
 	routeContext.URLParams.Add("slot", fmt.Sprint(fixture.block.Slot))
 	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
 	response, err := handler.GetEthV3ValidatorBlock(httptest.NewRecorder(), request)
-	require.NoError(t, err)
 	require.True(t, headChanged.Load(), "production waited for the parked envelope")
-	require.NoError(t, <-published)
+	if publish {
+		require.NoError(t, <-published)
+	}
+	return response, err, newRoot
+}
+
+// The head changes while production waits for the parked envelope of the old head: production is
+// retried once the new head's state is published, and the block builds on the new head.
+func TestGetEthV3ValidatorBlockRetriesOnTheNewHeadAfterAHeadChange(t *testing.T) {
+	logs := captureAllProductionLogs(t)
+	response, err, newRoot := produceAcrossAHeadChange(t, true)
+	require.NoError(t, err)
 	producedBlock, ok := response.Data.(*cltypes.BeaconBlock)
 	require.True(t, ok)
 	require.Equal(t, newRoot, producedBlock.ParentRoot)
+	require.Equal(t, 1, strings.Count(logs(), "retrying on the new head"))
+	require.Zero(t, headChangeWarnings(logs()))
+}
+
+func headChangeWarnings(logs string) int {
+	warnings := 0
+	for line := range strings.SplitSeq(logs, "\n") {
+		if strings.Contains(line, "lvl=warn") && strings.Contains(line, "fork choice head changed") {
+			warnings++
+		}
+	}
+	return warnings
+}
+
+// A retry that gives up returns the head change and records it once at warning level, so a missed
+// proposal is visible above Info.
+func TestGetEthV3ValidatorBlockWarnsOnceWhenTheRetryGivesUp(t *testing.T) {
+	logs := captureAllProductionLogs(t)
+	_, err, _ := produceAcrossAHeadChange(t, false)
+	require.ErrorIs(t, err, errForkChoiceHeadChanged)
+	require.Equal(t, 1, headChangeWarnings(logs()))
 }
 
 func TestSelfBuildEnvelopeCacheSeparatesBlockRoots(t *testing.T) {

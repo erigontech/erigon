@@ -197,6 +197,53 @@ func TestRetryPendingExecutionPayloadEnvelopeAdmitsOneAttemptPerInterval(t *test
 	awaitSignal(t, first, "the first retry")
 }
 
+// A caller that comes while another one probes the columns is not admitted: the retry is booked
+// before the probe, so it gets the time of the next retry without probing again.
+func TestRetryPendingExecutionPayloadEnvelopeBooksBeforeProbingTheColumns(t *testing.T) {
+	root := common.HexToHash("0x1")
+	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
+	probing, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	peerDas.EXPECT().IsDataAvailable(uint64(7), root).DoAndReturn(func(uint64, common.Hash) (bool, error) {
+		close(probing)
+		<-release
+		return false, nil
+	}).Times(1)
+	f, pending := newRetryPendingStore(t, peerDas)
+	pending.Add(root, &cltypes.SignedExecutionPayloadEnvelope{})
+
+	go func() {
+		f.RetryPendingExecutionPayloadEnvelope(t.Context(), root)
+		close(done)
+	}()
+	awaitSignal(t, probing, "the first probe")
+	require.False(t, f.RetryPendingExecutionPayloadEnvelope(t.Context(), root).IsZero())
+	close(release)
+	awaitSignal(t, done, "the first retry")
+}
+
+// Without PeerDAS the columns of a blob-carrying envelope count as missing, so the retry probes
+// again later and does not apply the envelope.
+func TestRetryPendingExecutionPayloadEnvelopeTreatsMissingPeerDasAsUnavailable(t *testing.T) {
+	root := common.HexToHash("0x1")
+	f, pending := newRetryPendingStore(t, nil)
+	f.peerDas = nil
+	pending.Add(root, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: root}})
+
+	start := time.Now()
+	next := f.RetryPendingExecutionPayloadEnvelope(t.Context(), root)
+	require.WithinDuration(t, start.Add(missingEnvelopeDataProbeInterval), next, 100*time.Millisecond)
+	require.True(t, pending.Contains(root))
+	_, applying := f.pendingEnvelopeApplyGate.Load(root)
+	require.False(t, applying)
+}
+
+func TestCheckDataAvailabilityTreatsMissingPeerDasAsUnavailable(t *testing.T) {
+	f, _ := newRetryPendingStore(t, nil)
+	f.peerDas = nil
+	block, _ := f.forkGraph.GetBlock(common.Hash{}) // commits to one blob
+	require.ErrorIs(t, f.checkDataAvailability(block, common.Hash{}), ErrEIP7594ColumnDataNotAvailable)
+}
+
 // An attempt that the caller's context ends before a verdict does not hold the retry interval,
 // so the next caller does not lose up to one interval of its budget.
 func TestRetryPendingExecutionPayloadEnvelopeReleasesTheIntervalOfAnInterruptedAttempt(t *testing.T) {

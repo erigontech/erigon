@@ -136,6 +136,7 @@ func pendingParentWaitFixture(t *testing.T, remaining time.Duration) (*ApiHandle
 	slotStart := time.Now().Add(remaining - sinceCutoff)
 	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 	clock.EXPECT().GetSlotTime(gomock.Any()).Return(slotStart).AnyTimes()
+	clock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
 	handler.ethClock = clock
 	return handler, forkchoiceStore, postState, baseBlockRoot, applied
 }
@@ -316,7 +317,7 @@ func TestEnvelopeParkedFlagsOnlyAnUnpersistedParkedEnvelope(t *testing.T) {
 
 // After a head change, production is retried only once the new head's state is published:
 // the state it failed on would fail the same way.
-func TestAwaitHeadStateAfterWaitsForTheNewHeadState(t *testing.T) {
+func TestAwaitHeadStateAfterChangeWaitsForTheNewHeadState(t *testing.T) {
 	handler, forkchoiceStore, postState, staleRoot, _ := pendingParentWaitFixture(t, 5*time.Second)
 	handler.syncedData = synced_data.NewSyncedDataManager(handler.beaconChainCfg, true)
 	require.NoError(t, handler.syncedData.OnHeadStateWithBlockRoot(postState, staleRoot))
@@ -328,42 +329,43 @@ func TestAwaitHeadStateAfterWaitsForTheNewHeadState(t *testing.T) {
 	}()
 
 	start := time.Now()
-	require.True(t, handler.awaitHeadStateAfter(t.Context(), staleRoot, postState.Slot()+1))
+	require.True(t, handler.awaitHeadStateAfterChange(t.Context(), postState.Slot()+1))
 	require.GreaterOrEqual(t, time.Since(start), 40*time.Millisecond)
 	root, _, _ := handler.syncedData.StateHead()
 	require.Equal(t, newRoot, root)
 }
 
-func TestAwaitHeadStateAfterGivesUpAtTheCutoff(t *testing.T) {
-	handler, _, postState, staleRoot, _ := pendingParentWaitFixture(t, 50*time.Millisecond)
+func TestAwaitHeadStateAfterChangeGivesUpAtTheCutoff(t *testing.T) {
+	handler, forkchoiceStore, postState, staleRoot, _ := pendingParentWaitFixture(t, 50*time.Millisecond)
 	handler.syncedData = synced_data.NewSyncedDataManager(handler.beaconChainCfg, true)
 	require.NoError(t, handler.syncedData.OnHeadStateWithBlockRoot(postState, staleRoot))
+	forkchoiceStore.HeadVal = common.Hash{0x42} // its state is never published
 
 	start := time.Now()
-	require.False(t, handler.awaitHeadStateAfter(t.Context(), staleRoot, postState.Slot()+1))
+	require.False(t, handler.awaitHeadStateAfterChange(t.Context(), postState.Slot()+1))
 	require.Less(t, time.Since(start), time.Second)
 }
 
-// A published state that is no longer the stale one but is not the fork-choice head either would
-// fail the same way: the head moved from A to B to C and only B's state is published.
-func TestAwaitHeadStateAfterWaitsForTheForkChoiceHeadState(t *testing.T) {
-	handler, forkchoiceStore, postState, staleRoot, _ := pendingParentWaitFixture(t, 100*time.Millisecond)
+// A published state that is not the fork-choice head would fail the same way: the head moved from
+// A to B to C and only B's state is published.
+func TestAwaitHeadStateAfterChangeWaitsForTheForkChoiceHeadState(t *testing.T) {
+	handler, forkchoiceStore, postState, _, _ := pendingParentWaitFixture(t, 100*time.Millisecond)
 	handler.syncedData = synced_data.NewSyncedDataManager(handler.beaconChainCfg, true)
 	require.NoError(t, handler.syncedData.OnHeadStateWithBlockRoot(postState, common.Hash{0x42}))
 	forkchoiceStore.HeadVal = common.Hash{0x43}
 
-	require.False(t, handler.awaitHeadStateAfter(t.Context(), staleRoot, postState.Slot()+1))
+	require.False(t, handler.awaitHeadStateAfterChange(t.Context(), postState.Slot()+1))
 }
 
 // After the cutoff the second attempt does not start, even when the new head state is published.
-func TestAwaitHeadStateAfterDoesNotRetryPastTheCutoff(t *testing.T) {
-	handler, forkchoiceStore, postState, staleRoot, _ := pendingParentWaitFixture(t, -time.Millisecond)
+func TestAwaitHeadStateAfterChangeDoesNotRetryPastTheCutoff(t *testing.T) {
+	handler, forkchoiceStore, postState, _, _ := pendingParentWaitFixture(t, -time.Millisecond)
 	handler.syncedData = synced_data.NewSyncedDataManager(handler.beaconChainCfg, true)
 	newRoot := common.Hash{0x42}
 	require.NoError(t, handler.syncedData.OnHeadStateWithBlockRoot(postState, newRoot))
 	forkchoiceStore.HeadVal = newRoot
 
-	require.False(t, handler.awaitHeadStateAfter(t.Context(), staleRoot, postState.Slot()+1))
+	require.False(t, handler.awaitHeadStateAfterChange(t.Context(), postState.Slot()+1))
 }
 
 // slotTimeClock starts every slot at slotStart, so a test controls how far the wait cutoff is.
@@ -373,6 +375,8 @@ type slotTimeClock struct {
 }
 
 func (c slotTimeClock) GetSlotTime(uint64) time.Time { return c.slotStart }
+
+func (c slotTimeClock) IsSlotCurrentSlotWithMaximumClockDisparity(uint64) bool { return true }
 
 // The envelope of the EMPTY head is parked at the start of production and applied by the wait's
 // retry: production then builds on the FULL parent instead of the EMPTY fallback.
@@ -443,4 +447,73 @@ func TestProduceBlockBuildsOnTheParentAppliedDuringTheWait(t *testing.T) {
 	require.NotZero(t, retries.Load())
 	require.NotNil(t, options.selectedBid)
 	require.Equal(t, fullHash, options.selectedBid.bid.Message.ParentBlockHash)
+}
+
+// When the head moves from A to B and back to A, the published state of A is the head's state
+// again, so production is retried at once.
+func TestAwaitHeadStateAfterChangeRetriesAtOnceWhenTheHeadReturns(t *testing.T) {
+	handler, forkchoiceStore, postState, root, _ := pendingParentWaitFixture(t, 5*time.Second)
+	handler.syncedData = synced_data.NewSyncedDataManager(handler.beaconChainCfg, true)
+	require.NoError(t, handler.syncedData.OnHeadStateWithBlockRoot(postState, root))
+	forkchoiceStore.HeadVal = root
+
+	start := time.Now()
+	require.True(t, handler.awaitHeadStateAfterChange(t.Context(), postState.Slot()+1))
+	require.Less(t, time.Since(start), 100*time.Millisecond)
+}
+
+// notCurrentSlotClock reports every slot as not current, as for a request for a later slot.
+func notCurrentSlotClock(t *testing.T) eth_clock.EthereumClock {
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(false).AnyTimes()
+	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now()).AnyTimes()
+	return clock
+}
+
+// A request for a slot that is not current does not wait: it would hold off payload preparation
+// until that slot's cutoff.
+func TestAwaitPendingParentPayloadDoesNotWaitForASlotThatIsNotCurrent(t *testing.T) {
+	handler, forkchoiceStore, postState, baseBlockRoot, _ := pendingParentWaitFixture(t, 5*time.Second)
+	handler.ethClock = notCurrentSlotClock(t)
+	var retries atomic.Int32
+	forkchoiceStore.RetryPendingEnvelopeFunc = func(context.Context, common.Hash) time.Time {
+		retries.Add(1)
+		return time.Now().Add(time.Millisecond)
+	}
+
+	start := time.Now()
+	require.NoError(t, handler.awaitPendingParentPayload(t.Context(), postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion))
+	require.Less(t, time.Since(start), 100*time.Millisecond)
+	require.Zero(t, retries.Load())
+}
+
+func TestAwaitHeadStateAfterChangeDoesNotWaitForASlotThatIsNotCurrent(t *testing.T) {
+	handler, forkchoiceStore, postState, staleRoot, _ := pendingParentWaitFixture(t, 5*time.Second)
+	handler.ethClock = notCurrentSlotClock(t)
+	handler.syncedData = synced_data.NewSyncedDataManager(handler.beaconChainCfg, true)
+	require.NoError(t, handler.syncedData.OnHeadStateWithBlockRoot(postState, staleRoot))
+	forkchoiceStore.HeadVal = common.Hash{0x42}
+
+	start := time.Now()
+	require.False(t, handler.awaitHeadStateAfterChange(t.Context(), postState.Slot()+1))
+	require.Less(t, time.Since(start), 100*time.Millisecond)
+}
+
+// The time a retry gets back can be another caller's booking, which is dropped if that attempt is
+// cut short. The wait checks again at the poll interval instead of sleeping until the dropped time.
+func TestAwaitPendingParentPayloadRetriesBeforeAnotherCallersBookingEnds(t *testing.T) {
+	handler, forkchoiceStore, postState, baseBlockRoot, applied := pendingParentWaitFixture(t, 5*time.Second)
+	var retries atomic.Int32
+	forkchoiceStore.RetryPendingEnvelopeFunc = func(context.Context, common.Hash) time.Time {
+		if retries.Add(1) == 1 {
+			return time.Now().Add(2 * time.Second) // booked by an attempt that is then cut short
+		}
+		applied.Store(true)
+		return time.Time{}
+	}
+
+	start := time.Now()
+	require.NoError(t, handler.awaitPendingParentPayload(t.Context(), postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion))
+	require.True(t, applied.Load())
+	require.Less(t, time.Since(start), time.Second)
 }

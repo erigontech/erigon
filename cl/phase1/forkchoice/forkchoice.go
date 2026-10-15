@@ -212,7 +212,8 @@ type ForkChoiceStore struct {
 	// Later, when OnBlock processes the block, it checks this cache and processes any pending envelope.
 	pendingEnvelopes         *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
 	envelopeGossipAdmissions ExecutionPayloadEnvelopeAdmissions
-	// Earliest time RetryDataAvailablePendingExecutionPayloadEnvelopes may retry a pending envelope again, by block root.
+	// Earliest time a retry of a pending envelope may run again, by block root. The background retry and
+	// a proposal's retry of its parent share it.
 	dataAvailableEnvelopeRetryAt *lru.Cache[common.Hash, time.Time]
 	dataAvailableEnvelopeRetryMu sync.Mutex // makes the due check and the booking of a retry one step
 

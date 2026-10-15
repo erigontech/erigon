@@ -324,7 +324,7 @@ func (f *ForkChoiceStore) checkDataAvailability(
 	}
 
 	if f.peerDas == nil {
-		return nil
+		return ErrEIP7594ColumnDataNotAvailable
 	}
 	// Check PeerDAS data availability
 	// Note: Unlike OnBlock, we don't skip this check even if EL has blobs,

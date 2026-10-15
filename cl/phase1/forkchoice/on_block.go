@@ -754,7 +754,10 @@ func (f *ForkChoiceStore) retryPendingEnvelopeWhenDue(ctx context.Context, root 
 	if !due {
 		return retryAt
 	}
-	if commitments := block.GetBlobKzgCommitments(); f.peerDas != nil && commitments != nil && commitments.Len() > 0 {
+	if commitments := block.GetBlobKzgCommitments(); commitments != nil && commitments.Len() > 0 {
+		if f.peerDas == nil {
+			return retryAt
+		}
 		if available, err := f.peerDas.IsDataAvailable(block.Block.Slot, root); err != nil || !available {
 			return retryAt
 		}
