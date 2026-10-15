@@ -856,13 +856,7 @@ func (f *ForkChoiceStore) ForkNodes() []ForkNode {
 	defer f.mu.RUnlock()
 	weights := f.weights
 	if f.trackGloasWeights() {
-		weights = make(map[common.Hash]uint64, len(f.gloasWeightTree.topologySeen))
-		for root := range f.gloasWeightTree.nodes {
-			if _, prepared := f.gloasWeightTree.topologySeen[root]; !prepared {
-				continue
-			}
-			weights[root] = f.gloasWeightTree.GetAttestationScore(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending})
-		}
+		weights = f.gloasWeightTree.snapshotWeights()
 	}
 	forkNodes := make([]ForkNode, 0, len(weights))
 	for blockRoot, weight := range weights {

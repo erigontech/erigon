@@ -71,6 +71,117 @@ func TestForkNodesGloasExportsPreparedWeight(t *testing.T) {
 	require.Empty(t, f.weights)
 }
 
+func TestForkNodesGloasIncludesProposerBoost(t *testing.T) {
+	f, root := newForkNodesTestStore(t)
+	graph := f.forkGraph.(*forkNodesTestGraph)
+	rootA, rootB := common.Hash{0xbb}, common.Hash{0xcc}
+	for _, childRoot := range []common.Hash{rootA, rootB} {
+		child := cltypes.NewSignedBeaconBlock(f.beaconCfg, clparams.GloasVersion)
+		child.Block.Slot = 13
+		child.Block.ParentRoot = root
+		graph.headers[childRoot] = child.SignedBeaconBlockHeader().Header
+		graph.blocks[childRoot] = child
+		f.updateChildren(11, root, childRoot)
+	}
+	f.time.Store(13 * f.beaconCfg.SecondsPerSlot)
+	f.checkpointStates.Store(f.JustifiedCheckpoint(), &checkpointState{
+		beaconConfig: f.beaconCfg, validatorSetSize: 3,
+		balances: []uint64{100, 90, 3010}, actives: []byte{7}, slasheds: []byte{0},
+		unslashedActiveBalance: 3200,
+	})
+	f.setLatestMessage(0, LatestMessage{Slot: 13, Root: rootA})
+	f.setLatestMessage(1, LatestMessage{Slot: 13, Root: rootB})
+	f.proposerBoostRoot.Store(rootB)
+	head, _, err := f.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, rootB, head.Root)
+
+	nodes := f.ForkNodes()
+	require.Len(t, nodes, 3)
+	weights := make(map[common.Hash]uint64, len(nodes))
+	for _, node := range nodes {
+		weights[node.BlockRoot] = node.Weight
+	}
+	require.Equal(t, map[common.Hash]uint64{root: 230, rootA: 100, rootB: 130}, weights)
+}
+
+func TestForkNodesGloasDoesNotPopulateBoostCache(t *testing.T) {
+	f, root := newForkNodesTestStore(t)
+	graph := f.forkGraph.(*forkNodesTestGraph)
+	parentRoot := common.Hash{0x99}
+	parent := cltypes.NewSignedBeaconBlock(f.beaconCfg, clparams.GloasVersion)
+	parent.Block.Slot = 9
+	graph.blocks[parentRoot] = parent
+	graph.headers[parentRoot] = parent.SignedBeaconBlockHeader().Header
+	graph.blocks[root].Block.ParentRoot = parentRoot
+	graph.headers[root].ParentRoot = parentRoot
+	f.checkpointStates.Store(f.JustifiedCheckpoint(), &checkpointState{
+		beaconConfig: f.beaconCfg, validatorSetSize: 2,
+		balances: []uint64{32, 3168}, actives: []byte{3}, slasheds: []byte{0},
+		unslashedActiveBalance: 3200,
+	})
+	f.proposerBoostRoot.Store(root)
+	_, _, err := f.GetHeadNode()
+	require.NoError(t, err)
+	require.False(t, f.gloasWeightTree.boostKnown)
+
+	require.Equal(t, []ForkNode{{
+		Slot: 11, BlockRoot: root, ParentRoot: parentRoot, Weight: 72, Validity: "valid",
+	}}, f.ForkNodes())
+	require.False(t, f.gloasWeightTree.boostKnown)
+}
+
+func TestForkNodesGloasBoostArrivesAfterPreparation(t *testing.T) {
+	f, root := newForkNodesTestStore(t)
+	f.checkpointStates.Store(f.JustifiedCheckpoint(), &checkpointState{
+		beaconConfig: f.beaconCfg, validatorSetSize: 2,
+		balances: []uint64{32, 3168}, actives: []byte{3}, slasheds: []byte{0},
+		unslashedActiveBalance: 3200,
+	})
+	_, _, err := f.GetHeadNode()
+	require.NoError(t, err)
+
+	graph := f.forkGraph.(*forkNodesTestGraph)
+	childRoot := common.Hash{0xbb}
+	child := cltypes.NewSignedBeaconBlock(f.beaconCfg, clparams.GloasVersion)
+	child.Block.Slot = 13
+	child.Block.ParentRoot = root
+	graph.headers[childRoot] = child.SignedBeaconBlockHeader().Header
+	graph.blocks[childRoot] = child
+	f.updateChildren(11, root, childRoot)
+	f.time.Store(13 * f.beaconCfg.SecondsPerSlot)
+	f.proposerBoostRoot.Store(childRoot)
+
+	require.Equal(t, []ForkNode{{
+		Slot: 11, BlockRoot: root, Weight: 72, Validity: "valid",
+	}}, f.ForkNodes())
+}
+
+func TestForkNodesGloasRequiresCurrentCheckpointState(t *testing.T) {
+	for _, test := range []string{"unprepared", "missing state", "changed root", "changed epoch"} {
+		t.Run(test, func(t *testing.T) {
+			f, _ := newForkNodesTestStore(t)
+			if test != "unprepared" {
+				_, _, err := f.GetHeadNode()
+				require.NoError(t, err)
+			}
+			checkpoint := f.JustifiedCheckpoint()
+			switch test {
+			case "missing state":
+				f.gloasWeightTree.prepare(checkpoint, nil)
+			case "changed root":
+				checkpoint.Root = common.Hash{0xbb}
+				f.justifiedCheckpoint.Store(checkpoint)
+			case "changed epoch":
+				checkpoint.Epoch++
+				f.justifiedCheckpoint.Store(checkpoint)
+			}
+
+			require.Empty(t, f.ForkNodes())
+		})
+	}
+}
+
 func TestForkNodesGloasExcludesPreviousJustifiedSubtree(t *testing.T) {
 	f, root := newForkNodesTestStore(t)
 	graph := f.forkGraph.(*forkNodesTestGraph)

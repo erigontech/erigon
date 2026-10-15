@@ -415,20 +415,20 @@ func (t *gloasWeightTree) GetProposerScore() uint64 {
 }
 
 func (t *gloasWeightTree) ShouldApplyProposerBoost() bool {
-	if t.boostKnown {
-		return t.boost
-	}
-	proposerBoostRoot := t.f.ProposerBoostRoot()
-	if proposerBoostRoot == (common.Hash{}) {
+	if !t.boostKnown {
+		t.boost = t.proposerBoostApplies(t.f.ProposerBoostRoot())
 		t.boostKnown = true
-		t.boost = false
+	}
+	return t.boost
+}
+
+func (t *gloasWeightTree) proposerBoostApplies(proposerBoostRoot common.Hash) bool {
+	if proposerBoostRoot == (common.Hash{}) {
 		return false
 	}
-	t.boost = t.f.shouldApplyProposerBoostGloasWith(proposerBoostRoot, func(root common.Hash) bool {
+	return t.f.shouldApplyProposerBoostGloasWith(proposerBoostRoot, func(root common.Hash) bool {
 		return t.f.isHeadWeakWith(root, t.state, t.headWeight)
 	})
-	t.boostKnown = true
-	return t.boost
 }
 
 // headWeight serves the prepared tree's O(1) aggregate for roots reached by the
@@ -439,6 +439,37 @@ func (t *gloasWeightTree) headWeight(root common.Hash) uint64 {
 		return t.GetAttestationScore(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending})
 	}
 	return pendingAttestationScore(newWeightStoreFromCheckpointState(t.f, t.state))(root)
+}
+
+func (t *gloasWeightTree) snapshotWeights() map[common.Hash]uint64 {
+	if t.state == nil || t.checkpoint != t.f.JustifiedCheckpoint() {
+		return nil
+	}
+	weights := make(map[common.Hash]uint64, len(t.topologySeen))
+	for root := range t.nodes {
+		if _, prepared := t.topologySeen[root]; prepared {
+			weights[root] = t.GetAttestationScore(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending})
+		}
+	}
+	proposerBoostRoot := t.f.ProposerBoostRoot()
+	if !t.proposerBoostApplies(proposerBoostRoot) {
+		return weights
+	}
+	score := t.GetProposerScore()
+	for root := proposerBoostRoot; root != (common.Hash{}); {
+		if weight, ok := weights[root]; ok {
+			weights[root] = weight + score
+		}
+		if root == t.checkpoint.Root {
+			break
+		}
+		header, ok := t.f.forkGraph.GetHeader(root)
+		if !ok {
+			break
+		}
+		root = header.ParentRoot
+	}
+	return weights
 }
 
 func (t *gloasWeightTree) pruneFinalized(finalizedSlot uint64) {
