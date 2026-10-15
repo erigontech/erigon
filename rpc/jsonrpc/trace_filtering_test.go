@@ -130,12 +130,26 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 	parallelResults, err := api.doCallBlockParallel(ctx, tx, baseTxNum, txs, msgs, callParams, header, false, nil)
 	require.NoError(t, err)
 	require.Len(t, parallelResults, len(txs))
-	t.Run("worker_history_boundary", func(t *testing.T) {
-		api.kv = historyFloorDB{TemporalRoDB: m.DB, startTxNum: baseTxNum + 1}
-		defer func() { api.kv = m.DB }()
-		_, err := api.doCallBlockParallel(ctx, tx, baseTxNum, txs, msgs, callParams, header, false, nil)
-		require.ErrorIs(t, err, state.ErrPruned)
-	})
+	for _, tc := range []struct {
+		name       string
+		startTxNum uint64
+		pruned     bool
+	}{
+		{"worker_history_at_base", baseTxNum, false},
+		{"worker_history_after_base", baseTxNum + 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api.kv = historyFloorDB{TemporalRoDB: m.DB, startTxNum: tc.startTxNum}
+			defer func() { api.kv = m.DB }()
+			_, err := api.doCallBlockParallel(ctx, tx, baseTxNum, txs, msgs, callParams, header, false, nil)
+			if tc.pruned {
+				require.ErrorIs(t, err, state.ErrPruned)
+				require.Contains(t, err.Error(), fmt.Sprintf("requested block %d", blockNum))
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 
 	// Sequential path — uses the stateReader/ibs prepared above.
 	sequentialResults, _, err := api.doCallBlock(ctx, tx, stateReader, sc, cachedWriter, ibs, txs, msgs,

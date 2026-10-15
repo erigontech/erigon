@@ -73,7 +73,6 @@ type tx struct {
 	streams                []kv.Closer
 	viewID, id             uint64
 	historyFilesGeneration *uint64
-	historyStarts          map[kv.Domain]uint64
 	streamingRequested     bool
 }
 
@@ -216,10 +215,6 @@ func (s *txViewStream) Recv() (*remoteproto.Pair, error) {
 	pair, err := s.KV_TxClient.Recv()
 	// Legacy replies omit both fields; do not replace their initial view ID with zero.
 	if err == nil && pair.ViewId != 0 {
-		if s.tx.viewID != pair.ViewId || s.tx.historyFilesGeneration == nil || pair.HistoryFilesGeneration == nil ||
-			*s.tx.historyFilesGeneration != *pair.HistoryFilesGeneration {
-			clear(s.tx.historyStarts)
-		}
 		s.tx.viewID = pair.ViewId
 		s.tx.historyFilesGeneration = pair.HistoryFilesGeneration
 	}
@@ -888,26 +883,12 @@ func (c *remoteCursorDupSort) LastDup() ([]byte, error) {
 
 // Temporal Methods
 
-// HistoryStartFrom reuses successful reads only while the server identifies the
-// same pinned view. txViewStream clears them when MDBX or history files change.
+// HistoryStartFrom preserves remote lookup errors. Returning (0, nil) on failure
+// would remove the on-disk lower bound from history availability checks.
 func (tx *tx) HistoryStartFrom(name kv.Domain) (uint64, error) {
-	if err := tx.ctx.Err(); err != nil {
-		return 0, err
-	}
-	if tx.historyFilesGeneration != nil {
-		if start, ok := tx.historyStarts[name]; ok {
-			return start, nil
-		}
-	}
 	reply, err := tx.db.remoteKV.HistoryStartFrom(tx.ctx, &remoteproto.HistoryStartFromReq{TxId: tx.id, Domain: uint32(name)})
 	if err != nil {
 		return 0, err
-	}
-	if tx.historyFilesGeneration != nil {
-		if tx.historyStarts == nil {
-			tx.historyStarts = make(map[kv.Domain]uint64)
-		}
-		tx.historyStarts[name] = reply.StartFrom
 	}
 	return reply.StartFrom, nil
 }

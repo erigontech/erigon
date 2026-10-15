@@ -105,9 +105,6 @@ func (e *TraceWorker) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint
 
 func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, gasBailout bool) error {
 	e.stateReader.SetTxNum(txNum)
-	if err := e.stateReader.CheckHistory(); err != nil {
-		return err
-	}
 	e.ibs.Reset()
 	e.ibs.SetTxContext(e.blockNum, txIndex)
 

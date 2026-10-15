@@ -195,18 +195,6 @@ func StateHistoryStartTxNum(ttx kv.TemporalTx) (uint64, error) {
 	return start, nil
 }
 
-// CheckHistory checks the persisted-history boundary at the reader's current txNum.
-func (hr *HistoryReaderV3) CheckHistory() error {
-	start, err := StateHistoryStartTxNum(hr.ttx)
-	if err != nil {
-		return err
-	}
-	if hr.txNum < start {
-		return fmt.Errorf("%w: requested txNum %d, history is available from txNum %d", ErrPruned, hr.txNum, start)
-	}
-	return nil
-}
-
 func (hr *HistoryReaderV3) DiscardReadList() {}
 
 func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {

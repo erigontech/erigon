@@ -184,17 +184,21 @@ func CreateUncachedStateReaderFromBlockNumber(ctx context.Context, tx kv.Tempora
 	return CreateHistoryStateReader(ctx, tx, blockNumber+1, txnIndex, txNumsReader)
 }
 
-func CreateHistoryStateReader(ctx context.Context, tx kv.TemporalTx, blockNumber uint64, txnIndex int, txNumsReader rawdbv3.TxNumsReader) (*state.HistoryReaderV3, error) {
+func CreateHistoryStateReader(ctx context.Context, tx kv.TemporalTx, blockNumber uint64, txnIndex int, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
 	minTxNum, err := txNumsReader.Min(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
 	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
-	reader := state.NewHistoryReaderV3(tx, txNum)
-	if err := reader.CheckHistory(); err != nil {
-		return nil, fmt.Errorf("requested block %d: %w", blockNumber, err)
+	minHistoryTxNum, err := state.StateHistoryStartTxNum(tx)
+	if err != nil {
+		return nil, err
 	}
-	return reader, nil
+	if txNum < minHistoryTxNum {
+		firstAvailBlock, _, _ := txNumsReader.FindBlockNum(ctx, tx, minHistoryTxNum)
+		return nil, fmt.Errorf("%w: requested block %d, history is available from block %d", state.ErrPruned, blockNumber, firstAvailBlock)
+	}
+	return state.NewHistoryReaderV3(tx, txNum), nil
 }
 
 func NewLatestStateReader(getter execctxapi.StateGetter) state.StateReader {
@@ -223,13 +227,21 @@ func CreateHistoryCachedStateReader(ctx context.Context, cache kvcache.CacheView
 	if !ok {
 		return nil, fmt.Errorf("%T does not implement GetAsOf at: %s", cache, dbg.Stack())
 	}
-	reader, err := CreateHistoryStateReader(ctx, tx, blockNumber, txnIndex, txNumsReader)
+	minTxNum, err := txNumsReader.Min(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
+	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
+	minHistoryTxNum, err := state.StateHistoryStartTxNum(tx)
+	if err != nil {
+		return nil, err
+	}
+	if txNum < minHistoryTxNum {
+		return nil, fmt.Errorf("%w: block tx: %d, min tx: %d", state.ErrPruned, txNum, minHistoryTxNum)
+	}
 	return &cachedHistoryReaderV3{
 		cache:     asOfView,
-		reader:    reader,
+		reader:    state.NewHistoryReaderV3(tx, txNum),
 		composite: make([]byte, 0, len(common.Address{})+len(common.Hash{})),
 	}, nil
 }

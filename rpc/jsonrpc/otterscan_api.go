@@ -163,7 +163,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 	if txn == nil {
 		return nil, fmt.Errorf("transaction %#x not found", hash)
 	}
-	if err := api.checkHistoryRetention(tx, block.NumberU64()); err != nil {
+	if err := api.checkPruneTransactionHistoryAtIndex(ctx, tx, block.NumberU64(), txIndex); err != nil {
 		return nil, err
 	}
 

@@ -2,7 +2,6 @@ package temporal
 
 import (
 	"context"
-	"encoding/binary"
 	"sync"
 	"testing"
 
@@ -26,48 +25,6 @@ import (
 )
 
 var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
-
-func TestTemporalTx_ReusesHistoryStarts(t *testing.T) {
-	t.Parallel()
-	agg := state.NewTest(datadir.New(t.TempDir())).StepSize(16).MustOpen(t.Context())
-	db, err := New(mdbxtest.NewTestDB(t, dbcfg.ChainDB), agg, nil)
-	require.NoError(t, err)
-	t.Cleanup(db.Close)
-
-	require.NoError(t, db.UpdateTemporal(t.Context(), func(tx kv.TemporalRwTx) error {
-		start, err := tx.Debug().HistoryStartFrom(kv.StorageDomain)
-		require.NoError(t, err)
-		require.Zero(t, start)
-		require.NoError(t, tx.Put(kv.TblStorageHistoryKeys, binary.BigEndian.AppendUint64(nil, 10), []byte{1}))
-		start, err = tx.Debug().HistoryStartFrom(kv.StorageDomain)
-		require.NoError(t, err)
-		require.Equal(t, uint64(10), start, "write transactions must see their own history changes")
-		return tx.Put(kv.TblCodeHistoryKeys, binary.BigEndian.AppendUint64(nil, 20), []byte{1})
-	}))
-	tx, err := db.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	counted := &historyStartCountingTx{Tx: tx.(*Tx).Tx}
-	tx.(*Tx).Tx = counted
-	for range 2 {
-		for domain, want := range map[kv.Domain]uint64{kv.AccountsDomain: 0, kv.StorageDomain: 10, kv.CodeDomain: 20} {
-			start, err := tx.Debug().HistoryStartFrom(domain)
-			require.NoError(t, err)
-			require.Equal(t, want, start)
-		}
-	}
-	require.Equal(t, 3, counted.cursorOpens, "each domain needs only one MDBX lookup, including an empty domain")
-}
-
-type historyStartCountingTx struct {
-	kv.Tx
-	cursorOpens int
-}
-
-func (tx *historyStartCountingTx) Cursor(table string) (kv.Cursor, error) {
-	tx.cursorOpens++
-	return tx.Tx.Cursor(table)
-}
 
 func TestTemporalMemBatchPrefetchReuse(t *testing.T) {
 	mdbxDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
@@ -197,7 +154,10 @@ func TestTemporalTx_DomainVisibleEndConcurrent(t *testing.T) {
 	}
 }
 
-func TestTemporalTx_ForceReopenRefreshesDomainBounds(t *testing.T) {
+// A read-only temporal tx memoizes DomainVisibleEnd, while
+// ForceReopenUnderlyingFilesTx swaps in a fresh files view that can extend the
+// frontier — the memo must be re-derived after the swap.
+func TestTemporalTx_ForceReopenRefreshesDomainVisibleEnd(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
@@ -229,9 +189,6 @@ func TestTemporalTx_ForceReopenRefreshesDomainBounds(t *testing.T) {
 	end, ok := roTtx.Debug().DomainVisibleEnd(kv.StorageDomain)
 	require.True(t, ok)
 	require.Equal(t, uint64(2), end)
-	start, err := roTtx.Debug().HistoryStartFrom(kv.StorageDomain)
-	require.NoError(t, err)
-	require.Equal(t, uint64(1), start)
 
 	// Write past the RO tx's MVCC view and move the data into files, which are
 	// visible regardless of the DB read view.
@@ -256,17 +213,11 @@ func TestTemporalTx_ForceReopenRefreshesDomainBounds(t *testing.T) {
 	end, ok = roTtx.Debug().DomainVisibleEnd(kv.StorageDomain)
 	require.True(t, ok)
 	require.Equal(t, uint64(2), end, "the pinned files view cannot see the new files before reopen")
-	start, err = roTtx.Debug().HistoryStartFrom(kv.StorageDomain)
-	require.NoError(t, err)
-	require.Equal(t, uint64(1), start)
 
 	roTtx.(*Tx).ForceReopenUnderlyingFilesTx()
 	end, ok = roTtx.Debug().DomainVisibleEnd(kv.StorageDomain)
 	require.True(t, ok)
 	require.Equal(t, filesEnd, end, "the frontier must reflect the fresh files view after reopen")
-	start, err = roTtx.Debug().HistoryStartFrom(kv.StorageDomain)
-	require.NoError(t, err)
-	require.Zero(t, start, "the new history files start at txNum zero")
 }
 
 func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {

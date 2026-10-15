@@ -286,9 +286,7 @@ type tx struct {
 type Tx struct {
 	kv.Tx
 	tx
-	visibleEnds         domainVisibleEnds
-	historyStarts       [kv.DomainLen]uint64
-	historyStartsLoaded [kv.DomainLen]bool
+	visibleEnds domainVisibleEnds
 }
 
 type RwTx struct {
@@ -364,12 +362,11 @@ func (tx *tx) ForceReopenUnderlyingFilesTx() {
 	tx.aggtx = tx.Agg().BeginFilesRo()
 }
 
-// ForceReopenUnderlyingFilesTx can change both domain bounds without changing
-// the MDBX view, so both caches must be cleared.
+// ForceReopenUnderlyingFilesTx swaps in a fresh files view, which can extend
+// the visible frontier — drop the memoized ends so they are re-derived.
 func (tx *Tx) ForceReopenUnderlyingFilesTx() {
 	tx.tx.ForceReopenUnderlyingFilesTx()
 	tx.visibleEnds.reset()
-	clear(tx.historyStartsLoaded[:])
 }
 
 func (tx *tx) FreezeInfo() kv.FreezeInfo {
@@ -846,13 +843,8 @@ func (tx *tx) historyStartFrom(name kv.Domain, roTx kv.Tx) uint64 {
 	return tx.aggtx.HistoryStartFrom(name, roTx)
 }
 
-// Only read-only transactions cache history starts; writes can move the boundary.
 func (tx *Tx) HistoryStartFrom(name kv.Domain) (uint64, error) {
-	if !tx.historyStartsLoaded[name] {
-		tx.historyStarts[name] = tx.historyStartFrom(name, tx.Tx)
-		tx.historyStartsLoaded[name] = true
-	}
-	return tx.historyStarts[name], nil
+	return tx.historyStartFrom(name, tx.Tx), nil
 }
 
 // HistoryFilesGeneration identifies pinned files, not the live aggregator view.

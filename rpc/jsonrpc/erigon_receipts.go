@@ -337,7 +337,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		}
 
 		if rangeErr != nil && logOptions.LogCount != 0 {
-			if err := api.checkHistoryRetention(tx, blockNum); err != nil {
+			if err := api.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNum, uint64(txIndex)); err != nil {
 				return nil, err
 			}
 		}

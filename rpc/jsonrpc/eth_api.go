@@ -503,12 +503,6 @@ const defaultUnsettledPreMergeTTL = time.Second
 // sequence, which a stored TxCount includes.
 const systemTxsPerBlock = 2
 
-// checkHistoryRetention enforces only the configured window; checked state
-// readers enforce the on-disk boundary at their actual transaction position.
-func (api *BaseAPI) checkHistoryRetention(tx kv.Tx, block uint64) error {
-	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available", nil)
-}
-
 // checkPruneHistory requires history from the block's first system transaction.
 func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint64) error {
 	return api.checkHistoryFloor(ctx, tx, block, func(f historyPruneFloors) uint64 { return f.wholeBlock })
@@ -517,6 +511,11 @@ func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint6
 // checkPruneState requires the state after the block, read at Min(block+1).
 func (api *BaseAPI) checkPruneState(ctx context.Context, tx kv.Tx, block uint64) error {
 	return api.checkHistoryFloor(ctx, tx, block, func(f historyPruneFloors) uint64 { return f.postState })
+}
+
+// checkPruneStateAfterSystemTx matches state readers opened at Min(block+1)+1.
+func (api *BaseAPI) checkPruneStateAfterSystemTx(ctx context.Context, tx kv.Tx, block uint64) error {
+	return api.checkHistoryFloor(ctx, tx, block, func(f historyPruneFloors) uint64 { return f.stateAfterSystemTx })
 }
 
 func (api *BaseAPI) checkHistoryFloor(ctx context.Context, tx kv.Tx, block uint64, pick func(historyPruneFloors) uint64) error {
@@ -626,10 +625,11 @@ func (api *BaseAPI) blocksAvailableFrom(ctx context.Context, tx kv.Tx, head uint
 }
 
 type historyPruneFloors struct {
-	startTxNum uint64
-	postState  uint64
-	wholeBlock uint64
-	replay     uint64
+	startTxNum         uint64
+	postState          uint64
+	stateAfterSystemTx uint64
+	wholeBlock         uint64
+	replay             uint64
 }
 
 var errHistoryViewChanged = errors.New("history view changed during availability lookup")
@@ -714,10 +714,11 @@ func (api *BaseAPI) historyStartBlocksFromTxNum(ctx context.Context, tx kv.Tx, h
 	if !ok {
 		// No historical block can be proven available; the current state remains readable.
 		return historyPruneFloors{
-			startTxNum: startTxNum,
-			postState:  head,
-			wholeBlock: head,
-			replay:     head,
+			startTxNum:         startTxNum,
+			postState:          head,
+			stateAfterSystemTx: head,
+			wholeBlock:         head,
+			replay:             head,
 		}, nil
 	}
 	blockStartTxNum, err := api._txNumReader.Min(ctx, tx, containingBlock)
@@ -727,10 +728,11 @@ func (api *BaseAPI) historyStartBlocksFromTxNum(ctx context.Context, tx kv.Tx, h
 	// State queries read at the next block's start, while whole-block history
 	// reads need this block's start. Transaction replay skips the initial system tx.
 	floors := historyPruneFloors{
-		startTxNum: startTxNum,
-		postState:  containingBlock,
-		wholeBlock: containingBlock,
-		replay:     containingBlock,
+		startTxNum:         startTxNum,
+		postState:          containingBlock,
+		stateAfterSystemTx: containingBlock,
+		wholeBlock:         containingBlock,
+		replay:             containingBlock,
 	}
 	if startTxNum > blockStartTxNum {
 		floors.wholeBlock = min(containingBlock+1, head)
@@ -739,6 +741,8 @@ func (api *BaseAPI) historyStartBlocksFromTxNum(ctx context.Context, tx kv.Tx, h
 	}
 	if startTxNum > blockStartTxNum+1 {
 		floors.replay = min(containingBlock+1, head)
+	} else if containingBlock > 0 {
+		floors.stateAfterSystemTx = containingBlock - 1
 	}
 	return floors, nil
 }
@@ -1018,9 +1022,6 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 		return nil
 	}
 	amount := field(p)
-	if onDiskFloor == nil && !amount.Enabled() {
-		return nil
-	}
 	latest, err := rpchelper.GetLatestBlockNumber(tx)
 	if err != nil {
 		return err
