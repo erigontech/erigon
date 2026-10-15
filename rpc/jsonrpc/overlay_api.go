@@ -115,6 +115,9 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	if err != nil {
 		return nil, err
 	}
+	if creationData == nil {
+		return nil, fmt.Errorf("no contract at %x", address)
+	}
 
 	blockNum, _, ok, err := api.txnLookup(ctx, tx, creationData.Tx)
 	if err != nil {

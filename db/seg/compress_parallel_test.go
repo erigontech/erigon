@@ -131,14 +131,9 @@ func TestCompressParallelBatchingBackpressureNoDeadlock(t *testing.T) {
 		corpus = append(corpus, testWord{data: fmt.Appendf(nil, "u-%08d", i), compressed: false})
 	}
 
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		assertSameOutputEveryWorkerCount(t, corpus, 2163753720, 1, 4)
-	}()
-	select {
-	case <-done:
-	case <-time.After(120 * time.Second):
-		t.Fatal("deadlock: parallel cover phase did not finish in 120s")
-	}
+	watchdog := time.AfterFunc(120*time.Second, func() {
+		panic("deadlock: parallel cover phase did not finish in 120s")
+	})
+	defer watchdog.Stop()
+	assertSameOutputEveryWorkerCount(t, corpus, 2163753720, 1, 4)
 }
