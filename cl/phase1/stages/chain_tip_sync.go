@@ -1371,8 +1371,9 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 	runGloasPayloadRetryPhases(ctx, gloasPayloadRetryBudget, offset, retryPhases...)
 
 	if canValidatePayloads {
-		if cfg.executionClient.SupportInsertion() {
-			if err := cfg.blockCollector.Flush(ctx); err != nil {
+		// A flush on a cancelled context panics in the embedded EL's first call.
+		if cfg.executionClient.SupportInsertion() && ctx.Err() == nil {
+			if err := cfg.blockCollector.Flush(ctx); err != nil && !errors.Is(err, context.Canceled) {
 				log.Warn("[chainTipSync] blockCollector.Flush failed (EL may still be catching up)", "err", err)
 			}
 		}
