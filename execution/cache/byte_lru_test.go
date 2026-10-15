@@ -155,6 +155,10 @@ func TestByteLRUBudgetedConcurrentSameKeyAccounting(t *testing.T) {
 // before the write, so maintenance evicting the newcomer cannot hide the
 // pressure that called for it.
 func TestByteLRUGrowsOnPositiveNetChange(t *testing.T) {
+	prev := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prev })
+	cachebudget.Global = cachebudget.New(1 << 40)
+
 	val := make([]byte, 256*1024)
 	b := newByteLRU(64*datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
 	defer b.Close()
