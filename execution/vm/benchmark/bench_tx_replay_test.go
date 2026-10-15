@@ -112,10 +112,10 @@ func newTxReplay(tb testing.TB, path string) *txReplay {
 	}
 }
 
-// run executes the tx once on a fresh state, as DoCall sets one up.
+// run executes the tx once on a pooled state, as DoCall sets one up.
 func (r *txReplay) run(tb testing.TB, noMaterialize bool) *evmtypes.ExecutionResult {
-	ibs := state.New(r.reader)
-	defer ibs.Close()
+	ibs := state.NewPooled(r.reader)
+	defer state.ReleasePooled(ibs)
 	if noMaterialize {
 		ibs.SetVersionMap(state.NewVersionMap(nil))
 		ibs.SetNoMaterialize(true)
