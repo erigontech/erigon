@@ -851,6 +851,18 @@ func (tx *RwTx) HistoryStartFrom(name kv.Domain) uint64 {
 	return tx.historyStartFrom(name, tx.RwTx)
 }
 
+func (tx *tx) historyCoverageStart(name kv.Domain, roTx kv.Tx) uint64 {
+	return tx.aggtx.HistoryCoverageStart(name, roTx)
+}
+
+func (tx *Tx) HistoryCoverageStart(name kv.Domain) uint64 {
+	return tx.historyCoverageStart(name, tx.Tx)
+}
+
+func (tx *RwTx) HistoryCoverageStart(name kv.Domain) uint64 {
+	return tx.historyCoverageStart(name, tx.RwTx)
+}
+
 func (tx *tx) historyRecordedInDB(name kv.Domain, roTx kv.Tx, fromTxNum, toTxNum uint64) (bool, error) {
 	return tx.aggtx.HistoryRecordedInDB(name, fromTxNum, toTxNum, roTx)
 }

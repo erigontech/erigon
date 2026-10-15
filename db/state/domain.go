@@ -1625,12 +1625,22 @@ func (dt *DomainRoTx) GetLatestValSize(key []byte, roTx kv.Tx) (size int, found 
 	return dt.getLatestFromFilesValSize(key, 0)
 }
 
-// HistoryStartFrom returns the first txNum the domain's history covers. With
-// history files that is the first file's start. Without them the DB holds every
-// change made after the domain's frozen files, since pruning never reaches past
-// them; only a history without snapshots is pruned on its own and reports its
-// first remaining record.
+// Returns the first txNum from available history
 func (dt *DomainRoTx) HistoryStartFrom(tx kv.Tx) uint64 {
+	if len(dt.ht.files) == 0 { // if no history files, check in MDBX
+		firstTxNumInMdbx := dt.ht.h.minTxNumInDB(tx)
+		return firstTxNumInMdbx
+	}
+	return dt.ht.files[0].startTxNum
+}
+
+// HistoryCoverageStart returns the first txNum the domain's history covers, as
+// opposed to the first txNum it happens to hold a record for. With history
+// files that is the first file's start. Without them the DB holds every change
+// made after the domain's frozen files, since pruning never reaches past them;
+// only a history without snapshots is pruned on its own and reports its first
+// remaining record.
+func (dt *DomainRoTx) HistoryCoverageStart(tx kv.Tx) uint64 {
 	if len(dt.ht.files) > 0 {
 		return dt.ht.files[0].startTxNum
 	}

@@ -523,14 +523,14 @@ func TestReplayResumedPrefixHonoursCancellation(t *testing.T) {
 
 type prefixHistoryDebugTx struct {
 	kv.TemporalDebugTx
-	historyStart uint64
-	filesEnd     uint64
-	recorded     bool
-	lookupErr    error
+	coverageStart uint64
+	filesEnd      uint64
+	recorded      bool
+	lookupErr     error
 }
 
-func (d prefixHistoryDebugTx) HistoryStartFrom(kv.Domain) uint64 { return d.historyStart }
-func (d prefixHistoryDebugTx) TxNumsInFiles(...kv.Domain) uint64 { return d.filesEnd }
+func (d prefixHistoryDebugTx) HistoryCoverageStart(kv.Domain) uint64 { return d.coverageStart }
+func (d prefixHistoryDebugTx) TxNumsInFiles(...kv.Domain) uint64     { return d.filesEnd }
 func (d prefixHistoryDebugTx) HistoryRecordedInDB(kv.Domain, uint64, uint64) (bool, error) {
 	return d.recorded, d.lookupErr
 }
@@ -544,8 +544,8 @@ func TestRequirePrefixHistory(t *testing.T) {
 		dbg  prefixHistoryDebugTx
 		ok   bool
 	}{
-		{"history starts after the prefix", prefixHistoryDebugTx{historyStart: 10, filesEnd: 20, recorded: true}, false},
-		{"history files cover the prefix", prefixHistoryDebugTx{historyStart: 0, filesEnd: 20, recorded: false}, true},
+		{"history starts after the prefix", prefixHistoryDebugTx{coverageStart: 10, filesEnd: 20, recorded: true}, false},
+		{"history files cover the prefix", prefixHistoryDebugTx{coverageStart: 0, filesEnd: 20, recorded: false}, true},
 		{"database history holds a record", prefixHistoryDebugTx{recorded: true}, true},
 		{"database history holds no record", prefixHistoryDebugTx{recorded: false}, false},
 		{"database history lookup fails", prefixHistoryDebugTx{lookupErr: errors.New("history read failed")}, false},

@@ -616,8 +616,8 @@ func (te *txExecutor) replayResumedPrefix(ctx context.Context, applyTx kv.Tempor
 func requirePrefixHistory(dbg kv.TemporalDebugTx, fromTxNum, toTxNum uint64) error {
 	domains := []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
 	for _, domain := range domains {
-		if start := dbg.HistoryStartFrom(domain); fromTxNum < start {
-			return fmt.Errorf("%s history starts at txNum %d, the resumed prefix at %d", domain, start, fromTxNum)
+		if start := dbg.HistoryCoverageStart(domain); fromTxNum < start {
+			return fmt.Errorf("%s history covers txNums from %d, the resumed prefix starts at %d", domain, start, fromTxNum)
 		}
 	}
 	if fromTxNum < dbg.TxNumsInFiles(domains...) {

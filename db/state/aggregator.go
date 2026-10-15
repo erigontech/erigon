@@ -2371,9 +2371,14 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 	return fin, started
 }
 
-// HistoryStartFrom returns the first txNum the history of a given domain covers
+// Returns the first known txNum found in history files of a given domain
 func (at *AggregatorRoTx) HistoryStartFrom(name kv.Domain, tx kv.Tx) uint64 {
 	return at.d[name].HistoryStartFrom(tx)
+}
+
+// HistoryCoverageStart returns the first txNum the history of a given domain covers
+func (at *AggregatorRoTx) HistoryCoverageStart(name kv.Domain, tx kv.Tx) uint64 {
+	return at.d[name].HistoryCoverageStart(tx)
 }
 
 // HistoryRecordedInDB reports whether the DB holds history records of a given

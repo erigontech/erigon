@@ -3899,11 +3899,11 @@ func TestDomainDisabledDiscardsWrites(t *testing.T) {
 	}
 }
 
-// TestDomain_HistoryStartFromIsCoverage pins that HistoryStartFrom reports where
+// TestDomain_HistoryCoverageStart pins that HistoryCoverageStart reports where
 // history coverage begins rather than where the first change happens to be
 // recorded: sparse history held only in the DB covers from txNum 0, while frozen
 // domain files without history files leave the DB covering only what follows them.
-func TestDomain_HistoryStartFromIsCoverage(t *testing.T) {
+func TestDomain_HistoryCoverageStart(t *testing.T) {
 	t.Parallel()
 	logger := log.New()
 
@@ -3923,7 +3923,7 @@ func TestDomain_HistoryStartFromIsCoverage(t *testing.T) {
 
 		dc = d.beginForTests()
 		defer dc.Close()
-		require.Zero(t, dc.HistoryStartFrom(tx))
+		require.Zero(t, dc.HistoryCoverageStart(tx))
 	})
 
 	t.Run("domain files without history files", func(t *testing.T) {
@@ -3942,6 +3942,6 @@ func TestDomain_HistoryStartFromIsCoverage(t *testing.T) {
 		defer dc.Close()
 		dc.ht.files = nil
 		require.NotZero(t, dc.files.EndTxNum())
-		require.Equal(t, dc.files.EndTxNum(), dc.HistoryStartFrom(tx))
+		require.Equal(t, dc.files.EndTxNum(), dc.HistoryCoverageStart(tx))
 	})
 }
