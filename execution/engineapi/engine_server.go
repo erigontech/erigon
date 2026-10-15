@@ -278,8 +278,8 @@ func (e *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 
 // EngineNewPayload validates and possibly executes payload
 func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
-	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, version clparams.StateVersion,
-) (*engine_types.PayloadStatus, error) {
+	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, inclusionList []hexutil.Bytes, version clparams.StateVersion,
+) (any, error) {
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
 	if !e.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
@@ -301,7 +301,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	var err error
 	txs := make([][]byte, len(req.Transactions))
 	transactions := make([]types.Transaction, len(req.Transactions))
-	var invalidTransactionStatus *engine_types.PayloadStatus
+	var invalidTransactionStatus *engine_types.PayloadStatusV2
 	for i, transaction := range req.Transactions {
 		txs[i] = transaction
 		if invalidTransactionStatus != nil {
@@ -309,7 +309,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 		if types.TypedTransactionMarshalledAsRlpString(transaction) {
 			e.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(transaction))
-			invalidTransactionStatus = &engine_types.PayloadStatus{
+			invalidTransactionStatus = &engine_types.PayloadStatusV2{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedErrorFromString("typed txn marshalled as RLP string"),
 			}
@@ -318,14 +318,14 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		transactions[i], err = types.UnmarshalTransactionFromBinary(transaction, false /* blobTxnsAreWrappedWithBlobs */)
 		if err != nil {
 			e.logger.Warn("[NewPayload] failed to decode transactions", "err", err)
-			invalidTransactionStatus = &engine_types.PayloadStatus{
+			invalidTransactionStatus = &engine_types.PayloadStatusV2{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedError(err),
 			}
 			continue
 		}
 		if transactions[i].GetGasLimit() > uint64(req.GasLimit) {
-			invalidTransactionStatus = &engine_types.PayloadStatus{
+			invalidTransactionStatus = &engine_types.PayloadStatusV2{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedError(protocol.ErrGasLimitReached),
 			}
@@ -422,10 +422,10 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		blockAccessList, err = types.DecodeBlockAccessListSidecarOwned(balBytes)
 		if err != nil {
 			e.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(balBytes))
-			return &engine_types.PayloadStatus{
+			return payloadStatusForVersion(&engine_types.PayloadStatusV2{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("%v: decode failed: %v", types.ErrInvalidBlockAccessList, err)),
-			}, nil
+			}, version), nil
 		}
 		hash, err := blockAccessList.Hash()
 		if err != nil {
@@ -439,13 +439,30 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			return nil, &rpc.InvalidParamsError{Message: "slotNumber missing"}
 		}
 	}
+	var il types.Transactions
+	if version >= clparams.HezeVersion {
+		if inclusionList == nil {
+			return nil, &rpc.InvalidParamsError{Message: "inclusion list missing"}
+		}
+
+		txns := make([][]byte, len(inclusionList))
+		for i, tx := range inclusionList {
+			txns[i] = tx
+		}
+		il, err = types.DecodeTransactions(txns)
+		if err != nil {
+			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("cannot decode inclusion list: %v", err)}
+		}
+	}
 
 	if (!e.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
 		(e.config.IsCancun(header.Time) && version < clparams.DenebVersion) ||
 		(!e.config.IsPrague(header.Time) && version >= clparams.ElectraVersion) ||
 		(e.config.IsPrague(header.Time) && version < clparams.ElectraVersion) || // osaka has no new newPayload method
 		(!e.config.IsAmsterdam(header.Time) && version >= clparams.GloasVersion) ||
-		(e.config.IsAmsterdam(header.Time) && version < clparams.GloasVersion) {
+		(e.config.IsAmsterdam(header.Time) && version < clparams.GloasVersion) ||
+		(!e.config.IsBogota(header.Time) && version >= clparams.HezeVersion) ||
+		(e.config.IsBogota(header.Time) && version < clparams.HezeVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
@@ -458,20 +475,20 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			"parentBeaconBlockRoot", parentBeaconBlockRoot,
 			"requests", executionRequests,
 		)
-		return &engine_types.PayloadStatus{
+		return payloadStatusForVersion(&engine_types.PayloadStatusV2{
 			Status:          engine_types.InvalidStatus,
 			ValidationError: engine_types.NewStringifiedErrorFromString("invalid block hash"),
-		}, nil
+		}, version), nil
 	}
 	if invalidTransactionStatus != nil {
-		return invalidTransactionStatus, nil
+		return payloadStatusForVersion(invalidTransactionStatus, version), nil
 	}
 	if blockAccessList != nil {
 		if err = blockAccessList.ValidateForBlock(header.GasLimit); err != nil {
-			return &engine_types.PayloadStatus{
+			return payloadStatusForVersion(&engine_types.PayloadStatusV2{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedError(err),
-			}, nil
+			}, version), nil
 		}
 	}
 
@@ -485,17 +502,17 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			if !bad {
 				latestValidHash = req.ParentHash
 			}
-			return &engine_types.PayloadStatus{
+			return payloadStatusForVersion(&engine_types.PayloadStatusV2{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedErrorFromString(err.Error()),
 				LatestValidHash: &latestValidHash,
-			}, nil
+			}, version), nil
 		}
 		if errors.Is(err, misc.ErrMismatchBlobHashes) || errors.Is(err, misc.ErrInvalidVersionedHash) {
-			return &engine_types.PayloadStatus{
+			return payloadStatusForVersion(&engine_types.PayloadStatusV2{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedErrorFromString(err.Error()),
-			}, nil
+			}, version), nil
 		}
 	}
 
@@ -505,7 +522,17 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 	if possibleStatus != nil {
 		e.logger.Debug("[NewPayload] got quick payload status", "payloadStatus", possibleStatus)
-		return possibleStatus, nil
+		status := &engine_types.PayloadStatusV2{
+			Status:          possibleStatus.Status,
+			ValidationError: possibleStatus.ValidationError,
+			LatestValidHash: possibleStatus.LatestValidHash,
+			CriticalError:   possibleStatus.CriticalError,
+		}
+		if status.Status == engine_types.ValidStatus {
+			ilSatisfied := true
+			status.InclusionListSatisfied = &ilSatisfied
+		}
+		return payloadStatusForVersion(status, version), nil
 	}
 
 	e.lock.Lock()
@@ -518,13 +545,14 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// via rlp.EncodeToBytes. Both slices reference the same underlying
 	// byte buffers from req.Transactions.
 	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessList)
+	block = block.WithInclusionList(il)
 	payloadStatus, err := e.HandleNewPayload(ctx, "NewPayload", block)
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
-			return &engine_types.PayloadStatus{
+			return payloadStatusForVersion(&engine_types.PayloadStatusV2{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedError(err),
-			}, nil
+			}, version), nil
 		}
 		return nil, err
 	}
@@ -534,7 +562,19 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return nil, payloadStatus.CriticalError
 	}
 
-	return payloadStatus, nil
+	return payloadStatusForVersion(payloadStatus, version), nil
+}
+
+func payloadStatusForVersion(status *engine_types.PayloadStatusV2, version clparams.StateVersion) any {
+	if version >= clparams.HezeVersion {
+		return status
+	}
+	return &engine_types.PayloadStatus{
+		Status:          status.Status,
+		ValidationError: status.ValidationError,
+		LatestValidHash: status.LatestValidHash,
+		CriticalError:   status.CriticalError,
+	}
 }
 
 // defaultReadinessWait is how long a request waits for a busy execution module before answering
@@ -997,7 +1037,7 @@ func (e *EngineServer) HandleNewPayload(
 	ctx context.Context,
 	logPrefix string,
 	block *types.Block,
-) (*engine_types.PayloadStatus, error) {
+) (*engine_types.PayloadStatusV2, error) {
 	e.engineLogSpamer.RecordRequest()
 
 	header := block.Header()
@@ -1020,11 +1060,11 @@ func (e *EngineServer) HandleNewPayload(
 	if parent == nil {
 		e.logger.Debug(fmt.Sprintf("[%s] New payload: need to download parent", logPrefix), "height", headerNumber, "hash", headerHash, "parentHash", header.ParentHash)
 		if e.test {
-			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+			return &engine_types.PayloadStatusV2{Status: engine_types.SyncingStatus}, nil
 		}
 
 		if !e.blockDownloader.StartDownloading(header.ParentHash, block, engine_block_downloader.NewPayloadTrigger) {
-			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+			return &engine_types.PayloadStatusV2{Status: engine_types.SyncingStatus}, nil
 		}
 
 		if currentHeadNumber != nil {
@@ -1039,38 +1079,37 @@ func (e *EngineServer) HandleNewPayload(
 				// no point in waiting if the downloader is no longer syncing (e.g. it's dropped the download request)
 				return status == engine_block_downloader.Syncing, nil
 			}); respondSyncing {
-				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+				return &engine_types.PayloadStatusV2{Status: engine_types.SyncingStatus}, nil
 			}
-			status, _, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
+			status, _, latestValidHash, ilSatisfied, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
 			if err != nil {
 				missingBlkHash, isMissingChainErr := execmodule.GetBlockHashFromMissingSegmentError(err)
 				if isMissingChainErr {
 					e.logger.Debug(fmt.Sprintf("[%s] New payload: need to download missing segment", logPrefix), "height", headerNumber, "hash", headerHash, "missingBlkHash", missingBlkHash)
 					if e.test {
-						return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+						return &engine_types.PayloadStatusV2{Status: engine_types.SyncingStatus}, nil
 					}
 					if e.blockDownloader.StartDownloading(missingBlkHash, block, engine_block_downloader.SegmentRecoveryTrigger) {
 						e.logger.Warn(fmt.Sprintf("[%s] New payload: need to recover missing segment", logPrefix), "height", headerNumber, "hash", headerHash, "missingBlkHash", missingBlkHash)
 					}
-					return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+					return &engine_types.PayloadStatusV2{Status: engine_types.SyncingStatus}, nil
 				}
 				return nil, err
 			}
-
 			if status == execmodule.ExecutionStatusBusy || status == execmodule.ExecutionStatusTooFarAway {
 				e.logger.Debug(fmt.Sprintf("[%s] New payload: Client is still syncing", logPrefix))
-				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+				return &engine_types.PayloadStatusV2{Status: engine_types.SyncingStatus}, nil
 			} else {
-				return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &latestValidHash}, nil
+				return &engine_types.PayloadStatusV2{Status: engine_types.ValidStatus, LatestValidHash: &latestValidHash, InclusionListSatisfied: inclusionListSatisfiedOrTrue(ilSatisfied)}, nil
 			}
 		} else {
-			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+			return &engine_types.PayloadStatusV2{Status: engine_types.SyncingStatus}, nil
 		}
 	}
 
 	if err := e.chainRW.InsertBlocks(ctx, []*types.Block{block}); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) || errors.Is(err, types.ErrInvalidBlockAccessList) {
-			return &engine_types.PayloadStatus{
+			return &engine_types.PayloadStatusV2{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedError(err),
 			}, nil
@@ -1079,23 +1118,23 @@ func (e *EngineServer) HandleNewPayload(
 	}
 
 	if math.AbsoluteDifference(*currentHeadNumber, headerNumber) >= e.maxReorgDepth {
-		return &engine_types.PayloadStatus{Status: engine_types.AcceptedStatus}, nil
+		return &engine_types.PayloadStatusV2{Status: engine_types.AcceptedStatus}, nil
 	}
 
 	e.logger.Debug(fmt.Sprintf("[%s] New payload begin verification", logPrefix))
-	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
+	status, validationErr, latestValidHash, ilSatisfied, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
 	e.logger.Debug(fmt.Sprintf("[%s] New payload verification ended", logPrefix), "status", status.String(), "err", err)
 	if err != nil {
 		missingBlkHash, isMissingChainErr := execmodule.GetBlockHashFromMissingSegmentError(err)
 		if isMissingChainErr {
 			e.logger.Debug(fmt.Sprintf("[%s] New payload: need to download missing segment", logPrefix), "height", headerNumber, "hash", headerHash, "missingBlkHash", missingBlkHash)
 			if e.test {
-				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+				return &engine_types.PayloadStatusV2{Status: engine_types.SyncingStatus}, nil
 			}
 			if e.blockDownloader.StartDownloading(missingBlkHash, block, engine_block_downloader.SegmentRecoveryTrigger) {
 				e.logger.Warn(fmt.Sprintf("[%s] New payload: need to recover missing segment", logPrefix), "height", headerNumber, "hash", headerHash, "missingBlkHash", missingBlkHash)
 			}
-			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+			return &engine_types.PayloadStatusV2{Status: engine_types.SyncingStatus}, nil
 		}
 		return nil, err
 	}
@@ -1104,15 +1143,28 @@ func (e *EngineServer) HandleNewPayload(
 		e.blockDownloader.ReportBadHeader(block.Hash(), latestValidHash, common.Deref(validationErr))
 	}
 
-	resp := &engine_types.PayloadStatus{
+	resp := &engine_types.PayloadStatusV2{
 		Status:          convertGrpcStatusToEngineStatus(status),
 		LatestValidHash: &latestValidHash,
+	}
+	if resp.Status == engine_types.ValidStatus {
+		resp.InclusionListSatisfied = inclusionListSatisfiedOrTrue(ilSatisfied)
 	}
 	if validationErr != nil {
 		resp.ValidationError = engine_types.NewStringifiedErrorFromString(*validationErr)
 	}
 
 	return resp, nil
+}
+
+// inclusionListSatisfiedOrTrue reports a VALID payload as satisfying its inclusion
+// list when validation skipped the check, e.g. because the block was already validated.
+func inclusionListSatisfiedOrTrue(ilSatisfied *bool) *bool {
+	if ilSatisfied != nil {
+		return ilSatisfied
+	}
+	satisfied := true
+	return &satisfied
 }
 
 func convertGrpcStatusToEngineStatus(status execmodule.ExecutionStatus) engine_types.EngineStatus {
