@@ -30,6 +30,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
@@ -75,6 +76,7 @@ func walkRecords(data []byte, fn func(blockNum uint64, hash common.Hash, recOff,
 // Writer appends BAL records for strictly increasing block numbers and keeps
 // the offset index in step with the log.
 type Writer struct {
+	mu             sync.Mutex
 	log, idx       *os.File
 	logBuf, idxBuf *bufio.Writer
 	logEnd         int64
@@ -239,6 +241,8 @@ func (w *Writer) appendIndex(blockNum uint64, recOff int64) error {
 // a blockNum at or below the last appended one is already stored (the resume
 // overlap after an interrupted run) and is skipped.
 func (w *Writer) Append(blockNum uint64, hash common.Hash, bal []byte) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if w.haveFirst && blockNum < w.next {
 		return nil
 	}
@@ -265,7 +269,37 @@ func (w *Writer) Append(blockNum uint64, hash common.Hash, bal []byte) error {
 	return w.idxBuf.Flush()
 }
 
+// Get reads the record of blockNum from the files with the same hash guard as
+// Reader.Get; it sees every record appended so far.
+func (w *Writer) Get(blockNum uint64, hash common.Hash) ([]byte, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.haveFirst || blockNum < w.first || blockNum >= w.next {
+		return nil, false
+	}
+	var b [8]byte
+	if _, err := w.idx.ReadAt(b[:], int64(indexHeaderSize)+int64(blockNum-w.first)*8); err != nil {
+		return nil, false
+	}
+	off := int64(binary.LittleEndian.Uint64(b[:]))
+	var rec [recPrefix]byte
+	if off == 0 {
+		return nil, false
+	}
+	if _, err := w.log.ReadAt(rec[:], off); err != nil ||
+		binary.LittleEndian.Uint64(rec[:8]) != blockNum || common.Hash(rec[8:8+length.Hash]) != hash {
+		return nil, false
+	}
+	payload := make([]byte, binary.LittleEndian.Uint32(rec[8+length.Hash:]))
+	if _, err := w.log.ReadAt(payload, off+recPrefix); err != nil {
+		return nil, false
+	}
+	return payload, true
+}
+
 func (w *Writer) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	return errors.Join(w.logBuf.Flush(), w.idxBuf.Flush(), w.log.Close(), w.idx.Close())
 }
 
@@ -354,33 +388,50 @@ func (r *Reader) Close() error {
 	return r.data.Unmap()
 }
 
-// Store is the offline-BAL store opened for one mode: a Writer to generate, a
-// Reader to use, or neither.
+// Store is the offline-BAL store: a Writer to generate, a Reader to use, both
+// on one directory, or neither.
 type Store struct {
 	Writer *Writer
 	Reader *Reader
 }
 
-func Open(generate, use bool, dir string) (Store, error) {
-	switch {
-	case generate && use:
-		return Store{}, errors.New("offline BALs: generate and use are mutually exclusive")
-	case generate:
-		w, err := NewWriter(dir)
-		return Store{Writer: w}, err
-	case use:
-		r, err := OpenReader(dir)
-		return Store{Reader: r}, err
+// Open opens the writer before the reader so the reader maps a log whose torn
+// tail is already cut.
+func Open(generate, use bool, dir string) (s Store, err error) {
+	if generate {
+		if s.Writer, err = NewWriter(dir); err != nil {
+			return Store{}, err
+		}
 	}
-	return Store{}, nil
+	if use {
+		if s.Reader, err = OpenReader(dir); err != nil {
+			return Store{}, errors.Join(err, s.Close())
+		}
+	}
+	return s, nil
 }
 
 func (s Store) Close() error {
+	var err error
 	if s.Writer != nil {
-		return s.Writer.Close()
+		err = s.Writer.Close()
 	}
 	if s.Reader != nil {
-		return s.Reader.Close()
+		err = errors.Join(err, s.Reader.Close())
 	}
-	return nil
+	return err
+}
+
+// Get serves blockNum from the reader's mapping, then from the records the
+// writer appended after the reader was opened.
+func (s Store) Get(blockNum uint64, hash common.Hash) ([]byte, bool) {
+	if s.Reader != nil {
+		if data, ok := s.Reader.Get(blockNum, hash); ok {
+			return data, true
+		}
+	}
+	if s.Writer != nil && s.Reader != nil {
+		return s.Writer.Get(blockNum, hash)
+	}
+	return nil, false
 }
