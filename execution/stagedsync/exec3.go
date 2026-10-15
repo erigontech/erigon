@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -625,12 +624,10 @@ func requirePrefixHistory(dbg kv.TemporalDebugTx, fromTxNum, toTxNum uint64) err
 		return nil
 	}
 	for _, domain := range domains {
-		it, err := dbg.HistoryKeyTxNumRange(domain, int(fromTxNum), int(toTxNum+1), order.Asc, 1)
+		recorded, err := dbg.HistoryRecordedInDB(domain, fromTxNum, toTxNum+1)
 		if err != nil {
 			return err
 		}
-		recorded := it.HasNext()
-		it.Close()
 		if recorded {
 			return nil
 		}

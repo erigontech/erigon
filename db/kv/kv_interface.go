@@ -590,6 +590,8 @@ type TemporalDebugTx interface {
 
 	// HistoryStartFrom returns the first txNum the history of a given domain covers
 	HistoryStartFrom(domainName Domain) uint64
+	// HistoryRecordedInDB reports whether the DB (not the files) holds history records of a given domain for any txNum in [fromTxNum, toTxNum)
+	HistoryRecordedInDB(domainName Domain, fromTxNum, toTxNum uint64) (bool, error)
 
 	// DomainProgress is a best-effort progress number for reporting: it mixes
 	// an exclusive files end with an inclusive DB txNum (so it is ±1 depending

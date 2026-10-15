@@ -3404,7 +3404,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			// couldn't be reconstructed (the suffix receipts still need blooms).
 			receipts.DeriveFields(blockReceipts, be.hash())
 
-			if pe.cfg.chainConfig.IsAmsterdam(header.Time) || pe.cfg.experimentalBAL {
+			if pe.cfg.chainConfig.IsAmsterdam(header.Time) {
 				if err := pe.replayResumedPrefix(ctx, applyTx, tt, startTxIndex, be.blockIO); err != nil {
 					return be.operationalBlockResult(fmt.Errorf("block %d: replay resumed prefix: %w", be.number(), err)), nil
 				}

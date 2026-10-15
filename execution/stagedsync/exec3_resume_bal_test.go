@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"errors"
 	"math/big"
 	"slices"
 	"testing"
@@ -16,10 +17,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -526,15 +526,13 @@ type prefixHistoryDebugTx struct {
 	historyStart uint64
 	filesEnd     uint64
 	recorded     bool
+	lookupErr    error
 }
 
 func (d prefixHistoryDebugTx) HistoryStartFrom(kv.Domain) uint64 { return d.historyStart }
 func (d prefixHistoryDebugTx) TxNumsInFiles(...kv.Domain) uint64 { return d.filesEnd }
-func (d prefixHistoryDebugTx) HistoryKeyTxNumRange(kv.Domain, int, int, order.By, int) (stream.KU64, error) {
-	if d.recorded {
-		return stream.NewSingleDuo([]byte("key"), uint64(5)), nil
-	}
-	return stream.EmptyKU64, nil
+func (d prefixHistoryDebugTx) HistoryRecordedInDB(kv.Domain, uint64, uint64) (bool, error) {
+	return d.recorded, d.lookupErr
 }
 
 // TestRequirePrefixHistory pins when a resumed prefix may be replayed: history
@@ -550,6 +548,7 @@ func TestRequirePrefixHistory(t *testing.T) {
 		{"history files cover the prefix", prefixHistoryDebugTx{historyStart: 0, filesEnd: 20, recorded: false}, true},
 		{"database history holds a record", prefixHistoryDebugTx{recorded: true}, true},
 		{"database history holds no record", prefixHistoryDebugTx{recorded: false}, false},
+		{"database history lookup fails", prefixHistoryDebugTx{lookupErr: errors.New("history read failed")}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := requirePrefixHistory(tc.dbg, 5, 6)
@@ -560,4 +559,39 @@ func TestRequirePrefixHistory(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestExperimentalBALResumeSkipsPrefixReplay pins that the mandatory prefix
+// replay is an Amsterdam rule: before Cancun a block start can change nothing,
+// so the history-record requirement would refuse a valid resume under the
+// experimental access-list flag.
+func TestExperimentalBALResumeSkipsPrefixReplay(t *testing.T) {
+	db := newResumeTestDB(t)
+	config := chain.TestChainBerlinConfig
+	pe, roTx := newResumeTestExec(t, db, config)
+	pe.cfg.experimentalBAL = true
+
+	txTask := &exec.TxTask{
+		Header:  &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000},
+		TxNum:   2,
+		TxIndex: 0,
+		Config:  config,
+		Txs:     types.Transactions{signSelfSendTx(t, 0, 0, 1, 21_000, config, 0)},
+	}
+	be := newBlockExec(newParallelTestBlock(1), new(protocol.GasPool).AddGas(10_000_000), nil, make(chan applyResult, 4), nil, false, nil)
+	eTask := &execTask{Task: txTask, index: 0}
+	be.tasks = []*execTask{eTask}
+	be.results = []*execResult{nil}
+	be.execTasks.setInProgress(0)
+	txResult := &exec.TxResult{
+		Task:            &taskVersion{execTask: eTask, version: state.Version{BlockNum: 1, TxIndex: 0, Incarnation: 1, TxNum: 2}},
+		ExecutionResult: evmtypes.ExecutionResult{ReceiptGasUsed: 10_000},
+	}
+
+	res, err := be.nextResult(context.Background(), pe, txResult, roTx)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.False(t, res.Operational, "resume must not fail operationally: %v", res.Err)
+	require.True(t, res.isPartial)
+	require.False(t, res.txIOComplete)
 }
