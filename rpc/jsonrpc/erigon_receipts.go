@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/jsonrpc/logquery"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -242,7 +243,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	defer exec.Close()
 
 	// The Logs should retrieve from latest to oldest order=Descend
-	txNumbers, err := applyFiltersV3(api._txNumReader, tx, begin, end, crit, order.Desc)
+	txNumbers, err := logquery.MatchingTxNums(api._txNumReader, tx, begin, end, crit, order.Desc)
 	if err != nil {
 		return nil, err
 	}
