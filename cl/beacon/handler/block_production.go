@@ -110,6 +110,8 @@ const (
 // produced block still reaches attesters in time to earn the proposer boost.
 const payloadPublicationDivisor = 4
 
+const gloasPayloadCollectionDivisor = 3
+
 // identificationSegment builds the client-version graffiti standard's EL+CL code and commit
 // prefix segment, so client-diversity tooling can attribute proposed blocks. See
 // https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md
@@ -340,7 +342,12 @@ func attestationDue(cfg *clparams.BeaconChainConfig, stateVersion clparams.State
 
 // unpreparedGrabOffset is the normal payload collection deadline measured from the slot start. It
 // reserves the final publication share of the attestation window for processing, signing, and gossip.
-func unpreparedGrabOffset(due time.Duration) time.Duration {
+// Gloas preparation stands down on a FULL parent, the usual case, so the builder starts only with the
+// proposal; collecting at a third of the window leaves two thirds for the block to reach attesters.
+func unpreparedGrabOffset(due time.Duration, stateVersion clparams.StateVersion) time.Duration {
+	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
+		return due / gloasPayloadCollectionDivisor
+	}
 	return due - payloadPublicationMargin(due)
 }
 
@@ -353,7 +360,7 @@ func payloadPublicationMargin(due time.Duration) time.Duration {
 // with its first poll minPayloadPollingWindow earlier to allow a brief retry.
 func maximumPreparedAdvance(cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion) time.Duration {
 	due := attestationDue(cfg, stateVersion)
-	return max(unpreparedGrabOffset(due)-payloadPublicationMargin(due), 0)
+	return max(unpreparedGrabOffset(due, stateVersion)-payloadPublicationMargin(due), 0)
 }
 
 // computeBlockBuilderWindow returns when to first poll for the assembled payload and when to stop,
@@ -361,7 +368,7 @@ func maximumPreparedAdvance(cfg *clparams.BeaconChainConfig, stateVersion clpara
 // advances the first poll by the same duration, up to the prepared collection point.
 func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion, warmup time.Duration) blockBuilderWindow {
 	due := attestationDue(cfg, stateVersion)
-	grabBy := slotStart.Add(unpreparedGrabOffset(due))
+	grabBy := slotStart.Add(unpreparedGrabOffset(due, stateVersion))
 	advance := min(max(warmup, 0), maximumPreparedAdvance(cfg, stateVersion))
 	firstGetAt := grabBy.Add(-minPayloadPollingWindow).Add(-advance)
 	if firstGetAt.Before(now) {
