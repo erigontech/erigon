@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
@@ -47,6 +48,8 @@ import (
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/shards"
 )
 
@@ -584,6 +587,56 @@ func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.T
 		return nil, fmt.Errorf("failed to reconstruct prior receipts for partial block %d (startTxIndex %d): %w", header.Number.Uint64(), startTxIndex, err)
 	}
 	return priorReceipts, nil
+}
+
+var errResumedPrefixHistoryPruned = errors.New("state history of the resumed prefix is pruned")
+
+// replayResumedPrefix re-executes the committed prefix of a block resumed
+// mid-block against state history and folds its reads and writes into io at
+// their access indices, so the block access list can be checked for the whole
+// block. task is any task of the block.
+func (te *txExecutor) replayResumedPrefix(ctx context.Context, applyTx kv.TemporalTx, task *exec.TxTask, startTxIndex int, io *state.VersionedIO) error {
+	header := task.Header
+	blockNum := header.Number.Uint64()
+	blockStartTxNum := task.TxNum - uint64(task.TxIndex+1)
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		if from := applyTx.Debug().HistoryStartFrom(domain); from > blockStartTxNum {
+			return fmt.Errorf("%w: %s history starts at txNum %d, block starts at %d", errResumedPrefixHistoryPruned, domain, from, blockStartTxNum)
+		}
+	}
+
+	ibs := state.New(state.NewHistoryReaderV3(applyTx, blockStartTxNum))
+	defer ibs.Close()
+	ibs.SetVersionMap(state.NewVersionMap(nil))
+	record := func() {
+		writes := ibs.FinalizedWrites(task.Rules())
+		ibs.MergeTxIOInto(io, writes)
+		ibs.FlushWritesToVersionMap(writes)
+		ibs.ResetVersionedIO()
+	}
+
+	ibs.SetTxContext(blockNum, -1)
+	chainReader := consensuschain.NewReader(te.cfg.chainConfig, applyTx, te.cfg.blockReader, te.logger)
+	if err := protocol.InitializeBlockExecution(te.cfg.engine, chainReader, header, te.cfg.chainConfig, ibs, nil, te.logger, nil); err != nil {
+		return fmt.Errorf("block start: %w", err)
+	}
+	record()
+
+	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+		return te.cfg.blockReader.Header(ctx, applyTx, hash, number)
+	}
+	blockHashFn := protocol.GetHashFn(header, getHeader)
+	gasPool := protocol.NewGasPool(header.GasLimit, te.cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time))
+	gasUsed := new(protocol.GasUsed)
+	coinbase := accounts.InternAddress(header.Coinbase)
+	for txIndex := range startTxIndex {
+		ibs.SetTxContext(blockNum, txIndex)
+		if _, err := protocol.ApplyTransaction(te.cfg.chainConfig, blockHashFn, te.cfg.engine, coinbase, gasPool, ibs, state.NewNoopWriter(), header, task.Txs[txIndex], gasUsed, vm.Config{}); err != nil {
+			return fmt.Errorf("tx %d: %w", txIndex, err)
+		}
+		record()
+	}
+	return nil
 }
 
 func (te *txExecutor) onBlockStart(ctx context.Context, block *types.Block) {
