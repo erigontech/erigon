@@ -190,3 +190,36 @@ func TestStorageValueStatus(t *testing.T) {
 	require.Equal(t, ValueDeleted, storageValueStatus(a, zero), "value -> absent")
 	require.Equal(t, ValueChanged, storageValueStatus(a, b), "value -> different value")
 }
+
+// TestVersionMapWriteView_BalanceKeepsDeleteStamp pins that the view carries the
+// writer's delete stamp on a balance write, both when the value is re-read from
+// the versionMap and when it falls back to the key-set: the commitment projection
+// decides delete-vs-revive from that stamp.
+func TestVersionMapWriteView_BalanceKeepsDeleteStamp(t *testing.T) {
+	t.Parallel()
+
+	const txIdx = 2
+	burned := getAddress(1)
+	missed := getAddress(2)
+
+	keys := &WriteSet{}
+	for _, addr := range []accounts.Address{burned, missed} {
+		vw := &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: txIdx}}}
+		vw.valStatus = ValueDeleted
+		keys.SetBalance(addr, vw)
+	}
+
+	flushed := &WriteSet{}
+	vw := &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: burned, Path: BalancePath, Version: Version{TxIndex: txIdx}}}
+	vw.valStatus = ValueDeleted
+	flushed.SetBalance(burned, vw)
+	vm := NewVersionMap(nil)
+	vm.FlushVersionedWrites(flushed, true, "")
+
+	seen := 0
+	for addr, vw := range NewVersionMapWriteView(keys, vm, txIdx).Balances() {
+		require.True(t, vw.Deletes(), "balance write for %x lost its delete stamp", addr)
+		seen++
+	}
+	require.Equal(t, 2, seen)
+}

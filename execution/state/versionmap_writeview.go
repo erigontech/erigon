@@ -30,11 +30,11 @@ func NewVersionMapWriteView(keys WriteSetView, vm *VersionMap, txIdx int) WriteS
 func (v *versionMapWriteView) Balances() iter.Seq2[accounts.Address, *VersionedWrite[uint256.Int]] {
 	return func(yield func(accounts.Address, *VersionedWrite[uint256.Int]) bool) {
 		for addr, kw := range v.keys.Balances() {
-			val, ok := versionedUpdateBalance(v.vm, addr, v.txIdx+1)
-			if !ok {
-				val = kw.Val
+			vw := &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, valStatus: kw.valStatus}, Val: kw.Val}
+			if val, res, ok := v.vm.ReadBalance(addr, v.txIdx+1); ok && res.Status() != MVReadResultNone {
+				vw.Val, vw.valStatus = val, res.ValStatus()
 			}
-			if !yield(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: val}) {
+			if !yield(addr, vw) {
 				return
 			}
 		}
