@@ -318,7 +318,7 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 	})
 	f.publicKeysRegistry.AddState(checkpoint, baseState)
 	checkpointState := newCheckpointState(f.beaconCfg, f.publicKeysRegistry, validators,
-		mixes, baseState.GenesisValidatorsRoot(), baseState.Fork(), baseState.GetTotalActiveBalance(), state.Epoch(baseState.BeaconState), checkpoint)
+		mixes, baseState.GenesisValidatorsRoot(), baseState.Fork(), getUnslashedActiveBalance(baseState), state.Epoch(baseState.BeaconState), checkpoint)
 	// Cache in memory what we are left with.
 	f.storeCheckpointState(checkpoint, checkpointState)
 	return checkpointState, nil
@@ -354,4 +354,22 @@ func (f *ForkChoiceStore) storeCheckpointState(checkpoint solid.Checkpoint, chec
 		}
 		f.checkpointStates.Delete(oldest)
 	}
+}
+
+// LoadJustifiedCheckpointState loads the current justified checkpoint state into the cache.
+func (f *ForkChoiceStore) LoadJustifiedCheckpointState() error {
+	_, err := f.getCheckpointState(f.justifiedCheckpoint.Load().(solid.Checkpoint))
+	return err
+}
+
+func getUnslashedActiveBalance(beaconState *state.CachingBeaconState) uint64 {
+	epoch := state.Epoch(beaconState)
+	var total uint64
+	beaconState.ForEachValidator(func(validator solid.Validator, _, _ int) bool {
+		if validator.Active(epoch) && !validator.Slashed() {
+			total += validator.EffectiveBalance()
+		}
+		return true
+	})
+	return max(beaconState.BeaconConfig().EffectiveBalanceIncrement, total)
 }

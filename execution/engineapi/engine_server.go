@@ -467,7 +467,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return invalidTransactionStatus, nil
 	}
 	if blockAccessList != nil {
-		if err = blockAccessList.ValidateForBlock(header.GasLimit); err != nil {
+		if err = blockAccessList.ValidateForBlock(header.GasLimit, len(transactions)); err != nil {
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedError(err),
@@ -1199,15 +1199,28 @@ func (e *EngineServer) HandleForkChoice(
 	}
 
 	// Call forkchoice here
-	status, validationErr, latestValidHash, err := e.chainRW.UpdateForkChoice(ctx, forkChoice.HeadHash, forkChoice.SafeBlockHash, forkChoice.FinalizedBlockHash)
+	result, err := e.chainRW.UpdateForkChoiceResult(ctx, forkChoice.HeadHash, forkChoice.SafeBlockHash, forkChoice.FinalizedBlockHash)
 	if err != nil {
 		return nil, err
 	}
+	status := result.Status
 	if status == execmodule.ExecutionStatusInvalidForkchoice {
 		return nil, &engine_helpers.InvalidForkchoiceStateErr
 	}
 	if status == execmodule.ExecutionStatusReorgTooDeep {
 		return nil, &engine_helpers.ReorgTooDeepErr
+	}
+	if status == execmodule.ExecutionStatusMissingSegment && result.MissingHash != (common.Hash{}) {
+		if bad, lastValidHash, validationErr := e.blockDownloader.IsBadHeader(result.MissingHash); bad {
+			invalid := &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &lastValidHash}
+			if validationErr != "" {
+				invalid.ValidationError = engine_types.NewStringifiedErrorFromString(validationErr)
+			}
+			return invalid, nil
+		}
+		if !e.test && e.blockDownloader.StartDownloading(result.MissingHash, nil, engine_block_downloader.FcuTrigger) {
+			e.logger.Warn(fmt.Sprintf("[%s] Fork choice: need to recover missing segment", logPrefix), "headerHash", headerHash, "missingHash", result.MissingHash)
+		}
 	}
 	// engine_forkchoiceUpdated restricts payload statuses to VALID, INVALID, and SYNCING — never ACCEPTED.
 	if status == execmodule.ExecutionStatusBusy ||
@@ -1220,11 +1233,11 @@ func (e *EngineServer) HandleForkChoice(
 	}
 	payloadStatus := &engine_types.PayloadStatus{
 		Status:          convertGrpcStatusToEngineStatus(status),
-		LatestValidHash: &latestValidHash,
+		LatestValidHash: &result.LatestValidHash,
 	}
 
-	if validationErr != nil {
-		payloadStatus.ValidationError = engine_types.NewStringifiedErrorFromString(*validationErr)
+	if result.ValidationError != "" {
+		payloadStatus.ValidationError = engine_types.NewStringifiedErrorFromString(result.ValidationError)
 	}
 	return payloadStatus, nil
 }

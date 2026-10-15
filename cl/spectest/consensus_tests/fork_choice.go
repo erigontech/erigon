@@ -247,8 +247,9 @@ func (f *ForkChoiceStep) GetChecks() *ForkChoiceChecks {
 
 type ForkChoiceChecks struct {
 	Head *struct {
-		Slot *int         `yaml:"slot,omitempty"`
-		Root *common.Hash `yaml:"root,omitempty"`
+		Slot          *int         `yaml:"slot,omitempty"`
+		Root          *common.Hash `yaml:"root,omitempty"`
+		PayloadStatus *int         `yaml:"payload_status,omitempty"`
 	} `yaml:"head,omitempty"`
 	Time                *int `yaml:"time,omitempty"`
 	GenesisTime         *int `yaml:"genesis_time,omitempty"`
@@ -262,7 +263,6 @@ type ForkChoiceChecks struct {
 		Root  *common.Hash `yaml:"root,omitempty"`
 	} `yaml:"finalized_checkpoint,omitempty"`
 	ProposerBoostRoot *common.Hash `yaml:"proposer_boost_root,omitempty"`
-	HeadPayloadStatus *int         `yaml:"head_payload_status,omitempty"`
 }
 
 type ForkChoicePayloadStatus struct {
@@ -444,13 +444,16 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 
 func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e *ForkChoiceChecks) {
 	if e.Head != nil {
-		root, v, err := store.GetHead(nil)
+		head, slot, err := store.GetHeadNode()
 		require.NoError(t, err, stepstr)
 		if e.Head.Root != nil {
-			assert.Equal(t, *e.Head.Root, root, stepstr)
+			assert.Equal(t, *e.Head.Root, head.Root, stepstr)
 		}
 		if e.Head.Slot != nil {
-			assert.Equal(t, *e.Head.Slot, int(v), stepstr)
+			assert.Equal(t, *e.Head.Slot, int(slot), stepstr)
+		}
+		if e.Head.PayloadStatus != nil {
+			assert.EqualValues(t, *e.Head.PayloadStatus, int(head.PayloadStatus), stepstr)
 		}
 	}
 	if e.Time != nil {
@@ -481,10 +484,5 @@ func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e 
 		if e.JustifiedCheckpoint.Epoch != nil {
 			assert.EqualValues(t, *e.JustifiedCheckpoint.Epoch, cp.Epoch, stepstr)
 		}
-	}
-	if e.HeadPayloadStatus != nil {
-		head, _, err := store.GetHeadNode()
-		assert.NoError(t, err, stepstr)
-		assert.EqualValues(t, *e.HeadPayloadStatus, int(head.PayloadStatus), stepstr)
 	}
 }

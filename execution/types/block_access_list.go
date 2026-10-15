@@ -31,8 +31,8 @@ type BlockAccessListSidecar struct {
 	bal               BlockAccessList
 	raw               atomic.Pointer[[]byte]
 	hash              atomic.Pointer[common.Hash]
-	validated         atomic.Bool
-	validatedGasLimit atomic.Uint64
+	validatedGasLimit atomic.Pointer[uint64]
+	validatedTxCount  atomic.Pointer[int]
 }
 
 // NewBlockAccessListSidecar wraps a decoded BAL that must not be mutated afterwards.
@@ -109,19 +109,38 @@ func (s *BlockAccessListSidecar) cacheHash(raw []byte) common.Hash {
 	return *s.hash.Load()
 }
 
-// ValidateForBlock validates once for each distinct gas limit.
-func (s *BlockAccessListSidecar) ValidateForBlock(gasLimit uint64) error {
+// ValidateForHeader validates once for each distinct gas limit.
+func (s *BlockAccessListSidecar) ValidateForHeader(gasLimit uint64) error {
 	if s == nil {
 		return nil
 	}
-	if s.validated.Load() && s.validatedGasLimit.Load() == gasLimit {
+	if validated := s.validatedGasLimit.Load(); validated != nil && *validated == gasLimit {
 		return nil
 	}
-	if err := s.bal.ValidateForBlock(gasLimit); err != nil {
+	if err := s.bal.ValidateForHeader(gasLimit); err != nil {
 		return err
 	}
-	s.validatedGasLimit.Store(gasLimit)
-	s.validated.Store(true)
+	s.validatedGasLimit.Store(&gasLimit)
+	return nil
+}
+
+// ValidateForBlock also rejects block access indices beyond len(transactions)+1, the
+// post-execution index, so a spurious change fails before the block executes. The
+// index pass is memoized for each distinct transaction count.
+func (s *BlockAccessListSidecar) ValidateForBlock(gasLimit uint64, txCount int) error {
+	if s == nil {
+		return nil
+	}
+	if err := s.ValidateForHeader(gasLimit); err != nil {
+		return err
+	}
+	if validated := s.validatedTxCount.Load(); validated != nil && *validated == txCount {
+		return nil
+	}
+	if err := s.bal.validateBlockAccessIndices(txCount); err != nil {
+		return err
+	}
+	s.validatedTxCount.Store(&txCount)
 	return nil
 }
 
@@ -138,9 +157,13 @@ func (s *BlockAccessListSidecar) copy() *BlockAccessListSidecar {
 		hashCopy := *hash
 		cpy.hash.Store(&hashCopy)
 	}
-	if s.validated.Load() {
-		cpy.validatedGasLimit.Store(s.validatedGasLimit.Load())
-		cpy.validated.Store(true)
+	if validated := s.validatedGasLimit.Load(); validated != nil {
+		gasLimit := *validated
+		cpy.validatedGasLimit.Store(&gasLimit)
+	}
+	if validated := s.validatedTxCount.Load(); validated != nil {
+		txCount := *validated
+		cpy.validatedTxCount.Store(&txCount)
 	}
 	return cpy
 }
@@ -925,14 +948,51 @@ func (bal BlockAccessList) Validate() error {
 	return nil
 }
 
-// ValidateForBlock validates a block access list against its block gas limit.
-func (bal BlockAccessList) ValidateForBlock(gasLimit uint64) error {
+// ValidateForHeader validates a block access list against its block gas limit.
+func (bal BlockAccessList) ValidateForHeader(gasLimit uint64) error {
 	err := bal.Validate()
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidBlockAccessList, err)
 	}
 	if err = bal.ValidateMaxItems(gasLimit); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidBlockAccessList, err)
+	}
+	return nil
+}
+
+func (bal BlockAccessList) validateBlockAccessIndices(txCount int) error {
+	maxIndex := uint64(txCount) + 1
+	for i := range bal {
+		if err := bal[i].validateBlockAccessIndices(maxIndex); err != nil {
+			return fmt.Errorf("%w: account %s: %w", ErrInvalidBlockAccessList, bal[i].Address.Hex(), err)
+		}
+	}
+	return nil
+}
+
+func (ac *AccountChanges) validateBlockAccessIndices(maxIndex uint64) error {
+	for i := range ac.StorageChanges {
+		if err := validateMaxIndex(ac.StorageChanges[i].Changes, maxIndex); err != nil {
+			return fmt.Errorf("storage_changes: %w", err)
+		}
+	}
+	if err := validateMaxIndex(ac.BalanceChanges, maxIndex); err != nil {
+		return fmt.Errorf("balance_changes: %w", err)
+	}
+	if err := validateMaxIndex(ac.NonceChanges, maxIndex); err != nil {
+		return fmt.Errorf("nonce_changes: %w", err)
+	}
+	if err := validateMaxIndex(ac.CodeChanges, maxIndex); err != nil {
+		return fmt.Errorf("code_changes: %w", err)
+	}
+	return nil
+}
+
+func validateMaxIndex[T indexedChange](changes []T, maxIndex uint64) error {
+	for _, change := range changes {
+		if index := uint64(change.GetIndex()); index > maxIndex {
+			return fmt.Errorf("block access index %d exceeds len(transactions)+1 = %d", index, maxIndex)
+		}
 	}
 	return nil
 }

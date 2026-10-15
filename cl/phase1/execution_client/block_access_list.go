@@ -33,7 +33,7 @@ func DecodeAndValidateBlockAccessList(payload *cltypes.Eth1Block) (*types.BlockA
 	if err != nil {
 		return nil, fmt.Errorf("decode block access list: %w", err)
 	}
-	if err = bal.ValidateForBlock(payload.GasLimit); err != nil {
+	if err = bal.ValidateForBlock(payload.GasLimit, payload.Transactions.Len()); err != nil {
 		return nil, fmt.Errorf("validate block access list: %w", err)
 	}
 	return bal, nil

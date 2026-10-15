@@ -66,3 +66,31 @@ func TestInclusionContributions(t *testing.T) {
 		require.Equal(t, uint64(0), state)
 	})
 }
+
+func TestMaxInclusionGas(t *testing.T) {
+	limit := params.MaxTxnGasLimit
+	tests := []struct {
+		name               string
+		amsterdam, skipCap bool
+		execution, state   uint64
+		want               uint64
+	}{
+		{"pre-Amsterdam", false, false, 10_000_000, 1_000, 10_000_000},
+		{"cap on, execution holds a cap", true, false, limit, 30_000_000, 30_000_000},
+		{"cap on, execution below a cap", true, false, limit - 1, 30_000_000, limit - 1},
+		{"cap on, state binds", true, false, 30_000_000, 2_000_000, 2_000_000},
+		{"cap off", true, true, 29_988_000, 30_000_000, 29_988_000},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gp := NewBlockGasPool(tc.execution, tc.state, 0)
+			got := MaxInclusionGas(gp, tc.amsterdam, tc.skipCap)
+			require.Equal(t, tc.want, got)
+			// The largest admitted gas limit: one more gas no longer fits.
+			e, s := InclusionContributions(got, tc.amsterdam, tc.skipCap)
+			require.NoError(t, CheckBlockGasInclusion(gp, e, s, 0))
+			e, s = InclusionContributions(got+1, tc.amsterdam, tc.skipCap)
+			require.ErrorIs(t, CheckBlockGasInclusion(gp, e, s, 0), ErrGasLimitReached)
+		})
+	}
+}

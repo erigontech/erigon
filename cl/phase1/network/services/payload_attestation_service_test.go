@@ -495,7 +495,7 @@ func TestPayloadAttestationServiceSlotMismatch(t *testing.T) {
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrIgnore)
 	require.Contains(t, err.Error(), "not current slot")
 }
 
@@ -559,7 +559,7 @@ func TestPayloadAttestationServiceDuplicateValidator(t *testing.T) {
 	// Second call with same (slot, validatorIndex) should be ignored
 	err = service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrIgnore)
 	require.Contains(t, err.Error(), "already seen payload attestation")
 }
 
@@ -688,7 +688,7 @@ func TestPayloadAttestationServiceReferencedBlockSlotMismatch(t *testing.T) {
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrIgnore)
 	require.Contains(t, err.Error(), "does not match referenced block slot")
 	require.False(t, service.seenAttestationsCache.Contains(seenPayloadAttestationKey{100, 1}))
 }
