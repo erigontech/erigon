@@ -21,6 +21,7 @@ import (
 
 	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/eez/protocol/da"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // ErrBlobPayload reports a batch whose DA payload is in blobs, which this
@@ -35,6 +36,29 @@ type Payload struct {
 
 // Blocks is the number of L2 blocks the payload carries.
 func (p *Payload) Blocks() uint64 { return uint64(len(p.Span.TxCounts)) }
+
+// BlockTxs returns the pure-L2 transactions of the payload's block i in
+// their EIP-2718 encoding.
+func (p *Payload) BlockTxs(i int) [][]byte {
+	start := 0
+	for _, c := range p.Span.TxCounts[:i] {
+		start += int(c)
+	}
+	return p.Span.Transactions[start : start+int(p.Span.TxCounts[i])]
+}
+
+// DecodeTxs decodes EIP-2718 transaction encodings.
+func DecodeTxs(encoded [][]byte) ([]types.Transaction, error) {
+	txs := make([]types.Transaction, len(encoded))
+	for i, enc := range encoded {
+		tx, err := types.UnmarshalTransactionFromBinary(enc, false)
+		if err != nil {
+			return nil, fmt.Errorf("transaction %d: %w", i, err)
+		}
+		txs[i] = tx
+	}
+	return txs, nil
+}
 
 // DecodePayload decodes the DA payload a batch carries in its callData. It
 // returns nil for another rollup's operations, which a multi-rollup batch
