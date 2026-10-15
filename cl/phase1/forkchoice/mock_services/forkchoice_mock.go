@@ -123,6 +123,7 @@ type ForkChoiceStorageMock struct {
 	RetryPendingEnvelopeFunc func(ctx context.Context, blockRoot common.Hash) time.Time
 	PendingEnvelopeRoots     map[common.Hash]struct{}
 	ApplyInFlightRoots       map[common.Hash]struct{}
+	VotesRuleOutFullRoots    map[common.Hash]struct{}
 
 	// [New in Gloas:EIP7732] Execution payload status by execution block hash
 	ExecutionPayloadStatusMap map[common.Hash]execution_client.PayloadStatus
@@ -662,6 +663,11 @@ func (f *ForkChoiceStorageMock) GetBlock(
 
 func (f *ForkChoiceStorageMock) ExecutionPayloadApplyInFlight(blockRoot common.Hash) bool {
 	_, ok := f.ApplyInFlightRoots[blockRoot]
+	return ok
+}
+
+func (f *ForkChoiceStorageMock) PayloadVotesRuleOutFull(blockRoot common.Hash) bool {
+	_, ok := f.VotesRuleOutFullRoots[blockRoot]
 	return ok
 }
 

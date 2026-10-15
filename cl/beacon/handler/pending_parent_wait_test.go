@@ -18,6 +18,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"testing"
@@ -30,8 +31,10 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -214,6 +217,61 @@ func TestAwaitPendingParentPayloadLetsTheApplyOutliveTheWait(t *testing.T) {
 	}
 }
 
+// An apply in flight when the wait starts can park the envelope later in the wait: the wait keeps
+// retrying, so it applies the envelope once it is parked.
+func TestAwaitPendingParentPayloadRetriesAnEnvelopeParkedDuringTheWait(t *testing.T) {
+	handler, forkchoiceStore, postState, baseBlockRoot, applied := pendingParentWaitFixture(t, 5*time.Second)
+	forkchoiceStore.PendingEnvelopeRoots = nil
+	forkchoiceStore.ApplyInFlightRoots = map[common.Hash]struct{}{baseBlockRoot: {}}
+	parkedAt := time.Now().Add(50 * time.Millisecond)
+	forkchoiceStore.RetryPendingEnvelopeFunc = func(context.Context, common.Hash) time.Time {
+		if time.Now().Before(parkedAt) {
+			return time.Time{} // nothing is parked yet
+		}
+		applied.Store(true)
+		return time.Time{}
+	}
+
+	start := time.Now()
+	require.NoError(t, handler.awaitPendingParentPayload(t.Context(), postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion))
+	require.True(t, applied.Load())
+	require.Less(t, time.Since(start), time.Second)
+}
+
+// When the PTC votes for a parent from the previous slot already rule out FULL, the proposal
+// builds on EMPTY whatever the wait does, so it does not wait.
+func TestAwaitPendingParentPayloadSkipsAParentThePtcVotesRuleOut(t *testing.T) {
+	handler, forkchoiceStore, postState, baseBlockRoot, _ := pendingParentWaitFixture(t, 5*time.Second)
+	forkchoiceStore.VotesRuleOutFullRoots = map[common.Hash]struct{}{baseBlockRoot: {}}
+	var retries atomic.Int32
+	forkchoiceStore.RetryPendingEnvelopeFunc = func(context.Context, common.Hash) time.Time {
+		retries.Add(1)
+		return time.Now().Add(time.Millisecond)
+	}
+	targetSlot := postState.LatestBlockHeader().Slot + 1
+
+	start := time.Now()
+	require.NoError(t, handler.awaitPendingParentPayload(t.Context(), postState, baseBlockRoot, targetSlot, clparams.GloasVersion))
+	require.Less(t, time.Since(start), 100*time.Millisecond)
+	require.Zero(t, retries.Load())
+}
+
+// The votes decide only for a parent from the previous slot; an older parent is still waited for.
+func TestAwaitPendingParentPayloadIgnoresVotesForAnOlderParent(t *testing.T) {
+	handler, forkchoiceStore, postState, baseBlockRoot, applied := pendingParentWaitFixture(t, 5*time.Second)
+	forkchoiceStore.VotesRuleOutFullRoots = map[common.Hash]struct{}{baseBlockRoot: {}}
+	var retries atomic.Int32
+	forkchoiceStore.RetryPendingEnvelopeFunc = func(context.Context, common.Hash) time.Time {
+		retries.Add(1)
+		applied.Store(true)
+		return time.Time{}
+	}
+	targetSlot := postState.LatestBlockHeader().Slot + 2
+
+	require.NoError(t, handler.awaitPendingParentPayload(t.Context(), postState, baseBlockRoot, targetSlot, clparams.GloasVersion))
+	require.NotZero(t, retries.Load())
+}
+
 func TestAwaitPendingParentPayloadWaitsOnlyForAParkedEnvelope(t *testing.T) {
 	handler, forkchoiceStore, postState, baseBlockRoot, _ := pendingParentWaitFixture(t, 5*time.Second)
 	forkchoiceStore.PendingEnvelopeRoots = nil
@@ -259,10 +317,11 @@ func TestEnvelopeParkedFlagsOnlyAnUnpersistedParkedEnvelope(t *testing.T) {
 // After a head change, production is retried only once the new head's state is published:
 // the state it failed on would fail the same way.
 func TestAwaitHeadStateAfterWaitsForTheNewHeadState(t *testing.T) {
-	handler, _, postState, staleRoot, _ := pendingParentWaitFixture(t, 5*time.Second)
+	handler, forkchoiceStore, postState, staleRoot, _ := pendingParentWaitFixture(t, 5*time.Second)
 	handler.syncedData = synced_data.NewSyncedDataManager(handler.beaconChainCfg, true)
 	require.NoError(t, handler.syncedData.OnHeadStateWithBlockRoot(postState, staleRoot))
 	newRoot := common.Hash{0x42}
+	forkchoiceStore.HeadVal = newRoot
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		_ = handler.syncedData.OnHeadStateWithBlockRoot(postState, newRoot)
@@ -283,4 +342,105 @@ func TestAwaitHeadStateAfterGivesUpAtTheCutoff(t *testing.T) {
 	start := time.Now()
 	require.False(t, handler.awaitHeadStateAfter(t.Context(), staleRoot, postState.Slot()+1))
 	require.Less(t, time.Since(start), time.Second)
+}
+
+// A published state that is no longer the stale one but is not the fork-choice head either would
+// fail the same way: the head moved from A to B to C and only B's state is published.
+func TestAwaitHeadStateAfterWaitsForTheForkChoiceHeadState(t *testing.T) {
+	handler, forkchoiceStore, postState, staleRoot, _ := pendingParentWaitFixture(t, 100*time.Millisecond)
+	handler.syncedData = synced_data.NewSyncedDataManager(handler.beaconChainCfg, true)
+	require.NoError(t, handler.syncedData.OnHeadStateWithBlockRoot(postState, common.Hash{0x42}))
+	forkchoiceStore.HeadVal = common.Hash{0x43}
+
+	require.False(t, handler.awaitHeadStateAfter(t.Context(), staleRoot, postState.Slot()+1))
+}
+
+// After the cutoff the second attempt does not start, even when the new head state is published.
+func TestAwaitHeadStateAfterDoesNotRetryPastTheCutoff(t *testing.T) {
+	handler, forkchoiceStore, postState, staleRoot, _ := pendingParentWaitFixture(t, -time.Millisecond)
+	handler.syncedData = synced_data.NewSyncedDataManager(handler.beaconChainCfg, true)
+	newRoot := common.Hash{0x42}
+	require.NoError(t, handler.syncedData.OnHeadStateWithBlockRoot(postState, newRoot))
+	forkchoiceStore.HeadVal = newRoot
+
+	require.False(t, handler.awaitHeadStateAfter(t.Context(), staleRoot, postState.Slot()+1))
+}
+
+// slotTimeClock starts every slot at slotStart, so a test controls how far the wait cutoff is.
+type slotTimeClock struct {
+	eth_clock.EthereumClock
+	slotStart time.Time
+}
+
+func (c slotTimeClock) GetSlotTime(uint64) time.Time { return c.slotStart }
+
+// The envelope of the EMPTY head is parked at the start of production and applied by the wait's
+// retry: production then builds on the FULL parent instead of the EMPTY fallback.
+func TestProduceBlockBuildsOnTheParentAppliedDuringTheWait(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	handler.beaconChainCfg.FuluForkEpoch = 0
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.InitializeForkSchedule()
+	require.NoError(t, postState.UpgradeToFulu())
+	require.NoError(t, postState.UpgradeToGloas())
+	postState.GetBuilders().Append(&cltypes.Builder{Pubkey: common.Bytes48{0x42}})
+	sinceCutoff := proposalWaitCutoff(time.Unix(0, 0), handler.beaconChainCfg, clparams.GloasVersion).Sub(time.Unix(0, 0))
+	handler.ethClock = slotTimeClock{EthereumClock: handler.ethClock, slotStart: time.Now().Add(5*time.Second - sinceCutoff)}
+
+	baseRoot := common.Hash{0x41}
+	targetSlot := postState.Slot() + 1
+	parentBid := postState.GetLatestExecutionPayloadBid()
+	emptyHash, fullHash := parentBid.ParentBlockHash, parentBid.BlockHash
+	require.NotEqual(t, emptyHash, fullHash)
+	postState.SetLatestBlockHash(emptyHash)
+
+	// The head is EMPTY with its envelope parked until the retry applies it.
+	var applied atomic.Bool
+	var retries atomic.Int32
+	forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+		status := cltypes.PayloadStatusEmpty
+		if applied.Load() {
+			status = cltypes.PayloadStatusFull
+		}
+		return forkchoice.ForkChoiceNode{Root: baseRoot, PayloadStatus: status}, postState.Slot(), nil
+	}
+	forkchoiceStore.PendingEnvelopeRoots = map[common.Hash]struct{}{baseRoot: {}}
+	forkchoiceStore.HasEnvelopeFunc = func(common.Hash) bool { return applied.Load() }
+	forkchoiceStore.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+		if !applied.Load() {
+			return nil, nil
+		}
+		return &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+			ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion),
+		}}, nil
+	}
+	forkchoiceStore.RetryPendingEnvelopeFunc = func(context.Context, common.Hash) time.Time {
+		retries.Add(1)
+		applied.Store(true)
+		return time.Time{}
+	}
+
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, errors.New("local execution unavailable")).AnyTimes()
+	handler.engine = engine
+	handler.epbsPool = pool.NewEpbsPool()
+	for _, parentHash := range []common.Hash{emptyHash, fullHash} {
+		forkchoiceStore.ExecutionPayloadGasLimitMap[parentHash] = parentBid.GasLimit
+		bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(targetSlot, 0, 0)}
+		bid.Message.ParentBlockHash = parentHash
+		bid.Message.ParentBlockRoot = baseRoot
+		bid.Message.FeeRecipient = common.Address{}
+		bid.Message.GasLimit = parentBid.GasLimit
+		handler.epbsPool.StoreHighestBid(pool.HighestBidKey{Slot: targetSlot, ParentBlockHash: parentHash, ParentBlockRoot: baseRoot}, bid)
+	}
+	options := &gloasBlockProductionOptions{builderConfig: &cltypes.BuilderConfig{BuilderBoostFactor: 100}}
+	ctx := context.WithValue(t.Context(), gloasBlockProductionOptionsKey{}, options)
+
+	_, err := handler.produceBlock(ctx, 100, postState.Slot(), baseRoot, postState, targetSlot, common.Bytes96{}, common.Hash{})
+	require.NoError(t, err)
+	require.NotZero(t, retries.Load())
+	require.NotNil(t, options.selectedBid)
+	require.Equal(t, fullHash, options.selectedBid.bid.Message.ParentBlockHash)
 }

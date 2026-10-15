@@ -323,6 +323,9 @@ func (f *ForkChoiceStore) checkDataAvailability(
 		return nil
 	}
 
+	if f.peerDas == nil {
+		return nil
+	}
 	// Check PeerDAS data availability
 	// Note: Unlike OnBlock, we don't skip this check even if EL has blobs,
 	// because we need to ensure blobs are stored in CL's blob storage for beacon API.

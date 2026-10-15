@@ -654,7 +654,6 @@ func (f *ForkChoiceStore) checkPreGloasBlockDataAvailability(ctx context.Context
 	return nil
 }
 
-// processPendingEnvelopeAfterBlock applies the envelope queued for blockRoot.
 func (f *ForkChoiceStore) processPendingEnvelopeAfterBlock(ctx context.Context, blockRoot common.Hash, checkDataAvailability bool) {
 	if !f.HasPendingExecutionPayloadEnvelope(blockRoot) {
 		return
@@ -751,20 +750,51 @@ func (f *ForkChoiceStore) RetryDataAvailablePendingExecutionPayloadEnvelopes(ctx
 // columns are available, and returns when the next attempt is due.
 func (f *ForkChoiceStore) retryPendingEnvelopeWhenDue(ctx context.Context, root common.Hash, block *cltypes.SignedBeaconBlock, checkDataAvailability bool) time.Time {
 	now := time.Now()
-	if retryAt, ok := f.dataAvailableEnvelopeRetryAt.Get(root); ok && now.Before(retryAt) {
+	retryAt, due := f.bookPendingEnvelopeRetry(root, now, now.Add(missingEnvelopeDataProbeInterval))
+	if !due {
 		return retryAt
 	}
 	if commitments := block.GetBlobKzgCommitments(); f.peerDas != nil && commitments != nil && commitments.Len() > 0 {
 		if available, err := f.peerDas.IsDataAvailable(block.Block.Slot, root); err != nil || !available {
-			retryAt := now.Add(missingEnvelopeDataProbeInterval)
-			f.dataAvailableEnvelopeRetryAt.Add(root, retryAt)
 			return retryAt
 		}
 	}
-	retryAt := now.Add(dataAvailableEnvelopeRetryInterval)
-	f.dataAvailableEnvelopeRetryAt.Add(root, retryAt)
+	attemptAt := now.Add(dataAvailableEnvelopeRetryInterval)
+	f.rebookPendingEnvelopeRetry(root, retryAt, attemptAt)
 	f.processPendingEnvelopeAfterBlock(ctx, root, checkDataAvailability)
-	return retryAt
+	if ctx.Err() != nil {
+		// The caller's context ended the attempt before a verdict, so it does not hold the interval.
+		f.rebookPendingEnvelopeRetry(root, attemptAt, time.Time{})
+		return time.Now()
+	}
+	return attemptAt
+}
+
+// bookPendingEnvelopeRetry books the next retry of root at next unless one is booked for later
+// than now, and reports whether this caller booked it.
+func (f *ForkChoiceStore) bookPendingEnvelopeRetry(root common.Hash, now, next time.Time) (time.Time, bool) {
+	f.dataAvailableEnvelopeRetryMu.Lock()
+	defer f.dataAvailableEnvelopeRetryMu.Unlock()
+	if retryAt, ok := f.dataAvailableEnvelopeRetryAt.Get(root); ok && now.Before(retryAt) {
+		return retryAt, false
+	}
+	f.dataAvailableEnvelopeRetryAt.Add(root, next)
+	return next, true
+}
+
+// rebookPendingEnvelopeRetry moves the booking of root from booked to next, or drops it when next
+// is zero. A booking that another caller made since is kept.
+func (f *ForkChoiceStore) rebookPendingEnvelopeRetry(root common.Hash, booked, next time.Time) {
+	f.dataAvailableEnvelopeRetryMu.Lock()
+	defer f.dataAvailableEnvelopeRetryMu.Unlock()
+	if current, ok := f.dataAvailableEnvelopeRetryAt.Peek(root); !ok || !current.Equal(booked) {
+		return
+	}
+	if next.IsZero() {
+		f.dataAvailableEnvelopeRetryAt.Remove(root)
+		return
+	}
+	f.dataAvailableEnvelopeRetryAt.Add(root, next)
 }
 
 func (f *ForkChoiceStore) HasPendingExecutionPayloadEnvelope(blockRoot common.Hash) bool {
@@ -784,7 +814,7 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelope(ctx context.Conte
 	if !ok || block == nil || block.Block == nil {
 		return time.Time{}
 	}
-	return f.retryPendingEnvelopeWhenDue(ctx, blockRoot, block, false)
+	return f.retryPendingEnvelopeWhenDue(ctx, blockRoot, block, true)
 }
 
 func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopeIndices(ctx context.Context, limit int) {
@@ -864,10 +894,9 @@ func (f *ForkChoiceStore) settlePendingEnvelopeError(blockRoot common.Hash, pend
 	}
 }
 
-// enterPendingEnvelopeApply admits one apply of a parked envelope per root at a time, at block
-// import and on every retry, so no two of them reach NewPayload for one parked copy. A later
-// caller waits for the holder and then runs itself, because the holder may have stopped
-// without a verdict.
+// enterPendingEnvelopeApply admits one apply of a parked envelope per root at a time, so no two of
+// them reach NewPayload for one parked copy. A later caller waits for the holder and then runs
+// itself, because the holder may have stopped without a verdict.
 func (f *ForkChoiceStore) enterPendingEnvelopeApply(ctx context.Context, blockRoot common.Hash) bool {
 	done := make(chan struct{})
 	for {

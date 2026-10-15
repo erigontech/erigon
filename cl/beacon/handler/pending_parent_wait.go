@@ -71,9 +71,10 @@ func awaitParkedEnvelope(
 	return nil
 }
 
-// retryParkedEnvelope retries the envelope parked for root until stop closes or nothing is
-// parked, at the pace fork choice sets per root. An apply in flight when stop closes runs on
-// until the payload collection deadline, so ending the wait does not waste its EL call.
+// retryParkedEnvelope retries the envelope parked for root until stop closes, at the pace fork
+// choice sets per root. While nothing is parked it keeps polling, because an apply in flight can
+// still park the envelope. An apply in flight when stop closes runs on until the payload
+// collection deadline, so ending the wait does not waste its EL call.
 func (a *ApiHandler) retryParkedEnvelope(ctx context.Context, root common.Hash, collectBy time.Time, stop <-chan struct{}) {
 	applyCtx, cancel := context.WithDeadline(context.WithoutCancel(ctx), collectBy)
 	defer cancel()
@@ -84,8 +85,11 @@ func (a *ApiHandler) retryParkedEnvelope(ctx context.Context, root common.Hash, 
 		default:
 		}
 		next := a.forkchoiceStore.RetryPendingExecutionPayloadEnvelope(applyCtx, root)
-		if next.IsZero() {
+		if applyCtx.Err() != nil {
 			return
+		}
+		if next.IsZero() {
+			next = time.Now().Add(proposalWaitPollInterval)
 		}
 		timer := time.NewTimer(time.Until(next))
 		select {
@@ -98,8 +102,7 @@ func (a *ApiHandler) retryParkedEnvelope(ctx context.Context, root common.Hash, 
 }
 
 // awaitPendingParentPayload gives an envelope parked for the EMPTY head a bounded chance to be
-// applied before the proposal builds on the EMPTY parent. Nothing else re-applies a parked
-// envelope at the start of the slot, so the wait retries it.
+// applied before the proposal builds on the EMPTY parent, and retries it meanwhile.
 func (a *ApiHandler) awaitPendingParentPayload(
 	ctx context.Context,
 	baseState *state.CachingBeaconState,
@@ -113,6 +116,9 @@ func (a *ApiHandler) awaitPendingParentPayload(
 	parked, err := a.parentEnvelopeParked(baseState, baseBlockRoot, targetSlot)
 	if err != nil || !parked {
 		return err
+	}
+	if baseState.LatestBlockHeader().Slot+1 == targetSlot && a.forkchoiceStore.PayloadVotesRuleOutFull(baseBlockRoot) {
+		return nil
 	}
 	slotStart := a.ethClock.GetSlotTime(targetSlot)
 	deadline := proposalWaitCutoff(slotStart, a.beaconChainCfg, stateVersion)
@@ -131,18 +137,21 @@ func (a *ApiHandler) awaitPendingParentPayload(
 	)
 }
 
-// awaitHeadStateAfter waits until the published head state is no longer staleRoot, so production
-// retried after a head change builds on the new head instead of the state it just failed on. It
-// gives up at the proposal wait cutoff.
+// awaitHeadStateAfter waits until the published head state is the state of the fork-choice head
+// and no longer staleRoot, so production retried after a head change builds on the new head
+// instead of the state it just failed on. It gives up at the proposal wait cutoff.
 func (a *ApiHandler) awaitHeadStateAfter(ctx context.Context, staleRoot common.Hash, targetSlot uint64) bool {
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch)
-	cutoff := time.NewTimer(time.Until(proposalWaitCutoff(a.ethClock.GetSlotTime(targetSlot), a.beaconChainCfg, stateVersion)))
+	deadline := proposalWaitCutoff(a.ethClock.GetSlotTime(targetSlot), a.beaconChainCfg, stateVersion)
+	cutoff := time.NewTimer(time.Until(deadline))
 	defer cutoff.Stop()
 	ticker := time.NewTicker(proposalWaitPollInterval)
 	defer ticker.Stop()
-	for {
+	for time.Now().Before(deadline) {
 		if root, _, ok := a.syncedData.StateHead(); ok && root != staleRoot {
-			return true
+			if head, _, err := a.forkchoiceStore.GetHeadNode(); err == nil && head.Root == root {
+				return true
+			}
 		}
 		select {
 		case <-ticker.C:
@@ -152,4 +161,5 @@ func (a *ApiHandler) awaitHeadStateAfter(ctx context.Context, staleRoot common.H
 			return false
 		}
 	}
+	return false
 }

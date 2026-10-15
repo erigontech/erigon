@@ -148,6 +148,8 @@ func TestRetryPendingExecutionPayloadEnvelopeAppliesOnceColumnDataBecomesAvailab
 	gomock.InOrder(
 		peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).Return(false, nil),
 		peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).Return(true, nil),
+		// The apply checks the columns again after admission: the custody set can grow meanwhile.
+		peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).Return(true, nil),
 	)
 	f.peerDas = peerDas
 
@@ -193,6 +195,37 @@ func TestRetryPendingExecutionPayloadEnvelopeAdmitsOneAttemptPerInterval(t *test
 	require.True(t, busy, "the first attempt is still in flight")
 	close(release)
 	awaitSignal(t, first, "the first retry")
+}
+
+// An attempt that the caller's context ends before a verdict does not hold the retry interval,
+// so the next caller does not lose up to one interval of its budget.
+func TestRetryPendingExecutionPayloadEnvelopeReleasesTheIntervalOfAnInterruptedAttempt(t *testing.T) {
+	root := common.HexToHash("0x1")
+	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
+	peerDas.EXPECT().IsDataAvailable(uint64(7), root).Return(true, nil).Times(1)
+	f, pending := newRetryPendingStore(t, peerDas)
+	release := make(chan struct{})
+	f.forkGraph = retryPendingForkGraph{block: f.forkGraph.(retryPendingForkGraph).block, gate: release}
+	pending.Add(root, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: root}})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		f.RetryPendingExecutionPayloadEnvelope(ctx, root)
+		close(done)
+	}()
+	require.Eventually(t, func() bool {
+		_, busy := f.pendingEnvelopeApplyGate.Load(root)
+		return busy
+	}, 5*time.Second, time.Millisecond)
+	_, booked := f.dataAvailableEnvelopeRetryAt.Peek(root)
+	require.True(t, booked, "the attempt in flight holds the interval")
+	cancel()
+	close(release)
+	awaitSignal(t, done, "the interrupted retry")
+
+	_, booked = f.dataAvailableEnvelopeRetryAt.Peek(root)
+	require.False(t, booked)
 }
 
 // gateWaitSignal closes waiting when the apply under test starts to wait at a busy per-root gate:

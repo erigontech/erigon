@@ -88,6 +88,9 @@ type ForkChoiceStorageReader interface {
 	// [New in Gloas:EIP7732] ExecutionPayloadApplyInFlight reports an envelope that is being
 	// applied after passing its signature check.
 	ExecutionPayloadApplyInFlight(blockRoot common.Hash) bool
+	// [New in Gloas:EIP7732] PayloadVotesRuleOutFull reports PTC votes recorded for blockRoot that
+	// already rule out building on its FULL variant.
+	PayloadVotesRuleOutFull(blockRoot common.Hash) bool
 	ExecutionPayloadReceivedBefore(blockRoot common.Hash, deadline time.Time) bool
 	// IsPayloadVerified reports whether the EL has fully validated the payload.
 	IsPayloadVerified(blockRoot common.Hash) bool

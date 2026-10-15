@@ -214,6 +214,7 @@ type ForkChoiceStore struct {
 	envelopeGossipAdmissions ExecutionPayloadEnvelopeAdmissions
 	// Earliest time RetryDataAvailablePendingExecutionPayloadEnvelopes may retry a pending envelope again, by block root.
 	dataAvailableEnvelopeRetryAt *lru.Cache[common.Hash, time.Time]
+	dataAvailableEnvelopeRetryMu sync.Mutex // makes the due check and the booking of a retry one step
 
 	// [New in Gloas:EIP7732] Locally-produced self-build envelopes waiting for their block.
 	// Separate from pendingEnvelopes so that OnBlock replay can distinguish local origin
