@@ -123,3 +123,22 @@ func TestSystemTransactions468(t *testing.T) {
 	}
 	require.Equal(t, 3, system)
 }
+
+// TestExecuteWithoutPostValidation recomputes what the checks compare: the
+// block's gas used and receipts.
+func TestExecuteWithoutPostValidation(t *testing.T) {
+	w := loadWindow(t, "captured-devnet-window-468")
+	last := len(w.blocks) - 1
+	block := w.blocks[last]
+	h := types.CopyHeader(block.Header())
+	h.GasUsed, h.ReceiptHash = 0, common.Hash{}
+	stripped := types.NewBlockFromStorage(h.Hash(), h, block.Transactions(), nil, block.Withdrawals(), nil)
+
+	_, err := Execute(w.config, w.engine, stripped, w.witness(last))
+	require.Error(t, err)
+	res, err := Execute(w.config, w.engine, stripped, w.witness(last), WithoutPostValidation())
+	require.NoError(t, err)
+	require.Equal(t, block.GasUsed(), res.GasUsed)
+	require.Equal(t, block.ReceiptHash(), types.DeriveSha(res.Receipts))
+	require.Equal(t, block.Root(), res.StateRoot)
+}
