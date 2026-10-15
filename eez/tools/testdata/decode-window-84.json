@@ -1,0 +1,62 @@
+{
+  "rollupIds": [
+    "0x1"
+  ],
+  "entries": [
+    {
+      "rollupUpdates": [
+        {
+          "rollupId": "0x1",
+          "etherDelta": "0x0",
+          "currentRoot": "0x5f62964e4debc83590b2a717b27ae1b2583bf0ad5d165feee8d3d24d15e8f29c",
+          "newRoot": "0x776de0ca48213074c90bf203d968d01611d6abba6b1e232a960a689fd0f288e7"
+        }
+      ],
+      "proxyEntryHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "l2ToL1Calls": 0,
+      "expectedL1ToL2Calls": 0,
+      "destinationRollupId": "0x1",
+      "success": true
+    }
+  ],
+  "immediateEntryCount": "0x1",
+  "staticEntryCount": 0,
+  "blockNumber": "0x0",
+  "blobCount": 0,
+  "payload": {
+    "rollupId": "0x1",
+    "blocks": [
+      {
+        "beneficiary": "0x0000000000000000000000000000000000000000",
+        "extraData": "0x",
+        "transactions": []
+      },
+      {
+        "beneficiary": "0x0000000000000000000000000000000000000000",
+        "extraData": "0x",
+        "transactions": []
+      },
+      {
+        "beneficiary": "0x0000000000000000000000000000000000000000",
+        "extraData": "0x",
+        "transactions": []
+      },
+      {
+        "beneficiary": "0x0000000000000000000000000000000000000000",
+        "extraData": "0x",
+        "transactions": []
+      },
+      {
+        "beneficiary": "0x0000000000000000000000000000000000000000",
+        "extraData": "0x",
+        "transactions": []
+      },
+      {
+        "beneficiary": "0x0000000000000000000000000000000000000000",
+        "extraData": "0x",
+        "transactions": []
+      }
+    ],
+    "actions": []
+  }
+}
