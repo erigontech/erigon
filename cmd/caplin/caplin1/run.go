@@ -432,7 +432,9 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		SubscribeAllTopics: config.SubscribeAllTopics,
 		// EnableBlocks:                 true,
 		// ActiveIndicies: uint64(len(activeIndicies)),
-		MaxPeerCount: config.MaxPeerCount,
+		MaxPeerCount:         config.MaxPeerCount,
+		DisableIPBlockLimits: config.DisableIPBlockLimits,
+		TrustedCIDRs:         config.TrustedCIDRs,
 	}, logger, ethClock)
 	if err != nil {
 		return err

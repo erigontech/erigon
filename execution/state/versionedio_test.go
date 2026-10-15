@@ -130,6 +130,15 @@ func (r *minimalStateReader) ReadAccountData(addr accounts.Address) (*accounts.A
 	return nil, nil
 }
 
+func (r *minimalStateReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (r *minimalStateReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
 func (r *minimalStateReader) ReadAccountDataForDebug(addr accounts.Address) (*accounts.Account, error) {
 	return nil, nil
 }
@@ -1992,4 +2001,31 @@ func TestSynthesizeWithoutCellsAllocatesNothing(t *testing.T) {
 		}
 	})
 	require.Zero(t, allocs)
+}
+
+// An arena-backed set copies AddressPath values onto its own slab, and a
+// published snapshot keeps its own copy once the set moves on to the next tx.
+func TestArenaAddressWritesOutliveTheSlab(t *testing.T) {
+	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
+	defer ibs.Close()
+	ibs.versionedWrites.UseArena()
+	addr := accounts.InternAddress(common.HexToAddress("0xacc7"))
+	ibs.recordWriteAddress(addr, &accounts.Account{Nonce: 7, Balance: *uint256.NewInt(9)})
+
+	published := ibs.VersionedWrites()
+	ibs.versionedWrites.ReleaseAndReset()
+	ibs.recordWriteAddress(addr, &accounts.Account{Nonce: 1})
+
+	vw, ok := published.GetAddress(addr)
+	require.True(t, ok)
+	require.Equal(t, uint64(7), vw.Val.Nonce)
+	require.Equal(t, *uint256.NewInt(9), vw.Val.Balance)
+
+	// Prime the slab past the measured count, so the measurement sees steady-state writes, not chunk growth.
+	for i := range 128 {
+		ibs.recordWriteAddress(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i+1)))), &accounts.Account{Nonce: uint64(i)})
+	}
+	ibs.versionedWrites.ReleaseAndReset()
+	acc := &accounts.Account{Nonce: 3}
+	require.Zero(t, testing.AllocsPerRun(100, func() { ibs.recordWriteAddress(addr, acc) }), "no allocation per AddressPath write")
 }

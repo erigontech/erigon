@@ -64,6 +64,35 @@ func TestGloasAnchorStartsWithoutPtcVotes(t *testing.T) {
 	}
 }
 
+func TestNewForkChoiceStoreAnchorCheckpointEpoch(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	for _, tc := range []struct {
+		name       string
+		slot       uint64
+		headerSlot uint64
+		wantEpoch  uint64
+	}{
+		{name: "advanced to epoch start", slot: 96, headerSlot: 95, wantEpoch: 3},
+		{name: "block post-state", slot: 95, headerSlot: 95, wantEpoch: 3},
+		{name: "advanced mid-epoch", slot: 95, headerSlot: 94, wantEpoch: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			anchor := state.New(&cfg)
+			require.NoError(t, anchor.SetSlot(tc.slot))
+			anchor.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: tc.headerSlot})
+			anchorRoot, err := anchor.BlockRoot()
+			require.NoError(t, err)
+
+			store, err := NewForkChoiceStore(nil, anchor, nil, pool.OperationsPool{}, nil, nil, nil, nil, public_keys_registry.NewInMemoryPublicKeysRegistry(), nil, false, nil)
+			require.NoError(t, err)
+
+			want := solid.Checkpoint{Epoch: tc.wantEpoch, Root: anchorRoot}
+			require.Equal(t, want, store.FinalizedCheckpoint())
+			require.Equal(t, want, store.JustifiedCheckpoint())
+		})
+	}
+}
+
 func (g *embeddedPtcVoteForkGraph) AddChainSegment(block *cltypes.SignedBeaconBlock, _ bool) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
 	root, err := block.Block.HashSSZ()
 	if err != nil {
@@ -789,6 +818,149 @@ func TestOnAttesterSlashingRejectsIncompleteOperation(t *testing.T) {
 	})
 }
 
+func TestOnAttesterSlashingIgnoresMissingJustifiedStateWhileSyncing(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	root := common.Hash{1}
+	loadErr := errors.New("state storage unavailable")
+	slashing := &cltypes.AttesterSlashing{
+		Attestation_1: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, []uint64{1}),
+			Data: &solid.AttestationData{
+				Slot:   1,
+				Target: solid.Checkpoint{Epoch: 1},
+			},
+		},
+		Attestation_2: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, []uint64{1}),
+			Data: &solid.AttestationData{
+				Slot:   2,
+				Target: solid.Checkpoint{Epoch: 1},
+			},
+		},
+	}
+	largeIndices := make([]uint64, int(cfg.MaxValidatorsPerCommittee)+1)
+	for i := range largeIndices {
+		largeIndices[i] = uint64(i)
+	}
+	largeSlashing := &cltypes.AttesterSlashing{
+		Attestation_1: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(int(cfg.MaxValidatorsPerCommittee*cfg.MaxCommitteesPerSlot), largeIndices),
+			Data:             slashing.Attestation_1.Data,
+		},
+		Attestation_2: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(int(cfg.MaxValidatorsPerCommittee*cfg.MaxCommitteesPerSlot), largeIndices),
+			Data:             slashing.Attestation_2.Data,
+		},
+	}
+	slashings := []struct {
+		name     string
+		slashing *cltypes.AttesterSlashing
+	}{
+		{name: "single index", slashing: slashing},
+		{name: "electra capacity with pre-electra target", slashing: largeSlashing},
+	}
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "missing"},
+		{name: "load error", err: loadErr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &ForkChoiceStore{
+				forkGraph:         &getFinalizedExecutionHashForkGraph{getStateErr: tc.err},
+				operationsPool:    pool.NewOperationsPool(&cfg),
+				syncedDataManager: synced_data.NewSyncedDataManager(&cfg, true),
+			}
+			store.justifiedCheckpoint.Store(solid.Checkpoint{Root: root})
+
+			for _, slashingCase := range slashings {
+				t.Run(slashingCase.name, func(t *testing.T) {
+					err := store.OnAttesterSlashing(slashingCase.slashing, true)
+					require.ErrorIs(t, err, synced_data.ErrNotSynced)
+				})
+			}
+		})
+	}
+}
+
+func TestOnAttesterSlashingRejectsInvalidSlashingWhileSyncing(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	root := common.Hash{1}
+	data := &solid.AttestationData{}
+	for _, slashingCase := range []struct {
+		name          string
+		slashing      *cltypes.AttesterSlashing
+		errorContains string
+	}{
+		{
+			name: "non-slashable data",
+			slashing: &cltypes.AttesterSlashing{
+				Attestation_1: &cltypes.IndexedAttestation{
+					AttestingIndices: solid.NewRawUint64List(2048, []uint64{1}),
+					Data:             data,
+				},
+				Attestation_2: &cltypes.IndexedAttestation{
+					AttestingIndices: solid.NewRawUint64List(2048, []uint64{1}),
+					Data:             data,
+				},
+			},
+			errorContains: "attestation data is not slashable",
+		},
+		{
+			name: "unsorted indices",
+			slashing: &cltypes.AttesterSlashing{
+				Attestation_1: &cltypes.IndexedAttestation{
+					AttestingIndices: solid.NewRawUint64List(2048, []uint64{2, 1}),
+					Data: &solid.AttestationData{
+						Slot:   1,
+						Target: solid.Checkpoint{Epoch: 1},
+					},
+				},
+				Attestation_2: &cltypes.IndexedAttestation{
+					AttestingIndices: solid.NewRawUint64List(2048, []uint64{1}),
+					Data: &solid.AttestationData{
+						Slot:   2,
+						Target: solid.Checkpoint{Epoch: 1},
+					},
+				},
+			},
+			errorContains: "attesting indices are not sorted or are null",
+		},
+	} {
+		t.Run(slashingCase.name, func(t *testing.T) {
+			loadErr := errors.New("state storage unavailable")
+			for _, tc := range []struct {
+				name      string
+				forkGraph *getFinalizedExecutionHashForkGraph
+			}{
+				{
+					name: "available",
+					forkGraph: &getFinalizedExecutionHashForkGraph{
+						states: map[common.Hash]*state.CachingBeaconState{root: state.New(&cfg)},
+					},
+				},
+				{name: "missing", forkGraph: &getFinalizedExecutionHashForkGraph{}},
+				{name: "load error", forkGraph: &getFinalizedExecutionHashForkGraph{getStateErr: loadErr}},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					store := &ForkChoiceStore{
+						forkGraph:         tc.forkGraph,
+						operationsPool:    pool.NewOperationsPool(&cfg),
+						syncedDataManager: synced_data.NewSyncedDataManager(&cfg, true),
+					}
+					store.justifiedCheckpoint.Store(solid.Checkpoint{Root: root})
+
+					err := store.OnAttesterSlashing(slashingCase.slashing, true)
+					require.ErrorContains(t, err, slashingCase.errorContains)
+					require.NotErrorIs(t, err, ErrIgnore)
+					require.NotErrorIs(t, err, synced_data.ErrNotSynced)
+				})
+			}
+		})
+	}
+}
+
 func TestDrainQueuedWorkRetainsOperationsWhenFinalizedStateIsUnavailable(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	operationsPool := pool.NewOperationsPool(&cfg)
@@ -884,6 +1056,158 @@ func waitForStateLoad(t *testing.T, started <-chan common.Hash) common.Hash {
 	}
 }
 
+func TestCheckpointStatesBoundedWithoutFinalization(t *testing.T) {
+	checkpoints := checkpointStateCacheTestCheckpoints(maxCheckpointStates + 1)
+	store := newCheckpointStateCacheTestStore(t, checkpoints, solid.Checkpoint{})
+
+	for _, checkpoint := range checkpoints {
+		_, err := store.getCheckpointState(checkpoint)
+		require.NoError(t, err)
+	}
+
+	require.Equal(t, maxCheckpointStates, checkpointStateCacheLen(store))
+	_, ok := store.checkpointStates.Load(checkpoints[0])
+	require.False(t, ok)
+}
+
+func TestCheckpointStatesKeepJustStoredState(t *testing.T) {
+	checkpoints := checkpointStateCacheTestCheckpoints(maxCheckpointStates + 1)
+	justStored := checkpoints[0]
+	store := newCheckpointStateCacheTestStore(t, checkpoints, solid.Checkpoint{})
+
+	for _, checkpoint := range checkpoints[1:] {
+		_, err := store.getCheckpointState(checkpoint)
+		require.NoError(t, err)
+	}
+	justStoredState, err := store.getCheckpointState(justStored)
+	require.NoError(t, err)
+
+	cached, ok := store.checkpointStates.Load(justStored)
+	require.True(t, ok)
+	require.Same(t, justStoredState, cached)
+	require.Equal(t, maxCheckpointStates, checkpointStateCacheLen(store))
+}
+
+func TestCheckpointStatesKeepCurrentJustified(t *testing.T) {
+	checkpoints := checkpointStateCacheTestCheckpoints(maxCheckpointStates + 2)
+	justified := checkpoints[0]
+	store := newCheckpointStateCacheTestStore(t, checkpoints, justified)
+
+	justifiedState, err := store.getCheckpointState(justified)
+	require.NoError(t, err)
+	for _, checkpoint := range checkpoints[1:] {
+		_, err := store.getCheckpointState(checkpoint)
+		require.NoError(t, err)
+	}
+
+	cached, ok := store.checkpointStates.Load(justified)
+	require.True(t, ok)
+	require.Same(t, justifiedState, cached)
+	require.Equal(t, maxCheckpointStates, checkpointStateCacheLen(store))
+}
+
+func TestJustifiedPromotionWaitsForCheckpointStateEviction(t *testing.T) {
+	current := solid.Checkpoint{Epoch: 1, Root: common.Hash{1}}
+	promoted := solid.Checkpoint{Epoch: 2, Root: common.Hash{2}}
+	store := newCheckpointStateCacheTestStore(t, nil, current)
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+
+	requireWaitsForCheckpointStatesMu(t, store, func() {
+		store.updateCheckpoints(promoted, solid.Checkpoint{})
+	}, func() {
+		require.Equal(t, current, store.justifiedCheckpoint.Load().(solid.Checkpoint))
+	})
+	require.Equal(t, promoted, store.justifiedCheckpoint.Load().(solid.Checkpoint))
+}
+
+func TestCheckpointStateEvictionWaitsForJustifiedPromotion(t *testing.T) {
+	checkpoint := checkpointStateCacheTestCheckpoints(1)[0]
+	store := newCheckpointStateCacheTestStore(t, []solid.Checkpoint{checkpoint}, solid.Checkpoint{})
+	var loadedState *checkpointState
+	var err error
+
+	requireWaitsForCheckpointStatesMu(t, store, func() {
+		loadedState, err = store.getCheckpointState(checkpoint)
+	}, nil)
+	require.NoError(t, err)
+
+	cached, ok := store.checkpointStates.Load(checkpoint)
+	require.True(t, ok)
+	require.Same(t, loadedState, cached)
+}
+
+func requireWaitsForCheckpointStatesMu(t *testing.T, store *ForkChoiceStore, fn, whileBlocked func()) {
+	t.Helper()
+	store.checkpointStatesMu.Lock()
+	unlocked := false
+	defer func() {
+		if !unlocked {
+			store.checkpointStatesMu.Unlock()
+		}
+	}()
+
+	started := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		close(started)
+		fn()
+		close(done)
+	}()
+	<-started
+
+	select {
+	case <-done:
+		t.Fatal("operation completed while checkpointStatesMu was held")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if whileBlocked != nil {
+		whileBlocked()
+	}
+
+	store.checkpointStatesMu.Unlock()
+	unlocked = true
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("operation did not finish after checkpointStatesMu was released")
+	}
+}
+
+func checkpointStateCacheTestCheckpoints(count int) []solid.Checkpoint {
+	checkpoints := make([]solid.Checkpoint, count)
+	for i := range checkpoints {
+		checkpoints[i] = solid.Checkpoint{Epoch: uint64(i + 1), Root: common.Hash{byte(i + 1)}}
+	}
+	return checkpoints
+}
+
+func newCheckpointStateCacheTestStore(t *testing.T, checkpoints []solid.Checkpoint, justified solid.Checkpoint) *ForkChoiceStore {
+	t.Helper()
+	cfg := clparams.MainnetBeaconConfig
+	graph := &getFinalizedExecutionHashForkGraph{states: make(map[common.Hash]*state.CachingBeaconState, len(checkpoints))}
+	for _, checkpoint := range checkpoints {
+		checkpointState := state.New(&cfg)
+		require.NoError(t, checkpointState.SetSlot(checkpoint.Epoch*cfg.SlotsPerEpoch))
+		graph.states[checkpoint.Root] = checkpointState
+	}
+	store := &ForkChoiceStore{
+		beaconCfg:          &cfg,
+		forkGraph:          graph,
+		publicKeysRegistry: public_keys_registry.NewInMemoryPublicKeysRegistry(),
+	}
+	store.justifiedCheckpoint.Store(justified)
+	return store
+}
+
+func checkpointStateCacheLen(store *ForkChoiceStore) int {
+	count := 0
+	store.checkpointStates.Range(func(_, _ any) bool {
+		count++
+		return true
+	})
+	return count
+}
+
 type getFinalizedExecutionHashForkGraph struct {
 	blocks                map[common.Hash]*cltypes.SignedBeaconBlock
 	headers               map[common.Hash]*cltypes.BeaconBlockHeader
@@ -893,6 +1217,7 @@ type getFinalizedExecutionHashForkGraph struct {
 	getStateAlwaysCopy    []bool
 	getStateStarted       chan common.Hash
 	getStateRelease       chan struct{}
+	getStateErr           error
 	beforeUpdate          *cltypes.LightClientUpdate
 	afterUpdate           *cltypes.LightClientUpdate
 	addChainSegmentStatus fork_graph.ChainSegmentInsertionResult
@@ -957,6 +1282,9 @@ func (g *getFinalizedExecutionHashForkGraph) GetState(blockRoot common.Hash, alw
 	}
 	if g.getStateRelease != nil {
 		<-g.getStateRelease
+	}
+	if g.getStateErr != nil {
+		return nil, g.getStateErr
 	}
 	state := g.states[blockRoot]
 	return state, nil
