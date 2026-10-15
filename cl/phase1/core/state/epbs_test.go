@@ -54,18 +54,20 @@ func TestGetProposerDependentRoot(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
-func TestGetProposerDependentRootRejectsUnderflow(t *testing.T) {
+func TestGetProposerDependentRootUsesGenesisRoot(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.SlotsPerEpoch = 32
 	cfg.MinSeedLookahead = 1
 	s := state2.New(&cfg)
-	require.NoError(t, s.SetSlot(100))
+	require.NoError(t, s.SetSlot(32))
+	want := common.Hash{0x42}
+	require.NoError(t, s.SetBlockRootAt(0, want))
 
-	_, err := state2.GetProposerDependentRoot(s, 0)
-	require.Error(t, err)
-
-	_, err = state2.GetProposerDependentRoot(s, 1)
-	require.Error(t, err)
+	for _, epoch := range []uint64{0, 1} {
+		got, err := state2.GetProposerDependentRoot(s, epoch)
+		require.NoError(t, err, "epoch %d", epoch)
+		require.Equal(t, want, got, "epoch %d", epoch)
+	}
 }
 
 func TestApplyDepositForBuilder_NewBuilder_WithValidSignature(t *testing.T) {

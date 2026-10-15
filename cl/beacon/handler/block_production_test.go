@@ -4682,6 +4682,45 @@ func TestPollAssembledPayloadStillReportsFailuresThatPrecededTheCancellation(t *
 	require.Contains(t, err.Error(), "boom")
 }
 
+func TestFeeRecipientForProposalUsesGenesisPreferences(t *testing.T) {
+	config := clparams.MainnetBeaconConfig
+	config.GloasForkEpoch = 0
+	config.MinSeedLookahead = 1
+	const proposerIndex = uint64(7)
+	feeRecipient := common.Address{0x22}
+	for _, targetSlot := range []uint64{1, 2, config.SlotsPerEpoch} {
+		for _, registered := range []bool{false, true} {
+			t.Run(fmt.Sprintf("slot_%d/registered_%t", targetSlot, registered), func(t *testing.T) {
+				baseState := state.New(&config)
+				baseState.SetVersion(clparams.GloasVersion)
+				genesisRoot, err := baseState.BlockRoot()
+				require.NoError(t, err)
+				require.NoError(t, baseState.SetSlot(targetSlot-1))
+				if baseState.Slot() > 0 {
+					require.NoError(t, baseState.SetBlockRootAt(0, genesisRoot))
+				}
+				params := validator_params.NewValidatorParams()
+				if registered {
+					params.SetFeeRecipient(proposerIndex, common.Address{0x11})
+				}
+				handler := &ApiHandler{beaconChainCfg: &config, validatorParams: params, epbsPool: pool.NewEpbsPool()}
+				handler.epbsPool.ProposerPreferences.Add(
+					pool.ProposerPreferencesKey{Slot: targetSlot, DependentRoot: genesisRoot},
+					&cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+						ProposalSlot: targetSlot, DependentRoot: genesisRoot, ValidatorIndex: proposerIndex,
+						FeeRecipient: feeRecipient, TargetGasLimit: 36_000_000,
+					}},
+				)
+
+				require.Equal(t, feeRecipient, handler.feeRecipientForProposal(baseState, targetSlot, proposerIndex, clparams.GloasVersion))
+				gasLimit := handler.targetGasLimitForProposal(baseState, targetSlot, proposerIndex, clparams.GloasVersion)
+				require.NotNil(t, gasLimit)
+				require.Equal(t, hexutil.Uint64(36_000_000), *gasLimit)
+			})
+		}
+	}
+}
+
 func TestFeeRecipientForProposalIgnoresUnrelatedPreferences(t *testing.T) {
 	config := clparams.MainnetBeaconConfig
 	targetSlot := 3 * config.SlotsPerEpoch
