@@ -494,7 +494,7 @@ func TestExecutionPayloadServiceAlreadySeen(t *testing.T) {
 	// Second call with same (blockRoot, builderIndex) should be ignored
 	err = service.ProcessMessage(context.Background(), nil, envelope)
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrIgnore)
 	require.Contains(t, err.Error(), "already seen envelope")
 }
 
@@ -878,7 +878,7 @@ func TestExecutionPayloadServiceSlotBelowFinalized(t *testing.T) {
 
 	err := service.ProcessMessage(context.Background(), nil, envelope)
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrIgnore)
 	require.Contains(t, err.Error(), "envelope slot 50 < finalized slot 64")
 }
 

@@ -102,7 +102,7 @@ func getProposerScore(f *ForkChoiceStore, cs *checkpointState) uint64 {
 	if cs == nil {
 		return 0
 	}
-	committeeWeight := cs.activeBalance / f.beaconCfg.SlotsPerEpoch
+	committeeWeight := cs.unslashedActiveBalance / f.beaconCfg.SlotsPerEpoch
 	return (committeeWeight * f.beaconCfg.ProposerScoreBoost) / 100
 }
 

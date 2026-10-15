@@ -324,6 +324,10 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		if err != nil {
 			return err
 		}
+		// [REJECT] The number of aggregation bits matches the committee size -- i.e. len(aggregation_bits) == len(get_beacon_committee(state, aggregate.data.slot, index)).
+		if aggregate.AggregationBits.Bits() != len(committee) {
+			return fmt.Errorf("aggregation bits length %d does not match committee size %d", aggregate.AggregationBits.Bits(), len(committee))
+		}
 		// [REJECT] The attestation has participants -- that is, len(get_attesting_indices(state, aggregate)) >= 1
 		attestingIndices, err = headState.GetAttestingIndicies(aggregate, false)
 		if err != nil {

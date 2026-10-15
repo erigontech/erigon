@@ -14,6 +14,7 @@ import (
 	"github.com/heimdalr/dag"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -792,6 +793,44 @@ func (a *vwArena[T]) reset(release func(*VersionedWrite[T])) {
 	}
 }
 
+const acctChunk = 32
+
+// acctSlab holds an arena-backed set's AddressPath values; a value stays valid
+// until the arena resets, so Snapshot copies it out.
+type acctSlab struct {
+	chunks [][]accounts.Account
+	n      int
+}
+
+func (s *acctSlab) copyOf(a *accounts.Account) *accounts.Account {
+	i, j := s.n/acctChunk, s.n%acctChunk
+	if i == len(s.chunks) {
+		if s.n >= vwMaxCells {
+			return a.SelfCopy()
+		}
+		s.chunks = append(s.chunks, make([]accounts.Account, acctChunk))
+	}
+	p := &s.chunks[i][j]
+	*p = *a
+	s.n++
+	return p
+}
+
+func (s *acctSlab) reset() {
+	for i := 0; i*acctChunk < s.n; i++ {
+		clear(s.chunks[i][:min(acctChunk, s.n-i*acctChunk)])
+	}
+	s.n = 0
+}
+
+// copyAccount returns a copy of a for an AddressPath write.
+func (ws *WriteSet) copyAccount(a *accounts.Account) *accounts.Account {
+	if ws.cells != nil {
+		return ws.cells.accounts.copyOf(a)
+	}
+	return a.SelfCopy()
+}
+
 func (ws *WriteSet) newVWAddress() *VersionedWrite[*accounts.Account] {
 	if ws.cells != nil {
 		return ws.cells.address.alloc(getVWAddress)
@@ -895,9 +934,11 @@ type vwArenas struct {
 	codeHash       vwArena[accounts.CodeHash]
 	codeSize       vwArena[int]
 	storage        vwArena[uint256.Int]
+	accounts       acctSlab
 }
 
 func (a *vwArenas) reset() {
+	a.accounts.reset()
 	a.address.reset(releaseVWAddress)
 	a.balance.reset(releaseVWBalance)
 	a.nonce.reset(releaseVWNonce)
@@ -1234,7 +1275,11 @@ func (ws *WriteSet) Snapshot() *WriteSet {
 		}
 		if !sd {
 			if vw, ok := ws.address[addr]; ok {
-				out.SetAddress(addr, cloneVW(vw))
+				c := cloneVW(vw)
+				if ws.cells != nil && c.Val != nil {
+					c.Val = c.Val.SelfCopy()
+				}
+				out.SetAddress(addr, c)
 			}
 			if vw, ok := ws.nonce[addr]; ok {
 				out.SetNonce(addr, cloneVW(vw))
@@ -1869,10 +1914,17 @@ type versionedStateReader struct {
 	reads       ReadSet
 	versionMap  *VersionMap
 	stateReader StateReader
+	eip8246     bool
 }
 
 func NewVersionedStateReader(txIndex int, reads ReadSet, versionMap *VersionMap, stateReader StateReader) *versionedStateReader {
-	return &versionedStateReader{txIndex, reads, versionMap, stateReader}
+	return &versionedStateReader{txIndex: txIndex, reads: reads, versionMap: versionMap, stateReader: stateReader}
+}
+
+// SetEIP8246 makes an account self-destructed by a prior tx read as live while
+// it keeps a non-zero balance.
+func (vr *versionedStateReader) SetEIP8246(enabled bool) {
+	vr.eip8246 = enabled
 }
 
 func (vr *versionedStateReader) SetTrace(trace bool, tracePrefix string) {
@@ -1911,7 +1963,7 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 		// coinbase re-creates it, and we must surface the re-created
 		// account so finalize accumulates the prior cumulative value.
 		if destroyed, _, revived := vr.versionMap.AccountLifecycle(address, vr.txIndex); destroyed && !revived {
-			return nil, nil
+			return vr.preservedAccount(address), nil
 		}
 		if acc, ok := versionedUpdateAddress(vr.versionMap, address, vr.txIndex); ok && acc != nil {
 			updated := vr.applyVersionedUpdates(address, *acc)
@@ -1955,6 +2007,32 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 	}
 
 	return nil, nil
+}
+
+// preservedAccount is what remains of a self-destructed account under EIP-8246:
+// the kept balance with no code and a zero nonce, or nil when nothing was kept.
+// Without a revival no balance cell sits above the destruct, so the floor cell is
+// the post-destruct balance.
+func (vr *versionedStateReader) preservedAccount(address accounts.Address) *accounts.Account {
+	if !vr.eip8246 {
+		return nil
+	}
+	balance, _, ok := vr.versionMap.ReadBalance(address, vr.txIndex)
+	if !ok || balance.IsZero() {
+		return nil
+	}
+	acc := accounts.NewAccount()
+	acc.Balance = balance
+	return &acc
+}
+
+func (vr *versionedStateReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return vr.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (vr *versionedStateReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := vr.ReadAccountByPlainAddr(address)
+	return acc != nil, err
 }
 
 // Per-path versionedUpdate helpers replace the legacy generic
