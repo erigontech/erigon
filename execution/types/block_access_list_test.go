@@ -52,6 +52,31 @@ func TestBlockAccessListCopy(t *testing.T) {
 	}
 }
 
+func TestDecodeBlockAccessListSidecarForHeaderRejectsDuplicateItems(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		bal  BlockAccessList
+	}{
+		{name: "accounts", bal: BlockAccessList{{}, {}}},
+		{name: "storage slots", bal: BlockAccessList{{StorageChanges: []SlotChanges{
+			{Slot: accounts.ZeroKey, Changes: []*StorageChange{{}}},
+			{Slot: accounts.ZeroKey, Changes: []*StorageChange{{}}},
+		}}}},
+		{name: "storage reads", bal: BlockAccessList{{StorageReads: []accounts.StorageKey{accounts.ZeroKey, accounts.ZeroKey}}}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, err := EncodeBlockAccessListBytes(tt.bal)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = DecodeBlockAccessListSidecarForHeader(raw, 1_000_000_000)
+			if !errors.Is(err, ErrInvalidBlockAccessList) || !strings.Contains(err.Error(), "strictly increasing") {
+				t.Fatalf("decode BAL: got %v, want invalid ordering", err)
+			}
+		})
+	}
+}
+
 func TestBlockAccessListSidecarPreservesRLP(t *testing.T) {
 	bal := BlockAccessList{{Address: common.Address{1}}}
 	raw, err := EncodeBlockAccessListBytes(bal)
@@ -444,7 +469,7 @@ func TestBlockAccessListLargeCodeRoundTrip(t *testing.T) {
 	if len(raw) <= 4<<20 {
 		t.Fatalf("BAL size = %d, want more than 4 MiB", len(raw))
 	}
-	sidecar, err := DecodeBlockAccessListSidecarOwned(raw)
+	sidecar, err := DecodeBlockAccessListSidecarForBlock(raw, 10_000_000_000, len(bal))
 	if err != nil {
 		t.Fatalf("decode BAL: %v", err)
 	}
@@ -598,7 +623,7 @@ func TestBlockAccessListLargeLists(t *testing.T) {
 			if err != nil {
 				t.Fatalf("encode BAL: %v", err)
 			}
-			decoded, err := DecodeBlockAccessListBytes(raw)
+			sidecar, err := DecodeBlockAccessListSidecarForHeader(raw, 10_000_000_000)
 			if tt.wantError != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantError) {
 					t.Fatalf("decode BAL: got %v, want %q", err, tt.wantError)
@@ -608,6 +633,7 @@ func TestBlockAccessListLargeLists(t *testing.T) {
 			if err != nil {
 				t.Fatalf("decode BAL: %v", err)
 			}
+			decoded := sidecar.BlockAccessList()
 			if err := decoded.ValidateForHeader(10_000_000_000); err != nil {
 				t.Fatalf("validate BAL: %v", err)
 			}
