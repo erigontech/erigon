@@ -1024,7 +1024,7 @@ func recordGloasPayloadRetryResult(
 	store gloasPayloadRetryResultStore,
 	payload forkchoice.PendingELPayload,
 	answer execution_client.PayloadStatus,
-	depth uint64,
+	depth validationDepth,
 ) (execution_client.PayloadStatus, bool) {
 	if !validPendingGloasPayload(payload) {
 		return execution_client.PayloadStatusNone, false
@@ -1042,8 +1042,8 @@ func recordGloasPayloadRetryResult(
 // notValidatedBelowDepth reports a block below the EL's validation depth that the EL itself answered
 // NotValidated, with that status recorded: the EL does not validate it, so a retry changes nothing.
 // A recorded NotValidated alone is not enough, because it outlives an error answer.
-func notValidatedBelowDepth(answer, recorded execution_client.PayloadStatus, blockNumber, depth uint64) bool {
-	return answer == execution_client.PayloadStatusNotValidated && recorded == execution_client.PayloadStatusNotValidated && blockNumber < depth
+func notValidatedBelowDepth(answer, recorded execution_client.PayloadStatus, blockNumber uint64, depth validationDepth) bool {
+	return answer == execution_client.PayloadStatusNotValidated && recorded == execution_client.PayloadStatusNotValidated && depth.skips(blockNumber)
 }
 
 // skippedValidation is a payload the EL answered NotValidated below its validation depth.
@@ -1061,17 +1061,48 @@ type skippedAnchorValidation struct {
 // validationDepthEL is an EL client that inserts a block below a number, deep under its head, but
 // answers NotValidated without validating it.
 type validationDepthEL interface {
-	SkipsValidationBelow(ctx context.Context) uint64
+	SkipsValidationBelow(ctx context.Context) (below uint64, known bool)
 }
 
-// elValidationDepth returns the block number below which el answers NotValidated without
-// validating, or 0. It follows the EL head.
-func elValidationDepth(ctx context.Context, el execution_client.ExecutionEngine) uint64 {
+// validationDepth is the block number below which the EL answers NotValidated without validating.
+// It is unknown while the EL head cannot be read.
+type validationDepth struct {
+	below uint64
+	known bool
+}
+
+func (d validationDepth) skips(blockNumber uint64) bool {
+	return blockNumber < d.below
+}
+
+// keeps reports whether a block remembered below the depth stays remembered: an unknown depth keeps it.
+func (d validationDepth) keeps(blockNumber uint64) bool {
+	return !d.known || blockNumber < d.below
+}
+
+// elValidationDepth returns el's validation depth. It follows the EL head; an EL without one
+// validates every block.
+func elValidationDepth(ctx context.Context, el execution_client.ExecutionEngine) validationDepth {
 	depthEL, ok := el.(validationDepthEL)
 	if !ok {
-		return 0
+		return validationDepth{known: true}
 	}
-	return depthEL.SkipsValidationBelow(ctx)
+	below, known := depthEL.SkipsValidationBelow(ctx)
+	return validationDepth{below: below, known: known}
+}
+
+// skipsRememberedRoot reports whether the sweep remembered root below the depth and it still is; a
+// root back above a known depth is forgotten.
+func skipsRememberedRoot(cfg *Cfg, root common.Hash, depth validationDepth) bool {
+	skipped, ok := cfg.gloasSkippedValidation[root]
+	if !ok {
+		return false
+	}
+	if depth.keeps(skipped.blockNumber) {
+		return true
+	}
+	delete(cfg.gloasSkippedValidation, root)
+	return false
 }
 
 func buildGloasNewPayloadArgs(cfg *Cfg, block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) ([]common.Hash, []hexutil.Bytes, error) {
@@ -1267,16 +1298,8 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 			completedScan = true
 			break
 		}
-		// A remembered root is skipped, not its ancestors: an interrupted batch may have left them
-		// unsent. The depth follows the EL head, so a payload back above it is checked again; an
-		// unknown depth (0) keeps it.
-		remembered := false
-		if skipped, ok := cfg.gloasSkippedValidation[root]; ok {
-			if remembered = depth == 0 || skipped.blockNumber < depth; !remembered {
-				delete(cfg.gloasSkippedValidation, root)
-			}
-		}
-		if !remembered && cfg.forkChoice.HasEnvelope(root) && !cfg.forkChoice.IsPayloadVerified(root) {
+		// A remembered root is skipped, not its ancestors: an interrupted batch may have left them unsent.
+		if !skipsRememberedRoot(cfg, root, depth) && cfg.forkChoice.HasEnvelope(root) && !cfg.forkChoice.IsPayloadVerified(root) {
 			blocks = append(blocks, gloasVerificationItem{root: root, block: block})
 		}
 		root = common.Hash(block.Block.ParentRoot)
@@ -1287,7 +1310,7 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 		if ctx.Err() != nil {
 			return false
 		}
-		if cfg.forkChoice.IsPayloadVerified(item.root) {
+		if cfg.forkChoice.IsPayloadVerified(item.root) || skipsRememberedRoot(cfg, item.root, depth) {
 			return true
 		}
 		envelope, err := cfg.forkChoice.ReadEnvelopeFromDisk(item.root)
@@ -1365,7 +1388,7 @@ func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
 		return
 	}
 	depth := elValidationDepth(ctx, cfg.executionClient)
-	if skipped := cfg.gloasSkippedAnchorValidation; skipped.root == anchorRoot && (depth == 0 || skipped.blockNumber < depth) {
+	if skipped := cfg.gloasSkippedAnchorValidation; skipped.root == anchorRoot && depth.keeps(skipped.blockNumber) {
 		return
 	}
 	anchorState, err := cfg.forkChoice.GetStateAtBlockRoot(anchorRoot, true)

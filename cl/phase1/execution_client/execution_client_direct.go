@@ -212,9 +212,11 @@ func retryAssembleBlock(ctx context.Context, attempts int, delay time.Duration, 
 }
 
 // SkipsValidationBelow returns the block number below which NewPayload inserts a block but answers
-// NotValidated without validating it, or 0 when it validates every block. It follows the EL head.
-func (cc *ExecutionClientDirect) SkipsValidationBelow(ctx context.Context) uint64 {
-	return notValidatedBelow(cc.chainRW.CurrentHeader(ctx))
+// NotValidated without validating it, or 0 when it validates every block. It follows the EL head;
+// known is false when the head cannot be read.
+func (cc *ExecutionClientDirect) SkipsValidationBelow(ctx context.Context) (below uint64, known bool) {
+	head := cc.chainRW.CurrentHeader(ctx)
+	return notValidatedBelow(head), head != nil
 }
 
 // notValidatedBelow returns the block number below which a block is more than reorgTooDeepDepth

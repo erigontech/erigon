@@ -150,8 +150,17 @@ func TestDirectSkipsValidationBelowTracksTheHead(t *testing.T) {
 		return client
 	}
 
-	require.Zero(t, newClient(0).SkipsValidationBelow(t.Context()))
-	require.Equal(t, uint64(6-reorgTooDeepDepth), newClient(6).SkipsValidationBelow(t.Context()))
+	below, known := newClient(0).SkipsValidationBelow(t.Context())
+	require.True(t, known)
+	require.Zero(t, below, "a head at the first blocks validates every block")
+	below, known = newClient(6).SkipsValidationBelow(t.Context())
+	require.True(t, known)
+	require.Equal(t, uint64(6-reorgTooDeepDepth), below)
+
+	ended, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, known = newClient(6).SkipsValidationBelow(ended)
+	require.False(t, known, "an unreadable head is not a depth of zero")
 }
 
 // insertThenCancelModule stores nothing and ends the caller's context once the insert returns, as

@@ -444,7 +444,7 @@ func TestVerifyUnverifiedGloasPayloadsAsksTheELOnceBelowItsValidationDepth(t *te
 	// A later pass stops at the root without reading it again, also when the EL head cannot be read.
 	reads := graph.envReads[headRoot]
 	verifyUnverifiedGloasPayloads(t.Context(), cfg)
-	cfg.executionClient = validationDepthEngine{testExecutionEngine: engine}
+	cfg.executionClient = validationDepthEngine{testExecutionEngine: engine, unknown: true}
 	verifyUnverifiedGloasPayloads(t.Context(), cfg)
 	require.Equal(t, reads, graph.envReads[headRoot])
 	require.Equal(t, 1, engine.newPayloadCalls)
@@ -481,6 +481,59 @@ func TestVerifyUnverifiedGloasPayloadsRetriesAnErrorBelowTheELValidationDepth(t 
 	require.Equal(t, 2, engine.newPayloadCalls)
 	require.NotContains(t, cfg.gloasSkippedValidation, headRoot)
 	require.NotEmpty(t, cfg.forkChoice.DrainPendingELPayloads())
+}
+
+// An EL head at the first blocks validates every block: a known zero depth checks a remembered root
+// again, where an unreadable head keeps it.
+func TestVerifyUnverifiedGloasPayloadsChecksARememberedRootAtAKnownZeroDepth(t *testing.T) {
+	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	engine.payloadStatus = execution_client.PayloadStatusNotValidated
+	headBlock := graph.parents[headRoot]
+	payload := graph.envelopes[headRoot].Message.Payload
+	delete(graph.parents, headRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
+	cfg.gloasSkippedValidation = map[common.Hash]skippedValidation{headRoot: {slot: headBlock.Block.Slot, blockNumber: payload.BlockNumber}}
+	cfg.executionClient = validationDepthEngine{testExecutionEngine: engine}
+
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+
+	require.Equal(t, 1, engine.newPayloadCalls)
+	require.NotContains(t, cfg.gloasSkippedValidation, headRoot)
+}
+
+// A selected head remembered below the depth is not sent again while the cursor walks its ancestors.
+func TestVerifyUnverifiedGloasPayloadsSkipsARememberedSelectedHead(t *testing.T) {
+	cfg, graph, parentRoot, child, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusNotValidated, false)
+	parent := graph.parents[parentRoot]
+	parentEnvelope := graph.envelopes[parentRoot]
+	delete(graph.parents, parentRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), parent, false, false, false))
+	cfg.forkChoice.MarkPayloadStatus(parentRoot, parentEnvelope.Message.Payload.BlockHash, execution_client.PayloadStatusValidated)
+	childPayloadHash := common.Hash{2}
+	child.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = childPayloadHash
+	childRoot, err := child.Block.HashSSZ()
+	require.NoError(t, err)
+	encoded, err := parentEnvelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	childEnvelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg.beaconCfg)}
+	require.NoError(t, childEnvelope.DecodeSSZ(encoded, int(clparams.GloasVersion)))
+	childEnvelope.Message.BeaconBlockRoot = childRoot
+	childEnvelope.Message.Payload.BlockHash = childPayloadHash
+	graph.envelopes[childRoot] = childEnvelope
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), child, false, false, false))
+	cfg.gloasVerificationHead = childRoot
+	cfg.executionClient = validationDepthEngine{testExecutionEngine: engine, below: 1 << 30}
+	cfg.gloasSkippedValidation = map[common.Hash]skippedValidation{childRoot: {slot: child.Block.Slot, blockNumber: childEnvelope.Message.Payload.BlockNumber}}
+
+	for range 3 {
+		cfg.gloasVerificationCursor = parentRoot
+		verifyUnverifiedGloasPayloads(t.Context(), cfg)
+	}
+
+	require.Zero(t, engine.newPayloadCalls)
+	require.Zero(t, graph.envReads[childRoot])
 }
 
 // A remembered root does not prove that its ancestors reached the EL, for example after a batch was

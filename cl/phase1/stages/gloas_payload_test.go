@@ -1078,6 +1078,26 @@ func TestForwardSyncValidatesOnlyWhenInsertionIsUnavailable(t *testing.T) {
 	require.False(t, shouldValidateForwardSyncPayload(&Cfg{}, false))
 }
 
+// An anchor validation cut short by our own context is not the EL's answer and records nothing.
+func TestValidateAnchorPayloadWithExecutionClientIgnoresAnInterruptedCall(t *testing.T) {
+	cfg, st, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
+	anchorRoot, err := st.BlockRoot()
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	engine := &testExecutionEngine{newPayloadFn: func(context.Context, *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
+		cancel()
+		return execution_client.PayloadStatusNone, ctx.Err()
+	}}
+	store := newAnchorForkChoiceStore(t, cfg, st, nil)
+	stageCfg := &Cfg{beaconCfg: cfg, forkChoice: store, executionClient: engine, gloasPayloadValidator: engine}
+
+	require.NoError(t, validateAnchorPayloadWithExecutionClient(ctx, stageCfg, anchorRoot, bid, env))
+
+	require.Equal(t, 1, engine.newPayloadCalls)
+	_, found := store.GetRecentExecutionPayloadStatusByRoot(anchorRoot)
+	require.False(t, found, "an interrupted call is not a verdict")
+}
+
 func TestValidateAnchorPayloadWithAnyExecutionClient(t *testing.T) {
 	cfg, st, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
 	anchorRoot, err := st.BlockRoot()
@@ -1118,15 +1138,16 @@ var _ validationDepthEL = (*execution_client.ExecutionClientDirect)(nil)
 // validationDepthEngine reports a validation depth, as the direct EL client does.
 type validationDepthEngine struct {
 	*testExecutionEngine
-	below uint64
-	reads *int
+	below   uint64
+	unknown bool // the EL head could not be read
+	reads   *int
 }
 
-func (e validationDepthEngine) SkipsValidationBelow(context.Context) uint64 {
+func (e validationDepthEngine) SkipsValidationBelow(context.Context) (uint64, bool) {
 	if e.reads != nil {
 		*e.reads++
 	}
-	return e.below
+	return e.below, !e.unknown
 }
 
 // An empty drain does not read the EL head for the depth.
@@ -1220,14 +1241,20 @@ func TestRetryUnverifiedAnchorPayloadAsksTheELOnceBelowItsValidationDepth(t *tes
 	require.EqualValues(t, execution_client.PayloadStatusNotValidated, status)
 
 	// An unreadable EL head (depth 0) keeps the remembered answer, as in the sweep.
-	stageCfg.executionClient = validationDepthEngine{testExecutionEngine: base}
+	stageCfg.executionClient = validationDepthEngine{testExecutionEngine: base, unknown: true}
 	retryUnverifiedAnchorPayload(t.Context(), stageCfg)
 	require.Equal(t, 1, base.newPayloadCalls)
+
+	// An EL head at the first blocks validates every block (a known zero depth), so the anchor is
+	// asked again.
+	stageCfg.executionClient = validationDepthEngine{testExecutionEngine: base}
+	retryUnverifiedAnchorPayload(t.Context(), stageCfg)
+	require.Equal(t, 2, base.newPayloadCalls)
 
 	noDepth := &Cfg{beaconCfg: cfg, forkChoice: store, executionClient: base, gloasPayloadValidator: base}
 	retryUnverifiedAnchorPayload(t.Context(), noDepth)
 	retryUnverifiedAnchorPayload(t.Context(), noDepth)
-	require.Equal(t, 3, base.newPayloadCalls, "an EL without a validation depth is asked every time")
+	require.Equal(t, 4, base.newPayloadCalls, "an EL without a validation depth is asked every time")
 }
 
 // Only the EL's own NotValidated answer ends the anchor retries below the depth. A call cut short
