@@ -66,7 +66,8 @@ func NewScanner(reader ChainReader, registry common.Address, rollupID uint64) *S
 // SetChunk sets the widest range the scanner asks for at once.
 func (s *Scanner) SetChunk(n uint64) { s.chunk = max(n, 1) }
 
-var registryTopics = [][]common.Hash{{
+// RegistryTopics selects the registry logs a follower reads.
+var RegistryTopics = [][]common.Hash{{
 	protocol.BatchPostedTopic,
 	protocol.L2ExecutionPerformedTopic,
 	protocol.ExecutionConsumedTopic,
@@ -95,7 +96,7 @@ type blockKey struct {
 }
 
 func (s *Scanner) scanRange(ctx context.Context, from, to uint64) ([]ScannedBatch, error) {
-	logs, err := s.reader.Logs(ctx, from, to, s.registry, registryTopics)
+	logs, err := s.reader.Logs(ctx, from, to, s.registry, RegistryTopics)
 	if err != nil {
 		return nil, err
 	}

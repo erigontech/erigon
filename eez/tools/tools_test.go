@@ -31,6 +31,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez/deriver/derivertest"
 	"github.com/erigontech/erigon/eez/internal/testfixtures"
+	"github.com/erigontech/erigon/eez/l1"
+	"github.com/erigontech/erigon/eez/l1/recording"
 	"github.com/erigontech/erigon/eez/protocol/da"
 	"github.com/erigontech/erigon/eez/tools"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -76,6 +78,38 @@ func compose(t *testing.T) (*derivertest.Composer, []*derivertest.Batch) {
 	}}, derivertest.Block{Coinbase: bob, Extra: []byte{}, Txs: [][]byte{c.Transfer(alice, 2)}})
 	c.Post(derivertest.Posting{Batch: second})
 	return c, []*derivertest.Batch{first, second}
+}
+
+// TestCapture is T-CAP-1 on an in-process chain: its capture loads through
+// the recording reader and scans to the same batches.
+func TestCapture(t *testing.T) {
+	c, _ := compose(t)
+	head, err := c.L1.Head(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, c.L1.Finalize(head.Number-1))
+	from := head.Number - 3
+	captured, err := tools.Capture(t.Context(), c.L1, c.Registry(), from, head.Number)
+	require.NoError(t, err)
+	dir := t.TempDir()
+	require.NoError(t, recording.Write(dir, captured))
+	rec, err := recording.Load(dir)
+	require.NoError(t, err)
+
+	scan := func(r l1.ChainReader) []l1.ScannedBatch {
+		batches, reached, err := l1.NewScanner(r, c.Registry(), 1).Scan(t.Context(), from, head.Number)
+		require.NoError(t, err)
+		require.Equal(t, head.Number, reached)
+		return batches
+	}
+	want := scan(c.L1)
+	require.Len(t, want, 2)
+	require.Equal(t, want, scan(rec))
+	f, err := rec.Finalized(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, head.Number-1, f.Number)
+
+	_, err = tools.Capture(t.Context(), c.L1, c.Registry(), head.Number+1, head.Number)
+	require.Error(t, err)
 }
 
 // serve exposes m's chain over JSON-RPC.
