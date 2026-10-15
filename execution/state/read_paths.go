@@ -452,7 +452,8 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 					if pathRead.Status() == MVReadResultDone {
 						readVersion = pathRead.Version()
 					}
-					if path == StoragePath || path == AddressPath {
+					if path == StoragePath || path == AddressPath ||
+						path == BalancePath || path == NoncePath || path == CodeSizePath {
 						s.recordWipedRead(addr, path, key, readVersion)
 					}
 					// Per-path revival misses account-level life: a fee credit revives the

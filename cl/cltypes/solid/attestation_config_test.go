@@ -2,7 +2,6 @@ package solid
 
 import (
 	"encoding/binary"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -104,7 +103,7 @@ func TestAttestationDecodeSSZRejectsOffsetPastBufferBeforeAllocation(t *testing.
 			} else {
 				err = decoded.DecodeSSZ(buf, int(clparams.GloasVersion))
 			}
-			require.True(t, errors.Is(err, ssz.ErrBadOffset), err)
+			require.ErrorIs(t, err, ssz.ErrBadOffset, err)
 			require.Nil(t, decoded.CommitteeBits)
 		})
 	}

@@ -22,7 +22,6 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io/fs"
 	"math"
@@ -380,7 +379,7 @@ func TestDumpStepRangeToPath(t *testing.T) {
 	// integrateDirtyFiles and dstDir overrides the write path.
 	snapKV := d.kvNewFilePath(0, 1)
 	_, err = os.Stat(snapKV)
-	require.Truef(t, errors.Is(err, fs.ErrNotExist),
+	require.ErrorIsf(t, err, fs.ErrNotExist,
 		"unexpected file in SnapDomain at %s (err=%v)", snapKV, err)
 
 	// dirtyFiles count is unchanged: integrate=false skips integration.

@@ -3385,6 +3385,102 @@ func TestPostProposerPreferencesStoresValidatedPreferenceOnce(t *testing.T) {
 	require.Same(t, preference, stored)
 }
 
+func TestPostProposerPreferencesPublishResultsAndDigest(t *testing.T) {
+	publishErr := errors.New("publish failed")
+	digestErr := errors.New("digest failed")
+	for _, test := range []struct {
+		name            string
+		proposalEpoch   uint64
+		computeErr      error
+		publishErr      error
+		wantStatus      int
+		wantDigestEpoch uint64
+		wantFailures    []poolingFailure
+	}{
+		{
+			name:            "publish error",
+			proposalEpoch:   3,
+			publishErr:      publishErr,
+			wantStatus:      http.StatusBadRequest,
+			wantDigestEpoch: 3,
+			wantFailures:    []poolingFailure{{Index: 0, Message: publishErr.Error()}},
+		},
+		{
+			name:            "fork digest error",
+			proposalEpoch:   3,
+			computeErr:      digestErr,
+			wantStatus:      http.StatusInternalServerError,
+			wantDigestEpoch: 3,
+		},
+		{
+			name:            "current Gloas digest before next epoch BPO",
+			proposalEpoch:   4,
+			wantStatus:      http.StatusOK,
+			wantDigestEpoch: 3,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			cfg := clparams.MainnetBeaconConfig
+			cfg.AltairForkEpoch = 0
+			cfg.BellatrixForkEpoch = 0
+			cfg.CapellaForkEpoch = 0
+			cfg.DenebForkEpoch = 0
+			cfg.ElectraForkEpoch = 0
+			cfg.FuluForkEpoch = 0
+			cfg.GloasForkEpoch = 3
+			clock := eth_clock.NewMockEthereumClock(ctrl)
+			clock.EXPECT().GetCurrentEpoch().Return(uint64(3)).AnyTimes()
+			var computedEpochs []uint64
+			clock.EXPECT().ComputeForkDigest(gomock.Any()).DoAndReturn(func(epoch uint64) (common.Bytes4, error) {
+				computedEpochs = append(computedEpochs, epoch)
+				if test.computeErr != nil {
+					return common.Bytes4{}, test.computeErr
+				}
+				return common.Bytes4{byte(epoch)}, nil
+			})
+
+			preference := &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+				ProposalSlot: test.proposalEpoch * cfg.SlotsPerEpoch,
+			}}
+			service := mock_services.NewMockProposerPreferencesService(ctrl)
+			service.EXPECT().ProcessMessage(gomock.Any(), gomock.Nil(), preference).Return(nil)
+			gossipManager := gossip_mock.NewMockGossip(ctrl)
+			var publishedDigests []common.Bytes4
+			if test.computeErr == nil {
+				gossipManager.EXPECT().PublishToForkDigest(gomock.Any(), gomock.Any(), gossip.TopicNameProposerPreferences, gomock.Any()).
+					DoAndReturn(func(_ context.Context, digest common.Bytes4, _ string, _ []byte) error {
+						publishedDigests = append(publishedDigests, digest)
+						return test.publishErr
+					})
+			}
+			handler := &ApiHandler{
+				beaconChainCfg:             &cfg,
+				ethClock:                   clock,
+				gossipManager:              gossipManager,
+				logger:                     log.Root(),
+				proposerPreferencesService: service,
+				sentinel:                   &nonNilSentinelClient{},
+			}
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/proposer_preferences", http.NoBody)
+
+			handler.postProposerPreferences(recorder, request, []*cltypes.SignedProposerPreferences{preference})
+
+			require.Equal(t, test.wantStatus, recorder.Code, recorder.Body.String())
+			require.Equal(t, []uint64{test.wantDigestEpoch}, computedEpochs)
+			if test.computeErr == nil {
+				require.Equal(t, []common.Bytes4{{byte(test.wantDigestEpoch)}}, publishedDigests)
+			}
+			if test.wantFailures != nil {
+				var response poolingError
+				require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+				require.Equal(t, test.wantFailures, response.Failures)
+			}
+		})
+	}
+}
+
 func TestPostProposerPreferencesAcknowledgesOnlyIdenticalRetries(t *testing.T) {
 	for _, test := range []struct {
 		name       string
@@ -3421,15 +3517,23 @@ func TestPostProposerPreferencesAcknowledgesOnlyIdenticalRetries(t *testing.T) {
 				clock.EXPECT().GenesisTime().Return(genesisTime).AnyTimes()
 				clock.EXPECT().GetCurrentSlot().Return(stored.Message.ProposalSlot - 1).AnyTimes()
 				clock.EXPECT().GetCurrentEpoch().Return((stored.Message.ProposalSlot - 1) / config.SlotsPerEpoch).AnyTimes()
+				gossipManager := gossip_mock.NewMockGossip(ctrl)
 				handler := &ApiHandler{
 					epbsPool:       epbsPool,
 					beaconChainCfg: &config,
 					ethClock:       clock,
-					gossipManager:  gossip_mock.NewMockGossip(ctrl),
+					gossipManager:  gossipManager,
 					sentinel:       &nonNilSentinelClient{},
 				}
 				if withService {
 					handler.proposerPreferencesService = services.NewProposerPreferencesService(nil, nil, clock, &config, epbsPool, nil)
+					forkDigest := common.Bytes4{0xaa, 0xbb, 0xcc, 0xdd}
+					publishCount := 1
+					if test.change == nil {
+						publishCount = 2
+					}
+					clock.EXPECT().ComputeForkDigest(uint64(3)).Return(forkDigest, nil).Times(publishCount)
+					gossipManager.EXPECT().PublishToForkDigest(gomock.Any(), forkDigest, gossip.TopicNameProposerPreferences, gomock.Any()).Return(nil).Times(publishCount)
 				}
 				retry := stored.Clone().(*cltypes.SignedProposerPreferences)
 				submitted := stored.Clone().(*cltypes.SignedProposerPreferences)
@@ -3463,13 +3567,15 @@ func TestPostProposerPreferencesWithoutServiceConcurrentRequests(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			config := clparams.MainnetBeaconConfig
 			clock := eth_clock.NewMockEthereumClock(ctrl)
+			forkDigest := common.Bytes4{0xaa, 0xbb, 0xcc, 0xdd}
 			clock.EXPECT().GetCurrentSlot().Return(uint64(95)).AnyTimes()
 			clock.EXPECT().GetCurrentEpoch().Return(uint64(2)).AnyTimes()
+			clock.EXPECT().ComputeForkDigest(uint64(3)).Return(forkDigest, nil)
 			epbsPool := pool.NewEpbsPool()
 			gossipManager := gossip_mock.NewMockGossip(ctrl)
 			var gossipCalls atomic.Uint32
-			gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameProposerPreferences, gomock.Any()).
-				DoAndReturn(func(context.Context, string, []byte) error {
+			gossipManager.EXPECT().PublishToForkDigest(gomock.Any(), forkDigest, gossip.TopicNameProposerPreferences, gomock.Any()).
+				DoAndReturn(func(context.Context, common.Bytes4, string, []byte) error {
 					gossipCalls.Add(1)
 					return nil
 				}).AnyTimes()
@@ -3526,7 +3632,14 @@ func TestPostValidatorProposerPreferencesGloasForkBoundary(t *testing.T) {
 	for _, contentType := range []string{"application/json", "application/octet-stream"} {
 		t.Run(contentType, func(t *testing.T) {
 			_, _, _, _, _, handler, _, _, fc, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			gossipManager := gossip_mock.NewMockGossip(gomock.NewController(t))
+			handler.gossipManager = gossipManager
+			handler.sentinel = &nonNilSentinelClient{}
 			cfg := handler.beaconChainCfg
+			cfg.CapellaForkEpoch = 1
+			cfg.DenebForkEpoch = 1
+			cfg.ElectraForkEpoch = 1
+			cfg.FuluForkEpoch = 2
 			cfg.GloasForkEpoch = 3
 			cfg.InitializeForkSchedule()
 			root := common.Hash{1}
@@ -3543,6 +3656,14 @@ func TestPostValidatorProposerPreferencesGloasForkBoundary(t *testing.T) {
 			fc.HeadVal = root
 			handler.epbsPool = pool.NewEpbsPool()
 			clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix())-64*cfg.SecondsPerSlot, common.Hash{}, cfg)
+			proposalForkDigest, err := clock.ComputeForkDigest(3)
+			require.NoError(t, err)
+			currentForkDigest, err := clock.CurrentForkDigest()
+			require.NoError(t, err)
+			require.NotEqual(t, currentForkDigest, proposalForkDigest)
+			gossipManager.EXPECT().PublishToForkDigest(gomock.Any(), proposalForkDigest, gossip.TopicNameProposerPreferences, gomock.Any()).Return(nil).Times(2)
+			gossipManager.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+			handler.ethClock = clock
 			handler.proposerPreferencesService = services.NewProposerPreferencesService(nil, fc, clock, cfg, handler.epbsPool, nil)
 			preferences := make([]*cltypes.SignedProposerPreferences, 0, 3)
 			for _, slot := range []uint64{95, 96, 100} {

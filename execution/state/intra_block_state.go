@@ -2456,6 +2456,12 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 			balSource = MapRead
 			balVersion = Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
 			preTxBalance = bal
+			// Without EIP-8246 a destruct at or above the cell burns its balance.
+			if !ibs.eip8246 {
+				if _, burned := ibs.versionMap.FindDoneSelfDestructInRange(addr, res.DepIdx(), ibs.txIndex, true); burned {
+					preTxBalance.Clear()
+				}
+			}
 		}
 	}
 	// Capture the address's current balance BEFORE createObject writes the fresh
@@ -3289,7 +3295,7 @@ func (ibs *IntraBlockState) recordWriteAddress(addr accounts.Address, account *a
 		return
 	}
 	// A copy, made only here: the caller's account keeps changing.
-	val := account.SelfCopy()
+	val := ibs.versionedWrites.copyAccount(account)
 	if vw, ok := ibs.versionedWrites.GetAddress(addr); ok {
 		vw.Version = ibs.Version()
 		vw.Val = val
