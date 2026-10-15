@@ -556,6 +556,7 @@ func TestPostPayloadAttestationsRejectsNullMessage(t *testing.T) {
 	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.Equal(t, "application/json", recorder.Header().Get("Content-Type"))
 	require.Contains(t, recorder.Body.String(), "missing payload attestation message data")
 }
 
