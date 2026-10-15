@@ -252,6 +252,9 @@ type Config struct {
 	Ethstats string
 	// Consensus layer
 	InternalCL bool
+	// NoEngineAPI keeps the engine API server down, for a chain an in-process
+	// service drives instead of a consensus layer.
+	NoEngineAPI bool
 
 	OverrideOsakaTime     *uint64 `toml:",omitempty"`
 	OverrideAmsterdamTime *uint64 `toml:",omitempty"`

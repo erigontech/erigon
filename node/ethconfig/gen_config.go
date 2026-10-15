@@ -48,6 +48,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		ExperimentalBAL                 bool
 		Ethstats                        string
 		InternalCL                      bool
+		NoEngineAPI                     bool
 		OverrideOsakaTime               *uint64 `toml:",omitempty"`
 		OverrideAmsterdamTime           *uint64 `toml:",omitempty"`
 		KeepStoredChainConfig           bool
@@ -85,6 +86,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.ExperimentalBAL = c.ExperimentalBAL
 	enc.Ethstats = c.Ethstats
 	enc.InternalCL = c.InternalCL
+	enc.NoEngineAPI = c.NoEngineAPI
 	enc.OverrideOsakaTime = c.OverrideOsakaTime
 	enc.OverrideAmsterdamTime = c.OverrideAmsterdamTime
 	enc.KeepStoredChainConfig = c.KeepStoredChainConfig
@@ -126,6 +128,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		ExperimentalBAL                 *bool
 		Ethstats                        *string
 		InternalCL                      *bool
+		NoEngineAPI                     *bool
 		OverrideOsakaTime               *uint64 `toml:",omitempty"`
 		OverrideAmsterdamTime           *uint64 `toml:",omitempty"`
 		KeepStoredChainConfig           *bool
@@ -215,6 +218,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.InternalCL != nil {
 		c.InternalCL = *dec.InternalCL
+	}
+	if dec.NoEngineAPI != nil {
+		c.NoEngineAPI = *dec.NoEngineAPI
 	}
 	if dec.OverrideOsakaTime != nil {
 		c.OverrideOsakaTime = dec.OverrideOsakaTime
