@@ -555,6 +555,7 @@ func newAttestationTestStore(
 		publicKeysRegistry: public_keys_registry.NewInMemoryPublicKeysRegistry(),
 		latestMessages:     newLatestMessagesStore(headState.ValidatorLength()),
 	}
+	store.justifiedCheckpoint.Store(solid.Checkpoint{})
 	store.gloasWeightTree = newGloasWeightTree(store)
 	store.time.Store(store.genesisTime + (attestationSlot+1)*cfg.SecondsPerSlot)
 	store.SetSynced(true)
