@@ -16,8 +16,10 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
@@ -517,4 +519,45 @@ func TestReplayResumedPrefixHonoursCancellation(t *testing.T) {
 
 	err := pe.replayResumedPrefix(ctx, roTx, task, 1, &state.VersionedIO{})
 	require.ErrorIs(t, err, context.Canceled)
+}
+
+type prefixHistoryDebugTx struct {
+	kv.TemporalDebugTx
+	historyStart uint64
+	filesEnd     uint64
+	recorded     bool
+}
+
+func (d prefixHistoryDebugTx) HistoryStartFrom(kv.Domain) uint64 { return d.historyStart }
+func (d prefixHistoryDebugTx) TxNumsInFiles(...kv.Domain) uint64 { return d.filesEnd }
+func (d prefixHistoryDebugTx) HistoryKeyTxNumRange(kv.Domain, int, int, order.By, int) (stream.KU64, error) {
+	if d.recorded {
+		return stream.NewSingleDuo([]byte("key"), uint64(5)), nil
+	}
+	return stream.EmptyKU64, nil
+}
+
+// TestRequirePrefixHistory pins when a resumed prefix may be replayed: history
+// files prove their coverage, while history held only in the database must
+// show a record for the prefix's txNums.
+func TestRequirePrefixHistory(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		dbg  prefixHistoryDebugTx
+		ok   bool
+	}{
+		{"history starts after the prefix", prefixHistoryDebugTx{historyStart: 10, filesEnd: 20, recorded: true}, false},
+		{"history files cover the prefix", prefixHistoryDebugTx{historyStart: 0, filesEnd: 20, recorded: false}, true},
+		{"database history holds a record", prefixHistoryDebugTx{recorded: true}, true},
+		{"database history holds no record", prefixHistoryDebugTx{recorded: false}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := requirePrefixHistory(tc.dbg, 5, 6)
+			if tc.ok {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+		})
+	}
 }

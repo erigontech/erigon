@@ -609,12 +609,22 @@ func (te *txExecutor) replayResumedPrefix(ctx context.Context, applyTx kv.Tempor
 	return err
 }
 
-// requirePrefixHistory refuses to replay a prefix whose history may be missing:
+// requirePrefixHistory refuses to replay a prefix whose history is not there:
 // a history read silently answers from the latest state then, which turns the
-// prefix's writes into no-ops. A committed prefix always changes state (the
-// block-start system calls alone do), so its txNum range must hold a record.
+// prefix's writes into no-ops. History files prove their coverage. History held
+// only in the DB must show a record for the prefix's txNums, which a committed
+// prefix always leaves (the block-start system calls alone write storage).
 func requirePrefixHistory(dbg kv.TemporalDebugTx, fromTxNum, toTxNum uint64) error {
-	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+	domains := []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
+	for _, domain := range domains {
+		if start := dbg.HistoryStartFrom(domain); fromTxNum < start {
+			return fmt.Errorf("%s history starts at txNum %d, the resumed prefix at %d", domain, start, fromTxNum)
+		}
+	}
+	if fromTxNum < dbg.TxNumsInFiles(domains...) {
+		return nil
+	}
+	for _, domain := range domains {
 		it, err := dbg.HistoryKeyTxNumRange(domain, int(fromTxNum), int(toTxNum+1), order.Asc, 1)
 		if err != nil {
 			return err

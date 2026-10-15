@@ -588,7 +588,7 @@ type TemporalDebugTx interface {
 	CurrentDomainVersion(domain Domain) version.Version
 	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
 
-	// HistoryStartFrom return the earliest known txnum in history of a given domain
+	// HistoryStartFrom returns the first txNum the history of a given domain covers
 	HistoryStartFrom(domainName Domain) uint64
 
 	// DomainProgress is a best-effort progress number for reporting: it mixes
