@@ -45,12 +45,12 @@ func witnessOf(w *testfixtures.Witness) *stateless.Witness {
 	return &stateless.Witness{State: conv(w.State), Codes: conv(w.Codes), Headers: conv(w.Headers)}
 }
 
-// TestDeriveWindows is T-DRV-1: the blocks of a recorded anchor-only
-// settlement, derived from its DA payload and executed on their recorded
-// witnesses, hash to the recorded blocks.
+// TestDeriveWindows is T-DRV-1: the blocks of a recorded settlement, derived
+// from its DA payload and executed on their recorded witnesses, hash to the
+// recorded blocks. Window 468 rebuilds a Sync block with system transactions.
 func TestDeriveWindows(t *testing.T) {
 	systemtx.Register()
-	for _, name := range []string{"captured-devnet-window-84", "captured-devnet-anchor-402"} {
+	for _, name := range []string{"captured-devnet-window-84", "captured-devnet-anchor-402", "captured-devnet-window-468"} {
 		t.Run(name, func(t *testing.T) { deriveWindow(t, name) })
 	}
 }
@@ -88,7 +88,17 @@ func deriveWindow(t *testing.T, name string) {
 	require.Equal(t, pre, parent.Hash())
 
 	for i, recorded := range w.Blocks {
-		txs, err := DecodeTxs(p.BlockTxs(i))
+		encoded := p.BlockTxs(i)
+		if i == len(w.Blocks)-1 && len(p.Actions) > 0 {
+			var block types.Block
+			require.NoError(t, rlp.DecodeBytes(recorded.RLP, &block))
+			// The system address nonce at the parent; execution checks it.
+			nonce := block.Transactions()[0].GetNonce()
+			sb, err := BuildSyncBlock(p, appliedAll(b), protocol.SyncTxContext{ChainID: cfg.ChainID.Uint64(), RollupID: l2.RollupID}, nonce)
+			require.NoError(t, err)
+			encoded = sb.Txs
+		}
+		txs, err := DecodeTxs(encoded)
 		require.NoError(t, err)
 		h := NewHeader(&cfg, parent, DeriveInputs(l2, parent, p.Span, i))
 		witness := witnessOf(recorded.Witness)
