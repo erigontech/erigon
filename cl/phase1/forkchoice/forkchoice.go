@@ -854,8 +854,18 @@ func (f *ForkChoiceStore) Participation(epoch uint64) (*solid.ParticipationBitLi
 func (f *ForkChoiceStore) ForkNodes() []ForkNode {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	forkNodes := make([]ForkNode, 0, len(f.weights))
-	for blockRoot, weight := range f.weights {
+	weights := f.weights
+	if f.trackGloasWeights() {
+		weights = make(map[common.Hash]uint64, len(f.gloasWeightTree.topologySeen))
+		for root := range f.gloasWeightTree.nodes {
+			if _, prepared := f.gloasWeightTree.topologySeen[root]; !prepared {
+				continue
+			}
+			weights[root] = f.gloasWeightTree.GetAttestationScore(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending})
+		}
+	}
+	forkNodes := make([]ForkNode, 0, len(weights))
+	for blockRoot, weight := range weights {
 		header, has := f.forkGraph.GetHeader(blockRoot)
 		if !has {
 			continue
