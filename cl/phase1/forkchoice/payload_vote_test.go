@@ -703,6 +703,39 @@ func TestParentPayloadStatusFromBidsRejectsIncompleteBlocks(t *testing.T) {
 	require.Equal(t, cltypes.PayloadStatusEmpty, ParentPayloadStatusFromBids(cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion), child.Block))
 }
 
+func TestParentPayloadStatusFromBidsDoesNotAllocate(t *testing.T) {
+	const childSlot uint64 = 1024
+	parentBlockHash := common.Hash{0x01}
+
+	for _, test := range []struct {
+		name                 string
+		childParentBlockHash common.Hash
+		want                 cltypes.PayloadStatus
+	}{
+		{name: "full", childParentBlockHash: parentBlockHash, want: cltypes.PayloadStatusFull},
+		{name: "empty", childParentBlockHash: common.Hash{0x02}, want: cltypes.PayloadStatusEmpty},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			parent := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+			parent.Block.Slot = childSlot - 1
+			parent.Block.Body.SignedExecutionPayloadBid.Message.BlockHash = parentBlockHash
+
+			child := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+			child.Block.Slot = childSlot
+			child.Block.ParentRoot = common.Hash{0x03}
+			child.Block.Body.SignedExecutionPayloadBid.Message.ParentBlockHash = test.childParentBlockHash
+
+			var got cltypes.PayloadStatus
+			allocations := testing.AllocsPerRun(1000, func() {
+				got = ParentPayloadStatusFromBids(parent, child.Block)
+			})
+
+			require.Equal(t, test.want, got)
+			require.Zero(t, allocations)
+		})
+	}
+}
+
 func TestApplyPayloadValidationResultRecordsRootAvailability(t *testing.T) {
 	root := common.HexToHash("0x5678")
 	for _, test := range []struct {
