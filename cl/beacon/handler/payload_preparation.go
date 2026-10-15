@@ -456,6 +456,13 @@ type preparationKey struct {
 	targetGasLimitSet   bool
 }
 
+func (k *preparationKey) setFeeRecipient(feeRecipient common.Address, stateVersion clparams.StateVersion) {
+	k.feeRecipient = common.Address{}
+	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
+		k.feeRecipient = feeRecipient
+	}
+}
+
 func (k *preparationKey) setTargetGasLimit(limit *hexutil.Uint64) {
 	k.targetGasLimitSet = limit != nil
 	k.targetGasLimit = 0
@@ -613,10 +620,9 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 		baseState, targetSlot, proposerIndex, stateVersion,
 	)
 	key.setTargetGasLimit(targetGasLimit)
-	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
-		feeRecipient = a.feeRecipientForProposal(baseState, targetSlot, proposerIndex, stateVersion)
-		key.feeRecipient = feeRecipient
-	}
+	preference := a.proposerPreferencesForProposal(baseState, targetSlot, proposerIndex, stateVersion)
+	feeRecipient, _ = resolveFeeRecipient(preference, feeRecipient, true)
+	key.setFeeRecipient(feeRecipient, stateVersion)
 	// The loop-level path is an early filter. Resolve it again after state work because the Gloas
 	// decision can change without changing the beacon head root.
 	payloadSource, err := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
@@ -687,6 +693,7 @@ func (a *ApiHandler) precheckPreparationInputs(key preparationKey) (preparationK
 		if a.proposerLookupTooFarAhead(headState, key.targetSlot) {
 			return errHeadTooFarBack
 		}
+		var registered bool
 		// Before Fulu, finding the proposer may require an epoch transition, so the sampled
 		// index is only a hint until preparation checks the advanced state. Fulu's lookahead
 		// makes this check possible without copying or advancing the state.
@@ -696,13 +703,15 @@ func (a *ApiHandler) precheckPreparationInputs(key preparationKey) (preparationK
 			if err != nil {
 				return err
 			}
+			registered = true
 		} else {
-			key.feeRecipient, _ = a.validatorParams.GetFeeRecipient(key.proposerIndex)
+			key.feeRecipient, registered = a.validatorParams.GetFeeRecipient(key.proposerIndex)
 		}
-		if preference := a.proposerPreferencesForProposal(headState, key.targetSlot, key.proposerIndex, clparams.GloasVersion); preference != nil {
-			key.feeRecipient = preference.FeeRecipient
-		}
-		key.setTargetGasLimit(a.targetGasLimitForProposal(headState, key.targetSlot, key.proposerIndex, clparams.GloasVersion))
+		stateVersion := a.beaconChainCfg.GetCurrentStateVersion(key.targetSlot / a.beaconChainCfg.SlotsPerEpoch)
+		preference := a.proposerPreferencesForProposal(headState, key.targetSlot, key.proposerIndex, stateVersion)
+		feeRecipient, _ := resolveFeeRecipient(preference, key.feeRecipient, registered)
+		key.setFeeRecipient(feeRecipient, stateVersion)
+		key.setTargetGasLimit(a.targetGasLimitForProposal(headState, key.targetSlot, key.proposerIndex, stateVersion))
 		return nil
 	})
 	return key, err

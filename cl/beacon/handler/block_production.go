@@ -433,6 +433,13 @@ func (a *ApiHandler) expectedWithdrawals(
 	return cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(consensusWithdrawals), nil
 }
 
+func resolveFeeRecipient(preference *cltypes.ProposerPreferences, registeredRecipient common.Address, registered bool) (common.Address, bool) {
+	if preference != nil {
+		return preference.FeeRecipient, true
+	}
+	return registeredRecipient, registered
+}
+
 // feeRecipientForProposal resolves the fee recipient, warning once per proposer when there is none:
 // building with the zero address gives that block's fees away.
 func (a *ApiHandler) feeRecipientForProposal(
@@ -440,11 +447,10 @@ func (a *ApiHandler) feeRecipientForProposal(
 	targetSlot, proposerIndex uint64,
 	stateVersion clparams.StateVersion,
 ) common.Address {
-	if preference := a.proposerPreferencesForProposal(baseState, targetSlot, proposerIndex, stateVersion); preference != nil {
-		return preference.FeeRecipient
-	}
-	feeRecipient, registered := a.validatorParams.GetFeeRecipient(proposerIndex)
-	if registered {
+	preference := a.proposerPreferencesForProposal(baseState, targetSlot, proposerIndex, stateVersion)
+	registeredRecipient, registered := a.validatorParams.GetFeeRecipient(proposerIndex)
+	feeRecipient, found := resolveFeeRecipient(preference, registeredRecipient, registered)
+	if found {
 		return feeRecipient
 	}
 	// Claimed in one step, so requests for the same slot arriving together do not each decide they
