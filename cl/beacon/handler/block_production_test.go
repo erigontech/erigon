@@ -4939,7 +4939,8 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 			var pinned *solid.AttestationData
 			if tt.wantStatus == http.StatusOK {
 				aggregatePool.EXPECT().PinAttestationData(gomock.Any()).DoAndReturn(func(data *solid.AttestationData) error {
-					pinned = data
+					copied := *data // the data as pinned, not as the handler may change it later
+					pinned = &copied
 					return nil
 				})
 			}
@@ -4960,4 +4961,26 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Before Electra the served data carries the requested committee index, so pins would grow with the
+// requests; the pool uses pins only from Electra on, so none are made.
+func TestGetEthV1ValidatorAttestationDataPinsOnlyFromElectra(t *testing.T) {
+	const attestationSlot = uint64(10)
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	cfg := handler.beaconChainCfg
+	cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch = 0, 0, 0, 0
+	cfg.ElectraForkEpoch, cfg.FuluForkEpoch, cfg.GloasForkEpoch = cfg.FarFutureEpoch, cfg.FarFutureEpoch, cfg.FarFutureEpoch
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(attestationSlot).AnyTimes()
+	handler.ethClock = clock
+	handler.attestationProducer = cachedAttestationDataProducer{data: solid.AttestationData{Slot: attestationSlot}, cached: true}
+	handler.aggregatePool = aggregation_mock.NewMockAggregationPool(gomock.NewController(t))
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+		fmt.Sprintf("/eth/v1/validator/attestation_data?slot=%d&committee_index=3", attestationSlot), http.NoBody))
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 }

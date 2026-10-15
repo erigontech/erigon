@@ -205,7 +205,7 @@ func (t *PoolTestSuite) TestAddAttestationElectra() {
 			for i := range tc.atts {
 				t.Require().NoError(pool.AddAttestation(tc.atts[i]))
 			}
-			att := pool.GetAggregatationByRootAndCommittee(tc.hashRoot, 10)
+			att := pool.GetAggregatationByRootAndCommittee(tc.hashRoot, 1, 10)
 			t.Equal(tc.expect, att, tc.name)
 		}()
 	}
@@ -231,7 +231,7 @@ func (t *PoolTestSuite) TestMergedGloasAttestationUsesProgressiveHash() {
 
 	t.Require().NoError(pool.AddAttestation(att1))
 	t.Require().NoError(pool.AddAttestation(att2))
-	merged := pool.GetAggregatationByRootAndCommittee(attData1Root, 10)
+	merged := pool.GetAggregatationByRootAndCommittee(attData1Root, 1, 10)
 	got, err := merged.HashSSZ()
 	t.Require().NoError(err)
 	want, err := merged.HashSSZProgressive()
@@ -260,7 +260,7 @@ func (t *PoolTestSuite) TestFirstGloasAttestationIsCopiedAndVersioned() {
 	afterAddRoot, err := att.HashSSZ()
 	t.Require().NoError(err)
 	t.Equal(callerRoot, afterAddRoot)
-	cached := pool.GetAggregatationByRootAndCommittee(attData1Root, 10)
+	cached := pool.GetAggregatationByRootAndCommittee(attData1Root, 1, 10)
 	t.NotSame(att, cached)
 	att.SetVersion(clparams.ElectraVersion)
 	got, err := cached.HashSSZ()
@@ -720,7 +720,125 @@ func (t *PoolTestSuite) TestAddAttestationElectraPinPromotesRefusedVotes() {
 
 	t.Equal([]byte{0, 0x81}, t.committeeAggregateBits(pool, 0xaa))
 	t.Len(pool.Aggregates(), maxDataPerCommittee)
-	t.NotNil(pool.refused[slotCommittee{slot: 5, committee: 1}], "the displaced data keeps its votes aside")
+	t.Equal([]byte{0x03, 0x80}, t.refusedBits(pool, 0), "the displaced data keeps its votes aside")
+}
+
+// Pinned data enters a committee whose refused set is full: the displaced data still keeps its votes.
+func (t *PoolTestSuite) TestAddAttestationElectraStoresPinnedDataBesideAFullRefusedSet() {
+	pool := t.newPinTestPool()
+	t.fillCommitteeWithTwoVoteData(pool)
+	for i := range maxDataPerCommittee {
+		t.Require().NoError(pool.AddAttestation(t.singleVote(byte(0xb0+i), 8+i)))
+	}
+	t.Require().NoError(pool.PinAttestationData(t.pinnedVote(12).Data))
+
+	t.Require().NoError(pool.AddAttestation(t.pinnedVote(12)))
+
+	t.Equal([]byte{0, 0x90}, t.committeeAggregateBits(pool, 0xaa))
+	t.Len(pool.refused[slotCommittee{slot: 5, committee: 1}], maxDataPerCommittee)
+	t.Equal([]byte{0x03, 0x80}, t.refusedBits(pool, 0), "the displaced data with two votes outranks single votes")
+}
+
+// The committee bound holds when every stored data is pinned: further pinned data waits with the
+// refused data, with its votes, whether its vote comes before or after the pin.
+func (t *PoolTestSuite) TestAddAttestationElectraKeepsPinnedDataWithinTheCommitteeBound() {
+	pool := t.newPinTestPool()
+	for i := range maxDataPerCommittee + 1 {
+		t.Require().NoError(pool.PinAttestationData(t.singleVote(byte(0xa0+i), i).Data))
+		t.Require().NoError(pool.AddAttestation(t.singleVote(byte(0xa0+i), i)))
+	}
+	late := t.singleVote(byte(0xa0+maxDataPerCommittee+1), maxDataPerCommittee+1)
+	t.Require().NoError(pool.AddAttestation(late))
+	t.Require().NoError(pool.PinAttestationData(late.Data))
+
+	t.Len(pool.Aggregates(), maxDataPerCommittee)
+	t.NotNil(t.refusedBits(pool, byte(0xa0+maxDataPerCommittee)))
+	t.NotNil(t.refusedBits(pool, byte(0xa0+maxDataPerCommittee+1)))
+}
+
+// Pinned data keeps every vote against both sequences that flush unpinned data: fresh one-vote data
+// between its votes, and refused data as strong as the weakest stored data that leaves it the only
+// candidate for eviction.
+func (t *PoolTestSuite) TestAddAttestationElectraPinnedDataKeepsEveryVote() {
+	pool := t.newPinTestPool()
+	vote := func(source byte, member int) *solid.Attestation { // a committee of 63 members
+		att := t.electraAttestationWithSource(5, 1, source)
+		bits := make([]byte, 8)
+		bits[7] = 0x80
+		bits[member/8] |= 1 << (member % 8)
+		att.AggregationBits = solid.BitlistFromBytes(bits, 2048*64)
+		return att
+	}
+	member := 0
+	for source := range 2*maxDataPerCommittee - 1 { // four stored and three refused data, two votes each
+		for range 2 {
+			t.Require().NoError(pool.AddAttestation(vote(byte(source), member)))
+			member++
+		}
+	}
+	t.Require().NoError(pool.PinAttestationData(vote(0xaa, 0).Data))
+	const honestVotes = 10
+	for i := range honestVotes {
+		t.Require().NoError(pool.AddAttestation(vote(0xaa, member)))
+		t.Require().NoError(pool.AddAttestation(vote(byte(0xd0+i), member+1)))
+		member += 2
+	}
+
+	bits := t.committeeAggregateBits(pool, 0xaa)
+	t.Require().NotNil(bits)
+	t.Equal(honestVotes, utils.BitsOnCount(bits)-1)
+}
+
+// The aggregate endpoint also serves data the pool keeps aside: refused data and data displaced from
+// the committee.
+func (t *PoolTestSuite) TestGetAggregatationByRootAndCommitteeServesRefusedData() {
+	pool := t.newPinTestPool()
+	t.fillCommitteeWithTwoVoteData(pool)
+	refusedVote := t.singleVote(0xbb, 8)
+	t.Require().NoError(pool.AddAttestation(refusedVote))
+	t.Require().NoError(pool.AddAttestation(t.singleVote(0xbb, 9)))
+	refusedRoot, err := refusedVote.Data.HashSSZ()
+	t.Require().NoError(err)
+
+	att := pool.GetAggregatationByRootAndCommittee(refusedRoot, 5, 1)
+	t.Require().NotNil(att)
+	t.Equal([]byte{0, 0x83}, att.AggregationBits.Bytes())
+	t.Nil(pool.GetAggregatationByRootAndCommittee(refusedRoot, 6, 1), "another slot")
+	t.Nil(pool.GetAggregatationByRootAndCommittee(refusedRoot, 5, 2), "another committee")
+
+	t.Require().NoError(pool.AddAttestation(t.singleVote(0xbb, 10)))
+	displacedRoot, err := t.singleVote(0, 0).Data.HashSSZ()
+	t.Require().NoError(err)
+	att = pool.GetAggregatationByRootAndCommittee(displacedRoot, 5, 1)
+	t.Require().NotNil(att, "the displaced data")
+	t.Equal([]byte{0x03, 0x80}, att.AggregationBits.Bytes())
+}
+
+func (t *PoolTestSuite) refusedBits(pool *aggregationPoolImpl, source byte) []byte {
+	for _, entry := range pool.refused[slotCommittee{slot: 5, committee: 1}] {
+		if entry.attestation.Data.Source.Root[0] == source {
+			return entry.attestation.AggregationBits.Bytes()
+		}
+	}
+	return nil
+}
+
+func (t *PoolTestSuite) storedSources(pool AggregationPool) []byte {
+	var sources []byte
+	for _, att := range pool.Aggregates() {
+		sources = append(sources, att.Data.Source.Root[0])
+	}
+	slices.Sort(sources)
+	return sources
+}
+
+func (t *PoolTestSuite) refusedSources(pool *aggregationPoolImpl) []byte {
+	var sources []byte
+	for _, entry := range pool.refused[slotCommittee{slot: 5, committee: 1}] {
+		sources = append(sources, entry.attestation.Data.Source.Root[0])
+	}
+	slices.Sort(sources)
+	return sources
 }
 
 // Data with more voters replaces the weakest unpinned data, never the pinned data.
@@ -781,20 +899,28 @@ func TestPool(t *testing.T) {
 
 // A full committee makes room only for an attestation that is added; one whose signature cannot be
 // decoded must not evict anything.
+// A vote whose signature fails to decode evicts nothing: not from the committee, not from a full
+// refused set, and not for pinned data.
 func (t *PoolTestSuite) TestAddAttestationElectraKeepsFullCommitteeOnSignatureError() {
-	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).AnyTimes()
-	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).AnyTimes()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
-	for source := range maxDataPerCommittee {
-		t.Require().NoError(pool.AddAttestation(t.electraAttestationWithSource(5, 1, byte(source))))
-	}
-	errBadSignature := errors.New("bad signature")
-	newSignatureAggregator = func() signatureAggregator { return &fakeSignatureAggregator{failAll: errBadSignature} }
+	for _, pinned := range []bool{false, true} {
+		pool := t.newPinTestPool()
+		t.fillCommitteeWithTwoVoteData(pool)
+		for i := range maxDataPerCommittee {
+			t.Require().NoError(pool.AddAttestation(t.singleVote(byte(0xb0+i), 8+i)))
+		}
+		stored, refused := t.storedSources(pool), t.refusedSources(pool)
+		bad := t.singleVote(0xcc, 12)
+		if pinned {
+			t.Require().NoError(pool.PinAttestationData(bad.Data))
+		}
+		errBadSignature := errors.New("bad signature")
+		newSignatureAggregator = func() signatureAggregator { return &fakeSignatureAggregator{failAll: errBadSignature} }
 
-	t.ErrorIs(pool.AddAttestation(t.electraAttestationWithSource(5, 1, 0xbb)), errBadSignature)
-	t.Len(pool.Aggregates(), maxDataPerCommittee)
+		t.ErrorIs(pool.AddAttestation(bad), errBadSignature, "pinned=%t", pinned)
+		t.Equal(stored, t.storedSources(pool), "pinned=%t", pinned)
+		t.Equal(refused, t.refusedSources(pool), "pinned=%t", pinned)
+		newSignatureAggregator = func() signatureAggregator { return &fakeSignatureAggregator{} }
+	}
 }
 
 // Stale entries are only swept once a minute; a full pool prunes them before refusing new data.

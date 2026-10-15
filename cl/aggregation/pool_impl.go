@@ -75,8 +75,8 @@ type aggregationPoolImpl struct {
 	// voters than the committee's weakest data. Only full committees have entries, so the pool
 	// bound also bounds these.
 	refused map[slotCommittee]map[common.Hash]*committeeAggregate
-	// pinned holds, by slot, the data roots the node served its validators. Gossip cannot displace
-	// them: their votes are always stored.
+	// pinned holds the data roots the node served its validators, with their slot for pruning. Gossip
+	// cannot displace them.
 	pinned map[common.Hash]uint64
 }
 
@@ -192,7 +192,7 @@ func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation, ver
 	perCommittee := slotCommittee{slot: inAtt.Data.Slot, committee: committeeIndex}
 	_, pinned := p.pinned[hashRoot]
 	full := len(p.dataPerCommittee[perCommittee]) >= maxDataPerCommittee
-	if full && !pinned {
+	if full && !(pinned && p.hasUnpinnedData(perCommittee)) {
 		return p.addRefusedVote(perCommittee, key, inAtt, version)
 	}
 	// Decode the signature before making room, so a rejected attestation evicts nothing.
@@ -272,13 +272,23 @@ func (p *aggregationPoolImpl) PinAttestationData(data *solid.AttestationData) er
 	p.pinned[root] = data.Slot
 	for perCommittee, refused := range p.refused {
 		entry, ok := refused[root]
-		if !ok || perCommittee.slot != data.Slot {
+		if !ok || perCommittee.slot != data.Slot || !p.hasUnpinnedData(perCommittee) {
 			continue
 		}
 		delete(refused, root)
 		p.storePinnedAggregate(perCommittee, keyAggrInCommittee{dataRoot: root, committeeIndex: perCommittee.committee}, entry)
 	}
 	return nil
+}
+
+// hasUnpinnedData reports whether the committee stores data that pinned data may take the place of.
+// When it stores only pinned data, more pinned data waits with the refused data, so the committee
+// bound holds.
+func (p *aggregationPoolImpl) hasUnpinnedData(perCommittee slotCommittee) bool {
+	return slices.ContainsFunc(p.dataPerCommittee[perCommittee], func(key keyAggrInCommittee) bool {
+		_, pinned := p.pinned[key.dataRoot]
+		return !pinned
+	})
 }
 
 // storePinnedAggregate stores pinned data in a full committee in place of its weakest unpinned data,
@@ -358,18 +368,20 @@ func (p *aggregationPoolImpl) GetAggregatationByRoot(root common.Hash) *solid.At
 	return p.aggregates[root]
 }
 
-func (p *aggregationPoolImpl) GetAggregatationByRootAndCommittee(root common.Hash, committeeIndex uint64) *solid.Attestation {
+func (p *aggregationPoolImpl) GetAggregatationByRootAndCommittee(root common.Hash, slot, committeeIndex uint64) *solid.Attestation {
 	p.aggregatesLock.RLock()
 	defer p.aggregatesLock.RUnlock()
 	key := keyAggrInCommittee{
 		dataRoot:       root,
 		committeeIndex: committeeIndex,
 	}
-	entry, exist := p.aggregatesInCommittee[key]
-	if !exist {
-		return nil
+	if entry, exist := p.aggregatesInCommittee[key]; exist {
+		return entry.attestation
 	}
-	return entry.attestation
+	if entry, exist := p.refused[slotCommittee{slot: slot, committee: committeeIndex}][root]; exist {
+		return entry.attestation
+	}
+	return nil
 }
 
 func (p *aggregationPoolImpl) Aggregates() []*solid.Attestation {

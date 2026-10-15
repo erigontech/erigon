@@ -686,7 +686,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	} else if committeeIndex != nil {
 		attestationData.CommitteeIndex = *committeeIndex
 	}
-	if a.aggregatePool != nil {
+	if a.aggregatePool != nil && clversion.AfterOrEqual(clparams.ElectraVersion) {
 		// Our aggregators ask for the aggregate of exactly this data; gossip votes for other data must
 		// not keep it out of the pool.
 		if err := a.aggregatePool.PinAttestationData(&attestationData); err != nil {
