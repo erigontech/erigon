@@ -128,7 +128,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		return err
 	}
 	defer ibs.Close()
-	replay := transactions.NewReplay(ibs, config.StateOverrides)
+	transactions.VersionedCallState(ibs, config.StateOverrides)
 
 	var precompiles vm.PrecompiledContracts
 	if config.BlockOverrides != nil {
@@ -179,7 +179,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			if traceErr != nil {
 				return traceErr
 			}
-			return replay.Finish(rules, state.NewNoopWriter())
+			return ibs.FinalizeTx(rules, state.NewNoopWriter())
 		})
 
 		stream.WriteObjectEnd()
@@ -473,7 +473,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 	ibs := state.New(stateReader)
 	defer ibs.Close()
-	replay := transactions.NewReplay(ibs, config.StateOverrides)
+	transactions.VersionedCallState(ibs, config.StateOverrides)
 
 	getHash := transactions.MakeBlockHashProvider(ctx, tx, api._blockReader, overrideBlockHash)
 
@@ -528,7 +528,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 				return err
 			}
 
-			_ = replay.Finish(rules, state.NewNoopWriter())
+			_ = ibs.FinalizeTx(rules, state.NewNoopWriter())
 
 		}
 		stream.WriteArrayEnd()

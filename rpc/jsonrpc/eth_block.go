@@ -110,7 +110,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	}
 	ibs := state.New(stateReader)
 	defer ibs.Close()
-	replay := transactions.NewReplay(ibs, nil)
+	transactions.VersionedCallState(ibs, nil)
 
 	parent, err := api.headerByHashAndNumber(ctx, tx, hash, stateBlockNumber)
 	if err != nil {
@@ -167,7 +167,8 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	defer crypto.ReturnToPool(bundleHash)
 
 	results := make([]map[string]any, 0, len(txs))
-	for _, txn := range txs {
+	for i, txn := range txs {
+		ibs.SetTxContext(blockCtx.BlockNumber, i)
 		msg, err := txn.AsMessage(*signer, header.BaseFee, rules)
 		if err != nil {
 			return nil, err
@@ -185,7 +186,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		if evm.Cancelled() {
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 		}
-		if err := replay.Finish(rules, state.NewNoopWriter()); err != nil {
+		if err := ibs.FinalizeTx(rules, state.NewNoopWriter()); err != nil {
 			return nil, err
 		}
 

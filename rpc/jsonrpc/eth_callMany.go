@@ -182,7 +182,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	st := state.New(stateReader)
 	defer st.Close()
-	replay := transactions.NewReplay(st, stateOverride)
+	transactions.VersionedCallState(st, stateOverride)
 
 	header := block.HeaderNoCopy()
 
@@ -223,7 +223,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			return nil, err
 		}
 
-		_ = replay.Finish(rules, state.NewNoopWriter())
+		_ = st.FinalizeTx(rules, state.NewNoopWriter())
 
 		if evm.Cancelled() {
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
@@ -243,12 +243,16 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	ret := make([][]map[string]any, 0)
 
+	// Every transaction of the request gets the next index, so each sees the ones before it.
+	txIndex := len(replayTransactions)
 	for _, bundle := range bundles {
 		// first change blockContext
 		bundle.BlockOverride.OverrideBlockContext(&blockCtx, ethapi.BlockHashOverrides(overrideBlockHash))
 		results := []map[string]any{}
 		for i := range bundle.Transactions {
 			txn := &bundle.Transactions[i]
+			st.SetTxContext(blockNum, txIndex)
+			txIndex++
 			if txn.Gas == nil || *txn.Gas == 0 {
 				txn.Gas = (*hexutil.Uint64)(&api.GasCap)
 			}
@@ -266,7 +270,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 				return nil, err
 			}
 
-			_ = replay.Finish(rules, state.NewNoopWriter())
+			_ = st.FinalizeTx(rules, state.NewNoopWriter())
 
 			// If the timer caused an abort, return an appropriate error message
 			if evm.Cancelled() {

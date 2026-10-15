@@ -200,43 +200,6 @@ func (r *ReusableCaller) Close() {
 
 func (r *ReusableCaller) Message() *types.Message { return r.message }
 
-// Replay runs the transactions of one block in order on the versioned state path: every
-// transaction sees the writes of the ones before it through one version map, as block
-// execution does. With overrides, or CALL_NO_MATERIALIZE off, it keeps the materializing path.
-type Replay struct {
-	ibs *state.IntraBlockState
-	vm  *state.VersionMap
-}
-
-func NewReplay(ibs *state.IntraBlockState, stateOverrides *ethapi2.StateOverrides) *Replay {
-	r := &Replay{ibs: ibs}
-	if dbg.CallNoMaterialize && stateOverrides == nil {
-		r.vm = state.NewVersionMap(nil)
-		r.attach()
-	}
-	return r
-}
-
-func (r *Replay) attach() {
-	r.ibs.SetVersionMap(r.vm)
-	r.ibs.SetNoMaterialize(true)
-	r.ibs.SetNoConflictDetection()
-}
-
-// Finish ends the current transaction so the next one sees its writes. The writer serves the
-// materializing path only; on the versioned path the writes go to the version map, the logs
-// keep their block-wide index and the state moves to the next transaction index.
-func (r *Replay) Finish(rules *chain.Rules, writer state.StateWriter) error {
-	if r.vm == nil {
-		return r.ibs.FinalizeTx(rules, writer)
-	}
-	r.ibs.FlushWritesToVersionMap(r.ibs.FinalizedWrites(rules))
-	r.ibs.SoftFinalise()
-	r.ibs.ResetVersionedIO()
-	r.ibs.SetTxContext(r.ibs.BlockNumber(), r.ibs.TxIndex()+1)
-	return nil
-}
-
 // VersionedCallState puts a one-shot call on the versioned state path block execution
 // uses. Overrides keep the materializing path: they end in FinalizeTx, which clears the
 // journal, and the versioned read path then serves this tx's own writes only from a

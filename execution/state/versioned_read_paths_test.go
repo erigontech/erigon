@@ -8,9 +8,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -1111,4 +1114,29 @@ func TestReadValueUnchanged_NilEmptyArmGated(t *testing.T) {
 	require.False(t, newIBS(sys, true, true).readValueUnchanged(sys, AddressPath, accounts.NilKey, r))
 	require.True(t, newIBS(sys, true, false).readValueUnchanged(sys, AddressPath, accounts.NilKey, r))
 	require.True(t, newIBS(other, true, true).readValueUnchanged(other, AddressPath, accounts.NilKey, r))
+}
+
+// TestFinalizeTxOnVersionedPathPublishesWritesToNextTx pins that on the noMaterialize path
+// FinalizeTx hands the transaction's writes to the version map, so the next transaction index
+// of the same state reads them, and keeps the logs' block-wide index.
+func TestFinalizeTxOnVersionedPathPublishesWritesToNextTx(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(201)
+	key := accounts.InternKey(common.HexToHash("0x11"))
+
+	s := NewWithVersionMap(newAccountStateReader(), NewVersionMap(nil))
+	defer s.Close()
+	s.SetNoMaterialize(true)
+	s.SetNoConflictDetection()
+	s.SetTxContext(0, 0)
+	require.NoError(t, s.SetState(addr, key, *uint256.NewInt(7)))
+	s.AddLog(&types.Log{Address: addr.Value()})
+	require.NoError(t, s.FinalizeTx(&chain.Rules{}, NewNoopWriter()))
+
+	s.SetTxContext(0, 1)
+	got, err := s.GetState(addr, key)
+	require.NoError(t, err)
+	require.Equal(t, *uint256.NewInt(7), got, "the next transaction must see the finalized write")
+	s.AddLog(&types.Log{Address: addr.Value()})
+	require.Equal(t, hexutil.Uint(1), s.Logs()[1].Index, "the log index keeps counting across transactions")
 }
