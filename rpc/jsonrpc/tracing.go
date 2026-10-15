@@ -347,6 +347,11 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 	}
 	ibs := state.New(stateReader)
 	defer ibs.Close()
+	var stateOverrides *ethapi.StateOverrides
+	if config != nil {
+		stateOverrides = config.StateOverrides
+	}
+	transactions.VersionedCallState(ibs, stateOverrides)
 
 	baseFee := overrideBaseFee(config, header.BaseFee)
 
