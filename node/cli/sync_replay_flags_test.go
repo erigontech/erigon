@@ -102,3 +102,8 @@ func TestTieringColdDirFlag(t *testing.T) {
 	require.Empty(t, buildEthCfg(t, nil).Sync.TieringColdDir)
 	require.Equal(t, "/hdd/domain", buildEthCfg(t, []string{"--tiering.cold-dir", "/hdd/domain"}).Sync.TieringColdDir)
 }
+
+func TestTieringCommitmentHotMergeStepsFlag(t *testing.T) {
+	require.Zero(t, buildEthCfg(t, nil).Sync.TieringCommitmentHotMergeSteps)
+	require.Equal(t, uint64(1), buildEthCfg(t, []string{"--tiering.commitment-hot-merge-steps", "1"}).Sync.TieringCommitmentHotMergeSteps)
+}

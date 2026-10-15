@@ -162,6 +162,11 @@ var (
 		Usage: "Cold-tier directory: a state file whose resolved path is under it counts as cold-resident (default: no cold tier)",
 	}
 
+	TieringCommitmentHotMergeStepsFlag = cli.Uint64Flag{
+		Name:  "tiering.commitment-hot-merge-steps",
+		Usage: "Max steps of a merged commitment file on the hot tier (1 = never merge commitment files; 0 = default merge limits)",
+	}
+
 	SyncParallelStateFlushing = cli.BoolFlag{
 		Name:  "sync.parallel-state-flushing",
 		Usage: "Enables parallel state flushing",
@@ -366,6 +371,7 @@ func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 	}
 	cfg.Sync.TieringLookbackBlocks = ctx.Uint64(TieringLookbackBlocksFlag.Name)
 	cfg.Sync.TieringColdDir = ctx.String(TieringColdDirFlag.Name)
+	cfg.Sync.TieringCommitmentHotMergeSteps = ctx.Uint64(TieringCommitmentHotMergeStepsFlag.Name)
 	cfg.Sync.ParallelStateFlushing = ctx.Bool(SyncParallelStateFlushing.Name)
 	if d := ctx.Duration(utils.SlowBlockThresholdFlag.Name); d >= 0 {
 		cfg.Sync.SlowBlockThreshold = &d
