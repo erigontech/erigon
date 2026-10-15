@@ -55,24 +55,68 @@ func RederiveBlockAccessList(
 ) (types.BlockAccessList, error) {
 	blockNum := header.Number.Uint64()
 	balIO := &state.VersionedIO{}
-	noopWriter := state.NewNoopWriter()
-	ibs.SetTxContext(blockNum, -1)
-	hashFn := protocol.GetHashFn(header, getHeader)
-	blockContext := protocol.NewEVMBlockContext(header, hashFn, engine, accounts.NilAddress, cfg)
-	blockRules := blockContext.Rules(cfg)
-	err := protocol.InitializeBlockExecution(engine, chainReader, header, cfg, ibs, noopWriter, logger, nil)
+	receipts, err := ReplayBlockPrefix(ctx, cfg, engine, chainReader, getHeader, header, txns, ibs, balIO, logger)
 	if err != nil {
-		return nil, fmt.Errorf("bal.RederiveBlockAccessList: initialize block %d: %w", blockNum, err)
+		return nil, fmt.Errorf("bal.RederiveBlockAccessList: %w", err)
 	}
-	initWrites := ibs.FinalizedWrites(blockRules)
-	ibs.MergeTxIOInto(balIO, initWrites)
-	// Publish this phase's writes to the versionMap so the next phase observes
-	// them across the ResetVersionedIO below — the cross-tx carrier the parallel
-	// executor and block builder also use. Without it a later tx's balance write
-	// (e.g. the accumulating coinbase fee) can't see the running value and the
-	// per-tx BAL change is lost.
-	ibs.FlushWritesToVersionMap(initWrites)
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+	ibs.SetTxContext(blockNum, len(txns))
 	ibs.ResetVersionedIO()
+	_, _, err = protocol.FinalizeBlockExecution(engine, header, txns, uncles, state.NewNoopWriter(), cfg, ibs, receipts, withdrawals, chainReader, false, logger)
+	if err != nil {
+		return nil, fmt.Errorf("bal.RederiveBlockAccessList: finalize block %d: %w", blockNum, err)
+	}
+	if err := ibs.StateReadError(); err != nil {
+		return nil, fmt.Errorf("bal.RederiveBlockAccessList: finalize block %d: %w", blockNum, err)
+	}
+	ibs.MergeTxIOInto(balIO, ibs.FinalizedWrites(blockRules(cfg, engine, header)))
+	return balIO.AsBlockAccessList(), nil
+}
+
+// ReplayBlockPrefix replays the block-start system calls and txns on ibs,
+// folding each phase's reads and writes into io at its access index, and
+// returns the receipts of txns. ibs is set up as for RederiveBlockAccessList.
+func ReplayBlockPrefix(
+	ctx context.Context,
+	cfg *chain.Config,
+	engine rules.Engine,
+	chainReader rules.ChainReader,
+	getHeader GetHeaderFunc,
+	header *types.Header,
+	txns types.Transactions,
+	ibs *state.IntraBlockState,
+	io *state.VersionedIO,
+	logger log.Logger,
+) (types.Receipts, error) {
+	blockNum := header.Number.Uint64()
+	noopWriter := state.NewNoopWriter()
+	hashFn := protocol.GetHashFn(header, getHeader)
+	chainRules := blockRules(cfg, engine, header)
+	// record folds the phase that just ran into io and publishes its writes to
+	// the version map, the cross-tx carrier the parallel executor and block
+	// builder also use: without it a later tx's balance write (e.g. the
+	// accumulating coinbase fee) can't see the running value.
+	record := func() error {
+		if err := ibs.StateReadError(); err != nil {
+			return err
+		}
+		writes := ibs.FinalizedWrites(chainRules)
+		ibs.MergeTxIOInto(io, writes)
+		ibs.FlushWritesToVersionMap(writes)
+		ibs.ResetVersionedIO()
+		return nil
+	}
+	ibs.SetTxContext(blockNum, -1)
+	if err := protocol.InitializeBlockExecution(engine, chainReader, header, cfg, ibs, noopWriter, logger, nil); err != nil {
+		return nil, fmt.Errorf("initialize block %d: %w", blockNum, err)
+	}
+	if err := record(); err != nil {
+		return nil, fmt.Errorf("initialize block %d: %w", blockNum, err)
+	}
 	gasUsed := new(protocol.GasUsed)
 	gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(cfg.GetMaxBlobGasPerBlock(header.Time))
 	vmCfg := vm.Config{}
@@ -87,32 +131,22 @@ func RederiveBlockAccessList(
 		evm := protocol.CreateEVM(cfg, hashFn, engine, accounts.NilAddress, ibs, header, vmCfg)
 		stopCancelWatch := context.AfterFunc(ctx, evm.Cancel)
 		receipt, err := protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, noopWriter, header, txn, gasUsed, vmCfg, evm)
-		if err != nil {
-			stopCancelWatch()
-			return nil, fmt.Errorf("bal.RederiveBlockAccessList: replay tx %d of block %d: %w", i, blockNum, err)
-		}
 		stopCancelWatch()
-		if evm.Cancelled() {
-			return nil, fmt.Errorf("bal.RederiveBlockAccessList: execution aborted replaying tx %d of block %d: %w", i, blockNum, ctx.Err())
+		if err != nil {
+			return nil, fmt.Errorf("replay tx %d of block %d: %w", i, blockNum, err)
 		}
-		txWrites := ibs.FinalizedWrites(blockRules)
-		ibs.MergeTxIOInto(balIO, txWrites)
-		ibs.FlushWritesToVersionMap(txWrites)
-		ibs.ResetVersionedIO()
+		if evm.Cancelled() {
+			return nil, fmt.Errorf("execution aborted replaying tx %d of block %d: %w", i, blockNum, ctx.Err())
+		}
+		if err := record(); err != nil {
+			return nil, fmt.Errorf("replay tx %d of block %d: %w", i, blockNum, err)
+		}
 		receipts = append(receipts, receipt)
 	}
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
-	ibs.SetTxContext(blockNum, len(txns))
-	ibs.ResetVersionedIO()
-	_, _, err = protocol.FinalizeBlockExecution(engine, header, txns, uncles, noopWriter, cfg, ibs, receipts, withdrawals, chainReader, false, logger)
-	if err != nil {
-		return nil, fmt.Errorf("bal.RederiveBlockAccessList: finalize block %d: %w", blockNum, err)
-	}
-	finalWrites := ibs.FinalizedWrites(blockRules)
-	ibs.MergeTxIOInto(balIO, finalWrites)
-	return balIO.AsBlockAccessList(), nil
+	return receipts, nil
+}
+
+func blockRules(cfg *chain.Config, engine rules.EngineReader, header *types.Header) *chain.Rules {
+	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), engine, accounts.NilAddress, cfg)
+	return blockContext.Rules(cfg)
 }

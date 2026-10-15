@@ -40,15 +40,18 @@ import (
 )
 
 // Genesis occupies txNums 0 and 1; block 1 then spans 2 (block start), 3 (tx0),
-// 4 (tx1) and 5 (block end).
+// 4 (tx1), 5 (tx2) and 6 (block end). In the access list, index 0 is the block
+// start and transactions start at 1.
 const (
 	resumeBALGenesisTxNum    = uint64(1)
 	resumeBALBlockStartTxNum = uint64(2)
+	resumeBALTx0AccessIndex  = uint32(1)
 )
 
-// resumeBALFixture is a two-transaction Amsterdam block over a tiny genesis:
-// tx0 is a plain transfer and tx1 stores the recipient's balance, so both the
-// resumed prefix and the suffix touch state the block access list records.
+// resumeBALFixture is a three-transaction Amsterdam block over a tiny genesis:
+// tx0 stores the target's balance, tx1 tops the target up and tx2 stores the
+// balance again, so the resumed prefix writes storage and the suffix changes
+// the same slot.
 type resumeBALFixture struct {
 	config  *chain.Config
 	engine  rules.Engine
@@ -70,6 +73,7 @@ func newResumeBALFixture(t *testing.T) *resumeBALFixture {
 	observerCode = append(observerCode, byte(vm.BALANCE), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP))
 	alloc := types.GenesisAlloc{
 		sender:   {Balance: big.NewInt(1_000_000_000_000_000_000)},
+		target:   {Balance: big.NewInt(7)},
 		observer: {Balance: new(big.Int), Nonce: 1, Code: observerCode},
 	}
 	for _, contract := range []accounts.Address{
@@ -84,21 +88,41 @@ func newResumeBALFixture(t *testing.T) *resumeBALFixture {
 
 	engine := merge.New(ethash.NewFaker())
 	t.Cleanup(func() { engine.Close() })
-	fx := &resumeBALFixture{config: config, engine: engine, alloc: alloc, genesis: genesis, senders: []common.Address{sender, sender}}
+	fx := &resumeBALFixture{config: config, engine: engine, alloc: alloc, genesis: genesis, senders: []common.Address{sender, sender, sender}}
 
 	signer := types.LatestSignerForChainID(config.ChainID)
 	gasPrice := uint256.NewInt(1_000_000_000)
 	var txs types.Transactions
 	for _, txn := range []*types.LegacyTx{
-		{CommonTx: types.CommonTx{Nonce: 0, To: &target, Value: *uint256.NewInt(1), GasLimit: 21_000}, GasPrice: *gasPrice},
-		{CommonTx: types.CommonTx{Nonce: 1, To: &observer, GasLimit: 100_000}, GasPrice: *gasPrice},
+		{CommonTx: types.CommonTx{Nonce: 0, To: &observer, GasLimit: 1_000_000}, GasPrice: *gasPrice},
+		{CommonTx: types.CommonTx{Nonce: 1, To: &target, Value: *uint256.NewInt(1), GasLimit: 21_000}, GasPrice: *gasPrice},
+		{CommonTx: types.CommonTx{Nonce: 2, To: &observer, GasLimit: 1_000_000}, GasPrice: *gasPrice},
 	} {
 		signed, err := types.SignTx(txn, *signer, senderIsCoinbaseKey.key)
 		require.NoError(t, err)
 		txs = append(txs, signed)
 	}
 	fx.block = fx.assembleBlock(t, txs, common.HexToAddress("0x000000000000000000000000000000000000c01b"))
+	require.True(t, hasStorageChangeAt(fx.block.BlockAccessList(), resumeBALTx0AccessIndex), "tx0 must write storage")
 	return fx
+}
+
+func hasStorageChangeAt(bal types.BlockAccessList, index uint32) bool {
+	for i := range bal {
+		for _, slot := range bal[i].StorageChanges {
+			for _, change := range slot.Changes {
+				if change.Index == index {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func storageKey(addr common.Address, slot accounts.StorageKey) []byte {
+	key := slot.Value()
+	return append(append(make([]byte, 0, len(addr)+len(key)), addr[:]...), key[:]...)
 }
 
 func allocAccount(ga types.GenesisAccount) accounts.Account {
@@ -155,6 +179,16 @@ func (fx *resumeBALFixture) seed(t *testing.T, db kv.TemporalRwDB, resumeAfterTx
 						return err
 					}
 				}
+				for _, slot := range bal[i].StorageChanges {
+					for _, change := range slot.Changes {
+						if change.Index != resumeBALTx0AccessIndex {
+							continue
+						}
+						if err := domains.DomainPut(kv.StorageDomain, tx, storageKey(bal[i].Address, slot.Slot), change.Value.Bytes(), commitTxNum, nil); err != nil {
+							return err
+						}
+					}
+				}
 			}
 		}
 		root, err := domains.ComputeCommitment(ctx, tx, true, commitBlock, commitTxNum, "seed", nil)
@@ -170,34 +204,28 @@ func (fx *resumeBALFixture) seed(t *testing.T, db kv.TemporalRwDB, resumeAfterTx
 }
 
 // postTx0Account derives an account's state after tx0 from the block access
-// list entries at access index 1.
+// list entries at tx0's access index; storage is seeded separately.
 func (fx *resumeBALFixture) postTx0Account(t *testing.T, changes *types.AccountChanges) (accounts.Account, bool) {
 	t.Helper()
-	const tx0Index = 1
 	acc := accounts.NewAccount()
 	if ga, ok := fx.alloc[changes.Address]; ok {
 		acc = allocAccount(ga)
 	}
 	changed := false
 	for _, bc := range changes.BalanceChanges {
-		if bc.Index == tx0Index {
+		if bc.Index == resumeBALTx0AccessIndex {
 			acc.Balance = bc.Value
 			changed = true
 		}
 	}
 	for _, nc := range changes.NonceChanges {
-		if nc.Index == tx0Index {
+		if nc.Index == resumeBALTx0AccessIndex {
 			acc.Nonce = nc.Value
 			changed = true
 		}
 	}
 	for _, cc := range changes.CodeChanges {
-		require.NotEqual(t, uint32(tx0Index), cc.Index, "tx0 is a plain transfer and must not change code")
-	}
-	for _, sc := range changes.StorageChanges {
-		for _, c := range sc.Changes {
-			require.NotEqual(t, uint32(tx0Index), c.Index, "tx0 is a plain transfer and must not change storage")
-		}
+		require.NotEqual(t, resumeBALTx0AccessIndex, cc.Index, "tx0 must not change code")
 	}
 	return acc, changed
 }
@@ -376,4 +404,24 @@ func TestResumedBlockValidatesBlockAccessList(t *testing.T) {
 
 	requireAccepted(t, fx.exec(t, fx.block, true), "the resumed block must still be accepted")
 	requireAccessListMismatch(t, fx.exec(t, tampered, true), "the resumed block must reject the tampered access list")
+}
+
+// TestReplayResumedPrefixHonoursCancellation pins that a cancelled context
+// stops the prefix replay before it executes a transaction.
+func TestReplayResumedPrefixHonoursCancellation(t *testing.T) {
+	db := newResumeTestDB(t)
+	config := chain.TestChainBerlinConfig
+	pe, roTx := newResumeTestExec(t, db, config)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	task := &exec.TxTask{
+		Header:  &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000},
+		TxNum:   3,
+		TxIndex: 1,
+		Config:  config,
+		Txs:     types.Transactions{signSelfSendTx(t, 0, 0, 1, 21_000, config, 0), signSelfSendTx(t, 1, 0, 1, 21_000, config, 0)},
+	}
+
+	err := pe.replayResumedPrefix(ctx, roTx, task, 1, &state.VersionedIO{})
+	require.ErrorIs(t, err, context.Canceled)
 }

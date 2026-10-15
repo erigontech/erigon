@@ -3405,15 +3405,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			receipts.DeriveFields(blockReceipts, be.hash())
 
 			if pe.cfg.chainConfig.IsAmsterdam(header.Time) || pe.cfg.experimentalBAL {
-				switch err := pe.replayResumedPrefix(ctx, applyTx, tt, startTxIndex, be.blockIO); {
-				case err == nil:
-					txIOComplete = true
-				case errors.Is(err, errResumedPrefixHistoryPruned):
-					pe.logger.Warn("["+pe.logPrefix+"] cannot validate the block access list of a block resumed mid-block",
-						"block", be.number(), "startTxIndex", startTxIndex, "err", err)
-				default:
+				if err := pe.replayResumedPrefix(ctx, applyTx, tt, startTxIndex, be.blockIO); err != nil {
 					return be.operationalBlockResult(fmt.Errorf("block %d: replay resumed prefix: %w", be.number(), err)), nil
 				}
+				txIOComplete = true
 			}
 		}
 
