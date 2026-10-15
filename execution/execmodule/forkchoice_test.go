@@ -292,6 +292,8 @@ func TestForkchoiceMissingSegmentReportsMissingHeader(t *testing.T) {
 		return nil
 	}))
 	missing := chain.Blocks[1]
+	// The genesis forkchoice update of New can still hold the semaphore, which would answer Busy.
+	m.ExecModule.WaitIdle(t.Context())
 
 	result, err := m.ExecModule.UpdateForkChoice(t.Context(), chain.TopBlock.Hash(), common.Hash{}, common.Hash{})
 	require.NoError(t, err)
