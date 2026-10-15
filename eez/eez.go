@@ -33,9 +33,6 @@ var EnabledFlag = cli.BoolFlag{
 	Usage: "Enable EEZ support: EEZ networks for --chain, the l2 config section, transaction type 0x76 and the EEZ rules engine",
 }
 
-// Flags lists the EEZ command-line flags.
-var Flags = []cli.Flag{&EnabledFlag}
-
 // Register adds the EEZ networks, the eez l2 config section, transaction
 // type 0x76 and the EEZ rules engine to the process-wide registries. It is
 // idempotent.

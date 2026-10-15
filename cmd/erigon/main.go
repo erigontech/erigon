@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/diagnostics/syscheck"
 	"github.com/erigontech/erigon/eez"
+	"github.com/erigontech/erigon/execution/types"
 	erigoncli "github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/debug"
 )
@@ -43,6 +44,7 @@ func main() {
 	var err error
 	common.WithProfilersMain(func() {
 		app := erigonapp.MakeApp("erigon", runErigon, slices.Concat(erigoncli.DefaultFlags, eez.Flags))
+		erigonapp.InitGenesisHook = eezGenesis
 		err = app.Run(context.Background(), os.Args)
 		if err != nil {
 			_, printErr := fmt.Fprintln(os.Stderr, err)
@@ -54,6 +56,16 @@ func main() {
 	if err != nil {
 		os.Exit(1)
 	}
+}
+
+// eezGenesis writes the l2 section the EEZ flags set into the genesis init
+// commits.
+func eezGenesis(cliCtx *cli.Command, genesis *types.Genesis) error {
+	cfg, err := eez.ConfigFromCLI(cliCtx)
+	if err != nil || cfg == nil {
+		return err
+	}
+	return cfg.L2.ApplyGenesis(genesis.Config, genesis.GasLimit)
 }
 
 func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
