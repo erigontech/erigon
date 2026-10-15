@@ -54,6 +54,17 @@ func TestNewByteLRUDroppedIsCollectable(t *testing.T) {
 	require.Nil(t, dropped.Value(), "an unbudgeted cache dropped without Close must be collected")
 }
 
+func TestBudgetedByteLRUClosedIsCollectable(t *testing.T) {
+	dropped := func() weak.Pointer[otter.Cache[uint64, []byte]] {
+		b := newByteLRU(datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
+		b.Add(1, make([]byte, 64))
+		b.Close()
+		return weak.Make(b.c)
+	}()
+	runtime.GC()
+	require.Nil(t, dropped.Value(), "a budgeted cache dropped after Close must be collected")
+}
+
 func TestHashByteLRUMissesForeignHash(t *testing.T) {
 	l := NewHashByteLRU(datasize.MB, func(v []byte) int64 { return int64(len(v)) })
 	hash := common.Hash{1, 2, 3}

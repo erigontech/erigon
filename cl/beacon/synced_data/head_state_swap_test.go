@@ -68,9 +68,10 @@ func TestViewHeadStateDoesNotWaitForHeadStateCopy(t *testing.T) {
 
 	writerDone := make(chan struct{})
 	var writeErr error
+	next := bigValidatorState(t, 1)
 	go func() {
 		defer close(writerDone)
-		writeErr = manager.OnHeadStateWithBlockRoot(bigValidatorState(t, 1), common.Hash{0x02})
+		writeErr = manager.OnHeadStateWithBlockRoot(next, common.Hash{0x02})
 	}()
 	<-writerPaused
 

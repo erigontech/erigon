@@ -1803,9 +1803,10 @@ func TestPublishedBlockJobRequestCancellationDoesNotCancelIntegration(t *testing
 			return nil
 		}
 	})
+	job := serviceJob(t, service, root)
 	processDone := make(chan struct{})
 	go func() {
-		service.processScheduledBlock(context.Background(), root, serviceJob(t, service, root), time.Now())
+		service.processScheduledBlock(context.Background(), root, job, time.Now())
 		close(processDone)
 	}()
 	<-started
