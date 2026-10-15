@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
@@ -255,6 +256,9 @@ type Config struct {
 	// NoEngineAPI keeps the engine API server down, for a chain an in-process
 	// service drives instead of a consensus layer.
 	NoEngineAPI bool
+	// ExtraAPIs are RPC namespaces served beside the built-in ones, subject
+	// to the same --http.api selection.
+	ExtraAPIs []rpc.API `toml:"-"`
 
 	OverrideOsakaTime     *uint64 `toml:",omitempty"`
 	OverrideAmsterdamTime *uint64 `toml:",omitempty"`
