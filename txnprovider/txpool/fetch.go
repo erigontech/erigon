@@ -431,8 +431,8 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		}
 
 		// Deduplicate transaction bodies to avoid repeated blob verification.
-		// Keep announcements so the fetcher can use another peer after a bad response
-		// and retry transactions after a temporary nonce-gap rejection.
+		// Keep announcements for peer fallback. Replies with cached bodies are still
+		// dropped before the pool can revalidate their transactions.
 		switch req.Id {
 		case sentryproto.MessageId_TRANSACTIONS_66, sentryproto.MessageId_POOLED_TRANSACTIONS_66:
 			if _, seen := seenLRU.Get(req.Data); seen {

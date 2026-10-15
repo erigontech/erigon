@@ -165,8 +165,10 @@ func TestGrpcServerAddRetriesNonceGapAfterStateUpdate(t *testing.T) {
 			require.Equal(t, []string{txpoolcfg.NonceTooDistant.String()}, first.Errors)
 			require.Empty(t, pool.byHash)
 			if persisted {
+				staleSender := sender
+				staleSender[0] ^= 0xff
 				require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
-					return tx.Put(kv.PoolTransaction, hash[:], append(sender[:], encoded.Bytes()...))
+					return tx.Put(kv.PoolTransaction, hash[:], append(staleSender[:], encoded.Bytes()...))
 				}))
 			}
 			account.Nonce = 141

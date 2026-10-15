@@ -36,9 +36,8 @@ type Config struct {
 	TotalBlobPoolLimit  uint64 // Total number of blobs (not txns) allowed within the txpool
 	PriceBump           uint64 // Price bump percentage to replace an already existing transaction
 	BlobPriceBump       uint64 // Price bump percentage to replace an existing 4844 blob txn (type-3)
-	// MaxNonceGap limits how far a transaction nonce may exceed the next nonce after consecutive pooled transactions.
-	// Larger gaps are evicted to bound queued transactions, but can shrink as the sender nonce advances or missing transactions arrive.
-	// A value of 0 disables this eviction. Default is 64.
+	// MaxNonceGap limits the gap beyond the sender's next nonce after consecutive pooled transactions.
+	// Transactions beyond this limit are evicted. Zero disables this eviction. Default is 64.
 	MaxNonceGap uint64
 
 	// QueuedDormancyDuration is the duration after which queued transactions from a sender with no
@@ -82,7 +81,7 @@ var DefaultConfig = Config{
 	PriceBump:          10,   // Price bump percentage to replace an already existing transaction
 	BlobPriceBump:      100,
 
-	MaxNonceGap: 64, // Evict queued txns with a nonce gap > 64 from the on-chain nonce
+	MaxNonceGap: 64,
 
 	QueuedDormancyDuration: 3 * time.Hour, // Evict queued senders with no on-chain activity for 3h
 
