@@ -24,6 +24,7 @@ type AggOpts struct { //nolint:gocritic
 	stepSize                        uint64 // != 0 mean override erigondb.toml settings
 	stepsInFrozenFile               uint64 // != 0 mean override erigondb.toml settings
 	erigondbDomainStepsInFrozenFile uint64
+	commitmentHotMaxMergeSteps      uint64
 	referencesInCommitmentBranches  *bool // nil = leave global schema default untouched
 
 	genSaltIfNeed       bool
@@ -68,6 +69,7 @@ func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:go
 	a.stepSize.Store(opts.stepSize)
 	a.stepsInFrozenFile.Store(opts.stepsInFrozenFile)
 	a.erigondbDomainStepsInFrozenFile = opts.erigondbDomainStepsInFrozenFile
+	a.commitmentHotMaxMergeSteps = opts.commitmentHotMaxMergeSteps
 
 	a.branchCacheDisabled = opts.disableBranchCache
 	a.disableFsync = opts.disableFsync
@@ -111,6 +113,12 @@ func (opts AggOpts) ErigondbDomainStepsInFrozenFile(steps uint64) AggOpts { //no
 	opts.erigondbDomainStepsInFrozenFile = steps
 	return opts
 }
+
+func (opts AggOpts) CommitmentHotMaxMergeSteps(steps uint64) AggOpts { //nolint:gocritic
+	opts.commitmentHotMaxMergeSteps = steps
+	return opts
+}
+
 func (opts AggOpts) GenSaltIfNeed(v bool) AggOpts { opts.genSaltIfNeed = v; return opts }   //nolint:gocritic
 func (opts AggOpts) Logger(l log.Logger) AggOpts  { opts.logger = l; return opts }          //nolint:gocritic
 func (opts AggOpts) DisableFsync() AggOpts        { opts.disableFsync = true; return opts } //nolint:gocritic

@@ -1285,7 +1285,8 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 			Logger(logger).
 			SanityOldNaming().
 			GenSaltIfNeed(createNewSaltFileIfNeeded).
-			WithErigonDBSettings(erigonDBSettings)
+			WithErigonDBSettings(erigonDBSettings).
+			CommitmentHotMaxMergeSteps(snConfig.Sync.TieringCommitmentHotMergeSteps)
 		if snConfig.ErigondbDomainStepsInFrozenFile != nil {
 			v := *snConfig.ErigondbDomainStepsInFrozenFile
 			stepsStr := "Inf"
