@@ -413,6 +413,33 @@ func TestHasEnvelopeUsesValidatedEnvelopeCache(t *testing.T) {
 	require.True(t, f.HasEnvelope(root))
 }
 
+func TestRejectedEnvelopeCannotBeReadOrReplaced(t *testing.T) {
+	for _, operation := range []string{"read", "replace"} {
+		t.Run(operation, func(t *testing.T) {
+			f := &forkGraphDisk{fs: afero.NewMemMapFs(), beaconCfg: &clparams.MainnetBeaconConfig}
+			root := common.Hash{1}
+			addEnvelopeTestBlock(f, root, 1)
+			envelope := testEnvelopeWithTransaction(root, []byte{1})
+			require.NoError(t, f.DumpEnvelopeOnDisk(root, envelope))
+			f.MarkPayloadAccepted(root, true)
+
+			require.True(t, f.RejectEnvelope(root))
+			require.False(t, f.HasEnvelope(root))
+			require.False(t, f.IsBlockInvalid(root))
+			require.True(t, f.IsPayloadUnavailable(root))
+			_, accepted := f.PayloadAccepted(root)
+			require.False(t, accepted)
+			if operation == "read" {
+				_, err := f.ReadEnvelopeFromDisk(root)
+				require.Error(t, err)
+			} else {
+				require.Error(t, f.DumpEnvelopeOnDisk(root, envelope))
+			}
+			require.False(t, f.HasEnvelope(root))
+		})
+	}
+}
+
 func TestDumpEnvelopeBeforePruneDoesNotSurvivePrune(t *testing.T) {
 	baseFs := afero.NewMemMapFs()
 	oldRoot := common.Hash{1}
@@ -1584,7 +1611,10 @@ func TestDumpEnvelopeRejectsPrunedRoot(t *testing.T) {
 	addEnvelopeTestBlock(f, newRoot, 3)
 	require.NoError(t, afero.WriteFile(fs, getBeaconStateFilename(oldRoot), []byte{1}, 0o644))
 	require.NoError(t, afero.WriteFile(fs, getBeaconStateFilename(newRoot), []byte{1}, 0o644))
+	require.True(t, f.RejectEnvelope(oldRoot))
 	require.NoError(t, f.Prune(2))
+	require.False(t, f.IsEnvelopeRejected(oldRoot))
+	require.False(t, f.RejectEnvelope(oldRoot))
 
 	require.Error(t, f.DumpEnvelopeOnDisk(oldRoot, testEnvelopeWithTransaction(oldRoot, []byte{1})))
 	exists, err := afero.Exists(fs, getEnvelopeFilename(oldRoot))

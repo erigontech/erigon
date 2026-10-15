@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
@@ -46,13 +47,17 @@ type selectedHeadEnvelopeTestStore struct {
 	envelopes             map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	onExecutionPayloadErr error
 	onExecutionPayload    func(*cltypes.SignedExecutionPayloadEnvelope) error
+	rejected              bool
 }
 
 type anchorEnvelopeTestStore struct {
 	root     common.Hash
 	state    *state2.CachingBeaconState
 	envelope *cltypes.SignedExecutionPayloadEnvelope
+	rejected bool
 }
+
+func (s *anchorEnvelopeTestStore) IsEnvelopeRejected(common.Hash) bool { return s.rejected }
 
 func (s *anchorEnvelopeTestStore) AnchorRoot() common.Hash {
 	return s.root
@@ -73,6 +78,20 @@ func (s *selectedHeadEnvelopeTestStore) HasEnvelope(root common.Hash) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.envelopes[root] != nil
+}
+
+func (s *selectedHeadEnvelopeTestStore) IsEnvelopeRejected(common.Hash) bool { return s.rejected }
+
+func TestWaitForSelectedHeadEnvelopeSkipsRejectedRoot(t *testing.T) {
+	store := &selectedHeadEnvelopeTestStore{rejected: true}
+	requests := 0
+	done := make(chan struct{})
+	waitForSelectedHeadEnvelope(t.Context(), store, func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+		requests++
+		return nil, nil
+	}, common.Hash{1}, time.Second, true, true, selectedHeadEnvelopeRequestHooks{done: func() { close(done) }})
+	<-done
+	require.Zero(t, requests)
 }
 
 func (s *selectedHeadEnvelopeTestStore) OnExecutionPayload(_ context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope, _, _ bool) error {
@@ -422,6 +441,10 @@ func TestChainTipAnchorEnvelopeRetriesAfterUnavailableResponse(t *testing.T) {
 	require.False(t, store.HasEnvelope(anchorRoot))
 	require.True(t, ensureAnchorEnvelopeForChild(context.Background(), store, recoverAnchor, child))
 	require.True(t, store.HasEnvelope(anchorRoot))
+	require.Equal(t, 2, requests)
+	store.envelope = nil
+	store.rejected = true
+	require.False(t, ensureAnchorEnvelopeForChild(t.Context(), store, recoverAnchor, child))
 	require.Equal(t, 2, requests)
 }
 
@@ -1099,12 +1122,16 @@ func TestValidateAnchorPayloadWithAnyExecutionClient(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, test := range []struct {
-		name   string
-		engine *testExecutionEngine
+		name    string
+		engine  *testExecutionEngine
+		wantErr error
 	}{
 		{name: "remote EL", engine: &testExecutionEngine{payloadStatus: execution_client.PayloadStatusValidated}},
 		{name: "local EL", engine: &testExecutionEngine{supportInsertion: true, payloadStatus: execution_client.PayloadStatusValidated}},
 		{name: "no EL"},
+		{name: "blob hash mismatch", engine: &testExecutionEngine{newPayloadFn: func(context.Context, *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
+			return execution_client.PayloadStatusInvalidated, misc.ErrMismatchBlobHashes
+		}}, wantErr: misc.ErrMismatchBlobHashes},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			forkGraph, err := fork_graph.NewForkGraphDisk(st, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
@@ -1130,15 +1157,81 @@ func TestValidateAnchorPayloadWithAnyExecutionClient(t *testing.T) {
 				stageCfg.executionClient = test.engine
 				stageCfg.gloasPayloadValidator = test.engine
 			}
-			require.NoError(t, validateAnchorPayloadWithExecutionClient(context.Background(), stageCfg, anchorRoot, bid, env))
+			err = validateAnchorPayloadWithExecutionClient(t.Context(), stageCfg, anchorRoot, bid, env)
 			if test.engine != nil {
 				require.Equal(t, 1, test.engine.newPayloadCalls)
 			}
+			if test.wantErr != nil {
+				require.ErrorIs(t, err, test.wantErr)
+				_, ok := store.GetRecentExecutionPayloadStatus(env.Message.Payload.BlockHash)
+				require.False(t, ok)
+				return
+			}
+			require.NoError(t, err)
 			gasLimit, ok := store.GetExecutionPayloadGasLimit(env.Message.Payload.BlockHash)
 			require.True(t, ok)
 			require.Equal(t, env.Message.Payload.GasLimit, gasLimit)
 		})
 	}
+}
+
+func TestRetryUnverifiedAnchorPayloadDoesNotCacheBlobMismatch(t *testing.T) {
+	beaconCfg, st, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
+	beaconCfg.AltairForkEpoch = 0
+	beaconCfg.BellatrixForkEpoch = 0
+	beaconCfg.CapellaForkEpoch = 0
+	beaconCfg.DenebForkEpoch = 0
+	beaconCfg.ElectraForkEpoch = 0
+	beaconCfg.FuluForkEpoch = 0
+	beaconCfg.InitializeForkSchedule()
+	st.SetLatestExecutionPayloadBid(bid)
+	anchorRoot, err := st.BlockRoot()
+	require.NoError(t, err)
+	env.Message.BeaconBlockRoot = anchorRoot
+	privateKey, err := bls.NewPrivateKeyFromIKM([]byte("01234567890123456789012345678901"))
+	require.NoError(t, err)
+	signAnchorEnvelope(t, st, privateKey, env, bid.Slot)
+	graph, err := fork_graph.NewForkGraphDisk(st, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	engine := &testExecutionEngine{newPayloadFn: func(context.Context, *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
+		return execution_client.PayloadStatusInvalidated, misc.ErrMismatchBlobHashes
+	}}
+	store, err := forkchoice.NewForkChoiceStore(
+		nil, st, engine, pool.NewOperationsPool(beaconCfg), graph, beaconevents.NewEventEmitter(),
+		nil, nil, public_keys_registry.NewInMemoryPublicKeysRegistry(), validator_params.NewValidatorParams(), false, nil,
+	)
+	require.NoError(t, err)
+	require.NoError(t, store.StoreAnchorEnvelope(anchorRoot, env))
+
+	stageCfg := &Cfg{
+		beaconCfg:             beaconCfg,
+		forkChoice:            store,
+		executionClient:       engine,
+		gloasPayloadValidator: engine,
+	}
+	retryUnverifiedAnchorPayload(t.Context(), stageCfg)
+	retryUnverifiedAnchorPayload(t.Context(), stageCfg)
+
+	require.Equal(t, 1, engine.newPayloadCalls)
+	_, ok := store.GetRecentExecutionPayloadStatus(env.Message.Payload.BlockHash)
+	require.False(t, ok)
+	require.False(t, store.HasEnvelope(anchorRoot))
+	require.False(t, graph.IsBlockInvalid(anchorRoot))
+
+	t.Run("late validation", func(t *testing.T) {
+		status, retained := store.MarkPayloadStatusAndGasLimitIfRetained(anchorRoot, env.Message.Payload.BlockHash, execution_client.PayloadStatusValidated, env.Message.Payload.GasLimit)
+		require.EqualValues(t, execution_client.PayloadStatusNone, status)
+		require.False(t, retained)
+		require.True(t, graph.IsPayloadUnavailable(anchorRoot))
+	})
+	t.Run("redelivery", func(t *testing.T) {
+		err := store.OnExecutionPayload(t.Context(), env, false, false)
+		require.ErrorIs(t, err, forkchoice.ErrInvalidExecutionPayloadEnvelope)
+		err = store.StoreAnchorEnvelope(anchorRoot, env)
+		require.ErrorIs(t, err, forkchoice.ErrInvalidExecutionPayloadEnvelope)
+		err = store.ApplyLocalSelfBuildEnvelope(t.Context(), env)
+		require.ErrorIs(t, err, forkchoice.ErrInvalidExecutionPayloadEnvelope)
+	})
 }
 
 func TestDrainPendingGloasPayloadsRequeuesNotValidatedPayload(t *testing.T) {

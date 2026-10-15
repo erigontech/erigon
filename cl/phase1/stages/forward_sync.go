@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 )
 
 // ErrForwardSyncStale is returned when forward sync makes no progress for an extended period.
@@ -388,6 +389,9 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 	}
 
 	anchorRoot := cfg.forkChoice.AnchorRoot()
+	if cfg.forkChoice.IsEnvelopeRejected(anchorRoot) {
+		return fmt.Errorf("%w: anchor envelope previously rejected", forkchoice.ErrInvalidExecutionPayloadEnvelope)
+	}
 	// Find the anchor block root via the header stored in the fork graph
 	anchorHeader, ok := cfg.forkChoice.GetHeader(anchorRoot)
 	if !ok {
@@ -475,6 +479,10 @@ func validateAnchorPayloadWithExecutionClient(ctx context.Context, cfg *Cfg, anc
 	if canValidateGloasPayloads(cfg) {
 		var err error
 		status, err = validateAnchorPayloadWithEL(ctx, cfg, bid, env)
+		if errors.Is(err, misc.ErrMismatchBlobHashes) {
+			cfg.forkChoice.RejectEnvelope(anchorRoot)
+			return fmt.Errorf("invalid anchor envelope: %w", err)
+		}
 		if err != nil {
 			log.Warn("[Caplin] Anchor envelope EL validation failed", "anchorRoot", anchorRoot, "status", status, "err", err)
 		}

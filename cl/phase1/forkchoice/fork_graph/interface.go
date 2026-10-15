@@ -74,4 +74,6 @@ type ForkGraph interface {
 	DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) error
 	ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
 	HasEnvelope(blockRoot common.Hash) bool
+	RejectEnvelope(blockRoot common.Hash) bool
+	IsEnvelopeRejected(blockRoot common.Hash) bool
 }
