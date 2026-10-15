@@ -182,6 +182,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	st := state.New(stateReader)
 	defer st.Close()
+	replay := transactions.NewReplay(st, stateOverride)
 
 	header := block.HeaderNoCopy()
 
@@ -222,7 +223,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			return nil, err
 		}
 
-		_ = st.FinalizeTx(rules, state.NewNoopWriter())
+		_ = replay.Finish(rules, state.NewNoopWriter())
 
 		if evm.Cancelled() {
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
@@ -265,7 +266,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 				return nil, err
 			}
 
-			_ = st.FinalizeTx(rules, state.NewNoopWriter())
+			_ = replay.Finish(rules, state.NewNoopWriter())
 
 			// If the timer caused an abort, return an appropriate error message
 			if evm.Cancelled() {

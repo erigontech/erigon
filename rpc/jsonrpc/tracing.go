@@ -128,6 +128,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		return err
 	}
 	defer ibs.Close()
+	replay := transactions.NewReplay(ibs, config.StateOverrides)
 
 	var precompiles vm.PrecompiledContracts
 	if config.BlockOverrides != nil {
@@ -178,7 +179,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			if traceErr != nil {
 				return traceErr
 			}
-			return ibs.FinalizeTx(rules, state.NewNoopWriter())
+			return replay.Finish(rules, state.NewNoopWriter())
 		})
 
 		stream.WriteObjectEnd()
@@ -257,6 +258,11 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		return err
 	}
 	defer ibs.Close()
+	var stateOverrides *ethapi.StateOverrides
+	if config != nil {
+		stateOverrides = config.StateOverrides
+	}
+	transactions.VersionedCallState(ibs, stateOverrides)
 
 	// The state is built from history at txnIndex, so the earlier transactions of
 	// the block never ran and the log counter they left has to be handed in.
@@ -467,6 +473,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 	ibs := state.New(stateReader)
 	defer ibs.Close()
+	replay := transactions.NewReplay(ibs, config.StateOverrides)
 
 	getHash := transactions.MakeBlockHashProvider(ctx, tx, api._blockReader, overrideBlockHash)
 
@@ -521,7 +528,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 				return err
 			}
 
-			_ = ibs.FinalizeTx(rules, state.NewNoopWriter())
+			_ = replay.Finish(rules, state.NewNoopWriter())
 
 		}
 		stream.WriteArrayEnd()

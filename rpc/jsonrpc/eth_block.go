@@ -110,6 +110,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	}
 	ibs := state.New(stateReader)
 	defer ibs.Close()
+	replay := transactions.NewReplay(ibs, nil)
 
 	parent, err := api.headerByHashAndNumber(ctx, tx, hash, stateBlockNumber)
 	if err != nil {
@@ -184,7 +185,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		if evm.Cancelled() {
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 		}
-		if err := ibs.FinalizeTx(rules, state.NewNoopWriter()); err != nil {
+		if err := replay.Finish(rules, state.NewNoopWriter()); err != nil {
 			return nil, err
 		}
 
