@@ -262,7 +262,10 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 			b.ScheduleBlockForLaterProcessing(msg)
 			return fmt.Errorf("%w: %w", ErrIgnore, err)
 		}
-		return err
+		if errors.Is(err, forkchoice.ErrBlockInvalid) {
+			return err
+		}
+		return fmt.Errorf("%w: %w", ErrIgnore, err)
 	}
 	return nil
 }
