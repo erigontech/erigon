@@ -259,15 +259,15 @@ func TestBlockBuilderWindowTakesPreparedPayloadEarly(t *testing.T) {
 	slotStart := time.Unix(100, 0)
 
 	for _, test := range []struct {
-		version      clparams.StateVersion
-		warmup       time.Duration
-		firstPoll    time.Duration
-		unpreparedAt time.Duration
-		pollUntil    time.Duration
-		lateRequest  time.Duration
+		version             clparams.StateVersion
+		warmup              time.Duration
+		firstPoll           time.Duration
+		pollUntil           time.Duration
+		unpreparedAt        time.Duration
+		unpreparedPollUntil time.Duration
 	}{
-		{clparams.ElectraVersion, 2 * time.Second, 900 * time.Millisecond, 2900 * time.Millisecond, 3 * time.Second, 2 * time.Second},
-		{clparams.GloasVersion, 250 * time.Millisecond, 650 * time.Millisecond, 900 * time.Millisecond, time.Second, 800 * time.Millisecond},
+		{clparams.ElectraVersion, 2 * time.Second, 900 * time.Millisecond, 3 * time.Second, 2900 * time.Millisecond, 3 * time.Second},
+		{clparams.GloasVersion, 1500 * time.Millisecond, 650 * time.Millisecond, 2250 * time.Millisecond, 900 * time.Millisecond, time.Second},
 	} {
 		t.Run(test.version.String(), func(t *testing.T) {
 			prepared := computeBlockBuilderWindow(slotStart, slotStart, cfg, test.version, test.warmup)
@@ -276,14 +276,14 @@ func TestBlockBuilderWindowTakesPreparedPayloadEarly(t *testing.T) {
 
 			unprepared := computeBlockBuilderWindow(slotStart, slotStart, cfg, test.version, 0)
 			require.Equal(t, slotStart.Add(test.unpreparedAt), unprepared.firstGetAt)
-			require.Equal(t, slotStart.Add(test.pollUntil), unprepared.pollUntil)
+			require.Equal(t, slotStart.Add(test.unpreparedPollUntil), unprepared.pollUntil)
 
 			require.True(t, prepared.firstGetAt.Before(unprepared.firstGetAt))
 			fullyWarmed := computeBlockBuilderWindow(slotStart, slotStart, cfg, test.version, 10*time.Second)
 			require.Equal(t, prepared, fullyWarmed, "warmup beyond the cap must not collect the payload earlier")
 
-			late := computeBlockBuilderWindow(slotStart.Add(test.lateRequest), slotStart, cfg, test.version, test.warmup)
-			require.Equal(t, slotStart.Add(test.lateRequest), late.firstGetAt)
+			late := computeBlockBuilderWindow(slotStart.Add(2*time.Second), slotStart, cfg, test.version, test.warmup)
+			require.Equal(t, slotStart.Add(2*time.Second), late.firstGetAt)
 			require.Equal(t, slotStart.Add(test.pollUntil), late.pollUntil)
 		})
 	}
@@ -339,7 +339,7 @@ func TestMaximumPreparedAdvancePreservesRecentBuildTime(t *testing.T) {
 	}
 
 	require.Equal(t, 2*time.Second, maximumPreparedAdvance(cfg, clparams.ElectraVersion))
-	require.Equal(t, 250*time.Millisecond, maximumPreparedAdvance(cfg, clparams.GloasVersion))
+	require.Equal(t, 1500*time.Millisecond, maximumPreparedAdvance(cfg, clparams.GloasVersion))
 }
 
 func TestPayloadPreparationScratchReusesState(t *testing.T) {

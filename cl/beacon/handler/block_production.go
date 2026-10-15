@@ -340,15 +340,19 @@ func attestationDue(cfg *clparams.BeaconChainConfig, stateVersion clparams.State
 	return time.Duration(cfg.AttestationDueMs(stateVersion.AfterOrEqual(clparams.GloasVersion))) * time.Millisecond
 }
 
-// unpreparedGrabOffset is the normal payload collection deadline measured from the slot start. It
+// preparedGrabOffset is the normal payload collection deadline measured from the slot start. It
 // reserves the final publication share of the attestation window for processing, signing, and gossip.
+func preparedGrabOffset(due time.Duration) time.Duration {
+	return due - payloadPublicationMargin(due)
+}
+
 // Gloas preparation stands down on a FULL parent, the usual case, so the builder starts only with the
 // proposal; collecting at a third of the window leaves two thirds for the block to reach attesters.
 func unpreparedGrabOffset(due time.Duration, stateVersion clparams.StateVersion) time.Duration {
 	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 		return due / gloasPayloadCollectionDivisor
 	}
-	return due - payloadPublicationMargin(due)
+	return preparedGrabOffset(due)
 }
 
 func payloadPublicationMargin(due time.Duration) time.Duration {
@@ -360,7 +364,7 @@ func payloadPublicationMargin(due time.Duration) time.Duration {
 // with its first poll minPayloadPollingWindow earlier to allow a brief retry.
 func maximumPreparedAdvance(cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion) time.Duration {
 	due := attestationDue(cfg, stateVersion)
-	return max(unpreparedGrabOffset(due, stateVersion)-payloadPublicationMargin(due), 0)
+	return max(preparedGrabOffset(due)-payloadPublicationMargin(due), 0)
 }
 
 // computeBlockBuilderWindow returns when to first poll for the assembled payload and when to stop,
@@ -369,6 +373,9 @@ func maximumPreparedAdvance(cfg *clparams.BeaconChainConfig, stateVersion clpara
 func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion, warmup time.Duration) blockBuilderWindow {
 	due := attestationDue(cfg, stateVersion)
 	grabBy := slotStart.Add(unpreparedGrabOffset(due, stateVersion))
+	if warmup > 0 {
+		grabBy = slotStart.Add(preparedGrabOffset(due))
+	}
 	advance := min(max(warmup, 0), maximumPreparedAdvance(cfg, stateVersion))
 	firstGetAt := grabBy.Add(-minPayloadPollingWindow).Add(-advance)
 	if firstGetAt.Before(now) {
