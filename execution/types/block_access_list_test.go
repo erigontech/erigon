@@ -502,21 +502,9 @@ func TestBlockAccessListRLPSizeLimit(t *testing.T) {
 
 func TestBlockAccessListLargeLists(t *testing.T) {
 	tests := []struct {
-		name      string
-		bal       func() BlockAccessList
-		wantError string
+		name string
+		bal  func() BlockAccessList
 	}{
-		{
-			name: "accounts",
-			bal: func() BlockAccessList {
-				bal := make(BlockAccessList, 1<<19+1)
-				for i := range bal {
-					binary.BigEndian.PutUint64(bal[i].Address[12:], uint64(i))
-				}
-				return bal
-			},
-			wantError: "block access list RLP exceeds maximum size",
-		},
 		{
 			name: "storage reads",
 			bal: func() BlockAccessList {
@@ -600,12 +588,6 @@ func TestBlockAccessListLargeLists(t *testing.T) {
 				t.Fatalf("encode BAL: %v", err)
 			}
 			sidecar, err := DecodeBlockAccessListSidecarForHeader(raw, 10_000_000_000)
-			if tt.wantError != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.wantError) {
-					t.Fatalf("decode BAL: got %v, want %q", err, tt.wantError)
-				}
-				return
-			}
 			if err != nil {
 				t.Fatalf("decode BAL: %v", err)
 			}
