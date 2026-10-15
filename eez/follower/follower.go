@@ -120,6 +120,15 @@ func (f *Follower) publish() {
 	f.statusMu.Lock()
 	f.status = s
 	f.statusMu.Unlock()
+
+	m := loadMetrics()
+	m.l1Head.SetUint64(f.target)
+	m.l1Scanned.SetUint64(s.L1Scanned)
+	m.l1Finalized.SetUint64(s.L1Finalized)
+	m.l1Lag.SetUint64(f.target - min(f.target, s.L1Scanned))
+	m.l2Cursor.SetUint64(s.Cursor)
+	m.l2Safe.SetUint64(s.Safe)
+	m.l2Finalized.SetUint64(s.Finalized)
 }
 
 // New returns a follower of the EEZ chain cfg, local in chain, settled on
@@ -183,9 +192,12 @@ func (f *Follower) Run(ctx context.Context) error {
 			if halts(err) {
 				return err
 			}
-			f.logger.Warn("[eez] follower step failed, retrying", "in", pause, "err", err)
+			f.logger.Warn("[eez] follower step failed, retrying", "event", "eez.deriver.resync.failed", "in", pause, "err", err)
 			retry, pause = time.After(pause), min(2*pause, f.cfg.MaxRetry)
 			continue
+		}
+		if retry != nil {
+			f.logger.Info("[eez] follower recovered", "event", "eez.deriver.resync.recovered", "l1Scanned", f.scanned)
 		}
 		retry, pause = nil, f.cfg.Retry
 	}
@@ -200,7 +212,7 @@ func (f *Follower) Boot(ctx context.Context) error {
 		if err == nil || halts(err) || attempt >= f.cfg.BootAttempts {
 			return err
 		}
-		f.logger.Warn("[eez] boot catch-up failed, retrying", "attempt", attempt, "in", pause, "err", err)
+		f.logger.Warn("[eez] boot catch-up failed, retrying", "event", "eez.node.deriver.boot_catch_up.failed", "attempt", attempt, "in", pause, "err", err)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -300,6 +312,7 @@ func (f *Follower) Handle(ctx context.Context, e l1.Event) error {
 	case l1.NewHead:
 		f.target = max(f.target, e.Head.Number)
 	case l1.Reorg:
+		f.logger.Info("[eez] L1 reorg", "event", "eez.l1_watcher.reorg.detected", "ancestor", e.Ancestor.Number, "oldHead", e.OldHead.Number)
 		if err := f.rewind(ctx, e.Ancestor.Number); err != nil {
 			return err
 		}
@@ -314,6 +327,7 @@ func (f *Follower) Handle(ctx context.Context, e l1.Event) error {
 // L1 finality.
 func (f *Follower) Sync(ctx context.Context) error {
 	defer f.publish()
+	defer loadMetrics().sync.ObserveDuration(time.Now())
 	if err := f.revalidate(ctx); err != nil {
 		return err
 	}
@@ -350,6 +364,7 @@ func (f *Follower) revalidate(ctx context.Context) error {
 // rewind drops what derivation took from the L1 blocks above ancestor.
 func (f *Follower) rewind(ctx context.Context, ancestor uint64) error {
 	defer f.publish()
+	loadMetrics().reorgs.Inc()
 	f.scanned = min(f.scanned, ancestor)
 	return f.deriver.OnReorg(ctx, ancestor)
 }
@@ -361,6 +376,7 @@ func (f *Follower) recover(ctx context.Context, err error) error {
 	if !errors.As(err, &div) {
 		return err
 	}
+	loadMetrics().divergences.Inc()
 	h, herr := f.reader.HeaderByNumber(ctx, div.L1Block)
 	if herr != nil && !errors.Is(herr, l1.ErrNotFound) {
 		// Canonicality unknown: retry rather than halt.

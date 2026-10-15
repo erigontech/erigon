@@ -17,6 +17,7 @@
 package follower_test
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/eez/deriver"
 	"github.com/erigontech/erigon/eez/deriver/derivertest"
 	"github.com/erigontech/erigon/eez/follower"
@@ -371,4 +373,67 @@ func TestService(t *testing.T) {
 	}
 	require.NoError(t, s.Stop())
 	require.ErrorIs(t, s.Err(), deriver.ErrDiverged)
+}
+
+// syncBuffer is a log sink the test reads while the follower writes.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// TestMetricsAndEvents checks the follower's metrics and that its log
+// lines carry the reference client's event names.
+func TestMetricsAndEvents(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	first := c.Compose(nil, derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: transfers(c, 1)})
+	l1First := c.Post(derivertest.Posting{Batch: first}).Header.Number
+	second := c.Compose(nil, derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: [][]byte{c.Transfer(bob, 2)}})
+	c.Post(derivertest.Posting{Batch: second})
+
+	var out syncBuffer
+	logger := log.New()
+	logger.SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StreamHandler(&out, log.LogfmtFormat())))
+	_, chain := derivertest.NewL2(t)
+	cfg := testConfig
+	cfg.Dir = t.TempDir()
+	f, err := follower.New(c.L1, chain, derivertest.Config(), cfg, logger)
+	require.NoError(t, err)
+	require.NoError(t, f.Boot(t.Context()))
+	require.Equal(t, uint64(2), metrics.GetOrCreateGauge("eez_l2_cursor").GetValueUint64())
+	require.Equal(t, l1First+1, metrics.GetOrCreateGauge("eez_l1_scanned").GetValueUint64())
+	require.Positive(t, metrics.GetOrCreateCounter("eez_l2_blocks_derived_total").GetValueUint64())
+
+	require.NoError(t, f.Handle(t.Context(), l1.Reorg{Ancestor: l1.Header{Number: l1First}}))
+	require.Positive(t, metrics.GetOrCreateCounter("eez_l1_reorgs_total").GetValueUint64())
+	for _, event := range []string{
+		"eez.deriver.safe.advanced",
+		"eez.l1_watcher.reorg.detected",
+		"eez.deriver.l1.reorg.retreated",
+	} {
+		require.Contains(t, out.String(), "event="+event)
+	}
+	require.NotContains(t, out.String(), "event=eez.deriver.state.diverged_post")
+
+	c.Post(derivertest.Posting{Batch: tampered(c)})
+	_, done := (&node{follower: f}).run(t)
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, deriver.ErrDiverged)
+	case <-time.After(10 * time.Second):
+		t.Fatal("follower did not halt")
+	}
+	require.Contains(t, out.String(), "event=eez.deriver.state.diverged_post")
+	require.Positive(t, metrics.GetOrCreateCounter("eez_divergences_total").GetValueUint64())
 }
