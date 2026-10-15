@@ -70,7 +70,11 @@ func WithParaTrieDB(db kv.TemporalRoDB) SharedDomainOption {
 // of the experimental parallel/concurrent flags — for one-shot / empty-DB paths
 // (e.g. genesis) that wire no trie-context factory for the parallel trie.
 func WithSequentialCommitment() SharedDomainOption {
-	return func(o *sharedDomainOptions) { o.trieCfg.Variant = commitment.VariantHexPatriciaTrie }
+	return func(o *sharedDomainOptions) {
+		if o.trieCfg.Variant == commitment.VariantParallelHexPatricia {
+			o.trieCfg.Variant = commitment.VariantHexPatriciaTrie
+		}
+	}
 }
 
 // WithLocalCacheUnwind defers shared-cache invalidation until adoption or commit.

@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -1931,6 +1932,7 @@ type blockResult struct {
 	AllDeps          map[int]map[int]bool
 	Exhausted        *ErrLoopExhausted
 	blockStateCache  *state.BlockStateCache
+	parentState      *state.BlockStateCache
 	superseded       supersededWrites
 }
 
@@ -3551,6 +3553,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			Exhausted:        be.exhausted,
 			blockStateCache:  be.blockStateCache,
 			superseded:       be.takeSuperseded(),
+		}
+		if !isPartial && len(be.tasks) > 0 && commitmentdb.ParentReadsWanted() && !slices.ContainsFunc(be.tasks, func(t *execTask) bool { return t.Task.IsHistoric() }) {
+			be.result.parentState = be.tasks[0].Task.GetBlockStateCache()
 		}
 		return be.result, nil
 	}

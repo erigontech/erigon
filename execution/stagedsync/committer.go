@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"runtime/debug"
 	"runtime/pprof"
 	"sync"
 	"sync/atomic"
@@ -15,6 +16,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
@@ -22,6 +24,8 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/state"
 )
 
 // commitmentResult is the outcome of a single commitment computation.
@@ -90,6 +94,7 @@ type commitmentCalculator struct {
 	// updates to the commitment context and rotates this one in; the context
 	// drains its buffer synchronously, so by the next rotation it is idle.
 	spare *commitment.Updates
+	feed  commitment.Feed
 
 	prefetch *commitment.Warmuper
 	balBlock bool
@@ -111,6 +116,14 @@ type commitmentCalculator struct {
 	// roTx is a persistent read-only transaction for domain reads.
 	// Opened at start, lives for the calculator's lifetime.
 	roTx kv.TemporalTx
+
+	readAtNum     uint64
+	readAtHash    common.Hash
+	handoff       *commitTarget
+	handoffDeltas [][]commitment.BranchDelta
+	handoffDel    [][]byte
+	handoffMulti  bool
+	sawMidBlock   bool
 
 	// commitProgress holds the most recent CommitProgress the trie reported,
 	// and firstCommitAtNs the wall time of the first round. The parallel
@@ -291,11 +304,12 @@ func newCommitmentCalculator(
 	}
 
 	// ModeUpdate carries values in its btree for the trie to read; the parallel
-	// trie reads leaf values from the as-of reader, so keep its ModeParallel buffer.
+	// trie reads leaf values from the as-of reader and v3 owns its own collected
+	// feed, so only ModeDirect needs the upgrade.
 	sdCtxUpdates := doms.GetCommitmentContext().GetUpdates()
 	calcUpdates := sdCtxUpdates.NewEmpty()
 	spareUpdates := sdCtxUpdates.NewEmpty()
-	if sdCtxUpdates.Mode() != commitment.ModeParallel {
+	if sdCtxUpdates.Mode() == commitment.ModeDirect {
 		calcUpdates.SetMode(commitment.ModeUpdate)
 		spareUpdates.SetMode(commitment.ModeUpdate)
 	}
@@ -315,6 +329,28 @@ func newCommitmentCalculator(
 	// (avoids future sd.mem state) and GetLatest for commitment branches
 	// (written sequentially by this calculator).
 	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, txNum: 0}
+	calc := newCalcState(asOfReader, logger, logPrefix)
+	var readAtNum uint64
+	var readAtHash common.Hash
+	if doms.GetCommitmentContext().AcceptsFeed() {
+		if n, err := stages.GetStageProgress(roTx, stages.Execution); err == nil {
+			if h, err := rawdb.ReadCanonicalHash(roTx, n); err == nil {
+				readAtNum, readAtHash = n, h
+			}
+		}
+		calc.hashes = newCalcHashes()
+		if p := takeBranchCarry(db, readAtNum, readAtHash); p != nil {
+			if dbg.AssertEnabled {
+				if err := p.verifyAgainst(roTx); err != nil {
+					panic(err)
+				}
+			}
+			calc.branchPrefetch = p.start(workCtx, db, readAtNum+1)
+		} else {
+			calc.branchPrefetch = newBranchPrefetcher(workCtx, db, readAtNum+1)
+		}
+		asOfReader.prefetched = calc.branchPrefetch
+	}
 
 	ok = true
 	cc := &commitmentCalculator{
@@ -325,7 +361,7 @@ func newCommitmentCalculator(
 		logger:               logger,
 		updates:              calcUpdates,
 		spare:                spareUpdates,
-		state:                newCalcState(asOfReader, logger, logPrefix),
+		state:                calc,
 		asOfReader:           asOfReader,
 		roTx:                 roTx,
 		signalCtx:            signalCtx,
@@ -339,8 +375,10 @@ func newCommitmentCalculator(
 		perBlockFrom:         perBlockFrom,
 		done:                 make(chan struct{}),
 		processedWake:        make(chan struct{}),
+		readAtNum:            readAtNum,
+		readAtHash:           readAtHash,
 	}
-	if dbg.BALCommitmentWarmupReaders() > 0 {
+	if dbg.BALCommitmentWarmupReaders() > 0 && !doms.GetCommitmentContext().AcceptsFeed() {
 		cc.state.prefetch = func(plainKey []byte) {
 			if !cc.balBlock {
 				cc.prefetchKey(workCtx, plainKey)
@@ -387,6 +425,17 @@ func (cc *commitmentCalculator) Start(ctx context.Context) {
 func (cc *commitmentCalculator) Stop() {
 	close(cc.done)
 	cc.wg.Wait()
+	if p := cc.state.branchPrefetch; p != nil {
+		p.close()
+		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", p.bytes.Load(),
+			"hits", p.hits.Load(), "misses", p.misses.Load(), "dropped", p.dropped.Load(), "drained", p.drained.Load())
+		if r := cc.parentRecords(); r != nil {
+			commitmentdb.PublishParentRecords(r)
+			if dbg.CommitmentBranchCarry && !cc.sawMidBlock && cc.handoffDeltas != nil {
+				storeBranchCarry(cc.db, p, *cc.handoff, cc.handoffDeltas, kv.Step(cc.handoff.lastTxNum/cc.doms.StepSize()))
+			}
+		}
+	}
 	if cc.prefetch != nil {
 		cc.prefetch.CloseAndWait()
 	}
@@ -608,6 +657,9 @@ func (cc *commitmentCalculator) handleBlockRequest(ctx context.Context, req *blo
 	if cc.hasSeenBlockResult && req.blockNum <= cc.lastBlockResultSeen {
 		return
 	}
+	if len(req.bal) > 0 && !dbg.IgnoreBAL {
+		cc.state.branchPrefetch.addBAL(req.bal)
+	}
 	mode := calcModeIncremental
 	if len(req.bal) > 0 && !dbg.IgnoreBAL && dbg.BALDrivenCommitment {
 		mode = calcModeBALDriven
@@ -777,7 +829,7 @@ func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req 
 // flushes it to a fresh updates buffer, and computes the root at t. Shared by
 // the block-end compute-ahead and the mid-block step checkpoints so the two can't drift.
 func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blockRequest, maxTxIndex uint32, emptyRemoval bool, eip8246 bool, t commitTarget) ([]byte, func() error, error) {
-	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: t.lastTxNum + 1}
+	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: t.lastTxNum + 1, prefetched: cc.state.branchPrefetch}
 	balState := newCalcState(reader, cc.logger, cc.logPrefix)
 	balState.LoadFromBALUpTo(req.bal, maxTxIndex, emptyRemoval, cc.chainConfig.Aura != nil, eip8246)
 	if err := balState.LazyLoadErr(); err != nil {
@@ -786,7 +838,7 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 	if cc.balUpdates == nil {
 		cc.balUpdates = cc.updates.NewEmpty()
 		// ModeDirect must upgrade to ModeUpdate to carry compute-ahead's BAL values.
-		if cc.balUpdates.Mode() != commitment.ModeParallel {
+		if cc.balUpdates.Mode() == commitment.ModeDirect {
 			cc.balUpdates.SetMode(commitment.ModeUpdate)
 		}
 	} else {
@@ -887,23 +939,48 @@ func (cc *commitmentCalculator) shouldComputeOnRequest() bool {
 // commitTarget is the block identity a compute needs; a mid-block checkpoint has
 // no StateRoot, so it carries a zero one and never sets checkRoot.
 type commitTarget struct {
-	blockNum  uint64
-	blockHash common.Hash
-	lastTxNum uint64
-	stateRoot common.Hash
+	blockNum   uint64
+	blockHash  common.Hash
+	parentHash common.Hash
+	lastTxNum  uint64
+	stateRoot  common.Hash
+	parent     *state.BlockStateCache
 }
 
 func targetOf(br *blockResult) commitTarget {
-	return commitTarget{blockNum: br.Block.NumberU64(), blockHash: br.Block.Hash(), lastTxNum: br.lastTxNum, stateRoot: br.Block.Root()}
+	return commitTarget{blockNum: br.Block.NumberU64(), blockHash: br.Block.Hash(), parentHash: br.Block.ParentHash(), lastTxNum: br.lastTxNum, stateRoot: br.Block.Root(), parent: br.parentState}
+}
+
+func (cc *commitmentCalculator) noteVerified(t commitTarget, deltas [][]commitment.BranchDelta) {
+	if cc.handoff != nil && cc.handoff.blockHash != t.blockHash {
+		cc.handoffMulti = true
+	}
+	cc.handoff, cc.handoffDeltas, cc.handoffDel = &t, deltas, cc.state.deleted
+}
+
+func (cc *commitmentCalculator) parentRecords() *commitmentdb.ParentRecords {
+	h, p := cc.handoff, cc.state.branchPrefetch
+	if h == nil || p == nil || cc.handoffMulti || h.blockNum != cc.readAtNum+1 || h.parentHash != cc.readAtHash {
+		return nil
+	}
+	gen := p.gen.Load()
+	r := &commitmentdb.ParentRecords{
+		BlockNum: h.blockNum, BlockHash: h.blockHash, ParentHash: h.parentHash, Deleted: cc.handoffDel,
+		Get: func(key []byte) ([]byte, kv.Step, bool) { return p.getAt(key, gen) },
+	}
+	if h.parent != nil {
+		r.State = h.parent
+	}
+	return r
 }
 
 // computeMode selects compute's per-call behaviour; isolation is otherwise
 // decided by ownsChangeset.
 type computeMode struct {
 	label       string // error-message context, e.g. "step-boundary "
-	midBlock    bool   // mid-block checkpoint: keep block flags dirty and don't advance lastComputedBlock (block-end otherwise)
-	checkRoot   bool   // compare the computed root against target.stateRoot
-	publishRoot bool   // with checkRoot, publish the successful root too (batch-boundary request), not just mismatches
+	midBlock    bool
+	checkRoot   bool // compare the computed root against target.stateRoot
+	publishRoot bool // with checkRoot, publish the successful root too (batch-boundary request), not just mismatches
 }
 
 func (cc *commitmentCalculator) prefetchKey(ctx context.Context, plainKey []byte) {
@@ -931,6 +1008,34 @@ func (cc *commitmentCalculator) handOffUpdates() *commitment.Updates {
 	return filled
 }
 
+const computeGCPercent = 400
+
+var gcRaise struct {
+	sync.Mutex
+	computes int
+	prev     int
+}
+
+func raiseGCPercent() (restore func()) {
+	gcRaise.Lock()
+	defer gcRaise.Unlock()
+	if gcRaise.computes == 0 {
+		gcRaise.prev = debug.SetGCPercent(computeGCPercent)
+		if gcRaise.prev < 0 || gcRaise.prev > computeGCPercent {
+			debug.SetGCPercent(gcRaise.prev)
+		}
+	}
+	gcRaise.computes++
+	return func() {
+		gcRaise.Lock()
+		defer gcRaise.Unlock()
+		gcRaise.computes--
+		if gcRaise.computes == 0 {
+			debug.SetGCPercent(gcRaise.prev)
+		}
+	}
+}
+
 // compute is the shared prologue/compute/footer for every calculator commitment
 // path; the per-call differences live in m.
 func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m computeMode) {
@@ -942,13 +1047,22 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		return
 	}
 	cc.finishPrefetch()
-	cc.state.FlushToUpdates(cc.updates)
+	cc.state.branchPrefetch.pause()
+	defer cc.state.branchPrefetch.resume()
+	sdCtx := cc.doms.GetCommitmentContext()
+	if sdCtx.AcceptsFeed() {
+		defer raiseGCPercent()()
+	}
+	if sdCtx.AcceptsFeed() && dbg.TrieTraceFile == "" && dbg.TrieTraceBlock == 0 {
+		cc.state.FlushToFeed(&cc.feed)
+		sdCtx.SetFeed(&cc.feed)
+	} else {
+		cc.state.FlushToUpdates(cc.updates)
+		sdCtx.SetUpdates(cc.handOffUpdates())
+	}
 	if !m.midBlock {
 		cc.state.ResetBlockFlags()
 	}
-
-	sdCtx := cc.doms.GetCommitmentContext()
-	sdCtx.SetUpdates(cc.handOffUpdates())
 
 	cc.asOfReader.txNum = t.lastTxNum + 1
 	sdCtx.SetStateReader(cc.asOfReader)
@@ -970,6 +1084,10 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	}
 
 	mismatch := m.checkRoot && !bytes.Equal(rh, t.stateRoot[:])
+	var deltas [][]commitment.BranchDelta
+	if u := cc.doms.GetCommitmentContext().PeekPendingUpdate(); u != nil && u.BlockNum == t.blockNum {
+		deltas = u.Deltas
+	}
 	if flushOwn != nil {
 		if mismatch {
 			cc.doms.GetCommitmentContext().ResetPendingUpdates()
@@ -985,6 +1103,11 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	if !m.midBlock {
 		cc.lastComputedBlock = t.blockNum
 		cc.hasComputed = true
+		if m.checkRoot && !mismatch {
+			cc.noteVerified(t, deltas)
+		}
+	} else {
+		cc.sawMidBlock = true
 	}
 
 	if !m.checkRoot {
@@ -1034,9 +1157,6 @@ func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, target 
 	cc.compute(ctx, target, computeMode{label: "partial-block "})
 }
 
-// computeStepBoundary checkpoints commitment at a mid-block step edge without
-// advancing lastComputedBlock or resetting block flags — the block-end fold
-// still needs the pre-edge dirty keys.
 func (cc *commitmentCalculator) computeStepBoundary(ctx context.Context, target commitTarget) {
 	cc.compute(ctx, target, computeMode{label: "step-boundary ", midBlock: true})
 }
@@ -1155,13 +1275,16 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 // Commitment domain reads use GetLatest since branches are only written
 // by the calculator sequentially.
 type asOfStateReader struct {
-	sd     *execctx.SharedDomains
-	roTx   kv.TemporalTx
-	getter execctxapi.StateGetter
-	txNum  uint64
+	sd         *execctx.SharedDomains
+	roTx       kv.TemporalTx
+	getter     execctxapi.StateGetter
+	txNum      uint64
+	prefetched *branchPrefetcher
 }
 
 func (r *asOfStateReader) WithHistory() bool { return false }
+
+func (r *asOfStateReader) ReadsOwnedBranches() {}
 
 func (r *asOfStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
 	return nil
@@ -1169,6 +1292,9 @@ func (r *asOfStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
 
 func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
 	if d == kv.CommitmentDomain {
+		if enc, step, ok := r.prefetchedBranch(plainKey); ok {
+			return enc, step, nil
+		}
 		// Branches: use GetLatest — written only by this calculator, sequential.
 		if r.getter != nil {
 			enc, step, err = r.getter.GetLatest(d, plainKey, kv.GetLatestOptions{})
@@ -1201,8 +1327,31 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 	return enc, step, err
 }
 
+func (r *asOfStateReader) prefetchedBranch(key []byte) ([]byte, kv.Step, bool) {
+	if r.prefetched == nil {
+		return nil, 0, false
+	}
+	if _, maxStep, inMem := r.sd.GetLatestFromMemory(kv.CommitmentDomain, key); inMem || maxStep != kv.NoStepBound {
+		return nil, 0, false
+	}
+	data, step, ok := r.prefetched.get(key)
+	if ok {
+		r.prefetched.hits.Add(1)
+	} else {
+		r.prefetched.misses.Add(1)
+	}
+	return data, step, ok
+}
+
+func (r *asOfStateReader) LeafRefs(key, data []byte) *commitment.LeafRefs {
+	if r.prefetched == nil || len(data) == 0 {
+		return nil
+	}
+	return r.prefetched.leafRefs(key, data)
+}
+
 func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
-	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum}
+	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, prefetched: r.prefetched}
 }
 
 // CloneForWorker meters the worker's CommitmentDomain reads into the per-worker
@@ -1214,7 +1363,7 @@ func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.Tempor
 	if metrics := kvmetrics.MetricsFromContext(workerCtx); metrics != nil {
 		getterOpts = getterOpts.WithMetrics(metrics)
 	}
-	return &asOfStateReader{sd: r.sd, roTx: tx, getter: r.sd.AsStateGetter(tx, getterOpts), txNum: r.txNum}
+	return &asOfStateReader{sd: r.sd, roTx: tx, getter: r.sd.AsStateGetter(tx, getterOpts), txNum: r.txNum, prefetched: r.prefetched}
 }
 
 // BindsWorkerTx: CloneForWorker rebinds both roTx and getter, and state reads

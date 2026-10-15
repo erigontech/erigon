@@ -193,7 +193,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				fmt.Println(blockNum, "Commitment")
 				se.doms.GetCommitmentCtx().SetTraceWriter(os.Stderr)
 			}
-			// Warmup is enabled via EnableTrieWarmup at executor init
 			rh, err := se.doms.ComputeCommitment(ctx, se.applyTx, true, blockNum, inputTxNum-1, se.logPrefix, se.onCommitProgress)
 			if traceBlk {
 				se.doms.GetCommitmentCtx().SetTraceWriter(nil)

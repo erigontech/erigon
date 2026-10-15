@@ -27,6 +27,7 @@ var (
 	witnessCacheBuildFailOtherCounter  = metrics.GetOrCreateCounter("witness_cache_build_fail_other_total")
 	witnessCacheStalePinSkipCounter    = metrics.GetOrCreateCounter("witness_cache_stale_pin_skip_total")
 	witnessCacheCoalesceDropCounter    = metrics.GetOrCreateCounter("witness_cache_coalesce_drop_total")
+	witnessCacheParentRecordsCounter   = metrics.GetOrCreateCounter("witness_cache_parent_records_total")
 
 	// Counts overflow events, not discarded witnesses: one overflow drops up to
 	// cap(ch)/2 queued pushes.

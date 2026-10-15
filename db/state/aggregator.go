@@ -17,6 +17,7 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -291,7 +292,8 @@ func (a *Aggregator) ForTestReferencesInCommitmentBranches(domain kv.Domain, v b
 func (a *Aggregator) referencesInCommitmentBranches() bool {
 	a.commitmentRefsMu.RLock()
 	defer a.commitmentRefsMu.RUnlock()
-	return a.d[kv.CommitmentDomain].ReferencesInCommitmentBranches
+	d := a.d[kv.CommitmentDomain]
+	return d.ReferencesInCommitmentBranches && !d.CommitmentV3Records
 }
 
 // applyReferencesInCommitmentBranches stores the resolved flag pre-configure (ConfigureDomains
@@ -705,6 +707,8 @@ func (a *Aggregator) closeDirtyFilesNoReopen() {
 	a.closeDirtyFiles()
 	a.recalcVisibleFiles(nil)
 }
+
+func (a *Aggregator) CloseFilesNoReopen() { a.closeDirtyFilesNoReopen() }
 
 func (a *Aggregator) WaitForFiles() {
 	for range a.WaitForBuildAndMerge(a.ctx) {
@@ -2692,10 +2696,28 @@ func (at *AggregatorRoTx) DebugRangeLatestFromFiles(domain kv.Domain, from, to [
 }
 
 func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
-	v, ok, err = at.d[name].GetAsOf(k, ts, tx)
-	if name == kv.CommitmentDomain && !ok {
-		v, _, ok, err = at.GetLatest(name, k, tx, kv.GetLatestOptions{})
+	if name != kv.CommitmentDomain {
+		return at.d[name].GetAsOf(k, ts, tx)
 	}
+	if !at.a.d[kv.CommitmentDomain].CommitmentV3Records {
+		v, ok, err = at.d[name].GetAsOf(k, ts, tx)
+		if err != nil || ok {
+			return v, ok, err
+		}
+		v, _, ok, err = at.GetLatest(name, k, tx, kv.GetLatestOptions{})
+		return v, ok, err
+	}
+	v, ok, err = at.d[name].ht.HistorySeek(k, ts, tx)
+	if err != nil {
+		return nil, false, err
+	}
+	if ok {
+		if len(v) == 0 {
+			return nil, false, nil
+		}
+		return v, true, nil
+	}
+	v, _, ok, err = at.GetLatest(name, k, tx, kv.GetLatestOptions{})
 	return v, ok, err
 }
 
@@ -2723,6 +2745,9 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 		if metrics != nil && dbg.KVReadLevelledMetrics {
 			metrics.UpdateDbReads(domain, start)
 		}
+		if opts.Owned() {
+			v = bytes.Clone(v)
+		}
 		at.cacheLatestBranch(cacheBranch, k, v, step, step.LastTxNum(at.StepSize()), tx)
 		return v, step, true, nil
 	}
@@ -2735,7 +2760,11 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 	if metrics != nil && dbg.KVReadLevelledMetrics {
 		metrics.UpdateFileReadsUnique(domain, k, start)
 	}
+	stored := v
 	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
+	if opts.Owned() && len(v) != 0 && len(stored) != 0 && &v[0] == &stored[0] {
+		v = bytes.Clone(v)
+	}
 	step = kv.Step(fileEndTxNum / at.StepSize())
 	if err == nil {
 		at.cacheLatestBranch(cacheBranch, k, v, step, fileEndTxNum, tx)

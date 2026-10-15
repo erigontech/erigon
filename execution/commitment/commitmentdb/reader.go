@@ -1,13 +1,18 @@
 package commitmentdb
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
+	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type StateReader interface {
@@ -313,16 +318,59 @@ func NewCommitmentReplayStateReader(ttx, tx kv.TemporalTx, tsd sd, plainStateAsO
 	}
 }
 
+type ParentRecords struct {
+	BlockNum   uint64
+	BlockHash  common.Hash
+	ParentHash common.Hash
+	Deleted    [][]byte
+	Get        func(key []byte) ([]byte, kv.Step, bool)
+	State      ParentState
+}
+
+type ParentState interface {
+	GetCommittedAccount(addr accounts.Address) (*accounts.Account, bool)
+	GetCommittedStorage(addr accounts.Address, key accounts.StorageKey) ([]byte, bool)
+}
+
+var (
+	parentRecords      atomic.Pointer[ParentRecords]
+	parentReadsWanted  atomic.Bool
+	mxParentRecordHit  = metrics.GetOrCreateCounter("witness_parent_record_hits_total")
+	mxParentRecordMiss = metrics.GetOrCreateCounter("witness_parent_record_misses_total")
+)
+
+func WantParentReads(want bool) { parentReadsWanted.Store(want) }
+
+func ParentReadsWanted() bool { return parentReadsWanted.Load() }
+
+func PublishParentRecords(r *ParentRecords) { parentRecords.Store(r) }
+
+func ParentRecordsFor(blockNum uint64, blockHash, parentHash common.Hash) *ParentRecords {
+	r := parentRecords.Load()
+	if r == nil || r.BlockNum != blockNum || r.BlockHash != blockHash || r.ParentHash != parentHash {
+		return nil
+	}
+	return r
+}
+
 // txLatestReader reads directly from a pinned RO transaction, bypassing
 // SharedDomains memory so commitment reads remain on the pinned parent view.
 type txLatestReader struct {
-	tx kv.TemporalTx
+	tx   kv.TemporalTx
+	recs *ParentRecords
 }
 
 func (r *txLatestReader) WithHistory() bool                           { return false }
 func (r *txLatestReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
 
 func (r *txLatestReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
+	if d == kv.CommitmentDomain && r.recs != nil {
+		if enc, step, ok := r.recs.Get(plainKey); ok {
+			mxParentRecordHit.Inc()
+			return bytes.Clone(enc), step, nil
+		}
+		mxParentRecordMiss.Inc()
+	}
 	enc, step, err := r.tx.GetLatest(d, plainKey, kv.GetLatestOptions{})
 	if err != nil {
 		return nil, 0, fmt.Errorf("txLatestReader(GetLatest) %q: %w", d, err)
@@ -334,10 +382,12 @@ func (r *txLatestReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]
 // warmup callers targets a different (compute) database and would read empty
 // parent commitment. The witness build runs sequential commitment, so these
 // are not exercised on the hot path, but preserving the pinned tx is correct.
-func (r *txLatestReader) Clone(kv.TemporalTx) StateReader { return &txLatestReader{tx: r.tx} }
+func (r *txLatestReader) Clone(kv.TemporalTx) StateReader {
+	return &txLatestReader{tx: r.tx, recs: r.recs}
+}
 
 func (r *txLatestReader) CloneForWorker(context.Context, kv.TemporalTx) StateReader {
-	return &txLatestReader{tx: r.tx}
+	return &txLatestReader{tx: r.tx, recs: r.recs}
 }
 
 func (r *txLatestReader) BindsWorkerTx() bool { return false }
@@ -370,6 +420,13 @@ func newHeadCaptureStateReader(pinnedParentTx kv.TemporalTx, committedTx kv.Temp
 			withHistory,
 		),
 	}
+}
+
+func (crsr *CommitmentReplayStateReader) WithParentRecords(recs *ParentRecords) *CommitmentReplayStateReader {
+	if l, ok := crsr.commitmentReader.(*txLatestReader); ok {
+		l.recs = recs
+	}
+	return crsr
 }
 
 func (crsr *CommitmentReplayStateReader) Clone(tx kv.TemporalTx) StateReader {

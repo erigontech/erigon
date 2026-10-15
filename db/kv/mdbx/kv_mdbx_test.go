@@ -1235,7 +1235,7 @@ func TestDeferredSyncFlushesAfterWritesStop(t *testing.T) {
 
 	deferred := open(mdbx.New(dbcfg.TemporaryDB, log.Root()).SafeNoSync().SyncPeriod(50 * time.Millisecond))
 	writeOne(deferred) // far below the byte threshold: only the deadline can flush this
-	require.Eventually(t, func() bool { return unsynced(deferred) == 0 }, 5*time.Second, 10*time.Millisecond,
+	require.Eventually(t, func() bool { return unsynced(deferred) == 0 }, time.Second, 10*time.Millisecond,
 		"the background flush never ran")
 
 	durable := open(mdbx.New(dbcfg.TemporaryDB, log.Root()).Durable())
@@ -1272,6 +1272,78 @@ func TestDeferredSyncClosesWhileWriting(t *testing.T) {
 		close(stop)
 		wg.Wait()
 	}
+}
+
+func TestDeferredSyncLeavesATipSizedCommitUnflushed(t *testing.T) {
+	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).SafeNoSync().SyncPeriod(time.Hour).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
+	t.Cleanup(db.Close)
+	val := make([]byte, 4096)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for i := range 4096 {
+			if err := tx.Put(kv.HeaderTD, binary.BigEndian.AppendUint64(nil, uint64(i)), val); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	info, err := db.(*mdbx.MdbxKV).Env().Info(nil)
+	require.NoError(t, err)
+	require.NotZero(t, info.UnsyncedBytes, "a tip-sized commit flushed inside the commit")
+}
+
+func TestDeferredSyncBoundsAWriterThatNeverReleasesTheLock(t *testing.T) {
+	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).SafeNoSync().SyncPeriod(10 * time.Millisecond).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
+	t.Cleanup(db.Close)
+	val := make([]byte, 4000)
+	write := func(i int) error {
+		tx, err := db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		for j := range 80 {
+			if err := tx.Put(kv.HeaderTD, binary.BigEndian.AppendUint64(nil, uint64(i*80+j)), val); err != nil {
+				return err
+			}
+		}
+		time.Sleep(40 * time.Millisecond)
+		return tx.Commit()
+	}
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if write(i) != nil {
+				return
+			}
+		}
+	})
+	var worst time.Duration
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		info, err := db.(*mdbx.MdbxKV).Env().Info(nil)
+		require.NoError(t, err)
+		worst = max(worst, info.SinceSync)
+	}
+	close(stop)
+	wg.Wait()
+	require.Less(t, worst, time.Second, "a writer that re-takes the lock at once kept its data unflushed")
+}
+
+func TestDeferredSyncLeavesTheDeadlineToThePoller(t *testing.T) {
+	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).SafeNoSync().SyncPeriod(50 * time.Millisecond).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
+	t.Cleanup(db.Close)
+	period, err := db.(*mdbx.MdbxKV).Env().GetSyncPeriod()
+	require.NoError(t, err)
+	require.InDelta(t, float64(1500*time.Millisecond), float64(period), float64(time.Millisecond),
+		"mdbx flushes inside a commit that lands past its own deadline, so it must outlast the poller's")
 }
 
 // The flush mode is settled once every option is in, so a mode set after SafeNoSync still wins
