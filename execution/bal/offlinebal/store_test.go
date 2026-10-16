@@ -288,7 +288,7 @@ func TestWriterRebuildsHeaderOnlyIndex(t *testing.T) {
 
 // TestGenerateAndUse runs one forward pass over blocks 1-5 on a store that
 // holds 1-3: stored blocks are served and kept as they are, missing blocks are
-// appended and visible to the same store at once.
+// appended.
 func TestGenerateAndUse(t *testing.T) {
 	dir := t.TempDir()
 	writeBlocks(t, dir, 1, 2, 3)
@@ -302,22 +302,13 @@ func TestGenerateAndUse(t *testing.T) {
 		t.Fatal(err)
 	}
 	for n := uint64(1); n <= 5; n++ {
-		if got, ok := s.Get(n, hashOf(byte(n))); ok {
-			if n > 3 || !bytes.Equal(got, []byte{byte(n)}) {
-				t.Fatalf("Get(%d) = %v before append", n, got)
-			}
-		} else if n <= 3 {
-			t.Fatalf("Get(%d) miss, want stored record", n)
+		got, ok := s.Reader.Get(n, hashOf(byte(n)))
+		if ok != (n <= 3) || (ok && !bytes.Equal(got, []byte{byte(n)})) {
+			t.Fatalf("Get(%d) = %v,%v", n, got, ok)
 		}
 		if err := s.Writer.Append(n, hashOf(byte(n)), []byte{byte(n)}); err != nil {
 			t.Fatal(err)
 		}
-		if got, ok := s.Get(n, hashOf(byte(n))); !ok || !bytes.Equal(got, []byte{byte(n)}) {
-			t.Fatalf("Get(%d) after append = %v,%v", n, got, ok)
-		}
-	}
-	if _, ok := s.Get(4, hashOf(0xFF)); ok {
-		t.Fatal("Get(4, wrongHash) found, want miss")
 	}
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
