@@ -3,6 +3,7 @@ package stages
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"sync"
 	"testing"
@@ -638,6 +639,7 @@ func (s *envelopeReadTestStore) ReadEnvelopeFromDisk(common.Hash) (*cltypes.Sign
 type gloasCollectorTest struct {
 	calls      int
 	flushCalls int
+	flushCtx   context.Context
 	err        error
 	flushErr   error
 }
@@ -652,8 +654,9 @@ func (c *gloasCollectorTest) AddBlock(*cltypes.BeaconBlock) error {
 	return c.err
 }
 
-func (c *gloasCollectorTest) Flush(context.Context) error {
+func (c *gloasCollectorTest) Flush(ctx context.Context) error {
 	c.flushCalls++
+	c.flushCtx = ctx
 	return c.flushErr
 }
 
@@ -731,23 +734,7 @@ func TestProcessDownloadedBlockBatchesRetainsFrontierForEnvelopeLocalFailure(t *
 		Root:          block.Block.StateRoot,
 		BodyRoot:      bodyRoot,
 	})
-	forkGraph, err := fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
-	require.NoError(t, err)
-	store, err := forkchoice.NewForkChoiceStore(
-		nil,
-		anchorState,
-		nil,
-		pool.NewOperationsPool(&cfg),
-		forkGraph,
-		beaconevents.NewEventEmitter(),
-		nil,
-		nil,
-		public_keys_registry.NewInMemoryPublicKeysRegistry(),
-		validator_params.NewValidatorParams(),
-		false,
-		nil,
-	)
-	require.NoError(t, err)
+	store := newAnchorForkChoiceStore(t, &cfg, anchorState, nil)
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	collector := &gloasCollectorTest{}
@@ -1093,6 +1080,26 @@ func TestForwardSyncValidatesOnlyWhenInsertionIsUnavailable(t *testing.T) {
 	require.False(t, shouldValidateForwardSyncPayload(&Cfg{}, false))
 }
 
+// An anchor validation cut short by our own context is not the EL's answer and records nothing.
+func TestValidateAnchorPayloadWithExecutionClientIgnoresAnInterruptedCall(t *testing.T) {
+	cfg, st, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
+	anchorRoot, err := st.BlockRoot()
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	engine := &testExecutionEngine{newPayloadFn: func(context.Context, *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
+		cancel()
+		return execution_client.PayloadStatusNone, ctx.Err()
+	}}
+	store := newAnchorForkChoiceStore(t, cfg, st, nil)
+	stageCfg := &Cfg{beaconCfg: cfg, forkChoice: store, executionClient: engine, gloasPayloadValidator: engine}
+
+	require.NoError(t, validateAnchorPayloadWithExecutionClient(ctx, stageCfg, anchorRoot, bid, env))
+
+	require.Equal(t, 1, engine.newPayloadCalls)
+	_, found := store.GetRecentExecutionPayloadStatusByRoot(anchorRoot)
+	require.False(t, found, "an interrupted call is not a verdict")
+}
+
 func TestValidateAnchorPayloadWithAnyExecutionClient(t *testing.T) {
 	cfg, st, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
 	anchorRoot, err := st.BlockRoot()
@@ -1104,39 +1111,199 @@ func TestValidateAnchorPayloadWithAnyExecutionClient(t *testing.T) {
 	}{
 		{name: "remote EL", engine: &testExecutionEngine{payloadStatus: execution_client.PayloadStatusValidated}},
 		{name: "local EL", engine: &testExecutionEngine{supportInsertion: true, payloadStatus: execution_client.PayloadStatusValidated}},
-		{name: "no EL"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			forkGraph, err := fork_graph.NewForkGraphDisk(st, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
-			require.NoError(t, err)
-			store, err := forkchoice.NewForkChoiceStore(
-				nil,
-				st,
-				nil,
-				pool.NewOperationsPool(cfg),
-				forkGraph,
-				beaconevents.NewEventEmitter(),
-				nil,
-				nil,
-				public_keys_registry.NewInMemoryPublicKeysRegistry(),
-				validator_params.NewValidatorParams(),
-				false,
-				nil,
-			)
-			require.NoError(t, err)
-
-			stageCfg := &Cfg{beaconCfg: cfg, forkChoice: store}
-			if test.engine != nil {
-				stageCfg.executionClient = test.engine
-				stageCfg.gloasPayloadValidator = test.engine
-			}
+			store := newAnchorForkChoiceStore(t, cfg, st, nil)
+			stageCfg := &Cfg{beaconCfg: cfg, forkChoice: store, executionClient: test.engine, gloasPayloadValidator: test.engine}
 			require.NoError(t, validateAnchorPayloadWithExecutionClient(context.Background(), stageCfg, anchorRoot, bid, env))
-			if test.engine != nil {
-				require.Equal(t, 1, test.engine.newPayloadCalls)
-			}
+			require.Equal(t, 1, test.engine.newPayloadCalls)
 			gasLimit, ok := store.GetExecutionPayloadGasLimit(env.Message.Payload.BlockHash)
 			require.True(t, ok)
 			require.Equal(t, env.Message.Payload.GasLimit, gasLimit)
+		})
+	}
+}
+
+func newAnchorForkChoiceStore(t *testing.T, cfg *clparams.BeaconChainConfig, st *state2.CachingBeaconState, engine execution_client.ExecutionEngine) *forkchoice.ForkChoiceStore {
+	t.Helper()
+	forkGraph, err := fork_graph.NewForkGraphDisk(st, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	store, err := forkchoice.NewForkChoiceStore(nil, st, engine, pool.NewOperationsPool(cfg), forkGraph, beaconevents.NewEventEmitter(), nil, nil,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(), validator_params.NewValidatorParams(), false, nil)
+	require.NoError(t, err)
+	return store
+}
+
+// The direct client must keep implementing the capability, or the depth rule silently turns off.
+var _ validationDepthEL = (*execution_client.ExecutionClientDirect)(nil)
+
+// validationDepthEngine reports a validation depth, as the direct EL client does.
+type validationDepthEngine struct {
+	*testExecutionEngine
+	below   uint64
+	unknown bool // the EL head could not be read
+	reads   *int
+}
+
+func (e validationDepthEngine) SkipsValidationBelow(context.Context) (uint64, bool) {
+	if e.reads != nil {
+		*e.reads++
+	}
+	return e.below, !e.unknown
+}
+
+// An empty drain does not read the EL head for the depth.
+func TestDrainPendingGloasPayloadsSkipsTheDepthReadWithoutPayloads(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	reads := 0
+	engine := validationDepthEngine{testExecutionEngine: &testExecutionEngine{}, below: 1, reads: &reads}
+
+	drainPendingGloasPayloads(t.Context(), &Cfg{beaconCfg: &cfg, executionClient: engine, gloasPayloadValidator: engine, forkChoice: &forkchoice.ForkChoiceStore{}})
+
+	require.Zero(t, reads)
+}
+
+// A NotValidated answer is requeued unless the block is below the EL's validation depth: the direct
+// client inserts such a block but does not validate it, and no retry changes that. The EL is asked
+// either way, so the block reaches it.
+func TestDrainPendingGloasPayloadsDoesNotRequeueBelowTheELValidationDepth(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	const below = 97
+	for _, tc := range []struct {
+		name     string
+		number   uint64
+		depth    bool
+		calls    int
+		requeued bool
+	}{
+		{name: "deep below the direct EL head", number: below - 1, depth: true, calls: 1, requeued: false},
+		{name: "at the direct EL boundary", number: below, depth: true, calls: 1, requeued: true},
+		{name: "an EL without a validation depth", number: below - 1, depth: false, calls: 1, requeued: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fc := &forkchoice.ForkChoiceStore{}
+			base := &testExecutionEngine{supportInsertion: true, payloadStatus: execution_client.PayloadStatusNotValidated}
+			var engine execution_client.ExecutionEngine = base
+			if tc.depth {
+				engine = validationDepthEngine{testExecutionEngine: base, below: below}
+			}
+			payload := cltypes.NewEth1Block(clparams.GloasVersion, &cfg)
+			payload.BlockHash = common.HexToHash("0x9abc")
+			payload.BlockNumber = tc.number
+			fc.RequeuePendingELPayload(forkchoice.PendingELPayload{
+				Block: &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 1, Body: &cltypes.BeaconBody{
+					Version: clparams.GloasVersion,
+					SignedExecutionPayloadBid: &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+						BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
+					}},
+				}}},
+				Envelope: &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: common.HexToHash("0x1234"), Payload: payload}},
+			})
+
+			drainPendingGloasPayloads(context.Background(), &Cfg{beaconCfg: &cfg, executionClient: engine, gloasPayloadValidator: base, forkChoice: fc})
+
+			require.Equal(t, tc.calls, base.newPayloadCalls, "the EL is asked")
+			require.Equal(t, tc.requeued, len(fc.DrainPendingELPayloads()) == 1)
+		})
+	}
+}
+
+// Below the EL's validation depth the anchor's payload is sent to the EL, which inserts it, once:
+// its NotValidated answer does not change while the anchor stays below the depth.
+func TestRetryUnverifiedAnchorPayloadAsksTheELOnceBelowItsValidationDepth(t *testing.T) {
+	cfg, st, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
+	cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch = 0, 0, 0
+	cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch = 0, 0, 0
+	st.SetLatestExecutionPayloadBid(bid)
+	anchorRoot, err := st.BlockRoot()
+	require.NoError(t, err)
+	env.Message.BeaconBlockRoot = anchorRoot
+	privKey, err := bls.NewPrivateKeyFromIKM([]byte("01234567890123456789012345678901"))
+	require.NoError(t, err)
+	signAnchorEnvelope(t, st, privKey, env, bid.Slot)
+	base := &testExecutionEngine{payloadStatus: execution_client.PayloadStatusNotValidated}
+	store := newAnchorForkChoiceStore(t, cfg, st, base)
+	require.NoError(t, store.StoreAnchorEnvelope(anchorRoot, env))
+	gasLimit, ok := store.GetExecutionPayloadGasLimit(env.Message.Payload.BlockHash)
+	require.True(t, ok, "bids on the anchor need its gas limit before the EL answers")
+	require.Equal(t, env.Message.Payload.GasLimit, gasLimit)
+	stageCfg := &Cfg{
+		beaconCfg:             cfg,
+		forkChoice:            store,
+		executionClient:       validationDepthEngine{testExecutionEngine: base, below: env.Message.Payload.BlockNumber + 1},
+		gloasPayloadValidator: base,
+	}
+
+	retryUnverifiedAnchorPayload(t.Context(), stageCfg)
+	retryUnverifiedAnchorPayload(t.Context(), stageCfg)
+	require.Equal(t, 1, base.newPayloadCalls)
+	status, ok := store.GetRecentExecutionPayloadStatusByRoot(anchorRoot)
+	require.True(t, ok)
+	require.EqualValues(t, execution_client.PayloadStatusNotValidated, status)
+
+	// An unreadable EL head (depth 0) keeps the remembered answer, as in the sweep.
+	stageCfg.executionClient = validationDepthEngine{testExecutionEngine: base, unknown: true}
+	retryUnverifiedAnchorPayload(t.Context(), stageCfg)
+	require.Equal(t, 1, base.newPayloadCalls)
+
+	// An EL head at the first blocks validates every block (a known zero depth), so the anchor is
+	// asked again.
+	stageCfg.executionClient = validationDepthEngine{testExecutionEngine: base}
+	retryUnverifiedAnchorPayload(t.Context(), stageCfg)
+	require.Equal(t, 2, base.newPayloadCalls)
+
+	noDepth := &Cfg{beaconCfg: cfg, forkChoice: store, executionClient: base, gloasPayloadValidator: base}
+	retryUnverifiedAnchorPayload(t.Context(), noDepth)
+	retryUnverifiedAnchorPayload(t.Context(), noDepth)
+	require.Equal(t, 4, base.newPayloadCalls, "an EL without a validation depth is asked every time")
+}
+
+// Only the EL's own NotValidated answer ends the anchor retries below the depth. A call cut short
+// by our own context, or an error answer, leaves the next cycle to ask the EL again.
+func TestRetryUnverifiedAnchorPayloadRetriesWithoutANotValidatedAnswer(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		interrupted bool
+	}{
+		{name: "interrupted", interrupted: true},
+		{name: "error answer"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, st, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
+			cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch = 0, 0, 0
+			cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch = 0, 0, 0
+			st.SetLatestExecutionPayloadBid(bid)
+			anchorRoot, err := st.BlockRoot()
+			require.NoError(t, err)
+			env.Message.BeaconBlockRoot = anchorRoot
+			privKey, err := bls.NewPrivateKeyFromIKM([]byte("01234567890123456789012345678901"))
+			require.NoError(t, err)
+			signAnchorEnvelope(t, st, privKey, env, bid.Slot)
+			ctx, cancel := context.WithCancel(t.Context())
+			base := &testExecutionEngine{newPayloadFn: func(context.Context, *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
+				if tc.interrupted {
+					cancel()
+					return execution_client.PayloadStatusNone, ctx.Err()
+				}
+				return execution_client.PayloadStatusNone, errors.New("insert failed")
+			}}
+			store := newAnchorForkChoiceStore(t, cfg, st, base)
+			require.NoError(t, store.StoreAnchorEnvelope(anchorRoot, env))
+			stageCfg := &Cfg{
+				beaconCfg:             cfg,
+				forkChoice:            store,
+				executionClient:       validationDepthEngine{testExecutionEngine: base, below: env.Message.Payload.BlockNumber + 1},
+				gloasPayloadValidator: base,
+			}
+
+			retryUnverifiedAnchorPayload(ctx, stageCfg)
+			require.Zero(t, stageCfg.gloasSkippedAnchorValidation)
+
+			base.newPayloadFn = nil
+			base.payloadStatus = execution_client.PayloadStatusNotValidated
+			retryUnverifiedAnchorPayload(t.Context(), stageCfg)
+			require.Equal(t, 2, base.newPayloadCalls, "the first call did not end the retries")
 		})
 	}
 }
@@ -1383,7 +1550,18 @@ func (t *testExecutionEngine) NewPayload(ctx context.Context, payload *cltypes.E
 }
 
 func (t *testExecutionEngine) NewPayloadWithAdmission(ctx context.Context, payload *cltypes.Eth1Block, parentRoot *common.Hash, hashes []common.Hash, requests []hexutil.Bytes) (execution_client.PayloadStatus, error) {
-	return t.NewPayload(ctx, payload, parentRoot, hashes, requests)
+	return admitted(ctx)(t.NewPayload(ctx, payload, parentRoot, hashes, requests))
+}
+
+// admitted wraps a NewPayload result the way the fork-choice admission does: a call that ended
+// with its context carries ErrPayloadValidationInterrupted.
+func admitted(ctx context.Context) func(execution_client.PayloadStatus, error) (execution_client.PayloadStatus, error) {
+	return func(status execution_client.PayloadStatus, err error) (execution_client.PayloadStatus, error) {
+		if execution_client.ValidationInterrupted(ctx, status, err) {
+			return status, fmt.Errorf("%w: %w", forkchoice.ErrPayloadValidationInterrupted, err)
+		}
+		return status, err
+	}
 }
 
 func (t *testExecutionEngine) ForkChoiceUpdate(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error) {

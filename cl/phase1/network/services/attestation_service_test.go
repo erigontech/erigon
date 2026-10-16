@@ -1024,3 +1024,58 @@ func TestAttestation(t *testing.T) {
 
 	suite.Run(t, &attestationTestSuite{})
 }
+
+func TestAttestationForLateBlockIsProcessedOnceBlockArrives(t *testing.T) {
+	saveSignatureGlobals(t)
+	origCommitteeCount, origSubnet := computeCommitteeCountPerSlot, computeSubnetForAttestation
+	t.Cleanup(func() { computeCommitteeCountPerSlot, computeSubnetForAttestation = origCommitteeCount, origSubnet })
+	computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 { return 8 }
+	computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 { return 1 }
+	computeSigningRoot = func(ssz.HashableSSZ, []byte) ([32]byte, error) { return [32]byte{}, nil }
+	blsVerifyMultipleSignatures = func(_, _, _ [][]byte) (bool, error) { return true, nil }
+
+	ctrl := gomock.NewController(t)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).AnyTimes()
+	clock.EXPECT().GetCurrentSlot().Return(mockSlot).AnyTimes()
+	processed := make(chan struct{})
+	aggregationPool := mockAggregation.NewMockAggregationPool(ctrl)
+	aggregationPool.EXPECT().AddAttestation(att).DoAndReturn(func(*solid.Attestation) error {
+		close(processed)
+		return nil
+	}).Times(1)
+
+	_, st, _ := tests.GetBellatrixRandom()
+	syncedData := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	require.NoError(t, syncedData.OnHeadState(st))
+	finalizedCheckpoint := solid.Checkpoint{Root: [32]byte{1, 0}, Epoch: 1}
+	forkChoice := &lateBlockForkChoice{
+		ForkChoiceStorageMock: &mock_services.ForkChoiceStorageMock{
+			Headers: map[common.Hash]*cltypes.BeaconBlockHeader{attData.BeaconBlockRoot: {}},
+			Ancestors: map[uint64]forkchoice.ForkChoiceNode{
+				mockEpoch * mockSlotsPerEpoch:                 {Root: attData.Target.Root},
+				finalizedCheckpoint.Epoch * mockSlotsPerEpoch: {Root: finalizedCheckpoint.Root},
+			},
+			FinalizedCheckpointVal: finalizedCheckpoint,
+			HighestSeenVal:         mockSlot,
+		},
+		root: attData.BeaconBlockRoot,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	verifier := NewBatchSignatureVerifier(ctx, nil)
+	verifier.Start()
+	beaconCfg := &clparams.BeaconChainConfig{SlotsPerEpoch: mockSlotsPerEpoch, SecondsPerSlot: 12, ElectraForkEpoch: 100000}
+	service := NewAttestationService(ctx, forkChoice, aggregationPool, clock, syncedData, beaconCfg, &clparams.NetworkConfig{}, beaconevents.NewEventEmitter(), verifier)
+
+	err := service.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{Attestation: att})
+	require.ErrorIs(t, err, ErrIgnore)
+
+	forkChoice.arrived.Store(true)
+	select {
+	case <-processed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("attestation was not processed after its block arrived")
+	}
+}

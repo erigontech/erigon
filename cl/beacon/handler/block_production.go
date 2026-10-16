@@ -698,7 +698,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 
 // gloasAttestationIndex returns attestation_data.index for Gloas: 0 when the attested block is from the attestation
 // slot, otherwise 1 if the head's chain has the block FULL and 0 if not. A FULL block whose payload is not verified
-// is optimistic, so it gets a 503 instead.
+// is optimistic, so it gets a 503 instead, as does a fork-choice head that cannot be read.
 func (a *ApiHandler) gloasAttestationIndex(slot uint64, root common.Hash) (uint64, error) {
 	header, ok := a.forkchoiceStore.GetHeader(root)
 	if !ok || header.Slot == slot {
@@ -706,7 +706,7 @@ func (a *ApiHandler) gloasAttestationIndex(slot uint64, root common.Hash) (uint6
 	}
 	node, _, err := a.forkchoiceStore.GetHeadNode()
 	if err != nil {
-		return 0, nil
+		return 0, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err)
 	}
 	// Attestation data is cached per slot, so the served root can be an ancestor of the head; take the payload status
 	// the head's chain gives it.
