@@ -251,7 +251,9 @@ func (c *Compressor) AddWord(word []byte) error {
 		}
 	}
 
-	c.advanceScan(2*len(word) + 2)
+	if err := c.advanceScan(2*len(word) + 2); err != nil {
+		return err
+	}
 	if c.sampledSuperstring() {
 		for _, a := range word {
 			c.superstring = append(c.superstring, uint16(a)+1)
@@ -268,18 +270,31 @@ func (c *Compressor) sampledSuperstring() bool { return c.superstringCount%c.Sam
 // advanceScan accounts for the next word (encoded size l) and cuts a new superstring when the
 // current one would overflow. Bytes are counted for every word so boundaries don't depend on
 // sampling; a superstring fills only when sampled, so only a non-empty buffer is sent and replaced.
-func (c *Compressor) advanceScan(l int) {
+func (c *Compressor) advanceScan(l int) error {
 	if c.scannedBytes+l <= c.superstringLimit {
 		c.scannedBytes += l
-		return
+		return nil
 	}
 
 	if len(c.superstring) > 0 {
-		c.superstrings <- c.superstring
+		if err := c.sendSuperstring(); err != nil {
+			return err
+		}
 		c.superstring = superStringsPool.Get().([]uint16)[:0]
 	}
 	c.superstringCount++
 	c.scannedBytes = 0
+	return nil
+}
+
+// sendSuperstring must watch ctx: the pattern workers exit on cancel, so nothing would drain the channel.
+func (c *Compressor) sendSuperstring() error {
+	select {
+	case c.superstrings <- c.superstring:
+		return nil
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	}
 }
 
 func (c *Compressor) AddUncompressedWord(word []byte) error {
@@ -313,7 +328,9 @@ func (c *Compressor) Compress() error {
 	// submitted for word-level compression, so the pattern dictionary will always be empty.
 	noWordPatterns := c.superstringCount == 0 && len(c.superstring) == 0
 	if len(c.superstring) > 0 {
-		c.superstrings <- c.superstring
+		if err := c.sendSuperstring(); err != nil {
+			return err
+		}
 	}
 	c.stopWorkers()
 
