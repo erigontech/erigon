@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -1411,4 +1412,23 @@ func TestMarshalToStreamsWhatMarshalBuffers(t *testing.T) {
 	require.NoError(t, MarshalTo(out, l))
 	require.Equal(t, string(want), got.String())
 	require.Less(t, out.largest, 2*FlushThreshold)
+}
+
+func TestHexUint64MatchesStrconv(t *testing.T) {
+	t.Parallel()
+	values := []uint64{0, math.MaxUint64}
+	for shift := range 64 {
+		values = append(values, 1<<shift, 1<<shift-1, 1<<shift+1)
+	}
+	for _, v := range values {
+		want := `{"a":"0x` + strconv.FormatUint(v, 16) + `","b":["0x` + strconv.FormatUint(v, 16) + `"]}`
+		s := New(nil)
+		s.WriteObjectStart()
+		HexUint64Field(s, "a", v)
+		s.Field("b").WriteArrayStart()
+		HexUint64(s, v)
+		s.WriteArrayEnd()
+		s.WriteObjectEnd()
+		require.Equal(t, want, string(s.Buffer()), "%#x", v)
+	}
 }

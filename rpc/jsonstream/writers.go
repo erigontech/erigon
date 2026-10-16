@@ -18,8 +18,8 @@ package jsonstream
 
 import (
 	"encoding"
+	"math/bits"
 	"slices"
-	"strconv"
 
 	"github.com/holiman/uint256"
 
@@ -62,29 +62,37 @@ func HexUint64(s *Stream, v uint64) {
 	s.beforeValue()
 	buf := s.stream.Buffer()
 	start := len(buf)
-	buf = strconv.AppendUint(append(buf, '"', '0', 'x'), v, 16)
-	s.commit(append(buf, '"'), start)
+	s.commit(appendQuotedHexUint64(buf, v), start)
 	s.afterValue()
 }
 
 // HexUint64Field writes a field name and its HexUint64 value in one step, so the name is never
 // left on the stack waiting for a value.
 func HexUint64Field(s *Stream, name string, v uint64) {
-	s.beforeValue()
-	writeObjectFieldFast(s.stream, name)
-	buf := s.stream.Buffer()
+	buf := s.appendField(name)
 	start := len(buf)
-	buf = strconv.AppendUint(append(buf, '"', '0', 'x'), v, 16)
-	s.commit(append(buf, '"'), start)
+	s.commit(appendQuotedHexUint64(buf, v), start)
 	s.separatorPending = true
 	flushIfFull(s.stream)
 }
 
+// appendQuotedHexUint64 is strconv.AppendUint(v, 16) in quotes after 0x, without its scratch array and copy.
+func appendQuotedHexUint64(buf []byte, v uint64) []byte {
+	n := max(1, (bits.Len64(v)+3)/4)
+	start := len(buf)
+	buf = slices.Grow(buf, n+4)[:start+n+4]
+	buf[start], buf[start+1], buf[start+2] = '"', '0', 'x'
+	for i := start + n + 2; i > start+2; i-- {
+		buf[i] = hexDigits[v&0xf]
+		v >>= 4
+	}
+	buf[start+n+3] = '"'
+	return buf
+}
+
 // HexField writes a field name and the 0x-prefixed hex of b in one step, as HexUint64Field does.
 func HexField(s *Stream, name string, b []byte) {
-	s.beforeValue()
-	writeObjectFieldFast(s.stream, name)
-	buf := s.stream.Buffer()
+	buf := s.appendField(name)
 	start := len(buf)
 	buf = hexutil.AppendQuoted(slices.Grow(buf, hexutil.QuotedLen(len(b))), b)
 	s.commit(buf, start)

@@ -97,10 +97,14 @@ func writeStringFast(stream *jsoniter.Stream, val string) {
 // a value gets: every field name Erigon writes is a source literal or a hex string.
 // The bare colon is correct only at jsoniter's IndentionStep 0, which newStream pins.
 func writeObjectFieldFast(stream *jsoniter.Stream, fieldName string) {
+	stream.SetBuffer(appendFieldName(stream.Buffer(), fieldName))
+}
+
+func appendFieldName(buf []byte, fieldName string) []byte {
 	if dbg.AssertEnabled && escapeIndex(fieldName) < len(fieldName) {
 		panic("jsonstream: field name needs escaping: " + strconv.Quote(fieldName))
 	}
-	buf := append(stream.Buffer(), '"')
+	buf = append(buf, '"')
 	buf = append(buf, fieldName...)
-	stream.SetBuffer(append(buf, '"', ':'))
+	return append(buf, '"', ':')
 }

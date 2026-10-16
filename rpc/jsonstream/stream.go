@@ -105,13 +105,13 @@ func (s *Stream) WriteHex(b []byte) {
 // HexesField writes fixed-size values as one array field: one buffer growth for the whole
 // array, where a value write per element grows once per element. A nil slice is null.
 func HexesField[S ~[]E, E ~[length.Hash]byte](s *Stream, name string, items S) {
-	s.Field(name)
 	if items == nil {
+		s.Field(name)
 		s.WriteNil()
 		return
 	}
-	s.beforeValue()
-	buf := slices.Grow(s.stream.Buffer(), 2+len(items)*(hexutil.QuotedLen(length.Hash)+1))
+	buf := s.appendField(name)
+	buf = slices.Grow(buf, 2+len(items)*(hexutil.QuotedLen(length.Hash)+1))
 	buf = append(buf, '[')
 	for i := range items {
 		if i > 0 {
@@ -120,7 +120,8 @@ func HexesField[S ~[]E, E ~[length.Hash]byte](s *Stream, name string, items S) {
 		buf = hexutil.AppendQuoted(buf, items[i][:])
 	}
 	s.stream.SetBuffer(append(buf, ']'))
-	s.afterValue()
+	s.separatorPending = true
+	flushIfFull(s.stream)
 }
 
 // WriteHexBytes is WriteHexes for elements that are already byte slices, whose lengths vary
@@ -477,6 +478,17 @@ func (s *Stream) beforeValue() {
 		s.stream.WriteMore()
 		s.separatorPending = false
 	}
+}
+
+// appendField returns the buffer with the pending separator and the field name appended, for a
+// writer that appends the value in the same pass and stores the buffer once.
+func (s *Stream) appendField(name string) []byte {
+	buf := s.stream.Buffer()
+	if s.separatorPending {
+		buf = append(buf, ',')
+		s.separatorPending = false
+	}
+	return appendFieldName(buf, name)
 }
 
 // consumeField drops the pending field name once its value has been written. A container
