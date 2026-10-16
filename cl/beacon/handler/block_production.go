@@ -454,12 +454,14 @@ func (a *ApiHandler) feeRecipientForProposal(proposerIndex, targetSlot uint64) c
 	return common.Address{}
 }
 
-// reportProductionFailure is the one place a failed production is recorded, so every exit through
-// produceBlock is covered exactly once. A caller that has already gone is not something anyone can
+// reportProductionFailure records a failed production once for every exit through produceBlock,
+// except a fork-choice head change, which GetEthV3ValidatorBlock retries and records. A caller that has already gone is not something anyone can
 // act on; an execution layer that stopped answering still is, and that arrives as a deadline.
 func reportProductionFailure(err error, targetSlot uint64) {
 	switch {
 	case err == nil:
+	case errors.Is(err, errForkChoiceHeadChanged):
+		// GetEthV3ValidatorBlock retries it and records the outcome.
 	case errors.Is(err, context.Canceled):
 		log.Debug("BlockProduction: abandoned by its caller", "err", err, "slot", targetSlot)
 	case execution_client.IsUnknownPayloadError(err):
@@ -777,38 +779,48 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	var (
 		baseBlockRoot common.Hash
 		baseState     *state.CachingBeaconState
+		block         *cltypes.BlindOrExecutionBeaconBlock
 	)
-	if err := a.viewHeadStateWithIdentity(func(headState *state.CachingBeaconState, root common.Hash, _ uint64) error {
-		baseBlockRoot = root
-		baseState, err = headState.Copy()
-		if err != nil {
-			return err
+	// A head change during production is retried once, from the new head's state.
+	for attempt := range 2 {
+		if attempt > 0 {
+			if !a.awaitHeadStateAfterChange(ctx, targetSlot) {
+				break
+			}
+			log.Info("BlockProduction: fork choice head changed during production, retrying on the new head", "slot", targetSlot, "err", err)
 		}
-		return nil
-	}); err != nil {
-		return nil, err
-	}
+		if err := a.viewHeadStateWithIdentity(func(headState *state.CachingBeaconState, root common.Hash, _ uint64) error {
+			var err error
+			baseBlockRoot = root
+			baseState, err = headState.Copy()
+			return err
+		}); err != nil {
+			return nil, err
+		}
+		if baseState == nil {
+			return nil, beaconhttp.NewEndpointError(
+				http.StatusNotFound,
+				fmt.Errorf("state not found %x", baseBlockRoot),
+			)
+		}
 
+		// Get the base block slot from the state header (avoids needing ReadBlockByRoot at genesis).
+		baseBlockSlot := baseState.LatestBlockHeader().Slot
+
+		if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
+			return nil, err
+		}
+		log.Info("[Beacon API] Found BeaconState object for block production", "slot", targetSlot, "duration", time.Since(start))
+		block, err = a.produceBlock(ctx, builderBoostFactor, baseBlockSlot, baseBlockRoot, baseState, targetSlot, randaoReveal, graffiti)
+		if !errors.Is(err, errForkChoiceHeadChanged) {
+			break
+		}
+	}
 	if err != nil {
-		return nil, err
-	}
-	if baseState == nil {
-		return nil, beaconhttp.NewEndpointError(
-			http.StatusNotFound,
-			fmt.Errorf("state not found %x", baseBlockRoot),
-		)
-	}
-
-	// Get the base block slot from the state header (avoids needing ReadBlockByRoot at genesis).
-	baseBlockSlot := baseState.LatestBlockHeader().Slot
-
-	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
-		return nil, err
-	}
-	log.Info("[Beacon API] Found BeaconState object for block production", "slot", targetSlot, "duration", time.Since(start))
-	block, err := a.produceBlock(ctx, builderBoostFactor, baseBlockSlot, baseBlockRoot, baseState, targetSlot, randaoReveal, graffiti)
-	if err != nil {
-		// produceBlock owns this record; repeating it here made one failure two.
+		// produceBlock owns the record of other errors; repeating it here made one failure two.
+		if errors.Is(err, errForkChoiceHeadChanged) && ctx.Err() == nil {
+			log.Warn("BlockProduction: fork choice head changed during production", "slot", targetSlot, "err", err)
+		}
 		return nil, err
 	}
 
@@ -983,6 +995,9 @@ func (a *ApiHandler) produceBlock(
 	defer func() { reportProductionFailure(err, targetSlot) }()
 
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch)
+	if err := a.awaitPendingParentPayload(ctx, baseState, baseBlockRoot, targetSlot, stateVersion); err != nil {
+		return nil, err
+	}
 	var wg sync.WaitGroup
 	// produce beacon body
 	var (
