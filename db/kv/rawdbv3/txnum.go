@@ -470,15 +470,22 @@ func (i *MapTxNum2BlockNumIter) find(txNum uint64) (err error) {
 	return err
 }
 
-// searchFrom moves from the current block to the block of txNum with steps of 1, 2, 4... blocks and a
-// binary search in the last step: O(log distance) lookups instead of a search over the whole chain.
-// It reports false when a block it needs is not in the index, the caller then falls back to find.
+// maxGallopSteps bounds searchFrom to blocks at most 7 away (5 probes). For blocks in files every
+// probe can read a body, and find is cheaper for far jumps thanks to BlockTxNumLookupCache.
+const maxGallopSteps = 3
+
+// searchFrom moves from the current block to the block of txNum with steps of 1, 2, 4 blocks and a
+// binary search in the last step. It reports false when txNum is farther than maxGallopSteps or a
+// block it needs is not in the index, the caller then falls back to find.
 func (i *MapTxNum2BlockNumIter) searchFrom(txNum uint64) (bool, error) {
 	// end(b) is the first txNum after block b; the target block is the first one with end > txNum
 	lo, loEnd := int64(i.blockNum)-1, i.minTxNumInBlock
 	hi, hiEnd := int64(i.blockNum), i.maxTxNumInBlock+1
 	var err error
 	for step := int64(1); txNum >= hiEnd; step *= 2 {
+		if step == 1<<maxGallopSteps {
+			return false, nil
+		}
 		lo, loEnd = hi, hiEnd
 		hi += step
 		if hiEnd, err = i.end(hi); err != nil {
@@ -486,6 +493,9 @@ func (i *MapTxNum2BlockNumIter) searchFrom(txNum uint64) (bool, error) {
 		}
 	}
 	for step := int64(1); txNum < loEnd; step *= 2 {
+		if step == 1<<maxGallopSteps {
+			return false, nil
+		}
 		hi, hiEnd = lo, loEnd
 		lo = max(lo-step, -1)
 		if loEnd, err = i.end(lo); err != nil || loEnd == math.MaxUint64 {

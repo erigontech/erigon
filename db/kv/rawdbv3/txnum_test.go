@@ -168,7 +168,12 @@ func TestTxNums2BlockNums(t *testing.T) {
 
 type countingTxBlockIndex struct {
 	TxBlockIndex
-	blockNumberCalls int
+	blockNumberCalls, maxTxNumCalls int
+}
+
+func (c *countingTxBlockIndex) MaxTxNum(ctx context.Context, tx kv.Tx, cursor kv.Cursor, blockNum uint64) (uint64, bool, error) {
+	c.maxTxNumCalls++
+	return c.TxBlockIndex.MaxTxNum(ctx, tx, cursor, blockNum)
 }
 
 func (c *countingTxBlockIndex) BlockNumber(ctx context.Context, tx kv.Tx, txNum uint64) (uint64, bool, error) {
@@ -202,6 +207,33 @@ func TestTxNums2BlockNumsSearchesOnce(t *testing.T) {
 		}
 		it.Close()
 		require.Equal(t, 1, index.blockNumberCalls)
+	}
+}
+
+// TestTxNums2BlockNumsFarJump pins that a far jump costs a few probes plus one FindBlockNum, not
+// O(log distance) probes: for blocks in files every probe can read a body from bodies.seg.
+func TestTxNums2BlockNumsFarJump(t *testing.T) {
+	db, spans := newTxNumsDB(t, 2000)
+	index := &countingTxBlockIndex{TxBlockIndex: DefaultTxBlockIndexInstance}
+	reader := TxNums.WithCustomReadTxNumFunc(index)
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	for _, asc := range []order.By{order.Asc, order.Desc} {
+		in := []uint64{spans[10].min, spans[1010].min}
+		if !asc {
+			slices.Reverse(in)
+		}
+		it := TxNums2BlockNums(t.Context(), tx, reader, stream.Array(in), asc)
+		_, _, _, _, _, err := it.Next()
+		require.NoError(t, err)
+		index.blockNumberCalls, index.maxTxNumCalls = 0, 0
+		_, blockNum, _, _, _, err := it.Next()
+		require.NoError(t, err)
+		it.Close()
+		require.Equal(t, map[order.By]uint64{order.Asc: 1010, order.Desc: 10}[asc], blockNum)
+		require.Equal(t, 1, index.blockNumberCalls)
+		require.LessOrEqual(t, index.maxTxNumCalls, 5)
 	}
 }
 
