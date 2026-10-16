@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/tiering"
@@ -45,6 +46,11 @@ var (
 	mxTieringCommitmentBytes   = metrics.GetOrCreateGaugeVec("tiering_commitment_bytes", []string{"tier", "kind"})
 	mxTieringDuplicateBytes    = metrics.GetOrCreateGaugeVec("tiering_duplicate_bytes", []string{"reason"})
 
+	probesPerBlockBuckets          = []float64{0, 1, 10, 100, 1e3, 1e4, 3e4, 1e5, 3e5, 1e6, 3e6, 1e7}
+	mxTieringSSDProbesPerBlock     = metrics.NewHistogram("tiering_ssd_probes_per_block", probesPerBlockBuckets)
+	mxTieringHDDProbesPerBlock     = metrics.NewHistogram("tiering_hdd_probes_per_block", probesPerBlockBuckets)
+	mxTieringHDDSlowProbesPerBlock = metrics.NewHistogram("tiering_hdd_slow_probes_per_block", probesPerBlockBuckets)
+
 	tieringGaugesAt atomic.Int64
 	tieringLoggedAt atomic.Int64
 )
@@ -62,6 +68,7 @@ func reportTiering(ctx context.Context, cfg ExecuteBlockCfg, doms *execctx.Share
 		return nil
 	}
 	tieringGaugesAt.Store(now.UnixNano())
+	state.PublishTierProbeCounts()
 
 	boundary := tiering.ColdBoundary(head, lookback)
 	txNumsReader := cfg.blockReader.TxnumReader()

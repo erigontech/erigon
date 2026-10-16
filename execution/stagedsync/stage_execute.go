@@ -468,12 +468,12 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		return err
 	}
 
-	start := time.Now()
+	start, probesBefore := time.Now(), state.ReadTierProbeCounts()
 	if !(dbg.Exec3Parallel || cfg.experimentalBAL) {
 		if err := execV3Serial(ctx, s, u, cfg, doms, rwTx, rng, logger); err != nil {
 			return err
 		}
-		return observeSingleBlockCycle(ctx, cfg, rwTx, rng, start)
+		return observeSingleBlockCycle(ctx, cfg, rwTx, rng, start, probesBefore)
 	}
 
 	out, execErr := execV3(ctx, cfg, doms, rwTx, s.SyncMode(), s.CurrentSyncCycle.IsInitialCycle, s.LogPrefix(), rng, nil, logger)
@@ -493,12 +493,12 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	if err := renderExecOutcome(execErr, out, cfg, s, u, logger); err != nil {
 		return err
 	}
-	return observeSingleBlockCycle(ctx, cfg, rwTx, rng, start)
+	return observeSingleBlockCycle(ctx, cfg, rwTx, rng, start, probesBefore)
 }
 
-// observeSingleBlockCycle records per-block exec time (execution + commitment) and Mgas/s for cycles that execute
-// one block, as at the chain tip.
-func observeSingleBlockCycle(ctx context.Context, cfg ExecuteBlockCfg, tx kv.TemporalTx, rng execRange, start time.Time) error {
+// observeSingleBlockCycle records per-block exec time (execution + commitment), Mgas/s and commitment file probes
+// by tier for cycles that execute one block, as at the chain tip.
+func observeSingleBlockCycle(ctx context.Context, cfg ExecuteBlockCfg, tx kv.TemporalTx, rng execRange, start time.Time, probesBefore state.TierProbeCounts) error {
 	if rng.blockNum != rng.maxBlockNum {
 		return nil
 	}
@@ -510,6 +510,10 @@ func observeSingleBlockCycle(ctx context.Context, cfg ExecuteBlockCfg, tx kv.Tem
 	mxExecBlockSeconds.Observe(d)
 	mxExecBlockSecondsMax.Observe(d)
 	mxExecBlockMgasPerSec.Observe(float64(header.GasUsed) / 1e6 / d)
+	probes := state.ReadTierProbeCounts().Sub(probesBefore)
+	mxTieringSSDProbesPerBlock.Observe(float64(probes.SSD))
+	mxTieringHDDProbesPerBlock.Observe(float64(probes.HDD))
+	mxTieringHDDSlowProbesPerBlock.Observe(float64(probes.HDDSlow))
 	return nil
 }
 
