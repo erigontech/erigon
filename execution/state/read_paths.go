@@ -1552,6 +1552,12 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		v, clean, err := so.GetState(key)
 		return v, StorageRead, UnknownVersion, clean, err
 	}
+	// Only an execution without conflict detection fills coldSlots, so the miss
+	// here is what tells the validated path apart. A write or a create drops
+	// the entry as it happens, so the hit needs no guard.
+	if v, ok := s.versionedReads.GetColdSlot(addr, key); ok {
+		return v, StorageRead, UnknownVersion, true, nil
+	}
 	if s.versionMap != nil && !s.warmReadable(addr) {
 		if vw, ok := s.versionedWrites.GetStorage(addr, key); ok {
 			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, false, nil
@@ -1598,7 +1604,11 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 			v, clean = r.mapStorageVal, true
 		}
 		if r.recordVR {
-			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
+			if s.noConflictDetection {
+				s.versionedReads.SetColdSlot(addr, key, v)
+			} else {
+				s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
+			}
 		}
 		return v, r.source, r.version, clean, nil
 	case outcomeReturnZero, outcomeReturnDefault:
@@ -1609,6 +1619,16 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 }
 
 // readCommittedState reads a storage slot with committed-view semantics.
+// createdOverSlot reports whether this call created a contract at addr, or
+// destroyed it, either of which empties its storage.
+func createdOverSlot(s *IntraBlockState, addr accounts.Address) bool {
+	if created, _ := s.versionedWriteCreateContract(addr); created {
+		return true
+	}
+	so, resident := s.stateObjects[addr]
+	return resident && so.deleted
+}
+
 func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, error) {
 	if s.versionMap == nil {
 		so, err := s.getStateObject(addr, true)
@@ -1621,11 +1641,14 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 	// A recorded read of the slot is its value before this tx, whatever the tx wrote
 	// since, unless the tx created the contract over it.
 	if s.versionMap != nil {
-		so, resident := s.stateObjects[addr]
-		created, _ := s.versionedWriteCreateContract(addr)
-		if (!resident || !so.deleted) && !created {
+		if !createdOverSlot(s, addr) {
 			if tr, ok := s.versionedReads.GetStorage(addr, key); ok && warmSource(tr.Source) {
 				return tr.Val, tr.Source, tr.Version, nil
+			}
+			// The memo holds the slot as it was before this call, which is what
+			// a committed read wants even after the call wrote it.
+			if v, ok := s.versionedReads.GetCommittedSlot(addr, key); ok {
+				return v, StorageRead, UnknownVersion, nil
 			}
 		}
 	}

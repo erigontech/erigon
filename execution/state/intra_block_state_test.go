@@ -1250,8 +1250,10 @@ func TestResetForPoolCarriesNothingToTheNextCall(t *testing.T) {
 	ibs.SetTxContext(5, 2)
 	ibs.SetVersion(3)
 	ibs.eip8246, ibs.eip161, ibs.isAura = true, true, true
+	ibs.versionedReads.SetColdSlot(addr, key, *uint256.NewInt(5))
 
 	require.True(t, ibs.resetForPool())
+	require.Empty(t, ibs.versionedReads.coldSlots, "a memoized slot is the last call's")
 	require.Nil(t, ibs.stateReader)
 	require.Zero(t, ibs.blockNum)
 	require.Zero(t, ibs.version)
