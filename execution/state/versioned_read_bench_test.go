@@ -30,6 +30,7 @@ func BenchmarkVersionedReadGetters(b *testing.B) {
 	// tx 1 reads → hits MapRead path inside versionedRead
 	s := NewWithVersionMap(reader, mvhm)
 	defer s.Close()
+	s.SetNoMaterialize(true)
 	s.txIndex = 1
 
 	b.Run("GetNonce", func(b *testing.B) {
