@@ -211,3 +211,20 @@ func TestCallConstructorReturnsOverlayError(t *testing.T) {
 	var invalidOpcode *vm.ErrInvalidOpCode
 	require.ErrorAs(t, err, &invalidOpcode)
 }
+
+func TestCallConstructorRejectsNonContract(t *testing.T) {
+	m, bankAddress, _, _ := chainWithDeployedContract(t)
+	base := newBaseApiForTest(m)
+	api := NewOverlayAPI(
+		base,
+		m.DB,
+		&rpccfg.OverlayApiConfig{GasCap: 1_000_000},
+		NewOtterscanAPI(base, m.DB, 25),
+	)
+	code := hexutil.Bytes{byte(vm.STOP)}
+	for _, addr := range []common.Address{bankAddress, common.HexToAddress("0xdead")} {
+		result, err := api.CallConstructor(m.Ctx, addr, &code)
+		require.Nil(t, result)
+		require.Error(t, err)
+	}
+}

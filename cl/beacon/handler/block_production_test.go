@@ -2641,7 +2641,7 @@ func TestPublishBlindedBlocksRejectsUnsupportedContentType(t *testing.T) {
 
 	_, err := h.publishBlindedBlocks(req, 2)
 	var endpointErr *beaconhttp.EndpointError
-	require.True(t, errors.As(err, &endpointErr))
+	require.ErrorAs(t, err, &endpointErr)
 	require.Equal(t, http.StatusUnsupportedMediaType, endpointErr.Code)
 	require.ErrorContains(t, err, "unsupported content type")
 }

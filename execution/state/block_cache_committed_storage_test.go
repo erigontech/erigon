@@ -20,6 +20,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -86,7 +87,9 @@ func TestBlockStateCache_CommittedStorage_ConcurrentAccess(t *testing.T) {
 				a, k := addrList[ai], keyList[ki]
 				cache.PutCommittedStorage(a, k, val(ai, ki))
 				if got, ok := cache.GetCommittedStorage(a, k); ok {
-					require.Equal(t, val(ai, ki), got)
+					if !assert.Equal(t, val(ai, ki), got) {
+						return
+					}
 				}
 				cache.GetCurrentStorage(a, k)
 			}

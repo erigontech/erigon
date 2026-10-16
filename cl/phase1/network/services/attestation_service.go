@@ -77,7 +77,7 @@ type attestationService struct {
 	// validatorAttestationSeen maps from epoch to validator index. This is used to ignore duplicate validator attestations in the same epoch.
 	validatorAttestationSeen *lru.CacheWithTTL[uint64, uint64] // validator index -> epoch
 	// attestationProcessed           *lru.CacheWithTTL[[32]byte, struct{}]
-	// attestationsToBeLaterProcessed sync.Map
+	awaitingBlock *blockArrivalQueue
 }
 
 // AttestationWithGossipData type represents attestation with the gossip data where it's coming from.
@@ -118,9 +118,9 @@ func NewAttestationService(
 		batchSignatureVerifier:   batchSignatureVerifier,
 		validatorAttestationSeen: lru.NewWithTTL[uint64, uint64]("validator_attestation_seen", validatorAttestationCacheSize, epochDuration),
 		// attestationProcessed:     lru.NewWithTTL[[32]byte, struct{}]("attestation_processed", validatorAttestationCacheSize, epochDuration),
+		awaitingBlock: newBlockArrivalQueue(forkchoiceStore, maxAttestationsAwaitingBlock, time.Duration(beaconCfg.SecondsPerSlot)*time.Second),
 	}
-
-	//go a.loop(ctx)
+	go a.awaitingBlock.run(ctx)
 	return a
 }
 
@@ -335,7 +335,10 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	// (a client MAY queue attestations for processing once block is retrieved).
 	blockHeader, ok := s.forkchoiceStore.GetHeader(root)
 	if !ok {
-		//s.scheduleAttestationForLaterProcessing(att)
+		if !att.ImmediateProcess {
+			subnet := *subnet
+			s.awaitingBlock.add(root, func(ctx context.Context) { _ = s.ProcessMessage(ctx, &subnet, att) })
+		}
 		return fmt.Errorf("%w: block not seen: %v", ErrIgnore, root)
 	}
 
@@ -394,51 +397,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 
 	return s.batchSignatureVerifier.VerifyAttestation(ctx, aggregateVerificationData)
 }
-
-// type attestationJob struct {
-// 	att          *AttestationWithGossipData
-// 	creationTime time.Time
-// 	subnet       uint64
-// }
-
-// func (a *attestationService) scheduleAttestationForLaterProcessing(att *AttestationWithGossipData) {
-// 	key, err := att.Attestation.HashSSZ()
-// 	if err != nil {
-// 		return
-// 	}
-// 	a.attestationsToBeLaterProcessed.Store(key, &attestationJob{
-// 		att:          att,
-// 		creationTime: time.Now(),
-// 	})
-// }
-
-// func (a *attestationService) loop(ctx context.Context) {
-// 	ticker := time.NewTicker(singleAttestationIntervalTick)
-// 	defer ticker.Stop()
-
-// 	for {
-// 		select {
-// 		case <-ctx.Done():
-// 			return
-// 		case <-ticker.C:
-// 		}
-// 		a.attestationsToBeLaterProcessed.Range(func(key, value any) bool {
-// 			k := key.([32]byte)
-// 			v := value.(*attestationJob)
-// 			if time.Now().After(v.creationTime.Add(singleAttestationJobExpiry)) {
-// 				a.attestationsToBeLaterProcessed.Delete(k)
-// 				return true
-// 			}
-
-// 			root := v.att.Attestation.Data.BeaconBlockRoot
-// 			if _, ok := a.forkchoiceStore.GetHeader(root); !ok {
-// 				return true
-// 			}
-// 			a.ProcessMessage(ctx, &v.subnet, v.att)
-// 			return true
-// 		})
-// 	}
-// }
 
 func contains[T comparable](target T, slices []T) int {
 	for i, s := range slices {
