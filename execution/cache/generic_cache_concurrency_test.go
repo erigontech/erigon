@@ -17,6 +17,7 @@
 package cache
 
 import (
+	"bytes"
 	"encoding/binary"
 	"math"
 	"runtime"
@@ -319,7 +320,7 @@ func TestGenericCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 		wg.Go(func() { c.Put(key, live, 20) })
 		wg.Go(func() { c.PutIfAbsent(key, fill, 10) })
 		wg.Wait()
-		if v, _ := c.Get(key); string(v) != string(live) {
+		if v, _ := c.Get(key); !bytes.Equal(v, live) {
 			t.Fatalf("round %d: PutIfAbsent overwrote a live Put with %q", round, v)
 		}
 	}
