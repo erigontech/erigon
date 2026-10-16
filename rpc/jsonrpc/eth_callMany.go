@@ -223,7 +223,9 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			return nil, err
 		}
 
-		_ = transactions.FinalizeCallTx(st, rules)
+		if err := transactions.FinalizeCallTx(st, rules); err != nil {
+			return nil, err
+		}
 
 		if evm.Cancelled() {
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
@@ -270,7 +272,9 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 				return nil, err
 			}
 
-			_ = transactions.FinalizeCallTx(st, rules)
+			if err := transactions.FinalizeCallTx(st, rules); err != nil {
+				return nil, err
+			}
 
 			// If the timer caused an abort, return an appropriate error message
 			if evm.Cancelled() {

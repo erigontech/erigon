@@ -531,7 +531,9 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 				return err
 			}
 
-			_ = transactions.FinalizeCallTx(ibs, rules)
+			if err := transactions.FinalizeCallTx(ibs, rules); err != nil {
+				return err
+			}
 
 		}
 		stream.WriteArrayEnd()
