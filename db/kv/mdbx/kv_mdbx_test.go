@@ -1229,11 +1229,11 @@ func TestDeferredSyncFlushesAfterWritesStop(t *testing.T) {
 		return info.UnsyncedBytes
 	}
 
-	byDefault := open(mdbx.New(dbcfg.TemporaryDB, log.Root()).SyncPeriod(time.Hour))
+	byDefault := open(mdbx.New(dbcfg.TemporaryDB, log.Root()).PollerSyncInterval(time.Hour))
 	writeOne(byDefault)
 	require.NotZero(t, unsynced(byDefault), "every database defers its flush unless asked otherwise")
 
-	deferred := open(mdbx.New(dbcfg.TemporaryDB, log.Root()).SafeNoSync().SyncPeriod(50 * time.Millisecond))
+	deferred := open(mdbx.New(dbcfg.TemporaryDB, log.Root()).SafeNoSync().PollerSyncInterval(50 * time.Millisecond))
 	writeOne(deferred) // far below the byte threshold: only the deadline can flush this
 	require.Eventually(t, func() bool { return unsynced(deferred) == 0 }, time.Second, 10*time.Millisecond,
 		"the background flush never ran")
@@ -1249,7 +1249,7 @@ func TestDeferredSyncClosesWhileWriting(t *testing.T) {
 	val := make([]byte, 4096)
 	for range 3 {
 		db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).
-			SafeNoSync().SyncPeriod(time.Millisecond).
+			SafeNoSync().PollerSyncInterval(time.Millisecond).
 			WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
 		var wg sync.WaitGroup
 		stop := make(chan struct{})
@@ -1275,7 +1275,7 @@ func TestDeferredSyncClosesWhileWriting(t *testing.T) {
 }
 
 func TestDeferredSyncLeavesATipSizedCommitUnflushed(t *testing.T) {
-	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).SafeNoSync().SyncPeriod(time.Hour).
+	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).SafeNoSync().PollerSyncInterval(time.Hour).
 		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
 	t.Cleanup(db.Close)
 	val := make([]byte, 4096)
@@ -1293,7 +1293,7 @@ func TestDeferredSyncLeavesATipSizedCommitUnflushed(t *testing.T) {
 }
 
 func TestDeferredSyncBoundsAWriterThatNeverReleasesTheLock(t *testing.T) {
-	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).SafeNoSync().SyncPeriod(10 * time.Millisecond).SyncInCommitIfUnsyncedFor(300 * time.Millisecond).
+	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).SafeNoSync().PollerSyncInterval(10 * time.Millisecond).SyncInCommitIfUnsyncedFor(300 * time.Millisecond).
 		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
 	t.Cleanup(db.Close)
 	val := make([]byte, 4000)
@@ -1336,7 +1336,7 @@ func TestDeferredSyncBoundsAWriterThatNeverReleasesTheLock(t *testing.T) {
 }
 
 func TestDeferredSyncLeavesTheDeadlineToThePoller(t *testing.T) {
-	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).SafeNoSync().SyncPeriod(50 * time.Millisecond).MustOpen()
+	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).SafeNoSync().PollerSyncInterval(50 * time.Millisecond).MustOpen()
 	t.Cleanup(db.Close)
 	period, err := db.(*mdbx.MdbxKV).Env().GetSyncPeriod()
 	require.NoError(t, err)
