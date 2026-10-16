@@ -25,6 +25,7 @@ import (
 	"github.com/klauspost/compress/gzip"
 	"github.com/klauspost/compress/zstd"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
@@ -50,7 +51,7 @@ func (p *writerPool[T]) put(w T) {
 
 // flate writes ~250-byte pieces, and net/http turns them into a write
 // syscall per 4 KB.
-const gzipOutBufSize = 64 * 1024
+var gzipOutBufSize = dbg.EnvInt("RPC_GZIP_BUF", 64*1024)
 
 type bufferedGzipWriter struct {
 	*gzip.Writer
