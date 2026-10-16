@@ -44,6 +44,7 @@ import (
 // Make mocks with maps and simple setters and getters, panic on methods from ForkChoiceStorageWriter
 
 type ForkChoiceStorageMock struct {
+	ProposerLookaheadVal                  solid.Uint64VectorSSZ
 	Ancestors                             map[uint64]forkchoice.ForkChoiceNode
 	AnchorSlotVal                         uint64
 	AnchorRootVal                         common.Hash
@@ -822,7 +823,7 @@ func (f *ForkChoiceStorageMock) GetPendingPartialWithdrawals(blockRoot common.Ha
 }
 
 func (f *ForkChoiceStorageMock) GetProposerLookahead(slot uint64) (solid.Uint64VectorSSZ, bool) {
-	return nil, false
+	return f.ProposerLookaheadVal, f.ProposerLookaheadVal != nil
 }
 
 // GetRecentExecutionPayloadStatus returns the validation status of a recently validated execution payload.
