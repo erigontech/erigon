@@ -136,9 +136,7 @@ func BenchmarkGenericCacheParallelFill(b *testing.B) {
 	}
 }
 
-// The longest a single put is held up while filling a cache from cold: on main
-// that is a whole-cache migration behind every put stripe, here it is one
-// shard's migration behind that shard's mutex.
+// The longest a single put is held up while filling a cache from cold.
 func BenchmarkGenericCacheWorstPut(b *testing.B) {
 	const keys = 1 << 20
 	val := make([]byte, 32)

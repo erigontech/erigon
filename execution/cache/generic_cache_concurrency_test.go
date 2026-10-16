@@ -73,13 +73,8 @@ func oneEntryBytes(key, val []byte) datasize.ByteSize {
 	return datasize.ByteSize(weighEntry(0, entry[[]byte]{size: uint32(len(key) + len(val))}))
 }
 
-// A ModeNoOp admission must never observe the byte counter mid-update: the
-// update path removes the old entry before adding the new one, and a
-// concurrent insert of another key that reads the transient dip passes the
-// budget check and lands over capacity — breaking "drop new keys when full"
-// with a key that should never have been admitted. The counter is reserved
-// before the removal, so the budget is transiently over-stated (at worst
-// dropping a new key) and never under-stated.
+// A ModeNoOp admission must never observe the byte counter mid-update: a concurrent
+// insert of another key must not land over capacity.
 func TestGenericCache_ModeNoOpAdmissionAtomicWithUpdate(t *testing.T) {
 	a, b := []byte("key-a-aaaaaaaaaaaaaa"), []byte("key-b-bbbbbbbbbbbbbb")
 	v := []byte("valuevalu")
@@ -167,52 +162,6 @@ func TestGenericCache_ClearRacingGet_DeadEntryStaysDead(t *testing.T) {
 	}
 }
 
-// A byte budget whose slot quotient exceeds a uint32 must clamp to the ceiling,
-// not wrap into a tiny cache.
-func TestSlotCeilingClampsAboveUint32(t *testing.T) {
-	prevBudget := cachebudget.Global
-	t.Cleanup(func() { cachebudget.Global = prevBudget })
-	cachebudget.Global = cachebudget.New(math.MaxInt64)
-
-	// Exactly 2^32 slots, so the quotient no longer fits the uint32 the clamp
-	// used to be applied after.
-	overflow := func(perSlot uint64) datasize.ByteSize { return datasize.ByteSize(perSlot << 32) }
-
-	g := newGrowLRU[codeSizeEntry](overflow(avgBytesPerEntry+uint64(slotChargeBytes(elemBytesFor[codeSizeEntry]()))), 0, nil)
-	t.Cleanup(g.Close)
-	require.Equal(t, uint32(maxCacheSlots), g.maxCap)
-}
-
-func TestCeilingTerminatesAboveTheSlotClamp(t *testing.T) {
-	t.Parallel()
-
-	free := func(uint32) int64 { return 0 }
-	for _, estimate := range []uint32{0, 1, 3, 1 << 31, math.MaxUint32} {
-		require.Equal(t, uint32(math.MaxUint32),
-			fitCeiling(estimate, math.MaxUint32, datasize.ByteSize(math.MaxInt64), free),
-			"seeded at %d", estimate)
-	}
-}
-
-// The same for the unsharded ceiling, over the value types that reach the widest
-// freelru elements. Its budget funds one table, so the strand is the same band.
-func TestGrowLRUCeilingLeavesNoAffordableSlot(t *testing.T) {
-	t.Parallel()
-
-	for _, budget := range []datasize.ByteSize{16 * datasize.MB, 64 * datasize.MB, 512 * datasize.MB} {
-		for _, payload := range []uint32{1, 64, 12288} {
-			g := closeOnCleanup(t, newGrowLRU[codeEntry](budget, payload, nil))
-			cost := func(c uint32) int64 { return growLRUBytes(c, g.procs, g.avgBytes, g.elemBytes) }
-			require.LessOrEqual(t, cost(g.maxCap), int64(budget),
-				"newGrowLRU(%s, %d) ceiling %d is outside its own budget", budget, payload, g.maxCap)
-			if g.maxCap < maxCacheSlots {
-				require.Greater(t, cost(g.maxCap+1), int64(budget),
-					"newGrowLRU(%s, %d) stopped at %d with a slot still affordable", budget, payload, g.maxCap)
-			}
-		}
-	}
-}
-
 // growLRU fits its slot ceiling against the shard geometry it is constructed
 // with. GOMAXPROCS can change under a running process, so a generation built
 // later must not be sized by a different geometry than the ceiling was fitted
@@ -235,19 +184,19 @@ func TestGrowLRU_ByteBudgetHoldsAcrossShardCountChanges(t *testing.T) {
 		}
 	}
 
-	const budget = 1 * datasize.GB
 	// ceilingCost walks a cache to its ceiling with GOMAXPROCS changed to `to`
 	// halfway, and reports what the full generation charged the envelope.
 	ceilingCost := func(t *testing.T, at, to int) int64 {
 		cachebudget.Global = cachebudget.New(math.MaxInt64)
 		runtime.GOMAXPROCS(at)
-		g := newGrowLRU[codeEntry](budget, largeCodePayloadBytes, nil)
+		g := newGrowLRUEntries[codeEntry](64*1024, largeCodePayloadBytes, nil)
 		defer g.Close()
+		budget := growLRUBytes(g.maxCap, g.procs, g.avgBytes, g.elemBytes)
 		settled := func(step string) {
 			t.Helper()
 			require.Equal(t, g.reserved, cachebudget.Global.Used(), "procs %d->%d after %s", at, to, step)
-			require.LessOrEqual(t, g.reserved, int64(budget),
-				"procs %d->%d after %s: %d slots cost %d B, over the %s they were fitted to",
+			require.LessOrEqual(t, g.reserved, budget,
+				"procs %d->%d after %s: %d slots cost %d B, over the %d they were fitted to",
 				at, to, step, g.curCap.Load(), g.reserved, budget)
 		}
 		settled("construction")

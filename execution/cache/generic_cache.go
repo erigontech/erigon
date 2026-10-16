@@ -122,12 +122,7 @@ func (c *GenericCache[T]) Get(key []byte) (T, bool) {
 // maxStep — the same coherence the BranchCache read applies for commitment.
 func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 	h := maphash.Hash(key)
-	// Snapshot coherence before loading the generation. Clear publishes the
-	// replacement generation before lifting the unwind floor, so an entry
-	// captured from the retiring generation is always judged by coherence that
-	// still carries its unwind. A replacement-generation entry judged by an old
-	// snapshot can only cause a safe miss because dropStale rechecks the current
-	// generation before removing it.
+	// Snapshot coherence before the load, so an entry is always judged by coherence that still carries its unwind.
 	coh := c.coh.Snapshot()
 	e, ok := c.data.Get(h)
 	if !ok || e.key != string(key) {

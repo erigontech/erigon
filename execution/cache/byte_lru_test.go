@@ -178,9 +178,7 @@ func TestByteLRUConcurrentSameKeyDoesNotOverReserve(t *testing.T) {
 	require.Equal(t, int64(b.c.WeightedSize()), b.resident.Load())
 }
 
-// A growing working set must still raise the limit: the growth step is decided
-// before the write, so maintenance evicting the newcomer cannot hide the
-// pressure that called for it.
+// A growing working set must still raise the limit.
 func TestByteLRUGrowsOnPositiveNetChange(t *testing.T) {
 	prev := cachebudget.Global
 	t.Cleanup(func() { cachebudget.Global = prev })
@@ -220,9 +218,8 @@ func TestByteLRURejectedNewcomerIsRefunded(t *testing.T) {
 	require.Positive(t, b.Len())
 }
 
-// An unbudgeted layer holds maxBytes from the start, so it never grows and its
-// residency counter is not maintained. What it must still do is stay inside the
-// byte bound under eviction pressure and serve correct values.
+// An unbudgeted layer holds maxBytes from the start and never grows. It must still
+// stay inside the byte bound under eviction pressure and serve correct values.
 func TestByteLRUUnbudgetedStaysBoundedAndCorrect(t *testing.T) {
 	const maxBytes = datasize.ByteSize(1 << 20)
 	val := func(i uint64) []byte { return append(make([]byte, 64*1024-1), byte(i)) }
@@ -233,7 +230,8 @@ func TestByteLRUUnbudgetedStaysBoundedAndCorrect(t *testing.T) {
 	}
 	b.c.CleanUp()
 
-	require.LessOrEqual(t, int64(b.c.WeightedSize()), int64(maxBytes), "bound holds without a refund path")
+	require.LessOrEqual(t, int64(b.c.WeightedSize()), int64(maxBytes))
+	require.Equal(t, int64(b.c.WeightedSize()), b.resident.Load())
 	require.Positive(t, b.Len())
 	// Whatever survived answers with its own value.
 	for key := range uint64(256) {

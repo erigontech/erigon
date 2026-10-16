@@ -23,19 +23,11 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/elastic/go-freelru"
 
 	"github.com/erigontech/erigon/common/cachebudget"
 	"github.com/erigontech/erigon/common/math"
 )
-
-// avgBytesPerEntry is the assumption used to translate a byte budget into
-// the entry-count cap the sharded LRU is sized against. 256 B
-// approximates account-record + key overhead and storage-slot value+key
-// overhead in the same order of magnitude. Actual residency tracked in
-// currentSize and reported via PrintStatsAndReset.
-const avgBytesPerEntry = 256
 
 // freelruElem mirrors freelru's element, which is unexported: the stored value
 // with a hashed key, five uint32 list indices and an expiry around it. The
@@ -57,11 +49,6 @@ func elemBytesFor[T any]() int64 {
 	return int64(unsafe.Sizeof(e)) + 4
 }
 
-// slotChargeBytes is a slot at freelru's best table ratio, 5/4, so it is a lower
-// bound: a capacity off that ratio costs up to 5/2. It seeds the ceiling search
-// only; every reservation charges the exact table through tableSlots.
-func slotChargeBytes(elemBytes int64) int64 { return elemBytes*5/4 + 1 }
-
 // freelruShardBytes covers a shard beyond its two arrays: the LRU struct and the
 // slice headers. Measured at 239-359 B; charged high to stay covering. The zero
 // key and value it also holds scale with the value type, so shardChargeBytes
@@ -72,31 +59,6 @@ func shardChargeBytes(elemBytes int64) int64 { return freelruShardBytes + elemBy
 
 // maxCacheSlots caps the slot array whatever the byte budget says.
 const maxCacheSlots = 16_000_000
-
-// fitCeiling is the largest capacity up to ceiling whose exact cost is inside the
-// budget. estimate only seeds the search and may sit on either side of the answer.
-// cost must be non-decreasing in capacity, as both callers' are: the payload term
-// grows with it and the table it rounds up to never shrinks.
-func fitCeiling(estimate, ceiling uint32, budget datasize.ByteSize, cost func(uint32) int64) uint32 {
-	if cost(1) > int64(budget) {
-		return 1
-	}
-	ceiling = max(ceiling, 1)
-	hi := max(min(estimate, ceiling), 1)
-	for hi < ceiling && cost(hi) <= int64(budget) {
-		hi = uint32(min(uint64(hi)*2, uint64(ceiling)))
-	}
-	lo := uint32(1)
-	for lo < hi {
-		mid := lo + (hi-lo+1)/2
-		if cost(mid) <= int64(budget) {
-			lo = mid
-		} else {
-			hi = mid - 1
-		}
-	}
-	return lo
-}
 
 func u64identity(k uint64) uint32 { return uint32(k) }
 
@@ -119,8 +81,7 @@ const (
 // only for content-addressed layers, where a key's payload never changes: a
 // write lost in a retired generation is a benign miss, and an entry whose
 // removal a racing copy undid serves correct bytes until its stale stamp
-// drops it on the next read. Do not reuse for mutable-per-key values — those
-// need GenericCache's fenced swap. The onEvict-maintained counters are
+// drops it on the next read. Do not reuse for mutable-per-key values. The onEvict-maintained counters are
 // approximate across grow windows (a lost write is counted but never
 // evicted; a raced removal can subtract twice).
 type growLRU[V any] struct {
@@ -149,20 +110,6 @@ type growLRU[V any] struct {
 func newGrowLRUEntries[V any](maxEntries, avgBytes uint32, onEvict func(uint64, V)) *growLRU[V] {
 	return newGrowLRUWith(max(min(maxEntries, maxCacheSlots), 1), int64(avgBytes),
 		uint32(runtime.GOMAXPROCS(0)), onEvict)
-}
-
-func newGrowLRU[V any](maxBytes datasize.ByteSize, avgBytes uint32, onEvict func(uint64, V)) *growLRU[V] {
-	if avgBytes == 0 {
-		avgBytes = avgBytesPerEntry
-	}
-	procs := uint32(runtime.GOMAXPROCS(0))
-	elemBytes := elemBytesFor[V]()
-	perSlot := int64(avgBytes) + slotChargeBytes(elemBytes)
-	approx := max(uint32(min(uint64(maxBytes)/uint64(perSlot), maxCacheSlots)), 1)
-	maxCap := fitCeiling(approx, maxCacheSlots, maxBytes, func(c uint32) int64 {
-		return growLRUBytes(c, procs, int64(avgBytes), elemBytes)
-	})
-	return newGrowLRUWith(maxCap, int64(avgBytes), procs, onEvict)
 }
 
 // growLRUGeneration is the table size and shard count freelru builds a capacity

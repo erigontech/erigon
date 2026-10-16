@@ -81,8 +81,8 @@ func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.Byt
 		sc.disableFills = true
 		log.Info("[cache] STATE_CACHE_FILLS=false — read fills disabled, only post-commit publication populates the cache")
 	}
-	sc.caches[kv.AccountsDomain] = newDomainCacheBytes(accountBytes, mode)
-	sc.caches[kv.StorageDomain] = newDomainCacheBytes(storageBytes, mode)
+	sc.caches[kv.AccountsDomain] = NewDomainCacheMode(accountBytes, mode)
+	sc.caches[kv.StorageDomain] = NewDomainCacheMode(storageBytes, mode)
 	sc.caches[kv.CodeDomain] = NewCodeCache(codeBytes, addrBytes)
 	// CommitmentDomain deliberately gets no cache: commitment data lives in the
 	// BranchCache, and the nil slot short-circuits every StateCache path for it
@@ -104,15 +104,6 @@ func stateCacheModeFromEnv() Mode {
 	default:
 		log.Warn("[cache] unrecognised STATE_CACHE_MODE; defaulting to evict", "value", v)
 		return ModeEvictLRU
-	}
-}
-
-// newDomainCacheBytes constructs a DomainCache bounded by capacityBytes. It
-// reserves from the shared envelope as it fills, so a domain with a small
-// working set (a test fixture) never pre-commits the full budget.
-func newDomainCacheBytes(capacityBytes datasize.ByteSize, mode Mode) *DomainCache {
-	return &DomainCache{
-		GenericCache: NewGenericCache(capacityBytes, func(v []byte) int { return len(v) }, mode),
 	}
 }
 
