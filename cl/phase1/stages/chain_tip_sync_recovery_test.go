@@ -1345,7 +1345,8 @@ func TestChainTipBatchReportsAParentEnvelopeNoPeerServes(t *testing.T) {
 
 	require.ErrorIs(t, rejected[common.Hash(fullRoot)], errParentEnvelopeUnavailable)
 	require.Contains(t, cfg.chainTipRejections.reasons, errParentEnvelopeUnavailable.Error())
-	require.NotContains(t, cfg.chainTipRejections.reasons, "process block failed")}
+	require.NotContains(t, cfg.chainTipRejections.reasons, "process block failed")
+}
 
 type stageCtxKey struct{}
 
