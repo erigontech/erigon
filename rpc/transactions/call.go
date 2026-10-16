@@ -230,6 +230,8 @@ func FinalizeCallTx(ibs *state.IntraBlockState, rules *chain.Rules) error {
 	}
 	for addr, removal := range normalized.SelfDestructs() {
 		if raw, ok := writes.GetSelfDestruct(addr); removal.Val && (!ok || !raw.Val) {
+			// The transaction's own cells of the account would read as its revival.
+			ibs.VersionMap().DeleteAll(addr, ibs.TxnIndex())
 			ibs.VersionMap().WriteSelfDestruct(addr, removal.Version, true, true)
 		}
 	}

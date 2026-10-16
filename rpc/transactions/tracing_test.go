@@ -305,3 +305,32 @@ func TestFinalizeCallTxRemovesTouchedEmptyAccount(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, exists)
 }
+
+// An account deleted under EIP-161 by one transaction, recreated empty by the next (a zero-value
+// call to a precompile) and deleted again, stays gone for the transaction after that.
+func TestFinalizeCallTxKeepsARecreatedEmptyAccountDeleted(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x0203"))
+	ibs := state.New(emptyAccountReader{NoopReader: state.NewNoopReader(), addr: addr})
+	defer ibs.Close()
+	ibs.SetVersionMap(state.NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+	ibs.SetNoConflictDetection()
+	rules := &chain.Rules{IsSpuriousDragon: true}
+
+	ibs.SetTxContext(0, 0)
+	require.NoError(t, ibs.TouchAccount(addr))
+	require.NoError(t, FinalizeCallTx(ibs, rules))
+
+	ibs.SetTxContext(0, 1)
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists)
+	require.NoError(t, ibs.CreateAccount(addr, false))
+	require.NoError(t, ibs.TouchAccount(addr))
+	require.NoError(t, FinalizeCallTx(ibs, rules))
+
+	ibs.SetTxContext(0, 2)
+	exists, err = ibs.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists)
+}
