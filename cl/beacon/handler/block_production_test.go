@@ -4356,6 +4356,35 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 		"SlotNumber should equal the target slot")
 }
 
+// The block after the requested state can be gone after pruning while the canonical index still names it.
+func TestExpectedWithdrawalsHistoricalBlockBodyPruned(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
+	delete(handler.blockReader.(*tests.MockBlockReader).U, blocks[1].Block.Slot)
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+		fmt.Sprintf("/eth/v1/builder/states/%d/expected_withdrawals", blocks[0].Block.Slot), http.NoBody)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusNotFound, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "next block body not found")
+}
+
+// A block the fork choice still holds in memory serves the request before the DB has it.
+func TestExpectedWithdrawalsReadsTheNextBlockFromForkChoice(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
+	delete(handler.blockReader.(*tests.MockBlockReader).U, blocks[1].Block.Slot)
+	root, err := blocks[1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.Headers[root] = blocks[1].SignedBeaconBlockHeader().Header
+	fcu.Blocks[root] = blocks[1]
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+		fmt.Sprintf("/eth/v1/builder/states/%d/expected_withdrawals", blocks[0].Block.Slot), http.NoBody)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
 func TestExpectedWithdrawalsReadsTheRightSourcePerFork(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch = 0, 0, 0

@@ -124,15 +124,9 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 		validatorIndices = append(validatorIndices, idx)
 	}
 
-	// PTC duties available for current and next epoch (beacon-APIs PR #592)
 	var dependentRoot common.Hash
 	duties := make([]ptcDutyResponse, 0)
-	if err := a.viewHeadStateWithIdentity(func(s *state.CachingBeaconState, headRoot common.Hash, headSlot uint64) error {
-		currentEpoch := state.Epoch(s)
-		if epoch < currentEpoch || epoch > currentEpoch+1 {
-			return beaconhttp.NewEndpointError(http.StatusBadRequest,
-				fmt.Errorf("PTC duties only available for current epoch %d and next epoch %d, requested %d", currentEpoch, currentEpoch+1, epoch))
-		}
+	fillDuties := func(s *state.CachingBeaconState, headRoot common.Hash, headSlot uint64) error {
 		if s.Version() < clparams.GloasVersion {
 			return beaconhttp.NewEndpointError(http.StatusServiceUnavailable,
 				fmt.Errorf("PTC duties for fork epoch %d are not available until the head reaches the Gloas fork", epoch))
@@ -185,8 +179,45 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 		}
 		dependentRoot = root
 		return nil
+	}
+
+	var (
+		advanced                         *state.CachingBeaconState
+		advancedHeadRoot                 common.Hash
+		advancedHeadSlot, advancedToSlot uint64
+	)
+	if err := a.viewHeadStateWithIdentity(func(s *state.CachingBeaconState, headRoot common.Hash, headSlot uint64) error {
+		stateEpoch := state.Epoch(s)
+		nextEpoch := a.ethClock.GetCurrentEpoch() + 1
+		if epoch < stateEpoch || epoch > nextEpoch {
+			return beaconhttp.NewEndpointError(http.StatusBadRequest,
+				fmt.Errorf("PTC duties only available for epochs %d to %d, requested %d", stateEpoch, nextEpoch, epoch))
+		}
+		if epoch > stateEpoch+2 {
+			return beaconhttp.NewEndpointError(http.StatusServiceUnavailable,
+				fmt.Errorf("PTC duties for epoch %d are not available while the head is in epoch %d", epoch, stateEpoch))
+		}
+		if epoch < stateEpoch+2 {
+			return fillDuties(s, headRoot, headSlot)
+		}
+		// The head has not crossed into the clock's epoch yet. The epoch transition computes the PTC of the requested
+		// epoch, and its dependent root (the last slot of the head's epoch) covers every input. The copy is advanced
+		// after the head-state view is released.
+		var err error
+		advanced, err = a.copyHeadStateForDuties(s)
+		advancedHeadRoot, advancedHeadSlot = headRoot, headSlot
+		advancedToSlot = (stateEpoch + 1) * a.beaconChainCfg.SlotsPerEpoch
+		return err
 	}); err != nil {
 		return nil, err
+	}
+	if advanced != nil {
+		if err := transition.DefaultMachine.ProcessSlots(advanced, advancedToSlot); err != nil {
+			return nil, err
+		}
+		if err := fillDuties(advanced, advancedHeadRoot, advancedHeadSlot); err != nil {
+			return nil, err
+		}
 	}
 
 	return newBeaconResponse(duties).
@@ -596,15 +627,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWrite
 	}
 
 	if len(failures) > 0 {
-		errResp := poolingError{
-			Code:     http.StatusBadRequest,
-			Message:  "some failures",
-			Failures: failures,
-		}
-		w.WriteHeader(http.StatusBadRequest)
-		if err := json.NewEncoder(w).Encode(errResp); err != nil {
-			a.logger.Warn("failed to encode response", "err", err)
-		}
+		a.writePoolingFailures(w, failures)
 		return
 	}
 	w.WriteHeader(http.StatusOK)

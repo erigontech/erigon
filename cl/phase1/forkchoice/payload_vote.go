@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
-	log "github.com/erigontech/erigon/common/log/v3"
 )
 
 // boolToVote converts a bool to the three-state vote representation:
@@ -232,13 +231,8 @@ func ParentPayloadStatusFromBids(parentBlock *cltypes.SignedBeaconBlock, block *
 
 	// Compare parent_block_hash with message_block_hash
 	if parentBlockHash == messageBlockHash {
-		log.Trace("[getParentPayloadStatus] FULL",
-			"slot", block.Slot, "parentBlockHash", parentBlockHash, "messageBlockHash", messageBlockHash)
 		return cltypes.PayloadStatusFull
 	}
-	log.Trace("[getParentPayloadStatus] EMPTY",
-		"slot", block.Slot, "parentBlockHash", parentBlockHash, "messageBlockHash", messageBlockHash,
-		"parentRoot", block.ParentRoot)
 	return cltypes.PayloadStatusEmpty
 }
 
