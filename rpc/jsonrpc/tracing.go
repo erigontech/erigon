@@ -527,7 +527,9 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 				return err
 			}
 
-			_ = ethapi.FinalizeCallTx(ibs, rules)
+			if err := ethapi.FinalizeCallTx(ibs, rules); err != nil {
+				return err
+			}
 
 		}
 		stream.WriteArrayEnd()
