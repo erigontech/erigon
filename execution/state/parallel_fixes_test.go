@@ -189,7 +189,7 @@ func TestTransientStorageResetInIBSReset(t *testing.T) {
 	defer ibs.Close()
 
 	testAddr := accounts.InternAddress([20]byte{0x42})
-	testKey := *uint256.NewInt(1)
+	testKey := TransientKey(*uint256.NewInt(1))
 
 	// Set transient storage
 	ibs.SetTransientState(testAddr, testKey, *uint256.NewInt(42))

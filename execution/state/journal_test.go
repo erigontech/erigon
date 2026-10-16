@@ -52,7 +52,7 @@ func TestJournalDirtySymmetry(t *testing.T) {
 		{"touchAccount", kindTouch, func(j *journal) { j.touchAccount(addr, false, val) }},
 		{"accessListAddAccountChange", kindAccessListAddAccount, func(j *journal) { j.accessListAddAccountChange(addr) }},
 		{"accessListAddSlotChange", kindAccessListAddSlot, func(j *journal) { j.accessListAddSlotChange(addr, key) }},
-		{"transientStorageChange", kindTransientStorage, func(j *journal) { j.transientStorageChange(addr, val, val) }},
+		{"transientStorageChange", kindTransientStorage, func(j *journal) { j.transientStorageChange(addr, TransientKey(val), val) }},
 	}
 
 	covered := map[entryKind]bool{}

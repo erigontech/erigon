@@ -98,7 +98,7 @@ type journalEntry struct {
 type journal struct {
 	dirties       map[accounts.Address]int // Dirty accounts and the number of changes
 	entries       []journalEntry           // Current changes tracked by the journal
-	transientKeys []uint256.Int            // kindTransientStorage keys, indexed by entry aux; too wide for journalEntry
+	transientKeys []TransientKey           // kindTransientStorage keys, indexed by entry aux; too wide for journalEntry
 	epoch         uint64                   // Moves on every revert, reset and unjournalled state change
 }
 
@@ -271,7 +271,7 @@ func (j *journal) accessListAddSlotChange(address accounts.Address, slot account
 	j.entries = append(j.entries, journalEntry{kind: kindAccessListAddSlot, account: address, key: slot})
 }
 
-func (j *journal) transientStorageChange(account accounts.Address, key uint256.Int, prevalue uint256.Int) {
+func (j *journal) transientStorageChange(account accounts.Address, key TransientKey, prevalue uint256.Int) {
 	j.entries = append(j.entries, journalEntry{kind: kindTransientStorage, account: account, value: prevalue, aux: uint64(len(j.transientKeys))})
 	j.transientKeys = append(j.transientKeys, key)
 }
