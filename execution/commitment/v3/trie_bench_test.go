@@ -52,15 +52,10 @@ func benchEntries(shape string, n int) []parityUpdate {
 	case "accounts", "storage":
 	case "whale":
 		seed = 424242
-	case "whale_mixed":
-		seed = 99
 	default:
 		shape = "storage"
 	}
-	c, err := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: shape, Count: n})
-	if err != nil {
-		panic(err)
-	}
+	c := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: shape, Count: n})
 	return parityEntries(c.Rounds[0])
 }
 

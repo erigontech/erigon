@@ -186,6 +186,15 @@ func (s *pbinWitnessStateless) ReadAccountDataForDebug(address accounts.Address)
 	return s.ReadAccountData(address)
 }
 
+func (s *pbinWitnessStateless) HasAccount(address common.Address) (bool, error) {
+	acc, err := s.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
+func (s *pbinWitnessStateless) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return s.ReadAccountData(accounts.InternAddress(address))
+}
+
 func (s *pbinWitnessStateless) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	addr := address.Value()
 	if account, ok := s.accountUpdates[addr]; ok {

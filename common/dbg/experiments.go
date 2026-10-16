@@ -50,7 +50,7 @@ var (
 	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
 	// CallNoMaterialize runs eth_call on the versioned state path, where reads
 	// go straight to the state reader instead of a resident stateObject.
-	CallNoMaterialize = EnvBool("CALL_NO_MATERIALIZE", false)
+	CallNoMaterialize = EnvBool("CALL_NO_MATERIALIZE", true)
 
 	MdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
 	MdbxNoSync       = EnvBool("MDBX_NO_FSYNC", false)
@@ -153,6 +153,7 @@ var (
 	// SharedDomains.changesetMu contention. Mid-block computes (step-edge
 	// checkpoints) still run alongside exec.
 	CommitmentAfterExec           = EnvBool("COMMITMENT_AFTER_EXEC", false)
+	CommitmentBranchCarry         = EnvBool("COMMITMENT_BRANCH_CARRY", false)
 	CaplinEfficientReorg          = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies             = EnvBool("USE_TX_DEPENDENCIES", false)
 	UseStateCache                 = EnvBool("USE_STATE_CACHE", true)

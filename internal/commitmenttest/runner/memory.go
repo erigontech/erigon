@@ -29,13 +29,9 @@ import (
 
 type ContextSpec struct {
 	Borrowed         bool
-	Owned            bool
 	ForbidStateReads bool
 	CaptureDeltas    bool
 	CheckPrevious    bool
-	BeforeRead       func(context.Context, []byte) error
-	ReadError        error
-	PutError         error
 }
 
 type counts struct {
@@ -51,7 +47,6 @@ type Memory struct {
 	store   *memoryStore
 	mu      sync.Mutex
 	scratch []byte
-	ctx     context.Context
 }
 
 type memoryStore struct {
@@ -63,36 +58,20 @@ type memoryStore struct {
 }
 
 func NewMemory(spec ContextSpec) *Memory {
-	return &Memory{spec: spec, ctx: context.Background(), store: &memoryStore{records: make(map[string][]byte), state: make(commitmenttest.State)}}
+	return &Memory{spec: spec, store: &memoryStore{records: make(map[string][]byte), state: make(commitmenttest.State)}}
 }
 
-func (m *Memory) Open(ctx context.Context) (commitment.PatriciaContext, func()) {
+func (m *Memory) Open(context.Context) (commitment.PatriciaContext, func()) {
 	m.store.Lock()
 	m.store.counts.Readers++
 	m.store.Unlock()
-	reader := &Memory{spec: m.spec, store: m.store, ctx: ctx}
-	if m.spec.Owned {
-		return ownedMemory{reader}, nil
-	}
-	return reader, nil
+	return &Memory{spec: m.spec, store: m.store}, nil
 }
 
-type ownedMemory struct{ *Memory }
-
-func (m ownedMemory) BranchOwned(key []byte) ([]byte, kv.Step, error) { return m.read(key) }
-
 func (m *Memory) read(key []byte) ([]byte, kv.Step, error) {
-	if m.spec.BeforeRead != nil {
-		if err := m.spec.BeforeRead(m.ctx, key); err != nil {
-			return nil, 0, err
-		}
-	}
 	m.store.Lock()
 	defer m.store.Unlock()
 	m.store.counts.BranchReads++
-	if m.spec.ReadError != nil {
-		return nil, 0, m.spec.ReadError
-	}
 	return m.store.records[string(key)], 0, nil
 }
 
@@ -116,9 +95,6 @@ func (m *Memory) Branch(key []byte) ([]byte, kv.Step, error) {
 func (m *Memory) PutBranch(key, data, prev []byte) error {
 	m.store.Lock()
 	defer m.store.Unlock()
-	if m.spec.PutError != nil {
-		return m.spec.PutError
-	}
 	if m.spec.CheckPrevious && !bytes.Equal(m.store.records[string(key)], prev) {
 		return fmt.Errorf("previous value mismatch for %x", key)
 	}

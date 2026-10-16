@@ -126,8 +126,7 @@ func TestDeltas(t *testing.T) {
 		t.Run(tc.name, tc.run)
 	}
 
-	generated, err := commitmenttest.Generate(commitmenttest.MathRand(0), commitmenttest.SequenceSpec{Kind: "storage", Count: 2200})
-	require.NoError(t, err)
+	generated := commitmenttest.Generate(commitmenttest.MathRand(0), commitmenttest.SequenceSpec{Kind: "storage", Count: 2200})
 	whale := commitmenttest.Key(commitmenttest.KeySpec{Kind: "bench-address", Size: 20}, 7)
 	account := commitmenttest.Account(commitmenttest.AccountSpec{Kind: "parity", Number: 7})
 	owner := commitmenttest.Op{Key: whale, Account: &account}

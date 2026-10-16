@@ -127,12 +127,13 @@ func TestOnBlockResetsCachedHeadAfterNewPayload(t *testing.T) {
 	awaitSignal(t, elEntered, "NewPayload to start")
 
 	headCached := make(chan struct{})
+	var headErr error
 	go func() {
 		defer close(headCached)
-		_, _, err := store.GetHead(nil)
-		require.NoError(t, err)
+		_, _, headErr = store.GetHead(nil)
 	}()
 	awaitSignal(t, headCached, "GetHead to populate the head cache")
+	require.NoError(t, headErr)
 
 	store.mu.RLock()
 	cachedHead := store.headHash
@@ -514,6 +515,23 @@ func TestOnBlockRejectsBlockThatWentStaleWaitingForAdmission(t *testing.T) {
 	})
 }
 
+func TestOnBlockRejectsPayloadInvalidatedDuringValidation(t *testing.T) {
+	engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusNotValidated, nil)
+	store, block := buildExAnteStorePendingLast(t, engine)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() { done <- store.OnBlock(context.Background(), block, true, true, false) }()
+	awaitSignal(t, elEntered, "NewPayload to start")
+	store.MarkPayloadInvalid(blockRoot, block.Block.Body.ExecutionPayload.BlockHash)
+	close(releaseEL)
+
+	err = awaitOnBlock(t, done)
+	require.ErrorIs(t, err, ErrInvalidExecutionPayloadEnvelope)
+	require.ErrorIs(t, err, ErrBlockInvalid)
+}
+
 // Invalid is terminal. A root invalidated while the EL call was in flight must not be
 // reported as validated to a queued caller, nor have its validated marker revived.
 func TestNewPayloadKeepsInvalidAheadOfValidated(t *testing.T) {
@@ -685,8 +703,9 @@ func TestOnBlockMalformedHashIsNotCachedAgainstTheClaimedHash(t *testing.T) {
 	require.NotEqual(t, claimed, derivedHash, "the payload must not name its own hash")
 
 	for range 2 {
-		require.ErrorContains(t, store.OnBlock(context.Background(), block, true, true, false),
-			"invalid execution payload hash")
+		err = store.OnBlock(context.Background(), block, true, true, false)
+		require.ErrorContains(t, err, "invalid execution payload hash")
+		require.ErrorIs(t, err, ErrBlockInvalid)
 	}
 
 	_, cached := store.GetRecentExecutionPayloadStatus(claimed)
@@ -713,13 +732,14 @@ func TestNewPayloadDoesNotWaitForTheLockWhileHoldingTheToken(t *testing.T) {
 	store.payloadValidationAdmission <- struct{}{}
 
 	var checked atomic.Bool
+	blockRoot := mustRoot(t, block)
 	locked, done := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(done)
 		store.mu.Lock()
 		close(locked)
 		_, _, _ = store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
-			mustRoot(t, block), func() error {
+			blockRoot, func() error {
 				checked.Store(true)
 				return nil
 			}, noDerivedHash, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)

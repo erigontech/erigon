@@ -100,11 +100,21 @@ func (p *partitioner) add(hashedKey []byte, update *commitment.Update) error {
 
 func (p *partitioner) done() (storage []storageTask, accounts []accountEntry) {
 	storage, accounts = p.storage, p.accounts
+	next := 0
 	for i := range accounts {
-		if accounts[i].storageDirty || accounts[i].update == nil || !accounts[i].update.Deleted() {
+		task := -1
+		if accounts[i].storageDirty {
+			task, next = next, next+1
+		}
+		if accounts[i].update == nil || !accounts[i].update.Deleted() {
 			continue
 		}
-		storage = append(storage, storageTask{addrHash: hashAddressPath(accounts[i].hashedKey), wipe: true})
+		wipe := storageTask{addrHash: hashAddressPath(accounts[i].hashedKey), wipe: true}
+		if task >= 0 {
+			storage[task] = wipe
+			continue
+		}
+		storage = append(storage, wipe)
 	}
 	return storage, accounts
 }

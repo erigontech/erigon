@@ -407,8 +407,8 @@ func (a *Aggregator) ForTestReferencesInCommitmentBranches(domain kv.Domain, v b
 func (a *Aggregator) referencesInCommitmentBranches() bool {
 	a.commitmentRefsMu.RLock()
 	defer a.commitmentRefsMu.RUnlock()
-	cd := a.d[kv.CommitmentDomain]
-	return cd != nil && cd.ReferencesInCommitmentBranches
+	d := a.d[kv.CommitmentDomain]
+	return d != nil && d.ReferencesInCommitmentBranches && !d.CommitmentV3Records
 }
 
 // applyReferencesInCommitmentBranches stores the resolved flag pre-configure (ConfigureDomains
@@ -3002,6 +3002,14 @@ func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx)
 	if name != kv.CommitmentDomain {
 		return at.d[name].GetAsOf(k, ts, tx)
 	}
+	if !at.a.d[kv.CommitmentDomain].CommitmentV3Records {
+		v, ok, err = at.d[name].GetAsOf(k, ts, tx)
+		if err != nil || ok {
+			return v, ok, err
+		}
+		v, _, ok, err = at.GetLatest(name, k, tx, kv.GetLatestOptions{})
+		return v, ok, err
+	}
 	v, ok, err = at.d[name].ht.HistorySeek(k, ts, tx)
 	if err != nil {
 		return nil, false, err
@@ -3016,12 +3024,12 @@ func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx)
 	return v, ok, err
 }
 
-func (at *AggregatorRoTx) cacheLatestBranch(domain kv.Domain, enabled, owned bool, k, v []byte, step kv.Step, txNum uint64) {
+func (at *AggregatorRoTx) cacheLatestBranch(domain kv.Domain, enabled bool, k, v []byte, step kv.Step, txNum uint64, tx kv.Tx) {
 	if !enabled || len(v) == 0 {
 		return
 	}
 	if branchCache := at.BranchCache(domain); branchCache != nil {
-		branchCache.TryPut(k, v, uint64(step), txNum, owned)
+		branchCache.Fill(k, v, uint64(step), txNum, tx.ViewID())
 	}
 }
 
@@ -3043,7 +3051,7 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 		if opts.Owned() {
 			v = bytes.Clone(v)
 		}
-		at.cacheLatestBranch(domain, cacheBranch, opts.Owned(), k, v, step, step.LastTxNum(at.StepSize()))
+		at.cacheLatestBranch(domain, cacheBranch, k, v, step, step.LastTxNum(at.StepSize()), tx)
 		return v, step, true, nil
 	}
 	var found bool
@@ -3062,7 +3070,7 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 	}
 	step = kv.Step(fileEndTxNum / at.StepSize())
 	if err == nil {
-		at.cacheLatestBranch(domain, cacheBranch, opts.Owned(), k, v, step, fileEndTxNum)
+		at.cacheLatestBranch(domain, cacheBranch, k, v, step, fileEndTxNum, tx)
 	}
 	return v, step, found, err
 }

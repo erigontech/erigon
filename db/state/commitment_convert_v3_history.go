@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/version"
@@ -251,59 +252,29 @@ func appendUnescapedKey(dst, escaped []byte) ([]byte, error) {
 	return nil, fmt.Errorf("escaped key %x has no terminator", escaped)
 }
 
-func seekFileSeq(iit *InvertedIndexRoTx, i int, key []byte, seq *multiencseq.SequenceReader) bool {
-	hi, lo := iit.hashKey(key)
-	offset, ok := iit.statelessIdxReader(i).TwoLayerLookupByHash(hi, lo)
-	if !ok {
-		return false
-	}
-	g := iit.statelessGetter(i)
-	g.Reset(offset)
-	if g.MatchCmp(key) != 0 {
-		return false
-	}
-	encoded, _ := g.Next(nil)
-	seq.Reset(iit.files[i].startTxNum, encoded)
-	return true
-}
-
 func lastWriteBefore(iit *InvertedIndexRoTx, key []byte, txNum uint64) (uint64, bool, error) {
-	var seq multiencseq.SequenceReader
-	var it multiencseq.SequenceIterator
-	for i, f := range slices.Backward(iit.files) {
-		if f.startTxNum >= txNum || !seekFileSeq(iit, i, key, &seq) {
-			continue
-		}
-		if f.endTxNum <= txNum {
-			return seq.Max(), true, nil
-		}
-		var last uint64
-		found := false
-		for it.Reset(&seq, 0); it.HasNext(); {
-			n, err := it.Next()
-			if err != nil {
-				return 0, false, err
-			}
-			if n >= txNum {
-				break
-			}
-			last, found = n, true
-		}
-		if found {
-			return last, true, nil
-		}
+	if txNum == 0 {
+		return 0, false, nil
 	}
-	return 0, false, nil
+	it, err := iit.iterateRangeOnFiles(key, int(txNum)-1, -1, order.Desc, 1)
+	if err != nil {
+		return 0, false, err
+	}
+	defer it.Close()
+	if !it.HasNext() {
+		return 0, false, nil
+	}
+	n, err := it.Next()
+	return n, err == nil, err
 }
 
 func appendFileTxNums(dst []uint64, iit *InvertedIndexRoTx, from, to uint64, key []byte) ([]uint64, error) {
-	i := slices.IndexFunc(iit.files, func(f visibleFile) bool { return f.startTxNum == from && f.endTxNum == to })
-	var seq multiencseq.SequenceReader
-	if i < 0 || !seekFileSeq(iit, i, key, &seq) {
-		return dst, nil
+	it, err := iit.iterateRangeOnFiles(key, int(from), int(to), order.Asc, -1)
+	if err != nil {
+		return dst, err
 	}
-	var it multiencseq.SequenceIterator
-	for it.Reset(&seq, 0); it.HasNext(); {
+	defer it.Close()
+	for it.HasNext() {
 		txNum, err := it.Next()
 		if err != nil {
 			return dst, err
@@ -638,6 +609,14 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 				}
 				return root, nil
 			}
+			var reachTxNum uint64
+			reach := &legacyReach{keysV2: keysV2, read: func(key []byte) ([]byte, error) {
+				return legacyCommitmentAsOf(wdt, key, reachTxNum)
+			}}
+			reachableAsOf := func(legacyKey, value []byte, txNum uint64) (bool, error) {
+				reachTxNum, reach.chain = txNum, reach.chain[:0]
+				return reach.reachable(legacyKey, value)
+			}
 			emitBoundary := func(txNum uint64, cur, next *historyVersion) error {
 				for _, e := range cur.ents {
 					if e.kind == v3.LegacySynthesized {
@@ -809,7 +788,15 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 						if err != nil {
 							return err
 						}
-						if err := convert(legacyKey, value(i), leavesAsOf(txNum), &cur); err != nil {
+						before := value(i)
+						live, err := reachableAsOf(legacyKey, before, txNum)
+						if err != nil {
+							return err
+						}
+						if !live {
+							before = nil
+						}
+						if err := convert(legacyKey, before, leavesAsOf(txNum), &cur); err != nil {
 							return err
 						}
 						if err := convert(legacyKey, next, txNum+1, &nextVersion); err != nil {
@@ -818,7 +805,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 						if err := emitBoundary(txNum, &cur, &nextVersion); err != nil {
 							return err
 						}
-						if err := childrenChanged(prefix, value(i), next, txNum); err != nil {
+						if err := childrenChanged(prefix, before, next, txNum); err != nil {
 							return err
 						}
 					}

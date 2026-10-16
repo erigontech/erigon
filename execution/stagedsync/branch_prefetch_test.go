@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"hash/maphash"
 	"runtime/debug"
 	"sort"
 	"testing"
@@ -44,13 +43,11 @@ import (
 )
 
 func TestBranchPrefetchRejectsChangedRecordBytes(t *testing.T) {
-	p := &branchPrefetcher{seed: maphash.MakeSeed()}
-	for i := range p.shards {
-		p.shards[i].records = make(map[string]prefetchedRecord)
-	}
+	p := newPrefetchRecords()
 	key := []byte{0x08}
 	data := []byte{0x01, 0x02}
-	p.shard(key).records[prefetchRecordKey(kv.CommitmentDomain, key)] = prefetchedRecord{
+	rk := prefetchRecordKey(kv.CommitmentDomain, key)
+	p.shard(rk).records[rk] = prefetchedRecord{
 		data: bytes.Clone(data),
 		refs: &commitment.LeafRefs{Mask: 1, Refs: make([][32]byte, 1)},
 	}
@@ -127,10 +124,8 @@ func TestBranchPrefetchFoldRejectsStaleRecordRefs(t *testing.T) {
 }
 
 func newTestBranchPrefetcher() *branchPrefetcher {
-	p := &branchPrefetcher{seed: maphash.MakeSeed(), bin: map[kv.Domain]bool{kv.CommitmentDomain: true}}
-	for i := range p.shards {
-		p.shards[i].records = make(map[string]prefetchedRecord)
-	}
+	p := newPrefetchRecords()
+	p.bin = map[kv.Domain]bool{kv.CommitmentDomain: true}
 	return p
 }
 
@@ -183,10 +178,7 @@ func branchPrefetchValue(seed byte) [eip8297.ValueLength]byte {
 
 func TestPrefetchedBranchesYieldToMemBatch(t *testing.T) {
 	_, tx, doms := setupStepTest(t)
-	p := &branchPrefetcher{seed: maphash.MakeSeed()}
-	for i := range p.shards {
-		p.shards[i].records = make(map[string]prefetchedRecord)
-	}
+	p := newPrefetchRecords()
 	r := &asOfStateReader{sd: doms, roTx: tx, commitmentDomain: kv.CommitmentDomain, prefetched: p}
 
 	flushed, untouched, absent := []byte{0x40, 0x12, 0x02}, []byte{0x40, 0x34, 0x02}, []byte{0x40, 0x56, 0x02}
@@ -219,6 +211,131 @@ func TestBranchPrefetcherCountsDroppedAndDrained(t *testing.T) {
 	p.pause()
 	p.resume()
 	require.Equal(t, uint64(1), p.drained.Load(), "an item still queued when compute starts is drained")
+}
+
+func TestBranchPrefetcherChunkStopsOnPause(t *testing.T) {
+	p := &branchPrefetcher{work: make(chan prefetchItem, 2*branchPrefetchPerTx)}
+	for i := range 2 * branchPrefetchPerTx {
+		p.add(prefetchItem{account: common.Hash{byte(i), byte(i >> 8)}})
+	}
+	touch := func(prefetchItem) {}
+	require.Equal(t, branchPrefetchPerTx, p.walkChunk(<-p.work, touch), "an unpaused worker walks a full chunk")
+	p.pausing.Store(true)
+	require.Equal(t, 1, p.walkChunk(<-p.work, touch), "a pending pause stops the chunk after the item in hand")
+	require.Len(t, p.work, branchPrefetchPerTx-1)
+}
+
+func TestParentRecordsOnlyForOneVerifiedChildOfTheReadHead(t *testing.T) {
+	p := newPrefetchRecords()
+	p.put([]byte{0x12}, []byte("parent-record"), 4)
+	head := common.Hash{9}
+	child := commitTarget{blockNum: 10, blockHash: common.Hash{10}, parentHash: head}
+	calc := func() *commitmentCalculator {
+		return &commitmentCalculator{state: &calcState{branchPrefetch: p}, readAtNum: 9, readAtHash: head}
+	}
+
+	cc := calc()
+	require.Nil(t, cc.parentRecords(), "nothing verified")
+	cc.noteVerified(child, nil)
+	r := cc.parentRecords()
+	require.NotNil(t, r)
+	require.Equal(t, child.blockHash, r.BlockHash)
+	data, step, ok := r.Get([]byte{0x12})
+	require.True(t, ok)
+	require.Equal(t, []byte("parent-record"), data)
+	require.Equal(t, kv.Step(4), step)
+
+	cc = calc()
+	cc.noteVerified(commitTarget{blockNum: 10, blockHash: common.Hash{10}, parentHash: common.Hash{8}}, nil)
+	require.Nil(t, cc.parentRecords(), "a block whose parent is not the head the records were read at")
+
+	cc = calc()
+	cc.noteVerified(child, nil)
+	cc.noteVerified(commitTarget{blockNum: 11, blockHash: common.Hash{11}, parentHash: child.blockHash}, nil)
+	require.Nil(t, cc.parentRecords(), "a calculator that verified two blocks")
+}
+
+type carryDB struct{ kv.TemporalRoDB }
+
+func TestBranchCarryAdoptsVerifiedDeltasOnlyAtItsHead(t *testing.T) {
+	t.Cleanup(dropBranchCarry)
+	db := &carryDB{}
+	p := newPrefetchRecords()
+	p.block = 10
+	p.put([]byte{0x01}, []byte("kept"), 3)
+	p.put([]byte{0x02}, []byte("old"), 3)
+	head := commitTarget{blockNum: 10, blockHash: common.Hash{10}}
+	deltas := [][]commitment.BranchDelta{{{Key: []byte{0x02}, Data: []byte("new")}, {Key: []byte{0x03}, Data: []byte("born")}}}
+
+	storeBranchCarry(db, p, head, deltas, 5)
+	require.Nil(t, takeBranchCarry(db, 10, common.Hash{9}), "another block at the carry's height")
+	require.Nil(t, takeBranchCarry(db, 10, common.Hash{10}), "a mismatch drops the carry")
+
+	storeBranchCarry(db, p, head, deltas, 5)
+	require.Nil(t, takeBranchCarry(&carryDB{}, 10, common.Hash{10}), "another database")
+
+	storeBranchCarry(db, p, head, deltas, 5)
+	got := takeBranchCarry(db, 10, common.Hash{10})
+	require.Same(t, p, got)
+	want := map[byte]string{0x01: "kept", 0x02: "new", 0x03: "born"}
+	for _, stage := range []string{"attached", "merged"} {
+		for key, w := range want {
+			data, _, ok := got.get([]byte{key})
+			require.True(t, ok, stage)
+			require.Equal(t, w, string(data), stage)
+		}
+		_, step, _ := got.get([]byte{0x02})
+		require.Equal(t, kv.Step(5), step, stage)
+		got.mergeOverlay()
+	}
+	require.Nil(t, got.overlay.Load())
+	require.Nil(t, takeBranchCarry(db, 10, common.Hash{10}), "a carry is taken once")
+}
+
+func TestBranchCarryEvictsRecordsOlderThanTheWindow(t *testing.T) {
+	p := newPrefetchRecords()
+	p.block = 1
+	p.put([]byte{0x01}, []byte("stale"), 0)
+	p.put([]byte{0x03}, []byte("refreshed"), 0)
+	p.block = 40
+	p.put([]byte{0x02}, []byte("recent"), 0)
+	p.put([]byte{0x03}, []byte("refreshed"), 0)
+	before := p.bytes.Load()
+
+	ov := map[string]prefetchedRecord{}
+	p.overlay.Store(&ov)
+	p.overlayBlock = 1 + branchCarryBlocks
+	p.mergeOverlay()
+
+	_, _, ok := p.get([]byte{0x01})
+	require.False(t, ok, "a record last filled more than the window ago is evicted")
+	for _, key := range []byte{0x02, 0x03} {
+		_, _, ok := p.get([]byte{key})
+		require.True(t, ok)
+	}
+	require.Equal(t, before-int64(1+len("stale")), p.bytes.Load())
+}
+
+func TestParentRecordsStopServingOnceTheCarryMovesOn(t *testing.T) {
+	p := newPrefetchRecords()
+	key := []byte{0x12}
+	p.put(key, []byte("parent"), 1)
+	head := common.Hash{9}
+	cc := &commitmentCalculator{state: &calcState{branchPrefetch: p}, readAtNum: 9, readAtHash: head}
+	cc.noteVerified(commitTarget{blockNum: 10, blockHash: common.Hash{10}, parentHash: head}, nil)
+	r := cc.parentRecords()
+	data, _, ok := r.Get(key)
+	require.True(t, ok)
+	require.Equal(t, []byte("parent"), data)
+
+	ov := overlayOf([][]commitment.BranchDelta{{{Key: key, Data: []byte("child")}}}, 10, 2)
+	p.overlay.Store(&ov)
+	data, _, ok = r.Get(key)
+	require.True(t, ok)
+	require.Equal(t, []byte("parent"), data, "an attached overlay does not reach block 10's witness")
+	p.mergeOverlay()
+	_, _, ok = r.Get(key)
+	require.False(t, ok, "records handed to block 10's witness stop serving once the carry holds block 10's own writes")
 }
 
 func TestHandleBlockRequestQueuesBALWrites(t *testing.T) {
@@ -266,15 +383,9 @@ func TestHandleBlockRequestQueuesBinaryBALKeys(t *testing.T) {
 	dbg.IgnoreBAL = false
 
 	_, tx, _ := setupStepTest(t)
-	p := &branchPrefetcher{
-		work:    make(chan prefetchItem, 16),
-		seed:    maphash.MakeSeed(),
-		domains: []kv.Domain{kv.CommitmentDomain},
-		bin:     map[kv.Domain]bool{kv.CommitmentDomain: true},
-	}
-	for i := range p.shards {
-		p.shards[i].records = make(map[string]prefetchedRecord)
-	}
+	p := newPrefetchRecords()
+	p.work = make(chan prefetchItem, 16)
+	p.bin = map[kv.Domain]bool{kv.CommitmentDomain: true}
 	cc := &commitmentCalculator{
 		state:         &calcState{branchPrefetch: p},
 		pending:       map[uint64]*pendingBlock{},
@@ -355,14 +466,8 @@ func TestComputeAheadReadsPrefetchedBranches(t *testing.T) {
 
 func TestBranchPrefetchUsesBinaryTreeKeys(t *testing.T) {
 	_, tx, _ := setupStepTest(t)
-	p := &branchPrefetcher{
-		seed:    maphash.MakeSeed(),
-		domains: []kv.Domain{kv.CommitmentDomain},
-		bin:     map[kv.Domain]bool{kv.CommitmentDomain: true},
-	}
-	for i := range p.shards {
-		p.shards[i].records = make(map[string]prefetchedRecord)
-	}
+	p := newPrefetchRecords()
+	p.bin = map[kv.Domain]bool{kv.CommitmentDomain: true}
 	address := [20]byte{0x46}
 	slot := [32]byte{0x80}
 	p.touch(tx, prefetchItem{address: address, plainSlot: slot, storage: true})

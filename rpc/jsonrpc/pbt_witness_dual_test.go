@@ -169,7 +169,7 @@ func TestPBinHeadCaptureWithoutCommitmentHistory(t *testing.T) {
 	blockNumber := rpc.BlockNumber(5)
 	info, err := api.resolveWitnessBlock(t.Context(), tx, rpc.BlockNumberOrHashWithNumber(blockNumber))
 	require.NoError(t, err)
-	result, err := api.buildWitnessResultHeadCapture(t.Context(), pbinWitnessWithoutCommitmentHistory{TemporalTx: tx}, pin.tx, info, witnessModeLegacy, witnessTriePBT)
+	result, err := api.buildWitnessResultHeadCapture(t.Context(), pbinWitnessWithoutCommitmentHistory{TemporalTx: tx}, pin, nil, info, witnessModeLegacy, witnessTriePBT)
 	require.NoError(t, err)
 	require.NotEmpty(t, result.State)
 }

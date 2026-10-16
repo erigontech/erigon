@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
@@ -56,6 +57,7 @@ var (
 	errLegacyBranch   = errors.New("commitment v3: invalid legacy branch")
 	errLegacyValue    = errors.New("commitment v3: legacy leaf value is missing")
 	errLegacyState    = errors.New("commitment v3: invalid legacy state")
+	errLegacyLeafRoot = errors.New("the trie root is a single leaf, which convert does not support: rebuild commitment with COMMITMENT_V3=true instead")
 	ErrLegacyConflict = errors.New("commitment v3: conflicting legacy conversions")
 
 	errStaleStorageRecord = errors.New("commitment v3: legacy storage record references a deleted slot")
@@ -97,12 +99,7 @@ func (c *LegacyConverter) Convert(legacyKey, value, prev []byte, emit LegacyEmit
 	if len(prefix) >= 128 {
 		return fmt.Errorf("%w: prefix of %d nibbles", errLegacyBranch, len(prefix))
 	}
-	plane, path, ownerHash := byte(planeAccount), prefix, []byte(nil)
-	var addrHash [32]byte
-	if len(prefix) >= 64 {
-		plane, path, ownerHash = planeStorage, prefix[64:], packPath(prefix[:64], addrHash[:0])
-	}
-	c.key = nodeKey(plane, ownerHash, path, c.key[:0])
+	plane, path, addrHash := c.setKey(prefix)
 
 	if c.incremental && plane == planeAccount && len(prev) != 0 {
 		if err := commitment.BranchData(prev).ForEachCell(func(_ int, cell commitment.BranchCell) error {
@@ -182,6 +179,25 @@ func (c *LegacyConverter) Convert(legacyKey, value, prev []byte, emit LegacyEmit
 	}
 	c.out = encodeRecord(n, len(path), c.out[:0])
 	return emit(c.key, c.out, LegacyDirect)
+}
+
+func (c *LegacyConverter) Tombstone(legacyKey []byte, emit LegacyEmitFunc) error {
+	prefix, err := c.decodePrefix(legacyKey)
+	if err != nil {
+		return err
+	}
+	c.setKey(prefix)
+	return emit(c.key, nil, LegacyTombstone)
+}
+
+func (c *LegacyConverter) setKey(prefix []byte) (plane byte, path []byte, addrHash [32]byte) {
+	plane, path = planeAccount, prefix
+	var ownerHash []byte
+	if len(prefix) >= 64 {
+		plane, path, ownerHash = planeStorage, prefix[64:], packPath(prefix[:64], addrHash[:0])
+	}
+	c.key = nodeKey(plane, ownerHash, path, c.key[:0])
+	return plane, path, addrHash
 }
 
 func (c *LegacyConverter) decodePrefix(key []byte) ([]byte, error) {
@@ -416,7 +432,7 @@ func ConvertLegacyState(value []byte) ([]byte, error) {
 	}
 	root := empty.RootHash[:]
 	if len(trieState) != 0 {
-		hph := commitment.NewHexPatriciaHashed(length.Addr, nil, commitment.DefaultTrieConfig())
+		hph := commitment.NewHexPatriciaHashed(length.Addr, leafRootContext{}, commitment.DefaultTrieConfig())
 		defer hph.Release()
 		if err := hph.SetState(trieState); err != nil {
 			return nil, fmt.Errorf("%w: %w", errLegacyState, err)
@@ -427,6 +443,24 @@ func ConvertLegacyState(value []byte) ([]byte, error) {
 		}
 	}
 	return commitment.EncodeCommitmentV3State(root, blockNum, txNum, nil)
+}
+
+type leafRootContext struct{}
+
+func (leafRootContext) Branch([]byte) ([]byte, kv.Step, error) {
+	return nil, 0, errLegacyLeafRoot
+}
+
+func (leafRootContext) PutBranch(_, _, _ []byte) error {
+	return errLegacyLeafRoot
+}
+
+func (leafRootContext) Account([]byte) (*commitment.Update, error) {
+	return nil, errLegacyLeafRoot
+}
+
+func (leafRootContext) Storage([]byte) (*commitment.Update, error) {
+	return nil, errLegacyLeafRoot
 }
 
 func checkNibbles(nibbles []byte) error {

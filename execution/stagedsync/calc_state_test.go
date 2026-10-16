@@ -42,7 +42,7 @@ import (
 func newTestCalcState() *calcState {
 	return &calcState{
 		accounts:     make(map[accounts.Address]*calcAccountState),
-		storageState: make(map[accounts.Address]*calcStorage),
+		storageState: make(map[accounts.Address]map[accounts.StorageKey]uint256.Int),
 		storageDirty: make(map[accounts.Address]map[accounts.StorageKey]bool),
 		codeValues:   make(map[accounts.Address][]byte),
 		wiped:        make(map[accounts.Address]struct{}),
@@ -395,6 +395,15 @@ type preBlockReader struct {
 	acc  *accounts.Account
 }
 
+func (r *preBlockReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (r *preBlockReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
 func (r *preBlockReader) ReadAccountData(a accounts.Address) (*accounts.Account, error) {
 	if a == r.addr {
 		return r.acc, nil
@@ -572,10 +581,10 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 	// load-bearing question is whether Normalize appends the
 	// StoragePath=0 entries needed to overwrite these values.
 	cs := newTestCalcState()
-	cs.storageState[addr] = &calcStorage{slots: map[accounts.StorageKey]calcSlot{
-		slot1: {value: preSDValue1},
-		slot2: {value: preSDValue2},
-	}}
+	cs.storageState[addr] = map[accounts.StorageKey]uint256.Int{
+		slot1: preSDValue1,
+		slot2: preSDValue2,
+	}
 
 	// Populate vm with StoragePath entries for both slots (this is what
 	// IBS' versionWritten does when EVM SLOAD/SSTORE touches a slot).
@@ -1050,6 +1059,7 @@ func TestFlushToUpdates_MidBlockFlushKeepsTheListUntilReset(t *testing.T) {
 
 func TestFlushToFeedCarriesWhatFlushToUpdatesEmits(t *testing.T) {
 	cs := newTestCalcState()
+	cs.hashes = newCalcHashes()
 	a := accounts.InternAddress(common.Address{0xa1})
 	b := accounts.InternAddress(common.Address{0xb2})
 	c := accounts.InternAddress(common.Address{0xc3})
@@ -1071,8 +1081,13 @@ func TestFlushToFeedCarriesWhatFlushToUpdatesEmits(t *testing.T) {
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
+	require.Nil(t, cs.deleted, "a flush to updates leaves the deletions unknown")
 	want := map[string]commitment.Update{}
+	wantDeleted := map[string]struct{}{}
 	for plainKey, u := range emittedUpdates(t, updates) {
+		if u.Deleted() {
+			wantDeleted[plainKey] = struct{}{}
+		}
 		hash := crypto.Keccak256([]byte(plainKey)[:20])
 		if len(plainKey) > 20 {
 			hash = append(hash, crypto.Keccak256([]byte(plainKey)[20:])...)
@@ -1104,6 +1119,14 @@ func TestFlushToFeedCarriesWhatFlushToUpdatesEmits(t *testing.T) {
 	require.Len(t, distinct, len(feed.Accounts))
 	require.Equal(t, len(want), feed.Keys)
 	require.Equal(t, want, got)
+
+	gotDeleted := map[string]struct{}{}
+	for _, key := range cs.deleted {
+		gotDeleted[string(key)] = struct{}{}
+	}
+	require.NotEmpty(t, wantDeleted)
+	require.Len(t, cs.deleted, len(wantDeleted))
+	require.Equal(t, wantDeleted, gotDeleted, "the feed's deleted keys are the deletions FlushToUpdates emits")
 }
 
 func sdWrites(addr accounts.Address, postSDBalance uint256.Int, eip8246 bool) *state.WriteSet {

@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/version"
 )
 
 func TestCommitmentReferencesDefault(t *testing.T) {
@@ -47,6 +48,16 @@ func TestEnableHistoricalCommitmentIncludesBinaryDomain(t *testing.T) {
 		cfg := Schema.GetDomainCfg(domain)
 		require.False(t, cfg.Hist.HistoryDisabled, domain.String())
 		require.False(t, cfg.Hist.SnapshotsDisabled, domain.String())
+	}
+}
+
+func TestCommitmentV3RejectsLegacyFiles(t *testing.T) {
+	cfg := Schema.CommitmentDomain
+	EnableCommitmentV3Records(&cfg)
+	for _, v := range []version.Versions{cfg.FileVersion.DataKV, cfg.Hist.FileVersion.DataV} {
+		assert.False(t, v.Supports(version.V2_0))
+		assert.False(t, v.Supports(version.Version{Major: 2, Minor: 2}))
+		assert.True(t, v.Supports(version.V3_0))
 	}
 }
 

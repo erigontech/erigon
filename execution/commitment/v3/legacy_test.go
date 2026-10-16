@@ -28,6 +28,7 @@ import (
 	keccak "github.com/erigontech/fastkeccak"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -317,4 +318,23 @@ func TestConversion(t *testing.T) {
 		w.written[storageRootKey] = stale
 		require.Equal(t, root, w.convert(t, nil, false, map[string][]byte{}))
 	})
+}
+
+func TestConvertLegacyStateRejectsLeafRoot(t *testing.T) {
+	for _, slots := range []int{0, 3} {
+		w := newLegacyWorld()
+		addr := common.Address{19: 7}
+		w.setAccount(addr[:], 1, 1000)
+		for i := range slots {
+			slot := common.Hash{0: byte(i + 1)}
+			w.setSlot(addr[:], slot[:], uint64(i+5))
+		}
+		w.process(t)
+		trieState, err := w.trie.EncodeCurrentState(nil)
+		require.NoError(t, err)
+		legacy := binary.BigEndian.AppendUint64(binary.BigEndian.AppendUint64(nil, 22), 11)
+		legacy = append(binary.BigEndian.AppendUint16(legacy, uint16(len(trieState))), trieState...)
+		_, err = ConvertLegacyState(legacy)
+		require.ErrorIs(t, err, errLegacyLeafRoot, "slots=%d", slots)
+	}
 }

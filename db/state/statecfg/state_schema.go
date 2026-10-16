@@ -444,10 +444,10 @@ const CommitmentV3Accessors = AccessorBTree | AccessorExistence
 func EnableCommitmentV3Records(c *DomainCfg) {
 	c.CommitmentV3Records = true
 	c.Accessors = CommitmentV3Accessors
-	c.FileVersion.DataKV.Current = version.V3_0
+	c.FileVersion.DataKV = version.Versions{Current: version.V3_0, MinSupported: version.V3_0}
 	c.FileVersion.AccessorBT = version.Versions{Current: version.V2_0, MinSupported: version.V1_0}
 	c.FileVersion.AccessorKVEI = version.Versions{Current: version.V1_2, MinSupported: version.V1_0}
-	c.Hist.FileVersion.DataV.Current = version.V3_0
+	c.Hist.FileVersion.DataV = version.Versions{Current: version.V3_0, MinSupported: version.V3_0}
 }
 
 func ConfigureCommitmentV3Records(enabled bool) {

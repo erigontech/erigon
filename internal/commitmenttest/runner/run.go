@@ -86,7 +86,7 @@ func execute(tb testing.TB, c commitmenttest.Case, spec RunSpec, open openFunc) 
 	}()
 	for i, ops := range c.Rounds {
 		state.Apply(ops)
-		label := fmt.Sprintf("case=%s seed=%+v engine=%s round=%d", c.ID, c.Seed, spec.Name, i)
+		label := fmt.Sprintf("case=%s seed=%d engine=%s round=%d", c.ID, c.Seed, spec.Name, i)
 		if spec.Fresh && engine != nil {
 			engine.Release()
 			engine = nil
@@ -168,12 +168,11 @@ func reload(tb testing.TB, engine commitment.Trie, spec RunSpec, open openFunc, 
 
 func check(tb testing.TB, c commitmenttest.Case, got observation) {
 	tb.Helper()
-	require.True(tb, c.Assertions.ProcessNoError, "case=%s must declare its Process no-error assertion", c.ID)
-	require.Len(tb, got.Rounds, len(c.Rounds), "case=%s seed=%+v engine=%s", c.ID, c.Seed, got.Name)
+	require.Len(tb, got.Rounds, len(c.Rounds), "case=%s seed=%d engine=%s", c.ID, c.Seed, got.Name)
 	checkStateReads := len(c.Assertions.StateReadEngines) == 0 || slices.Contains(c.Assertions.StateReadEngines, got.Name)
 	for i := range got.Rounds {
 		round := &got.Rounds[i]
-		label := fmt.Sprintf("case=%s seed=%+v engine=%s round=%d", c.ID, c.Seed, got.Name, i)
+		label := fmt.Sprintf("case=%s seed=%d engine=%s round=%d", c.ID, c.Seed, got.Name, i)
 		require.NoError(tb, round.Err, label)
 		if checkStateReads && c.Assertions.ZeroAccountReads {
 			require.Zero(tb, round.Counts.AccountReads, label)
@@ -204,9 +203,9 @@ func Compare(tb testing.TB, c commitmenttest.Case, runs []RunSpec, open openFunc
 		if i != 0 {
 			for round := range c.Rounds {
 				if spec.Fresh && !bytes.Equal(observations[0].Rounds[round].Root, got.Rounds[round].Root) {
-					tb.Fatalf("case=%s seed=%+v round=%d: v3 root differs from a trie rebuilt from the same state\n v3 %x\n fresh %x\nhistory: %+v", c.ID, c.Seed, round, observations[0].Rounds[round].Root, got.Rounds[round].Root, c.Rounds[:round+1])
+					tb.Fatalf("case=%s seed=%d round=%d: v3 root differs from a trie rebuilt from the same state\n v3 %x\n fresh %x\nhistory: %+v", c.ID, c.Seed, round, observations[0].Rounds[round].Root, got.Rounds[round].Root, c.Rounds[:round+1])
 				}
-				require.Equal(tb, observations[0].Rounds[round].Root, got.Rounds[round].Root, "case=%s seed=%+v round=%d %s/%s", c.ID, c.Seed, round, runs[0].Name, spec.Name)
+				require.Equal(tb, observations[0].Rounds[round].Root, got.Rounds[round].Root, "case=%s seed=%d round=%d %s/%s", c.ID, c.Seed, round, runs[0].Name, spec.Name)
 			}
 		}
 		verifiedFresh = verifiedFresh || spec.Fresh

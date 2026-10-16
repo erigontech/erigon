@@ -102,12 +102,14 @@ type MdbxOpts struct {
 const (
 	DefaultMapSize    = 2 * datasize.TB
 	DefaultGrowthStep = 1 * datasize.GB
+
+	inCommitSyncPeriods = 30
 )
 
 // How much may stay unflushed, and for how long, under SafeNoSync. Both bound what a crash
 // rolls back; the byte one also bounds the file growth that deferring a flush causes.
 var (
-	DefaultSyncBytes  = dbg.EnvDataSize("MDBX_SYNC_BYTES", 8*datasize.MB)
+	DefaultSyncBytes  = dbg.EnvDataSize("MDBX_SYNC_BYTES", 256*datasize.MB)
 	DefaultSyncPeriod = dbg.EnvDuration("MDBX_SYNC_PERIOD", time.Second)
 
 	// DefaultSafeNoSync gives every database the deferred flush. Set it before any database
@@ -426,7 +428,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 	}
 
 	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
-		if err := env.SetSyncPeriod(opts.syncPeriod); err != nil {
+		if err := env.SetSyncPeriod(inCommitSyncPeriods * opts.syncPeriod); err != nil {
 			return nil, err
 		}
 	}
@@ -764,8 +766,6 @@ func (db *MdbxKV) waitTxsAllDoneOnClose() {
 	}
 }
 
-// syncPoller enforces the sync deadline once writes stop: mdbx checks it only inside
-// mdbx_txn_commit and mdbx_env_sync.
 func (db *MdbxKV) syncPoller(interval time.Duration) {
 	defer close(db.syncerDone)
 	t := time.NewTicker(interval)
@@ -775,9 +775,7 @@ func (db *MdbxKV) syncPoller(interval time.Duration) {
 		case <-db.syncerStop:
 			return
 		case <-t.C:
-			// force=false: flush only when mdbx says a threshold is due. A writer holding the
-			// lock is MDBX_BUSY and routine; any other error leaves the data unflushed.
-			if err := db.env.Sync(false, true); err != nil && !mdbx.IsErrno(err, mdbxBusy) {
+			if err := db.env.Sync(true, true); err != nil && !mdbx.IsErrno(err, mdbxBusy) {
 				dbDeferredFlushFailed.Inc()
 				db.log.Error("[db] deferred flush failed, unflushed data is growing", "label", db.opts.label, "err", err)
 			}

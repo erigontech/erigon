@@ -151,6 +151,10 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 				logger.Error("failed to read account", "addr", addr, "err", err)
 				continue
 			}
+			if acc == nil {
+				logger.Info(fmt.Sprintf("%x: not found", addr))
+				continue
+			}
 			logger.Info(fmt.Sprintf("%x: nonce=%d balance=%d code=%x root=%x", addr, acc.Nonce, acc.Balance.Uint64(), acc.CodeHash, acc.Root))
 		}
 	case kv.StorageDomain.String():

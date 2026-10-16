@@ -330,7 +330,7 @@ func recordFixture(flags byte, depth int, child, leaf, ext uint16, self []byte, 
 	for nib, entry := range leafAt {
 		spec.Leaves[nib] = commitmenttest.Leaf{Suffix: entry.suffix, Value: entry.value}
 	}
-	return commitmenttest.Records([]commitmenttest.RecordSpec{spec})[0].Data
+	return commitmenttest.Record(&spec)
 }
 
 func extFixture(path []byte) []byte {

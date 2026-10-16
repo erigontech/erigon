@@ -18,7 +18,9 @@ package blob_storage
 
 import (
 	"bytes"
+	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -787,4 +789,76 @@ func TestBucketStoreWriteSurfacesAShortWriteFromTheFinalFlush(t *testing.T) {
 	exists, err := afero.Exists(fs, file)
 	require.NoError(t, err)
 	require.False(t, exists)
+}
+
+func TestBucketStoreLowestStoredSlotSkipsEmptyBuckets(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	b := newBucketStore(t, fs)
+
+	slot, err := b.EarliestStoredSlot()
+	require.NoError(t, err)
+	require.Zero(t, slot)
+
+	makeBuckets(t, fs, "1/sub", "2", "3", "5", "07")
+	require.NoError(t, afero.WriteFile(fs, "2/root_0"+tmpSuffix, []byte{1}, 0o644))
+	require.NoError(t, afero.WriteFile(fs, "3/root_0", []byte{1}, 0o644))
+	require.NoError(t, afero.WriteFile(fs, "5/root_0", []byte{1}, 0o644))
+	require.NoError(t, afero.WriteFile(fs, "07/root_0", []byte{1}, 0o644))
+	require.NoError(t, afero.WriteFile(fs, "4", []byte{1}, 0o644))
+
+	slot, err = b.EarliestStoredSlot()
+	require.NoError(t, err)
+	require.Equal(t, uint64(3*subdivisionSlot), slot)
+}
+
+func TestBucketStoreEarliestStoredSlotFindsSidecarBehindManyTempFiles(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	b := newBucketStore(t, fs)
+
+	makeBuckets(t, fs, "4")
+	for i := range 3 * listBatch {
+		require.NoError(t, afero.WriteFile(fs, fmt.Sprintf("4/a_%03d%s", i, tmpSuffix), []byte{1}, 0o644))
+	}
+	slot, err := b.EarliestStoredSlot()
+	require.NoError(t, err)
+	require.Zero(t, slot)
+
+	require.NoError(t, afero.WriteFile(fs, "4/z_0", []byte{1}, 0o644))
+	slot, err = b.EarliestStoredSlot()
+	require.NoError(t, err)
+	require.Equal(t, uint64(4*subdivisionSlot), slot)
+}
+
+type openFailingFs struct {
+	afero.Fs
+	name string
+}
+
+func (f openFailingFs) Open(name string) (afero.File, error) {
+	if name == f.name {
+		return nil, os.ErrPermission
+	}
+	return f.Fs.Open(name)
+}
+
+func TestBucketStoreEarliestStoredSlotSkipsAnUnreadableBucket(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	makeBuckets(t, mem, "2", "3")
+	require.NoError(t, afero.WriteFile(mem, "2/root_0", []byte{1}, 0o644))
+	require.NoError(t, afero.WriteFile(mem, "3/root_0", []byte{1}, 0o644))
+	b := newBucketStore(t, openFailingFs{Fs: mem, name: "2"})
+
+	slot, err := b.EarliestStoredSlot()
+	require.NoError(t, err)
+	require.Equal(t, uint64(3*subdivisionSlot), slot)
+}
+
+func TestBucketStoreEarliestStoredSlotErrorsWhenTheOnlyBucketIsUnreadable(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	makeBuckets(t, mem, "3")
+	require.NoError(t, afero.WriteFile(mem, "3/root_0", []byte{1}, 0o644))
+	b := newBucketStore(t, openFailingFs{Fs: mem, name: "3"})
+
+	_, err := b.EarliestStoredSlot()
+	require.ErrorIs(t, err, os.ErrPermission)
 }

@@ -589,6 +589,7 @@ func unwindDomsToBlock(ctx context.Context, rwTx kv.TemporalRwTx, br dbservices.
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
+	dropBranchCarry()
 	if err := checkStoppedHexShadowUnwind(ctx, rwTx, cfg.blockReader, cfg.chainConfig, s.BlockNumber, u.UnwindPoint); err != nil {
 		return err
 	}

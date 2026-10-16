@@ -448,6 +448,14 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 	}
 }
 
+func (sdc *SharedDomainsCommitmentContext) TouchChangedKey(tx kv.TemporalTx, d kv.Domain, plainKey []byte) error {
+	if sdc.updates.Mode() != commitment.ModeCollect {
+		sdc.TouchKey(d, string(plainKey), nil)
+		return nil
+	}
+	return sdc.TouchKeyFromState(tx, plainKey)
+}
+
 func (sdc *SharedDomainsCommitmentContext) TouchKeyFromState(tx kv.TemporalTx, plainKey []byte) error {
 	d := kv.AccountsDomain
 	switch len(plainKey) {
@@ -563,6 +571,19 @@ func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.C
 	}); ok {
 		t.SetCollapseTracer(tracer)
 	}
+}
+
+type collapseTracingTrie interface {
+	TraceCollapses(ctx context.Context, updates *commitment.Updates, tracer commitment.CollapseTracer) error
+}
+
+func (sdc *SharedDomainsCommitmentContext) TraceCollapses(ctx context.Context, tx kv.TemporalTx, blockNum, txNum uint64, tracer commitment.CollapseTracer) (bool, error) {
+	t, ok := sdc.patriciaTrie.(collapseTracingTrie)
+	if !ok {
+		return false, nil
+	}
+	sdc.trieContext(tx, blockNum, txNum, ctx, nil, nil)
+	return true, t.TraceCollapses(ctx, sdc.updates, tracer)
 }
 
 // BranchChildCount returns a branch's child count from the post-compute view.
@@ -1299,7 +1320,30 @@ func SeekCommitments(ctx context.Context, tx kv.TemporalTx, contexts ...*SharedD
 		}
 		return first.txNum, first.blockNum, nil
 	}
-
+	for _, sdc := range contexts {
+		if sdc == nil || sdc.CommitmentDomain() != kv.CommitmentDomain {
+			continue
+		}
+		switch sdc.patriciaTrie.Variant() {
+		case commitment.VariantBinPatriciaTrie:
+		case commitment.VariantCommitmentV3:
+			legacy, _, err := tx.GetLatest(kv.CommitmentDomain, KeyCommitmentState, kv.GetLatestOptions{})
+			if err != nil {
+				return 0, 0, err
+			}
+			if len(legacy) > 0 {
+				return 0, 0, errors.New("commitment v3 is enabled, but the datadir holds legacy commitment: convert it with `integration commitment convert --v3` first")
+			}
+		default:
+			v3, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentV3State, kv.GetLatestOptions{})
+			if err != nil {
+				return 0, 0, err
+			}
+			if len(v3) > 0 {
+				return 0, 0, errors.New("the datadir holds commitment v3 records: start with --experimental.commitment-v3")
+			}
+		}
+	}
 	// handle case when we have no commitment, but have executed blocks
 	bnBytes, err := tx.GetOne(kv.SyncStageProgress, []byte("Execution"))
 	if err != nil {

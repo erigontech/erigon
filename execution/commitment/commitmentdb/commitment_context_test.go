@@ -13,7 +13,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
-	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,7 +22,9 @@ func Test_EncodeCommitmentState(t *testing.T) {
 		txNum:     rand.Uint64(),
 		trieState: make([]byte, 1024),
 	}
-	commitmenttest.Read(t, cs.trieState, rand.Read)
+	n, err := rand.Read(cs.trieState)
+	require.NoError(t, err)
+	require.Equal(t, len(cs.trieState), n)
 
 	buf, err := cs.Encode()
 	require.NoError(t, err)

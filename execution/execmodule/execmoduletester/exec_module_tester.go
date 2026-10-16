@@ -806,7 +806,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			mock.Ctx,
 			stagedsync.StageSnapshotsCfg(mock.DB, mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, false, pruneMode, nil, nil),
 			stagedsync.StageHeadersCfg(mock.BlockReader),
-			stagedsync.StageBlockHashesCfg(mock.Dirs.Tmp, blockWriter),
 			stagedsync.StageBodiesCfg(mock.BlockReader, blockWriter),
 			stagedsync.StageSendersCfg(mock.ChainConfig, false /* badBlockHalt */, dirs.Tmp, mock.BlockReader, readAheader),
 			stagedsync.StageExecuteBlocksCfg(

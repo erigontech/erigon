@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -35,18 +36,22 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	commitmenttemporal "github.com/erigontech/erigon/internal/commitmenttest/temporal"
 )
 
 var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
@@ -57,8 +62,18 @@ func NewTest(dirs datadir.Dirs) state.AggOpts { //nolint:gocritic
 
 func newTestDb(tb testing.TB, stepSize uint64) kv.TemporalRwDB {
 	tb.Helper()
-	db, _ := commitmenttemporal.Open(tb, stepSize)
-	return db
+	logger := log.New()
+	dirs := datadir.New(tb.TempDir())
+	db := mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	tb.Cleanup(db.Close)
+
+	agg := NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context())
+	tb.Cleanup(agg.Close)
+	err := agg.OpenFolder(db)
+	require.NoError(tb, err)
+	tdb, err := temporal.New(db, agg, nil)
+	require.NoError(tb, err)
+	return tdb
 }
 
 func composite(k, k2 []byte) []byte {
@@ -1951,37 +1966,49 @@ func TestReceiptAsOf_InFlightBlockLogIndex(t *testing.T) {
 }
 
 func TestCommitmentGetAsOfBeforeKeyCreation(t *testing.T) {
-	previousSchema := statecfg.Schema
-	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
+	for _, v3 := range []bool{false, true} {
+		t.Run(fmt.Sprintf("v3=%t", v3), func(t *testing.T) {
+			previousSchema, previousV3 := statecfg.Schema, statecfg.ExperimentalCommitmentV3
+			t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousSchema, previousV3 })
+			if v3 {
+				statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+				statecfg.ExperimentalCommitmentV3 = true
+			}
+			statecfg.EnableHistoricalCommitment()
 
-	ctx := t.Context()
-	db := newTestDb(t, 1000)
-	rwTx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer rwTx.Rollback()
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
+			ctx := t.Context()
+			db := newTestDb(t, 1000)
+			rwTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			defer domains.Close()
 
-	key, first, second := []byte{0x40, 0x01, 0x02}, []byte("first"), []byte("second")
-	require.NoError(t, domains.DomainPut(kv.CommitmentDomain, rwTx, key, first, 5, nil))
-	require.NoError(t, domains.DomainPut(kv.CommitmentDomain, rwTx, key, second, 9, first))
-	require.NoError(t, domains.Flush(ctx, rwTx))
+			key, first, second := []byte{0x40, 0x01, 0x02}, []byte("first"), []byte("second")
+			require.NoError(t, domains.DomainPut(kv.CommitmentDomain, rwTx, key, first, 5, nil))
+			require.NoError(t, domains.DomainPut(kv.CommitmentDomain, rwTx, key, second, 9, first))
+			require.NoError(t, domains.Flush(ctx, rwTx))
 
-	for _, tc := range []struct {
-		ts   uint64
-		want []byte
-	}{{3, nil}, {5, nil}, {6, first}, {9, first}, {10, second}} {
-		got, ok, err := rwTx.GetAsOf(kv.CommitmentDomain, key, tc.ts)
-		require.NoError(t, err)
-		if tc.want == nil {
-			require.False(t, ok, "ts=%d: key not created yet, got %x", tc.ts, got)
-			require.Nil(t, got, "ts=%d", tc.ts)
-			continue
-		}
-		require.True(t, ok, "ts=%d", tc.ts)
-		require.Equal(t, tc.want, got, "ts=%d", tc.ts)
+			beforeCreation := second
+			if v3 {
+				beforeCreation = nil
+			}
+			for _, tc := range []struct {
+				ts   uint64
+				want []byte
+			}{{3, beforeCreation}, {5, beforeCreation}, {6, first}, {9, first}, {10, second}} {
+				got, ok, err := rwTx.GetAsOf(kv.CommitmentDomain, key, tc.ts)
+				require.NoError(t, err)
+				if tc.want == nil {
+					require.False(t, ok, "ts=%d: key not created yet, got %x", tc.ts, got)
+					require.Nil(t, got, "ts=%d", tc.ts)
+					continue
+				}
+				require.True(t, ok, "ts=%d", tc.ts)
+				require.Equal(t, tc.want, got, "ts=%d", tc.ts)
+			}
+		})
 	}
 }
 
@@ -2117,4 +2144,90 @@ func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
 	require.Equal(t, block2, storedBlock2)
 	require.Equal(t, txNum2, storedTx2)
 	require.Equal(t, trieState1, state2[16:])
+}
+
+func TestSeekCommitmentV3RejectsLegacyCommitmentState(t *testing.T) {
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	t.Cleanup(func() { statecfg.ExperimentalCommitmentV3 = previousV3 })
+
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	legacy, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	require.NoError(t, legacy.DomainPut(kv.CommitmentDomain, rwTx, commitmentdb.KeyCommitmentState, make([]byte, 32), 1, nil))
+	require.NoError(t, legacy.Flush(ctx, rwTx))
+	legacy.Close()
+
+	statecfg.ExperimentalCommitmentV3 = true
+	_, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.ErrorContains(t, err, "legacy commitment")
+}
+
+func TestSeekCommitmentLegacyRejectsV3CommitmentState(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	require.NoError(t, sd.DomainPut(kv.CommitmentDomain, rwTx, commitment.KeyCommitmentV3State, make([]byte, 32), 1, nil))
+	require.NoError(t, sd.Flush(ctx, rwTx))
+	sd.Close()
+
+	_, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.ErrorContains(t, err, "commitment v3 records")
+}
+
+func TestTouchChangedKeysFromHistoryRestoresTheStoredRoot(t *testing.T) {
+	for _, v3 := range []bool{false, true} {
+		t.Run(fmt.Sprintf("v3=%t", v3), func(t *testing.T) {
+			schema, enabled := statecfg.Schema, statecfg.ExperimentalCommitmentV3
+			t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = schema, enabled })
+			if v3 {
+				statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+				statecfg.ExperimentalCommitmentV3 = true
+			}
+			ctx := t.Context()
+			db1 := newTestDb(t, 1)
+			rw, err := db1.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			t.Cleanup(rw.Rollback)
+			sd1, err := execctx.NewSharedDomains(ctx, rw, log.New())
+			require.NoError(t, err)
+			t.Cleanup(sd1.Close)
+			for i, a := range []common.Address{common.HexToAddress("0x01"), common.HexToAddress("0x8000000000000000000000000000000000000002")} {
+				acc := accounts.NewAccount()
+				acc.Balance = *uint256.NewInt(uint64(i + 1))
+				require.NoError(t, sd1.DomainPut(kv.AccountsDomain, rw, a[:], accounts.SerialiseV3(&acc), uint64(i+1), nil))
+			}
+			want, err := sd1.ComputeCommitment(ctx, rw, true, 1, 2, "", nil)
+			require.NoError(t, err)
+			require.NotEqual(t, empty.RootHash[:], want)
+			require.NoError(t, sd1.Flush(ctx, rw))
+			require.NoError(t, rw.Commit())
+
+			ro, err := db1.BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			t.Cleanup(ro.Rollback)
+			ro2, err := newTestDb(t, 1).BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			t.Cleanup(ro2.Rollback)
+			sd2, err := execctx.NewSharedDomains(ctx, ro2, log.New())
+			require.NoError(t, err)
+			t.Cleanup(sd2.Close)
+			sd2.GetCommitmentContext().SetStateReader(commitmentdb.NewLatestStateReader(ro, sd1, commitmentdb.LatestStateReaderOptions{}))
+			n, _, err := sd2.TouchChangedKeysFromHistory(ro, 0, 3)
+			require.NoError(t, err)
+			require.Equal(t, 2, n)
+			got, err := sd2.ComputeCommitment(ctx, ro2, false, 1, 2, "", nil)
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+		})
+	}
 }

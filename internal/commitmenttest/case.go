@@ -16,27 +16,13 @@
 
 package commitmenttest
 
-import (
-	"fmt"
-	"math/rand"
-)
+import "math/rand"
 
-type Seed struct {
-	Algorithm string
-	Version   uint32
-	Words     []uint64
-}
+type Seed int64
 
-func MathRand(seed int64) Seed {
-	return Seed{Algorithm: "math/rand", Version: 1, Words: []uint64{uint64(seed)}}
-}
+func MathRand(seed int64) Seed { return Seed(seed) }
 
-func (s Seed) rand() (*rand.Rand, error) {
-	if s.Algorithm != "math/rand" || s.Version != 1 || len(s.Words) != 1 {
-		return nil, fmt.Errorf("unsupported seed: %+v", s)
-	}
-	return rand.New(rand.NewSource(int64(s.Words[0]))), nil
-}
+func (s Seed) rand() *rand.Rand { return rand.New(rand.NewSource(int64(s))) }
 
 type Op struct {
 	Key     []byte
@@ -49,7 +35,6 @@ type Op struct {
 type Assertions struct {
 	TolerateHPHDrift bool
 	StateReadEngines []string
-	ProcessNoError   bool
 	ZeroAccountReads bool
 	ZeroStorageReads bool
 }

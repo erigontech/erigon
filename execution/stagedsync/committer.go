@@ -27,6 +27,8 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -123,6 +125,14 @@ type commitmentCalculator struct {
 	// roTx is a persistent read-only transaction for domain reads.
 	// Opened at start, lives for the calculator's lifetime.
 	roTx kv.TemporalTx
+
+	readAtNum     uint64
+	readAtHash    common.Hash
+	handoff       *commitTarget
+	handoffDeltas [][]commitment.BranchDelta
+	handoffDel    [][]byte
+	handoffMulti  bool
+	sawMidBlock   bool
 
 	// commitProgress holds the most recent CommitProgress the trie reported,
 	// and firstCommitAtNs the wall time of the first round. The parallel
@@ -344,13 +354,37 @@ func newCommitmentCalculator(
 	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, commitmentDomain: collectorContext.CommitmentDomain(), txNum: 0}
 	calc := newCalcState(asOfReader, logger, logPrefix)
 	calc.binFeed = hasBinCommitmentContext(doms)
-	if branchPrefetchEnabled && collectorContext.AcceptsFeed() {
+	var readAtNum uint64
+	var readAtHash common.Hash
+	if collectorContext.AcceptsFeed() {
+		if n, err := stages.GetStageProgress(roTx, stages.Execution); err == nil {
+			if h, err := rawdb.ReadCanonicalHash(roTx, n); err == nil {
+				readAtNum, readAtHash = n, h
+			}
+		}
+		calc.hashes = newCalcHashes()
+		domains := doms.CommitmentDomains()
 		binDomains := make(map[kv.Domain]bool)
-		for _, domain := range doms.CommitmentDomains() {
+		for _, domain := range domains {
 			ctx := doms.GetCommitmentCtxForDomain(domain)
 			binDomains[domain] = ctx != nil && ctx.Trie().Variant() == commitment.VariantBinPatriciaTrie
 		}
-		calc.branchPrefetch = newBranchPrefetcher(workCtx, db, doms.CommitmentDomains(), binDomains)
+		var carried *branchPrefetcher
+		if hexOnlyPrefetch(domains, binDomains) {
+			carried = takeBranchCarry(db, readAtNum, readAtHash)
+		} else {
+			dropBranchCarry()
+		}
+		if carried != nil {
+			if dbg.AssertEnabled {
+				if err := carried.verifyAgainst(roTx); err != nil {
+					panic(err)
+				}
+			}
+			calc.branchPrefetch = carried.start(workCtx, db, readAtNum+1)
+		} else {
+			calc.branchPrefetch = newBranchPrefetcher(workCtx, db, readAtNum+1, domains, binDomains)
+		}
 		asOfReader.prefetched = calc.branchPrefetch
 	}
 
@@ -378,6 +412,8 @@ func newCommitmentCalculator(
 		finalizedBlockNum:    rawdb.ReadForkchoiceFinalizedNum(roTx),
 		done:                 make(chan struct{}),
 		processedWake:        make(chan struct{}),
+		readAtNum:            readAtNum,
+		readAtHash:           readAtHash,
 	}
 	if dbg.BALCommitmentWarmupReaders() > 0 && !collectorContext.AcceptsFeed() {
 		cc.state.prefetch = func(plainKey []byte) {
@@ -440,6 +476,12 @@ func (cc *commitmentCalculator) Stop() {
 		p.close()
 		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", p.bytes.Load(),
 			"hits", p.hits.Load(), "misses", p.misses.Load(), "dropped", p.dropped.Load(), "drained", p.drained.Load())
+		if r := cc.parentRecords(); r != nil {
+			commitmentdb.PublishParentRecords(r)
+			if dbg.CommitmentBranchCarry && !cc.sawMidBlock && cc.handoffDeltas != nil && hexOnlyPrefetch(p.domains, p.bin) {
+				storeBranchCarry(cc.db, p, *cc.handoff, cc.handoffDeltas, kv.Step(cc.handoff.lastTxNum/cc.doms.StepSize()))
+			}
+		}
 	}
 	if cc.prefetch != nil {
 		cc.prefetch.CloseAndWait()
@@ -1006,15 +1048,40 @@ func (cc *commitmentCalculator) shouldComputeOnRequest() bool {
 // commitTarget is the block identity a compute needs; a mid-block checkpoint has
 // no StateRoot, so it carries a zero one and never sets checkRoot.
 type commitTarget struct {
-	blockNum  uint64
-	blockHash common.Hash
-	lastTxNum uint64
-	blockTime uint64
-	stateRoot common.Hash
+	blockNum   uint64
+	blockHash  common.Hash
+	parentHash common.Hash
+	lastTxNum  uint64
+	blockTime  uint64
+	stateRoot  common.Hash
+	parent     *state.BlockStateCache
 }
 
 func targetOf(br *blockResult) commitTarget {
-	return commitTarget{blockNum: br.Block.NumberU64(), blockHash: br.Block.Hash(), lastTxNum: br.lastTxNum, blockTime: br.Block.Time(), stateRoot: br.Block.Root()}
+	return commitTarget{blockNum: br.Block.NumberU64(), blockHash: br.Block.Hash(), parentHash: br.Block.ParentHash(), lastTxNum: br.lastTxNum, blockTime: br.Block.Time(), stateRoot: br.Block.Root(), parent: br.parentState}
+}
+
+func (cc *commitmentCalculator) noteVerified(t commitTarget, deltas [][]commitment.BranchDelta) {
+	if cc.handoff != nil && cc.handoff.blockHash != t.blockHash {
+		cc.handoffMulti = true
+	}
+	cc.handoff, cc.handoffDeltas, cc.handoffDel = &t, deltas, cc.state.deleted
+}
+
+func (cc *commitmentCalculator) parentRecords() *commitmentdb.ParentRecords {
+	h, p := cc.handoff, cc.state.branchPrefetch
+	if h == nil || p == nil || cc.handoffMulti || h.blockNum != cc.readAtNum+1 || h.parentHash != cc.readAtHash {
+		return nil
+	}
+	gen := p.gen.Load()
+	r := &commitmentdb.ParentRecords{
+		BlockNum: h.blockNum, BlockHash: h.blockHash, ParentHash: h.parentHash, Deleted: cc.handoffDel,
+		Get: func(key []byte) ([]byte, kv.Step, bool) { return p.getAt(key, gen) },
+	}
+	if h.parent != nil {
+		r.State = h.parent
+	}
+	return r
 }
 
 // computeMode selects compute's per-call behaviour; isolation is otherwise
@@ -1151,6 +1218,10 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		return
 	}
 	mismatch := m.checkRoot && headerRootMismatch(rh, t.stateRoot[:])
+	var deltas [][]commitment.BranchDelta
+	if u := cc.doms.GetCommitmentContext().PeekPendingUpdate(); u != nil && u.BlockNum == t.blockNum {
+		deltas = u.Deltas
+	}
 	if flushOwn != nil {
 		if mismatch {
 			cc.doms.GetCommitmentContext().ResetPendingUpdates()
@@ -1166,6 +1237,11 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	if !m.midBlock {
 		cc.lastComputedBlock = t.blockNum
 		cc.hasComputed = true
+		if m.checkRoot && !mismatch {
+			cc.noteVerified(t, deltas)
+		}
+	} else {
+		cc.sawMidBlock = true
 	}
 
 	if !m.checkRoot {
@@ -1730,8 +1806,8 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 					addr := accounts.InternAddress(common.BytesToAddress(plainKey[:20]))
 					key := accounts.InternKey(common.BytesToHash(plainKey[20:]))
 					if storage := r.balState.storageState[addr]; storage != nil {
-						if value, ok := storage.slots[key]; ok {
-							return value.value.Bytes(), 0, nil
+						if value, ok := storage[key]; ok {
+							return value.Bytes(), 0, nil
 						}
 					}
 				}

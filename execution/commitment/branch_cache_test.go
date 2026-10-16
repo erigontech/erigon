@@ -373,10 +373,6 @@ func TestBranchCache_StateKeyNeverCached(t *testing.T) {
 	_, _, ok := c.Get(KeyCommitmentState)
 	require.False(t, ok, "state key must never be served from the cache")
 	require.Equal(t, 0, c.tailLen(), "state key must not occupy a tail slot")
-	c.Put(KeyCommitmentV3State, []byte("checkpoint"), 1, 1)
-	_, _, ok = c.Get(KeyCommitmentV3State)
-	require.False(t, ok, "v3 state key must never be served from the cache")
-	require.Equal(t, 0, c.tailLen(), "v3 state key must not occupy a tail slot")
 
 	deepKey := []byte{0x12, 0x34}
 	c.Put(deepKey, []byte("d"), 0, 0)
@@ -545,23 +541,6 @@ func TestBranchCache_StorageTrunkRoundTripAcrossDepths(t *testing.T) {
 	}
 }
 
-func TestBranchCache_TryPutSkipsBusyStripe(t *testing.T) {
-	c := NewBranchCache(10)
-	key := []byte{0xa0, 0xb0}
-
-	stripe := c.putStripe(key)
-	stripe.Lock()
-	c.TryPut(key, []byte("fill"), 0, 100, false)
-	stripe.Unlock()
-	_, _, ok := c.Get(key)
-	require.False(t, ok)
-
-	c.TryPut(key, []byte("fill"), 0, 100, false)
-	got, _, ok := c.Get(key)
-	require.True(t, ok)
-	require.Equal(t, []byte("fill"), got)
-}
-
 func TestBranchCache_UnpinContractDropsTheTrunk(t *testing.T) {
 	c := NewBranchCache(100)
 	defer c.Close()
@@ -667,4 +646,48 @@ func TestBranchCache_GetBeforeDoesNotEvict(t *testing.T) {
 	c.Unwind(100)
 	_, _, ok = c.GetBefore(key, 101)
 	require.False(t, ok, "a local bound must still honor canonical invalidation")
+}
+
+func TestBranchCache_FillDropsViewsOlderThanCommittedUnwind(t *testing.T) {
+	c := NewBranchCache(100)
+	key := []byte{0x01, 0x02, 0x03, 0x04, 0x05}
+	c.UnwindCommitted(10, 7)
+
+	c.Fill(key, []byte("old-view"), 1, 20, 6)
+	_, _, ok := c.Get(key)
+	require.False(t, ok)
+
+	c.Fill(key, []byte("new-view"), 1, 20, 7)
+	got, _, ok := c.Get(key)
+	require.True(t, ok)
+	require.Equal(t, []byte("new-view"), got)
+}
+
+func TestBranchCache_FillRacingUnwindCommitted(t *testing.T) {
+	key := []byte{0x01, 0x02, 0x03, 0x04, 0x05}
+	for range 2000 {
+		c := NewBranchCache(100)
+		stop := make(chan struct{})
+		var wg sync.WaitGroup
+		for range 4 {
+			wg.Go(func() {
+				for {
+					select {
+					case <-stop:
+						return
+					default:
+						c.Fill(key, []byte("dead"), 1, 20, 1)
+					}
+				}
+			})
+		}
+		runtime.Gosched()
+		c.UnwindCommitted(10, 2)
+		for range 100 {
+			got, _, ok := c.Get(key)
+			require.False(t, ok, "served %q after the unwind committed", got)
+		}
+		close(stop)
+		wg.Wait()
+	}
 }

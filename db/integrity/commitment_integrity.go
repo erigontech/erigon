@@ -363,6 +363,9 @@ func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *
 }
 
 func CheckCommitmentKvi(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, cache *IntegrityCache, failFast bool, logger log.Logger) error {
+	if skipsCommitmentV3Records("CommitmentKvi", logger) {
+		return nil
+	}
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -372,6 +375,9 @@ func CheckCommitmentKvi(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, 
 }
 
 func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, cache *IntegrityCache, failFast bool, logger log.Logger) error {
+	if skipsCommitmentV3Records("CommitmentKvDeref", logger) {
+		return nil
+	}
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -913,6 +919,9 @@ func deriveDecompForOtherDomain(baseFile string, oldDomain, newDomain kv.Domain)
 }
 
 func CheckCommitmentHistVal(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, br dbservices.FullBlockReader, failFast bool, logger log.Logger) error {
+	if skipsCommitmentV3Records("CommitmentHistVal", logger) {
+		return nil
+	}
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -1334,6 +1343,9 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 }
 
 func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fromStep uint64, logger log.Logger) error {
+	if skipsCommitmentV3Records("StateVerify", logger) {
+		return nil
+	}
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -2455,7 +2467,9 @@ func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domai
 			if visitor != nil {
 				visitor([]byte(k))
 			}
-			sd.GetCommitmentCtx().TouchKey(d, k, nil)
+			if err := sd.GetCommitmentCtx().TouchChangedKey(tx, d, []byte(k)); err != nil {
+				return 0, err
+			}
 		}
 		return uint64(len(offsets)), nil
 	}
@@ -2473,8 +2487,18 @@ func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domai
 		if visitor != nil {
 			visitor(k)
 		}
-		sd.GetCommitmentCtx().TouchKey(d, string(k), nil)
+		if err := sd.GetCommitmentCtx().TouchChangedKey(tx, d, k); err != nil {
+			return 0, err
+		}
 		touches++
 	}
 	return touches, nil
+}
+
+func skipsCommitmentV3Records(check string, logger log.Logger) bool {
+	if !statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).CommitmentV3Records {
+		return false
+	}
+	logger.Info("[integrity] " + check + " skipped: it checks legacy commitment files, not v3 records")
+	return true
 }

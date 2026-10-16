@@ -1868,6 +1868,9 @@ func (ibs *IntraBlockState) setStateVersioned(addr accounts.Address, key account
 // SetStorage replaces the entire storage for the specified account with given
 // storage. This function should only be used for debugging.
 func (ibs *IntraBlockState) SetStorage(addr accounts.Address, storage Storage) error {
+	if dbg.AssertEnabled && ibs.noMaterialize {
+		panic("SetStorage: full state override is not kept on the noMaterialize path")
+	}
 	stateObject, err := ibs.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
@@ -2302,7 +2305,10 @@ func (ibs *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 		if ibs.versionMap != nil {
 			prevWrites = ibs.versionedWrites.snapshotCreateFields(addr)
 		}
-		ibs.journal.resetObjectChange(addr, previous, prevWrites)
+		// previous may be built from an account record that lags the cached
+		// object: journal the cache entry (nil when none) so the revert restores
+		// or drops it.
+		ibs.journal.resetObjectChange(addr, ibs.stateObjects[addr], prevWrites)
 	}
 	newobj.newlyCreated = true
 	if !ibs.noMaterialize {
@@ -2376,11 +2382,9 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 				destructed = true
 			}
 
-			// Reuse the cached stateObject directly `previous` so that (a) selfdestructed=true is captured,
+			// Reuse the cached stateObject directly as `previous` so that (a) selfdestructed=true is captured and
 			// (b) the accumulated incarnation is used for the new object's PrevIncarnation (important when the
-			// account was created and destroyed multiple times within the same block), and
-			// (c) after a REVERT CommitBlock can still emit DeleteAccount for it (accumulated-IBS
-			// path, e.g. GenerateChain, where the map carries no SelfDestructPath cell).
+			// account was created and destroyed multiple times within the same block).
 			if !destructed {
 				if so, ok := ibs.stateObjects[addr]; ok && so.selfdestructed {
 					previous = so
@@ -2452,6 +2456,12 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 			balSource = MapRead
 			balVersion = Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
 			preTxBalance = bal
+			// Without EIP-8246 a destruct at or above the cell burns its balance.
+			if !ibs.eip8246 {
+				if _, burned := ibs.versionMap.FindDoneSelfDestructInRange(addr, res.DepIdx(), ibs.txIndex, true); burned {
+					preTxBalance.Clear()
+				}
+			}
 		}
 	}
 	// Capture the address's current balance BEFORE createObject writes the fresh

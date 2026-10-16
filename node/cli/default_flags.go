@@ -138,6 +138,7 @@ var DefaultFlags = []cli.Flag{
 	&RpcSubscriptionFiltersMaxAddressesFlag,
 	&RpcSubscriptionFiltersMaxTopicsFlag,
 	&RpcSubscriptionFiltersTimeoutFlag,
+	&RpcSubscriptionFiltersMaxSubscriptionsFlag,
 
 	&utils.SnapKeepBlocksFlag,
 	&utils.SnapStopFlag,

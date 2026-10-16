@@ -263,10 +263,11 @@ type SharedDomains struct {
 
 	// stateCache is an optional cache for state data (accounts, storage, code);
 	// cacheApplier is its authoritative writer handle (commit/unwind only).
-	stateCache       *cache.StateCache
-	cacheApplier     cache.Applier
-	cacheUnwind      cacheUnwindState
-	localCacheUnwind bool
+	stateCache           *cache.StateCache
+	cacheApplier         cache.Applier
+	cacheUnwind          cacheUnwindState
+	localCacheUnwind     bool
+	ownedCommitmentReads bool
 
 	// Backing frontiers stay fixed while writes and staged unwinds remain in
 	// mem; both reach the transaction during flush, which resets the memo.
@@ -422,16 +423,17 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	}
 	_, baseTxWritable := generationTx.(kv.TemporalRwTx)
 	sd := &SharedDomains{
-		logger:           logger,
-		commitmentDomain: commitmentDomain,
-		commitmentCtxs:   make(map[kv.Domain]*commitmentdb.SharedDomainsCommitmentContext),
-		metrics:          kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
-		nonExecMetrics:   kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
-		stepSize:         tx.Debug().StepSize(),
-		baseViewID:       generationTx.ViewID(),
-		baseTxWritable:   baseTxWritable,
-		baseStateVersion: stateVersion,
-		localCacheUnwind: o.localCacheUnwind,
+		logger:               logger,
+		commitmentDomain:     commitmentDomain,
+		commitmentCtxs:       make(map[kv.Domain]*commitmentdb.SharedDomainsCommitmentContext),
+		metrics:              kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+		nonExecMetrics:       kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+		stepSize:             tx.Debug().StepSize(),
+		baseViewID:           generationTx.ViewID(),
+		baseTxWritable:       baseTxWritable,
+		baseStateVersion:     stateVersion,
+		localCacheUnwind:     o.localCacheUnwind,
+		ownedCommitmentReads: o.trieCfg.Variant == commitment.VariantCommitmentV3 || o.trieCfg.Variant == commitment.VariantBinPatriciaTrie,
 	}
 
 	if o.mem != nil {
@@ -620,7 +622,7 @@ func (sd *SharedDomains) FlushPendingUpdatesWithoutChangeset(tx kv.TemporalTx) e
 }
 
 func (sd *SharedDomains) PutCommitmentBranches(roTx kv.TemporalTx, parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error {
-	if batch, ok := sd.mem.(commitmentBranchBatchWriter); ok && commitmentDeltasResolved(parts) {
+	if batch, ok := sd.mem.(commitmentBranchBatchWriter); ok {
 		return batch.PutOwnedCommitmentBranches(parts, txNum, diff)
 	}
 	for _, part := range parts {
@@ -631,17 +633,6 @@ func (sd *SharedDomains) PutCommitmentBranches(roTx kv.TemporalTx, parts [][]com
 		}
 	}
 	return nil
-}
-
-func commitmentDeltasResolved(parts [][]commitment.BranchDelta) bool {
-	for _, part := range parts {
-		for i := range part {
-			if part[i].Data == nil || part[i].Prev == nil {
-				return false
-			}
-		}
-	}
-	return true
 }
 
 func (sd *SharedDomains) flushPendingUpdates(tx kv.TemporalTx, lockHeld bool) error {
@@ -1493,19 +1484,21 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	if err := readStopped(); err != nil {
 		return err
 	}
+	viewID := tx.ViewID()
 	if err := tx.Commit(); err != nil {
 		return err
 	}
 	applyStopped()
-	if sd.hasLocalCacheUnwind() && sd.branchCache != nil {
-		sd.branchCache.Unwind(sd.cacheUnwind.toTxNum)
+	// Reads opened before the commit still see the unwound branches and may have filled them.
+	if sd.cacheUnwind.pending && sd.branchCache != nil {
+		sd.branchCache.UnwindCommitted(sd.cacheUnwind.toTxNum, viewID)
 	}
 	for i := range pendingBranches {
 		u := &pendingBranches[i]
 		if len(u.val) == 0 {
 			sd.branchCache.Invalidate(u.key)
 		} else {
-			sd.branchCache.PutOwned(u.key, u.val, uint64(u.step), u.txN)
+			sd.branchCache.Put(u.key, u.val, uint64(u.step), u.txN)
 		}
 	}
 	if sd.stateCache != nil {
@@ -1670,7 +1663,7 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	if useBranchCache && !sd.hasLocalCacheUnwind() {
 		getOpts = getOpts.WithBranchCache()
 	}
-	if domain == kv.CommitmentDomain {
+	if domain == kv.CommitmentDomain && sd.ownedCommitmentReads {
 		getOpts = getOpts.WithOwned()
 	}
 	willFill := !sd.hasLocalCacheUnwind() && maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
@@ -2257,7 +2250,9 @@ func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxN
 			return changes, err
 		}
 		if !sd.disableInlineTouchKey {
-			sd.GetCommitmentContext().TouchKey(d, string(k), nil)
+			if err := sd.GetCommitmentContext().TouchChangedKey(tx, d, k); err != nil {
+				return changes, err
+			}
 		}
 		changes++
 	}

@@ -39,7 +39,7 @@ func TestApplyWritesPrefetchesFirstWritePerBlock(t *testing.T) {
 	var got [][]byte
 	cs := &calcState{
 		accounts:     map[accounts.Address]*calcAccountState{},
-		storageState: map[accounts.Address]*calcStorage{},
+		storageState: map[accounts.Address]map[accounts.StorageKey]uint256.Int{},
 		storageDirty: map[accounts.Address]map[accounts.StorageKey]bool{},
 		prefetch:     func(plainKey []byte) { got = append(got, plainKey) },
 	}

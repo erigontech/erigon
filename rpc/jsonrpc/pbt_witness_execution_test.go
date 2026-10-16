@@ -192,7 +192,7 @@ func TestPBinExecutionWitnessEmptyBlock(t *testing.T) {
 	defer tx.Rollback()
 	info, err := api.resolveWitnessBlock(t.Context(), tx, rpc.BlockNumberOrHashWithNumber(2))
 	require.NoError(t, err)
-	accessed, _, err := api.buildAccessedState(t.Context(), tx, info.Block, m.ChainConfig, m.Engine, info.FirstTxNumInBlock, witnessModeLegacy)
+	accessed, _, err := api.buildAccessedState(t.Context(), tx, info.Block, m.ChainConfig, m.Engine, info.FirstTxNumInBlock, witnessModeLegacy, nil)
 	require.NoError(t, err)
 	require.True(t, accessed.isEmpty())
 	result := pbtExecutionWitnessAt(t, api, m, 2)

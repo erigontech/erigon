@@ -339,7 +339,7 @@ func TestOnNewBlockLimitsNewlyDelegatedSender(t *testing.T) {
 }
 
 func TestFromDBSkipsInvalidTransactions(t *testing.T) {
-	ctx, pool, poolDB, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	ctx, pool, poolDB, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 
 	invalidTxn := newTestTxnSlot(0, 0, 2, 1, 21_000)
 	validTxn := newTestTxnSlot(0, 0, 1, 2, 21_000)
@@ -361,9 +361,7 @@ func TestFromDBSkipsInvalidTransactions(t *testing.T) {
 	}))
 
 	require.NoError(t, poolDB.View(ctx, func(poolTx kv.Tx) error {
-		return coreDB.ViewTemporal(ctx, func(coreTx kv.TemporalTx) error {
-			return pool.fromDB(ctx, poolTx, coreTx)
-		})
+		return pool.fromDB(ctx, poolTx)
 	}))
 
 	validHash := validTxn.Txn.Hash()
@@ -3078,9 +3076,7 @@ func TestFromDBBlobsOutliveReadTx(t *testing.T) {
 		return tx.Put(kv.PoolTransaction, slot.IDHash[:], append(sender[:], txnRlp...))
 	}))
 	require.NoError(poolDB.View(ctx, func(poolTx kv.Tx) error {
-		return coreDB.ViewTemporal(ctx, func(coreTx kv.TemporalTx) error {
-			return pool.fromDB(ctx, poolTx, coreTx)
-		})
+		return pool.fromDB(ctx, poolTx)
 	}))
 
 	bundles := pool.GetBlobs(blobHashes)

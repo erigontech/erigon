@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	commitmenttemporal "github.com/erigontech/erigon/internal/commitmenttest/temporal"
 )
 
 type testAggConfig struct {
@@ -136,7 +135,18 @@ func testDbAndAggregatorForLargeData(tb testing.TB, aggStep uint64, persistentDi
 
 func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.TemporalRwDB, *state.Aggregator) {
 	tb.Helper()
-	return commitmenttemporal.Open(tb, aggStep)
+	logger := log.New()
+	dirs := datadir.New(tb.TempDir())
+	db := mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	tb.Cleanup(db.Close)
+
+	agg := testAgg(tb, dirs, aggStep, logger)
+	err := agg.OpenFolder(db)
+	require.NoError(tb, err)
+	tdb, err := temporal.New(db, agg, nil)
+	require.NoError(tb, err)
+	tb.Cleanup(tdb.Close)
+	return tdb, agg
 }
 
 func testAgg(tb testing.TB, dirs datadir.Dirs, aggStep uint64, logger log.Logger) *state.Aggregator {
@@ -1172,4 +1182,10 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		require.NotEmpty(t, rh)
 		require.Equal(t, roots[i], rh)
 	}
+}
+
+func TestMergeCommitmentV3RecordsWithReferencesEnabled(t *testing.T) {
+	useCommitmentSchema(t, true)
+	_, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10})
+	require.NoError(t, agg.MergeLoop(t.Context()))
 }

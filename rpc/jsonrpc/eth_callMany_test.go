@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
@@ -384,4 +385,58 @@ func TestTraceCallManyStreamsEachResult(t *testing.T) {
 	failing := &countingWriter{failAt: 2}
 	stream = jsonstream.New(failing)
 	require.Error(t, debugApi.TraceCallMany(context.Background(), bundles, stateCtx, config, stream))
+}
+
+// A state override on a precompile applies to the bundle as it does to eth_call:
+// a code override replaces the precompile, and a moved precompile runs at its
+// new address.
+func TestCallManyStateOverridePrecompile(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	api, _ := newCallManyApisForTest(m)
+
+	identity := common.HexToAddress("0x0000000000000000000000000000000000000004")
+	moveTo := common.HexToAddress("0x00000000000000000000000000000000000000ee")
+	revert := hexutil.Bytes(hexutil.MustDecode("0x60006000fd"))
+	input := hexutil.Bytes{0xde, 0xad, 0xbe, 0xef}
+	latest := StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)}
+	callTo := func(to common.Address) ethapi.CallArgs {
+		return ethapi.CallArgs{
+			From:         &bankAddr,
+			To:           &to,
+			Data:         &input,
+			MaxFeePerGas: (*hexutil.U256)(uint256.NewInt(2e9)),
+		}
+	}
+
+	t.Run("code replaces the precompile", func(t *testing.T) {
+		res, err := api.CallMany(context.Background(), []Bundle{{Transactions: []ethapi.CallArgs{callTo(identity)}}}, latest, &ethapi.StateOverrides{
+			accounts.InternAddress(identity): {Code: &revert},
+		}, nil)
+		require.NoError(t, err)
+		require.Len(t, res, 1)
+		require.Len(t, res[0], 1)
+		require.Equal(t, "execution reverted", res[0][0]["error"])
+	})
+
+	t.Run("moved precompile runs at the new address in every call", func(t *testing.T) {
+		// The override is applied once, so the moved set has to reach every
+		// call of every bundle.
+		bundles := []Bundle{
+			{Transactions: []ethapi.CallArgs{callTo(moveTo), callTo(moveTo)}},
+			{Transactions: []ethapi.CallArgs{callTo(moveTo)}},
+		}
+		res, err := api.CallMany(context.Background(), bundles, latest, &ethapi.StateOverrides{
+			accounts.InternAddress(identity): {MovePrecompileTo: &moveTo},
+		}, nil)
+		require.NoError(t, err)
+		require.Len(t, res, 2)
+		require.Len(t, res[0], 2)
+		require.Len(t, res[1], 1)
+		for i, bundle := range res {
+			for j, call := range bundle {
+				require.NotContains(t, call, "error", "bundle %d, call %d", i, j)
+				require.Equal(t, "deadbeef", call["value"], "bundle %d, call %d", i, j)
+			}
+		}
+	})
 }

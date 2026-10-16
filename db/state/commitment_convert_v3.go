@@ -25,6 +25,7 @@ import (
 	"math"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -150,7 +151,6 @@ func convertCommitmentFileV3(
 	dt := at.d[kv.CommitmentDomain]
 	d := dt.d
 	srcCompression := commitmentFileCompression(d, vf, stepSize)
-	lastStep := kv.Step(dt.files[len(dt.files)-1].endTxNum / stepSize)
 
 	baseName := filepath.Base(file.Fullpath())
 	fileStart := time.Now()
@@ -160,7 +160,6 @@ func convertCommitmentFileV3(
 	in := make(chan *kvBatch, workers*2)
 	out := make(chan *convertedBatch, workers*2)
 	var read atomic.Uint64
-	var shadowed uint64
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
@@ -169,7 +168,6 @@ func convertCommitmentFileV3(
 		defer logEvery.Stop()
 		reader := seg.NewReader(vf.src.decompressor.MakeGetter(), srcCompression)
 		keysCompressed, valsCompressed := srcCompression.Has(seg.CompressKeys), srcCompression.Has(seg.CompressVals)
-		newer := newNewerCommitmentKeys(dt, endTxNum, stepSize)
 		batch := kvBatchPool.Get().(*kvBatch)
 		batch.reset()
 		send := func() error {
@@ -183,23 +181,16 @@ func convertCommitmentFileV3(
 			}
 		}
 		for reader.HasNext() {
-			mark := len(batch.buf)
 			k := readOwned(reader, batch, keysCompressed)
 			if !reader.HasNext() {
 				return fmt.Errorf("truncated at key %x", k)
 			}
 			n := read.Add(1)
-			if newer.contains(k) {
-				reader.Skip()
-				batch.buf = batch.buf[:mark]
-				shadowed++
-			} else {
-				v := readOwned(reader, batch, valsCompressed)
-				batch.pairs = append(batch.pairs, [2][]byte{k, v})
-				if len(batch.pairs) == commitmentV3Batch {
-					if sendErr := send(); sendErr != nil {
-						return sendErr
-					}
+			v := readOwned(reader, batch, valsCompressed)
+			batch.pairs = append(batch.pairs, [2][]byte{k, v})
+			if len(batch.pairs) == commitmentV3Batch {
+				if sendErr := send(); sendErr != nil {
+					return sendErr
 				}
 			}
 			select {
@@ -224,15 +215,20 @@ func convertCommitmentFileV3(
 			defer converting.Done()
 			wat := at.a.BeginFilesRo()
 			defer wat.Close()
-			vals := &legacyFileValues{accounts: wat.d[kv.AccountsDomain], storage: wat.d[kv.StorageDomain], maxStep: lastStep - 1}
+			vals := &legacyFileValues{accounts: wat.d[kv.AccountsDomain], storage: wat.d[kv.StorageDomain], maxStep: stepTo - 1}
 			conv := v3.NewLegacyConverter(vals, st.keysV2, incremental)
 			prevs := wat.d[kv.CommitmentDomain]
-			reach := &legacyReach{dt: prevs, maxStep: lastStep - 1, keysV2: st.keysV2}
+			reach := &legacyReach{keysV2: st.keysV2, read: func(key []byte) ([]byte, error) {
+				v, _, _, _, readErr := prevs.getLatestFromFiles(key, nil, stepTo-1)
+				return v, readErr
+			}}
+			delta := &legacyDelta{commitment: prevs, before: stepFrom - 1, after: stepTo - 1, keysV2: st.keysV2}
+			delta.reachBefore = &legacyReach{keysV2: st.keysV2, read: func(key []byte) ([]byte, error) { return delta.read(key, delta.before) }}
 			for batch := range in {
 				res := convertedBatchPool.Get().(*convertedBatch)
 				res.buf, res.ents = res.buf[:0], res.ents[:0]
 				for _, p := range batch.pairs {
-					if convErr := convertLegacyPairV3(p[0], p[1], incremental, stepFrom, prevs, conv, reach, res.emit); convErr != nil {
+					if convErr := convertLegacyPairV3(p[0], p[1], incremental, stepFrom, prevs, conv, reach, delta, res.emit); convErr != nil {
 						return convErr
 					}
 				}
@@ -330,8 +326,8 @@ func convertCommitmentFileV3(
 	}
 	elapsed := time.Since(fileStart)
 	logger.Info(fmt.Sprintf(
-		"[commitment_convert] v3 file done %s legacy=%s shadowed=%s records=%s sizeDelta=%.1f%% in %s (%s key/s) collect=%s write=%s build=%s %s",
-		baseName, common.PrettyCounter(ki), common.PrettyCounter(shadowed), common.PrettyCounter(written), pct,
+		"[commitment_convert] v3 file done %s legacy=%s records=%s sizeDelta=%.1f%% in %s (%s key/s) collect=%s write=%s build=%s %s",
+		baseName, common.PrettyCounter(ki), common.PrettyCounter(written), pct,
 		elapsed.Round(time.Millisecond), formatRate(ki, elapsed),
 		collected.Sub(fileStart).Round(time.Millisecond), resolved.Sub(collected).Round(time.Millisecond), time.Since(resolved).Round(time.Millisecond),
 		buildPhase1Prefix(fileIdx, fileTotal, processedKeys+ki, grandTotalKeys)))
@@ -345,45 +341,6 @@ func commitmentFileCompression(d *Domain, f visibleFile, stepSize uint64) seg.Fi
 	return d.Compression
 }
 
-type newerCommitmentKeys struct {
-	readers []*seg.Reader
-	keys    [][]byte
-}
-
-func newNewerCommitmentKeys(dt *DomainRoTx, fromTxNum, stepSize uint64) *newerCommitmentKeys {
-	s := &newerCommitmentKeys{}
-	for _, f := range dt.files {
-		if f.startTxNum < fromTxNum {
-			continue
-		}
-		s.readers = append(s.readers, seg.NewReader(f.src.decompressor.MakeGetter(), commitmentFileCompression(dt.d, f, stepSize)))
-		s.keys = append(s.keys, nil)
-		s.advance(len(s.readers) - 1)
-	}
-	return s
-}
-
-func (s *newerCommitmentKeys) advance(i int) {
-	if !s.readers[i].HasNext() {
-		s.readers[i] = nil
-		return
-	}
-	s.keys[i], _ = s.readers[i].Next(s.keys[i][:0])
-	s.readers[i].Skip()
-}
-
-func (s *newerCommitmentKeys) contains(k []byte) bool {
-	for i := range s.readers {
-		for s.readers[i] != nil && bytes.Compare(s.keys[i], k) < 0 {
-			s.advance(i)
-		}
-		if s.readers[i] != nil && bytes.Equal(s.keys[i], k) {
-			return true
-		}
-	}
-	return false
-}
-
 func readOwned(reader *seg.Reader, batch *kvBatch, compressed bool) []byte {
 	if !compressed {
 		word, _ := reader.Next(nil)
@@ -394,7 +351,7 @@ func readOwned(reader *seg.Reader, batch *kvBatch, compressed bool) []byte {
 	return batch.buf[start:]
 }
 
-func convertLegacyPairV3(k, v []byte, incremental bool, stepFrom kv.Step, prevs *DomainRoTx, conv *v3.LegacyConverter, reach *legacyReach, emit v3.LegacyEmitFunc) error {
+func convertLegacyPairV3(k, v []byte, incremental bool, stepFrom kv.Step, prevs *DomainRoTx, conv *v3.LegacyConverter, reach *legacyReach, delta *legacyDelta, emit v3.LegacyEmitFunc) error {
 	if commitment.IsCommitmentStateKey(k) {
 		if !bytes.Equal(k, commitment.KeyCommitmentState) {
 			return fmt.Errorf("unexpected state key %x in a legacy file", k)
@@ -405,28 +362,157 @@ func convertLegacyPairV3(k, v []byte, incremental bool, stepFrom kv.Step, prevs 
 		}
 		return emit(commitment.KeyCommitmentV3State, state, v3.LegacyDirect)
 	}
-	if len(v) >= 4 && binary.BigEndian.Uint16(v[2:4]) != 0 {
-		if live, err := reach.reachable(k, v); err != nil || !live {
+	live, err := reach.reachable(k, v)
+	if err != nil {
+		return err
+	}
+	if !incremental {
+		if !live {
+			return nil
+		}
+		return conv.Convert(k, v, nil, emit)
+	}
+	prev, err := delta.read(k, stepFrom-1)
+	if err != nil {
+		return err
+	}
+	if !live {
+		if err := conv.Tombstone(k, emit); err != nil {
+			return err
+		}
+	} else if err := conv.Convert(k, v, prev, emit); err != nil {
+		return err
+	}
+	return delta.children(k, prev, v, live, conv, reach, emit)
+}
+
+type legacyDelta struct {
+	commitment         *DomainRoTx
+	before, after      kv.Step
+	keysV2             bool
+	reachBefore        *legacyReach
+	stack, kids, prevs []legacyChild
+}
+
+func (w *legacyDelta) read(key []byte, step kv.Step) ([]byte, error) {
+	v, _, _, _, err := w.commitment.getLatestFromFiles(key, nil, step)
+	return v, err
+}
+
+func (w *legacyDelta) children(k, prev, v []byte, live bool, conv *v3.LegacyConverter, reach *legacyReach, emit v3.LegacyEmitFunc) error {
+	prefix, err := decodeLegacyPrefix(k, w.keysV2)
+	if err != nil {
+		return err
+	}
+	if w.prevs, err = appendLegacyChildren(w.prevs[:0], prefix, prev); err != nil {
+		return err
+	}
+	w.kids = w.kids[:0]
+	if live {
+		if w.kids, err = appendLegacyChildren(w.kids, prefix, v); err != nil {
 			return err
 		}
 	}
-	var prev []byte
-	if incremental {
-		var err error
-		if prev, _, _, _, err = prevs.getLatestFromFiles(k, nil, stepFrom-1); err != nil {
+	liveBefore := false
+	if len(w.prevs) != 0 {
+		if liveBefore, err = w.reachBefore.reachable(k, prev); err != nil {
 			return err
 		}
 	}
-	return conv.Convert(k, v, prev, emit)
+	for _, c := range w.kids {
+		if liveBefore && slices.ContainsFunc(w.prevs, func(p legacyChild) bool { return p.hash == c.hash && bytes.Equal(p.path, c.path) }) {
+			continue
+		}
+		if err := w.reemit(c.path, conv, emit); err != nil {
+			return err
+		}
+	}
+	for _, p := range w.prevs {
+		if slices.ContainsFunc(w.kids, func(c legacyChild) bool { return bytes.Equal(p.path, c.path) }) {
+			continue
+		}
+		if err := w.drop(p.path, conv, reach, emit); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (w *legacyDelta) reemit(path []byte, conv *v3.LegacyConverter, emit v3.LegacyEmitFunc) error {
+	w.stack = append(w.stack[:0], legacyChild{path: path})
+	for len(w.stack) > 0 {
+		path := w.stack[len(w.stack)-1].path
+		w.stack = w.stack[:len(w.stack)-1]
+		key := encodeLegacyPrefix(path, w.keysV2)
+		value, old, unchanged, err := w.unchanged(key)
+		if err != nil {
+			return err
+		}
+		if !unchanged {
+			continue
+		}
+		if convErr := conv.Convert(key, value, old, emit); convErr != nil {
+			return convErr
+		}
+		liveBefore, err := w.reachBefore.reachable(key, old)
+		if err != nil {
+			return err
+		}
+		if !liveBefore {
+			if w.stack, err = appendLegacyChildren(w.stack, path, value); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (w *legacyDelta) drop(path []byte, conv *v3.LegacyConverter, reach *legacyReach, emit v3.LegacyEmitFunc) error {
+	w.stack = append(w.stack[:0], legacyChild{path: path})
+	for len(w.stack) > 0 {
+		path := w.stack[len(w.stack)-1].path
+		w.stack = w.stack[:len(w.stack)-1]
+		key := encodeLegacyPrefix(path, w.keysV2)
+		value, _, unchanged, err := w.unchanged(key)
+		if err != nil {
+			return err
+		}
+		if !unchanged {
+			continue
+		}
+		live, err := reach.reachable(key, value)
+		if err != nil {
+			return err
+		}
+		if live {
+			continue
+		}
+		if tombErr := conv.Tombstone(key, emit); tombErr != nil {
+			return tombErr
+		}
+		if w.stack, err = appendLegacyChildren(w.stack, path, value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (w *legacyDelta) unchanged(key []byte) (value, old []byte, unchanged bool, err error) {
+	if value, err = w.read(key, w.after); err != nil {
+		return nil, nil, false, err
+	}
+	if old, err = w.read(key, w.before); err != nil {
+		return nil, nil, false, err
+	}
+	return value, old, len(value) != 0 && bytes.Equal(value, old), nil
 }
 
 type legacyReach struct {
-	dt      *DomainRoTx
-	maxStep kv.Step
-	keysV2  bool
-	path    []byte
-	chain   []legacyReachNode
-	hashed  [64]byte
+	read   func(key []byte) ([]byte, error)
+	keysV2 bool
+	path   []byte
+	chain  []legacyReachNode
+	hashed [64]byte
 }
 
 type legacyReachNode struct {
@@ -435,6 +521,9 @@ type legacyReachNode struct {
 }
 
 func (r *legacyReach) reachable(legacyKey, value []byte) (bool, error) {
+	if len(value) < 4 || binary.BigEndian.Uint16(value[2:4]) == 0 {
+		return true, nil
+	}
 	path, err := decodeLegacyPrefix(legacyKey, r.keysV2)
 	if err != nil || len(path) == 0 {
 		return err == nil, err
@@ -450,7 +539,7 @@ func (r *legacyReach) reachable(legacyKey, value []byte) (bool, error) {
 	r.chain = r.chain[:keep]
 	r.path = append(r.path[:0], path...)
 	if len(r.chain) == 0 {
-		root, _, _, _, err := r.dt.getLatestFromFiles(encodeLegacyPrefix(nil, r.keysV2), nil, r.maxStep)
+		root, err := r.read(encodeLegacyPrefix(nil, r.keysV2))
 		if err != nil {
 			return false, err
 		}
@@ -469,7 +558,7 @@ func (r *legacyReach) reachable(legacyKey, value []byte) (bool, error) {
 			r.chain = append(r.chain, legacyReachNode{next, bytes.Clone(value)})
 			return true, nil
 		}
-		child, _, _, _, err := r.dt.getLatestFromFiles(encodeLegacyPrefix(path[:next], r.keysV2), nil, r.maxStep)
+		child, err := r.read(encodeLegacyPrefix(path[:next], r.keysV2))
 		if err != nil || len(child) < 4 || binary.BigEndian.Uint16(child[2:4]) == 0 {
 			return false, err
 		}

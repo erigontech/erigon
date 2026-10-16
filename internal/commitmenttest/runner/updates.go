@@ -18,11 +18,9 @@ package runner
 
 import (
 	"bytes"
-	"fmt"
 
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/internal/commitmenttest"
-	keccak "github.com/erigontech/fastkeccak"
 )
 
 func Update(op commitmenttest.Op) *commitment.Update {
@@ -55,34 +53,6 @@ func Update(op commitmenttest.Op) *commitment.Update {
 		copy(u.Storage[:], op.Storage)
 	}
 	return u
-}
-
-func Feed(ops []commitmenttest.Op) (*commitment.Feed, error) {
-	feed := &commitment.Feed{Keys: len(ops)}
-	index := make(map[string]int)
-	for _, op := range ops {
-		if op.Read || (len(op.Key) != 20 && len(op.Key) != 52) {
-			return nil, fmt.Errorf("feed requires account/storage writes: %x", op.Key)
-		}
-		addr := string(op.Key[:20])
-		at, ok := index[addr]
-		if !ok {
-			at = len(feed.Accounts)
-			index[addr] = at
-			feed.Accounts = append(feed.Accounts, commitment.FeedAccount{Hash: keccak.Sum256(op.Key[:20])})
-		}
-		account := &feed.Accounts[at]
-		if len(op.Key) == 20 {
-			account.Update = Update(op)
-			continue
-		}
-		slot := commitment.FeedSlot{Hash: keccak.Sum256(op.Key[20:])}
-		if !op.Delete {
-			slot.Value = append([]byte(nil), op.Storage...)
-		}
-		account.Slots = append(account.Slots, slot)
-	}
-	return feed, nil
 }
 
 func CloneDeltas(in []commitment.BranchDelta) []commitment.BranchDelta {

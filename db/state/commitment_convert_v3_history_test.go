@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -29,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -246,4 +248,127 @@ func TestConvertCommitmentFiles_V3History(t *testing.T) {
 		require.Equalf(t, roots[txNum], root, "root as of txNum %d", txNum+1)
 	}
 	require.Greater(t, checked, 90)
+}
+
+func TestRestoreCommitmentFiles_V3RestoresHistory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	db, agg, _ := testDbAggregatorWithCommitmentHistory(t, 10, 32)
+	dirs := agg.Dirs()
+	legacyHistory, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "*-commitment.*.v"))
+	require.NoError(t, err)
+	require.NotEmpty(t, legacyHistory)
+
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
+	agg.CloseFilesNoReopen()
+	require.NoError(t, state.RestoreCommitmentFiles(t.Context(), dirs, log.New()))
+
+	history, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "*-commitment.*.v"))
+	require.NoError(t, err)
+	require.ElementsMatch(t, legacyHistory, history)
+	domain, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-commitment.*.kv"))
+	require.NoError(t, err)
+	for _, p := range domain {
+		require.Falsef(t, strings.HasPrefix(filepath.Base(p), "v3.0-"), "%s left after restore", filepath.Base(p))
+	}
+}
+
+func TestConvertCommitmentFiles_V3HistoryStaleStorageBranchOfRecreatedAccount(t *testing.T) {
+	testV3HistoryStaleStorageBranch(t, 4)
+}
+
+func testV3HistoryStaleStorageBranch(t *testing.T, accounts int) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	const stepSize, steps = 4, 3
+	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
+	put, del, putAccount := domainWriter(t, domains, rwTx)
+	ctx := t.Context()
+
+	addrs, _ := generateInputData(t, length.Addr, 1, accounts)
+	owner := addrs[0]
+	next := uint64(1)
+	live := [][]byte{
+		storageSlotWithHashPrefix(t, []byte{0xe, 0x1, 0x2}, &next),
+		storageSlotWithHashPrefix(t, []byte{0xe, 0x5}, &next),
+		storageSlotWithHashPrefix(t, []byte{0x3}, &next),
+	}
+	old := [][]byte{
+		storageSlotWithHashPrefix(t, []byte{0xe, 0x1, 0x7, 0x0}, &next),
+		storageSlotWithHashPrefix(t, []byte{0xe, 0x1, 0x7, 0x9}, &next),
+		storageSlotWithHashPrefix(t, []byte{0xe, 0x1, 0xe, 0x5}, &next),
+		storageSlotWithHashPrefix(t, []byte{0xe, 0x1, 0xe, 0xa}, &next),
+	}
+	later := storageSlotWithHashPrefix(t, []byte{0xe, 0x1, 0x7, 0x3}, &next)
+	slot := func(s []byte) []byte { return append(bytes.Clone(owner), s...) }
+	for txNum := range uint64(stepSize * steps) {
+		switch txNum {
+		case 0:
+			for _, a := range addrs {
+				putAccount(a, txNum)
+			}
+			for _, s := range append(slices.Clone(live), old...) {
+				put(kv.StorageDomain, slot(s), []byte{1}, txNum)
+			}
+		case 1:
+			for _, s := range append(slices.Clone(live), old...) {
+				del(kv.StorageDomain, slot(s), txNum)
+			}
+			del(kv.AccountsDomain, owner, txNum)
+		case 2:
+			putAccount(owner, txNum)
+			for _, s := range live {
+				put(kv.StorageDomain, slot(s), []byte{2}, txNum)
+			}
+		case 4:
+			put(kv.StorageDomain, slot(later), []byte{3}, txNum)
+		default:
+			putAccount(addrs[1], txNum)
+		}
+		_, err := domains.ComputeCommitment(ctx, rwTx, true, txNum, txNum, "", nil)
+		require.NoError(t, err)
+	}
+	require.NoError(t, domains.Flush(ctx, rwTx))
+	require.NoError(t, rwTx.Commit())
+	require.NoError(t, agg.BuildFiles(db, stepSize*steps, unboundedFinalityCtx))
+
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
+
+	for txNum := uint64(1); txNum <= stepSize*steps; txNum++ {
+		_, err := state.DebugCommitmentV3RootAsOf(ctx, agg, txNum)
+		require.NoErrorf(t, err, "records as of txNum %d", txNum)
+	}
+}
+
+func TestRestoreCommitmentFiles_V3ResumesHistoryAfterDomains(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	db, agg, _ := testDbAggregatorWithCommitmentHistory(t, 10, 32)
+	dirs := agg.Dirs()
+	legacyHistory, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "*-commitment.*.v"))
+	require.NoError(t, err)
+
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
+	agg.CloseFilesNoReopen()
+	converted, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "v3.0-commitment.*"))
+	require.NoError(t, err)
+	for _, p := range converted {
+		require.NoError(t, dir.RemoveFile(p))
+	}
+	domainBackup := filepath.Join(dirs.Snap, "backup", "domains")
+	backups, err := os.ReadDir(domainBackup)
+	require.NoError(t, err)
+	for _, e := range backups {
+		require.NoError(t, os.Rename(filepath.Join(domainBackup, e.Name()), filepath.Join(dirs.SnapDomain, e.Name())))
+	}
+	require.NoError(t, dir.RemoveFile(domainBackup))
+
+	require.NoError(t, state.RestoreCommitmentFiles(t.Context(), dirs, log.New()))
+	history, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "*-commitment.*.v"))
+	require.NoError(t, err)
+	require.ElementsMatch(t, legacyHistory, history)
 }

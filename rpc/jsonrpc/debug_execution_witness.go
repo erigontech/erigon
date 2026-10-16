@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"slices"
+	"sync"
 
 	"github.com/holiman/uint256"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
@@ -22,11 +24,13 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	commitmentv3 "github.com/erigontech/erigon/execution/commitment/v3"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -203,6 +207,15 @@ func (s *RecordingState) ReadAccountData(address accounts.Address) (*accounts.Ac
 		}
 	}
 	return acc, err
+}
+
+func (s *RecordingState) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return s.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (s *RecordingState) HasAccount(address common.Address) (bool, error) {
+	acc, err := s.ReadAccountByPlainAddr(address)
+	return acc != nil, err
 }
 
 func (s *RecordingState) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
@@ -725,11 +738,15 @@ func (api *BaseAPI) buildAccessedState(
 	engine rules.EngineReader,
 	firstTxNumInBlock uint64,
 	mode witnessMode,
+	parent commitmentdb.ParentState,
 ) (accessed *accessedState, accessedBlockHashes []uint64, err error) {
 	blockNum := block.NumberU64()
 
 	// Create a state reader at the parent block state using the exact txnum
 	var stateReader state.StateReader = state.NewHistoryReaderV3(tx, firstTxNumInBlock)
+	if parent != nil {
+		stateReader = &parentStateReader{StateReader: stateReader, parent: parent}
+	}
 
 	// Create a combined recording state (reader + writer with in-memory overlay)
 	recordingState := NewRecordingState(stateReader)
@@ -775,6 +792,9 @@ func (api *BaseAPI) buildAccessedState(
 
 	// Execute all transactions in the block
 	for txIndex, txn := range block.Transactions() {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		msg, err := txn.AsMessage(*signer, header.BaseFee, blockRules)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to convert tx %d to message: %w", txIndex, err)
@@ -821,6 +841,69 @@ func (api *BaseAPI) buildAccessedState(
 	}
 
 	return collectAccessedState(recordingState, mode), accessedBlockHashes, nil
+}
+
+var (
+	mxParentStateHit  = metrics.GetOrCreateCounter("witness_parent_state_hits_total")
+	mxParentStateMiss = metrics.GetOrCreateCounter("witness_parent_state_misses_total")
+)
+
+type parentStateReader struct {
+	state.StateReader
+	parent commitmentdb.ParentState
+}
+
+func (r *parentStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
+	acc, ok := r.parent.GetCommittedAccount(address)
+	if !ok {
+		mxParentStateMiss.Inc()
+		return r.StateReader.ReadAccountData(address)
+	}
+	mxParentStateHit.Inc()
+	var got *accounts.Account
+	if acc != nil {
+		c := *acc
+		got = &c
+	}
+	if dbg.AssertEnabled {
+		want, err := r.StateReader.ReadAccountData(address)
+		if err != nil {
+			return nil, err
+		}
+		if (want == nil) != (got == nil) || want != nil && *want != *got {
+			return nil, fmt.Errorf("parent state account %x: %+v, history %+v", address, got, want)
+		}
+	}
+	return got, nil
+}
+
+func (r *parentStateReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(address)
+}
+
+func (r *parentStateReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	val, ok := r.parent.GetCommittedStorage(address, key)
+	if !ok {
+		mxParentStateMiss.Inc()
+		return r.StateReader.ReadAccountStorage(address, key)
+	}
+	mxParentStateHit.Inc()
+	var v uint256.Int
+	v.SetBytes(val)
+	if dbg.AssertEnabled {
+		want, wantOK, err := r.StateReader.ReadAccountStorage(address, key)
+		if err != nil {
+			return v, false, err
+		}
+		if !wantOK {
+			want.Clear()
+		}
+		if want != v {
+			err = fmt.Errorf("parent state slot %x %x: %x, history %x", address, key, &v, &want)
+			return v, false, err
+		}
+	}
+	return v, len(val) > 0, nil
 }
 
 // ExecutionWitness implements debug_executionWitness.
@@ -968,6 +1051,100 @@ var (
 // in-memory commitment fold.
 type headCaptureSource struct {
 	pinnedParentTx kv.TemporalTx
+	warmTxs        []kv.TemporalTx
+	records        *commitmentdb.ParentRecords
+	warm           *sync.Map
+}
+
+type warmRecord struct {
+	data []byte
+	step kv.Step
+}
+
+var mxWarmRecords = metrics.GetOrCreateCounter("witness_warm_records_total")
+
+func (hc *headCaptureSource) recordReader() *commitmentdb.ParentRecords {
+	if hc.warm == nil {
+		return hc.records
+	}
+	r := &commitmentdb.ParentRecords{}
+	if hc.records != nil {
+		*r = *hc.records
+	}
+	parent := r.Get
+	r.Get = func(key []byte) ([]byte, kv.Step, bool) {
+		if parent != nil {
+			if v, step, ok := parent(key); ok {
+				return v, step, true
+			}
+		}
+		if v, ok := hc.warm.Load(string(key)); ok {
+			rec := v.(warmRecord)
+			return rec.data, rec.step, true
+		}
+		return nil, 0, false
+	}
+	return r
+}
+
+func (hc *headCaptureSource) warmPaths(ctx context.Context, accessed *accessedState) {
+	type path struct{ account, slot []byte }
+	var paths []path
+	for addr := range accessed.Addresses {
+		paths = append(paths, path{account: crypto.Keccak256(addr[:])})
+	}
+	for addr := range accessed.CodeAddrs {
+		paths = append(paths, path{account: crypto.Keccak256(addr[:])})
+	}
+	for addr, slots := range accessed.Storage {
+		account := crypto.Keccak256(addr[:])
+		paths = append(paths, path{account: account})
+		for slot := range slots {
+			paths = append(paths, path{account: account, slot: crypto.Keccak256(slot[:])})
+		}
+	}
+	txs := append([]kv.TemporalTx{hc.pinnedParentTx}, hc.warmTxs...)
+	hc.warm = &sync.Map{}
+	var wg sync.WaitGroup
+	var crash sync.Once
+	var crashed any
+	for w, tx := range txs {
+		wg.Go(func() {
+			defer func() {
+				if r := recover(); r != nil {
+					crash.Do(func() { crashed = fmt.Sprintf("%v\n%s", r, dbg.Stack()) })
+				}
+			}()
+			read := func(key []byte) []byte {
+				if hc.records != nil {
+					if v, _, ok := hc.records.Get(key); ok {
+						return v
+					}
+				}
+				if v, ok := hc.warm.Load(string(key)); ok {
+					return v.(warmRecord).data
+				}
+				v, step, err := tx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
+				if err != nil {
+					return nil
+				}
+				hc.warm.Store(string(key), warmRecord{data: bytes.Clone(v), step: step})
+				mxWarmRecords.Inc()
+				return v
+			}
+			for i := w; i < len(paths) && ctx.Err() == nil; i += len(txs) {
+				if paths[i].slot == nil {
+					commitmentv3.PrefetchPath(read, paths[i].account, nil, 0)
+				} else {
+					commitmentv3.PrefetchPath(read, paths[i].account, paths[i].slot, 64)
+				}
+			}
+		})
+	}
+	wg.Wait()
+	if crashed != nil {
+		panic(crashed)
+	}
 }
 
 // collapseReaderFor selects the collapse-detection state reader: plain state at block
@@ -975,7 +1152,7 @@ type headCaptureSource struct {
 // parent-block history txNum (durable).
 func collapseReaderFor(hc *headCaptureSource, tx kv.TemporalTx, commitmentDomain kv.Domain, firstTxNumInBlock, endTxNum uint64) commitmentdb.StateReader {
 	if hc != nil {
-		return commitmentdb.NewHeadCaptureStateReaderForDomain(hc.pinnedParentTx, tx, commitmentDomain, endTxNum)
+		return commitmentdb.NewHeadCaptureStateReaderForDomain(hc.pinnedParentTx, tx, commitmentDomain, endTxNum).WithParentRecords(hc.recordReader())
 	}
 	return commitmentdb.NewSplitHistoryReaderForDomain(tx, commitmentDomain, firstTxNumInBlock, endTxNum, false /* withHistory */)
 }
@@ -986,7 +1163,7 @@ func collapseReaderFor(hc *headCaptureSource, tx kv.TemporalTx, commitmentDomain
 // WithHistory()==true so the read-only witness-capture fold does not write branches.
 func trieReaderFor(hc *headCaptureSource, tx kv.TemporalTx, commitmentDomain kv.Domain, firstTxNumInBlock uint64) commitmentdb.StateReader {
 	if hc != nil {
-		return commitmentdb.NewHeadCaptureTrieStateReaderForDomain(hc.pinnedParentTx, tx, commitmentDomain, firstTxNumInBlock)
+		return commitmentdb.NewHeadCaptureTrieStateReaderForDomain(hc.pinnedParentTx, tx, commitmentDomain, firstTxNumInBlock).WithParentRecords(hc.recordReader())
 	}
 	return commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
 }
@@ -997,8 +1174,8 @@ func trieReaderFor(hc *headCaptureSource, tx kv.TemporalTx, commitmentDomain kv.
 // state is read from committedTx's history exactly as the durable path does; only the
 // commitment source changes. Direct tx.GetLatest reads keep the pinned commitment
 // state independent of the build's in-memory commitment fold.
-func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, committedTx, pinnedParentTx kv.TemporalTx, info *witnessBlockInfo, mode witnessMode, requestedTrie witnessTrie) (*ExecutionWitnessResult, error) {
-	hc := &headCaptureSource{pinnedParentTx: pinnedParentTx}
+func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, committedTx kv.TemporalTx, pin *rollingPin, records *commitmentdb.ParentRecords, info *witnessBlockInfo, mode witnessMode, requestedTrie witnessTrie) (*ExecutionWitnessResult, error) {
+	hc := &headCaptureSource{pinnedParentTx: pin.tx, warmTxs: pin.warm, records: records}
 	return api.buildWitnessResult(ctx, committedTx, hc, info, mode, requestedTrie)
 }
 
@@ -1152,7 +1329,11 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	engine := api.engine()
 	fullEngine, fullEngineOK := engine.(rules.Engine)
 
-	accessed, accessedBlockHashes, err := api.buildAccessedState(ctx, tx, block, chainConfig, engine, firstTxNumInBlock, mode)
+	var parent commitmentdb.ParentState
+	if hc != nil && hc.records != nil {
+		parent = hc.records.State
+	}
+	accessed, accessedBlockHashes, err := api.buildAccessedState(ctx, tx, block, chainConfig, engine, firstTxNumInBlock, mode, parent)
 	if err != nil {
 		return nil, err
 	}
@@ -1220,6 +1401,9 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 
 	if accessed.isEmpty() {
 		return result, nil
+	}
+	if hc != nil && len(hc.warmTxs) != 0 && sdCtx.Trie().Variant() == commitment.VariantCommitmentV3 {
+		hc.warmPaths(ctx, accessed)
 	}
 
 	siblingPaths, err := detectCollapseSiblings(ctx, tx, hc, domains, sdCtx,
@@ -1303,7 +1487,14 @@ func (a *accessedState) isEmpty() bool {
 
 // touchNonZeroKeys touches only keys whose value is non-zero in at least one of pre/post state,
 // skipping zero→zero no-ops that would corrupt the HPH trie's internal maps.
-func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommitmentContext, post, pre commitmentdb.StateReader, stepSize uint64) {
+func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommitmentContext, post, pre commitmentdb.StateReader, stepSize uint64) (deleted map[string]struct{}) {
+	deleted = make(map[string]struct{})
+	touch := func(d kv.Domain, plainKey, postEnc []byte) {
+		if len(postEnc) == 0 {
+			deleted[string(plainKey)] = struct{}{}
+		}
+		sdCtx.TouchKey(d, string(plainKey), postEnc)
+	}
 	for addr := range a.Addresses {
 		plainKey := addr[:]
 		postEnc, _, _ := post.Read(kv.AccountsDomain, plainKey, stepSize)
@@ -1313,11 +1504,11 @@ func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommit
 				continue
 			}
 		}
-		sdCtx.TouchKey(kv.AccountsDomain, string(plainKey), postEnc)
+		touch(kv.AccountsDomain, plainKey, postEnc)
 	}
 	for addr := range a.CodeAddrs {
 		postEnc, _, _ := post.Read(kv.AccountsDomain, addr[:], stepSize)
-		sdCtx.TouchKey(kv.AccountsDomain, string(addr[:]), postEnc)
+		touch(kv.AccountsDomain, addr[:], postEnc)
 	}
 	for addr, keys := range a.Storage {
 		for key := range keys {
@@ -1331,9 +1522,10 @@ func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommit
 					continue
 				}
 			}
-			sdCtx.TouchKey(kv.StorageDomain, string(plainKey), postEnc)
+			touch(kv.StorageDomain, plainKey, postEnc)
 		}
 	}
+	return deleted
 }
 
 func (a *accessedState) touchAll(sdCtx *commitmentdb.SharedDomainsCommitmentContext) {
@@ -1557,28 +1749,40 @@ func detectCollapseSiblings(
 	}
 
 	preReader := commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
-	accessed.touchNonZeroKeys(sdCtx, splitStateReader, preReader, domains.StepSize())
+	touchedDeletes := accessed.touchNonZeroKeys(sdCtx, splitStateReader, preReader, domains.StepSize())
 
 	type collapseCandidate struct {
 		siblingPath  []byte
 		branchPrefix []byte
 	}
 	var candidates []collapseCandidate
-	sdCtx.SetCollapseTracer(func(hashedKeyPath, branchPrefix []byte) {
+	trace := func(hashedKeyPath, branchPrefix []byte) {
 		candidates = append(candidates, collapseCandidate{
 			siblingPath:  bytes.Clone(hashedKeyPath),
 			branchPrefix: bytes.Clone(branchPrefix),
 		})
-	})
-	defer sdCtx.SetCollapseTracer(nil)
-
-	computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
-	if err != nil {
-		return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %w", err)
 	}
+	traced := false
+	if mode == witnessModeLegacy && hc != nil && hc.records != nil && hc.records.Deleted != nil {
+		if err := checkTracedDeletes(hc.records.Deleted, touchedDeletes, preReader, domains.StepSize()); err != nil {
+			return nil, err
+		}
+		if traced, err = sdCtx.TraceCollapses(ctx, tx, blockNum, firstTxNumInBlock, trace); err != nil {
+			return nil, fmt.Errorf("[debug_executionWitness] collapse detection via TraceCollapses failed: %w", err)
+		}
+	}
+	if !traced {
+		sdCtx.SetCollapseTracer(trace)
+		defer sdCtx.SetCollapseTracer(nil)
 
-	if common.Hash(computedRootHash) != expectedBlockRoot {
-		return nil, fmt.Errorf("[debug_executionWitness] computedRootHash(%x)!= expectedRootHash(%x)", computedRootHash, expectedBlockRoot)
+		computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
+		if err != nil {
+			return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %w", err)
+		}
+
+		if common.Hash(computedRootHash) != expectedBlockRoot {
+			return nil, fmt.Errorf("[debug_executionWitness] computedRootHash(%x)!= expectedRootHash(%x)", computedRootHash, expectedBlockRoot)
+		}
 	}
 
 	// The canonical witness (insert-before-delete order) does not touch the sibling of
@@ -1601,6 +1805,26 @@ func detectCollapseSiblings(
 		siblingPaths = append(siblingPaths, c.siblingPath)
 	}
 	return siblingPaths, nil
+}
+
+func checkTracedDeletes(verified [][]byte, traced map[string]struct{}, pre commitmentdb.StateReader, stepSize uint64) error {
+	for _, key := range verified {
+		if _, ok := traced[string(key)]; ok {
+			continue
+		}
+		d := kv.AccountsDomain
+		if len(key) != length.Addr {
+			d = kv.StorageDomain
+		}
+		preEnc, _, err := pre.Read(d, key, stepSize)
+		if err != nil {
+			return err
+		}
+		if len(preEnc) != 0 {
+			return fmt.Errorf("[debug_executionWitness] block deletes %x, which the collapse trace does not delete", key)
+		}
+	}
+	return nil
 }
 
 // buildWitnessTrie re-seeks the commitment against the parent-state reader, touches
@@ -1990,6 +2214,15 @@ func (s *witnessStateless) TracePrefix() string {
 
 func (s *witnessStateless) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	return s.ReadAccountData(address)
+}
+
+func (s *witnessStateless) HasAccount(address common.Address) (bool, error) {
+	acc, err := s.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
+func (s *witnessStateless) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return s.ReadAccountData(accounts.InternAddress(address))
 }
 
 func (s *witnessStateless) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
