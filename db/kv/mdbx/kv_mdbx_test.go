@@ -1068,7 +1068,7 @@ func TestMdbxWithSyncBytes(t *testing.T) {
 		MapSize(8 * datasize.GB).
 		GrowthStep(16 * datasize.MB).
 		Flags(func(f uint) uint { return f&^mdbxgo.Durable | mdbxgo.SafeNoSync }).
-		SyncPeriod(2 * time.Second).
+		PollerSyncInterval(2 * time.Second).
 		SyncBytes(20_000).
 		DirtySpace(uint64(64 * datasize.MB)).
 		// WithMetrics().

@@ -59,7 +59,7 @@ func BenchmarkNodeDBGeometry(b *testing.B) {
 			return mdbxgo.SafeNoSync | mdbxgo.WriteMap
 		}).
 		SyncBytes(20 * datasize.MB).
-		SyncPeriod(2 * time.Second).
+		PollerSyncInterval(2 * time.Second).
 		DirtySpace(uint64(32 * datasize.MB))
 
 	doBench := func(b *testing.B, db kv.RwDB) {
