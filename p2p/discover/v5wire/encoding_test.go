@@ -127,6 +127,53 @@ func TestHandshake_timeout(t *testing.T) {
 	net.nodeB.expectDecodeErr(t, errUnexpectedHandshake, findnode)
 }
 
+// This test checks that handshakeGC removes timed-out handshakes in the order
+// they were sent, and keeps handshakes which were replaced or stored again later.
+func TestHandshakeGC(t *testing.T) {
+	var (
+		clock    mclock.Simulated
+		sc       = NewSessionCache(10, &clock)
+		addr     = netip.MustParseAddrPort("127.0.0.1:30303")
+		replaced = &Whoareyou{}
+		readded  = &Whoareyou{}
+		recent   = &Whoareyou{}
+	)
+	for i := 0; i < 100; i++ {
+		sc.storeSentHandshake(enode.ID{byte(i)}, addr, &Whoareyou{})
+	}
+	sc.storeSentHandshake(enode.ID{0xff}, addr, &Whoareyou{})
+	sc.storeSentHandshake(enode.ID{0xfd}, addr, &Whoareyou{})
+	sc.deleteHandshake(enode.ID{0xfd}, addr)
+	clock.Run(handshakeTimeout / 2)
+	sc.storeSentHandshake(enode.ID{0xfe}, addr, recent)
+	sc.storeSentHandshake(enode.ID{0xff}, addr, replaced)
+	sc.storeSentHandshake(enode.ID{0xfd}, addr, readded)
+
+	clock.Run(handshakeTimeout/2 + 1)
+	sc.handshakeGC()
+	if len(sc.handshakes) != 3 {
+		t.Fatalf("wrong number of handshakes after GC: got %d, want 3", len(sc.handshakes))
+	}
+	if len(sc.sent) != 3 {
+		t.Fatalf("wrong send order length after GC: got %d, want 3", len(sc.sent))
+	}
+	if sc.getHandshake(enode.ID{0xff}, addr) != replaced {
+		t.Fatal("replaced handshake removed")
+	}
+	if sc.getHandshake(enode.ID{0xfd}, addr) != readded {
+		t.Fatal("re-added handshake removed")
+	}
+	if sc.getHandshake(enode.ID{0xfe}, addr) != recent {
+		t.Fatal("recent handshake removed")
+	}
+
+	clock.Run(handshakeTimeout)
+	sc.handshakeGC()
+	if len(sc.handshakes) != 0 || sc.sent != nil {
+		t.Fatalf("handshakes left after timeout: %d, send order %d", len(sc.handshakes), len(sc.sent))
+	}
+}
+
 // This test checks handshake behavior when no record is sent in the auth response.
 func TestHandshake_norecord(t *testing.T) {
 	t.Parallel()
