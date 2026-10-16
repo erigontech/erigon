@@ -2067,8 +2067,9 @@ func (s *schedulerTest) queued() int {
 func (s *schedulerTest) deliver(tv *taskVersion, reads state.ReadSet, err error) {
 	s.t.Helper()
 	res := &exec.TxResult{Task: tv, TxIn: reads, TxOut: &state.WriteSet{}, Err: err, ExecutionResult: evmtypes.ExecutionResult{ReceiptGasUsed: 21000}}
-	_, nextErr := s.be.nextResult(s.ctx, s.pe, res, s.roTx)
+	blockRes, nextErr := s.be.nextResult(s.ctx, s.pe, res, s.roTx)
 	require.NoError(s.t, nextErr)
+	require.Nil(s.t, blockRes)
 }
 
 func (s *schedulerTest) parked(tx int) bool {
@@ -2119,6 +2120,21 @@ func TestTxDependencyWaitsForBlockerValidation(t *testing.T) {
 	require.Equal(t, 2, s.queued(), "dependent not dispatched after its blocker validated")
 }
 
+func TestTxDependencyIgnoresEarlierValidation(t *testing.T) {
+	s := newSchedulerTest(t, map[int][]int{2: {0}},
+		accounts.InternAddress(common.HexToAddress("0xa0")),
+		accounts.InternAddress(common.HexToAddress("0xb1")),
+		accounts.InternAddress(common.HexToAddress("0xc2")))
+	first, blocker := s.dispatched(), s.dispatched()
+
+	s.deliver(first, state.ReadSet{}, nil)
+	require.True(t, s.be.validateTasks.checkComplete(0))
+	require.True(t, s.parked(2), "dependent released by a validation it does not wait on")
+
+	s.deliver(blocker, state.ReadSet{}, nil)
+	require.Equal(t, 2, s.queued(), "dependent not dispatched after its blocker validated")
+}
+
 func TestAbortDependentReleasedWhenBlockerExecutes(t *testing.T) {
 	s := newSchedulerTest(t, nil,
 		accounts.InternAddress(common.HexToAddress("0xa0")),
@@ -2151,10 +2167,13 @@ func TestFrontierRetryDispatchedBeforeBatchTail(t *testing.T) {
 	t.Cleanup(pe.in.Close)
 	be := newBlockExec(newParallelTestBlock(1), new(protocol.GasPool).AddGas(10_000_000), nil, make(chan applyResult, 8), make(chan applyResult, 8), false, nil)
 	be.versionMap.WriteAddress(raced, state.Version{TxIndex: -1}, &accounts.Account{CodeHash: accounts.EmptyCodeHash}, true)
-	reads := state.ReadSet{}
-	reads.SetAddress(raced, state.VersionedRead[state.AccountView]{
-		ReadHeader: state.ReadHeader{Source: state.StorageRead, Version: state.UnknownVersion},
-	})
+	racedRead := func() state.ReadSet {
+		reads := state.ReadSet{}
+		reads.SetAddress(raced, state.VersionedRead[state.AccountView]{
+			ReadHeader: state.ReadHeader{Source: state.StorageRead, Version: state.UnknownVersion},
+		})
+		return reads
+	}
 	txs := []types.Transaction{signedTx, signedTx, signedTx}
 	for i := range txs {
 		be.tasks = append(be.tasks, &execTask{Task: &exec.TxTask{
@@ -2171,7 +2190,7 @@ func TestFrontierRetryDispatchedBeforeBatchTail(t *testing.T) {
 	for i := range results {
 		results[i] = &exec.TxResult{
 			Task:            &taskVersion{execTask: be.tasks[i], version: state.Version{BlockNum: 1, TxIndex: i, Incarnation: 3 * i, TxNum: uint64(i + 1)}},
-			TxIn:            reads,
+			TxIn:            racedRead(),
 			ExecutionResult: evmtypes.ExecutionResult{ReceiptGasUsed: 10000},
 		}
 	}
@@ -2180,7 +2199,7 @@ func TestFrontierRetryDispatchedBeforeBatchTail(t *testing.T) {
 	be.execFailed = []int{0, 0, 0}
 	be.execAborted = []int{0, 0, 0}
 	be.execTasks.pushPending(2)
-	be.blockIO.RecordReads(results[1].Version(), reads)
+	be.blockIO.RecordReads(results[1].Version(), results[1].TxIn)
 	be.execTasks.setInProgress(1)
 	be.execTasks.markComplete(1)
 	be.validateTasks.pushPending(1)
