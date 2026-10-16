@@ -110,7 +110,7 @@ func TestOpenFolderRejectsLegacyPBinStateInFiles(t *testing.T) {
 	settings := &state.ErigonDBSettings{StepSize: 1, StepsInFrozenFile: 1, TrieVariant: &variant, TrieHash: &hash}
 	initialSettings := &state.ErigonDBSettings{StepSize: 1, StepsInFrozenFile: 1}
 	require.NoError(t, state.WriteErigonDBSettings(dirs, initialSettings))
-	path := filepath.Join(dirs.SnapDomain, "v1.0-commitment.0-1.kv")
+	path := filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv")
 	compressor, err := seg.NewCompressor(t.Context(), "legacy-pbin-state", path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
 	require.NoError(t, compressor.AddWord(commitmentdb.KeyCommitmentState))

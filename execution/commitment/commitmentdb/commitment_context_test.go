@@ -164,6 +164,9 @@ type seekTemporalTx struct {
 
 func (tx *seekTemporalTx) GetOne(string, []byte) ([]byte, error) { return tx.progress, nil }
 func (tx *seekTemporalTx) AggTx() any                            { return tx.agg }
+func (tx *seekTemporalTx) GetLatest(kv.Domain, []byte, kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	return nil, 0, nil
+}
 
 type seekCommitmentLifecycle struct {
 	frozen  map[kv.Domain]uint64

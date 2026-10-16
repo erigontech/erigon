@@ -490,6 +490,9 @@ func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
 }
 
 func (cs *calcState) FlushToFeed(feed *commitment.Feed) {
+	if cs.hashes == nil {
+		cs.hashes = newCalcHashes()
+	}
 	slots := 0
 	for _, dirty := range cs.storageDirty {
 		slots += len(dirty)

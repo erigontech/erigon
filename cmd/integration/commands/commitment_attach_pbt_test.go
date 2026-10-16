@@ -59,7 +59,7 @@ func TestValidatePBTAttachFilesRequiresBothCommitmentDomains(t *testing.T) {
 func TestValidatePBTAttachFilesAcceptsStaleNodeBinFiles(t *testing.T) {
 	node, published := newPBTAttachFileTrees(t, true)
 	for _, dirs := range []datadir.Dirs{node, published} {
-		for _, name := range []string{"v1.0-accounts.1-2.kv", "v1.0-storage.1-2.kv", "v1.0-code.1-2.kv", "v1.0-commitment.1-2.kv"} {
+		for _, name := range []string{"v1.0-accounts.1-2.kv", "v1.0-storage.1-2.kv", "v1.0-code.1-2.kv", "v3.0-commitment.1-2.kv"} {
 			require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, name), []byte("step"), 0o644))
 		}
 	}
@@ -214,7 +214,7 @@ func TestAdoptPBTFilesReplacesStateAndCommitmentFiles(t *testing.T) {
 		"v1.0-accounts.0-1.kv",
 		"v1.0-storage.0-1.kv",
 		"v1.0-code.0-1.kv",
-		"v1.0-commitment.0-1.kv",
+		"v3.0-commitment.0-1.kv",
 		"v1.0-commitment-bin.0-1.kv",
 	} {
 		got, readErr := os.ReadFile(filepath.Join(node.SnapDomain, name))
@@ -374,7 +374,7 @@ func TestAttachPBTRemovesOutputSettingsRefusalCases(t *testing.T) {
 		node, published := newPBTAttachFileTrees(t, true)
 		writePBTAttachSettings(t, node, commitment.PBinHashBlake3, 1, 7)
 		writePBTAttachSettings(t, published, commitment.PBinHashBlake3, 1, 7)
-		require.NoError(t, dir.RemoveFile(filepath.Join(published.SnapDomain, "v1.0-commitment.0-1.kv")))
+		require.NoError(t, dir.RemoveFile(filepath.Join(published.SnapDomain, "v3.0-commitment.0-1.kv")))
 		err := attachPBT(t.Context(), node.DataDir, published.DataDir, "", log.New())
 		require.ErrorContains(t, err, "commitment")
 	})
@@ -958,7 +958,7 @@ func newPBTAttachFileTrees(t *testing.T, both bool) (datadir.Dirs, datadir.Dirs)
 			"v1.0-accounts.0-1.kv",
 			"v1.0-storage.0-1.kv",
 			"v1.0-code.0-1.kv",
-			"v1.0-commitment.0-1.kv",
+			"v3.0-commitment.0-1.kv",
 		} {
 			require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, name), []byte("node"), 0o644))
 		}
@@ -970,7 +970,7 @@ func newPBTAttachFileTrees(t *testing.T, both bool) (datadir.Dirs, datadir.Dirs)
 		"v1.0-accounts.0-1.kv",
 		"v1.0-storage.0-1.kv",
 		"v1.0-code.0-1.kv",
-		"v1.0-commitment.0-1.kv",
+		"v3.0-commitment.0-1.kv",
 		"v1.0-commitment-bin.0-1.kv",
 	} {
 		require.NoError(t, os.WriteFile(filepath.Join(published.SnapDomain, name), []byte("published"), 0o644))

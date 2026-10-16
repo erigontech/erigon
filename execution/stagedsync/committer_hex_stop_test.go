@@ -242,7 +242,7 @@ func TestStoppedHexShadowUnwindRefusesAcrossActivation(t *testing.T) {
 	activationTime := uint64(10)
 	err := checkStoppedHexShadowUnwind(t.Context(), tx, hexStopHeaderReader{}, &chain.Config{BinaryTrieTime: &activationTime}, 13, 4)
 	require.Error(t, err, "an unwind below activation must be refused after the hex shadow stops")
-	require.True(t, errors.Is(err, ErrTooDeepUnwind), "the stopped-shadow refusal must be a too-deep unwind")
+	require.ErrorIs(t, err, ErrTooDeepUnwind, "the stopped-shadow refusal must be a too-deep unwind")
 	require.NoError(t, checkStoppedHexShadowUnwind(t.Context(), tx, hexStopHeaderReader{}, &chain.Config{BinaryTrieTime: &activationTime}, 13, 5))
 }
 

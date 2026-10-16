@@ -79,7 +79,7 @@ func TestBranchPrefetchBudgetChargesCompleteLeafRefs(t *testing.T) {
 	require.NotEmpty(t, key)
 	require.NotNil(t, refs)
 	p.putDomain(kv.CommitmentDomain, key, data, 1)
-	want := int64(len(key) + len(data) + 32*len(refs.Refs))
+	want := int64(len(prefetchRecordKey(kv.CommitmentDomain, key)) + len(data) + 32*len(refs.Refs))
 	for _, prefix := range refs.Prefixes {
 		want += int64(len(prefix))
 	}
@@ -313,7 +313,7 @@ func TestBranchCarryEvictsRecordsOlderThanTheWindow(t *testing.T) {
 		_, _, ok := p.get([]byte{key})
 		require.True(t, ok)
 	}
-	require.Equal(t, before-int64(1+len("stale")), p.bytes.Load())
+	require.Equal(t, before-int64(len(prefetchRecordKey(kv.CommitmentDomain, []byte{0x01}))+len("stale")), p.bytes.Load())
 }
 
 func TestParentRecordsStopServingOnceTheCarryMovesOn(t *testing.T) {
