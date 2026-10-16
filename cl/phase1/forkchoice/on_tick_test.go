@@ -106,6 +106,21 @@ func TestTickBuildsUnrealizedJustifiedCheckpointState(t *testing.T) {
 	}, 10*time.Second, 10*time.Millisecond)
 }
 
+func TestEpochStartTickBuildsPromotedCheckpointState(t *testing.T) {
+	f := buildExAnteStore(t)
+	_, root := decodeDiffBlock(t, diffBlockc2Enc)
+	next := solid.Checkpoint{Epoch: f.JustifiedCheckpoint().Epoch + 1, Root: root}
+	f.unrealizedJustifiedCheckpoint.Store(next)
+
+	f.OnTick(f.beaconCfg.SlotsPerEpoch * f.beaconCfg.SecondsPerSlot)
+
+	require.Equal(t, next, f.JustifiedCheckpoint())
+	require.Eventually(t, func() bool {
+		_, ok := f.checkpointStates.Load(next)
+		return ok
+	}, 10*time.Second, 10*time.Millisecond)
+}
+
 func TestTickSkipsCheckpointStateBuild(t *testing.T) {
 	tests := []struct {
 		name string
