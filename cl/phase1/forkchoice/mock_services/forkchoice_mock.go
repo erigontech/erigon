@@ -44,6 +44,7 @@ import (
 // Make mocks with maps and simple setters and getters, panic on methods from ForkChoiceStorageWriter
 
 type ForkChoiceStorageMock struct {
+	PreparationImports                    forkchoice.PayloadPreparationImports
 	Ancestors                             map[uint64]forkchoice.ForkChoiceNode
 	AnchorSlotVal                         uint64
 	AnchorRootVal                         common.Hash
@@ -130,6 +131,14 @@ type ForkChoiceStorageMock struct {
 	PayloadStatusByRootMap    map[common.Hash]execution_client.PayloadStatus
 	// [New in Gloas:EIP7732] Execution payload gas limit by execution block hash
 	ExecutionPayloadGasLimitMap map[common.Hash]uint64
+}
+
+func (f *ForkChoiceStorageMock) BeginPayloadImport(slot uint64) func() {
+	return f.PreparationImports.BeginImport(slot)
+}
+
+func (f *ForkChoiceStorageMock) TryBeginPayloadPreparation(ctx context.Context, firstSlot, lastSlot uint64) (context.Context, func(), bool) {
+	return f.PreparationImports.TryBegin(ctx, firstSlot, lastSlot, nil)
 }
 
 func makeSyncContributionPoolMock(t *testing.T) sync_contribution_pool.SyncContributionPool {

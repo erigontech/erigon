@@ -3045,14 +3045,17 @@ func TestGetValidatorExecutionPayloadBidRevalidatesOneHeadSnapshot(t *testing.T)
 	require.Empty(t, handler.pendingBuilderPayloads.entries)
 }
 
-func TestGetValidatorExecutionPayloadBidRechecksPtcDecisionAfterEnvelopeRead(t *testing.T) {
+func TestGetValidatorExecutionPayloadBidRechecksPtcDecisionWithEnvelopeCache(t *testing.T) {
 	for _, test := range []struct {
-		name                 string
-		buildOnFullAfterRead bool
-		wantStatus           int
+		name          string
+		evictRequests bool
+		buildOnFull   bool
+		wantStatus    int
 	}{
-		{name: "unchanged FULL path", buildOnFullAfterRead: true, wantStatus: http.StatusOK},
-		{name: "PTC decision changes to EMPTY", wantStatus: http.StatusNotFound},
+		{name: "cached FULL path", buildOnFull: true, wantStatus: http.StatusOK},
+		{name: "cached requests with new EMPTY decision", wantStatus: http.StatusNotFound},
+		{name: "unchanged FULL path after eviction", evictRequests: true, buildOnFull: true, wantStatus: http.StatusOK},
+		{name: "PTC decision changes during envelope reread", evictRequests: true, wantStatus: http.StatusNotFound},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
@@ -3077,9 +3080,8 @@ func TestGetValidatorExecutionPayloadBidRechecksPtcDecisionAfterEnvelopeRead(t *
 			forkchoiceStore.SetEnvelope(baseRoot, envelope)
 			var envelopeReads atomic.Int32
 			forkchoiceStore.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
-				// The first read supplies production inputs; the second revalidates the bid.
 				if envelopeReads.Add(1) == 2 {
-					buildOnFull = test.buildOnFullAfterRead
+					buildOnFull = test.buildOnFull
 				}
 				return envelope, nil
 			}
@@ -3087,7 +3089,14 @@ func TestGetValidatorExecutionPayloadBidRechecksPtcDecisionAfterEnvelopeRead(t *
 			engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), payload.ParentHash, gomock.Any(), clparams.GloasVersion).
 				Return([]byte{1}, nil)
 			engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.GloasVersion).
-				Return(payload, &engine_types.BlobsBundle{}, nil, big.NewInt(2_000_000_000), nil)
+				DoAndReturn(func(context.Context, []byte, clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+					if test.evictRequests {
+						handler.parentExecutionRequests.entries.Remove(baseRoot)
+					} else {
+						buildOnFull = test.buildOnFull
+					}
+					return payload, &engine_types.BlobsBundle{}, nil, big.NewInt(2_000_000_000), nil
+				})
 			handler.engine = engine
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
 				fmt.Sprintf("/eth/v1/validator/execution_payload_bids/%d/3", slot), http.NoBody)
@@ -3095,7 +3104,11 @@ func TestGetValidatorExecutionPayloadBidRechecksPtcDecisionAfterEnvelopeRead(t *
 
 			handler.ServeHTTP(recorder, request)
 
-			require.EqualValues(t, 2, envelopeReads.Load())
+			wantReads := 1
+			if test.evictRequests {
+				wantReads = 2
+			}
+			require.EqualValues(t, wantReads, envelopeReads.Load())
 			require.Equal(t, baseRoot, forkchoiceStore.HeadVal)
 			require.Equal(t, cltypes.PayloadStatusFull, forkchoiceStore.HeadPayloadStatusVal)
 			require.Equal(t, test.wantStatus, recorder.Code, recorder.Body.String())

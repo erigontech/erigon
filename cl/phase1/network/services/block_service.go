@@ -78,6 +78,7 @@ type blockJob struct {
 	retryAfter          time.Time
 	retryDelay          time.Duration
 	storageErrorLogged  bool
+	finishPayloadImport func()
 }
 
 type blockJobAttempt struct {
@@ -884,9 +885,17 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 		job = newFailedBlockJob(block, store, ErrPublishedBlockJobStopped)
 		return job, job.storeGeneration
 	}
+	job.finishPayloadImport = b.forkchoiceStore.BeginPayloadImport(block.Block.Slot)
+	retained := false
+	defer func() {
+		if !retained {
+			job.finishPayloadImport()
+		}
+	}()
 	for {
 		existingValue, loaded := b.blocksScheduledForLaterExecution.LoadOrStore(blockRoot, job)
 		if !loaded {
+			retained = true
 			return job, jobGeneration
 		}
 		existing, generation := b.reuseScheduledBlockJob(blockRoot, existingValue.(*blockJob), job, store)
@@ -925,6 +934,8 @@ func (b *blockService) reuseScheduledBlockJob(key [32]byte, existing, job *block
 
 // processAndStoreBlock processes and stores a block
 func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
+	finishImport := b.forkchoiceStore.BeginPayloadImport(block.Block.Slot)
+	defer finishImport()
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		return err
@@ -1041,7 +1052,7 @@ func (b *blockService) stopPublishedBlockJobs() {
 				job.terminal = true
 				close(job.attempt.done)
 			}
-			b.blocksScheduledForLaterExecution.CompareAndDelete(key, job)
+			b.removeScheduledBlock(key.([32]byte), job)
 		}
 		job.mu.Unlock()
 		return true
@@ -1063,7 +1074,7 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 			job.terminal = true
 			close(job.attempt.done)
 		}
-		b.blocksScheduledForLaterExecution.CompareAndDelete(key, job)
+		b.removeScheduledBlock(key, job)
 		job.mu.Unlock()
 		return
 	}
@@ -1110,11 +1121,17 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 		job.attempt = &blockJobAttempt{done: make(chan struct{})}
 	}
 	if terminal {
-		b.blocksScheduledForLaterExecution.CompareAndDelete(key, job)
+		b.removeScheduledBlock(key, job)
 	}
 	job.mu.Unlock()
 	if err != nil {
 		log.Trace("Failed to process and store block", "block", job.block, "error", err)
 		return
+	}
+}
+
+func (b *blockService) removeScheduledBlock(key [32]byte, job *blockJob) {
+	if b.blocksScheduledForLaterExecution.CompareAndDelete(key, job) && job.finishPayloadImport != nil {
+		job.finishPayloadImport()
 	}
 }
