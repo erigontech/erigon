@@ -2437,10 +2437,15 @@ func (s *cursorDup2iter) advance() (err error) {
 	return nil
 }
 
+func (s *cursorDup2iter) CanSeekValue() bool { return s.limit < 0 }
+
 // SeekValue moves to the first value >= v (asc) or <= v (desc) with a B-tree search; it never moves backwards.
 func (s *cursorDup2iter) SeekValue(v []byte) (err error) {
 	if s.done {
 		return nil
+	}
+	if err := s.refresh(); err != nil {
+		return err
 	}
 	if c := bytes.Compare(s.v, v); (s.orderAscend && c >= 0) || (!s.orderAscend && c <= 0) {
 		return nil
@@ -2449,24 +2454,23 @@ func (s *cursorDup2iter) SeekValue(v []byte) (err error) {
 	if err != nil {
 		return err
 	}
-	if s.orderAscend || (nv != nil && bytes.Equal(nv, v)) {
-		s.v, s.done = nv, nv == nil
-		return nil
-	}
-	// desc: the last value <= v is before the first value >= v, or the last one when every value is < v
-	if nv != nil {
-		_, nv, err = s.c.PrevDup()
-	} else {
-		var k []byte
-		if k, _, err = s.c.SeekExact(s.key); err == nil && k != nil {
-			nv, err = s.c.LastDup()
+	// desc: the last value <= v is before the first value >= v, which exists because s.v > v
+	if !s.orderAscend && nv != nil && !bytes.Equal(nv, v) {
+		if _, nv, err = s.c.PrevDup(); err != nil {
+			return err
 		}
-	}
-	if err != nil {
-		return err
 	}
 	s.v, s.done = nv, nv == nil
 	return nil
+}
+
+// refresh re-reads the cached value on a RwTx: a write can move the page it points into.
+func (s *cursorDup2iter) refresh() (err error) {
+	if s.tx.readOnly {
+		return nil
+	}
+	_, s.v, err = s.c.Current()
+	return err
 }
 
 func (s *cursorDup2iter) Close() {
@@ -2493,7 +2497,7 @@ func (s *cursorDup2iter) HasNext() bool {
 
 	// Asc:  [from, to) AND from < to
 	// Desc: [from, to) AND from > to
-	if s.v == nil {
+	if s.refresh() != nil || s.v == nil {
 		return false
 	}
 	cmp := bytes.Compare(s.v, s.toPrefix)
@@ -2507,6 +2511,9 @@ func (s *cursorDup2iter) Next() (k, v []byte, err error) {
 	default:
 	}
 	s.limit--
+	if err := s.refresh(); err != nil {
+		return nil, nil, err
+	}
 	v = s.v
 	if err := s.advance(); err != nil {
 		return nil, nil, err

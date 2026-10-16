@@ -101,6 +101,7 @@ func TransformKV2U64[K, V []byte](it KV, transform func(K, V) (uint64, error)) *
 // ValueSeeker is a KV stream over the values of one key that can skip to a value, see Seeker.
 // SeekValue must not keep v: callers reuse its memory.
 type ValueSeeker interface {
+	CanSeekValue() bool
 	SeekValue(v []byte) error
 }
 
@@ -111,8 +112,8 @@ func TransformKV2U64Seekable[K, V []byte](it KV, transform func(K, V) (uint64, e
 }
 
 func (m *TransformKV2U64Iter[K, V]) CanSeek() bool {
-	_, ok := m.it.(ValueSeeker)
-	return ok && m.encode != nil
+	s, ok := m.it.(ValueSeeker)
+	return ok && m.encode != nil && s.CanSeekValue()
 }
 
 func (m *TransformKV2U64Iter[K, V]) Seek(v uint64) error {

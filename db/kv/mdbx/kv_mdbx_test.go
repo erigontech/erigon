@@ -326,6 +326,39 @@ func TestRangeRwTxInterleavedWrite(t *testing.T) {
 	require.False(t, it.HasNext())
 }
 
+func TestRangeDupSortRwTxInterleavedWrite(t *testing.T) {
+	db := BaseCaseDB(t)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	u64 := func(n uint64) []byte { return binary.BigEndian.AppendUint64(nil, n) }
+	for _, n := range []uint64{10, 3000, 5000} {
+		require.NoError(t, tx.Put("Table", []byte("key"), u64(n)))
+	}
+
+	it, err := tx.RangeDupSort("Table", []byte("key"), nil, u64(10_000), order.Asc, kv.Unlim)
+	require.NoError(t, err)
+	defer it.Close()
+
+	require.True(t, it.HasNext())
+	_, v, err := it.Next()
+	require.NoError(t, err)
+	require.Equal(t, u64(10), v)
+
+	// moves the value the cursor sits on: the duplicates grow from a sub-page into a sub-tree
+	for n := uint64(11); n < 3000; n++ {
+		require.NoError(t, tx.Put("Table", []byte("key"), u64(n)))
+	}
+
+	var got []uint64
+	for it.HasNext() {
+		_, v, err := it.Next()
+		require.NoError(t, err)
+		got = append(got, binary.BigEndian.Uint64(v))
+	}
+	require.Equal(t, []uint64{3000, 5000}, got)
+}
+
 func TestLastDup(t *testing.T) {
 	db, tx, _ := BaseCase(t)
 
@@ -1375,4 +1408,22 @@ func TestRangeDupSortSeekDoesNotAllocate(t *testing.T) {
 		require.NoError(t, it.Seek(target))
 	})
 	require.Zero(t, allocs)
+}
+
+func TestRangeDupSortSeekRespectsLimit(t *testing.T) {
+	db := BaseCaseDB(t)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	for n := range uint64(12) {
+		require.NoError(t, tx.Put("Table", []byte("key"), binary.BigEndian.AppendUint64(nil, n)))
+	}
+	kvIt, err := tx.RangeDupSort("Table", []byte("key"), nil, nil, order.Asc, 3) // [0,1,2]
+	require.NoError(t, err)
+	limited := stream.TransformKV2U64Seekable(kvIt, func(_, v []byte) (uint64, error) {
+		return binary.BigEndian.Uint64(v), nil
+	}, binary.BigEndian.AppendUint64)
+	got, err := stream.ToArrayU64(stream.Intersect[uint64](limited, stream.Array([]uint64{10}), order.Asc, kv.Unlim))
+	require.NoError(t, err)
+	require.Empty(t, got)
 }

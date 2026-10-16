@@ -216,20 +216,24 @@ func BaseCaseDBForBenchmark(b *testing.B) kv.RwDB {
 func BenchmarkRangeDupSortIntersect(b *testing.B) {
 	const bigN = 200_000
 	db := BaseCaseDBForBenchmark(b)
-	tx, err := db.BeginRw(b.Context())
+	rwTx, err := db.BeginRw(b.Context())
 	require.NoError(b, err)
-	defer tx.Rollback()
+	defer rwTx.Rollback()
 	rnd := rand.New(rand.NewSource(1))
 	for n := range uint64(bigN) {
-		require.NoError(b, tx.Put("Table", []byte("big"), binary.BigEndian.AppendUint64(nil, n*10)))
+		require.NoError(b, rwTx.Put("Table", []byte("big"), binary.BigEndian.AppendUint64(nil, n*10)))
 	}
 	ratios := []int{1, 1000}
 	for _, r := range ratios {
 		for range bigN / r {
 			v := uint64(rnd.Intn(bigN)) * 10
-			require.NoError(b, tx.Put("Table", fmt.Appendf(nil, "small%d", r), binary.BigEndian.AppendUint64(nil, v)))
+			require.NoError(b, rwTx.Put("Table", fmt.Appendf(nil, "small%d", r), binary.BigEndian.AppendUint64(nil, v)))
 		}
 	}
+	require.NoError(b, rwTx.Commit())
+	tx, err := db.BeginRo(b.Context())
+	require.NoError(b, err)
+	defer tx.Rollback()
 	decode := func(_, v []byte) (uint64, error) { return binary.BigEndian.Uint64(v), nil }
 	rangeU64 := func(key string, seek bool) stream.U64 {
 		it, err := tx.RangeDupSort("Table", []byte(key), nil, nil, order.Asc, -1)

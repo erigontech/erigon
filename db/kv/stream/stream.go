@@ -124,7 +124,8 @@ func (it *ReverseRangeIter[T]) Next() (T, error) {
 
 // Seeker is a stream that can skip ahead: after Seek(v), Next returns the first element not before v
 // in the stream order (>= v ascending, <= v descending). Seek never moves backwards. CanSeek reports
-// whether skipping is cheaper than iterating, e.g. a B-tree search instead of a scan.
+// whether skipping is cheaper than iterating, e.g. a B-tree search instead of a scan. A stream with
+// a finite limit does not seek: the elements it skips would not count against the limit.
 type Seeker[T any] interface {
 	CanSeek() bool
 	Seek(v T) error
@@ -262,7 +263,9 @@ func (m *UnionUno[T]) Next() (res T, _ error) {
 	return k, err
 }
 
-func (m *UnionUno[T]) CanSeek() bool { return seeker(m.x) != nil || seeker(m.y) != nil }
+func (m *UnionUno[T]) CanSeek() bool {
+	return m.limit < 0 && (seeker(m.x) != nil || seeker(m.y) != nil)
+}
 
 func (m *UnionUno[T]) Seek(v T) error {
 	if m.err != nil {
@@ -335,7 +338,9 @@ func (m *Intersected[T]) align() {
 	m.xHasNext = false
 }
 
-func (m *Intersected[T]) CanSeek() bool { return seeker(m.x) != nil || seeker(m.y) != nil }
+func (m *Intersected[T]) CanSeek() bool {
+	return m.limit < 0 && (seeker(m.x) != nil || seeker(m.y) != nil)
+}
 
 func (m *Intersected[T]) Seek(v T) error {
 	if m.err != nil {

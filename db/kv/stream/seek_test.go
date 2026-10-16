@@ -129,3 +129,25 @@ func TestIntersectSeeksPastTheLargeStream(t *testing.T) {
 	require.Equal(t, []uint64{10, 50_000, 99_999}, got)
 	require.Less(t, nexts, 40, "the large stream should be skipped, not iterated")
 }
+
+func seekRange(n uint64) *seekArr {
+	arr := make([]uint64, n)
+	for i := range arr {
+		arr[i] = uint64(i)
+	}
+	return &seekArr{arr: arr, asc: true, nexts: new(int)}
+}
+
+func TestIntersectDoesNotSeekPastTheUnionLimit(t *testing.T) {
+	limited := stream.Union[uint64](seekRange(12), stream.Array([]uint64{100}), order.Asc, 3) // [0,1,2]
+	got, err := stream.ToArrayU64(stream.Intersect[uint64](limited, stream.Array([]uint64{10}), order.Asc, -1))
+	require.NoError(t, err)
+	require.Empty(t, got)
+}
+
+func TestIntersectDoesNotSeekPastTheNestedIntersectLimit(t *testing.T) {
+	limited := stream.Intersect[uint64](seekRange(12), seekRange(12), order.Asc, 3) // [0,1,2]
+	got, err := stream.ToArrayU64(stream.Intersect[uint64](limited, stream.Array([]uint64{10}), order.Asc, -1))
+	require.NoError(t, err)
+	require.Empty(t, got)
+}
