@@ -117,6 +117,7 @@ func withLimit(cmd *cobra.Command) {
 func withUnwind(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&unwind, "unwind", 0, "how much blocks unwind on each iteration")
 }
+
 func withUnwindEvery(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&unwindEvery, "unwind.every", 0, "each iteration test will move forward `--unwind.every` blocks, then unwind `--unwind` blocks")
 }
@@ -173,12 +174,8 @@ func withDataDir(cmd *cobra.Command) {
 	must(cmd.MarkFlagDirname("chaindata"))
 }
 
-// withExperimentalCommitment binds the flag erigon uses to pick the commitment
-// trie. The default ORs erigon's own flag default with the env-derived value so
-// that flipping the default in one binary cannot leave the other on a different
-// trie.
 func withExperimentalCommitment(cmd *cobra.Command) {
-	def := statecfg.ExperimentalParallelCommitment || utils.ExperimentalParallelCommitmentFlag.Value
+	def := statecfg.ExperimentalParallelCommitment
 	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, def, utils.ExperimentalParallelCommitmentFlag.Usage)
 }
 

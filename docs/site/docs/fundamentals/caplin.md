@@ -53,8 +53,11 @@ When Caplin is running, it exposes a Beacon API that external tools can query. T
 | `--beacon.api.read.timeout` | `5` | HTTP server read timeout, in seconds |
 | `--beacon.api.write.timeout` | `31536000` | HTTP server write timeout, in seconds (~1 year) |
 | `--beacon.api.idle.timeout` | `25` | HTTP server idle timeout, in seconds |
+| `--beacon.api.preserve-graffiti` | `false` | Use validator-supplied graffiti exactly as given, without prefixing the EL+CL client identification segment |
 
 The API is not served until you enable it with `--beacon.api=<namespaces>`; see [Caplin for staking](../staking/caplin) for the full namespace list.
+
+By default, block-production requests that include a `graffiti` value have the [client-version graffiti standard](https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md)'s identification segment (execution and consensus client codes and commit prefixes, e.g. `EGab48CN5c2c`) prefixed to them, truncating the supplied graffiti to fit the 32-byte field if needed. Set `--beacon.api.preserve-graffiti` to use the supplied graffiti as decoded instead, with no prefix or truncation. A supplied `graffiti` value shorter than 32 bytes is right-padded (its bytes come first, zero bytes fill the rest) under both settings.
 
 :::note
 Enabling the Beacon API increases RAM usage by roughly **6 GB**. Account for it when sizing your host — see [Hardware Requirements](../get-started/hardware-requirements).

@@ -97,13 +97,15 @@ func (cc *ExecutionClientDirect) NewPayload(
 	monitor.ObserveExecutionClientInsertingBlocks(startInsertBlock)
 
 	headHeader := cc.chainRW.CurrentHeader(ctx)
+	if headHeader == nil && ctx.Err() != nil {
+		return PayloadStatusNone, ctx.Err()
+	}
 	if headHeader == nil || header.Number.Uint64() > headHeader.Number.Uint64()+1 {
 		// can't validate yet
 		return PayloadStatusNotValidated, nil
 	}
 
-	// check if the block is too deep in the reorg accounting for underflow
-	if headHeader.Number.Uint64() > reorgTooDeepDepth && header.Number.Uint64() < headHeader.Number.Uint64()-reorgTooDeepDepth {
+	if header.Number.Uint64() < notValidatedBelow(headHeader) {
 		// reorg too deep
 		return PayloadStatusNotValidated, nil
 	}
@@ -143,15 +145,13 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	// Retry AssembleBlock if the EL is busy (semaphore contention with
 	// fork choice commits). This is common in single-process dev mode
 	// where the CL and EL share the same process.
-	idBytes := make([]byte, 8)
 	id, err := retryAssembleBlock(ctx, 30, 200*time.Millisecond, func(ctx context.Context) (uint64, error) {
 		return cc.chainRW.AssembleBlock(ctx, head, attr)
 	})
 	if err != nil {
 		return nil, err
 	}
-	binary.LittleEndian.PutUint64(idBytes, id)
-	return idBytes, nil
+	return encodeDirectPayloadID(id), nil
 }
 
 func (cc *ExecutionClientDirect) StartPayloadBuild(ctx context.Context, head common.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error) {
@@ -159,9 +159,19 @@ func (cc *ExecutionClientDirect) StartPayloadBuild(ctx context.Context, head com
 	if err != nil {
 		return nil, err
 	}
+	return encodeDirectPayloadID(id), nil
+}
+
+// Direct execution-module payload IDs use little-endian uint64 encoding. Engine API payload IDs
+// are a separate wire format.
+func encodeDirectPayloadID(id uint64) []byte {
 	idBytes := make([]byte, 8)
 	binary.LittleEndian.PutUint64(idBytes, id)
-	return idBytes, nil
+	return idBytes
+}
+
+func decodeDirectPayloadID(id []byte) uint64 {
+	return binary.LittleEndian.Uint64(id)
 }
 
 func retryAssembleBlock(ctx context.Context, attempts int, delay time.Duration, assemble func(context.Context) (uint64, error)) (uint64, error) {
@@ -199,6 +209,23 @@ func retryAssembleBlock(ctx context.Context, attempts int, delay time.Duration, 
 		}
 	}
 	return 0, err
+}
+
+// SkipsValidationBelow returns the block number below which NewPayload inserts a block but answers
+// NotValidated without validating it, or 0 when it validates every block. It follows the EL head;
+// known is false when the head cannot be read.
+func (cc *ExecutionClientDirect) SkipsValidationBelow(ctx context.Context) (below uint64, known bool) {
+	head := cc.chainRW.CurrentHeader(ctx)
+	return notValidatedBelow(head), head != nil
+}
+
+// notValidatedBelow returns the block number below which a block is more than reorgTooDeepDepth
+// below head, too deep to validate, or 0.
+func notValidatedBelow(head *types.Header) uint64 {
+	if head == nil || head.Number.Uint64() <= reorgTooDeepDepth {
+		return 0
+	}
+	return head.Number.Uint64() - reorgTooDeepDepth
 }
 
 func (cc *ExecutionClientDirect) SupportInsertion() bool {
@@ -245,7 +272,7 @@ func (cc *ExecutionClientDirect) HasBlock(ctx context.Context, hash common.Hash)
 }
 
 func (cc *ExecutionClientDirect) GetAssembledBlock(ctx context.Context, idBytes []byte, _ clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-	return cc.chainRW.GetAssembledBlock(ctx, binary.LittleEndian.Uint64(idBytes))
+	return cc.chainRW.GetAssembledBlock(ctx, decodeDirectPayloadID(idBytes))
 }
 
 func (cc *ExecutionClientDirect) HasGapInSnapshots(ctx context.Context) bool {

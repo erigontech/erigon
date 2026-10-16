@@ -66,43 +66,43 @@ func NewEth1Header(version clparams.StateVersion) *Eth1Header {
 	}
 }
 
-func (e *Eth1Header) SetVersion(v clparams.StateVersion) {
-	e.version = v
+func (h *Eth1Header) SetVersion(v clparams.StateVersion) {
+	h.version = v
 }
 
-func (e *Eth1Header) Copy() *Eth1Header {
-	copied := *e
+func (h *Eth1Header) Copy() *Eth1Header {
+	copied := *h
 	copied.Extra = solid.NewExtraData()
-	if e.Extra != nil {
-		copied.Extra.SetBytes(e.Extra.Bytes())
+	if h.Extra != nil {
+		copied.Extra.SetBytes(h.Extra.Bytes())
 	}
-	// BlockAccessListRoot and SlotNumber are value types, copied by *e above.
+	// BlockAccessListRoot and SlotNumber are value types, copied by *h above.
 	return &copied
 }
 
 // Capella converts the header to capella version.
-func (e *Eth1Header) Capella() {
-	e.version = clparams.CapellaVersion
-	e.WithdrawalsRoot = common.Hash{}
+func (h *Eth1Header) Capella() {
+	h.version = clparams.CapellaVersion
+	h.WithdrawalsRoot = common.Hash{}
 }
 
 // Deneb converts the header to deneb version.
-func (e *Eth1Header) Deneb() {
-	e.version = clparams.DenebVersion
-	e.BlobGasUsed = 0
-	e.ExcessBlobGas = 0
+func (h *Eth1Header) Deneb() {
+	h.version = clparams.DenebVersion
+	h.BlobGasUsed = 0
+	h.ExcessBlobGas = 0
 }
 
-func (e *Eth1Header) IsZero() bool {
-	if e.Extra == nil {
-		e.Extra = solid.NewExtraData()
+func (h *Eth1Header) IsZero() bool {
+	if h.Extra == nil {
+		h.Extra = solid.NewExtraData()
 	}
-	return e.ParentHash == common.Hash{} && e.FeeRecipient == common.Address{} && e.StateRoot == common.Hash{} &&
-		e.ReceiptsRoot == common.Hash{} && e.LogsBloom == types.Bloom{} && e.PrevRandao == common.Hash{} && e.BlockNumber == 0 &&
-		e.GasLimit == 0 && e.GasUsed == 0 && e.Time == 0 && e.Extra.EncodingSizeSSZ() == 0 && e.BaseFeePerGas == [32]byte{} &&
-		e.BlockHash == common.Hash{} && e.TransactionsRoot == common.Hash{} && e.WithdrawalsRoot == common.Hash{} &&
-		e.BlobGasUsed == 0 && e.ExcessBlobGas == 0 &&
-		e.BlockAccessListRoot == common.Hash{} && e.SlotNumber == 0
+	return h.ParentHash == common.Hash{} && h.FeeRecipient == common.Address{} && h.StateRoot == common.Hash{} &&
+		h.ReceiptsRoot == common.Hash{} && h.LogsBloom == types.Bloom{} && h.PrevRandao == common.Hash{} && h.BlockNumber == 0 &&
+		h.GasLimit == 0 && h.GasUsed == 0 && h.Time == 0 && h.Extra.EncodingSizeSSZ() == 0 && h.BaseFeePerGas == [32]byte{} &&
+		h.BlockHash == common.Hash{} && h.TransactionsRoot == common.Hash{} && h.WithdrawalsRoot == common.Hash{} &&
+		h.BlobGasUsed == 0 && h.ExcessBlobGas == 0 &&
+		h.BlockAccessListRoot == common.Hash{} && h.SlotNumber == 0
 }
 
 // EncodeSSZ encodes the header in SSZ format.

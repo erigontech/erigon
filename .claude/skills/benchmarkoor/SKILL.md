@@ -750,6 +750,37 @@ rg 'parallel executed.*(abort=[1-9][0-9]*|invalid=[1-9][0-9]*)' \
 Associate each match with the latest `Executing test` line. Nonzero `abort` or `invalid` counters
 indicate speculative retry work even when the fixture passed.
 
+### A fixture's MGas/s is one payload, and the rollback strategy decides what it means
+
+Check both before reading any delta:
+
+```bash
+jq -r '.tests | to_entries[] | [.key,
+  .value.steps.test.aggregated.method_stats.mgas_s.engine_newPayloadV5.count] | @tsv' \
+  "$RUN_DIR/result.json"
+jq -r '.instance.rollback_strategy' "$RUN_DIR/config.json"
+```
+
+`count: 1` is normal: the figure is a single `engine_newPayloadV5` call, with no averaging and no
+warm-up setting in the runner. What that one payload sees depends on the rollback strategy:
+
+- `container-recreate` gives every fixture a fresh container and overlay off the read-only
+  baseline, so each is measured cold and position in the run does not matter.
+- `none` reuses one container and one overlay for the whole run, so a fixture measured third runs
+  on a client that already executed two payloads. This is the closer analogue of a node executing
+  blocks back to back, and it is the only regime in which a cache-resident effect can appear at all.
+
+Neither is wrong; they answer different questions. A cache or warm-state change measured under
+`container-recreate` will read flat because the cache starts empty every time. The same image and
+fixture read 137.8 MGas/s third in a four-fixture `none` run and 90.6 MGas/s alone.
+
+Under `none`, a fixture's number is only comparable to the same fixture at the same position in an
+identically filtered run. Keep the filter byte-identical across the arms of an A/B — then each
+fixture is position-matched on both sides and the per-fixture delta is a valid paired comparison.
+Never compare a figure from one filter against a figure from a different filter; that difference is
+regime, not code. Two independent single-fixture runs of one image agreed to 0.5%, so treat about
+1% as the floor and anything below it as noise.
+
 For local before/after, per-fixture MGas/s, website peer, or PR-style ranking comparisons, read
 [Cross-client ranking comparisons](references/ranking-comparisons.md). It defines the raw timing
 fields, full-name intersection, weighted aggregates, ranking formulas, and comparability checks.

@@ -35,7 +35,7 @@ func MakeBlobTxnRlp() ([]byte, []goethkzg.KZGCommitment) {
 	blobsRlpPrefix := hexutil.MustDecodeHex("fa040008")
 	blobRlpPrefix := hexutil.MustDecodeHex("ba020000")
 
-	var blob0, blob1 = goethkzg.Blob{}, goethkzg.Blob{}
+	blob0, blob1 := goethkzg.Blob{}, goethkzg.Blob{}
 	copy(blob0[:], hexutil.MustDecodeHex(testdata.ValidBlob1Hex))
 	copy(blob1[:], hexutil.MustDecodeHex(testdata.ValidBlob2Hex))
 
@@ -78,7 +78,7 @@ func MakeV1WrappedBlobTxnRlp() ([]byte, []goethkzg.KZGCommitment) {
 	blobsRlpPrefix := hexutil.MustDecodeHex("fa040008")
 	blobRlpPrefix := hexutil.MustDecodeHex("ba020000")
 
-	var blob0, blob1 = goethkzg.Blob{}, goethkzg.Blob{}
+	blob0, blob1 := goethkzg.Blob{}, goethkzg.Blob{}
 	copy(blob0[:], hexutil.MustDecodeHex(testdata.ValidBlob1Hex))
 	copy(blob1[:], hexutil.MustDecodeHex(testdata.ValidBlob2Hex))
 
@@ -98,10 +98,10 @@ func MakeV1WrappedBlobTxnRlp() ([]byte, []goethkzg.KZGCommitment) {
 	}
 	proofs := make(KZGProofs, 0, 256)
 	for _, pp := range &p1 {
-		proofs = append(proofs, (KZGProof(pp)))
+		proofs = append(proofs, KZGProof(pp))
 	}
 	for _, pp := range &p2 {
-		proofs = append(proofs, (KZGProof(pp)))
+		proofs = append(proofs, KZGProof(pp))
 	}
 
 	wrapperRlp := hexutil.MustDecodeHex("03fa04329e")
@@ -220,10 +220,10 @@ func MakeV1WrappedBlobTxn(chainId *uint256.Int) *BlobTxWrapper {
 	}
 
 	for _, pp := range &p1 {
-		wrappedTxn.Proofs = append(wrappedTxn.Proofs, (KZGProof(pp)))
+		wrappedTxn.Proofs = append(wrappedTxn.Proofs, KZGProof(pp))
 	}
 	for _, pp := range &p2 {
-		wrappedTxn.Proofs = append(wrappedTxn.Proofs, (KZGProof(pp)))
+		wrappedTxn.Proofs = append(wrappedTxn.Proofs, KZGProof(pp))
 	}
 
 	wrappedTxn.Tx.BlobVersionedHashes = make([]common.Hash, 2)

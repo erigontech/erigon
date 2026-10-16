@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/db/version"
 	ver "github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 )
@@ -254,7 +253,7 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 
 		for _, typ := range types {
 			if typeName == typ.Name() {
-				var versions version.Versions
+				var versions ver.Versions
 				if strings.HasSuffix(p.Name, "idx") {
 					versions = typ.Indexes()[idxIndex].Version
 				} else {
@@ -392,6 +391,7 @@ func ExtractBlockFromName(name string, v ver.Version) (block uint64, err error) 
 
 	return block, nil
 }
+
 func fromToml(in []byte) PreverifiedItems {
 	var outMap map[string]string
 	if err := toml.Unmarshal(in, &outMap); err != nil {
@@ -424,7 +424,7 @@ func newCfg(networkName string, preverified Preverified) *Cfg {
 type Cfg struct {
 	ExpectBlocks      uint64
 	Preverified       Preverified          // immutable
-	PreverifiedParsed []*snaptype.FileInfo //Preverified field after `snaptype.ParseFileName("", p.Name)`
+	PreverifiedParsed []*snaptype.FileInfo // Preverified field after `snaptype.ParseFileName("", p.Name)`
 	// The preverified list were loaded from local storage. That means they were committed after an
 	// initial sync completed successfully.
 	Local       bool

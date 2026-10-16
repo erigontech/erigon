@@ -358,7 +358,8 @@ func TestCompressNoWordPatterns(t *testing.T) {
 	}
 	for i := range 100 {
 		// Semantic: "empty word" means "found key with empty value". "nil" - means key was deleted - not encodable by compressor
-		words = append(words,
+		words = append(
+			words,
 			nil,
 			[]byte{},
 
@@ -454,4 +455,22 @@ func TestCompressorCloseReleasesWorkers(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("Close() returned while pattern workers are still running")
 	}
+}
+
+func TestParseFileCompression(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want FileCompression
+	}{
+		{"none", CompressNone},
+		{"k", CompressKeys},
+		{"v", CompressVals},
+		{"kv", CompressKeys | CompressVals},
+	} {
+		got, err := ParseFileCompression(tc.in)
+		require.NoError(t, err)
+		require.Equalf(t, tc.want, got, "%q", tc.in)
+	}
+	_, err := ParseFileCompression("zstd")
+	require.Error(t, err)
 }

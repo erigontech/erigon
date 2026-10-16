@@ -13,7 +13,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
@@ -35,7 +34,7 @@ type AggOpts struct { //nolint:gocritic
 }
 
 func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
-	return AggOpts{ //Defaults
+	return AggOpts{ // Defaults
 		logger:          log.Root(),
 		dirs:            dirs,
 		genSaltIfNeed:   false,
@@ -48,8 +47,8 @@ func NewTest(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 	return New(dirs).DisableFsync().GenSaltIfNeed(true).StepSize(config3.DefaultStepSize).StepsInFrozenFile(config3.DefaultStepsInFrozenFile)
 }
 
-func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) { //nolint:gocritic
-	//TODO: rename `OpenFolder` to `ReopenFolder`
+func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:gocritic
+	// TODO: rename `OpenFolder` to `ReopenFolder`
 	if opts.sanityOldNaming {
 		if err := CheckSnapshotsCompatibility(opts.dirs); err != nil {
 			panic(err)
@@ -61,7 +60,7 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 		return nil, err
 	}
 
-	a, err := newAggregator(ctx, opts.dirs, db, opts.logger)
+	a, err := newAggregator(ctx, opts.dirs, opts.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -87,8 +86,8 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 	return a, nil
 }
 
-func (opts AggOpts) MustOpen(ctx context.Context, db kv.RoDB) *Aggregator { //nolint:gocritic
-	agg, err := opts.Open(ctx, db)
+func (opts AggOpts) MustOpen(ctx context.Context) *Aggregator { //nolint:gocritic
+	agg, err := opts.Open(ctx)
 	if err != nil {
 		panic(fmt.Errorf("fail to open mdbx: %w", err))
 	}
@@ -98,6 +97,7 @@ func (opts AggOpts) MustOpen(ctx context.Context, db kv.RoDB) *Aggregator { //no
 // Setters
 
 func (opts AggOpts) StepSize(s uint64) AggOpts { opts.stepSize = s; return opts } //nolint:gocritic
+
 func (opts AggOpts) StepsInFrozenFile(steps uint64) AggOpts { //nolint:gocritic
 	opts.stepsInFrozenFile = steps
 	return opts
@@ -120,6 +120,7 @@ func (opts AggOpts) DisableBranchCache() AggOpts { //nolint:gocritic
 	opts.disableBranchCache = true
 	return opts
 }
+
 func (opts AggOpts) SanityOldNaming() AggOpts { //nolint:gocritic
 	opts.sanityOldNaming = true
 	return opts
@@ -201,7 +202,7 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 	for _, dirPath := range d.VersionedDirs() {
 		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
-				if os.IsNotExist(err) { //skip magically disappeared files
+				if os.IsNotExist(err) { // skip magically disappeared files
 					return nil
 				}
 				return err
@@ -212,7 +213,7 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 
 			name := entry.Name()
 			if strings.HasPrefix(name, "v1-") {
-				return errors.New("The datadir has bad snapshot files or they are " +
+				return errors.New("the datadir has bad snapshot files or they are " +
 					"incompatible with the current erigon version. If you want to upgrade from an" +
 					"older version, you may run the following to rename files to the " +
 					"new version: `erigon snapshots update-to-new-ver-format`")
@@ -238,7 +239,6 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 			}
 			return nil
 		})
-
 		if err != nil {
 			return err
 		}

@@ -25,12 +25,11 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-var PrunedError = errors.New("old data not available due to pruning")
+var ErrPruned = errors.New("old data not available due to pruning")
 
 // HistoryReaderV3 Implements StateReader and StateWriter.
 //
@@ -166,12 +165,12 @@ func (hr *HistoryReaderV3) SetTrace(trace bool, tracePrefix string) {
 	hr.tracePrefix = tracePrefix
 }
 
-func (r *HistoryReaderV3) Trace() bool {
-	return r.trace
+func (hr *HistoryReaderV3) Trace() bool {
+	return hr.trace
 }
 
-func (r *HistoryReaderV3) TracePrefix() string {
-	return r.tracePrefix
+func (hr *HistoryReaderV3) TracePrefix() string {
+	return hr.tracePrefix
 }
 
 // Gets the txNum where Account, Storage and Code history begins.
@@ -192,7 +191,11 @@ func StateHistoryStartTxNum(ttx kv.TemporalTx) uint64 {
 func (hr *HistoryReaderV3) DiscardReadList() {}
 
 func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
-	hr.addr = address.Value()
+	return hr.ReadAccountByPlainAddr(address.Value())
+}
+
+func (hr *HistoryReaderV3) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	hr.addr = address
 	enc, ok, err := hr.getAsOf(kv.AccountsDomain, hr.addr[:])
 	if err != nil || !ok || len(enc) == 0 {
 		if hr.trace {
@@ -208,6 +211,12 @@ func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.
 		fmt.Printf("%sReadAccountData (hist)[%x] => [nonce: %d, balance: %s, codeHash: %x]\n", hr.tracePrefix, address, a.Nonce, a.Balance.String(), a.CodeHash)
 	}
 	return &a, nil
+}
+
+func (hr *HistoryReaderV3) HasAccount(address common.Address) (bool, error) {
+	hr.addr = address
+	enc, ok, err := hr.getAsOf(kv.AccountsDomain, hr.addr[:])
+	return ok && len(enc) > 0, err
 }
 
 // ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
@@ -232,40 +241,9 @@ func (hr *HistoryReaderV3) ReadAccountStorage(address accounts.Address, key acco
 	return res, ok, err
 }
 
-func (hr *HistoryReaderV3) HasStorage(address accounts.Address) (bool, error) {
-	hr.addr = address.Value()
-	to, ok := kv.NextSubtree(hr.addr[:])
-	if !ok {
-		to = nil
-	}
-
-	it, err := hr.ttx.RangeAsOf(kv.StorageDomain, hr.addr[:], to, hr.txNum, order.Asc, kv.Unlim)
-	if err != nil {
-		return false, err
-	}
-
-	defer it.Close()
-	// Note: if a storage for an address gets deleted, the historical RangeAsOf will return its slots as empty values.
-	// If the address doesn't have any storage slots, then we return "no storage" immediately
-	// If the address has storage slots, but they are all empty, then we return "no storage"
-	// If we see a non-empty slot for then address, then we return "has storage" immediately
-	for it.HasNext() {
-		_, v, err := it.Next()
-		if err != nil {
-			return false, err
-		}
-
-		if len(v) != 0 {
-			return true, nil
-		}
-	}
-
-	return false, nil
-}
-
 func (hr *HistoryReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	//  must pass key2=Nil here: because Erigon4 does concatinate key1+key2 under the hood
-	//code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
+	// code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
 	hr.addr = address.Value()
 	code, _, err := hr.getAsOf(kv.CodeDomain, hr.addr[:])
 	if hr.trace {

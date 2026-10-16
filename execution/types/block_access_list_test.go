@@ -2,8 +2,10 @@ package types
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -18,7 +20,7 @@ import (
 
 func TestBlockAccessListCopy(t *testing.T) {
 	bal := BlockAccessList{{
-		Address: accounts.InternAddress(common.Address{1}),
+		Address: common.Address{1},
 		StorageChanges: []SlotChanges{{
 			Slot:    accounts.InternKey(common.Hash{2}),
 			Changes: []*StorageChange{{Index: 1, Value: *uint256.NewInt(3)}},
@@ -51,8 +53,33 @@ func TestBlockAccessListCopy(t *testing.T) {
 	}
 }
 
+func TestDecodeBlockAccessListSidecarForHeaderRejectsDuplicateItems(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		bal  BlockAccessList
+	}{
+		{name: "accounts", bal: BlockAccessList{{}, {}}},
+		{name: "storage slots", bal: BlockAccessList{{StorageChanges: []SlotChanges{
+			{Slot: accounts.ZeroKey, Changes: []*StorageChange{{}}},
+			{Slot: accounts.ZeroKey, Changes: []*StorageChange{{}}},
+		}}}},
+		{name: "storage reads", bal: BlockAccessList{{StorageReads: []accounts.StorageKey{accounts.ZeroKey, accounts.ZeroKey}}}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, err := EncodeBlockAccessListBytes(tt.bal)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = DecodeBlockAccessListSidecarForHeader(raw, 1_000_000_000)
+			if !errors.Is(err, ErrInvalidBlockAccessList) || !strings.Contains(err.Error(), "strictly increasing") {
+				t.Fatalf("decode BAL: got %v, want invalid ordering", err)
+			}
+		})
+	}
+}
+
 func TestBlockAccessListSidecarPreservesRLP(t *testing.T) {
-	bal := BlockAccessList{{Address: accounts.InternAddress(common.Address{1})}}
+	bal := BlockAccessList{{Address: common.Address{1}}}
 	raw, err := EncodeBlockAccessListBytes(bal)
 	if err != nil {
 		t.Fatalf("encode BAL: %v", err)
@@ -78,7 +105,7 @@ func TestBlockAccessListSidecarPreservesRLP(t *testing.T) {
 
 func TestDecodeBlockAccessListSidecarOwnedRetainsRLP(t *testing.T) {
 	raw, err := EncodeBlockAccessListBytes(BlockAccessList{{
-		Address: accounts.InternAddress(common.Address{1}),
+		Address: common.Address{1},
 	}})
 	if err != nil {
 		t.Fatalf("encode BAL: %v", err)
@@ -98,7 +125,7 @@ func TestDecodeBlockAccessListSidecarOwnedRetainsRLP(t *testing.T) {
 
 func TestBlockAccessListSidecarMemoizesRLP(t *testing.T) {
 	sidecar := NewBlockAccessListSidecar(BlockAccessList{{
-		Address: accounts.InternAddress(common.Address{1}),
+		Address: common.Address{1},
 	}})
 	first, err := sidecar.Bytes()
 	if err != nil {
@@ -115,28 +142,72 @@ func TestBlockAccessListSidecarMemoizesRLP(t *testing.T) {
 
 func TestBlockAccessListSidecarMemoizesValidation(t *testing.T) {
 	sidecar := NewBlockAccessListSidecar(BlockAccessList{{
-		Address: accounts.InternAddress(common.Address{1}),
+		Address:      common.Address{1},
+		NonceChanges: []*NonceChange{{Index: 2}},
 	}})
-	if sidecar.validated.Load() {
+	if sidecar.validatedGasLimit.Load() != nil || sidecar.validatedTxCount.Load() != nil {
 		t.Fatal("new sidecar is already validated")
 	}
-	if err := sidecar.ValidateForBlock(BalItemCost); err != nil {
+	if err := sidecar.ValidateForBlock(BalItemCost, 1); err != nil {
 		t.Fatalf("validate sidecar: %v", err)
 	}
-	if !sidecar.validated.Load() {
-		t.Fatal("successful validation was not memoized")
+	if got := sidecar.validatedGasLimit.Load(); got == nil || *got != BalItemCost {
+		t.Fatalf("validated gas limit = %v, want %d", got, BalItemCost)
 	}
-	if got := sidecar.validatedGasLimit.Load(); got != BalItemCost {
-		t.Fatalf("validated gas limit = %d, want %d", got, BalItemCost)
+	if got := sidecar.validatedTxCount.Load(); got == nil || *got != 1 {
+		t.Fatalf("validated tx count = %v, want 1", got)
 	}
-	if err := sidecar.ValidateForBlock(BalItemCost - 1); !errors.Is(err, ErrInvalidBlockAccessList) {
+	if err := sidecar.ValidateForBlock(BalItemCost-1, 1); !errors.Is(err, ErrInvalidBlockAccessList) {
 		t.Fatalf("validation with a different gas limit returned %v, want ErrInvalidBlockAccessList", err)
+	}
+	if err := sidecar.ValidateForBlock(BalItemCost, 0); !errors.Is(err, ErrInvalidBlockAccessList) {
+		t.Fatalf("validation with a different tx count returned %v, want ErrInvalidBlockAccessList", err)
+	}
+}
+
+func TestBlockAccessListValidateForBlockBoundsIndices(t *testing.T) {
+	const txCount = 2
+	const gasLimit = 10 * BalItemCost
+	accountWith := map[string]func(index uint32) AccountChanges{
+		"storage change": func(index uint32) AccountChanges {
+			return AccountChanges{Address: common.Address{1}, StorageChanges: []SlotChanges{{
+				Slot:    accounts.InternKey(common.Hash{1}),
+				Changes: []*StorageChange{{Index: index}},
+			}}}
+		},
+		"balance change": func(index uint32) AccountChanges {
+			return AccountChanges{Address: common.Address{1}, BalanceChanges: []*BalanceChange{{Index: index}}}
+		},
+		"nonce change": func(index uint32) AccountChanges {
+			return AccountChanges{Address: common.Address{1}, NonceChanges: []*NonceChange{{Index: index}}}
+		},
+		"code change": func(index uint32) AccountChanges {
+			return AccountChanges{Address: common.Address{1}, CodeChanges: []*CodeChange{{Index: index, Bytecode: []byte{1}}}}
+		},
+	}
+	for name, account := range accountWith {
+		t.Run(name, func(t *testing.T) {
+			if err := NewBlockAccessListSidecar(BlockAccessList{account(txCount + 1)}).ValidateForBlock(gasLimit, txCount); err != nil {
+				t.Fatalf("post-execution index rejected: %v", err)
+			}
+			outOfRange := NewBlockAccessListSidecar(BlockAccessList{account(txCount + 2)})
+			if err := outOfRange.ValidateForHeader(gasLimit); err != nil {
+				t.Fatalf("header-only validation cannot know the transaction count: %v", err)
+			}
+			err := outOfRange.ValidateForBlock(gasLimit, txCount)
+			if !errors.Is(err, ErrInvalidBlockAccessList) {
+				t.Fatalf("ValidateForBlock() error = %v, want ErrInvalidBlockAccessList", err)
+			}
+			if !strings.Contains(err.Error(), "block access index") {
+				t.Fatalf("ValidateForBlock() error = %v, want it to name the block access index", err)
+			}
+		})
 	}
 }
 
 func TestBlockAccessListSidecarMemoizesHash(t *testing.T) {
 	raw, err := EncodeBlockAccessListBytes(BlockAccessList{{
-		Address: accounts.InternAddress(common.Address{1}),
+		Address: common.Address{1},
 	}})
 	if err != nil {
 		t.Fatalf("encode BAL: %v", err)
@@ -185,8 +256,8 @@ func TestBlockAccessListValidateOrdering(t *testing.T) {
 	addrB[19] = 0x01
 
 	list := BlockAccessList{
-		{Address: accounts.InternAddress(addrA)},
-		{Address: accounts.InternAddress(addrB)},
+		{Address: addrA},
+		{Address: addrB},
 	}
 	if err := list.Validate(); err == nil {
 		t.Fatalf("expected ordering error, got nil")
@@ -202,15 +273,15 @@ func TestBlockAccessListCodecLeavesSemanticValidationToValidateForBlock(t *testi
 		{
 			name: "account address order",
 			bal: BlockAccessList{
-				{Address: accounts.InternAddress(common.Address{2})},
-				{Address: accounts.InternAddress(common.Address{1})},
+				{Address: common.Address{2}},
+				{Address: common.Address{1}},
 			},
 			wantError: "account addresses must be strictly increasing",
 		},
 		{
 			name: "storage read order",
 			bal: BlockAccessList{{
-				Address: accounts.InternAddress(common.Address{1}),
+				Address: common.Address{1},
 				StorageReads: []accounts.StorageKey{
 					accounts.InternKey(common.Hash{2}),
 					accounts.InternKey(common.Hash{1}),
@@ -221,7 +292,7 @@ func TestBlockAccessListCodecLeavesSemanticValidationToValidateForBlock(t *testi
 		{
 			name: "balance change order",
 			bal: BlockAccessList{{
-				Address: accounts.InternAddress(common.Address{1}),
+				Address: common.Address{1},
 				BalanceChanges: []*BalanceChange{
 					{Index: 2, Value: *uint256.NewInt(1)},
 					{Index: 1, Value: *uint256.NewInt(1)},
@@ -232,7 +303,7 @@ func TestBlockAccessListCodecLeavesSemanticValidationToValidateForBlock(t *testi
 		{
 			name: "nonce change order",
 			bal: BlockAccessList{{
-				Address: accounts.InternAddress(common.Address{1}),
+				Address: common.Address{1},
 				NonceChanges: []*NonceChange{
 					{Index: 2, Value: 1},
 					{Index: 1, Value: 2},
@@ -243,7 +314,7 @@ func TestBlockAccessListCodecLeavesSemanticValidationToValidateForBlock(t *testi
 		{
 			name: "code change order",
 			bal: BlockAccessList{{
-				Address: accounts.InternAddress(common.Address{1}),
+				Address: common.Address{1},
 				CodeChanges: []*CodeChange{
 					{Index: 2, Bytecode: []byte{1}},
 					{Index: 1, Bytecode: []byte{2}},
@@ -254,7 +325,7 @@ func TestBlockAccessListCodecLeavesSemanticValidationToValidateForBlock(t *testi
 		{
 			name: "empty slot changes",
 			bal: BlockAccessList{{
-				Address: accounts.InternAddress(common.Address{1}),
+				Address: common.Address{1},
 				StorageChanges: []SlotChanges{{
 					Slot: accounts.InternKey(common.Hash{1}),
 				}},
@@ -276,7 +347,7 @@ func TestBlockAccessListCodecLeavesSemanticValidationToValidateForBlock(t *testi
 			if !reflect.DeepEqual(decoded, tt.bal) {
 				t.Fatalf("round trip differs: got %v, want %v", decoded, tt.bal)
 			}
-			err = decoded.ValidateForBlock(^uint64(0))
+			err = NewBlockAccessListSidecar(decoded).ValidateForBlock(^uint64(0), 1)
 			if !errors.Is(err, ErrInvalidBlockAccessList) {
 				t.Fatalf("ValidateForBlock() error = %v, want ErrInvalidBlockAccessList", err)
 			}
@@ -295,7 +366,7 @@ func TestEncodeBlockAccessListRejectsNestedNil(t *testing.T) {
 		{
 			name: "storage change",
 			bal: BlockAccessList{{
-				Address: accounts.InternAddress(common.Address{1}),
+				Address: common.Address{1},
 				StorageChanges: []SlotChanges{{
 					Slot:    accounts.InternKey(common.Hash{1}),
 					Changes: []*StorageChange{nil},
@@ -305,21 +376,21 @@ func TestEncodeBlockAccessListRejectsNestedNil(t *testing.T) {
 		{
 			name: "balance change",
 			bal: BlockAccessList{{
-				Address:        accounts.InternAddress(common.Address{1}),
+				Address:        common.Address{1},
 				BalanceChanges: []*BalanceChange{nil},
 			}},
 		},
 		{
 			name: "nonce change",
 			bal: BlockAccessList{{
-				Address:      accounts.InternAddress(common.Address{1}),
+				Address:      common.Address{1},
 				NonceChanges: []*NonceChange{nil},
 			}},
 		},
 		{
 			name: "code change",
 			bal: BlockAccessList{{
-				Address:     accounts.InternAddress(common.Address{1}),
+				Address:     common.Address{1},
 				CodeChanges: []*CodeChange{nil},
 			}},
 		},
@@ -336,7 +407,7 @@ func TestEncodeBlockAccessListRejectsNestedNil(t *testing.T) {
 func TestBlockAccessListRLPEncoding(t *testing.T) {
 	bal := BlockAccessList{
 		{
-			Address: accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa")),
+			Address: common.HexToAddress("0x00000000000000000000000000000000000000aa"),
 			StorageChanges: []SlotChanges{
 				{
 					Slot: accounts.InternKey(common.HexToHash("0x01")),
@@ -383,6 +454,177 @@ func TestBlockAccessListRLPEncoding(t *testing.T) {
 	}
 }
 
+func TestBlockAccessListRLPSizeLimit(t *testing.T) {
+	const limit = 10 << 20
+	code := make([]byte, limit)
+	bal := BlockAccessList{{CodeChanges: []*CodeChange{{Index: 1, Bytecode: code}}}}
+	raw, err := EncodeBlockAccessListBytes(bal)
+	if err != nil {
+		t.Fatalf("encode BAL: %v", err)
+	}
+	overhead := len(raw) - len(code)
+	for _, tt := range []struct {
+		name string
+		size int
+	}{
+		{name: "below limit", size: limit - 1},
+		{name: "at limit", size: limit},
+		{name: "above limit", size: limit + 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			bal[0].CodeChanges[0].Bytecode = code[:tt.size-overhead]
+			raw, err := EncodeBlockAccessListBytes(bal)
+			if err != nil {
+				t.Fatalf("encode BAL: %v", err)
+			}
+			if len(raw) != tt.size {
+				t.Fatalf("RLP size = %d, want %d", len(raw), tt.size)
+			}
+			sidecar, err := DecodeBlockAccessListSidecarForBlock(raw, 10_000_000_000, len(bal))
+			if tt.size > limit {
+				if err == nil || !strings.Contains(err.Error(), "block access list RLP exceeds maximum size") {
+					t.Fatalf("decode BAL: got %v, want RLP size error", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("decode BAL: %v", err)
+			}
+			if err := sidecar.ValidateForBlock(10_000_000_000, len(bal)); err != nil {
+				t.Fatalf("validate BAL: %v", err)
+			}
+			if !reflect.DeepEqual(sidecar.BlockAccessList(), bal) {
+				t.Fatal("decoded BAL differs")
+			}
+		})
+	}
+}
+
+func TestBlockAccessListLargeLists(t *testing.T) {
+	tests := []struct {
+		name string
+		bal  func() BlockAccessList
+	}{
+		{
+			name: "storage reads",
+			bal: func() BlockAccessList {
+				reads := make([]accounts.StorageKey, 1<<18+1)
+				for i := range reads {
+					key := common.Hash{0: 1}
+					binary.BigEndian.PutUint64(key[24:], uint64(i))
+					reads[i] = accounts.InternKey(key)
+				}
+				return BlockAccessList{{StorageReads: reads}}
+			},
+		},
+		{
+			name: "storage slots",
+			bal: func() BlockAccessList {
+				slots := make([]SlotChanges, 1<<18+1)
+				for i := range slots {
+					key := common.Hash{0: 1}
+					binary.BigEndian.PutUint64(key[24:], uint64(i))
+					slots[i] = SlotChanges{
+						Slot:    accounts.InternKey(key),
+						Changes: []*StorageChange{{Index: 1, Value: *uint256.NewInt(1)}},
+					}
+				}
+				return BlockAccessList{{StorageChanges: slots}}
+			},
+		},
+		{
+			name: "storage changes",
+			bal: func() BlockAccessList {
+				changes := make([]*StorageChange, 1<<18+1)
+				for i := range changes {
+					changes[i] = &StorageChange{
+						Index: uint32(i + 1),
+						Value: uint256.Int{uint64(i + 1), 0, 0, 1 << 63},
+					}
+				}
+				return BlockAccessList{{StorageChanges: []SlotChanges{{
+					Slot:    accounts.InternKey(common.Hash{1}),
+					Changes: changes,
+				}}}}
+			},
+		},
+		{
+			name: "balance changes",
+			bal: func() BlockAccessList {
+				changes := make([]*BalanceChange, 1<<18+1)
+				for i := range changes {
+					changes[i] = &BalanceChange{Index: uint32(i + 1), Value: *uint256.NewInt(uint64(i + 1))}
+				}
+				return BlockAccessList{{BalanceChanges: changes}}
+			},
+		},
+		{
+			name: "nonce changes",
+			bal: func() BlockAccessList {
+				changes := make([]*NonceChange, 1<<18+1)
+				for i := range changes {
+					changes[i] = &NonceChange{Index: uint32(i + 1), Value: uint64(i + 1)}
+				}
+				return BlockAccessList{{NonceChanges: changes}}
+			},
+		},
+		{
+			name: "code changes",
+			bal: func() BlockAccessList {
+				changes := make([]*CodeChange, 1<<18+1)
+				for i := range changes {
+					address := accounts.InternAddress(common.Address{0: 1, 19: byte(i)})
+					changes[i] = &CodeChange{Index: uint32(i + 1), Bytecode: AddressToDelegation(address)}
+				}
+				return BlockAccessList{{CodeChanges: changes}}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bal := tt.bal()
+			raw, err := EncodeBlockAccessListBytes(bal)
+			if err != nil {
+				t.Fatalf("encode BAL: %v", err)
+			}
+			sidecar, err := DecodeBlockAccessListSidecarForHeader(raw, 10_000_000_000)
+			if err != nil {
+				t.Fatalf("decode BAL: %v", err)
+			}
+			decoded := sidecar.BlockAccessList()
+			if err := decoded.ValidateForHeader(10_000_000_000); err != nil {
+				t.Fatalf("validate BAL: %v", err)
+			}
+			if !reflect.DeepEqual(decoded, bal) {
+				t.Fatal("decoded BAL differs")
+			}
+		})
+	}
+}
+
+func TestBlockAccessListValidateForHeaderRejectsOversizedEarly(t *testing.T) {
+	slots := make([]SlotChanges, 100_000)
+	for i := range slots {
+		var key common.Hash
+		binary.BigEndian.PutUint64(key[24:], uint64(i+1))
+		slots[i] = SlotChanges{
+			Slot:    accounts.InternKey(key),
+			Changes: []*StorageChange{{Index: 1}},
+		}
+	}
+	bal := BlockAccessList{{StorageChanges: slots, StorageReads: []accounts.StorageKey{accounts.ZeroKey}}}
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	err := bal.ValidateForHeader(BalItemCost)
+	runtime.ReadMemStats(&after)
+	if !errors.Is(err, ErrInvalidBlockAccessList) || !strings.Contains(err.Error(), "block access list too large") {
+		t.Fatalf("validate BAL: got %v, want item limit error", err)
+	}
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated >= 1024*1024 {
+		t.Fatalf("validation allocated %d bytes for an oversized BAL", allocated)
+	}
+}
+
 func TestBlockAccessListValidateMaxItems(t *testing.T) {
 	makeBAL := func(numAccounts, slotsPerAccount int) BlockAccessList {
 		bal := make(BlockAccessList, numAccounts)
@@ -398,7 +640,7 @@ func TestBlockAccessListValidateMaxItems(t *testing.T) {
 				reads[j] = accounts.InternKey(h)
 			}
 			bal[i] = AccountChanges{
-				Address:      accounts.InternAddress(addr),
+				Address:      addr,
 				StorageReads: reads,
 			}
 		}
@@ -428,7 +670,7 @@ func TestBlockAccessListSlotUniqueness(t *testing.T) {
 	slot := common.HexToHash("0x01")
 
 	ac := &AccountChanges{
-		Address: accounts.InternAddress(addr),
+		Address: addr,
 		StorageChanges: []SlotChanges{
 			{
 				Slot:    accounts.InternKey(slot),
@@ -543,7 +785,7 @@ func TestBlockAccessListRejectsEmptySlotChanges(t *testing.T) {
 	slot := common.HexToHash("0x01")
 
 	ac := &AccountChanges{
-		Address: accounts.InternAddress(addr),
+		Address: addr,
 		StorageChanges: []SlotChanges{
 			{
 				Slot:    accounts.InternKey(slot),
@@ -587,13 +829,13 @@ func TestDecodeBlockAccessListBytesRejectsMalformedRLP(t *testing.T) {
 // unconditionally, so StorageChanges has to be too.
 func TestAccountChangesDecodeRLPClearsStorageChanges(t *testing.T) {
 	withSlots := AccountChanges{
-		Address: accounts.InternAddress(common.Address{1}),
+		Address: common.Address{1},
 		StorageChanges: []SlotChanges{{
 			Slot:    accounts.InternKey(common.Hash{2}),
 			Changes: []*StorageChange{{Index: 1, Value: *uint256.NewInt(3)}},
 		}},
 	}
-	empty := AccountChanges{Address: accounts.InternAddress(common.Address{9})}
+	empty := AccountChanges{Address: common.Address{9}}
 
 	var buf bytes.Buffer
 	if err := empty.EncodeRLP(&buf); err != nil {

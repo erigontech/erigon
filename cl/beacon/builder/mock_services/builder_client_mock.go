@@ -12,6 +12,7 @@ package mock_services
 import (
 	context "context"
 	reflect "reflect"
+	time "time"
 
 	builder "github.com/erigontech/erigon/cl/beacon/builder"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
@@ -159,6 +160,45 @@ func (c *MockBuilderClientRegisterValidatorCall) DoAndReturn(f func(context.Cont
 	return c
 }
 
+// RequestExecutionPayloadBid mocks base method.
+func (m *MockBuilderClient) RequestExecutionPayloadBid(ctx context.Context, builderURL string, slot uint64, parentHash, parentRoot common.Hash, proposerPubkey common.Bytes48, auth *cltypes.SignedBuilderRequestAuth, timeout time.Duration) (*cltypes.SignedExecutionPayloadBid, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RequestExecutionPayloadBid", ctx, builderURL, slot, parentHash, parentRoot, proposerPubkey, auth, timeout)
+	ret0, _ := ret[0].(*cltypes.SignedExecutionPayloadBid)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RequestExecutionPayloadBid indicates an expected call of RequestExecutionPayloadBid.
+func (mr *MockBuilderClientMockRecorder) RequestExecutionPayloadBid(ctx, builderURL, slot, parentHash, parentRoot, proposerPubkey, auth, timeout any) *MockBuilderClientRequestExecutionPayloadBidCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RequestExecutionPayloadBid", reflect.TypeOf((*MockBuilderClient)(nil).RequestExecutionPayloadBid), ctx, builderURL, slot, parentHash, parentRoot, proposerPubkey, auth, timeout)
+	return &MockBuilderClientRequestExecutionPayloadBidCall{Call: call}
+}
+
+// MockBuilderClientRequestExecutionPayloadBidCall wrap *gomock.Call
+type MockBuilderClientRequestExecutionPayloadBidCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBuilderClientRequestExecutionPayloadBidCall) Return(arg0 *cltypes.SignedExecutionPayloadBid, arg1 error) *MockBuilderClientRequestExecutionPayloadBidCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBuilderClientRequestExecutionPayloadBidCall) Do(f func(context.Context, string, uint64, common.Hash, common.Hash, common.Bytes48, *cltypes.SignedBuilderRequestAuth, time.Duration) (*cltypes.SignedExecutionPayloadBid, error)) *MockBuilderClientRequestExecutionPayloadBidCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBuilderClientRequestExecutionPayloadBidCall) DoAndReturn(f func(context.Context, string, uint64, common.Hash, common.Hash, common.Bytes48, *cltypes.SignedBuilderRequestAuth, time.Duration) (*cltypes.SignedExecutionPayloadBid, error)) *MockBuilderClientRequestExecutionPayloadBidCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // SubmitBlindedBlocks mocks base method.
 func (m *MockBuilderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.SignedBlindedBeaconBlock) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *cltypes.ExecutionRequests, error) {
 	m.ctrl.T.Helper()
@@ -196,6 +236,120 @@ func (c *MockBuilderClientSubmitBlindedBlocksCall) Do(f func(context.Context, *c
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBuilderClientSubmitBlindedBlocksCall) DoAndReturn(f func(context.Context, *cltypes.SignedBlindedBeaconBlock) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *cltypes.ExecutionRequests, error)) *MockBuilderClientSubmitBlindedBlocksCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SubmitBuilderPreferences mocks base method.
+func (m *MockBuilderClient) SubmitBuilderPreferences(ctx context.Context, builderURL string, proposerPubkey common.Bytes48, request *cltypes.BuilderPreferencesRequest) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SubmitBuilderPreferences", ctx, builderURL, proposerPubkey, request)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SubmitBuilderPreferences indicates an expected call of SubmitBuilderPreferences.
+func (mr *MockBuilderClientMockRecorder) SubmitBuilderPreferences(ctx, builderURL, proposerPubkey, request any) *MockBuilderClientSubmitBuilderPreferencesCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SubmitBuilderPreferences", reflect.TypeOf((*MockBuilderClient)(nil).SubmitBuilderPreferences), ctx, builderURL, proposerPubkey, request)
+	return &MockBuilderClientSubmitBuilderPreferencesCall{Call: call}
+}
+
+// MockBuilderClientSubmitBuilderPreferencesCall wrap *gomock.Call
+type MockBuilderClientSubmitBuilderPreferencesCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBuilderClientSubmitBuilderPreferencesCall) Return(arg0 error) *MockBuilderClientSubmitBuilderPreferencesCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBuilderClientSubmitBuilderPreferencesCall) Do(f func(context.Context, string, common.Bytes48, *cltypes.BuilderPreferencesRequest) error) *MockBuilderClientSubmitBuilderPreferencesCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBuilderClientSubmitBuilderPreferencesCall) DoAndReturn(f func(context.Context, string, common.Bytes48, *cltypes.BuilderPreferencesRequest) error) *MockBuilderClientSubmitBuilderPreferencesCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SubmitSignedBeaconBlock mocks base method.
+func (m *MockBuilderClient) SubmitSignedBeaconBlock(ctx context.Context, builderURL string, block *cltypes.SignedBeaconBlock) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SubmitSignedBeaconBlock", ctx, builderURL, block)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SubmitSignedBeaconBlock indicates an expected call of SubmitSignedBeaconBlock.
+func (mr *MockBuilderClientMockRecorder) SubmitSignedBeaconBlock(ctx, builderURL, block any) *MockBuilderClientSubmitSignedBeaconBlockCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SubmitSignedBeaconBlock", reflect.TypeOf((*MockBuilderClient)(nil).SubmitSignedBeaconBlock), ctx, builderURL, block)
+	return &MockBuilderClientSubmitSignedBeaconBlockCall{Call: call}
+}
+
+// MockBuilderClientSubmitSignedBeaconBlockCall wrap *gomock.Call
+type MockBuilderClientSubmitSignedBeaconBlockCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBuilderClientSubmitSignedBeaconBlockCall) Return(arg0 error) *MockBuilderClientSubmitSignedBeaconBlockCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBuilderClientSubmitSignedBeaconBlockCall) Do(f func(context.Context, string, *cltypes.SignedBeaconBlock) error) *MockBuilderClientSubmitSignedBeaconBlockCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBuilderClientSubmitSignedBeaconBlockCall) DoAndReturn(f func(context.Context, string, *cltypes.SignedBeaconBlock) error) *MockBuilderClientSubmitSignedBeaconBlockCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SubmitSignedBeaconBlockPublic mocks base method.
+func (m *MockBuilderClient) SubmitSignedBeaconBlockPublic(ctx context.Context, builderURL string, block *cltypes.SignedBeaconBlock) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SubmitSignedBeaconBlockPublic", ctx, builderURL, block)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SubmitSignedBeaconBlockPublic indicates an expected call of SubmitSignedBeaconBlockPublic.
+func (mr *MockBuilderClientMockRecorder) SubmitSignedBeaconBlockPublic(ctx, builderURL, block any) *MockBuilderClientSubmitSignedBeaconBlockPublicCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SubmitSignedBeaconBlockPublic", reflect.TypeOf((*MockBuilderClient)(nil).SubmitSignedBeaconBlockPublic), ctx, builderURL, block)
+	return &MockBuilderClientSubmitSignedBeaconBlockPublicCall{Call: call}
+}
+
+// MockBuilderClientSubmitSignedBeaconBlockPublicCall wrap *gomock.Call
+type MockBuilderClientSubmitSignedBeaconBlockPublicCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBuilderClientSubmitSignedBeaconBlockPublicCall) Return(arg0 error) *MockBuilderClientSubmitSignedBeaconBlockPublicCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBuilderClientSubmitSignedBeaconBlockPublicCall) Do(f func(context.Context, string, *cltypes.SignedBeaconBlock) error) *MockBuilderClientSubmitSignedBeaconBlockPublicCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBuilderClientSubmitSignedBeaconBlockPublicCall) DoAndReturn(f func(context.Context, string, *cltypes.SignedBeaconBlock) error) *MockBuilderClientSubmitSignedBeaconBlockPublicCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

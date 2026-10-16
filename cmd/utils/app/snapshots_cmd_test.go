@@ -27,9 +27,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
@@ -119,7 +122,7 @@ func createSchemaFiles(t *testing.T, schema state.SnapNameSchema, from, to int) 
 	t.Helper()
 	rootFrom, rootTo := RootNum(from), RootNum(to)
 	touchFile := func(filepath string) {
-		file, err := os.OpenFile(filepath, os.O_RDONLY|os.O_CREATE, 0644)
+		file, err := os.OpenFile(filepath, os.O_RDONLY|os.O_CREATE, 0o644)
 		if err != nil {
 			panic(err)
 		}
@@ -177,7 +180,7 @@ func Test_DeleteStateSnaps_RemovesTmpFiles(t *testing.T) {
 	}
 
 	touchFile := func(path string) {
-		f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0644)
+		f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0o644)
 		require.NoError(t, err)
 		f.Close()
 	}
@@ -218,7 +221,7 @@ func Test_DeleteStateSnaps_DryRunKeepsTmpFiles(t *testing.T) {
 	}
 
 	touchFile := func(path string) {
-		f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0644)
+		f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0o644)
 		require.NoError(t, err)
 		f.Close()
 	}
@@ -257,9 +260,15 @@ func Test_DeleteLatestStateSnaps_SubsetRemoval(t *testing.T) {
 	// Sub-ranges of 192-224: 192-208, 208-216, 216-220, 220-222, 222-223, 223-224
 	// Tip file: 224-225
 	ranges := [][2]int{
-		{0, 128}, {128, 192},
+		{0, 128},
+		{128, 192},
 		{192, 224},
-		{192, 208}, {208, 216}, {216, 220}, {220, 222}, {222, 223}, {223, 224},
+		{192, 208},
+		{208, 216},
+		{216, 220},
+		{220, 222},
+		{222, 223},
+		{223, 224},
 		{224, 225},
 	}
 	for _, r := range ranges {
@@ -310,9 +319,15 @@ func Test_DeleteStateSnaps_StepRange_SubsetRemoval(t *testing.T) {
 	// 0-128, 128-192, 192-224
 	// Sub-ranges of 192-224: 192-208, 208-216, 216-220, 220-222, 222-223, 223-224
 	ranges := [][2]int{
-		{0, 128}, {128, 192},
+		{0, 128},
+		{128, 192},
 		{192, 224},
-		{192, 208}, {208, 216}, {216, 220}, {220, 222}, {222, 223}, {223, 224},
+		{192, 208},
+		{208, 216},
+		{216, 220},
+		{220, 222},
+		{222, 223},
+		{223, 224},
 	}
 	for _, r := range ranges {
 		createFiles(t, dirs, r[0], r[1], &b)
@@ -378,9 +393,15 @@ func Test_DeleteStateSnaps_StepRange_FromPlus(t *testing.T) {
 	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 1)
 
 	ranges := [][2]int{
-		{0, 128}, {128, 192},
+		{0, 128},
+		{128, 192},
 		{192, 224},
-		{192, 208}, {208, 216}, {216, 220}, {220, 222}, {222, 223}, {223, 224},
+		{192, 208},
+		{208, 216},
+		{216, 220},
+		{220, 222},
+		{222, 223},
+		{223, 224},
 	}
 	for _, r := range ranges {
 		createFiles(t, dirs, r[0], r[1], &b)
@@ -401,6 +422,48 @@ func Test_DeleteStateSnaps_StepRange_FromPlus(t *testing.T) {
 	confirmExist(t, file)
 }
 
+func Test_DeleteStateSnaps_EmptyStepRange(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		stepRange    string
+		removeLatest bool
+	}{
+		{name: "from plus at latest", stepRange: "224+"},
+		{name: "from plus past latest", stepRange: "225+"},
+		{name: "equal bounds", stepRange: "224-224"},
+		{name: "zero bounds", stepRange: "0-0"},
+		{name: "reversed bounds", stepRange: "225-224"},
+		{name: "step overrides latest", stepRange: "224+", removeLatest: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			b := bundle{}
+			b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(statecfg.Schema.ReceiptDomain, dirs, 1)
+			createFiles(t, dirs, 0, 224, &b)
+			file, _ := b.domain.DataFile(version.V1_0, 0, 224)
+			require.NoError(t, os.WriteFile(file+".torrent", []byte("torrent"), 0o644))
+			require.NoError(t, os.WriteFile(file+".123.tmp", []byte("tmp"), 0o644))
+			var files []string
+			require.NoError(t, filepath.WalkDir(dirs.Snap, func(path string, entry os.DirEntry, err error) error {
+				if err == nil && !entry.IsDir() {
+					files = append(files, path)
+				}
+				return err
+			}))
+
+			require.NoError(t, DeleteStateSnapshots(DeleteStateSnapshotsArgs{
+				Dirs:         dirs,
+				StepRange:    tc.stepRange,
+				RemoveLatest: tc.removeLatest,
+				DomainNames:  []string{"receipt"},
+			}))
+			for _, path := range files {
+				require.FileExists(t, path)
+			}
+		})
+	}
+}
+
 // Test_DeleteLatestStateSnaps_NoFalseSubsetRemoval verifies that sub-range files
 // of a non-removed merged file are NOT incorrectly removed by the subset pass.
 func Test_DeleteLatestStateSnaps_NoFalseSubsetRemoval(t *testing.T) {
@@ -412,8 +475,12 @@ func Test_DeleteLatestStateSnaps_NoFalseSubsetRemoval(t *testing.T) {
 	// Create non-overlapping files: 0-64, 64-128, 128-192, 192-193
 	// 0-64 has sub-ranges: 0-32, 32-64
 	ranges := [][2]int{
-		{0, 64}, {0, 32}, {32, 64},
-		{64, 128}, {128, 192}, {192, 193},
+		{0, 64},
+		{0, 32},
+		{32, 64},
+		{64, 128},
+		{128, 192},
+		{192, 193},
 	}
 	for _, r := range ranges {
 		createFiles(t, dirs, r[0], r[1], &b)
@@ -551,7 +618,8 @@ func Test_DeleteLatestStateSnaps_DryRunPreservesSubsetFiles(t *testing.T) {
 	ranges := [][2]int{
 		{0, 128},
 		{128, 256},
-		{128, 192}, {192, 224},
+		{128, 192},
+		{192, 224},
 		{256, 257},
 	}
 	for _, r := range ranges {
@@ -664,7 +732,7 @@ func TestDUWalkSnapshots(t *testing.T) {
 	// Create mock files in various snapshot subdirectories.
 	writeFile := func(dir, name string, size int) {
 		path := filepath.Join(dir, name)
-		require.NoError(t, os.WriteFile(path, make([]byte, size), 0644))
+		require.NoError(t, os.WriteFile(path, make([]byte, size), 0o644))
 	}
 
 	// domain files (state file format: type.from-to)
@@ -1363,9 +1431,9 @@ func TestDUAcceptanceCriteria(t *testing.T) {
 // directory exists. Used by the rm-blocks tests below.
 func touchBlockSnap(t *testing.T, dirs datadir.Dirs, name string) string {
 	t.Helper()
-	require.NoError(t, os.MkdirAll(dirs.Snap, 0755))
+	require.NoError(t, os.MkdirAll(dirs.Snap, 0o755))
 	full := filepath.Join(dirs.Snap, name)
-	f, err := os.OpenFile(full, os.O_RDONLY|os.O_CREATE, 0644)
+	f, err := os.OpenFile(full, os.O_RDONLY|os.O_CREATE, 0o644)
 	require.NoError(t, err)
 	f.Close()
 	return full
@@ -1455,7 +1523,7 @@ func Test_removeAccessorsForRebuild(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 
 	touch := func(path string) {
-		f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0644)
+		f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0o644)
 		require.NoError(t, err)
 		require.NoError(t, f.Close())
 	}
@@ -1500,4 +1568,33 @@ func Test_removeAccessorsForRebuild(t *testing.T) {
 		confirmExist(t, f)
 	}
 	confirmExist(t, dataTorrent)
+}
+
+// Every commitment branch key sorts before "state", so a seek for it in a file
+// without the state key runs past the last key and finds no cursor.
+func TestCheckCommitmentFileHasRootWithoutStateKey(t *testing.T) {
+	dir := t.TempDir()
+	dataPath := filepath.Join(dir, "v1.0-commitment.0-1.kv")
+	compression := statecfg.Schema.CommitmentDomain.Compression
+	comp, err := seg.NewCompressor(t.Context(), t.Name(), dataPath, dir, seg.DefaultCfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+	defer comp.Close()
+	w := seg.NewWriter(comp, compression)
+	for _, word := range [][]byte{{0x01}, {0xaa}} {
+		_, err = w.Write(word)
+		require.NoError(t, err)
+	}
+	require.NoError(t, comp.Compress())
+
+	d, err := seg.NewDecompressor(dataPath)
+	require.NoError(t, err)
+	defer d.Close()
+	btPath := filepath.Join(dir, "v1.0-commitment.0-1.bt")
+	require.NoError(t, btindex.BuildBtreeIndexWithDecompressor(btPath, "", seg.NewReader(d.MakeGetter(), compression),
+		background.NewProgressSet(), dir, 1, log.New(), true, statecfg.AccessorBTree))
+
+	hasState, broken, _, err := checkCommitmentFileHasRoot(dataPath)
+	require.NoError(t, err)
+	require.False(t, hasState)
+	require.False(t, broken)
 }

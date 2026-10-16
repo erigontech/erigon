@@ -1,18 +1,41 @@
 package services
 
 import (
+	"context"
+
 	"github.com/erigontech/erigon/cl/cltypes"
 	serviceinterface "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
+	"github.com/erigontech/erigon/common"
 )
 
+type PublishedBlockJob interface {
+	Wait(context.Context) error
+}
+
 //go:generate mockgen -typed=true -destination=./mock_services/block_service_mock.go -package=mock_services . BlockService
-type BlockService serviceinterface.Service[*cltypes.SignedBeaconBlock]
+type BlockService interface {
+	serviceinterface.Service[*cltypes.SignedBeaconBlock]
+	ValidateGossip(context.Context, *cltypes.SignedBeaconBlock) error
+	CommitGossipReservation(*cltypes.SignedBeaconBlock)
+	ReleaseGossipReservation(*cltypes.SignedBeaconBlock)
+	ScheduleBlockForLaterProcessing(*cltypes.SignedBeaconBlock)
+	SchedulePublishedBlockForLaterProcessing(*cltypes.SignedBeaconBlock, func(context.Context) error) PublishedBlockJob
+}
 
 //go:generate mockgen -typed=true -destination=./mock_services/blob_sidecars_service_mock.go -package=mock_services . BlobSidecarsService
 type BlobSidecarsService serviceinterface.Service[*cltypes.BlobSidecar]
 
 //go:generate mockgen -typed=true -destination=./mock_services/sync_committee_messages_service_mock.go -package=mock_services . SyncCommitteeMessagesService
-type SyncCommitteeMessagesService serviceinterface.Service[*SyncCommitteeMessageForGossip]
+type SyncCommitteeMessagesService interface {
+	serviceinterface.Service[*SyncCommitteeMessageForGossip]
+	// MarkPublished records that a caller successfully admitted the given,
+	// already-verified message to the gossip publish queue, so a later
+	// duplicate submission of the same content can be ignored instead of
+	// spending another admission attempt on it. Content that does not match
+	// what MarkPublished was called for makes no difference - only content
+	// ProcessMessage itself verified can ever be marked published.
+	MarkPublished(subnet, slot, validatorIndex uint64, beaconBlockRoot common.Hash, signature common.Bytes96)
+}
 
 //go:generate mockgen -typed=true -destination=./mock_services/sync_contribution_service_mock.go -package=mock_services . SyncContributionService
 type SyncContributionService serviceinterface.Service[*SignedContributionAndProofForGossip]
@@ -45,7 +68,10 @@ type ExecutionPayloadService serviceinterface.Service[*cltypes.SignedExecutionPa
 type ExecutionPayloadBidService serviceinterface.Service[*cltypes.SignedExecutionPayloadBid]
 
 //go:generate mockgen -typed=true -destination=./mock_services/payload_attestation_service_mock.go -package=mock_services . PayloadAttestationService
-type PayloadAttestationService serviceinterface.Service[*cltypes.PayloadAttestationMessage]
+type PayloadAttestationService interface {
+	serviceinterface.Service[*cltypes.PayloadAttestationMessage]
+	ProcessRESTMessage(context.Context, *cltypes.PayloadAttestationMessage, func() error) error
+}
 
 //go:generate mockgen -typed=true -destination=./mock_services/proposer_preferences_service_mock.go -package=mock_services . ProposerPreferencesService
 type ProposerPreferencesService serviceinterface.Service[*cltypes.SignedProposerPreferences]

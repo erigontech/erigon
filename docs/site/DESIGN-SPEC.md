@@ -18,7 +18,7 @@ Complete specification of every customization applied to this site relative to a
 | `typescript` | ~6.0.2 |
 | `@easyops-cn/docusaurus-search-local` | ^0.55.1 |
 | `prism-react-renderer` | ^2.3.0 |
-| Node requirement | `>=20.0` |
+| Node requirement | `>=24.0` |
 
 ---
 
@@ -149,7 +149,7 @@ Font: **Quantify**, weight 700, letter-spacing 0.04em (applied via CSS)
 
 Completely swizzled (`src/theme/Footer/index.tsx`) — not using the Docusaurus built-in footer at all.
 
-**This site uses the minimalistic docs footer**, not the full five-column one. Canonical description lives in `erigon-documents` → `public-docs/docusaurus-design-spec.md` §6.0–§6.3; do not duplicate it here. Summary only:
+**This site uses the minimalistic docs footer**, not the full five-column one. Canonical description lives in `erigon-documents` → `public-docs/01-docs-sites/shared/docusaurus-design-spec.md` §6.0–§6.3; do not duplicate it here. Summary only:
 
 - Single row: brand lockup → tagline → icon-only social buttons pushed right; then a divider and a bottom bar (copyright left, Privacy / Cookie / Contact / `hello@erigon.tech` right).
 - No link columns and no postal address. Those belong to the **full** footer, which is erigon.tech's, not a docs site's. Do not "fix" this footer by porting them back.
@@ -413,7 +413,7 @@ help-center/
 **Workflow:** `.github/workflows/docs-deploy.yml`
 
 - Trigger: push to `release/3.4` (or manual via `workflow_dispatch`)
-- Node: 20, with npm cache (`docs/site/package-lock.json`)
+- Node: 24, with npm cache (`docs/site/package-lock.json`)
 - Build: `npm ci` → `npm run build` (with `GITHUB_TOKEN` forwarded for authenticated API calls)
 - Target: GitHub Pages → `docs.erigon.tech`
 - Permissions: `contents:read`, `pages:write`, `id-token:write`

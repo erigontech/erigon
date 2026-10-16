@@ -88,7 +88,7 @@ func (b *OffHeapBuilder) Close() {
 	if b.backingFile != nil {
 		name := b.backingFile.Name()
 		_ = b.backingFile.Close()
-		dir.RemoveFile(name)
+		_ = dir.RemoveFile(name)
 		b.backingFile = nil
 	}
 }
@@ -140,7 +140,7 @@ func NewEliasFanoOffHeap(count uint64, maxOffset uint64, tmpFilePath string) (_ 
 	defer func() {
 		if err != nil {
 			f.Close()
-			dir.RemoveFile(f.Name())
+			_ = dir.RemoveFile(f.Name())
 		}
 	}()
 	if err := fallocate(f, sizeBytes); err != nil {
@@ -346,7 +346,7 @@ func (ef *EliasFano) upper(i uint64) uint64 {
 }
 
 func Seek(data []byte, n uint64) (uint64, uint64, bool) {
-	ef, _ := ReadEliasFano(data) //for better perf: app-code can use ef.Reset(data).Seek(n)
+	ef, _ := ReadEliasFano(data) // for better perf: app-code can use ef.Reset(data).Seek(n)
 	return ef.Seek(n)
 }
 
@@ -565,18 +565,18 @@ type EliasFanoIter struct {
 	lowerBits []uint64
 	upperBits []uint64
 
-	//constants
+	// constants
 	count         uint64
 	lowerBitsMask uint64
 	l             uint64
 	upperStep     uint64
 	reverse       bool
 
-	//fields of current value
+	// fields of current value
 	upper    uint64
 	upperIdx uint64
 
-	//fields of next value
+	// fields of next value
 	lowerIdx  uint64
 	upperMask uint64
 
@@ -929,9 +929,9 @@ func (ef *DoubleEliasFano) build(cumKeys []uint64, position []uint64) bool {
 		set(ef.upperBitsPosition, ((position[i]-bitDelta)>>ef.lPosition)+i)
 		//fmt.Printf("i=%d, set pos for %d = %d\n", i, position[i]-bitDelta, (position[i]-bitDelta)>>ef.lPosition+i)
 	}
-	//fmt.Printf("loweBits %b\n", ef.lowerBits)
-	//fmt.Printf("upperBitsCumKeys %b\n", ef.upperBitsCumKeys)
-	//fmt.Printf("upperBitsPosition %b\n", ef.upperBitsPosition)
+	// fmt.Printf("loweBits %b\n", ef.lowerBits)
+	// fmt.Printf("upperBitsCumKeys %b\n", ef.upperBitsCumKeys)
+	// fmt.Printf("upperBitsPosition %b\n", ef.upperBitsPosition)
 	// i iterates over the 64-bit words in the wordCumKeys vector
 	// c iterates over bits in the wordCumKeys
 	// lastSuperQ is the largest multiple of 2^14 (4096) which is no larger than c
@@ -1019,7 +1019,8 @@ func (ef *DoubleEliasFano) Data() []uint64 {
 }
 
 func (ef *DoubleEliasFano) get2(i uint64) (cumKeys uint64, position uint64,
-	windowCumKeys uint64, selectCumKeys int, currWordCumKeys uint64, lower uint64, cumDelta uint64) {
+	windowCumKeys uint64, selectCumKeys int, currWordCumKeys uint64, lower uint64, cumDelta uint64,
+) {
 	posLower := i * (ef.lCumKeys + ef.lPosition)
 	idx64, shift := posLower/64, posLower%64
 	lower = ef.lowerBits[idx64] >> shift

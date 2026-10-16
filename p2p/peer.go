@@ -41,9 +41,7 @@ import (
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
-var (
-	ErrShuttingDown = errors.New("shutting down")
-)
+var ErrShuttingDown = errors.New("shutting down")
 
 const (
 	baseProtocolVersion    = 5
@@ -281,8 +279,7 @@ func (p *Peer) run() (peerErr *PeerError) {
 			// Allow the next write to start if there was no error.
 			writeStart <- struct{}{}
 		case err := <-readErr:
-			var reason DiscReason
-			if errors.As(err, &reason) {
+			if reason, ok := errors.AsType[DiscReason](err); ok {
 				return NewPeerError(PeerErrorDiscReasonRemote, reason, nil, "Peer.run got a remote DiscReason")
 			} else {
 				return NewPeerError(PeerErrorDiscReason, DiscNetworkError, err, "Peer.run readErr")
@@ -517,7 +514,6 @@ func (rw *protoRW) WriteMsg(msg Msg) (err error) {
 }
 
 func (rw *protoRW) ReadMsg() (Msg, error) {
-
 	select {
 	case msg := <-rw.in:
 		msg.Code -= rw.offset
