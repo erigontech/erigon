@@ -265,7 +265,7 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 		// check if the message satisfies the extra conditions
 		for _, condition := range conditions {
 			if !condition(pid, msg, curVersion) {
-				g.stats.addIgnore(name)
+				g.stats.addConditionIgnore(name)
 				return pubsub.ValidationIgnore
 			}
 		}
