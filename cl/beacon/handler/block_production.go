@@ -110,6 +110,10 @@ const (
 // produced block still reaches attesters in time to earn the proposer boost.
 const payloadPublicationDivisor = 4
 
+const gloasPayloadCollectionDivisor = 3
+
+const minimumPayloadBuildTime = 500 * time.Millisecond
+
 // identificationSegment builds the client-version graffiti standard's EL+CL code and commit
 // prefix segment, so client-diversity tooling can attribute proposed blocks. See
 // https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md
@@ -338,10 +342,19 @@ func attestationDue(cfg *clparams.BeaconChainConfig, stateVersion clparams.State
 	return time.Duration(cfg.AttestationDueMs(stateVersion.AfterOrEqual(clparams.GloasVersion))) * time.Millisecond
 }
 
-// unpreparedGrabOffset is the normal payload collection deadline measured from the slot start. It
+// preparedGrabOffset is the normal payload collection deadline measured from the slot start. It
 // reserves the final publication share of the attestation window for processing, signing, and gossip.
-func unpreparedGrabOffset(due time.Duration) time.Duration {
+func preparedGrabOffset(due time.Duration) time.Duration {
 	return due - payloadPublicationMargin(due)
+}
+
+// Gloas preparation stands down on a FULL parent, the usual case, so the builder starts only with the
+// proposal; collecting at a third of the window leaves two thirds for the block to reach attesters.
+func unpreparedGrabOffset(due time.Duration, stateVersion clparams.StateVersion) time.Duration {
+	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
+		return due / gloasPayloadCollectionDivisor
+	}
+	return preparedGrabOffset(due)
 }
 
 func payloadPublicationMargin(due time.Duration) time.Duration {
@@ -353,7 +366,7 @@ func payloadPublicationMargin(due time.Duration) time.Duration {
 // with its first poll minPayloadPollingWindow earlier to allow a brief retry.
 func maximumPreparedAdvance(cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion) time.Duration {
 	due := attestationDue(cfg, stateVersion)
-	return max(unpreparedGrabOffset(due)-payloadPublicationMargin(due), 0)
+	return max(preparedGrabOffset(due)-payloadPublicationMargin(due), 0)
 }
 
 // computeBlockBuilderWindow returns when to first poll for the assembled payload and when to stop,
@@ -361,9 +374,24 @@ func maximumPreparedAdvance(cfg *clparams.BeaconChainConfig, stateVersion clpara
 // advances the first poll by the same duration, up to the prepared collection point.
 func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion, warmup time.Duration) blockBuilderWindow {
 	due := attestationDue(cfg, stateVersion)
-	grabBy := slotStart.Add(unpreparedGrabOffset(due))
-	advance := min(max(warmup, 0), maximumPreparedAdvance(cfg, stateVersion))
-	firstGetAt := grabBy.Add(-minPayloadPollingWindow).Add(-advance)
+	preparedBy := slotStart.Add(preparedGrabOffset(due))
+	// A builder started after the unprepared collection point still gets a minimum build time, but
+	// is never collected later than the prepared collection point.
+	grabBy := slotStart.Add(unpreparedGrabOffset(due, stateVersion))
+	if lateGrab := now.Add(minimumPayloadBuildTime); lateGrab.After(grabBy) {
+		grabBy = lateGrab
+		if grabBy.After(preparedBy) {
+			grabBy = preparedBy
+		}
+	}
+	firstGetAt := grabBy.Add(-minPayloadPollingWindow)
+	if warmup > 0 {
+		advance := min(warmup, maximumPreparedAdvance(cfg, stateVersion))
+		if preparedFirst := preparedBy.Add(-minPayloadPollingWindow).Add(-advance); preparedFirst.Before(firstGetAt) {
+			firstGetAt = preparedFirst
+		}
+		grabBy = preparedBy
+	}
 	if firstGetAt.Before(now) {
 		firstGetAt = now
 	}
@@ -433,11 +461,24 @@ func (a *ApiHandler) expectedWithdrawals(
 	return cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(consensusWithdrawals), nil
 }
 
+func resolveFeeRecipient(preference *cltypes.ProposerPreferences, registeredRecipient common.Address, registered bool) (common.Address, bool) {
+	if preference != nil {
+		return preference.FeeRecipient, true
+	}
+	return registeredRecipient, registered
+}
+
 // feeRecipientForProposal resolves the fee recipient, warning once per proposer when there is none:
 // building with the zero address gives that block's fees away.
-func (a *ApiHandler) feeRecipientForProposal(proposerIndex, targetSlot uint64) common.Address {
-	feeRecipient, registered := a.validatorParams.GetFeeRecipient(proposerIndex)
-	if registered {
+func (a *ApiHandler) feeRecipientForProposal(
+	baseState *state.CachingBeaconState,
+	targetSlot, proposerIndex uint64,
+	stateVersion clparams.StateVersion,
+) common.Address {
+	preference := a.proposerPreferencesForProposal(baseState, targetSlot, proposerIndex, stateVersion)
+	registeredRecipient, registered := a.validatorParams.GetFeeRecipient(proposerIndex)
+	feeRecipient, found := resolveFeeRecipient(preference, registeredRecipient, registered)
+	if found {
 		return feeRecipient
 	}
 	// Claimed in one step, so requests for the same slot arriving together do not each decide they
@@ -448,7 +489,7 @@ func (a *ApiHandler) feeRecipientForProposal(proposerIndex, targetSlot uint64) c
 		firstTime = !alreadyWarned
 	}
 	if firstTime {
-		log.Warn("BlockProduction: no fee recipient from prepare_beacon_proposer, using zero address",
+		log.Warn("BlockProduction: no fee recipient from proposer preferences or prepare_beacon_proposer, using zero address",
 			"proposerIndex", proposerIndex, "slot", targetSlot)
 	}
 	return common.Address{}
@@ -595,6 +636,9 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	w http.ResponseWriter,
 	r *http.Request,
 ) (*beaconhttp.BeaconResponse, error) {
+	if err := a.refuseLaggingHead(); err != nil {
+		return nil, err
+	}
 	slot, err := beaconhttp.Uint64FromQueryParams(r, "slot")
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
@@ -763,7 +807,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		)
 	}
 
-	log.Debug("[Beacon API] Producing block", "slot", targetSlot)
 	builderBoostFactor := uint64(100)
 	if options := gloasBlockOptionsFromContext(ctx); options != nil {
 		builderBoostFactor = options.builderConfig.BuilderBoostFactor
@@ -778,6 +821,10 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			)
 		}
 	}
+	if err := a.refuseLaggingHead(); err != nil {
+		return nil, err
+	}
+	log.Debug("[Beacon API] Producing block", "slot", targetSlot)
 	finishBlockWork := a.payloadPreparationGate.beginBlockWork()
 	defer finishBlockWork()
 
@@ -1447,7 +1494,7 @@ func (a *ApiHandler) requestConfiguredBuilderBids(
 	if err != nil {
 		return nil
 	}
-	expectedFeeRecipient := a.feeRecipientForProposal(proposerIndex, targetSlot)
+	expectedFeeRecipient := a.feeRecipientForProposal(baseState, targetSlot, proposerIndex, clparams.GloasVersion)
 	targetGasLimit := parentBid.GasLimit
 	if configured := a.targetGasLimitForProposal(baseState, targetSlot, proposerIndex, clparams.GloasVersion); configured != nil {
 		targetGasLimit = uint64(*configured)
@@ -1758,7 +1805,7 @@ func (a *ApiHandler) produceBeaconBody(
 		if options := gloasBlockOptionsFromContext(ctx); options != nil && options.payloadFeeRecipient != nil {
 			feeRecipient = *options.payloadFeeRecipient
 		} else {
-			feeRecipient = a.feeRecipientForProposal(proposerIndex, targetSlot)
+			feeRecipient = a.feeRecipientForProposal(baseState, targetSlot, proposerIndex, stateVersion)
 		}
 		withdrawals, err := a.expectedWithdrawals(baseState, gloasWithdrawalsState, targetSlot)
 		if err != nil {
@@ -3523,10 +3570,36 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 		maxAttLen = int(a.beaconChainCfg.MaxAttestationsElectra)
 	}
 	ret := solid.NewDynamicListSSZ[*solid.Attestation](maxAttLen)
-	for _, att := range selectAttestations(attestationCandidates, s.BeaconConfig().ParticipationWeights(), proposerRewardDenominator(s.BeaconConfig()), maxAttLen) {
+	selected := selectAttestations(attestationCandidates, s.BeaconConfig().ParticipationWeights(), proposerRewardDenominator(s.BeaconConfig()), maxAttLen)
+	for _, att := range attestationsValidForProposal(s, selected) {
 		ret.Append(att)
 	}
 	return ret
+}
+
+// attestationsValidForProposal keeps the attestations whose signature verifies against the
+// proposal state. Aggregation bits map to validators by the shuffling an attestation was received
+// under; after a reorg that changes it, one such attestation would make the block invalid.
+func attestationsValidForProposal(s abstract.BeaconState, atts []*solid.Attestation) []*solid.Attestation {
+	valid := make([]*solid.Attestation, 0, len(atts))
+	for _, att := range atts {
+		if err := verifyAttestationForProposal(s, att); err != nil {
+			log.Warn("[Block Production] Dropping an attestation that does not verify against the proposal state",
+				"slot", att.Data.Slot, "committees", att.CommitteeBits.GetOnIndices(), "err", err)
+			continue
+		}
+		valid = append(valid, att)
+	}
+	return valid
+}
+
+func verifyAttestationForProposal(s abstract.BeaconState, att *solid.Attestation) error {
+	indices, err := s.GetAttestingIndicies(att, true)
+	if err != nil {
+		return err
+	}
+	_, err = state.IsValidIndexedAttestation(s, state.GetIndexedAttestation(att, indices))
+	return err
 }
 
 type scoredCandidate struct {

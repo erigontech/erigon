@@ -474,7 +474,7 @@ func TestGetPayloadAttestationDataReportsSyncing(t *testing.T) {
 		t.Run(path, func(t *testing.T) {
 			_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 			handler.beaconChainCfg.GloasForkEpoch = 0
-			syncedData.(*sync_mock_services.MockSyncedData).EXPECT().Syncing().Return(true)
+			syncedData.(*sync_mock_services.MockSyncedData).EXPECT().StateHead().Return(common.Hash{}, uint64(0), false)
 
 			recorder := httptest.NewRecorder()
 			handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
@@ -484,19 +484,17 @@ func TestGetPayloadAttestationDataReportsSyncing(t *testing.T) {
 	}
 }
 
-func TestGetPayloadAttestationDataPreservesUnavailableHeadStatus(t *testing.T) {
+// The stale-head gate answers before a gated endpoint reads the head, so the selected-head
+// lookup keeps its own test for a missing head state.
+func TestGetSelectedHeadReportsAMissingHeadStateAsUnavailable(t *testing.T) {
 	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
-	handler.beaconChainCfg.GloasForkEpoch = 0
 	handler.enableMemoizedHeadState = true
-	mockSyncedData := syncedData.(*sync_mock_services.MockSyncedData)
-	mockSyncedData.EXPECT().Syncing().Return(false)
-	mockSyncedData.EXPECT().StateHead().Return(common.Hash{}, uint64(0), false)
+	syncedData.(*sync_mock_services.MockSyncedData).EXPECT().StateHead().Return(common.Hash{}, uint64(0), false)
 
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/validator/payload_attestation_data?slot=64", http.NoBody)
-	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, request)
+	_, _, statusCode, err := handler.getSelectedHead()
 
-	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+	require.Error(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, statusCode)
 }
 
 func TestGetPayloadAttestationDataRejectsInvalidCanonicalSlotQuery(t *testing.T) {
@@ -2989,7 +2987,7 @@ func TestGetValidatorExecutionPayloadBidBuildsUnsignedBidWithoutGossip(t *testin
 		handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
 		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 	}
-	require.NotContains(t, logs(), "no fee recipient from prepare_beacon_proposer")
+	require.NotContains(t, logs(), "no fee recipient")
 }
 
 func TestGetValidatorExecutionPayloadBidRejectsChangedHeadBeforeBuilding(t *testing.T) {
