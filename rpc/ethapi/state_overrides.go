@@ -131,5 +131,24 @@ func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.Pr
 	// State overrides are synthetic pre-state and must not trigger EIP-161 account deletion.
 	overrideRules := *rules
 	overrideRules.DisabledEIPs = append(slices.Clone(rules.DisabledEIPs), 161)
-	return ibs.FinalizeTx(&overrideRules, state.NewNoopWriter())
+	if err := FinalizeCallTx(ibs, &overrideRules); err != nil {
+		return err
+	}
+	if ibs.IsVersioned() {
+		ibs.SetTxContext(ibs.BlockNumber(), ibs.TxnIndex()+1)
+	}
+	return nil
+}
+
+// FinalizeCallTx ends one transaction of a request that runs several on the same state.
+// On the versioned path the writes go to the version map, where the next transaction index
+// reads them; on the materializing path FinalizeTx commits them to the state objects.
+func FinalizeCallTx(ibs *state.IntraBlockState, rules *chain.Rules) error {
+	if !ibs.IsVersioned() {
+		return ibs.FinalizeTx(rules, state.NewNoopWriter())
+	}
+	ibs.FlushWritesToVersionMap(ibs.FinalizedWrites(rules))
+	ibs.SoftFinalise()
+	ibs.ResetVersionedIO()
+	return nil
 }

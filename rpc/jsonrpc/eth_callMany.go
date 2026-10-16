@@ -182,7 +182,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	st := state.New(stateReader)
 	defer st.Close()
-	transactions.VersionedCallState(st, stateOverride)
+	transactions.VersionedCallState(st)
 
 	header := block.HeaderNoCopy()
 
@@ -223,7 +223,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			return nil, err
 		}
 
-		_ = transactions.FinalizeCallTx(st, rules)
+		_ = ethapi.FinalizeCallTx(st, rules)
 
 		if evm.Cancelled() {
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
@@ -232,6 +232,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	// after replaying the txns, we want to overload the state
 	// overload state
+	st.SetTxContext(blockNum, len(replayTransactions))
 	var activePrecompiles vm.PrecompiledContracts
 	if stateOverride != nil {
 		activePrecompiles = vm.ActivePrecompiledContracts(rules)
@@ -244,7 +245,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	ret := make([][]map[string]any, 0)
 
 	// Every transaction of the request gets the next index, so each sees the ones before it.
-	txIndex := len(replayTransactions)
+	txIndex := st.TxnIndex()
 	for _, bundle := range bundles {
 		// first change blockContext
 		bundle.BlockOverride.OverrideBlockContext(&blockCtx, ethapi.BlockHashOverrides(overrideBlockHash))
@@ -270,7 +271,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 				return nil, err
 			}
 
-			_ = transactions.FinalizeCallTx(st, rules)
+			_ = ethapi.FinalizeCallTx(st, rules)
 
 			// If the timer caused an abort, return an appropriate error message
 			if evm.Cancelled() {

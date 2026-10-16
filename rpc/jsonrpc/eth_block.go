@@ -110,7 +110,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	}
 	ibs := state.New(stateReader)
 	defer ibs.Close()
-	transactions.VersionedCallState(ibs, nil)
+	transactions.VersionedCallState(ibs)
 
 	parent, err := api.headerByHashAndNumber(ctx, tx, hash, stateBlockNumber)
 	if err != nil {
@@ -186,7 +186,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		if evm.Cancelled() {
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 		}
-		if err := transactions.FinalizeCallTx(ibs, rules); err != nil {
+		if err := ethapi.FinalizeCallTx(ibs, rules); err != nil {
 			return nil, err
 		}
 
