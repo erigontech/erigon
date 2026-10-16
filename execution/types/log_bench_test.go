@@ -18,10 +18,13 @@ package types
 
 import (
 	"encoding/json"
+	"io"
+	"math/rand/v2"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -54,4 +57,46 @@ func BenchmarkLogsMarshalFastJSON(b *testing.B) {
 			}
 		}
 	})
+}
+
+// BenchmarkLogsMarshalFastJSONMainnet encodes a getLogs-sized result: logs grouped by
+// transaction and block, 1-4 topics, 0-320 bytes of data, timestamps stamped.
+func BenchmarkLogsMarshalFastJSONMainnet(b *testing.B) {
+	rng := rand.New(rand.NewPCG(1, 2))
+	hash := func() (h common.Hash) {
+		for i := range h {
+			h[i] = byte(rng.Uint32())
+		}
+		return h
+	}
+	var logs Logs
+	for blockNum := hexutil.Uint64(26_065_115); len(logs) < 400; blockNum++ {
+		blockHash, ts := hash(), 1_760_000_000+blockNum*12
+		for txIndex := range hexutil.Uint(1 + rng.IntN(20)) {
+			txHash := hash()
+			for range 1 + rng.IntN(4) {
+				topics := make([]common.Hash, 1+rng.IntN(4))
+				for i := range topics {
+					topics[i] = hash()
+				}
+				logs = append(logs, &Log{
+					Address: common.Address(topics[0][:20]), Topics: topics,
+					Data:        make([]byte, 32*rng.IntN(11)),
+					BlockNumber: blockNum, TxHash: txHash, TxIndex: txIndex, BlockHash: blockHash,
+					Index: hexutil.Uint(len(logs)), BlockTimestamp: &ts,
+				})
+			}
+		}
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		s := jsonstream.Get(io.Discard)
+		if err := logs.MarshalFastJSONTo(s); err != nil {
+			b.Fatal(err)
+		}
+		if err := s.Flush(); err != nil {
+			b.Fatal(err)
+		}
+		jsonstream.Put(s)
+	}
 }
