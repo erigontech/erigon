@@ -23,13 +23,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/cachebudget"
-	"github.com/erigontech/erigon/common/maphash"
 )
 
 // largeCodePayloadBytes is a big-content payload size for the growLRU sizing
@@ -76,21 +74,13 @@ func oneEntryBytes(key, val []byte) datasize.ByteSize {
 
 // A ModeNoOp admission must never observe the byte counter mid-update: the
 // update path removes the old entry before adding the new one, and a
-// concurrent insert on another stripe that reads the transient dip passes the
+// concurrent insert of another key that reads the transient dip passes the
 // budget check and lands over capacity — breaking "drop new keys when full"
 // with a key that should never have been admitted. The counter is reserved
 // before the removal, so the budget is transiently over-stated (at worst
 // dropping a new key) and never under-stated.
 func TestGenericCache_ModeNoOpAdmissionAtomicWithUpdate(t *testing.T) {
-	a := []byte("key-a-aaaaaaaaaaaaaa")
-	var b []byte
-	for i := 0; ; i++ {
-		cand := []byte("key-b-bbbbbbbbbbbbb" + string(rune('a'+i%26)))
-		if maphash.Hash(a)&(putStripeCount-1) != maphash.Hash(cand)&(putStripeCount-1) {
-			b = cand
-			break
-		}
-	}
+	a, b := []byte("key-a-aaaaaaaaaaaaaa"), []byte("key-b-bbbbbbbbbbbbbb")
 	v := []byte("valuevalu")
 	c := fixedGenericCache(t, oneEntryBytes(a, v), ModeNoOp) // fits exactly one entry
 	c.Put(a, v, 1)
@@ -106,20 +96,11 @@ func TestGenericCache_ModeNoOpAdmissionAtomicWithUpdate(t *testing.T) {
 	}
 }
 
-// A capacity eviction is a size-subtracting writer the put stripes cannot
-// serialize: an insert on one stripe evicts a key whose own update, on another
-// stripe, is mid-flight. With room for one entry every insert evicts the
-// other key, so any drift in the byte counter accumulates and shows after the
-// settle deletes.
+// A capacity eviction is a size-subtracting writer racing another key's
+// update. With room for one entry every insert evicts the other key, so any
+// drift in the byte counter accumulates and shows after the settle deletes.
 func TestGenericCache_CapacityEvictionAtomicWithPut_NoSizeDrift(t *testing.T) {
-	a := makeAddr(1)
-	var b []byte
-	for i := 2; ; i++ {
-		b = makeAddr(i)
-		if maphash.Hash(a)&(putStripeCount-1) != maphash.Hash(b)&(putStripeCount-1) {
-			break
-		}
-	}
+	a, b := makeAddr(1), makeAddr(2)
 	v := []byte("value-one")
 	c := fixedGenericCache(t, oneEntryBytes(a, v), ModeEvictLRU)
 	for range 100000 {
@@ -135,56 +116,33 @@ func TestGenericCache_CapacityEvictionAtomicWithPut_NoSizeDrift(t *testing.T) {
 	require.Zero(t, c.SizeBytes(), "capacity eviction raced the update-path delta")
 }
 
-// The failure mode is a pre-Clear epoch stamped on post-Clear storage. If Clear
-// reused that epoch value, a later unwind could reach the same value and treat
-// the entry as current even though its txNum is above the unwind floor.
-//
-// The test holds the key's stripe, then queues Clear before Put. Waiting beyond
-// the mutex starvation threshold makes the unlock hand the stripe to Clear
-// first. Clear must keep the stripe through the data and coherence generation
-// changes, so Put stamps the post-Clear epoch and a later unwind invalidates it.
+// A Put racing Clear may stamp a pre-Clear epoch on an entry that lands after
+// the wipe. Clear must not reuse that epoch value, or a later unwind could
+// treat the entry as current although its txNum is above the unwind floor.
 func TestGenericCache_ClearRacingPut_EpochAlias(t *testing.T) {
 	c := NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
 	defer c.Close()
-	c.Unwind(300) // epoch 0 -> 1
-
 	key := []byte("epoch-alias-key")
-	mu := &c.putStripes[maphash.Hash(key)&(putStripeCount-1)]
-	mu.Lock()
-
-	var wg sync.WaitGroup
-	wg.Go(func() { c.Clear() })
-	time.Sleep(5 * time.Millisecond)
-	wg.Go(func() { c.Put(key, []byte("dead-fork-value"), 200) })
-	time.Sleep(5 * time.Millisecond)
-	mu.Unlock()
-	wg.Wait()
-
-	c.Unwind(150)
-
-	_, ok := c.Get(key)
-	require.False(t, ok, "entry at txNum 200 outlived an unwind to 150")
+	for round := range 2000 {
+		c.Unwind(300)
+		var wg sync.WaitGroup
+		wg.Go(func() { c.Clear() })
+		wg.Go(func() { c.Put(key, []byte("dead-fork-value"), 200) })
+		wg.Wait()
+		c.Unwind(150)
+		_, ok := c.Get(key)
+		require.False(t, ok, "round %d: entry at txNum 200 outlived an unwind to 150", round)
+	}
 }
 
-// A reader that captures a dead (unwind-invalidated) entry from the retiring
-// generation must not have it revalidated by Clear's coherence reset:
-// judged against the post-Reset state (new epoch, lifted floor), the entry
-// passes IsStale and dead-fork state is served. Coherence is snapshotted
-// before the generation load, so an old-generation entry is always judged by
-// pre-Reset coherence that still carries the unwind.
-//
-// The reader gates on the fence reaching the key's stripe — the last one the
-// sweep locks — so its Get lands next to the Reset that follows.
+// A reader that captures a dead (unwind-invalidated) entry before Clear wipes
+// it must not have it revalidated by Clear's coherence reset: judged against
+// the post-Reset state (new epoch, lifted floor), the entry passes IsStale and
+// dead-fork state is served. Coherence is snapshotted before the entry load,
+// so an entry captured before the wipe is judged by pre-Reset coherence that
+// still carries the unwind.
 func TestGenericCache_ClearRacingGet_DeadEntryStaysDead(t *testing.T) {
-	var key []byte
-	for i := 0; ; i++ {
-		k := make([]byte, 8)
-		binary.BigEndian.PutUint64(k, uint64(i))
-		if maphash.Hash(k)&(putStripeCount-1) == putStripeCount-1 {
-			key = k
-			break
-		}
-	}
+	key := makeAddr(7)
 	dead := []byte("dead-fork-value")
 	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
 	defer c.Close()
@@ -195,14 +153,6 @@ func TestGenericCache_ClearRacingGet_DeadEntryStaysDead(t *testing.T) {
 		var wg sync.WaitGroup
 		wg.Go(func() { c.Clear() })
 		wg.Go(func() {
-			mu := &c.putStripes[putStripeCount-1]
-			for range 1 << 16 {
-				if mu.TryLock() {
-					mu.Unlock()
-					continue
-				}
-				break
-			}
 			for range 4 {
 				if _, ok := c.Get(key); ok {
 					served.Store(true)
@@ -354,3 +304,23 @@ func TestGrowLRU_CloseStopsFurtherReservations(t *testing.T) {
 // spreadKey mixes a counter into the bits freelru selects a shard with, so a
 // test fills a growLRU the way hashed production keys do.
 func spreadKey(i uint64) uint64 { return i * 0x9E3779B97F4A7C15 }
+
+// A fill that checks for a live entry and then inserts must not overwrite a
+// Put that landed between the check and the insert: whichever order the two
+// writers take, the live value wins.
+func TestGenericCache_PutIfAbsentAtomicWithPut(t *testing.T) {
+	key := []byte("live-vs-fill-key")
+	live, fill := []byte("live-value"), []byte("fill-value")
+	c := NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
+	defer c.Close()
+	for round := range 200000 {
+		c.Delete(key)
+		var wg sync.WaitGroup
+		wg.Go(func() { c.Put(key, live, 20) })
+		wg.Go(func() { c.PutIfAbsent(key, fill, 10) })
+		wg.Wait()
+		if v, _ := c.Get(key); string(v) != string(live) {
+			t.Fatalf("round %d: PutIfAbsent overwrote a live Put with %q", round, v)
+		}
+	}
+}

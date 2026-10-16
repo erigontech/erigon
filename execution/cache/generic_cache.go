@@ -17,20 +17,16 @@
 package cache
 
 import (
-	"sync"
 	"sync/atomic"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/maypok86/otter/v2"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/execution/cache/coherence"
 )
-
-// putStripeCount sizes the same-key write-serialization stripes; power of two
-// so the stripe index is a mask of the key hash.
-const putStripeCount = 256
 
 // entry stores the full key alongside the value so reads can detect hash
 // collisions: the layer is keyed by the uint64 maphash of the key, Go's
@@ -56,10 +52,6 @@ type GenericCache[T any] struct {
 	// valid iff written in the current epoch OR its txNum is below the unwind
 	// floor. See execution/cache/coherence.
 	coh coherence.Gen
-
-	// putStripes serialize same-key writers so PutIfAbsent's check+insert is
-	// atomic w.r.t. a concurrent Put.
-	putStripes [putStripeCount]sync.Mutex
 
 	hits         atomic.Uint64
 	misses       atomic.Uint64
@@ -176,92 +168,51 @@ func (c *GenericCache[T]) PutIfAbsent(key []byte, value T, txNum uint64) {
 }
 
 func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool) {
-	c.putStriped(key, value, txNum, overwrite)
-}
-
-// putStriped performs the write under the key's stripe, so a conditional put's
-// check and insert are atomic against a same-key writer.
-func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrite bool) {
 	h := maphash.Hash(key)
 	newSize := len(key) + c.sizeFunc(value)
-
-	mu := &c.putStripes[h&(putStripeCount-1)]
-	mu.Lock()
-	defer mu.Unlock()
-
-	// Sample the epoch under the stripe, so the stamp cannot belong to a
-	// different generation from the one where the entry lands.
-	ep := c.coh.Epoch()
-	existing, hasExisting := c.data.peek(h)
-	sameKey := hasExisting && existing.key == string(key)
-
-	if sameKey && !overwrite && !c.coh.IsStale(existing.txNum, existing.epoch) {
-		return
-	}
-	if c.mode == ModeNoOp && !sameKey {
-		// "Drop new keys when full": the lock-free layer would admit and evict.
-		if c.data.SizeBytes()+weighEntry(h, entry[T]{size: uint32(newSize)}) > int64(c.capacityB) {
-			c.dropped.Add(1)
-			return
+	c.data.compute(h, func(existing entry[T], found bool) (entry[T], otter.ComputeOp) {
+		sameKey := found && existing.key == string(key)
+		if sameKey && !overwrite && !c.coh.IsStale(existing.txNum, existing.epoch) {
+			return existing, otter.CancelOp
 		}
-	}
-
-	e := entry[T]{val: value, size: uint32(newSize), txNum: txNum, epoch: ep}
-	if sameKey {
-		e.key = existing.key // the stored buffer still holds this key
-	} else {
-		e.key = string(key)
-	}
-	// Add replaces in place whatever holds the hash: this key's older value or
-	// a 64-bit hash collision. The put stripe already serializes writers of h.
-	if w := weighEntry(h, e); w <= c.data.maxBytes {
-		c.data.addLocked(h, e, w)
-	}
-	c.inserts.Add(1)
+		e := entry[T]{val: value, size: uint32(newSize), txNum: txNum, epoch: c.coh.Epoch()}
+		// "Drop new keys when full": the lock-free layer would admit and evict.
+		if c.mode == ModeNoOp && !sameKey && c.data.SizeBytes()+weighEntry(h, e) > int64(c.capacityB) {
+			c.dropped.Add(1)
+			return existing, otter.CancelOp
+		}
+		if sameKey {
+			e.key = existing.key // the stored buffer still holds this key
+		} else {
+			e.key = string(key)
+		}
+		// A write over a 64-bit hash collision replaces the other key's entry.
+		c.inserts.Add(1)
+		return e, otter.WriteOp
+	})
 }
 
-// Delete removes the data for the given key. Runs under the key's put stripe
-// so the check-then-remove is atomic against same-key puts and excluded from
-// the generation swap in Clear, which fences via the stripes.
+// Delete removes the data for the given key.
 func (c *GenericCache[T]) Delete(key []byte) {
-	h := maphash.Hash(key)
-	mu := &c.putStripes[h&(putStripeCount-1)]
-	mu.Lock()
-	defer mu.Unlock()
-	if existing, ok := c.data.Get(h); ok && existing.key == string(key) {
-		c.data.Remove(h)
-	}
+	c.data.removeIf(maphash.Hash(key), func(e entry[T]) bool { return e.key == string(key) })
 }
 
-// dropStale removes key's entry under its put stripe: the re-check keeps an
-// entry a concurrent put revived, and the stripe keeps the removal out of
-// generation swaps.
+// dropStale removes key's entry unless a concurrent put revived it.
 func (c *GenericCache[T]) dropStale(h uint64, key []byte) {
-	mu := &c.putStripes[h&(putStripeCount-1)]
-	mu.Lock()
-	defer mu.Unlock()
-	if e, ok := c.data.Get(h); ok && e.key == string(key) && c.coh.IsStale(e.txNum, e.epoch) {
-		c.data.Remove(h)
-	}
+	c.data.removeIf(h, func(e entry[T]) bool {
+		return e.key == string(key) && c.coh.IsStale(e.txNum, e.epoch)
+	})
 }
 
 // Clear removes all entries and restores the starting capacity. It starts an
 // empty coherence generation by advancing the epoch and lifting the unwind
 // floor, so subsequent puts are not constrained by an unwind that belongs to
-// the retired data. The accounting reset, data swap, and coherence reset run
-// with every put stripe held, so a racing writer cannot split those
-// publications.
+// the retired data.
 func (c *GenericCache[T]) Clear() {
-	for i := range c.putStripes {
-		c.putStripes[i].Lock()
-	}
 	c.data.Purge()
 	// Reset coherence only after emptying, so an entry still in flight from the
 	// retired data is judged by pre-Reset coherence that carries the unwind.
 	c.coh.Reset()
-	for i := range c.putStripes {
-		c.putStripes[i].Unlock()
-	}
 }
 
 // Close returns this cache's envelope reservation so later caches can grow into

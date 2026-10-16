@@ -1345,9 +1345,9 @@ func TestStateCache_AccountDeleteDropsCodeBinding(t *testing.T) {
 }
 
 // A Delete racing an update-in-place put must not double-subtract the
-// displaced entry's size: freelru's OnEvict subtracts it for the Remove, and
-// put's update delta subtracts it again unless the two writers share the
-// key's stripe.
+// displaced entry's size: the deletion handler refunds it for the Remove, and
+// put's update delta subtracts it again unless the two writes are serialized
+// on the key.
 func TestDomainCache_DeleteAtomicWithPut_NoSizeDrift(t *testing.T) {
 	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU))
 	addr := makeAddr(1)
@@ -1364,9 +1364,8 @@ func TestDomainCache_DeleteAtomicWithPut_NoSizeDrift(t *testing.T) {
 	}
 }
 
-// The lazy stale-drop inside GetWithTxNum removes entries; an unstriped
-// Remove racing put's read-modify-write double-subtracts the displaced
-// entry's size. Exactly one live entry remains after every round, so drift
+// The lazy stale-drop inside GetWithTxNum removes entries; a Remove racing
+// put's read-modify-write would double-subtract the displaced entry's size. Exactly one live entry remains after every round, so drift
 // shows as a size mismatch.
 func TestDomainCache_StaleDropAtomicWithPut_NoSizeDrift(t *testing.T) {
 	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU))
@@ -1385,10 +1384,8 @@ func TestDomainCache_StaleDropAtomicWithPut_NoSizeDrift(t *testing.T) {
 	}
 }
 
-// A Clear racing a put must not leave phantom bytes: unless Clear excludes
-// writers via the put stripes, a put that loaded the retiring generation
-// lands its entry where no reader sees it and adds the entry's size after
-// Clear zeroed the counter — inflating SizeBytes for an invisible entry.
+// A Clear racing a put must not leave phantom bytes: the counter must agree
+// with the entry's presence whether the put landed before or after the wipe.
 func TestDomainCache_ClearAtomicWithPut_NoSizeDrift(t *testing.T) {
 	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU))
 	addr := makeAddr(1)
