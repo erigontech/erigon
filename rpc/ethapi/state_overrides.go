@@ -147,7 +147,18 @@ func FinalizeCallTx(ibs *state.IntraBlockState, rules *chain.Rules) error {
 	if !ibs.IsVersioned() {
 		return ibs.FinalizeTx(rules, state.NewNoopWriter())
 	}
-	ibs.FlushWritesToVersionMap(ibs.FinalizedWrites(rules))
+	writes := ibs.FinalizedWrites(rules)
+	ibs.FlushWritesToVersionMap(writes)
+	// A touched empty account has no write of its own: its EIP-161 removal is derived and published.
+	normalized, err := writes.Normalize(ibs.VersionMap(), ibs.TxnIndex(), 0, ibs.StateReader(), nil, rules.IsEIP161Enabled(), rules.IsAura, rules.IsAmsterdam)
+	if err != nil {
+		return err
+	}
+	for addr, removal := range normalized.SelfDestructs() {
+		if raw, ok := writes.GetSelfDestruct(addr); removal.Val && (!ok || !raw.Val) {
+			ibs.VersionMap().WriteSelfDestruct(addr, removal.Version, true, true)
+		}
+	}
 	ibs.SoftFinalise()
 	ibs.ResetVersionedIO()
 	return nil

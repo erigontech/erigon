@@ -250,3 +250,38 @@ func TestFinalizeCallTxPublishesWritesToNextTx(t *testing.T) {
 	ibs.AddLog(&types.Log{Address: addr.Value()})
 	require.Equal(t, hexutil.Uint(1), ibs.Logs()[1].Index)
 }
+
+type emptyAccountReader struct {
+	*state.NoopReader
+	addr accounts.Address
+}
+
+func (r emptyAccountReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	if addr == r.addr {
+		acc := accounts.NewAccount()
+		return &acc, nil
+	}
+	return nil, nil
+}
+
+// An existing account a transaction touches and leaves empty is gone for the next transaction
+// of the same request (EIP-161), as with FinalizeTx on the materializing path.
+func TestFinalizeCallTxRemovesTouchedEmptyAccount(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x0202"))
+	ibs := state.New(emptyAccountReader{NoopReader: state.NewNoopReader(), addr: addr})
+	defer ibs.Close()
+	ibs.SetVersionMap(state.NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+	ibs.SetNoConflictDetection()
+	ibs.SetTxContext(0, 0)
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.NoError(t, ibs.TouchAccount(addr))
+	require.NoError(t, FinalizeCallTx(ibs, &chain.Rules{IsSpuriousDragon: true}))
+
+	ibs.SetTxContext(0, 1)
+	exists, err = ibs.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists)
+}
