@@ -25,7 +25,8 @@ import (
 )
 
 // transientStorage is a representation of EIP-1153 "Transient Storage".
-type transientStorage map[accounts.Address]Storage
+// Keys are raw words, not interned StorageKeys: transient slots never leave the transaction.
+type transientStorage map[accounts.Address]map[uint256.Int]uint256.Int
 
 // newTransientStorage creates a new instance of a transientStorage.
 func newTransientStorage() transientStorage {
@@ -33,7 +34,7 @@ func newTransientStorage() transientStorage {
 }
 
 // Set sets the transient-storage `value` for `key` at the given `addr`.
-func (t transientStorage) Set(addr accounts.Address, key accounts.StorageKey, value uint256.Int) {
+func (t transientStorage) Set(addr accounts.Address, key uint256.Int, value uint256.Int) {
 	slots, ok := t[addr]
 	if value.IsZero() {
 		if !ok {
@@ -44,14 +45,14 @@ func (t transientStorage) Set(addr accounts.Address, key accounts.StorageKey, va
 	}
 
 	if !ok {
-		slots = make(Storage)
+		slots = make(map[uint256.Int]uint256.Int)
 		t[addr] = slots
 	}
 	slots[key] = value
 }
 
 // Get gets the transient storage for `key` at the given `addr`.
-func (t transientStorage) Get(addr accounts.Address, key accounts.StorageKey) uint256.Int {
+func (t transientStorage) Get(addr accounts.Address, key uint256.Int) uint256.Int {
 	val, ok := t[addr]
 	if !ok {
 		return uint256.Int{}

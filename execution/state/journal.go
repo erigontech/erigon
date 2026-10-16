@@ -96,9 +96,10 @@ type journalEntry struct {
 // commit. These are tracked to be able to be reverted in case of an execution
 // exception or revertal request.
 type journal struct {
-	dirties map[accounts.Address]int // Dirty accounts and the number of changes
-	entries []journalEntry           // Current changes tracked by the journal
-	epoch   uint64                   // Moves on every revert, reset and unjournalled state change
+	dirties       map[accounts.Address]int // Dirty accounts and the number of changes
+	entries       []journalEntry           // Current changes tracked by the journal
+	transientKeys []uint256.Int            // kindTransientStorage keys, indexed by entry aux; too wide for journalEntry
+	epoch         uint64                   // Moves on every revert, reset and unjournalled state change
 }
 
 // newJournal gets a journal from the pool.
@@ -116,6 +117,7 @@ func (j *journal) Reset() {
 	j.epoch++
 	clear(j.entries)
 	j.entries = j.entries[:0]
+	j.transientKeys = j.transientKeys[:0]
 	clear(j.dirties)
 }
 
@@ -269,8 +271,9 @@ func (j *journal) accessListAddSlotChange(address accounts.Address, slot account
 	j.entries = append(j.entries, journalEntry{kind: kindAccessListAddSlot, account: address, key: slot})
 }
 
-func (j *journal) transientStorageChange(account accounts.Address, key accounts.StorageKey, prevalue uint256.Int) {
-	j.entries = append(j.entries, journalEntry{kind: kindTransientStorage, account: account, key: key, value: prevalue})
+func (j *journal) transientStorageChange(account accounts.Address, key uint256.Int, prevalue uint256.Int) {
+	j.entries = append(j.entries, journalEntry{kind: kindTransientStorage, account: account, value: prevalue, aux: uint64(len(j.transientKeys))})
+	j.transientKeys = append(j.transientKeys, key)
 }
 
 // dirtied returns the address modified by this entry, or (NilAddress, false) for
@@ -492,7 +495,9 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 
 	case kindTransientStorage:
-		s.setTransientState(je.account, je.key, je.value)
+		keys := s.journal.transientKeys
+		s.setTransientState(je.account, keys[je.aux], je.value)
+		s.journal.transientKeys = keys[:je.aux]
 		return nil
 
 	case kindRefund:

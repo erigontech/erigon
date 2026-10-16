@@ -207,9 +207,7 @@ func enable1153(jt *JumpTable) {
 // opTload implements TLOAD opcode
 func opTload(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	loc := scope.Stack.peek()
-	key := evm.internStorageKey(loc)
-	val := evm.IntraBlockState().GetTransientState(scope.Contract.Address(), key)
-	*loc = val
+	*loc = evm.IntraBlockState().GetTransientState(scope.Contract.Address(), *loc)
 	return pc, nil, nil
 }
 
@@ -218,8 +216,7 @@ func opTstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if evm.readOnly {
 		return pc, nil, ErrWriteProtection
 	}
-	key := evm.internStorageKey(scope.Stack.peek())
-	scope.Stack.drop()
+	key := scope.Stack.popCopy()
 	val := scope.Stack.popCopy()
 	evm.IntraBlockState().SetTransientState(scope.Contract.Address(), key, val)
 	return pc, nil, nil
