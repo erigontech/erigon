@@ -442,6 +442,35 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 		return s.eth1Engine.Initialize(config, chain, header, state, syscall, logger, tracer)
 	}
 
+	if len(config.EIP8253Accounts) > 0 && config.IsAmsterdam(header.Time) && *config.AmsterdamTime > 0 {
+		parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
+		if parent == nil {
+			return rules.ErrUnknownAncestor
+		}
+		if !config.IsAmsterdam(parent.Time) {
+			for _, address := range config.EIP8253Accounts {
+				addr := accounts.InternAddress(address)
+				nonce, err := state.GetNonce(addr)
+				if err != nil {
+					return err
+				}
+				if nonce != 0 {
+					continue
+				}
+				codeHash, err := state.GetCodeHash(addr)
+				if err != nil {
+					return err
+				}
+				if !codeHash.IsEmpty() {
+					continue
+				}
+				if err := state.SetNonce(addr, 1, tracing.NonceChangeUnspecified); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
 	// See https://hackmd.io/@filoozom/rycoQITlWl
 	if config.BalancerTime != nil && header.Time >= *config.BalancerTime {
 		parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
