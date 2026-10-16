@@ -22,12 +22,15 @@ package vm
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
@@ -361,5 +364,43 @@ func benchPush(bench *testing.B, op OpCode, code []byte) {
 	for bench.Loop() {
 		execute(pc, evm, callContext)
 		callContext.Stack.top--
+	}
+}
+
+func BenchmarkOpTransientStorage(b *testing.B) {
+	for _, tstore := range []bool{false, true} {
+		for _, fixedKey := range []bool{true, false} {
+			b.Run(fmt.Sprintf("tstore=%t/fixed_key=%t", tstore, fixedKey), func(b *testing.B) {
+				ibs := state.New(state.NewNoopReader())
+				defer ibs.Close()
+				evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+				addr := accounts.InternAddress(common.Address{1})
+				scope := &CallContext{Contract: *NewContract(addr, addr, addr, uint256.Int{})}
+				var key, val uint256.Int
+				for i := uint64(0); b.Loop(); i++ {
+					if i%(64*1024) == 0 {
+						b.StopTimer()
+						ibs.Reset()
+						scope.Stack.push(*uint256.NewInt(1))
+						scope.Stack.push(uint256.Int{})
+						opTstore(0, evm, scope)
+						b.StartTimer()
+					}
+					if !fixedKey {
+						key.SetUint64(i)
+					}
+					if tstore {
+						val.SetUint64(i + 2)
+						scope.Stack.push(val)
+						scope.Stack.push(key)
+						opTstore(0, evm, scope)
+					} else {
+						scope.Stack.push(key)
+						opTload(0, evm, scope)
+						scope.Stack.drop()
+					}
+				}
+			})
+		}
 	}
 }

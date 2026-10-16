@@ -454,9 +454,9 @@ func TestBlockBuilderWindowGloas(t *testing.T) {
 
 	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.GloasVersion, 0)
 
-	// Attestation deadline is 3s; polling stops a quarter of it (750ms) earlier, at 2.25s.
-	require.Equal(t, slotStart.Add(2250*time.Millisecond).Add(-minPayloadPollingWindow), window.firstGetAt)
-	require.Equal(t, slotStart.Add(2250*time.Millisecond), window.pollUntil)
+	// Attestation deadline is 3s; an unprepared Gloas payload is collected at a third of it, 1s.
+	require.Equal(t, slotStart.Add(time.Second).Add(-minPayloadPollingWindow), window.firstGetAt)
+	require.Equal(t, slotStart.Add(time.Second), window.pollUntil)
 }
 
 func TestSelectGloasBidUsesGweiAndBoostSemantics(t *testing.T) {
@@ -2915,7 +2915,7 @@ func TestBlockBuilderWindowReservesPublicationMargin(t *testing.T) {
 		wantPollUntil time.Duration
 	}{
 		{"pre-gloas", clparams.ElectraVersion, 4 * time.Second, 3 * time.Second},
-		{"gloas", clparams.GloasVersion, 3 * time.Second, 2250 * time.Millisecond},
+		{"gloas", clparams.GloasVersion, 3 * time.Second, time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			window := computeBlockBuilderWindow(slotStart, slotStart, cfg, tc.version, 0)
