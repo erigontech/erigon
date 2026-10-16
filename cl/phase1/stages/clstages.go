@@ -87,6 +87,7 @@ type Cfg struct {
 	gloasSkippedAnchorValidation skippedAnchorValidation
 	sleepForSlotLastWake         sleepForSlotWake
 	sleepForSlotHeadChanged      bool
+	chainTipRejections           *chainTipRejections
 }
 
 type Args struct {
@@ -157,7 +158,13 @@ func ClStagesCfg(
 		blockCollector:          block_collector.NewPersistentBlockCollector(log.Root(), executionClient, beaconCfg, dirs.CaplinHistory),
 		gloasPayloadValidator:   forkChoice,
 		attestationDataProducer: attestationDataProducer,
+		chainTipRejections:      newChainTipRejections(chainTipRejectionLogInterval, nil),
 	}
+}
+
+// Close releases the resources the stage loop owns.
+func (cfg *Cfg) Close() error {
+	return cfg.blockCollector.Close()
 }
 
 type StageName = string

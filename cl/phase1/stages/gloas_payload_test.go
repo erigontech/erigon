@@ -639,6 +639,7 @@ func (s *envelopeReadTestStore) ReadEnvelopeFromDisk(common.Hash) (*cltypes.Sign
 type gloasCollectorTest struct {
 	calls      int
 	flushCalls int
+	flushCtx   context.Context
 	err        error
 	flushErr   error
 }
@@ -653,13 +654,18 @@ func (c *gloasCollectorTest) AddBlock(*cltypes.BeaconBlock) error {
 	return c.err
 }
 
-func (c *gloasCollectorTest) Flush(context.Context) error {
+func (c *gloasCollectorTest) Flush(ctx context.Context) error {
 	c.flushCalls++
+	c.flushCtx = ctx
 	return c.flushErr
 }
 
 func (c *gloasCollectorTest) HasBlock(uint64) bool {
 	return false
+}
+
+func (c *gloasCollectorTest) Close() error {
+	return nil
 }
 
 func TestProcessDownloadedGloasEnvelopeCollectorReconciliation(t *testing.T) {

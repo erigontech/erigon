@@ -81,19 +81,11 @@ func NewPersistentBlockCollector(
 	beaconChainCfg *clparams.BeaconChainConfig,
 	persistDir string,
 ) *PersistentBlockCollector {
-	ctx := context.Background()
-	db, err := openPersistentDB(ctx, logger, persistDir)
+	db, err := openPersistentDB(context.Background(), logger, persistDir)
 	if err != nil {
 		logger.Error("[PersistentBlockCollector] Failed to open database", "err", err, "path", persistDir)
 		return nil
 	}
-
-	go func() {
-		<-ctx.Done()
-		if db != nil {
-			db.Close()
-		}
-	}()
 
 	return &PersistentBlockCollector{
 		db:             db,
@@ -551,6 +543,9 @@ func (p *PersistentBlockCollector) HasBlock(blockNumber uint64) bool {
 
 // Close closes the database
 func (p *PersistentBlockCollector) Close() error {
+	if p == nil {
+		return nil
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
