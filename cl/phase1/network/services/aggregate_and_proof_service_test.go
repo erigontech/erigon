@@ -1167,3 +1167,38 @@ func TestAggregateAndProofRejectsAggregationBitsLengthMismatchBeforeElectra(t *t
 		})
 	}
 }
+
+func TestAggregateAndProofForLateBlockIsProcessedOnceBlockArrives(t *testing.T) {
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = func(_, _, _ [][]byte) (bool, error) { return true, nil }
+
+	cfg := &clparams.MainnetBeaconConfig
+	agg, s := getAggregateAndProofAndState()
+	setValidAggregateSelectionProof(t, cfg, agg, s)
+	data := agg.SignedAggregateAndProof.Message.Aggregate.Data
+
+	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
+	require.NoError(t, syncedDataManager.OnHeadState(s))
+	forkChoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	forkChoiceMock.FinalizedCheckpointVal = s.FinalizedCheckpoint()
+	forkChoiceMock.Ancestors[s.FinalizedCheckpoint().Epoch*cfg.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
+	forkChoiceMock.Ancestors[data.Slot] = forkchoice.ForkChoiceNode{Root: data.Target.Root}
+	forkChoiceMock.Headers[data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
+	forkChoice := &lateBlockForkChoice{ForkChoiceStorageMock: forkChoiceMock, root: data.BeaconBlockRoot}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	verifier := NewBatchSignatureVerifier(ctx, nil)
+	verifier.Start()
+	opPool := pool.OperationsPool{AttestationsPool: pool.NewOperationPool[common.Bytes96, *solid.Attestation](100, "test")}
+	validatorParams := validator_params.NewValidatorParams()
+	validatorParams.SetFeeRecipient(0, common.Address{})
+	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
+	service := NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, clock, cfg, opPool, false, verifier, validatorParams)
+
+	require.ErrorIs(t, service.ProcessMessage(context.Background(), nil, agg), ErrIgnore)
+
+	forkChoice.arrived.Store(true)
+	require.Eventually(t, func() bool { return forkChoice.attestingSets.Load() == 1 }, 5*time.Second, 10*time.Millisecond,
+		"aggregate was not processed by fork choice after its block arrived")
+}

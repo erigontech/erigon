@@ -17,6 +17,7 @@
 package rpctest
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 )
@@ -29,14 +30,14 @@ import (
 //	false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
 //	recordFile stores all eth_getlogs returned with success
 //	errorFile stores information when erigon and geth doesn't return same data
-func BenchOverlayGetLogs(erigonURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) error {
+func BenchOverlayGetLogs(erigonURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) (err error) {
 	setRoutes(erigonURL, erigonURL)
 
 	rec, errs, cleanup, err := openWriters(recordFile, errorFile)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+	defer func() { err = errors.Join(err, cleanup()) }()
 
 	var resultsCh chan CallResult = nil
 	if !needCompare {
