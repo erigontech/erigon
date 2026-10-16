@@ -1295,6 +1295,85 @@ func TestPreparePayloadLoopMemoizesEffectiveAttributes(t *testing.T) {
 	})
 }
 
+func TestPreparePayloadLoopMemoizesRealPreparation(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.ElectraVersion, clparams.FuluVersion, clparams.GloasVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			_, _, _, _, postState, handler, _, syncedData, forkchoiceStore, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+			handler.beaconChainCfg.SecondsPerSlot = 12
+			currentEpoch := postState.Slot() / handler.beaconChainCfg.SlotsPerEpoch
+			if version.AfterOrEqual(clparams.FuluVersion) {
+				require.NoError(t, postState.UpgradeToFulu())
+				handler.beaconChainCfg.FuluForkEpoch = currentEpoch
+			}
+			if version.AfterOrEqual(clparams.GloasVersion) {
+				require.NoError(t, postState.UpgradeToGloas())
+				handler.beaconChainCfg.GloasForkEpoch = currentEpoch
+			}
+			handler.beaconChainCfg.InitializeForkSchedule()
+			currentSlot := postState.Slot() + 1
+			targetSlot := currentSlot + 1
+			advancedState := state.New(handler.beaconChainCfg)
+			require.NoError(t, postState.CopyInto(advancedState))
+			require.NoError(t, transition.DefaultMachine.ProcessSlots(advancedState, targetSlot))
+			proposerIndex, err := advancedState.GetBeaconProposerIndex()
+			require.NoError(t, err)
+			feeRecipient := common.Address{0x11}
+			validatorParams.SetFeeRecipient(proposerIndex, feeRecipient)
+			if version.AfterOrEqual(clparams.GloasVersion) {
+				feeRecipient = common.Address{0x22}
+				dependentRoot, err := state.GetProposerDependentRoot(postState, targetSlot/handler.beaconChainCfg.SlotsPerEpoch)
+				require.NoError(t, err)
+				handler.epbsPool = pool.NewEpbsPool()
+				handler.epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{
+					Slot: targetSlot, DependentRoot: dependentRoot,
+				}, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+					ProposalSlot: targetSlot, DependentRoot: dependentRoot, ValidatorIndex: proposerIndex,
+					FeeRecipient: feeRecipient, TargetGasLimit: 36_000_000,
+				}})
+			}
+			baseBlockRoot := common.Hash{0x41}
+			forkchoiceStore.HeadVal = baseBlockRoot
+			forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+			syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+			syncedDataMock.EXPECT().HeadRoot().Return(baseBlockRoot).Times(3)
+			syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, postState.Slot(), true).AnyTimes()
+			syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).DoAndReturn(
+				func(view synced_data.ViewHeadStateWithIdentityFn) error {
+					return view(postState, baseBlockRoot, postState.Slot())
+				},
+			).AnyTimes()
+
+			synctest.Test(t, func(t *testing.T) {
+				ctrl := gomock.NewController(t)
+				clock := eth_clock.NewMockEthereumClock(ctrl)
+				clock.EXPECT().GetCurrentSlot().Return(currentSlot).Times(3)
+				clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(8 * time.Second)).AnyTimes()
+				handler.ethClock = clock
+				buildAttempts := 0
+				payloadID := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+				engine := newPayloadBuildEngine(t, ctrl)
+				engine.startPayloadBuild = func(_ context.Context, _ common.Hash, attrs *engine_types.PayloadAttributes) ([]byte, error) {
+					buildAttempts++
+					require.Equal(t, feeRecipient, attrs.SuggestedFeeRecipient)
+					if version.AfterOrEqual(clparams.GloasVersion) {
+						require.NotNil(t, attrs.TargetGasLimit)
+						require.Equal(t, hexutil.Uint64(36_000_000), *attrs.TargetGasLimit)
+					}
+					return payloadID, nil
+				}
+				handler.engine = engine
+				ctx, cancel := context.WithTimeout(t.Context(), 7*time.Second)
+				defer cancel()
+
+				handler.preparePayloadLoop(ctx)
+
+				require.Equal(t, 1, buildAttempts, "unchanged inputs must stay settled across eligible ticks")
+				require.Equal(t, payloadID, handler.preparedPayload.payloads[targetSlot].id)
+			})
+		})
+	}
+}
+
 func TestPreparePayloadLoopMemoizesTheGasLimitItUsed(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctrl := gomock.NewController(t)

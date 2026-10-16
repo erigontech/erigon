@@ -11,6 +11,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
@@ -58,15 +59,28 @@ func TestGetProposerDependentRootUsesGenesisRoot(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.SlotsPerEpoch = 32
 	cfg.MinSeedLookahead = 1
-	s := state2.New(&cfg)
-	require.NoError(t, s.SetSlot(32))
-	want := common.Hash{0x42}
-	require.NoError(t, s.SetBlockRootAt(0, want))
 
-	for _, epoch := range []uint64{0, 1} {
-		got, err := state2.GetProposerDependentRoot(s, epoch)
-		require.NoError(t, err, "epoch %d", epoch)
-		require.Equal(t, want, got, "epoch %d", epoch)
+	for _, version := range []clparams.StateVersion{clparams.ElectraVersion, clparams.FuluVersion, clparams.GloasVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			s := state2.New(&cfg)
+			s.SetVersion(version)
+			var genesisRoots [2]common.Hash
+			for epoch := range genesisRoots {
+				root, err := state2.GetProposerDependentRoot(s, uint64(epoch))
+				require.NoError(t, err, "epoch %d", epoch)
+				genesisRoots[epoch] = root
+			}
+
+			require.NoError(t, transition.DefaultMachine.ProcessSlots(s, 1))
+			want, err := s.GetBlockRootAtSlot(0)
+			require.NoError(t, err)
+			for epoch, root := range genesisRoots {
+				require.Equal(t, want, root, "epoch %d before slot processing", epoch)
+				got, err := state2.GetProposerDependentRoot(s, uint64(epoch))
+				require.NoError(t, err, "epoch %d", epoch)
+				require.Equal(t, want, got, "epoch %d after slot processing", epoch)
+			}
+		})
 	}
 }
 

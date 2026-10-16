@@ -461,7 +461,7 @@ func (a *ApiHandler) feeRecipientForProposal(
 		firstTime = !alreadyWarned
 	}
 	if firstTime {
-		log.Warn("BlockProduction: no fee recipient for proposer, using zero address",
+		log.Warn("BlockProduction: no fee recipient from proposer preferences or prepare_beacon_proposer, using zero address",
 			"proposerIndex", proposerIndex, "slot", targetSlot)
 	}
 	return common.Address{}

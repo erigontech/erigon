@@ -693,7 +693,6 @@ func (a *ApiHandler) precheckPreparationInputs(key preparationKey) (preparationK
 		if a.proposerLookupTooFarAhead(headState, key.targetSlot) {
 			return errHeadTooFarBack
 		}
-		var registered bool
 		// Before Fulu, finding the proposer may require an epoch transition, so the sampled
 		// index is only a hint until preparation checks the advanced state. Fulu's lookahead
 		// makes this check possible without copying or advancing the state.
@@ -703,13 +702,12 @@ func (a *ApiHandler) precheckPreparationInputs(key preparationKey) (preparationK
 			if err != nil {
 				return err
 			}
-			registered = true
 		} else {
-			key.feeRecipient, registered = a.validatorParams.GetFeeRecipient(key.proposerIndex)
+			key.feeRecipient, _ = a.validatorParams.GetFeeRecipient(key.proposerIndex)
 		}
 		stateVersion := a.beaconChainCfg.GetCurrentStateVersion(key.targetSlot / a.beaconChainCfg.SlotsPerEpoch)
 		preference := a.proposerPreferencesForProposal(headState, key.targetSlot, key.proposerIndex, stateVersion)
-		feeRecipient, _ := resolveFeeRecipient(preference, key.feeRecipient, registered)
+		feeRecipient, _ := resolveFeeRecipient(preference, key.feeRecipient, true)
 		key.setFeeRecipient(feeRecipient, stateVersion)
 		key.setTargetGasLimit(a.targetGasLimitForProposal(headState, key.targetSlot, key.proposerIndex, stateVersion))
 		return nil
