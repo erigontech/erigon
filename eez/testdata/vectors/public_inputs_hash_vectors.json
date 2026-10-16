@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "protocolCommit": "855fe0602484750861b4c31502a1a91355d33ed6",
+  "solidityOracle": "contracts/test/PublicInputsHashVectors.t.sol",
+  "vectors": [
+    {
+      "name": "empty_entry_single_rollup_single_ps",
+      "entryHashes": [],
+      "staticEntryHashes": [],
+      "blobHashes": [],
+      "callData": "0x",
+      "rollupAssignments": [
+        {
+          "rollupId": 1,
+          "proofSystemIndexes": [
+            0
+          ],
+          "vkeys": [
+            "0x0000000000000000000000000000000000000000000000000000000000000042"
+          ],
+          "customData": "0x"
+        }
+      ],
+      "proofSystemCount": 1,
+      "boundSender": "0x0000000000000000000000000000000000000000",
+      "expectedSharedPublicInput": "0x9cb76f48824c4b86548d571badcc9a0542b46deb1bcbff5ecfa63b60d113a3dd",
+      "expectedPublicInputsHashes": [
+        "0xd27632863985c23ae62bb5420b9b1b8d01ac1e64e31d4367cc61b46db364b49f"
+      ]
+    },
+    {
+      "name": "full_entry_and_calldata_single_rollup_single_ps",
+      "entryHashes": [
+        "0x752aa6c5ddc53a6bfdfec261248ee29246f6e831c59d3567d2c22d80dbf93dc1"
+      ],
+      "staticEntryHashes": [],
+      "blobHashes": [],
+      "callData": "0x0102030405",
+      "rollupAssignments": [
+        {
+          "rollupId": 1,
+          "proofSystemIndexes": [
+            0
+          ],
+          "vkeys": [
+            "0x0000000000000000000000000000000000000000000000000000000000000042"
+          ],
+          "customData": "0x"
+        }
+      ],
+      "proofSystemCount": 1,
+      "boundSender": "0x0000000000000000000000000000000000000000",
+      "expectedSharedPublicInput": "0x597638a46f222dfe739dea95acb35f302b6339639ff4d707aadc4455ba54fa62",
+      "expectedPublicInputsHashes": [
+        "0x1433641dadf5afe5f9fec99ab1c9e61d1ab2a9c09d091a86d93575aa4f2de850"
+      ]
+    },
+    {
+      "name": "multi_rollup_multi_ps",
+      "entryHashes": [],
+      "staticEntryHashes": [],
+      "blobHashes": [],
+      "callData": "0xaabbcc",
+      "rollupAssignments": [
+        {
+          "rollupId": 1,
+          "proofSystemIndexes": [
+            0,
+            2
+          ],
+          "vkeys": [
+            "0x0000000000000000000000000000000000000000000000000000000000000042",
+            "0x0000000000000000000000000000000000000000000000000000000000000099"
+          ],
+          "customData": "0x"
+        },
+        {
+          "rollupId": 2,
+          "proofSystemIndexes": [
+            1,
+            2
+          ],
+          "vkeys": [
+            "0x0000000000000000000000000000000000000000000000000000000000000043",
+            "0x0000000000000000000000000000000000000000000000000000000000000044"
+          ],
+          "customData": "0x"
+        }
+      ],
+      "proofSystemCount": 3,
+      "boundSender": "0x0000000000000000000000000000000000000000",
+      "expectedSharedPublicInput": "0x58a63c74be1cc3cbd8a0dc74bf4c862a0b18e5013ef0eacec2bf2e319398d718",
+      "expectedPublicInputsHashes": [
+        "0xb2121e16632ffd6860732ebe2af1a91ac4225b674667b95b3c8d5631598a7cb9",
+        "0x3c9874af807b93a58190c46b40539cee1e70563191f9d809ed0220c03ace0c24",
+        "0x70f74b384fe5841518e09eadcd178c46e6a7f62f9ca651e30c600ee23bb41a42"
+      ]
+    },
+    {
+      "name": "all_shared_input_dimensions",
+      "entryHashes": [],
+      "staticEntryHashes": [
+        "0x1a63bcaad1cc1d18331cee8e48f0074de3a9f1f887255d3dfdf44f62a08036c3"
+      ],
+      "blobHashes": [
+        "0x000000000000000000000000000000000000000000000000000000000000b10b"
+      ],
+      "callData": "0xa1b2c3",
+      "rollupAssignments": [
+        {
+          "rollupId": 1,
+          "proofSystemIndexes": [
+            0
+          ],
+          "vkeys": [
+            "0x0000000000000000000000000000000000000000000000000000000000000042"
+          ],
+          "customData": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0570d"
+        }
+      ],
+      "proofSystemCount": 1,
+      "boundSender": "0x000000000000000000000000000000000000beef",
+      "expectedSharedPublicInput": "0x63337a6c8300ec03d53497260962ca38155db08c6b233088078cb26caf172845",
+      "expectedPublicInputsHashes": [
+        "0x18742f97fac6fcd3ca33e57739399b92eb55a4cf3465327a9dd274199ef677ef"
+      ]
+    }
+  ]
+}

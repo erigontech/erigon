@@ -1,0 +1,21 @@
+{
+  "source": "https://rpc.chiadochain.net",
+  "capturedAt": "2026-10-14",
+  "network": "eez.dev Chiado testnet: L1 Gnosis Chiado, L2 chain 699069",
+  "l1ChainId": 10200,
+  "l1BlockNumber": 23413747,
+  "l1BlockHash": "0x54e29f1630916b23bd3a1bc6969e059bd95ad49d1dfa4543fc67098f8109f58f",
+  "l1BlockTimestamp": 1791398245,
+  "transactionHash": "0xf09c1c6fa2a2334f425097ff5b33eae1bab0300a0fa205c6e4b72c3154d15378",
+  "transactionIndex": "0x0",
+  "log": {
+    "address": "0x96d6617629b90bdf275dd1d4888170ad5266fa33",
+    "topics": [
+      "0x6867516efd826e92d08e1fdb96524601b1b494dc451db14c3f54299c071b583e",
+      "0x0000000000000000000000000000000000000000000000000000000000000001",
+      "0x0000000000000000000000004f9b11008535dd1520b9ccd490ab273a181d7036"
+    ],
+    "data": "0x05227a1af51a988231b625b276c6b29594f0a93090efd93463934cd1bf6e606e",
+    "logIndex": "0x0"
+  }
+}

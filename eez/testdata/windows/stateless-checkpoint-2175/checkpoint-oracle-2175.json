@@ -1,0 +1,17 @@
+{
+  "capture_harness_revision": "f58e1848def922a9fdbf2809e41bb80f69cd4e08",
+  "full_state_root_implementation_commit": "5950df8aa5ffccdabb64dfb4119089b4da6add54",
+  "recording": "fixtures/scenarios/fresh-chain-conformance",
+  "chain_tag": "chiado-fresh-2026-07-13-registry-0x03858ac",
+  "captured_at": "2026-07-13T13:32:39Z",
+  "block_number": 2175,
+  "block_hash": "0xbbcfaa72c283b2ce8616a53c0ea91ab0b6346d59bd62db41d87b64c1b4e755b2",
+  "parent_state_root": "0x69905d069f82ec82b3575f615101b49ed7de4cd4721d898bb1e75538d71489a9",
+  "expected_checkpoint_indices": [0, 1, 2],
+  "transaction_state_roots": [
+    "0x85f1df0fa25533910b50385f3b4391dec2088a435c78185ee0f9f7ab7209f60c",
+    "0x708dd8bfc0301ad3a163696fe1b0a6d51820d7b231178bab2911018590aa0633",
+    "0x0eee96499bed5984f09a147116ea9dbbfdf95881557f9854765d14aeede26298"
+  ],
+  "recorded_post_batch_sha256": "cbdf9d83ad28516cc9d563e0cc85a5e8229a139abf02afff6f58cfd87c0bc1f8"
+}
