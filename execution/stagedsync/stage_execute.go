@@ -499,7 +499,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 // observeSingleBlockCycle records per-block exec time (execution + commitment), Mgas/s and commitment file probes
 // by tier for cycles that execute one block, as at the chain tip.
 func observeSingleBlockCycle(ctx context.Context, cfg ExecuteBlockCfg, tx kv.TemporalTx, rng execRange, start time.Time, probesBefore state.TierProbeCounts) error {
-	if rng.blockNum != rng.maxBlockNum {
+	if rng.blockNum != rng.maxBlockNum && cfg.syncCfg.LoopBlockLimit != 1 {
 		return nil
 	}
 	d := time.Since(start).Seconds()
