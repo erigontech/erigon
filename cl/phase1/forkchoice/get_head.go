@@ -79,13 +79,7 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, che
 			votes[boostRoot] += (boost * auxilliaryState.BeaconConfig().ProposerScoreBoost) / 100
 		}
 	} else {
-		for validatorIndex := 0; validatorIndex < f.latestMessages.latestMessagesCount(); validatorIndex++ {
-			message, balance, ok := f.countableVote(checkpointState, validatorIndex)
-			if !ok {
-				continue
-			}
-			votes[message.Root] += balance
-		}
+		votes = f.voteTally.votes(f, justifiedCheckpoint, checkpointState)
 		boostRoot := f.proposerBoostRoot.Load().(common.Hash)
 		if boostRoot != (common.Hash{}) {
 			boost := checkpointState.activeBalance / checkpointState.beaconConfig.SlotsPerEpoch
