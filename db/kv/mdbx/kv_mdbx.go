@@ -103,18 +103,18 @@ const (
 	DefaultMapSize    = 2 * datasize.TB
 	DefaultGrowthStep = 1 * datasize.GB
 
-	// mdbx flushes inside a commit only when the poller missed this many intervals in a row.
-	commitFlushDeadlineIntervals = 30
-	maxCommitFlushDeadline       = 18 * time.Hour // mdbx stores the deadline in 16.16-bit seconds
+	// A commit syncs itself only when the poller missed this many intervals in a row.
+	syncInCommitAfterMissedIntervals = 30
+	maxSyncInCommitPeriod            = 18 * time.Hour // mdbx stores the period in 16.16-bit seconds
 )
 
-// Two flushers under SafeNoSync. The poller goroutine flushes every PollerFlushInterval. mdbx
-// flushes inside a commit only when more than CommitFlushBytes is unflushed or the last flush is
-// older than commitFlushDeadline, a backstop for a writer the poller cannot interrupt. Both
-// bound what a crash rolls back; the byte one also bounds the file growth a deferred flush causes.
+// Under SafeNoSync the poller goroutine calls env.Sync every PollerSyncInterval. A commit syncs
+// itself only when more than SyncInCommitAboveUnsyncedBytes is unsynced or the last sync is older
+// than syncInCommitWhenUnsyncedFor, a backstop for a writer the poller cannot interrupt. Both
+// bound what a crash rolls back; the byte one also bounds the file growth a deferred sync causes.
 var (
-	CommitFlushBytes    = dbg.EnvDataSize("MDBX_SYNC_BYTES", 256*datasize.MB)
-	PollerFlushInterval = dbg.EnvDuration("MDBX_SYNC_PERIOD", time.Second)
+	SyncInCommitAboveUnsyncedBytes = dbg.EnvDataSize("MDBX_SYNC_BYTES", 256*datasize.MB)
+	PollerSyncInterval             = dbg.EnvDuration("MDBX_SYNC_PERIOD", time.Second)
 
 	// DefaultSafeNoSync gives every database the deferred flush. Set it before any database
 	// opens - the erigon binary does so from --db.safe.nosync.
@@ -166,13 +166,14 @@ func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts     { opts.growthS
 func (opts MdbxOpts) Path(path string) MdbxOpts                   { opts.path = path; return opts }
 func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts    { opts.syncPeriod = period; return opts }
 
-// commitFlushDeadline is mdbx's own flush deadline, long enough that the poller flushes first.
-func commitFlushDeadline(pollerInterval time.Duration) time.Duration {
-	return min(commitFlushDeadlineIntervals*pollerInterval, maxCommitFlushDeadline)
+// syncInCommitWhenUnsyncedFor is the age of the last sync past which a commit syncs itself, long
+// enough that the poller normally gets there first.
+func syncInCommitWhenUnsyncedFor(pollerInterval time.Duration) time.Duration {
+	return min(syncInCommitAfterMissedIntervals*pollerInterval, maxSyncInCommitPeriod)
 }
 
-// SafeNoSync flushes from the poller every PollerFlushInterval instead of on every commit; a
-// commit flushes inline only past CommitFlushBytes or commitFlushDeadline. Mdbx keeps the last flushed commit-point explicitly, so a crash
+// SafeNoSync syncs from the poller every PollerSyncInterval instead of on every commit; a commit
+// syncs itself only past SyncInCommitAboveUnsyncedBytes or syncInCommitWhenUnsyncedFor. Mdbx keeps the last flushed commit-point explicitly, so a crash
 // rolls back to it and never corrupts the file. It is the default; Durable opts out.
 func (opts MdbxOpts) SafeNoSync() MdbxOpts {
 	return opts.Flags(func(f uint) uint { return f&^mdbx.Durable | mdbx.SafeNoSync })
@@ -201,10 +202,10 @@ func (opts MdbxOpts) resolveSync() MdbxOpts {
 		return opts
 	}
 	if opts.syncBytes == nil {
-		opts = opts.SyncBytes(CommitFlushBytes)
+		opts = opts.SyncBytes(SyncInCommitAboveUnsyncedBytes)
 	}
 	if opts.syncPeriod == 0 {
-		opts = opts.SyncPeriod(PollerFlushInterval)
+		opts = opts.SyncPeriod(PollerSyncInterval)
 	}
 	return opts
 }
@@ -437,7 +438,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 	}
 
 	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
-		if err := env.SetSyncPeriod(commitFlushDeadline(opts.syncPeriod)); err != nil {
+		if err := env.SetSyncPeriod(syncInCommitWhenUnsyncedFor(opts.syncPeriod)); err != nil {
 			return nil, err
 		}
 	}
