@@ -1483,3 +1483,66 @@ func TestWritePoolingFailuresDeclaresJSON(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
 }
+
+func TestPoolAggregatesAndProofsAcceptsSSZ(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service := services_mock.NewMockAggregateAndProofService(ctrl)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	digest, err := clock.ComputeForkDigest(3)
+	require.NoError(t, err)
+
+	committeeBits := solid.NewBitVector(int(cfg.MaxCommitteesPerSlot))
+	require.NoError(t, committeeBits.SetBitAt(0, true))
+	aggregate := &cltypes.SignedAggregateAndProof{
+		Message: &cltypes.AggregateAndProof{
+			AggregatorIndex: 7,
+			Aggregate: &solid.Attestation{
+				AggregationBits: solid.BitlistFromBytes([]byte{0b101}, int(cfg.MaxValidatorsPerCommittee*cfg.MaxCommitteesPerSlot)),
+				Data:            &solid.AttestationData{Slot: 3*cfg.SlotsPerEpoch + 1, Target: solid.Checkpoint{Epoch: 3}},
+				CommitteeBits:   committeeBits,
+				Signature:       common.Bytes96{1},
+			},
+			SelectionProof: common.Bytes96{2},
+		},
+		Signature: common.Bytes96{3},
+	}
+	aggregate.SetVersion(clparams.FuluVersion)
+	encodedAggregate, err := aggregate.EncodeSSZ(nil)
+	require.NoError(t, err)
+	list := solid.NewDynamicListSSZ[*cltypes.SignedAggregateAndProof](int(cfg.MaxCommitteesPerSlot * cfg.TargetAggregatorsPerCommittee))
+	list.Append(aggregate)
+	requestBody, err := list.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	service.EXPECT().ProcessMessage(gomock.Any(), nil, gomock.Any()).DoAndReturn(
+		func(ctx context.Context, subnetID *uint64, msg *services.SignedAggregateAndProofForGossip) error {
+			require.Equal(t, uint64(7), msg.SignedAggregateAndProof.Message.AggregatorIndex)
+			require.Equal(t, common.Bytes96{3}, msg.SignedAggregateAndProof.Signature)
+			return nil
+		},
+	).Times(1)
+	gossipManager.EXPECT().PublishToForkDigest(gomock.Any(), digest, clgossip.TopicNameBeaconAggregateAndProof, encodedAggregate).Return(nil).Times(1)
+	handler := &ApiHandler{
+		logger:                    log.Root(),
+		ethClock:                  clock,
+		beaconChainCfg:            &cfg,
+		aggregateAndProofsService: service,
+		gossipManager:             gossipManager,
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/validator/aggregate_and_proofs", bytes.NewReader(requestBody))
+	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("Eth-Consensus-Version", clparams.FuluVersion.String())
+
+	handler.PostEthV1ValidatorAggregatesAndProof(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
