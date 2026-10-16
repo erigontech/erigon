@@ -688,6 +688,13 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	} else if committeeIndex != nil {
 		attestationData.CommitteeIndex = *committeeIndex
 	}
+	if a.aggregatePool != nil && clversion.AfterOrEqual(clparams.ElectraVersion) {
+		// Our aggregators ask for the aggregate of exactly this data; gossip votes for other data must
+		// not keep it out of the pool.
+		if err := a.aggregatePool.PinAttestationData(&attestationData); err != nil {
+			a.logger.Debug("Failed to pin attestation data", "slot", *slot, "err", err)
+		}
+	}
 	return newBeaconResponse(attestationData), nil
 }
 
@@ -1981,11 +1988,15 @@ func (a *ApiHandler) produceBeaconBody(
 		start := time.Now()
 		defer func() {
 			poolSize := len(a.operationsPool.AttestationsPool.Raw())
+			localAggregates := 0
+			if a.aggregatePool != nil {
+				localAggregates = len(a.aggregatePool.Aggregates())
+			}
 			attCount := 0
 			if beaconBody.Attestations != nil {
 				attCount = beaconBody.Attestations.Len()
 			}
-			log.Info("BlockProduction: GetBlockOperations&findBestAttestations took", "duration", time.Since(start), "poolSize", poolSize, "selectedAtts", attCount)
+			log.Info("BlockProduction: GetBlockOperations&findBestAttestations took", "duration", time.Since(start), "poolSize", poolSize, "localAggregates", localAggregates, "selectedAtts", attCount)
 		}()
 		beaconBody.AttesterSlashings, beaconBody.ProposerSlashings, beaconBody.VoluntaryExits, beaconBody.ExecutionChanges = a.getBlockOperations(
 			baseState,
@@ -3175,13 +3186,35 @@ type attestationCandidate struct {
 	newFlags     []uint8
 }
 
+// includableSource is the source process_attestation requires for a vote of targetEpoch. Dropping
+// other candidates early saves the per-candidate work on votes that can never be included.
+func includableSource(s abstract.BeaconState, targetEpoch uint64) solid.Checkpoint {
+	if targetEpoch == state.Epoch(s) {
+		return s.CurrentJustifiedCheckpoint()
+	}
+	return s.PreviousJustifiedCheckpoint()
+}
+
+// blockInclusionAttestations returns the gossip aggregates together with the aggregates
+// built locally from attestations received on subscribed subnets.
+func (a *ApiHandler) blockInclusionAttestations() []*solid.Attestation {
+	attestations := a.operationsPool.AttestationsPool.Raw()
+	if a.aggregatePool != nil {
+		attestations = append(attestations, a.aggregatePool.Aggregates()...)
+	}
+	return attestations
+}
+
 func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) (map[common.Hash][]*solid.Attestation, error) {
 	pool := map[common.Hash]map[uint64][]*solid.Attestation{} // map root -> committee -> att candidates
 	// step 1: Group attestations by data root and committee index for merging
 	// so after this step, pool[dataRoot][committeeIndex] will contain all the attestation candidates for that data root and committee index
-	for _, candidate := range a.operationsPool.AttestationsPool.Raw() {
+	for _, candidate := range a.blockInclusionAttestations() {
 		if err := eth2.IsAttestationApplicable(s, candidate); err != nil {
 			continue // attestation not applicable skip
+		}
+		if !candidate.Data.Source.Equal(includableSource(s, candidate.Data.Target.Epoch)) {
+			continue
 		}
 
 		attVersion := a.beaconChainCfg.GetCurrentStateVersion(candidate.Data.Slot / a.beaconChainCfg.SlotsPerEpoch)
@@ -3245,7 +3278,11 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 		}
 		if appendCandidate {
 			// no merge case, just append. It might be merged with other attestation later.
-			pool[dataRoot][candCommitteeBit] = append(pool[dataRoot][candCommitteeBit], candidate.Copy())
+			// Candidates it covers add nothing, whatever order the sources come in.
+			candidates := slices.DeleteFunc(pool[dataRoot][candCommitteeBit], func(curAtt *solid.Attestation) bool {
+				return utils.IsNonStrictSupersetBitlist(candAggrBits, curAtt.AggregationBits.Bytes())
+			})
+			pool[dataRoot][candCommitteeBit] = append(candidates, candidate.Copy())
 		}
 	}
 
@@ -3392,6 +3429,9 @@ func (a *ApiHandler) denebMergedAttestationCandidates(s abstract.BeaconState) (m
 	for _, candidate := range a.operationsPool.AttestationsPool.Raw() {
 		if err := eth2.IsAttestationApplicable(s, candidate); err != nil {
 			continue // attestation not applicable skip
+		}
+		if !candidate.Data.Source.Equal(includableSource(s, candidate.Data.Target.Epoch)) {
+			continue
 		}
 
 		attVersion := a.beaconChainCfg.GetCurrentStateVersion(candidate.Data.Slot / a.beaconChainCfg.SlotsPerEpoch)
