@@ -19,6 +19,7 @@ package forkchoice
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"sync"
 	"testing"
@@ -47,6 +48,89 @@ type embeddedPtcVoteForkGraph struct {
 	*getFinalizedExecutionHashForkGraph
 	postState *state.CachingBeaconState
 	envelopes map[common.Hash]bool
+	invalid   map[common.Hash]bool
+}
+
+func (g *embeddedPtcVoteForkGraph) MarkHeaderAsInvalid(root common.Hash) {
+	if g.invalid == nil {
+		g.invalid = map[common.Hash]bool{}
+	}
+	g.invalid[root] = true
+}
+
+func (g *embeddedPtcVoteForkGraph) IsBlockInvalid(root common.Hash) bool {
+	return g.invalid[root]
+}
+
+func TestHasImportedDescendantAfterCountsDescendantsOnly(t *testing.T) {
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	childRoot, err := child.Block.HashSSZ()
+	require.NoError(t, err)
+
+	require.True(t, store.HasImportedDescendantAfter(anchorRoot, child.Block.Slot-1))
+	require.False(t, store.HasImportedDescendantAfter(anchorRoot, child.Block.Slot))
+	// The anchor precedes the child: an ancestor or another branch never counts.
+	require.False(t, store.HasImportedDescendantAfter(childRoot, 0))
+
+	// A deeper descendant counts too.
+	grandchild := cltypes.NewSignedBeaconBlock(store.beaconCfg, clparams.GloasVersion)
+	grandchild.Block.Slot = 40
+	grandchild.Block.ParentRoot = childRoot
+	grandchildRoot, err := grandchild.Block.HashSSZ()
+	require.NoError(t, err)
+	graph := store.forkGraph.(*embeddedPtcVoteForkGraph)
+	graph.blocks[grandchildRoot] = grandchild
+	graph.headers[grandchildRoot] = &cltypes.BeaconBlockHeader{Slot: grandchild.Block.Slot, ParentRoot: childRoot}
+	store.updateChildren(child.Block.Slot, childRoot, grandchildRoot)
+	require.True(t, store.HasImportedDescendantAfter(anchorRoot, grandchild.Block.Slot-1))
+}
+
+func TestHasImportedDescendantAfterSkipsBlocksCutOffByAnInvalidPayload(t *testing.T) {
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	require.Equal(t, cltypes.PayloadStatusFull, store.getParentPayloadStatus(child.Block))
+
+	// The child builds on the anchor's payload, so an INVALID verdict leaves no path to it.
+	store.MarkPayloadStatus(anchorRoot, common.Hash{0xe1}, execution_client.PayloadStatusInvalidated)
+	require.False(t, store.HasImportedDescendantAfter(anchorRoot, 0))
+}
+
+func TestHasImportedDescendantAfterKeepsBlocksOnTheEmptyVariantOfAnInvalidPayload(t *testing.T) {
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	anchorBlock, ok := store.forkGraph.GetBlock(anchorRoot)
+	require.True(t, ok)
+	anchorBlock.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = common.Hash{0xe1}
+	require.Equal(t, cltypes.PayloadStatusEmpty, store.getParentPayloadStatus(child.Block))
+
+	store.MarkPayloadStatus(anchorRoot, common.Hash{0xe1}, execution_client.PayloadStatusInvalidated)
+	require.True(t, store.HasImportedDescendantAfter(anchorRoot, 0))
+}
+
+// A pre-Gloas block has no EMPTY alternative: an invalid one cuts off itself and every child,
+// whatever the child's bid claims.
+func TestCutOffByInvalidationAtThePreGloasBoundary(t *testing.T) {
+	store, _, _ := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	graph := store.forkGraph.(*embeddedPtcVoteForkGraph)
+	add := func(block *cltypes.SignedBeaconBlock) common.Hash {
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		graph.blocks[root] = block
+		return root
+	}
+	parent := cltypes.NewSignedBeaconBlock(store.beaconCfg, clparams.FuluVersion)
+	parent.Block.Slot = 30
+	parentRoot := add(parent)
+	child := cltypes.NewSignedBeaconBlock(store.beaconCfg, clparams.GloasVersion)
+	child.Block.Slot = 31
+	child.Block.ParentRoot = parentRoot
+	childRoot := add(child)
+	require.Equal(t, cltypes.PayloadStatusEmpty, store.getParentPayloadStatus(child.Block))
+
+	require.False(t, store.cutOffByInvalidation(parentRoot))
+	require.False(t, store.cutOffByInvalidation(childRoot))
+
+	graph.MarkHeaderAsInvalid(parentRoot)
+	require.True(t, store.cutOffByInvalidation(parentRoot))
+	require.True(t, store.cutOffByInvalidation(childRoot))
 }
 
 func TestGloasAnchorStartsWithoutPtcVotes(t *testing.T) {
@@ -1402,4 +1486,239 @@ func (g *getFinalizedExecutionHashForkGraph) ReadEnvelopeFromDisk(common.Hash) (
 
 func (g *getFinalizedExecutionHashForkGraph) HasEnvelope(common.Hash) bool {
 	return false
+}
+
+// get_head attaches a child only under the payload variant its bid names, and offers FULL only
+// when the payload is available. At the served head, a child on the other variant counts only
+// while that variant is not a candidate.
+func TestHasImportedDescendantAfterFollowsTheServedVariant(t *testing.T) {
+	newStore := func(t *testing.T, childOnFull bool) (*ForkChoiceStore, common.Hash) {
+		store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+		if !childOnFull {
+			anchorBlock, ok := store.forkGraph.GetBlock(anchorRoot)
+			require.True(t, ok)
+			anchorBlock.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = common.Hash{0xe1}
+		}
+		want := cltypes.PayloadStatusEmpty
+		if childOnFull {
+			want = cltypes.PayloadStatusFull
+		}
+		require.Equal(t, want, store.getParentPayloadStatus(child.Block))
+		return store, anchorRoot
+	}
+	serve := func(store *ForkChoiceStore, root common.Hash, status cltypes.PayloadStatus) {
+		store.selectedHead.Store(&ForkChoiceNode{Root: root, PayloadStatus: status})
+	}
+
+	t.Run("served EMPTY, child on an available FULL", func(t *testing.T) {
+		store, anchorRoot := newStore(t, true)
+		store.MarkPayloadStatus(anchorRoot, common.Hash{0xe1}, execution_client.PayloadStatusValidated)
+		serve(store, anchorRoot, cltypes.PayloadStatusEmpty)
+		require.False(t, store.HasImportedDescendantAfter(anchorRoot, 0))
+	})
+	t.Run("served EMPTY, child on an unavailable FULL", func(t *testing.T) {
+		store, anchorRoot := newStore(t, true)
+		serve(store, anchorRoot, cltypes.PayloadStatusEmpty)
+		require.True(t, store.HasImportedDescendantAfter(anchorRoot, 0))
+	})
+	t.Run("served FULL, child on FULL", func(t *testing.T) {
+		store, anchorRoot := newStore(t, true)
+		serve(store, anchorRoot, cltypes.PayloadStatusFull)
+		require.True(t, store.HasImportedDescendantAfter(anchorRoot, 0))
+	})
+	t.Run("served FULL, child on EMPTY", func(t *testing.T) {
+		store, anchorRoot := newStore(t, false)
+		serve(store, anchorRoot, cltypes.PayloadStatusFull)
+		require.False(t, store.HasImportedDescendantAfter(anchorRoot, 0))
+	})
+	t.Run("another root served", func(t *testing.T) {
+		store, anchorRoot := newStore(t, false)
+		serve(store, common.Hash{0x99}, cltypes.PayloadStatusFull)
+		require.True(t, store.HasImportedDescendantAfter(anchorRoot, 0))
+	})
+}
+
+// viabilityTree is a Gloas store whose justified checkpoint is at epoch 1 (root at slot 32), with
+// one validator, at slot 128. add attaches a block on the parent's FULL or EMPTY variant.
+type viabilityTree struct {
+	store     *ForkChoiceStore
+	graph     *headSnapshotForkGraph
+	justified solid.Checkpoint
+}
+
+func newViabilityTree(t testing.TB) *viabilityTree {
+	t.Helper()
+	store, graph := newHeadSnapshotTestStore()
+	justified := store.JustifiedCheckpoint()
+	justified.Epoch = 1
+	graph.blocks[justified.Root].Block.Slot = 32
+	graph.headers[justified.Root].Slot = 32
+	store.justifiedCheckpoint.Store(justified)
+	store.time.Store(128 * store.beaconCfg.SecondsPerSlot)
+	store.checkpointStates.Store(justified, &checkpointState{
+		beaconConfig: store.beaconCfg, validatorSetSize: 1,
+		balances: []uint64{32}, actives: []byte{1}, slasheds: []byte{0},
+	})
+	return &viabilityTree{store: store, graph: graph, justified: justified}
+}
+
+// add attaches root at slot on parent's FULL or EMPTY variant. viable sets whether its voting
+// source matches the justified checkpoint.
+func (v *viabilityTree) add(root, parent common.Hash, slot uint64, full, viable bool) {
+	block := cltypes.NewSignedBeaconBlock(v.store.beaconCfg, clparams.GloasVersion)
+	block.Block.Slot = slot
+	block.Block.ParentRoot = parent
+	bid := block.Block.Body.GetSignedExecutionPayloadBid().Message
+	bid.BlockHash = root
+	parentBid := v.graph.blocks[parent].Block.Body.GetSignedExecutionPayloadBid().Message
+	bid.ParentBlockHash = parentBid.ParentBlockHash
+	if full {
+		bid.ParentBlockHash = parentBid.BlockHash
+	}
+	v.graph.blocks[root] = block
+	v.graph.headers[root] = block.SignedBeaconBlockHeader().Header
+	v.store.updateChildren(v.graph.headers[parent].Slot, parent, root)
+	source := solid.Checkpoint{}
+	if viable {
+		source = v.justified
+	}
+	v.store.unrealizedJustifications.Store(root, source)
+}
+
+// A descendant on a branch get_head filters out for its justification does not make the head
+// lag; the same descendant with a viable justification does. The served head H/EMPTY at slot 64
+// has a viable FULL child at slot 65 and an EMPTY child at slot 98.
+func TestHasImportedDescendantAfterSkipsNonViableBranches(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		viable, lagging bool
+	}{
+		{name: "non-viable justification", viable: false, lagging: false},
+		{name: "viable justification", viable: true, lagging: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := newViabilityTree(t)
+			store := v.store
+			headRoot, fullChild, emptyChild := common.Hash{0xbb}, common.Hash{0xcc}, common.Hash{0xdd}
+			v.add(headRoot, v.justified.Root, 64, true, true)
+			v.add(fullChild, headRoot, 65, true, true)
+			v.add(emptyChild, headRoot, 98, false, tc.viable)
+			store.setLatestMessage(0, LatestMessage{Slot: 100, Root: headRoot})
+
+			filtered := store.getFilteredBlockTree(v.justified.Root, v.justified, store.Slot())
+			require.Contains(t, filtered, fullChild)
+			require.Equal(t, tc.viable, filtered[emptyChild] != nil)
+			store.selectedHead.Store(&ForkChoiceNode{Root: headRoot, PayloadStatus: cltypes.PayloadStatusEmpty})
+			require.Equal(t, tc.lagging, store.HasImportedDescendantAfter(headRoot, 64+store.beaconCfg.SlotsPerEpoch))
+		})
+	}
+}
+
+// A block whose only viable descendant sits on its invalidated payload is not reachable: get_head
+// drops its FULL variant, and its EMPTY variant fails justification as a leaf. The served head
+// H/EMPTY at slot 64 has an EMPTY child C at slot 98 with a FULL child D at slot 99.
+func TestHasImportedDescendantAfterSkipsABlockViableOnlyThroughAnInvalidatedPayload(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		invalid, emptyLeaf bool
+		lagging            bool
+	}{
+		{name: "invalidated payload", invalid: true, lagging: false},
+		{name: "invalidated payload, viable EMPTY leaf", invalid: true, emptyLeaf: true, lagging: true},
+		{name: "payload not invalidated", lagging: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := newViabilityTree(t)
+			headRoot, c, d := common.Hash{0xbb}, common.Hash{0xc1}, common.Hash{0xd1}
+			v.add(headRoot, v.justified.Root, 64, true, true)
+			v.add(c, headRoot, 98, false, tc.emptyLeaf)
+			v.add(d, c, 99, true, true)
+			if tc.invalid {
+				v.graph.invalid = map[common.Hash]bool{c: true}
+			}
+			v.store.selectedHead.Store(&ForkChoiceNode{Root: headRoot, PayloadStatus: cltypes.PayloadStatusEmpty})
+
+			require.Equal(t, tc.lagging, v.store.HasImportedDescendantAfter(headRoot, 64+v.store.beaconCfg.SlotsPerEpoch))
+		})
+	}
+}
+
+// When get_head finds no viable node, it falls back to the justified root on EMPTY without having
+// chosen EMPTY over FULL. The gate then counts the FULL branch too: here an available FULL child
+// with an unavailable payload hides a viable grandchild past the tolerance.
+func TestHasImportedDescendantAfterCountsBothVariantsOfAFallbackHead(t *testing.T) {
+	v := newViabilityTree(t)
+	j := v.justified.Root
+	c, g := common.Hash{0xc2}, common.Hash{0xd2}
+	v.add(c, j, 33, true, false)
+	v.add(g, c, 98, true, true)
+	v.graph.noEnvelope = map[common.Hash]bool{c: true}
+	require.True(t, v.store.isPayloadAvailable(j))
+	require.False(t, v.store.isPayloadAvailable(c))
+
+	head, _, err := v.store.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, ForkChoiceNode{Root: j, PayloadStatus: cltypes.PayloadStatusEmpty}, head, "no viable node: the fallback")
+
+	require.True(t, v.store.HasImportedDescendantAfter(j, 32+v.store.beaconCfg.SlotsPerEpoch))
+}
+
+// A changed payload decision can rule out the served variant before get_head runs again; until it
+// does, the gate counts the children of both variants.
+func TestHasImportedDescendantAfterCountsBothVariantsAfterAPayloadDecisionChanges(t *testing.T) {
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	anchorBlock, ok := store.forkGraph.GetBlock(anchorRoot)
+	require.True(t, ok)
+	anchorBlock.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = common.Hash{0xe1}
+	require.Equal(t, cltypes.PayloadStatusEmpty, store.getParentPayloadStatus(child.Block))
+	store.selectedHead.Store(&ForkChoiceNode{Root: anchorRoot, PayloadStatus: cltypes.PayloadStatusFull})
+	require.False(t, store.HasImportedDescendantAfter(anchorRoot, 0))
+
+	store.MarkPayloadStatus(anchorRoot, common.Hash{0xe1}, execution_client.PayloadStatusInvalidated)
+
+	require.True(t, store.HasImportedDescendantAfter(anchorRoot, 0), "the FULL head is ruled out, so its EMPTY child counts")
+}
+
+func TestGetHeadPublishesTheSelectedNode(t *testing.T) {
+	store, _, _ := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	head, _, err := store.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, &head, store.selectedHead.Load())
+}
+
+// The case behind the stuck head: a child imported on the FULL variant of a parent whose payload
+// has no recorded status. get_head stays on the parent, and the gate must see the child.
+func TestHasImportedDescendantAfterSeesAChildGetHeadCannotReach(t *testing.T) {
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	require.Equal(t, cltypes.PayloadStatusFull, store.getParentPayloadStatus(child.Block))
+
+	head, headSlot, err := store.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, anchorRoot, head.Root)
+	require.Less(t, headSlot, child.Block.Slot)
+	require.True(t, store.HasImportedDescendantAfter(head.Root, child.Block.Slot-1))
+}
+
+// A head get_head selects has no imported descendant past it, on either payload variant.
+func TestHasImportedDescendantAfterIsFalseForTheSelectedHead(t *testing.T) {
+	for _, onFull := range []bool{true, false} {
+		t.Run(fmt.Sprintf("child on FULL=%t", onFull), func(t *testing.T) {
+			store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+			if onFull {
+				store.MarkPayloadStatus(anchorRoot, common.Hash{0xe1}, execution_client.PayloadStatusValidated)
+			} else {
+				anchorBlock, ok := store.forkGraph.GetBlock(anchorRoot)
+				require.True(t, ok)
+				anchorBlock.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = common.Hash{0xe1}
+			}
+			childRoot, err := child.Block.HashSSZ()
+			require.NoError(t, err)
+
+			head, headSlot, err := store.GetHeadNode()
+			require.NoError(t, err)
+			require.Equal(t, common.Hash(childRoot), head.Root)
+			require.False(t, store.HasImportedDescendantAfter(head.Root, headSlot))
+			require.False(t, store.HasImportedDescendantAfter(head.Root, 0))
+		})
+	}
 }
