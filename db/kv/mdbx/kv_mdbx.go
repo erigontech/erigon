@@ -103,18 +103,18 @@ const (
 	DefaultMapSize    = 2 * datasize.TB
 	DefaultGrowthStep = 1 * datasize.GB
 
-	// A commit syncs itself only when the poller missed this many intervals in a row.
+	// A commit falls back to Durable only when the poller missed this many intervals in a row.
 	syncInCommitAfterMissedIntervals = 30
 	maxSyncInCommitPeriod            = 18 * time.Hour // mdbx stores the period in 16.16-bit seconds
 )
 
-// Under SafeNoSync the poller goroutine calls env.Sync every PollerSyncInterval. A commit syncs
-// itself only when more than SyncInCommitAboveUnsyncedBytes is unsynced or the last sync is older
-// than syncInCommitWhenUnsyncedFor, a backstop for a writer the poller cannot interrupt. Both
-// bound what a crash rolls back; the byte one also bounds the file growth a deferred sync causes.
+// Under SafeNoSync the poller goroutine calls env.Sync every PollerSyncInterval. A commit past
+// either limit below behaves as Durable, syncing before it returns: a backstop for a writer the
+// poller cannot interrupt. Both limits bound what a crash rolls back; the byte one also bounds
+// the file growth a deferred sync causes.
 var (
-	SyncInCommitAboveUnsyncedBytes = dbg.EnvDataSize("MDBX_SYNC_BYTES", 256*datasize.MB)
-	PollerSyncInterval             = dbg.EnvDuration("MDBX_SYNC_PERIOD", time.Second)
+	SyncInCommitIfAboveUnsyncedBytes = dbg.EnvDataSize("MDBX_SYNC_BYTES", 256*datasize.MB)
+	PollerSyncInterval               = dbg.EnvDuration("MDBX_SYNC_PERIOD", time.Second)
 
 	// DefaultSafeNoSync gives every database the deferred flush. Set it before any database
 	// opens - the erigon binary does so from --db.safe.nosync.
@@ -166,14 +166,14 @@ func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts     { opts.growthS
 func (opts MdbxOpts) Path(path string) MdbxOpts                   { opts.path = path; return opts }
 func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts    { opts.syncPeriod = period; return opts }
 
-// syncInCommitWhenUnsyncedFor is the age of the last sync past which a commit syncs itself, long
-// enough that the poller normally gets there first.
-func syncInCommitWhenUnsyncedFor(pollerInterval time.Duration) time.Duration {
+// syncInCommitIfUnsyncedFor is the age of the last sync past which a commit behaves as Durable,
+// long enough that the poller normally gets there first.
+func syncInCommitIfUnsyncedFor(pollerInterval time.Duration) time.Duration {
 	return min(syncInCommitAfterMissedIntervals*pollerInterval, maxSyncInCommitPeriod)
 }
 
 // SafeNoSync syncs from the poller every PollerSyncInterval instead of on every commit; a commit
-// syncs itself only past SyncInCommitAboveUnsyncedBytes or syncInCommitWhenUnsyncedFor. Mdbx keeps the last flushed commit-point explicitly, so a crash
+// behaves as Durable only past SyncInCommitIfAboveUnsyncedBytes or syncInCommitIfUnsyncedFor. Mdbx keeps the last flushed commit-point explicitly, so a crash
 // rolls back to it and never corrupts the file. It is the default; Durable opts out.
 func (opts MdbxOpts) SafeNoSync() MdbxOpts {
 	return opts.Flags(func(f uint) uint { return f&^mdbx.Durable | mdbx.SafeNoSync })
@@ -202,7 +202,7 @@ func (opts MdbxOpts) resolveSync() MdbxOpts {
 		return opts
 	}
 	if opts.syncBytes == nil {
-		opts = opts.SyncBytes(SyncInCommitAboveUnsyncedBytes)
+		opts = opts.SyncBytes(SyncInCommitIfAboveUnsyncedBytes)
 	}
 	if opts.syncPeriod == 0 {
 		opts = opts.SyncPeriod(PollerSyncInterval)
@@ -438,7 +438,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 	}
 
 	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
-		if err := env.SetSyncPeriod(syncInCommitWhenUnsyncedFor(opts.syncPeriod)); err != nil {
+		if err := env.SetSyncPeriod(syncInCommitIfUnsyncedFor(opts.syncPeriod)); err != nil {
 			return nil, err
 		}
 	}
