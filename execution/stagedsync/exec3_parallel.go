@@ -1270,7 +1270,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			executor, ok = pe.blockExecutors[blockNum]
 
 			if !ok {
-				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.applyResults, execRequest.commitResults, execRequest.profile, execRequest.exhausted, pe.doms)
+				executor = newBlockExec(ctx, blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.applyResults, execRequest.commitResults, execRequest.profile, execRequest.exhausted, pe.doms)
 			}
 		}
 
@@ -2328,6 +2328,9 @@ type blockExecutor struct {
 	// gasFull marks a round that ended because the BLOCK had no room for its next transaction —
 	// gas-full, which is not out-of-gas. See exec3_stop.go.
 	gasFull bool
+	// onGasFull tells the round's caller it ended gas-full; nil when nobody is tracking a block
+	// budget across rounds. See exec.BlockGas.
+	onGasFull func()
 
 	// blockStateCache provides a stable pre-block snapshot of account data
 	// for GetCommittedState reads, unaffected by intra-block ApplyStateWrites.
@@ -2365,7 +2368,15 @@ func (be *blockExecutor) sendResult(ctx context.Context, r applyResult) (err err
 	return nil
 }
 
-func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, commitResults chan applyResult, profile bool, exhausted *ErrLoopExhausted, doms *execctx.SharedDomains) *blockExecutor {
+func newBlockExec(ctx context.Context, blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, commitResults chan applyResult, profile bool, exhausted *ErrLoopExhausted, doms *execctx.SharedDomains) *blockExecutor {
+	// THE BLOCK'S GAS, NOT THIS ROUND'S. The pool handed in was built for this execution RUN and
+	// starts at the full block limit; a round of a multi-round block starts at what the block has
+	// LEFT, which its caller carries in. See exec.BlockGas.
+	var onGasFull func()
+	if g, ok := exec.BlockGasFrom(ctx); ok {
+		gasPool = protocol.NewBlockGasPool(g.Regular, g.State, g.Blob)
+		onGasFull = g.Full
+	}
 	var blockIO *state.VersionedIO
 	var versionMap *state.VersionMap
 
@@ -2401,18 +2412,12 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		gasPool:          gasPool,
 		blockStateCache:  state.NewBlockStateCache(),
 		exhausted:        exhausted,
+		onGasFull:        onGasFull,
 	}
 
 	if doms != nil {
 		doms.SetVersionedIO(blockIO)
 		doms.SetVersionMap(versionMap)
-		// THE BLOCK'S GAS, NOT THIS ROUND'S. A flashblock is built over many rounds and each round is
-		// its own execution run, so the pool handed in here was built for THIS run and starts at the
-		// full block limit. Starting every round there means the block's budget is never tracked and a
-		// body can be built well past its gas limit with nothing in execution saying so.
-		if regular, state, blob, ok := doms.FlashGasRemaining(); ok {
-			be.gasPool = protocol.NewBlockGasPool(regular, state, blob)
-		}
 	}
 
 	return be
@@ -2734,8 +2739,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 							return be.invalidBlockResult(fmt.Errorf("%w: block gas used overflow at block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)), nil
 						}
 						be.gasFull = true
-						if pe.doms != nil {
-							pe.doms.SetRoundGasFull(true)
+						if be.onGasFull != nil {
+							be.onGasFull()
 						}
 						break
 					}
@@ -3157,16 +3162,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		// Flush block state cache to sd.mem — all writes (per-TX + finalize) are now visible.
 		if err := be.blockStateCache.Flush(pe.rs.Domains(), applyTx); err != nil {
 			return nil, err
-		}
-
-		// HAND THE BLOCK BACK WHAT THIS ROUND DID NOT SPEND. The pool is the block's budget, not the
-		// round's, and the next round starts where this one left off. Only on the flashblock path,
-		// where the block is tracked across rounds at all.
-		if pe.doms != nil && be.gasPool != nil {
-			if _, _, _, tracked := pe.doms.FlashGasRemaining(); tracked {
-				pe.doms.SetFlashGasRemaining(be.gasPool.RegularGasAvailable(),
-					be.gasPool.StateGasAvailable(), be.gasPool.BlobGas())
-			}
 		}
 
 		be.result = &blockResult{

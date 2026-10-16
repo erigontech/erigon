@@ -3,12 +3,14 @@ package execmodule
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -402,23 +404,27 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock
 	// Mark this as a flashblock accumulation round → exec skips the per-round block-END (it belongs
 	// to the CLOSE, which runs once via ValidateChain over a fresh SD where this flag is unset).
 	doms.SetFlashblockAccumulating(true)
-	doms.SetRoundGasFull(false)
 
-	// THE BLOCK'S GAS BUDGET, CARRIED INTO THIS ROUND. Each round executes in its own run with its
-	// own gas pool, so without this it starts at the FULL block limit every time and the block's
-	// budget is never tracked across its rounds — a body could be built well past its gas limit and
-	// nothing in execution would say so. A staged round takes the block's remaining; the block takes
-	// its limit once, when it opens.
-	if _, _, _, tracked := doms.FlashGasRemaining(); !tracked {
-		if stagingBase != nil {
-			if r, st, b, ok := stagingBase.FlashGasRemaining(); ok {
-				doms.SetFlashGasRemaining(r, st, b)
-			}
-		}
+	// THE BLOCK'S GAS BUDGET, CARRIED INTO THIS ROUND. Each round executes in its own run with its own
+	// gas pool, so without this it starts at the FULL block limit every time and the block's budget is
+	// never tracked across its rounds — a body could be built well past its gas limit and nothing in
+	// execution would say so.
+	//
+	// What the block has already spent is DERIVED, not stored: its receipts record it transaction by
+	// transaction, and they are the block's own, carried along the staged parent. Nothing about the
+	// budget lives on the SharedDomains, which spans a whole batch of blocks on the canonical path.
+	spent := uint64(0)
+	for _, r := range blockReceiptsSoFar(doms, stagingBase) {
+		spent += r.GasUsed
 	}
-	if _, _, _, tracked := doms.FlashGasRemaining(); !tracked {
-		doms.SetFlashGasRemaining(header.GasLimit, header.GasLimit, e.config.GetMaxBlobGasPerBlock(header.Time))
-	}
+	remaining := header.GasLimit - min(spent, header.GasLimit)
+	var gasFullSeen atomic.Bool
+	ctx = exec.WithBlockGas(ctx, exec.BlockGas{
+		Regular: remaining,
+		State:   remaining,
+		Blob:    e.config.GetMaxBlobGasPerBlock(header.Time),
+		Full:    func() { gasFullSeen.Store(true) },
+	})
 
 	tx := doms.BlockOverlay()
 
@@ -519,7 +525,7 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock
 	// rounds. The rest were never scheduled and are not in the state, so they may not be in the body either
 	// — the seal reads the in-progress block back by its header hash, and a body longer than its receipts
 	// would seal transactions nothing executed.
-	gasFull := doms.RoundGasFull()
+	gasFull := gasFullSeen.Load()
 	appliedTxs := len(body.Transactions)
 	if status == engine_types.ValidStatus {
 		if ran := prefixLen + len(doms.FlashblockReceipts()); ran < appliedTxs {
@@ -628,4 +634,14 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock
 		}
 	}
 	return res, nil
+}
+
+// blockReceiptsSoFar is what the in-progress block had executed BEFORE this round — its receipts, one
+// per transaction, in body order. A staged round holds only its own, so the block's are its parent's;
+// a round executing into the block's own SD already holds them all.
+func blockReceiptsSoFar(round, stagingBase *execctx.SharedDomains) types.Receipts {
+	if stagingBase != nil {
+		return stagingBase.FlashblockReceipts()
+	}
+	return round.FlashblockReceipts()
 }
