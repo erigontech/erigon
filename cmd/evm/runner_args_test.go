@@ -35,14 +35,24 @@ func TestRunnersRunEveryPathArgument(t *testing.T) {
 	if testing.Short() {
 		t.Skip("too slow for testing.Short")
 	}
-	const engineFixtures = "../../execution/tests/testdata/engine/"
+	const (
+		blockFixtures  = "../../execution/tests/testdata/delivered_access_list/"
+		engineFixtures = "../../execution/tests/testdata/engine/"
+	)
+	blockFixturesDir, err := filepath.Abs(blockFixtures)
+	require.NoError(t, err)
+	linkedDir := filepath.Join(t.TempDir(), "linked")
+	require.NoError(t, os.Symlink(blockFixturesDir, linkedDir))
 	for _, tc := range []struct {
 		command string
 		paths   []string
 		want    int
 	}{
-		// The directory holds only the file, so it runs twice.
-		{"enginetest", []string{engineFixtures + "bal_cross_block_ripemd160_state_leak.json", engineFixtures}, 2},
+		{"blocktest", []string{blockFixtures + "valid.json", blockFixtures + "mismatched_list.json"}, 2},
+		// A symlink to a directory runs the directory's three fixtures.
+		{"blocktest", []string{linkedDir}, 3},
+		// The directory holds the file and one more fixture.
+		{"enginetest", []string{engineFixtures + "bal_cross_block_ripemd160_state_leak.json", engineFixtures}, 3},
 	} {
 		t.Run(tc.command, func(t *testing.T) {
 			tt := cmdtest.NewTestCmd(t, nil)
@@ -72,6 +82,7 @@ func TestRunnersRejectMissingPathArgument(t *testing.T) {
 		command string
 		path    string
 	}{
+		{"blocktest", "../../execution/tests/testdata/delivered_access_list/valid.json"},
 		{"enginetest", "../../execution/tests/testdata/engine/bal_cross_block_ripemd160_state_leak.json"},
 	} {
 		t.Run(tc.command, func(t *testing.T) {
@@ -97,6 +108,7 @@ func TestRunnersRunFixturesBesideAnUnreadableOne(t *testing.T) {
 		command string
 		fixture string
 	}{
+		{"blocktest", "../../execution/tests/testdata/delivered_access_list/valid.json"},
 		{"enginetest", "../../execution/tests/testdata/engine/bal_cross_block_ripemd160_state_leak.json"},
 	} {
 		t.Run(tc.command, func(t *testing.T) {
@@ -152,6 +164,7 @@ func TestRunnersRunFilesBesideOneThatIsNotAnObject(t *testing.T) {
 		command string
 		fixture string
 	}{
+		{"blocktest", "../../execution/tests/testdata/delivered_access_list/valid.json"},
 		{"enginetest", "../../execution/tests/testdata/engine/bal_cross_block_ripemd160_state_leak.json"},
 	} {
 		t.Run(tc.command, func(t *testing.T) {
@@ -185,6 +198,7 @@ func TestRunnersExitOneWhenAFixtureFails(t *testing.T) {
 		command string
 		fixture string
 	}{
+		{"blocktest", "../../execution/tests/testdata/delivered_access_list/valid.json"},
 		{"enginetest", "../../execution/tests/testdata/engine/bal_cross_block_ripemd160_state_leak.json"},
 	} {
 		t.Run(tc.command, func(t *testing.T) {
@@ -200,4 +214,30 @@ func TestRunnersExitOneWhenAFixtureFails(t *testing.T) {
 			require.False(t, results[0].Pass)
 		})
 	}
+}
+
+// In batch mode, blocktest reports a file it cannot read on stderr, runs the
+// rest, and exits 2.
+func TestBlocktestBatchModeReportsAnUnreadableFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("too slow for testing.Short")
+	}
+	const (
+		valid   = "../../execution/tests/testdata/delivered_access_list/valid.json"
+		missing = "../../execution/tests/testdata/does-not-exist.json"
+	)
+	tt := cmdtest.NewTestCmd(t, nil)
+	tt.Run("evm-test", "blocktest", "--jsonout")
+	_, err := tt.InputLine(missing + "\n" + valid)
+	require.NoError(t, err)
+	tt.CloseStdin()
+	stdout := tt.Output()
+	tt.WaitExit()
+	require.Equal(t, exitIncompleteRun, tt.ExitStatus())
+	require.Contains(t, tt.StderrText(), "does-not-exist.json")
+
+	var results []testResult
+	require.NoError(t, json.Unmarshal(stdout, &results))
+	require.Len(t, results, 1)
+	require.True(t, results[0].Pass, results[0].Error)
 }

@@ -34,8 +34,10 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/tests/testutil"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 var blockTestCommand = cli.Command{
@@ -44,6 +46,9 @@ var blockTestCommand = cli.Command{
 	Usage:     "Executes the given blockchain tests. Paths (files or directories) are given as arguments, or filenames fed via standard input (batch mode).",
 	ArgsUsage: "<path>...",
 	Flags: []cli.Flag{
+		&BALReportFlag,
+		&BALSequentialFlag,
+		&BALWithholdFlag,
 		&DumpFlag,
 		&JSONOutputFlag,
 		&RunFlag,
@@ -70,6 +75,10 @@ func blockTestCmd(_ context.Context, ctx *cli.Command) error {
 		return err
 	}
 
+	if ctx.Bool(BALWithholdFlag.Name) {
+		dbg.SetIgnoreBAL(true)
+	}
+	reportPath := runnerExecutionPathReporter(ctx)
 	var incomplete incompleteRun
 	if ctx.Args().Present() {
 		files, err := collectArgFiles(ctx)
@@ -77,7 +86,7 @@ func blockTestCmd(_ context.Context, ctx *cli.Command) error {
 			return exitIncomplete(err)
 		}
 		collected := filter.filterFiles(files)
-		results, err := runBlockTestsParallel(ctx, collected, workers, filter, &incomplete)
+		results, err := runBlockTestsParallel(ctx, collected, workers, filter, reportPath, &incomplete)
 		if err != nil {
 			return err
 		}
@@ -86,7 +95,7 @@ func blockTestCmd(_ context.Context, ctx *cli.Command) error {
 	}
 	// Otherwise, read filenames from stdin and execute back-to-back.
 	runFile := incomplete.wrap(func(path string) ([]testResult, error) {
-		return runBlockTest(ctx, path, filter)
+		return runBlockTest(ctx, path, filter, reportPath)
 	})
 	failed := false
 	scanner := bufio.NewScanner(os.Stdin)
@@ -111,9 +120,9 @@ type fileResult struct {
 	err     error
 }
 
-func runBlockTestsParallel(ctx *cli.Command, files []string, workers uint64, filter testFilter, incomplete *incompleteRun) ([]testResult, error) {
+func runBlockTestsParallel(ctx *cli.Command, files []string, workers uint64, filter testFilter, reportPath func(ethconfig.BlockExecutionPath), incomplete *incompleteRun) ([]testResult, error) {
 	return runTestFilesParallel(files, workers, incomplete.wrap(func(path string) ([]testResult, error) {
-		return runBlockTest(ctx, path, filter)
+		return runBlockTest(ctx, path, filter, reportPath)
 	}))
 }
 
@@ -321,7 +330,7 @@ func jsonFiles(path string) ([]string, error) {
 
 // runBlockTest runs the fixtures in fname. Its error names a fixture that
 // cannot be decoded, which also gets a failed result, or the file itself.
-func runBlockTest(ctx *cli.Command, fname string, filter testFilter) ([]testResult, error) {
+func runBlockTest(ctx *cli.Command, fname string, filter testFilter, reportPath func(ethconfig.BlockExecutionPath)) ([]testResult, error) {
 	src, err := os.ReadFile(fname)
 	if err != nil {
 		return nil, err
@@ -344,6 +353,10 @@ func runBlockTest(ctx *cli.Command, fname string, filter testFilter) ([]testResu
 			continue
 		}
 
+		if ctx.Bool(BALSequentialFlag.Name) {
+			test.ExecWorkers = 1
+		}
+		test.ExecutionPathReporter = reportPath
 		result := &testResult{Name: name, Pass: true}
 		if err := test.RunCLI(); err != nil {
 			result.Pass = false

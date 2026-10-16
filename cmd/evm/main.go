@@ -149,6 +149,18 @@ var (
 		Value: 1,
 		Usage: "Number of workers to execute tests in parallel (must be >= 1)",
 	}
+	BALReportFlag = cli.BoolFlag{
+		Name:  "bal-report",
+		Usage: "Print how each block was executed (parallel or sequential, and why) as one JSON line per block on stderr",
+	}
+	BALSequentialFlag = cli.BoolFlag{
+		Name:  "bal-sequential",
+		Usage: "Execute every block on a single exec worker instead of the parallel executor",
+	}
+	BALWithholdFlag = cli.BoolFlag{
+		Name:  "bal-withhold",
+		Usage: "Execute every block without its access list, as IGNORE_BAL does",
+	}
 	JSONOutputFlag = cli.BoolFlag{
 		Name:  "jsonout",
 		Usage: "Output results as JSON array instead of human-readable format",

@@ -26,12 +26,14 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
@@ -47,17 +49,23 @@ import (
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
 // A BlockTest checks handling of entire blocks.
 type BlockTest struct {
-	json            btJSON
-	br              dbservices.FullBlockReader
-	ExperimentalBAL bool
+	json                  btJSON
+	br                    dbservices.FullBlockReader
+	ExperimentalBAL       bool
+	ExecWorkers           int
+	ExecutionPathReporter func(ethconfig.BlockExecutionPath)
 	// Rejections lists the blocks the last run rejected, in fixture order.
 	Rejections []Rejection
+	// deliveredAccessLists maps each block delivered with a list to whether
+	// that list was dropped.
+	deliveredAccessLists sync.Map
 }
 
 // A Rejection is a block or payload the client rejected, at its index in the
@@ -93,6 +101,32 @@ type btBlock struct {
 	Rlp             string
 	UncleHeaders    []*btHeader
 	BlockAccessList btBlockAccessList `json:"blockAccessList"`
+	// An expected-invalid block's access list is only in rlp_decoded.
+	RlpDecoded *struct {
+		BlockAccessList btBlockAccessList `json:"blockAccessList"`
+	} `json:"rlp_decoded"`
+}
+
+// accessList returns the block's access list, or dropped when its hash
+// differs from the header's, as sync drops a peer's. A list the header commits
+// to is returned even if malformed.
+func (bb *btBlock) accessList(header *types.Header) (sidecar *types.BlockAccessListSidecar, dropped bool) {
+	list := bb.BlockAccessList
+	if len(list) == 0 && bb.RlpDecoded != nil {
+		list = bb.RlpDecoded.BlockAccessList
+	}
+	sidecar = types.NewBlockAccessListSidecar(list.toBAL())
+	if sidecar == nil {
+		return nil, false
+	}
+	if header.BlockAccessListHash == nil {
+		return nil, true
+	}
+	hash, err := sidecar.Hash()
+	if err != nil || hash != *header.BlockAccessListHash {
+		return nil, true
+	}
+	return sidecar, false
 }
 
 // btBlockAccessList and related types for parsing block access list data from test JSON.
@@ -248,6 +282,23 @@ func (bt *BlockTest) newTester(tb testing.TB) (*execmoduletester.ExecModuleTeste
 	}
 	if bt.ExperimentalBAL {
 		mOpts = append(mOpts, execmoduletester.WithExperimentalBAL())
+	}
+	if bt.ExecWorkers > 0 {
+		mOpts = append(mOpts, execmoduletester.WithExecWorkerCount(bt.ExecWorkers))
+	}
+	if report := bt.ExecutionPathReporter; report != nil {
+		mOpts = append(mOpts, execmoduletester.WithExecutionPathReporter(func(p ethconfig.BlockExecutionPath) {
+			// A block delivered without a list keeps the executor's reason.
+			if dropped, delivered := bt.deliveredAccessLists.Load(p.Hash); delivered {
+				switch {
+				case dbg.IgnoreBAL:
+					p.Reason = "withheld"
+				case dropped.(bool):
+					p.Reason = "bad-access-list"
+				}
+			}
+			report(p)
+		}))
 	}
 	return execmoduletester.New(tb, mOpts...), nil
 }
@@ -406,12 +457,12 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlo
 				return nil, fmt.Errorf("block RLP decoding failed when expected to succeed: %w", err)
 			}
 		}
-		var bal types.BlockAccessList
-		if len(b.BlockAccessList) > 0 {
-			bal = b.BlockAccessList.toBAL()
-		}
 		// RLP decoding worked, try to insert into chain:
-		cb = types.NewBlockFromNetwork(cb.HeaderNoCopy(), cb.Body(), types.NewBlockAccessListSidecar(bal))
+		accessList, dropped := b.accessList(cb.HeaderNoCopy())
+		cb = types.NewBlockFromNetwork(cb.HeaderNoCopy(), cb.Body(), accessList)
+		if accessList != nil || dropped {
+			bt.deliveredAccessLists.Store(cb.Hash(), dropped)
+		}
 		chain := &blockgen.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb}
 		var previousHead *types.Header
 		if b.BlockHeader == nil {

@@ -24,9 +24,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-const engineFixture = "testdata/engine/bal_cross_block_ripemd160_state_leak.json"
+const (
+	engineFixture              = "testdata/engine/bal_cross_block_ripemd160_state_leak.json"
+	corruptedAccessListFixture = "testdata/engine/bal_invalid_balance_value.json"
+)
 
 func loadEngineTest(t *testing.T, edit func(payloads []any) []any) *engineapitester.EngineTest {
 	t.Helper()
@@ -67,8 +71,35 @@ func TestEngineTest(t *testing.T) {
 		require.ErrorContains(t, test.RunCLI(), "payload 1: payload status INVALID")
 	})
 
+	// The payload's list matches its header but not its execution: one
+	// balance is changed and the block hash recomputed. It is INVALID whether
+	// blocks run in parallel or on one worker.
+	for _, tc := range []struct {
+		name    string
+		workers int
+		path    string
+	}{
+		{"corrupted access list in parallel", 0, "parallel"},
+		{"corrupted access list on one worker", 1, "sequential"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src, err := os.ReadFile(corruptedAccessListFixture)
+			require.NoError(t, err)
+			var tests map[string]*engineapitester.EngineTest
+			require.NoError(t, json.Unmarshal(src, &tests))
+			require.Len(t, tests, 1)
+			for _, test := range tests {
+				var paths []string
+				test.ExecWorkers = tc.workers
+				test.ExecutionPathReporter = func(p ethconfig.BlockExecutionPath) { paths = append(paths, p.Path) }
+				require.NoError(t, test.RunCLI())
+				require.Equal(t, []string{tc.path}, paths)
+			}
+		})
+	}
+
 	// A node with no peers cannot fetch a missing parent; the test must fail
-	// with SYNCING rather than wait or crash.
+	// with SYNCING rather than wait.
 	t.Run("unknown parent", func(t *testing.T) {
 		test := loadEngineTest(t, func(payloads []any) []any { return payloads[1:] })
 		require.ErrorContains(t, test.RunCLI(), "payload 0: payload status SYNCING")
