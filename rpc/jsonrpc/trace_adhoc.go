@@ -1289,6 +1289,14 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if err != nil {
 		return nil, err
 	}
+	// A state diff is written through FinalizeTx, which the versioned path does not serve.
+	if !traceTypeStateDiff {
+		var stateOverrides *ethapi.StateOverrides
+		if traceConfig != nil {
+			stateOverrides = traceConfig.StateOverrides
+		}
+		transactions.VersionedCallState(ibs, stateOverrides)
+	}
 	if traceTypeVmTrace {
 		traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 	}
@@ -1946,6 +1954,9 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 
 	ibs := state.New(stateReader)
 	defer ibs.Close()
+	if !traceTypeStateDiff {
+		transactions.VersionedCallState(ibs, nil)
+	}
 
 	var ot OeTracer
 	ot.config, err = parseOeTracerConfig(nil)
