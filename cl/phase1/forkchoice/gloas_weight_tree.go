@@ -452,22 +452,26 @@ func (t *gloasWeightTree) snapshotWeights() map[common.Hash]uint64 {
 		}
 	}
 	proposerBoostRoot := t.f.ProposerBoostRoot()
-	if !t.proposerBoostApplies(proposerBoostRoot) {
-		return weights
-	}
 	score := t.GetProposerScore()
+	boostChecked := false
 	for root := proposerBoostRoot; root != (common.Hash{}); {
 		if weight, ok := weights[root]; ok {
+			if !boostChecked {
+				if !t.proposerBoostApplies(proposerBoostRoot) {
+					return weights
+				}
+				boostChecked = true
+			}
 			weights[root] = weight + score
 		}
 		if root == t.checkpoint.Root {
 			break
 		}
-		header, ok := t.f.forkGraph.GetHeader(root)
-		if !ok {
+		block, ok := t.f.forkGraph.GetBlock(root)
+		if !ok || block == nil {
 			break
 		}
-		root = header.ParentRoot
+		root = block.Block.ParentRoot
 	}
 	return weights
 }
