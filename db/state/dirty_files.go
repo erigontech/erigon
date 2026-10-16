@@ -129,6 +129,7 @@ type FilesItem struct {
 	// version is the file's parsed on-disk version, used as a per-file regime marker.
 	version  version.Version
 	refcount atomic.Int32
+	cold     bool // data file is a symlink into the cold tier
 
 	canDelete atomic.Bool
 }
@@ -458,6 +459,8 @@ func (d *Domain) openDirtyItem(item *FilesItem, dirEntries []string) bool {
 		if !openDirtyDataFile(item, d.kvFileNameMask(fromStep, toStep), dirEntries, d.dirs.SnapDomain, d.FileVersion.DataKV, tag, d.logger) {
 			return false
 		}
+		fi, err := os.Lstat(item.decompressor.FilePath())
+		item.cold = err == nil && fi.Mode()&os.ModeSymlink != 0
 	}
 
 	if item.index == nil && d.Accessors.Has(statecfg.AccessorHashMap) {
