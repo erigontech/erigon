@@ -314,7 +314,7 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 		} else if err != nil {
 			log.Warn("[GossipManager] reject message", "topic", name, "err", err, "peer", pid)
 			g.stats.addReject(name)
-			if banner := g.peerBanner; banner != nil {
+			if banner := g.peerBanner; banner != nil && !errors.Is(err, serviceintf.ErrRejectWithoutBan) {
 				select {
 				case g.peerBanQueue <- peerBan{banner: banner, pid: pid.String()}:
 				default:

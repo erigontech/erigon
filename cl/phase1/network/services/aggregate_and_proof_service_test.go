@@ -18,6 +18,8 @@ package services
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -34,10 +36,12 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	serviceintf "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 func TestAggregateAndProofServiceRejectsMalformedNestedInput(t *testing.T) {
@@ -210,6 +214,194 @@ func TestAggregateAndProofInvalidCommittee(t *testing.T) {
 	fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
 	agg.SignedAggregateAndProof.Message.AggregatorIndex = 12453224
 	require.Error(t, aggService.ProcessMessage(context.Background(), nil, agg))
+}
+
+func TestAggregateAndProofHeadCommitteeRejectionBanDependsOnShuffling(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		otherShuffling bool
+	}{
+		{name: "other shuffling", otherShuffling: true},
+		{name: "same shuffling"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			aggregate, headState := getAggregateAndProofAndState()
+			service, syncedData, fc := setupAggregateAndProofTest(t)
+			headRoot := common.Hash{0xa1}
+			require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, headRoot))
+
+			data := aggregate.SignedAggregateAndProof.Message.Aggregate.Data
+			committee, err := headState.GetBeaconCommitee(data.Slot, data.CommitteeIndex)
+			require.NoError(t, err)
+			activeValidators := headState.GetActiveValidatorsIndices(data.Target.Epoch)
+			for _, validatorIndex := range activeValidators {
+				if !slices.Contains(committee, validatorIndex) {
+					aggregate.SignedAggregateAndProof.Message.AggregatorIndex = validatorIndex
+					break
+				}
+			}
+			require.Contains(t, activeValidators, aggregate.SignedAggregateAndProof.Message.AggregatorIndex)
+			require.NotContains(t, committee, aggregate.SignedAggregateAndProof.Message.AggregatorIndex)
+
+			finalized := headState.FinalizedCheckpoint()
+			fc.FinalizedCheckpointVal = finalized
+			fc.Headers[data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{Slot: data.Slot}
+			dependentSlot := forkchoice.ComputeShufflingDependentSlot(
+				data.Target.Epoch,
+				clparams.MainnetBeaconConfig.MinSeedLookahead,
+				clparams.MainnetBeaconConfig.SlotsPerEpoch,
+			)
+			headDependentRoot := common.Hash{0xb1}
+			votedDependentRoot := headDependentRoot
+			if test.otherShuffling {
+				votedDependentRoot = common.Hash{0xb2}
+			}
+			fc.AncestorFn = func(root common.Hash, slot uint64) forkchoice.ForkChoiceNode {
+				switch slot {
+				case dependentSlot:
+					if root == headRoot {
+						return forkchoice.ForkChoiceNode{Root: headDependentRoot}
+					}
+					return forkchoice.ForkChoiceNode{Root: votedDependentRoot}
+				case finalized.Epoch * clparams.MainnetBeaconConfig.SlotsPerEpoch:
+					return forkchoice.ForkChoiceNode{Root: finalized.Root}
+				case data.Target.Epoch * clparams.MainnetBeaconConfig.SlotsPerEpoch:
+					return forkchoice.ForkChoiceNode{Root: data.Target.Root}
+				default:
+					return forkchoice.ForkChoiceNode{}
+				}
+			}
+
+			err = service.ProcessMessage(context.Background(), nil, aggregate)
+
+			require.EqualError(t, err, "committee index not in committee")
+			require.Equal(t, test.otherShuffling, errors.Is(err, serviceintf.ErrRejectWithoutBan))
+		})
+	}
+}
+
+func TestShufflingDiffersFromHead(t *testing.T) {
+	headRoot := common.Hash{0x01}
+	blockRoot := common.Hash{0x02}
+	tests := []struct {
+		name            string
+		headAncestor    common.Hash
+		blockAncestor   common.Hash
+		want            bool
+		wantHeadLookups int
+	}{
+		{name: "unknown voted block", headAncestor: common.Hash{0x11}},
+		{name: "unknown head ancestor", blockAncestor: common.Hash{0x11}, wantHeadLookups: 1},
+		{name: "equal ancestors", headAncestor: common.Hash{0x11}, blockAncestor: common.Hash{0x11}, wantHeadLookups: 1},
+		{name: "different ancestors", headAncestor: common.Hash{0x11}, blockAncestor: common.Hash{0x12}, want: true, wantHeadLookups: 1},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			headLookups := 0
+			fc := &mock_services.ForkChoiceStorageMock{
+				AncestorFn: func(root common.Hash, _ uint64) forkchoice.ForkChoiceNode {
+					if root == headRoot {
+						headLookups++
+						return forkchoice.ForkChoiceNode{Root: test.headAncestor}
+					}
+					return forkchoice.ForkChoiceNode{Root: test.blockAncestor}
+				},
+			}
+
+			got := shufflingDiffersFromHead(fc, &clparams.MainnetBeaconConfig, headRoot, blockRoot, 2)
+
+			require.Equal(t, test.want, got)
+			require.Equal(t, test.wantHeadLookups, headLookups)
+		})
+	}
+}
+
+func TestAggregateAndProofInvalidSignatureBanDependsOnShuffling(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	verifier := NewBatchSignatureVerifier(ctx, nil)
+	cfg := clparams.MainnetBeaconConfig
+	cfg.TargetAggregatorsPerCommittee = cfg.MaxValidatorsPerCommittee
+	syncedData := synced_data.NewSyncedDataManager(&cfg, true)
+	fc := mock_services.NewForkChoiceStorageMock(t)
+	operationsPool := pool.OperationsPool{
+		AttestationsPool: pool.NewOperationPool[common.Bytes96, *solid.Attestation](100, "test"),
+	}
+	validators := validator_params.NewValidatorParams()
+	validators.SetFeeRecipient(0, common.Address{})
+	service := NewAggregateAndProofService(ctx, syncedData, fc, eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, &cfg), &cfg, operationsPool, false, verifier, validators)
+
+	otherAggregate, headState := getAggregateAndProofAndState()
+	sameAggregate, _ := getAggregateAndProofAndState()
+	headRoot := common.Hash{0xe0}
+	require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, headRoot))
+	otherData := otherAggregate.SignedAggregateAndProof.Message.Aggregate.Data
+	sameData := sameAggregate.SignedAggregateAndProof.Message.Aggregate.Data
+	otherData.BeaconBlockRoot = common.Hash{0xe1}
+	sameData.BeaconBlockRoot = common.Hash{0xe2}
+	otherAggregate.Receiver = &sentinelproto.Peer{Pid: "other-shuffling"}
+	sameAggregate.Receiver = &sentinelproto.Peer{Pid: "same-shuffling"}
+	committee, err := headState.GetBeaconCommitee(otherData.Slot, otherData.CommitteeIndex)
+	require.NoError(t, err)
+	require.NotEmpty(t, committee)
+	otherAggregate.SignedAggregateAndProof.Message.AggregatorIndex = committee[0]
+	sameAggregate.SignedAggregateAndProof.Message.AggregatorIndex = committee[0]
+
+	finalized := headState.FinalizedCheckpoint()
+	fc.FinalizedCheckpointVal = finalized
+	fc.Headers[otherData.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{Slot: otherData.Slot}
+	fc.Headers[sameData.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{Slot: sameData.Slot}
+	dependentSlot := forkchoice.ComputeShufflingDependentSlot(otherData.Target.Epoch, cfg.MinSeedLookahead, cfg.SlotsPerEpoch)
+	headDependentRoot := common.Hash{0xf0}
+	fc.AncestorFn = func(root common.Hash, slot uint64) forkchoice.ForkChoiceNode {
+		switch slot {
+		case dependentSlot:
+			if root == otherData.BeaconBlockRoot {
+				return forkchoice.ForkChoiceNode{Root: common.Hash{0xf1}}
+			}
+			return forkchoice.ForkChoiceNode{Root: headDependentRoot}
+		case finalized.Epoch * cfg.SlotsPerEpoch:
+			return forkchoice.ForkChoiceNode{Root: finalized.Root}
+		case otherData.Target.Epoch * cfg.SlotsPerEpoch:
+			return forkchoice.ForkChoiceNode{Root: otherData.Target.Root}
+		default:
+			return forkchoice.ForkChoiceNode{}
+		}
+	}
+
+	for _, test := range []struct {
+		name                 string
+		aggregate            *SignedAggregateAndProofForGossip
+		rejectWithoutPeerBan bool
+		wantSendingPeer      bool
+	}{
+		{name: "other shuffling", aggregate: otherAggregate, rejectWithoutPeerBan: true},
+		{name: "same shuffling", aggregate: sameAggregate, wantSendingPeer: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			verification, result := captureQueuedVerification(t, verifier.aggregateProofVerify, func(ctx context.Context) error {
+				return service.ProcessMessage(ctx, nil, test.aggregate)
+			})
+			if test.wantSendingPeer {
+				require.Same(t, test.aggregate.Receiver, verification.SendingPeer)
+			} else {
+				require.Nil(t, verification.SendingPeer)
+			}
+			require.True(t, verification.report(ErrInvalidBlsSignature))
+			err := <-result
+
+			require.True(t, errors.Is(err, ErrInvalidBlsSignature))
+			require.Equal(t, test.rejectWithoutPeerBan, errors.Is(err, serviceintf.ErrRejectWithoutBan))
+			require.EqualError(t, err, ErrInvalidBlsSignature.Error())
+		})
+	}
+}
+
+func TestAggregateAndProofRejectWithoutBanIfNil(t *testing.T) {
+	if rejectWithoutBanIf(nil, true) != nil {
+		t.Fatal("rejectWithoutBanIf returned a non-nil error")
+	}
 }
 
 func TestAggregateAndProofAllowsNextEpochWhenForkchoiceHasSeenIt(t *testing.T) {

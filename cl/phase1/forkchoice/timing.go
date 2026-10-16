@@ -114,11 +114,11 @@ func (f *ForkChoiceStore) recordBlockTimeliness(block *cltypes.BeaconBlock, bloc
 
 func (f *ForkChoiceStore) getDependentRoot(root common.Hash) common.Hash {
 	epoch := f.computeEpochAtSlot(f.Slot())
-	dependentSlot := computeShufflingDependentSlot(epoch, f.beaconCfg.MinSeedLookahead, f.beaconCfg.SlotsPerEpoch)
+	dependentSlot := ComputeShufflingDependentSlot(epoch, f.beaconCfg.MinSeedLookahead, f.beaconCfg.SlotsPerEpoch)
 	return f.getAncestor(f.getNodeForRoot(root), dependentSlot).Root
 }
 
-func computeShufflingDependentSlot(epoch, minSeedLookahead, slotsPerEpoch uint64) uint64 {
+func ComputeShufflingDependentSlot(epoch, minSeedLookahead, slotsPerEpoch uint64) uint64 {
 	if epoch <= minSeedLookahead {
 		return 0
 	}

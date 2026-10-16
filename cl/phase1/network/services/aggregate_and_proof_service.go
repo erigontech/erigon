@@ -245,8 +245,9 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		attestingIndices          []uint64
 		seenIndex                 seenAggregateIndex
 		localValidatorIsProposer  bool
+		otherShuffling            bool
 	)
-	if err := a.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+	if err := a.syncedDataManager.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, headRoot common.Hash, _ uint64) error {
 		// If our head state is too far from the aggregate's epoch, committee
 		// computations will use a stale RANDAO mix and produce wrong results.
 		// Note: uses epoch (from slot), not target.Epoch, so malformed messages
@@ -322,6 +323,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			return fmt.Errorf("%w: %w", ErrIgnore, ErrAggregatorAlreadyKnown)
 		}
 
+		otherShuffling = shufflingDiffersFromHead(a.forkchoiceStore, a.beaconCfg, headRoot, aggregateData.BeaconBlockRoot, target.Epoch)
 		committee, err := headState.GetBeaconCommitee(slot, committeeIndex)
 		if err != nil {
 			return err
@@ -341,7 +343,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 
 		// [REJECT] The aggregator's validator index is within the committee -- i.e. aggregate_and_proof.aggregator_index in get_beacon_committee(state, aggregate.data.slot, index).
 		if !slices.Contains(committee, aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex) {
-			return errors.New("committee index not in committee")
+			return rejectWithoutBanIf(errors.New("committee index not in committee"), otherShuffling)
 		}
 		// [REJECT] The aggregate attestation's target block is an ancestor of the block named in the LMD vote -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, aggregate.data.target.epoch) == aggregate.data.target.root
 		if a.forkchoiceStore.Ancestor(
@@ -405,13 +407,15 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		a.seenAggreatorIndexes.ContainsOrAdd(seenIndex, aggregateRoot)
 	}
 	// for this specific request, collect data for potential peer banning or gossip publishing
-	aggregateVerificationData.SendingPeer = aggregateAndProof.Receiver
+	if !otherShuffling {
+		aggregateVerificationData.SendingPeer = aggregateAndProof.Receiver
+	}
 
 	if aggregateAndProof.ImmediateProcess {
 		return a.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
 	}
 
-	return a.batchSignatureVerifier.VerifyAggregateProof(ctx, aggregateVerificationData)
+	return rejectWithoutBanIf(a.batchSignatureVerifier.VerifyAggregateProof(ctx, aggregateVerificationData), otherShuffling)
 }
 
 func GetSignaturesOnAggregate(

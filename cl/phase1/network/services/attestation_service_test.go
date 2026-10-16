@@ -18,7 +18,10 @@ package services
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
+	"slices"
 	"testing"
 	"time"
 
@@ -37,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	serviceintf "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	mockCommittee "github.com/erigontech/erigon/cl/validator/committee_subscription/mock_services"
@@ -780,6 +784,271 @@ func (t *attestationTestSuite) TestAttestationProcessMessageRejectsBeyondNextEpo
 
 	t.Require().Error(err)
 	t.Require().Contains(err.Error(), "too far from attestation epoch")
+}
+
+func (t *attestationTestSuite) TestAttestationHeadCommitteeRejectionBanDependsOnShuffling() {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+
+	var headState *state.CachingBeaconState
+	t.Require().NoError(t.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
+		headState = s
+		return nil
+	}))
+	committee, err := headState.GetBeaconCommitee(mockSlot, 0)
+	t.Require().NoError(err)
+	var outsider uint64
+	activeValidators := headState.GetActiveValidatorsIndices(mockEpoch)
+	for _, validatorIndex := range activeValidators {
+		if !slices.Contains(committee, validatorIndex) {
+			outsider = validatorIndex
+			break
+		}
+	}
+	t.Require().Contains(activeValidators, outsider)
+	t.Require().NotContains(committee, outsider)
+
+	computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 { return 8 }
+	computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 { return 1 }
+	t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).AnyTimes()
+	t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).AnyTimes()
+	verifier := NewBatchSignatureVerifier(context.Background(), nil)
+	t.attService = NewAttestationService(
+		context.Background(),
+		t.mockForkChoice,
+		t.committeeSubscibe,
+		t.ethClock,
+		t.syncedData,
+		&cfg,
+		&clparams.NetworkConfig{},
+		beaconevents.NewEventEmitter(),
+		verifier,
+	)
+
+	headRoot := t.syncedData.HeadRoot()
+	votedRoot := common.Hash{0xc1}
+	t.mockForkChoice.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{
+		votedRoot: {Slot: mockSlot},
+	}
+	dependentSlot := forkchoice.ComputeShufflingDependentSlot(mockEpoch, cfg.MinSeedLookahead, cfg.SlotsPerEpoch)
+	for _, test := range []struct {
+		name           string
+		otherShuffling bool
+	}{
+		{name: "other shuffling", otherShuffling: true},
+		{name: "same shuffling"},
+	} {
+		t.Run(test.name, func() {
+			headDependentRoot := common.Hash{0xd1}
+			votedDependentRoot := headDependentRoot
+			if test.otherShuffling {
+				votedDependentRoot = common.Hash{0xd2}
+			}
+			t.mockForkChoice.AncestorFn = func(root common.Hash, slot uint64) forkchoice.ForkChoiceNode {
+				if slot != dependentSlot {
+					return forkchoice.ForkChoiceNode{}
+				}
+				if root == headRoot {
+					return forkchoice.ForkChoiceNode{Root: headDependentRoot}
+				}
+				return forkchoice.ForkChoiceNode{Root: votedDependentRoot}
+			}
+			attestation := &AttestationForGossip{
+				SingleAttestation: &solid.SingleAttestation{
+					CommitteeIndex: 0,
+					AttesterIndex:  outsider,
+					Data: &solid.AttestationData{
+						Slot:            mockSlot,
+						BeaconBlockRoot: votedRoot,
+						Source:          attData.Source,
+						Target:          attData.Target,
+					},
+				},
+			}
+
+			err := t.attService.ProcessMessage(context.Background(), common.NewUint64(1), attestation)
+
+			t.Require().EqualError(err, fmt.Sprintf("attester is not a member of the committee. attester index %d committeeIndex %v", outsider, uint64(0)))
+			t.Require().Equal(test.otherShuffling, errors.Is(err, serviceintf.ErrRejectWithoutBan))
+		})
+	}
+}
+
+func (t *attestationTestSuite) TestAttestationInvalidSignatureBanDependsOnShufflingBeforeElectra() {
+	computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 { return 8 }
+	computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 { return 1 }
+	t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).AnyTimes()
+	t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).AnyTimes()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.T().Cleanup(cancel)
+	verifier := NewBatchSignatureVerifier(ctx, nil)
+	cfg := clparams.MainnetBeaconConfig
+	t.attService = NewAttestationService(
+		ctx,
+		t.mockForkChoice,
+		t.committeeSubscibe,
+		t.ethClock,
+		t.syncedData,
+		&cfg,
+		&clparams.NetworkConfig{},
+		beaconevents.NewEventEmitter(),
+		verifier,
+	)
+
+	otherData := *attData
+	sameData := *attData
+	otherData.BeaconBlockRoot = common.Hash{0xe3}
+	sameData.BeaconBlockRoot = common.Hash{0xe4}
+	otherAttestation := *att
+	sameAttestation := *att
+	otherAttestation.Data = &otherData
+	sameAttestation.Data = &sameData
+	headRoot := t.syncedData.HeadRoot()
+	finalized := solid.Checkpoint{Root: common.Hash{0x01}, Epoch: 1}
+	t.mockForkChoice.FinalizedCheckpointVal = finalized
+	t.mockForkChoice.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{
+		otherData.BeaconBlockRoot: {Slot: mockSlot},
+		sameData.BeaconBlockRoot:  {Slot: mockSlot},
+	}
+	dependentSlot := forkchoice.ComputeShufflingDependentSlot(mockEpoch, cfg.MinSeedLookahead, cfg.SlotsPerEpoch)
+	headDependentRoot := common.Hash{0xf2}
+	t.mockForkChoice.AncestorFn = func(root common.Hash, slot uint64) forkchoice.ForkChoiceNode {
+		switch slot {
+		case dependentSlot:
+			if root == otherData.BeaconBlockRoot {
+				return forkchoice.ForkChoiceNode{Root: common.Hash{0xf3}}
+			}
+			if root == headRoot || root == sameData.BeaconBlockRoot {
+				return forkchoice.ForkChoiceNode{Root: headDependentRoot}
+			}
+			return forkchoice.ForkChoiceNode{}
+		case finalized.Epoch * cfg.SlotsPerEpoch:
+			return forkchoice.ForkChoiceNode{Root: finalized.Root}
+		case otherData.Target.Epoch * cfg.SlotsPerEpoch:
+			return forkchoice.ForkChoiceNode{Root: otherData.Target.Root}
+		default:
+			return forkchoice.ForkChoiceNode{}
+		}
+	}
+
+	for _, test := range []struct {
+		name                 string
+		attestation          *solid.Attestation
+		rejectWithoutPeerBan bool
+		wantSendingPeer      bool
+	}{
+		{name: "other shuffling", attestation: &otherAttestation, rejectWithoutPeerBan: true},
+		{name: "same shuffling", attestation: &sameAttestation, wantSendingPeer: true},
+	} {
+		t.Run(test.name, func() {
+			message := &AttestationForGossip{
+				Attestation: test.attestation,
+				Receiver:    &sentinelproto.Peer{Pid: test.name},
+			}
+			verification, result := captureQueuedVerification(t.T(), verifier.attVerifyAndExecute, func(ctx context.Context) error {
+				return t.attService.ProcessMessage(ctx, common.NewUint64(1), message)
+			})
+			if test.wantSendingPeer {
+				t.Require().Same(message.Receiver, verification.SendingPeer)
+			} else {
+				t.Require().Nil(verification.SendingPeer)
+			}
+			t.Require().True(verification.report(ErrInvalidBlsSignature))
+			err := <-result
+
+			t.Require().True(errors.Is(err, ErrInvalidBlsSignature))
+			t.Require().Equal(test.rejectWithoutPeerBan, errors.Is(err, serviceintf.ErrRejectWithoutBan))
+			t.Require().EqualError(err, ErrInvalidBlsSignature.Error())
+		})
+	}
+}
+
+func (t *attestationTestSuite) TestAttestationInvalidSignatureStillBansAfterElectra() {
+	computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 { return 8 }
+	computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 { return 1 }
+	t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).AnyTimes()
+	t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).AnyTimes()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.T().Cleanup(cancel)
+	verifier := NewBatchSignatureVerifier(ctx, nil)
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	t.attService = NewAttestationService(
+		ctx,
+		t.mockForkChoice,
+		t.committeeSubscibe,
+		t.ethClock,
+		t.syncedData,
+		&cfg,
+		&clparams.NetworkConfig{},
+		beaconevents.NewEventEmitter(),
+		verifier,
+	)
+
+	var headState *state.CachingBeaconState
+	t.Require().NoError(t.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
+		headState = s
+		return nil
+	}))
+	committee, err := headState.GetBeaconCommitee(mockSlot, 0)
+	t.Require().NoError(err)
+	t.Require().NotEmpty(committee)
+	headRoot := t.syncedData.HeadRoot()
+	votedRoot := common.Hash{0xe5}
+	finalized := solid.Checkpoint{Root: common.Hash{0x01}, Epoch: 1}
+	t.mockForkChoice.FinalizedCheckpointVal = finalized
+	t.mockForkChoice.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{
+		votedRoot: {Slot: mockSlot},
+	}
+	dependentSlot := forkchoice.ComputeShufflingDependentSlot(mockEpoch, cfg.MinSeedLookahead, cfg.SlotsPerEpoch)
+	t.mockForkChoice.AncestorFn = func(root common.Hash, slot uint64) forkchoice.ForkChoiceNode {
+		switch slot {
+		case dependentSlot:
+			if root == headRoot {
+				return forkchoice.ForkChoiceNode{Root: common.Hash{0xf4}}
+			}
+			return forkchoice.ForkChoiceNode{Root: common.Hash{0xf5}}
+		case finalized.Epoch * cfg.SlotsPerEpoch:
+			return forkchoice.ForkChoiceNode{Root: finalized.Root}
+		case mockEpoch * cfg.SlotsPerEpoch:
+			return forkchoice.ForkChoiceNode{Root: attData.Target.Root}
+		default:
+			return forkchoice.ForkChoiceNode{}
+		}
+	}
+	message := &AttestationForGossip{
+		SingleAttestation: &solid.SingleAttestation{
+			CommitteeIndex: 0,
+			AttesterIndex:  committee[0],
+			Data: &solid.AttestationData{
+				Slot:            mockSlot,
+				BeaconBlockRoot: votedRoot,
+				Source:          attData.Source,
+				Target:          attData.Target,
+			},
+		},
+		Receiver: &sentinelproto.Peer{Pid: "electra-other-shuffling"},
+	}
+
+	verification, result := captureQueuedVerification(t.T(), verifier.attVerifyAndExecute, func(ctx context.Context) error {
+		return t.attService.ProcessMessage(ctx, common.NewUint64(1), message)
+	})
+	t.Require().Same(message.Receiver, verification.SendingPeer)
+	t.Require().True(verification.report(ErrInvalidBlsSignature))
+	err = <-result
+	t.Require().True(errors.Is(err, ErrInvalidBlsSignature))
+	t.Require().False(errors.Is(err, serviceintf.ErrRejectWithoutBan))
+	t.Require().EqualError(err, ErrInvalidBlsSignature.Error())
 }
 
 func (t *attestationTestSuite) TestGloasAttestationIndexValidation() {
