@@ -167,6 +167,7 @@ func (opts MdbxOpts) PollerSyncPeriod(period time.Duration) MdbxOpts {
 	opts.pollerSyncPeriod = period
 	return opts
 }
+
 func (opts MdbxOpts) SyncInCommitIfUnsyncedFor(d time.Duration) MdbxOpts {
 	opts.syncInCommitIfUnsyncedFor = d
 	return opts
