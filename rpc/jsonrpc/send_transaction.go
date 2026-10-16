@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
@@ -114,10 +115,14 @@ func (api *APIImpl) waitForReceipt(ctx context.Context, hash common.Hash, timeou
 		TransactionHashes: []common.Hash{hash},
 	}
 	receiptsCh, id, err := api.filters.SubscribeReceipts(128, criteria)
-	if err != nil {
+	switch {
+	case err == nil:
+		defer api.filters.UnsubscribeReceipts(id)
+	case errors.Is(err, rpchelper.ErrTooManySubscriptions):
+		// The poll below carries the wait on its own; the nil channel never fires.
+	default:
 		return nil, err
 	}
-	defer api.filters.UnsubscribeReceipts(id)
 
 	// The filter update reaches the server asynchronously and without an ack, so a receipt produced before it
 	// lands is never delivered on the channel. Look the receipt up periodically to cover that window.

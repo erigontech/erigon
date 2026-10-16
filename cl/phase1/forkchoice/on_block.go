@@ -317,7 +317,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 				if err := f.optimisticStore.InvalidateBlock(blockRoot, block.Block); err != nil {
 					return fmt.Errorf("failed to remove block from optimistic store: %w", err)
 				}
-				return errors.New("block is invalid")
+				return invalidBlockError(errors.New("block is invalid"))
 			}
 			if block.Version() >= clparams.DenebVersion {
 				if err := verifyKzgCommitmentsAgainstTransactions(f.beaconCfg, block.Block); err != nil {
@@ -360,7 +360,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 					requestsHash = cltypes.ComputeExecutionRequestHash(executionRequestsList)
 				}
 				if _, hashErr := block.Block.Body.ExecutionPayload.RlpHeader(&block.Block.ParentRoot, requestsHash, nil); hashErr != nil {
-					return fmt.Errorf("OnBlock: invalid execution payload hash: %w", hashErr)
+					return invalidBlockError(fmt.Errorf("OnBlock: invalid execution payload hash: %w", hashErr))
 				}
 			}
 
@@ -369,7 +369,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 				if cleanupErr := f.optimisticStore.InvalidateBlock(blockRoot, block.Block); cleanupErr != nil {
 					return fmt.Errorf("failed to remove block from optimistic store: %w", cleanupErr)
 				}
-				return err
+				return invalidBlockError(err)
 			}
 			payloadStatus = f.markPayloadStatusLocked(blockRoot, executionBlockHash, payloadStatus)
 			f.executionPayloadGasLimit.Add(executionBlockHash, block.Block.Body.ExecutionPayload.GasLimit)
@@ -936,7 +936,7 @@ func (f *ForkChoiceStore) retryPendingEnvelopeError(err error, pending *cltypes.
 	if pending.Message == nil || pending.Message.Payload == nil {
 		return false
 	}
-	ageBounded := errors.Is(err, errPendingEnvelopeAgeBounded) || errors.Is(err, errPayloadValidationAdmission) || errors.Is(err, ErrIgnore) || errors.Is(err, ErrEIP7594ColumnDataNotAvailable)
+	ageBounded := errors.Is(err, errPendingEnvelopeAgeBounded) || errors.Is(err, ErrPayloadValidationInterrupted) || errors.Is(err, ErrIgnore) || errors.Is(err, ErrEIP7594ColumnDataNotAvailable)
 	if !ageBounded {
 		return true
 	}

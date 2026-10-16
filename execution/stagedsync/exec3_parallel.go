@@ -2119,6 +2119,7 @@ func (result *execResult) calcFees(
 	// own prior incarnations that would double-apply the tip on re-execution.
 	// Worker writes for the current tx are picked up below via TxOut.
 	vsReader := state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader)
+	vsReader.SetEIP8246(chainRules.IsAmsterdam)
 
 	coinbaseAcc, err := vsReader.ReadAccountData(result.Coinbase)
 	if err != nil {
@@ -2132,6 +2133,13 @@ func (result *execResult) calcFees(
 	// A burnt write can only differ from the pre-state when London adds a
 	// non-zero FeeBurnt, so skip the whole read otherwise.
 	hasBurnt := !burntAddr.IsNil() && chainRules.IsLondon && !result.ExecutionResult.FeeBurnt.IsZero()
+	coinbaseFee := result.ExecutionResult.FeeTipped
+	burntIsCoinbase := burntAddr == result.Coinbase
+	// Two entries for one account would overwrite each other, so a single entry carries both fees.
+	if hasBurnt && burntIsCoinbase {
+		coinbaseFee.Add(&coinbaseFee, &result.ExecutionResult.FeeBurnt)
+		hasBurnt = false
+	}
 	var newBurntBalance uint256.Int
 	var burntAcc *accounts.Account
 	if hasBurnt {
@@ -2183,7 +2191,7 @@ func (result *execResult) calcFees(
 	coinbaseWasContract := !coinbaseEmptyCodeHash || coinbaseHasCodeHashWrite || coinbaseCreatedContract
 	burnCoinbaseTip := !chainRules.IsAmsterdam && coinbaseSelfdestructed && coinbaseWasContract
 	if !burnCoinbaseTip {
-		newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
+		newCoinbaseBalance.Add(&newCoinbaseBalance, &coinbaseFee)
 	}
 	oldBurntBalance := newBurntBalance
 	if hasBurnt {
@@ -2235,7 +2243,7 @@ func (result *execResult) calcFees(
 	// The credit only moves when a prior tx's writes moved under it, so most
 	// rounds would rebuild the set the tx already carries.
 	if coinbaseEntry.shapeRecordedIn(credited, taskVersion, result.Coinbase) &&
-		burntEntry.shapeRecordedIn(credited, taskVersion, burntAddr) {
+		(burntIsCoinbase || burntEntry.shapeRecordedIn(credited, taskVersion, burntAddr)) {
 		return nil, feeCreditRecorded, nil
 	}
 
@@ -2600,8 +2608,8 @@ type blockExecutor struct {
 	applyCount  int
 	exhausted   *ErrLoopExhausted
 
-	// blockStateCache provides a stable pre-block snapshot of account data
-	// for GetCommittedState reads, unaffected by intra-block ApplyStateWrites.
+	// blockStateCache buffers the block's applied writes for the exec loop's state
+	// readers until Flush writes them to the domains; workers use a separate cache.
 	blockStateCache *state.BlockStateCache
 }
 
@@ -3228,6 +3236,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						return nil, fmt.Errorf("[parallel] normalize block writes: %w", normErr)
 					}
 					txResult.writes = normWrites
+					// Later txs in toValidate read the block cache through stateReader and
+					// must see normWrites, which can hold an EIP-161 removal the version map lacks.
+					if err := pe.rs.ApplyStateWrites(ctx, applyTx, be.number(), txTask.Version().TxNum, normWrites,
+						nil, txTask.Rules(), be.blockStateCache); err != nil {
+						return nil, fmt.Errorf("[parallel] apply block writes: %w", err)
+					}
 				}
 
 				// Snapshot the finalized result before pushing — prevents
@@ -3324,12 +3338,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if result.writes != nil {
 				applyResult.writes = result.writes
 				be.applyCount += applyResult.writes.Count()
-			}
-
-			// Apply state writes to sd.mem and block cache.
-			if err := pe.rs.ApplyStateWrites(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
-				nil, applyResult.rules, be.blockStateCache); err != nil {
-				return nil, err
 			}
 
 			// Apply per-tx indexes (logs, traces, receipt cache) here in the

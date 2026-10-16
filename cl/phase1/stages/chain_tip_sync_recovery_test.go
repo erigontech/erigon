@@ -48,10 +48,10 @@ func (v *orderedPayloadValidator) NewPayloadWithAdmission(ctx context.Context, p
 	v.calls = append(v.calls, payload.BlockHash)
 	if payload.BlockHash == v.slow {
 		<-ctx.Done()
-		return execution_client.PayloadStatusNone, ctx.Err()
+		return admitted(ctx)(execution_client.PayloadStatusNone, ctx.Err())
 	}
 	if err := ctx.Err(); err != nil {
-		return execution_client.PayloadStatusNone, err
+		return admitted(ctx)(execution_client.PayloadStatusNone, err)
 	}
 	return execution_client.PayloadStatusNotValidated, nil
 }
@@ -75,6 +75,7 @@ type chainTipBatchForkGraph struct {
 	envelopes   map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	added       map[common.Hash]int
 	insertOnAdd bool
+	envReads    map[common.Hash]int
 }
 
 type chainTipBatchEnvelopeSentinel struct {
@@ -144,8 +145,12 @@ func (g *chainTipBatchForkGraph) HasEnvelope(root common.Hash) bool {
 }
 
 func (g *chainTipBatchForkGraph) ReadEnvelopeFromDisk(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
-	g.envelopesMu.RLock()
-	defer g.envelopesMu.RUnlock()
+	g.envelopesMu.Lock()
+	defer g.envelopesMu.Unlock()
+	if g.envReads == nil {
+		g.envReads = map[common.Hash]int{}
+	}
+	g.envReads[root]++
 	if envelope, ok := g.envelopes[root]; ok {
 		return envelope, nil
 	}
@@ -332,6 +337,37 @@ func TestChainTipSyncVerifiesStoredGloasPayloadWhileBehind(t *testing.T) {
 	require.True(t, cfg.forkChoice.IsPayloadVerified(headRoot))
 }
 
+func TestForwardSyncReplayMakesGloasPayloadAvailableForHeadSelection(t *testing.T) {
+	cfg, graph, parentRoot, fullChild, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	engine.supportInsertion = true
+	parent := graph.parents[parentRoot]
+	envelope := graph.envelopes[parentRoot]
+	delete(graph.parents, parentRoot)
+	delete(graph.envelopes, parentRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), parent, false, false, false))
+	require.NoError(t, processDownloadedGloasEnvelope(
+		t.Context(),
+		log.Root(),
+		cfg.forkChoice,
+		&gloasCollectorTest{},
+		parent.Block,
+		parentRoot,
+		envelope,
+		true,
+		shouldValidateForwardSyncPayload(cfg, true),
+	))
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), fullChild, false, false, false))
+	fullChildRoot, err := fullChild.Block.HashSSZ()
+	require.NoError(t, err)
+
+	selectedRoot, _, err := cfg.forkChoice.GetHead(nil)
+	require.NoError(t, err)
+	require.Equal(t, common.Hash(fullChildRoot), selectedRoot)
+	require.Zero(t, engine.newPayloadCalls)
+	require.False(t, cfg.forkChoice.IsPayloadVerified(parentRoot))
+}
+
 func TestChainTipSyncDoesNotVerifyStoredGloasPayloadWhileExecutionEngineIsBusy(t *testing.T) {
 	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
 	headBlock := graph.parents[headRoot]
@@ -360,6 +396,8 @@ func TestVerifyUnverifiedGloasPayloadsDoesNotRecordTimeoutAsVerdict(t *testing.T
 		return execution_client.PayloadStatusNone, ctx.Err()
 	}
 	cfg.gloasVerificationCursor = headRoot
+	// Through the store's own admission, which classifies the interrupted call.
+	cfg.gloasPayloadValidator = cfg.forkChoice
 
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer cancel()
@@ -378,6 +416,176 @@ func TestVerifyUnverifiedGloasPayloadsDoesNotRecordTimeoutAsVerdict(t *testing.T
 	require.Equal(t, 2, engine.newPayloadCalls)
 	require.True(t, cfg.forkChoice.IsPayloadVerified(headRoot))
 	require.Zero(t, cfg.gloasVerificationCursor)
+}
+
+// Below the EL's validation depth the sweep still sends the payload to the EL, which inserts it, and
+// then stops at that root while it stays below the depth.
+func TestVerifyUnverifiedGloasPayloadsAsksTheELOnceBelowItsValidationDepth(t *testing.T) {
+	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	engine.payloadStatus = execution_client.PayloadStatusNotValidated
+	headBlock := graph.parents[headRoot]
+	const number = 10
+	graph.envelopes[headRoot].Message.Payload.BlockNumber = number
+	delete(graph.parents, headRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
+	cfg.gloasVerificationCursor = headRoot
+	cfg.executionClient = validationDepthEngine{testExecutionEngine: engine, below: number + 1}
+
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+
+	require.Equal(t, 1, engine.newPayloadCalls)
+	status, found := cfg.forkChoice.GetRecentExecutionPayloadStatusByRoot(headRoot)
+	require.True(t, found)
+	require.EqualValues(t, execution_client.PayloadStatusNotValidated, status)
+	require.Empty(t, cfg.forkChoice.DrainPendingELPayloads())
+	require.Contains(t, cfg.gloasSkippedValidation, headRoot)
+
+	// A later pass stops at the root without reading it again, also when the EL head cannot be read.
+	reads := graph.envReads[headRoot]
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+	cfg.executionClient = validationDepthEngine{testExecutionEngine: engine, unknown: true}
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+	require.Equal(t, reads, graph.envReads[headRoot])
+	require.Equal(t, 1, engine.newPayloadCalls)
+	require.Contains(t, cfg.gloasSkippedValidation, headRoot)
+
+	// The depth follows the EL head; once the payload is back above it, the root is checked again.
+	cfg.executionClient = validationDepthEngine{testExecutionEngine: engine, below: number}
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+	require.Equal(t, 2, engine.newPayloadCalls)
+	require.NotContains(t, cfg.gloasSkippedValidation, headRoot)
+}
+
+// Only the EL's own NotValidated answer is final below the depth. An error answer for a root already
+// recorded NotValidated keeps that status, but the payload is requeued and checked again.
+func TestVerifyUnverifiedGloasPayloadsRetriesAnErrorBelowTheELValidationDepth(t *testing.T) {
+	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	engine.newPayloadFn = func(context.Context, *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
+		return execution_client.PayloadStatusNone, errors.New("insert failed")
+	}
+	headBlock := graph.parents[headRoot]
+	payload := graph.envelopes[headRoot].Message.Payload
+	const number = 10
+	payload.BlockNumber = number
+	delete(graph.parents, headRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
+	cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(headRoot, payload.BlockHash, execution_client.PayloadStatusNotValidated, payload.GasLimit)
+	cfg.gloasVerificationCursor = headRoot
+	cfg.executionClient = validationDepthEngine{testExecutionEngine: engine, below: number + 1}
+
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+
+	require.Equal(t, 2, engine.newPayloadCalls)
+	require.NotContains(t, cfg.gloasSkippedValidation, headRoot)
+	require.NotEmpty(t, cfg.forkChoice.DrainPendingELPayloads())
+}
+
+// An EL head at the first blocks validates every block: a known zero depth checks a remembered root
+// again, where an unreadable head keeps it.
+func TestVerifyUnverifiedGloasPayloadsChecksARememberedRootAtAKnownZeroDepth(t *testing.T) {
+	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	engine.payloadStatus = execution_client.PayloadStatusNotValidated
+	headBlock := graph.parents[headRoot]
+	payload := graph.envelopes[headRoot].Message.Payload
+	delete(graph.parents, headRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
+	cfg.gloasSkippedValidation = map[common.Hash]skippedValidation{headRoot: {slot: headBlock.Block.Slot, blockNumber: payload.BlockNumber}}
+	cfg.executionClient = validationDepthEngine{testExecutionEngine: engine}
+
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+
+	require.Equal(t, 1, engine.newPayloadCalls)
+	require.NotContains(t, cfg.gloasSkippedValidation, headRoot)
+}
+
+// A selected head remembered below the depth is not sent again while the cursor walks its ancestors.
+func TestVerifyUnverifiedGloasPayloadsSkipsARememberedSelectedHead(t *testing.T) {
+	cfg, graph, parentRoot, child, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusNotValidated, false)
+	parent := graph.parents[parentRoot]
+	parentEnvelope := graph.envelopes[parentRoot]
+	delete(graph.parents, parentRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), parent, false, false, false))
+	cfg.forkChoice.MarkPayloadStatus(parentRoot, parentEnvelope.Message.Payload.BlockHash, execution_client.PayloadStatusValidated)
+	childPayloadHash := common.Hash{2}
+	child.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = childPayloadHash
+	childRoot, err := child.Block.HashSSZ()
+	require.NoError(t, err)
+	encoded, err := parentEnvelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	childEnvelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg.beaconCfg)}
+	require.NoError(t, childEnvelope.DecodeSSZ(encoded, int(clparams.GloasVersion)))
+	childEnvelope.Message.BeaconBlockRoot = childRoot
+	childEnvelope.Message.Payload.BlockHash = childPayloadHash
+	graph.envelopes[childRoot] = childEnvelope
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), child, false, false, false))
+	cfg.gloasVerificationHead = childRoot
+	cfg.executionClient = validationDepthEngine{testExecutionEngine: engine, below: 1 << 30}
+	cfg.gloasSkippedValidation = map[common.Hash]skippedValidation{childRoot: {slot: child.Block.Slot, blockNumber: childEnvelope.Message.Payload.BlockNumber}}
+
+	for range 3 {
+		cfg.gloasVerificationCursor = parentRoot
+		verifyUnverifiedGloasPayloads(t.Context(), cfg)
+	}
+
+	require.Zero(t, engine.newPayloadCalls)
+	require.Zero(t, graph.envReads[childRoot])
+}
+
+// A remembered root does not prove that its ancestors reached the EL, for example after a batch was
+// interrupted on an ancestor. The sweep skips only the remembered root and walks on.
+func TestVerifyUnverifiedGloasPayloadsWalksPastARememberedRoot(t *testing.T) {
+	cfg, graph, parentRoot, child, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusNotValidated, false)
+	parent := graph.parents[parentRoot]
+	parentEnvelope := graph.envelopes[parentRoot]
+	delete(graph.parents, parentRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), parent, false, false, false))
+	cfg.forkChoice.MarkPayloadStatus(parentRoot, parentEnvelope.Message.Payload.BlockHash, execution_client.PayloadStatusNotValidated)
+	childPayloadHash := common.Hash{2}
+	child.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = childPayloadHash
+	childRoot, err := child.Block.HashSSZ()
+	require.NoError(t, err)
+	encoded, err := parentEnvelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	childEnvelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg.beaconCfg)}
+	require.NoError(t, childEnvelope.DecodeSSZ(encoded, int(clparams.GloasVersion)))
+	childEnvelope.Message.BeaconBlockRoot = childRoot
+	childEnvelope.Message.Payload.BlockHash = childPayloadHash
+	graph.envelopes[childRoot] = childEnvelope
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), child, false, false, false))
+	selectedRoot, _, err := cfg.forkChoice.GetHead(nil)
+	require.NoError(t, err)
+	require.Equal(t, common.Hash(childRoot), selectedRoot)
+	cfg.gloasVerificationHead = childRoot
+	cfg.executionClient = validationDepthEngine{testExecutionEngine: engine, below: 1 << 30}
+	cfg.gloasSkippedValidation = map[common.Hash]skippedValidation{childRoot: {slot: child.Block.Slot, blockNumber: childEnvelope.Message.Payload.BlockNumber}}
+
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+
+	require.Equal(t, 1, engine.newPayloadCalls, "the parent reached the EL")
+	require.Equal(t, 1, graph.envReads[parentRoot])
+	require.Zero(t, graph.envReads[childRoot], "the remembered root is not read")
+}
+
+// The roots recorded below the EL's validation depth are forgotten once finalized.
+func TestVerifyUnverifiedGloasPayloadsPrunesSkippedRootsAtFinalization(t *testing.T) {
+	cfg, _, _, _, _, _ := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	finalizedSlot := cfg.forkChoice.FinalizedSlot()
+	finalized, live := common.Hash{0xf1}, common.Hash{0xf2}
+	cfg.gloasSkippedValidation = map[common.Hash]skippedValidation{
+		finalized: {slot: finalizedSlot},
+		live:      {slot: finalizedSlot + 1},
+	}
+
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+
+	require.NotContains(t, cfg.gloasSkippedValidation, finalized)
+	require.Contains(t, cfg.gloasSkippedValidation, live)
 }
 
 func TestVerifyUnverifiedGloasPayloadsChecksDirectExtensionWithEmptyCursor(t *testing.T) {
@@ -506,7 +714,7 @@ func TestChainTipBatchReplayBudgetSkipsParentsWithUsableVerdict(t *testing.T) {
 			}
 
 			seen := make(map[common.Hash]struct{})
-			processChainTipBatch(t.Context(), cfg, Args{targetSlot: childB.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{childA, childB}, seen)
+			processChainTipBatch(t.Context(), cfg, Args{targetSlot: childB.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{childA, childB}, seen, make(map[common.Hash]error))
 
 			require.Equal(t, 1, engine.newPayloadCalls)
 			require.Equal(t, graph.envelopes[parentARoot].Message.Payload.BlockHash, replayedPayload)
@@ -561,6 +769,7 @@ func TestChainTipBatchReplayBudgetStopsAtTarget(t *testing.T) {
 		Args{targetSlot: childA.Block.Slot},
 		[]*cltypes.SignedBeaconBlock{childA, childB},
 		make(map[common.Hash]struct{}),
+		make(map[common.Hash]error),
 	)
 
 	require.True(t, reachedTarget)
@@ -581,7 +790,7 @@ func TestChainTipBatchReplaysStoredParentPayload(t *testing.T) {
 		delete(graph.envelopes, parentRoot)
 		seen := make(map[common.Hash]struct{})
 
-		processChainTipBatch(t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{fullChild}, seen)
+		processChainTipBatch(t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{fullChild}, seen, make(map[common.Hash]error))
 
 		require.Equal(t, 1, sentinel.calls)
 		require.Equal(t, 1, engine.newPayloadCalls)
@@ -600,7 +809,7 @@ func TestChainTipBatchReplaysStoredParentPayload(t *testing.T) {
 		require.NoError(t, err)
 		seen := make(map[common.Hash]struct{})
 
-		reachedTarget := processChainTipBatch(t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{fullChild}, seen)
+		reachedTarget := processChainTipBatch(t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{fullChild}, seen, make(map[common.Hash]error))
 
 		require.False(t, reachedTarget)
 		require.Equal(t, 1, engine.newPayloadCalls)
@@ -617,7 +826,7 @@ func TestChainTipBatchReplaysStoredParentPayload(t *testing.T) {
 		require.NoError(t, err)
 		seen := make(map[common.Hash]struct{})
 
-		processChainTipBatch(t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{fullChild}, seen)
+		processChainTipBatch(t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{fullChild}, seen, make(map[common.Hash]error))
 
 		require.Equal(t, 1, engine.newPayloadCalls)
 		require.Zero(t, graph.added[common.Hash(fullRoot)])
@@ -643,7 +852,7 @@ func TestChainTipBatchReplaysStoredParentPayload(t *testing.T) {
 				blocks = []*cltypes.SignedBeaconBlock{emptyChild, fullChild}
 			}
 
-			processChainTipBatch(t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, blocks, seen)
+			processChainTipBatch(t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, blocks, seen, make(map[common.Hash]error))
 
 			require.Equal(t, 1, engine.newPayloadCalls)
 			require.Zero(t, graph.added[common.Hash(fullRoot)])
@@ -831,9 +1040,9 @@ func TestEnsureStoredParentPayloadAcceptedReplaysMissingVerdict(t *testing.T) {
 		gloasPayloadValidator: engine,
 	}
 
-	accepted := ensureStoredParentPayloadAccepted(t.Context(), cfg, store, root, envelope)
+	reason := ensureStoredParentPayloadAccepted(t.Context(), cfg, store, root, envelope)
 
-	require.True(t, accepted)
+	require.NoError(t, reason)
 	require.Equal(t, 1, engine.newPayloadCalls)
 	require.EqualValues(t, execution_client.PayloadStatusNotValidated, store.marked)
 	require.Equal(t, payload.GasLimit, store.markedGas)
@@ -854,9 +1063,9 @@ func TestEnsureStoredParentPayloadAcceptedRejectsInvalidVerdict(t *testing.T) {
 		block:       cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion),
 	}
 
-	accepted := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope)
+	reason := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope)
 
-	require.False(t, accepted)
+	require.Error(t, reason)
 	require.Empty(t, store.requeued)
 }
 
@@ -876,9 +1085,9 @@ func TestEnsureStoredParentPayloadAcceptedRestoresGasLimitForKnownVerdict(t *tes
 		markRetained: true,
 	}
 
-	accepted := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope)
+	reason := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope)
 
-	require.True(t, accepted)
+	require.NoError(t, reason)
 	require.Equal(t, payload.GasLimit, store.markedGas)
 }
 
@@ -895,9 +1104,9 @@ func TestEnsureStoredParentPayloadAcceptedWithoutExecutionClient(t *testing.T) {
 		markRetained: true,
 	}
 
-	accepted := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope)
+	reason := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope)
 
-	require.True(t, accepted)
+	require.NoError(t, reason)
 	require.EqualValues(t, execution_client.PayloadStatusNotValidated, store.marked)
 	require.Empty(t, store.requeued)
 }
@@ -916,7 +1125,7 @@ func TestStoredParentPayloadReplaySharesBudgetAndCachesResult(t *testing.T) {
 	}
 	replay := storedParentPayloadReplay{
 		deadline: time.Now().Add(10 * time.Millisecond),
-		results:  make(map[common.Hash]bool),
+		results:  make(map[common.Hash]error),
 	}
 	engine := &testExecutionEngine{}
 	engine.newPayloadFn = func(ctx context.Context, _ *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
@@ -929,11 +1138,8 @@ func TestStoredParentPayloadReplaySharesBudgetAndCachesResult(t *testing.T) {
 		gloasPayloadValidator: engine,
 	}
 
-	accepted := replay.accepted(t.Context(), cfg, store, root, envelope, forkchoice.ErrIgnore)
-	replayed := replay.accepted(t.Context(), cfg, store, root, envelope, forkchoice.ErrIgnore)
-
-	require.False(t, accepted)
-	require.False(t, replayed)
+	require.Error(t, replay.rejection(t.Context(), cfg, store, root, envelope, forkchoice.ErrIgnore))
+	require.Error(t, replay.rejection(t.Context(), cfg, store, root, envelope, forkchoice.ErrIgnore))
 	require.Equal(t, 1, engine.newPayloadCalls)
 }
 
@@ -951,7 +1157,7 @@ func TestStoredParentPayloadReplayReservesBudgetForLaterRoots(t *testing.T) {
 	replay := storedParentPayloadReplay{
 		deadline:  time.Now().Add(100 * time.Millisecond),
 		remaining: 2,
-		results:   make(map[common.Hash]bool),
+		results:   make(map[common.Hash]error),
 	}
 	cfg := &Cfg{
 		beaconCfg:             &clparams.MainnetBeaconConfig,
@@ -959,11 +1165,11 @@ func TestStoredParentPayloadReplayReservesBudgetForLaterRoots(t *testing.T) {
 		gloasPayloadValidator: validator,
 	}
 
-	require.False(t, replay.accepted(t.Context(), cfg, firstStore, firstRoot, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+	require.Error(t, replay.rejection(t.Context(), cfg, firstStore, firstRoot, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
 		BeaconBlockRoot: firstRoot,
 		Payload:         firstPayload,
 	}}, nil))
-	require.True(t, replay.accepted(t.Context(), cfg, secondStore, secondRoot, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+	require.NoError(t, replay.rejection(t.Context(), cfg, secondStore, secondRoot, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
 		BeaconBlockRoot: secondRoot,
 		Payload:         secondPayload,
 	}}, nil))
@@ -973,9 +1179,9 @@ func TestStoredParentPayloadReplayReservesBudgetForLaterRoots(t *testing.T) {
 func TestStoredParentPayloadReplayRejectsApplyFailure(t *testing.T) {
 	root := common.Hash{1}
 	store := &storedParentPayloadTestStore{has: true, markRetained: true}
-	replay := storedParentPayloadReplay{deadline: time.Now(), remaining: 1, results: make(map[common.Hash]bool)}
+	replay := storedParentPayloadReplay{deadline: time.Now(), remaining: 1, results: make(map[common.Hash]error)}
 
-	accepted := replay.accepted(
+	reason := replay.rejection(
 		t.Context(),
 		&Cfg{},
 		store,
@@ -987,7 +1193,7 @@ func TestStoredParentPayloadReplayRejectsApplyFailure(t *testing.T) {
 		forkchoice.ErrInvalidExecutionPayloadEnvelope,
 	)
 
-	require.False(t, accepted)
+	require.ErrorIs(t, reason, forkchoice.ErrInvalidExecutionPayloadEnvelope)
 	require.EqualValues(t, execution_client.PayloadStatusNone, store.marked)
 	require.Zero(t, replay.remaining)
 }
@@ -1018,10 +1224,10 @@ func TestStoredParentPayloadReplayWithoutVerdictKeepsStatus(t *testing.T) {
 			budget:    gloasPayloadRetryBudget,
 			deadline:  time.Now().Add(-time.Millisecond),
 			remaining: 1,
-			results:   make(map[common.Hash]bool),
+			results:   make(map[common.Hash]error),
 		}
 
-		require.False(t, replay.accepted(t.Context(), cfg, store, root, envelope, forkchoice.ErrIgnore))
+		require.Error(t, replay.rejection(t.Context(), cfg, store, root, envelope, forkchoice.ErrIgnore))
 		require.Zero(t, engine.newPayloadCalls)
 		require.Equal(t, unchanged, store.marked)
 		require.Empty(t, store.requeued)
@@ -1029,17 +1235,150 @@ func TestStoredParentPayloadReplayWithoutVerdictKeepsStatus(t *testing.T) {
 
 	t.Run("deadline during validation", func(t *testing.T) {
 		store := newStore()
-		engine := &testExecutionEngine{newPayloadFn: func(ctx context.Context, _ *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
+		// The EL call goes through a real store's admission, which classifies the interrupted call.
+		fixture, _, _, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+		engine.newPayloadFn = func(ctx context.Context, _ *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
 			<-ctx.Done()
 			return execution_client.PayloadStatusNone, ctx.Err()
-		}}
-		cfg := &Cfg{beaconCfg: &clparams.MainnetBeaconConfig, executionClient: engine, gloasPayloadValidator: engine}
+		}
+		cfg := &Cfg{beaconCfg: &clparams.MainnetBeaconConfig, executionClient: engine, gloasPayloadValidator: fixture.forkChoice}
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
 		defer cancel()
 
-		require.False(t, ensureStoredParentPayloadAccepted(ctx, cfg, store, root, envelope))
+		require.Error(t, ensureStoredParentPayloadAccepted(ctx, cfg, store, root, envelope))
 		require.Equal(t, 1, engine.newPayloadCalls)
 		require.Equal(t, unchanged, store.marked)
 		require.Empty(t, store.requeued)
 	})
+}
+
+// A stored parent below the EL's validation depth is sent to the EL, which inserts it, and is not
+// requeued after its NotValidated answer.
+func TestEnsureStoredParentPayloadAcceptedDoesNotRequeueBelowTheELValidationDepth(t *testing.T) {
+	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	engine.payloadStatus = execution_client.PayloadStatusNotValidated
+	envelope := graph.envelopes[headRoot]
+	const number = 10
+	envelope.Message.Payload.BlockNumber = number
+	for _, tc := range []struct {
+		name     string
+		below    uint64
+		requeued bool
+	}{
+		{name: "below the depth", below: number + 1},
+		{name: "at the depth", below: number, requeued: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &storedParentPayloadTestStore{has: true, block: graph.parents[headRoot], markRetained: true}
+			calls := engine.newPayloadCalls
+			cfg.executionClient = validationDepthEngine{testExecutionEngine: engine, below: tc.below}
+
+			require.NoError(t, ensureStoredParentPayloadAccepted(t.Context(), cfg, store, headRoot, envelope))
+			require.Equal(t, calls+1, engine.newPayloadCalls)
+			require.EqualValues(t, execution_client.PayloadStatusNotValidated, store.marked)
+			require.Equal(t, tc.requeued, len(store.requeued) == 1)
+		})
+	}
+}
+
+// The cause of a rejected block is passed on to the descendants that cannot attach, across
+// batches of one run, instead of a bare missing parent.
+func TestChainTipBatchPassesARejectionToDescendants(t *testing.T) {
+	cfg, _, _, fullChild, _, _ := newChainTipBatchFixture(t, execution_client.PayloadStatusInvalidated)
+	fullRoot, err := fullChild.Block.HashSSZ()
+	require.NoError(t, err)
+	// Each descendant builds on the EMPTY variant, so no parent envelope is fetched for it.
+	child := func(parent *cltypes.SignedBeaconBlock) (*cltypes.SignedBeaconBlock, common.Hash) {
+		parentRoot, err := parent.Block.HashSSZ()
+		require.NoError(t, err)
+		block := cltypes.NewSignedBeaconBlock(cfg.beaconCfg, clparams.GloasVersion)
+		block.Block.Slot = parent.Block.Slot + 1
+		block.Block.ParentRoot = parentRoot
+		block.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = parent.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		return block, root
+	}
+	grandchild, grandchildRoot := child(fullChild)
+	greatGrandchild, greatGrandchildRoot := child(grandchild)
+	seen := make(map[common.Hash]struct{})
+	rejected := make(map[common.Hash]error)
+	args := Args{targetSlot: greatGrandchild.Block.Slot + 1}
+	// A recent summary keeps the rejections aggregated, so the recorded labels can be read.
+	cfg.chainTipRejections = newChainTipRejections(time.Hour, nil)
+	cfg.chainTipRejections.lastLog = time.Now()
+
+	processChainTipBatch(t.Context(), cfg, args, []*cltypes.SignedBeaconBlock{fullChild, grandchild}, seen, rejected)
+	reason := rejected[common.Hash(fullRoot)]
+	require.ErrorContains(t, reason, "parent payload invalid")
+	require.Equal(t, reason, rejected[grandchildRoot])
+
+	processChainTipBatch(t.Context(), cfg, args, []*cltypes.SignedBeaconBlock{greatGrandchild}, seen, rejected)
+	require.Equal(t, reason, rejected[greatGrandchildRoot])
+
+	replay := cfg.chainTipRejections.reasons["parent payload not accepted"]
+	require.NotNil(t, replay)
+	require.Equal(t, common.Hash(fullRoot), replay.lastErrRoot)
+	missing := cfg.chainTipRejections.reasons["parent not in fork graph"]
+	require.NotNil(t, missing)
+	require.Equal(t, 2, missing.attempts)
+	require.Equal(t, greatGrandchildRoot, missing.lastRoot)
+	require.ErrorIs(t, missing.lastErr, reason)
+}
+
+// A parent envelope that no peer serves stalls the batch until its deadline; the child is reported
+// under the missing envelope, not under the deadline that ended its processing.
+func TestChainTipBatchReportsAParentEnvelopeNoPeerServes(t *testing.T) {
+	cfg, graph, parentRoot, fullChild, _, _ := newChainTipBatchFixture(t, execution_client.PayloadStatusNone)
+	fullRoot, err := fullChild.Block.HashSSZ()
+	require.NoError(t, err)
+	delete(graph.envelopes, parentRoot)
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg.beaconCfg)
+	cfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), &chainTipBatchEnvelopeSentinel{}, cfg.beaconCfg, clock, nil)
+	cfg.chainTipRejections = newChainTipRejections(time.Hour, nil)
+	cfg.chainTipRejections.lastLog = time.Now()
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+	rejected := make(map[common.Hash]error)
+
+	processChainTipBatch(ctx, cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{fullChild}, make(map[common.Hash]struct{}), rejected)
+
+	require.ErrorIs(t, rejected[common.Hash(fullRoot)], errParentEnvelopeUnavailable)
+	require.Contains(t, cfg.chainTipRejections.reasons, errParentEnvelopeUnavailable.Error())
+	require.NotContains(t, cfg.chainTipRejections.reasons, "process block failed")
+}
+
+func TestChainTipSyncFlushesCollectorWithStageContext(t *testing.T) {
+	cfg, _, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	engine.supportInsertion = true
+	collector := &gloasCollectorTest{}
+	cfg.blockCollector = collector
+	header, ok := cfg.forkChoice.GetHeader(headRoot)
+	require.True(t, ok)
+	targetSlot := header.Slot + 1
+
+	ctx, cancel := context.WithCancel(t.Context())
+	_ = chainTipSync(ctx, log.Root(), cfg, Args{seenSlot: targetSlot, targetSlot: targetSlot})
+	cancel()
+
+	require.Equal(t, 1, collector.flushCalls)
+	require.Error(t, collector.flushCtx.Err(), "the flush must stop with the stage context")
+}
+
+// A stop that lands before the flush skips it: the first engine call of a flush panics on the
+// embedded EL when the context is already cancelled.
+func TestChainTipSyncSkipsFlushWhenStopped(t *testing.T) {
+	cfg, _, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	engine.supportInsertion = true
+	collector := &gloasCollectorTest{}
+	cfg.blockCollector = collector
+	header, ok := cfg.forkChoice.GetHeader(headRoot)
+	require.True(t, ok)
+	targetSlot := header.Slot + 1
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_ = chainTipSync(ctx, log.Root(), cfg, Args{seenSlot: targetSlot, targetSlot: targetSlot})
+
+	require.Zero(t, collector.flushCalls)
 }

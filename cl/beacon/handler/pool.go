@@ -196,15 +196,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 		}
 	}
 	if len(failures) > 0 {
-		errResp := poolingError{
-			Code:     http.StatusBadRequest,
-			Message:  "some failures",
-			Failures: failures,
-		}
-		w.WriteHeader(http.StatusBadRequest)
-		if err := json.NewEncoder(w).Encode(errResp); err != nil {
-			log.Warn("failed to encode response", "err", err)
-		}
+		a.writePoolingFailures(w, failures)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -287,15 +279,7 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 		log.Debug("[Beacon REST] published attestation to gossip", "slot", slot, "committeeIndex", cIndex)
 	}
 	if len(failures) > 0 {
-		errResp := poolingError{
-			Code:     http.StatusBadRequest,
-			Message:  "some failures",
-			Failures: failures,
-		}
-		w.WriteHeader(http.StatusBadRequest)
-		if err := json.NewEncoder(w).Encode(errResp); err != nil {
-			log.Warn("failed to encode response", "err", err)
-		}
+		a.writePoolingFailures(w, failures)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -361,7 +345,12 @@ func (a *ApiHandler) PostEthV1BeaconPoolProposerSlashings(w http.ResponseWriter,
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
-	if err := a.proposerSlashingService.ProcessMessage(r.Context(), nil, &req); err != nil && !errors.Is(err, services.ErrIgnore) {
+	err := a.proposerSlashingService.ProcessMessage(r.Context(), nil, &req)
+	if errors.Is(err, services.ErrIgnore) {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
@@ -394,6 +383,7 @@ type poolingError struct {
 // writePoolingFailures reports partial failures as 400 with the failure list.
 // logger is nil on handlers built by struct literal, which the package tests do.
 func (a *ApiHandler) writePoolingFailures(w http.ResponseWriter, failures []poolingFailure) {
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusBadRequest)
 	if err := json.NewEncoder(w).Encode(poolingError{Code: http.StatusBadRequest, Message: "some failures", Failures: failures}); err != nil && a.logger != nil {
 		a.logger.Debug("[Beacon REST] failed to encode pooling error", "err", err)

@@ -1119,6 +1119,24 @@ func TestProductionUsesLocalPayloadWhenBuilderWithdrawalsRootIsWrong(t *testing.
 	})
 }
 
+func TestProcessBlockForProductionRejectsUnexpectedPayloadWithdrawal(t *testing.T) {
+	blocks, s, _ := tests.GetCapellaRandom()
+	block := blocks[0].Block
+	block.Body.ExecutionPayload.Withdrawals.Clear()
+	block.Body.ExecutionPayload.Withdrawals.Append(&cltypes.Withdrawal{Validator: ^uint64(0), Amount: 1})
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(s, block.Slot))
+
+	_, err := processBlockForProduction(s, &cltypes.BlindOrExecutionBeaconBlock{
+		Slot:          block.Slot,
+		ProposerIndex: block.ProposerIndex,
+		ParentRoot:    block.ParentRoot,
+		BeaconBody:    block.Body,
+		Cfg:           s.BeaconConfig(),
+	})
+
+	require.ErrorContains(t, err, "withdrawals root mismatch")
+}
+
 func TestProductionUsesValidBuilderPayloadAfterSlotAdvance(t *testing.T) {
 	var header *builder.ExecutionHeader
 	block := produceBlockWithBuilderForTest(t, func(ctrl *gomock.Controller, handler *ApiHandler, postState *state.CachingBeaconState, targetSlot uint64, parentHash common.Hash) {
@@ -2623,7 +2641,7 @@ func TestPublishBlindedBlocksRejectsUnsupportedContentType(t *testing.T) {
 
 	_, err := h.publishBlindedBlocks(req, 2)
 	var endpointErr *beaconhttp.EndpointError
-	require.True(t, errors.As(err, &endpointErr))
+	require.ErrorAs(t, err, &endpointErr)
 	require.Equal(t, http.StatusUnsupportedMediaType, endpointErr.Code)
 	require.ErrorContains(t, err, "unsupported content type")
 }
@@ -4338,6 +4356,35 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 		"SlotNumber should equal the target slot")
 }
 
+// The block after the requested state can be gone after pruning while the canonical index still names it.
+func TestExpectedWithdrawalsHistoricalBlockBodyPruned(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
+	delete(handler.blockReader.(*tests.MockBlockReader).U, blocks[1].Block.Slot)
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+		fmt.Sprintf("/eth/v1/builder/states/%d/expected_withdrawals", blocks[0].Block.Slot), http.NoBody)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusNotFound, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "next block body not found")
+}
+
+// A block the fork choice still holds in memory serves the request before the DB has it.
+func TestExpectedWithdrawalsReadsTheNextBlockFromForkChoice(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
+	delete(handler.blockReader.(*tests.MockBlockReader).U, blocks[1].Block.Slot)
+	root, err := blocks[1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.Headers[root] = blocks[1].SignedBeaconBlockHeader().Header
+	fcu.Blocks[root] = blocks[1]
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+		fmt.Sprintf("/eth/v1/builder/states/%d/expected_withdrawals", blocks[0].Block.Slot), http.NoBody)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
 func TestExpectedWithdrawalsReadsTheRightSourcePerFork(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch = 0, 0, 0
@@ -4898,6 +4945,7 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 		verified   bool
 		childHead  bool // the head is a child of the served root, as when attestation data was cached earlier in the slot
 		cached     bool
+		headErr    bool
 		wantStatus int
 		wantIndex  string
 	}{
@@ -4908,6 +4956,8 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 		{name: "EMPTY in the head's chain", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusEmpty, childHead: true, cached: true, wantStatus: http.StatusOK, wantIndex: "0"},
 		{name: "optimistic FULL head", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, cached: true, wantStatus: http.StatusServiceUnavailable},
 		{name: "optimistic FULL in the head's chain", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, childHead: true, wantStatus: http.StatusServiceUnavailable},
+		{name: "head unavailable", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, verified: true, cached: true, headErr: true, wantStatus: http.StatusServiceUnavailable},
+		{name: "head unavailable, block of the attestation slot", blockSlot: attestationSlot, status: cltypes.PayloadStatusFull, verified: true, cached: true, headErr: true, wantStatus: http.StatusOK, wantIndex: "0"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
@@ -4932,6 +4982,13 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 				fcu.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
 				fcu.Ancestors = map[uint64]forkchoice.ForkChoiceNode{tt.blockSlot: {Root: root, PayloadStatus: tt.status}}
 			}
+			wantErr := "payload of the beacon block root is not verified"
+			if tt.headErr {
+				wantErr = "no slot for head is stored"
+				fcu.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+					return forkchoice.ForkChoiceNode{}, 0, errors.New(wantErr)
+				}
+			}
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
 				fmt.Sprintf("/eth/v1/validator/attestation_data?slot=%d&committee_index=3", attestationSlot), http.NoBody)
 			recorder := httptest.NewRecorder()
@@ -4941,7 +4998,7 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 			if tt.wantStatus == http.StatusOK {
 				require.Contains(t, recorder.Body.String(), `"index":"`+tt.wantIndex+`"`)
 			} else {
-				require.Contains(t, recorder.Body.String(), "payload of the beacon block root is not verified")
+				require.Contains(t, recorder.Body.String(), wantErr)
 			}
 		})
 	}

@@ -17,17 +17,18 @@
 package rpctest
 
 import (
+	"errors"
 	"fmt"
 )
 
-func BenchTraceReplayTransaction(erigonUrl, gethUrl string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) error {
+func BenchTraceReplayTransaction(erigonUrl, gethUrl string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) (err error) {
 	setRoutes(erigonUrl, gethUrl)
 
 	rec, errs, cleanup, err := openWriters(recordFile, errorFile)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+	defer func() { err = errors.Join(err, cleanup()) }()
 
 	reqGen := &RequestGenerator{}
 
