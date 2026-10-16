@@ -306,6 +306,8 @@ func (ibs *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
 	ibs.versionMap = versionMap
 }
 
+func (ibs *IntraBlockState) StateReader() StateReader { return ibs.stateReader }
+
 func (ibs *IntraBlockState) VersionMap() *VersionMap {
 	return ibs.versionMap
 }
