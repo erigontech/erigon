@@ -454,12 +454,14 @@ func (a *ApiHandler) feeRecipientForProposal(proposerIndex, targetSlot uint64) c
 	return common.Address{}
 }
 
-// reportProductionFailure is the one place a failed production is recorded, so every exit through
-// produceBlock is covered exactly once. A caller that has already gone is not something anyone can
+// reportProductionFailure records a failed production once for every exit through produceBlock,
+// except a fork-choice head change, which GetEthV3ValidatorBlock retries and records. A caller that has already gone is not something anyone can
 // act on; an execution layer that stopped answering still is, and that arrives as a deadline.
 func reportProductionFailure(err error, targetSlot uint64) {
 	switch {
 	case err == nil:
+	case errors.Is(err, errForkChoiceHeadChanged):
+		// GetEthV3ValidatorBlock retries it and records the outcome.
 	case errors.Is(err, context.Canceled):
 		log.Debug("BlockProduction: abandoned by its caller", "err", err, "slot", targetSlot)
 	case execution_client.IsUnknownPayloadError(err):
@@ -686,12 +688,19 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	} else if committeeIndex != nil {
 		attestationData.CommitteeIndex = *committeeIndex
 	}
+	if a.aggregatePool != nil && clversion.AfterOrEqual(clparams.ElectraVersion) {
+		// Our aggregators ask for the aggregate of exactly this data; gossip votes for other data must
+		// not keep it out of the pool.
+		if err := a.aggregatePool.PinAttestationData(&attestationData); err != nil {
+			a.logger.Debug("Failed to pin attestation data", "slot", *slot, "err", err)
+		}
+	}
 	return newBeaconResponse(attestationData), nil
 }
 
 // gloasAttestationIndex returns attestation_data.index for Gloas: 0 when the attested block is from the attestation
 // slot, otherwise 1 if the head's chain has the block FULL and 0 if not. A FULL block whose payload is not verified
-// is optimistic, so it gets a 503 instead.
+// is optimistic, so it gets a 503 instead, as does a fork-choice head that cannot be read.
 func (a *ApiHandler) gloasAttestationIndex(slot uint64, root common.Hash) (uint64, error) {
 	header, ok := a.forkchoiceStore.GetHeader(root)
 	if !ok || header.Slot == slot {
@@ -699,7 +708,7 @@ func (a *ApiHandler) gloasAttestationIndex(slot uint64, root common.Hash) (uint6
 	}
 	node, _, err := a.forkchoiceStore.GetHeadNode()
 	if err != nil {
-		return 0, nil
+		return 0, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err)
 	}
 	// Attestation data is cached per slot, so the served root can be an ancestor of the head; take the payload status
 	// the head's chain gives it.
@@ -777,38 +786,48 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	var (
 		baseBlockRoot common.Hash
 		baseState     *state.CachingBeaconState
+		block         *cltypes.BlindOrExecutionBeaconBlock
 	)
-	if err := a.viewHeadStateWithIdentity(func(headState *state.CachingBeaconState, root common.Hash, _ uint64) error {
-		baseBlockRoot = root
-		baseState, err = headState.Copy()
-		if err != nil {
-			return err
+	// A head change during production is retried once, from the new head's state.
+	for attempt := range 2 {
+		if attempt > 0 {
+			if !a.awaitHeadStateAfterChange(ctx, targetSlot) {
+				break
+			}
+			log.Info("BlockProduction: fork choice head changed during production, retrying on the new head", "slot", targetSlot, "err", err)
 		}
-		return nil
-	}); err != nil {
-		return nil, err
-	}
+		if err := a.viewHeadStateWithIdentity(func(headState *state.CachingBeaconState, root common.Hash, _ uint64) error {
+			var err error
+			baseBlockRoot = root
+			baseState, err = headState.Copy()
+			return err
+		}); err != nil {
+			return nil, err
+		}
+		if baseState == nil {
+			return nil, beaconhttp.NewEndpointError(
+				http.StatusNotFound,
+				fmt.Errorf("state not found %x", baseBlockRoot),
+			)
+		}
 
+		// Get the base block slot from the state header (avoids needing ReadBlockByRoot at genesis).
+		baseBlockSlot := baseState.LatestBlockHeader().Slot
+
+		if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
+			return nil, err
+		}
+		log.Info("[Beacon API] Found BeaconState object for block production", "slot", targetSlot, "duration", time.Since(start))
+		block, err = a.produceBlock(ctx, builderBoostFactor, baseBlockSlot, baseBlockRoot, baseState, targetSlot, randaoReveal, graffiti)
+		if !errors.Is(err, errForkChoiceHeadChanged) {
+			break
+		}
+	}
 	if err != nil {
-		return nil, err
-	}
-	if baseState == nil {
-		return nil, beaconhttp.NewEndpointError(
-			http.StatusNotFound,
-			fmt.Errorf("state not found %x", baseBlockRoot),
-		)
-	}
-
-	// Get the base block slot from the state header (avoids needing ReadBlockByRoot at genesis).
-	baseBlockSlot := baseState.LatestBlockHeader().Slot
-
-	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
-		return nil, err
-	}
-	log.Info("[Beacon API] Found BeaconState object for block production", "slot", targetSlot, "duration", time.Since(start))
-	block, err := a.produceBlock(ctx, builderBoostFactor, baseBlockSlot, baseBlockRoot, baseState, targetSlot, randaoReveal, graffiti)
-	if err != nil {
-		// produceBlock owns this record; repeating it here made one failure two.
+		// produceBlock owns the record of other errors; repeating it here made one failure two.
+		if errors.Is(err, errForkChoiceHeadChanged) && ctx.Err() == nil {
+			log.Warn("BlockProduction: fork choice head changed during production", "slot", targetSlot, "err", err)
+		}
 		return nil, err
 	}
 
@@ -983,6 +1002,9 @@ func (a *ApiHandler) produceBlock(
 	defer func() { reportProductionFailure(err, targetSlot) }()
 
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch)
+	if err := a.awaitPendingParentPayload(ctx, baseState, baseBlockRoot, targetSlot, stateVersion); err != nil {
+		return nil, err
+	}
 	var wg sync.WaitGroup
 	// produce beacon body
 	var (
@@ -1966,11 +1988,15 @@ func (a *ApiHandler) produceBeaconBody(
 		start := time.Now()
 		defer func() {
 			poolSize := len(a.operationsPool.AttestationsPool.Raw())
+			localAggregates := 0
+			if a.aggregatePool != nil {
+				localAggregates = len(a.aggregatePool.Aggregates())
+			}
 			attCount := 0
 			if beaconBody.Attestations != nil {
 				attCount = beaconBody.Attestations.Len()
 			}
-			log.Info("BlockProduction: GetBlockOperations&findBestAttestations took", "duration", time.Since(start), "poolSize", poolSize, "selectedAtts", attCount)
+			log.Info("BlockProduction: GetBlockOperations&findBestAttestations took", "duration", time.Since(start), "poolSize", poolSize, "localAggregates", localAggregates, "selectedAtts", attCount)
 		}()
 		beaconBody.AttesterSlashings, beaconBody.ProposerSlashings, beaconBody.VoluntaryExits, beaconBody.ExecutionChanges = a.getBlockOperations(
 			baseState,
@@ -3160,13 +3186,35 @@ type attestationCandidate struct {
 	newFlags     []uint8
 }
 
+// includableSource is the source process_attestation requires for a vote of targetEpoch. Dropping
+// other candidates early saves the per-candidate work on votes that can never be included.
+func includableSource(s abstract.BeaconState, targetEpoch uint64) solid.Checkpoint {
+	if targetEpoch == state.Epoch(s) {
+		return s.CurrentJustifiedCheckpoint()
+	}
+	return s.PreviousJustifiedCheckpoint()
+}
+
+// blockInclusionAttestations returns the gossip aggregates together with the aggregates
+// built locally from attestations received on subscribed subnets.
+func (a *ApiHandler) blockInclusionAttestations() []*solid.Attestation {
+	attestations := a.operationsPool.AttestationsPool.Raw()
+	if a.aggregatePool != nil {
+		attestations = append(attestations, a.aggregatePool.Aggregates()...)
+	}
+	return attestations
+}
+
 func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) (map[common.Hash][]*solid.Attestation, error) {
 	pool := map[common.Hash]map[uint64][]*solid.Attestation{} // map root -> committee -> att candidates
 	// step 1: Group attestations by data root and committee index for merging
 	// so after this step, pool[dataRoot][committeeIndex] will contain all the attestation candidates for that data root and committee index
-	for _, candidate := range a.operationsPool.AttestationsPool.Raw() {
+	for _, candidate := range a.blockInclusionAttestations() {
 		if err := eth2.IsAttestationApplicable(s, candidate); err != nil {
 			continue // attestation not applicable skip
+		}
+		if !candidate.Data.Source.Equal(includableSource(s, candidate.Data.Target.Epoch)) {
+			continue
 		}
 
 		attVersion := a.beaconChainCfg.GetCurrentStateVersion(candidate.Data.Slot / a.beaconChainCfg.SlotsPerEpoch)
@@ -3230,7 +3278,11 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 		}
 		if appendCandidate {
 			// no merge case, just append. It might be merged with other attestation later.
-			pool[dataRoot][candCommitteeBit] = append(pool[dataRoot][candCommitteeBit], candidate.Copy())
+			// Candidates it covers add nothing, whatever order the sources come in.
+			candidates := slices.DeleteFunc(pool[dataRoot][candCommitteeBit], func(curAtt *solid.Attestation) bool {
+				return utils.IsNonStrictSupersetBitlist(candAggrBits, curAtt.AggregationBits.Bytes())
+			})
+			pool[dataRoot][candCommitteeBit] = append(candidates, candidate.Copy())
 		}
 	}
 
@@ -3377,6 +3429,9 @@ func (a *ApiHandler) denebMergedAttestationCandidates(s abstract.BeaconState) (m
 	for _, candidate := range a.operationsPool.AttestationsPool.Raw() {
 		if err := eth2.IsAttestationApplicable(s, candidate); err != nil {
 			continue // attestation not applicable skip
+		}
+		if !candidate.Data.Source.Equal(includableSource(s, candidate.Data.Target.Epoch)) {
+			continue
 		}
 
 		attVersion := a.beaconChainCfg.GetCurrentStateVersion(candidate.Data.Slot / a.beaconChainCfg.SlotsPerEpoch)

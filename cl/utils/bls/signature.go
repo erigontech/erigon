@@ -168,3 +168,24 @@ func AggregateSignatures(sigs [][]byte) ([]byte, error) {
 	agg.Aggregate(mulP2, false)
 	return agg.ToAffine().Compress(), nil
 }
+
+// SignatureAggregator keeps a running aggregate in uncompressed form. It does not group-check
+// added signatures, so it must only receive signatures that already passed verification.
+type SignatureAggregator struct {
+	agg blst.P2Aggregate
+}
+
+// AddValidated adds a compressed signature that has already passed signature verification.
+func (a *SignatureAggregator) AddValidated(sig []byte) error {
+	affine := new(blst.P2Affine).Uncompress(sig)
+	if affine == nil {
+		return ErrDeserializeSignature
+	}
+	a.agg.Add(affine, false)
+	return nil
+}
+
+// Compressed returns the compressed aggregate of all added signatures.
+func (a *SignatureAggregator) Compressed() [96]byte {
+	return [96]byte(a.agg.ToAffine().Compress())
+}
