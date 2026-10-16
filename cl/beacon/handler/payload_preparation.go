@@ -846,11 +846,34 @@ func (a *ApiHandler) resolveExecutionPayloadSource(
 	if err != nil {
 		return executionPayloadSource{}, err
 	}
-	path := gloasPayloadPathPreFork
-	if baseState.GetLatestExecutionPayloadBid() != nil && !a.isPreGloasParent(baseState) {
-		path = a.gloasPayloadPathForHead(head, targetSlot)
+	return a.executionPayloadSourceForGloasPath(baseState, baseBlockRoot, a.proposalGloasPath(baseState, head, targetSlot)), nil
+}
+
+func (a *ApiHandler) proposalGloasPath(baseState *state.CachingBeaconState, head forkchoice.ForkChoiceNode, targetSlot uint64) gloasPayloadPath {
+	if baseState.GetLatestExecutionPayloadBid() == nil || a.isPreGloasParent(baseState) {
+		return gloasPayloadPathPreFork
 	}
-	return a.executionPayloadSourceForGloasPath(baseState, baseBlockRoot, path), nil
+	return a.gloasPayloadPathForHead(head, targetSlot)
+}
+
+// parentEnvelopeParked reports a proposal that would build on the EMPTY head while that head's
+// envelope is parked, which can still make it FULL. Preparation primes the EMPTY fallback;
+// production waits for the decision.
+func (a *ApiHandler) parentEnvelopeParked(baseState *state.CachingBeaconState, baseBlockRoot common.Hash, targetSlot uint64) (bool, error) {
+	head, err := a.resolveProposalHead(baseBlockRoot)
+	if err != nil {
+		return false, err
+	}
+	return a.proposalGloasPath(baseState, head, targetSlot) == gloasPayloadPathEmpty && a.envelopeParked(head.Root), nil
+}
+
+// envelopeParked reports an EMPTY head whose envelope has arrived but is not applied yet: parked
+// for its data, or with its apply still in flight. An envelope already persisted does not count.
+func (a *ApiHandler) envelopeParked(root common.Hash) bool {
+	if a.forkchoiceStore.HasEnvelope(root) {
+		return false
+	}
+	return a.forkchoiceStore.HasPendingExecutionPayloadEnvelope(root) || a.forkchoiceStore.ExecutionPayloadApplyInFlight(root)
 }
 
 func (a *ApiHandler) executionPayloadSourceForGloasPath(

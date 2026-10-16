@@ -1000,7 +1000,7 @@ func (imp *impl) ProcessSyncAggregate(s abstract.BeaconState, sync *cltypes.Sync
 			s.GenesisValidatorsRoot(),
 		)
 		if err != nil {
-			return nil
+			return err
 		}
 		blockRoot, err := s.GetBlockRootAtSlot(previousSlot)
 		if err != nil {

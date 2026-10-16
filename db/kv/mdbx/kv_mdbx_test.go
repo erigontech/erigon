@@ -1068,7 +1068,7 @@ func TestMdbxWithSyncBytes(t *testing.T) {
 		MapSize(8 * datasize.GB).
 		GrowthStep(16 * datasize.MB).
 		Flags(func(f uint) uint { return f&^mdbxgo.Durable | mdbxgo.SafeNoSync }).
-		SyncPeriod(2 * time.Second).
+		PollerSyncPeriod(2 * time.Second).
 		SyncBytes(20_000).
 		DirtySpace(uint64(64 * datasize.MB)).
 		// WithMetrics().
@@ -1209,10 +1209,10 @@ func TestRollbackTwiceParksTxnOnce(t *testing.T) {
 	require.NotEqual(t, a.CHandle(), b.CHandle(), "two live read txns must never share one handle")
 }
 
-// A deferred flush leaves data unflushed after a commit, and mdbx only tests its deadline
+// A deferred sync leaves data unsynced after a commit, and mdbx only tests its deadline
 // while committing - so without the background goroutine, data written and then left alone
-// stays unflushed for good.
-func TestDeferredSyncFlushesAfterWritesStop(t *testing.T) {
+// stays unsynced for good.
+func TestDeferredSyncSyncsAfterWritesStop(t *testing.T) {
 	open := func(o mdbx.MdbxOpts) kv.RwDB {
 		db := o.Path(t.TempDir()).WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
 		t.Cleanup(db.Close)
@@ -1229,27 +1229,27 @@ func TestDeferredSyncFlushesAfterWritesStop(t *testing.T) {
 		return info.UnsyncedBytes
 	}
 
-	byDefault := open(mdbx.New(dbcfg.TemporaryDB, log.Root()).SyncPeriod(time.Hour))
+	byDefault := open(mdbx.New(dbcfg.TemporaryDB, log.Root()).PollerSyncPeriod(time.Hour))
 	writeOne(byDefault)
-	require.NotZero(t, unsynced(byDefault), "every database defers its flush unless asked otherwise")
+	require.NotZero(t, unsynced(byDefault), "every database defers its sync unless asked otherwise")
 
-	deferred := open(mdbx.New(dbcfg.TemporaryDB, log.Root()).SafeNoSync().SyncPeriod(50 * time.Millisecond))
-	writeOne(deferred) // far below the byte threshold: only the deadline can flush this
-	require.Eventually(t, func() bool { return unsynced(deferred) == 0 }, 5*time.Second, 10*time.Millisecond,
-		"the background flush never ran")
+	deferred := open(mdbx.New(dbcfg.TemporaryDB, log.Root()).SafeNoSync().PollerSyncPeriod(50 * time.Millisecond))
+	writeOne(deferred) // far below the byte threshold: only the deadline can sync this
+	require.Eventually(t, func() bool { return unsynced(deferred) == 0 }, time.Second, 10*time.Millisecond,
+		"the background sync never ran")
 
 	durable := open(mdbx.New(dbcfg.TemporaryDB, log.Root()).Durable())
 	writeOne(durable)
-	require.Zero(t, unsynced(durable), "a durable database flushes within the commit")
+	require.Zero(t, unsynced(durable), "a durable database syncs within the commit")
 }
 
-// Close must join the background flush: it touches the env on every tick, and the env is gone
+// Close must join the background sync: it touches the env on every tick, and the env is gone
 // once Close returns.
 func TestDeferredSyncClosesWhileWriting(t *testing.T) {
 	val := make([]byte, 4096)
 	for range 3 {
 		db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).
-			SafeNoSync().SyncPeriod(time.Millisecond).
+			SafeNoSync().PollerSyncPeriod(time.Millisecond).
 			WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
 		var wg sync.WaitGroup
 		stop := make(chan struct{})
@@ -1274,7 +1274,84 @@ func TestDeferredSyncClosesWhileWriting(t *testing.T) {
 	}
 }
 
-// The flush mode is settled once every option is in, so a mode set after SafeNoSync still wins
+func TestDeferredSyncLeavesATipSizedCommitUnsynced(t *testing.T) {
+	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).SafeNoSync().PollerSyncPeriod(time.Hour).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
+	t.Cleanup(db.Close)
+	val := make([]byte, 4096)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for i := range 4096 {
+			if err := tx.Put(kv.HeaderTD, binary.BigEndian.AppendUint64(nil, uint64(i)), val); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	info, err := db.(*mdbx.MdbxKV).Env().Info(nil)
+	require.NoError(t, err)
+	require.NotZero(t, info.UnsyncedBytes, "a tip-sized commit synced inside the commit")
+}
+
+func TestDeferredSyncBoundsAWriterThatNeverReleasesTheLock(t *testing.T) {
+	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).SafeNoSync().PollerSyncPeriod(10 * time.Millisecond).SyncInCommitIfUnsyncedFor(300 * time.Millisecond).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
+	t.Cleanup(db.Close)
+	val := make([]byte, 4000)
+	write := func(i int) error {
+		return db.Update(context.Background(), func(tx kv.RwTx) error {
+			for j := range 80 {
+				if err := tx.Put(kv.HeaderTD, binary.BigEndian.AppendUint64(nil, uint64(i*80+j)), val); err != nil {
+					return err
+				}
+			}
+			time.Sleep(40 * time.Millisecond)
+			return nil
+		})
+	}
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	var writeErr error
+	wg.Go(func() {
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if writeErr = write(i); writeErr != nil {
+				return
+			}
+		}
+	})
+	var worst time.Duration
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		info, err := db.(*mdbx.MdbxKV).Env().Info(nil)
+		require.NoError(t, err)
+		worst = max(worst, info.SinceSync)
+	}
+	close(stop)
+	wg.Wait()
+	require.NoError(t, writeErr)
+	require.Less(t, worst, time.Second, "a writer that re-takes the lock at once kept its data unsynced")
+}
+
+func TestDeferredSyncLeavesTheDeadlineToThePoller(t *testing.T) {
+	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).SafeNoSync().PollerSyncPeriod(50 * time.Millisecond).MustOpen()
+	t.Cleanup(db.Close)
+	period, err := db.(*mdbx.MdbxKV).Env().GetSyncPeriod()
+	require.NoError(t, err)
+	require.InDelta(t, float64(mdbx.DefaultSyncInCommitIfUnsyncedFor), float64(period), float64(time.Millisecond),
+		"mdbx syncs inside a commit that lands past its own period, so it must outlast the poller's interval")
+
+	long := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).SafeNoSync().SyncInCommitIfUnsyncedFor(100 * time.Hour).MustOpen()
+	t.Cleanup(long.Close)
+	period, err = long.(*mdbx.MdbxKV).Env().GetSyncPeriod()
+	require.NoError(t, err)
+	require.InDelta(t, float64(18*time.Hour), float64(period), float64(time.Second),
+		"a backstop past mdbx's 16.16 range wraps to a shorter deadline")
+}
+
+// The sync mode is settled once every option is in, so a mode set after SafeNoSync still wins
 // - mdbx rejects the thresholds outright on a read-only database.
 func TestSafeNoSyncYieldsToReadonlyWhateverTheOrder(t *testing.T) {
 	path := t.TempDir()
@@ -1288,7 +1365,7 @@ func TestSafeNoSyncYieldsToReadonlyWhateverTheOrder(t *testing.T) {
 	t.Cleanup(ro.Close)
 }
 
-// An in-memory database asks for no flush at all, and MDBX_UTTERLY_NOSYNC carries the
+// An in-memory database asks for no sync at all, and MDBX_UTTERLY_NOSYNC carries the
 // SafeNoSync bit - stripping that bit would leave a mode that fsyncs on every commit.
 func TestInMemKeepsUtterlyNoSync(t *testing.T) {
 	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).InMem(t.TempDir()).MustOpen()
@@ -1296,5 +1373,5 @@ func TestInMemKeepsUtterlyNoSync(t *testing.T) {
 	flags, err := db.(*mdbx.MdbxKV).Env().Flags()
 	require.NoError(t, err)
 	require.Equal(t, uint(mdbxgo.UtterlyNoSync), flags&mdbxgo.UtterlyNoSync,
-		"utterly-nosync lost a bit, and without all of them mdbx flushes on commit")
+		"utterly-nosync lost a bit, and without all of them mdbx syncs on commit")
 }

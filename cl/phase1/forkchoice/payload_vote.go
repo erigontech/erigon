@@ -18,6 +18,7 @@ package forkchoice
 
 import (
 	"errors"
+	"sync"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -25,7 +26,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
-	log "github.com/erigontech/erigon/common/log/v3"
 )
 
 // boolToVote converts a bool to the three-state vote representation:
@@ -154,15 +154,7 @@ func (f *ForkChoiceStore) payloadTimeliness(root common.Hash, timely bool) bool 
 	if !f.isPayloadAvailable(root) {
 		return !timely
 	}
-	votes := voteRaw.([clparams.PtcSize]int8)
-	target := boolToVote(timely)
-	count := uint64(0)
-	for i := range votes {
-		if votes[i] == target {
-			count++
-		}
-	}
-	return count > f.beaconCfg.PtcSize/2
+	return f.ptcMajority(voteRaw.([clparams.PtcSize]int8), timely)
 }
 
 // payloadDataAvailability returns whether the PTC voted blob data as available (available=true)
@@ -177,8 +169,12 @@ func (f *ForkChoiceStore) payloadDataAvailability(root common.Hash, available bo
 	if !f.isPayloadAvailable(root) {
 		return !available
 	}
-	votes := voteRaw.([clparams.PtcSize]int8)
-	target := boolToVote(available)
+	return f.ptcMajority(voteRaw.([clparams.PtcSize]int8), available)
+}
+
+// ptcMajority reports whether more than half of the PTC members cast vote in votes.
+func (f *ForkChoiceStore) ptcMajority(votes [clparams.PtcSize]int8, vote bool) bool {
+	target := boolToVote(vote)
 	count := uint64(0)
 	for i := range votes {
 		if votes[i] == target {
@@ -186,6 +182,21 @@ func (f *ForkChoiceStore) payloadDataAvailability(root common.Hash, available bo
 		}
 	}
 	return count > f.beaconCfg.PtcSize/2
+}
+
+// PayloadVotesRuleOutFull reports whether the PTC votes recorded for root already mark its payload
+// as not timely or its data as not available. ShouldBuildOnFull then stays false for root even
+// once its payload is applied.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) PayloadVotesRuleOutFull(root common.Hash) bool {
+	f.ptcVoteMu.Lock()
+	defer f.ptcVoteMu.Unlock()
+	for _, votes := range []*sync.Map{&f.payloadTimelinessVote, &f.payloadDataAvailabilityVote} {
+		if raw, ok := votes.Load(root); ok && f.ptcMajority(raw.([clparams.PtcSize]int8), false) {
+			return true
+		}
+	}
+	return false
 }
 
 // getParentPayloadStatus returns the payload status of the parent block.
@@ -232,13 +243,8 @@ func ParentPayloadStatusFromBids(parentBlock *cltypes.SignedBeaconBlock, block *
 
 	// Compare parent_block_hash with message_block_hash
 	if parentBlockHash == messageBlockHash {
-		log.Trace("[getParentPayloadStatus] FULL",
-			"slot", block.Slot, "parentBlockHash", parentBlockHash, "messageBlockHash", messageBlockHash)
 		return cltypes.PayloadStatusFull
 	}
-	log.Trace("[getParentPayloadStatus] EMPTY",
-		"slot", block.Slot, "parentBlockHash", parentBlockHash, "messageBlockHash", messageBlockHash,
-		"parentRoot", block.ParentRoot)
 	return cltypes.PayloadStatusEmpty
 }
 

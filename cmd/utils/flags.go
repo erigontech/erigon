@@ -930,12 +930,12 @@ var (
 	}
 	CaplinIPBlockLimitsDisableFlag = cli.BoolFlag{
 		Name:  "caplin.ip-block-limits.disable",
-		Usage: "Restore the released connection limits: drop Caplin's caps per IPv4 /24 and /16 and per IPv6 /48 and /32, and the exemption of private networks with --caplin.local-discovery. Networks in --caplin.ip-block-limits.trusted-cidrs stay exempt",
+		Usage: "Restore the released connection limits: drop Caplin's caps per IPv4 /24 and /16 and per IPv6 /48 and /32, and the exemption of private networks when local discovery is enabled. Networks in --caplin.ip-block-limits.trusted-cidrs stay exempt",
 		Value: false,
 	}
 	CaplinIPBlockLimitsTrustedCIDRsFlag = cli.StringSliceFlag{
 		Name:  "caplin.ip-block-limits.trusted-cidrs",
-		Usage: "Comma-separated networks in CIDR notation (at most an IPv4 /8 or an IPv6 /16 each, without host bits) exempt from every per-address and per-block connection cap. All connections of one network share a limit of 8 times --caplin.max-peer-count (at least 32). For trusted clusters on public addresses",
+		Usage: "Comma-separated networks in CIDR notation (at most an IPv4 /8 or an IPv6 /16 each, without host bits) exempt from every per-address and per-block connection cap. All connections of one network share a limit of 8 times --caplin.max-peer-count (at least 32); a loopback network stays unlimited. For trusted clusters on public addresses",
 	}
 	CaplinEnableUPNPlag = cli.BoolFlag{
 		Name:  "caplin.enable-upnp",

@@ -56,7 +56,8 @@ type P2PConfig struct {
 	ExternalIP net.IP // resolved from NAT at startup; set by NewP2Pmanager
 
 	MaxPeerCount uint64
-	// TrustedCIDRs are exempt from every per-address and per-block cap; each shares one limit.
+	// TrustedCIDRs are exempt from every per-address and per-block cap; each shares one limit, except
+	// loopback, which stays unlimited.
 	TrustedCIDRs []string
 	// DisableIPBlockLimits restores go-libp2p's default connection limits, as released.
 	DisableIPBlockLimits bool
