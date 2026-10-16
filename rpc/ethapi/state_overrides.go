@@ -70,7 +70,7 @@ func (so *StateOverrides) override(ibs *state.IntraBlockState, addrs []accounts.
 		// Apply state diff into specified accounts.
 		if account.StateDiff != nil {
 			// The versioned SetState does not create the absent account the materializing one creates.
-			if ibs.IsVersioned() {
+			if ibs.IsVersioned() && len(*account.StateDiff) > 0 {
 				exists, err := ibs.Exist(addr)
 				if err != nil {
 					return err

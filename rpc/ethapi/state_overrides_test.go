@@ -122,6 +122,30 @@ func TestStateOverridesPreserveStorageOnlyAccounts(t *testing.T) {
 	}
 }
 
+// An empty stateDiff writes no slot, so it must not create an absent account on either path.
+func TestStateOverrideEmptyStateDiffKeepsAccountAbsent(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0x1000000000000000000000000000000000000003"))
+	for _, versioned := range []bool{false, true} {
+		ibs := state.New(state.NewNoopReader())
+		if versioned {
+			ibs.SetVersionMap(state.NewVersionMap(nil))
+			ibs.SetNoMaterialize(true)
+			ibs.SetNoConflictDetection()
+			ibs.SetTxContext(0, 0)
+		}
+		empty := map[common.Hash]common.Hash{}
+		overrides := StateOverrides{addr: Account{StateDiff: &empty}}
+		require.NoError(t, overrides.Override(ibs, vm.PrecompiledContracts{}, &chain.Rules{IsSpuriousDragon: true}))
+
+		exists, err := ibs.Exist(addr)
+		require.NoError(t, err)
+		require.False(t, exists, "versioned=%v", versioned)
+		ibs.Close()
+	}
+}
+
 func TestStateOverridesBalanceDecoding(t *testing.T) {
 	maxU256 := strings.Repeat("f", 64)
 	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
