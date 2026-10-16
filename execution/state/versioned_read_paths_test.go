@@ -769,6 +769,72 @@ func TestVersionedRead_G7_BalanceViaResolvedAddressPath(t *testing.T) {
 	assert.Equal(t, *uint256.NewInt(555), bal, "balance resolved via AddressPath account")
 }
 
+// A lower tx creates the account and is flushed after the field probe missed
+// but before the account record fallback. The record holds creation-time
+// fields and has the same version as the field cell flushed with it, so
+// validation cannot catch a stale field: the read must return the cell.
+func TestVersionedRead_G9_FieldCellFlushedBeforeRecordFallback(t *testing.T) {
+	codeHash := accounts.InternCodeHash([32]byte{0xc9})
+	tests := []struct {
+		name  string
+		write func(ws *WriteSet, addr accounts.Address, hdr WriteHeader)
+		read  func(ibs *IntraBlockState, addr accounts.Address) (any, error)
+		want  any
+	}{
+		{
+			name: "balance",
+			write: func(ws *WriteSet, addr accounts.Address, hdr WriteHeader) {
+				hdr.Path = BalancePath
+				ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: hdr, Val: *uint256.NewInt(1)})
+			},
+			read: func(ibs *IntraBlockState, addr accounts.Address) (any, error) { return ibs.GetBalance(addr) },
+			want: *uint256.NewInt(1),
+		},
+		{
+			name: "nonce",
+			write: func(ws *WriteSet, addr accounts.Address, hdr WriteHeader) {
+				hdr.Path = NoncePath
+				ws.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: hdr, Val: 1})
+			},
+			read: func(ibs *IntraBlockState, addr accounts.Address) (any, error) { return ibs.GetNonce(addr) },
+			want: uint64(1),
+		},
+		{
+			name: "code hash",
+			write: func(ws *WriteSet, addr accounts.Address, hdr WriteHeader) {
+				hdr.Path = CodeHashPath
+				ws.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: hdr, Val: codeHash})
+			},
+			read: func(ibs *IntraBlockState, addr accounts.Address) (any, error) { return ibs.GetCodeHash(addr) },
+			want: codeHash,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			addr := accounts.InternAddress([20]byte{0x99})
+			vm := NewVersionMap(nil)
+			ibs := NewWithVersionMap(&emptyReader{}, vm)
+			defer ibs.Close()
+			ibs.SetTxContext(1, 1)
+
+			hdr := WriteHeader{Address: addr, Path: AddressPath, Version: Version{TxIndex: 0}}
+			ws := &WriteSet{}
+			ws.SetAddress(addr, &VersionedWrite[*accounts.Account]{WriteHeader: hdr, Val: &accounts.Account{CodeHash: accounts.EmptyCodeHash}})
+			tt.write(ws, addr, hdr)
+			fieldProbeMissHook = func() {
+				fieldProbeMissHook = nil
+				vm.FlushVersionedWrites(ws, true)
+			}
+			t.Cleanup(func() { fieldProbeMissHook = nil })
+
+			got, err := tt.read(ibs, addr)
+			require.NoError(t, err)
+			require.Nil(t, fieldProbeMissHook, "the flush must land between the probes")
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 // storage fallback. Empty reader + no prior writes/reads → falls through
 // to the readStorage callback (returns zero from emptyReader) and records
 // defaultV in readSet.
