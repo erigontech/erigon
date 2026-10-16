@@ -18,6 +18,7 @@ package rpctest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"iter"
 	"maps"
@@ -47,14 +48,14 @@ const maxTopicPositions = 4
 //	false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
 //	recordFile stores all eth_getlogs returned with success
 //	errorFile stores information when erigon and geth doesn't return same data
-func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) error {
+func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) (err error) {
 	setRoutes(erigonURL, gethURL)
 
 	rec, errs, cleanup, err := openWriters(recordFile, errorFile)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+	defer func() { err = errors.Join(err, cleanup()) }()
 
 	var resultsCh chan CallResult = nil
 	if !needCompare {
