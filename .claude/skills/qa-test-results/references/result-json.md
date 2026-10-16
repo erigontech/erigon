@@ -70,10 +70,13 @@ Other families:
 - **exec-from-zero's hash check**: a *second* result file,
   `result-state-hashes-<chain>.json`, with the same four top-level fields but its
   own measures — `matched`, `mismatched`, `local_only`, `published_only`,
-  `mismatched_<subdir>`, `local_state_files`, `published_state_files`.
+  `mismatched_<subdir>`, `compared_<subdir>`, `local_state_files`,
+  `published_state_files`. Only `matched + mismatched` files were compared;
   `local_only` / `published_only` are informational (the node stops at whatever
   step boundary it reached, and keeps building past the published set at the
-  tip); only `mismatched` fails the step. `outcome: ERROR` means no file name was
+  tip); only `mismatched` fails the step. `compared_<subdir>` is emitted for every
+  requested subdir, so `compared_domain: 0` means the check verified nothing about
+  the current state, whatever the outcome. `outcome: ERROR` means no file name was
   present on both sides, so nothing was actually compared.
 - **RPC integration**: verdict is not here — it's in
   `<result-dir>/results/test_report.json` alongside `output.log` and `summary.md`.

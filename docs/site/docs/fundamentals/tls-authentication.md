@@ -73,6 +73,10 @@ openssl ecparam -name prime256v1 -genkey -noout -out RPC-key.pem
 Now create the Certificate Signing Request for the Erigon key pair, and from this request, produce the certificate (signed by the CA) that proves that this key is now part of the “cluster of trust”:
 
 ```bash
+openssl req -new -key erigon-key.pem -out erigon.csr
+```
+
+```bash
 openssl x509 -req -in erigon.csr -CA CA-cert.pem -CAkey CA-key.pem -CAcreateserial -out erigon.crt -days 3650 -sha256
 ```
 

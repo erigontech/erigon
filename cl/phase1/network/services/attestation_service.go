@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/cl/aggregation"
@@ -27,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -35,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/cl/validator/committee_subscription"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
@@ -56,13 +57,17 @@ func validationEpochRange(headState *state.CachingBeaconState, highestSeenSlot, 
 	if currentSlot/slotsPerEpoch > headEpoch {
 		currEpoch = headEpoch + 1
 	}
+	// Shuffling for headEpoch+2 uses the head epoch's final RANDAO mix, provided no later block has been seen.
+	if currentSlot/slotsPerEpoch > headEpoch+1 && highestSeenSlot <= headState.Slot() {
+		currEpoch = headEpoch + 2
+	}
 	return state.PreviousEpoch(headState), currEpoch
 }
 
 type attestationService struct {
 	ctx                    context.Context
 	forkchoiceStore        forkchoice.ForkChoiceStorage
-	committeeSubscribe     committee_subscription.CommitteeSubscribe
+	aggregationPool        aggregation.AggregationPool
 	ethClock               eth_clock.EthereumClock
 	syncedDataManager      synced_data.SyncedData
 	beaconCfg              *clparams.BeaconChainConfig
@@ -71,8 +76,9 @@ type attestationService struct {
 	batchSignatureVerifier *BatchSignatureVerifier
 	// validatorAttestationSeen maps from epoch to validator index. This is used to ignore duplicate validator attestations in the same epoch.
 	validatorAttestationSeen *lru.CacheWithTTL[uint64, uint64] // validator index -> epoch
+	validatorClaimMu         sync.Mutex
 	// attestationProcessed           *lru.CacheWithTTL[[32]byte, struct{}]
-	// attestationsToBeLaterProcessed sync.Map
+	awaitingBlock *blockArrivalQueue
 }
 
 // AttestationWithGossipData type represents attestation with the gossip data where it's coming from.
@@ -82,12 +88,17 @@ type AttestationForGossip struct {
 	Receiver          *sentinelproto.Peer
 	// ImmediateProcess indicates whether the attestation should be processed immediately or able to be scheduled for later processing.
 	ImmediateProcess bool
+	TopicForkDigest  *common.Bytes4
+}
+
+func (a *AttestationForGossip) SetTopicForkDigest(digest common.Bytes4) {
+	a.TopicForkDigest = &digest
 }
 
 func NewAttestationService(
 	ctx context.Context,
 	forkchoiceStore forkchoice.ForkChoiceStorage,
-	committeeSubscribe committee_subscription.CommitteeSubscribe,
+	aggregationPool aggregation.AggregationPool,
 	ethClock eth_clock.EthereumClock,
 	syncedDataManager synced_data.SyncedData,
 	beaconCfg *clparams.BeaconChainConfig,
@@ -99,7 +110,7 @@ func NewAttestationService(
 	a := &attestationService{
 		ctx:                      ctx,
 		forkchoiceStore:          forkchoiceStore,
-		committeeSubscribe:       committeeSubscribe,
+		aggregationPool:          aggregationPool,
 		ethClock:                 ethClock,
 		syncedDataManager:        syncedDataManager,
 		beaconCfg:                beaconCfg,
@@ -108,9 +119,9 @@ func NewAttestationService(
 		batchSignatureVerifier:   batchSignatureVerifier,
 		validatorAttestationSeen: lru.NewWithTTL[uint64, uint64]("validator_attestation_seen", validatorAttestationCacheSize, epochDuration),
 		// attestationProcessed:     lru.NewWithTTL[[32]byte, struct{}]("attestation_processed", validatorAttestationCacheSize, epochDuration),
+		awaitingBlock: newBlockArrivalQueue(forkchoiceStore, maxAttestationsAwaitingBlock, time.Duration(beaconCfg.SecondsPerSlot)*time.Second),
 	}
-
-	//go a.loop(ctx)
+	go a.awaitingBlock.run(ctx)
 	return a
 }
 
@@ -154,6 +165,15 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 	attEpoch := s.ethClock.GetEpochAtSlot(slot)
 	clVersion := s.beaconCfg.GetCurrentStateVersion(attEpoch)
+	if att.TopicForkDigest != nil {
+		messageForkDigest, err := s.ethClock.ComputeForkDigest(attEpoch)
+		if err != nil {
+			return fmt.Errorf("%w: compute attestation fork digest: %w", ErrIgnore, err)
+		}
+		if messageForkDigest != *att.TopicForkDigest {
+			return fmt.Errorf("%w: attestation fork digest does not match topic", ErrIgnore)
+		}
+	}
 
 	var err error
 	if clVersion >= clparams.ElectraVersion {
@@ -204,6 +224,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	var (
 		domain      []byte
 		pubKey      common.Bytes48
+		vIndex      uint64
 		attestation *solid.Attestation // SingleAttestation will be transformed to Attestation struct with given member index in committee
 	)
 	if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
@@ -228,7 +249,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		if err != nil {
 			return err
 		}
-		var vIndex uint64
 		if clVersion <= clparams.DenebVersion {
 			// [REJECT] The number of aggregation bits matches the committee size -- i.e. len(aggregation_bits) == len(get_beacon_committee(state, attestation.data.slot, index)).
 			bits := att.Attestation.AggregationBits.Bytes()
@@ -289,19 +309,17 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 			}
 		}
 		// [IGNORE] There has been no other valid attestation seen on an attestation subnet that has an identical attestation.data.target.epoch and participating validator index.
-		// mark the validator as seen
 		epochLastTime, ok := s.validatorAttestationSeen.Get(vIndex)
 		if ok && epochLastTime == targetEpoch {
-			return fmt.Errorf("validator already seen in target epoch %w", ErrIgnore)
+			return fmt.Errorf("%w: %w", ErrIgnore, ErrAttestationAlreadySeen)
 		}
-		s.validatorAttestationSeen.Add(vIndex, targetEpoch)
 
 		// [REJECT] The signature of attestation is valid.
 		pubKey, err = headState.ValidatorPublicKey(int(vIndex))
 		if err != nil {
 			return fmt.Errorf("unable to get public key: %w", err)
 		}
-		domain, err = headState.GetDomain(s.beaconCfg.DomainBeaconAttester, targetEpoch)
+		domain, err = fork.ComputeDomainAtEpoch(s.beaconCfg, s.beaconCfg.DomainBeaconAttester, targetEpoch, headState.GenesisValidatorsRoot())
 		if err != nil {
 			return fmt.Errorf("unable to get the domain: %w", err)
 		}
@@ -318,7 +336,10 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	// (a client MAY queue attestations for processing once block is retrieved).
 	blockHeader, ok := s.forkchoiceStore.GetHeader(root)
 	if !ok {
-		//s.scheduleAttestationForLaterProcessing(att)
+		if !att.ImmediateProcess {
+			subnet := *subnet
+			s.awaitingBlock.add(root, func(ctx context.Context) { _ = s.ProcessMessage(ctx, &subnet, att) })
+		}
 		return fmt.Errorf("%w: block not seen: %v", ErrIgnore, root)
 	}
 
@@ -351,20 +372,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		Pks:         [][]byte{pubKey[:]},
 		SendingPeer: att.Receiver,
 		F: func() {
-			start := time.Now()
-			defer monitor.ObserveAggregateAttestation(start)
-			if err = s.committeeSubscribe.AggregateAttestation(attestation); errors.Is(err, aggregation.ErrIsSuperset) {
-				return
-			} else if err != nil {
-				log.Warn("could not check aggregate attestation", "err", err)
-				return
-			}
-			// send to subscribers
-			if att.Attestation != nil {
-				s.emitters.Operation().SendAttestation(att.Attestation)
-			} else if att.SingleAttestation != nil {
-				s.emitters.Operation().SendSingleAttestation(att.SingleAttestation)
-			}
+			s.onVerifiedAttestation(vIndex, targetEpoch, attestation, att)
 		},
 	}
 
@@ -372,60 +380,8 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
 	}
 
-	// push the signatures to verify asynchronously and run final functions after that.
-	s.batchSignatureVerifier.AsyncVerifyAttestation(aggregateVerificationData)
-
-	// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
-	// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
-	// in BatchSignatureVerifier service. After validating signatures, if they are valid we will publish the
-	// gossip ourselves or ban the peer which sent that particular invalid signature.
-	return nil
+	return s.batchSignatureVerifier.VerifyAttestation(ctx, aggregateVerificationData)
 }
-
-// type attestationJob struct {
-// 	att          *AttestationWithGossipData
-// 	creationTime time.Time
-// 	subnet       uint64
-// }
-
-// func (a *attestationService) scheduleAttestationForLaterProcessing(att *AttestationWithGossipData) {
-// 	key, err := att.Attestation.HashSSZ()
-// 	if err != nil {
-// 		return
-// 	}
-// 	a.attestationsToBeLaterProcessed.Store(key, &attestationJob{
-// 		att:          att,
-// 		creationTime: time.Now(),
-// 	})
-// }
-
-// func (a *attestationService) loop(ctx context.Context) {
-// 	ticker := time.NewTicker(singleAttestationIntervalTick)
-// 	defer ticker.Stop()
-
-// 	for {
-// 		select {
-// 		case <-ctx.Done():
-// 			return
-// 		case <-ticker.C:
-// 		}
-// 		a.attestationsToBeLaterProcessed.Range(func(key, value any) bool {
-// 			k := key.([32]byte)
-// 			v := value.(*attestationJob)
-// 			if time.Now().After(v.creationTime.Add(singleAttestationJobExpiry)) {
-// 				a.attestationsToBeLaterProcessed.Delete(k)
-// 				return true
-// 			}
-
-// 			root := v.att.Attestation.Data.BeaconBlockRoot
-// 			if _, ok := a.forkchoiceStore.GetHeader(root); !ok {
-// 				return true
-// 			}
-// 			a.ProcessMessage(ctx, &v.subnet, v.att)
-// 			return true
-// 		})
-// 	}
-// }
 
 func contains[T comparable](target T, slices []T) int {
 	for i, s := range slices {
@@ -434,4 +390,39 @@ func contains[T comparable](target T, slices []T) int {
 		}
 	}
 	return -1
+}
+
+func (s *attestationService) onVerifiedAttestation(vIndex, targetEpoch uint64, attestation *solid.Attestation, att *AttestationForGossip) {
+	start := time.Now()
+	defer monitor.ObserveAggregateAttestation(start)
+	// Claimed only now: a message dropped before its signature was
+	// verified must not consume the validator's slot for the epoch.
+	if !s.claimValidatorAttestation(vIndex, targetEpoch) {
+		return
+	}
+	if err := s.aggregationPool.AddAttestation(attestation); errors.Is(err, aggregation.ErrPoolLimit) {
+		dataRoot, _ := attestation.Data.HashSSZ()
+		log.Debug("aggregation pool refused attestation", "slot", attestation.Data.Slot,
+			"committees", attestation.CommitteeBits.GetOnIndices(), "dataRoot", common.Hash(dataRoot))
+	} else if err != nil && !errors.Is(err, aggregation.ErrIsSuperset) {
+		log.Warn("could not add attestation to the aggregation pool", "slot", attestation.Data.Slot, "err", err)
+	}
+	// send to subscribers
+	if att.Attestation != nil {
+		s.emitters.Operation().SendAttestation(att.Attestation)
+	} else if att.SingleAttestation != nil {
+		s.emitters.Operation().SendSingleAttestation(att.SingleAttestation)
+	}
+}
+
+// claimValidatorAttestation records the validator's vote for the target epoch and reports whether
+// this call made the claim. Copies of one vote can pass the seen check before either is verified.
+func (s *attestationService) claimValidatorAttestation(vIndex, targetEpoch uint64) bool {
+	s.validatorClaimMu.Lock()
+	defer s.validatorClaimMu.Unlock()
+	if epoch, ok := s.validatorAttestationSeen.Get(vIndex); ok && epoch == targetEpoch {
+		return false
+	}
+	s.validatorAttestationSeen.Add(vIndex, targetEpoch)
+	return true
 }

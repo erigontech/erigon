@@ -78,6 +78,7 @@ func TestSimpleLocalTxThroughputBenchmark(t *testing.T) {
 	start := time.Now()
 
 	// sender part
+	sendErrCh := make(chan error, 1)
 	go func() {
 		rpcClient := requests.NewRequestGenerator(
 			rpcAddressNode1,
@@ -99,10 +100,15 @@ func TestSimpleLocalTxThroughputBenchmark(t *testing.T) {
 				*types.LatestSignerForChainID(uint256.NewInt(1337)),
 				pkey1,
 			)
-			require.NoError(t, err)
+			if err != nil {
+				sendErrCh <- err
+				return
+			}
 
-			_, err = rpcClient.SendTransaction(signedTx)
-			require.NoError(t, err)
+			if _, err = rpcClient.SendTransaction(signedTx); err != nil {
+				sendErrCh <- err
+				return
+			}
 		}
 	}()
 
@@ -127,13 +133,15 @@ func TestSimpleLocalTxThroughputBenchmark(t *testing.T) {
 
 		case err := <-errCh:
 			require.NoError(t, err)
+		case err := <-sendErrCh:
+			require.NoError(t, err)
 		}
 	}
 
 	fmt.Printf("\nTx/s: (total %d txs processed): %.2f / s \n", txToSendCount, float64(txToSendCount)*float64(time.Second)/float64(time.Since(start)))
 	fmt.Println("Processed time:", time.Since(start))
 
-	dir.RemoveAll("./dev") //remove tmp dir
+	_ = dir.RemoveAll("./dev") // remove tmp dir
 }
 
 // Topology of the network:
@@ -197,7 +205,7 @@ func TestSimpleLocalTxLatencyBenchmark(t *testing.T) {
 	averageLatency /= time.Duration(txToSendCount)
 	fmt.Println("Avg latency:", averageLatency)
 
-	dir.RemoveAll("./dev") //remove tmp dir
+	_ = dir.RemoveAll("./dev") // remove tmp dir
 }
 
 // Topology of the network:
@@ -221,6 +229,7 @@ func TestSimpleRemoteTxThroughputBenchmark(t *testing.T) {
 	start := time.Now()
 
 	// sender part
+	sendErrCh := make(chan error, 1)
 	go func() {
 		rpcClient := requests.NewRequestGenerator(
 			rpcAddressNode2,
@@ -242,10 +251,15 @@ func TestSimpleRemoteTxThroughputBenchmark(t *testing.T) {
 				*types.LatestSignerForChainID(uint256.NewInt(1337)),
 				pkey1,
 			)
-			require.NoError(t, err)
+			if err != nil {
+				sendErrCh <- err
+				return
+			}
 
-			_, err = rpcClient.SendTransaction(signedTx)
-			require.NoError(t, err)
+			if _, err = rpcClient.SendTransaction(signedTx); err != nil {
+				sendErrCh <- err
+				return
+			}
 		}
 	}()
 
@@ -279,13 +293,15 @@ func TestSimpleRemoteTxThroughputBenchmark(t *testing.T) {
 
 		case err := <-errCh:
 			require.NoError(t, err)
+		case err := <-sendErrCh:
+			require.NoError(t, err)
 		}
 	}
 
 	fmt.Printf("\nTx/s: (total %d txs processed): %.2f / s \n", txToSendCount, float64(txToSendCount)*float64(time.Second)/float64(time.Since(start)))
 	fmt.Println("Processed time:", time.Since(start))
 
-	dir.RemoveAll("./dev") //remove tmp dir
+	_ = dir.RemoveAll("./dev") // remove tmp dir
 }
 
 // Topology of the network:
@@ -349,5 +365,5 @@ func TestSimpleRemoteTxLatencyBenchmark(t *testing.T) {
 	averageLatency /= time.Duration(txToSendCount)
 	fmt.Println("Avg latency:", averageLatency)
 
-	dir.RemoveAll("./dev") //remove tmp dir
+	_ = dir.RemoveAll("./dev") // remove tmp dir
 }

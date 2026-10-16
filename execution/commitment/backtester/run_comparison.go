@@ -72,7 +72,7 @@ func CompareRuns(runOutputDirs []string, outputDir string, logger log.Logger) er
 			processingTimes[i][j] = mVals[0].SpentProcessing
 		}
 	}
-	err := os.MkdirAll(outputDir, 0755)
+	err := os.MkdirAll(outputDir, 0o755)
 	if err != nil {
 		return err
 	}

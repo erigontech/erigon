@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sync"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -40,27 +39,24 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
-// SignedAggregateAndProofData is passed to SignedAggregateAndProof service. The service does the signature verification
-// asynchronously. That's why we cannot wait for its ProcessMessage call to finish to check error. The service
-// will do re-publishing of the gossip or banning the peer in case of invalid signature by itself.
-// that's why we are passing sentinelproto.SentinelClient and *sentinelproto.GossipData to enable the service
-// to do all of that by itself.
 type SignedAggregateAndProofForGossip struct {
 	SignedAggregateAndProof *cltypes.SignedAggregateAndProof
 	Receiver                *sentinelproto.Peer
 	ImmediateProcess        bool
+	TopicForkDigest         *common.Bytes4
 }
 
-type aggregateJob struct {
-	aggregate    *SignedAggregateAndProofForGossip
-	creationTime time.Time
+func (m *SignedAggregateAndProofForGossip) SetTopicForkDigest(digest common.Bytes4) {
+	m.TopicForkDigest = &digest
 }
 
 type seenAggregateIndex struct {
@@ -73,31 +69,32 @@ const seenAggregateCacheSize = 10_000
 type aggregateAndProofServiceImpl struct {
 	syncedDataManager      *synced_data.SyncedDataManager
 	forkchoiceStore        forkchoice.ForkChoiceStorage
+	ethClock               eth_clock.EthereumClock
 	beaconCfg              *clparams.BeaconChainConfig
 	opPool                 pool.OperationsPool
 	test                   bool
 	batchSignatureVerifier *BatchSignatureVerifier
-	seenAggreatorIndexes   *lru.Cache[seenAggregateIndex, struct{}]
+	seenAggreatorIndexes   *lru.Cache[seenAggregateIndex, common.Hash]
 	validatorParams        *validator_params.ValidatorParams
 
 	// Cached proposer indices per epoch (for current epoch check)
 	proposerIndicesCache *lru.Cache[uint64, []uint64]
 
-	// set of aggregates that are scheduled for later processing
-	aggregatesScheduledForLaterExecution sync.Map
+	awaitingBlock *blockArrivalQueue
 }
 
 func NewAggregateAndProofService(
 	ctx context.Context,
 	syncedDataManager *synced_data.SyncedDataManager,
 	forkchoiceStore forkchoice.ForkChoiceStorage,
+	ethClock eth_clock.EthereumClock,
 	beaconCfg *clparams.BeaconChainConfig,
 	opPool pool.OperationsPool,
 	test bool,
 	batchSignatureVerifier *BatchSignatureVerifier,
 	validatorParams *validator_params.ValidatorParams,
 ) AggregateAndProofService {
-	seenAggCache, err := lru.New[seenAggregateIndex, struct{}]("seenAggregate", seenAggregateCacheSize)
+	seenAggCache, err := lru.New[seenAggregateIndex, common.Hash]("seenAggregate", seenAggregateCacheSize)
 	if err != nil {
 		panic(err)
 	}
@@ -108,6 +105,7 @@ func NewAggregateAndProofService(
 	a := &aggregateAndProofServiceImpl{
 		syncedDataManager:      syncedDataManager,
 		forkchoiceStore:        forkchoiceStore,
+		ethClock:               ethClock,
 		beaconCfg:              beaconCfg,
 		opPool:                 opPool,
 		test:                   test,
@@ -115,8 +113,13 @@ func NewAggregateAndProofService(
 		seenAggreatorIndexes:   seenAggCache,
 		validatorParams:        validatorParams,
 		proposerIndicesCache:   proposerIndicesCache,
+		awaitingBlock: newBlockArrivalQueue(
+			forkchoiceStore,
+			int(beaconCfg.MaxCommitteesPerSlot*beaconCfg.TargetAggregatorsPerCommittee),
+			time.Duration(beaconCfg.SecondsPerSlot)*time.Second,
+		),
 	}
-	go a.loop(ctx)
+	go a.awaitingBlock.run(ctx)
 	return a
 }
 
@@ -199,6 +202,15 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 
 	epoch := slot / a.beaconCfg.SlotsPerEpoch
 	clversion := a.beaconCfg.GetCurrentStateVersion(epoch)
+	if aggregateAndProof.TopicForkDigest != nil {
+		messageForkDigest, err := a.ethClock.ComputeForkDigest(epoch)
+		if err != nil {
+			return fmt.Errorf("%w: compute aggregate fork digest: %w", ErrIgnore, err)
+		}
+		if messageForkDigest != *aggregateAndProof.TopicForkDigest {
+			return fmt.Errorf("%w: aggregate fork digest does not match topic", ErrIgnore)
+		}
+	}
 	aggregateAndProof.SignedAggregateAndProof.SetVersion(clversion)
 	if err := aggregate.ValidateForConfig(a.beaconCfg, clversion); err != nil {
 		return err
@@ -229,6 +241,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 
 	var (
 		aggregateVerificationData *AggregateVerificationData
+		aggregateRoot             common.Hash
 		attestingIndices          []uint64
 		seenIndex                 seenAggregateIndex
 		localValidatorIsProposer  bool
@@ -239,10 +252,9 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		// Note: uses epoch (from slot), not target.Epoch, so malformed messages
 		// with wrong target.Epoch still reach the reject check below.
 		// [IGNORE] the epoch of aggregate.data.slot is either the current or previous epoch
-		// When the head state lags behind (solo validator / genesis start), use the
-		// highest seen slot to widen the accepted epoch window.
-		highestSeen := a.forkchoiceStore.HighestSeen()
-		prevEpoch, currEpoch := validationEpochRange(headState, highestSeen, highestSeen, a.beaconCfg.SlotsPerEpoch)
+		// Use the wall-clock slot and highest seen slot to widen the accepted epoch
+		// window when the head state lags.
+		prevEpoch, currEpoch := validationEpochRange(headState, a.forkchoiceStore.HighestSeen(), a.ethClock.GetCurrentSlot(), a.beaconCfg.SlotsPerEpoch)
 		if epoch < prevEpoch || epoch > currEpoch {
 			return fmt.Errorf("%w: epoch outside validation range: %d (prev=%d, curr=%d)", ErrIgnore, epoch, prevEpoch, currEpoch)
 		}
@@ -256,6 +268,16 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		if aggregateData.Target.Epoch != epoch {
 			return errors.New("invalid target epoch in aggregate and proof")
 		}
+		// [IGNORE] The block being voted for (aggregate.data.beacon_block_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue aggregates for processing once block is retrieved).
+		// Checked before the finalized ancestor, which an unknown block always fails.
+		blockHeader, blockHeaderOk := a.forkchoiceStore.GetHeader(aggregateData.BeaconBlockRoot)
+		if !blockHeaderOk {
+			if !aggregateAndProof.ImmediateProcess {
+				a.awaitingBlock.add(aggregateData.BeaconBlockRoot, func(ctx context.Context) { _ = a.ProcessMessage(ctx, nil, aggregateAndProof) })
+			}
+			return fmt.Errorf("%w: block not seen: %v", ErrIgnore, aggregateData.BeaconBlockRoot)
+		}
+
 		finalizedCheckpoint := a.forkchoiceStore.FinalizedCheckpoint()
 		finalizedSlot := finalizedCheckpoint.Epoch * a.beaconCfg.SlotsPerEpoch
 		// [IGNORE] The current finalized_checkpoint is an ancestor of the block defined by aggregate.data.beacon_block_root -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, finalized_checkpoint.epoch) == store.finalized_checkpoint.root
@@ -264,12 +286,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			finalizedSlot,
 		).Root != finalizedCheckpoint.Root {
 			return fmt.Errorf("%w: invalid finalized checkpoint: %v", ErrIgnore, finalizedCheckpoint.Root)
-		}
-
-		// [IGNORE] The block being voted for (aggregate.data.beacon_block_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue aggregates for processing once block is retrieved).
-		blockHeader, blockHeaderOk := a.forkchoiceStore.GetHeader(aggregateData.BeaconBlockRoot)
-		if !blockHeaderOk {
-			return fmt.Errorf("%w: block not seen: %v", ErrIgnore, aggregateData.BeaconBlockRoot)
 		}
 
 		// [New in GLOAS] [REJECT] aggregate.data.index == 0 if block.slot == aggregate.data.slot
@@ -291,13 +307,28 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			epoch: target.Epoch,
 			index: aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex,
 		}
-		if a.seenAggreatorIndexes.Contains(seenIndex) {
-			return fmt.Errorf("%w: aggregator already seen", ErrIgnore)
+		if aggregateAndProof.ImmediateProcess {
+			root, err := aggregateAndProof.SignedAggregateAndProof.HashSSZ()
+			if err != nil {
+				return err
+			}
+			aggregateRoot = root
+		}
+		if seenRoot, ok := a.seenAggreatorIndexes.Peek(seenIndex); ok {
+			if aggregateAndProof.ImmediateProcess && seenRoot == aggregateRoot {
+				// ErrAggregatorAlreadySeen means this exact signed aggregate was validated before.
+				return fmt.Errorf("%w: %w", ErrIgnore, ErrAggregatorAlreadySeen)
+			}
+			return fmt.Errorf("%w: %w", ErrIgnore, ErrAggregatorAlreadyKnown)
 		}
 
 		committee, err := headState.GetBeaconCommitee(slot, committeeIndex)
 		if err != nil {
 			return err
+		}
+		// [REJECT] The number of aggregation bits matches the committee size -- i.e. len(aggregation_bits) == len(get_beacon_committee(state, aggregate.data.slot, index)).
+		if aggregate.AggregationBits.Bits() != len(committee) {
+			return fmt.Errorf("aggregation bits length %d does not match committee size %d", aggregate.AggregationBits.Bits(), len(committee))
 		}
 		// [REJECT] The attestation has participants -- that is, len(get_attesting_indices(state, aggregate)) >= 1
 		attestingIndices, err = headState.GetAttestingIndicies(aggregate, false)
@@ -324,7 +355,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		}
 
 		// [REJECT] aggregate_and_proof.selection_proof selects the validator as an aggregator for the slot -- i.e. is_aggregator(state, aggregate.data.slot, index, aggregate_and_proof.selection_proof) returns True.
-		if !state.IsAggregator(a.beaconCfg, uint64(len(committee)), committeeIndex, selectionProof) {
+		if !state.IsAggregator(a.beaconCfg, uint64(len(committee)), selectionProof) {
 			log.Warn("receveived aggregate and proof from invalid aggregator")
 			return errors.New("invalid aggregate and proof")
 		}
@@ -361,7 +392,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	if aggregateVerificationData == nil {
 		return ErrIgnore
 	}
-	// further processing will be done after async signature verification
 	aggregateVerificationData.F = func() {
 		a.opPool.AttestationsPool.Insert(
 			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Signature,
@@ -371,7 +401,8 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate,
 			attestingIndices,
 		)
-		a.seenAggreatorIndexes.Add(seenIndex, struct{}{})
+		// Keep the root of the first aggregate validated for this aggregator and epoch.
+		a.seenAggreatorIndexes.ContainsOrAdd(seenIndex, aggregateRoot)
 	}
 	// for this specific request, collect data for potential peer banning or gossip publishing
 	aggregateVerificationData.SendingPeer = aggregateAndProof.Receiver
@@ -380,8 +411,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		return a.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
 	}
 
-	a.batchSignatureVerifier.AsyncVerifyAggregateProof(aggregateVerificationData)
-	return nil
+	return a.batchSignatureVerifier.VerifyAggregateProof(ctx, aggregateVerificationData)
 }
 
 func GetSignaturesOnAggregate(
@@ -423,10 +453,8 @@ func AggregateAndProofSignature(
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	domain, err := state.GetDomain(
-		state.BeaconConfig().DomainSelectionProof,
-		slot*state.BeaconConfig().SlotsPerEpoch,
-	)
+	cfg := state.BeaconConfig()
+	domain, err := fork.ComputeDomainAtEpoch(cfg, cfg.DomainSelectionProof, slot/cfg.SlotsPerEpoch, state.GenesisValidatorsRoot())
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -443,7 +471,8 @@ func AggregatorSignature(
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	domain, err := state.GetDomain(state.BeaconConfig().DomainAggregateAndProof, state.Slot())
+	cfg := state.BeaconConfig()
+	domain, err := fork.ComputeDomainAtEpoch(cfg, cfg.DomainAggregateAndProof, aggregate.Message.Aggregate.Data.Slot/cfg.SlotsPerEpoch, state.GenesisValidatorsRoot())
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -482,7 +511,7 @@ func AggregateMessageSignature(
 		return nil, nil, nil, err
 	}
 
-	domain, err := s.GetDomain(s.BeaconConfig().DomainBeaconAttester, indexedAttestation.Data.Target.Epoch)
+	domain, err := fork.ComputeDomainAtEpoch(s.BeaconConfig(), s.BeaconConfig().DomainBeaconAttester, indexedAttestation.Data.Target.Epoch, s.GenesisValidatorsRoot())
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("unable to get the domain: %w", err)
 	}
@@ -498,44 +527,4 @@ func AggregateMessageSignature(
 	}
 
 	return indexedAttestation.Signature[:], signingRoot[:], pubKeys, nil
-}
-
-func (a *aggregateAndProofServiceImpl) loop(ctx context.Context) {
-	ticker := time.NewTicker(attestationJobsIntervalTick)
-	defer ticker.Stop()
-	keysToDel := make([][32]byte, 0)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-		keysToDel = keysToDel[:0]
-		a.aggregatesScheduledForLaterExecution.Range(func(key, value any) bool {
-			if a.syncedDataManager.Syncing() {
-				// Discard the job if we can't get the head state
-				keysToDel = append(keysToDel, key.([32]byte))
-				return false
-			}
-			job := value.(*aggregateJob)
-			// check if it has expired
-			if time.Since(job.creationTime) > attestationJobExpiry {
-				keysToDel = append(keysToDel, key.([32]byte))
-				return true
-			}
-			aggregateData := job.aggregate.SignedAggregateAndProof.Message.Aggregate.Data
-			if aggregateData.Slot > a.syncedDataManager.HeadSlot() {
-				return true
-			}
-			if err := a.ProcessMessage(ctx, nil, job.aggregate); err != nil {
-				return true
-			}
-
-			keysToDel = append(keysToDel, key.([32]byte))
-			return true
-		})
-		for _, key := range keysToDel {
-			a.aggregatesScheduledForLaterExecution.Delete(key)
-		}
-	}
 }

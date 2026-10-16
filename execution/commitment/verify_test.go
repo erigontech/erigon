@@ -66,10 +66,9 @@ func TestVerifyBranchHashes_RoundTrip(t *testing.T) {
 	}
 	c := newAccountCell(addr, &acc)
 
-	keccak := keccak.NewFastKeccak()
 	depth := int16(1)
 	hashBuf := make([]byte, length.Hash)
-	require.NoError(t, c.hashAccKey(keccak, depth, hashBuf))
+	c.hashAccKey(depth, hashBuf)
 	c.hashedExtension[64-depth] = terminatorHexByte
 
 	branchData := encodeCellToBranch(t, hph, c, depth, int(c.hashedExtension[0]))
@@ -114,22 +113,21 @@ func TestVerifyBranchHashes_Singleton(t *testing.T) {
 	c := newAccountCell(addr, &acc)
 	addStorageToCell(c, addr, loc, storageVal)
 
-	keccak := keccak.NewFastKeccak()
 	depth := int16(2)
 
 	hashBuf := make([]byte, length.Hash)
-	require.NoError(t, c.hashStorageKey(keccak, length.Addr, 0, 0, hashBuf))
+	c.hashStorageKey(length.Addr, 0, 0, hashBuf)
 	c.hashedExtension[64] = terminatorHexByte
 
-	require.NoError(t, c.hashAccKey(keccak, depth, hashBuf))
+	c.hashAccKey(depth, hashBuf)
 	nibble := int(c.hashedExtension[0])
 
-	require.NoError(t, c.hashStorageKey(keccak, length.Addr, 0, 0, hashBuf))
+	c.hashStorageKey(length.Addr, 0, 0, hashBuf)
 	c.hashedExtension[64] = terminatorHexByte
 
 	branchData := encodeCellToBranch(t, hph, c, depth, nibble)
 
-	require.NoError(t, c.hashAccKey(keccak, 0, hashBuf))
+	c.hashAccKey(0, hashBuf)
 	branchKey := nibbles.HexToCompact([]byte{c.hashedExtension[0]})
 
 	accountValues := map[string][]byte{
@@ -159,17 +157,16 @@ func TestVerifyBranchHashes_SingletonDepth1(t *testing.T) {
 	c := newAccountCell(addr, &acc)
 	addStorageToCell(c, addr, loc, storageVal)
 
-	keccak := keccak.NewFastKeccak()
 	depth := int16(1)
 
 	hashBuf := make([]byte, length.Hash)
-	require.NoError(t, c.hashStorageKey(keccak, length.Addr, 0, 0, hashBuf))
+	c.hashStorageKey(length.Addr, 0, 0, hashBuf)
 	c.hashedExtension[64] = terminatorHexByte
 
-	require.NoError(t, c.hashAccKey(keccak, depth, hashBuf))
+	c.hashAccKey(depth, hashBuf)
 	nibble := int(c.hashedExtension[0])
 
-	require.NoError(t, c.hashStorageKey(keccak, length.Addr, 0, 0, hashBuf))
+	c.hashStorageKey(length.Addr, 0, 0, hashBuf)
 	c.hashedExtension[64] = terminatorHexByte
 
 	branchData := encodeCellToBranch(t, hph, c, depth, nibble)
@@ -202,7 +199,7 @@ func TestVerifyBranchHashes_Storage(t *testing.T) {
 	depth := int16(65)
 	hashedKeyOffset := depth - 64
 	hashBuf := make([]byte, length.Hash)
-	require.NoError(t, c.hashStorageKey(keccak, length.Addr, 0, hashedKeyOffset, hashBuf))
+	c.hashStorageKey(length.Addr, 0, hashedKeyOffset, hashBuf)
 	c.hashedExtension[64-hashedKeyOffset] = terminatorHexByte
 
 	branchData := encodeCellToBranch(t, hph, c, depth, int(c.hashedExtension[0]))

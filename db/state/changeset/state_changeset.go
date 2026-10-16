@@ -223,12 +223,12 @@ func MergeDiffSets(newer, older []kv.DomainEntryDiff) []kv.DomainEntryDiff {
 	return result
 }
 
-func (d *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
+func (s *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
 	// Do  diff_length + diffSet
 	ret := out
 	tmp := make([]byte, 4)
-	for i := range d.Diffs {
-		diffSet := d.Diffs[i].GetDiffSet()
+	for i := range s.Diffs {
+		diffSet := s.Diffs[i].GetDiffSet()
 		binary.BigEndian.PutUint32(tmp, uint32(serializeDiffSetBufLen(diffSet)))
 		ret = append(ret, tmp...)
 
@@ -397,8 +397,9 @@ func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.Domai
 
 	return deserializeKeys(val), true, nil
 }
+
 func ReadLowestUnwindableBlock(tx kv.Tx) (uint64, error) {
-	//TODO: move this function somewhere from `commitment`/`state` pkg
+	// TODO: move this function somewhere from `commitment`/`state` pkg
 	changesetsCursor, err := tx.Cursor(kv.ChangeSets3)
 	if err != nil {
 		return 0, err
@@ -432,5 +433,4 @@ func ReadLowestUnwindableBlock(tx kv.Tx) (uint64, error) {
 		return 0, err
 	}
 	return blockNumber, nil
-
 }

@@ -80,7 +80,6 @@ func (bus *ManagedEventBus) UnregisterAll(object any) error {
 	bus.registrationLock.Lock()
 	for _, fn := range bus.registrations[objectPtr] {
 		err := bus.eventBus.Unsubscribe(fn)
-
 		if err != nil {
 			return err
 		}

@@ -54,7 +54,7 @@ type StorageMode int
 const (
 	DefaultStorageMode StorageMode = iota
 	KeyStorageMode
-	PrefixValStorageMode //TODO: change name
+	PrefixValStorageMode // TODO: change name
 	StepValueStorageMode
 	StepKeyStorageMode
 	ValueOffset8StorageMode // txNum at val[8:16], used by TxLookup
@@ -71,8 +71,8 @@ func HashSeekingPrune(
 	keysCursor kv.RwCursorDupSort, valDelCursor kv.PseudoDupSortRwCursor,
 	asserts bool,
 	mode StorageMode,
-) (stat *Stat, err error) {
-	stat = &Stat{MinTxNum: math.MaxUint64}
+) (*Stat, error) {
+	stat := &Stat{MinTxNum: math.MaxUint64}
 	start := time.Now()
 
 	if limit == 0 { // limits amount of txn to be pruned
@@ -119,7 +119,7 @@ func HashSeekingPrune(
 		}
 	}
 
-	err = collector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	loadErr := collector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		switch mode {
 		case KeyStorageMode:
 			//seek := make([]byte, 8, 256)
@@ -142,8 +142,7 @@ func HashSeekingPrune(
 				return err
 			}
 		case DefaultStorageMode:
-			err = valDelCursor.DeleteExact(key, txnm)
-			if err != nil {
+			if err := valDelCursor.DeleteExact(key, txnm); err != nil {
 				return err
 			}
 		}
@@ -181,7 +180,7 @@ func HashSeekingPrune(
 
 	logger.Debug("hash prune res", "name", name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "keys", stat.PruneCountTx, "vals", stat.PruneCountValues, "spent ms", time.Since(start).Milliseconds())
 
-	return stat, err
+	return stat, loadErr
 }
 
 type StartPos struct {
@@ -196,7 +195,6 @@ func TableScanningPrune(
 	logEvery *time.Ticker,
 	logger log.Logger,
 	keysCursor kv.RwCursorDupSort, valDelCursor kv.PseudoDupSortRwCursor,
-	asserts bool,
 	prevStat *Stat,
 	mode StorageMode,
 ) (stat *Stat, err error) {
@@ -223,7 +221,7 @@ func TableScanningPrune(
 		}
 	}
 
-	var keyCursorPosition = &StartPos{}
+	keyCursorPosition := &StartPos{}
 	if keysCursor != nil {
 		if prevStat.KeyProgress == InProgress {
 			keyCursorPosition.StartKey, keyCursorPosition.StartVal, err = keysCursor.Seek(prevStat.LastPrunedKey) //nolint:govet
@@ -287,7 +285,7 @@ func TableScanningPrune(
 		}
 	}
 
-	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, valDelCursor, keysCursor, asserts, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue)
+	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, valDelCursor, keysCursor, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue)
 	if err != nil {
 		return nil, err
 	}
@@ -311,7 +309,6 @@ func tableScanningPrune(
 	txNumGetter func(key, val []byte) uint64,
 	valDelCursor kv.PseudoDupSortRwCursor,
 	keysCursor kv.RwCursorDupSort,
-	asserts bool,
 	throttling *time.Duration,
 	logEvery *time.Ticker,
 	logger log.Logger,

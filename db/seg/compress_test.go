@@ -358,7 +358,8 @@ func TestCompressNoWordPatterns(t *testing.T) {
 	}
 	for i := range 100 {
 		// Semantic: "empty word" means "found key with empty value". "nil" - means key was deleted - not encodable by compressor
-		words = append(words,
+		words = append(
+			words,
 			nil,
 			[]byte{},
 

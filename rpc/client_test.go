@@ -24,18 +24,23 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -169,6 +174,49 @@ func TestClientBatchRequest(t *testing.T) {
 	}
 }
 
+// sendService records the order its calls run in. The first call is slow, so a concurrent
+// batch finishes it last.
+type sendService struct {
+	mu    sync.Mutex
+	order []int
+}
+
+func (s *sendService) SendRawTransaction(i int) int {
+	if i == 0 {
+		time.Sleep(50 * time.Millisecond)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.order = append(s.order, i)
+	return i
+}
+
+func TestClientBatchSendsRunInOrder(t *testing.T) {
+	logger := log.New()
+	server := newTestServer(logger)
+	defer server.Stop()
+	server.batchConcurrency = 2
+	svc := new(sendService)
+	if err := server.RegisterName("eth", svc); err != nil {
+		t.Fatal(err)
+	}
+	client := DialInProc(server, logger)
+	defer client.Close()
+
+	batch := make([]BatchElem, 4)
+	for i := range batch {
+		batch[i] = BatchElem{Method: "eth_sendRawTransaction", Args: []any{i}, Result: new(int)}
+	}
+	if err := client.BatchCall(batch); err != nil {
+		t.Fatal(err)
+	}
+	svc.mu.Lock()
+	defer svc.mu.Unlock()
+	if !slices.Equal(svc.order, []int{0, 1, 2, 3}) {
+		t.Fatalf("batch ran its sends in order %v, want 0 1 2 3", svc.order)
+	}
+}
+
 func TestClientBatchRequest_len(t *testing.T) {
 	logger := log.New()
 	b, err := json.Marshal([]jsonrpcMessage{
@@ -291,7 +339,7 @@ func TestClientCancelHTTP(t *testing.T)      { testClientCancel("http", t, log.N
 //
 // The HTTP transport uses synctest with in-memory connections for deterministic timing.
 // The WebSocket transport uses real TCP because its long-lived server goroutines
-// (pingLoop, ServeCodec, dispatch) have complex shutdown dependencies incompatible
+// (ServeCodec, dispatch) have complex shutdown dependencies incompatible
 // with synctest's requirement that all bubble goroutines exit.
 func testClientCancel(transport string, t *testing.T, logger log.Logger) {
 	if testing.Short() {
@@ -418,7 +466,7 @@ func TestClientSubscribeInvalidArg(t *testing.T) {
 				t.Error(dbg.Stack())
 			}
 		}()
-		client.EthSubscribe(context.Background(), arg, "foo_bar")
+		_, _ = client.EthSubscribe(context.Background(), arg, "foo_bar")
 	}
 	check(true, nil)
 	check(true, 1)
@@ -531,59 +579,71 @@ func TestClientCloseUnsubscribeRace(t *testing.T) {
 // This test checks that Client doesn't lock up when a single subscriber
 // doesn't read subscription events.
 func TestClientNotificationStorm(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
+	for _, test := range []struct {
+		name         string
+		count        int
+		wantOverflow bool
+	}{
+		{name: "full", count: maxClientSubscriptionBuffer},
+		{name: "overflow", count: maxClientSubscriptionBuffer + 1, wantOverflow: true},
+		// Delivery must also unblock after the forwarding goroutine exits.
+		{name: "notification_after_overflow", count: maxClientSubscriptionBuffer + 2, wantOverflow: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				logger := log.New()
+				server := newTestServer(logger)
+				defer server.Stop()
+				client := DialInProc(server, logger)
+				defer client.Close()
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+
+				nc := make(chan int)
+				sub, err := client.Subscribe(ctx, "nftest", nc, "someSubscription", test.count, 0)
+				if err != nil {
+					t.Fatal("can't subscribe:", err)
+				}
+
+				// Keep the subscriber unread until the notification burst has finished.
+				// Overflow then depends on queue capacity, not producer/consumer scheduling.
+				synctest.Wait()
+
+				var result int
+				if err := client.CallContext(ctx, &result, "nftest_echo", 42); err != nil {
+					t.Fatal("call with an unread subscriber:", err)
+				}
+				if result != 42 {
+					t.Fatalf("unexpected call result %d, want 42", result)
+				}
+
+				if test.wantOverflow {
+					select {
+					case err := <-sub.Err():
+						if !errors.Is(err, ErrSubscriptionQueueOverflow) {
+							t.Fatalf("got error %v, want %v", err, ErrSubscriptionQueueOverflow)
+						}
+					default:
+						t.Fatal("didn't get expected overflow error")
+					}
+					return
+				}
+
+				for i := range test.count {
+					select {
+					case val := <-nc:
+						if val != i {
+							t.Fatalf("(%d/%d) unexpected value %d", i, test.count, val)
+						}
+					case err := <-sub.Err():
+						t.Fatalf("(%d/%d) unexpected subscription error: %v", i, test.count, err)
+					case <-ctx.Done():
+						t.Fatalf("(%d/%d) waiting for notification: %v", i, test.count, ctx.Err())
+					}
+				}
+			})
+		})
 	}
-	logger := log.New()
-	server := newTestServer(logger)
-	defer server.Stop()
-
-	doTest := func(count int, wantError bool) {
-		client := DialInProc(server, logger)
-		defer client.Close()
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		// Subscribe on the server. It will start sending many notifications
-		// very quickly.
-		nc := make(chan int)
-		sub, err := client.Subscribe(ctx, "nftest", nc, "someSubscription", count, 0)
-		if err != nil {
-			t.Fatal("can't subscribe:", err)
-		}
-		defer sub.Unsubscribe()
-
-		// Process each notification, try to run a call in between each of them.
-		for i := range count {
-			select {
-			case val := <-nc:
-				if val != i {
-					t.Fatalf("(%d/%d) unexpected value %d", i, count, val)
-				}
-			case err := <-sub.Err():
-				if wantError && !errors.Is(err, ErrSubscriptionQueueOverflow) {
-					t.Fatalf("(%d/%d) got error %q, want %q", i, count, err, ErrSubscriptionQueueOverflow)
-				} else if !wantError {
-					t.Fatalf("(%d/%d) got unexpected error %q", i, count, err)
-				}
-				return
-			}
-			var r int
-			err := client.CallContext(ctx, &r, "nftest_echo", i)
-			if err != nil {
-				if !wantError {
-					t.Fatalf("(%d/%d) call error: %v", i, count, err)
-				}
-				return
-			}
-		}
-		if wantError {
-			t.Fatalf("didn't get expected error")
-		}
-	}
-
-	doTest(8000, false)
-	doTest(30000, true)
 }
 
 func TestClientSetHeader(t *testing.T) {
@@ -679,7 +739,7 @@ func TestClientReconnect(t *testing.T) {
 		if err != nil {
 			t.Fatal("can't listen:", err)
 		}
-		go http.Serve(l, srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+		go func() { _ = http.Serve(l, srv.WebsocketHandler([]string{"*"}, nil, false, logger)) }()
 		return srv, l
 	}
 
@@ -898,7 +958,7 @@ func memHTTPTestClient(srv *Server, fl *flakeyListener) (*Client, *http.Server) 
 	}
 
 	hs := &http.Server{Handler: srv}
-	go hs.Serve(listener)
+	go func() { _ = hs.Serve(listener) }()
 
 	httpClient := &http.Client{
 		Transport: &http.Transport{
@@ -911,4 +971,135 @@ func memHTTPTestClient(srv *Server, fl *flakeyListener) (*Client, *http.Server) 
 		panic(err)
 	}
 	return client, hs
+}
+
+func TestClientOptionsSetHeaders(t *testing.T) {
+	logger := log.New()
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	wsHandler := srv.WebsocketHandler(nil, nil, false, logger)
+	var (
+		mu  sync.Mutex
+		got http.Header
+	)
+	httpsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		got = r.Header.Clone()
+		mu.Unlock()
+		if r.Header.Get("Upgrade") == "websocket" {
+			wsHandler.ServeHTTP(w, r)
+			return
+		}
+		srv.ServeHTTP(w, r)
+	}))
+	defer httpsrv.Close()
+
+	for _, transport := range []string{"http", "ws"} {
+		t.Run(transport, func(t *testing.T) {
+			url := httpsrv.URL
+			if transport == "ws" {
+				url = "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
+			}
+			client, err := DialOptions(context.Background(), url, logger,
+				WithHeader("X-A", "a"),
+				WithHeaders(http.Header{"X-B": {"b"}}),
+				WithHTTPAuth(func(h http.Header) error {
+					h.Set("Authorization", "Bearer token")
+					return nil
+				}),
+				WithWebsocketDialOptions(websocket.DialOptions{HTTPHeader: http.Header{"X-D": {"d"}}}),
+			)
+			require.NoError(t, err)
+			defer client.Close()
+			require.Equal(t, transport != "http", client.SupportsSubscriptions())
+
+			ctx := NewContextWithHeaders(context.Background(), http.Header{"X-C": {"c"}})
+			_, err = client.SupportedModules()
+			require.NoError(t, err)
+			require.NoError(t, client.CallContext(ctx, nil, "test_noArgsRets"))
+
+			mu.Lock()
+			defer mu.Unlock()
+			require.Equal(t, "a", got.Get("X-A"))
+			require.Equal(t, "b", got.Get("X-B"))
+			require.Equal(t, "Bearer token", got.Get("Authorization"))
+			if transport == "http" {
+				require.Equal(t, "c", got.Get("X-C"))
+			} else {
+				require.Equal(t, "d", got.Get("X-D"))
+			}
+		})
+	}
+}
+
+func TestClientHTTPError(t *testing.T) {
+	httpsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "short and stout", http.StatusTeapot)
+	}))
+	defer httpsrv.Close()
+	client, err := DialOptions(context.Background(), httpsrv.URL, log.New())
+	require.NoError(t, err)
+	defer client.Close()
+
+	var httpErr HTTPError
+	require.ErrorAs(t, client.Call(nil, "test_noArgsRets"), &httpErr)
+	require.Equal(t, http.StatusTeapot, httpErr.StatusCode)
+	require.Contains(t, string(httpErr.Body), "short and stout")
+}
+
+func TestClientIPC(t *testing.T) {
+	logger := log.New()
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	path := filepath.Join(t.TempDir(), "rpc.ipc")
+	l, err := (&net.ListenConfig{}).Listen(t.Context(), "unix", path)
+	require.NoError(t, err)
+	defer l.Close()
+	go srv.ServeListener(l) //nolint:errcheck
+
+	client, err := DialOptions(context.Background(), path, logger)
+	require.NoError(t, err)
+	defer client.Close()
+	var res echoResult
+	require.NoError(t, client.Call(&res, "test_echo", "x", 1, nil))
+	require.Equal(t, "x", res.String)
+	require.True(t, client.SupportsSubscriptions())
+}
+
+type reverseService struct{}
+
+func (reverseService) Echo(ctx context.Context, s string) (string, error) {
+	if _, ok := ClientFromContext(ctx); !ok {
+		return "", errors.New("no client in the context")
+	}
+	return s, nil
+}
+
+// pipeClient returns a client whose server side is the returned writer and decoder.
+func pipeClient(t *testing.T, opts ...ClientOption) (*Client, io.Writer, *json.Decoder) {
+	inR, inW := io.Pipe()
+	outR, outW := io.Pipe()
+	cfg := new(clientConfig)
+	for _, opt := range opts {
+		opt(cfg)
+	}
+	client, err := newClient(context.Background(), cfg, newClientTransportIO(inR, outW), log.New())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		inW.Close() // ends the client's read loop, which Close waits for
+		outR.Close()
+		client.Close()
+	})
+	require.NoError(t, client.RegisterName("rev", reverseService{}))
+	return client, inW, json.NewDecoder(outR)
+}
+
+func TestClientServesReverseCalls(t *testing.T) {
+	_, in, out := pipeClient(t)
+	_, err := io.WriteString(in, `{"jsonrpc":"2.0","id":1,"method":"rev_echo","params":["hi"]}`)
+	require.NoError(t, err)
+	var resp jsonrpcMessage
+	require.NoError(t, out.Decode(&resp))
+	require.Nil(t, resp.Error)
+	require.JSONEq(t, `"hi"`, string(resp.Result))
 }

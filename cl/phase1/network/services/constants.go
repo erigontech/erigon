@@ -26,23 +26,25 @@ import (
 
 const (
 	validatorAttestationCacheSize = 100_000
-	proposerSlashingCacheSize     = 100
 	operationSeenCacheSize        = 16_384
 	seenBlockCacheSize            = 1000 // SeenBlockCacheSize is the size of the cache for seen blocks.
 	blockJobsIntervalTick         = 50 * time.Millisecond
-	blobJobsIntervalTick          = 5 * time.Millisecond
-	singleAttestationIntervalTick = 10 * time.Millisecond
 	attestationJobsIntervalTick   = 100 * time.Millisecond
 	blockJobExpiry                = 30 * time.Second
-	blobJobExpiry                 = 30 * time.Second
-	attestationJobExpiry          = 30 * time.Minute
-	singleAttestationJobExpiry    = 6 * time.Second
+	blockRetryInitialDelay        = 250 * time.Millisecond
+	blockRetryMaxDelay            = 2 * time.Second
+	maximumGossipClockDisparity   = 500 * time.Millisecond
+	// One mainnet slot of single attestations (~1M active validators / 32 slots), as seen on all subnets.
+	maxAttestationsAwaitingBlock = 1 << 15
 )
 
 var (
 	ErrIgnore                          = errors.New("ignore") // ErrIgnore is used to indicate that the message should be ignored.
-	ErrBidQueued                       = errors.New("bid queued")
+	ErrAggregatorAlreadyKnown          = errors.New("aggregator already known")
+	ErrAggregatorAlreadySeen           = errors.New("aggregator already seen")
+	ErrProposerPreferenceAlreadySeen   = errors.New("already seen proposer preferences")
 	ErrAttestationQueued               = errors.New("attestation queued")
+	ErrAttestationAlreadySeen          = errors.New("validator already seen in target epoch") // Returned before signature validation, so it does not prove the submitted attestation is valid.
 	ErrBlockYoungerThanParent          = errors.New("block is younger than parent")
 	ErrInvalidCommitmentsCount         = errors.New("invalid commitments count")
 	ErrCommitmentsInclusionProofFailed = errors.New("commitments inclusion proof failed")

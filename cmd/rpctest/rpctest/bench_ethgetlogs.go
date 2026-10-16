@@ -18,6 +18,7 @@ package rpctest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"iter"
 	"maps"
@@ -47,14 +48,14 @@ const maxTopicPositions = 4
 //	false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
 //	recordFile stores all eth_getlogs returned with success
 //	errorFile stores information when erigon and geth doesn't return same data
-func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) error {
+func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) (err error) {
 	setRoutes(erigonURL, gethURL)
 
 	rec, errs, cleanup, err := openWriters(recordFile, errorFile)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+	defer func() { err = errors.Join(err, cleanup()) }()
 
 	var resultsCh chan CallResult = nil
 	if !needCompare {
@@ -81,10 +82,10 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 		var mag DebugModifiedAccounts
 		res = reqGen.Erigon("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
 		if res.Err != nil {
-			return fmt.Errorf("Could not get modified accounts (Erigon): %w\n", res.Err)
+			return fmt.Errorf("could not get modified accounts (Erigon): %w", res.Err)
 		}
 		if mag.Error != nil {
-			return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", mag.Error.Code, mag.Error.Message)
+			return fmt.Errorf("error getting modified accounts (Erigon): %d %s", mag.Error.Code, mag.Error.Message)
 		}
 		if res.Err == nil && mag.Error == nil {
 			accountSet := extractAccountMap(&mag)
@@ -383,7 +384,8 @@ func BenchEthGetLogsRandomBlock(erigonURL string, concurentRequests int) error {
 
 			m.Unlock()
 
-			fmt.Printf("Latency 50p: %.2fms 90p: %.2fms 99p: %.2fms RPS: %.2f req/s\n",
+			fmt.Printf(
+				"Latency 50p: %.2fms 90p: %.2fms 99p: %.2fms RPS: %.2f req/s\n",
 				p50,
 				p90,
 				p99,
@@ -391,7 +393,6 @@ func BenchEthGetLogsRandomBlock(erigonURL string, concurentRequests int) error {
 			)
 
 		}
-
 	}()
 
 	reqQueue := make(chan struct{}, concurentRequests)
@@ -410,7 +411,7 @@ func BenchEthGetLogsRandomBlock(erigonURL string, concurentRequests int) error {
 				panic(fmt.Errorf("[ethGetLogsRandomBlock] could not get logs bn %d err %s", bn, res.Err.Error()))
 			}
 			if resp.Error != nil {
-				panic(fmt.Errorf("Error getting logs (Erigon): %d %s", resp.Error.Code, resp.Error.Message))
+				panic(fmt.Errorf("error getting logs (Erigon): %d %s", resp.Error.Code, resp.Error.Message))
 			}
 
 			reqLatency := int(time.Since(launchedAt).Microseconds())

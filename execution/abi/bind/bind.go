@@ -143,7 +143,7 @@ func Bind(types []string, abis []string, bytecodes []string, fsigs []map[string]
 			normalized := original
 			normalizedName := methodNormalizer[lang](alias(aliases, original.Name))
 			// Ensure there is no duplicated identifier
-			var identifiers = callIdentifiers
+			identifiers := callIdentifiers
 			if !original.IsConstant() {
 				identifiers = transactIdentifiers
 			}

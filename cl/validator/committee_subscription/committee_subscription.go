@@ -20,19 +20,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/gossip"
 	gossipMgr "github.com/erigontech/erigon/cl/phase1/network/gossip"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
-	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -47,42 +43,28 @@ var (
 )
 
 type CommitteeSubscribeMgmt struct {
-	ethClock      eth_clock.EthereumClock
-	beaconConfig  *clparams.BeaconChainConfig
-	netConfig     *clparams.NetworkConfig
-	syncedData    *synced_data.SyncedDataManager
-	gossipManager *gossipMgr.GossipManager
-	// subscriptions
-	aggregationPool    aggregation.AggregationPool
-	validatorSubsMutex sync.RWMutex
-	validatorSubs      map[uint64]*validatorSub // committeeIndex -> validatorSub
+	beaconConfig    *clparams.BeaconChainConfig
+	netConfig       *clparams.NetworkConfig
+	syncedData      *synced_data.SyncedDataManager
+	gossipManager   *gossipMgr.GossipManager
+	aggregationPool aggregation.AggregationPool
 }
 
 func NewCommitteeSubscribeManagement(
-	ctx context.Context,
 	beaconConfig *clparams.BeaconChainConfig,
 	netConfig *clparams.NetworkConfig,
-	ethClock eth_clock.EthereumClock,
-	aggregationPool aggregation.AggregationPool,
 	syncedData *synced_data.SyncedDataManager,
 	gossipManager *gossipMgr.GossipManager,
+	aggregationPool aggregation.AggregationPool,
 ) *CommitteeSubscribeMgmt {
 	c := &CommitteeSubscribeMgmt{
 		beaconConfig:    beaconConfig,
 		netConfig:       netConfig,
-		ethClock:        ethClock,
-		aggregationPool: aggregationPool,
 		syncedData:      syncedData,
 		gossipManager:   gossipManager,
-		validatorSubs:   make(map[uint64]*validatorSub),
+		aggregationPool: aggregationPool,
 	}
-	go c.sweepByStaleSlots(ctx)
 	return c
-}
-
-type validatorSub struct {
-	aggregate         bool
-	largestTargetSlot uint64
 }
 
 func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context, p *cltypes.BeaconCommitteeSubscription) error {
@@ -90,6 +72,9 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 		slot   = p.Slot
 		cIndex = p.CommitteeIndex
 	)
+	if p.IsAggregator {
+		c.aggregationPool.AddAggregatorDuty(slot, cIndex)
+	}
 
 	if c.syncedData.Syncing() {
 		return synced_data.ErrNotSynced
@@ -98,23 +83,6 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 	log.Trace("Add attestation subscription", "slot", slot, "committeeIndex", cIndex, "isAggregator", p.IsAggregator, "validatorIndex", p.ValidatorIndex)
 	commiteePerSlot := c.syncedData.CommitteeCount(p.Slot / c.beaconConfig.SlotsPerEpoch)
 	subnetId := subnets.ComputeSubnetForAttestation(commiteePerSlot, slot, cIndex, c.beaconConfig.SlotsPerEpoch, c.netConfig.AttestationSubnetCount)
-	// add validator to subscription
-	c.validatorSubsMutex.Lock()
-
-	if _, ok := c.validatorSubs[cIndex]; !ok {
-		c.validatorSubs[cIndex] = &validatorSub{
-			aggregate:         p.IsAggregator,
-			largestTargetSlot: slot,
-		}
-	} else {
-		// set aggregator to true if any validator in the committee is an aggregator
-		c.validatorSubs[cIndex].aggregate = (c.validatorSubs[cIndex].aggregate || p.IsAggregator)
-		// update latest target slot
-		if c.validatorSubs[cIndex].largestTargetSlot < slot {
-			c.validatorSubs[cIndex].largestTargetSlot = slot
-		}
-	}
-	c.validatorSubsMutex.Unlock()
 
 	epochDuration := 2 * time.Duration(c.beaconConfig.SlotsPerEpoch) * time.Duration(c.beaconConfig.SecondsPerSlot) * time.Second
 	// set sentinel gossip expiration by subnet id
@@ -130,97 +98,4 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 		return err
 	}
 	return nil
-}
-
-func (c *CommitteeSubscribeMgmt) AggregateAttestation(att *solid.Attestation) error {
-	var (
-		committeeIndex = att.Data.CommitteeIndex
-		slot           = att.Data.Slot
-		clVersion      = c.beaconConfig.GetCurrentStateVersion(slot / c.beaconConfig.SlotsPerEpoch)
-	)
-	if clVersion.AfterOrEqual(clparams.ElectraVersion) {
-		index, err := att.GetCommitteeIndexFromBits()
-		if err != nil {
-			return err
-		}
-		committeeIndex = index
-	}
-
-	c.validatorSubsMutex.RLock()
-	defer c.validatorSubsMutex.RUnlock()
-	if sub, ok := c.validatorSubs[committeeIndex]; ok && sub.aggregate {
-		// aggregate attestation
-		if err := c.aggregationPool.AddAttestation(att); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (c *CommitteeSubscribeMgmt) NeedToAggregate(att *solid.Attestation) bool {
-	var (
-		committeeIndex = att.Data.CommitteeIndex
-		slot           = att.Data.Slot
-	)
-	clVersion := c.beaconConfig.GetCurrentStateVersion(slot / c.beaconConfig.SlotsPerEpoch)
-	if clVersion.AfterOrEqual(clparams.ElectraVersion) {
-		index, err := att.GetCommitteeIndexFromBits()
-		if err != nil {
-			return false
-		}
-		committeeIndex = index
-	}
-
-	c.validatorSubsMutex.RLock()
-	defer c.validatorSubsMutex.RUnlock()
-	if sub, ok := c.validatorSubs[committeeIndex]; ok && sub.aggregate {
-		root, err := att.Data.HashSSZ()
-		if err != nil {
-			log.Warn("failed to hash attestation data", "err", err)
-			return false
-		}
-		aggregation := c.aggregationPool.GetAggregatationByRoot(root)
-		if aggregation == nil ||
-			!utils.IsNonStrictSupersetBitlist(aggregation.AggregationBits.Bytes(), att.AggregationBits.Bytes()) {
-			// the on bit is not set. need to aggregate
-			return true
-		}
-	}
-	return false
-}
-
-func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
-	slotIsStale := func(curSlot, targetSlot uint64) bool {
-		if curSlot <= targetSlot {
-			// Avoid subtracting unsigned integers
-			return false
-		}
-		return curSlot-targetSlot > c.netConfig.AttestationPropagationSlotRange
-	}
-	// sweep every 3 seconds
-	ticker := time.NewTicker(3 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			curSlot := c.ethClock.GetCurrentSlot()
-			toRemoves := make([]uint64, 0)
-			c.validatorSubsMutex.Lock()
-			for committeeIdx, sub := range c.validatorSubs {
-				if slotIsStale(curSlot, sub.largestTargetSlot) {
-					toRemoves = append(toRemoves, committeeIdx)
-				}
-				// try remove aggregator flag to avoid unnecessary aggregation
-				if curSlot > sub.largestTargetSlot {
-					sub.aggregate = false
-				}
-			}
-			for _, idx := range toRemoves {
-				delete(c.validatorSubs, idx)
-			}
-			c.validatorSubsMutex.Unlock()
-		}
-	}
 }

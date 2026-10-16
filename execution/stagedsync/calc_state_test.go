@@ -391,18 +391,30 @@ type preBlockReader struct {
 	acc  *accounts.Account
 }
 
+func (r *preBlockReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (r *preBlockReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
 func (r *preBlockReader) ReadAccountData(a accounts.Address) (*accounts.Account, error) {
 	if a == r.addr {
 		return r.acc, nil
 	}
 	return nil, nil
 }
+
 func (r *preBlockReader) ReadAccountDataForDebug(accounts.Address) (*accounts.Account, error) {
 	return nil, nil
 }
+
 func (r *preBlockReader) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
+
 func (r *preBlockReader) ReadAccountCode(accounts.Address) ([]byte, error)        { return nil, nil }
 func (r *preBlockReader) ReadAccountCodeSize(accounts.Address) (int, error)       { return 0, nil }
 func (r *preBlockReader) ReadAccountIncarnation(accounts.Address) (uint64, error) { return 0, nil }
@@ -413,8 +425,9 @@ func (r *preBlockReader) TracePrefix() string                                   
 // TestSDOfPreExistingContract_FullPipeline drives the production pipeline
 // end-to-end for an SD-of-pre-existing-contract scenario:
 //
-//	IBS.Selfdestruct (intra_block_state.go ~1430) emits via versionWritten:
-//	    IncarnationPath = original.Incarnation
+//	IBS.Selfdestruct emits via versionWritten:
+//	    IncarnationPath = 0 (the fixture writes a synthetic non-zero value
+//	                       to check that the calculator zeroes it)
 //	    SelfDestructPath = true
 //	    BalancePath = 0
 //	    StoragePath[k] = 0  for each k in stateObject.dirtyStorage
@@ -423,10 +436,8 @@ func (r *preBlockReader) TracePrefix() string                                   
 //	  → calcState.ApplyWrites(normalized)
 //	  → calcState.FlushToUpdates(updates)
 //
-// This test populates `vm` with the same versionWritten emits IBS.Selfdestruct
-// publishes in production (concern #1 from yperbasis review on PR #21032 —
-// the prior version of this test had an empty vm and so the completion
-// loop's vm.Read fallback never fired, masking the actual production flow).
+// This test also populates `vm` with these writes, so the completion loop's
+// vm.Read fallback runs as in production; only the incarnation value differs.
 //
 // What it locks in (post-#21088 corrected semantics):
 //  1. Normalize detects SD'd addresses by scanning for
@@ -822,9 +833,9 @@ func buildSDWithPostBalance(t *testing.T, addr accounts.Address, postSDBalance u
 	original := sdEIP8246Original()
 	ver := state.Version{TxIndex: 0, Incarnation: 0}
 
-	// IBS.Selfdestruct emits IncarnationPath=preInc, SelfDestructPath=true and
+	// IBS.Selfdestruct emits IncarnationPath, SelfDestructPath=true and
 	// BalancePath=postSDBalance (pre-8246 that balance is 0; EIP-8246 leaves the
-	// moved-in/retained balance).
+	// moved-in/retained balance). A non-zero incarnation checks that it is zeroed.
 	rawWrites := newWS().
 		inc(addr, ver, original.Incarnation).
 		selfDestruct(addr, ver, true).

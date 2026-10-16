@@ -48,7 +48,7 @@ func TestOverlayGetBeginEnd(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	latestExecuted, _, _, err := rpchelper.GetBlockNumber(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, nil)
+	latestExecuted, _, _, err := rpchelper.GetBlockNumber(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader)
 	require.NoError(t, err)
 
 	begin, end, err := getBeginEnd(m.Ctx, tx, api, filters.FilterCriteria{FromBlock: big.NewInt(2), ToBlock: big.NewInt(5)})
@@ -155,6 +155,28 @@ func TestOverlayGetLogsReplaysFailedTxWithCodeOverride(t *testing.T) {
 	require.Equal(t, controlTarget, logs[1].Address, "positive-control transaction should emit one log")
 }
 
+// The rules parameter is optional: a request with state overrides and no rules must not crash.
+func TestOverlayGetLogsStateOverrideWithoutRules(t *testing.T) {
+	failedTarget := common.HexToAddress("0x00000000000000000000000000000000000000aa")
+	controlTarget := common.HexToAddress("0x00000000000000000000000000000000000000bb")
+	revertCode := []byte{byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.REVERT)}
+	logCode := []byte{byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.LOG0)}
+	setup := newOverlayGetLogsTestSetup(t, map[common.Address][]byte{
+		failedTarget:  revertCode,
+		controlTarget: logCode,
+	}, failedTarget, 100_000, controlTarget)
+
+	balance := (*hexutil.U256)(uint256.NewInt(1))
+	logs, err := setup.api.GetLogs(setup.m.Ctx, filters.FilterCriteria{
+		FromBlock: setup.blockNumber,
+		ToBlock:   setup.blockNumber,
+		Addresses: []common.Address{failedTarget, controlTarget},
+	}, &ethapi.StateOverrides{accounts.InternAddress(controlTarget): {Balance: &balance}}, nil)
+	require.NoError(t, err)
+	require.Len(t, logs, 1)
+	require.Equal(t, controlTarget, logs[0].Address)
+}
+
 // Without overrides an originally failed txn must keep being skipped, even one
 // that would succeed on replay (the replay raises its gas limit to the gas cap,
 // so an out-of-gas failure would flip to success and emit a spurious log).
@@ -188,4 +210,21 @@ func TestCallConstructorReturnsOverlayError(t *testing.T) {
 	require.Nil(t, result)
 	var invalidOpcode *vm.ErrInvalidOpCode
 	require.ErrorAs(t, err, &invalidOpcode)
+}
+
+func TestCallConstructorRejectsNonContract(t *testing.T) {
+	m, bankAddress, _, _ := chainWithDeployedContract(t)
+	base := newBaseApiForTest(m)
+	api := NewOverlayAPI(
+		base,
+		m.DB,
+		&rpccfg.OverlayApiConfig{GasCap: 1_000_000},
+		NewOtterscanAPI(base, m.DB, 25),
+	)
+	code := hexutil.Bytes{byte(vm.STOP)}
+	for _, addr := range []common.Address{bankAddress, common.HexToAddress("0xdead")} {
+		result, err := api.CallConstructor(m.Ctx, addr, &code)
+		require.Nil(t, result)
+		require.Error(t, err)
+	}
 }
