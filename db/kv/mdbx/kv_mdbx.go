@@ -108,7 +108,9 @@ const (
 	maxSyncInCommitIfUnsyncedFor     = 18 * time.Hour // mdbx's 16.16-bit range
 )
 
-// SafeNoSync: the poller syncs every pollerSyncPeriod; past either SyncInCommit limit a commit behaves as Durable.
+// SafeNoSync. Poller: calls env.Sync every PollerSyncPeriod.
+// Commit: syncs inside itself, like Durable, only if unsynced data is above SyncInCommitIfAboveUnsyncedBytes
+// or the last sync is older than SyncInCommitIfUnsyncedFor.
 var (
 	SyncInCommitIfAboveUnsyncedBytes = dbg.EnvDataSize("MDBX_SYNC_BYTES", 256*datasize.MB)
 	DefaultPollerSyncPeriod          = dbg.EnvDuration("MDBX_SYNC_PERIOD", time.Second)
