@@ -20,6 +20,7 @@ func RegisterGossipServices(
 	gm *gossip.GossipManager,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	ethClock eth_clock.EthereumClock,
+	activeValidatorCount func() uint64,
 	// services
 	blockService services.BlockService,
 	attesterSlashingService services.AttesterSlashingService,
@@ -54,8 +55,11 @@ func RegisterGossipServices(
 	add(gossip.RegisterGossipService(gm, voluntaryExitService, waitReady, withRateLimiterByPeer(2, 8)))
 	add(gossip.RegisterGossipService(gm, blsToExecutionChangeService, waitReady, withRateLimiterByPeer(2, 8)))
 	add(gossip.RegisterGossipService(gm, proposerSlashingService, waitReady, withRateLimiterByPeer(2, 8)))
-	add(gossip.RegisterGossipService(gm, attestationService, waitReady, withGlobalTimeBasedRateLimiter(6*time.Second, 250)))
-	add(gossip.RegisterGossipService(gm, blobService, withEndVersion(clparams.FuluVersion), withGlobalTimeBasedRateLimiter(6*time.Second, 32)))
+	attestationWindow := 6 * time.Second
+	add(gossip.RegisterGossipService(gm, attestationService, waitReady, withGlobalTimeBasedRateLimiter(attestationWindow, func() int {
+		return max(250, int(gm.ExpectedAttestations(attestationWindow, activeValidatorCount())*3/2))
+	})))
+	add(gossip.RegisterGossipService(gm, blobService, withEndVersion(clparams.FuluVersion), withGlobalTimeBasedRateLimiter(6*time.Second, func() int { return 32 })))
 	// fulu
 	add(gossip.RegisterGossipService(gm, dataColumnSidecarService, withBeginVersion(clparams.FuluVersion), withRateLimiterByPeer(32, 64)))
 	// gloas
@@ -88,7 +92,7 @@ func withEndVersion(endVersion clparams.StateVersion) gossip.ConditionFunc {
 }
 
 // withGlobalTimeBasedRateLimiter returns a condition that checks if the message can be processed based on the time based rate limiter
-func withGlobalTimeBasedRateLimiter(duration time.Duration, maxRequests int) gossip.ConditionFunc {
+func withGlobalTimeBasedRateLimiter(duration time.Duration, maxRequests func() int) gossip.ConditionFunc {
 	limiter := newTimeBasedRateLimiter(duration, maxRequests)
 	return func(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
 		return limiter.tryAcquire()

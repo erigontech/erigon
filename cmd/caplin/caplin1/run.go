@@ -519,6 +519,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		gossipManager,
 		forkChoice,
 		ethClock,
+		syncedDataManager.ActiveValidatorCount,
 		blockService,
 		attesterSlashingService,
 		blobService,

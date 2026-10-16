@@ -159,7 +159,7 @@ func TestRegisterGossipServicesProcessesGloasPreferencesOneEpochEarly(t *testing
 			forkChoice := forkchoice_mock.NewForkChoiceStorageMock(t)
 			forkChoice.HighestSeenVal = 64
 			RegisterGossipServices(
-				gm, forkChoice, clock, blockService, attesterSlashingService, blobService, dataColumnSidecarService,
+				gm, forkChoice, clock, func() uint64 { return 0 }, blockService, attesterSlashingService, blobService, dataColumnSidecarService,
 				syncCommitteeMessagesService, syncContributionService, aggregateAndProofService, attestationService,
 				voluntaryExitService, blsToExecutionChangeService, proposerSlashingService, executionPayloadService,
 				payloadAttestationService, proposerPreferencesService, executionPayloadBidService,
