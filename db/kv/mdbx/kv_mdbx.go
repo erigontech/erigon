@@ -77,7 +77,7 @@ type MdbxOpts struct {
 	log                       log.Logger
 	bucketsCfg                TableCfgFunc
 	path                      string
-	pollerSyncInterval        time.Duration      // to be used only in combination with SafeNoSync flag. The dirty data will automatically be flushed to disk periodically in the background.
+	syncPeriod                time.Duration      // to be used only in combination with SafeNoSync flag. The dirty data will automatically be flushed to disk periodically in the background.
 	syncInCommitIfUnsyncedFor time.Duration      // SafeNoSync only
 	syncBytes                 *datasize.ByteSize // to be used only in combination with SafeNoSync flag. The dirty data will be flushed to disk when this threshold is reached.
 	mapSize                   datasize.ByteSize
@@ -108,10 +108,10 @@ const (
 	maxSyncInCommitIfUnsyncedFor     = 18 * time.Hour // mdbx's 16.16-bit range
 )
 
-// SafeNoSync: the poller syncs every pollerSyncInterval; past either SyncInCommit limit a commit behaves as Durable.
+// SafeNoSync: the poller syncs every syncPeriod; past either SyncInCommit limit a commit behaves as Durable.
 var (
 	SyncInCommitIfAboveUnsyncedBytes = dbg.EnvDataSize("MDBX_SYNC_BYTES", 256*datasize.MB)
-	DefaultPollerSyncInterval        = dbg.EnvDuration("MDBX_SYNC_PERIOD", time.Second)
+	DefaultSyncPeriod                = dbg.EnvDuration("MDBX_SYNC_PERIOD", time.Second)
 
 	// DefaultSafeNoSync gives every database the deferred flush. Set it before any database
 	// opens - the erigon binary does so from --db.safe.nosync.
@@ -161,8 +161,8 @@ func (opts MdbxOpts) RoTxsLimiter(l *semaphore.Weighted) MdbxOpts { opts.roTxsLi
 func (opts MdbxOpts) PageSize(v datasize.ByteSize) MdbxOpts       { opts.pageSize = v; return opts }
 func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts     { opts.growthStep = v; return opts }
 func (opts MdbxOpts) Path(path string) MdbxOpts                   { opts.path = path; return opts }
-func (opts MdbxOpts) PollerSyncInterval(period time.Duration) MdbxOpts {
-	opts.pollerSyncInterval = period
+func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts {
+	opts.syncPeriod = period
 	return opts
 }
 func (opts MdbxOpts) SyncInCommitIfUnsyncedFor(d time.Duration) MdbxOpts {
@@ -188,11 +188,11 @@ func (opts MdbxOpts) Durable() MdbxOpts {
 // accede must not take the write lock at open, and utterly-nosync wants no flush at all.
 func (opts MdbxOpts) resolveSync() MdbxOpts {
 	if opts.utterlyNoSync() { // asked for no flush at all, and the bit set includes SafeNoSync
-		opts.syncBytes, opts.pollerSyncInterval = nil, 0
+		opts.syncBytes, opts.syncPeriod = nil, 0
 		return opts
 	}
 	if opts.HasFlag(mdbx.Readonly) || opts.HasFlag(mdbx.Accede) {
-		opts.syncBytes, opts.pollerSyncInterval = nil, 0
+		opts.syncBytes, opts.syncPeriod = nil, 0
 		return opts.Flags(func(f uint) uint { return f &^ mdbx.SafeNoSync })
 	}
 	if !opts.HasFlag(mdbx.SafeNoSync) {
@@ -201,8 +201,8 @@ func (opts MdbxOpts) resolveSync() MdbxOpts {
 	if opts.syncBytes == nil {
 		opts = opts.SyncBytes(SyncInCommitIfAboveUnsyncedBytes)
 	}
-	if opts.pollerSyncInterval == 0 {
-		opts = opts.PollerSyncInterval(DefaultPollerSyncInterval)
+	if opts.syncPeriod == 0 {
+		opts = opts.SyncPeriod(DefaultSyncPeriod)
 	}
 	if opts.syncInCommitIfUnsyncedFor == 0 {
 		opts = opts.SyncInCommitIfUnsyncedFor(DefaultSyncInCommitIfUnsyncedFor)
@@ -437,7 +437,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		return nil, err
 	}
 
-	if opts.HasFlag(mdbx.SafeNoSync) && opts.pollerSyncInterval != 0 {
+	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
 		if err := env.SetSyncPeriod(min(opts.syncInCommitIfUnsyncedFor, maxSyncInCommitIfUnsyncedFor)); err != nil {
 			return nil, err
 		}
@@ -481,9 +481,9 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		MaxBatchDelay: DefaultMaxBatchDelay,
 	}
 
-	if opts.pollerSyncInterval > 0 && opts.HasFlag(mdbx.SafeNoSync) && !opts.utterlyNoSync() {
+	if opts.syncPeriod > 0 && opts.HasFlag(mdbx.SafeNoSync) && !opts.utterlyNoSync() {
 		db.syncerDone = make(chan struct{})
-		go db.syncPoller(opts.pollerSyncInterval)
+		go db.syncPoller(opts.syncPeriod)
 	}
 
 	// Open can fail after a read txn has been pooled; Close aborts those. The outer env.Close
