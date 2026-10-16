@@ -692,6 +692,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		attestationProducer,
 		peerDas,
 	)
+	defer stageCfg.Close()
 	sync := stages.ConsensusClStages()
 
 	logger.Info("[Caplin] starting clstages loop")
