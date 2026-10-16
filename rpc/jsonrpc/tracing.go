@@ -179,7 +179,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			if traceErr != nil {
 				return traceErr
 			}
-			return ibs.FinalizeTx(rules, state.NewNoopWriter())
+			return transactions.FinalizeCallTx(ibs, rules)
 		})
 
 		stream.WriteObjectEnd()
@@ -531,7 +531,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 				return err
 			}
 
-			_ = ibs.FinalizeTx(rules, state.NewNoopWriter())
+			_ = transactions.FinalizeCallTx(ibs, rules)
 
 		}
 		stream.WriteArrayEnd()

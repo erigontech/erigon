@@ -2665,14 +2665,6 @@ func printAccount(eip161Enabled bool, isAura bool, addr accounts.Address, stateO
 
 // FinalizeTx should be called after every transaction.
 func (ibs *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter StateWriter) error {
-	// On the noMaterialize path the writes go to the version map, where the next transaction
-	// index of this state reads them; the writer serves the materializing path only.
-	if ibs.noMaterialize {
-		ibs.FlushWritesToVersionMap(ibs.FinalizedWrites(chainRules))
-		ibs.SoftFinalise()
-		ibs.ResetVersionedIO()
-		return nil
-	}
 	for addr, bi := range ibs.balanceInc {
 		if !bi.transferred {
 			if _, err := ibs.getStateObject(addr, true); err != nil {

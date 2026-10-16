@@ -186,7 +186,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		if evm.Cancelled() {
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 		}
-		if err := ibs.FinalizeTx(rules, state.NewNoopWriter()); err != nil {
+		if err := transactions.FinalizeCallTx(ibs, rules); err != nil {
 			return nil, err
 		}
 

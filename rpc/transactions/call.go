@@ -214,6 +214,19 @@ func VersionedCallState(ibs *state.IntraBlockState, stateOverrides *ethapi2.Stat
 	ibs.SetNoConflictDetection()
 }
 
+// FinalizeCallTx ends one transaction of a request that runs several on the same state.
+// On the versioned path the writes go to the version map, where the next transaction index
+// reads them; on the materializing path FinalizeTx commits them to the state objects.
+func FinalizeCallTx(ibs *state.IntraBlockState, rules *chain.Rules) error {
+	if !ibs.IsVersioned() {
+		return ibs.FinalizeTx(rules, state.NewNoopWriter())
+	}
+	ibs.FlushWritesToVersionMap(ibs.FinalizedWrites(rules))
+	ibs.SoftFinalise()
+	ibs.ResetVersionedIO()
+	return nil
+}
+
 // InitialState returns the state every call runs against, rewound to the request's
 // overrides. eth_estimateGas probes the same state several times, so the state object
 // is reused and reset rather than rebuilt: Reset returns its objects to their pools,
