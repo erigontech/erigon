@@ -17,8 +17,6 @@
 package forkchoice
 
 import (
-	"slices"
-
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 )
@@ -69,19 +67,15 @@ func (t *voteTally) rebuild(f *ForkChoiceStore, justified solid.Checkpoint, cs *
 	clear(t.ids)
 	clear(t.dirty)
 	t.weights = append(t.weights[:0], 0)
-	n := f.latestMessages.latestMessagesCount()
-	t.applied = slices.Grow(t.applied[:0], n)[:n]
-	clear(t.applied)
-	for vi := range n {
+	t.applied = make([]uint32, f.latestMessages.latestMessagesCount())
+	for vi := range t.applied {
 		t.apply(f, vi)
 	}
 }
 
 func (t *voteTally) apply(f *ForkChoiceStore, vi int) {
 	if vi >= len(t.applied) {
-		n := len(t.applied)
-		t.applied = slices.Grow(t.applied, vi+1-n)[:vi+1]
-		clear(t.applied[n:])
+		t.applied = append(t.applied, make([]uint32, vi+1-len(t.applied))...)
 	}
 	if id := t.applied[vi]; id != 0 {
 		t.weights[id] -= t.state.balances[vi]
