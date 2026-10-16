@@ -27,6 +27,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	_ "github.com/erigontech/erigon/cmd/evm/internal/stderrlog" // before any package logs
 	"github.com/erigontech/erigon/cmd/evm/internal/t8ntool"
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	cli2 "github.com/erigontech/erigon/node/cli"
@@ -208,6 +209,7 @@ func init() {
 		&disasmCommand,
 		&runCommand,
 		&blockTestCommand,
+		&engineTestCommand,
 		&engineXTestCommand,
 		&zkevmTestCommand,
 		&stateTestCommand,

@@ -67,7 +67,7 @@
 #                                              Execution is parallel in every shard.
 #
 # Each shard maps to one cmd/evm subcommand running with --jsonout. Pass/fail
-# is decided here (not by the binary, which always exits 0): the shard fails
+# is decided here (not by the binary's exit status): the shard fails
 # if no tests ran (unexpected — fixture path bug) or if observed failures
 # exceed EEST_SPEC_MAX_FAILURES.
 #
