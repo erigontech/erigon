@@ -703,6 +703,39 @@ func TestParentPayloadStatusFromBidsRejectsIncompleteBlocks(t *testing.T) {
 	require.Equal(t, cltypes.PayloadStatusEmpty, ParentPayloadStatusFromBids(cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion), child.Block))
 }
 
+func TestParentPayloadStatusFromBidsDoesNotAllocate(t *testing.T) {
+	const childSlot uint64 = 1024
+	parentBlockHash := common.Hash{0x01}
+
+	for _, test := range []struct {
+		name                 string
+		childParentBlockHash common.Hash
+		want                 cltypes.PayloadStatus
+	}{
+		{name: "full", childParentBlockHash: parentBlockHash, want: cltypes.PayloadStatusFull},
+		{name: "empty", childParentBlockHash: common.Hash{0x02}, want: cltypes.PayloadStatusEmpty},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			parent := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+			parent.Block.Slot = childSlot - 1
+			parent.Block.Body.SignedExecutionPayloadBid.Message.BlockHash = parentBlockHash
+
+			child := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+			child.Block.Slot = childSlot
+			child.Block.ParentRoot = common.Hash{0x03}
+			child.Block.Body.SignedExecutionPayloadBid.Message.ParentBlockHash = test.childParentBlockHash
+
+			var got cltypes.PayloadStatus
+			allocations := testing.AllocsPerRun(1000, func() {
+				got = ParentPayloadStatusFromBids(parent, child.Block)
+			})
+
+			require.Equal(t, test.want, got)
+			require.Zero(t, allocations)
+		})
+	}
+}
+
 func TestApplyPayloadValidationResultRecordsRootAvailability(t *testing.T) {
 	root := common.HexToHash("0x5678")
 	for _, test := range []struct {
@@ -977,6 +1010,31 @@ func newPayloadVoteTestStore(t *testing.T, root common.Hash, hasEnvelope, verifi
 	f.payloadDataAvailabilityVote.Store(root, ptcVotes(majority, 0))
 
 	return f
+}
+
+// The recorded votes count before the payload is applied: the votes alone decide whether the FULL
+// variant can still be built on.
+func TestPayloadVotesRuleOutFullCountsVotesBeforeThePayloadIsApplied(t *testing.T) {
+	root := common.HexToHash("0x1")
+	majority := ptcVoteThreshold() + 1
+	for _, tc := range []struct {
+		name                  string
+		timeliness, dataVotes [clparams.PtcSize]int8
+		ruledOut              bool
+	}{
+		{name: "no votes", ruledOut: false},
+		{name: "timely and available", timeliness: ptcVotes(majority, 0), dataVotes: ptcVotes(majority, 0), ruledOut: false},
+		{name: "not timely", timeliness: ptcVotes(0, majority), dataVotes: ptcVotes(majority, 0), ruledOut: true},
+		{name: "data not available", timeliness: ptcVotes(majority, 0), dataVotes: ptcVotes(0, majority), ruledOut: true},
+		{name: "not timely without a majority", timeliness: ptcVotes(0, ptcVoteThreshold()), ruledOut: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPayloadVoteTestStore(t, root, false, false)
+			f.payloadTimelinessVote.Store(root, tc.timeliness)
+			f.payloadDataAvailabilityVote.Store(root, tc.dataVotes)
+			require.Equal(t, tc.ruledOut, f.PayloadVotesRuleOutFull(root))
+		})
+	}
 }
 
 func ptcVoteThreshold() int {

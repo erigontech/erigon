@@ -102,6 +102,8 @@ type ForkChoiceStore struct {
 	headHash                           common.Hash
 	headSlot                           uint64
 	headPayloadStatus                  cltypes.PayloadStatus
+	headIsFallback                     bool                           // Gloas get_head found no viable node and fell back to the justified root
+	selectedHead                       atomic.Pointer[ForkChoiceNode] // the head last published, for lock-free readers; nil after a payload decision changes
 	genesisTime                        uint64
 	genesisValidatorsRoot              common.Hash
 	anchorExecutionPayloadBuilderIndex uint64
@@ -118,8 +120,11 @@ type ForkChoiceStore struct {
 	inFlightInvalidPayloads *sync.Map
 	// [New in Gloas:EIP7732] Track execution payload validation status by execution block hash.
 	// Used to check if parent execution payload has been validated/invalidated for gossip validation.
-	executionPayloadStatus *lru.Cache[common.Hash, execution_client.PayloadStatus]
-	payloadStatusByRoot    *lru.Cache[common.Hash, execution_client.PayloadStatus]
+	executionPayloadStatus   *lru.Cache[common.Hash, execution_client.PayloadStatus]
+	payloadStatusByRoot      *lru.Cache[common.Hash, execution_client.PayloadStatus]
+	pendingEnvelopeApplyGate sync.Map // blockRoot -> chan struct{}: admits one apply of a parked envelope per root, closed when it ends
+	envelopeAppliesMu        sync.Mutex
+	envelopeApplies          map[common.Hash]int // envelope applies past the signature check, by block root
 	// [New in Gloas:EIP7732] Track execution payload gas_limit by execution block hash.
 	// Used for the is_gas_limit_target_compatible IGNORE check in bid gossip validation.
 	executionPayloadGasLimit *lru.Cache[common.Hash, uint64]
@@ -209,8 +214,10 @@ type ForkChoiceStore struct {
 	// Later, when OnBlock processes the block, it checks this cache and processes any pending envelope.
 	pendingEnvelopes         *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
 	envelopeGossipAdmissions ExecutionPayloadEnvelopeAdmissions
-	// Earliest time RetryDataAvailablePendingExecutionPayloadEnvelopes may retry a pending envelope again, by block root.
+	// Earliest time a retry of a pending envelope may run again, by block root. The background retry and
+	// a proposal's retry of its parent share it.
 	dataAvailableEnvelopeRetryAt *lru.Cache[common.Hash, time.Time]
+	dataAvailableEnvelopeRetryMu sync.Mutex // makes the due check and the booking of a retry one step
 
 	// [New in Gloas:EIP7732] Locally-produced self-build envelopes waiting for their block.
 	// Separate from pendingEnvelopes so that OnBlock replay can distinguish local origin
@@ -622,6 +629,70 @@ func (f *ForkChoiceStore) IsBlobDataAvailable(slot uint64, blockRoot common.Hash
 // Highest seen returns highest seen slot
 func (f *ForkChoiceStore) HighestSeen() uint64 {
 	return f.highestSeen.Load()
+}
+
+// HasImportedDescendantAfter reports whether a block imported on top of root, on a branch that
+// passes get_head's justification and finalization filter and that an invalidation did not cut
+// off, is past slot. A correct head has no such descendant, since get_head walks down to a leaf,
+// so one means the head is stuck. When root is the selected head, its children count only on a
+// payload variant get_head could have walked to. Viability is judged on blocks, not on get_head's
+// payload nodes: a block whose children all sit on one variant and are all non-viable is dropped
+// even when its other variant is a viable leaf. That needs a long non-finality period and errs
+// toward serving duties.
+func (f *ForkChoiceStore) HasImportedDescendantAfter(root common.Hash, slot uint64) bool {
+	var pending []common.Hash
+	for _, child := range f.children(root) {
+		if !f.cutOffByInvalidation(child) && f.reachableFromSelectedHead(root, child) {
+			pending = append(pending, child)
+		}
+	}
+	if len(pending) == 0 {
+		return false
+	}
+	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+	currentEpoch := f.computeEpochAtSlot(f.Slot())
+	viable := make(map[common.Hash]*cltypes.BeaconBlockHeader)
+	for _, child := range pending {
+		f.markViableUncutBlocks(child, viable, currentEpoch, justified)
+	}
+	for len(pending) > 0 {
+		block := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		header, ok := viable[block]
+		if !ok {
+			continue
+		}
+		if header.Slot > slot {
+			return true
+		}
+		pending = append(pending, f.children(block)...)
+	}
+	return false
+}
+
+// markViableUncutBlocks is getFilterBlockTree without the children an invalidation cut off: a
+// block whose other children are all cut off is judged as a leaf, as get_head judges its EMPTY
+// node.
+func (f *ForkChoiceStore) markViableUncutBlocks(blockRoot common.Hash, blocks map[common.Hash]*cltypes.BeaconBlockHeader, currentEpoch uint64, justified solid.Checkpoint) bool {
+	header, has := f.forkGraph.GetHeader(blockRoot)
+	if !has {
+		return false
+	}
+	anyChild, anyViable := false, false
+	for _, child := range f.children(blockRoot) {
+		if f.cutOffByInvalidation(child) {
+			continue
+		}
+		anyChild = true
+		if f.markViableUncutBlocks(child, blocks, currentEpoch, justified) {
+			anyViable = true
+		}
+	}
+	if anyViable || (!anyChild && f.isViableLeaf(blockRoot, header, currentEpoch, justified)) {
+		blocks[blockRoot] = header
+		return true
+	}
+	return false
 }
 
 // BlockProcessing reports whether an OnBlock call is waiting for the store lock or is active.
@@ -1166,8 +1237,47 @@ func (f *ForkChoiceStore) markPayloadStatus(
 	if !known || current != effective {
 		f.headHash = common.Hash{}
 		f.headPayloadStatus = cltypes.PayloadStatusPending
+		// The decision can rule out the published variant; get_head publishes again.
+		f.selectedHead.Store(nil)
 	}
 	return effective
+}
+
+// reachableFromSelectedHead reports whether get_head could reach child from root when root is
+// the selected head: a child on the other payload variant counts only while that variant is not
+// a candidate, that is, an unavailable FULL. Without a published head every child counts.
+func (f *ForkChoiceStore) reachableFromSelectedHead(root, child common.Hash) bool {
+	head := f.selectedHead.Load()
+	if head == nil || head.Root != root || (head.PayloadStatus != cltypes.PayloadStatusEmpty && head.PayloadStatus != cltypes.PayloadStatusFull) {
+		return true
+	}
+	block, ok := f.forkGraph.GetBlock(child)
+	if !ok || block == nil || block.Block == nil || block.Version() < clparams.GloasVersion {
+		return true
+	}
+	variant := f.getParentPayloadStatus(block.Block)
+	return variant == head.PayloadStatus || (variant == cltypes.PayloadStatusFull && !f.isPayloadAvailable(root))
+}
+
+// cutOffByInvalidation reports whether no fork-choice node of root survives the recorded
+// invalidations: an invalid pre-Gloas block, a child of one (it has no EMPTY alternative), or a
+// Gloas block built on an invalid parent payload.
+func (f *ForkChoiceStore) cutOffByInvalidation(root common.Hash) bool {
+	block, ok := f.forkGraph.GetBlock(root)
+	if !ok || block == nil || block.Block == nil {
+		return false
+	}
+	if block.Version() < clparams.GloasVersion {
+		return f.forkGraph.IsBlockInvalid(root)
+	}
+	parentRoot := block.Block.ParentRoot
+	if !f.forkGraph.IsBlockInvalid(parentRoot) {
+		return false
+	}
+	if parent, ok := f.forkGraph.GetBlock(parentRoot); ok && parent != nil && parent.Version() < clparams.GloasVersion {
+		return true
+	}
+	return f.getParentPayloadStatus(block.Block) == cltypes.PayloadStatusFull
 }
 
 func (f *ForkChoiceStore) payloadStatusAuthority(blockRoot common.Hash) (execution_client.PayloadStatus, bool) {

@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sync"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -60,11 +59,6 @@ func (m *SignedAggregateAndProofForGossip) SetTopicForkDigest(digest common.Byte
 	m.TopicForkDigest = &digest
 }
 
-type aggregateJob struct {
-	aggregate    *SignedAggregateAndProofForGossip
-	creationTime time.Time
-}
-
 type seenAggregateIndex struct {
 	epoch uint64
 	index uint64
@@ -86,8 +80,7 @@ type aggregateAndProofServiceImpl struct {
 	// Cached proposer indices per epoch (for current epoch check)
 	proposerIndicesCache *lru.Cache[uint64, []uint64]
 
-	// set of aggregates that are scheduled for later processing
-	aggregatesScheduledForLaterExecution sync.Map
+	awaitingBlock *blockArrivalQueue
 }
 
 func NewAggregateAndProofService(
@@ -120,8 +113,13 @@ func NewAggregateAndProofService(
 		seenAggreatorIndexes:   seenAggCache,
 		validatorParams:        validatorParams,
 		proposerIndicesCache:   proposerIndicesCache,
+		awaitingBlock: newBlockArrivalQueue(
+			forkchoiceStore,
+			int(beaconCfg.MaxCommitteesPerSlot*beaconCfg.TargetAggregatorsPerCommittee),
+			time.Duration(beaconCfg.SecondsPerSlot)*time.Second,
+		),
 	}
-	go a.loop(ctx)
+	go a.awaitingBlock.run(ctx)
 	return a
 }
 
@@ -270,6 +268,16 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		if aggregateData.Target.Epoch != epoch {
 			return errors.New("invalid target epoch in aggregate and proof")
 		}
+		// [IGNORE] The block being voted for (aggregate.data.beacon_block_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue aggregates for processing once block is retrieved).
+		// Checked before the finalized ancestor, which an unknown block always fails.
+		blockHeader, blockHeaderOk := a.forkchoiceStore.GetHeader(aggregateData.BeaconBlockRoot)
+		if !blockHeaderOk {
+			if !aggregateAndProof.ImmediateProcess {
+				a.awaitingBlock.add(aggregateData.BeaconBlockRoot, func(ctx context.Context) { _ = a.ProcessMessage(ctx, nil, aggregateAndProof) })
+			}
+			return fmt.Errorf("%w: block not seen: %v", ErrIgnore, aggregateData.BeaconBlockRoot)
+		}
+
 		finalizedCheckpoint := a.forkchoiceStore.FinalizedCheckpoint()
 		finalizedSlot := finalizedCheckpoint.Epoch * a.beaconCfg.SlotsPerEpoch
 		// [IGNORE] The current finalized_checkpoint is an ancestor of the block defined by aggregate.data.beacon_block_root -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, finalized_checkpoint.epoch) == store.finalized_checkpoint.root
@@ -278,12 +286,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			finalizedSlot,
 		).Root != finalizedCheckpoint.Root {
 			return fmt.Errorf("%w: invalid finalized checkpoint: %v", ErrIgnore, finalizedCheckpoint.Root)
-		}
-
-		// [IGNORE] The block being voted for (aggregate.data.beacon_block_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue aggregates for processing once block is retrieved).
-		blockHeader, blockHeaderOk := a.forkchoiceStore.GetHeader(aggregateData.BeaconBlockRoot)
-		if !blockHeaderOk {
-			return fmt.Errorf("%w: block not seen: %v", ErrIgnore, aggregateData.BeaconBlockRoot)
 		}
 
 		// [New in GLOAS] [REJECT] aggregate.data.index == 0 if block.slot == aggregate.data.slot
@@ -525,44 +527,4 @@ func AggregateMessageSignature(
 	}
 
 	return indexedAttestation.Signature[:], signingRoot[:], pubKeys, nil
-}
-
-func (a *aggregateAndProofServiceImpl) loop(ctx context.Context) {
-	ticker := time.NewTicker(attestationJobsIntervalTick)
-	defer ticker.Stop()
-	keysToDel := make([][32]byte, 0)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-		keysToDel = keysToDel[:0]
-		a.aggregatesScheduledForLaterExecution.Range(func(key, value any) bool {
-			if a.syncedDataManager.Syncing() {
-				// Discard the job if we can't get the head state
-				keysToDel = append(keysToDel, key.([32]byte))
-				return false
-			}
-			job := value.(*aggregateJob)
-			// check if it has expired
-			if time.Since(job.creationTime) > attestationJobExpiry {
-				keysToDel = append(keysToDel, key.([32]byte))
-				return true
-			}
-			aggregateData := job.aggregate.SignedAggregateAndProof.Message.Aggregate.Data
-			if aggregateData.Slot > a.syncedDataManager.HeadSlot() {
-				return true
-			}
-			if err := a.ProcessMessage(ctx, nil, job.aggregate); err != nil {
-				return true
-			}
-
-			keysToDel = append(keysToDel, key.([32]byte))
-			return true
-		})
-		for _, key := range keysToDel {
-			a.aggregatesScheduledForLaterExecution.Delete(key)
-		}
-	}
 }

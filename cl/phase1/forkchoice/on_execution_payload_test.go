@@ -594,7 +594,7 @@ func TestApplyPendingEnvelopeDoesNotIndexConcurrentWinner(t *testing.T) {
 		pendingEnvelopes: pending,
 	}
 
-	appliedEnvelope, _ := f.applyPendingEnvelope(context.Background(), blockRoot, envelope, false, false)
+	appliedEnvelope, _, _ := f.applyPendingEnvelope(context.Background(), blockRoot, false)
 	require.Nil(t, appliedEnvelope)
 	require.False(t, pending.Contains(blockRoot))
 }
@@ -613,7 +613,7 @@ func TestApplyPendingEnvelopeDropsHardFailure(t *testing.T) {
 		pendingLocalSelfBuildEnvelopes: local,
 	}
 
-	appliedEnvelope, _ := f.applyPendingEnvelope(context.Background(), blockRoot, envelope, false, false)
+	appliedEnvelope, _, _ := f.applyPendingEnvelope(context.Background(), blockRoot, false)
 	require.Nil(t, appliedEnvelope)
 	require.False(t, pending.Contains(blockRoot))
 }
@@ -629,7 +629,7 @@ func TestPendingExecutionPayloadRejectsInvalidCommitmentsBeforePersistence(t *te
 	graph := &persistingEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
 	f := &ForkChoiceStore{beaconCfg: cfg, forkGraph: graph, pendingEnvelopes: pending}
 
-	_, _ = f.applyPendingEnvelope(t.Context(), root, envelope, false, false)
+	f.applyPendingEnvelope(t.Context(), root, false)
 	require.False(t, pending.Contains(root))
 	require.False(t, graph.HasEnvelope(root))
 }
@@ -3342,6 +3342,56 @@ func TestExecutionPayloadAdmissionCancellationTransfersPendingOwnership(t *testi
 			require.False(t, origin.Contains(envelope.Message.BeaconBlockRoot))
 		})
 	}
+}
+
+// verdictRecordingForkGraph lets an EL verdict be recorded on the data-availability fixture.
+type verdictRecordingForkGraph struct {
+	dataAvailabilityForkGraph
+}
+
+func (verdictRecordingForkGraph) IsBlockInvalid(common.Hash) bool          { return false }
+func (verdictRecordingForkGraph) MarkHeaderAsInvalid(common.Hash)          {}
+func (verdictRecordingForkGraph) IsPayloadUnavailable(common.Hash) bool    { return false }
+func (verdictRecordingForkGraph) MarkPayloadAvailable(common.Hash)         {}
+func (verdictRecordingForkGraph) MarkPayloadUnavailable(common.Hash)       {}
+func (verdictRecordingForkGraph) MarkPayloadAccepted(common.Hash, bool)    {}
+func (verdictRecordingForkGraph) ClearPayloadAccepted(common.Hash)         {}
+func (verdictRecordingForkGraph) PayloadAccepted(common.Hash) (bool, bool) { return false, false }
+
+// The apply of an envelope that passed its signature check is in flight until it returns; an
+// envelope the EL rejects stops counting then, although its arrival stays recorded.
+func TestExecutionPayloadApplyInFlightEndsWithARejectedEnvelope(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	root := envelope.Message.BeaconBlockRoot
+	engine, entered, release := blockingEngine(t, 1, execution_client.PayloadStatusInvalidated, errors.New("invalid payload"))
+	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
+	require.NoError(t, err)
+	pendingLocal, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
+	require.NoError(t, err)
+	f := newPayloadVoteTestStore(t, root, false, false)
+	f.beaconCfg = cfg
+	f.engine = engine
+	f.forkGraph = verdictRecordingForkGraph{dataAvailabilityForkGraph{state: blockState, block: block}}
+	f.pendingEnvelopes = pending
+	f.pendingLocalSelfBuildEnvelopes = pendingLocal
+	f.executionPayloadGasLimit, err = lru.New[common.Hash, uint64](queueCacheSize)
+	require.NoError(t, err)
+	require.False(t, f.ExecutionPayloadApplyInFlight(root))
+
+	done := make(chan error, 1)
+	go func() { done <- f.OnExecutionPayload(t.Context(), envelope, false, true) }()
+	awaitSignal(t, entered, "NewPayload")
+	require.True(t, f.ExecutionPayloadApplyInFlight(root))
+	close(release)
+	select {
+	case err := <-done:
+		require.Error(t, err)
+	case <-time.After(lockScopeTimeout):
+		t.Fatal("the apply did not return")
+	}
+
+	require.False(t, f.ExecutionPayloadApplyInFlight(root))
+	require.True(t, f.ExecutionPayloadReceivedBefore(root, time.Now().Add(time.Second)), "the arrival stays recorded")
 }
 
 // availabilityRecordingForkGraph keeps the payload availability fork choice marks.

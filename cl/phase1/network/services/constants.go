@@ -29,14 +29,13 @@ const (
 	operationSeenCacheSize        = 16_384
 	seenBlockCacheSize            = 1000 // SeenBlockCacheSize is the size of the cache for seen blocks.
 	blockJobsIntervalTick         = 50 * time.Millisecond
-	singleAttestationIntervalTick = 10 * time.Millisecond
 	attestationJobsIntervalTick   = 100 * time.Millisecond
 	blockJobExpiry                = 30 * time.Second
 	blockRetryInitialDelay        = 250 * time.Millisecond
 	blockRetryMaxDelay            = 2 * time.Second
-	attestationJobExpiry          = 30 * time.Minute
-	singleAttestationJobExpiry    = 6 * time.Second
 	maximumGossipClockDisparity   = 500 * time.Millisecond
+	// One mainnet slot of single attestations (~1M active validators / 32 slots), as seen on all subnets.
+	maxAttestationsAwaitingBlock = 1 << 15
 )
 
 var (
