@@ -60,7 +60,7 @@ func RegisterGossipServices(
 	add(gossip.RegisterGossipService(gm, dataColumnSidecarService, withBeginVersion(clparams.FuluVersion), withRateLimiterByPeer(32, 64)))
 	// gloas
 	add(gossip.RegisterGossipService(gm, executionPayloadService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(2, 4)))
-	add(gossip.RegisterGossipService(gm, payloadAttestationService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(8, 16)))
+	add(gossip.RegisterGossipService(gm, payloadAttestationService, waitReady, withBeginVersion(clparams.GloasVersion), withPayloadAttestationRateLimiter()))
 	add(gossip.RegisterGossipService(gm, proposerPreferencesService, waitReady, withRateLimiterByPeer(2, 4)))
 	add(gossip.RegisterGossipService(gm, executionPayloadBidService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(8, 16)))
 
@@ -93,6 +93,13 @@ func withGlobalTimeBasedRateLimiter(duration time.Duration, maxRequests int) gos
 	return func(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
 		return limiter.tryAcquire()
 	}
+}
+
+// withPayloadAttestationRateLimiter lets one peer forward a whole PTC's votes at once: the votes
+// are due at the same point in the slot, and a vote ignored here is also dropped from every other
+// peer, because gossipsub has already marked it as seen.
+func withPayloadAttestationRateLimiter() gossip.ConditionFunc {
+	return withRateLimiterByPeer(float64(clparams.MaxPtcSize), int(clparams.MaxPtcSize))
 }
 
 // withRateLimiterByPeer returns a condition that checks if the message can be processed based on the token bucket rate limiter
