@@ -3523,10 +3523,36 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 		maxAttLen = int(a.beaconChainCfg.MaxAttestationsElectra)
 	}
 	ret := solid.NewDynamicListSSZ[*solid.Attestation](maxAttLen)
-	for _, att := range selectAttestations(attestationCandidates, s.BeaconConfig().ParticipationWeights(), proposerRewardDenominator(s.BeaconConfig()), maxAttLen) {
+	selected := selectAttestations(attestationCandidates, s.BeaconConfig().ParticipationWeights(), proposerRewardDenominator(s.BeaconConfig()), maxAttLen)
+	for _, att := range attestationsValidForProposal(s, selected) {
 		ret.Append(att)
 	}
 	return ret
+}
+
+// attestationsValidForProposal keeps the attestations whose signature verifies against the
+// proposal state. Aggregation bits map to validators by the shuffling an attestation was received
+// under; after a reorg that changes it, one such attestation would make the block invalid.
+func attestationsValidForProposal(s abstract.BeaconState, atts []*solid.Attestation) []*solid.Attestation {
+	valid := make([]*solid.Attestation, 0, len(atts))
+	for _, att := range atts {
+		if err := verifyAttestationForProposal(s, att); err != nil {
+			log.Warn("[Block Production] Dropping an attestation that does not verify against the proposal state",
+				"slot", att.Data.Slot, "committees", att.CommitteeBits.GetOnIndices(), "err", err)
+			continue
+		}
+		valid = append(valid, att)
+	}
+	return valid
+}
+
+func verifyAttestationForProposal(s abstract.BeaconState, att *solid.Attestation) error {
+	indices, err := s.GetAttestingIndicies(att, true)
+	if err != nil {
+		return err
+	}
+	_, err = state.IsValidIndexedAttestation(s, state.GetIndexedAttestation(att, indices))
+	return err
 }
 
 type scoredCandidate struct {
