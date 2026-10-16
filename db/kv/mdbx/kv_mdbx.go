@@ -161,7 +161,7 @@ func (opts MdbxOpts) RoTxsLimiter(l *semaphore.Weighted) MdbxOpts { opts.roTxsLi
 func (opts MdbxOpts) PageSize(v datasize.ByteSize) MdbxOpts       { opts.pageSize = v; return opts }
 func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts     { opts.growthStep = v; return opts }
 func (opts MdbxOpts) Path(path string) MdbxOpts                   { opts.path = path; return opts }
-func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts {
+func (opts MdbxOpts) PollerSyncInterval(period time.Duration) MdbxOpts {
 	opts.pollerSyncInterval = period
 	return opts
 }
