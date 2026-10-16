@@ -188,7 +188,8 @@ func newTestAction(addr accounts.Address, r *rand.Rand) testAction {
 		{
 			name: "SetTransientState",
 			fn: func(a testAction, s *IntraBlockState) error {
-				s.SetTransientState(addr, TransientKey(*uint256.NewInt(uint64(a.args[0]))), *uint256.NewInt(uint64(a.args[1])))
+				key := TransientKey(*uint256.NewInt(uint64(a.args[0])))
+				s.SetTransientState(addr, &key, uint256.NewInt(uint64(a.args[1])))
 				return nil
 			},
 			args: make([]int64, 2),
@@ -425,7 +426,7 @@ func TestTransientStorage(t *testing.T) {
 	value := uint256.NewInt(2)
 	addr := accounts.Address{}
 
-	state.SetTransientState(addr, key, *value)
+	state.SetTransientState(addr, &key, value)
 	if exp, got := 1, state.journal.length(); exp != got {
 		t.Fatalf("journal length mismatch: have %d, want %d", got, exp)
 	}
@@ -440,6 +441,36 @@ func TestTransientStorage(t *testing.T) {
 	if got, exp := state.GetTransientState(addr, key), (uint256.Int{}); exp != got {
 		t.Fatalf("transient storage mismatch: have %x, want %x", got, exp)
 	}
+}
+
+// Crosses transientScanLimit, so lookups switch from the slot scan to the index.
+func TestTransientStorageManySlots(t *testing.T) {
+	t.Parallel()
+	state := New(nil)
+	defer state.Close()
+
+	addr := accounts.Address{}
+	key := func(i int) TransientKey { return TransientKey(*uint256.NewInt(uint64(i))) }
+	const n = 2 * transientScanLimit
+	for i := range n {
+		k := key(i)
+		state.SetTransientState(addr, &k, uint256.NewInt(uint64(i+1)))
+	}
+	check := func(set int) {
+		t.Helper()
+		for i := range n {
+			want := uint64(0)
+			if i < set {
+				want = uint64(i + 1)
+			}
+			if got := state.GetTransientState(addr, key(i)); got.Uint64() != want {
+				t.Fatalf("slot %d: have %d, want %d", i, got.Uint64(), want)
+			}
+		}
+	}
+	check(n)
+	state.journal.revert(state, transientScanLimit/2)
+	check(transientScanLimit / 2)
 }
 
 func TestCloseResetsRevisions(t *testing.T) {

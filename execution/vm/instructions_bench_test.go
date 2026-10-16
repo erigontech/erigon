@@ -22,7 +22,6 @@ package vm
 
 import (
 	"bytes"
-	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -368,39 +367,61 @@ func benchPush(bench *testing.B, op OpCode, code []byte) {
 }
 
 func BenchmarkOpTransientStorage(b *testing.B) {
-	for _, tstore := range []bool{false, true} {
-		for _, fixedKey := range []bool{true, false} {
-			b.Run(fmt.Sprintf("tstore=%t/fixed_key=%t", tstore, fixedKey), func(b *testing.B) {
-				ibs := state.New(state.NewNoopReader())
-				defer ibs.Close()
-				evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
-				addr := accounts.InternAddress(common.Address{1})
-				scope := &CallContext{Contract: *NewContract(addr, addr, addr, uint256.Int{})}
-				var key, val uint256.Int
-				for i := uint64(0); b.Loop(); i++ {
-					if i%(64*1024) == 0 {
-						b.StopTimer()
-						ibs.Reset()
-						scope.Stack.push(*uint256.NewInt(1))
-						scope.Stack.push(uint256.Int{})
-						opTstore(0, evm, scope)
-						b.StartTimer()
-					}
-					if !fixedKey {
-						key.SetUint64(i)
-					}
-					if tstore {
-						val.SetUint64(i + 2)
-						scope.Stack.push(val)
-						scope.Stack.push(key)
-						opTstore(0, evm, scope)
-					} else {
-						scope.Stack.push(key)
-						opTload(0, evm, scope)
-						scope.Stack.drop()
+	const txOps = 20 * 1024
+	cases := []struct {
+		name               string
+		tstore, fixedValue bool
+		opsPerKey          uint64
+	}{
+		{"tload/fixed_key", false, false, txOps},
+		{"tload/key_per_1024_ops", false, false, 1024},
+		{"tload/fresh_key", false, false, 1},
+		{"tstore/fixed_key", true, false, txOps},
+		{"tstore/fixed_key/fixed_value", true, true, txOps},
+		{"tstore/key_per_1024_ops", true, false, 1024},
+		{"tstore/key_per_1024_ops/fixed_value", true, true, 1024},
+		{"tstore/fresh_key", true, false, 1},
+	}
+	for _, c := range cases {
+		b.Run(c.name, func(b *testing.B) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+			addr := accounts.InternAddress(common.Address{1})
+			scope := &CallContext{Contract: *NewContract(addr, addr, addr, uint256.Int{})}
+			tstore := func(key, val uint256.Int) {
+				scope.Stack.push(val)
+				scope.Stack.push(key)
+				opTstore(0, evm, scope)
+			}
+			one := *uint256.NewInt(1)
+			var key, val uint256.Int
+			for i := uint64(0); b.Loop(); i++ {
+				if i%txOps == 0 {
+					b.StopTimer()
+					ibs.Reset()
+					tstore(uint256.Int{^uint64(0)}, one)
+					b.StartTimer()
+				}
+				if i%c.opsPerKey == 0 {
+					key.SetUint64(i % txOps / c.opsPerKey)
+					if !c.tstore && c.opsPerKey > 1 {
+						tstore(key, one)
 					}
 				}
-			})
-		}
+				switch {
+				case !c.tstore:
+					scope.Stack.push(key)
+					opTload(0, evm, scope)
+					scope.Stack.drop()
+				case c.fixedValue:
+					val.AddUint64(&key, 1)
+					tstore(key, val)
+				default:
+					val.SetUint64(i + 2)
+					tstore(key, val)
+				}
+			}
+		})
 	}
 }
