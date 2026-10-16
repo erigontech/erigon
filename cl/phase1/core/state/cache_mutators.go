@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
@@ -85,7 +86,22 @@ func (b *CachingBeaconState) SlashValidator(slashedInd uint64, whistleblowerInd 
 	if err := IncreaseBalance(b, proposerInd, proposerReward); err != nil {
 		return 0, err
 	}
-	return proposerReward, IncreaseBalance(b, *whistleblowerInd, whistleBlowerReward-proposerReward)
+	if err := IncreaseBalance(b, *whistleblowerInd, whistleBlowerReward-proposerReward); err != nil {
+		return proposerReward, err
+	}
+	if b.Version() >= clparams.GloasVersion {
+		payments := b.GetBuilderPendingPayments()
+		if payments != nil {
+			for i := range payments.Length() {
+				payment := payments.Get(i)
+				if payment != nil && payment.ProposerIndex == slashedInd {
+					payments.Set(i, &cltypes.BuilderPendingPayment{Withdrawal: &cltypes.BuilderPendingWithdrawal{}})
+				}
+			}
+			b.SetBuilderPendingPayments(payments)
+		}
+	}
+	return proposerReward, nil
 }
 
 func (b *CachingBeaconState) InitiateValidatorExit(index uint64) error {
