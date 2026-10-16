@@ -103,15 +103,18 @@ const (
 	DefaultMapSize    = 2 * datasize.TB
 	DefaultGrowthStep = 1 * datasize.GB
 
-	inCommitSyncPeriods = 30
-	maxMdbxSyncPeriod   = 18 * time.Hour
+	// mdbx flushes inside a commit only when the poller missed this many intervals in a row.
+	commitFlushDeadlineIntervals = 30
+	maxCommitFlushDeadline       = 18 * time.Hour // mdbx stores the deadline in 16.16-bit seconds
 )
 
-// How much may stay unflushed, and for how long, under SafeNoSync. Both bound what a crash
-// rolls back; the byte one also bounds the file growth that deferring a flush causes.
+// Two flushers under SafeNoSync. The poller goroutine flushes every PollerFlushInterval. mdbx
+// flushes inside a commit only when more than CommitFlushBytes is unflushed or the last flush is
+// older than commitFlushDeadline, a backstop for a writer the poller cannot interrupt. Both
+// bound what a crash rolls back; the byte one also bounds the file growth a deferred flush causes.
 var (
-	DefaultSyncBytes  = dbg.EnvDataSize("MDBX_SYNC_BYTES", 256*datasize.MB)
-	DefaultSyncPeriod = dbg.EnvDuration("MDBX_SYNC_PERIOD", time.Second)
+	CommitFlushBytes    = dbg.EnvDataSize("MDBX_SYNC_BYTES", 256*datasize.MB)
+	PollerFlushInterval = dbg.EnvDuration("MDBX_SYNC_PERIOD", time.Second)
 
 	// DefaultSafeNoSync gives every database the deferred flush. Set it before any database
 	// opens - the erigon binary does so from --db.safe.nosync.
@@ -163,8 +166,13 @@ func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts     { opts.growthS
 func (opts MdbxOpts) Path(path string) MdbxOpts                   { opts.path = path; return opts }
 func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts    { opts.syncPeriod = period; return opts }
 
-// SafeNoSync flushes once DefaultSyncBytes is unflushed or DefaultSyncPeriod has passed,
-// instead of on every commit. Mdbx keeps the last flushed commit-point explicitly, so a crash
+// commitFlushDeadline is mdbx's own flush deadline, long enough that the poller flushes first.
+func commitFlushDeadline(pollerInterval time.Duration) time.Duration {
+	return min(commitFlushDeadlineIntervals*pollerInterval, maxCommitFlushDeadline)
+}
+
+// SafeNoSync flushes from the poller every PollerFlushInterval instead of on every commit; a
+// commit flushes inline only past CommitFlushBytes or commitFlushDeadline. Mdbx keeps the last flushed commit-point explicitly, so a crash
 // rolls back to it and never corrupts the file. It is the default; Durable opts out.
 func (opts MdbxOpts) SafeNoSync() MdbxOpts {
 	return opts.Flags(func(f uint) uint { return f&^mdbx.Durable | mdbx.SafeNoSync })
@@ -193,10 +201,10 @@ func (opts MdbxOpts) resolveSync() MdbxOpts {
 		return opts
 	}
 	if opts.syncBytes == nil {
-		opts = opts.SyncBytes(DefaultSyncBytes)
+		opts = opts.SyncBytes(CommitFlushBytes)
 	}
 	if opts.syncPeriod == 0 {
-		opts = opts.SyncPeriod(DefaultSyncPeriod)
+		opts = opts.SyncPeriod(PollerFlushInterval)
 	}
 	return opts
 }
@@ -429,7 +437,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 	}
 
 	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
-		if err := env.SetSyncPeriod(min(inCommitSyncPeriods*opts.syncPeriod, maxMdbxSyncPeriod)); err != nil {
+		if err := env.SetSyncPeriod(commitFlushDeadline(opts.syncPeriod)); err != nil {
 			return nil, err
 		}
 	}
