@@ -74,6 +74,7 @@ type ForkChoiceResult struct {
 	Status          ExecutionStatus
 	LatestValidHash common.Hash
 	ValidationError string
+	MissingHash     common.Hash
 }
 
 // ForkChoiceState is the native return type for GetForkChoice.

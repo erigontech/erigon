@@ -44,15 +44,9 @@ type ByteLRU[V any] struct {
 	weigh    func(uint64, V) int64
 	maxBytes int64
 
-	// Indirect so Close can clear it: the cache outlives Close via its runtime
-	// cleanup, and a callback capturing the owner would keep the owner too.
-	onEvict atomic.Pointer[func(uint64, V)]
+	*byteLRUEvictions[V]
 
-	// resident is maintained for a budgeted layer only, which is the one that
-	// spends it: an unbudgeted layer holds maxBytes from the start, so it never
-	// grows and never reads this.
-	resident atomic.Int64
-	limit    atomic.Int64 // for a budgeted cache, the bytes reserved from the envelope
+	limit atomic.Int64 // for a budgeted cache, the bytes reserved from the envelope
 	// ceiling is otter's maximum: limit may grow to it, and it drops to limit when the envelope
 	// refuses. otter runs its frequency sketch from half its maximum, so a maximum that tracked
 	// limit would charge every write of a growing cache for it.
@@ -65,6 +59,19 @@ type ByteLRU[V any] struct {
 	closed     bool
 	// unbudgeted holds maxBytes from the start and never touches the envelope.
 	unbudgeted bool
+}
+
+// byteLRUEvictions is the state otter's deletion handler updates. It is a
+// separate object because otter's runtime cleanup keeps the handler alive as
+// long as the cache: a handler reaching the ByteLRU would make it uncollectable.
+type byteLRUEvictions[V any] struct {
+	// resident is maintained for a budgeted layer only, which is the one that
+	// spends it: an unbudgeted layer holds maxBytes from the start, so it never
+	// grows and never reads this.
+	resident atomic.Int64
+	// Indirect so Close can clear it: a callback capturing the owner would keep
+	// the owner alive as long as the cache.
+	onEvict atomic.Pointer[func(uint64, V)]
 }
 
 // otterEntryOverheadBytes is otter's own per-entry cost beyond the key and the
@@ -83,7 +90,8 @@ const (
 )
 
 func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, onEvict func(uint64, V)) *ByteLRU[V] {
-	b := &ByteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1)}
+	ev := &byteLRUEvictions[V]{}
+	b := &ByteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1), byteLRUEvictions: ev}
 	if onEvict != nil {
 		b.onEvict.Store(&onEvict)
 	}
@@ -94,9 +102,9 @@ func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, 
 	b.c = newOtter(b.maxBytes, weigh, func(e otter.DeletionEvent[uint64, V]) {
 		// A replacement is refunded by Add, from the value Set displaced.
 		if e.Cause != otter.CauseReplacement {
-			b.resident.Add(-weigh(e.Key, e.Value))
+			ev.resident.Add(-weigh(e.Key, e.Value))
 		}
-		if fn := b.onEvict.Load(); fn != nil {
+		if fn := ev.onEvict.Load(); fn != nil {
 			(*fn)(e.Key, e.Value)
 		}
 	})
@@ -106,7 +114,7 @@ func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, 
 // NewByteLRU is a byte-bounded cache outside the shared cachebudget envelope. It may hold maxBytes
 // from the start and needs no Close, for owners that have no teardown.
 func NewByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64) *ByteLRU[V] {
-	b := &ByteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1), unbudgeted: true}
+	b := &ByteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1), byteLRUEvictions: &byteLRUEvictions[V]{}, unbudgeted: true}
 	b.limit.Store(b.maxBytes)
 	b.ceiling.Store(b.maxBytes)
 	b.c = newOtter(b.maxBytes, weigh, nil) // a handler capturing b would keep it alive through otter's runtime cleanup
@@ -226,7 +234,7 @@ func (b *ByteLRU[V]) Close() {
 		return
 	}
 	b.closed = true
-	// Entries, not just the reservation: the cache stays reachable after Close.
+	// Entries, not just the reservation: the owner may keep the cache after Close.
 	b.c.InvalidateAll()
 	b.onEvict.Store(nil)
 	b.resident.Store(0)

@@ -1119,6 +1119,24 @@ func TestProductionUsesLocalPayloadWhenBuilderWithdrawalsRootIsWrong(t *testing.
 	})
 }
 
+func TestProcessBlockForProductionRejectsUnexpectedPayloadWithdrawal(t *testing.T) {
+	blocks, s, _ := tests.GetCapellaRandom()
+	block := blocks[0].Block
+	block.Body.ExecutionPayload.Withdrawals.Clear()
+	block.Body.ExecutionPayload.Withdrawals.Append(&cltypes.Withdrawal{Validator: ^uint64(0), Amount: 1})
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(s, block.Slot))
+
+	_, err := processBlockForProduction(s, &cltypes.BlindOrExecutionBeaconBlock{
+		Slot:          block.Slot,
+		ProposerIndex: block.ProposerIndex,
+		ParentRoot:    block.ParentRoot,
+		BeaconBody:    block.Body,
+		Cfg:           s.BeaconConfig(),
+	})
+
+	require.ErrorContains(t, err, "withdrawals root mismatch")
+}
+
 func TestProductionUsesValidBuilderPayloadAfterSlotAdvance(t *testing.T) {
 	var header *builder.ExecutionHeader
 	block := produceBlockWithBuilderForTest(t, func(ctrl *gomock.Controller, handler *ApiHandler, postState *state.CachingBeaconState, targetSlot uint64, parentHash common.Hash) {
@@ -2623,7 +2641,7 @@ func TestPublishBlindedBlocksRejectsUnsupportedContentType(t *testing.T) {
 
 	_, err := h.publishBlindedBlocks(req, 2)
 	var endpointErr *beaconhttp.EndpointError
-	require.True(t, errors.As(err, &endpointErr))
+	require.ErrorAs(t, err, &endpointErr)
 	require.Equal(t, http.StatusUnsupportedMediaType, endpointErr.Code)
 	require.ErrorContains(t, err, "unsupported content type")
 }
