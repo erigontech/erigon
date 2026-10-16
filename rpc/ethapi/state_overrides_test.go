@@ -84,9 +84,12 @@ func TestStateOverridesPreserveStorageOnlyAccounts(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		stateDiff bool
+		versioned bool
 	}{
 		{name: "state"},
 		{name: "stateDiff", stateDiff: true},
+		{name: "state/versioned", versioned: true},
+		{name: "stateDiff/versioned", stateDiff: true, versioned: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			storage := map[common.Hash]common.Hash{key: common.HexToHash("0x2a")}
@@ -98,6 +101,12 @@ func TestStateOverridesPreserveStorageOnlyAccounts(t *testing.T) {
 			overrides := StateOverrides{addr: account}
 			ibs := state.New(state.NewNoopReader())
 			defer ibs.Close()
+			if tc.versioned {
+				ibs.SetVersionMap(state.NewVersionMap(nil))
+				ibs.SetNoMaterialize(true)
+				ibs.SetNoConflictDetection()
+				ibs.SetTxContext(0, 0)
+			}
 
 			rules := &chain.Rules{IsSpuriousDragon: true}
 			require.NoError(t, overrides.Override(ibs, vm.PrecompiledContracts{}, rules))
