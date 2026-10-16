@@ -2132,10 +2132,15 @@ func (result *execResult) calcFees(
 	// A burnt write can only differ from the pre-state when London adds a
 	// non-zero FeeBurnt, so skip the whole read otherwise.
 	hasBurnt := !burntAddr.IsNil() && chainRules.IsLondon && !result.ExecutionResult.FeeBurnt.IsZero()
-	sharedDestination := hasBurnt && burntAddr == result.Coinbase
+	coinbaseCredit := result.ExecutionResult.FeeTipped
+	if hasBurnt && burntAddr == result.Coinbase {
+		coinbaseCredit.Add(&coinbaseCredit, &result.ExecutionResult.FeeBurnt)
+		hasBurnt = false
+		burntAddr = accounts.NilAddress
+	}
 	var newBurntBalance uint256.Int
 	var burntAcc *accounts.Account
-	if hasBurnt && !sharedDestination {
+	if hasBurnt {
 		burntAcc, err = vsReader.ReadAccountData(burntAddr)
 		if err != nil {
 			return nil, feeCreditNone, err
@@ -2171,7 +2176,7 @@ func (result *execResult) calcFees(
 	if cw, ok := result.TxOut.GetCreateContract(result.Coinbase); ok {
 		coinbaseCreatedContract = cw.Val
 	}
-	if hasBurnt && !sharedDestination {
+	if hasBurnt {
 		if bw, ok := result.TxOut.GetBalance(burntAddr); ok {
 			newBurntBalance = bw.Val
 		}
@@ -2184,16 +2189,13 @@ func (result *execResult) calcFees(
 	coinbaseWasContract := !coinbaseEmptyCodeHash || coinbaseHasCodeHashWrite || coinbaseCreatedContract
 	burnCoinbaseTip := !chainRules.IsAmsterdam && coinbaseSelfdestructed && coinbaseWasContract
 	if !burnCoinbaseTip {
-		newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
-		if sharedDestination {
-			newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeBurnt)
-		}
+		newCoinbaseBalance.Add(&newCoinbaseBalance, &coinbaseCredit)
 	}
 	oldBurntBalance := newBurntBalance
-	if hasBurnt && !sharedDestination {
+	if hasBurnt {
 		newBurntBalance.Add(&newBurntBalance, &result.ExecutionResult.FeeBurnt)
 	}
-	emitBurnt := hasBurnt && !sharedDestination && newBurntBalance != oldBurntBalance
+	emitBurnt := hasBurnt && newBurntBalance != oldBurntBalance
 
 	// EIP-161 empty-removal: even when the tip is zero (newBal == oldBal)
 	// the coinbase must be "touched" so the commitment calculator sees the
@@ -2239,7 +2241,7 @@ func (result *execResult) calcFees(
 	// The credit only moves when a prior tx's writes moved under it, so most
 	// rounds would rebuild the set the tx already carries.
 	if coinbaseEntry.shapeRecordedIn(credited, taskVersion, result.Coinbase) &&
-		(sharedDestination || burntEntry.shapeRecordedIn(credited, taskVersion, burntAddr)) {
+		burntEntry.shapeRecordedIn(credited, taskVersion, burntAddr) {
 		return nil, feeCreditRecorded, nil
 	}
 

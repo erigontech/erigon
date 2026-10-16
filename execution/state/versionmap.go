@@ -1409,7 +1409,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 				// re-executed) but the read's value is unchanged — not a real
 				// conflict, so the read stays valid and does not re-execute.
 				valid = VersionValid
-			} else if valid == VersionValid && path == BalancePath && matchesLive != nil && !matchesLive() {
+			} else if valid == VersionValid && path == BalancePath && version == rr.Version() && matchesLive != nil && !matchesLive() {
 				if _, wiped := vm.FindDoneSelfDestructInRange(addr, rr.Version().TxIndex+1, txIndex, true); !absent || !wiped {
 					valid = VersionInvalid
 					invReason = "done-balance"

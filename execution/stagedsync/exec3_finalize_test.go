@@ -874,10 +874,15 @@ func TestFinalizeTxSimple_SharedFeeDestinationSelfdestructBurnsBothCredits(t *te
 		Val:         true,
 	})
 
-	writes := s.runFinalizeTx(t, nil)
+	result := s.buildExecResult()
+	vm := state.NewVersionMap(nil)
+	vm.FlushVersionedWrites(result.TxOut, true)
+	writes, outcome, err := result.calcFees(result.Task.(*taskVersion), vm, s.makeReader(), s.rules, nil)
+	require.NoError(t, err)
 
-	require.Nil(t, findBalance(writes, s.coinbase),
+	require.Nil(t, writes,
 		"a pre-Amsterdam SELFDESTRUCT of a shared tip and burn destination drops both credits with the deleted object, as serial does")
+	require.Equal(t, feeCreditNone, outcome)
 }
 
 // TestFinalizeTxSimple_FeeWriteInvalidatesStaleCoinbaseRead exercises the
@@ -936,9 +941,6 @@ func TestFinalizeTxSimple_FeeWriteInvalidatesStaleCoinbaseRead(t *testing.T) {
 	// Validate's value-tiebreaker catches the mismatch.
 	assert.Equal(t, state.VersionInvalid, validateCoinbaseRead(state.StorageRead, uint256.Int{}),
 		"a stale read of pre-tip baseline (via stateReader) must be invalidated by validate's value-tiebreaker")
-
-	assert.Equal(t, state.VersionInvalid, validateCoinbaseRead(state.MapRead, uint256.Int{}),
-		"a pre-credit balance read must become invalid even when its writer version is unchanged")
 
 	// Late timing — the dependent worker read after calcFees, recording the
 	// post-tip value at the worker's version (MapRead). Validate passes.
@@ -1841,6 +1843,39 @@ func TestCalcFees_ReCreditsWhenPriorBalanceChanged(t *testing.T) {
 	credited := findBalance(tip, s.coinbase)
 	require.NotNil(t, credited)
 	require.Equal(t, *new(uint256.Int).Add(priorBalance, &s.feeTipped), credited.Val)
+}
+
+func TestCalcFees_ReCreditInvalidatesReadAtUnchangedVersion(t *testing.T) {
+	t.Parallel()
+	s := simpleTransferScenario()
+	r := newFeeCreditRound(t, s)
+
+	first := findBalance(r.run(t), s.coinbase)
+	require.NotNil(t, first, "the first round must credit the tip")
+
+	io := state.NewVersionedIO(2)
+	rs := state.ReadSet{}
+	rs.SetBalance(s.coinbase, state.VersionedRead[uint256.Int]{
+		ReadHeader: state.ReadHeader{
+			Source:  state.MapRead,
+			Version: state.Version{TxIndex: first.Version.TxIndex, Incarnation: first.Version.Incarnation},
+		},
+		Val: first.Val,
+	})
+	io.RecordReads(state.Version{TxIndex: 1}, rs)
+	equalVersion := func(readV, writeV state.Version) state.VersionValidity {
+		if readV != writeV {
+			return state.VersionInvalid
+		}
+		return state.VersionValid
+	}
+	require.Equal(t, state.VersionValid, r.vm.ValidateVersion(1, io, equalVersion, true, false, false, ""))
+
+	r.setPreCreditBalance(s.coinbase, 7_000_000)
+	require.NotNil(t, r.run(t), "a changed base balance must produce a fresh credit")
+
+	require.Equal(t, state.VersionInvalid, r.vm.ValidateVersion(1, io, equalVersion, true, false, false, ""),
+		"a re-credit rewrites the cell at an unchanged version, so a read of the first credit is stale")
 }
 
 func TestCalcFees_ReCreditsWhenAddressPathMissing(t *testing.T) {
