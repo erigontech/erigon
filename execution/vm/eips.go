@@ -217,9 +217,9 @@ func opTstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if evm.readOnly {
 		return pc, nil, ErrWriteProtection
 	}
-	key := state.TransientKey(scope.Stack.popCopy())
-	val := scope.Stack.popCopy()
-	evm.IntraBlockState().SetTransientState(scope.Contract.Address(), key, val)
+	key := scope.Stack.pop()
+	val := scope.Stack.pop()
+	evm.IntraBlockState().SetTransientState(scope.Contract.Address(), (*state.TransientKey)(key), val)
 	return pc, nil, nil
 }
 

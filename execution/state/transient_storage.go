@@ -53,7 +53,7 @@ func newTransientStorage() transientStorage {
 }
 
 // Set sets the transient-storage `value` for `key` at the given `addr` and journals the previous value.
-func (t transientStorage) Set(j *journal, addr accounts.Address, key TransientKey, value uint256.Int) {
+func (t transientStorage) Set(j *journal, addr accounts.Address, key *TransientKey, value *uint256.Int) {
 	s, i := t.find(addr, key)
 	if i < 0 {
 		if value.IsZero() {
@@ -61,9 +61,9 @@ func (t transientStorage) Set(j *journal, addr accounts.Address, key TransientKe
 		}
 		s, i = t.add(addr, key)
 	}
-	if prev := s.slots[i].value; prev != value {
+	if prev := s.slots[i].value; prev != *value {
 		j.transientStorageChange(addr, i, prev)
-		s.slots[i].value = value
+		s.slots[i].value = *value
 	}
 }
 
@@ -75,14 +75,14 @@ func (t transientStorage) restore(addr accounts.Address, slot int, value uint256
 // Get gets the transient storage for `key` at the given `addr`.
 func (t transientStorage) Get(addr accounts.Address, key TransientKey) uint256.Int {
 	if s := t[addr]; s != nil {
-		if i := s.find(key); i >= 0 {
+		if i := s.find(&key); i >= 0 {
 			return s.slots[i].value
 		}
 	}
 	return uint256.Int{}
 }
 
-func (t transientStorage) find(addr accounts.Address, key TransientKey) (*transientSlots, int) {
+func (t transientStorage) find(addr accounts.Address, key *TransientKey) (*transientSlots, int) {
 	s := t[addr]
 	if s == nil {
 		return nil, -1
@@ -90,7 +90,7 @@ func (t transientStorage) find(addr accounts.Address, key TransientKey) (*transi
 	return s, s.find(key)
 }
 
-func (t transientStorage) add(addr accounts.Address, key TransientKey) (*transientSlots, int) {
+func (t transientStorage) add(addr accounts.Address, key *TransientKey) (*transientSlots, int) {
 	s := t[addr]
 	if s == nil {
 		s = &transientSlots{}
@@ -99,26 +99,26 @@ func (t transientStorage) add(addr accounts.Address, key TransientKey) (*transie
 	return s, s.add(key)
 }
 
-func (s *transientSlots) find(key TransientKey) int {
+func (s *transientSlots) find(key *TransientKey) int {
 	if s.index != nil {
-		if i, ok := s.index[key]; ok {
+		if i, ok := s.index[*key]; ok {
 			return i
 		}
 		return -1
 	}
 	for i := range s.slots {
-		if s.slots[i].key == key {
+		if s.slots[i].key == *key {
 			return i
 		}
 	}
 	return -1
 }
 
-func (s *transientSlots) add(key TransientKey) int {
+func (s *transientSlots) add(key *TransientKey) int {
 	i := len(s.slots)
-	s.slots = append(s.slots, transientSlot{key: key})
+	s.slots = append(s.slots, transientSlot{key: *key})
 	if s.index != nil {
-		s.index[key] = i
+		s.index[*key] = i
 	} else if len(s.slots) > transientScanLimit {
 		s.index = make(map[TransientKey]int, 2*len(s.slots))
 		for j := range s.slots {

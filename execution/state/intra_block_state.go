@@ -2064,7 +2064,7 @@ func (ibs *IntraBlockState) IsNewContract(addr accounts.Address) (bool, error) {
 // SetTransientState sets transient storage for a given account. It
 // adds the change to the journal so that it can be rolled back
 // to its previous value if there is a revert.
-func (ibs *IntraBlockState) SetTransientState(addr accounts.Address, key TransientKey, value uint256.Int) {
+func (ibs *IntraBlockState) SetTransientState(addr accounts.Address, key *TransientKey, value *uint256.Int) {
 	ibs.transientStorage.Set(ibs.journal, addr, key, value)
 }
 

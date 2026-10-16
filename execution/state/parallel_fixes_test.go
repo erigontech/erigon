@@ -192,7 +192,7 @@ func TestTransientStorageResetInIBSReset(t *testing.T) {
 	testKey := TransientKey(*uint256.NewInt(1))
 
 	// Set transient storage
-	ibs.SetTransientState(testAddr, testKey, *uint256.NewInt(42))
+	ibs.SetTransientState(testAddr, &testKey, uint256.NewInt(42))
 	val := ibs.GetTransientState(testAddr, testKey)
 	assert.False(t, val.IsZero(), "Transient storage should be set")
 
