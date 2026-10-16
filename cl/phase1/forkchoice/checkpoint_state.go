@@ -27,6 +27,7 @@ import (
 	corestate "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -119,39 +120,45 @@ func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, publicKeysRegi
 
 // getAttestingIndicies retrieves the beacon committee.
 func (c *checkpointState) getAttestingIndicies(attestation *solid.Attestation, aggregationBits []byte) ([]uint64, error) {
-	// First get beacon committee
 	slot := attestation.Data.Slot
 	epoch := c.epochAtSlot(slot)
-	cIndex := attestation.Data.CommitteeIndex
-	clversion := c.beaconConfig.GetCurrentStateVersion(epoch)
-	if clversion.AfterOrEqual(clparams.ElectraVersion) {
-		index, err := attestation.GetCommitteeIndexFromBits()
-		if err != nil {
-			return nil, err
-		}
-		cIndex = index
-	}
-
-	// Compute shuffled indicies
 	lenIndicies := uint64(len(c.shuffledSet))
 	committeesPerSlot := c.committeeCount(lenIndicies)
 	count := committeesPerSlot * c.beaconConfig.SlotsPerEpoch
-	index := (slot%c.beaconConfig.SlotsPerEpoch)*committeesPerSlot + cIndex
-	start := (lenIndicies * index) / count
-	end := (lenIndicies * (index + 1)) / count
-	committee := c.shuffledSet[start:end]
+	committeeIndices := []uint64{attestation.Data.CommitteeIndex}
+	if c.beaconConfig.GetCurrentStateVersion(epoch).AfterOrEqual(clparams.ElectraVersion) {
+		electraCommitteeIndices := attestation.CommitteeBits.GetOnIndices()
+		if len(electraCommitteeIndices) == 0 {
+			return nil, errors.New("getAttestingIndicies: no committee bits set")
+		}
+		committeeIndices = committeeIndices[:0]
+		for _, committeeIndex := range electraCommitteeIndices {
+			committeeIndices = append(committeeIndices, uint64(committeeIndex))
+		}
+	}
 
+	aggregationBitsLen := utils.GetBitlistLength(aggregationBits)
+	committeeOffset := 0
 	attestingIndices := []uint64{}
-	for i, member := range committee {
-		bitIndex := i % 8
-		sliceIndex := i / 8
-		if sliceIndex >= len(aggregationBits) {
-			return nil, fmt.Errorf("getAttestingIndicies: committee is too big, committeeOffset: %d, aggrBitsLen: %d, committeeSize: %d",
-				sliceIndex, len(aggregationBits), len(committee))
+	for _, committeeIndex := range committeeIndices {
+		if committeeIndex >= committeesPerSlot {
+			return nil, fmt.Errorf("getAttestingIndicies: committee index %d is out of bounds for %d committees", committeeIndex, committeesPerSlot)
 		}
-		if (aggregationBits[sliceIndex] & (1 << bitIndex)) > 0 {
-			attestingIndices = append(attestingIndices, member)
+		index := (slot%c.beaconConfig.SlotsPerEpoch)*committeesPerSlot + committeeIndex
+		start := (lenIndicies * index) / count
+		end := (lenIndicies * (index + 1)) / count
+		committee := c.shuffledSet[start:end]
+		if committeeOffset+len(committee) > aggregationBitsLen {
+			return nil, fmt.Errorf("getAttestingIndicies: aggregation bits are too short, committeeOffset: %d, aggrBitsLen: %d, committeeSize: %d",
+				committeeOffset, aggregationBitsLen, len(committee))
 		}
+		for i, member := range committee {
+			bitPosition := committeeOffset + i
+			if aggregationBits[bitPosition/8]&(1<<uint(bitPosition%8)) > 0 {
+				attestingIndices = append(attestingIndices, member)
+			}
+		}
+		committeeOffset += len(committee)
 	}
 	return attestingIndices, nil
 }

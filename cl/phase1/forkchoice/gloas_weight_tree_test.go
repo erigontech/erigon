@@ -271,6 +271,12 @@ func (g *countingHeadForkGraph) GetCurrentJustifiedCheckpoint(root common.Hash) 
 type headSnapshotForkGraph struct {
 	*getFinalizedExecutionHashForkGraph
 	onGetBlock func()
+	invalid    map[common.Hash]bool
+	noEnvelope map[common.Hash]bool
+}
+
+func (g *headSnapshotForkGraph) IsBlockInvalid(root common.Hash) bool {
+	return g.invalid[root]
 }
 
 func (g *headSnapshotForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
@@ -281,7 +287,7 @@ func (g *headSnapshotForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaco
 }
 
 func (g *headSnapshotForkGraph) HasEnvelope(root common.Hash) bool {
-	return g.blocks[root] != nil
+	return g.blocks[root] != nil && !g.noEnvelope[root]
 }
 
 func (g *headSnapshotForkGraph) PayloadAccepted(root common.Hash) (bool, bool) {

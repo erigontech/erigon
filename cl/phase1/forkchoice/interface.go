@@ -50,6 +50,7 @@ type ForkChoiceStorageReader interface {
 	GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error)
 	GetHeadNode() (ForkChoiceNode, uint64, error)
 	HighestSeen() uint64
+	HasImportedDescendantAfter(root common.Hash, slot uint64) bool
 	BlockProcessing() bool
 	JustifiedCheckpoint() solid.Checkpoint
 	JustifiedSlot() uint64
@@ -82,6 +83,15 @@ type ForkChoiceStorageReader interface {
 	HasBlockEquivocation(slot, proposerIndex uint64, exceptRoot common.Hash) bool
 	// [New in Gloas:EIP7732] HasEnvelope checks if a signed execution payload envelope exists.
 	HasEnvelope(blockRoot common.Hash) bool
+	// [New in Gloas:EIP7732] HasPendingExecutionPayloadEnvelope reports an envelope that is
+	// waiting for its block or its data columns.
+	HasPendingExecutionPayloadEnvelope(blockRoot common.Hash) bool
+	// [New in Gloas:EIP7732] ExecutionPayloadApplyInFlight reports an envelope that is being
+	// applied after passing its signature check.
+	ExecutionPayloadApplyInFlight(blockRoot common.Hash) bool
+	// [New in Gloas:EIP7732] PayloadVotesRuleOutFull reports PTC votes recorded for blockRoot that
+	// already rule out building on its FULL variant.
+	PayloadVotesRuleOutFull(blockRoot common.Hash) bool
 	ExecutionPayloadReceivedBefore(blockRoot common.Hash, deadline time.Time) bool
 	// IsPayloadVerified reports whether the EL has fully validated the payload.
 	IsPayloadVerified(blockRoot common.Hash) bool
@@ -150,6 +160,10 @@ type ForkChoiceStorageWriter interface {
 	// checkBlobData: verify blob data availability via PeerDAS
 	// validatePayload: call engine.NewPayload() to validate with EL
 	OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error
+	// [New in Gloas:EIP7732] RetryPendingExecutionPayloadEnvelope applies the envelope queued for
+	// blockRoot when its data is available and its retry is due, and returns when the next retry
+	// is due, or zero when nothing is queued.
+	RetryPendingExecutionPayloadEnvelope(ctx context.Context, blockRoot common.Hash) time.Time
 	ValidateExecutionPayloadEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
 	ClaimExecutionPayloadEnvelopeForGossip(context.Context, common.Hash, uint64) (ExecutionPayloadEnvelopeAdmissionToken, error)
 	TryClaimExecutionPayloadEnvelopeForGossip(common.Hash, uint64) (ExecutionPayloadEnvelopeAdmissionToken, error)

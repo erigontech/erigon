@@ -25,6 +25,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -457,4 +458,21 @@ func TestFlushSingleFCUWhenBelowBatchSize(t *testing.T) {
 	require.Equal(t, []uint64{1, 2, 3}, h.insertedNumbers())
 	require.Len(t, h.fcuHeads, 1, "with all blocks in a single sub-batch, only the final FCU fires")
 	require.Equal(t, blockHash(last), h.fcuHeads[0])
+}
+
+func TestPersistentBlockCollectorCloseLeavesNoGoroutine(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	c := NewPersistentBlockCollector(log.New(), nil, &clparams.MainnetBeaconConfig, t.TempDir())
+	require.NotNil(t, c)
+	require.NoError(t, c.Close())
+}
+
+// A collector whose database failed to open is a nil pointer behind the interface; closing it
+// on shutdown must not panic.
+func TestPersistentBlockCollectorCloseOnFailedOpen(t *testing.T) {
+	notADir := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(notADir, nil, 0o600))
+	var c BlockCollector = NewPersistentBlockCollector(log.New(), nil, &clparams.MainnetBeaconConfig, notADir)
+	require.Nil(t, c, "the open must fail on a regular file for this test to reach the guard")
+	require.NoError(t, c.Close())
 }
