@@ -33,7 +33,7 @@ type transientStorage map[accounts.Address]*transientSlots
 
 // transientScanLimit is how many slots are scanned before an index is built: Go
 // hashes a 32-byte map key even in a one-group map, and the scan is cheaper.
-const transientScanLimit = 8
+const transientScanLimit = 32
 
 // transientSlots only appends, so a slot index stays valid for the journal until
 // the transaction ends.
@@ -52,30 +52,22 @@ func newTransientStorage() transientStorage {
 	return make(transientStorage)
 }
 
-// Set sets the transient-storage `value` for `key` at the given `addr`. It returns the slot index
-// and the previous value, or -1 when value is zero and there is no slot to write.
-func (t transientStorage) Set(addr accounts.Address, key TransientKey, value uint256.Int) (int, uint256.Int) {
-	s := t[addr]
-	if s == nil {
-		if value.IsZero() {
-			return -1, uint256.Int{}
-		}
-		s = &transientSlots{}
-		t[addr] = s
-	}
-	i := s.find(key)
+// Set sets the transient-storage `value` for `key` at the given `addr` and journals the previous value.
+func (t transientStorage) Set(j *journal, addr accounts.Address, key TransientKey, value uint256.Int) {
+	s, i := t.find(addr, key)
 	if i < 0 {
 		if value.IsZero() {
-			return -1, uint256.Int{}
+			return
 		}
-		i = s.add(key)
+		s, i = t.add(addr, key)
 	}
-	prev := s.slots[i].value
-	s.slots[i].value = value
-	return i, prev
+	if prev := s.slots[i].value; prev != value {
+		j.transientStorageChange(addr, i, prev)
+		s.slots[i].value = value
+	}
 }
 
-// restore writes back a value that Set replaced at the returned slot index.
+// restore writes back a value that Set journalled for the slot index.
 func (t transientStorage) restore(addr accounts.Address, slot int, value uint256.Int) {
 	t[addr].slots[slot].value = value
 }
@@ -88,6 +80,23 @@ func (t transientStorage) Get(addr accounts.Address, key TransientKey) uint256.I
 		}
 	}
 	return uint256.Int{}
+}
+
+func (t transientStorage) find(addr accounts.Address, key TransientKey) (*transientSlots, int) {
+	s := t[addr]
+	if s == nil {
+		return nil, -1
+	}
+	return s, s.find(key)
+}
+
+func (t transientStorage) add(addr accounts.Address, key TransientKey) (*transientSlots, int) {
+	s := t[addr]
+	if s == nil {
+		s = &transientSlots{}
+		t[addr] = s
+	}
+	return s, s.add(key)
 }
 
 func (s *transientSlots) find(key TransientKey) int {
