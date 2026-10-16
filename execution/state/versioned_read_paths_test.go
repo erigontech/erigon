@@ -1190,3 +1190,30 @@ func TestReadValueUnchanged_NilEmptyArmGated(t *testing.T) {
 	require.True(t, newIBS(sys, true, false).readValueUnchanged(sys, AddressPath, accounts.NilKey, r))
 	require.True(t, newIBS(other, true, true).readValueUnchanged(other, AddressPath, accounts.NilKey, r))
 }
+
+// A first Exist on an address no tx has touched records the committed read, for
+// a present and an absent account alike.
+func TestVersionedRead_B_ColdExistRecordsCommittedRead(t *testing.T) {
+	t.Parallel()
+	present := accounts.InternAddress([20]byte{0xb7})
+	absent := accounts.InternAddress([20]byte{0xb8})
+	acc := accounts.NewAccount()
+	acc.Nonce = 3
+	ibs := newTouchTestIBS(t, present, acc, true)
+
+	ok, err := ibs.Exist(present)
+	require.NoError(t, err)
+	require.True(t, ok)
+	tr, found := ibs.versionedReads.GetAddress(present)
+	require.True(t, found)
+	require.Equal(t, ReadHeader{Source: StorageRead, Version: UnknownVersion}, tr.ReadHeader)
+	require.Equal(t, uint64(3), tr.Val.Account().Nonce)
+
+	ok, err = ibs.Exist(absent)
+	require.NoError(t, err)
+	require.False(t, ok)
+	tr, found = ibs.versionedReads.GetAddress(absent)
+	require.True(t, found)
+	require.Equal(t, ReadHeader{Source: StorageRead, Version: UnknownVersion}, tr.ReadHeader)
+	require.Nil(t, tr.Val)
+}

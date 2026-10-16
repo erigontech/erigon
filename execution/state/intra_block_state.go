@@ -1369,9 +1369,70 @@ func (ibs *IntraBlockState) getVersionedAccount(addr accounts.Address, readStora
 // overlay the per-field versionMap cells. It returns nil when the account is
 // absent or was destroyed with no revival. The AddressPath read it performs
 // records the nil-read that OCC uses to detect create/absent conflicts.
+// untouchedAddress reports that no write, read or version-map cell exists for
+// addr, so its account is the committed one.
+func (ibs *IntraBlockState) untouchedAddress(addr accounts.Address) bool {
+	if _, dirty := ibs.journal.dirties[addr]; dirty {
+		return false
+	}
+	if _, resident := ibs.stateObjects[addr]; resident {
+		return false
+	}
+	if _, read := ibs.versionedReads.GetAddress(addr); read {
+		return false
+	}
+	return ibs.versionMap.load(addr) == nil
+}
+
+// readUntouchedAccount reads an untouched address and records the read the
+// provisional path would end with.
+func (ibs *IntraBlockState) readUntouchedAccount(addr accounts.Address) (*accounts.Account, ReadSource, Version, error) {
+	acc, err := ibs.committedAccount(addr)
+	if err != nil {
+		return nil, StorageRead, UnknownVersion, err
+	}
+	if acc == nil {
+		ibs.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion}})
+		return nil, StorageRead, UnknownVersion, nil
+	}
+	ibs.accountRead(addr, acc, StorageRead, UnknownVersion)
+	return acc, StorageRead, UnknownVersion, nil
+}
+
+// committedAccount reads addr's account from the state reader once per tx.
+func (ibs *IntraBlockState) committedAccount(addr accounts.Address) (*accounts.Account, error) {
+	if cached, ok := ibs.committedBase[addr]; ok {
+		return cached, nil
+	}
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
+		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
+	}
+	var readStart time.Time
+	if dbg.KVReadLevelledMetrics {
+		readStart = time.Now()
+	}
+	acc, err := ibs.stateReader.ReadAccountData(addr)
+	if dbg.KVReadLevelledMetrics {
+		ibs.accountReadDuration += time.Since(readStart)
+		ibs.accountReadCount++
+	}
+	ibs.stateReader.SetTrace(false, "")
+	ibs.recordStateReadError(err)
+	if err == nil {
+		if ibs.committedBase == nil {
+			ibs.committedBase = make(map[accounts.Address]*accounts.Account)
+		}
+		ibs.committedBase[addr] = acc
+	}
+	return acc, err
+}
+
 func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStorage bool) (*accounts.Account, ReadSource, Version, error) {
 	if ibs.versionMap == nil {
 		return nil, UnknownSource, UnknownVersion, nil
+	}
+	if readStorage && ibs.untouchedAddress(addr) {
+		return ibs.readUntouchedAccount(addr)
 	}
 
 	readAccount, source, version, err := readAccount(ibs, addr)
@@ -1427,30 +1488,7 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 
 	if readAccount == nil {
 		if readStorage {
-			if cached, ok := ibs.committedBase[addr]; ok {
-				readAccount = cached
-			} else {
-				if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
-					ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
-				}
-				var readStart time.Time
-				if dbg.KVReadLevelledMetrics {
-					readStart = time.Now()
-				}
-				readAccount, err = ibs.stateReader.ReadAccountData(addr)
-				if dbg.KVReadLevelledMetrics {
-					ibs.accountReadDuration += time.Since(readStart)
-					ibs.accountReadCount++
-				}
-				ibs.stateReader.SetTrace(false, "")
-				ibs.recordStateReadError(err)
-				if err == nil {
-					if ibs.committedBase == nil {
-						ibs.committedBase = make(map[accounts.Address]*accounts.Account)
-					}
-					ibs.committedBase[addr] = readAccount
-				}
-			}
+			readAccount, err = ibs.committedAccount(addr)
 			source = StorageRead
 		}
 
