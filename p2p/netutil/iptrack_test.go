@@ -21,6 +21,7 @@ package netutil
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"net/netip"
 	"testing"
 	"time"
@@ -209,6 +210,96 @@ func TestIPTrackerForceGC(t *testing.T) {
 	if len(it.statements) > 2*max {
 		t.Errorf("statements not GCed, have %d", len(it.statements))
 	}
+}
+
+// This checks that the endpoint counts kept by AddStatement and GC match
+// the statements.
+func TestIPTrackerCounts(t *testing.T) {
+	var (
+		clock mclock.Simulated
+		it    = NewIPTracker(10*time.Second, 10*time.Second, 2)
+		rng   = rand.New(rand.NewPCG(1, 2))
+	)
+	it.clock = &clock
+	for i := 0; i < 5000; i++ {
+		host := netip.AddrFrom4([4]byte{1, byte(rng.IntN(8)), byte(rng.IntN(4)), byte(rng.IntN(4))})
+		endpoint := netip.AddrPortFrom(netip.AddrFrom4([4]byte{2, 0, 0, byte(rng.IntN(4))}), 9000)
+		it.AddStatement(host, endpoint)
+		clock.Run(time.Duration(rng.IntN(100)) * time.Millisecond)
+
+		pred := it.PredictEndpoint()
+		counts, maxcount := countStatements(it)
+		if maxcount < it.minStatements {
+			if pred.IsValid() {
+				t.Fatalf("op %d: prediction %v with max count %d", i, pred, maxcount)
+			}
+		} else if counts[pred] != maxcount {
+			t.Fatalf("op %d: prediction %v has count %d, max is %d", i, pred, counts[pred], maxcount)
+		}
+		for ep, c := range counts {
+			if it.counts.count[ep] != c {
+				t.Fatalf("op %d: endpoint %v count %d, want %d", i, ep, it.counts.count[ep], c)
+			}
+		}
+		if len(it.counts.count) != len(counts) {
+			t.Fatalf("op %d: %d endpoints counted, want %d", i, len(it.counts.count), len(counts))
+		}
+		checkEndpointSets(t, &it.counts)
+	}
+
+	// All statements expire.
+	clock.Run(11 * time.Second)
+	if pred := it.PredictEndpoint(); pred.IsValid() {
+		t.Fatalf("prediction %v after all statements expired", pred)
+	}
+	if len(it.statements) != 0 || it.order.Len() != 0 || len(it.votes) != 0 || len(it.counts.count) != 0 || len(it.counts.byCount) != 1 {
+		t.Fatalf("state left after all statements expired: %d statements, %d votes, %d endpoints, %d sets",
+			len(it.statements), len(it.votes), len(it.counts.count), len(it.counts.byCount))
+	}
+	it.AddStatement(netip.MustParseAddr("1.0.0.1"), netip.MustParseAddrPort("2.0.0.1:9000"))
+	it.AddStatement(netip.MustParseAddr("1.0.1.1"), netip.MustParseAddrPort("2.0.0.1:9000"))
+	if pred := it.PredictEndpoint(); pred != netip.MustParseAddrPort("2.0.0.1:9000") {
+		t.Fatalf("wrong prediction %v after reuse", pred)
+	}
+}
+
+// checkEndpointSets checks that every endpoint is in the set of its count.
+func checkEndpointSets(t *testing.T, ec *endpointCounts) {
+	t.Helper()
+	n := 0
+	for c, set := range ec.byCount {
+		for i, ep := range set {
+			if ec.count[ep] != c || ec.pos[ep] != i {
+				t.Fatalf("endpoint %v at set %d index %d, has count %d pos %d", ep, c, i, ec.count[ep], ec.pos[ep])
+			}
+		}
+		n += len(set)
+	}
+	if n != len(ec.count) || n != len(ec.pos) {
+		t.Fatalf("%d endpoints in sets, %d counts, %d positions", n, len(ec.count), len(ec.pos))
+	}
+	if top := len(ec.byCount) - 1; top > 0 && len(ec.byCount[top]) == 0 {
+		t.Fatalf("highest set %d is empty", top)
+	}
+}
+
+// countStatements counts the networks stating each endpoint.
+func countStatements(it *IPTracker) (map[netip.AddrPort]int, int) {
+	var (
+		counted  = make(map[netStatement]bool)
+		counts   = make(map[netip.AddrPort]int)
+		maxcount int
+	)
+	for host, el := range it.statements {
+		st := el.Value.(*ipStatement)
+		key := netStatement{statementNetwork(host), st.endpoint}
+		if !counted[key] {
+			counted[key] = true
+			counts[st.endpoint]++
+			maxcount = max(maxcount, counts[st.endpoint])
+		}
+	}
+	return counts, maxcount
 }
 
 // This checks that statements with an invalid host or endpoint are ignored.
