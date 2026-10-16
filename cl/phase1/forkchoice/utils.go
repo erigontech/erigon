@@ -18,6 +18,7 @@ package forkchoice
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -123,9 +124,9 @@ func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckp
 		f.checkpointStatesMu.Unlock()
 	}
 	if finalizedCheckpoint.Epoch > f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch {
+		f.finalizedCheckpoint.Store(finalizedCheckpoint)
 		f.queueOperationPrune(finalizedCheckpoint)
 		f.onNewFinalized(finalizedCheckpoint)
-		f.finalizedCheckpoint.Store(finalizedCheckpoint)
 
 		blockRoot := finalizedCheckpoint.Root
 		blockHeader, ok := f.forkGraph.GetHeader(blockRoot)
@@ -289,8 +290,19 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 	if state, ok := f.checkpointStates.Load(checkpoint); ok {
 		return state.(*checkpointState), nil
 	}
+	cs, err, _ := f.checkpointStateBuilds.Do(fmt.Sprintf("%d:%x", checkpoint.Epoch, checkpoint.Root), func() (any, error) {
+		if state, ok := f.checkpointStates.Load(checkpoint); ok {
+			return state.(*checkpointState), nil
+		}
+		return f.buildCheckpointState(checkpoint)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return cs.(*checkpointState), nil
+}
 
-	// If it is not in cache compute it and then put in cache.
+func (f *ForkChoiceStore) buildCheckpointState(checkpoint solid.Checkpoint) (*checkpointState, error) {
 	if f.forkGraph == nil {
 		return nil, errors.New("getCheckpointState: forkGraph not initialized")
 	}
@@ -321,6 +333,9 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 		mixes, baseState.GenesisValidatorsRoot(), baseState.Fork(), getUnslashedActiveBalance(baseState), state.Epoch(baseState.BeaconState), checkpoint)
 	// Cache in memory what we are left with.
 	f.storeCheckpointState(checkpoint, checkpointState)
+	if finalized, ok := f.finalizedCheckpoint.Load().(solid.Checkpoint); ok && checkpoint.Epoch < finalized.Epoch {
+		f.checkpointStates.Delete(checkpoint)
+	}
 	return checkpointState, nil
 }
 
