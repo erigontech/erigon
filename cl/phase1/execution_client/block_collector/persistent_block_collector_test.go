@@ -473,5 +473,6 @@ func TestPersistentBlockCollectorCloseOnFailedOpen(t *testing.T) {
 	notADir := filepath.Join(t.TempDir(), "file")
 	require.NoError(t, os.WriteFile(notADir, nil, 0o600))
 	var c BlockCollector = NewPersistentBlockCollector(log.New(), nil, &clparams.MainnetBeaconConfig, notADir)
+	require.Nil(t, c, "the open must fail on a regular file for this test to reach the guard")
 	require.NoError(t, c.Close())
 }
