@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -39,7 +40,9 @@ func fakeNode(t *testing.T, results map[string]string) (*httptest.Server, map[st
 			Method string          `json:"method"`
 			Params json.RawMessage `json:"params"`
 		}
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&req)) {
+			return
+		}
 		params[req.Method] = req.Params
 		res, ok := results[req.Method]
 		if !ok {
@@ -106,7 +109,9 @@ func TestFetchTxsWritesTheRestPastAFailure(t *testing.T) {
 			Method string `json:"method"`
 			Params []any  `json:"params"`
 		}
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&req)) {
+			return
+		}
 		res := `{"blockNumber":"0x1"}`
 		if req.Params[0] == "0xbad" {
 			res = "null"

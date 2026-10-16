@@ -807,6 +807,36 @@ func signedTransferAtLatest(t *testing.T, m *execmoduletester.ExecModuleTester) 
 	return buf.Bytes(), accounts.InternAddress(sender), accounts.InternAddress(recipient)
 }
 
+func TestUnknownTraceTypeIsInvalidParams(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	ctx := context.Background()
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	unknown := []string{TraceTypeTrace, "bogus"}
+
+	t.Run("trace_call", func(t *testing.T) {
+		_, err := api.Call(ctx, TraceCallParam{}, unknown, &latest, nil)
+		requireErrorCode(t, err, rpc.ErrCodeInvalidParams)
+	})
+	t.Run("trace_callMany", func(t *testing.T) {
+		_, err := api.CallMany(ctx, json.RawMessage(`[[{}, ["trace", "bogus"]]]`), &latest, nil)
+		requireErrorCode(t, err, rpc.ErrCodeInvalidParams)
+	})
+	t.Run("trace_replayBlockTransactions", func(t *testing.T) {
+		_, err := api.ReplayBlockTransactions(ctx, latest, unknown, nil, nil)
+		requireErrorCode(t, err, rpc.ErrCodeInvalidParams)
+	})
+	t.Run("trace_replayTransaction", func(t *testing.T) {
+		_, err := api.ReplayTransaction(ctx, common.HexToHash(debugTraceTransactionTests[0].txHash), unknown, nil, nil)
+		requireErrorCode(t, err, rpc.ErrCodeInvalidParams)
+	})
+	t.Run("trace_rawTransaction", func(t *testing.T) {
+		encoded, _, _ := signedTransferAtLatest(t, m)
+		_, err := api.RawTransaction(ctx, encoded, unknown)
+		requireErrorCode(t, err, rpc.ErrCodeInvalidParams)
+	})
+}
+
 func TestRawTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)
