@@ -1293,7 +1293,7 @@ func TestDeferredSyncLeavesATipSizedCommitUnflushed(t *testing.T) {
 }
 
 func TestDeferredSyncBoundsAWriterThatNeverReleasesTheLock(t *testing.T) {
-	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).SafeNoSync().SyncPeriod(10 * time.Millisecond).
+	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).SafeNoSync().SyncPeriod(10 * time.Millisecond).SyncInCommitIfUnsyncedFor(300 * time.Millisecond).
 		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
 	t.Cleanup(db.Close)
 	val := make([]byte, 4000)
@@ -1340,10 +1340,10 @@ func TestDeferredSyncLeavesTheDeadlineToThePoller(t *testing.T) {
 	t.Cleanup(db.Close)
 	period, err := db.(*mdbx.MdbxKV).Env().GetSyncPeriod()
 	require.NoError(t, err)
-	require.InDelta(t, float64(1500*time.Millisecond), float64(period), float64(time.Millisecond),
-		"mdbx flushes inside a commit that lands past its own deadline, so it must outlast the poller's")
+	require.InDelta(t, float64(mdbx.DefaultSyncInCommitIfUnsyncedFor), float64(period), float64(time.Millisecond),
+		"mdbx syncs inside a commit that lands past its own period, so it must outlast the poller's interval")
 
-	long := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).SafeNoSync().SyncPeriod(time.Hour).MustOpen()
+	long := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).SafeNoSync().SyncInCommitIfUnsyncedFor(100 * time.Hour).MustOpen()
 	t.Cleanup(long.Close)
 	period, err = long.(*mdbx.MdbxKV).Env().GetSyncPeriod()
 	require.NoError(t, err)

@@ -74,20 +74,21 @@ func WithChaindataTables(defaultBuckets kv.TableCfg) kv.TableCfg {
 type MdbxOpts struct {
 	// must be in the range from 12.5% (almost empty) to 50% (half empty)
 	// which corresponds to the range from 8192 and to 32768 in units respectively
-	log             log.Logger
-	bucketsCfg      TableCfgFunc
-	path            string
-	syncPeriod      time.Duration      // to be used only in combination with SafeNoSync flag. The dirty data will automatically be flushed to disk periodically in the background.
-	syncBytes       *datasize.ByteSize // to be used only in combination with SafeNoSync flag. The dirty data will be flushed to disk when this threshold is reached.
-	mapSize         datasize.ByteSize
-	growthStep      datasize.ByteSize
-	shrinkThreshold int
-	flags           uint
-	pageSize        datasize.ByteSize
-	dirtySpace      uint64 // if exceed this space, modified pages will `spill` to disk
-	mergeThreshold  uint64
-	verbosity       kv.DBVerbosityLvl
-	label           kv.Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
+	log                       log.Logger
+	bucketsCfg                TableCfgFunc
+	path                      string
+	syncPeriod                time.Duration      // to be used only in combination with SafeNoSync flag. The dirty data will automatically be flushed to disk periodically in the background.
+	syncInCommitIfUnsyncedFor time.Duration      // SafeNoSync only: a commit this long after the last sync behaves as Durable
+	syncBytes                 *datasize.ByteSize // to be used only in combination with SafeNoSync flag. The dirty data will be flushed to disk when this threshold is reached.
+	mapSize                   datasize.ByteSize
+	growthStep                datasize.ByteSize
+	shrinkThreshold           int
+	flags                     uint
+	pageSize                  datasize.ByteSize
+	dirtySpace                uint64 // if exceed this space, modified pages will `spill` to disk
+	mergeThreshold            uint64
+	verbosity                 kv.DBVerbosityLvl
+	label                     kv.Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
 
 	inMem, autoRemove bool
 
@@ -103,9 +104,9 @@ const (
 	DefaultMapSize    = 2 * datasize.TB
 	DefaultGrowthStep = 1 * datasize.GB
 
-	// A commit falls back to Durable only when the poller missed this many intervals in a row.
-	syncInCommitAfterMissedIntervals = 30
-	maxSyncInCommitPeriod            = 18 * time.Hour // mdbx stores the period in 16.16-bit seconds
+	// A commit falls back to Durable only after this long without a sync, 30 poller intervals.
+	DefaultSyncInCommitIfUnsyncedFor = 30 * time.Second
+	maxSyncInCommitIfUnsyncedFor     = 18 * time.Hour // mdbx stores the period in 16.16-bit seconds
 )
 
 // Under SafeNoSync the poller goroutine calls env.Sync every PollerSyncInterval. A commit past
@@ -165,15 +166,13 @@ func (opts MdbxOpts) PageSize(v datasize.ByteSize) MdbxOpts       { opts.pageSiz
 func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts     { opts.growthStep = v; return opts }
 func (opts MdbxOpts) Path(path string) MdbxOpts                   { opts.path = path; return opts }
 func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts    { opts.syncPeriod = period; return opts }
-
-// syncInCommitIfUnsyncedFor is the age of the last sync past which a commit behaves as Durable,
-// long enough that the poller normally gets there first.
-func syncInCommitIfUnsyncedFor(pollerInterval time.Duration) time.Duration {
-	return min(syncInCommitAfterMissedIntervals*pollerInterval, maxSyncInCommitPeriod)
+func (opts MdbxOpts) SyncInCommitIfUnsyncedFor(d time.Duration) MdbxOpts {
+	opts.syncInCommitIfUnsyncedFor = d
+	return opts
 }
 
 // SafeNoSync syncs from the poller every PollerSyncInterval instead of on every commit; a commit
-// behaves as Durable only past SyncInCommitIfAboveUnsyncedBytes or syncInCommitIfUnsyncedFor. Mdbx keeps the last flushed commit-point explicitly, so a crash
+// behaves as Durable only past SyncInCommitIfAboveUnsyncedBytes or SyncInCommitIfUnsyncedFor. Mdbx keeps the last flushed commit-point explicitly, so a crash
 // rolls back to it and never corrupts the file. It is the default; Durable opts out.
 func (opts MdbxOpts) SafeNoSync() MdbxOpts {
 	return opts.Flags(func(f uint) uint { return f&^mdbx.Durable | mdbx.SafeNoSync })
@@ -206,6 +205,9 @@ func (opts MdbxOpts) resolveSync() MdbxOpts {
 	}
 	if opts.syncPeriod == 0 {
 		opts = opts.SyncPeriod(PollerSyncInterval)
+	}
+	if opts.syncInCommitIfUnsyncedFor == 0 {
+		opts = opts.SyncInCommitIfUnsyncedFor(DefaultSyncInCommitIfUnsyncedFor)
 	}
 	return opts
 }
@@ -438,7 +440,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 	}
 
 	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
-		if err := env.SetSyncPeriod(syncInCommitIfUnsyncedFor(opts.syncPeriod)); err != nil {
+		if err := env.SetSyncPeriod(min(opts.syncInCommitIfUnsyncedFor, maxSyncInCommitIfUnsyncedFor)); err != nil {
 			return nil, err
 		}
 	}
