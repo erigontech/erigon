@@ -421,6 +421,108 @@ func TestVersionedRead_DestructedStaleStorageUsesStorageVersion(t *testing.T) {
 	require.Equal(t, VersionValid, vm.ValidateVersion(2, io, validateEqualVersion, true, false, false, ""))
 }
 
+// A fee credit revives a destroyed account without writing a code-hash cell, so
+// the keccak("") read must carry the version of the stale cell below the destruct.
+func TestVersionedRead_RevivedStaleCodeHashUsesCodeHashVersion(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xca})
+	vm := NewVersionMap(nil)
+	codeHashVersion := Version{TxIndex: 0}
+	vm.WriteCodeHash(addr, codeHashVersion, accounts.InternCodeHash(common.Hash{0x01}), true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
+	revived := accounts.NewAccount()
+	revived.Balance.SetUint64(1)
+	vm.WriteAddress(addr, Version{TxIndex: 2}, &revived, true)
+	vm.WriteBalance(addr, Version{TxIndex: 2}, revived.Balance, true)
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 3)
+	codeHash, err := ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	require.Equal(t, accounts.EmptyCodeHash, codeHash)
+	reads := ibs.VersionedReads()
+	read, ok := reads.GetCodeHash(addr)
+	require.True(t, ok)
+	require.Equal(t, codeHashVersion, read.Version)
+	io := NewVersionedIO(4)
+	io.RecordReads(Version{TxIndex: 3}, reads)
+	require.Equal(t, VersionValid, vm.ValidateVersion(3, io, validateEqualVersion, true, false, false, ""))
+}
+
+// A field read past a self-destruct returns zero and records the wiped read at
+// the destruct's version, so a lower tx that later revives the field invalidates it.
+func TestVersionedRead_RevivedFieldWipedReadCaughtAtCommit(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		read    func(*IntraBlockState, accounts.Address) (bool, error)
+		version func(ReadSet, accounts.Address) (Version, bool)
+		revive  func(*VersionMap, accounts.Address, Version)
+	}{
+		{
+			"balance",
+			func(ibs *IntraBlockState, a accounts.Address) (bool, error) {
+				v, err := ibs.GetBalance(a)
+				return v.IsZero(), err
+			},
+			func(rs ReadSet, a accounts.Address) (Version, bool) {
+				r, ok := rs.GetBalance(a)
+				return r.Version, ok
+			},
+			func(vm *VersionMap, a accounts.Address, v Version) { vm.WriteBalance(a, v, *uint256.NewInt(777), true) },
+		},
+		{
+			"nonce",
+			func(ibs *IntraBlockState, a accounts.Address) (bool, error) {
+				v, err := ibs.GetNonce(a)
+				return v == 0, err
+			},
+			func(rs ReadSet, a accounts.Address) (Version, bool) {
+				r, ok := rs.GetNonce(a)
+				return r.Version, ok
+			},
+			func(vm *VersionMap, a accounts.Address, v Version) { vm.WriteNonce(a, v, 1, true) },
+		},
+		{
+			"code size",
+			func(ibs *IntraBlockState, a accounts.Address) (bool, error) {
+				v, err := ibs.GetCodeSize(a)
+				return v == 0, err
+			},
+			func(rs ReadSet, a accounts.Address) (Version, bool) {
+				r, ok := rs.GetCodeSize(a)
+				return r.Version, ok
+			},
+			func(vm *VersionMap, a accounts.Address, v Version) { vm.WriteCodeSize(a, v, 3, true) },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			addr := accounts.InternAddress([20]byte{0xcb})
+			vm := NewVersionMap(nil)
+			destructVersion := Version{TxIndex: 1}
+			vm.WriteSelfDestruct(addr, destructVersion, true, true)
+			ibs := NewWithVersionMap(&emptyReader{}, vm)
+			defer ibs.Close()
+			ibs.SetTxContext(1, 3)
+			zero, err := tt.read(ibs, addr)
+			require.NoError(t, err)
+			require.True(t, zero)
+			reads := ibs.VersionedReads()
+			version, ok := tt.version(reads, addr)
+			require.True(t, ok, "the wiped read must be recorded past the self-destruct")
+			require.Equal(t, destructVersion, version)
+
+			io := NewVersionedIO(4)
+			io.RecordReads(Version{TxIndex: 3}, reads)
+			require.Equal(t, VersionValid, vm.ValidateVersion(3, io, validateEqualVersion, true, false, false, ""))
+			tt.revive(vm, addr, Version{TxIndex: 2})
+			require.Equal(t, VersionInvalid, vm.ValidateVersion(3, io, validateEqualVersion, true, false, false, ""))
+		})
+	}
+}
+
 // CodePath is exempt from the SelfDestruct short-circuit. Even if SD
 // is active, a CodePath read must fall through to the actual code-read
 // branches rather than returning zero.
@@ -755,6 +857,15 @@ func (r *refreshReader) ReadAccountData(accounts.Address) (*accounts.Account, er
 	return r.account, nil
 }
 
+func (r *refreshReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (r *refreshReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
 func (r *refreshReader) ReadAccountDataForDebug(accounts.Address) (*accounts.Account, error) {
 	return r.account, nil
 }
@@ -787,6 +898,22 @@ func TestVersionedRead_B_CommittedCodeHashReusesCommittedBase(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, codeHash, got)
 	assert.Equal(t, reads, r.accountReads, "the committed account is read once per tx")
+}
+
+func TestVersionedRead_B_TouchReadsAnAbsentAccountOnce(t *testing.T) {
+	t.Parallel()
+	r := &refreshReader{}
+	ibs := NewWithVersionMap(r, NewVersionMap(nil))
+	defer ibs.Close()
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(1, 5)
+	addr := accounts.InternAddress([20]byte{0xb9})
+
+	require.NoError(t, ibs.TouchAccount(addr))
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists)
+	assert.Equal(t, 1, r.accountReads)
 }
 
 // revival via NoncePath rewrite at a higher TxIdx than the SD.

@@ -53,6 +53,15 @@ func (r *fakeStateReader) ReadAccountData(address accounts.Address) (*accounts.A
 	return r.accounts[address.Value()], nil
 }
 
+func (r *fakeStateReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (r *fakeStateReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
 func (r *fakeStateReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	return r.accounts[address.Value()], nil
 }
@@ -816,4 +825,24 @@ func TestWitnessStatelessVerifyOnlyRunsUnderAssert(t *testing.T) {
 	dbg.AssertEnabled = true
 	require.Error(t, api.verifyWitnessStateless(ctx, tx, bad, block, fullEngine),
 		"under the gate the stateless replay rejects a wrong witness")
+}
+
+func TestBuildAccessedStateStopsOnCancelledContext(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	tx, err := api.db.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	bn := rpc.BlockNumber(3)
+	info, err := api.resolveWitnessBlock(m.Ctx, tx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+	require.NoError(t, err)
+	require.NotEmpty(t, info.Block.Transactions())
+	chainConfig, err := api.chainConfig(m.Ctx, tx)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(m.Ctx)
+	cancel()
+	_, _, err = api.buildAccessedState(ctx, tx, info.Block, chainConfig, api.engine(), info.FirstTxNumInBlock, witnessModeLegacy)
+	require.ErrorIs(t, err, context.Canceled)
 }

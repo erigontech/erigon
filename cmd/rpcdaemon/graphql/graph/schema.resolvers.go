@@ -73,7 +73,11 @@ func (r *blockResolver) Logs(ctx context.Context, obj *model.Block, filter model
 	if err != nil {
 		return nil, err
 	}
-	return rpcLogsToModel(logs), nil
+	result := rpcLogsToModel(logs)
+	if err := r.attachLogTransactions(ctx, result, obj); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // Account is the resolver for the account field.
@@ -300,7 +304,11 @@ func (r *queryResolver) Logs(ctx context.Context, filter model.FilterCriteria) (
 	if err != nil {
 		return nil, err
 	}
-	return rpcLogsToModel(logs), nil
+	result := rpcLogsToModel(logs)
+	if err := r.attachLogTransactions(ctx, result, nil); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // GasPrice is the resolver for the gasPrice field.

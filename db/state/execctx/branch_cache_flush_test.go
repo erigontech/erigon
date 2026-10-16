@@ -257,3 +257,80 @@ func TestLocalCacheUnwindDoesNotPopulateBranchCache(t *testing.T) {
 	_, _, ok := branchCache.Get(key)
 	require.False(t, ok, "a speculative session must not seed the shared branch cache")
 }
+
+// unwindDeadFork commits an unwind of the step-2 branch written at txNum 40. during runs after the unwind is
+// staged and before it commits.
+func unwindDeadFork(t *testing.T, db kv.TemporalRwDB, key []byte, during func()) {
+	t.Helper()
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	stepBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(stepBytes, ^uint64(2))
+	var diffs [kv.DomainLen][]kv.DomainEntryDiff
+	diffs[kv.CommitmentDomain] = []kv.DomainEntryDiff{{Key: string(key) + string(stepBytes), Value: nil}}
+	sd.Unwind(32, &diffs)
+	during()
+	require.NoError(t, sd.Commit(t.Context(), rwTx))
+}
+
+func latestCommitment(t *testing.T, db kv.TemporalRwDB, key []byte) []byte {
+	t.Helper()
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	sd, err := execctx.NewSharedDomains(t.Context(), roTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	v, _, err := sd.GetLatest(kv.CommitmentDomain, roTx, key)
+	require.NoError(t, err)
+	return v
+}
+
+// A read opened before the unwind commits still sees the dead fork; its fill must not survive the commit.
+func TestBranchCacheFillDuringUnwindCommitIsDropped(t *testing.T) {
+	const stepSize = uint64(16)
+	db, key, frozenValue := commitmentFileFixture(t, stepSize)
+	stepOneValue := []byte{0, 0, 0, 0, 2}
+	deadForkValue := []byte{0, 0, 0, 0, 3}
+	writeCommitmentRows(t, db, key, frozenValue, commitmentWrite{txNum: 20, value: stepOneValue}, commitmentWrite{txNum: 40, value: deadForkValue})
+	unwindDeadFork(t, db, key, func() {
+		roTx, err := db.BeginTemporalRo(t.Context())
+		require.NoError(t, err)
+		defer roTx.Rollback()
+		got, _, err := roTx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{}.WithBranchCache())
+		require.NoError(t, err)
+		require.Equal(t, deadForkValue, got)
+	})
+	require.Equal(t, stepOneValue, latestCommitment(t, db, key))
+}
+
+// A view opened before the unwind still sees the dead fork after the commit; it must not fill the cache.
+func TestBranchCacheRejectsFillFromViewOpenedBeforeUnwind(t *testing.T) {
+	const stepSize = uint64(16)
+	db, key, frozenValue := commitmentFileFixture(t, stepSize)
+	stepOneValue := []byte{0, 0, 0, 0, 2}
+	deadForkValue := []byte{0, 0, 0, 0, 3}
+	writeCommitmentRows(t, db, key, frozenValue, commitmentWrite{txNum: 20, value: stepOneValue}, commitmentWrite{txNum: 40, value: deadForkValue})
+	oldTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer oldTx.Rollback()
+	unwindDeadFork(t, db, key, func() {})
+	got, _, err := oldTx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{}.WithBranchCache())
+	require.NoError(t, err)
+	require.Equal(t, deadForkValue, got)
+	oldTx.Rollback()
+	require.Equal(t, stepOneValue, latestCommitment(t, db, key))
+
+	newTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer newTx.Rollback()
+	_, _, err = newTx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{}.WithBranchCache())
+	require.NoError(t, err)
+	got, _, ok := newTx.AggTx().(commitment.BranchCacheProvider).BranchCache().Get(key)
+	require.True(t, ok, "a view opened after the unwind commit must still fill")
+	require.Equal(t, stepOneValue, got)
+}

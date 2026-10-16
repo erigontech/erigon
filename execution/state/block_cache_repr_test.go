@@ -96,7 +96,7 @@ func TestBlockStateCacheAccountRepresentation(t *testing.T) {
 		require.NoError(t, err)
 		hist, err := history.ReadAccountData(addr)
 		require.NoError(t, err)
-		has, err := history.HasAccount(addr)
+		has, err := history.HasAccount(addr.Value())
 		require.NoError(t, err)
 		if want == nil {
 			require.Nil(t, got)

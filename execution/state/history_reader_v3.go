@@ -155,12 +155,16 @@ func StateHistoryStartTxNum(ttx kv.TemporalTx) uint64 {
 func (hr *HistoryReaderV3) DiscardReadList() {}
 
 func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
+	return hr.ReadAccountByPlainAddr(address.Value())
+}
+
+func (hr *HistoryReaderV3) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
 	if hr.blockCache != nil {
-		if acc, hit := hr.blockCache.GetCurrentAccountDecoded(address); hit {
+		if acc, hit := hr.blockCache.GetCurrentAccountDecoded(accounts.InternAddress(address)); hit {
 			return acc, nil
 		}
 	}
-	hr.addr = address.Value()
+	hr.addr = address
 	enc, ok, err := hr.getAsOf(kv.AccountsDomain, hr.addr[:])
 	if err != nil || !ok || len(enc) == 0 {
 		if hr.trace {
@@ -178,13 +182,13 @@ func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.
 	return &a, nil
 }
 
-func (hr *HistoryReaderV3) HasAccount(address accounts.Address) (bool, error) {
+func (hr *HistoryReaderV3) HasAccount(address common.Address) (bool, error) {
 	if hr.blockCache != nil {
-		if acc, hit := hr.blockCache.GetCurrentAccount(address); hit {
+		if acc, hit := hr.blockCache.GetCurrentAccount(accounts.InternAddress(address)); hit {
 			return acc != deletedAccount, nil
 		}
 	}
-	hr.addr = address.Value()
+	hr.addr = address
 	enc, ok, err := hr.getAsOf(kv.AccountsDomain, hr.addr[:])
 	return ok && len(enc) > 0, err
 }

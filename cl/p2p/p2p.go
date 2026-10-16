@@ -15,6 +15,7 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/metrics"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -54,8 +55,13 @@ type P2PConfig struct {
 	NAT        p2pnat.Interface
 	ExternalIP net.IP // resolved from NAT at startup; set by NewP2Pmanager
 
-	MaxPeerCount       uint64
-	SubscribeAllTopics bool // When true, advertise all attnets/syncnets in ENR
+	MaxPeerCount uint64
+	// TrustedCIDRs are exempt from every per-address and per-block cap; each shares one limit, except
+	// loopback, which stays unlimited.
+	TrustedCIDRs []string
+	// DisableIPBlockLimits restores go-libp2p's default connection limits, as released.
+	DisableIPBlockLimits bool
+	SubscribeAllTopics   bool // When true, advertise all attnets/syncnets in ENR
 
 	DataDir string // persistent storage dir; used to save the node key so ENR is stable across restarts
 }
@@ -65,6 +71,7 @@ type p2pManager struct {
 	pubsub   *pubsub.PubSub
 	bwc      *metrics.BandwidthCounter
 	host     host.Host
+	gater    *Gater
 	udpv5    *discover.UDPv5
 	ethClock eth_clock.EthereumClock
 }
@@ -142,6 +149,7 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	p := p2pManager{
 		cfg:      cfg,
 		host:     host,
+		gater:    gater,
 		bwc:      bwc,
 		ethClock: ethClock,
 	}
@@ -255,6 +263,10 @@ func (p *p2pManager) Pubsub() *pubsub.PubSub {
 
 func (p *p2pManager) Host() host.Host {
 	return p.host
+}
+
+func (p *p2pManager) SetDialPolicy(dialable func(peer.ID) bool) {
+	p.gater.SetDialPolicy(dialable)
 }
 
 func (p *p2pManager) BandwidthCounter() *metrics.BandwidthCounter {

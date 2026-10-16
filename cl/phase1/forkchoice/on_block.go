@@ -294,40 +294,9 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 			}
 		}
 
-		// Check if EL has blobs
-		elHasBlobs := false
-		if f.engine != nil && f.peerDas != nil && checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !f.peerDas.IsArchivedMode() {
-			blobsWithProof, proofs, err := f.engine.GetBlobs(ctx, versionedHashes, block.Version())
-			if err != nil {
-				log.Warn("OnBlock: GetBlobs failed", "blockRoot", common.Hash(blockRoot), "err", err)
-			}
-			elHasBlobs = err == nil && len(blobsWithProof) == len(versionedHashes) && len(proofs) == len(versionedHashes)
-			log.Trace("OnBlock: EL blob data availability", "blockRoot", common.Hash(blockRoot), "elHasBlobs", elHasBlobs)
-		}
-
-		// Check if blob data is available (skip if blobs are in txpool)
-		if checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !elHasBlobs {
-			if block.Version() >= clparams.FuluVersion && f.peerDas != nil {
-				available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot)
-				if err != nil {
-					return err
-				}
-				if !available {
-					if f.syncedDataManager.Syncing() {
-						return ErrEIP7594ColumnDataNotAvailable
-					} else {
-						if err := f.peerDas.SyncColumnDataLater(block); err != nil {
-							log.Warn("failed to schedule deferred column data sync", "slot", block.Block.Slot, "blockRoot", blockRoot, "err", err)
-						}
-					}
-				}
-			} else if block.Version() >= clparams.DenebVersion {
-				if err := f.isDataAvailable(ctx, block.Block.Slot, blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
-					if errors.Is(err, ErrEIP4844DataNotAvailable) {
-						return err
-					}
-					return fmt.Errorf("OnBlock: data is not available for block %x: %w", common.Hash(blockRoot), err)
-				}
+		if checkDataAvaiability {
+			if err := f.checkPreGloasBlockDataAvailability(ctx, block, common.Hash(blockRoot), versionedHashes); err != nil {
+				return err
 			}
 		}
 
@@ -348,7 +317,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 				if err := f.optimisticStore.InvalidateBlock(blockRoot, block.Block); err != nil {
 					return fmt.Errorf("failed to remove block from optimistic store: %w", err)
 				}
-				return errors.New("block is invalid")
+				return invalidBlockError(errors.New("block is invalid"))
 			}
 			if block.Version() >= clparams.DenebVersion {
 				if err := verifyKzgCommitmentsAgainstTransactions(f.beaconCfg, block.Block); err != nil {
@@ -391,7 +360,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 					requestsHash = cltypes.ComputeExecutionRequestHash(executionRequestsList)
 				}
 				if _, hashErr := block.Block.Body.ExecutionPayload.RlpHeader(&block.Block.ParentRoot, requestsHash, nil); hashErr != nil {
-					return fmt.Errorf("OnBlock: invalid execution payload hash: %w", hashErr)
+					return invalidBlockError(fmt.Errorf("OnBlock: invalid execution payload hash: %w", hashErr))
 				}
 			}
 
@@ -400,7 +369,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 				if cleanupErr := f.optimisticStore.InvalidateBlock(blockRoot, block.Block); cleanupErr != nil {
 					return fmt.Errorf("failed to remove block from optimistic store: %w", cleanupErr)
 				}
-				return err
+				return invalidBlockError(err)
 			}
 			payloadStatus = f.markPayloadStatusLocked(blockRoot, executionBlockHash, payloadStatus)
 			f.executionPayloadGasLimit.Add(executionBlockHash, block.Block.Body.ExecutionPayload.GasLimit)
@@ -649,6 +618,48 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	return nil
 }
 
+// checkPreGloasBlockDataAvailability checks that a pre-Gloas block's blob data is available before the block enters
+// fork choice.
+func (f *ForkChoiceStore) checkPreGloasBlockDataAvailability(ctx context.Context, block *cltypes.SignedBeaconBlock, blockRoot common.Hash, versionedHashes []common.Hash) error {
+	// Before Fulu, blobs in the EL's pool are enough. From Fulu the node must hold its custody columns: peers that see
+	// it treat the block as known ask it for them, and score it down for a partial answer.
+	elHasBlobs := false
+	if block.Version() < clparams.FuluVersion && f.engine != nil && f.peerDas != nil && block.Block.Body.BlobKzgCommitments.Len() > 0 && !f.peerDas.IsArchivedMode() {
+		blobsWithProof, proofs, err := f.engine.GetBlobs(ctx, versionedHashes, block.Version())
+		if err != nil {
+			log.Warn("OnBlock: GetBlobs failed", "blockRoot", common.Hash(blockRoot), "err", err)
+		}
+		elHasBlobs = err == nil && len(blobsWithProof) == len(versionedHashes) && len(proofs) == len(versionedHashes)
+		log.Trace("OnBlock: EL blob data availability", "blockRoot", common.Hash(blockRoot), "elHasBlobs", elHasBlobs)
+	}
+
+	// Check if blob data is available (skip if blobs are in txpool)
+	if block.Block.Body.BlobKzgCommitments.Len() > 0 && !elHasBlobs {
+		if block.Version() >= clparams.FuluVersion && f.peerDas != nil {
+			available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot)
+			if err != nil {
+				return err
+			}
+			if !available {
+				if !f.syncedDataManager.Syncing() {
+					if err := f.peerDas.SyncColumnDataLater(block); err != nil {
+						log.Warn("failed to schedule deferred column data sync", "slot", block.Block.Slot, "blockRoot", blockRoot, "err", err)
+					}
+				}
+				return ErrEIP7594ColumnDataNotAvailable
+			}
+		} else if block.Version() >= clparams.DenebVersion {
+			if err := f.isDataAvailable(ctx, block.Block.Slot, blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
+				if errors.Is(err, ErrEIP4844DataNotAvailable) {
+					return err
+				}
+				return fmt.Errorf("OnBlock: data is not available for block %x: %w", common.Hash(blockRoot), err)
+			}
+		}
+	}
+	return nil
+}
+
 func (f *ForkChoiceStore) processPendingEnvelopeAfterBlock(ctx context.Context, blockRoot common.Hash, checkDataAvailability bool) {
 	var pending *cltypes.SignedExecutionPayloadEnvelope
 	local := false
@@ -728,6 +739,41 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopes(ctx context.Cont
 				return
 			}
 		}
+	}
+}
+
+const (
+	// Bounds how often a polling caller re-reads column storage for one envelope still missing data.
+	missingEnvelopeDataProbeInterval = 250 * time.Millisecond
+	// Bounds how often a polling caller repeats a failed attempt (BLS, EL call, warning) for one envelope.
+	dataAvailableEnvelopeRetryInterval = time.Second
+)
+
+// RetryDataAvailablePendingExecutionPayloadEnvelopes applies queued gossip envelopes for blocks at or after minSlot
+// whose column data is available or that commit to no blobs. Otherwise an envelope that arrived before its columns
+// waits for the next chain tip sync, and the next proposer builds on the empty parent. Column storage probes and
+// application attempts are rate-limited per envelope, so this is cheap to poll.
+func (f *ForkChoiceStore) RetryDataAvailablePendingExecutionPayloadEnvelopes(ctx context.Context, minSlot uint64) {
+	for _, root := range f.pendingEnvelopes.Keys() {
+		if ctx.Err() != nil {
+			return
+		}
+		block, ok := f.forkGraph.GetBlock(root)
+		if !ok || block == nil || block.Block == nil || block.Block.Slot < minSlot {
+			continue
+		}
+		now := time.Now()
+		if retryAt, ok := f.dataAvailableEnvelopeRetryAt.Get(root); ok && now.Before(retryAt) {
+			continue
+		}
+		if commitments := block.GetBlobKzgCommitments(); commitments != nil && commitments.Len() > 0 {
+			if available, err := f.peerDas.IsDataAvailable(block.Block.Slot, root); err != nil || !available {
+				f.dataAvailableEnvelopeRetryAt.Add(root, now.Add(missingEnvelopeDataProbeInterval))
+				continue
+			}
+		}
+		f.dataAvailableEnvelopeRetryAt.Add(root, now.Add(dataAvailableEnvelopeRetryInterval))
+		f.processPendingEnvelopeAfterBlock(ctx, root, true)
 	}
 }
 
@@ -890,7 +936,7 @@ func (f *ForkChoiceStore) retryPendingEnvelopeError(err error, pending *cltypes.
 	if pending.Message == nil || pending.Message.Payload == nil {
 		return false
 	}
-	ageBounded := errors.Is(err, errPendingEnvelopeAgeBounded) || errors.Is(err, errPayloadValidationAdmission) || errors.Is(err, ErrIgnore) || errors.Is(err, ErrEIP7594ColumnDataNotAvailable)
+	ageBounded := errors.Is(err, errPendingEnvelopeAgeBounded) || errors.Is(err, ErrPayloadValidationInterrupted) || errors.Is(err, ErrIgnore) || errors.Is(err, ErrEIP7594ColumnDataNotAvailable)
 	if !ageBounded {
 		return true
 	}
