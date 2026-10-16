@@ -98,16 +98,20 @@ func TestBlockStateCacheAccountRepresentation(t *testing.T) {
 		require.NoError(t, err)
 		has, err := history.HasAccount(addr.Value())
 		require.NoError(t, err)
+		inc, err := history.ReadAccountIncarnation(addr)
+		require.NoError(t, err)
 		if want == nil {
 			require.Nil(t, got)
 			require.Nil(t, hist)
 			require.False(t, has)
+			require.Zero(t, inc)
 			return
 		}
 		exp := want.account()
 		require.Equal(t, &exp, got)
 		require.Equal(t, &exp, hist)
 		require.True(t, has)
+		require.Equal(t, max(want.incarnation, 1)-1, inc)
 	}
 
 	t.Run("partial writes overlay the base", func(t *testing.T) {
