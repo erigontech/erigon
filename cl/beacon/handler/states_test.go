@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
@@ -621,7 +622,7 @@ func TestResponseValidatorsDoesNotParkResponseInPool(t *testing.T) {
 // A state that left the fork-choice cache is served from the epoch data stored under the
 // epoch's start slot. States before Fulu have no proposer lookahead.
 func TestGetStateProposerLookaheadHistorical(t *testing.T) {
-	db, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	db, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	cfg := handler.beaconChainCfg
 	epoch := postState.Slot() / cfg.SlotsPerEpoch
 	require.NotZero(t, epoch%cfg.SlotsPerEpoch, "the epoch must not also be an epoch-start slot")
@@ -645,23 +646,37 @@ func TestGetStateProposerLookaheadHistorical(t *testing.T) {
 		return resp.StatusCode, body.Data
 	}
 
-	code, _ := get()
-	require.Equal(t, http.StatusBadRequest, code)
-
-	cfg.FuluForkEpoch = epoch
 	lookahead := solid.NewUint64VectorSSZ(int((1 + cfg.MinSeedLookahead) * cfg.SlotsPerEpoch))
 	for i := range lookahead.Length() {
 		lookahead.Set(i, uint64(i))
 	}
+	// Every raw state carries a zero-filled lookahead, so a cached pre-Fulu state is still refused.
+	fcu.ProposerLookaheadVal = lookahead
+	code, _ := get()
+	require.Equal(t, http.StatusBadRequest, code)
+	fcu.ProposerLookaheadVal = nil
+
+	// A later Fulu epoch: the antiquary writes the fork epoch's own row with the previous schema.
+	cfg.FuluForkEpoch = epoch - 1
+	key := base_encoding.Encode64ToBytes4(cfg.RoundSlotToEpoch(postState.Slot()))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error { return tx.Delete(kv.EpochData, key) }))
+	code, _ = get()
+	require.Equal(t, http.StatusNotFound, code)
+
 	epochData := &state_accessors.EpochData{JustificationBits: &cltypes.JustificationBits{}, ProposerLookahead: lookahead, BeaconConfig: cfg, Version: clparams.FuluVersion}
 	var buf bytes.Buffer
 	require.NoError(t, epochData.WriteTo(&buf))
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		return tx.Put(kv.EpochData, base_encoding.Encode64ToBytes4(cfg.RoundSlotToEpoch(postState.Slot())), buf.Bytes())
+		return tx.Put(kv.EpochData, key, buf.Bytes())
 	}))
 
 	code, data := get()
 	require.Equal(t, http.StatusOK, code)
 	require.Len(t, data, lookahead.Length())
 	require.Equal(t, strconv.Itoa(lookahead.Length()-1), data[len(data)-1])
+
+	// The row belongs to the canonical chain; a side-branch state must not be served from it.
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error { return beacon_indicies.MarkRootCanonical(tx, postState.Slot(), common.Hash{1}) }))
+	code, _ = get()
+	require.Equal(t, http.StatusNotFound, code)
 }

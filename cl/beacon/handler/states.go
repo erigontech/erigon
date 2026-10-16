@@ -706,6 +706,9 @@ func (a *ApiHandler) GetEthV1BeaconStatesProposerLookahead(w http.ResponseWriter
 
 	proposerLookahead, ok := a.forkchoiceStore.GetProposerLookahead(*slot)
 	if !ok {
+		if canonicalRoot != blockRoot {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read proposer lookahead: %x", blockRoot))
+		}
 		stateView := a.caplinStateSnapshots.View()
 		defer stateView.Close()
 		// read epoch data
