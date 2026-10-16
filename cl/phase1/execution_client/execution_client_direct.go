@@ -142,10 +142,9 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	if attr == nil {
 		return nil, nil
 	}
-	// Retry AssembleBlock if the EL is busy (semaphore contention with
-	// fork choice commits). This is common in single-process dev mode
-	// where the CL and EL share the same process.
-	id, err := retryAssembleBlock(ctx, 30, 200*time.Millisecond, func(ctx context.Context) (uint64, error) {
+	// The forkchoice update answers before its commit releases the execution semaphore, so the
+	// build that follows it is usually busy for tens of milliseconds.
+	id, err := retryAssembleBlock(ctx, 30, 10*time.Millisecond, 200*time.Millisecond, func(ctx context.Context) (uint64, error) {
 		return cc.chainRW.AssembleBlock(ctx, head, attr)
 	})
 	if err != nil {
@@ -174,7 +173,19 @@ func decodeDirectPayloadID(id []byte) uint64 {
 	return binary.LittleEndian.Uint64(id)
 }
 
-func retryAssembleBlock(ctx context.Context, attempts int, delay time.Duration, assemble func(context.Context) (uint64, error)) (uint64, error) {
+// assembleRetryDelay doubles the delay from first on each retry, up to maxDelay.
+func assembleRetryDelay(retry int, first, maxDelay time.Duration) time.Duration {
+	delay := first
+	for range retry {
+		if delay >= maxDelay/2 {
+			return maxDelay
+		}
+		delay *= 2
+	}
+	return min(delay, maxDelay)
+}
+
+func retryAssembleBlock(ctx context.Context, attempts int, firstDelay, maxDelay time.Duration, assemble func(context.Context) (uint64, error)) (uint64, error) {
 	if attempts <= 0 {
 		return 0, errors.New("assemble block requires at least one attempt")
 	}
@@ -195,7 +206,7 @@ func retryAssembleBlock(ctx context.Context, attempts int, delay time.Duration, 
 		if attempt+1 == attempts {
 			break
 		}
-		timer := time.NewTimer(delay)
+		timer := time.NewTimer(assembleRetryDelay(attempt, firstDelay, maxDelay))
 		select {
 		case <-ctx.Done():
 			if !timer.Stop() {
