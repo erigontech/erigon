@@ -454,8 +454,8 @@ func (a *ApiHandler) feeRecipientForProposal(proposerIndex, targetSlot uint64) c
 	return common.Address{}
 }
 
-// reportProductionFailure is the one place a failed production is recorded, so every exit through
-// produceBlock is covered exactly once. A caller that has already gone is not something anyone can
+// reportProductionFailure records a failed production once for every exit through produceBlock,
+// except a fork-choice head change, which GetEthV3ValidatorBlock retries and records. A caller that has already gone is not something anyone can
 // act on; an execution layer that stopped answering still is, and that arrives as a deadline.
 func reportProductionFailure(err error, targetSlot uint64) {
 	switch {
@@ -784,10 +784,10 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	// A head change during production is retried once, from the new head's state.
 	for attempt := range 2 {
 		if attempt > 0 {
-			log.Info("BlockProduction: fork choice head changed during production, retrying on the new head", "slot", targetSlot, "err", err)
 			if !a.awaitHeadStateAfterChange(ctx, targetSlot) {
 				break
 			}
+			log.Info("BlockProduction: fork choice head changed during production, retrying on the new head", "slot", targetSlot, "err", err)
 		}
 		if err := a.viewHeadStateWithIdentity(func(headState *state.CachingBeaconState, root common.Hash, _ uint64) error {
 			var err error

@@ -742,13 +742,13 @@ func (f *ForkChoiceStore) RetryDataAvailablePendingExecutionPayloadEnvelopes(ctx
 		if !ok || block == nil || block.Block == nil || block.Block.Slot < minSlot {
 			continue
 		}
-		f.retryPendingEnvelopeWhenDue(ctx, root, block, true)
+		f.retryPendingEnvelopeWhenDue(ctx, root, block)
 	}
 }
 
 // retryPendingEnvelopeWhenDue applies the envelope queued for root when its pacing allows and its
 // columns are available, and returns when the next attempt is due.
-func (f *ForkChoiceStore) retryPendingEnvelopeWhenDue(ctx context.Context, root common.Hash, block *cltypes.SignedBeaconBlock, checkDataAvailability bool) time.Time {
+func (f *ForkChoiceStore) retryPendingEnvelopeWhenDue(ctx context.Context, root common.Hash, block *cltypes.SignedBeaconBlock) time.Time {
 	now := time.Now()
 	retryAt, due := f.bookPendingEnvelopeRetry(root, now, now.Add(missingEnvelopeDataProbeInterval))
 	if !due {
@@ -764,7 +764,7 @@ func (f *ForkChoiceStore) retryPendingEnvelopeWhenDue(ctx context.Context, root 
 	}
 	attemptAt := now.Add(dataAvailableEnvelopeRetryInterval)
 	f.rebookPendingEnvelopeRetry(root, retryAt, attemptAt)
-	f.processPendingEnvelopeAfterBlock(ctx, root, checkDataAvailability)
+	f.processPendingEnvelopeAfterBlock(ctx, root, true)
 	if ctx.Err() != nil {
 		// The caller's context ended the attempt before a verdict, so it does not hold the interval.
 		f.rebookPendingEnvelopeRetry(root, attemptAt, time.Time{})
@@ -817,7 +817,7 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelope(ctx context.Conte
 	if !ok || block == nil || block.Block == nil {
 		return time.Time{}
 	}
-	return f.retryPendingEnvelopeWhenDue(ctx, blockRoot, block, true)
+	return f.retryPendingEnvelopeWhenDue(ctx, blockRoot, block)
 }
 
 func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopeIndices(ctx context.Context, limit int) {

@@ -3727,8 +3727,9 @@ func TestGetEthV3ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
 }
 
 // produceAcrossAHeadChange runs GetEthV3ValidatorBlock while the head changes during the wait for
-// the parked envelope of the old head. The new head's state is published only if publish is set.
-func produceAcrossAHeadChange(t *testing.T, publish bool) (*beaconhttp.BeaconResponse, error, common.Hash) {
+// the parked envelope of the old head. The new head's state is published only if publish is set,
+// and the request is cancelled while production waits for that state if cancel is set.
+func produceAcrossAHeadChange(t *testing.T, publish, cancel bool) (*beaconhttp.BeaconResponse, error, common.Hash) {
 	t.Helper()
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{slotOffset: 1})
 	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
@@ -3780,11 +3781,18 @@ func produceAcrossAHeadChange(t *testing.T, publish bool) (*beaconhttp.BeaconRes
 	}
 	forkchoiceStore.PendingEnvelopeRoots = map[common.Hash]struct{}{oldRoot: {}}
 	published := make(chan error, 1)
+	requestCtx, cancelRequest := context.WithCancel(t.Context())
+	defer cancelRequest()
 	forkchoiceStore.RetryPendingEnvelopeFunc = func(context.Context, common.Hash) time.Time {
-		if !headChanged.Swap(true) && publish {
+		if !headChanged.Swap(true) {
 			go func() {
 				time.Sleep(3 * proposalWaitPollInterval) // after the wait has seen the head change
-				published <- syncedData.OnHeadStateWithBlockRoot(newState, newRoot)
+				if cancel {
+					cancelRequest()
+				}
+				if publish {
+					published <- syncedData.OnHeadStateWithBlockRoot(newState, newRoot)
+				}
 			}()
 		}
 		return time.Now().Add(time.Second)
@@ -3820,7 +3828,7 @@ func produceAcrossAHeadChange(t *testing.T, publish bool) (*beaconhttp.BeaconRes
 	handler.engine = engine
 	handler.elClientVersion.Store(elClientVersionUnavailable) // avoid mocking GetClientVersionV1
 
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf(
+	request := httptest.NewRequestWithContext(requestCtx, http.MethodGet, fmt.Sprintf(
 		"/eth/v3/validator/blocks/%d?randao_reveal=%s&skip_randao_verification=true",
 		fixture.block.Slot,
 		(common.Bytes96{}).String(),
@@ -3840,7 +3848,7 @@ func produceAcrossAHeadChange(t *testing.T, publish bool) (*beaconhttp.BeaconRes
 // retried once the new head's state is published, and the block builds on the new head.
 func TestGetEthV3ValidatorBlockRetriesOnTheNewHeadAfterAHeadChange(t *testing.T) {
 	logs := captureAllProductionLogs(t)
-	response, err, newRoot := produceAcrossAHeadChange(t, true)
+	response, err, newRoot := produceAcrossAHeadChange(t, true, false)
 	require.NoError(t, err)
 	producedBlock, ok := response.Data.(*cltypes.BeaconBlock)
 	require.True(t, ok)
@@ -3863,9 +3871,20 @@ func headChangeWarnings(logs string) int {
 // proposal is visible above Info.
 func TestGetEthV3ValidatorBlockWarnsOnceWhenTheRetryGivesUp(t *testing.T) {
 	logs := captureAllProductionLogs(t)
-	_, err, _ := produceAcrossAHeadChange(t, false)
+	_, err, _ := produceAcrossAHeadChange(t, false, false)
 	require.ErrorIs(t, err, errForkChoiceHeadChanged)
 	require.Equal(t, 1, headChangeWarnings(logs()))
+	require.NotContains(t, logs(), "retrying on the new head")
+}
+
+// A request cancelled while production waits for the new head's state is not retried and leaves no
+// record of the head change.
+func TestGetEthV3ValidatorBlockStaysQuietWhenCancelledDuringTheRetryWait(t *testing.T) {
+	logs := captureAllProductionLogs(t)
+	_, err, _ := produceAcrossAHeadChange(t, false, true)
+	require.ErrorIs(t, err, errForkChoiceHeadChanged)
+	require.Zero(t, headChangeWarnings(logs()))
+	require.NotContains(t, logs(), "retrying on the new head")
 }
 
 func TestSelfBuildEnvelopeCacheSeparatesBlockRoots(t *testing.T) {
