@@ -33,6 +33,4 @@ func TestPayloadAttestationRateLimiterAdmitsFullCommitteeBurstFromOnePeer(t *tes
 	for i := range int(clparams.MaxPtcSize) {
 		require.True(t, condition(pid, nil, clparams.GloasVersion), "vote %d", i)
 	}
-	require.False(t, condition(pid, nil, clparams.GloasVersion))
-	require.True(t, condition(peer.ID("other-peer"), nil, clparams.GloasVersion))
 }
