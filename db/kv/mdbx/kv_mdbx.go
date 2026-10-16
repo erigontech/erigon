@@ -105,7 +105,7 @@ const (
 	DefaultGrowthStep = 1 * datasize.GB
 
 	DefaultSyncInCommitIfUnsyncedFor = 30 * time.Second
-	maxSyncInCommitIfUnsyncedFor     = 18 * time.Hour // mdbx's 16.16-bit range
+	maxSyncInCommitIfUnsyncedFor     = 18 * time.Hour // mdbx keeps the period in 16 bits of seconds: 65535 s, above that it wraps
 )
 
 // SafeNoSync. Poller: calls env.Sync every PollerSyncPeriod.
