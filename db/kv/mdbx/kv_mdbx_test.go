@@ -326,6 +326,39 @@ func TestRangeRwTxInterleavedWrite(t *testing.T) {
 	require.False(t, it.HasNext())
 }
 
+func TestRangeDupSortRwTxInterleavedWrite(t *testing.T) {
+	db := BaseCaseDB(t)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	u64 := func(n uint64) []byte { return binary.BigEndian.AppendUint64(nil, n) }
+	for _, n := range []uint64{10, 3000, 5000} {
+		require.NoError(t, tx.Put("Table", []byte("key"), u64(n)))
+	}
+
+	it, err := tx.RangeDupSort("Table", []byte("key"), nil, u64(10_000), order.Asc, kv.Unlim)
+	require.NoError(t, err)
+	defer it.Close()
+
+	require.True(t, it.HasNext())
+	_, v, err := it.Next()
+	require.NoError(t, err)
+	require.Equal(t, u64(10), v)
+
+	// moves the value the cursor sits on: the duplicates grow from a sub-page into a sub-tree
+	for n := uint64(11); n < 3000; n++ {
+		require.NoError(t, tx.Put("Table", []byte("key"), u64(n)))
+	}
+
+	var got []uint64
+	for it.HasNext() {
+		_, v, err := it.Next()
+		require.NoError(t, err)
+		got = append(got, binary.BigEndian.Uint64(v))
+	}
+	require.Equal(t, []uint64{3000, 5000}, got)
+}
+
 func TestLastDup(t *testing.T) {
 	db, tx, _ := BaseCase(t)
 
@@ -1374,4 +1407,100 @@ func TestInMemKeepsUtterlyNoSync(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint(mdbxgo.UtterlyNoSync), flags&mdbxgo.UtterlyNoSync,
 		"utterly-nosync lost a bit, and without all of them mdbx syncs on commit")
+}
+
+func TestRangeDupSortSeekValue(t *testing.T) {
+	db := BaseCaseDB(t)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	u64 := func(n uint64) []byte { return binary.BigEndian.AppendUint64(nil, n) }
+	for n := uint64(0); n < 1000; n += 2 { // even values 0..998
+		require.NoError(t, tx.Put("Table", []byte("key2"), u64(n)))
+	}
+	require.NoError(t, tx.Put("Table", []byte("key1"), u64(5)))
+	require.NoError(t, tx.Put("Table", []byte("key3"), u64(5)))
+
+	type seeker interface{ SeekValue(v []byte) error }
+	collect := func(it stream.KV) (out []uint64) {
+		for it.HasNext() {
+			_, v, err := it.Next()
+			require.NoError(t, err)
+			out = append(out, binary.BigEndian.Uint64(v))
+		}
+		return out
+	}
+	tests := []struct {
+		name     string
+		from, to []byte
+		asc      order.By
+		seeks    []uint64
+		want     []uint64
+	}{
+		{"asc", nil, nil, order.Asc, []uint64{500}, []uint64{500, 502}},
+		{"asc odd target", nil, nil, order.Asc, []uint64{501}, []uint64{502, 504}},
+		{"asc backwards is a no-op", u64(600), nil, order.Asc, []uint64{100}, []uint64{600, 602}},
+		{"asc past the end", nil, nil, order.Asc, []uint64{5000}, nil},
+		{"asc past the to bound", nil, u64(700), order.Asc, []uint64{701}, nil},
+		{"desc", nil, nil, order.Desc, []uint64{500}, []uint64{500, 498}},
+		{"desc odd target", nil, nil, order.Desc, []uint64{501}, []uint64{500, 498}},
+		{"desc above every value", u64(998), nil, order.Desc, []uint64{5000}, []uint64{998, 996}},
+		{"desc below every value", nil, nil, order.Desc, []uint64{0}, []uint64{0}},
+		{"two seeks", nil, nil, order.Asc, []uint64{100, 301}, []uint64{302, 304}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			it, err := tx.RangeDupSort("Table", []byte("key2"), tt.from, tt.to, tt.asc, -1)
+			require.NoError(t, err)
+			defer it.Close()
+			for _, v := range tt.seeks {
+				require.NoError(t, it.(seeker).SeekValue(u64(v)))
+			}
+			got := collect(it)
+			if len(got) > 2 {
+				got = got[:2]
+			}
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestRangeDupSortSeekDoesNotAllocate(t *testing.T) {
+	db := BaseCaseDB(t)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	for n := range uint64(10_000) {
+		require.NoError(t, tx.Put("Table", []byte("key"), binary.BigEndian.AppendUint64(nil, n)))
+	}
+	kvIt, err := tx.RangeDupSort("Table", []byte("key"), nil, nil, order.Asc, -1)
+	require.NoError(t, err)
+	it := stream.TransformKV2U64Seekable(kvIt, func(_, v []byte) (uint64, error) {
+		return binary.BigEndian.Uint64(v), nil
+	}, binary.BigEndian.AppendUint64)
+	defer it.Close()
+	target := uint64(0)
+	allocs := testing.AllocsPerRun(100, func() {
+		target += 50
+		require.NoError(t, it.Seek(target))
+	})
+	require.Zero(t, allocs)
+}
+
+func TestRangeDupSortSeekRespectsLimit(t *testing.T) {
+	db := BaseCaseDB(t)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	for n := range uint64(12) {
+		require.NoError(t, tx.Put("Table", []byte("key"), binary.BigEndian.AppendUint64(nil, n)))
+	}
+	kvIt, err := tx.RangeDupSort("Table", []byte("key"), nil, nil, order.Asc, 3) // [0,1,2]
+	require.NoError(t, err)
+	limited := stream.TransformKV2U64Seekable(kvIt, func(_, v []byte) (uint64, error) {
+		return binary.BigEndian.Uint64(v), nil
+	}, binary.BigEndian.AppendUint64)
+	got, err := stream.ToArrayU64(stream.Intersect[uint64](limited, stream.Array([]uint64{10}), order.Asc, kv.Unlim))
+	require.NoError(t, err)
+	require.Empty(t, got)
 }
