@@ -100,13 +100,13 @@ func (f *ForkChoiceStore) applyWirePayloadAttestation(
 	}
 	if firstValidOnly {
 		f.ptcVoteMu.Lock()
-		err := f.claimFirstValidPayloadAttestation(validatorIndex, data.Slot)
+		err := f.claimFirstValidPayloadAttestation(validatorIndex, data.Slot, currentSlot)
 		f.ptcVoteMu.Unlock()
 		if err != nil {
 			return err
 		}
 	}
-	return fmt.Errorf("%w: %w: slot %d, current slot %d", ErrIgnore, ErrPayloadAttestationNotCurrentSlot, data.Slot, currentSlot)
+	return fmt.Errorf("%w: slot %d, current slot %d", ErrPayloadAttestationNotCurrentSlot, data.Slot, currentSlot)
 }
 
 func (f *ForkChoiceStore) recordPayloadAttestationVotes(
@@ -128,7 +128,7 @@ func (f *ForkChoiceStore) recordPayloadAttestationVotes(
 		dataAvailabilityVotes = existing.([clparams.PtcSize]int8)
 	}
 	if firstValidOnly {
-		if err := f.claimFirstValidPayloadAttestation(validatorIndex, data.Slot); err != nil {
+		if err := f.claimFirstValidPayloadAttestation(validatorIndex, data.Slot, data.Slot); err != nil {
 			return err
 		}
 	}
@@ -147,23 +147,22 @@ type payloadAttestationSeenKey struct {
 }
 
 // claimFirstValidPayloadAttestation records the first valid gossip message from a validator
-// in a slot. It keeps the latest seen slot and the one before it, since messages for both can
-// be valid gossip within the clock disparity. The caller must hold ptcVoteMu so that
-// concurrent candidates have one winner.
-func (f *ForkChoiceStore) claimFirstValidPayloadAttestation(validatorIndex, slot uint64) error {
-	if f.payloadAttestationSeenSlot > 0 && slot < f.payloadAttestationSeenSlot-1 {
-		return fmt.Errorf("%w: payload attestation slot %d is before the previous seen slot", ErrIgnore, slot)
+// in the store's current or previous slot. The caller must hold ptcVoteMu so that concurrent
+// candidates have one winner.
+func (f *ForkChoiceStore) claimFirstValidPayloadAttestation(validatorIndex, slot, currentSlot uint64) error {
+	if currentSlot > slot && currentSlot-slot > 1 {
+		return fmt.Errorf("%w: payload attestation slot %d is before the previous store slot", ErrIgnore, slot)
 	}
 	if f.payloadAttestationSeen == nil {
 		f.payloadAttestationSeen = make(map[payloadAttestationSeenKey]struct{}, 2*clparams.PtcSize)
 	}
-	if slot > f.payloadAttestationSeenSlot {
-		f.payloadAttestationSeenSlot = slot
+	if currentSlot > f.payloadAttestationPrunedSlot {
 		for key := range f.payloadAttestationSeen {
-			if key.slot+1 < slot {
+			if currentSlot > key.slot && currentSlot-key.slot > 1 {
 				delete(f.payloadAttestationSeen, key)
 			}
 		}
+		f.payloadAttestationPrunedSlot = currentSlot
 	}
 	key := payloadAttestationSeenKey{slot: slot, validatorIndex: validatorIndex}
 	if _, seen := f.payloadAttestationSeen[key]; seen {

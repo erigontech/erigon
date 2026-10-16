@@ -112,33 +112,41 @@ func TestCurrentSlotPayloadVotesInvalidateHeadAtSlotBoundary(t *testing.T) {
 }
 
 func TestOnGossipPayloadAttestationMessageKeepsFirstValidForCurrentAndPreviousSlot(t *testing.T) {
-	f, _ := newGossipPayloadAttestationTestStore(t, gossipTestSlot+2)
+	f, signCurrent := newGossipPayloadAttestationTestStore(t, gossipTestSlot)
+	require.NoError(t, f.OnGossipPayloadAttestationMessage(context.Background(), signCurrent(true)))
 
-	for slot := gossipTestSlot; slot <= gossipTestSlot+2; slot++ {
-		sign := addGossipPayloadAttestationSigner(t, f, common.Hash{byte(slot)}, slot, gossipTestValidator, int(slot-gossipTestSlot), false)
-		err := f.OnGossipPayloadAttestationMessage(context.Background(), sign(true))
-		if slot == gossipTestSlot+2 {
-			require.NoError(t, err)
-		} else {
-			require.ErrorIs(t, err, ErrPayloadAttestationNotCurrentSlot)
-		}
-	}
+	f.timeMs.Store((gossipTestSlot + 2) * f.beaconCfg.SecondsPerSlot * 1000)
+	signPrevious := addGossipPayloadAttestationSigner(t, f, common.Hash{0x01}, gossipTestSlot+1, gossipTestValidator, gossipTestPTCPosition+1, false)
+	err := f.OnGossipPayloadAttestationMessage(context.Background(), signPrevious(true))
+	require.ErrorIs(t, err, ErrPayloadAttestationNotCurrentSlot)
+	require.NotContains(t, f.payloadAttestationSeen, payloadAttestationSeenKey{slot: gossipTestSlot, validatorIndex: gossipTestValidator})
 
+	signOld := addGossipPayloadAttestationSigner(t, f, common.Hash{0x02}, gossipTestSlot, gossipTestValidator+1, gossipTestPTCPosition+2, false)
+	err = f.OnGossipPayloadAttestationMessage(context.Background(), signOld(true))
+	require.ErrorIs(t, err, ErrIgnore)
+	require.NotErrorIs(t, err, ErrPayloadAttestationNotCurrentSlot)
+
+	signCurrent = addGossipPayloadAttestationSigner(t, f, common.Hash{0x03}, gossipTestSlot+2, gossipTestValidator, gossipTestPTCPosition+3, false)
+	require.NoError(t, f.OnGossipPayloadAttestationMessage(context.Background(), signCurrent(true)))
 	require.Len(t, f.payloadAttestationSeen, 2)
+	require.Contains(t, f.payloadAttestationSeen, payloadAttestationSeenKey{slot: gossipTestSlot + 1, validatorIndex: gossipTestValidator})
+	require.Contains(t, f.payloadAttestationSeen, payloadAttestationSeenKey{slot: gossipTestSlot + 2, validatorIndex: gossipTestValidator})
 }
 
-func TestOnGossipPayloadAttestationMessageIgnoresSlotsBeforePreviousSeenSlot(t *testing.T) {
+func TestOnGossipPayloadAttestationMessageIgnoresSlotsBeforePreviousStoreSlot(t *testing.T) {
 	f, _ := newGossipPayloadAttestationTestStore(t, gossipTestSlot+2)
 	sign101 := addGossipPayloadAttestationSigner(t, f, common.Hash{0x01}, gossipTestSlot+1, 43, 8, false)
 	sign100 := addGossipPayloadAttestationSigner(t, f, common.Hash{0x02}, gossipTestSlot, 44, 9, false)
 	sign99 := addGossipPayloadAttestationSigner(t, f, common.Hash{0x03}, gossipTestSlot-1, 45, 10, false)
 
+	for _, sign := range []func(bool) *cltypes.PayloadAttestationMessage{sign100, sign99} {
+		err := f.OnGossipPayloadAttestationMessage(context.Background(), sign(true))
+		require.ErrorIs(t, err, ErrIgnore)
+		require.NotErrorIs(t, err, ErrPayloadAttestationNotCurrentSlot)
+	}
+	require.Empty(t, f.payloadAttestationSeen)
 	require.ErrorIs(t, f.OnGossipPayloadAttestationMessage(context.Background(), sign101(true)), ErrPayloadAttestationNotCurrentSlot)
-	require.ErrorIs(t, f.OnGossipPayloadAttestationMessage(context.Background(), sign100(true)), ErrPayloadAttestationNotCurrentSlot)
-	err := f.OnGossipPayloadAttestationMessage(context.Background(), sign99(true))
-	require.ErrorIs(t, err, ErrIgnore)
-	require.NotErrorIs(t, err, ErrPayloadAttestationNotCurrentSlot)
-	require.Equal(t, gossipTestSlot+1, f.payloadAttestationSeenSlot)
+	require.Len(t, f.payloadAttestationSeen, 1)
 }
 
 func TestPayloadAttestationValidationContextsCollapseConcurrentBuilds(t *testing.T) {
@@ -488,8 +496,10 @@ func TestOnGossipPayloadAttestationMessageDoesNotCountLateMessage(t *testing.T) 
 	err := f.OnGossipPayloadAttestationMessage(context.Background(), sign(true))
 
 	require.ErrorIs(t, err, ErrPayloadAttestationNotCurrentSlot)
-	timeliness, _, _, _ := f.PayloadAttestationVotes(gossipTestBlockRoot)
+	require.NotErrorIs(t, err, ErrIgnore)
+	timeliness, dataAvailability, _, _ := f.PayloadAttestationVotes(gossipTestBlockRoot)
 	require.Equal(t, [clparams.PtcSize]int8{}, timeliness)
+	require.Equal(t, [clparams.PtcSize]int8{}, dataAvailability)
 }
 
 func TestOnGossipPayloadAttestationMessageDoesNotCountVoteAppliedAfterSlotTick(t *testing.T) {
@@ -515,6 +525,51 @@ func TestOnGossipPayloadAttestationMessageDoesNotCountVoteAppliedAfterSlotTick(t
 	require.Equal(t, [clparams.PtcSize]int8{}, timeliness)
 }
 
+func TestOnGossipPayloadAttestationMessageCurrentSlotConflictingMessagesHaveOneWinner(t *testing.T) {
+	type result struct {
+		err            error
+		payloadPresent bool
+	}
+
+	f, sign := newGossipPayloadAttestationTestStore(t, gossipTestSlot)
+	messages := make([]*cltypes.PayloadAttestationMessage, 16)
+	for i := range messages {
+		messages[i] = sign(i%2 == 0)
+	}
+	start := make(chan struct{})
+	results := make(chan result, len(messages))
+	for _, msg := range messages {
+		go func() {
+			<-start
+			results <- result{
+				err:            f.OnGossipPayloadAttestationMessage(context.Background(), msg),
+				payloadPresent: msg.Data.PayloadPresent,
+			}
+		}()
+	}
+
+	close(start)
+	winners := 0
+	var winnerVote int8
+	for range messages {
+		result := <-results
+		if result.err == nil {
+			winners++
+			winnerVote = boolToVote(result.payloadPresent)
+			continue
+		}
+		require.ErrorIs(t, result.err, ErrIgnore)
+		require.NotErrorIs(t, result.err, ErrPayloadAttestationNotCurrentSlot)
+	}
+
+	require.Equal(t, 1, winners)
+	timeliness, dataAvailability, timelinessPresent, dataAvailabilityPresent := f.PayloadAttestationVotes(gossipTestBlockRoot)
+	require.True(t, timelinessPresent)
+	require.True(t, dataAvailabilityPresent)
+	require.Equal(t, winnerVote, timeliness[gossipTestPTCPosition])
+	require.Equal(t, int8(-1), dataAvailability[gossipTestPTCPosition])
+}
+
 func TestOnGossipPayloadAttestationMessageLateConflictingMessagesHaveOneWinner(t *testing.T) {
 	f, sign := newGossipPayloadAttestationTestStore(t, gossipTestSlot+1)
 	messages := make([]*cltypes.PayloadAttestationMessage, 16)
@@ -534,10 +589,12 @@ func TestOnGossipPayloadAttestationMessageLateConflictingMessagesHaveOneWinner(t
 	winners := 0
 	for range messages {
 		err := <-results
-		require.ErrorIs(t, err, ErrIgnore)
 		if errors.Is(err, ErrPayloadAttestationNotCurrentSlot) {
 			winners++
+			require.NotErrorIs(t, err, ErrIgnore)
+			continue
 		}
+		require.ErrorIs(t, err, ErrIgnore)
 	}
 
 	require.Equal(t, 1, winners)

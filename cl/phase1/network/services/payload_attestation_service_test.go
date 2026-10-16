@@ -19,7 +19,6 @@ package services
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -1095,7 +1094,7 @@ type notCurrentSlotPayloadAttestationForkchoice struct {
 }
 
 func (notCurrentSlotPayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage) error {
-	return fmt.Errorf("%w: %w", forkchoice.ErrIgnore, forkchoice.ErrPayloadAttestationNotCurrentSlot)
+	return forkchoice.ErrPayloadAttestationNotCurrentSlot
 }
 
 func TestPayloadAttestationServiceAcceptsGossipNotCountedByForkChoice(t *testing.T) {
