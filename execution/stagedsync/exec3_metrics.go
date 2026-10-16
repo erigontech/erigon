@@ -32,6 +32,12 @@ var (
 
 	mxExecBlockDuration = metrics.NewGauge("exec_block_dur")
 
+	mxExecBlockSeconds = metrics.NewHistogram("exec_block_seconds",
+		[]float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.75, 1, 1.5, 2.5, 5, 10, 30, 60})
+	mxExecBlockSecondsMax = metrics.NewMaxGauge("exec_block_seconds_max")
+	mxExecBlockMgasPerSec = metrics.NewHistogram("exec_block_mgas_per_sec",
+		[]float64{5, 10, 20, 30, 40, 50, 60, 80, 100, 125, 150, 200, 300, 500, 1000})
+
 	mxExecTxnDuration             = metrics.NewGauge("exec_txn_dur")
 	mxExecTxnExecDuration         = metrics.NewGauge("exec_txn_exec_dur")
 	mxExecTxnReadDuration         = metrics.NewGauge("exec_txn_read_dur")

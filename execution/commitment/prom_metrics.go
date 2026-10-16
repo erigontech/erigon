@@ -35,7 +35,8 @@ var (
 	// Buckets span a fast incremental block through a whale fold. The histogram's
 	// _count is the round count; a separate counter for it would restate it.
 	mxRoundDuration = metrics.NewHistogram("commitment_round_duration_seconds",
-		[]float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60})
+		[]float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.75, 1, 1.5, 2.5, 5, 10, 30, 60})
+	mxRoundDurationMax = metrics.NewMaxGauge("commitment_round_duration_seconds_max")
 
 	mxKeys       = metrics.GetOrCreateCounter("commitment_keys_total")
 	mxFolds      = metrics.GetOrCreateCounter("commitment_folds_total")
@@ -86,7 +87,9 @@ func publishBranchWrites(n, bytesOut int, m *Metrics) {
 // observeRound publishes one finished round. Branch writes are not published
 // here — publishBranchWrites bills those where they land.
 func observeRound(m *Metrics, start time.Time) {
-	mxRoundDuration.ObserveDuration(start)
+	d := time.Since(start).Seconds()
+	mxRoundDuration.Observe(d)
+	mxRoundDurationMax.Observe(d)
 	if m == nil {
 		return
 	}

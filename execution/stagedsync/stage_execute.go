@@ -468,8 +468,12 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		return err
 	}
 
+	start := time.Now()
 	if !(dbg.Exec3Parallel || cfg.experimentalBAL) {
-		return execV3Serial(ctx, s, u, cfg, doms, rwTx, rng, logger)
+		if err := execV3Serial(ctx, s, u, cfg, doms, rwTx, rng, logger); err != nil {
+			return err
+		}
+		return observeSingleBlockCycle(ctx, cfg, rwTx, rng, start)
 	}
 
 	out, execErr := execV3(ctx, cfg, doms, rwTx, s.SyncMode(), s.CurrentSyncCycle.IsInitialCycle, s.LogPrefix(), rng, nil, logger)
@@ -486,7 +490,27 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		}
 	}
 
-	return renderExecOutcome(execErr, out, cfg, s, u, logger)
+	if err := renderExecOutcome(execErr, out, cfg, s, u, logger); err != nil {
+		return err
+	}
+	return observeSingleBlockCycle(ctx, cfg, rwTx, rng, start)
+}
+
+// observeSingleBlockCycle records per-block exec time (execution + commitment) and Mgas/s for cycles that execute
+// one block, as at the chain tip.
+func observeSingleBlockCycle(ctx context.Context, cfg ExecuteBlockCfg, tx kv.TemporalTx, rng execRange, start time.Time) error {
+	if rng.blockNum != rng.maxBlockNum {
+		return nil
+	}
+	d := time.Since(start).Seconds()
+	header, err := cfg.blockReader.HeaderByNumber(ctx, tx, rng.blockNum)
+	if err != nil || header == nil {
+		return err
+	}
+	mxExecBlockSeconds.Observe(d)
+	mxExecBlockSecondsMax.Observe(d)
+	mxExecBlockMgasPerSec.Observe(float64(header.GasUsed) / 1e6 / d)
+	return nil
 }
 
 // renderExecOutcome maps executor outcomes to the stage's error and unwind contract.
