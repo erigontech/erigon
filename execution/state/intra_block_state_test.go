@@ -442,6 +442,35 @@ func TestTransientStorage(t *testing.T) {
 	}
 }
 
+// Crosses transientScanLimit, so lookups switch from the slot scan to the index.
+func TestTransientStorageManySlots(t *testing.T) {
+	t.Parallel()
+	state := New(nil)
+	defer state.Close()
+
+	addr := accounts.Address{}
+	key := func(i int) TransientKey { return TransientKey(*uint256.NewInt(uint64(i))) }
+	const n = 2 * transientScanLimit
+	for i := range n {
+		state.SetTransientState(addr, key(i), *uint256.NewInt(uint64(i + 1)))
+	}
+	check := func(set int) {
+		t.Helper()
+		for i := range n {
+			want := uint64(0)
+			if i < set {
+				want = uint64(i + 1)
+			}
+			if got := state.GetTransientState(addr, key(i)); got.Uint64() != want {
+				t.Fatalf("slot %d: have %d, want %d", i, got.Uint64(), want)
+			}
+		}
+	}
+	check(n)
+	state.journal.revert(state, transientScanLimit/2)
+	check(transientScanLimit / 2)
+}
+
 func TestCloseResetsRevisions(t *testing.T) {
 	t.Parallel()
 	state := New(nil)
