@@ -224,6 +224,7 @@ func (f *ForkChoiceStore) computeHeadGloas(justifiedCheckpoint solid.Checkpoint,
 	// payload tiebreakers on the same slot even when the clock advances during this walk.
 	currentSlot := f.Slot()
 	nodes, nodeChildren := f.getFilteredNodeTree(justifiedCheckpoint.Root, justifiedCheckpoint, currentSlot)
+	f.headIsFallback = len(nodes) == 0
 	if len(nodes) == 0 {
 		header, hasHeader := f.forkGraph.GetHeader(justifiedCheckpoint.Root)
 		if !hasHeader {
@@ -460,7 +461,12 @@ func (f *ForkChoiceStore) getHeadOnce(auxilliaryState *state.CachingBeaconState,
 }
 
 func (f *ForkChoiceStore) publishSelectedHead(root common.Hash, slot uint64) {
-	f.selectedHead.Store(&ForkChoiceNode{Root: root, PayloadStatus: f.headPayloadStatus})
+	status := f.headPayloadStatus
+	if f.headIsFallback {
+		// get_head did not choose this variant over the other one, so neither rules the other out.
+		status = cltypes.PayloadStatusPending
+	}
+	f.selectedHead.Store(&ForkChoiceNode{Root: root, PayloadStatus: status})
 	if f.syncedDataManager != nil {
 		f.syncedDataManager.OnSelectedHead(root, slot)
 	}

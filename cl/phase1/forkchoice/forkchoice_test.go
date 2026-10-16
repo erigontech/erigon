@@ -1538,6 +1538,53 @@ func TestHasImportedDescendantAfterFollowsTheServedVariant(t *testing.T) {
 	})
 }
 
+// viabilityTree is a Gloas store whose justified checkpoint is at epoch 1 (root at slot 32), with
+// one validator, at slot 128. add attaches a block on the parent's FULL or EMPTY variant.
+type viabilityTree struct {
+	store     *ForkChoiceStore
+	graph     *headSnapshotForkGraph
+	justified solid.Checkpoint
+}
+
+func newViabilityTree(t testing.TB) *viabilityTree {
+	t.Helper()
+	store, graph := newHeadSnapshotTestStore()
+	justified := store.JustifiedCheckpoint()
+	justified.Epoch = 1
+	graph.blocks[justified.Root].Block.Slot = 32
+	graph.headers[justified.Root].Slot = 32
+	store.justifiedCheckpoint.Store(justified)
+	store.time.Store(128 * store.beaconCfg.SecondsPerSlot)
+	store.checkpointStates.Store(justified, &checkpointState{
+		beaconConfig: store.beaconCfg, validatorSetSize: 1,
+		balances: []uint64{32}, actives: []byte{1}, slasheds: []byte{0},
+	})
+	return &viabilityTree{store: store, graph: graph, justified: justified}
+}
+
+// add attaches root at slot on parent's FULL or EMPTY variant. viable sets whether its voting
+// source matches the justified checkpoint.
+func (v *viabilityTree) add(root, parent common.Hash, slot uint64, full, viable bool) {
+	block := cltypes.NewSignedBeaconBlock(v.store.beaconCfg, clparams.GloasVersion)
+	block.Block.Slot = slot
+	block.Block.ParentRoot = parent
+	bid := block.Block.Body.GetSignedExecutionPayloadBid().Message
+	bid.BlockHash = root
+	parentBid := v.graph.blocks[parent].Block.Body.GetSignedExecutionPayloadBid().Message
+	bid.ParentBlockHash = parentBid.ParentBlockHash
+	if full {
+		bid.ParentBlockHash = parentBid.BlockHash
+	}
+	v.graph.blocks[root] = block
+	v.graph.headers[root] = block.SignedBeaconBlockHeader().Header
+	v.store.updateChildren(v.graph.headers[parent].Slot, parent, root)
+	source := solid.Checkpoint{}
+	if viable {
+		source = v.justified
+	}
+	v.store.unrealizedJustifications.Store(root, source)
+}
+
 // A descendant on a branch get_head filters out for its justification does not make the head
 // lag; the same descendant with a viable justification does. The served head H/EMPTY at slot 64
 // has a viable FULL child at slot 65 and an EMPTY child at slot 98.
@@ -1550,51 +1597,70 @@ func TestHasImportedDescendantAfterSkipsNonViableBranches(t *testing.T) {
 		{name: "viable justification", viable: true, lagging: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			store, graph := newHeadSnapshotTestStore()
-			justified := store.JustifiedCheckpoint()
-			justified.Epoch = 1
-			graph.blocks[justified.Root].Block.Slot = 32
-			graph.headers[justified.Root].Slot = 32
-			store.justifiedCheckpoint.Store(justified)
-			store.time.Store(128 * store.beaconCfg.SecondsPerSlot)
-			store.checkpointStates.Store(justified, &checkpointState{
-				beaconConfig: store.beaconCfg, validatorSetSize: 1,
-				balances: []uint64{32}, actives: []byte{1}, slasheds: []byte{0},
-			})
-			add := func(root, parent common.Hash, slot uint64, full bool) {
-				block := cltypes.NewSignedBeaconBlock(store.beaconCfg, clparams.GloasVersion)
-				block.Block.Slot = slot
-				block.Block.ParentRoot = parent
-				bid := block.Block.Body.GetSignedExecutionPayloadBid().Message
-				bid.BlockHash = root
-				parentBid := graph.blocks[parent].Block.Body.GetSignedExecutionPayloadBid().Message
-				bid.ParentBlockHash = parentBid.ParentBlockHash
-				if full {
-					bid.ParentBlockHash = parentBid.BlockHash
-				}
-				graph.blocks[root] = block
-				graph.headers[root] = block.SignedBeaconBlockHeader().Header
-				store.updateChildren(graph.headers[parent].Slot, parent, root)
-			}
+			v := newViabilityTree(t)
+			store := v.store
 			headRoot, fullChild, emptyChild := common.Hash{0xbb}, common.Hash{0xcc}, common.Hash{0xdd}
-			add(headRoot, justified.Root, 64, true)
-			add(fullChild, headRoot, 65, true)
-			add(emptyChild, headRoot, 98, false)
-			store.unrealizedJustifications.Store(fullChild, justified)
-			emptyChildJustification := solid.Checkpoint{}
-			if tc.viable {
-				emptyChildJustification = justified
-			}
-			store.unrealizedJustifications.Store(emptyChild, emptyChildJustification)
+			v.add(headRoot, v.justified.Root, 64, true, true)
+			v.add(fullChild, headRoot, 65, true, true)
+			v.add(emptyChild, headRoot, 98, false, tc.viable)
 			store.setLatestMessage(0, LatestMessage{Slot: 100, Root: headRoot})
 
-			filtered := store.getFilteredBlockTree(justified.Root, justified, store.Slot())
+			filtered := store.getFilteredBlockTree(v.justified.Root, v.justified, store.Slot())
 			require.Contains(t, filtered, fullChild)
 			require.Equal(t, tc.viable, filtered[emptyChild] != nil)
 			store.selectedHead.Store(&ForkChoiceNode{Root: headRoot, PayloadStatus: cltypes.PayloadStatusEmpty})
 			require.Equal(t, tc.lagging, store.HasImportedDescendantAfter(headRoot, 64+store.beaconCfg.SlotsPerEpoch))
 		})
 	}
+}
+
+// A block whose only viable descendant sits on its invalidated payload is not reachable: get_head
+// drops its FULL variant, and its EMPTY variant fails justification as a leaf. The served head
+// H/EMPTY at slot 64 has an EMPTY child C at slot 98 with a FULL child D at slot 99.
+func TestHasImportedDescendantAfterSkipsABlockViableOnlyThroughAnInvalidatedPayload(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		invalid, emptyLeaf bool
+		lagging            bool
+	}{
+		{name: "invalidated payload", invalid: true, lagging: false},
+		{name: "invalidated payload, viable EMPTY leaf", invalid: true, emptyLeaf: true, lagging: true},
+		{name: "payload not invalidated", lagging: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := newViabilityTree(t)
+			headRoot, c, d := common.Hash{0xbb}, common.Hash{0xc1}, common.Hash{0xd1}
+			v.add(headRoot, v.justified.Root, 64, true, true)
+			v.add(c, headRoot, 98, false, tc.emptyLeaf)
+			v.add(d, c, 99, true, true)
+			if tc.invalid {
+				v.graph.invalid = map[common.Hash]bool{c: true}
+			}
+			v.store.selectedHead.Store(&ForkChoiceNode{Root: headRoot, PayloadStatus: cltypes.PayloadStatusEmpty})
+
+			require.Equal(t, tc.lagging, v.store.HasImportedDescendantAfter(headRoot, 64+v.store.beaconCfg.SlotsPerEpoch))
+		})
+	}
+}
+
+// When get_head finds no viable node, it falls back to the justified root on EMPTY without having
+// chosen EMPTY over FULL. The gate then counts the FULL branch too: here an available FULL child
+// with an unavailable payload hides a viable grandchild past the tolerance.
+func TestHasImportedDescendantAfterCountsBothVariantsOfAFallbackHead(t *testing.T) {
+	v := newViabilityTree(t)
+	j := v.justified.Root
+	c, g := common.Hash{0xc2}, common.Hash{0xd2}
+	v.add(c, j, 33, true, false)
+	v.add(g, c, 98, true, true)
+	v.graph.noEnvelope = map[common.Hash]bool{c: true}
+	require.True(t, v.store.isPayloadAvailable(j))
+	require.False(t, v.store.isPayloadAvailable(c))
+
+	head, _, err := v.store.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, ForkChoiceNode{Root: j, PayloadStatus: cltypes.PayloadStatusEmpty}, head, "no viable node: the fallback")
+
+	require.True(t, v.store.HasImportedDescendantAfter(j, 32+v.store.beaconCfg.SlotsPerEpoch))
 }
 
 // A changed payload decision can rule out the served variant before get_head runs again; until it
