@@ -33,7 +33,7 @@ type transientStorage map[accounts.Address]*transientSlots
 
 // transientScanLimit is how many slots are scanned before an index is built: Go
 // hashes a 32-byte map key even in a one-group map, and the scan is cheaper.
-const transientScanLimit = 8
+const transientScanLimit = 32
 
 // transientSlots only appends, so a slot index stays valid for the journal until
 // the transaction ends.
