@@ -1209,10 +1209,10 @@ func TestRollbackTwiceParksTxnOnce(t *testing.T) {
 	require.NotEqual(t, a.CHandle(), b.CHandle(), "two live read txns must never share one handle")
 }
 
-// A deferred flush leaves data unflushed after a commit, and mdbx only tests its deadline
+// A deferred sync leaves data unsynced after a commit, and mdbx only tests its deadline
 // while committing - so without the background goroutine, data written and then left alone
-// stays unflushed for good.
-func TestDeferredSyncFlushesAfterWritesStop(t *testing.T) {
+// stays unsynced for good.
+func TestDeferredSyncSyncsAfterWritesStop(t *testing.T) {
 	open := func(o mdbx.MdbxOpts) kv.RwDB {
 		db := o.Path(t.TempDir()).WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
 		t.Cleanup(db.Close)
@@ -1231,19 +1231,19 @@ func TestDeferredSyncFlushesAfterWritesStop(t *testing.T) {
 
 	byDefault := open(mdbx.New(dbcfg.TemporaryDB, log.Root()).PollerSyncPeriod(time.Hour))
 	writeOne(byDefault)
-	require.NotZero(t, unsynced(byDefault), "every database defers its flush unless asked otherwise")
+	require.NotZero(t, unsynced(byDefault), "every database defers its sync unless asked otherwise")
 
 	deferred := open(mdbx.New(dbcfg.TemporaryDB, log.Root()).SafeNoSync().PollerSyncPeriod(50 * time.Millisecond))
-	writeOne(deferred) // far below the byte threshold: only the deadline can flush this
+	writeOne(deferred) // far below the byte threshold: only the deadline can sync this
 	require.Eventually(t, func() bool { return unsynced(deferred) == 0 }, time.Second, 10*time.Millisecond,
-		"the background flush never ran")
+		"the background sync never ran")
 
 	durable := open(mdbx.New(dbcfg.TemporaryDB, log.Root()).Durable())
 	writeOne(durable)
-	require.Zero(t, unsynced(durable), "a durable database flushes within the commit")
+	require.Zero(t, unsynced(durable), "a durable database syncs within the commit")
 }
 
-// Close must join the background flush: it touches the env on every tick, and the env is gone
+// Close must join the background sync: it touches the env on every tick, and the env is gone
 // once Close returns.
 func TestDeferredSyncClosesWhileWriting(t *testing.T) {
 	val := make([]byte, 4096)
@@ -1274,7 +1274,7 @@ func TestDeferredSyncClosesWhileWriting(t *testing.T) {
 	}
 }
 
-func TestDeferredSyncLeavesATipSizedCommitUnflushed(t *testing.T) {
+func TestDeferredSyncLeavesATipSizedCommitUnsynced(t *testing.T) {
 	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).SafeNoSync().PollerSyncPeriod(time.Hour).
 		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
 	t.Cleanup(db.Close)
@@ -1289,7 +1289,7 @@ func TestDeferredSyncLeavesATipSizedCommitUnflushed(t *testing.T) {
 	}))
 	info, err := db.(*mdbx.MdbxKV).Env().Info(nil)
 	require.NoError(t, err)
-	require.NotZero(t, info.UnsyncedBytes, "a tip-sized commit flushed inside the commit")
+	require.NotZero(t, info.UnsyncedBytes, "a tip-sized commit synced inside the commit")
 }
 
 func TestDeferredSyncBoundsAWriterThatNeverReleasesTheLock(t *testing.T) {
@@ -1332,7 +1332,7 @@ func TestDeferredSyncBoundsAWriterThatNeverReleasesTheLock(t *testing.T) {
 	close(stop)
 	wg.Wait()
 	require.NoError(t, writeErr)
-	require.Less(t, worst, time.Second, "a writer that re-takes the lock at once kept its data unflushed")
+	require.Less(t, worst, time.Second, "a writer that re-takes the lock at once kept its data unsynced")
 }
 
 func TestDeferredSyncLeavesTheDeadlineToThePoller(t *testing.T) {
@@ -1351,7 +1351,7 @@ func TestDeferredSyncLeavesTheDeadlineToThePoller(t *testing.T) {
 		"a backstop past mdbx's 16.16 range wraps to a shorter deadline")
 }
 
-// The flush mode is settled once every option is in, so a mode set after SafeNoSync still wins
+// The sync mode is settled once every option is in, so a mode set after SafeNoSync still wins
 // - mdbx rejects the thresholds outright on a read-only database.
 func TestSafeNoSyncYieldsToReadonlyWhateverTheOrder(t *testing.T) {
 	path := t.TempDir()
@@ -1365,7 +1365,7 @@ func TestSafeNoSyncYieldsToReadonlyWhateverTheOrder(t *testing.T) {
 	t.Cleanup(ro.Close)
 }
 
-// An in-memory database asks for no flush at all, and MDBX_UTTERLY_NOSYNC carries the
+// An in-memory database asks for no sync at all, and MDBX_UTTERLY_NOSYNC carries the
 // SafeNoSync bit - stripping that bit would leave a mode that fsyncs on every commit.
 func TestInMemKeepsUtterlyNoSync(t *testing.T) {
 	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).InMem(t.TempDir()).MustOpen()
@@ -1373,5 +1373,5 @@ func TestInMemKeepsUtterlyNoSync(t *testing.T) {
 	flags, err := db.(*mdbx.MdbxKV).Env().Flags()
 	require.NoError(t, err)
 	require.Equal(t, uint(mdbxgo.UtterlyNoSync), flags&mdbxgo.UtterlyNoSync,
-		"utterly-nosync lost a bit, and without all of them mdbx flushes on commit")
+		"utterly-nosync lost a bit, and without all of them mdbx syncs on commit")
 }
