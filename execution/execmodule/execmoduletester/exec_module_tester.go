@@ -440,7 +440,14 @@ func WithStateTransitionObserver(observer execmodule.StateTransitionObserver) Op
 	}
 }
 
+func WithExecutionPathReporter(report func(ethconfig.BlockExecutionPath)) Option {
+	return func(opts *options) {
+		opts.executionPathReporter = report
+	}
+}
+
 type options struct {
+	executionPathReporter    func(ethconfig.BlockExecutionPath)
 	stepSize                 *uint64
 	e2RetireStep             *uint64
 	experimentalBAL          bool
@@ -582,6 +589,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	if opt.execWorkerCount > 0 {
 		cfg.Sync.ExecWorkerCount = opt.execWorkerCount
 	}
+	cfg.Sync.ExecutionPathReporter = opt.executionPathReporter
 	cfg.PersistReceiptsCacheV2 = true
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
