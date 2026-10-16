@@ -17,6 +17,7 @@
 package stream_test
 
 import (
+	"math"
 	"math/rand"
 	"slices"
 	"testing"
@@ -150,4 +151,28 @@ func TestIntersectDoesNotSeekPastTheNestedIntersectLimit(t *testing.T) {
 	got, err := stream.ToArrayU64(stream.Intersect[uint64](limited, stream.Array([]uint64{10}), order.Asc, -1))
 	require.NoError(t, err)
 	require.Empty(t, got)
+}
+
+func TestIntersectNaN(t *testing.T) {
+	nan := math.NaN()
+	tests := []struct {
+		name string
+		x, y []float64
+		asc  order.By
+		want []float64
+	}{
+		{"x only NaN", []float64{nan}, []float64{1}, order.Asc, nil},
+		{"y only NaN", []float64{1}, []float64{nan}, order.Asc, nil},
+		{"x asc", []float64{nan, 1, 2}, []float64{2}, order.Asc, []float64{2}},
+		{"y asc", []float64{2}, []float64{nan, 1, 2}, order.Asc, []float64{2}},
+		{"x desc", []float64{nan, 2, 1}, []float64{1}, order.Desc, []float64{1}},
+		{"y desc", []float64{1}, []float64{nan, 2, 1}, order.Desc, []float64{1}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := stream.ToArray(stream.Intersect[float64](stream.Array(tt.x), stream.Array(tt.y), tt.asc, -1))
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
 }

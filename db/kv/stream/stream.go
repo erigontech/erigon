@@ -329,10 +329,15 @@ func (m *Intersected[T]) align() {
 		if m.xNextK == m.yNextK {
 			return
 		}
-		if before(m.xNextK, m.yNextK, asc) {
+		switch {
+		case before(m.xNextK, m.yNextK, asc):
 			m.err = skipTo(m.x, &m.xNextK, &m.xHasNext, m.yNextK, asc)
-		} else {
+		case before(m.yNextK, m.xNextK, asc):
 			m.err = skipTo(m.y, &m.yNextK, &m.yHasNext, m.xNextK, asc)
+		case m.xNextK != m.xNextK: //nolint:gocritic // NaN: unordered and never equal, so it cannot match
+			m.advanceX()
+		default:
+			m.advanceY()
 		}
 	}
 	m.xHasNext = false
