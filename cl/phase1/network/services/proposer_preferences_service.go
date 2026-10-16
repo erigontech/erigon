@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -78,7 +79,7 @@ func (s *proposerPreferencesService) DecodeGossipMessage(_ peer.ID, data []byte,
 
 func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltypes.SignedProposerPreferences) error {
 	if msg == nil || msg.Message == nil {
-		return fmt.Errorf("nil proposer preferences message")
+		return errors.New("nil proposer preferences message")
 	}
 
 	preferences := msg.Message
@@ -237,7 +238,7 @@ func (s *proposerPreferencesService) proposerPreferencesValidationState(depState
 	dependentEpoch := s.shufflingDependentEpoch(proposalEpoch)
 	validationSlot, ok := safeMultiplyUint64(dependentEpoch, s.beaconCfg.SlotsPerEpoch)
 	if !ok {
-		return nil, fmt.Errorf("dependent validation slot is not representable")
+		return nil, errors.New("dependent validation slot is not representable")
 	}
 	if depState.Slot() >= validationSlot {
 		return depState, nil
@@ -259,7 +260,7 @@ func (s *proposerPreferencesService) validateProposerPreferencesWithState(msg *c
 	}
 	lookahead := depState.GetProposerLookahead()
 	if lookahead == nil {
-		return fmt.Errorf("proposer lookahead not available")
+		return errors.New("proposer lookahead not available")
 	}
 	lookaheadIndex := (proposalEpoch-stateEpoch)*s.beaconCfg.SlotsPerEpoch + proposalSlot%s.beaconCfg.SlotsPerEpoch
 	if int(lookaheadIndex) >= lookahead.Length() {
@@ -288,7 +289,7 @@ func (s *proposerPreferencesService) validateProposerPreferencesWithState(msg *c
 		return fmt.Errorf("signature verification error: %w", err)
 	}
 	if !valid {
-		return fmt.Errorf("invalid proposer preferences signature")
+		return errors.New("invalid proposer preferences signature")
 	}
 	return nil
 }
