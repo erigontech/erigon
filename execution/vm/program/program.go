@@ -292,7 +292,7 @@ func (p *Program) Mstore(data []byte, memStart uint32) *Program {
 	return p
 }
 
-// MstoreSmall stores the provided data, which must be smaller than 32 bytes,
+// MstoreSmall stores the provided data, which must contain between 1 and 32 bytes,
 // into the memory area starting at memStart.
 // The data will be LHS zero-added to align on 32 bytes.
 // For example, providing data 0x1122, it will do a PUSH2:

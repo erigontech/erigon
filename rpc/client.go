@@ -157,9 +157,9 @@ func (op *requestOp) wait(ctx context.Context, c *Client) ([]*jsonrpcMessage, er
 
 // Dial creates a new client for the given URL.
 //
-// The currently supported URL schemes are "http", "https", "ws" and "wss". If rawurl is a
-// file name with no URL scheme, a local socket connection is established using UNIX
-// domain sockets.
+// The currently supported URL schemes are "http", "https", "ws", "wss" and "stdio". If
+// rawurl is a file name with no URL scheme, a local socket connection is established using
+// UNIX domain sockets.
 //
 // If you want to further configure the transport, use DialOptions instead of this
 // function.
