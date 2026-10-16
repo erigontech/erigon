@@ -138,10 +138,14 @@ func (s *onBlockErrorStore) OnBlock(context.Context, *cltypes.SignedBeaconBlock,
 func setupBlockService(t *testing.T, ctrl *gomock.Controller) (BlockService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock, *mock_services.ForkChoiceStorageMock) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	cfg := &clparams.MainnetBeaconConfig
-	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
+	testCfg := *cfg
+	testCfg.AltairForkEpoch = 0
+	testCfg.BellatrixForkEpoch = 0
+	testCfg.CapellaForkEpoch = testCfg.FarFutureEpoch
+	syncedDataManager := synced_data.NewSyncedDataManager(&testCfg, true)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
-	blockService := newBlockService(db, forkchoiceMock, syncedDataManager, ethClock, cfg, nil)
+	blockService := newBlockService(db, forkchoiceMock, syncedDataManager, ethClock, &testCfg, nil)
 	return blockService, syncedDataManager, ethClock, forkchoiceMock
 }
 
@@ -167,6 +171,100 @@ func TestBlockServiceIgnoreSlot(t *testing.T) {
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(false).AnyTimes()
 
 	require.Error(t, blockService.ProcessMessage(context.Background(), nil, blocks[0]))
+}
+
+// TestBlockServiceDoesNotIgnoreLateBlockAsFuture proves the future-slot check compares against the
+// wall-clock slot, not the head: a block for a slot that has already passed, arriving while the
+// head is still behind it, is not from the future.
+func TestBlockServiceDoesNotIgnoreLateBlockAsFuture(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, _, post := tests.GetBellatrixRandom()
+
+	blockService, syncedData, ethClock, _ := setupBlockService(t, ctrl)
+	require.NoError(t, syncedData.OnHeadState(post))
+	block := blocks[0]
+	block.Block.Slot = post.Slot() + 1
+	ethClock.EXPECT().GetCurrentSlot().Return(post.Slot() + 2).AnyTimes()
+
+	err := blockService.ProcessMessage(context.Background(), nil, block)
+
+	require.ErrorIs(t, err, ErrInvalidSignature)
+}
+
+func scheduledBlockCount(t *testing.T, service BlockService) int {
+	t.Helper()
+	count := 0
+	service.(*blockService).blocksScheduledForLaterExecution.Range(func(_, _ any) bool {
+		count++
+		return true
+	})
+	return count
+}
+
+// A late block whose proposer is past the head state's registry can only be checked against its
+// parent's state. While the parent is unknown it must be ignored, and not queued unverified.
+func TestBlockServiceIgnoresUnknownProposerWhileParentIsUnknown(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, _, post := tests.GetBellatrixRandom()
+
+	blockService, syncedData, ethClock, _ := setupBlockService(t, ctrl)
+	require.NoError(t, syncedData.OnHeadState(post))
+	block := blocks[0]
+	block.Block.Slot = post.Slot() + 1
+	block.Block.ProposerIndex = uint64(post.ValidatorLength())
+	ethClock.EXPECT().GetCurrentSlot().Return(post.Slot() + 2).AnyTimes()
+
+	err := blockService.ProcessMessage(context.Background(), nil, block)
+
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Zero(t, scheduledBlockCount(t, blockService))
+}
+
+func TestBlockServiceRejectsUnknownProposerWhenParentIsKnown(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, _, post := tests.GetBellatrixRandom()
+
+	blockService, syncedData, ethClock, forkchoiceMock := setupBlockService(t, ctrl)
+	require.NoError(t, syncedData.OnHeadState(post))
+	block := blocks[0]
+	block.Block.Slot = post.Slot() + 1
+	block.Block.ProposerIndex = uint64(post.ValidatorLength())
+	forkchoiceMock.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{block.Block.ParentRoot: {Slot: post.Slot()}}
+	ethClock.EXPECT().GetCurrentSlot().Return(post.Slot() + 2).AnyTimes()
+
+	err := blockService.ProcessMessage(context.Background(), nil, block)
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
+}
+
+// Only the unknown proposer is excused while the parent is unknown: a malformed signature is
+// still rejected.
+func TestBlockServiceRejectsMalformedSignatureWhileParentIsUnknown(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, _, post := tests.GetBellatrixRandom()
+
+	blockService, syncedData, ethClock, _ := setupBlockService(t, ctrl)
+	require.NoError(t, syncedData.OnHeadState(post))
+	block := blocks[0]
+	block.Block.Slot = post.Slot() + 1
+	for i := range block.Signature {
+		block.Signature[i] = 0xff
+	}
+	ethClock.EXPECT().GetCurrentSlot().Return(post.Slot() + 2).AnyTimes()
+
+	err := blockService.ProcessMessage(context.Background(), nil, block)
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
 }
 
 func TestBlockServiceLowerThanFinalizedCheckpoint(t *testing.T) {
@@ -264,6 +362,45 @@ func TestBlockServiceIgnoresLocalExecutionFailure(t *testing.T) {
 		require.Equal(t, uint64(sentinelSlot), *slot, "the retry rewrote the block")
 		return nil
 	}))
+}
+
+func TestBlockServiceIgnoresLocalOnBlockFailureOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		err    error
+		ignore bool
+	}{
+		{name: "local failure", err: forkchoice.ErrMissingSegment, ignore: true},
+		{name: "invalid block", err: fmt.Errorf("%w: invalid block", forkchoice.ErrBlockInvalid)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			blocks, pre, post := tests.GetBellatrixRandom()
+			parentState, err := pre.Copy()
+			require.NoError(t, err)
+			require.NoError(t, transition.TransitionState(parentState, blocks[0], nil, false))
+
+			svc, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
+			require.NoError(t, syncedData.OnHeadState(post))
+			ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
+			ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+			fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
+			fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
+			fcu.StateAtBlockRootVal[blocks[1].Block.ParentRoot] = parentState
+			finalizedSlot := post.FinalizedCheckpoint().Epoch * post.BeaconConfig().SlotsPerEpoch
+			fcu.Ancestors[finalizedSlot] = forkchoice.ForkChoiceNode{Root: post.FinalizedCheckpoint().Root}
+			fcu.OnBlockErr = tc.err
+
+			err = svc.ProcessMessage(context.Background(), nil, blocks[1])
+			require.ErrorIs(t, err, tc.err)
+			if tc.ignore {
+				require.ErrorIs(t, err, ErrIgnore)
+			} else {
+				require.NotErrorIs(t, err, ErrIgnore)
+				require.NotContains(t, err.Error(), "ignore")
+			}
+		})
+	}
 }
 
 const sentinelSlot = 0xbadbad
@@ -1276,6 +1413,58 @@ func TestBlockServiceGossipAcceptsEmptyParentExecutionHead(t *testing.T) {
 	require.NoError(t, service.ValidateGossip(t.Context(), child))
 }
 
+func TestBlockServiceProcessMessageIgnoresForkSchemaMismatchBeforeStorage(t *testing.T) {
+	service, child, fcu, _, _ := newGloasGossipValidationFixture(t, nil)
+	impl := service.(*blockService)
+	cfg := *impl.beaconCfg
+	cfg.GloasForkEpoch = child.Block.Slot/cfg.SlotsPerEpoch + 1
+	impl.beaconCfg = &cfg
+	require.False(t, cfg.ForkSchemaMatchesSlot(child.Block.Slot, child.Version()))
+
+	assertBlockServiceProcessMessageIgnoredBeforeStorage(t, service, child, fcu, "fork schema mismatch reached fork choice")
+}
+
+func TestBlockServiceProcessMessageIgnoresExactForkVersionMismatchBeforeStorage(t *testing.T) {
+	service, child, fcu, _, _ := newGloasGossipValidationFixture(t, nil)
+	impl := service.(*blockService)
+	cfg := *impl.beaconCfg
+	cfg.GloasForkEpoch = child.Block.Slot/cfg.SlotsPerEpoch + 1
+	impl.beaconCfg = &cfg
+	child.Block.Body.Version = clparams.ElectraVersion
+	require.Equal(t, clparams.FuluVersion, cfg.GetCurrentStateVersion(child.Block.Slot/cfg.SlotsPerEpoch))
+	require.True(t, cfg.ForkSchemaMatchesSlot(child.Block.Slot, child.Version()))
+
+	assertBlockServiceProcessMessageIgnoredBeforeStorage(t, service, child, fcu, "fork version mismatch reached fork choice")
+}
+
+func assertBlockServiceProcessMessageIgnoredBeforeStorage(
+	t *testing.T,
+	service BlockService,
+	child *cltypes.SignedBeaconBlock,
+	fcu *mock_services.ForkChoiceStorageMock,
+	forkChoiceErr string,
+) {
+	t.Helper()
+	impl := service.(*blockService)
+	forkChoice := &onBlockErrorStore{
+		ForkChoiceStorage: fcu,
+		err:               errors.New(forkChoiceErr),
+	}
+	impl.forkchoiceStore = forkChoice
+	blockRoot, err := child.Block.HashSSZ()
+	require.NoError(t, err)
+
+	err = service.ProcessMessage(t.Context(), nil, child)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Zero(t, forkChoice.calls.Load())
+	require.NoError(t, impl.db.View(t.Context(), func(tx kv.Tx) error {
+		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
+		require.NoError(t, err)
+		require.Nil(t, slot)
+		return nil
+	}))
+}
+
 func TestBlockServiceGossipAcceptsChildOfHeaderOnlyCheckpointAnchor(t *testing.T) {
 	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, func(parentExecutionHead, _ common.Hash) common.Hash {
 		return parentExecutionHead
@@ -1614,9 +1803,10 @@ func TestPublishedBlockJobRequestCancellationDoesNotCancelIntegration(t *testing
 			return nil
 		}
 	})
+	job := serviceJob(t, service, root)
 	processDone := make(chan struct{})
 	go func() {
-		service.processScheduledBlock(context.Background(), root, serviceJob(t, service, root), time.Now())
+		service.processScheduledBlock(context.Background(), root, job, time.Now())
 		close(processDone)
 	}()
 	<-started

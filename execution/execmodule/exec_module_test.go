@@ -2735,6 +2735,44 @@ func TestInsertBlocksRejectsInvalidBlockAccessList(t *testing.T) {
 	require.ErrorIs(t, err, types.ErrInvalidBlockAccessList)
 }
 
+func TestInsertBlocksBoundsBlockAccessIndexByTransactionCount(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(0, m.Address, uint256.NewInt(0), 50_000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID),
+			m.Key,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	block := chainPack.Blocks[0]
+	require.Len(t, block.Transactions(), 1)
+
+	withNonceChangeAt := func(index uint32) *types.Block {
+		header := block.Header()
+		bal := types.BlockAccessList{{
+			Address:      common.Address{1},
+			NonceChanges: []*types.NonceChange{{Index: index}},
+		}}
+		encoded, err := types.EncodeBlockAccessListBytes(bal)
+		require.NoError(t, err)
+		balHash := crypto.Keccak256Hash(encoded)
+		header.BlockAccessListHash = &balHash
+		return types.NewBlockFromNetwork(header, block.Body(), types.NewBlockAccessListSidecar(bal))
+	}
+	postExecutionIndex := uint32(len(block.Transactions())) + 1
+
+	_, err = m.InsertBlocks(t.Context(), []*types.Block{withNonceChangeAt(postExecutionIndex + 1)})
+	require.ErrorIs(t, err, types.ErrInvalidBlockAccessList)
+	require.ErrorContains(t, err, "block access index")
+
+	_, err = m.InsertBlocks(t.Context(), []*types.Block{withNonceChangeAt(postExecutionIndex)})
+	require.NoError(t, err)
+}
+
 func TestInsertBlocksRejectsBlockAccessListHashMismatch(t *testing.T) {
 	t.Parallel()
 	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))

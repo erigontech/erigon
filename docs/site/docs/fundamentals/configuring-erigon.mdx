@@ -114,8 +114,8 @@ These flags control database performance and memory usage. See [Database](/funda
 * `--erigondb.domain.steps-in-frozen-file value`: Overrides the `steps_in_frozen_file` setting from `erigondb.toml` for the domain merge cap only (history and inverted-index merges are unaffected). Pass a positive integer to set an explicit cap, or `Inf` to leave the domain merge unbounded.
   * Default: unset (uses the value from `erigondb.toml`)
   * Use with care — an incorrect value may affect database structure.
-* `--commitment.plainValues` *(New in v3.6)*: On the first start of a fresh datadir, write commitment values in plain form (no shortened key references). This is a one-time, per-datadir choice — it is ignored once `erigondb.toml` exists.
-  * Default: `false`
+* `--commitment.plainValues` *(New in v3.6)*: Chooses the commitment branch encoding recorded in `snapshots/erigondb.toml` at the moment Erigon creates that file. `true` writes commitment values in plain form (keys inline); `false` writes shortened key references. This is a one-time, per-datadir choice — it is ignored once `erigondb.toml` exists, and an `erigondb.toml` delivered by the downloader wins over it. See [Commitment Snapshot Format](/fundamentals/snapshots-management#commitment-snapshot-format).
+  * Default: plain. Leaving the flag out selects plain, which is v3.6's compiled default; passing `--commitment.plainValues=false` explicitly selects the older *referenced* encoding. Before v3.6 the compiled default was referenced.
 
 ### Pruning and Snapshots
 
@@ -301,6 +301,9 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `50000000`
 * `--rpc.batch.limit value`: Sets the maximum number of requests in a batch.
   * Default: `100`
+* `--rpc.subscription.limit value`: Maximum number of concurrent subscriptions per WebSocket or IPC connection.
+  * Default: `1024`
+  * Set to `0` for unlimited subscriptions.
 * `--rpc.blockrange.limit value`: Sets the maximum block range for `eth_getLogs` and similar range queries.
   * Default: `1000`
   * Applies to: `eth_getLogs`, `eth_getFilterLogs`, `erigon_getLogs`
@@ -555,6 +558,9 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
   * Default: `false`
 * `--caplin.max-peer-count value`: The maximum number of peers to connect to.
   * Default: `128`
+* `--caplin.ip-block-limits.disable`: Restores the released connection limits. Without it, Caplin caps connections per IPv4 /24 and IPv6 /48 (an eighth of `--caplin.max-peer-count`, at least 16; for the /48 at most 64, go-libp2p's cap that it replaces) and per IPv4 /16 and IPv6 /32 (half of it, at least the /24 cap), on top of go-libp2p's caps of 8 per IPv4 address or IPv6 /56. Static peers (`--sentinel.staticpeers`) given by IP address keep only the per-address cap. With `--caplin.local-discovery`, private, link-local and IPv6 ULA networks are exempt from all of these caps; this flag also removes that exemption. Networks in `--caplin.ip-block-limits.trusted-cidrs` stay exempt.
+  * Default: `false`
+* `--caplin.ip-block-limits.trusted-cidrs value`: Comma-separated networks in CIDR notation, at most an IPv4 /8 or an IPv6 /16 each and without host bits, that are exempt from every per-address and per-block cap. All connections from one listed network share a limit of 8 times `--caplin.max-peer-count` (at least 32). Loopback stays unlimited even when it is listed. Useful for a trusted cluster on public addresses.
 * `--caplin.enable-upnp`: Enables NAT porting for Caplin.
   * Default: `false`
 * `--caplin.local-discovery`: Also attempts to find peers over private IPs. May cause issues with some hosts (for example, Hetzner).

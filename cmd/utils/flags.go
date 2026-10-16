@@ -43,6 +43,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/devgenesis"
+	clp2p "github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils/flags"
@@ -433,6 +434,11 @@ var (
 		Name:  "rpc.batch.limit",
 		Usage: "Maximum number of requests in a batch",
 		Value: 100,
+	}
+	RpcSubscriptionLimit = cli.IntFlag{
+		Name:  "rpc.subscription.limit",
+		Usage: "Maximum number of concurrent subscriptions per connection (WebSocket, IPC). 0 = unlimited",
+		Value: rpccfg.DefaultSubscriptionLimit,
 	}
 	RpcReturnDataLimit = cli.IntFlag{
 		Name:  "rpc.returndata.limit",
@@ -921,6 +927,15 @@ var (
 		Name:  "caplin.quic.disable",
 		Usage: "Disable the QUIC transport for Caplin libp2p, falling back to TCP only. Useful when the QUIC UDP port cannot be exposed (e.g. some Docker/Kubernetes setups)",
 		Value: false,
+	}
+	CaplinIPBlockLimitsDisableFlag = cli.BoolFlag{
+		Name:  "caplin.ip-block-limits.disable",
+		Usage: "Restore the released connection limits: drop Caplin's caps per IPv4 /24 and /16 and per IPv6 /48 and /32, and the exemption of private networks when local discovery is enabled. Networks in --caplin.ip-block-limits.trusted-cidrs stay exempt",
+		Value: false,
+	}
+	CaplinIPBlockLimitsTrustedCIDRsFlag = cli.StringSliceFlag{
+		Name:  "caplin.ip-block-limits.trusted-cidrs",
+		Usage: "Comma-separated networks in CIDR notation (at most an IPv4 /8 or an IPv6 /16 each, without host bits) exempt from every per-address and per-block connection cap. All connections of one network share a limit of 8 times --caplin.max-peer-count (at least 32); a loopback network stays unlimited. For trusted clusters on public addresses",
 	}
 	CaplinEnableUPNPlag = cli.BoolFlag{
 		Name:  "caplin.enable-upnp",
@@ -1859,6 +1874,12 @@ func setBeaconAPI(ctx *cli.Command, cfg *ethconfig.Config) error {
 
 func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 	cfg.CaplinConfig.EnableEngineAPI = ctx.Bool(CaplinUseEngineApiFlag.Name)
+	cfg.CaplinConfig.DisableIPBlockLimits = ctx.Bool(CaplinIPBlockLimitsDisableFlag.Name)
+	trustedCIDRs := ctx.StringSlice(CaplinIPBlockLimitsTrustedCIDRsFlag.Name)
+	if _, err := clp2p.ParseTrustedCIDRs(trustedCIDRs); err != nil {
+		Fatalf("Option %s: %v", CaplinIPBlockLimitsTrustedCIDRsFlag.Name, err)
+	}
+	cfg.CaplinConfig.TrustedCIDRs = trustedCIDRs
 
 	// Caplin's block's backfilling is enabled if any of the following flags are set
 	if !cfg.CaplinConfig.EnableEngineAPI {

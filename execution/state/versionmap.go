@@ -763,6 +763,14 @@ func (vm *VersionMap) readCodeLive(addr accounts.Address, txIdx int) (accounts.C
 	return readFloorLive(vm, addr, CodePath, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[accounts.Code]] { return e.Code })
 }
 
+func (vm *VersionMap) readNonceLive(addr accounts.Address, txIdx int) (uint64, bool, bool) {
+	return readFloorLive(vm, addr, NoncePath, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint64]] { return e.Nonce })
+}
+
+func (vm *VersionMap) readCodeHashLive(addr accounts.Address, txIdx int) (accounts.CodeHash, bool, bool) {
+	return readFloorLive(vm, addr, CodeHashPath, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[accounts.CodeHash]] { return e.CodeHash })
+}
+
 // selfDestructWipesLocked applies the per-path floor to the destruct scan and
 // reports the TxIndex the wiping destruct sits at.
 func selfDestructWipesLocked(e *AddressEntry, path AccountPath, floor, txIdx int) (int, bool) {
@@ -1529,6 +1537,15 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 								invReason = "addr-inc-created"
 							}
 						}
+					}
+				}
+				// With no cell for the path, a destruct in range wiped the
+				// committed value; a revival does not restore it.
+				if valid == VersionValid && !recursive && !absent && path != AddressPath && path != SelfDestructPath &&
+					path != IncarnationPath && path != CreateContractPath {
+					if _, ok := vm.FindDoneSelfDestructInRange(addr, version.TxIndex+1, txIndex, true); ok {
+						valid = VersionInvalid
+						invReason = "sd-stale"
 					}
 				}
 			} else if valid == VersionInvalid {

@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -404,6 +405,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	var blockAccessList *types.BlockAccessListSidecar
+	var blockAccessListErr error
 	if version < clparams.GloasVersion && req.SlotNumber != nil {
 		return nil, &rpc.InvalidParamsError{Message: "unexpected slotNumber before engine_newPayloadV5"}
 	}
@@ -419,17 +421,22 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}
 		balBytes := *req.BlockAccessList
-		blockAccessList, err = types.DecodeBlockAccessListSidecarOwned(balBytes)
-		if err != nil {
-			e.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(balBytes))
+		blockAccessList, blockAccessListErr = types.DecodeBlockAccessListSidecarForBlock(balBytes, header.GasLimit, len(transactions))
+		if blockAccessListErr != nil && !errors.Is(blockAccessListErr, types.ErrInvalidBlockAccessList) {
+			e.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", blockAccessListErr, "raw", hex.EncodeToString(balBytes))
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
-				ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("%v: decode failed: %v", types.ErrInvalidBlockAccessList, err)),
+				ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("%v: decode failed: %v", types.ErrInvalidBlockAccessList, blockAccessListErr)),
 			}, nil
 		}
-		hash, err := blockAccessList.Hash()
-		if err != nil {
-			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("cannot hash blockAccessList: %v", err)}
+		var hash common.Hash
+		if blockAccessListErr != nil {
+			hash = crypto.Keccak256Hash(balBytes)
+		} else {
+			hash, err = blockAccessList.Hash()
+			if err != nil {
+				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("cannot hash blockAccessList: %v", err)}
+			}
 		}
 		header.BlockAccessListHash = &hash
 		if req.SlotNumber != nil {
@@ -466,8 +473,14 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if invalidTransactionStatus != nil {
 		return invalidTransactionStatus, nil
 	}
+	if blockAccessListErr != nil {
+		return &engine_types.PayloadStatus{
+			Status:          engine_types.InvalidStatus,
+			ValidationError: engine_types.NewStringifiedError(blockAccessListErr),
+		}, nil
+	}
 	if blockAccessList != nil {
-		if err = blockAccessList.ValidateForBlock(header.GasLimit); err != nil {
+		if err = blockAccessList.ValidateForBlock(header.GasLimit, len(transactions)); err != nil {
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedError(err),
@@ -1199,15 +1212,28 @@ func (e *EngineServer) HandleForkChoice(
 	}
 
 	// Call forkchoice here
-	status, validationErr, latestValidHash, err := e.chainRW.UpdateForkChoice(ctx, forkChoice.HeadHash, forkChoice.SafeBlockHash, forkChoice.FinalizedBlockHash)
+	result, err := e.chainRW.UpdateForkChoiceResult(ctx, forkChoice.HeadHash, forkChoice.SafeBlockHash, forkChoice.FinalizedBlockHash)
 	if err != nil {
 		return nil, err
 	}
+	status := result.Status
 	if status == execmodule.ExecutionStatusInvalidForkchoice {
 		return nil, &engine_helpers.InvalidForkchoiceStateErr
 	}
 	if status == execmodule.ExecutionStatusReorgTooDeep {
 		return nil, &engine_helpers.ReorgTooDeepErr
+	}
+	if status == execmodule.ExecutionStatusMissingSegment && result.MissingHash != (common.Hash{}) {
+		if bad, lastValidHash, validationErr := e.blockDownloader.IsBadHeader(result.MissingHash); bad {
+			invalid := &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &lastValidHash}
+			if validationErr != "" {
+				invalid.ValidationError = engine_types.NewStringifiedErrorFromString(validationErr)
+			}
+			return invalid, nil
+		}
+		if !e.test && e.blockDownloader.StartDownloading(result.MissingHash, nil, engine_block_downloader.FcuTrigger) {
+			e.logger.Warn(fmt.Sprintf("[%s] Fork choice: need to recover missing segment", logPrefix), "headerHash", headerHash, "missingHash", result.MissingHash)
+		}
 	}
 	// engine_forkchoiceUpdated restricts payload statuses to VALID, INVALID, and SYNCING — never ACCEPTED.
 	if status == execmodule.ExecutionStatusBusy ||
@@ -1220,11 +1246,11 @@ func (e *EngineServer) HandleForkChoice(
 	}
 	payloadStatus := &engine_types.PayloadStatus{
 		Status:          convertGrpcStatusToEngineStatus(status),
-		LatestValidHash: &latestValidHash,
+		LatestValidHash: &result.LatestValidHash,
 	}
 
-	if validationErr != nil {
-		payloadStatus.ValidationError = engine_types.NewStringifiedErrorFromString(*validationErr)
+	if result.ValidationError != "" {
+		payloadStatus.ValidationError = engine_types.NewStringifiedErrorFromString(result.ValidationError)
 	}
 	return payloadStatus, nil
 }
@@ -1350,6 +1376,34 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 	default:
 		return nil, nil
 	}
+}
+
+func (e *EngineServer) getInclusionList(ctx context.Context) ([]hexutil.Bytes, error) {
+	if e.caplin {
+		e.logger.Crit(caplinEnabledLog)
+		return nil, errCaplinEnabled
+	}
+
+	txns, err := e.executionService.InclusionList(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	encodedTxns, err := types.MarshalTransactionsBinary(txns)
+	if err != nil {
+		return nil, err
+	}
+	list := make([]hexutil.Bytes, 0, len(encodedTxns))
+	total := 0
+	for i, tx := range encodedTxns {
+		if txns[i].Type() == types.BlobTxType || total+len(tx) > int(params.MaxTransactionsBytesPerInclusionListEIP7805) {
+			continue
+		}
+		list = append(list, tx)
+		total += len(tx)
+	}
+
+	return list, nil
 }
 
 func waitForResponse(ctx context.Context, maxWait time.Duration, waitCondnF func() (bool, error)) (bool, error) {
