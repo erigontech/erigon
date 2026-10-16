@@ -836,59 +836,8 @@ func TestShouldMarkExhaustedAtBlock(t *testing.T) {
 	}
 }
 
-// TestApplyLoopFlushAsComplete covers the helper that decides the `complete`
-// flag the apply loop passes to versionMap.FlushVersionedWrites. The `valid`
-// term in this helper is the regression guard for the gnosis-block-18,483,405
-// phantom-write bug: a current tx with a VersionInvalid verdict must NOT
-// flush its writes as Done, otherwise downstream OCC readers see them as
-// committed.
-func TestApplyLoopFlushAsComplete(t *testing.T) {
-	tests := []struct {
-		name       string
-		valid      bool
-		cntInvalid int
-		want       bool
-	}{
-		{
-			name:       "valid current tx, no prior invalids → Done",
-			valid:      true,
-			cntInvalid: 0,
-			want:       true,
-		},
-		{
-			// Regression guard for the gnosis-18,483,405 phantom-write bug:
-			// before this fix the apply loop only checked cntInvalid (which
-			// counts *prior* invalids), so an invalid current tx fell through
-			// as `complete=true → Done` and produced phantom committed entries.
-			name:       "INVALID current tx → must NOT be Done (phantom-write guard)",
-			valid:      false,
-			cntInvalid: 0,
-			want:       false,
-		},
-		{
-			name:       "valid current but prior invalid in iteration → Estimate",
-			valid:      true,
-			cntInvalid: 1,
-			want:       false,
-		},
-		{
-			name:       "INVALID current and prior invalid → Estimate",
-			valid:      false,
-			cntInvalid: 1,
-			want:       false,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, applyLoopFlushAsComplete(tc.valid, tc.cntInvalid),
-				"applyLoopFlushAsComplete(valid=%v, cntInvalid=%d)", tc.valid, tc.cntInvalid)
-		})
-	}
-}
-
 // TestApplyLoopFlush_InvalidTxWritesAreEstimate reproduces the bug-scenario
-// at the VersionMap layer using the production flush-decision helper.
+// at the VersionMap layer with the apply loop's flush flag for an invalid verdict.
 //
 // Repro recipe from gnosis block 18,483,405:
 //
@@ -905,19 +854,17 @@ func TestApplyLoopFlushAsComplete(t *testing.T) {
 //  5. Downstream gas-mismatch ~80K blocks later from the phantom-derived state
 //     cascading through the tx queue.
 //
-// The fix at exec3_parallel.go:applyLoopFlushAsComplete folds `valid` into
-// the gating so an invalidated tx's writes are flushed as Estimate. This test
-// asserts the downstream effect: a tx that later reads the slot must see
-// MVReadResultDependency (the validator treats this as VersionInvalid and
-// forces re-execution), not MVReadResultDone.
+// The apply loop now flushes with complete=valid, so an invalidated tx's
+// writes are flushed as Estimate. This test asserts the downstream effect: a
+// tx that later reads the slot must see MVReadResultDependency (the validator
+// treats this as VersionInvalid and forces re-execution), not MVReadResultDone.
 func TestApplyLoopFlush_InvalidTxWritesAreEstimate(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0x18b2b7673c6d661923e9460d592699617828b293"))
 	slot := accounts.InternKey(common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000008"))
 
 	vm := state.NewVersionMap(nil)
 
-	// Simulate the apply loop processing tx=3 with validity=VersionInvalid in
-	// the first iteration of toValidate (cntInvalid starts at 0).
+	// Simulate the apply loop processing tx=3 with validity=VersionInvalid.
 	const invalidTxIdx = 3
 	const invalidTxInc = 0
 	phantomVal := *uint256.NewInt(0xaabb)
@@ -926,15 +873,8 @@ func TestApplyLoopFlush_InvalidTxWritesAreEstimate(t *testing.T) {
 		stor(addr, slot, state.Version{TxIndex: invalidTxIdx, Incarnation: invalidTxInc}, phantomVal).
 		build()
 
-	// Drive the production flush-decision helper end-to-end.
-	valid := false  // validity == VersionInvalid
-	cntInvalid := 0 // no prior invalids in this iteration
-	complete := applyLoopFlushAsComplete(valid, cntInvalid)
-	require.False(t, complete,
-		"invalidated tx must flush as Estimate (not Done) — see "+
-			"TestApplyLoopFlushAsComplete for the unit-level guard")
-
-	vm.FlushVersionedWrites(invalidTxWrites, complete)
+	valid := false // validity == VersionInvalid
+	vm.FlushVersionedWrites(invalidTxWrites, valid)
 
 	// Downstream tx=16 reads the slot — this is the read that committed
 	// phantom state in the bug.

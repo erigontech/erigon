@@ -656,6 +656,9 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 
 type propertyCheck func(*parallelExecutor) error
 
+// ParallelValidationsTotal exposes the parallel executor's validation count to stagedsync_test.
+func ParallelValidationsTotal() int64 { return validationsTotal.Load() }
+
 func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.Task, profile bool, check propertyCheck, metadata bool) (result *blockResult, err error) {
 	if len(tasks) == 0 {
 		return nil, nil
