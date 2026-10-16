@@ -316,11 +316,11 @@ func BenchmarkCreatedContractSetCode(b *testing.B) {
 		addrs[i] = accounts.InternAddress([20]byte{0xc0, byte(i)})
 	}
 	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	b.ReportAllocs()
 	for b.Loop() {
 		ibs.Reset()
 		ibs.ResetVersionedIO()
+		ibs.SetNoMaterialize(true)
 		ibs.SetTxContext(1, 0)
 		for _, a := range addrs {
 			if err := ibs.CreateAccount(a, true); err != nil {
