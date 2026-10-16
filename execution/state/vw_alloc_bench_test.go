@@ -315,11 +315,11 @@ func BenchmarkCreatedContractSetCode(b *testing.B) {
 	for i := range addrs {
 		addrs[i] = accounts.InternAddress([20]byte{0xc0, byte(i)})
 	}
-	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
+	reader := NewNoopReader()
 	b.ReportAllocs()
 	for b.Loop() {
-		ibs.Reset()
-		ibs.ResetVersionedIO()
+		ibs := NewPooled(reader)
+		ibs.SetVersionMap(NewVersionMap(nil))
 		ibs.SetNoMaterialize(true)
 		ibs.SetTxContext(1, 0)
 		for _, a := range addrs {
@@ -333,5 +333,6 @@ func BenchmarkCreatedContractSetCode(b *testing.B) {
 				b.Fatal(err)
 			}
 		}
+		ReleasePooled(ibs)
 	}
 }
