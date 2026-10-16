@@ -171,7 +171,7 @@ func TestVersionedRead_B_WarmStorageReadReturnsReadSetTuple(t *testing.T) {
 	assert.EqualValues(t, 99, v.Uint64())
 	assert.Equal(t, MapRead, source)
 	assert.Equal(t, version, gotVersion)
-	assert.False(t, clean, "a read-set hit is never clean: it carries no dirty value to keep on revert")
+	assert.True(t, clean, "a read-set hit is clean: this tx has no write of the slot, so a revert deletes the write")
 }
 
 // A dirty address serves the recorded read of a field it has not written, as a

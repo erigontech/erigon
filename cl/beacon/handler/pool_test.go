@@ -1467,6 +1467,7 @@ func TestPoolAttestationsDoNotPublishIgnored(t *testing.T) {
 				handler.ServeHTTP(recorder, req)
 				require.Equal(t, outcome.status, recorder.Code, recorder.Body.String())
 				if outcome.status == http.StatusBadRequest {
+					require.Equal(t, "application/json", recorder.Header().Get("Content-Type"))
 					var response poolingError
 					require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
 					require.Equal(t, []poolingFailure{{Index: 0, Message: outcome.err.Error()}}, response.Failures)
@@ -1474,4 +1475,11 @@ func TestPoolAttestationsDoNotPublishIgnored(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestWritePoolingFailuresDeclaresJSON(t *testing.T) {
+	rec := httptest.NewRecorder()
+	(&ApiHandler{}).writePoolingFailures(rec, []poolingFailure{{Index: 0, Message: "invalid"}})
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
 }

@@ -286,6 +286,13 @@ func (t *TransactionsSSZ) UnderlyngReference() [][]byte {
 	return t.underlying
 }
 
+func (t *TransactionsSSZ) Len() int {
+	if t == nil {
+		return 0
+	}
+	return len(t.underlying)
+}
+
 func (t *TransactionsSSZ) ForEach(fn func(tx []byte, idx int, total int) bool) {
 	if t == nil {
 		return

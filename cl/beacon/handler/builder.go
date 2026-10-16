@@ -303,7 +303,7 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 		if blockRoot == (common.Hash{}) {
 			continue
 		}
-		blk, err := a.blockReader.ReadBlockByRoot(ctx, tx, blockRoot)
+		blk, err := a.readBlockByRoot(ctx, tx, blockRoot)
 		if err != nil {
 			return nil, err
 		}

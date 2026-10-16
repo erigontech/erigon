@@ -41,6 +41,7 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 	// Advance the forkchoice store's internal clock so that epoch-boundary
 	// checkpoint promotions (unrealized → realized) happen on time.
 	cfg.forkChoice.OnTick(cfg.ethClock.GenesisTime() + cfg.ethClock.GetCurrentSlot()*cfg.beaconCfg.SecondsPerSlot)
+	_ = cfg.forkChoice.LoadJustifiedCheckpointState()
 
 	if err = cfg.syncedData.ViewHeadState(func(prevHeadState *state.CachingBeaconState) error {
 		// Get the current head of the fork choice
