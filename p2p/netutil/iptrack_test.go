@@ -221,7 +221,7 @@ func TestIPTrackerCounts(t *testing.T) {
 		rng   = rand.New(rand.NewPCG(1, 2))
 	)
 	it.clock = &clock
-	for i := 0; i < 5000; i++ {
+	for i := range 5000 {
 		host := netip.AddrFrom4([4]byte{1, byte(rng.IntN(8)), byte(rng.IntN(4)), byte(rng.IntN(4))})
 		endpoint := netip.AddrPortFrom(netip.AddrFrom4([4]byte{2, 0, 0, byte(rng.IntN(4))}), 9000)
 		it.AddStatement(host, endpoint)

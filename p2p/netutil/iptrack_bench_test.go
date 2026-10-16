@@ -30,7 +30,7 @@ func BenchmarkIPTrackerPredict(b *testing.B) {
 		it    = NewIPTracker(5*time.Minute, 10*time.Minute, 10)
 	)
 	it.clock = &clock
-	for i := 0; i < 100000; i++ {
+	for i := range 100000 {
 		host := netip.AddrFrom16([16]byte{0x20, 0x01, 0x0d, 0xb8, byte(i >> 16), byte(i >> 8), byte(i), 1})
 		it.AddStatement(host, netip.MustParseAddrPort("[2001:db9::1]:30303"))
 	}

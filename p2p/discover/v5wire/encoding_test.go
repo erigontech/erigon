@@ -138,7 +138,7 @@ func TestHandshakeGC(t *testing.T) {
 		readded  = &Whoareyou{}
 		recent   = &Whoareyou{}
 	)
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		sc.storeSentHandshake(enode.ID{byte(i)}, addr, &Whoareyou{})
 	}
 	sc.storeSentHandshake(enode.ID{0xff}, addr, &Whoareyou{})

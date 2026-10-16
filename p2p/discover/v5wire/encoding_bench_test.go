@@ -89,7 +89,7 @@ func BenchmarkHandshakeGC(b *testing.B) {
 		sc    = NewSessionCache(10, &clock)
 		addr  = netip.MustParseAddrPort("127.0.0.1:30303")
 	)
-	for i := 0; i < 10000; i++ {
+	for i := range 10000 {
 		var id enode.ID
 		binary.BigEndian.PutUint64(id[:], uint64(i))
 		sc.storeSentHandshake(id, addr, &Whoareyou{})
