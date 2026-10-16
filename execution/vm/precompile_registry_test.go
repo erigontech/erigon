@@ -38,7 +38,7 @@ func (s stubPrecompile) Name() string                     { return s.name }
 func registerPrecompiles(t *testing.T, chainID uint64, f PrecompilesFunc) {
 	t.Helper()
 	RegisterPrecompiles(uint256.NewInt(chainID), f)
-	t.Cleanup(func() { UnregisterPrecompiles(uint256.NewInt(chainID)) })
+	t.Cleanup(func() { unregisterPrecompiles(uint256.NewInt(chainID)) })
 }
 
 func rulesForChain(chainID, l2Version uint64) *chain.Rules {
@@ -113,7 +113,7 @@ func TestRegisterPrecompilesPanics(t *testing.T) {
 	for _, id := range []*uint256.Int{nil, new(uint256.Int)} {
 		require.Panics(t, func() { RegisterPrecompiles(id, func(uint64) PrecompiledContracts { return nil }) },
 			"a nil or zero chain ID must be refused on register")
-		require.Panics(t, func() { UnregisterPrecompiles(id) },
+		require.Panics(t, func() { unregisterPrecompiles(id) },
 			"and refused on unregister too, or the same argument has two contracts")
 	}
 }
@@ -166,7 +166,7 @@ func TestRegisterSweepsStaleCache(t *testing.T) {
 	_, ok := Precompiles(rules)[oldAddr]
 	require.True(t, ok, "the first provider's overlay must resolve and cache")
 
-	UnregisterPrecompiles(uint256.NewInt(chainID))
+	unregisterPrecompiles(uint256.NewInt(chainID))
 	registerPrecompiles(t, chainID, func(uint64) PrecompiledContracts {
 		return PrecompiledContracts{newAddr: stubPrecompile{"NEW"}}
 	})
@@ -227,7 +227,7 @@ func BenchmarkActivePrecompilesParallel(b *testing.B) {
 
 	chainID := uint256.NewInt(900904)
 	RegisterPrecompiles(chainID, func(uint64) PrecompiledContracts { return PrecompiledContracts{} })
-	defer UnregisterPrecompiles(chainID)
+	defer unregisterPrecompiles(chainID)
 
 	b.Run("provider_chain", func(b *testing.B) {
 		resolve(b, &chain.Rules{ChainID: chainID, IsOsaka: true})

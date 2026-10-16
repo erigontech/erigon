@@ -75,10 +75,10 @@ func RegisterPrecompiles(chainID *uint256.Int, f PrecompilesFunc) {
 	dropCached(*chainID)
 }
 
-// UnregisterPrecompiles removes chainID's provider and its cached merged sets.
-func UnregisterPrecompiles(chainID *uint256.Int) {
+// unregisterPrecompiles removes chainID's provider and its cached merged sets.
+func unregisterPrecompiles(chainID *uint256.Int) {
 	if chainID == nil || chainID.IsZero() {
-		panic("vm: UnregisterPrecompiles: chain ID 0")
+		panic("vm: unregisterPrecompiles: chain ID 0")
 	}
 	registryMu.Lock()
 	defer registryMu.Unlock()
