@@ -57,6 +57,9 @@ func (a *ApiHandler) getDutiesProposerV2(w http.ResponseWriter, r *http.Request)
 }
 
 func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*beaconhttp.BeaconResponse, error) {
+	if err := a.refuseLaggingHead(); err != nil {
+		return nil, err
+	}
 	epoch, err := beaconhttp.EpochFromRequest(r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)

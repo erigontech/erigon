@@ -309,5 +309,3 @@ tool (
 	google.golang.org/protobuf/cmd/protoc-gen-go
 	mvdan.cc/gofumpt
 )
-
-replace github.com/maypok86/otter/v2 => github.com/AskAlexSharov/otter/v2 v2.3.1-0.20261016044328-1afbd8b26923
