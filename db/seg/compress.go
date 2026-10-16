@@ -287,7 +287,6 @@ func (c *Compressor) advanceScan(l int) error {
 	return nil
 }
 
-// sendSuperstring must watch ctx: the pattern workers exit on cancel, so nothing would drain the channel.
 func (c *Compressor) sendSuperstring() error {
 	select {
 	case c.superstrings <- c.superstring:
