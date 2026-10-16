@@ -172,6 +172,7 @@ func (f *ForkChoiceStore) verifyAttestationWithState(
 func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage) {
 	f.latestMessages.set(int(index), message)
 	f.gloasWeightTree.markDirty(index)
+	f.voteTally.markDirty(index)
 }
 
 func (f *ForkChoiceStore) trackGloasWeights() bool {
@@ -216,6 +217,7 @@ func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
 	subIndex := int(validatorIndex) % 8
 	f.equivocatingIndicies[index] |= 1 << uint(subIndex)
 	f.gloasWeightTree.markDirty(validatorIndex)
+	f.voteTally.markDirty(validatorIndex)
 }
 
 func (f *ForkChoiceStore) updateLatestMessages(
