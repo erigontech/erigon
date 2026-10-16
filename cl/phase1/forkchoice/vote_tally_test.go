@@ -90,3 +90,23 @@ func TestVoteTallyMatchesFullRecount(t *testing.T) {
 	}
 	require.Greater(t, compared, 500)
 }
+
+func TestVoteTallyDropsRootsLeftWithoutVotes(t *testing.T) {
+	const validators = 4
+	cs := &checkpointState{
+		balances:         make([]uint64, validators),
+		actives:          make([]byte, 1),
+		slasheds:         make([]byte, 1),
+		validatorSetSize: validators,
+	}
+	for i := range validators {
+		cs.balances[i] = 32_000_000_000
+		writeToBitset(cs.actives, i, true)
+	}
+	f := &ForkChoiceStore{latestMessages: newLatestMessagesStore(validators)}
+	checkpoint := solid.Checkpoint{Epoch: 1}
+	for epoch, root := range []common.Hash{{1}, {2}, {1}, {2}} {
+		f.setLatestMessage(0, LatestMessage{Epoch: uint64(epoch), Root: root})
+		require.Equal(t, recountVotes(f, cs), f.voteTally.votes(f, checkpoint, cs), "epoch %d", epoch)
+	}
+}
