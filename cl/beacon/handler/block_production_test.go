@@ -4945,6 +4945,7 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 		verified   bool
 		childHead  bool // the head is a child of the served root, as when attestation data was cached earlier in the slot
 		cached     bool
+		headErr    bool
 		wantStatus int
 		wantIndex  string
 	}{
@@ -4955,6 +4956,8 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 		{name: "EMPTY in the head's chain", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusEmpty, childHead: true, cached: true, wantStatus: http.StatusOK, wantIndex: "0"},
 		{name: "optimistic FULL head", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, cached: true, wantStatus: http.StatusServiceUnavailable},
 		{name: "optimistic FULL in the head's chain", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, childHead: true, wantStatus: http.StatusServiceUnavailable},
+		{name: "head unavailable", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, verified: true, cached: true, headErr: true, wantStatus: http.StatusServiceUnavailable},
+		{name: "head unavailable, block of the attestation slot", blockSlot: attestationSlot, status: cltypes.PayloadStatusFull, verified: true, cached: true, headErr: true, wantStatus: http.StatusOK, wantIndex: "0"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
@@ -4979,6 +4982,13 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 				fcu.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
 				fcu.Ancestors = map[uint64]forkchoice.ForkChoiceNode{tt.blockSlot: {Root: root, PayloadStatus: tt.status}}
 			}
+			wantErr := "payload of the beacon block root is not verified"
+			if tt.headErr {
+				wantErr = "no slot for head is stored"
+				fcu.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+					return forkchoice.ForkChoiceNode{}, 0, errors.New(wantErr)
+				}
+			}
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
 				fmt.Sprintf("/eth/v1/validator/attestation_data?slot=%d&committee_index=3", attestationSlot), http.NoBody)
 			recorder := httptest.NewRecorder()
@@ -4988,7 +4998,7 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 			if tt.wantStatus == http.StatusOK {
 				require.Contains(t, recorder.Body.String(), `"index":"`+tt.wantIndex+`"`)
 			} else {
-				require.Contains(t, recorder.Body.String(), "payload of the beacon block root is not verified")
+				require.Contains(t, recorder.Body.String(), wantErr)
 			}
 		})
 	}
