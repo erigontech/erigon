@@ -21,6 +21,8 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1312,26 +1314,44 @@ func TestCloseRacingBeginRo(t *testing.T) {
 		var live atomic.Int64
 		var closed atomic.Bool
 		var wg sync.WaitGroup
-		// One read per call, so its deferred Rollback ends it before the next begins.
-		read := func() bool {
+		// One read per call, so its deferred Rollback ends it before the next begins. Failures
+		// come back as errors: the workers are not the test goroutine.
+		read := func() (bool, error) {
 			tx, err := db.BeginRo(t.Context())
 			if err != nil {
-				require.ErrorContains(t, err, "closed")
-				return false
+				if !strings.Contains(err.Error(), "closed") {
+					return false, err
+				}
+				return false, nil
 			}
 			defer tx.Rollback()
-			require.False(t, closed.Load(), "a read began after Close returned")
+			if closed.Load() {
+				return false, errors.New("a read began after Close returned")
+			}
 			live.Add(1)
 			defer live.Add(-1)
 			// A read on a freed env crashes or errors: this is what Close must wait for.
 			v, err := tx.GetOne(kv.Headers, []byte{1})
-			require.NoError(t, err)
-			require.Equal(t, []byte{2}, v)
-			return true
+			if err != nil {
+				return false, err
+			}
+			if !bytes.Equal(v, []byte{2}) {
+				return false, fmt.Errorf("read %x, want 02", v)
+			}
+			return true, nil
 		}
+		workerErrs := make(chan error, 16)
 		for range 16 {
 			wg.Go(func() {
-				for read() {
+				for {
+					again, err := read()
+					if err != nil {
+						workerErrs <- err
+						return
+					}
+					if !again {
+						return
+					}
 				}
 			})
 		}
@@ -1340,5 +1360,9 @@ func TestCloseRacingBeginRo(t *testing.T) {
 		closed.Store(true)
 		require.Zero(t, live.Load(), "Close returned while a read was still running")
 		wg.Wait()
+		close(workerErrs)
+		for err := range workerErrs {
+			require.NoError(t, err)
+		}
 	}
 }

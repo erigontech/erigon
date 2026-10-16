@@ -173,14 +173,9 @@ whether or not the account itself was touched; a bulk round of a million keys at
 gets `G ≈ 15.6k`, so the root and every depth-1 node fork and depth-2 nodes do not.
 
 No separate bound is needed for walkers parked on their children: a walker with running
-helpers returns its lease before `Wait`, so the pool alone bounds the open read transactions —
-`min(numWorkers, GOMAXPROCS)` leases plus the base trie's own context, which
-`ParallelCommitmentReadTxs` declares as `parallelMountConcurrency(defaultParallelCommitmentWorkers) + 1`.
-A fork needs no permit: it starts helpers only on idle leases and otherwise walks its
-children inline. Under-declaring the
-budget is not a slowdown but a hang: the production factory
-(`concurrentTrieContextFactory`) blocks in `beginWorkerRo`, so a child that cannot open a
-transaction blocks while holding a lease.
+helpers returns its lease before `Wait`, so the pool alone bounds the open read transactions:
+`min(numWorkers, GOMAXPROCS)` leases plus the base trie's own context. A fork needs no permit:
+it starts helpers only on idle leases and otherwise walks its children inline.
 
 ### 4.2 Phase 3 — Commit and root publication
 
