@@ -53,6 +53,8 @@ func (t *voteTally) votes(f *ForkChoiceStore, justified solid.Checkpoint, cs *ch
 	for root, id := range t.ids {
 		if w := t.weights[id]; w > 0 {
 			votes[root] = w
+		} else {
+			delete(t.ids, root)
 		}
 	}
 	return votes
