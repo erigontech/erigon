@@ -543,6 +543,9 @@ func (p *PersistentBlockCollector) HasBlock(blockNumber uint64) bool {
 
 // Close closes the database
 func (p *PersistentBlockCollector) Close() error {
+	if p == nil {
+		return nil
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
