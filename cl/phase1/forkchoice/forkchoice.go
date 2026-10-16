@@ -64,6 +64,7 @@ type ForkNode struct {
 
 const (
 	checkpointsPerCache        = 1024
+	maxCheckpointStates        = 10
 	allowedCachedStates        = 8
 	queueCacheSize             = 128
 	pendingELPayloadsShrinkCap = 256 // drain releases the backing array when cap exceeds this
@@ -118,8 +119,11 @@ type ForkChoiceStore struct {
 	inFlightInvalidPayloads *sync.Map
 	// [New in Gloas:EIP7732] Track execution payload validation status by execution block hash.
 	// Used to check if parent execution payload has been validated/invalidated for gossip validation.
-	executionPayloadStatus *lru.Cache[common.Hash, execution_client.PayloadStatus]
-	payloadStatusByRoot    *lru.Cache[common.Hash, execution_client.PayloadStatus]
+	executionPayloadStatus   *lru.Cache[common.Hash, execution_client.PayloadStatus]
+	payloadStatusByRoot      *lru.Cache[common.Hash, execution_client.PayloadStatus]
+	pendingEnvelopeApplyGate sync.Map // blockRoot -> chan struct{}: admits one apply of a parked envelope per root, closed when it ends
+	envelopeAppliesMu        sync.Mutex
+	envelopeApplies          map[common.Hash]int // envelope applies past the signature check, by block root
 	// [New in Gloas:EIP7732] Track execution payload gas_limit by execution block hash.
 	// Used for the is_gas_limit_target_compatible IGNORE check in bid gossip validation.
 	executionPayloadGasLimit *lru.Cache[common.Hash, uint64]
@@ -134,6 +138,9 @@ type ForkChoiceStore struct {
 	// Per-block unrealized checkpoints (spec: store.unrealized_justifications)
 	unrealizedJustifications sync.Map // blockRoot -> solid.Checkpoint
 	unrealizedFinalizations  sync.Map // blockRoot -> solid.Checkpoint
+	// Serializes checkpointStates inserts and evictions with justified promotion,
+	// so an eviction pass never deletes the current justified state.
+	checkpointStatesMu sync.Mutex
 	// I use the cache due to the convenient auto-cleanup feauture.
 	checkpointStates   sync.Map // We keep ssz snappy of it as the full beacon state is full of rendundant data.
 	publicKeysRegistry public_keys_registry.PublicKeyRegistry
@@ -208,6 +215,10 @@ type ForkChoiceStore struct {
 	// Later, when OnBlock processes the block, it checks this cache and processes any pending envelope.
 	pendingEnvelopes         *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
 	envelopeGossipAdmissions ExecutionPayloadEnvelopeAdmissions
+	// Earliest time a retry of a pending envelope may run again, by block root. The background retry and
+	// a proposal's retry of its parent share it.
+	dataAvailableEnvelopeRetryAt *lru.Cache[common.Hash, time.Time]
+	dataAvailableEnvelopeRetryMu sync.Mutex // makes the due check and the booking of a retry one step
 
 	// [New in Gloas:EIP7732] Locally-produced self-build envelopes waiting for their block.
 	// Separate from pendingEnvelopes so that OnBlock replay can distinguish local origin
@@ -285,9 +296,16 @@ func NewForkChoiceStore(
 		return nil, err
 	}
 
+	slot := anchorState.Slot()
+	anchorEpoch := state.Epoch(anchorState.BeaconState)
+	if slot%anchorState.BeaconConfig().SlotsPerEpoch != 0 && anchorState.LatestBlockHeader().Slot == slot {
+		// A checkpoint block that is not at an epoch start is also the checkpoint at the next
+		// epoch start. A state advanced past its block keeps the epoch of its own slot.
+		anchorEpoch++
+	}
 	anchorCheckpoint := solid.Checkpoint{
 		Root:  anchorRoot,
-		Epoch: state.Epoch(anchorState.BeaconState),
+		Epoch: anchorEpoch,
 	}
 
 	verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](65536)
@@ -370,6 +388,11 @@ func NewForkChoiceStore(
 
 	// [New in Gloas:EIP7732] LRU cache for pending envelopes waiting for their block
 	pendingEnvelopes, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
+	if err != nil {
+		return nil, err
+	}
+
+	dataAvailableEnvelopeRetryAt, err := lru.New[common.Hash, time.Time](queueCacheSize)
 	if err != nil {
 		return nil, err
 	}
@@ -461,6 +484,7 @@ func NewForkChoiceStore(
 		partialWithdrawals:             partialWithdrawals,
 		proposerLookahead:              proposerLookahead,
 		pendingEnvelopes:               pendingEnvelopes,
+		dataAvailableEnvelopeRetryAt:   dataAvailableEnvelopeRetryAt,
 		pendingLocalSelfBuildEnvelopes: pendingLocalSelfBuildEnvelopes,
 		executionPayloadStatus:         executionPayloadStatus,
 		payloadStatusByRoot:            payloadStatusByRoot,

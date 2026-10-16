@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
@@ -255,7 +256,7 @@ func verifySyncCommitteeMessageSignature(s *state.CachingBeaconState, msg *cltyp
 		return nil, nil, nil, err
 	}
 	cfg := s.BeaconConfig()
-	domain, err := s.GetDomain(cfg.DomainSyncCommittee, state.GetEpochAtSlot(cfg, msg.Slot))
+	domain, err := fork.ComputeDomainAtEpoch(cfg, cfg.DomainSyncCommittee, state.GetEpochAtSlot(cfg, msg.Slot), s.GenesisValidatorsRoot())
 	if err != nil {
 		return nil, nil, nil, err
 	}

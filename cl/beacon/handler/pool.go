@@ -151,13 +151,20 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 		}
 		var (
 			slot                      = attestation.Data.Slot
+			epoch                     = slot / a.beaconChainCfg.SlotsPerEpoch
 			cIndex                    = attestation.Data.CommitteeIndex
-			committeeCountPerSlot     = a.syncedData.CommitteeCount(slot / a.beaconChainCfg.SlotsPerEpoch)
+			committeeCountPerSlot     = a.syncedData.CommitteeCount(epoch)
 			attestationWithGossipData = &services.AttestationForGossip{
 				Attestation:      attestation,
 				ImmediateProcess: true, // we want to process attestation immediately
 			}
 		)
+		topicForkDigest, err := a.ethClock.ComputeForkDigest(epoch)
+		if err != nil {
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+			return
+		}
+		attestationWithGossipData.TopicForkDigest = &topicForkDigest
 		subnet := subnets.ComputeSubnetForAttestation(committeeCountPerSlot, slot, cIndex, a.beaconChainCfg.SlotsPerEpoch, a.netConfig.AttestationSubnetCount)
 		encodedSSZ, err := attestation.EncodeSSZ(nil)
 		if err != nil {
@@ -165,15 +172,21 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			return
 		}
 
-		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestationWithGossipData); err != nil && !errors.Is(err, services.ErrIgnore) {
-			log.Warn("[Beacon REST] failed to process attestation in attestation service", "err", err)
+		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestationWithGossipData); errors.Is(err, services.ErrAttestationAlreadySeen) {
+			continue
+		} else if err != nil {
+			if errors.Is(err, services.ErrIgnore) {
+				log.Debug("[Beacon REST] ignored attestation in attestation service", "err", err, "slot", slot, "committeeIndex", cIndex)
+			} else {
+				log.Warn("[Beacon REST] failed to process attestation in attestation service", "err", err)
+			}
 			failures = append(failures, poolingFailure{
 				Index:   i,
 				Message: err.Error(),
 			})
 			continue
 		}
-		if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameBeaconAttestation(subnet), encodedSSZ); err != nil {
+		if err := a.gossipManager.PublishToForkDigest(r.Context(), topicForkDigest, gossip.TopicNameBeaconAttestation(subnet), encodedSSZ); err != nil {
 			a.logger.Debug("[Beacon REST] failed to publish attestation to gossip", "err", err)
 			failures = append(failures, poolingFailure{
 				Index:   i,
@@ -183,15 +196,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 		}
 	}
 	if len(failures) > 0 {
-		errResp := poolingError{
-			Code:     http.StatusBadRequest,
-			Message:  "some failures",
-			Failures: failures,
-		}
-		w.WriteHeader(http.StatusBadRequest)
-		if err := json.NewEncoder(w).Encode(errResp); err != nil {
-			log.Warn("failed to encode response", "err", err)
-		}
+		a.writePoolingFailures(w, failures)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -228,13 +233,20 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 		}
 		var (
 			slot                      = attestation.AttestationData().Slot
+			epoch                     = slot / a.beaconChainCfg.SlotsPerEpoch
 			cIndex                    = attestation.CommitteeIndex
-			committeeCountPerSlot     = a.syncedData.CommitteeCount(slot / a.beaconChainCfg.SlotsPerEpoch)
+			committeeCountPerSlot     = a.syncedData.CommitteeCount(epoch)
 			attestationWithGossipData = &services.AttestationForGossip{
 				SingleAttestation: attestation,
 				ImmediateProcess:  true, // we want to process attestation immediately
 			}
 		)
+		topicForkDigest, err := a.ethClock.ComputeForkDigest(epoch)
+		if err != nil {
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+			return
+		}
+		attestationWithGossipData.TopicForkDigest = &topicForkDigest
 		subnet := subnets.ComputeSubnetForAttestation(committeeCountPerSlot, slot, cIndex, a.beaconChainCfg.SlotsPerEpoch, a.netConfig.AttestationSubnetCount)
 		encodedSSZ, err := attestation.EncodeSSZ(nil)
 		if err != nil {
@@ -242,17 +254,21 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 			return
 		}
 
-		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestationWithGossipData); errors.Is(err, services.ErrIgnore) {
-			log.Debug("[Beacon REST] ignored attestation in attestation service", "err", err, "slot", slot, "committeeIndex", cIndex)
+		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestationWithGossipData); errors.Is(err, services.ErrAttestationAlreadySeen) {
+			continue
 		} else if err != nil {
-			log.Warn("[Beacon REST] failed to process attestation in attestation service", "err", err)
+			if errors.Is(err, services.ErrIgnore) {
+				log.Debug("[Beacon REST] ignored attestation in attestation service", "err", err, "slot", slot, "committeeIndex", cIndex)
+			} else {
+				log.Warn("[Beacon REST] failed to process attestation in attestation service", "err", err)
+			}
 			failures = append(failures, poolingFailure{
 				Index:   i,
 				Message: err.Error(),
 			})
 			continue
 		}
-		if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameBeaconAttestation(subnet), encodedSSZ); err != nil {
+		if err := a.gossipManager.PublishToForkDigest(r.Context(), topicForkDigest, gossip.TopicNameBeaconAttestation(subnet), encodedSSZ); err != nil {
 			a.logger.Debug("[Beacon REST] failed to publish attestation to gossip", "err", err)
 			failures = append(failures, poolingFailure{
 				Index:   i,
@@ -263,15 +279,7 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 		log.Debug("[Beacon REST] published attestation to gossip", "slot", slot, "committeeIndex", cIndex)
 	}
 	if len(failures) > 0 {
-		errResp := poolingError{
-			Code:     http.StatusBadRequest,
-			Message:  "some failures",
-			Failures: failures,
-		}
-		w.WriteHeader(http.StatusBadRequest)
-		if err := json.NewEncoder(w).Encode(errResp); err != nil {
-			log.Warn("failed to encode response", "err", err)
-		}
+		a.writePoolingFailures(w, failures)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -337,7 +345,12 @@ func (a *ApiHandler) PostEthV1BeaconPoolProposerSlashings(w http.ResponseWriter,
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
-	if err := a.proposerSlashingService.ProcessMessage(r.Context(), nil, &req); err != nil && !errors.Is(err, services.ErrIgnore) {
+	err := a.proposerSlashingService.ProcessMessage(r.Context(), nil, &req)
+	if errors.Is(err, services.ErrIgnore) {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
@@ -370,6 +383,7 @@ type poolingError struct {
 // writePoolingFailures reports partial failures as 400 with the failure list.
 // logger is nil on handlers built by struct literal, which the package tests do.
 func (a *ApiHandler) writePoolingFailures(w http.ResponseWriter, failures []poolingFailure) {
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusBadRequest)
 	if err := json.NewEncoder(w).Encode(poolingError{Code: http.StatusBadRequest, Message: "some failures", Failures: failures}); err != nil && a.logger != nil {
 		a.logger.Debug("[Beacon REST] failed to encode pooling error", "err", err)
@@ -435,6 +449,11 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 			continue
 		}
+		topicForkDigest, err := a.ethClock.ComputeForkDigest(epoch)
+		if err != nil {
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+			return
+		}
 		encodedSSZ, err := v.EncodeSSZ(nil)
 		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
@@ -442,19 +461,29 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 			return
 		}
 
-		// for this service we are not publishing gossipData as the service does it internally, we just pass that data as a parameter.
-		if err := a.aggregateAndProofsService.ProcessMessage(r.Context(), nil, &services.SignedAggregateAndProofForGossip{
+		err = a.aggregateAndProofsService.ProcessMessage(r.Context(), nil, &services.SignedAggregateAndProofForGossip{
 			SignedAggregateAndProof: v,
 			ImmediateProcess:        true, // we want to process aggregate and proof immediately
-		}); errors.Is(err, services.ErrIgnore) {
+			TopicForkDigest:         &topicForkDigest,
+		})
+		switch {
+		case errors.Is(err, services.ErrAggregatorAlreadySeen):
+			// The service validated this exact aggregate earlier; its publication may have failed.
+		case errors.Is(err, services.ErrAggregatorAlreadyKnown):
 			log.Debug("[Beacon REST] aggregate ignored", "err", err, "slot", v.Message.Aggregate.Data.Slot)
-		} else if err != nil {
+			continue
+		case errors.Is(err, services.ErrIgnore):
+			log.Debug("[Beacon REST] aggregate ignored", "err", err, "slot", v.Message.Aggregate.Data.Slot)
+			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
+			continue
+		case err != nil:
 			log.Warn("[Beacon REST] failed to process aggregate", "err", err)
 			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 			continue
 		}
-		if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameBeaconAggregateAndProof, encodedSSZ); err != nil {
+		if err := a.gossipManager.PublishToForkDigest(r.Context(), topicForkDigest, gossip.TopicNameBeaconAggregateAndProof, encodedSSZ); err != nil {
 			a.logger.Debug("[Beacon REST] failed to publish aggregate and proof to gossip", "err", err)
+			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 		}
 	}
 

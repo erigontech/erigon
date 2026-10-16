@@ -120,6 +120,11 @@ type ForkChoiceStorageMock struct {
 	ShouldExtendPayloadVal bool
 	ShouldBuildOnFullVal   *bool
 
+	RetryPendingEnvelopeFunc func(ctx context.Context, blockRoot common.Hash) time.Time
+	PendingEnvelopeRoots     map[common.Hash]struct{}
+	ApplyInFlightRoots       map[common.Hash]struct{}
+	VotesRuleOutFullRoots    map[common.Hash]struct{}
+
 	// [New in Gloas:EIP7732] Execution payload status by execution block hash
 	ExecutionPayloadStatusMap map[common.Hash]execution_client.PayloadStatus
 	PayloadStatusByRootMap    map[common.Hash]execution_client.PayloadStatus
@@ -654,6 +659,28 @@ func (f *ForkChoiceStorageMock) GetBlock(
 	blockRoot common.Hash,
 ) (*cltypes.SignedBeaconBlock, bool) {
 	return f.Blocks[blockRoot], f.Blocks[blockRoot] != nil
+}
+
+func (f *ForkChoiceStorageMock) ExecutionPayloadApplyInFlight(blockRoot common.Hash) bool {
+	_, ok := f.ApplyInFlightRoots[blockRoot]
+	return ok
+}
+
+func (f *ForkChoiceStorageMock) PayloadVotesRuleOutFull(blockRoot common.Hash) bool {
+	_, ok := f.VotesRuleOutFullRoots[blockRoot]
+	return ok
+}
+
+func (f *ForkChoiceStorageMock) HasPendingExecutionPayloadEnvelope(blockRoot common.Hash) bool {
+	_, ok := f.PendingEnvelopeRoots[blockRoot]
+	return ok
+}
+
+func (f *ForkChoiceStorageMock) RetryPendingExecutionPayloadEnvelope(ctx context.Context, blockRoot common.Hash) time.Time {
+	if f.RetryPendingEnvelopeFunc != nil {
+		return f.RetryPendingEnvelopeFunc(ctx, blockRoot)
+	}
+	return time.Time{}
 }
 
 func (f *ForkChoiceStorageMock) HasEnvelope(blockRoot common.Hash) bool {

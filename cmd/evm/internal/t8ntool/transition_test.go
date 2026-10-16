@@ -52,6 +52,14 @@ func TestGetTransactionPreservesSignature(t *testing.T) {
 	require.False(t, s.IsZero(), "s must be preserved")
 }
 
+// A transaction type t8n cannot build must be rejected, not decoded into a nil transaction.
+func TestGetTransactionRejectsUnsupportedType(t *testing.T) {
+	t.Parallel()
+	var twk txWithKey
+	err := twk.UnmarshalJSON([]byte(`{"type":"0x3","input":"0x","gas":"0x5208","nonce":"0x0","value":"0x0"}`))
+	require.ErrorContains(t, err, "unsupported transaction type")
+}
+
 // TestT8nSharedDomainsUsesParallelTrie pins t8n on the same commitment trie the
 // rest of the binary selects. The variant is only upgraded once a DB is wired in,
 // so a construction that skips that step computes the state root sequentially no
