@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
@@ -31,7 +32,7 @@ import (
 
 // CheckReceiptRootIntegrity verifies that receipts from RCache domain produce
 // receipt roots matching block headers. It auto-detects the range
-// [Byzantium, rcacheTip] and delegates to CheckRCacheRootAtBlkRange.
+// [Byzantium, rcacheTip) and delegates to CheckRCacheRootAtBlkRange.
 //
 // Pre-Byzantium blocks are skipped: their consensus receipt encoding includes
 // the 32-byte intermediate state root (PostState), which Erigon does not
@@ -50,13 +51,9 @@ func CheckReceiptRootIntegrity(ctx context.Context, sc SamplerCfg, db kv.Tempora
 	}
 	defer tx.Rollback()
 
-	rcacheDomainProgress := tx.Debug().DomainProgress(kv.RCacheDomain)
-	rcacheTip, ok, err := txNumsReader.FindBlockNum(ctx, tx, rcacheDomainProgress)
+	rcacheTip, err := RCacheEndBlockNum(ctx, tx, txNumsReader)
 	if err != nil {
-		return fmt.Errorf("findBlockNum(%d) fails: %w", rcacheDomainProgress, err)
-	}
-	if !ok {
-		return fmt.Errorf("findBlockNum(%d) not found", rcacheDomainProgress)
+		return err
 	}
 
 	if err := ValidateDomainProgress(ctx, db, kv.RCacheDomain, txNumsReader); err != nil {
@@ -64,7 +61,36 @@ func CheckReceiptRootIntegrity(ctx context.Context, sc SamplerCfg, db kv.Tempora
 	}
 	tx.Rollback()
 
-	return CheckRCacheRootAtBlkRange(ctx, sc, db, blockReader, cc, 1, rcacheTip+1, failFast, logger)
+	return CheckRCacheRootAtBlkRange(ctx, sc, db, blockReader, cc, 1, rcacheTip, failFast, logger)
+}
+
+func RCacheEndBlockNum(ctx context.Context, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader) (uint64, error) {
+	visibleEnd, exact := tx.Debug().DomainVisibleEnd(kv.RCacheDomain)
+	if !exact {
+		visibleEnd = tx.Debug().DomainProgress(kv.RCacheDomain)
+	}
+	if visibleEnd == 0 {
+		return 0, nil
+	}
+	lastTxNum := visibleEnd - 1
+	tip, ok, err := txNumsReader.FindBlockNum(ctx, tx, lastTxNum)
+	if err != nil {
+		return 0, fmt.Errorf("findBlockNum(%d) fails: %w", lastTxNum, err)
+	}
+	if !ok {
+		return 0, fmt.Errorf("findBlockNum(%d) not found", lastTxNum)
+	}
+	if exact && visibleEnd > tx.Debug().TxNumsInFiles(kv.RCacheDomain) {
+		return tip + 1, nil
+	}
+	tipMaxTxNum, err := txNumsReader.Max(ctx, tx, tip)
+	if err != nil {
+		return 0, err
+	}
+	if tipMaxTxNum == lastTxNum {
+		return tip + 1, nil
+	}
+	return tip, nil
 }
 
 // CheckRCacheRootAtBlk verifies the receipt root for a single block by
@@ -130,7 +156,7 @@ func checkRCacheRootAtBlkChunk(ctx context.Context, fromBlock, toBlock uint64, d
 		return fmt.Errorf("check-rcache-root-at-blk: failed to get maxTxNum for block %d: %w", toBlock, err)
 	}
 
-	it, err := rawdb.ReceiptCacheV2Stream(tx, fromTxNum, toTxNum)
+	it, err := rawdb.ReceiptCacheV2Stream(tx, fromTxNum, toTxNum+1)
 	if err != nil {
 		return fmt.Errorf("check-rcache-root-at-blk: failed to stream receipts for blocks [%d,%d]: %w", fromBlock, toBlock, err)
 	}
@@ -149,8 +175,17 @@ func checkRCacheRootAtBlkChunk(ctx context.Context, fromBlock, toBlock uint64, d
 		return fmt.Errorf("check-rcache-root-at-blk: missing header for block %d", blockNum)
 	}
 	var receipts types.Receipts
+	blockMinTxNum, entries := fromTxNum, uint64(0)
 
 	verifyAndAdvance := func() error {
+		if want := curMax - blockMinTxNum + 1; blockNum > 0 && entries != want {
+			mismatch := fmt.Errorf("%w: check-rcache-root-at-blk: rcache entries mismatch at block %d: have=%d, want=%d, txNums=[%d,%d]",
+				ErrIntegrity, blockNum, entries, want, blockMinTxNum, curMax)
+			if failFast {
+				return mismatch
+			}
+			log.Error(mismatch.Error())
+		}
 		computedRoot := types.DeriveSha(receipts)
 		if computedRoot != header.ReceiptHash {
 			mismatch := fmt.Errorf("%w: check-rcache-root-at-blk: receipt root mismatch at block %d: computed=%s, header=%s",
@@ -160,6 +195,7 @@ func checkRCacheRootAtBlkChunk(ctx context.Context, fromBlock, toBlock uint64, d
 			}
 		}
 		receipts = receipts[:0]
+		blockMinTxNum, entries = curMax+1, 0
 		blockNum++
 		if blockNum > toBlock {
 			return nil
@@ -190,6 +226,7 @@ func checkRCacheRootAtBlkChunk(ctx context.Context, fromBlock, toBlock uint64, d
 			}
 		}
 
+		entries++
 		if r != nil {
 			r.Bloom = types.CreateBloom(types.Receipts{r})
 			receipts = append(receipts, r)
