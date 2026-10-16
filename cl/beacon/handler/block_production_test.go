@@ -26,6 +26,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -39,6 +40,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	state_mock "github.com/erigontech/erigon/cl/abstract/mock_services"
+	aggregation_mock "github.com/erigontech/erigon/cl/aggregation/mock_services"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
@@ -3726,6 +3728,167 @@ func TestGetEthV3ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
 	require.True(t, found)
 }
 
+// produceAcrossAHeadChange runs GetEthV3ValidatorBlock while the head changes during the wait for
+// the parked envelope of the old head. The new head's state is published only if publish is set,
+// and the request is cancelled while production waits for that state if cancel is set.
+func produceAcrossAHeadChange(t *testing.T, publish, cancel bool) (*beaconhttp.BeaconResponse, error, common.Hash) {
+	t.Helper()
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{slotOffset: 1})
+	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	handler.beaconChainCfg = fixture.block.Cfg
+	forkEpoch := state.Epoch(fixture.productionState)
+	handler.beaconChainCfg.AltairForkEpoch = forkEpoch
+	handler.beaconChainCfg.BellatrixForkEpoch = forkEpoch
+	handler.beaconChainCfg.CapellaForkEpoch = forkEpoch
+	handler.beaconChainCfg.DenebForkEpoch = forkEpoch
+	handler.beaconChainCfg.ElectraForkEpoch = forkEpoch
+	handler.beaconChainCfg.FuluForkEpoch = forkEpoch
+	handler.beaconChainCfg.GloasForkEpoch = forkEpoch
+	handler.beaconChainCfg.InitializeForkSchedule()
+	sinceCutoff := proposalWaitCutoff(time.Unix(0, 0), handler.beaconChainCfg, clparams.GloasVersion).Sub(time.Unix(0, 0))
+	handler.ethClock = slotTimeClock{EthereumClock: handler.ethClock, slotStart: time.Now().Add(time.Second - sinceCutoff)}
+
+	// headState returns the parent state at the slot before the block, under a header made
+	// distinct by bodyRoot, and that header's root.
+	headState := func(bodyRoot common.Hash) (*state.CachingBeaconState, common.Hash) {
+		s, err := fixture.productionState.Copy()
+		require.NoError(t, err)
+		require.NoError(t, s.SetSlot(fixture.block.Slot-1))
+		stateRoot, err := s.HashSSZ()
+		require.NoError(t, err)
+		header := s.LatestBlockHeader()
+		header.Slot = fixture.block.Slot - 1
+		header.Root = common.Hash(stateRoot)
+		header.BodyRoot = bodyRoot
+		s.SetLatestBlockHeader(&header)
+		root, err := header.HashSSZ()
+		require.NoError(t, err)
+		return s, common.Hash(root)
+	}
+	oldState, oldRoot := headState(common.Hash{0x0a})
+	newState, newRoot := headState(common.Hash{0x0b})
+	require.NotEqual(t, oldRoot, newRoot)
+	syncedData := synced_data.NewSyncedDataManager(handler.beaconChainCfg, true)
+	require.NoError(t, syncedData.OnHeadStateWithBlockRoot(oldState, oldRoot))
+	handler.syncedData = syncedData
+
+	// The old head is EMPTY with a parked envelope. The first retry moves the fork-choice head,
+	// and the new head's state is published a little later.
+	var headChanged atomic.Bool
+	forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+		if headChanged.Load() {
+			return forkchoice.ForkChoiceNode{Root: newRoot, PayloadStatus: cltypes.PayloadStatusEmpty}, newState.Slot(), nil
+		}
+		return forkchoice.ForkChoiceNode{Root: oldRoot, PayloadStatus: cltypes.PayloadStatusEmpty}, oldState.Slot(), nil
+	}
+	forkchoiceStore.PendingEnvelopeRoots = map[common.Hash]struct{}{oldRoot: {}}
+	published := make(chan error, 1)
+	requestCtx, cancelRequest := context.WithCancel(t.Context())
+	defer cancelRequest()
+	forkchoiceStore.RetryPendingEnvelopeFunc = func(context.Context, common.Hash) time.Time {
+		if !headChanged.Swap(true) {
+			go func() {
+				time.Sleep(3 * proposalWaitPollInterval) // after the wait has seen the head change
+				if cancel {
+					cancelRequest()
+				}
+				if publish {
+					published <- syncedData.OnHeadStateWithBlockRoot(newState, newRoot)
+				}
+			}()
+		}
+		return time.Now().Add(time.Second)
+	}
+
+	builds := 0
+	if publish {
+		builds = 1
+	}
+	handler.epbsPool = pool.NewEpbsPool()
+	syncPool := sync_pool_mock.NewMockSyncContributionPool(gomock.NewController(t))
+	syncPool.EXPECT().GetSyncAggregate(gomock.Any(), gomock.Any()).
+		Return(cltypes.NewSyncAggregateWithSize(int(handler.beaconChainCfg.SyncCommitteeSize/8)), nil).
+		Times(builds)
+	handler.syncMessagePool = syncPool
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, handler.beaconChainCfg)
+	payload.ParentHash = newState.GetLatestBlockHash()
+	payload.BlockHash = common.Hash{0x66}
+	payload.PrevRandao = fixture.externalBid.Message.PrevRandao
+	payload.FeeRecipient = common.Address{0x77}
+	payload.GasLimit = 30_000_000
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(handler.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
+	payload.SlotNumber = fixture.block.Slot
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), clparams.GloasVersion).
+		Return([]byte{1}, nil).
+		Times(builds)
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.GloasVersion).
+		Return(payload, &engine_types.BlobsBundle{}, nil, big.NewInt(1), nil).
+		Times(builds)
+	handler.engine = engine
+	handler.elClientVersion.Store(elClientVersionUnavailable) // avoid mocking GetClientVersionV1
+
+	request := httptest.NewRequestWithContext(requestCtx, http.MethodGet, fmt.Sprintf(
+		"/eth/v3/validator/blocks/%d?randao_reveal=%s&skip_randao_verification=true",
+		fixture.block.Slot,
+		(common.Bytes96{}).String(),
+	), http.NoBody)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("slot", fmt.Sprint(fixture.block.Slot))
+	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+	response, err := handler.GetEthV3ValidatorBlock(httptest.NewRecorder(), request)
+	require.True(t, headChanged.Load(), "production waited for the parked envelope")
+	if publish {
+		require.NoError(t, <-published)
+	}
+	return response, err, newRoot
+}
+
+// The head changes while production waits for the parked envelope of the old head: production is
+// retried once the new head's state is published, and the block builds on the new head.
+func TestGetEthV3ValidatorBlockRetriesOnTheNewHeadAfterAHeadChange(t *testing.T) {
+	logs := captureAllProductionLogs(t)
+	response, err, newRoot := produceAcrossAHeadChange(t, true, false)
+	require.NoError(t, err)
+	producedBlock, ok := response.Data.(*cltypes.BeaconBlock)
+	require.True(t, ok)
+	require.Equal(t, newRoot, producedBlock.ParentRoot)
+	require.Equal(t, 1, strings.Count(logs(), "retrying on the new head"))
+	require.Zero(t, headChangeWarnings(logs()))
+}
+
+func headChangeWarnings(logs string) int {
+	warnings := 0
+	for line := range strings.SplitSeq(logs, "\n") {
+		if strings.Contains(line, "lvl=warn") && strings.Contains(line, "fork choice head changed") {
+			warnings++
+		}
+	}
+	return warnings
+}
+
+// A retry that gives up returns the head change and records it once at warning level, so a missed
+// proposal is visible above Info.
+func TestGetEthV3ValidatorBlockWarnsOnceWhenTheRetryGivesUp(t *testing.T) {
+	logs := captureAllProductionLogs(t)
+	_, err, _ := produceAcrossAHeadChange(t, false, false)
+	require.ErrorIs(t, err, errForkChoiceHeadChanged)
+	require.Equal(t, 1, headChangeWarnings(logs()))
+	require.NotContains(t, logs(), "retrying on the new head")
+}
+
+// A request cancelled while production waits for the new head's state is not retried and leaves no
+// record of the head change.
+func TestGetEthV3ValidatorBlockStaysQuietWhenCancelledDuringTheRetryWait(t *testing.T) {
+	logs := captureAllProductionLogs(t)
+	_, err, _ := produceAcrossAHeadChange(t, false, true)
+	require.ErrorIs(t, err, errForkChoiceHeadChanged)
+	require.Zero(t, headChangeWarnings(logs()))
+	require.NotContains(t, logs(), "retrying on the new head")
+}
+
 func TestSelfBuildEnvelopeCacheSeparatesBlockRoots(t *testing.T) {
 	cache, err := lru.New[selfBuildEnvelopeKey, *cltypes.ExecutionPayloadEnvelope]("testSelfBuildEnvelopes", 4)
 	require.NoError(t, err)
@@ -4356,6 +4519,35 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 		"SlotNumber should equal the target slot")
 }
 
+// The block after the requested state can be gone after pruning while the canonical index still names it.
+func TestExpectedWithdrawalsHistoricalBlockBodyPruned(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
+	delete(handler.blockReader.(*tests.MockBlockReader).U, blocks[1].Block.Slot)
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+		fmt.Sprintf("/eth/v1/builder/states/%d/expected_withdrawals", blocks[0].Block.Slot), http.NoBody)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusNotFound, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "next block body not found")
+}
+
+// A block the fork choice still holds in memory serves the request before the DB has it.
+func TestExpectedWithdrawalsReadsTheNextBlockFromForkChoice(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
+	delete(handler.blockReader.(*tests.MockBlockReader).U, blocks[1].Block.Slot)
+	root, err := blocks[1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.Headers[root] = blocks[1].SignedBeaconBlockHeader().Header
+	fcu.Blocks[root] = blocks[1]
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+		fmt.Sprintf("/eth/v1/builder/states/%d/expected_withdrawals", blocks[0].Block.Slot), http.NoBody)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
 func TestExpectedWithdrawalsReadsTheRightSourcePerFork(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch = 0, 0, 0
@@ -4916,6 +5108,7 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 		verified   bool
 		childHead  bool // the head is a child of the served root, as when attestation data was cached earlier in the slot
 		cached     bool
+		headErr    bool
 		wantStatus int
 		wantIndex  string
 	}{
@@ -4926,6 +5119,8 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 		{name: "EMPTY in the head's chain", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusEmpty, childHead: true, cached: true, wantStatus: http.StatusOK, wantIndex: "0"},
 		{name: "optimistic FULL head", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, cached: true, wantStatus: http.StatusServiceUnavailable},
 		{name: "optimistic FULL in the head's chain", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, childHead: true, wantStatus: http.StatusServiceUnavailable},
+		{name: "head unavailable", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, verified: true, cached: true, headErr: true, wantStatus: http.StatusServiceUnavailable},
+		{name: "head unavailable, block of the attestation slot", blockSlot: attestationSlot, status: cltypes.PayloadStatusFull, verified: true, cached: true, headErr: true, wantStatus: http.StatusOK, wantIndex: "0"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
@@ -4950,6 +5145,24 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 				fcu.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
 				fcu.Ancestors = map[uint64]forkchoice.ForkChoiceNode{tt.blockSlot: {Root: root, PayloadStatus: tt.status}}
 			}
+			wantErr := "payload of the beacon block root is not verified"
+			if tt.headErr {
+				wantErr = "no slot for head is stored"
+				fcu.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+					return forkchoice.ForkChoiceNode{}, 0, errors.New(wantErr)
+				}
+			}
+			// The served data is pinned in the aggregation pool, with the index the validator signs.
+			aggregatePool := aggregation_mock.NewMockAggregationPool(gomock.NewController(t))
+			var pinned *solid.AttestationData
+			if tt.wantStatus == http.StatusOK {
+				aggregatePool.EXPECT().PinAttestationData(gomock.Any()).DoAndReturn(func(data *solid.AttestationData) error {
+					copied := *data // the data as pinned, not as the handler may change it later
+					pinned = &copied
+					return nil
+				})
+			}
+			handler.aggregatePool = aggregatePool
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
 				fmt.Sprintf("/eth/v1/validator/attestation_data?slot=%d&committee_index=3", attestationSlot), http.NoBody)
 			recorder := httptest.NewRecorder()
@@ -4958,9 +5171,52 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 			require.Equal(t, tt.wantStatus, recorder.Code, recorder.Body.String())
 			if tt.wantStatus == http.StatusOK {
 				require.Contains(t, recorder.Body.String(), `"index":"`+tt.wantIndex+`"`)
+				require.NotNil(t, pinned)
+				require.Equal(t, root, pinned.BeaconBlockRoot)
+				require.Equal(t, tt.wantIndex, strconv.FormatUint(pinned.CommitteeIndex, 10))
 			} else {
-				require.Contains(t, recorder.Body.String(), "payload of the beacon block root is not verified")
+				require.Contains(t, recorder.Body.String(), wantErr)
 			}
+		})
+	}
+}
+
+// Before Electra the served data carries the requested committee index, so pins would grow with the
+// requests; the pool uses pins only from Electra on, so none are made.
+func TestGetEthV1ValidatorAttestationDataPinsOnlyFromElectra(t *testing.T) {
+	const attestationSlot = uint64(10)
+	for _, tc := range []struct {
+		version clparams.StateVersion
+		pins    bool
+	}{
+		{version: clparams.DenebVersion, pins: false},
+		{version: clparams.ElectraVersion, pins: true},
+	} {
+		t.Run(tc.version.String(), func(t *testing.T) {
+			_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+			cfg := handler.beaconChainCfg
+			cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch = 0, 0, 0, 0
+			cfg.ElectraForkEpoch, cfg.FuluForkEpoch, cfg.GloasForkEpoch = cfg.FarFutureEpoch, cfg.FarFutureEpoch, cfg.FarFutureEpoch
+			if tc.version == clparams.ElectraVersion {
+				cfg.ElectraForkEpoch = 0
+			}
+			cfg.InitializeForkSchedule()
+			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+			clock.EXPECT().GetCurrentSlot().Return(attestationSlot).AnyTimes()
+			handler.ethClock = clock
+			handler.attestationProducer = cachedAttestationDataProducer{data: solid.AttestationData{Slot: attestationSlot}, cached: true}
+			aggregatePool := aggregation_mock.NewMockAggregationPool(gomock.NewController(t))
+			if tc.pins {
+				// The served data, with data.index 0 from Electra on.
+				aggregatePool.EXPECT().PinAttestationData(&solid.AttestationData{Slot: attestationSlot}).Return(nil).Times(1)
+			}
+			handler.aggregatePool = aggregatePool
+
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+				fmt.Sprintf("/eth/v1/validator/attestation_data?slot=%d&committee_index=3", attestationSlot), http.NoBody))
+
+			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 		})
 	}
 }

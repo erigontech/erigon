@@ -36,7 +36,8 @@ func main() {
 	startTime := time.Now()
 	var logger log.Logger
 	rootCmd := &cobra.Command{
-		Use: "test",
+		Use:          "test",
+		SilenceUsage: true,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			log.Info(cmd.Name() + " starting")
 			logger = debug.SetupCobra(cmd, "rpctest")
@@ -118,11 +119,8 @@ func main() {
 		Use:   "benchEthCall",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchEthCall(erigonURL, gethURL, needCompare, latest, blockFrom, blockTo, recordFile, errorFile)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.BenchEthCall(erigonURL, gethURL, needCompare, latest, blockFrom, blockTo, recordFile, errorFile)
 		},
 	}
 	with(benchEthCallCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
@@ -131,11 +129,8 @@ func main() {
 		Use:   "benchEthEstimateGas",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchEthEstimateGas(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.BenchEthEstimateGas(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
 		},
 	}
 	with(benchEthEstimateGasCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
@@ -144,11 +139,8 @@ func main() {
 		Use:   "benchEthCreateAccessList",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchEthCreateAccessList(erigonURL, gethURL, needCompare, latest, blockFrom, blockTo, recordFile, errorFile)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.BenchEthCreateAccessList(erigonURL, gethURL, needCompare, latest, blockFrom, blockTo, recordFile, errorFile)
 		},
 	}
 	with(benchEthCreateAccessListCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
@@ -157,11 +149,8 @@ func main() {
 		Use:   "benchEthGetBlockByHash",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchEthGetBlockByHash(erigonURL, gethURL, needCompare, latest, blockFrom, blockTo, recordFile, errorFile)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.BenchEthGetBlockByHash(erigonURL, gethURL, needCompare, latest, blockFrom, blockTo, recordFile, errorFile)
 		},
 	}
 	with(benchEthGetBlockByHash, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
@@ -170,11 +159,8 @@ func main() {
 		Use:   "benchEthGetBlockByNumber2",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchEthGetBlockByNumber2(erigonURL, gethURL, needCompare, latest, blockFrom, blockTo, recordFile, errorFile)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.BenchEthGetBlockByNumber2(erigonURL, gethURL, needCompare, latest, blockFrom, blockTo, recordFile, errorFile)
 		},
 	}
 	with(benchEthGetBlockByNumber2Cmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
@@ -183,11 +169,8 @@ func main() {
 		Use:   "benchEthGetTransactionByHash",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchEthGetTransactionByHash(cmd.Context(), erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.BenchEthGetTransactionByHash(cmd.Context(), erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
 		},
 	}
 	with(benchEthGetTransactionByHashCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
@@ -196,11 +179,8 @@ func main() {
 		Use:   "benchOtsGetBlockTransactions",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchOtsGetBlockTransactions(erigonURL, gethURL, needCompare, visitAllPages, latest, blockFrom, blockTo, recordFile, errorFile)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.BenchOtsGetBlockTransactions(erigonURL, gethURL, needCompare, visitAllPages, latest, blockFrom, blockTo, recordFile, errorFile)
 		},
 	}
 	with(benchOtsGetBlockTransactions, withErigonUrl, withGethUrl, withNeedCompare, withVisitAllPages, withBlockNum, withRecord, withErrorFile, withLatest)
@@ -209,11 +189,8 @@ func main() {
 		Use:   "bench1",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.Bench1(erigonURL, gethURL, needCompare, fullTest, blockFrom, blockTo, recordFile)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.Bench1(erigonURL, gethURL, needCompare, fullTest, blockFrom, blockTo, recordFile)
 		},
 	}
 	with(bench1Cmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord)
@@ -223,22 +200,16 @@ func main() {
 		Use:   "bench2",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.Bench2(erigonURL)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.Bench2(erigonURL)
 		},
 	}
 	bench3Cmd := &cobra.Command{
 		Use:   "bench3",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.Bench3(erigonURL, gethURL)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.Bench3(erigonURL, gethURL)
 		},
 	}
 	with(bench3Cmd, withErigonUrl, withGethUrl)
@@ -247,11 +218,8 @@ func main() {
 		Use:   "bench4",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.Bench4(erigonURL)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.Bench4(erigonURL)
 		},
 	}
 	with(bench4Cmd, withErigonUrl)
@@ -260,11 +228,8 @@ func main() {
 		Use:   "bench5",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.Bench5(erigonURL)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.Bench5(erigonURL)
 		},
 	}
 	with(bench5Cmd, withErigonUrl)
@@ -272,11 +237,8 @@ func main() {
 		Use:   "bench6",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.Bench6(erigonURL)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.Bench6(erigonURL)
 		},
 	}
 	with(bench6Cmd, withErigonUrl)
@@ -285,11 +247,8 @@ func main() {
 		Use:   "bench7",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.Bench7(erigonURL, gethURL)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.Bench7(erigonURL, gethURL)
 		},
 	}
 	with(bench7Cmd, withErigonUrl, withGethUrl)
@@ -298,11 +257,8 @@ func main() {
 		Use:   "benchEthGetLogs",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchEthGetLogs(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.BenchEthGetLogs(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
 		},
 	}
 	with(benchEthGetLogsCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
@@ -311,11 +267,8 @@ func main() {
 		Use:   "invariantsEthGetLogs",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.EthGetLogsInvariants(cmd.Context(), erigonURL, gethURL, needCompare, blockFrom, blockTo, latest, failFast, queryLimit)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.EthGetLogsInvariants(cmd.Context(), erigonURL, gethURL, needCompare, blockFrom, blockTo, latest, failFast, queryLimit)
 		},
 	}
 	with(ethGetLogsInvariantsCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest, withFailFast, withQueryLimit)
@@ -324,11 +277,8 @@ func main() {
 		Use:   "benchOverlayGetLogs",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchOverlayGetLogs(erigonURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.BenchOverlayGetLogs(erigonURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
 		},
 	}
 	with(benchOverlayGetLogsCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
@@ -337,11 +287,8 @@ func main() {
 		Use:   "bench9",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.Bench9(erigonURL, gethURL, needCompare, latest)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.Bench9(erigonURL, gethURL, needCompare, latest)
 		},
 	}
 	with(bench9Cmd, withErigonUrl, withGethUrl, withNeedCompare, withLatest)
@@ -350,11 +297,8 @@ func main() {
 		Use:   "benchTraceCall",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchTraceCall(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.BenchTraceCall(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
 		},
 	}
 	with(benchTraceCallCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
@@ -364,11 +308,8 @@ func main() {
 		Use:   "benchDebugTraceBlockByNumber",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchDebugTraceBlockByNumber(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.BenchDebugTraceBlockByNumber(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
 		},
 	}
 	with(benchDebugTraceBlockByNumberCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
@@ -377,11 +318,8 @@ func main() {
 		Use:   "benchDebugTraceBlockByHash",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchDebugTraceBlockByHash(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.BenchDebugTraceBlockByHash(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
 		},
 	}
 	with(benchDebugTraceBlockByHashCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
@@ -390,11 +328,8 @@ func main() {
 		Use:   "benchDebugTraceTransaction",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchDebugTraceTransaction(erigonURL, gethURL, needCompare, blockFrom, blockTo, additionalParams, recordFile, errorFile)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.BenchDebugTraceTransaction(erigonURL, gethURL, needCompare, blockFrom, blockTo, additionalParams, recordFile, errorFile)
 		},
 	}
 	with(benchDebugTraceTransactionCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withAdditionalParams, withRecord, withErrorFile)
@@ -403,11 +338,8 @@ func main() {
 		Use:   "benchDebugTraceCall",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchDebugTraceCall(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.BenchDebugTraceCall(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
 		},
 	}
 	with(benchDebugTraceCallCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
@@ -418,11 +350,8 @@ func main() {
 		Use:   "benchTraceCallMany",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchTraceCallMany(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.BenchTraceCallMany(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
 		},
 	}
 	with(benchTraceCallManyCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
@@ -431,11 +360,8 @@ func main() {
 		Use:   "benchTraceBlock",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchTraceBlock(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.BenchTraceBlock(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
 		},
 	}
 	with(benchTraceBlockCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
@@ -444,11 +370,8 @@ func main() {
 		Use:   "benchTraceFilter",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchTraceFilter(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.BenchTraceFilter(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
 		},
 	}
 	with(benchTraceFilterCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
@@ -457,11 +380,8 @@ func main() {
 		Use:   "benchTxReceipt",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchTxReceipt(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.BenchTxReceipt(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
 		},
 	}
 	with(benchTxReceiptCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
@@ -470,11 +390,8 @@ func main() {
 		Use:   "benchBlockReceipts",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchBlockReceipts(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.BenchBlockReceipts(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
 		},
 	}
 	with(benchBlockReceiptsCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
@@ -483,11 +400,8 @@ func main() {
 		Use:   "benchTraceReplayTransaction",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchTraceReplayTransaction(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.BenchTraceReplayTransaction(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
 		},
 	}
 	with(benchTraceReplayTransactionCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
@@ -496,11 +410,8 @@ func main() {
 		Use:   "benchTraceTransaction",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchTraceTransaction(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.BenchTraceTransaction(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
 		},
 	}
 	with(benchTraceTransactionCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
@@ -509,11 +420,8 @@ func main() {
 		Use:   "benchBlockByNumber",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchEthGetBlockByNumber(erigonURL)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.BenchEthGetBlockByNumber(erigonURL)
 		},
 	}
 	with(benchEthBlockByNumberCmd, withErigonUrl)
@@ -522,11 +430,8 @@ func main() {
 		Use:   "benchEthGetBalance",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchEthGetBalance(erigonURL, gethURL, needCompare, blockFrom, blockTo)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.BenchEthGetBalance(erigonURL, gethURL, needCompare, blockFrom, blockTo)
 		},
 	}
 	with(benchEthGetBalanceCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum)
