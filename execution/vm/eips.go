@@ -25,6 +25,7 @@ import (
 	"strconv"
 
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/state"
 )
 
 var activators = map[int]func(*JumpTable){
@@ -207,7 +208,7 @@ func enable1153(jt *JumpTable) {
 // opTload implements TLOAD opcode
 func opTload(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	loc := scope.Stack.peek()
-	*loc = evm.IntraBlockState().GetTransientState(scope.Contract.Address(), *loc)
+	*loc = evm.IntraBlockState().GetTransientState(scope.Contract.Address(), state.TransientKey(*loc))
 	return pc, nil, nil
 }
 
@@ -216,7 +217,7 @@ func opTstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if evm.readOnly {
 		return pc, nil, ErrWriteProtection
 	}
-	key := scope.Stack.popCopy()
+	key := state.TransientKey(scope.Stack.popCopy())
 	val := scope.Stack.popCopy()
 	evm.IntraBlockState().SetTransientState(scope.Contract.Address(), key, val)
 	return pc, nil, nil

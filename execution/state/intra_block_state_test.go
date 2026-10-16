@@ -187,7 +187,7 @@ func newTestAction(addr accounts.Address, r *rand.Rand) testAction {
 		{
 			name: "SetTransientState",
 			fn: func(a testAction, s *IntraBlockState) error {
-				s.SetTransientState(addr, *uint256.NewInt(uint64(a.args[0])), *uint256.NewInt(uint64(a.args[1])))
+				s.SetTransientState(addr, TransientKey(*uint256.NewInt(uint64(a.args[0]))), *uint256.NewInt(uint64(a.args[1])))
 				return nil
 			},
 			args: make([]int64, 2),
@@ -420,7 +420,7 @@ func TestTransientStorage(t *testing.T) {
 	state := New(nil)
 	defer state.Close()
 
-	key := *uint256.NewInt(1)
+	key := TransientKey(*uint256.NewInt(1))
 	value := uint256.NewInt(2)
 	addr := accounts.Address{}
 
