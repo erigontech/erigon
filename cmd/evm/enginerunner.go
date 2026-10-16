@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 var engineTestCommand = cli.Command{
@@ -35,6 +36,8 @@ var engineTestCommand = cli.Command{
 	Usage:     "Executes the given engine API tests (blockchain_tests_engine fixtures)",
 	ArgsUsage: "<path>...",
 	Flags: []cli.Flag{
+		&BALReportFlag,
+		&BALSequentialFlag,
 		&JSONOutputFlag,
 		&RunFlag,
 		&ExcludeFlag,
@@ -62,6 +65,7 @@ func engineTestCmd(_ context.Context, ctx *cli.Command) error {
 		return err
 	}
 
+	reportPath := runnerExecutionPathReporter(ctx)
 	files, err := collectArgFiles(ctx)
 	if err != nil {
 		return exitIncomplete(err)
@@ -69,7 +73,7 @@ func engineTestCmd(_ context.Context, ctx *cli.Command) error {
 	files = filter.filterFiles(files)
 	var incomplete incompleteRun
 	results, err := runTestFilesParallel(files, workers, incomplete.wrap(func(fname string) ([]testResult, error) {
-		return runEngineTest(ctx, fname, filter)
+		return runEngineTest(ctx, fname, filter, reportPath)
 	}))
 	if err != nil {
 		return err
@@ -80,7 +84,7 @@ func engineTestCmd(_ context.Context, ctx *cli.Command) error {
 
 // runEngineTest runs the fixtures in fname. Its error names a fixture that
 // cannot be decoded, which also gets a failed result, or the file itself.
-func runEngineTest(ctx *cli.Command, fname string, filter testFilter) ([]testResult, error) {
+func runEngineTest(ctx *cli.Command, fname string, filter testFilter, reportPath func(ethconfig.BlockExecutionPath)) ([]testResult, error) {
 	src, err := os.ReadFile(fname)
 	if err != nil {
 		return nil, err
@@ -102,6 +106,10 @@ func runEngineTest(ctx *cli.Command, fname string, filter testFilter) ([]testRes
 			unreadable = append(unreadable, fmt.Errorf("fixture %s: %w", name, err))
 			continue
 		}
+		if ctx.Bool(BALSequentialFlag.Name) {
+			test.ExecWorkers = 1
+		}
+		test.ExecutionPathReporter = reportPath
 		result := testResult{Name: name, Pass: true}
 		if err := test.RunCLI(); err != nil {
 			result.Pass = false

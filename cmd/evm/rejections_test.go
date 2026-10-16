@@ -71,7 +71,17 @@ func TestRunnersReportRejections(t *testing.T) {
 	if testing.Short() {
 		t.Skip("too slow for testing.Short")
 	}
-	const engineFixture = "../../execution/tests/testdata/engine/bal_cross_block_ripemd160_state_leak.json"
+	const (
+		blockFixtures = "../../execution/tests/testdata/delivered_access_list/"
+		engineFixture = "../../execution/tests/testdata/engine/bal_cross_block_ripemd160_state_leak.json"
+		// The block in invalid_list commits to a list whose accounts are out
+		// of order.
+		badListOrder = "invalid block access list: account addresses must be strictly increasing"
+	)
+	wrongReason := func(fixture map[string]any) {
+		block := fixture["blocks"].([]any)[0].(map[string]any)
+		block["expectException"] = "TransactionException.INSUFFICIENT_ACCOUNT_FUNDS"
+	}
 	for _, tc := range []struct {
 		name      string
 		command   string
@@ -80,6 +90,16 @@ func TestRunnersReportRejections(t *testing.T) {
 		errSubstr string // empty when nothing is rejected
 		noHash    bool   // the block failed to decode, so it has no hash
 	}{
+		{"block valid", "blocktest", func(*testing.T) string { return blockFixtures + "valid.json" }, 0, "", false},
+		{"block rejected", "blocktest", func(*testing.T) string { return blockFixtures + "invalid_list.json" }, 0, badListOrder, false},
+		{"block rejected for another reason", "blocktest", func(t *testing.T) string {
+			return writeEditedFixture(t, blockFixtures+"invalid_list.json", wrongReason)
+		}, 0, badListOrder, false},
+		{"block that fails to decode", "blocktest", func(t *testing.T) string {
+			return writeEditedFixture(t, blockFixtures+"invalid_list.json", func(fixture map[string]any) {
+				fixture["blocks"].([]any)[0].(map[string]any)["rlp"] = "0xc0"
+			})
+		}, 0, "rlp", true},
 		{"engine valid", "enginetest", func(*testing.T) string { return engineFixture }, 0, "", false},
 		{"engine rejected for another reason", "enginetest", func(t *testing.T) string {
 			return writeEditedFixture(t, engineFixture, expectPayload1Invalid("TransactionException.INSUFFICIENT_ACCOUNT_FUNDS"))
