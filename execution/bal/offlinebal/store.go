@@ -347,6 +347,9 @@ func (r *Reader) Get(blockNum uint64, hash common.Hash) ([]byte, bool) {
 
 func (r *Reader) Len() int { return r.count }
 
+// End returns the block after the last indexed one.
+func (r *Reader) End() uint64 { return r.first + uint64(len(r.offsets)/8) }
+
 func (r *Reader) Close() error {
 	if r.data == nil {
 		return nil
@@ -354,33 +357,36 @@ func (r *Reader) Close() error {
 	return r.data.Unmap()
 }
 
-// Store is the offline-BAL store opened for one mode: a Writer to generate, a
-// Reader to use, or neither.
+// Store is the offline-BAL store: a Writer to generate, a Reader to use, both
+// on one directory, or neither.
 type Store struct {
 	Writer *Writer
 	Reader *Reader
 }
 
-func Open(generate, use bool, dir string) (Store, error) {
-	switch {
-	case generate && use:
-		return Store{}, errors.New("offline BALs: generate and use are mutually exclusive")
-	case generate:
-		w, err := NewWriter(dir)
-		return Store{Writer: w}, err
-	case use:
-		r, err := OpenReader(dir)
-		return Store{Reader: r}, err
+// Open opens the writer before the reader so the reader maps a log whose torn
+// tail is already cut.
+func Open(generate, use bool, dir string) (s Store, err error) {
+	if generate {
+		if s.Writer, err = NewWriter(dir); err != nil {
+			return Store{}, err
+		}
 	}
-	return Store{}, nil
+	if use {
+		if s.Reader, err = OpenReader(dir); err != nil {
+			return Store{}, errors.Join(err, s.Close())
+		}
+	}
+	return s, nil
 }
 
 func (s Store) Close() error {
+	var err error
 	if s.Writer != nil {
-		return s.Writer.Close()
+		err = s.Writer.Close()
 	}
 	if s.Reader != nil {
-		return s.Reader.Close()
+		err = errors.Join(err, s.Reader.Close())
 	}
-	return nil
+	return err
 }
