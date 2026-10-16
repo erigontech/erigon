@@ -38,13 +38,9 @@ const transientScanLimit = 32
 // transientSlots only appends, so a slot index stays valid for the journal until
 // the transaction ends.
 type transientSlots struct {
-	slots []transientSlot
-	index map[TransientKey]int // nil until len(slots) > transientScanLimit
-}
-
-type transientSlot struct {
-	key   TransientKey
-	value uint256.Int
+	values []uint256.Int
+	keys   []TransientKey       // scanned while small; nil once index is built
+	index  map[TransientKey]int // nil until len(values) > transientScanLimit
 }
 
 // newTransientStorage creates a new instance of a transientStorage.
@@ -61,22 +57,22 @@ func (t transientStorage) Set(j *journal, addr accounts.Address, key *TransientK
 		}
 		s, i = t.add(addr, key)
 	}
-	if prev := s.slots[i].value; prev != *value {
+	if prev := s.values[i]; prev != *value {
 		j.transientStorageChange(addr, i, prev)
-		s.slots[i].value = *value
+		s.values[i] = *value
 	}
 }
 
 // restore writes back a value that Set journalled for the slot index.
 func (t transientStorage) restore(addr accounts.Address, slot int, value uint256.Int) {
-	t[addr].slots[slot].value = value
+	t[addr].values[slot] = value
 }
 
 // Get gets the transient storage for `key` at the given `addr`.
 func (t transientStorage) Get(addr accounts.Address, key TransientKey) uint256.Int {
 	if s := t[addr]; s != nil {
 		if i := s.find(&key); i >= 0 {
-			return s.slots[i].value
+			return s.values[i]
 		}
 	}
 	return uint256.Int{}
@@ -106,8 +102,8 @@ func (s *transientSlots) find(key *TransientKey) int {
 		}
 		return -1
 	}
-	for i := range s.slots {
-		if s.slots[i].key == *key {
+	for i := range s.keys {
+		if s.keys[i] == *key {
 			return i
 		}
 	}
@@ -115,15 +111,19 @@ func (s *transientSlots) find(key *TransientKey) int {
 }
 
 func (s *transientSlots) add(key *TransientKey) int {
-	i := len(s.slots)
-	s.slots = append(s.slots, transientSlot{key: *key})
+	i := len(s.values)
+	s.values = append(s.values, uint256.Int{})
 	if s.index != nil {
 		s.index[*key] = i
-	} else if len(s.slots) > transientScanLimit {
-		s.index = make(map[TransientKey]int, 2*len(s.slots))
-		for j := range s.slots {
-			s.index[s.slots[j].key] = j
+		return i
+	}
+	s.keys = append(s.keys, *key)
+	if len(s.keys) > transientScanLimit {
+		s.index = make(map[TransientKey]int, 2*len(s.keys))
+		for j := range s.keys {
+			s.index[s.keys[j]] = j
 		}
+		s.keys = nil
 	}
 	return i
 }
