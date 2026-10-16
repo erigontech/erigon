@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/shards"
 )
 
@@ -508,6 +509,21 @@ func warmTxsHashes(block *types.Block, chainID *uint256.Int) {
 	_ = block.Hash()
 }
 
+// reportExecutionPath skips genesis, which is never executed.
+func (te *txExecutor) reportExecutionPath(b *types.Block, path, reason string, accessList bool) {
+	report := te.cfg.syncCfg.ExecutionPathReporter
+	if report == nil || b.NumberU64() == 0 {
+		return
+	}
+	report(ethconfig.BlockExecutionPath{
+		Number:     b.NumberU64(),
+		Hash:       b.Hash(),
+		Path:       path,
+		Reason:     reason,
+		AccessList: accessList,
+	})
+}
+
 func blockAccessList(blockTx kv.Getter, block *types.Block, blockNum uint64) (types.BlockAccessList, error) {
 	bal := block.BlockAccessList()
 	if bal == nil && block.HeaderNoCopy().HasNonEmptyBAL() {
@@ -605,6 +621,11 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()
+			if te.cfg.syncCfg.ExecWorkerCount <= 1 {
+				te.reportExecutionPath(b, "sequential", "single-worker", len(dbBAL) > 0)
+			} else {
+				te.reportExecutionPath(b, "parallel", "", len(dbBAL) > 0)
+			}
 
 			// BlockContext: workers override GetHash with their own per-worker
 			// function (installWorkerGetHash) using their own roTx; this
