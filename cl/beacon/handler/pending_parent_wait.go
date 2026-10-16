@@ -35,7 +35,7 @@ const proposalWaitPollInterval = 100 * time.Millisecond
 // still has that margin.
 func proposalWaitCutoff(slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion) time.Time {
 	due := attestationDue(cfg, stateVersion)
-	return slotStart.Add(unpreparedGrabOffset(due) - payloadPublicationMargin(due))
+	return slotStart.Add(preparedGrabOffset(due) - payloadPublicationMargin(due))
 }
 
 // awaitParkedEnvelope polls parked until it reports false or the deadline passes. A head change
@@ -128,7 +128,7 @@ func (a *ApiHandler) awaitPendingParentPayload(
 		return nil
 	}
 	a.logger.Info("BlockProduction: waiting for parent payload decision", "slot", targetSlot, "head", baseBlockRoot, "budget", time.Until(deadline).Round(time.Millisecond))
-	collectBy := slotStart.Add(unpreparedGrabOffset(attestationDue(a.beaconChainCfg, stateVersion)))
+	collectBy := slotStart.Add(preparedGrabOffset(attestationDue(a.beaconChainCfg, stateVersion)))
 	return awaitParkedEnvelope(ctx, deadline, proposalWaitPollInterval,
 		func() bool { return a.envelopeParked(baseBlockRoot) },
 		func() error {
