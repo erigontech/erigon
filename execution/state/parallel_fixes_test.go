@@ -353,7 +353,7 @@ func TestBlockStateCacheWriteAccount_NilCommitted(t *testing.T) {
 	acc.Nonce = 1
 
 	assert.NotPanics(t, func() {
-		cache.WriteAccount(addr, &acc, 1)
+		cache.WriteAccount(addr, acc, 1)
 	}, "WriteAccount should not panic with nil committed account")
 
 	// Verify the write is recorded.
@@ -377,12 +377,12 @@ func TestBlockStateCacheWriteAccountUpdatesCurrent(t *testing.T) {
 	acc.Nonce = 3
 	cache.PutCommittedAccount(addr, &acc)
 
-	cache.WriteAccount(addr, &acc, 3)
+	cache.WriteAccount(addr, acc, 3)
 
 	acc2 := accounts.NewAccount()
 	acc2.Balance = *uint256.NewInt(600)
 	acc2.Nonce = 3
-	cache.WriteAccount(addr, &acc2, 5)
+	cache.WriteAccount(addr, acc2, 5)
 
 	current, ok := cache.GetCurrentAccount(addr)
 	assert.True(t, ok)
@@ -425,7 +425,7 @@ func TestBlockStateCacheDeleteAccount_RecreateThenDeleteRecords(t *testing.T) {
 	acc.Balance = *uint256.NewInt(1)
 
 	cache.DeleteAccount(addr, 1)
-	cache.WriteAccount(addr, &acc, 2)
+	cache.WriteAccount(addr, acc, 2)
 	cache.DeleteAccount(addr, 3)
 
 	deletes := 0

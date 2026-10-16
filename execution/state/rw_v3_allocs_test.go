@@ -201,8 +201,6 @@ func TestCachedReaderV3_CurrentReadsCommittedWhenUnwritten(t *testing.T) {
 	require.NotSame(t, want, got, "the caller must not be able to mutate the cached account")
 }
 
-// A write this block shadows the committed view, and a nil write means the
-// account was destroyed — neither may fall through to the committed entry.
 func TestCachedReaderV3_CurrentPrefersBlockWrite(t *testing.T) {
 	t.Parallel()
 
@@ -212,7 +210,7 @@ func TestCachedReaderV3_CurrentPrefersBlockWrite(t *testing.T) {
 
 	written := cacheReadTestAccount()
 	written.Nonce = 43
-	cache.WriteAccount(addr, written, 1)
+	cache.WriteAccount(addr, *written, 1)
 	got, err := NewCurrentCachedReaderV3(nil, cache).ReadAccountData(addr)
 	require.NoError(t, err)
 	require.NotNil(t, got)

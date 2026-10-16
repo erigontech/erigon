@@ -164,13 +164,13 @@ func TestBlockStateCacheFlushPreservesPerTxHistory(t *testing.T) {
 	tx3Acc := accounts.NewAccount()
 	tx3Acc.Balance.SetUint64(1100)
 	tx3Enc := accounts.SerialiseV3(&tx3Acc)
-	cache.WriteAccount(addr, &tx3Acc, 3)
+	cache.WriteAccount(addr, tx3Acc, 3)
 
 	// Tx 5 increments balance to 1300.
 	tx5Acc := accounts.NewAccount()
 	tx5Acc.Balance.SetUint64(1300)
 	tx5Enc := accounts.SerialiseV3(&tx5Acc)
-	cache.WriteAccount(addr, &tx5Acc, 5)
+	cache.WriteAccount(addr, tx5Acc, 5)
 
 	// Block-end Flush.
 	domains.SetTxNum(5)

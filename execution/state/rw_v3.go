@@ -248,8 +248,10 @@ func (ws *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx, bl
 				acc := accounts.NewAccount()
 				if !d.selfDestruct {
 					if blockCache != nil {
-						if cur, ok := blockCache.GetCurrentAccount(addr); ok && cur != deletedAccount {
-							acc = cur
+						if cur, ok := blockCache.GetCurrentAccount(addr); ok {
+							if cur != deletedAccount {
+								acc = cur
+							}
 						} else if enc0, _, err := domains.GetLatest(kv.AccountsDomain, roTx, address[:]); err == nil && len(enc0) > 0 {
 							_ = accounts.DeserialiseV3(&acc, enc0)
 						}
@@ -275,7 +277,7 @@ func (ws *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx, bl
 					fmt.Printf("%d apply:put account: %x balance:%s,nonce:%d,codehash:%x\n", blockNum, addr, acc.Balance.String(), acc.Nonce, acc.CodeHash)
 				}
 				if blockCache != nil {
-					blockCache.WriteAccount(addr, &acc, txNum)
+					blockCache.WriteAccount(addr, acc, txNum)
 					if !domains.InlineTouchKeyDisabled() {
 						domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(address[:]), accounts.SerialiseV3(&acc))
 					}
@@ -386,7 +388,7 @@ func (ws *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx, bl
 			}
 		} else {
 			if blockCache != nil {
-				blockCache.WriteAccount(addr, &acc, txNum)
+				blockCache.WriteAccount(addr, acc, txNum)
 				if !domains.InlineTouchKeyDisabled() {
 					domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(addrValue[:]), accounts.SerialiseV3(&acc))
 				}
@@ -1138,7 +1140,13 @@ func (c *BlockStateCache) GetCommittedStorage(addr accounts.Address, key account
 	return v.(uint256.Int), true
 }
 
+var emptySlot any = uint256.Int{}
+
 func (c *BlockStateCache) PutCommittedStorage(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
+	if val.IsZero() {
+		c.committedStorage.Store(committedStorageKey{addr: addr, key: key}, emptySlot)
+		return
+	}
 	c.committedStorage.Store(committedStorageKey{addr: addr, key: key}, val)
 }
 
@@ -1154,8 +1162,8 @@ func (c *BlockStateCache) PutCommittedStorage(addr accounts.Address, key account
 // Multiple writes to the same address in one block produce multiple
 // log entries — Flush emits a DomainPut for each, building per-tx
 // AccountsDomain history.
-func (c *BlockStateCache) WriteAccount(addr accounts.Address, acc *accounts.Account, txNum uint64) {
-	stored := v3RoundTrip(acc)
+func (c *BlockStateCache) WriteAccount(addr accounts.Address, acc accounts.Account, txNum uint64) {
+	stored := v3RoundTrip(&acc)
 	enc := accounts.SerialiseV3(&stored)
 	c.mu.Lock()
 	c.currentAccounts[addr] = stored
@@ -1221,8 +1229,7 @@ func (c *BlockStateCache) GetCurrentAccountDecoded(addr accounts.Address) (*acco
 	if !ok || acc == deletedAccount {
 		return nil, ok
 	}
-	result := acc
-	return &result, true
+	return &acc, true
 }
 
 func (c *BlockStateCache) GetCurrentAccount(addr accounts.Address) (accounts.Account, bool) {

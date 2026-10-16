@@ -56,9 +56,12 @@ func BenchmarkBlockStateCacheAccountBlock(b *testing.B) {
 		return []any{balanceWrite(addr, balance, 0), nonceWrite(addr, nonce, 0), incarnationWrite(addr, 1), codeHashWrite(addr, 0xcd)}
 	}
 
-	blockWrites := make([]*WriteSet, txs)
-	for i := range txs {
-		blockWrites[i] = newWriteSet(append(append(fullWrite(senders[i], 999_000_000, 8), fullWrite(recipients[i], 1_001_000_000, 7)...), fullWrite(coinbase, uint64(1_000_000_000+i), 7)...)...)
+	var blockWrites [2][]*WriteSet
+	for p := range blockWrites {
+		blockWrites[p] = make([]*WriteSet, txs)
+		for i := range txs {
+			blockWrites[p][i] = newWriteSet(append(append(fullWrite(senders[i], uint64(999_000_000+p), 8), fullWrite(recipients[i], uint64(1_001_000_000+p), 7)...), fullWrite(coinbase, uint64(1_000_000_000+i+p), 7)...)...)
+		}
 	}
 
 	txNum := uint64(10)
@@ -66,15 +69,19 @@ func BenchmarkBlockStateCacheAccountBlock(b *testing.B) {
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		cache := NewBlockStateCache()
-		reader := NewCurrentCachedReaderV3(getter, cache)
+		worker := NewCachedReaderV3(getter, cache)
+		current := NewCurrentCachedReaderV3(getter, cache)
 		for i := range txs {
 			for _, addr := range []accounts.Address{senders[i], recipients[i], coinbase} {
-				if _, err := reader.ReadAccountData(addr); err != nil {
+				if _, err := worker.ReadAccountData(addr); err != nil {
+					b.Fatal(err)
+				}
+				if _, err := current.ReadAccountData(addr); err != nil {
 					b.Fatal(err)
 				}
 			}
 			txNum++
-			if err := blockWrites[i].Apply(domains, tx, 1, txNum, nil, rules, cache, false); err != nil {
+			if err := blockWrites[n%2][i].Apply(domains, tx, 1, txNum, nil, rules, cache, false); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -108,9 +115,12 @@ func BenchmarkBlockStateCacheStorageReads(b *testing.B) {
 
 	rules := &chain.Rules{}
 	getter := domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})
-	blockWrites := make([]*WriteSet, txs)
-	for i := range txs {
-		blockWrites[i] = newWriteSet(storageWrite(token, from[i], 999_000_000_000), storageWrite(token, to[i], uint64(1_000_001_000_000+i)), storageWrite(token, hot, uint64(i+1)))
+	var blockWrites [2][]*WriteSet
+	for p := range blockWrites {
+		blockWrites[p] = make([]*WriteSet, txs)
+		for i := range txs {
+			blockWrites[p][i] = newWriteSet(storageWrite(token, from[i], uint64(999_000_000_000+p)), storageWrite(token, to[i], uint64(1_000_001_000_000+i+p)), storageWrite(token, hot, uint64(i+1+p)))
+		}
 	}
 
 	txNum := uint64(10)
@@ -129,7 +139,7 @@ func BenchmarkBlockStateCacheStorageReads(b *testing.B) {
 				}
 			}
 			txNum++
-			if err := blockWrites[i].Apply(domains, tx, 1, txNum, nil, rules, cache, false); err != nil {
+			if err := blockWrites[n%2][i].Apply(domains, tx, 1, txNum, nil, rules, cache, false); err != nil {
 				b.Fatal(err)
 			}
 			if _, _, err := current.ReadAccountStorage(token, to[i]); err != nil {

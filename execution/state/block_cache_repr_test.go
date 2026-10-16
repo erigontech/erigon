@@ -83,14 +83,14 @@ func TestBlockStateCacheAccountRepresentation(t *testing.T) {
 	committedB.Root = common.HexToHash("0x1234")
 	cache.PutCommittedAccount(addrB, &committedB)
 
-	apply := func(txNum uint64, ws *WriteSet, increases map[accounts.Address]uint256.Int) {
+	apply := func(t *testing.T, txNum uint64, ws *WriteSet, increases map[accounts.Address]uint256.Int) {
 		t.Helper()
 		require.NoError(t, ws.Apply(domains, tx, 1, txNum, increases, &chain.Rules{}, cache, false))
 	}
 	current := NewCurrentCachedReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}), cache)
 	history := NewHistoryReaderV3WithBlockCache(tx, domains, cache, 100)
 
-	requireCurrent := func(addr accounts.Address, want *reprAcc) {
+	requireCurrent := func(t *testing.T, addr accounts.Address, want *reprAcc) {
 		t.Helper()
 		got, err := current.ReadAccountData(addr)
 		require.NoError(t, err)
@@ -110,34 +110,40 @@ func TestBlockStateCacheAccountRepresentation(t *testing.T) {
 		require.True(t, has)
 	}
 
-	apply(10, newWriteSet(balanceWrite(addrA, 200, 0)), nil)
-	requireCurrent(addrA, &reprAcc{nonce: 5, balance: 200, codeHash: codeHash, incarnation: 2})
-
-	apply(11, newWriteSet(nonceWrite(addrA, 6, 0)), nil)
-	requireCurrent(addrA, &reprAcc{nonce: 6, balance: 200, codeHash: codeHash, incarnation: 2})
-
-	committedView, err := history.ReadAccountData(addrB)
-	require.NoError(t, err)
-	require.Equal(t, reprAcc{nonce: 2, balance: 50}.account(), *committedView)
-
-	apply(12, newWriteSet(balanceWrite(addrC, 1, 0), codeHashWrite(addrC, 0)), nil)
-	requireCurrent(addrC, &reprAcc{balance: 1})
-
-	apply(13, newWriteSet(selfDestructWrite(addrD, true)), nil)
-	requireCurrent(addrD, nil)
-
-	apply(14, newWriteSet(balanceWrite(addrD, 5, 0)), nil)
-	requireCurrent(addrD, &reprAcc{nonce: 7, balance: 5})
-
-	apply(15, newWriteSet(selfDestructWrite(addrE, true)), nil)
-	apply(16, nil, map[accounts.Address]uint256.Int{addrE: *uint256.NewInt(4)})
-	requireCurrent(addrE, &reprAcc{balance: 4})
-
-	apply(17, nil, map[accounts.Address]uint256.Int{addrF: *uint256.NewInt(10)})
-	requireCurrent(addrF, &reprAcc{nonce: 9, balance: 100})
-
-	apply(18, newWriteSet(balanceWrite(empty, 0, 0)), nil)
-	requireCurrent(empty, &reprAcc{})
+	t.Run("partial writes overlay the base", func(t *testing.T) {
+		apply(t, 10, newWriteSet(balanceWrite(addrA, 200, 0)), nil)
+		requireCurrent(t, addrA, &reprAcc{nonce: 5, balance: 200, codeHash: codeHash, incarnation: 2})
+		apply(t, 11, newWriteSet(nonceWrite(addrA, 6, 0)), nil)
+		requireCurrent(t, addrA, &reprAcc{nonce: 6, balance: 200, codeHash: codeHash, incarnation: 2})
+	})
+	t.Run("committed view", func(t *testing.T) {
+		committedView, err := history.ReadAccountData(addrB)
+		require.NoError(t, err)
+		require.Equal(t, reprAcc{nonce: 2, balance: 50}.account(), *committedView)
+	})
+	t.Run("empty code hash", func(t *testing.T) {
+		apply(t, 12, newWriteSet(balanceWrite(addrC, 1, 0), codeHashWrite(addrC, 0)), nil)
+		requireCurrent(t, addrC, &reprAcc{balance: 1})
+	})
+	t.Run("write after self-destruct", func(t *testing.T) {
+		apply(t, 13, newWriteSet(selfDestructWrite(addrD, true)), nil)
+		requireCurrent(t, addrD, nil)
+		apply(t, 14, newWriteSet(balanceWrite(addrD, 5, 0)), nil)
+		requireCurrent(t, addrD, &reprAcc{balance: 5})
+	})
+	t.Run("increase after self-destruct", func(t *testing.T) {
+		apply(t, 15, newWriteSet(selfDestructWrite(addrE, true)), nil)
+		apply(t, 16, nil, map[accounts.Address]uint256.Int{addrE: *uint256.NewInt(4)})
+		requireCurrent(t, addrE, &reprAcc{balance: 4})
+	})
+	t.Run("increase", func(t *testing.T) {
+		apply(t, 17, nil, map[accounts.Address]uint256.Int{addrF: *uint256.NewInt(10)})
+		requireCurrent(t, addrF, &reprAcc{nonce: 9, balance: 100})
+	})
+	t.Run("empty account", func(t *testing.T) {
+		apply(t, 18, newWriteSet(balanceWrite(empty, 0, 0)), nil)
+		requireCurrent(t, empty, &reprAcc{})
+	})
 }
 
 func TestBlockStateCacheStorageRepresentation(t *testing.T) {

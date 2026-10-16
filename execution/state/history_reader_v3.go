@@ -101,14 +101,6 @@ func (hr *HistoryReaderV3) SetBlockStateCache(cache *BlockStateCache) {
 // we silently fall through to ttx so the same reader type is usable in
 // both modes.
 func (hr *HistoryReaderV3) getAsOf(domain kv.Domain, key []byte) (enc []byte, ok bool, err error) {
-	if hr.blockCache != nil && domain == kv.AccountsDomain && len(key) == 20 {
-		if cached, hit := hr.blockCache.GetCurrentAccount(accounts.InternAddress(common.Address(key))); hit {
-			if cached == deletedAccount {
-				return nil, false, nil
-			}
-			return accounts.SerialiseV3(&cached), true, nil
-		}
-	}
 	if hr.sd != nil {
 		enc, ok, err = hr.sd.GetAsOf(domain, key, hr.txNum)
 		if err == nil && ok {
@@ -161,6 +153,9 @@ func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.
 func (hr *HistoryReaderV3) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
 	if hr.blockCache != nil {
 		if acc, hit := hr.blockCache.GetCurrentAccountDecoded(accounts.InternAddress(address)); hit {
+			if hr.trace {
+				fmt.Printf("%sReadAccountData (cache)[%x] => %v\n", hr.tracePrefix, address, acc)
+			}
 			return acc, nil
 		}
 	}
@@ -202,6 +197,9 @@ func (hr *HistoryReaderV3) ReadAccountDataForDebug(address accounts.Address) (*a
 func (hr *HistoryReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	if hr.blockCache != nil {
 		if v, hit := hr.blockCache.GetCurrentStorage(address, key); hit {
+			if hr.trace {
+				fmt.Printf("%sReadAccountStorage (cache)[%x] [%x] => [%x]\n", hr.tracePrefix, address, key, v.Bytes())
+			}
 			return v, !v.IsZero(), nil
 		}
 	}
@@ -239,6 +237,14 @@ func (hr *HistoryReaderV3) ReadAccountCodeSize(address accounts.Address) (int, e
 }
 
 func (hr *HistoryReaderV3) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
+	if hr.blockCache != nil {
+		if acc, hit := hr.blockCache.GetCurrentAccount(address); hit {
+			if acc.Incarnation == 0 {
+				return 0, nil
+			}
+			return acc.Incarnation - 1, nil
+		}
+	}
 	hr.addr = address.Value()
 	enc, ok, err := hr.getAsOf(kv.AccountsDomain, hr.addr[:])
 	if err != nil || !ok || len(enc) == 0 {
