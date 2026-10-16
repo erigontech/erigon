@@ -17,6 +17,9 @@
 package tiering
 
 import (
+	"errors"
+	"math"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -62,29 +65,105 @@ type File struct {
 type Usage struct {
 	Files int
 	Bytes uint64
+	Txs   uint64 // txnums below the cold boundary
 }
 
-// Lag splits the files that should be on the cold tier but are not, by reason.
+// Lag splits the files that should be on the cold tier but are not, by reason. Hot counts every file not on the cold
+// tier. ColdEnd is the end of the newest cold-resident file; HotStart is the start of the oldest hot file, or ColdEnd
+// when every file is cold.
 type Lag struct {
-	ColdResident, CopyPending, Straddling Usage
+	ColdResident, CopyPending, Straddling, Hot Usage
+	ColdEnd, HotStart                          uint64
+}
+
+// IsCold reports whether a symlink-resolved path lies in the cold dir.
+func IsCold(path, coldDir string) bool {
+	return coldDir != "" && strings.HasPrefix(path, filepath.Clean(coldDir)+string(filepath.Separator))
 }
 
 func ComputeLag(files []File, boundaryTxNum uint64, coldDir string) Lag {
 	var lag Lag
+	hotStart := uint64(math.MaxUint64)
 	for _, f := range files {
+		if IsCold(f.Path, coldDir) {
+			lag.ColdResident.Files++
+			lag.ColdResident.Bytes += f.Size
+			lag.ColdEnd = max(lag.ColdEnd, f.End)
+			continue
+		}
+		lag.Hot.Files++
+		lag.Hot.Bytes += f.Size
+		hotStart = min(hotStart, f.Start)
 		var u *Usage
 		switch {
-		case coldDir != "" && strings.HasPrefix(f.Path, filepath.Clean(coldDir)+string(filepath.Separator)):
-			u = &lag.ColdResident
 		case f.End <= boundaryTxNum:
 			u = &lag.CopyPending
+			u.Txs += f.End - f.Start
 		case f.Start < boundaryTxNum:
 			u = &lag.Straddling
+			u.Txs += boundaryTxNum - f.Start
 		default:
 			continue
 		}
 		u.Files++
 		u.Bytes += f.Size
 	}
+	lag.HotStart = lag.ColdEnd
+	if lag.Hot.Files > 0 {
+		lag.HotStart = hotStart
+	}
 	return lag
+}
+
+// AccessorBytes sums the sizes of the accessor files in dir that belong to files. Accessors and data files can carry
+// different version prefixes, so they are matched by name without the version.
+func AccessorBytes(dir string, files []File) (uint64, error) {
+	want := make(map[string]struct{}, len(files))
+	for _, f := range files {
+		want[unversioned(strings.TrimSuffix(filepath.Base(f.Path), ".kv"))] = struct{}{}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, err
+	}
+	var total uint64
+	for _, e := range entries {
+		ext := filepath.Ext(e.Name())
+		if ext != ".kvi" && ext != ".bt" && ext != ".kvei" {
+			continue
+		}
+		if _, ok := want[unversioned(strings.TrimSuffix(e.Name(), ext))]; !ok {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			return 0, err
+		}
+		total += uint64(info.Size())
+	}
+	return total, nil
+}
+
+// DuplicateBytes sums the sizes of the cold-dir copies of hot files: data held on both tiers.
+func DuplicateBytes(coldDir string, hot []File) (uint64, error) {
+	if coldDir == "" {
+		return 0, nil
+	}
+	var total uint64
+	for _, f := range hot {
+		info, err := os.Stat(filepath.Join(coldDir, filepath.Base(f.Path)))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+		total += uint64(info.Size())
+	}
+	return total, nil
+}
+
+func unversioned(name string) string {
+	_, rest, _ := strings.Cut(name, "-")
+	return rest
 }
