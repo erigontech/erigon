@@ -83,7 +83,8 @@ func (t transientStorage) find(addr accounts.Address, key *TransientKey) (*trans
 	if s == nil {
 		return nil, -1
 	}
-	return s, s.find(key)
+	i := s.find(key)
+	return s, i
 }
 
 func (t transientStorage) add(addr accounts.Address, key *TransientKey) (*transientSlots, int) {
@@ -92,7 +93,8 @@ func (t transientStorage) add(addr accounts.Address, key *TransientKey) (*transi
 		s = &transientSlots{}
 		t[addr] = s
 	}
-	return s, s.add(key)
+	i := s.add(key)
+	return s, i
 }
 
 func (s *transientSlots) find(key *TransientKey) int {
