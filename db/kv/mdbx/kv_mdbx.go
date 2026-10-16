@@ -104,6 +104,7 @@ const (
 	DefaultGrowthStep = 1 * datasize.GB
 
 	inCommitSyncPeriods = 30
+	maxMdbxSyncPeriod   = 18 * time.Hour
 )
 
 // How much may stay unflushed, and for how long, under SafeNoSync. Both bound what a crash
@@ -428,7 +429,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 	}
 
 	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
-		if err := env.SetSyncPeriod(inCommitSyncPeriods * opts.syncPeriod); err != nil {
+		if err := env.SetSyncPeriod(min(inCommitSyncPeriods*opts.syncPeriod, maxMdbxSyncPeriod)); err != nil {
 			return nil, err
 		}
 	}

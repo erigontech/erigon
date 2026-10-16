@@ -1298,21 +1298,19 @@ func TestDeferredSyncBoundsAWriterThatNeverReleasesTheLock(t *testing.T) {
 	t.Cleanup(db.Close)
 	val := make([]byte, 4000)
 	write := func(i int) error {
-		tx, err := db.BeginRw(context.Background())
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-		for j := range 80 {
-			if err := tx.Put(kv.HeaderTD, binary.BigEndian.AppendUint64(nil, uint64(i*80+j)), val); err != nil {
-				return err
+		return db.Update(context.Background(), func(tx kv.RwTx) error {
+			for j := range 80 {
+				if err := tx.Put(kv.HeaderTD, binary.BigEndian.AppendUint64(nil, uint64(i*80+j)), val); err != nil {
+					return err
+				}
 			}
-		}
-		time.Sleep(40 * time.Millisecond)
-		return tx.Commit()
+			time.Sleep(40 * time.Millisecond)
+			return nil
+		})
 	}
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
+	var writeErr error
 	wg.Go(func() {
 		for i := 0; ; i++ {
 			select {
@@ -1320,7 +1318,7 @@ func TestDeferredSyncBoundsAWriterThatNeverReleasesTheLock(t *testing.T) {
 				return
 			default:
 			}
-			if write(i) != nil {
+			if writeErr = write(i); writeErr != nil {
 				return
 			}
 		}
@@ -1333,17 +1331,24 @@ func TestDeferredSyncBoundsAWriterThatNeverReleasesTheLock(t *testing.T) {
 	}
 	close(stop)
 	wg.Wait()
+	require.NoError(t, writeErr)
 	require.Less(t, worst, time.Second, "a writer that re-takes the lock at once kept its data unflushed")
 }
 
 func TestDeferredSyncLeavesTheDeadlineToThePoller(t *testing.T) {
-	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).SafeNoSync().SyncPeriod(50 * time.Millisecond).
-		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
+	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).SafeNoSync().SyncPeriod(50 * time.Millisecond).MustOpen()
 	t.Cleanup(db.Close)
 	period, err := db.(*mdbx.MdbxKV).Env().GetSyncPeriod()
 	require.NoError(t, err)
 	require.InDelta(t, float64(1500*time.Millisecond), float64(period), float64(time.Millisecond),
 		"mdbx flushes inside a commit that lands past its own deadline, so it must outlast the poller's")
+
+	long := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).SafeNoSync().SyncPeriod(time.Hour).MustOpen()
+	t.Cleanup(long.Close)
+	period, err = long.(*mdbx.MdbxKV).Env().GetSyncPeriod()
+	require.NoError(t, err)
+	require.InDelta(t, float64(18*time.Hour), float64(period), float64(time.Second),
+		"a backstop past mdbx's 16.16 range wraps to a shorter deadline")
 }
 
 // The flush mode is settled once every option is in, so a mode set after SafeNoSync still wins
