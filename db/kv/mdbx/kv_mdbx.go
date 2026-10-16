@@ -78,7 +78,7 @@ type MdbxOpts struct {
 	bucketsCfg                TableCfgFunc
 	path                      string
 	syncPeriod                time.Duration      // to be used only in combination with SafeNoSync flag. The dirty data will automatically be flushed to disk periodically in the background.
-	syncInCommitIfUnsyncedFor time.Duration      // SafeNoSync only: a commit this long after the last sync behaves as Durable
+	syncInCommitIfUnsyncedFor time.Duration      // SafeNoSync only
 	syncBytes                 *datasize.ByteSize // to be used only in combination with SafeNoSync flag. The dirty data will be flushed to disk when this threshold is reached.
 	mapSize                   datasize.ByteSize
 	growthStep                datasize.ByteSize
@@ -104,15 +104,11 @@ const (
 	DefaultMapSize    = 2 * datasize.TB
 	DefaultGrowthStep = 1 * datasize.GB
 
-	// A commit falls back to Durable only after this long without a sync, 30 poller intervals.
 	DefaultSyncInCommitIfUnsyncedFor = 30 * time.Second
-	maxSyncInCommitIfUnsyncedFor     = 18 * time.Hour // mdbx stores the period in 16.16-bit seconds
+	maxSyncInCommitIfUnsyncedFor     = 18 * time.Hour // mdbx's 16.16-bit range
 )
 
-// Under SafeNoSync the poller goroutine calls env.Sync every PollerSyncInterval. A commit past
-// either limit below behaves as Durable, syncing before it returns: a backstop for a writer the
-// poller cannot interrupt. Both limits bound what a crash rolls back; the byte one also bounds
-// the file growth a deferred sync causes.
+// SafeNoSync: the poller syncs every PollerSyncInterval; past either SyncInCommit limit a commit behaves as Durable.
 var (
 	SyncInCommitIfAboveUnsyncedBytes = dbg.EnvDataSize("MDBX_SYNC_BYTES", 256*datasize.MB)
 	PollerSyncInterval               = dbg.EnvDuration("MDBX_SYNC_PERIOD", time.Second)
@@ -171,8 +167,7 @@ func (opts MdbxOpts) SyncInCommitIfUnsyncedFor(d time.Duration) MdbxOpts {
 	return opts
 }
 
-// SafeNoSync syncs from the poller every PollerSyncInterval instead of on every commit; a commit
-// behaves as Durable only past SyncInCommitIfAboveUnsyncedBytes or SyncInCommitIfUnsyncedFor. Mdbx keeps the last flushed commit-point explicitly, so a crash
+// SafeNoSync defers the sync to the poller. Mdbx keeps the last synced commit-point, so a crash
 // rolls back to it and never corrupts the file. It is the default; Durable opts out.
 func (opts MdbxOpts) SafeNoSync() MdbxOpts {
 	return opts.Flags(func(f uint) uint { return f&^mdbx.Durable | mdbx.SafeNoSync })
