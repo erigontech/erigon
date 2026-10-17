@@ -42,7 +42,7 @@ func newTestCalcState() *calcState {
 	return &calcState{
 		accounts:     make(map[accounts.Address]*calcAccountState),
 		storageState: make(map[accounts.Address]map[accounts.StorageKey]uint256.Int),
-		storageDirty: make(map[accounts.Address]map[accounts.StorageKey]bool),
+		storageDirty: make(map[accounts.Address]map[accounts.StorageKey]slotFlags),
 	}
 }
 
@@ -83,7 +83,7 @@ func TestFlushToUpdates_DeletedWithIncarnation_EmitsZeroAccountUpdate(t *testing
 		Incarnation: 1,
 		Deleted:     true,
 	}
-	cs.markDirty(addr, cs.accounts[addr])
+	cs.markWritten(addr, cs.accounts[addr])
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -123,7 +123,7 @@ func TestFlushToUpdates_DeletedWithoutIncarnation_EmitsDelete(t *testing.T) {
 		Incarnation: 0,
 		Deleted:     true,
 	}
-	cs.markDirty(addr, cs.accounts[addr])
+	cs.markWritten(addr, cs.accounts[addr])
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -157,7 +157,7 @@ func TestFlushToUpdates_DeletedWithRetainedBalance_EmitsRegularUpdate(t *testing
 		Incarnation: 1, // bumped during CREATE2 frame, retained through revert
 		Deleted:     true,
 	}
-	cs.markDirty(addr, cs.accounts[addr])
+	cs.markWritten(addr, cs.accounts[addr])
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -189,7 +189,7 @@ func TestFlushToUpdates_LiveAccount_EmitsFullUpdate(t *testing.T) {
 		CodeHash: codeHashArr,
 		Deleted:  false,
 	}
-	cs.markDirty(addr, cs.accounts[addr])
+	cs.markWritten(addr, cs.accounts[addr])
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
