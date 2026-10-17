@@ -17,6 +17,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log"
@@ -44,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	erigonlog "github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
@@ -624,6 +626,25 @@ func (t *attestationTestSuite) TestAttestationEventEmittedWhenPoolRejectsVote() 
 	service.onVerifiedAttestation(7, mockEpoch, att, &AttestationForGossip{Attestation: att})
 
 	t.Len(events, 1)
+}
+
+// A vote of a member the pool already counts for other data is equivocation that gossip can carry, so
+// it is not logged as a warning, and its attestation event is still emitted.
+func (t *attestationTestSuite) TestAttestationOfACountedMemberIsNotAWarning() {
+	service := t.attService.(*attestationService)
+	t.aggregationPool.EXPECT().AddAttestation(att).Return(aggregation.ErrVoterAlreadyCounted).Times(1)
+	events := make(chan *beaconevents.EventStream, 4)
+	sub := t.emitters.Operation().Subscribe(events)
+	defer sub.Unsubscribe()
+	var output bytes.Buffer
+	previous := erigonlog.Root().GetHandler()
+	erigonlog.Root().SetHandler(erigonlog.LvlFilterHandler(erigonlog.LvlWarn, erigonlog.StreamHandler(&output, erigonlog.LogfmtFormat())))
+	defer erigonlog.Root().SetHandler(previous)
+
+	service.onVerifiedAttestation(7, mockEpoch, att, &AttestationForGossip{Attestation: att})
+
+	t.Len(events, 1)
+	t.Empty(output.String())
 }
 
 // The attestation event reports every verified attestation, whether or not the

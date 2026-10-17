@@ -132,7 +132,7 @@ func TestOnAttestationUsesTargetShuffling(t *testing.T) {
 			}
 			store := newAttestationTestStore(t, fixture.cfg, headState, fixture.headRoot, fixture.attestationSlot, graph)
 			if test.headEpochOffset > 0 {
-				store.time.Store(store.genesisTime + (headState.Slot()+1)*fixture.cfg.SecondsPerSlot)
+				store.timeMs.Store((store.genesisTime + (headState.Slot()+1)*fixture.cfg.SecondsPerSlot) * 1000)
 			}
 			attestation := &solid.Attestation{
 				AggregationBits: aggregationBits(fixture.committeeSize(t, test.targetRoot), int(fixture.cfg.MaxValidatorsPerCommittee), fixture.committeePosition),
@@ -319,7 +319,7 @@ func TestOnAttestationRandaoMixWrapUsesTargetState(t *testing.T) {
 		},
 	}
 	store := newAttestationTestStore(t, cfg, headState, headRoot, attestationSlot, graph)
-	store.time.Store(store.genesisTime + (headState.Slot()+1)*cfg.SecondsPerSlot)
+	store.timeMs.Store((store.genesisTime + (headState.Slot()+1)*cfg.SecondsPerSlot) * 1000)
 	targetCommittee, err := targetState.GetBeaconCommitee(attestationSlot, committeeIndex)
 	require.NoError(t, err)
 	attestation := &solid.Attestation{
@@ -557,7 +557,7 @@ func newAttestationTestStore(
 	}
 	store.justifiedCheckpoint.Store(solid.Checkpoint{})
 	store.gloasWeightTree = newGloasWeightTree(store)
-	store.time.Store(store.genesisTime + (attestationSlot+1)*cfg.SecondsPerSlot)
+	store.timeMs.Store((store.genesisTime + (attestationSlot+1)*cfg.SecondsPerSlot) * 1000)
 	store.SetSynced(true)
 	return store
 }
