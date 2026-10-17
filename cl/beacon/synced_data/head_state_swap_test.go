@@ -212,9 +212,7 @@ func TestFailedHeadUpdateKeepsHead(t *testing.T) {
 		require.Equal(t, uint64(101), headState.Slot())
 		return nil
 	}))
-	require.ErrorIs(t, manager.ViewPreviousHeadState(func(*state.CachingBeaconState) error {
-		return nil
-	}), ErrPreviousStateNotAvailable)
+	require.ErrorIs(t, manager.ViewPreviousHeadState(func(*state.CachingBeaconState) error { return nil }), ErrPreviousStateNotAvailable)
 }
 
 // TestOnHeadStateWithBlockRootSerializesConcurrentWriters verifies that a
