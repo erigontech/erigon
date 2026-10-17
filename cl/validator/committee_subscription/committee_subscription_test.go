@@ -20,7 +20,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
+	aggregation_mock "github.com/erigontech/erigon/cl/aggregation/mock_services"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -31,8 +33,9 @@ import (
 func TestAddAttestationSubscriptionReportsNotSyncedWhileSyncing(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	c := &CommitteeSubscribeMgmt{
-		beaconConfig: &cfg,
-		syncedData:   synced_data.NewSyncedDataManager(&cfg, true),
+		beaconConfig:    &cfg,
+		syncedData:      synced_data.NewSyncedDataManager(&cfg, true),
+		aggregationPool: aggregation_mock.NewMockAggregationPool(gomock.NewController(t)),
 	}
 
 	err := c.AddAttestationSubscription(t.Context(), &cltypes.BeaconCommitteeSubscription{
@@ -43,4 +46,28 @@ func TestAddAttestationSubscriptionReportsNotSyncedWhileSyncing(t *testing.T) {
 	})
 
 	require.ErrorIs(t, err, synced_data.ErrNotSynced)
+}
+
+// An aggregator subscription tells the pool about the duty, so the pool keeps the committee's data for
+// the aggregator; other subscriptions do not.
+func TestAddAttestationSubscriptionRegistersAggregatorDuties(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	pool := aggregation_mock.NewMockAggregationPool(gomock.NewController(t))
+	pool.EXPECT().AddAggregatorDuty(uint64(40), uint64(3)).Times(1)
+	c := &CommitteeSubscribeMgmt{
+		beaconConfig:    &cfg,
+		syncedData:      synced_data.NewSyncedDataManager(&cfg, true),
+		aggregationPool: pool,
+	}
+
+	for _, isAggregator := range []bool{true, false} {
+		err := c.AddAttestationSubscription(t.Context(), &cltypes.BeaconCommitteeSubscription{
+			ValidatorIndex:   1,
+			CommitteeIndex:   3,
+			CommitteesAtSlot: 4,
+			Slot:             40,
+			IsAggregator:     isAggregator,
+		})
+		require.ErrorIs(t, err, synced_data.ErrNotSynced)
+	}
 }

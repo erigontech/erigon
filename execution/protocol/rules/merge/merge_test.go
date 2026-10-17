@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -49,11 +50,11 @@ func (r readerMock) CurrentHeader() *types.Header {
 	return nil
 }
 
-func (cr readerMock) CurrentFinalizedHeader() *types.Header {
+func (r readerMock) CurrentFinalizedHeader() *types.Header {
 	return nil
 }
 
-func (cr readerMock) CurrentSafeHeader() *types.Header {
+func (r readerMock) CurrentSafeHeader() *types.Header {
 	return nil
 }
 
@@ -224,4 +225,103 @@ func TestFinalizeWithdrawalStateErrorPropagates(t *testing.T) {
 
 	require.ErrorIs(t, err, boom)
 	require.Contains(t, err.Error(), "withdrawal 7")
+}
+
+type blockDerivedL2 struct{}
+
+func (blockDerivedL2) Name() string { return "blockderived" }
+
+func (blockDerivedL2) ResolveRules(_, blockNum, _ uint64, r *chain.Rules) {
+	if blockNum >= 20_000_000 {
+		r.L2Version = 50
+	} else {
+		r.L2Version = 30
+	}
+}
+
+func TestInitializeTracesTheRulesTheSystemCallResolves(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		l2          chain.L2Config
+		blockNum    uint64
+		wantVersion uint64
+	}{
+		{"version from block number, below the ladder step", blockDerivedL2{}, 15_000_000, 30},
+		{"version from block number, above the ladder step", blockDerivedL2{}, 21_000_000, 50},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cancunTime := uint64(0)
+			chainConfig := chain.Config{
+				ChainID:    uint256.NewInt(1337),
+				CancunTime: &cancunTime,
+				L2:         tc.l2,
+			}
+			beaconRoot := common.HexToHash("0xbeac07")
+			header := &types.Header{
+				Difficulty:            *ProofOfStakeDifficulty,
+				Number:                *uint256.NewInt(tc.blockNum),
+				Time:                  1,
+				ParentBeaconBlockRoot: &beaconRoot,
+			}
+
+			var seen *tracing.VMContext
+			tracer := tracing.Hooks{
+				OnSystemCallStartV2: func(env *tracing.VMContext) { seen = env },
+			}
+
+			logger := log.New()
+			chainReader := consensuschain.NewReader(&chainConfig, nil, nil, logger)
+			systemCallCustom := func(accounts.Address, []byte, *state.IntraBlockState, *types.Header, bool) ([]byte, error) {
+				return nil, nil
+			}
+			var intraBlockState state.IntraBlockState
+			var eth1Engine rules.Engine
+
+			require.NoError(t, New(eth1Engine).Initialize(&chainConfig, chainReader, header,
+				&intraBlockState, systemCallCustom, logger, &tracer))
+
+			require.NotNil(t, seen, "the Cancun system call must reach OnSystemCallStartV2")
+			require.NotNil(t, seen.Rules, "the traced context must carry the rules, not the ingredients to rebuild them")
+
+			require.Equal(t, tc.wantVersion, seen.Rules.L2Version,
+				"the traced rules must carry the version the system call's own EVM resolves")
+		})
+	}
+}
+
+func TestInitializeTracesHistoryStorageCall(t *testing.T) {
+	chainConfig := chain.TestChainOsakaConfig.Copy()
+	header := &types.Header{
+		Difficulty: *ProofOfStakeDifficulty,
+		Number:     *uint256.NewInt(1),
+		Time:       1,
+		ParentHash: common.HexToHash("0x1234"),
+	}
+	var intraBlockState state.IntraBlockState
+	var callOrder []string
+	tracer := tracing.Hooks{
+		OnSystemCallStartV2: func(env *tracing.VMContext) {
+			callOrder = append(callOrder, "start")
+			require.NotNil(t, env)
+			require.Same(t, chainConfig, env.ChainConfig)
+			require.Same(t, &intraBlockState, env.IntraBlockState)
+			require.Equal(t, header.Number.Uint64(), env.BlockNumber)
+			require.Equal(t, header.Time, env.Time)
+			require.NotNil(t, env.Rules)
+			require.True(t, env.Rules.IsPrague)
+		},
+		OnSystemCallStart: func() { t.Fatal("legacy hook called when V2 is available") },
+		OnSystemCallEnd:   func() { callOrder = append(callOrder, "end") },
+	}
+	syscall := func(addr accounts.Address, data []byte, ibs *state.IntraBlockState, gotHeader *types.Header, constCall bool) ([]byte, error) {
+		callOrder = append(callOrder, "call")
+		require.Equal(t, params.HistoryStorageAddress, addr)
+		require.Equal(t, header.ParentHash[:], data)
+		require.Same(t, &intraBlockState, ibs)
+		require.Same(t, header, gotHeader)
+		require.False(t, constCall)
+		return nil, errors.New("system call failed")
+	}
+	require.NoError(t, New(nil).Initialize(chainConfig, readerMock{config: chainConfig}, header, &intraBlockState, syscall, log.New(), &tracer))
+	require.Equal(t, []string{"start", "call", "end"}, callOrder)
 }

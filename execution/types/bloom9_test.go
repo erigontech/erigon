@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 )
@@ -60,7 +62,7 @@ func TestBloom(t *testing.T) {
 // TestBloomExtensively does some more thorough tests
 func TestBloomExtensively(t *testing.T) {
 	t.Parallel()
-	var exp = common.HexToHash("c8d3ca65cdb4874300a9e39475508f23ed6da09fdbc487f89a2dcf50b09eb263")
+	exp := common.HexToHash("c8d3ca65cdb4874300a9e39475508f23ed6da09fdbc487f89a2dcf50b09eb263")
 	var b Bloom
 	// Add 100 "random" things
 	for i := range 100 {
@@ -159,5 +161,22 @@ func TestIsEmpty(t *testing.T) {
 	b[len(b)-1] = 1
 	if b.IsEmpty() {
 		t.Error("expected not empty")
+	}
+}
+
+// AppendText must be byte-identical to MarshalText (only the destination differs).
+func TestBloomAppendTextByteIdentical(t *testing.T) {
+	for name, b := range map[string]Bloom{
+		"zero": {},
+		"set":  BytesToBloom(crypto.Keccak256(nil)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			mt, err := b.MarshalText()
+			require.NoError(t, err)
+			const pfx = "PFX"
+			at, err := b.AppendText([]byte(pfx))
+			require.NoError(t, err)
+			require.Equal(t, append([]byte(pfx), mt...), at)
+		})
 	}
 }

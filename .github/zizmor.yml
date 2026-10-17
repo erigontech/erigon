@@ -48,3 +48,30 @@ rules:
   concurrency-limits:
     ignore:
       - ci-cd-main-branch-docker-images.yml
+
+  # docs-cutover.yml's `switch` job writes the DOCS_DEPLOY_BRANCH repository
+  # variable, which needs the release App's `variables` permission. The pinned
+  # actions/create-github-app-token exposes no `permission-variables` input
+  # (v3.2.0 is the newest release and its action.yml has no such key), so any
+  # permission-* list there would mint a token MISSING the one permission the
+  # job exists to use. The token is scoped on the repository axis
+  # (`repositories: "erigon"`) and the job is gated on the
+  # `release-branch-management` environment behind its required reviewers, so
+  # the blanket grant is never reached without a human approving that run.
+  # Drop this ignore once the action gains `permission-variables`.
+  github-app:
+    ignore:
+      - docs-cutover.yml
+
+  # lint.yml installs js-yaml to cross-check the docs-deploy trigger parser
+  # against a second, unrelated YAML implementation. The version is not ad-hoc:
+  # it is read at runtime out of docs/site/package-lock.json, so the lockfile
+  # stays the single source of truth and the two cannot drift. zizmor cannot see
+  # that the version came from a lockfile, only that `npm install` was called.
+  # `npm ci` on docs/site would be lockfile-visible but pulls the whole
+  # Docusaurus tree into a job that runs for every pull request, to load one
+  # module. The apt line beside it installs a DISTRO package (python3-yaml),
+  # deliberately not PyPI, for the same supply-chain reason.
+  adhoc-packages:
+    ignore:
+      - lint.yml

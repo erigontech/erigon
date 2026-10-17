@@ -51,6 +51,9 @@ const (
 	EngineGetBlobsV1 = "engine_getBlobsV1"
 	EngineGetBlobsV2 = "engine_getBlobsV2"
 	EngineGetBlobsV3 = "engine_getBlobsV3"
+	EngineGetBlobsV4 = "engine_getBlobsV4"
 )
+
+const EngineGetInclusionListV1 = "engine_getInclusionListV1"
 
 const EngineGetClientVersionV1 = "engine_getClientVersionV1"

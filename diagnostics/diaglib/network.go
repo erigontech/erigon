@@ -122,7 +122,6 @@ func peerStatisticsFromMsgUpdate(msg PeerStatisticMsgUpdate, prevValue any) Peer
 			ps.CapBytesOut[msg.MsgCap] += uint64(msg.Bytes)
 			ps.TypeBytesOut[msg.MsgType] += uint64(msg.Bytes)
 		}
-
 	}
 
 	return ps

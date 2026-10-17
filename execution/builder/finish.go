@@ -81,7 +81,7 @@ func finishBlock(ctx context.Context, tx kv.TemporalTx, cfg BuilderFinishCfg, lo
 	var blockAccessListSidecar *types.BlockAccessListSidecar
 	if blockAccessList != nil {
 		blockAccessListSidecar = types.NewBlockAccessListSidecar(blockAccessList)
-		if err := blockAccessListSidecar.ValidateForBlock(current.Header.GasLimit); err != nil {
+		if err := blockAccessListSidecar.ValidateForBlock(current.Header.GasLimit, len(current.Txns)); err != nil {
 			return fmt.Errorf("validate block access list: %w", err)
 		}
 		hash, err := blockAccessListSidecar.Hash()
@@ -124,7 +124,8 @@ func finishBlock(ctx context.Context, tx kv.TemporalTx, cfg BuilderFinishCfg, lo
 	}
 
 	if block.Transactions().Len() > 0 {
-		logger.Info(fmt.Sprintf("[%s] block ready for seal", logPrefix),
+		logger.Info(
+			fmt.Sprintf("[%s] block ready for seal", logPrefix),
 			"blockNum", block.NumberU64(),
 			"nonce", block.NonceU64(),
 			"hash", block.Hash(),

@@ -19,7 +19,6 @@ package types
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"io"
 	"testing"
 
@@ -305,15 +304,29 @@ func TestRegisterTxTypeCollisions(t *testing.T) {
 	})
 }
 
+func TestRegisterTxTypeNilNew(t *testing.T) {
+	const nilNewType = 0x79
+
+	require.Panics(t, func() {
+		RegisterTxType(nilNewType, TxTypeSpec{})
+	})
+
+	// The guard runs before the registry write, so the rejected id stays free.
+	require.NotPanics(t, func() {
+		RegisterTxType(nilNewType, TxTypeSpec{New: func() Transaction { return &fakeRegisteredTx{} }})
+	})
+	t.Cleanup(func() { unregisterTxType(nilNewType) })
+}
+
 func TestUnregisteredTxTypeStillUnsupported(t *testing.T) {
 	const unknownType = 0x7f
 
 	_, err := UnmarshalTransactionFromBinary([]byte{unknownType, 0x01}, false)
-	require.True(t, errors.Is(err, ErrTxTypeNotSupported))
+	require.ErrorIs(t, err, ErrTxTypeNotSupported)
 
 	_, err = UnmarshalTransactionFromJSON([]byte(`{"type":"0x7f"}`))
 	require.Error(t, err)
-	require.False(t, errors.Is(err, ErrTxTypeNotSupported))
+	require.NotErrorIs(t, err, ErrTxTypeNotSupported)
 }
 
 func TestRegisteredTxTypeNilJSONDecoder(t *testing.T) {

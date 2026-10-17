@@ -100,7 +100,7 @@ General advise: for deeper understanding read `mdbx.h`
 
 /*
 RoDB low-level interface - main target is - to provide common abstraction over top of MDBX and RemoteKV.
-Warning: can't move `tx` between goroutines. ReadOnly transactions do not lock goroutine to thread, RwTx does.
+See Tx and RwTx for transaction and cursor ownership rules.
 Lifetime: read data valid until end of transaction.
 Example:
 
@@ -143,19 +143,15 @@ type RwDB interface {
 	Update(ctx context.Context, f func(tx RwTx) error) error
 	UpdateNosync(ctx context.Context, f func(tx RwTx) error) error
 
-	// BeginRw - creates transaction
-	// A transaction and its cursors must only be used by a single
-	// 	thread (not goroutine), and a thread may only have a single transaction at a time.
-	//  It happens automatically by - because this method calls runtime.LockOSThread() inside (Rollback/Commit releases it)
-	//  By this reason application code can't call runtime.UnlockOSThread() - it leads to undefined behavior.
+	// BeginRw creates a write transaction. MDBX pins the creating goroutine to
+	// an OS thread; see RwTx for access and completion rules.
 	BeginRw(ctx context.Context) (RwTx, error)
 	BeginRwNosync(ctx context.Context) (RwTx, error)
 }
 
-// Tx
-// WARNING:
-//   - Tx is not threadsafe and may only be used in the goroutine that created it
-//   - ReadOnly transactions do not lock goroutine to thread, RwTx does
+// Tx and all of its cursors require serialized access. MDBX allows access
+// from different goroutines in turn (MDBX_NOSTICKYTHREADS); see RwTx for
+// write transaction ownership.
 type Tx interface {
 	Getter
 
@@ -204,12 +200,9 @@ type Tx interface {
 	Apply(ctx context.Context, f func(tx Tx) error) error
 }
 
-// RwTx
-//
-// WARNING:
-//   - RwTx is not threadsafe and may only be used in the goroutine that created it.
-//   - ReadOnly transactions do not lock goroutine to thread, RwTx does
-//   - User Can't call runtime.LockOSThread/runtime.UnlockOSThread in same goroutine until RwTx Commit/Rollback
+// RwTx follows Tx's serialization rules. For MDBX, BeginRw pins the creating
+// goroutine to its OS thread, and Commit or Rollback must run on that goroutine.
+// Do not change that goroutine's OS-thread lock while the transaction is open.
 type RwTx interface {
 	Tx
 	Putter
@@ -331,23 +324,29 @@ type RwCursorPseudoDupSort struct {
 func (c *RwCursorPseudoDupSort) DeleteExact(k1, k2 []byte) error {
 	return c.Delete(k1)
 }
+
 func (c *RwCursorPseudoDupSort) NextNoDup() ([]byte, []byte, error) {
 	return c.Next()
 }
+
 func (c *RwCursorPseudoDupSort) NextDup() ([]byte, []byte, error) {
 	return nil, nil, nil
 }
+
 func (c *RwCursorPseudoDupSort) FirstDup() ([]byte, error) {
 	_, v, err := c.Current()
 	return v, err
 }
+
 func (c *RwCursorPseudoDupSort) LastDup() ([]byte, error) {
 	_, v, err := c.Current()
 	return v, err
 }
+
 func (c *RwCursorPseudoDupSort) DeleteCurrentDuplicates() error {
 	return c.DeleteCurrent()
 }
+
 func (c *RwCursorPseudoDupSort) CountDuplicates() (uint64, error) {
 	return 1, nil
 }
@@ -454,7 +453,7 @@ type (
 type GetLatestMetrics interface {
 	UpdateCacheReads(domain Domain, start time.Time)
 	UpdateDbReads(domain Domain, start time.Time)
-	UpdateStateCacheHit(domain Domain)
+	UpdateStateCacheHit(domain Domain, start time.Time)
 	UpdateStateCacheMiss(domain Domain)
 	UpdateFileReadsUnique(domain Domain, key []byte, start time.Time)
 }
@@ -465,7 +464,17 @@ type GetLatestOptions struct {
 	maxStep     Step
 	hasMaxStep  bool
 	branchCache bool
+	buf         []byte
 }
+
+// WithBuf to decode a value into
+// `GetLatest` returning `v` - is not that buffer
+func (opts GetLatestOptions) WithBuf(buf []byte) GetLatestOptions {
+	opts.buf = buf
+	return opts
+}
+
+func (opts GetLatestOptions) Buf() []byte { return opts.buf }
 
 func (opts GetLatestOptions) WithMetrics(metrics GetLatestMetrics, start time.Time) GetLatestOptions {
 	opts.metrics, opts.start = metrics, start
@@ -501,8 +510,21 @@ func (opts GetLatestOptions) BranchCache() bool {
 
 type TemporalGetter interface {
 	GetLatest(name Domain, k []byte, opts GetLatestOptions) (v []byte, step Step, err error)
-	HasPrefix(name Domain, prefix []byte) (firstKey []byte, firstVal []byte, hasPrefix bool, err error)
 	StepsInFiles(entitySet ...Domain) Step
+}
+
+// UnderlyingTx peels table overlays off tx down to the transaction they are
+// layered on. An overlay owns its own sequence metadata, but snapshot identity
+// and temporal domain reads belong to the tx underneath it.
+func UnderlyingTx(tx TemporalTx) TemporalTx {
+	for tx != nil {
+		wrapper, ok := tx.(interface{ UnderlyingTx() TemporalTx })
+		if !ok {
+			return tx
+		}
+		tx = wrapper.UnderlyingTx()
+	}
+	return nil
 }
 
 type TemporalTx interface {
@@ -610,6 +632,9 @@ type FlushConfig struct {
 	// DomainCallbacks, if set for a domain, is invoked per (key,value,step,txNum)
 	// tuple during Flush so a downstream cache (e.g. the BranchCache) can stay in
 	// sync. txNum is the value's write txNum, for tx-precise unwind invalidation.
+	//
+	// k belongs to the callback; v is the batch's own storage, which is never
+	// rewritten in place, so a consumer may retain it.
 	DomainCallbacks map[Domain]func(k []byte, v []byte, step Step, txNum uint64)
 }
 
@@ -638,8 +663,6 @@ type TemporalMemBatch interface {
 	Merge(other TemporalMemBatch) error
 	IndexAdd(table InvertedIdx, key []byte, txNum uint64) (err error)
 	IteratePrefix(domain Domain, prefix []byte, roTx Tx, it func(k []byte, v []byte) (cont bool, err error)) error
-	HasPrefix(domain Domain, prefix []byte, roTx Tx) ([]byte, []byte, bool, error)
-	HasPrefixInRAM(domain Domain, prefix []byte) bool
 	SizeEstimate() uint64
 	Flush(ctx context.Context, tx RwTx, opts ...FlushOption) error
 	Close()
@@ -685,7 +708,7 @@ type TemporalPutDel interface {
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not perform append
 	DomainPut(domain Domain, k, v []byte, txNum uint64, prevVal []byte) error
-	//DomainPut2(domain Domain, k1 []byte, val []byte, ts uint64) error
+	// DomainPut2(domain Domain, k1 []byte, val []byte, ts uint64) error
 
 	// DomainDel
 	// Optimizations:
@@ -696,9 +719,18 @@ type TemporalPutDel interface {
 	DomainDelPrefix(domain Domain, prefix []byte, txNum uint64) error
 }
 
+type FinalityContext interface {
+	PruneToBlockNum() uint64
+	RetireToBlockNum() uint64
+	MaxReorgDepth() uint64
+	ReadyForCollation(ctx context.Context, db TemporalRoDB, stepLastTxNum uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error)
+}
+
 type TemporalRoDB interface {
 	RoDB
 	SnapshotNotifier
+	MaxPrunableStepsBacklog() uint64
+	StepSize() uint64
 	ViewTemporal(ctx context.Context, f func(tx TemporalTx) error) error
 	BeginTemporalRo(ctx context.Context) (TemporalTx, error)
 	Debug() TemporalDebugDB
@@ -709,6 +741,11 @@ type TemporalRwDB interface {
 	BeginTemporalRw(ctx context.Context) (TemporalRwTx, error)
 	BeginTemporalRwNosync(ctx context.Context) (TemporalRwTx, error)
 	UpdateTemporal(ctx context.Context, f func(tx TemporalRwTx) error) error
+	OpenStateSnapshots(ctx context.Context) error
+	BuildFiles2(ctx context.Context, fromStep, toStep Step, finalityCtx FinalityContext, doMerge bool) error
+	BuildFilesInBackground(finalityCtx FinalityContext) chan struct{}
+	BuildMissedAccessors(ctx context.Context, workers int, opts ...BuildAccessorsOption) error
+	CollateAndPrune(ctx context.Context, pruneFn func(tx TemporalRwTx) (FinalityContext, error)) (bool, <-chan struct{}, error)
 }
 
 // ---- non-important utilities
@@ -746,11 +783,15 @@ type PendingMutations interface {
 	BatchSize() int
 }
 
-type DBVerbosityLvl int8
-type Label string
+type (
+	DBVerbosityLvl int8
+	Label          string
+)
 
-const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
-const dbLabelName = "db"
+const (
+	ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
+	dbLabelName  = "db"
+)
 
 type DBGauges struct { // these gauges are shared by all MDBX instances, but need to be filtered by label
 	DbSize        *metrics.GaugeVec
@@ -822,48 +863,52 @@ func InitSummaries(dbLabel Label) {
 	}
 }
 
-var MDBXGauges = InitMDBXMGauges() // global mdbx gauges. each gauge can be filtered by db name
-var MDBXSummaries sync.Map         // dbName => Summaries mapping
-
 var (
-	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.ChaindataDeprecatedTables can be deleted")
-	/*
-		DbPgopsPrefault = metrics.NewCounter(`db_pgops{phase="prefault"}`) //nolint
-		DbPgopsMinicore = metrics.NewCounter(`db_pgops{phase="minicore"}`) //nolint
-		DbPgopsMsync    = metrics.NewCounter(`db_pgops{phase="msync"}`)    //nolint
-		DbPgopsFsync    = metrics.NewCounter(`db_pgops{phase="fsync"}`)    //nolint
-		DbMiLastPgNo    = metrics.NewCounter(`db_mi_last_pgno`)            //nolint
-
-		DbGcWorkRtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="work_rtime"}`) //nolint
-		DbGcWorkRsteps   = metrics.NewCounter(`db_gc{phase="work_rsteps"}`)                //nolint
-		DbGcWorkRxpages  = metrics.NewCounter(`db_gc{phase="work_rxpages"}`)               //nolint
-		DbGcSelfRtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="self_rtime"}`) //nolint
-		DbGcSelfXtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="self_xtime"}`) //nolint
-		DbGcWorkXtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="work_xtime"}`) //nolint
-		DbGcSelfRsteps   = metrics.NewCounter(`db_gc{phase="self_rsteps"}`)                //nolint
-		DbGcWloops       = metrics.NewCounter(`db_gc{phase="wloop"}`)                      //nolint
-		DbGcCoalescences = metrics.NewCounter(`db_gc{phase="coalescences"}`)               //nolint
-		DbGcWipes        = metrics.NewCounter(`db_gc{phase="wipes"}`)                      //nolint
-		DbGcFlushes      = metrics.NewCounter(`db_gc{phase="flushes"}`)                    //nolint
-		DbGcKicks        = metrics.NewCounter(`db_gc{phase="kicks"}`)                      //nolint
-		DbGcWorkMajflt   = metrics.NewCounter(`db_gc{phase="work_majflt"}`)                //nolint
-		DbGcSelfMajflt   = metrics.NewCounter(`db_gc{phase="self_majflt"}`)                //nolint
-		DbGcWorkCounter  = metrics.NewCounter(`db_gc{phase="work_counter"}`)               //nolint
-		DbGcSelfCounter  = metrics.NewCounter(`db_gc{phase="self_counter"}`)               //nolint
-		DbGcSelfXpages   = metrics.NewCounter(`db_gc{phase="self_xpages"}`)                //nolint
-	*/
-
-	//DbGcWorkPnlMergeTime   = metrics.GetOrCreateSummary(`db_gc_pnl_seconds{phase="work_merge_time"}`) //nolint
-	//DbGcWorkPnlMergeVolume = metrics.NewCounter(`db_gc_pnl{phase="work_merge_volume"}`)               //nolint
-	//DbGcWorkPnlMergeCalls  = metrics.NewCounter(`db_gc{phase="work_merge_calls"}`)                    //nolint
-	//DbGcSelfPnlMergeTime   = metrics.GetOrCreateSummary(`db_gc_pnl_seconds{phase="slef_merge_time"}`) //nolint
-	//DbGcSelfPnlMergeVolume = metrics.NewCounter(`db_gc_pnl{phase="self_merge_volume"}`)               //nolint
-	//DbGcSelfPnlMergeCalls  = metrics.NewCounter(`db_gc_pnl{phase="slef_merge_calls"}`)                //nolint
+	MDBXGauges    = InitMDBXMGauges() // global mdbx gauges. each gauge can be filtered by db name
+	MDBXSummaries sync.Map            // dbName => Summaries mapping
 )
+
+var ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.ChaindataDeprecatedTables can be deleted")
+
+/*
+	DbPgopsPrefault = metrics.NewCounter(`db_pgops{phase="prefault"}`) //nolint
+	DbPgopsMinicore = metrics.NewCounter(`db_pgops{phase="minicore"}`) //nolint
+	DbPgopsMsync    = metrics.NewCounter(`db_pgops{phase="msync"}`)    //nolint
+	DbPgopsFsync    = metrics.NewCounter(`db_pgops{phase="fsync"}`)    //nolint
+	DbMiLastPgNo    = metrics.NewCounter(`db_mi_last_pgno`)            //nolint
+
+	DbGcWorkRtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="work_rtime"}`) //nolint
+	DbGcWorkRsteps   = metrics.NewCounter(`db_gc{phase="work_rsteps"}`)                //nolint
+	DbGcWorkRxpages  = metrics.NewCounter(`db_gc{phase="work_rxpages"}`)               //nolint
+	DbGcSelfRtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="self_rtime"}`) //nolint
+	DbGcSelfXtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="self_xtime"}`) //nolint
+	DbGcWorkXtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="work_xtime"}`) //nolint
+	DbGcSelfRsteps   = metrics.NewCounter(`db_gc{phase="self_rsteps"}`)                //nolint
+	DbGcWloops       = metrics.NewCounter(`db_gc{phase="wloop"}`)                      //nolint
+	DbGcCoalescences = metrics.NewCounter(`db_gc{phase="coalescences"}`)               //nolint
+	DbGcWipes        = metrics.NewCounter(`db_gc{phase="wipes"}`)                      //nolint
+	DbGcFlushes      = metrics.NewCounter(`db_gc{phase="flushes"}`)                    //nolint
+	DbGcKicks        = metrics.NewCounter(`db_gc{phase="kicks"}`)                      //nolint
+	DbGcWorkMajflt   = metrics.NewCounter(`db_gc{phase="work_majflt"}`)                //nolint
+	DbGcSelfMajflt   = metrics.NewCounter(`db_gc{phase="self_majflt"}`)                //nolint
+	DbGcWorkCounter  = metrics.NewCounter(`db_gc{phase="work_counter"}`)               //nolint
+	DbGcSelfCounter  = metrics.NewCounter(`db_gc{phase="self_counter"}`)               //nolint
+	DbGcSelfXpages   = metrics.NewCounter(`db_gc{phase="self_xpages"}`)                //nolint
+*/ //DbGcWorkPnlMergeTime   = metrics.GetOrCreateSummary(`db_gc_pnl_seconds{phase="work_merge_time"}`) //nolint
+//DbGcWorkPnlMergeVolume = metrics.NewCounter(`db_gc_pnl{phase="work_merge_volume"}`)               //nolint
+//DbGcWorkPnlMergeCalls  = metrics.NewCounter(`db_gc{phase="work_merge_calls"}`)                    //nolint
+//DbGcSelfPnlMergeTime   = metrics.GetOrCreateSummary(`db_gc_pnl_seconds{phase="slef_merge_time"}`) //nolint
+//DbGcSelfPnlMergeVolume = metrics.NewCounter(`db_gc_pnl{phase="self_merge_volume"}`)               //nolint
+//DbGcSelfPnlMergeCalls  = metrics.NewCounter(`db_gc_pnl{phase="slef_merge_calls"}`)                //nolint
 
 // ErrReadTxLimitExceeded is returned by BeginRo when the read-tx semaphore is full and no slot is
 // available for a new concurrent read transaction. The RPC layer remaps this to HTTP 503 / JSON-RPC -32005.
 var ErrReadTxLimitExceeded = errors.New("read-tx limit exceeded: too many concurrent read transactions")
+
+// ErrInMemHistoryDisabled is returned by TemporalMemBatch history reads when the batch keeps only
+// the latest value per key, so no historical answer exists in memory. Overlay read views treat it as
+// a miss and fall through to their backing transaction; every other reader error stays fatal.
+var ErrInMemHistoryDisabled = errors.New("GetAsOf called on TemporalMemBatch with inMemHistoryReads disabled")
 
 type nonBlockingAcquireKey struct{}
 
@@ -883,10 +928,12 @@ type Closer interface {
 	Close()
 }
 
-type OnFilesChange func(frozenFileNames []string)
-type SnapshotNotifier interface {
-	OnFilesChange(onChange OnFilesChange, onDelete OnFilesChange)
-}
+type (
+	OnFilesChange    func(frozenFileNames []string)
+	SnapshotNotifier interface {
+		OnFilesChange(onChange OnFilesChange, onDelete OnFilesChange)
+	}
+)
 
 // RetireCutoffs is the txNum below which frozen history files are retired,
 // per domain (PerDomain, falling back to Default for other domains and standalone

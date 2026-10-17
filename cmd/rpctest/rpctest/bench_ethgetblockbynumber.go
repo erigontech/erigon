@@ -17,6 +17,7 @@
 package rpctest
 
 import (
+	"errors"
 	"fmt"
 )
 
@@ -28,17 +29,17 @@ import (
 //			    false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
 //	                 recordFile stores all eth_call returned with success
 //	                 errorFile stores information when erigon and geth doesn't return same data
-func BenchEthGetBlockByNumber2(erigonURL, gethURL string, needCompare, latest bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) error {
+func BenchEthGetBlockByNumber2(erigonURL, gethURL string, needCompare, latest bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) (err error) {
 	setRoutes(erigonURL, gethURL)
 
 	rec, errs, cleanup, err := openWriters(recordFileName, errorFileName)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+	defer func() { err = errors.Join(err, cleanup()) }()
 
 	var resultsCh chan CallResult = nil
-	var nBlocks = 0
+	nBlocks := 0
 
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
@@ -58,8 +59,7 @@ func BenchEthGetBlockByNumber2(erigonURL, gethURL string, needCompare, latest bo
 		}
 
 		nBlocks++
-		var request string
-		request = reqGen.getBlockByNumber(bn, true)
+		request := reqGen.getBlockByNumber(bn, true)
 		errCtx := fmt.Sprintf(" bn=%d ", bn)
 
 		if err := requestAndCompare(request, "eth_getBlockByNumber", errCtx, reqGen, needCompare, rec, errs, resultsCh,

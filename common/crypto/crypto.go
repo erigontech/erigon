@@ -136,12 +136,6 @@ func Keccak256(data ...[]byte) []byte {
 	return b
 }
 
-// Keccak256Hash calc Keccak256
-// Single-argument by design: a variadic signature exceeds the inlining budget.
-func Keccak256Hash(data []byte) common.Hash {
-	return keccak.Sum256(data)
-}
-
 func keccak256Hash(data [][]byte) common.Hash {
 	if len(data) == 1 { // fast-path
 		return keccak.Sum256(data[0])
@@ -284,8 +278,7 @@ func FromECDSAPub(pub *ecdsa.PublicKey) []byte {
 // HexToECDSA parses a secp256k1 private key.
 func HexToECDSA(hexkey string) (*ecdsa.PrivateKey, error) {
 	b, err := hex.DecodeString(hexkey)
-	var byteErr hex.InvalidByteError
-	if errors.As(err, &byteErr) {
+	if byteErr, ok := errors.AsType[hex.InvalidByteError](err); ok {
 		return nil, fmt.Errorf("invalid hex character %q in private key", byte(byteErr))
 	} else if err != nil {
 		return nil, errors.New("invalid hex data for private key")
@@ -352,7 +345,7 @@ func checkKeyFileEnd(r *bufio.Reader) error {
 // restrictive permissions. The key data is saved hex-encoded.
 func SaveECDSA(file string, key *ecdsa.PrivateKey) error {
 	k := hex.EncodeToString(FromECDSA(key))
-	return os.WriteFile(file, []byte(k), 0600)
+	return os.WriteFile(file, []byte(k), 0o600)
 }
 
 // GenerateKey generates a new private key.

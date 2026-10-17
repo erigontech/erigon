@@ -23,6 +23,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
@@ -52,6 +53,14 @@ func (b *gapBackend) HeaderByNumber(_ context.Context, number rpc.BlockNumber) (
 	}, nil
 }
 
+func (b *gapBackend) LatestHead(ctx context.Context) (uint64, common.Hash, error) {
+	h, err := b.HeaderByNumber(ctx, rpc.BlockNumber(b.head))
+	if err != nil || h == nil {
+		return 0, common.Hash{}, err
+	}
+	return b.head, h.Hash(), nil
+}
+
 func (b *gapBackend) BlockByNumber(context.Context, rpc.BlockNumber) (*types.Block, error) {
 	return nil, nil
 }
@@ -65,6 +74,26 @@ func (b *gapBackend) GetReceiptsGasUsed(context.Context, *types.Block) (types.Re
 }
 
 func (b *gapBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) { return nil, nil }
+
+func (b *gapBackend) CheckBlockRewardsAvailable(context.Context, uint64) error { return nil }
+
+// Zero hashes keep every height unresolved, so the oracle serves the range
+// uncached through HeaderByNumber and the missing-block gap stays visible.
+func (b *gapBackend) CanonicalHashes(_ context.Context, from, to uint64) ([]common.Hash, error) {
+	return make([]common.Hash, to-from+1), nil
+}
+
+func (b *gapBackend) FrozenBlocks() uint64 { return 0 }
+
+func (b *gapBackend) HeaderByHashNumber(ctx context.Context, _ common.Hash, number uint64) (*types.Header, error) {
+	return b.HeaderByNumber(ctx, rpc.BlockNumber(number))
+}
+
+func (b *gapBackend) BlockByHashNumber(context.Context, common.Hash, uint64) (*types.Block, error) {
+	return nil, nil
+}
+
+func (b *gapBackend) PrepareFork(context.Context) error { return nil }
 
 func (b *gapBackend) Fork(context.Context) (gasprice.OracleBackend, func(), error) {
 	return nil, nil, nil
@@ -82,7 +111,8 @@ func TestFeeHistoryTruncatesBlobArrays(t *testing.T) {
 	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{}, nil, gasprice.NewFeeHistoryCache(), log.New())
 
 	oldest, _, baseFee, gasUsedRatio, blobBaseFee, blobGasUsedRatio, err := oracle.FeeHistory(
-		context.Background(), 5, rpc.BlockNumber(10), nil)
+		context.Background(), 5, rpc.BlockNumber(10), nil,
+	)
 	require.NoError(t, err)
 
 	// Range is 6..10 with block 8 missing, so blocks 6 and 7 are returned.

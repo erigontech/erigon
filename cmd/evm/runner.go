@@ -71,7 +71,7 @@ var runCommand = cli.Command{
 // the initialized Genesis structure
 func readGenesis(genesisPath string) *types.Genesis {
 	// Make sure we have a valid genesis JSON
-	//genesisPath := ctx.Args().First()
+	// genesisPath := ctx.Args().First()
 	if len(genesisPath) == 0 {
 		utils.Fatalf("Must supply path to genesis JSON file")
 	}
@@ -211,6 +211,13 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 	defer sd.Close()
 	stateReader := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	statedb = state.New(stateReader)
+	// The dump commits the state, which the versioned path does not materialize.
+	if dbg.CallNoMaterialize && !ctx.Bool(DumpFlag.Name) {
+		statedb.SetVersionMap(state.NewVersionMap(nil))
+		statedb.SetNoMaterialize(true)
+		statedb.SetTxContext(0, 0)
+		statedb.SetNoConflictDetection()
+	}
 	if ctx.String(SenderFlag.Name) != "" {
 		sender = accounts.InternAddress(common.HexToAddress(ctx.String(SenderFlag.Name)))
 	}
@@ -233,7 +240,7 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 			var err error
 			// If - is specified, it means that code comes from stdin
 			if codeFileFlag == "-" {
-				//Try reading from stdin
+				// Try reading from stdin
 				if hexcode, err = io.ReadAll(os.Stdin); err != nil {
 					return fmt.Errorf("could not load code from stdin: %w", err)
 				}
@@ -318,7 +325,7 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 	if ctx.Bool(CreateFlag.Name) {
 		input = append(code, input...)
 		execFunc = func() ([]byte, uint64, error) {
-			output, _, gasLeft, err := runtime.Create(input, &runtimeConfig, 0)
+			output, _, gasLeft, err := runtime.Create(input, &runtimeConfig)
 			return output, initialGas - gasLeft.Total(), err
 		}
 	} else {

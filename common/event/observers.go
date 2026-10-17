@@ -20,8 +20,10 @@ import (
 	"sync"
 )
 
-type Observer[TEvent any] func(event TEvent)
-type UnregisterFunc func()
+type (
+	Observer[TEvent any] func(event TEvent)
+	UnregisterFunc       func()
+)
 
 type Observers[TEvent any] struct {
 	observers          map[uint64]Observer[TEvent]

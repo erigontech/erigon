@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/handshake"
-	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -75,7 +74,6 @@ func NewConsensusHandlers(
 	db freezeblocks.BeaconSnapshotReader,
 	indiciesDB kv.RoDB,
 	host host.Host,
-	peers *peers.Pool,
 	netCfg *clparams.NetworkConfig,
 	me *enode.LocalNode,
 	beaconConfig *clparams.BeaconChainConfig,

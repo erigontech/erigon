@@ -85,7 +85,8 @@ func TestUnrecommendedByType(t *testing.T) {
 	}
 
 	groups, failed := unrecommendedByType(
-		[]string{"/fast", "/data", "/snap", "/xfs", "/data/chaindata", "/snap/domain", "/gone"}, fsTypeOf)
+		[]string{"/fast", "/data", "/snap", "/xfs", "/data/chaindata", "/snap/domain", "/gone"}, fsTypeOf,
+	)
 
 	require.Equal(t, []fsGroup{
 		{fsType: "zfs", paths: []string{"/data"}},

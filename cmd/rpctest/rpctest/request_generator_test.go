@@ -17,7 +17,9 @@
 package rpctest
 
 import (
+	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -648,4 +650,23 @@ func logMatchesFilter(l *Log, addresses []common.Address, topics [][]common.Hash
 		}
 	}
 	return true
+}
+
+func TestOtsFullBlockDecodesTransactionCount(t *testing.T) {
+	var b OtsFullBlock
+	require.NoError(t, json.Unmarshal([]byte(`{"transactionCount":5}`), &b))
+	require.Equal(t, uint64(5), b.TransactionCount)
+}
+
+type failingWriteCloser struct{}
+
+func (failingWriteCloser) Write([]byte) (int, error) { return 0, errors.New("disk full") }
+func (failingWriteCloser) Close() error              { return nil }
+
+func TestFlushAndCloseReportsLostWrite(t *testing.T) {
+	f := failingWriteCloser{}
+	w := bufio.NewWriter(f)
+	_, err := w.WriteString("record")
+	require.NoError(t, err)
+	require.ErrorContains(t, flushAndClose(w, f)(), "disk full")
 }

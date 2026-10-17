@@ -129,8 +129,8 @@ func (s *E2SnapSchema) IndexTags() []string {
 	return s.indexFileTags
 }
 
-func (a *E2SnapSchema) AccessorList() statecfg.Accessors {
-	return a.accessors
+func (s *E2SnapSchema) AccessorList() statecfg.Accessors {
+	return s.accessors
 }
 
 // fileName assumes no folderName in it
