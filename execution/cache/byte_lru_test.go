@@ -151,9 +151,34 @@ func TestByteLRUBudgetedConcurrentSameKeyAccounting(t *testing.T) {
 	require.LessOrEqual(t, b.resident.Load(), b.limit.Load())
 }
 
-// A growing working set must still raise the limit: the growth step is decided
-// before the write, so maintenance evicting the newcomer cannot hide the
-// pressure that called for it.
+// Concurrent writers to one key must not reserve chunks for a predecessor they
+// both observed: the envelope is shared, and a stray reservation only comes
+// back on Purge or Close.
+func TestByteLRUConcurrentSameKeyDoesNotOverReserve(t *testing.T) {
+	val := make([]byte, 700*1024)
+	b := newByteLRU(64*datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
+	defer b.Close()
+
+	require.True(t, b.Add(1, val))
+	limAfterInsert := b.limit.Load()
+
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Go(func() {
+			for range 64 {
+				b.Add(1, val)
+			}
+		})
+	}
+	wg.Wait()
+	b.c.CleanUp()
+
+	require.Equal(t, limAfterInsert, b.limit.Load(), "same-size replacements must not grow the limit")
+	require.Equal(t, int64(len(val)), b.resident.Load())
+	require.Equal(t, int64(b.c.WeightedSize()), b.resident.Load())
+}
+
+// A growing working set must still raise the limit.
 func TestByteLRUGrowsOnPositiveNetChange(t *testing.T) {
 	prev := cachebudget.Global
 	t.Cleanup(func() { cachebudget.Global = prev })
@@ -193,9 +218,8 @@ func TestByteLRURejectedNewcomerIsRefunded(t *testing.T) {
 	require.Positive(t, b.Len())
 }
 
-// An unbudgeted layer holds maxBytes from the start, so it never grows and its
-// residency counter is not maintained. What it must still do is stay inside the
-// byte bound under eviction pressure and serve correct values.
+// An unbudgeted layer holds maxBytes from the start and never grows. It must still
+// stay inside the byte bound under eviction pressure and serve correct values.
 func TestByteLRUUnbudgetedStaysBoundedAndCorrect(t *testing.T) {
 	const maxBytes = datasize.ByteSize(1 << 20)
 	val := func(i uint64) []byte { return append(make([]byte, 64*1024-1), byte(i)) }
@@ -206,7 +230,8 @@ func TestByteLRUUnbudgetedStaysBoundedAndCorrect(t *testing.T) {
 	}
 	b.c.CleanUp()
 
-	require.LessOrEqual(t, int64(b.c.WeightedSize()), int64(maxBytes), "bound holds without a refund path")
+	require.LessOrEqual(t, int64(b.c.WeightedSize()), int64(maxBytes))
+	require.Equal(t, int64(b.c.WeightedSize()), b.resident.Load())
 	require.Positive(t, b.Len())
 	// Whatever survived answers with its own value.
 	for key := range uint64(256) {
