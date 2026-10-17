@@ -320,17 +320,15 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 	return msg, nil
 }
 
-// BlobsUnpriced reports whether the caller named blob fields but put no price on
+// BlobsUnpriced reports whether the caller named blob hashes but put no price on
 // them.
 func (args *CallArgs) BlobsUnpriced() bool {
 	blobFeeCap := (*uint256.Int)(args.MaxFeePerBlobGas)
-	namesBlobs := blobFeeCap != nil || args.BlobVersionedHashes != nil
-	cappedAtZero := blobFeeCap == nil || blobFeeCap.IsZero()
-	return namesBlobs && cappedAtZero
+	return args.BlobVersionedHashes != nil && (blobFeeCap == nil || blobFeeCap.IsZero())
 }
 
 // ZeroUnpricedBlobBaseFee drops the block's blob fee when the caller named blob
-// fields but put no price on them, the way BaseFee is dropped for a call with no
+// hashes but put no price on them, the way BaseFee is dropped for a call with no
 // gas price.
 func (args *CallArgs) ZeroUnpricedBlobBaseFee(blockCtx *evmtypes.BlockContext) {
 	if args.BlobsUnpriced() {
