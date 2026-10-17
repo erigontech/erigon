@@ -52,6 +52,7 @@ type SyncedDataManager struct {
 
 	headState         *state.CachingBeaconState
 	previousHeadState *state.CachingBeaconState
+	spareHeadState    *state.CachingBeaconState
 
 	accessLock sync.RWMutex // lock used for accessing atomic methods
 	mu         sync.RWMutex
@@ -116,7 +117,7 @@ func (s *SyncedDataManager) OnHeadStateWithBlockRoot(newState *state.CachingBeac
 	return s.publishHeadStateLocked(newState, blockRoot)
 }
 
-// publishHeadStateLocked materializes newState into the detached previous state and
+// publishHeadStateLocked materializes newState into a standalone copy and
 // swaps it in as the head state, demoting the current head state to
 // previous. Callers must hold writeLock for the duration of whatever work
 // determines blockRoot as well as this call, so a writer cannot be
@@ -124,11 +125,8 @@ func (s *SyncedDataManager) OnHeadStateWithBlockRoot(newState *state.CachingBeac
 // resolving its root or copying its state faster; readers only ever wait
 // for the pointer swap below.
 func (s *SyncedDataManager) publishHeadStateLocked(newState *state.CachingBeaconState, blockRoot common.Hash) error {
-	s.mu.Lock()
-	dst := s.previousHeadState
-	s.previousHeadState = nil
-	s.mu.Unlock()
-	copied, err := s.copyState(newState, dst)
+	copied, err := s.copyState(newState, s.spareHeadState)
+	s.spareHeadState = nil
 	if err != nil {
 		return err
 	}
@@ -138,6 +136,7 @@ func (s *SyncedDataManager) publishHeadStateLocked(newState *state.CachingBeacon
 	s.accessLock.Lock()
 	defer s.accessLock.Unlock()
 
+	s.spareHeadState = s.previousHeadState
 	s.previousHeadState = s.headState
 	s.headState = copied
 	s.stateHead.Store(&headIdentity{root: blockRoot, slot: newState.Slot()})
@@ -259,6 +258,7 @@ func (s *SyncedDataManager) UnsetHeadState() {
 	s.selectedHead.Store(nil)
 	s.headState = nil
 	s.previousHeadState = nil
+	s.spareHeadState = nil
 }
 
 func (s *SyncedDataManager) ValidatorPublicKeyByIndex(index int) (common.Bytes48, error) {
