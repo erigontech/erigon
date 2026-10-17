@@ -208,6 +208,7 @@ type ForkChoiceStore struct {
 	blockTimeliness sync.Map // map[common.Hash][clparams.NumBlockTimelinessDeadlines]bool
 	// [New in Gloas:EIP7732]
 	gloasWeightTree *gloasWeightTree
+	voteTally       voteTally
 	// [New in Gloas:EIP7732] Envelopes waiting for their corresponding block to arrive.
 	// In GLOAS, BeaconBlock and ExecutionPayloadEnvelope are gossiped separately.
 	// Due to network timing, the envelope may arrive before its corresponding block.
