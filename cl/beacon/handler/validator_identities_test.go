@@ -40,15 +40,10 @@ type overwriteAfterViewSyncedData struct {
 }
 
 func (s overwriteAfterViewSyncedData) ViewHeadStateWithIdentity(fn synced_data.ViewHeadStateWithIdentityFn) error {
-	var viewed *state.CachingBeaconState
-	err := s.SyncedData.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, root common.Hash, slot uint64) error {
-		viewed = headState
+	return s.SyncedData.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, root common.Hash, slot uint64) error {
+		defer func() { require.NoError(s.t, s.next.CopyInto(headState)) }()
 		return fn(headState, root, slot)
 	})
-	if viewed != nil {
-		require.NoError(s.t, s.next.CopyInto(viewed))
-	}
-	return err
 }
 
 func TestValidatorIdentitiesAtHeadAreReadInsideTheView(t *testing.T) {
