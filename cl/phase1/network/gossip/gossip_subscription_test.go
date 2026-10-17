@@ -528,3 +528,39 @@ func TestTopicSubscriptionsGetReturnsSnapshot(t *testing.T) {
 
 	require.Equal(t, expiry, result.expiry)
 }
+
+func TestSubscribedAttestationSubnetCount(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	h, err := libp2p.New(libp2p.NoListenAddrs)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, h.Close()) })
+	ps, err := pubsub.NewGossipSub(t.Context(), h)
+	require.NoError(t, err)
+
+	mockP2P := mock_services.NewMockP2PManager(ctrl)
+	mockP2P.EXPECT().UpdateENRAttSubnets(gomock.Any(), gomock.Any()).AnyTimes()
+	mockP2P.EXPECT().UpdateENRSyncNets(gomock.Any(), gomock.Any()).AnyTimes()
+	subscriptions := NewTopicSubscriptions(t.Context(), mockP2P)
+	validator := func(context.Context, peer.ID, *pubsub.Message) pubsub.ValidationResult {
+		return pubsub.ValidationAccept
+	}
+	expiry := time.Now().Add(time.Hour)
+	addTopic := func(topic string, subscribe bool) {
+		t.Helper()
+		handle, err := ps.Join(topic)
+		require.NoError(t, err)
+		require.NoError(t, subscriptions.Add(topic, handle, validator))
+		if subscribe {
+			require.NoError(t, subscriptions.SubscribeWithExpiry(topic, expiry))
+		}
+	}
+
+	addTopic("/eth2/abcd1234/beacon_attestation_0/ssz_snappy", true)
+	addTopic("/eth2/deadbeef/beacon_attestation_0/ssz_snappy", true)
+	addTopic("/eth2/abcd1234/beacon_attestation_1/ssz_snappy", false)
+	addTopic("/eth2/abcd1234/sync_committee_0/ssz_snappy", true)
+
+	require.Equal(t, uint64(1), subscriptions.subscribedAttestationSubnetCount())
+	require.NoError(t, subscriptions.SubscribeWithExpiry("/eth2/abcd1234/beacon_attestation_1/ssz_snappy", expiry))
+	require.Equal(t, uint64(2), subscriptions.subscribedAttestationSubnetCount())
+}
