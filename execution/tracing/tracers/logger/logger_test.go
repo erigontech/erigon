@@ -82,6 +82,33 @@ func TestStoreCapture(t *testing.T) {
 	require.EqualValues(t, -int64(params.StateGasPerStorageSet), logs[6]["stateGasCost"])
 }
 
+func TestStructLoggerHaltedStorageStepIsNotRecorded(t *testing.T) {
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+
+	var (
+		logger   = NewStructLogger(nil)
+		evm      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{Tracer: logger.Hooks()})
+		contract = *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	)
+	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x0, byte(vm.SSTORE)}
+	logger.OnTxStart(evm.GetVMContext(), nil, accounts.ZeroAddress)
+
+	_, _, _, err := evm.Run(contract, mdgas.MdGas{Execution: 200_000}, nil, true)
+	require.ErrorIs(t, err, vm.ErrWriteProtection)
+	_, _, _, err = evm.Run(contract, mdgas.MdGas{Execution: 6 + params.SstoreSentryGasEIP2200}, nil, false)
+	require.ErrorIs(t, err, vm.ErrOutOfGas)
+
+	logs := logger.StructLogs()
+	require.Len(t, logs, 6)
+	for _, i := range []int{2, 5} {
+		require.Equal(t, vm.SSTORE, logs[i].Op)
+		require.Error(t, logs[i].Err)
+		require.Empty(t, logs[i].Storage)
+	}
+	require.Empty(t, logger.storage[contract.Address()])
+}
+
 func TestStructLoggerTxEndError(t *testing.T) {
 	logger := NewStructLogger(nil)
 	logger.Hooks().EmitTxEnd(nil, mdgas.TxnGasUsage{}, vm.ErrInsufficientBalance)
