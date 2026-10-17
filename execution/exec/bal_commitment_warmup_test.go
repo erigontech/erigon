@@ -210,17 +210,18 @@ func TestWarmBALCommitmentReportsACancellationOnce(t *testing.T) {
 // The first worker error cancels the other workers. Their context errors are consequences, so only
 // the cause is reported, once.
 func TestWarmBALCommitmentReportsAWorkerErrorOnce(t *testing.T) {
+	errWorker := errors.New("worker failed")
 	db := &commitmentBeginFuncDB{begin: func(ctx context.Context) (kv.Tx, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		return nil, kv.ErrReadTxLimitExceeded
+		return nil, errWorker
 	}}
 
 	err := warmBALCommitment(t.Context(), db, threeAccountChanges(), 3)
 
 	require.Equal(t, int64(3), db.calls.Load())
-	require.Equal(t, kv.ErrReadTxLimitExceeded, err)
+	require.Equal(t, errWorker, err)
 }
 
 // Workers that fail with errors allocated per call, such as a closed database's, report the
