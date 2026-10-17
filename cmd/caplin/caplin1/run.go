@@ -492,6 +492,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	gossipManager := gossip.NewGossipManager(ctx, p2p, beaconConfig, networkConfig, ethClock, config.SubscribeAllTopics, uint64(len(activeIndicies)), config.MaxInboundTrafficPerPeer, config.MaxOutboundTrafficPerPeer, config.AdptableTrafficRequirements)
 
 	peerDasState.SetLocalNodeID(localNode)
+	gossipManager.SetLocalNodeID(localNode.ID())
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock, state)
 	gossipManager.SetPeerBanner(beaconRpc)
 	peerDas := das.NewPeerDas(beaconRpc, beaconConfig, &config, columnStorage, blobStorage, sentinel, localNode.ID(), ethClock, peerDasState, gossipManager, rcsn, indexDB)
