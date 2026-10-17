@@ -61,9 +61,11 @@ func TestDevGenesisBeaconBodyToleratesMissingGloasBid(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	genesisState := state.New(&cfg)
 	genesisState.SetVersion(clparams.GloasVersion)
+	genesisState.SetLatestExecutionPayloadBid(nil)
 
 	body := devGenesisBeaconBody(genesisState, &cfg)
-	require.NotNil(t, body.SignedExecutionPayloadBid.Message)
+	expected := cltypes.NewBeaconBody(&cfg, clparams.GloasVersion)
+	require.Equal(t, expected.SignedExecutionPayloadBid.Message, body.SignedExecutionPayloadBid.Message)
 	_, err := body.HashSSZ()
 	require.NoError(t, err)
 }

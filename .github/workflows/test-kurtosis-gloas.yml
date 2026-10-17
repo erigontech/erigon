@@ -435,70 +435,8 @@ jobs:
               $block[0].data.message.body.signed_execution_payload_bid.message
           ' "$api_tmp_dir/state.json"
 
-          curl "${curl_args[@]}" \
-            "$beacon_url/eth/v2/beacon/blocks/head" \
-            --output "$api_tmp_dir/head.json"
-          initial_head_slot=$(jq -er '.data.message.slot | tonumber' "$api_tmp_dir/head.json")
-          target_head_slot=$((initial_head_slot + 8))
-          last_head_slot=$initial_head_slot
-          next_slot=$((initial_head_slot > 8 ? initial_head_slot - 8 : 1))
-          deadline=$((SECONDS + 180))
-          payload_attestation_found=false
-          while ((SECONDS < deadline)); do
-            curl "${curl_args[@]}" \
-              "$beacon_url/eth/v2/beacon/blocks/head" \
-              --output "$api_tmp_dir/head.json"
-            head_slot=$(jq -er '.data.message.slot | tonumber' "$api_tmp_dir/head.json")
-            last_head_slot=$head_slot
-            for ((slot = next_slot; slot <= head_slot; slot++)); do
-              if ((SECONDS >= deadline)); then
-                break 2
-              fi
-              if curl "${curl_args[@]}" \
-                "$beacon_url/eth/v2/beacon/blocks/$slot" \
-                --output "$api_tmp_dir/candidate.json"; then
-                if jq -e '
-                  (.data.message.slot | tonumber) as $block_slot |
-                  .version == "gloas" and
-                  $block_slot > 0 and
-                  (.data.message.body.payload_attestations | length) > 0 and
-                  all(.data.message.body.payload_attestations[];
-                    (.data.slot | tonumber) == ($block_slot - 1) and
-                    (.aggregation_bits |
-                      test("^0x[0-9a-fA-F]+$") and
-                      (test("^0x0+$"; "i") | not)
-                    ) and
-                    (.signature |
-                      test("^0x[0-9a-fA-F]{192}$") and
-                      (test("^0x0+$"; "i") | not)
-                    )
-                  ) and
-                  any(.data.message.body.payload_attestations[];
-                    .data.payload_present == true
-                  )
-                ' "$api_tmp_dir/candidate.json"; then
-                  echo "Found available payload attestations in Gloas block at slot $slot"
-                  payload_attestation_found=true
-                  break 2
-                fi
-              fi
-              next_slot=$((slot + 1))
-            done
-            if ((head_slot >= target_head_slot)); then
-              break
-            fi
-            echo "Waiting for payload attestations: head slot $head_slot, target slot $target_head_slot"
-            sleep 3
-          done
-          if [ "$payload_attestation_found" = true ]; then
-            exit 0
-          fi
-          if ((last_head_slot < target_head_slot)); then
-            echo "::error::Chain liveness failure: head only advanced from slot $initial_head_slot to $last_head_slot before the deadline"
-          else
-            echo "::error::No canonical Gloas block exposed a payload attestation by head slot $last_head_slot"
-          fi
-          exit 1
+          .github/workflows/scripts/check_gloas_payload_attestations.sh \
+            "$beacon_url" "$api_tmp_dir"
 
       - name: Dump Kurtosis enclave on failure
         if: failure()
