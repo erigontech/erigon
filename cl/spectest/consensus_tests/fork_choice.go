@@ -425,7 +425,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 				require.Error(t, err, stepstr)
 			}
 		case "on_tick":
-			forkStore.OnTick(uint64(step.GetTick()))
+			forkStore.OnTick(uint64(step.GetTick()) * 1000)
 			// TODO: onTick needs to be able to return error
 		//	if step.GetValid() {
 		//		require.NoError(t, err)

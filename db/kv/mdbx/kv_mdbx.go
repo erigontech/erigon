@@ -2325,6 +2325,14 @@ func (tx *MdbxTx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []
 		s.Close() // it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
+	if !s.done {
+		var err error
+		if _, s.v, err = s.c.Current(); err != nil {
+			s.Close()
+			return nil, err
+		}
+		s.done = s.v == nil
+	}
 	return s, nil
 }
 
@@ -2339,6 +2347,7 @@ type cursorDup2iter struct {
 	limit                int64
 	ctx                  context.Context
 	done                 bool
+	v                    []byte // value under the cursor, the next one to return: read once per move, not on every HasNext and Next
 }
 
 func (s *cursorDup2iter) init(table string, tx kv.Tx) error {
@@ -2428,15 +2437,51 @@ func (s *cursorDup2iter) init(table string, tx kv.Tx) error {
 func (s *cursorDup2iter) advance() (err error) {
 	var k []byte
 	if s.orderAscend {
-		k, _, err = s.c.NextDup()
+		k, s.v, err = s.c.NextDup()
 	} else {
-		k, _, err = s.c.PrevDup()
+		k, s.v, err = s.c.PrevDup()
 	}
 	if err != nil {
 		return err
 	}
 	s.done = k == nil
 	return nil
+}
+
+func (s *cursorDup2iter) CanSeekValue() bool { return s.limit < 0 }
+
+// SeekValue moves to the first value >= v (asc) or <= v (desc) with a B-tree search; it never moves backwards.
+func (s *cursorDup2iter) SeekValue(v []byte) (err error) {
+	if s.done {
+		return nil
+	}
+	if err := s.refresh(); err != nil {
+		return err
+	}
+	if c := bytes.Compare(s.v, v); (s.orderAscend && c >= 0) || (!s.orderAscend && c <= 0) {
+		return nil
+	}
+	nv, err := s.c.SeekBothRange(s.key, v)
+	if err != nil {
+		return err
+	}
+	// desc: the last value <= v is before the first value >= v, which exists because s.v > v
+	if !s.orderAscend && nv != nil && !bytes.Equal(nv, v) {
+		if _, nv, err = s.c.PrevDup(); err != nil {
+			return err
+		}
+	}
+	s.v, s.done = nv, nv == nil
+	return nil
+}
+
+// refresh re-reads the cached value on a RwTx: a write can move the page it points into.
+func (s *cursorDup2iter) refresh() (err error) {
+	if s.tx.readOnly {
+		return nil
+	}
+	_, s.v, err = s.c.Current()
+	return err
 }
 
 func (s *cursorDup2iter) Close() {
@@ -2463,11 +2508,10 @@ func (s *cursorDup2iter) HasNext() bool {
 
 	// Asc:  [from, to) AND from < to
 	// Desc: [from, to) AND from > to
-	_, v, err := s.c.Current()
-	if err != nil || v == nil {
+	if s.refresh() != nil || s.v == nil {
 		return false
 	}
-	cmp := bytes.Compare(v, s.toPrefix)
+	cmp := bytes.Compare(s.v, s.toPrefix)
 	return (s.orderAscend && cmp < 0) || (!s.orderAscend && cmp > 0)
 }
 
@@ -2478,10 +2522,10 @@ func (s *cursorDup2iter) Next() (k, v []byte, err error) {
 	default:
 	}
 	s.limit--
-	_, v, err = s.c.Current()
-	if err != nil {
+	if err := s.refresh(); err != nil {
 		return nil, nil, err
 	}
+	v = s.v
 	if err := s.advance(); err != nil {
 		return nil, nil, err
 	}
