@@ -344,9 +344,6 @@ jobs:
           ./build/bin/rpc_pattern_gen --profile "perf/pattern/$CHAIN/config/eth_getLogs_wide.profile" --url http://localhost:8545 \
             --counts 20000 --block-tag latest --verify --keep ok --fees drop \
             --out "perf/pattern/$CHAIN/stress_test_eth_getLogs_wide_gen_latest.tar"
-          ./build/bin/rpc_pattern_gen --profile "perf/pattern/$CHAIN/config/eth_getLogs_or.profile" --url http://localhost:8545 \
-            --counts 40000 --block-tag latest --verify --keep ok --fees drop \
-            --out "perf/pattern/$CHAIN/stress_test_eth_getLogs_or_gen_latest.tar"
           ./build/bin/rpc_pattern_gen --profile "perf/pattern/$CHAIN/config/mixed.profile" --url http://localhost:8545 \
             --counts 120000 --block-tag latest --verify --keep ok --fees drop --max-blocks 2500 \
             --out "perf/pattern/$CHAIN/stress_test_mixed_gen_latest.tar"
@@ -362,7 +359,6 @@ jobs:
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getLogs_head_gen_latest.tar
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getLogs_topics_gen_latest.tar
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getLogs_wide_gen_latest.tar
-            ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getLogs_or_gen_latest.tar
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_mixed_gen_latest.tar
           retention-days: 1
 
@@ -582,8 +578,6 @@ jobs:
           run_perf "$RUNNER_WS" $CHAIN eth_getLogs stress_test_eth_getLogs_topics_gen_latest 1000:20,5000:20 $CLIENT eth_getLogs_topics false
           sync_clients eth_getLogs_wide
           run_perf "$RUNNER_WS" $CHAIN eth_getLogs stress_test_eth_getLogs_wide_gen_latest 200:20,1000:20 $CLIENT eth_getLogs_wide false
-          sync_clients eth_getLogs_or
-          run_perf "$RUNNER_WS" $CHAIN eth_getLogs stress_test_eth_getLogs_or_gen_latest 500:20,2000:20 $CLIENT eth_getLogs_or false
           
           # Move output.log to result_dir after all tests
           mv $output_log $result_dir/
@@ -673,7 +667,7 @@ jobs:
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
           for run_id in "$RUN_ID" "$RUN_ID-eth_call_gen" "$RUN_ID-eth_getLogs_gen" \
-            "$RUN_ID-eth_getLogs_head" "$RUN_ID-eth_getLogs_topics" "$RUN_ID-eth_getLogs_wide" "$RUN_ID-eth_getLogs_or"; do
+            "$RUN_ID-eth_getLogs_head" "$RUN_ID-eth_getLogs_topics" "$RUN_ID-eth_getLogs_wide"; do
             python3 coordinated_start.py --client "$BARRIER_ROLE" --run-id "$run_id" --chain "$NETWORK" --signal-error "workflow failed"
           done
 
