@@ -2205,3 +2205,33 @@ func TestVersionMapLatchesWhenTheEntryAlreadyExists(t *testing.T) {
 	m.WriteNonce(addr, Version{TxIndex: 0}, 7, true)
 	require.NotNil(t, m.load(addr), "a completed write must be visible")
 }
+
+func TestValidateRead_DoneBalanceRead(t *testing.T) {
+	addr := getAddress(212)
+	bal := *uint256.NewInt(100)
+	newIO := func(readVal uint256.Int) *VersionedIO {
+		io := NewVersionedIO(6)
+		rs := ReadSet{}
+		rs.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, Val: readVal})
+		io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
+		return io
+	}
+	t.Run("stale read at the cell version invalidates", func(t *testing.T) {
+		vm := NewVersionMap(nil)
+		vm.WriteBalance(addr, Version{TxIndex: 1}, bal, true)
+		require.Equal(t, VersionInvalid, vm.ValidateVersion(5, newIO(*uint256.NewInt(50)), validateEqualVersion, true, false, false, ""))
+	})
+	t.Run("wiped zero read at the cell version stays valid", func(t *testing.T) {
+		vm := NewVersionMap(nil)
+		vm.WriteBalance(addr, Version{TxIndex: 1}, bal, true)
+		vm.WriteSelfDestruct(addr, Version{TxIndex: 2}, true, true)
+		vm.WriteIncarnation(addr, Version{TxIndex: 2}, 1, true)
+		require.Equal(t, VersionValid, vm.ValidateVersion(5, newIO(uint256.Int{}), validateEqualVersion, true, false, false, ""))
+	})
+	t.Run("settled writer at a newer version stays valid under a settled-only check", func(t *testing.T) {
+		vm := NewVersionMap(nil)
+		vm.WriteBalance(addr, Version{TxIndex: 1, Incarnation: 1}, bal, true)
+		settled := func(_, _ Version) VersionValidity { return VersionValid }
+		require.Equal(t, VersionValid, vm.ValidateVersion(5, newIO(*uint256.NewInt(50)), settled, true, false, false, ""))
+	})
+}
