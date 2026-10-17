@@ -109,7 +109,7 @@ func (cc *ExecutionClientDirect) NewPayload(
 	}
 
 	startValidateChain := time.Now()
-	status, _, _, err := cc.chainRW.ValidateChain(ctx, payload.BlockHash, payload.BlockNumber)
+	status, _, _, _, err := cc.chainRW.ValidateChain(ctx, payload.BlockHash, payload.BlockNumber)
 	if err != nil {
 		return PayloadStatusNone, err
 	}

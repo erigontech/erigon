@@ -230,7 +230,7 @@ func (t *testingImpl) CommitBlockV1(
 	}
 
 	status, validationErr, busy, err := t.lockedStatusPoll(ctx, deadline, func() (execmodule.ExecutionStatus, *string, error) {
-		s, v, _, err := t.server.chainRW.ValidateChain(ctx, blockHash, blockNumber)
+		s, v, _, _, err := t.server.chainRW.ValidateChain(ctx, blockHash, blockNumber)
 		return s, v, err
 	})
 	if err != nil {
