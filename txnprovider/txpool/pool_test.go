@@ -478,6 +478,7 @@ func TestProvideTxnsAmsterdamGasAdmission(t *testing.T) {
 		{"above execution cap", 30_000_000, 20_000_000, 40_000_000, 1},
 		{"below execution cap", 30_000_000, params.MaxTxnGasLimit - 1, 40_000_000, 0},
 		{"at execution cap", 30_000_000, params.MaxTxnGasLimit, 30_000_000, 1},
+		{"at block gas limit", 40_000_000, params.MaxTxnGasLimit, 40_000_000, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), tc.gas)
