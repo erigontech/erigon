@@ -62,6 +62,9 @@ type PeerDas interface {
 	// to support both pre-GLOAS (blinded) and GLOAS (non-blinded) blocks
 	DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error
 	DownloadOnlyCustodyColumns(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error
+	// BackfillCustodyColumns fetches, in the background, the custody columns of blocks imported
+	// between fromSlot and toSlot without them.
+	BackfillCustodyColumns(fromSlot, toSlot uint64)
 	IsDataAvailable(slot uint64, blockRoot common.Hash) (bool, error)
 	PruneBelow(slot uint64) error
 	UpdateValidatorsCustody(cgc uint64)
@@ -112,6 +115,7 @@ type peerdas struct {
 	recoverySlotQueue   blobRecoverySlotHeap
 	recoveryPruneFloor  uint64
 	blocksToCheckSync   deferredColumnSyncs
+	backfills           chan slotRange
 
 	// [New in Gloas:EIP7732] For fetching blocks to get kzg_commitments
 	forkChoice     BlockGetter
@@ -149,6 +153,7 @@ func NewPeerDas(
 		ethClock:          ethClock,
 		gossipManager:     gossipManager,
 		recoverBlobsQueue: make(chan recoverBlobsRequest, 128),
+		backfills:         make(chan slotRange, 1),
 
 		recoveringMutex:     sync.Mutex{},
 		isRecovering:        make(map[common.Hash]bool),
@@ -172,6 +177,7 @@ func (d *peerdas) Start(ctx context.Context) {
 			go d.blobsRecoverWorker(ctx)
 		}
 		go d.syncColumnDataWorker(ctx)
+		go d.custodyBackfillWorker(ctx)
 	})
 }
 
@@ -2022,6 +2028,12 @@ func (q *deferredColumnSyncs) retryLater(root common.Hash, now time.Time, slot t
 		e.inFlight = false
 		e.nextAttempt = now.Add(slot)
 	}
+}
+
+func (q *deferredColumnSyncs) len() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.entries)
 }
 
 func (q *deferredColumnSyncs) forget(root common.Hash) {
