@@ -124,7 +124,11 @@ func (s *SyncedDataManager) OnHeadStateWithBlockRoot(newState *state.CachingBeac
 // resolving its root or copying its state faster; readers only ever wait
 // for the pointer swap below.
 func (s *SyncedDataManager) publishHeadStateLocked(newState *state.CachingBeaconState, blockRoot common.Hash) error {
-	copied, err := s.copyState(newState, s.detachPreviousHeadState())
+	s.mu.Lock()
+	dst := s.previousHeadState
+	s.previousHeadState = nil
+	s.mu.Unlock()
+	copied, err := s.copyState(newState, dst)
 	if err != nil {
 		return err
 	}
@@ -155,14 +159,6 @@ func (s *SyncedDataManager) copyState(newState, dst *state.CachingBeaconState) (
 		return nil, err
 	}
 	return dst, nil
-}
-
-func (s *SyncedDataManager) detachPreviousHeadState() *state.CachingBeaconState {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	previous := s.previousHeadState
-	s.previousHeadState = nil
-	return previous
 }
 
 // ViewHeadState allows safe, read-only access to the current head state.

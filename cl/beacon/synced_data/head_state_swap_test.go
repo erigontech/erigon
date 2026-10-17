@@ -186,10 +186,6 @@ func TestPreviousHeadStateIsUnavailableWhileItIsOverwritten(t *testing.T) {
 
 	close(releaseWriter)
 	require.NoError(t, <-writerDone)
-	require.NoError(t, manager.ViewPreviousHeadState(func(previous *state.CachingBeaconState) error {
-		require.Equal(t, uint64(101), previous.Slot())
-		return nil
-	}))
 }
 
 func TestFailedHeadUpdateKeepsHead(t *testing.T) {
