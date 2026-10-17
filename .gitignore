@@ -104,6 +104,7 @@ yarn.lock
 node_modules
 
 *.pgo
+!cmd/erigon/default.pgo
 /config.toml
 /config.yaml
 /config.yml

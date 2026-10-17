@@ -103,7 +103,9 @@ cd erigon
 make erigon
 ```
 
-Binaries land in `./build/bin`. Use `-j<n>` to parallelise the build. Packaged binaries, Docker images and the
+Binaries land in `./build/bin`. Use `-j<n>` to parallelise the build. The `erigon` build applies profile-guided
+optimisation from `cmd/erigon/default.pgo`, which makes an uncached build about twice as slow; see
+[docs/pgo.md](docs/pgo.md) to disable it or regenerate the profile. Packaged binaries, Docker images and the
 per-platform install steps are on the
 [installation](https://docs.erigon.tech/get-started/installation) page; to build a specific release rather than `main`,
 check out its tag.
