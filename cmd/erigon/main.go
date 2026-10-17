@@ -77,6 +77,9 @@ func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
 	if err != nil {
 		return err
 	}
+	if err := erigonapp.RetireStateIfStepsInDB(ctx, nodeCfg.Dirs, 3, logger); err != nil {
+		return err
+	}
 	if err := backup.ApplyMigrations(ctx, nodeCfg.Dirs, logger); err != nil {
 		return err
 	}
