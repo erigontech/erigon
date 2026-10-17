@@ -960,16 +960,6 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 			minS, maxS = _maxFrom, math.MaxUint64
 		}
 
-		removeAll := false
-		if minS == maxS {
-			q := "remove ALL snapshot files?\n\t1) RemoveFile\n\t4) NONONO (Exit)\n (pick number): "
-			if promptExit(q) {
-				os.Exit(0)
-			}
-			minS, maxS = 0, math.MaxUint64
-			removeAll = true
-		}
-
 		// Pre-compute files to remove
 		for i := range files {
 			res := &files[i]
@@ -1016,56 +1006,54 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 			}
 		}
 
-		if !removeAll {
-			// Print header with datadir and step range
-			if snapDir != "" {
-				fmt.Printf("\nDatadir: %s\n", snapDir)
-			}
-			if removeLatest {
-				fmt.Printf("Step range: latest (stepFrom>=%d)\n", _maxFrom)
+		// Print header with datadir and step range
+		if snapDir != "" {
+			fmt.Printf("\nDatadir: %s\n", snapDir)
+		}
+		if removeLatest {
+			fmt.Printf("Step range: latest (stepFrom>=%d)\n", _maxFrom)
+		} else {
+			fmt.Printf("Step range: [%d, %d)\n", minS, maxS)
+		}
+
+		// Display commitment files with KEEP/REMOVE markers, sizes, and labels
+		hasStateTrie := 0
+		fmt.Println()
+		for i := range commitmentFilesWithState {
+			cf := &commitmentFilesWithState[i]
+			var sizeStr string
+			if info, err := os.Stat(cf.file.Path); err == nil {
+				sizeStr = common.ByteCount(uint64(info.Size()))
 			} else {
-				fmt.Printf("Step range: [%d, %d)\n", minS, maxS)
+				sizeStr = "unknown"
 			}
 
-			// Display commitment files with KEEP/REMOVE markers, sizes, and labels
-			hasStateTrie := 0
-			fmt.Println()
-			for i := range commitmentFilesWithState {
-				cf := &commitmentFilesWithState[i]
-				var sizeStr string
-				if info, err := os.Stat(cf.file.Path); err == nil {
-					sizeStr = common.ByteCount(uint64(info.Size()))
-				} else {
-					sizeStr = "unknown"
-				}
-
-				_, isRemoved := toRemove[cf.file.Path]
-				action := "KEEP  "
-				if isRemoved {
-					action = "REMOVE"
-				} else {
-					hasStateTrie++
-				}
-				labelStr := ""
-				if cf.label != "" {
-					labelStr = "  " + cf.label
-				}
-				fmt.Printf("  %s %s  (%s)%s\n", action, filepath.Base(cf.file.Path), sizeStr, labelStr)
+			_, isRemoved := toRemove[cf.file.Path]
+			action := "KEEP  "
+			if isRemoved {
+				action = "REMOVE"
+			} else {
+				hasStateTrie++
 			}
-			if hasStateTrie == 0 && len(commitmentFilesWithState) > 0 {
-				fmt.Printf("\nthis will remove ALL commitment files with state trie\n")
-				q := "Do that anyway?\n\t1) RemoveFile\n\t4) NONONO (Exit)\n (pick number): "
-				if promptExit(q) {
-					os.Exit(0)
-				}
+			labelStr := ""
+			if cf.label != "" {
+				labelStr = "  " + cf.label
 			}
-
-			// Prompt with file count and estimated deletion size
-			q := fmt.Sprintf("\nremove %d files (~%s)?\n1) RemoveFile\n4) Exit\n (pick number): ",
-				len(toRemove), common.ByteCount(removeSize))
+			fmt.Printf("  %s %s  (%s)%s\n", action, filepath.Base(cf.file.Path), sizeStr, labelStr)
+		}
+		if hasStateTrie == 0 && len(commitmentFilesWithState) > 0 {
+			fmt.Printf("\nthis will remove ALL commitment files with state trie\n")
+			q := "Do that anyway?\n\t1) RemoveFile\n\t4) NONONO (Exit)\n (pick number): "
 			if promptExit(q) {
 				os.Exit(0)
 			}
+		}
+
+		// Prompt with file count and estimated deletion size
+		q := fmt.Sprintf("\nremove %d files (~%s)?\n1) RemoveFile\n4) Exit\n (pick number): ",
+			len(toRemove), common.ByteCount(removeSize))
+		if promptExit(q) {
+			os.Exit(0)
 		}
 	} else {
 		for i := range files {
