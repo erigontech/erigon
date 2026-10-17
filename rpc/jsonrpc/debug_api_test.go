@@ -2077,3 +2077,27 @@ func TestSetHeadCanonicalCleanup(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, head, restoredHead, "chain head should be restored after UpdateForkChoice")
 }
+
+func TestSetHeadWithForkchoiceHeadBehindExecution(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := m.Ctx
+	tx, err := m.DB.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	executed, err := stages.GetStageProgress(tx, stages.Execution)
+	require.NoError(t, err)
+	require.Greater(t, executed, uint64(2))
+	staleHead, err := rawdb.ReadCanonicalHash(tx, executed-2)
+	require.NoError(t, err)
+	rawdb.WriteForkchoiceHead(tx, staleHead)
+	require.NoError(t, tx.Commit())
+
+	require.NoError(t, m.ExecModule.SetHead(ctx, executed-1))
+
+	roTx, err := m.DB.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	progress, err := stages.GetStageProgress(roTx, stages.Execution)
+	require.NoError(t, err)
+	require.Equal(t, executed-1, progress)
+}

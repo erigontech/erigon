@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -240,34 +241,27 @@ func TestGetBlockByNumberWithLatestTag(t *testing.T) {
 	assert.Equal(t, expected, *b.Hash)
 }
 
-func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
+func TestGetBlockByNumberWithLatestTag_ForkchoiceHeadBehindExecution(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
 	tx, err := m.DB.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
-	latestBlock, err := m.BlockReader.BlockByHash(ctx, tx, latestBlockHash)
-	if err != nil {
-		tx.Rollback()
-		t.Errorf("couldn't retrieve latest block")
-	}
-	require.NoError(t, rawdb.WriteHeaderNumber(tx, latestBlockHash, latestBlock.NonceU64()))
-	rawdb.WriteForkchoiceHead(tx, latestBlockHash)
-	if safedHeadBlock := rawdb.ReadForkchoiceHead(tx); safedHeadBlock == (common.Hash{}) {
-		tx.Rollback()
-		t.Error("didn't find forkchoice head hash")
-	}
+	executed, err := stages.GetStageProgress(tx, stages.Execution)
+	require.NoError(t, err)
+	require.Greater(t, executed, uint64(2))
+	executedHash, err := rawdb.ReadCanonicalHash(tx, executed)
+	require.NoError(t, err)
+	staleHead, err := rawdb.ReadCanonicalHash(tx, executed-2)
+	require.NoError(t, err)
+	rawdb.WriteForkchoiceHead(tx, staleHead)
 	require.NoError(t, tx.Commit())
 
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	block, err := api.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
-	if err != nil {
-		t.Errorf("error retrieving block by number: %s", err)
-	}
-	expectedHash := common.HexToHash("0x71b89b6ca7b65debfd2fbb01e4f07de7bba343e6617559fa81df19b605f84662")
-	assert.Equal(t, expectedHash, *block.Hash)
+	require.NoError(t, err)
+	require.Equal(t, executedHash, *block.Hash)
 }
 
 func TestGetBlockByNumberWithPendingTag(t *testing.T) {
