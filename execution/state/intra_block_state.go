@@ -183,7 +183,13 @@ type IntraBlockState struct {
 	// waitCommit blocks a read that observes an in-flight (estimate) predecessor
 	// write until that predecessor commits, so execution pauses in place instead
 	// of aborting via ErrDependency. Returns false on shutdown.
-	waitCommit      func(depTxIndex int) bool
+	waitCommit func(depTxIndex int) bool
+	// wakeGen counts resumes from a dep-wait pause. A lower-txIndex writer may
+	// commit a new value while this worker sleeps in waitCommit, so any frame
+	// read cached before the pause can be stale on wake. ReadStamp folds wakeGen
+	// in, so a resume invalidates the vm's frame caches (slot/etc.) on the next
+	// lookup — what makes those caches safe under the dep-wait executor.
+	wakeGen         uint64
 	versionedWrites WriteSet
 	versionedReads  ReadSet
 	// versionedOrigins collects committed pre-block base cells (at originIndex) that a cold
@@ -253,7 +259,22 @@ func New(stateReader StateReader) *IntraBlockState {
 
 func NewWithVersionMap(stateReader StateReader, mvhm *VersionMap) *IntraBlockState {
 	ibs := New(stateReader)
-	ibs.versionMap = mvhm
+	ibs.SetVersionMap(mvhm)
+	return ibs
+}
+
+// NewForSequentialCommitment builds a versioned IBS that keeps the stateObject
+// cache on. Genesis is the sole caller that needs both representations at once:
+// its writes must reach the executor as versioned writes AND be read back and
+// persisted through the materialize path (ComputeGenesisCommitment's FinalizeTx,
+// the serial executor's MakeWriteSet). Every other versioned caller runs
+// cache-free via NewWithVersionMap; the version-map-implies-noMaterialize
+// invariant SetVersionMap enforces holds for all of them. Retire this with the
+// materialize path.
+func NewForSequentialCommitment(stateReader StateReader) *IntraBlockState {
+	ibs := New(stateReader)
+	ibs.versionMap = NewVersionMap(nil)
+	ibs.noMaterialize = false
 	return ibs
 }
 
@@ -289,8 +310,18 @@ func (ibs *IntraBlockState) CodeReadCount() int64 {
 	return ibs.codeReadCount
 }
 
+// SetVersionMap binds the IBS to a versionMap and, by that binding, to the
+// cache-free noMaterialize path. noMaterialize is derived from versionMap presence
+// and has no external setter, so the unsafe combination — a versionMap present but
+// the stateObject-materialize path still on — cannot be constructed: versioned
+// execution always runs noMaterialize.
 func (ibs *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
+	noMaterialize := versionMap != nil
+	if dbg.AssertEnabled && noMaterialize != ibs.noMaterialize && !ibs.stateObjectArena.empty() {
+		panic("noMaterialize changed with arena slots outstanding")
+	}
 	ibs.versionMap = versionMap
+	ibs.noMaterialize = noMaterialize
 }
 
 // StateReader returns the committed-base reader. The parallel executor uses it to
@@ -306,15 +337,6 @@ func (ibs *IntraBlockState) SetWaitCommit(f func(depTxIndex int) bool) {
 
 func (ibs *IntraBlockState) VersionMap() *VersionMap {
 	return ibs.versionMap
-}
-
-// SetNoMaterialize enables the cache-free parallel path: create/write flows
-// record only versioned cells and never populate the stateObject map.
-func (ibs *IntraBlockState) SetNoMaterialize(v bool) {
-	if dbg.AssertEnabled && v != ibs.noMaterialize && !ibs.stateObjectArena.empty() {
-		panic("noMaterialize changed with arena slots outstanding")
-	}
-	ibs.noMaterialize = v
 }
 
 func (ibs *IntraBlockState) IsVersioned() bool {

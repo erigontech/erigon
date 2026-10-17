@@ -59,7 +59,6 @@ func touchThenRevertRetainsWrite(t *testing.T, addr accounts.Address) bool {
 
 	vm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(reader, vm)
-	ibs.SetNoMaterialize(true)
 	defer ibs.Close()
 	ibs.SetTxContext(0, 0)
 	ibs.SetVersion(0)

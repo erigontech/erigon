@@ -70,7 +70,6 @@ func DoCall(
 	// path then serves this tx's own writes only from a resident stateObject.
 	if dbg.CallNoMaterialize && stateOverrides == nil {
 		ibs.SetVersionMap(state.NewVersionMap(nil))
-		ibs.SetNoMaterialize(true)
 		ibs.SetTxContext(0, 0)
 		ibs.SetNoConflictDetection()
 	}

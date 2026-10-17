@@ -118,7 +118,6 @@ func (r *txReplay) run(tb testing.TB, noMaterialize bool) *evmtypes.ExecutionRes
 	defer ibs.Close()
 	if noMaterialize {
 		ibs.SetVersionMap(state.NewVersionMap(nil))
-		ibs.SetNoMaterialize(true)
 		ibs.SetTxContext(0, 0)
 		ibs.SetNoConflictDetection()
 	}

@@ -2499,7 +2499,6 @@ func (ev *taskVersion) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer
 	if r, ok := ibs.StateReader().(*state.PrevBlockReader); ok {
 		r.SetBlock(ev.version.BlockNum)
 	}
-	ibs.SetNoMaterialize(true)
 	ibs.SetVersion(ev.version.Incarnation)
 	ibs.SetWaitCommit(ev.waitCommit)
 	return nil
