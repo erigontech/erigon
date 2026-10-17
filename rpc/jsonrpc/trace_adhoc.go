@@ -1891,9 +1891,9 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 
 // RawTransaction implements trace_rawTransaction.
 func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.Bytes, traceTypes []string) (*TraceCallResult, error) {
-	// Checked before decoding to bound its allocations: every authorization costs at least
-	// PerEmptyAccountCost of intrinsic gas, so a larger list cannot fit under the gas cap.
-	if n := setCodeAuthorizationCount(encodedTx); api.gasCap != 0 && uint64(n) > api.gasCap/params.PerEmptyAccountCost {
+	// Checked before decoding to bound its allocations: on every fork an authorization costs at
+	// least ExecutionPerAuthBaseCostEIP8038 of intrinsic gas, so a larger list cannot fit under the gas cap.
+	if n := setCodeAuthorizationCount(encodedTx); api.gasCap != 0 && uint64(n) > api.gasCap/params.ExecutionPerAuthBaseCostEIP8038 {
 		return nil, clientLimitExceededError(fmt.Sprintf("authorization list of %d entries exceeds the RPC gas cap %d", n, api.gasCap))
 	}
 	txn, err := types.DecodeWrappedTransaction(encodedTx)

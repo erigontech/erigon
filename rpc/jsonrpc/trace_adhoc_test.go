@@ -858,7 +858,7 @@ func TestRawTransactionMalformed(t *testing.T) {
 }
 
 func TestRawTransactionAuthorizationCountBeforeDecode(t *testing.T) {
-	const gasCap = 10 * params.PerEmptyAccountCost
+	const gasCap = 10 * params.ExecutionPerAuthBaseCostEIP8038
 	for _, tc := range []struct {
 		name           string
 		gasCap         uint64
@@ -894,6 +894,43 @@ func TestRawTransactionAuthorizationCountBeforeDecode(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestRawTransactionAuthorizationCountAmsterdam(t *testing.T) {
+	const (
+		gasCap         = 250_000
+		authorizations = 11 // above gasCap/PerEmptyAccountCost, priced at ExecutionPerAuthBaseCostEIP8038 on Amsterdam
+	)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	m := execmoduletester.New(t, execmoduletester.WithKey(key), execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config:   chain.AllProtocolChanges,
+		GasLimit: 60_000_000,
+		Alloc: types.GenesisAlloc{
+			crypto.PubkeyToAddress(key.PublicKey): {Balance: new(big.Int).Mul(big.NewInt(100), big.NewInt(1e18))},
+		},
+	}))
+	auths := make([]types.Authorization, authorizations)
+	for i := range auths {
+		auths[i] = types.Authorization{ChainID: *uint256.NewInt(1), Address: common.Address{2}, R: *uint256.NewInt(1), S: *uint256.NewInt(1)}
+	}
+	txn, err := types.SignTx(&types.SetCodeTransaction{
+		DynamicFeeTransaction: types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{To: &common.Address{1}, GasLimit: gasCap},
+			ChainID:  *m.ChainConfig.ChainID,
+			FeeCap:   *uint256.NewInt(100e9),
+			TipCap:   uint256.Int{},
+		},
+		Authorizations: auths,
+	}, *types.LatestSignerForChainID(m.ChainConfig.ChainID), key)
+	require.NoError(t, err)
+	var buf bytes.Buffer
+	require.NoError(t, txn.MarshalBinary(&buf))
+
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &rpccfg.TraceApiConfig{GasCap: gasCap})
+	result, err := api.RawTransaction(t.Context(), buf.Bytes(), []string{TraceTypeTrace})
+	require.NoError(t, err)
+	require.NotEmpty(t, result.Trace)
 }
 
 func TestRawTransactionStateDiff(t *testing.T) {
