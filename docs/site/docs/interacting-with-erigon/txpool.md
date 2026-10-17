@@ -51,7 +51,7 @@ The TxPool namespace must be explicitly enabled using the `--http.api` flag when
 
 ## **txpool\_content**
 
-Returns the content of the transaction pool, organized by sender address and categorized into pending and queued transactions. Blob transactions are not returned.
+Returns the content of the transaction pool, organized by sender address and categorized into pending and queued transactions.
 
 **Parameters**
 
