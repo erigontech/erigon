@@ -473,6 +473,26 @@ func TestTransientStorageManySlots(t *testing.T) {
 	check(transientScanLimit / 2)
 }
 
+// Several transactions under one snapshot: the revert crosses Prepare's clear.
+func TestTransientStorageRevertAcrossClear(t *testing.T) {
+	t.Parallel()
+	state := New(nil)
+	defer state.Close()
+
+	addr := accounts.Address{}
+	k1, k2 := TransientKey(*uint256.NewInt(1)), TransientKey(*uint256.NewInt(2))
+	state.SetTransientState(addr, &k1, uint256.NewInt(1))
+	state.SetTransientState(addr, &k1, uint256.NewInt(2))
+	clear(state.transientStorage)
+	state.SetTransientState(addr, &k2, uint256.NewInt(3))
+	clear(state.transientStorage)
+
+	state.journal.revert(state, 0)
+	if got := state.GetTransientState(addr, k2); !got.IsZero() {
+		t.Fatalf("k2: have %d, want 0", got.Uint64())
+	}
+}
+
 func TestCloseResetsRevisions(t *testing.T) {
 	t.Parallel()
 	state := New(nil)

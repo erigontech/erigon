@@ -63,9 +63,12 @@ func (t transientStorage) Set(j *journal, addr accounts.Address, key *TransientK
 	}
 }
 
-// restore writes back a value that Set journalled for the slot index.
+// restore writes back a value that Set journalled for the slot index. It skips slots
+// that Prepare's clear dropped: a revert crosses it when transactions share one snapshot.
 func (t transientStorage) restore(addr accounts.Address, slot int, value uint256.Int) {
-	t[addr].values[slot] = value
+	if s := t[addr]; s != nil && slot < len(s.values) {
+		s.values[slot] = value
+	}
 }
 
 // Get gets the transient storage for `key` at the given `addr`.
