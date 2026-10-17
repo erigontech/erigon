@@ -345,6 +345,14 @@ func (tx *tx) HistoryKeyTxNumRange(name kv.Domain, fromTs, toTs int, asc order.B
 	panic("not implemented")
 }
 
+func (tx *tx) HistoryCoverageStart(name kv.Domain) uint64 {
+	panic("not implemented")
+}
+
+func (tx *tx) HistoryRecordedInDB(name kv.Domain, fromTxNum, toTxNum uint64) (bool, error) {
+	panic("not implemented")
+}
+
 func (tx *tx) IIProgress(domain kv.InvertedIdx) uint64 {
 	panic("not implemented")
 }

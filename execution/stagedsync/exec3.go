@@ -33,11 +33,13 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -584,6 +586,53 @@ func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.T
 		return nil, fmt.Errorf("failed to reconstruct prior receipts for partial block %d (startTxIndex %d): %w", header.Number.Uint64(), startTxIndex, err)
 	}
 	return priorReceipts, nil
+}
+
+// replayResumedPrefix re-executes the committed prefix of a block resumed
+// mid-block against state history and folds its reads and writes into io at
+// their access indices, so the block access list can be checked for the whole
+// block. task is any task of the block.
+func (te *txExecutor) replayResumedPrefix(ctx context.Context, applyTx kv.TemporalTx, task *exec.TxTask, startTxIndex int, io *state.VersionedIO) error {
+	blockStartTxNum := task.TxNum - uint64(task.TxIndex+1)
+	if err := requirePrefixHistory(applyTx.Debug(), blockStartTxNum, blockStartTxNum+uint64(startTxIndex)); err != nil {
+		return err
+	}
+	ibs := state.New(state.NewHistoryReaderV3(applyTx, blockStartTxNum))
+	defer ibs.Close()
+	ibs.SetVersionMap(state.NewVersionMap(nil))
+	chainReader := consensuschain.NewReader(te.cfg.chainConfig, applyTx, te.cfg.blockReader, te.logger)
+	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+		return te.cfg.blockReader.Header(ctx, applyTx, hash, number)
+	}
+	_, err := bal.ReplayBlockPrefix(ctx, te.cfg.chainConfig, te.cfg.engine, chainReader, getHeader, task.Header, task.Txs[:startTxIndex], ibs, io, te.logger)
+	return err
+}
+
+// requirePrefixHistory refuses to replay a prefix whose history is not there:
+// a history read silently answers from the latest state then, which turns the
+// prefix's writes into no-ops. History files prove their coverage. History held
+// only in the DB must show a record for the prefix's txNums, which a committed
+// prefix always leaves (the block-start system calls alone write storage).
+func requirePrefixHistory(dbg kv.TemporalDebugTx, fromTxNum, toTxNum uint64) error {
+	domains := []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
+	for _, domain := range domains {
+		if start := dbg.HistoryCoverageStart(domain); fromTxNum < start {
+			return fmt.Errorf("%s history covers txNums from %d, the resumed prefix starts at %d", domain, start, fromTxNum)
+		}
+	}
+	if fromTxNum < dbg.TxNumsInFiles(domains...) {
+		return nil
+	}
+	for _, domain := range domains {
+		recorded, err := dbg.HistoryRecordedInDB(domain, fromTxNum, toTxNum+1)
+		if err != nil {
+			return err
+		}
+		if recorded {
+			return nil
+		}
+	}
+	return fmt.Errorf("no state history recorded for txNums %d-%d", fromTxNum, toTxNum)
 }
 
 func (te *txExecutor) onBlockStart(ctx context.Context, block *types.Block) {

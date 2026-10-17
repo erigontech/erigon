@@ -687,9 +687,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// per-block blockValidator was spawned earlier (~30 LOC up)
 					// and runs concurrently with the work above.
 					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(block.Time())
-					// A partial block records only suffix I/O, so it cannot be checked
-					// against a full-block BAL.
-					if validateFullBlock && (isAmsterdam || pe.cfg.experimentalBAL) {
+					if blockNum > 0 && applyResult.txIOComplete && (isAmsterdam || pe.cfg.experimentalBAL) {
 						if err := bal.Process(header, block.BlockAccessList(), applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger); err != nil {
 							recordApplyFailure(err)
 							continue
@@ -1923,6 +1921,7 @@ type blockResult struct {
 	complete         bool
 	isPartial        bool
 	receiptsComplete bool
+	txIOComplete     bool
 	ApplyCount       int
 	TxIO             *state.VersionedIO
 	Receipts         types.Receipts
@@ -3378,12 +3377,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		var header *types.Header
 		var txs types.Transactions
-		if tt, ok := txTask.(*exec.TxTask); ok {
+		tt, isTxTask := txTask.(*exec.TxTask)
+		if isTxTask {
 			header = tt.Header
 			txs = tt.Txs
 		}
 
 		receiptsComplete := !isPartial
+		txIOComplete := !isPartial
 		if isPartial && be.number() > 0 && header != nil {
 			startTxIndex := be.tasks[0].Version().TxIndex
 			receiptsComplete = startTxIndex == 0
@@ -3402,6 +3403,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			// blocks, skips partial ones — do it here, even when prior receipts
 			// couldn't be reconstructed (the suffix receipts still need blooms).
 			receipts.DeriveFields(blockReceipts, be.hash())
+
+			if pe.cfg.chainConfig.IsAmsterdam(header.Time) {
+				if err := pe.replayResumedPrefix(ctx, applyTx, tt, startTxIndex, be.blockIO); err != nil {
+					return be.operationalBlockResult(fmt.Errorf("block %d: replay resumed prefix: %w", be.number(), err)), nil
+				}
+				txIOComplete = true
+			}
 		}
 
 		// Block finalize: run engine.Finalize + MakeWriteSet on the producer
@@ -3545,6 +3553,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			TxIO:             be.blockIO,
 			Receipts:         blockReceipts,
 			receiptsComplete: receiptsComplete,
+			txIOComplete:     txIOComplete,
 			Stats:            be.stats,
 			Deps:             &deps,
 			AllDeps:          allDeps,
