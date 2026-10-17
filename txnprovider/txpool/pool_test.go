@@ -167,6 +167,29 @@ func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (cont
 	return ctx, pool, poolDB, coreDB, sender
 }
 
+func TestIdHashKnownDiscardReasons(t *testing.T) {
+	ctx, pool, poolDB, _, _ := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	hash := common.Hash{1}
+	for _, tc := range []struct {
+		reason txpoolcfg.DiscardReason
+		known  bool
+	}{
+		{txpoolcfg.NonceTooDistant, false},
+		{txpoolcfg.NonceTooLow, true},
+		{txpoolcfg.IntrinsicGas, true},
+	} {
+		t.Run(tc.reason.String(), func(t *testing.T) {
+			pool.discardReasonsLRU.Add(string(hash[:]), tc.reason)
+			require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
+				known, err := pool.IdHashKnown(tx, hash[:])
+				require.NoError(t, err)
+				require.Equal(t, tc.known, known)
+				return nil
+			}))
+		})
+	}
+}
+
 func TestAddLocalTxnsRejectsTotalGasAboveCap(t *testing.T) {
 	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 	pool.blockGasLimit.Store(2 * math.MaxUint32)

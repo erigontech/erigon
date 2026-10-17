@@ -26,6 +26,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/require"
 
@@ -93,6 +94,31 @@ func TestIPBlockConnLimitsScaleWithPeerCount(t *testing.T) {
 		perBlock24, perBlock16 := ipBlockConnLimits(tt.maxPeerCount)
 		require.Equal(t, tt.perBlock24, perBlock24, "maxPeerCount=%d", tt.maxPeerCount)
 		require.Equal(t, tt.perBlock16, perBlock16, "maxPeerCount=%d", tt.maxPeerCount)
+	}
+}
+
+// The lists are broadest first, so a refusal leaves no zero-count entry for a narrower prefix. An
+// IPv6 /48 keeps go-libp2p's cap of 64 at most.
+func TestIPBlockLimitsAreBroadestFirst(t *testing.T) {
+	prefixLengths := func(limits []rcmgr.ConnLimitPerSubnet) []int {
+		lengths := make([]int, 0, len(limits))
+		for _, limit := range limits {
+			lengths = append(lengths, limit.PrefixLength)
+		}
+		return lengths
+	}
+	for _, tt := range []struct {
+		maxPeerCount uint64
+		perSlash48   int
+	}{
+		{maxPeerCount: 128, perSlash48: 16},
+		{maxPeerCount: 512, perSlash48: 64},
+		{maxPeerCount: 1024, perSlash48: 64},
+	} {
+		v4, v6 := ipBlockLimits(tt.maxPeerCount)
+		require.Equal(t, []int{16, 24, 32}, prefixLengths(v4))
+		require.Equal(t, []int{32, 48, 56}, prefixLengths(v6))
+		require.Equal(t, tt.perSlash48, v6[1].ConnCount, "maxPeerCount=%d", tt.maxPeerCount)
 	}
 }
 
@@ -182,15 +208,18 @@ func TestResourceManagerDoesNotCapPrivateNetworksWithLocalDiscovery(t *testing.T
 }
 
 // Loopback keeps go-libp2p's unlimited default, also when exempt networks replace the default list.
+// A trusted network inside loopback must not replace go-libp2p's unlimited loopback entry with
+// the trusted limit, 32 at this peer count.
 func TestResourceManagerDoesNotCapLoopback(t *testing.T) {
 	for _, cfg := range []*P2PConfig{
 		{MaxPeerCount: testMaxPeerCount},
 		{MaxPeerCount: testMaxPeerCount, LocalDiscovery: true},
 		{MaxPeerCount: testMaxPeerCount, TrustedCIDRs: []string{"203.0.113.0/24", "2001:db8:aa::/48"}},
+		{MaxPeerCount: 4, TrustedCIDRs: []string{"127.0.0.1/32", "::1/128"}},
 	} {
 		o := newConnOpenerWithConfig(t, cfg)
 		for _, addr := range []string{"/ip4/127.0.0.1", "/ip6/::1"} {
-			for range 20 {
+			for range 40 {
 				require.NoError(t, o.open(addr), addr)
 			}
 			o.closeAll()
@@ -270,7 +299,7 @@ func TestParseTrustedCIDRs(t *testing.T) {
 		netip.MustParsePrefix("198.51.100.0/24"),
 	}, got)
 
-	for _, cidr := range []string{"203.0.113.1", "203.0.113.5/8", "0.0.0.0/0", "10.0.0.0/7", "::/0", "2001::/15", "2001:db8::1/32"} {
+	for _, cidr := range []string{"203.0.113.1", "203.0.113.5/8", "0.0.0.0/0", "10.0.0.0/7", "::/0", "2000::/15", "2001:db8::1/32"} {
 		_, err := ParseTrustedCIDRs([]string{cidr})
 		require.Error(t, err, cidr)
 	}
@@ -321,9 +350,9 @@ func TestRefusalCounterSummarisesRefusedBlocks(t *testing.T) {
 	_, err := counter.OpenConnection(network.DirInbound, false, multiaddr.StringCast("/ip4/203.0.113.201/udp/30303/quic-v1"))
 	require.ErrorContains(t, err, errPerSubnetLimit, "QUIC is refused and counted like TCP")
 
-	total, top := counter.flush()
+	total, mostRefusedBlocks := counter.flush()
 	require.Equal(t, 5, total)
-	require.Equal(t, "203.0.113.0/24: 4, 2001:db8::/48: 1", top)
+	require.Equal(t, "203.0.113.0/24: 4, 2001:db8::/48: 1", mostRefusedBlocks)
 	total, _ = counter.flush()
 	require.Zero(t, total)
 }
