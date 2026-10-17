@@ -575,7 +575,6 @@ func TestCallBlobBaseFee(t *testing.T) {
 	}{
 		{"blob hashes, no fee cap", nil, []common.Hash{{1}}, zeroWord},
 		{"blob hashes, priced", (*hexutil.U256)(uint256.NewInt(1e9)), []common.Hash{{1}}, oneWord},
-		{"zero fee cap, no hashes", (*hexutil.U256)(new(uint256.Int)), nil, zeroWord},
 		{"no blob fields", nil, nil, oneWord},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2136,6 +2135,18 @@ func TestCallRejectsMalformedBlobArgs(t *testing.T) {
 		require.ErrorIs(t, err, types.ErrBlobTxnEmptyBlobs)
 	})
 
+	for _, blobFeeCap := range []uint64{0, 1} {
+		t.Run(fmt.Sprintf("blob fee cap %d without blob hashes is rejected", blobFeeCap), func(t *testing.T) {
+			_, err := api.Call(context.Background(), ethapi.CallArgs{
+				From:             &bankAddr,
+				To:               &contractAddr,
+				Data:             &callData,
+				MaxFeePerBlobGas: (*hexutil.U256)(uint256.NewInt(blobFeeCap)),
+			}, nil, nil, nil)
+			require.ErrorIs(t, err, types.ErrBlobTxnEmptyBlobs)
+		})
+	}
+
 	t.Run("blob contract creation is rejected", func(t *testing.T) {
 		_, err := api.Call(context.Background(), ethapi.CallArgs{
 			From:                &bankAddr,
@@ -2200,7 +2211,7 @@ func TestCallRejectsBlobHashesBeforeCancun(t *testing.T) {
 	recipient := common.HexToAddress("0x3333333333333333333333333333333333333333")
 	validHash := common.Hash{kzg.BlobCommitmentVersionKZG}
 
-	call := func(t *testing.T, cfg *chain.Config, hashes []common.Hash) error {
+	call := func(t *testing.T, cfg *chain.Config, hashes []common.Hash, blobFeeCap *hexutil.U256) error {
 		t.Helper()
 		m, _, bankAddr := fundedBankGenesis(t, cfg)
 		api := newTestEthAPIWithFilters(t, m)
@@ -2208,24 +2219,29 @@ func TestCallRejectsBlobHashesBeforeCancun(t *testing.T) {
 			From:                &bankAddr,
 			To:                  &recipient,
 			BlobVersionedHashes: hashes,
+			MaxFeePerBlobGas:    blobFeeCap,
 		}, nil, nil, nil)
 		return err
 	}
 
 	t.Run("blob hashes before Cancun are rejected", func(t *testing.T) {
-		require.ErrorIs(t, call(t, preCancun, []common.Hash{validHash}), types.ErrBlobTxnPreCancun)
+		require.ErrorIs(t, call(t, preCancun, []common.Hash{validHash}, nil), types.ErrBlobTxnPreCancun)
 	})
 
 	t.Run("empty but present blob hash list before Cancun is rejected", func(t *testing.T) {
-		require.ErrorIs(t, call(t, preCancun, []common.Hash{}), types.ErrBlobTxnPreCancun)
+		require.ErrorIs(t, call(t, preCancun, []common.Hash{}, nil), types.ErrBlobTxnPreCancun)
+	})
+
+	t.Run("blob fee cap without blob hashes before Cancun is rejected", func(t *testing.T) {
+		require.ErrorIs(t, call(t, preCancun, nil, (*hexutil.U256)(uint256.NewInt(0))), types.ErrBlobTxnPreCancun)
 	})
 
 	t.Run("absent blob hashes before Cancun are accepted", func(t *testing.T) {
-		require.NoError(t, call(t, preCancun, nil))
+		require.NoError(t, call(t, preCancun, nil, nil))
 	})
 
 	t.Run("blob hashes from Cancun on are accepted", func(t *testing.T) {
-		require.NoError(t, call(t, chain.TestChainOsakaConfig, []common.Hash{validHash}))
+		require.NoError(t, call(t, chain.TestChainOsakaConfig, []common.Hash{validHash}, nil))
 	})
 }
 

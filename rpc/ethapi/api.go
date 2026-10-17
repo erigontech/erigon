@@ -299,6 +299,10 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 
 	if args.BlobVersionedHashes != nil {
 		msg.SetBlobVersionedHashes(args.BlobVersionedHashes)
+	} else if args.MaxFeePerBlobGas != nil {
+		// Only a blob transaction carries a blob fee cap, so a cap alone makes a blob call
+		// without hashes, which fails the blob rules like an empty hash list.
+		msg.SetBlobVersionedHashes([]common.Hash{})
 	}
 
 	if args.AuthorizationList != nil {
