@@ -596,8 +596,6 @@ func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWrite
 			continue
 		}
 
-		// Validate via PayloadAttestationService (handles dedup, clock disparity, pending queue,
-		// and delegates to forkchoice.OnPayloadAttestationMessage for signature + PTC checks)
 		if a.payloadAttestationService == nil {
 			failures = append(failures, poolingFailure{Index: i, Message: "payload attestation validation unavailable"})
 			continue
