@@ -214,6 +214,32 @@ func VersionedCallState(ibs *state.IntraBlockState, stateOverrides *ethapi2.Stat
 	ibs.SetNoConflictDetection()
 }
 
+// FinalizeCallTx ends one transaction of a request that runs several on the same state.
+// On the versioned path the writes go to the version map, where the next transaction index
+// reads them; on the materializing path FinalizeTx commits them to the state objects.
+func FinalizeCallTx(ibs *state.IntraBlockState, rules *chain.Rules) error {
+	if !ibs.IsVersioned() {
+		return ibs.FinalizeTx(rules, state.NewNoopWriter())
+	}
+	writes := ibs.FinalizedWrites(rules)
+	ibs.FlushWritesToVersionMap(writes)
+	// A touched empty account has no write of its own: its EIP-161 removal is derived and published.
+	normalized, err := writes.Normalize(ibs.VersionMap(), ibs.TxnIndex(), 0, ibs.StateReader(), nil, rules.IsEIP161Enabled(), rules.IsAura, rules.IsAmsterdam)
+	if err != nil {
+		return err
+	}
+	for addr, removal := range normalized.SelfDestructs() {
+		if raw, ok := writes.GetSelfDestruct(addr); removal.Val && (!ok || !raw.Val) {
+			// The transaction's own cells of the account would read as its revival.
+			ibs.VersionMap().DeleteAll(addr, ibs.TxnIndex())
+			ibs.VersionMap().WriteSelfDestruct(addr, removal.Version, true, true)
+		}
+	}
+	ibs.SoftFinalise()
+	ibs.ResetVersionedIO()
+	return nil
+}
+
 // InitialState returns the state every call runs against, rewound to the request's
 // overrides. eth_estimateGas probes the same state several times, so the state object
 // is reused and reset rather than rebuilt: Reset returns its objects to their pools,
