@@ -920,7 +920,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			return nil, nil, err
 		}
 
-		if historyIn.index, err = ht.h.openHashMapAccessor(idxPath); err != nil {
+		if historyIn.vi, err = OpenHistoryValueIndex(idxPath, ht.h.FileVersion.AccessorVI.Current); err != nil {
 			return nil, nil, fmt.Errorf("open %s idx: %w", ht.h.FilenameBase, err)
 		}
 	}
