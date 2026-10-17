@@ -50,6 +50,27 @@ func (t *TopicSubscriptions) AllTopics() []string {
 	return topics
 }
 
+func (t *TopicSubscriptions) subscribedAttestationSubnetCount() uint64 {
+	t.mutex.RLock()
+	defer t.mutex.RUnlock()
+
+	subnets := make(map[int]struct{})
+	for topic, subscription := range t.subs {
+		if subscription.sub == nil {
+			continue
+		}
+		name := extractTopicName(topic)
+		if !gossip.IsTopicBeaconAttestation(name) {
+			continue
+		}
+		subnet := extractSubnetIndexByGossipTopic(name)
+		if subnet >= 0 {
+			subnets[subnet] = struct{}{}
+		}
+	}
+	return uint64(len(subnets))
+}
+
 func (t *TopicSubscriptions) Get(topic string) *TopicSubscription {
 	t.mutex.RLock()
 	defer t.mutex.RUnlock()
