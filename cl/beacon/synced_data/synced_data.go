@@ -155,10 +155,7 @@ func (s *SyncedDataManager) copyState(newState, dst *state.CachingBeaconState) (
 	if dst == nil || dst.BeaconConfig() != newState.BeaconConfig() {
 		return newState.Copy()
 	}
-	if err := newState.CopyInto(dst); err != nil {
-		return nil, err
-	}
-	return dst, nil
+	return dst, newState.CopyInto(dst)
 }
 
 // ViewHeadState allows safe, read-only access to the current head state.

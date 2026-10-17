@@ -47,11 +47,7 @@ func (s overwriteAfterViewSyncedData) ViewHeadStateWithIdentity(fn synced_data.V
 }
 
 func TestValidatorIdentitiesAtHeadAreReadInsideTheView(t *testing.T) {
-	_, blocks, _, _, postState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-	var err error
-	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
-	require.NoError(t, err)
-	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+	_, _, _, _, postState, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	next := state.New(postState.BeaconConfig())
 	v := solid.NewValidator()
