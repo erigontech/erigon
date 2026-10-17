@@ -1771,7 +1771,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 		if parentErr := ctx.Err(); parentErr != nil {
 			return parentErr
 		}
-		if errors.Is(err, context.DeadlineExceeded) {
+		if integrity.BudgetExhausted(err) {
 			logger.Info("[integrity] budget exhausted, moving on", "check", chk, "elapsed", elapsed)
 			continue
 		}
