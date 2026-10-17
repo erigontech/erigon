@@ -145,14 +145,13 @@ func CanBuilderCoverBid(s abstract.BeaconState, builderIndex uint64, bidAmount u
 
 func GetProposerDependentRoot(s abstract.BeaconState, epoch uint64) (common.Hash, error) {
 	cfg := s.BeaconConfig()
-	if epoch < cfg.MinSeedLookahead {
-		return common.Hash{}, fmt.Errorf("proposer dependent root epoch %d before min seed lookahead %d", epoch, cfg.MinSeedLookahead)
+	if epoch <= cfg.MinSeedLookahead {
+		if s.Slot() == 0 {
+			return s.BlockRoot()
+		}
+		return s.GetBlockRootAtSlot(0)
 	}
-	dependentEpoch := epoch - cfg.MinSeedLookahead
-	if dependentEpoch == 0 {
-		return common.Hash{}, fmt.Errorf("proposer dependent root slot underflow for epoch %d", epoch)
-	}
-	dependentSlot := dependentEpoch*cfg.SlotsPerEpoch - 1
+	dependentSlot := (epoch-cfg.MinSeedLookahead)*cfg.SlotsPerEpoch - 1
 	return s.GetBlockRootAtSlot(dependentSlot)
 }
 

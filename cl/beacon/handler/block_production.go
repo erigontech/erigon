@@ -461,11 +461,24 @@ func (a *ApiHandler) expectedWithdrawals(
 	return cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(consensusWithdrawals), nil
 }
 
+func resolveFeeRecipient(preference *cltypes.ProposerPreferences, registeredRecipient common.Address, registered bool) (common.Address, bool) {
+	if preference != nil {
+		return preference.FeeRecipient, true
+	}
+	return registeredRecipient, registered
+}
+
 // feeRecipientForProposal resolves the fee recipient, warning once per proposer when there is none:
 // building with the zero address gives that block's fees away.
-func (a *ApiHandler) feeRecipientForProposal(proposerIndex, targetSlot uint64) common.Address {
-	feeRecipient, registered := a.validatorParams.GetFeeRecipient(proposerIndex)
-	if registered {
+func (a *ApiHandler) feeRecipientForProposal(
+	baseState *state.CachingBeaconState,
+	targetSlot, proposerIndex uint64,
+	stateVersion clparams.StateVersion,
+) common.Address {
+	preference := a.proposerPreferencesForProposal(baseState, targetSlot, proposerIndex, stateVersion)
+	registeredRecipient, registered := a.validatorParams.GetFeeRecipient(proposerIndex)
+	feeRecipient, found := resolveFeeRecipient(preference, registeredRecipient, registered)
+	if found {
 		return feeRecipient
 	}
 	// Claimed in one step, so requests for the same slot arriving together do not each decide they
@@ -476,7 +489,7 @@ func (a *ApiHandler) feeRecipientForProposal(proposerIndex, targetSlot uint64) c
 		firstTime = !alreadyWarned
 	}
 	if firstTime {
-		log.Warn("BlockProduction: no fee recipient from prepare_beacon_proposer, using zero address",
+		log.Warn("BlockProduction: no fee recipient from proposer preferences or prepare_beacon_proposer, using zero address",
 			"proposerIndex", proposerIndex, "slot", targetSlot)
 	}
 	return common.Address{}
@@ -1481,7 +1494,7 @@ func (a *ApiHandler) requestConfiguredBuilderBids(
 	if err != nil {
 		return nil
 	}
-	expectedFeeRecipient := a.feeRecipientForProposal(proposerIndex, targetSlot)
+	expectedFeeRecipient := a.feeRecipientForProposal(baseState, targetSlot, proposerIndex, clparams.GloasVersion)
 	targetGasLimit := parentBid.GasLimit
 	if configured := a.targetGasLimitForProposal(baseState, targetSlot, proposerIndex, clparams.GloasVersion); configured != nil {
 		targetGasLimit = uint64(*configured)
@@ -1792,7 +1805,7 @@ func (a *ApiHandler) produceBeaconBody(
 		if options := gloasBlockOptionsFromContext(ctx); options != nil && options.payloadFeeRecipient != nil {
 			feeRecipient = *options.payloadFeeRecipient
 		} else {
-			feeRecipient = a.feeRecipientForProposal(proposerIndex, targetSlot)
+			feeRecipient = a.feeRecipientForProposal(baseState, targetSlot, proposerIndex, stateVersion)
 		}
 		withdrawals, err := a.expectedWithdrawals(baseState, gloasWithdrawalsState, targetSlot)
 		if err != nil {
@@ -3105,7 +3118,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		}
 	}
 	currentSlot := a.ethClock.GetCurrentSlot()
-	a.forkchoiceStore.OnTick(a.ethClock.GenesisTime() + currentSlot*a.beaconChainCfg.SecondsPerSlot)
+	a.forkchoiceStore.OnTick(utils.SecondsToMilliseconds(a.ethClock.GenesisTime() + currentSlot*a.beaconChainCfg.SecondsPerSlot))
 	if !knownBlock {
 		var blockErr error
 		if rejectEquivocation {

@@ -246,7 +246,7 @@ func TestGetHeadNodeRefreshesGloasSelection(t *testing.T) {
 	graph.headers[childRoot] = child.SignedBeaconBlockHeader().Header
 	graph.blocks[childRoot] = child
 	store.updateChildren(10, root, childRoot)
-	store.OnTick(12 * cfg.SecondsPerSlot)
+	store.OnTick(12 * cfg.SecondsPerSlot * 1000)
 
 	head, selectedSlot, err = store.GetHeadNode()
 	require.NoError(t, err)
@@ -320,7 +320,7 @@ func newHeadSnapshotTestStore() (*ForkChoiceStore, *headSnapshotForkGraph) {
 	store.finalizedCheckpoint.Store(solid.Checkpoint{})
 	store.proposerBoostRoot.Store(common.Hash{})
 	store.checkpointStates.Store(checkpoint, &checkpointState{beaconConfig: &cfg})
-	store.time.Store(12 * cfg.SecondsPerSlot)
+	store.timeMs.Store(12 * cfg.SecondsPerSlot * 1000)
 	return store, graph
 }
 
@@ -349,7 +349,7 @@ func TestGloasHeadUsesOneSlotForPayloadDecisions(t *testing.T) {
 				if reads == test.advanceAtRead {
 					// OnTick can advance time while the head walk holds f.mu. Both
 					// variants must use the slot captured before that clock update.
-					store.time.Store(13 * store.beaconCfg.SecondsPerSlot)
+					store.timeMs.Store(13 * store.beaconCfg.SecondsPerSlot * 1000)
 				}
 			}
 
@@ -418,7 +418,7 @@ func TestPreGloasHeadReadCrossesGloasBoundary(t *testing.T) {
 
 			// Cross the fork while the pre-fork reader is outside f.mu for disk I/O.
 			store.checkpointStates.Store(checkpoint, cs)
-			store.OnTick(store.beaconCfg.SlotsPerEpoch * store.beaconCfg.SecondsPerSlot)
+			store.OnTick(store.beaconCfg.SlotsPerEpoch * store.beaconCfg.SecondsPerSlot * 1000)
 			want := ForkChoiceNode{Root: checkpoint.Root, PayloadStatus: cltypes.PayloadStatusFull}
 			if refresh {
 				head, _, err := store.GetHeadNode()
@@ -736,7 +736,7 @@ func TestPreGloasHeadWithAuxiliaryStateDoesNotDependOnCheckpointStateCache(t *te
 	store.headSet = map[common.Hash]struct{}{boostedRoot: {}, nonBoostedRoot: {}}
 	store.proposerBoostRoot.Store(boostedRoot)
 	store.setLatestMessage(0, LatestMessage{Slot: 2 * store.beaconCfg.SlotsPerEpoch, Root: nonBoostedRoot})
-	store.time.Store(2 * store.beaconCfg.SlotsPerEpoch * store.beaconCfg.SecondsPerSlot)
+	store.timeMs.Store(2 * store.beaconCfg.SlotsPerEpoch * store.beaconCfg.SecondsPerSlot * 1000)
 	store.checkpointStates.Delete(checkpoint)
 
 	coldHead, _, err := store.GetHead(auxiliaryState)
