@@ -422,6 +422,13 @@ func (g *GossipManager) SubscribeWithExpiry(name string, expiry time.Time) error
 	return nil
 }
 
+func (g *GossipManager) ExpectedAttestations(window time.Duration, activeValidators uint64) uint64 {
+	slotDuration := time.Duration(g.beaconConfig.SecondsPerSlot) * time.Second
+	slotBursts := uint64((window + slotDuration - 1) / slotDuration)
+	return g.subscriptions.subscribedAttestationSubnetCount() * activeValidators * slotBursts /
+		(g.beaconConfig.SlotsPerEpoch * g.networkConfig.AttestationSubnetCount)
+}
+
 func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) error {
 	forkDigest, err := g.ethClock.CurrentForkDigest()
 	if err != nil {
