@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -261,7 +262,7 @@ func TestFinalizeCallTxPublishesWritesToNextTx(t *testing.T) {
 	ibs.SetTxContext(0, 0)
 	require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(7)))
 	ibs.AddLog(&types.Log{Address: addr.Value()})
-	require.NoError(t, FinalizeCallTx(ibs, &chain.Rules{}))
+	require.NoError(t, ethapi.FinalizeCallTx(ibs, &chain.Rules{}))
 
 	ibs.SetTxContext(0, 1)
 	got, err := ibs.GetState(addr, key)
@@ -298,7 +299,7 @@ func TestFinalizeCallTxRemovesTouchedEmptyAccount(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, exists)
 	require.NoError(t, ibs.TouchAccount(addr))
-	require.NoError(t, FinalizeCallTx(ibs, &chain.Rules{IsSpuriousDragon: true}))
+	require.NoError(t, ethapi.FinalizeCallTx(ibs, &chain.Rules{IsSpuriousDragon: true}))
 
 	ibs.SetTxContext(0, 1)
 	exists, err = ibs.Exist(addr)
@@ -319,7 +320,7 @@ func TestFinalizeCallTxKeepsARecreatedEmptyAccountDeleted(t *testing.T) {
 
 	ibs.SetTxContext(0, 0)
 	require.NoError(t, ibs.TouchAccount(addr))
-	require.NoError(t, FinalizeCallTx(ibs, rules))
+	require.NoError(t, ethapi.FinalizeCallTx(ibs, rules))
 
 	ibs.SetTxContext(0, 1)
 	exists, err := ibs.Exist(addr)
@@ -327,7 +328,7 @@ func TestFinalizeCallTxKeepsARecreatedEmptyAccountDeleted(t *testing.T) {
 	require.False(t, exists)
 	require.NoError(t, ibs.CreateAccount(addr, false))
 	require.NoError(t, ibs.TouchAccount(addr))
-	require.NoError(t, FinalizeCallTx(ibs, rules))
+	require.NoError(t, ethapi.FinalizeCallTx(ibs, rules))
 
 	ibs.SetTxContext(0, 2)
 	exists, err = ibs.Exist(addr)

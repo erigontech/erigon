@@ -1880,12 +1880,29 @@ func (ibs *IntraBlockState) setStateVersioned(addr accounts.Address, key account
 // SetStorage replaces the entire storage for the specified account with given
 // storage. This function should only be used for debugging.
 func (ibs *IntraBlockState) SetStorage(addr accounts.Address, storage Storage) error {
-	if dbg.AssertEnabled && ibs.noMaterialize {
-		panic("SetStorage: full state override is not kept on the noMaterialize path")
-	}
 	stateObject, err := ibs.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
+	}
+	if ibs.versionMap != nil {
+		// An incarnation cell wipes storage and code for later transactions: a slot
+		// or code without a newer cell reads as empty, so the code is written again.
+		code, err := ibs.getCode(addr)
+		if err != nil {
+			return err
+		}
+		if code.Len() > 0 {
+			ibs.writeCode(addr, code, false)
+		}
+		ibs.recordWriteIncarnation(addr, stateObject.data.Incarnation)
+		// The incarnation cell does not hide a slot cell of an earlier transaction.
+		for _, key := range ibs.versionMap.StorageKeys(addr) {
+			ibs.recordWriteStorage(addr, key, uint256.Int{})
+		}
+		for key, value := range storage {
+			ibs.recordWriteStorage(addr, key, value)
+		}
+		return nil
 	}
 	if stateObject != nil {
 		stateObject.SetStorage(storage)

@@ -66,7 +66,7 @@ func DoCall(
 
 	ibs := state.NewPooled(stateReader)
 	defer state.ReleasePooled(ibs)
-	VersionedCallState(ibs, stateOverrides)
+	VersionedCallState(ibs)
 
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
@@ -201,43 +201,15 @@ func (r *ReusableCaller) Close() {
 func (r *ReusableCaller) Message() *types.Message { return r.message }
 
 // VersionedCallState puts a one-shot call on the versioned state path block execution
-// uses. Overrides keep the materializing path: they end in FinalizeTx, which clears the
-// journal, and the versioned read path then serves this tx's own writes only from a
-// resident stateObject. Reset clears the flags, so a reused state calls this again.
-func VersionedCallState(ibs *state.IntraBlockState, stateOverrides *ethapi2.StateOverrides) {
-	if !dbg.CallNoMaterialize || stateOverrides != nil {
+// uses. Reset clears the flags, so a reused state calls this again.
+func VersionedCallState(ibs *state.IntraBlockState) {
+	if !dbg.CallNoMaterialize {
 		return
 	}
 	ibs.SetVersionMap(state.NewVersionMap(nil))
 	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(0, 0)
 	ibs.SetNoConflictDetection()
-}
-
-// FinalizeCallTx ends one transaction of a request that runs several on the same state.
-// On the versioned path the writes go to the version map, where the next transaction index
-// reads them; on the materializing path FinalizeTx commits them to the state objects.
-func FinalizeCallTx(ibs *state.IntraBlockState, rules *chain.Rules) error {
-	if !ibs.IsVersioned() {
-		return ibs.FinalizeTx(rules, state.NewNoopWriter())
-	}
-	writes := ibs.FinalizedWrites(rules)
-	ibs.FlushWritesToVersionMap(writes)
-	// A touched empty account has no write of its own: its EIP-161 removal is derived and published.
-	normalized, err := writes.Normalize(ibs.VersionMap(), ibs.TxnIndex(), 0, ibs.StateReader(), nil, rules.IsEIP161Enabled(), rules.IsAura, rules.IsAmsterdam)
-	if err != nil {
-		return err
-	}
-	for addr, removal := range normalized.SelfDestructs() {
-		if raw, ok := writes.GetSelfDestruct(addr); removal.Val && (!ok || !raw.Val) {
-			// The transaction's own cells of the account would read as its revival.
-			ibs.VersionMap().DeleteAll(addr, ibs.TxnIndex())
-			ibs.VersionMap().WriteSelfDestruct(addr, removal.Version, true, true)
-		}
-	}
-	ibs.SoftFinalise()
-	ibs.ResetVersionedIO()
-	return nil
 }
 
 // InitialState returns the state every call runs against, rewound to the request's
@@ -254,7 +226,7 @@ func (r *ReusableCaller) InitialState() (*state.IntraBlockState, vm.PrecompiledC
 	} else {
 		ibs.Reset()
 	}
-	VersionedCallState(ibs, r.stateOverrides)
+	VersionedCallState(ibs)
 	if r.stateOverrides == nil {
 		return ibs, nil, nil
 	}
