@@ -300,9 +300,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 	if args.BlobVersionedHashes != nil {
 		msg.SetBlobVersionedHashes(args.BlobVersionedHashes)
 	} else if args.MaxFeePerBlobGas != nil {
-		// Only a blob transaction carries a blob fee cap, so a cap alone makes a blob call
-		// without hashes, which fails the blob rules like an empty hash list.
-		msg.SetBlobVersionedHashes([]common.Hash{})
+		return nil, ErrBlobFeeCapWithoutBlobHashes
 	}
 
 	if args.AuthorizationList != nil {
@@ -319,6 +317,11 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 
 	return msg, nil
 }
+
+// ErrBlobFeeCapWithoutBlobHashes rejects a call that sets maxFeePerBlobGas without
+// blobVersionedHashes: only a blob transaction carries a blob fee cap, and it carries at
+// least one versioned hash.
+var ErrBlobFeeCapWithoutBlobHashes = fmt.Errorf("maxFeePerBlobGas requires blobVersionedHashes: %w", types.ErrBlobTxnEmptyBlobs)
 
 // BlobsUnpriced reports whether the caller named blob hashes but put no price on
 // them.

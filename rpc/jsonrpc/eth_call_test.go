@@ -2143,7 +2143,7 @@ func TestCallRejectsMalformedBlobArgs(t *testing.T) {
 				Data:             &callData,
 				MaxFeePerBlobGas: (*hexutil.U256)(uint256.NewInt(blobFeeCap)),
 			}, nil, nil, nil)
-			require.ErrorIs(t, err, types.ErrBlobTxnEmptyBlobs)
+			require.ErrorIs(t, err, ethapi.ErrBlobFeeCapWithoutBlobHashes)
 		})
 	}
 
@@ -2232,8 +2232,8 @@ func TestCallRejectsBlobHashesBeforeCancun(t *testing.T) {
 		require.ErrorIs(t, call(t, preCancun, []common.Hash{}, nil), types.ErrBlobTxnPreCancun)
 	})
 
-	t.Run("blob fee cap without blob hashes before Cancun is rejected", func(t *testing.T) {
-		require.ErrorIs(t, call(t, preCancun, nil, (*hexutil.U256)(uint256.NewInt(0))), types.ErrBlobTxnPreCancun)
+	t.Run("blob fee cap without blob hashes before Cancun is rejected for the missing hashes", func(t *testing.T) {
+		require.ErrorIs(t, call(t, preCancun, nil, (*hexutil.U256)(uint256.NewInt(0))), ethapi.ErrBlobFeeCapWithoutBlobHashes)
 	})
 
 	t.Run("absent blob hashes before Cancun are accepted", func(t *testing.T) {

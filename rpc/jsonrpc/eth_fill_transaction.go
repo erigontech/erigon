@@ -104,6 +104,11 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 		}
 	}
 
+	if args.BlobVersionedHashes == nil {
+		// The calls reject a blob fee cap without blob hashes; a filled non-blob transaction has none.
+		args.MaxFeePerBlobGas = nil
+	}
+
 	if args.AuthorizationList != nil && len(args.AuthorizationList) == 0 {
 		return nil, errors.New("need at least one authorization for a set-code transaction")
 	}
@@ -150,12 +155,7 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 	}
 
 	if args.Gas == nil {
-		estimateArgs := args
-		if estimateArgs.BlobVersionedHashes == nil {
-			// The calls reject a blob fee cap without blob hashes; the filled transaction drops it.
-			estimateArgs.MaxFeePerBlobGas = nil
-		}
-		estimated, err := api.EstimateGas(ctx, &estimateArgs, &latestNumOrHash, nil, nil)
+		estimated, err := api.EstimateGas(ctx, &args, &latestNumOrHash, nil, nil)
 		if err != nil {
 			return nil, err
 		}

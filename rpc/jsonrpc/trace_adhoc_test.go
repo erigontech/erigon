@@ -2798,10 +2798,10 @@ func TestTraceCallFields(t *testing.T) {
 		var args TraceCallParam
 		require.NoError(t, json.Unmarshal([]byte(callObject(blobHashReader, `,"maxFeePerBlobGas":"0x77359400"`)), &args))
 		_, err := api.Call(context.Background(), args, []string{TraceTypeTrace}, nil, nil)
-		require.ErrorIs(t, err, types.ErrBlobTxnEmptyBlobs)
+		require.ErrorIs(t, err, ethapi.ErrBlobFeeCapWithoutBlobHashes)
 
 		_, err = api.CallMany(context.Background(), json.RawMessage(`[[`+callObject(blobHashReader, `,"maxFeePerBlobGas":"0x0"`)+`,["trace"]]]`), nil, nil)
-		require.ErrorIs(t, err, types.ErrBlobTxnEmptyBlobs)
+		require.ErrorIs(t, err, ethapi.ErrBlobFeeCapWithoutBlobHashes)
 	})
 
 	// As in eth_call, the nonce is not checked against the state, and the chain's own chainId
