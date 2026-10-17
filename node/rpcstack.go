@@ -34,7 +34,6 @@ import (
 	"github.com/klauspost/compress/gzhttp"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/rpc"
 )
@@ -82,11 +81,7 @@ func (h *rpcAdmissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		}
 		defer h.inflight.Add(-1)
 	}
-	ctx := r.Context()
-	if h.limit > 0 {
-		ctx = kv.WithNonBlockingAcquire(ctx)
-	}
-	h.next.ServeHTTP(w, r.WithContext(ctx))
+	h.next.ServeHTTP(w, r)
 }
 
 // NewWSConnectionLimiter wraps next so that at most limit concurrent WebSocket

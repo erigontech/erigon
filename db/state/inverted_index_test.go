@@ -30,7 +30,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -1580,47 +1579,6 @@ func TestInvertedIndexPrefetchCancellation(t *testing.T) {
 				require.NoError(t, err)
 				require.Zero(t, n)
 			}
-		})
-	}
-}
-
-func TestInvertedIndexPrefetchReadLimit(t *testing.T) {
-	for _, slots := range []int64{0, 1} {
-		t.Run(fmt.Sprintf("slots=%d", slots), func(t *testing.T) {
-			limiter := semaphore.NewWeighted(slots)
-			db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).
-				RoTxsLimiter(limiter).MustOpen()
-			t.Cleanup(db.Close)
-			tx, err := db.BeginRw(t.Context())
-			require.NoError(t, err)
-			defer tx.Rollback()
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
-			cursor := &prefetchIndexCursor{}
-			prefetchDB := &prefetchIndexDB{RoDB: db, cursor: cursor}
-			p := newInvertedIndexPrefetcher(prefetchDB, kv.TblTracesToIdx, 16)
-			pairs := [][2][]byte{{[]byte("key"), make([]byte, 8)}}
-			w := &InvertedIndexBufferedWriter{
-				prefetcher:        p,
-				prefetchBatchSize: 1024,
-				indexTable:        kv.TblTracesToIdx,
-				indexKeysTable:    kv.TblTracesToKeys,
-				tmpdir:            t.TempDir(),
-				logger:            log.New(),
-			}
-			defer w.close()
-			require.NoError(t, w.Add(pairs[0][0], 0))
-			require.NoError(t, w.Flush(ctx, tx))
-			value, err := tx.GetOne(kv.TblTracesToIdx, pairs[0][0])
-			require.NoError(t, err)
-			require.Equal(t, pairs[0][1], value)
-			key, err := tx.GetOne(kv.TblTracesToKeys, pairs[0][1])
-			require.NoError(t, err)
-			require.Equal(t, pairs[0][0], key)
-			require.EqualValues(t, slots+1, cursor.prefetchCalls.Load())
-			require.EqualValues(t, slots, cursor.rollbacks.Load())
-			require.True(t, limiter.TryAcquire(slots), "release all partially opened readers")
-			limiter.Release(slots)
 		})
 	}
 }

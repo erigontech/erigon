@@ -21,6 +21,8 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1503,4 +1505,70 @@ func TestRangeDupSortSeekRespectsLimit(t *testing.T) {
 	got, err := stream.ToArrayU64(stream.Intersect[uint64](limited, stream.Array([]uint64{10}), order.Asc, kv.Unlim))
 	require.NoError(t, err)
 	require.Empty(t, got)
+}
+
+// Begin racing Close: a transaction either starts before Close and is waited
+// for, or fails as closed. Close must never free the env under a running read,
+// and nothing may start once it has returned.
+func TestCloseRacingBeginRo(t *testing.T) {
+	for range 20 {
+		db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).MustOpen()
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			return tx.Put(kv.Headers, []byte{1}, []byte{2})
+		}))
+
+		var live atomic.Int64
+		var closed atomic.Bool
+		var wg sync.WaitGroup
+		// One read per call, so its deferred Rollback ends it before the next begins. Failures
+		// come back as errors: the workers are not the test goroutine.
+		read := func() (bool, error) {
+			tx, err := db.BeginRo(t.Context())
+			if err != nil {
+				if !strings.Contains(err.Error(), "closed") {
+					return false, err
+				}
+				return false, nil
+			}
+			defer tx.Rollback()
+			if closed.Load() {
+				return false, errors.New("a read began after Close returned")
+			}
+			live.Add(1)
+			defer live.Add(-1)
+			// A read on a freed env crashes or errors: this is what Close must wait for.
+			v, err := tx.GetOne(kv.Headers, []byte{1})
+			if err != nil {
+				return false, err
+			}
+			if !bytes.Equal(v, []byte{2}) {
+				return false, fmt.Errorf("read %x, want 02", v)
+			}
+			return true, nil
+		}
+		workerErrs := make(chan error, 16)
+		for range 16 {
+			wg.Go(func() {
+				for {
+					again, err := read()
+					if err != nil {
+						workerErrs <- err
+						return
+					}
+					if !again {
+						return
+					}
+				}
+			})
+		}
+		time.Sleep(time.Millisecond)
+		db.Close()
+		closed.Store(true)
+		require.Zero(t, live.Load(), "Close returned while a read was still running")
+		wg.Wait()
+		close(workerErrs)
+		for err := range workerErrs {
+			require.NoError(t, err)
+		}
+	}
 }
