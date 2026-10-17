@@ -18,6 +18,7 @@ package rulesconfig
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -35,6 +36,14 @@ import (
 
 type fakeL2Config struct {
 	name string
+}
+
+func TestCreateRulesEngineClique(t *testing.T) {
+	var config chain.Config
+	require.NoError(t, json.Unmarshal([]byte(`{"chainId":59141,"clique":{"period":1,"epoch":30000}}`), &config))
+	engine := CreateRulesEngineBareBones(context.Background(), &config, log.New())
+	t.Cleanup(func() { require.NoError(t, engine.Close()) })
+	require.Equal(t, "clique", string(engine.Type()))
 }
 
 func (f fakeL2Config) Name() string { return f.name }

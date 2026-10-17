@@ -614,6 +614,8 @@ func New(
 	var rulesConfig any
 
 	switch {
+	case chainConfig.Clique != nil:
+		rulesConfig = chainConfig.Clique
 	case chainConfig.Aura != nil:
 		rulesConfig = &config.Aura
 	default:
@@ -1400,7 +1402,7 @@ func (s *Ethereum) Start() error {
 		return currentTD
 	}
 
-	if chainspec.IsChainPoS(s.chainConfig, currentTDProvider) {
+	if shouldStartExecution(s.chainConfig, currentTDProvider) {
 		diaglib.Send(diaglib.SyncStageList{StagesList: diaglib.InitStagesFromList(s.pipelineStagedSync.StagesIdsList())})
 		go s.execModule.Start(s.sentryCtx, hook)
 	}
@@ -1516,6 +1518,10 @@ func (s *Ethereum) Stop() error {
 	}
 
 	return nil
+}
+
+func shouldStartExecution(config *chain.Config, currentTDProvider func() *uint256.Int) bool {
+	return (config.Clique != nil && config.TerminalTotalDifficulty != nil) || chainspec.IsChainPoS(config, currentTDProvider)
 }
 
 func (s *Ethereum) ChainDB() kv.RwDB {
