@@ -150,7 +150,12 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 	}
 
 	if args.Gas == nil {
-		estimated, err := api.EstimateGas(ctx, &args, &latestNumOrHash, nil, nil)
+		estimateArgs := args
+		if estimateArgs.BlobVersionedHashes == nil {
+			// The calls reject a blob fee cap without blob hashes; the filled transaction drops it.
+			estimateArgs.MaxFeePerBlobGas = nil
+		}
+		estimated, err := api.EstimateGas(ctx, &estimateArgs, &latestNumOrHash, nil, nil)
 		if err != nil {
 			return nil, err
 		}

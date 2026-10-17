@@ -2792,9 +2792,16 @@ func TestTraceCallFields(t *testing.T) {
 		hash := "0x0100000000000000000000000000000000000000000000000000000000000001"
 		withHash := traceCall(t, callObject(blobHashReader, `,"maxFeePerBlobGas":"0x77359400","blobVersionedHashes":["`+hash+`"]`))
 		require.Equal(t, hash, withHash.Output.String(), "BLOBHASH reads the supplied versioned hash")
+	})
 
-		withoutHash := traceCall(t, callObject(blobHashReader, `,"maxFeePerBlobGas":"0x77359400"`))
-		require.Equal(t, common.Hash{}.Hex(), withoutHash.Output.String())
+	t.Run("maxFeePerBlobGas without blobVersionedHashes", func(t *testing.T) {
+		var args TraceCallParam
+		require.NoError(t, json.Unmarshal([]byte(callObject(blobHashReader, `,"maxFeePerBlobGas":"0x77359400"`)), &args))
+		_, err := api.Call(context.Background(), args, []string{TraceTypeTrace}, nil, nil)
+		require.ErrorIs(t, err, types.ErrBlobTxnEmptyBlobs)
+
+		_, err = api.CallMany(context.Background(), json.RawMessage(`[[`+callObject(blobHashReader, `,"maxFeePerBlobGas":"0x0"`)+`,["trace"]]]`), nil, nil)
+		require.ErrorIs(t, err, types.ErrBlobTxnEmptyBlobs)
 	})
 
 	// As in eth_call, the nonce is not checked against the state, and the chain's own chainId
