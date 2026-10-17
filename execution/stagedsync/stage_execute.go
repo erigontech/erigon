@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -242,30 +243,36 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 	accumulator *shards.Accumulator,
 	changeset *[kv.DomainLen][]kv.DomainEntryDiff, logger log.Logger,
 ) error {
+	if accumulator == nil && !dbg.TraceUnwinds {
+		return nil
+	}
+	var currentAddress common.Address
 	var currentInc uint64
+	var incarnationKnown bool
 
 	// TODO: why we don't call accumulator.ChangeCode???
 	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		// TODO: This is broken - becuase it does not handle the way value changes
-		// for previous steps are represented - they will pass nil values here
-		// which will look like a delete (12/11/25 - I've not fixed this as it has
-		// been here for a while and I'm not sure what if anything receives these
-		// changes at what it does with them)
+		var address common.Address
+		copy(address[:], k[:length.Addr])
+		if address != currentAddress {
+			currentAddress = address
+			currentInc = 0
+			incarnationKnown = false
+		}
 		if len(k) == length.Addr {
+			incarnationKnown = true
 			if len(v) > 0 {
 				var account accounts.Account
 				if err := accounts.DeserialiseV3(&account, v); err != nil {
 					return fmt.Errorf("%w, %x", err, v)
 				}
-				var address common.Address
-				copy(address[:], k)
+				currentInc = account.Incarnation
 				newV := accounts.SerialiseV3(&account)
 				if accumulator != nil {
 					accumulator.ChangeAccount(address, account.Incarnation, newV)
 				}
 			} else {
-				var address common.Address
-				copy(address[:], k)
+				currentInc = 0
 				if accumulator != nil {
 					accumulator.DeleteAccount(address)
 				}
@@ -273,19 +280,24 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 			return nil
 		}
 
-		var address common.Address
 		var location common.Hash
-		copy(address[:], k[:length.Addr])
 		copy(location[:], k[length.Addr:])
 		if accumulator != nil {
-			accumulator.ChangeStorage(address, currentInc, location, bytes.Clone(v))
-		}
-		if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.StorageDomain)) {
-			if v == nil {
-				fmt.Printf("unwind (Block:%d,Tx:%d): storage [%x %x] => [empty]\n", blockUnwindTo, txUnwindTo, address, location)
-			} else {
-				fmt.Printf("unwind (Block:%d,Tx:%d): storage [%x %x] => [%x]\n", blockUnwindTo, txUnwindTo, address, location, v)
+			if !incarnationKnown {
+				accountData, _, err := tx.GetAsOf(kv.AccountsDomain, address[:], txUnwindTo)
+				if err != nil {
+					return err
+				}
+				if len(accountData) > 0 {
+					var account accounts.Account
+					if err := accounts.DeserialiseV3(&account, accountData); err != nil {
+						return fmt.Errorf("%w, %x", err, accountData)
+					}
+					currentInc = account.Incarnation
+				}
+				incarnationKnown = true
 			}
+			accumulator.ChangeStorage(address, currentInc, location, bytes.Clone(v))
 		}
 		return nil
 	}
@@ -296,7 +308,8 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 
 	if changeset != nil {
 		accountDiffs := changeset[kv.AccountsDomain]
-		for _, entry := range accountDiffs {
+		// The collector keeps the first value, while diffs sort newer steps first.
+		for _, entry := range slices.Backward(accountDiffs) {
 			if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.AccountsDomain)) {
 				address := entry.Key[:len(entry.Key)-8]
 				keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
@@ -312,13 +325,50 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 					fmt.Printf("unwind (Block:%d,Tx:%d): del acc: %x, step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
 				}
 			}
-			if err := stateChanges.Collect(common.ToBytesZeroCopy(entry.Key)[:length.Addr], entry.Value); err != nil {
+			key := common.ToBytesZeroCopy(entry.Key)[:length.Addr]
+			value := entry.Value
+			if value == nil {
+				if accumulator == nil {
+					continue
+				}
+				// Legacy diffs omit the previous value, and the pending unwind still leaves discarded database rows.
+				var err error
+				value, _, err = tx.GetAsOf(kv.AccountsDomain, key, txUnwindTo)
+				if err != nil {
+					return err
+				}
+			}
+			if err := stateChanges.Collect(key, value); err != nil {
 				return err
 			}
 		}
 		storageDiffs := changeset[kv.StorageDomain]
-		for _, kv := range storageDiffs {
-			if err := stateChanges.Collect(common.ToBytesZeroCopy(kv.Key), kv.Value); err != nil {
+		// Full keys sort newer steps first; the accumulator keeps the last update per slot.
+		for _, entry := range storageDiffs {
+			key := common.ToBytesZeroCopy(entry.Key)
+			value := entry.Value
+			if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.StorageDomain)) {
+				address, location := key[:length.Addr], key[length.Addr:len(key)-8]
+				switch {
+				case value == nil:
+					fmt.Printf("unwind (Block:%d,Tx:%d): storage [%x %x] => [different step]\n", blockUnwindTo, txUnwindTo, address, location)
+				case len(value) == 0:
+					fmt.Printf("unwind (Block:%d,Tx:%d): storage [%x %x] => [empty]\n", blockUnwindTo, txUnwindTo, address, location)
+				default:
+					fmt.Printf("unwind (Block:%d,Tx:%d): storage [%x %x] => [%x]\n", blockUnwindTo, txUnwindTo, address, location, value)
+				}
+			}
+			if value == nil {
+				if accumulator == nil {
+					continue
+				}
+				var err error
+				value, _, err = tx.GetAsOf(kv.StorageDomain, key[:len(key)-8], txUnwindTo)
+				if err != nil {
+					return err
+				}
+			}
+			if err := stateChanges.Collect(key, value); err != nil {
 				return err
 			}
 		}
