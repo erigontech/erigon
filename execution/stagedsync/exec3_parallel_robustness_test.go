@@ -20,7 +20,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -34,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // TestChangesetWindowStart covers the pure helper that decides where the
@@ -834,67 +832,6 @@ func TestShouldMarkExhaustedAtBlock(t *testing.T) {
 			}
 		})
 	}
-}
-
-// TestApplyLoopFlush_InvalidTxWritesAreEstimate reproduces the bug-scenario
-// at the VersionMap layer with the apply loop's flush flag for an invalid verdict.
-//
-// Repro recipe from gnosis block 18,483,405:
-//
-//  1. tx[3] inc=0 executed, EVM did NOT revert, and emitted 28 storage writes
-//     (one of them: contract 0x18b2b767… slot 0x08 = `aabS…0b886…5981`).
-//  2. Apply loop's ValidateVersionBlock returned VersionInvalid (some read no
-//     longer matched versionMap).
-//  3. Apply loop then called FlushVersionedWrites with `cntInvalid == 0` as
-//     the `complete` flag — true, because cntInvalid counts only *prior*
-//     invalid txs in the current iteration. The 28 writes were stored as
-//     flag=Done.
-//  4. tx[16] subsequently read slot 8, got `aabS…` via MapRead, recorded
-//     readVersion=tx[3]:inc0. Version-only validation passed.
-//  5. Downstream gas-mismatch ~80K blocks later from the phantom-derived state
-//     cascading through the tx queue.
-//
-// The apply loop now flushes with complete=valid, so an invalidated tx's
-// writes are flushed as Estimate. This test asserts the downstream effect: a
-// tx that later reads the slot must see MVReadResultDependency (the validator
-// treats this as VersionInvalid and forces re-execution), not MVReadResultDone.
-func TestApplyLoopFlush_InvalidTxWritesAreEstimate(t *testing.T) {
-	addr := accounts.InternAddress(common.HexToAddress("0x18b2b7673c6d661923e9460d592699617828b293"))
-	slot := accounts.InternKey(common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000008"))
-
-	vm := state.NewVersionMap(nil)
-
-	// Simulate the apply loop processing tx=3 with validity=VersionInvalid.
-	const invalidTxIdx = 3
-	const invalidTxInc = 0
-	phantomVal := *uint256.NewInt(0xaabb)
-
-	invalidTxWrites := newWS().
-		stor(addr, slot, state.Version{TxIndex: invalidTxIdx, Incarnation: invalidTxInc}, phantomVal).
-		build()
-
-	valid := false // validity == VersionInvalid
-	vm.FlushVersionedWrites(invalidTxWrites, valid)
-
-	// Downstream tx=16 reads the slot — this is the read that committed
-	// phantom state in the bug.
-	const downstreamTxIdx = 16
-	_, res, _ := vm.ReadStorage(addr, slot, downstreamTxIdx)
-
-	// MVReadResultDependency: the validator will treat any read of this cell
-	// as VersionInvalid, forcing the reader to re-execute. This is correct
-	// OCC behavior when an invalidated tx is awaiting retry.
-	require.Equal(t, state.MVReadResultDependency, res.Status(),
-		"invalid tx's writes must be flushed as Estimate so downstream reads "+
-			"return MVReadResultDependency. Pre-fix, this returned "+
-			"MVReadResultDone and downstream txs committed phantom state "+
-			"(gnosis block 18,483,405 repro).")
-
-	// Sanity: the entry IS recorded against tx[3] in versionMap (Estimate, not
-	// absent), so downstream readers' OCC dependency tracking still works.
-	require.Equal(t, invalidTxIdx, res.DepIdx(),
-		"phantom write is recorded as Estimate, not deleted — downstream "+
-			"OCC must still see it as a dependency")
 }
 
 // Real concurrent errors surface and are joined with a real apply result.

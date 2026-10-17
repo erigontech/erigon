@@ -3075,22 +3075,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				if readVersion != writtenVersion {
 					vv = state.VersionInvalid
-				} else if writtenVersion.TxIndex == state.UnknownDep && tx-1 > be.validateTasks.maxComplete() {
-					vv = state.VersionTooEarly
 				}
 
 				return vv
 			}, txTask.Rules().IsEIP161Enabled(), txTask.Rules().IsAura, trace, tracePrefix)
 		be.versionMap.SetTrace(false)
-
-		if validity == state.VersionTooEarly {
-			if dbg.TraceReexec {
-				fmt.Printf("TOOEARLY blk=%d tx=%d inc=%d\n", be.number(), txVersion.TxIndex, txVersion.Incarnation)
-			}
-			be.validateTasks.clearInProgress(tx)
-			be.validateTasks.pushPending(tx)
-			break
-		}
 
 		// The validator verdict is the single source of truth (issue #21319):
 		// a result is committed only if validation explicitly passed it.
@@ -3213,7 +3202,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					return nil, fmt.Errorf("[parallel] normalize block writes: %w", normErr)
 				}
 				txResult.writes = normWrites
-				// Later txs in toValidate read the block cache through stateReader and
+				// Later txs in this pass read the block cache through stateReader and
 				// must see normWrites, which can hold an EIP-161 removal the version map lacks.
 				if err := pe.rs.ApplyStateWrites(ctx, applyTx, be.number(), txTask.Version().TxNum, normWrites,
 					nil, txTask.Rules(), be.blockStateCache); err != nil {
