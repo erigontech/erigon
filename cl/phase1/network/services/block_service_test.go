@@ -364,6 +364,45 @@ func TestBlockServiceIgnoresLocalExecutionFailure(t *testing.T) {
 	}))
 }
 
+func TestBlockServiceIgnoresLocalOnBlockFailureOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		err    error
+		ignore bool
+	}{
+		{name: "local failure", err: forkchoice.ErrMissingSegment, ignore: true},
+		{name: "invalid block", err: fmt.Errorf("%w: invalid block", forkchoice.ErrBlockInvalid)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			blocks, pre, post := tests.GetBellatrixRandom()
+			parentState, err := pre.Copy()
+			require.NoError(t, err)
+			require.NoError(t, transition.TransitionState(parentState, blocks[0], nil, false))
+
+			svc, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
+			require.NoError(t, syncedData.OnHeadState(post))
+			ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
+			ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+			fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
+			fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
+			fcu.StateAtBlockRootVal[blocks[1].Block.ParentRoot] = parentState
+			finalizedSlot := post.FinalizedCheckpoint().Epoch * post.BeaconConfig().SlotsPerEpoch
+			fcu.Ancestors[finalizedSlot] = forkchoice.ForkChoiceNode{Root: post.FinalizedCheckpoint().Root}
+			fcu.OnBlockErr = tc.err
+
+			err = svc.ProcessMessage(context.Background(), nil, blocks[1])
+			require.ErrorIs(t, err, tc.err)
+			if tc.ignore {
+				require.ErrorIs(t, err, ErrIgnore)
+			} else {
+				require.NotErrorIs(t, err, ErrIgnore)
+				require.NotContains(t, err.Error(), "ignore")
+			}
+		})
+	}
+}
+
 const sentinelSlot = 0xbadbad
 
 func TestBlockServiceYoungerThanParent(t *testing.T) {
@@ -1764,9 +1803,10 @@ func TestPublishedBlockJobRequestCancellationDoesNotCancelIntegration(t *testing
 			return nil
 		}
 	})
+	job := serviceJob(t, service, root)
 	processDone := make(chan struct{})
 	go func() {
-		service.processScheduledBlock(context.Background(), root, serviceJob(t, service, root), time.Now())
+		service.processScheduledBlock(context.Background(), root, job, time.Now())
 		close(processDone)
 	}()
 	<-started

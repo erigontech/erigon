@@ -126,9 +126,10 @@ func TestBlobHistoryDownloaderFuluColumnRecoveryIsBounded(t *testing.T) {
 	fulu.Block.Slot = 100
 	fulu.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
 
+	blocks := rootedBlocks(t, fulu)
 	done := make(chan struct{})
 	go func() {
-		b.recoverFuluColumns(rootedBlocks(t, fulu))
+		b.recoverFuluColumns(blocks)
 		close(done)
 	}()
 
@@ -160,8 +161,9 @@ func TestBlobHistoryDownloaderFuluInitialStorageCheckUsesBlockTimeout(t *testing
 		columnBackfillTimeout: 20 * time.Millisecond,
 		logger:                log.New(),
 	}
+	blocks := rootedBlocks(t, block)
 	done := make(chan bool, 1)
-	go func() { done <- downloader.recoverFuluColumns(rootedBlocks(t, block)) }()
+	go func() { done <- downloader.recoverFuluColumns(blocks) }()
 
 	bounded := false
 	select {

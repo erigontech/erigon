@@ -168,6 +168,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().IntVar(&cfg.RpcFiltersConfig.RpcSubscriptionFiltersMaxAddresses, "rpc.subscription.filters.maxaddresses", rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxAddresses, "Maximum number of addresses accepted per log subscription.")
 	rootCmd.PersistentFlags().IntVar(&cfg.RpcFiltersConfig.RpcSubscriptionFiltersMaxTopics, "rpc.subscription.filters.maxtopics", rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxTopics, "Maximum number of topic alternatives accepted across all positions per log subscription.")
 	rootCmd.PersistentFlags().DurationVar(&cfg.RpcFiltersConfig.RpcSubscriptionFiltersTimeout, "rpc.subscription.filters.timeout", rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersTimeout, "Timeout before idle filters are evicted. Defaults to 5m; set to 0 to disable eviction.")
+	rootCmd.PersistentFlags().IntVar(&cfg.RpcFiltersConfig.RpcSubscriptionFiltersMaxSubscriptions, "rpc.subscription.filters.maxsubscriptions", rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxSubscriptions, "Maximum number of live filters and subscriptions across all clients. Set to 0 to disable the limit.")
 	rootCmd.PersistentFlags().IntVar(&cfg.BlockRangeLimit, utils.RpcBlockRangeLimit.Name, utils.RpcBlockRangeLimit.Value, utils.RpcBlockRangeLimit.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.GetLogsMaxResults, utils.RpcGetLogsMaxResults.Name, utils.RpcGetLogsMaxResults.Value, utils.RpcGetLogsMaxResults.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.LogQueryLimit, utils.RpcLogQueryLimit.Name, utils.RpcLogQueryLimit.Value, utils.RpcLogQueryLimit.Usage)
@@ -712,8 +713,15 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	httpHandler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression, rpcConcurrencyLimit, true)
 	var wsHandler http.Handler
 	if cfg.WebsocketEnabled {
+		// With a CORS list, NewWSOriginHandler checks origins; the handshake validator only keeps
+		// its localhost default for an empty list.
+		wsOrigins := cfg.HttpCORSDomain
+		if len(wsOrigins) > 0 {
+			wsOrigins = []string{"*"}
+		}
 		wsHandler = node.NewWSConnectionLimiter(int64(cfg.WsMaxConnections),
-			srv.WebsocketHandler([]string{"*"}, nil, cfg.WebsocketCompression, logger))
+			node.NewWSOriginHandler(cfg.HttpCORSDomain,
+				srv.WebsocketHandler(wsOrigins, nil, cfg.WebsocketCompression, logger)))
 	}
 	graphQLHandler := newGraphQLHandler(cfg, graphql.CreateHandler(defaultAPIList), rpcConcurrencyLimit)
 	apiHandler, err := createHandler(cfg, defaultAPIList, httpHandler, wsHandler, graphQLHandler, nil)

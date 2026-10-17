@@ -306,6 +306,8 @@ func (ibs *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
 	ibs.versionMap = versionMap
 }
 
+func (ibs *IntraBlockState) StateReader() StateReader { return ibs.stateReader }
+
 func (ibs *IntraBlockState) VersionMap() *VersionMap {
 	return ibs.versionMap
 }
@@ -1750,19 +1752,29 @@ func (ibs *IntraBlockState) journalCodeChange(addr accounts.Address, prevHash ac
 // path: its prior code is this tx's own cells, so no transient stateObject is
 // rebuilt, and the net-zero check against the tx-start code does not apply.
 func (ibs *IntraBlockState) setCreatedCode(addr accounts.Address, code accounts.Code, reason tracing.CodeChangeReason) error {
-	baseCodeHash, err := ibs.GetCodeHash(addr)
-	if err != nil {
-		return err
-	}
-	prev, err := ibs.codeSeed(addr, baseCodeHash)
-	if err != nil {
-		return err
+	cw, hadCode := ibs.versionedWrites.GetCode(addr)
+	hw, hadHash := ibs.versionedWrites.GetCodeHash(addr)
+	var prev accounts.Code
+	switch {
+	case hadCode:
+		prev = cw.Val
+	case hadHash && hw.Val == accounts.EmptyCodeHash:
+		prev = accounts.Code{Hash: accounts.EmptyCodeHash}
+	default:
+		// An unchanged SetCode drops the code hash write createObject made.
+		baseCodeHash, err := ibs.GetCodeHash(addr)
+		if err != nil {
+			return err
+		}
+		if prev, err = ibs.codeSeed(addr, baseCodeHash); err != nil {
+			return err
+		}
 	}
 	if prev.Hash == code.Hash && bytes.Equal(prev.Bytes, code.Bytes) {
 		return nil
 	}
-	ibs.journalCodeChange(addr, prev.Hash, prev.Bytes, code, !ibs.hasWrite(addr, CodePath, accounts.NilKey), reason)
-	ibs.writeCode(addr, code, code.Hash == baseCodeHash)
+	ibs.journalCodeChange(addr, prev.Hash, prev.Bytes, code, !hadCode, reason)
+	ibs.writeCode(addr, code, code.Hash == prev.Hash)
 	return nil
 }
 
@@ -2456,6 +2468,12 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 			balSource = MapRead
 			balVersion = Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
 			preTxBalance = bal
+			// Without EIP-8246 a destruct at or above the cell burns its balance.
+			if !ibs.eip8246 {
+				if _, burned := ibs.versionMap.FindDoneSelfDestructInRange(addr, res.DepIdx(), ibs.txIndex, true); burned {
+					preTxBalance.Clear()
+				}
+			}
 		}
 	}
 	// Capture the address's current balance BEFORE createObject writes the fresh
@@ -2942,6 +2960,14 @@ func (ibs *IntraBlockState) clearJournalAndRefund() {
 	ibs.stateObjectArena.reset() // same lifetime with `journal`
 }
 
+// SetForkRules sets the fork flags that the versioned read paths use. Prepare sets them for
+// each transaction; a caller that runs system calls before any transaction sets them here.
+func (ibs *IntraBlockState) SetForkRules(rules *chain.Rules) {
+	ibs.eip8246 = rules.IsAmsterdam
+	ibs.eip161 = rules.IsEIP161Enabled()
+	ibs.isAura = rules.IsAura
+}
+
 // Prepare handles the preparatory steps for executing a state transition.
 // This method must be invoked before state transition.
 //
@@ -2962,9 +2988,7 @@ func (ibs *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(sender.Handle()) || !dst.IsNil() && dbg.TraceAccount(dst.Handle())) {
 		fmt.Printf("%d (%d.%d) ibs.Prepare: sender: %x, coinbase: %x, dest: %x, %x, %v, %v\n", ibs.blockNum, ibs.txIndex, ibs.version, sender, coinbase, dst, precompiles, list, rules)
 	}
-	ibs.eip8246 = rules.IsAmsterdam
-	ibs.eip161 = rules.IsEIP161Enabled()
-	ibs.isAura = rules.IsAura
+	ibs.SetForkRules(rules)
 	ibs.txOutputFree = true
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
@@ -3283,7 +3307,7 @@ func (ibs *IntraBlockState) recordWriteAddress(addr accounts.Address, account *a
 		return
 	}
 	// A copy, made only here: the caller's account keeps changing.
-	val := account.SelfCopy()
+	val := ibs.versionedWrites.copyAccount(account)
 	if vw, ok := ibs.versionedWrites.GetAddress(addr); ok {
 		vw.Version = ibs.Version()
 		vw.Val = val

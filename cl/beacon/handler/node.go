@@ -49,11 +49,15 @@ func (a *ApiHandler) GetEthV1NodeHealth(w http.ResponseWriter, r *http.Request) 
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
-	syncingCode := http.StatusOK
+	syncingCode := http.StatusPartialContent
 	if syncingStatus != nil {
+		if *syncingStatus < 100 || *syncingStatus > 599 {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("syncing_status must be between 100 and 599, got %d", *syncingStatus)).WriteTo(w)
+			return
+		}
 		syncingCode = int(*syncingStatus)
 	}
-	if a.syncedData.Syncing() {
+	if a.headLagsBehind() {
 		w.WriteHeader(syncingCode)
 		return
 	}
@@ -174,7 +178,7 @@ func (a *ApiHandler) GetEthV1NodeSyncing(w http.ResponseWriter, r *http.Request)
 		map[string]any{
 			"head_slot":     strconv.FormatUint(a.syncedData.HeadSlot(), 10),
 			"sync_distance": strconv.FormatUint(currentSlot-a.syncedData.HeadSlot(), 10),
-			"is_syncing":    a.syncedData.Syncing(),
+			"is_syncing":    a.headLagsBehind(),
 			"is_optimistic": false, // needs to change
 			"el_offline":    false,
 		},

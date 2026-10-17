@@ -1552,6 +1552,15 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 						}
 					}
 				}
+				// With no cell for the path, a destruct in range wiped the
+				// committed value; a revival does not restore it.
+				if valid == VersionValid && !recursive && !absent && path != AddressPath && path != SelfDestructPath &&
+					path != IncarnationPath && path != CreateContractPath {
+					if _, ok := vm.FindDoneSelfDestructInRange(addr, version.TxIndex+1, txIndex, true); ok {
+						valid = VersionInvalid
+						invReason = "sd-stale"
+					}
+				}
 			} else if valid == VersionInvalid {
 				invReason = "none-vercheck"
 			}

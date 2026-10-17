@@ -32,6 +32,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"maps"
 	"math/big"
 	"net"
 	"net/http"
@@ -600,4 +601,53 @@ func TestNewWSConnectionLimiter(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return limiter.(*wsConnectionLimiter).count.Load() == 0
 	}, 2*time.Second, time.Millisecond)
+}
+
+func TestCorsHandlerRefusesCrossSiteGet(t *testing.T) {
+	calls := 0
+	srv := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++ })
+
+	get := func(h http.Handler, header http.Header) int {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost:8545/?method=debug_setHead&params=[1]", nil)
+		maps.Copy(req.Header, header)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	refused := []http.Header{
+		{"Sec-Fetch-Site": {"cross-site"}},
+		{"Sec-Fetch-Site": {"same-site"}},
+		{"Origin": {"https://evil.example"}},
+	}
+	allowedOrigin := http.Header{"Sec-Fetch-Site": {"cross-site"}, "Origin": {"https://dapp.example"}}
+	passed := []http.Header{
+		{},
+		{"Sec-Fetch-Site": {"none"}},
+		{"Sec-Fetch-Site": {"same-origin"}, "Origin": {"http://localhost:8545"}},
+	}
+
+	// No CORS list: every cross-site GET is refused.
+	h := newCorsHandler(srv, nil)
+	for _, header := range append(refused, allowedOrigin) {
+		require.Equal(t, http.StatusForbidden, get(h, header), "%v", header)
+	}
+	require.Zero(t, calls)
+	for _, header := range passed {
+		require.Equal(t, http.StatusOK, get(h, header), "%v", header)
+	}
+	require.Equal(t, len(passed), calls)
+
+	// CORS list: an allowed origin reaches the handler, every other origin is still refused.
+	for _, list := range [][]string{{"https://dapp.example"}, {"*"}} {
+		calls = 0
+		h = newCorsHandler(srv, list)
+		require.Equal(t, http.StatusOK, get(h, allowedOrigin), "%v", list)
+		require.Equal(t, 1, calls)
+		for _, header := range []http.Header{{"Sec-Fetch-Site": {"cross-site"}}, {"Sec-Fetch-Site": {"same-site"}}} {
+			require.Equal(t, http.StatusForbidden, get(h, header), "%v %v", list, header)
+		}
+	}
+	h = newCorsHandler(srv, []string{"https://dapp.example"})
+	require.Equal(t, http.StatusForbidden, get(h, http.Header{"Sec-Fetch-Site": {"cross-site"}, "Origin": {"https://evil.example"}}))
 }
