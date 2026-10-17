@@ -926,8 +926,12 @@ func (f *ForkChoiceStore) Participation(epoch uint64) (*solid.ParticipationBitLi
 func (f *ForkChoiceStore) ForkNodes() []ForkNode {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	forkNodes := make([]ForkNode, 0, len(f.weights))
-	for blockRoot, weight := range f.weights {
+	weights := f.weights
+	if f.trackGloasWeights() {
+		weights = f.gloasWeightTree.snapshotWeights()
+	}
+	forkNodes := make([]ForkNode, 0, len(weights))
+	for blockRoot, weight := range weights {
 		header, has := f.forkGraph.GetHeader(blockRoot)
 		if !has {
 			continue
