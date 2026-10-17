@@ -123,7 +123,7 @@ func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.Pr
 			precompiles[precompileMoveTo] = p
 			dirtyAddresses[precompileMoveTo] = struct{}{}
 		}
-		if isPrecompile {
+		if isPrecompile && (account.MovePrecompileTo != nil || account.Code != nil) {
 			delete(precompiles, addr)
 		}
 	}
