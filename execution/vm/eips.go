@@ -243,12 +243,6 @@ func enable3855(jt *JumpTable) {
 	}
 }
 
-// opPush0 implements the PUSH0 opcode
-func opPush0(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.pushRef().Clear()
-	return pc, nil, nil
-}
-
 // EIP-3860: Limit and meter initcode
 // https://eips.ethereum.org/EIPS/eip-3860
 func enable3860(jt *JumpTable) {

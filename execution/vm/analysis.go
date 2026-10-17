@@ -19,6 +19,14 @@
 
 package vm
 
+import (
+	"math"
+
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/execution/types/accounts"
+)
+
 // codeBitmapGeneric collects valid jump destinations in code: JUMPDEST opcodes outside of push data.
 func codeBitmapGeneric(code []byte) bitvec {
 	bits := make(bitvec, (len(code)+63)/64)
@@ -66,4 +74,103 @@ type bitvec []uint64
 // isJumpdest checks if the position is a valid jump destination.
 func (bits bitvec) isJumpdest(pos uint64) bool {
 	return ((bits[pos/64] >> (pos % 64)) & 1) != 0
+}
+
+// instr is one instruction of a decoded program: its kind, which is the opcode
+// or one of the kinds below for a PUSH, its pc and the kind's operand. It is one
+// word, so the loop loads it with one instruction.
+type instr uint64
+
+func newInstr(kind OpCode, pc int, arg uint32) instr {
+	return instr(kind) | instr(pc)<<16 | instr(arg)<<32
+}
+
+func (in instr) kind() OpCode { return OpCode(in) }
+func (in instr) pc() uint64   { return uint64(uint16(in >> 16)) }
+func (in instr) arg() uint32  { return uint32(in >> 32) }
+
+// The kinds of decoded PUSHes. They reuse PUSH opcodes, which decode never emits as kinds.
+const (
+	pushImm   = PUSH1 // pushes arg
+	pushConst = PUSH2 // pushes consts[arg]
+	jumpTo    = PUSH3 // PUSHn dest JUMP to a valid dest, whose instruction index is arg
+	jumpiTo   = PUSH4 // PUSHn dest JUMPI, as jumpTo
+)
+
+// jumpdestBit marks the JUMPDESTs in program.idx.
+const jumpdestBit = 1 << 15
+
+// program is code decoded for runDecoded. Its 16-bit pcs and indices fit code of up to params.MaxCodeSize.
+type program struct {
+	ins []instr
+	// idx maps each pc that starts an instruction, and len(code), to its instruction
+	// index, with jumpdestBit set at JUMPDESTs.
+	idx    []uint16
+	consts []uint256.Int
+	hash   accounts.CodeHash
+}
+
+func decode(code []byte) *program {
+	n := 0
+	for pc := 0; pc < len(code); pc++ {
+		if op := OpCode(code[pc]); op.IsPushWithImmediateArgs() {
+			pc += int(op - PUSH0)
+		}
+		n++
+	}
+	p := &program{ins: make([]instr, 0, n), idx: make([]uint16, len(code)+1)}
+	for pc := 0; pc < len(code); {
+		op := OpCode(code[pc])
+		p.idx[pc] = uint16(len(p.ins))
+		if op == JUMPDEST {
+			p.idx[pc] |= jumpdestBit
+		}
+		kind, arg := op, uint32(0)
+		next := pc + 1
+		if op.IsPushWithImmediateArgs() {
+			next += int(op - PUSH0)
+			var v uint256.Int
+			v.SetBytes(code[pc+1 : min(next, len(code))])
+			if missing := next - len(code); missing > 0 {
+				v.Lsh(&v, uint(8*missing))
+			}
+			if v.IsUint64() && v.Uint64() <= math.MaxUint32 {
+				kind, arg = pushImm, uint32(v.Uint64())
+			} else {
+				kind, arg = pushConst, uint32(len(p.consts))
+				p.consts = append(p.consts, v)
+			}
+		}
+		p.ins = append(p.ins, newInstr(kind, pc, arg))
+		pc = next
+	}
+	p.idx[len(code)] = uint16(len(p.ins))
+	for i := 1; i < len(p.ins); i++ {
+		push := p.ins[i-1]
+		if push.kind() != pushImm || push.arg() >= uint32(len(code)) || p.idx[push.arg()]&jumpdestBit == 0 {
+			continue
+		}
+		kind := jumpTo
+		switch p.ins[i].kind() {
+		case JUMP:
+		case JUMPI:
+			kind = jumpiTo
+		default:
+			continue
+		}
+		p.ins[i-1] = newInstr(kind, int(push.pc()), uint32(p.idx[push.arg()]&^jumpdestBit))
+	}
+	return p
+}
+
+// jumpdest returns idx at pos, which has jumpdestBit set only for a valid jump destination.
+func (p *program) jumpdest(pos *uint256.Int) uint16 {
+	if !pos.IsUint64() || pos.Uint64() >= uint64(len(p.idx)) {
+		return 0
+	}
+	return p.idx[pos.Uint64()]
+}
+
+func (p *program) size() int {
+	return len(p.ins)*8 + len(p.idx)*2 + len(p.consts)*32
 }
