@@ -134,6 +134,64 @@ func TestOnHeadStateWithBlockRootDemotesPriorHeadToPrevious(t *testing.T) {
 	}))
 }
 
+func TestPublishCopiesIntoTheDroppedPreviousState(t *testing.T) {
+	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	var heads []*state.CachingBeaconState
+	for i := range 3 {
+		s := bigValidatorState(t, 1)
+		require.NoError(t, s.SetSlot(uint64(100+i)))
+		require.NoError(t, manager.OnHeadStateWithBlockRoot(s, common.Hash{byte(1 + i)}))
+		require.NoError(t, manager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+			heads = append(heads, headState)
+			return nil
+		}))
+	}
+
+	require.Same(t, heads[0], heads[2])
+	require.Equal(t, uint64(102), heads[2].Slot())
+	require.NoError(t, manager.ViewPreviousHeadState(func(previous *state.CachingBeaconState) error {
+		require.Same(t, heads[1], previous)
+		require.Equal(t, uint64(101), previous.Slot())
+		return nil
+	}))
+}
+
+func TestPreviousHeadStateIsUnavailableWhileItIsOverwritten(t *testing.T) {
+	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	for i := range 2 {
+		s := bigValidatorState(t, 1)
+		require.NoError(t, s.SetSlot(uint64(100+i)))
+		require.NoError(t, manager.OnHeadStateWithBlockRoot(s, common.Hash{byte(1 + i)}))
+	}
+
+	writerPaused := make(chan struct{})
+	releaseWriter := make(chan struct{})
+	copyHookForTest = func() {
+		close(writerPaused)
+		<-releaseWriter
+	}
+	t.Cleanup(func() { copyHookForTest = nil })
+
+	writerDone := make(chan error, 1)
+	next := bigValidatorState(t, 1)
+	require.NoError(t, next.SetSlot(102))
+	go func() { writerDone <- manager.OnHeadStateWithBlockRoot(next, common.Hash{0x03}) }()
+	<-writerPaused
+
+	require.ErrorIs(t, manager.ViewPreviousHeadState(func(*state.CachingBeaconState) error { return nil }), ErrPreviousStateNotAvailable)
+	require.NoError(t, manager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		require.Equal(t, uint64(101), headState.Slot())
+		return nil
+	}))
+
+	close(releaseWriter)
+	require.NoError(t, <-writerDone)
+	require.NoError(t, manager.ViewPreviousHeadState(func(previous *state.CachingBeaconState) error {
+		require.Equal(t, uint64(101), previous.Slot())
+		return nil
+	}))
+}
+
 func TestFailedHeadUpdateKeepsHead(t *testing.T) {
 	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 	for i := range 2 {
@@ -158,10 +216,9 @@ func TestFailedHeadUpdateKeepsHead(t *testing.T) {
 		require.Equal(t, uint64(101), headState.Slot())
 		return nil
 	}))
-	require.NoError(t, manager.ViewPreviousHeadState(func(headState *state.CachingBeaconState) error {
-		require.Equal(t, uint64(100), headState.Slot())
+	require.ErrorIs(t, manager.ViewPreviousHeadState(func(*state.CachingBeaconState) error {
 		return nil
-	}))
+	}), ErrPreviousStateNotAvailable)
 }
 
 // TestOnHeadStateWithBlockRootSerializesConcurrentWriters verifies that a
