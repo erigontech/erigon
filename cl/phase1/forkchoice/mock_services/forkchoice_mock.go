@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -46,6 +47,7 @@ import (
 type ForkChoiceStorageMock struct {
 	ProposerLookaheadVal                  solid.Uint64VectorSSZ
 	Ancestors                             map[uint64]forkchoice.ForkChoiceNode
+	AncestorCalls                         atomic.Int64
 	AnchorSlotVal                         uint64
 	AnchorRootVal                         common.Hash
 	AnchorExecutionPayloadBuilderIndexVal uint64
@@ -61,11 +63,15 @@ type ForkChoiceStorageMock struct {
 	GetStateAtBlockRootFn                 func(common.Hash, bool) (*state.CachingBeaconState, error)
 	ViewStateAtBlockRootFn                func(common.Hash, func(*state.CachingBeaconState) error) error
 	HighestSeenVal                        uint64
-	JustifiedCheckpointVal                solid.Checkpoint
-	JustifiedSlotVal                      uint64
-	ProposerBoostRootVal                  common.Hash
-	SlotVal                               uint64
-	TimeVal                               uint64
+	// HighestImportedDescendantVal is the slot of the highest imported descendant of any root,
+	// unless HasImportedDescendantAfterFn is set.
+	HighestImportedDescendantVal uint64
+	HasImportedDescendantAfterFn func(root common.Hash, slot uint64) bool
+	JustifiedCheckpointVal       solid.Checkpoint
+	JustifiedSlotVal             uint64
+	ProposerBoostRootVal         common.Hash
+	SlotVal                      uint64
+	TimeVal                      uint64
 
 	ParticipationVal map[uint64]*solid.ParticipationBitList
 
@@ -271,6 +277,7 @@ func (f *ForkChoiceStorageMock) GetPeerDas() das.PeerDas {
 }
 
 func (f *ForkChoiceStorageMock) Ancestor(root common.Hash, slot uint64) forkchoice.ForkChoiceNode {
+	f.AncestorCalls.Add(1)
 	return f.Ancestors[slot]
 }
 
@@ -315,6 +322,13 @@ func (f *ForkChoiceStorageMock) GetHead(_ *state.CachingBeaconState) (common.Has
 
 func (f *ForkChoiceStorageMock) HighestSeen() uint64 {
 	return f.HighestSeenVal
+}
+
+func (f *ForkChoiceStorageMock) HasImportedDescendantAfter(root common.Hash, slot uint64) bool {
+	if f.HasImportedDescendantAfterFn != nil {
+		return f.HasImportedDescendantAfterFn(root, slot)
+	}
+	return f.HighestImportedDescendantVal > slot
 }
 
 func (f *ForkChoiceStorageMock) BlockProcessing() bool {
@@ -569,9 +583,9 @@ func (f *ForkChoiceStorageMock) OnPayloadAttestationMessage(ctx context.Context,
 	return nil
 }
 
-func (f *ForkChoiceStorageMock) OnTick(time uint64) {
+func (f *ForkChoiceStorageMock) OnTick(timeMs uint64) {
 	if f.OnTickFn != nil {
-		f.OnTickFn(time)
+		f.OnTickFn(timeMs)
 		return
 	}
 	panic("implement me")

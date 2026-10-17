@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"maps"
 	"slices"
 	"sync"
 	"testing"
@@ -501,10 +502,12 @@ func (t *PoolTestSuite) TestAddAttestationElectraLimitsDataPerCommittee() {
 	pool := NewAggregationPool(ctx, t.mockBeaconConfig, &clparams.NetworkConfig{AttestationPropagationSlotRange: 32}, t.mockEthClock).(*aggregationPoolImpl)
 	for source := range maxDataPerCommittee {
 		att := t.electraAttestationWithSource(5, 1, byte(source))
-		att.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048*64) // two votes each
+		bits := []byte{0, 0x80} // two votes each, from members of their own
+		bits[0] |= 0b11 << (2 * source)
+		att.AggregationBits = solid.BitlistFromBytes(bits, 2048*64)
 		t.Require().NoError(pool.AddAttestation(att))
 	}
-	t.NoError(pool.AddAttestation(t.electraAttestationWithSource(5, 1, 0xff)))
+	t.NoError(pool.AddAttestation(t.singleVote(0xff, 8)))
 	t.Len(pool.Aggregates(), maxDataPerCommittee, "a single vote does not displace stronger data")
 	t.NoError(pool.AddAttestation(t.electraAttestationWithSource(5, 2, 0xff)), "other committees keep their own allowance")
 
@@ -697,10 +700,13 @@ func (t *PoolTestSuite) TestAddAttestationElectraStoresPinnedDataInAFullCommitte
 	t.fillCommitteeWithTwoVoteData(pool)
 	t.Require().NoError(pool.PinAttestationData(t.pinnedVote(8).Data))
 
-	for round, member := range []int{8, 13} {
-		t.Require().NoError(pool.AddAttestation(t.pinnedVote(member)))
-		for i := range maxDataPerCommittee {
-			t.Require().NoError(pool.AddAttestation(t.singleVote(byte(0xb0+4*round+i), 9+i)))
+	for round, votes := range []struct {
+		pinned int
+		fresh  []int
+	}{{pinned: 8, fresh: []int{9, 10, 11, 12}}, {pinned: 13, fresh: []int{14}}} {
+		t.Require().NoError(pool.AddAttestation(t.pinnedVote(votes.pinned)))
+		for i, member := range votes.fresh {
+			t.Require().NoError(pool.AddAttestation(t.singleVote(byte(0xb0+4*round+i), member)))
 		}
 	}
 
@@ -888,16 +894,83 @@ func (t *PoolTestSuite) TestAddAggregatorDutyKeepsOnlyDutiesInTheWindow() {
 
 	pool.AddAggregatorDuty(63, 1)  // epoch 1: too old
 	pool.AddAggregatorDuty(64, 1)  // epoch 2
+	pool.AddAggregatorDuty(96, 1)  // epoch 3
 	pool.AddAggregatorDuty(160, 1) // epoch 5: too far ahead
 	pool.AddAggregatorDuty(159, 1) // epoch 4
 	pool.AddAggregatorDuty(100, 64)
-	t.Equal(map[slotCommittee]struct{}{{slot: 64, committee: 1}: {}, {slot: 159, committee: 1}: {}}, pool.aggregatorDuties)
+	t.Equal(map[slotCommittee]struct{}{{slot: 64, committee: 1}: {}, {slot: 96, committee: 1}: {}, {slot: 159, committee: 1}: {}}, pool.aggregatorDuties)
 	t.Equal(int(t.mockBeaconConfig.MaxValidatorsPerCommittee), pool.refusedLimit(slotCommittee{slot: 64, committee: 1}))
 	t.Equal(maxDataPerCommittee, pool.refusedLimit(slotCommittee{slot: 64, committee: 2}))
 
-	currentSlot = 128 // epoch 4
+	currentSlot = 128 // epoch 4: the duty of the previous epoch stays
 	pool.pruneStale()
-	t.Equal(map[slotCommittee]struct{}{{slot: 159, committee: 1}: {}}, pool.aggregatorDuties)
+	t.Equal(map[slotCommittee]struct{}{{slot: 96, committee: 1}: {}, {slot: 159, committee: 1}: {}}, pool.aggregatorDuties)
+}
+
+// A member votes once per epoch, in one slot and committee, so a vote of a member already counted for
+// other data of its committee equivocates and is refused, stored or kept aside alike.
+func (t *PoolTestSuite) TestAddAttestationElectraRefusesAMemberAlreadyCountedForOtherData() {
+	pool := t.newPinTestPool()
+	t.Require().NoError(pool.AddAttestation(t.singleVote(0xaa, 12)))
+
+	t.ErrorIs(pool.AddAttestation(t.singleVote(0xbb, 12)), ErrVoterAlreadyCounted)
+	t.Nil(t.committeeAggregateBits(pool, 0xbb))
+	t.ErrorIs(pool.AddAttestation(t.singleVote(0xaa, 12)), ErrIsSuperset, "the same vote again")
+
+	t.fillCommitteeWithTwoVoteData(pool) // members 0-7: the committee is full
+	t.Require().NoError(pool.AddAttestation(t.singleVote(0xcc, 9)))
+	t.ErrorIs(pool.AddAttestation(t.singleVote(0xdd, 9)), ErrVoterAlreadyCounted)
+	t.NotContains(t.refusedSources(pool), byte(0xdd))
+}
+
+// One member voting for new data again and again cannot fill the data kept aside for a local
+// aggregator, so honest data there keeps its votes.
+func (t *PoolTestSuite) TestAddAttestationElectraEquivocatingMemberCannotFlushALocalAggregatorsData() {
+	pool := t.newPinTestPool()
+	pool.AddAggregatorDuty(5, 1)
+	vote := func(source byte, member int) *solid.Attestation { // a committee of 63 members
+		att := t.electraAttestationWithSource(5, 1, source)
+		bits := make([]byte, 8)
+		bits[7] = 0x80
+		bits[member/8] |= 1 << (member % 8)
+		att.AggregationBits = solid.BitlistFromBytes(bits, 2048*64)
+		return att
+	}
+	member := 0
+	for source := range maxDataPerCommittee { // a full committee
+		for range 2 {
+			t.Require().NoError(pool.AddAttestation(vote(byte(source), member)))
+			member++
+		}
+	}
+	honest := vote(0xaa, member)
+	t.Require().NoError(pool.AddAttestation(honest))
+	t.Require().NoError(pool.AddAttestation(vote(0xb0, member+1)))
+	for source := range 100 {
+		t.ErrorIs(pool.AddAttestation(vote(byte(source+0x10), member+1)), ErrVoterAlreadyCounted)
+	}
+
+	t.Len(pool.refused[slotCommittee{slot: 5, committee: 1}], 2)
+	root, err := honest.Data.HashSSZ()
+	t.Require().NoError(err)
+	t.NotNil(pool.GetAggregatationByRootAndCommittee(root, 5, 1))
+}
+
+// Counted members are pruned with the inclusion window.
+func (t *PoolTestSuite) TestPruneStaleDropsCountedMembers() {
+	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).DoAndReturn(func(slot uint64) uint64 { return slot / 32 }).AnyTimes()
+	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).AnyTimes()
+	t.mockEthClock.EXPECT().GetCurrentSlot().Return(uint64(1000)).AnyTimes()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock).(*aggregationPoolImpl)
+	t.Require().NoError(pool.AddAttestation(t.singleVote(0xaa, 3)))
+	t.Require().NoError(pool.AddAttestation(t.electraAttestation(990, 1, 0b11)))
+	t.Require().Len(pool.voters, 2)
+
+	pool.pruneStale()
+
+	t.Equal([]slotCommittee{{slot: 990, committee: 1}}, slices.Collect(maps.Keys(pool.voters)), "only the members inside the inclusion window stay")
 }
 
 // The aggregate endpoint also serves data the pool keeps aside: refused data and data displaced from
@@ -1045,7 +1118,9 @@ func (t *PoolTestSuite) TestAddAttestationElectraPrunesBeforeRefusingWhenFull() 
 	pool := NewAggregationPool(ctx, t.mockBeaconConfig, &clparams.NetworkConfig{AttestationPropagationSlotRange: 32}, t.mockEthClock)
 	limit := 2 * int(t.mockBeaconConfig.SlotsPerEpoch*t.mockBeaconConfig.MaxCommitteesPerSlot) * maxDataPerCommittee
 	for i := range limit {
-		t.Require().NoError(pool.AddAttestation(t.electraAttestationWithSource(uint64(i/8), (i/4)%2, byte(i%4))))
+		att := t.electraAttestationWithSource(uint64(i/8), (i/4)%2, byte(i%4))
+		att.AggregationBits = solid.BitlistFromBytes([]byte{0x80 | 1<<(i%4)}, 2048*64) // one member per data
+		t.Require().NoError(pool.AddAttestation(att))
 	}
 	currentSlot = 100 // the entries above are now outside the inclusion window
 	t.NoError(pool.AddAttestation(t.electraAttestationWithSource(100, 0, 1)))

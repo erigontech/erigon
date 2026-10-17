@@ -17,6 +17,7 @@
 package node
 
 import (
+	"bufio"
 	"io"
 	"sync"
 
@@ -47,33 +48,54 @@ func (p *writerPool[T]) put(w T) {
 	p.inUse.Dec()
 }
 
-var gzipWriters = writerPool[*gzip.Writer]{
+// flate writes ~250-byte pieces, and net/http turns them into a write
+// syscall per 4 KB.
+const gzipOutBufSize = 64 * 1024
+
+type bufferedGzipWriter struct {
+	*gzip.Writer
+	out *bufio.Writer
+}
+
+var gzipWriters = writerPool[*bufferedGzipWriter]{
 	pool: sync.Pool{New: func() any {
-		gzw, _ := gzip.NewWriterLevel(nil, gzipLevel) // valid constant level, so no error
-		return gzw
+		out := bufio.NewWriterSize(nil, gzipOutBufSize)
+		gzw, _ := gzip.NewWriterLevel(out, gzipLevel) // valid constant level, so no error
+		return &bufferedGzipWriter{gzw, out}
 	}},
 	inUse: gzipWritersInUse,
 }
 
-type pooledGzipWriter struct{ *gzip.Writer }
+func (w *bufferedGzipWriter) Flush() error {
+	if err := w.Writer.Flush(); err != nil {
+		return err
+	}
+	return w.out.Flush()
+}
+
+type pooledGzipWriter struct{ *bufferedGzipWriter }
 
 func (w *pooledGzipWriter) Close() error {
-	if w.Writer == nil {
+	if w.bufferedGzipWriter == nil {
 		return nil
 	}
 	err := w.Writer.Close()
-	w.Writer.Reset(nil)
-	gzipWriters.put(w.Writer)
-	w.Writer = nil
+	if err == nil {
+		err = w.out.Flush()
+	}
+	w.out.Reset(nil)
+	gzipWriters.put(w.bufferedGzipWriter)
+	w.bufferedGzipWriter = nil
 	return err
 }
 
 var gzipWriterFactory = writer.GzipWriterFactory{
 	Levels: func() (int, int) { return gzipLevel, gzipLevel },
 	New: func(w io.Writer, _ int) writer.GzipWriter {
-		gzw := gzipWriters.get()
-		gzw.Reset(w)
-		return &pooledGzipWriter{gzw}
+		bw := gzipWriters.get()
+		bw.out.Reset(w)
+		bw.Writer.Reset(bw.out)
+		return &pooledGzipWriter{bw}
 	},
 }
 
