@@ -116,7 +116,7 @@ func (s *SyncedDataManager) OnHeadStateWithBlockRoot(newState *state.CachingBeac
 	return s.publishHeadStateLocked(newState, blockRoot)
 }
 
-// publishHeadStateLocked materializes newState into a standalone copy and
+// publishHeadStateLocked materializes newState into the detached previous state and
 // swaps it in as the head state, demoting the current head state to
 // previous. Callers must hold writeLock for the duration of whatever work
 // determines blockRoot as well as this call, so a writer cannot be
