@@ -814,14 +814,14 @@ func (a *ApiHandler) GetEthV1ValidatorIdentities(w http.ResponseWriter, r *http.
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
 	var (
-		validators   *solid.ValidatorSet
-		isFinalized  bool
-		isOptimistic bool
+		validatorIdentities *solid.ListSSZ[*validatorIdentityResponse]
+		isFinalized         bool
+		isOptimistic        bool
 	)
 	if blockId.Head() {
 		// If we are looking at the head, we can just read the validators from the head state
 		if err := a.viewHeadStateWithIdentity(func(s *state.CachingBeaconState, root common.Hash, _ uint64) error {
-			validators = s.Validators()
+			validatorIdentities = newValidatorIdentities(s.Validators())
 			isOptimistic = a.forkchoiceStore.IsRootOptimistic(root)
 			return nil
 		}); err != nil {
@@ -829,6 +829,7 @@ func (a *ApiHandler) GetEthV1ValidatorIdentities(w http.ResponseWriter, r *http.
 		}
 		isFinalized = false
 	} else {
+		var validators *solid.ValidatorSet
 		snRoTx := a.caplinStateSnapshots.View()
 		defer snRoTx.Close()
 		getter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
@@ -852,12 +853,21 @@ func (a *ApiHandler) GetEthV1ValidatorIdentities(w http.ResponseWriter, r *http.
 		}
 		isFinalized = *slot <= a.forkchoiceStore.FinalizedSlot()
 		isOptimistic = a.forkchoiceStore.IsRootOptimistic(blockRoot)
+		validatorIdentities = newValidatorIdentities(validators)
 	}
-	if validators == nil {
+	if validatorIdentities == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("validators not found"))
 	}
 
-	// compose the response
+	return newBeaconResponse(validatorIdentities).
+		WithOptimistic(isOptimistic).
+		WithFinalized(isFinalized), nil
+}
+
+func newValidatorIdentities(validators *solid.ValidatorSet) *solid.ListSSZ[*validatorIdentityResponse] {
+	if validators == nil {
+		return nil
+	}
 	validatorIdentities := solid.NewStaticListSSZ[*validatorIdentityResponse](validators.Length(), (&validatorIdentityResponse{}).EncodingSizeSSZ())
 	validators.Range(func(i int, v solid.Validator, l int) bool {
 		validatorIdentities.Append(&validatorIdentityResponse{
@@ -867,10 +877,7 @@ func (a *ApiHandler) GetEthV1ValidatorIdentities(w http.ResponseWriter, r *http.
 		})
 		return true
 	})
-
-	return newBeaconResponse(validatorIdentities).
-		WithOptimistic(isOptimistic).
-		WithFinalized(isFinalized), nil
+	return validatorIdentities
 }
 
 type validatorIdentityResponse struct {
