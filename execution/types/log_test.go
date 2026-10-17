@@ -293,11 +293,11 @@ func TestFilterLogsTopics(t *testing.T) {
 		},
 	}
 	for name, v := range filterLogTests {
-		ares := testFLExtractAddress(v.input.Filter(map[common.Address]struct{}{}, v.filter, 0))
+		ares := testFLExtractAddress(v.input.Filter(nil, v.filter, 0))
 		if !reflect.DeepEqual(ares, v.want) {
 			t.Errorf("Fail %s, got %v want %v", name, ares, v.want)
 		}
-		oldRes := testFLExtractAddress(v.input.Filter(map[common.Address]struct{}{}, v.filter, 0))
+		oldRes := testFLExtractAddress(v.input.Filter(nil, v.filter, 0))
 		if !reflect.DeepEqual(oldRes, v.want) {
 			t.Errorf("Fail Old %s, got %v want %v", name, oldRes, v.want)
 		}
@@ -309,57 +309,6 @@ func testFLExtractAddress(xs Logs) (o []common.Address) {
 		o = append(o, v.Address)
 	}
 	return
-}
-
-// TestFilterWithTopicMapEquivalence verifies that FilterWithTopicMap(addrMap, BuildTopicMap(topics), maxLogs)
-// produces identical results to Filter(addrMap, topics, maxLogs) for all topic shapes,
-// including wildcard positions (empty slices → nil map entry) and maxLogs limits.
-func TestFilterWithTopicMapEquivalence(t *testing.T) {
-	t.Parallel()
-
-	var (
-		A common.Hash = [32]byte{1}
-		B common.Hash = [32]byte{2}
-		C common.Hash = [32]byte{3}
-		D common.Hash = [32]byte{4}
-
-		a1 common.Address = [20]byte{1}
-		a2 common.Address = [20]byte{2}
-		a3 common.Address = [20]byte{3}
-		a4 common.Address = [20]byte{4}
-		a5 common.Address = [20]byte{5}
-	)
-
-	logs := Logs{
-		{Address: a1, Topics: []common.Hash{A, B, C}},
-		{Address: a2, Topics: []common.Hash{A, C, D}},
-		{Address: a3, Topics: []common.Hash{B, B}},
-		{Address: a4, Topics: []common.Hash{A, B}},
-		{Address: a5, Topics: []common.Hash{C}},
-	}
-	addrMap := map[common.Address]struct{}{}
-
-	cases := []struct {
-		name    string
-		topics  [][]common.Hash
-		maxLogs uint64
-	}{
-		{"no topics", [][]common.Hash{}, 0},
-		{"all wildcards", [][]common.Hash{{}, {}, {}}, 0},
-		{"exact match slot 0", [][]common.Hash{{A}}, 0},
-		{"wildcard slot 0, exact slot 1", [][]common.Hash{{}, {B}}, 0},
-		{"alternatives in slot 0", [][]common.Hash{{A, B}}, 0},
-		{"wildcard in middle", [][]common.Hash{{A}, {}, {C}}, 0},
-		{"maxLogs limit", [][]common.Hash{{A}}, 1},
-	}
-
-	for _, tc := range cases {
-		want := logs.Filter(addrMap, tc.topics, tc.maxLogs)
-		got := logs.FilterWithTopicMap(addrMap, BuildTopicMap(tc.topics), tc.maxLogs)
-		if !reflect.DeepEqual(want, got) {
-			t.Errorf("case %q: Filter=%v FilterWithTopicMap=%v", tc.name, testFLExtractAddress(want), testFLExtractAddress(got))
-		}
-	}
 }
 
 func TestLogJSONBlockTimestamp(t *testing.T) {
@@ -437,7 +386,7 @@ func TestAppendFilteredLogs(t *testing.T) {
 		},
 	}
 
-	rpcLogs := logs.AppendFilteredLogs(nil, nil, nil, 1900000000, 0)
+	rpcLogs := logs.AppendFilteredLogs(nil, NewLogFilter(nil, nil), 1900000000, 0)
 
 	require.Len(t, rpcLogs, len(logs))
 	for i, rpcLog := range rpcLogs {
@@ -457,13 +406,54 @@ func TestAppendFilteredLogsEmpty(t *testing.T) {
 	// Appending nothing must leave dst as it was, so an empty eth_getLogs result
 	// stays non-nil and serialises `[]` and not `null`.
 	for _, logs := range []Logs{{}, nil} {
-		rpcLogs := logs.AppendFilteredLogs(Logs{}, nil, nil, 1, 0)
+		rpcLogs := logs.AppendFilteredLogs(Logs{}, NewLogFilter(nil, nil), 1, 0)
 		require.NotNil(t, rpcLogs)
 		require.Len(t, rpcLogs, 0)
 	}
 }
 
-// AppendFilteredLogs must select exactly what FilterWithTopicMap selects.
+// A set of one value is matched without a map, so every case runs with one and with several values.
+func TestLogFilterSelects(t *testing.T) {
+	t.Parallel()
+
+	a1, a2, a3 := common.HexToAddress("0xa1"), common.HexToAddress("0xa2"), common.HexToAddress("0xa3")
+	x, y, z := common.HexToHash("0x11"), common.HexToHash("0x22"), common.HexToHash("0x33")
+	logs := Logs{
+		{Address: a1, Topics: []common.Hash{x, y, z}},
+		{Address: a2, Topics: []common.Hash{y, x}},
+		{Address: a3, Topics: []common.Hash{x}},
+		{Address: a1},
+	}
+
+	for name, tc := range map[string]struct {
+		addrs  []common.Address
+		topics [][]common.Hash
+		want   []int
+	}{
+		"no filter":                         {want: []int{0, 1, 2, 3}},
+		"one address":                       {addrs: []common.Address{a1}, want: []int{0, 3}},
+		"one address, duplicated":           {addrs: []common.Address{a2, a2}, want: []int{1}},
+		"two addresses":                     {addrs: []common.Address{a2, a3}, want: []int{1, 2}},
+		"unknown address":                   {addrs: []common.Address{common.HexToAddress("0xcc")}},
+		"one topic at 0":                    {topics: [][]common.Hash{{x}}, want: []int{0, 2}},
+		"two topics at 0":                   {topics: [][]common.Hash{{x, y}}, want: []int{0, 1, 2}},
+		"wildcard then one topic":           {topics: [][]common.Hash{nil, {x}}, want: []int{1}},
+		"wildcard in the middle":            {topics: [][]common.Hash{{x}, {}, {z}}, want: []int{0}},
+		"more positions than topics":        {topics: [][]common.Hash{nil, nil, nil, nil}},
+		"one address and one topic":         {addrs: []common.Address{a1}, topics: [][]common.Hash{{x}}, want: []int{0}},
+		"two addresses and two topics at 1": {addrs: []common.Address{a1, a2}, topics: [][]common.Hash{nil, {x, y}}, want: []int{0, 1}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var want Logs
+			for _, i := range tc.want {
+				want = append(want, StampedLog(logs[i], 7))
+			}
+			require.Equal(t, want, logs.AppendFilteredLogs(nil, NewLogFilter(tc.addrs, tc.topics), 7, 0))
+		})
+	}
+}
+
+// AppendFilteredLogs must select exactly what FilterWith selects.
 func TestAppendFilteredLogsMatchesFilter(t *testing.T) {
 	t.Parallel()
 
@@ -491,21 +481,17 @@ func TestAppendFilteredLogsMatchesFilter(t *testing.T) {
 		"no match":         {addrs: []common.Address{common.HexToAddress("0xcc")}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			addrMap := make(map[common.Address]struct{}, len(tc.addrs))
-			for _, a := range tc.addrs {
-				addrMap[a] = struct{}{}
-			}
-			topicMap := BuildTopicMap(tc.topics)
+			f := NewLogFilter(tc.addrs, tc.topics)
 
 			var want Logs
-			for _, l := range logs.FilterWithTopicMap(addrMap, topicMap, 0) {
+			for _, l := range logs.FilterWith(f, 0) {
 				want = append(want, StampedLog(l, 7))
 			}
-			require.Equal(t, want, logs.AppendFilteredLogs(nil, addrMap, topicMap, 7, 0))
+			require.Equal(t, want, logs.AppendFilteredLogs(nil, f, 7, 0))
 
 			if len(want) > 1 {
 				// limit stops the walk, so an over-cap receipt is not fully converted.
-				require.Len(t, logs.AppendFilteredLogs(nil, addrMap, topicMap, 7, 1), 1)
+				require.Len(t, logs.AppendFilteredLogs(nil, f, 7, 1), 1)
 			}
 		})
 	}
@@ -514,7 +500,7 @@ func TestAppendFilteredLogsMatchesFilter(t *testing.T) {
 // Pins the maxLogs accounting matchFilter's two return values exist to preserve: the
 // budget is spent on every log the filter considers, matching or not, and never on one
 // it skips outright.
-func TestFilterWithTopicMapMaxLogsCountsNonMatching(t *testing.T) {
+func TestFilterWithMaxLogsCountsNonMatching(t *testing.T) {
 	t.Parallel()
 
 	addr := common.HexToAddress("0xaa")
@@ -524,15 +510,14 @@ func TestFilterWithTopicMapMaxLogsCountsNonMatching(t *testing.T) {
 		{Address: addr, Topics: []common.Hash{topicY}},
 		{Address: addr, Topics: []common.Hash{topicX}},
 	}
-	addrMap := map[common.Address]struct{}{addr: {}}
-	topicMap := BuildTopicMap([][]common.Hash{{topicX}})
+	f := NewLogFilter([]common.Address{addr}, [][]common.Hash{{topicX}})
 
-	require.Empty(t, logs.FilterWithTopicMap(addrMap, topicMap, 1))
-	require.Len(t, logs.FilterWithTopicMap(addrMap, topicMap, 2), 1)
+	require.Empty(t, logs.FilterWith(f, 1))
+	require.Len(t, logs.FilterWith(f, 2), 1)
 
 	// A skipped log does not spend the budget.
 	other := Logs{{Address: common.HexToAddress("0xbb"), Topics: []common.Hash{topicX}}, logs[1]}
-	require.Len(t, other.FilterWithTopicMap(addrMap, topicMap, 1), 1)
+	require.Len(t, other.FilterWith(f, 1), 1)
 }
 
 // MarshalFastJSONTo replaces json.Marshal for these results, so it must match it byte for byte,
