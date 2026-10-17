@@ -594,6 +594,28 @@ func TestCallBlobBaseFee(t *testing.T) {
 	}
 }
 
+func TestEthCallFullStateOverrideHidesStoredSlots(t *testing.T) {
+	contract := common.HexToAddress("0x2000")
+	// PUSH1 0; CALLDATALOAD; SLOAD; PUSH1 0; MSTORE; PUSH1 32; PUSH1 0; RETURN
+	sload := hexutil.MustDecode("0x6000355460005260206000f3")
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: chain.AllProtocolChanges.Copy(),
+		Alloc: types.GenesisAlloc{
+			contract: {Nonce: 1, Code: sload, Storage: map[common.Hash]common.Hash{{31: 1}: {31: 5}, {31: 2}: {31: 7}}},
+		},
+	}))
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	storage := map[common.Hash]common.Hash{{31: 1}: {31: 0x2a}}
+	overrides := &ethapi.StateOverrides{accounts.InternAddress(contract): {State: &storage}}
+	for slot, want := range map[byte]byte{1: 0x2a, 2: 0} {
+		key := common.Hash{31: slot}
+		data := hexutil.Bytes(key[:])
+		result, err := api.Call(context.Background(), ethapi.CallArgs{To: &contract, Data: &data}, nil, overrides, nil)
+		require.NoError(t, err)
+		require.Equal(t, common.Hash{31: want}, common.BytesToHash(result), "slot %d", slot)
+	}
+}
+
 func TestEthCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")

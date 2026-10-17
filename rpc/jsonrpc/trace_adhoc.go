@@ -1291,11 +1291,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 	// A state diff is written through FinalizeTx, which the versioned path does not serve.
 	if !traceTypeStateDiff {
-		var stateOverrides *ethapi.StateOverrides
-		if traceConfig != nil {
-			stateOverrides = traceConfig.StateOverrides
-		}
-		transactions.VersionedCallState(ibs, stateOverrides)
+		transactions.VersionedCallState(ibs)
 	}
 	if traceTypeVmTrace {
 		traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
@@ -1353,7 +1349,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	var execResult *evmtypes.ExecutionResult
-	ibs.SetTxContext(blockCtx.BlockNumber, 0)
+	ibs.SetTxContext(blockCtx.BlockNumber, ibs.TxnIndex())
 	ibs.SetHooks(vmConfig.Tracer)
 
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxStart != nil {
@@ -1955,7 +1951,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	ibs := state.New(stateReader)
 	defer ibs.Close()
 	if !traceTypeStateDiff {
-		transactions.VersionedCallState(ibs, nil)
+		transactions.VersionedCallState(ibs)
 	}
 
 	var ot OeTracer

@@ -266,7 +266,7 @@ func TestBlockBuilderWindowTakesPreparedPayloadEarly(t *testing.T) {
 		unpreparedAt        time.Duration
 		unpreparedPollUntil time.Duration
 	}{
-		{clparams.ElectraVersion, 2 * time.Second, 900 * time.Millisecond, 3 * time.Second, 2900 * time.Millisecond, 3 * time.Second},
+		{clparams.ElectraVersion, 2 * time.Second, 899_750 * time.Microsecond, 2_999_250 * time.Microsecond, 2_899_250 * time.Microsecond, 2_999_250 * time.Microsecond},
 		{clparams.GloasVersion, 1500 * time.Millisecond, 650 * time.Millisecond, 2250 * time.Millisecond, 900 * time.Millisecond, time.Second},
 	} {
 		t.Run(test.version.String(), func(t *testing.T) {
@@ -300,8 +300,8 @@ func TestBlockBuilderWindowUsesPartialWarmup(t *testing.T) {
 
 	// One second of work before production advances collection by one second. It does not have to
 	// cross a minimum-age threshold before it becomes useful.
-	require.Equal(t, slotStart.Add(2*time.Second).Add(-minPayloadPollingWindow), window.firstGetAt)
-	require.Equal(t, slotStart.Add(3*time.Second), window.pollUntil)
+	require.Equal(t, slotStart.Add(1_999_250*time.Microsecond).Add(-minPayloadPollingWindow), window.firstGetAt)
+	require.Equal(t, slotStart.Add(2_999_250*time.Microsecond), window.pollUntil)
 }
 
 func TestPreparedPayloadMatchesOnlyTheSamePrime(t *testing.T) {
@@ -338,7 +338,7 @@ func TestMaximumPreparedAdvancePreservesRecentBuildTime(t *testing.T) {
 		IntervalsPerSlot: 3,
 	}
 
-	require.Equal(t, 2*time.Second, maximumPreparedAdvance(cfg, clparams.ElectraVersion))
+	require.Equal(t, 1_999_500*time.Microsecond, maximumPreparedAdvance(cfg, clparams.ElectraVersion))
 	require.Equal(t, 1500*time.Millisecond, maximumPreparedAdvance(cfg, clparams.GloasVersion))
 }
 
@@ -2385,8 +2385,7 @@ func requireProductionUsesPreparedWarmup(t *testing.T, postState *state.CachingB
 	handler.validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x42})
 
 	config := *handler.beaconChainCfg
-	config.SecondsPerSlot = 40
-	config.IntervalsPerSlot = 4
+	config.SecondsPerSlot = 30
 	handler.beaconChainCfg = &config
 	payloadID := []byte{1, 2, 3, 4, 5, 6, 7, 8}
 	handler.preparedPayload.set(targetSlot, payloadID, baseBlockRoot, time.Now().Add(-10*time.Second))
@@ -2405,8 +2404,8 @@ func requireProductionUsesPreparedWarmup(t *testing.T, postState *state.CachingB
 		})
 	handler.engine = engine
 
-	// With the five-second warmup cap, this slot collects immediately. Ignoring warmup would delay
-	// the first poll by more than four seconds, beyond the request context.
+	// With the warmup cap, this slot collects immediately. Ignoring warmup would delay
+	// the first poll beyond the request context.
 	slotStart := time.Now().Add(-3 * time.Second)
 	clock := eth_clock.NewMockEthereumClock(ctrl)
 	clock.EXPECT().GetSlotTime(targetSlot).Return(slotStart)

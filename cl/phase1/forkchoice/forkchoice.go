@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
@@ -88,7 +89,7 @@ type preverifiedAppendListsSizes struct {
 }
 
 type ForkChoiceStore struct {
-	time             atomic.Uint64
+	timeMs           atomic.Uint64
 	highestSeen      atomic.Uint64
 	highestSeenRoot  atomic.Value // common.Hash
 	blocksProcessing atomic.Int64
@@ -509,7 +510,7 @@ func NewForkChoiceStore(
 
 	f.highestSeen.Store(anchorState.Slot())
 	f.highestSeenRoot.Store(common.Hash(anchorRoot))
-	f.time.Store(anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot())
+	f.timeMs.Store(utils.SecondsToMilliseconds(anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot()))
 
 	var anchorTimelinessVotes [clparams.PtcSize]int8
 	var anchorDataAvailabilityVotes [clparams.PtcSize]int8
@@ -734,7 +735,7 @@ func (f *ForkChoiceStore) updateChildren(parentSlot uint64, parent, child common
 
 // Time returns current time
 func (f *ForkChoiceStore) Time() uint64 {
-	return f.time.Load()
+	return f.timeMs.Load() / 1000
 }
 
 // ProposerBoostRoot returns proposer boost root

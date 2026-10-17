@@ -10,13 +10,14 @@ import (
 type timeBasedRateLimiter struct {
 	duration    time.Duration
 	start       time.Time
-	maxRequests int
+	maxRequests func() int
+	limit       int
 	counter     int
 
 	mu sync.Mutex
 }
 
-func newTimeBasedRateLimiter(duration time.Duration, maxRequests int) *timeBasedRateLimiter {
+func newTimeBasedRateLimiter(duration time.Duration, maxRequests func() int) *timeBasedRateLimiter {
 	return &timeBasedRateLimiter{
 		duration:    duration,
 		maxRequests: maxRequests,
@@ -30,10 +31,11 @@ func (r *timeBasedRateLimiter) tryAcquire() bool {
 
 	if time.Since(r.start) > r.duration {
 		r.start = time.Now()
+		r.limit = r.maxRequests()
 		r.counter = 0
 	}
 
-	if r.counter < r.maxRequests {
+	if r.counter < r.limit {
 		r.counter++
 		return true
 	}
