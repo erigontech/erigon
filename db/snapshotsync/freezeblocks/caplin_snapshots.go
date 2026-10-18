@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"path/filepath"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -398,8 +397,7 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	}
 	list := make([]string, 0, len(files))
 	for i := range files {
-		_, fName := filepath.Split(files[i].Path)
-		list = append(list, fName)
+		list = append(list, files[i].Name())
 	}
 	if err := s.OpenList(list, true); err != nil {
 		return err
