@@ -81,7 +81,7 @@ func (c *BlockTxNumLookupCache) Find(r snapshotsync.Range, queryTxNum uint64, ge
 		txNum = lookup[i].Load()
 		if txNum == math.MaxUint64 {
 			// not found
-			blkNum := c.index2BlkNum(r.From(), len(lookup), i)
+			blkNum := c.index2BlkNum(r, len(lookup), i)
 			txNum, err = getter(blkNum)
 			if err != nil {
 				return true
@@ -100,7 +100,7 @@ func (c *BlockTxNumLookupCache) Find(r snapshotsync.Range, queryTxNum uint64, ge
 		return r.From(), nil
 	}
 
-	from, to := c.index2BlkNum(r.From(), len(lookup), lookupIndex-1), c.index2BlkNum(r.From(), len(lookup), lookupIndex)
+	from, to := c.index2BlkNum(r, len(lookup), lookupIndex-1), c.index2BlkNum(r, len(lookup), lookupIndex)
 	rangeFrom := from
 
 	for from < to {
@@ -143,12 +143,12 @@ func (c *BlockTxNumLookupCache) GetLastMaxTxNum(r snapshotsync.Range, getter Get
 	return maxTxNum, nil
 }
 
-func (c *BlockTxNumLookupCache) index2BlkNum(from uint64, lookupSize, idxlookupIdx int) uint64 {
+func (c *BlockTxNumLookupCache) index2BlkNum(r snapshotsync.Range, lookupSize, idxlookupIdx int) uint64 {
 	if idxlookupIdx >= lookupSize {
 		panic(fmt.Sprintf("index2BlkNum: idxlookupIdx (%d) >= lookupSize (%d)", idxlookupIdx, lookupSize))
 	}
 	if idxlookupIdx == lookupSize-1 {
-		return from + uint64(idxlookupIdx)*uint64(c.cadence) - 1
+		return r.To() - 1
 	}
-	return from + uint64(idxlookupIdx)*uint64(c.cadence)
+	return r.From() + uint64(idxlookupIdx)*uint64(c.cadence)
 }
