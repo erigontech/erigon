@@ -119,6 +119,16 @@ func TestBlock13(t *testing.T) {
 	_, err = Verify(w.config, w.engine, block, withoutRoot)
 	require.ErrorIs(t, err, ErrMissingParentState)
 
+	// Block 13 is empty: forged body commitments change neither state, receipts
+	// nor gas.
+	txHash := types.CopyHeader(block.Header())
+	txHash.TxHash[0] ^= 1
+	_, err = Verify(w.config, w.engine, block.WithSeal(txHash), w.witness(0))
+	require.ErrorIs(t, err, ErrBodyMismatch)
+	withUncle := types.NewBlockFromNetwork(block.Header(), &types.Body{Uncles: []*types.Header{parent}, Withdrawals: block.Withdrawals()}, nil)
+	_, err = Verify(w.config, w.engine, withUncle, w.witness(0))
+	require.ErrorIs(t, err, ErrBodyMismatch)
+
 	onlyRoot := w.witness(0)
 	onlyRoot.State = [][]byte{rootNode}
 	_, err = Verify(w.config, w.engine, block, onlyRoot)

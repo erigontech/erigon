@@ -38,6 +38,8 @@ var (
 	ErrWitnessHeaders = errors.New("witness headers do not chain to the parent")
 	// ErrStateRoot reports a post-state root other than the header's.
 	ErrStateRoot = fmt.Errorf("%w: post-state root mismatch", rules.ErrInvalidBlock)
+	// ErrBodyMismatch reports a body other than the one the header commits to.
+	ErrBodyMismatch = fmt.Errorf("%w: body does not match the header", rules.ErrInvalidBlock)
 )
 
 // Witness is an execution witness in the shape of reth's
@@ -97,6 +99,9 @@ func Execute(chainConfig *chain.Config, engine rules.Engine, block *types.Block,
 	}
 	if err := engine.VerifyHeader(headers, header, true); err != nil {
 		return nil, err
+	}
+	if err := block.Body().MatchesHeader(header); err != nil {
+		return nil, fmt.Errorf("%w: block %d: %w", ErrBodyMismatch, block.NumberU64(), err)
 	}
 	ws, err := newWitnessState(w.State, w.Codes, headers.parent.Root)
 	if err != nil {
