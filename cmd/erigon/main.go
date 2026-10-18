@@ -43,6 +43,7 @@ func main() {
 	var err error
 	common.WithProfilersMain(func() {
 		app := erigonapp.MakeApp("erigon", runErigon, slices.Concat(erigoncli.DefaultFlags, eez.Flags))
+		registerEEZ(app, eez.Register)
 		err = app.Run(context.Background(), os.Args)
 		if err != nil {
 			_, printErr := fmt.Fprintln(os.Stderr, err)
@@ -56,12 +57,27 @@ func main() {
 	}
 }
 
-func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
-	// Before any chain lookup: EEZ networks are registered only on request.
-	if cliCtx.Bool(eez.EnabledFlag.Name) {
-		eez.Register()
+// registerEEZ makes app call register when --eez.enabled is set. Unlike the
+// root action, the root Before runs for subcommands too, after the whole
+// command line is parsed.
+func registerEEZ(app *cli.Command, register func()) {
+	before := app.Before
+	app.Before = func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+		if before != nil {
+			var err error
+			// Applies --config, which may set the flag.
+			if ctx, err = before(ctx, cmd); err != nil {
+				return ctx, err
+			}
+		}
+		if cmd.Bool(eez.EnabledFlag.Name) {
+			register()
+		}
+		return ctx, nil
 	}
+}
 
+func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
 	logger, tracer, metricsMux, pprofMux, err := debug.Setup(ctx, cliCtx, true /* rootLogger */)
 	if err != nil {
 		return
