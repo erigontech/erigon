@@ -518,7 +518,10 @@ func (s *simulator) sanitizeCall(
 			args.MaxPriorityFeePerGas = new(hexutil.U256)
 		}
 	}
-	if args.MaxFeePerBlobGas == nil && args.BlobVersionedHashes != nil {
+	if args.BlobVersionedHashes == nil {
+		// eth_simulateV1 reads a blob fee cap without blob hashes as absent; the call methods reject it.
+		args.MaxFeePerBlobGas = nil
+	} else if args.MaxFeePerBlobGas == nil {
 		args.MaxFeePerBlobGas = new(hexutil.U256)
 	}
 	return nil
