@@ -475,6 +475,7 @@ func (p *TxPool) forgetUnusedSenders(ids []uint64) {
 		if p.all.hasTxns(id) {
 			continue
 		}
+		delete(p.senderLastActivity, id)
 		if addr, ok := p.senders.senderID2Addr[id]; ok {
 			delete(p.senders.senderID2Addr, id)
 			delete(p.senders.senderIDs, addr)
@@ -2641,6 +2642,7 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 		id := mt.TxnSlot.SenderID
 		idHash := mt.TxnSlot.IDHash[:]
 		if !p.all.hasTxns(id) {
+			delete(p.senderLastActivity, id)
 			addr, ok := p.senders.senderID2Addr[id]
 			if ok {
 				delete(p.senders.senderID2Addr, id)
