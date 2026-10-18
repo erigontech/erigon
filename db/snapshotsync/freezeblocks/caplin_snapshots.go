@@ -154,20 +154,6 @@ func (s *CaplinSnapshots) BuildMissedIndices(ctx context.Context, _ string, noti
 	return nil
 }
 
-func (s *CaplinSnapshots) openFolder(optimistic bool) error {
-	files, err := snapshotsync.AllTypedSegments(s.Dir(), s.Types())
-	if err != nil {
-		return err
-	}
-	list := make([]string, 0, len(files))
-	for i := range files {
-		f := &files[i]
-		_, fName := filepath.Split(f.Path)
-		list = append(list, fName)
-	}
-	return s.OpenList(list, optimistic)
-}
-
 type CaplinView struct {
 	base *snapshotsync.View
 }
@@ -401,7 +387,16 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	if s == nil {
 		return nil
 	}
-	if err := s.openFolder(true); err != nil {
+	files, err := snapshotsync.AllTypedSegments(s.Dir(), s.Types())
+	if err != nil {
+		return err
+	}
+	list := make([]string, 0, len(files))
+	for i := range files {
+		_, fName := filepath.Split(files[i].Path)
+		list = append(list, fName)
+	}
+	if err := s.OpenList(list, true); err != nil {
 		return err
 	}
 
