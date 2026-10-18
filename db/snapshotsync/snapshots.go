@@ -459,6 +459,7 @@ type BaseRoSnapshots struct {
 
 	dir               string
 	segmentsMinByType map[snaptype.Enum]*atomic.Uint64 // min block number per segment type
+	dirtyMaxByType    map[snaptype.Enum]*atomic.Uint64 // max height per segment type, indexed or not
 	idxMax            atomic.Uint64                    // all types of .idx files are available - up to this number
 	cfg               ethconfig.BlocksFreezing
 	snCfg             *snapcfg.Cfg
@@ -546,6 +547,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 		alignMin:          alignMin,
 		operators:         map[snaptype.Enum]*retireOperators{},
 		segmentsMinByType: make(map[snaptype.Enum]*atomic.Uint64),
+		dirtyMaxByType:    make(map[snaptype.Enum]*atomic.Uint64),
 	}
 	for _, snapType := range types {
 		s.dirty[snapType.Enum()] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
@@ -558,6 +560,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 		u := &atomic.Uint64{}
 		u.Store(math.MaxUint64)
 		s.segmentsMinByType[t] = u
+		s.dirtyMaxByType[t] = &atomic.Uint64{}
 	}
 
 	s.dirtyLock.Lock()
@@ -610,6 +613,43 @@ func (s *BaseRoSnapshots) DirtyBlocksAvailable(t snaptype.Enum) uint64 {
 
 func (s *BaseRoSnapshots) VisibleBlocksAvailable(t snaptype.Enum) uint64 {
 	return s.visibleIdxAvailability(t)
+}
+
+// DirtySegmentsMax is the tip of the data on disk, index or no index: unlike
+// DirtyBlocksAvailable it does not stop at the first unindexed segment, so a producer
+// can see a range it has dumped but not yet indexed.
+// DirtySegmentsMax is read per downloaded block, so it serves a value cached by
+// storeDirtyMax rather than walking the dirty set under a lock.
+func (s *BaseRoSnapshots) DirtySegmentsMax(t snaptype.Enum) uint64 {
+	u, ok := s.dirtyMaxByType[t]
+	if !ok {
+		return 0
+	}
+	return u.Load()
+}
+
+// storeDirtyMax refreshes the cache for t. Must be called with dirtyLock held, from the
+// single publish point every dirty mutation funnels through.
+func (s *BaseRoSnapshots) storeDirtyMax(t snaptype.Enum) {
+	u, ok := s.dirtyMaxByType[t]
+	if !ok {
+		return
+	}
+	dirty := s.dirty[t]
+	if dirty == nil {
+		u.Store(0)
+		return
+	}
+	var _max uint64
+	dirty.Walk(func(segments []*DirtySegment) bool {
+		for _, sn := range segments {
+			if sn.to > 0 && sn.to-1 > _max {
+				_max = sn.to - 1
+			}
+		}
+		return true
+	})
+	u.Store(_max)
 }
 
 func (s *BaseRoSnapshots) DownloadComplete() {
@@ -814,6 +854,7 @@ func (s *BaseRoSnapshots) recalcVisibleFiles(alignMin bool, retired retiredSegme
 	maxVisibleBlocks := make([]uint64, 0, len(s.types))
 
 	for _, t := range s.enums {
+		s.storeDirtyMax(t)
 		newVisibleSegments := RecalcVisibleSegments(s.dirty[t])
 		visible[t] = newVisibleSegments
 		var to uint64

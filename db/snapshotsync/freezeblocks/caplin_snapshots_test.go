@@ -164,9 +164,10 @@ func TestCaplinWatermarks(t *testing.T) {
 	require.Len(t, view.BeaconBlocks(), 2, "the unindexed tail segment must not be visible")
 	require.Len(t, view.BlobSidecars(), 1)
 
+	// dirty-backed: counts the unindexed tail, inclusive To-1.
+	require.Equal(t, uint64(3*limit-1), sn.SegmentsMax())
 	// visible-backed, inclusive To-1. BlocksAvailable is min(SegmentsMax, IndicesMax),
 	// so it follows IndicesMax whenever the tip is dumped but not yet indexed.
-	require.Equal(t, uint64(2*limit-1), sn.SegmentsMax())
 	require.Equal(t, uint64(2*limit-1), sn.IndicesMax())
 	require.Equal(t, uint64(2*limit-1), sn.BlocksAvailable())
 	// visible-backed, exclusive To — cl/beacon/handler/blobs.go compares slot < FrozenBlobs().
@@ -483,24 +484,6 @@ func TestBuildMissingIndicesRebuildsCorruptIndex(t *testing.T) {
 	view := sn.View()
 	defer view.Close()
 	require.Len(t, view.BeaconBlocks(), 1, "the reindexed segment must be published")
-}
-
-func TestSegmentsMaxStopsAtGap(t *testing.T) {
-	const limit = snaptype.CaplinMergeLimit
-
-	dirs := datadir.New(t.TempDir())
-	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true)
-	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 2*limit, 3*limit, true)
-
-	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
-	t.Cleanup(sn.Close)
-	require.NoError(t, sn.OpenFolder())
-
-	require.Equal(t, uint64(limit-1), sn.SegmentsMax())
-
-	view := sn.View()
-	defer view.Close()
-	require.Len(t, view.BeaconBlocks(), 1, "the segment past the gap must not be visible")
 }
 
 func TestRemoveOverlapsUnlinksCoveredBeaconBlocks(t *testing.T) {

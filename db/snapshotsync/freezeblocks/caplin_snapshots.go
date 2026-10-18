@@ -94,7 +94,12 @@ func (s *CaplinSnapshots) Close() {
 	s.BaseRoSnapshots.Close()
 }
 
-func (s *CaplinSnapshots) SegmentsMax() uint64 { return s.IndicesMax() }
+// SegmentsMax is dirty-backed and counts a segment as soon as its .seg opens, index or
+// not: the archive backfill stop condition asks how far data has been dumped, not how
+// far it is readable.
+func (s *CaplinSnapshots) SegmentsMax() uint64 {
+	return s.DirtySegmentsMax(snaptype.CaplinEnums.BeaconBlocks)
+}
 
 func (s *CaplinSnapshots) LogStat(str string) {
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", str),
