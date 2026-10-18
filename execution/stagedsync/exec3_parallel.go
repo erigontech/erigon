@@ -1336,7 +1336,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		switch {
 		case len(t.Dependencies()) > 0:
 			for _, depTxIndex := range t.Dependencies() {
-				executor.execTasks.addDependency(depTxIndex+1, i)
+				executor.execTasks.addDependency(depTxIndex+1, i, true)
 			}
 			executor.execTasks.clearPending(i)
 		case len(execRequest.accessList) != 0:
@@ -1353,7 +1353,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			}
 			if !sender.IsNil() {
 				if tx, ok := prevSenderTx[sender]; ok {
-					executor.execTasks.addDependency(tx, i)
+					executor.execTasks.addDependency(tx, i, true)
 					executor.execTasks.clearPending(i)
 				}
 
@@ -2931,12 +2931,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				l := len(be.estimateDeps[tx])
 				for l > 0 && be.estimateDeps[tx][l-1] > dependency {
-					be.execTasks.removeDependency(be.estimateDeps[tx][l-1])
+					be.execTasks.removeDependency(be.estimateDeps[tx][l-1], false)
 					be.estimateDeps[tx] = be.estimateDeps[tx][:l-1]
 					l--
 				}
 
-				addedDependencies := be.execTasks.addDependency(dependency, tx)
+				addedDependencies := be.execTasks.addDependency(dependency, tx, false)
 				be.execAborted[tx]++
 
 				if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
@@ -3011,7 +3011,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		be.execTasks.markComplete(tx)
 		be.cntSuccess++
 
-		be.execTasks.removeDependency(tx)
+		be.execTasks.removeDependency(tx, false)
 	}
 
 	// do validations ...
@@ -3092,6 +3092,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		if valid {
 			be.validateTasks.markComplete(tx)
+			be.execTasks.removeDependency(tx, true)
 
 			be.finalizedResults[tx] = txResult
 
