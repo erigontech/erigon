@@ -109,6 +109,14 @@ func Execute(chainConfig *chain.Config, engine rules.Engine, block *types.Block,
 	}
 	ibs := state.New(ws)
 	defer ibs.Close()
+	// Witness misses execution may swallow: Merge.Initialize only logs a
+	// failed history storage call, a caller frame absorbs a failed BLOCKHASH.
+	checkStateReadOrIncompleteError := func() error {
+		if err := ibs.StateReadError(); err != nil {
+			return err
+		}
+		return headers.incompleteErr
+	}
 
 	logger := log.Root()
 	evm := protocol.CreateEVM(chainConfig, headers.blockHash, engine, accounts.InternAddress(header.Coinbase), ibs, header, vm.Config{})
@@ -141,6 +149,10 @@ func Execute(chainConfig *chain.Config, engine rules.Engine, block *types.Block,
 			res.TxStateRoots = append(res.TxStateRoots, root)
 		}
 	}
+	// A witness gap is reported as such, not as a mismatch it caused.
+	if err := checkStateReadOrIncompleteError(); err != nil {
+		return nil, fmt.Errorf("block %d: %w", block.NumberU64(), err)
+	}
 	if err := engine.ValidateBlockPostExecution(chainConfig, header, gasUsed.BlockGasUsed(), gasUsed.Blob, true, true,
 		res.Receipts, block.Transactions(), logger); err != nil {
 		return nil, err
@@ -151,10 +163,8 @@ func Execute(chainConfig *chain.Config, engine rules.Engine, block *types.Block,
 	}
 	_, err = engine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), res.Receipts, block.Withdrawals(),
 		nil, syscall, false, logger)
-	// Latched by any read the witness misses, including ones a system call
-	// swallows, such as Merge.Initialize's history storage call.
-	if readErr := ibs.StateReadError(); readErr != nil {
-		return nil, fmt.Errorf("block %d: %w", block.NumberU64(), readErr)
+	if err := checkStateReadOrIncompleteError(); err != nil {
+		return nil, fmt.Errorf("block %d: %w", block.NumberU64(), err)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("block %d: finalize: %w", block.NumberU64(), err)
@@ -171,10 +181,11 @@ func Execute(chainConfig *chain.Config, engine rules.Engine, block *types.Block,
 // headerReader serves the witness headers, the BLOCKHASH sources of a block.
 type headerReader struct {
 	rules.ChainHeaderReader
-	config   *chain.Config
-	parent   *types.Header
-	byHash   map[common.Hash]*types.Header
-	byNumber map[uint64]*types.Header
+	config        *chain.Config
+	parent        *types.Header
+	byHash        map[common.Hash]*types.Header
+	byNumber      map[uint64]*types.Header
+	incompleteErr error
 }
 
 func newHeaderReader(chainConfig *chain.Config, block *types.Block, encoded [][]byte) (*headerReader, error) {
@@ -214,5 +225,9 @@ func (r *headerReader) blockHash(number uint64) (common.Hash, error) {
 	if h := r.byNumber[number]; h != nil {
 		return h.Hash(), nil
 	}
-	return common.Hash{}, fmt.Errorf("%w: no header %d for BLOCKHASH", ErrIncompleteWitness, number)
+	err := fmt.Errorf("%w: no header %d for BLOCKHASH", ErrIncompleteWitness, number)
+	if r.incompleteErr == nil {
+		r.incompleteErr = err
+	}
+	return common.Hash{}, err
 }

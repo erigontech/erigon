@@ -16,6 +16,7 @@
 package stateless
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"slices"
 	"testing"
@@ -24,15 +25,22 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/internal/testfixtures"
+	eezprotocol "github.com/erigontech/erigon/eez/protocol"
 	eezrules "github.com/erigontech/erigon/eez/rules"
 	"github.com/erigontech/erigon/eez/systemtx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 // windowTiming is the block interval and L1 block time of the deployment
@@ -165,4 +173,103 @@ func TestWitnessReadError(t *testing.T) {
 	require.Len(t, witness.Codes, n-1)
 	_, err = Execute(w.config, w.engine, block, witness)
 	require.ErrorIs(t, err, ErrIncompleteWitness)
+}
+
+// witnessTrie returns the state trie holding codes, one contract per address,
+// as the root and the nodes proving every path.
+func witnessTrie(t *testing.T, codes map[common.Address][]byte) (common.Hash, [][]byte) {
+	t.Helper()
+	tr := trie.New(common.Hash{})
+	for addr, code := range codes {
+		tr.UpdateAccount(crypto.Keccak256(addr[:]), &accounts.Account{
+			Root:     empty.RootHash,
+			CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code)),
+		})
+	}
+	root := tr.Hash()
+	var nodes [][]byte
+	for addr := range codes {
+		proof, err := tr.Prove(crypto.Keccak256(addr[:]), 0, false)
+		require.NoError(t, err)
+		for _, n := range proof {
+			if !slices.ContainsFunc(nodes, func(m []byte) bool { return slices.Equal(m, n) }) {
+				nodes = append(nodes, n)
+			}
+		}
+	}
+	return root, nodes
+}
+
+// commitBlock returns the block of txn on header whose gas used, receipts
+// root and bloom are what executing it on w yields.
+func commitBlock(t *testing.T, win *window, header *types.Header, txn types.Transaction, w *Witness) *types.Block {
+	t.Helper()
+	headers, err := newHeaderReader(win.config, types.NewBlockWithHeader(header, nil), w.Headers)
+	require.NoError(t, err)
+	ws, err := newWitnessState(w.State, w.Codes, headers.parent.Root)
+	require.NoError(t, err)
+	ibs := state.New(ws)
+	defer ibs.Close()
+	evm := protocol.CreateEVM(win.config, headers.blockHash, win.engine, accounts.InternAddress(header.Coinbase), ibs, header, vm.Config{})
+	var gasUsed protocol.GasUsed
+	ibs.SetTxContext(header.Number.Uint64(), 0)
+	receipt, err := protocol.ApplyTransactionWithEVM(win.config, win.engine, new(protocol.GasPool).AddGas(header.GasLimit), ibs, ws,
+		header, txn, &gasUsed, vm.Config{}, evm)
+	require.NoError(t, err)
+	h := types.CopyHeader(header)
+	h.GasUsed = gasUsed.BlockGasUsed()
+	return types.NewBlock(h, []types.Transaction{txn}, nil, types.Receipts{receipt}, []*types.Withdrawal{}, nil)
+}
+
+// TestMissingBlockhashAncestor covers a BLOCKHASH the witness headers cannot
+// serve: the EVM reports it as a frame error, which a failed transaction or a
+// caller frame absorbs.
+func TestMissingBlockhashAncestor(t *testing.T) {
+	win := loadWindow(t, "captured-devnet-window-468")
+	var grandparent types.Header
+	require.NoError(t, rlp.DecodeBytes(win.Blocks[0].Witness.Headers[len(win.Blocks[0].Witness.Headers)-1], &grandparent))
+	// PUSH8 <grandparent> BLOCKHASH POP STOP
+	blockhash := binary.BigEndian.AppendUint64([]byte{0x67}, grandparent.Number.Uint64())
+	blockhash = append(blockhash, 0x40, 0x50, 0x00)
+	callee := common.HexToAddress("0xb10c")
+	// CALL(GAS, callee, 0, 0, 0, 0, 0) POP STOP
+	call := append(append([]byte{0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x73}, callee[:]...), 0x5a, 0xf1, 0x50, 0x00)
+
+	for _, tc := range []struct {
+		name  string
+		codes map[common.Address][]byte
+	}{
+		{"direct", map[common.Address][]byte{eezprotocol.EEZL2Address: blockhash}},
+		{"nested call", map[common.Address][]byte{eezprotocol.EEZL2Address: call, callee: blockhash}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, nodes := witnessTrie(t, tc.codes)
+			var codes [][]byte
+			for _, code := range tc.codes {
+				codes = append(codes, code)
+			}
+			parent := types.CopyHeader(win.blocks[0].Header())
+			parent.Root = root
+			encGrandparent, err := rlp.EncodeToBytes(&grandparent)
+			require.NoError(t, err)
+			encParent, err := rlp.EncodeToBytes(parent)
+			require.NoError(t, err)
+			header := types.CopyHeader(win.blocks[1].Header())
+			header.ParentHash = parent.Hash()
+			txn, err := systemtx.New(eezprotocol.SystemTx{ChainID: win.config.ChainID.Uint64(), To: eezprotocol.EEZL2Address})
+			require.NoError(t, err)
+
+			full := &Witness{State: nodes, Codes: codes, Headers: [][]byte{encGrandparent, encParent}}
+			block := commitBlock(t, win, header, txn, full)
+			_, err = Execute(win.config, win.engine, block, full)
+			require.NoError(t, err)
+
+			// The header commits to the execution a parent-only witness yields.
+			parentOnly := &Witness{State: nodes, Codes: codes, Headers: [][]byte{encParent}}
+			forged := commitBlock(t, win, header, txn, parentOnly)
+			require.NotEqual(t, block.Hash(), forged.Hash())
+			_, err = Execute(win.config, win.engine, forged, parentOnly)
+			require.ErrorIs(t, err, ErrIncompleteWitness)
+		})
+	}
 }
