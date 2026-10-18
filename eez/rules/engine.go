@@ -92,6 +92,9 @@ func New(chainConfig *chain.Config) (*Engine, error) {
 // Ethereum rules it requires the configured interval and gas limit, a zero
 // prevRandao and beacon root, no blob gas, and empty withdrawals and requests.
 func (e *Engine) VerifyHeader(chain rules.ChainHeaderReader, header *types.Header, _ bool) error {
+	if !header.Number.IsUint64() {
+		return fmt.Errorf("%w: block number %d beyond uint64", ErrInvalidHeader, &header.Number)
+	}
 	number := header.Number.Uint64()
 	if number == 0 {
 		return fmt.Errorf("%w: genesis has no parent", ErrInvalidHeader)
@@ -108,7 +111,7 @@ func (e *Engine) verifyHeader(config *chain.Config, header, parent *types.Header
 		return fmt.Errorf("%w: block %d: %s", ErrInvalidHeader, header.Number.Uint64(), fmt.Sprintf(format, args...))
 	}
 	switch {
-	case header.Number.Uint64() != parent.Number.Uint64()+1:
+	case !header.Number.Eq(new(uint256.Int).AddUint64(&parent.Number, 1)):
 		return rules.ErrInvalidNumber
 	case header.Time != parent.Time+e.l2.BlockInterval:
 		return invalid("timestamp %d, want parent %d + %d", header.Time, parent.Time, e.l2.BlockInterval)

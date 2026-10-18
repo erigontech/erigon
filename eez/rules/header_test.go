@@ -125,6 +125,7 @@ func TestVerifyHeaderRejects(t *testing.T) {
 		mutate func(h *types.Header)
 	}{
 		{"number", func(h *types.Header) { h.Number.AddUint64(&h.Number, 1) }},
+		{"number beyond uint64", func(h *types.Header) { h.Number.Add(&h.Number, new(uint256.Int).Lsh(uint256.NewInt(1), 64)) }},
 		{"timestamp", func(h *types.Header) { h.Time++ }},
 		{"gas limit", func(h *types.Header) { h.GasLimit-- }},
 		{"gas used", func(h *types.Header) { h.GasUsed = h.GasLimit + 1 }},
