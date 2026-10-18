@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/eez"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
@@ -35,10 +36,15 @@ import (
 
 func main() {
 	cmd, cfg := cli.RootCommand()
+	eezEnabled := cmd.PersistentFlags().Bool(eez.EnabledFlag.Name, false, "Enable EEZ support: the l2 config section, transaction type 0x76 and the EEZ rules engine")
 	rootCtx, rootCancel := common.RootContext()
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "rpcdaemon")
+		// Before RemoteServices reads the chain config.
+		if *eezEnabled {
+			eez.Register()
+		}
 		db, backend, txPool, mining, stateCache, blockReader, engine, ff, err := cli.RemoteServices(ctx, cfg, logger, rootCancel)
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
