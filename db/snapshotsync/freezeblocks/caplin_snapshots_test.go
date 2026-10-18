@@ -48,8 +48,24 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
+
+type unavailableExecutionBlockReader struct{}
+
+func (unavailableExecutionBlockReader) Transactions(uint64, common.Hash) (*solid.TransactionsSSZ, error) {
+	return nil, snapshot_format.ErrExecutionBodyNotFound
+}
+
+func (unavailableExecutionBlockReader) Withdrawals(uint64, common.Hash) (*solid.ListSSZ[*cltypes.Withdrawal], error) {
+	panic("Withdrawals should not be called after transactions are unavailable")
+}
+
+func (unavailableExecutionBlockReader) SetBeaconChainConfig(*clparams.BeaconChainConfig) {}
+
+func (unavailableExecutionBlockReader) CacheBody(uint64, common.Hash, [][]byte, []*types.Withdrawal) {
+}
 
 // TestDumpBeaconBlocksNoPanic is a higher-level regression test: the production
 // panic occurred inside DumpBeaconBlocks when chooseSegmentEnd was called with
@@ -274,6 +290,38 @@ func TestReadHeaderReadsSlotFromSegment(t *testing.T) {
 	beyond, _, _, err := sn.ReadHeader(limit, nil)
 	require.NoError(t, err)
 	require.Nil(t, beyond, "a slot past the last segment has no view to read")
+}
+
+func TestBeaconSnapshotReaderPropagatesUnavailableExecutionBody(t *testing.T) {
+	const slot = 42
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.BellatrixVersion)
+	block.Block.Slot = slot
+	block.Block.Body.ExecutionPayload.BlockNumber = 42
+	block.Block.Body.ExecutionPayload.BlockHash = common.Hash{0x42}
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteBeaconBlockAndIndicies(t.Context(), tx, block, true)
+	}))
+
+	dirs := datadir.New(t.TempDir())
+	snapshots := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(snapshots.Close)
+	require.NoError(t, snapshots.OpenFolder())
+	reader := NewBeaconSnapshotReader(snapshots, unavailableExecutionBlockReader{}, &clparams.MainnetBeaconConfig)
+
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		byRoot, err := reader.ReadBlockByRoot(t.Context(), tx, root)
+		require.ErrorIs(t, err, snapshot_format.ErrExecutionBodyNotFound)
+		require.Nil(t, byRoot)
+
+		bySlot, err := reader.ReadBlockBySlot(t.Context(), tx, slot)
+		require.ErrorIs(t, err, snapshot_format.ErrExecutionBodyNotFound)
+		require.Nil(t, bySlot)
+		return nil
+	}))
 }
 
 func blockSnapshotWord(t *testing.T, block *cltypes.SignedBeaconBlock) []byte {

@@ -3676,5 +3676,5 @@ func (a *ApiHandler) cacheExecutionBody(payload *cltypes.Eth1Block) {
 		})
 		ws = cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(consensusWithdrawals)
 	}
-	a.blockReader.CacheBlockBody(payload.BlockNumber, rawTxs, ws)
+	a.blockReader.CacheBlockBody(payload.BlockNumber, payload.BlockHash, rawTxs, ws)
 }

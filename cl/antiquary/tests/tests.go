@@ -76,8 +76,9 @@ var phase0_post_state_ssz_snappy []byte
 var bellatrixFS embed.FS
 
 type MockBlockReader struct {
-	U            map[uint64]*cltypes.SignedBeaconBlock
-	CachedBodies []uint64
+	U                map[uint64]*cltypes.SignedBeaconBlock
+	CachedBodies     []uint64
+	CachedBodyHashes []common.Hash
 }
 
 func NewMockBlockReader() *MockBlockReader {
@@ -122,8 +123,9 @@ func (m *MockBlockReader) FrozenSlots() uint64 {
 	panic("implement me")
 }
 
-func (m *MockBlockReader) CacheBlockBody(blockNumber uint64, transactions [][]byte, withdrawals []*types.Withdrawal) {
+func (m *MockBlockReader) CacheBlockBody(blockNumber uint64, blockHash common.Hash, transactions [][]byte, withdrawals []*types.Withdrawal) {
 	m.CachedBodies = append(m.CachedBodies, blockNumber)
+	m.CachedBodyHashes = append(m.CachedBodyHashes, blockHash)
 }
 
 func LoadChain(blocks []*cltypes.SignedBeaconBlock, s *state.CachingBeaconState, db kv.RwDB, t *testing.T) *MockBlockReader {
