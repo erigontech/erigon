@@ -504,6 +504,7 @@ func TestRemoveOverlapsUnlinksCoveredBeaconBlocks(t *testing.T) {
 	covering := filepath.Join(dirs.Snap, snaptype.BeaconBlocks.FileName(version.ZeroVersion, 0, 2*limit))
 	require.Equal(t, []string{covering}, segs, "covered segments must be unlinked")
 	require.Len(t, caplinIdxFiles(t, dirs), 1, "covered indexes must be unlinked")
+	require.Equal(t, uint64(2*limit-1), sn.SegmentsMax(), "unlinking covered segments must not lower the dumped tip")
 }
 
 func caplinIdxFiles(t *testing.T, dirs datadir.Dirs) []string {
