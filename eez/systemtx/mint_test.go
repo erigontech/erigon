@@ -157,16 +157,21 @@ func TestMintRejects(t *testing.T) {
 	env := newExecEnv(t, codeStop, 0)
 	_, err := env.apply(t, systemTx(t, env.cfg, 1, 5), 30_000_000)
 	require.ErrorIs(t, err, execprotocol.ErrNonceTooHigh)
+	require.Zero(t, env.balance(t, sysAddr))
 
 	// The whole budget must fit the block before execution.
 	env = newExecEnv(t, codeStop, 0)
 	_, err = env.apply(t, systemTx(t, env.cfg, 0, 5), protocol.SystemTxGasLimit-1)
 	require.ErrorIs(t, err, execprotocol.ErrGasLimitReached)
+	require.Zero(t, env.balance(t, sysAddr))
 	_, err = env.apply(t, systemTx(t, env.cfg, 0, 0), protocol.SystemTxGasLimit)
 	require.NoError(t, err)
+	require.Zero(t, env.balance(t, sysAddr))
+	require.Zero(t, env.balance(t, eezl2Addr))
 
 	env = newExecEnv(t, codeStop, 1)
 	tx := mustNew(t, protocol.SystemTx{ChainID: env.cfg.ChainID.Uint64(), To: protocol.EEZL2Address, Value: *new(uint256.Int).SetAllOne()})
 	_, err = env.apply(t, tx, 30_000_000)
 	require.ErrorIs(t, err, protocol.ErrSystemTx)
+	require.Equal(t, uint64(1), env.balance(t, sysAddr))
 }

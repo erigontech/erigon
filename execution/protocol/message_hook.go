@@ -27,7 +27,7 @@ import (
 // registered transaction type.
 type MessageHook interface {
 	// BeforeExecute runs before the message's checks. An error rejects the
-	// transaction.
+	// transaction; a rejected transaction keeps none of the hook's changes.
 	BeforeExecute(state evmtypes.IntraBlockState, msg Message) error
 	// AfterExecute runs after the message executed; failed reports a reverted
 	// or halted outer call.

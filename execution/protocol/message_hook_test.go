@@ -136,6 +136,22 @@ func TestMessageHookError(t *testing.T) {
 	require.Zero(t, nonce)
 }
 
+func TestMessageHookRevertedOnRejection(t *testing.T) {
+	h := registerMintHook(t)
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+
+	// The block cannot fit the message's gas.
+	_, err := ApplyMessage(newTestEVM(ibs, chain.TestChainOsakaConfig, 30_000_000), hookedMsg(hookSender, hookRecipient, 5, hookedTxType),
+		new(GasPool).AddGas(99_999), true, false, nil)
+	require.ErrorIs(t, err, ErrGasLimitReached)
+	require.Equal(t, 1, h.before)
+	require.Zero(t, h.after)
+	balance, err := ibs.GetBalance(hookSender)
+	require.NoError(t, err)
+	require.True(t, balance.IsZero())
+}
+
 func TestMessageHookSkipsOtherTypes(t *testing.T) {
 	h := registerMintHook(t)
 	ibs := state.New(state.NewNoopReader())

@@ -190,7 +190,7 @@ func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 }
 
 func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, noFeeBurnAndTip bool, engine rules.EngineReader) (
-	*evmtypes.ExecutionResult, error,
+	res *evmtypes.ExecutionResult, err error,
 ) {
 	// Only zero-gas transactions may be service ones
 	if msg.FeeCap().IsZero() && !msg.IsFree() && engine != nil {
@@ -204,13 +204,22 @@ func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 	}
 	hook := messageHook(msg)
 	if hook != nil {
-		if err := hook.BeforeExecute(evm.IntraBlockState(), msg); err != nil {
+		ibs := evm.IntraBlockState()
+		snapshot := ibs.PushSnapshot()
+		defer func() {
+			// A rejected transaction keeps nothing the hook did.
+			if err != nil {
+				ibs.RevertToSnapshot(snapshot, err)
+			}
+			ibs.PopSnapshot(snapshot)
+		}()
+		if err := hook.BeforeExecute(ibs, msg); err != nil {
 			return nil, err
 		}
 	}
 	st := NewTxnExecutor(evm, msg, gp)
 	st.noFeeBurnAndTip = noFeeBurnAndTip
-	res, err := st.Execute(refunds, gasBailout)
+	res, err = st.Execute(refunds, gasBailout)
 	if err != nil || hook == nil {
 		return res, err
 	}
