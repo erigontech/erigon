@@ -200,6 +200,7 @@ func TestTraceTxCompletionV2(t *testing.T) {
 			require.EqualValues(t, params.StateGasPerStorageSet, received.BlockStateGasUsed)
 			require.Equal(t, receivedReceipt.GasUsed, received.BlockExecutionGasUsed+received.BlockStateGasUsed)
 			require.Zero(t, received.GasRefund)
+			require.False(t, ibs.AccessedAddr(recipient), "tracing does not build a block access list")
 		})
 	}
 }
