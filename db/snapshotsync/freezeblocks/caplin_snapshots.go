@@ -94,12 +94,7 @@ func (s *CaplinSnapshots) Close() {
 	s.BaseRoSnapshots.Close()
 }
 
-// SegmentsMax is dirty-backed and counts a segment as soon as its .seg opens, index or
-// not: the archive backfill stop condition asks how far data has been dumped, not how
-// far it is readable.
-func (s *CaplinSnapshots) SegmentsMax() uint64 {
-	return s.DirtySegmentsMax(snaptype.CaplinEnums.BeaconBlocks)
-}
+func (s *CaplinSnapshots) SegmentsMax() uint64 { return s.IndicesMax() }
 
 func (s *CaplinSnapshots) LogStat(str string) {
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", str),
@@ -145,14 +140,6 @@ func (s *CaplinSnapshots) SegFileNames(from, to uint64) []string {
 	return res
 }
 
-// OpenFolder keeps caplin's own directory scan: SegmentsCaplin drops beacon-block
-// segments past a gap, so SegmentsMax never reports data the backfill can't walk back to.
-func (s *CaplinSnapshots) OpenFolder() error { return s.openFolder(false) }
-
-// Shadowed so the promoted base versions cannot reach the unfiltered directory scan:
-// Go embedding has no virtual dispatch, so they would call the base OpenFolder.
-func (s *CaplinSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
-
 type snapshotNotifier interface {
 	OnNewSnapshot()
 }
@@ -168,7 +155,7 @@ func (s *CaplinSnapshots) BuildMissedIndices(ctx context.Context, _ string, noti
 }
 
 func (s *CaplinSnapshots) openFolder(optimistic bool) error {
-	files, _, err := snapshotsync.SegmentsCaplin(s.Dir())
+	files, err := snapshotsync.AllTypedSegments(s.Dir(), s.Types())
 	if err != nil {
 		return err
 	}

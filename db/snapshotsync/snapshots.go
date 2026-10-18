@@ -55,59 +55,6 @@ type SortedRange interface {
 	GetGrouping() string
 }
 
-// NoOverlaps - keep largest ranges and avoid overlap
-func NoOverlaps[T SortedRange](in []T) (res []T) {
-	if len(in) == 1 {
-		return in
-	}
-
-	for i := 0; i < len(in); i++ {
-		r := in[i]
-		iFrom, iTo := r.GetRange()
-		if iFrom == iTo {
-			continue
-		}
-		for j := i + 1; j < len(in); j++ {
-			r2 := in[j]
-			jFrom, jTo := r2.GetRange()
-			if jFrom == jTo {
-				continue
-			}
-			if jFrom > iFrom {
-				break
-			}
-			r = r2
-			i++
-		}
-		res = append(res, r)
-	}
-	return res
-}
-
-func NoGaps[T SortedRange](in []T) (out []T, missingRanges []Range) {
-	if len(in) == 0 {
-		return nil, nil
-	}
-	if len(in) == 1 {
-		return in, nil
-	}
-
-	prevTo, _ := in[0].GetRange()
-	for _, f := range in {
-		from, to := f.GetRange()
-		if to <= prevTo {
-			continue
-		}
-		if from != prevTo { // no gaps
-			missingRanges = append(missingRanges, Range{prevTo, from})
-			continue
-		}
-		prevTo = to
-		out = append(out, f)
-	}
-	return out, missingRanges
-}
-
 func findOverlaps[T SortedRange](in []T) (res []T, overlapped []T) {
 	for i := 0; i < len(in); i++ {
 		f := in[i]
@@ -512,7 +459,6 @@ type BaseRoSnapshots struct {
 
 	dir               string
 	segmentsMinByType map[snaptype.Enum]*atomic.Uint64 // min block number per segment type
-	dirtyMaxByType    map[snaptype.Enum]*atomic.Uint64 // max height per segment type, indexed or not
 	idxMax            atomic.Uint64                    // all types of .idx files are available - up to this number
 	cfg               ethconfig.BlocksFreezing
 	snCfg             *snapcfg.Cfg
@@ -600,7 +546,6 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 		alignMin:          alignMin,
 		operators:         map[snaptype.Enum]*retireOperators{},
 		segmentsMinByType: make(map[snaptype.Enum]*atomic.Uint64),
-		dirtyMaxByType:    make(map[snaptype.Enum]*atomic.Uint64),
 	}
 	for _, snapType := range types {
 		s.dirty[snapType.Enum()] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
@@ -613,7 +558,6 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 		u := &atomic.Uint64{}
 		u.Store(math.MaxUint64)
 		s.segmentsMinByType[t] = u
-		s.dirtyMaxByType[t] = &atomic.Uint64{}
 	}
 
 	s.dirtyLock.Lock()
@@ -666,43 +610,6 @@ func (s *BaseRoSnapshots) DirtyBlocksAvailable(t snaptype.Enum) uint64 {
 
 func (s *BaseRoSnapshots) VisibleBlocksAvailable(t snaptype.Enum) uint64 {
 	return s.visibleIdxAvailability(t)
-}
-
-// DirtySegmentsMax is the tip of the data on disk, index or no index: unlike
-// DirtyBlocksAvailable it does not stop at the first unindexed segment, so a producer
-// can see a range it has dumped but not yet indexed.
-// DirtySegmentsMax is read per downloaded block, so it serves a value cached by
-// storeDirtyMax rather than walking the dirty set under a lock.
-func (s *BaseRoSnapshots) DirtySegmentsMax(t snaptype.Enum) uint64 {
-	u, ok := s.dirtyMaxByType[t]
-	if !ok {
-		return 0
-	}
-	return u.Load()
-}
-
-// storeDirtyMax refreshes the cache for t. Must be called with dirtyLock held, from the
-// single publish point every dirty mutation funnels through.
-func (s *BaseRoSnapshots) storeDirtyMax(t snaptype.Enum) {
-	u, ok := s.dirtyMaxByType[t]
-	if !ok {
-		return
-	}
-	dirty := s.dirty[t]
-	if dirty == nil {
-		u.Store(0)
-		return
-	}
-	var _max uint64
-	dirty.Walk(func(segments []*DirtySegment) bool {
-		for _, sn := range segments {
-			if sn.to > 0 && sn.to-1 > _max {
-				_max = sn.to - 1
-			}
-		}
-		return true
-	})
-	u.Store(_max)
 }
 
 func (s *BaseRoSnapshots) DownloadComplete() {
@@ -907,7 +814,6 @@ func (s *BaseRoSnapshots) recalcVisibleFiles(alignMin bool, retired retiredSegme
 	maxVisibleBlocks := make([]uint64, 0, len(s.types))
 
 	for _, t := range s.enums {
-		s.storeDirtyMax(t)
 		newVisibleSegments := RecalcVisibleSegments(s.dirty[t])
 		visible[t] = newVisibleSegments
 		var to uint64
@@ -2184,36 +2090,4 @@ func removeOldFiles(toDel []string) {
 		_ = dir.RemoveFile(f)
 		_ = dir.RemoveFile(f + ".torrent")
 	}
-}
-
-func SegmentsCaplin(dir string) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
-	list, err := snaptype.Segments(dir)
-	if err != nil {
-		return nil, missingSnapshots, err
-	}
-
-	{
-		var l, lSidecars []snaptype.FileInfo
-		var m []Range
-		for i := range list {
-			f := &list[i]
-			if f.Type != nil && f.Type.Enum() != snaptype.CaplinEnums.BeaconBlocks && f.Type.Enum() != snaptype.CaplinEnums.BlobSidecars {
-				continue
-			}
-			if f.Type != nil && f.Type.Enum() == snaptype.CaplinEnums.BlobSidecars {
-				lSidecars = append(lSidecars, *f) // blobs are an exception
-				continue
-			}
-			l = append(l, *f)
-		}
-		l, m = NoGaps(NoOverlaps(l))
-		if len(m) > 0 {
-			lst := m[len(m)-1]
-			log.Debug("[snapshots] see gap", "type", snaptype.CaplinEnums.BeaconBlocks, "from", lst.From())
-		}
-		res = append(res, l...)
-		res = append(res, lSidecars...)
-		missingSnapshots = append(missingSnapshots, m...)
-	}
-	return res, missingSnapshots, nil
 }
