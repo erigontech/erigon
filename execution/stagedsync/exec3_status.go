@@ -230,7 +230,7 @@ func (m *execStatusList) countComplete() int {
 	return m.completeCnt
 }
 
-func (m *execStatusList) addDependency(blocker int, dependent int) bool {
+func (m *execStatusList) addDependency(blocker int, dependent int, atValidation bool) bool {
 	if blocker < 0 || blocker >= dependent {
 		return false
 	}
@@ -253,7 +253,7 @@ func (m *execStatusList) addDependency(blocker int, dependent int) bool {
 		}
 	}
 
-	m.dependency[blocker][dependent] = true
+	m.dependency[blocker][dependent] = atValidation
 
 	if curblockers == nil {
 		curblockers = map[int]bool{}
@@ -275,18 +275,22 @@ func (m *execStatusList) isBlocked(tx int) bool {
 	return len(m.blocker[tx]) > 0
 }
 
-func (m *execStatusList) removeDependency(tx int) {
-	if deps, ok := m.dependency[tx]; ok && len(deps) > 0 {
-		for k := range deps {
-			delete(m.blocker[k], tx)
+func (m *execStatusList) removeDependency(tx int, validated bool) {
+	deps := m.dependency[tx]
+	for k, atValidation := range deps {
+		if atValidation && !validated {
+			continue
+		}
+		delete(deps, k)
+		delete(m.blocker[k], tx)
 
-			if len(m.blocker[k]) == 0 {
-				if !m.checkComplete(k) && !m.checkPending(k) && !m.checkInProgress(k) {
-					m.pushPending(k)
-				}
+		if len(m.blocker[k]) == 0 {
+			if !m.checkComplete(k) && !m.checkPending(k) && !m.checkInProgress(k) {
+				m.pushPending(k)
 			}
 		}
-
+	}
+	if len(deps) == 0 {
 		delete(m.dependency, tx)
 	}
 }
