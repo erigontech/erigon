@@ -154,6 +154,9 @@ func TestWitnessReadError(t *testing.T) {
 	history, err := ws.ReadAccountData(params.HistoryStorageAddress)
 	require.NoError(t, err)
 	require.NotNil(t, history)
+	// reth leaves the system caller out; its absence is not proven.
+	_, err = ws.ReadAccountData(params.SystemAddress)
+	require.ErrorIs(t, err, ErrIncompleteWitness)
 
 	n := len(witness.Codes)
 	witness.Codes = slices.DeleteFunc(witness.Codes, func(code []byte) bool {

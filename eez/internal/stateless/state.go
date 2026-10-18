@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/commitment/trie"
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -106,10 +105,6 @@ func (s *witnessState) ReadAccountData(address accounts.Address) (*accounts.Acco
 	addrHash := crypto.Keccak256Hash(addr[:])
 	acc, ok := s.t.GetAccount(addrHash[:])
 	if !ok {
-		// reth leaves the EIP-4788 system caller out of its witnesses.
-		if address == params.SystemAddress {
-			return nil, nil
-		}
 		return nil, fmt.Errorf("%w: account %x", ErrIncompleteWitness, addr)
 	}
 	return acc, nil
