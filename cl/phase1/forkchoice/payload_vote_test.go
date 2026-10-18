@@ -405,7 +405,7 @@ func TestPtcShouldBuildOnFullReadsOneVoteSnapshot(t *testing.T) {
 func TestPtcShouldBuildOnFullIgnoresVotesBeforePreviousSlot(t *testing.T) {
 	root := common.HexToHash("0x05")
 	f := newPtcVoteTestStore(root)
-	f.time.Store(2 * f.beaconCfg.SecondsPerSlot)
+	f.timeMs.Store(2 * f.beaconCfg.SecondsPerSlot * 1000)
 	f.payloadDataAvailabilityVote.Store(root, ptcVotes(0, ptcVoteThreshold()+1))
 	f.payloadTimelinessVote.Store(root, ptcVotes(0, ptcVoteThreshold()+1))
 
@@ -971,7 +971,7 @@ func newPtcVoteTestStore(root common.Hash) *ForkChoiceStore {
 
 		verifiedExecutionPayload: verifiedExecutionPayload,
 	}
-	f.time.Store(cfg.SecondsPerSlot)
+	f.timeMs.Store(cfg.SecondsPerSlot * 1000)
 	return f
 }
 
