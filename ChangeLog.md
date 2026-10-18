@@ -1,5 +1,9 @@
 # Erigon v3.9.0 — TBD
 
+### Changed
+
+- rpc: reward records in `trace_block` and `trace_filter` now carry `"transactionHash": null` and `"transactionPosition": null`, so every record localized to a block has both members. Frames inside the `trace_call`, `trace_callMany`, `trace_rawTransaction` and `trace_replay*` envelopes still omit them (#TBD) — by @banteg
+
 # Erigon v3.8.0 — TBD
 
 ### Breaking Changes

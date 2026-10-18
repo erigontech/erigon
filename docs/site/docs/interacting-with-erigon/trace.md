@@ -87,8 +87,8 @@ reported. How they appear depends on the method:
 * **`trace_block`** appends one entry per withdrawal to the flat trace list. Each is a
   `"reward"` entry whose `action.rewardType` is `"withdrawal"`, with `action.author` set
   to the withdrawal address and `action.value` to the amount **in wei** (the beacon chain
-  denominates withdrawals in Gwei). These entries carry no `transactionHash` or
-  `transactionPosition`, since no transaction caused them.
+  denominates withdrawals in Gwei). These entries carry `transactionHash` and
+  `transactionPosition` as `null`, since no transaction caused them.
 
 * **`trace_replayBlockTransactions`** has no block-level slot in its per-transaction
   result shape, so withdrawals surface only through `stateDiff`. You must request
@@ -200,8 +200,8 @@ A `TraceEntry` represents a single call frame (root call, internal call, contrac
 | `type` | String | One of `"call"`, `"create"`, `"suicide"` (self-destruct), `"reward"` (block/uncle reward — appears in `trace_block` and in `trace_filter` results when the filter matches block coinbases or uncle authors). |
 | `blockHash` | DATA, 32 BYTES | (Only in block-level methods: `trace_block`, `trace_filter`, `trace_transaction`, `trace_get`) Hash of the block containing the transaction. |
 | `blockNumber` | QUANTITY | (Block-level methods only) Number of the block containing the transaction. |
-| `transactionHash` | DATA, 32 BYTES | (Block-level methods only) Hash of the transaction containing this call frame. Absent for `"reward"` entries. |
-| `transactionPosition` | QUANTITY | (Block-level methods only) Index of the transaction within the block. Absent for `"reward"` entries. |
+| `transactionHash` | DATA, 32 BYTES | (Block-level methods only) Hash of the transaction containing this call frame. `null` for `"reward"` entries. |
+| `transactionPosition` | QUANTITY | (Block-level methods only) Index of the transaction within the block. `null` for `"reward"` entries. |
 
 ### Action variants
 
