@@ -26,6 +26,8 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 )
 
+const maxRequestLightClientUpdates = 128
+
 func (a *ApiHandler) GetEthV1BeaconLightClientBootstrap(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -99,15 +101,14 @@ func (a *ApiHandler) GetEthV1BeaconLightClientUpdates(w http.ResponseWriter, r *
 	}
 
 	resp := []any{}
-	endPeriod := *startPeriod + *count
-	currentSlot := a.ethClock.GetCurrentSlot()
-	if endPeriod > a.beaconChainCfg.SyncCommitteePeriod(currentSlot) {
-		endPeriod = a.beaconChainCfg.SyncCommitteePeriod(currentSlot)
+	endPeriod := *startPeriod + min(*count, maxRequestLightClientUpdates)
+	currentPeriod := a.beaconChainCfg.SyncCommitteePeriod(a.ethClock.GetCurrentSlot())
+	if endPeriod > currentPeriod+1 {
+		endPeriod = currentPeriod + 1
 	}
 
 	notFoundPrev := false
-	// Fetch from [start_period, start_period + count]
-	for i := *startPeriod; i <= endPeriod; i++ {
+	for i := *startPeriod; i < endPeriod; i++ {
 		respUpdate := map[string]any{}
 		update, has := a.forkchoiceStore.GetLightClientUpdate(i)
 		if !has {
