@@ -108,8 +108,8 @@ func TestWriteTailBlockIsIdempotent(t *testing.T) {
 		require.Equal(t, uint64(200), bfs.BaseTxnID.U64())
 
 		for id, want := range map[uint64][]byte{201: raw1, 202: raw2} {
-			v, err := tx.GetOne(kv.EthTx, hexutil.EncodeTs(id))
-			require.NoError(t, err)
+			v, getErr := tx.GetOne(kv.EthTx, hexutil.EncodeTs(id))
+			require.NoError(t, getErr)
 			require.Equal(t, want, v, "EthTx %d", id)
 		}
 

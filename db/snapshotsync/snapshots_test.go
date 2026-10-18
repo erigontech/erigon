@@ -1688,44 +1688,6 @@ func TestViewSegmentsOfUnmanagedType(t *testing.T) {
 	})
 }
 
-func TestSegmentsMinReportsWhatTheVisibleTypesReach(t *testing.T) {
-	logger := log.New()
-	dir := t.TempDir()
-	createTestSegmentFile(t, 5000, 6000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
-	createTestSegmentFile(t, 5000, 6000, snaptype2.Enums.Bodies, dir, version.V1_0, logger)
-	createTestSegmentFile(t, 6000, 7000, snaptype2.Enums.Transactions, dir, version.V1_0, logger)
-
-	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
-	defer s.Close()
-	require.NoError(t, s.OpenFolder())
-
-	minBlock, ok := s.SegmentsMin()
-	require.False(t, ok, "no block is covered by every type")
-	require.Equal(t, uint64(5000), minBlock, "the segments still reach 5000, whatever the missing type costs")
-}
-
-func TestSegmentsMinNeedsEveryType(t *testing.T) {
-	logger := log.New()
-	dir := t.TempDir()
-	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
-	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Bodies, dir, version.V1_0, logger)
-	createTestSegmentFile(t, 1000, 2000, snaptype2.Enums.Transactions, dir, version.V1_0, logger)
-
-	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
-	defer s.Close()
-	require.NoError(t, s.OpenFolder())
-
-	_, ok := s.SegmentsMin()
-	require.False(t, ok, "alignment hides the transaction segment, so no block is covered by every type")
-
-	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Transactions, dir, version.V1_0, logger)
-	require.NoError(t, s.OpenFolder())
-
-	minBlock, ok := s.SegmentsMin()
-	require.True(t, ok)
-	require.Zero(t, minBlock)
-}
-
 // The epoch ladder is 1024 -> 8192 -> 65536 -> 524288, and CanRetire only ever yields one of those
 // aligned tiers, never a partial one.
 func TestCanRetireEpoch(t *testing.T) {
@@ -1863,9 +1825,9 @@ func TestFindMergeRangeEpochSeam(t *testing.T) {
 
 	full := seam(8)
 	require.Equal(t, Ranges{NewRange(598_016, 606_208)}.String(),
-		Ranges(merger.FindMergeRanges(full, 606_208)).String())
+		Ranges(merger.FindMergeRanges(full)).String())
 
-	require.Empty(t, merger.FindMergeRanges(seam(7), 605_184),
+	require.Empty(t, merger.FindMergeRanges(seam(7)),
 		"an incomplete era1 file must not drag the downloaded neighbour into a merge")
 }
 
@@ -1883,7 +1845,7 @@ func TestFindMergeRangeSkipsUncoveredLowerHalf(t *testing.T) {
 	}
 	r = append(r, NewRange(3_202_048, 3_203_072))
 
-	require.Empty(t, merger.FindMergeRanges(r, 3_203_072),
+	require.Empty(t, merger.FindMergeRanges(r),
 		"the 8192 tier below 3_203_072 reaches under the pruned frontier")
 }
 
@@ -1900,6 +1862,44 @@ func TestFindMergeRangeAllowsAlignedPrunedStart(t *testing.T) {
 	}
 
 	require.Equal(t, Ranges{NewRange(start, 7*524_288)}.String(),
-		Ranges(merger.FindMergeRanges(r, 7*524_288)).String(),
+		Ranges(merger.FindMergeRanges(r)).String(),
 		"nothing is missing below the start, so the tier merges")
+}
+
+func TestSegmentsMinReportsWhatTheVisibleTypesReach(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	createTestSegmentFile(t, 5000, 6000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 5000, 6000, snaptype2.Enums.Bodies, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 6000, 7000, snaptype2.Enums.Transactions, dir, version.V1_0, logger)
+
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+
+	minBlock, ok := s.SegmentsMin()
+	require.False(t, ok, "no block is covered by every type")
+	require.Equal(t, uint64(5000), minBlock, "the segments still reach 5000, whatever the missing type costs")
+}
+
+func TestSegmentsMinNeedsEveryType(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Bodies, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 1000, 2000, snaptype2.Enums.Transactions, dir, version.V1_0, logger)
+
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+
+	_, ok := s.SegmentsMin()
+	require.False(t, ok, "alignment hides the transaction segment, so no block is covered by every type")
+
+	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Transactions, dir, version.V1_0, logger)
+	require.NoError(t, s.OpenFolder())
+
+	minBlock, ok := s.SegmentsMin()
+	require.True(t, ok)
+	require.Zero(t, minBlock)
 }
