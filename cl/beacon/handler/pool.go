@@ -545,7 +545,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 	for idx, v := range msgs {
 		var publishingSubnets []uint64
 		if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
-			publishingSubnets, err = subnets.ComputeSubnetsForSyncCommittee(headState, v.ValidatorIndex)
+			publishingSubnets, err = subnets.ComputeSubnetsForSyncCommittee(headState, v.Slot, v.ValidatorIndex)
 			if err != nil {
 				return err
 			}

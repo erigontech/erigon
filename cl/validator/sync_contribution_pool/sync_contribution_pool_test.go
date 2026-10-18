@@ -79,3 +79,26 @@ func TestSyncContributionPool(t *testing.T) {
 	contribution.SubcommitteeIndex = 1
 	require.NoError(t, pool.AddSyncContribution(s, contribution))
 }
+
+// The next committee signs for the last slot of a period; the head may not have imported that slot yet.
+func TestSyncContributionPoolAggregatesTheLastSlotOfAPeriodBeforeItsBlock(t *testing.T) {
+	_, msgs, s := getTestCommitteesMessages(1)
+	cfg := s.BeaconConfig()
+	nextPeriod := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
+	require.NoError(t, s.SetSlot(nextPeriod-2))
+	// Move the member from the current committee to the next one.
+	current, next := s.CurrentSyncCommittee().Copy(), s.NextSyncCommittee().Copy()
+	currentKeys, nextKeys := current.GetCommittee(), next.GetCommittee()
+	nextKeys[0], currentKeys[0] = currentKeys[0], common.Bytes48{}
+	current.SetCommittee(currentKeys)
+	next.SetCommittee(nextKeys)
+	require.NoError(t, s.SetCurrentSyncCommittee(current))
+	require.NoError(t, s.SetNextSyncCommittee(next))
+
+	msg := msgs[0]
+	msg.Slot = nextPeriod - 1
+	pool := NewSyncContributionPool(cfg)
+	require.NoError(t, pool.AddSyncCommitteeMessage(s, 0, &msg))
+	contribution := pool.GetSyncContribution(msg.Slot, 0, testHash)
+	require.Equal(t, msg.Signature, contribution.Signature)
+}

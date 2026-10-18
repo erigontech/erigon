@@ -18,7 +18,6 @@ package subnets
 
 import (
 	"github.com/erigontech/erigon/cl/abstract"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
@@ -38,15 +37,12 @@ import (
 //
 // ])
 
-// ComputeSubnetsForSyncCommittee is used by the ValidatorClient to determine which subnets a validator should be subscribed to for sync committees.
-// the function takes an extra syncCommitteeIndicies parameter to adapt to the Beacon API specs.
-func ComputeSubnetsForSyncCommittee(s *state.CachingBeaconState, validatorIndex uint64) (subnets []uint64, err error) {
+// ComputeSubnetsForSyncCommittee returns the subnets of a validator in the sync committee that signs for slot.
+func ComputeSubnetsForSyncCommittee(s *state.CachingBeaconState, slot, validatorIndex uint64) (subnets []uint64, err error) {
 	cfg := s.BeaconConfig()
-	var syncCommittee *solid.SyncCommittee
-	if cfg.SyncCommitteePeriod(s.Slot()) == cfg.SyncCommitteePeriod(s.Slot()+1) {
-		syncCommittee = s.CurrentSyncCommittee()
-	} else {
-		syncCommittee = s.NextSyncCommittee()
+	syncCommittee, err := state.SyncCommitteeForMessageSlot(s, slot)
+	if err != nil {
+		return nil, err
 	}
 
 	targetPublicKey, err := s.ValidatorPublicKey(int(validatorIndex))

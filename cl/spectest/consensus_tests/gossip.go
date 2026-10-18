@@ -19,6 +19,7 @@ package consensus_tests
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io/fs"
 	"slices"
@@ -170,7 +171,10 @@ func validateGossipSyncCommitteeMessage(
 	if message.ValidatorIndex >= uint64(beaconState.ValidatorLength()) {
 		return "reject"
 	}
-	validSubnets, err := subnets.ComputeSubnetsForSyncCommittee(beaconState, message.ValidatorIndex)
+	validSubnets, err := subnets.ComputeSubnetsForSyncCommittee(beaconState, message.Slot, message.ValidatorIndex)
+	if errors.Is(err, state.ErrSyncCommitteeNotInState) {
+		return "ignore"
+	}
 	if err != nil || !slices.Contains(validSubnets, subnetID) {
 		return "reject"
 	}

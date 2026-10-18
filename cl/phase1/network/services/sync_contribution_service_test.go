@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	syncpoolmock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
+	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 )
@@ -147,4 +148,30 @@ func TestSyncContributionServiceSuccess(t *testing.T) {
 	require.NoError(t, err)
 	err = s.ProcessMessage(context.TODO(), nil, msg)
 	require.NoError(t, err) // Silent ignore: returns nil when seen before
+}
+
+func TestSyncSubcommitteePubkeysUseTheCommitteeOfTheContributionSlot(t *testing.T) {
+	_, _, head := tests.GetBellatrixRandom()
+	cfg := head.BeaconConfig()
+	nextPeriod := cfg.RoundSlotToSyncCommitteePeriod(head.Slot()) + cfg.SlotsPerEpoch*cfg.EpochsPerSyncCommitteePeriod
+	current, next := head.CurrentSyncCommittee().Copy(), head.NextSyncCommittee().Copy()
+	currentKeys, nextKeys := current.GetCommittee(), next.GetCommittee()
+	currentKeys[0], nextKeys[0] = common.Bytes48{0xaa}, common.Bytes48{0xbb}
+	current.SetCommittee(currentKeys)
+	next.SetCommittee(nextKeys)
+	require.NoError(t, head.SetCurrentSyncCommittee(current))
+	require.NoError(t, head.SetNextSyncCommittee(next))
+	s := &syncContributionService{beaconCfg: cfg}
+
+	// The head has not imported the last block of the period yet; the next committee signs for that slot.
+	require.NoError(t, head.SetSlot(nextPeriod-2))
+	pubkeys, err := s.getSyncSubcommitteePubkeys(head, nextPeriod-1, 0)
+	require.NoError(t, err)
+	require.Equal(t, common.Bytes48{0xbb}, pubkeys[0])
+
+	// The head is at the last slot of the period; the current committee signed for the slot before.
+	require.NoError(t, head.SetSlot(nextPeriod-1))
+	pubkeys, err = s.getSyncSubcommitteePubkeys(head, nextPeriod-2, 0)
+	require.NoError(t, err)
+	require.Equal(t, common.Bytes48{0xaa}, pubkeys[0])
 }

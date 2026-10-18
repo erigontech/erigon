@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"slices"
 	"sync"
 
@@ -30,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -194,7 +194,10 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 		if err != nil {
 			return err
 		}
-		subcommiteePubsKeys, err := s.getSyncSubcommitteePubkeys(headState, contributionAndProof.Contribution.SubcommitteeIndex)
+		subcommiteePubsKeys, err := s.getSyncSubcommitteePubkeys(headState, contributionAndProof.Contribution.Slot, contributionAndProof.Contribution.SubcommitteeIndex)
+		if errors.Is(err, state.ErrSyncCommitteeNotInState) {
+			return fmt.Errorf("%w: %w", ErrIgnore, err)
+		}
 		if err != nil {
 			return err
 		}
@@ -310,13 +313,11 @@ func (s *syncContributionService) GetSignaturesOnContributionSignatures(
 //	i = subcommittee_index * sync_subcommittee_size
 //	return sync_committee.pubkeys[i:i + sync_subcommittee_size]
 
-// getSyncSubcommitteePubkeys returns the public keys of the validators in the given subcommittee.
-func (s *syncContributionService) getSyncSubcommitteePubkeys(st *state.CachingBeaconState, subcommitteeIndex uint64) ([]common.Bytes48, error) {
-	var syncCommittee *solid.SyncCommittee
-	if s.beaconCfg.SyncCommitteePeriod(st.Slot()) == s.beaconCfg.SyncCommitteePeriod(st.Slot()+1) {
-		syncCommittee = st.CurrentSyncCommittee()
-	} else {
-		syncCommittee = st.NextSyncCommittee()
+// getSyncSubcommitteePubkeys returns the public keys of the given subcommittee of the committee that signs for slot.
+func (s *syncContributionService) getSyncSubcommitteePubkeys(st *state.CachingBeaconState, slot, subcommitteeIndex uint64) ([]common.Bytes48, error) {
+	syncCommittee, err := state.SyncCommitteeForMessageSlot(st, slot)
+	if err != nil {
+		return nil, err
 	}
 	syncSubcommitteeSize := s.beaconCfg.SyncCommitteeSize / s.beaconCfg.SyncCommitteeSubnetCount
 	i := subcommitteeIndex * syncSubcommitteeSize
