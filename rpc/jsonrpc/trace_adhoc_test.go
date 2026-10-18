@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -59,6 +60,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/runtime"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
@@ -611,6 +613,64 @@ func TestTraceBlockUnknownBlockIsResourceNotFound(t *testing.T) {
 		_, err := api.ReplayBlockTransactions(m.Ctx, rpc.BlockNumberOrHashWithHash(common.Hash{0xff}, false), []string{TraceTypeTrace}, nil, nil)
 		requireResourceNotFound(t, err, "block not found")
 	})
+}
+
+func TestTraceCallUnknownBlockIsResourceNotFound(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	calls := json.RawMessage(`[[{}, ["trace"]]]`)
+
+	for name, block := range map[string]rpc.BlockNumberOrHash{
+		"number": rpc.BlockNumberOrHashWithNumber(1_000_000),
+		"hash":   rpc.BlockNumberOrHashWithHash(common.Hash{0xff}, false),
+	} {
+		t.Run("trace_call by "+name, func(t *testing.T) {
+			_, err := api.Call(m.Ctx, TraceCallParam{}, []string{TraceTypeTrace}, &block, nil)
+			requireResourceNotFound(t, err, "block not found")
+		})
+		t.Run("trace_callMany by "+name, func(t *testing.T) {
+			_, err := api.CallMany(m.Ctx, calls, &block, nil)
+			requireResourceNotFound(t, err, "block not found")
+		})
+	}
+}
+
+func TestTraceUnavailableTagIsResourceNotFound(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	rawdb.WriteForkchoiceFinalized(tx, common.Hash{})
+	rawdb.WriteForkchoiceSafe(tx, common.Hash{})
+	require.NoError(t, tx.Commit())
+	api := newTraceApiForTest(m)
+	calls := json.RawMessage(`[[{}, ["trace"]]]`)
+
+	for _, tag := range []rpc.BlockNumber{rpc.FinalizedBlockNumber, rpc.SafeBlockNumber} {
+		block := rpc.BlockNumberOrHashWithNumber(tag)
+		t.Run(tag.String()+" trace_block", func(t *testing.T) {
+			_, err := api.Block(m.Ctx, tag, nil, nil)
+			requireResourceNotFound(t, err, "not available")
+		})
+		t.Run(tag.String()+" trace_replayBlockTransactions", func(t *testing.T) {
+			_, err := api.ReplayBlockTransactions(m.Ctx, block, []string{TraceTypeTrace}, nil, nil)
+			requireResourceNotFound(t, err, "not available")
+		})
+		t.Run(tag.String()+" trace_call", func(t *testing.T) {
+			_, err := api.Call(m.Ctx, TraceCallParam{}, []string{TraceTypeTrace}, &block, nil)
+			requireResourceNotFound(t, err, "not available")
+		})
+		t.Run(tag.String()+" trace_callMany", func(t *testing.T) {
+			_, err := api.CallMany(m.Ctx, calls, &block, nil)
+			requireResourceNotFound(t, err, "not available")
+		})
+		for name, req := range map[string]TraceFilterRequest{"fromBlock": {FromBlock: &tag}, "toBlock": {ToBlock: &tag}} {
+			t.Run(tag.String()+" trace_filter "+name, func(t *testing.T) {
+				err := api.Filter(m.Ctx, req, nil, nil, jsonstream.New(nil))
+				requireResourceNotFound(t, err, "not available")
+			})
+		}
+	}
 }
 
 func TestParityTraceGasUsageAcrossRPCPaths(t *testing.T) {

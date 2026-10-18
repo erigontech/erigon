@@ -3,6 +3,7 @@
 ### Breaking Changes
 
 - rpc: `vmTrace` operations no longer carry the Erigon-only `idx` member, a `<transaction>-<operation>-...` path string; before Amsterdam and outside `--trace.compat` each operation now has exactly `pc`, `cost`, `op`, `ex` and `sub`. The operation part of the path follows from each operation's position in `ops` and its nesting under `sub`; the transaction part is the envelope's position in a block replay. This can be a breaking change (#TBD) — by @banteg
+- rpc: `trace_call` and `trace_callMany` now return `-32001` "block not found" instead of `-32000` for a block number past the head or a block hash that names no known block, as `trace_block` and `trace_replayBlockTransactions` do. A `safe` or `finalized` tag the node cannot resolve yet now returns `-32001` instead of `-39001` in `trace_block`, `trace_replayBlockTransactions`, `trace_call`, `trace_callMany` and the `trace_filter` bounds. This can be a breaking change for clients that match on the error code (#TBD) — by @banteg
 
 ### Changed
 
