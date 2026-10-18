@@ -419,7 +419,7 @@ func (g *GossipManager) subscribePersistentAttestationSubnets() {
 		return
 	}
 	rotationEpoch := subnets.SubscribedSubnetsRotationEpoch(*nodeID, epoch)
-	expiry := g.ethClock.GetSlotTime(rotationEpoch * g.beaconConfig.SlotsPerEpoch)
+	expiry := g.ethClock.GetSlotTime(rotationEpoch*g.beaconConfig.SlotsPerEpoch + 1)
 	for _, topic := range g.subscriptions.AllTopics() {
 		name := extractTopicName(topic)
 		if !gossip.IsTopicBeaconAttestation(name) {

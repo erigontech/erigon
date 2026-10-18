@@ -144,7 +144,7 @@ func TestPersistentAttestationSubnetsStartupOrder(t *testing.T) {
 				manager.SetLocalNodeID(persistentSubnetNodeID)
 			}
 
-			expiry := baseTime.Add(time.Duration(244*beaconConfig.SlotsPerEpoch) * 12 * time.Second)
+			expiry := baseTime.Add(time.Duration(244*beaconConfig.SlotsPerEpoch+1) * 12 * time.Second)
 			requireLiveAttestationSubnets(t, manager, digest, networkConfig, map[uint64]time.Time{25: expiry, 26: expiry})
 		})
 	}
@@ -158,8 +158,8 @@ func TestPersistentAttestationSubnetsRotate(t *testing.T) {
 	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
 	_, _, err := manager.registerGossipService(persistentAttestationService(networkConfig))
 	require.NoError(t, err)
-	firstExpiry := baseTime.Add(time.Duration(244*beaconConfig.SlotsPerEpoch) * 12 * time.Second)
-	secondExpiry := baseTime.Add(time.Duration(500*beaconConfig.SlotsPerEpoch) * 12 * time.Second)
+	firstExpiry := baseTime.Add(time.Duration(244*beaconConfig.SlotsPerEpoch+1) * 12 * time.Second)
+	secondExpiry := baseTime.Add(time.Duration(500*beaconConfig.SlotsPerEpoch+1) * 12 * time.Second)
 	gomock.InOrder(
 		p2pManager.EXPECT().SetENRAttSubnets([]uint64{25, 26}),
 		p2pManager.EXPECT().SetENRAttSubnets([]uint64{33, 34}),
@@ -187,7 +187,7 @@ func TestPersistentAttestationSubnetDutyDoesNotShortenExpiry(t *testing.T) {
 	require.NoError(t, err)
 	p2pManager.EXPECT().SetENRAttSubnets([]uint64{25, 26})
 	manager.SetLocalNodeID(persistentSubnetNodeID)
-	persistentExpiry := baseTime.Add(time.Duration(244*beaconConfig.SlotsPerEpoch) * 12 * time.Second)
+	persistentExpiry := baseTime.Add(time.Duration(244*beaconConfig.SlotsPerEpoch+1) * 12 * time.Second)
 
 	require.NoError(t, manager.SubscribeWithExpiry(gossipnames.TopicNameBeaconAttestation(25), time.Now().Add(time.Hour)))
 	subscription := manager.subscriptions.Get(composeTopic(digest, gossipnames.TopicNameBeaconAttestation(25)))
@@ -208,8 +208,8 @@ func TestPersistentAttestationSubnetsSurviveForkRollover(t *testing.T) {
 		p2pManager.EXPECT().SetENRAttSubnets([]uint64{33, 34}),
 	)
 	manager.SetLocalNodeID(persistentSubnetNodeID)
-	firstExpiry := baseTime.Add(time.Duration(244*beaconConfig.SlotsPerEpoch) * 12 * time.Second)
-	secondExpiry := baseTime.Add(time.Duration(500*beaconConfig.SlotsPerEpoch) * 12 * time.Second)
+	firstExpiry := baseTime.Add(time.Duration(244*beaconConfig.SlotsPerEpoch+1) * 12 * time.Second)
+	secondExpiry := baseTime.Add(time.Duration(500*beaconConfig.SlotsPerEpoch+1) * 12 * time.Second)
 	newDigest := common.Bytes4{0xaa, 0xbb, 0xcc, 0xdd}
 	require.NoError(t, manager.subscribeUpcomingTopics(newDigest))
 	epoch.Store(244)
