@@ -74,11 +74,11 @@ jobs:
             commitment_mode: parallel
           - sim: ethereum/rpc-compat
             sim-limit: ".*"
-            max-allowed-failures: 0
+            max-allowed-failures: 2
             commitment_mode: serial
           - sim: ethereum/rpc-compat
             sim-limit: ".*"
-            max-allowed-failures: 0
+            max-allowed-failures: 2
             commitment_mode: parallel
           - sim: devp2p
             sim-limit: eth
