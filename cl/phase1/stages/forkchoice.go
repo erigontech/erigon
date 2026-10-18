@@ -42,14 +42,8 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 	// checkpoint promotions (unrealized → realized) happen on time.
 	cfg.forkChoice.OnTick(cfg.ethClock.GenesisTime() + cfg.ethClock.GetCurrentSlot()*cfg.beaconCfg.SecondsPerSlot)
 
-	if err = cfg.syncedData.ViewHeadState(func(prevHeadState *state.CachingBeaconState) error {
-		// Get the current head of the fork choice
-		headRoot, headSlot, err = cfg.forkChoice.GetHead(prevHeadState)
-		if err != nil {
-			return fmt.Errorf("failed to get head: %w", err)
-		}
-		return nil
-	}); err != nil {
+	headRoot, headSlot, err = cfg.forkChoice.GetHeadWithSyncedHeadState()
+	if err != nil {
 		if errors.Is(err, synced_data.ErrNotSynced) {
 			// Get the current head of the fork choice
 			headRoot, headSlot, err = cfg.forkChoice.GetHead(nil)
@@ -472,20 +466,22 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 		logger.Debug("Post forkchoice operations", "duration", time.Since(start))
 	}()
 
-	return cfg.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+	if err := cfg.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// Dump the head state on disk for ease of chain reorgs
 		if err := cfg.forkChoice.DumpBeaconStateOnDisk(headState); err != nil {
 			return fmt.Errorf("failed to dump beacon state on disk: %w", err)
 		}
 
-		if err := saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, headState.Slot()); err != nil {
-			return fmt.Errorf("failed to save finalized state on disk: %w", err)
-		}
-
 		// Shuffle validator set for the next epoch
 		preCacheNextShuffledValidatorSet(ctx, logger, cfg, headState)
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	if err := saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, headSlot); err != nil {
+		return fmt.Errorf("failed to save finalized state on disk: %w", err)
+	}
+	return nil
 }
 
 // doForkchoiceRoutine performs the fork choice routine by computing the new fork choice, updating the canonical chain in the database,
