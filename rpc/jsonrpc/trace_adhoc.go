@@ -145,7 +145,6 @@ type VmTraceOp struct {
 	Pc           int        `json:"pc"`
 	Sub          *VmTrace   `json:"sub"`
 	Op           string     `json:"op,omitempty"`
-	Idx          string     `json:"idx,omitempty"`
 }
 
 type VmTraceEx struct {
@@ -289,7 +288,6 @@ type OeTracer struct {
 	memLenStack  []uint64
 	lastOffStack *VmTraceOp
 	vmOpStack    []*VmTraceOp // Stack of vmTrace operations as call depth increases
-	idx          []string     // Prefix for the "idx" inside operations, for easier navigation
 	config       OeTracerConfig
 }
 
@@ -429,15 +427,6 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 	if ot.r.VmTrace != nil {
 		var vmTrace *VmTrace
 		if deep {
-			var vmT *VmTrace
-			if len(ot.vmOpStack) > 0 {
-				vmT = ot.vmOpStack[len(ot.vmOpStack)-1].Sub
-			} else {
-				vmT = ot.r.VmTrace
-			}
-			if !ot.compat {
-				ot.idx = append(ot.idx, fmt.Sprintf("%d-", len(vmT.Ops)-1))
-			}
 			ot.memOffStack = append(ot.memOffStack, ot.callMemOff)
 			ot.memLenStack = append(ot.memLenStack, ot.callMemLen)
 		}
@@ -560,9 +549,6 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed mdgas.MdG
 			if errors.Is(err, vm.ErrDepth) || errors.Is(err, vm.ErrInsufficientBalance) || errors.Is(err, vm.ErrNonceUintOverflow) {
 				ot.lastOffStack.Sub = nil
 			}
-		}
-		if !ot.compat && deep {
-			ot.idx = ot.idx[:len(ot.idx)-1]
 		}
 		if deep {
 			ot.lastMemOff = ot.memOffStack[len(ot.memOffStack)-1]
@@ -757,14 +743,6 @@ func (ot *OeTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.M
 		}
 		ot.lastVmOp = &VmTraceOp{Ex: &VmTraceEx{}}
 		vmTrace.Ops = append(vmTrace.Ops, ot.lastVmOp)
-		if !ot.compat {
-			var sb strings.Builder
-			sb.Grow(len(ot.idx))
-			for _, idx := range ot.idx {
-				sb.WriteString(idx)
-			}
-			ot.lastVmOp.Idx = fmt.Sprintf("%s%d", sb.String(), len(vmTrace.Ops)-1)
-		}
 		ot.lastOp = vm.OpCode(op)
 		ot.lastVmOp.Cost = int(cost.Execution)
 		ot.lastVmOp.StateGasCost = cost.State
@@ -1647,7 +1625,6 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			}
 			ot.compat = api.compatibility
 			ot.r = traceResult
-			ot.idx = []string{fmt.Sprintf("%d-", txIndex)}
 			if traceTypeTrace {
 				ot.traceAddr = []int{}
 			}
@@ -1812,7 +1789,6 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		}
 		ot.compat = api.compatibility
 		ot.r = traceResult
-		ot.idx = []string{fmt.Sprintf("%d-", txIndex)}
 		if traceTypeTrace {
 			ot.traceAddr = []int{}
 		}

@@ -1,5 +1,9 @@
 # Erigon v3.9.0 — TBD
 
+### Breaking Changes
+
+- rpc: `vmTrace` operations no longer carry the Erigon-only `idx` member, a `<transaction>-<operation>-...` path string; before Amsterdam and outside `--trace.compat` each operation now has exactly `pc`, `cost`, `op`, `ex` and `sub`. The operation part of the path follows from each operation's position in `ops` and its nesting under `sub`; the transaction part is the envelope's position in a block replay. This can be a breaking change (#TBD) — by @banteg
+
 ### Changed
 
 - rpc: reward records in `trace_block` and `trace_filter` now carry `"transactionHash": null` and `"transactionPosition": null`, so every record localized to a block has both members. Frames inside the `trace_call`, `trace_callMany`, `trace_rawTransaction` and `trace_replay*` envelopes still omit them (#TBD) — by @banteg

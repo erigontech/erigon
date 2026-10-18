@@ -1310,6 +1310,46 @@ func TestTraceCallVmTraceSubs(t *testing.T) {
 	}
 }
 
+func TestTraceCallVmTraceOperationMembers(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+	api := newTraceApiForTest(m)
+	target := common.HexToAddress("0x00000000000000000000000000000000cafe0007")
+	child := common.HexToAddress("0x00000000000000000000000000000000cafe0008")
+	code := append(append(hexutil.Bytes{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH20)}, child[:]...),
+		byte(vm.GAS), byte(vm.CALL), byte(vm.STOP))
+	childCode := hexutil.Bytes{byte(vm.PUSH1), 1, byte(vm.POP)}
+	overrides := ethapi.StateOverrides{
+		accounts.InternAddress(target): {Code: &code},
+		accounts.InternAddress(child):  {Code: &childCode},
+	}
+	result, err := api.Call(context.Background(), TraceCallParam{From: &bankAddr, To: &target},
+		[]string{TraceTypeVmTrace}, nil, &config.TraceConfig{StateOverrides: &overrides})
+	require.NoError(t, err)
+	encoded, err := json.Marshal(result.VmTrace)
+	require.NoError(t, err)
+
+	var countOps func(vmTrace json.RawMessage) int
+	countOps = func(vmTrace json.RawMessage) int {
+		var decoded struct {
+			Ops []map[string]json.RawMessage `json:"ops"`
+		}
+		require.NoError(t, json.Unmarshal(vmTrace, &decoded))
+		n := len(decoded.Ops)
+		for _, op := range decoded.Ops {
+			members := make([]string, 0, len(op))
+			for member := range op {
+				members = append(members, member)
+			}
+			require.ElementsMatch(t, []string{"cost", "ex", "op", "pc", "sub"}, members)
+			if string(op["sub"]) != "null" {
+				n += countOps(op["sub"])
+			}
+		}
+		return n
+	}
+	require.Equal(t, 11, countOps(encoded))
+}
+
 // revertInit is init code that reverts with 0xdeadbeef after 17 gas.
 var revertInit = []byte{byte(vm.PUSH4), 0xde, 0xad, 0xbe, 0xef, byte(vm.PUSH0), byte(vm.MSTORE), byte(vm.PUSH1), 4, byte(vm.PUSH1), 28, byte(vm.REVERT)}
 

@@ -517,7 +517,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		ot.config = oeConfig
 		ot.compat = api.compatibility
 		ot.r = traceResult
-		ot.idx = []string{fmt.Sprintf("%d-", txIndex)}
 		ot.traceAddr = []int{}
 		vmConfig.Tracer = ot.Tracer().Hooks
 
@@ -975,7 +974,6 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 				ot.config = oeConfig
 				ot.compat = api.compatibility
 				ot.r = traceResult
-				ot.idx = []string{fmt.Sprintf("%d-", job.txIndex)}
 				// TraceTypeTrace is always active here; initialise traceAddr unconditionally.
 				ot.traceAddr = []int{}
 
