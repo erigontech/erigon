@@ -345,7 +345,8 @@ func TestFinalizeOptionalRequestSources(t *testing.T) {
 	_, err := finalize(New(eth1Engine), state.New(state.NewNoopReader()), noCall)
 	require.ErrorContains(t, err, "Empty Code")
 
-	optional := New(eth1Engine, WithOptionalRequestSources())
+	optional := New(eth1Engine)
+	optional.OptionalRequestSources = true
 	requests, err := finalize(optional, state.New(state.NewNoopReader()), noCall)
 	require.NoError(t, err)
 	require.Empty(t, requests)

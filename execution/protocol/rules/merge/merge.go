@@ -68,33 +68,22 @@ var (
 type Merge struct {
 	eth1Engine rules.Engine // Original rules engine used in eth1, e.g. ethash
 
-	optionalRequestSources bool
+	// OptionalRequestSources is for chains without a beacon chain: an unset
+	// deposit contract and request contracts without code yield no requests,
+	// as an empty system call does in reth, instead of invalidating the block.
+	OptionalRequestSources bool
 
 	// Reusable buffer for collecting logs in Finalize - protected by logsBufMu
 	logsBufMu sync.Mutex
 	logsBuf   types.Logs
 }
 
-// Option configures a Merge engine.
-type Option func(*Merge)
-
-// WithOptionalRequestSources is for chains without a beacon chain: an unset
-// deposit contract and request contracts without code yield no requests, as
-// an empty system call does in reth, instead of invalidating the block.
-func WithOptionalRequestSources() Option {
-	return func(s *Merge) { s.optionalRequestSources = true }
-}
-
 // New creates a new instance of the Merge Engine with the given embedded eth1 engine.
-func New(eth1Engine rules.Engine, opts ...Option) *Merge {
+func New(eth1Engine rules.Engine) *Merge {
 	if _, ok := eth1Engine.(*Merge); ok {
 		panic("nested rules engine")
 	}
-	s := &Merge{eth1Engine: eth1Engine}
-	for _, opt := range opts {
-		opt(s)
-	}
-	return s
+	return &Merge{eth1Engine: eth1Engine}
 }
 
 // InnerEngine returns the embedded eth1 rules engine.
@@ -240,7 +229,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 			allLogs = append(allLogs, rec.Logs...)
 		}
 		var depositReqs *types.FlatRequest
-		if !s.optionalRequestSources || config.DepositContract != (common.Address{}) {
+		if !s.OptionalRequestSources || config.DepositContract != (common.Address{}) {
 			depositReqs, err = misc.ParseDepositLogs(allLogs, config.DepositContract)
 		}
 		if reuseBuffer {
@@ -301,7 +290,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 type requestDequeuer func(rules.SystemCall, *state.IntraBlockState, accounts.Address) (*types.FlatRequest, error)
 
 func (s *Merge) dequeueRequests(dequeue requestDequeuer, syscall rules.SystemCall, ibs *state.IntraBlockState, contract accounts.Address) (*types.FlatRequest, error) {
-	if s.optionalRequestSources {
+	if s.OptionalRequestSources {
 		codeSize, err := ibs.GetCodeSize(contract)
 		if err != nil {
 			return nil, err

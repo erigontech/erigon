@@ -83,7 +83,9 @@ func New(chainConfig *chain.Config) (*Engine, error) {
 	if err := l2.Validate(); err != nil {
 		return nil, err
 	}
-	return &Engine{Merge: merge.New(ethash.NewFaker(), merge.WithOptionalRequestSources()), l2: l2}, nil
+	m := merge.New(ethash.NewFaker())
+	m.OptionalRequestSources = true
+	return &Engine{Merge: m, l2: l2}, nil
 }
 
 // VerifyHeader checks header against its parent. Beyond the post-merge
