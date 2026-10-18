@@ -149,8 +149,14 @@ func Execute(chainConfig *chain.Config, engine rules.Engine, block *types.Block,
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		return sysCall(contract, data, ibs, header, false)
 	}
-	if _, err := engine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), res.Receipts, block.Withdrawals(),
-		nil, syscall, false, logger); err != nil {
+	_, err = engine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), res.Receipts, block.Withdrawals(),
+		nil, syscall, false, logger)
+	// Latched by any read the witness misses, including ones a system call
+	// swallows, such as Merge.Initialize's history storage call.
+	if readErr := ibs.StateReadError(); readErr != nil {
+		return nil, fmt.Errorf("block %d: %w", block.NumberU64(), readErr)
+	}
+	if err != nil {
 		return nil, fmt.Errorf("block %d: finalize: %w", block.NumberU64(), err)
 	}
 	if err := ibs.CommitBlock(chainRules, ws); err != nil {

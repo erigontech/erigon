@@ -17,6 +17,7 @@ package stateless
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -29,6 +30,7 @@ import (
 	eezrules "github.com/erigontech/erigon/eez/rules"
 	"github.com/erigontech/erigon/eez/systemtx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -138,4 +140,26 @@ func TestBlock13(t *testing.T) {
 	noHeaders.Headers = nil
 	_, err = Verify(w.config, w.engine, block, noHeaders)
 	require.ErrorIs(t, err, ErrWitnessHeaders)
+}
+
+// TestWitnessReadError covers a read failure the surrounding call swallows:
+// Merge.Initialize only logs a failed history storage call.
+func TestWitnessReadError(t *testing.T) {
+	w := loadWindow(t, "captured-devnet-window-84")
+	block, witness := w.blocks[0], w.witness(0)
+	parent := new(types.Header)
+	require.NoError(t, rlp.DecodeBytes(witness.Headers[len(witness.Headers)-1], parent))
+	ws, err := newWitnessState(witness.State, nil, parent.Root)
+	require.NoError(t, err)
+	history, err := ws.ReadAccountData(params.HistoryStorageAddress)
+	require.NoError(t, err)
+	require.NotNil(t, history)
+
+	n := len(witness.Codes)
+	witness.Codes = slices.DeleteFunc(witness.Codes, func(code []byte) bool {
+		return crypto.Keccak256Hash(code) == history.CodeHash.Value()
+	})
+	require.Len(t, witness.Codes, n-1)
+	_, err = Execute(w.config, w.engine, block, witness)
+	require.ErrorIs(t, err, ErrIncompleteWitness)
 }
