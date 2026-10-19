@@ -2089,11 +2089,18 @@ type schedulerTest struct {
 }
 
 func newSchedulerTest(t *testing.T, deps map[int][]int, senders ...accounts.Address) *schedulerTest {
+	return newSchedulerTestWithTxs(t, deps, nil, senders...)
+}
+
+func newSchedulerTestWithTxs(t *testing.T, deps map[int][]int, txs types.Transactions, senders ...accounts.Address) *schedulerTest {
+	t.Helper()
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
-	signedTx := signSelfSendTx(t, 0, 0, 1, 21000, chainSpec.Config, 0)
-	txs := make([]types.Transaction, len(senders))
-	for i := range txs {
-		txs[i] = signedTx
+	if txs == nil {
+		signedTx := signSelfSendTx(t, 0, 0, 1, 21000, chainSpec.Config, 0)
+		txs = make(types.Transactions, len(senders))
+		for i := range txs {
+			txs[i] = signedTx
+		}
 	}
 	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
 	pe, roTx := newResumeTestExec(t, newResumeTestDB(t), chainSpec.Config)
@@ -2290,4 +2297,34 @@ func TestFrontierRetryDispatchedBeforeBatchTail(t *testing.T) {
 	require.ErrorContains(t, res.Err, "too many validator-invalid retries")
 	require.True(t, be.execTasks.checkPending(2), "frontier dispatch ran past the frontier")
 	require.Equal(t, 1, be.cntExec, "frontier tx 0 must be dispatched before the tail's retry limit ends the batch")
+}
+
+func TestValueTransferRecipientWaitsForValidation(t *testing.T) {
+	senders := []accounts.Address{
+		accounts.InternAddress(common.HexToAddress("0xa0")),
+		accounts.InternAddress(common.HexToAddress("0xb1")),
+		accounts.InternAddress(common.HexToAddress("0xc2")),
+	}
+	recipient := common.HexToAddress("0xd3")
+	other := common.HexToAddress("0xe4")
+	txs := make(types.Transactions, len(senders))
+	for i, sender := range senders {
+		to := &recipient
+		if i == 0 {
+			to = &other
+		}
+		tx := &types.LegacyTx{CommonTx: types.CommonTx{To: to, Value: *uint256.NewInt(1), GasLimit: 21000}}
+		tx.SetSender(sender)
+		txs[i] = tx
+	}
+	s := newSchedulerTestWithTxs(t, nil, txs, senders...)
+	first, blocker := s.dispatched(), s.dispatched()
+	require.Equal(t, []int{0, 1}, []int{first.index, blocker.index})
+	require.True(t, s.parked(2), "shared-recipient successor dispatched alongside its predecessor")
+
+	s.deliver(blocker, state.ReadSet{}, nil)
+	require.True(t, s.parked(2), "successor released before its predecessor validated")
+
+	s.deliver(first, state.ReadSet{}, nil)
+	require.Equal(t, 2, s.queued(), "successor not dispatched after its predecessor validated")
 }
