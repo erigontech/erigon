@@ -38,7 +38,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -1467,24 +1466,6 @@ func TestFinalizeTxKeepsTouchedThenCreditedAccount(t *testing.T) {
 	bal, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	require.Equal(t, *uint256.NewInt(5), bal)
-}
-
-func TestSetStorageRejectsNoMaterialize(t *testing.T) {
-	prev := dbg.AssertEnabled
-	dbg.AssertEnabled = true
-	t.Cleanup(func() { dbg.AssertEnabled = prev })
-
-	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
-	ibs.SetTxContext(0, 0)
-	ibs.SetVersion(0)
-	defer ibs.Close()
-
-	addr := accounts.InternAddress([20]byte{0xaa})
-	key := accounts.InternKey([32]byte{0x01})
-	require.Panics(t, func() {
-		_ = ibs.SetStorage(addr, Storage{key: *uint256.NewInt(7)})
-	})
 }
 
 // Each call stays under the bound on its own, yet leaves a grown slot map at

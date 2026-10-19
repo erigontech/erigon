@@ -1467,6 +1467,7 @@ func TestPoolAttestationsDoNotPublishIgnored(t *testing.T) {
 				handler.ServeHTTP(recorder, req)
 				require.Equal(t, outcome.status, recorder.Code, recorder.Body.String())
 				if outcome.status == http.StatusBadRequest {
+					require.Equal(t, "application/json", recorder.Header().Get("Content-Type"))
 					var response poolingError
 					require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
 					require.Equal(t, []poolingFailure{{Index: 0, Message: outcome.err.Error()}}, response.Failures)
@@ -1474,4 +1475,173 @@ func TestPoolAttestationsDoNotPublishIgnored(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestWritePoolingFailuresDeclaresJSON(t *testing.T) {
+	rec := httptest.NewRecorder()
+	(&ApiHandler{}).writePoolingFailures(rec, []poolingFailure{{Index: 0, Message: "invalid"}})
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+}
+
+func TestPoolAggregatesAndProofsAcceptsSSZ(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service := services_mock.NewMockAggregateAndProofService(ctrl)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	digest, err := clock.ComputeForkDigest(3)
+	require.NoError(t, err)
+
+	committeeBits := solid.NewBitVector(int(cfg.MaxCommitteesPerSlot))
+	require.NoError(t, committeeBits.SetBitAt(0, true))
+	aggregate := &cltypes.SignedAggregateAndProof{
+		Message: &cltypes.AggregateAndProof{
+			AggregatorIndex: 7,
+			Aggregate: &solid.Attestation{
+				AggregationBits: solid.BitlistFromBytes([]byte{0b101}, int(cfg.MaxValidatorsPerCommittee*cfg.MaxCommitteesPerSlot)),
+				Data:            &solid.AttestationData{Slot: 3*cfg.SlotsPerEpoch + 1, Target: solid.Checkpoint{Epoch: 3}},
+				CommitteeBits:   committeeBits,
+				Signature:       common.Bytes96{1},
+			},
+			SelectionProof: common.Bytes96{2},
+		},
+		Signature: common.Bytes96{3},
+	}
+	aggregate.SetVersion(clparams.FuluVersion)
+	encodedAggregate, err := aggregate.EncodeSSZ(nil)
+	require.NoError(t, err)
+	list := solid.NewDynamicListSSZ[*cltypes.SignedAggregateAndProof](int(cfg.MaxCommitteesPerSlot * cfg.TargetAggregatorsPerCommittee))
+	list.Append(aggregate)
+	requestBody, err := list.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	service.EXPECT().ProcessMessage(gomock.Any(), nil, gomock.Any()).DoAndReturn(
+		func(ctx context.Context, subnetID *uint64, msg *services.SignedAggregateAndProofForGossip) error {
+			require.Equal(t, uint64(7), msg.SignedAggregateAndProof.Message.AggregatorIndex)
+			require.Equal(t, common.Bytes96{3}, msg.SignedAggregateAndProof.Signature)
+			return nil
+		},
+	).Times(1)
+	gossipManager.EXPECT().PublishToForkDigest(gomock.Any(), digest, clgossip.TopicNameBeaconAggregateAndProof, encodedAggregate).Return(nil).Times(1)
+	handler := &ApiHandler{
+		logger:                    log.Root(),
+		ethClock:                  clock,
+		beaconChainCfg:            &cfg,
+		aggregateAndProofsService: service,
+		gossipManager:             gossipManager,
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/validator/aggregate_and_proofs", bytes.NewReader(requestBody))
+	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("Eth-Consensus-Version", clparams.FuluVersion.String())
+
+	handler.PostEthV1ValidatorAggregatesAndProof(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
+// The service ignores a contribution before verifying it, for example one outside the current slot
+// or one whose committee the head state does not hold, so the handler must report it instead of
+// publishing it.
+func TestPoolContributionsAndProofsReportsIgnoredContributions(t *testing.T) {
+	for _, ignored := range []error{
+		services.ErrIgnore,
+		fmt.Errorf("%w: %w", services.ErrIgnore, state.ErrSyncCommitteeNotInState),
+	} {
+		t.Run(ignored.Error(), func(t *testing.T) { testPoolContributionIsReported(t, ignored) })
+	}
+}
+
+func testPoolContributionIsReported(t *testing.T, ignored error) {
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	require.NoError(t, sd.OnHeadState(s))
+	ctrl := gomock.NewController(t)
+	service := services_mock.NewMockSyncContributionService(ctrl)
+	service.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).Return(ignored)
+	handler.syncContributionAndProofsService = service
+	mockGossip := gossip_mock.NewMockGossip(ctrl)
+	mockGossip.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	handler.gossipManager = mockGossip
+
+	aggregationBits := make([]byte, cltypes.DefaultSyncCommitteeAggregationBitsSize)
+	aggregationBits[0] = 1
+	body, err := json.Marshal([]*cltypes.SignedContributionAndProof{{
+		Message: &cltypes.ContributionAndProof{
+			Contribution: &cltypes.Contribution{Slot: 1, AggregationBits: aggregationBits},
+		},
+	}})
+	require.NoError(t, err)
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	postReq, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/validator/contribution_and_proofs", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	postReq.Header.Set("Content-Type", "application/json")
+	resp, err := server.Client().Do(postReq)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+// The next committee signs for the last slot of a period, so a message for that slot goes to the
+// validator's subnet in the next committee even while the head is one slot behind.
+func TestPoolSyncCommitteesPublishesTheLastSlotOfAPeriodOnTheNextCommitteeSubnet(t *testing.T) {
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	cfg := s.BeaconConfig()
+	nextPeriod := cfg.RoundSlotToSyncCommitteePeriod(s.Slot()) + cfg.SlotsPerEpoch*cfg.EpochsPerSyncCommitteePeriod
+	require.NoError(t, s.SetSlot(nextPeriod-2))
+	const validatorIndex = 3
+	publicKey, err := s.ValidatorPublicKey(validatorIndex)
+	require.NoError(t, err)
+	without := func(committee *solid.SyncCommittee) []common.Bytes48 {
+		keys := committee.GetCommittee()
+		for i := range keys {
+			if keys[i] == publicKey {
+				keys[i] = common.Bytes48{}
+			}
+		}
+		return keys
+	}
+	current, next := s.CurrentSyncCommittee().Copy(), s.NextSyncCommittee().Copy()
+	current.SetCommittee(without(current))
+	nextKeys := without(next)
+	nextKeys[cfg.SyncCommitteeSize/cfg.SyncCommitteeSubnetCount] = publicKey // first member of subnet 1
+	next.SetCommittee(nextKeys)
+	require.NoError(t, s.SetCurrentSyncCommittee(current))
+	require.NoError(t, s.SetNextSyncCommittee(next))
+	require.NoError(t, sd.OnHeadState(s))
+
+	ctrl := gomock.NewController(t)
+	service := services_mock.NewMockSyncCommitteeMessagesService(ctrl)
+	service.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	service.EXPECT().MarkPublished(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
+	handler.syncCommitteeMessagesService = service
+	mockGossip := gossip_mock.NewMockGossip(ctrl)
+	var topics []string
+	mockGossip.EXPECT().PublishBackground(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(name string, _ []byte, _ time.Time, _ ...any) error {
+			topics = append(topics, name)
+			return nil
+		},
+	).AnyTimes()
+	handler.gossipManager = mockGossip
+
+	body, err := json.Marshal([]*cltypes.SyncCommitteeMessage{{Slot: nextPeriod - 1, ValidatorIndex: validatorIndex}})
+	require.NoError(t, err)
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	postReq, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/beacon/pool/sync_committees", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	postReq.Header.Set("Content-Type", "application/json")
+	resp, err := server.Client().Do(postReq)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, []string{clgossip.TopicNameSyncCommittee(1)}, topics)
 }

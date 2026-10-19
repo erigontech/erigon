@@ -218,7 +218,7 @@ func NewSysCallEVM(chainConfig *chain.Config, vmCfg vm.Config) *vm.EVM {
 // so the caller must not need any of those to survive. A nil EVM, or one built
 // for a different chainConfig, falls back to allocating one.
 func SysCallContractWithEVM(evm *vm.EVM, contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, params.SystemAddress, chainConfig)
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, chainConfig)
 	return sysCallContract(evm, contract, data, chainConfig, ibs, blockContext, constCall, vmCfg)
 }
 

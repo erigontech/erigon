@@ -56,6 +56,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	mock_services "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -473,7 +474,7 @@ func TestGetPayloadAttestationDataReportsSyncing(t *testing.T) {
 		t.Run(path, func(t *testing.T) {
 			_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 			handler.beaconChainCfg.GloasForkEpoch = 0
-			syncedData.(*sync_mock_services.MockSyncedData).EXPECT().Syncing().Return(true)
+			syncedData.(*sync_mock_services.MockSyncedData).EXPECT().StateHead().Return(common.Hash{}, uint64(0), false)
 
 			recorder := httptest.NewRecorder()
 			handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
@@ -483,19 +484,17 @@ func TestGetPayloadAttestationDataReportsSyncing(t *testing.T) {
 	}
 }
 
-func TestGetPayloadAttestationDataPreservesUnavailableHeadStatus(t *testing.T) {
+// The stale-head gate answers before a gated endpoint reads the head, so the selected-head
+// lookup keeps its own test for a missing head state.
+func TestGetSelectedHeadReportsAMissingHeadStateAsUnavailable(t *testing.T) {
 	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
-	handler.beaconChainCfg.GloasForkEpoch = 0
 	handler.enableMemoizedHeadState = true
-	mockSyncedData := syncedData.(*sync_mock_services.MockSyncedData)
-	mockSyncedData.EXPECT().Syncing().Return(false)
-	mockSyncedData.EXPECT().StateHead().Return(common.Hash{}, uint64(0), false)
+	syncedData.(*sync_mock_services.MockSyncedData).EXPECT().StateHead().Return(common.Hash{}, uint64(0), false)
 
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/validator/payload_attestation_data?slot=64", http.NoBody)
-	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, request)
+	_, _, statusCode, err := handler.getSelectedHead()
 
-	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+	require.Error(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, statusCode)
 }
 
 func TestGetPayloadAttestationDataRejectsInvalidCanonicalSlotQuery(t *testing.T) {
@@ -556,6 +555,7 @@ func TestPostPayloadAttestationsRejectsNullMessage(t *testing.T) {
 	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.Equal(t, "application/json", recorder.Header().Get("Content-Type"))
 	require.Contains(t, recorder.Body.String(), "missing payload attestation message data")
 }
 
@@ -2987,7 +2987,7 @@ func TestGetValidatorExecutionPayloadBidBuildsUnsignedBidWithoutGossip(t *testin
 		handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
 		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 	}
-	require.NotContains(t, logs(), "no fee recipient from prepare_beacon_proposer")
+	require.NotContains(t, logs(), "no fee recipient")
 }
 
 func TestGetValidatorExecutionPayloadBidRejectsChangedHeadBeforeBuilding(t *testing.T) {
@@ -4167,4 +4167,79 @@ func newTestExecutionPayloadBid(slot, builderIndex, value uint64) *cltypes.Execu
 		ExecutionPayment:   0,
 		BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
 	}
+}
+
+func TestPostPtcDutiesNextEpochWhileHeadIsInPreviousEpoch(t *testing.T) {
+	_, _, _, _, headState, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	previousStateForkEpoch := headState.BeaconConfig().GloasForkEpoch
+	t.Cleanup(func() { headState.BeaconConfig().GloasForkEpoch = previousStateForkEpoch })
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	headState.BeaconConfig().GloasForkEpoch = 0
+	headState.SetVersion(clparams.GloasVersion)
+	slotsPerEpoch := handler.beaconChainCfg.SlotsPerEpoch
+	headEpoch := state.Epoch(headState)
+	require.NoError(t, headState.SetSlot((headEpoch+1)*slotsPerEpoch-1))
+	// The epoch transition drops the effective balance of the even validators to zero, so they leave the PTC.
+	for i := 0; i < headState.ValidatorLength(); i += 2 {
+		require.NoError(t, headState.SetValidatorBalance(i, 0))
+	}
+	require.NoError(t, headState.InitializePtcWindow())
+	publishPtcDutiesHead(t, syncedData, headState, common.Hash{0x51})
+
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentEpoch().Return(headEpoch + 1).AnyTimes()
+	handler.ethClock = clock
+
+	requestedEpoch := headEpoch + 2
+	advanced, err := headState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(advanced, (headEpoch+1)*slotsPerEpoch))
+	want := map[[2]uint64]struct{}{}
+	for slot := requestedEpoch * slotsPerEpoch; slot < (requestedEpoch+1)*slotsPerEpoch; slot++ {
+		ptc, err := advanced.GetPTC(slot)
+		require.NoError(t, err)
+		for _, idx := range ptc {
+			want[[2]uint64{idx, slot}] = struct{}{}
+		}
+	}
+	require.NotEmpty(t, want)
+	indices := make([]string, 0, headState.ValidatorLength())
+	for i := range headState.ValidatorLength() {
+		indices = append(indices, fmt.Sprintf(`"%d"`, i))
+	}
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
+		fmt.Sprintf("/eth/v1/validator/duties/ptc/%d", requestedEpoch), strings.NewReader("["+strings.Join(indices, ",")+"]"))
+	recorder := httptest.NewRecorder()
+	handler.mux.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var response struct {
+		DependentRoot common.Hash       `json:"dependent_root"`
+		Data          []ptcDutyResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Equal(t, common.Hash{0x51}, response.DependentRoot)
+	got := map[[2]uint64]struct{}{}
+	for _, duty := range response.Data {
+		got[[2]uint64{duty.ValidatorIndex, duty.Slot}] = struct{}{}
+	}
+	require.Equal(t, want, got)
+}
+
+func TestPostPtcDutiesUnavailableWhileHeadLagsMoreThanOneEpoch(t *testing.T) {
+	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	headEpoch := uint64(2)
+	publishPtcDutiesHead(t, syncedData, newPtcDutiesHeadState(t, handler.beaconChainCfg, (headEpoch+1)*handler.beaconChainCfg.SlotsPerEpoch-1), common.Hash{0x52})
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentEpoch().Return(headEpoch + 2).AnyTimes()
+	handler.ethClock = clock
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
+		fmt.Sprintf("/eth/v1/validator/duties/ptc/%d", headEpoch+3), strings.NewReader(`["0"]`))
+	recorder := httptest.NewRecorder()
+	handler.mux.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
 }

@@ -84,7 +84,7 @@ func TestOnBlockHashMismatchPreservesVerifiedPayload(t *testing.T) {
 			mockEngine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
 			mockEngine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(engine.NewPayload)
 			store := newBellatrixForkChoiceStore(t, anchorState, mockEngine)
-			store.OnTick(anchorState.GenesisTime() + block.Block.Slot*anchorState.BeaconConfig().SecondsPerSlot)
+			store.OnTick((anchorState.GenesisTime() + block.Block.Slot*anchorState.BeaconConfig().SecondsPerSlot) * 1000)
 			require.NoError(t, store.OnBlock(t.Context(), block, false, true, false))
 			store.MarkPayloadVerified(blockRoot, executionHash)
 			status, ok := store.GetRecentExecutionPayloadStatus(executionHash)
@@ -190,7 +190,7 @@ func newBellatrixForkChoiceStore(t *testing.T, anchorState *state.CachingBeaconS
 		nil,
 	)
 	require.NoError(t, err)
-	store.OnTick(2000)
+	store.OnTick(2000 * 1000)
 	return store
 }
 
@@ -259,7 +259,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.NoError(t, err)
 	// first steps
 	store.OnTick(0)
-	store.OnTick(12)
+	store.OnTick(12 * 1000)
 	blockRoot, err := block0x3a.Block.HashSSZ()
 	require.NoError(t, err)
 	require.NoError(t, store.ValidateBlockForPublishing(block0x3a, false))
@@ -283,7 +283,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.Equal(t, headRoot, selectedRoot)
 	require.Equal(t, headSlot, selectedSlot)
 	// process another tick and another block
-	store.OnTick(36)
+	store.OnTick(36 * 1000)
 	require.NoError(t, store.OnBlock(ctx, block0xc2, false, true, false))
 	// Check if we get correct status (2)
 	require.Equal(t, uint64(36), store.Time())
@@ -362,7 +362,7 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 		false, // probabilisticHeadGetter
 		nil,   // db: no KV persistence in tests
 	)
-	store.OnTick(2000)
+	store.OnTick(2000 * 1000)
 	require.NoError(t, err)
 	for _, block := range blocks {
 		require.NoError(t, store.OnBlock(ctx, block, false, true, false))

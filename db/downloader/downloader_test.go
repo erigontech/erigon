@@ -1251,14 +1251,8 @@ func TestKeptLocalSeedingReportsCancelDuringJoin(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- batch.wait(ctx) }()
 
-	require.Never(func() bool {
-		select {
-		case <-done:
-			return true
-		default:
-			return false
-		}
-	}, 100*time.Millisecond, time.Millisecond, "wait must still be joining the parked seed tasks")
+	require.Never(func() bool { return len(done) > 0 }, 100*time.Millisecond, time.Millisecond,
+		"wait must still be joining the parked seed tasks")
 
 	dropped := errors.New("caller went away during the join")
 	cancel(dropped)
@@ -1298,14 +1292,8 @@ func TestKeptLocalSeedingReportsDownloaderShutdown(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- batch.wait(t.Context()) }()
 
-	require.Never(func() bool {
-		select {
-		case <-done:
-			return true
-		default:
-			return false
-		}
-	}, 100*time.Millisecond, time.Millisecond, "wait must still be joining the parked seed tasks")
+	require.Never(func() bool { return len(done) > 0 }, 100*time.Millisecond, time.Millisecond,
+		"wait must still be joining the parked seed tasks")
 
 	d.stop()
 

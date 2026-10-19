@@ -17,8 +17,11 @@
 package services
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"log"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,6 +30,8 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/aggregation"
+	mockAggregation "github.com/erigontech/erigon/cl/aggregation/mock_services"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -39,8 +44,8 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	mockCommittee "github.com/erigontech/erigon/cl/validator/committee_subscription/mock_services"
 	"github.com/erigontech/erigon/common"
+	erigonlog "github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
@@ -66,13 +71,14 @@ var (
 
 type attestationTestSuite struct {
 	suite.Suite
-	gomockCtrl        *gomock.Controller
-	mockForkChoice    *mock_services.ForkChoiceStorageMock
-	syncedData        synced_data.SyncedData
-	committeeSubscibe *mockCommittee.MockCommitteeSubscribe
-	ethClock          *eth_clock.MockEthereumClock
-	attService        AttestationService
-	beaconConfig      *clparams.BeaconChainConfig
+	gomockCtrl      *gomock.Controller
+	mockForkChoice  *mock_services.ForkChoiceStorageMock
+	syncedData      synced_data.SyncedData
+	aggregationPool *mockAggregation.MockAggregationPool
+	ethClock        *eth_clock.MockEthereumClock
+	attService      AttestationService
+	beaconConfig    *clparams.BeaconChainConfig
+	emitters        *beaconevents.EventEmitter
 }
 
 func (t *attestationTestSuite) SetupTest() {
@@ -82,7 +88,7 @@ func (t *attestationTestSuite) SetupTest() {
 	_, st, _ := tests.GetBellatrixRandom()
 	t.syncedData = synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 	t.Require().NoError(t.syncedData.OnHeadState(st))
-	t.committeeSubscibe = mockCommittee.NewMockCommitteeSubscribe(t.gomockCtrl)
+	t.aggregationPool = mockAggregation.NewMockAggregationPool(t.gomockCtrl)
 	t.ethClock = eth_clock.NewMockEthereumClock(t.gomockCtrl)
 	t.beaconConfig = &clparams.BeaconChainConfig{
 		SlotsPerEpoch:    mockSlotsPerEpoch,
@@ -90,12 +96,13 @@ func (t *attestationTestSuite) SetupTest() {
 	}
 	netConfig := &clparams.NetworkConfig{}
 	emitters := beaconevents.NewEventEmitter()
+	t.emitters = emitters
 	computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) { return [32]byte{}, nil }
 	batchSignatureVerifier := NewBatchSignatureVerifier(context.TODO(), nil)
 	go batchSignatureVerifier.Start()
 	ctx, cn := context.WithCancel(context.Background())
 	cn()
-	t.attService = NewAttestationService(ctx, t.mockForkChoice, t.committeeSubscibe, t.ethClock, t.syncedData, t.beaconConfig, netConfig, emitters, batchSignatureVerifier)
+	t.attService = NewAttestationService(ctx, t.mockForkChoice, t.aggregationPool, t.ethClock, t.syncedData, t.beaconConfig, netConfig, emitters, batchSignatureVerifier)
 }
 
 func (t *attestationTestSuite) TearDownTest() {
@@ -341,8 +348,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 					mockFinalizedCheckPoint.Epoch * mockSlotsPerEpoch: {Root: mockFinalizedCheckPoint.Root},
 				}
 				t.mockForkChoice.FinalizedCheckpointVal = *mockFinalizedCheckPoint
-				//t.committeeSubscibe.EXPECT().NeedToAggregate(att).Return(true).Times(1)
-				t.committeeSubscibe.EXPECT().AggregateAttestation(att).Return(nil).Times(1)
+				t.aggregationPool.EXPECT().AddAttestation(att).Return(nil).Times(1)
 			},
 			args: args{
 				ctx:    context.Background(),
@@ -405,7 +411,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessageAllowsNextEpochWhenC
 		finalizedCheckpoint.Epoch * mockSlotsPerEpoch: {Root: finalizedCheckpoint.Root},
 	}
 	t.mockForkChoice.FinalizedCheckpointVal = finalizedCheckpoint
-	t.committeeSubscibe.EXPECT().AggregateAttestation(&nextEpochAtt).Return(nil).Times(1)
+	t.aggregationPool.EXPECT().AddAttestation(&nextEpochAtt).Return(nil).Times(1)
 
 	err := t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
 		Attestation:      &nextEpochAtt,
@@ -444,7 +450,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessageAllowsSecondEpochWhe
 		finalizedCheckpoint.Epoch * mockSlotsPerEpoch: {Root: finalizedCheckpoint.Root},
 	}
 	t.mockForkChoice.FinalizedCheckpointVal = finalizedCheckpoint
-	t.committeeSubscibe.EXPECT().AggregateAttestation(&secondEpochAtt).Return(nil).Times(1)
+	t.aggregationPool.EXPECT().AddAttestation(&secondEpochAtt).Return(nil).Times(1)
 
 	t.ethClock.EXPECT().GetEpochAtSlot(secondEpochSlot).Return(secondEpoch).Times(1)
 	t.ethClock.EXPECT().GetCurrentSlot().Return(secondEpochSlot).Times(1)
@@ -513,7 +519,7 @@ func (t *attestationTestSuite) TestAttestationSignatureDomainUsesTargetEpochFork
 		finalizedCheckpoint.Epoch * mockSlotsPerEpoch: {Root: finalizedCheckpoint.Root},
 	}
 	t.mockForkChoice.FinalizedCheckpointVal = finalizedCheckpoint
-	t.committeeSubscibe.EXPECT().AggregateAttestation(att).Return(nil).Times(1)
+	t.aggregationPool.EXPECT().AddAttestation(att).Return(nil).Times(1)
 
 	err := t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
 		Attestation:      att,
@@ -563,7 +569,7 @@ func (t *attestationTestSuite) TestAttestationSeenOnlyAfterSignatureVerification
 		finalizedCheckpoint.Epoch * mockSlotsPerEpoch: {Root: finalizedCheckpoint.Root},
 	}
 	t.mockForkChoice.FinalizedCheckpointVal = finalizedCheckpoint
-	t.committeeSubscibe.EXPECT().AggregateAttestation(att).Return(nil).Times(1)
+	t.aggregationPool.EXPECT().AddAttestation(att).Return(nil).Times(1)
 
 	// An invalid signature must not consume the validator's slot.
 	err := t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
@@ -587,6 +593,101 @@ func (t *attestationTestSuite) TestAttestationSeenOnlyAfterSignatureVerification
 	})
 	t.Require().ErrorIs(err, ErrIgnore)
 	t.Require().ErrorIs(err, ErrAttestationAlreadySeen)
+}
+
+// Copies of one vote can pass the seen check before either is verified, for example one over
+// REST and one from gossip. Only the first to be verified may reach the pool and the event stream.
+func (t *attestationTestSuite) TestVerifiedAttestationIsClaimedOnce() {
+	service := t.attService.(*attestationService)
+	t.aggregationPool.EXPECT().AddAttestation(att).Return(nil).Times(1)
+	events := make(chan *beaconevents.EventStream, 16)
+	sub := t.emitters.Operation().Subscribe(events)
+	defer sub.Unsubscribe()
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			service.onVerifiedAttestation(7, mockEpoch, att, &AttestationForGossip{Attestation: att})
+		})
+	}
+	wg.Wait()
+
+	t.Len(events, 1)
+}
+
+// A pool error other than an already held vote does not make the attestation invalid.
+func (t *attestationTestSuite) TestAttestationEventEmittedWhenPoolRejectsVote() {
+	service := t.attService.(*attestationService)
+	t.aggregationPool.EXPECT().AddAttestation(att).Return(errors.New("pool error")).Times(1)
+	events := make(chan *beaconevents.EventStream, 4)
+	sub := t.emitters.Operation().Subscribe(events)
+	defer sub.Unsubscribe()
+
+	service.onVerifiedAttestation(7, mockEpoch, att, &AttestationForGossip{Attestation: att})
+
+	t.Len(events, 1)
+}
+
+// A vote of a member the pool already counts for other data is equivocation that gossip can carry, so
+// it is not logged as a warning, and its attestation event is still emitted.
+func (t *attestationTestSuite) TestAttestationOfACountedMemberIsNotAWarning() {
+	service := t.attService.(*attestationService)
+	t.aggregationPool.EXPECT().AddAttestation(att).Return(aggregation.ErrVoterAlreadyCounted).Times(1)
+	events := make(chan *beaconevents.EventStream, 4)
+	sub := t.emitters.Operation().Subscribe(events)
+	defer sub.Unsubscribe()
+	var output bytes.Buffer
+	previous := erigonlog.Root().GetHandler()
+	erigonlog.Root().SetHandler(erigonlog.LvlFilterHandler(erigonlog.LvlWarn, erigonlog.StreamHandler(&output, erigonlog.LogfmtFormat())))
+	defer erigonlog.Root().SetHandler(previous)
+
+	service.onVerifiedAttestation(7, mockEpoch, att, &AttestationForGossip{Attestation: att})
+
+	t.Len(events, 1)
+	t.Empty(output.String())
+}
+
+// The attestation event reports every verified attestation, whether or not the
+// aggregation pool already holds its vote.
+func (t *attestationTestSuite) TestAttestationEventEmittedWhenPoolAlreadyHasVote() {
+	computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 {
+		return 8
+	}
+	computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
+		return 1
+	}
+	blsVerifyMultipleSignatures = func(signatures [][]byte, signRoots [][]byte, pks [][]byte) (bool, error) {
+		return true, nil
+	}
+	t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).AnyTimes()
+	t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).AnyTimes()
+	t.mockForkChoice.HighestSeenVal = mockSlot
+	finalizedCheckpoint := solid.Checkpoint{Root: [32]byte{1, 0}, Epoch: 1}
+	t.mockForkChoice.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{
+		attData.BeaconBlockRoot: {},
+	}
+	t.mockForkChoice.Ancestors = map[uint64]forkchoice.ForkChoiceNode{
+		mockEpoch * mockSlotsPerEpoch:                 {Root: attData.Target.Root},
+		finalizedCheckpoint.Epoch * mockSlotsPerEpoch: {Root: finalizedCheckpoint.Root},
+	}
+	t.mockForkChoice.FinalizedCheckpointVal = finalizedCheckpoint
+	t.aggregationPool.EXPECT().AddAttestation(att).Return(aggregation.ErrIsSuperset).Times(1)
+	events := make(chan *beaconevents.EventStream, 4)
+	sub := t.emitters.Operation().Subscribe(events)
+	defer sub.Unsubscribe()
+
+	err := t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
+		Attestation:      att,
+		ImmediateProcess: true,
+	})
+	t.Require().NoError(err)
+
+	select {
+	case event := <-events:
+		t.Equal(beaconevents.OpAttestation, event.Event)
+	default:
+		t.Fail("no attestation event emitted")
+	}
 }
 
 func (t *attestationTestSuite) TestAttestationGossipNotAcceptedBeforeSignatureVerification() {
@@ -615,7 +716,7 @@ func (t *attestationTestSuite) TestAttestationGossipNotAcceptedBeforeSignatureVe
 		finalizedCheckpoint.Epoch * mockSlotsPerEpoch: {Root: finalizedCheckpoint.Root},
 	}
 	t.mockForkChoice.FinalizedCheckpointVal = finalizedCheckpoint
-	t.committeeSubscibe.EXPECT().AggregateAttestation(gomock.Any()).Times(0)
+	t.aggregationPool.EXPECT().AddAttestation(gomock.Any()).Times(0)
 
 	err := t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
 		Attestation:      att,
@@ -667,7 +768,7 @@ func (t *attestationTestSuite) TestAttestationGossipPreForkAttestationOnPostFork
 	t.attService = NewAttestationService(
 		context.Background(),
 		t.mockForkChoice,
-		t.committeeSubscibe,
+		t.aggregationPool,
 		t.ethClock,
 		t.syncedData,
 		&cfg,
@@ -705,7 +806,7 @@ func (t *attestationTestSuite) TestAttestationGossipPreForkAttestationOnPostFork
 		finalizedCheckpoint.Epoch * cfg.SlotsPerEpoch: {Root: finalizedCheckpoint.Root},
 	}
 	t.mockForkChoice.FinalizedCheckpointVal = finalizedCheckpoint
-	t.committeeSubscibe.EXPECT().AggregateAttestation(gomock.Any()).Return(nil).AnyTimes()
+	t.aggregationPool.EXPECT().AddAttestation(gomock.Any()).Return(nil).AnyTimes()
 
 	gloasMessage, err := t.attService.DecodeGossipMessage("peer", encoded, clparams.GloasVersion)
 	t.Require().NoError(err)
@@ -915,7 +1016,7 @@ func (t *attestationTestSuite) TestGloasAttestationIndexValidation() {
 		go batchSignatureVerifier.Start()
 		ctx, cn := context.WithCancel(context.Background())
 		cn()
-		t.attService = NewAttestationService(ctx, t.mockForkChoice, t.committeeSubscibe, t.ethClock, t.syncedData, gloasConfig, netConfig, emitters, batchSignatureVerifier)
+		t.attService = NewAttestationService(ctx, t.mockForkChoice, t.aggregationPool, t.ethClock, t.syncedData, gloasConfig, netConfig, emitters, batchSignatureVerifier)
 
 		tt.mock()
 		err := t.attService.ProcessMessage(tt.args.ctx, tt.args.subnet, &AttestationForGossip{
@@ -943,4 +1044,59 @@ func TestAttestation(t *testing.T) {
 	}
 
 	suite.Run(t, &attestationTestSuite{})
+}
+
+func TestAttestationForLateBlockIsProcessedOnceBlockArrives(t *testing.T) {
+	saveSignatureGlobals(t)
+	origCommitteeCount, origSubnet := computeCommitteeCountPerSlot, computeSubnetForAttestation
+	t.Cleanup(func() { computeCommitteeCountPerSlot, computeSubnetForAttestation = origCommitteeCount, origSubnet })
+	computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 { return 8 }
+	computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 { return 1 }
+	computeSigningRoot = func(ssz.HashableSSZ, []byte) ([32]byte, error) { return [32]byte{}, nil }
+	blsVerifyMultipleSignatures = func(_, _, _ [][]byte) (bool, error) { return true, nil }
+
+	ctrl := gomock.NewController(t)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).AnyTimes()
+	clock.EXPECT().GetCurrentSlot().Return(mockSlot).AnyTimes()
+	processed := make(chan struct{})
+	aggregationPool := mockAggregation.NewMockAggregationPool(ctrl)
+	aggregationPool.EXPECT().AddAttestation(att).DoAndReturn(func(*solid.Attestation) error {
+		close(processed)
+		return nil
+	}).Times(1)
+
+	_, st, _ := tests.GetBellatrixRandom()
+	syncedData := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	require.NoError(t, syncedData.OnHeadState(st))
+	finalizedCheckpoint := solid.Checkpoint{Root: [32]byte{1, 0}, Epoch: 1}
+	forkChoice := &lateBlockForkChoice{
+		ForkChoiceStorageMock: &mock_services.ForkChoiceStorageMock{
+			Headers: map[common.Hash]*cltypes.BeaconBlockHeader{attData.BeaconBlockRoot: {}},
+			Ancestors: map[uint64]forkchoice.ForkChoiceNode{
+				mockEpoch * mockSlotsPerEpoch:                 {Root: attData.Target.Root},
+				finalizedCheckpoint.Epoch * mockSlotsPerEpoch: {Root: finalizedCheckpoint.Root},
+			},
+			FinalizedCheckpointVal: finalizedCheckpoint,
+			HighestSeenVal:         mockSlot,
+		},
+		root: attData.BeaconBlockRoot,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	verifier := NewBatchSignatureVerifier(ctx, nil)
+	verifier.Start()
+	beaconCfg := &clparams.BeaconChainConfig{SlotsPerEpoch: mockSlotsPerEpoch, SecondsPerSlot: 12, ElectraForkEpoch: 100000}
+	service := NewAttestationService(ctx, forkChoice, aggregationPool, clock, syncedData, beaconCfg, &clparams.NetworkConfig{}, beaconevents.NewEventEmitter(), verifier)
+
+	err := service.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{Attestation: att})
+	require.ErrorIs(t, err, ErrIgnore)
+
+	forkChoice.arrived.Store(true)
+	select {
+	case <-processed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("attestation was not processed after its block arrived")
+	}
 }

@@ -930,12 +930,12 @@ var (
 	}
 	CaplinIPBlockLimitsDisableFlag = cli.BoolFlag{
 		Name:  "caplin.ip-block-limits.disable",
-		Usage: "Restore the released connection limits: drop Caplin's caps per IPv4 /24 and /16 and per IPv6 /48 and /32, and the exemption of private networks with --caplin.local-discovery. Networks in --caplin.ip-block-limits.trusted-cidrs stay exempt",
+		Usage: "Restore the released connection limits: drop Caplin's caps per IPv4 /24 and /16 and per IPv6 /48 and /32, and the exemption of private networks when local discovery is enabled. Networks in --caplin.ip-block-limits.trusted-cidrs stay exempt",
 		Value: false,
 	}
 	CaplinIPBlockLimitsTrustedCIDRsFlag = cli.StringSliceFlag{
 		Name:  "caplin.ip-block-limits.trusted-cidrs",
-		Usage: "Comma-separated networks in CIDR notation (at most an IPv4 /8 or an IPv6 /16 each, without host bits) exempt from every per-address and per-block connection cap. All connections of one network share a limit of 8 times --caplin.max-peer-count (at least 32). For trusted clusters on public addresses",
+		Usage: "Comma-separated networks in CIDR notation (at most an IPv4 /8 or an IPv6 /16 each, without host bits) exempt from every per-address and per-block connection cap. All connections of one network share a limit of 8 times --caplin.max-peer-count (at least 32); a loopback network stays unlimited. For trusted clusters on public addresses",
 	}
 	CaplinEnableUPNPlag = cli.BoolFlag{
 		Name:  "caplin.enable-upnp",
@@ -1606,7 +1606,7 @@ func SetNodeConfig(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logger) err
 	setNodeUserIdent(ctx, cfg)
 	SetP2PConfig(ctx, &cfg.P2P, cfg.NodeName(), cfg.Dirs.DataDir, logger)
 
-	cfg.SentryLogPeerInfo = ctx.IsSet(SentryLogPeerInfoFlag.Name)
+	cfg.SentryLogPeerInfo = ctx.Bool(SentryLogPeerInfoFlag.Name)
 	return nil
 }
 
@@ -1677,7 +1677,7 @@ func setGPO(ctx *cli.Command, cfg *gaspricecfg.Config) {
 
 func setTxPool(ctx *cli.Command, dbDir string, fullCfg *ethconfig.Config) {
 	cfg := txpoolcfg.DefaultConfig
-	if ctx.IsSet(TxPoolDisableFlag.Name) || TxPoolDisableFlag.Value {
+	if ctx.Bool(TxPoolDisableFlag.Name) {
 		cfg.Disable = true
 	}
 	if ctx.IsSet(TxPoolPriceLimitFlag.Name) {
@@ -1762,7 +1762,7 @@ func setEthash(ctx *cli.Command, datadir string, cfg *ethconfig.Config) {
 	if ctx.IsSet(EthashCachesLockMmapFlag.Name) {
 		cfg.Ethash.CachesLockMmap = ctx.Bool(EthashCachesLockMmapFlag.Name)
 	}
-	if ctx.IsSet(FakePoWFlag.Name) {
+	if ctx.Bool(FakePoWFlag.Name) {
 		cfg.Ethash.PowMode = ethashcfg.ModeFake
 	}
 	if ctx.IsSet(EthashDatasetsLockMmapFlag.Name) {
@@ -1801,7 +1801,7 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *buildercfg.BuilderConfig) {
 }
 
 func setBuilder(ctx *cli.Command, cfg *buildercfg.BuilderConfig) {
-	cfg.EnabledPOS = !ctx.IsSet(ProposingDisableFlag.Name)
+	cfg.EnabledPOS = !ctx.Bool(ProposingDisableFlag.Name)
 
 	switch {
 	case ctx.IsSet(MinerExtraDataFlag.Name):
@@ -2142,7 +2142,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	if ctx.IsSet(RPCGlobalTxFeeCapFlag.Name) {
 		cfg.RPCTxFeeCap = ctx.Float64(RPCGlobalTxFeeCapFlag.Name)
 	}
-	if ctx.IsSet(NoDiscoverFlag.Name) {
+	if ctx.Bool(NoDiscoverFlag.Name) {
 		cfg.EthDiscoveryURLs = []string{}
 	} else if ctx.IsSet(DNSDiscoveryFlag.Name) {
 		urls := ctx.String(DNSDiscoveryFlag.Name)

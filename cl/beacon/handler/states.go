@@ -696,16 +696,33 @@ func (a *ApiHandler) GetEthV1BeaconStatesProposerLookahead(w http.ResponseWriter
 		)
 	}
 
+	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
+	if version < clparams.FuluVersion {
+		return nil, beaconhttp.NewEndpointError(
+			http.StatusBadRequest,
+			fmt.Errorf("proposer lookahead is not available before Fulu: slot %d", *slot),
+		)
+	}
+
 	proposerLookahead, ok := a.forkchoiceStore.GetProposerLookahead(*slot)
 	if !ok {
+		if canonicalRoot != blockRoot {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read proposer lookahead: %x", blockRoot))
+		}
 		stateView := a.caplinStateSnapshots.View()
 		defer stateView.Close()
 		// read epoch data
-		epochData, err := state_accessors.ReadEpochData(state_accessors.GetValFnTxAndSnapshot(tx, stateView), *slot/a.beaconChainCfg.SlotsPerEpoch, a.beaconChainCfg)
+		epochData, err := state_accessors.ReadEpochData(state_accessors.GetValFnTxAndSnapshot(tx, stateView), a.beaconChainCfg.RoundSlotToEpoch(*slot), a.beaconChainCfg)
 		if err != nil {
 			return nil, beaconhttp.NewEndpointError(
 				http.StatusInternalServerError,
 				fmt.Errorf("failed to read historical epoch data: %w", err),
+			)
+		}
+		if epochData == nil {
+			return nil, beaconhttp.NewEndpointError(
+				http.StatusNotFound,
+				fmt.Errorf("could not read epoch data for slot %d", *slot),
 			)
 		}
 		proposerLookahead = epochData.ProposerLookahead
@@ -717,7 +734,6 @@ func (a *ApiHandler) GetEthV1BeaconStatesProposerLookahead(w http.ResponseWriter
 		return true
 	})
 
-	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	return newBeaconResponse(respProposerLookahead).
 		WithHeader("Eth-Consensus-Version", version.String()).
 		WithVersion(version).

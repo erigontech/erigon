@@ -19,15 +19,9 @@ package forkchoice
 import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 )
-
-// [New in Gloas:EIP7732] Timing helper functions.
-//
-// GLOAS replaces the fixed INTERVALS_PER_SLOT division with a BPS (basis points)
-// system for finer-grained control of slot-internal deadlines. All functions are
-// epoch-aware: pre-GLOAS epochs use the legacy IntervalsPerSlot arithmetic,
-// post-GLOAS epochs use BPS constants.
 
 // getAttestationDueMs returns the attestation deadline in milliseconds from slot start.
 func (f *ForkChoiceStore) getAttestationDueMs(epoch uint64) uint64 {
@@ -73,9 +67,9 @@ func (f *ForkChoiceStore) getPayloadAttestationDueMs(_ uint64) uint64 {
 // which implements the spec's should_apply_proposer_boost for weight calculation
 // (GLOAS: complex logic with equivocation checks; pre-GLOAS: checks proposer_boost_root != zero).
 func (f *ForkChoiceStore) shouldApplyProposerBoost() bool {
-	secondsSinceGenesis := f.time.Load() - f.genesisTime
-	timeIntoSlotMs := (secondsSinceGenesis % f.beaconCfg.SecondsPerSlot) * 1000
-	epoch := f.computeEpochAtSlot(f.Slot())
+	timeMs := f.timeMs.Load()
+	timeIntoSlotMs := (timeMs - utils.SecondsToMilliseconds(f.genesisTime)) % (f.beaconCfg.SecondsPerSlot * 1000)
+	epoch := f.computeEpochAtSlot(f.slotAtTimeMs(timeMs))
 	attestationDueMs := f.getAttestationDueMs(epoch)
 	return timeIntoSlotMs < attestationDueMs
 }
@@ -97,12 +91,13 @@ func (f *ForkChoiceStore) shouldApplyProposerBoost() bool {
 // NOTE: Both elements are time-based checks on when the *block* was received.
 // PTC_TIMELINESS_INDEX records whether the block arrived before the PTC deadline
 // (75% of slot), NOT whether the PTC has voted the payload present.
-func (f *ForkChoiceStore) recordBlockTimeliness(block *cltypes.BeaconBlock, blockRoot common.Hash) {
+func (f *ForkChoiceStore) recordBlockTimeliness(block *cltypes.BeaconBlock, blockRoot common.Hash) uint64 {
 	var timeliness [clparams.NumBlockTimelinessDeadlines]bool
-	if f.Slot() == block.Slot {
-		epoch := f.computeEpochAtSlot(block.Slot)
-		secondsSinceGenesis := f.time.Load() - f.genesisTime
-		timeIntoSlotMs := (secondsSinceGenesis % f.beaconCfg.SecondsPerSlot) * 1000
+	timeMs := f.timeMs.Load()
+	currentSlot := f.slotAtTimeMs(timeMs)
+	if currentSlot == block.Slot {
+		epoch := f.computeEpochAtSlot(currentSlot)
+		timeIntoSlotMs := (timeMs - utils.SecondsToMilliseconds(f.genesisTime)) % (f.beaconCfg.SecondsPerSlot * 1000)
 		timeliness[clparams.AttestationTimelinessIndex] = timeIntoSlotMs < f.getAttestationDueMs(epoch)
 		if epoch >= f.beaconCfg.GloasForkEpoch {
 			timeliness[clparams.PtcTimelinessIndex] = timeIntoSlotMs < f.getPayloadAttestationDueMs(epoch)
@@ -110,10 +105,11 @@ func (f *ForkChoiceStore) recordBlockTimeliness(block *cltypes.BeaconBlock, bloc
 	}
 
 	f.blockTimeliness.Store(blockRoot, timeliness)
+	return currentSlot
 }
 
-func (f *ForkChoiceStore) getDependentRoot(root common.Hash) common.Hash {
-	epoch := f.computeEpochAtSlot(f.Slot())
+func (f *ForkChoiceStore) getDependentRoot(root common.Hash, currentSlot uint64) common.Hash {
+	epoch := f.computeEpochAtSlot(currentSlot)
 	dependentSlot := computeShufflingDependentSlot(epoch, f.beaconCfg.MinSeedLookahead, f.beaconCfg.SlotsPerEpoch)
 	return f.getAncestor(f.getNodeForRoot(root), dependentSlot).Root
 }
@@ -126,7 +122,7 @@ func computeShufflingDependentSlot(epoch, minSeedLookahead, slotsPerEpoch uint64
 }
 
 // updateProposerBoostRoot implements update_proposer_boost_root from the spec.
-func (f *ForkChoiceStore) updateProposerBoostRoot(headRoot common.Hash, blockRoot common.Hash) {
+func (f *ForkChoiceStore) updateProposerBoostRoot(headRoot common.Hash, blockRoot common.Hash, currentSlot uint64) {
 	timeliness, ok := f.getBlockTimeliness(blockRoot)
 	if !ok {
 		return
@@ -138,12 +134,12 @@ func (f *ForkChoiceStore) updateProposerBoostRoot(headRoot common.Hash, blockRoo
 		return
 	}
 
-	epoch := f.computeEpochAtSlot(f.Slot())
+	epoch := f.computeEpochAtSlot(currentSlot)
 	if f.beaconCfg.GetCurrentStateVersion(epoch) >= clparams.GloasVersion {
 		if headRoot == (common.Hash{}) {
 			return
 		}
-		if f.getDependentRoot(blockRoot) != f.getDependentRoot(headRoot) {
+		if f.getDependentRoot(blockRoot, currentSlot) != f.getDependentRoot(headRoot, currentSlot) {
 			return
 		}
 	}
