@@ -22,6 +22,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,14 +33,15 @@ import (
 )
 
 type stalledStreamWriter struct {
-	header  http.Header
-	once    sync.Once
-	started chan struct{}
-	release chan struct{}
-	expire  chan struct{}
+	header    http.Header
+	once      sync.Once
+	started   chan struct{}
+	release   chan struct{}
+	expire    chan struct{}
+	abort     chan struct{}
+	abortOnce sync.Once
 
-	mu       sync.Mutex
-	deadline time.Time
+	deadline atomic.Int64
 }
 
 func newStalledStreamWriter() *stalledStreamWriter {
@@ -48,6 +50,7 @@ func newStalledStreamWriter() *stalledStreamWriter {
 		started: make(chan struct{}),
 		release: make(chan struct{}),
 		expire:  make(chan struct{}),
+		abort:   make(chan struct{}),
 	}
 }
 
@@ -58,16 +61,15 @@ func (w *stalledStreamWriter) WriteHeader(int) {}
 func (w *stalledStreamWriter) Flush() {}
 
 func (w *stalledStreamWriter) SetWriteDeadline(t time.Time) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.deadline = t
+	if t.IsZero() {
+		w.deadline.Store(0)
+		return nil
+	}
+	w.deadline.Store(t.UnixNano())
+	if !t.After(time.Now()) {
+		w.abortOnce.Do(func() { close(w.abort) })
+	}
 	return nil
-}
-
-func (w *stalledStreamWriter) deadlineArmed() bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return !w.deadline.IsZero()
 }
 
 func (w *stalledStreamWriter) Write(b []byte) (int, error) {
@@ -75,8 +77,10 @@ func (w *stalledStreamWriter) Write(b []byte) (int, error) {
 	select {
 	case <-w.release:
 		return len(b), nil
+	case <-w.abort:
+		return 0, os.ErrDeadlineExceeded
 	case <-w.expire:
-		if w.deadlineArmed() {
+		if w.deadline.Load() != 0 {
 			return 0, os.ErrDeadlineExceeded
 		}
 		<-w.release
@@ -107,24 +111,36 @@ func startEventStream(t *testing.T, w http.ResponseWriter) (*ApiHandler, <-chan 
 func TestEventStreamSlowClientDoesNotBlockEmitters(t *testing.T) {
 	w := newStalledStreamWriter()
 	defer close(w.release)
-	a, _ := startEventStream(t, w)
+	a, handlerDone := startEventStream(t, w)
 	select {
 	case <-w.started:
 	case <-time.After(5 * time.Second):
 		t.Fatal("event stream never wrote")
 	}
 
+	sendBlocks(t, a, 1000, "a stalled event stream client blocked the event emitter")
+	close(w.expire)
+	waitDone(t, handlerDone, "event stream did not close after its write deadline expired")
+}
+
+func sendBlocks(t *testing.T, a *ApiHandler, n int, failure string) {
+	t.Helper()
 	done := make(chan struct{})
 	go func() {
-		for range 1000 {
+		defer close(done)
+		for range n {
 			a.emitters.State().SendBlock(&beaconevents.BlockData{})
 		}
-		close(done)
 	}()
+	waitDone(t, done, failure)
+}
+
+func waitDone(t *testing.T, done <-chan struct{}, failure string) {
+	t.Helper()
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("a stalled event stream client blocked the event emitter")
+		t.Fatal(failure)
 	}
 }
 
@@ -138,39 +154,60 @@ func TestEventStreamOverflowClosesStalledStream(t *testing.T) {
 		t.Fatal("event stream never wrote")
 	}
 
-	for range 2 * eventStreamWriteQueueSize {
-		a.emitters.State().SendBlock(&beaconevents.BlockData{})
-	}
+	sendBlocks(t, a, 2*eventStreamWriteQueueSize, "a stalled event stream client blocked the event emitter")
 	close(w.expire)
+	waitDone(t, handlerDone, "overflowed event stream did not close while the client was stalled")
+}
 
-	select {
-	case <-handlerDone:
-	case <-time.After(5 * time.Second):
-		t.Fatal("overflowed event stream did not close while the client was stalled")
+func TestEventStreamOverflowDoesNotDrainQueueToSlowClient(t *testing.T) {
+	w := &slowStreamWriter{ResponseRecorder: httptest.NewRecorder(), delay: 10 * time.Millisecond}
+	a, handlerDone := startEventStream(t, w)
+
+	sendBlocks(t, a, 2*eventStreamWriteQueueSize, "a slow event stream client blocked the event emitter")
+	waitDone(t, handlerDone, "overflowed event stream kept draining its queue to a slow client")
+	require.Less(t, w.writes, eventStreamWriteQueueSize/2)
+}
+
+func TestEventStreamQueueRejectsMessagesOverByteBudget(t *testing.T) {
+	q := newEventStreamQueue()
+	msg := make([]byte, eventStreamWriteQueueBytes/4)
+
+	require.True(t, q.push(make([]byte, 2*eventStreamWriteQueueBytes)), "an empty queue accepts a single oversized message")
+	<-q.msgs
+	q.release(2 * eventStreamWriteQueueBytes)
+
+	for range 4 {
+		require.True(t, q.push(msg))
 	}
+	require.False(t, q.push(msg))
+	q.release(len(msg))
+	require.True(t, q.push(msg))
 }
 
 type failingStreamWriter struct {
-	header http.Header
-	mu     sync.Mutex
+	*httptest.ResponseRecorder
 	writes int
 }
 
-func (w *failingStreamWriter) Header() http.Header { return w.header }
-
-func (w *failingStreamWriter) WriteHeader(int) {}
-
-func (w *failingStreamWriter) Flush() {}
-
 func (w *failingStreamWriter) Write([]byte) (int, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
 	w.writes++
 	return 0, errors.New("connection reset")
 }
 
+type slowStreamWriter struct {
+	*httptest.ResponseRecorder
+	delay  time.Duration
+	writes int
+}
+
+func (w *slowStreamWriter) Write(b []byte) (int, error) {
+	time.Sleep(w.delay)
+	w.writes++
+	return len(b), nil
+}
+
 func TestEventStreamWriteErrorClosesStream(t *testing.T) {
-	w := &failingStreamWriter{header: http.Header{}}
+	w := &failingStreamWriter{ResponseRecorder: httptest.NewRecorder()}
 	_, handlerDone := startEventStream(t, w)
 
 	select {
@@ -178,8 +215,6 @@ func TestEventStreamWriteErrorClosesStream(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("event stream kept running after a write error")
 	}
-	w.mu.Lock()
-	defer w.mu.Unlock()
 	require.Equal(t, 1, w.writes)
 }
 
@@ -195,12 +230,12 @@ func (w *deadlineRecorder) SetWriteDeadline(t time.Time) error {
 
 func TestWriteEventStreamClearsDeadlineAfterEachWrite(t *testing.T) {
 	w := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
-	writeCh := make(chan []byte, 2)
-	writeCh <- []byte("a")
-	writeCh <- []byte("b")
-	close(writeCh)
+	q := newEventStreamQueue()
+	require.True(t, q.push([]byte("a")))
+	require.True(t, q.push([]byte("b")))
+	close(q.msgs)
 
-	require.NoError(t, writeEventStream(w, writeCh))
+	require.NoError(t, writeEventStream(w, q, nil))
 	require.Equal(t, "ab", w.Body.String())
 	require.Len(t, w.deadlines, 4)
 	for i, d := range w.deadlines {
@@ -210,10 +245,10 @@ func TestWriteEventStreamClearsDeadlineAfterEachWrite(t *testing.T) {
 
 func TestWriteEventStreamWithoutDeadlineSupport(t *testing.T) {
 	w := httptest.NewRecorder()
-	writeCh := make(chan []byte, 1)
-	writeCh <- []byte("a")
-	close(writeCh)
+	q := newEventStreamQueue()
+	require.True(t, q.push([]byte("a")))
+	close(q.msgs)
 
-	require.NoError(t, writeEventStream(w, writeCh))
+	require.NoError(t, writeEventStream(w, q, nil))
 	require.Equal(t, "a", w.Body.String())
 }

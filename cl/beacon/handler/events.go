@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -31,9 +32,40 @@ import (
 )
 
 const (
-	eventStreamWriteQueueSize = 1024
-	eventStreamWriteTimeout   = 30 * time.Second
+	eventStreamWriteQueueSize  = 1024
+	eventStreamWriteQueueBytes = 64 << 20
+	eventStreamWriteTimeout    = 30 * time.Second
 )
+
+type eventStreamQueue struct {
+	msgs   chan []byte
+	queued atomic.Int64
+}
+
+func newEventStreamQueue() *eventStreamQueue {
+	return &eventStreamQueue{msgs: make(chan []byte, eventStreamWriteQueueSize)}
+}
+
+// push is called from a single goroutine. It never blocks and rejects a message that exceeds the
+// message count or byte budget; an empty queue always accepts one message.
+func (q *eventStreamQueue) push(msg []byte) bool {
+	size := int64(len(msg))
+	if queued := q.queued.Load(); queued > 0 && queued+size > eventStreamWriteQueueBytes {
+		return false
+	}
+	q.queued.Add(size)
+	select {
+	case q.msgs <- msg:
+		return true
+	default:
+		q.queued.Add(-size)
+		return false
+	}
+}
+
+func (q *eventStreamQueue) release(size int) {
+	q.queued.Add(-int64(size))
+}
 
 var validTopics = map[event.EventTopic]struct{}{
 	// operation events
@@ -92,28 +124,29 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 	opSub := a.emitters.Operation().Subscribe(eventCh)
 	stateSub := a.emitters.State().Subscribe(eventCh)
 	// Emitters block until every subscriber takes an event, so network writes must not happen on this goroutine.
-	writeCh := make(chan []byte, eventStreamWriteQueueSize)
+	queue := newEventStreamQueue()
+	stop := make(chan struct{})
 	writerDone := make(chan struct{})
 	go func() {
 		defer close(writerDone)
-		if err := writeEventStream(w, writeCh); err != nil {
+		if err := writeEventStream(w, queue, stop); err != nil {
 			log.Warn("failed to write event", "err", err, "remote", r.RemoteAddr)
 		}
 	}()
 	defer func() {
 		opSub.Unsubscribe()
 		stateSub.Unsubscribe()
-		close(writeCh)
+		close(stop)
+		// Abort a write that is in flight; stop is closed first so the writer cannot re-arm the deadline and continue.
+		_ = setWriteDeadline(http.NewResponseController(w), time.Now())
 		<-writerDone
 	}()
 	enqueue := func(msg []byte) bool {
-		select {
-		case writeCh <- msg:
+		if queue.push(msg) {
 			return true
-		default:
-			log.Warn("event stream client is not keeping up, closing stream", "remote", r.RemoteAddr, "topics", subscribeTopics)
-			return false
 		}
+		log.Warn("event stream client is not keeping up, closing stream", "remote", r.RemoteAddr, "topics", subscribeTopics)
+		return false
 	}
 
 	ticker := time.NewTicker(time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second)
@@ -158,24 +191,41 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-func writeEventStream(w http.ResponseWriter, writeCh <-chan []byte) error {
+func writeEventStream(w http.ResponseWriter, q *eventStreamQueue, stop <-chan struct{}) error {
 	rc := http.NewResponseController(w)
-	for msg := range writeCh {
-		if err := setWriteDeadline(rc, time.Now().Add(eventStreamWriteTimeout)); err != nil {
-			return err
-		}
-		if _, err := w.Write(msg); err != nil {
-			return err
-		}
-		if err := rc.Flush(); err != nil {
-			return err
-		}
-		// A passed deadline cannot be extended, so leaving it armed would cut a healthy stream that is idle between keepalives.
-		if err := setWriteDeadline(rc, time.Time{}); err != nil {
-			return err
+	for {
+		select {
+		case <-stop:
+			return nil
+		case msg, ok := <-q.msgs:
+			if !ok {
+				return nil
+			}
+			if err := writeEvent(w, rc, msg, stop); err != nil {
+				return err
+			}
+			q.release(len(msg))
 		}
 	}
-	return nil
+}
+
+func writeEvent(w http.ResponseWriter, rc *http.ResponseController, msg []byte, stop <-chan struct{}) error {
+	if err := setWriteDeadline(rc, time.Now().Add(eventStreamWriteTimeout)); err != nil {
+		return err
+	}
+	select {
+	case <-stop:
+		return nil
+	default:
+	}
+	if _, err := w.Write(msg); err != nil {
+		return err
+	}
+	if err := rc.Flush(); err != nil {
+		return err
+	}
+	// A passed deadline cannot be extended, so leaving it armed would cut a healthy stream that is idle between keepalives.
+	return setWriteDeadline(rc, time.Time{})
 }
 
 func setWriteDeadline(rc *http.ResponseController, deadline time.Time) error {
