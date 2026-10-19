@@ -1982,6 +1982,9 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx
 	if err := sd.FlushPendingUpdates(tx); err != nil {
 		return nil, err
 	}
+	if p, ok := tx.AggTx().(interface{ PauseColdIO() (resume func()) }); ok {
+		defer p.PauseColdIO()()
+	}
 	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, onProgress)
 }
 

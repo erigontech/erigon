@@ -42,6 +42,8 @@ var (
 	mxTierProbeSeconds  = tierHistograms("tiering_file_probe_seconds", []float64{1e-6, 2.5e-6, 5e-6, 1e-5, 2.5e-5, 5e-5, 1e-4, 2.5e-4, 5e-4, 1e-3, 2.5e-3, 5e-3, 1e-2, 2.5e-2, 5e-2, 0.1, 0.25, 0.5, 1})
 	mxTierProbesPerLook = tierHistograms("tiering_probes_per_lookup", []float64{0, 1, 2, 3, 4, 6, 8, 16, 32, 64})
 
+	mxDemotionPausedSeconds = metrics.GetOrCreateGauge("tiering_demotion_paused_seconds_total")
+
 	tierProbes, tierSlowProbes, tierExistenceFP [2]atomic.Uint64
 	tierLookups, tierHDDLookups                 atomic.Uint64
 )

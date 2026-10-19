@@ -107,6 +107,7 @@ type Aggregator struct {
 	mergingFiles  atomic.Bool
 	demoting      atomic.Bool
 	onDemoteCopy  func(ctx context.Context) // test hook
+	coldIO        *coldIOGate
 
 	ctx       context.Context
 	ctxCancel context.CancelFunc
@@ -149,6 +150,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (*
 		dirs:               dirs,
 		leakDetector:       dbg.NewLeakDetector("agg", dbg.SlowTx()),
 		backgroundProgress: background.NewProgressSet(),
+		coldIO:             newColdIOGate(),
 		logger:             logger,
 		workers:            workersCfg{merge: dbg.MergeWorkers, collateAndBuild: dbg.CollateWorkers},
 

@@ -24,6 +24,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
@@ -46,7 +47,7 @@ func (a *Aggregator) DemoteFile(ctx context.Context, domain kv.Domain, from, to 
 	if a.onDemoteCopy != nil {
 		a.onDemoteCopy(ctx)
 	}
-	if err = copyToCold(ctx, ssdPath, coldPath); err != nil {
+	if err = copyToCold(ctx, ssdPath, coldPath, a.coldIO); err != nil {
 		return fmt.Errorf("DemoteFile: copy %s: %w", ssdPath, err)
 	}
 	if err = replaceWithSymlink(ssdPath, coldPath); err != nil {
@@ -89,7 +90,7 @@ func (a *Aggregator) dirtyDomainFile(d *Domain, from, to kv.Step) (item *FilesIt
 }
 
 // copyToCold skips the copy when dst already has the size of src (a demotion interrupted after the copy).
-func copyToCold(ctx context.Context, src, dst string) error {
+func copyToCold(ctx context.Context, src, dst string, gate *coldIOGate) error {
 	srcInfo, err := os.Stat(src)
 	if err != nil {
 		return err
@@ -110,7 +111,7 @@ func copyToCold(ctx context.Context, src, dst string) error {
 	if err != nil {
 		return err
 	}
-	if err := copyWithCancel(ctx, out, in); err != nil {
+	if err := copyWithCancel(ctx, out, in, gate); err != nil {
 		_ = out.Close()
 		_ = dir.RemoveFile(tmp)
 		return err
@@ -128,17 +129,28 @@ func copyToCold(ctx context.Context, src, dst string) error {
 	return dir.FsyncDir(filepath.Dir(dst))
 }
 
-// copyWithCancel copies in chunks so ctx is checked between them; io.CopyN keeps the copy_file_range fast path.
-func copyWithCancel(ctx context.Context, dst *os.File, src *os.File) error {
-	const chunk = 64 << 20
+// copyWithCancel copies in chunks so cancel and pause act between them; io.CopyN keeps the copy_file_range fast
+// path. Each chunk's writeback is started at once, so a pause also stops the disk writes, not only the copy.
+func copyWithCancel(ctx context.Context, dst *os.File, src *os.File, gate *coldIOGate) error {
+	const chunk = 1 << 20
+	var off int64
 	for {
-		if err := ctx.Err(); err != nil {
+		waitStart := time.Now()
+		if err := gate.Wait(ctx); err != nil {
 			return err
 		}
-		if _, err := io.CopyN(dst, src, chunk); err != nil {
-			if errors.Is(err, io.EOF) {
-				return nil
+		mxDemotionPausedSeconds.Add(time.Since(waitStart).Seconds())
+		n, err := io.CopyN(dst, src, chunk)
+		if n > 0 {
+			if werr := writeBack(dst, off, n, chunk); werr != nil {
+				return werr
 			}
+			off += n
+		}
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
 			return err
 		}
 	}
