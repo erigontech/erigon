@@ -480,10 +480,11 @@ jobs:
           echo "archive_label=${current_label}" >> "$GITHUB_OUTPUT"
 
           # What this proves, precisely: publishing the target branch loses no
-          # docs version — every version archived on the branch currently
-          # publishing is archived on the target too, and that branch's LIVE
-          # series either is the target's current label (so the bump will
-          # archive it) or is already archived there.
+          # docs version except, at most, one archive the target's own version
+          # bump pruned under the archive cap. Every other version archived on
+          # the branch currently publishing is archived on the target too, and
+          # that branch's LIVE series either is the target's current label (so
+          # the bump will archive it) or is already archived there.
           #
           # What it does NOT prove: that the branch was cut from the right
           # place. The archived `versioned_docs` trees are byte-identical across
@@ -528,16 +529,9 @@ jobs:
 
           # The oldest archive the target still carries. `docs-version-bump.yml`
           # prunes from the tail to hold the archive cap, so a version below
-          # this one was dropped on purpose, not lost.
+          # this one may have been dropped on purpose rather than lost. Whether
+          # it was is settled after the loop, against the commit that dropped it.
           tgt_oldest="$(printf '%s\n' $tgt_list | sort -V | head -n1)"
-          # ...and only when the target is at the archive cap, i.e. it gave up an
-          # old archive because it took on a new one. A target under the cap
-          # has lost versions that a real bump keeps. The cap is read from the
-          # bump workflow the target will run; if it cannot be read, no waiver.
-          bump_yml="$(gh api "repos/{owner}/{repo}/contents/.github/workflows/docs-version-bump.yml?ref=${TARGET_BRANCH}" \
-            --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || true)"
-          archive_cap="$(printf '%s\n' "$bump_yml" | sed -n "s/.*jq '\.\[:\([0-9][0-9]*\)\]'.*/\1/p" | head -n1)"
-          tgt_count="$(echo $tgt_list | wc -w)"
 
           # ...and only when both inventories are well-formed: `wc -w` counts
           # tokens, so a repeated entry would inflate the total, and a label
@@ -552,12 +546,8 @@ jobs:
               printf '%s' "$v" | grep -qE '^v[0-9]+\.[0-9]+$' || inventory_ok=0
             done
           done
-          if [ -z "$archive_cap" ]; then
-            inventory_ok=0
-            echo "::warning::Could not read the archive cap from docs-version-bump.yml on ${TARGET_BRANCH}."
-          fi
           if [ "$inventory_ok" -ne 1 ]; then
-            echo "::warning::versions.json on ${CURRENT_BRANCH} or ${TARGET_BRANCH} repeats an entry or holds a label that is not vX.Y, or the archive cap is unreadable."
+            echo "::warning::versions.json on ${CURRENT_BRANCH} or ${TARGET_BRANCH} repeats an entry or holds a label that is not vX.Y."
             echo "The archive-cap waiver is withheld: every version missing from ${TARGET_BRANCH} will be reported below."
           fi
 
@@ -567,8 +557,8 @@ jobs:
             case "$tgt_versions" in
               *"\"${v}\""*) continue ;;
             esac
-            # Strictly older than everything the target kept => pruned by the cap.
-            if [ "$inventory_ok" -eq 1 ] && [ "$tgt_count" -ge "$archive_cap" ] \
+            # Strictly older than everything the target kept => a prune candidate.
+            if [ "$inventory_ok" -eq 1 ] \
                && [ "$(printf '%s\n%s\n' "$v" "$tgt_oldest" | sort -V | head -n1)" = "$v" ]; then
               pruned="${pruned} ${v}"
             else
@@ -585,7 +575,47 @@ jobs:
             missing="${missing}${pruned}"
             pruned=""
           fi
-          [ -n "$pruned" ] && echo "Dropped by the archive cap on ${TARGET_BRANCH}, not lost:${pruned}"
+          # A single candidate is waived only if the commit that dropped it
+          # left the target at the cap in force AT THAT COMMIT. Reading the cap
+          # off the target's HEAD instead would judge an old prune by a newer
+          # cap: raise it after the bump and a genuine prune reads as a loss.
+          # Walk the versions.json history newest-first to the last commit that
+          # still listed the version; the one before it in the walk dropped it.
+          # Anything unreadable, or no such commit in the window, means no waiver.
+          if [ -n "$pruned" ]; then
+            v="${pruned# }"
+            waived=0
+            drop_sha=""
+            drop_versions=""
+            shas="$(gh api "repos/{owner}/{repo}/commits?sha=${TARGET_BRANCH}&path=docs/site/versions.json&per_page=30" \
+              --jq '.[].sha' 2>/dev/null || true)"
+            for sha in $shas; do
+              at="$(gh api "repos/{owner}/{repo}/contents/docs/site/versions.json?ref=${sha}" \
+                --jq '.content' 2>/dev/null | base64 -d 2>/dev/null | tr -d ' \n' || true)"
+              [ -n "$at" ] || break
+              case "$at" in
+                *"\"${v}\""*)
+                  if [ -n "$drop_sha" ]; then
+                    bump_at="$(gh api "repos/{owner}/{repo}/contents/.github/workflows/docs-version-bump.yml?ref=${drop_sha}" \
+                      --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || true)"
+                    cap_at="$(printf '%s\n' "$bump_at" | sed -n "s/.*jq '\.\[:\([0-9][0-9]*\)\]'.*/\1/p" | head -n1)"
+                    count_at="$(echo "$drop_versions" | tr -d '[]"' | tr ',' ' ' | wc -w)"
+                    if [ -n "$cap_at" ] && [ "$count_at" -ge "$cap_at" ]; then
+                      waived=1
+                    fi
+                  fi
+                  break ;;
+              esac
+              drop_sha="$sha"
+              drop_versions="$at"
+            done
+            if [ "$waived" -ne 1 ]; then
+              echo "::warning::${v} is older than every archive on ${TARGET_BRANCH}, but no commit there drops it while at the archive cap in force at the time."
+              missing="${missing}${pruned}"
+              pruned=""
+            fi
+          fi
+          [ -n "$pruned" ] && echo "Dropped by the archive cap on ${TARGET_BRANCH} in ${drop_sha:0:10}, not lost:${pruned}"
           # The LIVE series on the publishing branch must survive too: either
           # it is still the target's current label (the bump will archive it)
           # or it is already archived there. Archived-superset alone misses
@@ -608,7 +638,11 @@ jobs:
             echo "retiring several published versions in one step is a decision, not a prune."
             exit 1
           fi
-          echo "Docs tree on ${TARGET_BRANCH} preserves ${CURRENT_BRANCH}'s versions (live ${cur_label})."
+          if [ -n "$pruned" ]; then
+            echo "Docs tree on ${TARGET_BRANCH} preserves ${CURRENT_BRANCH}'s versions (live ${cur_label}) except${pruned}, pruned by the archive cap."
+          else
+            echo "Docs tree on ${TARGET_BRANCH} preserves ${CURRENT_BRANCH}'s versions (live ${cur_label})."
+          fi
 
           # Condition B — does docs-deploy.yml on the target branch pin itself?
           #
