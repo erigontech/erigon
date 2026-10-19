@@ -53,6 +53,10 @@ and resilience under heavy RPC and peer traffic.
   Failed trace frames use Parity-style error labels, and reverted contract creation returns
   `{gasUsed, output}` instead of an address and code (#24343, #24328, #24329, #24352, #24356, #24355) —
   by @banteg
+- **Tracing error codes.** `trace_block` and `trace_replayBlockTransactions` return `-32001` for
+  unknown blocks instead of `-32000`. Tracing methods that reject `pending` now return `-32602`
+  instead of `-32000`. Clients that match these error codes must update
+  (#24598, #24345) — by @lupin012, @banteg
 - **Stricter call inputs.** Call, simulation, and tracing APIs reject differing `data` and `input`
   fields and EIP-1559 fee fields before London. Call and trace methods also reject a `chainId` that
   differs from the node's chain (#24336, #24536, #24414, #24351) — by @banteg, @lupin012
@@ -76,12 +80,21 @@ and resilience under heavy RPC and peer traffic.
   (#24740, #24276, #24749, #24748) — by @MysticRyuujin, @Sahil-4555
 - Tracers report EIP-8037 execution and state gas, including negative state-gas costs when storage is
   cleared (#24240, #24370) — by @taratorio
+- `vmTrace` reports only operations that executed, removing synthetic `STOP` instructions and
+  operations rejected before execution. Operations that halt exceptionally report `ex: null`
+  (#24344) — by @banteg
 - `trace_callMany` applies state overrides across the bundle, including full storage replacements and
   moved precompiles. `eth_createAccessList` and `eth_callMany` also honor precompile overrides
   (#24567, #24739) — by @lupin012, @pucedoteth
 - `eth_sendRawTransactionSync` finds receipts even when a transaction is mined before its subscription
   becomes active or during a receipt-stream reconnect, avoiding unnecessary timeouts
   (#24134, #24337) — by @lupin012
+- Requests using `pending`, such as `eth_getBalance`, `eth_estimateGas`, and `eth_callBundle`, now
+  use the latest executed block while a node builds a payload, avoiding `block N+1 is not executed`
+  errors. RPCs reading committed data also resolve `latest` against the same view, avoiding missing
+  results while a newer block awaits commit (#24090) — by @Sahil-4555
+- `ots_hasCode` reports code at the end of the requested block, so contracts are visible in their
+  deployment block, matching `eth_getCode` (#24223) — by @Sahil-4555
 - Block transaction counts remain available when transaction payloads are pruned. Witness and
   Otterscan replay methods check the history they need before attempting execution (#23777) — by @yperbasis
 
