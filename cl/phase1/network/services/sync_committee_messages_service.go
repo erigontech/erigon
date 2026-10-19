@@ -133,7 +133,7 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 			return ErrIgnore
 		}
 		// [REJECT] The subnet_id is valid for the given validator, i.e. subnet_id in compute_subnets_for_sync_committee(state, sync_committee_message.validator_index).
-		// Note this validation implies the validator is part of the broader current sync committee along with the correct subcommittee.
+		// The committee is the one that signs for the message slot, which is the next committee at the last slot of a period.
 		subnets, err := subnets.ComputeSubnetsForSyncCommittee(headState, msg.SyncCommitteeMessage.Slot, msg.SyncCommitteeMessage.ValidatorIndex)
 		if errors.Is(err, state.ErrSyncCommitteeNotInState) {
 			return fmt.Errorf("%w: %w", ErrIgnore, err)

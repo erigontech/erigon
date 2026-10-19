@@ -237,6 +237,8 @@ func TestSyncCommitteesIgnoresRetryAfterSuccessfulPublish(t *testing.T) {
 func TestSyncCommitteesChecksTheCommitteeOfTheMessageSlot(t *testing.T) {
 	saveSignatureGlobals(t)
 	blsVerifyMultipleSignatures = func(_, _, _ [][]byte) (bool, error) { return true, nil }
+	fixture, _ := getObjectsForSyncCommitteesServiceTest()
+	period := fixture.BeaconConfig().SlotsPerEpoch * fixture.BeaconConfig().EpochsPerSyncCommitteePeriod
 
 	tests := []struct {
 		name         string
@@ -245,11 +247,13 @@ func TestSyncCommitteesChecksTheCommitteeOfTheMessageSlot(t *testing.T) {
 		inNext       bool
 		wantRejected bool
 		wantIgnored  bool
+		unknown      bool // the validator index is not in the registry
 	}{
-		{"previous slot with the head at the last slot", 1, 2, false, false, false},
-		{"last slot with the head one slot behind", 2, 1, true, false, false},
-		{"last slot signed by the current committee", 2, 1, false, true, false},
-		{"committee not in the head state", 1 + 2*8192, 1, true, false, true},
+		{"previous slot with the head at the last slot", 1, 2, false, false, false, false},
+		{"last slot with the head one slot behind", 2, 1, true, false, false, false},
+		{"last slot signed by the current committee", 2, 1, false, true, false, false},
+		{"committee not in the head state", 1 + 2*period, 1, true, false, true, false},
+		{"unknown validator with the committee not in the head state", 1 + 2*period, 1, true, true, false, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -278,6 +282,9 @@ func TestSyncCommitteesChecksTheCommitteeOfTheMessageSlot(t *testing.T) {
 
 			msg.SyncCommitteeMessage.Slot = nextPeriod - tt.messageSlot
 			msg.SyncCommitteeMessage.ValidatorIndex = 0
+			if tt.unknown {
+				msg.SyncCommitteeMessage.ValidatorIndex = uint64(head.ValidatorLength())
+			}
 			msg.ImmediateVerification = true
 
 			s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)

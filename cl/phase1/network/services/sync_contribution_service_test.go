@@ -175,3 +175,41 @@ func TestSyncSubcommitteePubkeysUseTheCommitteeOfTheContributionSlot(t *testing.
 	require.NoError(t, err)
 	require.Equal(t, common.Bytes48{0xaa}, pubkeys[0])
 }
+
+// The aggregator check does not depend on the state, so it runs before the committee lookup: a
+// non-aggregator is rejected even when the head state does not hold the committee that signs for
+// the contribution slot, and an aggregator is ignored.
+func TestSyncContributionServiceCommitteeNotInHeadState(t *testing.T) {
+	for _, tt := range []struct {
+		name           string
+		selectionProof byte // the first byte of a selection proof that selects (1) or does not select (0) an aggregator
+		wantIgnore     bool
+	}{
+		{"non-aggregator", 0, false},
+		{"aggregator", 1, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			cfg := &clparams.MainnetBeaconConfig
+			syncedData := synced_data.NewSyncedDataManager(cfg, true)
+			clock := eth_clock.NewMockEthereumClock(ctrl)
+			clock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+			verifier := NewBatchSignatureVerifier(t.Context(), nil)
+			s := NewSyncContributionService(syncedData, cfg, syncpoolmock.NewMockSyncContributionPool(ctrl), clock, beaconevents.NewEventEmitter(), verifier, validator_params.NewValidatorParams(), false)
+			head, msg := getObjectsForSyncContributionServiceTest()
+			require.NoError(t, syncedData.OnHeadState(head))
+			contribution := msg.SignedContributionAndProof.Message
+			contribution.Contribution.Slot = head.Slot() + 2*cfg.SlotsPerEpoch*cfg.EpochsPerSyncCommitteePeriod
+			contribution.SelectionProof[0] = tt.selectionProof
+
+			err := s.ProcessMessage(t.Context(), nil, msg)
+			if tt.wantIgnore {
+				require.ErrorIs(t, err, ErrIgnore)
+				require.ErrorIs(t, err, state.ErrSyncCommitteeNotInState)
+				return
+			}
+			require.Error(t, err)
+			require.NotErrorIs(t, err, ErrIgnore)
+		})
+	}
+}

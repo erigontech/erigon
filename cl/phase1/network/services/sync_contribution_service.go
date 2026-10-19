@@ -190,6 +190,14 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 			return errors.New("subcommittee index is out of range")
 		}
 
+		// [REJECT] The selection proof selects the validator as an aggregator for the slot. It does not
+		// depend on the state, so it runs before the committee lookup.
+		modulo := max(1, s.beaconCfg.SyncCommitteeSize/s.beaconCfg.SyncCommitteeSubnetCount/s.beaconCfg.TargetAggregatorsPerSyncSubcommittee)
+		hashSignature := crypto.Sha256(selectionProof[:])
+		if !s.test && binary.LittleEndian.Uint64(hashSignature[:8])%modulo != 0 {
+			return errors.New("selects the validator as an aggregator")
+		}
+
 		aggregatorPubKey, err := headState.ValidatorPublicKey(int(contributionAndProof.AggregatorIndex))
 		if err != nil {
 			return err
@@ -202,13 +210,7 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 			return err
 		}
 
-		modulo := max(1, s.beaconCfg.SyncCommitteeSize/s.beaconCfg.SyncCommitteeSubnetCount/s.beaconCfg.TargetAggregatorsPerSyncSubcommittee)
-		hashSignature := crypto.Sha256(selectionProof[:])
-		if !s.test && binary.LittleEndian.Uint64(hashSignature[:8])%modulo != 0 {
-			return errors.New("selects the validator as an aggregator")
-		}
-
-		// [REJECT] The aggregator's validator index is in the declared subcommittee of the current sync committee -- i.e. state.validators[contribution_and_proof.aggregator_index].pubkey in get_sync_subcommittee_pubkeys(state, contribution.subcommittee_index).
+		// [REJECT] The aggregator's validator index is in the declared subcommittee of the sync committee that signs for the contribution slot -- i.e. state.validators[contribution_and_proof.aggregator_index].pubkey in get_sync_subcommittee_pubkeys(state, contribution.subcommittee_index).
 		if !slices.Contains(subcommiteePubsKeys, aggregatorPubKey) {
 			return errors.New("aggregator's validator index is not in subcommittee")
 		}
@@ -299,21 +301,8 @@ func (s *syncContributionService) GetSignaturesOnContributionSignatures(
 	}, nil
 }
 
-// def get_sync_subcommittee_pubkeys(state: BeaconState, subcommittee_index: uint64) -> Sequence[BLSPubkey]:
-//
-//	# Committees assigned to `slot` sign for `slot - 1`
-//	# This creates the exceptional logic below when transitioning between sync committee periods
-//	next_slot_epoch = compute_epoch_at_slot(Slot(state.slot + 1))
-//	if compute_sync_committee_period(get_current_epoch(state)) == compute_sync_committee_period(next_slot_epoch):
-//	    sync_committee = state.current_sync_committee
-//	else:
-//	    sync_committee = state.next_sync_committee
-//	# Return pubkeys for the subcommittee index
-//	sync_subcommittee_size = SYNC_COMMITTEE_SIZE // SYNC_COMMITTEE_SUBNET_COUNT
-//	i = subcommittee_index * sync_subcommittee_size
-//	return sync_committee.pubkeys[i:i + sync_subcommittee_size]
-
-// getSyncSubcommitteePubkeys returns the public keys of the given subcommittee of the committee that signs for slot.
+// getSyncSubcommitteePubkeys returns the public keys of the given subcommittee of the committee that signs for slot
+// (get_sync_subcommittee_pubkeys, with the committee chosen by state.SyncCommitteeForMessageSlot).
 func (s *syncContributionService) getSyncSubcommitteePubkeys(st *state.CachingBeaconState, slot, subcommitteeIndex uint64) ([]common.Bytes48, error) {
 	syncCommittee, err := state.SyncCommitteeForMessageSlot(st, slot)
 	if err != nil {
