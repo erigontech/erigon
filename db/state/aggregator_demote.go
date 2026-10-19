@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -42,6 +43,9 @@ func (a *Aggregator) DemoteFile(ctx context.Context, domain kv.Domain, from, to 
 		return err
 	}
 	coldPath := filepath.Join(coldDir, filepath.Base(ssdPath))
+	if a.onDemoteCopy != nil {
+		a.onDemoteCopy(ctx)
+	}
 	if err = copyToCold(ctx, ssdPath, coldPath); err != nil {
 		return fmt.Errorf("DemoteFile: copy %s: %w", ssdPath, err)
 	}
@@ -106,7 +110,7 @@ func copyToCold(ctx context.Context, src, dst string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, in); err != nil {
+	if err := copyWithCancel(ctx, out, in); err != nil {
 		_ = out.Close()
 		_ = dir.RemoveFile(tmp)
 		return err
@@ -124,6 +128,22 @@ func copyToCold(ctx context.Context, src, dst string) error {
 	return dir.FsyncDir(filepath.Dir(dst))
 }
 
+// copyWithCancel copies in chunks so ctx is checked between them; io.CopyN keeps the copy_file_range fast path.
+func copyWithCancel(ctx context.Context, dst *os.File, src *os.File) error {
+	const chunk = 64 << 20
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if _, err := io.CopyN(dst, src, chunk); err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+	}
+}
+
 func replaceWithSymlink(path, target string) error {
 	tmp := path + ".demote.tmp"
 	if err := dir.RemoveFile(tmp); err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -136,4 +156,47 @@ func replaceWithSymlink(path, target string) error {
 		return err
 	}
 	return dir.FsyncDir(filepath.Dir(path))
+}
+
+// DemoteInBackground starts demoting the oldest commitment .kv on SSD whose whole range ends at or before
+// boundaryTxNum. It returns false when a demotion is already in flight or there is nothing to demote.
+func (a *Aggregator) DemoteInBackground(boundaryTxNum uint64, coldDir string) bool {
+	if dbg.NoBackgroundMaintenance() {
+		return false
+	}
+	if !a.demoting.CompareAndSwap(false, true) {
+		return false
+	}
+	from, to, ok := a.demotionCandidate(boundaryTxNum)
+	if !ok {
+		a.demoting.Store(false)
+		return false
+	}
+	started := a.background.TryGo(func() {
+		defer a.demoting.Store(false)
+		if err := a.DemoteFile(a.ctx, kv.CommitmentDomain, from, to, coldDir); err != nil && !errors.Is(err, context.Canceled) {
+			a.logger.Warn("[tiering] demotion failed", "from", from, "to", to, "err", err)
+		}
+	})
+	if !started {
+		a.demoting.Store(false)
+	}
+	return started
+}
+
+func (a *Aggregator) demotionCandidate(boundaryTxNum uint64) (from, to kv.Step, ok bool) {
+	at := a.BeginFilesRo()
+	defer at.Close()
+	stepSize := a.StepSize()
+	for _, f := range at.d[kv.CommitmentDomain].files {
+		if f.endTxNum > boundaryTxNum {
+			break
+		}
+		fi, err := os.Lstat(f.Fullpath())
+		if err != nil || fi.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		return kv.Step(f.startTxNum / stepSize), kv.Step(f.endTxNum / stepSize), true
+	}
+	return 0, 0, false
 }

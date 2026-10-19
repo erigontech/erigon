@@ -105,6 +105,8 @@ type Aggregator struct {
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
 	buildingFiles atomic.Bool
 	mergingFiles  atomic.Bool
+	demoting      atomic.Bool
+	onDemoteCopy  func(ctx context.Context) // test hook
 
 	ctx       context.Context
 	ctxCancel context.CancelFunc
