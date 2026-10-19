@@ -64,7 +64,10 @@ func TestTokenBucketRateLimiterSweepKeepsActiveBuckets(t *testing.T) {
 	require.Contains(t, limiter.limiter, "a")
 
 	limiter.limiter["a"].lastAccess = time.Now().Add(-4 * time.Minute)
-	limiter.lastSweep = time.Time{}
 	require.True(t, limiter.acquire("b"))
+	require.Contains(t, limiter.limiter, "a")
+
+	limiter.lastSweep = time.Time{}
+	require.True(t, limiter.acquire("c"))
 	require.NotContains(t, limiter.limiter, "a")
 }
