@@ -179,7 +179,7 @@ and resilience under heavy RPC and peer traffic.
   (#24629, #24544) — by @domiwei
 - A peer sending a blob transaction with a bad KZG proof no longer causes valid transactions from
   other peers in the same batch to be dropped
-  ([4dadfc2](https://github.com/erigontech/erigon/commit/4dadfc2eb28e08e39607feec9d9dbb21efed2a17)) — by @FlashWayne, @yperbasis
+  (#24535) — by @FlashWayne, @yperbasis
 
 **Full Changelog**: https://github.com/erigontech/erigon/compare/v3.7.1...v3.8.0
 
