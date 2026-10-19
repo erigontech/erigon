@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/execution/chain"
-	execprotocol "github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -63,8 +62,8 @@ func Register() {
 				return txn.Sender(sg)
 			},
 			StandardReceiptPayload: true,
+			MintsValue:             true,
 		})
-		execprotocol.RegisterMessageHook(protocol.SystemTxType, mintHook{})
 	})
 }
 

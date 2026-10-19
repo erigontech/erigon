@@ -172,6 +172,6 @@ func TestMintRejects(t *testing.T) {
 	env = newExecEnv(t, codeStop, 1)
 	tx := mustNew(t, protocol.SystemTx{ChainID: env.cfg.ChainID.Uint64(), To: protocol.EEZL2Address, Value: *new(uint256.Int).SetAllOne()})
 	_, err = env.apply(t, tx, 30_000_000)
-	require.ErrorIs(t, err, protocol.ErrSystemTx)
+	require.ErrorIs(t, err, execprotocol.ErrMintOverflow)
 	require.Equal(t, uint64(1), env.balance(t, sysAddr))
 }

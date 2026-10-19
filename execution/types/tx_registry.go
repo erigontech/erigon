@@ -42,6 +42,10 @@ type TxTypeSpec struct {
 	// a type is then absent from the receipts root this package derives, and
 	// the chain has to supply its own DerivableList.
 	StandardReceiptPayload bool
+	// MintsValue declares that the outer call of this type's transactions
+	// mints their value instead of debiting it from the sender: the sender's
+	// balance need not cover it, and a failed call mints nothing.
+	MintsValue bool
 }
 
 var (
@@ -77,6 +81,12 @@ func RegisterTxType(id byte, spec TxTypeSpec) {
 func IsRegisteredTxType(id byte) bool {
 	_, ok := registeredTxType(id)
 	return ok
+}
+
+// TxTypeMintsValue reports whether id was registered with MintsValue.
+func TxTypeMintsValue(id byte) bool {
+	spec, ok := registeredTxType(id)
+	return ok && spec.MintsValue
 }
 
 func registeredTxType(id byte) (TxTypeSpec, bool) {
