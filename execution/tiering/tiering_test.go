@@ -61,7 +61,7 @@ func TestLag(t *testing.T) {
 	}
 	require.Equal(t, Lag{
 		ColdResident: Usage{Files: 1, Bytes: 1000},
-		CopyPending:  Usage{Files: 1, Bytes: 500, Txs: 50},
+		Queued:       Usage{Files: 1, Bytes: 500, Txs: 50},
 		Straddling:   Usage{Files: 1, Bytes: 100, Txs: 5},
 		Hot:          Usage{Files: 3, Bytes: 610},
 		ColdEnd:      100,
@@ -69,12 +69,12 @@ func TestLag(t *testing.T) {
 	}, ComputeLag(files, 155, "/hdd/domain"))
 
 	require.Equal(t, Lag{
-		CopyPending: Usage{Files: 2, Bytes: 1500, Txs: 150},
-		Hot:         Usage{Files: 4, Bytes: 1610},
+		Queued: Usage{Files: 2, Bytes: 1500, Txs: 150},
+		Hot:    Usage{Files: 4, Bytes: 1610},
 	}, ComputeLag(files, 150, ""), "no cold dir; end == boundary is fully cold")
 	require.Equal(t, Lag{
-		CopyPending: Usage{Files: 1, Bytes: 1000, Txs: 100},
-		Hot:         Usage{Files: 4, Bytes: 1610},
+		Queued: Usage{Files: 1, Bytes: 1000, Txs: 100},
+		Hot:    Usage{Files: 4, Bytes: 1610},
 	}, ComputeLag(files, 100, "/hdd/dom"), "prefix of a dir name is not the cold dir")
 	cold := []File{{Start: 0, End: 100, Size: 1000, Path: "/hdd/domain/a.kv"}, {Start: 100, End: 150, Size: 500, Path: "/hdd/domain/b.kv"}}
 	require.Equal(t, Lag{
@@ -82,6 +82,32 @@ func TestLag(t *testing.T) {
 		ColdEnd:      150,
 		HotStart:     150,
 	}, ComputeLag(cold, 200, "/hdd/domain"), "all files cold: the hot tier starts where the cold tier ends")
+
+	copying := []File{
+		{Start: 0, End: 100, Size: 1000, Path: "/ssd/domain/a.kv", Copying: true},
+		{Start: 100, End: 150, Size: 500, Path: "/ssd/domain/b.kv"},
+		{Start: 150, End: 160, Size: 100, Path: "/ssd/domain/c.kv", Copying: true},
+	}
+	require.Equal(t, Lag{
+		Copying:    Usage{Files: 1, Bytes: 1000, Txs: 100},
+		Queued:     Usage{Files: 1, Bytes: 500, Txs: 50},
+		Straddling: Usage{Files: 1, Bytes: 100, Txs: 5},
+		Hot:        Usage{Files: 3, Bytes: 1600},
+	}, ComputeLag(copying, 155, "/hdd/domain"), "a straddling file is never counted as copying")
+}
+
+func TestStatCopying(t *testing.T) {
+	coldDir := t.TempDir()
+	writeFile(t, filepath.Join(coldDir, "b.kv.tmp"), 7)
+	files := []File{{Path: "/ssd/domain/a.kv"}, {Path: "/ssd/domain/b.kv"}}
+	tmpBytes, err := StatCopying(coldDir, files)
+	require.NoError(t, err)
+	require.EqualValues(t, 7, tmpBytes)
+	require.False(t, files[0].Copying)
+	require.True(t, files[1].Copying)
+	tmpBytes, err = StatCopying("", files)
+	require.NoError(t, err)
+	require.Zero(t, tmpBytes)
 }
 
 func TestKVFiles(t *testing.T) {

@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/kv"
@@ -43,13 +44,23 @@ func (a *Aggregator) DemoteFile(ctx context.Context, domain kv.Domain, from, to 
 	if err != nil {
 		return err
 	}
-	coldPath := filepath.Join(coldDir, filepath.Base(ssdPath))
+	name, size, start := filepath.Base(ssdPath), old.decompressor.Size(), time.Now()
+	mxDemotionInFlight.Set(1)
+	mxDemotionFile.WithLabelValues(name).Set(1)
+	defer func() {
+		mxDemotionInFlight.Set(0)
+		mxDemotionFile.Reset()
+	}()
+	a.logger.Info("[tiering] demotion started", "file", name, "size", common.ByteCount(uint64(size)))
+
+	coldPath := filepath.Join(coldDir, name)
 	if a.onDemoteCopy != nil {
 		a.onDemoteCopy(ctx)
 	}
 	if err = copyToCold(ctx, ssdPath, coldPath, a.coldIO); err != nil {
 		return fmt.Errorf("DemoteFile: copy %s: %w", ssdPath, err)
 	}
+	copyBytesPerSec := float64(size) / time.Since(start).Seconds()
 	if err = replaceWithSymlink(ssdPath, coldPath); err != nil {
 		return fmt.Errorf("DemoteFile: symlink %s: %w", ssdPath, err)
 	}
@@ -76,6 +87,13 @@ func (a *Aggregator) DemoteFile(ctx context.Context, domain kv.Domain, from, to 
 		return err
 	}
 	a.recalcVisibleFiles(retired)
+
+	seconds := time.Since(start).Seconds()
+	mxDemotions.WithLabelValues(domain.String()).Inc()
+	mxDemotedBytes.WithLabelValues(domain.String()).Add(float64(size))
+	mxDemotionSeconds.Set(seconds)
+	mxDemotionCopyBytesPerSec.Set(copyBytesPerSec)
+	a.logger.Info("[tiering] demotion done", "file", name, "size", common.ByteCount(uint64(size)), "seconds", fmt.Sprintf("%.1f", seconds), "MB/s", fmt.Sprintf("%.0f", copyBytesPerSec/1e6))
 	return nil
 }
 

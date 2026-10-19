@@ -91,9 +91,15 @@ func reportTiering(ctx context.Context, cfg ExecuteBlockCfg, stepSize uint64, tx
 		if err != nil {
 			return err
 		}
+		var copyingBytes uint64
+		if d == kv.CommitmentDomain {
+			if copyingBytes, err = tiering.StatCopying(coldDir, files); err != nil {
+				return err
+			}
+		}
 		lag := tiering.ComputeLag(files, boundaryTxNum, coldDir)
 		name := d.String()
-		for reason, u := range map[string]tiering.Usage{"straddling_file": lag.Straddling, "copy_pending": lag.CopyPending} {
+		for reason, u := range map[string]tiering.Usage{"straddling_file": lag.Straddling, "queued": lag.Queued, "copying": lag.Copying} {
 			mxTieringLagFiles.WithLabelValues(name, reason).SetInt(u.Files)
 			mxTieringLagBytes.WithLabelValues(name, reason).SetUint64(u.Bytes)
 			mxTieringLagTxs.WithLabelValues(name, reason).SetUint64(u.Txs)
@@ -104,6 +110,7 @@ func reportTiering(ctx context.Context, cfg ExecuteBlockCfg, stepSize uint64, tx
 		mxTieringSSDStartStep.WithLabelValues(name).SetUint64(lag.HotStart / stepSize)
 		if d == kv.CommitmentDomain {
 			commitmentLag = lag
+			mxTieringDuplicateBytes.WithLabelValues("copying").SetUint64(copyingBytes)
 			if err := reportCommitmentTiers(ctx, cfg, tx, files, lag, boundary, boundaryTxNum); err != nil {
 				return err
 			}
@@ -121,7 +128,7 @@ func reportTiering(ctx context.Context, cfg ExecuteBlockCfg, stepSize uint64, tx
 	}
 	logger.Info("[tiering] cold boundary", "head", head, "lookback", lookback, "boundaryBlock", boundary,
 		"boundaryStep", boundaryTxNum/stepSize, "coldCommitmentFiles", names,
-		"commitmentCopyPending", usageString(commitmentLag.CopyPending), "commitmentStraddling", usageString(commitmentLag.Straddling),
+		"commitmentQueued", usageString(commitmentLag.Queued), "commitmentCopying", usageString(commitmentLag.Copying), "commitmentStraddling", usageString(commitmentLag.Straddling),
 		"commitmentColdResident", usageString(commitmentLag.ColdResident))
 	return nil
 }
@@ -184,7 +191,7 @@ func reportCommitmentTiers(ctx context.Context, cfg ExecuteBlockCfg, tx kv.Tempo
 	if err != nil {
 		return err
 	}
-	copyPendingStartBlock, err := blockOfTxNum(ctx, cfg, tx, straddlingStart-lag.CopyPending.Txs, straddlingStartBlock)
+	copyPendingStartBlock, err := blockOfTxNum(ctx, cfg, tx, straddlingStart-lag.Queued.Txs-lag.Copying.Txs, straddlingStartBlock)
 	if err != nil {
 		return err
 	}

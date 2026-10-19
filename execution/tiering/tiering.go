@@ -61,6 +61,7 @@ func ColdFiles(files kv.VisibleFiles, boundaryTxNum uint64) kv.VisibleFiles {
 type File struct {
 	Start, End, Size uint64
 	Path             string
+	Copying          bool // its partial cold copy exists
 }
 
 type Usage struct {
@@ -73,8 +74,8 @@ type Usage struct {
 // tier. ColdEnd is the end of the newest cold-resident file; HotStart is the start of the oldest hot file, or ColdEnd
 // when every file is cold.
 type Lag struct {
-	ColdResident, CopyPending, Straddling, Hot Usage
-	ColdEnd, HotStart                          uint64
+	ColdResident, Queued, Copying, Straddling, Hot Usage
+	ColdEnd, HotStart                              uint64
 }
 
 // IsCold reports whether a symlink-resolved path lies in the cold dir.
@@ -97,8 +98,11 @@ func ComputeLag(files []File, boundaryTxNum uint64, coldDir string) Lag {
 		hotStart = min(hotStart, f.Start)
 		var u *Usage
 		switch {
+		case f.End <= boundaryTxNum && f.Copying:
+			u = &lag.Copying
+			u.Txs += f.End - f.Start
 		case f.End <= boundaryTxNum:
-			u = &lag.CopyPending
+			u = &lag.Queued
 			u.Txs += f.End - f.Start
 		case f.Start < boundaryTxNum:
 			u = &lag.Straddling
@@ -195,4 +199,24 @@ func ValidateDemote(lookback uint64, coldDir, snapDomain string, allowSameFS boo
 		return fmt.Errorf("--tiering.cold-dir %s is on the same filesystem as %s (set --tiering.allow-same-fs to allow)", coldDir, snapDomain)
 	}
 	return nil
+}
+
+// StatCopying marks the files whose partial cold copy (<coldDir>/<name>.tmp) exists and returns the bytes copied so far.
+func StatCopying(coldDir string, files []File) (uint64, error) {
+	if coldDir == "" {
+		return 0, nil
+	}
+	var total uint64
+	for i := range files {
+		info, err := os.Stat(filepath.Join(coldDir, filepath.Base(files[i].Path)+".tmp"))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+		files[i].Copying = true
+		total += uint64(info.Size())
+	}
+	return total, nil
 }

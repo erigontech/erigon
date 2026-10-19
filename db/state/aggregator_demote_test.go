@@ -302,3 +302,21 @@ func TestAggregatorCloseCancelsDemotionCopy(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, coldFiles)
 }
+
+func TestAggregatorDemoteFileMetrics(t *testing.T) {
+	t.Parallel()
+	_, agg := testAggWithThreeSteps(t)
+	ssdPath := domainFileBySuffix(t, agg.Dirs().SnapDomain, "commitment.1-2.kv")
+	fi, err := os.Stat(ssdPath)
+	require.NoError(t, err)
+	demotions := mxDemotions.WithLabelValues("commitment")
+	demotedBytes := mxDemotedBytes.WithLabelValues("commitment")
+	demotionsBefore, bytesBefore := demotions.GetValue(), demotedBytes.GetValue()
+
+	require.NoError(t, agg.DemoteFile(t.Context(), kv.CommitmentDomain, 1, 2, t.TempDir()))
+
+	require.GreaterOrEqual(t, demotions.GetValue()-demotionsBefore, 1.0)
+	require.GreaterOrEqual(t, demotedBytes.GetValue()-bytesBefore, float64(fi.Size()))
+	require.Positive(t, mxDemotionSeconds.GetValue())
+	require.Positive(t, mxDemotionCopyBytesPerSec.GetValue())
+}
