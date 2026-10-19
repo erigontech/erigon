@@ -76,6 +76,7 @@ type Aggregator struct {
 	erigondbDomainStepsInFrozenFile uint64
 	// commitmentHotMaxMergeSteps caps commitment merges (0 = no extra cap): with 1, commitment files on the hot tier stay 1-step.
 	commitmentHotMaxMergeSteps uint64
+	demoteColdDir              string
 
 	dirtyFilesLock sync.Mutex
 	// commitmentRefsMu guards the runtime-mutable commitment ReferencesInCommitmentBranches
@@ -105,6 +106,9 @@ type Aggregator struct {
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
 	buildingFiles atomic.Bool
 	mergingFiles  atomic.Bool
+	demoting      atomic.Bool
+	onDemoteCopy  func(ctx context.Context) // test hook
+	coldIO        *coldIOGate
 
 	ctx       context.Context
 	ctxCancel context.CancelFunc
@@ -147,6 +151,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (*
 		dirs:               dirs,
 		leakDetector:       dbg.NewLeakDetector("agg", dbg.SlowTx()),
 		backgroundProgress: background.NewProgressSet(),
+		coldIO:             newColdIOGate(),
 		logger:             logger,
 		workers:            workersCfg{merge: dbg.MergeWorkers, collateAndBuild: dbg.CollateWorkers},
 
@@ -599,16 +604,16 @@ func (a *Aggregator) OpenFolder(db kv.RoDB) error {
 	return a.checkFilesDBGap(db)
 }
 
-// checkCommitmentTiering refuses a commitment merge limit while commitment branches may reference
+// checkCommitmentTiering refuses a commitment merge limit or demotion while commitment branches may reference
 // account/storage files: referencing ties the merge ranges of the three domains together.
 func (a *Aggregator) checkCommitmentTiering() error {
-	if a.commitmentHotMaxMergeSteps == 0 {
+	if a.commitmentHotMaxMergeSteps == 0 && a.demoteColdDir == "" {
 		return nil
 	}
 	at := a.BeginFilesRo()
 	defer at.Close()
 	if a.referencesInCommitmentBranches() || at.commitmentVisibleFilesReferenced() {
-		return errors.New("tiering commitment merge limit needs commitment references off (references_in_commitment_branches=false, no referenced commitment files)")
+		return errors.New("tiering commitment merge limit and demotion need commitment references off (references_in_commitment_branches=false, no referenced commitment files)")
 	}
 	return nil
 }

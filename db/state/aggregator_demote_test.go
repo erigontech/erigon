@@ -17,6 +17,7 @@
 package state
 
 import (
+	"context"
 	"io"
 	"io/fs"
 	"os"
@@ -28,23 +29,36 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/mvcc"
 )
 
 func testAggWithThreeSteps(t *testing.T) (kv.RwDB, *Aggregator) {
 	t.Helper()
+	return testAggWithRanges(t, []testFileRange{{0, 1}, {1, 2}, {2, 3}})
+}
+
+// testAggWithRanges opens an aggregator with demotion to a temp cold dir. beforeOpen runs before the first OpenFolder;
+// the cold dir is set after it unless beforeOpen sets it, so test files skip the commitment-references check.
+func testAggWithRanges(t *testing.T, ranges []testFileRange, beforeOpen ...func(agg *Aggregator)) (kv.RwDB, *Aggregator) {
+	t.Helper()
 	if runtime.GOOS != "linux" {
 		t.Skip("inspects /proc/self/maps; Linux only")
 	}
 	db, agg := testDbAndAggregatorv3(t, 10)
-	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
 	dirs := agg.Dirs()
 	generateAccountsFile(t, dirs, ranges)
 	generateStorageFile(t, dirs, ranges)
 	generateCodeFile(t, dirs, ranges)
 	generateCommitmentFile(t, dirs, ranges)
+	for _, f := range beforeOpen {
+		f(agg)
+	}
 	require.NoError(t, agg.OpenFolder(db))
+	if agg.demoteColdDir == "" {
+		require.NoError(t, agg.setDemoteColdDir(t.TempDir()))
+	}
 	return db, agg
 }
 
@@ -93,7 +107,7 @@ func TestAggregatorDemoteFileSwapsToColdAndReleasesSSDInode(t *testing.T) {
 	snapDomain := agg.Dirs().SnapDomain
 	ssdPath := domainFileBySuffix(t, snapDomain, "commitment.1-2.kv")
 	kviPath := strings.TrimSuffix(ssdPath, ".kv") + ".kvi"
-	coldDir := t.TempDir()
+	coldDir := agg.demoteColdDir
 	coldPath := filepath.Join(coldDir, filepath.Base(ssdPath))
 
 	oldTx := agg.BeginFilesRo()
@@ -153,7 +167,7 @@ func TestAggregatorDeletingDemotedFileRemovesColdTarget(t *testing.T) {
 	t.Parallel()
 	_, agg := testAggWithThreeSteps(t)
 	ssdPath := domainFileBySuffix(t, agg.Dirs().SnapDomain, "commitment.1-2.kv")
-	coldDir := t.TempDir()
+	coldDir := agg.demoteColdDir
 	require.NoError(t, agg.DemoteFile(t.Context(), kv.CommitmentDomain, 1, 2, coldDir))
 
 	retireDirtyCommitmentFile(t, agg, mvcc.RetireReasonMerged, 1, 2)
@@ -169,7 +183,7 @@ func TestAggregatorReclaimAfterDemoteIsCloseOnly(t *testing.T) {
 	_, agg := testAggWithThreeSteps(t)
 	ssdPath := domainFileBySuffix(t, agg.Dirs().SnapDomain, "commitment.1-2.kv")
 	kviPath := strings.TrimSuffix(ssdPath, ".kv") + ".kvi"
-	coldDir := t.TempDir()
+	coldDir := agg.demoteColdDir
 
 	oldTx := agg.BeginFilesRo()
 	require.NoError(t, agg.DemoteFile(t.Context(), kv.CommitmentDomain, 1, 2, coldDir))
@@ -185,7 +199,7 @@ func TestAggregatorDemoteFileSkipsCopyOfSameSizeColdTarget(t *testing.T) {
 	t.Parallel()
 	_, agg := testAggWithThreeSteps(t)
 	ssdPath := domainFileBySuffix(t, agg.Dirs().SnapDomain, "commitment.1-2.kv")
-	coldDir := t.TempDir()
+	coldDir := agg.demoteColdDir
 	coldPath := filepath.Join(coldDir, filepath.Base(ssdPath))
 	data, err := os.ReadFile(ssdPath)
 	require.NoError(t, err)
@@ -206,7 +220,7 @@ func TestAggregatorDemoteFileReplacesColdTargetOfOtherSize(t *testing.T) {
 	ssdPath := domainFileBySuffix(t, agg.Dirs().SnapDomain, "commitment.1-2.kv")
 	ssdInfo, err := os.Stat(ssdPath)
 	require.NoError(t, err)
-	coldDir := t.TempDir()
+	coldDir := agg.demoteColdDir
 	coldPath := filepath.Join(coldDir, filepath.Base(ssdPath))
 	require.NoError(t, os.WriteFile(coldPath, []byte("partial"), 0o644))
 
@@ -217,4 +231,171 @@ func TestAggregatorDemoteFileReplacesColdTargetOfOtherSize(t *testing.T) {
 	require.Equal(t, ssdInfo.Size(), fi.Size())
 	_, err = os.Stat(coldPath + ".tmp")
 	require.ErrorIs(t, err, fs.ErrNotExist)
+}
+
+func isSymlink(t *testing.T, path string) bool {
+	t.Helper()
+	fi, err := os.Lstat(path)
+	require.NoError(t, err)
+	return fi.Mode()&os.ModeSymlink != 0
+}
+
+func waitDemotionIdle(t *testing.T, agg *Aggregator) {
+	t.Helper()
+	require.Eventually(t, func() bool { return !agg.demoting.Load() }, 10*time.Second, 5*time.Millisecond)
+}
+
+func TestAggregatorDemoteInBackgroundOldestFullyColdFirst(t *testing.T) {
+	t.Parallel()
+	_, agg := testAggWithRanges(t, []testFileRange{{0, 4}, {4, 5}, {5, 6}, {6, 8}})
+	snapDomain := agg.Dirs().SnapDomain
+	paths := []string{
+		domainFileBySuffix(t, snapDomain, "commitment.0-4.kv"),
+		domainFileBySuffix(t, snapDomain, "commitment.4-5.kv"),
+		domainFileBySuffix(t, snapDomain, "commitment.5-6.kv"),
+	}
+	straddling := domainFileBySuffix(t, snapDomain, "commitment.6-8.kv")
+	boundary := 7 * agg.StepSize()
+
+	for i := range paths {
+		require.True(t, agg.DemoteInBackground(boundary))
+		waitDemotionIdle(t, agg)
+		for j, p := range paths {
+			require.Equal(t, j <= i, isSymlink(t, p), "after run %d: %s", i, p)
+		}
+	}
+	require.False(t, agg.DemoteInBackground(boundary))
+	require.False(t, isSymlink(t, straddling))
+}
+
+func TestAggregatorDemoteInBackgroundIsSingleFlight(t *testing.T) {
+	t.Parallel()
+	_, agg := testAggWithRanges(t, []testFileRange{{0, 1}, {1, 2}, {2, 3}})
+	snapDomain := agg.Dirs().SnapDomain
+	entered, release := make(chan struct{}), make(chan struct{})
+	agg.onDemoteCopy = func(context.Context) {
+		entered <- struct{}{}
+		<-release
+	}
+
+	require.True(t, agg.DemoteInBackground(2*agg.StepSize()))
+	<-entered
+	require.False(t, agg.DemoteInBackground(2*agg.StepSize()))
+	close(release)
+	waitDemotionIdle(t, agg)
+
+	require.True(t, isSymlink(t, domainFileBySuffix(t, snapDomain, "commitment.0-1.kv")))
+	require.False(t, isSymlink(t, domainFileBySuffix(t, snapDomain, "commitment.1-2.kv")))
+}
+
+func TestAggregatorCloseCancelsDemotionCopy(t *testing.T) {
+	t.Parallel()
+	_, agg := testAggWithRanges(t, []testFileRange{{0, 1}, {1, 2}})
+	ssdPath := domainFileBySuffix(t, agg.Dirs().SnapDomain, "commitment.0-1.kv")
+	coldDir := agg.demoteColdDir
+	entered := make(chan struct{})
+	agg.onDemoteCopy = func(ctx context.Context) {
+		close(entered)
+		<-ctx.Done()
+	}
+
+	require.True(t, agg.DemoteInBackground(agg.StepSize()))
+	<-entered
+	agg.Close()
+
+	require.False(t, agg.demoting.Load())
+	require.False(t, isSymlink(t, ssdPath))
+	coldFiles, err := os.ReadDir(coldDir)
+	require.NoError(t, err)
+	require.Empty(t, coldFiles)
+}
+
+func TestAggregatorDemoteFileMetrics(t *testing.T) {
+	t.Parallel()
+	_, agg := testAggWithThreeSteps(t)
+	ssdPath := domainFileBySuffix(t, agg.Dirs().SnapDomain, "commitment.1-2.kv")
+	fi, err := os.Stat(ssdPath)
+	require.NoError(t, err)
+	demotions := mxDemotions.WithLabelValues("commitment")
+	demotedBytes := mxDemotedBytes.WithLabelValues("commitment")
+	demotionsBefore, bytesBefore := demotions.GetValue(), demotedBytes.GetValue()
+
+	require.NoError(t, agg.DemoteFile(t.Context(), kv.CommitmentDomain, 1, 2, t.TempDir()))
+
+	require.GreaterOrEqual(t, demotions.GetValue()-demotionsBefore, 1.0)
+	require.GreaterOrEqual(t, demotedBytes.GetValue()-bytesBefore, float64(fi.Size()))
+	require.Positive(t, mxDemotionSeconds.GetValue())
+	require.Positive(t, mxDemotionCopyBytesPerSec.GetValue())
+}
+
+func TestAggregatorOpenFolderFailsOnDanglingSymlink(t *testing.T) {
+	t.Parallel()
+	db, agg := testAggWithThreeSteps(t)
+	ssdPath := domainFileBySuffix(t, agg.Dirs().SnapDomain, "commitment.1-2.kv")
+	coldPath := filepath.Join(t.TempDir(), filepath.Base(ssdPath))
+	require.NoError(t, dir.RemoveFile(ssdPath))
+	require.NoError(t, os.Symlink(coldPath, ssdPath))
+
+	err := agg.OpenFolder(db)
+	require.ErrorContains(t, err, "dangling symlink")
+	require.ErrorContains(t, err, coldPath)
+}
+
+func TestAggregatorRecoverDemotionRemovesOwnLeftoversOnly(t *testing.T) {
+	t.Parallel()
+	_, agg := testAggWithThreeSteps(t)
+	snapDomain := agg.Dirs().SnapDomain
+	ssdPath := domainFileBySuffix(t, snapDomain, "commitment.1-2.kv")
+	name := filepath.Base(ssdPath)
+	coldDir := t.TempDir()
+	ownTmp := filepath.Join(coldDir, name+".tmp")
+	otherTmp := filepath.Join(coldDir, "v1.0-commitment.7-8.kv.tmp")
+	linkTmp := ssdPath + ".demote.tmp"
+	for _, p := range []string{ownTmp, otherTmp} {
+		require.NoError(t, os.WriteFile(p, []byte("partial"), 0o644))
+	}
+	require.NoError(t, os.Symlink(filepath.Join(coldDir, name), linkTmp))
+
+	require.NoError(t, recoverDemotion(snapDomain, coldDir, agg.logger))
+
+	for _, p := range []string{ownTmp, linkTmp} {
+		_, err := os.Lstat(p)
+		require.ErrorIs(t, err, fs.ErrNotExist, p)
+	}
+	_, err := os.Stat(otherTmp)
+	require.NoError(t, err)
+	require.False(t, isSymlink(t, ssdPath))
+}
+
+func TestAggregatorOpenFolderIgnoresDanglingDemoteTmpLink(t *testing.T) {
+	t.Parallel()
+	db, agg := testAggWithThreeSteps(t)
+	ssdPath := domainFileBySuffix(t, agg.Dirs().SnapDomain, "commitment.1-2.kv")
+	require.NoError(t, os.Symlink(filepath.Join(t.TempDir(), "gone.kv"), ssdPath+".demote.tmp"))
+	require.NoError(t, agg.OpenFolder(db))
+}
+
+func TestAggregatorDemoteInBackgroundSkipsOnlyColdResidentFiles(t *testing.T) {
+	t.Parallel()
+	var onOtherSSDDir, alreadyCold, notLinked string
+	_, agg := testAggWithRanges(t, []testFileRange{{0, 1}, {1, 2}, {2, 3}}, func(agg *Aggregator) {
+		snapDomain := agg.Dirs().SnapDomain
+		onOtherSSDDir = domainFileBySuffix(t, snapDomain, "commitment.0-1.kv")
+		alreadyCold = domainFileBySuffix(t, snapDomain, "commitment.1-2.kv")
+		notLinked = domainFileBySuffix(t, snapDomain, "commitment.2-3.kv")
+		require.NoError(t, agg.setDemoteColdDir(t.TempDir()))
+		moveToColdByHand(t, onOtherSSDDir, t.TempDir())
+		moveToColdByHand(t, alreadyCold, agg.demoteColdDir)
+	})
+
+	require.True(t, agg.DemoteInBackground(3*agg.StepSize()))
+	waitDemotionIdle(t, agg)
+	target, err := os.Readlink(onOtherSSDDir)
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(agg.demoteColdDir, filepath.Base(onOtherSSDDir)), target)
+
+	require.True(t, agg.DemoteInBackground(3*agg.StepSize()))
+	waitDemotionIdle(t, agg)
+	require.True(t, isSymlink(t, notLinked))
+	require.False(t, agg.DemoteInBackground(3*agg.StepSize()))
 }

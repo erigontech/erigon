@@ -24,8 +24,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -41,10 +46,23 @@ func (a *Aggregator) DemoteFile(ctx context.Context, domain kv.Domain, from, to 
 	if err != nil {
 		return err
 	}
-	coldPath := filepath.Join(coldDir, filepath.Base(ssdPath))
-	if err = copyToCold(ctx, ssdPath, coldPath); err != nil {
+	name, size, start := filepath.Base(ssdPath), old.decompressor.Size(), time.Now()
+	mxDemotionInFlight.Set(1)
+	mxDemotionFile.WithLabelValues(name).Set(1)
+	defer func() {
+		mxDemotionInFlight.Set(0)
+		mxDemotionFile.Reset()
+	}()
+	a.logger.Info("[tiering] demotion started", "file", name, "size", common.ByteCount(uint64(size)))
+
+	coldPath := filepath.Join(coldDir, name)
+	if a.onDemoteCopy != nil {
+		a.onDemoteCopy(ctx)
+	}
+	if err = copyToCold(ctx, ssdPath, coldPath, a.coldIO); err != nil {
 		return fmt.Errorf("DemoteFile: copy %s: %w", ssdPath, err)
 	}
+	copyBytesPerSec := float64(size) / time.Since(start).Seconds()
 	if err = replaceWithSymlink(ssdPath, coldPath); err != nil {
 		return fmt.Errorf("DemoteFile: symlink %s: %w", ssdPath, err)
 	}
@@ -71,6 +89,28 @@ func (a *Aggregator) DemoteFile(ctx context.Context, domain kv.Domain, from, to 
 		return err
 	}
 	a.recalcVisibleFiles(retired)
+
+	seconds := time.Since(start).Seconds()
+	mxDemotions.WithLabelValues(domain.String()).Inc()
+	mxDemotedBytes.WithLabelValues(domain.String()).Add(float64(size))
+	mxDemotionSeconds.Set(seconds)
+	mxDemotionCopyBytesPerSec.Set(copyBytesPerSec)
+	a.logger.Info("[tiering] demotion done", "file", name, "size", common.ByteCount(uint64(size)), "seconds", fmt.Sprintf("%.1f", seconds), "MB/s", fmt.Sprintf("%.0f", copyBytesPerSec/1e6))
+	return nil
+}
+
+// setDemoteColdDir enables demotion; commitment files that resolve into coldDir count as cold-resident from their next open.
+func (a *Aggregator) setDemoteColdDir(coldDir string) error {
+	abs, err := filepath.Abs(coldDir)
+	if err != nil {
+		return err
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return err
+	}
+	a.demoteColdDir = resolved
+	a.d[kv.CommitmentDomain].coldDir = resolved
 	return nil
 }
 
@@ -85,7 +125,7 @@ func (a *Aggregator) dirtyDomainFile(d *Domain, from, to kv.Step) (item *FilesIt
 }
 
 // copyToCold skips the copy when dst already has the size of src (a demotion interrupted after the copy).
-func copyToCold(ctx context.Context, src, dst string) error {
+func copyToCold(ctx context.Context, src, dst string, gate *coldIOGate) error {
 	srcInfo, err := os.Stat(src)
 	if err != nil {
 		return err
@@ -106,7 +146,7 @@ func copyToCold(ctx context.Context, src, dst string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, in); err != nil {
+	if err := copyWithCancel(ctx, out, in, gate); err != nil {
 		_ = out.Close()
 		_ = dir.RemoveFile(tmp)
 		return err
@@ -124,6 +164,33 @@ func copyToCold(ctx context.Context, src, dst string) error {
 	return dir.FsyncDir(filepath.Dir(dst))
 }
 
+// copyWithCancel copies in chunks so cancel and pause act between them; io.CopyN keeps the copy_file_range fast
+// path. Each chunk's writeback is started at once, so a pause also stops the disk writes, not only the copy.
+func copyWithCancel(ctx context.Context, dst *os.File, src *os.File, gate *coldIOGate) error {
+	const chunk = 1 << 20
+	var off int64
+	for {
+		waitStart := time.Now()
+		if err := gate.Wait(ctx); err != nil {
+			return err
+		}
+		mxDemotionPausedSeconds.Add(time.Since(waitStart).Seconds())
+		n, err := io.CopyN(dst, src, chunk)
+		if n > 0 {
+			if werr := writeBack(dst, off, n, chunk); werr != nil {
+				return werr
+			}
+			off += n
+		}
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
+}
+
 func replaceWithSymlink(path, target string) error {
 	tmp := path + ".demote.tmp"
 	if err := dir.RemoveFile(tmp); err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -136,4 +203,73 @@ func replaceWithSymlink(path, target string) error {
 		return err
 	}
 	return dir.FsyncDir(filepath.Dir(path))
+}
+
+// DemoteInBackground starts demoting the oldest commitment .kv on SSD whose whole range ends at or before
+// boundaryTxNum. It returns false when a demotion is already in flight or there is nothing to demote.
+func (a *Aggregator) DemoteInBackground(boundaryTxNum uint64) bool {
+	if dbg.NoBackgroundMaintenance() || a.demoteColdDir == "" {
+		return false
+	}
+	if !a.demoting.CompareAndSwap(false, true) {
+		return false
+	}
+	from, to, ok := a.demotionCandidate(boundaryTxNum)
+	if !ok {
+		a.demoting.Store(false)
+		return false
+	}
+	started := a.background.TryGo(func() {
+		defer a.demoting.Store(false)
+		if err := a.DemoteFile(a.ctx, kv.CommitmentDomain, from, to, a.demoteColdDir); err != nil && !errors.Is(err, context.Canceled) {
+			a.logger.Warn("[tiering] demotion failed", "from", from, "to", to, "err", err)
+		}
+	})
+	if !started {
+		a.demoting.Store(false)
+	}
+	return started
+}
+
+func (a *Aggregator) demotionCandidate(boundaryTxNum uint64) (from, to kv.Step, ok bool) {
+	at := a.BeginFilesRo()
+	defer at.Close()
+	stepSize := a.StepSize()
+	for _, f := range at.d[kv.CommitmentDomain].files {
+		if f.endTxNum > boundaryTxNum {
+			break
+		}
+		if f.src.cold {
+			continue
+		}
+		return kv.Step(f.startTxNum / stepSize), kv.Step(f.endTxNum / stepSize), true
+	}
+	return 0, 0, false
+}
+
+// recoverDemotion removes the leftovers of an interrupted demotion. The cold dir can be shared by several datadirs,
+// so only partial copies of this datadir's commitment files are removed there.
+func recoverDemotion(snapDomain, coldDir string, logger log.Logger) error {
+	entries, err := os.ReadDir(snapDomain)
+	if err != nil {
+		return err
+	}
+	commitment := "-" + kv.CommitmentDomain.String() + "."
+	for _, e := range entries {
+		name := e.Name()
+		switch {
+		case strings.HasSuffix(name, ".demote.tmp"):
+			if err := dir.RemoveFile(filepath.Join(snapDomain, name)); err != nil {
+				return err
+			}
+		case strings.Contains(name, commitment) && strings.HasSuffix(name, ".kv"):
+			if err := dir.RemoveFile(filepath.Join(coldDir, name+".tmp")); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return err
+			}
+			if _, err := os.Stat(filepath.Join(coldDir, name)); err == nil && e.Type().IsRegular() {
+				logger.Info("[tiering] demotion swap pending; the next trigger finishes it", "file", name)
+			}
+		}
+	}
+	return nil
 }

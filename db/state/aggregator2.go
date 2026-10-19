@@ -25,6 +25,7 @@ type AggOpts struct { //nolint:gocritic
 	stepsInFrozenFile               uint64 // != 0 mean override erigondb.toml settings
 	erigondbDomainStepsInFrozenFile uint64
 	commitmentHotMaxMergeSteps      uint64
+	demoteColdDir                   string
 	referencesInCommitmentBranches  *bool // nil = leave global schema default untouched
 
 	genSaltIfNeed       bool
@@ -50,6 +51,11 @@ func NewTest(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 
 func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:gocritic
 	// TODO: rename `OpenFolder` to `ReopenFolder`
+	if opts.demoteColdDir != "" {
+		if err := recoverDemotion(opts.dirs.SnapDomain, opts.demoteColdDir, opts.logger); err != nil {
+			return nil, err
+		}
+	}
 	if opts.sanityOldNaming {
 		if err := CheckSnapshotsCompatibility(opts.dirs); err != nil {
 			panic(err)
@@ -84,6 +90,16 @@ func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:go
 	if err := a.ConfigureDomains(); err != nil {
 		return nil, err
 	}
+	if opts.demoteColdDir != "" {
+		if err := a.setDemoteColdDir(opts.demoteColdDir); err != nil {
+			a.Close()
+			return nil, err
+		}
+	}
+	if err := a.checkCommitmentTiering(); err != nil {
+		a.Close()
+		return nil, err
+	}
 
 	return a, nil
 }
@@ -116,6 +132,12 @@ func (opts AggOpts) ErigondbDomainStepsInFrozenFile(steps uint64) AggOpts { //no
 
 func (opts AggOpts) CommitmentHotMaxMergeSteps(steps uint64) AggOpts { //nolint:gocritic
 	opts.commitmentHotMaxMergeSteps = steps
+	return opts
+}
+
+// DemoteColdDir enables demotion to coldDir: Open recovers interrupted demotions and commitment references are refused.
+func (opts AggOpts) DemoteColdDir(coldDir string) AggOpts { //nolint:gocritic
+	opts.demoteColdDir = coldDir
 	return opts
 }
 

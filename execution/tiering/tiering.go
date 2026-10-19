@@ -18,6 +18,7 @@ package tiering
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -60,6 +61,7 @@ func ColdFiles(files kv.VisibleFiles, boundaryTxNum uint64) kv.VisibleFiles {
 type File struct {
 	Start, End, Size uint64
 	Path             string
+	Copying          bool // its partial cold copy exists
 }
 
 type Usage struct {
@@ -72,8 +74,8 @@ type Usage struct {
 // tier. ColdEnd is the end of the newest cold-resident file; HotStart is the start of the oldest hot file, or ColdEnd
 // when every file is cold.
 type Lag struct {
-	ColdResident, CopyPending, Straddling, Hot Usage
-	ColdEnd, HotStart                          uint64
+	ColdResident, Queued, Copying, Straddling, Hot Usage
+	ColdEnd, HotStart                              uint64
 }
 
 // IsCold reports whether a symlink-resolved path lies in the cold dir.
@@ -96,8 +98,11 @@ func ComputeLag(files []File, boundaryTxNum uint64, coldDir string) Lag {
 		hotStart = min(hotStart, f.Start)
 		var u *Usage
 		switch {
+		case f.End <= boundaryTxNum && f.Copying:
+			u = &lag.Copying
+			u.Txs += f.End - f.Start
 		case f.End <= boundaryTxNum:
-			u = &lag.CopyPending
+			u = &lag.Queued
 			u.Txs += f.End - f.Start
 		case f.Start < boundaryTxNum:
 			u = &lag.Straddling
@@ -166,4 +171,64 @@ func DuplicateBytes(coldDir string, hot []File) (uint64, error) {
 func unversioned(name string) string {
 	_, rest, _ := strings.Cut(name, "-")
 	return rest
+}
+
+// ValidateDemote checks the settings that --tiering.demote needs.
+func ValidateDemote(lookback uint64, coldDir, snapDomain string, allowSameFS bool) error {
+	if lookback == 0 {
+		return errors.New("--tiering.demote requires --tiering.lookback-blocks")
+	}
+	if coldDir == "" {
+		return errors.New("--tiering.demote requires --tiering.cold-dir")
+	}
+	info, err := os.Stat(coldDir)
+	if err != nil {
+		return fmt.Errorf("--tiering.cold-dir: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("--tiering.cold-dir %s is not a directory", coldDir)
+	}
+	if allowSameFS {
+		return nil
+	}
+	same, err := sameFilesystem(coldDir, snapDomain)
+	if err != nil {
+		return err
+	}
+	if same {
+		return fmt.Errorf("--tiering.cold-dir %s is on the same filesystem as %s (set --tiering.allow-same-fs to allow)", coldDir, snapDomain)
+	}
+	return nil
+}
+
+// StatCopying marks the files whose partial cold copy (<coldDir>/<name>.tmp) exists and returns the bytes copied so far.
+func StatCopying(coldDir string, files []File) (uint64, error) {
+	if coldDir == "" {
+		return 0, nil
+	}
+	var total uint64
+	for i := range files {
+		info, err := os.Stat(filepath.Join(coldDir, filepath.Base(files[i].Path)+".tmp"))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+		files[i].Copying = true
+		total += uint64(info.Size())
+	}
+	return total, nil
+}
+
+// UnknownFinalityMargin is the unwind depth assumed when no finalized block is known.
+const UnknownFinalityMargin = 128
+
+// DemoteBoundary is the cold boundary for moving files to the cold tier. It counts back from the finalized block, not
+// the head: an unwind can never make a file below it hot again.
+func DemoteBoundary(head, finalized, lookback uint64) uint64 {
+	if finalized == 0 {
+		return ColdBoundary(ColdBoundary(head, UnknownFinalityMargin), lookback)
+	}
+	return ColdBoundary(min(head, finalized), lookback)
 }

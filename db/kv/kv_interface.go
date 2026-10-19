@@ -624,6 +624,7 @@ type TemporalDebugDB interface {
 
 	Files() []string
 	MergeLoop(ctx context.Context) error
+	DemoteInBackground(boundaryTxNum uint64) bool
 }
 
 // FlushConfig holds optional behaviour for TemporalMemBatch.Flush, populated by

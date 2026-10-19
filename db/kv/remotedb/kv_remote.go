@@ -243,6 +243,10 @@ func (db *DB) MergeLoop(ctx context.Context) error {
 	panic("not implemented")
 }
 
+func (db *DB) DemoteInBackground(boundaryTxNum uint64) bool {
+	panic("not implemented")
+}
+
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	t, err := db.BeginRo(ctx) //nolint:gocritic
 	if err != nil {

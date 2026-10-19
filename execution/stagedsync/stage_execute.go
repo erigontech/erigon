@@ -464,9 +464,10 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		maxBlockNum:              to,
 	}
 
-	if err := reportTiering(ctx, cfg, doms, rwTx, blockNum, logger); err != nil {
+	if err := reportTiering(ctx, cfg, doms.StepSize(), rwTx, blockNum, logger); err != nil {
 		return err
 	}
+	defer startTieringTicker(ctx, cfg, doms.StepSize(), blockNum, logger)()
 
 	start, probesBefore := time.Now(), state.ReadTierProbeCounts()
 	if !(dbg.Exec3Parallel || cfg.experimentalBAL) {

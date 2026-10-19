@@ -27,24 +27,25 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/tiering"
 )
 
 var (
-	mxTieringColdBoundaryBlock = metrics.GetOrCreateGauge("tiering_cold_boundary_block")
-	mxTieringLagFiles          = metrics.GetOrCreateGaugeVec("tiering_lag_files", []string{"domain", "reason"})
-	mxTieringLagBytes          = metrics.GetOrCreateGaugeVec("tiering_lag_bytes", []string{"domain", "reason"})
-	mxTieringLagTxs            = metrics.GetOrCreateGaugeVec("tiering_lag_txs", []string{"domain", "reason"})
-	mxTieringLagBlocks         = metrics.GetOrCreateGaugeVec("tiering_lag_blocks", []string{"domain", "reason"})
-	mxTieringColdResidentFiles = metrics.GetOrCreateGaugeVec("tiering_cold_resident_files", []string{"domain"})
-	mxTieringColdResidentBytes = metrics.GetOrCreateGaugeVec("tiering_cold_resident_bytes", []string{"domain"})
-	mxTieringHDDEndStep        = metrics.GetOrCreateGaugeVec("tiering_hdd_end_step", []string{"domain"})
-	mxTieringSSDStartStep      = metrics.GetOrCreateGaugeVec("tiering_ssd_start_step", []string{"domain"})
-	mxTieringCommitmentBytes   = metrics.GetOrCreateGaugeVec("tiering_commitment_bytes", []string{"tier", "kind"})
-	mxTieringDuplicateBytes    = metrics.GetOrCreateGaugeVec("tiering_duplicate_bytes", []string{"reason"})
+	mxTieringColdBoundaryBlock   = metrics.GetOrCreateGauge("tiering_cold_boundary_block")
+	mxTieringDemoteBoundaryBlock = metrics.GetOrCreateGauge("tiering_demote_boundary_block")
+	mxTieringLagFiles            = metrics.GetOrCreateGaugeVec("tiering_lag_files", []string{"domain", "reason"})
+	mxTieringLagBytes            = metrics.GetOrCreateGaugeVec("tiering_lag_bytes", []string{"domain", "reason"})
+	mxTieringLagTxs              = metrics.GetOrCreateGaugeVec("tiering_lag_txs", []string{"domain", "reason"})
+	mxTieringLagBlocks           = metrics.GetOrCreateGaugeVec("tiering_lag_blocks", []string{"domain", "reason"})
+	mxTieringColdResidentFiles   = metrics.GetOrCreateGaugeVec("tiering_cold_resident_files", []string{"domain"})
+	mxTieringColdResidentBytes   = metrics.GetOrCreateGaugeVec("tiering_cold_resident_bytes", []string{"domain"})
+	mxTieringHDDEndStep          = metrics.GetOrCreateGaugeVec("tiering_hdd_end_step", []string{"domain"})
+	mxTieringSSDStartStep        = metrics.GetOrCreateGaugeVec("tiering_ssd_start_step", []string{"domain"})
+	mxTieringCommitmentBytes     = metrics.GetOrCreateGaugeVec("tiering_commitment_bytes", []string{"tier", "kind"})
+	mxTieringDuplicateBytes      = metrics.GetOrCreateGaugeVec("tiering_duplicate_bytes", []string{"reason"})
 
 	probesPerBlockBuckets          = []float64{0, 1, 10, 100, 1e3, 1e4, 3e4, 1e5, 3e5, 1e6, 3e6, 1e7}
 	mxTieringSSDProbesPerBlock     = metrics.NewHistogram("tiering_ssd_probes_per_block", probesPerBlockBuckets)
@@ -58,49 +59,63 @@ var (
 // tieringGaugesInterval keeps the per-file scan (a stat per state file) off the per-block path at the chain tip.
 const tieringGaugesInterval = 10 * time.Second
 
-func reportTiering(ctx context.Context, cfg ExecuteBlockCfg, doms *execctx.SharedDomains, tx kv.TemporalTx, head uint64, logger log.Logger) error {
+const tieringTickInterval = 30 * time.Second
+
+func reportTiering(ctx context.Context, cfg ExecuteBlockCfg, stepSize uint64, tx kv.TemporalTx, head uint64, logger log.Logger) error {
 	lookback := cfg.syncCfg.TieringLookbackBlocks
 	if lookback == 0 {
 		return nil
 	}
 	now := time.Now()
-	if now.Sub(time.Unix(0, tieringGaugesAt.Load())) < tieringGaugesInterval {
+	gaugesDue := now.Sub(time.Unix(0, tieringGaugesAt.Load())) >= tieringGaugesInterval
+	if !gaugesDue && !cfg.syncCfg.TieringDemote {
+		return nil
+	}
+	if cfg.syncCfg.TieringDemote {
+		demoteBoundary := tiering.DemoteBoundary(head, rawdb.ReadForkchoiceFinalizedNum(tx), lookback)
+		demoteTxNum, err := cfg.blockReader.TxnumReader().Min(ctx, tx, demoteBoundary)
+		if err != nil {
+			return err
+		}
+		mxTieringDemoteBoundaryBlock.SetUint64(demoteBoundary)
+		cfg.db.Debug().DemoteInBackground(demoteTxNum)
+	}
+	if !gaugesDue {
 		return nil
 	}
 	tieringGaugesAt.Store(now.UnixNano())
 	state.PublishTierProbeCounts()
 
 	boundary := tiering.ColdBoundary(head, lookback)
-	txNumsReader := cfg.blockReader.TxnumReader()
-	boundaryTxNum, err := txNumsReader.Min(ctx, tx, boundary)
+	boundaryTxNum, err := cfg.blockReader.TxnumReader().Min(ctx, tx, boundary)
 	if err != nil {
 		return err
 	}
+
 	mxTieringColdBoundaryBlock.SetUint64(boundary)
-	coldDir, stepSize := cfg.syncCfg.TieringColdDir, doms.StepSize()
-	var commitmentLag tiering.Lag
-	for _, d := range []kv.Domain{kv.CommitmentDomain, kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
-		files, err := tieringFiles(tiering.KVFiles(tx.Debug().DomainFiles(d)))
-		if err != nil {
-			return err
-		}
-		lag := tiering.ComputeLag(files, boundaryTxNum, coldDir)
-		name := d.String()
-		for reason, u := range map[string]tiering.Usage{"straddling_file": lag.Straddling, "copy_pending": lag.CopyPending} {
-			mxTieringLagFiles.WithLabelValues(name, reason).SetInt(u.Files)
-			mxTieringLagBytes.WithLabelValues(name, reason).SetUint64(u.Bytes)
-			mxTieringLagTxs.WithLabelValues(name, reason).SetUint64(u.Txs)
-		}
-		mxTieringColdResidentFiles.WithLabelValues(name).SetInt(lag.ColdResident.Files)
-		mxTieringColdResidentBytes.WithLabelValues(name).SetUint64(lag.ColdResident.Bytes)
-		mxTieringHDDEndStep.WithLabelValues(name).SetUint64(lag.ColdEnd / stepSize)
-		mxTieringSSDStartStep.WithLabelValues(name).SetUint64(lag.HotStart / stepSize)
-		if d == kv.CommitmentDomain {
-			commitmentLag = lag
-			if err := reportCommitmentTiers(ctx, cfg, tx, files, lag, boundary, boundaryTxNum); err != nil {
-				return err
-			}
-		}
+	coldDir := cfg.syncCfg.TieringColdDir
+	files, err := tieringFiles(tiering.KVFiles(tx.Debug().DomainFiles(kv.CommitmentDomain)))
+	if err != nil {
+		return err
+	}
+	copyingBytes, err := tiering.StatCopying(coldDir, files)
+	if err != nil {
+		return err
+	}
+	commitmentLag := tiering.ComputeLag(files, boundaryTxNum, coldDir)
+	name := kv.CommitmentDomain.String()
+	for reason, u := range map[string]tiering.Usage{"straddling_file": commitmentLag.Straddling, "queued": commitmentLag.Queued, "copying": commitmentLag.Copying} {
+		mxTieringLagFiles.WithLabelValues(name, reason).SetInt(u.Files)
+		mxTieringLagBytes.WithLabelValues(name, reason).SetUint64(u.Bytes)
+		mxTieringLagTxs.WithLabelValues(name, reason).SetUint64(u.Txs)
+	}
+	mxTieringColdResidentFiles.WithLabelValues(name).SetInt(commitmentLag.ColdResident.Files)
+	mxTieringColdResidentBytes.WithLabelValues(name).SetUint64(commitmentLag.ColdResident.Bytes)
+	mxTieringHDDEndStep.WithLabelValues(name).SetUint64(commitmentLag.ColdEnd / stepSize)
+	mxTieringSSDStartStep.WithLabelValues(name).SetUint64(commitmentLag.HotStart / stepSize)
+	mxTieringDuplicateBytes.WithLabelValues("copying").SetUint64(copyingBytes)
+	if err := reportCommitmentTiers(ctx, cfg, tx, files, commitmentLag, boundary, boundaryTxNum); err != nil {
+		return err
 	}
 
 	if now.Sub(time.Unix(0, tieringLoggedAt.Load())) < 30*time.Second {
@@ -114,9 +129,41 @@ func reportTiering(ctx context.Context, cfg ExecuteBlockCfg, doms *execctx.Share
 	}
 	logger.Info("[tiering] cold boundary", "head", head, "lookback", lookback, "boundaryBlock", boundary,
 		"boundaryStep", boundaryTxNum/stepSize, "coldCommitmentFiles", names,
-		"commitmentCopyPending", usageString(commitmentLag.CopyPending), "commitmentStraddling", usageString(commitmentLag.Straddling),
+		"commitmentQueued", usageString(commitmentLag.Queued), "commitmentCopying", usageString(commitmentLag.Copying), "commitmentStraddling", usageString(commitmentLag.Straddling),
 		"commitmentColdResident", usageString(commitmentLag.ColdResident))
 	return nil
+}
+
+// startTieringTicker repeats reportTiering on its own read-only tx while a long exec cycle runs; head stays the
+// cycle's start block.
+func startTieringTicker(ctx context.Context, cfg ExecuteBlockCfg, stepSize, head uint64, logger log.Logger) (stop func()) {
+	if cfg.syncCfg.TieringLookbackBlocks == 0 {
+		return func() {}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(tieringTickInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+			err := cfg.db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+				return reportTiering(ctx, cfg, stepSize, tx, head, logger)
+			})
+			if err != nil && ctx.Err() == nil {
+				logger.Warn("[tiering] periodic report", "err", err)
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
 }
 
 func reportCommitmentTiers(ctx context.Context, cfg ExecuteBlockCfg, tx kv.TemporalTx, files []tiering.File, lag tiering.Lag, boundary, boundaryTxNum uint64) error {
@@ -145,7 +192,7 @@ func reportCommitmentTiers(ctx context.Context, cfg ExecuteBlockCfg, tx kv.Tempo
 	if err != nil {
 		return err
 	}
-	copyPendingStartBlock, err := blockOfTxNum(ctx, cfg, tx, straddlingStart-lag.CopyPending.Txs, straddlingStartBlock)
+	copyPendingStartBlock, err := blockOfTxNum(ctx, cfg, tx, straddlingStart-lag.Queued.Txs-lag.Copying.Txs, straddlingStartBlock)
 	if err != nil {
 		return err
 	}

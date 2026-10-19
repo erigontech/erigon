@@ -188,6 +188,13 @@ func filesFromDir(dir string) ([]string, error) {
 		if snaptype.IsTorrentPartial(filepath.Ext(f.Name())) {
 			continue
 		}
+		if f.Type()&os.ModeSymlink != 0 && !strings.HasSuffix(f.Name(), ".tmp") {
+			path := filepath.Join(dir, f.Name())
+			if _, err := os.Stat(path); err != nil {
+				target, _ := os.Readlink(path)
+				return nil, fmt.Errorf("filesFromDir: dangling symlink %s -> %s: %w", path, target, err)
+			}
+		}
 		filtered = append(filtered, f.Name())
 	}
 	return filtered, nil

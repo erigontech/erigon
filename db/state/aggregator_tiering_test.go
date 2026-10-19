@@ -17,10 +17,13 @@
 package state
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/version"
@@ -97,4 +100,37 @@ func TestCommitmentHotMaxMergeStepsRefusesReloadToReferences(t *testing.T) {
 	require.NoError(t, agg.ReloadErigonDBSettings(true))
 	agg.commitmentHotMaxMergeSteps = 1
 	require.ErrorContains(t, agg.ReloadErigonDBSettings(true), "commitment references")
+}
+
+func TestDemotionRefusesReferencesFlag(t *testing.T) {
+	db, agg := testDbAndAggregatorv3(t, 10)
+	agg.demoteColdDir = t.TempDir()
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
+	require.ErrorContains(t, agg.OpenFolder(db), "commitment references")
+}
+
+func TestOpenWithDemoteColdDirRecoversLeftovers(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	link := filepath.Join(dirs.SnapDomain, "v1.0-commitment.0-1.kv.demote.tmp")
+	require.NoError(t, os.Symlink(filepath.Join(t.TempDir(), "v1.0-commitment.0-1.kv"), link))
+	agg := NewTest(dirs).DemoteColdDir(t.TempDir()).MustOpen(t.Context())
+	t.Cleanup(agg.Close)
+	_, err := os.Lstat(link)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestOpenRefusesTieringWithReferences(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	writeRefsToml(t, dirs, true)
+	settings, err := ResolveErigonDBSettings(dirs, log.New(), true)
+	require.NoError(t, err)
+	opts := NewTest(dirs).WithErigonDBSettings(settings)
+
+	agg, err := opts.Open(t.Context())
+	require.NoError(t, err)
+	agg.Close()
+	_, err = opts.DemoteColdDir(t.TempDir()).Open(t.Context())
+	require.ErrorContains(t, err, "commitment references")
+	_, err = opts.CommitmentHotMaxMergeSteps(1).Open(t.Context())
+	require.ErrorContains(t, err, "commitment references")
 }

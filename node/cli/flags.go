@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/execution/tiering"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -160,6 +161,16 @@ var (
 	TieringColdDirFlag = cli.StringFlag{
 		Name:  "tiering.cold-dir",
 		Usage: "Cold-tier directory: a state file whose resolved path is under it counts as cold-resident (default: no cold tier)",
+	}
+
+	TieringDemoteFlag = cli.BoolFlag{
+		Name:  "tiering.demote",
+		Usage: "Move fully-cold commitment files to --tiering.cold-dir in the background (needs --tiering.lookback-blocks)",
+	}
+
+	TieringAllowSameFSFlag = cli.BoolFlag{
+		Name:  "tiering.allow-same-fs",
+		Usage: "Allow --tiering.cold-dir on the same filesystem as the snapshots (tests only)",
 	}
 
 	TieringCommitmentHotMergeStepsFlag = cli.Uint64Flag{
@@ -372,6 +383,12 @@ func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 	cfg.Sync.TieringLookbackBlocks = ctx.Uint64(TieringLookbackBlocksFlag.Name)
 	cfg.Sync.TieringColdDir = ctx.String(TieringColdDirFlag.Name)
 	cfg.Sync.TieringCommitmentHotMergeSteps = ctx.Uint64(TieringCommitmentHotMergeStepsFlag.Name)
+	cfg.Sync.TieringDemote = ctx.Bool(TieringDemoteFlag.Name)
+	if cfg.Sync.TieringDemote {
+		if err := tiering.ValidateDemote(cfg.Sync.TieringLookbackBlocks, cfg.Sync.TieringColdDir, cfg.Dirs.SnapDomain, ctx.Bool(TieringAllowSameFSFlag.Name)); err != nil {
+			utils.Fatalf("%v", err)
+		}
+	}
 	cfg.Sync.ParallelStateFlushing = ctx.Bool(SyncParallelStateFlushing.Name)
 	if d := ctx.Duration(utils.SlowBlockThresholdFlag.Name); d >= 0 {
 		cfg.Sync.SlowBlockThreshold = &d

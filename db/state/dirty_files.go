@@ -450,6 +450,16 @@ func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) error 
 	return nil
 }
 
+// isColdResident: with a cold dir, the file resolves into it; without one, the data file is a symlink.
+func (d *Domain) isColdResident(path string) bool {
+	if d.coldDir == "" {
+		fi, err := os.Lstat(path)
+		return err == nil && fi.Mode()&os.ModeSymlink != 0
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	return err == nil && strings.HasPrefix(resolved, d.coldDir+string(filepath.Separator))
+}
+
 // openDirtyItem opens the item's data file and accessors that are not open yet.
 // A false result means the data file is unusable.
 func (d *Domain) openDirtyItem(item *FilesItem, dirEntries []string) bool {
@@ -459,8 +469,7 @@ func (d *Domain) openDirtyItem(item *FilesItem, dirEntries []string) bool {
 		if !openDirtyDataFile(item, d.kvFileNameMask(fromStep, toStep), dirEntries, d.dirs.SnapDomain, d.FileVersion.DataKV, tag, d.logger) {
 			return false
 		}
-		fi, err := os.Lstat(item.decompressor.FilePath())
-		item.cold = err == nil && fi.Mode()&os.ModeSymlink != 0
+		item.cold = d.isColdResident(item.decompressor.FilePath())
 	}
 
 	if item.index == nil && d.Accessors.Has(statecfg.AccessorHashMap) {
