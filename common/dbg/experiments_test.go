@@ -53,23 +53,6 @@ func TestBALCommitmentWarmupReaders(t *testing.T) {
 	require.Zero(t, BALCommitmentWarmupReaders())
 }
 
-func TestReadAheadWorkerReaders(t *testing.T) {
-	previousEnabled, previousWorkers := ReadAhead, ReadAheadWorkers
-	t.Cleanup(func() {
-		ReadAhead = previousEnabled
-		ReadAheadWorkers = previousWorkers
-	})
-
-	ReadAhead, ReadAheadWorkers = false, 6
-	require.Zero(t, ReadAheadWorkerReaders())
-	ReadAhead, ReadAheadWorkers = true, -1
-	require.Equal(t, 1, ReadAheadWorkerReaders())
-	ReadAheadWorkers = 0
-	require.Equal(t, 1, ReadAheadWorkerReaders())
-	ReadAheadWorkers = 6
-	require.Equal(t, 6, ReadAheadWorkerReaders())
-}
-
 func TestMemUsageMatchesMemStats(t *testing.T) {
 	// The runtime can map memory between the reads, so sys is bracketed rather than compared.
 	var before, after runtime.MemStats

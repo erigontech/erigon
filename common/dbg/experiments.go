@@ -176,13 +176,6 @@ func BALCommitmentWarmupReaders() int {
 	return max(TrieBALWarmupers, 0)
 }
 
-func ReadAheadWorkerReaders() int {
-	if !ReadAhead {
-		return 0
-	}
-	return max(ReadAheadWorkers, 1)
-}
-
 func init() {
 	if PerfProfiles {
 		runtime.SetBlockProfileRate(1)

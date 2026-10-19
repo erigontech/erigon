@@ -44,12 +44,6 @@ func TestParallelPatriciaHashedSkeletonConstruction(t *testing.T) {
 	assert.Nil(t, p.rootHash.Load())
 }
 
-func TestParallelCommitmentReadTxs(t *testing.T) {
-	concurrency := parallelMountConcurrency(defaultParallelCommitmentWorkers)
-
-	require.Equal(t, concurrency+1, ParallelCommitmentReadTxs())
-}
-
 func TestParallelPatriciaHashedSkeletonParseTrieVariant(t *testing.T) {
 	assert.Equal(t, VariantParallelHexPatricia, ParseTrieVariant("parallel"))
 	assert.Equal(t, VariantHexPatriciaTrie, ParseTrieVariant("hex"))
@@ -1122,7 +1116,7 @@ func TestParallelCommitment_ConcurrentReadContextsStayInReserve(t *testing.T) {
 				require.Zero(t, lease.live.Load(), "every read context must be released")
 				reserve := parallelMountConcurrency(workers) + 1
 				require.LessOrEqual(t, int(lease.peak.Load()), reserve,
-					"peak concurrent read contexts must fit the reserve ParallelCommitmentReadTxs sizes for this worker count")
+					"peak concurrent read contexts must fit one per mount worker plus the base trie")
 				t.Logf("grain %s workers %d: reserve %d, peak %d, opened %d, forks %d",
 					grain.name, workers, reserve, lease.peak.Load(), lease.made.Load(), forks)
 			})

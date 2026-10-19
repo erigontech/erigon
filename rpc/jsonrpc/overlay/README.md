@@ -107,4 +107,3 @@ There's a [postman collection for overlays](../../../cmd/rpcdaemon/postman/Overl
 
 ## Configuration
 - add `ots,overlay` to your `--http.api` flag
-- increase the concurrent db reads because overlays are computed in parallel `--db.read.concurrency=256`

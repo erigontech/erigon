@@ -130,8 +130,7 @@ func (s *Server) ServeCodec(codec ServerCodec, options CodecOption) {
 }
 
 // ServeCodecWithContext is like ServeCodec but uses connCtx as the base context for all
-// handler goroutines spawned for this connection. Values set on connCtx (e.g.
-// kv.WithNonBlockingAcquire) propagate to every method call on the connection.
+// handler goroutines spawned for this connection.
 func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCodec, options CodecOption) {
 	defer codec.Close()
 

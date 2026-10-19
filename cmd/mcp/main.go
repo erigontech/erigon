@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/common/disk"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/diagnostics/mem"
 	nodecli "github.com/erigontech/erigon/node/cli"
@@ -290,9 +289,7 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 			return fmt.Errorf("failed to register %s API: %w", api.Namespace, err)
 		}
 	}
-	// NonBlockingAcquire so BeginRo fails fast instead of blocking MCP
-	// handlers when all DB read slots are held.
-	client := rpc.DialInProcWithContext(kv.WithNonBlockingAcquire(ctx), rpcSrv, logger)
+	client := rpc.DialInProcWithContext(ctx, rpcSrv, logger)
 	defer client.Close()
 
 	srv := mcpserver.NewErigonMCPServer(client, logDir, false)

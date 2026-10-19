@@ -35,7 +35,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 	stack2 "github.com/go-stack/stack"
-	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
@@ -48,8 +47,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 )
-
-var dbRoTxOverloaded = metrics.GetOrCreateCounter(`db_rotx_overloaded_total`)
 
 // A deferred sync that keeps failing means no new steady commit-point, so a crash rolls back
 // further than the deadline promises - worth alerting on, not just logging.
@@ -91,11 +88,6 @@ type MdbxOpts struct {
 	label                     kv.Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
 
 	inMem, autoRemove bool
-
-	// roTxsLimiter - without this limiter - it's possible to reach 10K threads (if 10K rotx will wait for IO) - and golang will crush https://groups.google.com/g/golang-dev/c/igMoDruWNwo
-	// most of db must set explicit `roTxsLimiter <= 9K`.
-	// There is way to increase the 10,000 thread limit: https://golang.org/pkg/runtime/debug/#SetMaxThreads
-	roTxsLimiter *semaphore.Weighted
 
 	metrics bool
 }
@@ -159,10 +151,9 @@ func (opts MdbxOpts) GetPageSize() datasize.ByteSize { return opts.pageSize }
 // Setters
 func (opts MdbxOpts) DirtySpace(s uint64) MdbxOpts { opts.dirtySpace = s; return opts }
 
-func (opts MdbxOpts) RoTxsLimiter(l *semaphore.Weighted) MdbxOpts { opts.roTxsLimiter = l; return opts }
-func (opts MdbxOpts) PageSize(v datasize.ByteSize) MdbxOpts       { opts.pageSize = v; return opts }
-func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts     { opts.growthStep = v; return opts }
-func (opts MdbxOpts) Path(path string) MdbxOpts                   { opts.path = path; return opts }
+func (opts MdbxOpts) PageSize(v datasize.ByteSize) MdbxOpts   { opts.pageSize = v; return opts }
+func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts { opts.growthStep = v; return opts }
+func (opts MdbxOpts) Path(path string) MdbxOpts               { opts.path = path; return opts }
 func (opts MdbxOpts) PollerSyncPeriod(period time.Duration) MdbxOpts {
 	opts.pollerSyncPeriod = period
 	return opts
@@ -452,33 +443,19 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		}
 	}
 
-	if opts.roTxsLimiter == nil {
-		// Golang panics over 10K threads.
-		// RoTx doesn't create thread, but if user's goroutine facing PageFault in RoTx - such goroutine gets out of CPU-bounded-threads-pool (to unlimited-IO-bounded-threads-pool).
-		// So, 9K goroutines can produce 0 new threads (if no PageFaults) - or 9K io-threads (if read only cold data).
-		targetSemCount := int64(9_000)
-		opts.roTxsLimiter = semaphore.NewWeighted(targetSemCount) // 1 less than max to allow unlocking to happen
-	}
-
-	txsCountMutex := &sync.Mutex{}
-
 	db := &MdbxKV{
-		opts:         opts,
-		env:          env,
-		log:          opts.log,
-		buckets:      kv.TableCfg{},
-		txSize:       dirtyPagesLimit * opts.pageSize.Bytes(),
-		roTxsLimiter: opts.roTxsLimiter,
-		roTxPool:     make(chan *mdbx.Txn, roTxPoolSize),
+		opts:     opts,
+		env:      env,
+		log:      opts.log,
+		buckets:  kv.TableCfg{},
+		txSize:   dirtyPagesLimit * opts.pageSize.Bytes(),
+		roTxPool: make(chan *mdbx.Txn, roTxPoolSize),
 
-		txsCountMutex:         txsCountMutex,
-		txsAllDoneOnCloseCond: sync.NewCond(txsCountMutex),
-
-		liveTxs: make(map[*MdbxTx]liveTxInfo),
+		txsDone: make(chan struct{}, 1),
 
 		syncerStop: make(chan struct{}),
 
-		leakDetector: dbg.NewLeakDetector("db."+string(opts.label), dbg.SlowTx()),
+		leakDetector: dbg.NewLeakDetector("db."+string(opts.label), leakThreshold(opts.label)),
 
 		MaxBatchSize:  DefaultMaxBatchSize,
 		MaxBatchDelay: DefaultMaxBatchDelay,
@@ -563,10 +540,9 @@ func (opts MdbxOpts) MustOpen() kv.RwDB {
 var roTxPoolSize = max(0, dbg.EnvInt("MDBX_RO_TX_POOL", 256))
 
 type MdbxKV struct {
-	log          log.Logger
-	env          *mdbx.Env
-	buckets      kv.TableCfg
-	roTxsLimiter *semaphore.Weighted // does limit amount of concurrent Ro transactions - in most casess runtime.NumCPU() is good value for this channel capacity - this channel can be shared with other components (like Decompressor)
+	log     log.Logger
+	env     *mdbx.Env
+	buckets kv.TableCfg
 	// roTxPool holds reset read txns: Renew reuses their bound reader slot, BeginTxn locks the reader table to bind one.
 	roTxPool chan *mdbx.Txn
 	opts     MdbxOpts
@@ -577,16 +553,8 @@ type MdbxKV struct {
 	syncerStop chan struct{}
 	syncerDone chan struct{} // nil when no background sync runs; closed when it has returned
 
-	txsCount              uint
-	txsCountMutex         *sync.Mutex
-	txsAllDoneOnCloseCond *sync.Cond
-
-	// liveTxs tracks all currently-open chaindata txs so we can dump the
-	// stacks of concurrent txs when a commit observes openTxs > 1 — answering
-	// "who held a tx alive while I was committing?" for diagnostic purposes.
-	// Keyed by the *MdbxTx pointer. Protected by txsCountMutex.
-	liveTxs       map[*MdbxTx]liveTxInfo
-	liveTxCounter uint64
+	txsCount atomic.Int64
+	txsDone  chan struct{} // wakes Close when txsCount drops to 0 after closed is set
 
 	leakDetector *dbg.LeakDetector
 
@@ -650,132 +618,44 @@ func (db *MdbxKV) openDBIs(buckets []string) error {
 	})
 }
 
-// mdbxTraceTx enables per-tx lifecycle logging and concurrent-tx stack dumps on
-// ChainDB. Read once at startup so enabling/disabling requires a restart.
-// When false, all tracer code paths early-return — zero overhead in production.
+// mdbxTraceTx keeps every ChainDB tx in the leak detector so a commit that sees
+// other open txs can dump their stacks.
 var mdbxTraceTx = os.Getenv("MDBX_TRACE_TX") == "true"
 
-// liveTxInfo is a diagnostic record for a currently-open chaindata tx.
-// Lets us dump the stacks of concurrent txs when a commit observes openTxs>1.
-type liveTxInfo struct {
-	id       uint64
-	kind     string // "ro" or "rw"
-	openedAt time.Time
-	stack    string
+func leakThreshold(label kv.Label) time.Duration {
+	if t := dbg.SlowTx(); t > 0 || !mdbxTraceTx || label != dbcfg.ChainDB {
+		return t
+	}
+	return 365 * 24 * time.Hour
 }
 
+// trackTxBegin counts the tx before it reads closed, and Close sets closed before it
+// reads the count: either the begin sees closed, or Close waits for the tx.
 func (db *MdbxKV) trackTxBegin() bool {
-	db.txsCountMutex.Lock()
-	defer db.txsCountMutex.Unlock()
-
-	isOpen := !db.closed.Load()
-	if isOpen {
-		db.txsCount++
+	db.txsCount.Add(1)
+	if db.closed.Load() {
+		db.trackTxEnd()
+		return false
 	}
-	return isOpen
-}
-
-// registerLiveTx records an open chaindata tx with its stack so concurrent-tx
-// dumps at commit time can identify it. No-op unless MDBX_TRACE_TX=true and
-// the DB is ChainDB (avoids per-alloc overhead on every ancillary DB tx).
-func (db *MdbxKV) registerLiveTx(tx *MdbxTx, readOnly bool) {
-	if !mdbxTraceTx || db.opts.label != dbcfg.ChainDB {
-		return
-	}
-	kind := "rw"
-	if readOnly {
-		kind = "ro"
-	}
-	stack := dbg.Stack()
-	openedAt := time.Now()
-
-	db.txsCountMutex.Lock()
-	db.liveTxCounter++
-	id := db.liveTxCounter
-	db.liveTxs[tx] = liveTxInfo{
-		id:       id,
-		kind:     kind,
-		openedAt: openedAt,
-		stack:    stack,
-	}
-	count := db.txsCount
-	db.txsCountMutex.Unlock()
-
-	db.log.Trace("MDBX_TX_OPEN", "id", id, "kind", kind, "count", count, "stack", stack)
-}
-
-// unregisterLiveTx removes a tx from the live set and logs a close event.
-// No-op unless MDBX_TRACE_TX=true and the DB is ChainDB.
-func (db *MdbxKV) unregisterLiveTx(tx *MdbxTx, event string) {
-	if !mdbxTraceTx || db.opts.label != dbcfg.ChainDB {
-		return
-	}
-	db.txsCountMutex.Lock()
-	info, ok := db.liveTxs[tx]
-	if ok {
-		delete(db.liveTxs, tx)
-	}
-	count := db.txsCount
-	db.txsCountMutex.Unlock()
-
-	if !ok {
-		return
-	}
-	db.log.Trace("MDBX_TX_"+event, "id", info.id, "kind", info.kind, "count", count, "stack", dbg.Stack())
-}
-
-// dumpConcurrentTxs prints the stacks of all live chaindata txs EXCEPT the
-// one currently committing. Called only when a commit observes openTxs>1,
-// to pinpoint which other tx was held alive during the commit window.
-func (db *MdbxKV) dumpConcurrentTxs(committer *MdbxTx) {
-	if !mdbxTraceTx || db.opts.label != dbcfg.ChainDB {
-		return
-	}
-	db.txsCountMutex.Lock()
-	snapshot := make([]liveTxInfo, 0, len(db.liveTxs))
-	committerID := uint64(0)
-	if info, ok := db.liveTxs[committer]; ok {
-		committerID = info.id
-	}
-	for tx, info := range db.liveTxs {
-		if tx == committer {
-			continue
-		}
-		snapshot = append(snapshot, info)
-	}
-	db.txsCountMutex.Unlock()
-
-	now := time.Now()
-	for _, info := range snapshot {
-		db.log.Trace("CONCURRENT_TX", "committer_id", committerID, "id", info.id, "kind", info.kind, "alive", now.Sub(info.openedAt), "stack", info.stack)
-	}
-}
-
-func (db *MdbxKV) hasTxsAllDoneAndClosed() bool {
-	return (db.txsCount == 0) && db.closed.Load()
+	return true
 }
 
 func (db *MdbxKV) trackTxEnd() {
-	db.txsCountMutex.Lock()
-	defer db.txsCountMutex.Unlock()
-
-	if db.txsCount > 0 {
-		db.txsCount--
-	} else {
+	n := db.txsCount.Add(-1)
+	if n < 0 {
 		panic("MdbxKV: unmatched trackTxEnd")
 	}
-
-	if db.hasTxsAllDoneAndClosed() {
-		db.txsAllDoneOnCloseCond.Signal()
+	if n == 0 && db.closed.Load() {
+		select {
+		case db.txsDone <- struct{}{}:
+		default:
+		}
 	}
 }
 
 func (db *MdbxKV) waitTxsAllDoneOnClose() {
-	db.txsCountMutex.Lock()
-	defer db.txsCountMutex.Unlock()
-
-	for !db.hasTxsAllDoneAndClosed() {
-		db.txsAllDoneOnCloseCond.Wait()
+	for db.txsCount.Load() > 0 {
+		<-db.txsDone
 	}
 }
 
@@ -826,7 +706,7 @@ func (db *MdbxKV) Close() {
 	}
 }
 
-func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
+func (db *MdbxKV) BeginRo(ctx context.Context) (kv.Tx, error) {
 	// don't try to acquire if the context is already done
 	select {
 	case <-ctx.Done():
@@ -839,28 +719,9 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		return nil, errors.New("db closed")
 	}
 
-	if kv.IsNonBlockingAcquire(ctx) {
-		if !db.roTxsLimiter.TryAcquire(1) {
-			db.trackTxEnd()
-			dbRoTxOverloaded.Inc()
-			return nil, kv.ErrReadTxLimitExceeded
-		}
-	} else if semErr := db.roTxsLimiter.Acquire(ctx, 1); semErr != nil {
-		db.trackTxEnd()
-		return nil, fmt.Errorf("mdbx.MdbxKV.BeginRo: roTxsLimiter error %w", semErr)
-	}
-
-	defer func() {
-		if txn == nil {
-			// on error, or if there is whatever reason that we don't return a tx,
-			// we need to free up the limiter slot, otherwise it could lead to deadlocks
-			db.roTxsLimiter.Release(1)
-			db.trackTxEnd()
-		}
-	}()
-
 	tx, err := db.beginRoTxn()
 	if err != nil {
+		db.trackTxEnd()
 		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, db.opts.label, stack2.Trace().String())
 	}
 
@@ -871,7 +732,6 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		readOnly: true,
 		traceID:  db.leakDetector.Add(),
 	}
-	db.registerLiveTx(mt, true)
 	return mt, nil
 }
 
@@ -948,7 +808,6 @@ func (db *MdbxKV) beginRw(ctx context.Context, flags uint) (txn kv.RwTx, err err
 		ctx:     ctx,
 		traceID: db.leakDetector.Add(),
 	}
-	db.registerLiveTx(mt, false)
 	return mt, nil
 }
 
@@ -1439,12 +1298,9 @@ func (tx *MdbxTx) Commit() error {
 		return nil
 	}
 	defer func() {
-		tx.db.unregisterLiveTx(tx, "COMMIT")
 		tx.tx = nil
 		tx.db.trackTxEnd()
-		if tx.readOnly {
-			tx.db.roTxsLimiter.Release(1)
-		} else {
+		if !tx.readOnly {
 			runtime.UnlockOSThread()
 		}
 		tx.db.leakDetector.Del(tx.traceID)
@@ -1465,12 +1321,11 @@ func (tx *MdbxTx) Commit() error {
 			tx.db.opts.log.Error("failed to record mdbx summaries", "err", err)
 		}
 	}
-	// Per-commit diagnostic log. Pairs with the MDBX_TX_OPEN/COMMIT/ROLLBACK
-	// tracer and the CONCURRENT_TX dumper — only useful when actively
-	// investigating GC / openTxs behavior. Gated behind the same env var so
-	// production runs don't get a log line per chaindata commit.
+	// Per-commit diagnostic log: the commit metrics and the open-transaction count, next to the
+	// concurrent-stack dump. Gated behind the same env var so production runs do not get a
+	// log line per chaindata commit.
 	if mdbxTraceTx && tx.db.opts.label == dbcfg.ChainDB {
-		openTxs := tx.db.txsCount
+		openTxs := tx.db.txsCount.Load()
 		tx.db.opts.log.Info(
 			"[mdbx] commit",
 			"whole", latency.Whole,
@@ -1494,7 +1349,9 @@ func (tx *MdbxTx) Commit() error {
 		// tx was held alive during this commit. Dump its stack so we can
 		// identify the callsite.
 		if openTxs > 1 {
-			tx.db.dumpConcurrentTxs(tx)
+			for _, live := range tx.db.leakDetector.Live(tx.traceID) {
+				tx.db.log.Trace("CONCURRENT_TX", "committer", tx.traceID, "tx", live)
+			}
 		}
 	}
 
@@ -1515,11 +1372,8 @@ func (tx *MdbxTx) Rollback() {
 	} else {
 		t.Abort()
 	}
-	tx.db.unregisterLiveTx(tx, "ROLLBACK")
 	tx.db.trackTxEnd()
-	if tx.readOnly {
-		tx.db.roTxsLimiter.Release(1)
-	} else {
+	if !tx.readOnly {
 		runtime.UnlockOSThread()
 	}
 	tx.db.leakDetector.Del(tx.traceID)

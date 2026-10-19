@@ -739,9 +739,6 @@ func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(db kv.Tempor
 	// avoid races like this
 	stepSize := sdc.sharedDomains.StepSize()
 	return func(ctx context.Context) (commitment.PatriciaContext, func()) {
-		// Warmup is best-effort: never queue on the read-tx semaphore. A blocking
-		// acquire here can starve execution workers of slots and stall shutdown.
-		ctx = kv.WithNonBlockingAcquire(ctx)
 		roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		if err != nil {
 			return &errorTrieContext{err: err}, func() {}
