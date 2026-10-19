@@ -292,10 +292,8 @@ func enable5656(jt *JumpTable) {
 	jt[MCOPY] = operation{
 		execute:     opMcopy,
 		constantGas: GasFastestStep,
-		dynamicGas:  gasMcopy,
 		numPop:      3,
 		numPush:     0,
-		memorySize:  memoryMcopy,
 	}
 }
 
