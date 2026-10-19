@@ -663,6 +663,26 @@ func (api *BaseAPI) historyStartBlocks(ctx context.Context, tx kv.Tx, head uint6
 	}
 }
 
+func (api *BaseAPI) historyAndCommitmentStartBlocks(ctx context.Context, tx kv.Tx, head uint64, includeCommitment bool) (historyPruneFloors, historyPruneFloors, error) {
+	for {
+		floors, err := api.historyStartBlocks(ctx, tx, head)
+		if err != nil || !includeCommitment {
+			return floors, historyPruneFloors{}, err
+		}
+		ttx := tx.(kv.TemporalTx)
+		key, hasKey := historyFloorCacheKey(ttx, head)
+		commitmentFloors, err := api.readCommitmentHistoryStartBlocks(ctx, ttx, head)
+		if err != nil || !hasKey {
+			return floors, commitmentFloors, err
+		}
+		// The commitment lookup can renew the remote view after the state
+		// floor was read. Retry both floors together if that happens.
+		if current, ok := historyFloorCacheKey(ttx, head); ok && current == key {
+			return floors, commitmentFloors, nil
+		}
+	}
+}
+
 func historyFloorCacheKey(tx kv.TemporalTx, head uint64) (pruneFloorCacheKey, bool) {
 	files, ok := tx.Debug().(interface{ HistoryFilesGeneration() uint64 })
 	if !ok {
@@ -1060,26 +1080,8 @@ func (api *BaseAPI) checkReceiptAvailableAtIndex(ctx context.Context, tx kv.Tx, 
 		return api.checkReceiptSourceAvailable(ctx, tx, block, txIndex)
 	}
 	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available", func(head uint64) (uint64, error) {
-		for {
-			floors, err := api.historyStartBlocks(ctx, tx, head)
-			if err != nil || !commitmentHistory {
-				return floors.wholeBlock, err
-			}
-			ttx := tx.(kv.TemporalTx)
-			key, hasKey := historyFloorCacheKey(ttx, head)
-			commitmentFloors, err := api.readCommitmentHistoryStartBlocks(ctx, ttx, head)
-			if err != nil {
-				return 0, err
-			}
-			// The commitment lookup can renew the remote view after the state
-			// floor was read. Retry both floors together if that happens.
-			if hasKey {
-				if current, ok := historyFloorCacheKey(ttx, head); !ok || current != key {
-					continue
-				}
-			}
-			return max(floors.wholeBlock, commitmentFloors.wholeBlock), nil
-		}
+		floors, commitmentFloors, err := api.historyAndCommitmentStartBlocks(ctx, tx, head, commitmentHistory)
+		return max(floors.wholeBlock, commitmentFloors.wholeBlock), err
 	})
 }
 

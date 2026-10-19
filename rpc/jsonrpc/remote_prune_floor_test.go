@@ -25,6 +25,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -350,6 +351,100 @@ func TestReceiptHistoryGateFollowsRemoteRenewal(t *testing.T) {
 				require.Nil(t, view.expire)
 				require.NotEqual(t, oldViewID, tx.ViewID())
 				require.ErrorIs(t, err, state.ErrPruned, "the renewed view no longer retains the block's initial system transaction")
+			})
+		})
+	}
+}
+
+type historyViewDB struct {
+	kv.TemporalRoDB
+	tx kv.TemporalTx
+}
+
+func (db historyViewDB) BeginTemporalRo(context.Context) (kv.TemporalTx, error) {
+	return db.tx, nil
+}
+
+func TestCapabilitiesHistoryFloorsFollowRemoteRenewal(t *testing.T) {
+	commitmentCfg := statecfg.Schema.CommitmentDomain
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema.CommitmentDomain = commitmentCfg })
+
+	for _, phase := range []string{"open", "close"} {
+		t.Run(phase, func(t *testing.T) {
+			apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+				mode: prune.ArchiveMode, chainConfig: byzantiumChainConfig(pruneGatingChainLen + 1),
+			})
+			apis.eth._txNumReader = rawdbv3.TxNums
+			apis.eth._historyPruneFloor.ttl = time.Hour
+			apis.eth._blockReader = &fixedMinimumBlockReader{FullBlockReader: apis.eth._blockReader}
+			const block = uint64(8)
+			local, err := apis.eth.db.BeginTemporalRo(t.Context())
+			require.NoError(t, err)
+			defer local.Rollback()
+			_, err = apis.eth.chainConfig(t.Context(), local)
+			require.NoError(t, err)
+			start, err := apis.eth._txNumReader.Min(t.Context(), local, block)
+			require.NoError(t, err)
+			newStart, err := apis.eth._txNumReader.Min(t.Context(), local, block+1)
+			require.NoError(t, err)
+			require.NoError(t, apis.rwDB.Update(t.Context(), func(tx kv.RwTx) error {
+				if err := writeHistoryStart(tx, start); err != nil {
+					return err
+				}
+				if err := tx.ClearTable(kv.TblCommitmentHistoryKeys); err != nil {
+					return err
+				}
+				if err := tx.Put(kv.TblCommitmentHistoryKeys, hexutil.EncodeTs(start), []byte{1}); err != nil {
+					return err
+				}
+				return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+			}))
+
+			synctest.Test(t, func(t *testing.T) {
+				ctx := t.Context()
+				db, _ := remoteHistoryDB(t, apis.eth.db)
+				tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic // Setup defers rollback; Capabilities takes ownership below.
+				require.NoError(t, err)
+				handedOff := false
+				defer func() {
+					if !handedOff {
+						tx.Rollback()
+					}
+				}()
+				old, err := apis.eth.historyStartBlocks(ctx, tx, chainInfo.head)
+				require.NoError(t, err)
+				require.Equal(t, block, old.wholeBlock)
+				oldViewID := tx.ViewID()
+				require.NoError(t, apis.rwDB.Update(ctx, func(tx kv.RwTx) error {
+					return writeHistoryStart(tx, newStart)
+				}))
+
+				// State history is cached. Renew during the commitment lookup while
+				// its older floor cannot mask the change to the state-history floor.
+				view := &expiringHistoryCursorTx{TemporalTx: tx, onClose: phase == "close", expire: func() {
+					time.Sleep(remotedbserver.MaxTxTTL + time.Nanosecond)
+				}}
+				apis.eth.db = historyViewDB{TemporalRoDB: db, tx: view}
+				handedOff = true
+				caps, err := apis.eth.Capabilities(ctx)
+				require.NoError(t, err)
+				require.Nil(t, view.expire)
+				require.NotEqual(t, oldViewID, tx.ViewID())
+				for _, tc := range []struct {
+					name   string
+					field  CapabilityField
+					oldest uint64
+				}{
+					{"state", caps.State, block},
+					{"stateproofs", caps.StateProofs, block},
+					{"receipts", caps.Receipts, block + 1},
+					{"logs", caps.Logs, block + 1},
+				} {
+					require.False(t, tc.field.Disabled, tc.name)
+					require.NotNil(t, tc.field.OldestBlock, tc.name)
+					assert.EqualValues(t, tc.oldest, *tc.field.OldestBlock, tc.name)
+				}
 			})
 		})
 	}

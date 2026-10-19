@@ -173,7 +173,7 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	if err != nil {
 		return nil, err
 	}
-	onDiskFloors, err := api.historyStartBlocks(ctx, tx, headBlock)
+	onDiskFloors, commitmentFloors, err := api.historyAndCommitmentStartBlocks(ctx, tx, headBlock, keepExecutionProofs)
 	if err != nil {
 		return nil, err
 	}
@@ -184,10 +184,6 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 
 	var stateproofs CapabilityField
 	if keepExecutionProofs {
-		commitmentFloors, err := api.readCommitmentHistoryStartBlocks(ctx, tx, headBlock)
-		if err != nil {
-			return nil, err
-		}
 		// eth_getProof gates commitment history by its on-disk start, not its
 		// configured window. Report the tighter deletion policy without moving that boundary.
 		proofAmount := pruneMode.CommitmentHistoryAmount()
