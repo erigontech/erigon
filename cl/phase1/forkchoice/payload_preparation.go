@@ -30,8 +30,9 @@ import (
 var ErrPayloadImportInProgress = errors.New("canonical payload import is in progress")
 
 type PayloadPreparationImports struct {
-	active    sync.Map
-	preparing atomic.Pointer[payloadPreparationAttempt]
+	active           sync.Map
+	pendingEnvelopes sync.Map
+	preparing        atomic.Pointer[payloadPreparationAttempt]
 }
 
 type payloadPreparationAttempt struct {
@@ -48,10 +49,21 @@ func (p *PayloadPreparationImports) BeginImport(slot uint64) func() {
 	return func() { p.active.Delete(key) }
 }
 
-func (p *PayloadPreparationImports) TryBegin(ctx context.Context, firstSlot, lastSlot uint64, pending func() bool) (context.Context, func(), bool) {
+func (p *PayloadPreparationImports) BeginPendingEnvelope(blockRoot common.Hash) func() {
+	key := &blockRoot
+	p.pendingEnvelopes.Store(key, blockRoot)
+	return func() { p.pendingEnvelopes.Delete(key) }
+}
+
+func (p *PayloadPreparationImports) TryBegin(
+	ctx context.Context,
+	firstSlot, lastSlot uint64,
+	pending func() bool,
+	blockSlot func(common.Hash) (uint64, bool),
+) (context.Context, func(), bool) {
 	ctx, cancel := context.WithCancelCause(ctx)
 	attempt := &payloadPreparationAttempt{firstSlot: firstSlot, lastSlot: lastSlot, cancel: cancel}
-	// Publish before sampling imports so each arrival is either sampled or cancels this attempt.
+	// Publish before sampling active imports so each import is either sampled or cancels this attempt.
 	if !p.preparing.CompareAndSwap(nil, attempt) {
 		cancel(ErrPayloadImportInProgress)
 		return ctx, nil, false
@@ -66,9 +78,17 @@ func (p *PayloadPreparationImports) TryBegin(ctx context.Context, firstSlot, las
 		clear = slot < firstSlot || slot > lastSlot
 		return clear
 	})
+	if clear && blockSlot != nil {
+		p.pendingEnvelopes.Range(func(_, value any) bool {
+			slot, known := blockSlot(value.(common.Hash))
+			clear = !known || slot < firstSlot || slot > lastSlot
+			return clear
+		})
+	}
 	clear = clear && (pending == nil || !pending())
 	if !clear || ctx.Err() != nil {
-		finish()
+		p.preparing.CompareAndSwap(attempt, nil)
+		cancel(ErrPayloadImportInProgress)
 		return ctx, nil, false
 	}
 	return ctx, finish, true
@@ -78,21 +98,36 @@ func (f *ForkChoiceStore) BeginPayloadImport(slot uint64) func() {
 	return f.payloadPreparation.BeginImport(slot)
 }
 
+func (f *ForkChoiceStore) BeginPendingPayloadEnvelope(blockRoot common.Hash) func() {
+	return f.payloadPreparation.BeginPendingEnvelope(blockRoot)
+}
+
 func (f *ForkChoiceStore) TryBeginPayloadPreparation(ctx context.Context, firstSlot, lastSlot uint64) (context.Context, func(), bool) {
 	return f.payloadPreparation.TryBegin(ctx, firstSlot, lastSlot, func() bool {
 		for _, queue := range []*lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]{f.pendingEnvelopes, f.pendingLocalSelfBuildEnvelopes} {
 			if queue == nil {
 				continue
 			}
-			for _, envelope := range queue.Values() {
-				if envelope != nil && envelope.Message != nil && envelope.Message.Payload != nil {
-					slot := envelope.Message.Payload.SlotNumber
-					if slot >= firstSlot && slot <= lastSlot {
-						return true
-					}
+			for _, root := range queue.Keys() {
+				slot, known := f.payloadPreparationBlockSlot(root)
+				// The selected head's parked envelope may never import; preparation primes its EMPTY fallback,
+				// and an import that starts cancels the attempt through BeginImport.
+				if known && slot > firstSlot && slot <= lastSlot {
+					return true
 				}
 			}
 		}
 		return false
-	})
+	}, f.payloadPreparationBlockSlot)
+}
+
+func (f *ForkChoiceStore) payloadPreparationBlockSlot(root common.Hash) (uint64, bool) {
+	if f.forkGraph.HasEnvelope(root) {
+		return 0, false
+	}
+	block, ok := f.forkGraph.GetBlock(root)
+	if !ok || block == nil || block.Block == nil {
+		return 0, false
+	}
+	return block.Block.Slot, true
 }

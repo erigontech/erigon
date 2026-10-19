@@ -3089,7 +3089,7 @@ func TestGetValidatorExecutionPayloadBidRechecksPtcDecisionWithEnvelopeCache(t *
 			engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.GloasVersion).
 				DoAndReturn(func(context.Context, []byte, clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 					if test.evictRequests {
-						handler.parentExecutionRequests.entries.Remove(baseRoot)
+						handler.parentExecutionRequests.Remove(baseRoot)
 					} else {
 						buildOnFull = test.buildOnFull
 					}

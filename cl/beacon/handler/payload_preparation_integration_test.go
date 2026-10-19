@@ -73,158 +73,217 @@ func (c *preparationCollectionClient) GetAssembledBlock(ctx context.Context, id 
 	return c.ExecutionClientDirect.GetAssembledBlock(ctx, id, version)
 }
 
-func TestPayloadPreparationCollectionWithExecutionModule(t *testing.T) {
-	for _, path := range []string{"ordinary", "epoch", "first_gloas", "empty", "full", "full_to_empty"} {
-		for _, preparation := range []string{"prepared", "absent", "failed", "mismatch"} {
-			t.Run(path+"/"+preparation, func(t *testing.T) {
-				_, _, _, _, fixture, handler, _, synced, store, validators := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
-				cfg := *handler.beaconChainCfg
-				cfg.SecondsPerSlot = 4
-				currentEpoch := fixture.Slot() / cfg.SlotsPerEpoch
-				if path == "first_gloas" {
-					cfg.FuluForkEpoch = currentEpoch
-					cfg.GloasForkEpoch = currentEpoch + 1
-				} else if path == "empty" || path == "full" || path == "full_to_empty" {
-					cfg.FuluForkEpoch = currentEpoch
-					cfg.GloasForkEpoch = currentEpoch
-				}
-				cfg.InitializeForkSchedule()
-				handler.beaconChainCfg = &cfg
-				headState := state.New(&cfg)
-				require.NoError(t, fixture.CopyInto(headState))
-				if cfg.FuluForkEpoch == currentEpoch {
-					require.NoError(t, headState.UpgradeToFulu())
-				}
-				if cfg.GloasForkEpoch == currentEpoch {
-					require.NoError(t, headState.UpgradeToGloas())
-				}
-				if path == "epoch" || path == "first_gloas" {
-					require.NoError(t, transition.DefaultMachine.ProcessSlots(headState, (currentEpoch+1)*cfg.SlotsPerEpoch-1))
-				}
-				currentSlot := headState.Slot()
-				targetSlot := currentSlot + 1
-				version := cfg.GetCurrentStateVersion(targetSlot / cfg.SlotsPerEpoch)
-				timestamp := uint64(time.Now().Add(4 * time.Second).Unix())
-				headState.SetGenesisTime(timestamp - targetSlot*cfg.SecondsPerSlot)
-				latestHeader := headState.LatestBlockHeader()
-				latestHeader.Slot = currentSlot
-				headState.SetLatestBlockHeader(&latestHeader)
+type preparationCollectionPath struct {
+	name              string
+	advanceToEpochEnd bool
+	gloasAtCurrent    bool
+	gloasAtNextEpoch  bool
+	needsForkChoice   bool
+	buildOnFull       bool
+	canonicalFull     bool
+	wantParentFull    bool
+}
 
-				elCfg := *chain.AllProtocolChanges
-				if version.Before(clparams.FuluVersion) {
-					elCfg.OsakaTime = nil
+type preparationCollectionFixture struct {
+	handler         *ApiHandler
+	engine          *preparationCollectionClient
+	cfg             clparams.BeaconChainConfig
+	headState       *state.CachingBeaconState
+	productionState *state.CachingBeaconState
+	parentHash      common.Hash
+	fullHash        common.Hash
+	baseRoot        common.Hash
+	currentSlot     uint64
+	targetSlot      uint64
+	version         clparams.StateVersion
+	proposer        uint64
+	slotStart       time.Time
+}
+
+func newPreparationCollectionFixture(t *testing.T, path preparationCollectionPath) *preparationCollectionFixture {
+	t.Helper()
+	_, _, _, _, initialState, handler, _, synced, store, validators := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	cfg := *handler.beaconChainCfg
+	cfg.SecondsPerSlot = 4
+	currentEpoch := initialState.Slot() / cfg.SlotsPerEpoch
+	if path.gloasAtNextEpoch {
+		cfg.FuluForkEpoch = currentEpoch
+		cfg.GloasForkEpoch = currentEpoch + 1
+	} else if path.gloasAtCurrent {
+		cfg.FuluForkEpoch = currentEpoch
+		cfg.GloasForkEpoch = currentEpoch
+	}
+	cfg.InitializeForkSchedule()
+	handler.beaconChainCfg = &cfg
+	headState := state.New(&cfg)
+	require.NoError(t, initialState.CopyInto(headState))
+	if cfg.FuluForkEpoch == currentEpoch {
+		require.NoError(t, headState.UpgradeToFulu())
+	}
+	if cfg.GloasForkEpoch == currentEpoch {
+		require.NoError(t, headState.UpgradeToGloas())
+	}
+	if path.advanceToEpochEnd {
+		require.NoError(t, transition.DefaultMachine.ProcessSlots(headState, (currentEpoch+1)*cfg.SlotsPerEpoch-1))
+	}
+	currentSlot := headState.Slot()
+	targetSlot := currentSlot + 1
+	version := cfg.GetCurrentStateVersion(targetSlot / cfg.SlotsPerEpoch)
+	timestamp := uint64(time.Now().Add(4 * time.Second).Unix())
+	headState.SetGenesisTime(timestamp - targetSlot*cfg.SecondsPerSlot)
+	latestHeader := headState.LatestBlockHeader()
+	latestHeader.Slot = currentSlot
+	headState.SetLatestBlockHeader(&latestHeader)
+
+	elCfg := *chain.AllProtocolChanges
+	if version.Before(clparams.FuluVersion) {
+		elCfg.OsakaTime = nil
+	}
+	if version.Before(clparams.GloasVersion) {
+		elCfg.AmsterdamTime = nil
+	} else if path.gloasAtNextEpoch {
+		elCfg.AmsterdamTime = &timestamp
+	}
+	module := execmoduletester.New(t, execmoduletester.WithChainConfig(&elCfg), execmoduletester.WithTxPool())
+	blocks, err := module.GenerateChain(2, nil)
+	require.NoError(t, err)
+	require.NoError(t, module.InsertChain(blocks))
+	parent, full := blocks.Blocks[0], blocks.TopBlock
+	client, err := execution_client.NewExecutionClientDirect(chainreader.NewChainReaderEth1(&elCfg, module.ExecModule, time.Minute), nil)
+	require.NoError(t, err)
+	canonical := parent.Hash()
+	if path.canonicalFull {
+		canonical = full.Hash()
+	}
+	_, err = client.ForkChoiceUpdate(t.Context(), parent.Hash(), parent.Hash(), canonical, nil, version)
+	require.NoError(t, err)
+	module.ExecModule.WaitIdle(t.Context())
+	engine := &preparationCollectionClient{ExecutionClientDirect: client}
+	handler.engine = engine
+	baseRoot := common.Hash{0x41}
+	store.HeadVal = baseRoot
+	store.HeadSlotVal = currentSlot
+	store.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+	payloadHeader := headState.LatestExecutionPayloadHeader()
+	payloadHeader.BlockHash = parent.Hash()
+	payloadHeader.BlockNumber = parent.NumberU64()
+	payloadHeader.GasLimit = parent.GasLimit()
+	headState.SetLatestExecutionPayloadHeader(payloadHeader)
+	if headState.Version() >= clparams.GloasVersion {
+		headState.SetLatestBlockHash(parent.Hash())
+		headState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+			ParentBlockHash: parent.Hash(), BlockHash: full.Hash(), Slot: currentSlot,
+			GasLimit: parent.GasLimit(), BuilderIndex: clparams.BuilderIndexSelfBuild,
+		})
+	}
+	if path.needsForkChoice {
+		store.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+		buildOnFull := path.buildOnFull
+		store.ShouldBuildOnFullVal = &buildOnFull
+		store.SetEnvelope(baseRoot, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+			ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(&cfg, clparams.GloasVersion),
+		}})
+	}
+	productionState, err := headState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(productionState, targetSlot))
+	proposer, err := productionState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validators.SetFeeRecipient(proposer, common.Address{0x42})
+	syncedMock := synced.(*syncmock.MockSyncedData)
+	syncedMock.EXPECT().SelectedHead().Return(baseRoot, currentSlot, true).AnyTimes()
+	syncedMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+		return view(headState, baseRoot, currentSlot)
+	}).AnyTimes()
+	fixture := &preparationCollectionFixture{
+		handler: handler, engine: engine, cfg: cfg, headState: headState, productionState: productionState,
+		parentHash: parent.Hash(), fullHash: full.Hash(), baseRoot: baseRoot, currentSlot: currentSlot,
+		targetSlot: targetSlot, version: version, proposer: proposer, slotStart: time.Now().Add(4 * time.Second),
+	}
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetSlotTime(targetSlot).DoAndReturn(func(uint64) time.Time { return fixture.slotStart }).AnyTimes()
+	handler.ethClock = clock
+	return fixture
+}
+
+func TestPayloadPreparationCollectionWithExecutionModule(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	paths := []preparationCollectionPath{
+		{name: "ordinary"},
+		{name: "epoch", advanceToEpochEnd: true},
+		{name: "first_gloas", advanceToEpochEnd: true, gloasAtNextEpoch: true},
+		{name: "empty", gloasAtCurrent: true},
+		{name: "full", gloasAtCurrent: true, needsForkChoice: true, buildOnFull: true, wantParentFull: true},
+		{name: "full_to_empty", gloasAtCurrent: true, needsForkChoice: true, canonicalFull: true},
+	}
+	preparations := []struct {
+		name      string
+		prepare   bool
+		fails     bool
+		mismatch  bool
+		wantReuse bool
+	}{
+		{name: "prepared", prepare: true, wantReuse: true},
+		{name: "absent"},
+		{name: "failed", prepare: true, fails: true},
+		{name: "mismatch", prepare: true, mismatch: true},
+	}
+	for _, path := range paths {
+		for _, preparation := range preparations {
+			t.Run(path.name+"/"+preparation.name, func(t *testing.T) {
+				fixture := newPreparationCollectionFixture(t, path)
+				if preparation.fails {
+					fixture.engine.prepareErr = errors.New("temporary execution failure")
 				}
-				if version.Before(clparams.GloasVersion) {
-					elCfg.AmsterdamTime = nil
-				} else if path == "first_gloas" {
-					elCfg.AmsterdamTime = &timestamp
-				}
-				module := execmoduletester.New(t, execmoduletester.WithChainConfig(&elCfg), execmoduletester.WithTxPool())
-				blocks, err := module.GenerateChain(2, nil)
-				require.NoError(t, err)
-				require.NoError(t, module.InsertChain(blocks))
-				parent, full := blocks.Blocks[0], blocks.TopBlock
-				client, err := execution_client.NewExecutionClientDirect(chainreader.NewChainReaderEth1(&elCfg, module.ExecModule, time.Minute), nil)
-				require.NoError(t, err)
-				canonical := parent.Hash()
-				if path == "full_to_empty" {
-					canonical = full.Hash()
-				}
-				_, err = client.ForkChoiceUpdate(t.Context(), parent.Hash(), parent.Hash(), canonical, nil, version)
-				require.NoError(t, err)
-				module.ExecModule.WaitIdle(t.Context())
-				engine := &preparationCollectionClient{ExecutionClientDirect: client}
-				handler.engine = engine
-				baseRoot := common.Hash{0x41}
-				store.HeadVal = baseRoot
-				store.HeadSlotVal = currentSlot
-				store.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
-				payloadHeader := headState.LatestExecutionPayloadHeader()
-				payloadHeader.BlockHash = parent.Hash()
-				payloadHeader.BlockNumber = parent.NumberU64()
-				payloadHeader.GasLimit = parent.GasLimit()
-				headState.SetLatestExecutionPayloadHeader(payloadHeader)
-				if headState.Version() >= clparams.GloasVersion {
-					headState.SetLatestBlockHash(parent.Hash())
-					headState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
-						ParentBlockHash: parent.Hash(), BlockHash: full.Hash(), Slot: currentSlot,
-						GasLimit: parent.GasLimit(), BuilderIndex: clparams.BuilderIndexSelfBuild,
-					})
-				}
-				if path == "full" || path == "full_to_empty" {
-					store.HeadPayloadStatusVal = cltypes.PayloadStatusFull
-					buildOnFull := path == "full"
-					store.ShouldBuildOnFullVal = &buildOnFull
-					store.SetEnvelope(baseRoot, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
-						ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(&cfg, clparams.GloasVersion),
-					}})
-				}
-				productionState, err := headState.Copy()
-				require.NoError(t, err)
-				require.NoError(t, transition.DefaultMachine.ProcessSlots(productionState, targetSlot))
-				proposer, err := productionState.GetBeaconProposerIndexForSlot(targetSlot)
-				require.NoError(t, err)
-				validators.SetFeeRecipient(proposer, common.Address{0x42})
-				syncedMock := synced.(*syncmock.MockSyncedData)
-				syncedMock.EXPECT().SelectedHead().Return(baseRoot, currentSlot, true).AnyTimes()
-				syncedMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
-					return view(headState, baseRoot, currentSlot)
-				}).AnyTimes()
-				slotStart := time.Now().Add(4 * time.Second)
-				clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
-				clock.EXPECT().GetSlotTime(targetSlot).DoAndReturn(func(uint64) time.Time { return slotStart }).AnyTimes()
-				handler.ethClock = clock
-				if preparation == "failed" {
-					engine.prepareErr = errors.New("temporary execution failure")
-				}
-				needsFCU := path == "full" || path == "full_to_empty"
-				if preparation != "absent" {
-					_, err = preparePayloadForTest(t, handler, targetSlot)
+				if preparation.prepare {
+					_, err := preparePayloadForTest(t, fixture.handler, fixture.targetSlot)
 					switch {
-					case needsFCU:
+					case path.needsForkChoice:
 						require.ErrorIs(t, err, errGloasPathNeedsForkChoice)
-					case preparation == "failed":
-						require.ErrorIs(t, err, engine.prepareErr)
+					case preparation.fails:
+						require.ErrorIs(t, err, fixture.engine.prepareErr)
 					default:
 						require.NoError(t, err)
 					}
 				}
-				prepared := handler.preparedPayload.payloads[targetSlot]
-				if preparation == "mismatch" {
-					validators.SetFeeRecipient(proposer, common.Address{0x43})
-					if needsFCU {
-						handler.preparedPayload.set(targetSlot, []byte{0xff}, baseRoot, time.Now().Add(-time.Second))
+				prepared := fixture.handler.preparedPayload.payloads[fixture.targetSlot]
+				if preparation.mismatch {
+					fixture.handler.validatorParams.SetFeeRecipient(fixture.proposer, common.Address{0x43})
+					if path.needsForkChoice {
+						fixture.handler.preparedPayload.set(fixture.targetSlot, []byte{0xff}, fixture.baseRoot, time.Now().Add(-time.Second))
 					}
 				}
-				reused := preparation == "prepared" && !needsFCU
+				reused := preparation.wantReuse && !path.needsForkChoice
 				if reused {
-					time.Sleep(maximumPreparedAdvance(&cfg, version))
+					time.Sleep(maximumPreparedAdvance(&fixture.cfg, fixture.version))
 				}
-				slotStart = time.Now()
-				normal := computeBlockBuilderWindow(slotStart, slotStart, &cfg, version, 0)
-				block, err := handler.produceBlock(t.Context(), 3, currentSlot, baseRoot, productionState, targetSlot, common.Bytes96{0xc0}, common.Hash{})
+				fixture.slotStart = time.Now()
+				normal := computeBlockBuilderWindow(fixture.slotStart, fixture.slotStart, &fixture.cfg, fixture.version, 0)
+				block, err := fixture.handler.produceBlock(t.Context(), 3, fixture.currentSlot, fixture.baseRoot, fixture.productionState, fixture.targetSlot, common.Bytes96{0xc0}, common.Hash{})
 				require.NoError(t, err)
 				require.NotNil(t, block)
 				payload := block.BeaconBody.ExecutionPayload
-				if version >= clparams.GloasVersion {
-					built, ok := handler.selfBuildPayloads.Get(block.BeaconBody.SignedExecutionPayloadBid.Message.BlockHash)
+				if fixture.version >= clparams.GloasVersion {
+					built, ok := fixture.handler.selfBuildPayloads.Get(block.BeaconBody.SignedExecutionPayloadBid.Message.BlockHash)
 					require.True(t, ok)
 					payload = built.Payload
 				}
-				wantParent := parent.Hash()
-				if path == "full" {
-					wantParent = full.Hash()
+				wantParent := fixture.parentHash
+				if path.wantParentFull {
+					wantParent = fixture.fullHash
 				}
 				require.Equal(t, wantParent, payload.ParentHash)
-				require.Equal(t, currentSlot, headState.Slot(), "preparation must only advance its copied state")
-				require.Equal(t, engine.productionID, engine.collectedID)
+				require.Equal(t, fixture.currentSlot, fixture.headState.Slot(), "preparation must only advance its copied state")
+				require.Equal(t, fixture.engine.productionID, fixture.engine.collectedID)
 				if reused {
-					require.Equal(t, prepared.id, engine.collectedID)
-					require.True(t, engine.firstCollection.Before(normal.firstGetAt), "prepared collection must start before the normal window")
+					require.Equal(t, prepared.id, fixture.engine.collectedID)
+					require.True(t, fixture.engine.firstCollection.Before(normal.firstGetAt), "prepared collection must start before the normal window")
 				} else {
-					require.False(t, engine.firstCollection.Before(normal.firstGetAt), "ordinary collection timing must be retained")
+					require.False(t, fixture.engine.firstCollection.Before(normal.firstGetAt), "ordinary collection timing must be retained")
 					if len(prepared.id) > 0 {
-						require.NotEqual(t, prepared.id, engine.collectedID)
+						require.NotEqual(t, prepared.id, fixture.engine.collectedID)
 					}
 				}
 			})

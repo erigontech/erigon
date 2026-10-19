@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/lru"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -45,7 +44,6 @@ import (
 )
 
 var (
-	payloadPreparationAttempts    = metrics.GetOrCreateCounter("caplin_payload_preparation_attempts_total")
 	payloadPreparationOutcomes    = metrics.GetOrCreateCounterVec("caplin_payload_preparation_outcomes_total", []string{"outcome"})
 	payloadPreparationCollections = metrics.GetOrCreateCounterVec("caplin_payload_preparation_collections_total", []string{"outcome"})
 
@@ -54,6 +52,7 @@ var (
 	errHeadTooFarBack           = errors.New("head state is too far behind the slot to prepare")
 	errPreparationHeadChanged   = errors.New("selected head changed while preparing payload")
 	errBlockWorkInFlight        = errors.New("block production, publication, or adoption is in progress")
+	errPreparationTooEarly      = errors.New("slot is too far away to prime payload production")
 	errPreparationTooLate       = errors.New("slot is too close to prime a payload production would use")
 	errGloasPayloadPending      = errors.New("gloas parent payload decision is not ready")
 	errForkChoiceHeadChanged    = errors.New("fork choice head changed")
@@ -95,31 +94,29 @@ type preparedPayload struct {
 
 const maxCachedParentExecutionRequests = 8
 
-type payloadRequestsCache struct {
-	mu      sync.Mutex
-	entries *lru.Cache[common.Hash, *cltypes.ExecutionRequests]
-}
-
 func (a *ApiHandler) fullParentExecutionRequests(root common.Hash) (*cltypes.ExecutionRequests, error) {
-	cache := &a.parentExecutionRequests
-	cache.mu.Lock()
-	defer cache.mu.Unlock()
-	if cache.entries == nil {
-		cache.entries = lru.NewCache[common.Hash, *cltypes.ExecutionRequests](maxCachedParentExecutionRequests)
-	}
-	if requests, ok := cache.entries.Get(root); ok {
+	if requests, ok := a.parentExecutionRequests.Get(root); ok {
 		return requests, nil
 	}
-	envelope, err := a.forkchoiceStore.ReadEnvelopeFromDisk(root)
+	result, err, _ := a.parentExecutionRequestsGroup.Do(string(root[:]), func() (any, error) {
+		if requests, ok := a.parentExecutionRequests.Get(root); ok {
+			return requests, nil
+		}
+		envelope, err := a.forkchoiceStore.ReadEnvelopeFromDisk(root)
+		if err != nil {
+			return nil, fmt.Errorf("read FULL parent payload envelope: %w", err)
+		}
+		if envelope == nil || envelope.Message == nil || envelope.Message.ExecutionRequests == nil {
+			return nil, fmt.Errorf("FULL parent payload has no execution requests for root %x", root)
+		}
+		requests := envelope.Message.ExecutionRequests
+		a.parentExecutionRequests.Add(root, requests)
+		return requests, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("read FULL parent payload envelope: %w", err)
+		return nil, err
 	}
-	if envelope == nil || envelope.Message == nil || envelope.Message.ExecutionRequests == nil {
-		return nil, fmt.Errorf("FULL parent payload has no execution requests for root %x", root)
-	}
-	requests := envelope.Message.ExecutionRequests
-	cache.entries.Add(root, requests)
-	return requests, nil
+	return result.(*cltypes.ExecutionRequests), nil
 }
 
 type payloadPreparationScratch struct {
@@ -184,12 +181,16 @@ func (p *preparedPayload) set(slot uint64, payloadID []byte, head common.Hash, p
 
 // warmupAndMismatch returns inherited build time for an exact payload-ID match. For a mismatch it
 // also returns the head from which the prepared builder started.
-func (p *preparedPayload) warmupAndMismatch(slot uint64, payloadID []byte, now time.Time) (time.Duration, common.Hash, bool) {
+func (p *preparedPayload) warmupAndMismatch(slot uint64, payloadID []byte, now time.Time, preparationRunning bool) (time.Duration, common.Hash, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	record, ok := p.payloads[slot]
 	if !ok || len(payloadID) == 0 {
-		payloadPreparationCollections.WithLabelValues("absent").Inc()
+		outcome := "absent"
+		if !preparationRunning {
+			outcome = "disabled"
+		}
+		payloadPreparationCollections.WithLabelValues(outcome).Inc()
 		return 0, common.Hash{}, false
 	}
 	if !bytes.Equal(record.id, payloadID) {
@@ -280,7 +281,12 @@ func slotsWithinOne(first, second uint64) bool {
 // The returned channel closes when the preparation loop stops.
 func (a *ApiHandler) StartPayloadPreparation(ctx context.Context) <-chan struct{} {
 	done := make(chan struct{})
-	if a.routerCfg == nil || !a.routerCfg.Validator || a.routerCfg.DisablePayloadPreparation || a.engine == nil {
+	if a.routerCfg == nil || !a.routerCfg.Validator || a.engine == nil {
+		close(done)
+		return done
+	}
+	if a.routerCfg.DisablePayloadPreparation {
+		a.logger.Info("PayloadPreparation: disabled", "reason", "disabled by flag")
 		close(done)
 		return done
 	}
@@ -293,8 +299,10 @@ func (a *ApiHandler) StartPayloadPreparation(ctx context.Context) <-chan struct{
 		close(done)
 		return done
 	}
+	a.payloadPreparationRunning.Store(true)
 	go func() {
 		defer close(done)
+		defer a.payloadPreparationRunning.Store(false)
 		a.preparePayloadLoop(ctx)
 	}()
 	return done
@@ -366,7 +374,6 @@ func (a *ApiHandler) preparePayloadLoopWith(
 		if stateVersion.Before(clparams.CapellaVersion) {
 			continue
 		}
-		payloadPreparationAttempts.Inc()
 		// This early check avoids state work during production. The gate is checked again before
 		// builder startup to cover production that begins after this point.
 		if !a.payloadPreparationGate.idle() {
@@ -385,7 +392,11 @@ func (a *ApiHandler) preparePayloadLoopWith(
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
 		currentSlotStart := slotStart.Add(-slotDuration)
 		lead := time.Until(slotStart)
-		if lead > slotDuration || lead <= minimumLead {
+		if lead > slotDuration {
+			observePreparationOutcome(errPreparationTooEarly)
+			continue
+		}
+		if lead <= minimumLead {
 			observePreparationOutcome(errPreparationTooLate)
 			continue
 		}
@@ -398,15 +409,20 @@ func (a *ApiHandler) preparePayloadLoopWith(
 			observePreparationOutcome(errBlockWorkInFlight)
 			continue
 		}
+		blockProcessing := a.forkchoiceStore.BlockProcessing()
 		if shouldWaitForCurrentSlotHead(
 			currentSlot,
 			selectedSlot,
-			a.forkchoiceStore.BlockProcessing(),
+			blockProcessing,
 			time.Now(),
 			currentSlotStart,
 			attestationDue(a.beaconChainCfg, currentVersion),
 		) {
-			observePreparationOutcome(errHeadTooFarBack)
+			if blockProcessing && selectedSlot < currentSlot {
+				observePreparationOutcome(errBlockWorkInFlight)
+			} else {
+				observePreparationOutcome(errHeadTooFarBack)
+			}
 			continue
 		}
 		// Preparation requires the selected and materialized head identities to match. Otherwise
@@ -447,7 +463,6 @@ func (a *ApiHandler) preparePayloadLoopWith(
 					currentSlotStart,
 					payloadAttestationDeadline,
 				); delay > 0 {
-					observePreparationOutcome(errGloasPayloadPending)
 					if err := common.Sleep(ctx, delay); err != nil {
 						return
 					}
@@ -517,6 +532,8 @@ func observePreparationOutcome(err error) {
 		reason = "stale_head"
 	case errors.Is(err, errBlockWorkInFlight), errors.Is(err, chainreader.ErrExecutionBusy), errors.Is(err, forkchoice.ErrPayloadImportInProgress):
 		reason = "busy"
+	case errors.Is(err, errPreparationTooEarly):
+		reason = "too_early"
 	case errors.Is(err, errPreparationTooLate), errors.Is(err, context.DeadlineExceeded):
 		reason = "late"
 	case errors.Is(err, errGloasPathNeedsForkChoice):
@@ -870,14 +887,21 @@ func (a *ApiHandler) startPayloadBuildAttempt(
 	defer finishAttempt()
 	buildCtx, finishImportCheck, ok := a.forkchoiceStore.TryBeginPayloadPreparation(ctx, selectedSlot, preparationSlot+1)
 	if !ok {
-		return nil, errBlockWorkInFlight
+		return nil, context.Cause(buildCtx)
 	}
 	defer finishImportCheck()
 	id, err := payloadBuilder.StartPayloadBuild(buildCtx, head, attrs)
-	if cause := context.Cause(buildCtx); cause != nil {
+	cause := context.Cause(buildCtx)
+	if err != nil {
+		if cause != nil {
+			return nil, cause
+		}
+		return nil, err
+	}
+	if errors.Is(cause, forkchoice.ErrPayloadImportInProgress) {
 		return nil, cause
 	}
-	return id, err
+	return id, nil
 }
 
 // payloadBuildAttributes is shared because production reuses a prepared builder only when every

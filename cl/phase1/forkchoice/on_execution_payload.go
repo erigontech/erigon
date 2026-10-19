@@ -604,6 +604,10 @@ func (f *ForkChoiceStore) NewPayloadWithAdmission(
 	if f.engine == nil {
 		return execution_client.PayloadStatusNone, errors.New("execution client is not configured")
 	}
+	if payload != nil {
+		finishImport := f.BeginPayloadImport(payload.SlotNumber)
+		defer finishImport()
+	}
 	return f.withPayloadValidationAdmission(ctx, func() (execution_client.PayloadStatus, error) {
 		return f.engine.NewPayload(ctx, payload, parentBlockRoot, versionedHashes, executionRequestsList)
 	})
@@ -766,11 +770,6 @@ func (f *ForkChoiceStore) applyEnvelope(
 		log.Warn("[applyEnvelope] received signed envelope with nil message")
 		return false, fmt.Errorf("%w: signed envelope has nil message", ErrInvalidExecutionPayloadEnvelope)
 	}
-	if signedEnvelope.Message.Payload != nil {
-		finishImport := f.BeginPayloadImport(signedEnvelope.Message.Payload.SlotNumber)
-		defer finishImport()
-	}
-
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -922,6 +921,8 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForConsensus(ctx conte
 	if err := f.validateEnvelopeAgainstBlock(signedEnvelope, block, blockState); err != nil {
 		return fmt.Errorf("execution payload envelope failed gossip validation: %w", err)
 	}
+	finishImport := f.BeginPayloadImport(block.Block.Slot)
+	defer finishImport()
 	if err := f.checkDataAvailability(block, root); err != nil {
 		return err
 	}
@@ -1085,6 +1086,8 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 		f.beginEnvelopeApply(beaconBlockRoot)
 		defer f.endEnvelopeApply(beaconBlockRoot)
 	}
+	finishImport := f.BeginPayloadImport(block.Block.Slot)
+	defer finishImport()
 
 	// Check blob data availability
 	if checkBlobData {
@@ -1159,6 +1162,9 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 
 	// Persist envelope to disk — this marks the root as "has payload" in store.payloads
 	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
+		if missingMode == queueMissingEnvelope {
+			f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
+		}
 		return false, fmt.Errorf("%w: OnExecutionPayload: failed to dump envelope: %w", ErrExecutionPayloadEnvelopePersistenceFailed, err)
 	}
 	f.cacheParentBuilderExitRequests(beaconBlockRoot, signedEnvelope)
@@ -1404,8 +1410,6 @@ func (f *ForkChoiceStore) OnExecutionPayloadAt(ctx context.Context, signedEnvelo
 
 	envelope := signedEnvelope.Message
 	beaconBlockRoot := envelope.BeaconBlockRoot
-	finishImport := f.BeginPayloadImport(envelope.Payload.SlotNumber)
-	defer finishImport()
 	commitmentsValidated, err := f.validateKnownEnvelopeCommitments(signedEnvelope, validatePayload)
 	if err != nil {
 		return fmt.Errorf("%w: OnExecutionPayload: invalid execution payload envelope commitments: %w", ErrInvalidExecutionPayloadEnvelope, err)
@@ -1415,9 +1419,6 @@ func (f *ForkChoiceStore) OnExecutionPayloadAt(ctx context.Context, signedEnvelo
 	// deadlock with postForkchoiceOperations (which holds MDBX tx then needs f.mu.RLock).
 	applied, err := f.applyEnvelope(ctx, signedEnvelope, checkBlobData, validatePayload, commitmentsValidated, queueMissingEnvelope, receivedAt)
 	if err != nil {
-		if errors.Is(err, ErrExecutionPayloadEnvelopePersistenceFailed) {
-			f.pendingEnvelopes.Add(common.Hash(beaconBlockRoot), signedEnvelope)
-		}
 		return err
 	}
 	token, tracked, err := f.claimEnvelopeIndexRepair(common.Hash(beaconBlockRoot), signedEnvelope, applied)
@@ -1506,9 +1507,6 @@ func (f *ForkChoiceStore) ApplyLocalSelfBuildEnvelope(ctx context.Context, signe
 
 	applied, err := f.applyLocalSelfBuildEnvelope(ctx, signedEnvelope, queueMissingEnvelope)
 	if err != nil {
-		if errors.Is(err, ErrExecutionPayloadEnvelopePersistenceFailed) {
-			f.pendingLocalSelfBuildEnvelopes.Add(common.Hash(beaconBlockRoot), signedEnvelope)
-		}
 		return err
 	}
 	token, tracked, err := f.claimEnvelopeIndexRepair(common.Hash(beaconBlockRoot), signedEnvelope, applied)
@@ -1762,6 +1760,8 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 		log.Trace("applyLocalSelfBuildEnvelopeCoordinated: block not found in fork graph", "beaconBlockRoot", common.Hash(beaconBlockRoot))
 		return false, fmt.Errorf("%w: block not found in fork graph for beacon_block_root %v", ErrIgnore, common.Hash(beaconBlockRoot))
 	}
+	finishImport := f.BeginPayloadImport(block.Block.Slot)
+	defer finishImport()
 
 	// Skip validateEnvelopeAgainstBlock — we produced this envelope locally.
 	blockState.SetPreviousStateRoot(block.Block.StateRoot)
@@ -1832,6 +1832,9 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 	}
 
 	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
+		if missingMode == queueMissingEnvelope {
+			f.pendingLocalSelfBuildEnvelopes.Add(beaconBlockRoot, signedEnvelope)
+		}
 		return false, fmt.Errorf("%w: applyLocalSelfBuildEnvelopeCoordinated: failed to dump envelope: %w", ErrExecutionPayloadEnvelopePersistenceFailed, err)
 	}
 	f.cacheParentBuilderExitRequests(beaconBlockRoot, signedEnvelope)

@@ -1834,7 +1834,9 @@ func (a *ApiHandler) produceBeaconBody(
 			return
 		}
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
-		warmup, preparedHead, preparedIDMismatch := a.preparedPayload.warmupAndMismatch(targetSlot, idBytes, builderStartedAt)
+		warmup, preparedHead, preparedIDMismatch := a.preparedPayload.warmupAndMismatch(
+			targetSlot, idBytes, builderStartedAt, a.payloadPreparationRunning.Load(),
+		)
 		if preparedIDMismatch {
 			a.logger.Info(
 				"PayloadPreparation: prepared payload ID did not match production",

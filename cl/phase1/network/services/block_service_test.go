@@ -1083,7 +1083,7 @@ func TestScheduledBlockKeepsPayloadPreparationBehindRetries(t *testing.T) {
 			return forkchoice.ErrNewPayloadNoStatus
 		}
 		return nil
-	})
+	}, true)
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	service.processScheduledBlock(t.Context(), root, job, time.Now())
@@ -1094,6 +1094,24 @@ func TestScheduledBlockKeepsPayloadPreparationBehindRetries(t *testing.T) {
 	require.False(t, ok)
 	service.processScheduledBlock(t.Context(), root, job, time.Now().Add(time.Second))
 	_, finish, ok = store.TryBeginPayloadPreparation(t.Context(), 10, 11)
+	require.True(t, ok)
+	finish()
+}
+
+func TestClaimingScheduleUpgradesUnclaimedBlockJob(t *testing.T) {
+	store := mock_services.NewForkChoiceStorageMock(t)
+	service := &blockService{forkchoiceStore: store}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	block.Block.Slot = 10
+	job, _ := service.scheduleBlockForLaterProcessing(block, nil, false)
+	service.ScheduleBlockForLaterProcessing(block)
+
+	_, _, ok := store.TryBeginPayloadPreparation(t.Context(), 10, 11)
+	require.False(t, ok)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	service.removeScheduledBlock(root, job)
+	_, finish, ok := store.TryBeginPayloadPreparation(t.Context(), 10, 11)
 	require.True(t, ok)
 	finish()
 }
@@ -1424,6 +1442,148 @@ func TestBlockServiceGossipIgnoresUnavailableParentState(t *testing.T) {
 	err := service.(*blockService).validateFirstGossip(t.Context(), child, func() { scheduled = true }, false)
 	require.ErrorIs(t, err, ErrIgnore)
 	require.True(t, scheduled)
+}
+
+func TestUnknownParentBlockDoesNotHoldPayloadPreparation(t *testing.T) {
+	service, child, store, _, _ := newGloasGossipValidationFixture(t, nil)
+	validatorKey, err := bls.GenerateKey()
+	require.NoError(t, err)
+	validator := solid.NewValidator()
+	var publicKey [48]byte
+	copy(publicKey[:], bls.CompressPublicKey(validatorKey.PublicKey()))
+	validator.SetPublicKey(publicKey)
+	validator.SetActivationEpoch(0)
+	validator.SetExitEpoch(service.(*blockService).beaconCfg.FarFutureEpoch)
+	validator.SetEffectiveBalance(service.(*blockService).beaconCfg.MaxEffectiveBalance)
+	parentState := store.StateAtBlockRootVal[child.Block.ParentRoot]
+	require.NoError(t, parentState.AddValidator(validator, service.(*blockService).beaconCfg.MaxEffectiveBalance))
+	require.NoError(t, service.(*blockService).syncedData.OnHeadState(parentState))
+
+	child.Block.ProposerIndex = 1
+	child.Block.ParentRoot = common.Hash{0xff}
+	domain, err := parentState.GetDomain(service.(*blockService).beaconCfg.DomainBeaconProposer, child.Block.Slot/service.(*blockService).beaconCfg.SlotsPerEpoch)
+	require.NoError(t, err)
+	signingRoot, err := fork.ComputeSigningRoot(child.Block, domain)
+	require.NoError(t, err)
+	copy(child.Signature[:], validatorKey.Sign(signingRoot[:]).Bytes())
+	root, err := child.Block.HashSSZ()
+	require.NoError(t, err)
+
+	err = service.ProcessMessage(t.Context(), nil, child)
+	require.ErrorIs(t, err, ErrIgnore)
+	_, scheduled := service.(*blockService).blocksScheduledForLaterExecution.Load(root)
+	require.True(t, scheduled)
+	_, finish, ok := store.TryBeginPayloadPreparation(t.Context(), child.Block.Slot, child.Block.Slot+1)
+	require.True(t, ok)
+	finish()
+}
+
+func TestAuthenticatedScheduledBlockTakesPayloadImportClaim(t *testing.T) {
+	service, child, store, root, job := parkUnknownParentBlockForRetry(t, true)
+	service.processScheduledBlock(t.Context(), root, job, time.Now())
+	require.ErrorIs(t, job.lastAttempt.err, forkchoice.ErrEIP7594ColumnDataNotAvailable)
+
+	_, finish, ok := store.TryBeginPayloadPreparation(t.Context(), child.Block.Slot, child.Block.Slot+1)
+	if ok {
+		finish()
+	}
+	require.False(t, ok)
+	service.processScheduledBlock(t.Context(), root, job, job.creationTime.Add(blockJobExpiry+time.Second))
+	_, finish, ok = store.TryBeginPayloadPreparation(t.Context(), child.Block.Slot, child.Block.Slot+1)
+	require.True(t, ok)
+	finish()
+}
+
+func TestWrongProposerScheduledBlockStaysUnclaimed(t *testing.T) {
+	service, child, store, root, job := parkUnknownParentBlockForRetry(t, false)
+	service.processScheduledBlock(t.Context(), root, job, time.Now())
+	require.ErrorIs(t, job.lastAttempt.err, forkchoice.ErrEIP7594ColumnDataNotAvailable)
+
+	_, finish, ok := store.TryBeginPayloadPreparation(t.Context(), child.Block.Slot, child.Block.Slot+1)
+	require.True(t, ok)
+	finish()
+}
+
+func TestUnrelatedScheduledBlockErrorSkipsProposerValidation(t *testing.T) {
+	service, child, store, root, job := parkUnknownParentBlockForRetry(t, true)
+	store.OnBlockErr = errors.New("unrelated retry error")
+	validationCalls := 0
+	store.ViewStateAtBlockRootFn = func(root common.Hash, fn func(*state.CachingBeaconState) error) error {
+		validationCalls++
+		return fn(store.StateAtBlockRootVal[root])
+	}
+
+	service.processScheduledBlock(t.Context(), root, job, time.Now())
+	require.EqualError(t, job.lastAttempt.err, "unrelated retry error")
+	require.Zero(t, validationCalls)
+	require.Nil(t, job.finishPayloadImport)
+	_, finish, ok := store.TryBeginPayloadPreparation(t.Context(), child.Block.Slot, child.Block.Slot+1)
+	require.True(t, ok)
+	finish()
+}
+
+func TestShouldRetainBlockImportClaim(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "EIP-4844 data unavailable", err: forkchoice.ErrEIP4844DataNotAvailable, want: true},
+		{name: "EIP-7594 column data unavailable", err: forkchoice.ErrEIP7594ColumnDataNotAvailable, want: true},
+		{name: "parent envelope pending", err: forkchoice.ErrParentEnvelopePending, want: true},
+		{name: "block too early", err: forkchoice.ErrBlockTooEarly, want: true},
+		{name: "new payload has no status", err: forkchoice.ErrNewPayloadNoStatus, want: true},
+		{name: "wrapped storage error", err: fmt.Errorf("wrapped: %w", errBlockStorage), want: true},
+		{name: "unrelated error", err: errors.New("unrelated error")},
+		{name: "invalid block", err: forkchoice.ErrBlockInvalid},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.want, shouldRetainBlockImportClaim(test.err))
+		})
+	}
+}
+
+func parkUnknownParentBlockForRetry(t *testing.T, matchingProposer bool) (*blockService, *cltypes.SignedBeaconBlock, *mock_services.ForkChoiceStorageMock, common.Hash, *blockJob) {
+	t.Helper()
+	serviceInterface, child, store, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	service := serviceInterface.(*blockService)
+	parent := store.Blocks[parentRoot]
+	parentHeader := store.Headers[parentRoot]
+	if !matchingProposer {
+		validatorKey, err := bls.GenerateKey()
+		require.NoError(t, err)
+		validator := solid.NewValidator()
+		var publicKey [48]byte
+		copy(publicKey[:], bls.CompressPublicKey(validatorKey.PublicKey()))
+		validator.SetPublicKey(publicKey)
+		validator.SetActivationEpoch(0)
+		validator.SetExitEpoch(service.beaconCfg.FarFutureEpoch)
+		validator.SetEffectiveBalance(service.beaconCfg.MaxEffectiveBalance)
+		parentState := store.StateAtBlockRootVal[parentRoot]
+		require.NoError(t, parentState.AddValidator(validator, service.beaconCfg.MaxEffectiveBalance))
+		require.NoError(t, service.syncedData.OnHeadState(parentState))
+		child.Block.ProposerIndex = 1
+		domain, err := parentState.GetDomain(service.beaconCfg.DomainBeaconProposer, child.Block.Slot/service.beaconCfg.SlotsPerEpoch)
+		require.NoError(t, err)
+		signingRoot, err := fork.ComputeSigningRoot(child.Block, domain)
+		require.NoError(t, err)
+		copy(child.Signature[:], validatorKey.Sign(signingRoot[:]).Bytes())
+	}
+	delete(store.Blocks, parentRoot)
+	delete(store.Headers, parentRoot)
+	root, err := child.Block.HashSSZ()
+	require.NoError(t, err)
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, child), ErrIgnore)
+	jobValue, loaded := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, loaded)
+	job := jobValue.(*blockJob)
+	require.Nil(t, job.finishPayloadImport)
+
+	store.Blocks[parentRoot] = parent
+	store.Headers[parentRoot] = parentHeader
+	store.OnBlockErr = forkchoice.ErrEIP7594ColumnDataNotAvailable
+	return service, child, store, root, job
 }
 
 func TestBlockServiceGossipRejectsWrongEmptyParentExecutionHead(t *testing.T) {

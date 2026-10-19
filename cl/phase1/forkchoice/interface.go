@@ -141,6 +141,7 @@ type ForkChoiceStorageReader interface {
 
 type ForkChoiceStorageWriter interface {
 	BeginPayloadImport(uint64) func()
+	BeginPendingPayloadEnvelope(common.Hash) func()
 	OnAttestation(attestation *solid.Attestation, fromBlock, insert bool) error
 	OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, test bool) error
 	OnBlock(
