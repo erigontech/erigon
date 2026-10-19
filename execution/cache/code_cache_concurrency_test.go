@@ -51,8 +51,7 @@ func TestCodeCache_ConcurrentPutSameCode_NoSizeDrift(t *testing.T) {
 	}
 	wg.Wait()
 
-	require.Equal(t, codeEntryBytes+int64(len(code)), cc.codeSize.Load(),
-		"hashToCode size must reflect exactly one insert after concurrent same-code Puts")
+	require.Zero(t, cc.codeSize.Load(), "an addr with a codeHash shares the codeHashToCode entry")
 	require.Equal(t, codeEntryBytes+int64(len(code)), cc.codeHashCodeSize.Load(),
 		"codeHashToCode size must reflect exactly one insert after concurrent same-code Puts")
 	require.Equal(t, int64(1), cc.codeSizeEntries.Load(),

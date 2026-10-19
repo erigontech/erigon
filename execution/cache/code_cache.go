@@ -54,7 +54,9 @@ const (
 type versionedAddressID struct {
 	// addr is the full key; only 8 of its bytes pick the slot, so Get compares
 	// it to reject a colliding address.
-	addr   common.Address
+	addr common.Address
+	// addrID keys hashToCode by maphash(code), or codeHashToCode by
+	// maphash(codeHash) when codeHash is set.
 	addrID uint64
 	// codeHash is the addr's keccak codeHash, used to reject a hashToCode
 	// maphash collision (a different contract whose code collides on the
@@ -319,13 +321,18 @@ func (c *CodeCache) GetWithTxNum(addr []byte) ([]byte, uint64, bool) {
 	}
 	c.addrHits.Add(1)
 
-	ce, ok := c.hashToCode.Get(vID.addrID)
+	// An addr bound with its codeHash shares the codeHashToCode entry.
+	layer := c.hashToCode
+	if vID.codeHash != ([32]byte{}) {
+		layer = c.codeHashToCode
+	}
+	ce, ok := layer.Get(vID.addrID)
 	if !ok || len(ce.code) == 0 {
 		c.codeMisses.Add(1)
 		return nil, 0, false
 	}
 	if coh.IsStale(ce.txNum, ce.epoch) {
-		c.hashToCode.Remove(vID.addrID) // OnEvict decrements codeSize
+		layer.Remove(vID.addrID) // OnEvict decrements the layer's resident bytes
 		c.codeMisses.Add(1)
 		return nil, 0, false
 	}
@@ -369,10 +376,14 @@ func (c *CodeCache) putCode(addr []byte, code []byte, keyHash [32]byte, txNum ui
 	stripe.Lock()
 	defer stripe.Unlock()
 
-	c.putCodeLocked(addr, code, keyHash, codeID, txNum, c.coh.Epoch(), overwriteAddr)
+	ep := c.coh.Epoch()
+	c.bindAddrLocked(addr, keyHash, codeID, txNum, ep, overwriteAddr)
+	entry := codeEntry{code: code, keyHash: keyHash, txNum: txNum, epoch: ep}
+	putContentLocked(c.hashToCode, codeID, entry, codeEntryStamp, codeEntryCodeLen,
+		&c.coh, &c.codeSize, codeEntryBytes)
 }
 
-func (c *CodeCache) putCodeLocked(addr []byte, code []byte, keyHash [32]byte, codeID, txNum uint64, ep uint32, overwriteAddr bool) {
+func (c *CodeCache) bindAddrLocked(addr []byte, keyHash [32]byte, codeID, txNum uint64, ep uint32, overwriteAddr bool) {
 	a := common.BytesToAddress(addr)
 	c.addrBindMu.Lock()
 	bindAddr := overwriteAddr
@@ -388,10 +399,6 @@ func (c *CodeCache) putCodeLocked(addr []byte, code []byte, keyHash [32]byte, co
 		c.addrToHash.Add(slot, versionedAddressID{addr: a, addrID: codeID, codeHash: keyHash, txNum: txNum, epoch: ep})
 	}
 	c.addrBindMu.Unlock()
-
-	entry := codeEntry{code: code, keyHash: keyHash, txNum: txNum, epoch: ep}
-	putContentLocked(c.hashToCode, codeID, entry, codeEntryStamp, codeEntryCodeLen,
-		&c.coh, &c.codeSize, codeEntryBytes)
 }
 
 // GetAddrCodeHash returns the Ethereum codeHash for addr if cached. Lets
@@ -513,26 +520,6 @@ func (c *CodeCache) PutWithCodeHashIfAbsent(addr []byte, code []byte, codeHash [
 	c.putWithCodeHash(addr, code, codeHash, txNum, false)
 }
 
-func (c *CodeCache) lockPutStripes(a, b uint8) {
-	if a > b {
-		a, b = b, a
-	}
-	c.putStripes[a].Lock()
-	if a != b {
-		c.putStripes[b].Lock()
-	}
-}
-
-func (c *CodeCache) unlockPutStripes(a, b uint8) {
-	if a > b {
-		a, b = b, a
-	}
-	if a != b {
-		c.putStripes[b].Unlock()
-	}
-	c.putStripes[a].Unlock()
-}
-
 func (c *CodeCache) lockAllPutStripes() {
 	for i := range c.putStripes {
 		c.putStripes[i].Lock()
@@ -550,18 +537,15 @@ func (c *CodeCache) putWithCodeHash(addr []byte, code []byte, codeHash []byte, t
 		return
 	}
 	hcc := maphash.Hash(codeHash)
-	codeID := hcc
-	if len(addr) > 0 {
-		codeID = maphash.Hash(code)
-	}
-	c.lockPutStripes(uint8(codeID), uint8(hcc))
-	defer c.unlockPutStripes(uint8(codeID), uint8(hcc))
+	stripe := &c.putStripes[uint8(hcc)]
+	stripe.Lock()
+	defer stripe.Unlock()
 
 	ep := c.coh.Epoch()
 	kh := hash32(codeHash)
 
 	if len(addr) > 0 {
-		c.putCodeLocked(addr, code, kh, codeID, txNum, ep, overwriteAddr)
+		c.bindAddrLocked(addr, kh, hcc, txNum, ep, overwriteAddr)
 	}
 
 	// Populate the size-only layer alongside the bytes layer — every time

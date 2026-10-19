@@ -48,9 +48,8 @@ func TestCodeCacheStaysWithinByteBudget(t *testing.T) {
 			cache.hashToCode.c.CleanUp()
 			cache.codeHashToCode.c.CleanUp()
 
-			// An addr is required or putCodeLocked never runs and codeSize is 0.
 			perLayer := int64(budget / 2)
-			require.NotZero(t, cache.CodeSizeBytes(), "hashToCode must be populated")
+			require.NotZero(t, cache.codeHashCodeSize.Load(), "codeHashToCode must be populated")
 			require.LessOrEqual(t, cache.CodeSizeBytes(), perLayer,
 				"hashToCode exceeds its share of the budget")
 			require.LessOrEqual(t, cache.codeHashCodeSize.Load(), perLayer,
