@@ -171,6 +171,9 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReqWithSnapshot(
 	if err != nil {
 		return nil, pid, filteredReq, err
 	}
+	if len(responsePacket) == 0 {
+		b.columnDataPeers.coolDown(pid)
+	}
 	if uint64(len(responsePacket)) > requestedColumnCount {
 		b.BanPeer(pid)
 		return nil, pid, filteredReq, fmt.Errorf("response count %d exceeds requested column count %d", len(responsePacket), requestedColumnCount)
