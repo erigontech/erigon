@@ -129,7 +129,8 @@ func (b *SimulatedBlock) UnmarshalJSON(input []byte) error {
 
 // checkOverrideKeys returns an error for a key of the JSON object that does not
 // name a field of t, or that names a field another key already names. Names
-// match case-insensitively, as in encoding/json.
+// match case-insensitively, as in encoding/json. Repeated identical keys cannot
+// be seen here; encoding/json keeps the last one.
 func checkOverrideKeys(input json.RawMessage, t reflect.Type, what string) error {
 	var keys map[string]json.RawMessage
 	if err := json.Unmarshal(input, &keys); err != nil || keys == nil {
