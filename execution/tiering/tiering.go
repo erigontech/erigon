@@ -18,6 +18,7 @@ package tiering
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -166,4 +167,32 @@ func DuplicateBytes(coldDir string, hot []File) (uint64, error) {
 func unversioned(name string) string {
 	_, rest, _ := strings.Cut(name, "-")
 	return rest
+}
+
+// ValidateDemote checks the settings that --tiering.demote needs.
+func ValidateDemote(lookback uint64, coldDir, snapDomain string, allowSameFS bool) error {
+	if lookback == 0 {
+		return errors.New("--tiering.demote requires --tiering.lookback-blocks")
+	}
+	if coldDir == "" {
+		return errors.New("--tiering.demote requires --tiering.cold-dir")
+	}
+	info, err := os.Stat(coldDir)
+	if err != nil {
+		return fmt.Errorf("--tiering.cold-dir: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("--tiering.cold-dir %s is not a directory", coldDir)
+	}
+	if allowSameFS {
+		return nil
+	}
+	same, err := sameFilesystem(coldDir, snapDomain)
+	if err != nil {
+		return err
+	}
+	if same {
+		return fmt.Errorf("--tiering.cold-dir %s is on the same filesystem as %s (set --tiering.allow-same-fs to allow)", coldDir, snapDomain)
+	}
+	return nil
 }

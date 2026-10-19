@@ -121,3 +121,12 @@ func TestDuplicateBytes(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, n)
 }
+
+func TestValidateDemote(t *testing.T) {
+	snapDomain, coldDir := t.TempDir(), t.TempDir()
+	require.ErrorContains(t, ValidateDemote(0, coldDir, snapDomain, true), "lookback-blocks")
+	require.ErrorContains(t, ValidateDemote(21_600, "", snapDomain, true), "cold-dir")
+	require.ErrorContains(t, ValidateDemote(21_600, filepath.Join(coldDir, "missing"), snapDomain, true), "missing")
+	require.ErrorContains(t, ValidateDemote(21_600, coldDir, snapDomain, false), "same filesystem")
+	require.NoError(t, ValidateDemote(21_600, coldDir, snapDomain, true))
+}

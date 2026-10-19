@@ -107,3 +107,9 @@ func TestTieringCommitmentHotMergeStepsFlag(t *testing.T) {
 	require.Zero(t, buildEthCfg(t, nil).Sync.TieringCommitmentHotMergeSteps)
 	require.Equal(t, uint64(1), buildEthCfg(t, []string{"--tiering.commitment-hot-merge-steps", "1"}).Sync.TieringCommitmentHotMergeSteps)
 }
+
+func TestTieringDemoteFlag(t *testing.T) {
+	require.False(t, buildEthCfg(t, nil).Sync.TieringDemote)
+	cfg := buildEthCfg(t, []string{"--tiering.demote", "--tiering.lookback-blocks", "21600", "--tiering.cold-dir", t.TempDir(), "--tiering.allow-same-fs"})
+	require.True(t, cfg.Sync.TieringDemote)
+}
