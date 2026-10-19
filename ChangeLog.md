@@ -90,15 +90,20 @@ and resilience under heavy RPC and peer traffic.
 - Caplin fixes Gloas block and payload publication, restores the served head and payload status after
   restarts, and avoids restart stalls caused by incorrect finality handling
   (#24545, #24548, #24628) — by @domiwei
+- Standalone Caplin reconstructs pre-Gloas beacon blocks with the matching execution body, preventing
+  incorrect block responses and peer bans when serving blocks from competing forks (#25021) — by @domiwei
+- Caplin subscribes to persistent attestation subnets and preserves advertised subnet membership
+  across fork transitions, improving attestation gossip reliability (#25052) — by @domiwei
 - Gloas block production honors the fee recipient in signed proposer preferences. Caplin refuses
   validator duties on a stale served head and checks selected attestations against the proposal state,
   preventing invalid proposals after reorgs that change committee assignments (#24937, #24829, #24959) — by
   @yperbasis, @lystopad
 - Missing custody columns are fetched within the slot instead of waiting over a minute. Parallel blob
   recovery reduces delays before blocks reach fork choice and execution (#24830, #24861) — by @lystopad
-- Execution fixes incorrect state roots after account destruction and revival, stale commitment reads
-  after reorgs, and recovery from invalid blocks. Fork-choice updates preserve safe and finalized
-  hashes even when the head does not move (#24705, #24731, #24836, #24032) — by @chfast,
+- Execution fixes incorrect state roots after account destruction and revival, inconsistent account
+  reads after recreation during parallel execution of Amsterdam blocks, stale commitment reads after
+  reorgs, and recovery from invalid blocks. Fork-choice updates preserve safe and finalized hashes
+  even when the head does not move (#24705, #25057, #24731, #24836, #24032) — by @chfast,
   @Sahil-4555, @AskAlexSharov, @yperbasis
 - A rejected transaction replacement no longer removes the original transaction from the pool,
   including during reorg recovery (#24534) — by @Bruce039
