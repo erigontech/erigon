@@ -54,8 +54,38 @@ func TestGetLightClientUpdatesRange(t *testing.T) {
 		})
 	}
 
+	t.Run("cap", func(t *testing.T) {
+		want := make([]uint64, maxRequestLightClientUpdates)
+		for i := range want {
+			want[i] = uint64(i)
+		}
+		require.Equal(t, want, fetchLightClientUpdatePeriods(t, handler, 0, 1000))
+	})
+
+	t.Run("current period bound", func(t *testing.T) {
+		cur := handler.beaconChainCfg.SyncCommitteePeriod(handler.ethClock.GetCurrentSlot())
+		for _, period := range []uint64{cur, cur + 1} {
+			update := cltypes.NewLightClientUpdate(postState.Version(), postState.BeaconConfig())
+			update.SignatureSlot = period
+			fcu.LCUpdates[period] = update
+		}
+		require.Equal(t, []uint64{cur}, fetchLightClientUpdatePeriods(t, handler, cur, 5))
+	})
+}
+
+func TestGetLightClientUpdatesLeadingGap(t *testing.T) {
+	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+
+	for period := uint64(200); period < 300; period++ {
+		update := cltypes.NewLightClientUpdate(postState.Version(), postState.BeaconConfig())
+		update.SignatureSlot = period
+		fcu.LCUpdates[period] = update
+	}
+
 	got := fetchLightClientUpdatePeriods(t, handler, 0, 1000)
-	require.Len(t, got, 128)
+	require.Len(t, got, 100)
+	require.Equal(t, uint64(200), got[0])
+	require.Equal(t, uint64(299), got[99])
 }
 
 func fetchLightClientUpdatePeriods(t *testing.T, handler *ApiHandler, start, count uint64) []uint64 {

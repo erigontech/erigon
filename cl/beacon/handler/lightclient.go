@@ -101,14 +101,10 @@ func (a *ApiHandler) GetEthV1BeaconLightClientUpdates(w http.ResponseWriter, r *
 	}
 
 	resp := []any{}
-	endPeriod := *startPeriod + min(*count, maxRequestLightClientUpdates)
 	currentPeriod := a.beaconChainCfg.SyncCommitteePeriod(a.ethClock.GetCurrentSlot())
-	if endPeriod > currentPeriod+1 {
-		endPeriod = currentPeriod + 1
-	}
 
 	notFoundPrev := false
-	for i := *startPeriod; i < endPeriod; i++ {
+	for i := *startPeriod; i <= currentPeriod && i-*startPeriod < *count && len(resp) < maxRequestLightClientUpdates; i++ {
 		respUpdate := map[string]any{}
 		update, has := a.forkchoiceStore.GetLightClientUpdate(i)
 		if !has {
