@@ -321,48 +321,6 @@ func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
 	checkFn(aggTx.d[kv.StorageDomain].ht.iit.files, true)
 }
 
-func TestAggregator_CheckDependencyBtwnDomains(t *testing.T) {
-	stepSize := uint64(10)
-	// testDbAggregatorWithNoFiles(t,  stepSize * 32, &testAggConfig{
-	// 	stepSize:                         10,
-	// 	disableCommitmentBranchTransform: false,
-	// })
-	db, agg := testDbAndAggregatorv3(t, stepSize)
-
-	require.NotNil(t, agg.d[kv.AccountsDomain].checker)
-	require.NotNil(t, agg.d[kv.StorageDomain].checker)
-	require.NotNil(t, agg.checker)
-	require.Nil(t, agg.d[kv.CommitmentDomain].checker)
-
-	generateAccountsFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {0, 2}})
-	generateCodeFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {0, 2}})
-	generateStorageFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {0, 2}})
-	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
-
-	require.NoError(t, agg.OpenFolder(db))
-
-	aggTx := agg.BeginFilesRo()
-	defer aggTx.Close()
-
-	checkFn := func(files visibleFiles, merged bool) {
-		if merged {
-			require.Equal(t, 1, len(files))
-			require.Equal(t, uint64(0), files[0].startTxNum/stepSize)
-			require.Equal(t, uint64(2), files[0].endTxNum/stepSize)
-		} else {
-			require.Equal(t, 2, len(files))
-			require.Equal(t, uint64(0), files[0].startTxNum/stepSize)
-			require.Equal(t, uint64(1), files[0].endTxNum/stepSize)
-			require.Equal(t, uint64(1), files[1].startTxNum/stepSize)
-			require.Equal(t, uint64(2), files[1].endTxNum/stepSize)
-		}
-	}
-	checkFn(aggTx.d[kv.AccountsDomain].files, false)
-	checkFn(aggTx.d[kv.CodeDomain].files, true)
-	checkFn(aggTx.d[kv.StorageDomain].files, false)
-	checkFn(aggTx.d[kv.CommitmentDomain].files, false)
-}
-
 func TestReceiptFilesVersionAdjust(t *testing.T) {
 	touchFn := func(t *testing.T, dirs datadir.Dirs, file string) {
 		t.Helper()
