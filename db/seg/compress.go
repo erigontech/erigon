@@ -131,8 +131,9 @@ type Compressor struct {
 	trace             bool
 	logger            log.Logger
 
-	noFsync bool // fsync is enabled by default, but tests can manually disable
-	timings Timings
+	noFsync     bool // fsync is enabled by default, but tests can manually disable
+	outputPacer func() error
+	timings     Timings
 
 	version             uint8
 	featureFlagBitmask  FeatureFlagBitmask
@@ -324,14 +325,18 @@ func (c *Compressor) Compress() error {
 	defer dir.RemoveFile(cf.Name()) //nolint:errcheck
 	defer cf.Close()                //nolint:errcheck
 	tmpFileName := cf.Name()
+	var out io.Writer = cf
+	if c.outputPacer != nil {
+		out = dir.NewPacedWriter(cf, 1<<20, c.outputPacer)
+	}
 
 	if c.version == FileCompressionFormatV1 {
-		if _, err := cf.Write([]byte{c.version, byte(c.featureFlagBitmask)}); err != nil {
+		if _, err := out.Write([]byte{c.version, byte(c.featureFlagBitmask)}); err != nil {
 			return err
 		}
 
 		if c.featureFlagBitmask.Has(PageLevelCompressionEnabled) {
-			if _, err := cf.Write([]byte{c.compPageValuesCount}); err != nil {
+			if _, err := out.Write([]byte{c.compPageValuesCount}); err != nil {
 				return err
 			}
 		}
@@ -341,10 +346,10 @@ func (c *Compressor) Compress() error {
 		dataLen := uint32(len(c.metadata))
 		var dataLenB [4]byte
 		binary.BigEndian.PutUint32(dataLenB[:], dataLen)
-		if _, err := cf.Write(dataLenB[:]); err != nil {
+		if _, err := out.Write(dataLenB[:]); err != nil {
 			return err
 		}
-		if _, err := cf.Write(c.metadata); err != nil {
+		if _, err := out.Write(c.metadata); err != nil {
 			return err
 		}
 	}
@@ -357,7 +362,7 @@ func (c *Compressor) Compress() error {
 			coll.Close()
 		}
 		c.suffixCollectors = nil
-		if err := compressNoWordPatterns(c.logPrefix, cf, c.uncompressedFile, c.lvl, c.logger); err != nil {
+		if err := compressNoWordPatterns(c.logPrefix, out, c.uncompressedFile, c.lvl, c.logger); err != nil {
 			return err
 		}
 	} else {
@@ -374,7 +379,7 @@ func (c *Compressor) Compress() error {
 				return err
 			}
 		}
-		if err := compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, tmpFileName, cf, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
+		if err := compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, tmpFileName, out, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
 			return err
 		}
 	}
@@ -404,6 +409,9 @@ func (c *Compressor) Compress() error {
 }
 
 func (c *Compressor) DisableFsync()    { c.noFsync = true }
+
+// SetOutputPacer makes Compress write the output file in 1 MB chunks, calling wait before each chunk.
+func (c *Compressor) SetOutputPacer(wait func() error) { c.outputPacer = wait }
 func (c *Compressor) Timings() Timings { return c.timings }
 
 func (c *Compressor) CollectTimings() {

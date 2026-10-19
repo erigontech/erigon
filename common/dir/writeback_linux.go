@@ -13,7 +13,7 @@
 //
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
-package state
+package dir
 
 import (
 	"os"
@@ -21,8 +21,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// writeBack starts the writeback of [off, off+n) and waits for the previous chunk, so at most two chunks are dirty.
-func writeBack(f *os.File, off, n, chunk int64) error {
+// WriteBack starts the writeback of [off, off+n) and waits for the previous chunk, so at most two chunks are dirty.
+func WriteBack(f *os.File, off, n, chunk int64) error {
 	fd := int(f.Fd())
 	if err := unix.SyncFileRange(fd, off, n, unix.SYNC_FILE_RANGE_WRITE); err != nil {
 		return err

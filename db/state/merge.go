@@ -472,6 +472,9 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", dt.d.FilenameBase, err)
 	}
 
+	if r.toColdDir {
+		kvFile.SetOutputPacer(func() error { return dt.d.coldIO.Wait(ctx) })
+	}
 	forceNoCompress := toStep-fromStep < DomainMinStepsToCompress
 	kvWriter = dt.dataWriter(kvFile, forceNoCompress)
 	if dt.d.noFsync {

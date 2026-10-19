@@ -178,7 +178,7 @@ func copyWithCancel(ctx context.Context, dst *os.File, src *os.File, gate *coldI
 		mxDemotionPausedSeconds.Add(time.Since(waitStart).Seconds())
 		n, err := io.CopyN(dst, src, chunk)
 		if n > 0 {
-			if werr := writeBack(dst, off, n, chunk); werr != nil {
+			if werr := dir.WriteBack(dst, off, n, chunk); werr != nil {
 				return werr
 			}
 			off += n
