@@ -157,7 +157,9 @@ func (s *SyncedDataManager) copyState(newState, dst *state.CachingBeaconState) (
 	return dst, newState.CopyInto(dst)
 }
 
-// ViewHeadState allows safe, read-only access to the current head state.
+// ViewHeadState gives read-only access to the head state. fn must not keep the
+// state, or anything that points into its storage, after it returns: a later
+// publish may overwrite it in place.
 func (s *SyncedDataManager) ViewHeadState(fn ViewHeadStateFn) error {
 	if !s.enabled || s.stateHead.Load() == nil {
 		return ErrNotSynced
@@ -196,7 +198,9 @@ func (s *SyncedDataManager) ViewHeadStateWithIdentity(fn ViewHeadStateWithIdenti
 	})
 }
 
-// ViewPreviousHeadState allows safe, read-only access to the previous head state.
+// ViewPreviousHeadState gives read-only access to the previous head state. fn must
+// not keep the state, or anything that points into its storage, after it returns:
+// a later publish may overwrite it in place.
 func (s *SyncedDataManager) ViewPreviousHeadState(fn ViewHeadStateFn) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
