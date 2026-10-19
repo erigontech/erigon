@@ -99,6 +99,21 @@ func (a *Aggregator) DemoteFile(ctx context.Context, domain kv.Domain, from, to 
 	return nil
 }
 
+// setDemoteColdDir enables demotion; commitment files that resolve into coldDir count as cold-resident from their next open.
+func (a *Aggregator) setDemoteColdDir(coldDir string) error {
+	abs, err := filepath.Abs(coldDir)
+	if err != nil {
+		return err
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return err
+	}
+	a.demoteColdDir = resolved
+	a.d[kv.CommitmentDomain].coldDir = resolved
+	return nil
+}
+
 func (a *Aggregator) dirtyDomainFile(d *Domain, from, to kv.Step) (item *FilesItem, path string, wordCount int, err error) {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
@@ -192,21 +207,21 @@ func replaceWithSymlink(path, target string) error {
 
 // DemoteInBackground starts demoting the oldest commitment .kv on SSD whose whole range ends at or before
 // boundaryTxNum. It returns false when a demotion is already in flight or there is nothing to demote.
-func (a *Aggregator) DemoteInBackground(boundaryTxNum uint64, coldDir string) bool {
-	if dbg.NoBackgroundMaintenance() {
+func (a *Aggregator) DemoteInBackground(boundaryTxNum uint64) bool {
+	if dbg.NoBackgroundMaintenance() || a.demoteColdDir == "" {
 		return false
 	}
 	if !a.demoting.CompareAndSwap(false, true) {
 		return false
 	}
-	from, to, ok := a.demotionCandidate(boundaryTxNum, coldDir)
+	from, to, ok := a.demotionCandidate(boundaryTxNum)
 	if !ok {
 		a.demoting.Store(false)
 		return false
 	}
 	started := a.background.TryGo(func() {
 		defer a.demoting.Store(false)
-		if err := a.DemoteFile(a.ctx, kv.CommitmentDomain, from, to, coldDir); err != nil && !errors.Is(err, context.Canceled) {
+		if err := a.DemoteFile(a.ctx, kv.CommitmentDomain, from, to, a.demoteColdDir); err != nil && !errors.Is(err, context.Canceled) {
 			a.logger.Warn("[tiering] demotion failed", "from", from, "to", to, "err", err)
 		}
 	})
@@ -216,13 +231,7 @@ func (a *Aggregator) DemoteInBackground(boundaryTxNum uint64, coldDir string) bo
 	return started
 }
 
-// demotionCandidate skips files that already resolve into coldDir; a symlink to another SSD path is still a candidate.
-func (a *Aggregator) demotionCandidate(boundaryTxNum uint64, coldDir string) (from, to kv.Step, ok bool) {
-	coldPrefix, err := filepath.EvalSymlinks(coldDir)
-	if err != nil {
-		return 0, 0, false
-	}
-	coldPrefix += string(filepath.Separator)
+func (a *Aggregator) demotionCandidate(boundaryTxNum uint64) (from, to kv.Step, ok bool) {
 	at := a.BeginFilesRo()
 	defer at.Close()
 	stepSize := a.StepSize()
@@ -230,8 +239,7 @@ func (a *Aggregator) demotionCandidate(boundaryTxNum uint64, coldDir string) (fr
 		if f.endTxNum > boundaryTxNum {
 			break
 		}
-		path, err := filepath.EvalSymlinks(f.Fullpath())
-		if err != nil || strings.HasPrefix(path, coldPrefix) {
+		if f.src.cold {
 			continue
 		}
 		return kv.Step(f.startTxNum / stepSize), kv.Step(f.endTxNum / stepSize), true

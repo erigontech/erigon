@@ -67,13 +67,13 @@ func TestAggregatorDemotionCopyWaitsWhileColdIOPaused(t *testing.T) {
 	t.Parallel()
 	_, agg := testAggWithRanges(t, []testFileRange{{0, 1}, {1, 2}})
 	ssdPath := domainFileBySuffix(t, agg.Dirs().SnapDomain, "commitment.0-1.kv")
-	coldDir := t.TempDir()
+	coldDir := agg.demoteColdDir
 
 	pausedBefore := mxDemotionPausedSeconds.GetValue()
 	at := agg.BeginFilesRo()
 	defer at.Close()
 	resume := at.PauseColdIO()
-	require.True(t, agg.DemoteInBackground(agg.StepSize(), coldDir))
+	require.True(t, agg.DemoteInBackground(agg.StepSize()))
 	time.Sleep(100 * time.Millisecond)
 	_, err := os.Stat(filepath.Join(coldDir, filepath.Base(ssdPath)))
 	require.ErrorIs(t, err, os.ErrNotExist)

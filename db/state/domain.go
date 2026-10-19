@@ -74,6 +74,8 @@ type Domain struct {
 	statecfg.DomainCfg // keep it above *History to avoid unexpected shadowing
 	*History
 
+	coldDir string // resolved demotion target; see isColdResident
+
 	// Schema:
 	//  - .kv - key -> value
 	//  - .bt - key -> offset index

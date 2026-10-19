@@ -629,7 +629,7 @@ func populateFilesFull(t *testing.T, dirs datadir.Dirs, repo *SnapshotRepo) (dat
 	return populateFiles(t, dirs, repo.schema, allFiles.all())
 }
 
-func populateFiles2(t *testing.T, dirs datadir.Dirs, repo *SnapshotRepo, ranges []testFileRange) (dataFileCount, btCount, existenceCount, accessorCount int) {
+func populateFiles2(t testing.TB, dirs datadir.Dirs, repo *SnapshotRepo, ranges []testFileRange) (dataFileCount, btCount, existenceCount, accessorCount int) {
 	t.Helper()
 	var allFiles []string //nolint:prealloc
 	v := version.V1_0
@@ -657,7 +657,7 @@ func populateFiles2(t *testing.T, dirs datadir.Dirs, repo *SnapshotRepo, ranges 
 }
 
 // this function creates mock files (.kvi, .v, .ef, .efi etc.) for the files specified in `allFiles`
-func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFiles []string) (dataFileCount, btCount, existenceCount, accessorCount int) {
+func populateFiles(t testing.TB, dirs datadir.Dirs, schema SnapNameSchema, allFiles []string) (dataFileCount, btCount, existenceCount, accessorCount int) {
 	t.Helper()
 
 	name := schema.DataTag()
@@ -770,7 +770,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 	return dataFileCount, btCount, existenceCount, accessorCount
 }
 
-func containsSubstring(t *testing.T, str string, list []string) bool {
+func containsSubstring(t testing.TB, str string, list []string) bool {
 	t.Helper()
 	for _, s := range list {
 		if strings.Contains(str, s) {

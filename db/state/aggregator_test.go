@@ -432,7 +432,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 	})
 }
 
-func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []testFileRange) {
+func generateDomainFiles(t testing.TB, name string, dirs datadir.Dirs, ranges []testFileRange) {
 	t.Helper()
 	ver := version.V1_0_standart
 	domainR := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (dn string, schema SnapNameSchema) {
@@ -469,22 +469,22 @@ func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []
 	populateFiles2(t, dirs, domainII, ranges)
 }
 
-func generateAccountsFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
+func generateAccountsFile(t testing.TB, dirs datadir.Dirs, ranges []testFileRange) {
 	t.Helper()
 	generateDomainFiles(t, "accounts", dirs, ranges)
 }
 
-func generateCodeFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
+func generateCodeFile(t testing.TB, dirs datadir.Dirs, ranges []testFileRange) {
 	t.Helper()
 	generateDomainFiles(t, "code", dirs, ranges)
 }
 
-func generateStorageFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
+func generateStorageFile(t testing.TB, dirs datadir.Dirs, ranges []testFileRange) {
 	t.Helper()
 	generateDomainFiles(t, "storage", dirs, ranges)
 }
 
-func generateCommitmentFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
+func generateCommitmentFile(t testing.TB, dirs datadir.Dirs, ranges []testFileRange) {
 	t.Helper()
 	ver := version.V1_0_standart
 	commitmentR := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
@@ -748,7 +748,7 @@ func TestCommitmentVisibleFilesReferenced(t *testing.T) {
 	})
 }
 
-func setupAggSnapRepo(t *testing.T, dirs datadir.Dirs, genRepo func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema)) *SnapshotRepo {
+func setupAggSnapRepo(t testing.TB, dirs datadir.Dirs, genRepo func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema)) *SnapshotRepo {
 	t.Helper()
 	stepSize := uint64(10)
 	name, schema := genRepo(stepSize, dirs)

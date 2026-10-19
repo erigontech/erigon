@@ -25,7 +25,7 @@ import (
 
 func TestTierProbeCountsSplitCommitmentProbesByTier(t *testing.T) {
 	_, agg := testAggWithThreeSteps(t)
-	require.NoError(t, agg.DemoteFile(t.Context(), kv.CommitmentDomain, 1, 2, t.TempDir()))
+	require.NoError(t, agg.DemoteFile(t.Context(), kv.CommitmentDomain, 1, 2, agg.demoteColdDir))
 
 	before := ReadTierProbeCounts()
 	at := agg.BeginFilesRo()

@@ -243,7 +243,7 @@ func (db *DB) MergeLoop(ctx context.Context) error {
 	panic("not implemented")
 }
 
-func (db *DB) DemoteInBackground(boundaryTxNum uint64, coldDir string) bool {
+func (db *DB) DemoteInBackground(boundaryTxNum uint64) bool {
 	panic("not implemented")
 }
 

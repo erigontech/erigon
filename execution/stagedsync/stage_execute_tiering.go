@@ -78,7 +78,7 @@ func reportTiering(ctx context.Context, cfg ExecuteBlockCfg, stepSize uint64, tx
 			return err
 		}
 		mxTieringDemoteBoundaryBlock.SetUint64(demoteBoundary)
-		cfg.db.Debug().DemoteInBackground(demoteTxNum, cfg.syncCfg.TieringColdDir)
+		cfg.db.Debug().DemoteInBackground(demoteTxNum)
 	}
 	if !gaugesDue {
 		return nil

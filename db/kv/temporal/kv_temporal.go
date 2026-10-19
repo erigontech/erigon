@@ -811,8 +811,8 @@ func (db *DB) MergeLoop(ctx context.Context) error {
 	return db.stateFiles.MergeLoop(ctx)
 }
 
-func (db *DB) DemoteInBackground(boundaryTxNum uint64, coldDir string) bool {
-	return db.stateFiles.DemoteInBackground(boundaryTxNum, coldDir)
+func (db *DB) DemoteInBackground(boundaryTxNum uint64) bool {
+	return db.stateFiles.DemoteInBackground(boundaryTxNum)
 }
 
 func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {

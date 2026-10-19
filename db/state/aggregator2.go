@@ -76,7 +76,6 @@ func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:go
 	a.stepsInFrozenFile.Store(opts.stepsInFrozenFile)
 	a.erigondbDomainStepsInFrozenFile = opts.erigondbDomainStepsInFrozenFile
 	a.commitmentHotMaxMergeSteps = opts.commitmentHotMaxMergeSteps
-	a.demoteColdDir = opts.demoteColdDir
 
 	a.branchCacheDisabled = opts.disableBranchCache
 	a.disableFsync = opts.disableFsync
@@ -90,6 +89,12 @@ func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:go
 
 	if err := a.ConfigureDomains(); err != nil {
 		return nil, err
+	}
+	if opts.demoteColdDir != "" {
+		if err := a.setDemoteColdDir(opts.demoteColdDir); err != nil {
+			a.Close()
+			return nil, err
+		}
 	}
 	if err := a.checkCommitmentTiering(); err != nil {
 		a.Close()
