@@ -19,11 +19,14 @@ type countingBlockAccessListGetter struct {
 	calls int
 }
 
-type warnCounter struct{ warns int }
+type warnCounter struct{ warns, infos int }
 
 func (h *warnCounter) Log(r *log.Record) error {
-	if r.Lvl == log.LvlWarn {
+	switch r.Lvl {
+	case log.LvlWarn:
 		h.warns++
+	case log.LvlInfo:
+		h.infos++
 	}
 	return nil
 }
@@ -61,7 +64,7 @@ func TestBlockAccessList(t *testing.T) {
 			getter := &countingBlockAccessListGetter{data: test.storedBAL}
 			block := types.NewBlockFromStorage(common.Hash{}, &types.Header{BlockAccessListHash: test.hash}, nil, nil, nil, types.NewBlockAccessListSidecar(test.blockBAL))
 
-			got, err := blockAccessList(getter, block, 1, nil, log.New())
+			got, err := blockAccessList(getter, block, 1, offlinebal.Store{}, log.New())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -109,7 +112,7 @@ func TestBlockAccessListOfflineBAL(t *testing.T) {
 	logger := log.New()
 	logger.SetHandler(warns)
 
-	got, err := blockAccessList(getter, block, 7, reader, logger)
+	got, err := blockAccessList(getter, block, 7, offlinebal.Store{Reader: reader}, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,10 +126,56 @@ func TestBlockAccessListOfflineBAL(t *testing.T) {
 		t.Fatalf("warnings for a stored block = %d, want 0", warns.warns)
 	}
 
-	if got, err := blockAccessList(getter, block, 8, reader, logger); err != nil || got != nil {
-		t.Fatalf("block 8 = %v,%v, want nil,nil", got, err)
+	used, missing := mxOfflineBALBlocks.WithLabelValues("used").GetValueUint64(), mxOfflineBALBlocks.WithLabelValues("missing").GetValueUint64()
+	for _, n := range []uint64{8, 9} {
+		if got, err := blockAccessList(getter, block, n, offlinebal.Store{Reader: reader}, logger); err != nil || got != nil {
+			t.Fatalf("block %d = %v,%v, want nil,nil", n, got, err)
+		}
+	}
+	if warns.warns != 0 || warns.infos != 1 {
+		t.Fatalf("logs past the store end: warns=%d infos=%d, want 0 and 1", warns.warns, warns.infos)
+	}
+	if _, err := blockAccessList(getter, block, 7, offlinebal.Store{Reader: reader}, logger); err != nil {
+		t.Fatal(err)
+	}
+	if d := mxOfflineBALBlocks.WithLabelValues("used").GetValueUint64() - used; d != 1 {
+		t.Fatalf("used blocks counted = %d, want 1", d)
+	}
+	if d := mxOfflineBALBlocks.WithLabelValues("missing").GetValueUint64() - missing; d != 2 {
+		t.Fatalf("missing blocks counted = %d, want 2", d)
+	}
+}
+
+// TestBlockAccessListOfflineBALGap pins that a block missing inside the stored
+// range is still a warning: the store was expected to hold it.
+func TestBlockAccessListOfflineBALGap(t *testing.T) {
+	dir := t.TempDir()
+	w, err := offlinebal.NewWriter(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []uint64{5, 7} {
+		if err := w.Append(n, common.Hash{byte(n)}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := offlinebal.OpenReader(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+
+	warns := &warnCounter{}
+	logger := log.New()
+	logger.SetHandler(warns)
+	block := types.NewBlockFromStorage(common.Hash{6}, &types.Header{}, nil, nil, nil, nil)
+	if _, err := blockAccessList(&countingBlockAccessListGetter{}, block, 6, offlinebal.Store{Reader: reader}, logger); err != nil {
+		t.Fatal(err)
 	}
 	if warns.warns != 1 {
-		t.Fatalf("warnings for a block missing from the store = %d, want 1", warns.warns)
+		t.Fatalf("warnings for a gap = %d, want 1", warns.warns)
 	}
 }

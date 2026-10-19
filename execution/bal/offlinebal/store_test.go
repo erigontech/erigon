@@ -170,10 +170,6 @@ func TestOpen(t *testing.T) {
 		t.Fatalf("Open(off) = %+v,%v, want empty store", s, err)
 	}
 
-	if _, err := Open(true, true, dir); err == nil {
-		t.Fatal("Open(generate, use) succeeded, want error")
-	}
-
 	s, err = Open(true, false, dir)
 	if err != nil || s.Writer == nil || s.Reader != nil {
 		t.Fatalf("Open(generate) = %+v,%v, want writer only", s, err)
@@ -288,4 +284,42 @@ func TestWriterRebuildsHeaderOnlyIndex(t *testing.T) {
 	}
 	writeBlocks(t, dir, 3)
 	requireBlocks(t, dir, 1, 2, 3)
+}
+
+// TestGenerateAndUse runs one forward pass over blocks 1-5 on a store that
+// holds 1-3: stored blocks are served and kept as they are, missing blocks are
+// appended.
+func TestGenerateAndUse(t *testing.T) {
+	dir := t.TempDir()
+	writeBlocks(t, dir, 1, 2, 3)
+	logBefore, err := os.ReadFile(filepath.Join(dir, fileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Open(true, true, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for n := uint64(1); n <= 5; n++ {
+		got, ok := s.Reader.Get(n, hashOf(byte(n)))
+		if ok != (n <= 3) || (ok && !bytes.Equal(got, []byte{byte(n)})) {
+			t.Fatalf("Get(%d) = %v,%v", n, got, ok)
+		}
+		if err := s.Writer.Append(n, hashOf(byte(n)), []byte{byte(n)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	requireBlocks(t, dir, 1, 2, 3, 4, 5)
+	logAfter, err := os.ReadFile(filepath.Join(dir, fileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(logAfter, logBefore) {
+		t.Fatal("records 1-3 changed")
+	}
 }
