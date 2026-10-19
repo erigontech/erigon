@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -132,5 +133,39 @@ func TestSyncContributionPoolKeepsOneEpochFromTheHead(t *testing.T) {
 		} else {
 			require.Equal(t, common.Bytes96(bls.InfiniteSignature), contribution.Signature, "slot %d", slot)
 		}
+	}
+}
+
+// The proposer reads the contributions for blocks, which are pruned by the same window.
+func TestSyncContributionPoolKeepsOneEpochFromTheHeadForBlocks(t *testing.T) {
+	_, msgs, s := getTestCommitteesMessages(1)
+	const headSlot = 10
+	require.NoError(t, s.SetSlot(headSlot))
+	epoch := s.BeaconConfig().SlotsPerEpoch
+	pool := NewSyncContributionPool(s.BeaconConfig())
+	kept := map[uint64]bool{
+		headSlot - 1:         false,
+		headSlot:             true,
+		headSlot + 2:         true,
+		headSlot + epoch:     true,
+		headSlot + epoch + 1: false,
+	}
+	msg := msgs[0]
+	msg.Slot = headSlot
+	require.NoError(t, pool.AddSyncCommitteeMessage(s, 0, &msg))
+	contribution := pool.GetSyncContribution(headSlot, 0, testHash)
+	for slot := range kept {
+		c := contribution.Copy()
+		c.Slot = slot
+		require.NoError(t, pool.AddSyncContribution(s, c))
+	}
+	next := msgs[0]
+	next.Slot = headSlot + 1
+	require.NoError(t, pool.AddSyncCommitteeMessage(s, 0, &next)) // runs the cleanup
+
+	for slot, want := range kept {
+		aggregate, err := pool.GetSyncAggregate(slot, testHash)
+		require.NoError(t, err)
+		require.Equal(t, want, utils.BitsOnCount(aggregate.SyncCommiteeBits) > 0, "slot %d", slot)
 	}
 }
