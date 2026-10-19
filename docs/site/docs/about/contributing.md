@@ -36,14 +36,14 @@ The Erigon node software is developed in the [erigontech/erigon](https://github.
 
 - Target the `main` branch for new features and non-critical fixes.
 - Target the relevant `release/x.y` branch for release-specific backports.
-- Keep PRs focused — one logical change per PR makes review faster.
+- Keep PRs focused — one logical change per pull request (PR) makes review faster.
 - Feel free to open a draft PR early if you want feedback on the direction before the implementation is complete.
 - Include a clear description of what changed, why, and how it was tested.
 
 ### Code style and guidelines
 
 - Follow the existing Go conventions in the codebase.
-- Run `make lint` before submitting — the CI will enforce it.
+- Run `make lint` before submitting — the continuous integration (CI) will enforce it.
 - All new code should be covered by tests where practical.
 - Use the package-prefix commit message format: `eth, rpc: make trace configs optional`. This keeps the git log scannable by subsystem.
 

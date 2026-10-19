@@ -10,7 +10,7 @@ sidebar_position: 3
 
 Erigon is highly resilient and uses a fully-transactional database. This design makes it safe against hard termination (`kill -9`) and power outages. The database ensures users never see "partial writes," meaning all data changes are atomic (all-or-nothing), and all RPC methods operate within Read-Only Transactions, guaranteeing a consistent data view.
 
-**Protect Against Hardware Failure**: True data corruption is typically only caused by hardware failures (like disk or RAM failure). We strongly recommend using ECC memory, disk RAID, and performing regular backups to mitigate these risks.
+**Protect Against Hardware Failure**: True data corruption is typically only caused by hardware failures (like disk or RAM failure). We strongly recommend using error-correcting code (ECC) memory, disk redundant array of independent disks (RAID), and performing regular backups to mitigate these risks.
 
 When an issue arises, follow these steps to methodically diagnose and resolve the problem.
 
@@ -29,7 +29,7 @@ When an issue arises, follow these steps to methodically diagnose and resolve th
 13. **Check for Snapshot File Issues:** For version upgrades, a known issue with snapshot filenames can cause problems. Use snapshot [upgrade](/get-started/installation/upgrading) and repair options.
 14. **Correct File Ownership:** If using a dedicated user or Docker, confirm that the user has full read/write access to the datadir. See the [Docker Compose](/fundamentals/docker-compose) guide for container-specific permission tips.
 15. **Adjust RPC Timeouts:** If specific RPC requests are timing out, try increasing the timeout values to allow more time for heavy requests to complete. See the [RPC & API flags](/fundamentals/configuring-erigon#rpc--api) in the CLI Reference.
-16. **Check for `DB.read.concurrency` issues:** If you have high RPC traffic and low TPS, try reducing the `--DB.read.concurrency` flag. See [Configuring Erigon](/fundamentals/configuring-erigon) for all database-related flags.
+16. **Check for `DB.read.concurrency` issues:** If you have high RPC traffic and low transactions per second (TPS), try reducing the `--DB.read.concurrency` flag. See [Configuring Erigon](/fundamentals/configuring-erigon) for all database-related flags.
 17. **Report a Bug:** If all else fails, open a detailed bug report on GitHub with logs, version info, and a clear description of the problem.
 18. **Engage with the Community:** The Erigon Discord server is an invaluable resource for seeking help from core developers and experienced users.
 
@@ -44,7 +44,7 @@ kill -SIGUSR1 $(pidof erigon)
 # Stack traces are printed to the erigon log / stdout
 ```
 
-If the node is wedged and you are ready to lose it, `kill -SIGQUIT <pid>` dumps every goroutine stack and terminates that process in one step. Erigon installs a stack-dump handler for `SIGUSR1` and shutdown handlers for `SIGINT` and `SIGTERM`, but none for `SIGQUIT` — so `SIGQUIT` falls through to the Go runtime's own behaviour, the same one this repository's CI watchdog relies on. Pass an explicit PID rather than `$(pidof erigon)`: `SIGQUIT` is destructive, and on a host running more than one instance `pidof` would kill all of them.
+If the node is wedged and you are ready to lose it, `kill -SIGQUIT <pid>` dumps every goroutine stack and terminates that process in one step. Erigon installs a stack-dump handler for `SIGUSR1` and shutdown handlers for `SIGINT` and `SIGTERM`, but none for `SIGQUIT` — so `SIGQUIT` falls through to the Go runtime's own behaviour, the same one this repository's continuous integration (CI) watchdog relies on. Pass an explicit PID rather than `$(pidof erigon)`: `SIGQUIT` is destructive, and on a host running more than one instance `pidof` would kill all of them.
 
 **Capture a CPU or heap profile via pprof** (requires `--pprof` flag at startup — default address `localhost:6060`; override with `--pprof.addr` and `--pprof.port`):
 
@@ -65,7 +65,7 @@ Attach the `.pprof` files and the goroutine dump to your GitHub issue.
 
 Hetzner filters traffic at the network edge, and the two product lines need different rules:
 
-* **Cloud** — the firewall is stateful, so return traffic is handled for you. Outbound is allow-all, but only for as long as no outbound rule exists: per Hetzner's FAQ, *"If you define one or more outbound rules, the outbound direction also changes to implicit 'deny'"*. Adding outbound rules for the ports below would therefore cut off DNS, NTP and HTTPS — including the snapshot webseeds — and break the initial download. Define **inbound rules only** and leave the outbound list empty.
+* **Cloud** — the firewall is stateful, so return traffic is handled for you. Outbound is allow-all, but only for as long as no outbound rule exists: per Hetzner's FAQ, *"If you define one or more outbound rules, the outbound direction also changes to implicit 'deny'"*. Adding outbound rules for the ports below would therefore cut off DNS, Network Time Protocol (NTP) and HTTPS — including the snapshot webseeds — and break the initial download. Define **inbound rules only** and leave the outbound list empty.
 * **Dedicated servers (Robot)** — the firewall is stateless, so nothing is inferred from an outgoing connection. The listening ports in the table below are not enough on their own: replies to Erigon's own outbound connections — DNS, HTTPS to the snapshot webseeds, and outgoing peer dials — arrive on ephemeral local ports and need inbound rules of their own (TCP with `ack` set, plus the UDP ranges you use), and any outbound filtering needs matching reply rules. Follow [Hetzner's notes on stateless-firewall configuration](https://docs.hetzner.com/robot/dedicated-server/firewall/#notes-about-stateless-firewall-configuration) rather than porting a Cloud ruleset across.
 
 The ports to allow inbound:
