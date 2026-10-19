@@ -369,13 +369,17 @@ func opKeccak256(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 	return pc, nil, nil
 }
 
-func opAddress(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if scope.addressWordsSet&(1<<addressWordSelf) == 0 {
-		address := scope.Contract.Address().Value()
-		scope.addressWords[addressWordSelf].SetBytes(address[:])
-		scope.addressWordsSet |= 1 << addressWordSelf
+func (ctx *CallContext) pushAddressWord(index addressWordIndex, address accounts.Address) {
+	if ctx.addressWordsSet&(1<<index) == 0 {
+		value := address.Value()
+		ctx.addressWords[index].SetBytes(value[:])
+		ctx.addressWordsSet |= 1 << index
 	}
-	scope.Stack.push(scope.addressWords[addressWordSelf])
+	ctx.Stack.push(ctx.addressWords[index])
+}
+
+func opAddress(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	scope.pushAddressWord(addressWordSelf, scope.Contract.Address())
 	return pc, nil, nil
 }
 
@@ -393,22 +397,12 @@ func opBalance(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 }
 
 func opOrigin(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if scope.addressWordsSet&(1<<addressWordOrigin) == 0 {
-		origin := evm.Origin.Value()
-		scope.addressWords[addressWordOrigin].SetBytes(origin[:])
-		scope.addressWordsSet |= 1 << addressWordOrigin
-	}
-	scope.Stack.push(scope.addressWords[addressWordOrigin])
+	scope.pushAddressWord(addressWordOrigin, evm.Origin)
 	return pc, nil, nil
 }
 
 func opCaller(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if scope.addressWordsSet&(1<<addressWordCaller) == 0 {
-		caller := scope.Contract.Caller().Value()
-		scope.addressWords[addressWordCaller].SetBytes(caller[:])
-		scope.addressWordsSet |= 1 << addressWordCaller
-	}
-	scope.Stack.push(scope.addressWords[addressWordCaller])
+	scope.pushAddressWord(addressWordCaller, scope.Contract.Caller())
 	return pc, nil, nil
 }
 
@@ -686,12 +680,7 @@ func stBlockhash(_ uint64, scope *CallContext) string {
 }
 
 func opCoinbase(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if scope.addressWordsSet&(1<<addressWordCoinbase) == 0 {
-		coinbase := evm.Context.Coinbase.Value()
-		scope.addressWords[addressWordCoinbase].SetBytes(coinbase[:])
-		scope.addressWordsSet |= 1 << addressWordCoinbase
-	}
-	scope.Stack.push(scope.addressWords[addressWordCoinbase])
+	scope.pushAddressWord(addressWordCoinbase, evm.Context.Coinbase)
 	return pc, nil, nil
 }
 
