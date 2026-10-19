@@ -246,7 +246,7 @@ func TestResetFollowsTheLoaderPastUnsupportedVersions(t *testing.T) {
 	})
 }
 
-func TestResetTreatsALegacyTwinOfACanonicalFileAsCanonical(t *testing.T) {
+func TestResetTreatsALegacyTwinOfACanonicalFileAsLocal(t *testing.T) {
 	withOsRoot(t, func(root *os.Root) {
 		startEntries := []fsEntry{{Name: "snapshots/domain/v1-commitment.0-256.kv"}}
 		makeEntries(t, startEntries, root)
@@ -257,11 +257,9 @@ func TestResetTreatsALegacyTwinOfACanonicalFileAsCanonical(t *testing.T) {
 			{Name: "domain/v1.0-accounts.0-256.kv"},
 		}
 		r.PreverifiedSnapshots.Sort()
-		qt.Assert(t, qt.IsNil(r.Run()))
-		qt.Assert(t, qt.IsNil(r.Dirs.RenameOldVersions(false)))
-		_, err := root.Stat("snapshots/domain/v1.0-commitment.0-256.kv")
-		qt.Assert(t, qt.IsNil(err))
-		qt.Assert(t, qt.IsNil(r.checkStateBuilds()))
+		err := r.Run()
+		qt.Assert(t, qt.IsNotNil(err))
+		qt.Assert(t, qt.StringContains(err.Error(), "0-256"))
 	})
 }
 
@@ -401,4 +399,41 @@ func TestResetChecksAdjacentRangesThatDoNotCoverEachOther(t *testing.T) {
 		qt.Assert(t, qt.IsNotNil(err))
 		qt.Assert(t, qt.StringContains(err.Error(), "0-2, 2-4"))
 	})
+}
+
+func TestResetRefusesALegacyFileThatStartupRenamesOverItsCanonicalTwin(t *testing.T) {
+	withOsRoot(t, func(root *os.Root) {
+		startEntries := []fsEntry{
+			{Name: "snapshots/domain/v1.0-accounts.0-256.kv"},
+			{Name: "snapshots/domain/v1-accounts.0-256.kv"},
+			{Name: "snapshots/domain/v1.0-storage.0-256.kv"},
+			{Name: "snapshots/domain/v1.0-commitment.0-256.kv"},
+		}
+		makeEntries(t, startEntries, root)
+		r := makeTestingReset(t, startEntries, root, "", ".")
+		r.RemoveUnknown, r.RemoveLocal = false, false
+		r.PreverifiedSnapshots = preverified.SortedItems{
+			{Name: "domain/v1.0-accounts.0-256.kv"},
+			{Name: "domain/v1.0-storage.0-256.kv"},
+			{Name: "domain/v1.0-commitment.0-256.kv"},
+		}
+		r.PreverifiedSnapshots.Sort()
+		err := r.Run()
+		qt.Assert(t, qt.IsNotNil(err))
+		qt.Assert(t, qt.StringContains(err.Error(), "0-256"))
+	})
+}
+
+func TestResetIgnoresMalformedNamesWhenFindingTheVisibleEnd(t *testing.T) {
+	for _, malformed := range []string{
+		"snapshots/idx/v1.0-logaddrs.8-4.ef",
+		"snapshots/idx/v1.0-logaddrs.99999999999999999999-4.ef",
+	} {
+		withOsRoot(t, func(root *os.Root) {
+			err := runCoveredRangeReset(t, root, append(slices.Clone(completeLocalMerge),
+				"snapshots/idx/v1.0-logaddrs.0-2.ef", malformed), nil)
+			qt.Assert(t, qt.IsNotNil(err), qt.Commentf("%s", malformed))
+			qt.Assert(t, qt.StringContains(err.Error(), "0-2"))
+		})
+	}
 }

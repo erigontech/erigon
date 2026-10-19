@@ -51,7 +51,7 @@ type Reset struct {
 // rewrites them to the dotted spelling, and reset does not run it first.
 var stateKVName = regexp.MustCompile(`^(v[0-9]+(?:\.[0-9]+)?)-(accounts|storage|commitment)\.([0-9]+)-([0-9]+)\.kv$`)
 
-var entityFileName = regexp.MustCompile(`^v[0-9]+(?:\.[0-9]+)?-([a-z]+)\.[0-9]+-([0-9]+)\.(kv|v|ef)$`)
+var entityFileName = regexp.MustCompile(`^v[0-9]+(?:\.[0-9]+)?-([a-z]+)\.([0-9]+)-([0-9]+)\.(kv|v|ef)$`)
 
 func startupName(name string) string {
 	if rest, ok := strings.CutPrefix(name, "v1-"); ok {
@@ -143,13 +143,18 @@ func (reset *Reset) checkStateBuilds() error {
 		if m == nil {
 			return
 		}
-		toStep, err := strconv.ParseUint(m[2], 10, 64)
+		fromStep, err := strconv.ParseUint(m[2], 10, 64)
 		if err != nil {
 			return
 		}
-		entity := m[1] + "." + m[3]
+		toStep, err := strconv.ParseUint(m[3], 10, 64)
+		if err != nil || fromStep > toStep {
+			return
+		}
+		entity := m[1] + "." + m[4]
 		entityEnds[entity] = max(entityEnds[entity], toStep)
 	}
+	renamedOntoManifest := map[string]bool{}
 
 	// A file the manifest describes ends up canonical whether or not it is on disk now: reset drops
 	// the lock file, and the next sync fetches or repairs it.
@@ -179,6 +184,9 @@ func (reset *Reset) checkStateBuilds() error {
 				continue
 			}
 			if _, known := reset.PreverifiedSnapshots.Get("domain/" + name); known {
+				if name != entry.Name() {
+					renamedOntoManifest[name] = true
+				}
 				continue
 			}
 			record(name, true)
@@ -211,7 +219,7 @@ func (reset *Reset) checkStateBuilds() error {
 			if st == nil {
 				continue
 			}
-			if st.retainedLocal != commitment.retainedLocal {
+			if st.retainedLocal != commitment.retainedLocal || renamedOntoManifest[st.name] || renamedOntoManifest[commitment.name] {
 				mixed = append(mixed, stepRange)
 				break
 			}
