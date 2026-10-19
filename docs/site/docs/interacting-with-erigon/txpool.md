@@ -21,7 +21,7 @@ The TxPool namespace must be explicitly enabled using the `--http.api` flag when
 ### Implementation Details
 
 * The `TxPoolAPIImpl` uses a `proto_txpool.TxpoolClient` to communicate with the transaction pool service
-* All transactions are decoded from RLP format and converted to `ethapi.RPCTransaction` objects for JSON-RPC responses
+* All transactions are decoded from Recursive Length Prefix (RLP) format and converted to `ethapi.RPCTransaction` objects for JSON-RPC responses
 * The implementation handles transaction categorization based on the `TxnType` field from the pool service
 
 ### External vs Internal Mode

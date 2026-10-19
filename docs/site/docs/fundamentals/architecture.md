@@ -110,7 +110,7 @@ See [Caplin](caplin) for full details.
 Where most clients store account state in a Merkle Patricia Trie *inside* the database, Erigon stores it as **flat key-value pairs** and computes the trie root incrementally as part of Execution. Trade-off:
 
 - **Read path is direct** — `getAccount(addr)` is a single key lookup, not a multi-level trie traversal.
-- **Write path defers trie hashing** — updates accumulate in the KV store and the trie is rebuilt only when state-root computation requires it.
+- **Write path defers trie hashing** — updates accumulate in the key-value (KV) store and the trie is rebuilt only when state-root computation requires it.
 
 This is the single largest reason Erigon's RPC performance stays flat under load: there is no background trie compaction that can spike CPU during an `eth_call` burst.
 
