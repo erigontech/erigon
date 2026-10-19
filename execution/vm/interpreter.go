@@ -75,8 +75,6 @@ type CallContext struct {
 	stateGasSpill     uint64
 	newAccountCharged bool
 	input             []byte
-	addressWords      [addressWordCount]uint256.Int
-	addressWordsSet   uint8
 	Memory            Memory
 
 	// Opcode-scoped key/address intern cache. cacheGen is incremented once per
@@ -95,10 +93,12 @@ type CallContext struct {
 	// Contract carries pointers, so it must precede the pointer-free Stack:
 	// the GC scans a struct only up to its last pointer word (PtrBytes), and
 	// Stack.data is 32 KB it can skip entirely.
-	Contract Contract
-	create   createGasPreparation
-	slots    frameSlots
-	Stack    Stack
+	Contract        Contract
+	create          createGasPreparation
+	slots           frameSlots
+	Stack           Stack
+	addressWords    [addressWordCount]uint256.Int
+	addressWordsSet [addressWordCount]bool
 }
 
 // maxFrameSlotMisses is how many fills a frame makes without a hit before it stops caching.
@@ -213,7 +213,7 @@ func (evm *EVM) getCallContext(contract Contract, input []byte, gas mdgas.MdGas)
 	ctx.stateGas = gas.State
 	ctx.stateGasSpill = 0
 	ctx.newAccountCharged = false
-	ctx.addressWordsSet = 0
+	ctx.addressWordsSet = [addressWordCount]bool{}
 	ctx.input = input
 	ctx.Contract = contract
 	return ctx
