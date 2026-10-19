@@ -944,19 +944,13 @@ func (f *ForkChoiceStore) ForkNodes() []ForkNode {
 		if !has {
 			continue
 		}
-		justifiedCheckpoint, has := f.forkGraph.GetCurrentJustifiedCheckpoint(blockRoot)
-		if !has {
-			if blockRoot != f.forkGraph.AnchorRoot() {
+		justifiedCheckpoint, hasJustified := f.forkGraph.GetCurrentJustifiedCheckpoint(blockRoot)
+		finalizedCheckpoint, hasFinalized := f.forkGraph.GetFinalizedCheckpoint(blockRoot)
+		if !hasJustified || !hasFinalized {
+			if blockRoot != f.forkGraph.AnchorRoot() || blockRoot != f.JustifiedCheckpoint().Root {
 				continue
 			}
-			justifiedCheckpoint = f.JustifiedCheckpoint()
-		}
-		finalizedCheckpoint, has := f.forkGraph.GetFinalizedCheckpoint(blockRoot)
-		if !has {
-			if blockRoot != f.forkGraph.AnchorRoot() {
-				continue
-			}
-			finalizedCheckpoint = f.FinalizedCheckpoint()
+			justifiedCheckpoint, finalizedCheckpoint = f.JustifiedCheckpoint(), f.FinalizedCheckpoint()
 		}
 		blockHash, _ := f.eth2Roots.Get(blockRoot)
 
