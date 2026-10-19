@@ -421,3 +421,80 @@ func BenchmarkLog3Interpreter(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkExpSmallOperands(b *testing.B) {
+	for _, base := range []uint64{3, 5, 7, 11, 13, 136279841} {
+		for _, exponent := range []uint64{3, 5, 7, 11, 13} {
+			b.Run(fmt.Sprintf("%d^%d", base, exponent), func(b *testing.B) {
+				opBenchmark(b, opExp, fmt.Sprintf("%016x", exponent), fmt.Sprintf("%016x", base))
+			})
+		}
+	}
+}
+
+func BenchmarkExpInterpreter(b *testing.B) {
+	for _, base := range []uint64{3, 13, 136279841} {
+		b.Run(fmt.Sprint(base), func(b *testing.B) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, Config{})
+			contract := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+			for range 256 {
+				contract.Code = append(contract.Code, byte(PUSH1), 13, byte(PUSH4), byte(base>>24), byte(base>>16), byte(base>>8), byte(base), byte(EXP), byte(POP))
+			}
+			contract.Code = append(contract.Code, byte(STOP))
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, _, _, err := evm.Run(*contract, mdgas.MdGas{Execution: 1_000_000}, nil, false); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkExpNegativeOne(b *testing.B) {
+	for _, tc := range []struct {
+		name           string
+		base, exponent uint256.Int
+	}{
+		{"negative_one/odd", *new(uint256.Int).SetAllOne(), *new(uint256.Int).SetAllOne()},
+		{"negative_one/even", *new(uint256.Int).SetAllOne(), uint256.Int{0, 0, 0, 1}},
+		{"small_base", uint256.Int{3}, uint256.Int{13}},
+		{"other_large_base", uint256.Int{3, 4, 5, 6}, uint256.Int{13}},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			scope := &CallContext{}
+			b.ReportAllocs()
+			for b.Loop() {
+				scope.Stack.Reset()
+				scope.Stack.push(tc.exponent)
+				scope.Stack.push(tc.base)
+				if _, _, err := opExp(0, nil, scope); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkContextAddress(b *testing.B) {
+	address := accounts.InternAddress(common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678"))
+	for _, tc := range []struct {
+		name string
+		op   executionFunc
+	}{{"address", opAddress}, {"caller", opCaller}, {"origin", opOrigin}, {"coinbase", opCoinbase}} {
+		b.Run(tc.name, func(b *testing.B) {
+			evm := &EVM{TxContext: evmtypes.TxContext{Origin: address}, Context: evmtypes.BlockContext{Coinbase: address}}
+			scope := evm.getCallContext(*NewContract(address, address, address, uint256.Int{}), nil, mdgas.MdGas{})
+			defer evm.putCallContext(scope)
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, _, err := tc.op(0, evm, scope); err != nil {
+					b.Fatal(err)
+				}
+				scope.Stack.Reset()
+			}
+		})
+	}
+}

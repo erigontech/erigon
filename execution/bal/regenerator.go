@@ -79,7 +79,9 @@ func NewRegenerator(blockReader dbservices.FullBlockReader, engine rules.Engine,
 // replayed), and state.ErrPruned-wrapped errors when the required history is
 // no longer available. The returned bytes are shared with the internal cache
 // and must be treated as read-only.
-func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, blockHash common.Hash, blockNum uint64) ([]byte, error) {
+// If set, beforeReplay must succeed before replay starts. Cache hits and
+// rejected preflight checks do not call it.
+func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, blockHash common.Hash, blockNum uint64, beforeReplay func() error) ([]byte, error) {
 	if cached, ok := g.cache.Get(blockHash); ok {
 		return cached, nil
 	}
@@ -97,10 +99,39 @@ func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Co
 	if !ok || canonicalHash != blockHash {
 		return nil, nil
 	}
-	mu := g.perBlockExecMu.lock(blockHash)
-	defer g.perBlockExecMu.unlock(mu, blockHash)
+	done, err := g.perBlockExecMu.lock(ctx, blockHash)
+	if err == nil {
+		defer g.perBlockExecMu.unlock(done, blockHash)
+	}
+	// Completed cached results remain usable after cancellation.
 	if cached, ok := g.cache.Get(blockHash); ok {
 		return cached, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// Check body metadata before admission; loading transactions is part of the limited work.
+	body, err := g.blockReader.CanonicalBodyForStorage(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	if body == nil {
+		return nil, nil
+	}
+	reader, err := g.historyStateReader(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if beforeReplay != nil {
+		if err := beforeReplay(); err != nil {
+			return nil, err
+		}
 	}
 	select {
 	case g.execSem <- struct{}{}:
@@ -114,10 +145,6 @@ func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Co
 	}
 	if block == nil {
 		return nil, nil
-	}
-	reader, err := g.historyStateReader(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
 	}
 	ibs := state.New(reader)
 	defer ibs.Close()
@@ -167,14 +194,25 @@ type loaderMutex[K comparable] struct {
 	sync.Map
 }
 
-func (m *loaderMutex[K]) lock(key K) *sync.Mutex {
-	value, _ := m.LoadOrStore(key, &sync.Mutex{})
-	mu := value.(*sync.Mutex)
-	mu.Lock()
-	return mu
+func (m *loaderMutex[K]) lock(ctx context.Context, key K) (chan struct{}, error) {
+	done := make(chan struct{})
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		value, loaded := m.LoadOrStore(key, done)
+		if !loaded {
+			return done, nil
+		}
+		select {
+		case <-value.(chan struct{}):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 }
 
-func (m *loaderMutex[K]) unlock(mu *sync.Mutex, key K) {
-	mu.Unlock()
+func (m *loaderMutex[K]) unlock(done chan struct{}, key K) {
 	m.Delete(key)
+	close(done)
 }

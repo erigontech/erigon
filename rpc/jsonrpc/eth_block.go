@@ -406,7 +406,7 @@ func (api *BaseAPI) blockAccessListBytes(ctx context.Context, tx kv.TemporalTx, 
 		return nil, err
 	}
 	if len(data) == 0 {
-		data, err = api.balRegenerator.GetBlockAccessListBytes(ctx, chainConfig, tx, blockHash, blockNum)
+		data, err = api.balRegenerator.GetBlockAccessListBytes(ctx, chainConfig, tx, blockHash, blockNum, nil)
 		if errors.Is(err, state.ErrPruned) {
 			return nil, blockAccessListPrunedHistoryError()
 		}

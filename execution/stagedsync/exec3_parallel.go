@@ -1300,7 +1300,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		return errors.New("parallel exec request has no block")
 	}
 
-	prevSenderTx := map[accounts.Address]int{}
+	prevAccountTx := map[common.Address]int{}
 	var scheduleable *blockExecutor
 	blockNum := execRequest.block.NumberU64()
 	if len(execRequest.tasks) > 0 {
@@ -1351,13 +1351,18 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			if err != nil {
 				return err
 			}
+			addresses := make([]common.Address, 0, 2)
 			if !sender.IsNil() {
-				if tx, ok := prevSenderTx[sender]; ok {
-					executor.execTasks.addDependency(tx, i, true)
+				addresses = append(addresses, sender.Value())
+			}
+			if tx := t.Tx(); tx != nil && !tx.GetValue().IsZero() && tx.GetTo() != nil {
+				addresses = append(addresses, *tx.GetTo())
+			}
+			for _, address := range addresses {
+				if tx, ok := prevAccountTx[address]; ok && tx != i && executor.execTasks.addDependency(tx, i, true) {
 					executor.execTasks.clearPending(i)
 				}
-
-				prevSenderTx[sender] = i
+				prevAccountTx[address] = i
 			}
 		}
 
