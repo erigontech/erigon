@@ -41,8 +41,9 @@ import (
 
 // fastOp is one opcode the untraced loop runs inline, without the jump table.
 // Every entry must charge only constant gas, plus copy gas per word for copies,
-// and must not fail once its checks pass. TestFastPathMatchesJumpTables pins the constants against all forks, and
-// TestRunMatchesRunTraced pins the inlined bodies against the jump-table ops.
+// and must not fail once its checks pass. TestFastPathMatchesJumpTables pins
+// the constants against all forks, and TestRunMatchesRunTraced pins the inlined
+// bodies against the jump-table ops.
 type fastOp struct {
 	name       string
 	execute    string // jump-table execute func, inlined as the case body; "" for the makeDup and makePush closures
