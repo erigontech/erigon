@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -438,8 +439,36 @@ func (s StorageKeysInfo) EncodeKey() string {
 	return u.Hex()
 }
 
+// StorageKeys are the storage keys of an eth_getProof request. The spec allows up to 64 hex
+// digits, so unlike hexutil.Bytes an odd-length key such as 0x1 is accepted and read as 0x01.
+type StorageKeys []hexutil.Bytes
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (k *StorageKeys) UnmarshalJSON(input []byte) error {
+	var raw []json.RawMessage
+	if err := json.Unmarshal(input, &raw); err != nil {
+		return err
+	}
+	if raw == nil {
+		*k = nil
+		return nil
+	}
+	keys := make(StorageKeys, len(raw))
+	for i, key := range raw {
+		// Pad an odd number of digits on the left, so "0x1" reads as "0x01".
+		if len(key) >= 4 && key[0] == '"' && hexutil.Has0xPrefix(string(key[1:3])) && len(key)%2 == 1 {
+			key = append([]byte(`"0x0`), key[3:]...)
+		}
+		if err := keys[i].UnmarshalJSON(key); err != nil {
+			return err
+		}
+	}
+	*k = keys
+	return nil
+}
+
 // GetProof implements eth_getProof; historical blocks are supported as far back as the commitment history allows.
-func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNrOrHashArg *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
+func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys StorageKeys, blockNrOrHashArg *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
 	blockNrOrHash := blockOrLatest(blockNrOrHashArg)
 	if len(storageKeys) > maxGetProofKeys {
 		return nil, &rpc.CustomError{

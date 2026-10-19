@@ -27,6 +27,7 @@ import (
 	"io"
 	"math/big"
 	"math/rand"
+	"strings"
 	"testing"
 	"time"
 
@@ -1425,6 +1426,48 @@ func TestGetProofStorageKeyEncoding(t *testing.T) {
 	}
 }
 
+// Odd-length keys are read as if left-padded with a zero digit; every other input decodes,
+// or fails, exactly as it does for []hexutil.Bytes.
+func TestStorageKeysUnmarshalJSON(t *testing.T) {
+	t.Parallel()
+
+	slotOne := common.BytesToHash([]byte{0x01})
+	hashKey := hexutil.Bytes(slotOne[:])
+	tests := []struct {
+		name  string
+		input string
+		want  StorageKeys
+	}{
+		{"null", `null`, nil},
+		{"empty list", `[]`, StorageKeys{}},
+		{"empty key", `["0x"]`, StorageKeys{{}}},
+		{"odd length", `["0x0","0x1","0xabc","0X1"]`, StorageKeys{{0x00}, {0x01}, {0x0a, 0xbc}, {0x01}}},
+		{"odd length keeps leading zeros", `["0x001"]`, StorageKeys{{0x00, 0x01}}},
+		{"even length", `["0x01","0x0abc"]`, StorageKeys{{0x01}, {0x0a, 0xbc}}},
+		{"63 digits", `["0x` + strings.Repeat("0", 62) + `1"]`, StorageKeys{hashKey}},
+		{"64 digits", `["0x` + strings.Repeat("0", 63) + `1"]`, StorageKeys{hashKey}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var got StorageKeys
+			require.NoError(t, json.Unmarshal([]byte(tt.input), &got))
+			require.Equal(t, tt.want, got)
+		})
+	}
+
+	for _, input := range []string{`["01"]`, `["0x01","01"]`, `["0xg1"]`, `["0x1g"]`, `[1]`, `[null]`} {
+		t.Run("error "+input, func(t *testing.T) {
+			t.Parallel()
+			var want []hexutil.Bytes
+			wantErr := json.Unmarshal([]byte(input), &want)
+			require.Error(t, wantErr)
+			var got StorageKeys
+			require.EqualError(t, json.Unmarshal([]byte(input), &got), wantErr.Error())
+		})
+	}
+}
+
 // TestGetProofRequestShapes covers the shapes eth_getProof must honour: the account
 // fields for each account shape, the block parameter forms execution-apis allows, and
 // the storage-key list rules.
@@ -1556,6 +1599,23 @@ func TestGetProofRequestShapes(t *testing.T) {
 			require.Equal(t, hexutil.Encode(k), proof.StorageProof[i].Key)
 		}
 		require.Equal(t, proof.StorageProof[0], proof.StorageProof[2])
+	})
+
+	t.Run("odd-length keys match their even-length form", func(t *testing.T) {
+		server := rpc.NewServer(50, false, false, true, log.New(), 100)
+		require.NoError(t, server.RegisterName("eth", EthAPI(api)))
+		client := rpc.DialInProc(server, log.New())
+		t.Cleanup(func() { client.Close(); server.Stop() })
+
+		getProof := func(keys ...string) string {
+			var res json.RawMessage
+			require.NoError(t, client.CallContext(ctx, &res, "eth_getProof", contractAddr, keys, "0x6"))
+			return string(res)
+		}
+		zeros := strings.Repeat("0", 62)
+		require.JSONEq(t,
+			getProof("0x00", "0x04", "0x08", "0x0a", "0x0"+zeros+"4"),
+			getProof("0x0", "0x4", "0x8", "0xa", "0x"+zeros+"4"))
 	})
 }
 
