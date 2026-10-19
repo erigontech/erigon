@@ -442,26 +442,22 @@ func (t *gloasWeightTree) headWeight(root common.Hash) uint64 {
 }
 
 func (t *gloasWeightTree) snapshotWeights() map[common.Hash]uint64 {
-	if t.state == nil || t.checkpoint != t.f.JustifiedCheckpoint() {
+	if t.state == nil || t.allDirty || t.checkpoint != t.f.JustifiedCheckpoint() {
 		return nil
 	}
 	weights := make(map[common.Hash]uint64, len(t.topologySeen))
-	for root := range t.nodes {
-		if _, prepared := t.topologySeen[root]; prepared {
-			weights[root] = t.GetAttestationScore(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending})
-		}
+	for root := range t.topologySeen {
+		weights[root] = t.GetAttestationScore(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending})
 	}
 	proposerBoostRoot := t.f.ProposerBoostRoot()
 	score := t.GetProposerScore()
 	boostChecked := false
 	for root := proposerBoostRoot; root != (common.Hash{}); {
 		if weight, ok := weights[root]; ok {
-			if !boostChecked {
-				if !t.proposerBoostApplies(proposerBoostRoot) {
-					return weights
-				}
-				boostChecked = true
+			if !boostChecked && !t.proposerBoostApplies(proposerBoostRoot) {
+				return weights
 			}
+			boostChecked = true
 			weights[root] = weight + score
 		}
 		if root == t.checkpoint.Root {

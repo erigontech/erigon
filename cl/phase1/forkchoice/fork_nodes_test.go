@@ -30,9 +30,21 @@ import (
 
 type forkNodesTestGraph struct {
 	*headSnapshotForkGraph
+	missingJustified map[common.Hash]bool
+	missingFinalized map[common.Hash]bool
 }
 
-func (g *forkNodesTestGraph) GetFinalizedCheckpoint(common.Hash) (solid.Checkpoint, bool) {
+func (g *forkNodesTestGraph) GetCurrentJustifiedCheckpoint(root common.Hash) (solid.Checkpoint, bool) {
+	if g.missingJustified[root] {
+		return solid.Checkpoint{}, false
+	}
+	return g.headSnapshotForkGraph.GetCurrentJustifiedCheckpoint(root)
+}
+
+func (g *forkNodesTestGraph) GetFinalizedCheckpoint(root common.Hash) (solid.Checkpoint, bool) {
+	if g.missingFinalized[root] {
+		return solid.Checkpoint{}, false
+	}
 	return solid.Checkpoint{}, true
 }
 
@@ -50,6 +62,80 @@ func newForkNodesTestStore(t *testing.T) (*ForkChoiceStore, common.Hash) {
 	})
 	f.setLatestMessage(0, LatestMessage{Slot: 12, Root: checkpoint.Root})
 	return f, checkpoint.Root
+}
+
+func TestForkNodesUsesPreGloasWeights(t *testing.T) {
+	f, root := newForkNodesTestStore(t)
+	f.beaconCfg.GloasForkEpoch = 2
+	f.beaconCfg.InitializeForkSchedule()
+	f.weights = map[common.Hash]uint64{root: 17}
+	checkpoint := f.JustifiedCheckpoint()
+	cs, ok := f.checkpointStates.Load(checkpoint)
+	require.True(t, ok)
+	f.gloasWeightTree.prepare(checkpoint, cs.(*checkpointState))
+
+	require.Equal(t, []ForkNode{{
+		Slot: 11, BlockRoot: root, Weight: 17, Validity: "valid",
+	}}, f.ForkNodes())
+}
+
+func TestForkNodesSwitchesWeightsAtGloasBoundary(t *testing.T) {
+	f, root := newForkNodesTestStore(t)
+	f.beaconCfg.GloasForkEpoch = 1
+	f.beaconCfg.InitializeForkSchedule()
+	f.weights = map[common.Hash]uint64{root: 17}
+	checkpoint := f.JustifiedCheckpoint()
+	cs, ok := f.checkpointStates.Load(checkpoint)
+	require.True(t, ok)
+	f.gloasWeightTree.prepare(checkpoint, cs.(*checkpointState))
+	f.headHash = root
+
+	for _, test := range []struct {
+		name   string
+		slot   uint64
+		weight uint64
+	}{
+		{name: "last pre-Gloas slot", slot: 31, weight: 17},
+		{name: "first Gloas slot", slot: 32, weight: 32},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f.timeMs.Store(test.slot * f.beaconCfg.SecondsPerSlot * 1000)
+
+			require.Equal(t, []ForkNode{{
+				Slot: 11, BlockRoot: root, Weight: test.weight, Validity: "valid",
+			}}, f.ForkNodes())
+		})
+	}
+}
+
+func TestForkNodesUsesStoreCheckpointsForAnchor(t *testing.T) {
+	f, anchorRoot := newForkNodesTestStore(t)
+	graph := f.forkGraph.(*forkNodesTestGraph)
+	graph.anchorRoot = anchorRoot
+	missingJustifiedRoot, missingFinalizedRoot := common.Hash{0xbb}, common.Hash{0xcc}
+	for i, root := range []common.Hash{missingJustifiedRoot, missingFinalizedRoot} {
+		block := cltypes.NewSignedBeaconBlock(f.beaconCfg, clparams.GloasVersion)
+		block.Block.Slot = uint64(12 + i)
+		block.Block.ParentRoot = anchorRoot
+		graph.headers[root] = block.SignedBeaconBlockHeader().Header
+		graph.blocks[root] = block
+		f.updateChildren(11, anchorRoot, root)
+	}
+	graph.missingJustified = map[common.Hash]bool{anchorRoot: true, missingJustifiedRoot: true}
+	graph.missingFinalized = map[common.Hash]bool{anchorRoot: true, missingFinalizedRoot: true}
+	oldCheckpoint := f.JustifiedCheckpoint()
+	cs, ok := f.checkpointStates.Load(oldCheckpoint)
+	require.True(t, ok)
+	justified := solid.Checkpoint{Epoch: 3, Root: anchorRoot}
+	f.justifiedCheckpoint.Store(justified)
+	f.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 2, Root: common.Hash{0xdd}})
+	f.checkpointStates.Store(justified, cs)
+	f.gloasWeightTree.prepare(justified, cs.(*checkpointState))
+	f.headHash = anchorRoot
+
+	require.Equal(t, []ForkNode{{
+		Slot: 11, BlockRoot: anchorRoot, JustifiedEpoch: 3, FinalizedEpoch: 2, Weight: 32, Validity: "valid",
+	}}, f.ForkNodes())
 }
 
 func TestForkNodesGloasExportsPreparedWeight(t *testing.T) {
@@ -234,15 +320,38 @@ func TestForkNodesGloasBoostRequiresBlockAncestry(t *testing.T) {
 }
 
 func TestForkNodesGloasRequiresCurrentCheckpointState(t *testing.T) {
-	for _, test := range []string{"unprepared", "missing state", "changed root", "changed epoch"} {
-		t.Run(test, func(t *testing.T) {
-			f, _ := newForkNodesTestStore(t)
-			if test != "unprepared" {
+	for _, test := range []struct {
+		name string
+		want []ForkNode
+	}{
+		{name: "unprepared", want: []ForkNode{{Slot: 11, BlockRoot: common.Hash{0xaa}, Weight: 32, Validity: "valid"}}},
+		{name: "missing state"},
+		{name: "changed root"},
+		{name: "changed epoch"},
+		{name: "pruned with invalidated head", want: []ForkNode{
+			{Slot: 11, BlockRoot: common.Hash{0xaa}, Weight: 32, Validity: "valid"},
+			{Slot: 12, BlockRoot: common.Hash{0xbb}, ParentRoot: common.Hash{0xaa}, Validity: "valid"},
+		}},
+		{name: "pruned with cached head"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f, root := newForkNodesTestStore(t)
+			if test.name == "pruned with invalidated head" || test.name == "pruned with cached head" {
+				graph := f.forkGraph.(*forkNodesTestGraph)
+				childRoot := common.Hash{0xbb}
+				child := cltypes.NewSignedBeaconBlock(f.beaconCfg, clparams.GloasVersion)
+				child.Block.Slot = 12
+				child.Block.ParentRoot = root
+				graph.headers[childRoot] = child.SignedBeaconBlockHeader().Header
+				graph.blocks[childRoot] = child
+				f.updateChildren(11, root, childRoot)
+			}
+			if test.name != "unprepared" {
 				_, _, err := f.GetHeadNode()
 				require.NoError(t, err)
 			}
 			checkpoint := f.JustifiedCheckpoint()
-			switch test {
+			switch test.name {
 			case "missing state":
 				f.gloasWeightTree.prepare(checkpoint, nil)
 			case "changed root":
@@ -251,9 +360,23 @@ func TestForkNodesGloasRequiresCurrentCheckpointState(t *testing.T) {
 			case "changed epoch":
 				checkpoint.Epoch++
 				f.justifiedCheckpoint.Store(checkpoint)
+			case "pruned with invalidated head":
+				f.mu.Lock()
+				f.gloasWeightTree.pruneFinalized(11)
+				f.headHash = common.Hash{}
+				f.mu.Unlock()
+			case "pruned with cached head":
+				f.mu.Lock()
+				f.gloasWeightTree.pruneFinalized(11)
+				f.mu.Unlock()
 			}
 
-			require.Empty(t, f.ForkNodes())
+			got := f.ForkNodes()
+			if test.want == nil {
+				require.Empty(t, got)
+			} else {
+				require.Equal(t, test.want, got)
+			}
 		})
 	}
 }

@@ -928,10 +928,14 @@ func (f *ForkChoiceStore) Participation(epoch uint64) (*solid.ParticipationBitLi
 }
 
 func (f *ForkChoiceStore) ForkNodes() []ForkNode {
+	trackGloasWeights := f.trackGloasWeights()
+	if trackGloasWeights {
+		_, _, _ = f.GetHeadNode()
+	}
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	weights := f.weights
-	if f.trackGloasWeights() {
+	if trackGloasWeights {
 		weights = f.gloasWeightTree.snapshotWeights()
 	}
 	forkNodes := make([]ForkNode, 0, len(weights))
@@ -942,11 +946,17 @@ func (f *ForkChoiceStore) ForkNodes() []ForkNode {
 		}
 		justifiedCheckpoint, has := f.forkGraph.GetCurrentJustifiedCheckpoint(blockRoot)
 		if !has {
-			continue
+			if blockRoot != f.forkGraph.AnchorRoot() {
+				continue
+			}
+			justifiedCheckpoint = f.JustifiedCheckpoint()
 		}
 		finalizedCheckpoint, has := f.forkGraph.GetFinalizedCheckpoint(blockRoot)
 		if !has {
-			continue
+			if blockRoot != f.forkGraph.AnchorRoot() {
+				continue
+			}
+			finalizedCheckpoint = f.FinalizedCheckpoint()
 		}
 		blockHash, _ := f.eth2Roots.Get(blockRoot)
 
