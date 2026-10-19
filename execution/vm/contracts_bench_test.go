@@ -26,6 +26,8 @@ import (
 	"testing"
 	"time"
 
+	bls "github.com/consensys/gnark-crypto/ecc/bls12-381"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 )
@@ -193,5 +195,29 @@ func benchJson(name, addr string, b *testing.B) {
 	}
 	for _, test := range tests {
 		benchmarkPrecompiled(b, addr, test)
+	}
+}
+
+func BenchmarkBLSRepeatedPoints(b *testing.B) {
+	_, _, g1, g2 := bls.Generators()
+	for _, size := range []int{1, 16, 128} {
+		for _, tc := range []struct {
+			name  string
+			point []byte
+			p     PrecompiledContract
+		}{{"G1", encodePointG1(&g1), &bls12381G1MultiExp{}}, {"G2", encodePointG2(&g2), &bls12381G2MultiExp{}}} {
+			b.Run(fmt.Sprintf("%s/%d", tc.name, size), func(b *testing.B) {
+				pair := make([]byte, len(tc.point)+32)
+				copy(pair, tc.point)
+				pair[len(pair)-1] = 1
+				input := bytes.Repeat(pair, size)
+				b.ReportAllocs()
+				for b.Loop() {
+					if _, err := tc.p.Run(input); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		}
 	}
 }
