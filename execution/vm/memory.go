@@ -162,8 +162,8 @@ func (m *Memory) allocated32(off *uint256.Int) bool {
 // stays in allocated memory, so it costs no expansion gas.
 func (m *Memory) allocatedCopy(dst, src, length *uint256.Int) bool {
 	n := uint64(len(m.store))
-	return dst.IsUint64() && src.IsUint64() && length.IsUint64() &&
-		dst.Uint64() <= n && src.Uint64() <= n && length.Uint64() <= n-max(dst.Uint64(), src.Uint64())
+	return dst[1]|dst[2]|dst[3]|src[1]|src[2]|src[3]|length[1]|length[2]|length[3] == 0 &&
+		length[0] <= n && max(dst[0], src[0]) <= n-length[0]
 }
 
 // Len returns the length of the backing slice

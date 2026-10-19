@@ -292,7 +292,9 @@ run:
 				if sLen >= 3 && jt[MCOPY].memorySize != nil && callContext.Memory.allocatedCopy(stack.peek(), stack.back(1), stack.back(2)) && gasLeft >= GasFastestStep+params.CopyGas*ToWordSize(stack.back(2).Uint64()) {
 					gasLeft -= GasFastestStep + params.CopyGas*ToWordSize(stack.back(2).Uint64())
 					dst, src, length := callContext.Stack.pop3()
+					callContext.gas, callContext.savedPC = gasLeft, pc
 					callContext.Memory.Copy(dst.Uint64(), src.Uint64(), length.Uint64())
+					gasLeft, pc = callContext.gas, callContext.savedPC
 					pc++
 					continue run
 				}

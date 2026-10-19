@@ -167,7 +167,7 @@ func inlineBody(instructions []byte, o fastOp) string {
 }
 
 // outOfLine are the funcs run's inlined bodies call that Go does not inline.
-var outOfLine = []string{"Mul", "Div", "SetBytes", "ILsh", "validJumpdest"}
+var outOfLine = []string{"Mul", "Div", "SetBytes", "ILsh", "validJumpdest", "Copy"}
 
 // saveAroundCalls stores gasLeft and pc in callContext before each statement of body
 // that calls an outOfLine func, and loads them back after it. Neither is then live
