@@ -8,14 +8,14 @@ and resilience under heavy RPC and peer traffic.
 
 - **Glamsterdam-ready.** Erigon and Caplin support Amsterdam and Gloas, including block access lists
   (EIP-7928) and enshrined proposer-builder separation (EIP-7732). Caplin follows `consensus-specs`
-  v1.7.0-beta.4 for the Hoodi upgrade (#24831; closes #17329, #17334) — by @domiwei, @taratorio, @yperbasis
+  v1.7.0-beta.4 for the Hoodi upgrade (#24831) — by @domiwei, @taratorio, @yperbasis
 - **Glamsterdam on Hoodi.** Upgrade Hoodi nodes before **26 October 2026, 17:42:48 UTC**. Amsterdam in
   the execution layer and Gloas in Caplin activate at epoch `132352`, with a default gas-limit target of
   **200 million** (#24847) — by @yperbasis
 - **Faster commitment and execution.** Parallel commitment spreads deferred writes across workers and
   prepares trie updates alongside execution. Trie prefetching now also benefits blocks without block
   access lists. EVM improvements reduce computation and repeated storage-read costs
-  (#23979, #24252, #24479, #24517, #22993; closes #19801) — by @awskii, @AskAlexSharov
+  (#23979, #24252, #24479, #24517, #22993) — by @awskii, @AskAlexSharov
 - **Faster RPC with less memory overhead.** Lower `eth_getBalance` tail latency under load, cheaper
   transaction-by-index queries, streamed trace output, and restored state caching for embedded RPC at
   the chain tip (#24795, #24409, #24239, #24347, #24497) — by @AskAlexSharov
