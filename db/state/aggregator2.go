@@ -139,12 +139,12 @@ func (opts AggOpts) CommitmentHotMaxMergeSteps(steps uint64) AggOpts { //nolint:
 	return opts
 }
 
-// DemoteColdDir enables demotion to coldDir: Open recovers interrupted demotions and commitment references are refused.
 func (opts AggOpts) ColdMergePause(pause bool) AggOpts { //nolint:gocritic
 	opts.coldMergeNoPause = !pause
 	return opts
 }
 
+// DemoteColdDir enables demotion to coldDir: Open recovers interrupted demotions and commitment references are refused.
 func (opts AggOpts) DemoteColdDir(coldDir string) AggOpts { //nolint:gocritic
 	opts.demoteColdDir = coldDir
 	return opts
