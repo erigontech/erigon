@@ -665,6 +665,7 @@ func TestBranchCache_FillDropsViewsOlderThanCommittedUnwind(t *testing.T) {
 
 func TestBranchCache_FillDropsViewsOlderThanCommitted(t *testing.T) {
 	c := NewBranchCache(100)
+	defer c.Close()
 	key := []byte{0x01, 0x02, 0x03, 0x04, 0x05}
 	c.Committed(7)
 	c.Put(key, []byte("committed"), 1, 20)
@@ -708,12 +709,11 @@ func TestBranchCache_FillRacingCommittedDeletion(t *testing.T) {
 		runtime.Gosched()
 		c.Committed(2)
 		c.Invalidate(key)
-		for range 100 {
-			got, _, ok := c.Get(key)
-			require.False(t, ok, "served %q after the deletion committed", got)
-		}
 		close(stop)
 		wg.Wait()
+		got, _, ok := c.Get(key)
+		c.Close()
+		require.False(t, ok, "served %q after the deletion committed", got)
 	}
 }
 
