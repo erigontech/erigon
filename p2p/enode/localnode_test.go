@@ -133,3 +133,22 @@ func TestLocalNodeEndpoint(t *testing.T) {
 	assert.Equal(t, fallback.Port, ln.Node().UDP())
 	assert.Equal(t, initialSeq+3, ln.Node().Seq())
 }
+
+func TestLocalNodeEndpointMappedIPv4(t *testing.T) {
+	ln, db := newLocalNodeForTesting(t.TempDir(), log.New())
+	defer db.Close()
+
+	endpoint := netip.MustParseAddrPort("[::ffff:1.2.3.4]:30303")
+	for i := range iptrackMinStatements {
+		fromAddr := netip.AddrPortFrom(netip.AddrFrom4([4]byte{1, 0, byte(i), 1}), 90)
+		ln.UDPEndpointStatement(fromAddr, endpoint)
+	}
+
+	n := ln.Node()
+	var ip enr.IPv4
+	if err := n.Load(&ip); err != nil {
+		t.Fatal("IPv4 ENR entry missing:", err)
+	}
+	assert.Equal(t, enr.IPv4{1, 2, 3, 4}, ip)
+	assert.Equal(t, int(endpoint.Port()), n.UDP())
+}

@@ -34,7 +34,7 @@ type IPTracker struct {
 	contactWindow time.Duration
 	minStatements int
 	clock         mclock.Clock
-	statements    map[netip.Addr]*list.Element // of *ipStatement, in order
+	statements    map[netip.Addr]*list.Element // of *ipStatement
 	order         list.List                    // statements, oldest first
 	votes         map[netStatement]int         // hosts per network and endpoint
 	counts        endpointCounts               // networks per endpoint
