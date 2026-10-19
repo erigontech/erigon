@@ -140,6 +140,7 @@ const (
 	MaxDialTimeout               = 15 * time.Second
 	VersionLength  int           = 4
 	MaxChunkSize   uint64        = 15 * 1024 * 1024
+	MaxPayloadSize uint64        = 10 * 1024 * 1024
 	ReqTimeout     time.Duration = 5 * time.Second
 	RespTimeout    time.Duration = 10 * time.Second
 	// ExecutionPayload transactions bounds from consensus specs.
