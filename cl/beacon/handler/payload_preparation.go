@@ -58,9 +58,17 @@ var (
 // priming the next slot cannot evict the record for a proposal that is still being produced.
 const preparedPayloadRetainSlots = 2
 
-// minimumPreparationLead leaves a best-effort margin for useful warmup before the proposal slot.
-// State copying and slot processing cannot be cancelled mid-call and may still overlap production.
+// minimumPreparationLead is the last point before the proposal slot at which preparation may still
+// start the execution builder.
 const minimumPreparationLead = 500 * time.Millisecond
+
+// stateWorkLead is the lead an attempt needs before it copies the head state and processes slots.
+// Neither can be cancelled mid-call, so work started later competes with production for CPU and the
+// head-state lock, and the builder cutoff then discards it. An eighth of a slot covers the copy and
+// an epoch transition: about 0.5 s and 0.3 s on a mainnet node.
+func stateWorkLead(slotDuration time.Duration) time.Duration {
+	return minimumPreparationLead + slotDuration/8
+}
 
 const (
 	payloadBuildBusyRetryDelay         = 100 * time.Millisecond
@@ -273,12 +281,13 @@ func (a *ApiHandler) preparePayloadLoopWith(
 	}
 	payloadAttestationDeadline := time.Duration(a.beaconChainCfg.PayloadAttestationDueMs()) * time.Millisecond
 	gloasWindow := slotDuration - payloadAttestationDeadline
+	minimumLead := stateWorkLead(slotDuration)
 	if a.beaconChainCfg.GloasForkEpoch != a.beaconChainCfg.FarFutureEpoch &&
-		gloasWindow <= minimumPreparationLead {
+		gloasWindow <= minimumLead {
 		logger.Warn(
 			"PayloadPreparation: Gloas preparation window is too short",
 			"available", gloasWindow,
-			"minimum", minimumPreparationLead,
+			"minimum", minimumLead,
 		)
 	}
 	// Preparation is silent on a node that rarely proposes, so say once that it is running:
@@ -334,7 +343,7 @@ func (a *ApiHandler) preparePayloadLoopWith(
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
 		currentSlotStart := slotStart.Add(-slotDuration)
 		lead := time.Until(slotStart)
-		if lead > slotDuration || lead <= minimumPreparationLead {
+		if lead > slotDuration || lead <= minimumLead {
 			continue
 		}
 		selectedRoot, selectedSlot, selected := a.syncedData.SelectedHead()
@@ -565,6 +574,7 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 		feeRecipient       common.Address
 		baseState          *state.CachingBeaconState
 		lookupAfterAdvance bool
+		stateWorkStart     time.Time
 	)
 	// Root, proposer and state all come from one view of the head. Reading them separately would
 	// let a head update in between pair a parent beacon block root with a different state, priming
@@ -593,6 +603,12 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 		if !a.payloadPreparationGate.idle() {
 			return errBlockWorkInFlight
 		}
+		// The view can wait behind a head-state writer, so check the lead again before the copy.
+		slotDuration := time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second
+		if time.Until(a.ethClock.GetSlotTime(targetSlot)) <= stateWorkLead(slotDuration) {
+			return errPreparationTooLate
+		}
+		stateWorkStart = time.Now()
 		baseState, err = scratch.copyFrom(headState, a.beaconChainCfg)
 		return err
 	}); err != nil {
@@ -602,6 +618,7 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
 		return key, err
 	}
+	stateWork := time.Since(stateWorkStart)
 	if lookupAfterAdvance {
 		var err error
 		proposerIndex, feeRecipient, err = a.registeredProposer(baseState, targetSlot)
@@ -612,7 +629,7 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	}
 
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch)
-	// State derivation can consume the entry lead, so enforce the same floor again.
+	// State derivation consumes part of the lead, so check the builder cutoff again.
 	if time.Until(a.ethClock.GetSlotTime(targetSlot)) <= minimumPreparationLead {
 		return key, errPreparationTooLate
 	}
@@ -664,7 +681,7 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	}
 
 	a.preparedPayload.set(targetSlot, payloadID, baseBlockRoot, time.Now())
-	a.logger.Info("PayloadPreparation: primed execution layer", "slot", targetSlot, "proposer", proposerIndex, "head", baseBlockRoot)
+	a.logger.Info("PayloadPreparation: primed execution layer", "slot", targetSlot, "proposer", proposerIndex, "head", baseBlockRoot, "stateWork", stateWork)
 	return key, nil
 }
 

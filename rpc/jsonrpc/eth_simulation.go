@@ -1069,6 +1069,17 @@ func (s *simulator) simulateCall(
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	// EIP-2681 also limits the nonce when validation is off and the nonce checks are skipped.
+	if !s.validation {
+		from := call.FromOrEmpty()
+		nonce, err := intraBlockState.GetNonce(from)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if nonce == math.MaxUint64 {
+			return nil, nil, nil, txValidationError(fmt.Errorf("%w: address %v, nonce: %d", protocol.ErrNonceMax, from, nonce))
+		}
+	}
 
 	// Prepare the transaction message
 	msg, err := call.ToMessage(globalGasCap, &blockCtx.BaseFee)
