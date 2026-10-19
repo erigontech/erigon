@@ -57,6 +57,13 @@ func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
 	return slices.Contains(vmConfig.ExtraEips, 3860) || rules.IsShanghai
 }
 
+const (
+	addressWordCached uint8 = 1 << iota
+	originWordCached
+	callerWordCached
+	coinbaseWordCached
+)
+
 // CallContext contains the things that are per-call, such as stack and memory.
 type CallContext struct {
 	gas               uint64
@@ -65,7 +72,10 @@ type CallContext struct {
 	stateGasSpill     uint64
 	newAccountCharged bool
 	input             []byte
-	addressWords      [4]uint256.Int
+	addressWord       uint256.Int
+	originWord        uint256.Int
+	callerWord        uint256.Int
+	coinbaseWord      uint256.Int
 	addressWordsSet   uint8
 	Memory            Memory
 

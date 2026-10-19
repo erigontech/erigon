@@ -369,17 +369,13 @@ func opKeccak256(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 	return pc, nil, nil
 }
 
-func (ctx *CallContext) pushAddressWord(index uint8, address accounts.Address) {
-	if ctx.addressWordsSet&(1<<index) == 0 {
-		value := address.Value()
-		ctx.addressWords[index].SetBytes(value[:])
-		ctx.addressWordsSet |= 1 << index
-	}
-	ctx.Stack.push(ctx.addressWords[index])
-}
-
 func opAddress(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	scope.pushAddressWord(0, scope.Contract.Address())
+	if scope.addressWordsSet&addressWordCached == 0 {
+		address := scope.Contract.Address().Value()
+		scope.addressWord.SetBytes(address[:])
+		scope.addressWordsSet |= addressWordCached
+	}
+	scope.Stack.push(scope.addressWord)
 	return pc, nil, nil
 }
 
@@ -397,12 +393,22 @@ func opBalance(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 }
 
 func opOrigin(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	scope.pushAddressWord(1, evm.Origin)
+	if scope.addressWordsSet&originWordCached == 0 {
+		origin := evm.Origin.Value()
+		scope.originWord.SetBytes(origin[:])
+		scope.addressWordsSet |= originWordCached
+	}
+	scope.Stack.push(scope.originWord)
 	return pc, nil, nil
 }
 
 func opCaller(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	scope.pushAddressWord(2, scope.Contract.Caller())
+	if scope.addressWordsSet&callerWordCached == 0 {
+		caller := scope.Contract.Caller().Value()
+		scope.callerWord.SetBytes(caller[:])
+		scope.addressWordsSet |= callerWordCached
+	}
+	scope.Stack.push(scope.callerWord)
 	return pc, nil, nil
 }
 
@@ -680,7 +686,12 @@ func stBlockhash(_ uint64, scope *CallContext) string {
 }
 
 func opCoinbase(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	scope.pushAddressWord(3, evm.Context.Coinbase)
+	if scope.addressWordsSet&coinbaseWordCached == 0 {
+		coinbase := evm.Context.Coinbase.Value()
+		scope.coinbaseWord.SetBytes(coinbase[:])
+		scope.addressWordsSet |= coinbaseWordCached
+	}
+	scope.Stack.push(scope.coinbaseWord)
 	return pc, nil, nil
 }
 
