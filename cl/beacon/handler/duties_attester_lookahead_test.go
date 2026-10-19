@@ -33,33 +33,39 @@ import (
 )
 
 func TestGetAttesterDutiesRejectsEpochBeyondNext(t *testing.T) {
-	_, blocks, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
-	var err error
-	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
-	require.NoError(t, err)
-	headSlot := blocks[len(blocks)-1].Block.Slot
-	fcu.HeadSlotVal = headSlot
-	cfg := h.beaconChainCfg
-	genesisTime := uint64(time.Now().Unix()) - headSlot*cfg.SecondsPerSlot
-	h.ethClock = eth_clock.NewEthereumClock(genesisTime, common.Hash{}, cfg)
-	currentEpoch := h.ethClock.GetCurrentEpoch()
-	require.Equal(t, headSlot/cfg.SlotsPerEpoch, currentEpoch)
-
-	server := httptest.NewServer(h.mux)
-	defer server.Close()
-	for _, tc := range []struct {
-		epoch uint64
-		code  int
-	}{
-		{currentEpoch, http.StatusOK},
-		{currentEpoch + 1, http.StatusOK},
-		{currentEpoch + 2, http.StatusBadRequest},
-	} {
-		t.Run(strconv.FormatUint(tc.epoch, 10), func(t *testing.T) {
-			resp, err := server.Client().Post(server.URL+"/eth/v1/validator/duties/attester/"+strconv.FormatUint(tc.epoch, 10), "application/json", strings.NewReader(`["0","1","2"]`))
+	// clockLead is how many epochs the wall clock is ahead of the head: the bound
+	// must follow the clock, not the head.
+	for _, clockLead := range []uint64{0, 1} {
+		t.Run("clockLead="+strconv.FormatUint(clockLead, 10), func(t *testing.T) {
+			_, blocks, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+			var err error
+			fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
 			require.NoError(t, err)
-			defer resp.Body.Close()
-			require.Equal(t, tc.code, resp.StatusCode)
+			headSlot := blocks[len(blocks)-1].Block.Slot
+			fcu.HeadSlotVal = headSlot
+			cfg := h.beaconChainCfg
+			genesisTime := uint64(time.Now().Unix()) - (headSlot/cfg.SlotsPerEpoch+clockLead)*cfg.SlotsPerEpoch*cfg.SecondsPerSlot
+			h.ethClock = eth_clock.NewEthereumClock(genesisTime, common.Hash{}, cfg)
+			currentEpoch := h.ethClock.GetCurrentEpoch()
+			require.Equal(t, headSlot/cfg.SlotsPerEpoch+clockLead, currentEpoch)
+
+			server := httptest.NewServer(h.mux)
+			defer server.Close()
+			for _, tc := range []struct {
+				epoch uint64
+				code  int
+			}{
+				{currentEpoch, http.StatusOK},
+				{currentEpoch + 1, http.StatusOK},
+				{currentEpoch + 2, http.StatusBadRequest},
+			} {
+				t.Run(strconv.FormatUint(tc.epoch, 10), func(t *testing.T) {
+					resp, err := server.Client().Post(server.URL+"/eth/v1/validator/duties/attester/"+strconv.FormatUint(tc.epoch, 10), "application/json", strings.NewReader(`["0","1","2"]`))
+					require.NoError(t, err)
+					defer resp.Body.Close()
+					require.Equal(t, tc.code, resp.StatusCode)
+				})
+			}
 		})
 	}
 }

@@ -150,8 +150,11 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("epoch %d overflows slot computation", epoch))
 	}
 	headEpoch := a.syncedData.HeadSlot() / a.beaconChainCfg.SlotsPerEpoch
-	if epoch > headEpoch+maxEpochsLookaheadForDuties || epoch > a.ethClock.GetCurrentEpoch()+1 {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("attestation duties: epoch %d is too far in the future", epoch))
+	if epoch > headEpoch+maxEpochsLookaheadForDuties {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("attestation duties: epoch %d is too far beyond head epoch %d", epoch, headEpoch))
+	}
+	if currentEpoch := a.ethClock.GetCurrentEpoch(); epoch > currentEpoch+1 {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("attestation duties: epoch %d is more than one epoch beyond clock epoch %d", epoch, currentEpoch))
 	}
 
 	var idxsStr []string
