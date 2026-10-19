@@ -50,7 +50,7 @@ Here is a comprehensive list of port-related options:
 * `--http.port [value]`: HTTP-RPC server listening port (default: `8545`)
 * `--https.port [value]`: HTTPS-RPC server listening port, used only when the HTTPS server is enabled (default: `0`, meaning `--http.port` + 363 — `8908` with a default `--http.port`)
 * `--http.url [value]` / `--https.url [value]`: Full listen URL that overrides the corresponding `addr` and `port` pair (`tcp://` or `unix://`)
-* `--socket.url [value]`: IPC server listen URL, used only when the IPC server is enabled (default: `unix:///var/run/erigon.sock`)
+* `--socket.url [value]`: inter-process communication (IPC) server listen URL, used only when the IPC server is enabled (default: `unix:///var/run/erigon.sock`)
 
 ### Caplin
 

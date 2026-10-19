@@ -72,7 +72,7 @@ func testMainnetConfig(t *testing.T) {
 		"REORG_HEAD_WEIGHT_THRESHOLD":    clparams.ReorgHeadWeightThreshold,
 		"REORG_PARENT_WEIGHT_THRESHOLD":  clparams.ReorgParentWeightThreshold,
 		"SLOT_DURATION_MS":               builtInBeacon.SecondsPerSlot * 1000,
-		"ATTESTATION_DUE_BPS":            clparams.BpsFactor / builtInBeacon.IntervalsPerSlot,
+		"ATTESTATION_DUE_BPS":            clparams.AttestationDueBps,
 		"EPOCHS_PER_SUBNET_SUBSCRIPTION": builtInBeacon.EpochsPerRandomSubnetSubscription,
 		"MAXIMUM_GOSSIP_CLOCK_DISPARITY": time.Duration(builtInNetwork.MaximumGossipClockDisparity).Milliseconds(),
 		"MESSAGE_DOMAIN_INVALID_SNAPPY":  binary.BigEndian.Uint32(builtInNetwork.MessageDomainInvalidSnappy[:]),

@@ -787,6 +787,22 @@ func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.B
 	return header, nil
 }
 
+func (b *GasPriceOracleBackend) LatestHead(ctx context.Context) (uint64, common.Hash, error) {
+	tx := b.baseApi.filters.WithOverlay(b.tx)
+	number, err := rpchelper.GetLatestBlockNumber(tx)
+	if err != nil {
+		return 0, common.Hash{}, err
+	}
+	hash, ok, err := b.baseApi._blockReader.CanonicalHash(ctx, tx, number)
+	if err != nil {
+		return 0, common.Hash{}, err
+	}
+	if !ok {
+		return 0, common.Hash{}, rpc.BlockNotFoundErr{BlockId: rpc.LatestBlockNumber.String()}
+	}
+	return number, hash, nil
+}
+
 func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
 	return b.baseApi.blockByNumberWithSenders(ctx, b.baseApi.filters.WithOverlay(b.tx), number.Uint64())
 }
