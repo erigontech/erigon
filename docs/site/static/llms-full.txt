@@ -872,7 +872,7 @@ Updating to the latest version of Erigon gives you access to the latest features
 
 A 3.6.x node upgrades to 3.7 in place: there is no database migration and no re-sync. Before restarting on the new version, check the following:
 
-- **Sepolia: Glamsterdam**: Glamsterdam activates on Sepolia at epoch `353024`, 6 October 2026 13:53:36 UTC (Amsterdam in the execution layer, Gloas in Caplin). Upgrade Sepolia nodes to v3.7.1 or later before then: v3.7.0 predates Glamsterdam fixes the fork needs, and 3.6 does not follow the chain past it. With an external consensus client, upgrade it too.
+- **Sepolia: Glamsterdam**: Glamsterdam has been active on Sepolia since epoch `353024`, 6 October 2026 13:53:36 UTC (Amsterdam in the execution layer, Gloas in Caplin). Sepolia nodes need v3.7.1 or later: v3.7.0 predates Glamsterdam fixes the fork needs, and 3.6 does not follow the chain past it. With an external consensus client, upgrade it too.
 - **CPU baseline**: amd64 binaries and Docker images now require the `x86-64-v2` baseline (SSE4.2, POPCNT). The separate `amd64v2` tarball and `linux/amd64/v2` Docker platform are gone; use the standard amd64 artifacts. Building from source requires Go 1.26 or newer. See [Hardware Requirements](https://docs.erigon.tech/get-started/hardware-requirements).
 - **Removed flags**: `--fcu.background.commit` and `--experimental.streaming-commitment` now prevent startup. Remove them from your startup arguments.
 - **Caplin with checkpoint sync disabled**: nodes running `--caplin.checkpoint-sync.disable` re-sync Caplin from genesis on upgrade unless a finalized state is saved locally. Allow checkpoint sync during the upgrade to avoid the replay.
@@ -1857,9 +1857,9 @@ MDBX reuses free pages instead of returning them to the filesystem, so `mdbx.dat
 ./build/bin/erigon db compact --datadir=<path>
 ```
 
-Erigon must be stopped. The command takes the datadir lock and opens each database exclusively, so it fails instead of touching a database still in use. The copy is written inside the database's own directory, so each database needs free space for a second copy of itself on the volume it already lives on, and a big `chaindata/` can take hours.
+Erigon must be stopped. The command takes the datadir lock and opens each database exclusively, so it fails instead of touching a database still in use. The copy is written inside the database's own directory, so each database needs free space for a second copy of its live data on the volume it already lives on, and a big `chaindata/` can take hours.
 
-Erigon also compacts at startup, before the node opens its databases: any database whose free pages are at least 10 GB **and** more than four times its live data is rewritten the same way (`[compact] auto-compact` in the log). It needs the same free space for a second copy, delays startup while it runs, and cannot be turned off. A database that fails to compact is left as it was, and startup continues. It skips the step if another process holds the datadir lock.
+Erigon also compacts at startup, before the node opens its databases: any database whose free pages are at least 10 GB **and** more than four times its live data is rewritten the same way (`[compact] auto-compact` in the log). It needs the same free space for a second copy of the live data, delays startup while it runs, and cannot be turned off. A database that fails to compact is left as it was, and startup continues. It skips the step if another process holds the datadir lock.
 
 `erigon db compact` is a manual defragmentation pass, not the background compaction of an LSM engine — MDBX has none, as described in *Storage engine: MDBX* above.
 
@@ -5384,7 +5384,7 @@ On 3.7 the `trace_call` family takes no `blobVersionedHashes`, so the blob rows 
 
 ### eth_syncing and eth_subscribe("syncing")
 
-`eth_syncing` returns `false` when the current block is fewer than 8 blocks from the highest block seen, in either direction, unless snapshots are downloading or handing off to execution; otherwise an object with `startingBlock`, `currentBlock`, `highestBlock` and `stages` (per-stage progress). While snapshots download, `currentBlock` advances with the bytes downloaded, scaled to the block the snapshots reach, and `stages` is empty (as it is while the highest block is not yet known). A node 8 or more blocks ahead of a stale highest block therefore reports syncing, with `highestBlock` equal to `currentBlock`. On 3.7 `eth_syncing` reports `startingBlock` as `0x0`; the subscription reports the block it was at when it first saw the node syncing.
+`eth_syncing` returns `false` when the current block is fewer than 8 blocks from the highest block seen, in either direction, unless snapshots are downloading or handing off to execution; otherwise an object with `startingBlock`, `currentBlock`, `highestBlock` and `stages` (per-stage progress). While snapshots download, `currentBlock` advances with the bytes downloaded, scaled to the block the snapshots reach; during the handoff to execution it stays at the snapshots' commitment block. In both phases `stages` is empty, as it is while the highest block is not yet known. A node 8 or more blocks ahead of a stale highest block therefore reports syncing, with `highestBlock` equal to `currentBlock`. On 3.7 `eth_syncing` reports `startingBlock` as `0x0`; the subscription reports the block it was at when it first saw the node syncing.
 
 `eth_subscribe("syncing")` (WebSocket or IPC) sends the last known state when you subscribe, if the node has reported one, then a message on each change: the same object with `syncing: true` while syncing, or `false` once synced. A slow client can miss intermediate states: each subscription buffers 8 messages and drops the oldest first, so the latest state always arrives.
 

@@ -133,13 +133,13 @@ pages:
 Erigon must be stopped. The command takes the datadir lock and opens each
 database exclusively, so it fails instead of touching a database still in use.
 The copy is written inside the database's own directory, so each database needs
-free space for a second copy of itself on the volume it already lives on, and a
+free space for a second copy of its live data on the volume it already lives on, and a
 big `chaindata/` can take hours.
 
 Erigon also compacts at startup, before the node opens its databases: any
 database whose free pages are at least 10 GB **and** more than four times its live
 data is rewritten the same way (`[compact] auto-compact` in the log). It needs the
-same free space for a second copy, delays startup while it runs, and cannot be
+same free space for a second copy of the live data, delays startup while it runs, and cannot be
 turned off. A database that fails to compact is left as it was, and startup
 continues. It skips the step if another process holds the datadir lock.
 
