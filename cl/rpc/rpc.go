@@ -150,7 +150,7 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReqWithSnapshot(
 	ctx context.Context,
 	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
 ) ([]*cltypes.DataColumnSidecar, string, *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier], error) {
-	filteredReq, pid, _, err := b.columnDataPeers.pickPeerRoundRobin(ctx, req)
+	filteredReq, pid, err := b.columnDataPeers.pickPeerRoundRobin(req)
 	if err != nil {
 		return nil, pid, nil, err
 	}
@@ -170,6 +170,9 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReqWithSnapshot(
 	responsePacket, pid, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, pid, maxResponseBytes)
 	if err != nil {
 		return nil, pid, filteredReq, err
+	}
+	if len(responsePacket) == 0 {
+		b.columnDataPeers.coolDown(pid)
 	}
 	if uint64(len(responsePacket)) > requestedColumnCount {
 		b.BanPeer(pid)
@@ -430,7 +433,7 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData, ma
 			return responsePacket, message.Peer.Pid, fmt.Errorf("response contains more chunks than requested: limit %d", *maxChunks)
 		}
 		// Read varint for length of message.
-		encodedLn, _, err := ssz_snappy.ReadUvarint(r)
+		encodedLn, err := ssz_snappy.ReadUvarint(r)
 		if err != nil {
 			return responsePacket, message.Peer.Pid, fmt.Errorf("sendRequest failed. Unable to read varint from message prefix: %w", err)
 		}

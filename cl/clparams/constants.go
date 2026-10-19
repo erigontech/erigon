@@ -3,6 +3,8 @@ package clparams
 import "math"
 
 const (
+	MaxSupportedCommitteesPerSlot = 64
+
 	// non-configurable constants
 	// For Gloas
 	BuilderIndexFlag                   = uint64(1 << 40) // 2^40
@@ -23,12 +25,13 @@ const (
 	PtcTimelinessIndex          = 1
 	NumBlockTimelinessDeadlines = 2
 
-	// [New in Gloas:EIP7732] BPS (basis points) timing constants.
+	// BPS (basis points) timing constants.
 	// These define slot-relative deadlines as basis points (1/10000 of a slot).
 	BpsFactor                = uint64(10000) // Denominator for BPS calculations
-	AttestationDueBpsGloas   = uint64(2500)  // 25% of slot — attestation deadline
-	AggregateDueBpsGloas     = uint64(5000)  // 50% of slot — aggregate deadline
-	PayloadAttestationDueBps = uint64(7500)  // 75% of slot — PTC payload attestation deadline
+	AttestationDueBps        = uint64(3333)
+	AttestationDueBpsGloas   = uint64(2500) // 25% of slot — attestation deadline
+	AggregateDueBpsGloas     = uint64(5000) // 50% of slot — aggregate deadline
+	PayloadAttestationDueBps = uint64(7500) // 75% of slot — PTC payload attestation deadline
 
 	// Proposer boost reorg constants.
 	// REORG_HEAD_WEIGHT_THRESHOLD is the percentage of committee weight below which

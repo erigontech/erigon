@@ -194,7 +194,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	defer tx.Rollback()
 	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader)
 	if err != nil {
-		return nil, err
+		return nil, unknownBlockAsResourceNotFound(err)
 	}
 	if blockNum == 0 {
 		return []ParityTrace{}, nil
@@ -405,6 +405,13 @@ func (api *TraceAPIImpl) resolveFilterBlockHash(ctx context.Context, tx kv.Tx, h
 		return 0, &rpc.ResourceNotFoundError{Message: err.Error()}
 	}
 	return blockNum, err
+}
+
+func unknownBlockAsResourceNotFound(err error) error {
+	if errors.As(err, &rpc.BlockNotFoundErr{}) {
+		return &rpc.ResourceNotFoundError{Message: err.Error()}
+	}
+	return err
 }
 
 func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsonstream.Stream, gasBailOut bool, traceConfig *config.TraceConfig) error {
@@ -1102,6 +1109,15 @@ type TraceFilterRequest struct {
 	Mode        TraceFilterMode   `json:"mode,omitempty"`
 	After       *uint64           `json:"after"`
 	Count       *uint64           `json:"count"`
+}
+
+// UnmarshalJSON rejects unknown fields, so a misspelled filter member fails
+// instead of silently widening the match.
+func (r *TraceFilterRequest) UnmarshalJSON(data []byte) error {
+	type plain TraceFilterRequest
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	return dec.Decode((*plain)(r))
 }
 
 type TraceFilterMode string

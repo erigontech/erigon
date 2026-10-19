@@ -17,11 +17,14 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
 	forkchoice_mock "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 func setupProposerPreferencesService(t *testing.T, ctrl *gomock.Controller) (*proposerPreferencesService, *synced_data_mock.MockSyncedData, *eth_clock.MockEthereumClock, *pool.EpbsPool, *forkchoice_mock.ForkChoiceStorageMock) {
@@ -133,6 +136,36 @@ func TestProposerPreferencesServiceGloasForkBoundary(t *testing.T) {
 			require.True(t, ok)
 		})
 	}
+}
+
+// Preferences for the first Gloas epoch are signed while the dependent state still carries the Fulu fork.
+func TestProposerPreferencesServiceSignatureDomainUsesProposalEpochForkVersion(t *testing.T) {
+	service, _, clock, epbsPool, forkChoiceMock := setupProposerPreferencesService(t, gomock.NewController(t))
+	cfg := service.beaconCfg
+	cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch = 0, 0, 0, 0, 0, 0
+	cfg.GloasForkEpoch = 3
+	clock.EXPECT().GetCurrentSlot().Return(uint64(94)).AnyTimes()
+	genesisValidatorsRoot := common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111")
+	depState := forkChoiceMock.StateAtBlockRootVal[testDependentRoot]
+	depState.SetGenesisValidatorsRoot(genesisValidatorsRoot)
+	depState.SetFork(&cltypes.Fork{
+		PreviousVersion: utils.Uint32ToBytes4(uint32(service.beaconCfg.ElectraForkVersion)),
+		CurrentVersion:  utils.Uint32ToBytes4(uint32(service.beaconCfg.FuluForkVersion)),
+	})
+	wantDomain, err := fork.ComputeDomain(service.beaconCfg.DomainProposerPreferences[:], utils.Uint32ToBytes4(uint32(service.beaconCfg.GloasForkVersion)), genesisValidatorsRoot)
+	require.NoError(t, err)
+	prevComputeSigningRoot := computeSigningRoot
+	var gotDomain []byte
+	computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
+		gotDomain = domain
+		return prevComputeSigningRoot(obj, domain)
+	}
+	t.Cleanup(func() { computeSigningRoot = prevComputeSigningRoot })
+
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, newTestSignedProposerPreferences(96, 42)))
+	require.Equal(t, wantDomain, gotDomain)
+	_, ok := epbsPool.GetPreference(96, testDependentRoot)
+	require.True(t, ok)
 }
 
 func TestProposerPreferencesServiceShufflingDependentSlot(t *testing.T) {
@@ -249,7 +282,7 @@ func TestProposerPreferencesServiceLookaheadNotKnown(t *testing.T) {
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrIgnore)
 	require.Contains(t, err.Error(), "not yet known")
 }
 
@@ -286,7 +319,7 @@ func TestProposerPreferencesServiceSlotAlreadyPassed(t *testing.T) {
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrIgnore)
 	require.Contains(t, err.Error(), "already passed")
 }
 
@@ -442,7 +475,7 @@ func TestProposerPreferencesServiceDuplicate(t *testing.T) {
 
 	err = service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrIgnore)
 	require.ErrorIs(t, err, ErrProposerPreferenceAlreadySeen)
 	require.Contains(t, err.Error(), "already seen proposer preferences")
 }
@@ -506,7 +539,7 @@ func TestProposerPreferencesServiceDependentRootStateMissing(t *testing.T) {
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrIgnore)
 	require.Contains(t, err.Error(), "state for dependent_root")
 
 	// Should NOT be marked as seen (validation failed)

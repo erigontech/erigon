@@ -32,6 +32,8 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/builder/buildercfg"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/p2p"
@@ -128,6 +130,27 @@ func TestCaplinDiscoveryPortsCanBeConfiguredIndependently(t *testing.T) {
 		"--caplin.discovery.tcpport=9000",
 		"--caplin.discovery.quicport=9001",
 	}))
+}
+
+// The default QUIC port must not collide with the default discv5 UDP port (4000) or
+// the default TCP port (4001) under the upstream ethereum-package Caplin launcher,
+// which starts Caplin with --sentinel.tcp.port=4001 --discovery.port=4001.
+func TestCaplinDiscoveryQUICPortDefaultAvoidsUpstreamLauncherConflict(t *testing.T) {
+	require.Equal(t, uint64(4002), CaplinDiscoveryQUICPortFlag.Value)
+	require.NotEqual(t, CaplinDiscoveryPortFlag.Value, CaplinDiscoveryQUICPortFlag.Value)
+	require.NotEqual(t, CaplinDiscoveryTCPPortFlag.Value, CaplinDiscoveryQUICPortFlag.Value)
+}
+
+func TestCaplinDisableQUICFlagDefaultsFalseAndCanBeSet(t *testing.T) {
+	require.False(t, CaplinDisableQUICFlag.Value)
+
+	disableQUIC := CaplinDisableQUICFlag
+	cmd := &cli.Command{Flags: []cli.Flag{&disableQUIC}}
+	cmd.Action = func(_ context.Context, cmd *cli.Command) error {
+		require.True(t, cmd.Bool(CaplinDisableQUICFlag.Name))
+		return nil
+	}
+	require.NoError(t, cmd.Run(t.Context(), []string{"erigon", "--caplin.quic.disable"}))
 }
 
 func TestResolveChainName(t *testing.T) {
@@ -349,6 +372,30 @@ func TestCaplinColumnKeepSlots_UnsetDefersToChainConfig(t *testing.T) {
 	require.Equal(t, uint64(12345), parse("--caplin.columns-keep-slots=12345"), "a user-set window must reach the config")
 }
 
+func TestCaplinIPBlockLimitFlagsReachConfig(t *testing.T) {
+	parse := func(args ...string) ethconfig.Config {
+		disable, trusted := CaplinIPBlockLimitsDisableFlag, CaplinIPBlockLimitsTrustedCIDRsFlag
+		cfg := ethconfig.Config{}
+		app := &cli.Command{
+			Flags: []cli.Flag{&disable, &trusted},
+			Action: func(_ context.Context, cmd *cli.Command) error {
+				setCaplin(cmd, &cfg)
+				return nil
+			},
+		}
+		require.NoError(t, app.Run(context.Background(), append([]string{"test"}, args...)))
+		return cfg
+	}
+
+	cfg := parse()
+	require.False(t, cfg.CaplinConfig.DisableIPBlockLimits)
+	require.Empty(t, cfg.CaplinConfig.TrustedCIDRs)
+
+	cfg = parse("--caplin.ip-block-limits.disable", "--caplin.ip-block-limits.trusted-cidrs=203.0.113.0/24,2001:db8::/32,")
+	require.True(t, cfg.CaplinConfig.DisableIPBlockLimits)
+	require.Equal(t, []string{"203.0.113.0/24", "2001:db8::/32", ""}, cfg.CaplinConfig.TrustedCIDRs)
+}
+
 func TestCommitmentPlainValuesFromCtx(t *testing.T) {
 	parse := func(args ...string) *bool {
 		var got *bool
@@ -403,4 +450,38 @@ func TestSetParallelCommitment(t *testing.T) {
 			"explicit =false must select the sequential trie")
 		require.True(t, run(seed, "--"+ExperimentalParallelCommitmentFlag.Name+"=true"))
 	}
+}
+
+func TestDisableBoolFlags_ExplicitFalse(t *testing.T) {
+	run := func(args ...string) (ethconfig.Config, buildercfg.BuilderConfig) {
+		txpoolDisable, proposingDisable, fakePoW := TxPoolDisableFlag, ProposingDisableFlag, FakePoWFlag
+		var ethCfg ethconfig.Config
+		var builderCfg buildercfg.BuilderConfig
+		app := &cli.Command{
+			Flags: []cli.Flag{&txpoolDisable, &proposingDisable, &fakePoW},
+			Action: func(_ context.Context, cmd *cli.Command) error {
+				setTxPool(cmd, t.TempDir(), &ethCfg)
+				setEthash(cmd, t.TempDir(), &ethCfg)
+				setBuilder(cmd, &builderCfg)
+				return nil
+			},
+		}
+		require.NoError(t, app.Run(context.Background(), append([]string{"test"}, args...)))
+		return ethCfg, builderCfg
+	}
+
+	ethCfg, builderCfg := run()
+	require.False(t, ethCfg.TxPool.Disable)
+	require.True(t, builderCfg.EnabledPOS)
+	require.Equal(t, ethashcfg.ModeNormal, ethCfg.Ethash.PowMode)
+
+	ethCfg, builderCfg = run("--txpool.disable=false", "--proposer.disable=false", "--fakepow=false")
+	require.False(t, ethCfg.TxPool.Disable)
+	require.True(t, builderCfg.EnabledPOS)
+	require.Equal(t, ethashcfg.ModeNormal, ethCfg.Ethash.PowMode)
+
+	ethCfg, builderCfg = run("--txpool.disable", "--proposer.disable", "--fakepow")
+	require.True(t, ethCfg.TxPool.Disable)
+	require.False(t, builderCfg.EnabledPOS)
+	require.Equal(t, ethashcfg.ModeFake, ethCfg.Ethash.PowMode)
 }

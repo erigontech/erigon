@@ -81,11 +81,12 @@ func newBenchEnv(t testing.TB, gasLimit uint64, noMaterialize bool) *vm.EVM {
 		state.NewVersionMap(nil),
 	)
 	statedb.SetNoMaterialize(noMaterialize)
+	statedb.SetNoConflictDetection()
 	return envFor(statedb, gasLimit)
 }
 
 // newCommittedBenchEnv commits what seed writes to the DB and returns an env
-// over a fresh unversioned state, so reads of it come from the state reader as
+// over a fresh versioned state, so reads of it come from the state reader as
 // in eth_call, not from the same tx's writes.
 func newCommittedBenchEnv(t testing.TB, gasLimit uint64, seed func(*state.IntraBlockState)) *vm.EVM {
 	t.Helper()
@@ -99,7 +100,10 @@ func newCommittedBenchEnv(t testing.TB, gasLimit uint64, seed func(*state.IntraB
 	seed(seeded)
 	vmenv := envFor(seeded, gasLimit)
 	require.NoError(t, seeded.CommitBlock(vmenv.ChainRules(), state.NewWriter(domains.AsPutDel(tx), nil, 1)))
-	return envFor(state.New(reader), gasLimit)
+	statedb := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
+	statedb.SetNoMaterialize(true)
+	statedb.SetNoConflictDetection()
+	return envFor(statedb, gasLimit)
 }
 
 func envFor(statedb *state.IntraBlockState, gasLimit uint64) *vm.EVM {
@@ -142,7 +146,7 @@ func setStorage(tb testing.TB, statedb *state.IntraBlockState, addr accounts.Add
 func prepareAndCall(vmenv *vm.EVM, addr accounts.Address, input []byte) ([]byte, mdgas.MdGas, error) {
 	rules := vmenv.ChainRules()
 	vmenv.IntraBlockState().Prepare(rules, vmenv.Origin, vmenv.Context.Coinbase, addr, vm.ActivePrecompiles(rules), nil)
-	gas := mdgas.SplitTxnGasLimit(vmenv.Context.GasLimit, 0, rules)
+	gas := mdgas.SplitTxnGasLimit(vmenv.Context.GasLimit, 0, rules, false)
 	ret, left, _, err := vmenv.Call(vmenv.Origin, addr, input, gas, uint256.Int{}, false)
 	return ret, left, err
 }

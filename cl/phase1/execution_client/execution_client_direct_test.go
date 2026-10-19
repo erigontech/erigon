@@ -29,7 +29,7 @@ import (
 
 func TestRetryAssembleBlockReturnsFirstSuccess(t *testing.T) {
 	calls := 0
-	id, err := retryAssembleBlock(t.Context(), 3, time.Millisecond, func(context.Context) (uint64, error) {
+	id, err := retryAssembleBlock(t.Context(), 3, time.Millisecond, time.Millisecond, func(context.Context) (uint64, error) {
 		calls++
 		if calls < 3 {
 			return 0, chainreader.ErrExecutionBusy
@@ -45,7 +45,7 @@ func TestRetryAssembleBlockReturnsFirstSuccess(t *testing.T) {
 func TestRetryAssembleBlockStopsOnRejection(t *testing.T) {
 	rejected := errors.New("withdrawals before shanghai")
 	calls := 0
-	_, err := retryAssembleBlock(t.Context(), 30, time.Hour, func(context.Context) (uint64, error) {
+	_, err := retryAssembleBlock(t.Context(), 30, time.Hour, time.Hour, func(context.Context) (uint64, error) {
 		calls++
 		return 0, rejected
 	})
@@ -58,7 +58,7 @@ func TestRetryAssembleBlockStopsOnRejection(t *testing.T) {
 
 func TestRetryAssembleBlockGivesUpAfterAttempts(t *testing.T) {
 	calls := 0
-	_, err := retryAssembleBlock(t.Context(), 2, time.Millisecond, func(context.Context) (uint64, error) {
+	_, err := retryAssembleBlock(t.Context(), 2, time.Millisecond, time.Millisecond, func(context.Context) (uint64, error) {
 		calls++
 		return 0, chainreader.ErrExecutionBusy
 	})
@@ -70,7 +70,7 @@ func TestRetryAssembleBlockGivesUpAfterAttempts(t *testing.T) {
 func TestRetryAssembleBlockStopsWhenContextIsCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	calls := 0
-	_, err := retryAssembleBlock(ctx, 30, time.Hour, func(context.Context) (uint64, error) {
+	_, err := retryAssembleBlock(ctx, 30, time.Hour, time.Hour, func(context.Context) (uint64, error) {
 		calls++
 		cancel()
 		return 0, chainreader.ErrExecutionBusy
@@ -84,7 +84,7 @@ func TestRetryAssembleBlockDoesNotStartWithCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	calls := 0
-	_, err := retryAssembleBlock(ctx, 30, time.Hour, func(context.Context) (uint64, error) {
+	_, err := retryAssembleBlock(ctx, 30, time.Hour, time.Hour, func(context.Context) (uint64, error) {
 		calls++
 		return 0, chainreader.ErrExecutionBusy
 	})
@@ -94,8 +94,38 @@ func TestRetryAssembleBlockDoesNotStartWithCanceledContext(t *testing.T) {
 }
 
 func TestRetryAssembleBlockRejectsNoAttempts(t *testing.T) {
-	_, err := retryAssembleBlock(t.Context(), 0, time.Millisecond, func(context.Context) (uint64, error) {
+	_, err := retryAssembleBlock(t.Context(), 0, time.Millisecond, time.Millisecond, func(context.Context) (uint64, error) {
 		return 1, nil
 	})
 	require.EqualError(t, err, "assemble block requires at least one attempt")
+}
+
+// The usual contention is the forkchoice update's own commit, which ends within tens of
+// milliseconds, so the first retries come quickly; longer contention backs off to the cap.
+func TestAssembleRetryDelayBacksOffToTheCap(t *testing.T) {
+	var delays []time.Duration
+	for retry := range 7 {
+		delays = append(delays, assembleRetryDelay(retry, 10*time.Millisecond, 200*time.Millisecond))
+	}
+	require.Equal(t, []time.Duration{
+		10 * time.Millisecond, 20 * time.Millisecond, 40 * time.Millisecond, 80 * time.Millisecond,
+		160 * time.Millisecond, 200 * time.Millisecond, 200 * time.Millisecond,
+	}, delays)
+}
+
+// One busy answer costs the first, short delay, not the cap.
+func TestRetryAssembleBlockRetriesOneBusyAnswerQuickly(t *testing.T) {
+	calls := 0
+	start := time.Now()
+	id, err := retryAssembleBlock(t.Context(), 30, 10*time.Millisecond, 5*time.Second, func(context.Context) (uint64, error) {
+		calls++
+		if calls == 1 {
+			return 0, chainreader.ErrExecutionBusy
+		}
+		return 7, nil
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, uint64(7), id)
+	require.Less(t, time.Since(start), time.Second)
 }

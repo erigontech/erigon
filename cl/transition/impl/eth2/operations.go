@@ -89,34 +89,6 @@ func (imp *impl) ProcessProposerSlashing(
 		return fmt.Errorf("proposer is not slashable: %v", proposer)
 	}
 
-	// [New in Gloas:EIP7732] Remove the BuilderPendingPayment corresponding to
-	// this proposal if it is still in the 2-epoch window.
-	if s.Version() >= clparams.GloasVersion {
-		slot := h1.Slot
-		beaconConfig := s.BeaconConfig()
-		proposalEpoch := state.GetEpochAtSlot(beaconConfig, slot)
-		currentEpoch := state.Epoch(s)
-		var paymentIndex int
-		clear := false
-		if proposalEpoch == currentEpoch {
-			paymentIndex = int(beaconConfig.SlotsPerEpoch + slot%beaconConfig.SlotsPerEpoch)
-			clear = true
-		} else if proposalEpoch == state.PreviousEpoch(s) {
-			paymentIndex = int(slot % beaconConfig.SlotsPerEpoch)
-			clear = true
-		}
-		if clear {
-			payments := s.GetBuilderPendingPayments()
-			payment := payments.Get(paymentIndex)
-			if payment != nil && payment.ProposerIndex == h1.ProposerIndex {
-				payments.Set(paymentIndex, &cltypes.BuilderPendingPayment{
-					Withdrawal: &cltypes.BuilderPendingWithdrawal{},
-				})
-			}
-			s.SetBuilderPendingPayments(payments)
-		}
-	}
-
 	// Set whistleblower index to 0 so current proposer gets reward.
 	pr, err := s.SlashValidator(h1.ProposerIndex, nil)
 	if imp.BlockRewardsCollector != nil {
@@ -629,8 +601,8 @@ func (imp *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltype
 }
 
 // ApplyParentExecutionPayload applies the effects of a full parent execution payload to state.
-// It processes execution requests (deposits, withdrawals, consolidations), queues the builder
-// payment, and updates latest_block_hash. This is the spec's apply_parent_execution_payload.
+// It settles the builder payment before processing execution requests, then updates
+// latest_block_hash. This is the spec's apply_parent_execution_payload.
 // [New in Gloas:EIP7732]
 func (imp *impl) ApplyParentExecutionPayload(s abstract.BeaconState, requests *cltypes.ExecutionRequests) error {
 	if requests == nil {
@@ -666,44 +638,7 @@ func (imp *impl) ApplyParentExecutionPayload(s abstract.BeaconState, requests *c
 		}
 	}
 	parentBid := s.GetLatestExecutionPayloadBid()
-	// Process execution requests (deposits, withdrawals, consolidations)
-	if requests.Deposits != nil {
-		if err := solid.RangeErr[*solid.DepositRequest](requests.Deposits, func(_ int, req *solid.DepositRequest, _ int) error {
-			return imp.ProcessDepositRequest(s, req)
-		}); err != nil {
-			return fmt.Errorf("ApplyParentExecutionPayload: ProcessDepositRequest: %w", err)
-		}
-	}
-	if requests.Withdrawals != nil {
-		if err := solid.RangeErr[*solid.WithdrawalRequest](requests.Withdrawals, func(_ int, req *solid.WithdrawalRequest, _ int) error {
-			return imp.ProcessWithdrawalRequest(s, req)
-		}); err != nil {
-			return fmt.Errorf("ApplyParentExecutionPayload: ProcessWithdrawalRequest: %w", err)
-		}
-	}
-	if requests.Consolidations != nil {
-		if err := solid.RangeErr[*solid.ConsolidationRequest](requests.Consolidations, func(_ int, req *solid.ConsolidationRequest, _ int) error {
-			return imp.ProcessConsolidationRequest(s, req)
-		}); err != nil {
-			return fmt.Errorf("ApplyParentExecutionPayload: ProcessConsolidationRequest: %w", err)
-		}
-	}
-	if requests.BuilderDeposits != nil {
-		if err := solid.RangeErr[*solid.BuilderDepositRequest](requests.BuilderDeposits, func(_ int, req *solid.BuilderDepositRequest, _ int) error {
-			return imp.ProcessBuilderDepositRequest(s, req)
-		}); err != nil {
-			return fmt.Errorf("ApplyParentExecutionPayload: ProcessBuilderDepositRequest: %w", err)
-		}
-	}
-	if requests.BuilderExits != nil {
-		if err := solid.RangeErr[*solid.BuilderExitRequest](requests.BuilderExits, func(_ int, req *solid.BuilderExitRequest, _ int) error {
-			return imp.ProcessBuilderExitRequest(s, req)
-		}); err != nil {
-			return fmt.Errorf("ApplyParentExecutionPayload: ProcessBuilderExitRequest: %w", err)
-		}
-	}
-
-	// Queue the builder payment using parent_slot (epoch-aware indexing per spec)
+	// Settle the builder payment using parent_slot.
 	beaconConfig := s.BeaconConfig()
 	parentSlot := s.LatestBlockHeader().Slot
 	slotsPerEpoch := beaconConfig.SlotsPerEpoch
@@ -745,6 +680,42 @@ func (imp *impl) ApplyParentExecutionPayload(s abstract.BeaconState, requests *c
 			Withdrawal: &cltypes.BuilderPendingWithdrawal{},
 		})
 		s.SetBuilderPendingPayments(payments)
+	}
+
+	if requests.Deposits != nil {
+		if err := solid.RangeErr[*solid.DepositRequest](requests.Deposits, func(_ int, req *solid.DepositRequest, _ int) error {
+			return imp.ProcessDepositRequest(s, req)
+		}); err != nil {
+			return fmt.Errorf("ApplyParentExecutionPayload: ProcessDepositRequest: %w", err)
+		}
+	}
+	if requests.Withdrawals != nil {
+		if err := solid.RangeErr[*solid.WithdrawalRequest](requests.Withdrawals, func(_ int, req *solid.WithdrawalRequest, _ int) error {
+			return imp.ProcessWithdrawalRequest(s, req)
+		}); err != nil {
+			return fmt.Errorf("ApplyParentExecutionPayload: ProcessWithdrawalRequest: %w", err)
+		}
+	}
+	if requests.Consolidations != nil {
+		if err := solid.RangeErr[*solid.ConsolidationRequest](requests.Consolidations, func(_ int, req *solid.ConsolidationRequest, _ int) error {
+			return imp.ProcessConsolidationRequest(s, req)
+		}); err != nil {
+			return fmt.Errorf("ApplyParentExecutionPayload: ProcessConsolidationRequest: %w", err)
+		}
+	}
+	if requests.BuilderDeposits != nil {
+		if err := solid.RangeErr[*solid.BuilderDepositRequest](requests.BuilderDeposits, func(_ int, req *solid.BuilderDepositRequest, _ int) error {
+			return imp.ProcessBuilderDepositRequest(s, req)
+		}); err != nil {
+			return fmt.Errorf("ApplyParentExecutionPayload: ProcessBuilderDepositRequest: %w", err)
+		}
+	}
+	if requests.BuilderExits != nil {
+		if err := solid.RangeErr[*solid.BuilderExitRequest](requests.BuilderExits, func(_ int, req *solid.BuilderExitRequest, _ int) error {
+			return imp.ProcessBuilderExitRequest(s, req)
+		}); err != nil {
+			return fmt.Errorf("ApplyParentExecutionPayload: ProcessBuilderExitRequest: %w", err)
+		}
 	}
 
 	// Update state
@@ -1029,7 +1000,7 @@ func (imp *impl) ProcessSyncAggregate(s abstract.BeaconState, sync *cltypes.Sync
 			s.GenesisValidatorsRoot(),
 		)
 		if err != nil {
-			return nil
+			return err
 		}
 		blockRoot, err := s.GetBlockRootAtSlot(previousSlot)
 		if err != nil {

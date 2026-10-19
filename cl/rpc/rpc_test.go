@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -43,6 +44,8 @@ type emptyColumnResponseSentinel struct {
 	calls            int
 	maxResponseBytes []uint64
 	response         []byte
+	err              error
+	askedPeers       []string
 	bannedPeer       string
 }
 
@@ -54,6 +57,10 @@ func (s *emptyColumnResponseSentinel) BanPeer(_ context.Context, peer *sentinelp
 func (s *emptyColumnResponseSentinel) SendPeerRequest(_ context.Context, req *sentinelproto.RequestDataWithPeer, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
 	s.calls++
 	s.maxResponseBytes = append(s.maxResponseBytes, req.MaxResponseBytes)
+	s.askedPeers = append(s.askedPeers, req.Pid)
+	if s.err != nil {
+		return nil, s.err
+	}
 	return &sentinelproto.ResponseData{Data: s.response, Peer: &sentinelproto.Peer{Pid: req.Pid}}, nil
 }
 
@@ -115,7 +122,7 @@ func TestReqRespRequestsBoundContextsWithoutDeadline(t *testing.T) {
 func TestColumnSidecarsRequestSnapshotReflectsPeerMaskAndPreservesWrapper(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	if clparams.GetBeaconConfig() == nil {
-		clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+		clparams.InitGlobalStaticConfig(&cfg)
 	}
 	sentinel := &emptyColumnResponseSentinel{}
 	client := &BeaconRpcP2P{
@@ -152,6 +159,8 @@ func TestColumnSidecarsRequestSnapshotReflectsPeerMaskAndPreservesWrapper(t *tes
 		return true
 	})
 
+	// The empty answer put the only peer on cooldown.
+	client.columnDataPeers.coolingUntil = nil
 	sidecars, pid, err = client.SendColumnSidecarsByRootIdentifierReq(t.Context(), request)
 	require.NoError(t, err)
 	require.Empty(t, sidecars)
@@ -159,11 +168,77 @@ func TestColumnSidecarsRequestSnapshotReflectsPeerMaskAndPreservesWrapper(t *tes
 	require.Equal(t, 2, sentinel.calls)
 }
 
+func TestColumnSidecarsRequestSkipsPeerThatAnsweredNothing(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg := clparams.MainnetBeaconConfig
+		if clparams.GetBeaconConfig() == nil {
+			clparams.InitGlobalStaticConfig(&cfg)
+		}
+		sentinel := &emptyColumnResponseSentinel{}
+		client := &BeaconRpcP2P{
+			sentinel:     sentinel,
+			beaconConfig: &cfg,
+			columnDataPeers: &columnDataPeers{
+				beaconConfig: &cfg,
+				peersQueue:   []peerData{{pid: "a", mask: allCustodyIndices}, {pid: "b", mask: allCustodyIndices}},
+			},
+		}
+		request := columnZeroRequest(&cfg)
+		send := func() error {
+			_, _, _, err := client.SendColumnSidecarsByRootIdentifierReqWithSnapshot(t.Context(), request)
+			return err
+		}
+
+		require.NoError(t, send())
+		require.NoError(t, send())
+		require.ElementsMatch(t, []string{"a", "b"}, sentinel.askedPeers, "the other peer is asked at once")
+		require.ErrorIs(t, send(), ErrNoGoodPeer)
+		time.Sleep(2 * time.Second)
+		require.NoError(t, send())
+		require.Len(t, sentinel.askedPeers, 3, "a peer is asked again after the cooldown")
+	})
+}
+
+// A failed request says nothing about the columns the peer has: it also fails on our own stream
+// limit or when the caller's context ends.
+func TestColumnSidecarsRequestKeepsPeerAfterFailedRequest(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	if clparams.GetBeaconConfig() == nil {
+		clparams.InitGlobalStaticConfig(&cfg)
+	}
+	sentinel := &emptyColumnResponseSentinel{err: errors.New("stream reset")}
+	client := &BeaconRpcP2P{
+		sentinel:     sentinel,
+		beaconConfig: &cfg,
+		columnDataPeers: &columnDataPeers{
+			beaconConfig: &cfg,
+			peersQueue:   []peerData{{pid: "a", mask: allCustodyIndices}},
+		},
+	}
+	request := columnZeroRequest(&cfg)
+	for range 2 {
+		_, _, _, err := client.SendColumnSidecarsByRootIdentifierReqWithSnapshot(t.Context(), request)
+		require.ErrorIs(t, err, sentinel.err)
+	}
+	require.Equal(t, []string{"a", "a"}, sentinel.askedPeers)
+}
+
+func columnZeroRequest(cfg *clparams.BeaconChainConfig) *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier] {
+	request := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](1)
+	identifier := &cltypes.DataColumnsByRootIdentifier{
+		BlockRoot: common.HexToHash("0x1234"),
+		Columns:   solid.NewUint64ListSSZ(int(cfg.NumberOfColumns)),
+	}
+	identifier.Columns.Append(0)
+	request.Append(identifier)
+	return request
+}
+
 func TestColumnSidecarsRequestRejectsOverCardinalityBeforeSidecarDecode(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.InitializeForkSchedule()
 	if clparams.GetBeaconConfig() == nil {
-		clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+		clparams.InitGlobalStaticConfig(&cfg)
 	}
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
 	digest, err := clock.ComputeForkDigest(cfg.FuluForkEpoch)
@@ -214,7 +289,7 @@ func TestColumnSidecarsRequestAcceptsExactGloasForkDigest(t *testing.T) {
 	cfg.GloasForkEpoch = 2
 	cfg.InitializeForkSchedule()
 	if clparams.GetBeaconConfig() == nil {
-		clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+		clparams.InitGlobalStaticConfig(&cfg)
 	}
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
 	digest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
@@ -260,7 +335,7 @@ func TestColumnSidecarsRequestRejectsUnknownForkDigest(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.InitializeForkSchedule()
 	if clparams.GetBeaconConfig() == nil {
-		clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+		clparams.InitGlobalStaticConfig(&cfg)
 	}
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
 	unknownDigest := common.Bytes4{0xde, 0xad, 0xbe, 0xef}
@@ -300,7 +375,7 @@ func TestColumnSidecarsRequestRejectsUnknownForkDigest(t *testing.T) {
 func TestColumnSidecarsSparseMultiRootCapPreservesFilteredOrderAndWrapper(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	if clparams.GetBeaconConfig() == nil {
-		clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+		clparams.InitGlobalStaticConfig(&cfg)
 	}
 	sentinel := &emptyColumnResponseSentinel{}
 	client := &BeaconRpcP2P{
@@ -354,6 +429,8 @@ func TestColumnSidecarsSparseMultiRootCapPreservesFilteredOrderAndWrapper(t *tes
 	wantCap := communication.MaxWireResponseBytes(client.columnSidecarRawBytes(), 3)
 	require.Equal(t, []uint64{wantCap}, sentinel.maxResponseBytes)
 
+	// The empty answer put the only peer on cooldown.
+	client.columnDataPeers.coolingUntil = nil
 	_, _, err = client.SendColumnSidecarsByRootIdentifierReq(t.Context(), request)
 	require.NoError(t, err)
 	require.Equal(t, []uint64{wantCap, wantCap}, sentinel.maxResponseBytes)

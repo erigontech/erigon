@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,28 +14,23 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package building
+package synced_data
 
 import (
-	"sync"
+	"testing"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/clparams"
 )
 
-type State struct {
-	feeRecipients map[int]common.Address
+func TestActiveValidatorCount(t *testing.T) {
+	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	require.Zero(t, manager.ActiveValidatorCount())
 
-	mu sync.RWMutex
-}
+	headState := bigValidatorState(t, 3)
+	require.NoError(t, headState.SetActivationEpochForValidatorAtIndex(2, 1))
+	require.NoError(t, manager.OnHeadState(headState))
 
-func NewState() *State {
-	return &State{
-		feeRecipients: map[int]common.Address{},
-	}
-}
-
-func (s *State) SetFeeRecipient(idx int, address common.Address) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.feeRecipients[idx] = address
+	require.Equal(t, uint64(2), manager.ActiveValidatorCount())
 }

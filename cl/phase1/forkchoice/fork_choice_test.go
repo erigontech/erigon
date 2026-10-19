@@ -84,14 +84,16 @@ func TestOnBlockHashMismatchPreservesVerifiedPayload(t *testing.T) {
 			mockEngine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
 			mockEngine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(engine.NewPayload)
 			store := newBellatrixForkChoiceStore(t, anchorState, mockEngine)
-			store.OnTick(anchorState.GenesisTime() + block.Block.Slot*anchorState.BeaconConfig().SecondsPerSlot)
+			store.OnTick((anchorState.GenesisTime() + block.Block.Slot*anchorState.BeaconConfig().SecondsPerSlot) * 1000)
 			require.NoError(t, store.OnBlock(t.Context(), block, false, true, false))
 			store.MarkPayloadVerified(blockRoot, executionHash)
 			status, ok := store.GetRecentExecutionPayloadStatus(executionHash)
 			require.True(t, ok)
 			require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusValidated), status)
 
-			require.ErrorContains(t, store.OnBlock(t.Context(), invalid, true, true, false), "OnBlock: invalid execution payload hash")
+			err = store.OnBlock(t.Context(), invalid, true, true, false)
+			require.ErrorContains(t, err, "OnBlock: invalid execution payload hash")
+			require.ErrorIs(t, err, forkchoice.ErrBlockInvalid)
 
 			status, ok = store.GetRecentExecutionPayloadStatus(executionHash)
 			require.True(t, ok)
@@ -105,7 +107,9 @@ func TestOnBlockHashMismatchPreservesVerifiedPayload(t *testing.T) {
 			require.NoError(t, err)
 			mockEngine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusInvalidated, nil)
 			require.ErrorContains(t, store.OnBlock(t.Context(), invalid, true, true, false), "execution payload is invalid")
-			require.ErrorContains(t, store.OnBlock(t.Context(), invalid, true, true, false), "block is invalid")
+			err = store.OnBlock(t.Context(), invalid, true, true, false)
+			require.ErrorContains(t, err, "block is invalid")
+			require.ErrorIs(t, err, forkchoice.ErrBlockInvalid)
 		})
 	}
 }
@@ -186,7 +190,7 @@ func newBellatrixForkChoiceStore(t *testing.T, anchorState *state.CachingBeaconS
 		nil,
 	)
 	require.NoError(t, err)
-	store.OnTick(2000)
+	store.OnTick(2000 * 1000)
 	return store
 }
 
@@ -255,7 +259,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.NoError(t, err)
 	// first steps
 	store.OnTick(0)
-	store.OnTick(12)
+	store.OnTick(12 * 1000)
 	blockRoot, err := block0x3a.Block.HashSSZ()
 	require.NoError(t, err)
 	require.NoError(t, store.ValidateBlockForPublishing(block0x3a, false))
@@ -279,7 +283,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.Equal(t, headRoot, selectedRoot)
 	require.Equal(t, headSlot, selectedSlot)
 	// process another tick and another block
-	store.OnTick(36)
+	store.OnTick(36 * 1000)
 	require.NoError(t, store.OnBlock(ctx, block0xc2, false, true, false))
 	// Check if we get correct status (2)
 	require.Equal(t, uint64(36), store.Time())
@@ -358,7 +362,7 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 		false, // probabilisticHeadGetter
 		nil,   // db: no KV persistence in tests
 	)
-	store.OnTick(2000)
+	store.OnTick(2000 * 1000)
 	require.NoError(t, err)
 	for _, block := range blocks {
 		require.NoError(t, store.OnBlock(ctx, block, false, true, false))

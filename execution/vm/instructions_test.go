@@ -25,11 +25,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -38,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -301,6 +305,28 @@ func TestJsonTestcases(t *testing.T) {
 		var testcases []TwoOperandTestcase
 		json.Unmarshal(data, &testcases)
 		testTwoOperandOp(t, testcases, twoOpMethods[name], name)
+	}
+}
+
+func innerOutputsShareBuffer(cfg Config) bool {
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, cfg)
+	evm.depth = 2
+	var mem Memory
+	mem.Resize(32)
+	a, b := evm.output(&mem, 0, 32), evm.output(&mem, 0, 32)
+	return unsafe.SliceData(a) == unsafe.SliceData(b)
+}
+
+func TestInnerFrameOutputReusesBuffer(t *testing.T) {
+	if !innerOutputsShareBuffer(Config{}) {
+		t.Fatal("each inner RETURN got a new buffer")
+	}
+}
+
+// Tracers such as callTracer keep every frame's output.
+func TestTracedInnerFrameOutputIsCopied(t *testing.T) {
+	if innerOutputsShareBuffer(Config{Tracer: &tracing.Hooks{}}) {
+		t.Fatal("a traced inner RETURN reused the buffer")
 	}
 }
 
@@ -1064,4 +1090,50 @@ func TestEIP8024_Execution(t *testing.T) {
 func ptrToByte(v byte) *byte {
 	b := v
 	return &b
+}
+
+func TestLogDataSurvivesMemoryAndArenaReuse(t *testing.T) {
+	t.Parallel()
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	scope := &CallContext{Contract: *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})}
+	op := makeLog(3)
+	for i, size := range []int{1024 * 1024, 1024, 32, 0, 1024 * 1024} {
+		ibs.SetTxContext(1, 0)
+		scope.Memory.Resize(uint64(size + 6))
+		data := bytes.Repeat([]byte{byte(i + 1)}, size)
+		scope.Memory.Set(6, uint64(size), data)
+		for range 3 {
+			scope.Stack.push(uint256.Int{})
+		}
+		scope.Stack.push(*uint256.NewInt(uint64(size)))
+		scope.Stack.push(*uint256.NewInt(6))
+		_, _, err := op(0, evm, scope)
+		require.NoError(t, err)
+		clear(scope.Memory.Data())
+		logs := ibs.GetRawLogs(0)
+		require.Len(t, logs, 1)
+		require.Equal(t, []common.Hash{{}, {}, {}}, logs[0].Topics)
+		require.Len(t, logs[0].Data, size)
+		require.True(t, bytes.Equal(data, logs[0].Data), "log data changed for size %d", size)
+		ibs.Reset()
+	}
+}
+
+func TestExpSmallOperandBoundaries(t *testing.T) {
+	t.Parallel()
+	modulus := new(big.Int).Lsh(big.NewInt(1), 256)
+	for _, base := range []uint64{0, 1, 2, 3, 7, 13, 136279841, 1 << 31, 1 << 32, 1 << 63, ^uint64(0)} {
+		for power := range uint64(66) {
+			scope := &CallContext{}
+			scope.Stack.push(*uint256.NewInt(power))
+			scope.Stack.push(*uint256.NewInt(base))
+			_, _, err := opExp(0, nil, scope)
+			require.NoError(t, err)
+			want := new(big.Int).Exp(new(big.Int).SetUint64(base), new(big.Int).SetUint64(power), modulus)
+			got := scope.Stack.popCopy()
+			require.Zero(t, want.Cmp(got.ToBig()), "base=%d exponent=%d", base, power)
+		}
+	}
 }

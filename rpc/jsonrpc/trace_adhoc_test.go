@@ -594,6 +594,25 @@ func TestReplayBlockTransactions(t *testing.T) {
 	require.Equal(t, uint64(1_000_000_000_000_000), v)
 }
 
+func TestTraceBlockUnknownBlockIsResourceNotFound(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	past := rpc.BlockNumber(1_000_000)
+
+	t.Run("trace_block", func(t *testing.T) {
+		_, err := api.Block(m.Ctx, past, nil, nil)
+		requireResourceNotFound(t, err, "block not found")
+	})
+	t.Run("trace_replayBlockTransactions by number", func(t *testing.T) {
+		_, err := api.ReplayBlockTransactions(m.Ctx, rpc.BlockNumberOrHashWithNumber(past), []string{TraceTypeTrace}, nil, nil)
+		requireResourceNotFound(t, err, "block not found")
+	})
+	t.Run("trace_replayBlockTransactions by hash", func(t *testing.T) {
+		_, err := api.ReplayBlockTransactions(m.Ctx, rpc.BlockNumberOrHashWithHash(common.Hash{0xff}, false), []string{TraceTypeTrace}, nil, nil)
+		requireResourceNotFound(t, err, "block not found")
+	})
+}
+
 func TestParityTraceGasUsageAcrossRPCPaths(t *testing.T) {
 	m, generated, calls := gasTracingTestChain(t)
 	api := newTraceApiForTest(m)
@@ -788,6 +807,36 @@ func signedTransferAtLatest(t *testing.T, m *execmoduletester.ExecModuleTester) 
 	return buf.Bytes(), accounts.InternAddress(sender), accounts.InternAddress(recipient)
 }
 
+func TestUnknownTraceTypeIsInvalidParams(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	ctx := context.Background()
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	unknown := []string{TraceTypeTrace, "bogus"}
+
+	t.Run("trace_call", func(t *testing.T) {
+		_, err := api.Call(ctx, TraceCallParam{}, unknown, &latest, nil)
+		requireErrorCode(t, err, rpc.ErrCodeInvalidParams)
+	})
+	t.Run("trace_callMany", func(t *testing.T) {
+		_, err := api.CallMany(ctx, json.RawMessage(`[[{}, ["trace", "bogus"]]]`), &latest, nil)
+		requireErrorCode(t, err, rpc.ErrCodeInvalidParams)
+	})
+	t.Run("trace_replayBlockTransactions", func(t *testing.T) {
+		_, err := api.ReplayBlockTransactions(ctx, latest, unknown, nil, nil)
+		requireErrorCode(t, err, rpc.ErrCodeInvalidParams)
+	})
+	t.Run("trace_replayTransaction", func(t *testing.T) {
+		_, err := api.ReplayTransaction(ctx, common.HexToHash(debugTraceTransactionTests[0].txHash), unknown, nil, nil)
+		requireErrorCode(t, err, rpc.ErrCodeInvalidParams)
+	})
+	t.Run("trace_rawTransaction", func(t *testing.T) {
+		encoded, _, _ := signedTransferAtLatest(t, m)
+		_, err := api.RawTransaction(ctx, encoded, unknown)
+		requireErrorCode(t, err, rpc.ErrCodeInvalidParams)
+	})
+}
+
 func TestRawTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)
@@ -797,6 +846,14 @@ func TestRawTransaction(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotEmpty(t, result.Trace)
+}
+
+func TestRawTransactionMalformed(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+
+	_, err := api.RawTransaction(context.Background(), hexutil.Bytes{0xde, 0xad, 0xbe, 0xef}, []string{"trace"})
+	requireErrorCode(t, err, rpc.ErrCodeInvalidParams)
 }
 
 func TestRawTransactionStateDiff(t *testing.T) {
@@ -2735,9 +2792,16 @@ func TestTraceCallFields(t *testing.T) {
 		hash := "0x0100000000000000000000000000000000000000000000000000000000000001"
 		withHash := traceCall(t, callObject(blobHashReader, `,"maxFeePerBlobGas":"0x77359400","blobVersionedHashes":["`+hash+`"]`))
 		require.Equal(t, hash, withHash.Output.String(), "BLOBHASH reads the supplied versioned hash")
+	})
 
-		withoutHash := traceCall(t, callObject(blobHashReader, `,"maxFeePerBlobGas":"0x77359400"`))
-		require.Equal(t, common.Hash{}.Hex(), withoutHash.Output.String())
+	t.Run("maxFeePerBlobGas without blobVersionedHashes", func(t *testing.T) {
+		var args TraceCallParam
+		require.NoError(t, json.Unmarshal([]byte(callObject(blobHashReader, `,"maxFeePerBlobGas":"0x77359400"`)), &args))
+		_, err := api.Call(context.Background(), args, []string{TraceTypeTrace}, nil, nil)
+		require.ErrorIs(t, err, ethapi.ErrBlobFeeCapWithoutBlobHashes)
+
+		_, err = api.CallMany(context.Background(), json.RawMessage(`[[`+callObject(blobHashReader, `,"maxFeePerBlobGas":"0x0"`)+`,["trace"]]]`), nil, nil)
+		require.ErrorIs(t, err, ethapi.ErrBlobFeeCapWithoutBlobHashes)
 	})
 
 	// As in eth_call, the nonce is not checked against the state, and the chain's own chainId
@@ -3138,7 +3202,7 @@ func TestTraceCallFeeEnvironmentMatchesEthCall(t *testing.T) {
 }
 
 // TestTraceCallPreLondonFeesMatchEthCall checks that before London, where eth_call
-// ignores the EIP-1559 fee fields, trace_call ignores them too.
+// rejects the EIP-1559 fee fields, trace_call rejects them too.
 func TestTraceCallPreLondonFeesMatchEthCall(t *testing.T) {
 	c := newBaseFeeTestChain(t, chain.TestChainBerlinConfig)
 	probe := c.deployOpcodeContract(t, opGasprice)
@@ -3146,16 +3210,13 @@ func TestTraceCallPreLondonFeesMatchEthCall(t *testing.T) {
 
 	var ethArgs ethapi.CallArgs
 	require.NoError(t, json.Unmarshal([]byte(call), &ethArgs))
-	ethOutput, err := newEthApiForTest(newBaseApiForTest(c.m), c.m.DB, nil, nil).Call(context.Background(), ethArgs, nil, nil, nil)
-	require.NoError(t, err)
+	_, err := newEthApiForTest(newBaseApiForTest(c.m), c.m.DB, nil, nil).Call(context.Background(), ethArgs, nil, nil, nil)
+	require.ErrorIs(t, err, types.ErrDynamicFeePreLondon)
 
 	var traceArgs TraceCallParam
 	require.NoError(t, json.Unmarshal([]byte(call), &traceArgs))
-	result, err := c.traceAPI().Call(context.Background(), traceArgs, []string{TraceTypeStateDiff}, nil, nil)
-	require.NoError(t, err)
-	require.Equal(t, ethOutput, result.Output)
-	require.Equal(t, common.Hash{}.Hex(), result.Output.String(), "GASPRICE")
-	requireBigEqual(t, big.NewInt(-7), stateDiffBalanceDelta(t, result.StateDiff, c.bankAddress), "the sender pays only the value")
+	_, err = c.traceAPI().Call(context.Background(), traceArgs, []string{TraceTypeStateDiff}, nil, nil)
+	require.ErrorIs(t, err, types.ErrDynamicFeePreLondon)
 }
 
 // TestTraceCallManyChargesEachCall checks that each trace_callMany call runs in its own

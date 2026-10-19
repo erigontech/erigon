@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -44,7 +45,9 @@ import (
 // Make mocks with maps and simple setters and getters, panic on methods from ForkChoiceStorageWriter
 
 type ForkChoiceStorageMock struct {
+	ProposerLookaheadVal                  solid.Uint64VectorSSZ
 	Ancestors                             map[uint64]forkchoice.ForkChoiceNode
+	AncestorCalls                         atomic.Int64
 	AnchorSlotVal                         uint64
 	AnchorRootVal                         common.Hash
 	AnchorExecutionPayloadBuilderIndexVal uint64
@@ -60,11 +63,15 @@ type ForkChoiceStorageMock struct {
 	GetStateAtBlockRootFn                 func(common.Hash, bool) (*state.CachingBeaconState, error)
 	ViewStateAtBlockRootFn                func(common.Hash, func(*state.CachingBeaconState) error) error
 	HighestSeenVal                        uint64
-	JustifiedCheckpointVal                solid.Checkpoint
-	JustifiedSlotVal                      uint64
-	ProposerBoostRootVal                  common.Hash
-	SlotVal                               uint64
-	TimeVal                               uint64
+	// HighestImportedDescendantVal is the slot of the highest imported descendant of any root,
+	// unless HasImportedDescendantAfterFn is set.
+	HighestImportedDescendantVal uint64
+	HasImportedDescendantAfterFn func(root common.Hash, slot uint64) bool
+	JustifiedCheckpointVal       solid.Checkpoint
+	JustifiedSlotVal             uint64
+	ProposerBoostRootVal         common.Hash
+	SlotVal                      uint64
+	TimeVal                      uint64
 
 	ParticipationVal map[uint64]*solid.ParticipationBitList
 
@@ -119,6 +126,11 @@ type ForkChoiceStorageMock struct {
 
 	ShouldExtendPayloadVal bool
 	ShouldBuildOnFullVal   *bool
+
+	RetryPendingEnvelopeFunc func(ctx context.Context, blockRoot common.Hash) time.Time
+	PendingEnvelopeRoots     map[common.Hash]struct{}
+	ApplyInFlightRoots       map[common.Hash]struct{}
+	VotesRuleOutFullRoots    map[common.Hash]struct{}
 
 	// [New in Gloas:EIP7732] Execution payload status by execution block hash
 	ExecutionPayloadStatusMap map[common.Hash]execution_client.PayloadStatus
@@ -265,6 +277,7 @@ func (f *ForkChoiceStorageMock) GetPeerDas() das.PeerDas {
 }
 
 func (f *ForkChoiceStorageMock) Ancestor(root common.Hash, slot uint64) forkchoice.ForkChoiceNode {
+	f.AncestorCalls.Add(1)
 	return f.Ancestors[slot]
 }
 
@@ -309,6 +322,13 @@ func (f *ForkChoiceStorageMock) GetHead(_ *state.CachingBeaconState) (common.Has
 
 func (f *ForkChoiceStorageMock) HighestSeen() uint64 {
 	return f.HighestSeenVal
+}
+
+func (f *ForkChoiceStorageMock) HasImportedDescendantAfter(root common.Hash, slot uint64) bool {
+	if f.HasImportedDescendantAfterFn != nil {
+		return f.HasImportedDescendantAfterFn(root, slot)
+	}
+	return f.HighestImportedDescendantVal > slot
 }
 
 func (f *ForkChoiceStorageMock) BlockProcessing() bool {
@@ -563,9 +583,9 @@ func (f *ForkChoiceStorageMock) OnPayloadAttestationMessage(ctx context.Context,
 	return nil
 }
 
-func (f *ForkChoiceStorageMock) OnTick(time uint64) {
+func (f *ForkChoiceStorageMock) OnTick(timeMs uint64) {
 	if f.OnTickFn != nil {
-		f.OnTickFn(time)
+		f.OnTickFn(timeMs)
 		return
 	}
 	panic("implement me")
@@ -654,6 +674,28 @@ func (f *ForkChoiceStorageMock) GetBlock(
 	blockRoot common.Hash,
 ) (*cltypes.SignedBeaconBlock, bool) {
 	return f.Blocks[blockRoot], f.Blocks[blockRoot] != nil
+}
+
+func (f *ForkChoiceStorageMock) ExecutionPayloadApplyInFlight(blockRoot common.Hash) bool {
+	_, ok := f.ApplyInFlightRoots[blockRoot]
+	return ok
+}
+
+func (f *ForkChoiceStorageMock) PayloadVotesRuleOutFull(blockRoot common.Hash) bool {
+	_, ok := f.VotesRuleOutFullRoots[blockRoot]
+	return ok
+}
+
+func (f *ForkChoiceStorageMock) HasPendingExecutionPayloadEnvelope(blockRoot common.Hash) bool {
+	_, ok := f.PendingEnvelopeRoots[blockRoot]
+	return ok
+}
+
+func (f *ForkChoiceStorageMock) RetryPendingExecutionPayloadEnvelope(ctx context.Context, blockRoot common.Hash) time.Time {
+	if f.RetryPendingEnvelopeFunc != nil {
+		return f.RetryPendingEnvelopeFunc(ctx, blockRoot)
+	}
+	return time.Time{}
 }
 
 func (f *ForkChoiceStorageMock) HasEnvelope(blockRoot common.Hash) bool {
@@ -752,13 +794,6 @@ func (f *ForkChoiceStorageMock) GetCurrentParticipationIndicies(
 	panic("implement me")
 }
 
-func (f *ForkChoiceStorageMock) GetPublicKeyForValidator(
-	blockRoot common.Hash,
-	idx uint64,
-) (common.Bytes48, error) {
-	panic("implement me")
-}
-
 // func (f *ForkChoiceStorageMock) OnSignedContributionAndProof(signedContribution *cltypes.SignedContributionAndProof, test bool) error {
 // 	f.SyncContributionPool.AddSyncContribution(nil, signedContribution.Message.Contribution)
 // 	return nil
@@ -802,7 +837,7 @@ func (f *ForkChoiceStorageMock) GetPendingPartialWithdrawals(blockRoot common.Ha
 }
 
 func (f *ForkChoiceStorageMock) GetProposerLookahead(slot uint64) (solid.Uint64VectorSSZ, bool) {
-	return nil, false
+	return f.ProposerLookaheadVal, f.ProposerLookaheadVal != nil
 }
 
 // GetRecentExecutionPayloadStatus returns the validation status of a recently validated execution payload.

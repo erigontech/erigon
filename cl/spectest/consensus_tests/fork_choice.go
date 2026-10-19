@@ -27,7 +27,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -248,8 +247,9 @@ func (f *ForkChoiceStep) GetChecks() *ForkChoiceChecks {
 
 type ForkChoiceChecks struct {
 	Head *struct {
-		Slot *int         `yaml:"slot,omitempty"`
-		Root *common.Hash `yaml:"root,omitempty"`
+		Slot          *int         `yaml:"slot,omitempty"`
+		Root          *common.Hash `yaml:"root,omitempty"`
+		PayloadStatus *int         `yaml:"payload_status,omitempty"`
 	} `yaml:"head,omitempty"`
 	Time                *int `yaml:"time,omitempty"`
 	GenesisTime         *int `yaml:"genesis_time,omitempty"`
@@ -263,7 +263,6 @@ type ForkChoiceChecks struct {
 		Root  *common.Hash `yaml:"root,omitempty"`
 	} `yaml:"finalized_checkpoint,omitempty"`
 	ProposerBoostRoot *common.Hash `yaml:"proposer_boost_root,omitempty"`
-	HeadPayloadStatus *int         `yaml:"head_payload_status,omitempty"`
 }
 
 type ForkChoicePayloadStatus struct {
@@ -273,10 +272,6 @@ type ForkChoicePayloadStatus struct {
 }
 
 type ForkChoice struct{}
-
-func NewForkChoice(fn func(s abstract.BeaconState) error) *ForkChoice {
-	return &ForkChoice{}
-}
 
 func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
 	// Skip GLOAS wrong_withdrawals fork choice test: the Python test generator modifies
@@ -361,7 +356,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 				} else if len(step.Proofs) != blobs.Len() || len(step.Proofs) != blk.Block.Body.GetBlobKzgCommitments().Len() {
 					continue
 				}
-				blobSidecarService := services.NewBlobSidecarService(ctx, &clparams.MainnetBeaconConfig, forkStore, nil, ethClock, emitters, true)
+				blobSidecarService := services.NewBlobSidecarService(&clparams.MainnetBeaconConfig, forkStore, nil, ethClock, emitters, true)
 
 				blobs.Range(func(index int, value *cltypes.Blob, length int) bool {
 					var proof common.Bytes48
@@ -430,7 +425,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 				require.Error(t, err, stepstr)
 			}
 		case "on_tick":
-			forkStore.OnTick(uint64(step.GetTick()))
+			forkStore.OnTick(uint64(step.GetTick()) * 1000)
 			// TODO: onTick needs to be able to return error
 		//	if step.GetValid() {
 		//		require.NoError(t, err)
@@ -449,13 +444,16 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 
 func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e *ForkChoiceChecks) {
 	if e.Head != nil {
-		root, v, err := store.GetHead(nil)
+		head, slot, err := store.GetHeadNode()
 		require.NoError(t, err, stepstr)
 		if e.Head.Root != nil {
-			assert.Equal(t, *e.Head.Root, root, stepstr)
+			assert.Equal(t, *e.Head.Root, head.Root, stepstr)
 		}
 		if e.Head.Slot != nil {
-			assert.Equal(t, *e.Head.Slot, int(v), stepstr)
+			assert.Equal(t, *e.Head.Slot, int(slot), stepstr)
+		}
+		if e.Head.PayloadStatus != nil {
+			assert.EqualValues(t, *e.Head.PayloadStatus, int(head.PayloadStatus), stepstr)
 		}
 	}
 	if e.Time != nil {
@@ -486,10 +484,5 @@ func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e 
 		if e.JustifiedCheckpoint.Epoch != nil {
 			assert.EqualValues(t, *e.JustifiedCheckpoint.Epoch, cp.Epoch, stepstr)
 		}
-	}
-	if e.HeadPayloadStatus != nil {
-		head, _, err := store.GetHeadNode()
-		assert.NoError(t, err, stepstr)
-		assert.EqualValues(t, *e.HeadPayloadStatus, int(head.PayloadStatus), stepstr)
 	}
 }
