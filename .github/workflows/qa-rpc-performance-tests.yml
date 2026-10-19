@@ -322,6 +322,12 @@ jobs:
             cd $workspace/rpc-tests/perf
             rm -rf ./reports/$network
 
+            # Erigon is served by a standalone rpcdaemon; other clients run under their own process name
+            process_name_flag=()
+            if [ "$client" == "erigon" ]; then
+              process_name_flag=(--process-name rpcdaemon)
+            fi
+
             # Move to home dir of rpc-tests
             cd ..
             ./build/bin/rpc_perf --blockchain "$network" \
@@ -333,7 +339,7 @@ jobs:
                                       --test-report \
                                       --json-report $result_dir/$result_file \
                                       --testing-client $client \
-                                      --process-name rpcdaemon
+                                      "${process_name_flag[@]}"
           
             # Capture test runner script exit status
             perf_exit_status=$?
