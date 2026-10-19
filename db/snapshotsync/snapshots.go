@@ -1575,10 +1575,12 @@ func isIndexedOnDisk(dirPath string, f snaptype.FileInfo) bool {
 }
 
 func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
+	notOwned := func(f snaptype.FileInfo) bool { return !s.HasType(f.Type) }
 	list, err := snaptype.Segments(s.dir)
 	if err != nil {
 		return err
 	}
+	list = slices.DeleteFunc(list, notOwned)
 	list, superseded := supersededEqualRangeVersions(list)
 	keepSegments, segmentsToRemove := findOverlaps(list)
 	segmentsToRemove = append(segmentsToRemove, superseded...)
@@ -1595,6 +1597,7 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 	if err != nil {
 		return err
 	}
+	idxList = slices.DeleteFunc(idxList, notOwned)
 	idxList, supersededIdx := supersededEqualRangeVersions(idxList)
 	_, accessorsToRemove := findOverlaps(idxList)
 	accessorsToRemove = append(accessorsToRemove, supersededIdx...)
@@ -1706,9 +1709,6 @@ func (s *BaseRoSnapshots) removeOrphanedIdx(superseded []snaptype.FileInfo) {
 
 	orphans := make([]string, 0, len(superseded))
 	for i := range superseded {
-		if !s.HasType(superseded[i].Type) {
-			continue
-		}
 		if _, ok := held[superseded[i].Path]; ok {
 			continue
 		}

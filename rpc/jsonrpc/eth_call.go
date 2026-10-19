@@ -1056,6 +1056,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	// otherwise the returned tracer seeds the next iteration.
 	step := func(prevTracer *logger.AccessListTracer) (*accessListResult, *logger.AccessListTracer, error) {
 		ibs.Reset()
+		transactions.VersionedCallState(ibs)
 
 		// Override the fields of specified contracts before execution. Override
 		// edits the precompile set it is given, so each iteration starts fresh.

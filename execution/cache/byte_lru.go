@@ -91,7 +91,11 @@ func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, 
 	b.limit.Store(floor)
 	b.ceiling.Store(b.maxBytes)
 	b.c = newOtter(floor, weigh, func(e otter.DeletionEvent[uint64, V]) {
-		ev.resident.Add(-weigh(e.Key, e.Value))
+		// A replacement is refunded by Add, synchronously with the Set that
+		// displaced the value; this path can run later, off the writer.
+		if e.Cause != otter.CauseReplacement {
+			ev.resident.Add(-weigh(e.Key, e.Value))
+		}
 		if fn := ev.onEvict.Load(); fn != nil {
 			(*fn)(e.Key, e.Value)
 		}
@@ -121,10 +125,8 @@ func newOtter[V any](maxWeight int64, weigh func(uint64, V) int64, onDeletion fu
 func (b *ByteLRU[V]) Get(key uint64) (V, bool) { return b.c.GetIfPresent(key) }
 
 // Add reports that the value could be offered, not that it is resident: a
-// W-TinyLFU rejection also returns true. False means it was not taken -- too
-// big for the whole budget, or the key is already there -- and onEvict never
-// fires for it, so the caller must refund its charge. Replacing a live key is
-// left to Remove+Add.
+// W-TinyLFU rejection also returns true. False means it was too big for the
+// whole budget, and no deletion fires for it.
 func (b *ByteLRU[V]) Add(key uint64, value V) bool {
 	w := b.weigh(key, value)
 	if w > b.maxBytes {
@@ -133,13 +135,12 @@ func (b *ByteLRU[V]) Add(key uint64, value V) bool {
 	if lim := b.limit.Load(); b.resident.Load()+w > lim && lim < b.ceiling.Load() {
 		b.grow(w)
 	}
-	b.resident.Add(w)
-	// Never Set over a live key: otter loses a node Set before the key's first
-	// write drains, and counts its weight forever. https://github.com/maypok86/otter/pull/189
-	if _, added := b.c.SetIfAbsent(key, value); !added {
-		b.resident.Add(-w)
-		return false
+	// Set returns the displaced value for a present key, so the charge is the net change.
+	prev, inserted := b.c.Set(key, value)
+	if !inserted {
+		w -= b.weigh(key, prev)
 	}
+	b.resident.Add(w)
 	return true
 }
 

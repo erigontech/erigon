@@ -94,7 +94,7 @@ func TestOnBlockYieldsForkChoiceLockDuringNewPayload(t *testing.T) {
 
 	tickDone := make(chan struct{})
 	go func() {
-		store.OnTick(48)
+		store.OnTick(48 * 1000)
 		close(tickDone)
 	}()
 	awaitSignal(t, tickDone, "OnTick to acquire the fork-choice lock while NewPayload is blocked")
@@ -673,7 +673,7 @@ func TestNewPayloadChecksAdmissionOnlyAfterWinningTheToken(t *testing.T) {
 
 	select {
 	case err := <-done:
-		require.ErrorIs(t, err, errPayloadValidationAdmission)
+		require.ErrorIs(t, err, ErrPayloadValidationInterrupted)
 	case <-time.After(lockScopeTimeout):
 		t.Fatal("the caller did not return after cancellation")
 	}

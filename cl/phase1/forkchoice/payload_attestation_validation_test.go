@@ -126,7 +126,7 @@ func TestApplyValidatedPayloadAttestationInvalidatesGloasHeadCache(t *testing.T)
 		headHash:          common.HexToHash("0xbeef"),
 		headPayloadStatus: cltypes.PayloadStatusFull,
 	}
-	f.time.Store(f.beaconCfg.SecondsPerSlot)
+	f.timeMs.Store(f.beaconCfg.SecondsPerSlot * 1000)
 
 	err := f.applyValidatedPayloadAttestation(
 		42,
@@ -148,7 +148,7 @@ func TestCurrentSlotPayloadVotesInvalidateHeadAtSlotBoundary(t *testing.T) {
 		headHash:          root,
 		headPayloadStatus: cltypes.PayloadStatusFull,
 	}
-	f.time.Store(8 * f.beaconCfg.SecondsPerSlot)
+	f.timeMs.Store(8 * f.beaconCfg.SecondsPerSlot * 1000)
 	data := &cltypes.PayloadAttestationData{Slot: 8, PayloadPresent: true, BlobDataAvailable: true}
 
 	require.NoError(t, f.applyValidatedPayloadAttestation(42, []int{7}, data, root, false))
@@ -158,7 +158,7 @@ func TestCurrentSlotPayloadVotesInvalidateHeadAtSlotBoundary(t *testing.T) {
 	require.Equal(t, int8(1), f.payloadTimelinessVoteValue(root)[7])
 	require.Equal(t, int8(1), f.payloadDataAvailabilityVoteValue(root)[7])
 
-	f.OnTick(9 * f.beaconCfg.SecondsPerSlot)
+	f.OnTick(9 * f.beaconCfg.SecondsPerSlot * 1000)
 
 	require.Equal(t, common.Hash{}, f.headHash, "the next slot must resolve its head using the recorded PTC votes")
 	require.Equal(t, cltypes.PayloadStatusPending, f.headPayloadStatus)
@@ -173,7 +173,7 @@ func TestApplyValidatedPayloadAttestationKeepsHeadSnapshotConsistent(t *testing.
 		headHash:          root,
 		headPayloadStatus: cltypes.PayloadStatusFull,
 	}
-	f.time.Store(f.beaconCfg.SecondsPerSlot)
+	f.timeMs.Store(f.beaconCfg.SecondsPerSlot * 1000)
 	oldVotes := [clparams.PtcSize]int8{7: 1}
 	f.payloadTimelinessVote.Store(root, oldVotes)
 	f.payloadDataAvailabilityVote.Store(root, oldVotes)

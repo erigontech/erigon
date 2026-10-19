@@ -128,6 +128,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		return err
 	}
 	defer ibs.Close()
+	transactions.VersionedCallState(ibs)
 
 	var precompiles vm.PrecompiledContracts
 	if config.BlockOverrides != nil {
@@ -146,6 +147,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	stream.WriteArrayStart()
 
 	txns := block.Transactions()
+	firstTxIndex := ibs.TxnIndex()
 
 	var gasUsed protocol.GasUsed
 	for txnIndex, txn := range txns {
@@ -158,7 +160,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-		ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
+		ibs.SetTxContext(blockCtx.BlockNumber, firstTxIndex+txnIndex)
 
 		// A transaction's error is answered inside its own object; the block trace goes on.
 		_ = rpc.WriteFieldOrError(stream, "result", func(s *jsonstream.Stream) error {
@@ -178,7 +180,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			if traceErr != nil {
 				return traceErr
 			}
-			return ibs.FinalizeTx(rules, state.NewNoopWriter())
+			return ethapi.FinalizeCallTx(ibs, rules)
 		})
 
 		stream.WriteObjectEnd()
@@ -259,6 +261,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		return err
 	}
 	defer ibs.Close()
+	transactions.VersionedCallState(ibs)
 
 	// The state is built from history at txnIndex, so the earlier transactions of
 	// the block never ran and the log counter they left has to be handed in.
@@ -278,9 +281,6 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		if config.StateOverrides != nil {
 			rules = blockCtx.Rules(chainConfig)
 			precompiles = vm.ActivePrecompiledContracts(rules)
-			if err := config.StateOverrides.Override(ibs, precompiles, rules); err != nil {
-				return err
-			}
 		}
 	}
 
@@ -289,6 +289,12 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		return err
 	}
 	txCtx.TxHash = hash
+	// The overrides take the transaction's index, so the transaction runs after them.
+	if config != nil && config.StateOverrides != nil {
+		if err := config.StateOverrides.Override(ibs, precompiles, rules); err != nil {
+			return err
+		}
+	}
 
 	// Trace the transaction and return
 	_, err = transactions.TraceTx(ctx, engine, block.Transactions()[txnIndex], msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, precompiles)
@@ -354,6 +360,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 	}
 	ibs := state.New(stateReader)
 	defer ibs.Close()
+	transactions.VersionedCallState(ibs)
 
 	baseFee := overrideBaseFee(config, header.BaseFee)
 
@@ -474,6 +481,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 	ibs := state.New(stateReader)
 	defer ibs.Close()
+	transactions.VersionedCallState(ibs)
 
 	getHash := transactions.MakeBlockHashProvider(ctx, tx, api._blockReader, overrideBlockHash)
 
@@ -499,6 +507,8 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	}
 
 	stream.WriteArrayStart()
+	// Every transaction of the request gets the next index, so each sees the ones before it.
+	txIndex := ibs.TxnIndex()
 	for _, bundle := range bundles {
 		stream.WriteArrayStart()
 		// first change block context
@@ -522,13 +532,16 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 			}
 			txCtx = protocol.NewEVMTxContext(msg)
 			ibs := evm.IntraBlockState()
-			ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
+			ibs.SetTxContext(blockCtx.BlockNumber, txIndex)
+			txIndex++
 			_, err = transactions.TraceTx(ctx, api.engine(), transaction, msg, blockCtx, txCtx, nil, common.Hash{}, txnIndex, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout, precompiles)
 			if err != nil {
 				return err
 			}
 
-			_ = ibs.FinalizeTx(rules, state.NewNoopWriter())
+			if err := ethapi.FinalizeCallTx(ibs, rules); err != nil {
+				return err
+			}
 
 		}
 		stream.WriteArrayEnd()

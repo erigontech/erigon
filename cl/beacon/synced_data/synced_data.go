@@ -180,6 +180,17 @@ func (s *SyncedDataManager) ViewHeadState(fn ViewHeadStateFn) error {
 	return nil
 }
 
+func (s *SyncedDataManager) ActiveValidatorCount() uint64 {
+	var count uint64
+	if err := s.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		count = uint64(len(headState.GetActiveValidatorsIndices(state.Epoch(headState))))
+		return nil
+	}); err != nil {
+		return 0
+	}
+	return count
+}
+
 func (s *SyncedDataManager) ViewHeadStateWithIdentity(fn ViewHeadStateWithIdentityFn) error {
 	return s.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		head := s.stateHead.Load()
