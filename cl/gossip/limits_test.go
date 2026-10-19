@@ -65,3 +65,9 @@ func TestMaxUncompressedSizeMatchesLargestEncoding(t *testing.T) {
 		require.Equal(t, net.GossipMaxSize, gossip.MaxUncompressedSize(topic, cfg, &net), topic)
 	}
 }
+
+func TestMaxUncompressedSizeIsCappedByNetworkLimit(t *testing.T) {
+	net := clparams.NetworkConfigs[chainspec.MainnetChainID]
+	net.GossipMaxSize = 1024
+	require.Equal(t, uint64(1024), gossip.MaxUncompressedSize(gossip.TopicNameBeaconAggregateAndProof, &clparams.MainnetBeaconConfig, &net))
+}

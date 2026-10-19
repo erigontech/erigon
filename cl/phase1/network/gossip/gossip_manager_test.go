@@ -1810,16 +1810,19 @@ func TestGossipManager(t *testing.T) {
 
 func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_RejectsPayloadAboveTopicBound() {
 	mainnetNetwork := clparams.NetworkConfigs[chainspec.MainnetChainID]
-	s.gm.beaconConfig, s.gm.networkConfig = &clparams.MainnetBeaconConfig, &mainnetNetwork
-	bound := gossipnames.MaxUncompressedSize(gossipnames.TopicNameBeaconAggregateAndProof, s.gm.beaconConfig, s.gm.networkConfig)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	gm := NewGossipManager(ctx, s.mockP2P, &clparams.MainnetBeaconConfig, &mainnetNetwork, s.mockClock, false, 0,
+		datasize.ByteSize(1024*1024), datasize.ByteSize(1024*1024), false)
+	bound := gossipnames.MaxUncompressedSize(gossipnames.TopicNameBeaconAggregateAndProof, gm.beaconConfig, gm.networkConfig)
 	topic := "/eth2/abcd1234/beacon_aggregate_and_proof/ssz_snappy"
 	decoded := 0
 	service := &mockService{decodeFunc: func(peer.ID, []byte, clparams.StateVersion) (any, error) {
 		decoded++
 		return "decoded_message", nil
 	}}
-	validator := s.gm.newPubsubValidator(service)
-	ctx, pid := context.Background(), peer.ID("test-peer")
+	validator := gm.newPubsubValidator(service)
+	pid := peer.ID("test-peer")
 
 	s.Equal(pubsub.ValidationAccept, validator(ctx, pid, createMockMessage(topic, utils.CompressSnappy(make([]byte, bound)))))
 	s.Equal(1, decoded)
