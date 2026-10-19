@@ -103,22 +103,31 @@ func TestSyncContributionPoolAggregatesTheLastSlotOfAPeriodBeforeItsBlock(t *tes
 	require.Equal(t, msg.Signature, contribution.Signature)
 }
 
-// The pool keeps contributions for the head's slot and the slot after it: older ones can no longer
-// be aggregated, and a stalled head must not let later slots pile up.
-func TestSyncContributionPoolKeepsTheHeadSlotAndTheNextOne(t *testing.T) {
+// The pool keeps contributions from the head's slot to one epoch after it: after empty slots the
+// next proposer and aggregators read slots well past the head, and older ones can no longer be
+// aggregated. A stalled head still bounds what is kept.
+func TestSyncContributionPoolKeepsOneEpochFromTheHead(t *testing.T) {
 	_, msgs, s := getTestCommitteesMessages(1)
 	const headSlot = 10
 	require.NoError(t, s.SetSlot(headSlot))
+	epoch := s.BeaconConfig().SlotsPerEpoch
 	pool := NewSyncContributionPool(s.BeaconConfig())
-	for _, slot := range []uint64{headSlot - 1, headSlot, headSlot + 1, headSlot + 2} {
+	kept := map[uint64]bool{
+		headSlot - 1:         false,
+		headSlot:             true,
+		headSlot + 2:         true, // two empty slots after the head
+		headSlot + epoch:     true,
+		headSlot + epoch + 1: false,
+	}
+	for slot := range kept {
 		msg := msgs[0]
 		msg.Slot = slot
 		require.NoError(t, pool.AddSyncCommitteeMessage(s, 0, &msg))
 	}
 
-	for slot, kept := range map[uint64]bool{headSlot - 1: false, headSlot: true, headSlot + 1: true, headSlot + 2: false} {
+	for slot, want := range kept {
 		contribution := pool.GetSyncContribution(slot, 0, testHash)
-		if kept {
+		if want {
 			require.Equal(t, msgs[0].Signature, contribution.Signature, "slot %d", slot)
 		} else {
 			require.Equal(t, common.Bytes96(bls.InfiniteSignature), contribution.Signature, "slot %d", slot)

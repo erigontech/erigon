@@ -649,10 +649,8 @@ func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWri
 			return
 		}
 
-		// A contribution whose committee the head state does not hold is ignored before its signatures are
-		// checked, so it must not be published.
-		if err = a.syncContributionAndProofsService.ProcessMessage(r.Context(), nil, &signedContributionAndProofWithGossipData); err != nil &&
-			(!errors.Is(err, services.ErrIgnore) || errors.Is(err, state.ErrSyncCommitteeNotInState)) {
+		// The service ignores a contribution before verifying it, so only an accepted one is published.
+		if err = a.syncContributionAndProofsService.ProcessMessage(r.Context(), nil, &signedContributionAndProofWithGossipData); err != nil {
 			log.Warn("[Beacon REST] failed to process sync contribution", "err", err)
 			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 			continue
