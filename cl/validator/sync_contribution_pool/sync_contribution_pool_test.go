@@ -79,3 +79,49 @@ func TestSyncContributionPool(t *testing.T) {
 	contribution.SubcommitteeIndex = 1
 	require.NoError(t, pool.AddSyncContribution(s, contribution))
 }
+
+// The next committee signs for the last slot of a period; the head may not have imported that slot yet.
+func TestSyncContributionPoolAggregatesTheLastSlotOfAPeriodBeforeItsBlock(t *testing.T) {
+	_, msgs, s := getTestCommitteesMessages(1)
+	cfg := s.BeaconConfig()
+	nextPeriod := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
+	require.NoError(t, s.SetSlot(nextPeriod-2))
+	// Move the member from the current committee to the next one.
+	current, next := s.CurrentSyncCommittee().Copy(), s.NextSyncCommittee().Copy()
+	currentKeys, nextKeys := current.GetCommittee(), next.GetCommittee()
+	nextKeys[0], currentKeys[0] = currentKeys[0], common.Bytes48{}
+	current.SetCommittee(currentKeys)
+	next.SetCommittee(nextKeys)
+	require.NoError(t, s.SetCurrentSyncCommittee(current))
+	require.NoError(t, s.SetNextSyncCommittee(next))
+
+	msg := msgs[0]
+	msg.Slot = nextPeriod - 1
+	pool := NewSyncContributionPool(cfg)
+	require.NoError(t, pool.AddSyncCommitteeMessage(s, 0, &msg))
+	contribution := pool.GetSyncContribution(msg.Slot, 0, testHash)
+	require.Equal(t, msg.Signature, contribution.Signature)
+}
+
+// The pool keeps contributions for the head's slot and the slot after it: older ones can no longer
+// be aggregated, and a stalled head must not let later slots pile up.
+func TestSyncContributionPoolKeepsTheHeadSlotAndTheNextOne(t *testing.T) {
+	_, msgs, s := getTestCommitteesMessages(1)
+	const headSlot = 10
+	require.NoError(t, s.SetSlot(headSlot))
+	pool := NewSyncContributionPool(s.BeaconConfig())
+	for _, slot := range []uint64{headSlot - 1, headSlot, headSlot + 1, headSlot + 2} {
+		msg := msgs[0]
+		msg.Slot = slot
+		require.NoError(t, pool.AddSyncCommitteeMessage(s, 0, &msg))
+	}
+
+	for slot, kept := range map[uint64]bool{headSlot - 1: false, headSlot: true, headSlot + 1: true, headSlot + 2: false} {
+		contribution := pool.GetSyncContribution(slot, 0, testHash)
+		if kept {
+			require.Equal(t, msgs[0].Signature, contribution.Signature, "slot %d", slot)
+		} else {
+			require.Equal(t, common.Bytes96(bls.InfiniteSignature), contribution.Signature, "slot %d", slot)
+		}
+	}
+}
