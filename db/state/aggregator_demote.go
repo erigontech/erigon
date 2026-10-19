@@ -115,6 +115,9 @@ func (a *Aggregator) setDemoteColdDir(coldDir string) error {
 	return nil
 }
 
+// disableColdMergePause gives cold merges a gate that is never paused; the demotion copy keeps the shared one.
+func (a *Aggregator) disableColdMergePause() { a.d[kv.CommitmentDomain].coldIO = newColdIOGate() }
+
 func (a *Aggregator) dirtyDomainFile(d *Domain, from, to kv.Step) (item *FilesItem, path string, wordCount int, err error) {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()

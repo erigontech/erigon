@@ -178,3 +178,14 @@ func TestAggregatorColdMergeWaitsWhilePaused(t *testing.T) {
 	require.NoError(t, <-done)
 	require.True(t, isSymlink(t, domainFileBySuffix(t, agg.Dirs().SnapDomain, "commitment.0-4.kv")))
 }
+
+func TestAggregatorColdMergeIgnoresPauseWhenDisabled(t *testing.T) {
+	t.Parallel()
+	agg := testAggWithColdCommitment(t, []testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}}, 4)
+	agg.disableColdMergePause()
+	agg.coldIO.Pause()
+	defer agg.coldIO.Resume()
+
+	mergeAll(t, agg, 4*agg.StepSize())
+	require.True(t, isSymlink(t, domainFileBySuffix(t, agg.Dirs().SnapDomain, "commitment.0-4.kv")))
+}

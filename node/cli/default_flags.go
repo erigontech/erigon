@@ -274,6 +274,7 @@ var DefaultFlags = []cli.Flag{
 	&TieringColdDirFlag,
 	&TieringCommitmentHotMergeStepsFlag,
 	&TieringDemoteFlag,
+	&TieringColdMergePauseFlag,
 	&TieringAllowSameFSFlag,
 	&SyncLoopBreakAfterFlag,
 	&SyncParallelStateFlushing,

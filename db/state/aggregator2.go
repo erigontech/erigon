@@ -26,6 +26,7 @@ type AggOpts struct { //nolint:gocritic
 	erigondbDomainStepsInFrozenFile uint64
 	commitmentHotMaxMergeSteps      uint64
 	demoteColdDir                   string
+	coldMergeNoPause                bool
 	referencesInCommitmentBranches  *bool // nil = leave global schema default untouched
 
 	genSaltIfNeed       bool
@@ -95,6 +96,9 @@ func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:go
 			a.Close()
 			return nil, err
 		}
+		if opts.coldMergeNoPause {
+			a.disableColdMergePause()
+		}
 	}
 	if err := a.checkCommitmentTiering(); err != nil {
 		a.Close()
@@ -136,6 +140,11 @@ func (opts AggOpts) CommitmentHotMaxMergeSteps(steps uint64) AggOpts { //nolint:
 }
 
 // DemoteColdDir enables demotion to coldDir: Open recovers interrupted demotions and commitment references are refused.
+func (opts AggOpts) ColdMergePause(pause bool) AggOpts { //nolint:gocritic
+	opts.coldMergeNoPause = !pause
+	return opts
+}
+
 func (opts AggOpts) DemoteColdDir(coldDir string) AggOpts { //nolint:gocritic
 	opts.demoteColdDir = coldDir
 	return opts
