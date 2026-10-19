@@ -3,14 +3,15 @@ participants_matrix:
     - el_type: erigon
       el_image: test/erigon:current
       el_log_level: "debug"
-      count: 2
   cl:
     - cl_type: teku
       cl_image: consensys/teku:26.4.0
       cl_log_level: "debug"
+      count: 2
     - cl_type: lighthouse
       cl_image: sigp/lighthouse:v7.0.1
       cl_log_level: "debug"
+      count: 2
 
 network_params:
   num_validator_keys_per_node: 32
