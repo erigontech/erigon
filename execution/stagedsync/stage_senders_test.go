@@ -17,8 +17,12 @@
 package stagedsync_test
 
 import (
+	"crypto/ecdsa"
+	"fmt"
+	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -30,9 +34,12 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -184,4 +191,50 @@ func TestSenders(t *testing.T) {
 		require.NoError(err)
 		assert.Len(t, txs, 3)
 	}
+}
+
+// Distinct senders paying one recipient form one read-modify-write chain:
+// every speculative run conflicts, and validation work must stay linear in the chain length.
+func TestParallelTransfersToOneRecipientValidateLinearly(t *testing.T) {
+	const txCount = 1000
+	keys := make([]*ecdsa.PrivateKey, txCount)
+	alloc := types.GenesisAlloc{}
+	for i := range keys {
+		key, err := crypto.HexToECDSA(fmt.Sprintf("%064x", i+1))
+		require.NoError(t, err)
+		keys[i] = key
+		alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(22), nil)}
+	}
+	config := chain.AllProtocolChanges.Copy()
+	config.AmsterdamTime = nil
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(&types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}),
+		execmoduletester.WithKey(keys[0]),
+		execmoduletester.WithExecWorkerCount(2))
+
+	recipient := common.HexToAddress("0x000000000000000000000000000000000000b0b0")
+	signer := types.LatestSignerForChainID(nil)
+	chainPack, err := m.GenerateChain(1, func(_ int, bg *blockgen.BlockGen) {
+		bg.SetCoinbase(common.HexToAddress("0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"))
+		gasPrice := new(uint256.Int).AddUint64(bg.GetHeader().BaseFee, 3)
+		for _, key := range keys {
+			txn, err := types.SignTx(types.NewTransaction(0, recipient, uint256.NewInt(1), params.TxGas, gasPrice, nil), *signer, key)
+			require.NoError(t, err)
+			bg.AddTx(txn)
+		}
+	})
+	require.NoError(t, err)
+	block := chainPack.Blocks[0]
+	require.Len(t, block.Transactions(), txCount)
+
+	before := stagedsync.ParallelValidationsTotal()
+	status, err := m.InsertBlocks(t.Context(), []*types.Block{block})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	result, err := m.ValidateChain(t.Context(), block.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
+
+	validations := stagedsync.ParallelValidationsTotal() - before
+	require.LessOrEqual(t, validations, int64(3*txCount), "validations per block must stay linear in the transaction count")
 }

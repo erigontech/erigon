@@ -64,20 +64,21 @@ func MarshalReceipt(
 	signed bool,
 	withBlockTimestamp bool,
 ) *RPCReceipt {
-	var chainId *uint256.Int
-	switch t := txn.(type) {
-	case *types.LegacyTx:
-		if t.Protected() {
-			chainId, _ = types.DeriveChainId(&t.V)
-		}
-	default:
-		chainId = txn.GetChainID()
-	}
-
 	var from *common.Address
 	if signed {
-		signer := types.LatestSignerForChainID(chainId)
-		sender, _ := txn.Sender(*signer)
+		sender, ok := txn.GetSender()
+		if !ok || sender.IsZero() {
+			var chainID *uint256.Int
+			switch t := txn.(type) {
+			case *types.LegacyTx:
+				if t.Protected() {
+					chainID, _ = types.DeriveChainId(&t.V)
+				}
+			default:
+				chainID = txn.GetChainID()
+			}
+			sender, _ = txn.Sender(*types.LatestSignerForChainID(chainID))
+		}
 		address := sender.Value()
 		from = &address
 	}

@@ -659,6 +659,9 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 
 type propertyCheck func(*parallelExecutor) error
 
+// ParallelValidationsTotal exposes the parallel executor's validation count to stagedsync_test.
+func ParallelValidationsTotal() int64 { return validationsTotal.Load() }
+
 func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.Task, profile bool, check propertyCheck, metadata bool) (result *blockResult, err error) {
 	if len(tasks) == 0 {
 		return nil, nil
@@ -2286,8 +2289,13 @@ func TestFrontierRetryDispatchedBeforeBatchTail(t *testing.T) {
 	res, err := be.nextResult(context.Background(), pe, results[0], roTx)
 
 	require.NoError(t, err)
-	require.NotNil(t, res)
-	require.ErrorContains(t, res.Err, "too many validator-invalid retries")
-	require.True(t, be.execTasks.checkPending(2), "frontier dispatch ran past the frontier")
-	require.Equal(t, 1, be.cntExec, "frontier tx 0 must be dispatched before the tail's retry limit ends the batch")
+	require.Nil(t, res)
+	require.Equal(t, 1, be.cntTotalValidations, "validation must stop at the first invalid result")
+	require.Equal(t, 3, be.txIncarnations[1], "the unvalidated tail must keep its incarnation")
+	require.True(t, be.validateTasks.checkPending(1), "the tail must remain pending validation")
+	for _, index := range []int{0, 2} {
+		tv, ok := pe.in.Next(t.Context())
+		require.True(t, ok)
+		require.Equal(t, index, tv.(*taskVersion).index, "the frontier retry must be dispatched before the tail")
+	}
 }

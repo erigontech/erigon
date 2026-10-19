@@ -2,133 +2,226 @@ package stages
 
 import (
 	"context"
-	"errors"
+	"math"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
+	network2 "github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/validator/attestation_producer"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
-type checkpointLoadForkGraph struct {
-	fork_graph.ForkGraph
-	calls atomic.Int32
-	err   error
-}
-
-func (g *checkpointLoadForkGraph) GetState(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
-	g.calls.Add(1)
-	if g.err != nil {
-		return nil, g.err
-	}
-	return g.ForkGraph.GetState(root, alwaysCopy)
-}
-
-type checkpointLoadSyncedData struct {
+type pausingHeadView struct {
 	synced_data.SyncedData
-	beforeView func()
-	afterView  func()
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *pausingHeadView) ViewHeadState(fn synced_data.ViewHeadStateFn) error {
+	return s.SyncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		close(s.entered)
+		<-s.release
+		return fn(headState)
+	})
+}
+
+type statusSentinel struct {
+	sentinelproto.SentinelClient
+}
+
+func (*statusSentinel) SetStatus(context.Context, *sentinelproto.Status, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	return &sentinelproto.EmptyMessage{}, nil
+}
+
+func (*statusSentinel) PeersInfo(context.Context, *sentinelproto.PeersInfoRequest, ...grpc.CallOption) (*sentinelproto.PeersInfoResponse, error) {
+	return &sentinelproto.PeersInfoResponse{}, nil
+}
+
+type noOpAttestationDataProducer struct {
+	attestation_producer.AttestationDataProducer
+}
+
+func (noOpAttestationDataProducer) ProduceAndCacheAttestationData(kv.Tx, *state.CachingBeaconState, common.Hash, uint64) (solid.AttestationData, error) {
+	return solid.AttestationData{}, nil
+}
+
+type lockOrderFixture struct {
+	cfg        *Cfg
+	syncedData *synced_data.SyncedDataManager
 	headState  *state.CachingBeaconState
-	err        error
+	headRoot   common.Hash
+	view       *pausingHeadView
 }
 
-func (s *checkpointLoadSyncedData) ViewHeadState(fn synced_data.ViewHeadStateFn) error {
-	s.beforeView()
-	if s.headState != nil {
-		if err := fn(s.headState); err != nil {
-			return err
-		}
-		s.afterView()
+func newLockOrderFixture(t *testing.T, slot uint64) lockOrderFixture {
+	t.Helper()
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.GloasForkEpoch = math.MaxUint64
+	genesisTime := uint64(time.Now().Unix()) - slot*beaconCfg.SecondsPerSlot
+	clock := eth_clock.NewEthereumClock(genesisTime, common.Hash{}, &beaconCfg)
+	headState := state.New(&beaconCfg)
+	headState.SetGenesisTime(genesisTime)
+	require.NoError(t, headState.SetSlot(slot))
+	headState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: slot})
+
+	manager := synced_data.NewSyncedDataManager(&beaconCfg, true)
+	emitter := beaconevents.NewEventEmitter()
+	graph, err := fork_graph.NewForkGraphDisk(
+		headState,
+		manager,
+		afero.NewMemMapFs(),
+		beacon_router_configuration.RouterConfiguration{},
+	)
+	require.NoError(t, err)
+	store, err := forkchoice.NewForkChoiceStore(
+		clock,
+		headState,
+		nil,
+		pool.NewOperationsPool(&beaconCfg),
+		graph,
+		emitter,
+		manager,
+		nil,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(),
+		validator_params.NewValidatorParams(),
+		false,
+		nil,
+	)
+	require.NoError(t, err)
+	headRoot := graph.AnchorRoot()
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(headState, headRoot))
+
+	viewEntered := make(chan struct{})
+	releaseView := make(chan struct{})
+	pausedView := &pausingHeadView{
+		SyncedData: manager,
+		entered:    viewEntered,
+		release:    releaseView,
 	}
-	return s.err
+	return lockOrderFixture{
+		cfg: &Cfg{
+			rpc:        rpc.NewBeaconRpcP2P(t.Context(), &statusSentinel{}, &beaconCfg, clock, headState),
+			ethClock:   clock,
+			beaconCfg:  &beaconCfg,
+			forkChoice: store,
+			syncedData: pausedView,
+			emitter:    emitter,
+		},
+		syncedData: manager,
+		headState:  headState,
+		headRoot:   headRoot,
+		view:       pausedView,
+	}
 }
 
-func TestComputeForkChoiceLoadsJustifiedStateBeforeViewingHeadState(t *testing.T) {
-	loadErr := errors.New("checkpoint state unavailable")
-	for _, test := range []struct {
-		name    string
-		loadErr error
-		useHead bool
-	}{
-		{name: "load succeeds", useHead: true},
-		{name: "load fails", loadErr: loadErr},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			beaconCfg := clparams.MainnetBeaconConfig
-			genesisTime := uint64(time.Now().Unix())
-			anchorState := state.New(&beaconCfg)
-			anchorState.SetGenesisTime(genesisTime)
-			baseGraph, err := fork_graph.NewForkGraphDisk(
-				anchorState,
-				nil,
-				afero.NewMemMapFs(),
-				beacon_router_configuration.RouterConfiguration{},
-			)
-			require.NoError(t, err)
-			graph := &checkpointLoadForkGraph{ForkGraph: baseGraph, err: test.loadErr}
-			store, err := forkchoice.NewForkChoiceStore(
-				eth_clock.NewEthereumClock(genesisTime, common.Hash{}, &beaconCfg),
-				anchorState,
-				nil,
-				pool.NewOperationsPool(&beaconCfg),
-				graph,
-				beaconevents.NewEventEmitter(),
-				nil,
-				nil,
-				public_keys_registry.NewInMemoryPublicKeysRegistry(),
-				validator_params.NewValidatorParams(),
-				false,
-				nil,
-			)
-			require.NoError(t, err)
-			errViewHeadState := errors.New("view head state")
-			var headState *state.CachingBeaconState
-			if test.useHead {
-				headState = anchorState
-			}
-			cfg := &Cfg{
-				beaconCfg:  &beaconCfg,
-				ethClock:   eth_clock.NewEthereumClock(genesisTime, common.Hash{}, &beaconCfg),
-				forkChoice: store,
-				syncedData: &checkpointLoadSyncedData{
-					beforeView: func() {
-						require.Equal(t, int32(1), graph.calls.Load(), "justified checkpoint state load must finish before ViewHeadState")
-					},
-					afterView: func() {
-						require.Equal(t, int32(1), graph.calls.Load(), "GetHead must use the preloaded checkpoint state")
-					},
-					headState: headState,
-					err:       errViewHeadState,
-				},
-			}
-
-			_, _, err = computeAndNotifyServicesOfNewForkChoice(t.Context(), nil, cfg)
-
-			require.ErrorIs(t, err, errViewHeadState)
-		})
+func requireLockOrderOperationCompletes(t *testing.T, fixture lockOrderFixture, operationDone <-chan error) {
+	t.Helper()
+	select {
+	case err := <-operationDone:
+		// An operation that never takes the synced-data lock cannot invert the order.
+		require.NoError(t, err)
+		return
+	case <-fixture.view.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("operation neither completed nor entered the synced head-state view")
 	}
+
+	writerDone := make(chan error, 1)
+	go func() {
+		writerDone <- fixture.syncedData.OnHeadStateWithBlockRoot(fixture.headState, fixture.headRoot)
+	}()
+	time.Sleep(250 * time.Millisecond)
+
+	slashingDone := make(chan error, 1)
+	go func() {
+		slashingDone <- fixture.cfg.forkChoice.OnAttesterSlashing(cltypes.NewAttesterSlashing(clparams.Phase0Version), true)
+	}()
+	select {
+	case err := <-slashingDone:
+		t.Fatalf("lock-order setup failed: attester slashing completed before the queued writer: %v", err)
+	case <-time.After(250 * time.Millisecond):
+	}
+
+	close(fixture.view.release)
+	select {
+	case err := <-operationDone:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("operation deadlocked: synced-data read lock waited for fork choice while fork choice waited behind a queued synced-data writer")
+	}
+	require.NoError(t, <-writerDone)
+	<-slashingDone
+}
+
+func TestComputeForkChoiceDoesNotInvertSyncedDataLockOrder(t *testing.T) {
+	fixture := newLockOrderFixture(t, 0)
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), fixture.cfg)
+		done <- err
+	}()
+
+	requireLockOrderOperationCompletes(t, fixture, done)
+}
+
+func TestComputeForkChoiceFallsBackWithoutSyncedHeadState(t *testing.T) {
+	fixture := newLockOrderFixture(t, 0)
+	fixture.syncedData.UnsetHeadState()
+
+	headSlot, headRoot, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), fixture.cfg)
+
+	require.NoError(t, err)
+	require.Equal(t, fixture.headState.Slot(), headSlot)
+	require.Equal(t, fixture.headRoot, headRoot)
+}
+
+func TestPostForkchoiceOperationsDoesNotInvertSyncedDataLockOrder(t *testing.T) {
+	fixture := newLockOrderFixture(t, clparams.MainnetBeaconConfig.SlotsPerEpoch*5)
+	fixture.cfg.blobDownloader = &network2.BlobHistoryDownloader{}
+	fixture.cfg.attestationDataProducer = noOpAttestationDataProducer{}
+	fixture.cfg.dirs = datadir.New(t.TempDir())
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+	done := make(chan error, 1)
+	go func() {
+		done <- postForkchoiceOperations(tx, log.New(), fixture.cfg, fixture.headState.Slot(), fixture.headRoot)
+	}()
+
+	requireLockOrderOperationCompletes(t, fixture, done)
+	_, err = checkpoint_sync.ReadLocalFinalizedState(fixture.cfg.dirs, fixture.cfg.beaconCfg)
+	require.NoError(t, err)
 }
 
 func TestPayloadAttributesUseSepoliaGasLimitScheduleAtGloas(t *testing.T) {
