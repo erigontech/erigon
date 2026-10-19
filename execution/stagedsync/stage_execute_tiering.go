@@ -94,36 +94,28 @@ func reportTiering(ctx context.Context, cfg ExecuteBlockCfg, stepSize uint64, tx
 
 	mxTieringColdBoundaryBlock.SetUint64(boundary)
 	coldDir := cfg.syncCfg.TieringColdDir
-	var commitmentLag tiering.Lag
-	for _, d := range []kv.Domain{kv.CommitmentDomain, kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
-		files, err := tieringFiles(tiering.KVFiles(tx.Debug().DomainFiles(d)))
-		if err != nil {
-			return err
-		}
-		var copyingBytes uint64
-		if d == kv.CommitmentDomain {
-			if copyingBytes, err = tiering.StatCopying(coldDir, files); err != nil {
-				return err
-			}
-		}
-		lag := tiering.ComputeLag(files, boundaryTxNum, coldDir)
-		name := d.String()
-		for reason, u := range map[string]tiering.Usage{"straddling_file": lag.Straddling, "queued": lag.Queued, "copying": lag.Copying} {
-			mxTieringLagFiles.WithLabelValues(name, reason).SetInt(u.Files)
-			mxTieringLagBytes.WithLabelValues(name, reason).SetUint64(u.Bytes)
-			mxTieringLagTxs.WithLabelValues(name, reason).SetUint64(u.Txs)
-		}
-		mxTieringColdResidentFiles.WithLabelValues(name).SetInt(lag.ColdResident.Files)
-		mxTieringColdResidentBytes.WithLabelValues(name).SetUint64(lag.ColdResident.Bytes)
-		mxTieringHDDEndStep.WithLabelValues(name).SetUint64(lag.ColdEnd / stepSize)
-		mxTieringSSDStartStep.WithLabelValues(name).SetUint64(lag.HotStart / stepSize)
-		if d == kv.CommitmentDomain {
-			commitmentLag = lag
-			mxTieringDuplicateBytes.WithLabelValues("copying").SetUint64(copyingBytes)
-			if err := reportCommitmentTiers(ctx, cfg, tx, files, lag, boundary, boundaryTxNum); err != nil {
-				return err
-			}
-		}
+	files, err := tieringFiles(tiering.KVFiles(tx.Debug().DomainFiles(kv.CommitmentDomain)))
+	if err != nil {
+		return err
+	}
+	copyingBytes, err := tiering.StatCopying(coldDir, files)
+	if err != nil {
+		return err
+	}
+	commitmentLag := tiering.ComputeLag(files, boundaryTxNum, coldDir)
+	name := kv.CommitmentDomain.String()
+	for reason, u := range map[string]tiering.Usage{"straddling_file": commitmentLag.Straddling, "queued": commitmentLag.Queued, "copying": commitmentLag.Copying} {
+		mxTieringLagFiles.WithLabelValues(name, reason).SetInt(u.Files)
+		mxTieringLagBytes.WithLabelValues(name, reason).SetUint64(u.Bytes)
+		mxTieringLagTxs.WithLabelValues(name, reason).SetUint64(u.Txs)
+	}
+	mxTieringColdResidentFiles.WithLabelValues(name).SetInt(commitmentLag.ColdResident.Files)
+	mxTieringColdResidentBytes.WithLabelValues(name).SetUint64(commitmentLag.ColdResident.Bytes)
+	mxTieringHDDEndStep.WithLabelValues(name).SetUint64(commitmentLag.ColdEnd / stepSize)
+	mxTieringSSDStartStep.WithLabelValues(name).SetUint64(commitmentLag.HotStart / stepSize)
+	mxTieringDuplicateBytes.WithLabelValues("copying").SetUint64(copyingBytes)
+	if err := reportCommitmentTiers(ctx, cfg, tx, files, commitmentLag, boundary, boundaryTxNum); err != nil {
+		return err
 	}
 
 	if now.Sub(time.Unix(0, tieringLoggedAt.Load())) < 30*time.Second {
