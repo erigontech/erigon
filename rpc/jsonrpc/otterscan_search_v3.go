@@ -66,6 +66,13 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			hasMore = true
 			break
 		}
+		if blockNumChanged {
+			// Require full replay history even when only a system entry survives.
+			// Trace indices can have a different physical start from state history.
+			if err := api.checkBlockHistoryAvailable(ctx, tx, blockNum); err != nil {
+				return nil, nil, false, err
+			}
+		}
 
 		// Avoid reading the same block multiple times; multiple matches in the same block
 		// may be common.
@@ -79,11 +86,6 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 		}
 
 		if mustReadBlock {
-			// Retired trace-index entries are invisible. Checking only the surviving
-			// matches could return a partial page instead of all matches in the block.
-			if err := api.checkBlockHistoryAvailable(ctx, tx, blockNum); err != nil {
-				return nil, nil, false, err
-			}
 			block, err = api.blockByNumberWithSenders(ctx, tx, blockNum)
 			if err != nil {
 				return nil, nil, false, err

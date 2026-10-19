@@ -53,6 +53,7 @@ func (e ErrTxNumsAppendWithGap) Is(err error) bool {
 }
 
 type TxBlockIndex interface {
+	// MaxTxNum accepts a nil cursor; otherwise c must read kv.MaxTxNum.
 	MaxTxNum(ctx context.Context, tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error)
 	BlockNumber(ctx context.Context, tx kv.Tx, txNum uint64) (blockNum uint64, ok bool, err error)
 }

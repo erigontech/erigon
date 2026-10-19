@@ -1712,6 +1712,14 @@ func (t *txBlockIndexWithBlockReader) MaxTxNum(ctx context.Context, tx kv.Tx, c 
 	if ok || r == nil {
 		return
 	}
+	// Only snapshot bodies use canonical txNums. MDBX body IDs also count side forks.
+	if br, local := r.(*BlockReader); local {
+		if _, found := br.viewSingleFile(tx, snaptype2.Bodies, blockNum); !found {
+			return 0, false, nil
+		}
+	} else if frozen := r.FrozenBlocks(); frozen == 0 || blockNum > frozen {
+		return 0, false, nil
+	}
 	b, err := r.CanonicalBodyForStorage(ctx, tx, blockNum)
 	if err != nil {
 		return 0, false, err

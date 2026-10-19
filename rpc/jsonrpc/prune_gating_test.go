@@ -740,6 +740,7 @@ const (
 type prunedHistoryConfig struct {
 	mode                 prune.Mode
 	transactionsPerBlock int
+	generateBlock        func(*execmoduletester.ExecModuleTester, *blockgen.BlockGen)
 	// receiptCache runs the chain with the receipt cache enabled and persisted, the only
 	// source of receipts left once history is retired.
 	receiptCache bool
@@ -767,6 +768,10 @@ func setupPhysicallyPrunedHistory(t *testing.T, cfg prunedHistoryConfig) (pruneG
 
 	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	c, err := m.GenerateChain(prunedHistoryChainLen, func(_ int, block *blockgen.BlockGen) {
+		if cfg.generateBlock != nil {
+			cfg.generateBlock(m, block)
+			return
+		}
 		for range max(1, cfg.transactionsPerBlock) {
 			txn, err := types.SignTx(types.NewTransaction(block.TxNonce(m.Address), common.Address{1},
 				uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *signer, m.Key)

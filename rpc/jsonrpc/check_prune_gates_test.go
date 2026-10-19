@@ -31,6 +31,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -53,6 +54,7 @@ import (
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
@@ -473,17 +475,9 @@ func TestIndexedHistoryGateMatchesReader(t *testing.T) {
 		require.NoError(t, err)
 		require.Less(t, index, lastMaxTxNum-minTxNum, "the index must fit the incorrect fallback bounds")
 		require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
-			return tx.Delete(kv.MaxTxNum, hexutil.EncodeTs(missing.NumberU64()))
-		}))
-		t.Run("body_backed_position", func(t *testing.T) {
-			bodyAPI := newDebugApiForTest(m)
-			bodyAPI.db = historyFloorDB{TemporalRoDB: bodyAPI.db, startTxNum: minTxNum + 3}
-			account, err := bodyAPI.AccountAt(ctx, missing.Hash(), 2, testAddr)
-			require.NoError(t, err, "the body supplies the missing mapping")
-			require.NotNil(t, account)
-			require.EqualValues(t, 2, account.Nonce)
-		})
-		require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+			if err := tx.Delete(kv.MaxTxNum, hexutil.EncodeTs(missing.NumberU64())); err != nil {
+				return err
+			}
 			rawdb.DeleteBody(tx, missing.Hash(), missing.NumberU64())
 			return nil
 		}))
@@ -496,12 +490,63 @@ func TestIndexedHistoryGateMatchesReader(t *testing.T) {
 			_, err := api.AccountAt(ctx, block.Hash(), 0, testAddr)
 			require.ErrorIs(t, err, state.ErrPruned, "a missing preceding mapping must not lower the replay floor")
 		})
+		t.Run("missing_predecessor_at_index", func(t *testing.T) {
+			_, err := api.AccountAt(ctx, block.Hash(), 9, testAddr)
+			require.ErrorIs(t, err, state.ErrPruned, "an unknown minimum must not be treated as txNum zero")
+		})
 		t.Run("post_state", func(t *testing.T) {
 			ref := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(missing.NumberU64()))
 			_, err := prunedAPIs.eth.GetBalance(ctx, testAddr, &ref)
 			require.ErrorIs(t, err, state.ErrPruned, "a missing mapping must not lower the post-state floor")
 		})
 	})
+}
+
+func TestIndexedHistoryGateRejectsMDBXBodySequence(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	m := execmoduletester.New(t, execmoduletester.WithKey(testKey))
+	c, err := m.GenerateChain(4, func(_ int, block *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), common.Address{1}, uint256.NewInt(1), 21_000, nil, nil), *types.LatestSignerForChainID(nil), testKey)
+		require.NoError(t, err)
+		block.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteBody(tx, common.Hash{0xff}, 1, &types.Body{})
+	}))
+	require.NoError(t, m.InsertChain(c))
+	api := newDebugApiForTest(m)
+	ro, err := m.DB.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer ro.Rollback()
+	block := c.Blocks[0]
+	minTxNum, err := api._txNumReader.Min(ctx, ro, block.NumberU64())
+	require.NoError(t, err)
+	body, err := rawdb.ReadBodyForStorageByKey(ro, dbutils.BlockBodyKey(block.NumberU64(), block.Hash()))
+	require.NoError(t, err)
+	require.NotNil(t, body)
+	require.Greater(t, body.BaseTxnID.U64(), minTxNum, "the side-fork body must move the storage sequence past canonical txNums")
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return tx.Delete(kv.MaxTxNum, hexutil.EncodeTs(block.NumberU64()))
+	}))
+	_, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	for _, reader := range []struct {
+		name string
+		read dbservices.FullBlockReader
+	}{
+		{"local", m.BlockReader},
+		{"remote", freezeblocks.NewRemoteBlockReader(remoteproto.NewETHBACKENDClient(conn))},
+	} {
+		t.Run(reader.name, func(t *testing.T) {
+			api := newDebugApiForTest(m)
+			api._txNumReader = reader.read.TxnumReader()
+			api.db = historyFloorDB{TemporalRoDB: api.db, startTxNum: minTxNum + 3}
+			account, err := api.AccountAt(ctx, block.Hash(), 2, testAddr)
+			require.ErrorIs(t, err, state.ErrPruned, "a storage sequence must not extend the block's indexed positions")
+			require.Nil(t, account)
+		})
+	}
 }
 
 func TestSearchTransactionsRejectsPartiallyRetiredBlock(t *testing.T) {
@@ -518,10 +563,12 @@ func TestSearchTransactionsRejectsPartiallyRetiredBlock(t *testing.T) {
 	defer before.Rollback()
 	minTxNum, err := apis.eth._txNumReader.Min(ctx, before, block)
 	require.NoError(t, err)
+	maxTxNum, err := apis.eth._txNumReader.Max(ctx, before, block)
+	require.NoError(t, err)
 	cutoff := minTxNum + 2
 	require.Zero(t, cutoff%prunedHistoryStepSize, "retirement must split the two user transactions")
 	readMatches := func(tx kv.TemporalTx) []uint64 {
-		matches, err := tx.IndexRange(kv.TracesToIdx, addr[:], int(minTxNum), int(minTxNum+4), order.Asc, kv.Unlim)
+		matches, err := tx.IndexRange(kv.TracesToIdx, addr[:], int(minTxNum), int(maxTxNum+1), order.Asc, kv.Unlim)
 		require.NoError(t, err)
 		defer matches.Close()
 		values, err := stream.ToArray(matches)
@@ -560,12 +607,72 @@ func TestSearchTransactionsRejectsPartiallyRetiredBlock(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := tc.call()
-			require.ErrorIs(t, err, state.ErrPruned, "a page must not silently omit pruned matches in its last block")
+			require.ErrorIs(t, err, state.ErrPruned, "the block does not have its full replay history")
 		})
 	}
 	page, err = apis.ots.SearchTransactionsBefore(ctx, addr, block+2, 1)
 	require.NoError(t, err)
 	require.Len(t, page.Txs, 2)
+	require.False(t, page.FirstPage)
+	require.False(t, page.LastPage)
+}
+
+func TestSearchTransactionsChecksHistoryBeforeSkippingCoinbase(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	addr := common.Address{1}
+	boundary := prunedHistoryDistance.PruneTo(prunedHistoryChainLen)
+	apis, _ := setupPhysicallyPrunedHistory(t, prunedHistoryConfig{
+		mode: prune.Mode{Initialised: true, History: prunedHistoryDistance, Blocks: prune.KeepAllBlocksPruneMode},
+		generateBlock: func(m *execmoduletester.ExecModuleTester, block *blockgen.BlockGen) {
+			if block.Number().Uint64() == boundary {
+				block.SetCoinbase(addr)
+			}
+			signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+			for i := range 2 {
+				to := addr
+				if block.Number().Uint64() == boundary && i == 1 {
+					to = common.Address{2}
+				}
+				txn, err := types.SignTx(types.NewTransaction(block.TxNonce(m.Address), to,
+					uint256.NewInt(10_000), 21_000, m.Genesis.BaseFee(), nil), *signer, m.Key)
+				require.NoError(t, err)
+				block.AddTx(txn)
+			}
+		},
+	})
+	before, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer before.Rollback()
+	minTxNum, err := apis.eth._txNumReader.Min(ctx, before, boundary)
+	require.NoError(t, err)
+	maxTxNum, err := apis.eth._txNumReader.Max(ctx, before, boundary)
+	require.NoError(t, err)
+	cutoff := minTxNum + 2
+	require.Zero(t, cutoff%prunedHistoryStepSize)
+	readMatches := func(tx kv.TemporalTx) []uint64 {
+		matches, err := tx.IndexRange(kv.TracesToIdx, addr[:], int(minTxNum), int(maxTxNum+1), order.Asc, kv.Unlim)
+		require.NoError(t, err)
+		defer matches.Close()
+		values, err := stream.ToArray(matches)
+		require.NoError(t, err)
+		return values
+	}
+	require.Equal(t, []uint64{minTxNum + 1, maxTxNum}, readMatches(before))
+	retired, err := before.Debug().Retire(ctx, kv.RetireCutoffs{Default: cutoff})
+	require.NoError(t, err)
+	require.Positive(t, retired)
+	after, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer after.Rollback()
+	require.Equal(t, []uint64{maxTxNum}, readMatches(after), "only the final system entry survives in the boundary block")
+	_, err = apis.ots.SearchTransactionsAfter(ctx, addr, 0, 1)
+	require.ErrorIs(t, err, state.ErrPruned)
+	page, err := apis.ots.SearchTransactionsBefore(ctx, addr, boundary+2, 1)
+	require.NoError(t, err, "a complete retained page must not inspect the next block's history")
+	require.Len(t, page.Txs, 2)
+	require.False(t, page.FirstPage)
+	require.False(t, page.LastPage)
 }
 
 func TestIndexedHistoryGateWithSnapshotMappings(t *testing.T) {
@@ -598,18 +705,29 @@ func TestIndexedHistoryGateWithSnapshotMappings(t *testing.T) {
 	require.NoError(t, err)
 	for _, number := range []uint64{historyBlock - 1, historyBlock} {
 		require.NoError(t, rwTx.Delete(kv.MaxTxNum, hexutil.EncodeTs(number)))
-		require.NoError(t, rwTx.Delete(kv.BlockBody, dbutils.BlockBodyKey(number, c.Blocks[number-1].Hash())))
 	}
 	require.NoError(t, rwTx.Commit())
-	api.db = historyFloorDB{TemporalRoDB: api.db, startTxNum: minTxNum + 2}
-
 	block := c.Blocks[historyBlock-1]
-	account, err := api.AccountAt(ctx, block.Hash(), 1, testAddr)
-	require.NoError(t, err, "snapshot mappings must admit a retained position without MDBX mappings or bodies")
-	require.NotNil(t, account)
-	require.EqualValues(t, 1, account.Nonce)
-	_, err = api.AccountAt(ctx, block.Hash(), 0, testAddr)
-	require.ErrorIs(t, err, state.ErrPruned)
+	_, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	for _, reader := range []struct {
+		name string
+		read dbservices.FullBlockReader
+	}{
+		{"local", m.BlockReader},
+		{"remote", freezeblocks.NewRemoteBlockReader(remoteproto.NewETHBACKENDClient(conn))},
+	} {
+		t.Run(reader.name, func(t *testing.T) {
+			api := newDebugApiForTest(m)
+			api._txNumReader = reader.read.TxnumReader()
+			api.db = historyFloorDB{TemporalRoDB: api.db, startTxNum: minTxNum + 2}
+			account, err := api.AccountAt(ctx, block.Hash(), 1, testAddr)
+			require.NoError(t, err, "snapshot mappings must admit a retained position without MDBX mappings")
+			require.NotNil(t, account)
+			require.EqualValues(t, 1, account.Nonce)
+			_, err = api.AccountAt(ctx, block.Hash(), 0, testAddr)
+			require.ErrorIs(t, err, state.ErrPruned)
+		})
+	}
 }
 
 func TestCallGateMatchesReaderAfterSystemTransaction(t *testing.T) {
