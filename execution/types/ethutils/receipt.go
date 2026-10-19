@@ -114,10 +114,7 @@ func MarshalReceipt(
 	if !chainConfig.IsLondon(header.Number.Uint64()) {
 		result.EffectiveGasPrice = (*hexutil.U256)(new(uint256.Int).Set(txn.GetTipCap()))
 	} else {
-		baseFee := header.BaseFee
-		effectiveTip := txn.GetEffectiveGasTip(baseFee)
-		var gasPrice uint256.Int
-		gasPrice.Add(baseFee, &effectiveTip)
+		gasPrice := types.EffectiveGasPrice(txn, header.BaseFee)
 		result.EffectiveGasPrice = (*hexutil.U256)(&gasPrice)
 	}
 

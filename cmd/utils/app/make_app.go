@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/eez"
 	"github.com/erigontech/erigon/node"
 	cli2 "github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/debug"
@@ -70,6 +71,10 @@ func MakeApp(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli.Comma
 				log.Error("failed setting config flags from yaml/toml file", "err", err)
 				return ctx, err
 			}
+		}
+		// After the config file, which may set it.
+		if cmd.Bool(eez.EnabledFlag.Name) {
+			eez.Register()
 		}
 
 		ctx, cancel := context.WithCancel(ctx)

@@ -61,6 +61,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/stats"
+	"github.com/erigontech/erigon/eez"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/aura"
@@ -82,6 +83,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -97,7 +99,10 @@ var rootCmd = &cobra.Command{
 	Short: "rpcdaemon is JSON RPC server that connects to Erigon node for remote DB access",
 }
 
-var stateCacheStr string
+var (
+	stateCacheStr string
+	eezEnabled    bool
+)
 
 func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
@@ -105,6 +110,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	cfg := &httpcfg.HttpCfg{Sync: ethconfig.Defaults.Sync, Enabled: true, StateCache: kvcache.DefaultCoherentConfig}
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "Erigon's components (txpool, rpcdaemon, sentry, downloader, ...) can be deployed as independent Processes on same/another server. Then components will connect to erigon by this internal grpc API. Example: 127.0.0.1:9090")
 	flags.DirVar(rootCmd.PersistentFlags(), &cfg.DataDir, "datadir", "", "path to Erigon working directory")
+	rootCmd.PersistentFlags().BoolVar(&eezEnabled, eez.EnabledFlag.Name, false, "Enable EEZ support: the l2 config section, transaction type 0x76 and the EEZ rules engine")
 	rootCmd.PersistentFlags().BoolVar(&cfg.GraphQLEnabled, "graphql", false, "enables graphql endpoint (disabled by default)")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.Gascap, "rpc.gascap", 50_000_000, "Sets a cap on gas that can be used in eth_call/estimateGas")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.MaxTraces, "trace.maxtraces", 200, "Sets a limit on traces that can be returned in trace_filter")
@@ -344,6 +350,10 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, engine rules.Engine,
 	ff *rpchelper.Filters, err error,
 ) {
+	// Before any chain config read, local or by the remote rules engine.
+	if eezEnabled {
+		eez.Register()
+	}
 	if !cfg.WithDatadir && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, nil, nil, nil, ff, errors.New("either remote db or local db must be specified")
 	}
@@ -540,7 +550,13 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	var remoteCE *remoteRulesEngine
 
 	if cfg.WithDatadir {
+		l2Engine, err := rulesconfig.NewL2RulesEngine(ctx, cc, logger)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, ff, err
+		}
 		switch {
+		case l2Engine != nil:
+			engine = l2Engine
 		case cc != nil && cc.Aura != nil:
 			consensusDB, err := kv2.New(dbcfg.ConsensusDB, logger).Path(filepath.Join(cfg.DataDir, "aura")).Accede(true).Open(ctx)
 			if err != nil {
@@ -1010,6 +1026,15 @@ func (e *remoteRulesEngine) init(db kv.RoDB, blockReader dbservices.FullBlockRea
 	cc, err := readChainConfigFromDB(context.Background(), db)
 	if err != nil {
 		return err
+	}
+
+	l2Engine, err := rulesconfig.NewL2RulesEngine(context.Background(), cc, logger)
+	if err != nil {
+		return err
+	}
+	if l2Engine != nil {
+		e.engine = l2Engine
+		return nil
 	}
 
 	// TODO(yperbasis): try to unify with CreateRulesEngine

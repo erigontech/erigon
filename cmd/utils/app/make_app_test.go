@@ -24,6 +24,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
+
+	"github.com/erigontech/erigon/eez"
+	"github.com/erigontech/erigon/eez/networks"
+	"github.com/erigontech/erigon/execution/chain/spec"
 )
 
 func TestMakeApp_ConfigFileAppliesToSubcommands(t *testing.T) {
@@ -52,4 +56,31 @@ func TestMakeApp_ConfigFileAppliesToSubcommands(t *testing.T) {
 
 	require.NoError(t, app.Run(context.Background(), []string{"erigon", "--config", cfgFile, "import"}))
 	require.Equal(t, "/tmp/from-config", sawDatadir, "config.toml settings must apply even when a subcommand like import is invoked")
+}
+
+func TestMakeApp_RegistersEEZForSubcommands(t *testing.T) {
+	registered := func() bool {
+		_, err := chainspec.ChainSpecByName(networks.Devnet.Name)
+		return err == nil
+	}
+	run := func(args ...string) (sawRegistered bool) {
+		// Fresh flag copy, as above.
+		enabled := eez.EnabledFlag
+		app := MakeApp("erigon", func(ctx context.Context, cmd *cli.Command) error {
+			return nil
+		}, []cli.Flag{&enabled})
+		app.Commands = []*cli.Command{{
+			Name: "import",
+			Action: func(ctx context.Context, cmd *cli.Command) error {
+				sawRegistered = registered()
+				return nil
+			},
+		}}
+		require.NoError(t, app.Run(context.Background(), append([]string{"erigon"}, args...)))
+		return sawRegistered
+	}
+
+	// Registration is process-wide, so the case without the flag goes first.
+	require.False(t, run("import"))
+	require.True(t, run("import", "--eez.enabled"))
 }

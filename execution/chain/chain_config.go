@@ -99,6 +99,10 @@ type Config struct {
 	// see https://github.com/gnosischain/specs/blob/master/network-upgrades/pectra.md#eip-4844-pectra.
 	BurntContract map[string]common.Address `json:"burntContract,omitempty"`
 
+	// (Optional) FeeCollector is EEZ Rollup0's FEE_COLLECTOR: every amount Ethereum burns is
+	// credited to it instead. Ignored when BurntContract is set.
+	FeeCollector *common.Address `json:"feeCollector,omitempty"`
+
 	// (Optional) deposit contract of PoS chains
 	// See also EIP-6110: Supply validator deposits on chain
 	DepositContract common.Address `json:"depositContractAddress,omitempty"`
@@ -424,6 +428,13 @@ func (c *Config) GetBurntContract(num uint64) accounts.Address {
 	}
 	addr := ConfigValueLookup(common.ParseMapKeysIntoUint64(c.BurntContract), num)
 	return accounts.InternAddress(addr)
+}
+
+func (c *Config) GetFeeCollector() accounts.Address {
+	if c.FeeCollector == nil {
+		return accounts.NilAddress
+	}
+	return accounts.InternAddress(*c.FeeCollector)
 }
 
 func (c *Config) GetMinBlobGasPrice() uint64 {

@@ -17,8 +17,11 @@
 package rawdb_test
 
 import (
+	"encoding/json"
+	"errors"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -38,6 +41,61 @@ func (c *testL2Config) Name() string { return c.Stack }
 
 func (c *testL2Config) ResolveRules(l2Version, blockNum, blockTime uint64, r *chain.Rules) {}
 
+type namedL2Config struct {
+	Name_ string `json:"name"`
+	Value uint64 `json:"value"`
+}
+
+func (c *namedL2Config) Name() string { return c.Name_ }
+
+func (c *namedL2Config) ResolveRules(l2Version, blockNum, blockTime uint64, r *chain.Rules) {}
+
+func init() {
+	chain.RegisterL2Config("rawdbtestl2", func(raw json.RawMessage) (chain.L2Config, error) {
+		var c namedL2Config
+		if err := json.Unmarshal(raw, &c); err != nil {
+			return nil, err
+		}
+		if c.Value == 0 {
+			return nil, errors.New("zero value")
+		}
+		return &c, nil
+	})
+}
+
+func TestChainConfigL2Resolved(t *testing.T) {
+	_, tx := mdbxtest.NewTestTx(t)
+	hash := common.Hash{4}
+
+	l2 := &namedL2Config{Name_: "rawdbtestl2", Value: 7}
+	require.NoError(t, rawdb.WriteChainConfig(tx, hash, &chain.Config{ChainID: uint256.NewInt(1), L2: l2}))
+
+	got, err := rawdb.ReadChainConfig(tx, hash)
+	require.NoError(t, err)
+	require.Equal(t, l2, got.L2)
+}
+
+func TestChainConfigL2Invalid(t *testing.T) {
+	_, tx := mdbxtest.NewTestTx(t)
+	hash := common.Hash{5}
+
+	require.NoError(t, tx.Put(kv.ConfigTable, hash[:], []byte(`{"chainId":1,"l2":{"name":"rawdbtestl2","value":0}}`)))
+	_, err := rawdb.ReadChainConfig(tx, hash)
+	require.ErrorContains(t, err, "zero value")
+}
+
+func TestGenesisL2Resolved(t *testing.T) {
+	_, tx := mdbxtest.NewTestTx(t)
+
+	cfg := *chain.AllProtocolChanges
+	cfg.L2JSON = []byte(`{"name":"rawdbtestl2","value":3}`)
+	require.NoError(t, rawdb.WriteGenesisIfNotExist(tx, &types.Genesis{Config: &cfg}))
+
+	got, err := rawdb.ReadGenesis(tx)
+	require.NoError(t, err)
+	require.Equal(t, &namedL2Config{Name_: "rawdbtestl2", Value: 3}, got.Config.L2)
+}
+
 func TestChainConfigL2JSONRoundTrip(t *testing.T) {
 	_, tx := mdbxtest.NewTestTx(t)
 	hash := common.Hash{1}
@@ -49,6 +107,7 @@ func TestChainConfigL2JSONRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, `{"stack":"testl2"}`, string(got.L2JSON))
 	require.True(t, got.IsL2())
+	require.Nil(t, got.L2, "a section without a registered name stays opaque")
 }
 
 func TestChainConfigL2JSONNullBackfill(t *testing.T) {

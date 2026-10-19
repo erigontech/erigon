@@ -125,6 +125,7 @@ type TxnExecutor struct {
 	data                  []byte
 	state                 *state.IntraBlockState
 	evm                   *vm.EVM
+	mintsValue            bool
 
 	// If true, fee burning and tipping won't happen during transition. Instead, their values will be included in the
 	// ExecutionResult, which caller can use the values to update the balance of burner and coinbase account.
@@ -163,16 +164,24 @@ type Message interface {
 // NewTxnExecutor initialises and returns a new transaction executor.
 func NewTxnExecutor(evm *vm.EVM, msg Message, gp *GasPool) *TxnExecutor {
 	return &TxnExecutor{
-		gp:       gp,
-		evm:      evm,
-		msg:      msg,
-		gasPrice: msg.GasPrice(),
-		feeCap:   msg.FeeCap(),
-		tipCap:   msg.TipCap(),
-		value:    *msg.Value(),
-		data:     msg.Data(),
-		state:    evm.IntraBlockState(),
+		gp:         gp,
+		evm:        evm,
+		msg:        msg,
+		gasPrice:   msg.GasPrice(),
+		feeCap:     msg.FeeCap(),
+		tipCap:     msg.TipCap(),
+		value:      *msg.Value(),
+		data:       msg.Data(),
+		state:      evm.IntraBlockState(),
+		mintsValue: mintsValue(msg),
 	}
+}
+
+// mintsValue reports whether msg has a registered type whose value the outer
+// call mints.
+func mintsValue(msg Message) bool {
+	typed, ok := msg.(interface{ TxType() byte })
+	return ok && typed.TxType() != 0 && types.TxTypeMintsValue(typed.TxType())
 }
 
 // ApplyMessage computes the new state by applying the given message
@@ -406,9 +415,11 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 			if overflow {
 				return upfrontTxnFees{}, fmt.Errorf("%w: address %v", ErrInsufficientFunds, from)
 			}
-			balanceCheck, overflow = u256.AddOverflow(balanceCheck, st.value)
-			if overflow {
-				return upfrontTxnFees{}, fmt.Errorf("%w: address %v", ErrInsufficientFunds, from)
+			if !st.mintsValue {
+				balanceCheck, overflow = u256.AddOverflow(balanceCheck, st.value)
+				if overflow {
+					return upfrontTxnFees{}, fmt.Errorf("%w: address %v", ErrInsufficientFunds, from)
+				}
 			}
 			if hasBlobGas {
 				maxBlobFee, overflow := u256.MulOverflow(maxFeePerBlobGas, u256.U64(blobGas))
@@ -427,6 +438,12 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 		if balance.Cmp(&balanceCheck) < 0 {
 			return upfrontTxnFees{}, fmt.Errorf("%w: address %v have %s want %s", ErrInsufficientFunds, from, balance.String(), balanceCheck.String())
+		}
+		if st.mintsValue {
+			// As if the value were minted to the sender ahead of the transfer.
+			if _, overflow := u256.AddOverflow(balance, st.value); overflow {
+				return upfrontTxnFees{}, fmt.Errorf("%w: address %v", ErrMintOverflow, from)
+			}
 		}
 	}
 
@@ -641,6 +658,11 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			bailout = true
 		}
 	}
+	// The outer call credits a minted value without debiting the sender; its
+	// revert takes the credit back.
+	if st.mintsValue {
+		bailout = true
+	}
 
 	var (
 		ret             []byte
@@ -794,6 +816,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 
 	if !msg.IsFree() && rules.IsLondon {
 		burntContractAddress = st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
+		if burntContractAddress.IsNil() {
+			burntContractAddress = st.evm.ChainConfig().GetFeeCollector()
+		}
 		if !burntContractAddress.IsNil() {
 			burnAmount = u256.Mul(u256.U64(st.txnGasUsed), st.evm.Context.BaseFee)
 

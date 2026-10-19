@@ -459,3 +459,22 @@ func TestRegisteredTxTypeWithoutStandardReceiptPayload(t *testing.T) {
 	_, err = rlp.EncodeToBytes((*ReceiptForStorage)(r))
 	require.ErrorContains(t, err, "invalid receipt type")
 }
+
+func TestEffectiveGasPrice(t *testing.T) {
+	registerFakeTxType(t)
+	baseFee := uint256.NewInt(7)
+
+	price := EffectiveGasPrice(&fakeRegisteredTx{}, baseFee)
+	require.True(t, price.IsZero(), "a fee-free registered type pays nothing")
+
+	dynamic := &DynamicFeeTransaction{TipCap: *uint256.NewInt(2), FeeCap: *uint256.NewInt(10)}
+	price = EffectiveGasPrice(dynamic, baseFee)
+	require.Equal(t, uint256.NewInt(9), &price)
+	dynamic.FeeCap = *uint256.NewInt(8)
+	price = EffectiveGasPrice(dynamic, baseFee)
+	require.Equal(t, uint256.NewInt(8), &price)
+
+	// A zero-price legacy service transaction keeps reporting the base fee.
+	price = EffectiveGasPrice(&LegacyTx{}, baseFee)
+	require.Equal(t, baseFee, &price)
+}

@@ -26,6 +26,15 @@ Recorded L2 block windows with their execution witnesses, from `eez-association/
 
 License: `MIT OR Apache-2.0` (eez-rollup0).
 
+`captured-devnet-window-468` and `captured-devnet-anchor-402` are from `NethermindEth/nethermind` at `a4cf778e119f29a1a5b6c138788ea3cadfd6262a` (`feature/eez-l2-execution`), `src/Nethermind/Nethermind.Eez.Test/Fixtures/<name>/`. Per that directory's README they were recorded on 2026-10-13 from a Kurtosis devnet of eez-rollup0 `fede75fc185f11a0b330de999dbffeae6d49d777` with core protocol `855fe06`; blocks come from `debug_getRawBlock`, witnesses from `debug_executionWitness`, calldata and proofs from the mined L1 transactions, the public inputs hash from the signer's `window_signed` record, and `chain-config.json` from the devnet genesis, `feeCollector` included.
+
+| Window | L2 chain id | Content |
+|---|---|---|
+| `captured-devnet-window-468` | 6290 | blocks 463 to 468; block 468 carries two `loadExecutionTable` system transactions each followed by a user transaction, then an `executeIncomingCrossChainCall` system transaction |
+| `captured-devnet-anchor-402` | 6290 | blocks 397 to 402 settled by an anchor-only batch; block 397 carries an ordinary transaction |
+
+License: `LGPL-3.0-only` (nethermind).
+
 ## chiado/
 
 `anchor-23507949.json` is a settlement mined on the eez.dev Chiado testnet (L1 Gnosis Chiado, chain id 10200; L2 chain id 699069), read from `https://eez.dev/rpc/l1` on 2026-10-14. The file is curated, not a raw RPC dump:
@@ -52,6 +61,38 @@ The loader test rebuilds the transaction from its fields and requires the mined 
 | `chiado/rollup-created-23413747.json` | `986dbf338aa6ed9b8bae098578d5421665aa298caddc72095ce7aa0cca2a953d` |
 | `vectors/public_inputs_hash_vectors.json` | `8a787a8e307089a5be0ec4a56d8bd0e1ef4d8862eb58bb6b5086347ff2745472` |
 | `vectors/rolling_hash_vectors.json` | `bc37e3a369c91dde689c586899a4f2cc49da50770032f24dfa5c313f5368b88d` |
+| `windows/captured-devnet-anchor-402/block-397.rlp.hex` | `f7768c77f78a57ee124aceef59fac0a9e6c5a06203cf4c000ea94e6d63f2cb88` |
+| `windows/captured-devnet-anchor-402/block-398.rlp.hex` | `b8f2164643d5a87278f6e5e9d0ef11eb588123d9ec00ddc5c05f9d9113170d79` |
+| `windows/captured-devnet-anchor-402/block-399.rlp.hex` | `8b6eefefcffe93192d3cda9078d9cd64361a43503719e6e1d14f758406acb603` |
+| `windows/captured-devnet-anchor-402/block-400.rlp.hex` | `cc588f6861efc20d652fba1a4d00151b45e1fa2e93944613159389c83b94ee95` |
+| `windows/captured-devnet-anchor-402/block-401.rlp.hex` | `cbfeb38c3022df71e753c20926b3e934201ac62b6e72f5d61a85fb79999472fd` |
+| `windows/captured-devnet-anchor-402/block-402.rlp.hex` | `f207e00687d8f8e907552e4fe071db2c9d3430083202331eb5df9513d03d4717` |
+| `windows/captured-devnet-anchor-402/blocks.json` | `708c3f1d2584177e1a44cb87f3aa56128c2f7ba95002630c9a40ac63c70e1e8f` |
+| `windows/captured-devnet-anchor-402/chain-config.json` | `c759838528f082b2f4ace53abecdd6f11793abddc79e5446e19370a2c9773a57` |
+| `windows/captured-devnet-anchor-402/oracle.json` | `faba65ff998a551e9a2b2af17d6907faecca5b4dd6108000496db3db52e46eea` |
+| `windows/captured-devnet-anchor-402/postbatch.hex` | `7c577dd7f8d7a2ddc0c47810b8ef422a6ebdb9dc2992340679cff067cf064602` |
+| `windows/captured-devnet-anchor-402/witness-397.json` | `54ee695be31a1475913c09719141ae885cb89fab645fe72c1001ad6a6c99eeb0` |
+| `windows/captured-devnet-anchor-402/witness-398.json` | `a8e89a4c856401f2d86fa072ea7fe9f01b2d69f1635421cc2b0e64afc3c990af` |
+| `windows/captured-devnet-anchor-402/witness-399.json` | `c5aec5c0e893b00773b0922fcb5c1d762378e2968b9ef848999b901eafba7939` |
+| `windows/captured-devnet-anchor-402/witness-400.json` | `4543d691c7ef7dda7686a3e7d571e85bf94b0e550db786d90590cbd754afa358` |
+| `windows/captured-devnet-anchor-402/witness-401.json` | `ca31f3eb843add112356cbc48d5e76a17365f77a0c5645568c049525a8b83ee7` |
+| `windows/captured-devnet-anchor-402/witness-402.json` | `c27c1e9be61fb1906d566319b73d1d44144c40704e3b5852e44c8035b3ce292a` |
+| `windows/captured-devnet-window-468/block-463.rlp.hex` | `a3eb3f4510e780f5993396e886e5f224da301b791f3e7c2d673b066bbbc32870` |
+| `windows/captured-devnet-window-468/block-464.rlp.hex` | `03f07cabab4d8f370fd9a02b360fcef964b5abf6f60f5eaff79ce20c9649ac71` |
+| `windows/captured-devnet-window-468/block-465.rlp.hex` | `859ab41ebe69bce58719d866e89cd66d485b0cc36af523251263afd486c03562` |
+| `windows/captured-devnet-window-468/block-466.rlp.hex` | `93e37b0f2658edbed25003fc9c4d27eaa57c04e68630950ba7db067d32b9be3e` |
+| `windows/captured-devnet-window-468/block-467.rlp.hex` | `fb698844bab08afa8425a5281e89014aecd825e2517abed14dcdc1da085f2748` |
+| `windows/captured-devnet-window-468/block-468.rlp.hex` | `5d31a8d3c2cfe2b0a6ebe0f7ee84fd0c50175a9e06e3f521893d3c10306bab8c` |
+| `windows/captured-devnet-window-468/blocks.json` | `aec5e73b97149fa49314ebd5aa02117c26068f410a8d8a2adfbfcc300d90d2d1` |
+| `windows/captured-devnet-window-468/chain-config.json` | `c759838528f082b2f4ace53abecdd6f11793abddc79e5446e19370a2c9773a57` |
+| `windows/captured-devnet-window-468/oracle.json` | `876169eb3bbb6e4d3988614398d87284ab1c5cb06ee7e8911720bbc62a7eed94` |
+| `windows/captured-devnet-window-468/postbatch.hex` | `aec963c8f50a25ddaeefe8b8c4775d48e1f5ebfdd2bef18d41086d8cb4d27a19` |
+| `windows/captured-devnet-window-468/witness-463.json` | `ca78ae9d9583b58b96a24cd70813b20a3fd674023aed51aa6b56eeea4afbd263` |
+| `windows/captured-devnet-window-468/witness-464.json` | `18aad20e567035717bb97da0747a7ca8fe5f04440cc1ff177ce8c5981423d530` |
+| `windows/captured-devnet-window-468/witness-465.json` | `51d4c75567e91c6ec5bc96c60e2774feb5f75b14a5fe09bab17281d178f9b26f` |
+| `windows/captured-devnet-window-468/witness-466.json` | `58bd65b6694538f760c5a568aa1d53ff8d210c01361736123711a3966a3f21c6` |
+| `windows/captured-devnet-window-468/witness-467.json` | `7db50e6ca33c9419f12d1cde8707570aade821fd24f3aeababb89bb009b0da1e` |
+| `windows/captured-devnet-window-468/witness-468.json` | `c3cd6648b6ee8031dac117c48dc154f2a3897d987620fa6d64b4771b76e2e7bb` |
 | `windows/captured-devnet-window-84/README.md` | `d356d9d06c28ad34f07d92a32e6931633ef6ef802fdec82e9f45a22bebb1ae6e` |
 | `windows/captured-devnet-window-84/block-79.rlp.hex` | `a2f068c120cc0646ecd58b0febfaecdd0c1fbcefa52aaf5a3dd46ff1332879e3` |
 | `windows/captured-devnet-window-84/block-80.rlp.hex` | `53ec098c1c770f05d6d373dc80fc4bf22083d607d0b3f6d13aafce5ac847eaa2` |

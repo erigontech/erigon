@@ -39,6 +39,8 @@ var WindowNames = []string{
 	"stateless-checkpoint-2175",
 	"nonzero-outbound-630",
 	"captured-devnet-window-84",
+	"captured-devnet-window-468",
+	"captured-devnet-anchor-402",
 }
 
 // Window is a run of consecutive recorded L2 blocks with their execution
@@ -131,9 +133,10 @@ func LoadWindow(name string) (*Window, error) {
 			}
 		case fname == "blocks.json":
 			var entries []struct {
-				Hash       common.Hash `json:"hash"`
-				Number     uint64      `json:"number"`
-				ParentHash common.Hash `json:"parent_hash"`
+				Hash         common.Hash `json:"hash"`
+				Number       uint64      `json:"number"`
+				ParentHash   common.Hash `json:"parent_hash"`
+				Transactions *uint64     `json:"transactions"`
 			}
 			if err := readStrict(path, &entries); err != nil {
 				return nil, err

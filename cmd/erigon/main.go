@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 
 	"github.com/urfave/cli/v3"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/diagnostics/syscheck"
+	"github.com/erigontech/erigon/eez"
 	erigoncli "github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/debug"
 )
@@ -40,7 +42,7 @@ import (
 func main() {
 	var err error
 	common.WithProfilersMain(func() {
-		app := erigonapp.MakeApp("erigon", runErigon, erigoncli.DefaultFlags)
+		app := erigonapp.MakeApp("erigon", runErigon, slices.Concat(erigoncli.DefaultFlags, eez.Flags))
 		err = app.Run(context.Background(), os.Args)
 		if err != nil {
 			_, printErr := fmt.Fprintln(os.Stderr, err)

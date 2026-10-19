@@ -276,8 +276,8 @@ func effectiveGasPrice(txn types.Transaction, baseFee *uint256.Int) *uint256.Int
 	if baseFee == nil {
 		return txn.GetTipCap()
 	}
-	tip := txn.GetEffectiveGasTip(baseFee)
-	return new(uint256.Int).Add(baseFee, &tip)
+	price := types.EffectiveGasPrice(txn, baseFee)
+	return &price
 }
 
 func (a *ReceiptsFilterAggregator) blobGasPrice(txn types.Transaction, header *types.Header) *uint256.Int {

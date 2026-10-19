@@ -93,6 +93,10 @@ var (
 	// is higher than the balance of the user's account.
 	ErrInsufficientFunds = errors.New("insufficient funds for gas * price + value")
 
+	// ErrMintOverflow is returned if a minted value would overflow the
+	// sender's balance.
+	ErrMintOverflow = errors.New("minted value overflows the sender balance")
+
 	// ErrGasUintOverflow is returned when calculating gas usage.
 	ErrGasUintOverflow = errors.New("gas uint64 overflow")
 
