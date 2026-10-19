@@ -74,7 +74,7 @@ Benefits:
 
 * enables inbound peer connections
 * improves transaction gossip freshness
-* leads to healthier TxPool "pending" state
+* leads to a healthier TxPool "pending" state
 * strongly recommended for validators
 
 Example:

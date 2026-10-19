@@ -13,8 +13,8 @@ The TxPool namespace must be explicitly enabled using the `--http.api` flag when
 ### Transaction Pool Architecture
 
 * Erigon's transaction pool is organized into three sub-pools: pending (executable), baseFee (insufficient base fee), and queued (nonce gaps)
-* The `txpool_content`, `txpool_contentFrom` and `txpool_status` methods expose only the `pending` and `queued` categories, as defined by the `ethereum/execution-apis` specification. Transactions in the internal baseFee sub-pool are nonce-ready and otherwise valid, but are not executable at the current base fee: they wait for the fee condition to change. They are reported as pending, matching Geth
-* Blob transactions (type 3) are not reported by `txpool_content` and `txpool_contentFrom`, matching Geth and Nethermind. They are still counted by `txpool_status`
+* The `txpool_content`, `txpool_contentFrom`, `txpool_inspect` and `txpool_status` methods expose only the `pending` and `queued` categories, as defined by the `ethereum/execution-apis` specification. Transactions in the internal baseFee sub-pool are nonce-ready and otherwise valid, but are not executable at the current base fee: they wait for the fee condition to change. They are reported as pending, matching Geth
+* Blob transactions (type 3) are not reported by `txpool_content`, `txpool_contentFrom` and `txpool_inspect`, matching Geth and Nethermind. They are still counted by `txpool_status`
 * The pool can run either integrated within the main Erigon process or as a separate service for scalability
 * Transaction pool methods communicate via gRPC with the TxPool service when running in external mode
 
@@ -26,8 +26,8 @@ The TxPool namespace must be explicitly enabled using the `--http.api` flag when
 
 ### External vs Internal Mode
 
-* **Internal Mode**: Transaction pool runs within the main Erigon process (default configuration)
-* **External Mode**: Transaction pool runs as a separate service, requiring explicit configuration with `--txpool.api.addr`. External mode requires an external Sentry service and provides better resource isolation
+* **Internal Mode**: The transaction pool runs within the main Erigon process (default configuration)
+* **External Mode**: The transaction pool runs as a separate service, requiring explicit configuration with `--txpool.api.addr`. External mode requires an external Sentry service and provides better resource isolation
 
 ### Usage in Development and Testing
 
@@ -98,6 +98,32 @@ curl -s --data '{"jsonrpc":"2.0","method":"txpool_contentFrom","params":["0xb60e
 | Object  | Transaction pool content for the specified address |
 | pending | Object                                             |
 | queued  | Object                                             |
+
+***
+
+## **txpool\_inspect**
+
+Returns a text summary of every transaction in the pool, organized like `txpool_content` by sub-pool, sender address and nonce, for quick inspection without the full transaction objects. Blob transactions are not returned.
+
+Each entry has the form `<to>: <value> wei + <gas limit> gas × <gas price> wei`, or `contract creation: ...` when the transaction has no recipient. For EIP-1559 and later transaction types the price shown is the fee cap (`maxFeePerGas`), as Geth reports it.
+
+**Parameters**
+
+None
+
+**Example**
+
+```bash
+curl -s --data '{"jsonrpc":"2.0","method":"txpool_inspect","params":[],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
+```
+
+**Returns**
+
+| Type    | Description                                                        |
+| ------- | ------------------------------------------------------------------ |
+| Object  | Transaction summaries organized by sub-pool, sender and nonce      |
+| pending | Object: sender address → nonce → summary string                    |
+| queued  | Object: sender address → nonce → summary string                    |
 
 ***
 

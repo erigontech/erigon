@@ -253,7 +253,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_traceBlockByNumber","params":["
 
 ### debug\_traceTransaction
 
-Returns Geth style transaction trace.
+Returns a Geth-style transaction trace.
 
 #### Parameters
 
@@ -278,7 +278,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["0x
 
 ### debug\_traceCall
 
-Returns Geth style call trace.
+Returns a Geth-style call trace.
 
 #### Parameters
 

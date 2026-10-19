@@ -53,7 +53,6 @@ These integrated practices focus on maximizing the reliability, efficiency, and 
 | **Practice**                      | **Details**                                                                                    | **Rationale**                                                           |
 | --------------------------------- | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | Check Validator Health            | For validator nodes, a daily check of the node's logs and service status is essential. See [Caplin](/staking/caplin) and [External Consensus Client](/staking/external-consensus-client-as-validator). | Confirms that the node is signing attestations and performing its duty. |
-| Maintain a Sufficient ETH Balance | Validators must maintain an adequate ETH balance on their signer address.                      | Required to cover transaction fees for checkpoint submissions.          |
 
 ## Advanced Performance Tricks
 

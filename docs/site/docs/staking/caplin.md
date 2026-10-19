@@ -37,7 +37,7 @@ erigon \
   * `--http.api=engine,eth,net,web3`: enables the necessary APIs for external clients and Caplin.
   * `--ws`: enables WebSocket-based communication (optional).
 * Consensus Layer (Caplin):
-  * `--caplin.discovery.addr` and `--caplin.discovery.port`: configures Caplin's gossip and discovery layer.
+  * `--caplin.discovery.addr` and `--caplin.discovery.port`: configure Caplin's gossip and discovery layer.
   * `--beacon.api=beacon,validator,builder,config,debug,events,node,lighthouse`: enables all possible API endpoints for the validator client.
 
 ## 2. Set Up Lighthouse Validator Client
@@ -93,7 +93,7 @@ Since v3.6, Caplin primes the execution layer one slot before the slot this node
 
 Preparation looks at most one slot ahead, and it does not alter execution-layer fork choice — it only starts the builder early. To confirm it is running, look for these lines in the Erigon log:
 
-```
+```text
 PayloadPreparation: watching for proposals
 PayloadPreparation: primed execution layer
 ```
