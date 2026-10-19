@@ -1546,14 +1546,15 @@ func makeLog(size int) executionFunc {
 			return pc, nil, nil
 		}
 		mem := scope.Memory.GetPtr(mStart, mSize)
-		log := ibs.AllocLog(scope.Contract.Address().Value(), size, len(mem))
+		log := ibs.AllocLog(scope.Contract.Address().Value(), size, 0)
 		// This is a non-consensus field, but assigned here because
 		// execution/state doesn't know the current block number.
 		log.BlockNumber = hexutil.Uint64(evm.Context.BlockNumber)
 		for i := range size {
 			log.Topics[i] = stack.pop().Bytes32()
 		}
-		copy(log.Data, mem)
+		// Append fills a new buffer without zeroing it before the copy.
+		log.Data = append(log.Data, mem...)
 		ibs.NotifyLog(log)
 		return pc, nil, nil
 	}
