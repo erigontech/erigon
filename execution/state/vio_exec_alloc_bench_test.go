@@ -101,12 +101,15 @@ func BenchmarkVersionedExecReads(b *testing.B) {
 
 	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	ibs := NewWithVersionMap(reader, mvhm)
+	ibs.SetNoMaterialize(true)
 	defer ibs.Close()
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		ibs.Reset()
+		ibs.SetVersionMap(mvhm)
+		ibs.SetNoMaterialize(true)
 		ibs.SetTxContext(1, 100)
 		a := addrs[i%nAddrs]
 		bal, _ := ibs.GetBalance(a)
@@ -145,11 +148,14 @@ func BenchmarkWarmExtCodeHash(b *testing.B) {
 
 	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	ibs := NewWithVersionMap(reader, mvhm)
+	ibs.SetNoMaterialize(true)
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		ibs.Reset()
+		ibs.SetVersionMap(mvhm)
+		ibs.SetNoMaterialize(true)
 		ibs.SetTxContext(1, 100)
 		a := addrs[i%nAddrs]
 		empty, _ := ibs.Empty(a)

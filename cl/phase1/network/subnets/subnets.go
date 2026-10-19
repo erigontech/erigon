@@ -17,10 +17,60 @@
 package subnets
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
+
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
+	commoncrypto "github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/p2p/enode"
 )
+
+const epochsPerSubnetSubscription = 256
+
+// ComputeSubscribedSubnets implements compute_subscribed_subnets from the phase0 p2p spec.
+func ComputeSubscribedSubnets(beaconConfig *clparams.BeaconChainConfig, networkConfig *clparams.NetworkConfig, nodeID enode.ID, epoch uint64) ([]uint64, error) {
+	nodeIDInt := uint256.NewInt(0).SetBytes(nodeID.Bytes())
+	prefix := new(uint256.Int).Rsh(nodeIDInt, uint(256-networkConfig.AttestationSubnetPrefixBits)).Uint64()
+	offset := subnetSubscriptionOffset(nodeID)
+	period := (epoch + offset) / epochsPerSubnetSubscription
+	var periodBytes [8]byte
+	binary.LittleEndian.PutUint64(periodBytes[:], period)
+	seed := sha256.Sum256(periodBytes[:])
+	permutated, err := shuffling.ComputeShuffledIndex(
+		beaconConfig,
+		prefix,
+		uint64(1)<<networkConfig.AttestationSubnetPrefixBits,
+		seed,
+		nil,
+		commoncrypto.Sha256,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	subnets := make([]uint64, beaconConfig.SubnetsPerNode)
+	for i := range beaconConfig.SubnetsPerNode {
+		subnets[i] = (permutated + i) % networkConfig.AttestationSubnetCount
+	}
+	return subnets, nil
+}
+
+// SubscribedSubnetsRotationEpoch returns the first epoch after epoch at which ComputeSubscribedSubnets uses a new shuffling seed.
+func SubscribedSubnetsRotationEpoch(nodeID enode.ID, epoch uint64) uint64 {
+	offset := subnetSubscriptionOffset(nodeID)
+	period := (epoch + offset) / epochsPerSubnetSubscription
+	return (period+1)*epochsPerSubnetSubscription - offset
+}
+
+func subnetSubscriptionOffset(nodeID enode.ID) uint64 {
+	return binary.BigEndian.Uint64(nodeID[24:]) % epochsPerSubnetSubscription
+}
 
 // def compute_subnets_for_sync_committee(state: BeaconState, validator_index: ValidatorIndex) -> Set[uint64]:
 //     next_slot_epoch = compute_epoch_at_slot(Slot(state.slot + 1))

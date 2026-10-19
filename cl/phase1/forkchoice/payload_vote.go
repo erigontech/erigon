@@ -18,6 +18,7 @@ package forkchoice
 
 import (
 	"errors"
+	"sync"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -153,15 +154,7 @@ func (f *ForkChoiceStore) payloadTimeliness(root common.Hash, timely bool) bool 
 	if !f.isPayloadAvailable(root) {
 		return !timely
 	}
-	votes := voteRaw.([clparams.PtcSize]int8)
-	target := boolToVote(timely)
-	count := uint64(0)
-	for i := range votes {
-		if votes[i] == target {
-			count++
-		}
-	}
-	return count > f.beaconCfg.PtcSize/2
+	return f.ptcMajority(voteRaw.([clparams.PtcSize]int8), timely)
 }
 
 // payloadDataAvailability returns whether the PTC voted blob data as available (available=true)
@@ -176,8 +169,12 @@ func (f *ForkChoiceStore) payloadDataAvailability(root common.Hash, available bo
 	if !f.isPayloadAvailable(root) {
 		return !available
 	}
-	votes := voteRaw.([clparams.PtcSize]int8)
-	target := boolToVote(available)
+	return f.ptcMajority(voteRaw.([clparams.PtcSize]int8), available)
+}
+
+// ptcMajority reports whether more than half of the PTC members cast vote in votes.
+func (f *ForkChoiceStore) ptcMajority(votes [clparams.PtcSize]int8, vote bool) bool {
+	target := boolToVote(vote)
 	count := uint64(0)
 	for i := range votes {
 		if votes[i] == target {
@@ -185,6 +182,21 @@ func (f *ForkChoiceStore) payloadDataAvailability(root common.Hash, available bo
 		}
 	}
 	return count > f.beaconCfg.PtcSize/2
+}
+
+// PayloadVotesRuleOutFull reports whether the PTC votes recorded for root already mark its payload
+// as not timely or its data as not available. ShouldBuildOnFull then stays false for root even
+// once its payload is applied.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) PayloadVotesRuleOutFull(root common.Hash) bool {
+	f.ptcVoteMu.Lock()
+	defer f.ptcVoteMu.Unlock()
+	for _, votes := range []*sync.Map{&f.payloadTimelinessVote, &f.payloadDataAvailabilityVote} {
+		if raw, ok := votes.Load(root); ok && f.ptcMajority(raw.([clparams.PtcSize]int8), false) {
+			return true
+		}
+	}
+	return false
 }
 
 // getParentPayloadStatus returns the payload status of the parent block.
