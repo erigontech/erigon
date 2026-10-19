@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/rawdb"
+	eezprotocol "github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -189,6 +190,21 @@ func TestRemoteRulesEngineInitL2(t *testing.T) {
 			require.Same(t, rpcdaemonTestL2Engine, e.engine)
 		})
 	}
+}
+
+func TestRemoteServicesRegistersEEZ(t *testing.T) {
+	remoteServices := func() {
+		// Neither a datadir nor a private API: it fails after registration.
+		_, _, _, _, _, _, _, _, err := RemoteServices(context.Background(), &httpcfg.HttpCfg{}, log.New(), func() {})
+		require.Error(t, err)
+	}
+	// Registration is process-wide, so the case without the flag goes first.
+	remoteServices()
+	require.False(t, types.IsRegisteredTxType(eezprotocol.SystemTxType))
+	eezEnabled = true
+	t.Cleanup(func() { eezEnabled = false })
+	remoteServices()
+	require.True(t, types.IsRegisteredTxType(eezprotocol.SystemTxType))
 }
 
 func TestRegularRpcServerGraphQLHostAndCORS(t *testing.T) {
