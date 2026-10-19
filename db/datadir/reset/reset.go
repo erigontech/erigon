@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"regexp"
 	"slices"
@@ -49,6 +50,15 @@ type Reset struct {
 // component is optional because a datadir can still hold legacy "v1-" names: RenameOldVersions
 // rewrites them to the dotted spelling, and reset does not run it first.
 var stateKVName = regexp.MustCompile(`^(v[0-9]+(?:\.[0-9]+)?)-(accounts|storage|commitment)\.([0-9]+)-([0-9]+)\.kv$`)
+
+var entityFileName = regexp.MustCompile(`^v[0-9]+(?:\.[0-9]+)?-([a-z]+)\.[0-9]+-([0-9]+)\.(kv|v|ef)$`)
+
+func startupName(name string) string {
+	if rest, ok := strings.CutPrefix(name, "v1-"); ok {
+		return "v1.0-" + rest
+	}
+	return name
+}
 
 // domainBuild is the file a step range will hold for one domain once reset is done and the
 // downloader has fetched what the manifest describes. Only the highest version of a logical file is
@@ -127,34 +137,73 @@ func (reset *Reset) checkStateBuilds() error {
 		}
 	}
 
+	entityEnds := map[string]uint64{}
+	recordEnd := func(fileName string) {
+		m := entityFileName.FindStringSubmatch(fileName)
+		if m == nil {
+			return
+		}
+		toStep, err := strconv.ParseUint(m[2], 10, 64)
+		if err != nil {
+			return
+		}
+		entity := m[1] + "." + m[3]
+		entityEnds[entity] = max(entityEnds[entity], toStep)
+	}
+
 	// A file the manifest describes ends up canonical whether or not it is on disk now: reset drops
 	// the lock file, and the next sync fetches or repairs it.
 	for _, item := range reset.PreverifiedSnapshots {
-		name, ok := strings.CutPrefix(item.Name, "domain/")
-		if !ok {
-			continue
+		dir, name, _ := strings.Cut(item.Name, "/")
+		switch dir {
+		case "domain":
+			record(name, false)
+			recordEnd(name)
+		case "history", "idx":
+			recordEnd(name)
 		}
-		record(name, false)
 	}
 
-	entries, err := os.ReadDir(reset.Dirs.SnapDomain)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
+	for _, dir := range []string{reset.Dirs.SnapDomain, reset.Dirs.SnapHistory, reset.Dirs.SnapIdx} {
+		entries, err := os.ReadDir(dir)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			name := startupName(entry.Name())
+			recordEnd(name)
+			if dir != reset.Dirs.SnapDomain {
+				continue
+			}
+			if _, known := reset.PreverifiedSnapshots.Get("domain/" + name); known {
+				continue
+			}
+			record(name, true)
+		}
 	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+
+	visibleEnd := uint64(math.MaxUint64)
+	for _, end := range entityEnds {
+		visibleEnd = min(visibleEnd, end)
+	}
+	hidden := func(commitment *domainBuild) bool {
+		for _, domains := range builds {
+			merged := domains["commitment"]
+			if merged != nil && merged != commitment && merged.toStep <= visibleEnd &&
+				merged.fromStep <= commitment.fromStep && commitment.toStep <= merged.toStep {
+				return true
+			}
 		}
-		if _, known := reset.PreverifiedSnapshots.Get("domain/" + entry.Name()); known {
-			continue
-		}
-		record(entry.Name(), true)
+		return false
 	}
 
 	var mixed []string
 	for stepRange, domains := range builds {
 		commitment := domains["commitment"]
-		if commitment == nil || !commitment.referenced() {
+		if commitment == nil || !commitment.referenced() || hidden(commitment) {
 			continue
 		}
 		for _, domain := range []string{"accounts", "storage"} {

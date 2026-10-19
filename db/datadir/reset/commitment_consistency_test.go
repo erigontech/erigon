@@ -2,6 +2,7 @@ package reset
 
 import (
 	"os"
+	"slices"
 	"testing"
 
 	"github.com/go-quicktest/qt"
@@ -245,10 +246,7 @@ func TestResetFollowsTheLoaderPastUnsupportedVersions(t *testing.T) {
 	})
 }
 
-// v1- and v1.0- parse to the same version but are two files, and the manifest only ever names one
-// spelling, so the other is kept as a local build. Either may be the one opened — glob order
-// actually favours the legacy spelling — so a twin makes the pair unsafe whichever wins.
-func TestResetTreatsALegacyTwinOfACanonicalFileAsLocal(t *testing.T) {
+func TestResetTreatsALegacyTwinOfACanonicalFileAsCanonical(t *testing.T) {
 	withOsRoot(t, func(root *os.Root) {
 		startEntries := []fsEntry{{Name: "snapshots/domain/v1-commitment.0-256.kv"}}
 		makeEntries(t, startEntries, root)
@@ -259,9 +257,11 @@ func TestResetTreatsALegacyTwinOfACanonicalFileAsLocal(t *testing.T) {
 			{Name: "domain/v1.0-accounts.0-256.kv"},
 		}
 		r.PreverifiedSnapshots.Sort()
-		err := r.Run()
-		qt.Assert(t, qt.IsNotNil(err))
-		qt.Assert(t, qt.StringContains(err.Error(), "0-256"))
+		qt.Assert(t, qt.IsNil(r.Run()))
+		qt.Assert(t, qt.IsNil(r.Dirs.RenameOldVersions(false)))
+		_, err := root.Stat("snapshots/domain/v1.0-commitment.0-256.kv")
+		qt.Assert(t, qt.IsNil(err))
+		qt.Assert(t, qt.IsNil(r.checkStateBuilds()))
 	})
 }
 
@@ -280,20 +280,125 @@ func TestResetIgnoresReversedStepRanges(t *testing.T) {
 	})
 }
 
-// The alias tie is decided by name, not by chance: the loader walks a sorted listing and keeps a
-// candidate only on a strictly greater version, and '-' sorts before '.'. So when the manifest
-// names the legacy spelling, the canonical file wins and the local twin never loads.
 func TestResetKeepsTheWinningAliasWhenTheCanonicalOneSortsFirst(t *testing.T) {
 	withOsRoot(t, func(root *os.Root) {
-		startEntries := []fsEntry{{Name: "snapshots/domain/v1.0-commitment.0-256.kv"}} // local twin, sorts second
+		startEntries := []fsEntry{{Name: "snapshots/domain/v1.0-commitment.0-256.kv"}}
 		makeEntries(t, startEntries, root)
 		r := makeTestingReset(t, startEntries, root, "", ".")
 		r.RemoveUnknown, r.RemoveLocal = false, false
 		r.PreverifiedSnapshots = preverified.SortedItems{
-			{Name: "domain/v1-commitment.0-256.kv"}, // canonical, sorts first, so it is the one opened
+			{Name: "domain/v1-commitment.0-256.kv"},
 			{Name: "domain/v1-accounts.0-256.kv"},
 		}
 		r.PreverifiedSnapshots.Sort()
 		qt.Assert(t, qt.IsNil(r.Run()))
+	})
+}
+
+func TestResetRefusesLegacyStateThatStartupRenamesIntoTheManifest(t *testing.T) {
+	withOsRoot(t, func(root *os.Root) {
+		startEntries := []fsEntry{
+			{Name: "snapshots/domain/v1-accounts.0-256.kv"},
+			{Name: "snapshots/domain/v1-storage.0-256.kv"},
+			{Name: "snapshots/domain/v1-commitment.0-256.kv"},
+		}
+		makeEntries(t, startEntries, root)
+		r := makeTestingReset(t, startEntries, root, "", ".")
+		r.RemoveUnknown, r.RemoveLocal = false, false
+		r.PreverifiedSnapshots = preverified.SortedItems{
+			{Name: "domain/v1.0-accounts.0-256.kv"},
+			{Name: "domain/v1.0-storage.0-256.kv"},
+		}
+		r.PreverifiedSnapshots.Sort()
+		err := r.Run()
+		qt.Assert(t, qt.IsNotNil(err))
+		qt.Assert(t, qt.StringContains(err.Error(), "0-256"))
+		qt.Assert(t, qt.IsNil(r.Dirs.RenameOldVersions(false)))
+		qt.Assert(t, qt.IsNotNil(r.checkStateBuilds()))
+	})
+}
+
+func runCoveredRangeReset(t *testing.T, root *os.Root, local, manifest []string) error {
+	var startEntries []fsEntry
+	for _, name := range local {
+		startEntries = append(startEntries, fsEntry{Name: slashName(name)})
+	}
+	makeEntries(t, startEntries, root)
+	r := makeTestingReset(t, startEntries, root, "", ".")
+	r.RemoveUnknown, r.RemoveLocal = false, false
+	r.PreverifiedSnapshots = preverified.SortedItems{
+		{Name: "domain/v1.0-accounts.0-2.kv"},
+		{Name: "domain/v1.0-storage.0-2.kv"},
+	}
+	for _, name := range manifest {
+		r.PreverifiedSnapshots = append(r.PreverifiedSnapshots, preverified.Item{Name: name})
+	}
+	r.PreverifiedSnapshots.Sort()
+	return r.Run()
+}
+
+var completeLocalMerge = []string{
+	"snapshots/domain/v2.1-commitment.0-2.kv",
+	"snapshots/domain/v2.1-commitment.0-4.kv",
+	"snapshots/domain/v1.0-accounts.0-4.kv",
+	"snapshots/domain/v1.0-storage.0-4.kv",
+}
+
+func TestResetAllowsAMixedRangeHiddenByACompleteMerge(t *testing.T) {
+	withOsRoot(t, func(root *os.Root) {
+		qt.Assert(t, qt.IsNil(runCoveredRangeReset(t, root, completeLocalMerge, nil)))
+	})
+	withOsRoot(t, func(root *os.Root) {
+		qt.Assert(t, qt.IsNil(runCoveredRangeReset(t, root, append(slices.Clone(completeLocalMerge),
+			"snapshots/history/v1.0-accounts.0-4.v",
+			"snapshots/idx/v1.0-logaddrs.0-4.ef"), []string{"history/v1.0-accounts.0-2.v"})))
+	})
+}
+
+func TestResetChecksAMixedRangeWhenTheMergeIsIncomplete(t *testing.T) {
+	withOsRoot(t, func(root *os.Root) {
+		err := runCoveredRangeReset(t, root, []string{
+			"snapshots/domain/v2.1-commitment.0-2.kv",
+			"snapshots/domain/v2.1-commitment.0-4.kv",
+			"snapshots/domain/v1.0-accounts.0-4.kv",
+		}, nil)
+		qt.Assert(t, qt.IsNotNil(err))
+		qt.Assert(t, qt.StringContains(err.Error(), "0-2"))
+	})
+}
+
+func TestResetChecksAMixedRangeWhenAnotherEntityHoldsTheMergeBack(t *testing.T) {
+	for _, lagging := range []string{
+		"history/v1.0-accounts.0-2.v",
+		"idx/v1.0-logaddrs.0-2.ef",
+		"domain/v1.0-code.0-2.kv",
+	} {
+		for _, fromManifest := range []bool{false, true} {
+			local, manifest := slices.Clone(completeLocalMerge), []string(nil)
+			if fromManifest {
+				manifest = append(manifest, lagging)
+			} else {
+				local = append(local, "snapshots/"+lagging)
+			}
+			withOsRoot(t, func(root *os.Root) {
+				err := runCoveredRangeReset(t, root, local, manifest)
+				qt.Assert(t, qt.IsNotNil(err), qt.Commentf("%s, from manifest: %v", lagging, fromManifest))
+				qt.Assert(t, qt.StringContains(err.Error(), "0-2"))
+			})
+		}
+	}
+}
+
+func TestResetChecksAdjacentRangesThatDoNotCoverEachOther(t *testing.T) {
+	withOsRoot(t, func(root *os.Root) {
+		err := runCoveredRangeReset(t, root, []string{
+			"snapshots/domain/v2.1-commitment.0-2.kv",
+			"snapshots/domain/v2.1-commitment.2-4.kv",
+		}, []string{
+			"domain/v1.0-accounts.2-4.kv",
+			"domain/v1.0-storage.2-4.kv",
+		})
+		qt.Assert(t, qt.IsNotNil(err))
+		qt.Assert(t, qt.StringContains(err.Error(), "0-2, 2-4"))
 	})
 }
