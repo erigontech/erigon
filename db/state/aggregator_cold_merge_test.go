@@ -158,8 +158,8 @@ func TestAggregatorRecoverDemotionRemovesInterruptedColdMerge(t *testing.T) {
 }
 
 func TestAggregatorColdMergeWaitsWhilePaused(t *testing.T) {
-	t.Parallel()
 	agg := testAggWithColdCommitment(t, []testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}}, 4)
+	pausedBefore := mxColdMergePausedSeconds.GetValue()
 	agg.coldIO.Pause()
 	done := make(chan error, 1)
 	go func() {
@@ -174,9 +174,25 @@ func TestAggregatorColdMergeWaitsWhilePaused(t *testing.T) {
 		t.Fatalf("merge finished while paused: %v", err)
 	case <-time.After(100 * time.Millisecond):
 	}
+	require.Equal(t, 1.0, mxColdMergePaused.GetValue())
 	agg.coldIO.Resume()
 	require.NoError(t, <-done)
 	require.True(t, isSymlink(t, domainFileBySuffix(t, agg.Dirs().SnapDomain, "commitment.0-4.kv")))
+	require.GreaterOrEqual(t, mxColdMergePausedSeconds.GetValue()-pausedBefore, 0.1)
+}
+
+func TestAggregatorColdMergeMetrics(t *testing.T) {
+	agg := testAggWithColdCommitment(t, []testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}}, 4)
+	inBefore, outBefore := mxColdMergeInBytes.GetValue(), mxColdMergeOutBytes.GetValue()
+
+	mergeAll(t, agg, 4*agg.StepSize())
+
+	fi, err := os.Stat(domainFileBySuffix(t, agg.Dirs().SnapDomain, "commitment.0-4.kv"))
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, mxColdMergeOutBytes.GetValue()-outBefore, float64(fi.Size()))
+	require.Greater(t, mxColdMergeInBytes.GetValue()-inBefore, 0.0)
+	require.Equal(t, 4.0, mxColdMergeSteps.GetValue())
+	require.Equal(t, 1.0, mxColdMergeProgress.GetValue())
 }
 
 func TestAggregatorColdMergeIgnoresPauseWhenDisabled(t *testing.T) {

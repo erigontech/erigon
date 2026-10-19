@@ -50,6 +50,14 @@ var (
 	mxDemotionSeconds         = metrics.GetOrCreateGauge("tiering_demotion_seconds")
 	mxDemotionCopyBytesPerSec = metrics.GetOrCreateGauge("tiering_demotion_copy_bytes_per_sec")
 
+	mxColdMergePaused        = metrics.GetOrCreateGauge("tiering_cold_merge_paused")
+	mxColdMergePausedSeconds = metrics.GetOrCreateGauge("tiering_cold_merge_paused_seconds_total")
+	mxColdMergeProgress      = metrics.GetOrCreateGauge("tiering_cold_merge_progress")
+	mxColdMergeSeconds       = metrics.NewHistogram("tiering_cold_merge_seconds", []float64{10, 30, 60, 120, 300, 600, 1200, 1800, 3600, 7200})
+	mxColdMergeSteps         = metrics.GetOrCreateGauge("tiering_cold_merge_steps")
+	mxColdMergeInBytes       = metrics.GetOrCreateGauge("tiering_cold_merge_in_bytes_total")
+	mxColdMergeOutBytes      = metrics.GetOrCreateGauge("tiering_cold_merge_out_bytes_total")
+
 	tierProbes, tierSlowProbes, tierExistenceFP [2]atomic.Uint64
 	tierLookups, tierHDDLookups                 atomic.Uint64
 )

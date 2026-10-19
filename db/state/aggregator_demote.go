@@ -279,34 +279,3 @@ func recoverDemotion(snapDomain, coldDir string, logger log.Logger) error {
 	}
 	return nil
 }
-
-const coldMergeLinkSuffix = ".coldmerge.tmp"
-
-// createColdMergeLink records an in-flight cold merge output before it is written, so recovery can find and
-// remove it in the shared cold dir.
-func createColdMergeLink(path, target string) (string, error) {
-	link := path + coldMergeLinkSuffix
-	removeColdMergeLink(link)
-	if err := os.Symlink(target, link); err != nil {
-		return "", err
-	}
-	return link, dir.FsyncDir(filepath.Dir(link))
-}
-
-func commitColdMergeLink(link, path string) error {
-	if err := os.Rename(link, path); err != nil {
-		return err
-	}
-	return dir.FsyncDir(filepath.Dir(path))
-}
-
-// removeColdMergeLink removes the link, its target and the compressor's temp files next to the target.
-func removeColdMergeLink(link string) {
-	if target, err := os.Readlink(link); err == nil {
-		tmps, _ := filepath.Glob(target + ".*.tmp")
-		for _, p := range append(tmps, target) {
-			_ = dir.RemoveFile(p)
-		}
-	}
-	_ = dir.RemoveFile(link)
-}

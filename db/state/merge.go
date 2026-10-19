@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
@@ -444,7 +445,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 
 	fromStep, toStep := kv.Step(r.values.from/r.aggStep), kv.Step(r.values.to/r.aggStep)
 	kvFilePath := dt.d.kvNewFilePath(fromStep, toStep)
-	outPath, coldLink := kvFilePath, ""
+	outPath, coldLink, coldStart := kvFilePath, "", time.Now()
 	if r.toColdDir {
 		outPath = filepath.Join(dt.d.coldDir, filepath.Base(kvFilePath))
 		if coldLink, err = createColdMergeLink(kvFilePath, outPath); err != nil {
@@ -473,7 +474,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	}
 
 	if r.toColdDir {
-		kvFile.SetOutputPacer(func() error { return dt.d.coldIO.Wait(ctx) })
+		kvFile.SetOutputPacer(func() error { return dt.d.waitColdMerge(ctx) })
 	}
 	forceNoCompress := toStep-fromStep < DomainMinStepsToCompress
 	kvWriter = dt.dataWriter(kvFile, forceNoCompress)
@@ -532,7 +533,8 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	i := uint64(0)
 	for cp.Len() > 0 {
 		if r.toColdDir && i%4096 == 0 {
-			if err := dt.d.coldIO.Wait(ctx); err != nil {
+			mxColdMergeProgress.Set(float64(i) / float64(cnt))
+			if err := dt.d.waitColdMerge(ctx); err != nil {
 				return nil, nil, nil, err
 			}
 		}
@@ -613,6 +615,10 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	valuesIn.version, _ = version.ParseVersion(filepath.Base(kvFilePath))
 	if valuesIn.decompressor, err = seg.NewDecompressor(kvFilePath); err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dt.d.FilenameBase, r.values.from, r.values.to, err)
+	}
+	if r.toColdDir {
+		mxColdMergeProgress.Set(1)
+		dt.d.logColdMerge(r.values, domainFiles, valuesIn, coldStart)
 	}
 
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
