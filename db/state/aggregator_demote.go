@@ -24,11 +24,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -229,4 +231,31 @@ func (a *Aggregator) demotionCandidate(boundaryTxNum uint64) (from, to kv.Step, 
 		return kv.Step(f.startTxNum / stepSize), kv.Step(f.endTxNum / stepSize), true
 	}
 	return 0, 0, false
+}
+
+// recoverDemotion removes the leftovers of an interrupted demotion. The cold dir can be shared by several datadirs,
+// so only partial copies of this datadir's commitment files are removed there.
+func recoverDemotion(snapDomain, coldDir string, logger log.Logger) error {
+	entries, err := os.ReadDir(snapDomain)
+	if err != nil {
+		return err
+	}
+	commitment := "-" + kv.CommitmentDomain.String() + "."
+	for _, e := range entries {
+		name := e.Name()
+		switch {
+		case strings.HasSuffix(name, ".demote.tmp"):
+			if err := dir.RemoveFile(filepath.Join(snapDomain, name)); err != nil {
+				return err
+			}
+		case strings.Contains(name, commitment) && strings.HasSuffix(name, ".kv"):
+			if err := dir.RemoveFile(filepath.Join(coldDir, name+".tmp")); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return err
+			}
+			if _, err := os.Stat(filepath.Join(coldDir, name)); err == nil && e.Type().IsRegular() {
+				logger.Info("[tiering] demotion swap pending; the next trigger finishes it", "file", name)
+			}
+		}
+	}
+	return nil
 }

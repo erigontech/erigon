@@ -29,6 +29,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/mvcc"
 )
@@ -319,4 +320,51 @@ func TestAggregatorDemoteFileMetrics(t *testing.T) {
 	require.GreaterOrEqual(t, demotedBytes.GetValue()-bytesBefore, float64(fi.Size()))
 	require.Positive(t, mxDemotionSeconds.GetValue())
 	require.Positive(t, mxDemotionCopyBytesPerSec.GetValue())
+}
+
+func TestAggregatorOpenFolderFailsOnDanglingSymlink(t *testing.T) {
+	t.Parallel()
+	db, agg := testAggWithThreeSteps(t)
+	ssdPath := domainFileBySuffix(t, agg.Dirs().SnapDomain, "commitment.1-2.kv")
+	coldPath := filepath.Join(t.TempDir(), filepath.Base(ssdPath))
+	require.NoError(t, dir.RemoveFile(ssdPath))
+	require.NoError(t, os.Symlink(coldPath, ssdPath))
+
+	err := agg.OpenFolder(db)
+	require.ErrorContains(t, err, "dangling symlink")
+	require.ErrorContains(t, err, coldPath)
+}
+
+func TestAggregatorRecoverDemotionRemovesOwnLeftoversOnly(t *testing.T) {
+	t.Parallel()
+	_, agg := testAggWithThreeSteps(t)
+	snapDomain := agg.Dirs().SnapDomain
+	ssdPath := domainFileBySuffix(t, snapDomain, "commitment.1-2.kv")
+	name := filepath.Base(ssdPath)
+	coldDir := t.TempDir()
+	ownTmp := filepath.Join(coldDir, name+".tmp")
+	otherTmp := filepath.Join(coldDir, "v1.0-commitment.7-8.kv.tmp")
+	linkTmp := ssdPath + ".demote.tmp"
+	for _, p := range []string{ownTmp, otherTmp} {
+		require.NoError(t, os.WriteFile(p, []byte("partial"), 0o644))
+	}
+	require.NoError(t, os.Symlink(filepath.Join(coldDir, name), linkTmp))
+
+	require.NoError(t, recoverDemotion(snapDomain, coldDir, agg.logger))
+
+	for _, p := range []string{ownTmp, linkTmp} {
+		_, err := os.Lstat(p)
+		require.ErrorIs(t, err, fs.ErrNotExist, p)
+	}
+	_, err := os.Stat(otherTmp)
+	require.NoError(t, err)
+	require.False(t, isSymlink(t, ssdPath))
+}
+
+func TestAggregatorOpenFolderIgnoresDanglingDemoteTmpLink(t *testing.T) {
+	t.Parallel()
+	db, agg := testAggWithThreeSteps(t)
+	ssdPath := domainFileBySuffix(t, agg.Dirs().SnapDomain, "commitment.1-2.kv")
+	require.NoError(t, os.Symlink(filepath.Join(t.TempDir(), "gone.kv"), ssdPath+".demote.tmp"))
+	require.NoError(t, agg.OpenFolder(db))
 }
