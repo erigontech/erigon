@@ -468,8 +468,15 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		return err
 	}
 
+	start, probesBefore := time.Now(), state.ReadTierProbeCounts()
 	if !(dbg.Exec3Parallel || cfg.experimentalBAL) {
-		return execV3Serial(ctx, s, u, cfg, doms, rwTx, rng, logger)
+		err := execV3Serial(ctx, s, u, cfg, doms, rwTx, rng, logger)
+		if singleBlockCycleDone(err, rng, cfg.syncCfg.LoopBlockLimit) {
+			if obsErr := observeSingleBlockCycle(ctx, cfg, rwTx, rng, start, probesBefore); obsErr != nil {
+				return obsErr
+			}
+		}
+		return err
 	}
 
 	out, execErr := execV3(ctx, cfg, doms, rwTx, s.SyncMode(), s.CurrentSyncCycle.IsInitialCycle, s.LogPrefix(), rng, nil, logger)
@@ -486,7 +493,40 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		}
 	}
 
-	return renderExecOutcome(execErr, out, cfg, s, u, logger)
+	err = renderExecOutcome(execErr, out, cfg, s, u, logger)
+	if singleBlockCycleDone(err, rng, cfg.syncCfg.LoopBlockLimit) {
+		if obsErr := observeSingleBlockCycle(ctx, cfg, rwTx, rng, start, probesBefore); obsErr != nil {
+			return obsErr
+		}
+	}
+	return err
+}
+
+// singleBlockCycleDone reports whether a cycle executed exactly one block and finished it. With a one-block loop limit
+// the cycle ends with ErrLoopExhausted.
+func singleBlockCycleDone(err error, rng execRange, loopBlockLimit uint) bool {
+	if err != nil && !errors.Is(err, &ErrLoopExhausted{}) {
+		return false
+	}
+	return rng.blockNum == rng.maxBlockNum || loopBlockLimit == 1
+}
+
+// observeSingleBlockCycle records per-block exec time (execution + commitment), Mgas/s and commitment file probes
+// by tier for cycles that execute one block, as at the chain tip.
+func observeSingleBlockCycle(ctx context.Context, cfg ExecuteBlockCfg, tx kv.TemporalTx, rng execRange, start time.Time, probesBefore state.TierProbeCounts) error {
+	d := time.Since(start).Seconds()
+	header, err := cfg.blockReader.HeaderByNumber(ctx, tx, rng.blockNum)
+	if err != nil || header == nil {
+		return err
+	}
+	mxExecBlockSeconds.Observe(d)
+	mxExecBlockSecondsMax.Observe(d)
+	mxExecBlockMgasPerSec.Observe(float64(header.GasUsed) / 1e6 / d)
+	probes := state.ReadTierProbeCounts().Sub(probesBefore)
+	mxTieringSSDProbesPerBlock.Observe(float64(probes.SSD))
+	mxTieringHDDProbesPerBlock.Observe(float64(probes.HDD))
+	mxTieringHDDSlowProbesPerBlock.Observe(float64(probes.HDDSlow))
+	return nil
 }
 
 // renderExecOutcome maps executor outcomes to the stage's error and unwind contract.

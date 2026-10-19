@@ -1520,6 +1520,11 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 	useCache := dt.name != kv.CommitmentDomain && !bounded && buf == nil
 
 	hi, lo := dt.ht.iit.hashKey(k)
+	var probes *lookupProbes
+	if dt.name == kv.CommitmentDomain {
+		probes = newLookupProbes(hi)
+		defer probes.done()
+	}
 
 	getFromFileCache := dt.getFromFileCache
 
@@ -1559,9 +1564,17 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 			}
 		}
 
+		var probeStart time.Time
+		tier := tierOf(f.src.cold)
+		if probes != nil && probes.timed(tier) {
+			probeStart = time.Now()
+		}
 		v, found, _, err = dt.getLatestFromFile(i, k, buf, hi, lo)
 		if err != nil {
 			return nil, false, 0, 0, err
+		}
+		if probes != nil {
+			probes.probe(tier, probeStart, found, useExistenceFilter && f.src.existence != nil)
 		}
 		if !found {
 			if traceGetLatest == dt.name {
