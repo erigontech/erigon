@@ -50,6 +50,7 @@ type ForkChoiceStorageReader interface {
 	GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error)
 	GetHeadNode() (ForkChoiceNode, uint64, error)
 	HighestSeen() uint64
+	HasImportedDescendantAfter(root common.Hash, slot uint64) bool
 	BlockProcessing() bool
 	JustifiedCheckpoint() solid.Checkpoint
 	JustifiedSlot() uint64
@@ -183,7 +184,7 @@ type ForkChoiceStorageWriter interface {
 	// need the envelope on disk to resolve their parent execution payload.
 	StoreAnchorEnvelope(blockRoot common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
 	AddPreverifiedBlobSidecar(blobSidecar *cltypes.BlobSidecar) error
-	OnTick(time uint64)
+	OnTick(timeMs uint64)
 	SetSynced(synced bool)
 	ProcessAttestingIndicies(attestation *solid.Attestation, attestionIndicies []uint64)
 }
