@@ -279,18 +279,24 @@ func (s *Service) slotLoop(ctx context.Context) {
 		slotStart := time.Unix(int64(genesisTime+currentSlot*secPerSlot), 0)
 		nextSlotStart := slotStart.Add(slotDuration)
 
-		// Wait until 1/3 into the slot for proposals, then attest.
-		proposalTime := slotStart.Add(slotDuration / 3)
-		if time.Now().Before(proposalTime) {
-			time.Sleep(time.Until(proposalTime))
-		}
+		// PROPOSE AT THE START OF THE SLOT. The 1/3 offset is the ATTESTATION deadline — the instant by
+		// which attesters must ALREADY HAVE the block — so a proposer that only begins there is late for
+		// its own attesters by construction. Measured on a 2s slot: AssembleBlock arrived p50 669ms into
+		// the slot it named (min 667 = slotDuration/3 exactly), leaving 1,333ms for a block whose budget
+		// is 1,800ms. The execution layer then answered past the slot end; this loop is single-threaded
+		// and maybePropose blocks on it, so the sleep to nextSlotStart below was skipped, currentSlot was
+		// recomputed from the wall clock, and the slots in between were simply dropped — 2, 4 and 6
+		// second steps between consecutive block numbers.
+		s.maybePropose(ctx, currentSlot)
 
+		// Attest at 1/3, by which point the proposal is in — which is what the offset is for.
+		attestTime := slotStart.Add(slotDuration / 3)
+		if time.Now().Before(attestTime) {
+			time.Sleep(time.Until(attestTime))
+		}
 		if ctx.Err() != nil {
 			return
 		}
-
-		// Propose if we have a duty for this slot.
-		s.maybePropose(ctx, currentSlot)
 
 		// Attest for all validators with duties at this slot.
 		s.maybeAttest(ctx, currentSlot)

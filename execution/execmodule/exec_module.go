@@ -200,7 +200,23 @@ type ExecModule struct {
 	// pipeline Sync and all FCU state. Ops either TryAcquire and report Busy
 	// (retried by the CL) or block, and the background FCU commit/prune
 	// goroutines inherit the semaphore, releasing it only when their work is done.
-	semaphore     *semaphore.Weighted
+	semaphore *semaphore.Weighted
+
+	// roundMu is the INNER LOOP's own mutual-exclusion domain: one pre-execution round at a time.
+	//
+	// ⚠ IT IS DELIBERATELY NOT THE SEMAPHORE ABOVE. A round used to take that one and hold it for its
+	// whole execution, which made the two operations that MUST overlap to build a block on time —
+	// executing into the block, and sealing it — mutually exclusive. AssembleBlock TryAcquires, so it
+	// returned Busy whenever a round was running; the seal then missed its slot, the CL retried with
+	// identical attributes, the duplicate-build short circuit handed back a PayloadID for a build that
+	// never ran, and production stalled. Measured on live328: 115 "failed to produce execution payload"
+	// over two minutes. Measured on live331: a round waiting 164ms on the semaphore to do 12ms of work.
+	//
+	// The domains are genuinely separate — the semaphore guards the pipeline Sync and FCU state, while a
+	// round writes into the producer's OWN per-generation SharedDomains (preexec_frontier.go) and its own
+	// flash state. Lock order is ONE WAY: an outer op (assemble) may take the semaphore and then this; a
+	// round takes ONLY this, so there is no cycle to deadlock on.
+	roundMu       sync.Mutex
 	forkValidator *ForkValidator
 	// preExec is the PRODUCER's pre-executed block chain — separate from the fork validator's candidate
 	// slot, which is validation space (see preexec_frontier.go).

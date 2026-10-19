@@ -3,6 +3,9 @@ package stagedsync
 import (
 	"context"
 	"fmt"
+	"time"
+
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 // A round the CALLER stopped is not a round that failed.
@@ -61,16 +64,27 @@ func (be *blockExecutor) stopping(pe *parallelExecutor) bool {
 
 // cutIfStopped shortens a stopped round to the transactions that completed, and reports whether it did.
 //
-// It only acts once everything dispatched has come back (nothing in progress), so no result can arrive for
-// a task that has just been truncated away. The cut is at the last PUBLISHED transaction, which at this
-// point is also the last validated one — the publish loop has already drained everything validation
+// The cut is at the last PUBLISHED transaction, which at this point is also the last validated one — the publish loop has already drained everything validation
 // finished — so the block keeps exactly the prefix whose state reached sd.mem.
 func (be *blockExecutor) cutIfStopped(pe *parallelExecutor) bool {
 	if be.cut {
 		return true
 	}
-	if !be.stopping(pe) || be.execTasks.inProgressCount() > 0 {
+	if !be.stopping(pe) {
 		return false
+	}
+	// THE CUT DOES NOT WAIT FOR WHAT IS STILL RUNNING. A round ends at the last transaction executed
+	// IN ORDER; anything dispatched beyond that is work the block will not carry, so there is nothing
+	// to wait for — its result is discarded as it arrives (nextResult).
+	//
+	// This used to require inProgressCount() == 0, and that wait WAS the stop's cost: measured on
+	// live328, a round given 13ms reported back 117ms later, and 14 of 50 stops kept NOTHING while
+	// still burning 61-104ms of the slot. The seal then lands past its deadline, the CL retries, the
+	// duplicate-build short circuit hands back a PayloadID for a build that never runs, and block
+	// production stalls for minutes. A stop must cost at most the transaction already running.
+	if be.stopSeen.IsZero() {
+		be.stopSeen = time.Now()
+		be.stopInFlight = be.execTasks.inProgressCount()
 	}
 	k := be.publishTasks.maxComplete()
 	// Nothing finished, or everything but the block-end did: neither is a cut worth making. The first has
@@ -87,6 +101,12 @@ func (be *blockExecutor) cutIfStopped(pe *parallelExecutor) bool {
 	be.validateTasks.truncate(k + 1)
 	be.publishTasks.truncate(k + 1)
 	be.cut = true
+	if !be.stopSeen.IsZero() {
+		log.Warn("[round-stop] drained",
+			"inFlightAtStop", be.stopInFlight,
+			"drainMs", time.Since(be.stopSeen).Milliseconds(),
+			"kept", k+1, "ofTasks", len(be.tasks))
+	}
 	return true
 }
 

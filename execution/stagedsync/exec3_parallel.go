@@ -2237,6 +2237,11 @@ type execRequest struct {
 }
 
 type blockExecutor struct {
+	// stopSeen is when this round first observed its stop, and stopInFlight how many transactions were
+	// still out with workers at that instant. Together with the drain that follows they say whether a
+	// stop costs one transaction, as designed, or the whole front.
+	stopSeen     time.Time
+	stopInFlight int
 	sync.Mutex
 	blockNum  uint64
 	blockHash common.Hash
@@ -2461,6 +2466,20 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	}
 
 	tx := task.index
+
+	// A CUT ROUND THROWS AWAY WHAT CAME BACK AFTER IT, AND DOES NOT WAIT FOR IT.
+	//
+	// The round ends at the last transaction executed IN ORDER; everything dispatched beyond that is
+	// work whose result the block will not carry. Waiting for it was costing the whole stop: measured
+	// on live328, a round given 13ms reported back 117ms later, and 14 of 50 stops kept NOTHING while
+	// still burning 61-104ms of the slot. A stop should cost at most the one transaction still running.
+	//
+	// So the cut happens immediately and these results are DISCARDED here — at the single point they
+	// enter, before any of the per-index bookkeeping below, because every slice they would touch has
+	// been truncated to the prefix and an index past it is out of range.
+	if be.cut && tx >= len(be.tasks) {
+		return nil, nil
+	}
 	be.results[tx] = &execResult{res, nil}
 	if res.Err != nil {
 		if execErr, ok := res.Err.(protocol.ErrExecAbortError); ok {

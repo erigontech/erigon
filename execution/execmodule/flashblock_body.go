@@ -222,17 +222,30 @@ func (f *flashBodyState) resetLocked(num uint64) {
 // body it guards live together, so the inserted/executed/sealed body is always the filtered set — the driver
 // no longer builds a body, computes a header, or calls InsertBlocks.
 func (e *ExecModule) PreExecuteFlashblock(ctx context.Context, inputs FlashblockInputs, newTxRLPs [][]byte) (*types.RawBody, common.Hash, ValidationResult, error) {
-	// Hold the exec semaphore across the WHOLE round (insert + pre-execute) so no other exec op interleaves
-	// mid-round, and so the atomic assemble can reuse preExecuteFlashblockLocked while already holding it.
-	if err := e.semaphore.Acquire(ctx, 1); err != nil {
-		return nil, common.Hash{}, ValidationResult{ValidationStatus: ExecutionStatusBusy}, err
+	// THE ROUND IS THE INNER LOOP AND RUNS IN ITS OWN DOMAIN. It takes roundMu, never the module
+	// semaphore: block assembly may hold that for as long as it needs and a round proceeds regardless.
+	// See the roundMu declaration for what holding the semaphore here used to cost.
+	// ⚠ INSTRUMENTED AND IT STAYS. A round still overruns its deadline by 30-105ms after moving off
+	// the module semaphore, so the wait is somewhere else. lockMs is time queued on this domain (the
+	// previous round, or a seal reconciling); workMs is the round itself. Deleting this measurement
+	// once already produced a false "clean" reading.
+	lockStart := time.Now()
+	e.roundMu.Lock()
+	lockWait := time.Since(lockStart)
+	defer e.roundMu.Unlock()
+	workStart := time.Now()
+	body, h, vr, err := e.preExecuteFlashblockLocked(ctx, inputs, newTxRLPs)
+	work := time.Since(workStart)
+	if lockWait+work > 25*time.Millisecond {
+		e.logger.Warn("[round-cost] where a round goes",
+			"lockMs", lockWait.Milliseconds(), "workMs", work.Milliseconds(), "txs", len(newTxRLPs))
 	}
-	defer e.semaphore.Release(1)
-	return e.preExecuteFlashblockLocked(ctx, inputs, newTxRLPs)
+	return body, h, vr, err
 }
 
-// preExecuteFlashblockLocked is PreExecuteFlashblock's body with the caller ALREADY holding e.semaphore, so
-// SealBlock can open the successor flashblock (empty round) atomically inside its own hold.
+// preExecuteFlashblockLocked is PreExecuteFlashblock's body with the caller ALREADY holding the round
+// domain (e.roundMu), so SealBlock can open the successor flashblock (empty round) atomically inside its
+// own hold. An outer caller that also holds e.semaphore takes them in that order — semaphore, then roundMu.
 func (e *ExecModule) preExecuteFlashblockLocked(ctx context.Context, inputs FlashblockInputs, newTxRLPs [][]byte) (*types.RawBody, common.Hash, ValidationResult, error) {
 	return e.accumulateFlashblockLocked(ctx, inputs, newTxRLPs, false)
 }
@@ -257,11 +270,22 @@ func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs Flas
 	if e.flash.num != inputs.Number {
 		e.flash.resetLocked(inputs.Number)
 	}
+	// ⚠ A ROUND MUST NOT SILENTLY RE-STAMP THE ATTRIBUTES. Every successful round writes e.flash.built =
+	// inputs at the end of this function. If the proposer attributes moved on since the block opened, that
+	// makes the stamp agree with the NEWEST round while the transactions already in the body executed under
+	// the OLD values — a block whose header no longer describes its own execution, which no follower can
+	// reproduce. The close cannot see it either: the stamp it compares has already been corrected. Report
+	// it, so "did this happen?" is a count rather than an argument. ReconcileAttrs is what prevents it.
+	if e.flash.valid && e.flash.num == inputs.Number && !sameProposerAttrs(e.flash.built, inputs) {
+		e.logger.Warn("[attrs-restamp] round carries attributes the open block did not execute under",
+			"block", inputs.Number, "bodyTxs", len(e.flash.body), "roundTxs", len(newTxRLPs),
+			"builtTs", e.flash.built.Timestamp, "roundTs", inputs.Timestamp)
+	}
 	// Filter the incoming stream against the frontier SD nonce + in-body dedup, appending survivors. A tx below
 	// the sender's frontier nonce is already sealed on the frontier (a DAG double-commit that straddled a block
 	// boundary) — drop it and REMEMBER it (seen) so a re-drain does not reconsider it. This is where the stale
 	// operator resolveBlock re-injection is removed, so it never reaches execution.
-	kept, err := e.filterStreamLocked(ctx, newTxRLPs)
+	kept, keptHashes, droppedHashes, err := e.filterStreamLocked(ctx, newTxRLPs)
 	if err != nil {
 		e.flash.mu.Unlock()
 		return nil, common.Hash{}, ValidationResult{ValidationStatus: ExecutionStatusBusy}, err
@@ -293,6 +317,10 @@ func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs Flas
 	vr, err := e.preExecuteLocked(ctx, rawBlock, func(txs [][]byte) *types.Header {
 		return BuildFlashHeader(inputs, txs, FlashblockOutputs{})
 	})
+	// What the FILTER kept, which is the only honest answer to "how many of these went in".
+	vr.RoundKept = len(kept)
+	vr.RoundKeptHashes = keptHashes
+	vr.RoundDroppedHashes = droppedHashes
 	// A STOPPED round keeps what it executed. Everything past that is as if it had never been fed: out of
 	// the maintained body, out of the header, and back to the caller to offer again.
 	if err == nil && vr.ValidationStatus == ExecutionStatusSuccess && vr.AppliedTxs < len(body) {
@@ -309,6 +337,11 @@ func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs Flas
 		}
 		stopped = &ExecutionStopped{
 			Reason: reason, Num: inputs.Number, Txs: len(kept), Applied: vr.AppliedTxs - roundBase,
+		}
+		// The prefix is what stayed in the body; the rest was rolled back out of it.
+		vr.RoundKept = stopped.Applied
+		if stopped.Applied >= 0 && stopped.Applied <= len(keptHashes) {
+			vr.RoundKeptHashes = keptHashes[:stopped.Applied]
 		}
 	}
 	// A round that MERGED is committed, whatever the clock says. Its state is in the block, so reporting
@@ -497,23 +530,36 @@ func (e *ExecModule) reopenFlashblockLocked(ctx context.Context, inputs Flashblo
 // decided) candidates, and RECORDS every decided (sender,nonce) in seen so a re-drain is never reconsidered.
 // Caller holds e.flash.mu. Returns the survivors in order. Reuses filterCandidatesByNonce's sequencing via the
 // frontier state reader.
-func (e *ExecModule) filterStreamLocked(ctx context.Context, newTxRLPs [][]byte) ([][]byte, error) {
+func (e *ExecModule) filterStreamLocked(ctx context.Context, newTxRLPs [][]byte) ([][]byte, []common.Hash, []common.Hash, error) {
 	if len(newTxRLPs) == 0 {
-		return nil, nil
+		return nil, nil, nil, nil
 	}
 	reader, closeReader, err := e.frontierStateReader(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	defer closeReader()
 	signer := types.LatestSignerForChainID(e.config.ChainID)
 
-	// Base nonce per sender: the frontier account nonce, advanced by whatever this in-progress body already
-	// holds for that sender (those txs will execute before these). next[] tracks the sequencing.
+	// Base nonce per sender: the frontier account nonce, advanced by whatever this in-progress body ALREADY
+	// HOLDS for that sender — those transactions execute before these.
+	//
+	// ⚠ THE BODY'S OWN NONCES WERE NOT CONSULTED. next[] is built fresh on every call, so the advancement a
+	// round made was thrown away when it returned, and the following round fell back to the frontier — which
+	// is the last SEALED block and knows nothing of the body being accumulated. Round 1 kept its 128 and set
+	// next=N+128; round 2 was offered N+128.. , compared them against N, and deferred every one as FUTURE.
+	// Measured on live356 during a 4,800-order burst: `in=128 kept=0 stale=0 future=128` round after round,
+	// drains offered 1,000-1,800 transactions and deferring nearly all of them, and blocks alternating
+	// 0, 41, 0, 156, 0, 0, 89 — one round's worth per block at best. e.flash.bodyNonce is exactly this
+	// record, maintained across rounds and rebuilt on rollback and re-open; it was only ever read by the
+	// continuity audit below.
 	next := make(map[accounts.Address]uint64)
 	nextNonce := func(a accounts.Address) uint64 {
 		if n, ok := next[a]; ok {
 			return n
+		}
+		if n, ok := e.flash.bodyNonce[a]; ok {
+			return n + 1
 		}
 		if acc, aerr := reader.ReadAccountData(a); aerr == nil && acc != nil {
 			return acc.Nonce
@@ -524,11 +570,20 @@ func (e *ExecModule) filterStreamLocked(ctx context.Context, newTxRLPs [][]byte)
 	var nStale, nFuture, nSeen int
 	cands, nBad := orderBySenderNonce(newTxRLPs, signer)
 	survivors := make([][]byte, 0, len(cands))
+	// WHICH transactions were kept, not just how many. The filter reorders by sender and nonce and keeps a
+	// SUBSET, so a caller that assumes a prefix of what it offered takes the wrong ones off its backlog and
+	// re-offers the ones already in the body — which come straight back as `seen`, forever.
+	keptHashes := make([]common.Hash, 0, len(cands))
+	// DECIDED AGAINST, as opposed to merely deferred. A stale or already-seen transaction will never be
+	// reconsidered, so the caller must stop offering it; a FUTURE one has only been told to wait for its
+	// predecessor and must keep coming back. Collapsing the two either loses transactions or loops on them.
+	droppedHashes := make([]common.Hash, 0, 8)
 	for _, c := range cands {
 		rlp, s := c.rlp, c.sender
 		k := snKeyExec{addr: s, nonce: c.nonce}
 		if e.flash.seen[k] {
 			nSeen++
+			droppedHashes = append(droppedHashes, c.hash)
 			continue // already decided (kept or dropped) — never reconsider
 		}
 		exp := nextNonce(s)
@@ -541,6 +596,7 @@ func (e *ExecModule) filterStreamLocked(ctx context.Context, newTxRLPs [][]byte)
 			}
 			e.logger.Warn("[TRACE-filter] STALE drop", "block", e.flash.num, "sender", s,
 				"nonce", c.nonce, "exp", exp, "src", srcKind, "srcBlock", srcBlock)
+			droppedHashes = append(droppedHashes, c.hash)
 			continue // stale: already sealed on the frontier — dropped (and now remembered)
 		}
 		if c.nonce > exp {
@@ -576,13 +632,14 @@ func (e *ExecModule) filterStreamLocked(ctx context.Context, newTxRLPs [][]byte)
 		}
 		e.flash.bodyNonce[s] = c.nonce
 		survivors = append(survivors, rlp)
+		keptHashes = append(keptHashes, c.hash)
 		next[s] = exp + 1
 	}
 	if nStale+nFuture+nSeen+nBad > 0 {
 		e.logger.Info("[TRACE-filter] round", "block", e.flash.num, "in", len(newTxRLPs),
 			"kept", len(survivors), "stale", nStale, "future", nFuture, "seen", nSeen, "undecodable", nBad)
 	}
-	return survivors, nil
+	return survivors, keptHashes, droppedHashes, nil
 }
 
 // auditSealedBody checks that the block just sealed can actually be RE-EXECUTED from its parent state, which
@@ -687,6 +744,7 @@ func (e *ExecModule) frontierStateReader(ctx context.Context) (state.StateReader
 // txCandidate is one decoded transaction awaiting a nonce verdict, with its sender resolved once.
 type txCandidate struct {
 	rlp    []byte
+	hash   common.Hash
 	sender accounts.Address
 	nonce  uint64
 	rank   int // the sender's first appearance, so senders keep the order they arrived in
@@ -736,7 +794,7 @@ func orderBySenderNonce(newTxRLPs [][]byte, signer *types.Signer) ([]txCandidate
 			r = len(rankOf)
 			rankOf[s] = r
 		}
-		cands = append(cands, txCandidate{rlp: rlp, sender: s, nonce: tx.GetNonce(), rank: r})
+		cands = append(cands, txCandidate{rlp: rlp, hash: tx.Hash(), sender: s, nonce: tx.GetNonce(), rank: r})
 	}
 	sort.SliceStable(cands, func(i, j int) bool {
 		if cands[i].rank != cands[j].rank {

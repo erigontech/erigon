@@ -79,6 +79,23 @@ type ValidationResult struct {
 	// AppliedTxs is how many of the block's body transactions this call left executed. It equals the body
 	// it was given unless the round was STOPPED part way, in which case the body was cut to it.
 	AppliedTxs int
+	// RoundKept is how many of the transactions THIS CALL was offered survived the stream filter and were
+	// appended to the body. It is NOT len(newTxRLPs): the filter drops transactions whose nonce is behind
+	// the frontier (stale) and defers ones ahead of it (future), before anything executes.
+	//
+	// ⚠ THE CALLER USED TO ASSUME THE BATCH LENGTH. Measured on live352, 455,798 transactions were offered
+	// across 3,841 rounds and 46 were kept — while the driver recorded every one of them as fed, marked
+	// them in flight, and its round-end line read applied=128 offered=128 while the chain held ONE
+	// transaction per block. It cannot be reconstructed from the returned body either: that is handed back
+	// BEFORE a round that does not commit is rolled back out of it.
+	RoundKept int
+	// RoundKeptHashes names them, in the order they went into the body. The filter reorders by sender and
+	// nonce and keeps a SUBSET, so the caller cannot take a prefix of what it offered.
+	RoundKeptHashes []common.Hash
+	// RoundDroppedHashes names the ones DECIDED AGAINST — already sealed on the frontier, or already judged
+	// in this block. They will never be reconsidered, so the caller stops offering them. Anything offered
+	// that is in neither list was DEFERRED (its nonce is ahead of the frontier) and must be offered again.
+	RoundDroppedHashes []common.Hash
 	// GasFull reports a round that ended because the BLOCK ran out of gas room, not because its
 	// caller stopped it. The transaction that did not fit is excluded and is the caller's to re-offer.
 	GasFull bool
@@ -198,6 +215,10 @@ type ExecutionModule interface {
 	// GetAssembledBlock retrieves the block that was assembled under the
 	// given payloadID.  The result is Busy when the builder has not finished.
 	GetAssembledBlock(ctx context.Context, payloadID uint64) (AssembledBlockResult, error)
+
+	// ReconcileAttrs brings the open block onto attributes delivered after it was opened, so the close never
+	// has to. See execmodule.ReconcileAttrs.
+	ReconcileAttrs(ctx context.Context, params *builder.Parameters) error
 
 	// SealBlock is the marker-driven CLOSE: the boundary assembler calls it when a block-end marker
 	// commits in consensus to seal the pre-executed in-progress flashblock (zero re-execution) and store

@@ -270,6 +270,37 @@ func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.P
 	return &types.BlockWithReceipts{Block: block, Receipts: receipts}, true, nil
 }
 
+// ReconcileAttrs brings the open block into line with attributes that arrived AFTER it opened, while there
+// is still a build window to pay for it in. It is the same reconcile the close runs, hoisted to the event
+// that makes it necessary.
+//
+// MEASURED, live348: the close re-executed the accumulated body on 4 blocks and took 1506/2032/685/792ms
+// doing it — each one exactly the interval between its "attrs changed" line and its [close-split] line.
+// The work itself is unavoidable (every proposer attribute is execution-affecting, so a body accumulated
+// under superseded attributes really is wrong), but the close is the one step that has to be constant
+// time, and paying it there pushed the seal past the next slot, whose attributes then superseded ITS
+// block: 4 in an unbroken chain. Run here, the close finds nothing to do.
+func (e *ExecModule) ReconcileAttrs(ctx context.Context, params *builder.Parameters) error {
+	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+		return err
+	}
+	defer e.semaphore.Release(1)
+	e.flash.mu.Lock()
+	open := e.flash.valid
+	built := e.flash.built
+	e.flash.mu.Unlock()
+	// Nothing open, or open under exactly these attributes: there is nothing to correct, and opening one
+	// here would pre-empt the driver's own open.
+	if !open || builtAttrsMatchParams(built, params) {
+		return nil
+	}
+	start := time.Now()
+	err := e.reconcileForAssembleLocked(ctx, params, false)
+	e.logger.Warn("[attrs-early-reconcile] open block brought onto the new attrs", "block", built.Number,
+		"tookMs", time.Since(start).Milliseconds(), "builtTs", built.Timestamp, "reqTs", params.Timestamp, "err", err)
+	return err
+}
+
 // SealBlock is the marker-driven CLOSE (the UNIVERSAL block-production step). The boundary assembler
 // (the cocoon driver's commits handler) calls it when the block-end MARKER commits in consensus — on EVERY
 // node, decoupled from the CL role. It seals the pre-executed in-progress flashblock via assemblePreconfirmed
@@ -277,10 +308,23 @@ func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.P
 // — riding behind — just RETRIEVES the already-sealed block instead of re-sealing it. Returns the sealed
 // block (or nil if there is no matching preconfirmed flashblock for these params). Acquires the semaphore.
 func (e *ExecModule) SealBlock(ctx context.Context, params *builder.Parameters, forceEmpty bool) (*types.BlockWithReceipts, error) {
+	// ⚠ THE CLOSE SHOULD BE CONSTANT TIME, AND IT IS NOT. Measured on live335 over 1,400 slots:
+	// p50 4ms, p95 55ms, max 1,711ms. Turning an already pre-executed block into its final form is
+	// bounded work, so a 400x tail is something else — and this method still takes the module
+	// semaphore that pre-execution was moved off. Split so the wait is not mistaken for the work.
+	semStart := time.Now()
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
 		return nil, err
 	}
+	semWait := time.Since(semStart)
 	defer e.semaphore.Release(1)
+	workStart := time.Now()
+	defer func() {
+		if w := time.Since(workStart); semWait+w > 20*time.Millisecond {
+			e.logger.Warn("[close-split] seal cost", "semWaitMs", semWait.Milliseconds(),
+				"workMs", w.Milliseconds(), "forceEmpty", forceEmpty)
+		}
+	}()
 
 	// RECONCILE (was sprawled driver-side, reading FlashblockState): ensure a pre-executed in-progress block for
 	// params.ParentHash exists whose stamped proposer attrs match params, so assemblePreconfirmed can seal it.
@@ -358,7 +402,12 @@ func (e *ExecModule) reconcileForAssembleLocked(ctx context.Context, params *bui
 			return fmt.Errorf("reconcileForAssembleLocked: no parent header to open on")
 		}
 		in := e.flashInputsForChild(parent, params, params.Timestamp)
+		// This path already holds e.semaphore (it is the assemble/FCU side). The round domain is taken
+		// here, in that order — semaphore then roundMu — which is the ONLY place both are held. A round
+		// itself takes roundMu alone, so the order can never invert.
+		e.roundMu.Lock()
 		_, _, vr, err := e.accumulateFlashblockLocked(ctx, in, body, len(body) > 0)
+		e.roundMu.Unlock()
 		if err != nil {
 			return err
 		}
@@ -876,4 +925,13 @@ func (e *ExecModule) restampWithdrawalsLocked(ctx context.Context, params *build
 	e.logger.Info("[execmodule] withdrawals re-stamped on the open block (no re-execution)",
 		"block", num, "txs", len(body), "withdrawals", len(in.Withdrawals))
 	return nil
+}
+
+// sameProposerAttrs reports whether two sets of flashblock inputs carry the same EXECUTION-AFFECTING
+// proposer attributes. Withdrawals are excluded deliberately: they credit accounts at block-end, after
+// every transaction has run, so a changed list does not invalidate accumulated execution (it is re-stamped,
+// see restampWithdrawalsLocked).
+func sameProposerAttrs(a, b FlashblockInputs) bool {
+	return a.Timestamp == b.Timestamp && a.PrevRandao == b.PrevRandao &&
+		a.FeeRecipient == b.FeeRecipient && a.ParentBeaconBlockRoot == b.ParentBeaconBlockRoot
 }
