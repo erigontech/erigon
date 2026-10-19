@@ -839,12 +839,12 @@ func (tx *RwTx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv
 	return tx.aggtx.Unwind(ctx, tx.RwTx, txNumUnwindTo, changeset)
 }
 
-func (tx *tx) historyStartFrom(name kv.Domain, roTx kv.Tx) uint64 {
+func (tx *tx) historyStartFrom(name kv.Domain, roTx kv.Tx) (uint64, error) {
 	return tx.aggtx.HistoryStartFrom(name, roTx)
 }
 
 func (tx *Tx) HistoryStartFrom(name kv.Domain) (uint64, error) {
-	return tx.historyStartFrom(name, tx.Tx), nil
+	return tx.historyStartFrom(name, tx.Tx)
 }
 
 // HistoryFilesGeneration identifies pinned files, not the live aggregator view.
@@ -852,7 +852,7 @@ func (tx *Tx) HistoryStartFrom(name kv.Domain) (uint64, error) {
 func (tx *Tx) HistoryFilesGeneration() uint64 { return tx.aggtx.Generation() }
 
 func (tx *RwTx) HistoryStartFrom(name kv.Domain) (uint64, error) {
-	return tx.historyStartFrom(name, tx.RwTx), nil
+	return tx.historyStartFrom(name, tx.RwTx)
 }
 
 func (tx *Tx) DomainProgress(domain kv.Domain) uint64 {

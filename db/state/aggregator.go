@@ -2373,8 +2373,8 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 	return fin, started
 }
 
-// Returns the first known txNum found in history files of a given domain
-func (at *AggregatorRoTx) HistoryStartFrom(name kv.Domain, tx kv.Tx) uint64 {
+// HistoryStartFrom returns the earliest known txNum in a domain's history.
+func (at *AggregatorRoTx) HistoryStartFrom(name kv.Domain, tx kv.Tx) (uint64, error) {
 	return at.d[name].HistoryStartFrom(tx)
 }
 
@@ -2385,7 +2385,8 @@ func (at *AggregatorRoTx) IIStartFrom(name kv.InvertedIdx, tx kv.Tx) uint64 {
 		return 0
 	}
 	if len(iit.files) == 0 {
-		return iit.ii.minTxNumInDB(tx)
+		start, _ := iit.ii.minTxNumInDB(tx)
+		return start
 	}
 	return iit.files[0].startTxNum
 }
