@@ -427,6 +427,9 @@ func TestPrecompileOutputDoesNotAliasInput(t *testing.T) {
 	for _, set := range precompiledContractSets {
 		for addr, p := range set {
 			typ := reflect.TypeOf(p)
+			if cached, ok := p.(*cachedPrecompile); ok {
+				typ = reflect.TypeOf(cached.PrecompiledContract)
+			}
 			if seenTypes[typ] {
 				continue
 			}
