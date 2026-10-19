@@ -54,8 +54,8 @@ and resilience under heavy RPC and peer traffic.
   matching receipts from one block into the notification's `result` array. Consumers must process
   every array element instead of assuming one receipt per notification (#24179) — by @AskAlexSharov
 - **Pending transaction gas prices.** For pool transactions of types 2, 3, and 4, `gasPrice` now equals
-  `maxFeePerGas`. This affects `eth_getTransactionByHash`, `txpool_content`, `txpool_contentFrom`, and
-  full `newPendingTransactions` notifications, which previously omitted the field
+  `maxFeePerGas`. `eth_getTransactionByHash`, `txpool_content`, and `txpool_contentFrom` previously
+  reported a projected effective price; full `newPendingTransactions` notifications omitted the field
   (#24099) — by @lupin012
 - **`trace_filter` defaults and selection.** Omitted block bounds now mean `latest`; specify
   `fromBlock: "earliest"` for a query starting at genesis. When both address lists are set, the default
@@ -147,8 +147,8 @@ and resilience under heavy RPC and peer traffic.
 - Proposed blocks include locally aggregated attestations and select additional votes by proposer
   reward, with lower memory use. The aggregation pool counts each committee member's vote once
   (#24813, #24566, #24955, #24798) — by @lystopad
-- Caplin uses a 1,666 ms pre-Gloas proposer-boost deadline on Gnosis and Chiado, replacing the effective
-  2,000 ms cutoff (#24875) — by @domiwei
+- On Gnosis and Chiado, Caplin uses a 1,666 ms pre-Gloas block-timeliness cutoff to determine proposer
+  boost, replacing the effective 2,000 ms cutoff (#24875) — by @domiwei
 - Standalone Caplin reconstructs pre-Gloas beacon blocks with the matching execution body, preventing
   incorrect block responses and peer bans when serving blocks from competing forks (#25021) — by @domiwei
 - Fulu column sidecars use the correct inclusion proof layout, including older columns served from
