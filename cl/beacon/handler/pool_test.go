@@ -1547,15 +1547,24 @@ func TestPoolAggregatesAndProofsAcceptsSSZ(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 }
 
-// The service ignores a contribution whose committee the head state does not hold, before checking
-// its signatures, so the handler must report it instead of publishing it.
-func TestPoolContributionsAndProofsReportsCommitteeNotInHeadState(t *testing.T) {
+// The service ignores a contribution before verifying it, for example one outside the current slot
+// or one whose committee the head state does not hold, so the handler must report it instead of
+// publishing it.
+func TestPoolContributionsAndProofsReportsIgnoredContributions(t *testing.T) {
+	for _, ignored := range []error{
+		services.ErrIgnore,
+		fmt.Errorf("%w: %w", services.ErrIgnore, state.ErrSyncCommitteeNotInState),
+	} {
+		t.Run(ignored.Error(), func(t *testing.T) { testPoolContributionIsReported(t, ignored) })
+	}
+}
+
+func testPoolContributionIsReported(t *testing.T, ignored error) {
 	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	require.NoError(t, sd.OnHeadState(s))
 	ctrl := gomock.NewController(t)
 	service := services_mock.NewMockSyncContributionService(ctrl)
-	service.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(fmt.Errorf("%w: %w", services.ErrIgnore, state.ErrSyncCommitteeNotInState))
+	service.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).Return(ignored)
 	handler.syncContributionAndProofsService = service
 	mockGossip := gossip_mock.NewMockGossip(ctrl)
 	mockGossip.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)

@@ -452,3 +452,49 @@ func BenchmarkExpInterpreter(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkExpNegativeOne(b *testing.B) {
+	for _, tc := range []struct {
+		name           string
+		base, exponent uint256.Int
+	}{
+		{"negative_one/odd", *new(uint256.Int).SetAllOne(), *new(uint256.Int).SetAllOne()},
+		{"negative_one/even", *new(uint256.Int).SetAllOne(), uint256.Int{0, 0, 0, 1}},
+		{"small_base", uint256.Int{3}, uint256.Int{13}},
+		{"other_large_base", uint256.Int{3, 4, 5, 6}, uint256.Int{13}},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			scope := &CallContext{}
+			b.ReportAllocs()
+			for b.Loop() {
+				scope.Stack.Reset()
+				scope.Stack.push(tc.exponent)
+				scope.Stack.push(tc.base)
+				if _, _, err := opExp(0, nil, scope); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkContextAddress(b *testing.B) {
+	address := accounts.InternAddress(common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678"))
+	for _, tc := range []struct {
+		name string
+		op   executionFunc
+	}{{"address", opAddress}, {"caller", opCaller}, {"origin", opOrigin}, {"coinbase", opCoinbase}} {
+		b.Run(tc.name, func(b *testing.B) {
+			evm := &EVM{TxContext: evmtypes.TxContext{Origin: address}, Context: evmtypes.BlockContext{Coinbase: address}}
+			scope := evm.getCallContext(*NewContract(address, address, address, uint256.Int{}), nil, mdgas.MdGas{})
+			defer evm.putCallContext(scope)
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, _, err := tc.op(0, evm, scope); err != nil {
+					b.Fatal(err)
+				}
+				scope.Stack.Reset()
+			}
+		})
+	}
+}
