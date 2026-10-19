@@ -269,8 +269,8 @@ func (j *journal) accessListAddSlotChange(address accounts.Address, slot account
 	j.entries = append(j.entries, journalEntry{kind: kindAccessListAddSlot, account: address, key: slot})
 }
 
-func (j *journal) transientStorageChange(account accounts.Address, key accounts.StorageKey, prevalue uint256.Int) {
-	j.entries = append(j.entries, journalEntry{kind: kindTransientStorage, account: account, key: key, value: prevalue})
+func (j *journal) transientStorageChange(account accounts.Address, slot int, prevalue uint256.Int) {
+	j.entries = append(j.entries, journalEntry{kind: kindTransientStorage, account: account, value: prevalue, aux: uint64(slot)})
 }
 
 // dirtied returns the address modified by this entry, or (NilAddress, false) for
@@ -492,7 +492,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 
 	case kindTransientStorage:
-		s.setTransientState(je.account, je.key, je.value)
+		s.transientStorage.restore(je.account, int(je.aux), je.value)
 		return nil
 
 	case kindRefund:
