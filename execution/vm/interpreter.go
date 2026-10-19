@@ -57,6 +57,16 @@ func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
 	return slices.Contains(vmConfig.ExtraEips, 3860) || rules.IsShanghai
 }
 
+type addressWordIndex uint8
+
+const (
+	addressWordSelf addressWordIndex = iota
+	addressWordOrigin
+	addressWordCaller
+	addressWordCoinbase
+	addressWordCount
+)
+
 // CallContext contains the things that are per-call, such as stack and memory.
 type CallContext struct {
 	gas               uint64
@@ -65,6 +75,8 @@ type CallContext struct {
 	stateGasSpill     uint64
 	newAccountCharged bool
 	input             []byte
+	addressWords      [addressWordCount]uint256.Int
+	addressWordsSet   uint8
 	Memory            Memory
 
 	// Opcode-scoped key/address intern cache. cacheGen is incremented once per
@@ -201,6 +213,7 @@ func (evm *EVM) getCallContext(contract Contract, input []byte, gas mdgas.MdGas)
 	ctx.stateGas = gas.State
 	ctx.stateGasSpill = 0
 	ctx.newAccountCharged = false
+	ctx.addressWordsSet = 0
 	ctx.input = input
 	ctx.Contract = contract
 	return ctx
