@@ -115,7 +115,9 @@ type peerdas struct {
 	recoverySlotQueue   blobRecoverySlotHeap
 	recoveryPruneFloor  uint64
 	blocksToCheckSync   deferredColumnSyncs
-	backfills           chan slotRange
+	backfills           chan struct{}
+	backfillMu          sync.Mutex
+	backfillPending     *slotRange
 
 	// [New in Gloas:EIP7732] For fetching blocks to get kzg_commitments
 	forkChoice     BlockGetter
@@ -153,7 +155,7 @@ func NewPeerDas(
 		ethClock:          ethClock,
 		gossipManager:     gossipManager,
 		recoverBlobsQueue: make(chan recoverBlobsRequest, 128),
-		backfills:         make(chan slotRange, 1),
+		backfills:         make(chan struct{}, 1),
 
 		recoveringMutex:     sync.Mutex{},
 		isRecovering:        make(map[common.Hash]bool),
@@ -1950,6 +1952,8 @@ type deferredColumnSync struct {
 	attempts    int
 	nextAttempt time.Time
 	inFlight    bool
+	// atMaxBackoff marks a root retried once per maximum backoff, which may never complete.
+	atMaxBackoff bool
 }
 
 // deferredColumnSyncs holds the roots whose columns gossip did not deliver. A failed round grows
@@ -2017,7 +2021,8 @@ func (q *deferredColumnSyncs) failed(root common.Hash, now time.Time, slot time.
 	e.attempts++
 	backoffSlots := min(uint64(e.attempts), maxBackoffSlots)
 	e.nextAttempt = now.Add(slot * time.Duration(backoffSlots))
-	return backoffSlots == maxBackoffSlots
+	e.atMaxBackoff = backoffSlots == maxBackoffSlots
+	return e.atMaxBackoff
 }
 
 // retryLater defers a root by one slot without counting an attempt, for a local storage error.
@@ -2030,10 +2035,17 @@ func (q *deferredColumnSyncs) retryLater(root common.Hash, now time.Time, slot t
 	}
 }
 
-func (q *deferredColumnSyncs) len() int {
+// activeLen counts the roots below the maximum backoff, which are retried at least once an epoch.
+func (q *deferredColumnSyncs) activeLen() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return len(q.entries)
+	n := 0
+	for _, e := range q.entries {
+		if !e.atMaxBackoff {
+			n++
+		}
+	}
+	return n
 }
 
 func (q *deferredColumnSyncs) forget(root common.Hash) {

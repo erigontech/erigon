@@ -67,16 +67,35 @@ func (b *backfillColumnBlock) BlockSignature() common.Bytes96 {
 
 // BackfillCustodyColumns queues the custody columns of the blocks imported between fromSlot and
 // toSlot without them, as forward sync imports blocks. It returns at once; a request that comes
-// while one is queued is dropped.
+// while another one waits is merged into it.
 func (d *peerdas) BackfillCustodyColumns(fromSlot, toSlot uint64) {
 	if toSlot < fromSlot {
 		return
 	}
-	select {
-	case d.backfills <- slotRange{from: fromSlot, to: toSlot}:
-	default:
-		log.Debug("[custodyBackfill] a backfill is already queued, dropping the request", "from", fromSlot, "to", toSlot)
+	d.backfillMu.Lock()
+	if d.backfillPending == nil {
+		d.backfillPending = &slotRange{from: fromSlot, to: toSlot}
+	} else {
+		d.backfillPending.from = min(d.backfillPending.from, fromSlot)
+		d.backfillPending.to = max(d.backfillPending.to, toSlot)
 	}
+	d.backfillMu.Unlock()
+	select {
+	case d.backfills <- struct{}{}:
+	default: // the worker is woken already
+	}
+}
+
+// takeBackfillRequest returns the waiting request, if any.
+func (d *peerdas) takeBackfillRequest() (slotRange, bool) {
+	d.backfillMu.Lock()
+	defer d.backfillMu.Unlock()
+	if d.backfillPending == nil {
+		return slotRange{}, false
+	}
+	r := *d.backfillPending
+	d.backfillPending = nil
+	return r, true
 }
 
 func (d *peerdas) custodyBackfillWorker(ctx context.Context) {
@@ -84,28 +103,42 @@ func (d *peerdas) custodyBackfillWorker(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case r := <-d.backfills:
-			d.backfillCustodyColumns(ctx, r.from, r.to)
+		case <-d.backfills:
+			if r, ok := d.takeBackfillRequest(); ok {
+				d.backfillCustodyColumns(ctx, r.from, r.to)
+			}
 		}
 	}
 }
 
 // backfillCustodyColumns walks the canonical chain from toSlot down to fromSlot, within the column
 // serve range, and queues the blocks that commit to blobs and miss their columns for the column
-// sync worker. It waits while the queue holds maxBackfillQueued roots.
+// sync worker. It waits while the queue holds maxBackfillQueued roots below the maximum backoff:
+// roots at the maximum backoff are retried once an epoch and may never complete, so they do not
+// hold the walk.
 func (d *peerdas) backfillCustodyColumns(ctx context.Context, fromSlot, toSlot uint64) {
-	if d.indiciesDB == nil || d.blockReader == nil || !d.waitForCanonicalSlot(ctx, toSlot) {
+	if d.indiciesDB == nil || d.blockReader == nil {
 		return
 	}
-	fromSlot = max(fromSlot, d.beaconConfig.DataColumnSidecarServeRangeStartSlot(d.ethClock.GetCurrentSlot()))
+	currentSlot := d.ethClock.GetCurrentSlot()
+	if currentSlot/d.beaconConfig.SlotsPerEpoch < d.beaconConfig.FuluForkEpoch {
+		return // no block has columns before Fulu
+	}
+	if !d.waitForCanonicalSlot(ctx, toSlot) {
+		return
+	}
+	fromSlot = max(fromSlot, d.beaconConfig.DataColumnSidecarServeRangeStartSlot(currentSlot))
 	queued := 0
 	for slot := toSlot; slot >= fromSlot; slot-- {
-		for d.blocksToCheckSync.len() >= maxBackfillQueued {
+		for d.blocksToCheckSync.activeLen() >= maxBackfillQueued {
 			select {
 			case <-ctx.Done():
 				return
 			case <-time.After(d.deferredColumnSyncTick()):
 			}
+		}
+		if ctx.Err() != nil {
+			return
 		}
 		block, err := d.backfillBlock(ctx, slot)
 		if err != nil {
@@ -127,7 +160,8 @@ func (d *peerdas) backfillCustodyColumns(ctx context.Context, fromSlot, toSlot u
 
 // waitForCanonicalSlot waits until the canonical chain reaches slot: forward sync stores its blocks
 // before the fork choice stage marks them canonical. After two epochs it stops waiting and lets
-// the backfill walk the chain as marked. It reports false only when ctx ends.
+// the backfill walk the chain as marked; slots without a canonical root are skipped. It reports
+// false only when ctx ends.
 func (d *peerdas) waitForCanonicalSlot(ctx context.Context, slot uint64) bool {
 	deadline := time.Now().Add(2 * time.Duration(d.beaconConfig.SlotsPerEpoch) * d.slotDuration())
 	for time.Now().Before(deadline) {
@@ -150,7 +184,8 @@ func (d *peerdas) waitForCanonicalSlot(ctx context.Context, slot uint64) bool {
 
 // backfillBlock returns the canonical block at slot if it commits to blobs, read without its
 // execution payload. Its root comes from the canonical index, since such a body does not hash
-// to it.
+// to it. A Gloas block commits to blobs in its bid, but its columns exist only if the payload was
+// revealed, so it is returned only once its envelope was processed.
 func (d *peerdas) backfillBlock(ctx context.Context, slot uint64) (*backfillColumnBlock, error) {
 	var block *backfillColumnBlock
 	err := d.indiciesDB.View(ctx, func(tx kv.Tx) error {
@@ -165,6 +200,13 @@ func (d *peerdas) backfillBlock(ctx context.Context, slot uint64) (*backfillColu
 		commitments := body.GetBlobKzgCommitments()
 		if commitments == nil || commitments.Len() == 0 {
 			return nil
+		}
+		if body.Version() >= clparams.GloasVersion {
+			// The envelope writes the execution block hash of a Gloas block.
+			payloadHash, err := beacon_indicies.ReadExecutionBlockHash(tx, root)
+			if err != nil || payloadHash == (common.Hash{}) {
+				return err
+			}
 		}
 		block = &backfillColumnBlock{version: body.Version(), slot: slot, root: root, commitments: commitments, signature: body.BlockSignature()}
 		return nil

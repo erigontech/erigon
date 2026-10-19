@@ -37,17 +37,25 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
 
-// bodyReader serves blocks without their execution payload, by slot.
+// bodyReader serves blocks without their execution payload, by slot, and records the slots read.
 type bodyReader struct {
 	freezeblocks.BeaconSnapshotReader
 	blocks map[uint64]*cltypes.SignedBeaconBlock
+	read   *[]uint64
+	onRead func()
 }
 
 func (r bodyReader) ReadBeaconBlockBodyBySlot(_ context.Context, _ kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
+	if r.read != nil {
+		*r.read = append(*r.read, slot)
+	}
+	if r.onRead != nil {
+		r.onRead()
+	}
 	return r.blocks[slot], nil
 }
 
-// backfillFixture is an archive node at slot 100 whose canonical chain holds the given blocks.
+// backfillFixture is an archive node at currentSlot whose canonical chain holds the given blocks.
 // complete holds the slots whose columns are already stored.
 type backfillFixture struct {
 	d     *peerdas
@@ -96,7 +104,7 @@ func newBackfillFixture(t *testing.T, currentSlot uint64, blocks map[uint64]*clt
 		columnStorage: columnStorage,
 		blobStorage:   blobStorage,
 		indiciesDB:    db,
-		blockReader:   bodyReader{blocks: blocks},
+		blockReader:   bodyReader{blocks: blocks, read: &[]uint64{}},
 	}, roots: roots}
 }
 
@@ -180,13 +188,25 @@ func TestBackfillCustodyColumnsSkipsSlotsBelowTheServeRange(t *testing.T) {
 	require.Equal(t, []uint64{serveStart}, f.queuedSlots())
 }
 
-func TestBackfillCustodyColumnsRequestIsAsynchronous(t *testing.T) {
-	d := &peerdas{backfills: make(chan slotRange, 1)}
-	d.BackfillCustodyColumns(5, 9)
-	d.BackfillCustodyColumns(10, 12) // the channel is full: dropped, not blocking
-	d.BackfillCustodyColumns(9, 5)   // an empty range is ignored
-	require.Equal(t, slotRange{from: 5, to: 9}, <-d.backfills)
-	require.Empty(t, d.backfills)
+// A request that comes while another one waits is merged into it, so no slot of a later forward
+// sync range is lost while the worker walks an earlier one.
+func TestBackfillCustodyColumnsMergesWaitingRequests(t *testing.T) {
+	d := &peerdas{backfills: make(chan struct{}, 1)}
+	d.BackfillCustodyColumns(1, 50)
+	r, ok := d.takeBackfillRequest() // the worker starts the first request
+	require.True(t, ok)
+	require.Equal(t, slotRange{from: 1, to: 50}, r)
+
+	d.BackfillCustodyColumns(30, 60)
+	d.BackfillCustodyColumns(40, 70)
+	d.BackfillCustodyColumns(9, 5) // an empty range is ignored
+
+	r, ok = d.takeBackfillRequest()
+	require.True(t, ok)
+	require.Equal(t, slotRange{from: 30, to: 70}, r)
+	_, ok = d.takeBackfillRequest()
+	require.False(t, ok)
+	require.Len(t, d.backfills, 1, "the worker is woken once, without blocking the callers")
 }
 
 // Forward sync stores its blocks before the fork choice stage marks them canonical, so the
@@ -195,11 +215,11 @@ func TestBackfillCustodyColumnsWaitsForTheCanonicalChain(t *testing.T) {
 	f := newBackfillFixture(t, 100, map[uint64]*cltypes.SignedBeaconBlock{
 		10: blockWithBlobs(t, 10, true),
 	}, nil)
-	late := blockWithBlobs(t, 14, true)
-	f.d.blockReader.(bodyReader).blocks[14] = late
+	f.d.blockReader.(bodyReader).blocks[14] = blockWithBlobs(t, 14, true)
+	marked := make(chan error, 1)
 	go func() {
 		time.Sleep(300 * time.Millisecond)
-		_ = f.d.indiciesDB.(kv.RwDB).Update(context.Background(), func(tx kv.RwTx) error {
+		marked <- f.d.indiciesDB.(kv.RwDB).Update(t.Context(), func(tx kv.RwTx) error {
 			return beacon_indicies.MarkRootCanonical(tx, 14, common.Hash{14, 0xab})
 		})
 	}()
@@ -207,6 +227,98 @@ func TestBackfillCustodyColumnsWaitsForTheCanonicalChain(t *testing.T) {
 	start := time.Now()
 	f.d.backfillCustodyColumns(t.Context(), 10, 14)
 
+	require.NoError(t, <-marked)
 	require.GreaterOrEqual(t, time.Since(start), 300*time.Millisecond)
 	require.Equal(t, []uint64{10, 14}, f.queuedSlots())
+}
+
+func gloasBlockWithBlobs(t *testing.T, slot uint64) *cltypes.SignedBeaconBlock {
+	t.Helper()
+	cfg := clparams.MainnetBeaconConfig
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	block.Block.Slot = slot
+	commitments := block.GetBlobKzgCommitments()
+	require.NotNil(t, commitments)
+	commitments.Append(&cltypes.KZGCommitment{})
+	return block
+}
+
+// A Gloas block commits to blobs in its bid, but the columns exist only if the builder revealed
+// the payload. Forward sync imports a block without an envelope when none was revealed, so the
+// backfill queues only the blocks whose envelope was processed.
+func TestBackfillCustodyColumnsSkipsGloasBlocksWithoutAnEnvelope(t *testing.T) {
+	f := newBackfillFixture(t, 100, map[uint64]*cltypes.SignedBeaconBlock{
+		10: gloasBlockWithBlobs(t, 10),
+		12: gloasBlockWithBlobs(t, 12),
+	}, nil)
+	require.NoError(t, f.d.indiciesDB.(kv.RwDB).Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteExecutionBlockHash(tx, f.roots[10], common.Hash{0x10})
+	}))
+
+	f.d.backfillCustodyColumns(t.Context(), 10, 12)
+
+	require.Equal(t, []uint64{10}, f.queuedSlots())
+}
+
+// A root at the maximum backoff is retried once an epoch and may never complete. Such roots do not
+// count toward the backfill's bound, so they cannot stall the walk.
+func TestBackfillCustodyColumnsIsNotStalledByRootsAtTheMaximumBackoff(t *testing.T) {
+	f := newBackfillFixture(t, 100, map[uint64]*cltypes.SignedBeaconBlock{
+		10: blockWithBlobs(t, 10, true),
+	}, nil)
+	cfg := clparams.MainnetBeaconConfig
+	for i := range maxBackfillQueued {
+		stuck, root := fuluColumnBlock(t, &cfg, uint64(200+i))
+		f.d.blocksToCheckSync.add(root, stuck, time.Time{})
+		for range cfg.SlotsPerEpoch {
+			f.d.blocksToCheckSync.failed(root, time.Now(), time.Second, cfg.SlotsPerEpoch)
+		}
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+
+	f.d.backfillCustodyColumns(ctx, 10, 10)
+
+	require.Contains(t, f.queuedSlots(), uint64(10))
+}
+
+// Before Fulu no block has columns, so the walk reads nothing.
+func TestBackfillCustodyColumnsDoesNothingBeforeFulu(t *testing.T) {
+	f := newBackfillFixture(t, 100, map[uint64]*cltypes.SignedBeaconBlock{
+		50: blockWithBlobs(t, 50, true),
+	}, nil)
+	f.d.beaconConfig.FuluForkEpoch = 10 // slot 320, after the fixture's current slot
+	f.d.beaconConfig.InitializeForkSchedule()
+
+	f.d.backfillCustodyColumns(t.Context(), 10, 50)
+
+	require.Empty(t, *f.d.blockReader.(bodyReader).read)
+}
+
+// A cancelled walk stops at once instead of trying every remaining slot.
+func TestBackfillCustodyColumnsStopsWhenCancelled(t *testing.T) {
+	f := newBackfillFixture(t, 100, map[uint64]*cltypes.SignedBeaconBlock{
+		50: blockWithBlobs(t, 50, true),
+	}, nil)
+	ctx, cancel := context.WithCancel(t.Context())
+	reader := f.d.blockReader.(bodyReader)
+	reader.onRead = cancel
+	f.d.blockReader = reader
+	views := &countingDB{RwDB: f.d.indiciesDB.(kv.RwDB)}
+	f.d.indiciesDB = views
+
+	f.d.backfillCustodyColumns(ctx, 10, 50)
+
+	require.Equal(t, []uint64{50}, *reader.read)
+	require.LessOrEqual(t, views.views, 2, "one view to find the canonical head and one per slot read")
+}
+
+type countingDB struct {
+	kv.RwDB
+	views int
+}
+
+func (c *countingDB) View(ctx context.Context, f func(tx kv.Tx) error) error {
+	c.views++
+	return c.RwDB.View(ctx, f)
 }
