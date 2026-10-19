@@ -225,7 +225,7 @@ var (
 )
 
 type NetworkConfig struct {
-	GossipMaxSize                   uint64             `yaml:"GOSSIP_MAX_SIZE" json:"GOSSIP_MAX_SIZE,string"`                                       // The maximum allowed size of uncompressed gossip messages.
+	GossipMaxSize                   uint64             `yaml:"MAX_PAYLOAD_SIZE" json:"GOSSIP_MAX_SIZE,string"`                                      // The maximum allowed size of uncompressed gossip messages.
 	GossipMaxSizeBellatrix          uint64             `yaml:"GOSSIP_MAX_SIZE_BELLATRIX" json:"GOSSIP_MAX_SIZE_BELLATRIX,string"`                   // The maximum allowed size of bellatrix uncompressed gossip messages.
 	MaxChunkSize                    uint64             `yaml:"MAX_CHUNK_SIZE" json:"MAX_CHUNK_SIZE,string"`                                         // The maximum allowed size of uncompressed req/resp chunked responses.
 	AttestationSubnetCount          uint64             `yaml:"ATTESTATION_SUBNET_COUNT" json:"ATTESTATION_SUBNET_COUNT,string"`                     // The number of attestation subnets used in the gossipsub protocol.
