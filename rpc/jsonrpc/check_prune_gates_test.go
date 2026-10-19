@@ -675,6 +675,44 @@ func TestSearchTransactionsChecksHistoryBeforeSkippingCoinbase(t *testing.T) {
 	require.False(t, page.LastPage)
 }
 
+func TestSearchTransactionsSkipsCoinbaseWithoutBlockData(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	addr := common.Address{1}
+	m := mockWithGenerator(t, 3, func(i int, block *blockgen.BlockGen) {
+		if i == 0 {
+			block.SetCoinbase(addr)
+		}
+		if i == 1 {
+			txn, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), addr,
+				uint256.NewInt(1), 21_000, nil, nil), *types.LatestSignerForChainID(nil), testKey)
+			require.NoError(t, err)
+			block.AddTx(txn)
+		}
+	})
+	tx, err := m.DB.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	maxTxNum, err := m.BlockReader.TxnumReader().Max(ctx, tx, 1)
+	require.NoError(t, err)
+	matches, err := tx.IndexRange(kv.TracesToIdx, addr[:], 0, int(maxTxNum+1), order.Asc, kv.Unlim)
+	require.NoError(t, err)
+	defer matches.Close()
+	values, err := stream.ToArray(matches)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{maxTxNum}, values, "the pruned block must only match its final system entry")
+
+	dropBodies(t, m.DB, 1, 2)
+	api := NewOtterscanAPI(newBaseApiForTest(m), m.DB, 25)
+	page, err := api.SearchTransactionsAfter(ctx, addr, 0, 1)
+	require.NoError(t, err)
+	require.Len(t, page.Txs, 1)
+	require.EqualValues(t, 2, page.Txs[0].BlockNumber.ToInt().Uint64())
+	require.Len(t, page.Receipts, 1)
+	require.True(t, page.FirstPage)
+	require.True(t, page.LastPage)
+}
+
 func TestIndexedHistoryGateWithSnapshotMappings(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -1485,6 +1523,59 @@ func TestCapabilitiesUseOnDiskFloors(t *testing.T) {
 	require.Equal(t, blocksFloor, uint64(*caps.Blocks.OldestBlock))
 	require.Equal(t, blocksFloor, uint64(*caps.Tx.OldestBlock))
 	require.Equal(t, blocksFloor, uint64(*caps.Receipts.OldestBlock))
+}
+
+func TestCapabilitiesSeparatePhysicalFloorsFromRetention(t *testing.T) {
+	t.Parallel()
+	const distance = prune.Distance(10)
+	const physicalFloor = uint64(18)
+	for _, tc := range []struct {
+		name          string
+		mode          prune.Mode
+		blocksFloor   uint64
+		historyFloor  uint64
+		receiptsFloor uint64
+	}{
+		{
+			name:        "keep_all_blocks_start_later",
+			mode:        prune.Mode{Initialised: true, History: distance, Blocks: prune.KeepAllBlocksPruneMode},
+			blocksFloor: physicalFloor, receiptsFloor: physicalFloor,
+		},
+		{
+			name:         "keep_all_history_starts_later",
+			mode:         prune.Mode{Initialised: true, History: prune.KeepAllBlocksPruneMode, Blocks: distance},
+			historyFloor: physicalFloor, receiptsFloor: physicalFloor,
+		},
+		{
+			name:         "wider_history_starts_after_receipt_cache",
+			mode:         prune.Mode{Initialised: true, History: distance, Blocks: prune.KeepAllBlocksPruneMode, Receipts: prune.Distance(5)},
+			historyFloor: physicalFloor, receiptsFloor: prune.Distance(5).PruneTo(pruneGatingChainLen),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := t.Context()
+			apis, _ := setupPruneGating(t, pruneGatingConfig{mode: tc.mode, persistReceipts: tc.mode.Receipts != nil})
+			if tc.historyFloor != 0 {
+				tx, err := apis.eth.db.BeginTemporalRo(ctx)
+				require.NoError(t, err)
+				defer tx.Rollback()
+				start, err := apis.eth._txNumReader.Min(ctx, tx, tc.historyFloor)
+				require.NoError(t, err)
+				apis.eth.db = historyFloorDB{TemporalRoDB: apis.eth.db, startTxNum: start}
+			}
+			apis.eth._blockReader = &fixedMinimumBlockReader{FullBlockReader: apis.eth._blockReader, floor: tc.blocksFloor}
+
+			caps, err := apis.eth.Capabilities(ctx)
+			require.NoError(t, err)
+			require.Equal(t, physicalFloor, uint64(*caps.Logs.OldestBlock))
+			require.NotNil(t, caps.Logs.DeleteStrategy)
+			require.EqualValues(t, distance, caps.Logs.DeleteStrategy.RetentionBlocks)
+			require.Equal(t, tc.receiptsFloor, uint64(*caps.Receipts.OldestBlock))
+			require.NotNil(t, caps.Receipts.DeleteStrategy)
+			require.EqualValues(t, distance, caps.Receipts.DeleteStrategy.RetentionBlocks)
+		})
+	}
 }
 
 func TestCapabilitiesUsePhysicalFloorsForUnboundedMode(t *testing.T) {

@@ -383,9 +383,9 @@ func TestCapabilities(t *testing.T) {
 		require.NoError(t, err)
 		// blocks constraint (mergeAt=18) is tighter than state (10): both receipts and logs must reflect it
 		require.Equal(t, mergeAt, oldest(t, result.Receipts))
-		require.Nil(t, result.Receipts.DeleteStrategy)
+		require.Equal(t, testPruneDistance, window(t, result.Receipts))
 		require.Equal(t, mergeAt, oldest(t, result.Logs))
-		require.Nil(t, result.Logs.DeleteStrategy)
+		require.Equal(t, testPruneDistance, window(t, result.Logs))
 	})
 
 	// full mode + --prune.include-receipts on a merge chain: pre-merge blocks were never downloaded,

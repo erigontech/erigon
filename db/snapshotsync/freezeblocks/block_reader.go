@@ -1714,10 +1714,21 @@ func (t *txBlockIndexWithBlockReader) MaxTxNum(ctx context.Context, tx kv.Tx, c 
 	}
 	// Only snapshot bodies use canonical txNums. MDBX body IDs also count side forks.
 	if br, local := r.(*BlockReader); local {
-		if _, found := br.viewSingleFile(tx, snaptype2.Bodies, blockNum); !found {
+		bodySeg, found := br.viewSingleFile(tx, snaptype2.Bodies, blockNum)
+		if !found {
 			return 0, false, nil
 		}
-	} else if frozen := r.FrozenBlocks(); frozen == 0 || blockNum > frozen {
+		b, _, err := BodyForTxnFromSnapshot(blockNum, bodySeg, nil)
+		if err != nil || b == nil {
+			return 0, false, err
+		}
+		return b.BaseTxnID.U64() + uint64(b.TxCount) - 1, true, nil
+	}
+	frozen, observed := r.FrozenBlocksObserved()
+	if !observed {
+		return 0, false, fmt.Errorf("cannot resolve txNum for block %d: remote frozen range is unknown", blockNum)
+	}
+	if frozen == 0 || blockNum > frozen {
 		return 0, false, nil
 	}
 	b, err := r.CanonicalBodyForStorage(ctx, tx, blockNum)

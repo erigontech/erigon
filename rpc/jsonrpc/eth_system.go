@@ -92,22 +92,20 @@ type CapabilitiesResult struct {
 	StateProofs CapabilityField `json:"stateproofs"`
 }
 
-// stricterRetention returns the policy that bounds availability more and
-// widerRetention the one that bounds it less. The oldest blocks alone cannot rank
-// them: a window that has not started pruning reports zero like keep-all, so a tie
-// there is resolved on the retention the policies will apply.
+// Physical availability does not rank deletion policies: a wider configured window
+// can start later on disk while it refills. Combine the boundaries and policies separately.
 func stricterRetention(oldestA uint64, a prune.BlockAmount, oldestB uint64, b prune.BlockAmount) (uint64, prune.BlockAmount) {
-	if oldestA > oldestB || (oldestA == oldestB && retentionBlocks(a) <= retentionBlocks(b)) {
-		return oldestA, a
+	if retentionBlocks(b) < retentionBlocks(a) {
+		a = b
 	}
-	return oldestB, b
+	return max(oldestA, oldestB), a
 }
 
 func widerRetention(oldestA uint64, a prune.BlockAmount, oldestB uint64, b prune.BlockAmount) (uint64, prune.BlockAmount) {
-	if oldestA < oldestB || (oldestA == oldestB && retentionBlocks(a) >= retentionBlocks(b)) {
-		return oldestA, a
+	if retentionBlocks(b) > retentionBlocks(a) {
+		a = b
 	}
-	return oldestB, b
+	return min(oldestA, oldestB), a
 }
 
 // retentionBlocks measures a policy by the window it keeps, every sentinel counting

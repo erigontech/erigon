@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/recsplit"
@@ -652,10 +653,8 @@ func (c frozenBlocksBackendClient) FrozenBlocks(ctx context.Context, in *emptypb
 	return c.reply, c.err
 }
 
-// TestRemoteBlockReaderFrozenBlocks pins that the remote reader answers FrozenBlocks
-// through the backend instead of panicking: the receipt gates and eth_capabilities
-// reach it on a remote rpcdaemon. The signature leaves no way to surface an error, so
-// a failed call reports zero, the conservative answer for every caller.
+// The scalar getter reports zero on failure. Callers that need to distinguish
+// unavailable metadata from an empty snapshot set must use FrozenBlocksObserved.
 func TestRemoteBlockReaderFrozenBlocks(t *testing.T) {
 	t.Parallel()
 
@@ -668,6 +667,61 @@ func TestRemoteBlockReaderFrozenBlocks(t *testing.T) {
 	require.NotPanics(t, func() {
 		require.Zero(t, failing.FrozenBlocks())
 	})
+}
+
+type txNumBackendClient struct {
+	frozenBlocksBackendClient
+	body      []byte
+	bodyCalls int
+}
+
+func (c *txNumBackendClient) CanonicalBodyForStorage(context.Context, *remoteproto.CanonicalBodyForStorageRequest, ...grpc.CallOption) (*remoteproto.CanonicalBodyForStorageReply, error) {
+	c.bodyCalls++
+	return &remoteproto.CanonicalBodyForStorageReply{Body: c.body}, nil
+}
+
+func TestRemoteTxNumsRequireObservedFrozenRange(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		return rawdbv3.TxNums.Append(tx, 50, 200)
+	}))
+	tx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	body, err := rlp.EncodeToBytes(&types.BodyForStorage{BaseTxnID: 80, TxCount: 4})
+	require.NoError(t, err)
+	client := &txNumBackendClient{
+		frozenBlocksBackendClient: frozenBlocksBackendClient{
+			reply: &remoteproto.FrozenBlocksReply{FrozenBlocks: 42},
+			err:   errors.New("backend unavailable"),
+		},
+		body: body,
+	}
+	reader := NewRemoteBlockReader(client)
+	txNums := reader.TxnumReader()
+	_, err = txNums.Max(ctx, tx, 42)
+	require.Error(t, err, "an unknown frozen range must not fall back to the latest txNum")
+	_, err = txNums.Min(ctx, tx, 43)
+	require.Error(t, err)
+	require.Zero(t, client.bodyCalls)
+
+	client.err = nil
+	reader.frozenBlocks.SetTTL(0)
+	maxTxNum, err := txNums.Max(ctx, tx, 42)
+	require.NoError(t, err)
+	require.EqualValues(t, 83, maxTxNum)
+	minTxNum, err := txNums.Min(ctx, tx, 43)
+	require.NoError(t, err)
+	require.EqualValues(t, 84, minTxNum)
+	require.Equal(t, 2, client.bodyCalls)
+
+	_, found, err := txNums.MaxExact(ctx, tx, nil, 43)
+	require.NoError(t, err)
+	require.False(t, found, "a body above the frozen range has storage IDs, not canonical txNums")
+	require.Equal(t, 2, client.bodyCalls, "do not read MDBX bodies for missing mappings")
 }
 
 type countingFrozenBlocksClient struct {

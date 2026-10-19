@@ -254,14 +254,15 @@ func TestRetire_StandaloneII(t *testing.T) {
 	mustExist(t, recentIdx, true)
 }
 
-func TestRetire_TraceAndHistoryPartitionsCanDiffer(t *testing.T) {
+func TestRetire_IndexAndHistoryPartitionsCanDiffer(t *testing.T) {
 	const stepSize = uint64(10)
 	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, 2)
 	historyRanges := []testFileRange{{0, 2}, {2, 3}}
 	generateAccountsFile(t, agg.Dirs(), historyRanges)
 	generateCodeFile(t, agg.Dirs(), historyRanges)
 	generateStorageFile(t, agg.Dirs(), historyRanges)
-	for _, idx := range []kv.InvertedIdx{kv.TracesFromIdx, kv.TracesToIdx} {
+	indices := []kv.InvertedIdx{kv.TracesFromIdx, kv.TracesToIdx, kv.LogAddrIdx, kv.LogTopicIdx}
+	for _, idx := range indices {
 		generateStandaloneIIFile(t, idx, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {2, 3}})
 	}
 	require.NoError(t, agg.OpenFolder(db))
@@ -278,8 +279,8 @@ func TestRetire_TraceAndHistoryPartitionsCanDiffer(t *testing.T) {
 		require.NoError(t, err)
 		require.Zero(t, start, "a merged history file spanning the cutoff is retained")
 	}
-	for _, idx := range []kv.InvertedIdx{kv.TracesFromIdx, kv.TracesToIdx} {
-		require.Equal(t, stepSize, at.IIStartFrom(idx, tx), "trace-index availability cannot be inferred from state history")
+	for _, idx := range indices {
+		require.Equal(t, stepSize, at.IIStartFrom(idx, tx), "standalone-index availability cannot be inferred from state history")
 	}
 }
 
