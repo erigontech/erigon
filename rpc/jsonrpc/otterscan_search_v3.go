@@ -79,7 +79,9 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 		}
 
 		if mustReadBlock {
-			if err := api.checkPruneBlocks(ctx, tx, blockNum); err != nil {
+			// Retired trace-index entries are invisible. Checking only the surviving
+			// matches could return a partial page instead of all matches in the block.
+			if err := api.checkBlockHistoryAvailable(ctx, tx, blockNum); err != nil {
 				return nil, nil, false, err
 			}
 			block, err = api.blockByNumberWithSenders(ctx, tx, blockNum)
@@ -91,10 +93,6 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			}
 			mustReadBlock = false
 		}
-		if err := api.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNum, uint64(txIndex)); err != nil {
-			return nil, nil, false, err
-		}
-
 		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
 			return nil, nil, false, err

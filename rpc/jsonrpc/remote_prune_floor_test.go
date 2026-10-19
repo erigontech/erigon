@@ -174,6 +174,12 @@ func TestRemoteHistoryFloorFollowsRenewal(t *testing.T) {
 				old, err := readUncached(ctx, tx, chainInfo.head)
 				require.NoError(t, err)
 				require.Positive(t, old.startTxNum, "a nonzero floor must reach the txNum-to-block lookup")
+				if tc.domain == kv.CommitmentDomain {
+					// Keep the state-floor lookup cached so renewal happens while converting
+					// the commitment floor, not during an earlier state-floor conversion.
+					_, err = apis.eth.historyStartBlocks(ctx, tx, chainInfo.head)
+					require.NoError(t, err)
+				}
 				if !tc.duringLookup {
 					_, err = read()
 					require.NoError(t, err)

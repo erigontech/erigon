@@ -548,26 +548,18 @@ func (api *BaseAPI) checkPruneTransactionHistoryAtIndex(ctx context.Context, tx 
 				return 0, err
 			}
 			defer c.Close()
-			minTxNum, err := api._txNumReader.MinWithCursor(ctx, tx, c, block)
+			minTxNum, hasMin, err := api._txNumReader.MinExact(ctx, tx, c, block)
 			if err != nil {
 				return 0, err
 			}
-			maxTxNum, err := api._txNumReader.MaxWithCursor(ctx, tx, c, block)
+			maxTxNum, hasMax, err := api._txNumReader.MaxExact(ctx, tx, c, block)
 			if err != nil {
 				return 0, err
 			}
 			// Only a position in this block can bypass its replay floor. Max names the
 			// final system transaction, whose pre-state follows all user transactions.
-			if maxTxNum > minTxNum && txIndex < maxTxNum-minTxNum && minTxNum+txIndex+1 >= floors.startTxNum {
-				// Min and Max can fall back to the latest mapping when a block is missing.
-				// The reverse lookup must confirm that the position belongs to this block.
-				mappedBlock, ok, err := api._txNumReader.FindBlockNum(ctx, tx, minTxNum+txIndex+1)
-				if err != nil {
-					return 0, err
-				}
-				if ok && mappedBlock == block {
-					return block, nil
-				}
+			if hasMin && hasMax && maxTxNum > minTxNum && txIndex < maxTxNum-minTxNum && minTxNum+txIndex+1 >= floors.startTxNum {
+				return block, nil
 			}
 			return 0, fmt.Errorf("%w: requested block %d at transaction index %d, history is available from txNum %d", state.ErrPruned, block, txIndex, floors.startTxNum)
 		})
@@ -738,7 +730,7 @@ func (api *BaseAPI) historyStartBlocksFromTxNum(ctx context.Context, tx kv.Tx, h
 			replay:             head,
 		}, nil
 	}
-	blockStartTxNum, err := api._txNumReader.Min(ctx, tx, containingBlock)
+	blockStartTxNum, hasStart, err := api._txNumReader.MinExact(ctx, tx, nil, containingBlock)
 	if err != nil {
 		return historyPruneFloors{}, err
 	}
@@ -751,12 +743,12 @@ func (api *BaseAPI) historyStartBlocksFromTxNum(ctx context.Context, tx kv.Tx, h
 		wholeBlock:         containingBlock,
 		replay:             containingBlock,
 	}
-	if startTxNum > blockStartTxNum {
+	if !hasStart || startTxNum > blockStartTxNum {
 		floors.wholeBlock = min(containingBlock+1, head)
 	} else if containingBlock > 0 {
 		floors.postState = containingBlock - 1
 	}
-	if startTxNum > blockStartTxNum+1 {
+	if !hasStart || startTxNum > blockStartTxNum+1 {
 		floors.replay = min(containingBlock+1, head)
 	} else if containingBlock > 0 {
 		floors.stateAfterSystemTx = containingBlock - 1

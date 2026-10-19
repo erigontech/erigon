@@ -729,8 +729,7 @@ func requirePersistedReceipts(t *testing.T, m *execmoduletester.ExecModuleTester
 }
 
 const (
-	// One transaction plus two system transactions per block, so a step holds one block
-	// and the retirement cutoff can land inside the chain.
+	// With the default one user transaction per block, a step holds one block.
 	prunedHistoryStepSize      = 3
 	prunedHistoryMaxReorgDepth = 2
 	prunedHistoryChainLen      = 24
@@ -739,7 +738,8 @@ const (
 )
 
 type prunedHistoryConfig struct {
-	mode prune.Mode
+	mode                 prune.Mode
+	transactionsPerBlock int
 	// receiptCache runs the chain with the receipt cache enabled and persisted, the only
 	// source of receipts left once history is retired.
 	receiptCache bool
@@ -767,10 +767,12 @@ func setupPhysicallyPrunedHistory(t *testing.T, cfg prunedHistoryConfig) (pruneG
 
 	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	c, err := m.GenerateChain(prunedHistoryChainLen, func(_ int, block *blockgen.BlockGen) {
-		txn, err := types.SignTx(types.NewTransaction(block.TxNonce(m.Address), common.Address{1},
-			uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *signer, m.Key)
-		require.NoError(t, err)
-		block.AddTx(txn)
+		for range max(1, cfg.transactionsPerBlock) {
+			txn, err := types.SignTx(types.NewTransaction(block.TxNonce(m.Address), common.Address{1},
+				uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *signer, m.Key)
+			require.NoError(t, err)
+			block.AddTx(txn)
+		}
 	})
 	require.NoError(t, err)
 

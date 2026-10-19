@@ -39,7 +39,9 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
@@ -437,7 +439,6 @@ func TestIndexedHistoryGateMatchesReader(t *testing.T) {
 	for _, backwards := range []bool{false, true} {
 		t.Run(fmt.Sprintf("ots_search_backwards=%t", backwards), func(t *testing.T) {
 			search := func(api *OtterscanAPIImpl, index byte) (*TransactionsWithReceipts, error) {
-				// Each recipient occurs once, so the page only needs that transaction's history.
 				addr := common.Address{1, index}
 				if backwards {
 					return api.SearchTransactionsBefore(ctx, addr, block.NumberU64()+1, 1)
@@ -447,9 +448,8 @@ func TestIndexedHistoryGateMatchesReader(t *testing.T) {
 			want, err := search(baselineAPIs.ots, 2)
 			require.NoError(t, err)
 			require.Len(t, want.Txs, 1)
-			got, err := search(prunedAPIs.ots, 2)
-			require.NoError(t, err)
-			require.Equal(t, want, got)
+			_, err = search(prunedAPIs.ots, 2)
+			require.ErrorIs(t, err, state.ErrPruned, "a retained match cannot prove that the block's trace index is complete")
 			_, err = search(prunedAPIs.ots, 1)
 			require.ErrorIs(t, err, state.ErrPruned)
 		})
@@ -462,22 +462,110 @@ func TestIndexedHistoryGateMatchesReader(t *testing.T) {
 		require.NoError(t, err, "the cursor block is excluded from the search")
 		require.Equal(t, want, got)
 	})
-	t.Run("missing_mapping_and_body", func(t *testing.T) {
+	t.Run("missing_mapping", func(t *testing.T) {
 		missing := c.Blocks[0]
 		minTxNum, err := api._txNumReader.Min(ctx, ro, missing.NumberU64())
 		require.NoError(t, err)
+		require.Greater(t, view.startTxNum, minTxNum+1)
 		index := view.startTxNum - minTxNum - 1
 		require.Greater(t, index, uint64(len(missing.Transactions())))
+		lastMaxTxNum, err := api._txNumReader.Max(ctx, ro, c.Blocks[len(c.Blocks)-1].NumberU64())
+		require.NoError(t, err)
+		require.Less(t, index, lastMaxTxNum-minTxNum, "the index must fit the incorrect fallback bounds")
 		require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
-			if err := tx.Delete(kv.MaxTxNum, hexutil.EncodeTs(missing.NumberU64())); err != nil {
-				return err
-			}
-			return tx.Delete(kv.BlockBody, dbutils.BlockBodyKey(missing.NumberU64(), missing.Hash()))
+			return tx.Delete(kv.MaxTxNum, hexutil.EncodeTs(missing.NumberU64()))
 		}))
-		account, err := api.AccountAt(ctx, missing.Hash(), index, testAddr)
-		require.ErrorIs(t, err, state.ErrPruned, "an index must not borrow a later block's retained history")
-		require.Nil(t, account)
+		t.Run("body_backed_position", func(t *testing.T) {
+			bodyAPI := newDebugApiForTest(m)
+			bodyAPI.db = historyFloorDB{TemporalRoDB: bodyAPI.db, startTxNum: minTxNum + 3}
+			account, err := bodyAPI.AccountAt(ctx, missing.Hash(), 2, testAddr)
+			require.NoError(t, err, "the body supplies the missing mapping")
+			require.NotNil(t, account)
+			require.EqualValues(t, 2, account.Nonce)
+		})
+		require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+			rawdb.DeleteBody(tx, missing.Hash(), missing.NumberU64())
+			return nil
+		}))
+		t.Run("oversized_index", func(t *testing.T) {
+			account, err := api.AccountAt(ctx, missing.Hash(), index, testAddr)
+			require.ErrorIs(t, err, state.ErrPruned, "an index must not borrow a later block's retained history")
+			require.Nil(t, account)
+		})
+		t.Run("first_transaction", func(t *testing.T) {
+			_, err := api.AccountAt(ctx, block.Hash(), 0, testAddr)
+			require.ErrorIs(t, err, state.ErrPruned, "a missing preceding mapping must not lower the replay floor")
+		})
+		t.Run("post_state", func(t *testing.T) {
+			ref := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(missing.NumberU64()))
+			_, err := prunedAPIs.eth.GetBalance(ctx, testAddr, &ref)
+			require.ErrorIs(t, err, state.ErrPruned, "a missing mapping must not lower the post-state floor")
+		})
 	})
+}
+
+func TestSearchTransactionsRejectsPartiallyRetiredBlock(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	apis, chainInfo := setupPhysicallyPrunedHistory(t, prunedHistoryConfig{
+		mode:                 prune.Mode{Initialised: true, History: prunedHistoryDistance, Blocks: prune.KeepAllBlocksPruneMode},
+		transactionsPerBlock: 2,
+	})
+	block := prunedHistoryDistance.PruneTo(chainInfo.head)
+	addr := common.Address{1}
+	before, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer before.Rollback()
+	minTxNum, err := apis.eth._txNumReader.Min(ctx, before, block)
+	require.NoError(t, err)
+	cutoff := minTxNum + 2
+	require.Zero(t, cutoff%prunedHistoryStepSize, "retirement must split the two user transactions")
+	readMatches := func(tx kv.TemporalTx) []uint64 {
+		matches, err := tx.IndexRange(kv.TracesToIdx, addr[:], int(minTxNum), int(minTxNum+4), order.Asc, kv.Unlim)
+		require.NoError(t, err)
+		defer matches.Close()
+		values, err := stream.ToArray(matches)
+		require.NoError(t, err)
+		return values
+	}
+	require.Equal(t, []uint64{minTxNum + 1, minTxNum + 2}, readMatches(before))
+	page, err := apis.ots.SearchTransactionsBefore(ctx, addr, block+1, 1)
+	require.NoError(t, err)
+	require.Len(t, page.Txs, 2, "a page includes all matches in its last block")
+
+	retired, err := before.Debug().Retire(ctx, kv.RetireCutoffs{Default: cutoff})
+	require.NoError(t, err)
+	require.Positive(t, retired)
+	after, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer after.Rollback()
+	start, err := state.StateHistoryStartTxNum(after)
+	require.NoError(t, err)
+	require.Equal(t, cutoff, start)
+	require.Equal(t, []uint64{minTxNum + 2}, readMatches(after), "the earlier match is absent, not just gated")
+
+	for _, tc := range []struct {
+		name string
+		call func() (*TransactionsWithReceipts, error)
+	}{
+		{"before", func() (*TransactionsWithReceipts, error) {
+			return apis.ots.SearchTransactionsBefore(ctx, addr, block+1, 1)
+		}},
+		{"after", func() (*TransactionsWithReceipts, error) {
+			return apis.ots.SearchTransactionsAfter(ctx, addr, block-1, 1)
+		}},
+		{"oldest_page", func() (*TransactionsWithReceipts, error) {
+			return apis.ots.SearchTransactionsAfter(ctx, addr, 0, 1)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.call()
+			require.ErrorIs(t, err, state.ErrPruned, "a page must not silently omit pruned matches in its last block")
+		})
+	}
+	page, err = apis.ots.SearchTransactionsBefore(ctx, addr, block+2, 1)
+	require.NoError(t, err)
+	require.Len(t, page.Txs, 2)
 }
 
 func TestIndexedHistoryGateWithSnapshotMappings(t *testing.T) {

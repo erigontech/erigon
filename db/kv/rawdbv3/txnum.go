@@ -179,11 +179,30 @@ func (TxNumsReader) WithCustomReadTxNumFunc(f TxBlockIndex) TxNumsReader {
 	return TxNumsReader{index: f}
 }
 
+// MinExact reports a missing preceding mapping instead of falling back to latest.
+// The cursor may be nil; genesis always starts at zero.
+func (t TxNumsReader) MinExact(ctx context.Context, tx kv.Tx, c kv.Cursor, blockNum uint64) (uint64, bool, error) {
+	if blockNum == 0 {
+		return 0, true, nil
+	}
+	maxTxNum, ok, err := t.MaxExact(ctx, tx, c, blockNum-1)
+	if err != nil || !ok {
+		return 0, false, err
+	}
+	return maxTxNum + 1, true, nil
+}
+
+// MaxExact reports a missing mapping instead of falling back to latest.
+// The cursor may be nil.
+func (t TxNumsReader) MaxExact(ctx context.Context, tx kv.Tx, c kv.Cursor, blockNum uint64) (uint64, bool, error) {
+	return t.index.MaxTxNum(ctx, tx, c, blockNum)
+}
+
 // MaxWithCursor - returns maxTxNum in given block using a caller-provided cursor.
 // If block not found - return last available value (`latest`/`pending` state).
 // Use this when iterating many blocks to avoid repeated cursor open/close overhead.
 func (t TxNumsReader) MaxWithCursor(ctx context.Context, tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, err error) {
-	maxTxNum, ok, err := t.index.MaxTxNum(ctx, tx, c, blockNum)
+	maxTxNum, ok, err := t.MaxExact(ctx, tx, c, blockNum)
 	if err != nil {
 		return 0, err
 	}
@@ -214,10 +233,7 @@ func (t TxNumsReader) Max(ctx context.Context, tx kv.Tx, blockNum uint64) (maxTx
 // Min = `max(blockNum-1)+1`. If block not found - return last available value (`latest`/`pending` state).
 // Use this when iterating many blocks to avoid repeated cursor open/close overhead.
 func (t TxNumsReader) MinWithCursor(ctx context.Context, tx kv.Tx, c kv.Cursor, blockNum uint64) (minTxNum uint64, err error) {
-	if blockNum == 0 {
-		return 0, nil
-	}
-	minTxNum, ok, err := t.index.MaxTxNum(ctx, tx, c, blockNum-1)
+	minTxNum, ok, err := t.MinExact(ctx, tx, c, blockNum)
 	if err != nil {
 		return 0, err
 	}
@@ -231,7 +247,7 @@ func (t TxNumsReader) MinWithCursor(ctx context.Context, tx kv.Tx, c kv.Cursor, 
 		}
 		return binary.BigEndian.Uint64(v) + 1, nil
 	}
-	return minTxNum + 1, nil
+	return minTxNum, nil
 }
 
 // Min = `max(blockNum-1)+1` returns minTxNum in given block. If block not found - return last available value (`latest`/`pending` state)
