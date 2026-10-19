@@ -1321,7 +1321,7 @@ func (evm *EVM) outputBuffer(size uint64) *[]byte {
 	if evm.depth == 1 {
 		return evm.txOutput
 	}
-	if evm.depth >= len(evm.outputs) || size > uint64(64*datasize.KB) || evm.config.Tracer != nil {
+	if evm.depth >= len(evm.outputs) || size > uint64(4*datasize.MB) || evm.config.Tracer != nil {
 		return nil
 	}
 	if evm.outputs == nil {
