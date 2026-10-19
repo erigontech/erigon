@@ -1,4 +1,4 @@
-# Erigon v3.8.0 — Watery Whiskers
+# Erigon v3.8.0 — Watery Whiskers — TBD
 
 Erigon 3.8.0 is **Glamsterdam-ready**, with **Glamsterdam on Hoodi**, faster commitment and execution,
 and further RPC performance improvements. It also improves Caplin block production, recovery after restarts,
@@ -8,14 +8,14 @@ and resilience under heavy RPC and peer traffic.
 
 - **Glamsterdam-ready.** Erigon and Caplin support Amsterdam and Gloas, including block access lists
   (EIP-7928) and enshrined proposer-builder separation (EIP-7732). Caplin follows `consensus-specs`
-  v1.7.0-beta.4 for the Hoodi upgrade (#17329, #17334, #24831) — by @domiwei, @taratorio, @yperbasis
+  v1.7.0-beta.4 for the Hoodi upgrade (#24831; closes #17329, #17334) — by @domiwei, @taratorio, @yperbasis
 - **Glamsterdam on Hoodi.** Upgrade Hoodi nodes before **26 October 2026, 17:42:48 UTC**. Amsterdam in
   the execution layer and Gloas in Caplin activate at epoch `132352`, with a default gas-limit target of
   **200 million** (#24847) — by @yperbasis
 - **Faster commitment and execution.** Parallel commitment spreads deferred writes across workers and
   prepares trie updates alongside execution. Trie prefetching now also benefits blocks without block
   access lists. EVM improvements reduce computation and repeated storage-read costs
-  (#19801, #23979, #24252, #24479, #24517, #22993) — by @awskii, @AskAlexSharov
+  (#23979, #24252, #24479, #24517, #22993; closes #19801) — by @awskii, @AskAlexSharov
 - **Faster RPC with less memory overhead.** Lower `eth_getBalance` tail latency under load, cheaper
   transaction-by-index queries, streamed trace output, and restored state caching for embedded RPC at
   the chain tip (#24795, #24409, #24239, #24347, #24497) — by @AskAlexSharov
@@ -66,14 +66,22 @@ and resilience under heavy RPC and peer traffic.
   (#24815, #24922) — by @lystopad
 - **Beacon health checks.** `/eth/v1/node/health` and `/` return HTTP `206` while syncing. Health checks
   that require `200` should accept `206` or use `?syncing_status=200` (#24719) — by @Bruce039
+- **RPC connectivity checks.** `net_listening` now returns `true` even when sentries are unreachable.
+  Do not use it alone to check peer connectivity (#24773) — by @lupin012
 
 ### Added and Changed
 
 #### RPC
 
+- After Amsterdam, `eth_call` and other read-only call simulations can use their full RPC gas
+  allowance instead of being capped at `2^24` execution gas. `eth_estimateGas`, `eth_createAccessList`,
+  and validated `eth_simulateV1` enforce transaction gas rules instead of producing unusable results
+  (#24520) — by @Sahil-4555
 - `eth_fillTransaction` builds blob sidecars, computes missing KZG commitments and proofs, and
   validates supplied ones. `txpool_inspect` adds a readable summary of pending and queued non-blob
   transactions (#24335, #24738) — by @lupin012
+- The Engine API adds `engine_getInclusionListV1` and its REST-SSZ equivalent to build FOCIL inclusion
+  lists from the public mempool (#24693) — by @SoarinSkySagar
 - `eth_simulateV1` returns `blockAccessListHash` after Amsterdam and accounts for execution gas and
   state gas separately. Fixes address lost code and ignored empty-storage overrides between simulated
   blocks, and historical state-root replay follows the simulated chain instead of later canonical blocks
@@ -89,6 +97,10 @@ and resilience under heavy RPC and peer traffic.
 - `eth_sendRawTransactionSync` finds receipts even when a transaction is mined before its subscription
   becomes active or during a receipt-stream reconnect, avoiding unnecessary timeouts
   (#24134, #24337) — by @lupin012
+- `eth_getRawTransactionByHash` returns pending transactions from the pool instead of `null`
+  (#24463) — by @0xShadowX
+- Log filters with only wildcard topics now receive matching logs instead of silently receiving
+  nothing ([b27b57e](https://github.com/erigontech/erigon/commit/b27b57e94c17a079a3a696f0fc62315a311c3681)) — by @FlashWayne
 - Requests using `pending`, such as `eth_getBalance`, `eth_estimateGas`, and `eth_callBundle`, now
   use the latest executed block while a node builds a payload, avoiding `block N+1 is not executed`
   errors. RPCs reading committed data also resolve `latest` against the same view, avoiding missing
@@ -98,26 +110,48 @@ and resilience under heavy RPC and peer traffic.
 - Block transaction counts remain available when transaction payloads are pruned. Witness and
   Otterscan replay methods check the history they need before attempting execution (#23777) — by @yperbasis
 
-#### Consensus and execution
+#### Consensus layer and execution
 
 - Caplin fixes Gloas block and payload publication, restores the served head and payload status after
   restarts, and avoids restart stalls caused by incorrect finality handling
   (#24545, #24548, #24628) — by @domiwei
+- Caplin avoids a deadlock when publishing its own block and reduces payload-build delays from a busy
+  execution layer or late payload preparation (#25011, #24965, #25029) — by @domiwei, @lystopad
+- Validator nodes verify and relay aggregates outside their proposal epochs. Attestation and Payload
+  Timeliness Committee (PTC) gossip budgets accommodate expected traffic and vote bursts, preventing
+  valid votes from being dropped (#25014, #24970, #24973) — by @lystopad, @domiwei
+- Proposed blocks include locally aggregated attestations and select additional votes by proposer
+  reward, with lower memory use. The aggregation pool counts each committee member's vote once
+  (#24813, #24566, #24955, #24798) — by @lystopad
 - Standalone Caplin reconstructs pre-Gloas beacon blocks with the matching execution body, preventing
   incorrect block responses and peer bans when serving blocks from competing forks (#25021) — by @domiwei
+- Fulu column sidecars use the correct inclusion proof layout, including older columns served from
+  disk, avoiding peer rejections and bans. Fulu gossip blocks wait for custody columns before entering
+  fork choice (#24512, #24546) — by @domiwei
 - Caplin subscribes to persistent attestation subnets and preserves advertised subnet membership
   across fork transitions, improving attestation gossip reliability (#25052) — by @domiwei
+- Transient handshake failures no longer ban incoming peers, Status and Goodbye limits recover more
+  quickly, and fork advertisements use the correct version at BPO upgrades
+  (#24627, #24406) — by @domiwei, @MysticRyuujin
 - Gloas block production honors the fee recipient in signed proposer preferences. Caplin refuses
   validator duties on a stale served head and checks selected attestations against the proposal state,
   preventing invalid proposals after reorgs that change committee assignments (#24937, #24829, #24959) — by
   @yperbasis, @lystopad
+- Duty responses use the correct dependent root after empty slots, preventing false duty-reorg
+  notifications and rejected proposer preferences (#24980) — by @domiwei
+- Caplin accepts valid proposer slashings and checks pre-Gloas payload withdrawals before importing
+  or signing blocks. Fork choice uses the target checkpoint's committees for attestations in imported
+  blocks (#24846, #24803, #24807) — by @domiwei, @yperbasis
 - Missing custody columns are fetched within the slot instead of waiting over a minute. Parallel blob
-  recovery reduces delays before blocks reach fork choice and execution (#24830, #24861) — by @lystopad
-- Execution fixes incorrect state roots after account destruction and revival, inconsistent account
-  reads after recreation during parallel execution of Amsterdam blocks, stale commitment reads after
-  reorgs, and recovery from invalid blocks. Fork-choice updates preserve safe and finalized hashes
-  even when the head does not move (#24705, #25057, #24731, #24836, #24032) — by @chfast,
-  @Sahil-4555, @AskAlexSharov, @yperbasis
+  recovery reduces delays before blocks reach fork choice and execution. Peers returning no columns
+  are briefly skipped to avoid repeated empty requests (#24830, #24861, #24992) — by @lystopad, @domiwei
+- Parallel execution fixes balance, nonce, and storage handling after account destruction, recreation,
+  and reverted calls, preventing wrong state roots and rejection of valid blocks. Amsterdam account
+  existence checks remain consistent during parallel execution
+  (#24705, #24653, #24654, #24742, #24866, #24701, #25057) — by @chfast, @yperbasis
+- Execution fixes stale commitment reads after reorgs and recovery from invalid blocks. Fork-choice
+  updates preserve safe and finalized hashes even when the head does not move
+  (#24731, #24836, #24032) — by @Sahil-4555, @AskAlexSharov, @yperbasis
 - A rejected transaction replacement no longer removes the original transaction from the pool,
   including during reorg recovery (#24534) — by @Bruce039
 
@@ -128,8 +162,24 @@ and resilience under heavy RPC and peer traffic.
   (#24249, #24953) — by @AskAlexSharov, @awskii
 - Gnosis and Chiado retain and serve data columns for 16,384 epochs, about 15 days, instead of 4,096
   epochs. Operators should allow for roughly four times the column storage (#24720) — by @Bruce039
-- Peer queues, transaction packets, and Caplin gossip control messages have tighter bounds to reduce
-  memory-exhaustion risks from hostile traffic (#24392, #24508, #24616) — by @yperbasis
+
+### Security
+
+- Network decoders allocate buffers as data arrives and reject impossible compressed sizes. Tighter
+  bounds on peer queues, transaction packets, and Caplin gossip control messages reduce memory
+  exhaustion risks from hostile traffic (#24374, #24649, #24648, #24392, #24508, #24616) — by
+  @yperbasis, @AskAlexSharov
+- RPC rejects oversized transactions before decoding. Caplin bounds SSZ committee vectors and
+  rejects invalid validator and slashing indices, preventing excessive allocations and panics.
+  Invalid block access list indices are rejected before execution
+  (#24315, #24614, #24615, #24771, #24908) — by @yperbasis, @domiwei
+- Caplin verifies signatures before forwarding attestations, aggregates, voluntary exits, and
+  BLS-to-execution changes. Attestations and aggregates use the correct fork's signing domain and
+  gossip topic, preventing invalid relays and rejection of valid messages near upgrades
+  (#24629, #24544) — by @domiwei
+- A peer sending a blob transaction with a bad KZG proof no longer causes valid transactions from
+  other peers in the same batch to be dropped
+  ([4dadfc2](https://github.com/erigontech/erigon/commit/4dadfc2eb28e08e39607feec9d9dbb21efed2a17)) — by @FlashWayne, @yperbasis
 
 **Full Changelog**: https://github.com/erigontech/erigon/compare/v3.7.1...v3.8.0
 
