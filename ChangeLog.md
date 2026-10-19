@@ -135,6 +135,8 @@ and resilience under heavy RPC and peer traffic.
 - Caplin fixes Gloas block and payload publication, restores the served head and payload status after
   restarts, and avoids restart stalls caused by incorrect finality handling
   (#24545, #24548, #24628) — by @domiwei
+- Caplin validates gossip blocks faster, reducing the delay before new blocks can become the head
+  (#24523) — by @lystopad
 - Caplin avoids a deadlock when publishing its own block and reduces payload-build delays from a busy
   execution layer or late payload preparation (#25019, #25005, #25043) — by @domiwei, @lystopad
 - Validator nodes verify and relay aggregates outside their proposal epochs. Attestation and Payload
@@ -142,6 +144,11 @@ and resilience under heavy RPC and peer traffic.
   valid votes from being dropped. Gossip attestations and aggregates received before their block are
   kept in bounded queues for about one slot and retried when the block arrives
   (#25042, #25000, #24981, #24949) — by @lystopad, @domiwei
+- Caplin selects the sync committee using the message or contribution slot, preventing valid messages
+  from being rejected and peers from being banned at period boundaries (#25067) — by @lystopad
+- Caplin fixes gossip timing checks that discarded valid late blocks and sync committee messages near
+  slot boundaries. Signature checks for sync committee messages from before a fork use the correct domain
+  after the head crosses the fork, avoiding incorrect peer bans (#24489) — by @lystopad
 - Caplin accepts SSZ submissions at `POST /eth/v2/validator/aggregate_and_proofs`, restoring aggregate
   publication for Prysm validator clients (#24927) — by @domiwei
 - Proposed blocks include locally aggregated attestations and select additional votes by proposer
@@ -188,6 +195,9 @@ and resilience under heavy RPC and peer traffic.
 
 #### Operations
 
+- Caplin validator nodes subscribed to many attestation subnets may use more CPU because they now
+  verify attestations previously dropped by the gossip limit. Allow CPU headroom for this additional
+  work, especially with `--caplin.subscribe-all-topics` (#25000) — by @domiwei
 - The default RPC block cache limit grows to 512 MiB, from 160 MiB for embedded RPC and remote
   rpcdaemon, or 32 MiB for rpcdaemon with `--datadir`. Set `RPC_BLOCK_CACHE` to adjust the memory budget
   (#24120) — by @AskAlexSharov
