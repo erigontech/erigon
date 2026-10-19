@@ -17,30 +17,21 @@
 package forkchoice
 
 import (
-	"context"
 	"testing"
-	"time"
 
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 )
 
 type executionHeadGraph struct {
 	*getFinalizedExecutionHashForkGraph
 	verified bool
-	envelope bool
 }
 
 func (g *executionHeadGraph) PayloadAccepted(common.Hash) (bool, bool) { return g.verified, true }
-func (g *executionHeadGraph) HasEnvelope(common.Hash) bool             { return g.envelope }
 
 func executionHeadFixture(t *testing.T) (*ForkChoiceStore, *executionHeadGraph, ForkChoiceNode) {
 	t.Helper()
@@ -55,104 +46,77 @@ func executionHeadFixture(t *testing.T) (*ForkChoiceStore, *executionHeadGraph, 
 	block.Block.Body.SignedExecutionPayloadBid.Message.BlockHash = common.Hash{3}
 	graph := &executionHeadGraph{
 		getFinalizedExecutionHashForkGraph: &getFinalizedExecutionHashForkGraph{blocks: map[common.Hash]*cltypes.SignedBeaconBlock{head.Root: block}},
-		verified:                           true, envelope: true,
+		verified:                           true,
 	}
-	hashes, err := lru.New[common.Hash, common.Hash](8)
-	require.NoError(t, err)
-	hashes.Add(head.Root, common.Hash{3})
-	hashes.Add(common.Hash{}, common.Hash{2})
-	store := &ForkChoiceStore{beaconCfg: &cfg, forkGraph: graph, headHash: head.Root, headPayloadStatus: head.PayloadStatus, eth2Roots: hashes}
-	store.justifiedCheckpoint.Store(solid.Checkpoint{})
-	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+	store := &ForkChoiceStore{beaconCfg: &cfg, forkGraph: graph}
 	return store, graph, head
 }
 
-func TestGetExecutionHeadUsesCanonicalPayloadStatus(t *testing.T) {
+func TestGetExecutionHeadResolvesNode(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		status cltypes.PayloadStatus
+		mutate func(*ForkChoiceStore, *executionHeadGraph, *ForkChoiceNode)
 		want   common.Hash
+		ready  bool
 	}{
-		{"FULL", cltypes.PayloadStatusFull, common.Hash{3}},
-		{"EMPTY", cltypes.PayloadStatusEmpty, common.Hash{2}},
-		{"PENDING", cltypes.PayloadStatusPending, common.Hash{2}},
+		{
+			name:  "Gloas FULL verified",
+			want:  common.Hash{3},
+			ready: true,
+		},
+		{
+			name: "Gloas FULL unverified",
+			mutate: func(_ *ForkChoiceStore, graph *executionHeadGraph, _ *ForkChoiceNode) {
+				graph.verified = false
+			},
+			want:  common.Hash{3},
+			ready: true,
+		},
+		{
+			name: "Gloas EMPTY",
+			mutate: func(_ *ForkChoiceStore, _ *executionHeadGraph, head *ForkChoiceNode) {
+				head.PayloadStatus = cltypes.PayloadStatusEmpty
+			},
+			want:  common.Hash{2},
+			ready: true,
+		},
+		{
+			name: "Gloas PENDING",
+			mutate: func(_ *ForkChoiceStore, _ *executionHeadGraph, head *ForkChoiceNode) {
+				head.PayloadStatus = cltypes.PayloadStatusPending
+			},
+			want:  common.Hash{2},
+			ready: true,
+		},
+		{
+			name: "pre-Gloas block",
+			mutate: func(store *ForkChoiceStore, graph *executionHeadGraph, head *ForkChoiceNode) {
+				graph.blocks[head.Root] = cltypes.NewSignedBeaconBlock(store.beaconCfg, clparams.FuluVersion)
+			},
+		},
+		{
+			name: "block not in graph",
+			mutate: func(_ *ForkChoiceStore, graph *executionHeadGraph, head *ForkChoiceNode) {
+				delete(graph.blocks, head.Root)
+			},
+		},
+		{
+			name: "Gloas block without bid",
+			mutate: func(store *ForkChoiceStore, graph *executionHeadGraph, head *ForkChoiceNode) {
+				block := cltypes.NewSignedBeaconBlock(store.beaconCfg, clparams.GloasVersion)
+				block.Block.Body.SignedExecutionPayloadBid = nil
+				graph.blocks[head.Root] = block
+			},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			store, _, head := executionHeadFixture(t)
-			head.PayloadStatus, store.headPayloadStatus = tc.status, tc.status
+			store, graph, head := executionHeadFixture(t)
+			if tc.mutate != nil {
+				tc.mutate(store, graph, &head)
+			}
 			hash, ready := store.GetExecutionHead(head)
-			require.True(t, ready)
+			require.Equal(t, tc.ready, ready)
 			require.Equal(t, tc.want, hash)
 		})
 	}
-}
-
-func TestGetExecutionHeadRejectsStaleOrUnverifiedFull(t *testing.T) {
-	for _, reason := range []string{"root changed", "status changed", "cache invalidated", "not verified", "no envelope", "different payload", "unverified anchor"} {
-		t.Run(reason, func(t *testing.T) {
-			store, graph, head := executionHeadFixture(t)
-			switch reason {
-			case "root changed":
-				store.headHash = common.Hash{9}
-			case "status changed":
-				store.headPayloadStatus = cltypes.PayloadStatusEmpty
-			case "cache invalidated":
-				store.headHash = common.Hash{}
-			case "not verified":
-				graph.verified = false
-			case "no envelope":
-				graph.envelope = false
-			case "different payload":
-				store.eth2Roots.Add(head.Root, common.Hash{9})
-			case "unverified anchor":
-				graph.anchorRoot = head.Root
-				delete(graph.blocks, head.Root)
-				graph.verified = false
-			}
-			_, ready := store.GetExecutionHead(head)
-			require.False(t, ready)
-		})
-	}
-}
-
-func TestUpdateExecutionHeadDiscardsChangedDecision(t *testing.T) {
-	store, _, head := executionHeadFixture(t)
-	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
-	store.engine = engine
-	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), common.Hash{2}, common.Hash{2}, common.Hash{3}, nil, clparams.GloasVersion).
-		DoAndReturn(func(ctx context.Context, _, _, _ common.Hash, _ *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
-			deadline, ok := ctx.Deadline()
-			require.True(t, ok)
-			require.LessOrEqual(t, time.Until(deadline), time.Second)
-			require.True(t, store.mu.TryLock(), "execution work must not hold the fork-choice lock")
-			store.headHash = common.Hash{}
-			store.mu.Unlock()
-			return nil, nil
-		})
-	hash, err := store.UpdateExecutionHead(t.Context(), head)
-	require.NoError(t, err)
-	require.Zero(t, hash, "a superseded decision must remain eligible for canonical retry")
-}
-
-func TestUpdateExecutionHeadWithoutEngine(t *testing.T) {
-	store, _, head := executionHeadFixture(t)
-	hash, err := store.UpdateExecutionHead(t.Context(), head)
-	require.NoError(t, err)
-	require.Equal(t, common.Hash{3}, hash, "an absent engine must not leave the canonical decision pending for retry")
-}
-
-func TestUpdateExecutionHeadBoundsSlowExecution(t *testing.T) {
-	store, _, head := executionHeadFixture(t)
-	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
-	store.engine = engine
-	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), nil, clparams.GloasVersion).
-		DoAndReturn(func(ctx context.Context, _, _, _ common.Hash, _ *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
-			require.True(t, store.mu.TryLock())
-			store.mu.Unlock()
-			<-ctx.Done()
-			return nil, ctx.Err()
-		})
-	hash, err := store.UpdateExecutionHead(t.Context(), head)
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	require.Zero(t, hash)
 }

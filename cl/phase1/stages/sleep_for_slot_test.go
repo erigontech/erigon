@@ -23,7 +23,6 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
@@ -33,14 +32,18 @@ type sleepForSlotForkChoiceFake struct {
 	head           common.Hash
 	headSlot       uint64
 	payloadStatus  cltypes.PayloadStatus
+	executionHead  common.Hash
+	ready          *bool
 	calls          *int
 	retryMinSlots  *[]uint64
 	retryDeadlines *[]time.Time
 }
 
 func (f sleepForSlotForkChoiceFake) GetHeadNode() (forkchoice.ForkChoiceNode, uint64, error) {
-	root, slot, err := f.GetHead(nil)
-	return forkchoice.ForkChoiceNode{Root: root, PayloadStatus: f.payloadStatus}, slot, err
+	if f.calls != nil {
+		(*f.calls)++
+	}
+	return forkchoice.ForkChoiceNode{Root: f.head, PayloadStatus: f.payloadStatus}, f.headSlot, nil
 }
 
 func TestSleepForSlotGloasPayloadStatusChange(t *testing.T) {
@@ -68,13 +71,6 @@ func TestSleepForSlotGloasPayloadStatusChange(t *testing.T) {
 	}
 }
 
-func (f sleepForSlotForkChoiceFake) GetHead(*state.CachingBeaconState) (common.Hash, uint64, error) {
-	if f.calls != nil {
-		(*f.calls)++
-	}
-	return f.head, f.headSlot, nil
-}
-
 func (f sleepForSlotForkChoiceFake) RetryDataAvailablePendingExecutionPayloadEnvelopes(ctx context.Context, minSlot uint64) {
 	if f.retryMinSlots != nil {
 		*f.retryMinSlots = append(*f.retryMinSlots, minSlot)
@@ -89,12 +85,6 @@ type blockingSleepForSlotForkChoiceFake struct {
 	head    common.Hash
 	started chan<- struct{}
 	release <-chan struct{}
-}
-
-func (f blockingSleepForSlotForkChoiceFake) GetHead(*state.CachingBeaconState) (common.Hash, uint64, error) {
-	close(f.started)
-	<-f.release
-	return f.head, 0, nil
 }
 
 func (blockingSleepForSlotForkChoiceFake) RetryDataAvailablePendingExecutionPayloadEnvelopes(context.Context, uint64) {
@@ -281,6 +271,39 @@ func TestSleepForSlotDoesNotWakeTwiceForSameHeadWithinRewakeInterval(t *testing.
 	require.GreaterOrEqual(t, time.Since(started), wait-25*time.Millisecond)
 }
 
+func TestSleepForSlotDoesNotBypassRewakeIntervalWhenExecutionHeadBecomesUnavailable(t *testing.T) {
+	materializedHead := common.Hash{1}
+	forkChoiceHead := common.Hash{2}
+	ready := true
+	clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: time.Now().Add(5 * sleepForSlotHeadPollInterval)}
+
+	wake, headChanged, err := waitForNextSlotOrHeadChange(
+		t.Context(), 11, sleepForSlotConfig(10),
+		sleepForSlotForkChoiceFake{head: forkChoiceHead, executionHead: common.Hash{0xee}, ready: &ready},
+		sleepForSlotSyncedDataFake{head: materializedHead},
+		clock,
+		sleepForSlotWake{}, common.Hash{},
+	)
+	require.NoError(t, err)
+	require.True(t, headChanged)
+
+	ready = false
+	wait := 2 * sleepForSlotHeadPollInterval
+	clock.nextSlot = time.Now().Add(wait)
+	started := time.Now()
+	_, headChanged, err = waitForNextSlotOrHeadChange(
+		t.Context(), 11, sleepForSlotConfig(10),
+		sleepForSlotForkChoiceFake{head: forkChoiceHead, ready: &ready},
+		sleepForSlotSyncedDataFake{head: materializedHead},
+		clock,
+		wake, common.Hash{},
+	)
+
+	require.NoError(t, err)
+	require.False(t, headChanged)
+	require.GreaterOrEqual(t, time.Since(started), wait-25*time.Millisecond)
+}
+
 func TestSleepForSlotPollCompletingAfterNextSlotDoesNotWakeEarly(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -357,6 +380,9 @@ func sleepForSlotConfig(gloasForkEpoch uint64) *clparams.BeaconChainConfig {
 }
 
 func (f sleepForSlotForkChoiceFake) GetExecutionHead(head forkchoice.ForkChoiceNode) (common.Hash, bool) {
+	if f.ready != nil {
+		return f.executionHead, *f.ready
+	}
 	if head.PayloadStatus == cltypes.PayloadStatusFull {
 		return common.Hash{0xee}, true
 	}
@@ -364,8 +390,9 @@ func (f sleepForSlotForkChoiceFake) GetExecutionHead(head forkchoice.ForkChoiceN
 }
 
 func (f blockingSleepForSlotForkChoiceFake) GetHeadNode() (forkchoice.ForkChoiceNode, uint64, error) {
-	root, slot, err := f.GetHead(nil)
-	return forkchoice.ForkChoiceNode{Root: root}, slot, err
+	close(f.started)
+	<-f.release
+	return forkchoice.ForkChoiceNode{Root: f.head}, 0, nil
 }
 
 func (blockingSleepForSlotForkChoiceFake) GetExecutionHead(forkchoice.ForkChoiceNode) (common.Hash, bool) {

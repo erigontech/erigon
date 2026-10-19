@@ -54,11 +54,6 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 			return 0, common.Hash{}, fmt.Errorf("failed to get head: %w", err)
 		}
 	}
-	head, slot, headErr := cfg.forkChoice.GetHeadNode()
-	if headErr != nil {
-		return 0, common.Hash{}, headErr
-	}
-	headRoot, headSlot = head.Root, slot
 	// Observe the current slot and epoch in the monitor
 	monitor.ObserveCurrentSlot(headSlot)
 	monitor.ObserveCurrentEpoch(headSlot / cfg.beaconCfg.SlotsPerEpoch)
@@ -67,22 +62,44 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		monitor.ObserveFrozenBlobs(int(cfg.sn.FrozenBlobs()))
 	}
 
-	if cfg.forkChoice.Engine() != nil {
-		logger.Debug("Caplin is sending forkchoice")
-	}
-	var executionHead common.Hash
-	if executionHead, err = cfg.forkChoice.UpdateExecutionHead(ctx, head); err != nil {
-		// A timeout leaves the canonical decision eligible for retry without delaying CL sync.
-		if errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) || errors.Is(err, context.DeadlineExceeded) {
-			logger.Debug("[Caplin] forkchoice update timed out", "head", headRoot)
-			err = nil
-		} else {
-			err = fmt.Errorf("failed to run forkchoice: %w", err)
-			return
+	headVersion := cfg.beaconCfg.GetCurrentStateVersion(headSlot / cfg.beaconCfg.SlotsPerEpoch)
+	executionHead := cfg.forkChoice.GetEth1Hash(headRoot)
+	if headVersion.AfterOrEqual(clparams.GloasVersion) {
+		head, slot, headErr := cfg.forkChoice.GetHeadNode()
+		if headErr == nil {
+			headRoot, headSlot = head.Root, slot
+			headVersion = cfg.beaconCfg.GetCurrentStateVersion(headSlot / cfg.beaconCfg.SlotsPerEpoch)
+			executionHead = cfg.forkChoice.GetEth1Hash(headRoot)
+			if hash, ready := cfg.forkChoice.GetExecutionHead(head); ready {
+				executionHead = hash
+			}
 		}
-	} else if executionHead != (common.Hash{}) {
-		cfg.executionHead = executionHead
 	}
+
+	// Perform fork choice update if the engine is available
+	if engine := cfg.forkChoice.Engine(); engine != nil {
+		finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
+		justifiedCheckpoint := cfg.forkChoice.JustifiedCheckpoint()
+		logger.Debug("Caplin is sending forkchoice")
+
+		if _, err = engine.ForkChoiceUpdate(
+			ctx,
+			cfg.forkChoice.GetFinalizedExecutionHash(finalizedCheckpoint.Root),
+			cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root),
+			executionHead, nil, headVersion,
+		); err != nil {
+			// A forkchoice update that ran out of time is not a rejection, and sync has no payload
+			// to lose by carrying on: the next head will send another one.
+			if errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) {
+				logger.Debug("[Caplin] forkchoice update timed out", "head", headRoot)
+				err = nil
+			} else {
+				err = fmt.Errorf("failed to run forkchoice: %w", err)
+				return
+			}
+		}
+	}
+	cfg.executionHead = executionHead
 
 	// Set the status in the RPC
 	if err2 := cfg.rpc.SetStatus(

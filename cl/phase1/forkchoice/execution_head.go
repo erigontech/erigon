@@ -17,80 +17,24 @@
 package forkchoice
 
 import (
-	"context"
-	"time"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 )
 
-// GetExecutionHead resolves only a current head; FULL also requires a verified envelope.
 func (f *ForkChoiceStore) GetExecutionHead(head ForkChoiceNode) (common.Hash, bool) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	return f.executionHeadLocked(head)
-}
-
-func (f *ForkChoiceStore) executionHeadLocked(head ForkChoiceNode) (common.Hash, bool) {
-	if head.Root == (common.Hash{}) || head.Root != f.headHash || head.PayloadStatus != f.headPayloadStatus {
-		return common.Hash{}, false
-	}
-	if f.beaconCfg.GetCurrentStateVersion(f.headSlot / f.beaconCfg.SlotsPerEpoch).Before(clparams.GloasVersion) {
-		hash, ok := f.eth2Roots.Get(head.Root)
-		return hash, ok
-	}
-	if head.PayloadStatus == cltypes.PayloadStatusFull && !f.IsPayloadVerified(head.Root) {
-		return common.Hash{}, false
-	}
 	block, ok := f.forkGraph.GetBlock(head.Root)
-	if !ok || block == nil {
-		if head.Root == f.forkGraph.AnchorRoot() {
-			hash, ok := f.eth2Roots.Get(head.Root)
-			return hash, ok
-		}
+	if !ok || block == nil || block.Block.Body.Version < clparams.GloasVersion {
 		return common.Hash{}, false
 	}
 	bid := block.Block.Body.GetSignedExecutionPayloadBid()
 	if bid == nil || bid.Message == nil {
 		return common.Hash{}, false
 	}
-	if head.PayloadStatus != cltypes.PayloadStatusFull {
-		return bid.Message.ParentBlockHash, true
+	if head.PayloadStatus == cltypes.PayloadStatusFull {
+		return bid.Message.BlockHash, true
 	}
-	hash, ok := f.eth2Roots.Get(head.Root)
-	return hash, ok && hash == bid.Message.BlockHash
-}
-
-// UpdateExecutionHead sends a canonical decision without holding the store lock over EL work.
-func (f *ForkChoiceStore) UpdateExecutionHead(ctx context.Context, head ForkChoiceNode) (common.Hash, error) {
-	f.mu.RLock()
-	hash, ready := f.executionHeadLocked(head)
-	if !ready {
-		f.mu.RUnlock()
-		return common.Hash{}, nil
-	}
-	if f.engine == nil {
-		f.mu.RUnlock()
-		return hash, nil
-	}
-	finalized := f.getFinalizedExecutionHashLocked(f.finalizedCheckpoint.Load().(solid.Checkpoint).Root)
-	safe := f.getFinalizedExecutionHashLocked(f.justifiedCheckpoint.Load().(solid.Checkpoint).Root)
-	version := f.beaconCfg.GetCurrentStateVersion(f.headSlot / f.beaconCfg.SlotsPerEpoch)
-	engine := f.engine
-	f.mu.RUnlock()
-
-	if version.AfterOrEqual(clparams.GloasVersion) {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Second)
-		defer cancel()
-	}
-	if _, err := engine.ForkChoiceUpdate(ctx, finalized, safe, hash, nil, version); err != nil {
-		return common.Hash{}, err
-	}
-	if current, ready := f.GetExecutionHead(head); !ready || current != hash {
-		return common.Hash{}, nil
-	}
-	return hash, nil
+	return bid.Message.ParentBlockHash, true
 }

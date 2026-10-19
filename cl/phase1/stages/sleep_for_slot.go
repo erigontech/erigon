@@ -102,7 +102,7 @@ func waitForNextSlotOrHeadChange(
 			}
 			executionHead, ready := forkChoice.GetExecutionHead(head)
 			changed := head.Root != syncedData.HeadRoot() || (ready && executionHead != lastExecutionHead)
-			if changed && (head.Root != lastWake.root || executionHead != lastWake.executionHead || time.Since(lastWake.at) >= sleepForSlotRewakeInterval) {
+			if changed && (head.Root != lastWake.root || (ready && executionHead != lastWake.executionHead) || time.Since(lastWake.at) >= sleepForSlotRewakeInterval) {
 				return sleepForSlotWake{root: head.Root, executionHead: executionHead, at: time.Now()}, true, nil
 			}
 			// The head's envelope decides whether the next proposer builds on a full or empty parent.

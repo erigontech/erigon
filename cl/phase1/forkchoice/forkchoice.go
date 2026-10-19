@@ -797,10 +797,6 @@ func (f *ForkChoiceStore) GetEth1Hash(eth2Root common.Hash) common.Hash {
 func (f *ForkChoiceStore) GetFinalizedExecutionHash(eth2Root common.Hash) common.Hash {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	return f.getFinalizedExecutionHashLocked(eth2Root)
-}
-
-func (f *ForkChoiceStore) getFinalizedExecutionHashLocked(eth2Root common.Hash) common.Hash {
 	block, ok := f.forkGraph.GetBlock(eth2Root)
 	if ok && block != nil && block.Block.Body.Version >= clparams.GloasVersion {
 		if bid := block.Block.Body.GetSignedExecutionPayloadBid(); bid != nil && bid.Message != nil {

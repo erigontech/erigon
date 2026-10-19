@@ -656,12 +656,6 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	if gloasPathRequiresForkChoiceUpdate(payloadSource.gloasPath) {
 		return key, errGloasPathNeedsForkChoice
 	}
-	if payloadSource.gloasPath == gloasPayloadPathFull {
-		envelope := payloadSource.parentEnvelope
-		if envelope.BeaconBlockRoot != baseBlockRoot || envelope.Payload == nil || envelope.Payload.BlockHash != payloadSource.head {
-			return key, errGloasPayloadPending
-		}
-	}
 	withdrawalsState, err := withdrawalsStateForExecutionPayloadSource(baseState, payloadSource)
 	if err != nil {
 		return key, fmt.Errorf("prepare payload: derive withdrawals state: %w", err)
@@ -685,7 +679,7 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	if !selected || selectedRoot != baseBlockRoot {
 		return key, errPreparationHeadChanged
 	}
-	if err := a.checkPreparationParent(baseBlockRoot, targetSlot, payloadSource.head, payloadSource.gloasPath); err != nil {
+	if err := a.checkPreparationParent(baseBlockRoot, targetSlot, payloadSource.gloasPath); err != nil {
 		return key, err
 	}
 
@@ -765,7 +759,7 @@ func (a *ApiHandler) startPayloadBuildForPreparation(
 		if !selected || selectedRoot != baseBlockRoot {
 			return nil, errPreparationHeadChanged
 		}
-		if err := a.checkPreparationParent(baseBlockRoot, targetSlot, head, path); err != nil {
+		if err := a.checkPreparationParent(baseBlockRoot, targetSlot, path); err != nil {
 			return nil, err
 		}
 		payloadID, err := a.startPayloadBuildAttempt(ctx, payloadBuilder, preparationSlot, selectedSlot, head, attrs)
@@ -786,22 +780,16 @@ func (a *ApiHandler) startPayloadBuildForPreparation(
 	}
 }
 
-func (a *ApiHandler) checkPreparationParent(root common.Hash, targetSlot uint64, executionHead common.Hash, path gloasPayloadPath) error {
+func (a *ApiHandler) checkPreparationParent(root common.Hash, targetSlot uint64, path gloasPayloadPath) error {
 	if path == gloasPayloadPathPreFork {
 		return nil
 	}
-	head, err := a.resolveProposalHead(root)
+	currentPath, err := a.resolveGloasPayloadPath(root, targetSlot)
 	if err != nil {
 		return err
 	}
-	if a.gloasPayloadPathForHead(head, targetSlot) != path {
+	if currentPath != path {
 		return errGloasPayloadPending
-	}
-	if path == gloasPayloadPathFull {
-		hash, ready := a.forkchoiceStore.GetExecutionHead(head)
-		if !ready || hash != executionHead {
-			return errGloasPayloadPending
-		}
 	}
 	return nil
 }
@@ -847,10 +835,10 @@ func (a *ApiHandler) payloadBuildAttributes(
 }
 
 type executionPayloadSource struct {
-	head           common.Hash
-	parentEnvelope *cltypes.ExecutionPayloadEnvelope
-	gloasPath      gloasPayloadPath
-	fallbackCause  error
+	head                    common.Hash
+	parentExecutionRequests *cltypes.ExecutionRequests
+	gloasPath               gloasPayloadPath
+	fallbackCause           error
 }
 
 func withdrawalsStateForExecutionPayloadSource(
@@ -862,7 +850,7 @@ func withdrawalsStateForExecutionPayloadSource(
 	if payloadSource.gloasPath == gloasPayloadPathPreFork {
 		return baseState, nil
 	}
-	if payloadSource.parentEnvelope == nil {
+	if payloadSource.parentExecutionRequests == nil {
 		return nil, nil
 	}
 	// Applying a FULL parent mutates Gloas withdrawal state. Other production inputs must keep
@@ -871,7 +859,7 @@ func withdrawalsStateForExecutionPayloadSource(
 	if err != nil {
 		return nil, fmt.Errorf("copy state for FULL parent payload: %w", err)
 	}
-	if err := transition.DefaultMachine.ApplyParentExecutionPayload(withdrawalsState, payloadSource.parentEnvelope.ExecutionRequests); err != nil {
+	if err := transition.DefaultMachine.ApplyParentExecutionPayload(withdrawalsState, payloadSource.parentExecutionRequests); err != nil {
 		return nil, fmt.Errorf("apply FULL parent payload: %w", err)
 	}
 	return withdrawalsState, nil
@@ -954,9 +942,9 @@ func (a *ApiHandler) executionPayloadSourceForGloasPath(
 		}
 	}
 	return executionPayloadSource{
-		head:           parentBid.BlockHash,
-		parentEnvelope: envelope.Message,
-		gloasPath:      path,
+		head:                    parentBid.BlockHash,
+		parentExecutionRequests: envelope.Message.ExecutionRequests,
+		gloasPath:               path,
 	}
 }
 
@@ -983,7 +971,11 @@ func (a *ApiHandler) resolveGloasPayloadPath(baseBlockRoot common.Hash, targetSl
 	if err != nil {
 		return gloasPayloadPathPending, err
 	}
-	return a.gloasPayloadPathForHead(head, targetSlot), nil
+	path := a.gloasPayloadPathForHead(head, targetSlot)
+	if path == gloasPayloadPathFull && !a.forkchoiceStore.IsPayloadVerified(head.Root) {
+		return gloasPayloadPathPending, errGloasPayloadPending
+	}
+	return path, nil
 }
 
 func (a *ApiHandler) gloasPayloadPathForHead(head forkchoice.ForkChoiceNode, targetSlot uint64) gloasPayloadPath {

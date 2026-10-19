@@ -665,6 +665,7 @@ func TestPreparePayloadLoopPrimesGloasAfterPayloadDecision(t *testing.T) {
 		elapsed       time.Duration
 		staleHead     bool
 		fullHead      bool
+		unverified    bool
 		reorgToEmpty  bool
 		timeout       time.Duration
 		shouldPrepare bool
@@ -673,6 +674,7 @@ func TestPreparePayloadLoopPrimesGloasAfterPayloadDecision(t *testing.T) {
 		{name: "wakeup at PTC deadline", elapsed: 8900 * time.Millisecond, timeout: 2 * time.Second, shouldPrepare: true},
 		{name: "EMPTY head after PTC deadline", elapsed: 9100 * time.Millisecond, shouldPrepare: true},
 		{name: "FULL head", elapsed: 9100 * time.Millisecond, fullHead: true, shouldPrepare: true},
+		{name: "unverified FULL head", elapsed: 9100 * time.Millisecond, fullHead: true, unverified: true},
 		{name: "FULL head with EMPTY decision", elapsed: 9100 * time.Millisecond, reorgToEmpty: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -693,8 +695,7 @@ func TestPreparePayloadLoopPrimesGloasAfterPayloadDecision(t *testing.T) {
 			forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
 			if test.fullHead {
 				forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusFull
-				forkchoiceStore.VerifiedPayloads = map[common.Hash]bool{baseBlockRoot: true}
-				forkchoiceStore.Eth1Hashes[baseBlockRoot] = common.Hash{0xb2}
+				forkchoiceStore.VerifiedPayloads = map[common.Hash]bool{baseBlockRoot: !test.unverified}
 				forkchoiceStore.Envelopes[baseBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{
 					Message: &cltypes.ExecutionPayloadEnvelope{
 						BeaconBlockRoot:   baseBlockRoot,
@@ -865,9 +866,11 @@ func TestPreparePayloadLoopClassifiesGloasPathWarnings(t *testing.T) {
 		name             string
 		headChanged      bool
 		lookupErr        error
+		unverifiedFull   bool
 		wantFirstWarning string
 	}{
 		{name: "pending", wantFirstWarning: pendingWarning},
+		{name: "unverified FULL", unverifiedFull: true},
 		{name: "head changed", headChanged: true},
 		{name: "lookup failed", lookupErr: errors.New("head lookup failed"), wantFirstWarning: failureWarning},
 	} {
@@ -885,11 +888,20 @@ func TestPreparePayloadLoopClassifiesGloasPathWarnings(t *testing.T) {
 				handler.logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
 				ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 				defer cancel()
+				if test.unverifiedFull {
+					buildOnFull := true
+					forkchoiceStore.ShouldBuildOnFullVal = &buildOnFull
+					forkchoiceStore.Envelopes[baseBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{}
+				}
 				reads := 0
 				var firstOutput string
 				forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
 					reads++
-					head := forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: cltypes.PayloadStatusPending}
+					status := cltypes.PayloadStatusPending
+					if test.unverifiedFull {
+						status = cltypes.PayloadStatusFull
+					}
+					head := forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: status}
 					switch reads {
 					case 1:
 						if test.headChanged {
@@ -925,8 +937,12 @@ func TestPreparePayloadLoopClassifiesGloasPathWarnings(t *testing.T) {
 				if test.wantFirstWarning != pendingWarning {
 					require.NotContains(t, firstOutput, pendingWarning)
 				}
-				// A lookup failure must not consume the warning budget for a pending payload.
-				require.Equal(t, 1, strings.Count(output.String(), pendingWarning))
+				if test.unverifiedFull {
+					require.NotContains(t, output.String(), pendingWarning)
+				} else {
+					// A lookup failure must not consume the warning budget for a pending payload.
+					require.Equal(t, 1, strings.Count(output.String(), pendingWarning))
+				}
 			})
 		})
 	}
@@ -1968,8 +1984,6 @@ func TestPreparePayloadForGloasPaths(t *testing.T) {
 		buildOnFull          bool
 		hasEnvelope          bool
 		unverified           bool
-		wrongEnvelopeRoot    bool
-		wrongEnvelopeHash    bool
 		invalidateAfterBuild bool
 		wantBuild            bool
 		wantErr              error
@@ -1981,14 +1995,6 @@ func TestPreparePayloadForGloasPaths(t *testing.T) {
 		{
 			name: "unverified FULL parent", payloadStatus: cltypes.PayloadStatusFull,
 			buildOnFull: true, hasEnvelope: true, unverified: true, wantErr: errGloasPayloadPending,
-		},
-		{
-			name: "wrong envelope root", payloadStatus: cltypes.PayloadStatusFull,
-			buildOnFull: true, hasEnvelope: true, wrongEnvelopeRoot: true, wantErr: errGloasPayloadPending,
-		},
-		{
-			name: "wrong envelope payload", payloadStatus: cltypes.PayloadStatusFull,
-			buildOnFull: true, hasEnvelope: true, wrongEnvelopeHash: true, wantErr: errGloasPayloadPending,
 		},
 		{
 			name: "invalidated during builder startup", payloadStatus: cltypes.PayloadStatusFull,
@@ -2014,7 +2020,6 @@ func TestPreparePayloadForGloasPaths(t *testing.T) {
 			baseBlockRoot := common.Hash{0x41}
 			forkchoiceStore.HeadVal = baseBlockRoot
 			forkchoiceStore.VerifiedPayloads = map[common.Hash]bool{baseBlockRoot: !test.unverified}
-			forkchoiceStore.Eth1Hashes[baseBlockRoot] = common.Hash{0xb2}
 			postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
 				ParentBlockHash: common.Hash{0xa1},
 				BlockHash:       common.Hash{0xb2},
@@ -2029,12 +2034,6 @@ func TestPreparePayloadForGloasPaths(t *testing.T) {
 						Payload:           &cltypes.Eth1Block{BlockHash: common.Hash{0xb2}},
 						ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion),
 					},
-				}
-				if test.wrongEnvelopeRoot {
-					forkchoiceStore.Envelopes[baseBlockRoot].Message.BeaconBlockRoot = common.Hash{0xff}
-				}
-				if test.wrongEnvelopeHash {
-					forkchoiceStore.Envelopes[baseBlockRoot].Message.Payload.BlockHash = common.Hash{0xff}
 				}
 			}
 
@@ -2096,7 +2095,7 @@ func TestExecutionPayloadSourceMarksReorgToEmptyAfterNegativePtcDecision(t *test
 
 	require.Equal(t, parentHash, source.head)
 	require.Equal(t, gloasPayloadPathReorgToEmpty, source.gloasPath)
-	require.Nil(t, source.parentEnvelope)
+	require.Nil(t, source.parentExecutionRequests)
 }
 
 func TestExecutionPayloadSourceFallsBackToEmptyForUnavailableGloasPayload(t *testing.T) {
@@ -2137,7 +2136,7 @@ func TestExecutionPayloadSourceFallsBackToEmptyForUnavailableGloasPayload(t *tes
 			require.NoError(t, err)
 			require.Equal(t, parentHash, source.head)
 			require.Equal(t, gloasPayloadPathPending, source.gloasPath)
-			require.Nil(t, source.parentEnvelope)
+			require.Nil(t, source.parentExecutionRequests)
 			if test.wantCause != "" {
 				require.ErrorContains(t, source.fallbackCause, test.wantCause)
 			} else {
@@ -3212,7 +3211,6 @@ func TestGloasPreparationRechecksParentDuringExecutionRetry(t *testing.T) {
 			store := mock_services.NewForkChoiceStorageMock(t)
 			store.HeadVal, store.HeadPayloadStatusVal = root, cltypes.PayloadStatusFull
 			store.VerifiedPayloads = map[common.Hash]bool{root: true}
-			store.Eth1Hashes[root] = payload
 			store.SetEnvelope(root, &cltypes.SignedExecutionPayloadEnvelope{})
 			synced := sync_mock_services.NewMockSyncedData(ctrl)
 			synced.EXPECT().SelectedHead().Return(root, uint64(10), true).AnyTimes()

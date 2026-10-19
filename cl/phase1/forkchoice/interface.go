@@ -49,7 +49,6 @@ type ForkChoiceStorageReader interface {
 	GetFinalizedExecutionHash(eth2Root common.Hash) common.Hash
 	GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error)
 	GetHeadNode() (ForkChoiceNode, uint64, error)
-	GetExecutionHead(head ForkChoiceNode) (common.Hash, bool)
 	HighestSeen() uint64
 	HasImportedDescendantAfter(root common.Hash, slot uint64) bool
 	BlockProcessing() bool
