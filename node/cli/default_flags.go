@@ -272,6 +272,7 @@ var DefaultFlags = []cli.Flag{
 	&OfflineBALDirFlag,
 	&TieringLookbackBlocksFlag,
 	&TieringColdDirFlag,
+	&TieringCommitmentHotMergeStepsFlag,
 	&SyncLoopBreakAfterFlag,
 	&SyncParallelStateFlushing,
 

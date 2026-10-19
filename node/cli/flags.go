@@ -148,10 +148,10 @@ var (
 
 	TieringLookbackBlocksFlag = cli.Uint64Flag{
 		Name:  "tiering.lookback-blocks",
-		Usage: "Hot window in blocks below the head; state files fully below it are cold (216000..1296000, 0 = off)",
+		Usage: "Hot window in blocks below the head; state files fully below it are cold (>= 1000, 0 = off)",
 		Validator: func(n uint64) error {
-			if n != 0 && (n < 216_000 || n > 1_296_000) {
-				return fmt.Errorf("--tiering.lookback-blocks=%d: want 0 or 216000..1296000", n)
+			if n != 0 && n < 1_000 {
+				return fmt.Errorf("--tiering.lookback-blocks=%d: want 0 or >= 1000", n)
 			}
 			return nil
 		},
@@ -160,6 +160,11 @@ var (
 	TieringColdDirFlag = cli.StringFlag{
 		Name:  "tiering.cold-dir",
 		Usage: "Cold-tier directory: a state file whose resolved path is under it counts as cold-resident (default: no cold tier)",
+	}
+
+	TieringCommitmentHotMergeStepsFlag = cli.Uint64Flag{
+		Name:  "tiering.commitment-hot-merge-steps",
+		Usage: "Max steps of a merged commitment file on the hot tier (1 = never merge commitment files; 0 = default merge limits)",
 	}
 
 	SyncParallelStateFlushing = cli.BoolFlag{
@@ -366,6 +371,7 @@ func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 	}
 	cfg.Sync.TieringLookbackBlocks = ctx.Uint64(TieringLookbackBlocksFlag.Name)
 	cfg.Sync.TieringColdDir = ctx.String(TieringColdDirFlag.Name)
+	cfg.Sync.TieringCommitmentHotMergeSteps = ctx.Uint64(TieringCommitmentHotMergeStepsFlag.Name)
 	cfg.Sync.ParallelStateFlushing = ctx.Bool(SyncParallelStateFlushing.Name)
 	if d := ctx.Duration(utils.SlowBlockThresholdFlag.Name); d >= 0 {
 		cfg.Sync.SlowBlockThreshold = &d

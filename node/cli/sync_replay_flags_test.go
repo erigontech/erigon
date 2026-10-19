@@ -89,10 +89,10 @@ func TestOfflineBALFlags(t *testing.T) {
 
 func TestTieringLookbackBlocksFlag(t *testing.T) {
 	require.Zero(t, buildEthCfg(t, nil).Sync.TieringLookbackBlocks)
-	for _, n := range []uint64{216_000, 1_296_000} {
+	for _, n := range []uint64{1_000, 21_600, 2_000_000} {
 		require.Equal(t, n, buildEthCfg(t, []string{"--tiering.lookback-blocks", strconv.FormatUint(n, 10)}).Sync.TieringLookbackBlocks)
 	}
-	for _, n := range []string{"1", "215999", "1296001"} {
+	for _, n := range []string{"1", "999"} {
 		app := &cli.Command{Flags: DefaultFlags, Action: func(context.Context, *cli.Command) error { return nil }}
 		require.Error(t, app.Run(context.Background(), []string{"erigon", "--tiering.lookback-blocks", n}), n)
 	}
@@ -101,4 +101,9 @@ func TestTieringLookbackBlocksFlag(t *testing.T) {
 func TestTieringColdDirFlag(t *testing.T) {
 	require.Empty(t, buildEthCfg(t, nil).Sync.TieringColdDir)
 	require.Equal(t, "/hdd/domain", buildEthCfg(t, []string{"--tiering.cold-dir", "/hdd/domain"}).Sync.TieringColdDir)
+}
+
+func TestTieringCommitmentHotMergeStepsFlag(t *testing.T) {
+	require.Zero(t, buildEthCfg(t, nil).Sync.TieringCommitmentHotMergeSteps)
+	require.Equal(t, uint64(1), buildEthCfg(t, []string{"--tiering.commitment-hot-merge-steps", "1"}).Sync.TieringCommitmentHotMergeSteps)
 }

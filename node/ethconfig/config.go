@@ -301,18 +301,19 @@ type Sync struct {
 	ExecWorkerCount  int
 	ReconWorkerCount int
 
-	BodyCacheLimit             datasize.ByteSize
-	BodyDownloadTimeoutSeconds int // TODO: change to duration
-	BreakAfterStage            string
-	LoopBlockLimit             uint
-	ParallelStateFlushing      bool
-	ChainTipMode               bool
-	ExecStopAtBlock            uint64
-	GenerateOfflineBALs        bool
-	UseOfflineBALs             bool
-	OfflineBALDir              string
-	TieringLookbackBlocks      uint64
-	TieringColdDir             string
+	BodyCacheLimit                 datasize.ByteSize
+	BodyDownloadTimeoutSeconds     int // TODO: change to duration
+	BreakAfterStage                string
+	LoopBlockLimit                 uint
+	ParallelStateFlushing          bool
+	ChainTipMode                   bool
+	ExecStopAtBlock                uint64
+	GenerateOfflineBALs            bool
+	UseOfflineBALs                 bool
+	OfflineBALDir                  string
+	TieringLookbackBlocks          uint64
+	TieringColdDir                 string
+	TieringCommitmentHotMergeSteps uint64
 
 	ChaosMonkey              bool
 	AlwaysGenerateChangesets bool
