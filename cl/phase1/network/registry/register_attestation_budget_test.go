@@ -96,7 +96,6 @@ func TestAttestationGossipBudgetScalesWithExpectedTraffic(t *testing.T) {
 			p2pManager.EXPECT().Pubsub().Return(ps).AnyTimes()
 			p2pManager.EXPECT().Host().Return(nil).AnyTimes()
 			p2pManager.EXPECT().BandwidthCounter().Return(metrics.NewBandwidthCounter()).AnyTimes()
-			p2pManager.EXPECT().UpdateENRAttSubnets(gomock.Any(), gomock.Any()).AnyTimes()
 
 			gm := gossip.NewGossipManager(
 				t.Context(), p2pManager, &tt.beaconConfig, &tt.networkConfig, clock, false, 0,
