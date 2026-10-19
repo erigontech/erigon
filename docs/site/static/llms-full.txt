@@ -102,7 +102,7 @@ A locally mounted **SSD** (Solid-State Drive) or **NVMe** (Non-Volatile Memory E
 | Component | Recommendation | Notes |
 | --- | --- | --- |
 | Disk Type | Use high-end NVMe SSDs. | Avoid HDDs. SSD performance may degrade when nearing full capacity. |
-| Disk Configuration | A single NVMe device is enough for any pruning mode. | An archive node fits on one 4 TB drive, so redundant array of independent disks (RAID) 0 striping is not needed. For failure protection, use a mirrored array, not RAID 0. See [Filesystem](https://docs.erigon.tech/get-started/hardware-requirements#filesystem). |
+| Disk Configuration | A single NVMe device is enough for any pruning mode. | An archive node fits on one 4 TB drive, so striping across a redundant array of independent disks (RAID 0) is not needed. For failure protection, use a mirrored array, not RAID 0. See [Filesystem](https://docs.erigon.tech/get-started/hardware-requirements#filesystem). |
 | Filesystem | ext4 or XFS | See [Filesystem](https://docs.erigon.tech/get-started/hardware-requirements#filesystem) below. |
 | RAM | Adequate memory is crucial | Reduces bottlenecks during sync and improves performance under load. |
 | CPU | 4–8 cores for Full nodes, 8–16 cores for Archive nodes | More cores are generally better for intense sync and query operations. On amd64, the CPU must support the `x86-64-v2` baseline (SSE4.2, POPCNT): Intel Nehalem (2008), AMD Bulldozer (2011) or newer. |
@@ -1866,7 +1866,7 @@ Erigon must be stopped. The command takes the datadir lock and opens each databa
 
 Erigon also compacts at startup, before the node opens its databases: any database whose free pages are at least 10 GB **and** more than four times its live data is rewritten the same way (`[compact] auto-compact` in the log). It needs the same free space for a second copy, delays startup while it runs, and cannot be turned off. A database that fails to compact is left as it was, and startup continues. It skips the step if another process holds the datadir lock.
 
-`erigon db compact` is a manual defragmentation pass, not the background compaction of an log-structured merge-tree (LSM) engine — MDBX has none, as described in *Storage engine: MDBX* above.
+`erigon db compact` is a manual defragmentation pass, not the background compaction of a log-structured merge-tree (LSM) engine — MDBX has none, as described in *Storage engine: MDBX* above.
 
 ## Where to go next
 
@@ -2785,7 +2785,7 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
 
   - Default: `false`
 
-- `--witness.cache.blocks value` *(New in v3.6)*: Number of recent blocks whose legacy `debug_executionWitness` result is eagerly cached in memory, keyed by block hash in an least recently used (LRU). Each witness is held as serialized JSON and served verbatim on a hit, so memory use is roughly this count multiplied by the per-block witness size. Embedded RPC only, and requires `--prune.include-commitment-history` (runtime errors from `debug_executionWitness` and `eth_getWitness` name its `--prune.experimental.include-commitment-history` alias instead). This flag also gates `debug_subscribe("executionWitnesses")`, which pushes each witness over WebSocket as the cache builds it. That stream is best-effort rather than contiguous — catch-up bursts, skipped or failed builds, and slow subscribers all leave gaps — so a client that needs every height re-requests the missing ones with `debug_executionWitness`.
+- `--witness.cache.blocks value` *(New in v3.6)*: Number of recent blocks whose legacy `debug_executionWitness` result is eagerly cached in memory, keyed by block hash in a least recently used (LRU) cache. Each witness is held as serialized JSON and served verbatim on a hit, so memory use is roughly this count multiplied by the per-block witness size. Embedded RPC only, and requires `--prune.include-commitment-history` (runtime errors from `debug_executionWitness` and `eth_getWitness` name its `--prune.experimental.include-commitment-history` alias instead). This flag also gates `debug_subscribe("executionWitnesses")`, which pushes each witness over WebSocket as the cache builds it. That stream is best-effort rather than contiguous — catch-up bursts, skipped or failed builds, and slow subscribers all leave gaps — so a client that needs every height re-requests the missing ones with `debug_executionWitness`.
 
   - Default: `0` (cache disabled); values above the cap of `96` are clamped
 
@@ -3551,7 +3551,7 @@ This flag sets the external address advertised in the **discv5 Ethereum Node Rec
 | Value | Behavior |
 | --- | --- |
 | `""` (default) | No NAT mapping — CL peers cannot reach you inbound |
-| `extip:1.2.3.4` | Advertise a fixed public IP — recommended for virtual private server (VPS) / datacenters |
+| `extip:1.2.3.4` | Advertise a fixed public IP — recommended for virtual private servers (VPS) / datacenters |
 | `stun` | Discover external IP via STUN |
 | `upnp` | Use UPnP to discover and map the port |
 | `pmp` | Use NAT-PMP; optionally `pmp:192.168.0.1` to specify the gateway |
@@ -5516,7 +5516,7 @@ For API usage refer to the below official resources:
 The sections below cover only the places where Erigon adds a method that is not in that standard set, or where its behaviour differs from it. They are not an exhaustive compliance statement: anything not listed here is expected to follow the spec, but a deviation that has not yet been documented may still exist.
 
 :::info
-`execution-apis` is a living specification rather than a frozen standard — methods are still being added, and some long-standing `eth` behaviour was never specified at all — so parts of what follows are differences from a moving target rather than defects. Erigon runs the specification's own conformance vectors in continuous integration (CI) (Hive's `rpc-compat` suite against a pinned `execution-apis` revision) and works with the other client teams on closing these gaps, so this page will change as the two converge.
+`execution-apis` is a living specification rather than a frozen standard — methods are still being added, and some long-standing `eth` behaviour was never specified at all — so parts of what follows are differences from a moving target rather than defects. Erigon runs the specification's own conformance vectors in continuous integration (CI), using Hive's `rpc-compat` suite against a pinned `execution-apis` revision, and works with the other client teams on closing these gaps, so this page will change as the two converge.
 :::
 
 ### Pending state
@@ -8207,7 +8207,7 @@ Note that many pre-merge flags, such as `--miner.etherbase`, are no longer usefu
 # Shutter Network
 URL: https://docs.erigon.tech/staking/shutter-network
 
-[Shutter Network](https://www.shutter.network) is a privacy-focused protocol that provides encrypted transaction pools using threshold encryption. The main objective is to protect users from malicious Maximal Extractable Value (MEV) (Miner Extractable Value) attacks such as front-running and sandwich attacks by encrypting transactions until they are included in a block.
+[Shutter Network](https://www.shutter.network) is a privacy-focused protocol that provides encrypted transaction pools using threshold encryption. The main objective is to protect users from malicious Maximal Extractable Value (MEV) attacks such as front-running and sandwich attacks by encrypting transactions until they are included in a block.
 
 The key advantages of Shutter Network are:
 
@@ -8331,7 +8331,7 @@ The Erigon node software is developed in the [erigontech/erigon](https://github.
 ### Code style and guidelines
 
 - Follow the existing Go conventions in the codebase.
-- Run `make lint` before submitting — the continuous integration (CI) will enforce it.
+- Run `make lint` before submitting — continuous integration (CI) will enforce it.
 - All new code should be covered by tests where practical.
 - Use the package-prefix commit message format: `eth, rpc: make trace configs optional`. This keeps the git log scannable by subsystem.
 
@@ -8492,7 +8492,7 @@ URL: https://docs.erigon.tech/help-center/troubleshooting
 
 Erigon is highly resilient and uses a fully-transactional database. This design makes it safe against hard termination (`kill -9`) and power outages. The database ensures users never see "partial writes," meaning all data changes are atomic (all-or-nothing), and all RPC methods operate within Read-Only Transactions, guaranteeing a consistent data view.
 
-**Protect Against Hardware Failure**: True data corruption is typically only caused by hardware failures (like disk or RAM failure). We strongly recommend using error-correcting code (ECC) memory, disk redundant array of independent disks (RAID), and performing regular backups to mitigate these risks.
+**Protect Against Hardware Failure**: True data corruption is typically only caused by hardware failures (like disk or RAM failure). We strongly recommend using error-correcting code (ECC) memory, a redundant array of independent disks (RAID), and performing regular backups to mitigate these risks.
 
 When an issue arises, follow these steps to methodically diagnose and resolve the problem.
 
@@ -8676,7 +8676,7 @@ These integrated practices focus on maximizing the reliability, efficiency, and 
 | **Practice** | **Details** | **Rationale** |
 | --- | --- | --- |
 | Use a High-End NVMe SSD | This is a non-negotiable prerequisite. NVMe SSDs are essential for reliable, high-performance node operation. See [Hardware Requirements](https://docs.erigon.tech/get-started/hardware-requirements). | Erigon is highly disk I/O intensive. Fast storage prevents bottlenecks and sync issues. |
-| Integrate Hardware Reliability | Use error-correcting code (ECC) memory and consider a disk redundant array of independent disks (RAID) setup. Do regular backups of your chain data. | While Erigon's database is fully-transactional and resilient to graceful shutdowns, crashes, and power outages, it is not protected against hardware failures (disk or RAM corruption). |
+| Integrate Hardware Reliability | Use error-correcting code (ECC) memory and consider a redundant array of independent disks (RAID) setup. Do regular backups of your chain data. | While Erigon's database is fully-transactional and resilient to graceful shutdowns, crashes, and power outages, it is not protected against hardware failures (disk or RAM corruption). |
 | Symlink Data Directories (Advanced) | For systems with multiple disks, consider symlinking `snapshots` and `temp` directories to a cheaper, high-capacity drive, while keeping the main `chaindata` on the fast NVMe. See [Optimizing Storage](https://docs.erigon.tech/fundamentals/optimizing-storage). | Optimizes cost and capacity while retaining performance for critical files. |
 | Maintain Sufficient RAM | Ensure your system has at least the recommended RAM for your chosen network and [pruning mode](https://docs.erigon.tech/fundamentals/pruning-modes). See [Hardware Requirements](https://docs.erigon.tech/get-started/hardware-requirements). | Insufficient RAM, even with Erigon's memory efficiency, will lead to OOM-kill events (Out-of-Memory). |
 
@@ -8735,7 +8735,7 @@ The following shell snippets can provide meaningful performance gains on the rig
 vmtouch -vldt /your/datadir/snapshots/domain
 ```
 
-**Reduce random-read pressure on cloud / network-attached storage (NAS) storage** — disable the random-access hint for snapshot files:
+**Reduce random-read pressure on cloud / network-attached storage (NAS)** — disable the random-access hint for snapshot files:
 
 ```bash
 export ERIGON_SNAPSHOT_MADV_RND=false
