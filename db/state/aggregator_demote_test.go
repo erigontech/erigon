@@ -368,3 +368,27 @@ func TestAggregatorOpenFolderIgnoresDanglingDemoteTmpLink(t *testing.T) {
 	require.NoError(t, os.Symlink(filepath.Join(t.TempDir(), "gone.kv"), ssdPath+".demote.tmp"))
 	require.NoError(t, agg.OpenFolder(db))
 }
+
+func TestAggregatorDemoteInBackgroundSkipsOnlyColdResidentFiles(t *testing.T) {
+	t.Parallel()
+	db, agg := testAggWithRanges(t, []testFileRange{{0, 1}, {1, 2}, {2, 3}})
+	snapDomain := agg.Dirs().SnapDomain
+	onOtherSSDDir := domainFileBySuffix(t, snapDomain, "commitment.0-1.kv")
+	alreadyCold := domainFileBySuffix(t, snapDomain, "commitment.1-2.kv")
+	notLinked := domainFileBySuffix(t, snapDomain, "commitment.2-3.kv")
+	coldDir := t.TempDir()
+	moveToColdByHand(t, onOtherSSDDir, t.TempDir())
+	moveToColdByHand(t, alreadyCold, coldDir)
+	require.NoError(t, agg.OpenFolder(db))
+
+	require.True(t, agg.DemoteInBackground(3*agg.StepSize(), coldDir))
+	waitDemotionIdle(t, agg)
+	target, err := os.Readlink(onOtherSSDDir)
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(coldDir, filepath.Base(onOtherSSDDir)), target)
+
+	require.True(t, agg.DemoteInBackground(3*agg.StepSize(), coldDir))
+	waitDemotionIdle(t, agg)
+	require.True(t, isSymlink(t, notLinked))
+	require.False(t, agg.DemoteInBackground(3*agg.StepSize(), coldDir))
+}

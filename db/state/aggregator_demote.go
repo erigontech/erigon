@@ -199,7 +199,7 @@ func (a *Aggregator) DemoteInBackground(boundaryTxNum uint64, coldDir string) bo
 	if !a.demoting.CompareAndSwap(false, true) {
 		return false
 	}
-	from, to, ok := a.demotionCandidate(boundaryTxNum)
+	from, to, ok := a.demotionCandidate(boundaryTxNum, coldDir)
 	if !ok {
 		a.demoting.Store(false)
 		return false
@@ -216,7 +216,13 @@ func (a *Aggregator) DemoteInBackground(boundaryTxNum uint64, coldDir string) bo
 	return started
 }
 
-func (a *Aggregator) demotionCandidate(boundaryTxNum uint64) (from, to kv.Step, ok bool) {
+// demotionCandidate skips files that already resolve into coldDir; a symlink to another SSD path is still a candidate.
+func (a *Aggregator) demotionCandidate(boundaryTxNum uint64, coldDir string) (from, to kv.Step, ok bool) {
+	coldPrefix, err := filepath.EvalSymlinks(coldDir)
+	if err != nil {
+		return 0, 0, false
+	}
+	coldPrefix += string(filepath.Separator)
 	at := a.BeginFilesRo()
 	defer at.Close()
 	stepSize := a.StepSize()
@@ -224,8 +230,8 @@ func (a *Aggregator) demotionCandidate(boundaryTxNum uint64) (from, to kv.Step, 
 		if f.endTxNum > boundaryTxNum {
 			break
 		}
-		fi, err := os.Lstat(f.Fullpath())
-		if err != nil || fi.Mode()&os.ModeSymlink != 0 {
+		path, err := filepath.EvalSymlinks(f.Fullpath())
+		if err != nil || strings.HasPrefix(path, coldPrefix) {
 			continue
 		}
 		return kv.Step(f.startTxNum / stepSize), kv.Step(f.endTxNum / stepSize), true

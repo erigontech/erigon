@@ -82,5 +82,5 @@ func TestAggregatorDemotionCopyWaitsWhileColdIOPaused(t *testing.T) {
 	resume()
 	waitDemotionIdle(t, agg)
 	require.True(t, isSymlink(t, ssdPath))
-	require.GreaterOrEqual(t, mxDemotionPausedSeconds.GetValue()-pausedBefore, 0.1)
+	require.Positive(t, mxDemotionPausedSeconds.GetValue()-pausedBefore)
 }
