@@ -8,6 +8,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -303,5 +304,35 @@ func benchFreshSetWrites(b *testing.B, arena bool, keys []accounts.StorageKey) {
 			ws.SetStorage(addr, k, vw)
 		}
 		ws.ReleaseAndReset()
+	}
+}
+
+// BenchmarkCreatedContractSetCode creates a batch of contracts on the
+// noMaterialize path the way a factory transaction does: account, nonce, code.
+func BenchmarkCreatedContractSetCode(b *testing.B) {
+	code := []byte{0x60, 0x80, 0x60, 0x40, 0x52}
+	addrs := make([]accounts.Address, 50)
+	for i := range addrs {
+		addrs[i] = accounts.InternAddress([20]byte{0xc0, byte(i)})
+	}
+	reader := NewNoopReader()
+	b.ReportAllocs()
+	for b.Loop() {
+		ibs := NewPooled(reader)
+		ibs.SetVersionMap(NewVersionMap(nil))
+		ibs.SetNoMaterialize(true)
+		ibs.SetTxContext(1, 0)
+		for _, a := range addrs {
+			if err := ibs.CreateAccount(a, true); err != nil {
+				b.Fatal(err)
+			}
+			if err := ibs.SetNonce(a, 1, tracing.NonceChangeNewContract); err != nil {
+				b.Fatal(err)
+			}
+			if err := ibs.SetCode(a, code, tracing.CodeChangeContractCreation); err != nil {
+				b.Fatal(err)
+			}
+		}
+		ReleasePooled(ibs)
 	}
 }

@@ -439,9 +439,9 @@ func TestBlockBuilderWindowPreGloas(t *testing.T) {
 
 	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.ElectraVersion, 0)
 
-	// Attestation deadline is 4s; polling stops a quarter of it (1s) earlier, at 3s.
-	require.Equal(t, slotStart.Add(3*time.Second).Add(-minPayloadPollingWindow), window.firstGetAt)
-	require.Equal(t, slotStart.Add(3*time.Second), window.pollUntil)
+	// Attestation deadline is 3999ms; polling stops a quarter of it earlier, at 2999.25ms.
+	require.Equal(t, slotStart.Add(2_999_250*time.Microsecond).Add(-minPayloadPollingWindow), window.firstGetAt)
+	require.Equal(t, slotStart.Add(2_999_250*time.Microsecond), window.pollUntil)
 }
 
 func TestBlockBuilderWindowGloas(t *testing.T) {
@@ -2944,9 +2944,9 @@ func TestBlockBuilderWindowLateStartKeepsPublicationMargin(t *testing.T) {
 
 	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.ElectraVersion, 0)
 
-	// A late request clamps the first poll up to now but still stops at 3s, preserving the margin.
+	// A late request clamps the first poll up to now but still stops at 2999.25ms, preserving the margin.
 	require.Equal(t, now, window.firstGetAt)
-	require.Equal(t, slotStart.Add(3*time.Second), window.pollUntil)
+	require.Equal(t, slotStart.Add(2_999_250*time.Microsecond), window.pollUntil)
 }
 
 func TestBlockBuilderWindowLateRequestGrabsImmediately(t *testing.T) {
@@ -2976,7 +2976,7 @@ func TestBlockBuilderWindowReservesPublicationMargin(t *testing.T) {
 		deadline      time.Duration
 		wantPollUntil time.Duration
 	}{
-		{"pre-gloas", clparams.ElectraVersion, 4 * time.Second, 3 * time.Second},
+		{"pre-gloas", clparams.ElectraVersion, 3999 * time.Millisecond, 2_999_250 * time.Microsecond},
 		{"gloas", clparams.GloasVersion, 3 * time.Second, time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3408,6 +3408,19 @@ func produceBodyWithNilWithdrawals(t *testing.T, version clparams.StateVersion) 
 		common.Bytes96{0xc0}, common.Hash{},
 	)
 	return body, reader, err
+}
+
+func TestCacheExecutionBodyUsesBlockHash(t *testing.T) {
+	reader := tests.NewMockBlockReader()
+	handler := &ApiHandler{blockReader: reader}
+	payload := cltypes.NewEth1Block(clparams.BellatrixVersion, &clparams.MainnetBeaconConfig)
+	payload.BlockNumber = 42
+	payload.BlockHash = common.Hash{0x42}
+
+	handler.cacheExecutionBody(payload)
+
+	require.Equal(t, []uint64{42}, reader.CachedBodies)
+	require.Equal(t, []common.Hash{{0x42}}, reader.CachedBodyHashes)
 }
 
 func TestProduceBeaconBodyRejectsMissingWithdrawalsAtCapella(t *testing.T) {

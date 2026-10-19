@@ -45,7 +45,7 @@ func BenchmarkHasImportedDescendantAfter(b *testing.B) {
 					v.add(root, parent, uint64(65+i), true, true)
 					parent = root
 				}
-				v.store.time.Store((uint64(64+n+1) + v.store.beaconCfg.SlotsPerEpoch) * v.store.beaconCfg.SecondsPerSlot)
+				v.store.timeMs.Store((uint64(64+n+1) + v.store.beaconCfg.SlotsPerEpoch) * v.store.beaconCfg.SecondsPerSlot * 1000)
 				require.True(b, v.store.HasImportedDescendantAfter(head, 64) || served.status == cltypes.PayloadStatusEmpty)
 				v.store.selectedHead.Store(&ForkChoiceNode{Root: head, PayloadStatus: served.status})
 				b.ReportAllocs()

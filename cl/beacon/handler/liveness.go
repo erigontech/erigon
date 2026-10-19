@@ -83,7 +83,7 @@ func (a *ApiHandler) liveness(w http.ResponseWriter, r *http.Request) (*beaconht
 	// we need to obtain the relevant data:
 	// Use the blocks in the epoch as heuristic
 	for i := epoch * a.beaconChainCfg.SlotsPerEpoch; i < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch; i++ {
-		block, err := a.blockReader.ReadBlockBySlot(ctx, tx, i)
+		block, err := a.blockReader.ReadBeaconBlockBodyBySlot(ctx, tx, i)
 		if err != nil {
 			return nil, err
 		}
