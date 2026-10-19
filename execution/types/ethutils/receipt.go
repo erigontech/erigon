@@ -87,11 +87,17 @@ func MarshalReceipt(
 
 	switch {
 	case withBlockTimestamp:
-		rpcLogs := make(types.Logs, 0, len(receipt.Logs))
-		for _, l := range receipt.Logs {
-			rpcLogs = append(rpcLogs, types.StampedLog(l, header.Time))
+		stamped := make([]struct {
+			log       types.Log
+			timestamp hexutil.Uint64
+		}, len(receipt.Logs))
+		logsToMarshal = make(types.Logs, len(receipt.Logs))
+		for i, log := range receipt.Logs {
+			stamped[i].log = *log
+			stamped[i].timestamp = hexutil.Uint64(header.Time)
+			stamped[i].log.BlockTimestamp = &stamped[i].timestamp
+			logsToMarshal[i] = &stamped[i].log
 		}
-		logsToMarshal = rpcLogs
 	case receipt.Logs == nil:
 		logsToMarshal = types.Logs{}
 	default:
