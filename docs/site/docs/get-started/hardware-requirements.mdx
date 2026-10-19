@@ -29,7 +29,7 @@ Use **ext4** or **XFS** on a single NVMe device. The disk figures below are meas
 
 Mount with `noatime` so reads do not generate metadata writes:
 
-```
+```text
 UUID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx  /data  ext4  defaults,noatime  0 2
 ```
 
@@ -87,7 +87,7 @@ These nodes were measured before the receipts cache was on by default. From 3.7 
 | --- | --- | --- | --- | --- |
 | Archive | {/* ds:mainnet:archive */}2.25 TB{/* ds:end */} | 4 TB | 32 GB | 64 GB |
 | Full (Default) | {/* ds:mainnet:full */}534.94 GB{/* ds:end */} | 2 TB | 16 GB | 32 GB |
-| Minimal | {/* ds:mainnet:minimal */}510.82 GB{/* ds:end */} | 1 TB | 16 GB | 64 GB |
+| Minimal | {/* ds:mainnet:minimal */}524.45 GB{/* ds:end */} | 1 TB | 16 GB | 64 GB |
 
 _Current Disk Usage measured as of {/* ds-date:mainnet */}2026-09-17{/* ds:end */}, the oldest of the measurements in this table; usage grows over time as the chain grows._
 
