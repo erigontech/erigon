@@ -13,7 +13,7 @@ The gRPC server can be explicitly enabled using the `--grpc` flag when running t
 ### Performance Considerations
 
 * gRPC APIs provide better performance than JSON-RPC for high-throughput applications
-* Direct database access via KV interface offers the fastest data retrieval
+* Direct database access via key-value (KV) interface offers the fastest data retrieval
 * Shared memory access (when running locally) provides optimal performance
 
 ### Data Format and Buckets
