@@ -327,7 +327,7 @@ func TestInitializeTracesHistoryStorageCall(t *testing.T) {
 	require.Equal(t, []string{"start", "call", "end"}, callOrder)
 }
 
-func TestFinalizeOptionalRequestSources(t *testing.T) {
+func TestFinalizeAllowEmptyRequestContracts(t *testing.T) {
 	chainConfig := chain.TestChainOsakaConfig.Copy()
 	chainConfig.DepositContract = common.Address{}
 	requestsHash := empty.RequestsHash
@@ -345,9 +345,9 @@ func TestFinalizeOptionalRequestSources(t *testing.T) {
 	_, err := finalize(New(eth1Engine), state.New(state.NewNoopReader()), noCall)
 	require.ErrorContains(t, err, "Empty Code")
 
-	optional := New(eth1Engine)
-	optional.OptionalRequestSources = true
-	requests, err := finalize(optional, state.New(state.NewNoopReader()), noCall)
+	allowEmpty := New(eth1Engine)
+	allowEmpty.AllowEmptyRequestContracts = true
+	requests, err := finalize(allowEmpty, state.New(state.NewNoopReader()), noCall)
 	require.NoError(t, err)
 	require.Empty(t, requests)
 	require.Equal(t, empty.RequestsHash, *requests.Hash())
@@ -357,7 +357,7 @@ func TestFinalizeOptionalRequestSources(t *testing.T) {
 	withdrawals := chainConfig.GetWithdrawalRequestContract()
 	require.NoError(t, ibs.SetCode(withdrawals, []byte{0x00}, tracing.CodeChangeUnspecified))
 	header.RequestsHash = nil
-	requests, err = finalize(optional, ibs, func(contract accounts.Address, _ []byte) ([]byte, error) {
+	requests, err = finalize(allowEmpty, ibs, func(contract accounts.Address, _ []byte) ([]byte, error) {
 		if contract != withdrawals {
 			return nil, fmt.Errorf("unexpected system call to %x", contract)
 		}

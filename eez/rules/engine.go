@@ -84,7 +84,7 @@ func New(chainConfig *chain.Config) (*Engine, error) {
 		return nil, err
 	}
 	m := merge.New(ethash.NewFaker())
-	m.OptionalRequestSources = true
+	m.AllowEmptyRequestContracts = true
 	return &Engine{Merge: m, l2: l2}, nil
 }
 

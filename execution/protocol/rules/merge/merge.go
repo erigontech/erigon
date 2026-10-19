@@ -68,10 +68,10 @@ var (
 type Merge struct {
 	eth1Engine rules.Engine // Original rules engine used in eth1, e.g. ethash
 
-	// OptionalRequestSources is for chains without a beacon chain: an unset
-	// deposit contract and request contracts without code yield no requests,
-	// as an empty system call does in reth, instead of invalidating the block.
-	OptionalRequestSources bool
+	// AllowEmptyRequestContracts is for chains without a beacon chain: a
+	// request contract without code yields no requests instead of
+	// invalidating the block, and an unset deposit contract no deposits.
+	AllowEmptyRequestContracts bool
 
 	// Reusable buffer for collecting logs in Finalize - protected by logsBufMu
 	logsBufMu sync.Mutex
@@ -229,7 +229,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 			allLogs = append(allLogs, rec.Logs...)
 		}
 		var depositReqs *types.FlatRequest
-		if !s.OptionalRequestSources || config.DepositContract != (common.Address{}) {
+		if !s.AllowEmptyRequestContracts || config.DepositContract != (common.Address{}) {
 			depositReqs, err = misc.ParseDepositLogs(allLogs, config.DepositContract)
 		}
 		if reuseBuffer {
@@ -290,7 +290,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 type requestDequeuer func(rules.SystemCall, *state.IntraBlockState, accounts.Address) (*types.FlatRequest, error)
 
 func (s *Merge) dequeueRequests(dequeue requestDequeuer, syscall rules.SystemCall, ibs *state.IntraBlockState, contract accounts.Address) (*types.FlatRequest, error) {
-	if s.OptionalRequestSources {
+	if s.AllowEmptyRequestContracts {
 		codeSize, err := ibs.GetCodeSize(contract)
 		if err != nil {
 			return nil, err
