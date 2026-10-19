@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/state"
@@ -216,7 +217,9 @@ func (s *witnessState) flush() (common.Hash, error) {
 	for addr, acc := range s.accounts {
 		addrHash := crypto.Keccak256Hash(addr[:])
 		if acc == nil {
-			s.t.Delete(addrHash[:])
+			if err := s.delete(addrHash[:], false); err != nil {
+				return common.Hash{}, err
+			}
 			continue
 		}
 		s.t.UpdateAccount(addrHash[:], acc)
@@ -230,7 +233,9 @@ func (s *witnessState) flush() (common.Hash, error) {
 		for k, v := range slots {
 			key := dbutils.GenerateCompositeTrieKey(addrHash, crypto.Keccak256Hash(k[:]))
 			if v.IsZero() {
-				s.t.Delete(key)
+				if err := s.delete(key, true); err != nil {
+					return common.Hash{}, err
+				}
 			} else {
 				s.t.Update(key, v.Bytes())
 			}
@@ -247,4 +252,82 @@ func (s *witnessState) flush() (common.Hash, error) {
 	}
 	s.reset()
 	return s.t.Hash(), nil
+}
+
+// delete removes an account, or a storage slot by its composite key, from
+// the trie. Deleting can reduce a branch to its one remaining child, and the
+// canonical result depends on that child's node kind: a witness holding the
+// child by hash alone cannot give it.
+func (s *witnessState) delete(key []byte, storage bool) error {
+	var present bool
+	if storage {
+		v, ok := s.t.Get(key)
+		if !ok {
+			return fmt.Errorf("%w: deleted slot %x", ErrIncompleteWitness, key)
+		}
+		present = len(v) > 0
+	} else {
+		acc, ok := s.t.GetAccount(key)
+		if !ok {
+			return fmt.Errorf("%w: deleted account %x", ErrIncompleteWitness, key)
+		}
+		present = acc != nil
+	}
+	if !present {
+		return nil
+	}
+	if collapsesOntoHash(s.t, key, storage) {
+		return fmt.Errorf("%w: sibling of deleted %x", ErrIncompleteWitness, key)
+	}
+	s.t.Delete(key)
+	return nil
+}
+
+// collapsesOntoHash reports whether deleting key, present in t, leaves a
+// branch with a single child known only by hash. Only the deepest branch on
+// key's path loses a child; the storage trie starts below the account's 64
+// nibbles.
+func collapsesOntoHash(t *trie.Trie, key []byte, storage bool) bool {
+	path := make([]byte, 0, 2*len(key))
+	for _, b := range key {
+		path = append(path, b>>4, b&0x0f)
+	}
+	from := 0
+	if storage {
+		from = 2 * length.Hash
+	}
+	for depth := len(path) - 1; depth >= from; depth-- {
+		var n trie.Node
+		if storage && depth == from {
+			// GetNode yields the account, not its storage root, at this depth.
+			if acc, ok := t.GetNode(path[:depth]).(*trie.AccountNode); ok {
+				n = acc.Storage
+			}
+		} else {
+			n = t.GetNode(path[:depth])
+		}
+		switch n.(type) {
+		case *trie.FullNode, *trie.DuoNode:
+		default:
+			continue
+		}
+		var sibling trie.Node
+		for nibble := range byte(16) {
+			if nibble == path[depth] {
+				continue
+			}
+			if c := t.GetNode(append(path[:depth:depth], nibble)); c != nil {
+				if sibling != nil {
+					return false
+				}
+				sibling = c
+			}
+		}
+		switch sibling.(type) {
+		case trie.HashNode, *trie.HashNode:
+			return true
+		}
+		return false
+	}
+	return false
 }
