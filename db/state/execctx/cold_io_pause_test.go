@@ -33,26 +33,36 @@ import (
 
 func TestComputeCommitmentPausesColdIO(t *testing.T) {
 	t.Parallel()
-	db := newTestDb(t, 16)
-	ctx := t.Context()
-	rwTx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer rwTx.Rollback()
-	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.NoError(t, err)
-	defer sd.Close()
-	at := rwTx.AggTx().(*state.AggregatorRoTx)
+	for name, compute := range map[string]func(sd *execctx.SharedDomains, tx kv.TemporalTx, onProgress func(*commitment.CommitProgress)) error{
+		"SharedDomains": func(sd *execctx.SharedDomains, tx kv.TemporalTx, onProgress func(*commitment.CommitProgress)) error {
+			_, err := sd.ComputeCommitment(t.Context(), tx, false, 0, 1, "", onProgress)
+			return err
+		},
+		"WithDiff": func(sd *execctx.SharedDomains, tx kv.TemporalTx, onProgress func(*commitment.CommitProgress)) error {
+			_, err := sd.GetCommitmentContext().ComputeCommitmentWithDiff(t.Context(), tx, false, 0, 1, "", onProgress, &kv.DomainDiff{})
+			return err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			db := newTestDb(t, 16)
+			ctx := t.Context()
+			rwTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+			sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			defer sd.Close()
+			at := rwTx.AggTx().(*state.AggregatorRoTx)
 
-	addr := make([]byte, length.Addr)
-	addr[0] = 0x42
-	acc := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}
-	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, addr, accounts.SerialiseV3(&acc), 1, nil))
+			addr := make([]byte, length.Addr)
+			addr[0] = 0x42
+			acc := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}
+			require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, addr, accounts.SerialiseV3(&acc), 1, nil))
 
-	var pausedDuringCompute bool
-	_, err = sd.ComputeCommitment(ctx, rwTx, false, 0, 1, "", func(*commitment.CommitProgress) {
-		pausedDuringCompute = at.ColdIOPaused()
-	})
-	require.NoError(t, err)
-	require.True(t, pausedDuringCompute)
-	require.False(t, at.ColdIOPaused())
+			var pausedDuringCompute bool
+			require.NoError(t, compute(sd, rwTx, func(*commitment.CommitProgress) { pausedDuringCompute = at.ColdIOPaused() }))
+			require.True(t, pausedDuringCompute)
+			require.False(t, at.ColdIOPaused())
+		})
+	}
 }

@@ -444,6 +444,9 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitmentWithDiff(ctx context
 }
 
 func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress), putter kv.TemporalPutDel) (rootHash []byte, err error) {
+	if p, ok := tx.AggTx().(interface{ PauseColdIO() (resume func()) }); ok {
+		defer p.PauseColdIO()()
+	}
 	if sdc.pendingUpdate != nil {
 		panic("sdCtx.ComputeCommitment called directly with non-nil pendingUpdate; use SharedDomains.ComputeCommitment wrapper instead")
 	}
