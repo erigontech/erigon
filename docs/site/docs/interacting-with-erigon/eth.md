@@ -27,8 +27,8 @@ deviation that has not yet been documented may still exist.
 `execution-apis` is a living specification rather than a frozen standard — methods are
 still being added, and some long-standing `eth` behaviour was never specified at all — so
 parts of what follows are differences from a moving target rather than defects. Erigon
-runs the specification's own conformance vectors in continuous integration (CI) (Hive's `rpc-compat` suite against
-a pinned `execution-apis` revision) and works with the other client teams on closing
+runs the specification's own conformance vectors in continuous integration (CI), using Hive's `rpc-compat` suite against
+a pinned `execution-apis` revision, and works with the other client teams on closing
 these gaps, so this page will change as the two converge.
 :::
 

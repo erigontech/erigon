@@ -10,7 +10,7 @@ sidebar_position: 3
 
 Erigon is highly resilient and uses a fully-transactional database. This design makes it safe against hard termination (`kill -9`) and power outages. The database ensures users never see "partial writes," meaning all data changes are atomic (all-or-nothing), and all RPC methods operate within Read-Only Transactions, guaranteeing a consistent data view.
 
-**Protect Against Hardware Failure**: True data corruption is typically only caused by hardware failures (like disk or RAM failure). We strongly recommend using error-correcting code (ECC) memory, disk redundant array of independent disks (RAID), and performing regular backups to mitigate these risks.
+**Protect Against Hardware Failure**: True data corruption is typically only caused by hardware failures (like disk or RAM failure). We strongly recommend using error-correcting code (ECC) memory, a redundant array of independent disks (RAID), and performing regular backups to mitigate these risks.
 
 When an issue arises, follow these steps to methodically diagnose and resolve the problem.
 

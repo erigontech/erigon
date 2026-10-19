@@ -113,7 +113,7 @@ This flag sets the external address advertised in the **discv5 Ethereum Node Rec
 | Value | Behavior |
 |-------|-----------|
 | `""` (default) | No NAT mapping — CL peers cannot reach you inbound |
-| `extip:1.2.3.4` | Advertise a fixed public IP — recommended for virtual private server (VPS) / datacenters |
+| `extip:1.2.3.4` | Advertise a fixed public IP — recommended for virtual private servers (VPS) / datacenters |
 | `stun` | Discover external IP via STUN |
 | `upnp` | Use UPnP to discover and map the port |
 | `pmp` | Use NAT-PMP; optionally `pmp:192.168.0.1` to specify the gateway |

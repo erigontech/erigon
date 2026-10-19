@@ -43,7 +43,7 @@ The Erigon node software is developed in the [erigontech/erigon](https://github.
 ### Code style and guidelines
 
 - Follow the existing Go conventions in the codebase.
-- Run `make lint` before submitting — the continuous integration (CI) will enforce it.
+- Run `make lint` before submitting — continuous integration (CI) will enforce it.
 - All new code should be covered by tests where practical.
 - Use the package-prefix commit message format: `eth, rpc: make trace configs optional`. This keeps the git log scannable by subsystem.
 

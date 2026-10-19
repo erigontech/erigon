@@ -143,7 +143,7 @@ same free space for a second copy of the live data, delays startup while it runs
 turned off. A database that fails to compact is left as it was, and startup
 continues. It skips the step if another process holds the datadir lock.
 
-`erigon db compact` is a manual defragmentation pass, not the background compaction of an
+`erigon db compact` is a manual defragmentation pass, not the background compaction of a
 log-structured merge-tree (LSM) engine — MDBX has none, as described in *Storage engine: MDBX* above.
 
 ## Where to go next
