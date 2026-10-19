@@ -247,7 +247,7 @@ func (a *Aggregator) demotionCandidate(boundaryTxNum uint64) (from, to kv.Step, 
 	return 0, 0, false
 }
 
-// recoverDemotion removes the leftovers of an interrupted demotion. The cold dir can be shared by several datadirs,
+// recoverDemotion removes the leftovers of an interrupted demotion or cold merge. The cold dir can be shared by several datadirs,
 // so only partial copies of this datadir's commitment files are removed there.
 func recoverDemotion(snapDomain, coldDir string, logger log.Logger) error {
 	entries, err := os.ReadDir(snapDomain)
@@ -258,6 +258,8 @@ func recoverDemotion(snapDomain, coldDir string, logger log.Logger) error {
 	for _, e := range entries {
 		name := e.Name()
 		switch {
+		case strings.HasSuffix(name, coldMergeLinkSuffix):
+			removeColdMergeLink(filepath.Join(snapDomain, name))
 		case strings.HasSuffix(name, ".demote.tmp"):
 			if err := dir.RemoveFile(filepath.Join(snapDomain, name)); err != nil {
 				return err
@@ -272,4 +274,35 @@ func recoverDemotion(snapDomain, coldDir string, logger log.Logger) error {
 		}
 	}
 	return nil
+}
+
+const coldMergeLinkSuffix = ".coldmerge.tmp"
+
+// createColdMergeLink records an in-flight cold merge output before it is written, so recovery can find and
+// remove it in the shared cold dir.
+func createColdMergeLink(path, target string) (string, error) {
+	link := path + coldMergeLinkSuffix
+	removeColdMergeLink(link)
+	if err := os.Symlink(target, link); err != nil {
+		return "", err
+	}
+	return link, dir.FsyncDir(filepath.Dir(link))
+}
+
+func commitColdMergeLink(link, path string) error {
+	if err := os.Rename(link, path); err != nil {
+		return err
+	}
+	return dir.FsyncDir(filepath.Dir(path))
+}
+
+// removeColdMergeLink removes the link, its target and the compressor's temp files next to the target.
+func removeColdMergeLink(link string) {
+	if target, err := os.Readlink(link); err == nil {
+		tmps, _ := filepath.Glob(target + ".*.tmp")
+		for _, p := range append(tmps, target) {
+			_ = dir.RemoveFile(p)
+		}
+	}
+	_ = dir.RemoveFile(link)
 }

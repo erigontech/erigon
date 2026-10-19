@@ -444,18 +444,30 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 
 	fromStep, toStep := kv.Step(r.values.from/r.aggStep), kv.Step(r.values.to/r.aggStep)
 	kvFilePath := dt.d.kvNewFilePath(fromStep, toStep)
+	outPath, coldLink := kvFilePath, ""
+	if r.toColdDir {
+		outPath = filepath.Join(dt.d.coldDir, filepath.Base(kvFilePath))
+		if coldLink, err = createColdMergeLink(kvFilePath, outPath); err != nil {
+			return nil, nil, nil, err
+		}
+	}
 	var kvWriter *seg.Writer
 	defer func() {
 		if closeFiles {
 			if kvWriter != nil {
 				kvWriter.Close()
 			}
-			// Completed commitment files may still reference this output.
-			valuesIn.closeFiles()
+			if r.toColdDir {
+				valuesIn.closeFilesAndRemove()
+				removeColdMergeLink(coldLink)
+			} else {
+				// Completed commitment files may still reference this output.
+				valuesIn.closeFiles()
+			}
 		}
 	}()
 
-	kvFile, err := seg.NewCompressor(ctx, "merge domain "+dt.d.FilenameBase, kvFilePath, dt.d.dirs.Tmp, dt.d.CompressCfg, log.LvlTrace, dt.d.logger)
+	kvFile, err := seg.NewCompressor(ctx, "merge domain "+dt.d.FilenameBase, outPath, dt.d.dirs.Tmp, dt.d.CompressCfg, log.LvlTrace, dt.d.logger)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", dt.d.FilenameBase, err)
 	}
@@ -581,8 +593,15 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	kvWriter.Close()
 	kvWriter = nil
 	ps.Delete(p)
+	if coldLink != "" {
+		if err := commitColdMergeLink(coldLink, kvFilePath); err != nil {
+			return nil, nil, nil, err
+		}
+		coldLink = kvFilePath
+	}
 
 	valuesIn = newFilesItem(r.values.from, r.values.to)
+	valuesIn.cold = r.toColdDir
 	valuesIn.version, _ = version.ParseVersion(filepath.Base(kvFilePath))
 	if valuesIn.decompressor, err = seg.NewDecompressor(kvFilePath); err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dt.d.FilenameBase, r.values.from, r.values.to, err)
