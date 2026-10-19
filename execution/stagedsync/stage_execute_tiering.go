@@ -27,23 +27,25 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/tiering"
 )
 
 var (
-	mxTieringColdBoundaryBlock = metrics.GetOrCreateGauge("tiering_cold_boundary_block")
-	mxTieringLagFiles          = metrics.GetOrCreateGaugeVec("tiering_lag_files", []string{"domain", "reason"})
-	mxTieringLagBytes          = metrics.GetOrCreateGaugeVec("tiering_lag_bytes", []string{"domain", "reason"})
-	mxTieringLagTxs            = metrics.GetOrCreateGaugeVec("tiering_lag_txs", []string{"domain", "reason"})
-	mxTieringLagBlocks         = metrics.GetOrCreateGaugeVec("tiering_lag_blocks", []string{"domain", "reason"})
-	mxTieringColdResidentFiles = metrics.GetOrCreateGaugeVec("tiering_cold_resident_files", []string{"domain"})
-	mxTieringColdResidentBytes = metrics.GetOrCreateGaugeVec("tiering_cold_resident_bytes", []string{"domain"})
-	mxTieringHDDEndStep        = metrics.GetOrCreateGaugeVec("tiering_hdd_end_step", []string{"domain"})
-	mxTieringSSDStartStep      = metrics.GetOrCreateGaugeVec("tiering_ssd_start_step", []string{"domain"})
-	mxTieringCommitmentBytes   = metrics.GetOrCreateGaugeVec("tiering_commitment_bytes", []string{"tier", "kind"})
-	mxTieringDuplicateBytes    = metrics.GetOrCreateGaugeVec("tiering_duplicate_bytes", []string{"reason"})
+	mxTieringColdBoundaryBlock   = metrics.GetOrCreateGauge("tiering_cold_boundary_block")
+	mxTieringDemoteBoundaryBlock = metrics.GetOrCreateGauge("tiering_demote_boundary_block")
+	mxTieringLagFiles            = metrics.GetOrCreateGaugeVec("tiering_lag_files", []string{"domain", "reason"})
+	mxTieringLagBytes            = metrics.GetOrCreateGaugeVec("tiering_lag_bytes", []string{"domain", "reason"})
+	mxTieringLagTxs              = metrics.GetOrCreateGaugeVec("tiering_lag_txs", []string{"domain", "reason"})
+	mxTieringLagBlocks           = metrics.GetOrCreateGaugeVec("tiering_lag_blocks", []string{"domain", "reason"})
+	mxTieringColdResidentFiles   = metrics.GetOrCreateGaugeVec("tiering_cold_resident_files", []string{"domain"})
+	mxTieringColdResidentBytes   = metrics.GetOrCreateGaugeVec("tiering_cold_resident_bytes", []string{"domain"})
+	mxTieringHDDEndStep          = metrics.GetOrCreateGaugeVec("tiering_hdd_end_step", []string{"domain"})
+	mxTieringSSDStartStep        = metrics.GetOrCreateGaugeVec("tiering_ssd_start_step", []string{"domain"})
+	mxTieringCommitmentBytes     = metrics.GetOrCreateGaugeVec("tiering_commitment_bytes", []string{"tier", "kind"})
+	mxTieringDuplicateBytes      = metrics.GetOrCreateGaugeVec("tiering_duplicate_bytes", []string{"reason"})
 
 	probesPerBlockBuckets          = []float64{0, 1, 10, 100, 1e3, 1e4, 3e4, 1e5, 3e5, 1e6, 3e6, 1e7}
 	mxTieringSSDProbesPerBlock     = metrics.NewHistogram("tiering_ssd_probes_per_block", probesPerBlockBuckets)
@@ -69,19 +71,26 @@ func reportTiering(ctx context.Context, cfg ExecuteBlockCfg, stepSize uint64, tx
 	if !gaugesDue && !cfg.syncCfg.TieringDemote {
 		return nil
 	}
-	boundary := tiering.ColdBoundary(head, lookback)
-	boundaryTxNum, err := cfg.blockReader.TxnumReader().Min(ctx, tx, boundary)
-	if err != nil {
-		return err
-	}
 	if cfg.syncCfg.TieringDemote {
-		cfg.db.Debug().DemoteInBackground(boundaryTxNum, cfg.syncCfg.TieringColdDir)
+		demoteBoundary := tiering.DemoteBoundary(head, rawdb.ReadForkchoiceFinalizedNum(tx), lookback)
+		demoteTxNum, err := cfg.blockReader.TxnumReader().Min(ctx, tx, demoteBoundary)
+		if err != nil {
+			return err
+		}
+		mxTieringDemoteBoundaryBlock.SetUint64(demoteBoundary)
+		cfg.db.Debug().DemoteInBackground(demoteTxNum, cfg.syncCfg.TieringColdDir)
 	}
 	if !gaugesDue {
 		return nil
 	}
 	tieringGaugesAt.Store(now.UnixNano())
 	state.PublishTierProbeCounts()
+
+	boundary := tiering.ColdBoundary(head, lookback)
+	boundaryTxNum, err := cfg.blockReader.TxnumReader().Min(ctx, tx, boundary)
+	if err != nil {
+		return err
+	}
 
 	mxTieringColdBoundaryBlock.SetUint64(boundary)
 	coldDir := cfg.syncCfg.TieringColdDir

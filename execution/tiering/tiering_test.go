@@ -156,3 +156,12 @@ func TestValidateDemote(t *testing.T) {
 	require.ErrorContains(t, ValidateDemote(21_600, coldDir, snapDomain, false), "same filesystem")
 	require.NoError(t, ValidateDemote(21_600, coldDir, snapDomain, true))
 }
+
+func TestDemoteBoundary(t *testing.T) {
+	const lookback = 21_600
+	head := uint64(25_000_000)
+	require.EqualValues(t, head-64-lookback, DemoteBoundary(head, head-64, lookback), "finalized behind the head")
+	require.EqualValues(t, head-lookback, DemoteBoundary(head, head+500, lookback), "replay: every block up to the head is final")
+	require.EqualValues(t, head-UnknownFinalityMargin-lookback, DemoteBoundary(head, 0, lookback), "no finalized block known")
+	require.Zero(t, DemoteBoundary(100, 0, lookback))
+}

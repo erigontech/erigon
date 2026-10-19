@@ -2130,6 +2130,17 @@
               "legendFormat": "head: {{instance}}",
               "range": true,
               "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "editorMode": "code",
+              "expr": "tiering_demote_boundary_block{instance=~\"$instance\"}",
+              "legendFormat": "demote boundary (finalized): {{instance}}",
+              "range": true,
+              "refId": "C"
             }
           ],
           "title": "Cold boundary vs head",

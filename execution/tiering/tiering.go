@@ -220,3 +220,15 @@ func StatCopying(coldDir string, files []File) (uint64, error) {
 	}
 	return total, nil
 }
+
+// UnknownFinalityMargin is the unwind depth assumed when no finalized block is known.
+const UnknownFinalityMargin = 128
+
+// DemoteBoundary is the cold boundary for moving files to the cold tier. It counts back from the finalized block, not
+// the head: an unwind can never make a file below it hot again.
+func DemoteBoundary(head, finalized, lookback uint64) uint64 {
+	if finalized == 0 {
+		return ColdBoundary(ColdBoundary(head, UnknownFinalityMargin), lookback)
+	}
+	return ColdBoundary(min(head, finalized), lookback)
+}
