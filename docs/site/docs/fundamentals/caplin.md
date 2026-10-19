@@ -34,7 +34,7 @@ With state archival enabled, Caplin's indexing database (`<datadir>/caplin/index
 
 For nodes participating in PeerDAS (EIP-7594), Caplin retains data column sidecars for a configurable window:
 
-* `--caplin.columns-keep-slots` (default: `0`): Number of slots to retain PeerDAS data column sidecars. `0` uses the chain's own spec window, `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`, so the retained slot count and the wall-clock duration it covers both follow the chain (on Ethereum mainnet, 131072 slots, ~18 days). Increase this value for DA oracle or rollup nodes that require a longer column history.
+* `--caplin.columns-keep-slots` (default: `0`): Number of slots to retain PeerDAS data column sidecars. `0` uses the chain's own spec window, `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`, so the retained slot count and the wall-clock duration it covers both follow the chain (on Ethereum mainnet, 131072 slots, ~18 days). Increase this value for data availability (DA) oracle or rollup nodes that require a longer column history.
 
 Caplin can also be used for [block production](../staking/caplin), aka **staking**.
 
@@ -46,7 +46,7 @@ When Caplin is running, it exposes a Beacon API that external tools can query. T
 |------|---------|-------------|
 | `--beacon.api.addr` | `localhost` | Listening address for the Beacon API |
 | `--beacon.api.port` | `5555` | Listening port for the Beacon API |
-| `--beacon.api.cors.allow-origins` | (empty) | CORS allowed origins |
+| `--beacon.api.cors.allow-origins` | (empty) | Cross-Origin Resource Sharing (CORS) allowed origins |
 | `--beacon.api.cors.allow-methods` | `GET, POST, PUT, DELETE, OPTIONS` | CORS allowed methods |
 | `--beacon.api.cors.allow-credentials` | `false` | Allow credentials in CORS requests |
 | `--beacon.api.protocol` | `tcp` | Network protocol (`tcp` or `tcp4` or `tcp6`) |

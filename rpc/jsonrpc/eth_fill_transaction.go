@@ -104,6 +104,11 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 		}
 	}
 
+	if args.BlobVersionedHashes == nil {
+		// The calls reject a blob fee cap without blob hashes; a filled non-blob transaction has none.
+		args.MaxFeePerBlobGas = nil
+	}
+
 	if args.AuthorizationList != nil && len(args.AuthorizationList) == 0 {
 		return nil, errors.New("need at least one authorization for a set-code transaction")
 	}
@@ -272,7 +277,7 @@ func parse48[T ~[types.LEN_48]byte](field string, in []hexutil.Bytes) ([]T, erro
 
 func (api *APIImpl) newGasOracle(dbTx kv.TemporalTx) *gasprice.Oracle {
 	backend := NewGasPriceOracleBackend(api.db, dbTx, api.BaseAPI)
-	return gasprice.NewOracle(backend, ethconfig.Defaults.GPO, api.gasCache, api.feeHistoryCache, api.logger.New("app", "gasPriceOracle"))
+	return gasprice.NewOracle(backend, ethconfig.Defaults.GPO, api.gasCache, api.feeHistoryCache, api.gasOracleLogger)
 }
 
 func (api *APIImpl) fillFeeDefaults(ctx context.Context, args *ethapi.CallArgs, head *types.Header, dbTx kv.TemporalTx) error {

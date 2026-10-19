@@ -32,6 +32,8 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/builder/buildercfg"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/p2p"
@@ -448,4 +450,38 @@ func TestSetParallelCommitment(t *testing.T) {
 			"explicit =false must select the sequential trie")
 		require.True(t, run(seed, "--"+ExperimentalParallelCommitmentFlag.Name+"=true"))
 	}
+}
+
+func TestDisableBoolFlags_ExplicitFalse(t *testing.T) {
+	run := func(args ...string) (ethconfig.Config, buildercfg.BuilderConfig) {
+		txpoolDisable, proposingDisable, fakePoW := TxPoolDisableFlag, ProposingDisableFlag, FakePoWFlag
+		var ethCfg ethconfig.Config
+		var builderCfg buildercfg.BuilderConfig
+		app := &cli.Command{
+			Flags: []cli.Flag{&txpoolDisable, &proposingDisable, &fakePoW},
+			Action: func(_ context.Context, cmd *cli.Command) error {
+				setTxPool(cmd, t.TempDir(), &ethCfg)
+				setEthash(cmd, t.TempDir(), &ethCfg)
+				setBuilder(cmd, &builderCfg)
+				return nil
+			},
+		}
+		require.NoError(t, app.Run(context.Background(), append([]string{"test"}, args...)))
+		return ethCfg, builderCfg
+	}
+
+	ethCfg, builderCfg := run()
+	require.False(t, ethCfg.TxPool.Disable)
+	require.True(t, builderCfg.EnabledPOS)
+	require.Equal(t, ethashcfg.ModeNormal, ethCfg.Ethash.PowMode)
+
+	ethCfg, builderCfg = run("--txpool.disable=false", "--proposer.disable=false", "--fakepow=false")
+	require.False(t, ethCfg.TxPool.Disable)
+	require.True(t, builderCfg.EnabledPOS)
+	require.Equal(t, ethashcfg.ModeNormal, ethCfg.Ethash.PowMode)
+
+	ethCfg, builderCfg = run("--txpool.disable", "--proposer.disable", "--fakepow")
+	require.True(t, ethCfg.TxPool.Disable)
+	require.False(t, builderCfg.EnabledPOS)
+	require.Equal(t, ethashcfg.ModeFake, ethCfg.Ethash.PowMode)
 }

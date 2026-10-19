@@ -18,6 +18,8 @@ package services
 
 import (
 	"context"
+	"fmt"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -1164,6 +1166,101 @@ func TestAggregateAndProofRejectsAggregationBitsLengthMismatchBeforeElectra(t *t
 			require.Error(t, err)
 			require.NotErrorIs(t, err, ErrIgnore)
 			require.Contains(t, err.Error(), "aggregation bits length")
+		})
+	}
+}
+
+func TestAggregateAndProofForLateBlockIsProcessedOnceBlockArrives(t *testing.T) {
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = func(_, _, _ [][]byte) (bool, error) { return true, nil }
+
+	cfg := &clparams.MainnetBeaconConfig
+	agg, s := getAggregateAndProofAndState()
+	setValidAggregateSelectionProof(t, cfg, agg, s)
+	data := agg.SignedAggregateAndProof.Message.Aggregate.Data
+
+	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
+	require.NoError(t, syncedDataManager.OnHeadState(s))
+	forkChoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	forkChoiceMock.FinalizedCheckpointVal = s.FinalizedCheckpoint()
+	forkChoiceMock.Ancestors[s.FinalizedCheckpoint().Epoch*cfg.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
+	forkChoiceMock.Ancestors[data.Slot] = forkchoice.ForkChoiceNode{Root: data.Target.Root}
+	forkChoiceMock.Headers[data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
+	forkChoice := &lateBlockForkChoice{ForkChoiceStorageMock: forkChoiceMock, root: data.BeaconBlockRoot}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	verifier := NewBatchSignatureVerifier(ctx, nil)
+	verifier.Start()
+	opPool := pool.OperationsPool{AttestationsPool: pool.NewOperationPool[common.Bytes96, *solid.Attestation](100, "test")}
+	validatorParams := validator_params.NewValidatorParams()
+	validatorParams.SetFeeRecipient(0, common.Address{})
+	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
+	service := NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, clock, cfg, opPool, false, verifier, validatorParams)
+
+	require.ErrorIs(t, service.ProcessMessage(context.Background(), nil, agg), ErrIgnore)
+
+	forkChoice.arrived.Store(true)
+	require.Eventually(t, func() bool { return forkChoice.attestingSets.Load() == 1 }, 5*time.Second, 10*time.Millisecond,
+		"aggregate was not processed by fork choice after its block arrived")
+}
+
+func TestAggregateAndProofIsVerifiedWhenTheNodeHasValidators(t *testing.T) {
+	for _, hasValidators := range []bool{true, false} {
+		t.Run(fmt.Sprintf("validators=%v", hasValidators), func(t *testing.T) {
+			saveSignatureGlobals(t)
+			blsVerifyMultipleSignatures = func(_, _, _ [][]byte) (bool, error) { return true, nil }
+
+			cfg := &clparams.MainnetBeaconConfig
+			agg, s := getAggregateAndProofAndState()
+			setValidAggregateSelectionProof(t, cfg, agg, s)
+			data := agg.SignedAggregateAndProof.Message.Aggregate.Data
+			s.SetVersion(clparams.FuluVersion)
+
+			// The local validator proposes neither in this epoch nor in the next one.
+			proposers, err := s.GetBeaconProposerIndices(state.Epoch(s))
+			require.NoError(t, err)
+			lookahead := s.GetProposerLookahead()
+			for i := range lookahead.Length() {
+				proposers = append(proposers, lookahead.Get(i))
+			}
+			localValidator := uint64(0)
+			for slices.Contains(proposers, localValidator) {
+				localValidator++
+			}
+
+			syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
+			require.NoError(t, syncedDataManager.OnHeadState(s))
+			forkChoiceMock := mock_services.NewForkChoiceStorageMock(t)
+			forkChoiceMock.FinalizedCheckpointVal = s.FinalizedCheckpoint()
+			forkChoiceMock.Ancestors[s.FinalizedCheckpoint().Epoch*cfg.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
+			forkChoiceMock.Ancestors[data.Slot] = forkchoice.ForkChoiceNode{Root: data.Target.Root}
+			forkChoiceMock.Headers[data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
+
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			verifier := NewBatchSignatureVerifier(ctx, nil)
+			verifier.Start()
+			opPool := pool.OperationsPool{AttestationsPool: pool.NewOperationPool[common.Bytes96, *solid.Attestation](100, "test")}
+			validatorParams := validator_params.NewValidatorParams()
+			if hasValidators {
+				validatorParams.SetFeeRecipient(localValidator, common.Address{})
+			}
+			clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
+			service := NewAggregateAndProofService(ctx, syncedDataManager, forkChoiceMock, clock, cfg, opPool, false, verifier, validatorParams)
+
+			err = service.ProcessMessage(context.Background(), nil, agg)
+			stored := func() bool {
+				_, ok := opPool.AttestationsPool.Get(agg.SignedAggregateAndProof.Message.Aggregate.Signature)
+				return ok
+			}
+			if !hasValidators {
+				require.ErrorIs(t, err, ErrIgnore)
+				require.False(t, stored())
+				return
+			}
+			require.NoError(t, err)
+			require.Eventually(t, stored, 5*time.Second, 10*time.Millisecond, "a verified aggregate must reach the block attestation pool")
 		})
 	}
 }

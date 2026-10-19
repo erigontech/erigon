@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
@@ -95,7 +96,7 @@ func TestGloasFullParentPreparationWithExecutionModule(t *testing.T) {
 	require.NoError(t, err)
 	handler.engine, handler.forkchoiceStore, handler.syncedData, handler.ethClock = engine, store, synced, clock
 	require.NoError(t, synced.OnHeadStateWithBlockRoot(anchor, store.AnchorRoot()))
-	store.OnTick(anchor.GenesisTime() + (anchorSlot+1)*handler.beaconChainCfg.SecondsPerSlot)
+	store.OnTick(utils.SecondsToMilliseconds(anchor.GenesisTime() + (anchorSlot+1)*handler.beaconChainCfg.SecondsPerSlot))
 	_, _, err = store.GetHeadNode()
 	require.NoError(t, err)
 

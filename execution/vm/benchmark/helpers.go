@@ -86,7 +86,7 @@ func newBenchEnv(t testing.TB, gasLimit uint64, noMaterialize bool) *vm.EVM {
 }
 
 // newCommittedBenchEnv commits what seed writes to the DB and returns an env
-// over a fresh unversioned state, so reads of it come from the state reader as
+// over a fresh versioned state, so reads of it come from the state reader as
 // in eth_call, not from the same tx's writes.
 func newCommittedBenchEnv(t testing.TB, gasLimit uint64, seed func(*state.IntraBlockState)) *vm.EVM {
 	t.Helper()
@@ -100,7 +100,10 @@ func newCommittedBenchEnv(t testing.TB, gasLimit uint64, seed func(*state.IntraB
 	seed(seeded)
 	vmenv := envFor(seeded, gasLimit)
 	require.NoError(t, seeded.CommitBlock(vmenv.ChainRules(), state.NewWriter(domains.AsPutDel(tx), nil, 1)))
-	return envFor(state.New(reader), gasLimit)
+	statedb := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
+	statedb.SetNoMaterialize(true)
+	statedb.SetNoConflictDetection()
+	return envFor(statedb, gasLimit)
 }
 
 func envFor(statedb *state.IntraBlockState, gasLimit uint64) *vm.EVM {
