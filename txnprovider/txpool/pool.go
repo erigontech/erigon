@@ -692,24 +692,27 @@ func (p *TxPool) Started() bool {
 
 // best returns the highest-priority pending transactions that fit within the given gas and RLP space budgets.
 func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
+	parentBlockWaitStop <-chan struct{},
 	availableGas mdgas.FullMdGas,
 	yielded mapset.Set[[32]byte], availableRlpSpace int,
 ) (bool, int, error) {
 	// sync.Cond has no notion of a context, so a caller that goes away while parked below would
 	// sleep until the next block broadcast the condition, or forever while the chain is stalled.
-	// Broadcasting on cancellation wakes it; every waiter rechecks its own condition anyway. The
-	// broadcast takes the lock so it cannot land between the check below and the wait, which is the
-	// window where a wakeup would be lost.
+	// Broadcasting on cancellation or on a stopped wait wakes it; every waiter rechecks its own
+	// condition anyway. The broadcast takes the lock so it cannot land between the check below and
+	// the wait, which is the window where a wakeup would be lost.
 	stopWatching, watcherDone := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(watcherDone)
 		select {
 		case <-ctx.Done():
-			p.lock.Lock()
-			p.lastSeenCond.Broadcast()
-			p.lock.Unlock()
+		case <-parentBlockWaitStop:
 		case <-stopWatching:
+			return
 		}
+		p.lock.Lock()
+		p.lastSeenCond.Broadcast()
+		p.lock.Unlock()
 	}()
 	// Joined rather than merely told to stop: with the context already ended the watcher can pick
 	// either case, and one that picked cancellation would otherwise take the lock after this call
@@ -726,6 +729,9 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			// Leaving with the lock held would stop every later pool operation, not just this one.
 			p.lock.Unlock()
 			return false, 0, ctx.Err()
+		case <-parentBlockWaitStop:
+			p.lock.Unlock()
+			return false, 0, nil
 		default:
 			// continue
 		}
@@ -899,6 +905,7 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 		provideOptions.Amount,
 		&txnsRlp,
 		provideOptions.ParentBlockNum,
+		provideOptions.ParentBlockWaitStop,
 		provideOptions.GasTarget,
 		provideOptions.TxnIdsFilter,
 		provideOptions.AvailableRlpSpace,
@@ -929,7 +936,7 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 
 func (p *TxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64) (bool, error) {
 	set := mapset.NewThreadUnsafeSet[[32]byte]()
-	onTime, _, err := p.best(ctx, n, txns, onTopOf,
+	onTime, _, err := p.best(ctx, n, txns, onTopOf, nil,
 		mdgas.NewFullMdGas(math.MaxUint64, math.MaxUint64, math.MaxUint64), set, math.MaxInt)
 	return onTime, err
 }

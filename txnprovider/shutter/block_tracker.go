@@ -94,6 +94,12 @@ func (bt *BlockTracker) Run(ctx context.Context) error {
 	}
 }
 
+func (bt *BlockTracker) reached(blockNum uint64) bool {
+	bt.blockChangeCond.L.Lock()
+	defer bt.blockChangeCond.L.Unlock()
+	return bt.currentBlockNum >= blockNum
+}
+
 func (bt *BlockTracker) Wait(ctx context.Context, blockNum uint64) error {
 	done := make(chan struct{})
 	go func() {

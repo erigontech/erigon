@@ -199,8 +199,22 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 	parentBlockWaitTimeout := time.Second * time.Duration(p.slotCalculator.SecondsPerSlot())
 	parentBlockWaitCtx, parentBlockWaitCtxCancel := context.WithTimeout(ctx, parentBlockWaitTimeout)
 	defer parentBlockWaitCtxCancel()
+	go func() {
+		select {
+		case <-provideOpts.ParentBlockWaitStop:
+			parentBlockWaitCtxCancel()
+		case <-parentBlockWaitCtx.Done():
+		}
+	}()
 	parentBlockWaitStart := time.Now()
 	err := p.blockTracker.Wait(parentBlockWaitCtx, parentBlockNum)
+	if errors.Is(err, context.Canceled) && ctx.Err() == nil {
+		// The stop can win the race against a parent that is already there, so ask the tracker.
+		if !p.blockTracker.reached(parentBlockNum) {
+			return nil, nil
+		}
+		err = nil
+	}
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			parentBlockWaitSecs.ObserveDuration(parentBlockWaitStart)

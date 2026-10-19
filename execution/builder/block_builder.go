@@ -38,6 +38,15 @@ type InclusionListFunc func(ctx context.Context) (types.Transactions, error)
 // ErrDiscarded reports that the payload was abandoned before the build completed.
 var ErrDiscarded = errors.New("block builder discarded")
 
+type stopSignalKey struct{}
+
+// stopSignal returns the channel that a BlockBuilder closes once it is asked for its payload, or nil
+// for a build that runs without one.
+func stopSignal(ctx context.Context) <-chan struct{} {
+	stop, _ := ctx.Value(stopSignalKey{}).(<-chan struct{})
+	return stop
+}
+
 const (
 	blockBuilderRunning uint32 = iota
 	blockBuilderCompleted
@@ -50,6 +59,8 @@ const (
 // a payload is collected. Discarding says the payload is not wanted at all, and cancels the work.
 type BlockBuilder struct {
 	interrupt atomic.Bool
+	stopped   chan struct{}
+	stopOnce  sync.Once
 	state     atomic.Uint32
 	discard   context.CancelFunc
 	mu        sync.Mutex
@@ -64,7 +75,8 @@ type BlockBuilder struct {
 // discarded.
 func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Parameters, maxBuildTime, stopGrace time.Duration) *BlockBuilder {
 	buildCtx, discard := context.WithCancel(ctx)
-	builder := &BlockBuilder{done: make(chan struct{}), discard: discard}
+	builder := &BlockBuilder{done: make(chan struct{}), stopped: make(chan struct{}), discard: discard}
+	buildCtx = context.WithValue(buildCtx, stopSignalKey{}, (<-chan struct{})(builder.stopped))
 
 	go func() {
 		var result *types.BlockWithReceipts
@@ -131,6 +143,7 @@ func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Paramet
 
 func (b *BlockBuilder) Stop(ctx context.Context) (*types.BlockWithReceipts, error) {
 	b.interrupt.Store(true)
+	b.stopOnce.Do(func() { close(b.stopped) })
 	if b.Discarded() {
 		return b.readResult()
 	}

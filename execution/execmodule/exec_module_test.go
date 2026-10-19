@@ -28,6 +28,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -1006,6 +1007,39 @@ func TestDiscardReleasesBuilderWaitingForSeal(t *testing.T) {
 	}
 }
 
+func TestStopWakesBuilderWaitingForMoreTransactions(t *testing.T) {
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+	parent := chainPack.TopBlock
+
+	synctest.Test(t, func(t *testing.T) {
+		provider := &observingTxnProvider{TxnProvider: emptyTxnProvider{}, txnCounts: make(chan int, 16)}
+		beaconRoot := randomHash()
+		payloadBuilder := builder.NewBlockBuilder(t.Context(), m.BlockBuilder.Build, &builder.Parameters{
+			ParentHash:            parent.Hash(),
+			Timestamp:             parent.Time() + 1,
+			PrevRandao:            parent.Header().MixDigest,
+			SuggestedFeeRecipient: common.Address{1},
+			Withdrawals:           make([]*types.Withdrawal, 0),
+			ParentBeaconBlockRoot: &beaconRoot,
+			SlotNumber:            syntheticSlotNumber(parent),
+			CustomTxnProvider:     provider,
+		}, time.Minute, time.Minute)
+
+		// The provider ran dry, so the build waits before it asks again.
+		<-provider.txnCounts
+		synctest.Wait()
+
+		started := time.Now()
+		result, err := payloadBuilder.Stop(t.Context())
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.Equal(t, started, time.Now(), "collecting the payload must not wait for the next provider poll")
+	})
+}
+
 // Start building a block, then accept a competing block with the same parent.
 // The original build must still produce a valid block. Also run without the
 // competing commit as a control.
@@ -1130,21 +1164,23 @@ func testAssembleBlockWithSiblingCommit(t *testing.T, commitSibling bool) {
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus, validation.ValidationError)
 }
 
-func TestGetAssembledBlockHonorsCanceledContextWhenTxPoolIsBehindParent(t *testing.T) {
-	ctx := t.Context()
-	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+// assembleWithTxPoolBehindParent starts a build whose transaction selection moves the txpool head back
+// to the block before the parent, and returns once selection has started.
+func assembleWithTxPoolBehindParent(t *testing.T) (m *execmoduletester.ExecModuleTester, parent *types.Block, payloadID uint64) {
+	t.Helper()
+	m = execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 	chainPack, err := m.GenerateChain(2, nil)
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(chainPack))
 
-	parent := chainPack.TopBlock
+	parent = chainPack.TopBlock
 	provider := &rewindingTxnProvider{
 		pool:  m.TxPool,
 		head:  txPoolHead(chainPack.Blocks[len(chainPack.Blocks)-2]),
 		ready: make(chan struct{}),
 	}
 	parentBeaconBlockRoot := randomHash()
-	payloadID, err := m.AssembleBlock(ctx, &builder.Parameters{
+	payloadID, err = m.AssembleBlock(t.Context(), &builder.Parameters{
 		ParentHash:            parent.Hash(),
 		Timestamp:             parent.Time() + 1,
 		PrevRandao:            parent.Header().MixDigest,
@@ -1161,6 +1197,12 @@ func TestGetAssembledBlockHonorsCanceledContextWhenTxPoolIsBehindParent(t *testi
 	case <-time.After(10 * time.Second):
 		t.Fatal("builder did not reach transaction selection")
 	}
+	return m, parent, payloadID
+}
+
+func TestGetAssembledBlockHonorsCanceledContextWhenTxPoolIsBehindParent(t *testing.T) {
+	ctx := t.Context()
+	m, parent, payloadID := assembleWithTxPoolBehindParent(t)
 
 	requestCtx, cancel := context.WithCancel(ctx)
 	cancel()
@@ -1188,6 +1230,20 @@ func TestGetAssembledBlockHonorsCanceledContextWhenTxPoolIsBehindParent(t *testi
 		t.Fatal("GetAssembledBlock remained blocked after context cancellation while the txpool was behind the builder parent")
 	}
 	require.ErrorIs(t, requestErr, context.Canceled)
+}
+
+func TestGetAssembledBlockDoesNotWaitForTxPoolBehindParent(t *testing.T) {
+	ctx := t.Context()
+	m, parent, payloadID := assembleWithTxPoolBehindParent(t)
+
+	// engine_getPayload has a one second timeout, and the txpool may never see the parent again.
+	requestCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	result, err := m.ExecModule.GetAssembledBlock(requestCtx, payloadID)
+	require.NoError(t, m.TxPool.OnNewBlock(ctx, txPoolHead(parent), txnpool.TxnSlots{}, txnpool.TxnSlots{}, txnpool.TxnSlots{}))
+	require.NoError(t, err)
+	require.NotNil(t, result.Block)
+	require.Equal(t, parent.Hash(), result.Block.Block.ParentHash())
 }
 
 func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
