@@ -369,9 +369,17 @@ func opKeccak256(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 	return pc, nil, nil
 }
 
+func (ctx *CallContext) pushAddressWord(index uint8, address accounts.Address) {
+	if ctx.addressWordsSet&(1<<index) == 0 {
+		value := address.Value()
+		ctx.addressWords[index].SetBytes(value[:])
+		ctx.addressWordsSet |= 1 << index
+	}
+	ctx.Stack.push(ctx.addressWords[index])
+}
+
 func opAddress(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	addrVal := scope.Contract.Address().Value()
-	scope.Stack.pushRef().SetBytes(addrVal[:])
+	scope.pushAddressWord(0, scope.Contract.Address())
 	return pc, nil, nil
 }
 
@@ -389,22 +397,12 @@ func opBalance(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 }
 
 func opOrigin(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if origin := evm.Origin; origin.IsNil() {
-		scope.Stack.pushRef().Clear()
-	} else {
-		originVal := origin.Value()
-		scope.Stack.pushRef().SetBytes(originVal[:])
-	}
+	scope.pushAddressWord(1, evm.Origin)
 	return pc, nil, nil
 }
 
 func opCaller(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if caller := scope.Contract.Caller(); caller.IsNil() {
-		scope.Stack.pushRef().Clear()
-	} else {
-		callerValue := caller.Value()
-		scope.Stack.pushRef().SetBytes(callerValue[:])
-	}
+	scope.pushAddressWord(2, scope.Contract.Caller())
 	return pc, nil, nil
 }
 
@@ -682,12 +680,7 @@ func stBlockhash(_ uint64, scope *CallContext) string {
 }
 
 func opCoinbase(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if coinbase := evm.Context.Coinbase; coinbase.IsNil() {
-		scope.Stack.pushRef().Clear()
-	} else {
-		coinbaseValue := coinbase.Value()
-		scope.Stack.pushRef().SetBytes(coinbaseValue[:])
-	}
+	scope.pushAddressWord(3, evm.Context.Coinbase)
 	return pc, nil, nil
 }
 

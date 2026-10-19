@@ -65,6 +65,8 @@ type CallContext struct {
 	stateGasSpill     uint64
 	newAccountCharged bool
 	input             []byte
+	addressWords      [4]uint256.Int
+	addressWordsSet   uint8
 	Memory            Memory
 
 	// Opcode-scoped key/address intern cache. cacheGen is incremented once per
@@ -201,6 +203,7 @@ func (evm *EVM) getCallContext(contract Contract, input []byte, gas mdgas.MdGas)
 	ctx.stateGas = gas.State
 	ctx.stateGasSpill = 0
 	ctx.newAccountCharged = false
+	ctx.addressWordsSet = 0
 	ctx.input = input
 	ctx.Contract = contract
 	return ctx
