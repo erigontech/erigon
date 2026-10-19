@@ -620,9 +620,8 @@ func modexpU256Applicable(base, mod []byte) bool {
 // dst, which must be len(modulus) zero bytes. Operands must satisfy
 // modexpU256Applicable; the exponent may be any length.
 //
-// It is a fixed-width uint256 left-to-right square-and-multiply using a
-// precomputed reciprocal, so each modular multiply is a multiply+reduce with no
-// division and no heap allocation.
+// It uses a precomputed reciprocal and a four-bit window for dense exponents.
+// Each modular product needs no division or heap allocation.
 func modexpU256(dst, base, exp, mod []byte) {
 	// Operands are padded to their declared field widths, which EIP-7823 caps at
 	// 1024 bytes. The loops below cost the field width, not the value, so the
@@ -647,21 +646,52 @@ func modexpU256(dst, base, exp, mod []byte) {
 	}
 	mu := uint256.Reciprocal(&m)
 
-	// started stays false until the first set exponent bit, so leading zero bits
-	// of the top byte cost no squarings. It is always set by the end: exp[0] != 0.
 	var result uint256.Int
-	started := false
-	for _, by := range exp {
-		for bit := 7; bit >= 0; bit-- {
-			if started {
-				result.MulModWithReciprocal(&result, &result, &m, &mu) // square
+	result.SetOne()
+	setBits, nonzeroDigits := 0, 0
+	if len(exp) >= 32 {
+		for _, by := range exp {
+			setBits += bits.OnesCount8(by)
+			if by>>4 != 0 {
+				nonzeroDigits++
 			}
-			if (by>>uint(bit))&1 == 1 {
-				if !started {
-					started = true
-					result.Set(&b) // result was 1, so 1*b = b
-				} else {
-					result.MulModWithReciprocal(&result, &b, &m, &mu) // multiply
+			if by&15 != 0 {
+				nonzeroDigits++
+			}
+		}
+	}
+	// The table costs 14 products; binary exponentiation skips its first square and product.
+	if setBits > nonzeroDigits+16+bits.LeadingZeros8(exp[0]) {
+		var powers [16]uint256.Int
+		powers[0].SetOne()
+		powers[1] = b
+		for i := 2; i < len(powers); i++ {
+			powers[i].MulModWithReciprocal(&powers[i-1], &b, &m, &mu)
+		}
+		for _, by := range exp {
+			for _, digit := range [2]byte{by >> 4, by & 15} {
+				for range 4 {
+					result.MulModWithReciprocal(&result, &result, &m, &mu)
+				}
+				if digit != 0 {
+					result.MulModWithReciprocal(&result, &powers[digit], &m, &mu)
+				}
+			}
+		}
+	} else {
+		started := false
+		for _, by := range exp {
+			for bit := 7; bit >= 0; bit-- {
+				if started {
+					result.MulModWithReciprocal(&result, &result, &m, &mu)
+				}
+				if (by>>uint(bit))&1 == 1 {
+					if !started {
+						started = true
+						result.Set(&b)
+					} else {
+						result.MulModWithReciprocal(&result, &b, &m, &mu)
+					}
 				}
 			}
 		}

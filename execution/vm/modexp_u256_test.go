@@ -111,6 +111,7 @@ func TestModexpU256PaddedAndZero(t *testing.T) {
 	}{
 		{"1024-byte exponent field holding 0", pad(32, 7), pad(1024)},
 		{"1024-byte exponent field holding 1", pad(32, 7), pad(1024, 1)},
+		{"1024-byte dense exponent", pad(32, 7), bytes.Repeat([]byte{0xff}, 1024)},
 		{"zero base, exponent 0", pad(32), pad(1024)},
 		{"zero base, all-ones exponent", pad(32), bytes.Repeat([]byte{0xff}, 1024)},
 		{"base equal to the modulus", mod, bytes.Repeat([]byte{0xff}, 1024)},
@@ -140,7 +141,7 @@ func TestModexpU256Random(t *testing.T) {
 	}
 	for iter := range 20000 {
 		base := randBytes(0, 32)
-		exp := randBytes(0, 20)
+		exp := randBytes(0, 65)
 		modB := randBytes(25, 32)
 		// Force the modulus to at least 2^192, then zero a random prefix so that
 		// padded fields (and their boundary) get exercised too.
