@@ -528,6 +528,11 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	var keyFileStartTxNum, keyFileEndTxNum uint64
 	i := uint64(0)
 	for cp.Len() > 0 {
+		if r.toColdDir && i%4096 == 0 {
+			if err := dt.d.coldIO.Wait(ctx); err != nil {
+				return nil, nil, nil, err
+			}
+		}
 		lastKey = append(lastKey[:0], cp[0].key...)
 		lastVal = append(lastVal[:0], cp[0].val...)
 		lastFileStartTxNum, lastFileEndTxNum := cp[0].startTxNum, cp[0].endTxNum

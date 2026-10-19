@@ -111,6 +111,7 @@ func (a *Aggregator) setDemoteColdDir(coldDir string) error {
 	}
 	a.demoteColdDir = resolved
 	a.d[kv.CommitmentDomain].coldDir = resolved
+	a.d[kv.CommitmentDomain].coldIO = a.coldIO
 	return nil
 }
 

@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -154,4 +155,26 @@ func TestAggregatorRecoverDemotionRemovesInterruptedColdMerge(t *testing.T) {
 
 	require.NoError(t, recoverDemotion(agg.Dirs().SnapDomain, agg.demoteColdDir, agg.logger))
 	requireNoColdMergeOutput(t, agg)
+}
+
+func TestAggregatorColdMergeWaitsWhilePaused(t *testing.T) {
+	t.Parallel()
+	agg := testAggWithColdCommitment(t, []testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}}, 4)
+	agg.coldIO.Pause()
+	done := make(chan error, 1)
+	go func() {
+		_, err := agg.mergeLoopStep(t.Context(), 4*agg.StepSize())
+		done <- err
+	}()
+
+	link := agg.d[kv.CommitmentDomain].kvNewFilePath(0, 4) + coldMergeLinkSuffix
+	require.Eventually(t, func() bool { _, err := os.Lstat(link); return err == nil }, 5*time.Second, time.Millisecond)
+	select {
+	case err := <-done:
+		t.Fatalf("merge finished while paused: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	agg.coldIO.Resume()
+	require.NoError(t, <-done)
+	require.True(t, isSymlink(t, domainFileBySuffix(t, agg.Dirs().SnapDomain, "commitment.0-4.kv")))
 }
