@@ -18,6 +18,7 @@ package cache
 
 import (
 	"bytes"
+	"encoding/binary"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -147,4 +148,19 @@ func BenchmarkAddrCodeHashHotKey(b *testing.B) {
 			}
 		})
 	})
+}
+
+// BenchmarkCodeCache_PutWithCodeHashIfAbsent_MaxCode is the EVM read path's fill
+// for a cold max-size contract: a fresh addr and codeHash each time.
+func BenchmarkCodeCache_PutWithCodeHashIfAbsent_MaxCode(b *testing.B) {
+	c := closeOnCleanup(b, NewCodeCache(64*datasize.MB, 16*datasize.MB))
+	code := bytes.Repeat([]byte{0x5b}, 24*1024)
+	addr := make([]byte, 20)
+	codeHash := make([]byte, 32)
+	b.SetBytes(int64(len(code)))
+	for i := 0; b.Loop(); i++ {
+		binary.BigEndian.PutUint64(addr, uint64(i))
+		binary.BigEndian.PutUint64(codeHash, uint64(i))
+		c.PutWithCodeHashIfAbsent(addr, code, codeHash, uint64(i))
+	}
 }
