@@ -384,7 +384,7 @@ created with Erigon 3.3 or earlier that have not already been rebased must use t
 
 ---
 
-# Erigon v3.5.5 — Tidal Tails — 2026-08-11
+# Erigon v3.5.5 — Tidal Tails — 2026-08-12
 
 v3.5.5 is a bugfix and security release recommended for all users, and especially for block proposers and archive-node operators. It fixes a panic on every Fulu blinded-block submission (#23150), a payload frozen before its slot began under an external consensus layer (#23102), and wrong `logIndex` values on archive nodes (#22951). It is a drop-in upgrade from 3.5.4 — no re-sync required.
 
@@ -411,7 +411,7 @@ v3.5.5 is a bugfix and security release recommended for all users, and especiall
 
 ---
 
-# Erigon v3.5.4 — Tidal Tails — 2026-07-28
+# Erigon v3.5.4 — Tidal Tails — 2026-07-29
 
 v3.5.4 is a bugfix release recommended for all users, and especially for operators running the RPC daemon with response compression enabled — archive nodes and high-traffic RPC endpoints — where a native-memory leak in the gzip path could grow by ~9-15 GiB/day (#22700). It is a drop-in upgrade from 3.5.3 — no re-sync required.
 
