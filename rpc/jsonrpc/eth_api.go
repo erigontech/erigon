@@ -559,7 +559,15 @@ func (api *BaseAPI) checkPruneTransactionHistoryAtIndex(ctx context.Context, tx 
 			// Only a position in this block can bypass its replay floor. Max names the
 			// final system transaction, whose pre-state follows all user transactions.
 			if maxTxNum > minTxNum && txIndex < maxTxNum-minTxNum && minTxNum+txIndex+1 >= floors.startTxNum {
-				return block, nil
+				// Min and Max can fall back to the latest mapping when a block is missing.
+				// The reverse lookup must confirm that the position belongs to this block.
+				mappedBlock, ok, err := api._txNumReader.FindBlockNum(ctx, tx, minTxNum+txIndex+1)
+				if err != nil {
+					return 0, err
+				}
+				if ok && mappedBlock == block {
+					return block, nil
+				}
 			}
 			return 0, fmt.Errorf("%w: requested block %d at transaction index %d, history is available from txNum %d", state.ErrPruned, block, txIndex, floors.startTxNum)
 		})
@@ -705,22 +713,11 @@ func (api *BaseAPI) readHistoryStartBlocks(ctx context.Context, tx kv.TemporalTx
 }
 
 func (api *BaseAPI) readCommitmentHistoryStartBlocks(ctx context.Context, tx kv.TemporalTx, head uint64) (historyPruneFloors, error) {
-	for {
-		key, hasKey := historyFloorCacheKey(tx, head)
-		startTxNum, err := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
-		if err != nil {
-			return historyPruneFloors{}, err
-		}
-		floors, err := api.historyStartBlocksFromTxNum(ctx, tx, head, startTxNum)
-		if err != nil || !hasKey {
-			return floors, err
-		}
-		// Cursor reads in the conversion can renew a remote transaction.
-		// Retry the whole lookup if it spans different views.
-		if current, ok := historyFloorCacheKey(tx, head); ok && current == key {
-			return floors, nil
-		}
+	startTxNum, err := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+	if err != nil {
+		return historyPruneFloors{}, err
 	}
+	return api.historyStartBlocksFromTxNum(ctx, tx, head, startTxNum)
 }
 
 func (api *BaseAPI) historyStartBlocksFromTxNum(ctx context.Context, tx kv.Tx, head, startTxNum uint64) (historyPruneFloors, error) {

@@ -165,7 +165,8 @@ func TestRemoteHistoryFloorFollowsRenewal(t *testing.T) {
 				}
 				read := func() (historyPruneFloors, error) {
 					if tc.domain == kv.CommitmentDomain {
-						return readUncached(ctx, tx, chainInfo.head)
+						_, floors, err := apis.eth.historyAndCommitmentStartBlocks(ctx, tx, chainInfo.head, true)
+						return floors, err
 					}
 					return apis.eth.historyStartBlocks(ctx, tx, chainInfo.head)
 				}

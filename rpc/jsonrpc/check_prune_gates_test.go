@@ -462,6 +462,66 @@ func TestIndexedHistoryGateMatchesReader(t *testing.T) {
 		require.NoError(t, err, "the cursor block is excluded from the search")
 		require.Equal(t, want, got)
 	})
+	t.Run("missing_mapping_and_body", func(t *testing.T) {
+		missing := c.Blocks[0]
+		minTxNum, err := api._txNumReader.Min(ctx, ro, missing.NumberU64())
+		require.NoError(t, err)
+		index := view.startTxNum - minTxNum - 1
+		require.Greater(t, index, uint64(len(missing.Transactions())))
+		require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+			if err := tx.Delete(kv.MaxTxNum, hexutil.EncodeTs(missing.NumberU64())); err != nil {
+				return err
+			}
+			return tx.Delete(kv.BlockBody, dbutils.BlockBodyKey(missing.NumberU64(), missing.Hash()))
+		}))
+		account, err := api.AccountAt(ctx, missing.Hash(), index, testAddr)
+		require.ErrorIs(t, err, state.ErrPruned, "an index must not borrow a later block's retained history")
+		require.Nil(t, account)
+	})
+}
+
+func TestIndexedHistoryGateWithSnapshotMappings(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	const head, historyBlock = uint64(1_000), uint64(600)
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.TestChainBerlinConfig), execmoduletester.WithKey(testKey))
+	signer := types.LatestSignerForChainID(nil)
+	c, err := m.GenerateChain(int(head), func(blockIndex int, block *blockgen.BlockGen) {
+		if uint64(blockIndex)+1 != historyBlock {
+			return
+		}
+		for index := range 2 {
+			txn, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), common.Address{byte(index)}, uint256.NewInt(1), 21000, nil, nil), *signer, testKey)
+			require.NoError(t, err)
+			block.AddTx(txn)
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(c))
+	require.NoError(t, freezeblocks.DumpBlocks(ctx, 0, head, m.ChainConfig, m.Dirs.Tmp, m.Dirs.Snap,
+		m.DB, 1, log.LvlDebug, log.New(), m.BlockReader, snapcfg.KnownCfgOrDevnet(m.ChainConfig.ChainName), nil))
+	require.NoError(t, m.DB.(freezeblocks.HasBlockFiles).DebugBlockFiles().OpenFolder())
+
+	api := newDebugApiForTest(m)
+	rwTx, err := m.DB.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	minTxNum, err := api._txNumReader.Min(ctx, rwTx, historyBlock)
+	require.NoError(t, err)
+	for _, number := range []uint64{historyBlock - 1, historyBlock} {
+		require.NoError(t, rwTx.Delete(kv.MaxTxNum, hexutil.EncodeTs(number)))
+		require.NoError(t, rwTx.Delete(kv.BlockBody, dbutils.BlockBodyKey(number, c.Blocks[number-1].Hash())))
+	}
+	require.NoError(t, rwTx.Commit())
+	api.db = historyFloorDB{TemporalRoDB: api.db, startTxNum: minTxNum + 2}
+
+	block := c.Blocks[historyBlock-1]
+	account, err := api.AccountAt(ctx, block.Hash(), 1, testAddr)
+	require.NoError(t, err, "snapshot mappings must admit a retained position without MDBX mappings or bodies")
+	require.NotNil(t, account)
+	require.EqualValues(t, 1, account.Nonce)
+	_, err = api.AccountAt(ctx, block.Hash(), 0, testAddr)
+	require.ErrorIs(t, err, state.ErrPruned)
 }
 
 func TestCallGateMatchesReaderAfterSystemTransaction(t *testing.T) {
