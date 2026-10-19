@@ -125,7 +125,7 @@ func buildGloasHeadChain(t *testing.T, blockCount int) (*ForkChoiceStore, *count
 	store.finalizedCheckpoint.Store(finalized)
 	store.proposerBoostRoot.Store(common.Hash{})
 	store.checkpointStates.Store(justified, &checkpointState{beaconConfig: &cfg})
-	store.time.Store((startSlot + uint64(blockCount) + 1) * cfg.SecondsPerSlot)
+	store.timeMs.Store((startSlot + uint64(blockCount) + 1) * cfg.SecondsPerSlot * 1000)
 	return store, graph, justified, tipRoot
 }
 
@@ -191,7 +191,7 @@ func TestGloasHeadUsesFilteredChildrenWhenEnvelopeAvailabilityChanges(t *testing
 	store.finalizedCheckpoint.Store(justified)
 	store.proposerBoostRoot.Store(common.Hash{})
 	store.checkpointStates.Store(justified, &checkpointState{beaconConfig: &cfg})
-	store.time.Store(100 * cfg.SecondsPerSlot)
+	store.timeMs.Store(100 * cfg.SecondsPerSlot * 1000)
 
 	head, slot, err := store.GetHeadNode()
 
@@ -303,7 +303,7 @@ func TestGloasHeadFinalizedCheckpointWhenJustifiedRootPredatesEpochStart(t *test
 	store.finalizedCheckpoint.Store(solid.Checkpoint{Root: baseRoot, Epoch: 4})
 	store.proposerBoostRoot.Store(common.Hash{})
 	store.checkpointStates.Store(justified, &checkpointState{beaconConfig: &cfg})
-	store.time.Store(6 * cfg.SlotsPerEpoch * cfg.SecondsPerSlot)
+	store.timeMs.Store(6 * cfg.SlotsPerEpoch * cfg.SecondsPerSlot * 1000)
 	for root := range graph.blocks {
 		store.unrealizedJustifications.Store(root, justified)
 	}
@@ -347,7 +347,7 @@ func newNodeFilterTestStore(t *testing.T, childParentStatus cltypes.PayloadStatu
 	store.finalizedCheckpoint.Store(justified)
 	store.proposerBoostRoot.Store(common.Hash{})
 	store.checkpointStates.Store(justified, &checkpointState{beaconConfig: &cfg})
-	store.time.Store((block.Block.Slot + currentSlotDelta) * cfg.SecondsPerSlot)
+	store.timeMs.Store((block.Block.Slot + currentSlotDelta) * cfg.SecondsPerSlot * 1000)
 	if childParentStatus == cltypes.PayloadStatusPending {
 		return store, root, common.Hash{}
 	}

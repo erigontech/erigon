@@ -94,7 +94,7 @@ func TestOnBlockYieldsForkChoiceLockDuringNewPayload(t *testing.T) {
 
 	tickDone := make(chan struct{})
 	go func() {
-		store.OnTick(48)
+		store.OnTick(48 * 1000)
 		close(tickDone)
 	}()
 	awaitSignal(t, tickDone, "OnTick to acquire the fork-choice lock while NewPayload is blocked")

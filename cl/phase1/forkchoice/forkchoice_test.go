@@ -330,7 +330,7 @@ func runEmbeddedPtcVoteBlock(
 		nil,
 	)
 	require.NoError(t, err)
-	store.OnTick(2 * cfg.SecondsPerSlot)
+	store.OnTick(2 * cfg.SecondsPerSlot * 1000)
 	if payloadValidated {
 		store.payloadStatusByRoot.Add(anchorRoot, execution_client.PayloadStatusValidated)
 	}
@@ -1554,7 +1554,7 @@ func newViabilityTree(t testing.TB) *viabilityTree {
 	graph.blocks[justified.Root].Block.Slot = 32
 	graph.headers[justified.Root].Slot = 32
 	store.justifiedCheckpoint.Store(justified)
-	store.time.Store(128 * store.beaconCfg.SecondsPerSlot)
+	store.timeMs.Store(128 * store.beaconCfg.SecondsPerSlot * 1000)
 	store.checkpointStates.Store(justified, &checkpointState{
 		beaconConfig: store.beaconCfg, validatorSetSize: 1,
 		balances: []uint64{32}, actives: []byte{1}, slasheds: []byte{0},
