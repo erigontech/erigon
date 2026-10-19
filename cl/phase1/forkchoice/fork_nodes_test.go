@@ -93,7 +93,7 @@ func TestForkNodesGloasIncludesProposerBoost(t *testing.T) {
 		graph.blocks[childRoot] = child
 		f.updateChildren(11, root, childRoot)
 	}
-	f.time.Store(13 * f.beaconCfg.SecondsPerSlot)
+	f.timeMs.Store(13 * f.beaconCfg.SecondsPerSlot * 1000)
 	f.checkpointStates.Store(f.JustifiedCheckpoint(), &checkpointState{
 		beaconConfig: f.beaconCfg, validatorSetSize: 3,
 		balances: []uint64{100, 90, 3010}, actives: []byte{7}, slasheds: []byte{0},
@@ -159,7 +159,7 @@ func TestForkNodesGloasBoostArrivesAfterPreparation(t *testing.T) {
 	graph.headers[childRoot] = child.SignedBeaconBlockHeader().Header
 	graph.blocks[childRoot] = child
 	f.updateChildren(11, root, childRoot)
-	f.time.Store(13 * f.beaconCfg.SecondsPerSlot)
+	f.timeMs.Store(13 * f.beaconCfg.SecondsPerSlot * 1000)
 	f.proposerBoostRoot.Store(childRoot)
 
 	require.Equal(t, []ForkNode{{
@@ -187,7 +187,7 @@ func TestForkNodesGloasIgnoresBoostOutsideSubtree(t *testing.T) {
 	}
 	graph.blocks[root].Block.ParentRoot = commonRoot
 	graph.headers[root].ParentRoot = commonRoot
-	f.time.Store(11 * f.beaconCfg.SecondsPerSlot)
+	f.timeMs.Store(11 * f.beaconCfg.SecondsPerSlot * 1000)
 	balances := make([]uint64, 16)
 	for i := range balances {
 		balances[i] = 32
@@ -221,7 +221,7 @@ func TestForkNodesGloasBoostRequiresBlockAncestry(t *testing.T) {
 	graph := f.forkGraph.(*forkNodesTestGraph)
 	boostRoot := common.Hash{0xbb}
 	graph.headers[boostRoot] = &cltypes.BeaconBlockHeader{Slot: 13, ParentRoot: root}
-	f.time.Store(13 * f.beaconCfg.SecondsPerSlot)
+	f.timeMs.Store(13 * f.beaconCfg.SecondsPerSlot * 1000)
 	f.proposerBoostRoot.Store(boostRoot)
 	require.False(t, f.isAncestor(
 		ForkChoiceNode{Root: boostRoot, PayloadStatus: cltypes.PayloadStatusPending},
