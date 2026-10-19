@@ -472,23 +472,32 @@ func TestTransientStorageManySlots(t *testing.T) {
 	check(transientScanLimit / 2)
 }
 
-// Several transactions under one snapshot: the revert crosses Prepare's clear.
 func TestTransientStorageRevertAcrossClear(t *testing.T) {
 	t.Parallel()
-	state := New(nil)
-	defer state.Close()
-
-	addr := accounts.Address{}
-	k1, k2 := TransientKey(*uint256.NewInt(1)), TransientKey(*uint256.NewInt(2))
-	state.SetTransientState(addr, &k1, uint256.NewInt(1))
-	state.SetTransientState(addr, &k1, uint256.NewInt(2))
-	clear(state.transientStorage)
-	state.SetTransientState(addr, &k2, uint256.NewInt(3))
-	clear(state.transientStorage)
-
-	state.journal.revert(state, 0)
-	if got := state.GetTransientState(addr, k2); !got.IsZero() {
-		t.Fatalf("k2: have %d, want 0", got.Uint64())
+	for _, clearLast := range []bool{false, true} {
+		t.Run(fmt.Sprint(clearLast), func(t *testing.T) {
+			state := New(nil)
+			defer state.Close()
+			snapshot := state.PushSnapshot()
+			addr := accounts.Address{}
+			const slots = 2 * transientScanLimit
+			for frame := range 3 {
+				state.Prepare(&chain.Rules{}, addr, addr, addr, nil, nil)
+				for i := range slots - frame {
+					key := TransientKey(*uint256.NewInt(uint64(frame*slots + i)))
+					state.SetTransientState(addr, &key, uint256.NewInt(1))
+					state.SetTransientState(addr, &key, uint256.NewInt(2))
+				}
+			}
+			if clearLast {
+				state.Prepare(&chain.Rules{}, addr, addr, addr, nil, nil)
+			}
+			state.RevertToSnapshot(snapshot, nil)
+			for i := range 3 * slots {
+				key := TransientKey(*uint256.NewInt(uint64(i)))
+				require.Equal(t, uint256.Int{}, state.GetTransientState(addr, key), "slot %d", i)
+			}
+		})
 	}
 }
 
