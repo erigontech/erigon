@@ -80,7 +80,7 @@ func TestPubsubRejectsOversizedIHave(t *testing.T) {
 	control = protowire.AppendBytes(control, ids)
 	rpc := protowire.AppendTag(nil, 3, protowire.BytesType)
 	rpc = protowire.AppendBytes(rpc, control)
-	require.Less(t, len(rpc), int(networkConfig.GossipMaxSizeBellatrix))
+	require.Less(t, uint64(len(rpc)), networkConfig.MaxGossipMessageSize())
 
 	s, err := sender.NewStream(ctx, target.ID(), pubsub.GossipSubID_v11)
 	require.NoError(t, err)

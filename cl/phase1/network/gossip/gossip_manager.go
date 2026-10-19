@@ -286,7 +286,7 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 			g.stats.addReject(name)
 			return pubsub.ValidationReject
 		}
-		msgData, err = utils.DecompressSnappyWithLimit(msgData, gossip.MaxUncompressedSize(name, g.beaconConfig, g.networkConfig))
+		msgData, err = gossip.DecompressMessage(name, msgData, g.beaconConfig, g.networkConfig)
 		if err != nil {
 			log.Debug("[GossipManager] reject decompress message", "topic", name, "err", err)
 			g.stats.addReject(name)

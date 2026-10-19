@@ -1,8 +1,10 @@
 package gossip_test
 
 import (
+	"encoding/binary"
 	"testing"
 
+	"github.com/golang/snappy"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -70,4 +72,25 @@ func TestMaxUncompressedSizeIsCappedByNetworkLimit(t *testing.T) {
 	net := clparams.NetworkConfigs[chainspec.MainnetChainID]
 	net.GossipMaxSize = 1024
 	require.Equal(t, uint64(1024), gossip.MaxUncompressedSize(gossip.TopicNameBeaconAggregateAndProof, &clparams.MainnetBeaconConfig, &net))
+}
+
+// Snappy allows an encoding of up to two bytes per input byte, so a payload within
+// the uncompressed limit can still exceed max_compressed_len.
+func TestDecompressMessageRejectsCompressedDataAboveMaxCompressedLen(t *testing.T) {
+	net := clparams.NetworkConfigs[chainspec.MainnetChainID]
+	net.GossipMaxSize = 1024
+	payload := make([]byte, 1000)
+	inefficient := binary.AppendUvarint(nil, uint64(len(payload)))
+	for _, b := range payload {
+		inefficient = append(inefficient, 0x00, b)
+	}
+	decoded, err := snappy.Decode(nil, inefficient)
+	require.NoError(t, err)
+	require.Equal(t, payload, decoded)
+
+	_, err = gossip.DecompressMessage(gossip.TopicNameBeaconBlock, inefficient, &clparams.MainnetBeaconConfig, &net)
+	require.Error(t, err)
+	decoded, err = gossip.DecompressMessage(gossip.TopicNameBeaconBlock, snappy.Encode(nil, payload), &clparams.MainnetBeaconConfig, &net)
+	require.NoError(t, err)
+	require.Equal(t, payload, decoded)
 }

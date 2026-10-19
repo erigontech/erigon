@@ -249,11 +249,16 @@ type NetworkConfig struct {
 	StaticPeers []string `yaml:"-" json:"-"`
 }
 
+// MaxCompressedPayloadSize is the spec's max_compressed_len(MAX_PAYLOAD_SIZE): the largest
+// snappy encoding of a payload within the uncompressed limit.
+func (n *NetworkConfig) MaxCompressedPayloadSize() uint64 {
+	return 32 + n.GossipMaxSize + n.GossipMaxSize/6
+}
+
 // MaxGossipMessageSize is the spec's max_message_size(): the largest gossipsub RPC frame
 // a peer may send, max_compressed_len(payload) plus 1024 bytes of framing, at least 1 MiB.
 func (n *NetworkConfig) MaxGossipMessageSize() uint64 {
-	payload := n.GossipMaxSize
-	return max(32+payload+payload/6+1024, 1<<20)
+	return max(n.MaxCompressedPayloadSize()+1024, 1<<20)
 }
 
 var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig{
