@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/tiering"
 )
@@ -58,26 +57,34 @@ var (
 // tieringGaugesInterval keeps the per-file scan (a stat per state file) off the per-block path at the chain tip.
 const tieringGaugesInterval = 10 * time.Second
 
-func reportTiering(ctx context.Context, cfg ExecuteBlockCfg, doms *execctx.SharedDomains, tx kv.TemporalTx, head uint64, logger log.Logger) error {
+const tieringTickInterval = 30 * time.Second
+
+func reportTiering(ctx context.Context, cfg ExecuteBlockCfg, stepSize uint64, tx kv.TemporalTx, head uint64, logger log.Logger) error {
 	lookback := cfg.syncCfg.TieringLookbackBlocks
 	if lookback == 0 {
 		return nil
 	}
 	now := time.Now()
-	if now.Sub(time.Unix(0, tieringGaugesAt.Load())) < tieringGaugesInterval {
+	gaugesDue := now.Sub(time.Unix(0, tieringGaugesAt.Load())) >= tieringGaugesInterval
+	if !gaugesDue && !cfg.syncCfg.TieringDemote {
+		return nil
+	}
+	boundary := tiering.ColdBoundary(head, lookback)
+	boundaryTxNum, err := cfg.blockReader.TxnumReader().Min(ctx, tx, boundary)
+	if err != nil {
+		return err
+	}
+	if cfg.syncCfg.TieringDemote {
+		cfg.db.Debug().DemoteInBackground(boundaryTxNum, cfg.syncCfg.TieringColdDir)
+	}
+	if !gaugesDue {
 		return nil
 	}
 	tieringGaugesAt.Store(now.UnixNano())
 	state.PublishTierProbeCounts()
 
-	boundary := tiering.ColdBoundary(head, lookback)
-	txNumsReader := cfg.blockReader.TxnumReader()
-	boundaryTxNum, err := txNumsReader.Min(ctx, tx, boundary)
-	if err != nil {
-		return err
-	}
 	mxTieringColdBoundaryBlock.SetUint64(boundary)
-	coldDir, stepSize := cfg.syncCfg.TieringColdDir, doms.StepSize()
+	coldDir := cfg.syncCfg.TieringColdDir
 	var commitmentLag tiering.Lag
 	for _, d := range []kv.Domain{kv.CommitmentDomain, kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
 		files, err := tieringFiles(tiering.KVFiles(tx.Debug().DomainFiles(d)))
@@ -117,6 +124,38 @@ func reportTiering(ctx context.Context, cfg ExecuteBlockCfg, doms *execctx.Share
 		"commitmentCopyPending", usageString(commitmentLag.CopyPending), "commitmentStraddling", usageString(commitmentLag.Straddling),
 		"commitmentColdResident", usageString(commitmentLag.ColdResident))
 	return nil
+}
+
+// startTieringTicker repeats reportTiering on its own read-only tx while a long exec cycle runs; head stays the
+// cycle's start block.
+func startTieringTicker(ctx context.Context, cfg ExecuteBlockCfg, stepSize, head uint64, logger log.Logger) (stop func()) {
+	if cfg.syncCfg.TieringLookbackBlocks == 0 {
+		return func() {}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(tieringTickInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+			err := cfg.db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+				return reportTiering(ctx, cfg, stepSize, tx, head, logger)
+			})
+			if err != nil && ctx.Err() == nil {
+				logger.Warn("[tiering] periodic report", "err", err)
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
 }
 
 func reportCommitmentTiers(ctx context.Context, cfg ExecuteBlockCfg, tx kv.TemporalTx, files []tiering.File, lag tiering.Lag, boundary, boundaryTxNum uint64) error {
