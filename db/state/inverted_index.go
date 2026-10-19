@@ -403,7 +403,7 @@ func (w *InvertedIndexBufferedWriter) flushIndex(ctx context.Context, tx kv.RwTx
 		return w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()})
 	}
 	defer w.prefetcher.close()
-	pairs := make([][2][]byte, 0, w.prefetchBatchSize)
+	var pairs [][2][]byte
 	flush := func(next etl.LoadNextFunc) error {
 		if err := w.prefetcher.prefetch(ctx, pairs); err != nil {
 			w.logger.Warn("inverted index flush prefetch failed", "table", w.indexTable, "err", err)
