@@ -523,6 +523,17 @@ if [[ "$SOAK_RC" -eq 0 ]]; then
         fi
         sleep "$QUIESCE_POLL_SEC"
     done
+    # A merge publishes its output before unlinking its inputs, so for a
+    # few seconds the wide file and the files it subsumes are all on disk.
+    # Nothing here can stop the node merging — merge-quiesce only confirms
+    # an idle window, and a merge may start the moment it returns — so a
+    # single measurement races it. Re-measure instead: a transient clears
+    # when the inputs go, a real leak does not.
+    DISK_CLEAN_SETTLE_TRIES="${DISK_CLEAN_SETTLE_TRIES:-6}"
+    DISK_CLEAN_SETTLE_SEC="${DISK_CLEAN_SETTLE_SEC:-20}"
+    DISK_CLEAN_TRY=0
+    while true; do
+    DISK_CLEAN_TRY=$((DISK_CLEAN_TRY + 1))
     OVERLAP_COUNT=0
     GAP_COUNT=0
     ORPHAN_COUNT=0
@@ -644,8 +655,17 @@ if [[ "$SOAK_RC" -eq 0 ]]; then
     done
 
     TOTAL=$((OVERLAP_COUNT + GAP_COUNT + ORPHAN_COUNT))
+    if [[ $TOTAL -gt 0 && $DISK_CLEAN_TRY -lt $DISK_CLEAN_SETTLE_TRIES ]]; then
+        echo "  disk-clean: overlaps=$OVERLAP_COUNT gaps=$GAP_COUNT orphans=$ORPHAN_COUNT on try $DISK_CLEAN_TRY/$DISK_CLEAN_SETTLE_TRIES — re-measuring in ${DISK_CLEAN_SETTLE_SEC}s in case a merge is mid-publish"
+        sleep "$DISK_CLEAN_SETTLE_SEC"
+        continue
+    fi
+    break
+    done
+
+    TOTAL=$((OVERLAP_COUNT + GAP_COUNT + ORPHAN_COUNT))
     if [[ $TOTAL -gt 0 ]]; then
-        echo "FAIL: disk-clean assertion — overlaps=$OVERLAP_COUNT gaps=$GAP_COUNT orphans=$ORPHAN_COUNT v4_transient=$V4_TRANSIENT_COUNT"
+        echo "FAIL: disk-clean assertion — overlaps=$OVERLAP_COUNT gaps=$GAP_COUNT orphans=$ORPHAN_COUNT v4_transient=$V4_TRANSIENT_COUNT (persisted across $DISK_CLEAN_TRY measurements ${DISK_CLEAN_SETTLE_SEC}s apart)"
         SOAK_RC=2
     elif [[ $V4_TRANSIENT_COUNT -gt 0 ]]; then
         # Under the launcher's default ERIGON_MERGE_MIN_AGE_STEPS=6
