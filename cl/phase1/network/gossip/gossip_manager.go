@@ -26,6 +26,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -39,11 +40,13 @@ import (
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/p2p"
 	serviceintf "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
+	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 // PeerBanner is an interface for banning misbehaving peers.
@@ -147,6 +150,7 @@ type GossipManager struct {
 	activeIndicies uint64
 	subscriptions  *TopicSubscriptions
 	subscribeAll   bool
+	localNodeID    atomic.Pointer[enode.ID]
 
 	publishQueue chan publishJob
 	peerBanQueue chan peerBan
@@ -214,6 +218,11 @@ func NewGossipManager(
 // SetPeerBanner sets the peer banner used to ban peers that fail message verification.
 func (g *GossipManager) SetPeerBanner(pb PeerBanner) {
 	g.peerBanner = pb
+}
+
+func (g *GossipManager) SetLocalNodeID(nodeID enode.ID) {
+	g.localNodeID.Store(&nodeID)
+	g.subscribePersistentAttestationSubnets()
 }
 
 // Close gracefully shuts down the GossipManager and all its goroutines.
@@ -390,8 +399,41 @@ func (g *GossipManager) registerGossipService(service serviceintf.Service[any], 
 		log.Debug("[GossipManager] registered topic", "topic", topic)
 	}
 	g.subscribeUpcomingProposerPreferences()
+	g.subscribePersistentAttestationSubnets()
 	err = nil
 	return
+}
+
+func (g *GossipManager) subscribePersistentAttestationSubnets() {
+	if g.subscribeAll {
+		return
+	}
+	nodeID := g.localNodeID.Load()
+	if nodeID == nil {
+		return
+	}
+	epoch := g.ethClock.GetCurrentEpoch()
+	persistentSubnets, err := subnets.ComputeSubscribedSubnets(g.beaconConfig, g.networkConfig, *nodeID, epoch)
+	if err != nil {
+		log.Warn("[GossipManager] failed to compute persistent attestation subnets", "err", err)
+		return
+	}
+	rotationEpoch := subnets.SubscribedSubnetsRotationEpoch(*nodeID, epoch)
+	expiry := g.ethClock.GetSlotTime(rotationEpoch*g.beaconConfig.SlotsPerEpoch + 1)
+	for _, topic := range g.subscriptions.AllTopics() {
+		name := extractTopicName(topic)
+		if !gossip.IsTopicBeaconAttestation(name) {
+			continue
+		}
+		subnet := extractSubnetIndexByGossipTopic(name)
+		if subnet < 0 || !slices.Contains(persistentSubnets, uint64(subnet)) {
+			continue
+		}
+		if err := g.subscriptions.SubscribeWithExpiry(topic, expiry); err != nil {
+			log.Warn("[GossipManager] failed to subscribe persistent attestation subnet", "topic", topic, "err", err)
+		}
+	}
+	g.p2p.SetENRAttSubnets(persistentSubnets)
 }
 
 func (g *GossipManager) defaultExpiryForTopic(name string) time.Time {
@@ -572,6 +614,7 @@ func (g *GossipManager) goCheckForkAndResubscribe(ctx context.Context) {
 		}
 
 		g.subscribeUpcomingProposerPreferences()
+		g.subscribePersistentAttestationSubnets()
 
 		// compute upcoming ForkDigest
 		epoch := g.ethClock.GetEpochAtSlot(g.ethClock.GetCurrentSlot() + slotLookahead)
