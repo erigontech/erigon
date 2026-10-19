@@ -70,7 +70,17 @@ const (
 	// already listening but SetStatus hasn't propagated yet.
 	awaitStatusTimeout = 10 * time.Second
 	maxPermitsPerPeer  = 4 // How many outstanding requests per peer we may have
+	// peerTasksQueueSize and peerTasksByteLimit bound the outbound messages
+	// waiting in each peer's queue. The message being written is outside the
+	// byte budget, which is above the largest eth message.
+	peerTasksQueueSize = 32
+	peerTasksByteLimit = 16 * 1024 * 1024
 )
+
+type peerTask struct {
+	run  func()
+	size int
+}
 
 // PeerInfo collects various extra bits of information about the peer,
 // for example deadlines that is used for regulating requests sent to the peer
@@ -92,9 +102,10 @@ type PeerInfo struct {
 	removeOnce   sync.Once
 
 	// each peer has own worker (goroutine) - all funcs from this queue will execute on this worker
-	// if this queue is full (means peer is slow) - old messages will be dropped
+	// if this queue is full by count or bytes (means peer is slow) - old messages will be dropped
 	// channel closed on peer remove
-	tasks chan func()
+	tasks       chan peerTask
+	queuedBytes atomic.Int64
 }
 
 type PeerRef struct {
@@ -145,7 +156,7 @@ func NewPeerInfo(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
 		peer:      peer,
 		rw:        rw,
 		removed:   make(chan struct{}),
-		tasks:     make(chan func(), 32),
+		tasks:     make(chan peerTask, peerTasksQueueSize),
 		ctx:       ctx,
 		ctxCancel: cancel,
 	}
@@ -155,8 +166,9 @@ func NewPeerInfo(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
 	p.lock.RUnlock()
 
 	go func() { // each peer has own worker, then slow
-		for f := range t {
-			f()
+		for task := range t {
+			p.queuedBytes.Add(-int64(task.size))
+			task.run()
 		}
 	}()
 	return p
@@ -287,31 +299,55 @@ func (pi *PeerInfo) Remove(reason *p2p.PeerError) {
 	})
 }
 
-func (pi *PeerInfo) Async(f func(), logger log.Logger) {
+// Async queues f on the peer's worker. size is the number of payload bytes f
+// keeps alive until it has run.
+func (pi *PeerInfo) Async(f func(), size int, logger log.Logger) {
 	pi.lock.Lock()
 	defer pi.lock.Unlock()
 	if pi.tasks == nil {
 		// Too late, the task channel has been closed
 		return
 	}
+	if size > peerTasksByteLimit {
+		logger.Debug("[sentry] dropping outbound message above the peer queue byte limit", "name", pi.peer.Name(), "size", size)
+		return
+	}
+	dropped := false
+	for pi.queuedBytes.Load()+int64(size) > peerTasksByteLimit && pi.dropOldestTask() {
+		dropped = true
+	}
+	pi.queuedBytes.Add(int64(size))
 	select {
 	case <-pi.removed: // noop if peer removed
+		pi.queuedBytes.Add(-int64(size))
 	case <-pi.ctx.Done():
+		pi.queuedBytes.Add(-int64(size))
 		if pi.tasks != nil {
 			close(pi.tasks)
 			// Setting this to nil because other functions detect the closure of the channel by checking pi.tasks == nil
 			pi.tasks = nil
 		}
-	case pi.tasks <- f:
+	case pi.tasks <- peerTask{run: f, size: size}:
 		if len(pi.tasks) == cap(pi.tasks) { // if channel full - discard old messages
 			for i := 0; i < cap(pi.tasks)/2; i++ {
-				select {
-				case <-pi.tasks:
-				default:
-				}
+				pi.dropOldestTask()
 			}
-			logger.Trace("[sentry] slow peer or too many requests, dropping its old requests", "name", pi.peer.Name())
+			dropped = true
 		}
+	}
+	if dropped {
+		logger.Trace("[sentry] slow peer or too many requests, dropping its old requests", "name", pi.peer.Name())
+	}
+}
+
+// dropOldestTask requires pi.lock to be held. It reports whether a queued task was dropped.
+func (pi *PeerInfo) dropOldestTask() bool {
+	select {
+	case task := <-pi.tasks:
+		pi.queuedBytes.Add(-int64(task.size))
+		return true
+	default:
+		return false
 	}
 }
 
@@ -989,7 +1025,7 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgID sent
 		} else if ttl > 0 {
 			peerInfo.AddDeadline(time.Now().Add(ttl))
 		}
-	}, ss.logger)
+	}, len(data), ss.logger)
 }
 
 func (ss *GrpcServer) getBlockHeaders(ctx context.Context, bestHash common.Hash, peerID [64]byte) error {
