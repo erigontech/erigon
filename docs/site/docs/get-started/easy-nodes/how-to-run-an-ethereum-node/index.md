@@ -4,6 +4,10 @@ description: "Run a full Ethereum mainnet node using Caplin (built-in consensus 
 sidebar_position: 1
 ---
 
+{/* llms-pinned-version: QUIC in v3.7.1 */}
+{/* llms-pinned-version: v3.7.1 uses */}
+{/* llms-pinned-version: v3.7.1 and earlier */}
+
 
 # How to run an Ethereum node
 

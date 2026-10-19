@@ -4,6 +4,10 @@ description: "Run a full Gnosis Chain node with Erigon's embedded consensus laye
 sidebar_position: 2
 ---
 
+{/* llms-pinned-version: QUIC in v3.7.1 */}
+{/* llms-pinned-version: v3.7.1 uses */}
+{/* llms-pinned-version: v3.7.1 and earlier */}
+
 
 # How to run a Gnosis Chain node
 
