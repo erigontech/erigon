@@ -32,6 +32,7 @@ import (
 	"google.golang.org/protobuf/encoding/protowire"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
 type rpcReceiveTracer struct {
@@ -47,11 +48,9 @@ func (tracer *rpcReceiveTracer) Trace(event *pb.TraceEvent) {
 	}
 }
 
-// TestPubsubRejectsOversizedIHave pins Caplin's control-message bound: an IHAVE
-// frame under the raised message-size cap but over the default control-message
-// budget is rejected (stream reset) instead of being delivered to the pubsub
-// event loop.
-func TestPubsubRejectsOversizedIHave(t *testing.T) {
+// sendRawRPC writes rpc to a Caplin gossipsub peer and reports whether the peer passed
+// it to the pubsub event loop (true) or reset the stream (false).
+func sendRawRPC(t *testing.T, rpc []byte) bool {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	mn := mocknet.New()
@@ -75,17 +74,13 @@ func TestPubsubRejectsOversizedIHave(t *testing.T) {
 	require.NoError(t, mn.LinkAll())
 	require.NoError(t, mn.ConnectAllButSelf())
 
-	ids := bytes.Repeat([]byte{0x12, 0x00}, (512<<10)/2+1)
-	control := protowire.AppendTag(nil, 1, protowire.BytesType)
-	control = protowire.AppendBytes(control, ids)
-	rpc := protowire.AppendTag(nil, 3, protowire.BytesType)
-	rpc = protowire.AppendBytes(rpc, control)
-	require.Less(t, uint64(len(rpc)), networkConfig.MaxGossipMessageSize())
-
 	s, err := sender.NewStream(ctx, target.ID(), pubsub.GossipSubID_v11)
 	require.NoError(t, err)
 	defer s.Close()
-	require.NoError(t, msgio.NewVarintWriter(s).WriteMsg(rpc))
+	if err := msgio.NewVarintWriter(s).WriteMsg(rpc); err != nil {
+		require.ErrorIs(t, err, network.ErrReset)
+		return false
+	}
 	reset := make(chan error, 1)
 	go func() {
 		_, err := s.Read(make([]byte, 1))
@@ -95,9 +90,46 @@ func TestPubsubRejectsOversizedIHave(t *testing.T) {
 	select {
 	case err := <-reset:
 		require.ErrorIs(t, err, network.ErrReset)
+		return false
 	case <-tracer.received:
-		t.Fatal("oversized IHAVE was decoded and passed to the pubsub event loop")
+		return true
 	case <-ctx.Done():
-		t.Fatal("oversized IHAVE did not reset the stream")
+		t.Fatal("the RPC was neither delivered nor rejected")
+		return false
 	}
+}
+
+// TestPubsubRejectsOversizedIHave pins Caplin's control-message bound: an IHAVE
+// frame under the message-size cap but over the default control-message budget is
+// rejected (stream reset) instead of being delivered to the pubsub event loop.
+func TestPubsubRejectsOversizedIHave(t *testing.T) {
+	ids := bytes.Repeat([]byte{0x12, 0x00}, (512<<10)/2+1)
+	control := protowire.AppendTag(nil, 1, protowire.BytesType)
+	control = protowire.AppendBytes(control, ids)
+	rpc := protowire.AppendTag(nil, 3, protowire.BytesType)
+	rpc = protowire.AppendBytes(rpc, control)
+	networkConfig := clparams.NetworkConfigs[chainspec.MainnetChainID]
+	require.Less(t, uint64(len(rpc)), networkConfig.MaxGossipMessageSize())
+
+	require.False(t, sendRawRPC(t, rpc), "oversized IHAVE was decoded and passed to the pubsub event loop")
+}
+
+func TestPubsubFrameLimitFollowsMaxGossipMessageSize(t *testing.T) {
+	networkConfig := clparams.NetworkConfigs[chainspec.MainnetChainID]
+	limit := int(networkConfig.MaxGossipMessageSize())
+	publishRPC := func(size int) []byte {
+		for data := size; ; data-- {
+			msg := protowire.AppendTag(nil, 4, protowire.BytesType)
+			msg = protowire.AppendString(msg, "/eth2/00000000/beacon_block/ssz_snappy")
+			msg = protowire.AppendTag(msg, 2, protowire.BytesType)
+			msg = protowire.AppendBytes(msg, make([]byte, data))
+			rpc := protowire.AppendTag(nil, 2, protowire.BytesType)
+			if rpc = protowire.AppendBytes(rpc, msg); len(rpc) == size {
+				return rpc
+			}
+		}
+	}
+
+	require.True(t, sendRawRPC(t, publishRPC(limit)), "an RPC at max_message_size must be accepted")
+	require.False(t, sendRawRPC(t, publishRPC(limit+1)), "an RPC above max_message_size must reset the stream")
 }
