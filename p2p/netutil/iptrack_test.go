@@ -93,6 +93,14 @@ func TestIPTracker(t *testing.T) {
 			{opStatement, 0, "1.2.3.4", "192.168.0.3"},
 			{opPredict, 0, "1.2.3.4", ""},
 		},
+		"lanIPv6Zones": {
+			{opStatement, 0, "fe80::2", "fe80::1%eth0"},
+			{opStatement, 0, "fe80::2", "fe80::1%eth1"},
+			{opStatement, 0, "fe80::2", "fe80::1%eth0"},
+			{opPredict, 0, "", ""},
+			{opStatement, 0, "fe80::2", "fe80::1%eth2"},
+			{opPredict, 0, "fe80::2", ""},
+		},
 		"fullconeMapped": {
 			{opContact, 0, "", "127.0.0.2"},
 			{opStatement, 10, "127.0.0.1", "::ffff:127.0.0.2"},

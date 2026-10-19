@@ -21,7 +21,6 @@ package enode
 
 import (
 	"context"
-	"math/rand"
 	"net"
 	"net/netip"
 	"testing"
@@ -115,15 +114,12 @@ func TestLocalNodeEndpoint(t *testing.T) {
 	assert.Equal(t, fallback.Port, ln.Node().UDP())
 	assert.Equal(t, initialSeq+1, ln.Node().Seq())
 
-	// Add endpoint statements from random hosts.
-	for range iptrackMinStatements {
+	for i := range iptrackMinStatements {
 		assert.Equal(t, fallback.IP, ln.Node().IP())
 		assert.Equal(t, fallback.Port, ln.Node().UDP())
 		assert.Equal(t, initialSeq+1, ln.Node().Seq())
 
-		fromIP := make(net.IP, 4)
-		rand.Read(fromIP)
-		fromAddr := netip.AddrPortFrom(netip.AddrFrom4([4]byte(fromIP)), 90)
+		fromAddr := netip.AddrPortFrom(netip.AddrFrom4([4]byte{1, 0, byte(i), 1}), 90)
 		predictedAddr := netip.AddrPortFrom(netip.AddrFrom4([4]byte(predicted.IP.To4())), uint16(predicted.Port))
 		ln.UDPEndpointStatement(fromAddr, predictedAddr)
 	}

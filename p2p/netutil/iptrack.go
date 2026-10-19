@@ -51,7 +51,7 @@ type ipStatement struct {
 
 // netStatement is an endpoint stated by the hosts of one network.
 type netStatement struct {
-	network  netip.Prefix
+	network  netip.Addr
 	endpoint netip.AddrPort
 }
 
@@ -111,17 +111,17 @@ func (it *IPTracker) PredictEndpoint() netip.AddrPort {
 // statementNetwork returns the network of a host making statements. Hosts in
 // the same public /24 (IPv4) or /48 (IPv6) network are likely controlled by
 // the same party, so their statements count as one. Hosts on the LAN, e.g. of
-// a local test network, count individually.
-func statementNetwork(host netip.Addr) netip.Prefix {
+// a local test network, count individually, including their IPv6 zone.
+func statementNetwork(host netip.Addr) netip.Addr {
+	if AddrIsLAN(host) {
+		return host
+	}
 	bits := 48
 	if host.Is4() {
 		bits = 24
 	}
-	if AddrIsLAN(host) {
-		bits = host.BitLen()
-	}
 	network, _ := host.Prefix(bits)
-	return network
+	return network.Addr()
 }
 
 // AddStatement records that a certain host thinks our external endpoint is the one given.
