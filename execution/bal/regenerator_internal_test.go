@@ -144,7 +144,8 @@ func TestRegenerator_CancelledBeforeReplayAdmission(t *testing.T) {
 			defer cancel()
 			reader := regeneratorAdmissionReader{hash: common.Hash{1}, preflightDone: make(chan struct{})}
 			gen := NewRegenerator(&reader, nil, log.New())
-			mu := gen.perBlockExecMu.lock(reader.hash)
+			lockDone, lockErr := gen.perBlockExecMu.lock(t.Context(), reader.hash)
+			require.NoError(t, lockErr)
 			var got []byte
 			var err error
 			admitted := false
@@ -158,11 +159,11 @@ func TestRegenerator_CancelledBeforeReplayAdmission(t *testing.T) {
 			}()
 
 			<-reader.preflightDone
-			cancel()
 			if tc.cached != nil {
 				gen.cache.Add(reader.hash, tc.cached)
 			}
-			gen.perBlockExecMu.unlock(mu, reader.hash)
+			cancel()
+			gen.perBlockExecMu.unlock(lockDone, reader.hash)
 			<-done
 
 			require.False(t, admitted, "a cancelled request must not consume replay admission")

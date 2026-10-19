@@ -577,48 +577,87 @@ func TestGetBlockAccessLists71_CacheBypassesReplayBudget(t *testing.T) {
 	})
 }
 
+type slowBALReader struct {
+	dbservices.FullBlockReader
+	loadBlock func(context.Context) error
+}
+
+func (r slowBALReader) Header(context.Context, kv.Getter, common.Hash, uint64) (*types.Header, error) {
+	return &types.Header{BlockAccessListHash: &common.Hash{8}}, nil
+}
+
+func (r slowBALReader) CanonicalHash(_ context.Context, _ kv.Getter, number uint64) (common.Hash, bool, error) {
+	return common.Hash{byte(number)}, true, nil
+}
+
+func (r slowBALReader) CanonicalBodyForStorage(context.Context, kv.Getter, uint64) (*types.BodyForStorage, error) {
+	return &types.BodyForStorage{}, nil
+}
+
+func (r slowBALReader) BlockWithSenders(ctx context.Context, _ kv.Getter, _ common.Hash, _ uint64) (*types.Block, []common.Address, error) {
+	return nil, nil, r.loadBlock(ctx)
+}
+
 func TestGetBlockAccessLists71_ReplayRemainsExclusiveAfterDeadline(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		cs := newBALTestClient(t)
-		var calls atomic.Int32
-		deadlineReached := make(chan struct{})
-		release := make(chan struct{})
-		unblockReplay := sync.OnceFunc(func() { close(release) })
-		defer unblockReplay()
-		cs.balGenerator = balGetterFunc(func(ctx context.Context, _ *chain.Config, _ kv.TemporalTx, _ common.Hash, _ uint64) ([]byte, error) {
-			if calls.Add(1) == 1 {
-				<-ctx.Done()
-				close(deadlineReached)
-				// Cancellation cannot interrupt every database operation immediately.
-				<-release
-				return nil, ctx.Err()
-			}
-			return []byte{0xc0}, nil
-		})
-		var firstResponse []rlp.RawValue
-		firstDone := make(chan error, 1)
-		go func() {
-			var err error
-			firstResponse, err = queryBALs(t.Context(), cs, eth.GetBlockAccessListsPacket{{1}, {2}})
-			firstDone <- err
-		}()
-		select {
-		case <-deadlineReached:
-		case err := <-firstDone:
-			require.NoError(t, err)
-			t.Fatal("replay returned before reaching its deadline")
-		}
-		time.Sleep(time.Second)
-
-		assert.Equal(t, []rlp.RawValue{{0xc0}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{1}, {3}}))
-		assert.Equal(t, int32(1), calls.Load(), "a refilled rate budget must not allow overlapping replay")
+	cs := newBALTestClient(t)
+	var calls atomic.Int32
+	deadlineReached := make(chan struct{})
+	release := make(chan struct{})
+	unblockReplay := sync.OnceFunc(func() { close(release) })
+	var requests sync.WaitGroup
+	defer func() {
 		unblockReplay()
-		require.NoError(t, <-firstDone)
-		require.Equal(t, []rlp.RawValue{{0xc0}}, firstResponse)
-
-		require.Equal(t, []rlp.RawValue{{0xc0}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{3}}))
-		require.Equal(t, int32(2), calls.Load(), "the replay slot must be released when work actually finishes")
+		requests.Wait()
+	}()
+	reader := slowBALReader{FullBlockReader: cs.blockReader, loadBlock: func(ctx context.Context) error {
+		if calls.Add(1) == 1 {
+			<-ctx.Done()
+			close(deadlineReached)
+			// Cancellation cannot interrupt every database operation immediately.
+			<-release
+			return ctx.Err()
+		}
+		return nil
+	}}
+	cs.balGenerator = bal.NewRegenerator(reader, nil, log.New())
+	var firstResponse []rlp.RawValue
+	firstDone := make(chan error, 1)
+	requests.Go(func() {
+		var err error
+		firstResponse, err = queryBALs(t.Context(), cs, eth.GetBlockAccessListsPacket{{1}, {2}})
+		firstDone <- err
 	})
+	select {
+	case <-deadlineReached:
+	case err := <-firstDone:
+		require.NoError(t, err)
+		t.Fatal("replay returned before reaching its deadline")
+	}
+	time.Sleep(time.Second)
+
+	var secondResponse []rlp.RawValue
+	secondDone := make(chan error, 1)
+	requests.Go(func() {
+		var err error
+		secondResponse, err = queryBALs(t.Context(), cs, eth.GetBlockAccessListsPacket{{1}, {2}})
+		secondDone <- err
+	})
+	select {
+	case err := <-secondDone:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("request waiting for the same block did not return after its deadline")
+	}
+	require.Equal(t, []rlp.RawValue{{0xc0}}, secondResponse)
+	require.Equal(t, []rlp.RawValue{{0xc0}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{1}}))
+	assert.Equal(t, []rlp.RawValue{{0xc0}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{1}, {3}}))
+	assert.Equal(t, int32(1), calls.Load(), "a refilled rate budget must not allow overlapping replay")
+	unblockReplay()
+	require.NoError(t, <-firstDone)
+	require.Equal(t, []rlp.RawValue{{0xc0}}, firstResponse)
+
+	require.Equal(t, []rlp.RawValue{{0x80}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{3}}))
+	require.Equal(t, int32(2), calls.Load(), "the replay slot must be released when work actually finishes")
 }
 
 func TestUploadStreams_SeparateBALReplay(t *testing.T) {

@@ -99,10 +99,16 @@ func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Co
 	if !ok || canonicalHash != blockHash {
 		return nil, nil
 	}
-	mu := g.perBlockExecMu.lock(blockHash)
-	defer g.perBlockExecMu.unlock(mu, blockHash)
+	done, err := g.perBlockExecMu.lock(ctx, blockHash)
+	if err == nil {
+		defer g.perBlockExecMu.unlock(done, blockHash)
+	}
+	// Completed cached results remain usable after cancellation.
 	if cached, ok := g.cache.Get(blockHash); ok {
 		return cached, nil
+	}
+	if err != nil {
+		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -184,14 +190,25 @@ type loaderMutex[K comparable] struct {
 	sync.Map
 }
 
-func (m *loaderMutex[K]) lock(key K) *sync.Mutex {
-	value, _ := m.LoadOrStore(key, &sync.Mutex{})
-	mu := value.(*sync.Mutex)
-	mu.Lock()
-	return mu
+func (m *loaderMutex[K]) lock(ctx context.Context, key K) (chan struct{}, error) {
+	done := make(chan struct{})
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		value, loaded := m.LoadOrStore(key, done)
+		if !loaded {
+			return done, nil
+		}
+		select {
+		case <-value.(chan struct{}):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 }
 
-func (m *loaderMutex[K]) unlock(mu *sync.Mutex, key K) {
-	mu.Unlock()
+func (m *loaderMutex[K]) unlock(done chan struct{}, key K) {
 	m.Delete(key)
+	close(done)
 }
