@@ -1,57 +1,122 @@
-
 id: el-triggered-withdrawal
-name: "EL-triggered withdrawal test"
-timeout: 1h
+name: "EL-triggered partial withdrawal test"
+timeout: 45m
 config:
   walletPrivkey: ""
-  validatorIndex: 20
+  validatorMnemonic: ""
+  validatorIndex: 21
+  # Withdraw one Gwei of earned rewards; no new validator or deposit is needed.
   withdrawAmount: 1
-  waitForSlot: 41
 
 tasks:
 - name: check_clients_are_healthy
-  title: "Check if at least one client is ready"
+  title: "Wait for a ready client"
   timeout: 5m
   config:
     minClientCount: 1
 
-- name: check_consensus_validator_status
-  title: "Get status for validator ${validatorIndex}"
-  timeout: 1h
+- name: get_consensus_specs
+  id: specs
+  title: "Get fork and validator-age requirements"
+
+- name: check_consensus_slot_range
+  title: "Wait for Electra and eligible genesis validators"
+  timeout: 10m
+  configVars:
+    minEpochNumber: "| [.tasks.specs.outputs.specs.ELECTRA_FORK_EPOCH, .tasks.specs.outputs.specs.SHARD_COMMITTEE_PERIOD] | map(tonumber) | max"
+
+- name: generate_child_wallet
+  id: wallet
+  title: "Fund the withdrawal sender"
   config:
-    validatorStatus:
-    - active_ongoing
+    walletSeed: "pectra-partial-withdrawal"
+    prefundMinBalance: 2000000000000000000
+  configVars:
+    privateKey: "walletPrivkey"
+
+- name: check_consensus_validator_status
+  title: "Require an active genesis validator"
+  timeout: 2m
+  config:
+    validatorStatus: [active_ongoing]
+    withdrawalCredsPrefix: "0x00"
     validatorPubKeyResultVar: "validatorPubKey"
   configVars:
     validatorIndex: "validatorIndex"
 
-- name: run_shell
-  id: build_calldata
-  title: "Build calldata"
+- name: generate_bls_changes
+  title: "Authorize the withdrawal sender"
   config:
-    envVars:
-      amount: "withdrawAmount"
-      pubkey: "validatorPubKey"
-    command: |
-      amount=$(echo $amount | jq -r .)
-      amount=$(expr ${amount:-1} \* 1000000000)
-      amount=$(printf "%016x" $amount)
-
-      pubkey=$(echo $pubkey | jq -r .)
-
-      echo "Pubkey: $pubkey"
-      echo "Amount: $amount"
-      echo "::set-out txCalldata $pubkey$amount"
-
-- name: generate_transaction
-  title: "Exit Validator ${validatorIndex} via EL"
-  config:
-    targetAddress: "0x00000961Ef480Eb55e80D19ad83579A64c007002"
-    feeCap: 50000000000 # 50 gwei
-    gasLimit: 1000000
-    amount: "500000000000000000" # 0.5 ETH
-    failOnReject: true
+    limitTotal: 1
+    indexCount: 1
   configVars:
-    privateKey: "walletPrivkey"
-    # 0x0000000000000000 is the amount as uint64,  0 means full withdrawal / exit
-    callData: "tasks.build_calldata.outputs.txCalldata"
+    mnemonic: "validatorMnemonic"
+    startIndex: "validatorIndex"
+    targetAddress: "tasks.wallet.outputs.childWallet.address"
+
+- name: check_consensus_block_proposals
+  title: "Wait for the authorized BLS change in a beacon block"
+  timeout: 3m
+  config:
+    checkLookback: 8
+    minBlsChangeCount: 1
+  configVars:
+    expectBlsChanges: "| [{publicKey: .validatorPubKey, address: .tasks.wallet.outputs.childWallet.address}]"
+
+- name: generate_consolidations
+  title: "Enable requested partial withdrawals with a self-consolidation"
+  config:
+    limitTotal: 1
+    sourceIndexCount: 1
+    failOnReject: true
+    awaitReceipt: true
+  configVars:
+    walletPrivkey: "tasks.wallet.outputs.childWallet.privkey"
+    sourceStartValidatorIndex: "validatorIndex"
+    targetValidatorIndex: "validatorIndex"
+
+- name: check_consensus_validator_status
+  title: "Wait for compounding credentials and enough earned rewards"
+  timeout: 10m
+  config:
+    validatorStatus: [active_ongoing]
+  configVars:
+    validatorIndex: "validatorIndex"
+    minValidatorBalance: "| 32000000000 + .withdrawAmount"
+    withdrawalCredsPrefix: "| \"0x020000000000000000000000\" + (.tasks.wallet.outputs.childWallet.address | ltrimstr(\"0x\"))"
+
+- name: run_task_background
+  title: "Request a partial withdrawal and wait for its payout"
+  timeout: 30m
+  config:
+    onBackgroundComplete: failOrIgnore
+    backgroundTask:
+      name: generate_withdrawal_requests
+      title: "Request ${withdrawAmount} Gwei from validator ${validatorIndex}"
+      config:
+        limitTotal: 1
+        sourceIndexCount: 1
+        awaitReceipt: true
+        failOnReject: true
+      configVars:
+        walletPrivkey: "tasks.wallet.outputs.childWallet.privkey"
+        sourceStartValidatorIndex: "validatorIndex"
+        withdrawAmount: "withdrawAmount"
+    foregroundTask:
+      name: check_consensus_block_proposals
+      title: "Require the exact partial withdrawal in an execution payload"
+      config:
+        checkLookback: 0
+        minWithdrawalCount: 1
+      configVars:
+        expectWithdrawals: "| [{publicKey: .validatorPubKey, address: .tasks.wallet.outputs.childWallet.address, minAmount: .withdrawAmount, maxAmount: .withdrawAmount}]"
+
+- name: check_consensus_validator_status
+  title: "Require the partially withdrawn validator to remain active"
+  timeout: 2m
+  config:
+    validatorStatus: [active_ongoing]
+    withdrawalCredsPrefix: "0x02"
+    minValidatorBalance: 32000000000
+  configVars:
+    validatorIndex: "validatorIndex"
