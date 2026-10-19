@@ -30,8 +30,9 @@ import (
 
 type forkNodesTestGraph struct {
 	*headSnapshotForkGraph
-	missingJustified map[common.Hash]bool
-	missingFinalized map[common.Hash]bool
+	missingJustified    map[common.Hash]bool
+	missingFinalized    map[common.Hash]bool
+	finalizedCheckpoint solid.Checkpoint
 }
 
 func (g *forkNodesTestGraph) GetCurrentJustifiedCheckpoint(root common.Hash) (solid.Checkpoint, bool) {
@@ -45,7 +46,7 @@ func (g *forkNodesTestGraph) GetFinalizedCheckpoint(root common.Hash) (solid.Che
 	if g.missingFinalized[root] {
 		return solid.Checkpoint{}, false
 	}
-	return solid.Checkpoint{}, true
+	return g.finalizedCheckpoint, true
 }
 
 func newForkNodesTestStore(t *testing.T) (*ForkChoiceStore, common.Hash) {
@@ -64,39 +65,21 @@ func newForkNodesTestStore(t *testing.T) (*ForkChoiceStore, common.Hash) {
 	return f, checkpoint.Root
 }
 
-func TestForkNodesUsesPreGloasWeights(t *testing.T) {
-	f, root := newForkNodesTestStore(t)
-	f.beaconCfg.GloasForkEpoch = 2
-	f.beaconCfg.InitializeForkSchedule()
-	f.weights = map[common.Hash]uint64{root: 17}
-	checkpoint := f.JustifiedCheckpoint()
-	cs, ok := f.checkpointStates.Load(checkpoint)
-	require.True(t, ok)
-	f.gloasWeightTree.prepare(checkpoint, cs.(*checkpointState))
-
-	require.Equal(t, []ForkNode{{
-		Slot: 11, BlockRoot: root, Weight: 17, Validity: "valid",
-	}}, f.ForkNodes())
-}
-
 func TestForkNodesSwitchesWeightsAtGloasBoundary(t *testing.T) {
 	f, root := newForkNodesTestStore(t)
 	f.beaconCfg.GloasForkEpoch = 1
 	f.beaconCfg.InitializeForkSchedule()
 	f.weights = map[common.Hash]uint64{root: 17}
 	checkpoint := f.JustifiedCheckpoint()
-	cs, ok := f.checkpointStates.Load(checkpoint)
-	require.True(t, ok)
-	f.gloasWeightTree.prepare(checkpoint, cs.(*checkpointState))
-	f.headHash = root
+	f.unrealizedJustifications.Store(root, checkpoint)
 
 	for _, test := range []struct {
 		name   string
 		slot   uint64
 		weight uint64
 	}{
-		{name: "last pre-Gloas slot", slot: 31, weight: 17},
 		{name: "first Gloas slot", slot: 32, weight: 32},
+		{name: "last pre-Gloas slot", slot: 31, weight: 17},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			f.timeMs.Store(test.slot * f.beaconCfg.SecondsPerSlot * 1000)
@@ -112,30 +95,38 @@ func TestForkNodesUsesStoreCheckpointsForAnchor(t *testing.T) {
 	f, anchorRoot := newForkNodesTestStore(t)
 	graph := f.forkGraph.(*forkNodesTestGraph)
 	graph.anchorRoot = anchorRoot
-	missingJustifiedRoot, missingFinalizedRoot := common.Hash{0xbb}, common.Hash{0xcc}
-	for i, root := range []common.Hash{missingJustifiedRoot, missingFinalizedRoot} {
+	viableRoot, missingCheckpointsRoot := common.Hash{0xbb}, common.Hash{0xcc}
+	for i, root := range []common.Hash{viableRoot, missingCheckpointsRoot} {
 		block := cltypes.NewSignedBeaconBlock(f.beaconCfg, clparams.GloasVersion)
-		block.Block.Slot = uint64(12 + i)
+		block.Block.Slot = uint64(97 + i)
 		block.Block.ParentRoot = anchorRoot
 		graph.headers[root] = block.SignedBeaconBlockHeader().Header
 		graph.blocks[root] = block
 		f.updateChildren(11, anchorRoot, root)
 	}
-	graph.missingJustified = map[common.Hash]bool{anchorRoot: true, missingJustifiedRoot: true}
-	graph.missingFinalized = map[common.Hash]bool{anchorRoot: true, missingFinalizedRoot: true}
+	graph.missingJustified = map[common.Hash]bool{anchorRoot: true, missingCheckpointsRoot: true}
+	graph.missingFinalized = map[common.Hash]bool{anchorRoot: true}
 	oldCheckpoint := f.JustifiedCheckpoint()
 	cs, ok := f.checkpointStates.Load(oldCheckpoint)
 	require.True(t, ok)
 	justified := solid.Checkpoint{Epoch: 3, Root: anchorRoot}
+	finalized := solid.Checkpoint{Epoch: 2, Root: anchorRoot}
+	graph.currentJustified = justified
+	graph.finalizedCheckpoint = finalized
 	f.justifiedCheckpoint.Store(justified)
-	f.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 2, Root: common.Hash{0xdd}})
+	f.finalizedCheckpoint.Store(finalized)
 	f.checkpointStates.Store(justified, cs)
-	f.gloasWeightTree.prepare(justified, cs.(*checkpointState))
-	f.headHash = anchorRoot
+	f.timeMs.Store(98 * f.beaconCfg.SecondsPerSlot * 1000)
 
-	require.Equal(t, []ForkNode{{
-		Slot: 11, BlockRoot: anchorRoot, JustifiedEpoch: 3, FinalizedEpoch: 2, Weight: 32, Validity: "valid",
-	}}, f.ForkNodes())
+	want := []ForkNode{
+		{Slot: 11, BlockRoot: anchorRoot, JustifiedEpoch: 3, FinalizedEpoch: 2, Weight: 32, Validity: "valid"},
+		{Slot: 97, BlockRoot: viableRoot, ParentRoot: anchorRoot, JustifiedEpoch: 3, FinalizedEpoch: 2, Validity: "valid"},
+	}
+	require.Equal(t, want, f.ForkNodes())
+
+	delete(graph.missingJustified, missingCheckpointsRoot)
+	graph.missingFinalized[missingCheckpointsRoot] = true
+	require.Equal(t, want, f.ForkNodes())
 }
 
 func TestForkNodesGloasExportsPreparedWeight(t *testing.T) {
@@ -321,22 +312,23 @@ func TestForkNodesGloasBoostRequiresBlockAncestry(t *testing.T) {
 
 func TestForkNodesGloasRequiresCurrentCheckpointState(t *testing.T) {
 	for _, test := range []struct {
-		name string
-		want []ForkNode
+		name     string
+		addChild bool
+		want     []ForkNode
 	}{
 		{name: "unprepared", want: []ForkNode{{Slot: 11, BlockRoot: common.Hash{0xaa}, Weight: 32, Validity: "valid"}}},
 		{name: "missing state"},
 		{name: "changed root"},
 		{name: "changed epoch"},
-		{name: "pruned with invalidated head", want: []ForkNode{
+		{name: "pruned with invalidated head", addChild: true, want: []ForkNode{
 			{Slot: 11, BlockRoot: common.Hash{0xaa}, Weight: 32, Validity: "valid"},
 			{Slot: 12, BlockRoot: common.Hash{0xbb}, ParentRoot: common.Hash{0xaa}, Validity: "valid"},
 		}},
-		{name: "pruned with cached head"},
+		{name: "pruned with cached head", addChild: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			f, root := newForkNodesTestStore(t)
-			if test.name == "pruned with invalidated head" || test.name == "pruned with cached head" {
+			if test.addChild {
 				graph := f.forkGraph.(*forkNodesTestGraph)
 				childRoot := common.Hash{0xbb}
 				child := cltypes.NewSignedBeaconBlock(f.beaconCfg, clparams.GloasVersion)
