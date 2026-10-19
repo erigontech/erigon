@@ -158,6 +158,14 @@ func (m *Memory) allocated32(off *uint256.Int) bool {
 	return off.IsUint64() && off.Uint64() < uint64(len(m.store)) && uint64(len(m.store))-off.Uint64() >= 32
 }
 
+// allocatedCopy reports whether a copy of length bytes between dst and src
+// stays in allocated memory, so it costs no expansion gas.
+func (m *Memory) allocatedCopy(dst, src, length *uint256.Int) bool {
+	n := uint64(len(m.store))
+	return dst.IsUint64() && src.IsUint64() && length.IsUint64() &&
+		dst.Uint64() <= n && src.Uint64() <= n && length.Uint64() <= n-max(dst.Uint64(), src.Uint64())
+}
+
 // Len returns the length of the backing slice
 func (m *Memory) Len() int {
 	return len(m.store)

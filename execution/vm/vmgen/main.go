@@ -40,8 +40,8 @@ import (
 )
 
 // fastOp is one opcode the untraced loop runs inline, without the jump table.
-// Every entry must charge only constant gas and must not fail once its checks
-// pass. TestFastPathMatchesJumpTables pins the constants against all forks, and
+// Every entry must charge only constant gas, plus copy gas per word for copies,
+// and must not fail once its checks pass. TestFastPathMatchesJumpTables pins the constants against all forks, and
 // TestRunMatchesRunTraced pins the inlined bodies against the jump-table ops.
 type fastOp struct {
 	name       string
@@ -49,6 +49,9 @@ type fastOp struct {
 	gas        string
 	pop, push  int
 	memorySize string // set for memory ops, which take the fast path only when memory need not grow
+	dynamicGas string // the jump-table gas func of a memory op
+	allocated  string // a memory op's condition that memory need not grow
+	copyLen    string // the stack item a copy charges params.CopyGas per word of
 	jump       bool   // a taken jump also charges the JUMPDEST it lands on and steps over it
 }
 
@@ -72,8 +75,11 @@ func fastOps() []fastOp {
 		op("EQ", "opEq", "GasFastestStep", 2, 1),
 		op("AND", "opAnd", "GasFastestStep", 2, 1),
 		op("ISZERO", "opIszero", "GasFastestStep", 1, 1),
-		{name: "MLOAD", execute: "opMload", gas: "GasFastestStep", pop: 1, push: 1, memorySize: "memoryMLoad"},
-		{name: "MSTORE", execute: "opMstore", gas: "GasFastestStep", pop: 2, memorySize: "memoryMStore"},
+		{name: "MLOAD", execute: "opMload", gas: "GasFastestStep", pop: 1, push: 1, memorySize: "memoryMLoad", dynamicGas: "pureMemoryGascost", allocated: allocated32},
+		{name: "MSTORE", execute: "opMstore", gas: "GasFastestStep", pop: 2, memorySize: "memoryMStore", dynamicGas: "pureMemoryGascost", allocated: allocated32},
+		// MCOPY is in the jump table only from Cancun on.
+		{name: "MCOPY", execute: "opMcopy", gas: "GasFastestStep", pop: 3, memorySize: "memoryMcopy", dynamicGas: "gasMcopy",
+			allocated: "jt[MCOPY].memorySize != nil && callContext.Memory.allocatedCopy(stack.peek(), stack.back(1), stack.back(2))", copyLen: "stack.back(2)"},
 	}
 	for n := 3; n <= 32; n++ {
 		ops = append(ops, op(fmt.Sprintf("PUSH%d", n), "", "GasFastestStep", 0, 1))
@@ -86,6 +92,8 @@ func fastOps() []fastOp {
 	}
 	return ops
 }
+
+const allocated32 = "callContext.Memory.allocated32(stack.peek())"
 
 const switchHere = "// execution/vm/vmgen inserts the fastOps switch here.\n"
 
@@ -290,15 +298,19 @@ func fastSwitch(instructions []byte, ops []fastOp) string {
 		switch o.push - o.pop {
 		case 1:
 			cond = append(cond, "sLen < stackLimit")
-		case 0, -1, -2:
+		case 0, -1, -2, -3:
 		default:
 			log.Fatalf("%s: stack growth %d needs its own bound", o.name, o.push-o.pop)
 		}
-		if o.memorySize != "" {
-			cond = append(cond, "callContext.Memory.allocated32(stack.peek())")
+		if o.allocated != "" {
+			cond = append(cond, o.allocated)
 		}
-		cond = append(cond, "gasLeft >= "+o.gas)
-		code := fmt.Sprintf("if %s {\ngasLeft -= %s\n%s\n}\n", strings.Join(cond, " && "), o.gas, inlineBody(instructions, o))
+		gas := o.gas
+		if o.copyLen != "" {
+			gas += " + params.CopyGas*ToWordSize(" + o.copyLen + ".Uint64())"
+		}
+		cond = append(cond, "gasLeft >= "+gas)
+		code := fmt.Sprintf("if %s {\ngasLeft -= %s\n%s\n}\n", strings.Join(cond, " && "), gas, inlineBody(instructions, o))
 		// Ops with the same code share a case: each case deepens run's compare tree.
 		if n := len(codes); n > 0 && codes[n-1] == code {
 			names[n-1] += ", " + o.name
@@ -432,8 +444,8 @@ func testTable(ops []fastOp) []byte {
 	b.WriteString("import \"github.com/erigontech/erigon/execution/protocol/params\"\n\n")
 	b.WriteString("var fastPathOps = map[OpCode]fastPathWant{\n")
 	for _, o := range ops {
-		execute, memorySize := cmp.Or(o.execute, "nil"), cmp.Or(o.memorySize, "nil")
-		fmt.Fprintf(&b, "%s: {%s, %s, %d, %d, %s},\n", o.name, execute, o.gas, o.pop, o.push, memorySize)
+		execute, memorySize, dynamicGas := cmp.Or(o.execute, "nil"), cmp.Or(o.memorySize, "nil"), cmp.Or(o.dynamicGas, "nil")
+		fmt.Fprintf(&b, "%s: {%s, %s, %d, %d, %s, %s},\n", o.name, execute, o.gas, o.pop, o.push, memorySize, dynamicGas)
 	}
 	b.WriteString("}\n")
 	out, err := format.Source([]byte(b.String()))

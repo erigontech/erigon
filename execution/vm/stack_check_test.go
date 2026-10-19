@@ -122,6 +122,10 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 	for i, jt := range tables {
 		for op, w := range fastPathOps {
 			got := &jt[op]
+			if w.memorySize != nil && got.memorySize == nil {
+				// The op is not in this fork, and the fast path checks for that.
+				continue
+			}
 			if w.execute != nil {
 				require.Equal(t, reflect.ValueOf(w.execute).Pointer(), reflect.ValueOf(got.execute).Pointer(), "table %d %s execute", i, op)
 			} else {
@@ -146,8 +150,7 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 				require.Nil(t, got.memorySize, "table %d %s memorySize", i, op)
 				continue
 			}
-			// Memory that need not grow costs no dynamic gas.
-			require.Equal(t, reflect.ValueOf(pureMemoryGascost).Pointer(), reflect.ValueOf(got.dynamicGas).Pointer(), "table %d %s dynamicGas", i, op)
+			require.Equal(t, reflect.ValueOf(w.dynamicGas).Pointer(), reflect.ValueOf(got.dynamicGas).Pointer(), "table %d %s dynamicGas", i, op)
 			require.Equal(t, reflect.ValueOf(w.memorySize).Pointer(), reflect.ValueOf(got.memorySize).Pointer(), "table %d %s memorySize", i, op)
 		}
 	}
@@ -159,6 +162,7 @@ type fastPathWant struct {
 	gas             uint64
 	numPop, numPush int
 	memorySize      memorySizeFunc
+	dynamicGas      gasFunc
 }
 
 // TestRunIsGenerated fails when vm_run_gen.go or fast_path_gen_test.go are
@@ -345,4 +349,17 @@ func TestRunMatchesRunTraced(t *testing.T) {
 			require.Equal(t, want, got, "%s at gas %d", name, gas)
 		}
 	}
+}
+
+func TestRunRejectsMcopyBeforeCancun(t *testing.T) {
+	t.Parallel()
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	evm.jt = &shanghaiInstructionSet
+	c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	c.Code = []byte{byte(PUSH1), 32, byte(PUSH1), 0, byte(MSTORE), byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 0, byte(MCOPY)}
+	_, _, _, err := evm.run(*c, mdgas.MdGas{Execution: 100_000}, nil, false, false, false)
+	var invalid *ErrInvalidOpCode
+	require.ErrorAs(t, err, &invalid)
 }
