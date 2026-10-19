@@ -116,6 +116,54 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 	})
 }
 
+func TestDomainRoTx_findTieredMergeRange(t *testing.T) {
+	t.Parallel()
+
+	file := func(from, to uint64, cold bool) visibleFile {
+		return visibleFile{startTxNum: from, endTxNum: to, src: &FilesItem{startTxNum: from, endTxNum: to, cold: cold}}
+	}
+	newDomainRoTx := func(files ...visibleFile) *DomainRoTx {
+		return &DomainRoTx{name: kv.CommitmentDomain, files: files, stepSize: 1, ht: &HistoryRoTx{iit: &InvertedIndexRoTx{}}}
+	}
+
+	t.Run("cold_prefix_merges_into_cold_dir", func(t *testing.T) {
+		dt := newDomainRoTx(file(0, 1, true), file(1, 2, true), file(2, 3, true), file(3, 4, true),
+			file(4, 5, false), file(5, 6, false), file(6, 7, false), file(7, 8, false))
+		r := dt.findTieredMergeRange(8, 32, 1)
+		require.True(t, r.values.needMerge)
+		require.Equal(t, uint64(0), r.values.from)
+		require.Equal(t, uint64(4), r.values.to)
+		require.True(t, r.toColdDir)
+	})
+
+	t.Run("hot_files_never_merge_with_hot_limit_1", func(t *testing.T) {
+		dt := newDomainRoTx(file(0, 1, false), file(1, 2, false), file(2, 3, false), file(3, 4, false))
+		r := dt.findTieredMergeRange(4, 32, 1)
+		require.False(t, r.values.needMerge)
+	})
+
+	t.Run("gap_stops_cold_frontier", func(t *testing.T) {
+		dt := newDomainRoTx(file(0, 1, true), file(1, 2, false), file(2, 3, true), file(3, 4, true))
+		r := dt.findTieredMergeRange(4, 32, 1)
+		require.False(t, r.values.needMerge)
+	})
+
+	t.Run("hot_merge_never_crosses_the_frontier", func(t *testing.T) {
+		dt := newDomainRoTx(file(0, 1, true), file(1, 2, false))
+		r := dt.findTieredMergeRange(2, 32, 32)
+		require.False(t, r.values.needMerge)
+	})
+
+	t.Run("hot_merge_after_the_frontier_stays_hot", func(t *testing.T) {
+		dt := newDomainRoTx(file(0, 2, true), file(2, 3, false), file(3, 4, false))
+		r := dt.findTieredMergeRange(4, 32, 32)
+		require.True(t, r.values.needMerge)
+		require.Equal(t, uint64(2), r.values.from)
+		require.Equal(t, uint64(4), r.values.to)
+		require.False(t, r.toColdDir)
+	})
+}
+
 // TestHistoryStaticFilesInRange_DetectsGapInSourceFiles pins that a gap in
 // source files must reject the merge, not silently produce a shorter,
 // mislabeled result.

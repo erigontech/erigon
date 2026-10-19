@@ -65,6 +65,8 @@ type DomainRanges struct {
 	values  MergeRange
 	history HistoryRanges
 	aggStep uint64
+
+	toColdDir bool
 }
 
 func NewDomainRanges(name kv.Domain, values MergeRange, history HistoryRanges, aggStep uint64) DomainRanges {
@@ -127,12 +129,17 @@ func calculateMergeStartTxNum(endTxNum, stepSize, maxSpan uint64) uint64 {
 // but resets needMerge to false, letting later smaller-but-still-mergeable files
 // take over.
 func findMergeRangeInFiles(files visibleFiles, stepSize, maxEndTxNum, maxSpan uint64, superSetCheck bool) MergeRange {
+	return findMergeRangeInFilesFrom(files, stepSize, 0, maxEndTxNum, maxSpan, superSetCheck)
+}
+
+// findMergeRangeInFilesFrom is findMergeRangeInFiles with every merge start clamped to at least minStart.
+func findMergeRangeInFilesFrom(files visibleFiles, stepSize, minStart, maxEndTxNum, maxSpan uint64, superSetCheck bool) MergeRange {
 	var r MergeRange
 	for _, item := range files {
 		if item.endTxNum > maxEndTxNum {
 			continue
 		}
-		start := clipMergeStartToFileBoundary(files, calculateMergeStartTxNum(item.endTxNum, stepSize, maxSpan))
+		start := max(minStart, clipMergeStartToFileBoundary(files, calculateMergeStartTxNum(item.endTxNum, stepSize, maxSpan)))
 		if superSetCheck && r.from == item.startTxNum && item.endTxNum >= r.to {
 			r.needMerge = false
 			r.from = start
@@ -191,6 +198,25 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, domainMaxSpan, maxSpan uint64)
 		r.history = dt.ht.findMergeRange(maxEndTxNum, maxSpan)
 	}
 
+	return r
+}
+
+// findTieredMergeRange merges cold-resident files only among themselves (output to the cold dir) and hot files only
+// after the cold frontier: the end of the leading run of cold-resident files.
+func (dt *DomainRoTx) findTieredMergeRange(maxEndTxNum, coldSpan, hotSpan uint64) DomainRanges {
+	var frontier uint64
+	for _, f := range dt.files {
+		if !f.src.cold {
+			break
+		}
+		frontier = f.endTxNum
+	}
+	r := DomainRanges{name: dt.name, aggStep: dt.stepSize}
+	r.values = findMergeRangeInFiles(dt.files, dt.stepSize, min(maxEndTxNum, frontier), coldSpan, false)
+	r.toColdDir = r.values.needMerge
+	if !r.values.needMerge {
+		r.values = findMergeRangeInFilesFrom(dt.files, dt.stepSize, frontier, maxEndTxNum, hotSpan, false)
+	}
 	return r
 }
 
