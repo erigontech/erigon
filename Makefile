@@ -60,7 +60,11 @@ ifeq ($(GOARCH),amd64)
 	CGO_MARCH := -march=$(strip $(if $(filter v1,$(GOAMD64_VERSION)),x86-64,x86-64-$(GOAMD64_VERSION)))
 endif
 
-CGO_CFLAGS += -Wno-unknown-warning-option -Wno-enum-int-mismatch -Wno-strict-prototypes -Wno-unused-but-set-variable -O3 -DNDEBUG $(CGO_MARCH)
+CGO_CFLAGS += -Wno-enum-int-mismatch -Wno-strict-prototypes -Wno-unused-but-set-variable -O3 -DNDEBUG $(CGO_MARCH)
+# Clang-only: lets clang skip the gcc-only flags above. gcc reports it as unrecognized next to any other warning.
+ifneq (,$(findstring clang,$(shell $(shell $(GO) env CC 2>/dev/null) --version 2>/dev/null)))
+	CGO_CFLAGS += -Wno-unknown-warning-option
+endif
 
 CGO_LDFLAGS := $(shell $(GO) env CGO_LDFLAGS 2> /dev/null)
 CGO_LDFLAGS += -O3 -g
