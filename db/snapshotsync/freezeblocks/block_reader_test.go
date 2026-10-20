@@ -703,9 +703,9 @@ func TestRemoteTxNumsRequireObservedFrozenRange(t *testing.T) {
 	reader := NewRemoteBlockReader(client)
 	txNums := reader.TxnumReader()
 	_, err = txNums.Max(ctx, tx, 42)
-	require.Error(t, err, "an unknown frozen range must not fall back to the latest txNum")
+	require.ErrorContains(t, err, "remote frozen range is unknown")
 	_, err = txNums.Min(ctx, tx, 43)
-	require.Error(t, err)
+	require.ErrorContains(t, err, "remote frozen range is unknown")
 	require.Zero(t, client.bodyCalls)
 
 	client.err = nil
