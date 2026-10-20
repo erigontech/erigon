@@ -1386,7 +1386,6 @@ func (s *Ethereum) Start() error {
 				ChainConfig: s.chainConfig,
 				ChainRW:     chainRW,
 				Svc:         s.bscP2PService,
-				TargetBlock: s.config.Sync.TargetBlock,
 				FcuInterval: uint64(s.config.Sync.LoopBlockLimit),
 			})
 			if err == nil || errors.Is(err, context.Canceled) {

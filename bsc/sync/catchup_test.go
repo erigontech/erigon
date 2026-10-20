@@ -76,17 +76,6 @@ func TestCatchUpWaitsForAnnouncedHead(t *testing.T) {
 	})
 }
 
-func TestRunParallelStopsAtTargetBlock(t *testing.T) {
-	t.Parallel()
-	network := fakeChain(4000)
-	chainRW := newFakeChainRW(network[:1])
-	cfg := Config{ChainRW: chainRW, Svc: &fakeP2P{peers: 2, chain: network}, TargetBlock: 2500, FcuInterval: 1000}
-
-	require.NoError(t, runParallel(t.Context(), testlog.Logger(t, log.LvlCrit), cfg))
-	require.Equal(t, uint64(2500), chainRW.headNum())
-	require.Equal(t, 2500, chainRW.numInserted())
-}
-
 func TestCatchUpAnnouncedHeadDropsBelowCursor(t *testing.T) {
 	t.Parallel()
 	network := fakeChain(4000)

@@ -79,31 +79,25 @@ type Config struct {
 	ChainConfig *chain.Config
 	ChainRW     chainReaderWriter
 	Svc         p2pService
-	TargetBlock uint64 // upper bound for the parallel downloader; 0 follows the chain tip
 	FcuInterval uint64 // blocks between UpdateForkChoice calls during catch-up
 }
 
-// RunBlockDownloader runs the p2p service and the download loop until ctx is
-// cancelled or a fatal error occurs. With a target block it stops at the target,
-// otherwise it follows the chain tip.
+// RunBlockDownloader runs the p2p service and follows the chain tip until ctx is
+// cancelled or a fatal error occurs.
 func RunBlockDownloader(ctx context.Context, logger log.Logger, cfg Config) error {
 	if cfg.FcuInterval == 0 {
 		cfg.FcuInterval = defaultFcuBlocks
 	}
+	store, err := parlia.NewSnapshotStore(cfg.ChainConfig, chainHeaderReader{ctx: ctx, chainRW: cfg.ChainRW}, snapshotCacheSize)
+	if err != nil {
+		return err
+	}
+	tipEvents := NewTipEvents(logger, cfg.Svc)
+	ts := newTipSync(logger, cfg.ChainRW, cfg.Svc, fetchBackwardsWith(cfg.Svc), tipEvents, store, NewParliaVerifier(cfg.ChainConfig))
 	errCh := make(chan error, 3)
 	go func() { errCh <- cfg.Svc.Run(ctx) }()
-	if cfg.TargetBlock > 0 {
-		go func() { errCh <- runParallel(ctx, logger, cfg) }()
-	} else {
-		tipEvents := NewTipEvents(logger, cfg.Svc)
-		go func() { errCh <- tipEvents.Run(ctx) }()
-		store, err := parlia.NewSnapshotStore(cfg.ChainConfig, chainHeaderReader{ctx: ctx, chainRW: cfg.ChainRW}, snapshotCacheSize)
-		if err != nil {
-			return err
-		}
-		ts := newTipSync(logger, cfg.ChainRW, cfg.Svc, fetchBackwardsWith(cfg.Svc), tipEvents, store, NewParliaVerifier(cfg.ChainConfig))
-		go func() { errCh <- followTip(ctx, logger, cfg, ts) }()
-	}
+	go func() { errCh <- tipEvents.Run(ctx) }()
+	go func() { errCh <- followTip(ctx, logger, cfg, ts) }()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -140,18 +134,6 @@ type chainHeaderReader struct {
 
 func (r chainHeaderReader) GetHeader(hash common.Hash, number uint64) *types.Header {
 	return r.chainRW.GetHeader(r.ctx, hash, number)
-}
-
-// runParallel downloads [head+1, TargetBlock] with the parallel multi-peer range
-// downloader, persisting each assembled batch and advancing the head via FCU.
-func runParallel(ctx context.Context, logger log.Logger, cfg Config) error {
-	head, _ := computeResume(ctx, cfg.ChainRW)
-	logger.Info("[bsc] block downloader started", "resumeFrom", head, "target", cfg.TargetBlock, "rangeSize", rangeSize)
-	if _, err := downloadTo(ctx, logger, cfg, func() uint64 { return cfg.TargetBlock }); err != nil {
-		return err
-	}
-	logger.Info("[bsc] reached target", "block", max(head, cfg.TargetBlock))
-	return nil
 }
 
 // catchUp downloads forward until the local head is at most tipHandoverDistance
