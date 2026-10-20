@@ -152,9 +152,8 @@ func BenchmarkAddrCodeHashHotKey(b *testing.B) {
 }
 
 // BenchmarkCodeCache_PutWithCodeHashIfAbsent_MaxCode is the EVM read path's fill
-// for a cold max-size contract. The contracts outnumber the cache, so each fill misses.
+// for a cold max-size contract: the cache restarts, untimed, before a codeHash repeats.
 func BenchmarkCodeCache_PutWithCodeHashIfAbsent_MaxCode(b *testing.B) {
-	c := closeOnCleanup(b, NewCodeCache(64*datasize.MB, 16*datasize.MB))
 	codes := make([][]byte, 4096)
 	hashes := make([][]byte, len(codes))
 	for i := range codes {
@@ -164,7 +163,17 @@ func BenchmarkCodeCache_PutWithCodeHashIfAbsent_MaxCode(b *testing.B) {
 	}
 	addr := make([]byte, 20)
 	b.SetBytes(24 * 1024)
+	var c *CodeCache
+	defer func() { c.Close() }()
 	for i := 0; b.Loop(); i++ {
+		if i%len(codes) == 0 {
+			b.StopTimer()
+			if c != nil {
+				c.Close()
+			}
+			c = NewCodeCache(64*datasize.MB, 16*datasize.MB)
+			b.StartTimer()
+		}
 		binary.BigEndian.PutUint64(addr[len(addr)-8:], uint64(i))
 		c.PutWithCodeHashIfAbsent(addr, codes[i%len(codes)], hashes[i%len(codes)], uint64(i))
 	}
