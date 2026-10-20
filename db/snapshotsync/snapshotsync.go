@@ -561,6 +561,10 @@ func SyncSnapshots(
 				continue
 			}
 
+			if snaptype.EpochRegimeMismatch(p.Name, snaptype2.RegimeFor(cc)) {
+				continue
+			}
+
 			downloadRequest = append(downloadRequest, dbservices.DownloadRequest{
 				Path:        p.Name,
 				TorrentHash: p.Hash,

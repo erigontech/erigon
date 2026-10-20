@@ -72,7 +72,7 @@ func TestBlockRetireUsesFinalityContext(t *testing.T) {
 		nil,
 		nil,
 		db,
-		&chain.Config{},
+		&chain.Config{Aura: &chain.AuRaConfig{}},
 		&cfg,
 		nil,
 		nil,
@@ -264,9 +264,9 @@ func TestRetireMergedTransactionFilesBelow(t *testing.T) {
 
 	// The seeder is told about the [0, mergeLimit) tx segment: its .seg + both indexes.
 	require.ElementsMatch(t, []string{
-		snaptype.SegmentFileName(ver, 0, testMergeLimit, snaptype2.Transactions.Enum()),
-		snaptype.IdxFileName(ver, 0, testMergeLimit, snaptype2.Transactions.Enum().String()),
-		snaptype.IdxFileName(ver, 0, testMergeLimit, snaptype2.Indexes.TxnHash2BlockNum.Name),
+		snaptype.SegmentFileName(ver, false, 0, testMergeLimit, snaptype2.Transactions.Enum()),
+		snaptype.IdxFileName(ver, false, 0, testMergeLimit, snaptype2.Transactions.Enum().String()),
+		snaptype.IdxFileName(ver, false, 0, testMergeLimit, snaptype2.Indexes.TxnHash2BlockNum.Name),
 	}, deleted)
 
 	// Gone from the live set...
@@ -293,7 +293,7 @@ func TestDumpRangeErrorsWhenRangeAlreadyClaimed(t *testing.T) {
 	snapshots := blocksnapshots.NewRoSnapshots(cfg, dir, logger)
 	defer snapshots.Close()
 
-	f := snaptype2.Headers.FileInfo(dir, 0, 1000)
+	f := snaptype2.Headers.FileInfo(dir, false, 0, 1000)
 	require.True(t, snapshots.TryAcquireRange(f.Type.Enum(), f.From, f.To))
 
 	dumperCalled := false

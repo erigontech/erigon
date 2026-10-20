@@ -40,13 +40,14 @@ func (m *Merger) DisableFsync() { m.noFsync = true }
 
 func (m *Merger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
 	cfg := m.snCfg
+	epoch := snaptype2.RegimeFor(m.chainConfig)
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
-		mergeLimit := cfg.MergeLimit(snaptype.Unknown, r.From())
+		mergeLimit := cfg.MergeLimit(snaptype.Unknown, epoch, r.From())
 		if r.To()-r.From() >= mergeLimit {
 			continue
 		}
-		for _, span := range snapcfg.MergeStepsFromCfg(cfg, snaptype.Unknown, r.From()) {
+		for _, span := range snapcfg.MergeStepsFromCfg(cfg, snaptype.Unknown, epoch, r.From()) {
 			if r.To()%span != 0 {
 				continue
 			}
@@ -54,6 +55,9 @@ func (m *Merger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
 				break
 			}
 			aggFrom := r.To() - span
+			if !rangesCover(currentRanges, aggFrom, r.To()) {
+				break // reaches below our lowest segment; pruning deleted those blocks
+			}
 			toMerge = append(toMerge, NewRange(aggFrom, r.To()))
 			for i >= 0 && currentRanges[i].From() > aggFrom {
 				i--
@@ -63,6 +67,29 @@ func (m *Merger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
 	}
 	slices.SortFunc(toMerge, func(i, j Range) int { return cmp.Compare(i.From(), j.From()) })
 	return toMerge
+}
+
+// rangesCover says whether ranges (sorted, non-overlapping) cover all of [from,to) with no hole.
+//
+// The ladder picks what to merge by subtracting a tier size from the top of an existing range, so it
+// can ask for a range starting below the lowest segment we still have. That happens on a pruned node,
+// where the oldest transactions were deleted. Merging it anyway would write a file whose name claims
+// blocks it does not contain, and nothing downstream would notice.
+func rangesCover(ranges []Range, from, to uint64) bool {
+	at := from
+	for _, r := range ranges {
+		if r.To() <= at {
+			continue
+		}
+		if r.From() > at {
+			return false
+		}
+		at = r.To()
+		if at >= to {
+			return true
+		}
+	}
+	return at >= to
 }
 
 func (m *Merger) filesByRange(v *View, from, to uint64) (map[snaptype.Enum][]*DirtySegment, error) {
@@ -218,10 +245,11 @@ func (m *Merger) Merge(
 			out[snapType] = append(out[snapType], t...)
 		}
 
+		epoch := snaptype2.RegimeFor(m.chainConfig)
 		for _, t := range snapTypes {
 			newDirtySegment, err := m.mergeSubSegment(
 				ctx,
-				t.FileInfo(snapDir, r.From(), r.To()),
+				t.FileInfo(snapDir, epoch, r.From(), r.To()),
 				toMerge[t.Enum()],
 				snapDir,
 				doIndex,
@@ -387,6 +415,7 @@ func (m *Merger) merge(ctx context.Context, toMerge []*DirtySegment, targetFile 
 	sn := &DirtySegment{
 		segType: targetFile.Type,
 		version: targetFile.Version,
+		epoch:   targetFile.Epoch,
 		Range:   Range{targetFile.From, targetFile.To},
 		frozen:  m.snCfg.IsFrozen(targetFile),
 	}

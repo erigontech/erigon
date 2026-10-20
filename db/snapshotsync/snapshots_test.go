@@ -51,7 +51,7 @@ import (
 func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver snaptype.Version, logger log.Logger) {
 	compressCfg := seg.DefaultCfg
 	compressCfg.MinPatternScore = 100
-	c, err := seg.NewCompressor(t.Context(), "test", filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, name)), dir, compressCfg, log.LvlDebug, logger)
+	c, err := seg.NewCompressor(t.Context(), "test", filepath.Join(dir, snaptype.SegmentFileName(ver, false, from, to, name)), dir, compressCfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 	defer c.Close()
 	c.DisableFsync()
@@ -63,7 +63,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 		KeyCount:   1,
 		BucketSize: 10,
 		TmpDir:     dir,
-		IndexFile:  filepath.Join(dir, snaptype.IdxFileName(ver, from, to, name.String())),
+		IndexFile:  filepath.Join(dir, snaptype.IdxFileName(ver, false, from, to, name.String())),
 		LeafSize:   8,
 	}, logger)
 	require.NoError(t, err)
@@ -78,7 +78,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 			KeyCount:   1,
 			BucketSize: 10,
 			TmpDir:     dir,
-			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(ver, from, to, snaptype2.Indexes.TxnHash2BlockNum.Name)),
+			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(ver, false, from, to, snaptype2.Indexes.TxnHash2BlockNum.Name)),
 			LeafSize:   8,
 		}, logger)
 		require.NoError(t, err)
@@ -93,7 +93,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 func createTestSegmentOnlyFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver snaptype.Version, logger log.Logger) {
 	compressCfg := seg.DefaultCfg
 	compressCfg.MinPatternScore = 100
-	c, err := seg.NewCompressor(t.Context(), "test", filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, name)), dir, compressCfg, log.LvlDebug, logger)
+	c, err := seg.NewCompressor(t.Context(), "test", filepath.Join(dir, snaptype.SegmentFileName(ver, false, from, to, name)), dir, compressCfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 	defer c.Close()
 	c.DisableFsync()
@@ -102,7 +102,8 @@ func createTestSegmentOnlyFile(t *testing.T, from, to uint64, name snaptype.Enum
 }
 
 func TestFindMergeRange(t *testing.T) {
-	merger := NewMerger("x", 1, log.LvlInfo, nil, chainspec.Mainnet.Config, nil)
+	merger := NewMerger("x", 1, log.LvlInfo, nil, chainspec.Gnosis.Config, nil)
+	merger.snCfg = snapcfg.KnownCfgOrDevnet(networkname.Mainnet)
 	merger.DisableFsync()
 	t.Run("big", func(t *testing.T) {
 		var RangesOld []Range
@@ -187,7 +188,8 @@ func TestMergeSnapshots(t *testing.T) {
 	defer s.Close()
 	require.NoError(s.OpenFolder())
 	{
-		merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+		merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Gnosis.Config, logger)
+		merger.snCfg = snapcfg.KnownCfgOrDevnet(networkname.Mainnet) // decimal chain, mainnet's 500k ladder
 		merger.DisableFsync()
 		require.NoError(s.OpenSegments(snaptype2.BlockSnapshotTypes, true))
 		Ranges := merger.FindMergeRanges(s.Ranges(false))
@@ -201,7 +203,7 @@ func TestMergeSnapshots(t *testing.T) {
 		require.NoError(err)
 	}
 
-	expectedFileName := snaptype.SegmentFileName(snaptype2.Transactions.Versions().Current, 0, 500_000, snaptype2.Transactions.Enum())
+	expectedFileName := snaptype.SegmentFileName(snaptype2.Transactions.Versions().Current, false, 0, 500_000, snaptype2.Transactions.Enum())
 	d, err := seg.NewDecompressor(filepath.Join(dir, expectedFileName))
 	require.NoError(err)
 	defer d.Close()
@@ -209,7 +211,8 @@ func TestMergeSnapshots(t *testing.T) {
 	require.Equal(50, a)
 
 	{
-		merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+		merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Gnosis.Config, logger)
+		merger.snCfg = snapcfg.KnownCfgOrDevnet(networkname.Mainnet) // decimal chain, mainnet's 500k ladder
 		merger.DisableFsync()
 		require.NoError(s.OpenFolder())
 		Ranges := merger.FindMergeRanges(s.Ranges(false))
@@ -221,7 +224,7 @@ func TestMergeSnapshots(t *testing.T) {
 
 	// [0; N] merges are not supported anymore
 
-	// expectedFileName = snaptype.SegmentFileName(snaptype2.Transactions.Versions().Current, 600_000, 700_000, snaptype2.Transactions.Enum())
+	// expectedFileName = snaptype.SegmentFileName(snaptype2.Transactions.Versions().Current, false, 600_000, 700_000, snaptype2.Transactions.Enum())
 	// d, err = seg.NewDecompressor(filepath.Join(dir, expectedFileName))
 	// require.NoError(err)
 	// defer d.Close()
@@ -246,7 +249,7 @@ func TestMergeSnapshots(t *testing.T) {
 	// 	require.NoError(err)
 	// }
 
-	// expectedFileName = snaptype.SegmentFileName(snaptype2.Transactions.Versions().Current, start+100_000, start+200_000, snaptype2.Transactions.Enum())
+	// expectedFileName = snaptype.SegmentFileName(snaptype2.Transactions.Versions().Current, false, start+100_000, start+200_000, snaptype2.Transactions.Enum())
 	// d, err = seg.NewDecompressor(filepath.Join(dir, expectedFileName))
 	// require.NoError(err)
 	// defer d.Close()
@@ -263,7 +266,7 @@ func TestMergeSnapshots(t *testing.T) {
 	// 	require.NoError(err)
 	// }
 
-	// expectedFileName = snaptype.SegmentFileName(snaptype2.Transactions.Versions().Current, start+600_000, start+700_000, snaptype2.Transactions.Enum())
+	// expectedFileName = snaptype.SegmentFileName(snaptype2.Transactions.Versions().Current, false, start+600_000, start+700_000, snaptype2.Transactions.Enum())
 	// d, err = seg.NewDecompressor(filepath.Join(dir, expectedFileName))
 	// require.NoError(err)
 	// defer d.Close()
@@ -288,11 +291,12 @@ func TestMergeSkipsPreClaimedRange(t *testing.T) {
 	claimed, free := NewRange(0, 20_000), NewRange(20_000, 40_000)
 	require.True(s.TryAcquireRange(snaptype2.Transactions.Enum(), claimed.From(), claimed.To()))
 
-	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Gnosis.Config, logger)
+	merger.snCfg = snapcfg.KnownCfgOrDevnet(networkname.Mainnet) // decimal chain, mainnet's 500k ladder
 	merger.DisableFsync()
 	require.NoError(merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, []Range{claimed, free}, s.Dir(), false, nil, nil))
 
-	skippedFile := filepath.Join(dir, snaptype.SegmentFileName(snaptype2.Transactions.Versions().Current, claimed.From(), claimed.To(), snaptype2.Transactions.Enum()))
+	skippedFile := filepath.Join(dir, snaptype.SegmentFileName(snaptype2.Transactions.Versions().Current, false, claimed.From(), claimed.To(), snaptype2.Transactions.Enum()))
 	exists, err := dir2.FileExist(skippedFile)
 	require.NoError(err)
 	require.False(exists)
@@ -301,7 +305,7 @@ func TestMergeSkipsPreClaimedRange(t *testing.T) {
 	s.ReleaseRange(snaptype2.Headers.Enum(), claimed.From(), claimed.To())
 
 	for _, snT := range snaptype2.BlockSnapshotTypes {
-		mergedFile := filepath.Join(dir, snaptype.SegmentFileName(snT.Versions().Current, free.From(), free.To(), snT.Enum()))
+		mergedFile := filepath.Join(dir, snaptype.SegmentFileName(snT.Versions().Current, false, free.From(), free.To(), snT.Enum()))
 		exists, err := dir2.FileExist(mergedFile)
 		require.NoError(err)
 		require.True(exists)
@@ -355,7 +359,7 @@ func TestRetireFilesIsIdempotent(t *testing.T) {
 	defer s.Close()
 	require.NoError(s.OpenFolder())
 
-	fileName := snaptype.SegmentFileName(version.V1_0, 0, 10_000, snaptype2.Bodies.Enum())
+	fileName := snaptype.SegmentFileName(version.V1_0, false, 0, 10_000, snaptype2.Bodies.Enum())
 
 	require.NoError(s.retireFiles(mvcc.RetireReasonAged, fileName))
 	require.False(slices.Contains(s.Files(), fileName))
@@ -396,7 +400,7 @@ func TestRetireFilesDetachesFromDirty(t *testing.T) {
 	require.Equal(2, s.dirty[txEnum].Len())
 	require.True(visibleHas(s, txEnum, 0, 10_000))
 
-	require.NoError(s.retireFiles(mvcc.RetireReasonAged, snaptype.SegmentFileName(version.V1_0, 0, 10_000, txEnum)))
+	require.NoError(s.retireFiles(mvcc.RetireReasonAged, snaptype.SegmentFileName(version.V1_0, false, 0, 10_000, txEnum)))
 
 	// Detached from dirty, not just hidden...
 	require.Equal(1, s.dirty[txEnum].Len())
@@ -530,9 +534,9 @@ func TestRetireFilesAbove(t *testing.T) {
 	require.False(visibleHas(s, txEnum, 10_000, 20_000))
 	require.False(visibleHas(s, txEnum, 20_000, 30_000))
 
-	require.Contains(deleted, snaptype.SegmentFileName(version.V1_0, 10_000, 20_000, txEnum), "seeder told about removed files")
-	require.Contains(deleted, snaptype.SegmentFileName(version.V1_0, 20_000, 30_000, txEnum))
-	require.NotContains(deleted, snaptype.SegmentFileName(version.V1_0, 0, 10_000, txEnum))
+	require.Contains(deleted, snaptype.SegmentFileName(version.V1_0, false, 10_000, 20_000, txEnum), "seeder told about removed files")
+	require.Contains(deleted, snaptype.SegmentFileName(version.V1_0, false, 20_000, 30_000, txEnum))
+	require.NotContains(deleted, snaptype.SegmentFileName(version.V1_0, false, 0, 10_000, txEnum))
 }
 
 func TestRemoveOverlaps(t *testing.T) {
@@ -666,7 +670,7 @@ func TestRemoveOverlapsKeepsSecondIdxTheSurvivorResolvesTo(t *testing.T) {
 
 	createTestSegmentFile(t, from, to, snaptype2.Enums.Transactions, dir, version.V1_0, logger)
 	createTestSegmentOnlyFile(t, from, to, snaptype2.Enums.Transactions, dir, version.V1_1, logger)
-	newIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_1, from, to, snaptype2.Enums.Transactions.String()))
+	newIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_1, false, from, to, snaptype2.Enums.Transactions.String()))
 	idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   1,
 		BucketSize: 10,
@@ -680,9 +684,9 @@ func TestRemoveOverlapsKeepsSecondIdxTheSurvivorResolvesTo(t *testing.T) {
 	require.NoError(t, idx.AddKey([]byte{1}, 0))
 	require.NoError(t, idx.Build(t.Context()))
 
-	oldSeg := filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, from, to, snaptype2.Enums.Transactions))
-	oldIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, snaptype2.Enums.Transactions.String()))
-	oldToBlock := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, snaptype2.Indexes.TxnHash2BlockNum.Name))
+	oldSeg := filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, false, from, to, snaptype2.Enums.Transactions))
+	oldIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, false, from, to, snaptype2.Enums.Transactions.String()))
+	oldToBlock := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, false, from, to, snaptype2.Indexes.TxnHash2BlockNum.Name))
 
 	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, []snaptype.Type{snaptype2.Transactions}, snaptype2.Transactions, true, logger)
 	defer s.Close()
@@ -713,10 +717,10 @@ func TestRemoveOverlapsLeavesAnotherCollectionsIdxAlone(t *testing.T) {
 
 	createTestSegmentFile(t, from, to, snaptype2.Enums.Headers, dir, version.V1_0, logger)
 	createTestSegmentFile(t, from, to, snaptype2.Enums.Headers, dir, version.V1_1, logger)
-	ownedOldIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, snaptype2.Enums.Headers.String()))
+	ownedOldIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, false, from, to, snaptype2.Enums.Headers.String()))
 
-	foreignOldIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, snaptype.BeaconBlocks.Name()))
-	foreignNewIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_1, from, to, snaptype.BeaconBlocks.Name()))
+	foreignOldIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, false, from, to, snaptype.BeaconBlocks.Name()))
+	foreignNewIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_1, false, from, to, snaptype.BeaconBlocks.Name()))
 	require.NoError(t, os.WriteFile(foreignOldIdx, []byte{0}, 0o644))
 	require.NoError(t, os.WriteFile(foreignNewIdx, []byte{0}, 0o644))
 
@@ -753,8 +757,8 @@ func TestRemoveOverlapsReportsOnlyOwnTypes(t *testing.T) {
 	}))
 
 	require.ElementsMatch(t, []string{
-		snaptype.SegmentFileName(version.V1_0, 0, 500_000, headers),
-		snaptype.IdxFileName(version.V1_0, 0, 500_000, headers.String()),
+		snaptype.SegmentFileName(version.V1_0, false, 0, 500_000, headers),
+		snaptype.IdxFileName(version.V1_0, false, 0, 500_000, headers.String()),
 	}, reported, "only overlaps of the collection's own types may reach the seeder")
 }
 
@@ -777,10 +781,10 @@ func TestCanRetire(t *testing.T) {
 	}
 	snCfg := snapcfg.KnownCfgOrDevnet(networkname.Mainnet)
 	for i, tc := range cases {
-		from, to, can := CanRetire(tc.inFrom, tc.inTo, snaptype.Unknown, snCfg, tc.retireStep)
+		from, to, can := CanRetire(false, tc.inFrom, tc.inTo, snaptype.Unknown, snCfg, tc.retireStep)
 		require.Equal(t, tc.outFrom, from, i)
 		require.Equal(t, tc.outTo, to, i)
-		require.Equal(t, tc.can, can, "CanRetire(%d, %d) case %d", tc.inFrom, tc.inTo, i)
+		require.Equal(t, tc.can, can, "CanRetire(false, %d, %d) case %d", tc.inFrom, tc.inTo, i)
 	}
 }
 
@@ -1137,7 +1141,7 @@ func TestCalculateVisibleSegmentsWhenGapsInIdx(t *testing.T) {
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Transactions)
 	}
 
-	missingIdxFile := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 500_000, 1_000_000, snaptype2.Headers.Name()))
+	missingIdxFile := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, false, 500_000, 1_000_000, snaptype2.Headers.Name()))
 	err := dir2.RemoveFile(missingIdxFile)
 	require.NoError(err)
 
@@ -1179,7 +1183,7 @@ func TestSegmentsMaxDerivedFromVisible(t *testing.T) {
 	// segmentsMax because it was set from dirty files in openSegments.
 	// Now it must not, because it never becomes visible.
 	createFile(1_500_000, 2_000_000, snaptype2.Headers)
-	missingIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 1_500_000, 2_000_000, snaptype2.Headers.Name()))
+	missingIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, false, 1_500_000, 2_000_000, snaptype2.Headers.Name()))
 	require.NoError(dir2.RemoveFile(missingIdx))
 
 	require.NoError(s.OpenFolder())
@@ -1266,7 +1270,7 @@ func TestRetireVsLiveViewDoesNotCrash(t *testing.T) {
 	var subNames []string
 	for from := uint64(0); from < 10_000; from += 1_000 {
 		for i, snT := range snaptype2.BlockSnapshotTypes {
-			subNames = append(subNames, snaptype.SegmentFileName(verOf(i), from, from+1_000, snT.Enum()))
+			subNames = append(subNames, snaptype.SegmentFileName(verOf(i), false, from, from+1_000, snT.Enum()))
 		}
 	}
 	require.NoError(s.retireFiles(mvcc.RetireReasonAged, subNames...))
@@ -1285,7 +1289,7 @@ func createTestIdxFile(t *testing.T, from, to uint64, name snaptype.Enum, dir st
 		KeyCount:   1,
 		BucketSize: 10,
 		TmpDir:     dir,
-		IndexFile:  filepath.Join(dir, snaptype.IdxFileName(ver, from, to, name.String())),
+		IndexFile:  filepath.Join(dir, snaptype.IdxFileName(ver, false, from, to, name.String())),
 		LeafSize:   8,
 	}, logger)
 	require.NoError(t, err)
@@ -1300,7 +1304,7 @@ func createTestIdxFile(t *testing.T, from, to uint64, name snaptype.Enum, dir st
 			KeyCount:   1,
 			BucketSize: 10,
 			TmpDir:     dir,
-			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(ver, from, to, snaptype2.Indexes.TxnHash2BlockNum.Name)),
+			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(ver, false, from, to, snaptype2.Indexes.TxnHash2BlockNum.Name)),
 			LeafSize:   8,
 		}, logger)
 		require.NoError(t, err)
@@ -1494,7 +1498,7 @@ func TestDirtySegmentsMaxCountsUnindexedTail(t *testing.T) {
 	for i := range uint64(3) {
 		createTestSegmentFile(t, i*10_000, (i+1)*10_000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
 	}
-	missingIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 20_000, 30_000, snaptype2.Headers.Name()))
+	missingIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, false, 20_000, 30_000, snaptype2.Headers.Name()))
 	require.NoError(dir2.RemoveFile(missingIdx))
 	require.NoError(s.OpenFolder())
 
@@ -1518,7 +1522,7 @@ func TestDirtySegmentsMaxFollowsRetire(t *testing.T) {
 	require.NoError(s.OpenFolder())
 	require.Equal(uint64(30_000-1), s.DirtySegmentsMax(snaptype2.Enums.Headers))
 
-	tail := snaptype.SegmentFileName(version.V1_0, 20_000, 30_000, snaptype2.Enums.Headers)
+	tail := snaptype.SegmentFileName(version.V1_0, false, 20_000, 30_000, snaptype2.Enums.Headers)
 	require.NoError(s.retireFiles(mvcc.RetireReasonMerged, tail))
 	require.Equal(uint64(20_000-1), s.DirtySegmentsMax(snaptype2.Enums.Headers))
 }
@@ -1536,7 +1540,7 @@ func TestWalkDirtySegments(t *testing.T) {
 	for i := range uint64(3) {
 		createTestSegmentFile(t, i*10_000, (i+1)*10_000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
 	}
-	missingIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 20_000, 30_000, snaptype2.Headers.Name()))
+	missingIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, false, 20_000, 30_000, snaptype2.Headers.Name()))
 	require.NoError(dir2.RemoveFile(missingIdx))
 	require.NoError(s.OpenFolder())
 
@@ -1571,7 +1575,7 @@ func TestOpenListOpensOnlyNamedFiles(t *testing.T) {
 		createTestSegmentFile(t, i*10_000, (i+1)*10_000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
 	}
 	name := func(i uint64) string {
-		return snaptype.SegmentFileName(version.V1_0, i*10_000, (i+1)*10_000, snaptype2.Enums.Headers)
+		return snaptype.SegmentFileName(version.V1_0, false, i*10_000, (i+1)*10_000, snaptype2.Enums.Headers)
 	}
 
 	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
@@ -1651,7 +1655,7 @@ func TestOpenListToleratesDuplicateNames(t *testing.T) {
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)
 	createTestSegmentFile(t, 0, 10_000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
-	name := snaptype.SegmentFileName(version.V1_0, 0, 10_000, snaptype2.Enums.Headers)
+	name := snaptype.SegmentFileName(version.V1_0, false, 0, 10_000, snaptype2.Enums.Headers)
 
 	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
 	s := NewBaseRoSnapshots(cfg, dir, []snaptype.Type{snaptype2.Headers}, snaptype2.Headers, false, logger)
@@ -1682,6 +1686,184 @@ func TestViewSegmentsOfUnmanagedType(t *testing.T) {
 		_, ok := v.Segment(snaptype.BeaconBlocks, 0)
 		require.False(ok)
 	})
+}
+
+// The epoch ladder is 1024 -> 8192 -> 65536 -> 524288, and CanRetire only ever yields one of those
+// aligned tiers, never a partial one.
+func TestCanRetireEpoch(t *testing.T) {
+	require := require.New(t)
+
+	cases := []struct {
+		inFrom, inTo, outFrom, outTo uint64
+		can                          bool
+	}{
+		{0, 524_288, 0, 524_288, true},       // full top-tier segment
+		{0, 100_000, 0, 65_536, true},        // largest aligned tier that fits
+		{0, 10_000, 0, 8_192, true},          // one era1 file
+		{8_192, 20_000, 8_192, 16_384, true}, // from aligned to 8192 only
+		{0, 500, 0, 0, false},                // below the 1024 min tier
+	}
+	snCfg := snapcfg.KnownCfgOrDevnet(networkname.Mainnet)
+	for i, tc := range cases {
+		from, to, can := CanRetire(true, tc.inFrom, tc.inTo, snaptype.Unknown, snCfg, 0)
+		require.Equal(int(tc.outFrom), int(from), i)
+		require.Equal(int(tc.outTo), int(to), i)
+		require.Equal(tc.can, can, i)
+	}
+}
+
+// Each epoch tier merges into the next one up, and a run of full top-tier segments is frozen.
+func TestFindMergeRangeEpoch(t *testing.T) {
+	merger := NewMerger("x", 1, log.LvlInfo, nil, chainspec.Mainnet.Config, nil)
+	merger.DisableFsync()
+
+	tiers := []struct{ size, next uint64 }{
+		{1_024, 8_192},
+		{8_192, 65_536},
+		{65_536, 524_288},
+	}
+	for _, tr := range tiers {
+		var r Ranges
+		for i := uint64(0); i < tr.next/tr.size; i++ {
+			r = append(r, NewRange(i*tr.size, (i+1)*tr.size))
+		}
+		found := merger.FindMergeRanges(r)
+		require.Equal(t, Ranges{NewRange(0, tr.next)}.String(), Ranges(found).String(), "size %d -> %d", tr.size, tr.next)
+	}
+
+	var r Ranges
+	for i := range uint64(8) {
+		r = append(r, NewRange(i*524_288, (i+1)*524_288))
+	}
+	require.Empty(t, merger.FindMergeRanges(r))
+}
+
+// The regime is a property of the chain, so the same ranges merge on the decimal ladder for a
+// Gnosis merger and on the epoch ladder for a mainnet one.
+func TestFindMergeRangeBorNotEpoch(t *testing.T) {
+	decimalMerger := NewMerger("x", 1, log.LvlInfo, nil, chainspec.Gnosis.Config, nil)
+	decimalMerger.DisableFsync()
+	epochMerger := NewMerger("x", 1, log.LvlInfo, nil, chainspec.Mainnet.Config, nil)
+	epochMerger.DisableFsync()
+
+	var decimal Ranges
+	for i := range uint64(10) {
+		decimal = append(decimal, NewRange(i*10_000, (i+1)*10_000))
+	}
+	require.Equal(t, Ranges{NewRange(0, 100_000)}.String(),
+		Ranges(decimalMerger.FindMergeRanges(decimal)).String())
+	// same input on the epoch chain does NOT merge (100k not 2^k-aligned)
+	require.Empty(t, epochMerger.FindMergeRanges(decimal))
+
+	var epoch Ranges
+	for i := range uint64(8) {
+		epoch = append(epoch, NewRange(i*8_192, (i+1)*8_192))
+	}
+	require.Equal(t, Ranges{NewRange(0, 65_536)}.String(),
+		Ranges(epochMerger.FindMergeRanges(epoch)).String())
+}
+
+func TestCanRetireEpochStep(t *testing.T) {
+	snCfg := snapcfg.KnownCfgOrDevnet(networkname.Mainnet)
+
+	from, to, can := CanRetire(true, 1, 9, snaptype.Unknown, snCfg, 8)
+	require.True(t, can)
+	require.Equal(t, uint64(0), from)
+	require.Equal(t, uint64(8), to)
+
+	_, _, can = CanRetire(true, 1, 9, snaptype.Unknown, snCfg, 10)
+	require.False(t, can, "a step that does not divide 8192 must fall back to the 1024 floor")
+
+	_, _, can = CanRetire(true, 1, 9, snaptype.Unknown, snCfg, 0)
+	require.False(t, can, "no step means the 1024 floor")
+
+	from, to, can = CanRetire(true, 1, 20_000, snaptype.Unknown, snCfg, 8)
+	require.True(t, can)
+	require.Equal(t, uint64(0), from)
+	require.Equal(t, uint64(8_192), to)
+}
+
+// A node that downloaded its lower segments starts producing again at the end of the last one. How
+// big a segment it may cut there depends on what that block is aligned to.
+func TestCanRetireEpochSeam(t *testing.T) {
+	require := require.New(t)
+	snCfg := snapcfg.KnownCfgOrDevnet(networkname.Mainnet)
+
+	cases := []struct {
+		name                         string
+		inFrom, inTo, outFrom, outTo uint64
+	}{
+		{"8192-aligned boundary jumps one era1 file", 598_016, 610_000, 598_016, 606_208},
+		{"65536-aligned boundary jumps a whole tier", 589_824, 700_000, 589_824, 655_360},
+		{"only the 1024 floor fits", 598_016, 600_000, 598_016, 599_040},
+	}
+	for _, tc := range cases {
+		from, to, can := CanRetire(true, tc.inFrom, tc.inTo, snaptype.Unknown, snCfg, 0)
+		require.True(can, tc.name)
+		require.Equal(int(tc.outFrom), int(from), tc.name)
+		require.Equal(int(tc.outTo), int(to), tc.name)
+	}
+}
+
+// After a download the file list is one large segment followed by small ones just produced. Those
+// small ones merge among themselves; the large neighbour is already full and must be left alone.
+func TestFindMergeRangeEpochSeam(t *testing.T) {
+	merger := NewMerger("x", 1, log.LvlInfo, nil, chainspec.Mainnet.Config, nil)
+	merger.DisableFsync()
+
+	seam := func(produced uint64) Ranges {
+		r := Ranges{
+			NewRange(0, 524_288),
+			NewRange(524_288, 589_824),
+			NewRange(589_824, 598_016),
+		}
+		for i := range produced {
+			r = append(r, NewRange(598_016+i*1_024, 598_016+(i+1)*1_024))
+		}
+		return r
+	}
+
+	full := seam(8)
+	require.Equal(t, Ranges{NewRange(598_016, 606_208)}.String(),
+		Ranges(merger.FindMergeRanges(full)).String())
+
+	require.Empty(t, merger.FindMergeRanges(seam(7)),
+		"an incomplete era1 file must not drag the downloaded neighbour into a merge")
+}
+
+// A pruned type starts above block 0 and between two cuts, so sooner or later the ladder asks for a
+// merge reaching below its first file. Doing it would write a file short of the range in its name.
+func TestFindMergeRangeSkipsUncoveredLowerHalf(t *testing.T) {
+	merger := NewMerger("x", 1, log.LvlInfo, nil, chainspec.Mainnet.Config, nil)
+	merger.DisableFsync()
+
+	// transactions pruned to 3_200_000; the first 8192-aligned boundary above it is 3_203_072, whose
+	// merge range would start at 3_194_880 — below anything on disk.
+	var r Ranges
+	for from := uint64(3_200_000); from < 3_203_072; from += 1_024 {
+		r = append(r, NewRange(from, from+1_024))
+	}
+	r = append(r, NewRange(3_202_048, 3_203_072))
+
+	require.Empty(t, merger.FindMergeRanges(r),
+		"the 8192 tier below 3_203_072 reaches under the pruned frontier")
+}
+
+// The other side of that condition. When the pruned type resumes on a 524288 boundary, every merge
+// the ladder can ask for starts at or above it, so the coverage check must not get in the way.
+func TestFindMergeRangeAllowsAlignedPrunedStart(t *testing.T) {
+	merger := NewMerger("x", 1, log.LvlInfo, nil, chainspec.Mainnet.Config, nil)
+	merger.DisableFsync()
+
+	const start = 6 * 524_288 // 3_145_728
+	var r Ranges
+	for from := uint64(start); from < 7*524_288; from += 65_536 {
+		r = append(r, NewRange(from, from+65_536))
+	}
+
+	require.Equal(t, Ranges{NewRange(start, 7*524_288)}.String(),
+		Ranges(merger.FindMergeRanges(r)).String(),
+		"nothing is missing below the start, so the tier merges")
 }
 
 func TestSegmentsMinReportsWhatTheVisibleTypesReach(t *testing.T) {

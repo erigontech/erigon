@@ -510,7 +510,7 @@ func writeCaplinIntegritySegment(t *testing.T, dirs datadir.Dirs, snapshotType s
 
 func writeCaplinIntegritySegmentData(t *testing.T, dirs datadir.Dirs, snapshotType snaptype.Type, from, to uint64, word func(uint64) []byte) snaptype.FileInfo {
 	t.Helper()
-	name := snapshotType.FileName(version.ZeroVersion, from, to)
+	name := snapshotType.FileName(version.ZeroVersion, false, from, to)
 	info, _, ok := snaptype.ParseFileName(dirs.Snap, name)
 	require.True(t, ok)
 
@@ -526,7 +526,7 @@ func writeCaplinIntegritySegmentData(t *testing.T, dirs datadir.Dirs, snapshotTy
 
 func writeCaplinIntegritySegmentWithExtraWord(t *testing.T, dirs datadir.Dirs, snapshotType snaptype.Type, from, to uint64) {
 	t.Helper()
-	name := snapshotType.FileName(version.ZeroVersion, from, to)
+	name := snapshotType.FileName(version.ZeroVersion, false, from, to)
 	info, _, ok := snaptype.ParseFileName(dirs.Snap, name)
 	require.True(t, ok)
 	compressor, err := seg.NewCompressor(t.Context(), "test "+snapshotType.Name(), info.Path, dirs.Tmp, seg.DefaultCfg, log.LvlCrit, log.New())

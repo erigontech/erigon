@@ -101,7 +101,7 @@ func (d *recordingDownloader) Download(context.Context, *downloaderproto.Downloa
 // writeStateFixture writes one indexed caplin state segment, the shape RemoveOverlaps acts on.
 func writeStateFixture(t *testing.T, dir, table string, from, to uint64, logger log.Logger) string {
 	t.Helper()
-	segName := strings.ReplaceAll(snaptype.BeaconBlocks.FileName(version.ZeroVersion, from, to), "beaconblocks", table)
+	segName := strings.ReplaceAll(snaptype.BeaconBlocks.FileName(version.ZeroVersion, false, from, to), "beaconblocks", table)
 	segPath := filepath.Join(dir, segName)
 
 	compressCfg := seg.DefaultCfg
