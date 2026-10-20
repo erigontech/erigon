@@ -117,17 +117,23 @@ func TestPubsubRejectsOversizedIHave(t *testing.T) {
 func TestPubsubFrameLimitFollowsMaxGossipMessageSize(t *testing.T) {
 	networkConfig := clparams.NetworkConfigs[chainspec.MainnetChainID]
 	limit := int(networkConfig.MaxGossipMessageSize())
+	const topic = "/eth2/00000000/beacon_block/ssz_snappy"
 	publishRPC := func(size int) []byte {
-		for data := size; ; data-- {
-			msg := protowire.AppendTag(nil, 4, protowire.BytesType)
-			msg = protowire.AppendString(msg, "/eth2/00000000/beacon_block/ssz_snappy")
-			msg = protowire.AppendTag(msg, 2, protowire.BytesType)
-			msg = protowire.AppendBytes(msg, make([]byte, data))
-			rpc := protowire.AppendTag(nil, 2, protowire.BytesType)
-			if rpc = protowire.AppendBytes(rpc, msg); len(rpc) == size {
-				return rpc
-			}
+		msgLen := func(data int) int {
+			return protowire.SizeTag(4) + protowire.SizeBytes(len(topic)) + protowire.SizeTag(2) + protowire.SizeBytes(data)
 		}
+		data := size
+		for protowire.SizeTag(2)+protowire.SizeBytes(msgLen(data)) != size {
+			data--
+		}
+		msg := protowire.AppendTag(nil, 4, protowire.BytesType)
+		msg = protowire.AppendString(msg, topic)
+		msg = protowire.AppendTag(msg, 2, protowire.BytesType)
+		msg = protowire.AppendBytes(msg, make([]byte, data))
+		rpc := protowire.AppendTag(nil, 2, protowire.BytesType)
+		rpc = protowire.AppendBytes(rpc, msg)
+		require.Len(t, rpc, size)
+		return rpc
 	}
 
 	require.True(t, sendRawRPC(t, publishRPC(limit)), "an RPC at max_message_size must be accepted")
