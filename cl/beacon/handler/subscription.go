@@ -53,11 +53,6 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 		return
 	}
 
-	if a.syncedData.Syncing() {
-		beaconhttp.WrapEndpointError(synced_data.ErrNotSynced).WriteTo(w)
-		return
-	}
-
 	// Validate every request before subscribing to any subnet.
 	syncnets := make([][]uint64, len(req))
 	for i, subRequest := range req {
@@ -66,6 +61,10 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 				syncnets[i] = append(syncnets[i], subnet)
 			}
 			continue
+		}
+		if subRequest.SyncCommitteeIndicies == nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("request %d: sync_committee_indices is required", i)).WriteTo(w)
+			return
 		}
 		sn, err := a.syncCommitteeSubnets(subRequest.SyncCommitteeIndicies)
 		if err != nil {

@@ -102,31 +102,21 @@ func TestBeaconCommitteeSubscriptionSucceedsWhenSynced(t *testing.T) {
 	require.Equal(t, http.StatusOK, postBeaconCommitteeSubscription(t, handler))
 }
 
-func TestSyncCommitteeSubscriptionIsUnavailableWhileSyncing(t *testing.T) {
+// The subnets come from the request, so a syncing node subscribes too, and the endpoint has no 503 response.
+func TestSyncCommitteeSubscriptionSucceedsWhileSyncing(t *testing.T) {
 	_, _, _, _, _, handler, _, syncedDataMgr, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().Syncing().Return(true).AnyTimes()
-
-	server := httptest.NewServer(handler.mux)
-	defer server.Close()
+	ctrl := gomock.NewController(t)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	gossipManager.EXPECT().SubscribeWithExpiry(gossip.TopicNameSyncCommittee(0), gomock.Any()).Return(nil).Times(1)
+	handler.gossipManager = gossipManager
 
 	// Far enough ahead that the subscription has not expired, without overflowing the slot clock.
-	body, err := json.Marshal([]ValidatorSyncCommitteeSubscriptionsRequest{{
+	require.Equal(t, http.StatusOK, postSyncCommitteeSubscriptions(t, handler, []ValidatorSyncCommitteeSubscriptionsRequest{{
 		ValidatorIndex:        1,
 		SyncCommitteeIndicies: []string{"0"},
 		UntilEpoch:            1_000_000_000,
-	}})
-	require.NoError(t, err)
-
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
-		server.URL+"/eth/v1/validator/sync_committee_subscriptions", bytes.NewBuffer(body))
-	require.NoError(t, err)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := server.Client().Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+	}}))
 }
 
 func postSyncCommitteeSubscriptions(t *testing.T, handler *ApiHandler, subs []ValidatorSyncCommitteeSubscriptionsRequest) int {
@@ -149,19 +139,37 @@ func TestSyncCommitteeSubscriptionUsesRequestedIndices(t *testing.T) {
 	const untilEpoch = 1_000_000
 	expiry := handler.ethClock.GetSlotTime(untilEpoch * handler.beaconChainCfg.SlotsPerEpoch)
 
+	// The head committee puts validator 1 on subnets 0 and 2; request positions on the other two.
 	ctrl := gomock.NewController(t)
 	gossipManager := gossip_mock.NewMockGossip(ctrl)
-	for _, subnet := range []int{0, 2} {
+	for _, subnet := range []int{1, 3} {
 		gossipManager.EXPECT().SubscribeWithExpiry(gossip.TopicNameSyncCommittee(subnet), expiry).Return(nil).Times(1)
 	}
 	handler.gossipManager = gossipManager
 
-	indices := []string{"1", strconv.FormatUint(2*subcommitteeSize, 10), strconv.FormatUint(3*subcommitteeSize-1, 10)}
+	indices := []string{strconv.FormatUint(subcommitteeSize+1, 10), strconv.FormatUint(3*subcommitteeSize, 10), strconv.FormatUint(4*subcommitteeSize-1, 10)}
 	require.Equal(t, http.StatusOK, postSyncCommitteeSubscriptions(t, handler, []ValidatorSyncCommitteeSubscriptionsRequest{{
-		ValidatorIndex:        uint64(s.ValidatorLength()), // not in the head state: subnets must not depend on it
+		ValidatorIndex:        1,
 		SyncCommitteeIndicies: indices,
 		UntilEpoch:            untilEpoch,
 	}}))
+}
+
+// sync_committee_indices is required; an empty list is a valid request with nothing to subscribe.
+func TestSyncCommitteeSubscriptionRequiresIndices(t *testing.T) {
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	require.NoError(t, sd.OnHeadState(s))
+	ctrl := gomock.NewController(t)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	gossipManager.EXPECT().SubscribeWithExpiry(gomock.Any(), gomock.Any()).Times(0)
+	handler.gossipManager = gossipManager
+
+	require.Equal(t, http.StatusBadRequest, postSyncCommitteeSubscriptions(t, handler, []ValidatorSyncCommitteeSubscriptionsRequest{
+		{ValidatorIndex: 1, UntilEpoch: 1_000_000},
+	}))
+	require.Equal(t, http.StatusOK, postSyncCommitteeSubscriptions(t, handler, []ValidatorSyncCommitteeSubscriptionsRequest{
+		{ValidatorIndex: 1, SyncCommitteeIndicies: []string{}, UntilEpoch: 1_000_000},
+	}))
 }
 
 func TestSyncCommitteeSubscriptionRejectsInvalidIndices(t *testing.T) {
