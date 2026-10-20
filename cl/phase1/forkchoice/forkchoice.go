@@ -146,6 +146,7 @@ type ForkChoiceStore struct {
 	localValidators    *validator_params.ValidatorParams
 
 	latestMessages    *latestMessagesStore
+	voteTally         voteTally
 	syncedDataManager *synced_data.SyncedDataManager
 	// We keep track of them so that we can forkchoice with EL.
 	eth2Roots *lru.Cache[common.Hash, common.Hash] // ETH2 root -> ETH1 hash
@@ -205,7 +206,6 @@ type ForkChoiceStore struct {
 	blockTimeliness sync.Map // map[common.Hash][clparams.NumBlockTimelinessDeadlines]bool
 	// [New in Gloas:EIP7732]
 	gloasWeightTree *gloasWeightTree
-	voteTally       voteTally
 	// [New in Gloas:EIP7732] Envelopes waiting for their corresponding block to arrive.
 	// In GLOAS, BeaconBlock and ExecutionPayloadEnvelope are gossiped separately.
 	// Due to network timing, the envelope may arrive before its corresponding block.
