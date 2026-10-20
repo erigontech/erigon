@@ -460,6 +460,14 @@ func (g *GossipManager) SubscribeWithExpiry(name string, expiry time.Time) error
 	if err := g.subscriptions.SubscribeWithExpiry(topic, expiry); err != nil {
 		return err
 	}
+	for _, registeredTopic := range g.subscriptions.AllTopics() {
+		if registeredTopic == topic || extractTopicName(registeredTopic) != name {
+			continue
+		}
+		if err := g.subscriptions.SubscribeWithExpiry(registeredTopic, expiry); err != nil {
+			log.Warn("[GossipManager] failed to subscribe topic on another fork digest", "topic", registeredTopic, "err", err)
+		}
+	}
 
 	return nil
 }
