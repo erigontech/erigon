@@ -111,6 +111,13 @@ func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconCha
 	if pollUntil.Before(firstGetAt) {
 		pollUntil = firstGetAt
 	}
+	// ⚠ THE WINDOW, FROM THE RUNNING CONFIG. These are offsets into the slot the block is for, so they can
+	// be read against the slot period rather than inferred from SecondsPerSlot and IntervalsPerSlot.
+	log.Warn("[payload-window]", "secondsPerSlot", cfg.SecondsPerSlot, "intervalsPerSlot", cfg.IntervalsPerSlot,
+		"dueMs", due.Milliseconds(),
+		"firstGetAtMs", firstGetAt.Sub(slotStart).Milliseconds(),
+		"pollUntilMs", pollUntil.Sub(slotStart).Milliseconds(),
+		"nowAtMs", now.Sub(slotStart).Milliseconds())
 	return blockBuilderWindow{
 		firstGetAt: firstGetAt,
 		pollUntil:  pollUntil,
@@ -129,11 +136,20 @@ func pollAssembledPayload(
 	retryTime time.Duration,
 	get func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error),
 ) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, bool) {
+	// ⚠ TRACED, NOT DERIVED. This is the only place the CL decides how long it will wait for a payload,
+	// and the window comes from the beacon config's slot arithmetic. Print the real instants and the real
+	// grab count so "the CL gave up after N ms and G grabs" is a fact rather than a reading of the code.
+	pollStart := time.Now()
+	grabs := 0
+	firstGetIn := time.Until(window.firstGetAt)
+	pollUntilIn := time.Until(window.pollUntil)
 	if wait := time.Until(window.firstGetAt); wait > 0 {
 		buildTimer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
 			buildTimer.Stop()
+			log.Warn("[payload-poll] abandoned before the first grab", "reason", "ctx",
+				"firstGetInMs", firstGetIn.Milliseconds(), "pollUntilInMs", pollUntilIn.Milliseconds())
 			return nil, nil, nil, nil, false
 		case <-buildTimer.C:
 		}
@@ -144,22 +160,36 @@ func pollAssembledPayload(
 	defer retryTicker.Stop()
 	for {
 		// Grab at least once, even past the deadline, so a late produce request still gets a payload.
+		grabs++
 		payload, bundles, requestsBundle, blockValue, err := get()
 		if err != nil {
 			log.Error("BlockProduction: Failed to get payload", "err", err)
 		} else if payload != nil {
+			if took := time.Since(pollStart); took > 100*time.Millisecond || grabs > 1 {
+				log.Warn("[payload-poll] got a payload", "grabs", grabs, "tookMs", took.Milliseconds(),
+					"firstGetInMs", firstGetIn.Milliseconds(), "pollUntilInMs", pollUntilIn.Milliseconds())
+			}
 			return payload, bundles, requestsBundle, blockValue, true
 		}
 		select {
 		case <-ctx.Done():
+			log.Warn("[payload-poll] GAVE UP", "reason", "ctx", "grabs", grabs,
+				"tookMs", time.Since(pollStart).Milliseconds(), "lastErr", err,
+				"firstGetInMs", firstGetIn.Milliseconds(), "pollUntilInMs", pollUntilIn.Milliseconds())
 			return nil, nil, nil, nil, false
 		case <-deadlineTimer.C:
+			log.Warn("[payload-poll] GAVE UP", "reason", "deadline", "grabs", grabs,
+				"tookMs", time.Since(pollStart).Milliseconds(), "lastErr", err,
+				"firstGetInMs", firstGetIn.Milliseconds(), "pollUntilInMs", pollUntilIn.Milliseconds())
 			return nil, nil, nil, nil, false
 		case <-retryTicker.C:
 		}
 		// Re-check here, not before get(): the select may pick the ticker after
 		// deadlineTimer fired, and get() stops the builder, so it must not run past pollUntil.
 		if !shouldRetryGetPayload(time.Now(), window.pollUntil) {
+			log.Warn("[payload-poll] GAVE UP", "reason", "past pollUntil", "grabs", grabs,
+				"tookMs", time.Since(pollStart).Milliseconds(), "lastErr", err,
+				"firstGetInMs", firstGetIn.Milliseconds(), "pollUntilInMs", pollUntilIn.Milliseconds())
 			return nil, nil, nil, nil, false
 		}
 	}
@@ -755,6 +785,7 @@ func (a *ApiHandler) produceBeaconBody(
 			baseBlockSlot,
 		)
 	}
+	bodyStart := time.Now()
 	var wg sync.WaitGroup
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(
 		targetSlot / a.beaconChainCfg.SlotsPerEpoch,
@@ -959,6 +990,13 @@ func (a *ApiHandler) produceBeaconBody(
 			attrs,
 			stateVersion,
 		)
+		fcuMs := time.Since(builderStartedAt).Milliseconds()
+		if fcuMs > 100 {
+			// ⚠ THE FCU-WITH-ATTRIBUTES IS THE EXECUTION LAYER'S AssembleBlock. body-phases showed slot 392
+			// spending 3,383ms waiting on this goroutine while its own poll was only 559ms of that, so ~2.8s
+			// sat here with no trace on it.
+			log.Warn("[fcu-attrs] ForkChoiceUpdate with attributes was slow", "slot", targetSlot, "tookMs", fcuMs)
+		}
 		if err != nil {
 			log.Error("BlockProduction: Failed to get payload id", "err", err)
 			return
@@ -1206,7 +1244,16 @@ func (a *ApiHandler) produceBeaconBody(
 			beaconBody.PayloadAttestations = a.aggregatePayloadAttestations(baseState, targetSlot-1, baseBlockRoot)
 		}()
 	}
+	// ⚠ WHERE THE BODY'S TIME GOES. templateMs reached 7,869ms on a 2,000ms slot while the payload poll
+	// accounted for at most 3,224ms of it. This splits the rest: the work this function does itself before
+	// it waits, versus the wait for the payload goroutine.
+	beforeWaitMs := time.Since(bodyStart).Milliseconds()
+	waitStart := time.Now()
 	wg.Wait()
+	if total := time.Since(bodyStart); total > 1000*time.Millisecond {
+		log.Warn("[body-phases] produceBeaconBody", "slot", targetSlot, "totalMs", total.Milliseconds(),
+			"beforeWaitMs", beforeWaitMs, "waitMs", time.Since(waitStart).Milliseconds())
+	}
 	if executionPayload == nil {
 		return nil, 0, errors.New("failed to produce execution payload")
 	}

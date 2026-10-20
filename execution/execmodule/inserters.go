@@ -258,6 +258,8 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 		return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: semaphore acquire: %w", err)
 	}
 	defer e.semaphore.Release(1)
+	e.semTake("InsertBlocks")
+	defer e.semDrop()
 	e.logger.Debug("ethereumExecutionModule.InsertBlocks: semaphore acquired", "wait", time.Since(start))
 	return e.insertBlocksLocked(ctx, blocks)
 }

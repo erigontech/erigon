@@ -201,6 +201,10 @@ type ExecModule struct {
 	// (retried by the CL) or block, and the background FCU commit/prune
 	// goroutines inherit the semaphore, releasing it only when their work is done.
 	semaphore *semaphore.Weighted
+	// semHolder names whatever currently holds the semaphore, so a refusal can say who refused it rather
+	// than leaving it to be guessed. Written only under the hold; read without one.
+	semHolder atomic.Value
+	semSince  atomic.Int64
 
 	// roundMu is the INNER LOOP's own mutual-exclusion domain: one pre-execution round at a time.
 	//
@@ -216,6 +220,9 @@ type ExecModule struct {
 	// round writes into the producer's OWN per-generation SharedDomains (preexec_frontier.go) and its own
 	// flash state. Lock order is ONE WAY: an outer op (assemble) may take the semaphore and then this; a
 	// round takes ONLY this, so there is no cycle to deadlock on.
+	// assembleMu is ASSEMBLY's own domain: one block assembled at a time. Assembly builds a NEW block and
+	// rewrites no state, so it must not queue behind validation — see AssembleBlock.
+	assembleMu    sync.Mutex
 	roundMu       sync.Mutex
 	forkValidator *ForkValidator
 	// preExec is the PRODUCER's pre-executed block chain — separate from the fork validator's candidate
@@ -546,7 +553,9 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		if !e.semaphore.TryAcquire(1) {
 			return ValidationResult{ValidationStatus: ExecutionStatusBusy}, nil
 		}
+		e.semTake("ValidateChain:stageSealed")
 		stageErr := e.stageSealedForCanonicalLocked(ctx, blockHash, blockNumber)
+		e.semDrop()
 		e.semaphore.Release(1)
 		if stageErr != nil {
 			return ValidationResult{}, fmt.Errorf("ValidateChain: %w", stageErr)
@@ -565,6 +574,8 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		return ValidationResult{ValidationStatus: ExecutionStatusBusy}, nil
 	}
 	defer e.semaphore.Release(1)
+	e.semTake("ValidateChain")
+	defer e.semDrop()
 	return e.validateChainLocked(ctx, blockHash, blockNumber)
 }
 
@@ -901,6 +912,8 @@ func (e *ExecModule) IngestSealedFlashblock(ctx context.Context, sealed *types.H
 		return fmt.Errorf("IngestSealedFlashblock: semaphore acquire: %w", err)
 	}
 	defer e.semaphore.Release(1)
+	e.semTake("IngestSealedFlashblock")
+	defer e.semDrop()
 	return e.ingestSealedFlashblockLocked(ctx, sealed)
 }
 
@@ -1112,6 +1125,8 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 		return
 	}
 	defer e.semaphore.Release(1)
+	e.semTake("Start")
+	defer e.semDrop()
 
 	if err := e.pipelineExecutor.ProcessFrozenBlocks(ctx, hook, e.onlySnapDownloadOnStart); err != nil {
 		if !errors.Is(err, context.Canceled) {
@@ -1162,6 +1177,8 @@ func (e *ExecModule) Ready(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 	defer e.semaphore.Release(1)
+	e.semTake("Ready")
+	defer e.semDrop()
 	return true, nil
 }
 
@@ -1194,4 +1211,38 @@ func (e *ExecModule) HasBlock(ctx context.Context, blockHash *common.Hash, _ *ui
 		return false, err
 	}
 	return has, nil
+}
+
+// semTake records who holds the module semaphore and since when, so a refusal can say who refused it and
+// for how long rather than leaving either to be guessed.
+func (e *ExecModule) semTake(name string) {
+	e.semHolder.Store(name)
+	e.semSince.Store(time.Now().UnixNano())
+}
+
+func (e *ExecModule) semDrop() {
+	if at := e.semSince.Load(); at > 0 {
+		if held := time.Since(time.Unix(0, at)); held > 50*time.Millisecond {
+			e.logger.Warn("[sem-hold] module semaphore held", "by", e.semHolderName(), "heldMs", held.Milliseconds())
+		}
+	}
+	e.semHolder.Store("")
+	e.semSince.Store(0)
+}
+
+func (e *ExecModule) semHolderName() string {
+	s, _ := e.semHolder.Load().(string)
+	if s == "" {
+		return "none-recorded"
+	}
+	return s
+}
+
+// semHeldFor reports how long the current holder has had it, for a refusal to print.
+func (e *ExecModule) semHeldFor() int64 {
+	at := e.semSince.Load()
+	if at == 0 {
+		return -1
+	}
+	return time.Since(time.Unix(0, at)).Milliseconds()
 }

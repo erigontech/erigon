@@ -97,11 +97,33 @@ func (e *ExecModule) evictOldBuilders() {
 	}
 }
 
+// AssembleBlock begins building the block for these attributes and returns its payload id.
+//
+// ASSEMBLY HAS ITS OWN DOMAIN. It generates a NEW block: it rewrites no state and needs nothing but its
+// parent, so it must not queue behind validation. One assembly at a time is the only exclusion it needs,
+// and that is what assembleMu gives it. The module semaphore — the pipeline Sync and FCU state — is taken
+// only by the two paths that genuinely reach into that state: the re-anchor, and the from-scratch builder.
+//
+// ⚠ IT USED TO TAKE THE MODULE SEMAPHORE FOR THE WHOLE CALL, AND EVERY WAY OF DOING SO WAS WRONG.
+// As TryAcquire it REFUSED: the Busy return becomes "execution data is still syncing" in
+// ChainReaderWriterEth1, which fails the proposal and loses the slot. Measured on live363-365, a THIRD of
+// all assembles were refused on an IDLE chain (36 of 57 blocks), every one of them to updateForkChoice —
+// the plain head/safe/finalized FCU the CL issues immediately before this one, so they contend by
+// construction. Switched to Acquire it BLOCKED instead: live367 measured the FCU-with-attributes at p50
+// 733ms and max 7,225ms, waiting behind SealBlock holds of 2.2-3.7s.
+//
+// On a 12-second slot a 3-second hold is a quarter of the slot and invisible, which is why this survives
+// upstream. On a 2-second slot it is the whole slot, and a lost slot leaves the execution layer building
+// under attributes nothing re-issues — the multi-second case-3 re-executions.
+//
+// The same mistake was fixed once before in the other direction: a pre-exec round held this semaphore, so
+// AssembleBlock refused whenever one ran (live328: 115 "failed to produce execution payload" in two
+// minutes). It was fixed by giving rounds their own domain (roundMu), not by making the refusal cheaper.
 func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Parameters) (AssembleBlockResult, error) {
-	if !e.semaphore.TryAcquire(1) {
-		return AssembleBlockResult{Busy: true}, nil
-	}
-	defer e.semaphore.Release(1)
+	// ONE BLOCK AT A TIME. nextPayloadId and lastParameters are touched by this method alone, so this is
+	// the whole of the exclusion assembly needs.
+	e.assembleMu.Lock()
+	defer e.assembleMu.Unlock()
 
 	if err := e.checkWithdrawalsPresence(params.Timestamp, params.Withdrawals); err != nil {
 		return AssembleBlockResult{}, err
@@ -116,29 +138,32 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 		}
 	}
 
-	// Initiate payload building
-	e.evictOldBuilders()
-
 	e.nextPayloadId++
 	params.PayloadId = e.nextPayloadId
 	e.lastParameters = params
 
 	// DAG-L2 BOUNDARY ASSEMBLE: on a DAG-driven L2 the CL's FCU-with-attributes does NOT build from-scratch
-	// from the txpool. It inserts a block-end MARKER carrying these attrs into the ordering layer and WAITS
-	// (bounded, inside this assembly delay — the "one DAG round trip" the boundary costs) for the marker to
-	// appear in the committed stream, the point every node agrees the block ends; then seals the already-
-	// pre-executed body (zero re-execution). The marker carrying params gives attribute agreement for free
-	// (pre-exec ran under these same attrs, sourced from this FCU). See [[dag_start_end_system_tx]].
+	// from the txpool. It inserts a block-end MARKER carrying these attrs into the ordering layer, then seals
+	// the already-pre-executed body (zero re-execution). The marker carrying params gives attribute agreement
+	// for free (pre-exec ran under these same attrs, sourced from this FCU). See [[dag_start_end_system_tx]].
 	if e.blockAssembler != nil {
-		// RE-ANCHOR (exec-internal, under this semaphore hold): if the CL is now building on a DIFFERENT parent
-		// than the in-progress flashblock was opened on, Caplin accepted a new head — drop the stale fork and
-		// re-anchor the frontier to that head so the boundary opens FRESH on it. This replaced the driver's
-		// AnchorFrontier callback, which was semaphore-free only because it rode inside this hold (an anti-pattern
-		// on the public interface); the trigger + action now live where the semaphore is genuinely held.
-		e.reanchorFrontierForBlockLocked(ctx, params)
+		// RE-ANCHOR: if the CL is now building on a DIFFERENT parent than the in-progress flashblock was
+		// opened on, Caplin accepted a new head — drop the stale fork and re-anchor the frontier to it. This
+		// is the ONLY part of an assemble that reaches into fork-validator and module-context state, so it is
+		// the only part that takes the semaphore, and only when it has work to do. In steady state the CL is
+		// building on the parent we already hold and this does not run at all.
+		if e.assembleNeedsReanchor(params) {
+			if err := e.semaphore.Acquire(ctx, 1); err != nil {
+				return AssembleBlockResult{}, err
+			}
+			e.semTake("AssembleBlock:reanchor")
+			e.reanchorFrontierForBlockLocked(ctx, params)
+			e.semDrop()
+			e.semaphore.Release(1)
+		}
 		// Insert the block-end marker NOW (non-blocking) so it starts committing during the CL assembly
-		// delay, and record the params so GetAssembledBlock can GetAssembledBlock + seal. MUST NOT wait here —
-		// the CL's ForkChoiceUpdate blocks on AssembleBlock returning a PayloadID.
+		// delay, and record the params so GetAssembledBlock can seal. MUST NOT wait here — the CL's
+		// ForkChoiceUpdate blocks on AssembleBlock returning a PayloadID.
 		if err := e.blockAssembler.AssembleBlock(ctx, params); err != nil {
 			return AssembleBlockResult{}, err
 		}
@@ -148,6 +173,18 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 		e.logger.Debug("[ForkChoiceUpdated] DAG boundary begun", "payload", e.nextPayloadId, "parent", params.ParentHash, "ts", params.Timestamp, "randao", params.PrevRandao)
 		return AssembleBlockResult{PayloadID: e.nextPayloadId}, nil
 	}
+
+	// FROM-SCRATCH PATHS. These write e.builders and e.preconfirmedBlocks, which GetAssembledBlock also
+	// reads under the semaphore, and assemblePreconfirmed seals from the fork validator — so from here down
+	// the module semaphore is genuinely required.
+	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+		return AssembleBlockResult{}, err
+	}
+	defer e.semaphore.Release(1)
+	e.semTake("AssembleBlock:builder")
+	defer e.semDrop()
+
+	e.evictOldBuilders()
 
 	// PRECONFIRM VARIANT: if a preconfirm producer (op-stack sequencer) has accumulated a matching in-progress
 	// flashblock in the fork validator, SEAL it synchronously and hand it back directly — no from-scratch build,
@@ -164,6 +201,20 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	e.logger.Debug("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
 
 	return AssembleBlockResult{PayloadID: e.nextPayloadId}, nil
+}
+
+// assembleNeedsReanchor reports whether the re-anchor has anything to do, so the common case can skip the
+// module semaphore entirely. Conservative: any doubt returns true.
+func (e *ExecModule) assembleNeedsReanchor(params *builder.Parameters) bool {
+	fr := e.frontierHeader.Load()
+	if fr == nil || fr.Hash() != params.ParentHash {
+		return true
+	}
+	e.flash.mu.Lock()
+	valid := e.flash.valid
+	inProgressParent := e.flash.built.Parent
+	e.flash.mu.Unlock()
+	return valid && inProgressParent != params.ParentHash
 }
 
 // assemblePreconfirmed is the base-erigon PRECONFIRM assemble variant. When the fork validator holds a
@@ -285,6 +336,8 @@ func (e *ExecModule) ReconcileAttrs(ctx context.Context, params *builder.Paramet
 		return err
 	}
 	defer e.semaphore.Release(1)
+	e.semTake("ReconcileAttrs")
+	defer e.semDrop()
 	e.flash.mu.Lock()
 	open := e.flash.valid
 	built := e.flash.built
@@ -318,6 +371,8 @@ func (e *ExecModule) SealBlock(ctx context.Context, params *builder.Parameters, 
 	}
 	semWait := time.Since(semStart)
 	defer e.semaphore.Release(1)
+	e.semTake("SealBlock")
+	defer e.semDrop()
 	workStart := time.Now()
 	defer func() {
 		if w := time.Since(workStart); semWait+w > 20*time.Millisecond {
@@ -808,9 +863,12 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 	}
 
 	if !e.semaphore.TryAcquire(1) {
+		e.logger.Warn("[assemble-busy] GetAssembledBlock refused — module semaphore held", "heldBy", e.semHolderName(), "payload", payloadID)
 		return AssembledBlockResult{Busy: true}, nil
 	}
 	defer e.semaphore.Release(1)
+	e.semTake("GetAssembledBlock")
+	defer e.semDrop()
 
 	// PRECONFIRM VARIANT: a synchronously-sealed preconfirmed block is returned directly (no async builder).
 	if br, ok := e.preconfirmedBlocks[payloadID]; ok {

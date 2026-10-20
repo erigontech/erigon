@@ -154,6 +154,8 @@ func (e *ExecModule) AssembleInProgress(ctx context.Context) (*types.Header, boo
 		return nil, false, err
 	}
 	defer e.semaphore.Release(1)
+	e.semTake("AssembleInProgress")
+	defer e.semDrop()
 	e.flash.mu.Lock()
 	num, hash, valid := e.flash.num, e.flash.hash, e.flash.valid
 	built := e.flash.built

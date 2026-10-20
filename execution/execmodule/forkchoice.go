@@ -164,9 +164,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return fmt.Errorf("semaphore timeout")
 	}
 	shouldReleaseSema := true
+	e.semTake("updateForkChoice")
 	defer func() {
 		if shouldReleaseSema {
 			e.semaphore.Release(1)
+			e.semDrop()
 		}
 	}()
 

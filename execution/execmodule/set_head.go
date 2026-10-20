@@ -57,6 +57,8 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 		return fmt.Errorf("execution module is busy: %w", err)
 	}
 	defer e.semaphore.Release(1)
+	e.semTake("SetHead")
+	defer e.semDrop()
 
 	tx, err := e.db.BeginTemporalRw(ctx)
 	if err != nil {

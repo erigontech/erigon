@@ -279,15 +279,19 @@ func (s *Service) slotLoop(ctx context.Context) {
 		slotStart := time.Unix(int64(genesisTime+currentSlot*secPerSlot), 0)
 		nextSlotStart := slotStart.Add(slotDuration)
 
-		// PROPOSE AT THE START OF THE SLOT. The 1/3 offset is the ATTESTATION deadline — the instant by
-		// which attesters must ALREADY HAVE the block — so a proposer that only begins there is late for
-		// its own attesters by construction. Measured on a 2s slot: AssembleBlock arrived p50 669ms into
-		// the slot it named (min 667 = slotDuration/3 exactly), leaving 1,333ms for a block whose budget
-		// is 1,800ms. The execution layer then answered past the slot end; this loop is single-threaded
-		// and maybePropose blocks on it, so the sleep to nextSlotStart below was skipped, currentSlot was
-		// recomputed from the wall clock, and the slots in between were simply dropped — 2, 4 and 6
-		// second steps between consecutive block numbers.
+		// ⚠ WHERE THE SLOT ACTUALLY GOES. This loop is single-threaded: if one pass takes longer than a
+		// slot, the sleep below is skipped, currentSlot is recomputed from the wall clock, and every slot
+		// it ran through is never proposed for. A missed slot is not a head update, so nothing re-emits
+		// payload attributes and the execution layer keeps building under a slot that has already gone —
+		// which is how its block comes to be asked for under attributes it never agreed to.
+		//
+		// Measured on live358, the execution layer was NOT what held this: post-assemble processing was
+		// p50 3ms and the payload was already sealed when asked in 5,468 of 5,481 blocks, while the worst
+		// hold before the first missed slot was 443ms. The remaining ~4.7s of a 5.5s pass was inside here
+		// and had no timing on it at all. Now it does.
+		passStart := time.Now()
 		s.maybePropose(ctx, currentSlot)
+		proposeMs := time.Since(passStart).Milliseconds()
 
 		// Attest at 1/3, by which point the proposal is in — which is what the offset is for.
 		attestTime := slotStart.Add(slotDuration / 3)
@@ -299,10 +303,21 @@ func (s *Service) slotLoop(ctx context.Context) {
 		}
 
 		// Attest for all validators with duties at this slot.
+		attestStart := time.Now()
 		s.maybeAttest(ctx, currentSlot)
+		attestMs := time.Since(attestStart).Milliseconds()
 
 		// Submit sync committee messages for validators in the current committee.
+		syncStart := time.Now()
 		s.maybeSyncCommittee(ctx, currentSlot)
+		syncMs := time.Since(syncStart).Milliseconds()
+
+		if pass := time.Since(passStart); pass > slotDuration {
+			s.logger.Warn("[dev-validator] slot pass ran past its slot — the next slots are dropped",
+				"slot", currentSlot, "passMs", pass.Milliseconds(),
+				"proposeMs", proposeMs, "attestMs", attestMs, "syncMs", syncMs,
+				"slotMs", slotDuration.Milliseconds())
+		}
 
 		// Wait for next slot.
 		if time.Now().Before(nextSlotStart) {
@@ -324,9 +339,13 @@ func (s *Service) maybePropose(ctx context.Context, slot uint64) {
 	}
 	var duties []proposerDuty
 	path := fmt.Sprintf("/eth/v1/validator/duties/proposer/%d", epoch)
+	dutiesStart := time.Now()
 	if err := s.client.get(ctx, path, &duties); err != nil {
 		s.logger.Warn("[dev-validator] duties skip", "slot", slot, "epoch", epoch, "spe", s.cfg.SlotsPerEpoch, "err", err)
 		return
+	}
+	if d := time.Since(dutiesStart); d > 200*time.Millisecond {
+		s.logger.Warn("[dev-validator] proposer duties fetch was slow", "slot", slot, "tookMs", d.Milliseconds())
 	}
 
 	for _, duty := range duties {
@@ -359,31 +378,41 @@ func (s *Service) maybePropose(ctx context.Context, slot uint64) {
 // proposeBlock fetches a block template, signs it, and submits it.
 func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorKey) error {
 	epoch := slot / s.cfg.SlotsPerEpoch
+	// ⚠ WHERE A PROPOSAL'S TIME GOES. maybePropose was measured at 94-97% of every slot pass that ran
+	// past its slot — p50 7,248ms and max 11,113ms against a 2,000ms slot — while the execution layer's
+	// share of it, the getPayload wait, was at most 3,687ms. The rest was in here with no timing on it.
+	t0 := time.Now()
 
 	// Compute RANDAO reveal.
 	randaoReveal, err := signRandaoReveal(key, epoch, s.cfg, s.genesisValidatorsRoot)
 	if err != nil {
 		return fmt.Errorf("randao reveal: %w", err)
 	}
+	randaoMs := time.Since(t0).Milliseconds()
 
 	// Get block template (unsigned BeaconBlock). Retry a few times if the EL
 	// is busy with fork choice (semaphore contention in AssembleBlock).
 	path := fmt.Sprintf("/eth/v3/validator/blocks/%d?randao_reveal=%s",
 		slot, hexutil.Encode(randaoReveal[:]))
 
+	tmplStart := time.Now()
 	var blockResponse json.RawMessage
 	var getErr error
+	attempts := 0
 	for attempt := 0; attempt < 5; attempt++ {
+		attempts++
 		getErr = s.client.get(ctx, path, &blockResponse)
 		if getErr == nil {
 			break
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
+	templateMs := time.Since(tmplStart).Milliseconds()
 	if getErr != nil {
 		return fmt.Errorf("get block template: %w", getErr)
 	}
 
+	parseStart := time.Now()
 	// Parse the block template. The v3 response is a DenebBeaconBlock
 	// ({"block": {...}, "kzg_proofs": [...], "blobs": [...]}).
 	version := s.cfg.GetCurrentStateVersion(epoch)
@@ -420,12 +449,16 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 		}
 	}
 
+	parseMs := time.Since(parseStart).Milliseconds()
+
 	// Sign the block.
+	signStart := time.Now()
 	sig, err := signBlock(key, block.Block, slot, s.cfg, s.genesisValidatorsRoot)
 	if err != nil {
 		return fmt.Errorf("sign block: %w", err)
 	}
 	block.Signature = sig
+	signMs := time.Since(signStart).Milliseconds()
 
 	// Submit the signed block. For Deneb+, wrap in DenebSignedBeaconBlock
 	// with empty blob sidecars.
@@ -438,8 +471,16 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 			Blobs:       solid.NewStaticListSSZ[*cltypes.Blob](cltypes.MaxBlobsCommittmentsPerBlock, int(cltypes.BYTES_PER_BLOB)),
 		}
 	}
+	pubStart := time.Now()
 	if err := s.client.postJSON(ctx, "/eth/v2/beacon/blocks", submitBody, versionStr); err != nil {
 		return fmt.Errorf("submit block: %w", err)
+	}
+	publishMs := time.Since(pubStart).Milliseconds()
+
+	if total := time.Since(t0); total > 1500*time.Millisecond {
+		s.logger.Warn("[dev-validator] proposal phases", "slot", slot, "totalMs", total.Milliseconds(),
+			"randaoMs", randaoMs, "templateMs", templateMs, "templateAttempts", attempts,
+			"parseMs", parseMs, "signMs", signMs, "publishMs", publishMs)
 	}
 
 	s.logger.Debug("[dev-validator] proposed block", "slot", slot, "validator", key.ValidatorIndex)
