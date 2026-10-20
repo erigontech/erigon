@@ -46,9 +46,31 @@ type Reset struct {
 	}
 }
 
-var stateKVName = regexp.MustCompile(`^(v[0-9]+(?:\.[0-9]+)?)-(accounts|storage|commitment)\.([0-9]+)-([0-9]+)\.kv$`)
+var stateFileName = regexp.MustCompile(`^(v[0-9]+(?:\.[0-9]+)?)-([a-z]+)\.([0-9]+)-([0-9]+)\.(kv|v|ef)$`)
 
-var entityFileName = regexp.MustCompile(`^v[0-9]+(?:\.[0-9]+)?-([a-z]+)\.([0-9]+)-([0-9]+)\.(kv|v|ef)$`)
+type stateFile struct {
+	ver              string
+	entity           string
+	ext              string
+	stepRange        string
+	fromStep, toStep uint64
+}
+
+func parseStateFile(name string) (stateFile, bool) {
+	m := stateFileName.FindStringSubmatch(name)
+	if m == nil {
+		return stateFile{}, false
+	}
+	fromStep, err := strconv.ParseUint(m[3], 10, 64)
+	if err != nil {
+		return stateFile{}, false
+	}
+	toStep, err := strconv.ParseUint(m[4], 10, 64)
+	if err != nil || fromStep > toStep {
+		return stateFile{}, false
+	}
+	return stateFile{ver: m[1], entity: m[2], ext: m[5], stepRange: m[3] + "-" + m[4], fromStep: fromStep, toStep: toStep}, true
+}
 
 // domainBuild is the file a step range will hold for one domain once reset is done and the
 // downloader has fetched what the manifest describes. Only the highest version of a logical file is
@@ -84,28 +106,15 @@ func (reset *Reset) checkStateBuilds() error {
 
 	builds := map[string]map[string]*domainBuild{}
 	record := func(fileName string, retainedLocal bool) {
-		m := stateKVName.FindStringSubmatch(fileName)
-		if m == nil {
+		f, ok := parseStateFile(fileName)
+		if !ok || f.ext != "kv" || (f.entity != "accounts" && f.entity != "storage" && f.entity != "commitment") {
 			return
 		}
-		ver, err := version.ParseVersion(m[1])
+		ver, err := version.ParseVersion(f.ver)
 		if err != nil {
 			return
 		}
-		fromStep, err := strconv.ParseUint(m[3], 10, 64)
-		if err != nil {
-			return
-		}
-		toStep, err := strconv.ParseUint(m[4], 10, 64)
-		if err != nil {
-			return
-		}
-		// A name whose range runs backwards describes no real file, and the span it implies
-		// underflows into one that looks like it carries references.
-		if toStep <= fromStep {
-			return
-		}
-		stepRange, domain := m[3]+"-"+m[4], m[2]
+		stepRange, domain := f.stepRange, f.entity
 		if builds[stepRange] == nil {
 			builds[stepRange] = map[string]*domainBuild{}
 		}
@@ -122,27 +131,17 @@ func (reset *Reset) checkStateBuilds() error {
 			name:          fileName,
 			retainedLocal: retainedLocal,
 			ver:           ver,
-			fromStep:      fromStep,
-			toStep:        toStep,
+			fromStep:      f.fromStep,
+			toStep:        f.toStep,
 		}
 	}
 
 	entityEnds := map[string]uint64{}
 	recordEnd := func(fileName string) {
-		m := entityFileName.FindStringSubmatch(fileName)
-		if m == nil {
-			return
+		if f, ok := parseStateFile(fileName); ok {
+			entity := f.entity + "." + f.ext
+			entityEnds[entity] = max(entityEnds[entity], f.toStep)
 		}
-		fromStep, err := strconv.ParseUint(m[2], 10, 64)
-		if err != nil {
-			return
-		}
-		toStep, err := strconv.ParseUint(m[3], 10, 64)
-		if err != nil || fromStep > toStep {
-			return
-		}
-		entity := m[1] + "." + m[4]
-		entityEnds[entity] = max(entityEnds[entity], toStep)
 	}
 
 	// A file the manifest describes ends up canonical whether or not it is on disk now: reset drops
