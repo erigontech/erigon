@@ -140,6 +140,7 @@ const (
 	MaxDialTimeout               = 15 * time.Second
 	VersionLength  int           = 4
 	MaxChunkSize   uint64        = 15 * 1024 * 1024
+	MaxPayloadSize uint64        = 10 * 1024 * 1024
 	ReqTimeout     time.Duration = 5 * time.Second
 	RespTimeout    time.Duration = 10 * time.Second
 	// ExecutionPayload transactions bounds from consensus specs.
@@ -887,10 +888,7 @@ func (b *BeaconChainConfig) AttestationDueMs(gloas bool) uint64 {
 	if gloas {
 		return b.SecondsPerSlot * AttestationDueBpsGloas / (BpsFactor / 1000)
 	}
-	if b.IntervalsPerSlot == 0 {
-		return 0
-	}
-	return b.SecondsPerSlot * 1000 / b.IntervalsPerSlot
+	return b.SecondsPerSlot * AttestationDueBps / (BpsFactor / 1000)
 }
 
 // PayloadAttestationDueMs returns the Gloas PTC deadline in milliseconds from slot start.

@@ -40,6 +40,9 @@ var ErrIsSuperset = errors.New("attestation is superset of existing attestation"
 // ErrPoolLimit reports an attestation dropped because the pool holds as many aggregates as it may.
 var ErrPoolLimit = errors.New("aggregation pool limit reached")
 
+// ErrVoterAlreadyCounted reports a vote of a committee member the pool already counts for other data.
+var ErrVoterAlreadyCounted = errors.New("committee member already voted for other attestation data")
+
 // maxDataPerCommittee bounds the distinct AttestationData kept per slot and committee, and also the
 // refused data tracked for it. Honest votes split by head block and, from Gloas, by payload status
 // (data.index), so a late block already gives up to three honest data; the fourth is a spare for a fork.
@@ -78,6 +81,9 @@ type aggregationPoolImpl struct {
 	// aggregatorDuties holds the committees with a local aggregator. An aggregator may get its data
 	// from another beacon node, so these committees keep the refused data of every voter.
 	aggregatorDuties map[slotCommittee]struct{}
+	// voters holds the members whose vote is counted, per slot and committee. A member votes once per
+	// epoch, so one already counted for other data equivocates, and every data needs its own voter.
+	voters map[slotCommittee]*solid.BitList
 	// pinned holds the data roots the node served its validators, with their slot for pruning. Gossip
 	// cannot displace them.
 	pinned map[common.Hash]uint64
@@ -109,6 +115,7 @@ func NewAggregationPool(
 		dataPerCommittee:      make(map[slotCommittee][]keyAggrInCommittee),
 		refused:               make(map[slotCommittee]map[common.Hash]*committeeAggregate),
 		aggregatorDuties:      make(map[slotCommittee]struct{}),
+		voters:                make(map[slotCommittee]*solid.BitList),
 		pinned:                make(map[common.Hash]uint64),
 	}
 	go p.sweepStaleAtt(ctx)
@@ -187,20 +194,30 @@ func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation, ver
 		dataRoot:       hashRoot,
 		committeeIndex: committeeIndex,
 	}
+	perCommittee := slotCommittee{slot: inAtt.Data.Slot, committee: committeeIndex}
 	p.aggregatesLock.Lock()
 	defer p.aggregatesLock.Unlock()
+	if p.votedForOtherData(perCommittee, key, inAtt) {
+		return ErrVoterAlreadyCounted
+	}
+	if err := p.addCommitteeVote(perCommittee, key, inAtt, version); err != nil {
+		return err
+	}
+	return p.countVoters(perCommittee, inAtt)
+}
+
+func (p *aggregationPoolImpl) addCommitteeVote(perCommittee slotCommittee, key keyAggrInCommittee, inAtt *solid.Attestation, version clparams.StateVersion) error {
 	entry, exist := p.aggregatesInCommittee[key]
 	if exist {
 		return entry.add(inAtt, version)
 	}
-	perCommittee := slotCommittee{slot: inAtt.Data.Slot, committee: committeeIndex}
-	_, pinned := p.pinned[hashRoot]
+	_, pinned := p.pinned[key.dataRoot]
 	full := len(p.dataPerCommittee[perCommittee]) >= maxDataPerCommittee
 	if full && !(pinned && p.hasUnpinnedData(perCommittee)) {
 		return p.addRefusedVote(perCommittee, key, inAtt, version)
 	}
 	// Decode the signature before making room, so a rejected attestation evicts nothing.
-	entry, err = newCommitteeAggregate(inAtt, version)
+	entry, err := newCommitteeAggregate(inAtt, version)
 	if err != nil {
 		return err
 	}
@@ -215,6 +232,34 @@ func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation, ver
 		}
 	}
 	p.storeCommitteeAggregate(perCommittee, key, entry)
+	return nil
+}
+
+// votedForOtherData reports a vote whose members are already counted for other data of the committee.
+// A member counted for this data is left to the aggregate, which refuses the overlap.
+func (p *aggregationPoolImpl) votedForOtherData(perCommittee slotCommittee, key keyAggrInCommittee, inAtt *solid.Attestation) bool {
+	counted, ok := p.voters[perCommittee]
+	if !ok || !utils.IsOverlappingSSZBitlist(counted.Bytes(), inAtt.AggregationBits.Bytes()) {
+		return false
+	}
+	own, ok := p.aggregatesInCommittee[key]
+	if !ok {
+		own, ok = p.refused[perCommittee][key.dataRoot]
+	}
+	return !ok || !utils.IsOverlappingSSZBitlist(own.attestation.AggregationBits.Bytes(), inAtt.AggregationBits.Bytes())
+}
+
+func (p *aggregationPoolImpl) countVoters(perCommittee slotCommittee, inAtt *solid.Attestation) error {
+	counted, ok := p.voters[perCommittee]
+	if !ok {
+		p.voters[perCommittee] = inAtt.AggregationBits.Copy()
+		return nil
+	}
+	merged, err := counted.Merge(inAtt.AggregationBits)
+	if err != nil {
+		return err
+	}
+	p.voters[perCommittee] = merged
 	return nil
 }
 
@@ -357,8 +402,9 @@ func (p *aggregationPoolImpl) AddAggregatorDuty(slot, committeeIndex uint64) {
 	p.aggregatorDuties[slotCommittee{slot: slot, committee: committeeIndex}] = struct{}{}
 }
 
-// refusedLimit bounds the refused data of a committee. With a local aggregator it is the committee
-// size: a validator votes once per epoch, so every data that got a vote keeps it.
+// refusedLimit bounds the refused data of a committee. With a local aggregator it is
+// MAX_VALIDATORS_PER_COMMITTEE: every data needs a member not counted for other data, so the data of
+// a committee never outnumber its members, and every data that got a vote keeps it.
 func (p *aggregationPoolImpl) refusedLimit(perCommittee slotCommittee) int {
 	if _, ok := p.aggregatorDuties[perCommittee]; ok {
 		return int(p.beaconConfig.MaxValidatorsPerCommittee)
@@ -474,6 +520,11 @@ func (p *aggregationPoolImpl) pruneStaleLocked() {
 	for perCommittee := range p.aggregatorDuties {
 		if p.ethClock.GetEpochAtSlot(perCommittee.slot)+1 < currentEpoch {
 			delete(p.aggregatorDuties, perCommittee)
+		}
+	}
+	for perCommittee := range p.voters {
+		if p.ethClock.GetEpochAtSlot(perCommittee.slot)+1 < currentEpoch {
+			delete(p.voters, perCommittee)
 		}
 	}
 }

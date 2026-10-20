@@ -286,7 +286,7 @@ func newChainTipBatchFixtureWithRecordedStatus(t *testing.T, replayStatus execut
 		nil,
 	)
 	require.NoError(t, err)
-	store.OnTick((parent.Block.Slot + 1) * beaconCfg.SecondsPerSlot)
+	store.OnTick((parent.Block.Slot + 1) * beaconCfg.SecondsPerSlot * 1000)
 	if recordStatus {
 		store.MarkPayloadStatus(parentRoot, envelope.Message.Payload.BlockHash, execution_client.PayloadStatusNone)
 		status, found := store.GetRecentExecutionPayloadStatusByRoot(parentRoot)
