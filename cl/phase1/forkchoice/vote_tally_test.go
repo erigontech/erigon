@@ -91,7 +91,7 @@ func TestVoteTallyMatchesFullRecount(t *testing.T) {
 	require.Greater(t, compared, 500)
 }
 
-func TestVoteTallyDropsRootsLeftWithoutVotes(t *testing.T) {
+func TestVoteTallyReusesSlotsAndOmitsZeroWeightRoots(t *testing.T) {
 	const validators = 4
 	cs := &checkpointState{
 		balances:         make([]uint64, validators),
@@ -105,8 +105,11 @@ func TestVoteTallyDropsRootsLeftWithoutVotes(t *testing.T) {
 	}
 	f := &ForkChoiceStore{latestMessages: newLatestMessagesStore(validators)}
 	checkpoint := solid.Checkpoint{Epoch: 1}
-	for epoch, root := range []common.Hash{{1}, {2}, {1}, {2}} {
+	roots := []common.Hash{{1}, {2}}
+	for epoch := range 8 {
+		root := roots[epoch%len(roots)]
 		f.setLatestMessage(0, LatestMessage{Epoch: uint64(epoch), Root: root})
-		require.Equal(t, recountVotes(f, cs), f.voteTally.votes(f, checkpoint, cs), "epoch %d", epoch)
+		require.Equal(t, map[common.Hash]uint64{root: 32_000_000_000}, f.voteTally.votes(f, checkpoint, cs), "epoch %d", epoch)
+		require.LessOrEqual(t, len(f.voteTally.weights), len(roots)+1, "epoch %d", epoch)
 	}
 }
