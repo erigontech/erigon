@@ -1067,12 +1067,7 @@ func (bal BlockAccessList) CountDeclaredReads() int {
 	return n
 }
 
-// DeclaredReadTracker accumulates which (address, slot) pairs from a declared
-// BlockAccessList's storage_reads have been satisfied by an actual SLOAD during
-// block execution. It backs the EIP-7928 phantom-read DoS mitigation: at each
-// transaction boundary, the executor observes the tx's reads, then asks
-// EarlyRejectCheck whether enough block gas remains to still satisfy the
-// outstanding declared reads at the minimum per-read cost.
+// DeclaredReadTracker tracks pending BAL storage reads for the gas feasibility check.
 type DeclaredReadTracker struct {
 	pending   map[common.Address]map[common.Hash]struct{}
 	remaining int
@@ -1095,6 +1090,11 @@ func NewDeclaredReadTracker(bal BlockAccessList) *DeclaredReadTracker {
 	return t
 }
 
+func (t *DeclaredReadTracker) ExcludeAddress(addr common.Address) {
+	t.remaining -= len(t.pending[addr])
+	delete(t.pending, addr)
+}
+
 // ObserveRead marks (addr, slot) as observed. First-time observation of a
 // declared storage_read decrements Remaining; reads of undeclared slots or
 // repeats are no-ops.
@@ -1113,8 +1113,7 @@ func (t *DeclaredReadTracker) ObserveRead(addr common.Address, slot common.Hash)
 	t.remaining--
 }
 
-// Remaining returns the number of declared storage_reads not yet observed
-// (R_remaining in EIP-7928 Security Considerations).
+// Remaining returns the number of pending storage reads at non-excluded addresses.
 func (t *DeclaredReadTracker) Remaining() int { return t.remaining }
 
 // EarlyRejectCheck enforces the EIP-7928 Security Considerations budget:

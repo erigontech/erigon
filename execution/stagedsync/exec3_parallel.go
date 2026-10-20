@@ -1313,6 +1313,10 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	executor, ok := pe.blockExecutors[blockNum]
 	if !ok {
 		executor = newBlockExec(execRequest.block, execRequest.gasPool, execRequest.accessList, execRequest.applyResults, execRequest.commitResults, execRequest.profile, execRequest.exhausted)
+		// System calls do not use block gas; their reads are checked against the final BAL.
+		for _, addr := range pe.cfg.chainConfig.SystemContracts(execRequest.block.Time()) {
+			executor.declaredReadTracker.ExcludeAddress(addr.Value())
+		}
 	}
 
 	for i, txTask := range execRequest.tasks {
