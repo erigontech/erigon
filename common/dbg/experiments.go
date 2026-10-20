@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/metrics"
 	"runtime/pprof"
 	"strings"
 	"sync"
@@ -49,7 +50,7 @@ var (
 	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
 	// CallNoMaterialize runs eth_call on the versioned state path, where reads
 	// go straight to the state reader instead of a resident stateObject.
-	CallNoMaterialize = EnvBool("CALL_NO_MATERIALIZE", false)
+	CallNoMaterialize = EnvBool("CALL_NO_MATERIALIZE", true)
 
 	MdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
 	MdbxNoSync       = EnvBool("MDBX_NO_FSYNC", false)
@@ -194,6 +195,17 @@ func ReadMemStats(m *runtime.MemStats) {
 		return
 	}
 	runtime.ReadMemStats(m)
+}
+
+// MemUsage returns MemStats.Alloc and MemStats.Sys without the stop-the-world
+// of runtime.ReadMemStats, so it is cheap enough for per-block logs.
+func MemUsage() (alloc, sys uint64) {
+	s := []metrics.Sample{
+		{Name: "/memory/classes/heap/objects:bytes"},
+		{Name: "/memory/classes/total:bytes"},
+	}
+	metrics.Read(s)
+	return s[0].Value.Uint64(), s[1].Value.Uint64()
 }
 
 func DiscardCommitment() bool       { return discardCommitment }

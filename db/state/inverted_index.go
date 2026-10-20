@@ -722,9 +722,9 @@ func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNu
 	if err != nil {
 		return nil, err
 	}
-	return stream.TransformKV2U64(it, func(_, v []byte) (uint64, error) {
+	return stream.TransformKV2U64Seekable(it, func(_, v []byte) (uint64, error) {
 		return binary.BigEndian.Uint64(v), nil
-	}), nil
+	}, binary.BigEndian.AppendUint64), nil
 }
 
 // IdxRange is to be used in public API, therefore it relies on read-only transaction
@@ -996,7 +996,7 @@ func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.Rw
 	pruneStat, err := prune.TableScanningPrune(ctx, name, iit.ii.FilenameBase, txFrom, txTo, iit.stepSize,
 		logEvery, iit.ii.logger, keysCursor, valDelCursor, prs, mode)
 	if err != nil {
-		iit.ii.logger.Error("prune table", iit.ii.FilenameBase, "err", err)
+		iit.ii.logger.Error("prune table", "name", iit.ii.FilenameBase, "err", err)
 		return nil, err
 	}
 	defer func() {

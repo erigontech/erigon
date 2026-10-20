@@ -451,6 +451,38 @@ func TestFilterModeValidation(t *testing.T) {
 	}
 }
 
+func TestFilterRejectsUnknownFields(t *testing.T) {
+	m := execmoduletester.New(t)
+	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	require.NoError(t, server.RegisterName("trace", newTraceApiForTest(m)))
+	client := rpc.DialInProc(server, log.New())
+	t.Cleanup(func() { client.Close(); server.Stop() })
+	for _, field := range []string{"unknownDiagnosticFlag", "fromAdress", "address"} {
+		t.Run(field, func(t *testing.T) {
+			var result json.RawMessage
+			err := client.CallContext(t.Context(), &result, "trace_filter", map[string]any{"fromBlock": "0x0", field: true})
+			var rpcErr rpc.Error
+			require.ErrorAs(t, err, &rpcErr)
+			require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+			require.ErrorContains(t, err, field)
+		})
+	}
+}
+
+// Member names match case-insensitively, as in encoding/json; this is accepted
+// on purpose, unlike Parity's exact names. A bound past the head proves that
+// FROMBLOCK is decoded as fromBlock rather than ignored.
+func TestFilterFieldNamesAreCaseInsensitive(t *testing.T) {
+	m := execmoduletester.New(t)
+	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	require.NoError(t, server.RegisterName("trace", newTraceApiForTest(m)))
+	client := rpc.DialInProc(server, log.New())
+	t.Cleanup(func() { client.Close(); server.Stop() })
+	var result json.RawMessage
+	err := client.CallContext(t.Context(), &result, "trace_filter", map[string]any{"FROMBLOCK": "0x1"})
+	require.EqualError(t, err, ErrBlockRangeIntoFuture)
+}
+
 // TestFilterBoundPastHead checks that a bound past the executed head returns
 // -32602, as eth_getLogs does, instead of an empty result, and that the head
 // itself is still a valid bound.

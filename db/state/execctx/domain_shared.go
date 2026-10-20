@@ -49,10 +49,6 @@ import (
 
 var mxFlushTook = metrics.GetOrCreateSummary("domain_flush_took")
 
-// CommitmentFlushCallback is invoked once per flushed commitment-domain tuple
-// (key, value, step, txNum) by TemporalMemBatch.FlushWithCommitmentCallback.
-type CommitmentFlushCallback func(k []byte, v []byte, step kv.Step, txNum uint64)
-
 // KvList sort.Interface to sort write list by keys
 type KvList struct {
 	Keys []string
@@ -1296,11 +1292,13 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	if err := requireStateVersion(tx, committedStateVersion); err != nil {
 		return err
 	}
+	viewID := tx.ViewID()
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	if sd.hasLocalCacheUnwind() && sd.branchCache != nil {
-		sd.branchCache.Unwind(sd.cacheUnwind.toTxNum)
+	// Reads opened before the commit still see the unwound branches and may have filled them.
+	if sd.cacheUnwind.pending && sd.branchCache != nil {
+		sd.branchCache.UnwindCommitted(sd.cacheUnwind.toTxNum, viewID)
 	}
 	for i := range pendingBranches {
 		u := &pendingBranches[i]
@@ -2041,4 +2039,15 @@ func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxN
 		changes++
 	}
 	return changes, nil
+}
+
+type DomainReader interface {
+	membatchwithdb.DomainReader
+	AsGetter(tx kv.TemporalTx) execctxapi.StateGetter
+	IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error
+}
+
+// AsGetter returns a metrics-free execution getter.
+func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) execctxapi.StateGetter {
+	return sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})
 }

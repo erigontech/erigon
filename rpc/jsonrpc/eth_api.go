@@ -135,7 +135,7 @@ type EthAPI interface {
 	Sign(ctx context.Context, _ common.Address, _ hexutil.Bytes) (hexutil.Bytes, error)
 	SignTransaction(_ context.Context, txObject any) (common.Hash, error)
 	FillTransaction(ctx context.Context, args ethapi.CallArgs) (*ethapi.SignTransactionResult, error)
-	GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNr *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error)
+	GetProof(ctx context.Context, address common.Address, storageKeys StorageKeys, blockNr *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error)
 	CreateAccessList(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi.StateOverrides, optimizeGas *bool) (*accessListResult, error)
 
 	// Mining related (see ./eth_mining.go)
@@ -403,6 +403,16 @@ func (api *BaseAPI) headerByHashAndNumber(ctx context.Context, tx kv.Getter, has
 		api.headersLRU.Add(hash, header)
 	}
 	return header, nil
+}
+
+// currentHeader is rawdb.ReadCurrentHeader served through the header caches.
+func (api *BaseAPI) currentHeader(ctx context.Context, tx kv.Getter) (*types.Header, error) {
+	hash := rawdb.ReadHeadHeaderHash(tx)
+	number := rawdb.ReadHeaderNumber(tx, hash)
+	if number == nil {
+		return nil, nil
+	}
+	return api.headerByHashAndNumber(ctx, tx, hash, *number)
 }
 
 func (api *BaseAPI) canonicalHeaderByNumber(ctx context.Context, tx kv.Getter, number uint64) (*types.Header, error) {
@@ -936,6 +946,7 @@ type APIImpl struct {
 	RpcTxSyncDefaultTimeout     time.Duration
 	RpcTxSyncMaxTimeout         time.Duration
 	logger                      log.Logger
+	gasOracleLogger             log.Logger
 }
 
 // NewEthAPI returns APIImpl instance
@@ -962,6 +973,7 @@ func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPo
 		RpcTxSyncDefaultTimeout:     cfg.RpcTxSyncDefaultTimeout,
 		RpcTxSyncMaxTimeout:         cfg.RpcTxSyncMaxTimeout,
 		logger:                      logger,
+		gasOracleLogger:             logger.New("app", "gasPriceOracle"),
 	}
 }
 

@@ -38,6 +38,11 @@ var (
 	ErrNoPeers      = errors.New("no peers")
 )
 
+const (
+	handshakeFailureUndialableThreshold = 3
+	handshakeFailureRefusalThreshold    = 10
+)
+
 // Item is an item in the pool
 type Item struct {
 	id    peer.ID
@@ -65,6 +70,7 @@ type Pool struct {
 	host host.Host
 
 	bannedPeers       *lru.CacheWithTTL[peer.ID, struct{}]
+	undialable        *lru.CacheWithTTL[peer.ID, struct{}]
 	handshakeFailures *lru.CacheWithTTL[peer.ID, int]
 
 	mu sync.Mutex
@@ -74,22 +80,24 @@ func NewPool(h host.Host) *Pool {
 	return &Pool{
 		host:              h,
 		bannedPeers:       lru.NewWithTTL[peer.ID, struct{}]("bannedPeers", 100_000, 30*time.Minute),
-		handshakeFailures: lru.NewWithTTL[peer.ID, int]("handshakeFailures", 10_000, 10*time.Minute),
+		undialable:        lru.NewWithTTL[peer.ID, struct{}]("undialable", 100_000, 30*time.Minute),
+		handshakeFailures: lru.NewWithTTL[peer.ID, int]("handshakeFailures", 100_000, 10*time.Minute),
 	}
 }
 
-// RecordHandshakeFailure increments the failure count. After 3 failures within 10 minutes, the peer is banned.
-func (p *Pool) RecordHandshakeFailure(pid peer.ID) {
+// RecordHandshakeFailure records a failure and reports threshold transitions. Failures stop our
+// dials before they refuse the peer's own connections, because a peer may close our dials without
+// misbehaving.
+func (p *Pool) RecordHandshakeFailure(pid peer.ID) (count int, becameUndialable bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	count, _ := p.handshakeFailures.Get(pid)
+	count, _ = p.handshakeFailures.Get(pid)
 	count++
-	if count >= 3 {
-		p.bannedPeers.Add(pid, struct{}{})
-		p.handshakeFailures.Remove(pid)
-	} else {
-		p.handshakeFailures.Add(pid, count)
+	if count >= handshakeFailureUndialableThreshold {
+		p.undialable.Add(pid, struct{}{})
 	}
+	p.handshakeFailures.Add(pid, count)
+	return count, count == handshakeFailureUndialableThreshold
 }
 
 func (p *Pool) BanStatus(pid peer.ID) bool {
@@ -97,8 +105,31 @@ func (p *Pool) BanStatus(pid peer.ID) bool {
 	return ok
 }
 
+func (p *Pool) Dialable(pid peer.ID) bool {
+	if p.RefuseConnections(pid) {
+		return false
+	}
+	_, undialable := p.undialable.Get(pid)
+	return !undialable
+}
+
+func (p *Pool) RefuseConnections(pid peer.ID) bool {
+	if p.BanStatus(pid) {
+		return true
+	}
+	failures, ok := p.handshakeFailures.Get(pid)
+	return ok && failures >= handshakeFailureRefusalThreshold
+}
+
 func (p *Pool) LenBannedPeers() int {
 	return p.bannedPeers.Len()
+}
+
+func (p *Pool) RecordHandshakeSuccess(pid peer.ID) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.handshakeFailures.Remove(pid)
+	p.undialable.Remove(pid)
 }
 
 func (p *Pool) SetBanStatus(pid peer.ID, banned bool) {

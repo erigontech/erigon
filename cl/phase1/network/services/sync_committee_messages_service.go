@@ -18,6 +18,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -27,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
@@ -131,8 +133,11 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 			return ErrIgnore
 		}
 		// [REJECT] The subnet_id is valid for the given validator, i.e. subnet_id in compute_subnets_for_sync_committee(state, sync_committee_message.validator_index).
-		// Note this validation implies the validator is part of the broader current sync committee along with the correct subcommittee.
-		subnets, err := subnets.ComputeSubnetsForSyncCommittee(headState, msg.SyncCommitteeMessage.ValidatorIndex)
+		// The committee is the one that signs for the message slot, which is the next committee at the last slot of a period.
+		subnets, err := subnets.ComputeSubnetsForSyncCommittee(headState, msg.SyncCommitteeMessage.Slot, msg.SyncCommitteeMessage.ValidatorIndex)
+		if errors.Is(err, state.ErrSyncCommitteeNotInState) {
+			return fmt.Errorf("%w: %w", ErrIgnore, err)
+		}
 		if err != nil {
 			return err
 		}
@@ -255,7 +260,7 @@ func verifySyncCommitteeMessageSignature(s *state.CachingBeaconState, msg *cltyp
 		return nil, nil, nil, err
 	}
 	cfg := s.BeaconConfig()
-	domain, err := s.GetDomain(cfg.DomainSyncCommittee, state.GetEpochAtSlot(cfg, msg.Slot))
+	domain, err := fork.ComputeDomainAtEpoch(cfg, cfg.DomainSyncCommittee, state.GetEpochAtSlot(cfg, msg.Slot), s.GenesisValidatorsRoot())
 	if err != nil {
 		return nil, nil, nil, err
 	}

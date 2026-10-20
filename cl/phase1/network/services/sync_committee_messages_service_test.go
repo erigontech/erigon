@@ -25,12 +25,10 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	syncpoolmock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 )
@@ -66,42 +64,6 @@ func getObjectsForSyncCommitteesServiceTest() (*state.CachingBeaconState, *SyncC
 		ImmediateVerification: true,
 	}
 	return state, msg
-}
-
-func TestVerifySyncCommitteeMessageSignatureUsesMessageSlotDomain(t *testing.T) {
-	headState, msg := getObjectsForSyncCommitteesServiceTest()
-	cfg := headState.BeaconConfig()
-	forkEpoch := state.Epoch(headState) + 1
-	headSlot := forkEpoch * cfg.SlotsPerEpoch
-	require.NoError(t, headState.SetSlot(headSlot))
-
-	previousVersion := common.Bytes4{0x01}
-	currentVersion := common.Bytes4{0x02}
-	headState.SetFork(&cltypes.Fork{
-		PreviousVersion: previousVersion,
-		CurrentVersion:  currentVersion,
-		Epoch:           forkEpoch,
-	})
-
-	for _, tc := range []struct {
-		name        string
-		slot        uint64
-		forkVersion common.Bytes4
-	}{
-		{name: "previous epoch", slot: headSlot - 1, forkVersion: previousVersion},
-		{name: "same epoch", slot: headSlot, forkVersion: currentVersion},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			msg.SyncCommitteeMessage.Slot = tc.slot
-			_, signingRoot, _, err := verifySyncCommitteeMessageSignature(headState, msg.SyncCommitteeMessage)
-			require.NoError(t, err)
-
-			domain, err := fork.ComputeDomain(cfg.DomainSyncCommittee[:], tc.forkVersion, headState.GenesisValidatorsRoot())
-			require.NoError(t, err)
-			expected := crypto.Sha256(msg.SyncCommitteeMessage.BeaconBlockRoot[:], domain)
-			require.Equal(t, expected[:], signingRoot)
-		})
-	}
 }
 
 // TestSyncCommitteesIgnoresForgedSlotThatAliasesToNow uses the real clock: a slot 2^62 ahead
@@ -268,4 +230,81 @@ func TestSyncCommitteesIgnoresRetryAfterSuccessfulPublish(t *testing.T) {
 
 	err := s.ProcessMessage(context.Background(), subnet, msg)
 	require.ErrorIs(t, err, ErrIgnore)
+}
+
+// Members assigned to slot+1 sign for slot, so at the last slot of a period the next committee signs,
+// whatever slot the head is at.
+func TestSyncCommitteesChecksTheCommitteeOfTheMessageSlot(t *testing.T) {
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = func(_, _, _ [][]byte) (bool, error) { return true, nil }
+	fixture, _ := getObjectsForSyncCommitteesServiceTest()
+	period := fixture.BeaconConfig().SlotsPerEpoch * fixture.BeaconConfig().EpochsPerSyncCommitteePeriod
+
+	tests := []struct {
+		name         string
+		headBehind   uint64 // slots before the first slot of the next period: 1 puts the head at the last slot
+		messageSlot  uint64 // slots before the first slot of the next period
+		inNext       bool
+		wantRejected bool
+		wantIgnored  bool
+		unknown      bool // the validator index is not in the registry
+	}{
+		{"previous slot with the head at the last slot", 1, 2, false, false, false, false},
+		{"last slot with the head one slot behind", 2, 1, true, false, false, false},
+		{"last slot signed by the current committee", 2, 1, false, true, false, false},
+		{"committee not in the head state", 1 + 2*period, 1, true, false, true, false},
+		{"unknown validator with the committee not in the head state", 1 + 2*period, 1, true, true, false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			head, msg := getObjectsForSyncCommitteesServiceTest()
+			cfg := head.BeaconConfig()
+			// Three periods after the fixture, so a head two periods behind the message stays above zero.
+			nextPeriod := cfg.RoundSlotToSyncCommitteePeriod(head.Slot()) + 3*cfg.SlotsPerEpoch*cfg.EpochsPerSyncCommitteePeriod
+			require.Greater(t, nextPeriod, tt.headBehind)
+			require.NoError(t, head.SetSlot(nextPeriod-tt.headBehind))
+
+			publicKey := common.Bytes48{0xaa}
+			validator, err := head.ValidatorForValidatorIndex(0)
+			require.NoError(t, err)
+			validator.SetPublicKey(publicKey)
+			head.SetValidatorAtIndex(0, validator)
+			current, next := head.CurrentSyncCommittee().Copy(), head.NextSyncCommittee().Copy()
+			member, other := current, next
+			if tt.inNext {
+				member, other = next, current
+			}
+			pubkeys := member.GetCommittee()
+			pubkeys[0] = publicKey
+			member.SetCommittee(pubkeys)
+			require.NotContains(t, other.GetCommittee(), publicKey)
+			require.NoError(t, head.SetCurrentSyncCommittee(current))
+			require.NoError(t, head.SetNextSyncCommittee(next))
+
+			msg.SyncCommitteeMessage.Slot = nextPeriod - tt.messageSlot
+			msg.SyncCommitteeMessage.ValidatorIndex = 0
+			if tt.unknown {
+				msg.SyncCommitteeMessage.ValidatorIndex = uint64(head.ValidatorLength())
+			}
+			msg.ImmediateVerification = true
+
+			s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
+			require.NoError(t, synced.OnHeadState(head))
+			ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(msg.SyncCommitteeMessage.Slot).Return(true).AnyTimes()
+			ethClock.EXPECT().GetCurrentSlot().Return(msg.SyncCommitteeMessage.Slot).AnyTimes()
+
+			err = s.ProcessMessage(context.Background(), new(uint64), msg)
+			if tt.wantIgnored {
+				require.ErrorIs(t, err, ErrIgnore)
+				return
+			}
+			if tt.wantRejected {
+				require.Error(t, err)
+				require.NotErrorIs(t, err, ErrIgnore)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
 }

@@ -68,7 +68,7 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 			}
 		} else {
 			if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
-				sn, err := subnets.ComputeSubnetsForSyncCommittee(headState, subRequest.ValidatorIndex)
+				sn, err := subnets.ComputeSubnetsForSyncCommittee(headState, headState.Slot(), subRequest.ValidatorIndex)
 				if err != nil {
 					return err
 				}
