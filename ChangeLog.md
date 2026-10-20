@@ -2,6 +2,8 @@
 
 ### Breaking Changes
 
+- rpc: historical requests now check available state history and block transactions as well as configured retention. Requests below the observed boundary return a pruning error, including while a wider retention window refills. Local and remote history-lookup failures now propagate to RPC callers. `eth_capabilities` reports these availability bounds without changing the configured deletion policy. Reward requests to `eth_feeHistory` stop at the first unavailable block; if the oldest requested block is unavailable, the result is empty without a pruning error. Header-only fee history remains available, and `eth_gasPrice` keeps its fallback behavior. Count-limited `erigon_getLatestLogs` queries can finish within retained history without requiring the full requested range. Unpruned MDBX-only nodes now advertise minimum block 0 to peers. This can be a breaking change (#23776) — by @yperbasis
+
 - rpc: a JSON-RPC call sent over GET (`/?method=...&params=...`) now needs `Content-Type: application/json`, as a POST already does; without it the server answers 415. A cross-site page cannot set this header without a CORS preflight, so this also covers plain-HTTP, non-loopback addresses, where browsers send neither `Origin` nor `Sec-Fetch-Site`. The empty GET health check is unchanged. Callers such as `curl "http://host:8545/?method=..."` must add `-H 'Content-Type: application/json'`. This can be a breaking change (#24969) — by @lupin012
 
 ---
