@@ -19,6 +19,7 @@ package block_collector
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -102,7 +103,7 @@ func (p *PersistentBlockCollector) AddBlock(block *cltypes.BeaconBlock) error {
 	defer p.mu.Unlock()
 
 	if p.db == nil {
-		return fmt.Errorf("database not initialized")
+		return errors.New("database not initialized")
 	}
 
 	payload := block.Body.ExecutionPayload
@@ -123,7 +124,7 @@ func (p *PersistentBlockCollector) AddGloasBlock(block *cltypes.BeaconBlock, env
 	defer p.mu.Unlock()
 
 	if p.db == nil {
-		return fmt.Errorf("database not initialized")
+		return errors.New("database not initialized")
 	}
 
 	payload := envelope.Message.Payload
@@ -193,7 +194,7 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	defer p.releaseOversizedScratch()
 
 	if p.db == nil {
-		return fmt.Errorf("database not initialized")
+		return errors.New("database not initialized")
 	}
 
 	blocksBatch := []*types.Block{}
