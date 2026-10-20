@@ -339,11 +339,16 @@ func TestColumnSyncGivesUpBackfillRootsAtTheMaximumBackoff(t *testing.T) {
 	f.d.blocksToCheckSync.add(f.roots[12], live, time.Time{})
 	require.Equal(t, []uint64{10, 12}, f.queuedSlots())
 
-	for range f.d.beaconConfig.SlotsPerEpoch {
+	fail := func() {
 		f.d.columnSyncRoundFailed(t.Context(), f.roots[10], 10, time.Now())
 		f.d.columnSyncRoundFailed(t.Context(), f.roots[12], 12, time.Now())
 	}
+	for range f.d.beaconConfig.SlotsPerEpoch - 1 {
+		fail()
+	}
+	require.Equal(t, []uint64{10, 12}, f.queuedSlots(), "a backfill root is kept below the maximum backoff")
 
+	fail()
 	require.Equal(t, []uint64{12}, f.queuedSlots())
 }
 

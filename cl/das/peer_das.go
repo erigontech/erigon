@@ -2127,9 +2127,6 @@ func (d *peerdas) stillCanonical(ctx context.Context, slot uint64, root common.H
 	return canonical
 }
 
-// syncColumnDataWorker fetches the custody columns gossip did not deliver. Download rounds run
-// off the ticker with a per-root in-flight marker, so one root nobody serves cannot stall the
-// others.
 // columnSyncRoundFailed records a round that left a root's columns missing. A root whose backoff
 // reached an epoch is kept while it is canonical, since nothing in this queue re-queues it; a later
 // SyncColumnDataLater can, for example for a parked Gloas envelope. A root that is not canonical,
@@ -2149,11 +2146,12 @@ func (d *peerdas) columnSyncRoundFailed(ctx context.Context, root common.Hash, s
 	}
 }
 
+// syncColumnDataWorker fetches the custody columns gossip did not deliver. Download rounds run
+// off the ticker with a per-root in-flight marker, so one root nobody serves cannot stall the
+// others.
 func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 	ticker := time.NewTicker(d.deferredColumnSyncTick())
 	defer ticker.Stop()
-	// The round's own context has expired by then, so the canonical check uses the worker's.
-	failed := func(root common.Hash, slot uint64, now time.Time) { d.columnSyncRoundFailed(ctx, root, slot, now) }
 	for {
 		select {
 		case <-ctx.Done():
@@ -2220,7 +2218,8 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 					continue
 				}
 				if !available {
-					failed(root, blocks[i].GetSlot(), time.Now())
+					// The round's own context has expired by then, so the canonical check uses the worker's.
+					d.columnSyncRoundFailed(ctx, root, blocks[i].GetSlot(), time.Now())
 					continue
 				}
 				d.blocksToCheckSync.forget(root)
