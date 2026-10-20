@@ -2166,6 +2166,16 @@ func (result *execResult) finalizeSystemTx(
 	return nil, ibs.VersionedReads(), writes, nil
 }
 
+// finalizedBlockWrites is the block-end write-set. Deciding EIP-161 removals reads pre-block
+// state, so a read failure there is checked here, after the write-set is built.
+func finalizedBlockWrites(ibs *state.IntraBlockState, rules *chain.Rules, blockNum uint64) (*state.WriteSet, error) {
+	writes := ibs.FinalizedWrites(rules)
+	if stateErr := ibs.StateReadError(); stateErr != nil {
+		return nil, fmt.Errorf("can't finalize block %d: state read: %w", blockNum, stateErr)
+	}
+	return writes, nil
+}
+
 func (result *execResult) calcFees(
 	task *taskVersion,
 	vm *state.VersionMap,
@@ -3525,7 +3535,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
 
-				ivw := ibs.FinalizedWrites(tt.Rules())
+				ivw, err := finalizedBlockWrites(ibs, tt.Rules(), be.blockNum)
+				if err != nil {
+					return be.operationalBlockResult(err), nil
+				}
 				if !ivw.IsEmpty() {
 					be.blockIO.RecordWrites(finalVersion, ivw)
 					be.versionMap.FlushVersionedWrites(ivw, true, "")
