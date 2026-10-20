@@ -51,7 +51,6 @@ func TestCodeCache_ConcurrentPutSameCode_NoSizeDrift(t *testing.T) {
 	}
 	wg.Wait()
 
-	require.Zero(t, cc.codeSize.Load(), "an addr with a codeHash shares the codeHashToCode entry")
 	require.Equal(t, codeEntryBytes+int64(len(code)), cc.codeHashCodeSize.Load(),
 		"codeHashToCode size must reflect exactly one insert after concurrent same-code Puts")
 	require.Equal(t, int64(1), cc.codeSizeEntries.Load(),
@@ -146,15 +145,16 @@ func TestCodeCache_ClearRacingPut_EpochAlias(t *testing.T) {
 	addr := make([]byte, 20)
 	addr[0] = 0xef
 	code := []byte("dead-fork-code")
-	codeID := maphash.Hash(code)
+	codeHash := hash32(crypto.Keccak256(code))
+	codeID := maphash.Hash(codeHash[:])
 	preClearEpoch := cc.coh.Epoch()
 
 	cc.Clear()
 	// Model a writer that sampled the epoch before Clear and published after
 	// the relevant layers were purged.
 	a := common.BytesToAddress(addr)
-	cc.addrToHash.Add(addrSlot(a), versionedAddressID{addr: a, addrID: codeID, txNum: 200, epoch: preClearEpoch})
-	cc.hashToCode.Add(codeID, codeEntry{code: code, txNum: 200, epoch: preClearEpoch})
+	cc.addrToHash.Add(addrSlot(a), versionedAddressID{addr: a, addrID: codeID, codeHash: codeHash, txNum: 200, epoch: preClearEpoch})
+	cc.codeHashToCode.Add(codeID, codeEntry{code: code, keyHash: codeHash, txNum: 200, epoch: preClearEpoch})
 	cc.Unwind(150)
 
 	_, ok := cc.Get(addr)
