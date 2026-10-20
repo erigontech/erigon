@@ -80,7 +80,6 @@ func SetFlagsFromConfigFile(cmd *cli.Command, filePath string) error {
 				err := cmd.Set(key, fmt.Sprintf("%v", value))
 				if err != nil {
 					return fmt.Errorf("failed setting %s flag with value=%v error=%w", key, value, err)
-
 				}
 			}
 		}

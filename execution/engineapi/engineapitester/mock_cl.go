@@ -275,7 +275,21 @@ func (cl *MockCl) InsertNewPayload(ctx context.Context, p *MockClPayload) (*engi
 
 // UpdateForkChoice updates the fork choice to the given block. Genesis is always set as safe and finalised.
 func (cl *MockCl) UpdateForkChoice(ctx context.Context, p *MockClPayload) error {
-	head := p.ExecutionPayload.BlockHash
+	if err := cl.UpdateForkChoiceByHash(ctx, p.ExecutionPayload.BlockHash); err != nil {
+		return err
+	}
+	cl.state.ParentElBlock = p.ExecutionPayload.BlockHash
+	cl.state.ParentElTimestamp = p.ExecutionPayload.Timestamp.Uint64()
+	cl.state.ParentClBlockRoot = p.ParentBeaconBlockRoot.U256()
+	cl.state.ParentClBlockRoot.AddUint64(&cl.state.ParentClBlockRoot, 1)
+	cl.state.ParentRandao = p.ExecutionPayload.PrevRandao.U256()
+	cl.state.ParentRandao.AddUint64(&cl.state.ParentRandao, 1)
+	return nil
+}
+
+// UpdateForkChoiceByHash sets the head, with genesis as safe and finalised.
+// It does not change block-building state, which requires the full payload.
+func (cl *MockCl) UpdateForkChoiceByHash(ctx context.Context, head common.Hash) error {
 	forkChoiceState := enginetypes.ForkChoiceState{
 		HeadHash:           head,
 		SafeBlockHash:      cl.genesis,
@@ -301,13 +315,6 @@ func (cl *MockCl) UpdateForkChoice(ctx context.Context, p *MockClPayload) error 
 	if fcuRes.PayloadStatus.Status != enginetypes.ValidStatus {
 		return fmt.Errorf("payload status of fcu is not valid: %s", fcuRes.PayloadStatus.Status)
 	}
-	// move forward
-	cl.state.ParentElBlock = head
-	cl.state.ParentElTimestamp = p.ExecutionPayload.Timestamp.Uint64()
-	cl.state.ParentClBlockRoot = p.ParentBeaconBlockRoot.U256()
-	cl.state.ParentClBlockRoot.AddUint64(&cl.state.ParentClBlockRoot, 1)
-	cl.state.ParentRandao = p.ExecutionPayload.PrevRandao.U256()
-	cl.state.ParentRandao.AddUint64(&cl.state.ParentRandao, 1)
 	return nil
 }
 
@@ -350,7 +357,8 @@ type blockBuildingOptions struct {
 }
 
 func RetryEngine[T any](ctx context.Context, retryStatuses []enginetypes.EngineStatus, retryErrors []error,
-	f func() (*T, enginetypes.EngineStatus, error)) (*T, error) {
+	f func() (*T, enginetypes.EngineStatus, error),
+) (*T, error) {
 	operation := func() (*T, error) {
 		res, status, err := f()
 		if err != nil {
@@ -426,12 +434,16 @@ func MockClPayloadToHeader(p *MockClPayload) *types.Header {
 	for i, txn := range elPayload.Transactions {
 		txns[i] = txn
 	}
+	var baseFee *uint256.Int // a null baseFeePerGas stays nil and fails validation
+	if elPayload.BaseFeePerGas != nil {
+		baseFee = new(uint256.Int).Set((*uint256.Int)(elPayload.BaseFeePerGas))
+	}
 	header := &types.Header{
 		ParentHash:            elPayload.ParentHash,
 		Coinbase:              elPayload.FeeRecipient,
 		Root:                  elPayload.StateRoot,
 		Bloom:                 bloom,
-		BaseFee:               uint256.MustFromBig(elPayload.BaseFeePerGas.ToInt()),
+		BaseFee:               baseFee,
 		Extra:                 elPayload.ExtraData,
 		Number:                *uint256.NewInt(elPayload.BlockNumber.Uint64()),
 		GasUsed:               uint64(elPayload.GasUsed),

@@ -22,8 +22,14 @@ import (
 	"io"
 	"sync"
 
+	"github.com/holiman/uint256"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/notifications"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -36,6 +42,8 @@ type ReceiptsFilterAggregator struct {
 	receiptsFilterLock sync.Mutex
 	nextFilterId       uint64
 	events             *shards.Events
+	chainConfig        *chain.Config
+	signer             *types.Signer
 }
 
 type ReceiptsFilter struct {
@@ -44,7 +52,7 @@ type ReceiptsFilter struct {
 	sender      remoteproto.ETHBACKEND_SubscribeReceiptsServer
 }
 
-func NewReceiptsFilterAggregator(events *shards.Events) *ReceiptsFilterAggregator {
+func NewReceiptsFilterAggregator(events *shards.Events, chainConfig *chain.Config) *ReceiptsFilterAggregator {
 	return &ReceiptsFilterAggregator{
 		aggReceiptsFilter: ReceiptsFilter{
 			txHashes: make(map[common.Hash]int),
@@ -52,6 +60,8 @@ func NewReceiptsFilterAggregator(events *shards.Events) *ReceiptsFilterAggregato
 		receiptsFilters: make(map[uint64]*ReceiptsFilter),
 		nextFilterId:    0,
 		events:          events,
+		chainConfig:     chainConfig,
+		signer:          types.LatestSigner(chainConfig),
 	}
 }
 
@@ -144,6 +154,17 @@ func (a *ReceiptsFilterAggregator) distributeReceipts(receipts []*notifications.
 	a.receiptsFilterLock.Lock()
 	defer a.receiptsFilterLock.Unlock()
 	filtersToDelete := make(map[uint64]*ReceiptsFilter)
+	// Each stream's latest receipt is held back until the next one shows whether it ends its block.
+	held := make(map[uint64]*remoteproto.SubscribeReceiptsReply)
+	send := func(filterId uint64, reply *remoteproto.SubscribeReceiptsReply, lastInBlock bool) {
+		if lastInBlock {
+			reply = proto.CloneOf(reply) // the unflagged reply may also go to other streams
+			reply.LastInBlock = true
+		}
+		if err := a.receiptsFilters[filterId].sender.Send(reply); err != nil {
+			filtersToDelete[filterId] = a.receiptsFilters[filterId]
+		}
+	}
 	for _, rn := range receipts {
 		txHash := rn.Receipt.TxHash
 		if a.aggReceiptsFilter.allTxHashes == 0 {
@@ -152,20 +173,24 @@ func (a *ReceiptsFilterAggregator) distributeReceipts(receipts []*notifications.
 			}
 		}
 		// Lazy convert: only build protobuf when we actually need to send
-		var proto *remoteproto.SubscribeReceiptsReply
+		var reply *remoteproto.SubscribeReceiptsReply
 		for filterId, filter := range a.receiptsFilters {
 			if filter.allTxHashes == 0 {
 				if _, ok := filter.txHashes[txHash]; !ok {
 					continue
 				}
 			}
-			if proto == nil {
-				proto = receiptNotificationToProto(rn)
+			if reply == nil {
+				reply = a.receiptNotificationToProto(rn)
 			}
-			if err := filter.sender.Send(proto); err != nil {
-				filtersToDelete[filterId] = filter
+			if prev := held[filterId]; prev != nil {
+				send(filterId, prev, prev.BlockNumber != reply.BlockNumber)
 			}
+			held[filterId] = reply
 		}
+	}
+	for filterId, reply := range held {
+		send(filterId, reply, true)
 	}
 	for filterId, filter := range filtersToDelete {
 		a.subtractReceiptsFilters(filter)
@@ -174,7 +199,7 @@ func (a *ReceiptsFilterAggregator) distributeReceipts(receipts []*notifications.
 }
 
 // receiptNotificationToProto converts a native ReceiptNotification to protobuf for gRPC.
-func receiptNotificationToProto(rn *notifications.ReceiptNotification) *remoteproto.SubscribeReceiptsReply {
+func (a *ReceiptsFilterAggregator) receiptNotificationToProto(rn *notifications.ReceiptNotification) *remoteproto.SubscribeReceiptsReply {
 	receipt := rn.Receipt
 	blockNum := receipt.BlockNumber.Uint64()
 	var blockTimestamp uint64
@@ -213,8 +238,7 @@ func receiptNotificationToProto(rn *notifications.ReceiptNotification) *remotepr
 
 	// Add transaction data (from/to)
 	if rn.Tx != nil {
-		signer := types.MakeSigner(nil, blockNum, 0)
-		if sender, err := rn.Tx.Sender(*signer); err == nil {
+		if sender, err := rn.Tx.Sender(*a.signer); err == nil {
 			protoReceipt.From = gointerfaces.ConvertAddressToH160(sender.Value())
 		}
 		if to := rn.Tx.GetTo(); to != nil {
@@ -234,5 +258,36 @@ func receiptNotificationToProto(rn *notifications.ReceiptNotification) *remotepr
 		}
 	}
 
+	// The RPC side has neither the transaction nor the chain config the fees are derived from.
+	if rn.Tx != nil && rn.Header != nil {
+		protoReceipt.EffectiveGasPrice = gointerfaces.ConvertUint256IntToH256(effectiveGasPrice(rn.Tx, rn.Header.BaseFee))
+		if numBlobs := len(rn.Tx.GetBlobHashes()); numBlobs > 0 {
+			protoReceipt.BlobGasUsed = misc.GetBlobGasUsed(numBlobs)
+			if price := a.blobGasPrice(rn.Tx, rn.Header); price != nil {
+				protoReceipt.BlobGasPrice = gointerfaces.ConvertUint256IntToH256(price)
+			}
+		}
+	}
+
 	return protoReceipt
+}
+
+func effectiveGasPrice(txn types.Transaction, baseFee *uint256.Int) *uint256.Int {
+	if baseFee == nil {
+		return txn.GetTipCap()
+	}
+	tip := txn.GetEffectiveGasTip(baseFee)
+	return new(uint256.Int).Add(baseFee, &tip)
+}
+
+func (a *ReceiptsFilterAggregator) blobGasPrice(txn types.Transaction, header *types.Header) *uint256.Int {
+	if header.ExcessBlobGas == nil {
+		return nil
+	}
+	price, err := misc.GetBlobGasPrice(a.chainConfig, *header.ExcessBlobGas, header.Time)
+	if err != nil {
+		log.Warn("[rpc] cannot derive the blob gas price of a subscribed receipt", "err", err, "txHash", txn.Hash())
+		return nil
+	}
+	return &price
 }

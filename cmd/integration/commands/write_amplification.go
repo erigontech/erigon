@@ -178,7 +178,8 @@ func calculateWriteAmplification(ctx context.Context, chainDb kv.TemporalRwDB, d
 	fmt.Println(strings.Repeat("-", 78))
 
 	for _, stats := range results {
-		fmt.Printf("%-15s %15s %18s %10d %15.2fx\n",
+		fmt.Printf(
+			"%-15s %15s %18s %10d %15.2fx\n",
 			stats.Domain.String(),
 			common.PrettyCounter(stats.UniqueKeys),
 			common.PrettyCounter(stats.TotalKeysKV),

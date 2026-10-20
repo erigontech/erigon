@@ -138,7 +138,7 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 		return fmt.Errorf("validated state unavailable for %s", hash)
 	}
 	start := time.Now()
-	if err := candidate.domains.FlushPendingUpdates(ctx, tx); err != nil {
+	if err := candidate.domains.FlushPendingUpdates(tx); err != nil {
 		return err
 	}
 	sdTxNum, _, err := sd.SeekCommitment(ctx, tx)
@@ -283,7 +283,7 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	notifications.Accumulator.Reset(0)
 	notifications.RecentReceipts.Clear()
 	status, latestValidHash, validationError, criticalError =
-		fv.validateAndStorePayload(fv.ctx, sd, tx, header, body, unwindPoint, headersChain, bodiesChain)
+		fv.validateAndStorePayload(sd, tx, header, body, unwindPoint, headersChain, bodiesChain)
 	if status == engine_types.ValidStatus && criticalError == nil && validationError == nil {
 		owned := NewAccumulation()
 		notifications.Accumulator.CopyAndReset(owned.Accumulator)
@@ -317,7 +317,7 @@ func (fv *ForkValidator) ClearWithUnwind() {
 }
 
 // validateAndStorePayload validate and store a payload fork chain if such chain results valid.
-func (fv *ForkValidator) validateAndStorePayload(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
+func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 ) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
 	start := time.Now()
 	headersChain = append(headersChain, header)
@@ -329,7 +329,7 @@ func (fv *ForkValidator) validateAndStorePayload(ctx context.Context, sd *execct
 		sd.TakeCommitmentTime() // discard anything left by an earlier block
 		beforeIO = blockmetrics.Take(sd.Metrics(), sd.NonExecMetrics())
 	}
-	if err := fv.executor.ValidateBlock(ctx, sd, tx, unwindPoint, headersChain, bodiesChain); err != nil {
+	if err := fv.executor.ValidateBlock(sd, tx, unwindPoint, headersChain, bodiesChain); err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			validationError = err
 		} else {

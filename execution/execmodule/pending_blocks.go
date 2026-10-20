@@ -73,7 +73,7 @@ func (e *ExecModule) retainSideBlocks(tx kv.TemporalTx, committed []common.Hash,
 		e.dropPendingBlocks()
 		return nil
 	}
-	retained, err := membatchwithdb.NewMemoryBatch(tx, tx.Debug().Dirs().Tmp, e.logger)
+	retained, err := membatchwithdb.NewMemoryBatch(tx)
 	if err != nil {
 		return err
 	}
@@ -107,7 +107,7 @@ func sideBlocksToRetain(pending map[common.Hash]pendingBlock, committed []common
 }
 
 func (e *ExecModule) initSeededOverlay(tx kv.TemporalTx, sd *execctx.SharedDomains) error {
-	if err := sd.InitBlockOverlay(tx, tx.Debug().Dirs().Tmp); err != nil {
+	if err := sd.InitBlockOverlay(tx); err != nil {
 		return err
 	}
 	if err := e.seedRetainedBlocks(tx, sd.BlockOverlay()); err != nil {

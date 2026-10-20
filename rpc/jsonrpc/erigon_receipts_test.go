@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
@@ -50,7 +51,8 @@ func TestGetLogsFromPersistedReceipts(t *testing.T) {
 	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
 	dbg.AssertEnabled = false // assertions re-execute instead of serving the persistent cache
 
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(&types.Genesis{
 			Config: chain.TestChainBerlinConfig,
 			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1_000_000_000)}},
@@ -121,7 +123,7 @@ func TestErigonGetLatestLogs(t *testing.T) {
 	api := NewErigonAPI(newBaseApiForTest(m), db, nil)
 	expectedLogs, _ := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
 
-	expectedRPCLogs := make(types.RPCLogs, 0, len(expectedLogs))
+	expectedRPCLogs := make(types.Logs, 0, len(expectedLogs))
 	for _, expectedLog := range slices.Backward(expectedLogs) {
 		expectedRPCLogs = append(expectedRPCLogs, expectedLog)
 	}
@@ -134,21 +136,177 @@ func TestErigonGetLatestLogs(t *testing.T) {
 	require.NotNil(t, actual)
 	assert.Equal(expectedRPCLogs, actual)
 
-	expectedLog := &types.RPCLog{
-		Log: types.Log{
-			Address:     common.HexToAddress("0x3CB5b6E26e0f37F2514D45641F15Bd6fEC2E0c4c"),
-			Topics:      []common.Hash{common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")},
-			Data:        []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 151, 160, 176, 241, 203, 220, 75, 75, 222, 127, 170, 33, 171, 34, 107, 143, 20, 185, 234, 201},
-			BlockNumber: 10,
-			TxHash:      common.HexToHash("0xb6449d8e167a8826d050afe4c9f07095236ff769a985f02649b1023c2ded2059"),
-			TxIndex:     0,
-			BlockHash:   common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef"),
-			Index:       0,
-			Removed:     false,
-		},
-		BlockTimestamp: 100,
+	stampedAt := hexutil.Uint64(100)
+	expectedLog := &types.Log{
+		Address:        common.HexToAddress("0x3CB5b6E26e0f37F2514D45641F15Bd6fEC2E0c4c"),
+		Topics:         []common.Hash{common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")},
+		Data:           []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 151, 160, 176, 241, 203, 220, 75, 75, 222, 127, 170, 33, 171, 34, 107, 143, 20, 185, 234, 201},
+		BlockNumber:    10,
+		TxHash:         common.HexToHash("0xb6449d8e167a8826d050afe4c9f07095236ff769a985f02649b1023c2ded2059"),
+		TxIndex:        0,
+		BlockHash:      common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef"),
+		Index:          0,
+		Removed:        false,
+		BlockTimestamp: &stampedAt,
 	}
 	assert.Equal(expectedLog, actual[0])
+}
+
+func TestGetLatestLogsStopsBeforePrunedBlocks(t *testing.T) {
+	t.Parallel()
+	m, chain := rpcdaemontest.CreateTestExecModuleNoInsert(t)
+	require.NoError(t, m.InsertChain(chain))
+	const firstRetained = uint64(10)
+	dropBodies(t, m.DB, 1, firstRetained)
+	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+		// Keep the preceding block's max txNum to resolve the retained block's start.
+		for block := uint64(1); block < firstRetained-1; block++ {
+			if err := tx.Delete(kv.MaxTxNum, hexutil.EncodeTs(block)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+
+	want, err := api.GetLogs(m.Ctx, blockFilter(firstRetained))
+	require.NoError(t, err)
+	require.Len(t, want, 1)
+
+	for _, tc := range []struct {
+		name       string
+		options    filters.LogFilterOptions
+		unfiltered bool
+		noMatch    bool
+		pruned     bool
+	}{
+		{name: "log_count", options: filters.LogFilterOptions{LogCount: 1}},
+		{name: "block_count", options: filters.LogFilterOptions{BlockCount: 1}},
+		{name: "too_few_logs", options: filters.LogFilterOptions{LogCount: 2}, pruned: true},
+		{name: "too_few_blocks", options: filters.LogFilterOptions{BlockCount: 2}, pruned: true},
+		{name: "no_matches", options: filters.LogFilterOptions{LogCount: 1}, noMatch: true, pruned: true},
+		{name: "unfiltered_log_count", options: filters.LogFilterOptions{LogCount: 1}, unfiltered: true},
+		{name: "unfiltered_block_count", options: filters.LogFilterOptions{BlockCount: 1}, unfiltered: true},
+		{name: "unfiltered_too_few_logs", options: filters.LogFilterOptions{LogCount: 2}, unfiltered: true, pruned: true},
+		{name: "unfiltered_too_few_blocks", options: filters.LogFilterOptions{BlockCount: 2}, unfiltered: true, pruned: true},
+	} {
+		for _, from := range []uint64{0, 5} {
+			t.Run(fmt.Sprintf("%s/from_%d", tc.name, from), func(t *testing.T) {
+				criteria := filters.FilterCriteria{
+					FromBlock: new(big.Int).SetUint64(from),
+					ToBlock:   new(big.Int).SetUint64(firstRetained),
+				}
+				if !tc.unfiltered {
+					topic := want[0].Topics[0]
+					if tc.noMatch {
+						topic = common.Hash{}
+					}
+					criteria.Topics = [][]common.Hash{{topic}}
+				}
+				logs, err := api.GetLatestLogs(m.Ctx, criteria, tc.options)
+				if tc.pruned {
+					require.ErrorIs(t, err, state.ErrPruned)
+					require.Nil(t, logs)
+					return
+				}
+				require.NoError(t, err)
+				require.Equal(t, want, logs)
+			})
+		}
+	}
+	t.Run("range_below_block_floor", func(t *testing.T) {
+		for _, from := range []uint64{0, 5} {
+			for _, filtered := range []bool{false, true} {
+				t.Run(fmt.Sprintf("from_%d/filtered_%t", from, filtered), func(t *testing.T) {
+					criteria := filters.FilterCriteria{
+						FromBlock: new(big.Int).SetUint64(from),
+						ToBlock:   big.NewInt(5),
+					}
+					if filtered {
+						criteria.Topics = [][]common.Hash{{want[0].Topics[0]}}
+					}
+					logs, err := api.GetLatestLogs(m.Ctx, criteria, filters.LogFilterOptions{LogCount: 1})
+					require.ErrorIs(t, err, state.ErrPruned)
+					require.Nil(t, logs)
+				})
+			}
+		}
+	})
+	t.Run("unavailable_transactions", func(t *testing.T) {
+		base := newBaseApiForTest(m)
+		base._blockReader = &fixedMinimumBlockReader{FullBlockReader: base._blockReader, floor: firstRetained + 1}
+		api := NewErigonAPI(base, m.DB, nil)
+		logs, err := api.GetLatestLogs(m.Ctx, filters.FilterCriteria{
+			ToBlock: new(big.Int).SetUint64(firstRetained),
+		}, filters.LogFilterOptions{BlockCount: 1})
+		require.ErrorIs(t, err, state.ErrPruned)
+		require.Nil(t, logs)
+	})
+}
+
+func TestGetLatestLogsAtHistoryBoundary(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	topics := []common.Hash{{0x11}, {0x22}, {0x33}}
+	signer := types.LatestSignerForChainID(nil)
+	m := mockWithGenerator(t, 2, func(i int, block *blockgen.BlockGen) {
+		if i != 0 {
+			return
+		}
+		for _, topic := range topics {
+			logOnCreate := append(append([]byte{0x7f}, topic[:]...), 0x60, 0x00, 0x60, 0x00, 0xa1, 0x00) // PUSH32 topic PUSH1 0 PUSH1 0 LOG1 STOP
+			txn, err := types.SignTx(types.NewContractCreation(block.TxNonce(testAddr), uint256.NewInt(0), 100_000, uint256.NewInt(1), logOnCreate), *signer, testKey)
+			require.NoError(t, err)
+			block.AddTx(txn)
+		}
+	})
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+	want, err := api.GetLatestLogs(ctx, blockFilter(1), filters.LogFilterOptions{LogCount: 3})
+	require.NoError(t, err)
+	require.Len(t, want, 3)
+	require.Equal(t, hexutil.Uint(2), want[0].TxIndex)
+	require.Equal(t, hexutil.Uint(1), want[1].TxIndex)
+
+	tx, err := m.DB.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	start, err := api._txNumReader.Min(ctx, tx, 1)
+	require.NoError(t, err)
+	// Report history from the second user transaction, leaving the reader's data
+	// intact so a missing gate would serve the pruned first transaction too.
+	api.db = historyFloorDB{TemporalRoDB: m.DB, startTxNum: start + 2}
+
+	t.Run("retained_logs", func(t *testing.T) {
+		logs, err := api.GetLatestLogs(ctx, blockFilter(1), filters.LogFilterOptions{LogCount: 2})
+		require.NoError(t, err)
+		require.Equal(t, want[:2], logs)
+	})
+	t.Run("retained_topic", func(t *testing.T) {
+		criteria := blockFilter(1)
+		criteria.Topics = [][]common.Hash{{topics[2]}}
+		logs, err := api.GetLatestLogs(ctx, criteria, filters.LogFilterOptions{LogCount: 1})
+		require.NoError(t, err)
+		require.Equal(t, want[:1], logs)
+	})
+	t.Run("pruned_transaction", func(t *testing.T) {
+		logs, err := api.GetLatestLogs(ctx, blockFilter(1), filters.LogFilterOptions{LogCount: 3})
+		require.ErrorIs(t, err, state.ErrPruned)
+		require.Nil(t, logs)
+	})
+	t.Run("exhausted_topic_index", func(t *testing.T) {
+		criteria := blockFilter(1)
+		criteria.Topics = [][]common.Hash{{topics[2]}}
+		logs, err := api.GetLatestLogs(ctx, criteria, filters.LogFilterOptions{LogCount: 2})
+		require.ErrorIs(t, err, state.ErrPruned)
+		require.Nil(t, logs)
+	})
+	t.Run("incomplete_block", func(t *testing.T) {
+		criteria := blockFilter(1)
+		criteria.Topics = [][]common.Hash{{topics[2]}}
+		logs, err := api.GetLatestLogs(ctx, criteria, filters.LogFilterOptions{BlockCount: 1})
+		require.ErrorIs(t, err, state.ErrPruned)
+		require.Nil(t, logs)
+	})
 }
 
 func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
@@ -158,7 +316,7 @@ func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 	api := NewErigonAPI(newBaseApiForTest(m), db, nil)
 	expectedLogs, _ := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
 
-	expectedRPCLogs := make(types.RPCLogs, 0, len(expectedLogs))
+	expectedRPCLogs := make(types.Logs, 0, len(expectedLogs))
 	for _, expectedLog := range slices.Backward(expectedLogs) {
 		expectedRPCLogs = append(expectedRPCLogs, expectedLog)
 	}
@@ -556,6 +714,28 @@ func TestErigonGetLogsByBlockHashRequiresACanonicalBlock(t *testing.T) {
 	require.Nil(t, logs)
 }
 
+// TestErigonGetLatestLogsByBlockHashRequiresACanonicalBlock pins that a reorged-out
+// sibling is not served the logs of the canonical block at its height.
+func TestErigonGetLatestLogsByBlockHashRequiresACanonicalBlock(t *testing.T) {
+	m, chain, orphanedChain := rpcdaemontest.CreateTestExecModule(t)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+	opts := filters.LogFilterOptions{LogCount: 10}
+
+	canonical := chain.Blocks[0].Hash()
+	_, err := api.GetLatestLogs(m.Ctx, filters.FilterCriteria{BlockHash: &canonical}, opts)
+	require.NoError(t, err)
+
+	orphaned := orphanedChain[0].Blocks[0].Hash()
+	logs, err := api.GetLatestLogs(m.Ctx, filters.FilterCriteria{BlockHash: &orphaned}, opts)
+	require.ErrorContains(t, err, "block not found")
+	require.Nil(t, logs)
+
+	unknown := common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111")
+	logs, err = api.GetLatestLogs(m.Ctx, filters.FilterCriteria{BlockHash: &unknown}, opts)
+	require.ErrorContains(t, err, "block not found")
+	require.Nil(t, logs)
+}
+
 // TestGetLogsByHashIncludesBlockTimestamp pins that erigon_getLogsByHash reports the
 // same blockTimestamp erigon_getLogs reports for the same log.
 func TestGetLogsByHashIncludesBlockTimestamp(t *testing.T) {
@@ -573,7 +753,7 @@ func TestGetLogsByHashIncludesBlockTimestamp(t *testing.T) {
 	for _, txLogs := range byHash {
 		for _, l := range txLogs {
 			require.Equal(t, expected[0].BlockTimestamp, l.BlockTimestamp)
-			require.NotZero(t, l.BlockTimestamp)
+			require.NotZero(t, *l.BlockTimestamp)
 			seen++
 		}
 	}
@@ -608,7 +788,7 @@ func TestGetLogsByHashCachedReceiptsIncludeBlockTimestamp(t *testing.T) {
 	var seen int
 	for _, txLogs := range cachedLogs {
 		for _, l := range txLogs {
-			require.NotZero(t, l.BlockTimestamp)
+			require.NotZero(t, *l.BlockTimestamp)
 			seen++
 		}
 	}

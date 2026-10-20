@@ -34,6 +34,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -58,7 +59,6 @@ type addMockTxPool struct {
 	addLocalSlotsLen int
 }
 
-func (m *addMockTxPool) ValidateSerializedTxn(serializedTxn []byte) error { return nil }
 func (m *addMockTxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64) (bool, error) {
 	return false, nil
 }
@@ -67,6 +67,7 @@ func (m *addMockTxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]t
 	m.addLocalSlotsLen = len(newTxns.Txns)
 	return m.addReasons, nil
 }
+
 func (m *addMockTxPool) deprecatedForEach(f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx) {
 }
 func (m *addMockTxPool) CountContent() (int, int, int) { return 0, 0, 0 }
@@ -78,7 +79,9 @@ func (m *addMockTxPool) IdHashKnown(tx kv.Tx, hash []byte) (bool, error) {
 	}
 	return false, nil
 }
-func (m *addMockTxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool)       { return 0, false }
+
+func (m *addMockTxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool) { return 0, false }
+
 func (m *addMockTxPool) GetBlobs(blobhashes []common.Hash) (blobBundles []PoolBlobBundle) { return nil }
 
 func TestGrpcServerAddDiscardReasonIndexAlignment(t *testing.T) {
@@ -113,6 +116,86 @@ func TestGrpcServerAddDiscardReasonIndexAlignment(t *testing.T) {
 	}
 	if reply.Imported[1] != txpoolproto.ImportResult_INVALID || reply.Errors[1] != "max priority fee per gas higher than max fee per gas" {
 		t.Fatalf("unexpected second tx result: imported=%v error=%q", reply.Imported[1], reply.Errors[1])
+	}
+}
+
+func TestGrpcServerAddRetriesNonceGapAfterStateUpdate(t *testing.T) {
+	for _, persisted := range []bool{false, true} {
+		name := "memory only"
+		if persisted {
+			name = "pool DB row awaiting cleanup"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			logger := log.New()
+			coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			poolDB := mdbxtest.NewTestPoolDB(t)
+			cfg := txpoolcfg.DefaultConfig
+			cfg.MaxNonceGap = 64
+			pool, err := New(ctx, make(chan Announcements, 1), poolDB, coreDB, cfg, kvcache.NewLatestBatchCache(),
+				chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+			require.NoError(t, err)
+			key, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			sender := crypto.PubkeyToAddress(key.PublicKey)
+			txn := newTestTxnSlot(141, 0, 300_000, 300_000, 100_000).Txn.(*types.DynamicFeeTransaction)
+			txn.ChainID = pool.chainID
+			signed, err := types.SignTx(txn, *types.LatestSignerForChainID(&pool.chainID), key)
+			require.NoError(t, err)
+			hash := signed.Hash()
+			var encoded bytes.Buffer
+			require.NoError(t, signed.MarshalBinary(&encoded))
+			server := NewGrpcServer(ctx, pool, poolDB, nil, pool.chainID, logger)
+			request := &txpoolproto.AddRequest{RlpTxs: [][]byte{encoded.Bytes()}}
+			account := accounts3.Account{Nonce: 61, Balance: *uint256.NewInt(common.Ether), CodeHash: accounts3.EmptyCodeHash}
+			change := &remoteproto.StateChangeBatch{
+				PendingBlockBaseFee: 200_000, BlockGasLimit: 1_000_000,
+				ChangeBatch: []*remoteproto.StateChange{{
+					BlockHeight: 62, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{}),
+					Changes: []*remoteproto.AccountChange{{
+						Action: remoteproto.Action_UPSERT, Address: gointerfaces.ConvertAddressToH160(sender), Data: accounts3.SerialiseV3(&account),
+					}},
+				}},
+			}
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+			first, err := server.Add(ctx, request)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_INTERNAL_ERROR}, first.Imported)
+			require.Equal(t, []string{txpoolcfg.NonceTooDistant.String()}, first.Errors)
+			require.Empty(t, pool.byHash)
+			if persisted {
+				staleSender := sender
+				staleSender[0] ^= 0xff
+				require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
+					return tx.Put(kv.PoolTransaction, hash[:], append(staleSender[:], encoded.Bytes()...))
+				}))
+			}
+			account.Nonce = 141
+			change.ChangeBatch[0].BlockHeight = 142
+			change.ChangeBatch[0].Changes[0].Data = accounts3.SerialiseV3(&account)
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+			retry, err := server.Add(ctx, request)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, retry.Imported)
+			pending, baseFee, queued := pool.CountContent()
+			require.Equal(t, 1, pending)
+			require.Zero(t, baseFee+queued)
+			duplicate, err := server.Add(ctx, request)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS}, duplicate.Imported)
+			if persisted {
+				_, err = pool.flush(ctx)
+				require.NoError(t, err)
+				require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
+					row, err := tx.GetOne(kv.PoolTransaction, hash[:])
+					require.NoError(t, err)
+					require.Equal(t, append(sender[:], encoded.Bytes()...), row)
+					return nil
+				}))
+			}
+		})
 	}
 }
 

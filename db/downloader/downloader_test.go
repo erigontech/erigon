@@ -172,7 +172,7 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 	//		ErigonV1.24 node must keep using existing file instead of downloading new one.
 	err = test.downloader.testStartSingleDownloadNoWait(ctx, snaptype.Hex2InfoHash("bb"), "a.seg")
 	// I'm not sure if this is a good idea.
-	//require.Error(err)
+	// require.Error(err)
 	_ = err
 	tt, ok = test.downloader.torrentClient.Torrent(snaptype.Hex2InfoHash("aa"))
 	require.True(ok)
@@ -304,7 +304,6 @@ func TestAddDel(t *testing.T) {
 	err = server.Delete(ctx, []string{f1Abs, f2})
 	require.NoError(err)
 	require.Equal(0, len(test.downloader.torrentClient.Torrents()))
-
 }
 
 // downloaderTest holds test fixtures for Downloader tests.
@@ -1252,14 +1251,8 @@ func TestKeptLocalSeedingReportsCancelDuringJoin(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- batch.wait(ctx) }()
 
-	require.Never(func() bool {
-		select {
-		case <-done:
-			return true
-		default:
-			return false
-		}
-	}, 100*time.Millisecond, time.Millisecond, "wait must still be joining the parked seed tasks")
+	require.Never(func() bool { return len(done) > 0 }, 100*time.Millisecond, time.Millisecond,
+		"wait must still be joining the parked seed tasks")
 
 	dropped := errors.New("caller went away during the join")
 	cancel(dropped)
@@ -1299,14 +1292,8 @@ func TestKeptLocalSeedingReportsDownloaderShutdown(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- batch.wait(t.Context()) }()
 
-	require.Never(func() bool {
-		select {
-		case <-done:
-			return true
-		default:
-			return false
-		}
-	}, 100*time.Millisecond, time.Millisecond, "wait must still be joining the parked seed tasks")
+	require.Never(func() bool { return len(done) > 0 }, 100*time.Millisecond, time.Millisecond,
+		"wait must still be joining the parked seed tasks")
 
 	d.stop()
 

@@ -396,9 +396,7 @@ func RaiseFdLimit() {
 	}
 }
 
-var (
-	metricsConfigs = []string{metricsEnabledFlag.Name, metricsAddrFlag.Name, metricsPortFlag.Name}
-)
+var metricsConfigs = []string{metricsEnabledFlag.Name, metricsAddrFlag.Name, metricsPortFlag.Name}
 
 func SetCobraFlagsFromConfigFile(cmd *cobra.Command) error {
 	flags := cmd.Flags()

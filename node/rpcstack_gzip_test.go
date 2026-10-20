@@ -53,7 +53,7 @@ func TestRPCDaemonLatency(t *testing.T) {
 	}
 
 	// Append results to file with a header so we can diff two runs.
-	f, err := os.OpenFile(resultsFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(resultsFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		t.Logf("warning: could not write results file: %v", err)
 		return

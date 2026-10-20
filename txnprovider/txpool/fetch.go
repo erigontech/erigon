@@ -105,14 +105,14 @@ func NewFetch(
 		pool:                 pool,
 		db:                   db,
 		stateChangesClient:   stateChangesClient,
-		stateChangesParseCtx: NewTxnParseContext(chainID).ChainIDRequired(), //TODO: change ctx if rules changed
+		stateChangesParseCtx: NewTxnParseContext(chainID).ChainIDRequired(), // TODO: change ctx if rules changed
 		pooledTxnsParseCtx:   NewTxnParseContext(chainID).ChainIDRequired(),
 		announcements:        announcements,
 		wg:                   options.p2pFetcherWg,
 		logger:               logger,
 	}
-	f.pooledTxnsParseCtx.ValidateRLP(f.pool.ValidateSerializedTxn)
-	f.stateChangesParseCtx.ValidateRLP(f.pool.ValidateSerializedTxn)
+	f.pooledTxnsParseCtx.ValidateRLP(ValidateSerializedTxn)
+	f.stateChangesParseCtx.ValidateRLP(ValidateSerializedTxn)
 
 	return f
 }
@@ -430,18 +430,9 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 			return nil
 		}
 
-		// Skip duplicate tx-body messages (TRANSACTIONS_66, POOLED_TRANSACTIONS_66):
-		// blob-tx verification is the expensive work worth amortizing. We must NOT
-		// dedupe announcements (NEW_POOLED_TRANSACTION_HASHES_66/68) across peers —
-		// when one peer delivers a bad tx for an announced hash and gets kicked,
-		// the tx fetcher falls back to a different peer that announced the same
-		// hash, which only works if each peer's announcement is actually processed.
-		// Same-peer repeated announcements are not deduped here either: the
-		// dominant cost per announcement (a FilterKnownIdHashes call plus one
-		// GET_POOLED_TRANSACTIONS_66 per unknown hash) is self-limiting — once
-		// the pool has ingested the tx, FilterKnownIdHashes returns empty for
-		// all subsequent announcements. Per-peer announcement spam before that
-		// is a peer-reputation concern, not a fetcher dedup one.
+		// Deduplicate transaction bodies to avoid repeated blob verification.
+		// Keep announcements for peer fallback. Replies with cached bodies are still
+		// dropped before the pool can revalidate their transactions.
 		switch req.Id {
 		case sentryproto.MessageId_TRANSACTIONS_66, sentryproto.MessageId_POOLED_TRANSACTIONS_66:
 			if _, seen := seenLRU.Get(req.Data); seen {
@@ -552,7 +543,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 			}
 		}
 	case sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:
-		//TODO: handleInboundMessage is single-threaded - means it can accept as argument couple buffers (or analog of txParseContext). Protobuf encoding will copy data anyway, but DirectClient doesn't
+		// TODO: handleInboundMessage is single-threaded - means it can accept as argument couple buffers (or analog of txParseContext). Protobuf encoding will copy data anyway, but DirectClient doesn't
 		var encodedRequest []byte
 		var messageID sentryproto.MessageId
 		messageID = sentryproto.MessageId_POOLED_TRANSACTIONS_66
@@ -810,7 +801,6 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 					f.logger.Debug("[txpool.fetch] stream.Recv", "dir", change.Direction, "txnType", txnType, "index", i, "err", err)
 					continue // 1 txn handling error must not stop batch processing
 				}
-
 			}
 		} else if change.Direction == remoteproto.Direction_UNWIND {
 			for i := range change.Txs {

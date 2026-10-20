@@ -21,7 +21,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -59,8 +58,7 @@ func TestEIP8246FundedThenSelfdestructedAccount(t *testing.T) {
 			key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 			require.NoError(t, err)
 			sender := crypto.PubkeyToAddress(key.PublicKey)
-			config := new(chain.Config)
-			require.NoError(t, copier.CopyWithOption(config, chain.TestChainOsakaConfig, copier.Option{DeepCopy: true}))
+			config := chain.TestChainOsakaConfig.Copy()
 			config.AmsterdamTime = common.NewUint64(0)
 			genesis := &types.Genesis{
 				Config:   config,

@@ -33,7 +33,7 @@ var files embed.FS
 // Load reads the built-in JS tracer files embedded in the binary and
 // returns a mapping of tracer name to source.
 func Load() (map[string]string, error) {
-	var assetTracers = make(map[string]string)
+	assetTracers := make(map[string]string)
 	err := fs.WalkDir(files, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err

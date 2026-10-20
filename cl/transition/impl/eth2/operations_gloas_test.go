@@ -4,11 +4,8 @@ import (
 	"math"
 	"testing"
 
-	"go.uber.org/mock/gomock"
-
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/cl/abstract/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -28,47 +25,25 @@ func TestProcessExecutionPayloadEnvelopeRejectsNilEnvelope(t *testing.T) {
 	}))
 }
 
-func TestProcessProposerSlashingDoesNotClearDifferentProposerPayment(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	cfg := &clparams.MainnetBeaconConfig
-	slot := uint64(3)
-	proposerIndex := uint64(7)
-	paymentIndex := int(cfg.SlotsPerEpoch + slot%cfg.SlotsPerEpoch)
-	payments := solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](int(2 * cfg.SlotsPerEpoch))
-	payments.Set(paymentIndex, &cltypes.BuilderPendingPayment{
-		Withdrawal: &cltypes.BuilderPendingWithdrawal{
-			Amount:       100,
-			BuilderIndex: 1,
-		},
-		ProposerIndex: proposerIndex + 1,
-	})
-	validator := solid.NewValidatorFromParameters(
-		common.Bytes48{},
-		common.Hash{},
-		cfg.MinActivationBalance,
-		false,
-		0,
-		0,
-		cfg.FarFutureEpoch,
-		cfg.FarFutureEpoch,
-	)
-	s := mock_services.NewMockBeaconState(ctrl)
-	s.EXPECT().ValidatorForValidatorIndex(int(proposerIndex)).Return(validator, nil)
-	s.EXPECT().BeaconConfig().Return(cfg).AnyTimes()
-	s.EXPECT().Slot().Return(slot).AnyTimes()
-	s.EXPECT().Version().Return(clparams.GloasVersion)
-	s.EXPECT().GetBuilderPendingPayments().Return(payments)
-	s.EXPECT().SetBuilderPendingPayments(payments)
-	s.EXPECT().SlashValidator(proposerIndex, nil).Return(uint64(0), nil)
+func TestApplyParentExecutionPayloadUsesHeaderSlot(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	s := state.New(&cfg)
+	s.SetVersion(clparams.GloasVersion)
+	require.NoError(t, s.SetSlot(65))
+	s.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: 63})
+	s.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{Slot: 0, BlockHash: common.Hash{1}})
+	payments := s.GetBuilderPendingPayments()
+	payments.Set(31, &cltypes.BuilderPendingPayment{Withdrawal: &cltypes.BuilderPendingWithdrawal{Amount: 17}})
+	s.SetBuilderPendingPayments(payments)
 
 	machine := &eth2.Impl{}
-	err := machine.ProcessProposerSlashing(s, newTestProposerSlashing(slot, proposerIndex))
-
-	require.NoError(t, err)
-	require.Equal(t, uint64(100), payments.Get(paymentIndex).Withdrawal.Amount)
-	require.Equal(t, proposerIndex+1, payments.Get(paymentIndex).ProposerIndex)
+	require.NoError(t, machine.ApplyParentExecutionPayload(s, &cltypes.ExecutionRequests{}))
+	require.Equal(t, 1, s.GetBuilderPendingWithdrawals().Len())
+	require.Equal(t, uint64(17), s.GetBuilderPendingWithdrawals().Get(0).Amount)
+	require.Zero(t, s.GetBuilderPendingPayments().Get(31).Withdrawal.Amount)
+	require.True(t, s.GetExecutionPayloadAvailability().GetBitAt(63))
+	require.False(t, s.GetExecutionPayloadAvailability().GetBitAt(0))
+	require.Equal(t, common.Hash{1}, s.GetLatestBlockHash())
 }
 
 func TestProcessBuilderDepositRequestTopsUpExistingBuilder(t *testing.T) {

@@ -49,6 +49,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 	// [New in Gloas:EIP7732] process_parent_execution_payload BEFORE process_block_header
 	var parentSlot uint64
 	if version >= clparams.GloasVersion {
+		parentSlot = s.LatestBlockHeader().Slot
 		if err := impl.ProcessParentExecutionPayload(s, block); err != nil {
 			return fmt.Errorf("processBlock: failed to process parent execution payload: %w", err)
 		}
@@ -69,8 +70,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 			return fmt.Errorf("processBlock: failed to process withdrawals: %w", err)
 		}
 		// 3. [New in Gloas:EIP7732] process_execution_payload_bid(state, block)
-		parentSlot, err = impl.ProcessExecutionPayloadBid(s, block)
-		if err != nil {
+		if err := impl.ProcessExecutionPayloadBid(s, block); err != nil {
 			return fmt.Errorf("processBlock: failed to process execution payload bid: %w", err)
 		}
 	} else if version >= clparams.BellatrixVersion {
@@ -88,6 +88,13 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 				expectWithdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(s.BeaconConfig().MaxWithdrawalsPerPayload), 44)
 				for i := range expect.Withdrawals {
 					expectWithdrawals.Append(expect.Withdrawals[i])
+				}
+				expectedRoot, err := expectWithdrawals.HashSSZ()
+				if err != nil {
+					return fmt.Errorf("processBlock: failed to hash expected withdrawals: %w", err)
+				}
+				if payloadHeader.WithdrawalsRoot != expectedRoot {
+					return fmt.Errorf("processBlock: withdrawals root mismatch: payload %x, expected %x", payloadHeader.WithdrawalsRoot, expectedRoot)
 				}
 				if err := impl.ProcessWithdrawals(s, expectWithdrawals); err != nil {
 					return fmt.Errorf("processBlock: failed to process withdrawals: %w", err)

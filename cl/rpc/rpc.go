@@ -23,10 +23,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 	"time"
 
-	"github.com/c2h5oh/datasize"
+	"github.com/golang/snappy"
 	"go.uber.org/zap/buffer"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -43,8 +44,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
-
-const maxMessageLength = 18 * datasize.MB
 
 const reqRespFallbackTimeout = 30 * time.Second
 
@@ -84,6 +83,7 @@ func NewBeaconRpcP2P(ctx context.Context, sentinel sentinelproto.SentinelClient,
 		ethClock:     ethClock,
 	}
 	rpc.columnDataPeers = newColumnPeers(
+		ctx,
 		sentinel,
 		beaconConfig,
 		ethClock,
@@ -148,7 +148,7 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReqWithSnapshot(
 	ctx context.Context,
 	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
 ) ([]*cltypes.DataColumnSidecar, string, *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier], error) {
-	filteredReq, pid, _, err := b.columnDataPeers.pickPeerRoundRobin(ctx, req)
+	filteredReq, pid, err := b.columnDataPeers.pickPeerRoundRobin(req)
 	if err != nil {
 		return nil, pid, nil, err
 	}
@@ -168,6 +168,9 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReqWithSnapshot(
 	responsePacket, pid, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, pid, maxResponseBytes)
 	if err != nil {
 		return nil, pid, filteredReq, err
+	}
+	if len(responsePacket) == 0 {
+		b.columnDataPeers.coolDown(pid)
 	}
 	if uint64(len(responsePacket)) > requestedColumnCount {
 		b.BanPeer(pid)
@@ -211,8 +214,8 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRangeReq(ctx context.Conte
 	if maxRequestPayloads == 0 {
 		return nil, "", errors.New("MAX_REQUEST_PAYLOADS is zero")
 	}
-	if count > maxRequestPayloads {
-		return nil, "", fmt.Errorf("execution payload envelopes by range count %d exceeds MAX_REQUEST_PAYLOADS %d", count, maxRequestPayloads)
+	if count > math.MaxUint64-start {
+		return nil, "", fmt.Errorf("execution payload envelopes by range start %d plus count %d overflows", start, count)
 	}
 	var buf buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buf, &cltypes.ExecutionPayloadEnvelopesByRangeRequest{
@@ -222,16 +225,14 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRangeReq(ctx context.Conte
 		return nil, "", err
 	}
 
-	responsePacket, pid, responseErr := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRangeProtocolV1, buf.Bytes(), communication.MaxWireResponseBytes(int(clparams.MaxChunkSize), count), count)
+	responseLimit := min(count, maxRequestPayloads)
+	responsePacket, pid, responseErr := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRangeProtocolV1, buf.Bytes(), communication.MaxWireResponseBytes(int(clparams.MaxPayloadSize), responseLimit), responseLimit)
 	if responseErr != nil && len(responsePacket) == 0 {
 		return nil, pid, responseErr
 	}
 
 	envelopes := make([]*cltypes.SignedExecutionPayloadEnvelope, 0, len(responsePacket))
 	for _, data := range responsePacket {
-		if uint64(len(data.raw)) > clparams.MaxChunkSize {
-			return envelopes, pid, fmt.Errorf("execution payload envelope by range length %d exceeds max chunk size %d", len(data.raw), clparams.MaxChunkSize)
-		}
 		if err := cltypes.ValidateExecutionPayloadEnvelopeVersion(data.version); err != nil {
 			return envelopes, pid, err
 		}
@@ -268,16 +269,13 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRootReq(ctx context.Contex
 		return nil, "", err
 	}
 
-	responsePacket, pid, responseErr := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRootProtocolV1, buf.Bytes(), communication.MaxWireResponseBytes(int(clparams.MaxChunkSize), uint64(len(roots))), uint64(len(roots)))
+	responsePacket, pid, responseErr := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRootProtocolV1, buf.Bytes(), communication.MaxWireResponseBytes(int(clparams.MaxPayloadSize), uint64(len(roots))), uint64(len(roots)))
 	if responseErr != nil && len(responsePacket) == 0 {
 		return nil, pid, responseErr
 	}
 
 	envelopes := make([]*cltypes.SignedExecutionPayloadEnvelope, 0, len(responsePacket))
 	for _, data := range responsePacket {
-		if uint64(len(data.raw)) > clparams.MaxChunkSize {
-			return envelopes, pid, fmt.Errorf("execution payload envelope by root length %d exceeds max chunk size %d", len(data.raw), clparams.MaxChunkSize)
-		}
 		if err := cltypes.ValidateExecutionPayloadEnvelopeVersion(data.version); err != nil {
 			return envelopes, pid, err
 		}
@@ -342,7 +340,7 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(ctx context.Context, start, co
 	data := buffer.Bytes()
 	// Prefer v2 but accept v1 for peers that haven't upgraded yet.
 	blocksByRangeTopic := communication.BeaconBlocksByRangeProtocolV2 + "," + communication.BeaconBlocksByRangeProtocolV1
-	return b.sendBlocksRequest(ctx, blocksByRangeTopic, data, communication.MaxWireResponseBytes(int(clparams.MaxChunkSize), count))
+	return b.sendBlocksRequest(ctx, blocksByRangeTopic, data, communication.MaxWireResponseBytes(int(clparams.MaxPayloadSize), count))
 }
 
 // SendBeaconBlocksByRootReq retrieves blocks by root from beacon chain.
@@ -358,7 +356,7 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRootReq(ctx context.Context, roots [][3
 	data := buffer.Bytes()
 	// Prefer v2 but accept v1 for peers that haven't upgraded yet.
 	blocksByRootTopic := communication.BeaconBlocksByRootProtocolV2 + "," + communication.BeaconBlocksByRootProtocolV1
-	return b.sendBlocksRequest(ctx, blocksByRootTopic, data, communication.MaxWireResponseBytes(int(clparams.MaxChunkSize), uint64(len(roots))))
+	return b.sendBlocksRequest(ctx, blocksByRootTopic, data, communication.MaxWireResponseBytes(int(clparams.MaxPayloadSize), uint64(len(roots))))
 }
 
 // Peers retrieves peer count.
@@ -427,18 +425,18 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData, ma
 			return responsePacket, message.Peer.Pid, fmt.Errorf("response contains more chunks than requested: limit %d", *maxChunks)
 		}
 		// Read varint for length of message.
-		encodedLn, _, err := ssz_snappy.ReadUvarint(r)
+		encodedLn, err := ssz_snappy.ReadUvarint(r)
 		if err != nil {
 			return responsePacket, message.Peer.Pid, fmt.Errorf("sendRequest failed. Unable to read varint from message prefix: %w", err)
 		}
 		// Sanity check for message size.
-		if encodedLn > uint64(maxMessageLength) {
+		if encodedLn > clparams.MaxPayloadSize {
 			return responsePacket, message.Peer.Pid, errors.New("received message too big")
 		}
 
 		// Read bytes using snappy into a new raw buffer of side encodedLn.
 		raw := make([]byte, encodedLn)
-		sr.Reset(r)
+		sr.Reset(io.LimitReader(r, int64(snappy.MaxEncodedLen(int(encodedLn)))))
 		bytesRead := 0
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])
