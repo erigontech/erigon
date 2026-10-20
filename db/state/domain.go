@@ -75,6 +75,7 @@ type Domain struct {
 	*History
 
 	coldDir string // resolved demotion target; see isColdResident
+	coldIO  *coldIOGate
 
 	// Schema:
 	//  - .kv - key -> value

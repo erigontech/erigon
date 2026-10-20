@@ -1984,6 +1984,10 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 		if kv.Domain(id) == kv.CommitmentDomain && at.a.commitmentHotMaxMergeSteps > 0 {
 			span = min(span, stepSize*at.a.commitmentHotMaxMergeSteps)
 		}
+		if d.d.coldDir != "" {
+			r.domain[id] = d.findTieredMergeRange(maxEndTxNum, domainMaxSpan, span)
+			continue
+		}
 		r.domain[id] = d.findMergeRange(maxEndTxNum, span, maxSpan)
 	}
 

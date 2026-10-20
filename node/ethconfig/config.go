@@ -315,6 +315,7 @@ type Sync struct {
 	TieringColdDir                 string
 	TieringCommitmentHotMergeSteps uint64
 	TieringDemote                  bool
+	TieringColdMergePause          bool
 
 	ChaosMonkey              bool
 	AlwaysGenerateChangesets bool

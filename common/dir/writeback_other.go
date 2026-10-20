@@ -15,8 +15,8 @@
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 //go:build !linux
 
-package state
+package dir
 
 import "os"
 
-func writeBack(f *os.File, off, n, chunk int64) error { return nil }
+func WriteBack(f *os.File, off, n, chunk int64) error { return nil }

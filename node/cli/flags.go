@@ -168,6 +168,12 @@ var (
 		Usage: "Move fully-cold commitment files to --tiering.cold-dir in the background (needs --tiering.lookback-blocks)",
 	}
 
+	TieringColdMergePauseFlag = cli.BoolFlag{
+		Name:  "tiering.cold-merge-pause",
+		Usage: "Pause cold-tier commitment merges while commitment is computed (with --tiering.demote)",
+		Value: true,
+	}
+
 	TieringAllowSameFSFlag = cli.BoolFlag{
 		Name:  "tiering.allow-same-fs",
 		Usage: "Allow --tiering.cold-dir on the same filesystem as the snapshots (tests only)",
@@ -384,6 +390,7 @@ func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 	cfg.Sync.TieringColdDir = ctx.String(TieringColdDirFlag.Name)
 	cfg.Sync.TieringCommitmentHotMergeSteps = ctx.Uint64(TieringCommitmentHotMergeStepsFlag.Name)
 	cfg.Sync.TieringDemote = ctx.Bool(TieringDemoteFlag.Name)
+	cfg.Sync.TieringColdMergePause = ctx.Bool(TieringColdMergePauseFlag.Name)
 	if cfg.Sync.TieringDemote {
 		if err := tiering.ValidateDemote(cfg.Sync.TieringLookbackBlocks, cfg.Sync.TieringColdDir, cfg.Dirs.SnapDomain, ctx.Bool(TieringAllowSameFSFlag.Name)); err != nil {
 			utils.Fatalf("%v", err)

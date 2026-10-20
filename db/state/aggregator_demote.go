@@ -111,8 +111,12 @@ func (a *Aggregator) setDemoteColdDir(coldDir string) error {
 	}
 	a.demoteColdDir = resolved
 	a.d[kv.CommitmentDomain].coldDir = resolved
+	a.d[kv.CommitmentDomain].coldIO = a.coldIO
 	return nil
 }
+
+// disableColdMergePause gives cold merges a gate that is never paused; the demotion copy keeps the shared one.
+func (a *Aggregator) disableColdMergePause() { a.d[kv.CommitmentDomain].coldIO = newColdIOGate() }
 
 func (a *Aggregator) dirtyDomainFile(d *Domain, from, to kv.Step) (item *FilesItem, path string, wordCount int, err error) {
 	a.dirtyFilesLock.Lock()
@@ -177,7 +181,7 @@ func copyWithCancel(ctx context.Context, dst *os.File, src *os.File, gate *coldI
 		mxDemotionPausedSeconds.Add(time.Since(waitStart).Seconds())
 		n, err := io.CopyN(dst, src, chunk)
 		if n > 0 {
-			if werr := writeBack(dst, off, n, chunk); werr != nil {
+			if werr := dir.WriteBack(dst, off, n, chunk); werr != nil {
 				return werr
 			}
 			off += n
@@ -247,7 +251,7 @@ func (a *Aggregator) demotionCandidate(boundaryTxNum uint64) (from, to kv.Step, 
 	return 0, 0, false
 }
 
-// recoverDemotion removes the leftovers of an interrupted demotion. The cold dir can be shared by several datadirs,
+// recoverDemotion removes the leftovers of an interrupted demotion or cold merge. The cold dir can be shared by several datadirs,
 // so only partial copies of this datadir's commitment files are removed there.
 func recoverDemotion(snapDomain, coldDir string, logger log.Logger) error {
 	entries, err := os.ReadDir(snapDomain)
@@ -258,6 +262,8 @@ func recoverDemotion(snapDomain, coldDir string, logger log.Logger) error {
 	for _, e := range entries {
 		name := e.Name()
 		switch {
+		case strings.HasSuffix(name, coldMergeLinkSuffix):
+			removeColdMergeLink(filepath.Join(snapDomain, name))
 		case strings.HasSuffix(name, ".demote.tmp"):
 			if err := dir.RemoveFile(filepath.Join(snapDomain, name)); err != nil {
 				return err

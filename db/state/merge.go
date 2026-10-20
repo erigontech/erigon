@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
@@ -65,6 +66,8 @@ type DomainRanges struct {
 	values  MergeRange
 	history HistoryRanges
 	aggStep uint64
+
+	toColdDir bool
 }
 
 func NewDomainRanges(name kv.Domain, values MergeRange, history HistoryRanges, aggStep uint64) DomainRanges {
@@ -127,12 +130,17 @@ func calculateMergeStartTxNum(endTxNum, stepSize, maxSpan uint64) uint64 {
 // but resets needMerge to false, letting later smaller-but-still-mergeable files
 // take over.
 func findMergeRangeInFiles(files visibleFiles, stepSize, maxEndTxNum, maxSpan uint64, superSetCheck bool) MergeRange {
+	return findMergeRangeInFilesFrom(files, stepSize, 0, maxEndTxNum, maxSpan, superSetCheck)
+}
+
+// findMergeRangeInFilesFrom is findMergeRangeInFiles with every merge start clamped to at least minStart.
+func findMergeRangeInFilesFrom(files visibleFiles, stepSize, minStart, maxEndTxNum, maxSpan uint64, superSetCheck bool) MergeRange {
 	var r MergeRange
 	for _, item := range files {
 		if item.endTxNum > maxEndTxNum {
 			continue
 		}
-		start := clipMergeStartToFileBoundary(files, calculateMergeStartTxNum(item.endTxNum, stepSize, maxSpan))
+		start := max(minStart, clipMergeStartToFileBoundary(files, calculateMergeStartTxNum(item.endTxNum, stepSize, maxSpan)))
 		if superSetCheck && r.from == item.startTxNum && item.endTxNum >= r.to {
 			r.needMerge = false
 			r.from = start
@@ -191,6 +199,25 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, domainMaxSpan, maxSpan uint64)
 		r.history = dt.ht.findMergeRange(maxEndTxNum, maxSpan)
 	}
 
+	return r
+}
+
+// findTieredMergeRange merges cold-resident files only among themselves (output to the cold dir) and hot files only
+// after the cold frontier: the end of the leading run of cold-resident files.
+func (dt *DomainRoTx) findTieredMergeRange(maxEndTxNum, coldSpan, hotSpan uint64) DomainRanges {
+	var frontier uint64
+	for _, f := range dt.files {
+		if !f.src.cold {
+			break
+		}
+		frontier = f.endTxNum
+	}
+	r := DomainRanges{name: dt.name, aggStep: dt.stepSize}
+	r.values = findMergeRangeInFiles(dt.files, dt.stepSize, min(maxEndTxNum, frontier), coldSpan, false)
+	r.toColdDir = r.values.needMerge
+	if !r.values.needMerge {
+		r.values = findMergeRangeInFilesFrom(dt.files, dt.stepSize, frontier, maxEndTxNum, hotSpan, false)
+	}
 	return r
 }
 
@@ -418,22 +445,37 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 
 	fromStep, toStep := kv.Step(r.values.from/r.aggStep), kv.Step(r.values.to/r.aggStep)
 	kvFilePath := dt.d.kvNewFilePath(fromStep, toStep)
+	outPath, coldLink, coldStart := kvFilePath, "", time.Now()
+	if r.toColdDir {
+		outPath = filepath.Join(dt.d.coldDir, filepath.Base(kvFilePath))
+		if coldLink, err = createColdMergeLink(kvFilePath, outPath); err != nil {
+			return nil, nil, nil, err
+		}
+	}
 	var kvWriter *seg.Writer
 	defer func() {
 		if closeFiles {
 			if kvWriter != nil {
 				kvWriter.Close()
 			}
-			// Completed commitment files may still reference this output.
-			valuesIn.closeFiles()
+			if r.toColdDir {
+				valuesIn.closeFilesAndRemove()
+				removeColdMergeLink(coldLink)
+			} else {
+				// Completed commitment files may still reference this output.
+				valuesIn.closeFiles()
+			}
 		}
 	}()
 
-	kvFile, err := seg.NewCompressor(ctx, "merge domain "+dt.d.FilenameBase, kvFilePath, dt.d.dirs.Tmp, dt.d.CompressCfg, log.LvlTrace, dt.d.logger)
+	kvFile, err := seg.NewCompressor(ctx, "merge domain "+dt.d.FilenameBase, outPath, dt.d.dirs.Tmp, dt.d.CompressCfg, log.LvlTrace, dt.d.logger)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", dt.d.FilenameBase, err)
 	}
 
+	if r.toColdDir {
+		kvFile.SetOutputPacer(func() error { return dt.d.waitColdMerge(ctx) })
+	}
 	forceNoCompress := toStep-fromStep < DomainMinStepsToCompress
 	kvWriter = dt.dataWriter(kvFile, forceNoCompress)
 	if dt.d.noFsync {
@@ -490,6 +532,12 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	var keyFileStartTxNum, keyFileEndTxNum uint64
 	i := uint64(0)
 	for cp.Len() > 0 {
+		if r.toColdDir && i%4096 == 0 {
+			mxColdMergeProgress.Set(float64(i) / float64(cnt))
+			if err := dt.d.waitColdMerge(ctx); err != nil {
+				return nil, nil, nil, err
+			}
+		}
 		lastKey = append(lastKey[:0], cp[0].key...)
 		lastVal = append(lastVal[:0], cp[0].val...)
 		lastFileStartTxNum, lastFileEndTxNum := cp[0].startTxNum, cp[0].endTxNum
@@ -555,11 +603,22 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	kvWriter.Close()
 	kvWriter = nil
 	ps.Delete(p)
+	if coldLink != "" {
+		if err := commitColdMergeLink(coldLink, kvFilePath); err != nil {
+			return nil, nil, nil, err
+		}
+		coldLink = kvFilePath
+	}
 
 	valuesIn = newFilesItem(r.values.from, r.values.to)
+	valuesIn.cold = r.toColdDir
 	valuesIn.version, _ = version.ParseVersion(filepath.Base(kvFilePath))
 	if valuesIn.decompressor, err = seg.NewDecompressor(kvFilePath); err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dt.d.FilenameBase, r.values.from, r.values.to, err)
+	}
+	if r.toColdDir {
+		mxColdMergeProgress.Set(1)
+		dt.d.logColdMerge(r.values, domainFiles, valuesIn, coldStart)
 	}
 
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
