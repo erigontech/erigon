@@ -186,9 +186,7 @@ func (r *ephemeralReplay) verify(tx kv.TemporalRwTx, doms *execctx.SharedDomains
 func BenchmarkEphemeralParallelReplay(b *testing.B) {
 	fx, err := blockreplay.Load(fixturePath(b))
 	require.NoError(b, err)
-	if !dbg.DiscardCommitment() {
-		b.Fatal("set DISCARD_COMMITMENT=true: the witness carries no commitment trie")
-	}
+	defer dbg.OverrideDiscardCommitment(true)() // the witness carries no commitment trie
 	require.NotNil(b, fx.Outputs, "fixture missing captured outputs; recapture with `integration capture_block`")
 	expected := fx.Outputs
 
@@ -215,13 +213,10 @@ func BenchmarkEphemeralParallelReplay(b *testing.B) {
 // a BAL derived from a block's execution must be reproduced when the versionMap
 // is pre-seeded from it and the block re-executed. The reference BAL is derived
 // here rather than read from the header, since the header may carry no BAL hash.
-// Same recipe as BenchmarkEphemeralParallelReplay (DISCARD_COMMITMENT=true).
 func BenchmarkEphemeralBALRoundTrip(b *testing.B) {
 	fx, err := blockreplay.Load(fixturePath(b))
 	require.NoError(b, err)
-	if !dbg.DiscardCommitment() {
-		b.Fatal("set DISCARD_COMMITMENT=true: the witness carries no commitment trie")
-	}
+	defer dbg.OverrideDiscardCommitment(true)() // the witness carries no commitment trie
 	require.NotNil(b, fx.Outputs, "fixture missing captured outputs; recapture with `integration capture_block`")
 	expected := fx.Outputs
 
