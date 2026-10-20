@@ -1164,10 +1164,12 @@ func testAssembleBlockWithSiblingCommit(t *testing.T, commitSibling bool) {
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus, validation.ValidationError)
 }
 
-// assembleWithTxPoolBehindParent adds two pending transactions to the txpool and starts a build whose
-// transaction selection moves the txpool head back to the block before the parent. It returns once
-// selection has started.
-func assembleWithTxPoolBehindParent(t *testing.T) (m *execmoduletester.ExecModuleTester, parent *types.Block, payloadID uint64) {
+func txPoolBehindParentFixture(t *testing.T) (
+	m *execmoduletester.ExecModuleTester,
+	parent *types.Block,
+	params *builder.Parameters,
+	provider *rewindingTxnProvider,
+) {
 	t.Helper()
 	m = execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 	chainPack, err := m.GenerateChain(2, nil)
@@ -1176,13 +1178,13 @@ func assembleWithTxPoolBehindParent(t *testing.T) (m *execmoduletester.ExecModul
 
 	parent = chainPack.TopBlock
 	addTwoTxnsToPool(t.Context(), 0, t, m, m.TxPoolGrpcServer, parent.BaseFee().Uint64())
-	provider := &rewindingTxnProvider{
+	provider = &rewindingTxnProvider{
 		pool:  m.TxPool,
 		head:  txPoolHead(chainPack.Blocks[len(chainPack.Blocks)-2]),
 		ready: make(chan struct{}),
 	}
 	parentBeaconBlockRoot := randomHash()
-	payloadID, err = m.AssembleBlock(t.Context(), &builder.Parameters{
+	params = &builder.Parameters{
 		ParentHash:            parent.Hash(),
 		Timestamp:             parent.Time() + 1,
 		PrevRandao:            parent.Header().MixDigest,
@@ -1191,7 +1193,17 @@ func assembleWithTxPoolBehindParent(t *testing.T) (m *execmoduletester.ExecModul
 		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
 		SlotNumber:            syntheticSlotNumber(parent),
 		CustomTxnProvider:     provider,
-	})
+	}
+	return m, parent, params, provider
+}
+
+// assembleWithTxPoolBehindParent adds two pending transactions to the txpool and starts a build whose
+// transaction selection moves the txpool head back to the block before the parent. It returns once
+// selection has started.
+func assembleWithTxPoolBehindParent(t *testing.T) (m *execmoduletester.ExecModuleTester, parent *types.Block, payloadID uint64) {
+	t.Helper()
+	m, parent, params, provider := txPoolBehindParentFixture(t)
+	payloadID, err := m.AssembleBlock(t.Context(), params)
 	require.NoError(t, err)
 
 	select {
@@ -1242,25 +1254,36 @@ func TestGetAssembledBlockDoesNotWaitForTxPoolBehindParent(t *testing.T) {
 	requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	result, err := m.ExecModule.GetAssembledBlock(requestCtx, payloadID)
-	require.NoError(t, m.TxPool.OnNewBlock(ctx, txPoolHead(parent), txnpool.TxnSlots{}, txnpool.TxnSlots{}, txnpool.TxnSlots{}))
 	require.NoError(t, err)
 	require.NotNil(t, result.Block)
 	require.Equal(t, parent.Hash(), result.Block.Block.ParentHash())
 }
 
 func TestGetAssembledBlockIncludesTxnsOnceTxPoolCatchesUpSoonAfterStop(t *testing.T) {
-	ctx := t.Context()
-	m, parent, payloadID := assembleWithTxPoolBehindParent(t)
+	m, parent, params, provider := txPoolBehindParentFixture(t)
+	synctest.Test(t, func(t *testing.T) {
+		payloadID, err := m.AssembleBlock(t.Context(), params)
+		require.NoError(t, err)
+		<-provider.ready
+		synctest.Wait()
 
-	caughtUp := make(chan error, 1)
-	time.AfterFunc(100*time.Millisecond, func() {
-		caughtUp <- m.TxPool.OnNewBlock(ctx, txPoolHead(parent), txnpool.TxnSlots{}, txnpool.TxnSlots{}, txnpool.TxnSlots{})
+		type assembled struct {
+			result execmodule.AssembledBlockResult
+			err    error
+		}
+		returned := make(chan assembled, 1)
+		go func() {
+			result, err := m.ExecModule.GetAssembledBlock(t.Context(), payloadID)
+			returned <- assembled{result, err}
+		}()
+		synctest.Wait()
+		require.NoError(t, m.TxPool.OnNewBlock(t.Context(), txPoolHead(parent), txnpool.TxnSlots{}, txnpool.TxnSlots{}, txnpool.TxnSlots{}))
+
+		got := <-returned
+		require.NoError(t, got.err)
+		require.NotNil(t, got.result.Block)
+		require.Len(t, got.result.Block.Block.Transactions(), 2)
 	})
-	result, err := m.ExecModule.GetAssembledBlock(ctx, payloadID)
-	require.NoError(t, err)
-	require.NoError(t, <-caughtUp)
-	require.NotNil(t, result.Block)
-	require.Len(t, result.Block.Block.Transactions(), 2)
 }
 
 func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
