@@ -58,7 +58,7 @@ mkdir -p ~/.lighthouse/validators
 
 ### 2.3. Run Lighthouse Validator Client
 
-Start the validator client and connect it to the Caplin CL:
+Start the validator client and connect it to the Caplin Consensus Layer (CL):
 
 ```bash
 lighthouse vc \
