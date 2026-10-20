@@ -135,3 +135,7 @@ func (s *Service) RegisterNewBlockObserver(o event.Observer[*p2p.DecodedInboundM
 func (s *Service) RegisterNewBlockHashesObserver(o event.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]]) event.UnregisterFunc {
 	return s.messageListener.RegisterNewBlockHashesObserver(o)
 }
+
+func (s *Service) RegisterPeerEventObserver(o event.Observer[*sentryproto.PeerEvent], opts ...p2p.RegisterOpt) event.UnregisterFunc {
+	return s.messageListener.RegisterPeerEventObserver(o, opts...)
+}
