@@ -1545,6 +1545,49 @@ func TestWrongProposerScheduledBlockDoesNotCancelPayloadPreparation(t *testing.T
 	require.False(t, scheduled)
 }
 
+func TestScheduledBlockRejectsInvalidParentSlotBeforeStateAccess(t *testing.T) {
+	tests := []struct {
+		name      string
+		blockSlot uint64
+	}{
+		{name: "parent in later epoch", blockSlot: 5},
+		{name: "parent at same slot", blockSlot: clparams.MainnetBeaconConfig.SlotsPerEpoch},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			serviceInterface, child, store, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+			service := serviceInterface.(*blockService)
+			child.Block.Slot = test.blockSlot
+			root, err := child.Block.HashSSZ()
+			require.NoError(t, err)
+			job, _ := service.scheduleBlockForLaterProcessing(child, nil, false)
+			store.OnBlockErr = forkchoice.ErrParentEnvelopePending
+
+			stateReads := 0
+			store.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+				require.Equal(t, parentRoot, root)
+				stateReads++
+				parentState := store.StateAtBlockRootVal[root]
+				if alwaysCopy {
+					return parentState.Copy()
+				}
+				return parentState, nil
+			}
+
+			for range 2 {
+				service.processScheduledBlock(t.Context(), root, job, time.Now())
+
+				require.Zero(t, stateReads)
+				require.ErrorIs(t, job.lastAttempt.err, forkchoice.ErrBlockInvalid)
+				require.ErrorIs(t, job.lastAttempt.err, ErrBlockYoungerThanParent)
+				require.Nil(t, job.finishPayloadImport)
+				_, scheduled := service.blocksScheduledForLaterExecution.Load(root)
+				require.False(t, scheduled)
+			}
+		})
+	}
+}
+
 func TestUnrelatedScheduledBlockErrorDoesNotRetainImportClaim(t *testing.T) {
 	service, child, store, root, job := parkUnknownParentBlockForRetry(t, true)
 	store.OnBlockErr = errors.New("unrelated retry error")

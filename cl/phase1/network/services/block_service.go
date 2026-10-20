@@ -1109,6 +1109,9 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 		store = func(ctx context.Context) error {
 			if needsImportClaim {
 				block := job.block.Block
+				if parentHeader, ok := b.forkchoiceStore.GetHeader(block.ParentRoot); ok && parentHeader.Slot >= block.Slot {
+					return fmt.Errorf("%w: %w", forkchoice.ErrBlockInvalid, ErrBlockYoungerThanParent)
+				}
 				validationContext, err := b.blockValidationContext(ctx, block.ParentRoot, block.Slot)
 				if err != nil {
 					return err
