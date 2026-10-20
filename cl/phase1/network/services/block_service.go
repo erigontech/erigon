@@ -1104,19 +1104,25 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 	attempt := job.attempt
 	needsImportClaim := job.finishPayloadImport == nil
 	job.mu.Unlock()
+	authenticated := false
 	if store == nil {
-		store = func(ctx context.Context) error { return b.processAndStoreBlock(ctx, job.block) }
+		store = func(ctx context.Context) error {
+			if needsImportClaim {
+				block := job.block.Block
+				validationContext, err := b.blockValidationContext(ctx, block.ParentRoot, block.Slot)
+				if err != nil {
+					return err
+				}
+				if block.ProposerIndex != validationContext.expectedProposer {
+					return fmt.Errorf("%w: block proposer index %d does not match expected proposer %d", forkchoice.ErrBlockInvalid, block.ProposerIndex, validationContext.expectedProposer)
+				}
+				authenticated = true
+			}
+			return b.processAndStoreBlock(ctx, job.block)
+		}
 	}
 	err := store(ctx)
 	job.logStorageErrorOnce(err)
-	authenticated := false
-	if needsImportClaim && shouldRetainBlockImportClaim(err) && b.forkchoiceStore != nil {
-		block := job.block.Block
-		if _, parentKnown := b.forkchoiceStore.GetHeader(block.ParentRoot); parentKnown {
-			validationContext, validationErr := b.blockValidationContext(ctx, block.ParentRoot, block.Slot)
-			authenticated = validationErr == nil && validationContext.expectedProposer == block.ProposerIndex
-		}
-	}
 	job.mu.Lock()
 	job.running = false
 	if job.terminal && job.completedGeneration >= generation {
@@ -1139,7 +1145,7 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 		job.retryAfter = time.Now().Add(job.retryDelay)
 	}
 	terminal := latest && (err == nil || errors.Is(err, forkchoice.ErrBlockInvalid))
-	if !terminal && authenticated && job.finishPayloadImport == nil {
+	if !terminal && authenticated && shouldRetainBlockImportClaim(err) && job.finishPayloadImport == nil {
 		current, ok := b.blocksScheduledForLaterExecution.Load(key)
 		if ok && current == job {
 			job.finishPayloadImport = b.forkchoiceStore.BeginPayloadImport(job.block.Block.Slot)

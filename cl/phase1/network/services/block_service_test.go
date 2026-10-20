@@ -1471,11 +1471,46 @@ func TestUnknownParentBlockDoesNotHoldPayloadPreparation(t *testing.T) {
 
 	err = service.ProcessMessage(t.Context(), nil, child)
 	require.ErrorIs(t, err, ErrIgnore)
-	_, scheduled := service.(*blockService).blocksScheduledForLaterExecution.Load(root)
+	queued, scheduled := service.(*blockService).blocksScheduledForLaterExecution.Load(root)
 	require.True(t, scheduled)
-	_, finish, ok := store.TryBeginPayloadPreparation(t.Context(), child.Block.Slot, child.Block.Slot+1)
+	ctx, finish, ok := store.TryBeginPayloadPreparation(t.Context(), child.Block.Slot, child.Block.Slot+1)
 	require.True(t, ok)
-	finish()
+	defer finish()
+
+	job := queued.(*blockJob)
+	for range 2 {
+		service.(*blockService).processScheduledBlock(t.Context(), root, job, time.Now())
+		require.NoError(t, context.Cause(ctx))
+		require.ErrorIs(t, job.lastAttempt.err, ErrIgnore)
+		_, scheduled = service.(*blockService).blocksScheduledForLaterExecution.Load(root)
+		require.True(t, scheduled)
+	}
+}
+
+func TestScheduledBlockWaitsForProposerStateBeforeCancelingPayloadPreparation(t *testing.T) {
+	service, child, store, root, job := parkUnknownParentBlockForRetry(t, true)
+	stateErr := errors.New("parent state unavailable")
+	store.ViewStateAtBlockRootFn = func(common.Hash, func(*state.CachingBeaconState) error) error {
+		return stateErr
+	}
+	ctx, finish, ok := store.TryBeginPayloadPreparation(t.Context(), child.Block.Slot, child.Block.Slot+1)
+	require.True(t, ok)
+	defer finish()
+
+	service.processScheduledBlock(t.Context(), root, job, time.Now())
+
+	require.NoError(t, context.Cause(ctx))
+	require.ErrorIs(t, job.lastAttempt.err, stateErr)
+	require.Nil(t, job.finishPayloadImport)
+	_, scheduled := service.blocksScheduledForLaterExecution.Load([32]byte(root))
+	require.True(t, scheduled)
+
+	store.ViewStateAtBlockRootFn = nil
+	service.processScheduledBlock(t.Context(), root, job, time.Now())
+
+	require.ErrorIs(t, context.Cause(ctx), forkchoice.ErrPayloadImportInProgress)
+	require.ErrorIs(t, job.lastAttempt.err, forkchoice.ErrEIP7594ColumnDataNotAvailable)
+	require.NotNil(t, job.finishPayloadImport)
 }
 
 func TestAuthenticatedScheduledBlockTakesPayloadImportClaim(t *testing.T) {
@@ -1494,17 +1529,23 @@ func TestAuthenticatedScheduledBlockTakesPayloadImportClaim(t *testing.T) {
 	finish()
 }
 
-func TestWrongProposerScheduledBlockStaysUnclaimed(t *testing.T) {
+func TestWrongProposerScheduledBlockDoesNotCancelPayloadPreparation(t *testing.T) {
 	service, child, store, root, job := parkUnknownParentBlockForRetry(t, false)
-	service.processScheduledBlock(t.Context(), root, job, time.Now())
-	require.ErrorIs(t, job.lastAttempt.err, forkchoice.ErrEIP7594ColumnDataNotAvailable)
-
-	_, finish, ok := store.TryBeginPayloadPreparation(t.Context(), child.Block.Slot, child.Block.Slot+1)
+	store.OnBlockErr = forkchoice.ErrParentEnvelopePending
+	ctx, finish, ok := store.TryBeginPayloadPreparation(t.Context(), child.Block.Slot, child.Block.Slot+1)
 	require.True(t, ok)
-	finish()
+	defer finish()
+
+	service.processScheduledBlock(t.Context(), root, job, time.Now())
+
+	require.NoError(t, context.Cause(ctx))
+	require.ErrorIs(t, job.lastAttempt.err, forkchoice.ErrBlockInvalid)
+	require.Nil(t, job.finishPayloadImport)
+	_, scheduled := service.blocksScheduledForLaterExecution.Load([32]byte(root))
+	require.False(t, scheduled)
 }
 
-func TestUnrelatedScheduledBlockErrorSkipsProposerValidation(t *testing.T) {
+func TestUnrelatedScheduledBlockErrorDoesNotRetainImportClaim(t *testing.T) {
 	service, child, store, root, job := parkUnknownParentBlockForRetry(t, true)
 	store.OnBlockErr = errors.New("unrelated retry error")
 	validationCalls := 0
@@ -1515,7 +1556,7 @@ func TestUnrelatedScheduledBlockErrorSkipsProposerValidation(t *testing.T) {
 
 	service.processScheduledBlock(t.Context(), root, job, time.Now())
 	require.EqualError(t, job.lastAttempt.err, "unrelated retry error")
-	require.Zero(t, validationCalls)
+	require.Equal(t, 1, validationCalls)
 	require.Nil(t, job.finishPayloadImport)
 	_, finish, ok := store.TryBeginPayloadPreparation(t.Context(), child.Block.Slot, child.Block.Slot+1)
 	require.True(t, ok)
