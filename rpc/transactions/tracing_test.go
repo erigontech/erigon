@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -284,6 +285,57 @@ func (r emptyAccountReader) ReadAccountData(addr accounts.Address) (*accounts.Ac
 		return &acc, nil
 	}
 	return nil, nil
+}
+
+type countingReader struct {
+	*state.NoopReader
+	addr                    accounts.Address
+	code                    []byte
+	storageReads, codeReads int
+}
+
+func (r *countingReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	if addr != r.addr {
+		return nil, nil
+	}
+	acc := accounts.NewAccount()
+	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(r.code))
+	return &acc, nil
+}
+
+func (r *countingReader) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
+	r.storageReads++
+	return *uint256.NewInt(7), true, nil
+}
+
+func (r *countingReader) ReadAccountCode(accounts.Address) ([]byte, error) {
+	r.codeReads++
+	return r.code, nil
+}
+
+// The versioned state drops its read set after every transaction; a request that replays several
+// reads a contract's committed code and storage once, as the materialized state objects did.
+func TestReplayReaderServesCommittedReadsAcrossTransactions(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x0203"))
+	key := accounts.InternKey(common.HexToHash("0x11"))
+	reader := &countingReader{NoopReader: state.NewNoopReader(), addr: addr, code: []byte{byte(vm.STOP)}}
+	ibs := state.New(state.NewReplayReader(reader))
+	defer ibs.Close()
+	ibs.SetVersionMap(state.NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+	ibs.SetNoConflictDetection()
+	for txIndex := range 2 {
+		ibs.SetTxContext(0, txIndex)
+		got, err := ibs.GetState(addr, key)
+		require.NoError(t, err)
+		require.Equal(t, *uint256.NewInt(7), got)
+		code, err := ibs.GetCode(addr)
+		require.NoError(t, err)
+		require.Equal(t, reader.code, code)
+		require.NoError(t, ethapi.FinalizeCallTx(ibs, &chain.Rules{}))
+	}
+	require.Equal(t, 1, reader.storageReads)
+	require.Equal(t, 1, reader.codeReads)
 }
 
 // An existing account a transaction touches and leaves empty is gone for the next transaction

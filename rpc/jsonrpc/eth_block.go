@@ -108,7 +108,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 			return nil, err
 		}
 	}
-	ibs := state.New(stateReader)
+	ibs := state.New(state.NewReplayReader(stateReader))
 	defer ibs.Close()
 	transactions.VersionedCallState(ibs)
 

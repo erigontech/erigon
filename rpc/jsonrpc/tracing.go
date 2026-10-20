@@ -467,7 +467,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		return err
 	}
 
-	ibs := state.New(stateReader)
+	ibs := state.New(state.NewReplayReader(stateReader))
 	defer ibs.Close()
 	transactions.VersionedCallState(ibs)
 
