@@ -46,19 +46,9 @@ type Reset struct {
 	}
 }
 
-// stateKVName matches a domain data file, capturing its version, domain and step range. The minor
-// component is optional because a datadir can still hold legacy "v1-" names: RenameOldVersions
-// rewrites them to the dotted spelling, and reset does not run it first.
 var stateKVName = regexp.MustCompile(`^(v[0-9]+(?:\.[0-9]+)?)-(accounts|storage|commitment)\.([0-9]+)-([0-9]+)\.kv$`)
 
 var entityFileName = regexp.MustCompile(`^v[0-9]+(?:\.[0-9]+)?-([a-z]+)\.([0-9]+)-([0-9]+)\.(kv|v|ef)$`)
-
-func startupName(name string) string {
-	if rest, ok := strings.CutPrefix(name, "v1-"); ok {
-		return "v1.0-" + rest
-	}
-	return name
-}
 
 // domainBuild is the file a step range will hold for one domain once reset is done and the
 // downloader has fetched what the manifest describes. Only the highest version of a logical file is
@@ -178,7 +168,10 @@ func (reset *Reset) checkStateBuilds() error {
 			if entry.IsDir() {
 				continue
 			}
-			name := startupName(entry.Name())
+			name, kept := reset.Dirs.RenamedOldVersion(dir, entry.Name())
+			if !kept {
+				continue
+			}
 			recordEnd(name)
 			if dir != reset.Dirs.SnapDomain {
 				continue

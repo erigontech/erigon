@@ -443,3 +443,25 @@ func TestResetIgnoresMalformedNamesWhenFindingTheVisibleEnd(t *testing.T) {
 		})
 	}
 }
+
+func TestResetSkipsLegacyCommitmentHistoryThatStartupRemoves(t *testing.T) {
+	for _, legacy := range []string{
+		"snapshots/history/v1-commitment.0-2.v",
+		"snapshots/idx/v1-commitment.0-2.ef",
+	} {
+		withOsRoot(t, func(root *os.Root) {
+			err := runCoveredRangeReset(t, root, append(slices.Clone(completeLocalMerge), legacy), nil)
+			qt.Assert(t, qt.IsNil(err), qt.Commentf("%s", legacy))
+		})
+	}
+	for _, pair := range [][2]string{
+		{"snapshots/history/v1.0-commitment.0-2.v", "snapshots/history/v1-commitment.0-4.v"},
+		{"snapshots/idx/v1.0-commitment.0-2.ef", "snapshots/idx/v1-commitment.0-4.ef"},
+	} {
+		withOsRoot(t, func(root *os.Root) {
+			err := runCoveredRangeReset(t, root, append(slices.Clone(completeLocalMerge), pair[0], pair[1]), nil)
+			qt.Assert(t, qt.IsNotNil(err), qt.Commentf("%s", pair[1]))
+			qt.Assert(t, qt.StringContains(err.Error(), "0-2"))
+		})
+	}
+}

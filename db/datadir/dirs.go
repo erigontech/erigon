@@ -265,6 +265,18 @@ func (d *Dirs) VersionedDirs() []string {
 	}
 }
 
+func (d *Dirs) RenamedOldVersion(dirPath, name string) (string, bool) {
+	rest, ok := strings.CutPrefix(name, "v1-")
+	if !ok {
+		return name, true
+	}
+	if strings.HasSuffix(name, ".torrent") ||
+		strings.Contains(name, "commitment") && (dirPath == d.SnapAccessors || dirPath == d.SnapHistory || dirPath == d.SnapIdx) {
+		return "", false
+	}
+	return "v1.0-" + rest, true
+}
+
 func (d *Dirs) RenameOldVersions(cmdCommand bool) error {
 	renamed := 0
 	torrentsRemoved := 0
@@ -283,28 +295,21 @@ func (d *Dirs) RenameOldVersions(cmdCommand bool) error {
 			}
 
 			name := entry.Name()
-			if strings.HasPrefix(name, "v1-") {
-				if strings.HasSuffix(name, ".torrent") {
-					if err := dir.RemoveFile(path); err != nil {
-						return err
-					}
-					torrentsRemoved++
-					return nil
+			newName, kept := d.RenamedOldVersion(dirPath, name)
+			switch {
+			case newName == name:
+			case !kept && strings.HasSuffix(name, ".torrent"):
+				if err := dir.RemoveFile(path); err != nil {
+					return err
 				}
-
-				if strings.Contains(entry.Name(), "commitment") &&
-					(dirPath == d.SnapAccessors || dirPath == d.SnapHistory || dirPath == d.SnapIdx) {
-					// remove the file instead of renaming
-					if err := dir.RemoveFile(path); err != nil {
-						return fmt.Errorf("failed to remove file %s: %w", path, err)
-					}
-					removed++
-					return nil
+				torrentsRemoved++
+			case !kept:
+				if err := dir.RemoveFile(path); err != nil {
+					return fmt.Errorf("failed to remove file %s: %w", path, err)
 				}
-
-				newName := strings.Replace(name, "v1-", "v1.0-", 1)
-				newPath := filepath.Join(filepath.Dir(path), newName)
-				if err := os.Rename(path, newPath); err != nil {
+				removed++
+			default:
+				if err := os.Rename(path, filepath.Join(filepath.Dir(path), newName)); err != nil {
 					return err
 				}
 				renamed++
