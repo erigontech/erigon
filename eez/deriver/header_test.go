@@ -20,9 +20,11 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/internal/stateless"
@@ -31,6 +33,7 @@ import (
 	eezrules "github.com/erigontech/erigon/eez/rules"
 	"github.com/erigontech/erigon/eez/systemtx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -104,7 +107,7 @@ func deriveWindow(t *testing.T, name string) {
 		}
 		txs, err := DecodeTxs(encoded)
 		require.NoError(t, err)
-		h := NewHeader(&cfg, parent, DeriveInputs(l2, parent, p.Span, i))
+		h := newHeader(&cfg, parent, DeriveInputs(l2, parent, p.Span, i))
 		witness := witnessOf(recorded.Witness)
 		res, err := stateless.Execute(&cfg, engine, types.NewBlock(h, txs, nil, nil, []*types.Withdrawal{}, nil), witness,
 			stateless.WithoutPostValidation())
@@ -134,4 +137,34 @@ func deriveWindow(t *testing.T, name string) {
 		require.ErrorIs(t, VerifyOutbound(append(outbound, outbound[0]), logs, l2.RollupID), ErrOutboundUnauthorized, "one call settles one entry")
 		require.ErrorIs(t, VerifyOutbound(outbound, logs, l2.RollupID+1), ErrOutboundUnauthorized)
 	}
+}
+
+// newHeader returns the header of the block in derives on parent, before
+// execution fills in its roots, bloom and gas used: a post-merge header with
+// zero prevRandao and beacon root, no blob gas and empty withdrawals and
+// requests.
+func newHeader(cfg *chain.Config, parent *types.Header, in HeaderInputs) *types.Header {
+	h := &types.Header{
+		ParentHash: in.ParentHash,
+		UncleHash:  empty.UncleHash,
+		Coinbase:   in.Coinbase,
+		Number:     *uint256.NewInt(in.Number),
+		GasLimit:   in.GasLimit,
+		Time:       in.Time,
+		Extra:      in.Extra,
+		BaseFee:    misc.CalcBaseFee(cfg, parent),
+	}
+	if cfg.IsShanghai(in.Time) {
+		h.WithdrawalsHash = &empty.RootHash
+	}
+	if cfg.IsCancun(in.Time) {
+		zero := uint64(0)
+		excess := misc.CalcExcessBlobGas(cfg, parent, in.Time)
+		h.BlobGasUsed, h.ExcessBlobGas = &zero, &excess
+		h.ParentBeaconBlockRoot = &common.Hash{}
+	}
+	if cfg.IsPrague(in.Time) {
+		h.RequestsHash = &empty.RequestsHash
+	}
+	return h
 }
