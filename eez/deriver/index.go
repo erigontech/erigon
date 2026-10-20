@@ -36,9 +36,6 @@ type Index struct {
 	records []Record
 }
 
-// Len is the number of settlements.
-func (x *Index) Len() int { return len(x.records) }
-
 // Last returns the latest settlement.
 func (x *Index) Last() (Record, bool) {
 	if len(x.records) == 0 {
@@ -70,17 +67,6 @@ func (x *Index) Append(r Record) bool {
 	}
 	x.records = append(x.records, r)
 	return true
-}
-
-// CountAtL1Block counts the settlements of L1 block number.
-func (x *Index) CountAtL1Block(number uint64) int {
-	n := 0
-	for _, r := range x.records {
-		if r.L1Block == number {
-			n++
-		}
-	}
-	return n
 }
 
 // RetreatOnReorg drops the settlements above the L1 block ancestor and

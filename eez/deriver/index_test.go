@@ -48,7 +48,6 @@ func TestIndex(t *testing.T) {
 	require.True(t, x.Append(record(14, 3, 12)))
 	require.True(t, x.Append(record(20, 4, 9)))
 	require.Equal(t, uint64(9), x.Cursor(), "the latest settlement, not the highest")
-	require.Equal(t, 2, x.CountAtL1Block(10))
 	require.True(t, x.Contains(common.Hash{3}))
 
 	settled, ok := x.SettledAt(15)
