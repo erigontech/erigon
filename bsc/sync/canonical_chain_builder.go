@@ -18,10 +18,10 @@ package bscsync
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sync"
 
@@ -196,32 +196,49 @@ func (ccb *CanonicalChainBuilder) walk(from *forkTreeNode, visit func(*forkTreeN
 	}
 }
 
-// compareForkTreeNodes returns a positive number if the chain ending at node1 is better than
-// the chain ending at node2: a greater total difficulty, a smaller block number, or a
-// lexicographically greater hash.
-func compareForkTreeNodes(node1 *forkTreeNode, node2 *forkTreeNode) int {
-	if c := cmp.Compare(node1.totalDifficulty, node2.totalDifficulty); c != 0 {
-		return c
+// reorgNeeded ports bsc-geth's ReorgNeededWithFastFinality. Where bsc-geth flips a coin, the
+// current tip is kept.
+func reorgNeeded(current, candidate *forkTreeNode) bool {
+	if c, k := candidate.justifiedNumber(), current.justifiedNumber(); c != k {
+		return c > k
 	}
-	if c := node1.header.Number.Cmp(&node2.header.Number); c != 0 {
-		return -c
+	if candidate.totalDifficulty != current.totalDifficulty {
+		return candidate.totalDifficulty > current.totalDifficulty
 	}
-	return bytes.Compare(node1.headerHash[:], node2.headerHash[:])
+	candidateNum, currentNum := candidate.header.Number.Uint64(), current.header.Number.Uint64()
+	if candidateNum != currentNum {
+		return candidateNum < currentNum
+	}
+	if candidate.header.Time != current.header.Time {
+		return candidate.header.Time < current.header.Time
+	}
+	if candidate.header.Coinbase == current.header.Coinbase {
+		return bytes.Compare(candidate.headerHash[:], current.headerHash[:]) < 0
+	}
+	return false
+}
+
+func (n *forkTreeNode) justifiedNumber() uint64 {
+	number, _ := n.snapshot.Justified()
+	return number
 }
 
 func (ccb *CanonicalChainBuilder) updateTipIfNeeded(tipCandidate *forkTreeNode) {
-	if compareForkTreeNodes(tipCandidate, ccb.tip) > 0 {
+	if reorgNeeded(ccb.tip, tipCandidate) {
 		ccb.tip = tipCandidate
 	}
 }
 
 func (ccb *CanonicalChainBuilder) recalcTip() *forkTreeNode {
-	tip := ccb.root
-	ccb.walk(ccb.root, func(node *forkTreeNode) {
-		if compareForkTreeNodes(tip, node) < 0 {
+	nodes := slices.SortedFunc(maps.Values(ccb.nodes), func(a, b *forkTreeNode) int {
+		return bytes.Compare(a.headerHash[:], b.headerHash[:])
+	})
+	tip := nodes[0]
+	for _, node := range nodes[1:] {
+		if reorgNeeded(tip, node) {
 			tip = node
 		}
-	})
+	}
 	return tip
 }
 
