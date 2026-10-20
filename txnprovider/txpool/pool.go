@@ -701,12 +701,19 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	// Broadcasting on cancellation or on a stopped wait wakes it; every waiter rechecks its own
 	// condition anyway. The broadcast takes the lock so it cannot land between the check below and
 	// the wait, which is the window where a wakeup would be lost.
+	watchParentBlockWaitStop := parentBlockWaitStop
+	// An already closed stop needs no watcher; its broadcast and join would contend on every later call.
+	select {
+	case <-watchParentBlockWaitStop:
+		watchParentBlockWaitStop = nil
+	default:
+	}
 	stopWatching, watcherDone := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(watcherDone)
 		select {
 		case <-ctx.Done():
-		case <-parentBlockWaitStop:
+		case <-watchParentBlockWaitStop:
 		case <-stopWatching:
 			return
 		}
@@ -731,6 +738,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			return false, 0, ctx.Err()
 		case <-parentBlockWaitStop:
 			p.lock.Unlock()
+			p.logger.Debug("[txpool] Parent block wait stopped", "expecting", onTopOf, "lastSeen", last)
 			return false, 0, ctx.Err()
 		default:
 			// continue
