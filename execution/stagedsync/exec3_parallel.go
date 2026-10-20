@@ -2276,8 +2276,15 @@ func (result *execResult) calcFees(
 	// AddressPath sibling) even when the net change is zero, else the worker's raw
 	// gas-debit value is left behind and a later whole-account read gets a stale balance.
 	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance || (cbOverride && !coinbaseNetDestructed)
+	// The fee credit touches the coinbase, so a zero tip removes an empty one (EIP-161).
+	coinbaseEmptied := !emitCoinbase && coinbaseAcc != nil && !coinbaseSelfdestructed && newCoinbaseBalance.IsZero() &&
+		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite &&
+		state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, result.Coinbase)
 
 	addWrites := &state.WriteSet{}
+	if coinbaseEmptied {
+		addWrites.SetEmptyRemoval(result.Coinbase, taskVersion)
+	}
 	if emitCoinbase {
 		{
 			addWrites.SetBalance(result.Coinbase, &state.VersionedWrite[uint256.Int]{
