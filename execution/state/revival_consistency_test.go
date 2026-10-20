@@ -26,18 +26,10 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// Revival is decided at three sites with two different definitions:
-//
-//   - the two readers — getVersionedAccount and versionedStateReader.ReadAccountData —
-//     agree exactly: revived = AddressPath >= destructTx OR {Balance,Nonce,CodeHash} > destructTx
-//   - the validator — validateReadImpl — omits the AddressPath >= arm:
-//     revived = {Balance,Nonce,CodeHash} > destructTx
-//
-// These tests pin whether that omission is observably divergent. The invariant
-// they lock: production revival (createObject) always co-writes CodeHash at the
-// revival tx, so the two definitions never disagree on a production-shaped
-// history — but the validator's verdict *does* diverge from the readers in the
-// synthetic AddressPath-only revival, which is why the co-write is load-bearing.
+// Account revival and field-read validity are separate: a reader can return a
+// revived account while validation rejects an earlier field read. These tests
+// cover a balance read made stale by a newer balance write, and a nonce read
+// made stale by self-destruct even though the nonce cell's version is unchanged.
 
 func recreatedAccount(inc uint64) *accounts.Account {
 	return &accounts.Account{
@@ -90,12 +82,10 @@ func TestRevivalConsistency_SameTxMetamorphic_ReaderAndValidatorAgree(t *testing
 		"pre-destruct field read is stale after same-tx re-create — reader and validator agree the old value is gone")
 }
 
-// Synthetic AddressPath-only revival: no field is re-written at the revival tx.
-// Here the reader reports revived (AddressPath >= arm) while the validator does
-// not (it lacks that arm) — the divergence. Production never produces this
-// history because createObject always co-writes CodeHash; this test documents
-// that the co-write is what keeps the two revival definitions consistent.
-func TestRevivalConsistency_AddressPathOnly_ReaderAndValidatorDiverge(t *testing.T) {
+// Returning a revived account and rejecting its old nonce read are consistent.
+// Self-destruct invalidates that nonzero nonce read even if the nonce cell's
+// version is unchanged.
+func TestRevivalConsistency_AddressPathOnly_RejectsPreDestructNonce(t *testing.T) {
 	t.Parallel()
 	addr := getAddress(79)
 
