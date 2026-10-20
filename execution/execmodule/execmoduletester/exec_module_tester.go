@@ -855,6 +855,12 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		return nil
 	})
 	mock.StreamWg.Wait()
+	mock.StreamWg.Add(1)
+	mock.bgComponentsEg.Go(func() error {
+		mock.sentriesClient.RecvUploadBlockAccessListsMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
+		return nil
+	})
+	mock.StreamWg.Wait()
 
 	// app expecting that genesis will always be in db
 	c := &blockgen.ChainPack{
