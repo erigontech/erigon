@@ -151,6 +151,10 @@ func (ccb *CanonicalChainBuilder) HeaderReader() CcbHeaderReader {
 func (ccb *CanonicalChainBuilder) PruneRoot(newRootNum uint64) error {
 	ccb.mu.Lock()
 	defer ccb.mu.Unlock()
+	return ccb.pruneRoot(newRootNum)
+}
+
+func (ccb *CanonicalChainBuilder) pruneRoot(newRootNum uint64) error {
 	if (newRootNum < ccb.root.header.Number.Uint64()) || (newRootNum > ccb.tip.header.Number.Uint64()) {
 		return errors.New("CanonicalChainBuilder.PruneRoot: newRootNum outside of the canonical chain")
 	}
@@ -387,4 +391,41 @@ func (r CcbHeaderReader) HeaderByHash(_ context.Context, hash common.Hash) (*typ
 		return nil, nil
 	}
 	return node.header, nil
+}
+
+// Justified returns the block that the tip's vote attestation justifies, or nil before the
+// first attestation.
+func (ccb *CanonicalChainBuilder) Justified() *types.Header {
+	ccb.mu.Lock()
+	defer ccb.mu.Unlock()
+	number, hash := ccb.tip.snapshot.Justified()
+	return ccb.attestedHeader(number, hash)
+}
+
+// Finalized returns the block that the tip's vote attestation finalizes, or nil before the
+// first attestation.
+func (ccb *CanonicalChainBuilder) Finalized() *types.Header {
+	ccb.mu.Lock()
+	defer ccb.mu.Unlock()
+	number, hash := ccb.tip.snapshot.Finalized()
+	return ccb.attestedHeader(number, hash)
+}
+
+func (ccb *CanonicalChainBuilder) attestedHeader(number uint64, hash common.Hash) *types.Header {
+	if hash == (common.Hash{}) {
+		return nil
+	}
+	return ccb.chain().GetHeader(hash, number)
+}
+
+// PruneToFinalized moves the root up to the tip's finalized block. Headers below the new
+// root are then read from db, so call it only after the canonical chain is stored.
+func (ccb *CanonicalChainBuilder) PruneToFinalized() error {
+	ccb.mu.Lock()
+	defer ccb.mu.Unlock()
+	number, hash := ccb.tip.snapshot.Finalized()
+	if _, ok := ccb.nodes[hash]; !ok || number <= ccb.root.header.Number.Uint64() {
+		return nil
+	}
+	return ccb.pruneRoot(number)
 }

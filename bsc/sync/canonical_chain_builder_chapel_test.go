@@ -61,25 +61,23 @@ func fixtureIndex(headers []*types.Header, number uint64) int {
 	return int(number - headers[0].Number.Uint64())
 }
 
-func newChapelStore(t *testing.T, headers []*types.Header) *parlia.SnapshotStore {
-	t.Helper()
-	db := fakeChainDB{}
+func (db fakeChainDB) add(headers ...*types.Header) {
 	for _, h := range headers {
 		db[h.Hash()] = h
 	}
-	store, err := parlia.NewSnapshotStore(bscchain.Chapel.Config, db, 4096)
-	require.NoError(t, err)
-	return store
 }
 
-func newChapelCCB(t *testing.T) (*CanonicalChainBuilder, []*types.Header, []*types.Header) {
+func newChapelCCB(t *testing.T) (*CanonicalChainBuilder, []*types.Header, fakeChainDB) {
 	t.Helper()
 	headers := loadChapelHeaders(t)
 	rootIdx := fixtureIndex(headers, chapelFixtureRoot)
-	store := newChapelStore(t, headers[:rootIdx+1])
+	db := fakeChainDB{}
+	db.add(headers[:rootIdx+1]...)
+	store, err := parlia.NewSnapshotStore(bscchain.Chapel.Config, db, 4096)
+	require.NoError(t, err)
 	ccb, err := NewCanonicalChainBuilder(store, NewParliaVerifier(bscchain.Chapel.Config), headers[rootIdx])
 	require.NoError(t, err)
-	return ccb, headers[rootIdx+1:], headers
+	return ccb, headers[rootIdx+1:], db
 }
 
 func forgeHeader(t *testing.T, h *types.Header) *types.Header {
@@ -127,4 +125,27 @@ func TestCCBChapelForkFailsVerification(t *testing.T) {
 	require.Empty(t, connected)
 	require.False(t, ccb.ContainsHash(forged.Hash()))
 	require.Equal(t, tip.Hash(), ccb.Tip().Hash())
+}
+
+func TestCCBChapelPruneToFinalized(t *testing.T) {
+	t.Parallel()
+	ccb, tail, db := newChapelCCB(t)
+
+	for start := 0; start < len(tail); start += 50 {
+		batch := tail[start:min(start+50, len(tail))]
+		_, err := ccb.Connect(t.Context(), batch)
+		require.NoError(t, err)
+		db.add(batch...)
+		require.NoError(t, ccb.PruneToFinalized())
+
+		tip := ccb.Tip()
+		justified, finalized := ccb.Justified(), ccb.Finalized()
+		require.NotNil(t, justified)
+		require.NotNil(t, finalized)
+		require.Equal(t, finalized.Hash(), ccb.Root().Hash())
+		require.Less(t, finalized.Number.Uint64(), justified.Number.Uint64())
+		require.Less(t, justified.Number.Uint64(), tip.Number.Uint64())
+		require.LessOrEqual(t, tip.Number.Uint64()-finalized.Number.Uint64(), uint64(10))
+	}
+	require.Equal(t, tail[len(tail)-1].Hash(), ccb.Tip().Hash())
 }

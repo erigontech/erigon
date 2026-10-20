@@ -612,3 +612,67 @@ func assertLca(t *testing.T, ccb *CanonicalChainBuilder, a, b, wantLca *types.He
 	require.Equal(t, wantOk, ok)
 	require.Equal(t, wantLca, lca)
 }
+
+func attest(source, target *types.Header) *parlia.VoteData {
+	return &parlia.VoteData{
+		SourceNumber: source.Number.Uint64(),
+		SourceHash:   source.Hash(),
+		TargetNumber: target.Number.Uint64(),
+		TargetHash:   target.Hash(),
+	}
+}
+
+func TestCCBJustifiedAndFinalized(t *testing.T) {
+	t.Parallel()
+	test, root := newConnectCCBTest(t)
+	headers := test.makeHeaders(root, []uint64{2, 2, 2, 2})
+	test.verifier.justified[headers[3].Hash()] = attest(headers[1], headers[2])
+	_, err := test.builder.Connect(t.Context(), headers)
+	require.NoError(t, err)
+
+	require.Equal(t, headers[2].Hash(), test.builder.Justified().Hash())
+	require.Equal(t, headers[1].Hash(), test.builder.Finalized().Hash())
+}
+
+func TestCCBJustifiedAndFinalizedWithoutAttestation(t *testing.T) {
+	t.Parallel()
+	test, root := newConnectCCBTest(t)
+	_, err := test.builder.Connect(t.Context(), test.makeHeaders(root, []uint64{2, 2}))
+	require.NoError(t, err)
+
+	require.Nil(t, test.builder.Justified())
+	require.Nil(t, test.builder.Finalized())
+}
+
+func TestCCBPruneToFinalized(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	test, root := newConnectCCBTest(t)
+	headers := test.makeHeaders(root, []uint64{2, 2, 2, 2})
+	fork := test.makeHeader(headers[0], 1)
+	test.verifier.justified[headers[3].Hash()] = attest(headers[1], headers[2])
+	_, err := test.builder.Connect(ctx, headers)
+	require.NoError(t, err)
+	_, err = test.builder.Connect(ctx, []*types.Header{fork})
+	require.NoError(t, err)
+
+	require.NoError(t, test.builder.PruneToFinalized())
+	require.Equal(t, headers[1].Hash(), test.builder.Root().Hash())
+	require.Equal(t, headers[3].Hash(), test.builder.Tip().Hash())
+	require.False(t, test.builder.ContainsHash(fork.Hash()))
+	require.False(t, test.builder.ContainsHash(headers[0].Hash()))
+	require.Len(t, test.builder.Headers(), 3)
+}
+
+func TestCCBPruneToFinalizedKeepsRootWhenFinalizedIsOlder(t *testing.T) {
+	t.Parallel()
+	test, root := newConnectCCBTest(t)
+	headers := test.makeHeaders(root, []uint64{2, 2, 2, 2})
+	test.verifier.justified[headers[3].Hash()] = attest(headers[0], headers[2])
+	_, err := test.builder.Connect(t.Context(), headers)
+	require.NoError(t, err)
+	require.NoError(t, test.builder.PruneRoot(2))
+
+	require.NoError(t, test.builder.PruneToFinalized())
+	require.Equal(t, headers[1].Hash(), test.builder.Root().Hash())
+}
