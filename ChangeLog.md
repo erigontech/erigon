@@ -6,7 +6,7 @@
 
 ---
 
-# Erigon v3.8.0 — Watery Whiskers — TBD
+# Erigon v3.8.0 — Watery Whiskers — 2026-10-20
 
 Erigon 3.8.0 is **Glamsterdam-ready**, with **Glamsterdam on Hoodi**, faster commitment and execution,
 and further RPC performance improvements. It also improves Caplin block production, recovery after restarts,
