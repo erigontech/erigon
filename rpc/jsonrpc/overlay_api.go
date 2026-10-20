@@ -50,7 +50,7 @@ import (
 
 type OverlayAPI interface {
 	GetLogs(ctx context.Context, crit filters.FilterCriteria, stateOverride *ethapi.StateOverrides, rules *chain.Rules) ([]*types.Log, error)
-	CallConstructor(ctx context.Context, address common.Address, code *hexutil.Bytes) (*CreationCode, error)
+	CallConstructor(ctx context.Context, address common.Address, code hexutil.Bytes) (*CreationCode, error)
 }
 
 // OverlayAPIImpl is implementation of the OverlayAPIImpl interface based on remote Db access
@@ -90,7 +90,7 @@ func NewOverlayAPI(base *BaseAPI, db kv.TemporalRoDB, cfg *rpccfg.OverlayApiConf
 	}
 }
 
-func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.Address, code *hexutil.Bytes) (*CreationCode, error) {
+func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.Address, code hexutil.Bytes) (*CreationCode, error) {
 	var (
 		replayTransactions types.Transactions
 		evm                *vm.EVM
@@ -218,12 +218,12 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	contractAddr := types.CreateAddress(msg.From().Value(), msg.Nonce())
 	if creationTx.GetTo() == nil && contractAddr == address {
 		// CREATE: adapt message with new code so it's replaced instantly
-		msg = types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), api.GasCap, msg.GasPrice(), msg.FeeCap(), msg.TipCap(), *code, msg.AccessList(), msg.CheckNonce(), msg.CheckTransaction(), msg.CheckGas(), msg.IsFree(), msg.MaxFeePerBlobGas())
+		msg = types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), api.GasCap, msg.GasPrice(), msg.FeeCap(), msg.TipCap(), code, msg.AccessList(), msg.CheckNonce(), msg.CheckTransaction(), msg.CheckGas(), msg.IsFree(), msg.MaxFeePerBlobGas())
 	} else {
 		msg.ChangeGas(api.GasCap, api.GasCap)
 	}
 	txCtx = protocol.NewEVMTxContext(msg)
-	ct := OverlayCreateTracer{contractAddress: accounts.InternAddress(address), code: *code, gasCap: api.GasCap}
+	ct := OverlayCreateTracer{contractAddress: accounts.InternAddress(address), code: code, gasCap: api.GasCap}
 	evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Tracer: ct.Tracer().Hooks})
 	ct.evm = evm
 
