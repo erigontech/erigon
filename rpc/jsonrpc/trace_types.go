@@ -47,7 +47,9 @@ type ParityTrace struct {
 type ParityTraces []ParityTrace
 
 // MarshalFastJSONTo streams trace_block and trace_transaction results in encoding/json's field
-// order and forms. An action or result of a type it does not know fails before the first write.
+// order and forms, except that a record localized to a block always carries transactionHash and
+// transactionPosition, null for a reward. An action or result of a type it does not know fails
+// before the first write.
 func (ts ParityTraces) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if ts == nil {
 		s.WriteNil()
@@ -124,11 +126,16 @@ func (t *ParityTrace) marshalFastJSONTo(s *jsonstream.Stream) {
 	s.Field("subtraces").Int(int64(t.Subtraces))
 	s.Field("traceAddress")
 	jsonstream.ArrayValue(s, t.TraceAddress, writeIntElem)
+	localized := t.BlockHash != nil
 	if t.TransactionHash != nil {
 		ethjson.Data(s, "transactionHash", t.TransactionHash[:])
+	} else if localized {
+		s.Field("transactionHash").WriteNil()
 	}
 	if t.TransactionPosition != nil {
 		s.Field("transactionPosition").Uint(*t.TransactionPosition)
+	} else if localized {
+		s.Field("transactionPosition").WriteNil()
 	}
 	s.Field("type").WriteString(t.Type)
 	s.WriteObjectEnd()
