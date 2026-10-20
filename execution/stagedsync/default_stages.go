@@ -31,7 +31,6 @@ func DefaultStages(
 	ctx context.Context,
 	snapshots SnapshotsCfg,
 	headers HeadersCfg,
-	blockHashCfg BlockHashesCfg,
 	bodies BodiesCfg,
 	senders SendersCfg,
 	exec ExecuteBlockCfg,
@@ -52,7 +51,7 @@ func DefaultStages(
 				return nil
 			},
 			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
-				return SnapshotsPrune(p, snapshots, ctx, tx, logger)
+				return SnapshotsPrune(p, snapshots, ctx, tx)
 			},
 		},
 		{
@@ -72,7 +71,7 @@ func DefaultStages(
 			ID:          stages.BlockHashes,
 			Description: "Write block hashes",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return SpawnBlockHashStage(s, tx, blockHashCfg, ctx, logger)
+				return SpawnBlockHashStage(s, tx)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return UnwindBlockHashStage(u, tx)
@@ -168,7 +167,7 @@ func DefaultStages(
 	}
 }
 
-func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, exec ExecuteBlockCfg, txLookup TxLookupCfg, finish FinishCfg) []*Stage {
+func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, senders SendersCfg, exec ExecuteBlockCfg, txLookup TxLookupCfg, finish FinishCfg) []*Stage {
 	return []*Stage{
 		{
 			ID:          stages.Snapshots,
@@ -183,14 +182,14 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 				return nil
 			},
 			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
-				return SnapshotsPrune(p, snapshots, ctx, tx, logger)
+				return SnapshotsPrune(p, snapshots, ctx, tx)
 			},
 		},
 		{
 			ID:          stages.BlockHashes,
 			Description: "Write block hashes",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return SpawnBlockHashStage(s, tx, blockHashCfg, ctx, logger)
+				return SpawnBlockHashStage(s, tx)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return UnwindBlockHashStage(u, tx)
@@ -255,7 +254,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 }
 
 // StateStages are all stages necessary for basic unwind and stage computation, it is primarily used to process side forks and memory execution.
-func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, exec ExecuteBlockCfg) []*Stage {
+func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, senders SendersCfg, exec ExecuteBlockCfg) []*Stage {
 	return []*Stage{
 		{
 			ID:          stages.Headers,
@@ -281,7 +280,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 			ID:          stages.BlockHashes,
 			Description: "Write block hashes",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return SpawnBlockHashStage(s, tx, blockHashCfg, ctx, logger)
+				return SpawnBlockHashStage(s, tx)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return UnwindBlockHashStage(u, tx)
@@ -319,7 +318,7 @@ var DefaultForwardOrder = UnwindOrder{
 	// Stages below don't use Internet
 	stages.Senders,
 	stages.Execution,
-	//stages.CustomTrace,
+	// stages.CustomTrace,
 	stages.TxLookup,
 	stages.Finish,
 }
@@ -328,14 +327,16 @@ var DefaultForwardOrder = UnwindOrder{
 // The unwind order is important and not always just stages going backwards.
 // Let's say, there is txn pool can be unwound only after execution.
 // It's ok to remove some stage from here to disable only unwind of stage
-type UnwindOrder []stages.SyncStage
-type PruneOrder []stages.SyncStage
+type (
+	UnwindOrder []stages.SyncStage
+	PruneOrder  []stages.SyncStage
+)
 
 var DefaultUnwindOrder = UnwindOrder{
 	stages.Finish,
 	stages.TxLookup,
 
-	//stages.CustomTrace,
+	// stages.CustomTrace,
 	stages.Execution,
 	stages.Senders,
 

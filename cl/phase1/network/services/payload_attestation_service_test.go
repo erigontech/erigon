@@ -51,11 +51,11 @@ type panickingPayloadAttestationForkchoice struct {
 	forkchoice.ForkChoiceStorage
 }
 
-func (*panickingPayloadAttestationForkchoice) OnPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, bool) error {
+func (*panickingPayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage) error {
 	panic("validation panic")
 }
 
-func (f *blockingPayloadAttestationForkchoice) OnPayloadAttestationMessage(ctx context.Context, _ *cltypes.PayloadAttestationMessage, _ bool) error {
+func (f *blockingPayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(ctx context.Context, _ *cltypes.PayloadAttestationMessage) error {
 	active := f.active.Add(1)
 	defer f.active.Add(-1)
 	for {
@@ -86,7 +86,7 @@ type retryablePayloadAttestationForkchoice struct {
 	calls atomic.Int32
 }
 
-func (f *retryablePayloadAttestationForkchoice) OnPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, bool) error {
+func (f *retryablePayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage) error {
 	if f.calls.Add(1) == 1 {
 		return f.first
 	}
@@ -99,7 +99,7 @@ type candidatePayloadAttestationForkchoice struct {
 	release chan struct{}
 }
 
-func (f *candidatePayloadAttestationForkchoice) OnPayloadAttestationMessage(_ context.Context, msg *cltypes.PayloadAttestationMessage, _ bool) error {
+func (f *candidatePayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(_ context.Context, msg *cltypes.PayloadAttestationMessage) error {
 	candidate := msg.Signature[0]
 	f.started <- candidate
 	<-f.release
@@ -109,7 +109,7 @@ func (f *candidatePayloadAttestationForkchoice) OnPayloadAttestationMessage(_ co
 	return nil
 }
 
-func (f *retryPayloadAttestationForkchoice) OnPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, bool) error {
+func (f *retryPayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage) error {
 	if f.calls.Add(1) == 1 {
 		close(f.firstStarted)
 		<-f.releaseFirst
@@ -125,6 +125,8 @@ func setupPayloadAttestationService(t *testing.T, ctrl *gomock.Controller) (*pay
 	ethClockMock.EXPECT().GetSlotTime(gomock.Any()).DoAndReturn(func(slot uint64) time.Time {
 		return time.Unix(int64(slot*12), 0)
 	}).AnyTimes()
+	ethClockMock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(0)).AnyTimes()
+	ethClockMock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.GloasVersion).AnyTimes()
 
 	seenCache, err := lru.New[seenPayloadAttestationKey, struct{}]("seen_payload_attestations", seenPayloadAttestationCacheSize)
 	require.NoError(t, err)
@@ -459,6 +461,27 @@ func TestPayloadAttestationServiceNilMessage(t *testing.T) {
 	require.Contains(t, err.Error(), "nil payload attestation message")
 }
 
+func TestPayloadAttestationServiceRejectsPreGloasSlot(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, _ := setupPayloadAttestationService(t, ctrl)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GenesisTime().Return(uint64(0)).AnyTimes()
+	clock.EXPECT().GetSlotTime(gomock.Any()).DoAndReturn(func(slot uint64) time.Time {
+		return time.Unix(int64(slot*12), 0)
+	}).AnyTimes()
+	clock.EXPECT().GetEpochAtSlot(uint64(63)).Return(uint64(1)).AnyTimes()
+	clock.EXPECT().StateVersionByEpoch(uint64(1)).Return(clparams.FuluVersion).AnyTimes()
+	service.ethClock = clock
+	service.now = func() time.Time { return time.Unix(63*12+6, 0) }
+
+	err := service.ProcessMessage(context.Background(), nil, newTestPayloadAttestationMessage(63, 1, common.Hash{1}))
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
+	require.ErrorContains(t, err, "pre-Gloas")
+}
+
 func TestPayloadAttestationServiceSlotMismatch(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -468,11 +491,11 @@ func TestPayloadAttestationServiceSlotMismatch(t *testing.T) {
 	blockRoot := common.HexToHash("0x1234")
 	msg := newTestPayloadAttestationMessage(100, 1, blockRoot)
 
-	service.now = func() time.Time { return time.Unix(100*12, 0).Add(-gloasMaximumClockDisparity - time.Millisecond) }
+	service.now = func() time.Time { return time.Unix(100*12, 0).Add(-maximumGossipClockDisparity - time.Millisecond) }
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrIgnore)
 	require.Contains(t, err.Error(), "not current slot")
 }
 
@@ -481,7 +504,7 @@ func TestPayloadAttestationServiceRejectsTooEarlyNextSlot(t *testing.T) {
 	defer ctrl.Finish()
 
 	service, _, _ := setupPayloadAttestationService(t, ctrl)
-	service.now = func() time.Time { return time.Unix(100*12, 0).Add(-gloasMaximumClockDisparity - time.Millisecond) }
+	service.now = func() time.Time { return time.Unix(100*12, 0).Add(-maximumGossipClockDisparity - time.Millisecond) }
 
 	err := service.ProcessMessage(context.Background(), nil, newTestPayloadAttestationMessage(100, 1, common.HexToHash("0x1234")))
 	require.ErrorIs(t, err, ErrIgnore)
@@ -501,11 +524,11 @@ func TestPayloadAttestationSlotCurrentBoundaries(t *testing.T) {
 		slot uint64
 		want bool
 	}{
-		{name: "too early next slot", now: slotStart.Add(-gloasMaximumClockDisparity - time.Millisecond), slot: 100, want: false},
-		{name: "exact lower boundary", now: slotStart.Add(-gloasMaximumClockDisparity), slot: 100, want: true},
+		{name: "too early next slot", now: slotStart.Add(-maximumGossipClockDisparity - time.Millisecond), slot: 100, want: false},
+		{name: "exact lower boundary", now: slotStart.Add(-maximumGossipClockDisparity), slot: 100, want: true},
 		{name: "current slot interior", now: slotStart.Add(6 * time.Second), slot: 100, want: true},
-		{name: "exact upper boundary", now: nextSlotStart.Add(gloasMaximumClockDisparity), slot: 100, want: true},
-		{name: "too late previous slot", now: nextSlotStart.Add(gloasMaximumClockDisparity + time.Millisecond), slot: 100, want: false},
+		{name: "exact upper boundary", now: nextSlotStart.Add(maximumGossipClockDisparity), slot: 100, want: true},
+		{name: "too late previous slot", now: nextSlotStart.Add(maximumGossipClockDisparity + time.Millisecond), slot: 100, want: false},
 		{name: "slot time overflow", now: slotStart, slot: uint64(math.MaxInt64/12) + 1, want: false},
 		{name: "maximum slot", now: slotStart, slot: math.MaxUint64, want: false},
 	} {
@@ -536,7 +559,7 @@ func TestPayloadAttestationServiceDuplicateValidator(t *testing.T) {
 	// Second call with same (slot, validatorIndex) should be ignored
 	err = service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrIgnore)
 	require.Contains(t, err.Error(), "already seen payload attestation")
 }
 
@@ -619,7 +642,7 @@ func TestPayloadAttestationServiceGossipPendingDropsAfterCurrentSlot(t *testing.
 	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, msg), ErrAttestationQueued)
 	require.Equal(t, int32(1), service.pending.count.Load())
 
-	service.now = func() time.Time { return time.Unix(101*12, 0).Add(gloasMaximumClockDisparity + time.Millisecond) }
+	service.now = func() time.Time { return time.Unix(101*12, 0).Add(maximumGossipClockDisparity + time.Millisecond) }
 	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{Slot: 100}
 	service.pending.processPending(t.Context())
 
@@ -665,7 +688,7 @@ func TestPayloadAttestationServiceReferencedBlockSlotMismatch(t *testing.T) {
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrIgnore)
 	require.Contains(t, err.Error(), "does not match referenced block slot")
 	require.False(t, service.seenAttestationsCache.Contains(seenPayloadAttestationKey{100, 1}))
 }
@@ -726,7 +749,7 @@ type coordinatedPayloadAttestationForkchoice struct {
 	firstErr     error
 }
 
-func (f *coordinatedPayloadAttestationForkchoice) OnPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, bool) error {
+func (f *coordinatedPayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage) error {
 	if f.calls.Add(1) == 1 {
 		close(f.firstStarted)
 		<-f.releaseFirst
@@ -735,7 +758,7 @@ func (f *coordinatedPayloadAttestationForkchoice) OnPayloadAttestationMessage(co
 	return nil
 }
 
-func (f *consumeOncePayloadAttestationForkchoice) OnPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, bool) error {
+func (f *consumeOncePayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage) error {
 	if f.calls.Add(1) == 1 {
 		return nil
 	}
@@ -974,7 +997,7 @@ func TestPayloadAttestationServicePendingSlotMismatch(t *testing.T) {
 	key := mustPendingPayloadAttestationKey(t, blockRoot, msg)
 	storePendingJob(t, service.pending, key, msg, time.Now())
 
-	service.now = func() time.Time { return time.Unix(101*12, 0).Add(gloasMaximumClockDisparity + time.Millisecond) }
+	service.now = func() time.Time { return time.Unix(101*12, 0).Add(maximumGossipClockDisparity + time.Millisecond) }
 	output := captureServiceLogs(t)
 
 	// Process pending - should remove due to slot mismatch
@@ -1064,6 +1087,61 @@ func TestPayloadAttestationServiceRetainsPendingRetryableValidation(t *testing.T
 			require.Zero(t, service.pending.count.Load())
 		})
 	}
+}
+
+type notCurrentSlotPayloadAttestationForkchoice struct {
+	forkchoice.ForkChoiceStorage
+}
+
+func (notCurrentSlotPayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage) error {
+	return forkchoice.ErrPayloadAttestationNotCurrentSlot
+}
+
+func TestPayloadAttestationServiceAcceptsGossipNotCountedByForkChoice(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service, fcu, _ := setupPayloadAttestationService(t, ctrl)
+	root := common.HexToHash("0x1234")
+	msg := newTestPayloadAttestationMessage(100, 42, root)
+	fcu.Headers[root] = &cltypes.BeaconBlockHeader{Slot: 100}
+	service.forkchoiceStore = notCurrentSlotPayloadAttestationForkchoice{ForkChoiceStorage: fcu}
+
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, msg))
+	require.True(t, service.seenAttestationsCache.Contains(seenPayloadAttestationKey{100, 42}))
+	_, pooled := service.epbsPool.PayloadAttestations.Get(pool.PayloadAttestationKey{Slot: 100, ValidatorIndex: 42})
+	require.True(t, pooled)
+}
+
+func TestPayloadAttestationServicePublishesRESTMessageNotCountedByForkChoice(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service, fcu, _ := setupPayloadAttestationService(t, ctrl)
+	root := common.HexToHash("0x1234")
+	msg := newTestPayloadAttestationMessage(100, 42, root)
+	fcu.Headers[root] = &cltypes.BeaconBlockHeader{Slot: 100}
+	service.forkchoiceStore = notCurrentSlotPayloadAttestationForkchoice{ForkChoiceStorage: fcu}
+	published := false
+
+	require.NoError(t, service.ProcessRESTMessage(t.Context(), msg, func() error {
+		published = true
+		return nil
+	}))
+
+	require.True(t, published)
+	require.True(t, service.seenAttestationsCache.Contains(seenPayloadAttestationKey{100, 42}))
+}
+
+func TestPayloadAttestationServiceCompletesPendingMessageNotCountedByForkChoice(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service, fcu, _ := setupPayloadAttestationService(t, ctrl)
+	root := common.HexToHash("0x1234")
+	msg := newTestPayloadAttestationMessage(100, 42, root)
+	fcu.Headers[root] = &cltypes.BeaconBlockHeader{Slot: 100}
+	service.forkchoiceStore = notCurrentSlotPayloadAttestationForkchoice{ForkChoiceStorage: fcu}
+	require.NoError(t, service.queuePendingAttestation(root, msg))
+
+	service.pending.processPending(t.Context())
+
+	require.Zero(t, service.pending.count.Load())
+	require.True(t, service.seenAttestationsCache.Contains(seenPayloadAttestationKey{100, 42}))
 }
 
 func TestPayloadAttestationServicePendingQueueCap(t *testing.T) {

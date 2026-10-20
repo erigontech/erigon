@@ -205,7 +205,7 @@ func (c *Codec) Encode(id enode.ID, addr netip.AddrPort, packet Packet, challeng
 			enc := applyMasking(id, head.IV, c.buf.Bytes())
 			return enc, w.Nonce, nil
 		}
-		head, err = c.encodeWhoareyou(id, packet.(*Whoareyou))
+		head, err = c.encodeWhoareyou(packet.(*Whoareyou))
 	case challenge != nil:
 		// We have an unanswered challenge, send handshake.
 		head, session, err = c.encodeHandshakeHeader(id, addr, challenge)
@@ -213,10 +213,10 @@ func (c *Codec) Encode(id enode.ID, addr netip.AddrPort, packet Packet, challeng
 		session = c.sc.session(id, addr)
 		if session != nil {
 			// There is a session, use it.
-			head, err = c.encodeMessageHeader(id, session)
+			head, err = c.encodeMessageHeader(session)
 		} else {
 			// No keys, send random data to kick off the handshake.
-			head, msgData, err = c.encodeRandom(id)
+			head, msgData, err = c.encodeRandom()
 		}
 	}
 	if err != nil {
@@ -277,7 +277,7 @@ func (c *Codec) writeHeaders(head *Header) {
 }
 
 // makeHeader creates a packet header.
-func (c *Codec) makeHeader(toID enode.ID, flag byte, authsizeExtra int) Header {
+func (c *Codec) makeHeader(flag byte, authsizeExtra int) Header {
 	var authsize int
 	switch flag {
 	case flagMessage:
@@ -304,8 +304,8 @@ func (c *Codec) makeHeader(toID enode.ID, flag byte, authsizeExtra int) Header {
 }
 
 // encodeRandom encodes a packet with random content.
-func (c *Codec) encodeRandom(toID enode.ID) (Header, []byte, error) {
-	head := c.makeHeader(toID, flagMessage, 0)
+func (c *Codec) encodeRandom() (Header, []byte, error) {
+	head := c.makeHeader(flagMessage, 0)
 
 	// Encode auth data.
 	auth := messageAuthData{SrcID: c.localnode.ID()}
@@ -323,14 +323,14 @@ func (c *Codec) encodeRandom(toID enode.ID) (Header, []byte, error) {
 }
 
 // encodeWhoareyou encodes a WHOAREYOU packet.
-func (c *Codec) encodeWhoareyou(toID enode.ID, packet *Whoareyou) (Header, error) {
+func (c *Codec) encodeWhoareyou(packet *Whoareyou) (Header, error) {
 	// Sanity check node field to catch misbehaving callers.
 	if packet.RecordSeq > 0 && packet.Node == nil {
 		panic("BUG: missing node in whoareyou with non-zero seq")
 	}
 
 	// Create header.
-	head := c.makeHeader(toID, flagWhoareyou, 0)
+	head := c.makeHeader(flagWhoareyou, 0)
 	head.Nonce = packet.Nonce
 
 	// Encode auth data.
@@ -352,7 +352,7 @@ func (c *Codec) encodeHandshakeHeader(toID enode.ID, addr netip.AddrPort, challe
 	}
 
 	// Generate new secrets.
-	auth, session, err := c.makeHandshakeAuth(toID, addr, challenge)
+	auth, session, err := c.makeHandshakeAuth(toID, challenge)
 	if err != nil {
 		return Header{}, nil, err
 	}
@@ -369,7 +369,7 @@ func (c *Codec) encodeHandshakeHeader(toID enode.ID, addr netip.AddrPort, challe
 	// Encode the auth header.
 	var (
 		authsizeExtra = len(auth.pubkey) + len(auth.signature) + len(auth.record)
-		head          = c.makeHeader(toID, flagHandshake, authsizeExtra)
+		head          = c.makeHeader(flagHandshake, authsizeExtra)
 	)
 	c.headbuf.Reset()
 	binary.Write(&c.headbuf, binary.BigEndian, &auth.h) //nolint:errcheck
@@ -382,13 +382,13 @@ func (c *Codec) encodeHandshakeHeader(toID enode.ID, addr netip.AddrPort, challe
 }
 
 // makeHandshakeAuth creates the auth header on a request packet following WHOAREYOU.
-func (c *Codec) makeHandshakeAuth(toID enode.ID, addr netip.AddrPort, challenge *Whoareyou) (*handshakeAuthData, *session, error) {
+func (c *Codec) makeHandshakeAuth(toID enode.ID, challenge *Whoareyou) (*handshakeAuthData, *session, error) {
 	auth := new(handshakeAuthData)
 	auth.h.SrcID = c.localnode.ID()
 
 	// Create the ephemeral key. This needs to be first because the
 	// key is part of the ID nonce signature.
-	var remotePubkey = new(ecdsa.PublicKey)
+	remotePubkey := new(ecdsa.PublicKey)
 	if err := challenge.Node.Load((*enode.Secp256k1)(remotePubkey)); err != nil {
 		return nil, nil, errors.New("can't find secp256k1 key for recipient")
 	}
@@ -424,8 +424,8 @@ func (c *Codec) makeHandshakeAuth(toID enode.ID, addr netip.AddrPort, challenge 
 }
 
 // encodeMessageHeader encodes an encrypted message packet.
-func (c *Codec) encodeMessageHeader(toID enode.ID, s *session) (Header, error) {
-	head := c.makeHeader(toID, flagMessage, 0)
+func (c *Codec) encodeMessageHeader(s *session) (Header, error) {
+	head := c.makeHeader(flagMessage, 0)
 
 	// Create the header.
 	nonce, err := c.sc.nextNonce(s)

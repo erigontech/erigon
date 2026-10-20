@@ -85,10 +85,14 @@ type CaplinConfig struct {
 	CaplinDiscoveryAddr         string
 	CaplinDiscoveryPort         uint64
 	CaplinDiscoveryTCPPort      uint64
+	CaplinDiscoveryQUICPort     uint64
+	CaplinDisableQUIC           bool
 	SentinelAddr                string
 	SentinelPort                uint64
 	SubscribeAllTopics          bool
 	MaxPeerCount                uint64
+	DisableIPBlockLimits        bool
+	TrustedCIDRs                []string
 	EnableUPnP                  bool
 	CaplinNAT                   string // NAT mode for Caplin P2P (extip:<IP>|stun|upnp|pmp|none)
 	MaxInboundTrafficPerPeer    datasize.ByteSize
@@ -136,6 +140,7 @@ const (
 	MaxDialTimeout               = 15 * time.Second
 	VersionLength  int           = 4
 	MaxChunkSize   uint64        = 15 * 1024 * 1024
+	MaxPayloadSize uint64        = 10 * 1024 * 1024
 	ReqTimeout     time.Duration = 5 * time.Second
 	RespTimeout    time.Duration = 10 * time.Second
 	// ExecutionPayload transactions bounds from consensus specs.
@@ -414,9 +419,30 @@ func (b *BeaconChainConfig) MinEpochsForBlockRequests() uint64 {
 	return b.MinValidatorWithdrawabilityDelay + b.ChurnLimitQuotient/2
 }
 
-// MinSlotsForBlobRequests  equal to MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS * SLOTS_PER_EPOCH
+// MinSlotsForBlobsSidecarsRequest returns the configured blob-serving window in slots.
 func (b *BeaconChainConfig) MinSlotsForBlobsSidecarsRequest() uint64 {
 	return b.MinEpochsForBlobSidecarsRequests * b.SlotsPerEpoch
+}
+
+// BlobSidecarServeRangeStartSlot returns the first slot in the mandatory blob-serving range.
+func (b *BeaconChainConfig) BlobSidecarServeRangeStartSlot(currentSlot uint64) uint64 {
+	return serveRangeStartSlot(currentSlot, b.SlotsPerEpoch, b.MinEpochsForBlobSidecarsRequests, b.DenebForkEpoch)
+}
+
+// DataColumnSidecarServeRangeStartSlot returns the first slot in the mandatory data-column-serving range.
+func (b *BeaconChainConfig) DataColumnSidecarServeRangeStartSlot(currentSlot uint64) uint64 {
+	return serveRangeStartSlot(currentSlot, b.SlotsPerEpoch, b.MinEpochsForDataColumnSidecarsRequests, b.FuluForkEpoch)
+}
+
+func serveRangeStartSlot(currentSlot, slotsPerEpoch, minEpochs, forkEpoch uint64) uint64 {
+	if slotsPerEpoch == 0 {
+		return 0
+	}
+	currentEpoch := currentSlot / slotsPerEpoch
+	if currentEpoch < forkEpoch {
+		return 0
+	}
+	return max(forkEpoch, currentEpoch-min(currentEpoch, minEpochs)) * slotsPerEpoch
 }
 
 // MaxRequestPayloadsLimit falls back to MAX_REQUEST_BLOCKS_DENEB for configs
@@ -466,6 +492,11 @@ func (b ConfigHex4Bytes) MarshalJSON() ([]byte, error) {
 type BlobParameters struct {
 	Epoch            uint64 `yaml:"EPOCH" json:"EPOCH,string"`
 	MaxBlobsPerBlock uint64 `yaml:"MAX_BLOBS_PER_BLOCK" json:"MAX_BLOBS_PER_BLOCK,string"`
+}
+
+type GasLimitScheduleEntry struct {
+	Epoch    uint64 `yaml:"EPOCH" json:"EPOCH,string"`
+	GasLimit uint64 `yaml:"GAS_LIMIT" json:"GAS_LIMIT,string"`
 }
 
 // BeaconChainConfig contains constant configs for node to participate in beacon chain.
@@ -719,6 +750,9 @@ type BeaconChainConfig struct {
 
 	// EIP7892 - Blob Schedule
 	BlobSchedule []BlobParameters `yaml:"BLOB_SCHEDULE" spec:"true" json:"BLOB_SCHEDULE"` // Schedule of blob limits per epoch
+
+	GasLimitSchedule []GasLimitScheduleEntry `yaml:"GAS_LIMIT_SCHEDULE" spec:"true" json:"GAS_LIMIT_SCHEDULE"`
+
 	// Fulu
 	ValidatorCustodyRequirement      uint64 `yaml:"VALIDATOR_CUSTODY_REQUIREMENT" spec:"true" json:"VALIDATOR_CUSTODY_REQUIREMENT,string"`               // ValidatorCustodyRequirement defines the custody requirement for validators.
 	BalancePerAdditionalCustodyGroup uint64 `yaml:"BALANCE_PER_ADDITIONAL_CUSTODY_GROUP" spec:"true" json:"BALANCE_PER_ADDITIONAL_CUSTODY_GROUP,string"` // BalancePerAdditionalCustodyGroup defines the balance required per additional custody group.
@@ -751,6 +785,18 @@ func (b *BeaconChainConfig) GetBlobParameters(epoch uint64) BlobParameters {
 		Epoch:            b.ElectraForkEpoch,
 		MaxBlobsPerBlock: b.MaxBlobsPerBlockElectra,
 	}
+}
+
+func (b *BeaconChainConfig) GetScheduledGasLimit(epoch uint64) (uint64, bool) {
+	if epoch < b.GloasForkEpoch {
+		return 0, false
+	}
+	for _, entry := range slices.Backward(b.GasLimitSchedule) {
+		if epoch >= entry.Epoch {
+			return entry.GasLimit, true
+		}
+	}
+	return 0, false
 }
 
 func (b *BeaconChainConfig) RoundSlotToEpoch(slot uint64) uint64 {
@@ -842,10 +888,12 @@ func (b *BeaconChainConfig) AttestationDueMs(gloas bool) uint64 {
 	if gloas {
 		return b.SecondsPerSlot * AttestationDueBpsGloas / (BpsFactor / 1000)
 	}
-	if b.IntervalsPerSlot == 0 {
-		return 0
-	}
-	return b.SecondsPerSlot * 1000 / b.IntervalsPerSlot
+	return b.SecondsPerSlot * AttestationDueBps / (BpsFactor / 1000)
+}
+
+// PayloadAttestationDueMs returns the Gloas PTC deadline in milliseconds from slot start.
+func (b *BeaconChainConfig) PayloadAttestationDueMs() uint64 {
+	return b.SecondsPerSlot * PayloadAttestationDueBps / (BpsFactor / 1000)
 }
 
 // InitializeForkSchedule initializes the schedules forks baked into the config.
@@ -853,6 +901,9 @@ func (b *BeaconChainConfig) InitializeForkSchedule() {
 	b.ForkVersionSchedule = configForkSchedule(b)
 	// sort blob schedule by epoch in ascending order
 	slices.SortFunc(b.BlobSchedule, func(a, b BlobParameters) int {
+		return cmp.Compare(a.Epoch, b.Epoch)
+	})
+	slices.SortFunc(b.GasLimitSchedule, func(a, b GasLimitScheduleEntry) int {
 		return cmp.Compare(a.Epoch, b.Epoch)
 	})
 }
@@ -1130,13 +1181,14 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 		{412672, 15},
 		{419072, 21},
 	},
+	GasLimitSchedule: []GasLimitScheduleEntry{},
 
 	// Gloas
 	ChurnLimitQuotientGloas:              1 << 15,
 	ConsolidationChurnLimitQuotient:      1 << 16,
 	MaxPerEpochActivationChurnLimitGloas: 256_000_000_000,
 	BuilderWithdrawalPrefix:              0xB0,
-	PayloadDueBps:                        7500,
+	PayloadDueBps:                        5000,
 	PtcSize:                              512,
 	MaxPayloadAttestations:               4,
 	BuilderRegistryLimit:                 1 << 40,
@@ -1174,6 +1226,9 @@ func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
 	if err := yaml.Unmarshal(b, &beaconCfg); err != nil {
 		return BeaconChainConfig{}, NetworkConfig{}, err
 	}
+	if beaconCfg.GasLimitSchedule == nil {
+		beaconCfg.GasLimitSchedule = []GasLimitScheduleEntry{}
+	}
 
 	// Forks absent from a custom config are unscheduled (far-future), as in other
 	// clients, rather than inheriting the mainnet base config's finite epochs.
@@ -1199,6 +1254,9 @@ func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
 	beaconCfg.InitializeForkSchedule()
 	if err := beaconCfg.ValidateExecutionRequestTypeConstants(); err != nil {
 		return BeaconChainConfig{}, NetworkConfig{}, err
+	}
+	if beaconCfg.MaxCommitteesPerSlot > MaxSupportedCommitteesPerSlot {
+		return BeaconChainConfig{}, NetworkConfig{}, fmt.Errorf("MAX_COMMITTEES_PER_SLOT exceeds supported limit: %d > %d", beaconCfg.MaxCommitteesPerSlot, MaxSupportedCommitteesPerSlot)
 	}
 
 	// setup network config
@@ -1280,12 +1338,17 @@ func sepoliaConfig() BeaconChainConfig {
 	cfg.ElectraForkVersion = 0x90000074
 	cfg.FuluForkEpoch = 272640
 	cfg.FuluForkVersion = 0x90000075
+	cfg.GloasForkEpoch = 353024
+	cfg.GloasForkVersion = 0x90000076
 	cfg.TerminalTotalDifficulty = "17000000000000000"
 	cfg.DepositContractAddress = "0x7f02C3E3c98b133055B8B348B2Ac625669Ed295D"
 
 	cfg.BlobSchedule = []BlobParameters{
 		{274176, 15},
 		{275712, 21},
+	}
+	cfg.GasLimitSchedule = []GasLimitScheduleEntry{
+		{Epoch: 353024, GasLimit: 200_000_000},
 	}
 
 	cfg.InitializeForkSchedule()
@@ -1318,6 +1381,8 @@ func hoodiConfig() BeaconChainConfig {
 	cfg.ElectraForkVersion = 0x60000910
 	cfg.FuluForkEpoch = 50688
 	cfg.FuluForkVersion = 0x70000910
+	cfg.GloasForkEpoch = 132352
+	cfg.GloasForkVersion = 0x80000910
 	cfg.TerminalTotalDifficulty = "0"
 	cfg.TerminalBlockHash = [32]byte{}
 	cfg.TerminalBlockHashActivationEpoch = math.MaxUint64
@@ -1337,6 +1402,9 @@ func hoodiConfig() BeaconChainConfig {
 	cfg.BlobSchedule = []BlobParameters{
 		{52480, 15},
 		{54016, 21},
+	}
+	cfg.GasLimitSchedule = []GasLimitScheduleEntry{
+		{Epoch: 132352, GasLimit: 200_000_000},
 	}
 
 	cfg.InitializeForkSchedule()
@@ -1440,6 +1508,7 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.MaxBlobsPerBlockElectra = 2
 	cfg.BlobSidecarSubnetCountElectra = 2
 	cfg.MinEpochsForBlobSidecarsRequests = 16384
+	cfg.MinEpochsForDataColumnSidecarsRequests = 16384
 	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
 	cfg.MaxRequestBlobSidecarsElectra = 256
@@ -1487,6 +1556,7 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.MaxBlobsPerBlockElectra = 2
 	cfg.BlobSidecarSubnetCountElectra = 2
 	cfg.MinEpochsForBlobSidecarsRequests = 16384
+	cfg.MinEpochsForDataColumnSidecarsRequests = 16384
 	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
 	cfg.MaxRequestBlobSidecarsElectra = 256

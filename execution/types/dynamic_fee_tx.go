@@ -32,6 +32,8 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+var ErrDynamicFeePreLondon = errors.New("eip-1559 transactions require London")
+
 type DynamicFeeTransaction struct {
 	CommonTx
 	ChainID    uint256.Int
@@ -295,7 +297,7 @@ func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules
 		checkGas:         true,
 	}
 	if !rules.IsLondon {
-		return nil, errors.New("eip-1559 transactions require London")
+		return nil, ErrDynamicFeePreLondon
 	}
 	if baseFee != nil {
 		msg.gasPrice.Set(baseFee)
@@ -350,7 +352,8 @@ func (tx *DynamicFeeTransaction) SigningHash(chainID *uint256.Int) common.Hash {
 			Value:      &tx.Value,
 			Data:       tx.Data,
 			AccessList: tx.AccessList,
-		})
+		},
+	)
 }
 
 // accessors for innerTx.
@@ -371,6 +374,7 @@ func (tx *DynamicFeeTransaction) cachedSender() (sender accounts.Address, ok boo
 	}
 	return s, true
 }
+
 func (tx *DynamicFeeTransaction) Sender(signer Signer) (accounts.Address, error) {
 	if from := tx.from; !from.IsNil() && !from.IsZero() {
 		// Sender address can never be zero in a transaction with a valid signer
@@ -385,7 +389,7 @@ func (tx *DynamicFeeTransaction) Sender(signer Signer) (accounts.Address, error)
 }
 
 // NewEIP1559Transaction creates an unsigned eip1559 transaction.
-func NewEIP1559Transaction(chainID uint256.Int, nonce uint64, to common.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, gasTip *uint256.Int, gasFeeCap *uint256.Int, data []byte) *DynamicFeeTransaction {
+func NewEIP1559Transaction(chainID uint256.Int, nonce uint64, to common.Address, amount *uint256.Int, gasLimit uint64, gasTip *uint256.Int, gasFeeCap *uint256.Int, data []byte) *DynamicFeeTransaction {
 	return &DynamicFeeTransaction{
 		CommonTx: CommonTx{
 			Nonce:    nonce,

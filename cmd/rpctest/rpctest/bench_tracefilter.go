@@ -17,6 +17,7 @@
 package rpctest
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 
@@ -27,14 +28,14 @@ import (
 // but also can be used for comparing RPCDaemon with Geth
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
-func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) error {
+func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) (err error) {
 	setRoutes(erigonURL, oeURL)
 
 	rec, errs, cleanup, err := openWriters(recordFile, errorFile)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+	defer func() { err = errors.Join(err, cleanup()) }()
 
 	reqGen := &RequestGenerator{}
 
@@ -52,10 +53,10 @@ func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint6
 		var mag DebugModifiedAccounts
 		res = reqGen.Erigon("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
 		if res.Err != nil {
-			return fmt.Errorf("Could not get modified accounts (Erigon): %w\n", res.Err)
+			return fmt.Errorf("could not get modified accounts (Erigon): %w", res.Err)
 		}
 		if mag.Error != nil {
-			return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", mag.Error.Code, mag.Error.Message)
+			return fmt.Errorf("error getting modified accounts (Erigon): %d %s", mag.Error.Code, mag.Error.Message)
 		}
 		if res.Err == nil && mag.Error == nil {
 			accountSet := extractAccountMap(&mag)

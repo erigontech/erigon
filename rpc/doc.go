@@ -102,11 +102,5 @@ connection which was used to create the subscription is closed. This can be init
 the client and server. The server will close the connection for any write error.
 
 For more information about subscriptions, see https://github.com/erigontech/erigon/wiki/RPC-PUB-SUB.
-
-# Reverse Calls
-
-In any method handler, an instance of rpc.Client can be accessed through the
-ClientFromContext method. Using this client instance, server-to-client method calls can be
-performed on the RPC connection.
 */
 package rpc

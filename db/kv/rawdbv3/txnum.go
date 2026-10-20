@@ -332,7 +332,7 @@ func (TxNumsReader) First(tx kv.Tx) (blockNum, txNum uint64, err error) {
 	return binary.BigEndian.Uint64(k), binary.BigEndian.Uint64(v), nil
 }
 
-func (t TxNumsReader) IsMaxTxNumPopulated(ctx context.Context, tx kv.Tx, domainProgress uint64) (bool, error) {
+func (t TxNumsReader) IsMaxTxNumPopulated(tx kv.Tx, domainProgress uint64) (bool, error) {
 	_, maxTxNum, err := t.Last(tx)
 	if err != nil {
 		return false, err
@@ -422,40 +422,26 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isF
 		return txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err
 	}
 
-	// txNums are sorted, it means blockNum will not change until `txNum < maxTxNumInBlock`
-	if i.maxTxNumInBlock == 0 || (i.orderAscend && txNum > i.maxTxNumInBlock) || (!i.orderAscend && txNum < i.minTxNumInBlock) {
+	if i.maxTxNumInBlock == 0 || txNum > i.maxTxNumInBlock || txNum < i.minTxNumInBlock {
 		blockNumChanged = true
-
-		var ok bool
-		i.blockNum, ok, err = i.txNumsReader.FindBlockNum(i.ctx, i.tx, txNum)
-		if err != nil {
-			return
-		}
-		if !ok {
-			_lb, _lt, _ := i.txNumsReader.Last(i.tx)
-			_fb, _ft, _ := i.txNumsReader.First(i.tx)
-			return txNum, i.blockNum, txIndex, isFinalTxn, blockNumChanged, fmt.Errorf("can't find blockNumber by txnID=%d; last in db: (%d-%d, %d-%d)", txNum, _fb, _lb, _ft, _lt)
-		}
-	}
-	blockNum = i.blockNum
-
-	// if block number changed, calculate all related field
-	if blockNumChanged {
 		if i.cursor == nil {
-			i.cursor, err = i.tx.Cursor(kv.MaxTxNum)
-			if err != nil {
+			if i.cursor, err = i.tx.Cursor(kv.MaxTxNum); err != nil {
 				return
 			}
 		}
-		i.minTxNumInBlock, err = i.txNumsReader.MinWithCursor(i.ctx, i.tx, i.cursor, blockNum)
-		if err != nil {
-			return
+		moved := false
+		if i.maxTxNumInBlock != 0 {
+			if moved, err = i.searchFrom(txNum); err != nil {
+				return
+			}
 		}
-		i.maxTxNumInBlock, err = i.txNumsReader.MaxWithCursor(i.ctx, i.tx, i.cursor, blockNum)
-		if err != nil {
-			return
+		if !moved {
+			if err = i.find(txNum); err != nil {
+				return
+			}
 		}
 	}
+	blockNum = i.blockNum
 
 	txIndex = int(txNum) - int(i.minTxNumInBlock) - 1
 	if i.orderAscend {
@@ -464,4 +450,85 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isF
 		isFinalTxn = txNum == i.minTxNumInBlock
 	}
 	return
+}
+
+func (i *MapTxNum2BlockNumIter) find(txNum uint64) (err error) {
+	var ok bool
+	i.blockNum, ok, err = i.txNumsReader.FindBlockNum(i.ctx, i.tx, txNum)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		_lb, _lt, _ := i.txNumsReader.Last(i.tx)
+		_fb, _ft, _ := i.txNumsReader.First(i.tx)
+		return fmt.Errorf("can't find blockNumber by txnID=%d; last in db: (%d-%d, %d-%d)", txNum, _fb, _lb, _ft, _lt)
+	}
+	if i.minTxNumInBlock, err = i.txNumsReader.MinWithCursor(i.ctx, i.tx, i.cursor, i.blockNum); err != nil {
+		return err
+	}
+	i.maxTxNumInBlock, err = i.txNumsReader.MaxWithCursor(i.ctx, i.tx, i.cursor, i.blockNum)
+	return err
+}
+
+// maxGallopSteps bounds searchFrom to blocks at most 7 away (5 probes). For blocks in files every
+// probe can read a body, and find is cheaper for far jumps thanks to BlockTxNumLookupCache.
+const maxGallopSteps = 3
+
+// searchFrom moves from the current block to the block of txNum with steps of 1, 2, 4 blocks and a
+// binary search in the last step. It reports false when txNum is farther than maxGallopSteps or a
+// block it needs is not in the index, the caller then falls back to find.
+func (i *MapTxNum2BlockNumIter) searchFrom(txNum uint64) (bool, error) {
+	// end(b) is the first txNum after block b; the target block is the first one with end > txNum
+	lo, loEnd := int64(i.blockNum)-1, i.minTxNumInBlock
+	hi, hiEnd := int64(i.blockNum), i.maxTxNumInBlock+1
+	var err error
+	for step := int64(1); txNum >= hiEnd; step *= 2 {
+		if step == 1<<maxGallopSteps {
+			return false, nil
+		}
+		lo, loEnd = hi, hiEnd
+		hi += step
+		if hiEnd, err = i.end(hi); err != nil {
+			return false, err
+		}
+	}
+	for step := int64(1); txNum < loEnd; step *= 2 {
+		if step == 1<<maxGallopSteps {
+			return false, nil
+		}
+		hi, hiEnd = lo, loEnd
+		lo = max(lo-step, -1)
+		if loEnd, err = i.end(lo); err != nil || loEnd == math.MaxUint64 {
+			return false, err
+		}
+	}
+	for hi-lo > 1 {
+		mid := lo + (hi-lo)/2
+		e, err := i.end(mid)
+		if err != nil {
+			return false, err
+		}
+		if e > txNum {
+			hi, hiEnd = mid, e
+		} else {
+			lo, loEnd = mid, e
+		}
+	}
+	if hiEnd == math.MaxUint64 {
+		return false, nil
+	}
+	i.blockNum, i.minTxNumInBlock, i.maxTxNumInBlock = uint64(hi), loEnd, hiEnd-1
+	return true, nil
+}
+
+// end returns the first txNum after block b: 0 before genesis, math.MaxUint64 when b is not in the index.
+func (i *MapTxNum2BlockNumIter) end(b int64) (uint64, error) {
+	if b < 0 {
+		return 0, nil
+	}
+	maxTxNum, ok, err := i.txNumsReader.index.MaxTxNum(i.ctx, i.tx, i.cursor, uint64(b))
+	if err != nil || !ok {
+		return math.MaxUint64, err
+	}
+	return maxTxNum + 1, nil
 }

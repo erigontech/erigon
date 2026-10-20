@@ -20,6 +20,7 @@
 package types
 
 import (
+	"encoding/binary"
 	"math/big"
 	"testing"
 
@@ -45,16 +46,15 @@ func BenchmarkBloom9Lookup(b *testing.B) {
 }
 
 func BenchmarkCreateBloom(b *testing.B) {
-
 	one, _ := uint256.FromBig(big.NewInt(1))
 	two, _ := uint256.FromBig(big.NewInt(2))
 
-	var txs = Transactions{
+	txs := Transactions{
 		NewContractCreation(1, one, 1, one, nil),
 		NewTransaction(2, common.HexToAddress("0x2"), two, 2, two, nil),
 	}
 	postState := common.Hash{2}
-	var rSmall = Receipts{
+	rSmall := Receipts{
 		&Receipt{
 			Status:            ReceiptStatusFailed,
 			CumulativeGasUsed: 1,
@@ -79,12 +79,12 @@ func BenchmarkCreateBloom(b *testing.B) {
 		},
 	}
 
-	var rLarge = make(Receipts, 200)
+	rLarge := make(Receipts, 200)
 	// Fill it with 200 receipts x 2 logs
 	for i := 0; i < 200; i += 2 {
 		copy(rLarge[i:], rSmall)
 	}
-	var rLargeWithBloom = make(Receipts, len(rLarge))
+	rLargeWithBloom := make(Receipts, len(rLarge))
 	for i, receipt := range rLarge {
 		cpy := &Receipt{Logs: receipt.Logs}
 		cpy.Bloom = CreateBloom(Receipts{cpy})
@@ -97,7 +97,7 @@ func BenchmarkCreateBloom(b *testing.B) {
 			bl = CreateBloom(rSmall)
 		}
 		b.StopTimer()
-		var exp = common.HexToHash("c384c56ece49458a427c67b90fefe979ebf7104795be65dc398b280f24104949")
+		exp := common.HexToHash("c384c56ece49458a427c67b90fefe979ebf7104795be65dc398b280f24104949")
 		got := crypto.Keccak256Hash(bl.Bytes())
 		if got != exp {
 			b.Errorf("Got %x, exp %x", got, exp)
@@ -110,7 +110,7 @@ func BenchmarkCreateBloom(b *testing.B) {
 			bl = CreateBloom(rLarge)
 		}
 		b.StopTimer()
-		var exp = common.HexToHash("c384c56ece49458a427c67b90fefe979ebf7104795be65dc398b280f24104949")
+		exp := common.HexToHash("c384c56ece49458a427c67b90fefe979ebf7104795be65dc398b280f24104949")
 		got := crypto.Keccak256Hash(bl.Bytes())
 		if got != exp {
 			b.Errorf("Got %x, exp %x", got, exp)
@@ -126,10 +126,32 @@ func BenchmarkCreateBloom(b *testing.B) {
 			}
 		}
 		b.StopTimer()
-		var exp = common.HexToHash("c384c56ece49458a427c67b90fefe979ebf7104795be65dc398b280f24104949")
+		exp := common.HexToHash("c384c56ece49458a427c67b90fefe979ebf7104795be65dc398b280f24104949")
 		got := crypto.Keccak256Hash(bl.Bytes())
 		if got != exp {
 			b.Errorf("Got %x, exp %x", got, exp)
 		}
 	})
+}
+
+func BenchmarkBloomHashing(b *testing.B) {
+	for _, fresh := range []bool{false, true} {
+		name := "repeated"
+		if fresh {
+			name = "fresh"
+		}
+		b.Run(name, func(b *testing.B) {
+			var bloom Bloom
+			var key [32]byte
+			var counter uint64
+			b.ReportAllocs()
+			for b.Loop() {
+				if fresh {
+					counter++
+					binary.BigEndian.PutUint64(key[:8], counter)
+				}
+				bloom.Add(key[:])
+			}
+		})
+	}
 }

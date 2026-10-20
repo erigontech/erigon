@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -116,6 +117,40 @@ func confirmHTTPRequestYieldsStatusCode(t *testing.T, method, contentType, body 
 
 func TestHTTPResponseWithEmptyGet(t *testing.T) {
 	confirmHTTPRequestYieldsStatusCode(t, http.MethodGet, "", "", http.StatusOK)
+}
+
+func TestHTTPGetQueryRequiresJSONContentType(t *testing.T) {
+	srv := newTestServer(log.New())
+	defer srv.Stop()
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	for _, tc := range []struct {
+		name        string
+		contentType string
+		wantStatus  int
+	}{
+		{"none", "", http.StatusUnsupportedMediaType},
+		{"textPlain", "text/plain", http.StatusUnsupportedMediaType},
+		{"json", contentType, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+"/?method=test_rets", nil)
+			require.NoError(t, err)
+			if tc.contentType != "" {
+				req.Header.Set("Content-Type", tc.contentType)
+			}
+			resp, err := ts.Client().Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantStatus, resp.StatusCode, string(body))
+			if tc.wantStatus == http.StatusOK {
+				require.Contains(t, string(body), `"result":""`)
+			}
+		})
+	}
 }
 
 // This checks that maxRequestContentLength is not applied to the response of a request.
@@ -280,7 +315,7 @@ type overloadService struct{}
 
 func (*overloadService) Reject(context.Context) (string, error) { return "", kv.ErrReadTxLimitExceeded }
 
-func (*overloadService) RejectStreaming(_ context.Context, _ jsonstream.Stream) error {
+func (*overloadService) RejectStreaming(_ context.Context, _ *jsonstream.Stream) error {
 	return kv.ErrReadTxLimitExceeded
 }
 
@@ -338,6 +373,48 @@ func TestUndeliveredResponseIsCounted(t *testing.T) {
 
 	require.Greater(t, undeliveredGauge.GetValueUint64(), before,
 		"a response the client never received was not recorded")
+}
+
+func TestNewContextWithHeaders(t *testing.T) {
+	t.Parallel()
+
+	expectedHeaders := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		for i := 0; i < expectedHeaders; i++ {
+			key, want := fmt.Sprintf("key-%d", i), fmt.Sprintf("val-%d", i)
+			if have := request.Header.Get(key); have != want {
+				t.Errorf("wrong request headers for %s, want: %s, have: %s", key, want, have)
+			}
+		}
+		writer.WriteHeader(http.StatusOK)
+		_, _ = writer.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	client, err := Dial(server.URL, log.New())
+	if err != nil {
+		t.Fatalf("failed to dial: %s", err)
+	}
+	defer client.Close()
+
+	newHdr := func(k, v string) http.Header {
+		header := http.Header{}
+		header.Set(k, v)
+		return header
+	}
+	ctx1 := NewContextWithHeaders(context.Background(), newHdr("key-0", "val-0"))
+	ctx2 := NewContextWithHeaders(ctx1, newHdr("key-1", "val-1"))
+	ctx3 := NewContextWithHeaders(ctx2, newHdr("key-2", "val-2"))
+
+	expectedHeaders = 3
+	if err := client.CallContext(ctx3, nil, "test"); !errors.Is(err, ErrNoResult) {
+		t.Error("call failed", err)
+	}
+
+	expectedHeaders = 2
+	if err := client.CallContext(ctx2, nil, "test"); !errors.Is(err, ErrNoResult) {
+		t.Error("call failed:", err)
+	}
 }
 
 // TestHTTPRequestFraming covers what the server answers for the shapes of body
@@ -460,7 +537,7 @@ func TestReadAllBody(t *testing.T) {
 			want[i] = byte(i)
 		}
 		// an oversized hint is what a lying Content-Length produces
-		for _, hint := range []int{0, size, size * 2, 1, int(maxBodySizeHint)} {
+		for _, hint := range []int{0, size, size * 2, 1, int(smallBodyLimit)} {
 			got, err := readAllBody(bytes.NewReader(want), hint)
 			require.NoError(t, err)
 			require.Equal(t, want, got, "size %d hint %d", size, hint)
@@ -478,3 +555,229 @@ func TestReadAllBodyError(t *testing.T) {
 type errReader struct{}
 
 func (*errReader) Read([]byte) (int, error) { return 0, io.ErrClosedPipe }
+
+// barrierService holds every call until n of them are in flight, so a batch whose items
+// stopped running concurrently cannot complete.
+type barrierService struct {
+	n       int
+	release chan struct{}
+
+	mu      sync.Mutex
+	arrived int
+}
+
+func (b *barrierService) Wait(ctx context.Context) (int, error) {
+	b.mu.Lock()
+	b.arrived++
+	arrived := b.arrived
+	if arrived == b.n {
+		close(b.release)
+	}
+	b.mu.Unlock()
+
+	select {
+	case <-b.release:
+		return arrived, nil
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+}
+
+// An HTTP batch runs its items on their own goroutines even though the request itself is
+// answered on the serving goroutine.
+func TestHTTPBatchRunsItemsConcurrently(t *testing.T) {
+	const n = 4
+	srv := NewServer(n, false /* traceRequests */, false /* debugSingleRequest */, false /* disableStreaming */, log.New(), 100)
+	defer srv.Stop()
+	require.NoError(t, srv.RegisterName("barrier", &barrierService{n: n, release: make(chan struct{})}))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	items := make([]string, n)
+	for i := range items {
+		items[i] = fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"barrier_wait"}`, i+1)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ts.URL, strings.NewReader("["+strings.Join(items, ",")+"]"))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := ts.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	var answers []struct {
+		ID    int             `json:"id"`
+		Error json.RawMessage `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &answers))
+	require.Len(t, answers, n)
+	for _, a := range answers {
+		require.Nil(t, a.Error, "item %d did not reach the barrier, so batch items ran one after another", a.ID)
+	}
+}
+
+func TestHTTPContentLengthForBufferedResponse(t *testing.T) {
+	logger := log.New()
+	srv := NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, false /* disableStreaming */, logger, 100)
+	defer srv.Stop()
+	require.NoError(t, srv.RegisterName("test", new(testService)))
+	require.NoError(t, srv.RegisterName("mid", largeRespService{8 * 1024}))
+	require.NoError(t, srv.RegisterName("big", largeRespService{4 * jsonstream.FlushThreshold}))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	post := func(body string) (contentLength int64, transferEncoding []string, answer string) {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, ts.URL, strings.NewReader(body))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := ts.Client().Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		raw, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		return resp.ContentLength, resp.TransferEncoding, string(raw)
+	}
+
+	// Above net/http's 2KB auto-buffer and below FlushThreshold, so only this change can set the length.
+	length, encoding, answer := post(`{"jsonrpc":"2.0","id":1,"method":"mid_largeResp"}`)
+	require.Greater(t, length, int64(8*1024))
+	require.Empty(t, encoding)
+	require.Equal(t, int(length), len(answer))
+
+	length, encoding, _ = post(`{"jsonrpc":"2.0","id":2,"method":"big_largeResp"}`)
+	require.Equal(t, int64(-1), length)
+	require.Equal(t, []string{"chunked"}, encoding)
+}
+
+func TestBatchNotificationGetsNoReply(t *testing.T) {
+	srv := newTestServer(log.Root())
+	defer srv.Stop()
+
+	body := `[{"jsonrpc":"2.0","method":"test_streamEcho","params":["x"]},` +
+		`{"jsonrpc":"2.0","method":"test_echo","params":["x",1]},` +
+		`{"jsonrpc":"2.0","id":1,"method":"test_streamEcho","params":["y"]}]`
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	require.JSONEq(t, `[{"jsonrpc":"2.0","id":1,"result":"y"}]`, rec.Body.String())
+}
+
+// echoRequest returns a test_echo call padded to exactly size bytes.
+func echoRequest(size int) string {
+	const head, tail = `{"jsonrpc":"2.0","id":1,"method":"test_echo","params":["`, `",3]}`
+	return head + strings.Repeat("x", size-len(head)-len(tail)) + tail
+}
+
+// TestHTTPBodyBudget pins that a body is charged for the bytes past smallBodyLimit it has
+// sent, that the charge is refused once the budget is full, that a small body is never
+// charged, and that the charge is released once the request is served.
+func TestHTTPBodyBudget(t *testing.T) {
+	srv := newTestServer(log.New())
+	defer srv.Stop()
+	const sent = 2 * smallBodyLimit // what each stalled body sends; the first smallBodyLimit of it is free
+	srv.ingress.limit = 2 * (sent - smallBodyLimit)
+
+	newRequest := func(body io.Reader, length int64) *http.Request {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", body)
+		req.Header.Set("Content-Type", contentType)
+		req.ContentLength = length
+		return req
+	}
+
+	// Two bodies send their bytes and then stall, so together they hold the whole budget.
+	var served sync.WaitGroup
+	var pipes []*io.PipeWriter
+	for range 2 {
+		pr, pw := io.Pipe()
+		pipes = append(pipes, pw)
+		served.Go(func() { srv.ServeHTTP(httptest.NewRecorder(), newRequest(pr, maxRequestContentLength)) })
+		go func() { _, _ = pw.Write(make([]byte, sent)) }()
+	}
+	require.Eventually(t, func() bool { return srv.ingress.used.Load() == srv.ingress.limit }, 5*time.Second, time.Millisecond)
+
+	// A third body is refused once its bytes past smallBodyLimit arrive.
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, newRequest(strings.NewReader(echoRequest(int(smallBodyLimit)+1)), smallBodyLimit+1))
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	require.Contains(t, rec.Body.String(), ErrMsgServerOverloaded)
+
+	// A small body is not charged.
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, newRequest(strings.NewReader(echoRequest(100)), 100))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"result"`)
+
+	// Serving a request releases its charge.
+	pipes[0].Close()
+	require.Eventually(t, func() bool { return srv.ingress.used.Load() == srv.ingress.limit/2 }, 5*time.Second, time.Millisecond)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, newRequest(strings.NewReader(echoRequest(int(sent))), sent))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"result"`)
+
+	pipes[1].Close()
+	served.Wait()
+	require.Zero(t, srv.ingress.used.Load())
+}
+
+// TestHTTPDeclaredBodyIsChargedAsRead pins that a body declaring the cap holds no budget
+// until its bytes arrive, so declaring a size costs nothing and buys nothing.
+func TestHTTPDeclaredBodyIsChargedAsRead(t *testing.T) {
+	srv := newTestServer(log.New())
+	defer srv.Stop()
+	pr, pw := io.Pipe()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", pr)
+	req.Header.Set("Content-Type", contentType)
+	req.ContentLength = maxRequestContentLength
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		srv.ServeHTTP(httptest.NewRecorder(), req)
+	}()
+
+	require.Zero(t, srv.ingress.used.Load())
+	_, err := pw.Write(make([]byte, smallBodyLimit+1))
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return srv.ingress.used.Load() == 1 }, 5*time.Second, time.Millisecond)
+
+	pw.Close()
+	<-served
+	require.Zero(t, srv.ingress.used.Load())
+}
+
+// TestHTTPUndeclaredBodyBudget pins that a body without a content length is charged for
+// its bytes past smallBodyLimit, and not before.
+func TestHTTPUndeclaredBodyBudget(t *testing.T) {
+	srv := newTestServer(log.New())
+	defer srv.Stop()
+	srv.ingress.limit = maxRequestContentLength
+	require.True(t, srv.ingress.acquire(maxRequestContentLength)) // another body holds the whole budget
+
+	serve := func(size int) *httptest.ResponseRecorder {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(echoRequest(size)))
+		req.Header.Set("Content-Type", contentType)
+		req.ContentLength = -1
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec
+	}
+	rec := serve(int(smallBodyLimit))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"result"`)
+
+	rec = serve(int(smallBodyLimit) + 1)
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	require.Contains(t, rec.Body.String(), ErrMsgServerOverloaded)
+
+	srv.ingress.release(maxRequestContentLength)
+	rec = serve(int(smallBodyLimit) + 1)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"result"`)
+	require.Zero(t, srv.ingress.used.Load())
+}

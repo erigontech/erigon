@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -17,9 +18,20 @@ import (
 type emptyReader struct{}
 
 func (r *emptyReader) ReadAccountData(accounts.Address) (*accounts.Account, error) { return nil, nil }
+
 func (r *emptyReader) ReadAccountDataForDebug(accounts.Address) (*accounts.Account, error) {
 	return nil, nil
 }
+
+func (r *emptyReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (r *emptyReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
 func (r *emptyReader) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
@@ -177,10 +189,10 @@ func TestTransientStorageResetInIBSReset(t *testing.T) {
 	defer ibs.Close()
 
 	testAddr := accounts.InternAddress([20]byte{0x42})
-	testKey := accounts.InternKey([32]byte{0x01})
+	testKey := TransientKey(*uint256.NewInt(1))
 
 	// Set transient storage
-	ibs.SetTransientState(testAddr, testKey, *uint256.NewInt(42))
+	ibs.SetTransientState(testAddr, &testKey, uint256.NewInt(42))
 	val := ibs.GetTransientState(testAddr, testKey)
 	assert.False(t, val.IsZero(), "Transient storage should be set")
 
@@ -202,9 +214,11 @@ func TestCodeReadFromVersionMap(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x55})
 
 	// Write EIP-7702 delegation code to versionMap at txIndex=5
-	delegationCode := []byte{0xef, 0x01, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+	delegationCode := []byte{
+		0xef, 0x01, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
 		0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
-		0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14}
+		0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14,
+	}
 	vm.WriteCode(addr, Version{TxIndex: 5, Incarnation: 0}, accounts.NewCode(delegationCode), true)
 
 	// Read at txIndex=10 should find the code

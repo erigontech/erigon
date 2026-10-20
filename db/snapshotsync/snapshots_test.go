@@ -109,13 +109,14 @@ func TestFindMergeRange(t *testing.T) {
 		for i := range 24 {
 			RangesOld = append(RangesOld, NewRange(uint64(i*100_000), uint64((i+1)*100_000)))
 		}
-		found := merger.FindMergeRanges(RangesOld, uint64(24*100_000))
+		found := merger.FindMergeRanges(RangesOld)
 
 		expect := Ranges{
 			NewRange(0, 500000),
 			NewRange(500000, 1000000),
 			NewRange(1000000, 1500000),
-			NewRange(1500000, 2000000)}
+			NewRange(1500000, 2000000),
+		}
 		require.Equal(t, expect.String(), Ranges(found).String())
 
 		var RangesNew []Range
@@ -123,7 +124,7 @@ func TestFindMergeRange(t *testing.T) {
 		for i := range uint64(24) {
 			RangesNew = append(RangesNew, NewRange(start+(i*100_000), start+((i+1)*100_000)))
 		}
-		found = merger.FindMergeRanges(RangesNew, uint64(24*100_000))
+		found = merger.FindMergeRanges(RangesNew)
 
 		expect = Ranges{}
 		require.Equal(t, expect.String(), Ranges(found).String())
@@ -134,7 +135,7 @@ func TestFindMergeRange(t *testing.T) {
 		for i := range uint64(240) {
 			RangesOld = append(RangesOld, NewRange(i*10_000, (i+1)*10_000))
 		}
-		found := merger.FindMergeRanges(RangesOld, uint64(240*10_000))
+		found := merger.FindMergeRanges(RangesOld)
 		var expect Ranges
 		for i := range uint64(4) {
 			expect = append(expect, NewRange(i*snaptype.Erigon2OldMergeLimit, (i+1)*snaptype.Erigon2OldMergeLimit))
@@ -150,7 +151,7 @@ func TestFindMergeRange(t *testing.T) {
 		for i := range uint64(240) {
 			RangesNew = append(RangesNew, NewRange(start+i*10_000, start+(i+1)*10_000))
 		}
-		found = merger.FindMergeRanges(RangesNew, uint64(240*10_000))
+		found = merger.FindMergeRanges(RangesNew)
 		expect = nil
 		for i := range uint64(24) {
 			expect = append(expect, NewRange(start+i*snaptype.Erigon2MergeLimit, start+(i+1)*snaptype.Erigon2MergeLimit))
@@ -158,7 +159,6 @@ func TestFindMergeRange(t *testing.T) {
 
 		require.Equal(t, expect.String(), Ranges(found).String())
 	})
-
 }
 
 func TestMergeSnapshots(t *testing.T) {
@@ -190,7 +190,7 @@ func TestMergeSnapshots(t *testing.T) {
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
 		merger.DisableFsync()
 		require.NoError(s.OpenSegments(snaptype2.BlockSnapshotTypes, true))
-		Ranges := merger.FindMergeRanges(s.Ranges(false), s.SegmentsMax())
+		Ranges := merger.FindMergeRanges(s.Ranges(false))
 		require.Len(Ranges, 3)
 		// NOTE: TestMergeSnapshots calls Merge with doIndex=false.
 		// Since the merged segment is not indexed, RecalcVisibleSegments will not promote it
@@ -212,7 +212,7 @@ func TestMergeSnapshots(t *testing.T) {
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
 		merger.DisableFsync()
 		require.NoError(s.OpenFolder())
-		Ranges := merger.FindMergeRanges(s.Ranges(false), s.SegmentsMax())
+		Ranges := merger.FindMergeRanges(s.Ranges(false))
 		require.Empty(Ranges)
 		// doIndex=false, same rationale as above
 		err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
@@ -240,7 +240,7 @@ func TestMergeSnapshots(t *testing.T) {
 	// 	merger.DisableFsync()
 	// 	fmt.Println(s.Ranges(), s.SegmentsMax())
 	// 	fmt.Println(s.Ranges(), s.SegmentsMax())
-	// 	Ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
+	// 	Ranges := merger.FindMergeRanges(s.Ranges())
 	// 	require.True(len(Ranges) > 0)
 	// 	err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
 	// 	require.NoError(err)
@@ -257,7 +257,7 @@ func TestMergeSnapshots(t *testing.T) {
 	// 	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.MainnetChainConfig, logger)
 	// 	merger.DisableFsync()
 	// 	s.OpenSegments(snaptype2.BlockSnapshotTypes, false)
-	// 	Ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
+	// 	Ranges := merger.FindMergeRanges(s.Ranges())
 	// 	require.True(len(Ranges) == 0)
 	// 	err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
 	// 	require.NoError(err)
@@ -536,7 +536,7 @@ func TestRetireFilesAbove(t *testing.T) {
 }
 
 func TestRemoveOverlaps(t *testing.T) {
-	mustSeeFile := func(files []string, fileNameWithoutVersion string) bool { //file-version agnostic
+	mustSeeFile := func(files []string, fileNameWithoutVersion string) bool { // file-version agnostic
 		for _, f := range files {
 			if strings.HasSuffix(f, fileNameWithoutVersion) {
 				return true
@@ -586,7 +586,7 @@ func TestRemoveOverlaps(t *testing.T) {
 	require.NoError(err)
 	require.Len(list, 60)
 
-	//corner case: small header.seg was removed, but header.idx left as garbage. such garbage must be cleaned.
+	// corner case: small header.seg was removed, but header.idx left as garbage. such garbage must be cleaned.
 	require.NoError(dir2.RemoveFile(filepath.Join(s.Dir(), list[15].Name())))
 
 	require.NoError(s.OpenSegments(snaptype2.BlockSnapshotTypes, true))
@@ -657,7 +657,6 @@ func TestRemoveOverlaps_CrossingTypeString(t *testing.T) {
 	list, err = snaptype.IdxFiles(s.Dir())
 	require.NoError(err)
 	require.Equal(4, len(list))
-
 }
 
 func TestRemoveOverlapsKeepsSecondIdxTheSurvivorResolvesTo(t *testing.T) {
@@ -729,6 +728,34 @@ func TestRemoveOverlapsLeavesAnotherCollectionsIdxAlone(t *testing.T) {
 	require.NoFileExists(t, ownedOldIdx, "an owned superseded index is still reclaimed")
 	require.FileExists(t, foreignOldIdx, "another collection's index is not this collection's to unlink")
 	require.FileExists(t, foreignNewIdx)
+}
+
+func TestRemoveOverlapsReportsOnlyOwnTypes(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	headers, beacon := snaptype2.Enums.Headers, snaptype.BeaconBlocks.Enum()
+
+	createTestSegmentFile(t, 0, 500_000, headers, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 0, 1_000_000, headers, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 0, 500_000, beacon, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 0, 1_000_000, beacon, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 1_000_000, 1_500_000, beacon, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 1_000_000, 1_500_000, beacon, dir, version.V1_1, logger)
+
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, []snaptype.Type{snaptype2.Headers}, snaptype2.Headers, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+
+	var reported []string
+	require.NoError(t, s.RemoveOverlaps(func(l []string) error {
+		reported = append(reported, l...)
+		return nil
+	}))
+
+	require.ElementsMatch(t, []string{
+		snaptype.SegmentFileName(version.V1_0, 0, 500_000, headers),
+		snaptype.IdxFileName(version.V1_0, 0, 500_000, headers.String()),
+	}, reported, "only overlaps of the collection's own types may reach the seeder")
 }
 
 func TestCanRetire(t *testing.T) {

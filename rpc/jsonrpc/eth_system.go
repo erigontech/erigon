@@ -19,9 +19,11 @@ package jsonrpc
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 
 	"github.com/holiman/uint256"
 
@@ -34,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -45,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/gasprice"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -279,7 +281,7 @@ func (api *APIImpl) Syncing(ctx context.Context) (any, error) {
 	currentBlock := reply.CurrentBlock
 
 	return map[string]any{
-		"startingBlock": "0x0", // 0x0 is a placeholder, I do not think it matters what we return here
+		"startingBlock": hexutil.Uint64(startingBlock(reply)),
 		"currentBlock":  hexutil.Uint64(currentBlock),
 		"highestBlock":  hexutil.Uint64(highestBlock),
 		"stages":        stagesFromReply(reply.Stages),
@@ -332,7 +334,11 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.U256, error) {
 	}
 	gasResult := uint256.NewInt(0)
 	gasResult.Set(tipcap)
-	if head := rawdb.ReadCurrentHeader(tx); head != nil && head.BaseFee != nil {
+	head, err := api.currentHeader(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if head != nil && head.BaseFee != nil {
 		gasResult.Add(tipcap, head.BaseFee)
 	}
 
@@ -361,6 +367,71 @@ type feeHistoryResult struct {
 	GasUsedRatio     []float64        `json:"gasUsedRatio"`
 	BlobBaseFee      []hexutil.U256   `json:"baseFeePerBlobGas,omitempty"`
 	BlobGasUsedRatio []float64        `json:"blobGasUsedRatio,omitempty"`
+}
+
+// MarshalFastJSONTo writes r in encoding/json's field order and number forms.
+func (r *feeHistoryResult) MarshalFastJSONTo(s *jsonstream.Stream) error {
+	if r == nil {
+		s.WriteNil()
+		return nil
+	}
+	if !allFinite(r.GasUsedRatio) || !allFinite(r.BlobGasUsedRatio) {
+		_, err := json.Marshal(r) // encoding/json's error for NaN or Inf, reported before the first write
+		return err
+	}
+	s.WriteObjectStart()
+	jsonstream.Text(s, "oldestBlock", r.OldestBlock)
+	if len(r.Reward) > 0 {
+		s.Field("reward")
+		jsonstream.ArrayValue(s, r.Reward, writeU256s)
+	}
+	if len(r.BaseFee) > 0 {
+		s.Field("baseFeePerGas")
+		writeU256s(s, &r.BaseFee)
+	}
+	s.Field("gasUsedRatio")
+	jsonstream.ArrayValue(s, r.GasUsedRatio, writeJSONFloat)
+	if len(r.BlobBaseFee) > 0 {
+		s.Field("baseFeePerBlobGas")
+		writeU256s(s, &r.BlobBaseFee)
+	}
+	if len(r.BlobGasUsedRatio) > 0 {
+		s.Field("blobGasUsedRatio")
+		jsonstream.ArrayValue(s, r.BlobGasUsedRatio, writeJSONFloat)
+	}
+	s.WriteObjectEnd()
+	return nil
+}
+
+func writeU256s(s *jsonstream.Stream, vs *[]hexutil.U256) {
+	jsonstream.ArrayValue(s, *vs, writeU256)
+}
+
+func writeU256(s *jsonstream.Stream, v *hexutil.U256) { s.WriteQuotedText(v) }
+
+func allFinite(fs []float64) bool {
+	for _, f := range fs {
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return false
+		}
+	}
+	return true
+}
+
+// writeJSONFloat writes f as encoding/json does: 'e' notation outside [1e-6, 1e21), and no
+// leading zero in a negative exponent.
+func writeJSONFloat(s *jsonstream.Stream, f *float64) {
+	format := byte('f')
+	if abs := math.Abs(*f); abs != 0 && (abs < 1e-6 || abs >= 1e21) {
+		format = 'e'
+	}
+	var buf [32]byte
+	b := strconv.AppendFloat(buf[:0], *f, format, -1, 64)
+	if n := len(b); format == 'e' && b[n-4] == 'e' && b[n-3] == '-' && b[n-2] == '0' {
+		b[n-2] = b[n-1] // e-09 -> e-9
+		b = b[:n-1]
+	}
+	s.WriteRawBytes(b)
 }
 
 func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (*feeHistoryResult, error) {
@@ -392,7 +463,10 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.U256, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	header := rawdb.ReadCurrentHeader(tx)
+	header, err := api.currentHeader(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	if header == nil || header.ExcessBlobGas == nil {
 		return nil, nil
 	}
@@ -418,7 +492,10 @@ func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.U256, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	header := rawdb.ReadCurrentHeader(tx)
+	header, err := api.currentHeader(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	if header == nil {
 		return nil, nil
 	}
@@ -708,6 +785,22 @@ func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.B
 		return nil, nil
 	}
 	return header, nil
+}
+
+func (b *GasPriceOracleBackend) LatestHead(ctx context.Context) (uint64, common.Hash, error) {
+	tx := b.baseApi.filters.WithOverlay(b.tx)
+	number, err := rpchelper.GetLatestBlockNumber(tx)
+	if err != nil {
+		return 0, common.Hash{}, err
+	}
+	hash, ok, err := b.baseApi._blockReader.CanonicalHash(ctx, tx, number)
+	if err != nil {
+		return 0, common.Hash{}, err
+	}
+	if !ok {
+		return 0, common.Hash{}, rpc.BlockNotFoundErr{BlockId: rpc.LatestBlockNumber.String()}
+	}
+	return number, hash, nil
 }
 
 func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {

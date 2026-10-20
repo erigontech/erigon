@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 // Context contains some contextual infos for a transaction execution that is not
@@ -44,15 +45,16 @@ type Context struct {
 type Tracer struct {
 	*tracing.Hooks
 	GetResult func() (json.RawMessage, error)
+	// MarshalFastJSONTo, when set, streams what GetResult would return. On error it leaves the
+	// stream untouched, so the caller can take back the result field it opened.
+	MarshalFastJSONTo func(*jsonstream.Stream) error
 	// Stop terminates execution of the tracer at the first opportune moment.
 	Stop func(err error)
 }
 
 type lookupFunc func(string, *Context, json.RawMessage) (*Tracer, error)
 
-var (
-	lookups []lookupFunc
-)
+var lookups []lookupFunc
 
 // RegisterLookup registers a method as a lookup for tracers, meaning that
 // users can invoke a named tracer through that lookup. If 'wildcard' is true,

@@ -17,6 +17,7 @@
 package cache
 
 import (
+	"encoding/binary"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -24,7 +25,9 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/maypok86/otter/v2"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/cachebudget"
+	"github.com/erigontech/erigon/common/length"
 )
 
 // ByteLRU is a uint64-keyed cache bounded by the bytes it holds, weighed by the
@@ -41,18 +44,25 @@ type ByteLRU[V any] struct {
 	weigh    func(uint64, V) int64
 	maxBytes int64
 
-	// Indirect so Close can clear it: the cache outlives Close via its runtime
-	// cleanup, and a callback capturing the owner would keep the owner too.
-	onEvict atomic.Pointer[func(uint64, V)]
+	*byteLRUEvictions[V]
 
-	resident atomic.Int64
-	limit    atomic.Int64 // otter's maximum; for a budgeted cache, the bytes reserved from the envelope
-	ceiling  atomic.Int64 // limit may still grow to this; drops to limit when the envelope refuses
+	limit   atomic.Int64 // otter's maximum; for a budgeted cache, the bytes reserved from the envelope
+	ceiling atomic.Int64 // limit may still grow to this; drops to limit when the envelope refuses
 
 	growMu sync.Mutex
 	closed bool
 	// unbudgeted holds maxBytes from the start and never touches the envelope.
 	unbudgeted bool
+}
+
+// byteLRUEvictions is the state otter's deletion handler updates. It is a
+// separate object because otter's runtime cleanup keeps the handler alive as
+// long as the cache: a handler reaching the ByteLRU would make it uncollectable.
+type byteLRUEvictions[V any] struct {
+	resident atomic.Int64
+	// Indirect so Close can clear it: a callback capturing the owner would keep
+	// the owner alive as long as the cache.
+	onEvict atomic.Pointer[func(uint64, V)]
 }
 
 // otterEntryOverheadBytes is otter's own per-entry cost beyond the key and the
@@ -71,7 +81,8 @@ const (
 )
 
 func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, onEvict func(uint64, V)) *ByteLRU[V] {
-	b := &ByteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1)}
+	ev := &byteLRUEvictions[V]{}
+	b := &ByteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1), byteLRUEvictions: ev}
 	if onEvict != nil {
 		b.onEvict.Store(&onEvict)
 	}
@@ -79,39 +90,43 @@ func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, 
 	cachebudget.Global.Take(floor)
 	b.limit.Store(floor)
 	b.ceiling.Store(b.maxBytes)
-	b.c = b.newOtter(floor, weigh)
+	b.c = newOtter(floor, weigh, func(e otter.DeletionEvent[uint64, V]) {
+		// A replacement is refunded by Add, synchronously with the Set that
+		// displaced the value; this path can run later, off the writer.
+		if e.Cause != otter.CauseReplacement {
+			ev.resident.Add(-weigh(e.Key, e.Value))
+		}
+		if fn := ev.onEvict.Load(); fn != nil {
+			(*fn)(e.Key, e.Value)
+		}
+	})
 	return b
 }
 
 // NewByteLRU is a byte-bounded cache outside the shared cachebudget envelope. It may hold maxBytes
 // from the start and needs no Close, for owners that have no teardown.
 func NewByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64) *ByteLRU[V] {
-	b := &ByteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1), unbudgeted: true}
+	b := &ByteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1), byteLRUEvictions: &byteLRUEvictions[V]{}, unbudgeted: true}
 	b.limit.Store(b.maxBytes)
 	b.ceiling.Store(b.maxBytes)
-	b.c = b.newOtter(b.maxBytes, weigh)
+	b.c = newOtter(b.maxBytes, weigh, nil) // a handler capturing b would keep it alive through otter's runtime cleanup
 	return b
 }
 
-func (b *ByteLRU[V]) newOtter(maxWeight int64, weigh func(uint64, V) int64) *otter.Cache[uint64, V] {
+func newOtter[V any](maxWeight int64, weigh func(uint64, V) int64, onDeletion func(otter.DeletionEvent[uint64, V])) *otter.Cache[uint64, V] {
 	return otter.Must(&otter.Options[uint64, V]{
 		MaximumWeight: uint64(maxWeight),
 		Weigher:       func(k uint64, v V) uint32 { return uint32(min(weigh(k, v), math.MaxUint32)) },
-		OnDeletion: func(e otter.DeletionEvent[uint64, V]) {
-			b.resident.Add(-weigh(e.Key, e.Value))
-			if fn := b.onEvict.Load(); fn != nil {
-				(*fn)(e.Key, e.Value)
-			}
-		},
-		Executor: func(fn func()) { fn() },
+		OnDeletion:    onDeletion,
+		Executor:      func(fn func()) { fn() },
 	})
 }
 
 func (b *ByteLRU[V]) Get(key uint64) (V, bool) { return b.c.GetIfPresent(key) }
 
 // Add reports that the value could be offered, not that it is resident: a
-// W-TinyLFU rejection also returns true. False means it exceeds the whole
-// budget, and onEvict never fires for it, so the caller must refund its charge.
+// W-TinyLFU rejection also returns true. False means it was too big for the
+// whole budget, and no deletion fires for it.
 func (b *ByteLRU[V]) Add(key uint64, value V) bool {
 	w := b.weigh(key, value)
 	if w > b.maxBytes {
@@ -120,8 +135,12 @@ func (b *ByteLRU[V]) Add(key uint64, value V) bool {
 	if lim := b.limit.Load(); b.resident.Load()+w > lim && lim < b.ceiling.Load() {
 		b.grow(w)
 	}
+	// Set returns the displaced value for a present key, so the charge is the net change.
+	prev, inserted := b.c.Set(key, value)
+	if !inserted {
+		w -= b.weigh(key, prev)
+	}
 	b.resident.Add(w)
-	b.c.Set(key, value)
 	return true
 }
 
@@ -171,7 +190,7 @@ func (b *ByteLRU[V]) Close() {
 		return
 	}
 	b.closed = true
-	// Entries, not just the reservation: the cache stays reachable after Close.
+	// Entries, not just the reservation: the owner may keep the cache after Close.
 	b.c.InvalidateAll()
 	b.onEvict.Store(nil)
 	b.resident.Store(0)
@@ -180,4 +199,32 @@ func (b *ByteLRU[V]) Close() {
 	}
 	b.limit.Store(0)
 	b.ceiling.Store(0)
+}
+
+// HashByteLRU is an unbudgeted ByteLRU keyed by a hash: the first 8 bytes pick the slot, Get compares the whole hash.
+type HashByteLRU[V any] struct {
+	c     *ByteLRU[hashEntry[V]]
+	weigh func(V) int64
+}
+
+type hashEntry[V any] struct {
+	hash   common.Hash
+	value  V
+	weight int64 // weighed once in Add: ByteLRU asks for the weight on Add, on insert and on eviction
+}
+
+func NewHashByteLRU[V any](maxBytes datasize.ByteSize, weigh func(V) int64) *HashByteLRU[V] {
+	return &HashByteLRU[V]{weigh: weigh, c: NewByteLRU(maxBytes, func(_ uint64, e hashEntry[V]) int64 { return e.weight })}
+}
+
+func (l *HashByteLRU[V]) Get(hash common.Hash) (value V, ok bool) {
+	e, ok := l.c.Get(binary.BigEndian.Uint64(hash[:]))
+	if !ok || e.hash != hash {
+		return value, false
+	}
+	return e.value, true
+}
+
+func (l *HashByteLRU[V]) Add(hash common.Hash, value V) {
+	l.c.Add(binary.BigEndian.Uint64(hash[:]), hashEntry[V]{hash: hash, value: value, weight: l.weigh(value) + length.Hash + ByteLRUEntryOverheadBytes})
 }

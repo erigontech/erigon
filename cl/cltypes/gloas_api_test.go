@@ -125,7 +125,8 @@ func TestExecutionPayloadBidRejectsNonCanonicalSSZOffsets(t *testing.T) {
 
 func requireEncodedSSZ(t *testing.T, value interface {
 	EncodeSSZ([]byte) ([]byte, error)
-}) []byte {
+},
+) []byte {
 	t.Helper()
 	encoded, err := value.EncodeSSZ(nil)
 	require.NoError(t, err)
