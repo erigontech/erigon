@@ -260,15 +260,15 @@ flowchart LR
 **Files:**
 - Modify: `db/state/pbt_range_writer_test.go`
 
-- [ ] take only `db/state/pbt_range_writer_test.go` from `ad6b9a1809d` on `awskii/pbt-stream-rows`. Do not
+- [x] take only `db/state/pbt_range_writer_test.go` from `ad6b9a1809d` on `awskii/pbt-stream-rows`. Do not
       cherry-pick: that commit also touches a plan file this branch does not have
-- [ ] fix its four review findings:
+- [x] fix its four review findings:
       - compare every bin file raw, as the full key/value sequence in file order, including duplicates and empty
         range files;
       - compare the persisted state bytes, not the in-memory copy;
       - Test B compares state;
       - add a storage split at bit 271 next to the 264 split
-- [ ] run gates — must pass before Task 3
+- [x] run gates — must pass before Task 3
 
 ### Task 3: Join ownership guard and collapse coverage
 

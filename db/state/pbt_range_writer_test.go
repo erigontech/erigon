@@ -18,15 +18,18 @@ package state_test
 
 import (
 	"bytes"
+	"fmt"
 	"math"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -36,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -439,6 +443,279 @@ func TestPBinRangeWriterStampsRowsByMaximumLeafAndKeepsEmptyRanges(t *testing.T)
 	defer after.Close()
 	require.Equal(t, before, pbinRangeWriterRows(t, after))
 	require.Less(t, len(after.Files(kv.CommitmentBinDomain)), len(files))
+}
+
+func TestPBinRangeWriterBatchSizeDoesNotChangeRows(t *testing.T) {
+	selectPBinRangeWriterHash(t)
+	for _, corpus := range pbinRangeWriterCorpora() {
+		t.Run(corpus.name, func(t *testing.T) {
+			var want pbinRangeWriterSnapshot
+			for _, maxOps := range []int{100000, 1000, 7, 1} {
+				got := runPBinRangeWriterCorpus(t, corpus.leaves, maxOps)
+				if want.state == nil {
+					want = got
+					continue
+				}
+				require.Equal(t, want, got, "maxOps=%d", maxOps)
+			}
+		})
+	}
+}
+
+func TestPBinRangeWriterRecordsMatchSequentialTrie(t *testing.T) {
+	selectPBinRangeWriterHash(t)
+	for _, corpus := range pbinRangeWriterCorpora() {
+		t.Run(corpus.name, func(t *testing.T) {
+			ops := make([]pbt.Op, len(corpus.leaves))
+			for i, leaf := range corpus.leaves {
+				var value [eip8297.ValueLength]byte
+				copy(value[:], leaf.Value)
+				ops[i] = pbt.Op{Key: bytes.Clone(leaf.Key), Value: value}
+			}
+			wantContext := newPBinSequentialContext()
+			wantRoot, err := pbt.NewTrie(wantContext).Process(ops)
+			require.NoError(t, err)
+			wantTrieState, err := pbt.NewTrie(wantContext).EncodeCurrentState(nil)
+			require.NoError(t, err)
+			wantState, err := commitmentdb.NewCommitmentState(23, 0, wantTrieState).Encode()
+			require.NoError(t, err)
+			got := runPBinRangeWriterCorpus(t, corpus.leaves, 7)
+			gotRecords := make(map[string][]byte)
+			for _, file := range got.files {
+				for _, entry := range file.entries {
+					if commitment.IsCommitmentStateKey(entry.key) {
+						continue
+					}
+					require.NotContains(t, gotRecords, string(entry.key), "file=[%d,%d)", file.start, file.end)
+					gotRecords[string(entry.key)] = entry.value
+				}
+			}
+			require.Equal(t, wantRoot, got.root)
+			require.Equal(t, wantContext.records, gotRecords)
+			require.Equal(t, wantState, got.state)
+			if corpus.name == "bucket-heavy" {
+				bucket := eip8297.PathFromBits(pbinRangeWriterSplit271Prefix(), 264)
+				bucketKey, err := pbt.EncodeRowKey(&bucket)
+				require.NoError(t, err)
+				record, err := pbt.DecodeRecord(bucketKey, wantContext.records[string(bucketKey)])
+				require.NoError(t, err)
+				require.Equal(t, pbt.ExtRoot, record.Form)
+				require.Equal(t, int16(271-264), record.SelfExt.BitLen)
+			}
+		})
+	}
+}
+
+type pbinSequentialContext struct {
+	records map[string][]byte
+}
+
+func newPBinSequentialContext() *pbinSequentialContext {
+	return &pbinSequentialContext{records: make(map[string][]byte)}
+}
+
+func (c *pbinSequentialContext) Branch(key []byte) ([]byte, kv.Step, error) {
+	return bytes.Clone(c.records[string(key)]), 0, nil
+}
+
+func (c *pbinSequentialContext) PutBranch(key, data, prev []byte) error {
+	old := c.records[string(key)]
+	if !bytes.Equal(old, prev) {
+		return fmt.Errorf("previous record mismatch for %x", key)
+	}
+	if len(data) == 0 {
+		delete(c.records, string(key))
+	} else {
+		c.records[string(key)] = bytes.Clone(data)
+	}
+	return nil
+}
+
+func (c *pbinSequentialContext) Account([]byte) (*commitment.Update, error) {
+	return nil, fmt.Errorf("unexpected account read")
+}
+
+func (c *pbinSequentialContext) Storage([]byte) (*commitment.Update, error) {
+	return nil, fmt.Errorf("unexpected storage read")
+}
+
+var _ commitment.PatriciaContext = (*pbinSequentialContext)(nil)
+
+type pbinRangeWriterCorpus struct {
+	name   string
+	leaves []state.PBinLeaf
+}
+
+type pbinRangeWriterSnapshot struct {
+	files []pbinRangeWriterFile
+	state []byte
+	root  common.Hash
+}
+
+type pbinRangeWriterFile struct {
+	start   uint64
+	end     uint64
+	entries []pbinRangeWriterEntry
+}
+
+type pbinRangeWriterEntry struct {
+	key   []byte
+	value []byte
+}
+
+func runPBinRangeWriterCorpus(t *testing.T, leaves []state.PBinLeaf, maxOps int) pbinRangeWriterSnapshot {
+	t.Helper()
+	db, agg := commitmenttemporal.Open(t, 8)
+	writePBinRangeWriterAccounts(t, db, 32)
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 3, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = commitment.VariantCommitmentV3
+	cfg.EnableTrieWarmup = false
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(kv.CommitmentBinDomain), execctx.WithoutCommitmentSeek())
+	require.NoError(t, err)
+	defer domains.Close()
+	writer, err := state.NewPBinRangeWriterWithLimitsForTest(agg, kv.CommitmentBinDomain, 23, maxOps, 1<<30)
+	require.NoError(t, err)
+	root, err := writer.WriteAtBlock(t.Context(), tx, domains, func(emit func(state.PBinLeaf) error) error {
+		for _, leaf := range leaves {
+			if emitErr := emit(leaf); emitErr != nil {
+				return emitErr
+			}
+		}
+		return nil
+	}, 0)
+	require.NoError(t, err)
+	out := agg.BeginFilesRo()
+	defer out.Close()
+	snapshot := pbinRangeWriterSnapshot{root: root}
+	for _, visible := range out.Files(kv.CommitmentBinDomain) {
+		if !strings.HasSuffix(visible.Fullpath(), ".kv") {
+			continue
+		}
+		file := pbinRangeWriterFile{start: visible.StartRootNum(), end: visible.EndRootNum(), entries: []pbinRangeWriterEntry{}}
+		decompressor, err := seg.NewDecompressor(visible.Fullpath())
+		require.NoError(t, err)
+		reader := seg.NewReader(decompressor.MakeGetter(), seg.CompressNone)
+		for reader.HasNext() {
+			key, _ := reader.Next(nil)
+			require.True(t, reader.HasNext(), "key %x has no value in %s", key, visible.Fullpath())
+			value, _ := reader.Next(nil)
+			if commitment.IsCommitmentStateKey(key) {
+				require.Nil(t, snapshot.state, "second state record in %s", visible.Fullpath())
+				snapshot.state = bytes.Clone(value)
+			}
+			file.entries = append(file.entries, pbinRangeWriterEntry{key: bytes.Clone(key), value: bytes.Clone(value)})
+		}
+		decompressor.Close()
+		snapshot.files = append(snapshot.files, file)
+	}
+	require.NotEmpty(t, snapshot.files)
+	require.NotNil(t, snapshot.state)
+	return snapshot
+}
+
+func pbinRangeWriterCorpora() []pbinRangeWriterCorpus {
+	threeZone := make([]state.PBinLeaf, 0, 128)
+	for i := byte(1); i <= 24; i++ {
+		address := bytes.Repeat([]byte{i}, 20)
+		basic := pbinRangeWriterBasicValue(i)
+		header := pbinRangeWriterHeaderValue(i)
+		threeZone = append(threeZone,
+			state.PBinLeaf{Key: eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey), Value: basic, Stamp: uint64(i % 24)},
+			state.PBinLeaf{Key: eip8297.TreeKeyAccount(address, eip8297.HeaderStorageOffset), Value: header, Stamp: uint64((i + 3) % 24)},
+			state.PBinLeaf{Key: eip8297.TreeKeyCodeChunk(common.BytesToHash(bytes.Repeat([]byte{i}, 32)), 0), Value: pbinRangeWriterCodeValue(i), Stamp: uint64((i + 6) % 24)},
+			state.PBinLeaf{Key: eip8297.TreeKeyStorage(address, []byte{i}), Value: pbinRangeWriterValue(i + 72), Stamp: uint64((i + 9) % 24)},
+		)
+	}
+	zonePure := make([]state.PBinLeaf, 0, 96)
+	for i := byte(1); i <= 24; i++ {
+		address := bytes.Repeat([]byte{i}, 20)
+		zonePure = append(zonePure,
+			state.PBinLeaf{Key: eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey), Value: pbinRangeWriterBasicValue(i), Stamp: uint64(i % 24)},
+			state.PBinLeaf{Key: eip8297.TreeKeyAccount(address, eip8297.CodeHashLeafKey), Value: pbinRangeWriterCodeHashValue(i), Stamp: uint64((int(i) + 1) % 24)},
+			state.PBinLeaf{Key: eip8297.TreeKeyAccount(address, eip8297.HeaderStorageOffset), Value: pbinRangeWriterHeaderValue(i), Stamp: uint64((int(i) + 2) % 24)},
+		)
+	}
+	bucketHeavy := make([]state.PBinLeaf, 0, 80)
+	for i := range 8 {
+		bucket := byte(i)
+		prefix := append([]byte{eip8297.StorageZone}, bytes.Repeat([]byte{bucket + 1}, 32)...)
+		for slotIndex := range 8 {
+			slot := byte(slotIndex)
+			key := make([]byte, eip8297.StorageKeyLength)
+			copy(key, prefix)
+			key[33] = 1 << slot
+			key[len(key)-1] = slot + 1
+			bucketHeavy = append(bucketHeavy, state.PBinLeaf{Key: key, Value: pbinRangeWriterValue(bucket*8 + slot + 1), Stamp: uint64((i*8 + slotIndex) % 24)})
+		}
+	}
+	for _, first := range []byte{0x10, 0x11} {
+		key := make([]byte, eip8297.StorageKeyLength)
+		copy(key, pbinRangeWriterSplit271Prefix())
+		key[33] = first
+		key[len(key)-1] = first
+		bucketHeavy = append(bucketHeavy, state.PBinLeaf{Key: key, Value: pbinRangeWriterValue(first + 0x40), Stamp: uint64(first % 24)})
+	}
+	for i := range 8 {
+		bucket := byte(i)
+		key := make([]byte, eip8297.StorageKeyLength)
+		key[0] = eip8297.StorageZone
+		copy(key[1:33], bytes.Repeat([]byte{0x80 + bucket}, 32))
+		key[len(key)-1] = 1
+		bucketHeavy = append(bucketHeavy, state.PBinLeaf{Key: key, Value: pbinRangeWriterValue(100 + bucket), Stamp: uint64(i + 16)})
+	}
+	for i := byte(1); i <= 8; i++ {
+		address := bytes.Repeat([]byte{0xa0 + i}, 20)
+		bucketHeavy = append(bucketHeavy,
+			state.PBinLeaf{Key: eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey), Value: pbinRangeWriterBasicValue(120 + i), Stamp: uint64(i)},
+			state.PBinLeaf{Key: eip8297.TreeKeyCodeChunk(common.BytesToHash(bytes.Repeat([]byte{0xb0 + i}, 32)), 0), Value: pbinRangeWriterCodeValue(140 + i), Stamp: uint64(i + 8)},
+		)
+	}
+	for _, corpus := range []*[]state.PBinLeaf{&threeZone, &zonePure, &bucketHeavy} {
+		sort.Slice(*corpus, func(i, j int) bool { return bytes.Compare((*corpus)[i].Key, (*corpus)[j].Key) < 0 })
+	}
+	return []pbinRangeWriterCorpus{{name: "three-zone", leaves: threeZone}, {name: "zone-pure", leaves: zonePure}, {name: "bucket-heavy", leaves: bucketHeavy}}
+}
+
+func pbinRangeWriterSplit271Prefix() []byte {
+	return append([]byte{eip8297.StorageZone}, bytes.Repeat([]byte{0x71}, 32)...)
+}
+
+func pbinRangeWriterValue(seed byte) []byte {
+	value := bytes.Repeat([]byte{seed}, eip8297.ValueLength)
+	if value[0] == 0 {
+		value[0] = 1
+	}
+	return value
+}
+
+func pbinRangeWriterBasicValue(seed byte) []byte {
+	value, err := eip8297.EncodeBasicData(uint64(seed), uint256.NewInt(uint64(seed)), 0)
+	if err != nil {
+		panic(err)
+	}
+	return value[:]
+}
+
+func pbinRangeWriterHeaderValue(seed byte) []byte {
+	value := eip8297.EncodeStorageValue([]byte{seed})
+	return value[:]
+}
+
+func pbinRangeWriterCodeValue(seed byte) []byte {
+	var value [eip8297.ValueLength]byte
+	value[0] = 1
+	value[1] = seed
+	return value[:]
+}
+
+func pbinRangeWriterCodeHashValue(seed byte) []byte {
+	value := eip8297.CodeHashValue(common.BytesToHash(bytes.Repeat([]byte{seed}, 32)))
+	return value[:]
 }
 
 func pbinRangeWriterRows(t *testing.T, at *state.AggregatorRoTx) map[string][]byte {
