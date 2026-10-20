@@ -87,7 +87,7 @@ GLOBL jda5b<>(SB), RODATA|NOPTR, $16
 // func jumpdestBitmapSSE4(code *byte, steps int, tab *byte, out *uint64) (entry int)
 TEXT ·jumpdestBitmapSSE4(SB), NOSPLIT, $0-40
 	MOVQ code+0(FP), SI
-	MOVQ steps+8(FP), CX
+	MOVQ steps+8(FP), R14
 	MOVQ tab+16(FP), BX
 	MOVQ out+24(FP), DI
 	MOVOU jda10<>(SB), X10
@@ -110,16 +110,19 @@ loop:
 	SHLL $16, R13
 	ORL  R13, R12               // JUMPDEST bytes
 
-	// A step entered at offset 0 without PUSH opcodes needs no analysis: every byte is an instruction.
-	CMPQ R8, $0x80
-	JNE  analyze
+	// A step without PUSH opcodes needs no analysis: every byte from the entry on is an instruction.
 	MOVOU X4, X0
 	PMAXSB X9, X0
 	PCMPGTB X11, X0             // PUSH1..PUSH32: the only bytes > 0x5f as int8
 	PMOVMSKB X0, AX
 	TESTL AX, AX
 	JNZ  analyze
+	LEAQ -0x80(R8), CX
+	MOVQ $-1, AX
+	SHLQ CX, AX
+	ANDL AX, R12
 	MOVL R12, 0(DI)
+	MOVQ $0x80, R8
 	JMP  next
 
 analyze:
@@ -161,7 +164,7 @@ analyze:
 next:
 	ADDQ $32, SI
 	ADDQ $4, DI
-	DECQ CX
+	DECQ R14
 	JNZ  loop
 
 	SUBQ $0x80, R8
