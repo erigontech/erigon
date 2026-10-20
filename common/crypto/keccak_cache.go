@@ -61,6 +61,9 @@ func Keccak256Hash(data []byte) common.Hash {
 	}
 	key := maphash.Bytes(keccakCacheSeed, data)
 	b := &keccakCacheBuckets[key&(uint64(len(keccakCacheBuckets))-1)]
+	// The CAS below is a full fence, so without the prefetch the second line of the bucket
+	// is fetched only after the first one arrives.
+	prefetchKeccakBucket(b)
 	tag := (key | keccakBucketAlive) &^ keccakBucketLocked
 	if st := b.tag.Load(); st == tag && b.tag.CompareAndSwap(st, st|keccakBucketLocked) {
 		hit := bytes.Equal(b.in[:b.n], data)
