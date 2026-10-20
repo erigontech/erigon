@@ -8,7 +8,7 @@ sidebar_position: 3
 
 Erigon stores all chain data under a single **datadir**. Understanding what lives where is useful when you size hardware, debug disk-usage issues, or split storage across fast and slow drives.
 
-This page covers the *what* and *where* of Erigon's data. For the *why* — flat KV state, immutable snapshots — see [Architecture](architecture). For operational tuning (symlinks, multi-disk layout), see [Optimizing Storage](optimizing-storage).
+This page covers the *what* and *where* of Erigon's data. For the *why* — flat key-value (KV) state, immutable snapshots — see [Architecture](architecture). For operational tuning (symlinks, multi-disk layout), see [Optimizing Storage](optimizing-storage).
 
 ## The datadir at a glance
 
@@ -143,8 +143,8 @@ same free space for a second copy of the live data, delays startup while it runs
 turned off. A database that fails to compact is left as it was, and startup
 continues. It skips the step if another process holds the datadir lock.
 
-`erigon db compact` is a manual defragmentation pass, not the background compaction of an
-LSM engine — MDBX has none, as described in *Storage engine: MDBX* above.
+`erigon db compact` is a manual defragmentation pass, not the background compaction of a
+log-structured merge-tree (LSM) engine — MDBX has none, as described in *Storage engine: MDBX* above.
 
 ## Where to go next
 

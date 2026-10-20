@@ -104,7 +104,7 @@ and follow the logs when you need them with `docker compose logs -f`.
 * `--chain=mainnet` specifies to run on Ethereum mainnet
 * Add `--prune.mode=minimal` to run minimal [Pruning Mode](/fundamentals/pruning-modes) or `--prune.mode=archive` to run an archive node
 * `--datadir=/var/lib/erigon` has to name the same path as the container side of the volume mount. Without it Erigon writes to its default location inside the container instead of your mounted directory, and the data ends up in an anonymous Docker volume rather than where you pointed it
-* `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/fundamentals/web3-wallet). `0.0.0.0` is the address *inside* the container, which is what lets Docker forward to it at all; the `127.0.0.1:8545:8545` port mapping is what keeps it off your LAN. Change that mapping to `8545:8545` only if you intend to expose RPC to other machines
+* `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/fundamentals/web3-wallet). `0.0.0.0` is the address *inside* the container, which is what lets Docker forward to it at all; the `127.0.0.1:8545:8545` port mapping is what keeps it off your local area network (LAN). Change that mapping to `8545:8545` only if you intend to expose RPC to other machines
 * `--nat=extip:<your public IP>` and `--caplin.nat=extip:<your public IP>` advertise a reachable address so other nodes can dial you — the first for the execution layer, the second for Caplin. Without them, and without the forwarded ports, the node still syncs but only through connections it opens itself
 * `--torrent.download.rate` is deliberately not set above, because its default of `512mb` (megabytes per second) is already the maximum this recipe would ask for. During initial sync Erigon uses the full allowance, which is what you want on a dedicated machine. Add the flag only to **lower** the cap if you share the machine with other work (e.g. `--torrent.download.rate=128mb`), or set `--torrent.download.rate=Inf` to remove the limit entirely.
 
@@ -116,7 +116,7 @@ Press `Ctrl+C` in your terminal to stop Erigon.
 
 ## Host networking as an alternative
 
-Publishing each port individually is explicit, but Docker's NAT is also what
+Publishing each port individually is explicit, but Docker's Network Address Translation (NAT) is also what
 makes `--nat=extip:...` necessary in the first place. Adding `network_mode:
 host` to the service instead gives the container the host's network stack
 directly, so peers see the host's own address and there is nothing to map:

@@ -56,7 +56,7 @@ For production environments where RPC endpoints are exposed publicly, it is stro
 
 **TLS Encryption**: For remote RPC Daemon deployments, enable TLS authentication. The process involves:
 
-1. Generating CA key pairs
+1. Generating certificate authority (CA) key pairs
 2. Creating certificates for each instance
 3. Deploying certificates to secure communication
 
