@@ -2730,22 +2730,8 @@ func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules,
 		// Clear the whole account footprint, not just the fields: a surviving
 		// AddressPath (or code/incarnation) write at this tx index alongside the
 		// SelfDestruct is the exact cell layout of a same-tx SD+CREATE2 recreate, so
-		// AccountLifecycleAt would read the removed account as Revived. deleteAddr
-		// drops address/code/codeSize/createContract/storage too, leaving only the
-		// SelfDestruct+Balance delete markers re-added below.
-		writes.deleteAddr(addr)
-		writes.SetSelfDestruct(addr, &VersionedWrite[bool]{
-			WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: ibs.Version()},
-			Val:         true,
-		})
-		// Record the balance clear as a versioned write, as a real SELFDESTRUCT
-		// does, so a reader that observed the account empty depends on it and a
-		// later funding write invalidates that read. A zero write over a zero
-		// balance is a no-op for the BAL and keeps the domain leaf pure-deleted.
-		writes.SetBalance(addr, &VersionedWrite[uint256.Int]{
-			WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: ibs.Version()},
-			Val:         uint256.Int{},
-		})
+		// AccountLifecycleAt would read the removed account as Revived.
+		writes.SetEmptyRemoval(addr, ibs.Version())
 	}
 }
 

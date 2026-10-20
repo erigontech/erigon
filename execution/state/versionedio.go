@@ -1333,6 +1333,21 @@ func (ws *WriteSet) Snapshot() *WriteSet {
 	return out
 }
 
+// SetEmptyRemoval replaces addr's writes with an EIP-161 removal: a self-destruct
+// and a balance delete. The balance write makes a reader that saw the account empty
+// depend on the removal; its delete stamp keeps the leaf deleted downstream, where an
+// unstamped balance would read as the account surviving its destruct.
+func (ws *WriteSet) SetEmptyRemoval(addr accounts.Address, version Version) {
+	ws.deleteAddr(addr)
+	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{
+		WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: version},
+		Val:         true,
+	})
+	ws.SetBalance(addr, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: version, valStatus: ValueDeleted},
+	})
+}
+
 func (ws *WriteSet) deleteAddr(addr accounts.Address) {
 	delete(ws.address, addr)
 	delete(ws.balance, addr)

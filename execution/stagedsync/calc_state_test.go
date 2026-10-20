@@ -564,6 +564,31 @@ func TestNormalizeWriteSet_GenesisBypassRetainsEmptyAccount(t *testing.T) {
 		"empty account at genesis must emit full UPDATE, matching serial's TrieContext.Account")
 }
 
+// A touch of a pre-existing empty account with an incarnation (it held storage)
+// removes it under EIP-161. The block-end pass skips an account with an
+// incarnation, so the removal the touching tx writes must keep the leaf deleted.
+func TestApplyWrites_TouchedEmptyAccountWithIncarnationDeletes(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0x0e, 0x49, 0x72})
+	acc := &accounts.Account{Incarnation: 1, CodeHash: accounts.EmptyCodeHash}
+	reader := &seededReader{NoopReader: state.NewNoopReader(), addr: addr, acc: acc}
+	ibs := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
+	ibs.SetTxContext(1, 0)
+	ibs.SetNoMaterialize(true)
+	require.NoError(t, ibs.TouchAccount(addr))
+	writes := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+
+	cs := newTestCalcState()
+	cs.accounts[addr] = &calcAccountState{CodeHash: empty.CodeHash, Incarnation: 1}
+	cs.ApplyWrites(writes)
+	cs.ApplyEIP161Removal(true /*emptyRemoval*/, false /*isAura*/)
+	assert.True(t, cs.accounts[addr].Deleted)
+
+	updates := newTestUpdates()
+	cs.FlushToUpdates(updates)
+	keyVal := addr.Value()
+	assert.Equal(t, commitment.DeleteUpdate, lookupKeyUpdate(t, updates, string(keyVal[:])).Flags)
+}
+
 // TestNormalizeWriteSet_PostGenesisEmptyAccountTriggersEIP161 pins that emptyRemoval=true
 // emits SelfDestructPath for an empty account and flushes as DeleteUpdate.
 func TestNormalizeWriteSet_PostGenesisEmptyAccountTriggersEIP161(t *testing.T) {
