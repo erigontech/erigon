@@ -303,7 +303,7 @@ func readAllBody(r io.Reader, hint int) ([]byte, error) {
 	buf := make([]byte, 0, max(hint+1, 512))
 	for {
 		if len(buf) == cap(buf) {
-			buf = append(buf, 0)[:len(buf)]
+			buf = slices.Grow(buf, cap(buf))
 		}
 		n, err := r.Read(buf[len(buf):cap(buf)])
 		buf = buf[:len(buf)+n]

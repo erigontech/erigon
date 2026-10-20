@@ -17,6 +17,7 @@
 package rpc
 
 import (
+	"bytes"
 	"context"
 	"net/http/httptest"
 	"strings"
@@ -73,6 +74,16 @@ func BenchmarkWebsocket16kb(b *testing.B) {
 		err := client.Call(nil, "test_echo", payload16kb, 5, nil)
 		if err != nil {
 			panic(err)
+		}
+	}
+}
+
+func BenchmarkReadAllBody17MB(b *testing.B) {
+	body := make([]byte, 17*1024*1024)
+	b.SetBytes(int64(len(body)))
+	for b.Loop() {
+		if _, err := readAllBody(bytes.NewReader(body), int(smallBodyLimit)); err != nil {
+			b.Fatal(err)
 		}
 	}
 }
