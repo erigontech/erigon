@@ -6,7 +6,7 @@ participants:
     el_type: erigon
     el_image: test/erigon:current
     el_log_level: "debug"
-    el_extra_params: ["--experimental.bal", "--miner.extradata=caplin-glamsterdam"]
+    el_extra_params: ["--experimental.bal", "--miner.extradata=caplin-glamsterdam", "--rpc.txfeecap=0"]
     use_separate_vc: true
     vc_type: lighthouse
     vc_image: ethpandaops/lighthouse:glamsterdam-devnet-8
