@@ -100,16 +100,30 @@ TEXT ·jumpdestBitmapSSE4(SB), NOSPLIT, $0-40
 
 loop:
 	MOVOU 0(SI), X4
+	MOVOU 16(SI), X9
 	MOVOU X4, X0
 	PCMPEQB jda5b<>(SB), X0
 	PMOVMSKB X0, R12
-	VECTOR(X4, X1, X2, X3, X5)
-	MOVOU 16(SI), X9
 	MOVOU X9, X0
 	PCMPEQB jda5b<>(SB), X0
 	PMOVMSKB X0, R13
 	SHLL $16, R13
 	ORL  R13, R12               // JUMPDEST bytes
+
+	// A step entered at offset 0 without PUSH opcodes needs no analysis: every byte is an instruction.
+	CMPQ R8, $0x80
+	JNE  analyze
+	MOVOU X4, X0
+	PMAXSB X9, X0
+	PCMPGTB X11, X0             // PUSH1..PUSH32: the only bytes > 0x5f as int8
+	PMOVMSKB X0, AX
+	TESTL AX, AX
+	JNZ  analyze
+	MOVL R12, 0(DI)
+	JMP  next
+
+analyze:
+	VECTOR(X4, X1, X2, X3, X5)
 	VECTOR(X9, X6, X7, X8, X5)
 
 	MOVOU X1, 0(BX)   // TA
@@ -144,6 +158,7 @@ loop:
 	MOVL AX, 0(DI)
 	MOVBQZX -80(BX)(R8*1), R8   // e = PT[e]
 
+next:
 	ADDQ $32, SI
 	ADDQ $4, DI
 	DECQ CX
