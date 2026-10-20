@@ -149,7 +149,7 @@ func (w *Witness) WriteDiff(w2 *Witness, output io.Writer) {
 
 	length := max(len(w2.Operators), len(w.Operators))
 
-	for i := 0; i < length; i++ {
+	for i := range length {
 		var op WitnessOperator
 		if i < len(w.Operators) {
 			op = w.Operators[i]

@@ -27,9 +27,9 @@ func TestProcessPtcWindow(t *testing.T) {
 	// Epoch 1 slots [32..63]: validator indices all = slot*10
 	// Epoch 2 slots [64..95]: validator indices all = slot*10
 	initial := solid.NewUint64VectorOfVectors(totalSlots, ptcSize)
-	for i := 0; i < totalSlots; i++ {
+	for i := range totalSlots {
 		vec := solid.NewUint64VectorSSZ(ptcSize)
-		for j := 0; j < ptcSize; j++ {
+		for j := range ptcSize {
 			vec.Set(j, uint64(i*10+j))
 		}
 		initial.Set(i, vec)
@@ -47,10 +47,10 @@ func TestProcessPtcWindow(t *testing.T) {
 	mockState.EXPECT().GetPtcWindow().Return(initial)
 
 	// Mock ComputePTC: for each slot in next epoch, return predictable values.
-	for i := uint64(0); i < slotsPerEpoch; i++ {
+	for i := range slotsPerEpoch {
 		s := nextEpochStartSlot + i
 		ptc := make([]uint64, ptcSize)
-		for j := 0; j < ptcSize; j++ {
+		for j := range ptcSize {
 			ptc[j] = s*1000 + uint64(j) // unique per slot
 		}
 		mockState.EXPECT().ComputePTC(s).Return(ptc, nil)
@@ -70,7 +70,7 @@ func TestProcessPtcWindow(t *testing.T) {
 
 	// Verify shift: positions [0, lastEpochStart) should equal old positions
 	// [slotsPerEpoch, totalSlots), i.e., old epochs 1 and 2.
-	for i := 0; i < lastEpochStart; i++ {
+	for i := range lastEpochStart {
 		oldIdx := i + int(slotsPerEpoch)
 		got := captured.Get(i)
 		// Check first element to verify correct shift

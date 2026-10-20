@@ -1,7 +1,7 @@
 ---
 title: "TLS Authentication"
 description: "Mutual TLS setup for securing gRPC and RPC daemon endpoints."
-sidebar_position: 13
+sidebar_position: 18
 ---
 
 
@@ -48,7 +48,7 @@ openssl ecparam -name prime256v1 -genkey -noout -out CA-key.pem
 
 ## 2. Creating the CA certificate file
 
-Create CA self-signed certificate (this command will ask questions, the answers aren’t important for now, but at least the first one needs to be filled in with some data). The file created by this command will be called `CA-cert.pem`:
+Create the self-signed CA certificate (this command will ask questions; the answers aren’t important for now, but at least the first one needs to be filled in with some data). The file created by this command will be called `CA-cert.pem`:
 
 ```bash
 openssl req -x509 -new -nodes -key CA-key.pem -sha256 -days 3650 -out CA-cert.pem
@@ -62,7 +62,7 @@ Generate a key pair for the Erigon node:
 openssl ecparam -name prime256v1 -genkey -noout -out erigon-key.pem
 ```
 
-Also generate a key pair for the RPC daemon:
+Also generate a key pair for the RPC Daemon:
 
 ```bash
 openssl ecparam -name prime256v1 -genkey -noout -out RPC-key.pem
@@ -71,6 +71,10 @@ openssl ecparam -name prime256v1 -genkey -noout -out RPC-key.pem
 ## 4. Creating the certificate file for each public key
 
 Now create the Certificate Signing Request for the Erigon key pair, and from this request, produce the certificate (signed by the CA) that proves that this key is now part of the “cluster of trust”:
+
+```bash
+openssl req -new -key erigon-key.pem -out erigon.csr
+```
 
 ```bash
 openssl x509 -req -in erigon.csr -CA CA-cert.pem -CAkey CA-key.pem -CAcreateserial -out erigon.crt -days 3650 -sha256
@@ -82,7 +86,7 @@ Then create the certificate signing request for the RPC Daemon key pair:
 openssl req -new -key RPC-key.pem -out RPC.csr
 ```
 
-From this request, produce the certificate (signed by CA), proving that this key is now part of the “cluster of trust”:
+From this request, produce the certificate (signed by the CA), proving that this key is now part of the “cluster of trust”:
 
 ```bash
 openssl x509 -req -in RPC.csr -CA CA-cert.pem -CAkey CA-key.pem -CAcreateserial -out RPC.crt -days 3650 -sha256
@@ -102,9 +106,9 @@ On the RPC Daemon machine, these three files must also be placed in the /erigon 
 
 `CA-cert.pem`
 
-`RPC key.pem`
+`RPC-key.pem`
 
-`RPC.crtv`
+`RPC.crt`
 
 ## 6. Run Erigon and RPC Daemon with the correct tags
 

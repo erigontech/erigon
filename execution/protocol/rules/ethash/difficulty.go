@@ -103,14 +103,15 @@ func calcDifficultyHomestead(time, parentTime uint64, parentDifficulty uint256.I
 	adjust.Rsh(adjust, difficultyBoundDivisor) // adjust: pDiff / 2048
 
 	x := (time - parentTime) / 10 // (time - ptime) / 10)
-	var neg = true
-	if x == 0 {
+	neg := true
+	switch {
+	case x == 0:
 		x = 1
 		neg = false
-	} else if x >= 100 {
+	case x >= 100:
 		x = 99
-	} else {
-		x = x - 1
+	default:
+		x--
 	}
 	z := new(uint256.Int).SetUint64(x)
 	adjust.Mul(adjust, z) // adjust: (pdiff / 2048) * max((time - ptime) / 10 - 1, 99)
@@ -155,7 +156,7 @@ func makeDifficultyCalculator(bombDelay uint64) func(time, parentTime uint64, pa
 		xNeg := x >= c
 		if xNeg {
 			// x is now _negative_ adjustment factor
-			x = x - c // - ( (t-p)/p -( 2 or 1) )
+			x -= c // - ( (t-p)/p -( 2 or 1) )
 		} else {
 			x = c - x // (2 or 1) - (t-p)/9
 		}
@@ -164,7 +165,7 @@ func makeDifficultyCalculator(bombDelay uint64) func(time, parentTime uint64, pa
 		}
 		// parent_diff + (parent_diff / 2048 * max((2 if len(parent.uncles) else 1) - ((timestamp - parent.timestamp) // 9), -99))
 		y := pDiff.Clone()
-		z := new(uint256.Int).SetUint64(x) //z : +-adj_factor (either pos or negative)
+		z := new(uint256.Int).SetUint64(x) // z : +-adj_factor (either pos or negative)
 		y.Rsh(y, difficultyBoundDivisor)   // y: p__diff / 2048
 		z.Mul(y, z)                        // z: (p_diff / 2048 ) * (+- adj_factor)
 

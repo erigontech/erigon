@@ -18,21 +18,17 @@ package kvcache
 
 import (
 	"bytes"
-
 	"context"
 	"encoding/binary"
 	"fmt"
-	"hash"
-
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	keccak "github.com/erigontech/fastkeccak"
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -59,7 +55,6 @@ type Cache interface {
 type CacheView interface {
 	Get(k []byte) ([]byte, error)
 	GetCode(k []byte) ([]byte, error)
-	HasStorage(address common.Address) (bool, error)
 }
 
 // Coherent works on top of Database Transaction and pair Coherent+ReadTransaction must
@@ -102,7 +97,6 @@ type CacheView interface {
 //   - changes in Canonical View SHOULD reflect in stateEvict
 //   - changes in Non-Canonical View SHOULD NOT reflect in stateEvict
 type Coherent struct {
-	hasher               hash.Hash
 	codeEvictLen         metrics.Gauge
 	codeKeys             metrics.Gauge
 	keys                 metrics.Gauge
@@ -121,7 +115,6 @@ type Coherent struct {
 	lock                 sync.Mutex
 	waitExceededCount    atomic.Int32 // used as a circuit breaker to stop the cache waiting for new blocks
 }
-
 type CoherentRoot struct {
 	cache           *btree2.BTreeG[*Element]
 	codeCache       *btree2.BTreeG[*Element]
@@ -142,26 +135,19 @@ type CoherentView struct {
 func (c *CoherentView) Get(k []byte) ([]byte, error) {
 	return c.cache.Get(k, c.tx, c.stateVersionID)
 }
+
 func (c *CoherentView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
 	return nil, false, nil
 }
+
 func (c *CoherentView) GetCode(k []byte) ([]byte, error) {
 	return c.cache.GetCode(k, c.tx, c.stateVersionID)
 }
-func (c *CoherentView) HasStorage(address common.Address) (bool, error) {
-	// note: theoretically we could try to use the cache and look for populated storage
-	// slots for the given account, however that will be only useful in case of a
-	// collision (ie creating an account which already has storage as per eip-7610) which
-	// in reality is very rare; for all the other most likely situations in which we query
-	// if an account has storage (and that account is newly created and doesn't have storage)
-	// the cache will say that there is no known storage in which case we will still need to
-	// check in the DB to be absolutely sure anyway (this deems such an "optimisation" useless)
-	_, _, hasStorage, err := c.tx.HasPrefix(kv.StorageDomain, address[:])
-	return hasStorage, err
-}
 
-var _ Cache = (*Coherent)(nil)         // compile-time interface check
-var _ CacheView = (*CoherentView)(nil) // compile-time interface check
+var (
+	_ Cache     = (*Coherent)(nil)     // compile-time interface check
+	_ CacheView = (*CoherentView)(nil) // compile-time interface check
+)
 
 const (
 	DEGREE    = 32
@@ -198,17 +184,16 @@ func New(cfg CoherentConfig) *Coherent {
 		roots:        map[uint64]*CoherentRoot{},
 		stateEvict:   &ThreadSafeEvictionList{l: NewList()},
 		codeEvict:    &ThreadSafeEvictionList{l: NewList()},
-		hasher:       keccak.NewFastKeccak(),
 		cfg:          cfg,
-		miss:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
-		hits:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
-		timeout:      metrics.GetOrCreateCounter(fmt.Sprintf(`cache_timeout_total{name="%s"}`, cfg.MetricsLabel)),
-		keys:         metrics.GetOrCreateGauge(fmt.Sprintf(`cache_keys_total{name="%s"}`, cfg.MetricsLabel)),
-		evict:        metrics.GetOrCreateGauge(fmt.Sprintf(`cache_list_total{name="%s"}`, cfg.MetricsLabel)),
-		codeMiss:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
-		codeHits:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
-		codeKeys:     metrics.GetOrCreateGauge(fmt.Sprintf(`cache_code_keys_total{name="%s"}`, cfg.MetricsLabel)),
-		codeEvictLen: metrics.GetOrCreateGauge(fmt.Sprintf(`cache_code_list_total{name="%s"}`, cfg.MetricsLabel)),
+		miss:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="miss",name=%q}`, cfg.MetricsLabel)),
+		hits:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="hit",name=%q}`, cfg.MetricsLabel)),
+		timeout:      metrics.GetOrCreateCounter(fmt.Sprintf(`cache_timeout_total{name=%q}`, cfg.MetricsLabel)),
+		keys:         metrics.GetOrCreateGauge(fmt.Sprintf(`cache_keys_total{name=%q}`, cfg.MetricsLabel)),
+		evict:        metrics.GetOrCreateGauge(fmt.Sprintf(`cache_list_total{name=%q}`, cfg.MetricsLabel)),
+		codeMiss:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_total{result="miss",name=%q}`, cfg.MetricsLabel)),
+		codeHits:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_total{result="hit",name=%q}`, cfg.MetricsLabel)),
+		codeKeys:     metrics.GetOrCreateGauge(fmt.Sprintf(`cache_code_keys_total{name=%q}`, cfg.MetricsLabel)),
+		codeEvictLen: metrics.GetOrCreateGauge(fmt.Sprintf(`cache_code_list_total{name=%q}`, cfg.MetricsLabel)),
 	}
 }
 
@@ -301,20 +286,16 @@ func (c *Coherent) OnNewBlock(stateChanges *remoteproto.StateChangeBatch) {
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 				v := sc.Changes[i].Data
 				c.add(addr[:], v, r, id)
-				c.hasher.Reset()
-				c.hasher.Write(sc.Changes[i].Code)
-				k := c.hasher.Sum(nil)
-				c.addCode(k, sc.Changes[i].Code, r, id)
+				k := crypto.Keccak256Hash(sc.Changes[i].Code)
+				c.addCode(k[:], sc.Changes[i].Code, r, id)
 			case remoteproto.Action_REMOVE:
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 				c.add(addr[:], nil, r, id)
 			case remoteproto.Action_STORAGE:
-				//skip, will check later
+				// skip, will check later
 			case remoteproto.Action_CODE:
-				c.hasher.Reset()
-				c.hasher.Write(sc.Changes[i].Code)
-				k := c.hasher.Sum(nil)
-				c.addCode(k, sc.Changes[i].Code, r, id)
+				k := crypto.Keccak256Hash(sc.Changes[i].Code)
+				c.addCode(k[:], sc.Changes[i].Code, r, id)
 			default:
 				panic("not implemented yet")
 			}
@@ -390,8 +371,9 @@ func (c *Coherent) getFromCache(k []byte, id uint64, domain kv.Domain) (*Element
 	}
 	return it, r, nil
 }
+
 func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err error) {
-	//TODO: Get must accept from user Domain parameter
+	// TODO: Get must accept from user Domain parameter
 	it, r, err := c.getFromCache(k, id, kv.AccountsDomain)
 	if err != nil {
 		return nil, err
@@ -406,9 +388,9 @@ func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err err
 	c.miss.Inc()
 
 	if len(k) == 20 {
-		v, _, err = tx.GetLatest(kv.AccountsDomain, k)
+		v, _, err = tx.GetLatest(kv.AccountsDomain, k, kv.GetLatestOptions{})
 	} else {
-		v, _, err = tx.GetLatest(kv.StorageDomain, k)
+		v, _, err = tx.GetLatest(kv.StorageDomain, k, kv.GetLatestOptions{})
 	}
 	if err != nil {
 		return nil, err
@@ -421,7 +403,7 @@ func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err err
 
 	defer c.lock.Unlock()
 
-	v = c.add(common.Copy(k), common.Copy(v), r, id).V
+	v = c.add(bytes.Clone(k), bytes.Clone(v), r, id).V
 	return v, nil
 }
 
@@ -438,7 +420,7 @@ func (c *Coherent) GetCode(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err
 	}
 	c.codeMiss.Inc()
 
-	v, _, err = tx.GetLatest(kv.CodeDomain, k)
+	v, _, err = tx.GetLatest(kv.CodeDomain, k, kv.GetLatestOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -446,9 +428,10 @@ func (c *Coherent) GetCode(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err
 
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	v = c.addCode(common.Copy(k), common.Copy(v), r, id).V
+	v = c.addCode(bytes.Clone(k), bytes.Clone(v), r, id).V
 	return v, nil
 }
+
 func (c *Coherent) removeOldest(r *CoherentRoot) {
 	e := c.stateEvict.Oldest()
 	if e != nil {
@@ -456,6 +439,7 @@ func (c *Coherent) removeOldest(r *CoherentRoot) {
 		r.cache.Delete(e)
 	}
 }
+
 func (c *Coherent) removeOldestCode(r *CoherentRoot) {
 	e := c.codeEvict.Oldest()
 	if e != nil {
@@ -463,6 +447,7 @@ func (c *Coherent) removeOldestCode(r *CoherentRoot) {
 		r.codeCache.Delete(e)
 	}
 }
+
 func (c *Coherent) add(k, v []byte, r *CoherentRoot, id uint64) *Element {
 	it := &Element{K: k, V: v}
 
@@ -483,6 +468,7 @@ func (c *Coherent) add(k, v []byte, r *CoherentRoot, id uint64) *Element {
 
 	return it
 }
+
 func (c *Coherent) addCode(k, v []byte, r *CoherentRoot, id uint64) *Element {
 	it := &Element{K: k, V: v}
 	replaced, _ := r.codeCache.Set(it)
@@ -503,7 +489,6 @@ func (c *Coherent) addCode(k, v []byte, r *CoherentRoot, id uint64) *Element {
 }
 
 func (c *Coherent) ValidateCurrentRoot(ctx context.Context, tx kv.TemporalTx) (*CacheValidationResult, error) {
-
 	result := &CacheValidationResult{
 		Enabled:          true,
 		RequestCancelled: false,
@@ -558,7 +543,7 @@ func (c *Coherent) ValidateCurrentRoot(ctx context.Context, tx kv.TemporalTx) (*
 			}
 
 			// check the db
-			inDb, _, err := tx.GetLatest(domain, val.K)
+			inDb, _, err := tx.GetLatest(domain, val.K, kv.GetLatestOptions{})
 			if err != nil {
 				return false, keys, err
 			}
@@ -653,13 +638,14 @@ func (c *Coherent) evictRoots() {
 		delete(c.roots, txID)
 	}
 }
+
 func (c *Coherent) Len() int {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	if c.latestStateView == nil {
 		return 0
 	}
-	return c.latestStateView.cache.Len() //todo: is it same with cache.len()?
+	return c.latestStateView.cache.Len() // todo: is it same with cache.len()?
 }
 
 // Element is an element of a linked list.
@@ -692,6 +678,7 @@ func (l *ThreadSafeEvictionList) Init() {
 	l.l.Init()
 	l.lock.Unlock()
 }
+
 func (l *ThreadSafeEvictionList) PushFront(e *Element) {
 	l.lock.Lock()
 	l.l.PushFront(e)

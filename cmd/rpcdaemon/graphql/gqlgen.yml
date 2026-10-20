@@ -82,6 +82,8 @@ models:
       - github.com/99designs/gqlgen/graphql.Uint64
   Block:
     fields:
+      parent:
+        resolver: true
       transactionAt:
         resolver: true
       account:
@@ -91,6 +93,8 @@ models:
       estimateGas:
         resolver: true
       logs:
+        resolver: true
+      miner:
         resolver: true
   Pending:
     fields:
@@ -105,6 +109,12 @@ models:
       from:
         resolver: true
       to:
+        resolver: true
+      createdContract:
+        resolver: true
+  Log:
+    fields:
+      account:
         resolver: true
 
 omit_getters: true

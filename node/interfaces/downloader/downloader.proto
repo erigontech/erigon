@@ -28,7 +28,7 @@ message SeedRequest {
 
 // DownloadItem:
 // - if Erigon created new snapshot and want seed it
-// - if Erigon wnat download files - it fills only "torrent_hash" field
+// - if Erigon want download files - it fills only "torrent_hash" field
 message DownloadItem {
   string path = 1;
   types.H160 torrent_hash = 2; // will be resolved as magnet link

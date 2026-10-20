@@ -38,7 +38,9 @@ func Test(t *testing.T) {
 	if dbg.EnvBool("ERIGON_SKIP_CL_SPECTEST", false) {
 		t.Skip("ERIGON_SKIP_CL_SPECTEST=true; consensus spec tests are covered by test-integration-caplin")
 	}
-	caplinConfig := clparams.CaplinConfig{}
-	clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig, &caplinConfig)
+	if clparams.GetBeaconConfig() == nil {
+		clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig)
+	}
+	t.Run("mainnet_config", testMainnetConfig)
 	spectest.RunCases(t, consensus_tests.TestFormats, transition.ValidatingMachine, os.DirFS(mainnetDir))
 }

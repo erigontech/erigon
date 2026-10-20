@@ -41,20 +41,19 @@ This path offers the simplest validator configuration by using Erigon's embedded
 **Steps for Minimal Downtime**
 
 1. **Preparation**: [Install](installation/) Erigon.
-2. **Configuration Check** (No Conflict): Ensure Erigon's standard [ports](../fundamentals/default-ports) (JSON-RPC, P2P) are different from Geth's. These ports are configured via the `--port` and `--p2p.allowed-ports` command-line options. For example:
+2. **Configuration Check** (No Conflict): Ensure Erigon's standard [ports](../fundamentals/default-ports) (JSON-RPC, P2P) are different from Geth's. The P2P listening port is configured via the `--port` command-line option. For example:
 
     ```sh
     erigon \
       --datadir=/data/erigon \
       --chain=mainnet \
-      --port=30304 \
-      --p2p.allowed-ports=30310,30311,30312,30313,30314,30315,30316
+      --port=30304
     ```
 3. **Synchronization**: Start syncing Erigon. Monitor the sync status using the `eth_syncing` JSON-[RPC method](../interacting-with-erigon/) or a health check.
 4. **Validator Swap**: Once Erigon is fully synced, shut down Geth and the external CL client.
 5. **Reconfiguration and Restart**:
-   * To restart Erigon, there's no need to specify `--port` or `--P2P.allowed-ports`. Refer to this [guide](../fundamentals/caplin) for additional Erigon + Caplin configuration recommendations.
-   * Crucially, reconfigure your **validator keys manager** to point directly to the Erigon Beacon API, as Erigon/Caplin now handles both layers internally).
+   * To restart Erigon, there's no need to specify `--port`. Refer to this [guide](../fundamentals/caplin) for additional Erigon + Caplin configuration recommendations.
+   * Crucially, reconfigure your **validator keys manager** to point directly to the Erigon Beacon API, as Erigon/Caplin now handles both layers internally.
 6. **Decommission Old Setup**: Verify Erigon/Caplin is proposing and attesting blocks correctly. If confirmed, safely remove Geth, the external CL client, and all their data, including the old JWT secret.
 </TabItem>
 <TabItem value="migrate-to-erigon-+-external-cl" label="Migrate to Erigon + External CL">
@@ -63,15 +62,14 @@ Switch to an Erigon Execution Layer (EL) while keeping your current external Con
 **Steps for Minimal Downtime**
 
 1. **Preparation**: [Install](installation/) Erigon.
-2. **Configuration Check**: run Erigon + Caplin simultaneously with Geth (or any other EL) for fast, parallel syncing and assign unique ports for its P2P networking via `--port` and `--p2p.allowed-ports` (check which ports your present
+2. **Configuration Check**: run Erigon + Caplin simultaneously with Geth (or any other EL) for fast, parallel syncing and assign a unique port for its P2P networking via `--port` (check which ports your present
    EL is using). For example:
 
     ```sh
     erigon \
       --datadir=/data/erigon \
       --chain=mainnet \
-      --port=30304 \
-      --p2p.allowed-ports=30310,30311,30312,30313,30314,30315,30316
+      --port=30304
     ```
 3. **Synchronization**: Monitor the sync status using the `eth_syncing` JSON-RPC method or a health check.
 4. **Validator Swap**: Once Erigon is fully synced, **shut down** both Geth and Erigon. **Keep the external CL client running.**

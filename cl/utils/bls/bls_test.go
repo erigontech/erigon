@@ -54,7 +54,8 @@ func TestAggregateSignature(t *testing.T) {
 			convertHexToPublicKey("a491d1b0ecd9bb917989f0e74f0dea0422eac4a873e5e2644f368dffb9a6e20fd6e10c1b77654d067c0618f6e5a7f79a"),
 			convertHexToPublicKey("b301803f8b5ac4a1133581fc676dfedc60d891dd5fa99028805e5ea5b08d3491af75d0707adab3b70c6a6a580217bf81"),
 			convertHexToPublicKey("b53d21a4cfd562c469cc81514d4ce5a6b577d8403d32a394dc265dd190b47fa9f829fdd7963afdf972e5e77854051f6f"),
-		})
+		},
+	)
 	require.NoError(t, err)
 	require.True(t, valid)
 }
@@ -84,7 +85,8 @@ func TestAggregateVerifyInfinity(t *testing.T) {
 			convertHexToPublicKey("a491d1b0ecd9bb917989f0e74f0dea0422eac4a873e5e2644f368dffb9a6e20fd6e10c1b77654d067c0618f6e5a7f79a"),
 			convertHexToPublicKey("b301803f8b5ac4a1133581fc676dfedc60d891dd5fa99028805e5ea5b08d3491af75d0707adab3b70c6a6a580217bf81"),
 			convertHexToPublicKey("b53d21a4cfd562c469cc81514d4ce5a6b577d8403d32a394dc265dd190b47fa9f829fdd7963afdf972e5e77854051f6f"),
-		})
+		},
+	)
 	require.NoError(t, err)
 	require.False(t, valid)
 }
@@ -131,4 +133,27 @@ func TestAggregateSignatures(t *testing.T) {
 	valid, err := bls.Verify(aggregatedSignature, msg, aggregatedPublicKey)
 	require.NoError(t, err)
 	require.True(t, valid)
+}
+
+func TestSignatureAggregatorMatchesAggregateSignatures(t *testing.T) {
+	var sigs [][]byte
+	var aggregator bls.SignatureAggregator
+	for i := range 5 {
+		key, err := bls.GenerateKey()
+		require.NoError(t, err)
+		sig := key.Sign([]byte{byte(i)}).Bytes()
+		sigs = append(sigs, sig)
+		require.NoError(t, aggregator.AddValidated(sig))
+	}
+	expected, err := bls.AggregateSignatures(sigs)
+	require.NoError(t, err)
+
+	got := aggregator.Compressed()
+	require.Equal(t, expected, got[:])
+}
+
+func TestSignatureAggregatorRejectsMalformedSignature(t *testing.T) {
+	var aggregator bls.SignatureAggregator
+	require.ErrorIs(t, aggregator.AddValidated(make([]byte, 96)), bls.ErrDeserializeSignature)
+	require.Error(t, aggregator.AddValidated(make([]byte, 95)))
 }

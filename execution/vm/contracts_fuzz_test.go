@@ -23,6 +23,8 @@ import (
 	"maps"
 	"slices"
 	"testing"
+
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 )
 
 func FuzzPrecompiledContracts(f *testing.F) {
@@ -36,7 +38,9 @@ func FuzzPrecompiledContracts(f *testing.F) {
 			return
 		}
 		inWant := string(input)
-		RunPrecompiledContract(p, input, gas, nil)
+		// Fuzzed input is expected to fail; the assertion below is about
+		// the precompile not mutating the caller's buffer.
+		_, _, _ = RunPrecompiledContract(p, input, mdgas.MdGas{Execution: gas}, nil)
 		if inHave := string(input); inWant != inHave {
 			t.Errorf("Precompiled %v modified input data", a)
 		}

@@ -20,12 +20,13 @@ func BenchmarkPureArithmetic(b *testing.B) {
 
 		b.Run("add/"+name, func(b *testing.B) {
 			b.ReportAllocs()
-			cfg, statedb := benchConfig(b, gas)
-			deployContract(statedb, addrContract, code)
+			vmenv := benchConfig(b, gas)
+			statedb := vmenv.IntraBlockState()
+			deployContract(b, statedb, addrContract, code)
 			// Warmup
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+			callOOG(b, vmenv, addrContract)
 			for b.Loop() {
-				prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+				callOOG(b, vmenv, addrContract)
 			}
 		})
 	}
@@ -35,11 +36,12 @@ func BenchmarkPureArithmetic(b *testing.B) {
 	mulCode := p.Push(3).Push(7).Op(vm.MUL, vm.POP).Jump(lbl).Bytes()
 	b.Run("mul/100M", func(b *testing.B) {
 		b.ReportAllocs()
-		cfg, statedb := benchConfig(b, 100_000_000)
-		deployContract(statedb, addrContract, mulCode)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+		vmenv := benchConfig(b, 100_000_000)
+		statedb := vmenv.IntraBlockState()
+		deployContract(b, statedb, addrContract, mulCode)
+		callOOG(b, vmenv, addrContract)
 		for b.Loop() {
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			callOOG(b, vmenv, addrContract)
 		}
 	})
 }
@@ -56,11 +58,12 @@ func BenchmarkStackOps(b *testing.B) {
 
 	b.Run("dup-swap/100M", func(b *testing.B) {
 		b.ReportAllocs()
-		cfg, statedb := benchConfig(b, 100_000_000)
-		deployContract(statedb, addrContract, code)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+		vmenv := benchConfig(b, 100_000_000)
+		statedb := vmenv.IntraBlockState()
+		deployContract(b, statedb, addrContract, code)
+		callOOG(b, vmenv, addrContract)
 		for b.Loop() {
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			callOOG(b, vmenv, addrContract)
 		}
 	})
 }
@@ -75,11 +78,12 @@ func BenchmarkMemoryOps(b *testing.B) {
 
 	b.Run("mstore-mload/100M", func(b *testing.B) {
 		b.ReportAllocs()
-		cfg, statedb := benchConfig(b, 100_000_000)
-		deployContract(statedb, addrContract, code)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+		vmenv := benchConfig(b, 100_000_000)
+		statedb := vmenv.IntraBlockState()
+		deployContract(b, statedb, addrContract, code)
+		callOOG(b, vmenv, addrContract)
 		for b.Loop() {
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			callOOG(b, vmenv, addrContract)
 		}
 	})
 
@@ -98,11 +102,12 @@ func BenchmarkMemoryOps(b *testing.B) {
 
 	b.Run("mstore-growing/10M", func(b *testing.B) {
 		b.ReportAllocs()
-		cfg, statedb := benchConfig(b, 10_000_000)
-		deployContract(statedb, addrContract, growCode)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+		vmenv := benchConfig(b, 10_000_000)
+		statedb := vmenv.IntraBlockState()
+		deployContract(b, statedb, addrContract, growCode)
+		callOOG(b, vmenv, addrContract)
 		for b.Loop() {
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			callOOG(b, vmenv, addrContract)
 		}
 	})
 }
@@ -116,11 +121,12 @@ func BenchmarkKeccak256(b *testing.B) {
 
 		b.Run(formatSize(size)+"/100M", func(b *testing.B) {
 			b.ReportAllocs()
-			cfg, statedb := benchConfig(b, 100_000_000)
-			deployContract(statedb, addrContract, code)
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+			vmenv := benchConfig(b, 100_000_000)
+			statedb := vmenv.IntraBlockState()
+			deployContract(b, statedb, addrContract, code)
+			callOOG(b, vmenv, addrContract)
 			for b.Loop() {
-				prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+				callOOG(b, vmenv, addrContract)
 			}
 		})
 	}
@@ -145,11 +151,12 @@ func BenchmarkMixedCompute(b *testing.B) {
 
 	b.Run("mixed/100M", func(b *testing.B) {
 		b.ReportAllocs()
-		cfg, statedb := benchConfig(b, 100_000_000)
-		deployContract(statedb, addrContract, code)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+		vmenv := benchConfig(b, 100_000_000)
+		statedb := vmenv.IntraBlockState()
+		deployContract(b, statedb, addrContract, code)
+		callOOG(b, vmenv, addrContract)
 		for b.Loop() {
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			callOOG(b, vmenv, addrContract)
 		}
 	})
 }

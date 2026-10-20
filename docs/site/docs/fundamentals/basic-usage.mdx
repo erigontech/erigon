@@ -63,7 +63,7 @@ The all-in-one client is the preferred option for most users:
 
 This CLI command allows you to run an Ethereum **full node** where every process is integrated and no special configuration is needed.
 
-The default Consensus Layer utilized is [Caplin](caplin), the Erigon flagship embedded CL.
+The default Consensus Layer utilized is [Caplin](caplin), the Erigon flagship embedded Consensus Layer (CL).
 
 ## Example of configuration
 
@@ -85,14 +85,14 @@ To run Erigon with RPC Daemon, TxPool, and other components in a single process 
 
 ### Flags of Interest
 
-*   Default data directory is `/home/usr/.local/share/erigon`. If you want to store Erigon files in a non-default location, use the flag:
+*   The default data directory is `~/.local/share/erigon` on Linux (`$XDG_DATA_HOME/erigon` when that variable is set), `~/Library/Erigon` on macOS and `%LOCALAPPDATA%\Erigon` on Windows. If you want to store Erigon files in a non-default location, use the flag:
 
     ```bash
     --datadir=/desired/path/to/datadir
     ```
 * The `--chain=mainnet` flag is set by default for Erigon to sync with the Ethereum mainnet. To explore other network options, check the [Supported Networks](supported-networks) section. For quick testing, consider selecting a testnet.
 * `--log.dir.path` dictates where [logs](logs) will be output - useful for sending reports to the Erigon team when issues occur.
-* Based on the [prune mode](prune-modes) you want to run you can add `--prune.mode=archive` to run an archive node, `--prune.mode=full` for a full node (default value) or `--prune.mode=minimal` for a minimal node.
+* Based on the [pruning mode](pruning-modes) you want to run you can add `--prune.mode=archive` to run an archive node, `--prune.mode=full` for a full node (default value) or `--prune.mode=minimal` for a minimal node.
 * `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use [RPC Service](../interacting-with-erigon/) and e.g. be able to connect your [wallet](web3-wallet).
 * `--torrent.download.rate` sets the torrent download rate cap. The default is `512mb` (megabytes per second). During initial sync Erigon will use the full allowance — on a dedicated machine this is fine, but if you share the machine with other work you may want to lower it (e.g. `--torrent.download.rate=128mb`). Set `--torrent.download.rate=Inf` to remove the limit entirely.
 
@@ -128,7 +128,7 @@ curl -s -X POST -H "Content-Type: application/json" \
   http://localhost:8545
 ```
 
-* While syncing, the result is an object with `currentBlock`, `highestBlock`, and a `stages` array (one entry per stage, with `{stage_name, block_number}`). Subtract `currentBlock` from `highestBlock` to see how many blocks remain; the `stages` array gives you the same per-stage progress as the log prefix above. (`startingBlock` is also returned but is hardcoded to `"0x0"` and carries no meaningful info.)
+* While syncing, the result is an object with `currentBlock`, `highestBlock`, and a `stages` array (one entry per stage, with `{stage_name, block_number}`). Subtract `currentBlock` from `highestBlock` to see how many blocks remain; the `stages` array gives you the same per-stage progress as the log prefix above. `startingBlock` reports the block the current sync session started from, so `(currentBlock - startingBlock) / (highestBlock - startingBlock)` is the progress of this run.
 * Once fully synced, the result is simply `false`.
 
 :::tip
@@ -148,7 +148,7 @@ This command will display a list of convenience commands available in the Makefi
 ```text
  go-version:                        print and verify go version
  validate_docker_build_args:        ensure docker build args are valid
- docker:                            validate, update submodules and build with docker
+ docker:                            validate and build with docker
  setup_xdg_data_home:               TODO
  docker-compose:                    validate build args, setup xdg data home, and run docker-compose up
  dbg                                debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
@@ -172,7 +172,6 @@ This command will display a list of convenience commands available in the Makefi
  bindings:                          generate test contracts and core contracts
  prometheus:                        run prometheus and grafana with docker-compose
  escape:                            run escape path={path} to check for memory leaks e.g. run escape path=cmd/erigon
- git-submodules:                    update git submodules
  install:                           copies binaries and libraries to DIST
  user_linux:                        create "erigon" user (Linux)
  user_macos:                        create "erigon" user (MacOS)

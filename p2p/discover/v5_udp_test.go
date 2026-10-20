@@ -21,8 +21,10 @@ package discover
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/rand"
 	"net"
@@ -41,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/p2p/discover/v5wire"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
+	"github.com/erigontech/erigon/p2p/netutil"
 )
 
 // Real sockets, real crypto: this test checks end-to-end connectivity for UDPv5.
@@ -49,7 +52,7 @@ func TestUDPv5_lookupE2E(t *testing.T) {
 
 	const N = 5
 	var nodes []*UDPv5
-	for i := 0; i < N; i++ {
+	for range N {
 		var cfg Config
 		if len(nodes) > 0 {
 			bn := nodes[0].Self()
@@ -95,11 +98,70 @@ func startLocalhostV5(t *testing.T, cfg Config) *UDPv5 {
 	realaddr := socket.LocalAddr().(*net.UDPAddr)
 	ln.SetStaticIP(realaddr.IP)
 	ln.SetFallbackUDP(realaddr.Port)
-	udp, err := ListenV5(socket, ln, cfg)
+	udp, err := ListenV5(t.Context(), socket, ln, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return udp
+}
+
+// This test checks that cancelling the context passed to ListenV5 shuts the transport
+// down completely, without an explicit Close.
+func TestUDPv5_listenCtxCancel(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	db, _ := enode.OpenDB("")
+	defer db.Close()
+	key := newkey()
+	udp, err := ListenV5(ctx, newpipe(), enode.NewLocalNode(db, key), Config{
+		PrivateKey:   key,
+		Log:          testlog.Logger(t, log.LvlInfo),
+		ValidSchemes: enode.ValidSchemesForTesting,
+		PingInterval: 1000 * time.Hour,
+	})
+	require.NoError(t, err)
+	defer udp.Close()
+
+	cancel()
+
+	// tab.closed is the last thing Close does, so observing it proves the whole
+	// shutdown ran: the socket is closed, readLoop and dispatch have exited, and
+	// the table loop has stopped.
+	select {
+	case <-udp.tab.closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelling the listen context did not shut the transport down")
+	}
+}
+
+// This test checks that trace logging follows the configured log level.
+func TestUDPv5_traceFollowsLogLevel(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		level log.Lvl
+		want  bool
+	}{
+		{log.LvlTrace, true},
+		{log.LvlInfo, false},
+	} {
+		t.Run(tc.level.String(), func(t *testing.T) {
+			db, _ := enode.OpenDB("")
+			defer db.Close()
+			key := newkey()
+			udp, err := ListenV5(t.Context(), newpipe(), enode.NewLocalNode(db, key), Config{
+				PrivateKey:   key,
+				Log:          testlog.Logger(t, tc.level),
+				ValidSchemes: enode.ValidSchemesForTesting,
+				PingInterval: 1000 * time.Hour,
+			})
+			require.NoError(t, err)
+			defer udp.Close()
+
+			require.Equal(t, tc.want, udp.trace)
+		})
+	}
 }
 
 // This test checks that incoming PING calls are handled correctly.
@@ -215,6 +277,60 @@ func TestUDPv5_handshakeRepeatChallenge(t *testing.T) {
 	test.waitPacketOut(func(p *v5wire.Whoareyou, addr netip.AddrPort, authTag v5wire.Nonce) {
 		check(p, authTag, nonce1)
 	})
+}
+
+// A handshake record is self-signed by the sender and its endpoint is never
+// checked against the packet source, so a peer must not be able to plant an
+// arbitrary address in the routing table.
+func TestUDPv5_handshakeNodeRelayAddr(t *testing.T) {
+	t.Parallel()
+	test := newUDPV5Test(t)
+	defer test.close()
+
+	publicAddr := netip.MustParseAddrPort("1.2.3.4:30303")
+	planted := test.getNode(newkey(), netip.MustParseAddrPort("169.254.169.254:30303")).Node()
+	allowed := test.getNode(newkey(), netip.MustParseAddrPort("5.6.7.8:30303")).Node()
+	lowPort := test.getNode(newkey(), netip.MustParseAddrPort("5.6.7.9:53")).Node()
+	inList := test.getNode(newkey(), netip.MustParseAddrPort("9.9.9.9:30303")).Node()
+	outOfList := test.getNode(newkey(), netip.MustParseAddrPort("8.8.8.8:30303")).Node()
+
+	list, err := netutil.ParseNetlist("9.9.9.0/24")
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name        string
+		node        *enode.Node
+		netrestrict *netutil.Netlist
+		inTabl      bool
+	}{
+		{"unrelated link-local address", planted, nil, false},
+		{"public address", allowed, nil, true},
+		{"low port", lowPort, nil, false},
+		{"outside netrestrict", outOfList, list, false},
+		{"inside netrestrict", inList, list, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			test.udp.netrestrict = tc.netrestrict
+			test.udp.codec.(*testCodec).handshakeNode = tc.node
+			test.packetInFrom(newkey(), publicAddr, &v5wire.Unknown{Nonce: v5wire.Nonce{1}})
+			test.waitPacketOut(func(*v5wire.Whoareyou, netip.AddrPort, v5wire.Nonce) {})
+
+			if inTable(test.table, tc.node.ID()) != tc.inTabl {
+				t.Fatalf("node %v in table = %v, want %v", tc.node.IPAddr(), !tc.inTabl, tc.inTabl)
+			}
+		})
+	}
+}
+
+func inTable(tab *Table, id enode.ID) bool {
+	for _, bucket := range tab.Nodes() {
+		for _, n := range bucket {
+			if n.Node.ID() == id {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // This test checks that incoming FINDNODE calls are handled correctly.
@@ -334,7 +450,7 @@ func TestUDPv5_pingCall(t *testing.T) {
 		done <- err
 	}()
 	test.waitPacketOut(func(p *v5wire.Ping, addr netip.AddrPort, _ v5wire.Nonce) {})
-	if err := <-done; err != errTimeout {
+	if err := <-done; !errors.Is(err, errTimeout) {
 		t.Fatalf("want errTimeout, got %q", err)
 	}
 
@@ -359,7 +475,7 @@ func TestUDPv5_pingCall(t *testing.T) {
 		wrongAddr := netip.MustParseAddrPort("33.44.55.22:10101")
 		test.packetInFrom(test.remotekey, wrongAddr, &v5wire.Pong{ReqID: p.ReqID})
 	})
-	if err := <-done; err != errTimeout {
+	if err := <-done; !errors.Is(err, errTimeout) {
 		t.Fatalf("want errTimeout for reply from wrong IP, got %q", err)
 	}
 }
@@ -417,7 +533,9 @@ type BadIdentityScheme struct{}
 func (s BadIdentityScheme) Verify(r *enr.Record, sig []byte) error { return nil }
 func (s BadIdentityScheme) NodeAddr(r *enr.Record) []byte {
 	var id enode.ID
-	r.Load(enr.WithEntry("badaddr", &id))
+	if err := r.Load(enr.WithEntry("badaddr", &id)); err != nil {
+		return nil
+	}
 	return id[:]
 }
 
@@ -446,7 +564,7 @@ func TestUDPv5_findnodeCall_InvalidNodes(t *testing.T) {
 			sign: func(r *enr.Record, id enode.ID) *enode.Node {
 				r.Set(enr.ID("bad"))
 				r.Set(enr.WithEntry("badaddr", id))
-				r.SetSig(BadIdentityScheme{}, []byte{})
+				require.NoError(t, r.SetSig(BadIdentityScheme{}, []byte{}))
 				n, _ := enode.New(BadIdentityScheme{}, r)
 				return n
 			},
@@ -559,7 +677,7 @@ func TestUDPv5_multipleHandshakeRounds(t *testing.T) {
 	test.waitPacketOut(func(p *v5wire.Ping, addr netip.AddrPort, nonce v5wire.Nonce) {
 		test.packetIn(&v5wire.Whoareyou{Nonce: nonce})
 	})
-	if err := <-done; err != errTimeout {
+	if err := <-done; !errors.Is(err, errTimeout) {
 		t.Fatalf("unexpected ping error: %q", err)
 	}
 }
@@ -674,7 +792,7 @@ func TestUDPv5_talkRequest(t *testing.T) {
 		done <- err
 	}()
 	test.waitPacketOut(func(p *v5wire.TalkRequest, addr netip.AddrPort, _ v5wire.Nonce) {})
-	if err := <-done; err != errTimeout {
+	if err := <-done; !errors.Is(err, errTimeout) {
 		t.Fatalf("want errTimeout, got %q", err)
 	}
 
@@ -889,6 +1007,8 @@ type testCodec struct {
 	ctr  uint64
 
 	sentChallenges map[enode.ID]*v5wire.Whoareyou
+	// handshakeNode, when set, is returned as the node a handshake packet carried.
+	handshakeNode *enode.Node
 }
 
 type testCodecFrame struct {
@@ -898,8 +1018,7 @@ type testCodecFrame struct {
 	Packet  rlp.RawValue
 }
 
-func (c *testCodec) Encode(toID enode.ID, addr string, p v5wire.Packet, _ *v5wire.Whoareyou) ([]byte, v5wire.Nonce, error) {
-
+func (c *testCodec) Encode(toID enode.ID, addr netip.AddrPort, p v5wire.Packet, _ *v5wire.Whoareyou) ([]byte, v5wire.Nonce, error) {
 	if wp, ok := p.(*v5wire.Whoareyou); ok && len(wp.ChallengeData) > 0 {
 		// To match the behavior of v5wire.Codec, we return the cached encoding of
 		// WHOAREYOU challenges.
@@ -927,25 +1046,25 @@ func (c *testCodec) Encode(toID enode.ID, addr string, p v5wire.Packet, _ *v5wir
 	return frame, authTag, err
 }
 
-func (c *testCodec) CurrentChallenge(id enode.ID, addr string) *v5wire.Whoareyou {
+func (c *testCodec) CurrentChallenge(id enode.ID, addr netip.AddrPort) *v5wire.Whoareyou {
 	return c.sentChallenges[id]
 }
 
-func (c *testCodec) Decode(input []byte, addr string) (enode.ID, *enode.Node, v5wire.Packet, error) {
+func (c *testCodec) Decode(input []byte, addr netip.AddrPort) (enode.ID, *enode.Node, v5wire.Packet, error) {
 	frame, p, err := c.decodeFrame(input)
 	if err != nil {
 		return enode.ID{}, nil, nil, err
 	}
-	return frame.NodeID, nil, p, nil
+	return frame.NodeID, c.handshakeNode, p, nil
 }
 
-func (c *testCodec) SessionNode(id enode.ID, addr string) *enode.Node {
+func (c *testCodec) SessionNode(id enode.ID, addr netip.AddrPort) *enode.Node {
 	return c.test.nodesByID[id].Node()
 }
 
 func (c *testCodec) decodeFrame(input []byte) (frame testCodecFrame, p v5wire.Packet, err error) {
 	if err = rlp.DecodeBytes(input, &frame); err != nil {
-		return frame, nil, fmt.Errorf("invalid frame: %v", err)
+		return frame, nil, fmt.Errorf("invalid frame: %w", err)
 	}
 	switch frame.Ptype {
 	case v5wire.UnknownPacket:
@@ -977,7 +1096,7 @@ func newUDPV5Test(t *testing.T) *udpV5Test {
 	ln := enode.NewLocalNode(test.db, test.localkey)
 	ln.SetStaticIP(net.IP{10, 0, 0, 1})
 	ln.SetFallbackUDP(30303)
-	test.udp, _ = ListenV5(test.pipe, ln, Config{
+	test.udp, _ = ListenV5(t.Context(), test.pipe, ln, Config{
 		PrivateKey:   test.localkey,
 		Log:          testlog.Logger(t, log.LvlTrace),
 		ValidSchemes: enode.ValidSchemesForTesting,
@@ -1003,7 +1122,7 @@ func (test *udpV5Test) packetInFrom(key *ecdsa.PrivateKey, addr netip.AddrPort, 
 
 	ln := test.getNode(key, addr)
 	codec := &testCodec{test: test, id: ln.ID()}
-	enc, _, err := codec.Encode(test.udp.Self().ID(), addr.String(), packet, nil)
+	enc, _, err := codec.Encode(test.udp.Self().ID(), addr, packet, nil)
 	if err != nil {
 		test.t.Errorf("%s encode error: %v", packet.Name(), err)
 	}
@@ -1037,10 +1156,10 @@ func (test *udpV5Test) waitPacketOut(validate any) (closed bool) {
 	exptype := fn.Type().In(0)
 
 	dgram, err := test.pipe.receive()
-	if err == errClosed {
+	if errors.Is(err, errClosed) {
 		return true
 	}
-	if err == errTimeout {
+	if errors.Is(err, errTimeout) {
 		test.t.Fatalf("timed out waiting for %v", exptype)
 		return false
 	}

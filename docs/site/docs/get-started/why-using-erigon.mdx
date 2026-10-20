@@ -6,18 +6,18 @@ sidebar_position: 1
 
 import Link from '@docusaurus/Link';
 
-# Why using Erigon?
+# Why use Erigon?
 
 Erigon is an Ethereum execution layer client focused on performance, low disk usage, and modular architecture.
 
-A core benefit of Erigon is its **reduced disk footprint** across all available prune modes — achieved through efficient state storage and compression, making node operation feasible on consumer-grade hardware. It also features an **integrated Consensus Layer (Caplin)**, eliminating the need for separate CL software, and a **BitTorrent-based protocol** for decentralised historical data distribution.
+A core benefit of Erigon is its **reduced disk footprint** across all available pruning modes — achieved through efficient state storage and compression, making node operation feasible on consumer-grade hardware. It also features an **integrated Consensus Layer (Caplin)**, eliminating the need for separate Consensus Layer (CL) software, and a **BitTorrent-based protocol** for decentralised historical data distribution.
 
 {/* ─── Stats strip ─── */}
 
 <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))', gap:'1rem', margin:'2rem 0'}}>
   {[
     {stat:'10×',     label:'cheaper to backup & distribute node data'},
-    {stat:'< 2 TB',  label:'archive node on consumer SSD'},
+    {stat:'~2 TB',   label:'archive node on consumer SSD'},
     {stat:'1 binary',label:'execution + consensus, no extra software'},
     {stat:'40+',     label:'AI query tools via built-in MCP server'},
   ].map(({stat, label}) => (
@@ -65,7 +65,7 @@ Erigon's architecture provides measurable improvements in cost, performance, and
   <div className="lp-card-desc">Historical data lives in immutable files distributed via BitTorrent — up to <strong>10× cheaper</strong> to backup, repair, and distribute. No double-disk usage, no complex serialisation.</div>
 </Link>
 
-<Link to="../fundamentals/prune-modes" className="lp-card">
+<Link to="../fundamentals/pruning-modes" className="lp-card">
   <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>
     <path d="M18 9a9 9 0 0 1-9 9"/>
@@ -91,7 +91,7 @@ Erigon's architecture provides measurable improvements in cost, performance, and
   <div className="lp-card-desc">Core node, RPC Daemon, and TxPool run as independent processes with per-component resource limits. If one crashes the rest stay alive. Run multiple instances without downtime.</div>
 </Link>
 
-<Link to="../fundamentals/prune-modes" className="lp-card">
+<Link to="../fundamentals/pruning-modes" className="lp-card">
   <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
   </svg>
@@ -127,7 +127,7 @@ Erigon's architecture provides measurable improvements in cost, performance, and
     <line x1="6" y1="18" x2="6.01" y2="18"/>
   </svg>
   <div className="lp-card-title">RPC Providers & Large Stakers</div>
-  <div className="lp-card-desc">Modular architecture and predictable performance handle high-volume traffic with low latency. Smaller database cuts hardware costs. Caplin reduces missed attestations and slashing risk.</div>
+  <div className="lp-card-desc">Modular architecture and predictable performance handle high-volume traffic with low latency. A smaller database cuts hardware costs. Caplin reduces missed attestations and slashing risk.</div>
 </Link>
 
 <Link to="../staking/" className="lp-card">
@@ -145,7 +145,7 @@ Erigon's architecture provides measurable improvements in cost, performance, and
     <polyline points="8 6 2 12 8 18"/>
   </svg>
   <div className="lp-card-title">Developers</div>
-  <div className="lp-card-desc">Full <code>trace_</code> namespace, historical <code>eth_getProof</code>, historical blobs, and gRPC API. Modular components let you update, extend, or replace parts without rebuilding the whole stack.</div>
+  <div className="lp-card-desc">Full <code>trace_</code> namespace, historical <code>eth_getProof</code>, historical blobs, and a gRPC API. Modular components let you update, extend, or replace parts without rebuilding the whole stack.</div>
 </Link>
 
 </div>
@@ -179,3 +179,5 @@ The interface is **read-only** and localhost-bound — no risk of unintended sta
 # Register with Claude Code in one command
 claude mcp add --transport sse erigon http://127.0.0.1:8553/sse
 ```
+
+Where MCP lets a model query your *node*, [llms.txt and llms-full.txt](../fundamentals/mcp#these-docs-as-a-single-file) let it read these *docs*: an index of the current documentation, and the same pages' text as one plain-text file for offline use.

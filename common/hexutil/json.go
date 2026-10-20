@@ -20,6 +20,7 @@
 package hexutil
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"math/big"
@@ -31,6 +32,8 @@ import (
 
 var (
 	bigT    = reflect.TypeFor[*Big]()
+	u256T   = reflect.TypeFor[*U256]()
+	int64T  = reflect.TypeFor[Int64]()
 	uintT   = reflect.TypeFor[Uint]()
 	uint16T = reflect.TypeFor[Uint16]()
 	uint32T = reflect.TypeFor[Uint32]()
@@ -47,14 +50,33 @@ func UnmarshalFixedUnprefixedText(typeName string, input, out []byte) error {
 // Big marshals/unmarshals as a JSON string with 0x prefix.
 // The zero value marshals as "0x0".
 //
-// Negative integers are not supported at this time. Attempting to marshal them will
-// return an error. Values larger than 256bits are rejected by Unmarshal but will be
-// marshaled without error.
+// Negative integers are not round-trippable: MarshalText/AppendText encode them as
+// "-0x…", but UnmarshalText rejects that form. Values larger than 256 bits are
+// rejected by Unmarshal but will be marshaled without error.
 type Big big.Int
 
 // MarshalText implements encoding.TextMarshaler
 func (b Big) MarshalText() ([]byte, error) {
 	return []byte(EncodeBig((*big.Int)(&b))), nil
+}
+
+// AppendText implements encoding.TextAppender (alloc-free MarshalText).
+func (b Big) AppendText(dst []byte) ([]byte, error) {
+	i := (*big.Int)(&b)
+	switch i.Sign() {
+	case 0:
+		return append(dst, `0x0`...), nil
+	case -1:
+		// EncodeBig writes the sign before the prefix ("-0x…"); big.Int.Append
+		// writes it after ("0x-…"). Append "-0x", let Append add the magnitude with its
+		// own leading '-', then drop that duplicate '-'.
+		dst = append(dst, `-0x`...)
+		dash := len(dst)
+		dst = i.Append(dst, 16)
+		return append(dst[:dash], dst[dash+1:]...), nil
+	default:
+		return i.Append(append(dst, `0x`...), 16), nil
+	}
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -90,7 +112,7 @@ func (b *Big) UnmarshalText(input []byte) error {
 	}
 	var dec big.Int
 	dec.SetBits(words)
-	*b = (Big)(dec)
+	*b = Big(dec)
 	return nil
 }
 
@@ -99,8 +121,10 @@ func (b *Big) ToInt() *big.Int {
 	return (*big.Int)(b)
 }
 
-// ToUint256 converts b to a uint256.Int.
-func (b *Big) ToUint256() *uint256.Int { return uint256.MustFromBig(b.ToInt()) }
+// ToUint256 converts b to a uint256.Int and reports whether it overflows 256 bits.
+func (b *Big) ToUint256() (*uint256.Int, bool) {
+	return uint256.FromBig((*big.Int)(b))
+}
 
 // String returns the hex encoding of b.
 func (b *Big) String() string {
@@ -108,7 +132,124 @@ func (b *Big) String() string {
 }
 
 func (b *Big) Uint64() uint64 {
-	return ((*big.Int)(b)).Uint64()
+	return (*big.Int)(b).Uint64()
+}
+
+// U256 marshals/unmarshals as a JSON string with 0x prefix, byte-identical to
+// Big for any value both can represent. The zero value marshals as "0x0".
+type U256 uint256.Int
+
+// MarshalText implements encoding.TextMarshaler
+func (b U256) MarshalText() ([]byte, error) {
+	return b.AppendText(make([]byte, 0, 66))
+}
+
+// AppendText implements encoding.TextAppender (alloc-free MarshalText).
+func (b U256) AppendText(dst []byte) ([]byte, error) {
+	z := (*uint256.Int)(&b)
+	nibbles := (z.BitLen() + 3) / 4
+	if nibbles == 0 {
+		nibbles = 1
+	}
+	// hex.Encode works in whole bytes, so an odd nibble count produces one
+	// leading zero digit to drop.
+	nbytes := (nibbles + 1) / 2
+	be := z.Bytes32()
+	var digits [64]byte
+	hex.Encode(digits[:2*nbytes], be[32-nbytes:])
+	return append(append(dst, '0', 'x'), digits[2*nbytes-nibbles:2*nbytes]...), nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (b *U256) UnmarshalJSON(input []byte) error {
+	if !isString(input) {
+		return errNonString(u256T)
+	}
+	return wrapTypeError(b.UnmarshalText(input[1:len(input)-1]), u256T)
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler
+func (b *U256) UnmarshalText(input []byte) error {
+	raw, err := checkNumberText(input)
+	if err != nil {
+		return err
+	}
+	if len(raw) > 64 {
+		return ErrBig256Range
+	}
+	z := (*uint256.Int)(b)
+	z.Clear()
+	for _, nib := range raw {
+		d := decodeNibble(nib)
+		if d == badNibble {
+			return ErrSyntax
+		}
+		z.Lsh(z, 4)
+		z[0] |= d
+	}
+	return nil
+}
+
+// ToInt converts b to a big.Int.
+func (b *U256) ToInt() *big.Int {
+	return (*uint256.Int)(b).ToBig()
+}
+
+// String returns the hex encoding of b.
+func (b *U256) String() string {
+	return (*uint256.Int)(b).Hex()
+}
+
+func (b *U256) Uint64() uint64 {
+	return (*uint256.Int)(b).Uint64()
+}
+
+// Int64 encodes signed quantities as "0x..." or "-0x...".
+type Int64 int64
+
+func (b Int64) MarshalText() ([]byte, error) {
+	return b.AppendText(make([]byte, 0, 19))
+}
+
+func (b Int64) AppendText(dst []byte) ([]byte, error) {
+	magnitude := Uint64(b)
+	if b < 0 {
+		dst = append(dst, '-')
+		magnitude = -magnitude
+	}
+	return magnitude.AppendText(dst)
+}
+
+func (b *Int64) UnmarshalJSON(input []byte) error {
+	if !isString(input) {
+		return errNonString(int64T)
+	}
+	return wrapTypeError(b.UnmarshalText(input[1:len(input)-1]), int64T)
+}
+
+func (b *Int64) UnmarshalText(input []byte) error {
+	negative := len(input) > 0 && input[0] == '-'
+	limit := Uint64(1<<63 - 1)
+	if negative {
+		input = input[1:]
+		if len(input) == 0 {
+			return ErrEmptyNumber
+		}
+		limit++
+	}
+	var magnitude Uint64
+	err := magnitude.UnmarshalText(input)
+	if magnitude > limit || errors.Is(err, ErrUint64Range) {
+		return ErrInt64Range
+	}
+	if err != nil {
+		return err
+	}
+	if negative {
+		magnitude = -magnitude
+	}
+	*b = Int64(magnitude)
+	return nil
 }
 
 // Uint64 marshals/unmarshals as a JSON string with 0x prefix.
@@ -121,6 +262,11 @@ func (b Uint64) MarshalText() ([]byte, error) {
 	copy(buf, `0x`)
 	buf = strconv.AppendUint(buf, uint64(b), 16)
 	return buf, nil
+}
+
+// AppendText implements encoding.TextAppender (alloc-free MarshalText).
+func (b Uint64) AppendText(dst []byte) ([]byte, error) {
+	return strconv.AppendUint(append(dst, `0x`...), uint64(b), 16), nil
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -159,7 +305,7 @@ func (b Uint64) String() string {
 }
 
 func (b Uint64) Uint64() uint64 {
-	return (uint64)(b)
+	return uint64(b)
 }
 
 // Uint16 marshals/unmarshals as a JSON string with 0x prefix.
@@ -299,6 +445,11 @@ func (b Uint) MarshalText() ([]byte, error) {
 	return Uint64(b).MarshalText()
 }
 
+// AppendText implements encoding.TextAppender (alloc-free MarshalText).
+func (b Uint) AppendText(dst []byte) ([]byte, error) {
+	return Uint64(b).AppendText(dst)
+}
+
 // UnmarshalJSON implements json.Unmarshaler.
 func (b *Uint) UnmarshalJSON(input []byte) error {
 	if !isString(input) {
@@ -352,8 +503,7 @@ func wrapTypeError(err error, typ reflect.Type) error {
 	//if _, ok := err.(*decError); ok {
 	//	return &json.UnmarshalTypeError{Value: err.Error(), Type: typ}
 	//}
-	var dec *decError
-	if errors.As(err, &dec) {
+	if _, ok := errors.AsType[*decError](err); ok {
 		return &json.UnmarshalTypeError{Value: err.Error(), Type: typ}
 	}
 	return err

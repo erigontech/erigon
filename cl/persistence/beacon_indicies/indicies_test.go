@@ -17,23 +17,41 @@
 package beacon_indicies
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"math/rand"
 	"testing"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
+
+type errorCursor struct {
+	err error
+}
+
+func (c errorCursor) First() ([]byte, []byte, error)           { return nil, nil, nil }
+func (c errorCursor) Seek([]byte) ([]byte, []byte, error)      { return nil, nil, nil }
+func (c errorCursor) SeekExact([]byte) ([]byte, []byte, error) { return nil, nil, nil }
+func (c errorCursor) Next() ([]byte, []byte, error)            { return nil, nil, c.err }
+func (c errorCursor) Prev() ([]byte, []byte, error)            { return nil, nil, nil }
+func (c errorCursor) Last() ([]byte, []byte, error)            { return nil, nil, nil }
+func (c errorCursor) Current() ([]byte, []byte, error)         { return nil, nil, nil }
+func (c errorCursor) Close()                                   {}
 
 func setupTestDB(t *testing.T) kv.RwDB {
 	// Create an in-memory SQLite DB for testing purposes
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	return db
 }
 
@@ -49,7 +67,7 @@ func TestWriteBlockRoot(t *testing.T) {
 	block.Block.Slot = 56
 	block.EncodingSizeSSZ()
 
-	require.NoError(t, WriteBeaconBlockHeaderAndIndicies(context.Background(), tx, block.SignedBeaconBlockHeader(), false))
+	require.NoError(t, WriteBeaconBlockHeaderAndIndicies(tx, block.SignedBeaconBlockHeader(), false))
 
 	// Try to retrieve the block's slot by its blockRoot and verify
 	blockRoot, err := block.Block.HashSSZ()
@@ -63,12 +81,40 @@ func TestWriteBlockRoot(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, common.Hash{}, canonicalRoot)
 
-	err = MarkRootCanonical(context.Background(), tx, *retrievedSlot, blockRoot)
+	err = MarkRootCanonical(tx, *retrievedSlot, blockRoot)
 	require.NoError(t, err)
 
 	canonicalRoot, err = ReadCanonicalBlockRoot(tx, *retrievedSlot)
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(blockRoot), canonicalRoot)
+}
+
+func TestWriteBeaconBlockStoresCompleteZstdFrame(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	block.Block.Slot = 42
+	block.EncodingSizeSSZ()
+
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	require.NoError(t, WriteBeaconBlock(tx, block))
+
+	stored, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, blockRoot))
+	require.NoError(t, err)
+	require.NotEmpty(t, stored)
+
+	dec, err := zstd.NewReader(nil)
+	require.NoError(t, err)
+	defer dec.Close()
+	// DecodeAll reads the whole frame to EOF, so it fails on the unterminated frame
+	// a Flush()-only encoder leaves behind — pinning that WriteBeaconBlock closes it.
+	_, err = dec.DecodeAll(stored, nil)
+	require.NoError(t, err)
 }
 
 func TestReadParentBlockRoot(t *testing.T) {
@@ -85,13 +131,13 @@ func TestReadParentBlockRoot(t *testing.T) {
 	block.Block.ParentRoot = mockParentRoot
 	block.EncodingSizeSSZ()
 
-	require.NoError(t, WriteBeaconBlockHeaderAndIndicies(context.Background(), tx, block.SignedBeaconBlockHeader(), false))
+	require.NoError(t, WriteBeaconBlockHeaderAndIndicies(tx, block.SignedBeaconBlockHeader(), false))
 
 	// Try to retrieve the block's slot by its blockRoot and verify
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 
-	retrieveParentRoot, err := ReadParentBlockRoot(context.Background(), tx, blockRoot)
+	retrieveParentRoot, err := ReadParentBlockRoot(tx, blockRoot)
 	require.NoError(t, err)
 	require.Equal(t, mockParentRoot, retrieveParentRoot)
 }
@@ -110,7 +156,7 @@ func TestTruncateCanonicalChain(t *testing.T) {
 	block.Block.ParentRoot = mockParentRoot
 	block.EncodingSizeSSZ()
 
-	require.NoError(t, WriteBeaconBlockHeaderAndIndicies(context.Background(), tx, block.SignedBeaconBlockHeader(), true))
+	require.NoError(t, WriteBeaconBlockHeaderAndIndicies(tx, block.SignedBeaconBlockHeader(), true))
 
 	// Try to retrieve the block's slot by its blockRoot and verify
 	blockRoot, err := block.Block.HashSSZ()
@@ -120,11 +166,36 @@ func TestTruncateCanonicalChain(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(blockRoot), canonicalRoot)
 
-	require.NoError(t, TruncateCanonicalChain(context.Background(), tx, 0))
+	require.NoError(t, TruncateCanonicalChain(tx, 0))
 
 	canonicalRoot, err = ReadCanonicalBlockRoot(tx, block.Block.Slot)
 	require.NoError(t, err)
 	require.Equal(t, common.Hash{}, canonicalRoot)
+}
+
+func TestReadCanonicalHead(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	slot, root, err := ReadCanonicalHead(tx)
+	require.NoError(t, err)
+	require.Zero(t, slot)
+	require.Equal(t, common.Hash{}, root)
+
+	root10 := common.Hash{0x10}
+	root12 := common.Hash{0x12}
+	root11 := common.Hash{0x11}
+	require.NoError(t, MarkRootCanonical(tx, 10, root10))
+	require.NoError(t, MarkRootCanonical(tx, 12, root12))
+	require.NoError(t, MarkRootCanonical(tx, 11, root11))
+
+	slot, root, err = ReadCanonicalHead(tx)
+	require.NoError(t, err)
+	require.Equal(t, uint64(12), slot)
+	require.Equal(t, root12, root)
 }
 
 func TestReadBeaconBlockHeader(t *testing.T) {
@@ -146,13 +217,13 @@ func TestReadBeaconBlockHeader(t *testing.T) {
 	canonical := true
 	block.EncodingSizeSSZ()
 
-	require.NoError(t, WriteBeaconBlockHeaderAndIndicies(context.Background(), tx, block.SignedBeaconBlockHeader(), canonical))
+	require.NoError(t, WriteBeaconBlockHeaderAndIndicies(tx, block.SignedBeaconBlockHeader(), canonical))
 
 	// Try to retrieve the block's slot by its blockRoot and verify
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 
-	header, isCanonical, err := ReadSignedHeaderByBlockRoot(context.Background(), tx, blockRoot)
+	header, isCanonical, err := ReadSignedHeaderByBlockRoot(tx, blockRoot)
 	require.NoError(t, err)
 	require.Equal(t, isCanonical, canonical)
 	require.NotNil(t, header)
@@ -161,7 +232,6 @@ func TestReadBeaconBlockHeader(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, headerRoot, blockRoot)
-
 }
 
 func TestWriteExecutionBlockNumber(t *testing.T) {
@@ -219,12 +289,12 @@ func TestPruneBlocksRemovesAllBlocksBeforeSlot(t *testing.T) {
 
 		root, err := block.Block.HashSSZ()
 		require.NoError(t, err)
-		require.NoError(t, WriteBeaconBlockAndIndicies(context.Background(), tx, block, false))
+		require.NoError(t, WriteBeaconBlockAndIndicies(tx, block, false))
 
 		blocks = append(blocks, storedBlock{slot: slot, root: root})
 	}
 
-	require.NoError(t, PruneBlocks(context.Background(), tx, 3))
+	require.NoError(t, PruneBlocks(tx, 3))
 
 	for _, block := range blocks {
 		body, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(block.slot, block.root))
@@ -234,5 +304,142 @@ func TestPruneBlocksRemovesAllBlocksBeforeSlot(t *testing.T) {
 			continue
 		}
 		require.NotEmpty(t, body)
+	}
+}
+
+func TestPruneBlocksLimitRemovesBoundedNumberOfBlocks(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	type storedBlock struct {
+		slot uint64
+		root common.Hash
+	}
+
+	var blocks []storedBlock
+	for _, slot := range []uint64{1, 2, 3, 4} {
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+		block.Block.Slot = slot
+		block.EncodingSizeSSZ()
+
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		require.NoError(t, WriteBeaconBlockAndIndicies(tx, block, false))
+
+		blocks = append(blocks, storedBlock{slot: slot, root: root})
+	}
+
+	deleted, hasMore, err := PruneBlocksLimit(tx, 4, 2)
+	require.NoError(t, err)
+	require.Equal(t, 2, deleted)
+	require.True(t, hasMore)
+
+	for _, block := range blocks {
+		body, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(block.slot, block.root))
+		require.NoError(t, err)
+		if block.slot < 3 {
+			require.Empty(t, body)
+			continue
+		}
+		require.NotEmpty(t, body)
+	}
+
+	deleted, hasMore, err = PruneBlocksLimit(tx, 4, 2)
+	require.NoError(t, err)
+	require.Equal(t, 1, deleted)
+	require.False(t, hasMore)
+}
+
+func TestPruneBlocksLimitExactLimitHasNoMore(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	for _, slot := range []uint64{1, 2} {
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+		block.Block.Slot = slot
+		block.EncodingSizeSSZ()
+		require.NoError(t, WriteBeaconBlockAndIndicies(tx, block, false))
+	}
+
+	deleted, hasMore, err := PruneBlocksLimit(tx, 3, 2)
+	require.NoError(t, err)
+	require.Equal(t, 2, deleted)
+	require.False(t, hasMore)
+}
+
+func TestHasMorePrunableBeaconBlocksReturnsCursorError(t *testing.T) {
+	wantErr := errors.New("cursor failed")
+
+	hasMore, err := hasMorePrunableBeaconBlocks(errorCursor{err: wantErr}, 10)
+
+	require.False(t, hasMore)
+	require.ErrorIs(t, err, wantErr)
+}
+
+// See zstdWriterPool for why the output has to stay byte-identical.
+func TestWriteBeaconBlockMatchesReferenceEncoderOptions(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	block.Block.Slot = 42
+	block.EncodingSizeSSZ()
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	require.NoError(t, WriteBeaconBlock(tx, block))
+	stored, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, blockRoot))
+	require.NoError(t, err)
+
+	var want bytes.Buffer
+	enc, err := zstd.NewWriter(&want, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
+	require.NoError(t, err)
+	_, err = snapshot_format.WriteBlockForSnapshot(enc, block, nil)
+	require.NoError(t, err)
+	require.NoError(t, enc.Close())
+
+	require.Equal(t, want.Bytes(), stored)
+}
+
+// Window and history options only start to change the output once a payload crosses
+// the 128KiB block size, which a single beacon block stays well below.
+func TestZstdWriterPoolMatchesReferenceEncoderOptionsOnLargePayload(t *testing.T) {
+	payload := make([]byte, 4<<20)
+	r := rand.New(rand.NewSource(1))
+	for i := range payload {
+		if i%23 == 0 {
+			payload[i] = byte(r.Intn(256))
+		} else {
+			payload[i] = byte(i % 251)
+		}
+	}
+
+	var want bytes.Buffer
+	ref, err := zstd.NewWriter(&want, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
+	require.NoError(t, err)
+	_, err = ref.Write(payload)
+	require.NoError(t, err)
+	require.NoError(t, ref.Close())
+
+	// Twice, so a pooled encoder also has to match after reuse.
+	for range 2 {
+		var got bytes.Buffer
+		enc := getZstdWriter(&got)
+		_, err = enc.Write(payload)
+		require.NoError(t, err)
+		require.NoError(t, enc.Close())
+		putZstdWriter(enc)
+		require.Equal(t, want.Bytes(), got.Bytes())
 	}
 }

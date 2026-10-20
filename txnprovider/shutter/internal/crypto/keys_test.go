@@ -75,7 +75,7 @@ func TestEonPublicKeyShare(t *testing.T) {
 		&gammas2,
 	}
 	gammas := [][]*blst.P2{}
-	for i := 0; i < len(gammasAff); i++ {
+	for i := range gammasAff {
 		gammas = append(gammas, []*blst.P2{})
 		for j := 0; j < len(*gammasAff[i]); j++ {
 			gammas[i] = append(gammas[i], new(blst.P2))
@@ -203,7 +203,7 @@ func TestInverse(t *testing.T) {
 		new(big.Int).Sub(order, big.NewInt(2)),
 		new(big.Int).Sub(order, big.NewInt(1)),
 	}
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		x, err := rand.Int(rand.Reader, order)
 		require.NoError(t, err)
 		if x.Sign() == 0 {
@@ -382,14 +382,14 @@ func TestComputeEpochSecretKey(t *testing.T) {
 	epochID := ComputeEpochID([]byte("epoch1"))
 
 	ps := []*Polynomial{}
-	for i := 0; i < n; i++ {
+	for range n {
 		p, err := RandomPolynomial(rand.Reader, threshold-1)
 		require.NoError(t, err)
 		ps = append(ps, p)
 	}
 
 	epochSecretKeyShares := []*EpochSecretKeyShare{}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		vs := []*big.Int{}
 		for _, p := range ps {
 			v := p.EvalForKeyper(i)
@@ -414,17 +414,20 @@ func TestComputeEpochSecretKey(t *testing.T) {
 	epochSecretKey12, err := ComputeEpochSecretKey(
 		[]int{0, 1},
 		[]*EpochSecretKeyShare{epochSecretKeyShares[0], epochSecretKeyShares[1]},
-		threshold)
+		threshold,
+	)
 	require.NoError(t, err)
 	epochSecretKey13, err := ComputeEpochSecretKey(
 		[]int{0, 2},
 		[]*EpochSecretKeyShare{epochSecretKeyShares[0], epochSecretKeyShares[2]},
-		threshold)
+		threshold,
+	)
 	require.NoError(t, err)
 	epochSecretKey23, err := ComputeEpochSecretKey(
 		[]int{1, 2},
 		[]*EpochSecretKeyShare{epochSecretKeyShares[1], epochSecretKeyShares[2]},
-		threshold)
+		threshold,
+	)
 	require.NoError(t, err)
 
 	assert.True(t, epochSecretKey12.Equal(epochSecretKey13))
@@ -438,7 +441,7 @@ func TestFull(t *testing.T) {
 
 	ps := []*Polynomial{}
 	gammas := []*Gammas{}
-	for i := 0; i < n; i++ {
+	for range n {
 		p, err := RandomPolynomial(rand.Reader, threshold-1)
 		require.NoError(t, err)
 		ps = append(ps, p)
@@ -446,9 +449,9 @@ func TestFull(t *testing.T) {
 	}
 
 	eonSecretKeyShares := []*EonSecretKeyShare{}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		vs := []*big.Int{}
-		for j := 0; j < n; j++ {
+		for j := range n {
 			v := ps[j].EvalForKeyper(i)
 			vs = append(vs, v)
 		}
@@ -457,37 +460,40 @@ func TestFull(t *testing.T) {
 	}
 
 	eonPublicKeyShares := []*EonPublicKeyShare{}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		eonPublicKeyShare := ComputeEonPublicKeyShare(i, gammas)
 		eonPublicKeyShares = append(eonPublicKeyShares, eonPublicKeyShare)
 	}
 
 	epochSecretKeyShares := []*EpochSecretKeyShare{}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		epochSecretKeyShare := ComputeEpochSecretKeyShare(eonSecretKeyShares[i], epochID)
 		epochSecretKeyShares = append(epochSecretKeyShares, epochSecretKeyShare)
 	}
 
 	// verify (published) epoch sk shares
-	for i := 0; i < n; i++ {
+	for i := range n {
 		assert.True(t, VerifyEpochSecretKeyShare(epochSecretKeyShares[i], eonPublicKeyShares[i], epochID))
 	}
 
 	epochSecretKey, err := ComputeEpochSecretKey(
 		[]int{0, 1},
 		[]*EpochSecretKeyShare{epochSecretKeyShares[0], epochSecretKeyShares[1]},
-		threshold)
+		threshold,
+	)
 	require.NoError(t, err)
 
 	epochSecretKey13, err := ComputeEpochSecretKey(
 		[]int{0, 2},
 		[]*EpochSecretKeyShare{epochSecretKeyShares[0], epochSecretKeyShares[2]},
-		threshold)
+		threshold,
+	)
 	require.NoError(t, err)
 	epochSecretKey23, err := ComputeEpochSecretKey(
 		[]int{1, 2},
 		[]*EpochSecretKeyShare{epochSecretKeyShares[1], epochSecretKeyShares[2]},
-		threshold)
+		threshold,
+	)
 	require.NoError(t, err)
 	assert.True(t, epochSecretKey.Equal(epochSecretKey13))
 	assert.True(t, epochSecretKey.Equal(epochSecretKey23))

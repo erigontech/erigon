@@ -17,7 +17,7 @@
 package diaglib
 
 import (
-	"sort"
+	"slices"
 	"sync"
 	"time"
 
@@ -122,7 +122,6 @@ func peerStatisticsFromMsgUpdate(msg PeerStatisticMsgUpdate, prevValue any) Peer
 			ps.CapBytesOut[msg.MsgCap] += uint64(msg.Bytes)
 			ps.TypeBytesOut[msg.MsgType] += uint64(msg.Bytes)
 		}
-
 	}
 
 	return ps
@@ -150,13 +149,13 @@ func (p *PeerStats) getPeers() map[string]PeerStatistics {
 	p.peersInfo.Range(func(key, value any) bool {
 		loadedKey, ok := key.(string)
 		if !ok {
-			log.Debug("Failed to cast key to string", key)
+			log.Debug("Failed to cast key to string", "key", key)
 			return true
 		}
 
 		loadedValue, ok := value.(PeerStatistics)
 		if !ok {
-			log.Debug("Failed to cast value to PeerStatistics struct", value)
+			log.Debug("Failed to cast value to PeerStatistics struct", "value", value)
 			return true
 		}
 
@@ -214,8 +213,14 @@ func (p *PeerStats) getOldestUpdatedPeersWithSize(size int) []PeerUpdTime {
 		timeArray = append(timeArray, PeerUpdTime{k, v})
 	}
 
-	sort.Slice(timeArray, func(i, j int) bool {
-		return timeArray[i].Time.Before(timeArray[j].Time)
+	slices.SortFunc(timeArray, func(a, b PeerUpdTime) int {
+		if a.Time.Before(b.Time) {
+			return -1
+		}
+		if b.Time.Before(a.Time) {
+			return 1
+		}
+		return 0
 	})
 
 	if len(timeArray) < size {

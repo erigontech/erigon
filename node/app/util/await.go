@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"sync"
 )
 
@@ -143,12 +144,13 @@ func NewChannelGroup(waitContext context.Context) *ChannelGroup {
 		{
 			Dir:  reflect.SelectRecv,
 			Chan: reflect.ValueOf(mux.context.Done()),
-		}}
+		},
+	}
 
 	return mux
 }
 
-func (mux *ChannelGroup) Add(ichan interface{}) *ChannelGroup {
+func (mux *ChannelGroup) Add(ichan any) *ChannelGroup {
 	mux.mutex.Lock()
 	mux.pending = append(mux.pending, reflect.SelectCase{
 		Dir:  reflect.SelectRecv,
@@ -158,14 +160,14 @@ func (mux *ChannelGroup) Add(ichan interface{}) *ChannelGroup {
 	return mux
 }
 
-func (mux *ChannelGroup) Remove(ichan interface{}) *ChannelGroup {
+func (mux *ChannelGroup) Remove(ichan any) *ChannelGroup {
 	mux.mutex.Lock()
 	mux.pendingRemove = append(mux.pendingRemove, reflect.ValueOf(ichan))
 	mux.mutex.Unlock()
 	return mux
 }
 
-func (mux *ChannelGroup) Wait(chanFunc func(interface{}, interface{}, bool) (bool, bool), errorFunc func(error)) bool {
+func (mux *ChannelGroup) Wait(chanFunc func(any, any, bool) (bool, bool), errorFunc func(error)) bool {
 	if mux == nil {
 		return false
 	}
@@ -181,14 +183,7 @@ WAIT:
 		mux.pending = nil
 		var active []reflect.SelectCase
 		for _, a := range mux.active {
-			var remove bool
-			for _, r := range mux.pendingRemove {
-				if a.Chan == r {
-					remove = true
-					break
-				}
-			}
-
+			remove := slices.Contains(mux.pendingRemove, a.Chan)
 			if !remove {
 				active = append(active, a)
 			} else {

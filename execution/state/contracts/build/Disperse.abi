@@ -1,0 +1,1 @@
+[{"inputs":[{"internalType":"address[]","name":"recipients","type":"address[]"},{"internalType":"uint256[]","name":"values","type":"uint256[]"}],"name":"disperseEther","outputs":[],"stateMutability":"payable","type":"function"}]

@@ -28,11 +28,13 @@ import (
 	"io"
 	"math/rand"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -116,8 +118,8 @@ func TestDecodeEmptyTypedTx(t *testing.T) {
 	t.Parallel()
 	input := []byte{0x80}
 	_, err := DecodeTransaction(input)
-	if !errors.Is(err, rlp.EOL) {
-		t.Fatal("wrong error:", err)
+	if err == nil || errors.Is(err, rlp.EOL) {
+		t.Fatal("expected a decode error, not EOL:", err)
 	}
 }
 
@@ -221,7 +223,6 @@ func TestEIP2718TransactionSigHash(t *testing.T) {
 
 // This test checks signature operations on access list transactions.
 func TestEIP2930Signer(t *testing.T) {
-
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		keyAddr = crypto.PubkeyToAddress(key.PublicKey)
@@ -329,6 +330,7 @@ func TestEIP2718TransactionEncode(t *testing.T) {
 		assert.False(t, TypedTransactionMarshalledAsRlpString(have))
 	}
 }
+
 func TestEIP1559TransactionEncode(t *testing.T) {
 	t.Parallel()
 	{
@@ -401,7 +403,7 @@ func TestTransactionPriceNonceSort(t *testing.T) {
 	t.Parallel()
 	// Generate a batch of accounts to start with
 	keys := make([]*ecdsa.PrivateKey, 25)
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		keys[i], _ = crypto.GenerateKey()
 	}
 	signer := LatestSignerForChainID(nil)
@@ -411,7 +413,7 @@ func TestTransactionPriceNonceSort(t *testing.T) {
 	groups := TransactionsGroupedBySender{}
 	for start, key := range keys {
 		addr := crypto.PubkeyToAddress(key.PublicKey)
-		for i := 0; i < 25; i++ {
+		for i := range 25 {
 			tx, _ := SignTx(NewTransaction(uint64(start+i), common.Address{}, uint256.NewInt(100), 100, uint256.NewInt(uint64(start+i)), nil), *signer, key)
 
 			j, ok := idx[addr]
@@ -438,7 +440,7 @@ func TestTransactionCoding(t *testing.T) {
 		recipient = common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")
 		accesses  = AccessList{{Address: addr, StorageKeys: []common.Hash{{0}}}}
 	)
-	for i := uint64(0); i < 500; i++ {
+	for i := range uint64(500) {
 		var txdata Transaction
 		switch i % 5 {
 		case 0:
@@ -604,8 +606,10 @@ func assertEqualBlobWrapper(orig *BlobTxWrapper, cpy *BlobTxWrapper) error {
 
 const N = 50
 
-var dummyBlobTxs = [N]*BlobTx{}
-var dummyBlobWrapperTxs = [N]*BlobTxWrapper{}
+var (
+	dummyBlobTxs        = [N]*BlobTx{}
+	dummyBlobWrapperTxs = [N]*BlobTxWrapper{}
+)
 
 func randIntInRange(_min, _max int) int {
 	return (rand.Intn(_max-_min) + _min)
@@ -613,7 +617,7 @@ func randIntInRange(_min, _max int) int {
 
 func randAddr() *common.Address {
 	var a common.Address
-	for j := 0; j < 20; j++ {
+	for j := range 20 {
 		a[j] = byte(rand.Intn(255))
 	}
 	return &a
@@ -621,7 +625,7 @@ func randAddr() *common.Address {
 
 func randHash() common.Hash {
 	var h common.Hash
-	for i := 0; i < 32; i++ {
+	for i := range 32 {
 		h[i] = byte(rand.Intn(255))
 	}
 	return h
@@ -629,7 +633,7 @@ func randHash() common.Hash {
 
 func randHashes(n int) []common.Hash {
 	h := make([]common.Hash, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		h[i] = randHash()
 	}
 	return h
@@ -638,7 +642,7 @@ func randHashes(n int) []common.Hash {
 func randAccessList() AccessList {
 	size := randIntInRange(4, 10)
 	var result AccessList
-	for i := 0; i < size; i++ {
+	for range size {
 		var tup AccessTuple
 
 		tup.Address = *randAddr()
@@ -657,22 +661,23 @@ func randData() []byte {
 }
 
 func newRandBlobTx() *BlobTx {
-	stx := &BlobTx{DynamicFeeTransaction: DynamicFeeTransaction{
-		CommonTx: CommonTx{
-			Nonce:    rand.Uint64(),
-			GasLimit: rand.Uint64(),
-			To:       randAddr(),
-			Value:    *uint256.NewInt(rand.Uint64()),
-			Data:     randData(),
-			V:        uint256.Int{},
-			R:        *uint256.NewInt(rand.Uint64()),
-			S:        *uint256.NewInt(rand.Uint64()),
+	stx := &BlobTx{
+		DynamicFeeTransaction: DynamicFeeTransaction{
+			CommonTx: CommonTx{
+				Nonce:    rand.Uint64(),
+				GasLimit: rand.Uint64(),
+				To:       randAddr(),
+				Value:    *uint256.NewInt(rand.Uint64()),
+				Data:     randData(),
+				V:        uint256.Int{},
+				R:        *uint256.NewInt(rand.Uint64()),
+				S:        *uint256.NewInt(rand.Uint64()),
+			},
+			ChainID:    *uint256.NewInt(rand.Uint64()),
+			TipCap:     *uint256.NewInt(rand.Uint64()),
+			FeeCap:     *uint256.NewInt(rand.Uint64()),
+			AccessList: randAccessList(),
 		},
-		ChainID:    *uint256.NewInt(rand.Uint64()),
-		TipCap:     *uint256.NewInt(rand.Uint64()),
-		FeeCap:     *uint256.NewInt(rand.Uint64()),
-		AccessList: randAccessList(),
-	},
 		MaxFeePerBlobGas:    *uint256.NewInt(rand.Uint64()),
 		BlobVersionedHashes: randHashes(randIntInRange(1, 6)),
 	}
@@ -685,9 +690,9 @@ func randByte() byte {
 
 func newRandCommitments(size int) BlobKzgs {
 	var result BlobKzgs
-	for i := 0; i < size; i++ {
+	for range size {
 		var arr [LEN_48]byte
-		for j := 0; j < LEN_48; j++ {
+		for j := range LEN_48 {
 			arr[j] = randByte()
 		}
 		result = append(result, arr)
@@ -697,9 +702,9 @@ func newRandCommitments(size int) BlobKzgs {
 
 func newRandProofs(size int) KZGProofs {
 	var result KZGProofs
-	for i := 0; i < size; i++ {
+	for range size {
 		var arr [LEN_48]byte
-		for j := 0; j < LEN_48; j++ {
+		for j := range LEN_48 {
 			arr[j] = randByte()
 		}
 		result = append(result, arr)
@@ -709,9 +714,9 @@ func newRandProofs(size int) KZGProofs {
 
 func newRandBlobs(size int) Blobs {
 	var result Blobs
-	for i := 0; i < size; i++ {
+	for range size {
 		var arr [params.BlobSize]byte
-		for j := 0; j < params.BlobSize; j++ {
+		for j := range params.BlobSize {
 			arr[j] = randByte()
 		}
 		result = append(result, arr)
@@ -731,7 +736,7 @@ func newRandBlobWrapper() *BlobTxWrapper {
 }
 
 func populateBlobTxs() {
-	for i := 0; i < N; i++ {
+	for i := range N {
 		dummyBlobTxs[i] = newRandBlobTx()
 	}
 }
@@ -739,7 +744,7 @@ func populateBlobTxs() {
 func TestBlobTxEncodeDecode(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	populateBlobTxs()
-	for i := 0; i < N; i++ {
+	for i := range N {
 		// printSTX(dummyBlobTxs[i])
 
 		tx, err := encodeDecodeBinary(dummyBlobTxs[i])
@@ -775,7 +780,6 @@ func TestShortUnwrap(t *testing.T) {
 		return
 	}
 	blobTx, err := DecodeTransaction(shortRlp)
-
 	if err != nil {
 		t.Errorf("short rlp decoding failed : %v", err)
 	}
@@ -786,7 +790,9 @@ func TestShortUnwrap(t *testing.T) {
 		t.Errorf("long rlp decoding failed: %v", err)
 	}
 
-	assertEqual(blobTx, &wrappedBlobTx.Tx)
+	if err := assertEqual(blobTx, &wrappedBlobTx.Tx); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestV1BlobTxnUnwrap(t *testing.T) {
@@ -800,7 +806,6 @@ func TestV1BlobTxnUnwrap(t *testing.T) {
 		return
 	}
 	blobTx, err := DecodeTransaction(shortRlp)
-
 	if err != nil {
 		t.Errorf("short rlp decoding failed : %v", err)
 	}
@@ -811,7 +816,9 @@ func TestV1BlobTxnUnwrap(t *testing.T) {
 		t.Errorf("long rlp decoding failed: %v", err)
 	}
 
-	assertEqual(blobTx, &wrappedBlobTx.Tx)
+	if err := assertEqual(blobTx, &wrappedBlobTx.Tx); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestTrailingBytes(t *testing.T) {
@@ -854,5 +861,346 @@ func TestTrailingBytes(t *testing.T) {
 	_, err = DecodeTransactions(transactions)
 	if err == nil {
 		panic("Malicious transaction has not errored!") // @audit this panic is occurs
+	}
+}
+
+// Error text is matched verbatim by eest's ErigonExceptionMapper (TYPE_3/TYPE_4_TX_CONTRACT_CREATION).
+func TestTypedTxEmptyToErrorMessage(t *testing.T) {
+	t.Parallel()
+	// list of: chainID=1, nonce=0, tip=0, feeCap=0, gas=0, to=""
+	payload := []byte{0xc6, 0x01, 0x80, 0x80, 0x80, 0x80, 0x80}
+
+	for _, tc := range []struct {
+		name string
+		txn  Transaction
+	}{
+		{"blob", &BlobTx{}},
+		{"setCode", &SetCodeTransaction{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.txn.DecodeRLP(rlp.NewStream(bytes.NewReader(payload), 0))
+			assert.EqualError(t, err, "wrong size for To: 0")
+		})
+	}
+}
+
+// Typed-transaction JSON that omits a field the decoder dereferences must be
+// rejected, not panic.
+func TestUnmarshalTransactionFromJSONMissingFields(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		json string
+	}{
+		{"dynamicFee without maxFeePerGas", `{"type":"0x2","chainId":"0x1","nonce":"0x1","maxPriorityFeePerGas":"0x1","gas":"0x5208","value":"0x0","input":"0x","v":"0x0","r":"0x0","s":"0x0"}`},
+		{"dynamicFee without maxPriorityFeePerGas", `{"type":"0x2","chainId":"0x1","nonce":"0x1","maxFeePerGas":"0x1","gas":"0x5208","value":"0x0","input":"0x","v":"0x0","r":"0x0","s":"0x0"}`},
+		{"blob without maxFeePerGas", `{"type":"0x3","chainId":"0x1","nonce":"0x1","maxPriorityFeePerGas":"0x1","gas":"0x5208","value":"0x0","input":"0x","maxFeePerBlobGas":"0x1","v":"0x0","r":"0x0","s":"0x0"}`},
+		{"blob without maxPriorityFeePerGas", `{"type":"0x3","chainId":"0x1","nonce":"0x1","maxFeePerGas":"0x1","gas":"0x5208","value":"0x0","input":"0x","maxFeePerBlobGas":"0x1","v":"0x0","r":"0x0","s":"0x0"}`},
+		{"setCode without authorizationList", `{"type":"0x4","chainId":"0x1","nonce":"0x1","maxFeePerGas":"0x1","maxPriorityFeePerGas":"0x1","gas":"0x5208","value":"0x0","input":"0x","v":"0x0","r":"0x0","s":"0x0"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := UnmarshalTransactionFromJSON([]byte(tc.json))
+			assert.Error(t, err)
+		})
+	}
+}
+
+// A type-2 transaction carries no 'gasPrice' field, so its absence must not be
+// an error.
+func TestUnmarshalDynamicFeeTransactionFromJSONWithoutGasPrice(t *testing.T) {
+	t.Parallel()
+	const txJSON = `{"type":"0x2","chainId":"0x1","nonce":"0x1","maxFeePerGas":"0x3b9aca00","maxPriorityFeePerGas":"0x1","gas":"0x5208","value":"0x0","input":"0x","v":"0x0","r":"0x0","s":"0x0"}`
+	txn, err := UnmarshalTransactionFromJSON([]byte(txJSON))
+	require.NoError(t, err)
+	assert.Equal(t, uint256.NewInt(1_000_000_000), txn.GetFeeCap())
+}
+
+func TestAATotalGasLimitOverflow(t *testing.T) {
+	t.Parallel()
+
+	tx := &AccountAbstractionTransaction{ValidationGasLimit: 1, PaymasterValidationGasLimit: 2, PostOpGasLimit: 4}
+	tx.GasLimit = 8
+	total, ok := tx.TotalGasLimit(16)
+	assert.True(t, ok)
+	assert.Equal(t, uint64(31), total)
+
+	overflowing := &AccountAbstractionTransaction{ValidationGasLimit: ^uint64(0), PaymasterValidationGasLimit: 1}
+	_, ok = overflowing.TotalGasLimit(params.TxAAGas)
+	assert.False(t, ok)
+	assert.Equal(t, ^uint64(0), overflowing.GetGasLimit())
+}
+
+// decodeAccessList backs every tuple's StorageKeys with one arena, so a tuple's
+// slice must be capped: appending to it may not reach the next tuple's keys.
+func TestDecodeAccessListKeysDoNotAlias(t *testing.T) {
+	t.Parallel()
+	al := AccessList{
+		{Address: common.Address{1}, StorageKeys: []common.Hash{{0xaa}}},
+		{Address: common.Address{2}, StorageKeys: []common.Hash{{0xbb}}},
+	}
+	var buf bytes.Buffer
+	if err := rlp.EncodeListPrefix(accessListSize(al), &buf, make([]byte, 9)); err != nil {
+		t.Fatal(err)
+	}
+	if err := encodeAccessList(al, &buf, make([]byte, 33)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodeALFrom(buf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d tuples, want 2", len(got))
+	}
+	got[0].StorageKeys = append(got[0].StorageKeys, common.Hash{0xcc})
+	if got[1].StorageKeys[0] != (common.Hash{0xbb}) {
+		t.Fatalf("append to tuple 0 overwrote tuple 1: %x", got[1].StorageKeys[0])
+	}
+}
+
+// decodeALFrom decodes b into a fresh AccessList, returning the pooled stream as
+// NewBytesStream requires.
+func decodeALFrom(b []byte) (AccessList, error) {
+	s := rlp.NewBytesStream(b)
+	defer rlp.PutStream(s)
+	var al AccessList
+	err := decodeAccessList(&al, s)
+	return al, err
+}
+
+func encodeAL(t *testing.T, al AccessList) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := rlp.EncodeListPrefix(accessListSize(al), &buf, make([]byte, 9)); err != nil {
+		t.Fatal(err)
+	}
+	if err := encodeAccessList(al, &buf, make([]byte, 33)); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func sampleAL(tuples, keysPer int) AccessList {
+	al := make(AccessList, tuples)
+	for i := range al {
+		al[i].Address = common.Address{byte(i + 1)}
+		al[i].StorageKeys = make([]common.Hash, keysPer)
+		for j := range al[i].StorageKeys {
+			al[i].StorageKeys[j] = common.Hash{byte(i + 1), byte(j + 1)}
+		}
+	}
+	return al
+}
+
+// decodeAccessList sizes both slices from countAccessList, so a wrong count
+// silently costs allocations. Pin it against the shapes it must get right.
+func TestCountAccessList(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct{ tuples, keysPer int }{{0, 0}, {1, 0}, {1, 1}, {3, 2}, {2, 60}, {40, 1}} {
+		t.Run(fmt.Sprintf("%dx%d", c.tuples, c.keysPer), func(t *testing.T) {
+			enc := encodeAL(t, sampleAL(c.tuples, c.keysPer))
+			s := rlp.NewBytesStream(enc)
+			defer rlp.PutStream(s)
+			l, err := s.List()
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw := s.Peek()
+			if uint64(len(raw)) < l {
+				t.Fatalf("Peek gave %d bytes, want at least %d", len(raw), l)
+			}
+			gotT, gotK := countAccessList(raw[:l])
+			if gotT != c.tuples || gotK != c.tuples*c.keysPer {
+				t.Errorf("counted %d tuples %d keys, want %d and %d",
+					gotT, gotK, c.tuples, c.tuples*c.keysPer)
+			}
+		})
+	}
+}
+
+// countAccessList reads attacker-controlled bytes ahead of the decoder, so it
+// must never panic and must never stop the decoder reporting the real error.
+func TestDecodeAccessListMalformed(t *testing.T) {
+	t.Parallel()
+	enc := encodeAL(t, sampleAL(3, 2))
+	for i := range enc {
+		// A proper prefix is never a complete access list, so the pre-walk must
+		// not let one decode.
+		if _, err := decodeALFrom(enc[:i]); err == nil {
+			t.Errorf("truncation to %d bytes decoded without error", i)
+		}
+		for _, b := range []byte{0x00, 0x7f, 0x80, 0xb7, 0xbf, 0xf7, 0xff} {
+			corrupt := bytes.Clone(enc)
+			corrupt[i] = b
+			// A flipped byte can still spell a valid, different list, so only
+			// the absence of a panic is pinned here.
+			_, _ = decodeALFrom(corrupt)
+		}
+	}
+}
+
+// A stream that is not slice-backed cannot be walked ahead, so decodeAccessList
+// must fall back to growing rather than mis-decoding.
+func TestDecodeAccessListNonSliceReader(t *testing.T) {
+	t.Parallel()
+	want := sampleAL(3, 2)
+	enc := encodeAL(t, want)
+	var got AccessList
+	if err := decodeAccessList(&got, rlp.NewStream(bytes.NewReader(enc), 0)); err != nil {
+		t.Fatal(err)
+	}
+	require.Equal(t, want, got)
+}
+
+// countAccessList sizes the decode, so its results must stay bounded by the
+// bytes that produced them: a tuple needs at least 23 and a key at least 33.
+// rlp.Prefix checks a length against the whole payload, not against the
+// enclosing tuple, so overlapping tuples could otherwise count bytes repeatedly.
+func TestCountAccessListNoAmplification(t *testing.T) {
+	t.Parallel()
+	const units = 2000
+	raw := make([]byte, 0, units*23)
+	for range units {
+		u := make([]byte, 23)
+		u[0] = 0xd6  // list, payload 22: the tuple spans [1,23)
+		u[22] = 0xf8 // at tuplePos+21: long list, its length byte is the next u[0]
+		raw = append(raw, u...)
+	}
+	tuples, keys := countAccessList(raw)
+	assert.LessOrEqual(t, tuples, len(raw)/23, "more tuples than fit in the input")
+	assert.LessOrEqual(t, keys, len(raw)/33, "more keys than fit in the input")
+}
+
+// decodeAccessList replaces rather than appends, on both the walked and the
+// grown path.
+func TestDecodeAccessListReplacesExisting(t *testing.T) {
+	t.Parallel()
+	enc := encodeAL(t, sampleAL(1, 1))
+	stale := AccessList{{Address: common.Address{0xff}, StorageKeys: []common.Hash{{0xff}}}}
+	viaSlice := slices.Clone(stale)
+	viaSliceStream := rlp.NewBytesStream(enc)
+	require.NoError(t, decodeAccessList(&viaSlice, viaSliceStream))
+	rlp.PutStream(viaSliceStream)
+	viaReader := slices.Clone(stale)
+	require.NoError(t, decodeAccessList(&viaReader, rlp.NewStream(bytes.NewReader(enc), 0)))
+	require.Equal(t, viaSlice, viaReader)
+	require.Len(t, viaSlice, 1)
+}
+
+// Decoding a whole typed txn goes through the typed decoder's
+// tx.AccessList = AccessList{}, so an absent access list lands non-nil and
+// marshals as []. TestDecodeAccessListEmptyStaysNil starts from a nil slice
+// and pins the other branch; both shapes reach RPC, so both are pinned.
+func TestDecodeAccessListEmptyThroughTypedTxn(t *testing.T) {
+	t.Parallel()
+	to := common.Address{0x01}
+	txn := &AccessListTx{
+		LegacyTx: LegacyTx{
+			CommonTx: CommonTx{
+				Nonce: 1, GasLimit: 21000, To: &to, Value: *uint256.NewInt(1),
+				V: *uint256.NewInt(1), R: *uint256.NewInt(2), S: *uint256.NewInt(3),
+			},
+			GasPrice: *uint256.NewInt(1),
+		},
+		ChainID: *uint256.NewInt(1),
+	}
+	var buf bytes.Buffer
+	require.NoError(t, txn.EncodeRLP(&buf))
+
+	decoded, err := DecodeTransaction(buf.Bytes())
+	require.NoError(t, err)
+
+	al := decoded.GetAccessList()
+	require.NotNil(t, al, "the typed decoder preinitializes, so an absent list is empty, not nil")
+	require.Empty(t, al)
+	encoded, err := json.Marshal(&al)
+	require.NoError(t, err)
+	require.JSONEq(t, "[]", string(encoded))
+}
+
+// A typed txn with no access list decodes to a nil slice, which rpc/ethapi
+// marshals as null. A non-nil empty slice would silently move that to [].
+func TestDecodeAccessListEmptyStaysNil(t *testing.T) {
+	t.Parallel()
+	al, err := decodeALFrom(encodeAL(t, AccessList{}))
+	require.NoError(t, err)
+	require.Nil(t, al)
+	encoded, err := json.Marshal(&al)
+	require.NoError(t, err)
+	require.JSONEq(t, "null", string(encoded))
+}
+
+func TestTransactionHashFromEncoding(t *testing.T) {
+	t.Parallel()
+	to := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	dynFee := func() DynamicFeeTransaction { // a fresh value each time: the hash cache must not be copied
+		return DynamicFeeTransaction{
+			CommonTx: CommonTx{Nonce: 1, To: &to, GasLimit: 21000, Data: []byte("abc")},
+			ChainID:  u256.Num1,
+			TipCap:   *uint256.NewInt(1),
+			FeeCap:   *uint256.NewInt(2),
+		}
+	}
+	for _, txn := range []Transaction{
+		rightvrsTx,
+		signedEip2718Tx,
+		signedDynFeeTx,
+		&BlobTx{DynamicFeeTransaction: dynFee(), MaxFeePerBlobGas: *uint256.NewInt(3), BlobVersionedHashes: []common.Hash{{0x01}}},
+		&SetCodeTransaction{DynamicFeeTransaction: dynFee(), Authorizations: []Authorization{{ChainID: u256.Num1, Address: to, Nonce: 2}}},
+		&AccountAbstractionTransaction{ChainID: uint256.NewInt(1), NonceKey: uint256.NewInt(0), Nonce: 1, Tip: uint256.NewInt(1), FeeCap: uint256.NewInt(2), BuilderFee: uint256.NewInt(0), GasLimit: 21000},
+	} {
+		var binary bytes.Buffer
+		require.NoError(t, txn.MarshalBinary(&binary))
+		wrapped, err := rlp.EncodeToBytes(txn)
+		require.NoError(t, err)
+		for _, enc := range [][]byte{binary.Bytes(), wrapped} {
+			got, err := TransactionHashFromEncoding(enc)
+			require.NoError(t, err)
+			require.Equal(t, txn.Hash(), got, "type %d, encoding %x", txn.Type(), enc[:1])
+			bin, err := BinaryFromStoredTxn(enc)
+			require.NoError(t, err)
+			require.Equal(t, binary.Bytes(), bin, "type %d, encoding %x", txn.Type(), enc[:1])
+		}
+	}
+}
+
+// A stored record whose framing is not one transaction's is rejected, not handed out as one.
+func TestBinaryFromStoredTxnRejectsMalformed(t *testing.T) {
+	wrap := func(b []byte) []byte {
+		out := make([]byte, rlp.StringLen(b))
+		rlp.EncodeStringToBuf(b, out)
+		return out
+	}
+	binaryOf := func(txn Transaction) []byte {
+		var buf bytes.Buffer
+		require.NoError(t, txn.MarshalBinary(&buf))
+		return bytes.Clone(buf.Bytes())
+	}
+	legacyBinary, typedBinary := binaryOf(rightvrsTx), binaryOf(signedDynFeeTx)
+	// The trailing-byte cases must be a valid encoding plus one byte: anything shorter
+	// is already rejected on the field count, leaving the trailing checks untested.
+	withTrailing := func(b []byte) []byte { return append(bytes.Clone(b), 0x80) }
+
+	for name, stored := range map[string][]byte{
+		"empty":                  {},
+		"legacy empty list":      {0xc0},
+		"legacy not a list":      {0x01, 0x02},
+		"legacy trailing bytes":  withTrailing(legacyBinary),
+		"typed empty list":       wrap([]byte{0x02, 0xc0}),
+		"typed without fields":   wrap([]byte{0x02}),
+		"typed trailing bytes":   wrap(withTrailing(typedBinary)),
+		"wrapped trailing bytes": withTrailing(wrap(typedBinary)),
+		"wrapped empty":          {0x80},
+		"legacy one field":       {0xc1, 0x80},
+		"typed one field":        {0x02, 0xc1, 0x80},
+		"unknown type byte":      {0x7f, 0xc1, 0x80},
+		"non-canonical field":    {0xc2, 0x81, 0x00},
+		"wrapped one field":      {0x82, 0xc1, 0x80},
+		"legacy field count":     append([]byte{0xf8, 0x39}, bytes.Repeat([]byte{0x80}, 57)...),
+		"zero type byte":         append([]byte{0x00}, legacyBinary...),
+		"wrapped legacy list":    wrap(legacyBinary),
+	} {
+		_, err := BinaryFromStoredTxn(stored)
+		require.Error(t, err, name)
 	}
 }

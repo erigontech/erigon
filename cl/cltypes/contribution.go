@@ -25,8 +25,10 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-var _ ssz2.SizedObjectSSZ = (*ContributionAndProof)(nil)
-var _ ssz2.SizedObjectSSZ = (*Contribution)(nil)
+var (
+	_ ssz2.SizedObjectSSZ = (*ContributionAndProof)(nil)
+	_ ssz2.SizedObjectSSZ = (*Contribution)(nil)
+)
 
 /*
  * ContributionAndProof contains the index of the aggregator, the attestation
@@ -81,8 +83,7 @@ func (a *SignedContributionAndProof) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (a *SignedContributionAndProof) EncodingSizeSSZ() int {
-	return length.Bytes96 + a.Message.EncodingSizeSSZ()
-	// return 100 + a.Message.EncodingSizeSSZ()
+	return signedStaticSize(a.Message.EncodingSizeSSZ())
 }
 
 func (a *SignedContributionAndProof) HashSSZ() ([32]byte, error) {

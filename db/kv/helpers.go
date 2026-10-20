@@ -17,56 +17,22 @@
 package kv
 
 import (
+	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
 	"maps"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-	"unsafe"
-
-	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon/common/hexutil"
 
 	"github.com/erigontech/erigon/common"
 )
-
-// NewGatedRoDB wraps an RoDB so every View() call acquires gate.RLock() for
-// the duration of the tx. Purpose: serialize background read txs (e.g.
-// snapshot retirement reading chaindata) against a writer that briefly holds
-// gate.Lock() during commit. Without the gate, a concurrent reader pins the
-// MDBX freelist and prevents page reclamation at commit time.
-//
-// BeginRo is passed through ungated — gating open-ended Tx lifetimes has
-// ambiguous scope. Callers that need gating must use the View closure idiom.
-func NewGatedRoDB(inner RoDB, gate *sync.RWMutex) RoDB {
-	if gate == nil {
-		return inner
-	}
-	return &gatedRoDB{inner: inner, gate: gate}
-}
-
-type gatedRoDB struct {
-	inner RoDB
-	gate  *sync.RWMutex
-}
-
-func (g *gatedRoDB) Close()                                  { g.inner.Close() }
-func (g *gatedRoDB) BeginRo(ctx context.Context) (Tx, error) { return g.inner.BeginRo(ctx) }
-func (g *gatedRoDB) ReadOnly() bool                          { return g.inner.ReadOnly() }
-func (g *gatedRoDB) AllTables() TableCfg                     { return g.inner.AllTables() }
-func (g *gatedRoDB) PageSize() datasize.ByteSize             { return g.inner.PageSize() }
-func (g *gatedRoDB) CHandle() unsafe.Pointer                 { return g.inner.CHandle() }
-func (g *gatedRoDB) Path() string                            { return g.inner.Path() }
-func (g *gatedRoDB) View(ctx context.Context, f func(tx Tx) error) error {
-	g.gate.RLock()
-	defer g.gate.RUnlock()
-	return g.inner.View(ctx, f)
-}
 
 // Adapts an RoDB to the RwDB interface (invoking write operations results in error)
 type RwWrapper struct {
@@ -76,12 +42,15 @@ type RwWrapper struct {
 func (w RwWrapper) Update(ctx context.Context, f func(tx RwTx) error) error {
 	return errors.New("Update not implemented")
 }
+
 func (w RwWrapper) UpdateNosync(ctx context.Context, f func(tx RwTx) error) error {
 	return errors.New("UpdateNosync not implemented")
 }
+
 func (w RwWrapper) BeginRw(ctx context.Context) (RwTx, error) {
 	return nil, errors.New("BeginRw not implemented")
 }
+
 func (w RwWrapper) BeginRwNosync(ctx context.Context) (RwTx, error) {
 	return nil, errors.New("BeginRwNosync not implemented")
 }
@@ -128,7 +97,7 @@ func BigChunks(db RoDB, table string, from []byte, walker func(tx Tx, k, v []byt
 				stop = true
 			}
 
-			from = common.Copy(k) // next transaction will start from this key
+			from = bytes.Clone(k) // next transaction will start from this key
 
 			return nil
 		}); err != nil {
@@ -179,7 +148,8 @@ func GetBool(tx Getter, bucket string, k []byte) (enabled bool, err error) {
 	return bytes2bool(vBytes), nil
 }
 
-func ReadAhead(ctx context.Context, db RoDB, progress *atomic.Bool, table string, from []byte, amount uint32) (clean func()) {
+// ReadAheadDeprecated is the legacy amount-bounded prefetcher (NewReadAhead is the windowed one).
+func ReadAheadDeprecated(ctx context.Context, db RoDB, progress *atomic.Bool, table string, from []byte, amount uint32) (clean func()) {
 	if db == nil {
 		return func() {}
 	}
@@ -192,9 +162,7 @@ func ReadAhead(ctx context.Context, db RoDB, progress *atomic.Bool, table string
 		cancel()
 		wg.Wait()
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		defer progress.Store(false)
 		_ = db.View(ctx, func(tx Tx) error {
 			c, err := tx.Cursor(table)
@@ -203,13 +171,13 @@ func ReadAhead(ctx context.Context, db RoDB, progress *atomic.Bool, table string
 			}
 			defer c.Close()
 
+			var sink byte
+			defer func() { warmupSink.Add(uint64(sink)) }()
 			for k, v, err := c.Seek(from); k != nil && amount > 0; k, v, err = c.Next() {
 				if err != nil {
 					return err
 				}
-				if len(v) > 0 {
-					_, _ = v[0], v[len(v)-1]
-				}
+				sink = touchValue(sink, v)
 				amount--
 				select {
 				case <-ctx.Done():
@@ -219,7 +187,7 @@ func ReadAhead(ctx context.Context, db RoDB, progress *atomic.Bool, table string
 			}
 			return nil
 		})
-	}()
+	})
 	return clean
 }
 
@@ -256,8 +224,8 @@ func LastKey(tx Tx, table string) ([]byte, error) {
 func NextSubtree(in []byte) ([]byte, bool) {
 	r := make([]byte, len(in))
 	copy(r, in)
-	for i := len(r) - 1; i >= 0; i-- {
-		if r[i] != 255 {
+	for i, v := range slices.Backward(r) {
+		if v != 255 {
 			r[i]++
 			return r, true
 		}
@@ -324,7 +292,7 @@ func (d *DomainDiff) DomainUpdate(k []byte, step Step, prevValue []byte) {
 		if prevValue == nil {
 			d.prevValues[valsKeySCopy] = []byte{} // no previous value (new key)
 		} else {
-			d.prevValues[valsKeySCopy] = common.Copy(prevValue)
+			d.prevValues[valsKeySCopy] = bytes.Clone(prevValue)
 		}
 		d.prevValsSlice = nil
 	}
@@ -341,8 +309,16 @@ func (d *DomainDiff) GetDiffSet() (keysToValue []DomainEntryDiff) {
 		d.prevValsSlice[i].Value = v
 		i++
 	}
-	sort.Slice(d.prevValsSlice, func(i, j int) bool {
-		return d.prevValsSlice[i].Key < d.prevValsSlice[j].Key
+	slices.SortFunc(d.prevValsSlice, func(a, b DomainEntryDiff) int {
+		return cmp.Compare(a.Key, b.Key)
 	})
 	return d.prevValsSlice
+}
+
+// RollbackUnless rolls tx back unless *ok is true. Defer it right after opening
+// a tx that is returned to the caller, so an early return or panic cannot leak it.
+func RollbackUnless(ok *bool, tx Tx) {
+	if !*ok {
+		tx.Rollback()
+	}
 }

@@ -114,8 +114,10 @@ var testValidator2 = solid.NewValidatorFromParameters(
 
 var testValidator2Snappified, _ = hex.DecodeString("79f078bff465728708cccd057fa4be1bf83eb42ec6a70e52cca2d24309de9e2b0cbc1a7110b92e8c7f475625d1e79f86f31a3e3ba9e58ab7d3807a2733e3aa204fdacde3f0d16e7126492c72fa228eae20c5eb049ecb26522fe64100d782ece92cc4e4867a27d1403d91a9df8419a7ac348f8bab41e54308f5d2e470")
 
-var testValidatorRoot1 = common.HexToHash("83e755dbe8b552c628677bcad4d5f28b29f9a24bfe1b3db26f5386ad823a5a67")
-var testValidatorRoot2 = common.HexToHash("0bcf6f6b165f8ba4a0b59fad23195a83097cdfc62eca06d6219d5699f057aa14")
+var (
+	testValidatorRoot1 = common.HexToHash("83e755dbe8b552c628677bcad4d5f28b29f9a24bfe1b3db26f5386ad823a5a67")
+	testValidatorRoot2 = common.HexToHash("0bcf6f6b165f8ba4a0b59fad23195a83097cdfc62eca06d6219d5699f057aa14")
+)
 
 func TestValidatorSlashed(t *testing.T) {
 	encoded, _ := testValidator1.EncodeSSZ([]byte{0x2})
@@ -138,5 +140,4 @@ func TestValidatorNonSlashed(t *testing.T) {
 	require.Equal(t, common.Hash(root), testValidatorRoot2)
 
 	assert.False(t, decodedValidator.IsSlashable(1))
-
 }

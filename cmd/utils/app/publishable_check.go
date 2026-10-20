@@ -1,11 +1,12 @@
 package app
 
 import (
+	"cmp"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
@@ -38,7 +39,7 @@ func CheckFilesForSchema(schema state.SnapNameSchema, params CheckFilesParams) (
 	dataFiles := make([]state.SnapInfo, 0)
 	if err := filepath.WalkDir(schema.DataDirectory(), func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) { //it's ok if some file get removed during walk
+			if os.IsNotExist(err) { // it's ok if some file get removed during walk
 				return nil
 			}
 			return err
@@ -66,8 +67,11 @@ func CheckFilesForSchema(schema state.SnapNameSchema, params CheckFilesParams) (
 		return 0, false, err
 	}
 
-	sort.Slice(dataFiles, func(i, j int) bool {
-		return (dataFiles[i].From < dataFiles[j].From) || (dataFiles[i].From == dataFiles[j].From && dataFiles[i].To < dataFiles[j].To)
+	slices.SortFunc(dataFiles, func(a, b state.SnapInfo) int {
+		if a.From != b.From {
+			return cmp.Compare(a.From, b.From)
+		}
+		return cmp.Compare(a.To, b.To)
 	})
 
 	if len(dataFiles) == 0 {
@@ -110,14 +114,14 @@ func CheckFilesForSchema(schema state.SnapNameSchema, params CheckFilesParams) (
 		// should get the same name as dataFile...
 		// this checks the version is correct (between min and current), and that there's only one such data file
 		if _, err := schema.DataFile(version.StrictSearchVersion, from, to); err != nil {
-			return 0, false, fmt.Errorf("unsupported data file version: %s: %v", dataFile.Name, err)
+			return 0, false, fmt.Errorf("unsupported data file version: %s: %w", dataFile.Name, err)
 		}
 
 		if accessors.Has(statecfg.AccessorHashMap) {
 			for idxPos := uint16(0); idxPos < schema.AccessorIdxCount(); idxPos++ {
 				_, err := schema.AccessorIdxFile(version.StrictSearchVersion, from, to, idxPos)
 				if err != nil {
-					return 0, false, fmt.Errorf("missing %s accessor idx file for data file %s (idx tag: %d): %v", schema.DataTag(), dataFile.Name, idxPos, err)
+					return 0, false, fmt.Errorf("missing %s accessor idx file for data file %s (idx tag: %d): %w", schema.DataTag(), dataFile.Name, idxPos, err)
 				}
 			}
 		}
@@ -125,14 +129,14 @@ func CheckFilesForSchema(schema state.SnapNameSchema, params CheckFilesParams) (
 		if accessors.Has(statecfg.AccessorBTree) {
 			_, err := schema.BtIdxFile(version.StrictSearchVersion, from, to)
 			if err != nil {
-				return 0, false, fmt.Errorf("missing %s bt tree file for data file %s: %v", schema.DataTag(), dataFile.Name, err)
+				return 0, false, fmt.Errorf("missing %s bt tree file for data file %s: %w", schema.DataTag(), dataFile.Name, err)
 			}
 		}
 
 		if accessors.Has(statecfg.AccessorExistence) {
 			_, err := schema.ExistenceFile(version.StrictSearchVersion, from, to)
 			if err != nil {
-				return 0, false, fmt.Errorf("missing %s existence filter for data file %s: %v", schema.DataTag(), dataFile.Name, err)
+				return 0, false, fmt.Errorf("missing %s existence filter for data file %s: %w", schema.DataTag(), dataFile.Name, err)
 			}
 		}
 	}

@@ -214,7 +214,7 @@ exitcode:3 OK
 
 The chain configuration to be used for a transition is specified via the
 `--state.fork` CLI flag. A list of possible values and configurations can be
-found in [`execution/testutil/forks.go`](../../execution/testutil/forks.go).
+found in [`execution/tests/testforks/forks.go`](../../execution/tests/testforks/forks.go).
 
 #### Examples
 ##### Basic usage

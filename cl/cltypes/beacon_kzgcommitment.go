@@ -36,8 +36,10 @@ var (
 	_ ssz2.SizedObjectSSZ = (*KZGProof)(nil)
 )
 
-type Blob goethkzg.Blob
-type KZGProof goethkzg.KZGProof // [48]byte
+type (
+	Blob     goethkzg.Blob
+	KZGProof goethkzg.KZGProof // [48]byte
+)
 
 const (
 	// https://github.com/ethereum/consensus-specs/blob/3a2304981a3b820a22b518fe4859f4bba0ebc83b/specs/deneb/polynomial-commitments.md#custom-types

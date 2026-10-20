@@ -29,8 +29,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
@@ -56,7 +56,7 @@ type BadHeaderEntry struct {
 type EngineBlockDownloader struct {
 	backgroundCtx context.Context
 	status        atomic.Value // current Status of the downloading process, aka: is it doing anything
-	blockReader   services.FullBlockReader
+	blockReader   dbservices.FullBlockReader
 	db            kv.RoDB
 	chainRW       chainreader.ChainReaderWriterEth1
 	syncCfg       ethconfig.Sync
@@ -70,7 +70,7 @@ func NewEngineBlockDownloader(
 	ctx context.Context,
 	logger log.Logger,
 	executionClient execmodule.ExecutionModule,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	db kv.RoDB,
 	config *chain.Config,
 	syncCfg ethconfig.Sync,
@@ -164,7 +164,7 @@ func (e *EngineBlockDownloader) processReq(ctx context.Context, req BackwardDown
 		return nil
 	}
 	tip := req.ValidateChainTip
-	err = e.chainRW.InsertBlockAndWait(ctx, tip)
+	err = e.chainRW.InsertBlock(ctx, tip)
 	if err != nil {
 		return fmt.Errorf("could not insert request chain tip for validation: %w", err)
 	}
@@ -220,10 +220,11 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 	logProgressTicker := time.NewTicker(30 * time.Second)
 	defer logProgressTicker.Stop()
 
-	var blocks []*types.Block
+	var batch p2p.BlockBatchResult
 	var insertedBlocksWithoutExec int
 	var lastTip *types.Block
-	for blocks, err = feed.Next(ctx); err == nil && len(blocks) > 0; blocks, err = feed.Next(ctx) {
+	for batch, err = feed.Next(ctx); err == nil && len(batch.Blocks) > 0; batch, err = feed.Next(ctx) {
+		blocks := batch.Blocks
 		progressLogArgs := []any{
 			"from", blocks[0].NumberU64(),
 			"fromHash", blocks[0].Hash(),
@@ -236,7 +237,7 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 		default:
 			e.logger.Trace("[EngineBlockDownloader] processing downloaded blocks", progressLogArgs...)
 		}
-		err := e.chainRW.InsertBlocksAndWait(ctx, blocks)
+		err := e.chainRW.InsertBlocks(ctx, blocks)
 		if err != nil {
 			return err
 		}

@@ -85,6 +85,7 @@ func IsTopicDataColumnSidecar(d string) bool {
 func IsTopicSyncCommittee(d string) bool {
 	return strings.HasPrefix(d, "sync_committee_") && !strings.Contains(d, TopicNameSyncCommitteeContributionAndProof)
 }
+
 func IsTopicBeaconAttestation(d string) bool {
 	return strings.HasPrefix(d, "beacon_attestation_")
 }

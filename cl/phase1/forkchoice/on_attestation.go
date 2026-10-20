@@ -26,9 +26,7 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-var (
-	ErrIgnore = errors.New("ignore")
-)
+var ErrIgnore = errors.New("ignore")
 
 // OnAttestation processes incoming attestations.
 func (f *ForkChoiceStore) OnAttestation(
@@ -62,19 +60,25 @@ func (f *ForkChoiceStore) OnAttestation(
 	var err error
 	target := data.Target
 
-	if f.syncedDataManager.Syncing() {
-		attestationIndicies, err = f.verifyAttestationWithCheckpointState(
-			target,
-			attestation,
-			fromBlock,
-		)
-	} else {
-		if err := f.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+	useCheckpointState := f.syncedDataManager.Syncing()
+	if !useCheckpointState {
+		if err := f.syncedDataManager.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, headRoot common.Hash, _ uint64) error {
+			if !f.headStateHasTargetShuffling(headState, headRoot, target) {
+				useCheckpointState = true
+				return nil
+			}
 			attestationIndicies, err = f.verifyAttestationWithState(headState, attestation, fromBlock)
 			return err
 		}); err != nil {
 			return err
 		}
+	}
+	if useCheckpointState {
+		attestationIndicies, err = f.verifyAttestationWithCheckpointState(
+			target,
+			attestation,
+			fromBlock,
+		)
 	}
 	if err != nil {
 		return err
@@ -84,6 +88,20 @@ func (f *ForkChoiceStore) OnAttestation(
 	f.updateLatestMessages(attestation, attestationIndicies)
 
 	return nil
+}
+
+// The one-epoch window preserves the target's final seed mix; the dependent block then identifies the same committees.
+func (f *ForkChoiceStore) headStateHasTargetShuffling(headState *state.CachingBeaconState, headRoot common.Hash, target solid.Checkpoint) bool {
+	headEpoch := state.Epoch(headState)
+	if target.Epoch > headEpoch+1 || target.Epoch+1 < headEpoch {
+		return false
+	}
+	dependentSlot := computeShufflingDependentSlot(target.Epoch, f.beaconCfg.MinSeedLookahead, f.beaconCfg.SlotsPerEpoch)
+	targetDependentRoot := f.Ancestor(target.Root, dependentSlot).Root
+	if targetDependentRoot == (common.Hash{}) {
+		return false
+	}
+	return targetDependentRoot == f.Ancestor(headRoot, dependentSlot).Root
 }
 
 func (f *ForkChoiceStore) ProcessAttestingIndicies(
@@ -152,19 +170,13 @@ func (f *ForkChoiceStore) verifyAttestationWithState(
 }
 
 func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage) {
-	// Update indexed weight store if present: read old value BEFORE overwriting
-	if f.indexedWeightStore != nil {
-		if oldMessage, has := f.latestMessages.get(int(index)); has && oldMessage != (LatestMessage{}) {
-			f.indexedWeightStore.RemoveVote(index, oldMessage.Root)
-		}
-	}
-
 	f.latestMessages.set(int(index), message)
+	f.gloasWeightTree.markDirty(index)
+}
 
-	// Add new vote to index (balance looked up internally)
-	if f.indexedWeightStore != nil {
-		f.indexedWeightStore.IndexVote(index, message)
-	}
+func (f *ForkChoiceStore) trackGloasWeights() bool {
+	currentEpoch := f.computeEpochAtSlot(f.Slot())
+	return f.beaconCfg.GetCurrentStateVersion(currentEpoch) >= clparams.GloasVersion
 }
 
 func (f *ForkChoiceStore) getLatestMessage(validatorIndex uint64) (LatestMessage, bool) {
@@ -173,34 +185,44 @@ func (f *ForkChoiceStore) getLatestMessage(validatorIndex uint64) (LatestMessage
 
 func (f *ForkChoiceStore) isUnequivocating(validatorIndex uint64) bool {
 	// f.equivocatingIndicies is a bitlist
-	index := int(validatorIndex) / 8
-	if index >= len(f.equivocatingIndicies) {
+	index := validatorIndex / 8
+	if index >= uint64(len(f.equivocatingIndicies)) {
 		return false
 	}
-	subIndex := int(validatorIndex) % 8
-	return f.equivocatingIndicies[index]&(1<<uint(subIndex)) != 0
+	subIndex := validatorIndex % 8
+	return f.equivocatingIndicies[index]&(1<<subIndex) != 0
 }
 
 func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
+	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
 	index := int(validatorIndex) / 8
 	if index >= len(f.equivocatingIndicies) {
-		if index >= cap(f.equivocatingIndicies) {
-			tmp := make([]byte, index+1, index*2)
-			copy(tmp, f.equivocatingIndicies)
-			f.equivocatingIndicies = tmp
+		if index < cap(f.equivocatingIndicies) {
+			f.equivocatingIndicies = f.equivocatingIndicies[:index+1]
+		} else {
+			nextCap := cap(f.equivocatingIndicies)
+			if nextCap == 0 {
+				nextCap = 1
+			}
+			for nextCap <= index {
+				nextCap *= 2
+			}
+			next := make([]byte, index+1, nextCap)
+			copy(next, f.equivocatingIndicies)
+			f.equivocatingIndicies = next
 		}
-		f.equivocatingIndicies = f.equivocatingIndicies[:index+1]
 	}
 	subIndex := int(validatorIndex) % 8
 	f.equivocatingIndicies[index] |= 1 << uint(subIndex)
+	f.gloasWeightTree.markDirty(validatorIndex)
 }
 
 func (f *ForkChoiceStore) updateLatestMessages(
 	attestation *solid.Attestation,
 	indicies []uint64,
 ) {
-	currentEpoch := f.computeEpochAtSlot(f.Slot())
-	if f.beaconCfg.GetCurrentStateVersion(currentEpoch) >= clparams.GloasVersion {
+	if f.trackGloasWeights() {
 		f.updateLatestMessagesGloas(attestation, indicies)
 	} else {
 		f.updateLatestMessagesPreGloas(attestation, indicies)
@@ -240,6 +262,7 @@ func (f *ForkChoiceStore) updateLatestMessagesGloas(
 	slot := attestation.Data.Slot
 	beaconBlockRoot := attestation.Data.BeaconBlockRoot
 	payloadPresent := attestation.Data.CommitteeIndex == 1
+	updated := false
 
 	for _, index := range indicies {
 		if f.isUnequivocating(index) {
@@ -252,7 +275,12 @@ func (f *ForkChoiceStore) updateLatestMessagesGloas(
 				Root:           beaconBlockRoot,
 				PayloadPresent: payloadPresent,
 			})
+			updated = true
 		}
+	}
+	if updated {
+		f.headHash = common.Hash{}
+		f.headPayloadStatus = cltypes.PayloadStatusPending
 	}
 }
 
@@ -282,7 +310,7 @@ func (f *ForkChoiceStore) ValidateOnAttestation(attestation *solid.Attestation) 
 			return errors.New("attestation index must be 0 when block_slot equals attestation_slot")
 		}
 		// PTC attestation (index 1): payload must be verified
-		if attestation.Data.CommitteeIndex == 1 && !f.forkGraph.HasEnvelope(attestation.Data.BeaconBlockRoot) {
+		if attestation.Data.CommitteeIndex == 1 && !f.IsPayloadVerified(attestation.Data.BeaconBlockRoot) {
 			return errors.New("PTC attestation requires verified payload envelope")
 		}
 	}

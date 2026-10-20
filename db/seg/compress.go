@@ -33,12 +33,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c2h5oh/datasize"
-
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
-	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/bufiopool"
 	"github.com/erigontech/erigon/db/etl"
 )
 
@@ -110,7 +107,8 @@ type Compressor struct {
 	Cfg
 	ctx              context.Context
 	wg               *sync.WaitGroup
-	superstrings     chan []byte
+	stopWorkersOnce  sync.Once
+	superstrings     chan []uint16
 	uncompressedFile *RawWordsFile
 	tmpDir           string // temporary directory to use for ETL when building dictionary
 	logPrefix        string
@@ -118,11 +116,13 @@ type Compressor struct {
 	outputFileName   string
 	outputFile       string // File where to output the dictionary and compressed data
 	suffixCollectors []*etl.Collector
-	// Buffer for "superstring" - transformation of superstrings where each byte of a word, say b,
-	// is turned into 2 bytes, 0x01 and b, and two zero bytes 0x00 0x00 are inserted after each word
-	// this is needed for using ordinary (one string) suffix sorting algorithm instead of a generalised (many superstrings) suffix
-	// sorting algorithm
-	superstring       []byte
+	// Buffer for "superstring" - one uint16 symbol per cell so an ordinary (single-string)
+	// suffix sort handles the generalised (many-words) case: a real byte b maps to b+1 and a
+	// word boundary to 0, so boundaries sort before any real byte and a real 0x00 stays
+	// distinct from a separator.
+	superstring       []uint16
+	scannedBytes      int
+	superstringLimit  int
 	wordsCount        uint64
 	superstringCount  uint64
 	uncompressedBytes int
@@ -150,7 +150,7 @@ type Timings struct {
 
 func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cfg Cfg, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
 	workers := cfg.Workers
-	dir2.MustExist(tmpDir)
+	dir.MustExist(tmpDir)
 	_, fileName := filepath.Split(outputFile)
 
 	uncompressedPath := filepath.Join(tmpDir, fileName) + ".idt"
@@ -160,17 +160,18 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 	}
 
 	// Collector for dictionary superstrings (sorted by their score)
-	superstrings := make(chan []byte, workers*2)
+	superstrings := make(chan []uint16, workers*2)
 	wg := &sync.WaitGroup{}
-	wg.Add(workers)
 	suffixCollectors := make([]*etl.Collector, workers)
-	for i := 0; i < workers; i++ {
+	for i := range workers {
 		collector := etl.NewCollectorWithAllocator(logPrefix+"_dict", tmpDir, etl.SmallSortableBuffers, logger) //nolint:gocritic
 		collector.SortAndFlushInBackground(false)
 		collector.LogLvl(lvl)
 
 		suffixCollectors[i] = collector
-		go extractPatternsInSuperstrings(ctx, superstrings, collector, cfg, wg, logger)
+		wg.Go(func() {
+			extractPatternsInSuperstrings(ctx, superstrings, collector, cfg, logger)
+		})
 	}
 	_, outputFileName := filepath.Split(outputFile)
 	cc := &Compressor{
@@ -187,6 +188,7 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 		wg:               wg,
 		logger:           logger,
 		version:          FileCompressionFormatV1,
+		superstringLimit: superstringLimit,
 	}
 
 	if cfg.ValuesOnCompressedPage > 0 {
@@ -197,7 +199,15 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 	return cc, nil
 }
 
+func (c *Compressor) stopWorkers() {
+	c.stopWorkersOnce.Do(func() {
+		close(c.superstrings)
+		c.wg.Wait()
+	})
+}
+
 func (c *Compressor) Close() {
+	c.stopWorkers()
 	c.uncompressedFile.CloseAndRemove()
 	for _, collector := range c.suffixCollectors {
 		collector.Close()
@@ -218,32 +228,6 @@ func (c *Compressor) SetMetadata(metadata []byte) {
 
 func (c *Compressor) Count() int { return int(c.wordsCount) }
 
-// Erigon doesn't create tons of bufio readers/writers, but it has tons of
-// parallel small unit-tests which each create many small files and bufio
-// readers/writers — pooling avoids the allocation pressure in that scenario.
-var (
-	bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, int(512*datasize.KB)) }}
-	bufioReaderPool = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, int(512*datasize.KB)) }}
-)
-
-func getBufioWriter(w io.Writer) *bufio.Writer {
-	bw := bufioWriterPool.Get().(*bufio.Writer)
-	bw.Reset(w)
-	return bw
-}
-
-// Reset(nil) before Put is required: without it the pool entry retains a
-// reference to the underlying io.Writer/io.Reader, keeping it alive until the
-// next GC cycle or until the entry is reused — whichever comes first.
-func putBufioWriter(w *bufio.Writer) { w.Reset(nil); bufioWriterPool.Put(w) }
-
-func getBufioReader(r io.Reader) *bufio.Reader {
-	br := bufioReaderPool.Get().(*bufio.Reader)
-	br.Reset(r)
-	return br
-}
-func putBufioReader(r *bufio.Reader) { r.Reset(nil); bufioReaderPool.Put(r) }
-
 func (c *Compressor) ReadFrom(g *Getter) error {
 	var v []byte
 	for g.HasNext() {
@@ -255,7 +239,7 @@ func (c *Compressor) ReadFrom(g *Getter) error {
 	return nil
 }
 
-var superStringsPool = sync.Pool{New: func() any { return make([]byte, 0, superstringLimit) }}
+var superStringsPool = sync.Pool{New: func() any { return make([]uint16, 0, superstringLimit/2) }}
 
 func (c *Compressor) AddWord(word []byte) error {
 	c.wordsCount++
@@ -267,24 +251,49 @@ func (c *Compressor) AddWord(word []byte) error {
 		}
 	}
 
-	l := 2*len(word) + 2
-	if len(c.superstring)+l > superstringLimit {
-		if c.superstringCount%c.SamplingFactor == 0 {
-			c.superstrings <- c.superstring
-		}
-		c.superstringCount++
-		c.superstring = superStringsPool.Get().([]byte)[:0]
+	if err := c.advanceScan(2*len(word) + 2); err != nil {
+		return err
 	}
-
-	if c.superstringCount%c.SamplingFactor == 0 {
+	if c.sampledSuperstring() {
 		for _, a := range word {
-			c.superstring = append(c.superstring, 1, a)
+			c.superstring = append(c.superstring, uint16(a)+1)
 		}
-		c.superstring = append(c.superstring, 0, 0)
+		c.superstring = append(c.superstring, 0) // word boundary
 	}
 
 	c.uncompressedBytes += len(word)
 	return c.uncompressedFile.Append(word)
+}
+
+func (c *Compressor) sampledSuperstring() bool { return c.superstringCount%c.SamplingFactor == 0 }
+
+// advanceScan accounts for the next word (encoded size l) and cuts a new superstring when the
+// current one would overflow. Bytes are counted for every word so boundaries don't depend on
+// sampling; a superstring fills only when sampled, so only a non-empty buffer is sent and replaced.
+func (c *Compressor) advanceScan(l int) error {
+	if c.scannedBytes+l <= c.superstringLimit {
+		c.scannedBytes += l
+		return nil
+	}
+
+	if len(c.superstring) > 0 {
+		if err := c.sendSuperstring(); err != nil {
+			return err
+		}
+		c.superstring = superStringsPool.Get().([]uint16)[:0]
+	}
+	c.superstringCount++
+	c.scannedBytes = 0
+	return nil
+}
+
+func (c *Compressor) sendSuperstring() error {
+	select {
+	case c.superstrings <- c.superstring:
+		return nil
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	}
 }
 
 func (c *Compressor) AddUncompressedWord(word []byte) error {
@@ -318,18 +327,19 @@ func (c *Compressor) Compress() error {
 	// submitted for word-level compression, so the pattern dictionary will always be empty.
 	noWordPatterns := c.superstringCount == 0 && len(c.superstring) == 0
 	if len(c.superstring) > 0 {
-		c.superstrings <- c.superstring
+		if err := c.sendSuperstring(); err != nil {
+			return err
+		}
 	}
-	close(c.superstrings)
-	c.wg.Wait()
+	c.stopWorkers()
 
-	cf, err := dir.CreateTemp(c.outputFile)
-	if err != nil {
-		return err
+	cf, createErr := dir.CreateTemp(c.outputFile)
+	if createErr != nil {
+		return createErr
 	}
+	defer dir.RemoveFile(cf.Name()) //nolint:errcheck
+	defer cf.Close()                //nolint:errcheck
 	tmpFileName := cf.Name()
-	defer dir.RemoveFile(tmpFileName)
-	defer cf.Close()
 
 	if c.version == FileCompressionFormatV1 {
 		if _, err := cf.Write([]byte{c.version, byte(c.featureFlagBitmask)}); err != nil {
@@ -363,15 +373,14 @@ func (c *Compressor) Compress() error {
 			coll.Close()
 		}
 		c.suffixCollectors = nil
-		if err = compressNoWordPatterns(c.logPrefix, cf, c.uncompressedFile, c.lvl, c.logger); err != nil {
+		if err := compressNoWordPatterns(c.logPrefix, cf, c.uncompressedFile, c.lvl, c.logger); err != nil {
 			return err
 		}
 	} else {
 		if c.lvl < log.LvlTrace {
 			c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.logPrefix), "workers", c.Workers)
 		}
-		var db *DictionaryBuilder
-		db, err = DictionaryBuilderFromCollectors(c.ctx, c.Cfg, c.logPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
+		db, err := DictionaryBuilderFromCollectors(c.ctx, c.Cfg, c.logPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
 		if err != nil {
 			return err
 		}
@@ -381,22 +390,21 @@ func (c *Compressor) Compress() error {
 				return err
 			}
 		}
-		if err = compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, tmpFileName, cf, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
+		if err := compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, tmpFileName, cf, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
 			return err
 		}
 	}
-	if err = c.fsync(cf); err != nil {
+	if err := c.fsync(cf); err != nil {
 		return err
 	}
-	if err = cf.Close(); err != nil {
+	if err := cf.Close(); err != nil {
 		return err
 	}
 	if err := os.Rename(tmpFileName, c.outputFile); err != nil {
 		return fmt.Errorf("renaming: %w", err)
 	}
 
-	var outputStat os.FileInfo
-	outputStat, err = os.Stat(c.outputFile)
+	outputStat, err := os.Stat(c.outputFile)
 	if err != nil {
 		return fmt.Errorf("ratio: %w", err)
 	}
@@ -484,14 +492,14 @@ func (db *DictionaryBuilder) Pop() any {
 
 func (db *DictionaryBuilder) processWord(chars []byte, score uint64) {
 	if db.Len()+1 <= db.softLimit {
-		heap.Push(db, &Pattern{word: common.Copy(chars), score: score})
+		heap.Push(db, &Pattern{word: bytes.Clone(chars), score: score})
 		return
 	}
 
 	// RemoveFile the element with smallest score
 	elem := heap.Pop(db).(*Pattern)
 	if elem == nil {
-		heap.Push(db, &Pattern{word: common.Copy(chars), score: score})
+		heap.Push(db, &Pattern{word: bytes.Clone(chars), score: score})
 		return
 	}
 	elem.word = append(elem.word[:0], chars...)
@@ -817,80 +825,6 @@ type DynamicCell struct {
 	patternIdx  int // offset of the last element in the pattern slice
 }
 
-type Ring struct {
-	cells             []DynamicCell
-	head, tail, count int
-}
-
-func NewRing() *Ring {
-	return &Ring{
-		cells: make([]DynamicCell, 16),
-		head:  0,
-		tail:  0,
-		count: 0,
-	}
-}
-
-func (r *Ring) Reset() {
-	r.count = 0
-	r.head = 0
-	r.tail = 0
-}
-
-func (r *Ring) ensureSize() {
-	if r.count < len(r.cells) {
-		return
-	}
-	newcells := make([]DynamicCell, r.count*2)
-	if r.tail > r.head {
-		copy(newcells, r.cells[r.head:r.tail])
-	} else {
-		n := copy(newcells, r.cells[r.head:])
-		copy(newcells[n:], r.cells[:r.tail])
-	}
-	r.head = 0
-	r.tail = r.count
-	r.cells = newcells
-}
-
-func (r *Ring) PushFront() *DynamicCell {
-	r.ensureSize()
-	if r.head == 0 {
-		r.head = len(r.cells)
-	}
-	r.head--
-	r.count++
-	return &r.cells[r.head]
-}
-
-func (r *Ring) PushBack() *DynamicCell {
-	r.ensureSize()
-	if r.tail == len(r.cells) {
-		r.tail = 0
-	}
-	result := &r.cells[r.tail]
-	r.tail++
-	r.count++
-	return result
-}
-
-func (r Ring) Len() int {
-	return r.count
-}
-
-func (r *Ring) Get(i int) *DynamicCell {
-	if i < 0 || i >= r.count {
-		return nil
-	}
-	return &r.cells[(r.head+i)&(len(r.cells)-1)]
-}
-
-// Truncate removes all items starting from i
-func (r *Ring) Truncate(i int) {
-	r.count = i
-	r.tail = (r.head + i) & (len(r.cells) - 1)
-}
-
 type DictAggregator struct {
 	collector     *etl.Collector
 	dist          map[int]int
@@ -959,31 +893,28 @@ func NewRawWordsFile(filePath string) (*RawWordsFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &RawWordsFile{filePath: filePath, f: f, w: getBufioWriter(f), buf: make([]byte, 128)}, nil
+	return &RawWordsFile{filePath: filePath, f: f, w: bufiopool.Writer(f), buf: make([]byte, 128)}, nil
 }
-func OpenRawWordsFile(filePath string) (*RawWordsFile, error) {
-	f, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	return &RawWordsFile{filePath: filePath, f: f, w: getBufioWriter(f), buf: make([]byte, 128)}, nil
-}
+
 func (f *RawWordsFile) Flush() error {
 	return f.w.Flush()
 }
+
 func (f *RawWordsFile) Close() {
 	if f.w != nil {
-		f.w.Flush()
-		f.f.Close()
-		putBufioWriter(f.w)
+		f.w.Flush() //nolint:errcheck
+		f.f.Close() //nolint:errcheck
+		bufiopool.PutWriter(f.w)
 		f.w = nil
 		f.f = nil
 	}
 }
+
 func (f *RawWordsFile) CloseAndRemove() {
 	f.Close()
-	dir2.RemoveFile(f.filePath)
+	dir.RemoveFile(f.filePath) //nolint:errcheck
 }
+
 func (f *RawWordsFile) Append(v []byte) error {
 	f.count++
 	// For compressed words, the length prefix is shifted to make lowest bit zero
@@ -998,6 +929,7 @@ func (f *RawWordsFile) Append(v []byte) error {
 	}
 	return nil
 }
+
 func (f *RawWordsFile) AppendUncompressed(v []byte) error {
 	f.count++
 	// For uncompressed words, the length prefix is shifted to make lowest bit one
@@ -1019,8 +951,8 @@ func (f *RawWordsFile) ForEach(walker func(v []byte, compressed bool) error) err
 	if err != nil {
 		return err
 	}
-	r := getBufioReader(f.f)
-	defer putBufioReader(r)
+	r := bufiopool.Reader(f.f)
+	defer bufiopool.PutReader(r)
 	buf := make([]byte, 16*1024)
 	l, e := binary.ReadUvarint(r)
 	for ; e == nil; l, e = binary.ReadUvarint(r) {

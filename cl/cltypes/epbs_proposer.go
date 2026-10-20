@@ -70,6 +70,10 @@ func (p *ProposerPreferences) DecodeSSZ(buf []byte, version int) error {
 	return ssz2.UnmarshalSSZ(buf, version, p.DependentRoot[:], &p.ProposalSlot, &p.ValidatorIndex, p.FeeRecipient[:], &p.TargetGasLimit)
 }
 
+func (p *ProposerPreferences) DecodeSSZStrict(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZStrict(buf, version, p.DependentRoot[:], &p.ProposalSlot, &p.ValidatorIndex, p.FeeRecipient[:], &p.TargetGasLimit)
+}
+
 func (p *ProposerPreferences) Clone() clonable.Clonable {
 	return &ProposerPreferences{
 		DependentRoot:  p.DependentRoot,
@@ -91,7 +95,7 @@ func (s *SignedProposerPreferences) EncodingSizeSSZ() int {
 	if s.Message == nil {
 		return length.Bytes96
 	}
-	return s.Message.EncodingSizeSSZ() + length.Bytes96
+	return signedStaticSize(s.Message.EncodingSizeSSZ())
 }
 
 func (s *SignedProposerPreferences) Static() bool {
@@ -105,6 +109,11 @@ func (s *SignedProposerPreferences) EncodeSSZ(buf []byte) ([]byte, error) {
 func (s *SignedProposerPreferences) DecodeSSZ(buf []byte, version int) error {
 	s.Message = new(ProposerPreferences)
 	return ssz2.UnmarshalSSZ(buf, version, s.Message, s.Signature[:])
+}
+
+func (s *SignedProposerPreferences) DecodeSSZStrict(buf []byte, version int) error {
+	s.Message = new(ProposerPreferences)
+	return ssz2.UnmarshalSSZStrict(buf, version, s.Message, s.Signature[:])
 }
 
 func (s *SignedProposerPreferences) HashSSZ() ([32]byte, error) {

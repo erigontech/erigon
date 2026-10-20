@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
 // RecentReceipts re-exports the type from execution/notifications.
@@ -33,11 +34,13 @@ func NewRecentReceipts(limit uint64) *RecentReceipts {
 	return notifications.NewRecentReceipts(limit)
 }
 
-type NewSnapshotSubscription func() error
-type HeaderSubscription func(headerRLP []byte) error
-type PendingLogsSubscription func(types.Logs) error
-type PendingBlockSubscription func(*types.Block) error
-type PendingTxsSubscription func([]types.Transaction) error
+type (
+	NewSnapshotSubscription  func() error
+	HeaderSubscription       func(headerRLP []byte) error
+	PendingLogsSubscription  func(types.Logs) error
+	PendingBlockSubscription func(*types.Block) error
+	PendingTxsSubscription   func([]types.Transaction) error
+)
 
 // Events manages event subscriptions and dissemination. Thread-safe.
 type Events struct {
@@ -45,8 +48,11 @@ type Events struct {
 	headerSubscriptions         map[int]chan [][]byte
 	overlaySubscriptions        map[int]chan *execctx.SharedDomains
 	newSnapshotSubscription     map[int]chan struct{}
+	syncStateSubscriptions      map[int]chan *remoteproto.SyncingReply
 	retirementStartSubscription map[int]chan bool
 	retirementDoneSubscription  map[int]chan struct{}
+	stateRetirementStartSubs    map[int]chan bool
+	stateRetirementDoneSubs     map[int]chan struct{}
 	pendingLogsSubscriptions    map[int]PendingLogsSubscription
 	pendingBlockSubscriptions   map[int]PendingBlockSubscription
 	pendingTxsSubscriptions     map[int]PendingTxsSubscription
@@ -56,9 +62,21 @@ type Events struct {
 	hasReceiptSubscriptions     bool
 	lock                        sync.RWMutex
 
-	// latestSD holds the most recently published SharedDomains from FCU.
-	// Accessible lock-free for the builder and RPC layer.
-	latestSD atomic.Pointer[execctx.SharedDomains]
+	// latestPub holds the most recently published SharedDomains from FCU
+	// together with its publish sequence number, as one atomic snapshot so
+	// readers can never observe the SD and the sequence out of step.
+	// Reads are lock-free; the store is a load-modify-store (seq increments
+	// from the previous value), so publishers must hold e.lock to keep the
+	// sequence monotonic.
+	latestPub atomic.Pointer[overlayPub]
+}
+
+// overlayPub pairs a published SharedDomains with a monotonic publish
+// sequence number. The first publish gets seq 1, so seq 0 uniquely means
+// "nothing was ever published".
+type overlayPub struct {
+	sd  *execctx.SharedDomains
+	seq uint64
 }
 
 func NewEvents() *Events {
@@ -71,8 +89,11 @@ func NewEvents() *Events {
 		pendingTxsSubscriptions:     map[int]PendingTxsSubscription{},
 		logsSubscriptions:           map[int]chan []*notifications.LogNotification{},
 		newSnapshotSubscription:     map[int]chan struct{}{},
+		syncStateSubscriptions:      map[int]chan *remoteproto.SyncingReply{},
 		retirementStartSubscription: map[int]chan bool{},
 		retirementDoneSubscription:  map[int]chan struct{}{},
+		stateRetirementStartSubs:    map[int]chan bool{},
+		stateRetirementDoneSubs:     map[int]chan struct{}{},
 	}
 }
 
@@ -133,6 +154,29 @@ func (e *Events) AddNewSnapshotSubscription() (chan struct{}, func()) {
 	}
 }
 
+func (e *Events) AddSyncStateSubscription() (chan *remoteproto.SyncingReply, func()) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	ch := make(chan *remoteproto.SyncingReply, 8)
+	e.id++
+	id := e.id
+	e.syncStateSubscriptions[id] = ch
+	return ch, func() {
+		e.lock.Lock()
+		defer e.lock.Unlock()
+		delete(e.syncStateSubscriptions, id)
+		close(ch)
+	}
+}
+
+func (e *Events) OnNewSyncState(reply *remoteproto.SyncingReply) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	for _, ch := range e.syncStateSubscriptions {
+		common.PrioritizedSend(ch, reply)
+	}
+}
+
 func (e *Events) AddRetirementStartSubscription() (chan bool, func()) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
@@ -159,6 +203,36 @@ func (e *Events) AddRetirementDoneSubscription() (chan struct{}, func()) {
 		e.lock.Lock()
 		defer e.lock.Unlock()
 		delete(e.retirementDoneSubscription, id)
+		close(ch)
+	}
+}
+
+func (e *Events) AddStateRetirementStartSubscription() (chan bool, func()) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	ch := make(chan bool, 8)
+	e.id++
+	id := e.id
+	e.stateRetirementStartSubs[id] = ch
+	return ch, func() {
+		e.lock.Lock()
+		defer e.lock.Unlock()
+		delete(e.stateRetirementStartSubs, id)
+		close(ch)
+	}
+}
+
+func (e *Events) AddStateRetirementDoneSubscription() (chan struct{}, func()) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	ch := make(chan struct{}, 8)
+	e.id++
+	id := e.id
+	e.stateRetirementDoneSubs[id] = ch
+	return ch, func() {
+		e.lock.Lock()
+		defer e.lock.Unlock()
+		delete(e.stateRetirementDoneSubs, id)
 		close(ch)
 	}
 }
@@ -240,9 +314,13 @@ func (e *Events) AddOverlaySubscription() (chan *execctx.SharedDomains, func()) 
 // PublishOverlay sends the SharedDomains to all in-process subscribers.
 // The SD is shared read-only; the background commit goroutine owns its lifecycle.
 func (e *Events) PublishOverlay(sd *execctx.SharedDomains) {
-	e.latestSD.Store(sd)
 	e.lock.Lock()
 	defer e.lock.Unlock()
+	seq := uint64(1)
+	if prev := e.latestPub.Load(); prev != nil {
+		seq = prev.seq + 1
+	}
+	e.latestPub.Store(&overlayPub{sd: sd, seq: seq})
 	for _, ch := range e.overlaySubscriptions {
 		common.PrioritizedSend(ch, sd)
 	}
@@ -250,7 +328,20 @@ func (e *Events) PublishOverlay(sd *execctx.SharedDomains) {
 
 // LatestSD returns the most recently published SharedDomains, or nil.
 func (e *Events) LatestSD() *execctx.SharedDomains {
-	return e.latestSD.Load()
+	sd, _ := e.OverlaySnapshot()
+	return sd
+}
+
+// OverlaySnapshot returns the published SharedDomains together with its
+// publish sequence number as one coherent pair. Comparing the sequence around
+// a tx open detects any publish landing in between — including a
+// publish/unpublish cycle that leaves the SD pointer unchanged.
+func (e *Events) OverlaySnapshot() (*execctx.SharedDomains, uint64) {
+	p := e.latestPub.Load()
+	if p == nil {
+		return nil, 0
+	}
+	return p.sd, p.seq
 }
 
 func (e *Events) OnNewPendingLogs(logs types.Logs) {
@@ -295,23 +386,100 @@ func (e *Events) OnRetirementDone() {
 	}
 }
 
+func (e *Events) OnStateRetirementStart(started bool) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	for _, ch := range e.stateRetirementStartSubs {
+		common.PrioritizedSend(ch, started)
+	}
+}
+
+func (e *Events) OnStateRetirementDone() {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	for _, ch := range e.stateRetirementDoneSubs {
+		common.PrioritizedSend(ch, struct{}{})
+	}
+}
+
 type Notifications struct {
 	Events               *Events
 	Accumulator          *Accumulator // StateAccumulator
 	StateChangesConsumer StateChangeConsumer
 	RecentReceipts       *RecentReceipts
 	LastNewBlockSeen     atomic.Uint64 // This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
+
+	// Snapshot download progress. Nil means no download is in progress;
+	// eth_syncing then reports block-based progress.
+	snapDownload atomic.Pointer[snapDownloadState]
+
+	syncStateLock sync.Mutex
+	lastSyncState *remoteproto.SyncingReply
+
+	// Pinned by the first publish. Nil until then: the RPC path serves replies
+	// before the stage loop starts a session, and a zero pin would report
+	// progress from genesis.
+	startingBlock atomic.Pointer[uint64]
 }
 
 func (n *Notifications) NewLastBlockSeen(blockNum uint64) {
 	n.LastNewBlockSeen.Store(blockNum)
 }
 
-func NewNotifications(StateChangesConsumer StateChangeConsumer) *Notifications {
+// snapDownloadState is published as a whole: the byte total is recomputed by
+// the downloader every cycle and grows as torrent metadata arrives, so mixing
+// fields from two samples can report more progress than was downloaded.
+type snapDownloadState struct {
+	phase       snapDownloadPhase
+	done, total uint64
+	targetBlock uint64 // highest block covered by the snapshots being downloaded
+	commitBlock uint64 // block where execution resumes once the download is done
+}
+
+type snapDownloadPhase uint8
+
+const (
+	snapDownloading snapDownloadPhase = iota
+	snapHandoff
+)
+
+// SetSnapshotDownloading records an in-flight snapshot-download sample in bytes
+// so eth_syncing can report it as block-based progress.
+func (n *Notifications) SetSnapshotDownloading(done, total, targetBlock uint64) {
+	n.snapDownload.Store(&snapDownloadState{done: done, total: total, targetBlock: targetBlock})
+}
+
+// SetSnapshotDownloadHandoff pins progress at the block where execution
+// resumes, bridging the window between a finished download and the first
+// committed execution progress.
+func (n *Notifications) SetSnapshotDownloadHandoff(commitBlock uint64) {
+	n.snapDownload.Store(&snapDownloadState{phase: snapHandoff, commitBlock: commitBlock})
+}
+
+// ClearSnapshotDownload drops the download state, so eth_syncing goes back to
+// reporting block-based progress.
+func (n *Notifications) ClearSnapshotDownload() {
+	n.snapDownload.Store(nil)
+}
+
+// ClearSnapshotDownloadPin ends the handoff, reporting whether it dropped one.
+// It is the only owner of that end: readers stop reporting the pin once they see
+// execution at the commitment block, but must not drop it, since the tx they read
+// can be ahead of the committed view. An in-flight sample is kept: after a failed
+// download it is the last honest progress the node can report.
+func (n *Notifications) ClearSnapshotDownloadPin() bool {
+	s := n.snapDownload.Load()
+	if s == nil || s.phase != snapHandoff {
+		return false
+	}
+	return n.snapDownload.CompareAndSwap(s, nil)
+}
+
+func NewNotifications(stateChangesConsumer StateChangeConsumer) *Notifications {
 	return &Notifications{
 		Events:               NewEvents(),
 		Accumulator:          NewAccumulator(),
 		RecentReceipts:       NewRecentReceipts(512),
-		StateChangesConsumer: StateChangesConsumer,
+		StateChangesConsumer: stateChangesConsumer,
 	}
 }

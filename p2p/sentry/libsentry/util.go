@@ -34,10 +34,11 @@ func PeerProtocols(sentry sentryproto.SentryClient, peer *typesproto.H512) []byt
 
 		if info != nil {
 			for _, cap := range info.Caps {
-				parts := strings.Split(cap, "/")
-				if len(parts) > 1 && strings.EqualFold(parts[0], "ETH") {
-					if version, err := strconv.Atoi(parts[1]); err == nil {
-						protocols = append(protocols, byte(version))
+				if before, after, ok := strings.Cut(cap, "/"); ok {
+					if strings.EqualFold(before, "ETH") {
+						if version, err := strconv.Atoi(after); err == nil {
+							protocols = append(protocols, byte(version))
+						}
 					}
 				}
 			}
@@ -59,13 +60,14 @@ func Protocols(sentry sentryproto.SentryClient) []byte {
 			var seen map[byte]struct{} = map[byte]struct{}{}
 			for _, info := range infos.GetPeers() {
 				for _, cap := range info.Caps {
-					parts := strings.Split(cap, "/")
-					if len(parts) > 1 && strings.EqualFold(parts[0], "ETH") {
-						if version, err := strconv.Atoi(parts[1]); err == nil {
-							p := byte(version)
-							if _, ok := seen[p]; !ok {
-								protocols = append(protocols, p)
-								seen[p] = struct{}{}
+					if before, after, ok := strings.Cut(cap, "/"); ok {
+						if strings.EqualFold(before, "ETH") {
+							if version, err := strconv.Atoi(after); err == nil {
+								p := byte(version)
+								if _, ok := seen[p]; !ok {
+									protocols = append(protocols, p)
+									seen[p] = struct{}{}
+								}
 							}
 						}
 					}

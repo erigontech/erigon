@@ -19,13 +19,13 @@ package utils
 import (
 	"encoding/binary"
 	"errors"
+	"math"
 	"math/bits"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/ssz"
 )
 
@@ -67,18 +67,27 @@ func Uint64ToLE(i uint64) []byte {
 	return buf
 }
 
+var errSnappyDecodedTooLarge = errors.New("snappy: decoded length is too large")
+
 func DecompressSnappy(data []byte, lengthCheck bool) ([]byte, error) {
-	// Decode the snappy
+	limit := uint64(math.MaxInt)
+	if lengthCheck {
+		limit = uint64(maxDecodeLenAllowed)
+	}
+	return DecompressSnappyWithLimit(data, limit)
+}
+
+// DecompressSnappyWithLimit rejects a payload whose declared decoded length exceeds
+// maxDecodedLen before allocating anything for it.
+func DecompressSnappyWithLimit(data []byte, maxDecodedLen uint64) ([]byte, error) {
 	lenDecoded, err := snappy.DecodedLen(data)
 	if err != nil {
 		return nil, err
 	}
-	if lengthCheck && lenDecoded > int(maxDecodeLenAllowed) {
-		return nil, errors.New("snappy: decoded length is too large")
+	if uint64(lenDecoded) > maxDecodedLen {
+		return nil, errSnappyDecodedTooLarge
 	}
-	decodedData := make([]byte, lenDecoded)
-
-	return snappy.Decode(decodedData, data)
+	return snappy.Decode(make([]byte, lenDecoded), data)
 }
 
 func CompressSnappy(data []byte) []byte {
@@ -132,17 +141,6 @@ func GetBitlistLength(b []byte) int {
 	return 8*(len(b)-1) + msb - 1
 }
 
-func ReverseBytes(h *common.Hash) {
-	a := binary.LittleEndian.Uint64(h[0:8])
-	b := binary.LittleEndian.Uint64(h[24:32])
-	binary.LittleEndian.PutUint64(h[0:8], bits.ReverseBytes64(b))
-	binary.LittleEndian.PutUint64(h[24:32], bits.ReverseBytes64(a))
-	a = binary.LittleEndian.Uint64(h[8:16])
-	b = binary.LittleEndian.Uint64(h[16:24])
-	binary.LittleEndian.PutUint64(h[8:16], bits.ReverseBytes64(b))
-	binary.LittleEndian.PutUint64(h[16:24], bits.ReverseBytes64(a))
-}
-
 func FlipBitOn(b []byte, i int) {
 	b[i/8] |= 1 << (i % 8)
 }
@@ -160,7 +158,7 @@ func IsNonStrictSupersetBitlist(a, b []byte) bool {
 	}
 
 	// Check each bit in 'b' to ensure it is also set in 'a'
-	for i := 0; i < len(b); i++ {
+	for i := range b {
 		if (a[i] & b[i]) != b[i] {
 			return false
 		}
@@ -175,14 +173,13 @@ func IsNonStrictSupersetBitlist(a, b []byte) bool {
 func IsOverlappingSSZBitlist(a, b []byte) bool {
 	length := min(len(a), len(b))
 	for i := range length {
-
 		if a[i]&b[i] != 0 {
 			if i != length-1 {
 				return true
 			}
 			var foundOverlap bool
 			// check the overlap bit by bit
-			for j := 0; j < 8; j++ {
+			for j := range 8 {
 				if (a[i]>>j)&(b[i]>>j)&1 == 1 {
 					if foundOverlap {
 						return true
@@ -193,7 +190,6 @@ func IsOverlappingSSZBitlist(a, b []byte) bool {
 		}
 	}
 	return false
-
 }
 
 // func IsOverlappingBitlist(a, b []byte) bool {
@@ -212,12 +208,6 @@ func BitsOnCount(b []byte) int {
 		count += bits.OnesCount8(v)
 	}
 	return count
-}
-
-func MergeBitlists(a, b []byte) {
-	for i := range b {
-		a[i] |= b[i]
-	}
 }
 
 func ExtractSlotFromSerializedBeaconState(beaconState []byte) (uint64, error) {

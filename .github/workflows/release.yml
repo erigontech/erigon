@@ -8,7 +8,7 @@ env:
   TEST_TRACKING_TIME_SECONDS: 7200 # 2 hours
   TEST_TOTAL_TIME_SECONDS: 432000   # 5 days
   TEST_CHAIN: "mainnet"
-  BUILDER_IMAGE: "golang:1.25-bookworm"
+  BUILDER_IMAGE: "golang:1.27-bookworm"
   TARGET_BASE_IMAGE: "debian:12-slim"
   APP_REPO: "erigontech/erigon"
   PACKAGE: "github.com/erigontech/erigon"
@@ -94,8 +94,9 @@ jobs:
           echo "OK: No existing GitHub Release found for ${RELEASE_VERSION}. Proceeding."
 
       - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
+          persist-credentials: false
           repository: ${{ env.APP_REPO }}
           fetch-depth: 0
           ref: ${{ inputs.checkout_ref }}
@@ -122,7 +123,6 @@ jobs:
           mkdir \
             $GITHUB_WORKSPACE/build-arm64 \
             $GITHUB_WORKSPACE/build-amd64 \
-            $GITHUB_WORKSPACE/build-amd64v2 \
             $GITHUB_WORKSPACE/docker-build-output
           cd erigon
           echo "id=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
@@ -202,7 +202,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_PUSH_TOKEN }}
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a  ## v4.0.0
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1  ## v4.4.0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  ## v4.0.0
@@ -212,23 +212,29 @@ jobs:
           RELEASE_VERSION: ${{ inputs.release_version }}
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY_DEV }}
           CHECKOUT_REF: ${{ inputs.checkout_ref }}
+          COMMIT_ID: ${{ steps.getCommitId.outputs.commit-id }}
+          SHORT_COMMIT_ID: ${{ steps.getCommitId.outputs.short-commit-id }}
         run: |
           cd erigon;
+          # linux/amd64 below is compiled at the x86-64-v2 baseline (SSE4.2, POPCNT;
+          # see Dockerfile CPU_FLAGS) -- no separate amd64v2 platform/tag exists.
+          # Older CPUs, or hypervisor profiles that mask v2 features, fail Go's
+          # startup CPU-feature check and exit immediately, not at image pull time.
           docker buildx build \
             --no-cache \
             --output type=local,dest=${GITHUB_WORKSPACE}/docker-build-output \
             --output type=registry \
             --attest type=provenance,mode=max \
             --sbom=true \
-            --platform linux/amd64,linux/amd64/v2,linux/arm64 \
+            --platform linux/amd64,linux/arm64 \
             --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
             --label org.opencontainers.image.authors="https://github.com/erigontech/erigon/graphs/contributors" \
             --label org.opencontainers.image.url="https://github.com/erigontech/erigon/tree/${CHECKOUT_REF}" \
             --label org.opencontainers.image.documentation="https://docs.erigon.tech/" \
             --label org.opencontainers.image.source="https://github.com/erigontech/erigon" \
             --label org.opencontainers.image.version=${RELEASE_VERSION} \
-            --label org.opencontainers.image.revision=${{ steps.getCommitId.outputs.commit-id }} \
-            --label org.opencontainers.image.vcs-ref-short=${{ steps.getCommitId.outputs.short-commit-id }} \
+            --label org.opencontainers.image.revision="${COMMIT_ID}" \
+            --label org.opencontainers.image.vcs-ref-short="${SHORT_COMMIT_ID}" \
             --label org.opencontainers.image.vendor="${{ github.repository_owner }}" \
             --label org.opencontainers.image.description="${{ env.LABEL_DESCRIPTION }}" \
             --label org.opencontainers.image.base.name="${{ env.TARGET_BASE_IMAGE }}" \
@@ -274,7 +280,7 @@ jobs:
         run: |
           echo "=== Verifying release artifacts ==="
           FAILED=0
-          for PLATFORM in arm64 amd64 amd64v2; do
+          for PLATFORM in arm64 amd64; do
             FILE="${GITHUB_WORKSPACE}/release/${APPLICATION}_${RELEASE_VERSION}_linux_${PLATFORM}.tar"
             if [ ! -f "${FILE}" ]; then
               echo "ERROR: Missing artifact: ${FILE}"
@@ -311,15 +317,6 @@ jobs:
           compression-level: 0
           if-no-files-found: error
 
-      - name: Upload artifact -- linux/amd64/v2
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  ## v7.0.1
-        with:
-          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
-          path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
-          retention-days: 7
-          compression-level: 0
-          if-no-files-found: error
-
   test-release:
     name: test on ${{ matrix.id }}
     if: ${{ ! inputs.skip_tests }}
@@ -342,7 +339,7 @@ jobs:
         run: rm -drfv *
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -362,8 +359,9 @@ jobs:
           ls -lR
 
       - name: Fast checkout git repository erigontech/erigon-qa
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
+          persist-credentials: false
           token: ${{ secrets.ORG_GITHUB_ERIGONTECH_ERIGON_QA_READ }}
           repository: erigontech/erigon-qa
           fetch-depth: 1
@@ -434,10 +432,10 @@ jobs:
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
 
-      - name: Download amd64v2 artifact
+      - name: Download amd64 artifact
         uses: actions/download-artifact@v8
         with:
-          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
+          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
 
       - name: Install required packages
         run: |
@@ -448,8 +446,7 @@ jobs:
         env:
           VERSION: ${{ needs.build-release.outputs.parsed-version }}
         run: |
-          tar xvf ${APPLICATION}_v${VERSION}_linux_amd64v2.tar
-          mv -v ${APPLICATION}_v${VERSION}_linux_amd64v2 ${APPLICATION}_v${VERSION}_linux_amd64
+          tar xvf ${APPLICATION}_v${VERSION}_linux_amd64.tar
           tar xvf ${APPLICATION}_v${VERSION}_linux_arm64.tar
           cat <<'POSTINST' > postinst.template
           #!/bin/sh
@@ -473,7 +470,7 @@ jobs:
                      deb-pkg/${APPLICATION}_${VERSION}_${ARCH}/DEBIAN
             install postinst.template deb-pkg/${APPLICATION}_${VERSION}_${ARCH}/DEBIAN/postinst
             if [ "${ARCH}" = "amd64" ]; then
-              ARCH_NOTE=" This amd64 package is compiled for x86-64-v2 or newer CPUs (requires SSE4.2, POPCNT). All modern server CPUs qualify: Intel 2nd gen Core+ (2011), AMD Bulldozer+ (2012). It will not run on older hardware."
+              ARCH_NOTE=" This amd64 package is compiled for the x86-64-v2 baseline (requires SSE4.2, POPCNT). Intel Nehalem (2008) and AMD Bulldozer (2011) or newer qualify. It will not run on older hardware."
             else
               ARCH_NOTE=""
             fi
@@ -559,8 +556,9 @@ jobs:
     steps:
 
     - name: Fast checkout just ${{ env.DOCKERFILE_PATH }} from git repository ${{ env.APP_REPO }}
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
+        persist-credentials: false
         repository: ${{ env.APP_REPO }}
         sparse-checkout: ${{ env.DOCKERFILE_PATH }}
         sparse-checkout-cone-mode: false
@@ -580,15 +578,15 @@ jobs:
         DOCKER_URL_TMP: ${{ env.DOCKERHUB_REPOSITORY_DEV }}
         PUBLISH_LATEST_TAG: ${{ inputs.publish_latest_tag }}
       run: |
-        echo Publishing docker image: 
-        skopeo copy --multi-arch all docker://${{ env.DOCKER_URL_TMP }}:${RELEASE_VERSION} docker://${{ env.DOCKER_URL }}:${RELEASE_VERSION}
+        echo Publishing docker image:
+        skopeo copy --multi-arch all "docker://${DOCKER_URL_TMP}:${RELEASE_VERSION}" "docker://${DOCKER_URL}:${RELEASE_VERSION}"
         if [ "x${PUBLISH_LATEST_TAG}" == "xtrue" ]; then
           echo Publishing latest tag:
-          skopeo copy --multi-arch all docker://${{ env.DOCKER_URL_TMP }}:${RELEASE_VERSION} docker://${{ env.DOCKER_URL }}:latest
+          skopeo copy --multi-arch all "docker://${DOCKER_URL_TMP}:${RELEASE_VERSION}" "docker://${DOCKER_URL}:latest"
         fi
         echo -n "Deleting temporary image: "
         set +e
-        skopeo delete docker://${{ env.DOCKER_URL_TMP }}:${RELEASE_VERSION}
+        skopeo delete "docker://${DOCKER_URL_TMP}:${RELEASE_VERSION}"
         SKOPEO_DELETE_EXIT=$?
         set -e
         if [ $SKOPEO_DELETE_EXIT -ne 0 ]; then
@@ -615,11 +613,13 @@ jobs:
     - name: Generate GitHub App token for release publishing
       id: generate_token
       if: ${{ inputs.perform_release }}
-      uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3  ## v3.1.1
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  ## v3.3.0
       with:
         client-id: ${{ vars.RELEASE_BOT_APP_ID }}
         private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
         repositories: "erigon"
+        permission-contents: write
+        permission-workflows: write
 
     - name: Download linux/arm64 artifact
       uses: actions/download-artifact@v8
@@ -631,12 +631,6 @@ jobs:
       uses: actions/download-artifact@v8
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
-        path: dist/
-
-    - name: Download linux/amd64v2 artifact
-      uses: actions/download-artifact@v8
-      with:
-        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
         path: dist/
 
     - name: Download arm64 debian package
@@ -662,7 +656,6 @@ jobs:
         for FILE in \
           "dist/${{ env.APPLICATION }}_${RELEASE_VERSION}_linux_arm64.tar" \
           "dist/${{ env.APPLICATION }}_${RELEASE_VERSION}_linux_amd64.tar" \
-          "dist/${{ env.APPLICATION }}_${RELEASE_VERSION}_linux_amd64v2.tar" \
           "dist/${{ env.APPLICATION }}_${PARSED_VERSION}_arm64.deb" \
           "dist/${{ env.APPLICATION }}_${PARSED_VERSION}_amd64.deb"; do
           if [ ! -f "${FILE}" ]; then
@@ -684,7 +677,8 @@ jobs:
 
     - name: Checkout git repository ${{ env.APP_REPO }} at release commit
       if: ${{ inputs.perform_release && inputs.release_version != '' }}
-      uses: actions/checkout@v6
+      # Token must persist: the next step pushes the release tag with it.
+      uses: actions/checkout@v7 # zizmor: ignore[artipacked]
       with:
         repository: ${{ env.APP_REPO }}
         fetch-depth: 1
@@ -710,6 +704,7 @@ jobs:
         GH_REPO: ${{ github.repository }}
         RELEASE_VERSION: ${{ inputs.release_version }}
         DOCKER_TAGS: "${{ env.DOCKERHUB_REPOSITORY }}:${{ inputs.release_version }}"
+        TARGET_COMMIT: ${{ needs.build-release.outputs.commit-id }}
       run: |
         cd dist
         for archive in *.tar; do gzip $archive; echo "Artifact $archive compressed"; done
@@ -743,7 +738,7 @@ jobs:
           echo "  cd dist"
           echo "  gh release create \\"
           echo "    --repo ${{ env.APP_REPO }} \\"
-          echo "    --target ${{ needs.build-release.outputs.commit-id }} \\"
+          echo "    --target ${TARGET_COMMIT} \\"
           echo "    --draft=true \\"
           echo "    --title \"${RELEASE_VERSION}\" \\"
           echo "    \"${RELEASE_VERSION}\" \\"
@@ -779,14 +774,17 @@ jobs:
     steps:
       - name: Generate GitHub App token for git operations
         id: generate_token_rollback
-        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3  ## v3.1.1
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  ## v3.3.0
         with:
           client-id: ${{ vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
           repositories: "erigon"
+          permission-contents: write
+          permission-workflows: write
 
       - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
-        uses: actions/checkout@v6
+        # Token must persist: the next step deletes the release tag with it.
+        uses: actions/checkout@v7 # zizmor: ignore[artipacked]
         with:
           repository: ${{ env.APP_REPO }}
           fetch-depth: 0

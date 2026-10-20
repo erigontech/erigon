@@ -45,12 +45,12 @@ type logger struct {
 // applog is the default package-level logger used when no logger is in context.
 var applog Logger = &logger{Logger: log.Root(), level: log.LvlInfo}
 
-func NewLogger(level log.Lvl, ctx []string, kvCtx interface{}) Logger {
-	var kv []interface{}
-	if kvPairs, ok := kvCtx.([]interface{}); ok && len(kvPairs) > 0 {
+func NewLogger(level log.Lvl, ctx []string, kvCtx any) Logger {
+	var kv []any
+	if kvPairs, ok := kvCtx.([]any); ok && len(kvPairs) > 0 {
 		kv = kvPairs
 	} else {
-		kv = make([]interface{}, 0, len(ctx)*2)
+		kv = make([]any, 0, len(ctx)*2)
 		for _, c := range ctx {
 			kv = append(kv, "module", c)
 		}
@@ -90,7 +90,7 @@ func (l *logger) DebugEnabled() bool {
 
 // LogInstance returns a human-readable string representation of a value,
 // suitable for use in log key-value pairs. It handles nil values safely.
-func LogInstance(value interface{}) string {
+func LogInstance(value any) string {
 	if value == nil {
 		return "<nil>"
 	}

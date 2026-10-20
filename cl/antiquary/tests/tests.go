@@ -76,7 +76,9 @@ var phase0_post_state_ssz_snappy []byte
 var bellatrixFS embed.FS
 
 type MockBlockReader struct {
-	U map[uint64]*cltypes.SignedBeaconBlock
+	U                map[uint64]*cltypes.SignedBeaconBlock
+	CachedBodies     []uint64
+	CachedBodyHashes []common.Hash
 }
 
 func NewMockBlockReader() *MockBlockReader {
@@ -105,6 +107,7 @@ func (m *MockBlockReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, blockRo
 	}
 	return nil, nil
 }
+
 func (m *MockBlockReader) ReadHeaderByRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (*cltypes.SignedBeaconBlockHeader, error) {
 	block, err := m.ReadBlockByRoot(ctx, tx, blockRoot)
 	if err != nil {
@@ -120,11 +123,12 @@ func (m *MockBlockReader) FrozenSlots() uint64 {
 	panic("implement me")
 }
 
-func (m *MockBlockReader) CacheBlockBody(blockNumber uint64, transactions [][]byte, withdrawals []*types.Withdrawal) {
-	// no-op in tests
+func (m *MockBlockReader) CacheBlockBody(blockNumber uint64, blockHash common.Hash, transactions [][]byte, withdrawals []*types.Withdrawal) {
+	m.CachedBodies = append(m.CachedBodies, blockNumber)
+	m.CachedBodyHashes = append(m.CachedBodyHashes, blockHash)
 }
 
-func LoadChain(blocks []*cltypes.SignedBeaconBlock, s *state.CachingBeaconState, db kv.RwDB, t *testing.T) *MockBlockReader {
+func LoadChain(blocks []*cltypes.SignedBeaconBlock, db kv.RwDB, t *testing.T) *MockBlockReader {
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -132,7 +136,7 @@ func LoadChain(blocks []*cltypes.SignedBeaconBlock, s *state.CachingBeaconState,
 	m := NewMockBlockReader()
 	for _, block := range blocks {
 		m.U[block.Block.Slot] = block
-		require.NoError(t, beacon_indicies.WriteBeaconBlockAndIndicies(context.Background(), tx, block, true))
+		require.NoError(t, beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true))
 		require.NoError(t, beacon_indicies.WriteHighestFinalized(tx, block.Block.Slot+64))
 	}
 
@@ -155,7 +159,6 @@ func GetElectraRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState
 	preState := state.New(&clparams.MainnetBeaconConfig)
 	if err := utils.DecodeSSZSnappy(preState, electra_pre_state_ssz_snappy, int(clparams.ElectraVersion)); err != nil {
 		panic(err)
-
 	}
 	postState := state.New(&clparams.MainnetBeaconConfig)
 	if err := utils.DecodeSSZSnappy(postState, electra_post_state_ssz_snappy, int(clparams.ElectraVersion)); err != nil {
@@ -179,7 +182,6 @@ func GetCapellaRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState
 	preState := state.New(&clparams.MainnetBeaconConfig)
 	if err := utils.DecodeSSZSnappy(preState, capella_pre_state_ssz_snappy, int(clparams.CapellaVersion)); err != nil {
 		panic(err)
-
 	}
 	postState := state.New(&clparams.MainnetBeaconConfig)
 	if err := utils.DecodeSSZSnappy(postState, capella_post_state_ssz_snappy, int(clparams.CapellaVersion)); err != nil {
@@ -214,7 +216,7 @@ func GetPhase0Random() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState,
 func GetBellatrixRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState, *state.CachingBeaconState) {
 	ret := make([]*cltypes.SignedBeaconBlock, 0, 96)
 	// format for blocks is blocks_{i}.ssz_snappy where i is the index of the block, starting from 0 to 95 included.
-	for i := 0; i < 96; i++ {
+	for i := range 96 {
 		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.BellatrixVersion)
 		// Lets do te
 		b, err := bellatrixFS.ReadFile("test_data/bellatrix/blocks_" + strconv.Itoa(i) + ".ssz_snappy")
@@ -243,5 +245,4 @@ func GetBellatrixRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconSta
 		panic(err)
 	}
 	return ret, preState, postState
-
 }

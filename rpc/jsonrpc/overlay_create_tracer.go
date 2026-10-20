@@ -40,28 +40,24 @@ func (ct *OverlayCreateTracer) Tracer() *tracers.Tracer {
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
 			OnTxStart: nil,
-			OnEnter:   ct.OnEnter,
+			OnEnterV2: ct.OnEnterV2,
 		},
 	}
 }
 
 // Rest of the frames
-func (ct *OverlayCreateTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (ct *OverlayCreateTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
 	if ct.isCapturing {
 		return
 	}
 
 	if (vm.OpCode(typ) == vm.CREATE || vm.OpCode(typ) == vm.CREATE2) && to == ct.contractAddress {
 		ct.isCapturing = true
-		_, _, _, _, err := ct.evm.OverlayCreate(from, vm.NewCodeAndHash(ct.code), mdgas.MdGas{Regular: ct.gasCap}, value, to, vm.OpCode(typ), true /* incrementNonce */)
+		_, _, _, _, err := ct.evm.OverlayCreate(from, vm.NewCodeAndHash(ct.code), mdgas.MdGas{Execution: ct.gasCap}, value, to, vm.OpCode(typ), true /* incrementNonce */)
 		if err != nil {
 			ct.err = err
 		} else {
-			if result, err := ct.evm.IntraBlockState().GetCode(ct.contractAddress); err != nil {
-				ct.resultCode = result
-			} else {
-				ct.err = err
-			}
+			ct.resultCode, ct.err = ct.evm.IntraBlockState().GetCode(ct.contractAddress)
 		}
 	}
 }

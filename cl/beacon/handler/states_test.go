@@ -17,25 +17,33 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 func TestGetStateFork(t *testing.T) {
-
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 
@@ -74,7 +82,9 @@ func TestGetStateFork(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
 			// Query the block in the handler with /eth/v2/beacon/blocks/{block_id}
-			resp, err := http.Get(server.URL + "/eth/v1/beacon/states/" + c.blockID + "/fork")
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+c.blockID+"/fork", nil)
+			require.NoError(t, err)
+			resp, err := server.Client().Do(req)
 			require.NoError(t, err)
 			defer resp.Body.Close()
 			require.Equal(t, c.code, resp.StatusCode)
@@ -92,13 +102,7 @@ func TestGetStateFork(t *testing.T) {
 	}
 }
 
-func stringRPCErr(r io.Reader) string {
-	b, _ := io.ReadAll(r)
-	return string(b)
-}
-
 func TestGetStateRoot(t *testing.T) {
-
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 
@@ -139,7 +143,9 @@ func TestGetStateRoot(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
 			// Query the block in the handler with /eth/v2/beacon/blocks/{block_id}
-			resp, err := http.Get(server.URL + "/eth/v1/beacon/states/" + c.blockID + "/root")
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+c.blockID+"/root", nil)
+			require.NoError(t, err)
+			resp, err := server.Client().Do(req)
 			require.NoError(t, err)
 			defer resp.Body.Close()
 			require.Equal(t, c.code, resp.StatusCode)
@@ -156,7 +162,6 @@ func TestGetStateRoot(t *testing.T) {
 }
 
 func TestGetStateFullHistorical(t *testing.T) {
-
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 
@@ -198,7 +203,7 @@ func TestGetStateFullHistorical(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
 			// Query the block in the handler with /eth/v2/beacon/states/{block_id} with content-type octet-stream
-			req, err := http.NewRequest("GET", server.URL+"/eth/v2/debug/beacon/states/"+c.blockID, nil)
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v2/debug/beacon/states/"+c.blockID, nil)
 			require.NoError(t, err)
 			req.Header.Set("Accept", "application/octet-stream")
 
@@ -249,7 +254,6 @@ func TestGetStateFullHistorical(t *testing.T) {
 }
 
 func TestGetStateFullForkchoice(t *testing.T) {
-
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 
@@ -292,7 +296,7 @@ func TestGetStateFullForkchoice(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
 			// Query the block in the handler with /eth/v2/beacon/states/{block_id} with content-type octet-stream
-			req, err := http.NewRequest("GET", server.URL+"/eth/v2/debug/beacon/states/"+c.blockID, nil)
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v2/debug/beacon/states/"+c.blockID, nil)
 			require.NoError(t, err)
 			req.Header.Set("Accept", "application/octet-stream")
 
@@ -317,8 +321,91 @@ func TestGetStateFullForkchoice(t *testing.T) {
 	}
 }
 
-func TestGetStateSyncCommittees(t *testing.T) {
+// TestGetStateFullSkipsForkchoiceStateAtLaterSlot pins that a fork choice state
+// advanced past its block, as an anchor state can be, is not served for that
+// block's slot or root.
+func TestGetStateFullSkipsForkchoiceStateAtLaterSlot(t *testing.T) {
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 
+	postRoot, err := postState.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
+
+	advanced, err := postState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(advanced, postState.Slot()+1))
+	fcu.StateAtBlockRootVal[fcu.HeadVal] = advanced
+
+	for _, stateID := range []string{
+		"0x" + common.Bytes2Hex(postRoot[:]),
+		strconv.FormatUint(postState.Slot(), 10),
+	} {
+		t.Run(stateID, func(t *testing.T) {
+			server := httptest.NewServer(handler.mux)
+			defer server.Close()
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v2/debug/beacon/states/"+stateID, nil)
+			require.NoError(t, err)
+			req.Header.Set("Accept", "application/octet-stream")
+			resp, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+
+			out, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			got := state.New(&clparams.MainnetBeaconConfig)
+			require.NoError(t, got.DecodeSSZ(out, int(clparams.Phase0Version)))
+			require.Equal(t, postState.Slot(), got.Slot())
+			gotRoot, err := got.HashSSZ()
+			require.NoError(t, err)
+			require.Equal(t, postRoot, gotRoot)
+		})
+	}
+}
+
+// TestGetStateFullFinalizedServesAdvancedForkchoiceState pins that a named
+// state_id still gets the fork choice state when it was advanced past its
+// block, as the anchor checkpoint state can be.
+func TestGetStateFullFinalizedServesAdvancedForkchoiceState(t *testing.T) {
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+
+	var err error
+	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
+
+	advanced, err := postState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(advanced, postState.Slot()+1))
+	advancedRoot, err := advanced.HashSSZ()
+	require.NoError(t, err)
+	fcu.StateAtBlockRootVal[fcu.HeadVal] = advanced
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v2/debug/beacon/states/finalized", nil)
+	require.NoError(t, err)
+	req.Header.Set("Accept", "application/octet-stream")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	out, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	got := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, got.DecodeSSZ(out, int(clparams.Phase0Version)))
+	require.Equal(t, advanced.Slot(), got.Slot())
+	gotRoot, err := got.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, advancedRoot, gotRoot)
+}
+
+func TestGetStateSyncCommittees(t *testing.T) {
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
@@ -366,7 +453,9 @@ func TestGetStateSyncCommittees(t *testing.T) {
 		t.Run(c.blockID, func(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
-			resp, err := http.Get(server.URL + "/eth/v1/beacon/states/" + c.blockID + "/sync_committees")
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+c.blockID+"/sync_committees", nil)
+			require.NoError(t, err)
+			resp, err := server.Client().Do(req)
 			require.NoError(t, err)
 
 			defer resp.Body.Close()
@@ -383,7 +472,6 @@ func TestGetStateSyncCommittees(t *testing.T) {
 }
 
 func TestGetStateSyncCommitteesHistorical(t *testing.T) {
-
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
@@ -424,7 +512,9 @@ func TestGetStateSyncCommitteesHistorical(t *testing.T) {
 		t.Run(c.blockID, func(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
-			resp, err := http.Get(server.URL + "/eth/v1/beacon/states/" + c.blockID + "/sync_committees")
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+c.blockID+"/sync_committees", nil)
+			require.NoError(t, err)
+			resp, err := server.Client().Do(req)
 			require.NoError(t, err)
 
 			defer resp.Body.Close()
@@ -441,7 +531,6 @@ func TestGetStateSyncCommitteesHistorical(t *testing.T) {
 }
 
 func TestGetStateFinalityCheckpoints(t *testing.T) {
-
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 
@@ -482,7 +571,9 @@ func TestGetStateFinalityCheckpoints(t *testing.T) {
 		t.Run(c.blockID, func(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
-			resp, err := http.Get(server.URL + "/eth/v1/beacon/states/" + c.blockID + "/finality_checkpoints")
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+c.blockID+"/finality_checkpoints", nil)
+			require.NoError(t, err)
+			resp, err := server.Client().Do(req)
 			require.NoError(t, err)
 
 			defer resp.Body.Close()
@@ -499,7 +590,6 @@ func TestGetStateFinalityCheckpoints(t *testing.T) {
 }
 
 func TestGetRandao(t *testing.T) {
-
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 
@@ -539,7 +629,9 @@ func TestGetRandao(t *testing.T) {
 		t.Run(c.blockID, func(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
-			resp, err := http.Get(server.URL + "/eth/v1/beacon/states/" + c.blockID + "/randao")
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+c.blockID+"/randao", nil)
+			require.NoError(t, err)
+			resp, err := server.Client().Do(req)
 			require.NoError(t, err)
 
 			defer resp.Body.Close()
@@ -553,4 +645,123 @@ func TestGetRandao(t *testing.T) {
 			require.Equal(t, expected, string(out))
 		})
 	}
+}
+
+func TestGetPendingQueuesConsensusVersionHeader(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+
+	var err error
+	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+	lowest := uint64(0)
+	fcu.LowestAvailableSlotVal = &lowest
+	fcu.PendingConsolidationsVal = map[common.Hash]*solid.ListSSZ[*solid.PendingConsolidation]{
+		fcu.HeadVal: solid.NewPendingConsolidationList(&clparams.MainnetBeaconConfig),
+	}
+	fcu.PendingDepositsVal = map[common.Hash]*solid.ListSSZ[*solid.PendingDeposit]{
+		fcu.HeadVal: solid.NewPendingDepositList(&clparams.MainnetBeaconConfig),
+	}
+	fcu.PendingPartialWithdrawalsVal = map[common.Hash]*solid.ListSSZ[*solid.PendingPartialWithdrawal]{
+		fcu.HeadVal: solid.NewPendingWithdrawalList(&clparams.MainnetBeaconConfig),
+	}
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	versions := map[string]string{}
+	for _, endpoint := range []string{"pending_consolidations", "pending_deposits", "pending_partial_withdrawals"} {
+		req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/head/"+endpoint, nil)
+		require.NoError(t, err)
+		resp, err := server.Client().Do(req)
+		require.NoError(t, err)
+		resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode, endpoint)
+		v := resp.Header.Get("Eth-Consensus-Version")
+		require.NotEmpty(t, v, "%s must set Eth-Consensus-Version", endpoint)
+		versions[endpoint] = v
+	}
+	require.Equal(t, versions["pending_partial_withdrawals"], versions["pending_consolidations"])
+	require.Equal(t, versions["pending_partial_withdrawals"], versions["pending_deposits"])
+}
+
+// The response can be hundreds of MB on mainnet, so it must not stay in the pool.
+func TestResponseValidatorsDoesNotParkResponseInPool(t *testing.T) {
+	seed := new(strings.Builder)
+	saved := stringsBuilderPool
+	stringsBuilderPool = &sync.Pool{New: func() any { return seed }}
+	t.Cleanup(func() { stringsBuilderPool = saved })
+
+	const count = 16
+	validators := solid.NewValidatorSetWithLength(count, count)
+	balances := solid.NewUint64ListSSZ(count)
+	for i := range count {
+		balances.Append(uint64(i))
+	}
+
+	responseValidators(httptest.NewRecorder(), nil, nil, 0, balances, validators, true, false)
+
+	require.Zero(t, seed.Len(), "pooled builder still holds the whole response")
+}
+
+// A state that left the fork-choice cache is served from the epoch data stored under the
+// epoch's start slot. States before Fulu have no proposer lookahead.
+func TestGetStateProposerLookaheadHistorical(t *testing.T) {
+	db, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	cfg := handler.beaconChainCfg
+	epoch := postState.Slot() / cfg.SlotsPerEpoch
+	require.NotZero(t, epoch%cfg.SlotsPerEpoch, "the epoch must not also be an epoch-start slot")
+	postRoot, err := postState.HashSSZ()
+	require.NoError(t, err)
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	get := func() (int, []string) {
+		req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/0x"+common.Bytes2Hex(postRoot[:])+"/proposer_lookahead", nil)
+		require.NoError(t, err)
+		resp, err := server.Client().Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		var body struct {
+			Data []string `json:"data"`
+		}
+		if resp.StatusCode == http.StatusOK {
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+		}
+		return resp.StatusCode, body.Data
+	}
+
+	lookahead := solid.NewUint64VectorSSZ(int((1 + cfg.MinSeedLookahead) * cfg.SlotsPerEpoch))
+	for i := range lookahead.Length() {
+		lookahead.Set(i, uint64(i))
+	}
+	// Every raw state carries a zero-filled lookahead, so a cached pre-Fulu state is still refused.
+	fcu.ProposerLookaheadVal = lookahead
+	code, _ := get()
+	require.Equal(t, http.StatusBadRequest, code)
+	fcu.ProposerLookaheadVal = nil
+
+	// A later Fulu epoch: the antiquary writes the fork epoch's own row with the previous schema.
+	cfg.FuluForkEpoch = epoch - 1
+	key := base_encoding.Encode64ToBytes4(cfg.RoundSlotToEpoch(postState.Slot()))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error { return tx.Delete(kv.EpochData, key) }))
+	code, _ = get()
+	require.Equal(t, http.StatusNotFound, code)
+
+	epochData := &state_accessors.EpochData{JustificationBits: &cltypes.JustificationBits{}, ProposerLookahead: lookahead, BeaconConfig: cfg, Version: clparams.FuluVersion}
+	var buf bytes.Buffer
+	require.NoError(t, epochData.WriteTo(&buf))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Put(kv.EpochData, key, buf.Bytes())
+	}))
+
+	code, data := get()
+	require.Equal(t, http.StatusOK, code)
+	require.Len(t, data, lookahead.Length())
+	require.Equal(t, strconv.Itoa(lookahead.Length()-1), data[len(data)-1])
+
+	// The row belongs to the canonical chain; a side-branch state must not be served from it.
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error { return beacon_indicies.MarkRootCanonical(tx, postState.Slot(), common.Hash{1}) }))
+	code, _ = get()
+	require.Equal(t, http.StatusNotFound, code)
 }

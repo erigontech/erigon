@@ -18,7 +18,7 @@ package caplinflags
 
 import (
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var CliFlags = []cli.Flag{
@@ -33,15 +33,19 @@ var CliFlags = []cli.Flag{
 	&EngineApiHostFlag,
 	&EngineApiPortFlag,
 	&MevRelayUrl,
+	&utils.CaplinAllowPrivateBuilderURLs,
 	&JwtSecret,
 	&CustomConfig,
 	&CustomGenesisState,
 	&utils.DataDirFlag,
 	&utils.BeaconApiAllowCredentialsFlag,
+	&utils.BeaconApiPreserveGraffitiFlag,
 	&utils.BeaconApiAllowMethodsFlag,
 	&utils.BeaconApiAllowOriginsFlag,
 	&utils.CaplinCheckpointSyncUrlFlag,
 	&utils.CaplinMaxPeerCount,
+	&utils.CaplinIPBlockLimitsDisableFlag,
+	&utils.CaplinIPBlockLimitsTrustedCIDRsFlag,
 	&utils.CaplinSubscribeAllTopicsFlag,
 }
 

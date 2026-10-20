@@ -6,9 +6,9 @@ sidebar_position: 2
 
 # Sync Modes
 
-Erigon 3 supports four prune modes that control how much chain history your node retains. Choose based on your use case — most users should run a Full Node.
+Erigon 3 supports four pruning modes that control how much chain history your node retains. Choose based on your use case — most users should run a Full Node.
 
-| **Prune Mode**                                                        | **Flag**               | **Data Retained**                                                                                    | **Primary Use Case**                                                                     |
+| **Pruning Mode**                                                        | **Flag**               | **Data Retained**                                                                                    | **Primary Use Case**                                                                     |
 | --------------------------------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | <p>* <a href="sync-modes.md#full-node">Full Node</a><br/>(Default)</p> | (No flag needed)       | Retains recent state, all blocks POST-Merge, and prunes ancient blocks and state (EIP-4444 enabled)  | General users, DApp interaction, fastest sync.                                           |
 | \* [Minimal Node](sync-modes#minimal-node)                         | `--prune.mode=minimal` | Only recent blocks                                                                                   | Solo staking, users with constrained hardware, maximum privacy for sending transactions. |

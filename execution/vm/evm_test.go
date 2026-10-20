@@ -19,14 +19,61 @@ package vm
 import (
 	"math"
 	"testing"
+	"unsafe"
+
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-// TestDeriveFrameRegularGasUsed covers the EIP-8037 cases where the formula
-// Regular = (inputTotal − gasRemainingTotal) − stateGasUsed must hold,
+func TestFrameGasUsageRevert(t *testing.T) {
+	for _, typ := range []OpCode{CALLCODE, CREATE} {
+		for _, tc := range []struct {
+			name      string
+			ending    []byte
+			execution uint64
+		}{
+			{name: "revert", ending: []byte{byte(PUSH0), byte(PUSH0), byte(REVERT)}, execution: 12_110},
+			{name: "exceptional halt", ending: []byte{byte(INVALID)}, execution: 200_000},
+		} {
+			t.Run(typ.String()+"/"+tc.name, func(t *testing.T) {
+				ibs := state.New(state.NewNoopReader())
+				defer ibs.Close()
+				evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+				initial := mdgas.MdGas{Execution: 200_000, State: params.StateGasPerStorageSet / 2}
+				code := append([]byte{byte(PUSH1), 1, byte(PUSH1), 0, byte(SSTORE)}, tc.ending...)
+				var remaining mdgas.MdGas
+				var used mdgas.MdGasUsage
+				var err error
+				if typ == CREATE {
+					_, _, remaining, used, err = evm.Create(accounts.ZeroAddress, code, initial, uint256.Int{}, nil, false)
+				} else {
+					address := accounts.InternAddress(common.HexToAddress("0x1000"))
+					require.NoError(t, ibs.SetCode(address, code, tracing.CodeChangeUnspecified))
+					_, remaining, used, err = evm.CallCode(accounts.ZeroAddress, address, nil, initial, uint256.Int{})
+				}
+				require.Error(t, err)
+				require.Equal(t, mdgas.MdGas{Execution: initial.Execution - tc.execution, State: initial.State}, remaining)
+				require.Equal(t, mdgas.MdGasUsage{Execution: tc.execution}, used)
+			})
+		}
+	}
+}
+
+// TestDeriveFrameExecutionGasUsed covers the EIP-8037 cases where the formula
+// Execution = (inputTotal − gasRemainingTotal) − stateGasUsed must hold,
 // including the refund-heavy case where stateGas grows above the input
-// because inline state-gas refunds (creditStateGasRefund) credit the
+// because inline state-gas refunds (refillStateGas) credit the
 // frame's local reservoir.
-func TestDeriveFrameRegularGasUsed(t *testing.T) {
+func TestDeriveFrameExecutionGasUsed(t *testing.T) {
 	t.Parallel()
 
 	const sgps = 64 * 1530 // params.StateGasPerStorageSet
@@ -39,7 +86,7 @@ func TestDeriveFrameRegularGasUsed(t *testing.T) {
 		want              uint64
 	}{
 		{
-			// Plain frame: 50 regular ops, 30 state charge from a 100-unit
+			// Plain frame: 50 execution ops, 30 state charge from a 100-unit
 			// reservoir, no spillover.
 			//   input = 1000 R + 100 S = 1100
 			//   leftover = 950 R + 70 S = 1020
@@ -51,12 +98,12 @@ func TestDeriveFrameRegularGasUsed(t *testing.T) {
 			want:              50,
 		},
 		{
-			// Spillover: 50 regular ops + state charge 200 against a 100-unit
-			// reservoir, 100 spills into regular gas.
+			// Spillover: 50 execution ops + state charge 200 against a 100-unit
+			// reservoir, 100 spills into execution gas.
 			//   input = 1000 R + 100 S = 1100
 			//   leftover = 850 R + 0 S = 850
 			//   stateGasUsed = 200 (full charge, regardless of spillover)
-			// Want 50 (RegularUsedDirect only — the spilled portion is
+			// Want 50 (ExecutionUsedDirect only — the spilled portion is
 			// already represented in stateGasUsed).
 			name:              "with_spillover",
 			inputTotal:        1100,
@@ -71,9 +118,9 @@ func TestDeriveFrameRegularGasUsed(t *testing.T) {
 			// pushing gasRemainingTotal above inputTotal.
 			//   input = 100 R + 50 S = 150
 			//   refund sgps grows leftover state to 50 + sgps
-			//   10 regular ops → leftover regular = 90
+			//   10 execution ops → leftover execution = 90
 			//   stateGasUsed = -sgps
-			// Want 10 (the regular ops). A guarded uint64 subtraction would
+			// Want 10 (the execution ops). A guarded uint64 subtraction would
 			// see gasRemainingTotal > inputTotal and (wrongly) return 0.
 			name:              "refunds_exceed_charges_intermediate_frame",
 			inputTotal:        150,
@@ -82,9 +129,9 @@ func TestDeriveFrameRegularGasUsed(t *testing.T) {
 			want:              10,
 		},
 		{
-			// Pure refund frame, no regular work. Verifies signed cancellation
+			// Pure refund frame, no execution work. Verifies signed cancellation
 			// across the entire delta.
-			name:              "refunds_only_no_regular_ops",
+			name:              "refunds_only_no_execution_ops",
 			inputTotal:        150,
 			gasRemainingTotal: 150 + sgps,
 			stateGasUsed:      -sgps,
@@ -106,11 +153,103 @@ func TestDeriveFrameRegularGasUsed(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := deriveFrameRegularGasUsed(tc.inputTotal, tc.gasRemainingTotal, tc.stateGasUsed)
+			got := deriveFrameExecutionGasUsed(tc.inputTotal, tc.gasRemainingTotal, tc.stateGasUsed)
 			if got != tc.want {
-				t.Fatalf("deriveFrameRegularGasUsed(input=%d, leftover=%d, state=%d) = %d, want %d",
+				t.Fatalf("deriveFrameExecutionGasUsed(input=%d, leftover=%d, state=%d) = %d, want %d",
 					tc.inputTotal, tc.gasRemainingTotal, tc.stateGasUsed, got, tc.want)
 			}
+		})
+	}
+}
+
+// TestEVMFitsItsSizeClass keeps EVM inside the allocation size class its field
+// order was chosen for. The bound is one-sided: shrinking EVM is free, growing
+// it past the class is what costs a size class per allocation.
+func TestEVMFitsItsSizeClass(t *testing.T) {
+	t.Parallel()
+
+	if got := unsafe.Sizeof(EVM{}); got > evmSizeClass {
+		t.Fatalf("sizeof(EVM) = %d, above the %d-byte size class: pack the new field into "+
+			"existing padding, or raise evmSizeClass knowing every EVM allocation grows", got, evmSizeClass)
+	}
+}
+
+func TestNestedCallsReuseOneFrameContext(t *testing.T) {
+	t.Parallel()
+
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	caller := accounts.InternAddress(common.HexToAddress("0x1000"))
+	callee := accounts.InternAddress(common.HexToAddress("0x2000"))
+	call := []byte{byte(PUSH0), byte(PUSH0), byte(PUSH0), byte(PUSH0), byte(PUSH0), byte(PUSH2), 0x20, 0x00, byte(GAS), byte(CALL), byte(POP)}
+	require.NoError(t, ibs.SetCode(caller, append(call, call...), tracing.CodeChangeUnspecified))
+	require.NoError(t, ibs.SetCode(callee, []byte{byte(STOP)}, tracing.CodeChangeUnspecified))
+
+	var nested []*CallContext
+	var parked []*CallContext
+	var evm *EVM
+	hooks := &tracing.Hooks{OnOpcode: func(_ uint64, _ byte, _, _ uint64, scope tracing.OpContext, _ []byte, depth int, _ error) {
+		switch depth {
+		case 1:
+			// Between the two CALLs the returned nested context sits in the
+			// spare slot; without the parking it would have gone to the pool.
+			parked = append(parked, evm.spareFrame)
+		case 2:
+			nested = append(nested, scope.(*CallContext))
+		}
+	}}
+	evm = NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: hooks})
+	_, _, _, err := evm.Call(accounts.ZeroAddress, caller, nil, mdgas.MdGas{Execution: 100_000}, uint256.Int{}, false)
+	require.NoError(t, err)
+	require.Len(t, nested, 2)
+	require.Same(t, nested[0], nested[1], "the second nested call reuses the first one's context")
+	// The pool would hand the same context back too, so the spare slot is what
+	// distinguishes parking from a pool round-trip.
+	require.Contains(t, parked, nested[0], "the returned nested context parks on the EVM")
+	require.Nil(t, evm.spareFrame, "the outermost frame returns the spare context to the pool")
+}
+
+func TestCreateCollisionCheckOfAnAbsentAccountReadsOnlyExistence(t *testing.T) {
+	t.Parallel()
+
+	ibs := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+	defer ibs.Close()
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+
+	collision, err := evm.hasCreateCollision(addr)
+	require.NoError(t, err)
+	require.False(t, collision)
+	reads := ibs.VersionedReads()
+	_, nonceRead := reads.GetNonce(addr)
+	_, codeHashRead := reads.GetCodeHash(addr)
+	require.False(t, nonceRead || codeHashRead, "an absent account needs no nonce or code hash read")
+}
+
+func TestZeroUnpricedBaseFee(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		noBaseFee  bool
+		gasPrice   uint64
+		wantZeroed bool
+	}{
+		{name: "unpriced call skipping the fee checks", noBaseFee: true, gasPrice: 0, wantZeroed: true},
+		{name: "priced call skipping the fee checks", noBaseFee: true, gasPrice: 3, wantZeroed: false},
+		{name: "unpriced call under the fee checks", noBaseFee: false, gasPrice: 0, wantZeroed: false},
+		{name: "priced call under the fee checks", noBaseFee: false, gasPrice: 3, wantZeroed: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			blockCtx := evmtypes.BlockContext{BaseFee: *uint256.NewInt(7)}
+			txCtx := evmtypes.TxContext{GasPrice: *uint256.NewInt(tc.gasPrice)}
+
+			got := ZeroUnpricedBaseFee(blockCtx, txCtx, Config{NoBaseFee: tc.noBaseFee})
+
+			want := uint256.NewInt(7)
+			if tc.wantZeroed {
+				want = uint256.NewInt(0)
+			}
+			require.Equal(t, want, &got.BaseFee)
 		})
 	}
 }

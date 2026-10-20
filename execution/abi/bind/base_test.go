@@ -28,7 +28,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -50,7 +49,7 @@ func (mc *mockCaller) CodeAt(ctx context.Context, contract common.Address, block
 	return []byte{1, 2, 3}, nil
 }
 
-func (mc *mockCaller) CallContract(ctx context.Context, call ethereum.CallMsg, blockNumber *uint256.Int) ([]byte, error) {
+func (mc *mockCaller) CallContract(ctx context.Context, call bind.CallMsg, blockNumber *uint256.Int) ([]byte, error) {
 	mc.callContractBlockNumber = blockNumber
 	return nil, nil
 }
@@ -60,12 +59,12 @@ func (mc *mockCaller) PendingCodeAt(ctx context.Context, contract common.Address
 	return nil, nil
 }
 
-func (mc *mockCaller) PendingCallContract(ctx context.Context, call ethereum.CallMsg) ([]byte, error) {
+func (mc *mockCaller) PendingCallContract(ctx context.Context, call bind.CallMsg) ([]byte, error) {
 	mc.pendingCallContractCalled = true
 	return nil, nil
 }
-func TestPassingBlockNumber(t *testing.T) {
 
+func TestPassingBlockNumber(t *testing.T) {
 	mc := &mockCaller{}
 
 	bc := bind.NewBoundContract(common.HexToAddress("0x0"), abi.ABI{
@@ -189,7 +188,9 @@ func TestUnpackIndexedFuncTyLogIntoMap(t *testing.T) {
 	addrBytes := mockAddress[:]
 	hash := crypto.Keccak256Hash([]byte("mockFunction(address,uint)"))
 	functionSelector := hash[:4]
-	functionTyBytes := append(addrBytes, functionSelector...)
+	functionTyBytes := make([]byte, 0, len(addrBytes)+len(functionSelector))
+	functionTyBytes = append(functionTyBytes, addrBytes...)
+	functionTyBytes = append(functionTyBytes, functionSelector...)
 	var functionTy [24]byte
 	copy(functionTy[:], functionTyBytes[0:24])
 	topics := []common.Hash{

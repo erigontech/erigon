@@ -79,6 +79,7 @@ func (ac *aggDirtyFilesRoTx) MadvNormal() *aggDirtyFilesRoTx {
 	}
 	return ac
 }
+
 func (ac *aggDirtyFilesRoTx) DisableReadAhead() {
 	for _, d := range ac.domain {
 		for _, f := range d.files {
@@ -118,6 +119,26 @@ func (ac *aggDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorAggFi
 		mf.ii[ii.ii.Name] = ii.filesWithMissedAccessors(accessorDL)
 	}
 	return
+}
+
+func (ac *aggDirtyFilesRoTx) dropCovered(mf *MissedAccessorAggFiles) {
+	drop := func(missed MissedFilesMap, all []*FilesItem, l statecfg.Accessors) {
+		for acc := range missed {
+			missed[acc] = dropCoveredAccessors(missed[acc], all, l)
+		}
+	}
+	for _, d := range ac.domain {
+		df := mf.domain[d.d.Name]
+		drop(df.files, d.files, d.d.Accessors)
+		drop(df.history.files, d.history.files, d.history.h.Accessors)
+		drop(df.history.ii.files, d.history.ii.files, d.history.ii.ii.Accessors)
+	}
+	for _, ii := range ac.ii {
+		if ii == nil {
+			continue
+		}
+		drop(mf.ii[ii.ii.Name].files, ii.files, ii.ii.Accessors)
+	}
 }
 
 func (ac *aggDirtyFilesRoTx) Close() {
@@ -248,7 +269,7 @@ func (a *Aggregator) PeriodicalyPrintProcessSet(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-logEvery.C:
-				if s := a.ps.String(); s != "" {
+				if s := a.backgroundProgress.String(); s != "" {
 					a.logger.Info("[agg] building", "files", s)
 				}
 			}
@@ -257,11 +278,13 @@ func (a *Aggregator) PeriodicalyPrintProcessSet(ctx context.Context) {
 }
 
 // fileItems collection of missed files
-type MissedFilesMap map[statecfg.Accessors][]*FilesItem
-type MissedAccessorAggFiles struct {
-	domain map[kv.Domain]*MissedAccessorDomainFiles
-	ii     map[kv.InvertedIdx]*MissedAccessorIIFiles
-}
+type (
+	MissedFilesMap         map[statecfg.Accessors][]*FilesItem
+	MissedAccessorAggFiles struct {
+		domain map[kv.Domain]*MissedAccessorDomainFiles
+		ii     map[kv.InvertedIdx]*MissedAccessorIIFiles
+	}
+)
 
 func (m MissedFilesMap) IsEmpty() bool {
 	for _, v := range m {

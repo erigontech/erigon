@@ -9,6 +9,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
@@ -73,7 +74,6 @@ func Configure(Schema SchemaGen, a AggSetters, dirs datadir.Dirs, salt *uint32, 
 	return nil
 }
 
-const AggregatorSqueezeCommitmentValues = true
 const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
 
 var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", false)
@@ -187,7 +187,18 @@ func (s *SchemaGen) GetBlockIdxFilesCfg(name string) BlockIdxFilesCfg {
 	return v
 }
 
-var ExperimentalConcurrentCommitment = false // set true to use concurrent commitment by default
+// commitmentKVWriteVersion stamps v2.1 on referenced commitment files (matching main's referenced
+// default) and v2.2 on plain ones; the read ceiling (DataKV.Current = v2.2) accepts both.
+func commitmentKVWriteVersion(c *DomainCfg) version.Version {
+	if c.ReferencesInCommitmentBranches {
+		return version.V2_1
+	}
+	return version.V2_2
+}
+
+const DefaultParallelCommitment = true
+
+var ExperimentalParallelCommitment = dbg.EnvBool("COMMITMENT_PARALLEL", DefaultParallelCommitment)
 
 var Schema = SchemaGen{
 	AccountsDomain: DomainCfg{
@@ -205,6 +216,7 @@ var Schema = SchemaGen{
 			HistoryIdx:         kv.AccountsHistoryIdx,
 
 			IiCfg: InvIdxCfg{
+				Enabled:      true,
 				FilenameBase: kv.AccountsDomain.String(), KeysTable: kv.TblAccountHistoryKeys, ValuesTable: kv.TblAccountIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
@@ -226,6 +238,7 @@ var Schema = SchemaGen{
 			HistoryIdx:         kv.StorageHistoryIdx,
 
 			IiCfg: InvIdxCfg{
+				Enabled:      true,
 				FilenameBase: kv.StorageDomain.String(), KeysTable: kv.TblStorageHistoryKeys, ValuesTable: kv.TblStorageIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
@@ -248,6 +261,7 @@ var Schema = SchemaGen{
 			HistoryIdx:         kv.CodeHistoryIdx,
 
 			IiCfg: InvIdxCfg{
+				Enabled:      true,
 				FilenameBase: kv.CodeDomain.String(), KeysTable: kv.TblCodeHistoryKeys, ValuesTable: kv.TblCodeIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
@@ -258,8 +272,9 @@ var Schema = SchemaGen{
 		Name: kv.CommitmentDomain, ValuesTable: kv.TblCommitmentVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
-		Accessors:           AccessorHashMap,
-		ReplaceKeysInValues: AggregatorSqueezeCommitmentValues, // when true, keys are replaced in values during merge once file range reaches threshold
+		Accessors:                      AccessorHashMap,
+		ReferencesInCommitmentBranches: config3.DefaultReferencesInCommitmentBranches, // when true, keys are replaced in values during merge once file range reaches threshold
+		KVWriteVersion:                 commitmentKVWriteVersion,
 
 		Hist: HistCfg{
 			ValuesTable:   kv.TblCommitmentHistoryVals,
@@ -274,6 +289,7 @@ var Schema = SchemaGen{
 			HistoryDisabled:   true,
 
 			IiCfg: InvIdxCfg{
+				Enabled:      true,
 				FilenameBase: kv.CommitmentDomain.String(), KeysTable: kv.TblCommitmentHistoryKeys, ValuesTable: kv.TblCommitmentIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
@@ -296,6 +312,7 @@ var Schema = SchemaGen{
 			HistoryIdx:         kv.ReceiptHistoryIdx,
 
 			IiCfg: InvIdxCfg{
+				Enabled:      true,
 				FilenameBase: kv.ReceiptDomain.String(), KeysTable: kv.TblReceiptHistoryKeys, ValuesTable: kv.TblReceiptIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
@@ -307,11 +324,11 @@ var Schema = SchemaGen{
 		LargeValues: true,
 
 		Accessors:   AccessorHashMap,
-		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
 
 		Hist: HistCfg{
 			ValuesTable:   kv.TblRCacheHistoryVals,
-			CompressorCfg: seg.Cfg{ValuesOnCompressedPage: 16}, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+			CompressorCfg: seg.Cfg{ValuesOnCompressedPage: 16}, Compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
 			Accessors: AccessorHashMap,
 
 			HistoryLargeValues: true,
@@ -321,7 +338,7 @@ var Schema = SchemaGen{
 			HistoryValuesOnCompressedPage: 16,
 
 			IiCfg: InvIdxCfg{
-				Disable:      true, // disable everything by default
+				Enabled:      false, // rcache domain is opt-in via EnableHistoricalRCache
 				FilenameBase: kv.RCacheDomain.String(), KeysTable: kv.TblRCacheHistoryKeys, ValuesTable: kv.TblRCacheIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
@@ -330,6 +347,7 @@ var Schema = SchemaGen{
 	},
 
 	LogAddrIdx: InvIdxCfg{
+		Enabled:      true,
 		FilenameBase: kv.FileLogAddressIdx, KeysTable: kv.TblLogAddressKeys, ValuesTable: kv.TblLogAddressIdx,
 
 		Compression: seg.CompressNone,
@@ -337,6 +355,7 @@ var Schema = SchemaGen{
 		Accessors:   AccessorHashMap,
 	},
 	LogTopicIdx: InvIdxCfg{
+		Enabled:      true,
 		FilenameBase: kv.FileLogTopicsIdx, KeysTable: kv.TblLogTopicsKeys, ValuesTable: kv.TblLogTopicsIdx,
 
 		Compression: seg.CompressNone,
@@ -344,6 +363,7 @@ var Schema = SchemaGen{
 		Accessors:   AccessorHashMap,
 	},
 	TracesFromIdx: InvIdxCfg{
+		Enabled:      true,
 		FilenameBase: kv.FileTracesFromIdx, KeysTable: kv.TblTracesFromKeys, ValuesTable: kv.TblTracesFromIdx,
 
 		Compression: seg.CompressNone,
@@ -351,6 +371,7 @@ var Schema = SchemaGen{
 		Accessors:   AccessorHashMap,
 	},
 	TracesToIdx: InvIdxCfg{
+		Enabled:      true,
 		FilenameBase: kv.FileTracesToIdx, KeysTable: kv.TblTracesToKeys, ValuesTable: kv.TblTracesToIdx,
 
 		Compression: seg.CompressNone,
@@ -442,7 +463,7 @@ var HistoryCompressCfg = seg.Cfg{
 
 func EnableHistoricalRCache() {
 	cfg := Schema.RCacheDomain
-	cfg.Hist.IiCfg.Disable = false
+	cfg.Hist.IiCfg.Enabled = true
 	cfg.Hist.HistoryDisabled = false
 	cfg.Hist.SnapshotsDisabled = false
 	Schema.RCacheDomain = cfg

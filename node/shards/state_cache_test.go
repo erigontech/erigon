@@ -38,7 +38,6 @@ func TestCacheBtreeOrderAccountStorage2(t *testing.T) {
 	sc.SetAccountWrite(a1[:], &accounts.Account{Incarnation: 2})
 	x, ok := sc.GetAccount(a1[:])
 	fmt.Printf("%+v,%t\n", x.Incarnation, ok)
-
 }
 
 func TestCacheBtreeOrderAccountStorage(t *testing.T) {
@@ -161,10 +160,8 @@ func TestAccountReadWrites(t *testing.T) {
 	sc.SetAccountWrite(addr1[:], &account11)
 	if a, ok := sc.GetAccount(addr1[:]); !ok {
 		t.Fatalf("Expected to find account with addr1")
-	} else {
-		if a.Balance.Uint64() != 11 {
-			t.Fatalf("Expected account balance 11, got %d", a.Balance.Uint64())
-		}
+	} else if a.Balance.Uint64() != 11 {
+		t.Fatalf("Expected account balance 11, got %d", a.Balance.Uint64())
 	}
 	if sc.WriteCount() != 1 {
 		t.Fatalf("Write queue is expected to have 1 elements, got: %d", sc.WriteCount())
@@ -184,10 +181,8 @@ func TestAccountReadWrites(t *testing.T) {
 	sc.SetAccountWrite(addr2[:], &account22)
 	if a, ok := sc.GetAccount(addr2[:]); !ok {
 		t.Fatalf("Expected to find account with addr2")
-	} else {
-		if a.Balance.Uint64() != 22 {
-			t.Fatalf("Expected account balance 22, got %d", a.Balance.Uint64())
-		}
+	} else if a.Balance.Uint64() != 22 {
+		t.Fatalf("Expected account balance 22, got %d", a.Balance.Uint64())
 	}
 	if sc.WriteCount() != 2 {
 		t.Fatalf("Write queue is expected to have 2 elements, got: %d", sc.WriteCount())
@@ -507,7 +502,7 @@ func TestCodeReadWriteAbsentDelete(t *testing.T) {
 	for i := 1; i <= 6; i++ {
 		var addr common.Address
 		addr[0] = byte(i)
-		var code = []byte{byte(i), 2, 3}
+		code := []byte{byte(i), 2, 3}
 		sc.SetCodeRead(addr[:], 2, code)
 	}
 	if sc.readQueuesLen() != 4 {
@@ -549,7 +544,7 @@ func TestCodeReadWriteAbsentDelete(t *testing.T) {
 	for i := 1; i <= 4; i++ {
 		var addr common.Address
 		addr[0] = byte(i)
-		var code = []byte{byte(i), 2, 3}
+		code := []byte{byte(i), 2, 3}
 		sc.SetCodeWrite(addr[:], 1, code)
 	}
 	if sc.WriteCount() != 4 {

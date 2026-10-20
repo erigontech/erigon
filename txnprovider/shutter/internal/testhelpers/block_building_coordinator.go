@@ -70,6 +70,6 @@ func (c ShutterBlockBuildingCoordinator) BuildBlock(
 		return nil, err
 	}
 
-	*txnPointer = *txnPointer + uint64(len(ips))
+	*txnPointer += uint64(len(ips))
 	return block, nil
 }

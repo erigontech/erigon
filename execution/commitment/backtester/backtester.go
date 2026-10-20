@@ -33,12 +33,11 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -70,7 +69,7 @@ func WithChartsPageSize(n uint64) Opt {
 	}
 }
 
-func New(logger log.Logger, db kv.TemporalRoDB, br services.FullBlockReader, outputDir string, opts ...Opt) Backtester {
+func New(logger log.Logger, db kv.TemporalRoDB, br dbservices.FullBlockReader, outputDir string, opts ...Opt) Backtester {
 	bt := Backtester{
 		logger:          logger,
 		db:              db,
@@ -88,7 +87,7 @@ func New(logger log.Logger, db kv.TemporalRoDB, br services.FullBlockReader, out
 type Backtester struct {
 	logger          log.Logger
 	db              kv.TemporalRoDB
-	blockReader     services.FullBlockReader
+	blockReader     dbservices.FullBlockReader
 	outputDir       string
 	paraTrie        bool
 	trieWarmup      bool
@@ -151,7 +150,7 @@ func (bt Backtester) run(ctx context.Context, tx kv.TemporalTx, fromBlock uint64
 		start:      start,
 	}
 	runOutputDir := path.Join(bt.outputDir, ri.String())
-	err = os.MkdirAll(runOutputDir, 0755)
+	err = os.MkdirAll(runOutputDir, 0o755)
 	if err != nil {
 		return err
 	}
@@ -183,7 +182,7 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	start := time.Now()
 	bt.logger.Info("backtesting block commitment", "block", block)
 	blockOutputDir := deriveBlockOutputDir(runOutputDir, block)
-	err := os.MkdirAll(blockOutputDir, 0755)
+	err := os.MkdirAll(blockOutputDir, 0o755)
 	if err != nil {
 		return err
 	}
@@ -197,17 +196,19 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	}
 	toTxNum := maxTxNum + 1
 	bt.logger.Info("backtesting block commitment", "fromTxNum", fromTxNum, "toTxNum", toTxNum, "paraTrie", bt.paraTrie)
+	cfg := commitment.DefaultTrieConfig()
 	if bt.paraTrie {
-		statecfg.ExperimentalConcurrentCommitment = true
+		cfg.Variant = commitment.VariantParallelHexPatricia
 	}
-	sd, err := execctx.NewSharedDomains(ctx, tx, bt.logger)
+	cfg.EnableTrieWarmup = bt.trieWarmup
+	cfg.CsvMetricsFilePrefix = deriveBlockMetricsFilePrefix(blockOutputDir)
+	sd, err := execctx.NewSharedDomains(ctx, tx, bt.logger, execctx.WithTrieConfig(cfg))
 	if err != nil {
 		return err
 	}
 	defer sd.Close()
 	if bt.trieWarmup {
 		sd.EnableParaTrieDB(bt.db)
-		sd.EnableTrieWarmup(true)
 	}
 	if bt.paraTrie {
 		sd.EnableParaTrieDB(bt.db)
@@ -216,8 +217,11 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	//   - commitment data as-of the beginning of the block
 	//   - account/storage/code data as-of the end of the block
 	sd.GetCommitmentCtx().SetStateReader(commitmentdb.NewSplitHistoryReader(tx, fromTxNum, toTxNum /* withHistory */, false))
-	sd.GetCommitmentCtx().SetTrace(bt.logger.Enabled(ctx, log.LvlTrace))
-	sd.GetCommitmentCtx().EnableCsvMetrics(deriveBlockMetricsFilePrefix(blockOutputDir))
+	if bt.logger.Enabled(ctx, log.LvlTrace) {
+		sd.GetCommitmentCtx().SetTraceWriter(os.Stderr)
+	} else {
+		sd.GetCommitmentCtx().SetTraceWriter(nil)
+	}
 	latestTxNum, latestBlockNum, err := sd.SeekCommitment(ctx, tx)
 	if err != nil {
 		return err
@@ -368,7 +372,10 @@ func checkDataAvailable(ctx context.Context, tx kv.TemporalTx, fromBlock uint64,
 	if err != nil {
 		return err
 	}
-	historyAvailableFromTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+	historyAvailableFromTxNum, err := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+	if err != nil {
+		return err
+	}
 	if fromTxNum < historyAvailableFromTxNum {
 		return fmt.Errorf("history not available for given start: %d < %d", fromTxNum, historyAvailableFromTxNum)
 	}

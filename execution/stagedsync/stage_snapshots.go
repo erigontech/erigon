@@ -20,26 +20,24 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
-	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/stats"
-	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
@@ -52,9 +50,9 @@ type SnapshotsCfg struct {
 	db                 kv.TemporalRwDB
 	chainConfig        *chain.Config
 	dirs               datadir.Dirs
-	blockRetire        services.BlockRetire
-	snapshotDownloader downloader.Client
-	blockReader        services.FullBlockReader
+	blockRetire        dbservices.BlockRetire
+	snapshotDownloader dbservices.DownloaderClient
+	blockReader        dbservices.FullBlockReader
 	notifier           *shards.Notifications
 	caplin             bool
 	blobs              bool
@@ -69,9 +67,9 @@ type SnapshotsCfg struct {
 }
 
 // Returns a seeder client for block management, a noop implementation if no downloader is attached.
-func (me *SnapshotsCfg) getSeederClient() downloader.SeederClient {
+func (me *SnapshotsCfg) getSeederClient() dbservices.SeederClient {
 	if me.snapshotDownloader == nil {
-		return downloader.NoopSeederClient{}
+		return dbservices.NoopSeederClient{}
 	}
 	return me.snapshotDownloader
 }
@@ -80,9 +78,9 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 	chainConfig *chain.Config,
 	syncConfig ethconfig.Sync,
 	dirs datadir.Dirs,
-	blockRetire services.BlockRetire,
-	snapshotDownloader downloader.Client,
-	blockReader services.FullBlockReader,
+	blockRetire dbservices.BlockRetire,
+	snapshotDownloader dbservices.DownloaderClient,
+	blockReader dbservices.FullBlockReader,
 	notifier *shards.Notifications,
 	caplin bool,
 	blobs bool,
@@ -111,6 +109,18 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 	return cfg
 }
 
+// mustReopenUnderlyingFilesTx refreshes the tx's pinned block-files/aggregator
+// view so files opened earlier in this stage are visible to reads made through
+// this tx. Panics rather than silently skipping: a tx that can't reopen would
+// reintroduce stale-view bugs (e.g. minimal-mode history pruning downloading all files).
+func mustReopenUnderlyingFilesTx(tx kv.RwTx) {
+	reopener, ok := tx.(kv.CanReopenUnderlyingFilesTx)
+	if !ok {
+		panic(fmt.Sprintf("snapshots stage requires a tx that can ForceReopenUnderlyingFilesTx, got %T", tx))
+	}
+	reopener.ForceReopenUnderlyingFilesTx()
+}
+
 func SpawnStageSnapshots(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, logger log.Logger) (err error) {
 	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, logger); err != nil {
 		return err
@@ -131,7 +141,7 @@ func SpawnStageSnapshots(s *StageState, ctx context.Context, tx kv.RwTx, cfg Sna
 	}
 
 	if minProgress > s.BlockNumber {
-		if err = s.Update(tx, minProgress); err != nil {
+		if err := s.Update(tx, minProgress); err != nil {
 			return err
 		}
 	}
@@ -141,14 +151,135 @@ func SpawnStageSnapshots(s *StageState, ctx context.Context, tx kv.RwTx, cfg Sna
 	if !cfg.blockReader.Snapshots().DownloadReady() {
 		cfg.blockReader.Snapshots().DownloadComplete()
 	}
-	if cfg.chainConfig.Bor != nil && !cfg.blockReader.BorSnapshots().DownloadReady() {
-		cfg.blockReader.BorSnapshots().DownloadComplete()
-	}
-
 	return nil
 }
 
-func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, logger log.Logger) error {
+// Overridden by tests to avoid waiting whole intervals for a publish.
+var snapshotDownloadProgressInterval = 2 * time.Second
+
+// startSnapshotDownloadProgressReporter periodically republishes sync state so
+// eth_syncing reports progress during the (long) snapshot download. The reply
+// switches to download-based progress only once the first sample arrives, so a
+// downloader with nothing to report never changes the reply shape. Returns a
+// stop func that, on a successful download, pins progress at the commitment
+// block to bridge the handoff to execution — or clears it when no
+// commitment block came with the snapshots (execution restarts from genesis).
+// No-op when the downloader can't report progress or the target is unknown.
+func startSnapshotDownloadProgressReporter(ctx context.Context, cfg SnapshotsCfg) func(downloadErr error, downloadCompleted bool, commitBlock uint64) {
+	noop := func(error, bool, uint64) {}
+	provider, ok := cfg.snapshotDownloader.(dbservices.DownloadProgressProvider)
+	if !ok {
+		return noop
+	}
+	reporter := provider.DownloadProgress()
+	if reporter == nil {
+		return noop
+	}
+	// No state files means no commitment block: execution restarts from genesis,
+	// so a byte ratio mapped onto the headers tip would climb to ~tip and then
+	// reset to 0. Keep the stage-list reply instead.
+	if cfg.blockReader.FreezingCfg().DisableDownloadE3 {
+		return noop
+	}
+	var target uint64
+	if c, known := snapcfg.KnownCfg(cfg.chainConfig.ChainName); known {
+		toBlock := cfg.syncConfig.SnapshotDownloadToBlock
+		// Not ExpectBlocks: it also counts slot-numbered CL segments, which can
+		// exceed the EL tip. The headers files bound the blocks this download
+		// covers; a capped download retains only the files up to the cap, so the
+		// byte total covers that set and the target has to match its top boundary.
+		for _, info := range c.PreverifiedParsed {
+			if info == nil || info.Ext != ".seg" || info.Type == nil || info.Type.Enum() != snaptype2.Enums.Headers {
+				continue
+			}
+			if !snapshotsync.BlockFileRetainedUnderCap(info.To, toBlock) {
+				continue
+			}
+			target = max(target, info.To)
+		}
+		if target > 0 {
+			target--
+		}
+	}
+	if target == 0 {
+		return noop
+	}
+
+	reporter.ResetProgress()
+
+	publishState := func() {
+		if cfg.notifier.Events == nil {
+			return
+		}
+		if err := cfg.db.View(ctx, func(tx kv.Tx) error {
+			return cfg.notifier.PublishSyncState(tx, cfg.blockReader.FrozenBlocks())
+		}); err != nil {
+			log.Warn("[OtterSync] sync-state publish failed", "err", err)
+		}
+	}
+
+	// Owned by the ticker goroutine.
+	var lastDone, lastTotal uint64
+	publish := func() {
+		done, total := reporter.Completed()
+		if total == 0 {
+			return
+		}
+		// The downloader refreshes its sample on a slower backoff than the tick,
+		// so an unchanged one would open a ro-tx just to build an identical reply.
+		if done == lastDone && total == lastTotal {
+			return
+		}
+		lastDone, lastTotal = done, total
+		cfg.notifier.SetSnapshotDownloading(done, total, target)
+		publishState()
+	}
+
+	stopCtx, cancel := context.WithCancel(ctx)
+	stopped := make(chan struct{})
+	go func() {
+		defer dbg.LogPanic()
+		defer close(stopped)
+		t := time.NewTicker(snapshotDownloadProgressInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-stopCtx.Done():
+				return
+			case <-t.C:
+				publish()
+			}
+		}
+	}()
+
+	return func(downloadErr error, downloadCompleted bool, commitBlock uint64) {
+		cancel()
+		<-stopped
+		// A failed download must not claim 100%, and clearing would fabricate 0:
+		// keep the last honest sample. A failure after the download completed is
+		// different — the sample would outlive a node that syncs on regardless,
+		// so fall through to the same clear-or-pin as on success.
+		if downloadErr != nil && !downloadCompleted {
+			return
+		}
+		// Without a commitment block execution starts from genesis, so a handoff
+		// pin would claim the frozen tip for the whole re-execution. Clear instead.
+		if commitBlock == 0 {
+			cfg.notifier.ClearSnapshotDownload()
+			publishState()
+			return
+		}
+		// Pin at the commitment block, where execution resumes, instead of
+		// clearing: clearing would report currentBlock=0 until the first-cycle
+		// commit, i.e. a 100%→0% dip. The last in-flight sample can map above it
+		// when the snapshot set's commitment lags the headers tip; stepping back
+		// to the block execution resumes from is the honest correction.
+		cfg.notifier.SetSnapshotDownloadHandoff(commitBlock)
+		publishState()
+	}
+}
+
+func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, logger log.Logger) (err error) {
 	if !s.CurrentSyncCycle.IsFirstCycle {
 		return nil
 	}
@@ -184,7 +315,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	// Download only the snapshots that are for the header chain.
 
 	// How do we get to the real Downloader if we need? Get the stack trace.
-	//panic("here")
+	// panic("here")
 
 	if err := snapshotsync.SyncSnapshots(
 		ctx,
@@ -214,16 +345,32 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	// Erigon can start on datadir with broken files `transactions.seg` files and Downloader will
 	// fix them, but only if Erigon call `.Add()` for broken files. But `headerchain` feature
 	// calling `.Add()` only for header/body files (not for `transactions.seg`) and `.OpenFolder()` will fail
-	if err := cfg.blockReader.Snapshots().OpenSegments([]snaptype.Type{snaptype2.Headers, snaptype2.Bodies}, true, false); err != nil {
+	if err := cfg.blockReader.Snapshots().OpenSegments([]snaptype.Type{snaptype2.Headers, snaptype2.Bodies}, false); err != nil {
 		err = fmt.Errorf("error opening segments after syncing header chain: %w", err)
 		return err
 	}
 
-	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "Download snapshots"})
+	mustReopenUnderlyingFilesTx(tx)
+
+	// Only this phase reports progress: the header-chain phase above downloads a
+	// small subset, so its ratio would jump backwards once the full set is known.
+	var commitBlock uint64
+	var downloadCompleted bool
+	stopReporter := startSnapshotDownloadProgressReporter(ctx, cfg)
+	defer func() {
+		// A panic unwinds with err == nil; stopping as a success would clear the
+		// last honest sample. Stop as a failure instead, then keep unwinding.
+		if r := recover(); r != nil {
+			stopReporter(fmt.Errorf("snapshots stage panic: %v", r), downloadCompleted, 0)
+			panic(r)
+		}
+		stopReporter(err, downloadCompleted, commitBlock)
+	}()
+
 	if err := snapshotsync.SyncSnapshots(
 		ctx,
 		s.LogPrefix(),
-		"remaining snapshots",
+		"snapshots",
 		false, /*headerChain=*/
 		cfg.blobs,
 		cfg.caplinState,
@@ -238,6 +385,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	); err != nil {
 		return err
 	}
+	downloadCompleted = true
 
 	if cfg.afterDownload != nil {
 		if err := cfg.afterDownload(ctx); err != nil {
@@ -249,13 +397,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if err := cfg.blockReader.Snapshots().OpenFolder(); err != nil {
 			return err
 		}
-
-		if cfg.chainConfig.Bor != nil {
-			if err := cfg.blockReader.BorSnapshots().OpenFolder(); err != nil {
-				return err
-			}
-		}
-		if err := agg.OpenFolder(); err != nil {
+		if err := cfg.db.OpenStateSnapshots(ctx); err != nil {
 			return err
 		}
 
@@ -266,7 +408,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	// All snapshots are downloaded. Now commit the preverified.toml file so we load the same set of
 	// hashes next time.
-	err := downloadercfg.SaveSnapshotHashes(cfg.dirs, cfg.chainConfig.ChainName)
+	err = downloadercfg.SaveSnapshotHashes(cfg.dirs, cfg.chainConfig.ChainName)
 	if err != nil {
 		err = fmt.Errorf("saving snapshot hashes: %w", err)
 		return err
@@ -285,13 +427,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	if err := buildOrDeferE3Accessors(ctx, s, cfg, agg, headersProgress); err != nil {
+	// a state file missing its accessor is excluded from the visible set, so E3 accessors
+	// must be rebuilt before execution — there is no background rebuild path
+	if err := cfg.db.Debug().BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers(), kv.SkipCoveredAccessors); err != nil {
 		return err
 	}
 
-	if temporal, ok := tx.(*temporal.RwTx); ok {
-		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
-	}
+	mustReopenUnderlyingFilesTx(tx) // otherwise next stages will not see just-indexed-files
 
 	// It's ok to notify before tx.Commit(), because RPCDaemon does read list of files by gRPC (not by reading from db)
 	if cfg.notifier.Events != nil {
@@ -306,14 +448,11 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		s.BlockNumber = frozenBlocks
 	}
 
-	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "Fill DB"})
 	if err := rawdbreset.FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.blockReader, logger); err != nil {
 		return fmt.Errorf("FillDBFromSnapshots: %w", err)
 	}
 
-	if temporal, ok := tx.(*temporal.RwTx); ok {
-		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
-	}
+	mustReopenUnderlyingFilesTx(tx) // otherwise next stages will not see just-indexed-files
 
 	// In E3, the post-execution state is in domain files. After FillDBFromSnapshots,
 	// snapshot domain state may be ahead of the Execution stage progress (which is 0
@@ -323,7 +462,10 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	// that crashed eth_call on Gnosis with "invalid opcode: SHR" (#21066).
 	// Bump Execution stage progress to the snapshot commitment block so RPC sees a
 	// consistent view immediately, matching what ExecV3 would set on its first run.
-	if commitBlock := readCommitmentBlockFromDB(ctx, cfg.db); commitBlock > 0 {
+	// Plain assignment: the deferred stopReporter reads this variable, and a
+	// := here would shadow it and silently disable the handoff pin.
+	commitBlock = readCommitmentBlockFromDB(ctx, cfg.db)
+	if commitBlock > 0 {
 		execProgress, err := stages.GetStageProgress(tx, stages.Execution)
 		if err != nil {
 			return fmt.Errorf("get Execution stage progress: %w", err)
@@ -351,16 +493,10 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 // buildOrDeferE2Indices decides whether to build E2 block snapshot indices synchronously
 // or defer them to background processing.
 // On restart (headersProgress > 0), E2 indexing is skipped at startup. Missing indices
-// will be built in the background via RetireBlocksInBackground (called from SnapshotsPrune
+// will be built in the background via BuildFilesInBackground (called from SnapshotsPrune
 // on every sync cycle).
-// Exception: Bor chains always index synchronously because RetireBlocks has an early-exit
-// guard for Bor data readiness that may skip BuildMissedIndicesIfNeed.
 func buildOrDeferE2Indices(ctx context.Context, s *StageState, cfg SnapshotsCfg, headersProgress uint64) error {
-	isBor := cfg.chainConfig.Bor != nil
-	canDefer := headersProgress > 0 && !isBor
-
-	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "E2 Indexing"})
-	if !canDefer {
+	if headersProgress == 0 {
 		if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events); err != nil {
 			return err
 		}
@@ -370,31 +506,7 @@ func buildOrDeferE2Indices(ctx context.Context, s *StageState, cfg SnapshotsCfg,
 	return nil
 }
 
-// buildOrDeferE3Accessors decides whether to build E3 state accessors synchronously
-// or defer them to background processing.
-// On restart (headersProgress > 0), E3 indexing is skipped at startup. Missing accessors
-// will be built in the background via BuildMissedAccessorsInBackground (called from
-// SnapshotsPrune on every sync cycle).
-// Unindexed state files are safely excluded from visible files by checkForVisibility
-// (which checks accessor presence), so queries correctly reflect only indexed data.
-// Note: unlike E2, there is no Bor exception — the background path calls
-// BuildMissedAccessors directly without any Bor-specific early-exit guards.
-func buildOrDeferE3Accessors(ctx context.Context, s *StageState, cfg SnapshotsCfg, agg *state.Aggregator, headersProgress uint64) error {
-	canDefer := headersProgress > 0
-
-	indexWorkers := estimate.IndexSnapshot.Workers()
-	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "E3 Indexing"})
-	if !canDefer {
-		if err := agg.BuildMissedAccessors(ctx, indexWorkers); err != nil {
-			return err
-		}
-	} else {
-		log.Debug(fmt.Sprintf("[%s] Deferring E3 indexing to background", s.LogPrefix()), "reason", "restart", "headersProgress", headersProgress)
-	}
-	return nil
-}
-
-func firstNonGenesisCheck(tx kv.RwTx, snapshots services.BlockSnapshots, logPrefix string, dirs datadir.Dirs) error {
+func firstNonGenesisCheck(tx kv.RwTx, snapshots dbservices.BlockSnapshots, logPrefix string, dirs datadir.Dirs) error {
 	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
 	if err != nil {
 		return err
@@ -409,7 +521,7 @@ func firstNonGenesisCheck(tx kv.RwTx, snapshots services.BlockSnapshots, logPref
 	return nil
 }
 
-func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader services.FullBlockReader) error {
+func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader dbservices.FullBlockReader) error {
 	pruneThreshold := rawdbreset.GetPruneMarkerSafeThreshold(blockReader)
 	if pruneThreshold == 0 {
 		return nil
@@ -447,30 +559,25 @@ func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader services
 }
 
 // SnapshotsPrune moving block data from db into snapshots, removing old snapshots (if --prune.* enabled)
-func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx, logger log.Logger) (err error) {
+func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx) (err error) {
 	if dbg.NoPrune() {
 		return nil
 	}
 	freezingCfg := cfg.blockReader.FreezingCfg()
 	if freezingCfg.ProduceE2 && !dbg.NoBackgroundMaintenance() {
-		//TODO: initialSync maybe save files progress here
-
-		var minBlockNumber uint64
-
 		if s.CurrentSyncCycle.IsInitialCycle {
 			cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
 		} else {
 			cfg.blockRetire.SetWorkers(1)
 		}
-
-		started := cfg.blockRetire.RetireBlocksInBackground(
+		started := cfg.blockRetire.BuildFilesInBackground(
 			ctx,
-			minBlockNumber,
-			s.ForwardProgress,
+			0,
+			s.FinalityCtx,
 			log.LvlDebug,
 			cfg.getSeederClient(),
 			func() error {
-				filesDeleted, err := pruneBlockSnapshots(ctx, cfg, logger)
+				filesDeleted, err := retireBlockSnapshots(ctx, cfg)
 				if filesDeleted && cfg.notifier != nil {
 					cfg.notifier.Events.OnNewSnapshot()
 				}
@@ -480,7 +587,8 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 				if cfg.notifier != nil {
 					cfg.notifier.Events.OnRetirementDone()
 				}
-			})
+			},
+		)
 		if cfg.notifier != nil {
 			cfg.notifier.Events.OnRetirementStart(started)
 		}
@@ -501,7 +609,10 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	return nil
 }
 
-func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logger) (bool, error) {
+func retireBlockSnapshots(ctx context.Context, cfg SnapshotsCfg) (bool, error) {
+	if dbg.NoRetire() {
+		return false, nil
+	}
 	tx, err := cfg.db.BeginRo(ctx)
 	if err != nil {
 		return false, err
@@ -518,43 +629,14 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 		return false, nil
 	}
 
-	// Keep at least 2 block snapshots as we do not want FrozenBlocks to be 0
 	pruneTo := cfg.prune.Blocks.PruneTo(headNumber)
-
 	if pruneTo > executionProgress {
 		return false, nil
 	}
 
-	//TODO: push-down this logic into `blockRetire`: instead of work on raw file names - we must work on dirtySegments. Instead of calling downloader.Del(file) we must call `downloader.Del(dirtySegment.Paths(snapDir)`
-	snapshotFileNames := cfg.blockReader.FrozenFiles()
-	filesDeleted := false
-	// Prune blocks snapshots if necessary
-	for _, file := range snapshotFileNames {
-		if !cfg.prune.Blocks.Enabled() || headNumber == 0 || !strings.Contains(file, "transactions") {
-			continue
-		}
-
-		// take the snapshot file name and parse it to get the "from"
-		info, _, ok := snaptype.ParseFileName(cfg.dirs.Snap, file)
-		if !ok {
-			continue
-		}
-		if info.To >= pruneTo {
-			continue
-		}
-		if info.To-info.From != snaptype.Erigon2MergeLimit {
-			continue
-		}
-		err = cfg.getSeederClient().Delete(ctx, []string{file})
-		if err != nil {
-			return filesDeleted, err
-		}
-		if err := cfg.blockReader.Snapshots().Delete(file); err != nil {
-			return filesDeleted, err
-		}
-		filesDeleted = true
-	}
-	return filesDeleted, nil
+	return cfg.blockRetire.RetireTransactionFiles(pruneTo, func(files []string) error {
+		return cfg.getSeederClient().Delete(ctx, files)
+	})
 }
 
 // readCommitmentBlockFromDB reads the commitment domain's "state" key via a
@@ -567,7 +649,7 @@ func readCommitmentBlockFromDB(ctx context.Context, db kv.TemporalRwDB) uint64 {
 		return 0
 	}
 	defer roTx.Rollback()
-	v, _, err := roTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+	v, _, err := roTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
 	if err != nil || len(v) < 16 {
 		return 0
 	}

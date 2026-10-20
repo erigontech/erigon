@@ -102,20 +102,9 @@ func DeriveForRange(
 		ibs.SetTxContext(blockNum, i)
 		evm := protocol.CreateEVM(cfg, hashFn, engine, accounts.NilAddress, ibs, header, vmCfg)
 
-		// Cancel watcher: abort mid-opcode if the context is cancelled
-		// (e.g. RPC timeout). Without this, a gas-heavy transaction would
-		// run to completion even after the caller has given up.
-		txDone := make(chan struct{})
-		go func() {
-			select {
-			case <-ctx.Done():
-				evm.Cancel()
-			case <-txDone:
-			}
-		}()
-
-		receipt, err := protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, noopWriter, header, txns[i], gasUsed, vmCfg, evm)
-		close(txDone)
+		receipt, err := applyCancellable(ctx, evm, func() (*types.Receipt, error) {
+			return protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, noopWriter, header, txns[i], gasUsed, vmCfg, evm)
+		})
 		if err != nil {
 			return nil, fmt.Errorf("receipts.DeriveForRange: replay tx %d: %w", i, err)
 		}
@@ -126,6 +115,14 @@ func DeriveForRange(
 	}
 
 	return receipts, nil
+}
+
+// applyCancellable runs apply with the EVM wired to ctx: a cancelled context aborts it
+// mid-opcode, so a gas-heavy transaction does not run on after the caller has given up. The
+// callback is deregistered when apply returns, which a defer in the caller's loop would not do.
+func applyCancellable(ctx context.Context, evm *vm.EVM, apply func() (*types.Receipt, error)) (*types.Receipt, error) {
+	defer context.AfterFunc(ctx, evm.Cancel)()
+	return apply()
 }
 
 // DeriveBlockReceipts replays all transactions in a block and returns their receipts.
@@ -143,12 +140,16 @@ func DeriveBlockReceipts(
 	return DeriveForRange(ctx, cfg, engine, header, txns, 0, len(txns), ibs, gp, getHeader)
 }
 
-// DeriveFields populates BlockHash and FirstLogIndexWithinBlock on each receipt.
-// ApplyTransactionWithEVM sets most receipt fields, but BlockHash and the
-// per-receipt first-log-index need a second pass once all receipts are known.
+// DeriveFields populates BlockHash, FirstLogIndexWithinBlock, and (when
+// missing) Bloom on each receipt. ApplyTransactionWithEVM sets most receipt
+// fields, but the first-log-index needs a second pass once all receipts are
+// known, and finalize-produced or cache-read receipts arrive without a bloom.
 func DeriveFields(receipts types.Receipts, blockHash common.Hash) {
 	for i, receipt := range receipts {
 		receipt.BlockHash = blockHash
+		if receipt.Bloom.IsEmpty() && len(receipt.Logs) > 0 {
+			receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+		}
 		if len(receipt.Logs) > 0 {
 			receipt.FirstLogIndexWithinBlock = uint32(receipt.Logs[0].Index)
 		} else if i > 0 {

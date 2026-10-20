@@ -20,8 +20,10 @@ import (
 	"sync"
 )
 
-type Observer[TEvent any] func(event TEvent)
-type UnregisterFunc func()
+type (
+	Observer[TEvent any] func(event TEvent)
+	UnregisterFunc       func()
+)
 
 type Observers[TEvent any] struct {
 	observers          map[uint64]Observer[TEvent]
@@ -92,11 +94,9 @@ func (o *Observers[TEvent]) NotifySync(event TEvent) {
 
 	var wg sync.WaitGroup
 	for _, observer := range observers {
-		wg.Add(1)
-		go func(observer Observer[TEvent]) {
-			defer wg.Done()
+		wg.Go(func() {
 			observer(event)
-		}(observer)
+		})
 	}
 
 	wg.Wait()

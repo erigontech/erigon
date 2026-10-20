@@ -54,7 +54,7 @@ func BytesToBloom(b []byte) Bloom {
 
 func (b Bloom) IsEmpty() bool {
 	var bb []uint64 = unsafe.Slice((*uint64)(unsafe.Pointer(&b[0])), BloomByteLength/8)
-	for i := 0; i < BloomByteLength/8; i++ {
+	for i := range BloomByteLength / 8 {
 		if bb[i] != 0 {
 			return false
 		}
@@ -110,7 +110,7 @@ func (b Bloom) Test(topic []byte) bool {
 func (b *Bloom) Or(other *Bloom) {
 	bb := unsafe.Slice((*uint64)(unsafe.Pointer(&b[0])), BloomByteLength/8)
 	ob := unsafe.Slice((*uint64)(unsafe.Pointer(&other[0])), BloomByteLength/8)
-	for i := 0; i < BloomByteLength/8; i++ {
+	for i := range BloomByteLength / 8 {
 		bb[i] |= ob[i]
 	}
 }
@@ -120,9 +120,24 @@ func (b Bloom) MarshalText() ([]byte, error) {
 	return hexutil.Bytes(b[:]).MarshalText()
 }
 
+// AppendText implements encoding.TextAppender (alloc-free MarshalText).
+func (b Bloom) AppendText(dst []byte) ([]byte, error) {
+	return hexutil.Bytes(b[:]).AppendText(dst)
+}
+
 // UnmarshalText b as a hex string with 0x prefix.
 func (b *Bloom) UnmarshalText(input []byte) error {
 	return hexutil.UnmarshalFixedText("Bloom", input, b[:])
+}
+
+// MergedBloom ORs the per-receipt blooms together. Cheaper than CreateBloom
+// when every receipt already carries its Bloom — callers must ensure that.
+func (rs Receipts) MergedBloom() Bloom {
+	var bin Bloom
+	for _, receipt := range rs {
+		bin.Or(&receipt.Bloom)
+	}
+	return bin
 }
 
 func CreateBloom(receipts Receipts) Bloom {
@@ -133,8 +148,8 @@ func CreateBloom(receipts Receipts) Bloom {
 	for _, receipt := range receipts {
 		for _, log := range receipt.Logs {
 			bin.add(log.Address[:], &buf)
-			for _, b := range log.Topics {
-				bin.add(b[:], &buf)
+			for i := range log.Topics {
+				bin.add(log.Topics[i][:], &buf)
 			}
 		}
 	}
@@ -150,10 +165,8 @@ func Bloom9(data []byte) []byte {
 
 // bloomValues returns the bytes (index-value pairs) to set for the given data
 func bloomValues(data []byte, hashbuf *[6]byte) (uint, byte, uint, byte, uint, byte) {
-	sha := crypto.NewKeccakState()
-	sha.Write(data)      //nolint:errcheck
-	sha.Read(hashbuf[:]) //nolint:errcheck
-	crypto.ReturnToPool(sha)
+	hash := crypto.Keccak256Hash(data)
+	copy(hashbuf[:], hash[:6])
 	// The actual bits to flip
 	v1 := byte(1 << (hashbuf[1] & 0x7))
 	v2 := byte(1 << (hashbuf[3] & 0x7))

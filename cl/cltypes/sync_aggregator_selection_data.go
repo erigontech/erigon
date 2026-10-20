@@ -45,7 +45,6 @@ func (f *SyncAggregatorSelectionData) EncodeSSZ(dst []byte) ([]byte, error) {
 
 func (f *SyncAggregatorSelectionData) DecodeSSZ(buf []byte, _ int) error {
 	return ssz2.UnmarshalSSZ(buf, 0, &f.Slot, &f.SubcommitteeIndex)
-
 }
 
 func (f *SyncAggregatorSelectionData) EncodingSizeSSZ() int {

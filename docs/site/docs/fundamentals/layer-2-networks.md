@@ -1,7 +1,7 @@
 ---
 title: "Layer 2 Networks"
-description: "Running Erigon for Polygon PoS, Bor, and other Layer 2 networks."
-sidebar_position: 6
+description: "Using Erigon with an Optimism op-node, and the experimental Erigon Nitro client for Arbitrum."
+sidebar_position: 9
 ---
 
 # Layer 2 Networks

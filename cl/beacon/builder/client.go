@@ -23,10 +23,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
+
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -38,39 +44,77 @@ import (
 
 var _ BuilderClient = &builderClient{}
 
-var (
-	ErrNoContent = errors.New("no http content")
+var ErrNoContent = errors.New("no http content")
+
+const (
+	maxBuilderResponseBodySize = 1 << 20
+	maxBuilderErrorBodySize    = 256
+	builderPreferencesTimeout  = time.Second
+	builderBeaconBlockTimeout  = time.Second
+	defaultBuilderCallLimit    = 32
+	defaultPreferenceCallLimit = 24
 )
+
+type BuilderTargetPolicy struct {
+	AllowPrivate bool
+}
 
 type builderClient struct {
 	// ref: https://ethereum.github.io/builder-specs/#/
-	httpClient   *http.Client
-	url          *url.URL
-	beaconConfig *clparams.BeaconChainConfig
+	httpClient               *http.Client
+	url                      *url.URL
+	beaconConfig             *clparams.BeaconChainConfig
+	lookupIP                 func(context.Context, string) ([]net.IPAddr, error)
+	targetPolicy             BuilderTargetPolicy
+	transport                http.RoundTripper
+	publicTransport          http.RoundTripper
+	admission                *semaphore.Weighted
+	admissionOnce            sync.Once
+	preferencesAdmission     *semaphore.Weighted
+	preferencesAdmissionOnce sync.Once
 }
 
-func NewBlockBuilderClient(baseUrl string, beaconConfig *clparams.BeaconChainConfig) *builderClient {
-	u, err := url.Parse(baseUrl)
-	if err != nil {
-		panic(err)
+func NewDynamicBuilderClient(beaconConfig *clparams.BeaconChainConfig, policy BuilderTargetPolicy) *builderClient {
+	return newBlockBuilderClient("", beaconConfig, policy, false)
+}
+
+func NewBlockBuilderClientWithPolicy(baseURL string, beaconConfig *clparams.BeaconChainConfig, policy BuilderTargetPolicy) *builderClient {
+	return newBlockBuilderClient(baseURL, beaconConfig, policy, true)
+}
+
+func newBlockBuilderClient(baseUrl string, beaconConfig *clparams.BeaconChainConfig, policy BuilderTargetPolicy, checkStatus bool) *builderClient {
+	var u *url.URL
+	var err error
+	if baseUrl != "" {
+		u, err = url.Parse(baseUrl)
+		if err != nil {
+			panic(err)
+		}
 	}
 	c := &builderClient{
-		httpClient:   &http.Client{},
-		url:          u,
-		beaconConfig: beaconConfig,
+		httpClient:           &http.Client{},
+		url:                  u,
+		beaconConfig:         beaconConfig,
+		targetPolicy:         policy,
+		transport:            newPinnedBuilderTransport(nil),
+		publicTransport:      newPinnedBuilderTransport(nil),
+		admission:            semaphore.NewWeighted(defaultBuilderCallLimit),
+		preferencesAdmission: semaphore.NewWeighted(defaultPreferenceCallLimit),
 	}
-	if err := c.GetStatus(context.Background()); err != nil {
-		log.Error("cannot connect to builder client", "url", baseUrl, "error", err)
-		panic("cannot connect to builder client")
+	if checkStatus {
+		if err := c.GetStatus(context.Background()); err != nil {
+			log.Error("cannot connect to builder client", "url", baseUrl, "error", err)
+			panic("cannot connect to builder client")
+		}
+		log.Info("Builder client is ready", "url", baseUrl)
 	}
-	log.Info("Builder client is ready", "url", baseUrl)
 	return c
 }
 
 func (b *builderClient) RegisterValidator(ctx context.Context, registers []*cltypes.ValidatorRegistration) error {
 	// https://ethereum.github.io/builder-specs/#/Builder/registerValidator
 	path := "/eth/v1/builder/validators"
-	url := b.url.JoinPath(path).String()
+	targetURL := b.url.JoinPath(path).String()
 	if len(registers) == 0 {
 		return errors.New("empty registers")
 	}
@@ -78,7 +122,7 @@ func (b *builderClient) RegisterValidator(ctx context.Context, registers []*clty
 	if err != nil {
 		return err
 	}
-	_, err = httpCall[json.RawMessage](ctx, b.httpClient, http.MethodPost, url, nil, bytes.NewBuffer(payload), json.RawMessage{})
+	_, err = httpCall[json.RawMessage](ctx, b.httpClient, http.MethodPost, targetURL, nil, bytes.NewBuffer(payload), json.RawMessage{})
 	if errors.Is(err, ErrNoContent) {
 		// no content is ok
 		return nil
@@ -92,23 +136,24 @@ func (b *builderClient) RegisterValidator(ctx context.Context, registers []*clty
 func (b *builderClient) GetHeader(ctx context.Context, slot int64, parentHash common.Hash, pubKey common.Bytes48) (*ExecutionHeader, error) {
 	// https://ethereum.github.io/builder-specs/#/Builder/getHeader
 	path := fmt.Sprintf("/eth/v1/builder/header/%d/%s/%s", slot, parentHash.Hex(), pubKey.Hex())
-	url := b.url.JoinPath(path).String()
+	targetURL := b.url.JoinPath(path).String()
 	var headerIn ExecutionHeader
 	var epoch uint64
 	//
 	if b.beaconConfig.SlotsPerEpoch != 0 {
 		epoch = uint64(slot / int64(b.beaconConfig.SlotsPerEpoch))
 	}
+	version := b.beaconConfig.GetCurrentStateVersion(epoch)
 	headerIn.Data = ExecutionHeaderData{Message: ExecutionHeaderMessage{
-		Header:             cltypes.NewEth1Header(b.beaconConfig.GetCurrentStateVersion(epoch)),
-		ExecutionRequests:  cltypes.NewExecutionRequests(b.beaconConfig),
+		Header:             cltypes.NewEth1Header(version),
+		ExecutionRequests:  cltypes.NewExecutionRequestsWithVersion(b.beaconConfig, version),
 		BlobKzgCommitments: solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
 	}}
 
 	requestHeader := map[string]string{
 		"Date-Milliseconds": strconv.FormatInt(time.Now().UnixMilli(), 10),
 	}
-	header, err := httpCall[ExecutionHeader](ctx, b.httpClient, http.MethodGet, url, requestHeader, nil, headerIn)
+	header, err := httpCall[ExecutionHeader](ctx, b.httpClient, http.MethodGet, targetURL, requestHeader, nil, headerIn)
 	if err != nil {
 		log.Warn("[mev builder] httpCall error on GetExecutionPayloadHeader", "err", err, "slot", slot, "parentHash", parentHash.Hex(), "pubKey", pubKey.Hex())
 		return nil, err
@@ -123,7 +168,7 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 	if isPostFulu {
 		path = "/eth/v2/builder/blinded_blocks"
 	}
-	url := b.url.JoinPath(path).String()
+	targetURL := b.url.JoinPath(path).String()
 	payload, err := json.Marshal(block)
 	if err != nil {
 		return nil, nil, nil, err
@@ -135,14 +180,14 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 	var resp *BlindedBlockResponse
 
 	if isPostFulu {
-		_, err = httpCall(ctx, b.httpClient, http.MethodPost, url, headers, bytes.NewBuffer(payload), "")
+		_, err = httpCall(ctx, b.httpClient, http.MethodPost, targetURL, headers, bytes.NewBuffer(payload), "")
 		if err != nil {
 			log.Warn("[mev builder] httpCall error on SubmitBlindedBlocks", "err", err, "slot", block.Block.Slot)
 			return nil, nil, nil, err
 		}
 		return nil, nil, nil, nil // no content expected for Fulu version
 	} else {
-		resp, err = httpCall(ctx, b.httpClient, http.MethodPost, url, headers, bytes.NewBuffer(payload), BlindedBlockResponse{})
+		resp, err = httpCall(ctx, b.httpClient, http.MethodPost, targetURL, headers, bytes.NewBuffer(payload), BlindedBlockResponse{})
 		if err != nil {
 			log.Warn("[mev builder] httpCall error on SubmitBlindedBlocks", "err", err, "slot", block.Block.Slot)
 			return nil, nil, nil, err
@@ -180,7 +225,7 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 		}{
 			ExecutionPayload:  cltypes.NewEth1Block(version, b.beaconConfig),
 			BlobsBundle:       &engine_types.BlobsBundle{},
-			ExecutionRequests: cltypes.NewExecutionRequests(b.beaconConfig),
+			ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(b.beaconConfig, version),
 		}
 		if err := json.Unmarshal(resp.Data, denebResp); err != nil {
 			return nil, nil, nil, err
@@ -194,8 +239,8 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 
 func (b *builderClient) GetStatus(ctx context.Context) error {
 	path := "/eth/v1/builder/status"
-	url := b.url.JoinPath(path).String()
-	_, err := httpCall[json.RawMessage](ctx, b.httpClient, http.MethodGet, url, nil, nil, json.RawMessage{})
+	targetURL := b.url.JoinPath(path).String()
+	_, err := httpCall[json.RawMessage](ctx, b.httpClient, http.MethodGet, targetURL, nil, nil, json.RawMessage{})
 	if errors.Is(err, ErrNoContent) {
 		// no content is ok, we just need to check if the server is up
 		return nil
@@ -203,10 +248,364 @@ func (b *builderClient) GetStatus(ctx context.Context) error {
 	return err
 }
 
-func httpCall[T any](ctx context.Context, client *http.Client, method, url string, headers map[string]string, payloadReader io.Reader, body T) (*T, error) {
-	request, err := http.NewRequestWithContext(ctx, method, url, payloadReader)
+func (b *builderClient) SubmitBuilderPreferences(ctx context.Context, builderURL string, proposerPubkey common.Bytes48, request *cltypes.BuilderPreferencesRequest) error {
+	if request == nil {
+		return errors.New("nil builder preferences request")
+	}
+	payload, err := json.Marshal(request)
 	if err != nil {
-		log.Warn("[mev builder] http.NewRequest failed", "err", err, "url", url, "method", method)
+		return err
+	}
+	requestContext, cancel := context.WithTimeout(ctx, builderPreferencesTimeout)
+	defer cancel()
+	preferencesAdmission := b.builderPreferencesAdmission()
+	if err := preferencesAdmission.Acquire(requestContext, 1); err != nil {
+		return err
+	}
+	defer preferencesAdmission.Release(1)
+	admission := b.builderAdmission()
+	if err := admission.Acquire(requestContext, 1); err != nil {
+		return err
+	}
+	defer admission.Release(1)
+	target, err := b.builderEndpoint(requestContext, b.targetPolicy, builderURL, "eth", "v1", "builder", "builder_preferences", proposerPubkey.Hex())
+	if err != nil {
+		return err
+	}
+	response, err := b.builderCall(requestContext, http.MethodPost, target, map[string]string{
+		"Eth-Consensus-Version": clparams.GloasVersion.String(),
+	}, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	if response.status != http.StatusAccepted {
+		return fmt.Errorf("builder preferences: unexpected status code %d", response.status)
+	}
+	return nil
+}
+
+func (b *builderClient) RequestExecutionPayloadBid(ctx context.Context, builderURL string, slot uint64, parentHash, parentRoot common.Hash, proposerPubkey common.Bytes48, auth *cltypes.SignedBuilderRequestAuth, timeout time.Duration) (*cltypes.SignedExecutionPayloadBid, error) {
+	if auth == nil {
+		return nil, errors.New("nil builder request auth")
+	}
+	timeoutMilliseconds := timeout.Milliseconds()
+	if timeoutMilliseconds <= 0 {
+		return nil, errors.New("builder request timeout must be at least one millisecond")
+	}
+	requestContext, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	if err := b.builderAdmission().Acquire(requestContext, 1); err != nil {
+		return nil, err
+	}
+	defer b.builderAdmission().Release(1)
+	payload, err := json.Marshal(auth)
+	if err != nil {
+		return nil, err
+	}
+	target, err := b.builderEndpoint(requestContext, b.targetPolicy, builderURL, "eth", "v1", "builder", "execution_payload_bid", strconv.FormatUint(slot, 10), parentHash.Hex(), parentRoot.Hex(), proposerPubkey.Hex())
+	if err != nil {
+		return nil, err
+	}
+	response, err := b.builderCall(requestContext, http.MethodPost, target, map[string]string{
+		"Eth-Consensus-Version": clparams.GloasVersion.String(),
+		"Date-Milliseconds":     strconv.FormatInt(time.Now().UnixMilli(), 10),
+		"X-Timeout-Ms":          strconv.FormatInt(timeoutMilliseconds, 10),
+	}, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	if response.status == http.StatusNoContent {
+		return nil, nil
+	}
+	if response.status != http.StatusOK {
+		return nil, fmt.Errorf("execution payload bid: unexpected status code %d", response.status)
+	}
+	if response.header.Get("Eth-Consensus-Version") != clparams.GloasVersion.String() {
+		return nil, errors.New("execution payload bid response is missing the Gloas consensus version")
+	}
+	var responseBody struct {
+		Version string                             `json:"version"`
+		Data    *cltypes.SignedExecutionPayloadBid `json:"data"`
+	}
+	if err := json.Unmarshal(response.body, &responseBody); err != nil {
+		return nil, fmt.Errorf("decode execution payload bid: %w", err)
+	}
+	if responseBody.Version != clparams.GloasVersion.String() || responseBody.Data == nil || responseBody.Data.Message == nil {
+		return nil, errors.New("execution payload bid response is missing Gloas data")
+	}
+	return responseBody.Data, nil
+}
+
+func (b *builderClient) SubmitSignedBeaconBlock(ctx context.Context, builderURL string, block *cltypes.SignedBeaconBlock) error {
+	return b.submitSignedBeaconBlock(ctx, builderURL, block, b.targetPolicy, false)
+}
+
+func (b *builderClient) SubmitSignedBeaconBlockPublic(ctx context.Context, builderURL string, block *cltypes.SignedBeaconBlock) error {
+	return b.submitSignedBeaconBlock(ctx, builderURL, block, BuilderTargetPolicy{}, true)
+}
+
+func (b *builderClient) submitSignedBeaconBlock(ctx context.Context, builderURL string, block *cltypes.SignedBeaconBlock, policy BuilderTargetPolicy, strictPublic bool) error {
+	if block == nil || block.Block == nil || block.Block.Body == nil {
+		return errors.New("nil signed beacon block")
+	}
+	payload, err := json.Marshal(block)
+	if err != nil {
+		return err
+	}
+	requestContext, cancel := context.WithTimeout(ctx, builderBeaconBlockTimeout)
+	defer cancel()
+	if err := b.builderAdmission().Acquire(requestContext, 1); err != nil {
+		return err
+	}
+	defer b.builderAdmission().Release(1)
+	target, err := b.builderEndpoint(requestContext, policy, builderURL, "eth", "v1", "builder", "beacon_blocks")
+	if err != nil {
+		return err
+	}
+	transport := b.transport
+	if strictPublic {
+		transport = b.publicTransport
+	}
+	response, err := b.builderCallWithTransport(requestContext, http.MethodPost, target, map[string]string{
+		"Eth-Consensus-Version": block.Version().String(),
+	}, bytes.NewReader(payload), transport)
+	if err != nil {
+		return err
+	}
+	if response.status != http.StatusAccepted {
+		return fmt.Errorf("signed beacon block: unexpected status code %d", response.status)
+	}
+	return nil
+}
+
+type builderTarget struct {
+	url      string
+	hostname string
+	ips      []net.IP
+}
+
+func (b *builderClient) builderEndpoint(ctx context.Context, policy BuilderTargetPolicy, rawURL string, path ...string) (builderTarget, error) {
+	target, err := url.Parse(rawURL)
+	if err != nil {
+		return builderTarget{}, err
+	}
+	if (target.Scheme != "http" && target.Scheme != "https") || target.Host == "" || target.User != nil {
+		return builderTarget{}, errors.New("builder URL must be an HTTP(S) URL without user information")
+	}
+	hostname := target.Hostname()
+	addresses := []net.IPAddr(nil)
+	if ip := net.ParseIP(hostname); ip != nil {
+		addresses = []net.IPAddr{{IP: ip}}
+	} else {
+		lookup := b.lookupIP
+		if lookup == nil {
+			lookup = net.DefaultResolver.LookupIPAddr
+		}
+		addresses, err = lookup(ctx, hostname)
+		if err != nil {
+			return builderTarget{}, fmt.Errorf("resolve builder URL: %w", err)
+		}
+	}
+	if len(addresses) == 0 {
+		return builderTarget{}, errors.New("builder URL has no resolved addresses")
+	}
+	for _, address := range addresses {
+		if !isAllowedBuilderIP(address.IP, policy) {
+			return builderTarget{}, fmt.Errorf("builder URL resolves to disallowed address %s", address.IP)
+		}
+	}
+	validatedIPs := make([]net.IP, len(addresses))
+	for i, address := range addresses {
+		validatedIPs[i] = append(net.IP(nil), address.IP...)
+	}
+	return builderTarget{url: target.JoinPath(path...).String(), hostname: hostname, ips: validatedIPs}, nil
+}
+
+func isPublicBuilderIP(ip net.IP) bool {
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return false
+	}
+	addr = addr.Unmap()
+	if addr.Is6() && !publicIPv6BuilderPrefix.Contains(addr) {
+		return false
+	}
+	if !addr.IsGlobalUnicast() {
+		return false
+	}
+	for _, prefix := range nonPublicBuilderPrefixes {
+		if prefix.Contains(addr) {
+			return false
+		}
+	}
+	return true
+}
+
+var publicIPv6BuilderPrefix = netip.MustParsePrefix("2000::/3")
+
+var nonPublicBuilderPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"), netip.MustParsePrefix("10.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"), netip.MustParsePrefix("127.0.0.0/8"),
+	netip.MustParsePrefix("169.254.0.0/16"), netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.0.0.0/24"), netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("192.31.196.0/24"), netip.MustParsePrefix("192.52.193.0/24"),
+	netip.MustParsePrefix("192.88.99.0/24"), netip.MustParsePrefix("192.168.0.0/16"),
+	netip.MustParsePrefix("192.175.48.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"), netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"), netip.MustParsePrefix("224.0.0.0/4"),
+	netip.MustParsePrefix("240.0.0.0/4"), netip.MustParsePrefix("::/128"),
+	netip.MustParsePrefix("::1/128"), netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"), netip.MustParsePrefix("100:0:0:1::/64"),
+	netip.MustParsePrefix("100::/64"),
+	netip.MustParsePrefix("2001::/23"), netip.MustParsePrefix("2001:2::/48"),
+	netip.MustParsePrefix("2001:db8::/32"), netip.MustParsePrefix("2002::/16"),
+	netip.MustParsePrefix("3fff::/20"), netip.MustParsePrefix("5f00::/16"),
+	netip.MustParsePrefix("fc00::/7"), netip.MustParsePrefix("fec0::/10"),
+	netip.MustParsePrefix("fe80::/10"),
+	netip.MustParsePrefix("ff00::/8"),
+}
+
+func isAllowedBuilderIP(ip net.IP, policy BuilderTargetPolicy) bool {
+	if isPublicBuilderIP(ip) {
+		return true
+	}
+	return policy.AllowPrivate && ip != nil && (ip.IsPrivate() || ip.IsLoopback())
+}
+
+type builderHTTPResponse struct {
+	body   []byte
+	header http.Header
+	status int
+}
+
+func (b *builderClient) builderCall(ctx context.Context, method string, target builderTarget, headers map[string]string, body io.Reader) (*builderHTTPResponse, error) {
+	return b.builderCallWithTransport(ctx, method, target, headers, body, b.transport)
+}
+
+func (b *builderClient) builderCallWithTransport(ctx context.Context, method string, target builderTarget, headers map[string]string, body io.Reader, transport http.RoundTripper) (*builderHTTPResponse, error) {
+	if transport == nil {
+		return nil, errors.New("builder pinned transport is unavailable")
+	}
+	var attemptTimeout time.Duration
+	if deadline, ok := ctx.Deadline(); ok && len(target.ips) > 1 {
+		attemptTimeout = time.Until(deadline) / time.Duration(len(target.ips))
+	} else if len(target.ips) > 1 {
+		attemptTimeout = time.Second
+	}
+	requestContext := context.WithValue(ctx, pinnedBuilderTargetKey{}, pinnedBuilderTarget{hostname: target.hostname, ips: target.ips, attemptTimeout: attemptTimeout})
+	request, err := http.NewRequestWithContext(requestContext, method, target.url, body)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json")
+	for name, value := range headers {
+		request.Header.Set(name, value)
+	}
+	if b.httpClient == nil {
+		return nil, errors.New("nil builder HTTP client")
+	}
+	client := *b.httpClient
+	client.Transport = transport
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return errors.New("builder redirects are not allowed")
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	bodyLimit := int64(maxBuilderResponseBodySize)
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		bodyLimit = maxBuilderErrorBodySize
+	}
+	bodyBytes, err := io.ReadAll(io.LimitReader(response.Body, bodyLimit+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(bodyBytes) > maxBuilderResponseBodySize && bodyLimit == maxBuilderResponseBodySize {
+		return nil, fmt.Errorf("builder response exceeds %d bytes", maxBuilderResponseBodySize)
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, fmt.Errorf("builder returned status code %d", response.StatusCode)
+	}
+	return &builderHTTPResponse{body: bodyBytes, header: response.Header.Clone(), status: response.StatusCode}, nil
+}
+
+func (b *builderClient) builderAdmission() *semaphore.Weighted {
+	b.admissionOnce.Do(func() {
+		if b.admission == nil {
+			b.admission = semaphore.NewWeighted(defaultBuilderCallLimit)
+		}
+	})
+	return b.admission
+}
+
+func (b *builderClient) builderPreferencesAdmission() *semaphore.Weighted {
+	b.preferencesAdmissionOnce.Do(func() {
+		if b.preferencesAdmission == nil {
+			b.preferencesAdmission = semaphore.NewWeighted(defaultPreferenceCallLimit)
+		}
+	})
+	return b.preferencesAdmission
+}
+
+type pinnedBuilderTargetKey struct{}
+
+type pinnedBuilderTarget struct {
+	hostname       string
+	ips            []net.IP
+	attemptTimeout time.Duration
+}
+
+func newPinnedBuilderTransport(dialContext func(context.Context, string, string) (net.Conn, error)) http.RoundTripper {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	if dialContext == nil {
+		dialContext = (&net.Dialer{}).DialContext
+	}
+	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		pinned, ok := ctx.Value(pinnedBuilderTargetKey{}).(pinnedBuilderTarget)
+		if !ok {
+			return nil, errors.New("builder target was not resolved before dialing")
+		}
+		host, port, err := net.SplitHostPort(address)
+		if err != nil {
+			return nil, err
+		}
+		if !strings.EqualFold(host, pinned.hostname) {
+			return nil, errors.New("builder dial target does not match resolved host")
+		}
+		var dialErrors []error
+		for i, ip := range pinned.ips {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			pinnedAddress := net.JoinHostPort(ip.String(), port)
+			attemptCtx := ctx
+			cancel := func() {}
+			if i+1 < len(pinned.ips) && pinned.attemptTimeout > 0 {
+				attemptCtx, cancel = context.WithTimeout(ctx, pinned.attemptTimeout)
+			}
+			conn, err := dialContext(attemptCtx, network, pinnedAddress)
+			cancel()
+			if err == nil {
+				return conn, nil
+			}
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			dialErrors = append(dialErrors, fmt.Errorf("dial builder address %s: %w", pinnedAddress, err))
+		}
+		return nil, errors.Join(dialErrors...)
+	}
+	return transport
+}
+
+func httpCall[T any](ctx context.Context, client *http.Client, method, rawURL string, headers map[string]string, payloadReader io.Reader, body T) (*T, error) {
+	request, err := http.NewRequestWithContext(ctx, method, rawURL, payloadReader)
+	if err != nil {
+		log.Warn("[mev builder] http.NewRequest failed", "err", err, "url", rawURL, "method", method)
 		return nil, err
 	}
 	request.Header.Set("Content-Type", "application/json")
@@ -216,7 +615,7 @@ func httpCall[T any](ctx context.Context, client *http.Client, method, url strin
 	// send request
 	response, err := client.Do(request)
 	if err != nil {
-		log.Warn("[mev builder] client.Do failed", "err", err, "url", url, "method", method)
+		log.Warn("[mev builder] client.Do failed", "err", err, "url", rawURL, "method", method)
 		return nil, err
 	}
 	defer func() {
@@ -229,11 +628,11 @@ func httpCall[T any](ctx context.Context, client *http.Client, method, url strin
 		if response.Body == nil {
 			return nil, fmt.Errorf("status code: %d", response.StatusCode)
 		}
-		bytes, err := io.ReadAll(response.Body)
+		bodyBytes, err := io.ReadAll(response.Body)
 		if err != nil {
-			log.Warn("[mev builder] io.ReadAll failed", "err", err, "url", url, "method", method)
+			log.Warn("[mev builder] io.ReadAll failed", "err", err, "url", rawURL, "method", method)
 		} else {
-			log.Warn("[mev builder] httpCall failed", "status", response.Status, "content", string(bytes))
+			log.Warn("[mev builder] httpCall failed", "status", response.Status, "content", string(bodyBytes))
 		}
 		return nil, fmt.Errorf("status code: %d", response.StatusCode)
 	}
@@ -245,16 +644,16 @@ func httpCall[T any](ctx context.Context, client *http.Client, method, url strin
 	if response.Body == nil {
 		return &body, nil
 	}
-	bytes, err := io.ReadAll(response.Body)
+	bodyBytes, err := io.ReadAll(response.Body)
 	if err != nil {
-		log.Warn("[mev builder] io.ReadAll failed", "err", err, "url", url, "method", method)
+		log.Warn("[mev builder] io.ReadAll failed", "err", err, "url", rawURL, "method", method)
 		return nil, err
 	}
-	if len(bytes) == 0 {
+	if len(bodyBytes) == 0 {
 		return &body, nil
 	}
-	if err := json.Unmarshal(bytes, &body); err != nil {
-		log.Warn("[mev builder] json.Unmarshal error", "err", err, "content", string(bytes))
+	if err := json.Unmarshal(bodyBytes, &body); err != nil {
+		log.Warn("[mev builder] json.Unmarshal error", "err", err, "content", string(bodyBytes))
 		return nil, err
 	}
 	return &body, nil

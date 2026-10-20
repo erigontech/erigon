@@ -38,9 +38,8 @@ func CollectTableSizes(ctx context.Context, db RoDB) ([]TableSize, error) {
 	}
 
 	var freeListSize uint64
-	var err error
 	tableSizes := make([]TableSize, 0, len(allTables))
-	err = db.View(ctx, func(tx Tx) error {
+	if err := db.View(ctx, func(tx Tx) error {
 		for _, table := range allTables {
 			sz, err := tx.BucketSize(table)
 			if err != nil {
@@ -50,15 +49,15 @@ func CollectTableSizes(ctx context.Context, db RoDB) ([]TableSize, error) {
 			tableSizes = append(tableSizes, TableSize{Name: table, Size: sz})
 		}
 
-		freeListSize, err = tx.BucketSize("freelist")
+		sz, err := tx.BucketSize("freelist")
 		if err != nil {
 			return err
 		}
+		freeListSize = sz
 
 		tableSizes = append(tableSizes, TableSize{Name: "Freelist", Size: freeListSize})
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		return nil, err
 	}
 
@@ -91,6 +90,9 @@ func CollectTableSizesPeriodically(ctx context.Context, db TemporalRoDB, label L
 		case <-ticker.C:
 			tableSizes, err := CollectTableSizes(ctx, db)
 			if err != nil {
+				if ctx.Err() != nil { // graceful shutdown mid-collect, not a real failure
+					return
+				}
 				logger.Error("[kv] failed to collect table sizes", "err", err)
 				continue
 			}

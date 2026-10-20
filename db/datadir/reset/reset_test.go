@@ -1,6 +1,7 @@
 package reset
 
 import (
+	"bytes"
 	"fmt"
 	"io/fs"
 	"iter"
@@ -14,6 +15,8 @@ import (
 	"testing"
 
 	g "github.com/anacrolix/generics"
+	"github.com/anacrolix/torrent/bencode"
+	"github.com/anacrolix/torrent/metainfo"
 	"github.com/go-quicktest/qt"
 
 	"github.com/erigontech/erigon/common/dir"
@@ -44,6 +47,33 @@ func TestSnapshots(t *testing.T) {
 		r.PreverifiedSnapshots.Sort()
 		qt.Assert(t, qt.IsNil(r.Run()))
 		checkFs(t, root.FS(), haveEntries(startEntries[0])...)
+	})
+}
+
+// A data file whose torrent has an infohash that doesn't match preverified is a stale local build:
+// reset must drop both the torrent and the data file so the downloader re-fetches the canonical copy.
+func TestIncorrectTorrentRemovesDataFile(t *testing.T) {
+	withOsRoot(t, func(root *os.Root) {
+		var mi metainfo.MetaInfo
+		infoBytes, err := bencode.Marshal(metainfo.Info{Name: "foo.ef", PieceLength: 16384, Pieces: make([]byte, 20)})
+		qt.Assert(t, qt.IsNil(err))
+		mi.InfoBytes = infoBytes
+		var torrentBuf bytes.Buffer
+		qt.Assert(t, qt.IsNil(mi.Write(&torrentBuf)))
+
+		wrongHash := "0000000000000000000000000000000000000000"
+		qt.Assert(t, qt.Not(qt.Equals(mi.HashInfoBytes().String(), wrongHash)))
+
+		startEntries := []fsEntry{
+			{Name: "snapshots/idx/foo.ef"},
+			{Name: "snapshots/idx/foo.ef.torrent", Data: torrentBuf.String()},
+		}
+		makeEntries(t, startEntries, root)
+		r := makeTestingReset(t, startEntries, root, "", ".")
+		r.PreverifiedSnapshots = preverified.SortedItems{{Name: "idx/foo.ef", Hash: wrongHash}}
+		r.PreverifiedSnapshots.Sort()
+		qt.Assert(t, qt.IsNil(r.Run()))
+		checkFs(t, root.FS(), haveEntries(fsEntry{Name: "snapshots", Mode: fs.ModeDir})...)
 	})
 }
 
@@ -108,7 +138,8 @@ func TestResetCheapDiskExample(t *testing.T) {
 		}
 		endEntries := append(
 			slices.Clone(startEntries[:7]),
-			fsEntry{Name: ".", Mode: fs.ModeDir})
+			fsEntry{Name: ".", Mode: fs.ModeDir},
+		)
 		makeEntries(t, startEntries, testRoot)
 		rootFS := testRoot.FS()
 		printFs(t, rootFS)
@@ -319,14 +350,14 @@ func checkFs(t *testing.T, fsRoot fs.FS, checkers ...fsChecker) {
 			println("checkFs", path, d, err)
 			matched := false
 			for _, c := range checkers {
-				stop, err := c.OnWalkDir(fsCheckerWalkInput{
+				stop, checkErr := c.OnWalkDir(fsCheckerWalkInput{
 					name: slashName(path),
 					d:    d,
 					err:  err,
 					fs:   fsRoot,
 				})
-				if err != nil {
-					return err
+				if checkErr != nil {
+					return checkErr
 				}
 				if stop {
 					matched = true
@@ -363,8 +394,10 @@ func makeEntries(t *testing.T, entries []fsEntry, root *os.Root) {
 	for _, entry := range entries {
 		localName, err := filepath.Localize(string(entry.Name))
 		qt.Assert(t, qt.IsNil(err), qt.Commentf("localizing entry name %q", entry.Name))
-		root.MkdirAll(filepath.Dir(localName), dir.DirPerm)
-		if entry.Mode&fs.ModeSymlink != 0 {
+		err = root.MkdirAll(filepath.Dir(localName), dir.DirPerm)
+		qt.Assert(t, qt.IsNil(err), qt.Commentf("mkdir for entry %q", entry.Name))
+		switch {
+		case entry.Mode&fs.ModeSymlink != 0:
 			// Windows doesn't seem to create SYMLINKD types when going through os.Root. So we do
 			// appropriate path conversions going into Symlink. That's on top of having to make sure
 			// the target exists if we want a SYMLINKD and not just a SYMLINK.
@@ -374,11 +407,15 @@ func makeEntries(t *testing.T, entries []fsEntry, root *os.Root) {
 			if err != nil {
 				panic(fmt.Sprintf("creating symlink %q -> %q: %v", localName, targetFilePath, err))
 			}
-		} else if entry.Mode&fs.ModeDir != 0 {
+		case entry.Mode&fs.ModeDir != 0:
 			assertNoErr(root.Mkdir(localName, dir.DirPerm))
-		} else {
+		default:
 			f, err := root.Create(localName)
 			assertNoErr(err)
+			if entry.Data != "" {
+				_, err = f.WriteString(entry.Data)
+				assertNoErr(err)
+			}
 			f.Close()
 		}
 	}

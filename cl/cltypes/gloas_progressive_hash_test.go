@@ -1,0 +1,45 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package cltypes
+
+import (
+	"encoding/base64"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/common"
+)
+
+func TestGloasProgressiveBlockRoot(t *testing.T) {
+	encoded := `ZAAAAJYtQIWHk1ycTpGzhW0g2p7X6s5ks5Ubf1jIX2yArmqnYontvy0ASMpxZwFAkQlICQhpMhnL5ghg3ri/CLXKr0NuIKLrFab6aavneWflEwfCWqc0aYDEnRI/Jt2UeEkNp8EEAAAAAAAAzQEAAAAAAAB43v4sBrX296jsHdhWCjtKBCwHKiCaWsyPZXdANizHuwonuCaFkdSYYa3orUcF90o0g9s5Xfvb1nlznH5YfDc/VAAAAI8DTbX2llwS7QSbGqCGvpdH4ebYOXFjFz24HkSRWufwK6SwCKZnfkclBDHF8dLGPxZveC+9GyoS0b1TmeTAUryPbAE8LhQAptrTRot0fbsR97mPpYznLpxn70tgcoQGzNcKI0cxKFxoBMKk9WcR3bjILJl0DyB4VIkQKK804n5eAAAAAAAAAAA3/Ny/HDjdeJH+veQV6F3ZDQSTKrNXvCyRUZX4GW7fC2xvZGVzdGFyLWV0aHJleC0xIEVYODZkZExTYmZkZAAAjAEAAIwBAACMAQAAgAQAAIAEAACZg+iv/Rx9Yt+Xu/Hnf+/n/P1h3rvv4df27i1LzWnqvla+a48tvwr3/53/1Sz/3nC9fu+fbnH1dS1mv++fnzN/hunIdZDFkkCQL+jMLWyjT+DBuBix6PvJodVEJ9ZINklZOtI7TPZsoYd0jfWRUqm/C+gomaT6dFB8M/zeDF1X5KJaE0vZjYFawfgpr+8eCZiNOT+3qXCW9627GTZsrXHvgAQAAIAEAADECAAAxAgAAAwAAAAEAQAA/AEAAOwAAAC/BAAAAAAAAAAAAAAAAAAAeN7+LAa19veo7B3YVgo7SgQsByogmlrMj2V3QDYsx7skAAAAAAAAADd1mVev1X2E6rBufJgd+eNAgeYyIZDFXJzwE5PkkxJdJQAAAAAAAABb73WdxetG8KuQ8sCFdRkx1OUkxORvo2WdZP7z45cDhIa5MVf0VqdC8LeL1NZWUaPp5ncHqoduOnU2MGluhpBHXrsB//ILEZwGv8PlEiD5EAflPPvSCVtclBEPyNca9kswZZD9MlXL7oJj2BUFbLuu7Ps4zzotIoP6+mAVYcPWLAEAAAAAAAAA//////////////9/7AAAAMAEAAAAAAAAAQAAAAAAAAB43v4sBrX296jsHdhWCjtKBCwHKiCaWsyPZXdANizHuyUAAAAAAAAAW+91ncXrRvCrkPLAhXUZMdTlJMTkb6NlnWT+8+OXA4QmAAAAAAAAAHje/iwGtfb3qOwd2FYKO0oELAcqIJpazI9ld0A2LMe7gkcUbqEPulyg1S+j2258vUz8yDxuBUrSm3Uq5SKrKGvnJuJg8YMxz2hyPf2zMzDnFGsl0hXmBQEcROg/pENj0qUcn+U5qr5sRwTlbGM1OUKLChYerL2IVfZi0z8BQFBgAQAAAAAAAAA3GToEJDgHDJAZECDsAAAAwAQAAAAAAAAAAAAAAAAAAHje/iwGtfb3qOwd2FYKO0oELAcqIJpazI9ld0A2LMe7JQAAAAAAAABb73WdxetG8KuQ8sCFdRkx1OUkxORvo2WdZP7z45cDhCYAAAAAAAAAeN7+LAa19veo7B3YVgo7SgQsByogmlrMj2V3QDYsx7ug/Kb8F3PBzlJ57AnyYuJZnrPEGb8Q/XzKQkbFbOfteaYdZ9sq3I9FFsFM4gTDP18FNRBS6YD7RlZUsNtyTVm+AQLL9TLx2vcc4aXXEGp1EOtJJAriS/IF5wond/ATmbkBAAAAAAAAAAjihODQB9hwTUJsKmQAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB2/s8b9pHxWVGuVYoLRoGPht0jvfhULoAVglOu32rv1nje/iwGtfb3qOwd2FYKO0oELAcqIJpazI9ld0A2LMe7avGWvZgUy5vPpxR+yGqzSKaZWoWeh3of/AsxfAzFAl3aLCURsryYRyNg4hDBF87INvOejfSfw1PuZ9Vd80Pr+vl+GAwFDlqwciEa0sIT61ruTfE0vdT4BgAAAAD//////////8EEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOAAAAC4LuMEjC70JWA2RX604KDy903a+4HlmG6z8UXNCYuFRqlcqr0AnhibnyBeAyj/hHrYhuT45xm9chmHX7uWiPs/vncEux36fimTo96o0M92faQo94x9nN0FgXF91hYyqYe/sN67/RI3qYJaakxYVcxWbeehsX0r83IGIMY201sXoKICloI3VVti5q8g5x7rAaXoRTrluR0QZ2GvHv82Xv5IzhMKH70wFNEWiqGaUUpcd5PYiIRCptBcyOCnaQliSL8f9kghDxc32WCrHj85yedq92k6CkEFhob6ZR1kFQvKSJfZKSSBrAWhTuAjJ3oXudUXqZA79GR1+OOdHBfMu8p8cvGhvoeaKVaWgv1JgjNY65eH0megtNhCrOjzxKhVdhT9MWfkACkocxETzamDZz/7xkxqyQk6N+IXxPbg1JtWgKKufHFuc2VWuCIjGHGQqUgMMij67m/z4fwMqiD16GPUEzjg+jo7EfmWqSWj9LdcaauFix3w16X9oyOPlN65b/jahrX5YTEcEY3ZsMEEmafqkg1tLUWSoh3FapLBxvyKf6bUxx7oqgH+B3YgwRR0nYTArWEzsTtMKvJnazYI68jVP7WhLaoQ+ucuIDdqkAThrYodnsv9sKnO0aWLmfTScwU+Bb0J+6s0QuSyYftGcAWQpIKxf8iKEczxTUiSJz4l8ousc15cfz/EsbYuPhpCDerMZ272p5Ai4oRc5bZW/poFf2ZAfBhy5cJbaQ0Yzttu/Ku7FnNvg4C3C+GXlq7o5jxfrFQJonkknhClHvAGAxIVI5Ds7MGFn2mNF8Y3xEmBQ5A02NFoFEPAizQia13+LMfYWSuAaax9Fbw3M9987zJU+vyYeR9yd70E3NvfZPqY4qtYLpRQyH8LneyNRQ8FPKmJ+B+ppS167UYIotrNS1NQeYBxwDb9Wc3pXXC5YTq1pZkaZGJyxahQU1ke6jUXUR56rCUBuo3XEjsJyYhsICOvfmZd6OcfUCU066bSaZlvcJVZsaQOXwen5/iW3pnmASdyyL7dVOBtWfSZ6XHs3gLPEcH/Iq8HNbgmnNCq1syt+xQAAAAUAAAAFAAAABQAAAAUAAAA`
+	data, err := base64.StdEncoding.DecodeString(encoded)
+	require.NoError(t, err)
+
+	cfg := clparams.MainnetBeaconConfig
+	block := NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	require.NoError(t, block.DecodeSSZ(data, int(clparams.GloasVersion)))
+
+	bodyRoot, err := block.Block.Body.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, common.HexToHash("0x2a362b974b66fe01e8aa8d6b012340c5fb1a2faeec0aee8b010638b949999a8e"), common.Hash(bodyRoot))
+
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, common.HexToHash("0x44b8ee5de972ae05b8b103e18e06feb92a03cb817f5e05a5e66b6d282bf542cc"), common.Hash(blockRoot))
+}

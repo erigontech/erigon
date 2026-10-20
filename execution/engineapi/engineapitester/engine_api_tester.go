@@ -24,13 +24,13 @@ import (
 	"math/big"
 	"net"
 	"path"
+	"slices"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
@@ -39,11 +39,16 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/engineapi"
+	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -98,13 +103,9 @@ func DefaultEngineApiTesterGenesis() (*types.Genesis, *ecdsa.PrivateKey, error) 
 	if err != nil {
 		return nil, nil, fmt.Errorf("decode beacon roots code: %w", err)
 	}
-	var chainConfig chain.Config
-	err = copier.CopyWithOption(&chainConfig, chain.AllProtocolChanges, copier.Option{DeepCopy: true})
-	if err != nil {
-		return nil, nil, fmt.Errorf("copy chain config: %w", err)
-	}
+	chainConfig := chain.AllProtocolChanges.Copy()
 	genesis := &types.Genesis{
-		Config:     &chainConfig,
+		Config:     chainConfig,
 		Coinbase:   coinbaseAddr,
 		Difficulty: merge.ProofOfStakeDifficulty,
 		GasLimit:   1_000_000_000,
@@ -128,6 +129,18 @@ func DefaultEngineApiTesterGenesis() (*types.Genesis, *ecdsa.PrivateKey, error) 
 				Code:    beaconRootsCode,
 				Nonce:   1,
 				Balance: new(big.Int),
+			},
+			chainConfig.GetBuilderDepositContract().Value(): {
+				Code:    misc.BuilderDepositRequestCode,
+				Storage: make(map[common.Hash]common.Hash),
+				Balance: new(big.Int),
+				Nonce:   1,
+			},
+			chainConfig.GetBuilderExitContract().Value(): {
+				Code:    misc.BuilderExitRequestCode,
+				Storage: make(map[common.Hash]common.Hash),
+				Balance: new(big.Int),
+				Nonce:   1,
 			},
 		},
 	}
@@ -165,8 +178,8 @@ type cleanupHandle struct {
 func (h *cleanupHandle) close() error {
 	h.once.Do(func() {
 		var errs []error
-		for i := len(h.cleanups) - 1; i >= 0; i-- {
-			err := h.cleanups[i]()
+		for _, cleanup := range slices.Backward(h.cleanups) {
+			err := cleanup()
 			if err != nil {
 				errs = append(errs, err)
 			}
@@ -218,13 +231,13 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	// happy path the http server's Shutdown closes the listener first and the
 	// cleanup is a silent no-op. The sentry/P2P stack picks its own kernel-
 	// assigned port directly via its config below, so no pre-bind there.
-	jsonRpcListener, err := net.Listen("tcp", localhostEphemeral)
+	jsonRpcListener, err := net.Listen("tcp", localhostEphemeral) //nolint:noctx
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("listen json-rpc: %w", err)
 	}
 	addCleanup(closeListenerCleanup(jsonRpcListener))
 	jsonRpcPort := jsonRpcListener.Addr().(*net.TCPAddr).Port
-	engineApiListener, err := net.Listen("tcp", localhostEphemeral)
+	engineApiListener, err := net.Listen("tcp", localhostEphemeral) //nolint:noctx
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("listen engine-api: %w", err)
 	}
@@ -232,14 +245,19 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	engineApiPort := engineApiListener.Addr().(*net.TCPAddr).Port
 	logger.Debug("[engine-api-tester] selected ports", "engineApi", engineApiPort, "jsonRpc", jsonRpcPort)
 
+	httpAPIs := []string{"eth", "txpool"}
+	if args.EnableTestingAPI {
+		httpAPIs = append(httpAPIs, "testing")
+	}
 	httpConfig := httpcfg.HttpCfg{
 		Enabled:                  true,
 		HttpServerEnabled:        true,
 		WebsocketEnabled:         true,
+		HttpCompression:          true,
 		HttpListenAddress:        "127.0.0.1",
 		HttpPort:                 jsonRpcPort,
 		HttpListener:             jsonRpcListener,
-		API:                      []string{"eth"},
+		API:                      httpAPIs,
 		AuthRpcHTTPListenAddress: "127.0.0.1",
 		AuthRpcPort:              engineApiPort,
 		AuthRpcListener:          engineApiListener,
@@ -251,7 +269,6 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		RpcTxSyncDefaultTimeout:  rpccfg.DefaultRpcTxSyncDefaultTimeout,
 		RpcTxSyncMaxTimeout:      rpccfg.DefaultRpcTxSyncMaxTimeout,
 	}
-
 	nodeKeyConfig := p2p.NodeKeyConfig{}
 	nodeKey, err := nodeKeyConfig.LoadOrGenerateAndSave(nodeKeyConfig.DefaultPath(args.DataDir))
 	if err != nil {
@@ -279,6 +296,10 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	txPoolConfig := txpoolcfg.DefaultConfig
 	txPoolConfig.DBDir = dirs.TxPool
 	txPoolConfig.Disable = args.DisableTxPool
+	// Without a limit the txpool DB reserves 1TB of VA, which cannot fit below
+	// the Go race-mode heap window on darwin and starves arena reservation
+	// ("too many address space collisions for -race mode").
+	txPoolConfig.MdbxDBSizeLimit = mdbxDBSizeLimit
 	syncDefault := ethconfig.Defaults.Sync
 	syncDefault.ParallelStateFlushing = false
 	ethConfig := ethconfig.Config{
@@ -293,6 +314,9 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		},
 		BatchSize:             512 * datasize.MB,
 		KeepStoredChainConfig: true,
+		// Small per-instance state cache: one ExecModule is built per fixture,
+		// so the full production cache would exhaust memory across the corpus.
+		StateCacheBudget: 1 * datasize.MB,
 	}
 	if args.EthConfigTweaker != nil {
 		args.EthConfigTweaker(&ethConfig)
@@ -326,7 +350,17 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("obtain jwt secret: %w", err)
 	}
-	ethBackend, err := eth.New(ctx, ethNode, &ethConfig, logger, nil)
+	ethBackend, err := eth.New(
+		ctx,
+		ethNode,
+		&ethConfig,
+		logger,
+		nil,
+		eth.WithStateTransitionObserver(args.StateTransitionObserver),
+		eth.WithRPCStateCacheDecorator(func(cache kvcache.Cache) kvcache.Cache {
+			return withRPCViewObserver(cache, args.StateTransitionObserver)
+		}),
+	)
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("eth.New: %w", err)
 	}
@@ -341,6 +375,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 
 	rpcDaemonHttpUrl := fmt.Sprintf("%s:%d", httpConfig.HttpListenAddress, httpConfig.HttpPort)
 	rpcApiClient := requests.NewRequestGenerator(rpcDaemonHttpUrl, logger)
+	addCleanup(func() error { rpcApiClient.UnsubscribeAll(); return nil })
 	contractBackend := contracts.NewJsonRpcBackend(rpcDaemonHttpUrl, logger)
 	//goland:noinspection HttpUrlsUsage
 	engineApiClientOpts := []engineapi.JsonRpcClientOption{
@@ -383,12 +418,19 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	// must be appended last) — that way ctx-watching background goroutines
 	// see Done before downstream resources (DB, node) are torn down.
 	addCleanup(func() error { cancel(); return nil })
+	var stateAgg *state.Aggregator
+	if aggHolder, ok := ethBackend.ChainDB().(state.HasAgg); ok {
+		stateAgg, _ = aggHolder.Agg().(*state.Aggregator)
+	}
 	success = true
 	return EngineApiTester{
 		GenesisBlock:         genesisBlock,
 		CoinbaseKey:          args.CoinbaseKey,
 		ChainConfig:          genesis.Config,
 		EngineApiClient:      engineApiClient,
+		JsonRpcUrl:           "http://" + rpcDaemonHttpUrl,
+		EngineApiUrl:         engineApiUrl,
+		JwtSecret:            jwtSecret,
 		RpcApiClient:         rpcApiClient,
 		ContractBackend:      contractBackend,
 		MockCl:               mockCl,
@@ -396,22 +438,27 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		TxnInclusionVerifier: NewTxnInclusionVerifier(rpcApiClient),
 		Node:                 ethNode,
 		NodeKey:              nodeKey,
+		StateAgg:             stateAgg,
+		ChainDB:              ethBackend.ChainDB().(kv.TemporalRoDB),
+		ExecutionModule:      ethBackend.ExecutionModule(),
 		cleanup:              cleanup,
 	}, nil
 }
 
 type EngineApiTesterInitArgs struct {
-	Logger                 log.Logger
-	DataDir                string
-	Genesis                *types.Genesis
-	CoinbaseKey            *ecdsa.PrivateKey
-	EthConfigTweaker       func(*ethconfig.Config)
-	MockClState            *MockClState
-	NoEmptyBlock1          bool
-	EngineApiClientTimeout *time.Duration
-	DisableTxPool          bool
-	DisableSentry          bool
-	MdbxDBSizeLimit        datasize.ByteSize
+	Logger                  log.Logger
+	DataDir                 string
+	Genesis                 *types.Genesis
+	CoinbaseKey             *ecdsa.PrivateKey
+	EthConfigTweaker        func(*ethconfig.Config)
+	MockClState             *MockClState
+	NoEmptyBlock1           bool
+	EngineApiClientTimeout  *time.Duration
+	DisableTxPool           bool
+	DisableSentry           bool
+	MdbxDBSizeLimit         datasize.ByteSize
+	StateTransitionObserver execmodule.StateTransitionObserver
+	EnableTestingAPI        bool
 }
 
 type EngineApiTester struct {
@@ -419,6 +466,9 @@ type EngineApiTester struct {
 	CoinbaseKey          *ecdsa.PrivateKey
 	ChainConfig          *chain.Config
 	EngineApiClient      *engineapi.JsonRpcClient
+	JsonRpcUrl           string
+	EngineApiUrl         string
+	JwtSecret            []byte
 	RpcApiClient         requests.RequestGenerator
 	ContractBackend      contracts.JsonRpcBackend
 	MockCl               *MockCl
@@ -426,6 +476,9 @@ type EngineApiTester struct {
 	TxnInclusionVerifier TxnInclusionVerifier
 	Node                 *node.Node
 	NodeKey              *ecdsa.PrivateKey
+	StateAgg             *state.Aggregator
+	ChainDB              kv.TemporalRoDB
+	ExecutionModule      execmodule.ExecutionModule
 	cleanup              *cleanupHandle
 }
 

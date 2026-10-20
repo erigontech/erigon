@@ -35,7 +35,7 @@ func NewStateChangesClientMock(ctx context.Context, recvC <-chan *remoteproto.St
 }
 
 func (s StateChangesClientMock) StateChanges(context.Context, *remoteproto.StateChangeRequest, ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error) {
-	return kvStateChangesStreamMock{ctx: s.ctx, recvC: s.recvC}, nil
+	return kvStateChangesStreamMock(s), nil
 }
 
 var _ remoteproto.KV_StateChangesClient = kvStateChangesStreamMock{}

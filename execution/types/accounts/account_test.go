@@ -17,13 +17,19 @@
 package accounts
 
 import (
+	"bytes"
+	"encoding/json"
 	"testing"
+	"unique"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func TestEmptyAccount(t *testing.T) {
@@ -76,13 +82,92 @@ func TestEmptyAccount_BufferStrangeBehaviour(t *testing.T) {
 	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
 }
 
+func TestDeserialiseV3CodeHash(t *testing.T) {
+	t.Parallel()
+	balances := []uint256.Int{{}, *uint256.NewInt(1), *uint256.NewInt(1e18), *new(uint256.Int).Lsh(uint256.NewInt(1), 200)}
+	nonces := []uint64{0, 1, 255, 1 << 40}
+	codeHashes := []CodeHash{EmptyCodeHash, InternCodeHash(crypto.Keccak256Hash([]byte{1, 2, 3}))}
+	incarnations := []uint64{0, 7}
+
+	for _, nonce := range nonces {
+		for i := range balances {
+			for _, ch := range codeHashes {
+				for _, inc := range incarnations {
+					a := Account{Nonce: nonce, Balance: balances[i], CodeHash: ch, Incarnation: inc}
+					enc := SerialiseV3(&a)
+
+					var full Account
+					if err := DeserialiseV3(&full, enc); err != nil {
+						t.Fatal(err)
+					}
+					got := DeserialiseV3CodeHash(enc)
+					if full.CodeHash.IsEmpty() {
+						if got != nil {
+							t.Fatalf("empty codeHash must extract as nil, got %x (acc %+v)", got, a)
+						}
+					} else {
+						want := full.CodeHash.Value()
+						if !bytes.Equal(got, want[:]) {
+							t.Fatalf("extracted %x, want %x (acc %+v)", got, want, a)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestDeserialiseV3CodeHashMalformed(t *testing.T) {
+	t.Parallel()
+	a := Account{
+		Nonce:       255,
+		Balance:     *uint256.NewInt(1e18),
+		CodeHash:    InternCodeHash(crypto.Keccak256Hash([]byte{1, 2, 3})),
+		Incarnation: 4,
+	}
+	enc := SerialiseV3(&a)
+	// [1+nonce][1+balance][1+codeHash]... — the codeHash field is complete at:
+	codeHashEnd := 1 + int(enc[0]) + 1
+	codeHashEnd += int(enc[codeHashEnd-1]) + 1
+	codeHashEnd += int(enc[codeHashEnd-1])
+	// Any truncation cutting into (or before) the codeHash must yield nil,
+	// never an out-of-bounds read; beyond it the codeHash is extractable.
+	for cut := 0; cut <= len(enc); cut++ {
+		got := DeserialiseV3CodeHash(enc[:cut])
+		if cut < codeHashEnd && got != nil {
+			t.Fatalf("cut=%d (codeHash complete at %d): expected nil, got %x", cut, codeHashEnd, got)
+		}
+		if cut >= codeHashEnd && got == nil {
+			t.Fatalf("cut=%d (codeHash complete at %d): expected hash, got nil", cut, codeHashEnd)
+		}
+	}
+	if got := DeserialiseV3CodeHash(nil); got != nil {
+		t.Fatalf("nil input: expected nil, got %x", got)
+	}
+	// A record claiming a non-32-byte codeHash is malformed for extraction.
+	odd := append([]byte{0, 0, 31}, make([]byte, 31)...)
+	if got := DeserialiseV3CodeHash(odd); got != nil {
+		t.Fatalf("non-32-byte codeHash field: expected nil, got %x", got)
+	}
+	// Non-canonical records spelling out the no-code sentinels (canonical
+	// SerialiseV3 writes length 0 instead) must extract as nil, matching
+	// CodeHash.IsEmpty.
+	for _, sentinel := range [][]byte{make([]byte, 32), empty.CodeHash[:]} {
+		rec := append([]byte{0, 0, 32}, sentinel...)
+		rec = append(rec, 0)
+		if got := DeserialiseV3CodeHash(rec); got != nil {
+			t.Fatalf("sentinel codeHash %x: expected nil, got %x", sentinel, got)
+		}
+	}
+}
+
 func TestAccountEncodeWithCode(t *testing.T) {
 	t.Parallel()
 	a := Account{
 		Nonce:       2,
 		Balance:     *uint256.NewInt(0).SetUint64(1000),
 		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-		CodeHash:    InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
+		CodeHash:    InternCodeHash(crypto.Keccak256Hash([]byte{1, 2, 3})),
 		Incarnation: 4,
 	}
 
@@ -102,7 +187,7 @@ func TestAccountEncodeWithCodeWithStorageSizeHack(t *testing.T) {
 		Nonce:       2,
 		Balance:     *uint256.NewInt(0).SetUint64(1000),
 		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-		CodeHash:    InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
+		CodeHash:    InternCodeHash(crypto.Keccak256Hash([]byte{1, 2, 3})),
 		Incarnation: 5,
 	}
 
@@ -154,6 +239,7 @@ func TestEncodeAccountWithEmptyBalanceNonNilContractAndNotZeroIncarnation(t *tes
 
 	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
 }
+
 func TestEncodeAccountWithEmptyBalanceAndNotZeroIncarnation(t *testing.T) {
 	t.Parallel()
 	a := Account{
@@ -230,7 +316,6 @@ func TestEmptyIncarnationForEmptyAccount2(t *testing.T) {
 	}
 
 	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
-
 }
 
 func TestIncarnationWithNonEmptyAccount(t *testing.T) {
@@ -239,7 +324,7 @@ func TestIncarnationWithNonEmptyAccount(t *testing.T) {
 		Nonce:       2,
 		Balance:     *uint256.NewInt(0).SetUint64(1000),
 		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-		CodeHash:    InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
+		CodeHash:    InternCodeHash(crypto.Keccak256Hash([]byte{1, 2, 3})),
 		Incarnation: 4,
 	}
 
@@ -259,7 +344,7 @@ func TestIncarnationWithNoIncarnation(t *testing.T) {
 		Nonce:       2,
 		Balance:     *uint256.NewInt(0).SetUint64(1000),
 		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-		CodeHash:    InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
+		CodeHash:    InternCodeHash(crypto.Keccak256Hash([]byte{1, 2, 3})),
 		Incarnation: 0,
 	}
 
@@ -271,17 +356,14 @@ func TestIncarnationWithNoIncarnation(t *testing.T) {
 	}
 
 	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
-
 }
 
 func TestIncarnationWithInvalidEncodedAccount(t *testing.T) {
-
-	var failingSlice = []byte{1, 12}
+	failingSlice := []byte{1, 12}
 
 	if incarnation, err := DecodeIncarnationFromStorage(failingSlice); err == nil {
 		t.Fatal("decoded the incarnation", incarnation, failingSlice)
 	}
-
 }
 
 func isIncarnationEqual(t *testing.T, initialIncarnation uint64, decodedIncarnation uint64) {
@@ -289,4 +371,80 @@ func isIncarnationEqual(t *testing.T, initialIncarnation uint64, decodedIncarnat
 	if initialIncarnation != decodedIncarnation {
 		t.Fatal("Can't decode the incarnation", initialIncarnation, decodedIncarnation)
 	}
+}
+
+func TestAccProofResultMarshalFastJSONTo(t *testing.T) {
+	proof := func(n int) []hexutil.Bytes {
+		nodes := make([]hexutil.Bytes, n)
+		for i := range nodes {
+			nodes[i] = bytes.Repeat([]byte{byte(i + 1)}, 532)
+		}
+		return nodes
+	}
+	maxU256 := (*hexutil.U256)(new(uint256.Int).SetAllOne())
+	for name, result := range map[string]*AccProofResult{
+		"zero":          {},
+		"no storage":    {Address: common.HexToAddress("0x01"), AccountProof: proof(3), Balance: maxU256, Nonce: hexutil.Uint64(^uint64(0))},
+		"empty storage": {AccountProof: []hexutil.Bytes{}, Balance: new(hexutil.U256), StorageProof: []StorProofResult{}},
+		"slots": {
+			AccountProof: proof(8), Balance: (*hexutil.U256)(uint256.NewInt(1 << 40)), CodeHash: common.HexToHash("0xc0de"), StorageHash: common.HexToHash("0x5707"),
+			StorageProof: []StorProofResult{
+				{Key: "0x01", Value: maxU256, Proof: proof(5)},
+				{Key: `"quoted"`, Value: new(hexutil.U256), Proof: []hexutil.Bytes{}},
+				{Key: "0x03", Value: (*hexutil.U256)(uint256.NewInt(0x10)), Proof: proof(1)},
+				{},
+			},
+		},
+		"large": {AccountProof: proof(2 * jsonstream.FlushThreshold / 532), Balance: new(hexutil.U256)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			want, err := json.Marshal(result)
+			require.NoError(t, err)
+			s := jsonstream.Get(nil)
+			defer jsonstream.Put(s)
+			require.NoError(t, result.MarshalFastJSONTo(s))
+			require.Equal(t, string(want), string(s.Buffer()))
+		})
+	}
+}
+
+func TestAccountCopyCopiesAllFields(t *testing.T) {
+	t.Parallel()
+	a := Account{
+		Nonce:           1,
+		Balance:         *uint256.NewInt(2),
+		Root:            common.Hash{3},
+		CodeHash:        InternCodeHash(common.Hash{4}),
+		Incarnation:     5,
+		PrevIncarnation: 6,
+	}
+	var b Account
+	b.Copy(&a)
+	require.Equal(t, a, b)
+	require.Equal(t, a, *a.SelfCopy())
+}
+
+// Values that share an intern-table slot must each come back as their own canonical handle.
+func TestInternSlotCollision(t *testing.T) {
+	k1, k2 := common.Hash{1}, common.Hash{1}
+	k2[10] = 7
+	a1, a2 := common.Address{1}, common.Address{2}
+	require.Same(t, keySlot(k1), keySlot(k2))
+	require.Same(t, addressSlot(a1), addressSlot(a2))
+	for range 2 {
+		for _, k := range []common.Hash{k1, k2} {
+			require.Equal(t, StorageKey(unique.Make(k)), InternKey(k))
+			require.Equal(t, k, InternKey(k).Value())
+		}
+		for _, a := range []common.Address{a1, a2} {
+			require.Equal(t, Address(unique.Make(a)), InternAddress(a))
+			require.Equal(t, a, InternAddress(a).Value())
+		}
+	}
+}
+
+// Precompiles and small scalar storage slots differ only in their last bytes; they must not share a slot.
+func TestInternSlotsSpreadLowValues(t *testing.T) {
+	require.NotSame(t, addressSlot(common.BytesToAddress([]byte{1})), addressSlot(common.BytesToAddress([]byte{2})))
+	require.NotSame(t, keySlot(common.BytesToHash([]byte{1})), keySlot(common.BytesToHash([]byte{2})))
 }

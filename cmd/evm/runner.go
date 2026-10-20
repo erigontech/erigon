@@ -32,7 +32,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/evm/internal/compiler"
 	"github.com/erigontech/erigon/cmd/utils"
@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -70,7 +71,7 @@ var runCommand = cli.Command{
 // the initialized Genesis structure
 func readGenesis(genesisPath string) *types.Genesis {
 	// Make sure we have a valid genesis JSON
-	//genesisPath := ctx.Args().First()
+	// genesisPath := ctx.Args().First()
 	if len(genesisPath) == 0 {
 		utils.Fatalf("Must supply path to genesis JSON file")
 	}
@@ -144,7 +145,7 @@ func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []by
 	return output, stats, err
 }
 
-func runCmd(ctx *cli.Context) error {
+func runCmd(_ context.Context, ctx *cli.Command) error {
 	machineFriendlyOutput := ctx.Bool(MachineFlag.Name)
 	if machineFriendlyOutput {
 		log.Root().SetHandler(log.DiscardHandler())
@@ -168,19 +169,24 @@ func runCmd(ctx *cli.Context) error {
 		receiver      = accounts.InternAddress(common.BytesToAddress([]byte("receiver")))
 		genesisConfig *types.Genesis
 	)
-	if machineFriendlyOutput {
+	switch {
+	case machineFriendlyOutput:
 		tracer = logger.NewJSONLogger(logconfig, os.Stderr).Tracer()
-	} else if ctx.Bool(DebugFlag.Name) {
+	case ctx.Bool(DebugFlag.Name):
 		debugLogger = logger.NewStructLogger(logconfig)
 		tracer = debugLogger.Tracer()
-	} else {
+	default:
 		debugLogger = logger.NewStructLogger(logconfig)
 	}
 	tmpDir, err := os.MkdirTemp("", "erigon-evm-run-*")
 	if err != nil {
 		return err
 	}
-	defer dir.RemoveAll(tmpDir)
+	defer func() {
+		if err := dir.RemoveAll(tmpDir); err != nil {
+			log.Warn("failed to remove temp dir", "dir", tmpDir, "err", err)
+		}
+	}()
 	db := temporaltest.NewTestDB(nil, datadir.New(tmpDir))
 	defer db.Close()
 	if ctx.String(GenesisFlag.Name) != "" {
@@ -203,12 +209,21 @@ func runCmd(ctx *cli.Context) error {
 		return err
 	}
 	defer sd.Close()
-	stateReader := state.NewReaderV3(sd.AsGetter(tx))
+	stateReader := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	statedb = state.New(stateReader)
+	// The dump commits the state, which the versioned path does not materialize.
+	if dbg.CallNoMaterialize && !ctx.Bool(DumpFlag.Name) {
+		statedb.SetVersionMap(state.NewVersionMap(nil))
+		statedb.SetNoMaterialize(true)
+		statedb.SetTxContext(0, 0)
+		statedb.SetNoConflictDetection()
+	}
 	if ctx.String(SenderFlag.Name) != "" {
 		sender = accounts.InternAddress(common.HexToAddress(ctx.String(SenderFlag.Name)))
 	}
-	statedb.CreateAccount(sender, true)
+	if err := statedb.CreateAccount(sender, true); err != nil {
+		return err
+	}
 
 	if ctx.String(ReceiverFlag.Name) != "" {
 		receiver = accounts.InternAddress(common.HexToAddress(ctx.String(ReceiverFlag.Name)))
@@ -225,16 +240,14 @@ func runCmd(ctx *cli.Context) error {
 			var err error
 			// If - is specified, it means that code comes from stdin
 			if codeFileFlag == "-" {
-				//Try reading from stdin
+				// Try reading from stdin
 				if hexcode, err = io.ReadAll(os.Stdin); err != nil {
-					fmt.Printf("Could not load code from stdin: %v\n", err)
-					os.Exit(1)
+					return fmt.Errorf("could not load code from stdin: %w", err)
 				}
 			} else {
 				// Codefile with hex assembly
 				if hexcode, err = os.ReadFile(codeFileFlag); err != nil {
-					fmt.Printf("Could not load code from file: %v\n", err)
-					os.Exit(1)
+					return fmt.Errorf("could not load code from file: %w", err)
 				}
 			}
 		} else {
@@ -242,8 +255,7 @@ func runCmd(ctx *cli.Context) error {
 		}
 		hexcode = bytes.TrimSpace(hexcode)
 		if len(hexcode)%2 != 0 {
-			fmt.Printf("Invalid input length for hex data (%d)\n", len(hexcode))
-			os.Exit(1)
+			return fmt.Errorf("invalid input length for hex data (%d)", len(hexcode))
 		}
 		code = hexutil.MustDecodeHex(string(hexcode))
 	} else if fn := ctx.Args().First(); len(fn) > 0 {
@@ -283,12 +295,11 @@ func runCmd(ctx *cli.Context) error {
 	if cpuProfilePath := ctx.String(CPUProfileFlag.Name); cpuProfilePath != "" {
 		f, err := os.Create(cpuProfilePath)
 		if err != nil {
-			fmt.Println("could not create CPU profile: ", err)
-			os.Exit(1)
+			return fmt.Errorf("could not create CPU profile: %w", err)
 		}
+		defer f.Close()
 		if err := pprof.StartCPUProfile(f); err != nil {
-			fmt.Println("could not start CPU profile: ", err)
-			os.Exit(1)
+			return fmt.Errorf("could not start CPU profile: %w", err)
 		}
 		defer pprof.StopCPUProfile()
 	}
@@ -303,8 +314,7 @@ func runCmd(ctx *cli.Context) error {
 	if inputFileFlag := ctx.String(InputFileFlag.Name); inputFileFlag != "" {
 		var err error
 		if hexInput, err = os.ReadFile(inputFileFlag); err != nil {
-			fmt.Printf("could not load input from file: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("could not load input from file: %w", err)
 		}
 	} else {
 		hexInput = []byte(ctx.String(InputFlag.Name))
@@ -315,12 +325,14 @@ func runCmd(ctx *cli.Context) error {
 	if ctx.Bool(CreateFlag.Name) {
 		input = append(code, input...)
 		execFunc = func() ([]byte, uint64, error) {
-			output, _, gasLeft, err := runtime.Create(input, &runtimeConfig, 0)
+			output, _, gasLeft, err := runtime.Create(input, &runtimeConfig)
 			return output, initialGas - gasLeft.Total(), err
 		}
 	} else {
 		if len(code) > 0 {
-			statedb.SetCode(receiver, code, tracing.CodeChangeUnspecified)
+			if err := statedb.SetCode(receiver, code, tracing.CodeChangeUnspecified); err != nil {
+				return err
+			}
 		}
 		execFunc = func() ([]byte, uint64, error) {
 			output, gasLeft, err := runtime.Call(receiver, input, &runtimeConfig)
@@ -341,8 +353,7 @@ func runCmd(ctx *cli.Context) error {
 			rules = blockContext.Rules(chainConfig)
 		}
 		if err = statedb.CommitBlock(rules, state.NewNoopWriter()); err != nil {
-			fmt.Println("Could not commit state: ", err)
-			os.Exit(1)
+			return fmt.Errorf("could not commit state: %w", err)
 		}
 		fmt.Println(string(state.NewDumper(tx, rawdbv3.TxNums, 0).DefaultDump()))
 	}
@@ -350,12 +361,10 @@ func runCmd(ctx *cli.Context) error {
 	if memProfilePath := ctx.String(MemProfileFlag.Name); memProfilePath != "" {
 		f, err := os.Create(memProfilePath)
 		if err != nil {
-			fmt.Println("could not create memory profile: ", err)
-			os.Exit(1)
+			return fmt.Errorf("could not create memory profile: %w", err)
 		}
 		if err := pprof.WriteHeapProfile(f); err != nil {
-			fmt.Println("could not write memory profile: ", err)
-			os.Exit(1)
+			return fmt.Errorf("could not write memory profile: %w", err)
 		}
 		closeErr := f.Close()
 		if closeErr != nil {

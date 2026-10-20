@@ -25,18 +25,23 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -55,8 +60,10 @@ type twoOperandParams struct {
 	y string
 }
 
-var commonParams []*twoOperandParams
-var twoOpMethods map[string]executionFunc
+var (
+	commonParams []*twoOperandParams
+	twoOpMethods map[string]executionFunc
+)
 
 type contractRef struct {
 	addr common.Address
@@ -67,7 +74,6 @@ func (c contractRef) Address() common.Address {
 }
 
 func init() {
-
 	// Params is a list of common edgecases that should be used for some common tests
 	params := []string{
 		"0000000000000000000000000000000000000000000000000000000000000000", // 0
@@ -87,7 +93,8 @@ func init() {
 			commonParams[i*len(params)+j] = &twoOperandParams{x, y}
 		}
 	}
-	twoOpMethods = map[string]executionFunc{"add": opAdd,
+	twoOpMethods = map[string]executionFunc{
+		"add":     opAdd,
 		"sub":     opSub,
 		"mul":     opMul,
 		"div":     opDiv,
@@ -128,7 +135,7 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 		if callContext.Stack.top != 1 {
 			t.Errorf("Expected one item on stack after %v, got %d: ", name, callContext.Stack.top)
 		}
-		actual := callContext.Stack.pop()
+		actual := callContext.Stack.popCopy()
 
 		if actual.Cmp(expected) != 0 {
 			t.Errorf("Testcase %v %d, %v(%x, %x): expected  %x, got %x", name, i, name, x, y, expected, &actual)
@@ -226,7 +233,8 @@ func TestAddMod(t *testing.T) {
 		z        string
 		expected string
 	}{
-		{"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+		{
+			"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
 			"fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe",
 			"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
 			"fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe",
@@ -244,7 +252,7 @@ func TestAddMod(t *testing.T) {
 		callContext.Stack.push(y)
 		callContext.Stack.push(x)
 		opAddmod(pc, evm, callContext)
-		actual := callContext.Stack.pop()
+		actual := callContext.Stack.popCopy()
 		if actual.Cmp(expected) != 0 {
 			t.Errorf("Testcase %d, expected  %x, got %x", i, expected, actual)
 		}
@@ -300,234 +308,26 @@ func TestJsonTestcases(t *testing.T) {
 	}
 }
 
-func opBenchmark(b *testing.B, op executionFunc, args ...string) {
-	var (
-		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
-		callContext = &CallContext{}
-	)
+func innerOutputsShareBuffer(cfg Config) bool {
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, cfg)
+	evm.depth = 2
+	var mem Memory
+	mem.Resize(32)
+	a, b := evm.output(&mem, 0, 32), evm.output(&mem, 0, 32)
+	return unsafe.SliceData(a) == unsafe.SliceData(b)
+}
 
-	// convert args
-	byteArgs := make([][]byte, len(args))
-	for i, arg := range args {
-		byteArgs[i] = common.Hex2Bytes(arg)
-	}
-	pc := uint64(0)
-	for b.Loop() {
-		for _, arg := range byteArgs {
-			a := *new(uint256.Int).SetBytes(arg)
-			callContext.Stack.push(a)
-		}
-		op(pc, evm, callContext)
-		callContext.Stack.pop()
+func TestInnerFrameOutputReusesBuffer(t *testing.T) {
+	if !innerOutputsShareBuffer(Config{}) {
+		t.Fatal("each inner RETURN got a new buffer")
 	}
 }
 
-func BenchmarkOpAdd64(b *testing.B) {
-	x := "ffffffff"
-	y := "fd37f3e2bba2c4f"
-
-	opBenchmark(b, opAdd, x, y)
-}
-
-func BenchmarkOpAdd128(b *testing.B) {
-	x := "ffffffffffffffff"
-	y := "f5470b43c6549b016288e9a65629687"
-
-	opBenchmark(b, opAdd, x, y)
-}
-
-func BenchmarkOpAdd256(b *testing.B) {
-	x := "0802431afcbce1fc194c9eaa417b2fb67dc75a95db0bc7ec6b1c8af11df6a1da9"
-	y := "a1f5aac137876480252e5dcac62c354ec0d42b76b0642b6181ed099849ea1d57"
-
-	opBenchmark(b, opAdd, x, y)
-}
-
-func BenchmarkOpSub64(b *testing.B) {
-	x := "51022b6317003a9d"
-	y := "a20456c62e00753a"
-
-	opBenchmark(b, opSub, x, y)
-}
-
-func BenchmarkOpSub128(b *testing.B) {
-	x := "4dde30faaacdc14d00327aac314e915d"
-	y := "9bbc61f5559b829a0064f558629d22ba"
-
-	opBenchmark(b, opSub, x, y)
-}
-
-func BenchmarkOpSub256(b *testing.B) {
-	x := "4bfcd8bb2ac462735b48a17580690283980aa2d679f091c64364594df113ea37"
-	y := "97f9b1765588c4e6b69142eb00d20507301545acf3e1238c86c8b29be227d46e"
-
-	opBenchmark(b, opSub, x, y)
-}
-
-func BenchmarkOpMul(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opMul, x, y)
-}
-
-func BenchmarkOpDiv256(b *testing.B) {
-	x := "ff3f9014f20db29ae04af2c2d265de17"
-	y := "fe7fb0d1f59dfe9492ffbf73683fd1e870eec79504c60144cc7f5fc2bad1e611"
-	opBenchmark(b, opDiv, x, y)
-}
-
-func BenchmarkOpDiv128(b *testing.B) {
-	x := "fdedc7f10142ff97"
-	y := "fbdfda0e2ce356173d1993d5f70a2b11"
-	opBenchmark(b, opDiv, x, y)
-}
-
-func BenchmarkOpDiv64(b *testing.B) {
-	x := "fcb34eb3"
-	y := "f97180878e839129"
-	opBenchmark(b, opDiv, x, y)
-}
-
-func BenchmarkOpSdiv(b *testing.B) {
-	x := "ff3f9014f20db29ae04af2c2d265de17"
-	y := "fe7fb0d1f59dfe9492ffbf73683fd1e870eec79504c60144cc7f5fc2bad1e611"
-
-	opBenchmark(b, opSdiv, x, y)
-}
-
-func BenchmarkOpMod(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opMod, x, y)
-}
-
-func BenchmarkOpSmod(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opSmod, x, y)
-}
-
-func BenchmarkOpExp(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opExp, x, y)
-}
-
-func BenchmarkOpSignExtend(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opSignExtend, x, y)
-}
-
-func BenchmarkOpLt(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opLt, x, y)
-}
-
-func BenchmarkOpGt(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opGt, x, y)
-}
-
-func BenchmarkOpSlt(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opSlt, x, y)
-}
-
-func BenchmarkOpSgt(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opSgt, x, y)
-}
-
-func BenchmarkOpEq(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opEq, x, y)
-}
-func BenchmarkOpEq2(b *testing.B) {
-	x := "FBCDEF090807060504030201ffffffffFBCDEF090807060504030201ffffffff"
-	y := "FBCDEF090807060504030201ffffffffFBCDEF090807060504030201fffffffe"
-	opBenchmark(b, opEq, x, y)
-}
-func BenchmarkOpAnd(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opAnd, x, y)
-}
-
-func BenchmarkOpOr(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opOr, x, y)
-}
-
-func BenchmarkOpXor(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opXor, x, y)
-}
-
-func BenchmarkOpByte(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-
-	opBenchmark(b, opByte, x, y)
-}
-
-func BenchmarkOpAddmod(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-	z := opTestArg
-
-	opBenchmark(b, opAddmod, x, y, z)
-}
-
-func BenchmarkOpMulmod(b *testing.B) {
-	x := opTestArg
-	y := opTestArg
-	z := opTestArg
-
-	opBenchmark(b, opMulmod, x, y, z)
-}
-
-func BenchmarkOpSHL(b *testing.B) {
-	x := "FBCDEF090807060504030201ffffffffFBCDEF090807060504030201ffffffff"
-	y := "ff"
-
-	opBenchmark(b, opSHL, x, y)
-}
-func BenchmarkOpSHR(b *testing.B) {
-	x := "FBCDEF090807060504030201ffffffffFBCDEF090807060504030201ffffffff"
-	y := "ff"
-
-	opBenchmark(b, opSHR, x, y)
-}
-func BenchmarkOpSAR(b *testing.B) {
-	x := "FBCDEF090807060504030201ffffffffFBCDEF090807060504030201ffffffff"
-	y := "ff"
-
-	opBenchmark(b, opSAR, x, y)
-}
-func BenchmarkOpIsZero(b *testing.B) {
-	x := "FBCDEF090807060504030201ffffffffFBCDEF090807060504030201ffffffff"
-	opBenchmark(b, opIszero, x)
+// Tracers such as callTracer keep every frame's output.
+func TestTracedInnerFrameOutputIsCopied(t *testing.T) {
+	if innerOutputsShareBuffer(Config{Tracer: &tracing.Hooks{}}) {
+		t.Fatal("a traced inner RETURN reused the buffer")
+	}
 }
 
 func TestOpMstore(t *testing.T) {
@@ -554,21 +354,147 @@ func TestOpMstore(t *testing.T) {
 	}
 }
 
-func BenchmarkOpMstore(bench *testing.B) {
-	var (
-		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
-		callContext = &CallContext{}
-	)
+var retSink []byte
 
+// The CALL/CREATE trace formatters must read the operands the op is about to
+// pop (top-relative), not fixed slots near the array's capacity.
+func TestStaticCallTraceReadsStackTop(t *testing.T) {
+	callContext := &CallContext{}
 	callContext.Memory.Resize(64)
-	pc := uint64(0)
-	memStart := uint256.Int{}
-	value := *new(uint256.Int).SetUint64(0x1337)
+	callContext.Memory.Set(0, 4, []byte{0xde, 0xad, 0xbe, 0xef})
+	wantAddr := common.HexToAddress("0x1122334455667788990011223344556677889900")
 
-	for bench.Loop() {
-		callContext.Stack.push(value)
-		callContext.Stack.push(memStart)
-		opMstore(pc, evm, callContext)
+	// STATICCALL operands, top-down: gas, addr, inOffset, inSize, retOffset, retSize
+	callContext.Stack.push(uint256.Int{})                           // retSize
+	callContext.Stack.push(uint256.Int{})                           // retOffset
+	callContext.Stack.push(*uint256.NewInt(4))                      // inSize
+	callContext.Stack.push(uint256.Int{})                           // inOffset
+	callContext.Stack.push(*new(uint256.Int).SetBytes(wantAddr[:])) // addr
+	callContext.Stack.push(*uint256.NewInt(21000))                  // gas
+
+	got := stStaticCall(0, callContext)
+	wantHex := fmt.Sprintf("%x", wantAddr)
+	if !strings.Contains(got, wantHex) || !strings.Contains(got, "deadbeef") {
+		t.Fatalf("trace read wrong stack slots: got %q, want addr %s and args deadbeef", got, wantHex)
+	}
+}
+
+// CREATE2 must be wired to stCreate2 (not stCreate), which labels the op
+// "CREATE2" and includes the salt operand it reads from the fourth slot.
+func TestCreate2TraceWiring(t *testing.T) {
+	jt := newAmsterdamInstructionSet()
+	callContext := &CallContext{}
+	callContext.Memory.Resize(64)
+	callContext.Memory.Set(0, 4, []byte{0xde, 0xad, 0xbe, 0xef})
+
+	// CREATE2 operands, top-down: endowment, offset, size, salt
+	callContext.Stack.push(*uint256.NewInt(0xcafe)) // salt
+	callContext.Stack.push(*uint256.NewInt(4))      // size
+	callContext.Stack.push(uint256.Int{})           // offset
+	callContext.Stack.push(*uint256.NewInt(7))      // endowment
+
+	got := jt[CREATE2].string(0, callContext)
+	if !strings.HasPrefix(got, "CREATE2 ") {
+		t.Fatalf("CREATE2 traced with wrong formatter: got %q", got)
+	}
+	if !strings.Contains(got, "51966") || !strings.Contains(got, "deadbeef") {
+		t.Fatalf("CREATE2 trace missing salt/input: got %q, want salt 51966 and deadbeef", got)
+	}
+}
+
+func TestCreate2InitCodeAllocations(t *testing.T) {
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	evm.depth = int(params.CallCreateDepth) + 1 // exclude child execution from the allocation count.
+	scope := evm.getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, mdgas.MdGas{Execution: 500_000})
+	defer evm.putCallContext(scope)
+	scope.Memory.Resize(64)
+	clear(scope.Memory.Data())
+	allocations := func(memorySize int) float64 {
+		return testing.AllocsPerRun(100, func() {
+			scope.Memory.store = scope.Memory.store[:memorySize]
+			scope.Memory.lastGasCost = 0
+			scope.Stack.Reset()
+			scope.Stack.push(uint256.Int{})
+			scope.Stack.push(*uint256.NewInt(64))
+			scope.Stack.push(uint256.Int{})
+			scope.Stack.push(uint256.Int{})
+			if _, err := gasCreate2Eip3860(evm, scope, scope.Gas(), 64); err != nil {
+				t.Fatal(err)
+			}
+			scope.Memory.Resize(64)
+			if _, _, err := opCreate2(0, evm, scope); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	withoutPadding := allocations(64)
+	withPadding := allocations(32)
+	if withPadding != withoutPadding {
+		t.Fatalf("zero-padding adds initcode allocations: without padding %g, with padding %g", withoutPadding, withPadding)
+	}
+}
+
+func TestStackPopHelpers(t *testing.T) {
+	st := &Stack{}
+
+	// pop2Uint64 returns the low 64 bits of (top, next) and shrinks by two.
+	st.push(*uint256.NewInt(0xAAAA)) // next
+	st.push(*uint256.NewInt(0xBBBB)) // top
+	if x, y := st.pop2Uint64(); x != 0xBBBB || y != 0xAAAA {
+		t.Fatalf("pop2Uint64 = (%#x, %#x), want (0xbbbb, 0xaaaa)", x, y)
+	}
+	if st.len() != 0 {
+		t.Fatalf("pop2Uint64 len = %d, want 0", st.len())
+	}
+
+	// popRef returns a pointer to the just-popped slot, shrinks by one, and the
+	// pointed-to value stays valid until the next push reuses that slot.
+	st.push(*uint256.NewInt(1)) // stays below
+	st.push(*uint256.NewInt(2)) // popped by popRef
+	ref := st.pop()
+	if st.len() != 1 {
+		t.Fatalf("popRef len = %d, want 1", st.len())
+	}
+	if ref.Uint64() != 2 {
+		t.Fatalf("popRef value = %d, want 2", ref.Uint64())
+	}
+	if got := st.peek().Uint64(); got != 1 {
+		t.Fatalf("popRef disturbed slot below: peek = %d, want 1", got)
+	}
+	if ref.Uint64() != 2 {
+		t.Fatalf("popRef pointer invalidated before push: got %d, want 2", ref.Uint64())
+	}
+	st.push(*uint256.NewInt(9))
+	if ref.Uint64() != 9 {
+		t.Fatalf("push did not reuse popRef slot: ref = %d, want 9", ref.Uint64())
+	}
+
+	// popRef2Peek1 returns (top, next, third), shrinks by two, and leaves the
+	// third slot as the new top so the result can be built in place.
+	st.Reset()
+	st.push(*uint256.NewInt(3)) // third: stays as new top
+	st.push(*uint256.NewInt(2)) // next
+	st.push(*uint256.NewInt(1)) // top
+	x, y, z := st.pop2Peek1()
+	if x.Uint64() != 1 || y.Uint64() != 2 || z.Uint64() != 3 {
+		t.Fatalf("popRef2Peek1 = (%d, %d, %d), want (1, 2, 3)", x.Uint64(), y.Uint64(), z.Uint64())
+	}
+	if st.len() != 1 {
+		t.Fatalf("popRef2Peek1 len = %d, want 1", st.len())
+	}
+	if st.peek() != z {
+		t.Fatalf("popRef2Peek1 left wrong slot on top: peek = %p, want %p", st.peek(), z)
+	}
+
+	// dup takes a depth below the top: dup(0) duplicates the top item.
+	st.Reset()
+	st.push(*uint256.NewInt(7)) // depth 1
+	st.push(*uint256.NewInt(8)) // depth 0
+	st.dup(1)
+	if st.len() != 3 || st.peek().Uint64() != 7 {
+		t.Fatalf("dup(1) = (len %d, top %d), want (3, 7)", st.len(), st.peek().Uint64())
 	}
 }
 
@@ -582,6 +508,7 @@ func TestOpTstore(t *testing.T) {
 		callContext = &CallContext{Contract: *NewContract(caller, caller, to, uint256.Int{})}
 		value       = common.Hex2Bytes("abcdef00000000000000abba000000000deaf000000c0de00100000000133700")
 	)
+	defer state.Close()
 
 	pc := uint64(0)
 	// push the value to the stack
@@ -603,22 +530,6 @@ func TestOpTstore(t *testing.T) {
 	val := callContext.Stack.peek()
 	if !bytes.Equal(val.Bytes(), value) {
 		t.Fatal("incorrect element read from transient storage")
-	}
-}
-
-func BenchmarkOpKeccak256(bench *testing.B) {
-	var (
-		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
-		callContext = &CallContext{}
-	)
-	callContext.Memory.Resize(32)
-	pc := uint64(0)
-	start := uint256.Int{}
-
-	for bench.Loop() {
-		callContext.Stack.push(*uint256.NewInt(32))
-		callContext.Stack.push(start)
-		opKeccak256(pc, evm, callContext)
 	}
 }
 
@@ -679,7 +590,7 @@ func TestCreate2Addreses(t *testing.T) {
 		origin := common.BytesToAddress(common.FromHex(tt.origin))
 		salt := common.BytesToHash(common.FromHex(tt.salt))
 		code := common.FromHex(tt.code)
-		codeHash := accounts.InternCodeHash(crypto.HashData(code))
+		codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
 		address := types.CreateAddress2(origin, salt, codeHash)
 		/*
 			stack          := newstack()
@@ -815,7 +726,7 @@ func TestOpMCopy(t *testing.T) {
 		if dynamicCost, err := gasMcopy(evm, callContext, mdgas.MdGas{}, memorySize); err != nil {
 			t.Error(err)
 		} else {
-			haveGas = GasFastestStep + dynamicCost.Regular
+			haveGas = GasFastestStep + dynamicCost.Execution
 		}
 		// Expand mem
 		if memorySize > 0 {
@@ -868,7 +779,7 @@ func TestOpCLZ(t *testing.T) {
 			if gotLen := callContext.Stack.len(); gotLen != 1 {
 				t.Fatalf("stack length = %d; want 1", gotLen)
 			}
-			result := callContext.Stack.pop()
+			result := callContext.Stack.popCopy()
 
 			if got := result.Uint64(); got != tc.want {
 				t.Fatalf("clz(%q) = %d; want %d", tc.inputHex, got, tc.want)
@@ -937,7 +848,7 @@ func TestPush(t *testing.T) {
 	} {
 		pc := uint64(i)
 		push32(pc, evm, callContext)
-		res := callContext.Stack.pop()
+		res := callContext.Stack.popCopy()
 		if have := res.Hex(); have != want {
 			t.Fatalf("case %d, have %v want %v", i, have, want)
 		}
@@ -1127,9 +1038,10 @@ func TestEIP8024_Execution(t *testing.T) {
 				if errOp != tc.wantOpcode {
 					t.Fatalf("expected error from opcode %s, got %s", tc.wantOpcode, errOp)
 				}
-				// Fail if we don't get the error we expect.
-				switch tc.wantErr.(type) {
-				case *ErrInvalidOpCode:
+				var invalidOp *ErrInvalidOpCode
+				var stackUnderflow *ErrStackUnderflow
+				switch {
+				case errors.As(tc.wantErr, &invalidOp):
 					var got *ErrInvalidOpCode
 					if !errors.As(err, &got) {
 						t.Fatalf("expected ErrInvalidOpCode, got %v", err)
@@ -1145,9 +1057,8 @@ func TestEIP8024_Execution(t *testing.T) {
 							t.Fatalf("ErrInvalidOpCode.operand=0x%02x; want 0x%02x", *got.operand, *tc.wantOperand)
 						}
 					}
-				case *ErrStackUnderflow:
-					var want *ErrStackUnderflow
-					if !errors.As(err, &want) {
+				case errors.As(tc.wantErr, &stackUnderflow):
+					if _, ok := errors.AsType[*ErrStackUnderflow](err); !ok {
 						t.Fatalf("expected ErrStackUnderflow, got %v", err)
 					}
 				default:
@@ -1179,4 +1090,105 @@ func TestEIP8024_Execution(t *testing.T) {
 func ptrToByte(v byte) *byte {
 	b := v
 	return &b
+}
+
+func TestLogDataSurvivesMemoryAndArenaReuse(t *testing.T) {
+	t.Parallel()
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	scope := &CallContext{Contract: *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})}
+	op := makeLog(3)
+	for i, size := range []int{1024 * 1024, 1024, 32, 0, 1024 * 1024} {
+		ibs.SetTxContext(1, 0)
+		scope.Memory.Resize(uint64(size + 6))
+		data := bytes.Repeat([]byte{byte(i + 1)}, size)
+		scope.Memory.Set(6, uint64(size), data)
+		for range 3 {
+			scope.Stack.push(uint256.Int{})
+		}
+		scope.Stack.push(*uint256.NewInt(uint64(size)))
+		scope.Stack.push(*uint256.NewInt(6))
+		_, _, err := op(0, evm, scope)
+		require.NoError(t, err)
+		clear(scope.Memory.Data())
+		logs := ibs.GetRawLogs(0)
+		require.Len(t, logs, 1)
+		require.Equal(t, []common.Hash{{}, {}, {}}, logs[0].Topics)
+		require.Len(t, logs[0].Data, size)
+		require.True(t, bytes.Equal(data, logs[0].Data), "log data changed for size %d", size)
+		ibs.Reset()
+	}
+}
+
+func TestExpSmallOperandBoundaries(t *testing.T) {
+	t.Parallel()
+	modulus := new(big.Int).Lsh(big.NewInt(1), 256)
+	for _, base := range []uint64{0, 1, 2, 3, 7, 13, 136279841, 1 << 31, 1 << 32, 1 << 63, ^uint64(0)} {
+		for power := range uint64(66) {
+			scope := &CallContext{}
+			scope.Stack.push(*uint256.NewInt(power))
+			scope.Stack.push(*uint256.NewInt(base))
+			_, _, err := opExp(0, nil, scope)
+			require.NoError(t, err)
+			want := new(big.Int).Exp(new(big.Int).SetUint64(base), new(big.Int).SetUint64(power), modulus)
+			got := scope.Stack.popCopy()
+			require.Zero(t, want.Cmp(got.ToBig()), "base=%d exponent=%d", base, power)
+		}
+	}
+}
+
+func TestExpNegativeOneParity(t *testing.T) {
+	modulus := new(big.Int).Lsh(big.NewInt(1), 256)
+	base := new(uint256.Int).SetAllOne()
+	for _, exponent := range []uint256.Int{{}, {1}, {2}, {3}, {0, 1}, {1, 1}, {0, 0, 0, 1}, {1, 0, 0, 1}, *new(uint256.Int).SetAllOne()} {
+		scope := &CallContext{}
+		scope.Stack.push(exponent)
+		scope.Stack.push(*base)
+		_, _, err := opExp(0, nil, scope)
+		want := new(big.Int).Exp(base.ToBig(), exponent.ToBig(), modulus)
+		if err != nil || scope.Stack.peek().ToBig().Cmp(want) != 0 {
+			t.Fatalf("exp %x: got %x, %v; want %x", exponent, scope.Stack.peek(), err, want)
+		}
+	}
+}
+
+func TestContextAddressWordsReusedFrame(t *testing.T) {
+	evm := &EVM{}
+	addresses := []accounts.Address{
+		accounts.NilAddress,
+		accounts.ZeroAddress,
+		accounts.InternAddress(common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678")),
+		accounts.InternAddress(common.HexToAddress("0xabcdef0123456789abcdef0123456789abcdef01")),
+	}
+	for frame := range addresses {
+		address := addresses[frame]
+		origin := addresses[(frame+1)%len(addresses)]
+		caller := addresses[(frame+2)%len(addresses)]
+		coinbase := addresses[(frame+3)%len(addresses)]
+		evm.TxContext = evmtypes.TxContext{Origin: origin}
+		evm.Context = evmtypes.BlockContext{Coinbase: coinbase}
+		scope := evm.getCallContext(*NewContract(caller, caller, address, uint256.Int{}), nil, mdgas.MdGas{})
+		for _, tc := range []struct {
+			name    string
+			op      executionFunc
+			address accounts.Address
+		}{
+			{"ADDRESS", opAddress, address},
+			{"ORIGIN", opOrigin, origin},
+			{"CALLER", opCaller, caller},
+			{"COINBASE", opCoinbase, coinbase},
+		} {
+			value := tc.address.Value()
+			want := new(uint256.Int).SetBytes(value[:])
+			for range 2 {
+				_, _, err := tc.op(0, evm, scope)
+				if err != nil || *scope.Stack.peek() != *want {
+					t.Fatalf("frame %d %s: got %x, %v; want %x", frame, tc.name, scope.Stack.peek(), err, want)
+				}
+				scope.Stack.Reset()
+			}
+		}
+		evm.putCallContext(scope)
+	}
 }

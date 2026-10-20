@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -43,7 +44,10 @@ func TestMatchPattern(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.pattern+"_"+tt.name, func(t *testing.T) {
-			got := matchPattern(tt.pattern, tt.name)
+			got, err := matchPattern(tt.pattern, tt.name)
+			if err != nil {
+				t.Fatalf("matchPattern(%q, %q): %v", tt.pattern, tt.name, err)
+			}
 			if got != tt.want {
 				t.Errorf("matchPattern(%q, %q) = %v, want %v", tt.pattern, tt.name, got, tt.want)
 			}
@@ -72,13 +76,7 @@ func TestListMetricNames(t *testing.T) {
 	}
 
 	// Check if our test metric is in the list
-	found := false
-	for _, name := range names {
-		if name == "test_mcp_counter" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(names, "test_mcp_counter")
 
 	if !found {
 		t.Error("test_mcp_counter not found in metric names")
@@ -104,13 +102,13 @@ func TestGatherMetrics(t *testing.T) {
 	testCounter.Inc()
 	testGauge.Set(42.5)
 
-	metrics, err := GatherMetrics()
+	metrics, err := GatherMetricsFiltered("")
 	if err != nil {
-		t.Fatalf("GatherMetrics() error = %v", err)
+		t.Fatalf("GatherMetricsFiltered: %v", err)
 	}
 
 	if len(metrics) == 0 {
-		t.Error("GatherMetrics() returned empty map")
+		t.Error("GatherMetricsFiltered returned empty map")
 	}
 
 	// Check counter

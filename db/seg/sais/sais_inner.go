@@ -8,6 +8,8 @@
 
 package sais
 
+import "slices"
+
 func sais_32(text []int32, textMax int, sa, tmp []int32) {
 	if len(sa) != len(text) || len(tmp) < textMax {
 		panic("sais: misuse of sais_32")
@@ -53,7 +55,7 @@ func sais_32(text []int32, textMax int, sa, tmp []int32) {
 }
 
 func freq_32(text []int32, freq, bucket []int32) []int32 {
-	if freq != nil && freq[0] >= 0 {
+	if len(freq) > 0 && freq[0] >= 0 {
 		return freq
 	}
 	if freq == nil {
@@ -91,8 +93,8 @@ func placeLMS_32(text []int32, sa, freq, bucket []int32) int {
 	lastB := int32(-1)
 
 	c0, c1, isTypeS := int32(0), int32(0), false
-	for i := len(text) - 1; i >= 0; i-- {
-		c0, c1 = text[i], c0
+	for i, t := range slices.Backward(text) {
+		c0, c1 = t, c0
 		if c0 < c1 {
 			isTypeS = true
 		} else if c0 > c1 && isTypeS {
@@ -126,7 +128,7 @@ func induceSubL_32(text []int32, sa, freq, bucket []int32) {
 	sa[b] = int32(k)
 	b++
 
-	for i := 0; i < len(sa); i++ {
+	for i := range sa {
 		j := int(sa[i])
 		if j == 0 {
 			continue
@@ -160,8 +162,8 @@ func induceSubS_32(text []int32, sa, freq, bucket []int32) {
 	b := bucket[cB]
 
 	top := len(sa)
-	for i := len(sa) - 1; i >= 0; i-- {
-		j := int(sa[i])
+	for i, v := range slices.Backward(sa) {
+		j := int(v)
 		if j == 0 {
 			continue
 		}
@@ -193,8 +195,8 @@ func length_32(text []int32, sa []int32, numLMS int) {
 	end := 0
 
 	c0, c1, isTypeS := int32(0), int32(0), false
-	for i := len(text) - 1; i >= 0; i-- {
-		c0, c1 = text[i], c0
+	for i, t := range slices.Backward(text) {
+		c0, c1 = t, c0
 		if c0 < c1 {
 			isTypeS = true
 		} else if c0 > c1 && isTypeS {
@@ -229,7 +231,7 @@ func assignID_32(text []int32, sa []int32, numLMS int) int {
 			n := int(n)
 			this := text[j:][:n]
 			last := text[lastPos:][:n]
-			for i := 0; i < n; i++ {
+			for i := range n {
 				if this[i] != last[i] {
 					goto New
 				}
@@ -251,8 +253,8 @@ func unmap_32(text []int32, sa []int32, numLMS int) {
 	j := len(unmap)
 
 	c0, c1, isTypeS := int32(0), int32(0), false
-	for i := len(text) - 1; i >= 0; i-- {
-		c0, c1 = text[i], c0
+	for i, t := range slices.Backward(text) {
+		c0, c1 = t, c0
 		if c0 < c1 {
 			isTypeS = true
 		} else if c0 > c1 && isTypeS {
@@ -278,7 +280,7 @@ func expand_32(text []int32, freq, bucket, sa []int32, numLMS int) {
 	b := bucket[c] - 1
 	bucket[c] = b
 
-	for i := len(sa) - 1; i >= 0; i-- {
+	for i := range slices.Backward(sa) {
 		if i != int(b) {
 			sa[i] = 0
 			continue
@@ -309,7 +311,7 @@ func induceL_32(text []int32, sa, freq, bucket []int32) {
 	sa[b] = int32(k)
 	b++
 
-	for i := 0; i < len(sa); i++ {
+	for i := range sa {
 		j := int(sa[i])
 		if j <= 0 {
 			continue
@@ -339,8 +341,8 @@ func induceS_32(text []int32, sa, freq, bucket []int32) {
 	cB := int32(0)
 	b := bucket[cB]
 
-	for i := len(sa) - 1; i >= 0; i-- {
-		j := int(sa[i])
+	for i, v := range slices.Backward(sa) {
+		j := int(v)
 		if j >= 0 {
 			continue
 		}

@@ -29,7 +29,7 @@ func (bc *BlockContext) Rules(c *chain.Config) *chain.Rules {
 		chainID = new(uint256.Int)
 	}
 
-	return &chain.Rules{
+	r := &chain.Rules{
 		ChainID:            new(uint256.Int).Set(chainID),
 		IsHomestead:        c.IsHomestead(bc.BlockNumber),
 		IsTangerineWhistle: c.IsTangerineWhistle(bc.BlockNumber),
@@ -40,15 +40,18 @@ func (bc *BlockContext) Rules(c *chain.Config) *chain.Rules {
 		IsIstanbul:         c.IsIstanbul(bc.BlockNumber),
 		IsBerlin:           c.IsBerlin(bc.BlockNumber),
 		IsLondon:           c.IsLondon(bc.BlockNumber),
-		IsShanghai:         c.IsShanghai(bc.Time) || c.IsAgra(bc.BlockNumber),
+		IsShanghai:         c.IsShanghai(bc.Time),
 		IsCancun:           c.IsCancun(bc.Time),
-		IsNapoli:           c.IsNapoli(bc.BlockNumber),
-		IsAhmedabad:        c.IsAhmedabad(bc.BlockNumber),
-		IsBhilai:           c.IsBhilai(bc.BlockNumber),
-		IsPrague:           c.IsPrague(bc.Time) || c.IsBhilai(bc.BlockNumber),
+		IsPrague:           c.IsPrague(bc.Time),
 		IsOsaka:            c.IsOsaka(bc.Time),
 		IsAmsterdam:        c.IsAmsterdam(bc.Time),
 		DisabledEIPs:       c.DisabledEIPs,
 		IsAura:             c.Aura != nil,
 	}
+
+	if c.L2 != nil {
+		c.L2.ResolveRules(bc.L2Version, bc.BlockNumber, bc.Time, r)
+	}
+
+	return r
 }

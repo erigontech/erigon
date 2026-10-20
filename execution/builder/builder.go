@@ -23,8 +23,8 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
@@ -45,17 +45,15 @@ type SDProvider func() *execctx.SharedDomains
 // without staged-sync machinery. Its Build method satisfies BlockBuilderFunc and can
 // be passed directly to ExecModule.
 type Builder struct {
-	ctx                   context.Context
 	db                    kv.TemporalRoDB
 	pendingBlockCh        chan *types.Block
 	builderCfg            *buildercfg.BuilderConfig
 	chainConfig           *chain.Config
 	engine                rules.Engine
-	blockReader           services.FullBlockReader
+	blockReader           dbservices.FullBlockReader
 	executeBlockCfg       stagedsync.ExecuteBlockCfg
 	notifier              stagedsync.ChainEventNotifier
 	vmConfig              *vm.Config
-	tmpdir                string
 	txnProvider           txnprovider.TxnProvider
 	sealCancel            chan struct{}
 	latestBlockBuiltStore *LatestBlockBuiltStore
@@ -64,16 +62,14 @@ type Builder struct {
 }
 
 func NewBuilder(
-	ctx context.Context,
 	db kv.TemporalRoDB,
 	builderCfg *buildercfg.BuilderConfig,
 	chainConfig *chain.Config,
 	engine rules.Engine,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	executeBlockCfg stagedsync.ExecuteBlockCfg,
 	notifier stagedsync.ChainEventNotifier,
 	vmConfig *vm.Config,
-	tmpdir string,
 	txnProvider txnprovider.TxnProvider,
 	sealCancel chan struct{},
 	latestBlockBuiltStore *LatestBlockBuiltStore,
@@ -81,7 +77,6 @@ func NewBuilder(
 	logger log.Logger,
 ) *Builder {
 	return &Builder{
-		ctx:                   ctx,
 		db:                    db,
 		pendingBlockCh:        make(chan *types.Block, 1),
 		builderCfg:            builderCfg,
@@ -91,7 +86,6 @@ func NewBuilder(
 		executeBlockCfg:       executeBlockCfg,
 		notifier:              notifier,
 		vmConfig:              vmConfig,
-		tmpdir:                tmpdir,
 		txnProvider:           txnProvider,
 		sealCancel:            sealCancel,
 		latestBlockBuiltStore: latestBlockBuiltStore,
@@ -107,7 +101,10 @@ func (b *Builder) PendingBlockCh() chan *types.Block {
 }
 
 // Build satisfies BlockBuilderFunc. Pass b.Build directly to ExecModule.
-func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *types.BlockWithReceipts, err error) {
+//
+// Build passes ctx through the read and execution paths and stops waiting for an asynchronous seal
+// result when the context ends, allowing its deferred read resources to close.
+func (b *Builder) Build(ctx context.Context, param *Parameters, interrupt *atomic.Bool) (result *types.BlockWithReceipts, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -124,7 +121,7 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 		BuiltBlock:      &exec.AssembledBlock{},
 	}
 
-	tx, err := b.db.BeginTemporalRo(b.ctx)
+	tx, err := b.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +142,7 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 		}
 	}
 
-	sd, err := execctx.NewSharedDomains(b.ctx, compositeTx, b.logger)
+	sd, err := execctx.NewSharedDomains(ctx, compositeTx, b.logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache())
 	if err != nil {
 		return nil, err
 	}
@@ -154,6 +151,11 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 	if parentSD != nil {
 		sd.SetParent(parentSD)
 	}
+
+	// Wire the parallel commitment trie's context factory. Values still resolve
+	// through the sd/parent mem-batch overlay chain; b.db only backs the fresh
+	// per-worker readers. Mirrors exec3; no-op for the sequential trie.
+	sd.EnableParaTrieDB(b.db)
 
 	executionAt, err := stages.GetStageProgress(compositeTx, stages.Execution)
 	if err != nil {
@@ -164,18 +166,33 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 	if param.CustomTxnProvider != nil {
 		txnProvider = param.CustomTxnProvider
 	}
-	execCfg := StageBuilderExecCfg(state, b.notifier, b.chainConfig, b.engine, b.vmConfig, b.tmpdir, interrupt, param.PayloadId, txnProvider, b.blockReader)
+	execCfg := StageBuilderExecCfg(state, b.notifier, b.chainConfig, b.engine, b.vmConfig, interrupt, param.PayloadId, txnProvider, b.blockReader)
 	finishCfg := StageBuilderFinishCfg(b.chainConfig, b.engine, state, b.sealCancel, b.blockReader, b.latestBlockBuiltStore)
 
-	if err := createBlock(b.ctx, sd, compositeTx, executionAt, createCfg, b.logger); err != nil {
+	if err := createBlock(sd, compositeTx, executionAt, createCfg, b.logger); err != nil {
 		return nil, err
 	}
-	if err := execBlock(b.ctx, sd, compositeTx, executionAt, execCfg, b.executeBlockCfg, b.logger); err != nil {
+	if err := execBlock(ctx, sd, compositeTx, executionAt, execCfg, b.executeBlockCfg, b.logger); err != nil {
 		return nil, err
 	}
-	if err := finishBlock(compositeTx, finishCfg, b.logger); err != nil {
+	if err := finishBlock(ctx, compositeTx, finishCfg, b.logger); err != nil {
 		return nil, err
 	}
 
-	return <-state.BuilderResultCh, nil
+	return waitForBuilderResult(ctx, state.BuilderResultCh)
+}
+
+func waitForBuilderResult(ctx context.Context, results <-chan *types.BlockWithReceipts) (*types.BlockWithReceipts, error) {
+	select {
+	case result := <-results:
+		return result, nil
+	case <-ctx.Done():
+		// Keep a payload that completed as cancellation arrived.
+		select {
+		case result := <-results:
+			return result, nil
+		default:
+			return nil, ctx.Err()
+		}
+	}
 }

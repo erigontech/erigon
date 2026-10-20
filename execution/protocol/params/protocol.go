@@ -32,6 +32,7 @@ const (
 	MaxBlockGasLimit     uint64 = 0x7fffffffffffffff // Maximum the block gas limit may ever be.
 	MaxTxnGasLimit       uint64 = 16_777_216         // See EIP-7825: Transaction Gas Limit Cap.
 	GenesisGasLimit      uint64 = 4712388            // Gas limit of the Genesis block.
+	MaxTxnTotalGasLimit  uint64 = 4_294_967_295      // See EIP-8037: TX_MAX_TOTAL_GAS_LIMIT.
 
 	MaximumExtraDataSize  uint64 = 32    // Maximum size extra data may be after Genesis.
 	CallValueTransferGas  uint64 = 9000  // Paid for CALL when the value transfer is non-zero.
@@ -77,6 +78,12 @@ const (
 	// In EIP-3529: SSTORE_CLEARS_SCHEDULE is defined as SSTORE_RESET_GAS + ACCESS_LIST_STORAGE_KEY_COST
 	// Which becomes: 5000 - 2100 + 1900 = 4800
 	SstoreClearsScheduleRefundEIP3529 = SstoreResetGasEIP2200 - ColdSloadCostEIP2929 + TxAccessListStorageKeyGas
+
+	// EIP-2929/3529 SSTORE schedule as "access cost + write cost": the access
+	// carries the warm SLOAD, so the write costs are net of it.
+	SstoreColdAccessEIP2929    = ColdSloadCostEIP2929 + WarmStorageReadCostEIP2929                         // 2200
+	SstoreWriteCreateEIP2929   = SstoreSetGasEIP2200 - WarmStorageReadCostEIP2929                          // 19900
+	SstoreWriteExistingEIP2929 = SstoreResetGasEIP2200 - ColdSloadCostEIP2929 - WarmStorageReadCostEIP2929 // 2800
 
 	JumpdestGas   uint64 = 1     // Once per JUMPDEST operation.
 	EpochDuration uint64 = 30000 // Duration between proof-of-work epochs.
@@ -134,16 +141,13 @@ const (
 	// Introduced in Tangerine Whistle (Eip 150)
 	CreateBySelfdestructGas uint64 = 25000
 
-	BaseFeeChangeDenominator           = 8          // Bounds the amount the base fee can change between blocks.
-	BaseFeeChangeDenominatorPostDelhi  = 16         // Bounds the amount the base fee can change between blocks post delhi hard fork for polygon networks.
-	BaseFeeChangeDenominatorPostBhilai = 64         // Bounds the amount the base fee can change between blocks post bhilai hard fork for polygon networks.
-	ElasticityMultiplier               = 2          // Bounds the maximum gas limit an EIP-1559 block may have.
-	InitialBaseFee                     = 1000000000 // Initial base fee for EIP-1559 blocks.
+	BaseFeeChangeDenominator = 8          // Bounds the amount the base fee can change between blocks.
+	ElasticityMultiplier     = 2          // Bounds the maximum gas limit an EIP-1559 block may have.
+	InitialBaseFee           = 1000000000 // Initial base fee for EIP-1559 blocks.
 
 	MaxCodeSize              = 24 * 1024                // Maximum bytecode to permit for a contract
-	MaxCodeSizeAhmedabad     = 32 * 1024                // Maximum bytecode to permit for a contract post Ahmedabad hard fork (bor / polygon pos) (32KB)
 	MaxInitCodeSize          = 2 * MaxCodeSize          // Maximum initcode to permit in a creation transaction and create instructions
-	MaxCodeSizeAmsterdam     = 32 * 1024                // EIP-7954: Increase Maximum Contract Size
+	MaxCodeSizeAmsterdam     = 64 * 1024                // EIP-7954: Increase Maximum Contract Size
 	MaxInitCodeSizeAmsterdam = 2 * MaxCodeSizeAmsterdam // EIP-7954: Increase Maximum Contract Size
 
 	// Precompiled contract gas prices
@@ -199,8 +203,7 @@ const (
 	P256VerifyGasEIP7951 uint64 = 6900
 
 	// EIP-2935: Historical block hashes in state
-	BlockHashHistoryServeWindow uint64 = 8191
-	BlockHashOldWindow          uint64 = 256
+	BlockHashOldWindow uint64 = 256
 
 	// EIP-7702: Set EOA account code
 	SetCodeMagicPrefix  = byte(0x05)
@@ -215,8 +218,6 @@ const (
 	// EIP-8037: State Creation Gas Cost Increase
 	CreateGasEIP8037        = CallValueTransferGas // spec: "9000, assuming same as GAS_CALL_VALUE"
 	Create2GasEIP8037       = CallValueTransferGas
-	SstoreSetGasEIP8037     = 2_900 // SstoreResetGasEIP2200 - ColdSloadCostEIP2929
-	PerAuthBaseCostEIP8037  = 7_500
 	StateBytesNewAccount    = 120 // bytes per new account creation
 	StateBytesPerStorageSet = 64  // bytes per new storage slot
 	StateBytesAuthBase      = 23  // bytes per authorization base cost
@@ -224,16 +225,44 @@ const (
 	CostPerStateByte        = 1530
 
 	// Pre-multiplied state-gas costs (StateBytesX * CostPerStateByte) for hot paths.
-	StateGasNewAccount        = StateBytesNewAccount * CostPerStateByte
-	StateGasPerStorageSet     = StateBytesPerStorageSet * CostPerStateByte
-	StateGasAuthBase          = StateBytesAuthBase * CostPerStateByte
-	StateGasNewAccountAndAuth = (StateBytesNewAccount + StateBytesAuthBase) * CostPerStateByte
-	StateGasSystemMaxSstores  = StateBytesPerStorageSet * CostPerStateByte * SystemMaxSstoresPerCall
+	StateGasNewAccount       = StateBytesNewAccount * CostPerStateByte
+	StateGasPerStorageSet    = StateBytesPerStorageSet * CostPerStateByte
+	StateGasAuthBase         = StateBytesAuthBase * CostPerStateByte
+	StateGasSystemMaxSstores = StateBytesPerStorageSet * CostPerStateByte * SystemMaxSstoresPerCall
+
+	// EIP-8038: State-access gas cost update. Reprices the EIP-2929 state-access
+	// costs and adds the execution-gas write components (ACCOUNT_WRITE, STORAGE_WRITE)
+	// that the EIP-8037 state-gas model is charged alongside.
+	ColdAccountAccessCostEIP8038      = uint64(3000)                                           // COLD_ACCOUNT_ACCESS (EIP-2929: 2600)
+	ColdStorageAccessCostEIP8038      = uint64(2100)                                           // COLD_STORAGE_ACCESS (unchanged from EIP-2929)
+	AccountWriteCostEIP8038           = uint64(9000)                                           // ACCOUNT_WRITE: account balance-leaf write
+	StorageWriteCostEIP8038           = uint64(10000)                                          // STORAGE_WRITE: first write to a slot in the txn
+	CallValueTransferGasEIP8038       = AccountWriteCostEIP8038 + CallStipend                  // CALL_VALUE = 11300
+	CreateAccessEIP8038               = AccountWriteCostEIP8038 + ColdAccountAccessCostEIP8038 // CREATE_ACCESS = 12000
+	SstoreClearsScheduleRefundEIP8038 = (StorageWriteCostEIP8038 + ColdStorageAccessCostEIP8038) * 4800 / 5000
+	TxAccessListAddressGasEIP8038     = ColdAccountAccessCostEIP8038 - WarmStorageReadCostEIP2929
+	TxAccessListStorageKeyGasEIP8038  = ColdStorageAccessCostEIP8038 - WarmStorageReadCostEIP2929
+	ExtCodeWarmAccessGasEIP8038       = 2 * WarmStorageReadCostEIP2929 // EXTCODESIZE/EXTCODECOPY: account access + second read for the code
+	// EXECUTION_PER_AUTH_BASE_COST = 101 auth-tuple bytes * 16 + ECRECOVER + COLD_ACCOUNT_ACCESS + 2*WARM_ACCESS = 7816
+	ExecutionPerAuthBaseCostEIP8038 = 101*TxDataNonZeroGasEIP2028 + EcrecoverGas + ColdAccountAccessCostEIP8038 + 2*WarmStorageReadCostEIP2929
+	// PER_AUTH execution intrinsic = ACCOUNT_WRITE + EXECUTION_PER_AUTH_BASE_COST = 16816
+	PerAuthExecutionCostEIP8038 = AccountWriteCostEIP8038 + ExecutionPerAuthBaseCostEIP8038
+
+	// EIP-2780: Reduce intrinsic transaction gas (resource-based decomposition).
+	// COLD_ACCOUNT_ACCESS and CREATE_ACCESS take their values from EIP-8038.
+	TxBaseEIP2780            uint64 = 12_000 // TX_BASE: sender ECDSA recovery plus access and write
+	TxValueCostEIP2780       uint64 = 6_000  // TX_VALUE_COST: recipient balance write and EIP-7708 transfer log
+	ColdAccountAccessEIP2780 uint64 = 3_000  // COLD_ACCOUNT_ACCESS: recipient account touch
+	CreateAccessEIP2780      uint64 = CreateAccessEIP8038
+
+	MaxTransactionsBytesPerInclusionListEIP7805 uint64 = 8192 // MAX_TRANSACTIONS_BYTES_PER_INCLUSION_LIST
 )
 
 // EIP-7702: Set EOA account code
-var DelegatedDesignationPrefix = []byte{0xef, 0x01, 0x00}
-var DelegatedCodeHash = common.HexToHash("0xeadcdba66a79ab5dce91622d1d75c8cff5cff0b96944c3bf1072cd08ce018329")
+var (
+	DelegatedDesignationPrefix = []byte{0xef, 0x01, 0x00}
+	DelegatedCodeHash          = common.HexToHash("0xeadcdba66a79ab5dce91622d1d75c8cff5cff0b96944c3bf1072cd08ce018329")
+)
 
 // SystemAddress is where the system-transaction is sent from as per EIP-4788
 var SystemAddress = accounts.InternAddress(common.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe"))
@@ -255,8 +284,18 @@ var Bls12381MSMDiscountTableG1 = [128]uint64{1000, 949, 848, 797, 764, 750, 738,
 
 var Bls12381MSMDiscountTableG2 = [128]uint64{1000, 1000, 923, 884, 855, 832, 812, 796, 782, 770, 759, 749, 740, 732, 724, 717, 711, 704, 699, 693, 688, 683, 679, 674, 670, 666, 663, 659, 655, 652, 649, 646, 643, 640, 637, 634, 632, 629, 627, 624, 622, 620, 618, 615, 613, 611, 609, 607, 606, 604, 602, 600, 598, 597, 595, 593, 592, 590, 589, 587, 586, 584, 583, 582, 580, 579, 578, 576, 575, 574, 573, 571, 570, 569, 568, 567, 566, 565, 563, 562, 561, 560, 559, 558, 557, 556, 555, 554, 553, 552, 552, 551, 550, 549, 548, 547, 546, 545, 545, 544, 543, 542, 541, 541, 540, 539, 538, 537, 537, 536, 535, 535, 534, 533, 532, 532, 531, 530, 530, 529, 528, 528, 527, 526, 526, 525, 524, 524}
 
-var (
-	GenesisDifficulty = uint256.NewInt(131072) // Difficulty of the Genesis block.
+var GenesisDifficulty = uint256.NewInt(131072) // Difficulty of the Genesis block.
+
+// EIP-8282 - The Builder Deposit Addresses
+// Nick's-method derived address from the builder deposit contract deployment transaction.
+var BuilderDepositAddress = accounts.InternAddress(
+	common.HexToAddress("0x0000BFF46984E3725691FA540A8C7589300D8282"),
+)
+
+// EIP-8282 - The Builder Exit Addresses
+// Nick's-method derived address from the builder exit contract deployment transaction.
+var BuilderExitAddress = accounts.InternAddress(
+	common.HexToAddress("0x000064D678505AD48F8CCB093BC65613800E8282"),
 )
 
 // See EIP-7840: Add blob schedule to EL config files

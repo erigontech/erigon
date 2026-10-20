@@ -129,11 +129,6 @@ invalidates the cache for the entire package.
 mtime equals the commit that last modified it. This is deterministic and
 content-sensitive.
 
-**Submodule fixtures** — shallow clones (`--depth 1`) don't have enough history for
-`git restore-mtime`. Instead, set every file's mtime to the submodule's HEAD commit
-timestamp. All files in a submodule share the same mtime, which is stable as long as
-the pinned commit doesn't change.
-
 **Directory mtimes** — normalize all directories to a fixed epoch (e.g.
 `200902132331.30`). Git doesn't track directory mtimes, so without this step they
 reflect checkout time, which varies between runs.

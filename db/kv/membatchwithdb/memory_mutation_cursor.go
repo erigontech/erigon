@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"errors"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -137,7 +136,7 @@ func (m *memoryMutationCursor) Current() ([]byte, []byte, error) {
 	if m.isTableCleared() {
 		return m.memCursor.Current()
 	}
-	return common.Copy(m.currentPair.key), common.Copy(m.currentPair.value), nil
+	return bytes.Clone(m.currentPair.key), bytes.Clone(m.currentPair.value), nil
 }
 
 func (m *memoryMutationCursor) skipIntersection(memKey, memValue, dbKey, dbValue []byte, t NextType) (newDbKey []byte, newDbValue []byte, err error) {
@@ -226,7 +225,6 @@ func (m *memoryMutationCursor) NextDup() ([]byte, []byte, error) {
 
 	if m.isPrevFromDb {
 		k, v, err := m.getNextOnDb(Dup)
-
 		if err != nil {
 			return nil, nil, err
 		}
@@ -281,16 +279,15 @@ func (m *memoryMutationCursor) SeekExact(seek []byte) ([]byte, []byte, error) {
 }
 
 func (m *memoryMutationCursor) Put(k, v []byte) error {
-	return m.mutation.Put(m.table, common.Copy(k), common.Copy(v))
+	return m.mutation.Put(m.table, bytes.Clone(k), bytes.Clone(v))
 }
 
 func (m *memoryMutationCursor) Append(k []byte, v []byte) error {
-	return m.mutation.Append(m.table, common.Copy(k), common.Copy(v))
-
+	return m.mutation.Append(m.table, bytes.Clone(k), bytes.Clone(v))
 }
 
 func (m *memoryMutationCursor) AppendDup(k []byte, v []byte) error {
-	return m.memCursor.AppendDup(common.Copy(k), common.Copy(v))
+	return m.memCursor.AppendDup(bytes.Clone(k), bytes.Clone(v))
 }
 
 func (m *memoryMutationCursor) PutNoDupData(key, value []byte) error {
@@ -417,9 +414,11 @@ func (m *memoryMutationCursor) Last() ([]byte, []byte, error) {
 func (m *memoryMutationCursor) Prev() ([]byte, []byte, error) {
 	panic("Prev is not implemented!")
 }
+
 func (m *memoryMutationCursor) PrevDup() ([]byte, []byte, error) {
 	panic("Prev is not implemented!")
 }
+
 func (m *memoryMutationCursor) PrevNoDup() ([]byte, []byte, error) {
 	panic("Prev is not implemented!")
 }

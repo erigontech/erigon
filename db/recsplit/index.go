@@ -26,7 +26,6 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
-	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -57,10 +56,10 @@ const (
 	//   It makes .seg files "warm" - which is bad because they are big and
 	//      data-locality of touches is bad (and maybe need visit a lot of shards to find key).
 	//   Can add a built-in "existence filter" (like bloom/cuckoo/ribbon/xor-filter/fuse-filter); it will improve
-	//      data-locality - filters are small-enough and existance-chekcs will be co-located on disk.
+	//      data-locality - filters are small-enough and existence-checks will be co-located on disk.
 	//   But there are 2 additional properties we have in our data:
 	//      "keys are known", "keys are hashed" (.idx works on murmur3), ".idx can calc key-number by key".
-	//   It means: if we rely on this properties then we can do better than general-purpose-existance-filter.
+	//   It means: if we rely on this properties then we can do better than general-purpose-existence-filter.
 	//   Seems just an "array of 1-st bytes of key-hashes" is great alternative:
 	//      general-purpose-filter: 9bits/key, 0.3% false-positives, 3 mem access
 	//      first-bytes-array: 8bits/key, 1/256=0.4% false-positives, 1 mem access
@@ -69,20 +68,21 @@ const (
 	LessFalsePositives Features = 0b10 //
 )
 
-// SupportedFeaturs - if see feature not from this list (likely after downgrade) - return IncompatibleErr and recommend for user manually delete file
-var SupportedFeatures = []Features{Enums, LessFalsePositives}
-var IncompatibleErr = errors.New("incompatible. can re-build such files by command 'erigon snapshots index'")
+// SupportedFeaturs - if see feature not from this list (likely after downgrade) - return ErrIncompatible and recommend for user manually delete file
+var (
+	SupportedFeatures = []Features{Enums, LessFalsePositives}
+	ErrIncompatible   = errors.New("incompatible. can re-build such files by command 'erigon snapshots index'")
+)
 
 // Index implements index lookup from the file created by the RecSplit
 type Index struct {
 	offsetEf           *eliasfano32.EliasFano
 	f                  *os.File
-	mmapHandle2        *[mmap.MaxMapSize]byte // mmap handle for windows (this is used to close mmap)
 	filePath, fileName string
 
 	grData      []uint64
-	data        []byte // slice of correct size for the index to work with
-	mmapHandle1 []byte // mmap handle for unix (this is used to close mmap)
+	data        []byte  // slice of correct size for the index to work with
+	mmapHandle1 mmap.Ro // mmap handle for unix (this is used to close mmap)
 	golombRice  []uint32
 
 	dataStructureVersion version.DataStructureVersion
@@ -107,7 +107,7 @@ type Index struct {
 	existenceV1        *fusefilter.Reader
 	existenceV2        *fusefilter.ReaderSharded
 
-	readers         *sync.Pool
+	sharedReader    *IndexReader // IndexReader is stateless, so one instance serves all goroutines
 	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
 }
 
@@ -141,12 +141,12 @@ func OpenIndex(indexFilePath string) (_ *Index, err error) {
 	}
 	idx.size = stat.Size()
 	idx.modTime = stat.ModTime()
-	if idx.mmapHandle1, idx.mmapHandle2, err = mmap.Mmap(idx.f, int(idx.size)); err != nil {
+	if idx.mmapHandle1, err = mmap.OpenRo(idx.f, int(idx.size)); err != nil {
 		return nil, err
 	}
 	idx.data = idx.mmapHandle1[:idx.size]
 
-	if err = idx.init(); err != nil {
+	if err := idx.init(); err != nil {
 		return nil, err
 	}
 
@@ -163,16 +163,12 @@ func OpenIndex(indexFilePath string) (_ *Index, err error) {
 	//	//}
 	//}
 
-	idx.readers = &sync.Pool{
-		New: func() any {
-			return NewIndexReader(idx)
-		},
-	}
+	idx.sharedReader = NewIndexReader(idx)
 	return idx, nil
 }
 
 func (idx *Index) init() (err error) {
-	var validationPassed = false
+	validationPassed := false
 	defer func() {
 		// recover from panic if one occurred. Set err to nil if no panic
 		if rec := recover(); rec != nil {
@@ -199,7 +195,7 @@ func (idx *Index) init() (err error) {
 	offset := 16 + 1 + int(idx.keyCount)*idx.bytesPerRec
 
 	if offset < 0 {
-		return fmt.Errorf("file %s %w. offset is: %d which is below zero", idx.fileName, IncompatibleErr, offset)
+		return fmt.Errorf("file %s %w. offset is: %d which is below zero", idx.fileName, ErrIncompatible, offset)
 	}
 
 	// Bucket count, bucketSize, leafSize
@@ -222,7 +218,7 @@ func (idx *Index) init() (err error) {
 	startSeedLen := int(idx.data[offset])
 	offset++
 	idx.startSeed = make([]uint64, startSeedLen)
-	for i := 0; i < startSeedLen; i++ {
+	for i := range startSeedLen {
 		idx.startSeed[i] = binary.BigEndian.Uint64(idx.data[offset:])
 		offset += 8
 	}
@@ -243,7 +239,7 @@ func (idx *Index) init() (err error) {
 		arrSz := binary.BigEndian.Uint64(idx.data[offset:])
 		offset += 8
 		if arrSz != idx.keyCount {
-			return fmt.Errorf("%w. size of existence filter %d != keys count %d", IncompatibleErr, arrSz, idx.keyCount)
+			return fmt.Errorf("%w. size of existence filter %d != keys count %d", ErrIncompatible, arrSz, idx.keyCount)
 		}
 		idx.existenceV0 = idx.data[offset : offset+int(arrSz)]
 		offset += int(arrSz)
@@ -279,7 +275,7 @@ func (idx *Index) init() (err error) {
 			}
 			offset += sz
 		default:
-			return fmt.Errorf("%w. unsupported existence filter version %d", IncompatibleErr, idx.dataStructureVersion)
+			return fmt.Errorf("%w. unsupported existence filter version %d", ErrIncompatible, idx.dataStructureVersion)
 		}
 	}
 
@@ -287,25 +283,26 @@ func (idx *Index) init() (err error) {
 	golombParamSize := binary.BigEndian.Uint16(idx.data[offset:])
 	offset += 4
 	idx.golombRice = make([]uint32, golombParamSize)
-	for i := uint16(0); i < golombParamSize; i++ {
-		if i == 0 {
+	for i := range golombParamSize {
+		switch {
+		case i == 0:
 			idx.golombRice[i] = (bijMemo[i] << 27) | bijMemo[i]
-		} else if i <= idx.leafSize {
+		case i <= idx.leafSize:
 			idx.golombRice[i] = (bijMemo[i] << 27) | (uint32(1) << 16) | bijMemo[i]
-		} else {
+		default:
 			computeGolombRice(i, idx.golombRice, idx.leafSize, idx.primaryAggrBound, idx.secondaryAggrBound)
 		}
 	}
 
 	l := binary.BigEndian.Uint64(idx.data[offset:])
 	offset += 8
-	p := (*[maxDataSize / 8]uint64)(unsafe.Pointer(&idx.data[offset]))
-	idx.grData = p[:l]
+	idx.grData = unsafe.Slice((*uint64)(unsafe.Pointer(&idx.data[offset])), l)
 	offset += 8 * int(l)
 	idx.ef.Read(idx.data[offset:])
 	validationPassed = true
 	return nil
 }
+
 func (idx *Index) ForceExistenceFilterWillNeed() {
 	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
 	if !existanceSupported {
@@ -333,6 +330,21 @@ func (idx *Index) ForceExistenceFilterNormal() {
 		idx.existenceV2.MadvNormal()
 	}
 }
+
+func (idx *Index) ForceExistenceFilterRandom() {
+	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
+	if !existanceSupported {
+		return
+	}
+	if idx.dataStructureVersion == 1 {
+		idx.existenceV1.MadvRandom()
+		return
+	}
+	if idx.dataStructureVersion >= 2 {
+		idx.existenceV2.MadvRandom()
+	}
+}
+
 func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
 	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
 	if !existanceSupported {
@@ -349,16 +361,12 @@ func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
 
 func onlyKnownFeatures(features Features) error {
 	for _, f := range SupportedFeatures {
-		features = features &^ f
+		features &^= f
 	}
 	if features != No {
-		return fmt.Errorf("%w. unknown features bitmap: %b", IncompatibleErr, features)
+		return fmt.Errorf("%w. unknown features bitmap: %b", ErrIncompatible, features)
 	}
 	return nil
-}
-
-func (idx *Index) DataHandle() unsafe.Pointer {
-	return unsafe.Pointer(&idx.data[0])
 }
 
 func (idx *Index) Size() int64 { return idx.size }
@@ -384,7 +392,7 @@ func (idx *Index) Close() {
 	if idx == nil || idx.f == nil {
 		return
 	}
-	if err := mmap.Munmap(idx.mmapHandle1, idx.mmapHandle2); err != nil {
+	if err := idx.mmapHandle1.Unmap(); err != nil {
 		log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", idx.FileName(), "stack", dbg.Stack())
 	}
 	if err := idx.f.Close(); err != nil {
@@ -416,14 +424,11 @@ func (idx *Index) KeyCount() uint64 { return idx.keyCount }
 func (idx *Index) LeafSize() uint16 { return idx.leafSize }
 func (idx *Index) BucketSize() int  { return idx.bucketSize }
 
-// Lookup is not thread-safe because it used id.hasher
+// Lookup is safe for concurrent use: it only reads the index's immutable state
 func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	if idx.keyCount == 0 {
 		_, fName := filepath.Split(idx.filePath)
 		panic("no Lookup should be done when keyCount==0, please use Empty function to guard " + fName)
-	}
-	if idx.keyCount == 1 {
-		return 0, true
 	}
 	if idx.lessFalsePositives {
 		switch idx.dataStructureVersion {
@@ -436,6 +441,12 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 				return 0, false
 			}
 		}
+	}
+	if idx.keyCount == 1 {
+		if !idx.enums {
+			return binary.BigEndian.Uint64(idx.data[9+idx.bytesPerRec:]) & idx.recMask, true
+		}
+		return 0, true
 	}
 
 	var gr GolombRiceReader
@@ -580,6 +591,7 @@ func (idx *Index) DisableReadAhead() {
 		log.Warn("read-ahead negative counter", "file", idx.FileName())
 	}
 }
+
 func (idx *Index) MadvSequential() *Index {
 	if idx == nil || idx.mmapHandle1 == nil {
 		return idx
@@ -588,6 +600,7 @@ func (idx *Index) MadvSequential() *Index {
 	_ = mmap.MadviseSequential(idx.mmapHandle1)
 	return idx
 }
+
 func (idx *Index) MadvNormal() *Index {
 	if idx == nil || idx.mmapHandle1 == nil {
 		return idx
@@ -596,6 +609,7 @@ func (idx *Index) MadvNormal() *Index {
 	_ = mmap.MadviseNormal(idx.mmapHandle1)
 	return idx
 }
+
 func (idx *Index) MadvWillNeed() *Index {
 	if idx == nil || idx.mmapHandle1 == nil {
 		return idx
@@ -604,6 +618,6 @@ func (idx *Index) MadvWillNeed() *Index {
 	return idx
 }
 
-func (idx *Index) GetReaderFromPool() *IndexReader {
-	return idx.readers.Get().(*IndexReader)
+func (idx *Index) Reader() *IndexReader {
+	return idx.sharedReader
 }

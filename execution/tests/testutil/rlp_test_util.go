@@ -47,6 +47,8 @@ type RLPTest struct {
 	Out string
 }
 
+type rlpTestBigInt []byte
+
 // FromHex returns the bytes represented by the hexadecimal string s.
 // s may be prefixed with "0x".
 // This is copy-pasted from bytes.go, which does not return the error
@@ -108,14 +110,9 @@ func translateJSON(v any) any {
 			if !ok {
 				panic(fmt.Errorf("bad test: bad big int: %q", v))
 			}
-			// Erigon's RLP layer only supports integers up to 2^256-1, which
-			// covers every value Ethereum encodes on-chain (EIP-7702 caps
-			// chainID at < 2^256, EIP-2294 (stagnant) proposes ~2^63 for
-			// chainID). Test vectors with larger values are filtered out at
-			// the test-runner level.
 			u, overflow := uint256.FromBig(b)
 			if overflow {
-				panic(fmt.Errorf("test value %q exceeds 2^256-1; skip via TestMatcher", v))
+				return rlpTestBigInt(b.Bytes())
 			}
 			return u
 		}
@@ -152,6 +149,14 @@ func checkDecodeFromJSON(s *rlp.Stream, exp any) error {
 		}
 		if u.Cmp(exp) != 0 {
 			return addStack("Uint256", exp, fmt.Errorf("result mismatch: got %d", u))
+		}
+	case rlpTestBigInt:
+		b, err := s.Bytes()
+		if err != nil {
+			return addStack("Big", exp, err)
+		}
+		if !bytes.Equal(b, exp) {
+			return addStack("Big", exp, fmt.Errorf("result mismatch: got %x", b))
 		}
 	case []byte:
 		b, err := s.Bytes()

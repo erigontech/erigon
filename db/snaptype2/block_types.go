@@ -36,12 +36,13 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 func init() {
-	ethereumTypes := append(BlockSnapshotTypes, snaptype.CaplinSnapshotTypes...)
+	ethereumTypes := make([]snaptype.Type, 0, len(BlockSnapshotTypes)+len(snaptype.CaplinSnapshotTypes))
+	ethereumTypes = append(ethereumTypes, BlockSnapshotTypes...)
+	ethereumTypes = append(ethereumTypes, snaptype.CaplinSnapshotTypes...)
 
 	snapcfg.RegisterKnownTypes(networkname.Mainnet, ethereumTypes)
 	snapcfg.RegisterKnownTypes(networkname.Sepolia, ethereumTypes)
@@ -92,7 +93,7 @@ var (
 		Enums.Salt,
 		"salt",
 		snaptype.Versions{
-			Current:      version.ZeroVersion, //2,
+			Current:      version.ZeroVersion, // 2,
 			MinSupported: version.ZeroVersion,
 		},
 		nil,
@@ -107,10 +108,6 @@ var (
 		[]snaptype.Index{Indexes.HeaderHash},
 		snaptype.IndexBuilderFunc(
 			func(ctx context.Context, info snaptype.FileInfo, salt uint32, _ *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
-				hasher := crypto.NewKeccakState()
-				defer crypto.ReturnToPool(hasher)
-				var h common.Hash
-
 				cfg := recsplit.RecSplitArgs{
 					Enums:              true,
 					BucketSize:         recsplit.DefaultBucketSize,
@@ -125,10 +122,7 @@ var (
 						p.Processed.Add(1)
 					}
 
-					headerRlp := word[1:]
-					hasher.Reset()
-					hasher.Write(headerRlp)
-					hasher.Read(h[:])
+					h := crypto.Keccak256Hash(word[1:])
 					if err := idx.AddKey(h[:], offset); err != nil {
 						return err
 					}
@@ -137,7 +131,8 @@ var (
 					return fmt.Errorf("HeadersIdx: %w", err)
 				}
 				return nil
-			}),
+			},
+		),
 	)
 
 	Bodies = snaptype.RegisterType(
@@ -171,7 +166,8 @@ var (
 					return fmt.Errorf("can't index %s: %w", info.Name(), err)
 				}
 				return nil
-			}),
+			},
+		),
 	)
 
 	Transactions = snaptype.RegisterType(
@@ -277,10 +273,10 @@ var (
 					g, bodyGetter := d.MakeGetter(), bodiesSegment.MakeGetter()
 					var ti, offset, nextPos uint64
 					blockNum := firstBlockNum
-					body := &types.BodyForStorage{}
+					body := &types.BodyOnlyTxn{}
 
 					bodyBuf, _ = bodyGetter.Next(bodyBuf[:0])
-					if err := rlp.DecodeBytes(bodyBuf, body); err != nil {
+					if err := body.DecodeRLPBytes(bodyBuf); err != nil {
 						return err
 					}
 
@@ -299,7 +295,7 @@ var (
 							}
 
 							bodyBuf, _ = bodyGetter.Next(bodyBuf[:0])
-							if err := rlp.DecodeBytes(bodyBuf, body); err != nil {
+							if err := body.DecodeRLPBytes(bodyBuf); err != nil {
 								return err
 							}
 
@@ -337,8 +333,12 @@ var (
 					if err := txnHashIdx.Build(ctx); err != nil {
 						if errors.Is(err, recsplit.ErrCollision) {
 							logger.Warn("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
-							txnHashIdx.ResetNextSalt()
-							txnHash2BlockNumIdx.ResetNextSalt()
+							if resetErr := txnHashIdx.ResetNextSalt(); resetErr != nil {
+								return resetErr
+							}
+							if resetErr := txnHash2BlockNumIdx.ResetNextSalt(); resetErr != nil {
+								return resetErr
+							}
 							continue
 						}
 						return fmt.Errorf("txnHashIdx: %w", err)
@@ -346,8 +346,12 @@ var (
 					if err := txnHash2BlockNumIdx.Build(ctx); err != nil {
 						if errors.Is(err, recsplit.ErrCollision) {
 							logger.Warn("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
-							txnHashIdx.ResetNextSalt()
-							txnHash2BlockNumIdx.ResetNextSalt()
+							if resetErr := txnHashIdx.ResetNextSalt(); resetErr != nil {
+								return resetErr
+							}
+							if resetErr := txnHash2BlockNumIdx.ResetNextSalt(); resetErr != nil {
+								return resetErr
+							}
 							continue
 						}
 						return fmt.Errorf("txnHash2BlockNumIdx: %w", err)
@@ -355,7 +359,8 @@ var (
 
 					return nil
 				}
-			}),
+			},
+		),
 	)
 	Domains = snaptype.RegisterType(
 		Enums.Domains,
@@ -406,19 +411,19 @@ var (
 func TxsAmountBasedOnBodiesSnapshots(bodiesSegment *seg.Decompressor, len uint64) (baseTxID types.BaseTxnID, expectedCount int, err error) {
 	gg := bodiesSegment.MakeGetter()
 	buf, _ := gg.Next(nil)
-	firstBody := &types.BodyForStorage{}
-	if err = rlp.DecodeBytes(buf, firstBody); err != nil {
+	firstBody := &types.BodyOnlyTxn{}
+	if err = firstBody.DecodeRLPBytes(buf); err != nil {
 		return
 	}
 	baseTxID = firstBody.BaseTxnID
 
-	lastBody := new(types.BodyForStorage)
+	lastBody := new(types.BodyOnlyTxn)
 	i := uint64(0)
 	for gg.HasNext() {
 		i++
 		if i == len {
 			buf, _ = gg.Next(buf[:0])
-			if err = rlp.DecodeBytes(buf, lastBody); err != nil {
+			if err = lastBody.DecodeRLPBytes(buf); err != nil {
 				return
 			}
 			if gg.HasNext() {

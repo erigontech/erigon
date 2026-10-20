@@ -32,7 +32,7 @@ import (
 func TestRandomSigma(t *testing.T) {
 	firstByteAlways0 := true
 	lastByteAlways0 := true
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		sigma, err := RandomSigma(rand.Reader)
 		require.NoError(t, err)
 		if sigma[0] != 0 {
@@ -200,7 +200,7 @@ func TestPaddingRoundtrip(t *testing.T) {
 		bytes.Repeat([]byte("a"), 32),
 		bytes.Repeat([]byte("a"), 33),
 	}
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		l, err := rand.Int(rand.Reader, big.NewInt(100))
 		require.NoError(t, err)
 		m := make([]byte, l.Int64())
@@ -224,7 +224,7 @@ func makeKeys(t *testing.T) (*EonPublicKey, *EpochSecretKey, *EpochID) {
 
 	ps := []*Polynomial{}
 	gammas := []*Gammas{}
-	for i := 0; i < n; i++ {
+	for range n {
 		p, err := RandomPolynomial(rand.Reader, threshold-1)
 		require.NoError(t, err)
 		ps = append(ps, p)
@@ -234,12 +234,12 @@ func makeKeys(t *testing.T) (*EonPublicKey, *EpochSecretKey, *EpochID) {
 	eonSecretKeyShares := []*EonSecretKeyShare{}
 	epochSecretKeyShares := []*EpochSecretKeyShare{}
 	eonSecretKey := big.NewInt(0)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		eonSecretKey.Add(eonSecretKey, ps[i].Eval(big.NewInt(0)))
 		eonSecretKey.Mod(eonSecretKey, order)
 
 		ss := []*big.Int{}
-		for j := 0; j < n; j++ {
+		for j := range n {
 			s := ps[j].EvalForKeyper(i)
 			ss = append(ss, s)
 		}
@@ -253,7 +253,8 @@ func makeKeys(t *testing.T) (*EonPublicKey, *EpochSecretKey, *EpochID) {
 	epochSecretKey, err := ComputeEpochSecretKey(
 		[]int{0, 1},
 		[]*EpochSecretKeyShare{epochSecretKeyShares[0], epochSecretKeyShares[1]},
-		threshold)
+		threshold,
+	)
 	require.NoError(t, err)
 	return eonPublicKey, epochSecretKey, epochID
 }

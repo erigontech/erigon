@@ -17,8 +17,12 @@
 package solid
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
@@ -27,20 +31,56 @@ import (
 )
 
 type TransactionsSSZ struct {
-	underlying [][]byte    // underlying transaction list
-	root       common.Hash // root
+	underlying                [][]byte    // underlying transaction list
+	root                      common.Hash // root
+	maxBytesPerTransaction    uint64
+	maxTransactionsPerPayload uint64
+	maxEncodedBytes           uint64
 }
 
+const transactionOffsetSize = 4
+
 func (t *TransactionsSSZ) UnmarshalJSON(buf []byte) error {
-	tmp := []hexutil.Bytes{}
 	t.root = common.Hash{}
-	if err := json.Unmarshal(buf, &tmp); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(buf))
+	token, err := decoder.Token()
+	if err != nil {
 		return err
 	}
-	t.underlying = nil
-	for _, tx := range tmp {
-		t.underlying = append(t.underlying, tx)
+	if delimiter, ok := token.(json.Delim); !ok || delimiter != '[' {
+		return fmt.Errorf("expected JSON array")
 	}
+	transactions := make([][]byte, 0, int(min(t.maxTransactions(), 16)))
+	var encodedSize uint64
+	for decoder.More() {
+		if uint64(len(transactions)) >= t.maxTransactions() {
+			return fmt.Errorf("transactions exceed decoder resource limit %d", t.maxTransactions())
+		}
+		var encoded json.RawMessage
+		if err := decoder.Decode(&encoded); err != nil {
+			return err
+		}
+		encoded = bytes.TrimSpace(encoded)
+		if len(encoded) > 4 && uint64((len(encoded)-4+1)/2) > t.maxBytes() {
+			return fmt.Errorf("transaction %d exceeds decoder byte limit %d", len(transactions), t.maxBytes())
+		}
+		var transaction hexutil.Bytes
+		if err := json.Unmarshal(encoded, &transaction); err != nil {
+			return err
+		}
+		encodedSize += transactionOffsetSize + uint64(len(transaction))
+		if t.maxEncodedBytes != 0 && encodedSize > t.maxEncodedBytes {
+			return fmt.Errorf("transactions exceed decoder byte limit %d", t.maxEncodedBytes)
+		}
+		transactions = append(transactions, transaction)
+	}
+	if _, err := decoder.Token(); err != nil {
+		return err
+	}
+	if err := requireJSONEOF(decoder); err != nil {
+		return err
+	}
+	t.underlying = transactions
 	return nil
 }
 
@@ -52,8 +92,15 @@ func (t TransactionsSSZ) MarshalJSON() ([]byte, error) {
 	return json.Marshal(tmp)
 }
 
-func (*TransactionsSSZ) Clone() clonable.Clonable {
-	return &TransactionsSSZ{}
+func (t *TransactionsSSZ) Clone() clonable.Clonable {
+	if t == nil {
+		return &TransactionsSSZ{}
+	}
+	return &TransactionsSSZ{
+		maxBytesPerTransaction:    t.maxBytesPerTransaction,
+		maxTransactionsPerPayload: t.maxTransactionsPerPayload,
+		maxEncodedBytes:           t.maxEncodedBytes,
+	}
 }
 
 func (*TransactionsSSZ) Static() bool {
@@ -61,25 +108,41 @@ func (*TransactionsSSZ) Static() bool {
 }
 
 func (t *TransactionsSSZ) DecodeSSZ(buf []byte, _ int) error {
+	if t.maxEncodedBytes != 0 && uint64(len(buf)) > t.maxEncodedBytes {
+		return errors.Join(ssz.ErrTooBigList, fmt.Errorf("TransactionsSSZ: encoded length %d exceeds limit %d", len(buf), t.maxEncodedBytes))
+	}
 	if len(buf) == 0 {
+		t.root = common.Hash{}
+		t.underlying = nil
 		return nil
 	}
 	if len(buf) < 4 {
 		return ssz.ErrLowBufferSize
 	}
 	t.root = common.Hash{}
-	length := ssz.DecodeOffset(buf[:4]) / 4
-	if length == 0 {
-		t.underlying = nil
-		return nil
+	firstOffset := ssz.DecodeOffset(buf[:4])
+	if firstOffset%4 != 0 {
+		return ssz.ErrBadOffset
 	}
-	if uint32(len(buf)) < length*4 {
+	length := firstOffset / 4
+	if length == 0 {
+		return ssz.ErrBadOffset
+	}
+	maxTransactionsPerPayload := t.maxTransactions()
+	if uint64(length) > maxTransactionsPerPayload {
+		return errors.Join(ssz.ErrTooBigList, fmt.Errorf("TransactionsSSZ: expected at most %d transactions, got %d", maxTransactionsPerPayload, length))
+	}
+	if uint32(len(buf)) < firstOffset {
 		return ssz.ErrLowBufferSize
 	}
+	maxBytesPerTransaction := t.maxBytes()
 	t.underlying = make([][]byte, length)
-	for i := uint32(0); i < length; i++ {
+	for i := range length {
 		offsetPosition := i * 4
 		startTx := ssz.DecodeOffset(buf[offsetPosition:])
+		if startTx < firstOffset {
+			return ssz.ErrBadOffset
+		}
 		var endTx uint32
 		if i == length-1 {
 			endTx = uint32(len(buf))
@@ -91,6 +154,9 @@ func (t *TransactionsSSZ) DecodeSSZ(buf []byte, _ int) error {
 		}
 		if len(buf) < int(endTx) {
 			return ssz.ErrLowBufferSize
+		}
+		if uint64(endTx-startTx) > maxBytesPerTransaction {
+			return errors.Join(ssz.ErrTooBigList, fmt.Errorf("TransactionsSSZ: transaction[%d] length %d exceeds limit %d", i, endTx-startTx, maxBytesPerTransaction))
 		}
 		t.underlying[i] = buf[startTx:endTx]
 	}
@@ -111,6 +177,25 @@ func (t *TransactionsSSZ) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	return dst, nil
 }
 
+// ValidateBounds checks transaction count and per-transaction byte limits.
+func (t *TransactionsSSZ) ValidateBounds(maxTransactions, maxBytesPerTransaction uint64) error {
+	if maxTransactions == 0 {
+		maxTransactions = clparams.MaxTransactionsPerPayloadDefault
+	}
+	if maxBytesPerTransaction == 0 {
+		maxBytesPerTransaction = clparams.MaxBytesPerTransactionDefault
+	}
+	if uint64(len(t.underlying)) > maxTransactions {
+		return fmt.Errorf("too many transactions: got %d, max %d", len(t.underlying), maxTransactions)
+	}
+	for i, transaction := range t.underlying {
+		if uint64(len(transaction)) > maxBytesPerTransaction {
+			return fmt.Errorf("transaction %d is too large: got %d bytes, max %d", i, len(transaction), maxBytesPerTransaction)
+		}
+	}
+	return nil
+}
+
 func (t *TransactionsSSZ) HashSSZ() ([32]byte, error) {
 	var err error
 	if t.root != (common.Hash{}) {
@@ -118,6 +203,18 @@ func (t *TransactionsSSZ) HashSSZ() ([32]byte, error) {
 	}
 	t.root, err = merkle_tree.TransactionsListRoot(t.underlying)
 	return t.root, err
+}
+
+func (t *TransactionsSSZ) HashSSZProgressive() ([32]byte, error) {
+	roots := make([][32]byte, len(t.underlying))
+	for i, transaction := range t.underlying {
+		root, err := merkle_tree.ProgressiveBasicListRoot(transaction, uint64(len(transaction)))
+		if err != nil {
+			return [32]byte{}, err
+		}
+		roots[i] = root
+	}
+	return merkle_tree.ProgressiveListRoot(roots, uint64(len(roots)))
 }
 
 func (t *TransactionsSSZ) EncodingSizeSSZ() (size int) {
@@ -131,13 +228,69 @@ func (t *TransactionsSSZ) EncodingSizeSSZ() (size int) {
 }
 
 func NewTransactionsSSZFromTransactions(txs [][]byte) *TransactionsSSZ {
+	return NewTransactionsSSZFromTransactionsWithLimits(txs, 0, 0)
+}
+
+// NewTransactionsSSZFromTransactionsWithLimits constructs transactions with decoder resource limits.
+func NewTransactionsSSZFromTransactionsWithLimits(txs [][]byte, maxTransactionsPerPayload, maxBytesPerTransaction uint64) *TransactionsSSZ {
 	return &TransactionsSSZ{
-		underlying: txs,
+		underlying:                txs,
+		maxTransactionsPerPayload: maxTransactionsPerPayload,
+		maxBytesPerTransaction:    maxBytesPerTransaction,
 	}
+}
+
+func NewTransactionsSSZWithLimits(maxTransactionsPerPayload, maxBytesPerTransaction uint64) *TransactionsSSZ {
+	return &TransactionsSSZ{
+		maxTransactionsPerPayload: maxTransactionsPerPayload,
+		maxBytesPerTransaction:    maxBytesPerTransaction,
+	}
+}
+
+func NewProgressiveTransactionsSSZ() *TransactionsSSZ {
+	return &TransactionsSSZ{
+		maxTransactionsPerPayload: clparams.MaxTransactionsPerPayloadDefault,
+		maxBytesPerTransaction:    clparams.MaxChunkSize,
+		maxEncodedBytes:           clparams.MaxChunkSize,
+	}
+}
+
+func NewProgressiveTransactionsSSZFromTransactions(txs [][]byte) *TransactionsSSZ {
+	transactions := NewProgressiveTransactionsSSZ()
+	transactions.underlying = txs
+	return transactions
+}
+
+func (t *TransactionsSSZ) ValidateProgressiveBounds() error {
+	if size := uint64(t.EncodingSizeSSZ()); size > clparams.MaxChunkSize {
+		return fmt.Errorf("transactions encoding size %d exceeds max %d", size, clparams.MaxChunkSize)
+	}
+	return t.ValidateBounds(t.maxTransactions(), clparams.MaxChunkSize)
+}
+
+func (t *TransactionsSSZ) maxTransactions() uint64 {
+	if t.maxTransactionsPerPayload != 0 {
+		return t.maxTransactionsPerPayload
+	}
+	return clparams.MaxTransactionsPerPayloadDefault
+}
+
+func (t *TransactionsSSZ) maxBytes() uint64 {
+	if t.maxBytesPerTransaction != 0 {
+		return t.maxBytesPerTransaction
+	}
+	return clparams.MaxBytesPerTransactionDefault
 }
 
 func (t *TransactionsSSZ) UnderlyngReference() [][]byte {
 	return t.underlying
+}
+
+func (t *TransactionsSSZ) Len() int {
+	if t == nil {
+		return 0
+	}
+	return len(t.underlying)
 }
 
 func (t *TransactionsSSZ) ForEach(fn func(tx []byte, idx int, total int) bool) {

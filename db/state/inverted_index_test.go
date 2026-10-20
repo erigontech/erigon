@@ -20,15 +20,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/prune"
 
 	"github.com/erigontech/erigon/common/background"
@@ -41,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/kv/stream/streamtest"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
@@ -53,7 +58,7 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	dirs := datadir.New(tb.TempDir())
 	keysTable := "Keys"
 	indexTable := "Index"
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
 			indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
@@ -62,7 +67,7 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 		}
 	}).MustOpen()
 	salt := uint32(1)
-	cfg := statecfg.InvIdxCfg{FilenameBase: "inv", KeysTable: keysTable, ValuesTable: indexTable, FileVersion: statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
+	cfg := statecfg.InvIdxCfg{Enabled: true, FilenameBase: "inv", KeysTable: keysTable, ValuesTable: indexTable, FileVersion: statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
 	cfg.Accessors = statecfg.AccessorHashMap
 	ii, err := NewInvertedIndex(cfg, aggStep, config3.DefaultStepsInFrozenFile, dirs, logger)
 	require.NoError(tb, err)
@@ -85,6 +90,32 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	ii.salt.Store(&salt)
 	ii.DisableFsync()
 	return db, ii
+}
+
+func TestInvertedIndexVisibleEnd(t *testing.T) {
+	db, ii := testDbAndInvertedIndex(t, 16, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	iit := ii.beginForTests()
+	defer iit.Close()
+	require.Zero(t, iit.Progress(tx))
+	require.Zero(t, iit.visibleEnd(tx))
+
+	var txNum [8]byte
+	require.NoError(t, tx.Put(ii.KeysTable, txNum[:], []byte{1}))
+	require.Zero(t, iit.Progress(tx))
+	require.Equal(t, uint64(1), iit.visibleEnd(tx))
+
+	binary.BigEndian.PutUint64(txNum[:], 100)
+	require.NoError(t, tx.Put(ii.KeysTable, txNum[:], []byte{1}))
+	require.Equal(t, uint64(100), iit.Progress(tx))
+	require.Equal(t, uint64(101), iit.visibleEnd(tx))
+
+	iit.files = visibleFiles{{endTxNum: 200}}
+	require.Equal(t, uint64(200), iit.Progress(tx))
+	require.Equal(t, uint64(200), iit.visibleEnd(tx))
 }
 
 func TestInvIndexPruningCorrectness(t *testing.T) {
@@ -185,7 +216,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			defer ic.Close()
 
 			// this should prune exactly pruneLimit*pruneIter transactions
-			for i := 0; i < pruneIters; i++ {
+			for i := range pruneIters {
 				stat, err := ic.HashSeekingPrune(t.Context(), tx, 0, 1000, pruneLimit, logEvery, true, nil, nil, prune.DefaultStorageMode)
 				require.NoError(t, err)
 				t.Logf("[%d] stats: %v", i, stat)
@@ -228,7 +259,6 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			// If we would prune by txnum then txTo prune should be available after prune is finished
 			require.EqualValues(t, pruneIters*int(pruneLimit)+prunedInStep0, int(binary.BigEndian.Uint64(txn)-1))
 		})
-
 	}) // hash_prune
 
 	t.Run("scan_prune", func(t *testing.T) {
@@ -346,7 +376,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		})
 
 		t.Run("retire_one_step_no_force", func(t *testing.T) {
-			t.Skip() //TODO: can't deal with this false-positive but it's so theoretical in scanprune, so IDK
+			ii, tx, logEvery, _, _ := setup(t)
 			collation, err := ii.collate(t.Context(), 0, tx)
 			require.NoError(t, err)
 			sf, _ := ii.buildFiles(t.Context(), 0, collation, background.NewProgressSet())
@@ -354,96 +384,51 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			txFrom, txTo := firstTxNumOfStep(0, ii.stepSize), firstTxNumOfStep(1, ii.stepSize)
 			ii.integrateDirtyFiles(sf, txFrom, txTo)
 
-			// without `reCalcVisibleFiles` must be nothing to prune - because files are not visible yet.
 			ic := ii.beginForTests()
 			defer ic.Close()
-			st := &prune.Stat{
-				MinTxNum:         0,
-				MaxTxNum:         0,
-				PruneCountTx:     0,
-				PruneCountValues: 0,
-				DupsDeleted:      0,
-				LastPrunedValue:  nil,
-				LastPrunedKey:    nil,
-				KeyProgress:      prune.Done,
-				ValueProgress:    prune.Done,
-				TxFrom:           0,
-				TxTo:             10,
-			}
-			err = SavePruneValProgress(tx, ic.ii.ValuesTable, st)
-			require.NoError(t, err)
-			stat, err := ic.TableScanningPrune(ctx, tx, 0, 10, pruneLimit, logEvery, false, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
-			require.NoError(t, err)
-			require.Zero(t, stat.PruneCountTx)
-			require.Zero(t, stat.PruneCountValues)
-
-			ic = ii.beginForTests()
-			defer ic.Close()
-			newTHR := 9 * time.Millisecond
-			otherCtx := context.WithValue(t.Context(), throttle, &newTHR)
-			stat, err = ic.TableScanningPrune(otherCtx, tx, 0, 10, pruneLimit, logEvery, false, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
+			stat, err := ic.TableScanningPrune(t.Context(), tx, 0, 10, pruneLimit, logEvery, false, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
 			require.NoError(t, err)
 			require.Equal(t, 9, int(stat.PruneCountTx))
 			require.Equal(t, 9, int(stat.PruneCountValues))
 
-			// prune only what left in step 0. Even if requested more. don't allow print more than what we have in visible files
-			stat, err = ic.TableScanningPrune(otherCtx, tx, 0, 20, pruneLimit, logEvery, false, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
+			// even if requested more, don't prune beyond what visible files cover (step 0 ends at stepSize).
+			stat, err = ic.TableScanningPrune(t.Context(), tx, 0, 20, pruneLimit, logEvery, false, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
 			require.NoError(t, err)
 			require.Equal(t, 6, int(stat.PruneCountTx))
 			require.Equal(t, 6, int(stat.PruneCountValues))
 		})
 
 		t.Run("force", func(t *testing.T) {
-			t.Skip() //TODO: figure out how to make it pretty
+			ii, tx, logEvery, from, _ := setup(t)
 			ic := ii.beginForTests()
 			defer ic.Close()
-			newTHR := 1 * time.Millisecond
-			ctx := context.WithValue(t.Context(), "throttle", &newTHR)
-			// this should prune exactly pruneLimit*pruneIter transactions
-			for i := 0; i < pruneIters; i++ {
-				stat, err := ic.TableScanningPrune(ctx, tx, 0, 1000, pruneLimit, logEvery, true, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
-				require.NoError(t, err)
-				t.Logf("[%d] stats: %v %d %d", i, stat, stat.PruneCountTx, stat.PruneCountValues)
-			}
 
-			// ascending - empty
-			it, err := ic.IdxRange(nil, 0, pruneIters*int(pruneLimit), order.Asc, -1, tx)
+			// Unlike HashSeekingPrune, TableScanningPrune does not honor `limit` for the
+			// key range: a single forced call prunes the whole [txFrom, txTo) range.
+			pruneTo := uint64(pruneIters) * pruneLimit
+			stat, err := ic.TableScanningPrune(t.Context(), tx, 0, pruneTo, pruneLimit, logEvery, true, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
+			require.NoError(t, err)
+			t.Logf("pruned tx=%d vals=%d", stat.PruneCountTx, stat.PruneCountValues)
+
+			// [0, pruneTo) fully pruned
+			it, err := ic.IdxRange(nil, 0, int(pruneTo), order.Asc, -1, tx)
 			require.NoError(t, err)
 			require.False(t, it.HasNext())
 			it.Close()
 
-			// descending - empty
-			it, err = ic.IdxRange(nil, pruneIters*int(pruneLimit), 0, order.Desc, -1, tx)
+			it, err = ic.IdxRange(nil, int(pruneTo), 0, order.Desc, -1, tx)
 			require.NoError(t, err)
 			require.False(t, it.HasNext())
 			it.Close()
 
-			// straight from pruned - not empty
+			// first surviving txn in the keys table == pruneTo
 			icc, err := tx.CursorDupSort(ii.KeysTable)
 			require.NoError(t, err)
 			defer icc.Close()
 			txn, _, err := icc.Seek(from[:])
 			require.NoError(t, err)
-			println("from", binary.BigEndian.Uint64(from[:]), "txn", binary.BigEndian.Uint64(txn))
-
-			prunedInStep0 := 16 - 1
-			// we pruned by limit so next transaction after prune should be equal to `pruneIters*pruneLimit+1`
-			// If we would prune by txnum then txTo prune should be available after prune is finished
-			require.EqualValues(t, pruneIters*int(pruneLimit)+prunedInStep0, int(binary.BigEndian.Uint64(txn)-1))
-			icc.Close()
-
-			// check second table
-			icc2, err := tx.CursorDupSort(ii.ValuesTable)
-			require.NoError(t, err)
-			defer icc2.Close()
-			key, txn, err := icc2.First()
-			t.Logf("key: %x, txn: %x", key, txn)
-			require.NoError(t, err)
-			// we pruned by limit so next transaction after prune should be equal to `pruneIters*pruneLimit+1`
-			// If we would prune by txnum then txTo prune should be available after prune is finished
-			require.EqualValues(t, pruneIters*int(pruneLimit)+prunedInStep0, int(binary.BigEndian.Uint64(txn)-1))
+			require.EqualValues(t, pruneTo, binary.BigEndian.Uint64(txn))
 		})
-
 	}) // scan_prune
 }
 
@@ -464,7 +449,7 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	defer tx.Rollback()
 	ic := ii.beginForTests()
 	defer ic.Close()
-	writer := ic.NewWriter()
+	writer := ic.NewWriter(db)
 	defer writer.close()
 
 	err = writer.Add([]byte("key1"), 2)
@@ -542,7 +527,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	}()
 	ic := ii.beginForTests()
 	defer ic.Close()
-	writer := ic.NewWriter()
+	writer := ic.NewWriter(db)
 	defer writer.close()
 
 	err = writer.Add([]byte("key1"), 2)
@@ -631,9 +616,9 @@ func TestInvIndex_PruneRollingCursorProgress(t *testing.T) {
 		t.Helper()
 		ic := ii.beginForTests()
 		defer ic.Close()
-		w := ic.NewWriter()
+		w := ic.NewWriter(db)
 		defer w.close()
-		for k := uint64(0); k < keyCount; k++ {
+		for k := range uint64(keyCount) {
 			var key [8]byte
 			binary.BigEndian.PutUint64(key[:], k)
 			require.NoError(t, w.Add(key[:], txNum))
@@ -729,7 +714,7 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 	err := db.Update(ctx, func(tx kv.RwTx) error {
 		ic := ii.beginForTests()
 		defer ic.Close()
-		writer := ic.NewWriter()
+		writer := ic.NewWriter(db)
 		defer writer.close()
 
 		var flusher flusher
@@ -750,7 +735,7 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 			}
 			if txNum%10 == 0 {
 				flusher = writer
-				writer = ic.NewWriter()
+				writer = ic.NewWriter(db)
 			}
 		}
 		if flusher != nil {
@@ -792,33 +777,33 @@ func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			reverseStream, err := ic.IdxRange(k[:], 976-1, 0, order.Desc, -1, nil)
 			require.NoError(t, err)
 			defer reverseStream.Close()
-			stream.ExpectEqualU64(t, stream.ReverseArray(values), reverseStream)
+			streamtest.ExpectEqualU64(t, stream.ReverseArray(values), reverseStream)
 		})
 		t.Run("unbounded asc", func(t *testing.T) {
 			forwardLimited, err := ic.IdxRange(k[:], -1, 976, order.Asc, 2, nil)
 			require.NoError(t, err)
 			defer forwardLimited.Close()
-			stream.ExpectEqualU64(t, stream.Array(values[:2]), forwardLimited)
+			streamtest.ExpectEqualU64(t, stream.Array(values[:2]), forwardLimited)
 		})
 		t.Run("unbounded desc", func(t *testing.T) {
 			reverseLimited, err := ic.IdxRange(k[:], 976-1, -1, order.Desc, 2, nil)
 			require.NoError(t, err)
 			defer reverseLimited.Close()
-			stream.ExpectEqualU64(t, stream.ReverseArray(values[len(values)-2:]), reverseLimited)
+			streamtest.ExpectEqualU64(t, stream.ReverseArray(values[len(values)-2:]), reverseLimited)
 		})
 		t.Run("tiny bound asc", func(t *testing.T) {
 			it, err := ic.IdxRange(k[:], 100, 102, order.Asc, -1, nil)
 			require.NoError(t, err)
 			defer it.Close()
 			expect := stream.FilterU64(stream.Array(values), func(k uint64) bool { return k >= 100 && k < 102 })
-			stream.ExpectEqualU64(t, expect, it)
+			streamtest.ExpectEqualU64(t, expect, it)
 		})
 		t.Run("tiny bound desc", func(t *testing.T) {
 			it, err := ic.IdxRange(k[:], 102, 100, order.Desc, -1, nil)
 			require.NoError(t, err)
 			defer it.Close()
 			expect := stream.FilterU64(stream.ReverseArray(values), func(k uint64) bool { return k <= 102 && k > 100 })
-			stream.ExpectEqualU64(t, expect, it)
+			streamtest.ExpectEqualU64(t, expect, it)
 		})
 	}
 	// Now check invertedIndex that require access to DB
@@ -978,7 +963,7 @@ func TestInvIndexScanFiles(t *testing.T) {
 
 	scanDirsRes, err := scanDirs(ii.dirs)
 	require.NoError(err)
-	err = ii.openFolder(scanDirsRes)
+	_, err = ii.openFolder(t.Context(), scanDirsRes)
 	require.NoError(err)
 
 	mergeInverted(t, db, ii, txs)
@@ -1098,12 +1083,12 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 
 	err := dir.RemoveFile(fn)
 	require.NoError(t, err)
-	err = os.WriteFile(fn, make([]byte, 33), 0644)
+	err = os.WriteFile(fn, make([]byte, 33), 0o644)
 	require.NoError(t, err)
 
 	scanDirsRes, err := scanDirs(ii.dirs)
 	require.NoError(t, err)
-	err = ii.openFolder(scanDirsRes)
+	_, err = ii.openFolder(t.Context(), scanDirsRes)
 	require.NoError(t, err)
 	ii.Close()
 }
@@ -1133,7 +1118,7 @@ func TestInvertedIndex_IdxRange_SkipsFileRange(t *testing.T) {
 	err := db.Update(ctx, func(tx kv.RwTx) error {
 		ic := ii.beginForTests()
 		defer ic.Close()
-		writer := ic.NewWriter()
+		writer := ic.NewWriter(db)
 		defer writer.close()
 		for _, txNum := range txNums {
 			if err := writer.Add(key[:], txNum); err != nil {
@@ -1219,7 +1204,7 @@ func TestInvertedIndex_IdxRange_IgnoresDBInFileRange(t *testing.T) {
 	err := db.Update(ctx, func(tx kv.RwTx) error {
 		ic := ii.beginForTests()
 		defer ic.Close()
-		writer := ic.NewWriter()
+		writer := ic.NewWriter(db)
 		defer writer.close()
 		for _, txNum := range txNums {
 			if err := writer.Add(key[:], txNum); err != nil {
@@ -1281,4 +1266,361 @@ func TestInvertedIndex_IdxRange_IgnoresDBInFileRange(t *testing.T) {
 		wantDesc[i], wantDesc[j] = wantDesc[j], wantDesc[i]
 	}
 	require.Equal(wantDesc, gotDesc, "descending: rogue DB entry in file range must be invisible")
+}
+
+// TestInvertedIndexDisabledDiscardsWrites pins that Enabled=false is a real
+// master switch: a writer taken from a disabled index must drop everything
+// instead of quietly collecting and flushing into the DB tables.
+func TestInvertedIndexDisabledDiscardsWrites(t *testing.T) {
+	logger := log.New()
+	db, ii := testDbAndInvertedIndex(t, 16, logger)
+	ii.Enabled = false
+	ctx := t.Context()
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	ic := ii.beginForTests()
+	defer ic.Close()
+	w := ic.NewWriter(db)
+	defer w.close()
+
+	require.NoError(t, w.Add([]byte("key1"), 2))
+	require.NoError(t, w.Flush(ctx, tx))
+
+	for _, table := range []string{ii.KeysTable, ii.ValuesTable} {
+		n, err := tx.Count(table)
+		require.NoError(t, err)
+		require.Zerof(t, n, "table %s must stay empty", table)
+	}
+}
+
+type prefetchIndexTx struct {
+	kv.RwTx
+	table  string
+	cursor *prefetchIndexCursor
+}
+
+func (tx *prefetchIndexTx) RwCursor(table string) (kv.RwCursor, error) {
+	if table != tx.table {
+		return tx.RwTx.RwCursor(table)
+	}
+	return tx.cursor, nil
+}
+
+func (tx *prefetchIndexTx) Put(table string, k, v []byte) error {
+	if table == tx.table {
+		require.GreaterOrEqual(tx.cursor.t, tx.cursor.prefetched.Add(-1), int32(0), "prefetch must precede every write")
+	}
+	return tx.RwTx.Put(table, k, v)
+}
+
+type prefetchIndexCursor struct {
+	kv.RwCursorDupSort
+	t             *testing.T
+	prefetchErr   error
+	prefetched    atomic.Int32
+	prefetchCalls atomic.Int32
+	rollbacks     atomic.Int32
+}
+
+func (c *prefetchIndexCursor) Put(k, v []byte) error {
+	require.GreaterOrEqual(c.t, c.prefetched.Add(-1), int32(0), "prefetch must precede every write")
+	return c.RwCursorDupSort.Put(k, v)
+}
+
+type prefetchIndexDB struct {
+	kv.RoDB
+	cursor *prefetchIndexCursor
+}
+
+func (db *prefetchIndexDB) BeginRo(ctx context.Context) (kv.Tx, error) {
+	db.cursor.prefetchCalls.Add(1)
+	if db.cursor.prefetchErr != nil {
+		return nil, db.cursor.prefetchErr
+	}
+	tx, err := db.RoDB.BeginRo(ctx) //nolint:gocritic // The caller owns the returned transaction.
+	if err != nil {
+		return nil, err
+	}
+	return &prefetchIndexReadTx{Tx: tx, cursor: db.cursor}, nil
+}
+
+type prefetchIndexReadTx struct {
+	kv.Tx
+	cursor *prefetchIndexCursor
+}
+
+func (tx *prefetchIndexReadTx) Rollback() {
+	tx.Tx.Rollback()
+	tx.cursor.rollbacks.Add(1)
+}
+
+func (tx *prefetchIndexReadTx) CursorDupSort(table string) (kv.CursorDupSort, error) {
+	c, err := tx.Tx.CursorDupSort(table) //nolint:gocritic // The caller owns the returned cursor.
+	if err != nil {
+		return nil, err
+	}
+	return &prefetchIndexReadCursor{CursorDupSort: c, cursor: tx.cursor}, nil
+}
+
+type prefetchIndexReadCursor struct {
+	kv.CursorDupSort
+	cursor *prefetchIndexCursor
+}
+
+func (c *prefetchIndexReadCursor) SeekBothRange(k, v []byte) ([]byte, error) {
+	value, err := c.CursorDupSort.SeekBothRange(k, v)
+	if err == nil {
+		c.cursor.prefetched.Add(1)
+	}
+	return value, err
+}
+
+func TestInvertedIndexPrefetch(t *testing.T) {
+	const workers, batchSize = uint64(16), uint64(1024)
+	type entry struct {
+		txNum uint64
+		key   string
+	}
+	entries := []entry{
+		{6, "c"},
+		{5, "b"},
+		{6, "a"},
+		{5, "b"},
+		{6, "c"},
+		{8, "z"},
+		{6, "d"},
+		{5, "a"},
+		{6, "a\x00"},
+		{8, "c"},
+		{7, "c"},
+		{9, "c"},
+		{9, "c"},
+		{0, "m"},
+		{0, ""},
+		{3, ""},
+		{2, ""},
+		{3, ""},
+	}
+	for i := range 3073 {
+		key := "boundary"
+		if i >= 1025 {
+			key = "boundary-next"
+		}
+		entries = append(entries, entry{uint64(16 + i%31), key})
+	}
+	for _, seed := range []struct {
+		name    string
+		entries []entry
+	}{
+		{"empty", nil},
+		{"append", []entry{{1, "z"}}},
+		{"overlap", []entry{{5, "b"}, {6, "b"}, {9, "z"}}},
+		{"same_last_key", []entry{{5, "b"}}},
+		{"empty_key", []entry{{2, ""}, {5, ""}}},
+	} {
+		for _, spill := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/spill=%t", seed.name, spill), func(t *testing.T) {
+				db, ii := testDbAndInvertedIndex(t, 16, log.New())
+				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+					for _, e := range seed.entries {
+						var txNum [8]byte
+						binary.BigEndian.PutUint64(txNum[:], e.txNum)
+						if err := tx.Put(ii.KeysTable, txNum[:], []byte(e.key)); err != nil {
+							return err
+						}
+						if err := tx.Put(ii.ValuesTable, []byte(e.key), txNum[:]); err != nil {
+							return err
+						}
+					}
+					return nil
+				}))
+				tx, err := db.BeginRw(t.Context())
+				require.NoError(t, err)
+				defer tx.Rollback()
+				expected := map[string]map[string]struct{}{ii.KeysTable: {}, ii.ValuesTable: {}}
+				for _, group := range [][]entry{seed.entries, entries} {
+					for _, e := range group {
+						var txNum [8]byte
+						binary.BigEndian.PutUint64(txNum[:], e.txNum)
+						expected[ii.KeysTable][fmt.Sprintf("%x:%x", txNum, e.key)] = struct{}{}
+						expected[ii.ValuesTable][fmt.Sprintf("%x:%x", e.key, txNum)] = struct{}{}
+					}
+				}
+				iit := ii.beginForTests()
+				defer iit.Close()
+				c, err := tx.RwCursorDupSort(ii.ValuesTable)
+				require.NoError(t, err)
+				defer c.Close()
+				cursor := &prefetchIndexCursor{RwCursorDupSort: c, t: t}
+				prefetchDB := &prefetchIndexDB{RoDB: db, cursor: cursor}
+				w := iit.NewWriter(prefetchDB)
+				defer w.close()
+				w.prefetcher = newInvertedIndexPrefetcher(prefetchDB, ii.ValuesTable, workers)
+				w.prefetchBatchSize = batchSize
+				for i, e := range entries {
+					require.NoError(t, w.Add([]byte(e.key), e.txNum))
+					if spill && i%2 == 1 {
+						require.NoError(t, w.indexKeys.Flush())
+						require.NoError(t, w.index.Flush())
+					}
+				}
+				require.NoError(t, w.Flush(t.Context(), &prefetchIndexTx{RwTx: tx, table: ii.ValuesTable, cursor: cursor}))
+				require.Zero(t, cursor.prefetched.Load())
+				require.EqualValues(t, workers, cursor.prefetchCalls.Load(), "open readers once per flush")
+				require.EqualValues(t, workers, cursor.rollbacks.Load(), "release readers before returning from flush")
+				for table, values := range expected {
+					want := make([]string, 0, len(values))
+					for value := range values {
+						want = append(want, value)
+					}
+					var got []string
+					require.NoError(t, tx.ForEach(table, nil, func(k, v []byte) error {
+						got = append(got, fmt.Sprintf("%x:%x", k, v))
+						return nil
+					}))
+					require.ElementsMatch(t, want, got, table)
+				}
+			})
+		}
+	}
+}
+
+func TestInvertedIndexPrefetchError(t *testing.T) {
+	db, ii := testDbAndInvertedIndex(t, 16, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	iit := ii.beginForTests()
+	defer iit.Close()
+	wantErr := errors.New("read failed")
+	cursor := &prefetchIndexCursor{prefetchErr: wantErr}
+	prefetchDB := &prefetchIndexDB{RoDB: db, cursor: cursor}
+	w := iit.NewWriter(prefetchDB)
+	defer w.close()
+	w.prefetcher = newInvertedIndexPrefetcher(prefetchDB, ii.ValuesTable, 3)
+	w.prefetchBatchSize = 1024
+	require.NoError(t, w.Add([]byte("key"), 1))
+	require.NoError(t, w.Flush(t.Context(), tx))
+	require.EqualValues(t, 1, cursor.prefetchCalls.Load())
+	var txNum [8]byte
+	binary.BigEndian.PutUint64(txNum[:], 1)
+	value, err := tx.GetOne(ii.ValuesTable, []byte("key"))
+	require.NoError(t, err)
+	require.Equal(t, txNum[:], value)
+	key, err := tx.GetOne(ii.KeysTable, txNum[:])
+	require.NoError(t, err)
+	require.Equal(t, []byte("key"), key)
+}
+
+func TestInvertedIndexPrefetchReuse(t *testing.T) {
+	for _, tc := range []struct{ workers, batchSize uint64 }{{1, 1024}, {3, 1024}, {3, 0}, {3, 1}} {
+		t.Run(fmt.Sprintf("workers=%d/batch=%d", tc.workers, tc.batchSize), func(t *testing.T) {
+			db, ii := testDbAndInvertedIndex(t, 16, log.New())
+			iit := ii.beginForTests()
+			defer iit.Close()
+			cursor := &prefetchIndexCursor{}
+			prefetchDB := &prefetchIndexDB{RoDB: db, cursor: cursor}
+			w := iit.NewWriter(prefetchDB)
+			defer w.close()
+			w.prefetcher = newInvertedIndexPrefetcher(prefetchDB, ii.ValuesTable, tc.workers)
+			w.prefetchBatchSize = tc.batchSize
+			p := w.prefetcher
+			for txNum := uint64(1); txNum <= 2; txNum++ {
+				ctx, cancel := context.WithCancel(t.Context())
+				require.NoError(t, w.Add([]byte("key"), txNum))
+				err := db.Update(ctx, func(tx kv.RwTx) error { return w.Flush(ctx, tx) })
+				cancel()
+				require.NoError(t, err)
+				require.Same(t, p, w.prefetcher)
+				require.EqualValues(t, txNum*tc.workers, cursor.prefetchCalls.Load())
+				require.EqualValues(t, txNum*tc.workers, cursor.rollbacks.Load())
+			}
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				for _, table := range []string{ii.KeysTable, ii.ValuesTable} {
+					n, err := tx.Count(table)
+					require.NoError(t, err)
+					require.EqualValues(t, 2, n)
+				}
+				return nil
+			}))
+		})
+	}
+}
+
+func TestInvertedIndexPrefetchCancellation(t *testing.T) {
+	for _, batchSize := range []uint64{1, 1024} {
+		t.Run(fmt.Sprintf("batch=%d", batchSize), func(t *testing.T) {
+			db, ii := testDbAndInvertedIndex(t, 16, log.New())
+			tx, err := db.BeginRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			iit := ii.beginForTests()
+			defer iit.Close()
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			var rollbacks int
+			prefetchDB := &prefetchTestDB{newCursor: func(context.Context) kv.CursorDupSort {
+				return &prefetchTestCursor{seek: func(_, _ []byte) error {
+					cancel()
+					return ctx.Err()
+				}}
+			}, rollback: func() { rollbacks++ }}
+			w := iit.NewWriter(db)
+			defer w.close()
+			w.prefetcher = newInvertedIndexPrefetcher(prefetchDB, ii.ValuesTable, 1)
+			w.prefetchBatchSize = batchSize
+			require.NoError(t, w.Add([]byte("key"), 1))
+			require.ErrorIs(t, w.Flush(ctx, tx), context.Canceled)
+			require.Equal(t, 1, rollbacks)
+			for _, table := range []string{ii.KeysTable, ii.ValuesTable} {
+				n, err := tx.Count(table)
+				require.NoError(t, err)
+				require.Zero(t, n)
+			}
+		})
+	}
+}
+
+func TestInvertedIndexPrefetchReadLimit(t *testing.T) {
+	for _, slots := range []int64{0, 1} {
+		t.Run(fmt.Sprintf("slots=%d", slots), func(t *testing.T) {
+			limiter := semaphore.NewWeighted(slots)
+			db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).
+				RoTxsLimiter(limiter).MustOpen()
+			t.Cleanup(db.Close)
+			tx, err := db.BeginRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			cursor := &prefetchIndexCursor{}
+			prefetchDB := &prefetchIndexDB{RoDB: db, cursor: cursor}
+			p := newInvertedIndexPrefetcher(prefetchDB, kv.TblTracesToIdx, 16)
+			pairs := [][2][]byte{{[]byte("key"), make([]byte, 8)}}
+			w := &InvertedIndexBufferedWriter{
+				prefetcher:        p,
+				prefetchBatchSize: 1024,
+				indexTable:        kv.TblTracesToIdx,
+				indexKeysTable:    kv.TblTracesToKeys,
+				tmpdir:            t.TempDir(),
+				logger:            log.New(),
+			}
+			defer w.close()
+			require.NoError(t, w.Add(pairs[0][0], 0))
+			require.NoError(t, w.Flush(ctx, tx))
+			value, err := tx.GetOne(kv.TblTracesToIdx, pairs[0][0])
+			require.NoError(t, err)
+			require.Equal(t, pairs[0][1], value)
+			key, err := tx.GetOne(kv.TblTracesToKeys, pairs[0][1])
+			require.NoError(t, err)
+			require.Equal(t, pairs[0][0], key)
+			require.EqualValues(t, slots+1, cursor.prefetchCalls.Load())
+			require.EqualValues(t, slots, cursor.rollbacks.Load())
+			require.True(t, limiter.TryAcquire(slots), "release all partially opened readers")
+			limiter.Release(slots)
+		})
+	}
 }

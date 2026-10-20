@@ -50,7 +50,7 @@ type SnapshotFilesDeleted struct {
 // DownloadRequested asks the Downloader to fetch specific files by name.
 // Used by the snapshot stage and by plugins (snapshot-manager, ccip).
 //
-// Replaces: downloader.Client.Download(*DownloadRequest)
+// Replaces: services.DownloaderClient.Download(*DownloadRequest)
 // Publisher: Stages, plugins/snapshot-manager, plugins/ccip
 type DownloadRequested struct {
 	Items []DownloadItem

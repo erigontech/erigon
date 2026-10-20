@@ -24,11 +24,8 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -53,15 +50,15 @@ func checkPayloadStatus(payloadStatus *engine_types.PayloadStatus) error {
 	}
 	validationErr := payloadStatus.ValidationError
 	if validationErr != nil {
-		return fmt.Errorf("engine payload status error: %s", validationErr.Error())
+		return fmt.Errorf("engine payload status error: %w", validationErr.Error())
 	}
 	return nil
 }
 
-// ExecutionClientEngine implements ExecutionEngine using the EngineAPI interface.
-// It works in two modes:
-//   - Local: engine is an in-process *EngineServer, chainRW provides direct access
-//   - Remote: engine is an EngineAPIRPCClient over HTTP, rpcClient provides eth_* calls
+// ExecutionClientEngine implements ExecutionEngine with either an in-process or
+// remote EngineAPI. Local mode accesses chain data and the transaction pool
+// directly; remote mode uses authenticated HTTP JSON-RPC for Engine API and
+// eth_* calls.
 type ExecutionClientEngine struct {
 	engine    engineapi.EngineAPI
 	chainRW   *chainreader.ChainReaderWriterEth1 // non-nil for local mode
@@ -70,20 +67,22 @@ type ExecutionClientEngine struct {
 	beaconCfg *clparams.BeaconChainConfig
 }
 
-// NewExecutionClientEngineLocal creates an in-process engine client that calls
-// EngineServer methods directly, avoiding HTTP/JWT/JSON overhead.
+// NewExecutionClientEngineLocal creates an in-process client with direct chain
+// and transaction-pool access. The supplied EngineAPI is called without HTTP,
+// JWT, or JSON serialization.
 func NewExecutionClientEngineLocal(
 	engine engineapi.EngineAPI,
 	chainRW chainreader.ChainReaderWriterEth1,
 	txpool txpoolproto.TxpoolClient,
 	beaconCfg *clparams.BeaconChainConfig,
 ) (*ExecutionClientEngine, error) {
-	return &ExecutionClientEngine{
-		engine:    engine,
-		chainRW:   &chainRW,
-		txpool:    txpool,
-		beaconCfg: beaconCfg,
-	}, nil
+	cc := &ExecutionClientEngine{
+		engine:  engine,
+		chainRW: &chainRW,
+		txpool:  txpool,
+	}
+	cc.SetBeaconChainConfig(beaconCfg)
+	return cc, nil
 }
 
 // NewExecutionClientEngineRPC creates a remote engine client that communicates
@@ -106,61 +105,17 @@ func (cc *ExecutionClientEngine) isLocal() bool {
 
 func (cc *ExecutionClientEngine) SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfig) {
 	cc.beaconCfg = beaconCfg
+	if engineWithCfg, ok := cc.engine.(interface {
+		SetBeaconChainConfig(*clparams.BeaconChainConfig)
+	}); ok {
+		engineWithCfg.SetBeaconChainConfig(beaconCfg)
+	}
 }
 
-// Close releases resources held by the engine client (HTTP connections, goroutines).
 func (cc *ExecutionClientEngine) Close() {
 	if cc.rpcClient != nil {
 		cc.rpcClient.Close()
 	}
-}
-
-// buildExecutionPayload converts a CL Eth1Block into an Engine API ExecutionPayload.
-func buildExecutionPayload(payload *cltypes.Eth1Block) *engine_types.ExecutionPayload {
-	reversedBaseFeePerGas := common.Copy(payload.BaseFeePerGas[:])
-	for i, j := 0, len(reversedBaseFeePerGas)-1; i < j; i, j = i+1, j-1 {
-		reversedBaseFeePerGas[i], reversedBaseFeePerGas[j] = reversedBaseFeePerGas[j], reversedBaseFeePerGas[i]
-	}
-	baseFee := new(uint256.Int).SetBytes(reversedBaseFeePerGas)
-
-	request := &engine_types.ExecutionPayload{
-		ParentHash:   payload.ParentHash,
-		FeeRecipient: payload.FeeRecipient,
-		StateRoot:    payload.StateRoot,
-		ReceiptsRoot: payload.ReceiptsRoot,
-		LogsBloom:    payload.LogsBloom[:],
-		PrevRandao:   payload.PrevRandao,
-		BlockNumber:  hexutil.Uint64(payload.BlockNumber),
-		GasLimit:     hexutil.Uint64(payload.GasLimit),
-		GasUsed:      hexutil.Uint64(payload.GasUsed),
-		Timestamp:    hexutil.Uint64(payload.Time),
-		ExtraData:    payload.Extra.Bytes(),
-		BlockHash:    payload.BlockHash,
-	}
-	request.BaseFeePerGas = (*hexutil.Big)(baseFee.ToBig())
-
-	payloadBody := payload.Body()
-	request.Withdrawals = payloadBody.Withdrawals
-	for _, bytesTransaction := range payloadBody.Transactions {
-		request.Transactions = append(request.Transactions, bytesTransaction)
-	}
-
-	if payload.Version() >= clparams.DenebVersion {
-		request.BlobGasUsed = new(hexutil.Uint64)
-		request.ExcessBlobGas = new(hexutil.Uint64)
-		*request.BlobGasUsed = hexutil.Uint64(payload.BlobGasUsed)
-		*request.ExcessBlobGas = hexutil.Uint64(payload.ExcessBlobGas)
-	}
-
-	if payload.Version() >= clparams.GloasVersion {
-		if payload.BlockAccessList != nil {
-			request.BlockAccessList = payload.BlockAccessList.Bytes()
-		}
-		slotNumber := hexutil.Uint64(payload.SlotNumber)
-		request.SlotNumber = &slotNumber
-	}
-
-	return request
 }
 
 func (cc *ExecutionClientEngine) NewPayload(
@@ -174,7 +129,7 @@ func (cc *ExecutionClientEngine) NewPayload(
 		return PayloadStatusValidated, nil
 	}
 
-	request := buildExecutionPayload(payload)
+	request := engine_types.ExecutionPayloadFromSSZBlock(payload, payload.Version())
 
 	var (
 		payloadStatus *engine_types.PayloadStatus
@@ -229,20 +184,26 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 	case clparams.CapellaVersion:
 		resp, err = cc.engine.ForkchoiceUpdatedV2(ctx, forkChoiceState, attributes)
 	case clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion:
-		// V3 is valid for Cancun (Deneb) and Prague (Electra/Fulu)
+		// V3 is valid for Cancun (Deneb), Prague (Electra), and Osaka (Fulu).
 		resp, err = cc.engine.ForkchoiceUpdatedV3(ctx, forkChoiceState, attributes)
 	default: // Gloas+ (Amsterdam)
-		resp, err = cc.engine.ForkchoiceUpdatedV4(ctx, forkChoiceState, attributes)
+		resp, err = cc.engine.ForkchoiceUpdatedV4(ctx, forkChoiceState, attributes, nil)
 	}
 	if err != nil {
-		if err.Error() == errContextExceeded {
-			return nil, nil
+		if isDeadlineExceeded(err) {
+			return nil, fmt.Errorf("%w: %w", ErrForkChoiceUpdateTimeout, err)
 		}
 		return nil, fmt.Errorf("engine ForkchoiceUpdated failed: %w", err)
 	}
 
 	if resp.PayloadId == nil {
-		return []byte{}, checkPayloadStatus(resp.PayloadStatus)
+		if err := checkPayloadStatus(resp.PayloadStatus); err != nil {
+			return nil, err
+		}
+		if attributes != nil {
+			return nil, ErrForkChoiceUpdateNoPayloadID
+		}
+		return []byte{}, nil
 	}
 	return *resp.PayloadId, checkPayloadStatus(resp.PayloadStatus)
 }
@@ -251,12 +212,9 @@ func (cc *ExecutionClientEngine) SupportInsertion() bool {
 	return cc.isLocal()
 }
 
-func (cc *ExecutionClientEngine) InsertBlocks(ctx context.Context, blocks []*types.Block, wait bool) error {
+func (cc *ExecutionClientEngine) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
 	if !cc.isLocal() {
 		return ErrNotSupported
-	}
-	if wait {
-		return cc.chainRW.InsertBlocksAndWait(ctx, blocks)
 	}
 	return cc.chainRW.InsertBlocks(ctx, blocks)
 }
@@ -265,7 +223,7 @@ func (cc *ExecutionClientEngine) InsertBlock(ctx context.Context, block *types.B
 	if !cc.isLocal() {
 		return ErrNotSupported
 	}
-	return cc.chainRW.InsertBlockAndWait(ctx, block)
+	return cc.chainRW.InsertBlock(ctx, block)
 }
 
 func (cc *ExecutionClientEngine) CurrentHeader(ctx context.Context) (*types.Header, error) {
@@ -293,7 +251,7 @@ func (cc *ExecutionClientEngine) IsCanonicalHash(ctx context.Context, hash commo
 	// eth_getBlockByHash returns non-canonical blocks too — verify canonicality
 	// by fetching the canonical block at this height and comparing hashes.
 	var canonical *types.Header
-	if err := cc.rpcClient.CallContext(ctx, &canonical, "eth_getBlockByNumber", hexutil.EncodeBig(header.Number.ToBig()), false); err != nil {
+	if err := cc.rpcClient.CallContext(ctx, &canonical, "eth_getBlockByNumber", hexutil.EncodeUint64(header.Number.Uint64()), false); err != nil {
 		return false, fmt.Errorf("eth_getBlockByNumber failed: %w", err)
 	}
 	return canonical != nil && canonical.Hash() == hash, nil
@@ -365,10 +323,10 @@ func (cc *ExecutionClientEngine) HasBlock(ctx context.Context, hash common.Hash)
 
 func (cc *ExecutionClientEngine) GetAssembledBlock(ctx context.Context, id []byte, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	if cc.isLocal() {
-		return cc.chainRW.GetAssembledBlock(binary.LittleEndian.Uint64(id))
+		return cc.chainRW.GetAssembledBlock(ctx, binary.LittleEndian.Uint64(id))
 	}
 
-	// Select Engine API version based on CL state version.
+	// GetPayload versions advance with the response fields introduced by each fork.
 	switch {
 	case version >= clparams.GloasVersion:
 		return cc.getAssembledBlockV6(ctx, id, version)
@@ -390,10 +348,13 @@ func (cc *ExecutionClientEngine) getAssembledBlockV3(ctx context.Context, id []b
 		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV3 failed: %w", err)
 	}
 	if resp.ExecutionPayload == nil {
-		return nil, nil, nil, nil, errors.New("GetPayloadV3 returned nil execution payload")
+		return nil, nil, nil, nil, fmt.Errorf("%w: GetPayloadV3 returned nil execution payload", ErrInvalidGetPayloadResponse)
+	}
+	if resp.BlobsBundle == nil {
+		return nil, nil, nil, nil, fmt.Errorf("%w: GetPayloadV3 returned missing blobs bundle", ErrInvalidGetPayloadResponse)
 	}
 
-	block, err := executionPayloadToEth1Block(resp.ExecutionPayload, version, cc.beaconCfg)
+	block, err := resp.ExecutionPayload.ToEth1Block(version, cc.beaconCfg)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -406,16 +367,20 @@ func (cc *ExecutionClientEngine) getAssembledBlockV3(ctx context.Context, id []b
 	return block, resp.BlobsBundle, nil, blockValue, nil
 }
 
-// getAssembledBlockFromResponse converts a GetPayloadResponse into the block production tuple.
+// getAssembledBlockFromResponse converts an Engine response into Caplin's
+// block-production values.
 func (cc *ExecutionClientEngine) getAssembledBlockFromResponse(resp *engine_types.GetPayloadResponse, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	if resp.ExecutionPayload == nil {
-		return nil, nil, nil, nil, errors.New("GetPayload returned nil execution payload")
+		return nil, nil, nil, nil, fmt.Errorf("%w: GetPayload returned nil execution payload", ErrInvalidGetPayloadResponse)
+	}
+	if resp.BlobsBundle == nil {
+		return nil, nil, nil, nil, fmt.Errorf("%w: GetPayload returned missing blobs bundle", ErrInvalidGetPayloadResponse)
 	}
 	if cc.beaconCfg == nil {
 		return nil, nil, nil, nil, errors.New("beaconCfg not set — call SetBeaconChainConfig before GetAssembledBlock")
 	}
 
-	block, err := executionPayloadToEth1Block(resp.ExecutionPayload, version, cc.beaconCfg)
+	block, err := resp.ExecutionPayload.ToEth1Block(version, cc.beaconCfg)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -462,87 +427,6 @@ func (cc *ExecutionClientEngine) getAssembledBlockV6(ctx context.Context, id []b
 	return cc.getAssembledBlockFromResponse(resp, version)
 }
 
-func executionPayloadToEth1Block(ep *engine_types.ExecutionPayload, version clparams.StateVersion, beaconCfg *clparams.BeaconChainConfig) (*cltypes.Eth1Block, error) {
-	block := cltypes.NewEth1Block(version, beaconCfg)
-	block.ParentHash = ep.ParentHash
-	block.FeeRecipient = ep.FeeRecipient
-	block.StateRoot = ep.StateRoot
-	block.ReceiptsRoot = ep.ReceiptsRoot
-	block.PrevRandao = ep.PrevRandao
-	block.BlockNumber = uint64(ep.BlockNumber)
-	block.GasLimit = uint64(ep.GasLimit)
-	block.GasUsed = uint64(ep.GasUsed)
-	block.Time = uint64(ep.Timestamp)
-	block.BlockHash = ep.BlockHash
-
-	if len(ep.LogsBloom) == 256 {
-		copy(block.LogsBloom[:], ep.LogsBloom)
-	}
-
-	if ep.ExtraData != nil {
-		block.Extra = solid.NewExtraData()
-		block.Extra.SetBytes(ep.ExtraData)
-	}
-
-	if ep.BaseFeePerGas != nil {
-		baseFee := uint256.MustFromBig(ep.BaseFeePerGas.ToInt())
-		baseFeeBytes := baseFee.Bytes32()
-		// Reverse to little-endian for Eth1Block.BaseFeePerGas
-		for i, j := 0, len(baseFeeBytes)-1; i < j; i, j = i+1, j-1 {
-			baseFeeBytes[i], baseFeeBytes[j] = baseFeeBytes[j], baseFeeBytes[i]
-		}
-		copy(block.BaseFeePerGas[:], baseFeeBytes[:])
-	}
-
-	if ep.BlobGasUsed != nil {
-		block.BlobGasUsed = uint64(*ep.BlobGasUsed)
-	}
-	if ep.ExcessBlobGas != nil {
-		block.ExcessBlobGas = uint64(*ep.ExcessBlobGas)
-	}
-
-	// Transactions
-	txBytes := make([][]byte, len(ep.Transactions))
-	for i, tx := range ep.Transactions {
-		txBytes[i] = tx
-	}
-	block.Transactions = solid.NewTransactionsSSZFromTransactions(txBytes)
-
-	// Withdrawals
-	if ep.Withdrawals != nil {
-		maxWithdrawals := 16
-		if beaconCfg != nil {
-			maxWithdrawals = int(beaconCfg.MaxWithdrawalsPerPayload)
-		}
-		block.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](maxWithdrawals, 44)
-		for _, w := range ep.Withdrawals {
-			block.Withdrawals.Append(&cltypes.Withdrawal{
-				Index:     w.Index,
-				Validator: w.Validator,
-				Address:   w.Address,
-				Amount:    w.Amount,
-			})
-		}
-	}
-
-	// GLOAS fields
-	if ep.SlotNumber != nil {
-		block.SlotNumber = uint64(*ep.SlotNumber)
-	}
-	if len(ep.BlockAccessList) > 0 {
-		maxBytes := uint64(1073741824) // MAX_BYTES_PER_TRANSACTION default
-		if beaconCfg != nil {
-			maxBytes = beaconCfg.MaxBytesPerTransaction
-		}
-		block.BlockAccessList = solid.NewByteListSSZ(maxBytes)
-		if err := block.BlockAccessList.SetBytes(ep.BlockAccessList); err != nil {
-			return nil, err
-		}
-	}
-
-	return block, nil
-}
-
 func (cc *ExecutionClientEngine) HasGapInSnapshots(ctx context.Context) bool {
 	if cc.isLocal() {
 		_, hasGap := cc.chainRW.FrozenBlocks(ctx)
@@ -574,9 +458,8 @@ func (cc *ExecutionClientEngine) GetBlobs(ctx context.Context, versionedHashes [
 		return blobs, proofs, nil
 	}
 
-	// Remote mode: select GetBlobs version based on fork.
-	// V1 returns single proof per blob (Deneb/Electra).
-	// V2/V3 return cell proofs (Fulu+).
+	// Deneb and Electra expect one proof per blob. Fulu and later expect cell
+	// proofs.
 	if version >= clparams.FuluVersion {
 		result, err := cc.engine.GetBlobsV2(ctx, versionedHashes)
 		if err != nil {
@@ -611,4 +494,8 @@ func (cc *ExecutionClientEngine) GetBlobs(ctx context.Context, versionedHashes [
 		proofs[i] = [][]byte{bap.Proof}
 	}
 	return blobs, proofs, nil
+}
+
+func (cc *ExecutionClientEngine) GetClientVersionV1(ctx context.Context, callerVersion *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
+	return cc.engine.GetClientVersionV1(ctx, callerVersion)
 }

@@ -17,14 +17,19 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
@@ -32,26 +37,37 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
+	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/jsonrpc/contracts"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 func newBaseApiForTest(m *execmoduletester.ExecModuleTester) *BaseAPI {
-	return NewBaseApi(nil, m.StateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+	return NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 }
 
-func newBaseApiWithLimits(m *execmoduletester.ExecModuleTester, rangeLimit, maxResults int) *BaseAPI {
-	return NewBaseApi(nil, m.StateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, rangeLimit, maxResults)
+func newBaseApiWithLimits(m *execmoduletester.ExecModuleTester, rangeLimit, maxResults, logQueryLimit int) *BaseAPI {
+	return NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{
+		Dirs:              m.Dirs,
+		BlockRangeLimit:   rangeLimit,
+		GetLogsMaxResults: maxResults,
+		LogQueryLimit:     logQueryLimit,
+	})
 }
 
 func newEthApiForTest(base *BaseAPI, db kv.TemporalRoDB, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient) *APIImpl {
-	cfg := &EthApiConfig{
+	cfg := &rpccfg.EthApiConfig{
 		GasCap:                      5000000,
 		FeeCap:                      ethconfig.Defaults.RPCTxFeeCap,
 		ReturnDataLimit:             100_000,
@@ -64,6 +80,33 @@ func newEthApiForTest(base *BaseAPI, db kv.TemporalRoDB, txPool txpoolproto.Txpo
 	return NewEthAPI(base, db, nil, txPool, mining, cfg, log.New())
 }
 
+func newTraceApiForTest(m *execmoduletester.ExecModuleTester) *TraceAPIImpl {
+	return NewTraceAPI(newBaseApiForTest(m), m.DB, &rpccfg.TraceApiConfig{})
+}
+
+func newDebugApiForTest(m *execmoduletester.ExecModuleTester) *DebugAPIImpl {
+	return NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+}
+
+func TestNewBaseApiEvmCallTimeout(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+
+	t.Run("zero is normalized to default", func(t *testing.T) {
+		base := NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+		assert.Equal(t, rpccfg.DefaultEvmCallTimeout, base.evmCallTimeout)
+	})
+
+	t.Run("explicit value is preserved", func(t *testing.T) {
+		base := NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs, EvmCallTimeout: 42 * time.Second})
+		assert.Equal(t, 42*time.Second, base.evmCallTimeout)
+	})
+
+	t.Run("nil config falls back to defaults", func(t *testing.T) {
+		base := NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, nil)
+		assert.Equal(t, rpccfg.DefaultEvmCallTimeout, base.evmCallTimeout)
+	})
+}
+
 func TestGetBalanceChangesInBlock(t *testing.T) {
 	assert := assert.New(t)
 	myBlockNum := rpc.BlockNumberOrHashWithNumber(0)
@@ -74,10 +117,10 @@ func TestGetBalanceChangesInBlock(t *testing.T) {
 	if err != nil {
 		t.Errorf("calling GetBalanceChangesInBlock resulted in an error: %v", err)
 	}
-	expected := map[common.Address]*hexutil.Big{
-		common.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e"): (*hexutil.Big)(uint256.NewInt(200000000000000000).ToBig()),
-		common.HexToAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7"): (*hexutil.Big)(uint256.NewInt(300000000000000000).ToBig()),
-		common.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7"): (*hexutil.Big)(uint256.NewInt(9000000000000000000).ToBig()),
+	expected := map[common.Address]*hexutil.U256{
+		common.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e"): (*hexutil.U256)(uint256.NewInt(200000000000000000)),
+		common.HexToAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7"): (*hexutil.U256)(uint256.NewInt(300000000000000000)),
+		common.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7"): (*hexutil.U256)(uint256.NewInt(9000000000000000000)),
 	}
 	assert.Len(balances, len(expected))
 	for i := range balances {
@@ -89,7 +132,7 @@ func TestGetBalanceChangesInBlock(t *testing.T) {
 func TestGetTransactionReceipt(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := newEthApiForTest(NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0), m.DB, nil, nil)
+	api := newEthApiForTest(NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), m.DB, nil, nil)
 	// Call GetTransactionReceipt for transaction which is not in the database
 	if _, err := api.GetTransactionReceipt(context.Background(), common.Hash{}); err != nil {
 		t.Errorf("calling GetTransactionReceipt with empty hash: %v", err)
@@ -113,12 +156,26 @@ func TestGetStorageAt_ByBlockNumber_WithRequireCanonicalDefault(t *testing.T) {
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
-	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithNumber(0))
+	result, err := api.GetStorageAt(context.Background(), addr, "0x0", bnhPtr(rpc.BlockNumberOrHashWithNumber(0)))
 	if err != nil {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
 
-	assert.Equal(common.HexToHash("0x0").String(), result)
+	assert.Equal(common.Hash{}, result)
+}
+
+// The wire form is a 0x-prefixed 32-byte hex string, whatever Go type carries it.
+func TestGetStorageAtJSONShape(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+
+	result, err := api.GetStorageAt(context.Background(), addr, "0x0", bnhPtr(rpc.BlockNumberOrHashWithNumber(0)))
+	require.NoError(t, err)
+
+	enc, err := json.Marshal(result)
+	require.NoError(t, err)
+	require.Regexp(t, `^"0x[0-9a-f]{64}"$`, string(enc))
 }
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault(t *testing.T) {
@@ -127,12 +184,12 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault(t *testing.T) {
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
-	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), false))
+	result, err := api.GetStorageAt(context.Background(), addr, "0x0", bnhPtr(rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), false)))
 	if err != nil {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
 
-	assert.Equal(common.HexToHash("0x0").String(), result)
+	assert.Equal(common.Hash{}, result)
 }
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue(t *testing.T) {
@@ -141,12 +198,12 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue(t *testing.T) {
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
-	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), true))
+	result, err := api.GetStorageAt(context.Background(), addr, "0x0", bnhPtr(rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), true)))
 	if err != nil {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
 
-	assert.Equal(common.HexToHash("0x0").String(), result)
+	assert.Equal(common.Hash{}, result)
 }
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_BlockNotFoundError(t *testing.T) {
@@ -157,14 +214,14 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_BlockNotFoundError
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
-	offChain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, block *blockgen.BlockGen) {
+	offChain, err := m.GenerateChain(1, func(i int, block *blockgen.BlockGen) {
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	offChainBlock := offChain.Blocks[0]
 
-	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(offChainBlock.Hash(), false)); err != nil {
+	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", bnhPtr(rpc.BlockNumberOrHashWithHash(offChainBlock.Hash(), false))); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("block not found: %s", offChainBlock.Hash().String()) {
 			t.Errorf("wrong error: %v", err)
 		}
@@ -178,14 +235,14 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_BlockNotFoundError(t 
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
-	offChain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, block *blockgen.BlockGen) {
+	offChain, err := m.GenerateChain(1, func(i int, block *blockgen.BlockGen) {
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	offChainBlock := offChain.Blocks[0]
 
-	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(offChainBlock.Hash(), true)); err != nil {
+	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", bnhPtr(rpc.BlockNumberOrHashWithHash(offChainBlock.Hash(), true))); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("block not found: %s", offChainBlock.Hash().String()) {
 			t.Errorf("wrong error: %v", err)
 		}
@@ -202,7 +259,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(
 
 	orphanedBlock := orphanedChain[0].Blocks[0]
 
-	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), false))
+	result, err := api.GetStorageAt(context.Background(), addr, "0x0", bnhPtr(rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), false)))
 	if err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
@@ -211,7 +268,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(
 		t.Error("error expected")
 	}
 
-	assert.Equal(common.HexToHash("0x0").String(), result)
+	assert.Equal(common.Hash{}, result)
 }
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.T) {
@@ -221,7 +278,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *
 
 	orphanedBlock := orphanedChain[0].Blocks[0]
 
-	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), true)); err != nil {
+	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", bnhPtr(rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), true))); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
 		}
@@ -239,7 +296,7 @@ func TestCall_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(t *testi
 	orphanedBlock := orphanedChain[0].Blocks[0]
 
 	blockNumberOrHash := rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), false)
-	var blockNumberOrHashRef = &blockNumberOrHash
+	blockNumberOrHashRef := &blockNumberOrHash
 
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &from,
@@ -264,7 +321,7 @@ func TestCall_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.
 
 	orphanedBlock := orphanedChain[0].Blocks[0]
 	blockNumberOrHash := rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), true)
-	var blockNumberOrHashRef = &blockNumberOrHash
+	blockNumberOrHashRef := &blockNumberOrHash
 
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &from,
@@ -276,18 +333,6 @@ func TestCall_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.
 	} else {
 		t.Error("error expected")
 	}
-}
-
-var _ bridgeReader = mockBridgeReader{}
-
-type mockBridgeReader struct{}
-
-func (m mockBridgeReader) Events(context.Context, common.Hash, uint64) ([]*types.Message, error) {
-	panic("mock")
-}
-
-func (m mockBridgeReader) EventTxnLookup(context.Context, common.Hash) (uint64, bool, error) {
-	panic("mock")
 }
 
 func TestGetStorageValues_HappyPath(t *testing.T) {
@@ -302,7 +347,7 @@ func TestGetStorageValues_HappyPath(t *testing.T) {
 
 	result, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{
 		addr1: {slot0, slot1},
-	}, latest)
+	}, &latest)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -329,7 +374,7 @@ func TestGetStorageValues_MultipleAddresses(t *testing.T) {
 		addr2: {slot1, slot2},
 		addr3: {slot0, slot2},
 	}
-	result, err := api.GetStorageValues(context.Background(), request, latest)
+	result, err := api.GetStorageValues(context.Background(), request, &latest)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -356,7 +401,7 @@ func TestGetStorageValues_MissingSlotReturnsZero(t *testing.T) {
 
 	result, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{
 		addr1: {common.HexToHash("0xff")},
-	}, latest)
+	}, &latest)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -371,7 +416,7 @@ func TestGetStorageValues_EmptyRequestReturnsError(t *testing.T) {
 
 	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 
-	_, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{}, latest)
+	_, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{}, &latest)
 	if err == nil {
 		t.Fatal("expected error for empty request")
 	}
@@ -394,7 +439,7 @@ func TestGetStorageValues_ExceedingSlotLimitReturnsError(t *testing.T) {
 
 	_, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{
 		addr1: tooMany,
-	}, latest)
+	}, &latest)
 	if err == nil {
 		t.Fatal("expected error for exceeding slot limit")
 	}
@@ -411,7 +456,7 @@ func TestGetStorageValues_ByBlockHash_NonCanonicalBlock(t *testing.T) {
 
 	_, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{
 		addr1: {common.Hash{}},
-	}, blockNumberOrHash)
+	}, &blockNumberOrHash)
 	if err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
@@ -432,7 +477,7 @@ func TestGetStorageValues_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock
 
 	_, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{
 		addr1: {common.Hash{}},
-	}, blockNumberOrHash)
+	}, &blockNumberOrHash)
 	if err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
@@ -453,8 +498,343 @@ func TestGetStorageValues_PrunedBlockReturnsError(t *testing.T) {
 
 	_, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{
 		addr1: {common.Hash{}},
-	}, blockNumberOrHash)
+	}, &blockNumberOrHash)
 	if err != nil {
 		t.Logf("got expected prune error: %v", err)
 	}
+}
+
+// bnhPtr returns a pointer to a BlockNumberOrHash, for the state methods whose
+// block parameter is now optional (*rpc.BlockNumberOrHash).
+func bnhPtr(b rpc.BlockNumberOrHash) *rpc.BlockNumberOrHash { return &b }
+
+// TestStateMethods_OmittedBlockDefaultsToLatest verifies that an omitted (nil)
+// block selector is treated identically to an explicit "latest" selector for each
+// state method (per execution-apis: the Block parameter is optional, default
+// 'latest'). This exercises the blockOrLatest(nil) path directly.
+func TestStateMethods_OmittedBlockDefaultsToLatest(t *testing.T) {
+	a := assert.New(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	ctx := context.Background()
+	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+
+	balNil, err := api.GetBalance(ctx, addr, nil)
+	a.NoError(err)
+	balLatest, err := api.GetBalance(ctx, addr, &latest)
+	a.NoError(err)
+	a.Equal(balLatest, balNil)
+
+	codeNil, err := api.GetCode(ctx, addr, nil)
+	a.NoError(err)
+	codeLatest, err := api.GetCode(ctx, addr, &latest)
+	a.NoError(err)
+	a.Equal(codeLatest, codeNil)
+
+	nonceNil, err := api.GetTransactionCount(ctx, addr, nil)
+	a.NoError(err)
+	nonceLatest, err := api.GetTransactionCount(ctx, addr, &latest)
+	a.NoError(err)
+	a.Equal(nonceLatest, nonceNil)
+
+	storageNil, err := api.GetStorageAt(ctx, addr, "0x0", nil)
+	a.NoError(err)
+	storageLatest, err := api.GetStorageAt(ctx, addr, "0x0", &latest)
+	a.NoError(err)
+	a.Equal(storageLatest, storageNil)
+
+	proofNil, err := api.GetProof(ctx, addr, nil, nil)
+	a.NoError(err)
+	proofLatest, err := api.GetProof(ctx, addr, nil, &latest)
+	a.NoError(err)
+	a.Equal(proofLatest, proofNil)
+
+	req := map[common.Address][]common.Hash{addr: {{}}}
+	svNil, err := api.GetStorageValues(ctx, req, nil)
+	a.NoError(err)
+	svLatest, err := api.GetStorageValues(ctx, req, &latest)
+	a.NoError(err)
+	a.Equal(svLatest, svNil)
+}
+
+func TestChainIdServesCachedConfigWithoutReadTx(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	want, err := api.ChainId(m.Ctx)
+	require.NoError(t, err)
+
+	api.db = unopenableDB{m.DB}
+	got, err := api.ChainId(m.Ctx)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+func TestForksServesCachedConfigWithoutReadTx(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+	want, err := api.Forks(m.Ctx)
+	require.NoError(t, err)
+
+	api.db = unopenableDB{m.DB}
+	got, err := api.Forks(m.Ctx)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+func TestGraphQLChainIDServesCachedConfigWithoutReadTx(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewGraphQLAPI(newBaseApiForTest(m), m.DB, nil, nil, &rpccfg.GraphQLApiConfig{})
+	want, err := api.GetChainID(m.Ctx)
+	require.NoError(t, err)
+
+	api.db = unopenableDB{m.DB}
+	got, err := api.GetChainID(m.Ctx)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+func TestGraphQLBlockDetailsSkipReceiptsWithoutTxs(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewGraphQLAPI(newBaseApiForTest(m), m.DB, nil, nil, &rpccfg.GraphQLApiConfig{})
+
+	yes, no := true, false
+	withTxs, err := api.GetBlockDetails(m.Ctx, 1, &yes)
+	require.NoError(t, err)
+	require.NotEmpty(t, withTxs["receipts"])
+
+	hash := withTxs["block"].(*ethapi.RPCBlock).Hash
+	for _, details := range []func() (map[string]any, error){
+		func() (map[string]any, error) { return api.GetBlockDetails(m.Ctx, 1, &no) },
+		func() (map[string]any, error) { return api.GetBlockDetailsByHash(m.Ctx, *hash, &no) },
+	} {
+		got, err := details()
+		require.NoError(t, err)
+		require.NotNil(t, got["block"])
+		require.NotContains(t, got, "receipts")
+	}
+}
+
+// A pooled transaction is priced at its fee cap, and carries no location.
+func TestNewRPCPendingTransactionGasPriceIsFeeCap(t *testing.T) {
+	feeCap := uint256.NewInt(1_000_000_000)
+	txn := types.NewEIP1559Transaction(*uint256.NewInt(1), 1, common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, uint256.NewInt(2), feeCap, nil)
+
+	result := newRPCPendingTransaction(txn)
+	require.NotNil(t, result.GasPrice)
+	require.Equal(t, feeCap.ToBig(), result.GasPrice.ToInt())
+	require.Nil(t, result.BlockHash)
+}
+
+func TestGetStorageAtExcludesNextBlockSystemCall(t *testing.T) {
+	statecfg.EnableHistoricalCommitment()
+	chainConfig := chain.TestChainOsakaConfig.Copy()
+	historyAddr := params.HistoryStorageAddress.Value()
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: chainConfig,
+		Alloc: types.GenesisAlloc{
+			historyAddr:                 {Balance: big.NewInt(0), Code: sloadStub, Nonce: 1},
+			common.HexToAddress("0x01"): {Balance: big.NewInt(1)},
+		},
+	}))
+	ch, err := m.GenerateChain(3, func(int, *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(ch))
+	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, &rpccfg.EthApiConfig{GasCap: 5000000}, log.New())
+
+	const bn = 2
+	at := bnhPtr(rpc.BlockNumberOrHashWithNumber(bn))
+	written, err := api.GetStorageAt(context.Background(), historyAddr, hexutil.EncodeUint64(bn-1), at)
+	require.NoError(t, err)
+	require.Equal(t, ch.Blocks[bn-2].Hash(), written)
+
+	notYetWritten, err := api.GetStorageAt(context.Background(), historyAddr, hexutil.EncodeUint64(bn), at)
+	require.NoError(t, err)
+	require.Equal(t, common.Hash{}, notYetWritten, "slot %d is written by block %d", bn, bn+1)
+
+	values, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{historyAddr: {common.BigToHash(big.NewInt(bn))}}, at)
+	require.NoError(t, err)
+	require.Equal(t, common.Hash{}, common.BytesToHash(values[historyAddr][0]))
+
+	gql := NewGraphQLAPI(newBaseApiForTest(m), m.DB, nil, nil, &rpccfg.GraphQLApiConfig{})
+	stored, err := gql.GetAccountStorage(context.Background(), historyAddr, hexutil.EncodeUint64(bn), rpc.BlockNumber(bn))
+	require.NoError(t, err)
+	require.Equal(t, common.Hash{}, common.HexToHash(stored))
+
+	slot := common.BigToHash(big.NewInt(bn))
+	proof, err := api.GetProof(context.Background(), historyAddr, []hexutil.Bytes{slot[:]}, at)
+	require.NoError(t, err)
+	require.True(t, (*uint256.Int)(proof.StorageProof[0].Value).IsZero())
+}
+
+// sloadStub returns the storage slot named by the call data, so a call can read the slot the
+// EIP-2935 system call writes.
+var sloadStub = common.Hex2Bytes(contracts.HistoryStorageStubBinRuntime)
+
+func TestTraceCallExcludesNextBlockSystemCall(t *testing.T) {
+	statecfg.EnableHistoricalCommitment()
+	chainConfig := chain.TestChainOsakaConfig.Copy()
+	historyAddr := params.HistoryStorageAddress.Value()
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: chainConfig,
+		Alloc: types.GenesisAlloc{
+			historyAddr:                 {Balance: big.NewInt(0), Code: sloadStub, Nonce: 1},
+			common.HexToAddress("0x01"): {Balance: big.NewInt(1)},
+		},
+	}))
+	ch, err := m.GenerateChain(3, func(int, *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(ch))
+
+	const bn = 2
+	at := bnhPtr(rpc.BlockNumberOrHashWithNumber(bn))
+	slotOfNextBlock := common.BigToHash(big.NewInt(bn))
+	slotOfThisBlock := common.BigToHash(big.NewInt(bn - 1))
+
+	traceAPI := NewTraceAPI(newBaseApiForTest(m), m.DB, &rpccfg.TraceApiConfig{})
+	traceRead := func(slot common.Hash) common.Hash {
+		t.Helper()
+		res, err := traceAPI.Call(context.Background(), TraceCallParam{To: &historyAddr, Data: new(hexutil.Bytes(slot[:]))}, []string{"trace"}, at, nil)
+		require.NoError(t, err)
+		return common.BytesToHash(res.Output)
+	}
+	require.Equal(t, ch.Blocks[bn-2].Hash(), traceRead(slotOfThisBlock))
+	require.Equal(t, common.Hash{}, traceRead(slotOfNextBlock), "slot %d is written by block %d", bn, bn+1)
+
+	debugAPI := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{GasCap: 5000000})
+	debugRead := func(slot common.Hash) common.Hash {
+		t.Helper()
+		data := hexutil.Bytes(slot[:])
+		var out bytes.Buffer
+		stream := jsonstream.New(&out)
+		require.NoError(t, debugAPI.TraceCall(context.Background(), ethapi.CallArgs{To: &historyAddr, Data: &data}, at, &tracersConfig.TraceConfig{}, stream))
+		require.NoError(t, stream.Flush())
+		var traced struct {
+			ReturnValue string `json:"returnValue"`
+		}
+		require.NoError(t, json.Unmarshal(out.Bytes(), &traced))
+		return common.HexToHash(traced.ReturnValue)
+	}
+	require.Equal(t, ch.Blocks[bn-2].Hash(), debugRead(slotOfThisBlock))
+	require.Equal(t, common.Hash{}, debugRead(slotOfNextBlock), "slot %d is written by block %d", bn, bn+1)
+}
+
+// storeStub stores the second call data word in the slot named by the first when the second word
+// is not zero, and otherwise returns that slot.
+var storeStub = []byte{0x5f, 0x35, 0x60, 0x20, 0x35, 0x80, 0x15, 0x60, 0x0d, 0x57, 0x90, 0x55, 0x00, 0x5b, 0x50, 0x54, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}
+
+func TestTraceCallManyExcludesNextBlockSystemCall(t *testing.T) {
+	statecfg.EnableHistoricalCommitment()
+	chainConfig := chain.TestChainOsakaConfig.Copy()
+	historyAddr := params.HistoryStorageAddress.Value()
+	storeAddr := common.HexToAddress("0xc0de")
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: chainConfig,
+		Alloc: types.GenesisAlloc{
+			historyAddr:                 {Balance: big.NewInt(0), Code: sloadStub, Nonce: 1},
+			storeAddr:                   {Balance: big.NewInt(0), Code: storeStub, Nonce: 1},
+			common.HexToAddress("0x01"): {Balance: big.NewInt(1)},
+		},
+	}))
+	ch, err := m.GenerateChain(3, func(int, *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(ch))
+
+	traceAPI := NewTraceAPI(newBaseApiForTest(m), m.DB, &rpccfg.TraceApiConfig{})
+	slot := func(n uint64) hexutil.Bytes {
+		word := common.BigToHash(new(big.Int).SetUint64(n))
+		return word[:]
+	}
+	traceCall := func(t *testing.T, at rpc.BlockNumberOrHash, data hexutil.Bytes) common.Hash {
+		t.Helper()
+		res, err := traceAPI.Call(context.Background(), TraceCallParam{To: &historyAddr, Data: &data}, []string{"trace"}, &at, nil)
+		require.NoError(t, err)
+		return common.BytesToHash(res.Output)
+	}
+	traceCallMany := func(t *testing.T, at rpc.BlockNumberOrHash, calls ...TraceCallParam) []common.Hash {
+		t.Helper()
+		items := make([]string, len(calls))
+		for i, call := range calls {
+			items[i] = fmt.Sprintf(`[{"to":%q,"data":%q},["trace"]]`, call.To.Hex(), call.Data.String())
+		}
+		res, err := traceAPI.CallMany(context.Background(), json.RawMessage("["+strings.Join(items, ",")+"]"), &at, nil)
+		require.NoError(t, err)
+		require.Len(t, res, len(calls))
+		outputs := make([]common.Hash, len(res))
+		for i, r := range res {
+			outputs[i] = common.BytesToHash(r.Output)
+		}
+		return outputs
+	}
+	readHistory := func(t *testing.T, at rpc.BlockNumberOrHash, n uint64) common.Hash {
+		t.Helper()
+		got := traceCallMany(t, at, TraceCallParam{To: &historyAddr, Data: new(slot(n))})[0]
+		require.Equal(t, traceCall(t, at, slot(n)), got, "one-item trace_callMany differs from trace_call for slot %d", n)
+		return got
+	}
+
+	const bn = 2
+	for name, at := range map[string]rpc.BlockNumberOrHash{
+		"number": rpc.BlockNumberOrHashWithNumber(bn),
+		"hash":   rpc.BlockNumberOrHashWithHash(ch.Blocks[bn-1].Hash(), true),
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, ch.Blocks[bn-2].Hash(), readHistory(t, at, bn-1))
+			require.Equal(t, common.Hash{}, readHistory(t, at, bn), "slot %d is written by block %d", bn, bn+1)
+		})
+	}
+
+	t.Run("latest", func(t *testing.T) {
+		latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+		head := uint64(len(ch.Blocks))
+		require.Equal(t, ch.Blocks[head-2].Hash(), readHistory(t, latest, head-1))
+		require.Equal(t, common.Hash{}, readHistory(t, latest, head))
+	})
+
+	t.Run("sequential", func(t *testing.T) {
+		store := append(slot(1), slot(42)...)
+		outputs := traceCallMany(t, rpc.BlockNumberOrHashWithNumber(bn),
+			TraceCallParam{To: &storeAddr, Data: &store},
+			TraceCallParam{To: &storeAddr, Data: new(slot(1))},
+			TraceCallParam{To: &historyAddr, Data: new(slot(bn))},
+		)
+		require.Equal(t, common.BigToHash(big.NewInt(42)), outputs[1], "the second call reads the first call's write")
+		require.Equal(t, common.Hash{}, outputs[2], "slot %d is written by block %d", bn, bn+1)
+	})
+}
+
+func TestHeaderByHashAndNumberServesRepeatedLookupsFromCache(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newBaseApiForTest(m)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	hash, ok, err := api._blockReader.CanonicalHash(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	first, err := api.headerByHashAndNumber(m.Ctx, tx, hash, 1)
+	require.NoError(t, err)
+	api._blockReader = failHeaderReadBlockReader{FullBlockReader: api._blockReader, hash: hash, blockNumber: 1, err: errors.New("unexpected header database read")}
+	second, err := api.headerByHashAndNumber(m.Ctx, tx, hash, 1)
+	require.NoError(t, err)
+	require.Same(t, first, second)
+}
+
+// A block read leaves the header cache alone: the block cache already serves that header.
+func TestBlockReadDoesNotFillHeaderCache(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newBaseApiForTest(m)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	hash, ok, err := api._blockReader.CanonicalHash(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	block, err := api.blockWithSenders(m.Ctx, tx, hash, 1)
+	require.NoError(t, err)
+	require.NotNil(t, block)
+	_, cached := api.headersLRU.Get(hash)
+	require.False(t, cached)
 }

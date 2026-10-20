@@ -342,7 +342,7 @@ func (q *Deque[T]) Insert(at int, item T) {
 	if at*2 < q.count {
 		q.PushFront(item)
 		front := q.head
-		for i := 0; i < at; i++ {
+		for range at {
 			next := q.next(front)
 			q.buf[front], q.buf[next] = q.buf[next], q.buf[front]
 			front = next
@@ -352,7 +352,7 @@ func (q *Deque[T]) Insert(at int, item T) {
 	swaps := q.count - at
 	q.PushBack(item)
 	back := q.prev(q.tail)
-	for i := 0; i < swaps; i++ {
+	for range swaps {
 		prev := q.prev(back)
 		q.buf[back], q.buf[prev] = q.buf[prev], q.buf[back]
 		back = prev
@@ -375,7 +375,7 @@ func (q *Deque[T]) Remove(at int) T {
 
 	rm := (q.head + at) & (len(q.buf) - 1)
 	if at*2 < q.count {
-		for i := 0; i < at; i++ {
+		for range at {
 			prev := q.prev(rm)
 			q.buf[prev], q.buf[rm] = q.buf[rm], q.buf[prev]
 			rm = prev
@@ -383,7 +383,7 @@ func (q *Deque[T]) Remove(at int) T {
 		return q.PopFront()
 	}
 	swaps := q.count - at - 1
-	for i := 0; i < swaps; i++ {
+	for range swaps {
 		next := q.next(rm)
 		q.buf[rm], q.buf[next] = q.buf[next], q.buf[rm]
 		rm = next
@@ -399,11 +399,7 @@ func (q *Deque[T]) Remove(at int) T {
 // Setting a larger minimum capacity may be used to prevent resizing when the
 // number of stored items changes frequently across a wide range.
 func (q *Deque[T]) SetMinCapacity(minCapacityExp uint) {
-	if 1<<minCapacityExp > minCapacity {
-		q.minCap = 1 << minCapacityExp
-	} else {
-		q.minCap = minCapacity
-	}
+	q.minCap = max(1<<minCapacityExp, minCapacity)
 }
 
 // prev returns the previous buffer position wrapping around buffer.

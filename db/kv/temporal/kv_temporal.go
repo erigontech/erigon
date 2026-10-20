@@ -21,16 +21,15 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"testing"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/version"
 )
@@ -41,7 +40,7 @@ var ( // Compile time interface checks
 	_ kv.TemporalDebugTx = (*Tx)(nil)
 )
 
-//Variables Naming:
+// Variables Naming:
 //  tx - Database Transaction
 //  txn - Ethereum Transaction (and TxNum - is also number of Ethereum Transaction)
 //  RoTx - Read-Only Database Transaction. RwTx - read-write
@@ -50,12 +49,12 @@ var ( // Compile time interface checks
 //  Cursor - low-level mdbx-tide api to navigate over Table
 //  Iter - high-level iterator-like api over Table/InvertedIndex/History/Domain. Server-side-streaming friendly - less methods than Cursor, but constructor is powerful as `SELECT key, value FROM table WHERE key BETWEEN x1 AND x2 ORDER DESC LIMIT n`.
 
-//Methods Naming:
+// Methods Naming:
 //  Get: exact match of criteria
 //  Range: [from, to). from=nil means StartOfTable, to=nil means EndOfTable, rangeLimit=-1 means Unlimited
 //  Prefix: `Range(Table, prefix, kv.NextSubtree(prefix))`
 
-//Abstraction Layers:
+// Abstraction Layers:
 // LowLevel:
 //      1. DB/Tx - low-level key-value database
 //      2. Snapshots/Freeze - immutable files with historical data. May be downloaded at first App
@@ -77,27 +76,41 @@ var ( // Compile time interface checks
 type DB struct {
 	kv.RwDB
 	stateFiles *state.Aggregator
-	forkaggs   []*state.ForkableAgg
+	// blockFiles: block snapshots, the peer of stateFiles. Nil for state-only
+	// tools; a tx from such a DB pins no view and panics on any block read.
+	blockFiles *blocksnapshots.RoSnapshots
 }
 
-func New(db kv.RwDB, agg *state.Aggregator, forkaggs ...*state.ForkableAgg) (*DB, error) {
-	tdb := &DB{RwDB: db, stateFiles: agg}
-	if len(forkaggs) > 0 {
-		arr := make([]*state.ForkableAgg, 0)
-		for _, forkagg := range forkaggs {
-			if forkagg == nil {
-				continue
-			}
-			arr = append(arr, forkagg)
-		}
-		tdb.forkaggs = arr
-	}
-	return tdb, nil
+// New wires the temporal DB over a raw kv.RwDB, its state aggregator, and the
+// block snapshots — the block-data peer of stateFiles. Pass nil blockSnaps only
+// for a tool that never reads block data: block reads panic without a view.
+func New(db kv.RwDB, agg *state.Aggregator, blockSnaps *blocksnapshots.RoSnapshots) (*DB, error) {
+	return &DB{RwDB: db, stateFiles: agg, blockFiles: blockSnaps}, nil
 }
-func (db *DB) Agg() any                         { return db.stateFiles }
-func (db *DB) ForkableAgg(id kv.ForkableId) any { return db.forkaggs[db.searchForkableAggIdx(id)] }
-func (db *DB) InternalDB() kv.RwDB              { return db.RwDB }
-func (db *DB) Debug() kv.TemporalDebugDB        { return kv.TemporalDebugDB(db) }
+
+func (db *DB) Agg() any {
+	return db.stateFiles
+}
+
+func (db *DB) DebugBlockFiles() *blocksnapshots.RoSnapshots {
+	return db.blockFiles
+}
+
+// beginBlockFilesRo pins the block-files view for a tx, or nil if unset.
+func (db *DB) beginBlockFilesRo() *blocksnapshots.View {
+	if db.blockFiles == nil {
+		return nil
+	}
+	return db.blockFiles.View()
+}
+
+func (db *DB) InternalDB() kv.RwDB {
+	return db.RwDB
+}
+
+func (db *DB) Debug() kv.TemporalDebugDB {
+	return kv.TemporalDebugDB(db)
+}
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	kvTx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic
@@ -107,15 +120,41 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	tx := &Tx{Tx: kvTx, tx: tx{db: db, ctx: ctx}}
 
 	tx.aggtx = db.stateFiles.BeginFilesRo()
+	tx.blocktx = db.beginBlockFilesRo()
 
-	if len(db.forkaggs) > 0 {
-		tx.forkaggs = make([]*state.ForkableAggTemporalTx, len(db.forkaggs))
-		for i, forkagg := range db.forkaggs {
-			tx.forkaggs[i] = forkagg.BeginTemporalTx()
-		}
-	}
 	return tx, nil
 }
+
+// temporalFilesPin implements kv.TemporalFilesPin: it holds a consistent
+// aggregator file snapshot and opens read txns bound to it.
+type temporalFilesPin struct {
+	db  *DB
+	agg *state.AggregatorFilesPin
+}
+
+// Pin returns a kv.TemporalFilesPin holding this tx's aggregator file snapshot;
+// read txns opened from it stay on that generation. Independent of this tx's
+// lifetime — release with Close.
+func (tx *tx) Pin() kv.TemporalFilesPin {
+	return &temporalFilesPin{db: tx.db, agg: tx.aggtx.Pin()}
+}
+
+func (p *temporalFilesPin) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	kvTx, err := p.db.RwDB.BeginRo(ctx) //nolint:gocritic
+	if err != nil {
+		return nil, err
+	}
+	// Commitment workers read only state domains through aggtx, never forkable
+	// data, so the worker tx needs the pinned file snapshot and nothing else.
+	tx := &Tx{Tx: kvTx, tx: tx{db: p.db, ctx: ctx}}
+	tx.aggtx = p.agg.BeginFilesRo()
+	return tx, nil
+}
+
+func (p *temporalFilesPin) Close() {
+	p.agg.Close()
+}
+
 func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -129,6 +168,7 @@ func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) 
 func (db *DB) BeginRo(ctx context.Context) (kv.Tx, error) {
 	return db.BeginTemporalRo(ctx)
 }
+
 func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -141,12 +181,7 @@ func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 func (db *DB) newRwTx(kvTx kv.RwTx, ctx context.Context) *RwTx {
 	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
 	tx.aggtx = db.stateFiles.BeginFilesRo()
-	if len(db.forkaggs) > 0 {
-		tx.forkaggs = make([]*state.ForkableAggTemporalTx, len(db.forkaggs))
-		for i, forkagg := range db.forkaggs {
-			tx.forkaggs[i] = forkagg.BeginTemporalTx()
-		}
-	}
+	tx.blocktx = db.beginBlockFilesRo()
 	return tx
 }
 
@@ -157,16 +192,18 @@ func (db *DB) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
 	}
 	return db.newRwTx(kvTx, ctx), nil
 }
+
 func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
 	return db.BeginTemporalRw(ctx)
 }
+
 func (db *DB) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
 	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if err = f(tx); err != nil {
+	if err := f(tx); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -178,7 +215,7 @@ func (db *DB) UpdateTemporal(ctx context.Context, f func(tx kv.TemporalRwTx) err
 		return err
 	}
 	defer tx.Rollback()
-	if err = f(tx); err != nil {
+	if err := f(tx); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -191,6 +228,7 @@ func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.TemporalRwTx, error
 	}
 	return db.newRwTx(kvTx, ctx), nil
 }
+
 func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
 	return db.BeginTemporalRwNosync(ctx) //nolint:gocritic
 }
@@ -213,72 +251,42 @@ func (db *DB) BeginTemporalRwTry(ctx context.Context) (kv.TemporalRwTx, error) {
 	}
 	return db.newRwTx(kvTx, ctx), nil
 }
+
 func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error {
 	tx, err := db.BeginTemporalRwNosync(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if err = f(tx); err != nil {
+	if err := f(tx); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
 func (db *DB) Close() {
-	//db.stateFiles.Close()
-	db.RwDB.Close()
-	for _, forkagg := range db.forkaggs {
-		forkagg.Close()
+	if db.stateFiles != nil {
+		db.stateFiles.Close()
 	}
+	db.RwDB.Close()
 }
 
 func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 	db.stateFiles.OnFilesChange(onChange, onDel)
 }
 
-func (db *DB) searchForkableAggIdx(forkableId kv.ForkableId) int {
-	for i, forkagg := range db.forkaggs {
-		if forkagg.IsForkablePresent(forkableId) {
-			return i
-		}
-	}
-	panic(fmt.Sprintf("forkable not found: %d", forkableId))
-}
-
-func NewTestDB(tb testing.TB, label kv.Label) kv.TemporalRwDB {
-	tb.Helper()
-	db := memdb.NewTestDB(tb, label)
-	dirs := datadir.New(tb.TempDir())
-	agg := state.NewTest(dirs).DisableHistory().MustOpen(context.Background(), db)
-	tb.Cleanup(agg.Close)
-	tdb, _ := New(db, agg)
-	return tdb
-}
-
-func NewTestTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
-	tb.Helper()
-	db := NewTestDB(tb, dbcfg.ChainDB)
-	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	if err != nil {
-		tb.Fatal(err)
-	}
-	tb.Cleanup(tx.Rollback)
-	return db, tx
-}
-
 type tx struct {
-	db               *DB
-	aggtx            *state.AggregatorRoTx
-	forkaggs         []*state.ForkableAggTemporalTx
-	resourcesToClose []kv.Closer
-	ctx              context.Context
-	mu               sync.RWMutex
+	db      *DB
+	aggtx   *state.AggregatorRoTx
+	blocktx *blocksnapshots.View
+	ctx     context.Context
+	mu      sync.RWMutex
 }
 
 type Tx struct {
 	kv.Tx
 	tx
+	visibleEnds domainVisibleEnds
 }
 
 type RwTx struct {
@@ -286,26 +294,115 @@ type RwTx struct {
 	tx
 }
 
-func (tx *tx) ForceReopenAggCtx() {
-	tx.aggtx.Close()
+type domainVisibleEnds struct {
+	// ends is atomic so a lock-free read can overlap a reset-and-reload of
+	// the same slot without a data race. A torn read (state bit from one
+	// generation, end from another) can only be stale-low, which merely
+	// over-rejects fills: a view's frontier never decreases in a process that
+	// fills a cache — the DB component is frozen at tx begin, and a files
+	// reopen only extends it, an invariant the aggregator enforces once a
+	// fill-enabled cache is wired over it (ForbidVisibilityLowering).
+	ends  [kv.DomainLen]atomic.Uint64
+	mu    sync.Mutex
+	state atomic.Uint32
+}
+
+// state packs two bits per domain into one word so a single atomic load
+// returns a consistent (loaded, ok) pair: loadedBit says ends[domain] is
+// memoized, okBit is the memoized ok answer of DomainVisibleEnd. The array
+// size asserts at compile time that both halves fit in uint32.
+var _ [32 - 2*int(kv.DomainLen)]struct{}
+
+func visibleEndBits(domain kv.Domain) (loadedBit, okBit uint32) {
+	loadedBit = uint32(1) << uint32(domain)
+	return loadedBit, loadedBit << uint32(kv.DomainLen)
+}
+
+func (v *domainVisibleEnds) get(tx *Tx, domain kv.Domain) (uint64, bool) {
+	loadedBit, okBit := visibleEndBits(domain)
+	state := v.state.Load()
+	if state&loadedBit != 0 {
+		return v.ends[domain].Load(), state&okBit != 0
+	}
+	return v.load(tx, domain, loadedBit, okBit)
+}
+
+func (v *domainVisibleEnds) load(tx *Tx, domain kv.Domain, loadedBit, okBit uint32) (uint64, bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	state := v.state.Load()
+	if state&loadedBit == 0 {
+		end, ok := tx.aggtx.DomainVisibleEnd(domain, tx.Tx)
+		v.ends[domain].Store(end)
+		state |= loadedBit
+		if ok {
+			state |= okBit
+		}
+		v.state.Store(state)
+	}
+	return v.ends[domain].Load(), state&okBit != 0
+}
+
+// reset takes mu so an in-flight load can't re-store pre-reset bits.
+func (v *domainVisibleEnds) reset() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.state.Store(0)
+}
+
+func (tx *tx) ForceReopenUnderlyingFilesTx() {
+	if tx.blocktx != nil {
+		tx.blocktx.Close()
+	}
+	tx.blocktx = tx.db.beginBlockFilesRo()
+	if tx.aggtx != nil {
+		tx.aggtx.Close()
+	}
 	tx.aggtx = tx.Agg().BeginFilesRo()
 }
-func (tx *tx) FreezeInfo() kv.FreezeInfo { return tx.aggtx }
 
-func (tx *tx) AggTx() any             { return tx.aggtx }
-func (tx *tx) Agg() *state.Aggregator { return tx.db.stateFiles }
+// ForceReopenUnderlyingFilesTx swaps in a fresh files view, which can extend
+// the visible frontier — drop the memoized ends so they are re-derived.
+func (tx *Tx) ForceReopenUnderlyingFilesTx() {
+	tx.tx.ForceReopenUnderlyingFilesTx()
+	tx.visibleEnds.reset()
+}
+
+func (tx *tx) FreezeInfo() kv.FreezeInfo {
+	return tx.aggtx
+}
+
+func (tx *tx) AggTx() any {
+	return tx.aggtx
+}
+
+func (tx *tx) Agg() *state.Aggregator {
+	return tx.db.stateFiles
+}
+
+// BlockFilesRoTx returns the tx's pinned block-files view, or nil if unset.
+func (tx *tx) BlockFilesRoTx() *blocksnapshots.View {
+	return tx.blocktx
+}
+
 func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return tx.aggtx.StepsInFiles(entitySet...)
 }
 
-func (tx *tx) Rollback() {
-	tx.autoClose()
+func (tx *tx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (int, error) {
+	return tx.aggtx.Retire(cutoffs)
 }
+
+func (tx *tx) Rollback() {
+	tx.closeFilesView()
+}
+
 func (tx *Tx) Rollback() {
 	if tx == nil {
 		return
 	}
-	tx.autoClose()
+	tx.closeFilesView()
 	if tx.Tx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return
 	}
@@ -330,6 +427,22 @@ func (tx *Tx) LockDBInRam() error {
 	return nil
 }
 
+// DistributeCursors forwards to the underlying mdbx engine. Like DeleteRange, it
+// fails loud on a non-mdbx inner rather than silently degrading (none exists today).
+func (tx *Tx) DistributeCursors(table string, from []byte, n int) ([][]byte, error) {
+	if s, ok := tx.Tx.(kv.DBWithDistributionSupport); ok {
+		return s.DistributeCursors(table, from, n)
+	}
+	return nil, fmt.Errorf("DistributeCursors not supported by %T", tx.Tx)
+}
+
+func (tx *RwTx) DistributeCursors(table string, from []byte, n int) ([][]byte, error) {
+	if s, ok := tx.RwTx.(kv.DBWithDistributionSupport); ok {
+		return s.DistributeCursors(table, from, n)
+	}
+	return nil, fmt.Errorf("DistributeCursors not supported by %T", tx.RwTx)
+}
+
 func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	tx.tx.mu.RLock()
 	applyTx := tx.Tx
@@ -340,40 +453,20 @@ func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	return applyTx.Apply(ctx, f)
 }
 
-func (tx *tx) searchForkableAggIdx(forkableId kv.ForkableId) int {
-	for i, forkagg := range tx.forkaggs {
-		if forkagg.IsForkablePresent(forkableId) {
-			return i
-		}
-	}
-	panic(fmt.Sprintf("forkable not found: %d", forkableId))
-}
-
-func (tx *Tx) AggForkablesTx(id kv.ForkableId) any {
-	return tx.forkaggs[tx.searchForkableAggIdx(id)]
-}
-
-func (tx *Tx) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
-	return newUnmarkedTx(tx.Tx, tx.forkaggs[tx.searchForkableAggIdx(id)].Unmarked(id))
-}
-
-func (tx *RwTx) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
-	return newUnmarkedTx(tx.RwTx, tx.forkaggs[tx.searchForkableAggIdx(id)].Unmarked(id))
-}
-
-func (tx *RwTx) UnmarkedRw(id kv.ForkableId) kv.UnmarkedRwTx {
-	return newUnmarkedTx(tx.RwTx, tx.forkaggs[tx.searchForkableAggIdx(id)].Unmarked(id))
-}
-
-func (tx *RwTx) AggForkablesTx(id kv.ForkableId) any {
-	return tx.forkaggs[tx.searchForkableAggIdx(id)]
-}
-
 func (tx *RwTx) WarmupDB(force bool) error {
 	if mdbxTx, ok := tx.RwTx.(*mdbx.MdbxTx); ok {
 		return mdbxTx.WarmupDB(force)
 	}
 	return nil
+}
+
+func (tx *RwTx) DeleteRange(table string, from, to []byte) (uint64, error) {
+	if dr, ok := tx.RwTx.(kv.HasDeleteRange); ok {
+		return dr.DeleteRange(table, from, to)
+	}
+	// No non-mdbx temporal backend exists (mdbx's native range-delete is used
+	// above); fail loud rather than carry an unexercised, DupSort-unsafe emulation.
+	return 0, fmt.Errorf("DeleteRange not supported by %T", tx.RwTx)
 }
 
 func (tx *RwTx) LockDBInRam() error {
@@ -383,17 +476,25 @@ func (tx *RwTx) LockDBInRam() error {
 	return nil
 }
 
-func (tx *RwTx) Debug() kv.TemporalDebugTx { return tx }
-func (tx *Tx) Debug() kv.TemporalDebugTx   { return tx }
+func (tx *RwTx) Debug() kv.TemporalDebugTx {
+	return tx
+}
+
+func (tx *Tx) Debug() kv.TemporalDebugTx {
+	return tx
+}
 
 func (tx *RwTx) NewMemBatch(ioMetrics any) kv.TemporalMemBatch {
-	return state.NewTemporalMemBatch(tx, ioMetrics)
-}
-func (tx *Tx) NewMemBatch(ioMetrics any) kv.TemporalMemBatch {
-	return state.NewTemporalMemBatch(tx, ioMetrics)
+	return state.NewTemporalMemBatch(tx, tx.db.RwDB, ioMetrics)
 }
 
-func (tx *RwTx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
+func (tx *Tx) NewMemBatch(ioMetrics any) kv.TemporalMemBatch {
+	return state.NewTemporalMemBatch(tx, tx.db.RwDB, ioMetrics)
+}
+
+// ST1016 is reported here, not on AsyncClone: staticcheck aggregates the
+// finding for the whole RwTx type at one representative method.
+func (tx *RwTx) Apply(ctx context.Context, f func(tx kv.Tx) error) error { //nolint:staticcheck
 	tx.tx.mu.RLock()
 	applyTx := tx.RwTx
 	tx.tx.mu.RUnlock()
@@ -417,7 +518,7 @@ func (tx *RwTx) Rollback() {
 	if tx == nil {
 		return
 	}
-	tx.autoClose()
+	tx.closeFilesView()
 	if tx.RwTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return
 	}
@@ -433,16 +534,21 @@ type asyncClone struct {
 // this is needed to create a clone that can be passed
 // to external go rooutines - they are intended as slaves
 // so should never commit or rollback the master transaction
+//
+// The receiver stays "rwtx", not "tx" like RwTx's other methods: renaming it
+// would make the embedded tx{} composite literal below ambiguous with the receiver.
 func (rwtx *RwTx) AsyncClone(asyncTx kv.RwTx) *asyncClone {
 	return &asyncClone{
 		RwTx{
 			RwTx: asyncTx,
 			tx: tx{
-				db:               rwtx.db,
-				aggtx:            rwtx.aggtx,
-				resourcesToClose: nil,
-				ctx:              rwtx.ctx,
-			}}}
+				db:      rwtx.db,
+				aggtx:   rwtx.aggtx,
+				blocktx: rwtx.blocktx,
+				ctx:     rwtx.ctx,
+			},
+		},
+	}
 }
 
 func (tx *asyncClone) ApplyChan() mdbx.TxApplyChan {
@@ -452,24 +558,22 @@ func (tx *asyncClone) ApplyChan() mdbx.TxApplyChan {
 func (tx *asyncClone) Commit() error {
 	return errors.New("can't commit cloned tx")
 }
+
 func (tx *asyncClone) Rollback() {
 }
 
-func (tx *tx) autoClose() {
-	for _, closer := range tx.resourcesToClose {
-		closer.Close()
-	}
+func (tx *tx) closeFilesView() {
 	tx.aggtx.Close()
-	for _, f := range tx.forkaggs {
-		f.Close()
-	}
+	tx.aggtx = nil
+	tx.blocktx.Close()
+	tx.blocktx = nil
 }
 
 func (tx *RwTx) Commit() error {
 	if tx == nil {
 		return nil
 	}
-	tx.autoClose()
+	tx.closeFilesView()
 	if tx.RwTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return nil
 	}
@@ -483,7 +587,6 @@ func (tx *tx) rangeAsOf(name kv.Domain, rtx kv.Tx, fromKey, toKey []byte, asOfTs
 	if err != nil {
 		return nil, err
 	}
-	tx.resourcesToClose = append(tx.resourcesToClose, it)
 	return it, nil
 }
 
@@ -495,8 +598,8 @@ func (tx *RwTx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 	return tx.rangeAsOf(name, tx.RwTx, fromKey, toKey, asOfTs, asc, limit)
 }
 
-func (tx *tx) getLatest(name kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step kv.Step, err error) {
-	v, step, ok, err := tx.aggtx.GetLatest(name, k, dbTx)
+func (tx *tx) getLatest(name kv.Domain, dbTx kv.Tx, k []byte, opts kv.GetLatestOptions) (v []byte, step kv.Step, err error) {
+	v, step, ok, err := tx.aggtx.GetLatest(name, k, dbTx, opts)
 	if err != nil {
 		return nil, step, err
 	}
@@ -506,44 +609,24 @@ func (tx *tx) getLatest(name kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step kv
 	return v, step, err
 }
 
-func (tx *Tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	return tx.hasPrefix(name, tx.Tx, prefix)
+func (tx *tx) getLatestValSize(name kv.Domain, dbTx kv.Tx, k []byte) (size int, found bool, err error) {
+	return tx.aggtx.GetLatestValSize(name, k, dbTx)
 }
 
-func (tx *RwTx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	return tx.hasPrefix(name, tx.RwTx, prefix)
+func (tx *Tx) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) (v []byte, step kv.Step, err error) {
+	return tx.getLatest(name, tx.Tx, k, opts)
 }
 
-func (tx *tx) hasPrefix(name kv.Domain, dbTx kv.Tx, prefix []byte) ([]byte, []byte, bool, error) {
-	to, ok := kv.NextSubtree(prefix)
-	if !ok {
-		to = nil
-	}
-
-	it, err := tx.rangeLatest(name, dbTx, prefix, to, 1)
-	if err != nil {
-		return nil, nil, false, err
-	}
-
-	defer it.Close()
-	if !it.HasNext() {
-		return nil, nil, false, nil
-	}
-
-	k, v, err := it.Next()
-	if err != nil {
-		return nil, nil, false, err
-	}
-
-	return k, v, true, nil
+func (tx *RwTx) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) (v []byte, step kv.Step, err error) {
+	return tx.getLatest(name, tx.RwTx, k, opts)
 }
 
-func (tx *Tx) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
-	return tx.getLatest(name, tx.Tx, k)
+func (tx *Tx) GetLatestValSize(name kv.Domain, k []byte) (size int, found bool, err error) {
+	return tx.getLatestValSize(name, tx.Tx, k)
 }
 
-func (tx *RwTx) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
-	return tx.getLatest(name, tx.RwTx, k)
+func (tx *RwTx) GetLatestValSize(name kv.Domain, k []byte) (size int, found bool, err error) {
+	return tx.getLatestValSize(name, tx.RwTx, k)
 }
 
 func (tx *tx) getAsOf(name kv.Domain, gtx kv.Tx, key []byte, ts uint64) (v []byte, ok bool, err error) {
@@ -575,7 +658,6 @@ func (tx *tx) indexRange(name kv.InvertedIdx, dbTx kv.Tx, k []byte, fromTs, toTs
 	if err != nil {
 		return nil, err
 	}
-	tx.resourcesToClose = append(tx.resourcesToClose, timestamps)
 	return timestamps, nil
 }
 
@@ -592,7 +674,6 @@ func (tx *tx) historyRange(name kv.Domain, dbTx kv.Tx, fromTs, toTs int, asc ord
 	if err != nil {
 		return nil, err
 	}
-	tx.resourcesToClose = append(tx.resourcesToClose, it)
 	return it, nil
 }
 
@@ -609,7 +690,6 @@ func (tx *tx) historyKeyTxNumRange(name kv.Domain, dbTx kv.Tx, fromTs, toTs int,
 	if err != nil {
 		return nil, err
 	}
-	tx.resourcesToClose = append(tx.resourcesToClose, it)
 	return it, nil
 }
 
@@ -626,9 +706,11 @@ func (tx *RwTx) HistoryKeyTxNumRange(name kv.Domain, fromTs, toTs int, asc order
 func (tx *tx) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
 	panic("implement me pls. or use SharedDomains")
 }
+
 func (tx *tx) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
 	panic("implement me pls. or use SharedDomains")
 }
+
 func (tx *tx) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
 	panic("implement me pls. or use SharedDomains")
 }
@@ -674,31 +756,44 @@ func (tx *Tx) TraceKey(domain kv.Domain, k []byte, fromTxNum, toTxNum uint64) (s
 func (db *DB) DomainTables(domain ...kv.Domain) []string {
 	return db.stateFiles.DomainTables(domain...)
 }
+
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string {
 	return db.stateFiles.InvertedIdxTables(domain...)
 }
-func (db *DB) ForkableTables(names ...kv.ForkableId) (tables []string) {
-	for _, name := range names {
-		tables = append(tables, db.forkaggs[db.searchForkableAggIdx(name)].Tables()...)
 
-	}
-	return
+func (db *DB) OpenStateSnapshots(_ context.Context) error {
+	return db.stateFiles.OpenFolder(db)
 }
-func (db *DB) ReloadFiles() error { return db.stateFiles.ReloadFiles() }
-func (db *DB) BuildMissedAccessors(ctx context.Context, workers int) (err error) {
-	if err = db.stateFiles.BuildMissedAccessors(ctx, workers); err != nil {
-		return
-	}
 
-	if len(db.forkaggs) > 0 {
-		for _, forkagg := range db.forkaggs {
-			if err = forkagg.BuildMissedAccessors(ctx, workers); err != nil {
-				return
-			}
-		}
-	}
-	return
+func (db *DB) StepSize() uint64 {
+	return db.stateFiles.StepSize()
 }
+
+func (db *DB) MaxPrunableStepsBacklog() uint64 {
+	return db.stateFiles.MaxPrunableStepsBacklog()
+}
+
+func (db *DB) BuildFiles(toTxNum uint64, finalityCtx kv.FinalityContext) error {
+	return db.stateFiles.BuildFiles(db, toTxNum, finalityCtx)
+}
+
+func (db *DB) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, finalityCtx kv.FinalityContext, doMerge bool) error {
+	return db.stateFiles.BuildFiles2(ctx, db, fromStep, toStep, finalityCtx, doMerge)
+}
+
+func (db *DB) BuildFilesInBackground(finalityCtx kv.FinalityContext) chan struct{} {
+	toTxNum := db.stateFiles.EndTxNumMinimax() + db.stateFiles.StepSize()
+	return db.stateFiles.BuildFilesInBackground(db, toTxNum, finalityCtx)
+}
+
+func (db *DB) CollateAndPrune(ctx context.Context, pruneFn func(tx kv.TemporalRwTx) (kv.FinalityContext, error)) (bool, <-chan struct{}, error) {
+	return db.stateFiles.CollateAndPrune(ctx, db, pruneFn)
+}
+
+func (db *DB) BuildMissedAccessors(ctx context.Context, workers int, opts ...kv.BuildAccessorsOption) (err error) {
+	return db.stateFiles.BuildMissedAccessors(ctx, db, workers, opts...)
+}
+
 func (db *DB) EnableReadAhead() kv.TemporalDebugDB {
 	db.stateFiles.MadvNormal()
 	return db
@@ -719,9 +814,11 @@ func (db *DB) MergeLoop(ctx context.Context) error {
 func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
 	return tx.aggtx.DomainFiles(domain...)
 }
+
 func (tx *Tx) CurrentDomainVersion(domain kv.Domain) version.Version {
 	return tx.aggtx.CurrentDomainVersion(domain)
 }
+
 func (tx *tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) {
 	return tx.aggtx.TxNumsInFiles(domains...)
 }
@@ -729,80 +826,79 @@ func (tx *tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) {
 func (tx *RwTx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
 	return tx.aggtx.DomainFiles(domain...)
 }
+
 func (tx *RwTx) CurrentDomainVersion(domain kv.Domain) version.Version {
 	return tx.aggtx.CurrentDomainVersion(domain)
 }
-func (tx *RwTx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
-	if len(tx.forkaggs) > 0 {
-		timeTaken := time.Now()
-		for i := 0; i < len(tx.forkaggs); i++ {
-			hasMore, err := tx.forkaggs[i].PruneSmallBatches(ctx, timeout, tx.RwTx)
-			if err != nil {
-				return true, err
-			}
-			if time.Since(timeTaken) > timeout {
-				return true, nil
-			}
-			haveMore = haveMore || hasMore
-		}
-		timeout -= time.Since(timeTaken)
-	}
 
-	hasMore, err := tx.aggtx.PruneSmallBatches(ctx, timeout, tx.RwTx)
-	if err != nil {
-		return
-	}
-	return haveMore || hasMore, nil
+func (tx *RwTx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
+	return tx.aggtx.PruneSmallBatches(ctx, timeout, tx.RwTx)
 }
+
 func (tx *RwTx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
 	return tx.aggtx.Unwind(ctx, tx.RwTx, txNumUnwindTo, changeset)
 }
 
-func (tx *tx) ForkableAggTx(id kv.ForkableId) any {
-	return tx.forkaggs[tx.searchForkableAggIdx(id)]
-}
-func (tx *tx) historyStartFrom(name kv.Domain, roTx kv.Tx) uint64 {
+func (tx *tx) historyStartFrom(name kv.Domain, roTx kv.Tx) (uint64, error) {
 	return tx.aggtx.HistoryStartFrom(name, roTx)
 }
-func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
+
+func (tx *Tx) HistoryStartFrom(name kv.Domain) (uint64, error) {
 	return tx.historyStartFrom(name, tx.Tx)
 }
-func (tx *RwTx) HistoryStartFrom(name kv.Domain) uint64 {
+
+// HistoryFilesGeneration identifies pinned files, not the live aggregator view.
+// Combine it with ViewID when caching values that can also come from MDBX.
+func (tx *Tx) HistoryFilesGeneration() uint64 { return tx.aggtx.Generation() }
+
+func (tx *RwTx) HistoryStartFrom(name kv.Domain) (uint64, error) {
 	return tx.historyStartFrom(name, tx.RwTx)
 }
+
 func (tx *Tx) DomainProgress(domain kv.Domain) uint64 {
 	return tx.aggtx.DomainProgress(domain, tx.Tx)
 }
+
 func (tx *RwTx) DomainProgress(domain kv.Domain) uint64 {
 	return tx.aggtx.DomainProgress(domain, tx.RwTx)
 }
+
+func (tx *Tx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
+	return tx.visibleEnds.get(tx, domain)
+}
+
+func (tx *RwTx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
+	return tx.aggtx.DomainVisibleEnd(domain, tx.RwTx)
+}
+
 func (tx *Tx) IIProgress(domain kv.InvertedIdx) uint64 {
 	return tx.aggtx.IIProgress(domain, tx.Tx)
 }
+
 func (tx *RwTx) IIProgress(domain kv.InvertedIdx) uint64 {
 	return tx.aggtx.IIProgress(domain, tx.RwTx)
 }
 
-func (tx *tx) dirs() datadir.Dirs   { return tx.aggtx.Dirs() }
-func (tx *Tx) Dirs() datadir.Dirs   { return tx.dirs() }
-func (tx *RwTx) Dirs() datadir.Dirs { return tx.dirs() }
+func (tx *tx) dirs() datadir.Dirs {
+	return tx.aggtx.Dirs()
+}
+
+func (tx *Tx) Dirs() datadir.Dirs {
+	return tx.dirs()
+}
+
+func (tx *RwTx) Dirs() datadir.Dirs {
+	return tx.dirs()
+}
 
 func (tx *tx) stepSize() uint64 {
 	return tx.aggtx.StepSize()
 }
-func (tx *Tx) StepSize() uint64 { return tx.stepSize() }
-func (tx *RwTx) StepSize() uint64 {
+
+func (tx *Tx) StepSize() uint64 {
 	return tx.stepSize()
 }
-func (tx *Tx) AllForkableIds() (ids []kv.ForkableId) {
-	for _, forkagg := range tx.tx.forkaggs {
-		ids = append(ids, forkagg.Ids()...)
-	}
-	return
-}
-func (tx *RwTx) AllForkableIds() (ids []kv.ForkableId) {
-	for _, forkagg := range tx.tx.forkaggs {
-		ids = append(ids, forkagg.Ids()...)
-	}
-	return
+
+func (tx *RwTx) StepSize() uint64 {
+	return tx.stepSize()
 }

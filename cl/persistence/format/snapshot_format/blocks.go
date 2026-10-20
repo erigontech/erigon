@@ -17,17 +17,19 @@
 package snapshot_format
 
 import (
-	"bytes"
 	"encoding/binary"
+	"errors"
 	"io"
-	"sync"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/execution/types"
 )
+
+var ErrExecutionBodyNotFound = errors.New("execution body not found")
 
 type ExecutionBlockReaderByNumber interface {
 	Transactions(number uint64, hash common.Hash) (*solid.TransactionsSSZ, error)
@@ -35,11 +37,7 @@ type ExecutionBlockReaderByNumber interface {
 	SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfig)
 	// CacheBody stores a recently produced block body for immediate retrieval.
 	// Implementations that don't support caching should no-op.
-	CacheBody(blockNumber uint64, transactions [][]byte, withdrawals []*types.Withdrawal)
-}
-
-var buffersPool = sync.Pool{
-	New: func() any { return &bytes.Buffer{} },
+	CacheBody(blockNumber uint64, blockHash common.Hash, transactions [][]byte, withdrawals []*types.Withdrawal)
 }
 
 // WriteBlockForSnapshot writes a block to the given writer in the format expected by the snapshot.
@@ -103,9 +101,8 @@ func readMetadataForBlock(r io.Reader, b []byte) (clparams.StateVersion, common.
 }
 
 func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNumber, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBeaconBlock, error) {
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-	buffer.Reset()
+	buffer := pool.GetBuffer()
+	defer pool.PutBuffer(buffer)
 
 	// Read the metadata
 	metadataSlab := make([]byte, 33)
@@ -147,6 +144,15 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 	}
 	blockNumber := blindedBlock.Block.Body.ExecutionPayload.BlockNumber
 	blockHash := blindedBlock.Block.Body.ExecutionPayload.BlockHash
+	// Pre-Merge Bellatrix blocks carry a default (all-zero) execution payload header.
+	// Their BlockHash is the zero hash, meaning no EL block exists to fetch transactions
+	// from. This matches the consensus spec's is_execution_enabled check:
+	// is_merge_transition_complete(state) || block.body.execution_payload.block_hash != Bytes32()
+	// We don't have beacon state here, but a zero BlockHash is a reliable indicator that
+	// execution is not yet enabled for this block.
+	if blockHash == (common.Hash{}) {
+		return blindedBlock.Full(nil, nil), nil
+	}
 	txs, err := executionReader.Transactions(blockNumber, blockHash)
 	if err != nil {
 		return nil, err
@@ -160,9 +166,8 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 
 // ReadBlockHeaderFromSnapshotWithExecutionData reads the beacon block header and the EL block number and block hash.
 func ReadBlockHeaderFromSnapshotWithExecutionData(r io.Reader, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBeaconBlockHeader, uint64, common.Hash, error) {
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-	buffer.Reset()
+	buffer := pool.GetBuffer()
+	defer pool.PutBuffer(buffer)
 
 	// Read the metadata
 	metadataSlab := make([]byte, 33)
@@ -232,13 +237,21 @@ func ReadBlockHeaderFromSnapshotWithExecutionData(r io.Reader, cfg *clparams.Bea
 //     Callers that need full EL data should use ReadBlockFromSnapshot instead.
 //   - GLOAS: stored as full SignedBeaconBlock (no payload to blind); decoded directly.
 func ReadBeaconBlockBodyFromSnapshot(r io.Reader, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBeaconBlock, error) {
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-	buffer.Reset()
+	return readBeaconBlockBodyFromSnapshot(r, cfg, false)
+}
+
+// ReadBeaconBlockBodyFromSnapshotForIntegrity verifies the stored body root while decoding.
+func ReadBeaconBlockBodyFromSnapshotForIntegrity(r io.Reader, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBeaconBlock, error) {
+	return readBeaconBlockBodyFromSnapshot(r, cfg, true)
+}
+
+func readBeaconBlockBodyFromSnapshot(r io.Reader, cfg *clparams.BeaconChainConfig, verifyBodyRoot bool) (*cltypes.SignedBeaconBlock, error) {
+	buffer := pool.GetBuffer()
+	defer pool.PutBuffer(buffer)
 
 	// Read the metadata
 	metadataSlab := make([]byte, 33)
-	v, _, err := readMetadataForBlock(r, metadataSlab)
+	v, bodyRoot, err := readMetadataForBlock(r, metadataSlab)
 	if err != nil {
 		return nil, err
 	}
@@ -258,6 +271,15 @@ func ReadBeaconBlockBodyFromSnapshot(r io.Reader, cfg *clparams.BeaconChainConfi
 		if err := block.DecodeSSZ(buffer.Bytes(), int(v)); err != nil {
 			return nil, err
 		}
+		if verifyBodyRoot {
+			decodedBodyRoot, err := block.Block.Body.HashSSZ()
+			if err != nil {
+				return nil, err
+			}
+			if decodedBodyRoot != bodyRoot {
+				return nil, errors.New("beacon snapshot body root does not match decoded body")
+			}
+		}
 		return block, nil
 	}
 
@@ -265,6 +287,15 @@ func ReadBeaconBlockBodyFromSnapshot(r io.Reader, cfg *clparams.BeaconChainConfi
 	blindedBlock := cltypes.NewSignedBlindedBeaconBlock(cfg, v)
 	if err := blindedBlock.DecodeSSZ(buffer.Bytes(), int(v)); err != nil {
 		return nil, err
+	}
+	if verifyBodyRoot {
+		decodedBodyRoot, err := blindedBlock.Block.Body.HashSSZ()
+		if err != nil {
+			return nil, err
+		}
+		if decodedBodyRoot != bodyRoot {
+			return nil, errors.New("beacon snapshot body root does not match decoded body")
+		}
 	}
 	txs := &solid.TransactionsSSZ{}
 	var ws *solid.ListSSZ[*cltypes.Withdrawal]

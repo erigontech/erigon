@@ -109,6 +109,20 @@ func (pt *PeerTracker) BlockNumMissing(peerId *PeerId, blockNum uint64) {
 	})
 }
 
+func (pt *PeerTracker) BALNumMissing(peerId *PeerId, blockNum uint64) {
+	pt.updatePeerSyncProgress(peerId, func(psp *peerSyncProgress) {
+		psp.balNumMissing(blockNum)
+	})
+}
+
+func (pt *PeerTracker) PeerMayHaveBALNum(peerId *PeerId, blockNum uint64) bool {
+	pt.mu.Lock()
+	defer pt.mu.Unlock()
+
+	peerSyncProgress, ok := pt.peerSyncProgresses[*peerId]
+	return !ok || peerSyncProgress.peerMayHaveBALNum(blockNum)
+}
+
 func (pt *PeerTracker) ListPeersMayMissBlockHash(blockHash common.Hash) []*PeerId {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()

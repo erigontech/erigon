@@ -19,10 +19,8 @@ package solid
 import (
 	"encoding/binary"
 	"encoding/json"
-	"unsafe"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/length"
@@ -53,24 +51,24 @@ func NewValidator() Validator {
 // NewValidatorFromParameters creates a new Validator object from the provided parameters.
 // It is represented as a flat buffer.
 func NewValidatorFromParameters(
-	PublicKey [48]byte,
-	WithdrawalCredentials [32]byte,
-	EffectiveBalance uint64,
-	Slashed bool,
-	ActivationEligibilityEpoch uint64,
-	ActivationEpoch uint64,
-	ExitEpoch uint64,
-	WithdrawableEpoch uint64,
+	publicKey [48]byte,
+	withdrawalCredentials [32]byte,
+	effectiveBalance uint64,
+	slashed bool,
+	activationEligibilityEpoch uint64,
+	activationEpoch uint64,
+	exitEpoch uint64,
+	withdrawableEpoch uint64,
 ) Validator {
 	v := NewValidator()
-	v.SetPublicKey(PublicKey)
-	v.SetWithdrawalCredentials(WithdrawalCredentials)
-	v.SetEffectiveBalance(EffectiveBalance)
-	v.SetSlashed(Slashed)
-	v.SetActivationEligibilityEpoch(ActivationEligibilityEpoch)
-	v.SetActivationEpoch(ActivationEpoch)
-	v.SetExitEpoch(ExitEpoch)
-	v.SetWithdrawableEpoch(WithdrawableEpoch)
+	v.SetPublicKey(publicKey)
+	v.SetWithdrawalCredentials(withdrawalCredentials)
+	v.SetEffectiveBalance(effectiveBalance)
+	v.SetSlashed(slashed)
+	v.SetActivationEligibilityEpoch(activationEligibilityEpoch)
+	v.SetActivationEpoch(activationEpoch)
+	v.SetExitEpoch(exitEpoch)
+	v.SetWithdrawableEpoch(withdrawableEpoch)
 	return v
 }
 
@@ -123,42 +121,33 @@ func (v Validator) WithdrawalCredentials() (o common.Hash) {
 	copy(o[:], v[48:80])
 	return
 }
+
 func (v Validator) EffectiveBalance() uint64 {
-	if utils.IsSysLittleEndian {
-		return *(*uint64)(unsafe.Pointer(&v[80]))
-	}
 	return binary.LittleEndian.Uint64(v[80:88])
 }
+
 func (v Validator) Slashed() bool {
 	return v[88] != 0
 }
+
 func (v Validator) ActivationEligibilityEpoch() uint64 {
-	if utils.IsSysLittleEndian {
-		return *(*uint64)(unsafe.Pointer(&v[89]))
-	}
 	return binary.LittleEndian.Uint64(v[89:97])
 }
+
 func (v Validator) ActivationEpoch() uint64 {
-	if utils.IsSysLittleEndian {
-		return *(*uint64)(unsafe.Pointer(&v[97]))
-	}
 	return binary.LittleEndian.Uint64(v[97:105])
 }
+
 func (v Validator) ExitEpoch() uint64 {
-	if utils.IsSysLittleEndian {
-		return *(*uint64)(unsafe.Pointer(&v[105]))
-	}
 	return binary.LittleEndian.Uint64(v[105:113])
 }
+
 func (v Validator) WithdrawableEpoch() uint64 {
-	if utils.IsSysLittleEndian {
-		return *(*uint64)(unsafe.Pointer(&v[113]))
-	}
 	return binary.LittleEndian.Uint64(v[113:121])
 }
 
 func (v Validator) CopyHashBufferTo(o []byte) error {
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		o[i] = 0
 	}
 	copy(o[:64], v[:48])
@@ -185,10 +174,6 @@ func (v Validator) SetWithdrawalCredentials(o common.Hash) {
 }
 
 func (v Validator) SetEffectiveBalance(i uint64) {
-	if utils.IsSysLittleEndian {
-		*(*uint64)(unsafe.Pointer(&v[80])) = i
-		return
-	}
 	binary.LittleEndian.PutUint64(v[80:88], i)
 }
 
@@ -203,35 +188,20 @@ func (v Validator) SetSlashed(b bool) {
 	}
 	v[88] = 0
 }
+
 func (v Validator) SetActivationEligibilityEpoch(i uint64) {
-	if utils.IsSysLittleEndian {
-		*(*uint64)(unsafe.Pointer(&v[89])) = i
-		return
-	}
 	binary.LittleEndian.PutUint64(v[89:97], i)
 }
 
 func (v Validator) SetActivationEpoch(i uint64) {
-	if utils.IsSysLittleEndian {
-		*(*uint64)(unsafe.Pointer(&v[97])) = i
-		return
-	}
 	binary.LittleEndian.PutUint64(v[97:105], i)
 }
 
 func (v Validator) SetExitEpoch(i uint64) {
-	if utils.IsSysLittleEndian {
-		*(*uint64)(unsafe.Pointer(&v[105])) = i
-		return
-	}
 	binary.LittleEndian.PutUint64(v[105:113], i)
 }
 
 func (v Validator) SetWithdrawableEpoch(i uint64) {
-	if utils.IsSysLittleEndian {
-		*(*uint64)(unsafe.Pointer(&v[113])) = i
-		return
-	}
 	binary.LittleEndian.PutUint64(v[113:121], i)
 }
 
@@ -267,7 +237,6 @@ func (v Validator) MarshalJSON() ([]byte, error) {
 }
 
 func (v *Validator) UnmarshalJSON(input []byte) error {
-	var err error
 	var tmp struct {
 		PublicKey                  common.Bytes48 `json:"pubkey"`
 		WithdrawalCredentials      common.Hash    `json:"withdrawal_credentials"`
@@ -278,7 +247,7 @@ func (v *Validator) UnmarshalJSON(input []byte) error {
 		ExitEpoch                  uint64         `json:"exit_epoch,string"`
 		WithdrawableEpoch          uint64         `json:"withdrawable_epoch,string"`
 	}
-	if err = json.Unmarshal(input, &tmp); err != nil {
+	if err := json.Unmarshal(input, &tmp); err != nil {
 		return err
 	}
 	*v = NewValidatorFromParameters(tmp.PublicKey, tmp.WithdrawalCredentials, tmp.EffectiveBalance, tmp.Slashed, tmp.ActivationEligibilityEpoch, tmp.ActivationEpoch, tmp.ExitEpoch, tmp.WithdrawableEpoch)

@@ -28,17 +28,17 @@ import (
 type ServiceBus struct {
 	eventBus         EventBus
 	execPool         util.ExecPool
-	busMap           map[interface{}]*ManagedEventBus
+	busMap           map[any]*ManagedEventBus
 	mapLock          *sync.Mutex
-	registrations    map[uintptr][]interface{}
+	registrations    map[uintptr][]any
 	registrationLock sync.Mutex
 }
 
 func NewServiceBus(execPool util.ExecPool) *ServiceBus {
-	return &ServiceBus{NewEventBus(execPool), execPool, make(map[interface{}]*ManagedEventBus), &sync.Mutex{}, make(map[uintptr][]interface{}), sync.Mutex{}}
+	return &ServiceBus{NewEventBus(execPool), execPool, make(map[any]*ManagedEventBus), &sync.Mutex{}, make(map[uintptr][]any), sync.Mutex{}}
 }
 
-func (bus *ServiceBus) GetEventBus(key interface{}) *ManagedEventBus {
+func (bus *ServiceBus) GetEventBus(key any) *ManagedEventBus {
 	bus.mapLock.Lock()
 	defer bus.mapLock.Unlock()
 
@@ -63,7 +63,7 @@ func (bus *ServiceBus) Deactivate() { /*
 // objectPointer returns reflect.Value.Pointer() if object has a kind that
 // supports it (pointer-like). Returns false otherwise so callers can return a
 // descriptive error rather than panic inside reflect.
-func objectPointer(object interface{}) (uintptr, bool) {
+func objectPointer(object any) (uintptr, bool) {
 	v := reflect.ValueOf(object)
 	switch v.Kind() {
 	case reflect.Pointer, reflect.Chan, reflect.Map, reflect.Func, reflect.Slice, reflect.UnsafePointer:
@@ -73,7 +73,7 @@ func objectPointer(object interface{}) (uintptr, bool) {
 	}
 }
 
-func (bus *ServiceBus) Register(object interface{}, fns ...interface{}) (err error) {
+func (bus *ServiceBus) Register(object any, fns ...any) (err error) {
 	objectPtr, ok := objectPointer(object)
 	if !ok {
 		return fmt.Errorf("ServiceBus.Register: object kind %s is not supported; pass a pointer", reflect.ValueOf(object).Kind())
@@ -94,7 +94,7 @@ func (bus *ServiceBus) Register(object interface{}, fns ...interface{}) (err err
 	return err
 }
 
-func (bus *ServiceBus) UnregisterAll(object interface{}) error {
+func (bus *ServiceBus) UnregisterAll(object any) error {
 	objectPtr, ok := objectPointer(object)
 	if !ok {
 		return fmt.Errorf("ServiceBus.UnregisterAll: object kind %s is not supported; pass a pointer", reflect.ValueOf(object).Kind())
@@ -118,7 +118,7 @@ func (bus *ServiceBus) UnregisterAll(object interface{}) error {
 	return nil
 }
 
-func (bus *ServiceBus) Unregister(object interface{}, fns ...interface{}) error {
+func (bus *ServiceBus) Unregister(object any, fns ...any) error {
 	objectPtr, ok := objectPointer(object)
 	if !ok {
 		return fmt.Errorf("ServiceBus.Unregister: object kind %s is not supported; pass a pointer", reflect.ValueOf(object).Kind())
@@ -145,7 +145,7 @@ func (bus *ServiceBus) Unregister(object interface{}, fns ...interface{}) error 
 	return nil
 }
 
-func (bus *ServiceBus) Registrations(object interface{}) []interface{} {
+func (bus *ServiceBus) Registrations(object any) []any {
 	objectPtr, ok := objectPointer(object)
 	if !ok {
 		return nil
@@ -157,11 +157,11 @@ func (bus *ServiceBus) Registrations(object interface{}) []interface{} {
 	if len(src) == 0 {
 		return nil
 	}
-	out := make([]interface{}, len(src))
+	out := make([]any, len(src))
 	copy(out, src)
 	return out
 }
 
-func (bus *ServiceBus) Post(args ...interface{}) int {
+func (bus *ServiceBus) Post(args ...any) int {
 	return bus.eventBus.Publish(args...)
 }

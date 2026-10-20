@@ -17,17 +17,17 @@
 package handler
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sort"
+	"slices"
 	"strconv"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -48,7 +48,7 @@ func (a *ApiHandler) liveness(w http.ResponseWriter, r *http.Request) (*beaconht
 
 	var idxsStr []string
 	if err := json.NewDecoder(r.Body).Decode(&idxsStr); err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("could not decode request body: %w. request body is required.", err))
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("could not decode request body: %w. request body is required", err))
 	}
 	if len(idxsStr) == 0 {
 		return newBeaconResponse([]string{}), nil
@@ -79,12 +79,11 @@ func (a *ApiHandler) liveness(w http.ResponseWriter, r *http.Request) (*beaconht
 	for _, idx := range idxs {
 		liveSet[idx] = &live{Index: int(idx), IsLive: false}
 	}
-	var lastBlockRootProcess common.Hash
 	var lastSlotProcess uint64
 	// we need to obtain the relevant data:
 	// Use the blocks in the epoch as heuristic
 	for i := epoch * a.beaconChainCfg.SlotsPerEpoch; i < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch; i++ {
-		block, err := a.blockReader.ReadBlockBySlot(ctx, tx, i)
+		block, err := a.blockReader.ReadBeaconBlockBodyBySlot(ctx, tx, i)
 		if err != nil {
 			return nil, err
 		}
@@ -92,14 +91,10 @@ func (a *ApiHandler) liveness(w http.ResponseWriter, r *http.Request) (*beaconht
 			continue
 		}
 		updateLivenessWithBlock(block, liveSet)
-		lastBlockRootProcess, err = block.Block.HashSSZ()
-		if err != nil {
-			return nil, err
-		}
 		lastSlotProcess = block.Block.Slot
 	}
 	// use the epoch participation as an additional heuristic
-	currentEpochParticipation, err := a.obtainCurrentEpochParticipationFromEpoch(tx, epoch, lastBlockRootProcess, lastSlotProcess)
+	currentEpochParticipation, err := a.obtainCurrentEpochParticipationFromEpoch(tx, epoch, lastSlotProcess)
 	if err != nil {
 		return nil, err
 	}
@@ -120,14 +115,14 @@ func (a *ApiHandler) liveness(w http.ResponseWriter, r *http.Request) (*beaconht
 	for _, v := range liveSet {
 		resp = append(resp, v)
 	}
-	sort.Slice(resp, func(i, j int) bool {
-		return resp[i].Index < resp[j].Index
+	slices.SortFunc(resp, func(a, b *live) int {
+		return cmp.Compare(a.Index, b.Index)
 	})
 
 	return newBeaconResponse(resp), nil
 }
 
-func (a *ApiHandler) obtainCurrentEpochParticipationFromEpoch(tx kv.Tx, epoch uint64, blockRoot common.Hash, blockSlot uint64) (*solid.ParticipationBitList, error) {
+func (a *ApiHandler) obtainCurrentEpochParticipationFromEpoch(tx kv.Tx, epoch, blockSlot uint64) (*solid.ParticipationBitList, error) {
 	snRoTx := a.caplinStateSnapshots.View()
 	defer snRoTx.Close()
 
@@ -139,7 +134,6 @@ func (a *ApiHandler) obtainCurrentEpochParticipationFromEpoch(tx kv.Tx, epoch ui
 		return curr, err
 	}
 	return currParticipation, nil
-
 }
 
 func updateLivenessWithBlock(block *cltypes.SignedBeaconBlock, liveSet map[uint64]*live) {

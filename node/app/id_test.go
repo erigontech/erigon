@@ -32,7 +32,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestCreateDomains(t *testing.T) {
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		d, err := app.NewDomain[int]()
 		require.NoError(t, err)
 		require.NotNil(t, d)

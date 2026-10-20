@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -168,7 +167,7 @@ func TestDomain_IteratePrefix_PrefersFilesOverDB(t *testing.T) {
 	defer tx.Rollback()
 
 	dt := d.beginForTests()
-	writer := dt.NewWriter()
+	writer := dt.NewWriter(db)
 
 	require.NoError(writer.PutWithPrev(key[:], v0[:], 1, nil))
 	require.NoError(writer.Flush(ctx, tx))
@@ -221,7 +220,7 @@ func TestDomain_IteratePrefix_PrefersFilesOverDB(t *testing.T) {
 	var ramIter btree2.MapIter[string, []dataWithTxNum]
 	err = dt.debugIteratePrefixLatest(prefix, ramIter, func(k, v []byte) (bool, error) {
 		if bytes.Equal(k, key[:]) {
-			gotVal = common.Copy(v)
+			gotVal = bytes.Clone(v)
 		}
 		return true, nil
 	}, roTx)
@@ -264,7 +263,7 @@ func TestDomainLatestIterFile_PrefersFilesOverDB(t *testing.T) {
 	defer tx.Rollback()
 
 	dt := d.beginForTests()
-	writer := dt.NewWriter()
+	writer := dt.NewWriter(db)
 
 	require.NoError(writer.PutWithPrev(key[:], v0[:], 1, nil))
 	require.NoError(writer.Flush(ctx, tx))
@@ -322,7 +321,7 @@ func TestDomainLatestIterFile_PrefersFilesOverDB(t *testing.T) {
 		k, v, err := iter.Next()
 		require.NoError(err)
 		if bytes.Equal(k, key[:]) {
-			gotVal = common.Copy(v)
+			gotVal = bytes.Clone(v)
 		}
 	}
 
@@ -368,7 +367,7 @@ func TestDomainLatestIterFile_PrefersFilesOverDB_LargeValues(t *testing.T) {
 	defer tx.Rollback()
 
 	dt := d.beginForTests()
-	writer := dt.NewWriter()
+	writer := dt.NewWriter(db)
 
 	require.NoError(writer.PutWithPrev(key[:], v0[:], 1, nil))
 	require.NoError(writer.Flush(ctx, tx))
@@ -422,7 +421,7 @@ func TestDomainLatestIterFile_PrefersFilesOverDB_LargeValues(t *testing.T) {
 		k, v, err := iter2.Next()
 		require.NoError(err)
 		if bytes.Equal(k, key[:]) {
-			gotVal = common.Copy(v)
+			gotVal = bytes.Clone(v)
 		}
 	}
 

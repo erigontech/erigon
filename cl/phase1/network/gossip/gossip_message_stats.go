@@ -1,14 +1,9 @@
 package gossip
 
 import (
-	"context"
-	"maps"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
-
-	"github.com/erigontech/erigon/common/log/v3"
 )
 
 type gossipMessageStats struct {
@@ -65,40 +60,4 @@ func (s *gossipMessageStats) addIgnore(name string) {
 		s.ignores = make(map[string]int64)
 	}
 	s.ignores[name]++
-}
-
-func (s *gossipMessageStats) goPrintStats(ctx context.Context) {
-	go func() {
-		duration := time.Minute
-		ticker := time.NewTicker(duration)
-		defer ticker.Stop()
-		times := int64(1) // Start at 1 to avoid division by zero
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				// logger has internal mutex
-				// means need make current mutex lock as short as possible
-				s.statsMutex.Lock()
-				accepts := maps.Clone(s.accepts)
-				rejects := maps.Clone(s.rejects)
-				ignores := maps.Clone(s.ignores)
-				s.statsMutex.Unlock()
-
-				totalSeconds := float64(times * int64(duration.Seconds()))
-				for name, count := range accepts {
-					log.Debug("Gossip Message Accepts Stats", "name", name, "count", count, "rate_sec", float64(count)/totalSeconds)
-				}
-				for name, count := range rejects {
-					log.Debug("Gossip Message Rejects Stats", "name", name, "count", count, "rate_sec", float64(count)/totalSeconds)
-				}
-				for name, count := range ignores {
-					log.Debug("Gossip Message Ignores Stats", "name", name, "count", count, "rate_sec", float64(count)/totalSeconds)
-				}
-				times++
-			}
-		}
-	}()
 }

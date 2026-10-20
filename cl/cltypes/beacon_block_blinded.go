@@ -53,18 +53,18 @@ func NewSignedBlindedBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version 
 	}
 }
 
-func (s *SignedBlindedBeaconBlock) SignedBeaconBlockHeader() *SignedBeaconBlockHeader {
-	bodyRoot, err := s.Block.Body.HashSSZ()
+func (b *SignedBlindedBeaconBlock) SignedBeaconBlockHeader() *SignedBeaconBlockHeader {
+	bodyRoot, err := b.Block.Body.HashSSZ()
 	if err != nil {
 		panic(err)
 	}
 	return &SignedBeaconBlockHeader{
-		Signature: s.Signature,
+		Signature: b.Signature,
 		Header: &BeaconBlockHeader{
-			Slot:          s.Block.Slot,
-			ProposerIndex: s.Block.ProposerIndex,
-			ParentRoot:    s.Block.ParentRoot,
-			Root:          s.Block.StateRoot,
+			Slot:          b.Block.Slot,
+			ProposerIndex: b.Block.ProposerIndex,
+			ParentRoot:    b.Block.ParentRoot,
+			Root:          b.Block.StateRoot,
 			BodyRoot:      bodyRoot,
 		},
 	}
@@ -259,7 +259,7 @@ func NewBlindedBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparam
 	if version.AfterOrEqual(clparams.ElectraVersion) {
 		maxAttSlashing = MaxAttesterSlashingsElectra
 		maxAttestation = MaxAttestationsElectra
-		executionRequests = NewExecutionRequests(beaconCfg)
+		executionRequests = NewExecutionRequestsWithVersion(beaconCfg, version)
 	}
 
 	return &BlindedBeaconBody{
@@ -276,10 +276,11 @@ func NewBlindedBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparam
 		ExecutionChanges:   solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172),
 		BlobKzgCommitments: solid.NewStaticListSSZ[*KZGCommitment](int(beaconCfg.MaxBlobCommittmentsPerBlock), 48),
 		ExecutionRequests:  executionRequests,
-		Version:            0,
+		Version:            version,
 		beaconCfg:          beaconCfg,
 	}
 }
+
 func (b *BlindedBeaconBody) SetVersion(version clparams.StateVersion) *BlindedBeaconBody {
 	b.Version = version
 	if b.ExecutionPayload == nil {
@@ -360,7 +361,7 @@ func (b *BlindedBeaconBody) EncodingSizeSSZ() (size int) {
 		size += b.ExecutionChanges.EncodingSizeSSZ()
 	}
 	if b.Version >= clparams.DenebVersion {
-		size += b.ExecutionChanges.EncodingSizeSSZ()
+		size += b.BlobKzgCommitments.EncodingSizeSSZ()
 	}
 	if b.Version >= clparams.ElectraVersion {
 		if b.ExecutionRequests != nil {
@@ -374,7 +375,7 @@ func (b *BlindedBeaconBody) DecodeSSZ(buf []byte, version int) error {
 	b.Version = clparams.StateVersion(version)
 
 	if len(buf) < b.EncodingSizeSSZ() {
-		return fmt.Errorf("[BeaconBody] err: %s", ssz.ErrLowBufferSize)
+		return fmt.Errorf("[BeaconBody] err: %w", ssz.ErrLowBufferSize)
 	}
 
 	b.ExecutionPayload = NewEth1Header(b.Version)
@@ -385,10 +386,11 @@ func (b *BlindedBeaconBody) DecodeSSZ(buf []byte, version int) error {
 
 	// Post-decode fixup: propagate preset-aware limits to decoded attestations and slashings.
 	if b.beaconCfg != nil && b.Version.AfterOrEqual(clparams.ElectraVersion) {
-		b.Attestations.Range(func(_ int, att *solid.Attestation, _ int) bool {
-			att.SetBeaconConfig(b.beaconCfg)
-			return true
-		})
+		if err := solid.RangeErr(b.Attestations, func(_ int, att *solid.Attestation, _ int) error {
+			return att.ValidateForConfig(b.beaconCfg, b.Version)
+		}); err != nil {
+			return err
+		}
 		b.AttesterSlashings.Range(func(_ int, as *AttesterSlashing, _ int) bool {
 			as.SetVersionWithConfig(b.Version, b.beaconCfg)
 			return true
@@ -487,6 +489,7 @@ func (b *BlindedBeaconBody) Full(txs *solid.TransactionsSSZ, withdrawals *solid.
 func (*BlindedBeaconBody) Static() bool {
 	return false
 }
+
 func (b *BlindedBeaconBody) Clone() clonable.Clonable {
 	return NewBlindedBeaconBody(b.beaconCfg, b.Version)
 }
@@ -559,4 +562,9 @@ func (b *BlindedBeaconBody) GetPayloadAttestations() *solid.ListSSZ[*PayloadAtte
 
 func (b *BlindedBeaconBody) GetParentExecutionRequests() *ExecutionRequests {
 	return nil
+}
+
+// BlockSignature implements ColumnSyncableSignedBlock.
+func (b *SignedBlindedBeaconBlock) BlockSignature() common.Bytes96 {
+	return b.Signature
 }

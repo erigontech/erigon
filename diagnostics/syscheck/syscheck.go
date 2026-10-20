@@ -120,5 +120,4 @@ func CheckKernelAllocationHints(ctx context.Context, log log.Logger) {
 	if b, err := os.ReadFile("/proc/1/cgroup"); err == nil && strings.Contains(string(b), "docker") {
 		log.Info("running under container cgroup; ensure sysctls are applied on the host or via --sysctl in the runtime")
 	}
-
 }

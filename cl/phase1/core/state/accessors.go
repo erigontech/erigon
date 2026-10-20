@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 
 	"github.com/erigontech/erigon/cl/abstract"
@@ -32,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/threading"
 )
 
@@ -50,17 +50,15 @@ func Epoch(b abstract.BeaconStateBasic) uint64 {
 	return GetEpochAtSlot(b.BeaconConfig(), b.Slot())
 }
 
-func IsAggregator(cfg *clparams.BeaconChainConfig, committeeLength, committeeIndex uint64, slotSignature common.Bytes96) bool {
+func IsAggregator(cfg *clparams.BeaconChainConfig, committeeLength uint64, slotSignature common.Bytes96) bool {
 	modulo := max(1, committeeLength/cfg.TargetAggregatorsPerCommittee)
-	hashSlotSignatue := utils.Sha256(slotSignature[:])
+	hashSlotSignatue := crypto.Sha256(slotSignature[:])
 	return binary.LittleEndian.Uint64(hashSlotSignatue[:8])%modulo == 0
 }
 
 // GetTotalBalance return the sum of all balances within the given validator set.
 func GetTotalBalance(b abstract.BeaconStateBasic, validatorSet []uint64) (uint64, error) {
-	var (
-		total uint64
-	)
+	var total uint64
 	for _, validatorIndex := range validatorSet {
 		// Should be in bounds.
 		delta, err := b.ValidatorEffectiveBalance(int(validatorIndex))
@@ -130,7 +128,7 @@ func EligibleValidatorsIndicies(b abstract.BeaconState) (eligibleValidators []ui
 	}
 	previousEpoch := PreviousEpoch(b)
 	// Iterate over all validators and include the active ones that have flag_index enabled and are not slashed.
-	for i := 0; i < numThreads; i++ {
+	for i := range numThreads {
 		workerID := i
 		wp.AddWork(func() error {
 			from := workerID * shardSize
@@ -150,8 +148,18 @@ func EligibleValidatorsIndicies(b abstract.BeaconState) (eligibleValidators []ui
 			return nil
 		})
 	}
-	wp.Execute()
+	// Every job above returns nil unconditionally (the only fallible op inside
+	// panics instead), so Execute can never return a non-nil error here.
+	_ = wp.Execute()
 	// Merge the results from all threads.
+	total := 0
+	for i := range eligibleValidatorsShards {
+		total += len(eligibleValidatorsShards[i])
+	}
+	if total == 0 {
+		return nil
+	}
+	eligibleValidators = make([]uint64, 0, total)
 	for i := range eligibleValidatorsShards {
 		eligibleValidators = append(eligibleValidators, eligibleValidatorsShards[i]...)
 	}
@@ -161,8 +169,8 @@ func EligibleValidatorsIndicies(b abstract.BeaconState) (eligibleValidators []ui
 
 func IsValidIndexedAttestation(b abstract.BeaconStateBasic, att *cltypes.IndexedAttestation) (bool, error) {
 	inds := att.AttestingIndices
-	if inds.Length() == 0 || !solid.IsUint64SortedSet(inds) {
-		return false, errors.New("isValidIndexedAttestation: attesting indices are not sorted or are null")
+	if err := ValidateIndexedAttestationIndices(b.BeaconConfig(), b.Version(), inds); err != nil {
+		return false, err
 	}
 
 	pks := make([][]byte, 0, inds.Length())
@@ -180,22 +188,46 @@ func IsValidIndexedAttestation(b abstract.BeaconStateBasic, att *cltypes.Indexed
 
 	domain, err := b.GetDomain(b.BeaconConfig().DomainBeaconAttester, att.Data.Target.Epoch)
 	if err != nil {
-		return false, fmt.Errorf("unable to get the domain: %v", err)
+		return false, fmt.Errorf("unable to get the domain: %w", err)
 	}
 
 	signingRoot, err := fork.ComputeSigningRoot(att.Data, domain)
 	if err != nil {
-		return false, fmt.Errorf("unable to get signing root: %v", err)
+		return false, fmt.Errorf("unable to get signing root: %w", err)
 	}
 
 	valid, err := bls.VerifyAggregate(att.Signature[:], signingRoot[:], pks)
 	if err != nil {
-		return false, fmt.Errorf("error while validating signature: %v", err)
+		return false, fmt.Errorf("error while validating signature: %w", err)
 	}
 	if !valid {
 		return false, errors.New("invalid aggregate signature")
 	}
 	return true, nil
+}
+
+func ValidateIndexedAttestationIndices(cfg *clparams.BeaconChainConfig, version clparams.StateVersion, inds *solid.RawUint64List) error {
+	if inds == nil || inds.Length() == 0 {
+		return errors.New("isValidIndexedAttestation: attesting indices are not sorted or are null")
+	}
+	if cfg == nil {
+		return errors.New("isValidIndexedAttestation: beacon config is nil")
+	}
+	limit := cfg.MaxValidatorsPerCommittee
+	if version >= clparams.ElectraVersion {
+		if cfg.MaxCommitteesPerSlot != 0 && limit > ^uint64(0)/cfg.MaxCommitteesPerSlot {
+			limit = ^uint64(0)
+		} else {
+			limit *= cfg.MaxCommitteesPerSlot
+		}
+	}
+	if uint64(inds.Length()) > limit {
+		return fmt.Errorf("isValidIndexedAttestation: too many attesting indices: %d > %d", inds.Length(), limit)
+	}
+	if !solid.IsUint64SortedSet(inds) {
+		return errors.New("isValidIndexedAttestation: attesting indices are not sorted or are null")
+	}
+	return nil
 }
 
 // IsValidatorEligibleForActivationQueue returns whether the validator is eligible to be placed into the activation queue.
@@ -306,6 +338,21 @@ func getBalanceAfterWithdrawals(b abstract.BeaconState, validatorIndex uint64, w
 		return balance - totalWithdrawn
 	}
 	return 0
+}
+
+func getBuilderBalanceAfterWithdrawals(balance uint64, builderIndex uint64, withdrawalSets ...[]*cltypes.Withdrawal) uint64 {
+	validatorIndex := ConvertBuilderIndexToValidatorIndex(builderIndex)
+	for _, set := range withdrawalSets {
+		for _, withdrawal := range set {
+			if withdrawal.Validator == validatorIndex {
+				if withdrawal.Amount >= balance {
+					return 0
+				}
+				balance -= withdrawal.Amount
+			}
+		}
+	}
+	return balance
 }
 
 // GetExpectedWithdrawals calculates the expected withdrawals that can be made by validators in the current epoch
@@ -494,14 +541,17 @@ func GetBuildersSweepWithdrawals(b abstract.BeaconState, withdrawalIndex uint64,
 		}
 
 		builder := builders.Get(int(builderIndex))
-		if builder != nil && builder.WithdrawableEpoch <= epoch && builder.Balance > 0 {
-			withdrawals = append(withdrawals, &cltypes.Withdrawal{
-				Index:     withdrawalIndex,
-				Validator: ConvertBuilderIndexToValidatorIndex(builderIndex),
-				Address:   builder.ExecutionAddress,
-				Amount:    builder.Balance,
-			})
-			withdrawalIndex++
+		if builder != nil {
+			balance := getBuilderBalanceAfterWithdrawals(builder.Balance, builderIndex, priorWithdrawals, withdrawals)
+			if builder.WithdrawableEpoch <= epoch && balance > 0 {
+				withdrawals = append(withdrawals, &cltypes.Withdrawal{
+					Index:     withdrawalIndex,
+					Validator: ConvertBuilderIndexToValidatorIndex(builderIndex),
+					Address:   builder.ExecutionAddress,
+					Amount:    balance,
+				})
+				withdrawalIndex++
+			}
 		}
 
 		builderIndex = (builderIndex + 1) % uint64(buildersLen)
@@ -521,7 +571,7 @@ func GetNextSyncCommitteeIndices(b *CachingBeaconState) ([]uint64, error) {
 	mixPosition := (epoch + conf.EpochsPerHistoricalVector - conf.MinSeedLookahead - 1) %
 		conf.EpochsPerHistoricalVector
 	mix := b.GetRandaoMix(int(mixPosition))
-	seed := shuffling.GetSeed(conf, mix, epoch, conf.DomainSyncCommittee)
+	seed := shuffling.GetSeed(mix, epoch, conf.DomainSyncCommittee)
 
 	indices := b.GetActiveValidatorsIndices(epoch)
 	return shuffling.ComputeBalanceWeightedSelection(b.BeaconState, indices, seed, conf.SyncCommitteeSize, true)

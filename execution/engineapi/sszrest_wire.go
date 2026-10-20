@@ -11,7 +11,6 @@ package engineapi
 import (
 	"encoding/binary"
 	"fmt"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -22,7 +21,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
-	"github.com/erigontech/erigon/execution/types"
 )
 
 const (
@@ -34,8 +32,6 @@ const (
 	sszKZGBytes               = 48
 	sszCellsPerExtBlob        = 128
 )
-
-var mainnetBeaconCfg = &clparams.MainnetBeaconConfig
 
 func hashListValues(l solid.HashListSSZ) []common.Hash {
 	if l == nil {
@@ -179,7 +175,7 @@ func decodeCapabilities(buf []byte, version int) ([]string, error) {
 	}
 	offsets := make([]uint32, count+1)
 	offsets[count] = uint32(len(buf))
-	for i := 0; i < count; i++ {
+	for i := range count {
 		offsets[i] = binary.LittleEndian.Uint32(buf[i*4:])
 		if i > 0 && offsets[i] < offsets[i-1] {
 			return nil, fmt.Errorf("capabilities: non-monotonic offset %d", i)
@@ -189,7 +185,7 @@ func decodeCapabilities(buf []byte, version int) ([]string, error) {
 		}
 	}
 	out := make([]string, 0, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		capability := solid.NewByteListSSZ(sszMaxCapabilityNameBytes)
 		if err := capability.DecodeSSZ(buf[offsets[i]:offsets[i+1]], version); err != nil {
 			return nil, err
@@ -221,13 +217,12 @@ func decodeClientVersionRequest(buf []byte) (*engine_types.ClientVersionV1, erro
 	return version, nil
 }
 
-func blockValueHash(v *hexutil.Big) common.Hash {
+func blockValueHash(v *hexutil.U256) common.Hash {
 	var out common.Hash
 	if v == nil {
 		return out
 	}
-	u := uint256.MustFromBig((*big.Int)(v))
-	b := u.Bytes32()
+	b := (*uint256.Int)(v).Bytes32()
 	for i := range b {
 		out[i] = b[31-i]
 	}
@@ -242,13 +237,9 @@ func newBlobsBundleSSZ(b *engine_types.BlobsBundle, version clparams.StateVersio
 	return b
 }
 
-func encodeGetPayloadResponse(resp *engine_types.GetPayloadResponse, version clparams.StateVersion) ([]byte, error) {
+func encodeGetPayloadResponse(cfg *clparams.BeaconChainConfig, resp *engine_types.GetPayloadResponse, version clparams.StateVersion) ([]byte, error) {
 	payload := resp.ExecutionPayload
 	payload.SSZVersion = version
-	executionRequests, err := executionRequestsFromList(resp.ExecutionRequests, version)
-	if err != nil {
-		return nil, err
-	}
 	blockValue := blockValueHash(resp.BlockValue)
 	blobsBundle := newBlobsBundleSSZ(resp.BlobsBundle, version)
 	switch version {
@@ -257,35 +248,16 @@ func encodeGetPayloadResponse(resp *engine_types.GetPayloadResponse, version clp
 	case clparams.DenebVersion:
 		return ssz2.MarshalSSZ(nil, payload, blockValue[:], blobsBundle, resp.ShouldOverrideBuilder)
 	default:
+		executionRequests, err := executionRequestsFromList(cfg, resp.ExecutionRequests, version)
+		if err != nil {
+			return nil, err
+		}
 		return ssz2.MarshalSSZ(nil, payload, blockValue[:], blobsBundle, resp.ShouldOverrideBuilder, executionRequests)
 	}
 }
 
-func executionRequestsFromList(requests []hexutil.Bytes, version clparams.StateVersion) (*cltypes.ExecutionRequests, error) {
-	out := cltypes.NewExecutionRequests(mainnetBeaconCfg)
-	for _, request := range requests {
-		if len(request) == 0 {
-			continue
-		}
-		data := request[1:]
-		switch request[0] {
-		case types.DepositRequestType:
-			if err := out.Deposits.DecodeSSZ(data, int(version)); err != nil {
-				return nil, err
-			}
-		case types.WithdrawalRequestType:
-			if err := out.Withdrawals.DecodeSSZ(data, int(version)); err != nil {
-				return nil, err
-			}
-		case types.ConsolidationRequestType:
-			if err := out.Consolidations.DecodeSSZ(data, int(version)); err != nil {
-				return nil, err
-			}
-		default:
-			return nil, fmt.Errorf("unknown execution request type %d", request[0])
-		}
-	}
-	return out, nil
+func executionRequestsFromList(cfg *clparams.BeaconChainConfig, requests []hexutil.Bytes, version clparams.StateVersion) (*cltypes.ExecutionRequests, error) {
+	return cltypes.DecodeExecutionRequestsList(cfg, requests, version)
 }
 
 func encodeGetBlobsV1Response(blobs []*engine_types.BlobAndProofV1) ([]byte, error) {
@@ -314,4 +286,12 @@ func encodeGetBlobsV3Response(blobs []*engine_types.BlobAndProofV2) ([]byte, err
 		list.Append(engine_types.NewNullableBlobAndProofV2(blob))
 	}
 	return ssz2.MarshalSSZ(nil, list)
+}
+
+func encodeGetInclusionListResponse(txs []hexutil.Bytes) ([]byte, error) {
+	raw := make([][]byte, len(txs))
+	for i, tx := range txs {
+		raw[i] = tx
+	}
+	return solid.NewTransactionsSSZFromTransactions(raw).EncodeSSZ(nil)
 }

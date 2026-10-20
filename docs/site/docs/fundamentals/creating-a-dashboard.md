@@ -1,7 +1,7 @@
 ---
 title: "Creating a dashboard"
 description: "Prometheus metrics export and Grafana dashboard setup for node monitoring."
-sidebar_position: 17
+sidebar_position: 22
 ---
 
 # Creating a dashboard

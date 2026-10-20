@@ -105,14 +105,14 @@ func NewFetch(
 		pool:                 pool,
 		db:                   db,
 		stateChangesClient:   stateChangesClient,
-		stateChangesParseCtx: NewTxnParseContext(chainID).ChainIDRequired(), //TODO: change ctx if rules changed
+		stateChangesParseCtx: NewTxnParseContext(chainID).ChainIDRequired(), // TODO: change ctx if rules changed
 		pooledTxnsParseCtx:   NewTxnParseContext(chainID).ChainIDRequired(),
 		announcements:        announcements,
 		wg:                   options.p2pFetcherWg,
 		logger:               logger,
 	}
-	f.pooledTxnsParseCtx.ValidateRLP(f.pool.ValidateSerializedTxn)
-	f.stateChangesParseCtx.ValidateRLP(f.pool.ValidateSerializedTxn)
+	f.pooledTxnsParseCtx.ValidateRLP(ValidateSerializedTxn)
+	f.stateChangesParseCtx.ValidateRLP(ValidateSerializedTxn)
 
 	return f
 }
@@ -210,6 +210,12 @@ func (f *Fetch) checkPooledTxnAnnouncement(pid *typesproto.H512, slot *TxnSlot) 
 	return nil
 }
 
+func (f *Fetch) penalizePeer(ctx context.Context, sentryClient sentryproto.SentryClient, peerID *typesproto.H512) {
+	if _, err := sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: peerID, Penalty: sentryproto.PenaltyKind_Kick}); err != nil {
+		f.logger.Debug("[txpool] penalize peer failed", "peer", peerID, "err", err)
+	}
+}
+
 // checkBlobSidecar verifies EIP-4844 per-commitment invariants on a blob tx
 // wrapper that arrived from a peer. Returns an error when the sidecar's
 // commitments don't match the tx's blob_versioned_hashes — the peer that
@@ -251,22 +257,18 @@ func (f *Fetch) threadSafeParseStateChangeTxn(cb func(*TxnParseContext) error) e
 // ConnectSentries initialises connection to the sentry
 func (f *Fetch) ConnectSentries() {
 	for i := range f.sentryClients {
-		f.connectWg.Add(2)
-		go func(i int) {
-			defer f.connectWg.Done()
-			f.receiveMessageLoop(f.sentryClients[i])
-		}(i)
-		go func(i int) {
-			defer f.connectWg.Done()
-			f.receivePeerLoop(f.sentryClients[i])
-		}(i)
+		client := f.sentryClients[i]
+		f.connectWg.Go(func() {
+			f.receiveMessageLoop(client)
+		})
+		f.connectWg.Go(func() {
+			f.receivePeerLoop(client)
+		})
 	}
 }
 
 func (f *Fetch) ConnectCore() {
-	f.connectWg.Add(1)
-	go func() {
-		defer f.connectWg.Done()
+	f.connectWg.Go(func() {
 		for {
 			select {
 			case <-f.ctx.Done():
@@ -285,7 +287,7 @@ func (f *Fetch) ConnectCore() {
 				f.logger.Warn("[txpool.handleStateChanges]", "err", err)
 			}
 		}
-	}()
+	})
 }
 
 // Wait blocks until all goroutines spawned by ConnectCore and ConnectSentries have exited.
@@ -428,18 +430,9 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 			return nil
 		}
 
-		// Skip duplicate tx-body messages (TRANSACTIONS_66, POOLED_TRANSACTIONS_66):
-		// blob-tx verification is the expensive work worth amortizing. We must NOT
-		// dedupe announcements (NEW_POOLED_TRANSACTION_HASHES_66/68) across peers —
-		// when one peer delivers a bad tx for an announced hash and gets kicked,
-		// the tx fetcher falls back to a different peer that announced the same
-		// hash, which only works if each peer's announcement is actually processed.
-		// Same-peer repeated announcements are not deduped here either: the
-		// dominant cost per announcement (a FilterKnownIdHashes call plus one
-		// GET_POOLED_TRANSACTIONS_66 per unknown hash) is self-limiting — once
-		// the pool has ingested the tx, FilterKnownIdHashes returns empty for
-		// all subsequent announcements. Per-peer announcement spam before that
-		// is a peer-reputation concern, not a fetcher dedup one.
+		// Deduplicate transaction bodies to avoid repeated blob verification.
+		// Keep announcements for peer fallback. Replies with cached bodies are still
+		// dropped before the pool can revalidate their transactions.
 		switch req.Id {
 		case sentryproto.MessageId_TRANSACTIONS_66, sentryproto.MessageId_POOLED_TRANSACTIONS_66:
 			if _, seen := seenLRU.Get(req.Data); seen {
@@ -475,14 +468,14 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		hashCount, pos, err := ParseHashesCount(req.Data, 0)
 		if err != nil {
 			f.logger.Debug("[txpool] penalizing peer for malformed NewPooledTransactionHashes66", "peer", req.PeerId, "err", err)
-			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+			f.penalizePeer(ctx, sentryClient, req.PeerId)
 			return nil
 		}
 
 		if hashCount > maxHashesPerMsg {
 			f.logger.Warn("Oversized hash announcement",
 				"peer", req.PeerId, "count", hashCount)
-			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick}) // Disconnect peer
+			f.penalizePeer(ctx, sentryClient, req.PeerId)
 			return nil
 		}
 
@@ -490,7 +483,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		for i := 0; i < len(hashes); i += 32 {
 			if _, pos, err = ParseHash(req.Data, pos, hashes[i:]); err != nil {
 				f.logger.Debug("[txpool] penalizing peer for malformed NewPooledTransactionHashes66", "peer", req.PeerId, "err", err)
-				sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+				f.penalizePeer(ctx, sentryClient, req.PeerId)
 				return nil
 			}
 		}
@@ -516,13 +509,13 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		if count, err := peekAnnouncementCount(req.Data); err == nil && count > maxHashesPerMsg {
 			f.logger.Warn("Oversized hash announcement",
 				"peer", req.PeerId, "count", count)
-			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+			f.penalizePeer(ctx, sentryClient, req.PeerId)
 			return nil
 		}
 		txTypes, sizes, hashes, _, err := parseAnnouncements(req.Data, 0)
 		if err != nil {
 			f.logger.Debug("[txpool] penalizing peer for malformed NewPooledTransactionHashes68", "peer", req.PeerId, "err", err)
-			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+			f.penalizePeer(ctx, sentryClient, req.PeerId)
 			return nil
 		}
 
@@ -550,14 +543,14 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 			}
 		}
 	case sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:
-		//TODO: handleInboundMessage is single-threaded - means it can accept as argument couple buffers (or analog of txParseContext). Protobuf encoding will copy data anyway, but DirectClient doesn't
+		// TODO: handleInboundMessage is single-threaded - means it can accept as argument couple buffers (or analog of txParseContext). Protobuf encoding will copy data anyway, but DirectClient doesn't
 		var encodedRequest []byte
 		var messageID sentryproto.MessageId
 		messageID = sentryproto.MessageId_POOLED_TRANSACTIONS_66
 		requestID, hashes, _, err := ParseGetPooledTransactions66(req.Data, 0, nil)
 		if err != nil {
 			f.logger.Debug("[txpool] penalizing peer for malformed GetPooledTransactions66", "peer", req.PeerId, "err", err)
-			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+			f.penalizePeer(ctx, sentryClient, req.PeerId)
 			return nil
 		}
 
@@ -623,7 +616,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 					return err
 				}
 				f.logger.Debug("[txpool] penalizing peer for malformed Transactions66", "peer", req.PeerId, "err", err)
-				sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+				f.penalizePeer(ctx, sentryClient, req.PeerId)
 				return nil
 			}
 		case sentryproto.MessageId_POOLED_TRANSACTIONS_66:
@@ -646,7 +639,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 					return err
 				}
 				f.logger.Debug("[txpool] penalizing peer for malformed PooledTransactions66", "peer", req.PeerId, "err", err)
-				sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+				f.penalizePeer(ctx, sentryClient, req.PeerId)
 				return nil
 			}
 		default:
@@ -661,13 +654,13 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 			if req.Id == sentryproto.MessageId_POOLED_TRANSACTIONS_66 {
 				if err := f.checkPooledTxnAnnouncement(req.PeerId, txns.Txns[i]); err != nil {
 					f.logger.Debug("[txpool] penalizing peer for mismatched tx announcement", "peer", req.PeerId, "err", err)
-					sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+					f.penalizePeer(ctx, sentryClient, req.PeerId)
 					return nil
 				}
 			}
 			if err := f.checkBlobSidecar(txns.Txns[i]); err != nil {
 				f.logger.Debug("[txpool] penalizing peer for bad blob sidecar", "peer", req.PeerId, "err", err)
-				sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+				f.penalizePeer(ctx, sentryClient, req.PeerId)
 				return nil
 			}
 		}
@@ -745,7 +738,7 @@ func (f *Fetch) receivePeer(sentryClient sentryproto.SentryClient) error {
 		if req == nil {
 			return nil
 		}
-		if err = f.handleNewPeer(req); err != nil {
+		if err := f.handleNewPeer(req); err != nil {
 			return err
 		}
 		if f.wg != nil {
@@ -758,8 +751,7 @@ func (f *Fetch) handleNewPeer(req *sentryproto.PeerEvent) error {
 	if req == nil {
 		return nil
 	}
-	switch req.EventId {
-	case sentryproto.PeerEvent_Connect:
+	if req.EventId == sentryproto.PeerEvent_Connect {
 		f.pool.AddNewGoodPeer(req.PeerId)
 	}
 
@@ -809,7 +801,6 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 					f.logger.Debug("[txpool.fetch] stream.Recv", "dir", change.Direction, "txnType", txnType, "index", i, "err", err)
 					continue // 1 txn handling error must not stop batch processing
 				}
-
 			}
 		} else if change.Direction == remoteproto.Direction_UNWIND {
 			for i := range change.Txs {

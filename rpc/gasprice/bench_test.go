@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 const txsPerBlock = 100
@@ -59,9 +60,9 @@ func newTestBackendN(tb testing.TB, n int) *execmoduletester.ExecModuleTester {
 	}
 	signer := types.LatestSigner(gspec.Config)
 	m := execmoduletester.New(tb, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
-	ch, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, n, func(i int, b *blockgen.BlockGen) {
+	ch, err := m.GenerateChain(n, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
-		for j := 0; j < txsPerBlock; j++ {
+		for j := range txsPerBlock {
 			gasPrice := uint256.NewInt(uint64(j+1) * uint64(common.GWei))
 			tx, txErr := types.SignTx(
 				types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"),
@@ -94,8 +95,7 @@ func BenchmarkSuggestTipCap(b *testing.B) {
 	m := newTestBackendN(b, numBlocks)
 	defer m.Close()
 
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false,
-		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewLatestBatchCache(), m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 
 	cases := []struct {
 		name        string
@@ -129,7 +129,7 @@ func BenchmarkSuggestTipCap(b *testing.B) {
 				// Fresh cache every iteration → cold path, no cache hits.
 				cache := jsonrpc.NewGasPriceCache()
 				oracle := gasprice.NewOracle(
-					jsonrpc.NewGasPriceOracleBackend(dbArg, tx, baseApi),
+					jsonrpc.NewGasPriceOracleBackend(dbArg, rpchelper.PinToOverlay(tx, nil), baseApi),
 					cfg,
 					cache,
 					nil,
@@ -158,8 +158,7 @@ func BenchmarkFeeHistory(b *testing.B) {
 	m := newTestBackendN(b, numBlocks)
 	defer m.Close()
 
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false,
-		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewLatestBatchCache(), m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 
 	gasCache := jsonrpc.NewGasPriceCache()
 
@@ -189,7 +188,7 @@ func BenchmarkFeeHistory(b *testing.B) {
 				// starts cold every time (nil historyCache).  This ensures we
 				// measure DB round-trips, not cache hits.
 				oracle := gasprice.NewOracle(
-					jsonrpc.NewGasPriceOracleBackend(m.DB, tx, baseApi),
+					jsonrpc.NewGasPriceOracleBackend(m.DB, rpchelper.PinToOverlay(tx, nil), baseApi),
 					gaspricecfg.Config{MaxHeaderHistory: 0, MaxBlockHistory: 0},
 					gasCache,
 					nil, // cold: no history cache

@@ -9,6 +9,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -27,8 +28,10 @@ const (
 
 const AA_GAS_PENALTY_PCT = 10
 
-var AA_ENTRY_POINT = accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000007560"))
-var AA_SENDER_CREATOR = accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000ffff7560"))
+var (
+	AA_ENTRY_POINT    = accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000007560"))
+	AA_SENDER_CREATOR = accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000ffff7560"))
+)
 
 type AccountAbstractionTransaction struct {
 	TransactionMisc
@@ -102,6 +105,7 @@ func (tx *AccountAbstractionTransaction) GetChainID() *uint256.Int {
 func (tx *AccountAbstractionTransaction) GetNonce() uint64 {
 	return tx.Nonce
 }
+
 func (tx *AccountAbstractionTransaction) GetPrice() *uint256.Int {
 	return tx.Tip
 }
@@ -114,8 +118,26 @@ func (tx *AccountAbstractionTransaction) GetFeeCap() *uint256.Int {
 	return tx.FeeCap
 }
 
+// TotalGasLimit reports whether base plus the declared gas limits fits in a uint64.
+func (tx *AccountAbstractionTransaction) TotalGasLimit(base uint64) (uint64, bool) {
+	total := base
+	for _, gas := range [...]uint64{tx.ValidationGasLimit, tx.PaymasterValidationGasLimit, tx.GasLimit, tx.PostOpGasLimit} {
+		sum, overflow := math.SafeAdd(total, gas)
+		if overflow {
+			return 0, false
+		}
+		total = sum
+	}
+	return total, true
+}
+
 func (tx *AccountAbstractionTransaction) GetGasLimit() uint64 {
-	return params.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit
+	// Saturate: the interface cannot report overflow, and a wrapped-small total would pass gas checks.
+	total, ok := tx.TotalGasLimit(params.TxAAGas)
+	if !ok {
+		return math.MaxUint64
+	}
+	return total
 }
 
 func (tx *AccountAbstractionTransaction) GetTipCap() *uint256.Int {
@@ -147,10 +169,11 @@ func (tx *AccountAbstractionTransaction) Type() byte {
 }
 
 func (tx *AccountAbstractionTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
+	// No blobHashes: an AA txn carries no blobs, and a non-nil slice would make
+	// the message look blob-carrying to EIP-4844 validation.
 	return &Message{
-		to:         accounts.NilAddress,
-		gasPrice:   *tx.FeeCap,
-		blobHashes: []common.Hash{},
+		to:       accounts.NilAddress,
+		gasPrice: *tx.FeeCap,
 	}, nil
 }
 
@@ -162,21 +185,10 @@ func (tx *AccountAbstractionTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(AccountAbstractionTxType, []any{
-		tx.ChainID,
-		tx.NonceKey, tx.Nonce,
-		tx.SenderAddress, tx.SenderValidationData,
-		tx.Deployer, tx.DeployerData,
-		tx.Paymaster, tx.PaymasterData,
-		tx.ExecutionData,
-		tx.BuilderFee,
-		tx.Tip, tx.FeeCap,
-		tx.ValidationGasLimit, tx.PaymasterValidationGasLimit, tx.PostOpGasLimit,
-		tx.GasLimit,
-		tx.AccessList,
-		tx.Authorizations,
+	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
+	hash := prefixedPayloadHash(AccountAbstractionTxType, func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize, accessListLen, authorizationsLen)
 	})
-
 	tx.hash.Store(&hash)
 	return hash
 }
@@ -382,12 +394,12 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 	}
 
 	tx.ChainID = new(uint256.Int)
-	if err = s.ReadUint256(tx.ChainID); err != nil {
+	if err := s.ReadUint256(tx.ChainID); err != nil {
 		return err
 	}
 
 	tx.NonceKey = new(uint256.Int)
-	if err = s.ReadUint256(tx.NonceKey); err != nil {
+	if err := s.ReadUint256(tx.NonceKey); err != nil {
 		return err
 	}
 
@@ -396,7 +408,7 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 	}
 
 	var senderAddress common.Address
-	if err = s.ReadBytes(senderAddress[:]); err != nil {
+	if err := s.ReadBytes(senderAddress[:]); err != nil {
 		return err
 	}
 	tx.SenderAddress = accounts.InternAddress(senderAddress)
@@ -404,7 +416,7 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if err = DecodeOptionalAddress(&tx.Deployer, s); err != nil {
+	if err := DecodeOptionalAddress(&tx.Deployer, s); err != nil {
 		return err
 	}
 
@@ -412,7 +424,7 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if err = DecodeOptionalAddress(&tx.Paymaster, s); err != nil {
+	if err := DecodeOptionalAddress(&tx.Paymaster, s); err != nil {
 		return err
 	}
 
@@ -425,17 +437,17 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 	}
 
 	tx.BuilderFee = new(uint256.Int)
-	if err = s.ReadUint256(tx.BuilderFee); err != nil {
+	if err := s.ReadUint256(tx.BuilderFee); err != nil {
 		return err
 	}
 
 	tx.Tip = new(uint256.Int)
-	if err = s.ReadUint256(tx.Tip); err != nil {
+	if err := s.ReadUint256(tx.Tip); err != nil {
 		return err
 	}
 
 	tx.FeeCap = new(uint256.Int)
-	if err = s.ReadUint256(tx.FeeCap); err != nil {
+	if err := s.ReadUint256(tx.FeeCap); err != nil {
 		return err
 	}
 
@@ -457,13 +469,13 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 
 	// decode AccessList
 	tx.AccessList = AccessList{}
-	if err = decodeAccessList(&tx.AccessList, s); err != nil {
+	if err := decodeAccessList(&tx.AccessList, s); err != nil {
 		return err
 	}
 
 	// decode authorizations
 	tx.Authorizations = make([]Authorization, 0)
-	if err = decodeAuthorizations(&tx.Authorizations, s); err != nil {
+	if err := decodeAuthorizations(&tx.Authorizations, s); err != nil {
 		return err
 	}
 
@@ -503,7 +515,7 @@ func (tx *AccountAbstractionTransaction) PreTransactionGasCost(rules *chain.Rule
 		IsEIP7623:         rules.IsPrague,
 		IsEIP7976:         rules.IsAmsterdam,
 		IsEIP7981:         rules.IsAmsterdam,
-		IsEIP8037:         rules.IsAmsterdam,
+		IsEIP2780:         rules.IsAmsterdam,
 		IsAATxn:           true,
 	})
 
@@ -511,7 +523,7 @@ func (tx *AccountAbstractionTransaction) PreTransactionGasCost(rules *chain.Rule
 		return 0, errors.New("overflow")
 	}
 
-	return intrinsicGasResult.RegularGas, nil
+	return intrinsicGasResult.ExecutionGas, nil
 }
 
 func (tx *AccountAbstractionTransaction) DeployerFrame(rules *chain.Rules, hasEIP3860 bool) *Message {

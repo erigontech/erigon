@@ -24,19 +24,24 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"golang.org/x/sync/semaphore"
+	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
@@ -100,39 +105,44 @@ func GetBlockHashFromMissingSegmentError(err error) (common.Hash, bool) {
 // OnNewBlock is intentionally a no-op: in the embedded (non-remote) rpcdaemon
 // the SD is the authoritative source, so the coherent cache's state-tracking
 // machinery is unnecessary.
-//
-// This shim predates SharedDomains' current capabilities and will be simplified
-// as part of #19623 (2-cache IBS rationalization) once the StateReader/CacheView
-// interfaces stabilize. See also #19798 (event stream extraction) and #19855
-// (TransactionState/BlockState separation).
 type Cache struct {
 	execModule  *ExecModule
-	publishedSD func() *execctx.SharedDomains // returns the latest published SD from Events (for background commit)
+	publishedSD func() *execctx.SharedDomains // returns the latest published SD from Events
 }
 
 // SetPublishedSD wires the Cache to fall back to the published SD from Events
-// when the exec module's currentContext is nil (e.g. during background commit).
+// when the exec module's currentContext is nil (e.g. while an FCU commits).
 func (c *Cache) SetPublishedSD(provider func() *execctx.SharedDomains) {
 	c.publishedSD = provider
 }
 
-var _ kvcache.Cache = (*Cache)(nil)         // compile-time interface check
-var _ kvcache.CacheView = (*CacheView)(nil) // compile-time interface check
+var (
+	_ kvcache.Cache     = (*Cache)(nil)     // compile-time interface check
+	_ kvcache.CacheView = (*CacheView)(nil) // compile-time interface check
+)
 
-func (c *Cache) View(_ context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
-	var context *execctx.SharedDomains
+func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
+	var sd *execctx.SharedDomains
+	var stateCache *cache.StateCache
 	if c.execModule != nil {
+		stateCache = c.execModule.stateCache
 		c.execModule.lock.RLock()
-		context = c.execModule.currentContext
+		sd = c.execModule.currentContext
 		c.execModule.lock.RUnlock()
 	}
-	// Fall back to the published SD from Events during background commits
+	// Fall back to the published SD from Events while an FCU commits
 	// (currentContext is nil but the SD is still valid in memory).
-	if context == nil && c.publishedSD != nil {
-		context = c.publishedSD()
+	if sd == nil && c.publishedSD != nil {
+		sd = c.publishedSD()
 	}
 
-	return &CacheView{context: context, tx: tx}, nil
+	var view *CacheView
+	if sd != nil {
+		view = &CacheView{context: sd, getter: sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})}
+	} else {
+		view = &CacheView{getter: execctx.NewCachedTemporalTxStateGetter(tx, stateCache)}
+	}
+	return view, nil
 }
 func (c *Cache) OnNewBlock(sc *remoteproto.StateChangeBatch) {}
 func (c *Cache) Evict() int                                  { return 0 }
@@ -143,27 +153,22 @@ func (c *Cache) ValidateCurrentRoot(_ context.Context, _ kv.TemporalTx) (*kvcach
 
 type CacheView struct {
 	context *execctx.SharedDomains
-	tx      kv.TemporalTx
+	// getter is built once per view: it carries the per-tx cache ReadView, so
+	// per-read getter construction would cost an allocation on every call.
+	getter execctxapi.StateGetter
 }
 
 func (c *CacheView) Get(k []byte) ([]byte, error) {
-	var getter kv.TemporalGetter = c.tx
-	if c.context != nil {
-		getter = c.context.AsGetter(c.tx)
-	}
 	if len(k) == 20 {
-		v, _, err := getter.GetLatest(kv.AccountsDomain, k)
+		v, _, err := c.getter.GetLatest(kv.AccountsDomain, k, kv.GetLatestOptions{})
 		return v, err
 	}
-	v, _, err := getter.GetLatest(kv.StorageDomain, k)
+	v, _, err := c.getter.GetLatest(kv.StorageDomain, k, kv.GetLatestOptions{})
 	return v, err
 }
+
 func (c *CacheView) GetCode(k []byte) ([]byte, error) {
-	var getter kv.TemporalGetter = c.tx
-	if c.context != nil {
-		getter = c.context.AsGetter(c.tx)
-	}
-	v, _, err := getter.GetLatest(kv.CodeDomain, k)
+	v, _, err := c.getter.GetLatest(kv.CodeDomain, k, kv.GetLatestOptions{})
 	return v, err
 }
 
@@ -177,85 +182,100 @@ func (c *CacheView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error
 	return nil, false, nil
 }
 
-func (c *CacheView) HasStorage(address common.Address) (bool, error) {
-	var getter kv.TemporalGetter = c.tx
-	if c.context != nil {
-		getter = c.context.AsGetter(c.tx)
-	}
-	_, _, hasStorage, err := getter.HasPrefix(kv.StorageDomain, address[:])
-	return hasStorage, err
-}
-
 type ExecModule struct {
-	bacgroundCtx context.Context
+	backgroundCtx context.Context
 	// Snapshots + MDBX
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 
 	// MDBX database
-	db               kv.TemporalRwDB // main database
+	db kv.TemporalRwDB // main database
+	// semaphore is the module's single mutual-exclusion domain: it guards the
+	// pipeline Sync and all FCU state. Ops either TryAcquire and report Busy
+	// (retried by the CL) or block, and the background FCU commit/prune
+	// goroutines inherit the semaphore, releasing it only when their work is done.
 	semaphore        *semaphore.Weighted
 	forkValidator    *ForkValidator
 	pipelineExecutor *PipelineExecutor
 
 	logger log.Logger
 	// Block building
-	nextPayloadId  uint64
-	lastParameters *builder.Parameters
-	builderFunc    builder.BlockBuilderFunc
-	builders       map[uint64]*builder.BlockBuilder
+	nextPayloadId       uint64
+	builderFunc         builder.BlockBuilderFunc
+	inclusionListFunc   builder.InclusionListFunc
+	builders            map[uint64]*builderEntry
+	buildersByTimestamp map[uint64]uint64
 
 	// Changes accumulator
 	hook  *stageloop.Hook
 	accum *Accumulation
 
 	// configuration
-	config  *chain.Config
-	syncCfg ethconfig.Sync
+	config          *chain.Config
+	syncCfg         ethconfig.Sync
+	experimentalBAL bool
 	// rules engine
-	engine rules.Engine
+	engine         rules.Engine
+	balRegenerator *bal.Regenerator
 
 	fcuBackgroundPrune      bool
-	fcuBackgroundCommit     bool
 	onlySnapDownloadOnStart bool
+	nextForkActivated       bool
 	// gas-weighted EWMA: accumulate gas and time separately so near-empty blocks don't skew the average
 	accumGasMgas float64
 	accumTimeSec float64
 
 	lock           sync.RWMutex
 	currentContext *execctx.SharedDomains
-	publishedSD    func() *execctx.SharedDomains // fallback for background commit
+	publishedSD    func() *execctx.SharedDomains // fallback while an FCU commits
 
 	// stateCache is a cache for state data (accounts, storage, code)
 	stateCache  *cache.StateCache
 	readAheader *exec.BlockReadAheader
+
+	stateTransitionObserver StateTransitionObserver
 
 	stopNode func() error
 }
 
 var _ ExecutionModule = (*ExecModule)(nil) // compile-time interface check
 
+// ExecModuleOption configures execution-module construction.
+type ExecModuleOption func(*ExecModule)
+
+// WithStateTransitionObserver enables deterministic execution lifecycle hooks
+// for integration tests.
+func WithStateTransitionObserver(observer StateTransitionObserver) ExecModuleOption {
+	return func(module *ExecModule) {
+		module.stateTransitionObserver = observer
+	}
+}
+
 func NewExecModule(
 	ctx context.Context,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	db kv.TemporalRwDB,
 	pipelineExecutor *PipelineExecutor,
 	currentBlockNumber uint64,
 	config *chain.Config,
 	builderFunc builder.BlockBuilderFunc,
+	inclusionListFunc builder.InclusionListFunc,
 	hook *stageloop.Hook,
 	accum *Accumulation,
 	stateCache *Cache,
+	stateCacheBudget datasize.ByteSize,
 	logger log.Logger,
 	engine rules.Engine,
 	syncCfg ethconfig.Sync,
+	experimentalBAL bool,
 	fcuBackgroundPrune bool,
-	fcuBackgroundCommit bool,
 	onlySnapDownloadOnStart bool,
 	readAheader *exec.BlockReadAheader,
 	stopNode func() error,
+	opts ...ExecModuleOption,
 ) *ExecModule {
-	domainCache := cache.NewDefaultStateCache()
-	forkValidator := newForkValidator(ctx, currentBlockNumber, pipelineExecutor, blockReader, syncCfg.MaxReorgDepth)
+	domainCache := newDomainStateCache(stateCacheBudget)
+	execctx.GuardAggregatorForCache(db, domainCache)
+	forkValidator := newForkValidator(ctx, currentBlockNumber, pipelineExecutor, blockReader, syncCfg.MaxReorgDepth, syncCfg.SlowBlockThreshold)
 
 	em := &ExecModule{
 		blockReader:             blockReader,
@@ -263,21 +283,34 @@ func NewExecModule(
 		logger:                  logger,
 		forkValidator:           forkValidator,
 		pipelineExecutor:        pipelineExecutor,
-		builders:                make(map[uint64]*builder.BlockBuilder),
+		builders:                make(map[uint64]*builderEntry),
+		buildersByTimestamp:     make(map[uint64]uint64),
 		builderFunc:             builderFunc,
+		inclusionListFunc:       inclusionListFunc,
 		config:                  config,
 		semaphore:               semaphore.NewWeighted(1),
 		hook:                    hook,
 		accum:                   accum,
 		engine:                  engine,
+		balRegenerator:          bal.NewRegenerator(blockReader, engine, logger),
 		syncCfg:                 syncCfg,
-		bacgroundCtx:            ctx,
+		experimentalBAL:         experimentalBAL,
+		backgroundCtx:           ctx,
 		fcuBackgroundPrune:      fcuBackgroundPrune,
-		fcuBackgroundCommit:     fcuBackgroundCommit,
 		onlySnapDownloadOnStart: onlySnapDownloadOnStart,
 		stateCache:              domainCache,
 		readAheader:             readAheader,
 		stopNode:                stopNode,
+	}
+	for _, opt := range opts {
+		opt(em)
+	}
+
+	// Wire the process-global state cache into the read-ahead so its
+	// prefetches populate the same hashmap that SharedDomains.GetLatest
+	// probes on the EVM hot path. Reth's "same hashmap" pattern.
+	if readAheader != nil {
+		readAheader.SetStateCache(domainCache)
 	}
 
 	if stateCache != nil {
@@ -286,8 +319,8 @@ func NewExecModule(
 	return em
 }
 
-// WaitIdle blocks until any in-flight updateForkChoice goroutine finishes.
-// Call before closing the database to avoid waitTxsAllDoneOnClose hangs.
+// WaitIdle blocks until any in-flight updateForkChoice goroutine finishes or
+// ctx ends.
 func (e *ExecModule) WaitIdle(ctx context.Context) {
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
 		return // context cancelled — best effort
@@ -295,11 +328,54 @@ func (e *ExecModule) WaitIdle(ctx context.Context) {
 	e.semaphore.Release(1)
 }
 
+// Drain waits without a local timeout for serialized execution work to finish.
+// Callers must stop producers first because backing resources are unsafe to
+// close while execution still holds a transaction.
+func (e *ExecModule) Drain() {
+	e.WaitIdle(context.Background())
+}
+
+// newDomainStateCache is the module's one construction site of the domain
+// state cache: USE_STATE_CACHE=false builds none, so nothing upstream can
+// allocate a cache that would only be discarded. A budget > 0 overrides the
+// production per-domain byte budget (test harnesses keep per-fixture modules
+// small); 0 means the production default.
+func newDomainStateCache(budget datasize.ByteSize) *cache.StateCache {
+	if !dbg.UseStateCache {
+		return nil
+	}
+	if budget > 0 {
+		return cache.NewStateCache(budget, budget, budget, budget)
+	}
+	return cache.NewDefaultStateCache()
+}
+
+// Close releases the domain state cache's reservation in the shared memory
+// envelope.
+func (e *ExecModule) Close() {
+	if e.stateCache != nil {
+		e.stateCache.Close()
+	}
+}
+
+// closeModuleContext closes and clears e.currentContext. The nil swap happens
+// under e.lock first, so getters holding the read lock (beginOverlayOrRo) can
+// never obtain a SharedDomains that is about to be closed.
+func (e *ExecModule) closeModuleContext() {
+	e.lock.Lock()
+	old := e.currentContext
+	e.currentContext = nil
+	e.lock.Unlock()
+	if old != nil {
+		old.Close()
+	}
+}
+
 // ForkValidator returns the fork validator owned by this module.
 func (e *ExecModule) ForkValidator() *ForkValidator { return e.forkValidator }
 
 // SetPublishedSD wires the ExecModule to fall back to the published SD from Events
-// when currentContext is nil (e.g. during background commit).
+// when currentContext is nil (e.g. while an FCU commits).
 func (e *ExecModule) SetPublishedSD(provider func() *execctx.SharedDomains) {
 	e.publishedSD = provider
 }
@@ -316,12 +392,11 @@ func (e *ExecModule) getTD(_ context.Context, tx kv.Tx, blockHash common.Hash, b
 	return rawdb.ReadTd(tx, blockHash, blockNumber)
 }
 
-func (e *ExecModule) getBody(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Body, error) {
+func (e *ExecModule) getRawBody(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.RawBody, error) {
 	if e.blockReader == nil {
-		body, _, _ := rawdb.ReadBody(tx, blockHash, blockNumber)
-		return body, nil
+		return rawdb.ReadRawBody(tx, blockHash, blockNumber)
 	}
-	return e.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
+	return e.blockReader.BodyWithRawTransactions(ctx, tx, blockHash, blockNumber)
 }
 
 func (e *ExecModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber uint64) (common.Hash, error) {
@@ -346,11 +421,30 @@ func (e *ExecModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber ui
 	return canonical, nil
 }
 
-func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header) error {
+// suspendReadAhead prevents raw-database warmup from filling the shared state
+// cache while an unwind's staged state is being read or published. It returns
+// the context error rather than allowing the unwind to proceed unsuspended.
+func (e *ExecModule) suspendReadAhead(ctx context.Context) (func(), error) {
+	if e.readAheader == nil {
+		return func() {}, nil
+	}
+	return e.readAheader.SuspendWarmup(ctx)
+}
+
+// unwindToCommonCanonical keeps read-ahead suspended after staging an unwind.
+// Its caller must resume only after all reads of the staged state have ended.
+func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, ensureReadAheadSuspended func() error) error {
 	currentHeader := header
-	for isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()); !isCanonical && err == nil; isCanonical, err = e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()) {
+	for {
+		isCanonical, err := e.isCanonicalHash(e.backgroundCtx, tx, currentHeader.Hash())
+		if err != nil {
+			return err
+		}
+		if isCanonical {
+			break
+		}
 		parentBlockHash, parentBlockNum := currentHeader.ParentHash, currentHeader.Number.Uint64()-1
-		currentHeader, err = e.getHeader(e.bacgroundCtx, tx, parentBlockHash, parentBlockNum)
+		currentHeader, err = e.getHeader(e.backgroundCtx, tx, parentBlockHash, parentBlockNum)
 		if err != nil {
 			return err
 		}
@@ -374,6 +468,9 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 		return err
 	}
 
+	if err := ensureReadAheadSuspended(); err != nil {
+		return fmt.Errorf("suspend read-ahead: %w", err)
+	}
 	if err := e.pipelineExecutor.UnwindTo(unwindPoint, stagedsync.ExecUnwind, tx); err != nil {
 		return err
 	}
@@ -382,6 +479,18 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 	}
 	return nil
 }
+
+const nextForkBanner = `
+:'######:::'##::::::::::'###::::'##::::'##::'######::'########:'########:'########::'########:::::'###::::'##::::'##:
+'##... ##:: ##:::::::::'## ##::: ###::'###:'##... ##:... ##..:: ##.....:: ##.... ##: ##.... ##:::'## ##::: ###::'###:
+ ##:::..::: ##::::::::'##:. ##:: ####'####: ##:::..::::: ##:::: ##::::::: ##:::: ##: ##:::: ##::'##:. ##:: ####'####:
+ ##::'####: ##:::::::'##:::. ##: ## ### ##:. ######::::: ##:::: ######::: ########:: ##:::: ##:'##:::. ##: ## ### ##:
+ ##::: ##:: ##::::::: #########: ##. #: ##::..... ##:::: ##:::: ##...:::: ##.. ##::: ##:::: ##: #########: ##. #: ##:
+ ##::: ##:: ##::::::: ##.... ##: ##:.:: ##:'##::: ##:::: ##:::: ##::::::: ##::. ##:: ##:::: ##: ##.... ##: ##:.:: ##:
+. ######::: ########: ##:::: ##: ##:::: ##:. ######::::: ##:::: ########: ##:::. ##: ########:: ##:::: ##: ##:::: ##:
+:......::::........::..:::::..::..:::::..:::......::::::..:::::........::..:::::..::........:::..:::::..::..:::::..::
+=============================================== GLAMSTERDAM ACTIVATED ===============================================
+`
 
 func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error) {
 	defer validateChainDuration.ObserveDuration(time.Now())
@@ -392,7 +501,6 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}, nil
 	}
 	defer e.semaphore.Release(1)
-
 	e.hook.LastNewBlockSeen(blockNumber) // used by eth_syncing
 	e.currentContext.ResetPendingUpdates()
 	e.forkValidator.ClearWithUnwind()
@@ -401,8 +509,20 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		header             *types.Header
 		body               *types.Body
 		currentBlockNumber *uint64
+		payloadExecuted    bool
 		err                error
 	)
+	alreadyExecuted := func(tx kv.Getter) (bool, error) {
+		canonical, err := e.blockReader.IsCanonical(ctx, tx, blockHash, blockNumber)
+		if err != nil || !canonical {
+			return false, err
+		}
+		if blockNumber > rawdb.ReadForkchoiceFinalizedNum(tx) {
+			return false, nil
+		}
+		progress, err := stages.GetStageProgress(tx, stages.Execution)
+		return progress >= blockNumber, err
+	}
 	// Read header/body from the block overlay on currentContext if available
 	// (block data written by InsertBlocks hasn't been flushed to DB yet),
 	// falling back to a plain DB read otherwise.
@@ -422,22 +542,26 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		if err != nil {
 			return ValidationResult{}, err
 		}
-		e.readAheader.AddHeaderAndBody(ctx, e.db, header, body)
+		e.readAheader.AddHeaderAndBody(ctx, e.db, overlay, header, body)
 		currentBlockNumber = rawdb.ReadCurrentBlockNumber(overlay)
+		payloadExecuted, err = alreadyExecuted(overlay)
+		if err != nil {
+			return ValidationResult{}, err
+		}
 	} else {
 		if err := e.db.View(ctx, func(tx kv.Tx) error {
 			header, err = e.blockReader.Header(ctx, tx, blockHash, blockNumber)
 			if err != nil {
 				return err
 			}
-
 			body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
 			if err != nil {
 				return err
 			}
-			e.readAheader.AddHeaderAndBody(ctx, e.db, header, body)
+			e.readAheader.AddHeaderAndBody(ctx, e.db, tx, header, body)
 			currentBlockNumber = rawdb.ReadCurrentBlockNumber(tx)
-			return nil
+			payloadExecuted, err = alreadyExecuted(tx)
+			return err
 		}); err != nil {
 			return ValidationResult{}, err
 		}
@@ -448,14 +572,19 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			ValidationStatus: ExecutionStatusMissingSegment,
 		}, nil
 	}
-
 	if math.AbsoluteDifference(*currentBlockNumber, blockNumber) >= e.syncCfg.MaxReorgDepth {
 		return ValidationResult{
 			ValidationStatus: ExecutionStatusTooFarAway,
 			LatestValidHash:  common.Hash{},
 		}, nil
 	}
-
+	// Finality fixes canonical hashes even after their unwind history is pruned.
+	if payloadExecuted {
+		return ValidationResult{
+			ValidationStatus: ExecutionStatusSuccess,
+			LatestValidHash:  blockHash,
+		}, nil
+	}
 	// Use the overlay-as-rwTx pattern: the validation pipeline writes through
 	// a fresh BlockOverlay on a new SharedDomains. This mirrors updateForkChoice
 	// (forkchoice.go:239-251) and is required by the parallel exec path —
@@ -469,34 +598,28 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		return ValidationResult{}, err
 	}
 	defer roTx.Rollback()
-
-	doms, err := execctx.NewSharedDomains(ctx, roTx, e.logger)
+	doms, err := execctx.NewSharedDomains(ctx, roTx, e.logger, execctx.WithLocalCacheUnwind())
 	if err != nil {
 		return ValidationResult{}, err
 	}
-	// NOTE: do NOT defer doms.Close(). On the success path, ownership of
-	// doms transfers to forkValidator.sharedDom inside ValidatePayload —
-	// later phases (MergeExtendingFork, NotifyCurrentHeight) close it.
-	// We Close explicitly only on the early-return error paths below.
+	// Do not defer doms.Close(): on the success path ownership transfers to
+	// forkValidator.sharedDom inside ValidatePayload and later phases close it,
+	// so we Close explicitly only on the early-return error paths below.
 	doms.SetInMemHistoryReads(inMemHistoryReads)
-
-	if err := doms.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+	if err := doms.InitBlockOverlay(roTx); err != nil {
 		doms.Close()
 		return ValidationResult{}, fmt.Errorf("ValidateChain: init block overlay: %w", err)
 	}
 	var tx kv.TemporalRwTx = doms.BlockOverlay()
-
-	// Chain the validation SD to currentContext when the payload extends the
-	// canonical head. FCU's MergeExtendingFork leaves the latest state in
-	// currentContext.mem; MDBX is committed only later under memory pressure,
-	// so between an FCU and the next newPayload this fresh doms would
-	// otherwise read stale MDBX and compute a wrong trie root. Head-extending
-	// payloads only — a fork payload needs unwindToCommonCanonical to revert
-	// doms to the common ancestor, which the parent link would shadow.
-	if e.currentContext != nil && header.ParentHash == rawdb.ReadHeadBlockHash(tx) {
+	// Chain the validation SD to the canonical generation (e.currentContext) for
+	// any payload with a parent, not just head-extending ones: head-extending
+	// payloads read its not-yet-committed domain state instead of stale MDBX, and
+	// fork payloads reach the canonical generation's pastChangesAccumulator (via
+	// GetDiffset's parent chain) to build the unwind set — without the link the
+	// unwind runs empty, leaving the BranchCache unmasked and corrupting the root.
+	if e.currentContext != nil {
 		doms.SetParent(e.currentContext)
 	}
-
 	// Flush block overlay data (headers, bodies, TDs from InsertBlocks) into
 	// the validation overlay so unwindToCommonCanonical and ValidatePayload —
 	// and the parallel exec goroutine via NewReadView — see this block data.
@@ -510,35 +633,41 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			return ValidationResult{}, fmt.Errorf("ValidateChain: flush overlay to validation tx: %w", err)
 		}
 	}
-
 	// Set state cache in SharedDomains for use during state reading
 	doms.SetStateCache(e.stateCache)
-	if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
+	// Either unwind path may run, and both can run in one validation. Share one
+	// lazy suspension so it spans every staged-state read without penalising the
+	// common case where validation needs no unwind.
+	var resumeReadAhead func()
+	var suspendReadAheadErr error
+	var suspendReadAheadOnce sync.Once
+	ensureReadAheadSuspended := func() error {
+		suspendReadAheadOnce.Do(func() {
+			resumeReadAhead, suspendReadAheadErr = e.suspendReadAhead(ctx)
+		})
+		return suspendReadAheadErr
+	}
+	defer func() {
+		if resumeReadAhead != nil {
+			resumeReadAhead()
+		}
+	}()
+
+	if err := e.unwindToCommonCanonical(doms, tx, header, ensureReadAheadSuspended); err != nil {
 		doms.Close()
 		return ValidationResult{}, err
 	}
-
-	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), e.logger)
+	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), ensureReadAheadSuspended, e.logger)
 	if criticalError != nil {
 		return ValidationResult{}, criticalError
 	}
 
-	// Clear state cache on invalid block
-	isInvalid := status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
-	if e.stateCache != nil && isInvalid {
-		e.stateCache.ClearWithHash(header.ParentHash)
-	}
-
-	// Validation tx is the SD's BlockOverlay; defer doms.Close() above handles
-	// its rollback. By design we do not persist validation-run writes — there
-	// is no Flush/Commit on this path.
-
+	// Validation writes and cache unwind remain local until adoption.
 	validationStatus := ExecutionStatusSuccess
 	if status == engine_types.AcceptedStatus {
 		validationStatus = ExecutionStatusMissingSegment
 	}
 	isInvalidChain := status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
-
 	// Only open a second tx when we actually need to write (bad-chain purge).
 	// On the valid-chain path (the common case at tip) opening + empty-committing
 	// a second RwTx just produces no-op commits with openTxs>=2, pinning freelist
@@ -549,21 +678,25 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			return ValidationResult{}, err
 		}
 		defer purgeTx.Rollback()
-
 		if (lvh != common.Hash{}) && lvh != blockHash {
 			if err := e.purgeBadChain(ctx, purgeTx, lvh, blockHash); err != nil {
 				return ValidationResult{}, err
 			}
+			if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
+				if err := e.purgeBadChain(ctx, e.currentContext.BlockOverlay(), lvh, blockHash); err != nil {
+					return ValidationResult{}, err
+				}
+			}
 		}
 		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", blockHash)
 		validationStatus = ExecutionStatusBadBlock
-		// Discard the block overlay — it may contain the bad block's data.
-		if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
-			e.currentContext.BlockOverlay().Close()
-		}
 		if err := purgeTx.Commit(); err != nil {
 			return ValidationResult{}, err
 		}
+	}
+	if !e.nextForkActivated && validationStatus == ExecutionStatusSuccess && e.config.IsAmsterdam(header.Time) {
+		e.nextForkActivated = true
+		e.logger.Info(nextForkBanner)
 	}
 	result := ValidationResult{
 		ValidationStatus: validationStatus,
@@ -581,7 +714,7 @@ func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidH
 		return err
 	}
 	if tip == nil {
-		// Block only existed in the overlay (not yet committed to DB) — nothing to purge.
+		// Block is not in tx — nothing to purge.
 		return nil
 	}
 
@@ -608,28 +741,62 @@ func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidH
 	return nil
 }
 
+// haltOnInitialSyncFailure reports whether a non-routine initial-sync failure
+// must stop the process when parallel or experimental BAL execution is selected.
+// Post-sync publication errors do not halt; serial execution stays up.
+func haltOnInitialSyncFailure(err error, exec3Parallel, experimentalBAL bool) bool {
+	return err != nil && !isRoutineInitialSyncStop(err) && !isInitialSyncPublicationError(err) &&
+		(exec3Parallel || experimentalBAL)
+}
+
+// gRPC client cancellation does not unwrap to context.Canceled, but errors.Is
+// matches an equivalent status. Keep this target inside the all-causes check.
+var grpcContextCanceled = status.FromContextError(context.Canceled).Err()
+
+func isRoutineInitialSyncStop(err error) bool {
+	return commonerrors.IsOnly(err, context.Canceled, common.ErrStopped, grpcContextCanceled)
+}
+
+func isInitialSyncPublicationError(err error) bool {
+	var publicationErr *initialSyncPublicationError
+	return errors.As(err, &publicationErr)
+}
+
+// processFrozenBlocks binds the state cache after the startup sync: its commit
+// advances the state version without publishing to the cache.
+func (e *ExecModule) processFrozenBlocks(ctx context.Context, hook *stageloop.Hook) error {
+	err := e.pipelineExecutor.ProcessFrozenBlocks(ctx, hook, e.onlySnapDownloadOnStart)
+	if e.stateCache != nil {
+		initErr := execctx.InitStateCacheVersion(ctx, e.db, e.stateCache)
+		if initErr != nil && !commonerrors.IsOnlyCanceled(initErr) {
+			e.logger.Warn("[exec] state cache serves RPC only after the first executed block", "err", initErr)
+		}
+	}
+	return err
+}
+
 func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
-		if !errors.Is(err, context.Canceled) {
+		if !commonerrors.IsOnlyCanceled(err) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}
 		return
 	}
 	defer e.semaphore.Release(1)
 
-	if err := e.pipelineExecutor.ProcessFrozenBlocks(ctx, hook, e.onlySnapDownloadOnStart); err != nil {
-		if !errors.Is(err, context.Canceled) {
-			e.logger.Error("Could not start execution service", "err", err)
+	if err := e.processFrozenBlocks(ctx, hook); err != nil {
+		if !isRoutineInitialSyncStop(err) {
+			if isInitialSyncPublicationError(err) {
+				e.logger.Error("Could not publish initial sync updates", "err", err)
+			} else {
+				e.logger.Error("Could not start execution service", "err", err)
+			}
 		}
-		// During parallel execution, an invalid block in initial sync (ProcessFrozenBlocks)
-		// is unrecoverable: the parallel executor cannot unwind and retrying will hit the
-		// same block forever, pushing Caplin's backward target further back.
-		// Exit the process so the operator can investigate.
-		if dbg.Exec3Parallel && errors.Is(err, rules.ErrInvalidBlock) {
-			e.logger.Error("Invalid block during parallel initial sync — halting process")
+		if haltOnInitialSyncFailure(err, dbg.Exec3Parallel, e.experimentalBAL) {
+			e.logger.Error("Initial sync failed during parallel execution — halting process")
 			go func() {
 				if stopErr := e.stopNode(); stopErr != nil {
-					e.logger.Error("Could not stop node on invalid block", "err", stopErr)
+					e.logger.Error("Could not stop node on initial sync failure", "err", stopErr)
 				}
 			}()
 			return
@@ -643,7 +810,7 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 		}
 		e.forkValidator.NotifyCurrentHeight(progress)
 		return nil
-	}); err != nil {
+	}); err != nil && !commonerrors.IsOnlyCanceled(err) {
 		e.logger.Warn("Could not notify fork validator of current height", "err", err)
 	}
 }
@@ -686,14 +853,15 @@ func (e *ExecModule) HasBlock(ctx context.Context, blockHash *common.Hash, _ *ui
 	if *num <= e.blockReader.FrozenBlocks() {
 		return true, nil
 	}
-	has, err := tx.Has(kv.Headers, dbutils.HeaderKey(*num, *blockHash))
+	dbKey := dbutils.HeaderKey(*num, *blockHash)
+	has, err := tx.Has(kv.Headers, dbKey)
 	if err != nil {
 		return false, err
 	}
 	if !has {
 		return false, nil
 	}
-	has, err = tx.Has(kv.BlockBody, dbutils.HeaderKey(*num, *blockHash))
+	has, err = tx.Has(kv.BlockBody, dbKey)
 	if err != nil {
 		return false, err
 	}

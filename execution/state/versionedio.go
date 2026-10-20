@@ -5,19 +5,19 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"reflect"
+	"iter"
+	"maps"
 	"slices"
-	"sort"
 	"strconv"
+	"sync"
 
 	"github.com/heimdalr/dag"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -35,6 +35,8 @@ func (s ReadSource) String() string {
 		return "tx-writes"
 	case ReadSetRead:
 		return "tx-reads"
+	case ProvisionalRead:
+		return "provisional"
 	default:
 		return "unknown"
 	}
@@ -50,6 +52,8 @@ func (s ReadSource) VersionedString(version Version) string {
 		return "tx-writes"
 	case ReadSetRead:
 		return "tx-reads"
+	case ProvisionalRead:
+		return "provisional"
 	default:
 		return "unknown"
 	}
@@ -61,148 +65,1824 @@ const (
 	StorageRead
 	WriteSetRead
 	ReadSetRead
+	// ProvisionalRead marks a nil record probe made mid-account-load, before
+	// the load has exposed any value to the EVM: a re-probe in the same load
+	// that finds a freshly flushed cell adopts it instead of aborting.
+	ProvisionalRead
 )
 
-type ReadSet map[accounts.Address]map[AccountKey]VersionedRead
+// ReadHeader is the type-agnostic part of a versioned read: the tx-version
+// that produced the value and the tier it came from.  Shared by every
+// per-path read via embedding in VersionedRead.
+type ReadHeader struct {
+	Source   ReadSource
+	Version  Version
+	internal bool // conflict-detection only; excluded from the block access list
+}
 
-func (a ReadSet) Merge(b ReadSet) ReadSet {
-	if a == nil && b == nil {
+// VersionedRead is a single versioned read.  The per-path map it lives in fixes
+// the address (map key) and path — and, for storage, the slot key — so the
+// struct carries only the header and the path-typed value.
+type VersionedRead[T any] struct {
+	ReadHeader
+	Val T
+}
+
+// AccountView abstracts the AddressPath read's account payload so the read
+// can be backed by an already-materialised account today and, later, by a
+// versionMap cell without changing consumers.  Scoped to the read path —
+// deliberately not the package-wide accounts.Account.
+type AccountView interface {
+	Account() *accounts.Account
+	IsNil() bool
+}
+
+// concreteAccountView is the AccountView backed by an already-materialised
+// account.  It is pointer-shaped, so it costs no extra allocation when held
+// in an AccountView interface value.
+type concreteAccountView struct{ acc *accounts.Account }
+
+func (c concreteAccountView) Account() *accounts.Account { return c.acc }
+func (c concreteAccountView) IsNil() bool                { return c.acc == nil }
+
+// NewAccountView wraps a materialised account as an AccountView.
+func NewAccountView(acc *accounts.Account) AccountView { return concreteAccountView{acc} }
+
+// ReadSet holds per-task versioned reads in per-path maps keyed by address
+// (and by storage slot for the storage path).  Each read is held by value;
+// the per-path split keeps the record path off the heap and collapses
+// non-storage probes to a single map lookup.  All maps are lazily allocated
+// on first write.
+type ReadSet struct {
+	address      map[accounts.Address]VersionedRead[AccountView]
+	balance      map[accounts.Address]VersionedRead[uint256.Int]
+	nonce        map[accounts.Address]VersionedRead[uint64]
+	incarnation  map[accounts.Address]VersionedRead[uint64]
+	selfDestruct map[accounts.Address]VersionedRead[bool]
+	// selfDestructWitnesses holds the OTHER distinct destruct versions a tx
+	// consumed when it recorded more than one (a wipe from each of several
+	// destroy/recreate cycles of one address): validation must re-check every
+	// destruct a conclusion depended on, not only the last-recorded one.
+	selfDestructWitnesses map[accounts.Address][]VersionedRead[bool]
+	createContract        map[accounts.Address]VersionedRead[bool]
+	code                  map[accounts.Address]VersionedRead[accounts.Code]
+	codeHash              map[accounts.Address]VersionedRead[accounts.CodeHash]
+	codeSize              map[accounts.Address]VersionedRead[int]
+	storage               map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int]
+	// slotMapPeak is the most slots each kept storage map has held: a cleared
+	// map keeps the buckets it grew.
+	slotMapPeak map[accounts.Address]int
+
+	// access carries EIP-7928 "address was accessed" marks (with the
+	// non-revertable "real EVM access" bit) on the read side, so the access set
+	// travels with the read-set rather than as a separate IntraBlockState cache.
+	access AccessSet
+}
+
+func (s *ReadSet) entries() int {
+	n := len(s.address) + len(s.balance) + len(s.nonce) + len(s.incarnation) + len(s.selfDestruct) +
+		len(s.selfDestructWitnesses) + len(s.createContract) + len(s.code) + len(s.codeHash) + len(s.codeSize)
+	// Slots, not addresses: one contract's slot map is what a reused set keeps,
+	// and a map never shrinks back.
+	for _, inner := range s.storage {
+		n += len(inner)
+	}
+	return n
+}
+
+func (s *ReadSet) clearForReuse() {
+	clear(s.address)
+	clear(s.balance)
+	clear(s.nonce)
+	clear(s.incarnation)
+	clear(s.selfDestruct)
+	clear(s.selfDestructWitnesses)
+	clear(s.createContract)
+	clear(s.code)
+	clear(s.codeHash)
+	clear(s.codeSize)
+	// Keep the per-address slot maps: a call that reads one contract's slots
+	// would otherwise regrow its map from scratch on every later call. Only
+	// this call's contracts stay, or a run of calls on different contracts
+	// would pin a map each while every entries() count looked small.
+	if len(s.storage) <= maxReusedStorageAddrs {
+		held := 0
+		for addr, inner := range s.storage {
+			if len(inner) == 0 {
+				delete(s.storage, addr)
+				delete(s.slotMapPeak, addr)
+				continue
+			}
+			if s.slotMapPeak == nil {
+				s.slotMapPeak = make(map[accounts.Address]int, len(s.storage))
+			}
+			peak := max(s.slotMapPeak[addr], len(inner))
+			s.slotMapPeak[addr] = peak
+			held += peak
+			clear(inner)
+		}
+		if held > maxPooledEntries {
+			s.storage, s.slotMapPeak = nil, nil
+		}
+	} else {
+		// Nil, not cleared: a cleared map keeps the buckets those addresses grew.
+		s.storage, s.slotMapPeak = nil, nil
+	}
+	s.access = nil
+}
+
+// maxReusedStorageAddrs bounds how many per-address slot maps a reused read set
+// keeps; past it the outer map is dropped with them.
+const maxReusedStorageAddrs = 64
+
+func readSetPut[T any](m *map[accounts.Address]VersionedRead[T], addr accounts.Address, tr VersionedRead[T]) {
+	if *m == nil {
+		*m = make(map[accounts.Address]VersionedRead[T])
+	}
+	(*m)[addr] = tr
+}
+
+func (s *ReadSet) SetAddress(addr accounts.Address, tr VersionedRead[AccountView]) {
+	readSetPut(&s.address, addr, tr)
+}
+
+func (s *ReadSet) SetBalance(addr accounts.Address, tr VersionedRead[uint256.Int]) {
+	readSetPut(&s.balance, addr, tr)
+}
+
+func (s *ReadSet) SetNonce(addr accounts.Address, tr VersionedRead[uint64]) {
+	readSetPut(&s.nonce, addr, tr)
+}
+
+func (s *ReadSet) SetIncarnation(addr accounts.Address, tr VersionedRead[uint64]) {
+	readSetPut(&s.incarnation, addr, tr)
+}
+
+func (s *ReadSet) SetSelfDestruct(addr accounts.Address, tr VersionedRead[bool]) {
+	if prev, ok := s.selfDestruct[addr]; ok && prev.Version != tr.Version {
+		for _, w := range s.selfDestructWitnesses[addr] {
+			if w.Version == prev.Version {
+				readSetPut(&s.selfDestruct, addr, tr)
+				return
+			}
+		}
+		if s.selfDestructWitnesses == nil {
+			s.selfDestructWitnesses = map[accounts.Address][]VersionedRead[bool]{}
+		}
+		s.selfDestructWitnesses[addr] = append(s.selfDestructWitnesses[addr], prev)
+	}
+	readSetPut(&s.selfDestruct, addr, tr)
+}
+
+func (s *ReadSet) SetCreateContract(addr accounts.Address, tr VersionedRead[bool]) {
+	readSetPut(&s.createContract, addr, tr)
+}
+
+func (s *ReadSet) SetCode(addr accounts.Address, tr VersionedRead[accounts.Code]) {
+	readSetPut(&s.code, addr, tr)
+}
+
+func (s *ReadSet) SetCodeHash(addr accounts.Address, tr VersionedRead[accounts.CodeHash]) {
+	readSetPut(&s.codeHash, addr, tr)
+}
+
+func (s *ReadSet) SetCodeSize(addr accounts.Address, tr VersionedRead[int]) {
+	readSetPut(&s.codeSize, addr, tr)
+}
+
+func (s *ReadSet) SetStorage(addr accounts.Address, key accounts.StorageKey, tr VersionedRead[uint256.Int]) {
+	if s.storage == nil {
+		s.storage = make(map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int])
+	}
+	inner := s.storage[addr]
+	if inner == nil {
+		inner = make(map[accounts.StorageKey]VersionedRead[uint256.Int])
+		s.storage[addr] = inner
+	}
+	inner[key] = tr
+}
+
+func (s *ReadSet) GetAddress(addr accounts.Address) (VersionedRead[AccountView], bool) {
+	tr, ok := s.address[addr]
+	return tr, ok
+}
+
+func (s *ReadSet) GetBalance(addr accounts.Address) (VersionedRead[uint256.Int], bool) {
+	tr, ok := s.balance[addr]
+	return tr, ok
+}
+
+func (s *ReadSet) GetNonce(addr accounts.Address) (VersionedRead[uint64], bool) {
+	tr, ok := s.nonce[addr]
+	return tr, ok
+}
+
+func (s *ReadSet) GetIncarnation(addr accounts.Address) (VersionedRead[uint64], bool) {
+	tr, ok := s.incarnation[addr]
+	return tr, ok
+}
+
+func (s *ReadSet) GetSelfDestruct(addr accounts.Address) (VersionedRead[bool], bool) {
+	tr, ok := s.selfDestruct[addr]
+	return tr, ok
+}
+
+func (s *ReadSet) GetCreateContract(addr accounts.Address) (VersionedRead[bool], bool) {
+	tr, ok := s.createContract[addr]
+	return tr, ok
+}
+
+func (s *ReadSet) GetCode(addr accounts.Address) (VersionedRead[accounts.Code], bool) {
+	tr, ok := s.code[addr]
+	return tr, ok
+}
+
+func (s *ReadSet) GetCodeHash(addr accounts.Address) (VersionedRead[accounts.CodeHash], bool) {
+	tr, ok := s.codeHash[addr]
+	return tr, ok
+}
+
+func (s *ReadSet) GetCodeSize(addr accounts.Address) (VersionedRead[int], bool) {
+	tr, ok := s.codeSize[addr]
+	return tr, ok
+}
+
+func (s *ReadSet) GetStorage(addr accounts.Address, key accounts.StorageKey) (VersionedRead[uint256.Int], bool) {
+	inner := s.storage[addr]
+	if inner == nil {
+		return VersionedRead[uint256.Int]{}, false
+	}
+	tr, ok := inner[key]
+	return tr, ok
+}
+
+func (s ReadSet) Storages() iter.Seq2[accounts.Address, map[accounts.StorageKey]VersionedRead[uint256.Int]] {
+	return maps.All(s.storage)
+}
+
+// getHeader probes the read set for path and returns the type-agnostic
+// header only.  This is the single read-set probe versionedReadCore uses —
+// uniform return type, so the runtime path switch works without the value
+// type leaking into the probe.
+func (s *ReadSet) getHeader(addr accounts.Address, path AccountPath, key accounts.StorageKey) (ReadHeader, bool) {
+	switch path {
+	case AddressPath:
+		tr, ok := s.address[addr]
+		return tr.ReadHeader, ok
+	case BalancePath:
+		tr, ok := s.balance[addr]
+		return tr.ReadHeader, ok
+	case NoncePath:
+		tr, ok := s.nonce[addr]
+		return tr.ReadHeader, ok
+	case IncarnationPath:
+		tr, ok := s.incarnation[addr]
+		return tr.ReadHeader, ok
+	case SelfDestructPath:
+		tr, ok := s.selfDestruct[addr]
+		return tr.ReadHeader, ok
+	case CreateContractPath:
+		tr, ok := s.createContract[addr]
+		return tr.ReadHeader, ok
+	case CodePath:
+		tr, ok := s.code[addr]
+		return tr.ReadHeader, ok
+	case CodeHashPath:
+		tr, ok := s.codeHash[addr]
+		return tr.ReadHeader, ok
+	case CodeSizePath:
+		tr, ok := s.codeSize[addr]
+		return tr.ReadHeader, ok
+	case StoragePath:
+		inner := s.storage[addr]
+		if inner == nil {
+			return ReadHeader{}, false
+		}
+		tr, ok := inner[key]
+		return tr.ReadHeader, ok
+	}
+	return ReadHeader{}, false
+}
+
+// setHeader records a header-only read (zero value) at (addr, path, key).
+// Used on the dependency-conflict paths where versionedReadCore records the
+// read purely for ValidateVersion's version check — the value is never
+// consulted there (it was zero in the legacy VersionedRead path too).
+func (s *ReadSet) SetHeader(addr accounts.Address, path AccountPath, key accounts.StorageKey, hdr ReadHeader) {
+	switch path {
+	case AddressPath:
+		s.SetAddress(addr, VersionedRead[AccountView]{hdr, nil})
+	case BalancePath:
+		s.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader: hdr})
+	case NoncePath:
+		s.SetNonce(addr, VersionedRead[uint64]{ReadHeader: hdr})
+	case IncarnationPath:
+		s.SetIncarnation(addr, VersionedRead[uint64]{ReadHeader: hdr})
+	case SelfDestructPath:
+		s.SetSelfDestruct(addr, VersionedRead[bool]{ReadHeader: hdr})
+	case CreateContractPath:
+		s.SetCreateContract(addr, VersionedRead[bool]{ReadHeader: hdr})
+	case CodePath:
+		s.SetCode(addr, VersionedRead[accounts.Code]{ReadHeader: hdr})
+	case CodeHashPath:
+		s.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{ReadHeader: hdr})
+	case CodeSizePath:
+		s.SetCodeSize(addr, VersionedRead[int]{ReadHeader: hdr})
+	case StoragePath:
+		s.SetStorage(addr, key, VersionedRead[uint256.Int]{ReadHeader: hdr})
+	}
+}
+
+// scanAddrPath visits the addr entry of one non-storage path map, writing
+// any header mutation back.  Helper for ScanAddr.
+func scanAddrPath[T any](m map[accounts.Address]VersionedRead[T], addr accounts.Address, path AccountPath, fn func(AccountPath, accounts.StorageKey, *ReadHeader)) int {
+	if tr, ok := m[addr]; ok {
+		fn(path, accounts.NilKey, &tr.ReadHeader)
+		m[addr] = tr
+		return 1
+	}
+	return 0
+}
+
+// ScanAddr visits every entry under addr (all paths), passing the path, key
+// and a pointer to the mutable header.  Any header mutation is written back
+// into the map.  Returns the number of entries visited.
+func (s *ReadSet) ScanAddr(addr accounts.Address, fn func(path AccountPath, key accounts.StorageKey, hdr *ReadHeader)) int {
+	n := scanAddrPath(s.address, addr, AddressPath, fn) +
+		scanAddrPath(s.balance, addr, BalancePath, fn) +
+		scanAddrPath(s.nonce, addr, NoncePath, fn) +
+		scanAddrPath(s.incarnation, addr, IncarnationPath, fn) +
+		scanAddrPath(s.selfDestruct, addr, SelfDestructPath, fn) +
+		scanAddrPath(s.createContract, addr, CreateContractPath, fn) +
+		scanAddrPath(s.code, addr, CodePath, fn) +
+		scanAddrPath(s.codeHash, addr, CodeHashPath, fn) +
+		scanAddrPath(s.codeSize, addr, CodeSizePath, fn)
+	if inner, ok := s.storage[addr]; ok {
+		for k, tr := range inner {
+			fn(StoragePath, k, &tr.ReadHeader)
+			inner[k] = tr
+			n++
+		}
+	}
+	return n
+}
+
+// hasAddr reports whether any path has an entry for addr.
+func (s *ReadSet) hasAddr(addr accounts.Address) bool {
+	if _, ok := s.address[addr]; ok {
+		return true
+	}
+	if _, ok := s.balance[addr]; ok {
+		return true
+	}
+	if _, ok := s.nonce[addr]; ok {
+		return true
+	}
+	if _, ok := s.incarnation[addr]; ok {
+		return true
+	}
+	if _, ok := s.selfDestruct[addr]; ok {
+		return true
+	}
+	if _, ok := s.createContract[addr]; ok {
+		return true
+	}
+	if _, ok := s.code[addr]; ok {
+		return true
+	}
+	if _, ok := s.codeHash[addr]; ok {
+		return true
+	}
+	if _, ok := s.codeSize[addr]; ok {
+		return true
+	}
+	_, ok := s.storage[addr]
+	return ok
+}
+
+// Delete removes every path entry for addr.
+func (s *ReadSet) Delete(addr accounts.Address) {
+	delete(s.address, addr)
+	delete(s.balance, addr)
+	delete(s.nonce, addr)
+	delete(s.incarnation, addr)
+	delete(s.selfDestruct, addr)
+	delete(s.createContract, addr)
+	delete(s.code, addr)
+	delete(s.codeHash, addr)
+	delete(s.codeSize, addr)
+	delete(s.storage, addr)
+}
+
+// Len returns the total entry count across all paths.  Value receiver so it
+// can be called on a function-returned read set directly.
+func (s ReadSet) Len() int {
+	n := len(s.address) + len(s.balance) + len(s.nonce) + len(s.incarnation) +
+		len(s.selfDestruct) + len(s.createContract) +
+		len(s.code) + len(s.codeHash) + len(s.codeSize)
+	for _, inner := range s.storage {
+		n += len(inner)
+	}
+	return n
+}
+
+// mergeFrom copies every entry of src into s, overwriting on collision.
+func (s *ReadSet) mergeFrom(src ReadSet) {
+	for a, tr := range src.address {
+		readSetPut(&s.address, a, tr)
+	}
+	for a, tr := range src.balance {
+		readSetPut(&s.balance, a, tr)
+	}
+	for a, tr := range src.nonce {
+		readSetPut(&s.nonce, a, tr)
+	}
+	for a, tr := range src.incarnation {
+		readSetPut(&s.incarnation, a, tr)
+	}
+	for a, tr := range src.selfDestruct {
+		s.SetSelfDestruct(a, tr)
+	}
+	for a, trs := range src.selfDestructWitnesses {
+		for _, tr := range trs {
+			s.SetSelfDestruct(a, tr)
+		}
+	}
+	for a, tr := range src.createContract {
+		readSetPut(&s.createContract, a, tr)
+	}
+	for a, tr := range src.code {
+		readSetPut(&s.code, a, tr)
+	}
+	for a, tr := range src.codeHash {
+		readSetPut(&s.codeHash, a, tr)
+	}
+	for a, tr := range src.codeSize {
+		readSetPut(&s.codeSize, a, tr)
+	}
+	for a, inner := range src.storage {
+		for k, tr := range inner {
+			s.SetStorage(a, k, tr)
+		}
+	}
+	if len(src.access) > 0 {
+		if s.access == nil {
+			s.access = make(AccessSet, len(src.access))
+		}
+		maps.Copy(s.access, src.access)
+	}
+}
+
+// Merge returns a new read set containing every entry of s then o.  On a
+// collision o's entry wins.
+func (s ReadSet) Merge(o ReadSet) ReadSet {
+	var out ReadSet
+	out.mergeFrom(s)
+	out.mergeFrom(o)
+	return out
+}
+
+// MergeFrom merges o into s in place, without allocating a new ReadSet.
+func (s *ReadSet) MergeFrom(o ReadSet) {
+	s.mergeFrom(o)
+}
+
+// TraceReads prints every read in path-major order, prefixed.  Debug only —
+// keeps the per-path iteration inside this package.
+func (s ReadSet) TraceReads(prefix string) {
+	for addr, tr := range s.address {
+		fmt.Println(prefix, "RD", traceReadStr(addr, AddressPath, accounts.NilKey, tr.ReadHeader, accountViewString(tr.Val)))
+	}
+	for addr, tr := range s.balance {
+		fmt.Println(prefix, "RD", traceReadStr(addr, BalancePath, accounts.NilKey, tr.ReadHeader, valueString(BalancePath, tr.Val)))
+	}
+	for addr, tr := range s.nonce {
+		fmt.Println(prefix, "RD", traceReadStr(addr, NoncePath, accounts.NilKey, tr.ReadHeader, valueString(NoncePath, tr.Val)))
+	}
+	for addr, tr := range s.incarnation {
+		fmt.Println(prefix, "RD", traceReadStr(addr, IncarnationPath, accounts.NilKey, tr.ReadHeader, valueString(IncarnationPath, tr.Val)))
+	}
+	for addr, tr := range s.selfDestruct {
+		fmt.Println(prefix, "RD", traceReadStr(addr, SelfDestructPath, accounts.NilKey, tr.ReadHeader, valueString(SelfDestructPath, tr.Val)))
+	}
+	for addr, tr := range s.createContract {
+		fmt.Println(prefix, "RD", traceReadStr(addr, CreateContractPath, accounts.NilKey, tr.ReadHeader, valueString(CreateContractPath, tr.Val)))
+	}
+	for addr, tr := range s.code {
+		fmt.Println(prefix, "RD", traceReadStr(addr, CodePath, accounts.NilKey, tr.ReadHeader, valueString(CodePath, tr.Val)))
+	}
+	for addr, tr := range s.codeHash {
+		fmt.Println(prefix, "RD", traceReadStr(addr, CodeHashPath, accounts.NilKey, tr.ReadHeader, valueString(CodeHashPath, tr.Val)))
+	}
+	for addr, tr := range s.codeSize {
+		fmt.Println(prefix, "RD", traceReadStr(addr, CodeSizePath, accounts.NilKey, tr.ReadHeader, valueString(CodeSizePath, tr.Val)))
+	}
+	for addr, inner := range s.storage {
+		for key, tr := range inner {
+			fmt.Println(prefix, "RD", traceReadStr(addr, StoragePath, key, tr.ReadHeader, valueString(StoragePath, tr.Val)))
+		}
+	}
+}
+
+func traceReadStr(addr accounts.Address, path AccountPath, key accounts.StorageKey, hdr ReadHeader, valStr string) string {
+	return fmt.Sprintf("(%s) %x %s: %s", hdr.Source.VersionedString(hdr.Version), addr, AccountKey{Path: path, Key: key}, valStr)
+}
+
+func accountViewString(v AccountView) string {
+	if v == nil || v.IsNil() {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%+v", v.Account())
+}
+
+func eachHeaderOf[T any](m map[accounts.Address]VersionedRead[T], yield func(ReadHeader) bool) bool {
+	for _, tr := range m {
+		if !yield(tr.ReadHeader) {
+			return false
+		}
+	}
+	return true
+}
+
+// eachHeader visits the type-agnostic header of every read; the callback
+// returns false to stop early.
+func (s ReadSet) eachHeader(yield func(ReadHeader) bool) {
+	if !eachHeaderOf(s.address, yield) ||
+		!eachHeaderOf(s.balance, yield) ||
+		!eachHeaderOf(s.nonce, yield) ||
+		!eachHeaderOf(s.incarnation, yield) ||
+		!eachHeaderOf(s.selfDestruct, yield) ||
+		!eachHeaderOf(s.createContract, yield) ||
+		!eachHeaderOf(s.code, yield) ||
+		!eachHeaderOf(s.codeHash, yield) ||
+		!eachHeaderOf(s.codeSize, yield) {
+		return
+	}
+	for _, inner := range s.storage {
+		for _, tr := range inner {
+			if !yield(tr.ReadHeader) {
+				return
+			}
+		}
+	}
+}
+
+// WriteHeader is the type-agnostic part of a versioned write: address,
+// path, optional storage key, tx-version and balance-change reason.
+// Shared across every per-path write via embedding in VersionedWrite[T].
+type WriteHeader struct {
+	Address     accounts.Address
+	Key         accounts.StorageKey
+	Version     Version
+	Path        AccountPath
+	Reason      tracing.BalanceChangeReason
+	NonceReason tracing.NonceChangeReason
+}
+
+func (h WriteHeader) String() string {
+	return fmt.Sprintf("%x %s (%d.%d)", h.Address, AccountKey{Path: h.Path, Key: h.Key}, h.Version.TxIndex, h.Version.Incarnation)
+}
+
+// VersionedWrite is a single versioned write.  The per-path map it lives
+// in fixes the address (map key), path — and, for storage, the slot key.
+// The struct carries the header and the path-typed value.
+type VersionedWrite[T any] struct {
+	WriteHeader
+	Val T
+}
+
+func cloneVW[T any](w *VersionedWrite[T]) *VersionedWrite[T] {
+	c := *w
+	return &c
+}
+
+func (w *VersionedWrite[T]) String() string {
+	return fmt.Sprintf("%s: %v", w.WriteHeader, w.Val)
+}
+
+// Per-path *VersionedWrite[T] pools.  Each pool sources fresh cleared
+// instances; callers fill the WriteHeader + Val before inserting into the
+// typed map on WriteSet.  Lifetime is per-tx — WriteSet.ReleaseAndReset
+// walks the maps at tx-finalize and returns every VW to its pool.
+//
+// Slice-valued payloads (CodePath) have their Val cleared on release to
+// avoid pinning external memory; same pattern as versionmap.go's WriteCell
+// pool (releaseCellCode).
+var (
+	vwPoolAddress        = sync.Pool{New: func() any { return &VersionedWrite[*accounts.Account]{} }}
+	vwPoolBalance        = sync.Pool{New: func() any { return &VersionedWrite[uint256.Int]{} }}
+	vwPoolNonce          = sync.Pool{New: func() any { return &VersionedWrite[uint64]{} }}
+	vwPoolIncarnation    = sync.Pool{New: func() any { return &VersionedWrite[uint64]{} }}
+	vwPoolSelfDestruct   = sync.Pool{New: func() any { return &VersionedWrite[bool]{} }}
+	vwPoolCreateContract = sync.Pool{New: func() any { return &VersionedWrite[bool]{} }}
+	vwPoolCode           = sync.Pool{New: func() any { return &VersionedWrite[accounts.Code]{} }}
+	vwPoolCodeHash       = sync.Pool{New: func() any { return &VersionedWrite[accounts.CodeHash]{} }}
+	vwPoolCodeSize       = sync.Pool{New: func() any { return &VersionedWrite[int]{} }}
+	vwPoolStorage        = sync.Pool{New: func() any { return &VersionedWrite[uint256.Int]{} }}
+)
+
+func getVWAddress() *VersionedWrite[*accounts.Account] {
+	return vwPoolAddress.Get().(*VersionedWrite[*accounts.Account])
+}
+
+func getVWBalance() *VersionedWrite[uint256.Int] {
+	return vwPoolBalance.Get().(*VersionedWrite[uint256.Int])
+}
+func getVWNonce() *VersionedWrite[uint64] { return vwPoolNonce.Get().(*VersionedWrite[uint64]) }
+func getVWIncarnation() *VersionedWrite[uint64] {
+	return vwPoolIncarnation.Get().(*VersionedWrite[uint64])
+}
+
+func getVWSelfDestruct() *VersionedWrite[bool] {
+	return vwPoolSelfDestruct.Get().(*VersionedWrite[bool])
+}
+
+func getVWCreateContract() *VersionedWrite[bool] {
+	return vwPoolCreateContract.Get().(*VersionedWrite[bool])
+}
+
+func getVWCode() *VersionedWrite[accounts.Code] {
+	return vwPoolCode.Get().(*VersionedWrite[accounts.Code])
+}
+
+func getVWCodeHash() *VersionedWrite[accounts.CodeHash] {
+	return vwPoolCodeHash.Get().(*VersionedWrite[accounts.CodeHash])
+}
+func getVWCodeSize() *VersionedWrite[int] { return vwPoolCodeSize.Get().(*VersionedWrite[int]) }
+func getVWStorage() *VersionedWrite[uint256.Int] {
+	return vwPoolStorage.Get().(*VersionedWrite[uint256.Int])
+}
+
+func releaseVWAddress(vw *VersionedWrite[*accounts.Account]) {
+	vw.Val = nil // unpin
+	vwPoolAddress.Put(vw)
+}
+func releaseVWBalance(vw *VersionedWrite[uint256.Int]) { vwPoolBalance.Put(vw) }
+func releaseVWNonce(vw *VersionedWrite[uint64])        { vwPoolNonce.Put(vw) }
+func releaseVWIncarnation(vw *VersionedWrite[uint64])  { vwPoolIncarnation.Put(vw) }
+func releaseVWSelfDestruct(vw *VersionedWrite[bool])   { vwPoolSelfDestruct.Put(vw) }
+func releaseVWCreateContract(vw *VersionedWrite[bool]) { vwPoolCreateContract.Put(vw) }
+func releaseVWCode(vw *VersionedWrite[accounts.Code]) {
+	vw.Val = accounts.Code{} // unpin bytecode
+	vwPoolCode.Put(vw)
+}
+func releaseVWCodeHash(vw *VersionedWrite[accounts.CodeHash]) { vwPoolCodeHash.Put(vw) }
+func releaseVWCodeSize(vw *VersionedWrite[int])               { vwPoolCodeSize.Put(vw) }
+func releaseVWStorage(vw *VersionedWrite[uint256.Int])        { vwPoolStorage.Put(vw) }
+
+// Slabs double from a small first one, so a path that writes a handful of cells
+// buys a handful and a path that writes thousands still amortizes. A reusing set
+// keeps its slabs, so the cap is what one outlier may pin on it; past the cap
+// the shared pools serve the cells, as they did before the arena, and the set
+// keeps its list of those cells only up to vwMaxOverflow.
+const (
+	vwFirstSlab   = 4
+	vwMaxCells    = 1024
+	vwMaxOverflow = 4 * vwMaxCells
+)
+
+// vwArena hands out VersionedWrite cells from append-only slabs and recycles
+// them on reset, which costs no atomics and no per-cell Put. A cell stays valid
+// only until that reset, so nothing outside the owning set may hold one. Every
+// cell it hands out is zero: a new slab starts zeroed, reset clears what it
+// rewinds, and alloc clears a pooled cell.
+type vwArena[T any] struct {
+	slabs    [][]VersionedWrite[T]
+	slab     int
+	idx      int
+	cap      int
+	overflow []*VersionedWrite[T]
+}
+
+func (a *vwArena[T]) alloc(get func() *VersionedWrite[T]) *VersionedWrite[T] {
+	if a.slab == len(a.slabs) {
+		if a.cap == vwMaxCells {
+			vw := get()
+			*vw = VersionedWrite[T]{} // the pools clear only what pins memory
+			a.overflow = append(a.overflow, vw)
+			return vw
+		}
+		a.slabs = append(a.slabs, make([]VersionedWrite[T], a.nextSlab()))
+		a.cap += len(a.slabs[a.slab])
+	}
+	vw := &a.slabs[a.slab][a.idx]
+	a.idx++
+	if a.idx == len(a.slabs[a.slab]) {
+		a.slab++
+		a.idx = 0
+	}
+	return vw
+}
+
+func (a *vwArena[T]) nextSlab() int {
+	return min(max(a.cap, vwFirstSlab), vwMaxCells-a.cap)
+}
+
+func (a *vwArena[T]) reset(release func(*VersionedWrite[T])) {
+	for s := 0; s <= a.slab && s < len(a.slabs); s++ {
+		used := a.slabs[s]
+		if s == a.slab {
+			used = used[:a.idx]
+		}
+		clear(used)
+	}
+	a.slab, a.idx = 0, 0
+	for _, vw := range a.overflow {
+		release(vw)
+	}
+	clear(a.overflow)
+	a.overflow = a.overflow[:0]
+	if cap(a.overflow) > vwMaxOverflow {
+		a.overflow = nil
+	}
+}
+
+const acctChunk = 32
+
+// acctSlab holds an arena-backed set's AddressPath values; a value stays valid
+// until the arena resets, so Snapshot copies it out.
+type acctSlab struct {
+	chunks [][]accounts.Account
+	n      int
+}
+
+func (s *acctSlab) copyOf(a *accounts.Account) *accounts.Account {
+	i, j := s.n/acctChunk, s.n%acctChunk
+	if i == len(s.chunks) {
+		if s.n >= vwMaxCells {
+			return a.SelfCopy()
+		}
+		s.chunks = append(s.chunks, make([]accounts.Account, acctChunk))
+	}
+	p := &s.chunks[i][j]
+	*p = *a
+	s.n++
+	return p
+}
+
+func (s *acctSlab) reset() {
+	for i := 0; i*acctChunk < s.n; i++ {
+		clear(s.chunks[i][:min(acctChunk, s.n-i*acctChunk)])
+	}
+	s.n = 0
+}
+
+// copyAccount returns a copy of a for an AddressPath write.
+func (ws *WriteSet) copyAccount(a *accounts.Account) *accounts.Account {
+	if ws.cells != nil {
+		return ws.cells.accounts.copyOf(a)
+	}
+	return a.SelfCopy()
+}
+
+func (ws *WriteSet) newVWAddress() *VersionedWrite[*accounts.Account] {
+	if ws.cells != nil {
+		return ws.cells.address.alloc(getVWAddress)
+	}
+	return getVWAddress()
+}
+
+func (ws *WriteSet) newVWBalance() *VersionedWrite[uint256.Int] {
+	if ws.cells != nil {
+		return ws.cells.balance.alloc(getVWBalance)
+	}
+	return getVWBalance()
+}
+
+func (ws *WriteSet) newVWNonce() *VersionedWrite[uint64] {
+	if ws.cells != nil {
+		return ws.cells.nonce.alloc(getVWNonce)
+	}
+	return getVWNonce()
+}
+
+func (ws *WriteSet) newVWIncarnation() *VersionedWrite[uint64] {
+	if ws.cells != nil {
+		return ws.cells.incarnation.alloc(getVWIncarnation)
+	}
+	return getVWIncarnation()
+}
+
+func (ws *WriteSet) newVWSelfDestruct() *VersionedWrite[bool] {
+	if ws.cells != nil {
+		return ws.cells.selfDestruct.alloc(getVWSelfDestruct)
+	}
+	return getVWSelfDestruct()
+}
+
+func (ws *WriteSet) newVWCreateContract() *VersionedWrite[bool] {
+	if ws.cells != nil {
+		return ws.cells.createContract.alloc(getVWCreateContract)
+	}
+	return getVWCreateContract()
+}
+
+func (ws *WriteSet) newVWCode() *VersionedWrite[accounts.Code] {
+	if ws.cells != nil {
+		return ws.cells.code.alloc(getVWCode)
+	}
+	return getVWCode()
+}
+
+func (ws *WriteSet) newVWCodeHash() *VersionedWrite[accounts.CodeHash] {
+	if ws.cells != nil {
+		return ws.cells.codeHash.alloc(getVWCodeHash)
+	}
+	return getVWCodeHash()
+}
+
+func (ws *WriteSet) newVWCodeSize() *VersionedWrite[int] {
+	if ws.cells != nil {
+		return ws.cells.codeSize.alloc(getVWCodeSize)
+	}
+	return getVWCodeSize()
+}
+
+func (ws *WriteSet) newVWStorage() *VersionedWrite[uint256.Int] {
+	if ws.cells != nil {
+		return ws.cells.storage.alloc(getVWStorage)
+	}
+	return getVWStorage()
+}
+
+// WriteSet is the cell-pipeline target shape for versionedWrites.
+// Symmetric with ReadSet — see that type for rationale.
+type WriteSet struct {
+	address        map[accounts.Address]*VersionedWrite[*accounts.Account]
+	balance        map[accounts.Address]*VersionedWrite[uint256.Int]
+	nonce          map[accounts.Address]*VersionedWrite[uint64]
+	incarnation    map[accounts.Address]*VersionedWrite[uint64]
+	selfDestruct   map[accounts.Address]*VersionedWrite[bool]
+	createContract map[accounts.Address]*VersionedWrite[bool]
+	code           map[accounts.Address]*VersionedWrite[accounts.Code]
+	codeHash       map[accounts.Address]*VersionedWrite[accounts.CodeHash]
+	codeSize       map[accounts.Address]*VersionedWrite[int]
+	storage        map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int]
+
+	// released marks a ReleaseMaps that was not a reset for reuse: the pooled
+	// maps leave the set reading as empty, so under assertions readers panic
+	// instead.
+	released bool
+
+	cells *vwArenas // nil until UseArena
+}
+
+type vwArenas struct {
+	address        vwArena[*accounts.Account]
+	balance        vwArena[uint256.Int]
+	nonce          vwArena[uint64]
+	incarnation    vwArena[uint64]
+	selfDestruct   vwArena[bool]
+	createContract vwArena[bool]
+	code           vwArena[accounts.Code]
+	codeHash       vwArena[accounts.CodeHash]
+	codeSize       vwArena[int]
+	storage        vwArena[uint256.Int]
+	accounts       acctSlab
+}
+
+func (a *vwArenas) reset() {
+	a.accounts.reset()
+	a.address.reset(releaseVWAddress)
+	a.balance.reset(releaseVWBalance)
+	a.nonce.reset(releaseVWNonce)
+	a.incarnation.reset(releaseVWIncarnation)
+	a.selfDestruct.reset(releaseVWSelfDestruct)
+	a.createContract.reset(releaseVWCreateContract)
+	a.code.reset(releaseVWCode)
+	a.codeHash.reset(releaseVWCodeHash)
+	a.codeSize.reset(releaseVWCodeSize)
+	a.storage.reset(releaseVWStorage)
+}
+
+func (ws *WriteSet) ArenaBacked() bool { return ws != nil && ws.cells != nil }
+
+// assertNotArena trips when a set that recycles its cells would hand one out.
+// Unreachable while every consumer takes a Snapshot clone; it is here so a
+// future caller that passes the live set fails loudly instead of silently.
+func (ws *WriteSet) assertNotArena(op string) {
+	if dbg.AssertEnabled && ws.ArenaBacked() {
+		panic("writeset: " + op + " of an arena-backed set")
+	}
+}
+
+// UseArena routes this set's cells to its own slabs. Only a set the state keeps
+// across txs may do it, and a set that shares its cells out must not (see
+// assertNotArena and recycle).
+func (ws *WriteSet) UseArena() {
+	if ws.cells == nil {
+		ws.cells = &vwArenas{}
+	}
+}
+
+// recycle resets the set and takes its cells from its own slabs from here on.
+// Slabs only pay off once the state outlives a tx: a one-shot state would buy
+// a slab per path it touches and throw it away.
+func (ws *WriteSet) recycle() {
+	ws.ReleaseAndReset()
+	ws.UseArena()
+}
+
+// Released reports whether ReleaseMaps pooled this set's maps and no later
+// write revived it.
+func (ws *WriteSet) Released() bool { return ws != nil && ws.released }
+
+// The panic must stay inline with a constant message: an out-of-line helper
+// costs a call, and IsEmpty then exceeds its inline budget.
+func (ws *WriteSet) assertLive() {
+	if dbg.AssertEnabled && ws != nil && ws.released {
+		panic("WriteSet read after ReleaseMaps: the maps are pooled, so this read silently sees nothing")
+	}
+}
+
+// vwMapPool[T] pools the per-path map[Address]*VersionedWrite[T] containers
+// themselves, not just the *VersionedWrite[T] values (those are in vwPool*).
+// put() walks no entries — by contract, callers release every VW to its
+// vwPool before put() — but it does call clear() so the map header survives
+// with cleared buckets ready for the next checkout.  Pooling the container
+// preserves bucket capacity across txs; clear() is precisely the behaviour
+// pool-resident containers want.
+type vwMapPool[T any] struct{ p sync.Pool }
+
+func newVWMapPool[T any]() *vwMapPool[T] {
+	return &vwMapPool[T]{p: sync.Pool{New: func() any {
+		return make(map[accounts.Address]*VersionedWrite[T])
+	}}}
+}
+
+func (mp *vwMapPool[T]) get() map[accounts.Address]*VersionedWrite[T] {
+	return mp.p.Get().(map[accounts.Address]*VersionedWrite[T])
+}
+
+func (mp *vwMapPool[T]) put(m map[accounts.Address]*VersionedWrite[T]) {
+	if m == nil {
+		return
+	}
+	clear(m)
+	mp.p.Put(m)
+}
+
+var (
+	wsMapPoolAddress        = newVWMapPool[*accounts.Account]()
+	wsMapPoolBalance        = newVWMapPool[uint256.Int]()
+	wsMapPoolNonce          = newVWMapPool[uint64]()
+	wsMapPoolIncarnation    = newVWMapPool[uint64]()
+	wsMapPoolSelfDestruct   = newVWMapPool[bool]()
+	wsMapPoolCreateContract = newVWMapPool[bool]()
+	wsMapPoolCode           = newVWMapPool[accounts.Code]()
+	wsMapPoolCodeHash       = newVWMapPool[accounts.CodeHash]()
+	wsMapPoolCodeSize       = newVWMapPool[int]()
+	wsMapPoolStorageInner   = sync.Pool{New: func() any {
+		return make(map[accounts.StorageKey]*VersionedWrite[uint256.Int])
+	}}
+	wsMapPoolStorageOuter = sync.Pool{New: func() any {
+		return make(map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int])
+	}}
+)
+
+func wsGetStorageInner() map[accounts.StorageKey]*VersionedWrite[uint256.Int] {
+	return wsMapPoolStorageInner.Get().(map[accounts.StorageKey]*VersionedWrite[uint256.Int])
+}
+
+func wsPutStorageInner(m map[accounts.StorageKey]*VersionedWrite[uint256.Int]) {
+	if m == nil {
+		return
+	}
+	clear(m)
+	wsMapPoolStorageInner.Put(m)
+}
+
+func wsGetStorageOuter() map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int] {
+	return wsMapPoolStorageOuter.Get().(map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int])
+}
+
+func wsPutStorageOuter(m map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int]) {
+	if m == nil {
+		return
+	}
+	clear(m)
+	wsMapPoolStorageOuter.Put(m)
+}
+
+// writeSetPut lazily checks out a pooled map and inserts vw at addr.
+// First write per tx pays vwMapPool.Get (cheap); subsequent writes are
+// direct map insert.  ReleaseAndReset puts the map back on tx-finalize.
+func writeSetPut[T any](s *WriteSet, m *map[accounts.Address]*VersionedWrite[T], addr accounts.Address, vw *VersionedWrite[T], pool *vwMapPool[T]) {
+	if *m == nil {
+		*m = pool.get()
+		s.revive()
+	}
+	(*m)[addr] = vw
+}
+
+func (ws *WriteSet) revive() {
+	ws.released = false
+}
+
+func (ws *WriteSet) SetAddress(addr accounts.Address, vw *VersionedWrite[*accounts.Account]) {
+	writeSetPut(ws, &ws.address, addr, vw, wsMapPoolAddress)
+}
+
+func (ws *WriteSet) SetBalance(addr accounts.Address, vw *VersionedWrite[uint256.Int]) {
+	writeSetPut(ws, &ws.balance, addr, vw, wsMapPoolBalance)
+}
+
+func (ws *WriteSet) SetNonce(addr accounts.Address, vw *VersionedWrite[uint64]) {
+	writeSetPut(ws, &ws.nonce, addr, vw, wsMapPoolNonce)
+}
+
+func (ws *WriteSet) SetIncarnation(addr accounts.Address, vw *VersionedWrite[uint64]) {
+	writeSetPut(ws, &ws.incarnation, addr, vw, wsMapPoolIncarnation)
+}
+
+func (ws *WriteSet) SetSelfDestruct(addr accounts.Address, vw *VersionedWrite[bool]) {
+	writeSetPut(ws, &ws.selfDestruct, addr, vw, wsMapPoolSelfDestruct)
+}
+
+func (ws *WriteSet) SetCreateContract(addr accounts.Address, vw *VersionedWrite[bool]) {
+	writeSetPut(ws, &ws.createContract, addr, vw, wsMapPoolCreateContract)
+}
+
+func (ws *WriteSet) SetCode(addr accounts.Address, vw *VersionedWrite[accounts.Code]) {
+	writeSetPut(ws, &ws.code, addr, vw, wsMapPoolCode)
+}
+
+func (ws *WriteSet) SetCodeHash(addr accounts.Address, vw *VersionedWrite[accounts.CodeHash]) {
+	writeSetPut(ws, &ws.codeHash, addr, vw, wsMapPoolCodeHash)
+}
+
+func (ws *WriteSet) SetCodeSize(addr accounts.Address, vw *VersionedWrite[int]) {
+	writeSetPut(ws, &ws.codeSize, addr, vw, wsMapPoolCodeSize)
+}
+
+func (ws *WriteSet) SetStorage(addr accounts.Address, key accounts.StorageKey, vw *VersionedWrite[uint256.Int]) {
+	if ws.storage == nil {
+		ws.storage = wsGetStorageOuter()
+		ws.revive()
+	}
+	inner := ws.storage[addr]
+	if inner == nil {
+		inner = wsGetStorageInner()
+		ws.storage[addr] = inner
+	}
+	inner[key] = vw
+}
+
+func (ws *WriteSet) IsEmpty() bool {
+	if ws == nil {
+		return true
+	}
+	ws.assertLive()
+	return len(ws.address) == 0 && len(ws.balance) == 0 && len(ws.nonce) == 0 &&
+		len(ws.incarnation) == 0 && len(ws.selfDestruct) == 0 && len(ws.createContract) == 0 &&
+		len(ws.code) == 0 && len(ws.codeHash) == 0 && len(ws.codeSize) == 0 && len(ws.storage) == 0
+}
+
+// Has reports whether a write exists at h's (Address, Path, Key).
+func (ws *WriteSet) Has(h WriteHeader) bool {
+	return ws.hasHeader(h)
+}
+
+// Filter returns a new WriteSet holding only the writes whose header satisfies
+// keep. The kept writes are shared (not cloned) with the receiver.
+func (ws *WriteSet) Filter(keep func(WriteHeader) bool) *WriteSet {
+	if ws == nil {
 		return nil
 	}
-	out := make(ReadSet)
-	if a != nil {
-		a.Scan(func(vr *VersionedRead) bool {
-			out.Set(*vr)
-			return true
-		})
+	ws.assertLive()
+	ws.assertNotArena("filter")
+	out := &WriteSet{}
+	for a, vw := range ws.address {
+		if keep(vw.WriteHeader) {
+			out.SetAddress(a, vw)
+		}
 	}
-	if b != nil {
-		b.Scan(func(vr *VersionedRead) bool {
-			out.Set(*vr)
-			return true
-		})
+	for a, vw := range ws.balance {
+		if keep(vw.WriteHeader) {
+			out.SetBalance(a, vw)
+		}
+	}
+	for a, vw := range ws.nonce {
+		if keep(vw.WriteHeader) {
+			out.SetNonce(a, vw)
+		}
+	}
+	for a, vw := range ws.incarnation {
+		if keep(vw.WriteHeader) {
+			out.SetIncarnation(a, vw)
+		}
+	}
+	for a, vw := range ws.selfDestruct {
+		if keep(vw.WriteHeader) {
+			out.SetSelfDestruct(a, vw)
+		}
+	}
+	for a, vw := range ws.createContract {
+		if keep(vw.WriteHeader) {
+			out.SetCreateContract(a, vw)
+		}
+	}
+	for a, vw := range ws.code {
+		if keep(vw.WriteHeader) {
+			out.SetCode(a, vw)
+		}
+	}
+	for a, vw := range ws.codeHash {
+		if keep(vw.WriteHeader) {
+			out.SetCodeHash(a, vw)
+		}
+	}
+	for a, vw := range ws.codeSize {
+		if keep(vw.WriteHeader) {
+			out.SetCodeSize(a, vw)
+		}
+	}
+	for a, inner := range ws.storage {
+		for k, vw := range inner {
+			if keep(vw.WriteHeader) {
+				out.SetStorage(a, k, vw)
+			}
+		}
 	}
 	return out
 }
 
-func (rs ReadSet) Set(v VersionedRead) {
-	reads, ok := rs[v.Address]
+// Finalize produces the committable write-set for a tx from the raw recorded
+// writes: it applies the EIP-6780 net-zero storage wipe, then returns the
+// filtered Snapshot. It operates on the write-set alone — no IntraBlockState —
+// so the parallel finalize can be driven straight from the recorded IO.
+func (ws *WriteSet) Finalize() *WriteSet {
+	ws.zeroSameTxCreateDestructStorage()
+	return ws.Snapshot()
+}
 
-	if !ok {
-		rs[v.Address] = map[AccountKey]VersionedRead{
-			{v.Path, v.Key}: v,
+// zeroSameTxCreateDestructStorage implements EIP-6780 + EIP-7928: when a
+// contract is created and self-destructed in the same tx, its storage is wiped
+// at end-of-tx, so the BAL must record the dirty slots as reads (net-zero), not
+// changes. Zero the storage write values so AsBlockAccessList folds them away.
+// The create+destruct pair is detectable from the write-set itself
+// (createContract survives SELFDESTRUCT), so no stateObject is needed.
+func (ws *WriteSet) zeroSameTxCreateDestructStorage() {
+	for addr, cc := range ws.createContract {
+		if !cc.Val {
+			continue
 		}
-	} else {
-		reads[AccountKey{v.Path, v.Key}] = v
+		if sd, ok := ws.selfDestruct[addr]; !ok || !sd.Val {
+			continue
+		}
+		if inner, ok := ws.storage[addr]; ok {
+			for _, vw := range inner {
+				vw.Val = uint256.Int{}
+			}
+		}
 	}
 }
 
-func (s ReadSet) Scan(yield func(input *VersionedRead) bool) {
-	for _, reads := range s {
-		for _, v := range reads {
-			if !yield(&v) {
+// Snapshot returns a frozen typed copy of the recorded writes. The journal keeps
+// the write-set in step with reverts, so every address present is a surviving
+// write — no dirty reconciliation is needed. Under self-destruct only
+// SelfDestruct/Balance/Incarnation/Storage/CreateContract are kept (the BAL needs
+// residual balance, later reads need the incarnation cell as the storage-wipe signal, the calculator
+// needs per-slot deletes, and fee finalization needs the creation marker);
+// Nonce/Code/CodeHash/CodeSize/Address drop.
+func (ws *WriteSet) Snapshot() *WriteSet {
+	out := &WriteSet{}
+
+	addrs := make(map[accounts.Address]struct{})
+	for h := range ws.AllHeaders() {
+		addrs[h.Address] = struct{}{}
+	}
+
+	for addr := range addrs {
+		sd := false
+		if vw, ok := ws.selfDestruct[addr]; ok {
+			out.SetSelfDestruct(addr, cloneVW(vw))
+			sd = vw.Val
+		}
+		if vw, ok := ws.balance[addr]; ok {
+			out.SetBalance(addr, cloneVW(vw))
+		}
+		if vw, ok := ws.incarnation[addr]; ok {
+			out.SetIncarnation(addr, cloneVW(vw))
+		}
+		if inner, ok := ws.storage[addr]; ok {
+			for k, vw := range inner {
+				out.SetStorage(addr, k, cloneVW(vw))
+			}
+		}
+		// CreateContract survives self-destruct: fee finalization and the BAL need
+		// the creation marker, and zeroSameTxCreateDestructStorage detects the
+		// create+destruct pair from it. ApplyVersionedWrites skips applying it under
+		// self-destruct, so keeping it here does not resurrect the account.
+		if vw, ok := ws.createContract[addr]; ok {
+			out.SetCreateContract(addr, cloneVW(vw))
+		}
+		if !sd {
+			if vw, ok := ws.address[addr]; ok {
+				c := cloneVW(vw)
+				if ws.cells != nil && c.Val != nil {
+					c.Val = c.Val.SelfCopy()
+				}
+				out.SetAddress(addr, c)
+			}
+			if vw, ok := ws.nonce[addr]; ok {
+				out.SetNonce(addr, cloneVW(vw))
+			}
+			if vw, ok := ws.code[addr]; ok {
+				out.SetCode(addr, cloneVW(vw))
+			}
+			if vw, ok := ws.codeHash[addr]; ok {
+				out.SetCodeHash(addr, cloneVW(vw))
+			}
+			if vw, ok := ws.codeSize[addr]; ok {
+				out.SetCodeSize(addr, cloneVW(vw))
+			}
+		}
+	}
+	return out
+}
+
+func (ws *WriteSet) deleteAddr(addr accounts.Address) {
+	delete(ws.address, addr)
+	delete(ws.balance, addr)
+	delete(ws.nonce, addr)
+	delete(ws.incarnation, addr)
+	delete(ws.selfDestruct, addr)
+	delete(ws.createContract, addr)
+	delete(ws.code, addr)
+	delete(ws.codeHash, addr)
+	delete(ws.codeSize, addr)
+	delete(ws.storage, addr)
+}
+
+// createWriteSnapshot holds a deep copy of the account-record writes that
+// createObject/createAccount overwrite when (re)creating an account. It lets a
+// reverted recreation restore the prior writes rather than leave them
+// overwritten — the record-level create journal entry maintaining its own
+// field-level writes.
+type createWriteSnapshot struct {
+	address        *VersionedWrite[*accounts.Account]
+	balance        *VersionedWrite[uint256.Int]
+	incarnation    *VersionedWrite[uint64]
+	selfDestruct   *VersionedWrite[bool]
+	createContract *VersionedWrite[bool]
+	codeHash       *VersionedWrite[accounts.CodeHash]
+}
+
+// snapshotCreateFields clones the account-record writes that a subsequent
+// createObject/createAccount will overwrite, so a reverted recreation can
+// restore them. Fields creation never writes (nonce/code/codeSize/storage) are
+// not captured — they survive the recreation untouched.
+func (ws *WriteSet) snapshotCreateFields(addr accounts.Address) *createWriteSnapshot {
+	snap := &createWriteSnapshot{}
+	if vw, ok := ws.address[addr]; ok {
+		snap.address = cloneVW(vw)
+	}
+	if vw, ok := ws.balance[addr]; ok {
+		snap.balance = cloneVW(vw)
+	}
+	if vw, ok := ws.incarnation[addr]; ok {
+		snap.incarnation = cloneVW(vw)
+	}
+	if vw, ok := ws.selfDestruct[addr]; ok {
+		snap.selfDestruct = cloneVW(vw)
+	}
+	if vw, ok := ws.createContract[addr]; ok {
+		snap.createContract = cloneVW(vw)
+	}
+	if vw, ok := ws.codeHash[addr]; ok {
+		snap.codeHash = cloneVW(vw)
+	}
+	return snap
+}
+
+// restoreCreateFields reverts the account-record writes overwritten by a
+// recreation back to snap (nil entries in snap become deletions). Only the
+// fields creation writes are touched.
+func (ws *WriteSet) restoreCreateFields(addr accounts.Address, snap *createWriteSnapshot) {
+	delete(ws.address, addr)
+	delete(ws.balance, addr)
+	delete(ws.incarnation, addr)
+	delete(ws.selfDestruct, addr)
+	delete(ws.createContract, addr)
+	delete(ws.codeHash, addr)
+	if snap == nil {
+		return
+	}
+	if snap.address != nil {
+		ws.SetAddress(addr, snap.address)
+	}
+	if snap.balance != nil {
+		ws.SetBalance(addr, snap.balance)
+	}
+	if snap.incarnation != nil {
+		ws.SetIncarnation(addr, snap.incarnation)
+	}
+	if snap.selfDestruct != nil {
+		ws.SetSelfDestruct(addr, snap.selfDestruct)
+	}
+	if snap.createContract != nil {
+		ws.SetCreateContract(addr, snap.createContract)
+	}
+	if snap.codeHash != nil {
+		ws.SetCodeHash(addr, snap.codeHash)
+	}
+}
+
+// assertSelfDestructNormalized panics if a self-destructed address still carries
+// the account fields Normalize is required to drop. Any of them makes Apply
+// compute pureDelete=false and take the cleanup-before-recreate branch, which
+// writes the account back instead of deleting it — a phantom account. Balance
+// (retained under EIP-8246) and the storage-delete cascade are legal.
+func (ws *WriteSet) assertSelfDestructNormalized() {
+	for addr, sdw := range ws.selfDestruct {
+		if !sdw.Val {
+			continue
+		}
+		var field string
+		switch {
+		case ws.nonce[addr] != nil:
+			field = "nonce"
+		case ws.incarnation[addr] != nil:
+			field = "incarnation"
+		case ws.codeHash[addr] != nil:
+			field = "codeHash"
+		default:
+			continue
+		}
+		panic(fmt.Sprintf("write set not normalized: self-destructed %x keeps its %s write", addr.Value(), field))
+	}
+}
+
+// DeleteAccountFields removes the Balance/Nonce/Incarnation/CodeHash writes for
+// addr, leaving storage/code/self-destruct intact.
+func (ws *WriteSet) DeleteAccountFields(addr accounts.Address) {
+	delete(ws.balance, addr)
+	delete(ws.nonce, addr)
+	delete(ws.incarnation, addr)
+	delete(ws.codeHash, addr)
+}
+
+// Count is the total number of writes across all paths.
+func (ws *WriteSet) Count() int {
+	if ws == nil {
+		return 0
+	}
+	ws.assertLive()
+	n := len(ws.address) + len(ws.balance) + len(ws.nonce) + len(ws.incarnation) +
+		len(ws.selfDestruct) + len(ws.createContract) + len(ws.code) + len(ws.codeHash) + len(ws.codeSize)
+	for _, inner := range ws.storage {
+		n += len(inner)
+	}
+	return n
+}
+
+func (ws *WriteSet) GetAddress(addr accounts.Address) (*VersionedWrite[*accounts.Account], bool) {
+	if ws == nil {
+		return nil, false
+	}
+	vw, ok := ws.address[addr]
+	return vw, ok
+}
+
+func (ws *WriteSet) GetBalance(addr accounts.Address) (*VersionedWrite[uint256.Int], bool) {
+	if ws == nil {
+		return nil, false
+	}
+	vw, ok := ws.balance[addr]
+	return vw, ok
+}
+
+func (ws *WriteSet) GetNonce(addr accounts.Address) (*VersionedWrite[uint64], bool) {
+	if ws == nil {
+		return nil, false
+	}
+	vw, ok := ws.nonce[addr]
+	return vw, ok
+}
+
+func (ws *WriteSet) GetIncarnation(addr accounts.Address) (*VersionedWrite[uint64], bool) {
+	if ws == nil {
+		return nil, false
+	}
+	vw, ok := ws.incarnation[addr]
+	return vw, ok
+}
+
+func (ws *WriteSet) GetSelfDestruct(addr accounts.Address) (*VersionedWrite[bool], bool) {
+	if ws == nil {
+		return nil, false
+	}
+	vw, ok := ws.selfDestruct[addr]
+	return vw, ok
+}
+
+func (ws *WriteSet) GetCreateContract(addr accounts.Address) (*VersionedWrite[bool], bool) {
+	if ws == nil {
+		return nil, false
+	}
+	vw, ok := ws.createContract[addr]
+	return vw, ok
+}
+
+func (ws *WriteSet) GetCode(addr accounts.Address) (*VersionedWrite[accounts.Code], bool) {
+	if ws == nil {
+		return nil, false
+	}
+	vw, ok := ws.code[addr]
+	return vw, ok
+}
+
+func (ws *WriteSet) GetCodeHash(addr accounts.Address) (*VersionedWrite[accounts.CodeHash], bool) {
+	if ws == nil {
+		return nil, false
+	}
+	vw, ok := ws.codeHash[addr]
+	return vw, ok
+}
+
+func (ws *WriteSet) GetCodeSize(addr accounts.Address) (*VersionedWrite[int], bool) {
+	if ws == nil {
+		return nil, false
+	}
+	vw, ok := ws.codeSize[addr]
+	return vw, ok
+}
+
+func (ws *WriteSet) GetStorage(addr accounts.Address, key accounts.StorageKey) (*VersionedWrite[uint256.Int], bool) {
+	if ws == nil {
+		return nil, false
+	}
+	inner := ws.storage[addr]
+	if inner == nil {
+		return nil, false
+	}
+	vw, ok := inner[key]
+	return vw, ok
+}
+
+// forEachAddr calls f for every address with at least one entry, allocating
+// nothing. An address present in several paths is visited once per path, so
+// callers must tolerate repeats (use addrs() when a deduped set is required).
+func (ws *WriteSet) forEachAddr(f func(accounts.Address)) {
+	if ws == nil {
+		return
+	}
+	ws.assertLive()
+	for a := range ws.address {
+		f(a)
+	}
+	ws.forEachFieldAddr(f)
+}
+
+// forEachFieldAddr is forEachAddr restricted to field-level writes: it skips the
+// record-level AddressPath map, whose entries carry no field of their own.
+func (ws *WriteSet) forEachFieldAddr(f func(accounts.Address)) {
+	if ws == nil {
+		return
+	}
+	ws.assertLive()
+	for a := range ws.balance {
+		f(a)
+	}
+	for a := range ws.nonce {
+		f(a)
+	}
+	for a := range ws.incarnation {
+		f(a)
+	}
+	for a := range ws.selfDestruct {
+		f(a)
+	}
+	for a := range ws.createContract {
+		f(a)
+	}
+	for a := range ws.code {
+		f(a)
+	}
+	for a := range ws.codeHash {
+		f(a)
+	}
+	for a := range ws.codeSize {
+		f(a)
+	}
+	for a := range ws.storage {
+		f(a)
+	}
+}
+
+// addrs returns the union of all addresses that have at least one entry.
+// Iteration order across the union is non-deterministic — caller sorts
+// before use if determinism matters.
+func (ws *WriteSet) addrs() map[accounts.Address]struct{} {
+	out := map[accounts.Address]struct{}{}
+	for a := range ws.address {
+		out[a] = struct{}{}
+	}
+	for a := range ws.balance {
+		out[a] = struct{}{}
+	}
+	for a := range ws.nonce {
+		out[a] = struct{}{}
+	}
+	for a := range ws.incarnation {
+		out[a] = struct{}{}
+	}
+	for a := range ws.selfDestruct {
+		out[a] = struct{}{}
+	}
+	for a := range ws.createContract {
+		out[a] = struct{}{}
+	}
+	for a := range ws.code {
+		out[a] = struct{}{}
+	}
+	for a := range ws.codeHash {
+		out[a] = struct{}{}
+	}
+	for a := range ws.codeSize {
+		out[a] = struct{}{}
+	}
+	for a := range ws.storage {
+		out[a] = struct{}{}
+	}
+	return out
+}
+
+// Per-path typed iterators over the write collections. Consumers that depend on
+// the self-destruct-vs-field priority iterate these in explicit order (e.g.
+// SelfDestructs before the reviving field writes) rather than relying on a flat
+// stream's element order.
+func (ws *WriteSet) Addresses() iter.Seq2[accounts.Address, *VersionedWrite[*accounts.Account]] {
+	return writeSetSeq(ws, func(s *WriteSet) map[accounts.Address]*VersionedWrite[*accounts.Account] { return s.address })
+}
+
+func (ws *WriteSet) Balances() iter.Seq2[accounts.Address, *VersionedWrite[uint256.Int]] {
+	return writeSetSeq(ws, func(s *WriteSet) map[accounts.Address]*VersionedWrite[uint256.Int] { return s.balance })
+}
+
+func (ws *WriteSet) Nonces() iter.Seq2[accounts.Address, *VersionedWrite[uint64]] {
+	return writeSetSeq(ws, func(s *WriteSet) map[accounts.Address]*VersionedWrite[uint64] { return s.nonce })
+}
+
+func (ws *WriteSet) Incarnations() iter.Seq2[accounts.Address, *VersionedWrite[uint64]] {
+	return writeSetSeq(ws, func(s *WriteSet) map[accounts.Address]*VersionedWrite[uint64] { return s.incarnation })
+}
+
+func (ws *WriteSet) SelfDestructs() iter.Seq2[accounts.Address, *VersionedWrite[bool]] {
+	return writeSetSeq(ws, func(s *WriteSet) map[accounts.Address]*VersionedWrite[bool] { return s.selfDestruct })
+}
+
+func (ws *WriteSet) Codes() iter.Seq2[accounts.Address, *VersionedWrite[accounts.Code]] {
+	return writeSetSeq(ws, func(s *WriteSet) map[accounts.Address]*VersionedWrite[accounts.Code] { return s.code })
+}
+
+func (ws *WriteSet) CodeHashes() iter.Seq2[accounts.Address, *VersionedWrite[accounts.CodeHash]] {
+	return writeSetSeq(ws, func(s *WriteSet) map[accounts.Address]*VersionedWrite[accounts.CodeHash] { return s.codeHash })
+}
+
+func (ws *WriteSet) Storages() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
+	return writeSetSeq(ws, func(s *WriteSet) map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int] {
+		return s.storage
+	})
+}
+
+// writeSetSeq defers both the liveness check and the map read to the moment the
+// sequence runs. A sequence built before ReleaseMaps would otherwise walk the
+// pooled maps and silently see nothing.
+func writeSetSeq[T any](s *WriteSet, pick func(*WriteSet) map[accounts.Address]T) iter.Seq2[accounts.Address, T] {
+	return func(yield func(accounts.Address, T) bool) {
+		if s == nil {
+			return
+		}
+		s.assertLive()
+		for addr, v := range pick(s) {
+			if !yield(addr, v) {
 				return
 			}
 		}
 	}
 }
 
-func (s ReadSet) Len() int {
-	var l int
-	for _, p := range s {
-		l += len(p)
+func eachWriteHeaderOf[T any](m map[accounts.Address]*VersionedWrite[T], yield func(WriteHeader) bool) bool {
+	if len(m) == 0 {
+		return true
 	}
-	return l
-}
-
-func (s ReadSet) Delete(addr accounts.Address, key AccountKey) {
-	if reads, ok := s[addr]; ok {
-		delete(reads, key)
-		if len(reads) == 0 {
-			delete(s, addr)
+	for _, vw := range m {
+		if !yield(vw.WriteHeader) {
+			return false
 		}
 	}
+	return true
 }
 
-type WriteSet map[accounts.Address]map[AccountKey]VersionedWrite
-
-func (s WriteSet) Set(v VersionedWrite) {
-	writes, ok := s[v.Address]
-
-	if !ok {
-		s[v.Address] = map[AccountKey]VersionedWrite{
-			{v.Path, v.Key}: v,
+// AllHeaders visits the type-agnostic header of every write; the value is read
+// typed-by-path from the per-path maps, so nothing is erased to an interface.
+func (ws *WriteSet) AllHeaders() iter.Seq[WriteHeader] {
+	return func(yield func(WriteHeader) bool) {
+		if ws == nil {
+			return
 		}
-	} else {
-		writes[AccountKey{v.Path, v.Key}] = v
-	}
-}
-
-// UpdateVal updates the Val field of an existing entry. Returns true if the entry was found.
-func (s WriteSet) UpdateVal(addr accounts.Address, key AccountKey, val any) bool {
-	if writes, ok := s[addr]; ok {
-		if v, ok := writes[key]; ok {
-			v.Val = val
-			writes[key] = v
-			return true
+		ws.assertLive()
+		if !eachWriteHeaderOf(ws.address, yield) ||
+			!eachWriteHeaderOf(ws.balance, yield) ||
+			!eachWriteHeaderOf(ws.nonce, yield) ||
+			!eachWriteHeaderOf(ws.incarnation, yield) ||
+			!eachWriteHeaderOf(ws.selfDestruct, yield) ||
+			!eachWriteHeaderOf(ws.createContract, yield) ||
+			!eachWriteHeaderOf(ws.code, yield) ||
+			!eachWriteHeaderOf(ws.codeHash, yield) ||
+			!eachWriteHeaderOf(ws.codeSize, yield) {
+			return
 		}
-	}
-	return false
-}
-
-func (s WriteSet) Delete(addr accounts.Address, key AccountKey) {
-	if writes, ok := s[addr]; ok {
-		delete(writes, key)
-		if len(writes) == 0 {
-			delete(s, addr)
-		}
-	}
-}
-
-func (s WriteSet) Len() int {
-	var l int
-	for _, p := range s {
-		l += len(p)
-	}
-	return l
-}
-
-func (s WriteSet) Scan(yield func(input *VersionedWrite) bool) {
-	for _, writes := range s {
-		for _, v := range writes {
-			if !yield(&v) {
-				return
+		for _, inner := range ws.storage {
+			for _, vw := range inner {
+				if !yield(vw.WriteHeader) {
+					return
+				}
 			}
 		}
 	}
 }
 
-type VersionedRead struct {
-	Address  accounts.Address
-	Path     AccountPath
-	Key      accounts.StorageKey
-	Source   ReadSource
-	Version  Version
-	Val      any
-	internal bool // when true, read is used for conflict detection only; excluded from BAL
+// ReleaseAndReset returns every *VersionedWrite[T] held by the set to its
+// typed sync.Pool, or rewinds the set's arena, then returns the per-path maps
+// to their map-pools.
+// Called at tx-finalize so both the VW values and the map buckets cycle
+// through pools rather than getting GC'd. The values must go back before
+// ReleaseMaps clears the maps that hold them.
+func (ws *WriteSet) ReleaseAndReset() {
+	if ws.cells != nil {
+		ws.ReleaseMaps()
+		ws.cells.reset()
+		ws.revive() // a reset hands the set back for reuse
+		return
+	}
+	for _, vw := range ws.address {
+		releaseVWAddress(vw)
+	}
+	for _, vw := range ws.balance {
+		releaseVWBalance(vw)
+	}
+	for _, vw := range ws.nonce {
+		releaseVWNonce(vw)
+	}
+	for _, vw := range ws.incarnation {
+		releaseVWIncarnation(vw)
+	}
+	for _, vw := range ws.selfDestruct {
+		releaseVWSelfDestruct(vw)
+	}
+	for _, vw := range ws.createContract {
+		releaseVWCreateContract(vw)
+	}
+	for _, vw := range ws.code {
+		releaseVWCode(vw)
+	}
+	for _, vw := range ws.codeHash {
+		releaseVWCodeHash(vw)
+	}
+	for _, vw := range ws.codeSize {
+		releaseVWCodeSize(vw)
+	}
+	for _, inner := range ws.storage {
+		for _, vw := range inner {
+			releaseVWStorage(vw)
+		}
+	}
+	ws.ReleaseMaps()
+	ws.revive() // a reset hands the set back for reuse
 }
 
-func (vr VersionedRead) String() string {
-	return fmt.Sprintf("(%s) %x %s: %s", vr.Source.VersionedString(vr.Version), vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, valueString(vr.Path, vr.Val))
+// ReleaseMaps returns the map containers to their pools without releasing the
+// VersionedWrite values, which stay owned by GC — they may be shared with other
+// sets after MergeInto. Use ReleaseAndReset only for sets whose VWs came from
+// the vwPools and are exclusively owned.
+func (ws *WriteSet) ReleaseMaps() {
+	if ws == nil {
+		return
+	}
+	wsMapPoolAddress.put(ws.address)
+	wsMapPoolBalance.put(ws.balance)
+	wsMapPoolNonce.put(ws.nonce)
+	wsMapPoolIncarnation.put(ws.incarnation)
+	wsMapPoolSelfDestruct.put(ws.selfDestruct)
+	wsMapPoolCreateContract.put(ws.createContract)
+	wsMapPoolCode.put(ws.code)
+	wsMapPoolCodeHash.put(ws.codeHash)
+	wsMapPoolCodeSize.put(ws.codeSize)
+	for _, inner := range ws.storage {
+		wsPutStorageInner(inner)
+	}
+	wsPutStorageOuter(ws.storage)
+	cells := ws.cells
+	*ws = WriteSet{}
+	ws.cells = cells
+	ws.released = true
 }
 
-type VersionedWrite struct {
-	Address             accounts.Address
-	Path                AccountPath
-	Key                 accounts.StorageKey
-	Version             Version
-	Val                 any
-	BalanceChangeReason tracing.BalanceChangeReason
-	NonceChangeReason   tracing.NonceChangeReason
+// delCell drops addr's cell, returning it to its pool unless the set recycles
+// its own cells.
+func delCell[K comparable, T any](ws *WriteSet, m map[K]*VersionedWrite[T], k K, release func(*VersionedWrite[T])) {
+	vw, ok := m[k]
+	if !ok {
+		return
+	}
+	if ws.cells == nil {
+		release(vw)
+	}
+	delete(m, k)
 }
 
-func (vr VersionedWrite) String() string {
-	return fmt.Sprintf("%x %s: %s (%d.%d)", vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, valueString(vr.Path, vr.Val), vr.Version.TxIndex, vr.Version.Incarnation)
+func (ws *WriteSet) DelBalance(addr accounts.Address) {
+	delCell(ws, ws.balance, addr, releaseVWBalance)
+}
+
+func (ws *WriteSet) DelNonce(addr accounts.Address) {
+	delCell(ws, ws.nonce, addr, releaseVWNonce)
+}
+
+func (ws *WriteSet) DelIncarnation(addr accounts.Address) {
+	delCell(ws, ws.incarnation, addr, releaseVWIncarnation)
+}
+
+func (ws *WriteSet) DelSelfDestruct(addr accounts.Address) {
+	delCell(ws, ws.selfDestruct, addr, releaseVWSelfDestruct)
+}
+
+func (ws *WriteSet) DelCode(addr accounts.Address) {
+	delCell(ws, ws.code, addr, releaseVWCode)
+}
+
+func (ws *WriteSet) DelCodeHash(addr accounts.Address) {
+	delCell(ws, ws.codeHash, addr, releaseVWCodeHash)
+}
+
+func (ws *WriteSet) DelCodeSize(addr accounts.Address) {
+	delCell(ws, ws.codeSize, addr, releaseVWCodeSize)
+}
+
+func (ws *WriteSet) DelStorage(addr accounts.Address, key accounts.StorageKey) {
+	inner := ws.storage[addr]
+	if inner == nil {
+		return
+	}
+	delCell(ws, inner, key, releaseVWStorage)
+	if len(inner) == 0 {
+		delete(ws.storage, addr)
+	}
+}
+
+// updateBalance, updateNonce etc. are typed in-place mutations on the
+// existing per-path entry.  No-op when no entry exists for addr.
+func (ws *WriteSet) updateBalance(addr accounts.Address, val uint256.Int) {
+	if vw, ok := ws.balance[addr]; ok {
+		vw.Val = val
+	}
+}
+
+func (ws *WriteSet) updateStorage(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
+	if inner := ws.storage[addr]; inner != nil {
+		if vw, ok := inner[key]; ok {
+			vw.Val = val
+		}
+	}
+}
+
+func (ws *WriteSet) updateNonce(addr accounts.Address, val uint64) {
+	if vw, ok := ws.nonce[addr]; ok {
+		vw.Val = val
+	}
+}
+
+func (ws *WriteSet) updateIncarnation(addr accounts.Address, val uint64) {
+	if vw, ok := ws.incarnation[addr]; ok {
+		vw.Val = val
+	}
+}
+
+func (ws *WriteSet) updateSelfDestruct(addr accounts.Address, val bool) {
+	if vw, ok := ws.selfDestruct[addr]; ok {
+		vw.Val = val
+	}
+}
+
+func (ws *WriteSet) updateCode(addr accounts.Address, val accounts.Code) {
+	if vw, ok := ws.code[addr]; ok {
+		vw.Val = val
+	}
+}
+
+func (ws *WriteSet) updateCodeHash(addr accounts.Address, val accounts.CodeHash) {
+	if vw, ok := ws.codeHash[addr]; ok {
+		vw.Val = val
+	}
+}
+
+func (ws *WriteSet) updateCodeSize(addr accounts.Address, val int) {
+	if vw, ok := ws.codeSize[addr]; ok {
+		vw.Val = val
+	}
 }
 
 func valueString(path AccountPath, value any) string {
@@ -221,8 +1901,11 @@ func valueString(path AccountPath, value any) string {
 	case NoncePath, IncarnationPath:
 		return strconv.FormatUint(value.(uint64), 10)
 	case CodePath:
-		l := min(len(value.([]byte)), 40)
-		return hex.EncodeToString(value.([]byte)[0:l])
+		if v, ok := value.(accounts.Code); ok {
+			l := min(v.Len(), 40)
+			return hex.EncodeToString(v.Bytes[0:l])
+		}
+		return "<unknown-code>"
 	}
 
 	return fmt.Sprint(value)
@@ -235,30 +1918,42 @@ type versionedStateReader struct {
 	reads       ReadSet
 	versionMap  *VersionMap
 	stateReader StateReader
+	eip8246     bool
 }
 
 func NewVersionedStateReader(txIndex int, reads ReadSet, versionMap *VersionMap, stateReader StateReader) *versionedStateReader {
-	return &versionedStateReader{txIndex, reads, versionMap, stateReader}
+	return &versionedStateReader{txIndex: txIndex, reads: reads, versionMap: versionMap, stateReader: stateReader}
+}
+
+// SetEIP8246 makes an account self-destructed by a prior tx read as live while
+// it keeps a non-zero balance.
+func (vr *versionedStateReader) SetEIP8246(enabled bool) {
+	vr.eip8246 = enabled
 }
 
 func (vr *versionedStateReader) SetTrace(trace bool, tracePrefix string) {
-	vr.stateReader.SetTrace(trace, tracePrefix)
+	if vr.stateReader != nil {
+		vr.stateReader.SetTrace(trace, tracePrefix)
+	}
 }
 
 func (vr *versionedStateReader) Trace() bool {
-	return vr.stateReader.Trace()
+	return vr.stateReader != nil && vr.stateReader.Trace()
 }
 
 func (vr *versionedStateReader) TracePrefix() string {
+	if vr.stateReader == nil {
+		return ""
+	}
 	return vr.stateReader.TracePrefix()
 }
 
 func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
-	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.Val != nil {
-		if account, ok := r.Val.(*accounts.Account); ok && account != nil {
-			updated := vr.applyVersionedUpdates(address, *account)
-			return &updated, nil
-		}
+	r, recorded := vr.reads.GetAddress(address)
+	if recorded && r.Val != nil && !r.Val.IsNil() {
+		account := r.Val.Account()
+		updated := vr.applyVersionedUpdates(address, *account)
+		return &updated, nil
 	}
 
 	// Check version map for AddressPath — handles accounts created by
@@ -271,45 +1966,19 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 		// stays 0 → empty-account prune); a later TX that tips the same
 		// coinbase re-creates it, and we must surface the re-created
 		// account so finalize accumulates the prior cumulative value.
-		if res := vr.versionMap.Read(address, SelfDestructPath, accounts.NilKey, vr.txIndex); res.Status() == MVReadResultDone {
-			if destructed, ok := res.Value().(bool); ok && destructed {
-				destructTxIndex := res.DepIdx()
-				// Cap at vr.txIndex-1 so a prior incarnation of the same
-				// tx (whose writes still sit in the versionMap at
-				// (vr.txIndex, prevIncarnation)) doesn't masquerade as
-				// a "later tx revived this account." versionMap.Read
-				// excludes the current tx via floor(txIdx-1); the
-				// LatestTxIndex bound is inclusive, so subtract one
-				// explicitly to keep both consistent.
-				revivalLimit := vr.txIndex - 1
-				revived := false
-				if hi, ok := vr.versionMap.LatestTxIndex(address, BalancePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
-					revived = true
-				}
-				if !revived {
-					if hi, ok := vr.versionMap.LatestTxIndex(address, NoncePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
-						revived = true
-					}
-				}
-				if !revived {
-					if hi, ok := vr.versionMap.LatestTxIndex(address, CodeHashPath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
-						revived = true
-					}
-				}
-				if !revived {
-					return nil, nil
-				}
-			}
+		if destroyed, _, revived := vr.versionMap.AccountLifecycle(address, vr.txIndex); destroyed && !revived {
+			return vr.preservedAccount(address), nil
 		}
-		if acc, ok := versionedUpdate[*accounts.Account](vr.versionMap, address, AddressPath, accounts.NilKey, vr.txIndex); ok && acc != nil {
+		if acc, ok := versionedUpdateAddress(vr.versionMap, address, vr.txIndex); ok && acc != nil {
 			updated := vr.applyVersionedUpdates(address, *acc)
 			return &updated, nil
 		}
 	}
 
-	if vr.stateReader != nil {
+	// A recorded AddressPath read with no account is the tx's own conclusion that
+	// the address holds nothing; the domain cannot say otherwise.
+	if vr.stateReader != nil && !recorded {
 		account, err := vr.stateReader.ReadAccountData(address)
-
 		if err != nil {
 			return nil, err
 		}
@@ -330,61 +1999,85 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 	// AddressPath / stateReader. Synthesize an empty account and let
 	// applyVersionedUpdates apply the BAL-preloaded fields.
 	if vr.versionMap != nil {
+		// A cell whose value leaves the record EIP-161-empty is no evidence the
+		// account exists: BAL pre-population writes zero balances and nonces
+		// value-blind, and a wipe only clears a field to the default a record
+		// with no cells already holds.
 		var synth accounts.Account
-		updated := vr.applyVersionedUpdates(address, synth)
-		// Only return the synthesized account if applyVersionedUpdates
-		// actually applied at least one field — otherwise we'd return a
-		// zero account for addresses that have no versionMap entries.
-		if updated != synth {
-			return &updated, nil
+		vr.versionMap.applySubFieldWrites(address, vr.txIndex, &synth)
+		if synth.Nonce != 0 || !synth.Balance.IsZero() || !synth.CodeHash.IsEmpty() {
+			return &synth, nil
 		}
 	}
 
 	return nil, nil
 }
 
-func versionedUpdate[T any](versionMap *VersionMap, addr accounts.Address, path AccountPath, key accounts.StorageKey, txIndex int) (T, bool) {
-	if res := versionMap.Read(addr, path, key, txIndex); res.Status() == MVReadResultDone {
-		return res.Value().(T), true
+// preservedAccount is what remains of a self-destructed account under EIP-8246:
+// the kept balance with no code and a zero nonce, or nil when nothing was kept.
+// Without a revival no balance cell sits above the destruct, so the floor cell is
+// the post-destruct balance.
+func (vr *versionedStateReader) preservedAccount(address accounts.Address) *accounts.Account {
+	if !vr.eip8246 {
+		return nil
 	}
-	var v T
-	return v, false
+	balance, _, ok := vr.versionMap.ReadBalance(address, vr.txIndex)
+	if !ok || balance.IsZero() {
+		return nil
+	}
+	acc := accounts.NewAccount()
+	acc.Balance = balance
+	return &acc
 }
 
-// applyVersionedUpdates applies updated from the version map to the account before returning it, this is necessary
-// for the account obkect becuase the state reader/.writer api's treat the subfileds as a group and this
-// may lead to updated from pervious transactions being missed where we only update a subset of the fiels as these won't
-// be recored as reads and hence the varification process will miss them.  We don't want to creat a fail but
-// we do  want to capture the updates
+func (vr *versionedStateReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return vr.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (vr *versionedStateReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := vr.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
+// Per-path versionedUpdate helpers replace the legacy generic
+// versionedUpdate[T] — they consume the typed VersionMap Read primitives
+// directly so neither the call site nor the read path crosses an any
+// boundary. Each returns the cell value if a Done OR Dependency (Estimate)
+// write exists at txIndex (a Dependency cell holds the same latest in-block
+// write a Done cell does; finalize reconstruction must consume it, not fall
+// back to the pre-block DB value), otherwise zero value and ok=false.
+
+func versionedUpdateAddress(vm *VersionMap, addr accounts.Address, txIndex int) (*accounts.Account, bool) {
+	val, res, ok := vm.ReadAddress(addr, txIndex)
+	if ok && res.Status() != MVReadResultNone {
+		return val, true
+	}
+	return nil, false
+}
+
+// applyVersionedUpdates overlays the version map's per-field writes onto account.
+// The reader/writer API treats an account's sub-fields as one group, so a prior
+// tx that wrote only a subset would otherwise be lost here — and those fields are
+// not recorded as reads, so validation would not catch the miss either.
 func (vr versionedStateReader) applyVersionedUpdates(address accounts.Address, account accounts.Account) accounts.Account {
-	if update, ok := versionedUpdate[uint256.Int](vr.versionMap, address, BalancePath, accounts.NilKey, vr.txIndex); ok {
-		account.Balance = update
-	}
-	if update, ok := versionedUpdate[uint64](vr.versionMap, address, NoncePath, accounts.NilKey, vr.txIndex); ok {
-		account.Nonce = update
-	}
-	if update, ok := versionedUpdate[uint64](vr.versionMap, address, IncarnationPath, accounts.NilKey, vr.txIndex); ok {
-		account.Incarnation = update
-	}
-	if update, ok := versionedUpdate[accounts.CodeHash](vr.versionMap, address, CodeHashPath, accounts.NilKey, vr.txIndex); ok {
-		account.CodeHash = update
-	}
+	vr.versionMap.applySubFieldWrites(address, vr.txIndex, &account)
 	return account
 }
 
 func (vr versionedStateReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
-	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.Val != nil {
-		if account, ok := r.Val.(*accounts.Account); ok {
-			updated := vr.applyVersionedUpdates(address, *account)
-			return &updated, nil
-		}
+	if r, ok := vr.reads.GetAddress(address); ok && r.Val != nil && !r.Val.IsNil() {
+		account := r.Val.Account()
+		updated := vr.applyVersionedUpdates(address, *account)
+		return &updated, nil
 	}
 
 	if vr.stateReader != nil {
 		account, err := vr.stateReader.ReadAccountDataForDebug(address)
-
 		if err != nil {
 			return nil, err
+		}
+		if account == nil {
+			return nil, nil
 		}
 
 		updated := vr.applyVersionedUpdates(address, *account)
@@ -395,21 +2088,23 @@ func (vr versionedStateReader) ReadAccountDataForDebug(address accounts.Address)
 }
 
 func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
-	if r, ok := vr.reads[address][AccountKey{Path: StoragePath, Key: key}]; ok && r.Val != nil {
-		val := r.Val.(uint256.Int)
-		return val, true, nil
+	// A non-zero recorded read is the tx's own conclusion. A zero one may instead
+	// be the zero recordWipedRead left behind, which is an absent slot rather than
+	// one holding zero, so the map settles it.
+	recorded, hasRecorded := vr.reads.GetStorage(address, key)
+	if hasRecorded && !recorded.Val.IsZero() {
+		return recorded.Val, true, nil
 	}
 
-	// Check version map for storage written by prior transactions.
-	if vr.versionMap != nil {
-		if res := vr.versionMap.Read(address, SelfDestructPath, accounts.NilKey, vr.txIndex); res.Status() == MVReadResultDone {
-			if destructed, ok := res.Value().(bool); ok && destructed {
-				return uint256.Int{}, false, nil
-			}
-		}
-		if val, ok := versionedUpdate[uint256.Int](vr.versionMap, address, StoragePath, key, vr.txIndex); ok {
-			return val, true, nil
-		}
+	val, found, wiped := vr.versionMap.readStorageLive(address, key, vr.txIndex)
+	if found {
+		return val, true, nil
+	}
+	if wiped {
+		return uint256.Int{}, false, nil
+	}
+	if hasRecorded {
+		return recorded.Val, true, nil
 	}
 
 	if vr.stateReader != nil {
@@ -419,40 +2114,22 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 	return uint256.Int{}, false, nil
 }
 
-func (vr versionedStateReader) HasStorage(address accounts.Address) (bool, error) {
-	if r, ok := vr.reads[address]; ok {
-		for k := range r {
-			if k.Path == StoragePath {
-				return true, nil
-			}
-		}
+// versionedCode resolves code from the read set and the version map, reporting
+// whether either answered.
+func (vr versionedStateReader) versionedCode(address accounts.Address) ([]byte, bool) {
+	if r, ok := vr.reads.GetCode(address); ok && r.Val.Bytes != nil {
+		return r.Val.Bytes, true
 	}
-
-	if vr.stateReader != nil {
-		return vr.stateReader.HasStorage(address)
+	code, found, wiped := vr.versionMap.readCodeLive(address, vr.txIndex)
+	if found {
+		return code.Bytes, true
 	}
-
-	return false, nil
+	return nil, wiped
 }
 
 func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
-	if r, ok := vr.reads[address][AccountKey{Path: CodePath}]; ok && r.Val != nil {
-		if code, ok := r.Val.([]byte); ok {
-			return code, nil
-		}
-	}
-
-	// Check version map for CodePath entries written by prior transactions
-	// (e.g. EIP-7702 delegation set by an earlier tx in the same block).
-	if vr.versionMap != nil {
-		if res := vr.versionMap.Read(address, SelfDestructPath, accounts.NilKey, vr.txIndex); res.Status() == MVReadResultDone {
-			if destructed, ok := res.Value().(bool); ok && destructed {
-				return nil, nil
-			}
-		}
-		if code, ok := versionedUpdate[[]byte](vr.versionMap, address, CodePath, accounts.NilKey, vr.txIndex); ok {
-			return code, nil
-		}
+	if code, ok := vr.versionedCode(address); ok {
+		return code, nil
 	}
 
 	if vr.stateReader != nil {
@@ -463,21 +2140,8 @@ func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte
 }
 
 func (vr versionedStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
-	if r, ok := vr.reads[address][AccountKey{Path: CodePath}]; ok && r.Val != nil {
-		if code, ok := r.Val.([]byte); ok {
-			return len(code), nil
-		}
-	}
-
-	if vr.versionMap != nil {
-		if res := vr.versionMap.Read(address, SelfDestructPath, accounts.NilKey, vr.txIndex); res.Status() == MVReadResultDone {
-			if destructed, ok := res.Value().(bool); ok && destructed {
-				return 0, nil
-			}
-		}
-		if code, ok := versionedUpdate[[]byte](vr.versionMap, address, CodePath, accounts.NilKey, vr.txIndex); ok {
-			return len(code), nil
-		}
+	if code, ok := vr.versionedCode(address); ok {
+		return len(code), nil
 	}
 
 	if vr.stateReader != nil {
@@ -488,8 +2152,8 @@ func (vr versionedStateReader) ReadAccountCodeSize(address accounts.Address) (in
 }
 
 func (vr versionedStateReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.Val != nil {
-		return r.Val.(*accounts.Account).Incarnation, nil
+	if r, ok := vr.reads.GetAddress(address); ok && r.Val != nil && !r.Val.IsNil() {
+		return r.Val.Account().Incarnation, nil
 	}
 
 	if vr.stateReader != nil {
@@ -499,63 +2163,166 @@ func (vr versionedStateReader) ReadAccountIncarnation(address accounts.Address) 
 	return 0, nil
 }
 
-type VersionedWrites []*VersionedWrite
-
-// TouchUpdates feeds VersionedWrites directly to a commitment.Updates buffer
-// via TouchPlainKeyDirect. Each VersionedWrite maps to a single Update with
-// the appropriate key and flags. The Updates buffer handles per-key merging
-// (same address gets accumulated flags from BalancePath, NoncePath, etc.).
-//
-// This is used by the commitment calculator to process writes received via
-// the fan-out channel. No serialization/deserialization — the values pass
-// through as-is.
-func (writes VersionedWrites) TouchUpdates(updates *commitment.Updates) {
-	for _, w := range writes {
-		if w.Val == nil {
-			continue
+// SetAccountFieldFromMap resolves an account field from the version map and
+// sets it into out, returning whether a Done value was found.
+func SetAccountFieldFromMap(out *WriteSet, vm *VersionMap, addr accounts.Address, path AccountPath, ver Version, txIdx int) bool {
+	switch path {
+	case BalancePath:
+		v, rr, found := vm.ReadBalance(addr, txIdx)
+		if found && rr.Status() == MVReadResultDone {
+			out.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: ver}, Val: v})
+			return true
 		}
-		address := w.Address.Value()
+	case NoncePath:
+		v, rr, found := vm.ReadNonce(addr, txIdx)
+		if found && rr.Status() == MVReadResultDone {
+			out.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: ver}, Val: v})
+			return true
+		}
+	case IncarnationPath:
+		v, rr, found := vm.ReadIncarnation(addr, txIdx)
+		if found && rr.Status() == MVReadResultDone {
+			out.SetIncarnation(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath, Version: ver}, Val: v})
+			return true
+		}
+	case CodeHashPath:
+		v, rr, found := vm.ReadCodeHash(addr, txIdx)
+		if found && rr.Status() == MVReadResultDone {
+			out.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: ver}, Val: v})
+			return true
+		}
+	}
+	return false
+}
 
-		switch w.Path {
-		case BalancePath:
-			v := w.Val.(uint256.Int)
-			updates.TouchPlainKeyDirect(string(address[:]), &commitment.Update{
-				Flags:   commitment.BalanceUpdate,
-				Balance: v,
+// setAccountFieldLive is SetAccountFieldFromMap with the readers' destruct wipe
+// for the nonce and the code hash: a committed destruct after the last write
+// sets the zero value.
+func setAccountFieldLive(out *WriteSet, vm *VersionMap, addr accounts.Address, path AccountPath, ver Version, txIdx int) bool {
+	switch path {
+	case NoncePath:
+		v, found, wiped := vm.readNonceLive(addr, txIdx)
+		if found || wiped {
+			out.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: ver}, Val: v})
+		}
+		return found || wiped
+	case CodeHashPath:
+		v, found, wiped := vm.readCodeHashLive(addr, txIdx)
+		if wiped {
+			v = accounts.EmptyCodeHash
+		}
+		if found || wiped {
+			out.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: ver}, Val: v})
+		}
+		return found || wiped
+	}
+	return SetAccountFieldFromMap(out, vm, addr, path, ver, txIdx)
+}
+
+// NewAccountFieldZeroWrite returns a typed *VersionedWrite[T] for path
+// holding the zero value (used by the SD-earlier fallback that emits
+// post-destruction defaults).  Path must be Balance/Nonce/Incarnation/CodeHash.
+// SetAccountFieldZero sets the post-destruction zero value for path into out.
+func SetAccountFieldZero(out *WriteSet, addr accounts.Address, path AccountPath, ver Version) {
+	switch path {
+	case BalancePath:
+		out.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: ver}})
+	case NoncePath:
+		out.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: ver}})
+	case IncarnationPath:
+		out.SetIncarnation(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath, Version: ver}})
+	case CodeHashPath:
+		out.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: ver}, Val: accounts.EmptyCodeHash})
+	}
+}
+
+// NewAccountFieldWriteFromAccount returns a typed *VersionedWrite[T]
+// populated from acc (may be nil — falls back to zero values except for
+// CodeHash which becomes EmptyCodeHash).
+// SetAccountFieldFromAccount sets path's value from acc into out.
+func SetAccountFieldFromAccount(out *WriteSet, addr accounts.Address, path AccountPath, ver Version, acc *accounts.Account) {
+	switch path {
+	case BalancePath:
+		var v uint256.Int
+		if acc != nil {
+			v = acc.Balance
+		}
+		out.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: ver}, Val: v})
+	case NoncePath:
+		var v uint64
+		if acc != nil {
+			v = acc.Nonce
+		}
+		out.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: ver}, Val: v})
+	case IncarnationPath:
+		var v uint64
+		if acc != nil {
+			v = acc.Incarnation
+		}
+		out.SetIncarnation(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath, Version: ver}, Val: v})
+	case CodeHashPath:
+		v := accounts.EmptyCodeHash
+		if acc != nil {
+			v = acc.CodeHash
+		}
+		out.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: ver}, Val: v})
+	}
+}
+
+// TouchUpdates feeds the write set directly to a commitment.Updates buffer
+// via TouchPlainKeyDirect, one partial Update per write. The buffer merges
+// per key (ModeUpdate and ModeParallel both accumulate flags additively).
+// An address whose writes do not cover balance, nonce and code hash together
+// costs one account read at fold time, where the trie fills in the rest.
+func (ws *WriteSet) TouchUpdates(updates *commitment.Updates) {
+	if ws == nil {
+		return
+	}
+	ws.assertLive()
+	for addr, w := range ws.balance {
+		addrVal := addr.Value()
+		updates.TouchPlainKeyDirect(string(addrVal[:]), &commitment.Update{
+			Flags:   commitment.BalanceUpdate,
+			Balance: w.Val,
+		})
+	}
+	for addr, w := range ws.nonce {
+		addrVal := addr.Value()
+		updates.TouchPlainKeyDirect(string(addrVal[:]), &commitment.Update{
+			Flags: commitment.NonceUpdate,
+			Nonce: w.Val,
+		})
+	}
+	for addr, w := range ws.codeHash {
+		addrVal := addr.Value()
+		updates.TouchPlainKeyDirect(string(addrVal[:]), &commitment.Update{
+			Flags:    commitment.CodeUpdate,
+			CodeHash: w.Val.Value(),
+		})
+	}
+	for addr, w := range ws.code {
+		addrVal := addr.Value()
+		updates.TouchPlainKeyDirect(string(addrVal[:]), &commitment.Update{
+			Flags:    commitment.CodeUpdate,
+			CodeHash: w.Val.Hash.Value(),
+		})
+	}
+	for addr, w := range ws.selfDestruct {
+		if w.Val {
+			addrVal := addr.Value()
+			updates.TouchPlainKeyDirect(string(addrVal[:]), &commitment.Update{
+				Flags: commitment.DeleteUpdate,
 			})
-		case NoncePath:
-			v := w.Val.(uint64)
-			updates.TouchPlainKeyDirect(string(address[:]), &commitment.Update{
-				Flags: commitment.NonceUpdate,
-				Nonce: v,
-			})
-		case CodeHashPath:
-			v := w.Val.(accounts.CodeHash)
-			updates.TouchPlainKeyDirect(string(address[:]), &commitment.Update{
-				Flags:    commitment.CodeUpdate,
-				CodeHash: v.Value(),
-			})
-		case CodePath:
-			code := w.Val.([]byte)
-			updates.TouchPlainKeyDirect(string(address[:]), &commitment.Update{
-				Flags:    commitment.CodeUpdate,
-				CodeHash: crypto.Keccak256Hash(code),
-			})
-		case SelfDestructPath:
-			// Only emit DeleteUpdate when the account was actually self-destructed.
-			// SelfDestructPath=false means the account is NOT deleted (e.g., resurrection).
-			if destructed, ok := w.Val.(bool); ok && destructed {
-				updates.TouchPlainKeyDirect(string(address[:]), &commitment.Update{
-					Flags: commitment.DeleteUpdate,
-				})
-			}
-		case StoragePath:
-			keyVal := w.Key.Value()
+		}
+	}
+	for addr, inner := range ws.storage {
+		addrVal := addr.Value()
+		for key, w := range inner {
+			vBytes := w.Val.Bytes()
+			keyVal := key.Value()
 			composite := make([]byte, 20+32)
-			copy(composite, address[:])
+			copy(composite, addrVal[:])
 			copy(composite[20:], keyVal[:])
-			v := w.Val.(uint256.Int)
-			vBytes := v.Bytes()
 			var u commitment.Update
 			u.StorageLen = int8(len(vBytes))
 			if len(vBytes) == 0 {
@@ -569,69 +2336,219 @@ func (writes VersionedWrites) TouchUpdates(updates *commitment.Updates) {
 	}
 }
 
-// sortVersionedWrites sorts a VersionedWrites slice by (Address, Path, Key)
-// to ensure deterministic processing order. VersionedWrites originate from
-// WriteSet map iteration which has non-deterministic order in Go.
+// sortWriteHeaders sorts headers by (Address, Path, Key) for deterministic
+// processing order; WriteSet map iteration is non-deterministic in Go.
 // The sort relies on the AccountPath enum ordering defined in versionmap.go.
-func sortVersionedWrites(writes VersionedWrites) {
-	sort.Slice(writes, func(i, j int) bool {
-		if c := writes[i].Address.Cmp(writes[j].Address); c != 0 {
-			return c < 0
+func sortWriteHeaders(headers []WriteHeader) {
+	slices.SortFunc(headers, func(a, b WriteHeader) int {
+		if c := a.Address.Cmp(b.Address); c != 0 {
+			return c
 		}
-		if writes[i].Path != writes[j].Path {
-			return writes[i].Path < writes[j].Path
+		if a.Path != b.Path {
+			if a.Path < b.Path {
+				return -1
+			}
+			return 1
 		}
-		return writes[i].Key.Cmp(writes[j].Key) < 0
+		return a.Key.Cmp(b.Key)
 	})
 }
 
-func (prev VersionedWrites) Merge(next VersionedWrites) VersionedWrites {
-	if len(prev) == 0 {
+// hasHeader reports whether a write exists at h's (Address, Path, Key).
+func (ws *WriteSet) hasHeader(h WriteHeader) bool {
+	if ws == nil {
+		return false
+	}
+	switch h.Path {
+	case AddressPath:
+		_, ok := ws.address[h.Address]
+		return ok
+	case BalancePath:
+		_, ok := ws.balance[h.Address]
+		return ok
+	case NoncePath:
+		_, ok := ws.nonce[h.Address]
+		return ok
+	case IncarnationPath:
+		_, ok := ws.incarnation[h.Address]
+		return ok
+	case SelfDestructPath:
+		_, ok := ws.selfDestruct[h.Address]
+		return ok
+	case CreateContractPath:
+		_, ok := ws.createContract[h.Address]
+		return ok
+	case CodePath:
+		_, ok := ws.code[h.Address]
+		return ok
+	case CodeHashPath:
+		_, ok := ws.codeHash[h.Address]
+		return ok
+	case CodeSizePath:
+		_, ok := ws.codeSize[h.Address]
+		return ok
+	case StoragePath:
+		if inner, ok := ws.storage[h.Address]; ok {
+			_, ok := inner[h.Key]
+			return ok
+		}
+	}
+	return false
+}
+
+// copyFrom merges src into s, value-copying each VersionedWrite so the result
+// shares no *VersionedWrite with src — the in-place recordWrite mutators would
+// otherwise make either side observe the other's later edits.
+func (ws *WriteSet) copyFrom(src *WriteSet) {
+	if src == nil {
+		return
+	}
+	for a, vw := range src.address {
+		ws.SetAddress(a, cloneVW(vw))
+	}
+	for a, vw := range src.balance {
+		ws.SetBalance(a, cloneVW(vw))
+	}
+	for a, vw := range src.nonce {
+		ws.SetNonce(a, cloneVW(vw))
+	}
+	for a, vw := range src.incarnation {
+		ws.SetIncarnation(a, cloneVW(vw))
+	}
+	for a, vw := range src.selfDestruct {
+		ws.SetSelfDestruct(a, cloneVW(vw))
+	}
+	for a, vw := range src.createContract {
+		ws.SetCreateContract(a, cloneVW(vw))
+	}
+	for a, vw := range src.code {
+		ws.SetCode(a, cloneVW(vw))
+	}
+	for a, vw := range src.codeHash {
+		ws.SetCodeHash(a, cloneVW(vw))
+	}
+	for a, vw := range src.codeSize {
+		ws.SetCodeSize(a, cloneVW(vw))
+	}
+	for a, inner := range src.storage {
+		for key, vw := range inner {
+			ws.SetStorage(a, key, cloneVW(vw))
+		}
+	}
+}
+
+// copyMissingFrom adds the entries s does not already hold, sharing src's
+// *VersionedWrite pointers rather than cloning them — see MergeInto for what
+// the sharing costs the caller.
+func (ws *WriteSet) copyMissingFrom(src *WriteSet) {
+	if src == nil {
+		return
+	}
+	for a, vw := range src.address {
+		if _, ok := ws.address[a]; !ok {
+			ws.SetAddress(a, vw)
+		}
+	}
+	for a, vw := range src.balance {
+		if _, ok := ws.balance[a]; !ok {
+			ws.SetBalance(a, vw)
+		}
+	}
+	for a, vw := range src.nonce {
+		if _, ok := ws.nonce[a]; !ok {
+			ws.SetNonce(a, vw)
+		}
+	}
+	for a, vw := range src.incarnation {
+		if _, ok := ws.incarnation[a]; !ok {
+			ws.SetIncarnation(a, vw)
+		}
+	}
+	for a, vw := range src.selfDestruct {
+		if _, ok := ws.selfDestruct[a]; !ok {
+			ws.SetSelfDestruct(a, vw)
+		}
+	}
+	for a, vw := range src.createContract {
+		if _, ok := ws.createContract[a]; !ok {
+			ws.SetCreateContract(a, vw)
+		}
+	}
+	for a, vw := range src.code {
+		if _, ok := ws.code[a]; !ok {
+			ws.SetCode(a, vw)
+		}
+	}
+	for a, vw := range src.codeHash {
+		if _, ok := ws.codeHash[a]; !ok {
+			ws.SetCodeHash(a, vw)
+		}
+	}
+	for a, vw := range src.codeSize {
+		if _, ok := ws.codeSize[a]; !ok {
+			ws.SetCodeSize(a, vw)
+		}
+	}
+	for a, inner := range src.storage {
+		own := ws.storage[a]
+		for key, vw := range inner {
+			if _, ok := own[key]; !ok {
+				ws.SetStorage(a, key, vw)
+			}
+		}
+	}
+}
+
+// Merge returns the union of prev and next, with next winning on (addr,path,key).
+func (ws *WriteSet) Merge(next *WriteSet) *WriteSet {
+	ws.assertNotArena("merge")
+	next.assertNotArena("merge")
+	if ws.IsEmpty() {
 		return next
 	}
-	if len(next) == 0 {
-		return prev
+	if next.IsEmpty() {
+		return ws
 	}
-	merged := WriteSet{}
-	for _, v := range prev {
-		merged.Set(*v)
-	}
-	for _, v := range next {
-		merged.Set(*v)
-	}
-	out := make(VersionedWrites, 0, merged.Len())
-	merged.Scan(func(v *VersionedWrite) bool {
-		out = append(out, v)
-		return true
-	})
+	out := &WriteSet{}
+	out.copyFrom(ws)
+	out.copyFrom(next)
 	return out
 }
 
+// MergeInto folds s's entries into next in place and returns the surviving
+// set, next winning on (addr, path, key). That is next, except that an empty
+// side short-circuits to the other one — so the result can be s, and a
+// caller that releases or mutates it must compare identity first. Unlike Merge
+// it shares *VersionedWrite pointers instead of cloning, so next must be
+// exclusively owned by the caller and neither side may mutate a shared
+// VersionedWrite in place afterwards; s's maps are never touched, so
+// map-level deletes on s stay safe.
+func (ws *WriteSet) MergeInto(next *WriteSet) *WriteSet {
+	ws.assertNotArena("merge")
+	next.assertNotArena("merge")
+	if ws.IsEmpty() {
+		return next
+	}
+	if next.IsEmpty() {
+		return ws
+	}
+	next.copyMissingFrom(ws)
+	return next
+}
+
 // hasNewWrite: returns true if the current set has a new write compared to the input
-func (writes VersionedWrites) HasNewWrite(cmpSet []*VersionedWrite) bool {
-	if len(writes) == 0 {
+func (ws *WriteSet) HasNewWrite(cmpSet *WriteSet) bool {
+	if ws.IsEmpty() {
 		return false
-	} else if len(cmpSet) == 0 || len(writes) > len(cmpSet) {
+	}
+	if cmpSet.IsEmpty() || ws.Count() > cmpSet.Count() {
 		return true
 	}
-
-	cmpMap := map[accounts.Address]map[AccountKey]struct{}{}
-
-	for _, vw := range cmpSet {
-		keys, ok := cmpMap[vw.Address]
-		if !ok {
-			keys = map[AccountKey]struct{}{}
-			cmpMap[vw.Address] = keys
-		}
-		keys[AccountKey{vw.Path, vw.Key}] = struct{}{}
-	}
-
-	for _, v := range writes {
-		if _, ok := cmpMap[v.Address][AccountKey{v.Path, v.Key}]; !ok {
+	for h := range ws.AllHeaders() {
+		if !cmpSet.hasHeader(h) {
 			return true
 		}
 	}
-
 	return false
 }
 
@@ -647,583 +2564,53 @@ func (writes VersionedWrites) HasNewWrite(cmpSet []*VersionedWrite) bool {
 //   - delta: the absolute difference between stale write and stale read
 //   - increase: true if the TX increased the balance, false if decreased
 //   - found: true if both a stale read and write were found and a non-zero delta computed
-func (writes VersionedWrites) StripBalanceWrite(addr accounts.Address, readSet ReadSet) (stripped VersionedWrites, delta uint256.Int, increase bool, found bool) {
-	stripped = writes
-	if addr.IsNil() {
+func (ws *WriteSet) StripBalanceWrite(addr accounts.Address, readSet ReadSet) (stripped *WriteSet, delta uint256.Int, increase bool, found bool) {
+	stripped = ws
+	if ws == nil || addr.IsNil() {
 		return
 	}
-
-	reads, ok := readSet[addr]
-	if !ok {
-		// TX didn't read this address — no delta to compute.
-		// Still strip the write to prevent stale cache pollution.
-		for i, w := range stripped {
-			if w.Address == addr && w.Path == BalancePath {
-				stripped = append(stripped[:i], stripped[i+1:]...)
-				return
-			}
+	bw, hasWrite := ws.balance[addr]
+	if !readSet.hasAddr(addr) {
+		// TX didn't read this address — no delta to compute. Still strip the
+		// write to prevent stale cache pollution.
+		if hasWrite {
+			delete(ws.balance, addr)
 		}
 		return
 	}
-
-	balKey := AccountKey{Path: BalancePath, Key: accounts.NilKey}
-	balRead, ok := reads[balKey]
-	if !ok {
+	balRead, ok := readSet.GetBalance(addr)
+	if !ok || !hasWrite {
 		return
 	}
-	staleRead, ok := balRead.Val.(uint256.Int)
-	if !ok {
-		return
+	staleRead := balRead.Val
+	staleWrite := bw.Val
+	delete(ws.balance, addr)
+	if staleWrite.Gt(&staleRead) {
+		delta.Sub(&staleWrite, &staleRead)
+		increase = true
+		found = true
+	} else if staleRead.Gt(&staleWrite) {
+		delta.Sub(&staleRead, &staleWrite)
+		found = true
 	}
-
-	for i, w := range stripped {
-		if w.Address == addr && w.Path == BalancePath {
-			staleWrite, ok := w.Val.(uint256.Int)
-			if !ok {
-				break
-			}
-			// Remove the stale absolute write
-			stripped = append(stripped[:i], stripped[i+1:]...)
-			// Compute the TX's net effect on this balance
-			if staleWrite.Gt(&staleRead) {
-				delta.Sub(&staleWrite, &staleRead)
-				increase = true
-				found = true
-			} else if staleRead.Gt(&staleWrite) {
-				delta.Sub(&staleRead, &staleWrite)
-				increase = false
-				found = true
-			}
-			return
-		}
-	}
-
 	return
-}
-
-// SetAccountBalanceOrDelete replaces the BalancePath write for addr. If the
-// address has no existing writes in the set, all four account fields (balance,
-// nonce, incarnation, codeHash) are emitted so that applyVersionedWrites can
-// reconstruct a complete account. Without the full set, it would create an
-// account with nonce=0, incarnation=0, empty codeHash — wiping the real values.
-//
-// When emptyRemoval is true (EIP-161 SpuriousDragon), if the final account
-// would be empty (balance=0, nonce=0, empty code), the existing writes for
-// this address are stripped and a SelfDestructPath entry is emitted instead.
-func (writes VersionedWrites) SetAccountBalanceOrDelete(addr accounts.Address, acc *accounts.Account, val uint256.Int, reason tracing.BalanceChangeReason, emptyRemoval bool) VersionedWrites {
-	if acc == nil {
-		a := accounts.NewAccount()
-		acc = &a
-	}
-
-	// EIP-161: if the final account is empty, delete it.
-	if emptyRemoval && val.IsZero() && acc.Nonce == 0 && acc.IsEmptyCodeHash() {
-		// Strip any existing writes for this address and emit a delete.
-		filtered := make(VersionedWrites, 0, len(writes)+1)
-		for _, w := range writes {
-			if w.Address != addr {
-				filtered = append(filtered, w)
-			}
-		}
-		return append(filtered, &VersionedWrite{Address: addr, Path: SelfDestructPath, Val: true})
-	}
-
-	// First pass: if a Balance entry exists for this addr, just update value.
-	// Tracks whether ANY entry for this addr exists — if yes we MUST NOT
-	// re-emit Nonce/Incarnation/CodeHash from the pre-block snapshot acc,
-	// because the worker has already written some fields with the correct
-	// post-execution values; appending pre-block field entries after the
-	// worker's writes would clobber them under last-wins downstream merge.
-	addrHasAnyWrite := false
-	for _, w := range writes {
-		if w.Address != addr {
-			continue
-		}
-		addrHasAnyWrite = true
-		if w.Path == BalancePath {
-			w.Val = val
-			w.BalanceChangeReason = reason
-			return writes
-		}
-	}
-	if addrHasAnyWrite {
-		// Worker already wrote some other field (e.g. Nonce on a miner
-		// self-send where sender == coinbase). Append only the Balance
-		// write; the other fields are correct in the existing entries.
-		return append(writes,
-			&VersionedWrite{Address: addr, Path: BalancePath, Val: val, BalanceChangeReason: reason},
-		)
-	}
-	// Account not in writes — emit complete account fields.
-	return append(writes,
-		&VersionedWrite{Address: addr, Path: BalancePath, Val: val, BalanceChangeReason: reason},
-		&VersionedWrite{Address: addr, Path: NoncePath, Val: acc.Nonce},
-		&VersionedWrite{Address: addr, Path: IncarnationPath, Val: acc.Incarnation},
-		&VersionedWrite{Address: addr, Path: CodeHashPath, Val: acc.CodeHash},
-	)
-}
-
-func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, commited bool, defaultV T, copyV func(T) T, readStorage func(sdb *stateObject) (T, error)) (T, ReadSource, Version, error) {
-	if s.versionMap == nil {
-		so, err := s.getStateObject(addr, true)
-
-		if err != nil || readStorage == nil {
-			return defaultV, StorageRead, UnknownVersion, err
-		}
-		val, err := readStorage(so)
-		return val, StorageRead, UnknownVersion, err
-	}
-
-	var destrcutedVersion Version
-	if so, ok := s.stateObjects[addr]; ok && so.deleted {
-		// If the in-memory deletion reflects a prior tx's selfdestruct
-		// (versionMap has SelfDestructPath=true), surface the SD version
-		// instead of UnknownVersion. Returning UnknownVersion here was
-		// causing CreateAccount's synthetic Balance/Incarnation read records
-		// (intra_block_state.go:1864-1865) to be stamped with UnknownVersion
-		// while subsequent reads — via the SD-revival path that falls through
-		// to MVReadResultDone — observed the real (0.0) version, producing a
-		// versionedReads mismatch that panicked tx N+1 on every incarnation
-		// and exhausted the parallel-exec retry budget ("too many incarnations").
-		// Aligning this shortcut with the SD-zero path below removes the
-		// inconsistency.
-		if s.versionMap != nil {
-			sdRes := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex)
-			if sdRes.Status() == MVReadResultDone {
-				if v, ok := sdRes.value.(bool); ok && v {
-					sdVer := Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}
-					if !commited {
-						if s.versionedReads == nil {
-							s.versionedReads = ReadSet{}
-						}
-						s.versionedReads.Set(VersionedRead{
-							Address: addr,
-							Path:    SelfDestructPath,
-							Key:     accounts.NilKey,
-							Source:  MapRead,
-							Version: sdVer,
-							Val:     true,
-						})
-					}
-					var zero T
-					return zero, MapRead, sdVer, nil
-				}
-			}
-		}
-		return defaultV, StorageRead, UnknownVersion, nil
-	} else if res := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex); res.Status() == MVReadResultDone && res.value.(bool) {
-		// Revival check: a later write to BalancePath/NoncePath/CodeHashPath
-		// at a strictly higher TxIndex re-creates the account, so the SD
-		// must NOT short-circuit the read. Mirrors versionedStateReader
-		// .ReadAccountData's revival check at lines 273-293 of this file.
-		//
-		// Without this the worker reads zero for any post-revival access:
-		// e.g. EIP-161 fires for the coinbase when tx N's finalize emits
-		// SelfDestructPath=true (empty-removal: balance 0, no fee tip),
-		// then tx N+1's finalize emits BalancePath=FeeTipped (revives it
-		// with a non-zero balance). A subsequent tx's BALANCE coinbase
-		// must surface the revived balance — the serial equivalent is
-		// AddBalance(amount>0) on a previously-deleted stateObject, where
-		// GetOrNewStateObject implicitly recreates a fresh object with
-		// the new balance. Without this check the parallel worker reads
-		// zero, SSTOREs zero into the contract's slot (was non-zero),
-		// triggering a spurious SSTORE_CLEAR_REFUND that doesn't fire
-		// under serial — observed as TestLegacyBlockchain bcEIP3675/
-		// tipInsideBlock failing with gas exactly 4800 short under
-		// ERIGON_EXEC3_PARALLEL=true (matches EIP-2200's clear refund).
-		destructTxIndex := res.DepIdx()
-		if !commited {
-			if vw, ok := s.versionedWrite(addr, path, key); ok {
-				// The current tx has itself written this field — a same-tx
-				// value-transfer or recreate that revived the account. A tx
-				// always observes its own write, regardless of a prior tx's
-				// self-destruct, so return it directly as WriteSetRead (issue
-				// #21319). Falling through to the normal read path instead
-				// would route an own-write read through the cross-tx
-				// dependency check and spuriously abort.
-				return vw.Val.(T), WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, nil
-			}
-		}
-		// Per-path revival resolution (issue #21319): the account was
-		// self-destructed at destructTxIndex. THIS field is revived iff the
-		// version map holds a write to THIS path at a strictly higher
-		// TxIndex. versionMap.Read floors at txIndex-1, so a prior
-		// incarnation of the current tx cannot masquerade as a later tx's
-		// revival (this is why the old explicit revivalLimit subtraction is
-		// no longer needed). Per-path (vs. the old Balance|Nonce|CodeHash
-		// account-wide scan) is precise: a field with no post-SD write
-		// reads as the fresh account's zero value — exactly correct for a
-		// value-transfer revival, where GetOrNewStateObject yields nonce 0
-		// and empty code — and never surfaces a stale pre-SD nonce/codeHash
-		// for an account revived only via BalancePath.
-		//
-		// An in-flight revival (Estimate cell → MVReadResultDependency) also
-		// counts as revived: it must fall through so the normal read below
-		// surfaces the dependency and re-executes, rather than being
-		// swallowed as a zero. This matches the old LatestTxIndex scan,
-		// which descended Estimate cells too.
-		revived := false
-		if pathRevival := s.versionMap.Read(addr, path, key, s.txIndex); pathRevival.DepIdx() > destructTxIndex &&
-			(pathRevival.Status() == MVReadResultDone || pathRevival.Status() == MVReadResultDependency) {
-			revived = true
-		}
-		if !revived && path != CodePath {
-			// A prior tx self-destructed this account — all state reads must
-			// return the zero value of the type, not the caller-supplied default.
-			// refreshVersionedAccount passes the account's pre-destruction field
-			// values as defaultV, so using defaultV here would return stale data.
-			var zero T
-			sdVersion := Version{TxIndex: destructTxIndex, Incarnation: res.Incarnation()}
-			if commited {
-				return zero, MapRead, sdVersion, nil
-			}
-			if vw, ok := s.versionedWrite(addr, SelfDestructPath, key); !ok || vw.Val.(bool) {
-				// Record the SelfDestructPath dependency so that
-				// ValidateVersion can verify the destruct is still
-				// valid.  Without this entry the readSet would be
-				// empty for the affected address, and validation
-				// would have nothing to cross-check — allowing
-				// skipCheck to commit stale results.
-				if s.versionedReads == nil {
-					s.versionedReads = ReadSet{}
-				}
-				s.versionedReads.Set(VersionedRead{
-					Address: addr,
-					Path:    SelfDestructPath,
-					Key:     accounts.NilKey,
-					Source:  MapRead,
-					Version: sdVersion,
-					Val:     true,
-				})
-				return zero, MapRead, sdVersion, nil
-			}
-			destrcutedVersion = Version{
-				TxIndex: destructTxIndex,
-			}
-		}
-	}
-
-	res := s.versionMap.Read(addr, path, key, s.txIndex)
-
-	var v T
-	var vr = VersionedRead{
-		Address: addr,
-		Path:    path,
-		Key:     key,
-		Version: Version{
-			TxIndex:     res.DepIdx(),
-			Incarnation: res.Incarnation(),
-		},
-	}
-
-	if !commited {
-		if vw, ok := s.versionedWrite(addr, path, key); ok {
-			if res.Status() == MVReadResultDone {
-				if pr, ok := s.versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
-					if vr.Version.TxIndex > destrcutedVersion.TxIndex && vr.Version != pr.Version {
-						if vr.Version.TxIndex > s.dep {
-							s.dep = vr.Version.TxIndex
-						}
-
-						if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
-							fmt.Printf("%d (%d.%d) WR DEP (%d.%d)!=(%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, pr.Version.TxIndex, pr.Version.Incarnation, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key}, valueString(path, pr.Val))
-						}
-
-						if s.versionedReads == nil {
-							s.versionedReads = ReadSet{}
-						}
-						s.versionedReads.Set(vr)
-						panic(ErrDependency)
-					}
-				}
-			}
-
-			if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
-				fmt.Printf("%d (%d.%d) RD (%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, WriteSetRead, addr, AccountKey{path, key}, valueString(path, vw.Val))
-			}
-
-			val := vw.Val.(T)
-			return val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, nil
-		}
-	}
-
-	switch res.Status() {
-	case MVReadResultDone:
-		vr.Source = MapRead
-
-		if pr, ok := s.versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
-			if pr.Version == vr.Version {
-				if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
-					fmt.Printf("%d (%d.%d) RD (%s:%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepString(), addr, AccountKey{path, key}, valueString(path, pr.Val))
-				}
-
-				return pr.Val.(T), vr.Source, vr.Version, nil
-			}
-
-			if vr.Version.TxIndex > s.dep {
-				s.dep = vr.Version.TxIndex
-			}
-
-			if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
-				fmt.Printf("%d (%d.%d) RD DEP (%d.%d)!=(%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, pr.Version.TxIndex, pr.Version.Incarnation, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key})
-			}
-
-			if s.versionedReads == nil {
-				s.versionedReads = ReadSet{}
-			}
-
-			s.versionedReads.Set(vr)
-
-			panic(ErrDependency)
-		}
-
-		var ok bool
-		if v, ok = res.Value().(T); !ok {
-			return defaultV, UnknownSource, vr.Version, fmt.Errorf("unexpected type: got: %T, expected %v", res.Value(), reflect.TypeFor[T]())
-		}
-
-		if path == CodePath {
-			sdres := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex)
-			if sdres.Status() == MVReadResultDone && sdres.Value().(bool) && sdres.DepIdx() >= res.DepIdx() {
-				return defaultV, MapRead, Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, nil
-			}
-		}
-
-		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
-			fmt.Printf("%d (%d.%d) RD (%s:%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepString(), addr, AccountKey{path, key}, valueString(path, v))
-		}
-
-		if copyV == nil {
-			return v, MapRead, vr.Version, nil
-		}
-
-		vr.Val = copyV(v)
-
-	case MVReadResultDependency:
-		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
-			fmt.Printf("%d (%d.%d) MP DEP (%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key})
-		}
-
-		if res.DepIdx() > s.dep {
-			s.dep = res.DepIdx()
-		}
-		vr.Source = MapRead
-		if s.versionedReads == nil {
-			s.versionedReads = ReadSet{}
-		}
-		s.versionedReads.Set(vr)
-		panic(ErrDependency)
-
-	case MVReadResultNone:
-		if versionedReads := s.versionedReads; !commited && versionedReads != nil {
-			if pr, ok := versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
-				if pr.Version == vr.Version {
-					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
-						fmt.Printf("%d (%d.%d) RD (%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, ReadSetRead, addr, AccountKey{path, key}, valueString(path, pr.Val))
-					}
-
-					return pr.Val.(T), ReadSetRead, pr.Version, nil
-				}
-
-				if pr.Source == MapRead {
-					if path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath {
-						if _, source, version, _ := versionedRead(s, addr, AddressPath, accounts.NilKey, false, nil,
-							func(v *accounts.Account) *accounts.Account { return v }, nil); source == pr.Source && version == pr.Version {
-							return pr.Val.(T), ReadSetRead, pr.Version, nil
-						}
-					}
-
-					// A previous dependency has been removed from the map
-					// (prior TX is being re-executed, entry marked Estimate).
-					// Instead of aborting with ErrDependency (which causes
-					// cascading re-executions and livelocks in dense blocks),
-					// fall through to read from storage. Validation will catch
-					// any mismatch when the prior TX's value returns to Done.
-					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
-						fmt.Printf("%d (%d.%d) RM DEP FALLTHROUGH (%d.%d)!=(%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, pr.Version.TxIndex, pr.Version.Incarnation, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key})
-					}
-					// Fall through to storage read below
-				}
-			}
-		}
-
-		// Self-destructed account: a per-account field (Balance/Nonce/
-		// Incarnation/CodeHash/Code) with no dedicated versionMap cell reads as
-		// the post-SD zero value. Record the read as a dependency on the
-		// SelfDestructPath entry rather than a bare StorageRead/UnknownVersion
-		// read — the latter is rejected on sight by the validator's
-		// path==AddressPath cross-check (IncarnationPath is Done), producing a
-		// non-converging validator-invalid retry loop. The SelfDestructPath
-		// dependency validates cleanly via checkVersion. (Branch 794's SD
-		// short-circuit misses this when its revival check fires for a
-		// recreate-in-the-same-tx target.)
-		//
-		// Per-path revival resolution (issue #21319): reaching here means res
-		// — the version-map read of THIS path — was MVReadResultNone, so this
-		// field has no post-SD write and per-path it is not revived; it reads
-		// as the post-SD zero value regardless of whether other fields were
-		// revived. The old account-wide LatestTxIndex scan over
-		// Balance|Nonce|CodeHash would, for a value-transfer revival
-		// (BalancePath write only), treat the whole account as revived and
-		// fall through to surface a stale pre-SD nonce/codeHash — the same
-		// imprecision #21323 removed from the branch-794 SD short-circuit.
-		if path == BalancePath || path == NoncePath || path == IncarnationPath ||
-			path == CodeHashPath || path == CodePath || path == CodeSizePath {
-			if sd := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex); sd.Status() == MVReadResultDone {
-				if destructed, ok := sd.Value().(bool); ok && destructed {
-					sdVer := Version{TxIndex: sd.DepIdx(), Incarnation: sd.Incarnation()}
-					if !commited {
-						if s.versionedReads == nil {
-							s.versionedReads = ReadSet{}
-						}
-						s.versionedReads.Set(VersionedRead{
-							Address: addr,
-							Path:    SelfDestructPath,
-							Key:     accounts.NilKey,
-							Source:  MapRead,
-							Version: sdVer,
-							Val:     true,
-						})
-					}
-					var zero T
-					return zero, MapRead, sdVer, nil
-				}
-			}
-		}
-
-		if readStorage == nil {
-			// Record reads so that ValidateVersion can detect when a prior
-			// transaction modifies any account property.  Without tracking
-			// these reads, validation misses conflicts where a prior tx
-			// changes an account's balance/nonce/etc. — causing later txs
-			// to execute against stale data, and the parallel-built block
-			// access list (AsBlockAccessList) to diverge from the header.
-			//
-			// AddressPath probes MUST be recorded: getStateObject probes the
-			// versionMap for AddressPath before falling back to the
-			// stateReader. The validator's path==AddressPath branch cross-
-			// checks the precise IncarnationPath signal (account create /
-			// destruct), so the recorded probe does not over-invalidate on
-			// ordinary BalancePath/NoncePath writes.
-			//
-			// Do NOT cache CodePath: getStateObject calls versionedRead for
-			// CodePath with readStorage=nil to check if a prior tx wrote
-			// code (EIP-7702).  Caching defaultV (nil) would poison the
-			// ReadSet, causing subsequent getCode calls (which pass a real
-			// readStorage callback) to return empty code instead of loading
-			// it from the DB — breaking deposit contract execution, etc.
-			if !commited && path != CodePath {
-				vr.Source = StorageRead
-				vr.Val = defaultV
-				if s.versionedReads == nil {
-					s.versionedReads = ReadSet{}
-				}
-				s.versionedReads.Set(vr)
-			}
-			return defaultV, UnknownSource, UnknownVersion, nil
-		}
-
-		var so *stateObject
-		var err error
-
-		// For StoragePath, detect contract creation/destruction by a prior tx.
-		// IncarnationPath is written ONLY by CreateAccount (contract creation) and
-		// Selfdestruct — both operations that clear all storage.  When no prior tx
-		// wrote this specific storage slot (MVReadResultNone), but a prior tx DID
-		// write IncarnationPath, the account was created or destroyed in this block
-		// and all unwritten storage slots must be zero.
-		//
-		// Without this check, the read falls through to StorageDomain which may
-		// contain stale data from before a prior block's SELFDESTRUCT (because
-		// Writer.DeleteAccount clears AccountsDomain but NOT StorageDomain).
-		if path == StoragePath {
-			incRes := s.versionMap.Read(addr, IncarnationPath, accounts.NilKey, s.txIndex)
-			if incRes.Status() == MVReadResultDone {
-				var zero T
-				vr.Source = StorageRead
-				vr.Val = zero
-
-				if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
-					fmt.Printf("%d (%d.%d) RD (%s) %x %s: zero (IncarnationPath written by tx %d)\n",
-						s.blockNum, s.txIndex, s.version, StorageRead, addr, AccountKey{path, key}, incRes.DepIdx())
-				}
-
-				if s.versionedReads == nil {
-					s.versionedReads = ReadSet{}
-				}
-				s.versionedReads.Set(vr)
-				// Record dependency on IncarnationPath so that ValidateVersion
-				// detects if the creation/destruction is reverted by a re-execution.
-				incVersion := Version{TxIndex: incRes.DepIdx(), Incarnation: incRes.Incarnation()}
-				s.versionedReads.Set(VersionedRead{
-					Address: addr,
-					Path:    IncarnationPath,
-					Key:     accounts.NilKey,
-					Source:  MapRead,
-					Version: incVersion,
-					Val:     incRes.Value(),
-				})
-				return zero, StorageRead, UnknownVersion, nil
-			}
-		}
-
-		if path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath {
-			readAccount, source, version, err := versionedRead(s, addr, AddressPath, accounts.NilKey, false, nil,
-				func(v *accounts.Account) *accounts.Account { return v }, nil)
-
-			if err != nil {
-				return defaultV, source, UnknownVersion, err
-			}
-
-			if readAccount != nil {
-				vr.Source = source
-				vr.Version = version
-				so = newObject(s, addr, readAccount, readAccount)
-			}
-		}
-
-		if so == nil {
-			vr.Source = StorageRead
-			so, err = s.getStateObject(addr, true)
-			if err != nil {
-				return defaultV, StorageRead, UnknownVersion, err
-			}
-		}
-
-		if v, err = readStorage(so); err != nil {
-			return defaultV, StorageRead, UnknownVersion, err
-		}
-
-		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
-			fmt.Printf("%d (%d.%d) RD (%s:%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, vr.Source, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key}, valueString(path, v))
-		}
-
-		vr.Val = copyV(v)
-
-	default:
-		return defaultV, UnknownSource, UnknownVersion, nil
-	}
-
-	if s.versionedReads == nil {
-		s.versionedReads = ReadSet{}
-	}
-	s.versionedReads.Set(vr)
-
-	return v, vr.Source, vr.Version, nil
 }
 
 // note that TxIndex starts at -1 (the begin system tx)
 type VersionedIO struct {
-	inputs   []versionedReadSet
-	outputs  []VersionedWrites // write sets that should be checked during validation
-	accessed []AccessSet
+	inputs  []versionedReadSet
+	outputs []*WriteSet // write sets that should be checked during validation
+
+	// outputsReleased marks ReleaseOutputMaps having run. A read after that
+	// point sees emptied sets rather than failing, so under assertions the
+	// accessors panic instead. Only written when dbg.AssertEnabled.
+	outputsReleased bool
 }
 
 func NewVersionedIO(numTx int) *VersionedIO {
 	return &VersionedIO{
-		inputs:   make([]versionedReadSet, numTx+1),
-		outputs:  make([]VersionedWrites, numTx+1),
-		accessed: make([]AccessSet, numTx+1),
+		inputs:  make([]versionedReadSet, numTx+1),
+		outputs: make([]*WriteSet, numTx+1),
 	}
 }
 
@@ -1231,20 +2618,20 @@ func (io *VersionedIO) Len() int {
 	if io == nil {
 		return 0
 	}
-	return max(len(io.inputs), max(len(io.outputs), len(io.accessed)))
+	return max(len(io.inputs), len(io.outputs))
 }
 
 func (io *VersionedIO) Inputs() []versionedReadSet {
 	return io.inputs
 }
 
-func (io *VersionedIO) Outputs() []VersionedWrites {
+func (io *VersionedIO) Outputs() []*WriteSet {
 	return io.outputs
 }
 
 func (io *VersionedIO) ReadSet(txnIdx int) ReadSet {
 	if len(io.inputs) <= txnIdx+1 {
-		return nil
+		return ReadSet{}
 	}
 	return io.inputs[txnIdx+1].readSet
 }
@@ -1253,15 +2640,14 @@ func (io *VersionedIO) ReadSetIncarnation(txnIdx int) int {
 	if len(io.inputs) <= txnIdx+1 {
 		return -1
 	}
-
-	if io.inputs[txnIdx+1].readSet != nil {
+	if io.inputs[txnIdx+1].readSet.Len() > 0 {
 		return io.inputs[txnIdx+1].incarnation
 	}
-
 	return 0
 }
 
-func (io *VersionedIO) WriteSet(txnIdx int) VersionedWrites {
+func (io *VersionedIO) WriteSet(txnIdx int) *WriteSet {
+	io.assertOutputsLive("WriteSet")
 	if len(io.outputs) <= txnIdx+1 {
 		return nil
 	}
@@ -1269,18 +2655,35 @@ func (io *VersionedIO) WriteSet(txnIdx int) VersionedWrites {
 }
 
 func (io *VersionedIO) WriteCount() (count int64) {
+	io.assertOutputsLive("WriteCount")
 	for _, output := range io.outputs {
-		count += int64(len(output))
+		count += int64(output.Count())
 	}
 
 	return count
 }
 
+func (io *VersionedIO) assertOutputsLive(op string) {
+	if dbg.AssertEnabled && io != nil && io.outputsReleased {
+		panic("VersionedIO." + op + " after ReleaseOutputMaps: the write sets are emptied, so this read silently sees nothing")
+	}
+}
+
+// ReleaseOutputMaps returns every recorded write set's map containers to their
+// pools and empties the slots. Only for a VersionedIO whose last reader is
+// done; the shared VersionedWrite values are left to GC.
+func (io *VersionedIO) ReleaseOutputMaps() {
+	for _, output := range io.outputs {
+		output.ReleaseMaps()
+	}
+	if dbg.AssertEnabled {
+		io.outputsReleased = true
+	}
+}
+
 func (io *VersionedIO) ReadCount() (count int64) {
 	for _, input := range io.inputs {
-		if input.readSet != nil {
-			count += int64(input.readSet.Len())
-		}
+		count += int64(input.readSet.Len())
 	}
 
 	return count
@@ -1290,7 +2693,7 @@ func (io *VersionedIO) HasReads(txnIdx int) bool {
 	if len(io.inputs) <= txnIdx+1 {
 		return false
 	}
-	return len(io.inputs[txnIdx+1].readSet) > 0
+	return io.inputs[txnIdx+1].readSet.Len() > 0
 }
 
 func (io *VersionedIO) RecordReads(txVersion Version, input ReadSet) {
@@ -1300,41 +2703,20 @@ func (io *VersionedIO) RecordReads(txVersion Version, input ReadSet) {
 	io.inputs[txVersion.TxIndex+1] = versionedReadSet{txVersion.Incarnation, input}
 }
 
-func (io *VersionedIO) RecordWrites(txVersion Version, output VersionedWrites) {
+func (io *VersionedIO) RecordWrites(txVersion Version, output *WriteSet) {
 	txId := txVersion.TxIndex
 
 	if len(io.outputs) <= txId+1 {
-		io.outputs = append(io.outputs, make([]VersionedWrites, txId+2-len(io.outputs))...)
+		io.outputs = append(io.outputs, make([]*WriteSet, txId+2-len(io.outputs))...)
 	}
 	io.outputs[txId+1] = output
-}
-
-func (io *VersionedIO) RecordAccesses(txVersion Version, addresses AccessSet) {
-	if len(addresses) == 0 {
-		return
-	}
-	if len(io.accessed) <= txVersion.TxIndex+1 {
-		io.accessed = append(io.accessed, make([]AccessSet, txVersion.TxIndex+2-len(io.accessed))...)
-	}
-	dest := make(AccessSet, len(addresses))
-	for addr, opt := range addresses {
-		dest[addr] = opt
-	}
-	io.accessed[txVersion.TxIndex+1] = dest
-}
-
-func (io *VersionedIO) AccessedAddresses(txIndex int) AccessSet {
-	if len(io.accessed) <= txIndex+1 {
-		return nil
-	}
-	return io.accessed[txIndex+1]
 }
 
 func (io *VersionedIO) Merge(other *VersionedIO) *VersionedIO {
 	mergedLen := max(io.Len(), other.Len())
 	merged := NewVersionedIO(mergedLen - 1)
 
-	for i := 0; i < mergedLen; i++ {
+	for i := range mergedLen {
 		if i < len(io.inputs) {
 			if i < len(other.inputs) {
 				merged.inputs[i] = io.inputs[i].Merge(other.inputs[i])
@@ -1353,19 +2735,44 @@ func (io *VersionedIO) Merge(other *VersionedIO) *VersionedIO {
 		} else if i < len(other.outputs) {
 			merged.outputs[i] = other.outputs[i].Merge(nil)
 		}
-		if i < len(io.accessed) {
-			if i < len(other.accessed) {
-				merged.accessed[i] = io.accessed[i].Merge(other.accessed[i])
-			} else {
-				merged.accessed[i] = io.accessed[i].Merge(nil)
-			}
-		} else if i < len(other.accessed) {
-			merged.accessed[i] = other.accessed[i].Merge(nil)
-		}
 	}
 	return merged
 }
 
+// mergeTx folds a single transaction's reads, writes and accesses (recorded at
+// version.TxIndex) into io at that index, accumulating into the slot rather
+// than overwriting it the way RecordReads does. The three per-tx slices grow in
+// lockstep so they stay equal length.
+func (io *VersionedIO) mergeTx(version Version, reads ReadSet, writes *WriteSet) {
+	idx := version.TxIndex + 1
+	n := max(idx+1, len(io.inputs), len(io.outputs))
+	if n > len(io.inputs) {
+		io.inputs = append(io.inputs, make([]versionedReadSet, n-len(io.inputs))...)
+	}
+	if n > len(io.outputs) {
+		io.outputs = append(io.outputs, make([]*WriteSet, n-len(io.outputs))...)
+	}
+	// Fold the read set when it carries typed reads OR access-only marks: an
+	// access-only phase has Len()==0 but must still reach io.inputs for the
+	// EIP-7928 BAL. Len() itself stays access-free so the parallel executor's
+	// HasReads/ReadSetIncarnation/ReadCount keep their read-presence semantics.
+	if reads.Len() > 0 || len(reads.access) > 0 {
+		if io.inputs[idx].readSet.Len() == 0 && len(io.inputs[idx].readSet.access) == 0 {
+			// Production call sites merge each tx once into an empty slot; hand the
+			// read set over directly (like RecordReads) instead of deep-copying.
+			io.inputs[idx] = versionedReadSet{version.Incarnation, reads}
+		} else {
+			io.inputs[idx] = io.inputs[idx].Merge(versionedReadSet{version.Incarnation, reads})
+		}
+	}
+	if !writes.IsEmpty() {
+		io.outputs[idx] = io.outputs[idx].Merge(writes)
+	}
+}
+
+// AsBlockAccessList assembles the EIP-7928 block access list. EIP-7928 and
+// EIP-8246 both activate with Amsterdam, so balance writes always use the
+// no-burn SELFDESTRUCT semantics.
 func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 	if io == nil {
 		return nil
@@ -1375,114 +2782,191 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 	maxTxIndex := io.Len() - 1
 
 	for txIndex := -1; txIndex <= maxTxIndex; txIndex++ {
-		io.ReadSet(txIndex).Scan(func(vr *VersionedRead) bool {
-			if vr.Address.IsNil() || vr.internal {
-				return true
-			}
-			// Skip validation-only reads for non-existent accounts.
-			// These are recorded by versionedRead when the version map
-			// has no entry (MVReadResultNone) so that conflict detection
-			// works across transactions, but they should not appear in
-			// the block access list.
-			if vr.Path == AddressPath {
-				if val, ok := vr.Val.(*accounts.Account); ok && val == nil {
-					return true
-				}
-			}
-			account := ensureAccountState(ac, vr.Address)
-			account.updateRead(vr)
-			return true
-		})
-
-		writes := io.WriteSet(txIndex)
-		sortVersionedWrites(writes)
-		for _, vw := range writes {
-			if vw.Address.IsNil() {
+		// EIP-7928 requires every accessed address to appear in the BAL, so each per-path read map must register its address.
+		rs := io.ReadSet(txIndex)
+		for addr, tr := range rs.balance {
+			if addr.IsNil() || tr.internal {
 				continue
 			}
-			account := ensureAccountState(ac, vw.Address)
-			accessIndex := vw.Version.blockAccessIndex()
-			account.updateWrite(vw, accessIndex)
+			ensureAccountState(ac, addr).updateReadBalance(tr.Val)
 		}
-
-		isUserTx := txIndex >= 0
-		for addr, opts := range io.AccessedAddresses(txIndex) {
+		for addr, inner := range rs.storage {
 			if addr.IsNil() {
 				continue
 			}
-
-			account := ensureAccountState(ac, addr)
-			// A non-revertable access means the address was the target of
-			// an actual EVM operation (evm.Call, evm.Create, SELFDESTRUCT
-			// with non-zero balance, BALANCE, EXTCODESIZE, etc.) — not just
-			// a gas-calculation read. This is used to distinguish real state
-			// access from incidental reads (e.g. Empty() in gas calc) for
-			// the system address filter.
-			if isUserTx && opts != nil && !opts.revertable {
-				account.nonRevertableUserAccess = true
+			for key, tr := range inner {
+				if tr.internal {
+					continue
+				}
+				ensureAccountState(ac, addr).updateReadStorage(key, tr.Val)
 			}
+		}
+		for addr, tr := range rs.address {
+			if addr.IsNil() || tr.internal {
+				continue
+			}
+			// Skip validation-only reads for non-existent accounts.
+			// These are recorded when the version map has no entry
+			// (MVReadResultNone) so that conflict detection works across
+			// transactions, but they should not appear in the block access list.
+			if tr.Val == nil || tr.Val.IsNil() {
+				continue
+			}
+			ensureAccountState(ac, addr)
+		}
+		for addr, tr := range rs.nonce {
+			if addr.IsNil() || tr.internal {
+				continue
+			}
+			ensureAccountState(ac, addr)
+		}
+		for addr, tr := range rs.incarnation {
+			if addr.IsNil() || tr.internal {
+				continue
+			}
+			ensureAccountState(ac, addr)
+		}
+		for addr, tr := range rs.selfDestruct {
+			if addr.IsNil() || tr.internal {
+				continue
+			}
+			ensureAccountState(ac, addr)
+		}
+		for addr, tr := range rs.createContract {
+			if addr.IsNil() || tr.internal {
+				continue
+			}
+			ensureAccountState(ac, addr)
+		}
+		for addr, tr := range rs.code {
+			if addr.IsNil() || tr.internal {
+				continue
+			}
+			ensureAccountState(ac, addr)
+		}
+		for addr, tr := range rs.codeHash {
+			if addr.IsNil() || tr.internal {
+				continue
+			}
+			account := ensureAccountState(ac, addr)
+			// A pre-block-empty code hash marks the baseline empty so applyToCode drops a
+			// net-zero same-tx set-then-clear. Only an empty read seen before any code
+			// change is the pre-block value — a later read of an already-cleared delegation
+			// also reads empty and must not poison the baseline into dropping that clear.
+			if tr.Val.IsEmpty() && len(account.code.changes.entries) == 0 {
+				account.initialCodeEmpty = true
+			}
+		}
+		for addr, tr := range rs.codeSize {
+			if addr.IsNil() || tr.internal {
+				continue
+			}
+			ensureAccountState(ac, addr)
+		}
+
+		if writes := io.WriteSet(txIndex); writes != nil {
+			// Self-destruct is applied before the balance writes so the EIP-7928
+			// burn (zeroing a non-zero balance written by the destroying tx) fires
+			// — the priority is explicit in loop order.
+			for addr, w := range writes.SelfDestructs() {
+				if addr.IsNil() || !w.Val {
+					continue
+				}
+				ensureAccountState(ac, addr)
+			}
+			for addr, w := range writes.Balances() {
+				if addr.IsNil() {
+					continue
+				}
+				ensureAccountState(ac, addr).applyWriteBalance(w.Val, w.Version.blockAccessIndex())
+			}
+			for addr, w := range writes.Nonces() {
+				if addr.IsNil() {
+					continue
+				}
+				ensureAccountState(ac, addr).applyWriteNonce(w.Val, w.Version.blockAccessIndex())
+			}
+			for addr, w := range writes.Codes() {
+				if addr.IsNil() {
+					continue
+				}
+				ensureAccountState(ac, addr).applyWriteCode(w.Val, w.Version.blockAccessIndex())
+			}
+			for addr, byKey := range writes.Storages() {
+				if addr.IsNil() {
+					continue
+				}
+				account := ensureAccountState(ac, addr)
+				for key, w := range byKey {
+					account.applyWriteStorage(key, w.Val, w.Version.blockAccessIndex())
+				}
+			}
+			// EIP-7928 requires every touched address to appear. The value-carrying
+			// paths above register via ensureAccountState; a single sweep over the
+			// full address union covers the rest (incarnation/codeHash/create/
+			// codeSize/address) and can't silently miss a future path — the repeat
+			// ensureAccountState is a harmless get-or-create.
+			for addr := range writes.addrs() {
+				if addr.IsNil() {
+					continue
+				}
+				account := ensureAccountState(ac, addr)
+				// A contract created this block did not exist pre-block, so its pre-block
+				// code is empty; applyToCode uses this to drop a net-zero empty code change.
+				if vw, ok := writes.GetCreateContract(addr); ok && vw.Val {
+					account.initialCodeEmpty = true
+				}
+			}
+		}
+
+		for addr := range io.ReadSet(txIndex).access {
+			if addr.IsNil() {
+				continue
+			}
+			ensureAccountState(ac, addr)
 		}
 	}
 
-	bal := make([]*types.AccountChanges, 0, len(ac))
+	bal := make(types.BlockAccessList, 0, len(ac))
 	for _, account := range ac {
 		account.finalize()
 		account.changes.Normalize()
-		// The system address (0xff...fe) is touched during every block's system
-		// call (EIP-4788 beacon root) because it is msg.sender. Per EIP-7928,
-		// "SYSTEM_ADDRESS MUST NOT be included unless it experiences state access
-		// itself." We use the non-revertable access flag from MarkAddressAccess
-		// to distinguish real state access (evm.Call target, SELFDESTRUCT
-		// beneficiary, BALANCE opcode, etc.) from incidental gas-calculation
-		// reads (Empty() in statefulGasCall). Keep it when it has actual state
-		// changes or when a user tx performed a non-revertable access to it.
-		if account.changes.Address == params.SystemAddress && !hasAccountChanges(account.changes) && !account.nonRevertableUserAccess {
-			continue
-		}
-		bal = append(bal, account.changes)
+		bal = append(bal, *account.changes)
 	}
 
-	sort.Slice(bal, func(i, j int) bool {
-		return bal[i].Address.Cmp(bal[j].Address) < 0
+	slices.SortFunc(bal, func(a, b types.AccountChanges) int {
+		return a.Address.Cmp(b.Address)
 	})
 
 	return bal
 }
 
-// hasAccountChanges returns true if the account has any state changes
-// (storage, balance, nonce, or code) that belong in the BAL.
-func hasAccountChanges(ac *types.AccountChanges) bool {
-	return len(ac.StorageChanges) > 0 || len(ac.StorageReads) > 0 ||
-		len(ac.BalanceChanges) > 0 || len(ac.NonceChanges) > 0 ||
-		len(ac.CodeChanges) > 0
-}
-
 type accountState struct {
-	changes                 *types.AccountChanges
-	balance                 *fieldTracker[uint256.Int]
-	nonce                   *fieldTracker[uint64]
-	code                    *fieldTracker[[]byte]
-	balanceValue            *uint256.Int                        // tracks latest seen balance
-	initialBalanceValue     *uint256.Int                        // tracks pre-block balance for net-zero detection
-	selfDestructed          bool                                //
-	selfDestructedAt        uint32                              // access index of the selfdestruct
-	storageReadValues       map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
-	nonRevertableUserAccess bool                                // true if a user tx (txIndex >= 0) has non-revertable access
+	changes             *types.AccountChanges
+	balance             *fieldTracker[uint256.Int]
+	nonce               *fieldTracker[uint64]
+	code                *fieldTracker[accounts.Code]
+	balanceValue        *uint256.Int                        // tracks latest seen balance
+	initialBalanceValue *uint256.Int                        // tracks pre-block balance for net-zero detection
+	storageReadValues   map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
+	slotWrites          map[accounts.StorageKey]int         // slot -> index into changes.StorageChanges, built past slotIndexMin
+	slotReads           map[accounts.StorageKey]int         // slot -> index into changes.StorageReads, built with slotWrites
+	initialCodeEmpty    bool                                // pre-block code was empty (created contract or empty-codehash read)
 }
 
 // check pre- and post-values, add to BAL if different
-func (a *accountState) finalize() {
-	applyToBalance(a.balance, a.changes, a.initialBalanceValue)
-	applyToNonce(a.nonce, a.changes)
-	applyToCode(a.code, a.changes)
+func (account *accountState) finalize() {
+	applyToBalance(account.balance, account.changes, account.initialBalanceValue)
+	applyToNonce(account.nonce, account.changes)
+	applyToCode(account.code, account.changes, account.initialCodeEmpty)
 }
 
 type fieldTracker[T any] struct {
 	changes changeTracker[T]
 }
 
-func (ft *fieldTracker[T]) recordWrite(idx uint32, value T, copyFn func(T) T, equal func(T, T) bool) {
-	ft.changes.recordWrite(idx, value, copyFn, equal)
+func (ft *fieldTracker[T]) recordWrite(idx uint32, value T) {
+	ft.changes.recordWrite(idx, value)
 }
 
 func newBalanceTracker() *fieldTracker[uint256.Int] {
@@ -1523,30 +3007,41 @@ func applyToNonce(nt *fieldTracker[uint64], ac *types.AccountChanges) {
 	})
 }
 
-func newCodeTracker() *fieldTracker[[]byte] {
-	return &fieldTracker[[]byte]{}
+func newCodeTracker() *fieldTracker[accounts.Code] {
+	return &fieldTracker[accounts.Code]{}
 }
 
-func applyToCode(ct *fieldTracker[[]byte], ac *types.AccountChanges) {
-	ct.changes.apply(func(idx uint32, value []byte) {
+func applyToCode(ct *fieldTracker[accounts.Code], ac *types.AccountChanges, initialCodeEmpty bool) {
+	// A first code change back to empty when pre-block code was already empty
+	// (e.g. an EIP-7702 delegation set then cleared in the same tx) is a net-zero
+	// change and is omitted, matching EELS's post-vs-pre code-hash diff.
+	firstFiltered := false
+	ct.changes.apply(func(idx uint32, value accounts.Code) {
+		if !firstFiltered {
+			firstFiltered = true
+			if initialCodeEmpty && len(value.Bytes) == 0 {
+				return
+			}
+		}
 		ac.CodeChanges = append(ac.CodeChanges, &types.CodeChange{
 			Index:    idx,
-			Bytecode: bytes.Clone(value),
+			Bytecode: bytes.Clone(value.Bytes),
 		})
 	})
 }
 
+// changeTracker stores the latest written value per access index. For CodePath
+// the entry borrows the canonical bytecode owned by cache.StateCache; applyToCode
+// clones it into the BAL CodeChange so the consensus-visible output owns its bytes.
 type changeTracker[T any] struct {
 	entries map[uint32]T
-	equal   func(T, T) bool
 }
 
-func (ct *changeTracker[T]) recordWrite(idx uint32, value T, copyFn func(T) T, equal func(T, T) bool) {
+func (ct *changeTracker[T]) recordWrite(idx uint32, value T) {
 	if ct.entries == nil {
 		ct.entries = make(map[uint32]T)
-		ct.equal = equal
 	}
-	ct.entries[idx] = copyFn(value)
+	ct.entries[idx] = value
 }
 
 func (ct *changeTracker[T]) apply(applyFn func(uint32, T)) {
@@ -1565,54 +3060,54 @@ func (ct *changeTracker[T]) apply(applyFn func(uint32, T)) {
 	}
 }
 
-func (a *accountState) setBalanceValue(v uint256.Int) {
-	if a.balanceValue == nil {
-		a.balanceValue = &uint256.Int{}
+func (account *accountState) setBalanceValue(v uint256.Int) {
+	if account.balanceValue == nil {
+		account.balanceValue = &uint256.Int{}
 	}
-	*a.balanceValue = v
+	*account.balanceValue = v
+}
+
+func newAccountState(addr accounts.Address) *accountState {
+	return &accountState{
+		changes: &types.AccountChanges{Address: addr.Value()},
+		balance: newBalanceTracker(),
+		nonce:   newNonceTracker(),
+		code:    newCodeTracker(),
+	}
 }
 
 func ensureAccountState(accounts map[accounts.Address]*accountState, addr accounts.Address) *accountState {
 	if account, ok := accounts[addr]; ok {
 		return account
 	}
-	account := &accountState{
-		changes: &types.AccountChanges{Address: addr},
-		balance: newBalanceTracker(),
-		nonce:   newNonceTracker(),
-		code:    newCodeTracker(),
-	}
+	account := newAccountState(addr)
 	accounts[addr] = account
 	return account
 }
 
-func (account *accountState) updateWrite(vw *VersionedWrite, accessIndex uint32) {
-	switch vw.Path {
-	case StoragePath:
-		// Skip intra-tx net-zero storage writes: if this is the first write
-		// to the slot (no prior tx wrote to it) and the written value equals
-		// the original read value, it's a no-op that should remain as a read.
-		if !hasStorageWrite(account.changes, vw.Key) {
-			if val, ok := vw.Val.(uint256.Int); ok {
-				if origVal, wasRead := account.storageReadValues[vw.Key]; wasRead && val.Eq(&origVal) {
-					return
-				}
-			}
-		}
-		addStorageUpdate(account.changes, vw, accessIndex)
-	case BalancePath:
-		val, ok := vw.Val.(uint256.Int)
-		if !ok {
+func (account *accountState) applyWriteStorage(key accounts.StorageKey, val uint256.Int, accessIndex uint32) {
+	// Skip intra-tx net-zero storage writes: if this is the first write
+	// to the slot (no prior tx wrote to it) and the written value equals
+	// the original read value, it's a no-op that should remain as a read.
+	at := account.storageWriteIndex(key)
+	if at < 0 {
+		if origVal, wasRead := account.storageReadValues[key]; wasRead && val.Eq(&origVal) {
 			return
 		}
-		// Skip non-zero balance writes for selfdestructed accounts within the
-		// SAME transaction (e.g. priority fee applied during finalize of the
-		// selfdestructing tx). Balance writes from LATER transactions (e.g. a
-		// value transfer to the now-empty address) are real state changes that
-		// must appear in the BAL.
-		if account.selfDestructed && accessIndex == account.selfDestructedAt && !val.IsZero() {
-			return
-		}
+	}
+	account.addStorageUpdate(at, key, val, accessIndex)
+}
+
+func (account *accountState) applyWriteNonce(val uint64, accessIndex uint32) {
+	account.nonce.recordWrite(accessIndex, val)
+}
+
+func (account *accountState) applyWriteCode(val accounts.Code, accessIndex uint32) {
+	account.code.recordWrite(accessIndex, val)
+}
+
+func (account *accountState) applyWriteBalance(val uint256.Int, accessIndex uint32) {
+	{
 		// If we haven't seen a balance and the first write is zero, treat it
 		// as a touch only when the pre-block balance is (or is implicitly) zero:
 		//   - No prior read: the account wasn't accessed before, so its
@@ -1647,122 +3142,160 @@ func (account *accountState) updateWrite(vw *VersionedWrite, accessIndex uint32)
 			return
 		}
 		account.setBalanceValue(val)
-		account.balance.recordWrite(accessIndex, val, func(v uint256.Int) uint256.Int { return v }, func(a, b uint256.Int) bool {
-			return a.Eq(&b)
-		})
-	case NoncePath:
-		if val, ok := vw.Val.(uint64); ok {
-			account.nonce.recordWrite(accessIndex, val, func(v uint64) uint64 { return v }, func(a, b uint64) bool {
-				return a == b
-			})
-		}
-	case CodePath:
-		if val, ok := vw.Val.([]byte); ok {
-			account.code.recordWrite(accessIndex, val, bytes.Clone, bytes.Equal)
-		}
-	case SelfDestructPath:
-		if val, ok := vw.Val.(bool); ok && val {
-			account.selfDestructed = true
-			account.selfDestructedAt = accessIndex
-		}
-	default:
+		account.balance.recordWrite(accessIndex, val)
 	}
 }
 
-func (account *accountState) updateRead(vr *VersionedRead) {
-	if vr != nil {
-		switch vr.Path {
-		case StoragePath:
-			// Record the original read value for net-zero detection.
-			// Only the first read for each slot is recorded (the original value).
-			if val, ok := vr.Val.(uint256.Int); ok {
-				if account.storageReadValues == nil {
-					account.storageReadValues = make(map[accounts.StorageKey]uint256.Int)
-				}
-				if _, exists := account.storageReadValues[vr.Key]; !exists {
-					account.storageReadValues[vr.Key] = val
-				}
-			}
-			if hasStorageWrite(account.changes, vr.Key) {
-				return
-			}
-			account.changes.StorageReads = append(account.changes.StorageReads, vr.Key)
-		case BalancePath:
-			if val, ok := vr.Val.(uint256.Int); ok {
-				// Record the initial (pre-block) balance for net-zero detection.
-				// Only set from the first read AND only before any writes have
-				// been recorded. A read that arrives after a write (e.g. the
-				// block-end finalize in the parallel executor reading from a
-				// fresh IBS, or a BAL-prepopulated read of a tx's predicted
-				// write) reflects post-write state, not the pre-block balance,
-				// and must not be used for net-zero filtering.
-				if account.initialBalanceValue == nil && account.balanceValue == nil {
-					v := val
-					account.initialBalanceValue = &v
-				}
-				// Only update balanceValue from reads when no writes have been
-				// recorded yet. After a write, balanceValue tracks the written
-				// state; a stale read from the DB must not override it, or the
-				// no-op check in updateWrite will incorrectly skip a real write.
-				if len(account.balance.changes.entries) == 0 {
-					account.setBalanceValue(val)
-				}
-			}
-		default:
-			// Only track storage reads for BAL. Balance/nonce/code changes are tracked via writes, others are ignored
+func (account *accountState) updateReadStorage(key accounts.StorageKey, val uint256.Int) {
+	// Record the original read value for net-zero detection.
+	// Only the first read for each slot is recorded (the original value).
+	if account.storageReadValues == nil {
+		account.storageReadValues = make(map[accounts.StorageKey]uint256.Int)
+	}
+	if _, exists := account.storageReadValues[key]; !exists {
+		account.storageReadValues[key] = val
+	}
+	if account.hasStorageWrite(key) {
+		return
+	}
+	if account.slotReads != nil {
+		if _, seen := account.slotReads[key]; seen {
+			return
 		}
+		account.slotReads[key] = len(account.changes.StorageReads)
+	}
+	account.changes.StorageReads = append(account.changes.StorageReads, key)
+}
+
+func (account *accountState) updateReadBalance(val uint256.Int) {
+	// Record the initial (pre-block) balance for net-zero detection.
+	// Only set from the first read AND only before any writes have
+	// been recorded. A read that arrives after a write (e.g. the
+	// block-end finalize in the parallel executor reading from a
+	// fresh IBS, or a BAL-prepopulated read of a tx's predicted
+	// write) reflects post-write state, not the pre-block balance,
+	// and must not be used for net-zero filtering.
+	if account.initialBalanceValue == nil && account.balanceValue == nil {
+		v := val
+		account.initialBalanceValue = &v
+	}
+	// Only update balanceValue from reads when no writes have been
+	// recorded yet. After a write, balanceValue tracks the written
+	// state; a stale read from the DB must not override it, or the
+	// no-op check in updateWrite will incorrectly skip a real write.
+	if len(account.balance.changes.entries) == 0 {
+		account.setBalanceValue(val)
 	}
 }
 
-func addStorageUpdate(ac *types.AccountChanges, vw *VersionedWrite, txIndex uint32) {
+// slotIndexMin is where scanning the slot lists stops being cheaper than a map
+// probe. A storage-bloated block puts thousands of slots on one account and
+// looks every one of them up.
+const slotIndexMin = 16
+
+// storageWriteIndex returns the position of slot in changes.StorageChanges, or -1.
+func (account *accountState) storageWriteIndex(slot accounts.StorageKey) int {
+	if account.slotWrites != nil {
+		if i, ok := account.slotWrites[slot]; ok {
+			return i
+		}
+		return -1
+	}
+	for i := range account.changes.StorageChanges {
+		if account.changes.StorageChanges[i].Slot == slot {
+			return i
+		}
+	}
+	return -1
+}
+
+func (account *accountState) hasStorageWrite(slot accounts.StorageKey) bool {
+	return account.storageWriteIndex(slot) >= 0
+}
+
+// addStorageUpdate records a write at slot, which storageWriteIndex already
+// located as at (-1 when the slot is new). It is the only writer of
+// changes.StorageChanges, so the index cannot drift from it.
+func (account *accountState) addStorageUpdate(at int, slot accounts.StorageKey, val uint256.Int, txIndex uint32) {
 	// If we already recorded a read for this slot, drop it because a write takes precedence.
-	removeStorageRead(ac, vw.Key)
+	account.removeStorageRead(slot)
 
-	if ac.StorageChanges == nil {
-		ac.StorageChanges = []*types.SlotChanges{{
-			Slot:    vw.Key,
-			Changes: []*types.StorageChange{{Index: txIndex, Value: vw.Val.(uint256.Int)}},
-		}}
+	ac := account.changes
+	if at >= 0 {
+		sc := &ac.StorageChanges[at]
+		// EIP-7928 no-op filter: skip if value equals the slot's last recorded write.
+		if n := len(sc.Changes); n > 0 && val.Eq(&sc.Changes[n-1].Value) {
+			return
+		}
+		sc.Changes = append(sc.Changes, &types.StorageChange{Index: txIndex, Value: val})
 		return
 	}
 
-	for _, slotChange := range ac.StorageChanges {
-		if slotChange.Slot == vw.Key {
-			slotChange.Changes = append(slotChange.Changes, &types.StorageChange{Index: txIndex, Value: vw.Val.(uint256.Int)})
-			return
-		}
+	if account.slotWrites != nil {
+		account.slotWrites[slot] = len(ac.StorageChanges)
 	}
-
-	ac.StorageChanges = append(ac.StorageChanges, &types.SlotChanges{
-		Slot:    vw.Key,
-		Changes: []*types.StorageChange{{Index: txIndex, Value: vw.Val.(uint256.Int)}},
+	ac.StorageChanges = append(ac.StorageChanges, types.SlotChanges{
+		Slot:    slot,
+		Changes: []*types.StorageChange{{Index: txIndex, Value: val}},
 	})
-}
-
-func hasStorageWrite(ac *types.AccountChanges, slot accounts.StorageKey) bool {
-	for _, sc := range ac.StorageChanges {
-		if sc != nil && sc.Slot == slot {
-			return true
+	if account.slotWrites == nil && len(ac.StorageChanges) >= slotIndexMin {
+		account.slotWrites = make(map[accounts.StorageKey]int, len(ac.StorageChanges))
+		for i := range ac.StorageChanges {
+			account.slotWrites[ac.StorageChanges[i].Slot] = i
 		}
+		// StorageReads can hold the same slot twice: below the threshold reads are
+		// appended unchecked, and Normalize is what dedups them. The index needs
+		// one entry per slot, so drop the repeats while building it.
+		account.slotReads = make(map[accounts.StorageKey]int, len(ac.StorageReads))
+		deduped := ac.StorageReads[:0]
+		for _, slot := range ac.StorageReads {
+			if _, seen := account.slotReads[slot]; seen {
+				continue
+			}
+			account.slotReads[slot] = len(deduped)
+			deduped = append(deduped, slot)
+		}
+		ac.StorageReads = deduped
 	}
-	return false
 }
 
-func removeStorageRead(ac *types.AccountChanges, slot accounts.StorageKey) {
+// removeStorageRead drops slot from StorageReads, because a write to it takes
+// precedence. Past slotIndexMin the position is indexed and the last entry is
+// swapped in; order does not survive Normalize's sort anyway.
+func (account *accountState) removeStorageRead(slot accounts.StorageKey) {
+	ac := account.changes
 	if len(ac.StorageReads) == 0 {
 		return
 	}
-	out := ac.StorageReads[:0]
-	for _, s := range ac.StorageReads {
-		if s != slot {
-			out = append(out, s)
+	if account.slotReads == nil {
+		out := ac.StorageReads[:0]
+		for _, s := range ac.StorageReads {
+			if s != slot {
+				out = append(out, s)
+			}
 		}
+		if len(out) == 0 {
+			ac.StorageReads = nil
+		} else {
+			ac.StorageReads = out
+		}
+		return
 	}
-	if len(out) == 0 {
+	i, ok := account.slotReads[slot]
+	if !ok {
+		return
+	}
+	delete(account.slotReads, slot)
+	last := len(ac.StorageReads) - 1
+	if i != last {
+		ac.StorageReads[i] = ac.StorageReads[last]
+		account.slotReads[ac.StorageReads[i]] = i
+	}
+	if last == 0 {
 		ac.StorageReads = nil
-	} else {
-		ac.StorageReads = out
+		return
 	}
+	ac.StorageReads = ac.StorageReads[:last]
 }
 
 type versionedReadSet struct {
@@ -1770,9 +3303,10 @@ type versionedReadSet struct {
 	readSet     ReadSet
 }
 
-func (s versionedReadSet) Scan(yield func(input *VersionedRead) bool) {
-	if s.readSet != nil {
-		s.readSet.Scan(yield)
+// AllHeaders iterates the type-agnostic header of every read in the set.
+func (s versionedReadSet) AllHeaders() iter.Seq[ReadHeader] {
+	return func(yield func(ReadHeader) bool) {
+		s.readSet.eachHeader(yield)
 	}
 }
 
@@ -1794,14 +3328,17 @@ type DAG struct {
 }
 
 type TxDep struct {
-	Index         int
 	Reads         ReadSet
-	FullWriteList []VersionedWrites
+	FullWriteList []*WriteSet
+	Index         int
 }
 
-func HasReadDep(txFrom VersionedWrites, txTo ReadSet) bool {
-	for _, rd := range txFrom {
-		if _, ok := txTo[rd.Address][AccountKey{Path: rd.Path, Key: rd.Key}]; ok {
+func HasReadDep(txFrom *WriteSet, txTo ReadSet) bool {
+	if txFrom == nil {
+		return false
+	}
+	for h := range txFrom.AllHeaders() {
+		if _, ok := txTo.getHeader(h.Address, h.Path, h.Key); ok {
 			return true
 		}
 	}
@@ -1847,7 +3384,7 @@ func BuildDAG(deps *VersionedIO, logger log.Logger) (d DAG) {
 	return
 }
 
-func depsHelper(dependencies map[int]map[int]bool, txFrom VersionedWrites, txTo ReadSet, i int, j int) map[int]map[int]bool {
+func depsHelper(dependencies map[int]map[int]bool, txFrom *WriteSet, txTo ReadSet, i int, j int) map[int]map[int]bool {
 	if HasReadDep(txFrom, txTo) {
 		dependencies[i][j] = true
 
@@ -1893,4 +3430,85 @@ func GetDep(deps *VersionedIO) map[int]map[int]bool {
 	}
 
 	return newDependencies
+}
+
+func (ws *WriteSet) createdEmpty(addr accounts.Address) bool {
+	created, ok := ws.address[addr]
+	if !ok || created.Val == nil {
+		return false
+	}
+	account := *created.Val
+	if written, ok := ws.balance[addr]; ok {
+		account.Balance = written.Val
+	}
+	if written, ok := ws.nonce[addr]; ok {
+		account.Nonce = written.Val
+	}
+	if written, ok := ws.codeHash[addr]; ok {
+		account.CodeHash = written.Val
+	}
+	if !account.Empty() {
+		return false
+	}
+	_, hasCode := ws.code[addr]
+	_, hasIncarnation := ws.incarnation[addr]
+	_, destroyed := ws.selfDestruct[addr]
+	_, createdContract := ws.createContract[addr]
+	_, hasCodeSize := ws.codeSize[addr]
+	return !hasCode && !hasIncarnation && !destroyed && !createdContract && !hasCodeSize && len(ws.storage[addr]) == 0
+}
+
+func versionedUpdateBalance(vm *VersionMap, addr accounts.Address, txIndex int) (uint256.Int, bool) {
+	val, res, ok := vm.ReadBalance(addr, txIndex)
+	if ok && res.Status() != MVReadResultNone {
+		return val, true
+	}
+	return uint256.Int{}, false
+}
+
+func versionedUpdateNonce(vm *VersionMap, addr accounts.Address, txIndex int) (uint64, bool) {
+	val, res, ok := vm.ReadNonce(addr, txIndex)
+	if ok && res.Status() != MVReadResultNone {
+		return val, true
+	}
+	return 0, false
+}
+
+func versionedUpdateIncarnation(vm *VersionMap, addr accounts.Address, txIndex int) (uint64, bool) {
+	val, res, ok := vm.ReadIncarnation(addr, txIndex)
+	if ok && res.Status() != MVReadResultNone {
+		return val, true
+	}
+	return 0, false
+}
+
+func versionedUpdateCode(vm *VersionMap, addr accounts.Address, txIndex int) ([]byte, bool) {
+	val, res, ok := vm.ReadCode(addr, txIndex)
+	if ok && res.Status() != MVReadResultNone {
+		return val.Bytes, true
+	}
+	return nil, false
+}
+
+func versionedUpdateCodeHash(vm *VersionMap, addr accounts.Address, txIndex int) (accounts.CodeHash, bool) {
+	val, res, ok := vm.ReadCodeHash(addr, txIndex)
+	if ok && res.Status() != MVReadResultNone {
+		return val, true
+	}
+	return accounts.CodeHash{}, false
+}
+
+func versionedUpdateStorage(vm *VersionMap, addr accounts.Address, key accounts.StorageKey, txIndex int) (uint256.Int, bool) {
+	val, res, ok := vm.ReadStorage(addr, key, txIndex)
+	if ok && res.Status() != MVReadResultNone {
+		return val, true
+	}
+	return uint256.Int{}, false
+}
+
+func (ws *WriteSet) CreateContracts() iter.Seq2[accounts.Address, *VersionedWrite[bool]] {
+	if ws == nil {
+		return maps.All(map[accounts.Address]*VersionedWrite[bool](nil))
+	}
+	return maps.All(ws.createContract)
 }

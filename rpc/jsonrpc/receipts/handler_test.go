@@ -65,7 +65,7 @@ func TestGetBlockHeaders(t *testing.T) {
 	}
 
 	var blocks []*types.Block
-	for i := uint64(0); i < limit; i++ {
+	for i := range limit {
 		block, err := backend.BlockReader.BlockByNumber(backend.Ctx, tx, i)
 		require.NoError(t, err)
 		blocks = append(blocks, block)
@@ -75,7 +75,7 @@ func TestGetBlockHeaders(t *testing.T) {
 	require.NoError(t, err)
 
 	getHashes := func(from, limit uint64) (hashes []common.Hash) {
-		for i := uint64(0); i < limit; i++ {
+		for i := range limit {
 			hashes = append(hashes, blocks[from-1-i].Hash())
 		}
 		return hashes
@@ -169,7 +169,8 @@ func TestGetBlockHeaders(t *testing.T) {
 				blocks[currentBlock.NumberU64()-4].Hash(),
 				blocks[currentBlock.NumberU64()-1].Hash(),
 			},
-		}, {
+		},
+		{
 			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: 4}, Skip: 2, Amount: 3, Reverse: true},
 			[]common.Hash{
 				blocks[4].Hash(),
@@ -231,7 +232,8 @@ func TestGetBlockHeaders(t *testing.T) {
 		{
 			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Hash: unknown}, Amount: 1},
 			[]common.Hash{},
-		}, {
+		},
+		{
 			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.NumberU64() + 1}, Amount: 1},
 			[]common.Hash{},
 		},
@@ -344,19 +346,21 @@ func TestGetBlockReceipts(t *testing.T) {
 	require.Equal(t, expect, sent.Data)
 }
 
-// newTestBackend creates a chain with a number of explicitly defined blocks and
+// mockWithGenerator creates a chain with a number of explicitly defined blocks and
 // wraps it into a mock backend.
-func mockWithGenerator(t *testing.T, blocks int, generator func(int, *blockgen.BlockGen)) *execmoduletester.ExecModuleTester {
+func mockWithGenerator(t *testing.T, blocks int, generator func(int, *blockgen.BlockGen), opts ...execmoduletester.Option) *execmoduletester.ExecModuleTester {
 	m := execmoduletester.New(
 		t,
-		execmoduletester.WithGenesisSpec(&types.Genesis{
-			Config: chain.TestChainBerlinConfig,
-			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
-		}),
-		execmoduletester.WithKey(testKey),
+		append([]execmoduletester.Option{
+			execmoduletester.WithGenesisSpec(&types.Genesis{
+				Config: chain.TestChainBerlinConfig,
+				Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
+			}),
+			execmoduletester.WithKey(testKey),
+		}, opts...)...,
 	)
 	if blocks > 0 {
-		chain, _ := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, generator)
+		chain, _ := m.GenerateChain(blocks, generator)
 		err := m.InsertChain(chain)
 		require.NoError(t, err)
 	}

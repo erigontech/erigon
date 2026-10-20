@@ -22,11 +22,14 @@ import (
 	"sync"
 )
 
-var typeInitFunctions = []func(){}
-var typeInitMutex = sync.Mutex{}
+var (
+	typeInitFunctions = []func(){}
+	typeInitMutex     = sync.Mutex{}
+)
 
-func LocalTypeInit(localIdInitialiser func(govalue interface{}) TypeId,
-	publicIdInitialiser func(domainValue interface{}, id []byte, idVersion Version) (TypeId, error)) {
+func LocalTypeInit(localIdInitialiser func(govalue any) TypeId,
+	publicIdInitialiser func(domainValue any, id []byte, idVersion Version) (TypeId, error),
+) {
 	typeInitMutex.Lock()
 	if NewLocalTypeId == nil {
 		NewLocalTypeId = localIdInitialiser
@@ -38,14 +41,15 @@ func LocalTypeInit(localIdInitialiser func(govalue interface{}) TypeId,
 	typeInitMutex.Unlock()
 }
 
-var NewLocalTypeId func(govalue interface{}) TypeId
+var NewLocalTypeId func(govalue any) TypeId
 
-var typeIds = map[string]TypeId{}
-var typeIdsMutex = &sync.RWMutex{}
+var (
+	typeIds      = map[string]TypeId{}
+	typeIdsMutex = &sync.RWMutex{}
+)
 
 func MustNewId(domain Domain, id ident, idVersion Version) TypeId {
 	typeid, err := NewTypeId(domain, id, idVersion)
-
 	if err != nil {
 		panic(fmt.Sprintf("Can't create new type id: %s", err))
 	}
@@ -54,9 +58,7 @@ func MustNewId(domain Domain, id ident, idVersion Version) TypeId {
 }
 
 func NewTypeId(domain Domain, id ident, idVersion Version) (TypeId, error) {
-
 	base, err := NewId(domain, id /*idVersion*/)
-
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +134,7 @@ func (a TypeArray) String() string {
 	return fmt.Sprintf("%s", argTypes)
 }
 
-func (a TypeArray) Type(at interface{}) TypeId {
+func (a TypeArray) Type(at any) TypeId {
 	return a[at.(int)]
 }
 
@@ -144,7 +146,7 @@ func (m TypeMap) Len() int {
 
 func (m TypeMap) String() string {
 	argTypes := make([]string, m.Len())
-	var i = 0
+	i := 0
 	for argName, argType := range m {
 		argTypes[i] = fmt.Sprintf("%s=%s", argName, argType.String())
 		i++
@@ -153,24 +155,24 @@ func (m TypeMap) String() string {
 	return fmt.Sprintf("%s", argTypes)
 }
 
-func (m TypeMap) Type(at interface{}) TypeId {
+func (m TypeMap) Type(at any) TypeId {
 	return m[at.(string)]
 }
 
 type ArgTypes interface {
 	Len() int
 	String() string
-	Type(at interface{}) TypeId
+	Type(at any) TypeId
 }
 
 type Args interface {
-	Arg(key interface{}) interface{}
+	Arg(key any) any
 	Len() int
 }
 
-type ArgArray []interface{}
+type ArgArray []any
 
-func (a ArgArray) Arg(at interface{}) interface{} {
+func (a ArgArray) Arg(at any) any {
 	return a[at.(int)]
 }
 
@@ -178,9 +180,9 @@ func (a ArgArray) Len() int {
 	return len(a)
 }
 
-type ArgMap map[string]interface{}
+type ArgMap map[string]any
 
-func (m ArgMap) Arg(at interface{}) interface{} {
+func (m ArgMap) Arg(at any) any {
 	return m[at.(string)]
 }
 
@@ -204,10 +206,12 @@ var LocalTypeDomain Domain = func() Domain {
 }()
 var Trace = false
 
-var typeids = map[reflect.Type]TypeId{}
-var typeidsMutex = &sync.RWMutex{}
+var (
+	typeids      = map[reflect.Type]TypeId{}
+	typeidsMutex = &sync.RWMutex{}
+)
 
-func TypeIdOf(govalue interface{}) TypeId {
+func TypeIdOf(govalue any) TypeId {
 	var err error
 	var gotype reflect.Type
 	var ok bool
@@ -235,7 +239,6 @@ func TypeIdOf(govalue interface{}) TypeId {
 	if !ok {
 		typeidsMutex.Lock()
 		id, err = newIdFor(gotype)
-
 		if err != nil {
 			typeidsMutex.Unlock()
 			panic(fmt.Sprintf("Can't create type id for:%+v\n", err))
@@ -289,7 +292,6 @@ func (ti *GoTypeId) AssignableTo(typeId TypeId) bool {
 }
 
 func newIdFor(gotype reflect.Type) (TypeId, error) {
-
 	typeName := gotype.Name()
 
 	if pkgPath := gotype.PkgPath(); len(pkgPath) > 0 {
@@ -297,7 +299,6 @@ func newIdFor(gotype reflect.Type) (TypeId, error) {
 	}
 
 	base, err := NewId(LocalTypeDomain, typeName)
-
 	if err != nil {
 		return nil, err
 	}
@@ -329,7 +330,7 @@ func (info *typeInfo) LocalType() reflect.Type {
 	return info.localType
 }
 
-func TypeIdValues(typeIds interface{}) []TypeId {
+func TypeIdValues(typeIds any) []TypeId {
 	s := reflect.ValueOf(typeIds)
 
 	if s.Kind() == reflect.Pointer {
@@ -337,8 +338,8 @@ func TypeIdValues(typeIds interface{}) []TypeId {
 	}
 
 	var values []TypeId
-	for i := 0; i < s.NumField(); i++ {
-		if value, ok := s.Field(i).Interface().(TypeId); ok {
+	for _, field := range s.Fields() {
+		if value, ok := reflect.TypeAssert[TypeId](field); ok {
 			values = append(values, value)
 		}
 	}

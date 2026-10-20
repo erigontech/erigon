@@ -48,7 +48,10 @@ func TestPostEthV1ValidatorPreparation(t *testing.T) {
 	reqByte, err := json.Marshal(req)
 	require.NoError(t, err)
 
-	resp, err := http.Post(server.URL+"/eth/v1/validator/prepare_beacon_proposer", "application/json", bytes.NewBuffer(reqByte))
+	postReq, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/validator/prepare_beacon_proposer", bytes.NewBuffer(reqByte))
+	require.NoError(t, err)
+	postReq.Header.Set("Content-Type", "application/json")
+	resp, err := server.Client().Do(postReq)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, 200, resp.StatusCode)

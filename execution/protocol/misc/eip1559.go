@@ -31,28 +31,13 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
-// VerifyEip1559Header verifies some header attributes which were changed in EIP-1559,
-// - gas limit check
-// - basefee check
-func VerifyEip1559Header(config *chain.Config, parent, header *types.Header, skipGasLimit bool) error {
-	if !skipGasLimit {
-		// Verify that the gas limit remains within allowed bounds
-		parentGasLimit := parent.GasLimit
-		if !config.IsLondon(parent.Number.Uint64()) {
-			parentGasLimit = parent.GasLimit * params.ElasticityMultiplier
-		}
-		if err := VerifyGaslimit(parentGasLimit, header.GasLimit); err != nil {
-			return err
-		}
-	}
-	// Verify the header is not malformed
+// VerifyEip1559Header checks base fee only; gas limit is in VerifyParentGasLimit.
+func VerifyEip1559Header(config *chain.Config, parent, header *types.Header) error {
 	if header.BaseFee == nil {
 		return errors.New("header is missing baseFee")
 	}
-	// Verify the baseFee is correct based on the parent header.
 	expectedBaseFee := CalcBaseFee(config, parent)
 	if header.BaseFee.Cmp(expectedBaseFee) != 0 {
 		return fmt.Errorf("invalid baseFee: have %s, want %s, parentBaseFee %s, parentGasUsed %d",
@@ -111,7 +96,7 @@ func CalcBaseFee(config *chain.Config, parent *types.Header) *uint256.Int {
 	var (
 		parentGasTarget          = parent.GasLimit / params.ElasticityMultiplier
 		parentGasTargetU256      = uint256.NewInt(parentGasTarget)
-		baseFeeChangeDenominator = uint256.NewInt(getBaseFeeChangeDenominator(config.Bor, parent.Number.Uint64()))
+		baseFeeChangeDenominator = uint256.NewInt(params.BaseFeeChangeDenominator)
 	)
 	// If the parent gasUsed is the same as the target, the baseFee remains unchanged.
 	if parent.GasUsed == parentGasTarget {
@@ -140,19 +125,4 @@ func CalcBaseFee(config *chain.Config, parent *types.Header) *uint256.Int {
 		}
 		return x
 	}
-}
-
-func getBaseFeeChangeDenominator(borConfig chain.BorConfig, number uint64) uint64 {
-	// If we're running bor based chain post delhi hardfork, return the new value
-	if borConfig, ok := borConfig.(*borcfg.BorConfig); ok {
-		switch {
-		case borConfig.IsBhilai(number):
-			return params.BaseFeeChangeDenominatorPostBhilai
-		case borConfig.IsDelhi(number):
-			return params.BaseFeeChangeDenominatorPostDelhi
-		}
-	}
-
-	// Return the original once for other chains and pre-fork cases
-	return params.BaseFeeChangeDenominator
 }

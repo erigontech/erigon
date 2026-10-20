@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/transition"
+	"github.com/erigontech/erigon/cl/utils"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -31,31 +32,119 @@ import (
 
 // Slot calculates the current slot number using the time and genesis slot.
 func (f *ForkChoiceStore) Slot() uint64 {
-	return f.beaconCfg.GenesisSlot + ((f.time.Load() - f.genesisTime) / f.beaconCfg.SecondsPerSlot)
+	return f.slotAtTimeMs(f.timeMs.Load())
+}
+
+func (f *ForkChoiceStore) slotAtTimeMs(timeMs uint64) uint64 {
+	return f.beaconCfg.GenesisSlot + ((timeMs - utils.SecondsToMilliseconds(f.genesisTime)) / (f.beaconCfg.SecondsPerSlot * 1000))
+}
+
+// queueEmit defers an event send until after f.mu is released: Feed.Send blocks
+// until every subscriber accepts the event, so a stalled subscriber must not be
+// able to wedge the store. Callers hold f.mu.
+func (f *ForkChoiceStore) queueEmit(emit func()) {
+	f.queuedEmits = append(f.queuedEmits, emit)
+}
+
+func (f *ForkChoiceStore) queuePrune(slot uint64) {
+	f.queuedPrunes = append(f.queuedPrunes, slot)
+}
+
+func (f *ForkChoiceStore) queueOperationPrune(checkpoint solid.Checkpoint) {
+	f.queuedOperationPrunes = append(f.queuedOperationPrunes, checkpoint)
+}
+
+// drainQueuedWork runs queued event sends and prunes. Call after releasing f.mu.
+func (f *ForkChoiceStore) drainQueuedWork() {
+	f.mu.Lock()
+	emits := f.queuedEmits
+	prunes := f.queuedPrunes
+	operationPrunes := f.queuedOperationPrunes
+	f.queuedEmits = nil
+	f.queuedPrunes = nil
+	f.queuedOperationPrunes = nil
+	f.mu.Unlock()
+	if len(operationPrunes) > 0 && f.operationsPool.HasPrunableOperations() {
+		f.scheduleOperationPrune(operationPrunes[len(operationPrunes)-1])
+	}
+	for _, emit := range emits {
+		emit()
+	}
+	for _, pruneSlot := range prunes {
+		if err := f.forkGraph.Prune(pruneSlot); err != nil {
+			log.Warn("Failed to prune fork graph", "pruneSlot", pruneSlot, "err", err)
+			continue
+		}
+		f.pruneExecutionPayloadFirstSeen(pruneSlot)
+	}
+}
+
+func (f *ForkChoiceStore) scheduleOperationPrune(checkpoint solid.Checkpoint) {
+	f.operationPruneMu.Lock()
+	if checkpoint.Epoch <= f.operationPruneTarget.Epoch {
+		f.operationPruneMu.Unlock()
+		return
+	}
+	f.operationPruneTarget = checkpoint
+	f.operationPrunePending = true
+	if f.operationPruneRunning {
+		f.operationPruneMu.Unlock()
+		return
+	}
+	f.operationPruneRunning = true
+	f.operationPruneMu.Unlock()
+	go f.runOperationPruner()
+}
+
+func (f *ForkChoiceStore) runOperationPruner() {
+	for {
+		f.operationPruneMu.Lock()
+		if !f.operationPrunePending {
+			f.operationPruneRunning = false
+			f.operationPruneMu.Unlock()
+			return
+		}
+		checkpoint := f.operationPruneTarget
+		f.operationPrunePending = false
+		f.operationPruneMu.Unlock()
+
+		if !f.operationsPool.HasPrunableOperations() {
+			continue
+		}
+		finalizedState, err := f.forkGraph.GetState(checkpoint.Root, true)
+		if err != nil || finalizedState == nil {
+			log.Warn("Failed to load finalized state for operation pruning", "root", checkpoint.Root, "err", err)
+			continue
+		}
+		f.operationsPool.PruneFinalized(finalizedState, checkpoint.Epoch)
+	}
 }
 
 // updateCheckpoints updates the justified and finalized checkpoints if new checkpoints have higher epochs.
 func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckpoint solid.Checkpoint) {
 	if justifiedCheckpoint.Epoch > f.justifiedCheckpoint.Load().(solid.Checkpoint).Epoch {
+		f.checkpointStatesMu.Lock()
 		f.justifiedCheckpoint.Store(justifiedCheckpoint)
+		f.checkpointStatesMu.Unlock()
 	}
 	if finalizedCheckpoint.Epoch > f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch {
+		f.queueOperationPrune(finalizedCheckpoint)
 		f.onNewFinalized(finalizedCheckpoint)
 		f.finalizedCheckpoint.Store(finalizedCheckpoint)
 
-		// prepare and send the finalized checkpoint event
 		blockRoot := finalizedCheckpoint.Root
 		blockHeader, ok := f.forkGraph.GetHeader(blockRoot)
 		if !ok {
 			log.Warn("Finalized block header not found", "blockRoot", blockRoot)
 			return
 		}
-		f.emitters.State().SendFinalizedCheckpoint(&beaconevents.FinalizedCheckpointData{
+		data := &beaconevents.FinalizedCheckpointData{
 			Block:               finalizedCheckpoint.Root,
 			Epoch:               finalizedCheckpoint.Epoch,
 			State:               blockHeader.Root,
 			ExecutionOptimistic: false,
-		})
+		}
+		f.queueEmit(func() { f.emitters.State().SendFinalizedCheckpoint(data) })
 	}
 }
 
@@ -105,6 +194,9 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 		}
 		return true
 	})
+	if f.gloasWeightTree != nil {
+		f.gloasWeightTree.pruneFinalized(finalizedSlot)
+	}
 	// Clean up GLOAS-specific payload votes for finalized blocks.
 	// Note: envelope files are cleaned up in forkGraph.Prune().
 	if newFinalized.Epoch >= f.beaconCfg.GloasForkEpoch {
@@ -128,7 +220,7 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 	// Guard against uint64 underflow during the first 3 epochs after genesis.
 	if newFinalized.Epoch > 3 {
 		slotToPrune := ((newFinalized.Epoch - 3) * f.beaconCfg.SlotsPerEpoch) - 1
-		f.forkGraph.Prune(slotToPrune)
+		f.queuePrune(slotToPrune)
 	}
 }
 
@@ -157,46 +249,43 @@ func (f *ForkChoiceStore) computeSlotsSinceEpochStart(slot uint64) uint64 {
 	return slot - f.computeStartSlotAtEpoch(f.computeEpochAtSlot(slot))
 }
 
-// Ancestor returns the ancestor to the given root.
-// [Modified in Gloas:EIP7732] Returns ForkChoiceNode with payload status.
-// Spec: if block.slot <= slot (block is at or before the target), return PENDING.
-// Otherwise traverse up and return get_parent_payload_status for the found ancestor.
-func (f *ForkChoiceStore) Ancestor(root common.Hash, slot uint64) ForkChoiceNode {
-	header, has := f.forkGraph.GetHeader(root)
+func (f *ForkChoiceStore) getAncestor(node ForkChoiceNode, slot uint64) ForkChoiceNode {
+	header, has := f.forkGraph.GetHeader(node.Root)
 	if !has {
 		return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
 	}
 
-	// Spec: if block.slot <= slot, return (root, PENDING)
 	if header.Slot <= slot {
-		return ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending}
+		return node
 	}
 
-	// Traverse up: find the ancestor block whose parent is at or before the target slot.
-	// This mirrors the spec's "while parent.slot > slot" loop, tracking the child (block)
-	// so we can call get_parent_payload_status(block) at the end.
-	childRoot := root
-	for header.Slot > slot {
-		childRoot = root
-		root = header.ParentRoot
-		header, has = f.forkGraph.GetHeader(header.ParentRoot)
-		if !has {
+	for {
+		block, hasBlock := f.forkGraph.GetBlock(node.Root)
+		if !hasBlock || block == nil {
 			return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
 		}
+		parent := ForkChoiceNode{
+			Root:          block.Block.ParentRoot,
+			PayloadStatus: f.getParentPayloadStatus(block.Block),
+		}
+		parentHeader, hasParent := f.forkGraph.GetHeader(parent.Root)
+		if !hasParent {
+			return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
+		}
+		if parentHeader.Slot <= slot {
+			return parent
+		}
+		node = parent
 	}
+}
 
-	// root is now the ancestor at or before the target slot.
-	// childRoot is the block whose parent_root == root (i.e. "block" in the spec).
-	// Spec: return ForkChoiceNode(root=block.parent_root, payload_status=get_parent_payload_status(store, block))
-	payloadStatus := cltypes.PayloadStatusPending
-	if block, hasBlock := f.forkGraph.GetBlock(childRoot); hasBlock && block != nil {
-		payloadStatus = f.getParentPayloadStatus(block.Block)
-	}
-
-	return ForkChoiceNode{
+// Ancestor returns the ancestor to the given root.
+// [Modified in Gloas:EIP7732] Returns ForkChoiceNode with payload status.
+func (f *ForkChoiceStore) Ancestor(root common.Hash, slot uint64) ForkChoiceNode {
+	return f.getAncestor(ForkChoiceNode{
 		Root:          root,
-		PayloadStatus: payloadStatus,
-	}
+		PayloadStatus: cltypes.PayloadStatusPending,
+	}, slot)
 }
 
 // getCheckpointState computes and caches checkpoint states.
@@ -234,8 +323,52 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 	})
 	f.publicKeysRegistry.AddState(checkpoint, baseState)
 	checkpointState := newCheckpointState(f.beaconCfg, f.publicKeysRegistry, validators,
-		mixes, baseState.GenesisValidatorsRoot(), baseState.Fork(), baseState.GetTotalActiveBalance(), state.Epoch(baseState.BeaconState), checkpoint)
+		mixes, baseState.GenesisValidatorsRoot(), baseState.Fork(), getUnslashedActiveBalance(baseState), state.Epoch(baseState.BeaconState), checkpoint)
 	// Cache in memory what we are left with.
-	f.checkpointStates.Store(checkpoint, checkpointState)
+	f.storeCheckpointState(checkpoint, checkpointState)
 	return checkpointState, nil
+}
+
+// storeCheckpointState stores the state, then evicts the lowest-epoch entries
+// above maxCheckpointStates, but never the current justified state, which is read
+// to compute the head, or the state just stored.
+func (f *ForkChoiceStore) storeCheckpointState(checkpoint solid.Checkpoint, checkpointState *checkpointState) {
+	f.checkpointStatesMu.Lock()
+	defer f.checkpointStatesMu.Unlock()
+
+	f.checkpointStates.Store(checkpoint, checkpointState)
+	for {
+		justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+		count := 0
+		var oldest solid.Checkpoint
+		hasOldest := false
+		f.checkpointStates.Range(func(key, _ any) bool {
+			count++
+			candidate := key.(solid.Checkpoint)
+			if candidate == justified || candidate == checkpoint {
+				return true
+			}
+			if !hasOldest || candidate.Epoch < oldest.Epoch {
+				oldest = candidate
+				hasOldest = true
+			}
+			return true
+		})
+		if count <= maxCheckpointStates || !hasOldest {
+			return
+		}
+		f.checkpointStates.Delete(oldest)
+	}
+}
+
+func getUnslashedActiveBalance(beaconState *state.CachingBeaconState) uint64 {
+	epoch := state.Epoch(beaconState)
+	var total uint64
+	beaconState.ForEachValidator(func(validator solid.Validator, _, _ int) bool {
+		if validator.Active(epoch) && !validator.Slashed() {
+			total += validator.EffectiveBalance()
+		}
+		return true
+	})
+	return max(beaconState.BeaconConfig().EffectiveBalanceIncrement, total)
 }

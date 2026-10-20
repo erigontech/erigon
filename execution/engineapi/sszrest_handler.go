@@ -14,7 +14,6 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -27,6 +26,18 @@ func (e *EngineServer) SSZRESTHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		e.handleSSZREST(w, r)
 	})
+}
+
+func (e *EngineServer) beaconChainConfig() *clparams.BeaconChainConfig {
+	if cfg := e.beaconCfg.Load(); cfg != nil {
+		return cfg
+	}
+	if e.config != nil {
+		if _, cfg, _, err := clparams.GetConfigsByNetworkName(e.config.ChainName); err == nil {
+			return cfg
+		}
+	}
+	return &clparams.MainnetBeaconConfig
 }
 
 func (e *EngineServer) handleSSZREST(w http.ResponseWriter, r *http.Request) {
@@ -51,6 +62,8 @@ func (e *EngineServer) handleSSZREST(w http.ResponseWriter, r *http.Request) {
 		e.handleSSZForkchoice(w, r, version)
 	case r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "blobs":
 		e.handleSSZGetBlobs(w, r, version)
+	case r.Method == http.MethodGet && len(parts) == 3 && parts[2] == "inclusion-list":
+		e.handleSSZGetInclusionList(w, r, version)
 	case r.Method == http.MethodPost && len(parts) == 4 && parts[2] == "client" && parts[3] == "version" && version == 1:
 		e.handleSSZClientVersion(w, r)
 	case r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "capabilities" && version == 1:
@@ -118,7 +131,8 @@ func readSSZBody(r *http.Request) ([]byte, error) {
 
 func writeSSZ(w http.ResponseWriter, obj interface {
 	EncodeSSZ([]byte) ([]byte, error)
-}) {
+},
+) {
 	out, err := obj.EncodeSSZ(nil)
 	if err != nil {
 		writeSSZError(w, http.StatusInternalServerError, err.Error())
@@ -141,8 +155,7 @@ func writeEngineError(w http.ResponseWriter, err error) {
 	if err == nil {
 		return
 	}
-	var rpcErr rpc.Error
-	if errors.As(err, &rpcErr) {
+	if rpcErr, ok := errors.AsType[rpc.Error](err); ok {
 		switch rpcErr.ErrorCode() {
 		case engine_helpers.UnknownPayloadErr.Code:
 			writeSSZError(w, http.StatusNotFound, err.Error())
@@ -225,7 +238,7 @@ func (e *EngineServer) handleSSZGetPayload(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		sv, _ := sszGetPayloadVersion(version)
-		out, err := encodeGetPayloadResponse(resp, sv)
+		out, err := encodeGetPayloadResponse(e.beaconChainConfig(), resp, sv)
 		if err != nil {
 			writeSSZError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -289,7 +302,7 @@ func (e *EngineServer) handleSSZForkchoice(w http.ResponseWriter, r *http.Reques
 	case 3:
 		resp, err = e.ForkchoiceUpdatedV3(r.Context(), &state, attrs)
 	case 4:
-		resp, err = e.ForkchoiceUpdatedV4(r.Context(), &state, attrs)
+		resp, err = e.ForkchoiceUpdatedV4(r.Context(), &state, attrs, nil)
 	}
 	if err != nil {
 		writeEngineError(w, err)
@@ -369,6 +382,25 @@ func (e *EngineServer) handleSSZGetBlobs(w http.ResponseWriter, r *http.Request,
 	}
 }
 
+func (e *EngineServer) handleSSZGetInclusionList(w http.ResponseWriter, r *http.Request, version int) {
+	if version != 1 {
+		writeSSZError(w, http.StatusNotFound, "unsupported get inclusion list version")
+		return
+	}
+	resp, err := e.GetInclusionListV1(r.Context())
+	if err != nil {
+		writeEngineError(w, err)
+		return
+	}
+	e.logger.Info("[SSZ-REST] handled get inclusion list", "path", r.URL.Path)
+	out, err := encodeGetInclusionListResponse(resp)
+	if err != nil {
+		writeSSZError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeSSZBytes(w, out)
+}
+
 func (e *EngineServer) handleSSZClientVersion(w http.ResponseWriter, r *http.Request) {
 	body, err := readSSZBody(r)
 	if err != nil {
@@ -394,8 +426,6 @@ func (e *EngineServer) handleSSZClientVersion(w http.ResponseWriter, r *http.Req
 	writeSSZBytes(w, out)
 }
 
-func ptr[T any](v T) *T { return &v }
-
 func (e *EngineServer) handleSSZCapabilities(w http.ResponseWriter, r *http.Request) {
 	body, err := readSSZBody(r)
 	if err != nil {
@@ -416,5 +446,3 @@ func (e *EngineServer) handleSSZCapabilities(w http.ResponseWriter, r *http.Requ
 	}
 	writeSSZBytes(w, out)
 }
-
-func hashesToCommon(in []common.Hash) []common.Hash { return in }

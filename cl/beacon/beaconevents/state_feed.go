@@ -1,7 +1,7 @@
 package beaconevents
 
 import (
-	ethevent "github.com/erigontech/erigon/p2p/event"
+	ethevent "github.com/erigontech/erigon/common/event"
 )
 
 type stateFeed struct {
@@ -23,6 +23,17 @@ func (f *stateFeed) SendHead(value *HeadData) int {
 		Event: StateHead,
 		Data:  value,
 	})
+}
+
+func (f *stateFeed) TrySendHead(value *HeadData) int {
+	return f.feed.TrySend(&EventStream{
+		Event: StateHead,
+		Data:  value,
+	})
+}
+
+func (f *stateFeed) SendHeadV2(value *HeadV2Data) int {
+	return f.feed.TrySend(&EventStream{Event: StateHeadV2, Data: value})
 }
 
 // The node has received a block (from P2P or API) that is successfully imported on the fork-choice on_block handler

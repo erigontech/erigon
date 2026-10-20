@@ -21,8 +21,19 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/cl/sentinel/communication"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func setRateLimiterLastRefill(t *testing.T, rl *peerRateLimiter, key peerProtocolKey, lastRefill time.Time) {
+	t.Helper()
+	bucketI, ok := rl.buckets.Load(key)
+	require.True(t, ok)
+	bucket := bucketI.(*tokenBucket)
+	bucket.mu.Lock()
+	bucket.lastRefill = lastRefill
+	bucket.mu.Unlock()
+}
 
 func TestRateLimiter_AllowRequest(t *testing.T) {
 	rl := newPeerRateLimiter()
@@ -30,7 +41,7 @@ func TestRateLimiter_AllowRequest(t *testing.T) {
 	proto := communication.BeaconBlocksByRangeProtocolV2
 
 	// First 128 single-token requests should be allowed (burst capacity).
-	for i := 0; i < 128; i++ {
+	for i := range 128 {
 		require.True(t, rl.allowRequest(peer, proto, 1), "request %d should be allowed", i)
 	}
 
@@ -52,12 +63,43 @@ func TestRateLimiter_PingLimit(t *testing.T) {
 	require.False(t, rl.allowRequest(peer, proto, 1), "3rd ping should be rate-limited")
 }
 
+func testRateLimiterRecoversWithoutPunishment(t *testing.T, protocolName string, burst int) {
+	t.Helper()
+	rl := newPeerRateLimiter()
+	peerID := "16Uiu2peer1"
+	key := peerProtocolKey{peerID: peerID, protocol: protocolName}
+
+	require.True(t, rl.allowRequest(peerID, protocolName, 1))
+	setRateLimiterLastRefill(t, rl, key, time.Now().Add(time.Hour))
+	for range burst - 1 {
+		require.True(t, rl.allowRequest(peerID, protocolName, 1))
+	}
+	require.False(t, rl.allowRequest(peerID, protocolName, 1))
+
+	_, punished := rl.punished.Load(key)
+	assert.False(t, punished)
+	setRateLimiterLastRefill(t, rl, key, time.Now().Add(-time.Second))
+	assert.True(t, rl.allowRequest(peerID, protocolName, 1))
+}
+
+func TestRateLimiter_StatusRecoversWithoutPunishment(t *testing.T) {
+	for _, protocolName := range []string{communication.StatusProtocolV1, communication.StatusProtocolV2} {
+		t.Run(protocolName, func(t *testing.T) {
+			testRateLimiterRecoversWithoutPunishment(t, protocolName, 5)
+		})
+	}
+}
+
+func TestRateLimiter_GoodbyeRecoversWithoutPunishment(t *testing.T) {
+	testRateLimiterRecoversWithoutPunishment(t, communication.GoodbyeProtocolV1, 1)
+}
+
 func TestRateLimiter_Concurrency(t *testing.T) {
 	rl := newPeerRateLimiter()
 	peer := "16Uiu2peer1"
 
 	// Acquire up to the limit.
-	for i := 0; i < maxConcurrentRequestsPerPeer; i++ {
+	for i := range maxConcurrentRequestsPerPeer {
 		require.True(t, rl.acquireConcurrency(peer), "acquire %d should succeed", i)
 	}
 
@@ -89,7 +131,7 @@ func TestRateLimiter_PunishmentBlocksRequests(t *testing.T) {
 func TestRateLimiter_UnknownProtocolAllowed(t *testing.T) {
 	rl := newPeerRateLimiter()
 	// Protocols not in the rate limit map should be allowed (no rate config = no limit).
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		require.True(t, rl.allowRequest("peer1", "/unknown/protocol/v1", 1))
 	}
 }

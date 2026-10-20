@@ -13,6 +13,7 @@ export const sectionForMethod = {
   'install-source':   'linuxmacos',
   'install-native':   'windows',
   'install-wsl':      'windows',
+  'install-arm':      'ethereum-on-arm',
 };
 
 export const go = (id, e) => {
@@ -78,7 +79,8 @@ To install Erigon, begin by choosing an installation method suited to your opera
 <ul>
   <li><a href="#install-prebuilt" onClick={e => { e.preventDefault(); go('install-prebuilt'); }}><strong>Pre-built Binaries</strong></a> — Fastest way to get started. Download and run a pre-compiled binary for your architecture.</li>
   <li><a href="#install-docker" onClick={e => { e.preventDefault(); go('install-docker'); }}><strong>Docker</strong></a> — Run Erigon in an isolated container. Recommended for most users.</li>
-  <li><a href="#install-source" onClick={e => { e.preventDefault(); go('install-source'); }}><strong>Build from Source</strong></a> — Full control over the build. Requires Go, C++ compiler, and CLI experience.</li>
+  <li><a href="#install-source" onClick={e => { e.preventDefault(); go('install-source'); }}><strong>Build from Source</strong></a> — Full control over the build. Requires Go, a C++ compiler, and CLI experience.</li>
+  <li><a href="#install-arm" onClick={e => { e.preventDefault(); go('install-arm'); }}><strong>Ethereum on ARM</strong></a> — Community image and APT repository for ARM single-board computers (Raspberry Pi, Rock 5B, Orange Pi 5).</li>
 </ul>
 </TabItem>
 <TabItem value="macos" label="macOS">
@@ -114,7 +116,7 @@ _(Note: The container itself is built on multi-platform Linux architectures (lin
 **General Info**
 
 * The Docker images feature several binaries, including: `erigon`, `downloader`, `evm`, `caplin`, `capcli`, `integration`, `rpcdaemon`, `sentry`, and `txpool`.
-* The multi-platform Docker image is available for `linux/amd64/v2` and `linux/arm64` platforms and is now based on Debian Bookworm. There's no need to pull a different image for another supported platform.
+* The multi-platform Docker image is available for `linux/amd64` and `linux/arm64` platforms and is now based on Debian Bookworm. There's no need to pull a different image for another supported platform. The `linux/amd64` image is compiled for the `x86-64-v2` baseline (SSE4.2, POPCNT); Intel Nehalem (2008) and AMD Bulldozer (2011) or newer qualify; older hardware and hypervisor profiles that mask v2 CPU features are not supported.
 * All build flags are now passed to the release workflow, allowing users to view previously missed build information in the released binaries and Docker images. This change is also expected to result in better build optimization.
 * Docker images now contain the label `org.opencontainers.image.revision`, which refers to the commit ID from the Erigon project used to build the artifacts.
 * With recent updates, all build configurations are now included in the release process. This provides users with more comprehensive build information for both binaries and Docker images, along with enhanced build optimizations.
@@ -130,7 +132,7 @@ Here are the steps to download and start Erigon in Docker.
 
 **1. Check which version you want to download**
 
-Check in the GitHub [Release Notes](https://github.com/erigontech/erigon/releases) page which version you want to download (normally latest is the best choice).
+Check in the GitHub [Release Notes](https://github.com/erigontech/erigon/releases) page which version you want to download (normally the latest is the best choice).
 
 **2. Download Erigon container**
 
@@ -165,7 +167,7 @@ docker run -it erigontech/erigon:v{ERIGON_VERSION} --chain=hoodi --prune.mode=mi
 * `-v` connects a folder on your computer to the container (must have authorization)
 * `-it` lets you see what's happening and interact with Erigon
 * `--chain=hoodi` specifies which [network](/fundamentals/supported-networks) to sync
-* `--prune.mode=minimal` tells Erigon to use minimal [Prune Mode](/fundamentals/prune-modes)
+* `--prune.mode=minimal` tells Erigon to use minimal [Pruning Mode](/fundamentals/pruning-modes)
 * `--datadir` tells Erigon where to store data inside the container
 
 </details>
@@ -189,9 +191,11 @@ Download the appropriate binary file for your processor architecture:
 | 64-bit Intel/AMD | Debian Package (.deb) | erigon_{ERIGON_VERSION}_amd64.deb |
 | 64-bit ARM | Debian Package (.deb) | erigon_{ERIGON_VERSION}_arm64.deb |
 | 64-bit Intel/AMD | Compressed Archive (.tar.gz) | erigon_v{ERIGON_VERSION}_linux_amd64.tar.gz |
-| 64-bit Intel/AMDv2 | Compressed Archive (.tar.gz) | erigon_v{ERIGON_VERSION}_linux_amd64v2.tar.gz |
 | 64-bit ARM | Compressed Archive (.tar.gz) | erigon_v{ERIGON_VERSION}_linux_arm64.tar.gz |
 
+
+The amd64 artifacts are compiled for the `x86-64-v2` baseline (SSE4.2, POPCNT). Intel Nehalem (2008) and AMD
+Bulldozer (2011) or newer qualify; older hardware is not supported.
 
 Note that the Release Page Assets table contains also the **checksum** for each file and a checksum file.
 
@@ -297,7 +301,7 @@ sudo apt install build-essential cmake -y
 
 **1.3 Go Programming Language**
 
-Erigon utilizes Go (also known as Golang) version 1.25 or newer for part of its development. It is recommended to have a
+Erigon utilizes Go (also known as Golang) version 1.26 or newer for part of its development. It is recommended to have a
 fresh Go installation. If you have an older version, consider deleting the `/usr/local/go` folder (you may need to use
 `sudo`) and re-extract the new version in its place.
 
@@ -308,7 +312,7 @@ To install the latest Go version, visit the official documentation at [https://g
 This turns the C++ part of Erigon's code into a program your computer can run. You can use either **Clang** or **GCC**:
 
 * For **Clang** follow the instructions at [https://clang.llvm.org/get\_started.html](https://clang.llvm.org/get_started.html);
-* For **GCC** (version 10 or newer): [https://gcc.gnu.org/install/index.html](https://gcc.gnu.org/install/index.html).
+* For **GCC** (version 11 or newer): [https://gcc.gnu.org/install/index.html](https://gcc.gnu.org/install/index.html).
 
 **2. Building Erigon from Source**
 
@@ -331,7 +335,7 @@ Next, fetch all available release tags:
 git fetch --tags
 ```
 
-Check out the desired version tag by replacing `<tag_name>` with the version you want. Normally latest stable version is the best, check the official [Release Notes](https://github.com/erigontech/erigon/releases). For example:
+Check out the desired version tag by replacing `<tag_name>` with the version you want. Normally the latest stable version is the best; check the official [Release Notes](https://github.com/erigontech/erigon/releases). For example:
 
 ```sh
 git checkout v{ERIGON_VERSION}
@@ -341,27 +345,33 @@ git checkout v{ERIGON_VERSION}
 
 Compile the Erigon binary using the `make` command.
 
-Standard Compilation:
-
 ```sh
 make erigon
 ```
 
-Fast Compilation (Recommended): to significantly speed up the process, specify the number of processors you want to use with the `-j<n>` option, where `<n>` is the number of processor you want to use (we recommend using a number slightly less than your total core count):
+The resulting executable binary will be created in the `./build/bin/erigon` path.
+
+**2.4 Installing Outside the Build Tree (Optional)**
+
+Running Erigon as a [dedicated system user](/fundamentals/security) — for example under `systemd` — is easiest when the binaries live outside your source checkout, where that user can reach them. Pass a destination to `make install`:
 
 ```sh
-make -j<n> erigon
+make DIST=/opt/erigon install
 ```
 
-The resulting executable binary will be created in the `./build/bin/erigon` path.
+`make install` creates the destination directory, so a path under `/opt` needs either `sudo make DIST=/opt/erigon install` or a directory you already own (`sudo install -d -o $USER /opt/erigon`). A path under `$HOME/erigon` avoids that entirely. `make install` copies whatever is currently in `build/bin`, so build every component you intend to deploy before running it.
+
+Once installed this way, run the installed copy — `/opt/erigon/erigon` — rather than the one in the build tree.
 
 **3. Running Erigon**
 
-After installation, you can run Erigon from your terminal:
+From the build tree, run Erigon from your terminal:
 
 ```sh
 ./build/bin/erigon [options]
 ```
+
+If you completed step 2.4, run the binary at your chosen `DIST` path instead.
 
 </details>
 
@@ -407,7 +417,7 @@ Git is a tool that helps download and manage the Erigon source code. To install 
 
 **1.4 Go Programming Language**
 
-Erigon utilizes Go (also known as Golang) version 1.25 or newer for part of its development. It is recommended to have a
+Erigon utilizes Go (also known as Golang) version 1.26 or newer for part of its development. It is recommended to have a
 fresh Go installation. If you have an older version, consider deleting the `/usr/local/go` folder (you may need to use
 `sudo`) and re-extract the new version in its place.
 
@@ -450,7 +460,7 @@ Next, fetch all available release tags:
 git fetch --tags
 ```
 
-Check out the desired version tag by replacing `<tag_name>` with the version you want. Normally latest stable version is the best, check the official [Release Notes](https://github.com/erigontech/erigon/releases). For example:
+Check out the desired version tag by replacing `<tag_name>` with the version you want. Normally the latest stable version is the best; check the official [Release Notes](https://github.com/erigontech/erigon/releases). For example:
 
 ```bash
 git checkout v{ERIGON_VERSION}
@@ -490,7 +500,7 @@ You can use the same command to build other binaries such as `RPCDaemon`, `TxPoo
 
 **4. Running Erigon**
 
-To make Erigon executable from anywhere from your terminal repeat step 1.5 and add Erigon executable path
+To make Erigon executable from anywhere from your terminal repeat step 1.5 and add the Erigon executable path:
 
 ```text
 C:\Users\your-user\erigon.\build\bin\
@@ -510,7 +520,7 @@ erigon.exe [options]
 
 <details id="install-wsl">
 
-<summary>Window Subsystem for Linux (WSL)</summary>
+<summary>Windows Subsystem for Linux (WSL)</summary>
 
 WSL enables you to run a complete GNU/Linux environment natively within Windows, offering Linux compatibility without the performance and resource overhead of traditional virtual machines.
 
@@ -534,7 +544,7 @@ The location of your Erigon data directory (`datadir`) is the most crucial facto
 
 **RPC Daemon Configuration**
 
-The choice of data location directly impacts how you must configure the RPC daemon:
+The choice of data location directly impacts how you must configure the RPC Daemon:
 
 | **Scenario**                                  | **RPC Daemon Requirement**                                                               |
 | --------------------------------------------- | ---------------------------------------------------------------------------------------- |
@@ -549,7 +559,29 @@ The choice of data location directly impacts how you must configure the RPC daem
 
 Be aware that the default WSL2 environment uses its own internal IP address, which is distinct from the IP address of your Windows host machine.
 
-If you need to connect to Erigon from an external network (e.g., opening a port on your home router for peering on port `30303`), you must account for this separate WSL2 IP address when configuring NAT on your router. Alternatively consider [Mirrored mode networking](https://learn.microsoft.com/en-us/windows/wsl/networking#mirrored-mode-networking).
+If you need to connect to Erigon from an external network (e.g., opening a port on your home router for peering on port `30303`), you must account for this separate WSL2 IP address when configuring Network Address Translation (NAT) on your router. Alternatively consider [Mirrored mode networking](https://learn.microsoft.com/en-us/windows/wsl/networking#mirrored-mode-networking).
+
+</details>
+
+### Ethereum on ARM
+
+<details id="install-arm">
+
+<summary>Install with APT on ARM boards</summary>
+
+[Ethereum on ARM](https://ethereum-on-arm-documentation.readthedocs.io/) is a community project that provides a custom Linux image for ARM single-board computers (such as Raspberry Pi, Rock 5B, and Orange Pi 5) with an APT repository preconfigured to install and update Ethereum clients — including Erigon — as native system packages.
+
+Once the image is installed, Erigon can be installed and kept up to date with your system's package manager:
+
+```sh
+sudo apt update && sudo apt install erigon
+```
+
+For the full image, supported boards, and setup instructions, see the [Ethereum on ARM documentation](https://ethereum-on-arm-documentation.readthedocs.io/) and the [project on GitHub](https://github.com/EOA-Blockchain-Labs/ethereumonarm).
+
+:::info
+Ethereum on ARM is maintained independently by the community and is not an official Erigon distribution channel. The Erigon version available through its APT repository may lag behind the latest [GitHub release](https://github.com/erigontech/erigon/releases).
+:::
 
 </details>
 

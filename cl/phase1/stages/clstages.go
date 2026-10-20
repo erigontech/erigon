@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/cl/antiquary"
@@ -32,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/execution_client/block_collector"
@@ -48,26 +51,43 @@ import (
 )
 
 type Cfg struct {
-	rpc                     *rpc.BeaconRpcP2P
-	ethClock                eth_clock.EthereumClock
-	beaconCfg               *clparams.BeaconChainConfig
-	executionClient         execution_client.ExecutionEngine
-	state                   *state.CachingBeaconState
-	forkChoice              *forkchoice.ForkChoiceStore
-	indiciesDB              kv.RwDB
-	dirs                    datadir.Dirs
-	blockReader             freezeblocks.BeaconSnapshotReader
-	antiquary               *antiquary.Antiquary
-	syncedData              *synced_data.SyncedDataManager
-	emitter                 *beaconevents.EventEmitter
-	blockCollector          block_collector.BlockCollector
-	sn                      *freezeblocks.CaplinSnapshots
-	blobStore               blob_storage.BlobStorage
-	peerDas                 das.PeerDas
-	blobDownloader          *network2.BlobHistoryDownloader
-	attestationDataProducer attestation_producer.AttestationDataProducer
-	caplinConfig            clparams.CaplinConfig
-	hasDownloaded           bool
+	rpc                          *rpc.BeaconRpcP2P
+	ethClock                     eth_clock.EthereumClock
+	beaconCfg                    *clparams.BeaconChainConfig
+	executionClient              execution_client.ExecutionEngine
+	state                        *state.CachingBeaconState
+	forkChoice                   *forkchoice.ForkChoiceStore
+	indiciesDB                   kv.RwDB
+	dirs                         datadir.Dirs
+	blockReader                  freezeblocks.BeaconSnapshotReader
+	antiquary                    *antiquary.Antiquary
+	syncedData                   synced_data.SyncedData
+	emitter                      *beaconevents.EventEmitter
+	blockCollector               block_collector.BlockCollector
+	sn                           *freezeblocks.CaplinSnapshots
+	blobStore                    blob_storage.BlobStorage
+	peerDas                      das.PeerDas
+	blobDownloader               *network2.BlobHistoryDownloader
+	attestationDataProducer      attestation_producer.AttestationDataProducer
+	caplinConfig                 clparams.CaplinConfig
+	hasDownloaded                bool
+	gloasPayloadRetryOffset      atomic.Uint32
+	gloasEnvelopeRecoveryCursor  common.Hash
+	gloasEnvelopeRecoveryHead    common.Hash
+	gloasEnvelopeRecoveryPending []common.Hash
+	gloasEnvelopeRecoveryReplace int
+	gloasHeadEnvelopeRequestMu   sync.Mutex
+	gloasHeadEnvelopeRequestID   uint64
+	gloasHeadEnvelopeRequests    map[common.Hash]uint64
+	gloasHeadEnvelopeRequestHead common.Hash
+	gloasPayloadValidator        gloasPayloadValidator
+	gloasVerificationCursor      common.Hash
+	gloasVerificationHead        common.Hash
+	gloasSkippedValidation       map[common.Hash]skippedValidation // roots the EL answered NotValidated below its validation depth
+	gloasSkippedAnchorValidation skippedAnchorValidation
+	sleepForSlotLastWake         sleepForSlotWake
+	sleepForSlotHeadChanged      bool
+	chainTipRejections           *chainTipRejections
 }
 
 type Args struct {
@@ -77,6 +97,8 @@ type Args struct {
 	targetSlot, seenSlot   uint64
 
 	hasDownloaded bool
+	// headUnpublished is set while the fork choice head differs from the head the beacon API serves.
+	headUnpublished bool
 }
 
 func ClStagesCfg(
@@ -102,6 +124,7 @@ func ClStagesCfg(
 	blobDownloader := network2.NewBlobHistoryDownloader(
 		ctx,
 		beaconCfg,
+		ethClock,
 		rpc,
 		indiciesDB,
 		blobStore,
@@ -133,8 +156,15 @@ func ClStagesCfg(
 		emitter:                 emitters,
 		blobStore:               blobStore,
 		blockCollector:          block_collector.NewPersistentBlockCollector(log.Root(), executionClient, beaconCfg, dirs.CaplinHistory),
+		gloasPayloadValidator:   forkChoice,
 		attestationDataProducer: attestationDataProducer,
+		chainTipRejections:      newChainTipRejections(chainTipRejectionLogInterval, nil),
 	}
+}
+
+// Close releases the resources the stage loop owns.
+func (cfg *Cfg) Close() error {
+	return cfg.blockCollector.Close()
 }
 
 type StageName = string
@@ -169,12 +199,22 @@ func MetaCatchingUp(args Args) StageName {
 	return ""
 }
 
+// catchUpAfterImport is MetaCatchingUp for the stages that import blocks. Before going back to ChainTipSync, which can
+// wait a slot or longer for the next block, it publishes a newly imported head: validators attest to the served head.
+func catchUpAfterImport(args Args) StageName {
+	next := MetaCatchingUp(args)
+	if next == ChainTipSync && args.headUnpublished {
+		return ForkChoice
+	}
+	return next
+}
+
 func processBlock(ctx context.Context, cfg *Cfg, db kv.RwDB, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
 			return err
 		}
-		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
+		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, false)
 	}); err != nil {
 		return err
 	}
@@ -226,10 +266,7 @@ digraph {
 */
 
 // ConsensusClStages creates a stage loop container to be used to run caplin
-func ConsensusClStages(ctx context.Context,
-	cfg *Cfg,
-) *clstages.StageGraph[*Cfg, Args] {
-
+func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 	// clstages run in a single thread - so we don't need to worry about any synchronization.
 	return &clstages.StageGraph[*Cfg, Args]{
 		// the ArgsFunc is run after every stage. It is passed into the transition function, and the same args are passed into the next stage.
@@ -244,6 +281,9 @@ func ConsensusClStages(ctx context.Context,
 			args.seenSlot = cfg.forkChoice.HighestSeen()
 			args.seenEpoch = args.seenSlot / cfg.beaconCfg.SlotsPerEpoch
 			args.targetSlot = cfg.ethClock.GetCurrentSlot()
+			if head, _, err := cfg.forkChoice.GetHead(nil); err == nil {
+				args.headUnpublished = head != cfg.syncedData.HeadRoot()
+			}
 			// Note that the target epoch is always one behind. this is because we are always behind in the current epoch, so it would not be very useful.
 			// Guard against uint64 underflow at genesis (GetCurrentEpoch() == 0).
 			if currentEpoch := cfg.ethClock.GetCurrentEpoch(); currentEpoch > 0 {
@@ -262,7 +302,7 @@ func ConsensusClStages(ctx context.Context,
 					return ChainTipSync
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
-					if err := saveHeadStateOnDiskIfNeeded(cfg, cfg.state); err != nil {
+					if err := saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, cfg.state.Slot()); err != nil {
 						return err
 					}
 					// We only download historical blocks once
@@ -292,15 +332,20 @@ func ConsensusClStages(ctx context.Context,
 					}
 
 					startingSlot := cfg.state.LatestBlockHeader().Slot
-					logger.Debug("Backward sync starting",
+					logger.Debug(
+						"Backward sync starting",
 						"slot", startingSlot,
 						"stateVersion", cfg.state.Version(),
-						"stateRoot", stateRoot,
-						"blockRoot", startingRoot,
+						"stateRoot", common.Hash(stateRoot),
+						"blockRoot", common.Hash(startingRoot),
 					)
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc, cfg.sn, cfg.executionClient, cfg.indiciesDB, cfg.beaconCfg)
-					if urls := clparams.ConfigurableCheckpointsURLs; len(urls) > 0 {
-						downloader.SetHTTPFallbackURL(urls[0])
+					downloader.SetCurrentSlotSampler(cfg.ethClock.GetCurrentSlot)
+					downloader.SetGloasSuccessorValidator(network2.NewGloasSuccessorValidator(cfg.state, startingRoot))
+					if checkpoint_sync.RemoteCheckpointSyncEnabled(cfg.caplinConfig) {
+						if urls := clparams.GetAllCheckpointSyncEndpoints(cfg.caplinConfig.NetworkId); len(urls) > 0 {
+							downloader.SetHTTPFallbackURL(urls[0])
+						}
 					}
 
 					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.caplinConfig, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger, cfg.forkChoice, cfg.blobDownloader), ctx, logger); err != nil {
@@ -319,8 +364,11 @@ func ConsensusClStages(ctx context.Context,
 					if errors.Is(err, ErrForwardSyncStale) {
 						return ChainTipSync
 					}
-					if x := MetaCatchingUp(args); x != "" {
+					if x := catchUpAfterImport(args); x != "" {
 						return x
+					}
+					if args.headUnpublished && args.seenSlot < args.targetSlot {
+						return ForkChoice
 					}
 					return ChainTipSync
 				},
@@ -329,7 +377,7 @@ func ConsensusClStages(ctx context.Context,
 			ChainTipSync: {
 				Description: `if we are within the epoch but not at head, we run catchupblocks`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
-					if x := MetaCatchingUp(args); x != "" {
+					if x := catchUpAfterImport(args); x != "" {
 						return x
 					}
 					return ForkChoice
@@ -381,13 +429,21 @@ func ConsensusClStages(ctx context.Context,
 					if x := MetaCatchingUp(args); x != "" {
 						return x
 					}
+					if cfg.sleepForSlotHeadChanged {
+						return ForkChoice
+					}
 					return ChainTipSync
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					nextSlot := args.seenSlot + 1
-					nextSlotTime := cfg.ethClock.GetSlotTime(nextSlot)
-					time.Sleep(time.Until(nextSlotTime))
-					return nil
+					wake, headChanged, err := waitForNextSlotOrHeadChange(
+						ctx, nextSlot, cfg.beaconCfg, cfg.forkChoice, cfg.syncedData, cfg.ethClock, cfg.sleepForSlotLastWake,
+					)
+					cfg.sleepForSlotHeadChanged = headChanged
+					if headChanged {
+						cfg.sleepForSlotLastWake = wake
+					}
+					return err
 				},
 			},
 		},
@@ -427,6 +483,11 @@ func writeGenesisBeaconBlock(ctx context.Context, cfg *Cfg) error {
 			body.ExecutionPayload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.beaconCfg.MaxWithdrawalsPerPayload), 44)
 		}
 	}
+	if version >= clparams.GloasVersion {
+		if bid := cfg.state.GetLatestExecutionPayloadBid(); bid != nil {
+			body.SignedExecutionPayloadBid.Message = bid
+		}
+	}
 
 	bodyRoot, err := body.HashSSZ()
 	if err != nil {
@@ -449,7 +510,7 @@ func writeGenesisBeaconBlock(ctx context.Context, cfg *Cfg) error {
 	}
 
 	return cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
-		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, genesisBlock, true)
+		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, genesisBlock, true)
 	})
 }
 

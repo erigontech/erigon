@@ -86,8 +86,9 @@ type beaconStatesCollector struct {
 	builderPendingWithdrawalsWriter  *base_encoding.SSZQueueEncoder[*cltypes.BuilderPendingWithdrawal]
 	payloadExpectedWithdrawalsWriter *base_encoding.SSZQueueEncoder[*cltypes.Withdrawal]
 
-	buf        *bytes.Buffer
-	compressor *zstd.Encoder
+	buf           *bytes.Buffer
+	compressor    *zstd.Encoder
+	effBalScratch []byte
 
 	beaconCfg *clparams.BeaconChainConfig
 	logger    log.Logger
@@ -154,7 +155,7 @@ func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir stri
 	}
 }
 
-func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *state.CachingBeaconState) error {
+func (i *beaconStatesCollector) addGenesisState(state *state.CachingBeaconState) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
 
@@ -168,7 +169,7 @@ func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *stat
 	})
 	roundedSlotToDump := slot - (slot % clparams.SlotsPerDump)
 
-	if err := antiquateField(ctx, roundedSlotToDump, state.RawBalances(), i.buf, i.compressor, i.balancesDumpsCollector); err != nil {
+	if err := antiquateField(roundedSlotToDump, state.RawBalances(), i.buf, i.compressor, i.balancesDumpsCollector); err != nil {
 		return err
 	}
 
@@ -200,24 +201,24 @@ func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *stat
 		}
 	}
 	if state.Version() >= clparams.ElectraVersion {
-		if err := antiquateListSSZ(ctx, slot, state.PendingDeposits(), i.buf, i.compressor, i.pendingDepositsCollectorDump); err != nil {
+		if err := antiquateListSSZ(slot, state.PendingDeposits(), i.buf, i.compressor, i.pendingDepositsCollectorDump); err != nil {
 			return err
 		}
-		if err := antiquateListSSZ(ctx, slot, state.PendingConsolidations(), i.buf, i.compressor, i.pendingConsolidationsCollectorDump); err != nil {
+		if err := antiquateListSSZ(slot, state.PendingConsolidations(), i.buf, i.compressor, i.pendingConsolidationsCollectorDump); err != nil {
 			return err
 		}
-		if err := antiquateListSSZ(ctx, slot, state.PendingPartialWithdrawals(), i.buf, i.compressor, i.pendingWithdrawalsCollectorDump); err != nil {
+		if err := antiquateListSSZ(slot, state.PendingPartialWithdrawals(), i.buf, i.compressor, i.pendingWithdrawalsCollectorDump); err != nil {
 			return err
 		}
 	}
 	if state.Version() >= clparams.GloasVersion {
-		if err := antiquateListSSZ(ctx, slot, state.GetBuilders(), i.buf, i.compressor, i.buildersCollectorDump); err != nil {
+		if err := antiquateListSSZ(slot, state.GetBuilders(), i.buf, i.compressor, i.buildersCollectorDump); err != nil {
 			return err
 		}
-		if err := antiquateListSSZ(ctx, slot, state.GetBuilderPendingWithdrawals(), i.buf, i.compressor, i.builderPendingWithdrawalsCollectorDump); err != nil {
+		if err := antiquateListSSZ(slot, state.GetBuilderPendingWithdrawals(), i.buf, i.compressor, i.builderPendingWithdrawalsCollectorDump); err != nil {
 			return err
 		}
-		if err := antiquateListSSZ(ctx, slot, state.GetPayloadExpectedWithdrawals(), i.buf, i.compressor, i.payloadExpectedWithdrawalsCollectorDump); err != nil {
+		if err := antiquateListSSZ(slot, state.GetPayloadExpectedWithdrawals(), i.buf, i.compressor, i.payloadExpectedWithdrawalsCollectorDump); err != nil {
 			return err
 		}
 		if err := i.collectExecutionPayloadAvailability(slot, state.GetExecutionPayloadAvailability()); err != nil {
@@ -271,12 +272,9 @@ func (i *beaconStatesCollector) collectEffectiveBalancesDump(slot uint64, uncomp
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
 
-	validatorSetSize := 121
-	for j := 0; j < len(uncompressed)/validatorSetSize; j++ {
-		// 80:88
-		if _, err := i.compressor.Write(uncompressed[j*validatorSetSize+80 : j*validatorSetSize+88]); err != nil {
-			return err
-		}
+	i.effBalScratch = base_encoding.AppendEffectiveBalances(i.effBalScratch[:0], uncompressed)
+	if _, err := i.compressor.Write(i.effBalScratch); err != nil {
+		return err
 	}
 
 	if err := i.compressor.Close(); err != nil {
@@ -289,13 +287,13 @@ func (i *beaconStatesCollector) collectEffectiveBalancesDump(slot uint64, uncomp
 func (i *beaconStatesCollector) collectBalancesDump(slot uint64, uncompressed []byte) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
-	return antiquateField(context.Background(), slot, uncompressed, i.buf, i.compressor, i.balancesDumpsCollector)
+	return antiquateField(slot, uncompressed, i.buf, i.compressor, i.balancesDumpsCollector)
 }
 
 func (i *beaconStatesCollector) collectPendingDepositsDump(slot uint64, pendingDeposits *solid.ListSSZ[*solid.PendingDeposit]) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
-	return antiquateListSSZ(context.Background(), slot, pendingDeposits, i.buf, i.compressor, i.pendingDepositsCollectorDump)
+	return antiquateListSSZ(slot, pendingDeposits, i.buf, i.compressor, i.pendingDepositsCollectorDump)
 }
 
 func (i *beaconStatesCollector) preStateTransitionHook(preState *state.CachingBeaconState) {
@@ -338,13 +336,13 @@ func (i *beaconStatesCollector) collectElectraQueuesDiffs(slot uint64, pendingDe
 func (i *beaconStatesCollector) collectPendingConsolidationsDump(slot uint64, pendingConsolidations *solid.ListSSZ[*solid.PendingConsolidation]) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
-	return antiquateListSSZ(context.Background(), slot, pendingConsolidations, i.buf, i.compressor, i.pendingConsolidationsCollectorDump)
+	return antiquateListSSZ(slot, pendingConsolidations, i.buf, i.compressor, i.pendingConsolidationsCollectorDump)
 }
 
 func (i *beaconStatesCollector) collectPendingWithdrawalsDump(slot uint64, pendingWithdrawals *solid.ListSSZ[*solid.PendingPartialWithdrawal]) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
-	return antiquateListSSZ(context.Background(), slot, pendingWithdrawals, i.buf, i.compressor, i.pendingWithdrawalsCollectorDump)
+	return antiquateListSSZ(slot, pendingWithdrawals, i.buf, i.compressor, i.pendingWithdrawalsCollectorDump)
 }
 
 // -- gloas queue diffs --
@@ -383,19 +381,19 @@ func (i *beaconStatesCollector) collectGloasQueuesDiffs(
 func (i *beaconStatesCollector) collectBuildersDump(slot uint64, builders *solid.ListSSZ[*cltypes.Builder]) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
-	return antiquateListSSZ(context.Background(), slot, builders, i.buf, i.compressor, i.buildersCollectorDump)
+	return antiquateListSSZ(slot, builders, i.buf, i.compressor, i.buildersCollectorDump)
 }
 
 func (i *beaconStatesCollector) collectBuilderPendingWithdrawalsDump(slot uint64, bpw *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal]) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
-	return antiquateListSSZ(context.Background(), slot, bpw, i.buf, i.compressor, i.builderPendingWithdrawalsCollectorDump)
+	return antiquateListSSZ(slot, bpw, i.buf, i.compressor, i.builderPendingWithdrawalsCollectorDump)
 }
 
 func (i *beaconStatesCollector) collectPayloadExpectedWithdrawalsDump(slot uint64, pew *solid.ListSSZ[*cltypes.Withdrawal]) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
-	return antiquateListSSZ(context.Background(), slot, pew, i.buf, i.compressor, i.payloadExpectedWithdrawalsCollectorDump)
+	return antiquateListSSZ(slot, pew, i.buf, i.compressor, i.payloadExpectedWithdrawalsCollectorDump)
 }
 
 // -- gloas per-slot fields --
@@ -518,12 +516,12 @@ func (i *beaconStatesCollector) collectStateEvents(slot uint64, events *state_ac
 	return i.stateEventsCollector.Collect(base_encoding.Encode64ToBytes4(slot), events.CopyBytes())
 }
 
-func (i *beaconStatesCollector) collectBalancesDiffs(ctx context.Context, slot uint64, old, new []byte) error {
-	return antiquateBytesListDiff(ctx, base_encoding.Encode64ToBytes4(slot), old, new, i.balancesCollector, base_encoding.ComputeCompressedSerializedUint64ListDiff)
+func (i *beaconStatesCollector) collectBalancesDiffs(slot uint64, oldVal, newVal []byte) error {
+	return antiquateBytesListDiff(base_encoding.Encode64ToBytes4(slot), oldVal, newVal, i.buf, i.balancesCollector, base_encoding.ComputeCompressedSerializedUint64ListDiff)
 }
 
-func (i *beaconStatesCollector) collectEffectiveBalancesDiffs(ctx context.Context, slot uint64, oldValidatorSetSSZ, newValidatorSetSSZ []byte) error {
-	return antiquateBytesListDiff(ctx, base_encoding.Encode64ToBytes4(slot), oldValidatorSetSSZ, newValidatorSetSSZ, i.effectiveBalanceCollector, base_encoding.ComputeCompressedSerializedEffectiveBalancesDiff)
+func (i *beaconStatesCollector) collectEffectiveBalancesDiffs(slot uint64, oldEffectiveBalances, newEffectiveBalances []byte) error {
+	return antiquateBytesListDiff(base_encoding.Encode64ToBytes4(slot), oldEffectiveBalances, newEffectiveBalances, i.buf, i.effectiveBalanceCollector, base_encoding.ComputeCompressedSerializedUint64ListDiff)
 }
 
 func (i *beaconStatesCollector) collectInactivityScores(slot uint64, inactivityScores []byte) error {
@@ -685,7 +683,7 @@ func antiquateFullUint64List(collector *etl.Collector, slot uint64, raw []byte, 
 	return collector.Collect(base_encoding.Encode64ToBytes4(slot), buffer.Bytes())
 }
 
-func antiquateField(ctx context.Context, slot uint64, uncompressed []byte, buffer *bytes.Buffer, compressor *zstd.Encoder, collector *etl.Collector) error {
+func antiquateField(slot uint64, uncompressed []byte, buffer *bytes.Buffer, compressor *zstd.Encoder, collector *etl.Collector) error {
 	buffer.Reset()
 	compressor.Reset(buffer)
 
@@ -699,7 +697,7 @@ func antiquateField(ctx context.Context, slot uint64, uncompressed []byte, buffe
 	return collector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), buffer.Bytes())
 }
 
-func antiquateListSSZ[T solid.EncodableHashableSSZ](ctx context.Context, slot uint64, l *solid.ListSSZ[T], buffer *bytes.Buffer, compressor *zstd.Encoder, collector *etl.Collector) error {
+func antiquateListSSZ[T solid.EncodableHashableSSZ](slot uint64, l *solid.ListSSZ[T], buffer *bytes.Buffer, compressor *zstd.Encoder, collector *etl.Collector) error {
 	buffer.Reset()
 	compressor.Reset(buffer)
 
@@ -717,15 +715,13 @@ func antiquateListSSZ[T solid.EncodableHashableSSZ](ctx context.Context, slot ui
 	return collector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), buffer.Bytes())
 }
 
-func antiquateBytesListDiff(ctx context.Context, key []byte, old, new []byte, collector *etl.Collector, diffFn func(w io.Writer, old, new []byte) error) error {
-	// create a diff
-	diffBuffer := bufferPool.Get().(*bytes.Buffer)
-	defer bufferPool.Put(diffBuffer)
-	diffBuffer.Reset()
+func antiquateBytesListDiff(key, oldVal, newVal []byte, buffer *bytes.Buffer, collector *etl.Collector, diffFn func(w io.Writer, oldVal, newVal []byte) error) error {
+	buffer.Reset()
 
-	if err := diffFn(diffBuffer, old, new); err != nil {
+	// create a diff
+	if err := diffFn(buffer, oldVal, newVal); err != nil {
 		return err
 	}
 
-	return collector.Collect(key, diffBuffer.Bytes())
+	return collector.Collect(key, buffer.Bytes())
 }

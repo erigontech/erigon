@@ -35,6 +35,7 @@ type JustificationBits [JustificationBitsLength]bool // Bit vector of size 4
 func (j JustificationBits) Clone() clonable.Clonable {
 	return JustificationBits{}
 }
+
 func (j JustificationBits) Byte() (out byte) {
 	for i, bit := range j {
 		if !bit {

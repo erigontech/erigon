@@ -17,9 +17,14 @@
 package chain
 
 import (
+	"encoding/json"
+	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -225,6 +230,33 @@ func TestBlobParameterInactiveHardfork(t *testing.T) {
 	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(time))
 }
 
+func TestConfigL2JSONRoundTrip(t *testing.T) {
+	var c Config
+	a := assert.New(t)
+	a.NoError(json.Unmarshal([]byte(`{"chainId":1,"l2":{"name":"testl2","foo":1}}`), &c))
+	a.JSONEq(`{"name":"testl2","foo":1}`, string(c.L2JSON))
+	a.True(c.IsL2())
+
+	var noL2 Config
+	a.NoError(json.Unmarshal([]byte(`{"chainId":1}`), &noL2))
+	a.False(noL2.IsL2())
+
+	var nullL2 Config
+	a.NoError(json.Unmarshal([]byte(`{"chainId":1,"l2":null}`), &nullL2))
+	a.False(nullL2.IsL2())
+
+	resolved := Config{L2: fakeL2{}}
+	a.True(resolved.IsL2())
+
+	var nilCfg *Config
+	a.False(nilCfg.IsL2())
+}
+
+type fakeL2 struct{}
+
+func (fakeL2) Name() string                                                 { return "fake" }
+func (fakeL2) ResolveRules(l2Version, blockNum, blockTime uint64, r *Rules) {}
+
 func TestBlobParameterDencunAndPectraAtGenesis(t *testing.T) {
 	var c Config
 	c.CancunTime = common.NewUint64(0)
@@ -247,4 +279,93 @@ func TestBlobParameterDencunAndPectraAtGenesis(t *testing.T) {
 	assert.Equal(t, uint64(6), c.GetTargetBlobsPerBlock(0))
 	assert.Equal(t, uint64(9), c.GetMaxBlobsPerBlock(0))
 	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(0))
+}
+
+func TestCheckConfigForkOrder(t *testing.T) {
+	t.Parallel()
+	u64 := func(n uint64) *uint64 { return &n }
+	cases := []struct {
+		name    string
+		cfg     Config
+		wantErr bool
+	}{
+		{
+			// EEST TangerineWhistle/SpuriousDragon test genesis: EIP-150 active at
+			// block 0 with the DAO fork scheduled past the test's blocks. The DAO
+			// fork block sits after eip150 but must not be rejected.
+			name:    "dao after eip150",
+			cfg:     Config{ChainID: uint256.NewInt(1), HomesteadBlock: u64(0), DAOForkBlock: u64(2000), TangerineWhistleBlock: u64(0), SpuriousDragonBlock: u64(0)},
+			wantErr: false,
+		},
+		{
+			name:    "dao disabled",
+			cfg:     Config{ChainID: uint256.NewInt(1), HomesteadBlock: u64(0), TangerineWhistleBlock: u64(0), SpuriousDragonBlock: u64(0)},
+			wantErr: false,
+		},
+		{
+			name:    "eip150 after eip155 still rejected",
+			cfg:     Config{ChainID: uint256.NewInt(1), HomesteadBlock: u64(0), TangerineWhistleBlock: u64(10), SpuriousDragonBlock: u64(5)},
+			wantErr: true,
+		},
+	}
+	for i := range cases {
+		tc := &cases[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := tc.cfg.CheckConfigForkOrder()
+			if tc.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// forkTimestamps is the one inventory both the compatibility comparison and the ordering
+// check walk, so a time-based fork missing from it escapes both silently.
+func TestForkTimestampsCoversEveryTimeField(t *testing.T) {
+	listed := make(map[string]bool)
+	for _, fork := range (&Config{}).forkTimestamps() {
+		listed[fork.name] = true
+	}
+
+	cfg := reflect.TypeFor[Config]()
+	for field := range cfg.Fields() {
+		if field.Type != reflect.TypeFor[*uint64]() {
+			continue
+		}
+		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+		if !strings.HasSuffix(name, "Time") {
+			continue
+		}
+		require.True(t, listed[name], "%s is time-based but missing from forkTimestamps()", name)
+	}
+}
+
+// A shared config is read and copied by value from many goroutines at once, so reading the
+// blob schedule must not write to it.
+func TestGetBlobConfigDoesNotWriteConfig(t *testing.T) {
+	c := AllProtocolChanges.Copy()
+	before := *c
+	c.GetBlobConfig(0)
+	require.Equal(t, before, *c)
+}
+
+func TestIsPostMerge(t *testing.T) {
+	assert.False(t, (&Config{}).IsPostMerge(1_000_000, 1_000_000))
+
+	assert.True(t, (&Config{TerminalTotalDifficulty: uint256.NewInt(0)}).IsPostMerge(0, 0))
+
+	mergeHeight := &Config{TerminalTotalDifficulty: uint256.NewInt(1), MergeHeight: common.NewUint64(100), ShanghaiTime: common.NewUint64(1000)}
+	assert.False(t, mergeHeight.IsPostMerge(99, 0))
+	assert.True(t, mergeHeight.IsPostMerge(100, 0))
+
+	netsplit := &Config{MergeNetsplitBlock: common.NewUint64(100)}
+	assert.False(t, netsplit.IsPostMerge(99, 0))
+	assert.True(t, netsplit.IsPostMerge(100, 0))
+
+	shanghai := &Config{ShanghaiTime: common.NewUint64(1000)}
+	assert.False(t, shanghai.IsPostMerge(0, 999))
+	assert.True(t, shanghai.IsPostMerge(0, 1000))
 }

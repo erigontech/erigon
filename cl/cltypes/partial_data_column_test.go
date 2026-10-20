@@ -3,6 +3,7 @@ package cltypes_test
 import (
 	"io/fs"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -18,11 +19,25 @@ type sszRoot struct {
 	Root string `yaml:"root"`
 }
 
+func partialDataColumnSpectestDir(fork, typ string) string {
+	candidates := []string{
+		filepath.Join("..", "..", "test-fixtures-cache", "cl_mainnet", "tests", "mainnet", fork, "ssz_static", typ, "ssz_random", "case_0"),
+		filepath.Join("..", "spectest", "tests", "mainnet", fork, "ssz_static", typ, "ssz_random", "case_0"),
+	}
+	for _, candidate := range candidates {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return candidates[0]
+}
+
 func testSSZRoundTrip(t *testing.T, testDir string, version clparams.StateVersion, obj interface {
 	DecodeSSZ([]byte, int) error
 	EncodeSSZ([]byte) ([]byte, error)
 	HashSSZ() ([32]byte, error)
-}) {
+},
+) {
 	t.Helper()
 	fsys := os.DirFS(testDir)
 
@@ -54,7 +69,7 @@ func testSSZRoundTrip(t *testing.T, testDir string, version clparams.StateVersio
 }
 
 func TestPartialDataColumnHeader_Fulu(t *testing.T) {
-	testDir := "../spectest/tests/mainnet/fulu/ssz_static/PartialDataColumnHeader/ssz_random/case_0"
+	testDir := partialDataColumnSpectestDir("fulu", "PartialDataColumnHeader")
 	if _, err := os.Stat(testDir); os.IsNotExist(err) {
 		t.Skip("spec test data not found")
 	}
@@ -63,7 +78,7 @@ func TestPartialDataColumnHeader_Fulu(t *testing.T) {
 }
 
 func TestPartialDataColumnHeader_Gloas(t *testing.T) {
-	testDir := "../spectest/tests/mainnet/gloas/ssz_static/PartialDataColumnHeader/ssz_random/case_0"
+	testDir := partialDataColumnSpectestDir("gloas", "PartialDataColumnHeader")
 	if _, err := os.Stat(testDir); os.IsNotExist(err) {
 		t.Skip("spec test data not found")
 	}
@@ -72,7 +87,7 @@ func TestPartialDataColumnHeader_Gloas(t *testing.T) {
 }
 
 func TestPartialDataColumnSidecar_Fulu(t *testing.T) {
-	testDir := "../spectest/tests/mainnet/fulu/ssz_static/PartialDataColumnSidecar/ssz_random/case_0"
+	testDir := partialDataColumnSpectestDir("fulu", "PartialDataColumnSidecar")
 	if _, err := os.Stat(testDir); os.IsNotExist(err) {
 		t.Skip("spec test data not found")
 	}
@@ -81,7 +96,7 @@ func TestPartialDataColumnSidecar_Fulu(t *testing.T) {
 }
 
 func TestPartialDataColumnSidecar_Gloas(t *testing.T) {
-	testDir := "../spectest/tests/mainnet/gloas/ssz_static/PartialDataColumnSidecar/ssz_random/case_0"
+	testDir := partialDataColumnSpectestDir("gloas", "PartialDataColumnSidecar")
 	if _, err := os.Stat(testDir); os.IsNotExist(err) {
 		t.Skip("spec test data not found")
 	}
@@ -90,19 +105,26 @@ func TestPartialDataColumnSidecar_Gloas(t *testing.T) {
 }
 
 func TestPartialDataColumnPartsMetadata_Fulu(t *testing.T) {
-	testDir := "../spectest/tests/mainnet/fulu/ssz_static/PartialDataColumnPartsMetadata/ssz_random/case_0"
+	testDir := partialDataColumnSpectestDir("fulu", "PartialDataColumnPartsMetadata")
 	if _, err := os.Stat(testDir); os.IsNotExist(err) {
 		t.Skip("spec test data not found")
 	}
-	obj := cltypes.NewPartialDataColumnPartsMetadata()
+	obj := cltypes.NewPartialDataColumnPartsMetadata(clparams.FuluVersion)
 	testSSZRoundTrip(t, testDir, clparams.FuluVersion, obj)
 }
 
 func TestPartialDataColumnPartsMetadata_Gloas(t *testing.T) {
-	testDir := "../spectest/tests/mainnet/gloas/ssz_static/PartialDataColumnPartsMetadata/ssz_random/case_0"
+	testDir := partialDataColumnSpectestDir("gloas", "PartialDataColumnPartsMetadata")
 	if _, err := os.Stat(testDir); os.IsNotExist(err) {
 		t.Skip("spec test data not found")
 	}
-	obj := cltypes.NewPartialDataColumnPartsMetadata()
+	obj := cltypes.NewPartialDataColumnPartsMetadata(clparams.GloasVersion)
 	testSSZRoundTrip(t, testDir, clparams.GloasVersion, obj)
+}
+
+func TestPartialDataColumnPartsMetadataCloneNil(t *testing.T) {
+	var metadata *cltypes.PartialDataColumnPartsMetadata
+	clone := metadata.Clone()
+	require.NotNil(t, clone)
+	require.IsType(t, &cltypes.PartialDataColumnPartsMetadata{}, clone)
 }

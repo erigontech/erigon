@@ -90,7 +90,7 @@ func benchBuild(b *testing.B, sharded bool, n int) {
 			}
 			w.DisableFsync()
 			rng := rand.New(rand.NewPCG(1, 2))
-			for j := 0; j < n; j++ {
+			for range n {
 				if err := w.AddHash(rng.Uint64()); err != nil {
 					b.Fatal(err)
 				}
@@ -103,7 +103,7 @@ func benchBuild(b *testing.B, sharded bool, n int) {
 			}
 			w.DisableFsync()
 			rng := rand.New(rand.NewPCG(1, 2))
-			for j := 0; j < n; j++ {
+			for range n {
 				if err := w.AddHash(rng.Uint64()); err != nil {
 					b.Fatal(err)
 				}
@@ -205,7 +205,7 @@ func benchLookup(b *testing.B, sharded bool, n int) {
 		}
 		w.DisableFsync()
 		rng := rand.New(rand.NewPCG(1, 2))
-		for j := 0; j < n; j++ {
+		for range n {
 			if err := w.AddHash(rng.Uint64()); err != nil {
 				b.Fatal(err)
 			}
@@ -221,7 +221,7 @@ func benchLookup(b *testing.B, sharded bool, n int) {
 		}
 		w.DisableFsync()
 		rng := rand.New(rand.NewPCG(1, 2))
-		for j := 0; j < n; j++ {
+		for range n {
 			if err := w.AddHash(rng.Uint64()); err != nil {
 				b.Fatal(err)
 			}

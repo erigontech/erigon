@@ -36,6 +36,12 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	fromPkFile := flag.String("fromPkFile", "", "path to the private key file")
 	from := flag.String("from", "", "sender address")
 	to := flag.String("to", "", "receiver address")
@@ -73,8 +79,9 @@ func main() {
 	err := sendTxns(ctx, logger, *fromPkFile, *from, *to, *amount, *rpcUrl, *numTxn, *chain)
 	if err != nil {
 		logger.Error("failed to send transactions", "err", err)
-		os.Exit(1)
+		return err
 	}
+	return nil
 }
 
 func sendTxns(ctx context.Context, logger log.Logger, fromPkFile, fromStr, toStr, amountStr, url, countStr, chain string) error {
@@ -104,7 +111,7 @@ func sendTxns(ctx context.Context, logger log.Logger, fromPkFile, fromStr, toStr
 	if fromStr != crypto.PubkeyToAddress(from.PublicKey).String() {
 		panic(fmt.Sprintf("from address mismatch: %s != %s", fromStr, crypto.PubkeyToAddress(from.PublicKey).String()))
 	}
-	for i := 0; i < count; i++ {
+	for range count {
 		txn, err := transactor.SubmitSimpleTransfer(from, to, amount)
 		if err != nil {
 			if strings.Contains(err.Error(), "failed to get transaction count: Invalid params") {

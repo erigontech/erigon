@@ -22,10 +22,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/kvcache"
@@ -46,10 +44,10 @@ Testing tracing RPC API by generating patters of contracts invoking one another 
 func TestGeneratedDebugApi(t *testing.T) {
 	m := rpcdaemontest.CreateTestExecModuleForTraces(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
-	api := NewPrivateDebugAPI(baseApi, m.DB, nil, 0, false)
+	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	api := NewPrivateDebugAPI(baseApi, m.DB, nil, &rpccfg.DebugApiConfig{})
 	var buf bytes.Buffer
-	stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+	stream := jsonstream.New(&buf)
 	callTracer := "callTracer"
 	err := api.TraceBlockByNumber(context.Background(), rpc.BlockNumber(1), &tracersConfig.TraceConfig{Tracer: &callTracer}, stream)
 	if err != nil {
@@ -133,8 +131,8 @@ func TestGeneratedDebugApi(t *testing.T) {
 func TestGeneratedTraceApi(t *testing.T) {
 	m := rpcdaemontest.CreateTestExecModuleForTraces(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
-	api := NewTraceAPI(baseApi, m.DB, &httpcfg.HttpCfg{})
+	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	api := NewTraceAPI(baseApi, m.DB, &rpccfg.TraceApiConfig{})
 	traces, err := api.Block(context.Background(), rpc.BlockNumber(1), new(bool), nil)
 	if err != nil {
 		t.Errorf("trace_block %d: %v", 0, err)
@@ -289,7 +287,7 @@ func TestGeneratedTraceApi(t *testing.T) {
 
 func TestGeneratedTraceApiCollision(t *testing.T) {
 	m := rpcdaemontest.CreateTestExecModuleForTracesCollision(t)
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 	traces, err := api.Transaction(context.Background(), common.HexToHash("0xb2b9fa4c999c1c8370ce1fbd1c4315a9ce7f8421fe2ebed8a9051ff2e4e7e3da"), new(bool), nil)
 	if err != nil {
 		t.Errorf("trace_block %d: %v", 0, err)
@@ -335,7 +333,7 @@ func TestGeneratedTraceApiCollision(t *testing.T) {
         },
         "blockHash": "0xc78e9674685b04e1300d62cafdae0708d030a9bc0ff7aa9eb9315da23de650dc",
         "blockNumber": 1,
-        "error": "contract address collision",
+        "error": "Contract address collision",
         "result": null,
         "subtraces": 0,
         "traceAddress": [

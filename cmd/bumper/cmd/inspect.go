@@ -40,8 +40,7 @@ func inspectSchemaFields(s *statecfg.SchemaGen) []FieldInfo {
 	var result []FieldInfo
 	v := reflect.ValueOf(*s)
 	t := v.Type()
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
+	for field := range t.Fields() {
 		kind := field.Type.Name() // domainCfg, iiCfg, etc.
 		result = append(result, FieldInfo{
 			Name: field.Name,
@@ -74,6 +73,9 @@ func getNames(s *statecfg.SchemaGen) (res map[string]string, domains []string) {
 	res = make(map[string]string)
 	for _, f := range fields {
 		name, ftype := parseName(f.Name)
+		if ftype == "" {
+			continue
+		}
 		res[name] = ftype
 		domains = append(domains, name)
 	}
