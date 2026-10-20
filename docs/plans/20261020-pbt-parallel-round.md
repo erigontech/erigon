@@ -177,9 +177,21 @@ flowchart LR
 ```
 
 ## Technical Details
-- Previous measurement, for orientation only. It came from a harness whose shared test base serialized reads, so it
-  must not be used for before/after; Task 1 records the real baseline. Mac, 18 logical CPUs, 1M-leaf blake3 trie,
-  median ms; w=1 is sequential `Process`:
+- **Reference baseline (Task 1).** `go test -run '^$' -bench 'BenchmarkParallelRound' -benchtime=5x -count=1
+  ./execution/commitment/v3/pbt/` at `3b86c1aed6d` plus the Task 1 test files, on the lock-free per-worker view base.
+  Apple M5 Max, 18 logical CPUs, 1M-leaf blake3 trie. Machine load before the run (`top -l 1`): load average
+  6.50/3.59/2.64, CPU 80.5% idle. Mean ms/round over 5 rounds (ns/op); w=1 is sequential `Process`. The phase read
+  lock is still in place (Task 7 removes it):
+
+  | round | w=1 | w=2 | w=4 | w=8 | w=16 |
+  |---|---|---|---|---|---|
+  | tip, K=2,000 | 59.8 | 41.0 | 28.4 | 25.4 | 24.7 |
+  | re-exec, K=100,000 random | 1421.6 | 930.4 | 710.1 | 613.9 | 588.6 |
+  | convert, K=100,000 in one partition | 256.5 | 293.2 | 290.9 | 307.9 | 305.3 |
+
+- Previous measurement, superseded by the table above. It came from a harness whose shared test base serialized reads,
+  so it must not be used for before/after. Mac, 18 logical CPUs, 1M-leaf blake3 trie, median ms; w=1 is sequential
+  `Process`:
 
   | round | w=1 | w=2 | w=4 | w=8 | w=16 |
   |---|---|---|---|---|---|
@@ -229,19 +241,19 @@ flowchart LR
 - Create: `execution/commitment/v3/pbt/parallel_round_test.go`
 - Create: `execution/commitment/v3/pbt/parallel_round_bench_test.go`
 
-- [ ] add a test base whose factory gives each worker a read-only, lock-free view of a frozen record snapshot. Writes
+- [x] add a test base whose factory gives each worker a read-only, lock-free view of a frozen record snapshot. Writes
       go only to the main context
-- [ ] port the scratch grid (`~/org/mode/e/research/pbt-parallel-convert/par-bench_test.go.txt`) onto that base as
+- [x] port the scratch grid (`~/org/mode/e/research/pbt-parallel-convert/par-bench_test.go.txt`) onto that base as
       `BenchmarkParallelRound{Tip,Reexec,Convert}`, with sub-benchmarks per workers 1/2/4/8/16 and the same corpus
       shape:
       - 400k account, 100k code, 500k storage leaves;
       - storage in 100k buckets, 8 of them with 20k–50k slots;
       - the base trie built once outside the timer, and each round started from it
-- [ ] add `TestParallelRoundMatchesSequential` on the same base, with a factory installed: the corpus shapes at small
+- [x] add `TestParallelRoundMatchesSequential` on the same base, with a factory installed: the corpus shapes at small
       size plus a churn corpus with drops, at workers 2/4/8. Compare root and full record map with sequential `Process`
-- [ ] run `go test -race ./execution/commitment/v3/pbt/...`
-- [ ] record the benchmark baseline in Technical Details, replacing the orientation table as the reference
-- [ ] run gates — must pass before Task 2
+- [x] run `go test -race ./execution/commitment/v3/pbt/...`
+- [x] record the benchmark baseline in Technical Details, replacing the orientation table as the reference
+- [x] run gates — must pass before Task 2
 
 ### Task 2: Convert oracle tests
 
