@@ -470,6 +470,22 @@ func (c *Config) IsFeynman(num, time uint64) bool {
 	return c.IsLondon(num) && isForked(c.FeynmanTime, time)
 }
 
+func (c *Config) IsBohr(num, time uint64) bool {
+	return c.IsLondon(num) && isForked(c.BohrTime, time)
+}
+
+func (c *Config) IsLorentz(num, time uint64) bool {
+	return c.IsLondon(num) && isForked(c.LorentzTime, time)
+}
+
+func (c *Config) IsMaxwell(num, time uint64) bool {
+	return c.IsLondon(num) && isForked(c.MaxwellTime, time)
+}
+
+func (c *Config) IsFermi(num, time uint64) bool {
+	return c.IsLondon(num) && isForked(c.FermiTime, time)
+}
+
 func (c *Config) IsHaber(num, time uint64) bool {
 	return c.IsLondon(num) && isForked(c.HaberTime, time)
 }
