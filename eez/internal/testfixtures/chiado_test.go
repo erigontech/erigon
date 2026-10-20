@@ -20,12 +20,10 @@ import (
 	"testing"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -37,42 +35,19 @@ func TestChiadoSettlement(t *testing.T) {
 	require.NoError(t, err)
 	tx := &s.Transaction
 
-	u256 := func(name string, b *hexutil.Big) uint256.Int {
-		v, overflow := b.ToUint256()
-		require.False(t, overflow, name)
-		return *v
-	}
-	chainID := u256("chainId", &tx.ChainID)
+	chainID, overflow := tx.ChainID.ToUint256()
+	require.False(t, overflow)
 	require.Equal(t, s.L1ChainID, chainID.Uint64())
-	require.True(t, chainID.IsUint64())
 	require.Equal(t, uint64(types.BlobTxType), uint64(tx.Type))
 	require.Equal(t, s.Registry, tx.To)
 	require.Empty(t, tx.AccessList)
 	require.Len(t, tx.BlobVersionedHashes, 1)
 	require.Equal(t, uint64(1), s.ReceiptStatus)
 
-	to := tx.To
-	btx := &types.BlobTx{
-		DynamicFeeTransaction: types.DynamicFeeTransaction{
-			CommonTx: types.CommonTx{
-				Nonce:    uint64(tx.Nonce),
-				GasLimit: uint64(tx.Gas),
-				To:       &to,
-				Value:    u256("value", &tx.Value),
-				Data:     tx.Input,
-				V:        *uint256.NewInt(uint64(tx.YParity)),
-				R:        u256("r", &tx.R),
-				S:        u256("s", &tx.S),
-			},
-			ChainID: chainID,
-			TipCap:  u256("maxPriorityFeePerGas", &tx.MaxPriorityFeePerGas),
-			FeeCap:  u256("maxFeePerGas", &tx.MaxFeePerGas),
-		},
-		MaxFeePerBlobGas:    u256("maxFeePerBlobGas", &tx.MaxFeePerBlobGas),
-		BlobVersionedHashes: tx.BlobVersionedHashes,
-	}
+	btx, err := s.Tx()
+	require.NoError(t, err)
 	require.Equal(t, tx.Hash, btx.Hash())
-	sender, err := types.LatestSignerForChainID(&chainID).Sender(btx)
+	sender, err := types.LatestSignerForChainID(chainID).Sender(btx)
 	require.NoError(t, err)
 	require.Equal(t, tx.From, sender.Value())
 

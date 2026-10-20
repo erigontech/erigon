@@ -19,8 +19,11 @@ package testfixtures
 import (
 	"fmt"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // Live Chiado recordings in chiado/.
@@ -101,6 +104,40 @@ type ChiadoContractView struct {
 	RollupContract         common.Address `json:"rollupContract"`
 	RollupRoot             common.Hash    `json:"rollupRoot"`
 	RollupEtherBalance     hexutil.Big    `json:"rollupEtherBalance"`
+}
+
+// Tx rebuilds the settling transaction from its recorded fields.
+func (s *ChiadoSettlement) Tx() (*types.BlobTx, error) {
+	tx := &s.Transaction
+	var err error
+	u256 := func(name string, b *hexutil.Big) uint256.Int {
+		v, overflow := b.ToUint256()
+		if overflow && err == nil {
+			err = fmt.Errorf("%s overflows 256 bits", name)
+		}
+		return *v
+	}
+	to := tx.To
+	btx := &types.BlobTx{
+		DynamicFeeTransaction: types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{
+				Nonce:    uint64(tx.Nonce),
+				GasLimit: uint64(tx.Gas),
+				To:       &to,
+				Value:    u256("value", &tx.Value),
+				Data:     tx.Input,
+				V:        *uint256.NewInt(uint64(tx.YParity)),
+				R:        u256("r", &tx.R),
+				S:        u256("s", &tx.S),
+			},
+			ChainID: u256("chainId", &tx.ChainID),
+			TipCap:  u256("maxPriorityFeePerGas", &tx.MaxPriorityFeePerGas),
+			FeeCap:  u256("maxFeePerGas", &tx.MaxFeePerGas),
+		},
+		MaxFeePerBlobGas:    u256("maxFeePerBlobGas", &tx.MaxFeePerBlobGas),
+		BlobVersionedHashes: tx.BlobVersionedHashes,
+	}
+	return btx, err
 }
 
 // LoadChiadoSettlement loads chiado/anchor-23507949.json.

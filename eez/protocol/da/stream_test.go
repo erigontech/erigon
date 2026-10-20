@@ -17,7 +17,6 @@ package da
 
 import (
 	"bytes"
-	"encoding/binary"
 	"slices"
 	"testing"
 
@@ -27,43 +26,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/eez/internal/testfixtures"
 )
-
-// encode is a test encoder: the version byte, then msgs as BLOB_FORMAT_SPEC
-// lays them out, with shortest length prefixes.
-func encode(msgs ...Message) []byte {
-	out := []byte{StreamVersion}
-	for i := range msgs {
-		out = appendMessage(out, &msgs[i])
-	}
-	return out
-}
-
-func appendMessage(out []byte, m *Message) []byte {
-	out = append(out, byte(m.Type))
-	appendData := func(out []byte) []byte {
-		out = binary.AppendUvarint(out, uint64(len(m.Data)))
-		return append(out, m.Data...)
-	}
-	switch m.Type {
-	case RollupOperation, InitiateCrossRollupTransaction:
-		out = binary.LittleEndian.AppendUint64(out, m.RollupID)
-		out = appendData(out)
-	case Call, StaticCall:
-		out = binary.LittleEndian.AppendUint64(out, m.RollupID)
-		out = append(out, m.FromAddress[:]...)
-		out = append(out, m.ToAddress[:]...)
-		if m.Type == Call {
-			v := m.Value.Bytes32()
-			slices.Reverse(v[:])
-			out = append(out, v[:]...)
-		}
-		out = binary.LittleEndian.AppendUint64(out, m.Gas)
-		out = appendData(out)
-	case ReturnSuccess, ReturnFail:
-		out = appendData(out)
-	}
-	return out
-}
 
 // packBlobs lays stream bytes out in blobs the way BlobData reads them.
 func packBlobs(stream []byte) [][]byte {
@@ -107,21 +69,21 @@ func sample() []Message {
 }
 
 func TestDecodeCallDataStream(t *testing.T) {
-	msgs, err := Decode(nil, encode(sample()...))
+	msgs, err := Decode(nil, Encode(sample()...))
 	require.NoError(t, err)
 	require.Equal(t, sample(), msgs)
 }
 
 func TestDecodeBlobStream(t *testing.T) {
-	stream := append(encode(sample()...), byte(CloseBlobStream))
+	stream := append(Encode(sample()...), byte(CloseBlobStream))
 	msgs, err := Decode(packBlobs(stream), nil)
 	require.NoError(t, err)
 	require.Equal(t, sample(), msgs)
 
 	// A message may span blobs; callData continues the stream after the close.
 	big := Message{Type: RollupOperation, RollupID: 7, Data: bytes.Repeat([]byte{0xcc}, BlobDataSize)}
-	stream = append(encode(big), byte(CloseBlobStream))
-	tail := encode(sample()[1:13]...)[1:]
+	stream = append(Encode(big), byte(CloseBlobStream))
+	tail := Encode(sample()[1:13]...)[1:]
 	msgs, err = Decode(packBlobs(stream), tail)
 	require.NoError(t, err)
 	require.Equal(t, append([]Message{big}, sample()[1:13]...), msgs)
@@ -143,7 +105,7 @@ func TestDecodeChiadoBlob(t *testing.T) {
 
 	data, err := BlobData(blob)
 	require.NoError(t, err)
-	require.Equal(t, append(encode(msgs...), byte(CloseBlobStream)), data[:43])
+	require.Equal(t, append(Encode(msgs...), byte(CloseBlobStream)), data[:43])
 	require.Equal(t, make([]byte, BlobDataSize-43), data[43:])
 }
 
@@ -157,10 +119,10 @@ func TestDecodeRejects(t *testing.T) {
 	withType := func(t byte) []byte { return []byte{StreamVersion, t} }
 	closed := func(stream []byte) [][]byte { return packBlobs(append(stream, byte(CloseBlobStream))) }
 
-	badElement := closed(encode(op))
+	badElement := closed(Encode(op))
 	badElement[0][32*5] = 1
 	// Version, type, rollup id and a three-byte length prefix take 13 bytes.
-	full := encode(Message{Type: RollupOperation, Data: make([]byte, BlobDataSize-13)})
+	full := Encode(Message{Type: RollupOperation, Data: make([]byte, BlobDataSize-13)})
 	require.Len(t, full, BlobDataSize)
 	fullBlob := packBlobs(full)
 
@@ -176,25 +138,25 @@ func TestDecodeRejects(t *testing.T) {
 		{"reserved type", nil, withType(0), ErrMessageType},
 		{"type 11", nil, withType(11), ErrMessageType},
 		{"type 255", nil, withType(255), ErrMessageType},
-		{"truncated rollup id", nil, encode(op)[:6], ErrTruncated},
-		{"truncated data", nil, encode(op)[:len(encode(op))-1], ErrTruncated},
-		{"six-byte length", nil, append(encode(op)[:10], 0x80, 0x80, 0x80, 0x80, 0x80, 0x00), ErrLength},
-		{"length above uint32", nil, append(encode(op)[:10], 0x80, 0x80, 0x80, 0x80, 0x10), ErrLength},
-		{"return without call", nil, encode(initiate, ret), ErrBracket},
-		{"finish with open call", nil, encode(initiate, call, finish), ErrBracket},
-		{"nested transaction", nil, encode(initiate, initiate), ErrBracket},
-		{"revert without snapshot", nil, encode(initiate, revert), ErrBracket},
-		{"revert with open call", nil, encode(initiate, snapshot, call, revert), ErrBracket},
-		{"return leaves snapshot frame", nil, encode(initiate, call, snapshot, ret), ErrBracket},
-		{"finish with open snapshot", nil, encode(initiate, snapshot, finish), ErrBracket},
-		{"unclosed transaction", nil, encode(initiate), ErrBracket},
-		{"call outside transaction", nil, encode(call), ErrPlacement},
-		{"snapshot outside transaction", nil, encode(snapshot), ErrPlacement},
-		{"operation inside transaction", nil, encode(initiate, op), ErrPlacement},
-		{"close without blobs", nil, append(encode(op), byte(CloseBlobStream)), ErrBlobClose},
-		{"blobs without close", packBlobs(encode(op)), nil, ErrMessageType},
+		{"truncated rollup id", nil, Encode(op)[:6], ErrTruncated},
+		{"truncated data", nil, Encode(op)[:len(Encode(op))-1], ErrTruncated},
+		{"six-byte length", nil, append(Encode(op)[:10], 0x80, 0x80, 0x80, 0x80, 0x80, 0x00), ErrLength},
+		{"length above uint32", nil, append(Encode(op)[:10], 0x80, 0x80, 0x80, 0x80, 0x10), ErrLength},
+		{"return without call", nil, Encode(initiate, ret), ErrBracket},
+		{"finish with open call", nil, Encode(initiate, call, finish), ErrBracket},
+		{"nested transaction", nil, Encode(initiate, initiate), ErrBracket},
+		{"revert without snapshot", nil, Encode(initiate, revert), ErrBracket},
+		{"revert with open call", nil, Encode(initiate, snapshot, call, revert), ErrBracket},
+		{"return leaves snapshot frame", nil, Encode(initiate, call, snapshot, ret), ErrBracket},
+		{"finish with open snapshot", nil, Encode(initiate, snapshot, finish), ErrBracket},
+		{"unclosed transaction", nil, Encode(initiate), ErrBracket},
+		{"call outside transaction", nil, Encode(call), ErrPlacement},
+		{"snapshot outside transaction", nil, Encode(snapshot), ErrPlacement},
+		{"operation inside transaction", nil, Encode(initiate, op), ErrPlacement},
+		{"close without blobs", nil, append(Encode(op), byte(CloseBlobStream)), ErrBlobClose},
+		{"blobs without close", packBlobs(Encode(op)), nil, ErrMessageType},
 		{"full blob without close", fullBlob, nil, ErrBlobClose},
-		{"close in callData tail", closed(encode(op)), []byte{byte(CloseBlobStream)}, ErrBlobClose},
+		{"close in callData tail", closed(Encode(op)), []byte{byte(CloseBlobStream)}, ErrBlobClose},
 		{"field element above 248 bits", badElement, nil, ErrBlobEncoding},
 		{"short blob", [][]byte{make([]byte, BlobSize-1)}, nil, ErrBlobEncoding},
 	} {
@@ -206,7 +168,7 @@ func TestDecodeRejects(t *testing.T) {
 }
 
 func TestDecodeAcceptsNonMinimalLength(t *testing.T) {
-	stream := encode(Message{Type: RollupOperation, RollupID: 1, Data: []byte{0xab}})
+	stream := Encode(Message{Type: RollupOperation, RollupID: 1, Data: []byte{0xab}})
 	require.Equal(t, byte(1), stream[10])
 	padded := slices.Concat(stream[:10], []byte{0x81, 0x80, 0x80, 0x80, 0x00}, stream[11:])
 	msgs, err := Decode(nil, padded)
@@ -218,7 +180,7 @@ func TestParsePayload(t *testing.T) {
 	value := *uint256.NewInt(42)
 	in := Message{Type: Call, RollupID: 1, FromRollup: 0, FromAddress: addrA, ToAddress: addrB, Value: value, Gas: 5, Data: []byte{1}}
 	out := Message{Type: Call, RollupID: 0, FromRollup: 1, FromAddress: addrB, ToAddress: addrA, Data: []byte{2}}
-	stream := encode(
+	stream := Encode(
 		Message{Type: RollupOperation, RollupID: 1, Data: []byte{0}},
 		Message{Type: InitiateCrossRollupTransaction, RollupID: 0, Data: []byte{0xff}},
 		in, Message{Type: ReturnSuccess, Data: []byte{3}}, Message{Type: FinishCrossRollupTransaction},
@@ -233,6 +195,22 @@ func TestParsePayload(t *testing.T) {
 		{SourceRollupID: 0, TargetRollupID: 1, SourceAddress: addrA, TargetAddress: addrB, Value: value, Gas: 5, Data: []byte{1}, Success: true, ReturnData: []byte{3}},
 		{SourceRollupID: 1, TargetRollupID: 0, SourceAddress: addrB, TargetAddress: addrA, Data: []byte{2}, ReturnData: []byte{4}},
 	}}, p)
+}
+
+func TestPayloadMessages(t *testing.T) {
+	p := &Payload{
+		RollupID:   1,
+		Operations: []byte{SpanVersionV0, 1, 0, 1},
+		Actions: []Action{
+			{SourceRollupID: 1, TargetRollupID: 0, SourceAddress: addrA, TargetAddress: addrB, Value: *uint256.NewInt(5), Data: []byte{1}, Success: true, ReturnData: []byte{2}},
+			{SourceRollupID: 0, TargetRollupID: 1, SourceAddress: addrB, TargetAddress: addrA, Gas: 9, Data: []byte{3}, ReturnData: []byte{4}},
+		},
+	}
+	msgs, err := Decode(nil, Encode(p.Messages()...))
+	require.NoError(t, err)
+	got, err := ParsePayload(msgs)
+	require.NoError(t, err)
+	require.Equal(t, p, got)
 }
 
 func TestParsePayloadRejects(t *testing.T) {
@@ -260,14 +238,14 @@ func TestParsePayloadRejects(t *testing.T) {
 }
 
 func FuzzDecodeCallDataStream(f *testing.F) {
-	f.Add(encode(sample()...))
-	f.Add(encode(Message{Type: RollupOperation, RollupID: 1, Data: []byte{0}}))
+	f.Add(Encode(sample()...))
+	f.Add(Encode(Message{Type: RollupOperation, RollupID: 1, Data: []byte{0}}))
 	f.Fuzz(func(t *testing.T, stream []byte) {
 		msgs, err := Decode(nil, stream)
 		if err != nil {
 			return
 		}
-		again, err := Decode(nil, encode(msgs...))
+		again, err := Decode(nil, Encode(msgs...))
 		require.NoError(t, err)
 		require.Equal(t, msgs, again)
 	})

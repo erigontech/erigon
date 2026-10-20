@@ -99,8 +99,6 @@ func makeLog(t *testing.T, ev *abi.Event, topics []common.Hash, values ...any) *
 	return &types.Log{Topics: append([]common.Hash{ev.ID}, topics...), Data: data}
 }
 
-func uint64Topic(v uint64) common.Hash { return common.BigToHash(new(big.Int).SetUint64(v)) }
-
 func TestParseSyntheticLogs(t *testing.T) {
 	g := newValueGen(5)
 	callHash, root := g.hash(), g.hash()

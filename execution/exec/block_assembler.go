@@ -25,11 +25,18 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 )
 
+// ErrTxnNotIncluded reports a transaction a strict assembly could not
+// include.
+var ErrTxnNotIncluded = errors.New("transaction not included")
+
 type AssemblerCfg struct {
 	ChainConfig     *chain.Config
 	Engine          rules.Engine
 	BlockReader     dbservices.FullBlockReader
 	ExperimentalBAL bool
+	// Strict makes AddTransactions fail on the first transaction it cannot
+	// include instead of skipping it.
+	Strict bool
 }
 
 type AssembledBlock struct {
@@ -314,6 +321,9 @@ func (ba *BlockAssembler) AddTransactions(
 	}()
 
 	minTxGas := mdgas.MinTxGas(ba.cfg.ChainConfig.IsAmsterdam(header.Time))
+	notIncluded := func(txn types.Transaction, reason error) error {
+		return fmt.Errorf("[%s] %w: %x: %w", logPrefix, ErrTxnNotIncluded, txn.Hash(), reason)
+	}
 
 	done := false
 
@@ -342,12 +352,18 @@ LOOP:
 		// Only the execution dimension bounds this exit: AA txns draw solely on the
 		// execution pool, so a state-gas exit would drop ones that still fit.
 		if gasPool.Gas() < minTxGas {
+			if ba.cfg.Strict {
+				return nil, true, notIncluded(txn, protocol.ErrGasLimitReached)
+			}
 			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", minTxGas)
 			done = true
 			break
 		}
 
 		rlpSpacePostTxn := ba.AvailableRlpSpace(ba.cfg.ChainConfig, txn)
+		if rlpSpacePostTxn < 0 && ba.cfg.Strict {
+			return nil, true, notIncluded(txn, errors.New("block size limit"))
+		}
 		if rlpSpacePostTxn < 0 {
 			rlpSpacePreTxn := ba.AvailableRlpSpace(ba.cfg.ChainConfig)
 			logger.Debug(
@@ -361,6 +377,9 @@ LOOP:
 
 		// We use the eip155 signer regardless of the env hf.
 		from, err := txn.Sender(*signer)
+		if err != nil && ba.cfg.Strict {
+			return nil, true, notIncluded(txn, err)
+		}
 		if err != nil {
 			logger.Warn(fmt.Sprintf("[%s] Could not recover transaction sender", logPrefix), "hash", txn.Hash(), "err", err)
 			continue
@@ -369,6 +388,9 @@ LOOP:
 		// Check whether the txn is replay protected. If we're not in the EIP155 (Spurious Dragon) hf
 		// phase, start ignoring the sender until we do.
 		if txn.Protected() && !ba.cfg.ChainConfig.IsSpuriousDragon(header.Number.Uint64()) {
+			if ba.cfg.Strict {
+				return nil, true, notIncluded(txn, errors.New("replay-protected before EIP-155"))
+			}
 			logger.Debug(fmt.Sprintf("[%s] Ignoring replay protected transaction", logPrefix), "hash", txn.Hash(), "eip155", ba.cfg.ChainConfig.SpuriousDragonBlock)
 			continue
 		}
@@ -379,6 +401,9 @@ LOOP:
 			recordTxIO()
 		} else {
 			clearTxIO()
+			if ba.cfg.Strict {
+				return nil, true, notIncluded(txn, err)
+			}
 		}
 		switch {
 		case errors.Is(err, protocol.ErrGasLimitReached):
