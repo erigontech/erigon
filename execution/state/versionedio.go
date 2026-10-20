@@ -2085,9 +2085,20 @@ func versionedUpdateBalance(vm *VersionMap, addr accounts.Address, txIndex int) 
 	return uint256.Int{}, false
 }
 
+// destroyedAbove reports whether a Done destruct below txIndex sits at or above
+// the cell res read. A destruct erases nonce and code hash without a cell of its
+// own, so such a cell is stale.
+func (vm *VersionMap) destroyedAbove(addr accounts.Address, res ReadResult, txIndex int) bool {
+	_, ok := vm.FindDoneSelfDestructInRange(addr, res.DepIdx(), txIndex, true)
+	return ok
+}
+
 func versionedUpdateNonce(vm *VersionMap, addr accounts.Address, txIndex int) (uint64, bool) {
 	val, res, ok := vm.ReadNonce(addr, txIndex)
 	if ok && res.Status() != MVReadResultNone {
+		if vm.destroyedAbove(addr, res, txIndex) {
+			return 0, true
+		}
 		return val, true
 	}
 	return 0, false
@@ -2112,6 +2123,9 @@ func versionedUpdateCode(vm *VersionMap, addr accounts.Address, txIndex int) ([]
 func versionedUpdateCodeHash(vm *VersionMap, addr accounts.Address, txIndex int) (accounts.CodeHash, bool) {
 	val, res, ok := vm.ReadCodeHash(addr, txIndex)
 	if ok && res.Status() != MVReadResultNone {
+		if vm.destroyedAbove(addr, res, txIndex) {
+			return accounts.EmptyCodeHash, true
+		}
 		return val, true
 	}
 	return accounts.CodeHash{}, false

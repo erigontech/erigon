@@ -575,14 +575,22 @@ func (vm *VersionMap) applySubFieldWrites(addr accounts.Address, txIdx int, acco
 	if _, fv := floorCell(e.Balance, txIdx); fv != nil {
 		account.Balance = fv.Value
 	}
-	if _, fv := floorCell(e.Nonce, txIdx); fv != nil {
-		account.Nonce = fv.Value
+	// A destruct erases nonce and code hash without a cell of its own, so a cell
+	// below a later destruct is stale.
+	if k, fv := floorCell(e.Nonce, txIdx); fv != nil {
+		account.Nonce = 0
+		if _, wiped := findDoneSelfDestructLocked(e, k, txIdx, true); !wiped {
+			account.Nonce = fv.Value
+		}
 	}
 	if _, fv := floorCell(e.Incarnation, txIdx); fv != nil {
 		account.Incarnation = fv.Value
 	}
-	if _, fv := floorCell(e.CodeHash, txIdx); fv != nil {
-		account.CodeHash = fv.Value
+	if k, fv := floorCell(e.CodeHash, txIdx); fv != nil {
+		account.CodeHash = accounts.EmptyCodeHash
+		if _, wiped := findDoneSelfDestructLocked(e, k, txIdx, true); !wiped {
+			account.CodeHash = fv.Value
+		}
 	}
 }
 
