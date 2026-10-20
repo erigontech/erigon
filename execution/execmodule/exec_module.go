@@ -208,7 +208,7 @@ type ExecModule struct {
 	// it. TryAcquire callers BARGE: they take the lock whenever it is momentarily free, jumping the queue
 	// that Acquire waits in.
 	semAcquires atomic.Int64
-	semSince  atomic.Int64
+	semSince    atomic.Int64
 
 	// roundMu is the INNER LOOP's own mutual-exclusion domain: one pre-execution round at a time.
 	//
@@ -718,20 +718,6 @@ func (e *ExecModule) validateChainLocked(ctx context.Context, blockHash common.H
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), e.logger)
 	if criticalError != nil {
 		return ValidationResult{}, criticalError
-	}
-
-	if status == engine_types.ValidStatus && body != nil {
-
-		// Intra-block notification: tell subscribers these txs are validated.
-		// Noop when no subscribers (standard Ethereum). In flashblock mode
-		// a subscriber removes the txs from the txpool.
-		if dispatcher := e.pipelineExecutor.Dispatcher(); dispatcher != nil && len(body.Transactions) > 0 {
-			txHashes := make([]common.Hash, len(body.Transactions))
-			for i, tx := range body.Transactions {
-				txHashes[i] = tx.Hash()
-			}
-			dispatcher.OnTransactionValidated(txHashes)
-		}
 	}
 
 	// Clear state cache on invalid block

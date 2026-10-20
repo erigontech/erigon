@@ -187,13 +187,6 @@ func (e *ExecModule) closePreExecutedLocked(ctx context.Context, blockHash commo
 		return result, nil
 	}
 	e.preExec.RecordTxHashes(body.Transactions)
-	if dispatcher := e.pipelineExecutor.Dispatcher(); dispatcher != nil && len(body.Transactions) > 0 {
-		txHashes := make([]common.Hash, len(body.Transactions))
-		for i, t := range body.Transactions {
-			txHashes[i] = t.Hash()
-		}
-		dispatcher.OnTransactionValidated(txHashes)
-	}
 
 	if cc := doms.GetCommitmentContext(); cc != nil {
 		if root, rerr := cc.Trie().RootHash(); rerr == nil && len(root) > 0 {
@@ -578,13 +571,6 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, block *types.RawBlock
 			registered = true
 		}
 		e.preExec.RecordTxHashes(body.Transactions)
-		if dispatcher := e.pipelineExecutor.Dispatcher(); dispatcher != nil && len(body.Transactions) > 0 {
-			txHashes := make([]common.Hash, len(body.Transactions))
-			for i, t := range body.Transactions {
-				txHashes[i] = t.Hash()
-			}
-			dispatcher.OnTransactionValidated(txHashes)
-		}
 	}
 
 	validationStatus := ExecutionStatusSuccess

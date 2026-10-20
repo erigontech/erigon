@@ -2154,25 +2154,9 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 	return nil
 }
 
-// OnTransactionValidated removes txs that have been validated in a
-// DAG round (intra-block). This is the lightweight counterpart to OnNewBlock
-// which runs at slot boundaries. By removing validated txs the pool prevents
-// cancellation via replacement transactions.
-func (p *TxPool) OnTransactionValidated(txHashes []common.Hash) {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-
-	var toRemove []*TxnSlot
-	for _, h := range txHashes {
-		if mt, ok := p.byHash[string(h[:])]; ok {
-			toRemove = append(toRemove, mt.TxnSlot)
-		}
-	}
-	if len(toRemove) > 0 {
-		if err := p.removeMined(p.all, toRemove); err != nil {
-			p.logger.Warn("OnTransactionValidated: removeMined failed", "err", err)
-		}
-	}
+func (p *TxPool) hasBuilderNonce(senderID uint64) bool {
+	_, held := p.builderNonce[senderID]
+	return held
 }
 
 // onSenderStateChange is the function that recalculates ephemeral fields of transactions and determines
@@ -2214,6 +2198,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 				if p.nonceGapEvictions == 1 || p.nonceGapEvictions%500 == 0 {
 					logger.Warn("[nonce-gap] evicting — the sender's sequence has a hole",
 						"senderID", senderID, "onChainNonce", senderNonce, "firstMissingNonce", noGapsNonce,
+						"builderNonce", p.builderNonce[senderID], "builderNonceHeld", p.hasBuilderNonce(senderID),
 						"evictingNonce", mt.TxnSlot.Nonce, "gap", mt.TxnSlot.Nonce-noGapsNonce,
 						"maxNonceGap", p.cfg.MaxNonceGap, "evictionsSoFar", p.nonceGapEvictions)
 				}

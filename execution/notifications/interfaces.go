@@ -19,7 +19,6 @@ package notifications
 import (
 	"context"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
@@ -48,10 +47,4 @@ type ChainEventNotifier interface {
 	HasLogSubscriptions() bool
 	OnReceipts([]*ReceiptNotification)
 	HasReceiptSubscriptions() bool
-
-	// OnTransactionValidated is the intra-block notification fired after
-	// ValidateChain confirms txs are validated. By default a noop (no
-	// subscribers). In flashblock processing a subscriber removes the
-	// txs from the txpool so they can't be cancelled via replacement.
-	OnTransactionValidated(txHashes []common.Hash)
 }

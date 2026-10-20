@@ -189,14 +189,6 @@ func (d *Dispatcher) Dispatch(
 	return nil
 }
 
-// OnTransactionValidated forwards the intra-block notification to Events.
-// Noop when events is nil or no subscribers exist.
-func (d *Dispatcher) OnTransactionValidated(txHashes []common.Hash) {
-	if d.events != nil {
-		d.events.OnTransactionValidated(txHashes)
-	}
-}
-
 // PublishOverlay sends the SharedDomains to in-process subscribers via Events.
 // The SD holds both block overlay (table data) and domain state.
 func (d *Dispatcher) PublishOverlay(sd *execctx.SharedDomains) {
