@@ -880,10 +880,15 @@ func TestPoolSyncCommitteesRejectsValidatorOutsideCommittee(t *testing.T) {
 
 	ctrl := gomock.NewController(t)
 	mockGossip := gossip_mock.NewMockGossip(ctrl)
-	mockGossip.EXPECT().PublishBackground(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	// Validator 0 fills every committee position, so each of its messages goes to every subnet.
+	mockGossip.EXPECT().PublishBackground(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).Times(2 * int(handler.beaconChainCfg.SyncCommitteeSubnetCount))
 	handler.gossipManager = mockGossip
 
-	msgs := []*cltypes.SyncCommitteeMessage{{Slot: s.Slot(), BeaconBlockRoot: common.Hash{1}, ValidatorIndex: outsider}}
+	msgs := []*cltypes.SyncCommitteeMessage{
+		{Slot: s.Slot(), BeaconBlockRoot: common.Hash{1}, ValidatorIndex: 0},
+		{Slot: s.Slot(), BeaconBlockRoot: common.Hash{1}, ValidatorIndex: outsider},
+		{Slot: s.Slot(), BeaconBlockRoot: common.Hash{1}, ValidatorIndex: 0},
+	}
 	body, err := json.Marshal(msgs)
 	require.NoError(t, err)
 	recorder := httptest.NewRecorder()
@@ -894,8 +899,30 @@ func TestPoolSyncCommitteesRejectsValidatorOutsideCommittee(t *testing.T) {
 	var response poolingError
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
 	require.Len(t, response.Failures, 1)
-	require.Equal(t, 0, response.Failures[0].Index)
+	require.Equal(t, 1, response.Failures[0].Index)
 	require.Contains(t, response.Failures[0].Message, "not in the sync committee")
+}
+
+// A head state from before Altair has zero-filled sync committees, so the failure must name the head, not the validator.
+func TestPoolSyncCommitteesReportsPreAltairHead(t *testing.T) {
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	require.NoError(t, sd.OnHeadState(s))
+	ctrl := gomock.NewController(t)
+	mockGossip := gossip_mock.NewMockGossip(ctrl)
+	mockGossip.EXPECT().PublishBackground(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	handler.gossipManager = mockGossip
+
+	body, err := json.Marshal([]*cltypes.SyncCommitteeMessage{{Slot: s.Slot(), BeaconBlockRoot: common.Hash{1}, ValidatorIndex: 0}})
+	require.NoError(t, err)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/sync_committees", bytes.NewReader(body))
+	handler.mux.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	var response poolingError
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Len(t, response.Failures, 1)
+	require.Contains(t, response.Failures[0].Message, "before Altair")
 }
 
 func TestPoolSyncCommitteesIsUnavailableWhileSyncing(t *testing.T) {

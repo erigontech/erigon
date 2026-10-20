@@ -545,6 +545,10 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 	for idx, v := range msgs {
 		var publishingSubnets []uint64
 		if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+			// A phase0 head has zero-filled sync committees, so no validator would be found in them.
+			if headState.Version() < clparams.AltairVersion {
+				return errors.New("head state is before Altair and has no sync committee")
+			}
 			publishingSubnets, err = subnets.ComputeSubnetsForSyncCommittee(headState, v.Slot, v.ValidatorIndex)
 			if err != nil {
 				return err
