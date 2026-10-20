@@ -37,9 +37,7 @@ const (
 
 	// The pool never shrinks: all entries a transaction may emit would park 13MB
 	// per arena, while a tenth still holds the ~1700 logs of a p99 block that a
-	// caller resetting per block pools in one go. Data is pooled up to what one
-	// transaction may emit, so a transaction of large logs leaves its buffers to
-	// the next one instead of mapping fresh memory.
+	// caller resetting per block pools in one go. Arena holds one txn's logs, not a block's.
 	maxPooledLogEntries = maxLogsPerTxn / 10
 	maxPooledLogBytes   = maxLogBytesPerTxn
 
