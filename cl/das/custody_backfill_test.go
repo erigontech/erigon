@@ -27,14 +27,17 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	blob_storage_mock_services "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 // bodyReader serves blocks without their execution payload, by slot, and records the slots read.
@@ -321,4 +324,48 @@ type countingDB struct {
 func (c *countingDB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 	c.views++
 	return c.RwDB.View(ctx, f)
+}
+
+// A root the backfill queued is given up at the maximum backoff: on a range peers cannot serve,
+// such roots would otherwise stay for the serve range and be retried every epoch. A canonical root
+// queued by the live path stays.
+func TestColumnSyncGivesUpBackfillRootsAtTheMaximumBackoff(t *testing.T) {
+	f := newBackfillFixture(t, 100, map[uint64]*cltypes.SignedBeaconBlock{
+		10: blockWithBlobs(t, 10, true),
+		12: blockWithBlobs(t, 12, true),
+	}, nil)
+	f.d.backfillCustodyColumns(t.Context(), 10, 10)
+	live, _ := fuluColumnBlock(t, f.d.beaconConfig, 12)
+	f.d.blocksToCheckSync.add(f.roots[12], live, time.Time{})
+	require.Equal(t, []uint64{10, 12}, f.queuedSlots())
+
+	for range f.d.beaconConfig.SlotsPerEpoch {
+		f.d.columnSyncRoundFailed(t.Context(), f.roots[10], 10, time.Now())
+		f.d.columnSyncRoundFailed(t.Context(), f.roots[12], 12, time.Now())
+	}
+
+	require.Equal(t, []uint64{12}, f.queuedSlots())
+}
+
+// On a custody node, not in archive mode, a block is complete once its custody columns are stored.
+func TestBackfillCustodyColumnsUsesTheCustodyColumnsOfACustodyNode(t *testing.T) {
+	f := newBackfillFixture(t, 100, map[uint64]*cltypes.SignedBeaconBlock{
+		10: blockWithBlobs(t, 10, true),
+		12: blockWithBlobs(t, 12, true),
+	}, map[uint64]bool{12: true})
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	nodeDB, err := enode.OpenDB("")
+	require.NoError(t, err)
+	t.Cleanup(func() { nodeDB.Close() })
+	initTestBeaconConfig(f.d.beaconConfig)
+	custody := peerdasstate.NewPeerDasState(f.d.beaconConfig, &clparams.NetworkConfig{})
+	custody.SetLocalNodeID(enode.NewLocalNode(nodeDB, key))
+	f.d.state = custody
+	f.d.caplinConfig = &clparams.CaplinConfig{}
+	require.False(t, f.d.IsArchivedMode())
+
+	f.d.backfillCustodyColumns(t.Context(), 10, 12)
+
+	require.Equal(t, []uint64{10}, f.queuedSlots())
 }

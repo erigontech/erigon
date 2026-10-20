@@ -140,11 +140,16 @@ func (d *peerdas) backfillCustodyColumns(ctx context.Context, fromSlot, toSlot u
 		if ctx.Err() != nil {
 			return
 		}
+		// A slot skipped on an error keeps its custody gap: nothing revisits it, so it is logged.
 		block, err := d.backfillBlock(ctx, slot)
 		if err != nil {
-			log.Debug("[custodyBackfill] failed to read the block", "slot", slot, "err", err)
+			log.Warn("[custodyBackfill] failed to read the block, skipping it", "slot", slot, "err", err)
 		} else if block != nil {
-			if available, err := d.IsDataAvailable(slot, block.root); err == nil && !available {
+			available, err := d.IsDataAvailable(slot, block.root)
+			switch {
+			case err != nil:
+				log.Warn("[custodyBackfill] failed to check the stored columns, skipping the block", "slot", slot, "blockRoot", block.root, "err", err)
+			case !available:
 				d.blocksToCheckSync.add(block.root, block, time.Now())
 				queued++
 			}

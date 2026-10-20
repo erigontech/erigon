@@ -318,7 +318,8 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 			// Before handing off to ChainTipSync, try to set the head state so that
 			// gossip beacon_block messages won't be ignored (Syncing() becomes false).
 			setHeadStateFromForkChoice(cfg, logger)
-			requestCustodyBackfill(cfg, startSlot, currentSlot.Load())
+			// A failing batch does not advance currentSlot, but its earlier blocks were imported.
+			requestCustodyBackfill(cfg, startSlot, max(currentSlot.Load(), cfg.forkChoice.HighestSeen()))
 			return ErrForwardSyncStale
 		}
 

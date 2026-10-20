@@ -2048,6 +2048,18 @@ func (q *deferredColumnSyncs) activeLen() int {
 	return n
 }
 
+// isBackfill reports whether root was queued by the custody backfill.
+func (q *deferredColumnSyncs) isBackfill(root common.Hash) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	e := q.entries[root]
+	if e == nil {
+		return false
+	}
+	_, ok := e.block.(*backfillColumnBlock)
+	return ok
+}
+
 func (q *deferredColumnSyncs) forget(root common.Hash) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -2118,19 +2130,30 @@ func (d *peerdas) stillCanonical(ctx context.Context, slot uint64, root common.H
 // syncColumnDataWorker fetches the custody columns gossip did not deliver. Download rounds run
 // off the ticker with a per-root in-flight marker, so one root nobody serves cannot stall the
 // others.
+// columnSyncRoundFailed records a round that left a root's columns missing. A root whose backoff
+// reached an epoch is kept while it is canonical, since nothing in this queue re-queues it; a later
+// SyncColumnDataLater can, for example for a parked Gloas envelope. A root that is not canonical,
+// such as an orphaned block nobody serves, is given up. So is a root the custody backfill queued:
+// on a range peers cannot serve, keeping them would retry a growing set every epoch.
+func (d *peerdas) columnSyncRoundFailed(ctx context.Context, root common.Hash, slot uint64, now time.Time) {
+	if !d.blocksToCheckSync.failed(root, now, d.slotDuration(), d.beaconConfig.SlotsPerEpoch) {
+		return
+	}
+	switch {
+	case d.blocksToCheckSync.isBackfill(root):
+		log.Warn("[custodyBackfill] peers did not serve the custody columns, giving up the block", "slot", slot, "blockRoot", root)
+		d.blocksToCheckSync.forget(root)
+	case !d.stillCanonical(ctx, slot, root):
+		log.Debug("[syncColumnDataWorker] column data still missing for a non-canonical block, removing from sync queue", "slot", slot, "blockRoot", root)
+		d.blocksToCheckSync.forget(root)
+	}
+}
+
 func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 	ticker := time.NewTicker(d.deferredColumnSyncTick())
 	defer ticker.Stop()
-	// A root whose backoff reached an epoch is kept while it is canonical, since nothing in this
-	// queue re-queues it; a later SyncColumnDataLater can, for example for a parked Gloas envelope.
-	// A root that is not canonical, such as an orphaned block nobody serves, is given up. The
-	// round's own context has expired by then, so the canonical check uses the worker's.
-	failed := func(root common.Hash, slot uint64, now time.Time) {
-		if d.blocksToCheckSync.failed(root, now, d.slotDuration(), d.beaconConfig.SlotsPerEpoch) && !d.stillCanonical(ctx, slot, root) {
-			log.Debug("[syncColumnDataWorker] column data still missing for a non-canonical block, removing from sync queue", "slot", slot, "blockRoot", root)
-			d.blocksToCheckSync.forget(root)
-		}
-	}
+	// The round's own context has expired by then, so the canonical check uses the worker's.
+	failed := func(root common.Hash, slot uint64, now time.Time) { d.columnSyncRoundFailed(ctx, root, slot, now) }
 	for {
 		select {
 		case <-ctx.Done():
