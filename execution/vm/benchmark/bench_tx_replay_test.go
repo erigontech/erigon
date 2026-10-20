@@ -58,6 +58,7 @@ type txFixture struct {
 	} `json:"receipt"`
 	Block    types.Header       `json:"block"`
 	Prestate types.GenesisAlloc `json:"prestate"`
+	Config   *chain.Config      `json:"config"`
 }
 
 type txReplay struct {
@@ -87,6 +88,9 @@ func newTxReplay(tb testing.TB, path string) *txReplay {
 	txn.SetSender(accounts.InternAddress(sender.From))
 
 	cfg := chainspec.Mainnet.Config
+	if f.Config != nil {
+		cfg = f.Config
+	}
 	noHashes := func(uint64) (common.Hash, error) { return common.Hash{}, nil }
 	blockCtx := protocol.NewEVMBlockContext(&f.Block, noHashes, nil, accounts.InternAddress(f.Block.Coinbase), cfg)
 	rules := blockCtx.Rules(cfg)
