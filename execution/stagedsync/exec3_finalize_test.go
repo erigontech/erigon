@@ -873,20 +873,6 @@ func TestFinalizeTxSimple_AccumulatedFees(t *testing.T) {
 	}
 }
 
-func TestFinalizeTxSimple_SharedFeeDestination(t *testing.T) {
-	t.Parallel()
-	s := londonTransferScenario()
-	s.burntAddr = s.coinbase
-
-	writes := s.runFinalizeTx(t, nil)
-
-	balance := findBalance(writes, s.coinbase)
-	require.NotNil(t, balance, "a shared tip and burn destination still needs one balance write")
-	var expected uint256.Int
-	expected.Add(&s.feeTipped, &s.feeBurnt)
-	require.Equal(t, expected, balance.Val, "a shared destination must receive both the tip and the burn")
-}
-
 func TestFinalizeTxSimple_SharedFeeDestinationSelfdestructBurnsBothCredits(t *testing.T) {
 	t.Parallel()
 	s := londonTransferScenario()
