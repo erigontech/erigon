@@ -48,7 +48,7 @@ func BenchmarkIntraBlockStateReset(b *testing.B) {
 					ibs.nilAccounts[a] = struct{}{}
 					ibs.stateObjectsDirty[a] = struct{}{}
 					ibs.balanceInc[a] = nil
-					ibs.transientStorage.Set(a, accounts.NilKey, one)
+					ibs.transientStorage.Set(ibs.journal, a, &TransientKey{}, &one)
 				}
 				ibs.Reset()
 			}

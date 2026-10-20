@@ -359,7 +359,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	// if we've pruned this history away for this block then just return early
 	// to save any red herring errors
 
-	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, dbtx, fromBlock)
+	err = api.BaseAPI.checkBlockHistoryRangeAvailable(ctx, dbtx, fromBlock, toBlock)
 	if err != nil {
 		return err
 	}
@@ -945,6 +945,16 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 				return err
 			}
 			defer workerTx.Rollback()
+
+			// Workers pin their own history view. Check the first replay position
+			// here; all jobs in this block read at or after it.
+			startTxNum, err := state.StateHistoryStartTxNum(workerTx)
+			if err != nil {
+				return err
+			}
+			if baseTxNum < startTxNum {
+				return fmt.Errorf("%w: requested block %d, history is available from txNum %d", state.ErrPruned, header.Number.Uint64(), startTxNum)
+			}
 
 			// Per-worker constants: same for every job this worker processes.
 			// blockCtx captures workerTx in its GetHash closure, so it cannot

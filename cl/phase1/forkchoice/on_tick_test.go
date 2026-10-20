@@ -17,11 +17,13 @@
 package forkchoice
 
 import (
+	"math"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -51,7 +53,7 @@ func TestFinalizedCheckpointEmittedOutsideLock(t *testing.T) {
 
 	tickDone := make(chan struct{})
 	go func() {
-		f.OnTick(f.beaconCfg.SlotsPerEpoch * f.beaconCfg.SecondsPerSlot)
+		f.OnTick(f.beaconCfg.SlotsPerEpoch * f.beaconCfg.SecondsPerSlot * 1000)
 		close(tickDone)
 	}()
 
@@ -97,7 +99,7 @@ func TestTickBuildsUnrealizedJustifiedCheckpointState(t *testing.T) {
 	next := solid.Checkpoint{Epoch: justified.Epoch + 1, Root: root}
 	f.unrealizedJustifiedCheckpoint.Store(next)
 
-	f.OnTick((f.beaconCfg.SlotsPerEpoch - 1) * f.beaconCfg.SecondsPerSlot)
+	f.OnTick((f.beaconCfg.SlotsPerEpoch - 1) * f.beaconCfg.SecondsPerSlot * 1000)
 
 	require.Equal(t, justified, f.JustifiedCheckpoint())
 	require.Eventually(t, func() bool {
@@ -112,7 +114,7 @@ func TestEpochStartTickBuildsPromotedCheckpointState(t *testing.T) {
 	next := solid.Checkpoint{Epoch: f.JustifiedCheckpoint().Epoch + 1, Root: root}
 	f.unrealizedJustifiedCheckpoint.Store(next)
 
-	f.OnTick(f.beaconCfg.SlotsPerEpoch * f.beaconCfg.SecondsPerSlot)
+	f.OnTick(f.beaconCfg.SlotsPerEpoch * f.beaconCfg.SecondsPerSlot * 1000)
 
 	require.Equal(t, next, f.JustifiedCheckpoint())
 	require.Eventually(t, func() bool {
@@ -126,9 +128,9 @@ func TestTickSkipsCheckpointStateBuild(t *testing.T) {
 		name string
 		tick func(f *ForkChoiceStore) uint64
 	}{
-		{name: "slot not advanced", tick: func(f *ForkChoiceStore) uint64 { return f.time.Load() }},
+		{name: "slot not advanced", tick: func(f *ForkChoiceStore) uint64 { return f.timeMs.Load() }},
 		{name: "not synced", tick: func(f *ForkChoiceStore) uint64 {
-			return (f.highestSeen.Load() + 2*f.beaconCfg.SlotsPerEpoch + 1) * f.beaconCfg.SecondsPerSlot
+			return (f.highestSeen.Load() + 2*f.beaconCfg.SlotsPerEpoch + 1) * f.beaconCfg.SecondsPerSlot * 1000
 		}},
 	}
 	for _, tt := range tests {
@@ -176,7 +178,7 @@ func TestConcurrentCheckpointStateMissesBuildOnce(t *testing.T) {
 	slot := f.Slot()
 	var ticks sync.WaitGroup
 	for i := uint64(1); i <= 3; i++ {
-		ticks.Go(func() { f.OnTick((slot + i) * f.beaconCfg.SecondsPerSlot) })
+		ticks.Go(func() { f.OnTick((slot + i) * f.beaconCfg.SecondsPerSlot * 1000) })
 	}
 	ticks.Wait()
 	built := make(chan error, 1)
@@ -337,7 +339,7 @@ func TestForkGraphPruneRunsOutsideLock(t *testing.T) {
 
 	tickDone := make(chan struct{})
 	go func() {
-		f.OnTick(promoted.Epoch * f.beaconCfg.SlotsPerEpoch * f.beaconCfg.SecondsPerSlot)
+		f.OnTick(promoted.Epoch * f.beaconCfg.SlotsPerEpoch * f.beaconCfg.SecondsPerSlot * 1000)
 		close(tickDone)
 	}()
 
@@ -373,12 +375,12 @@ func TestOnTickBeforeGenesisIsNoop(t *testing.T) {
 	f := buildExAnteStore(t)
 	const shift = 1000
 	f.genesisTime += shift
-	f.time.Store(f.time.Load() + shift)
-	before := f.time.Load()
+	f.timeMs.Store(f.timeMs.Load() + shift*1000)
+	before := f.timeMs.Load()
 
 	done := make(chan struct{})
 	go func() {
-		f.OnTick(f.genesisTime - 1)
+		f.OnTick(f.genesisTime*1000 - 1)
 		close(done)
 	}()
 	select {
@@ -386,5 +388,103 @@ func TestOnTickBeforeGenesisIsNoop(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("OnTick before genesis did not return")
 	}
-	require.Equal(t, before, f.time.Load())
+	require.Equal(t, before, f.timeMs.Load())
+}
+
+func TestOnTickWithSaturatedGenesisIsNoop(t *testing.T) {
+	genesisTime := uint64(math.MaxUint64/1000 + 1)
+	f, _, _, _ := buildExAnteStoreBeforeBlocks(t, nil, &genesisTime)
+	require.Zero(t, f.Slot())
+	before := f.timeMs.Load()
+
+	done := make(chan struct{})
+	go func() {
+		f.OnTick(uint64(time.Now().UnixMilli()))
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("OnTick before a saturated genesis did not return")
+	}
+	require.Equal(t, uint64(math.MaxUint64), before)
+	require.Zero(t, f.Slot())
+	require.Equal(t, before, f.timeMs.Load())
+}
+
+func TestOnTickDoesNotMoveTimeBackwards(t *testing.T) {
+	tests := []struct {
+		name        string
+		earlierTime func(slotStartMs uint64) uint64
+	}{
+		{name: "same slot", earlierTime: func(slotStartMs uint64) uint64 { return slotStartMs + 4000 }},
+		{name: "earlier slot", earlierTime: func(slotStartMs uint64) uint64 { return slotStartMs - 1000 }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := buildExAnteStore(t)
+			laterSlot := f.Slot() + 2
+			slotStartMs := (f.genesisTime + laterSlot*f.beaconCfg.SecondsPerSlot) * 1000
+			laterTimeMs := slotStartMs + 5000
+			f.OnTick(laterTimeMs)
+			f.OnTick(tt.earlierTime(slotStartMs))
+
+			assert.Equal(t, laterTimeMs/1000, f.Time())
+			assert.Equal(t, laterSlot, f.Slot())
+			assert.Equal(t, laterTimeMs, f.timeMs.Load())
+		})
+	}
+}
+
+func TestOnTickAdvancesSlotWhileForkChoiceLocked(t *testing.T) {
+	f := buildExAnteStore(t)
+	nextSlot := f.Slot() + 1
+	nextSlotTimeMs := (f.genesisTime + nextSlot*f.beaconCfg.SecondsPerSlot) * 1000
+	require.NotZero(t, f.ProposerBoostRoot())
+
+	f.mu.Lock()
+	tickDone := make(chan struct{})
+	go func() {
+		f.OnTick(nextSlotTimeMs)
+		close(tickDone)
+	}()
+
+	assert.Eventually(t, func() bool {
+		return f.Slot() == nextSlot
+	}, time.Second, time.Millisecond)
+	f.mu.Unlock()
+
+	select {
+	case <-tickDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("OnTick did not finish")
+	}
+	require.Zero(t, f.ProposerBoostRoot())
+}
+
+func TestConcurrentOnTickKeepsLatestTime(t *testing.T) {
+	const (
+		workers = 64
+		rounds  = 1000
+	)
+	f := newTestForkChoiceStore(12, 3, 32, 0, 0, 0)
+
+	for round := range rounds {
+		f.timeMs.Store(0)
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(workers)
+		for i := range workers {
+			timeMs := uint64((i+round)%workers + 1)
+			go func() {
+				defer wg.Done()
+				<-start
+				f.OnTick(timeMs)
+			}()
+		}
+		close(start)
+		wg.Wait()
+		require.Equal(t, uint64(workers), f.timeMs.Load())
+	}
 }

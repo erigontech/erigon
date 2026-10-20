@@ -480,9 +480,9 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	// record_block_timeliness: store [block_timely, ptc_timely] vector.
 	// [Modified in Gloas:EIP7732] Post-GLOAS stores a two-element timeliness vector;
 	// pre-GLOAS stores [block_timely, false]. See recordBlockTimeliness for details.
-	f.recordBlockTimeliness(block.Block, common.Hash(blockRoot))
+	currentSlot := f.recordBlockTimeliness(block.Block, common.Hash(blockRoot))
 	// update_proposer_boost_root: conditionally set proposer boost root.
-	f.updateProposerBoostRoot(headBeforeBlock, common.Hash(blockRoot))
+	f.updateProposerBoostRoot(headBeforeBlock, common.Hash(blockRoot), currentSlot)
 
 	// [New in Gloas:EIP7732] GLOAS-specific on_block logic (post state transition)
 	var pendingEnvelopeFound bool

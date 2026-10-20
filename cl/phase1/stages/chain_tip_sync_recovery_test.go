@@ -286,7 +286,7 @@ func newChainTipBatchFixtureWithRecordedStatus(t *testing.T, replayStatus execut
 		nil,
 	)
 	require.NoError(t, err)
-	store.OnTick((parent.Block.Slot + 1) * beaconCfg.SecondsPerSlot)
+	store.OnTick((parent.Block.Slot + 1) * beaconCfg.SecondsPerSlot * 1000)
 	if recordStatus {
 		store.MarkPayloadStatus(parentRoot, envelope.Message.Payload.BlockHash, execution_client.PayloadStatusNone)
 		status, found := store.GetRecentExecutionPayloadStatusByRoot(parentRoot)
@@ -385,22 +385,22 @@ func TestChainTipSyncDoesNotVerifyStoredGloasPayloadWhileExecutionEngineIsBusy(t
 	require.Zero(t, engine.newPayloadCalls)
 }
 
-func TestVerifyUnverifiedGloasPayloadsDoesNotRecordTimeoutAsVerdict(t *testing.T) {
+func TestVerifyUnverifiedGloasPayloadsDoesNotRecordInterruptedCallAsVerdict(t *testing.T) {
 	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
 	headBlock := graph.parents[headRoot]
 	delete(graph.parents, headRoot)
 	graph.insertOnAdd = true
 	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
 	engine.newPayloadFn = func(ctx context.Context, _ *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
-		<-ctx.Done()
+		cancel()
 		return execution_client.PayloadStatusNone, ctx.Err()
 	}
 	cfg.gloasVerificationCursor = headRoot
 	// Through the store's own admission, which classifies the interrupted call.
 	cfg.gloasPayloadValidator = cfg.forkChoice
 
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
-	defer cancel()
 	verifyUnverifiedGloasPayloads(ctx, cfg)
 
 	require.Equal(t, 1, engine.newPayloadCalls)

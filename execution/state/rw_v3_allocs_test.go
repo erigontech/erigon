@@ -66,7 +66,7 @@ func TestStateReader_ReadMethods_Allocs(t *testing.T) {
 	hr := NewHistoryReaderV3(histMockTx{val: accEnc}, 0)
 
 	cache := NewBlockStateCache()
-	cache.PutCommittedStorage(addr, key, make([]byte, 32))
+	cache.PutCommittedStorage(addr, key, *uint256.NewInt(1))
 	cache.PutCommittedAccount(addr, &acc)
 	cr := NewCachedReaderV3(execctx.NewTemporalTxStateGetter(fixedTemporalTx{val: make([]byte, 32)}), cache)
 	addrValue := addr.Value()
@@ -201,8 +201,6 @@ func TestCachedReaderV3_CurrentReadsCommittedWhenUnwritten(t *testing.T) {
 	require.NotSame(t, want, got, "the caller must not be able to mutate the cached account")
 }
 
-// A write this block shadows the committed view, and a nil write means the
-// account was destroyed — neither may fall through to the committed entry.
 func TestCachedReaderV3_CurrentPrefersBlockWrite(t *testing.T) {
 	t.Parallel()
 
@@ -212,13 +210,13 @@ func TestCachedReaderV3_CurrentPrefersBlockWrite(t *testing.T) {
 
 	written := cacheReadTestAccount()
 	written.Nonce = 43
-	cache.WriteAccount(addr, accounts.SerialiseV3(written), 1)
+	cache.WriteAccount(addr, *written, 1)
 	got, err := NewCurrentCachedReaderV3(nil, cache).ReadAccountData(addr)
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Equal(t, uint64(43), got.Nonce)
 
-	cache.WriteAccount(addr, nil, 2)
+	cache.DeleteAccount(addr, 2)
 	got, err = NewCurrentCachedReaderV3(nil, cache).ReadAccountData(addr)
 	require.NoError(t, err)
 	require.Nil(t, got)

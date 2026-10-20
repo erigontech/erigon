@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/transition"
+	"github.com/erigontech/erigon/cl/utils"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -32,7 +33,11 @@ import (
 
 // Slot calculates the current slot number using the time and genesis slot.
 func (f *ForkChoiceStore) Slot() uint64 {
-	return f.beaconCfg.GenesisSlot + ((f.time.Load() - f.genesisTime) / f.beaconCfg.SecondsPerSlot)
+	return f.slotAtTimeMs(f.timeMs.Load())
+}
+
+func (f *ForkChoiceStore) slotAtTimeMs(timeMs uint64) uint64 {
+	return f.beaconCfg.GenesisSlot + ((timeMs - utils.SecondsToMilliseconds(f.genesisTime)) / (f.beaconCfg.SecondsPerSlot * 1000))
 }
 
 // queueEmit defers an event send until after f.mu is released: Feed.Send blocks
@@ -369,12 +374,6 @@ func (f *ForkChoiceStore) storeCheckpointState(checkpoint solid.Checkpoint, chec
 		}
 		f.checkpointStates.Delete(oldest)
 	}
-}
-
-// LoadJustifiedCheckpointState loads the current justified checkpoint state into the cache.
-func (f *ForkChoiceStore) LoadJustifiedCheckpointState() error {
-	_, err := f.getCheckpointState(f.justifiedCheckpoint.Load().(solid.Checkpoint))
-	return err
 }
 
 func getUnslashedActiveBalance(beaconState *state.CachingBeaconState) uint64 {
