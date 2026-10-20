@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"maps"
 	"math/rand"
@@ -254,6 +255,8 @@ func parallelRoundConvertOps(r *rand.Rand, k int) []Op {
 	return sortParallelRoundOps(ops)
 }
 
+var errParallelRoundSerial = errors.New("no second task started while the first task was in progress")
+
 func holdFirstTaskForSecond(trie *Trie) {
 	var started atomic.Int32
 	both := make(chan struct{})
@@ -266,24 +269,25 @@ func holdFirstTaskForSecond(trie *Trie) {
 		}
 		select {
 		case <-both:
-		case <-time.After(time.Second):
+			return nil
+		case <-time.After(5 * time.Second):
+			return errParallelRoundSerial
 		}
-		return nil
 	})
 }
 
 func TestParallelRoundMatchesSequential(t *testing.T) {
 	corpus := newParallelRoundCorpus(t, parallelRoundTestShape)
 	cases := []struct {
-		name     string
-		base     map[string][]byte
-		minViews int
-		ops      func(*rand.Rand) []Op
+		name       string
+		base       map[string][]byte
+		concurrent bool
+		ops        func(*rand.Rand) []Op
 	}{
-		{name: "tip", base: corpus.snapshot, minViews: 2, ops: func(r *rand.Rand) []Op { return corpus.updates(r, 200, 20) }},
-		{name: "reexec", base: corpus.snapshot, minViews: 2, ops: func(r *rand.Rand) []Op { return corpus.updates(r, 600, 0) }},
-		{name: "convert", base: map[string][]byte{}, minViews: 1, ops: func(r *rand.Rand) []Op { return parallelRoundConvertOps(r, 300) }},
-		{name: "churn", base: corpus.snapshot, minViews: 2, ops: func(r *rand.Rand) []Op { return corpus.churn(r, 300, 12) }},
+		{name: "tip", base: corpus.snapshot, concurrent: true, ops: func(r *rand.Rand) []Op { return corpus.updates(r, 200, 20) }},
+		{name: "reexec", base: corpus.snapshot, concurrent: true, ops: func(r *rand.Rand) []Op { return corpus.updates(r, 600, 0) }},
+		{name: "convert", base: map[string][]byte{}, ops: func(r *rand.Rand) []Op { return parallelRoundConvertOps(r, 300) }},
+		{name: "churn", base: corpus.snapshot, concurrent: true, ops: func(r *rand.Rand) []Op { return corpus.churn(r, 300, 12) }},
 	}
 	for _, tc := range cases {
 		for _, workers := range []int{2, 4, 8} {
@@ -298,14 +302,15 @@ func TestParallelRoundMatchesSequential(t *testing.T) {
 
 					base := newParallelRoundBase(snapshot)
 					trie := base.trie()
-					if tc.minViews >= 2 {
+					if tc.concurrent {
 						holdFirstTaskForSecond(trie)
 					}
 					gotRoot, err := trie.ProcessParallelContext(t.Context(), ops, workers)
+					require.NotErrorIs(t, err, errParallelRoundSerial, "round=%d", round)
 					require.NoError(t, err, "round=%d", round)
 					require.Equal(t, wantRoot, gotRoot, "round=%d", round)
 					require.Equal(t, sequential.records, base.main.records, "round=%d", round)
-					require.GreaterOrEqual(t, base.servedViews(), tc.minViews, "round=%d views that served reads", round)
+					require.Positive(t, base.servedViews(), "round=%d views that served reads", round)
 					snapshot = sequential.records
 				}
 			})
