@@ -409,10 +409,10 @@ func (c *Compressor) Compress() error {
 }
 
 func (c *Compressor) DisableFsync()    { c.noFsync = true }
+func (c *Compressor) Timings() Timings { return c.timings }
 
 // SetOutputPacer makes Compress write the output file in 1 MB chunks, calling wait before each chunk.
 func (c *Compressor) SetOutputPacer(wait func() error) { c.outputPacer = wait }
-func (c *Compressor) Timings() Timings { return c.timings }
 
 func (c *Compressor) CollectTimings() {
 	c.timings.Enabled, c.timings.AddStart = true, time.Now() // assume Adding data into compressor starting
