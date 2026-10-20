@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -61,6 +62,7 @@ func setupProposerPreferencesService(t *testing.T, ctrl *gomock.Controller) (*pr
 		now: func() time.Time {
 			return ethClockMock.GetSlotTime(ethClockMock.GetCurrentSlot())
 		},
+		validationViews: newProposerPreferencesViewCache(),
 	}
 
 	return service, mockSyncedData, ethClockMock, epbsPool, forkChoiceMock
@@ -559,6 +561,70 @@ func TestProposerPreferencesServiceMissingStatePrecedesBoundaryReject(t *testing
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.ErrorIs(t, err, ErrIgnore)
 	require.Contains(t, err.Error(), "state for dependent_root")
+}
+
+func TestProposerPreferencesServiceImpossibleDependentRootSkipsStateLoad(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	service, _, ethClock, _, fc := setupProposerPreferencesService(t, ctrl)
+	fc.HeadVal = common.HexToHash("0x99")
+	stateLoads := 0
+	fc.GetStateAtBlockRootFn = func(root common.Hash, _ bool) (*state2.CachingBeaconState, error) {
+		stateLoads++
+		return fc.StateAtBlockRootVal[root].Copy()
+	}
+	ethClock.EXPECT().GetCurrentSlot().Return(uint64(90))
+
+	err := service.ProcessMessage(context.Background(), nil, newTestSignedProposerPreferences(100, 42))
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Contains(t, err.Error(), "not a possible dependent block")
+	require.Zero(t, stateLoads)
+}
+
+func TestProposerPreferencesServiceSharesDependentStateAcrossSlots(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	service, _, ethClock, _, fc := setupProposerPreferencesService(t, ctrl)
+	stateLoads := 0
+	fc.GetStateAtBlockRootFn = func(root common.Hash, _ bool) (*state2.CachingBeaconState, error) {
+		stateLoads++
+		return fc.StateAtBlockRootVal[root].Copy()
+	}
+	ethClock.EXPECT().GetCurrentSlot().Return(uint64(90)).Times(2)
+
+	require.NoError(t, service.ProcessMessage(context.Background(), nil, newTestSignedProposerPreferences(96, 42)))
+	require.NoError(t, service.ProcessMessage(context.Background(), nil, newTestSignedProposerPreferences(100, 42)))
+	require.Equal(t, 1, stateLoads)
+}
+
+func TestProposerPreferencesServiceSharesDependentStateLoadInFlight(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	service, _, ethClock, _, fc := setupProposerPreferencesService(t, ctrl)
+	var stateLoads atomic.Int32
+	release := make(chan struct{})
+	fc.GetStateAtBlockRootFn = func(root common.Hash, _ bool) (*state2.CachingBeaconState, error) {
+		stateLoads.Add(1)
+		<-release
+		return fc.StateAtBlockRootVal[root].Copy()
+	}
+	ethClock.EXPECT().GetCurrentSlot().Return(uint64(90)).Times(2)
+
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, slot := range []uint64{96, 100} {
+		wg.Go(func() {
+			errs <- service.ProcessMessage(context.Background(), nil, newTestSignedProposerPreferences(slot, 42))
+		})
+	}
+	time.Sleep(100 * time.Millisecond)
+	close(release)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	require.Equal(t, int32(1), stateLoads.Load())
 }
 
 func TestProposerPreferencesDependentRootValidity(t *testing.T) {
