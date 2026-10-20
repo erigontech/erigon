@@ -387,17 +387,21 @@ func opKeccak256(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 	return pc, nil, nil
 }
 
-func (ctx *CallContext) pushAddressWord(index addressWordIndex, address accounts.Address) {
-	if ctx.addressWordsSet&(1<<index) == 0 {
-		value := address.Value()
-		ctx.addressWords[index].SetBytes(value[:])
-		ctx.addressWordsSet |= 1 << index
+func (ctx *CallContext) addressWord(index addressWordIndex, address accounts.Address) *uint256.Int {
+	if !ctx.addressWordsSet[index] {
+		ctx.fillAddressWord(index, address)
 	}
-	ctx.Stack.push(ctx.addressWords[index])
+	return &ctx.addressWords[index]
+}
+
+func (ctx *CallContext) fillAddressWord(index addressWordIndex, address accounts.Address) {
+	value := address.Value()
+	ctx.addressWords[index].SetBytes(value[:])
+	ctx.addressWordsSet[index] = true
 }
 
 func opAddress(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	scope.pushAddressWord(addressWordSelf, scope.Contract.Address())
+	*scope.Stack.pushRef() = *scope.addressWord(addressWordSelf, scope.Contract.Address())
 	return pc, nil, nil
 }
 
@@ -415,12 +419,12 @@ func opBalance(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 }
 
 func opOrigin(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	scope.pushAddressWord(addressWordOrigin, evm.Origin)
+	*scope.Stack.pushRef() = *scope.addressWord(addressWordOrigin, evm.Origin)
 	return pc, nil, nil
 }
 
 func opCaller(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	scope.pushAddressWord(addressWordCaller, scope.Contract.Caller())
+	*scope.Stack.pushRef() = *scope.addressWord(addressWordCaller, scope.Contract.Caller())
 	return pc, nil, nil
 }
 
@@ -698,7 +702,7 @@ func stBlockhash(_ uint64, scope *CallContext) string {
 }
 
 func opCoinbase(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	scope.pushAddressWord(addressWordCoinbase, evm.Context.Coinbase)
+	*scope.Stack.pushRef() = *scope.addressWord(addressWordCoinbase, evm.Context.Coinbase)
 	return pc, nil, nil
 }
 
