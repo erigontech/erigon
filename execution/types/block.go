@@ -1414,7 +1414,6 @@ func (b *Block) BlockAccessList() BlockAccessList { return b.bal.BlockAccessList
 // BlockAccessListSidecar returns the block's immutable EIP-7928 sidecar.
 func (b *Block) BlockAccessListSidecar() *BlockAccessListSidecar { return b.bal }
 
-// InclusionList returns the block's inclusion list.
 func (b *Block) InclusionList() Transactions { return b.il }
 
 // Header returns a deep-copy of the entire block header using CopyHeader()

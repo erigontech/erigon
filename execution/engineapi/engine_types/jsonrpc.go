@@ -175,6 +175,18 @@ type PayloadStatusV2 struct {
 	CriticalError          error             `json:"-"`
 }
 
+func (s *PayloadStatusV2) ToPayloadStatus() *PayloadStatus {
+	if s == nil {
+		return nil
+	}
+	return &PayloadStatus{
+		Status:          s.Status,
+		ValidationError: s.ValidationError,
+		LatestValidHash: s.LatestValidHash,
+		CriticalError:   s.CriticalError,
+	}
+}
+
 type ForkChoiceUpdatedResponse struct {
 	PayloadId     *hexutil.Bytes `json:"payloadId"` // We need to reformat the uint64 so this makes more sense.
 	PayloadStatus *PayloadStatus `json:"payloadStatus"`

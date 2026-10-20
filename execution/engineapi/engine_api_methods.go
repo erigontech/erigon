@@ -201,8 +201,7 @@ func (e *EngineServer) NewPayloadV1(ctx context.Context, payload *engine_types.E
 	if err != nil {
 		return nil, err
 	}
-	ret, _ := resp.(*engine_types.PayloadStatus)
-	return ret, nil
+	return resp.ToPayloadStatus(), nil
 }
 
 // NewPayloadV2 processes new payloads (blocks) from the beacon chain with withdrawals.
@@ -212,8 +211,7 @@ func (e *EngineServer) NewPayloadV2(ctx context.Context, payload *engine_types.E
 	if err != nil {
 		return nil, err
 	}
-	ret, _ := resp.(*engine_types.PayloadStatus)
-	return ret, nil
+	return resp.ToPayloadStatus(), nil
 }
 
 // NewPayloadV3 processes new payloads (blocks) from the beacon chain with withdrawals & blob gas.
@@ -225,8 +223,7 @@ func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.E
 	if err != nil {
 		return nil, err
 	}
-	ret, _ := resp.(*engine_types.PayloadStatus)
-	return ret, nil
+	return resp.ToPayloadStatus(), nil
 }
 
 // NewPayloadV4 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas and requests.
@@ -238,8 +235,7 @@ func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.E
 	if err != nil {
 		return nil, err
 	}
-	ret, _ := resp.(*engine_types.PayloadStatus)
-	return ret, nil
+	return resp.ToPayloadStatus(), nil
 }
 
 // NewPayloadV5 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas, requests and block access list.
@@ -251,8 +247,7 @@ func (e *EngineServer) NewPayloadV5(ctx context.Context, payload *engine_types.E
 	if err != nil {
 		return nil, err
 	}
-	ret, _ := resp.(*engine_types.PayloadStatus)
-	return ret, nil
+	return resp.ToPayloadStatus(), nil
 }
 
 // NewPayloadV6 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas, requests, block access list and inclusion list.
@@ -264,8 +259,7 @@ func (e *EngineServer) NewPayloadV6(ctx context.Context, payload *engine_types.E
 	if err != nil {
 		return nil, err
 	}
-	ret, _ := resp.(*engine_types.PayloadStatusV2)
-	return ret, nil
+	return resp, nil
 }
 
 // Returns an array of execution payload bodies referenced by their block hashes
