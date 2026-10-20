@@ -1356,7 +1356,8 @@ func (sd *SharedDomains) latestFromMem(domain kv.Domain, key []byte) (v []byte, 
 
 type getLatestOptions struct {
 	codeHash []byte
-	buf      []byte
+	// buf is lent for decoding code; getLatest sets *buf to nil when the code cache keeps it.
+	buf *[]byte
 }
 
 func (opts getLatestOptions) withCodeHash(codeHash []byte) getLatestOptions {
@@ -1472,8 +1473,8 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	}
 	willFill := !sd.hasLocalCacheUnwind() && maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
 	fillsCode := willFill && len(opts.codeHash) == len(common.Hash{})
-	if fillsCode {
-		getOpts = getOpts.WithBuf(opts.buf)
+	if fillsCode && opts.buf != nil {
+		getOpts = getOpts.WithBuf(*opts.buf)
 	}
 
 	v, step, err = tx.GetLatest(domain, k, getOpts)
@@ -1491,7 +1492,11 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 			fillView = fillView.WithFrontier(sd.cacheFrontierFor(tx))
 		}
 		if fillsCode {
-			v = fillView.FillCode(k, v, opts.codeHash, readTxNum, decodedInto(v, opts.buf))
+			owned := opts.buf != nil && decodedInto(v, *opts.buf)
+			if owned {
+				*opts.buf = nil
+			}
+			v = fillView.FillCode(k, v, opts.codeHash, readTxNum, owned)
 		} else {
 			fillView.Fill(domain, k, v, readTxNum)
 		}
@@ -1611,7 +1616,7 @@ func (sd *SharedDomains) GetCode(tx kv.TemporalTx, addr []byte, txNum uint64) ([
 	return sd.getCode(tx, sd.cacheReader(), addr, txNum, nil)
 }
 
-func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64, buf []byte) ([]byte, bool, error) {
+func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64, buf *[]byte) ([]byte, bool, error) {
 	if tx == nil {
 		return nil, false, errors.New("sd.GetCode: unexpected nil tx")
 	}

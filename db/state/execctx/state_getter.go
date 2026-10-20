@@ -48,10 +48,7 @@ func (g *stateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptio
 }
 
 func (g *stateGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
-	code, ok, err := g.sd.getCode(g.tx, g.view, addr, txNum, g.codeBuf)
-	if len(code) > 0 && cap(g.codeBuf) > 0 && &code[0] == &g.codeBuf[:1][0] {
-		g.codeBuf = nil // the code cache kept the buffer
-	}
+	code, ok, err := g.sd.getCode(g.tx, g.view, addr, txNum, &g.codeBuf)
 	g.codeBuf = slices.Grow(g.codeBuf[:0], min(len(code), maxLentCodeBuf))
 	return code, ok, err
 }
