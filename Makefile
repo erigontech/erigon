@@ -61,8 +61,10 @@ ifeq ($(GOARCH),amd64)
 endif
 
 CGO_CFLAGS += -Wno-enum-int-mismatch -Wno-strict-prototypes -Wno-unused-but-set-variable -O3 -DNDEBUG $(CGO_MARCH)
-# Clang-only: lets clang skip the gcc-only flags above. gcc reports it as unrecognized next to any other warning.
-ifneq (,$(findstring clang,$(shell $(shell $(GO) env CC 2>/dev/null) --version 2>/dev/null)))
+# Lets clang skip the gcc-only flag above. gcc does not know it and reports it next to any other warning, so leave it
+# out only for gcc; other or unknown compilers keep it. make < 4.4 does not pass a command-line CC to $(shell).
+CGO_CC := $(shell $(if $(filter command line,$(origin CC)),CC='$(CC)') $(GO) env CC 2>/dev/null)
+ifeq (,$(findstring Free Software Foundation,$(if $(CGO_CC),$(shell $(CGO_CC) --version 2>/dev/null))))
 	CGO_CFLAGS += -Wno-unknown-warning-option
 endif
 
