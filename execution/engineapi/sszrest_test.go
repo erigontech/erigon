@@ -84,6 +84,28 @@ func TestSSZRESTPayloadStatusV2InclusionListSatisfiedRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSSZRESTPayloadStatusV2DecodeClearsReusedReceiver(t *testing.T) {
+	latest := common.HexToHash("0x1234")
+	satisfied := true
+	valid, err := (&engine_types.PayloadStatusV2{
+		Status:                 engine_types.ValidStatus,
+		LatestValidHash:        &latest,
+		ValidationError:        engine_types.NewStringifiedErrorFromString("stale"),
+		InclusionListSatisfied: &satisfied,
+	}).EncodeSSZ(nil)
+	require.NoError(t, err)
+	syncing, err := (&engine_types.PayloadStatusV2{Status: engine_types.SyncingStatus}).EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	var out engine_types.PayloadStatusV2
+	require.NoError(t, out.DecodeSSZ(valid, 0))
+	require.NoError(t, out.DecodeSSZ(syncing, 0))
+	require.Equal(t, engine_types.SyncingStatus, out.Status)
+	require.Nil(t, out.LatestValidHash)
+	require.Nil(t, out.ValidationError)
+	require.Nil(t, out.InclusionListSatisfied)
+}
+
 func TestSSZRESTPayloadStatusV2RejectsNonBooleanInclusionListSatisfied(t *testing.T) {
 	satisfied := true
 	enc, err := (&engine_types.PayloadStatusV2{Status: engine_types.ValidStatus, InclusionListSatisfied: &satisfied}).EncodeSSZ(nil)

@@ -300,6 +300,9 @@ func (s *PayloadStatusV2) DecodeSSZ(buf []byte, version int) error {
 		return err
 	}
 	s.Status = engineStatus
+	s.LatestValidHash = nil
+	s.ValidationError = nil
+	s.InclusionListSatisfied = nil
 	if latest.Length() > 0 {
 		hash := latest.Get(0)
 		s.LatestValidHash = &hash
