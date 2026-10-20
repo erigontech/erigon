@@ -1109,7 +1109,11 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 		store = func(ctx context.Context) error {
 			if needsImportClaim {
 				block := job.block.Block
-				if parentHeader, ok := b.forkchoiceStore.GetHeader(block.ParentRoot); ok && parentHeader.Slot >= block.Slot {
+				parentHeader, ok := b.forkchoiceStore.GetHeader(block.ParentRoot)
+				if !ok {
+					return fmt.Errorf("%w: parent header not found: %v", ErrIgnore, block.ParentRoot)
+				}
+				if parentHeader.Slot >= block.Slot {
 					return fmt.Errorf("%w: %w", forkchoice.ErrBlockInvalid, ErrBlockYoungerThanParent)
 				}
 				validationContext, err := b.blockValidationContext(ctx, block.ParentRoot, block.Slot)

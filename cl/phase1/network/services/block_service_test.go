@@ -25,6 +25,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -1478,13 +1479,30 @@ func TestUnknownParentBlockDoesNotHoldPayloadPreparation(t *testing.T) {
 	defer finish()
 
 	job := queued.(*blockJob)
-	for range 2 {
-		service.(*blockService).processScheduledBlock(t.Context(), root, job, time.Now())
-		require.NoError(t, context.Cause(ctx))
-		require.ErrorIs(t, job.lastAttempt.err, ErrIgnore)
-		_, scheduled = service.(*blockService).blocksScheduledForLaterExecution.Load(root)
-		require.True(t, scheduled)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		bs := service.(*blockService)
+		store.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+			t.Error("unknown-parent retry fetched parent state")
+			return nil, nil
+		}
+		retryCtx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+
+		for _, full := range []bool{false, true} {
+			bs.validationSlots = make(chan struct{}, 1)
+			if full {
+				bs.validationSlots <- struct{}{}
+			}
+
+			bs.processScheduledBlock(retryCtx, root, job, time.Now())
+
+			require.NoError(t, retryCtx.Err(), "unknown-parent retry waited for validation capacity")
+			require.NoError(t, context.Cause(ctx))
+			require.ErrorIs(t, job.lastAttempt.err, ErrIgnore)
+			_, scheduled = bs.blocksScheduledForLaterExecution.Load(root)
+			require.True(t, scheduled)
+		}
+	})
 }
 
 func TestScheduledBlockWaitsForProposerStateBeforeCancelingPayloadPreparation(t *testing.T) {
