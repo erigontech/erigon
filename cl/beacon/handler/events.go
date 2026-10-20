@@ -140,6 +140,8 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 		// Abort a write that is in flight; stop is closed first so the writer cannot re-arm the deadline and continue.
 		_ = setWriteDeadline(http.NewResponseController(w), time.Now())
 		<-writerDone
+		// The writer may have cleared or re-armed the deadline after the abort above.
+		_ = setWriteDeadline(http.NewResponseController(w), time.Now())
 	}()
 	enqueue := func(msg []byte) bool {
 		if queue.push(msg) {

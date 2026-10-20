@@ -155,7 +155,6 @@ func TestEventStreamOverflowClosesStalledStream(t *testing.T) {
 	}
 
 	sendBlocks(t, a, 2*eventStreamWriteQueueSize, "a stalled event stream client blocked the event emitter")
-	close(w.expire)
 	waitDone(t, handlerDone, "overflowed event stream did not close while the client was stalled")
 }
 
@@ -251,4 +250,15 @@ func TestWriteEventStreamWithoutDeadlineSupport(t *testing.T) {
 
 	require.NoError(t, writeEventStream(w, q, nil))
 	require.Equal(t, "a", w.Body.String())
+}
+
+func TestWriteEventStreamReleasesQueuedBytes(t *testing.T) {
+	w := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	q := newEventStreamQueue()
+	require.True(t, q.push([]byte("a")))
+	require.True(t, q.push([]byte("bc")))
+	close(q.msgs)
+
+	require.NoError(t, writeEventStream(w, q, nil))
+	require.Zero(t, q.queued.Load())
 }
