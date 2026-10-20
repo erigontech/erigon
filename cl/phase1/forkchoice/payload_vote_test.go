@@ -199,6 +199,32 @@ func TestPtcBoolToVote(t *testing.T) {
 	require.Equal(t, int8(-1), boolToVote(false))
 }
 
+func TestPayloadAttestationVotesReportsPresence(t *testing.T) {
+	root := common.HexToHash("0x01")
+	f := &ForkChoiceStore{}
+
+	timeliness, dataAvailability, timelinessPresent, dataAvailabilityPresent := f.PayloadAttestationVotes(root)
+	require.Equal(t, [clparams.PtcSize]int8{}, timeliness)
+	require.Equal(t, [clparams.PtcSize]int8{}, dataAvailability)
+	require.False(t, timelinessPresent)
+	require.False(t, dataAvailabilityPresent)
+
+	f.payloadTimelinessVote.Store(root, [clparams.PtcSize]int8{})
+	_, _, timelinessPresent, dataAvailabilityPresent = f.PayloadAttestationVotes(root)
+	require.True(t, timelinessPresent)
+	require.False(t, dataAvailabilityPresent)
+
+	f.payloadDataAvailabilityVote.Store(root, [clparams.PtcSize]int8{})
+	_, _, timelinessPresent, dataAvailabilityPresent = f.PayloadAttestationVotes(root)
+	require.True(t, timelinessPresent)
+	require.True(t, dataAvailabilityPresent)
+
+	f.payloadTimelinessVote.Delete(root)
+	_, _, timelinessPresent, dataAvailabilityPresent = f.PayloadAttestationVotes(root)
+	require.False(t, timelinessPresent)
+	require.True(t, dataAvailabilityPresent)
+}
+
 func TestPtcPayloadTimelinessVoteCounting(t *testing.T) {
 	root := common.HexToHash("0x01")
 	f := newPtcVoteTestStore(root)
@@ -405,7 +431,7 @@ func TestPtcShouldBuildOnFullReadsOneVoteSnapshot(t *testing.T) {
 func TestPtcShouldBuildOnFullIgnoresVotesBeforePreviousSlot(t *testing.T) {
 	root := common.HexToHash("0x05")
 	f := newPtcVoteTestStore(root)
-	f.time.Store(2 * f.beaconCfg.SecondsPerSlot)
+	f.timeMs.Store(2 * f.beaconCfg.SecondsPerSlot * 1000)
 	f.payloadDataAvailabilityVote.Store(root, ptcVotes(0, ptcVoteThreshold()+1))
 	f.payloadTimelinessVote.Store(root, ptcVotes(0, ptcVoteThreshold()+1))
 
@@ -971,7 +997,7 @@ func newPtcVoteTestStore(root common.Hash) *ForkChoiceStore {
 
 		verifiedExecutionPayload: verifiedExecutionPayload,
 	}
-	f.time.Store(cfg.SecondsPerSlot)
+	f.timeMs.Store(cfg.SecondsPerSlot * 1000)
 	return f
 }
 
@@ -1010,6 +1036,31 @@ func newPayloadVoteTestStore(t *testing.T, root common.Hash, hasEnvelope, verifi
 	f.payloadDataAvailabilityVote.Store(root, ptcVotes(majority, 0))
 
 	return f
+}
+
+// The recorded votes count before the payload is applied: the votes alone decide whether the FULL
+// variant can still be built on.
+func TestPayloadVotesRuleOutFullCountsVotesBeforeThePayloadIsApplied(t *testing.T) {
+	root := common.HexToHash("0x1")
+	majority := ptcVoteThreshold() + 1
+	for _, tc := range []struct {
+		name                  string
+		timeliness, dataVotes [clparams.PtcSize]int8
+		ruledOut              bool
+	}{
+		{name: "no votes", ruledOut: false},
+		{name: "timely and available", timeliness: ptcVotes(majority, 0), dataVotes: ptcVotes(majority, 0), ruledOut: false},
+		{name: "not timely", timeliness: ptcVotes(0, majority), dataVotes: ptcVotes(majority, 0), ruledOut: true},
+		{name: "data not available", timeliness: ptcVotes(majority, 0), dataVotes: ptcVotes(0, majority), ruledOut: true},
+		{name: "not timely without a majority", timeliness: ptcVotes(0, ptcVoteThreshold()), ruledOut: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPayloadVoteTestStore(t, root, false, false)
+			f.payloadTimelinessVote.Store(root, tc.timeliness)
+			f.payloadDataAvailabilityVote.Store(root, tc.dataVotes)
+			require.Equal(t, tc.ruledOut, f.PayloadVotesRuleOutFull(root))
+		})
+	}
 }
 
 func ptcVoteThreshold() int {

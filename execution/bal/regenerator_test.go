@@ -84,7 +84,7 @@ func TestRegeneratorReproducesCanonicalBlockAccessLists(t *testing.T) {
 		require.NotNil(t, expectedBAL, "block %d should have a canonical BAL", block.NumberU64())
 		expected, err := types.EncodeBlockAccessListBytes(expectedBAL)
 		require.NoError(t, err)
-		got, err := gen.GetBlockAccessListBytes(ctx, m.ChainConfig, ttx, block.Hash(), block.NumberU64())
+		got, err := gen.GetBlockAccessListBytes(ctx, m.ChainConfig, ttx, block.Hash(), block.NumberU64(), nil)
 		require.NoError(t, err, "block %d", block.NumberU64())
 		require.Equal(t, expected, got, "block %d", block.NumberU64())
 		decoded, err := types.DecodeBlockAccessListBytes(got)
@@ -148,7 +148,7 @@ func TestRegeneratorReturnsNilForPreAmsterdamBlocks(t *testing.T) {
 	ttx, err := m.DB.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer ttx.Rollback()
-	got, err := gen.GetBlockAccessListBytes(ctx, m.ChainConfig, ttx, chainPack.Blocks[0].Hash(), chainPack.Blocks[0].NumberU64())
+	got, err := gen.GetBlockAccessListBytes(ctx, m.ChainConfig, ttx, chainPack.Blocks[0].Hash(), chainPack.Blocks[0].NumberU64(), nil)
 	require.NoError(t, err)
 	require.Nil(t, got)
 }

@@ -611,6 +611,35 @@ func TestSimulateV1PopulatesMaxUsedGas(t *testing.T) {
 	assert.GreaterOrEqual(t, uint64(call.MaxUsedGas), uint64(call.GasUsed))
 }
 
+func TestSimulateV1IgnoresLoneBlobFeeCap(t *testing.T) {
+	for _, validation := range []bool{false, true} {
+		t.Run(fmt.Sprintf("validation %v", validation), func(t *testing.T) {
+			m, _, bankAddr := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+			api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+			to := common.HexToAddress("0x3333333333333333333333333333333333333333")
+			gas := hexutil.Uint64(21_000)
+			feeCap := (*hexutil.U256)(uint256.NewInt(1_000_000_000))
+
+			result, err := api.SimulateV1(context.Background(), SimulationRequest{
+				BlockStateCalls: []SimulatedBlock{{Calls: []ethapi.CallArgs{{
+					From:                 &bankAddr,
+					To:                   &to,
+					Gas:                  &gas,
+					MaxFeePerGas:         feeCap,
+					MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(0)),
+					MaxFeePerBlobGas:     (*hexutil.U256)(uint256.NewInt(0)),
+				}}}},
+				Validation: validation,
+			}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+			require.NoError(t, err)
+			require.Len(t, result, 1)
+			require.Len(t, result[0].Calls, 1)
+			require.Nil(t, result[0].Calls[0].Error)
+			require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(result[0].Calls[0].Status))
+		})
+	}
+}
+
 // A base fee override must reach the BASEFEE opcode in non-validation mode too,
 // where the call carries no gas price of its own.
 func TestSimulateV1BaseFeeOverrideReachesEVM(t *testing.T) {
@@ -730,6 +759,33 @@ func TestSimulateV1WithdrawalsOverrideCreditsBalance(t *testing.T) {
 	require.Len(t, calls, 1)
 	require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(calls[0].Status))
 	assert.Equal(t, "0x00000000000000000000000000000000000000000000000000000001a13b8600", calls[0].ReturnData)
+}
+
+func TestSimulateV1MaxNonceSender(t *testing.T) {
+	for _, validation := range []bool{false, true} {
+		t.Run(fmt.Sprintf("validation=%v", validation), func(t *testing.T) {
+			m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+			api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+			to := common.HexToAddress("0x00000000000000000000000000000000c0ffee03")
+			maxNonce := hexutil.Uint64(math.MaxUint64)
+			gas := hexutil.Uint64(100_000)
+
+			_, err := api.SimulateV1(context.Background(), SimulationRequest{
+				BlockStateCalls: []SimulatedBlock{{
+					StateOverrides: &ethapi.StateOverrides{
+						accounts.InternAddress(bankAddr): {Nonce: &maxNonce},
+					},
+					Calls: []ethapi.CallArgs{{From: &bankAddr, To: &to, Gas: &gas}},
+				}},
+				Validation: validation,
+			}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+			var customErr *rpc.CustomError
+			require.ErrorAs(t, err, &customErr)
+			assert.Equal(t, rpc.ErrCodeInternalError, customErr.Code)
+			assert.ErrorContains(t, err, protocol.ErrNonceMax.Error())
+		})
+	}
 }
 
 func TestSimulateV1ClientDecodesMaxUsedGas(t *testing.T) {

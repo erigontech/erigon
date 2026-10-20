@@ -32,7 +32,7 @@ URL: https://docs.erigon.tech/get-started/why-using-erigon
 
 Erigon is an Ethereum execution layer client focused on performance, low disk usage, and modular architecture.
 
-A core benefit of Erigon is its **reduced disk footprint** across all available pruning modes — achieved through efficient state storage and compression, making node operation feasible on consumer-grade hardware. It also features an **integrated Consensus Layer (Caplin)**, eliminating the need for separate CL software, and a **BitTorrent-based protocol** for decentralised historical data distribution.
+A core benefit of Erigon is its **reduced disk footprint** across all available pruning modes — achieved through efficient state storage and compression, making node operation feasible on consumer-grade hardware. It also features an **integrated Consensus Layer (Caplin)**, eliminating the need for separate Consensus Layer (CL) software, and a **BitTorrent-based protocol** for decentralised historical data distribution.
 
 10×
 
@@ -102,7 +102,7 @@ A locally mounted **SSD** (Solid-State Drive) or **NVMe** (Non-Volatile Memory E
 | Component | Recommendation | Notes |
 | --- | --- | --- |
 | Disk Type | Use high-end NVMe SSDs. | Avoid HDDs. SSD performance may degrade when nearing full capacity. |
-| Disk Configuration | A single NVMe device is enough for any pruning mode. | An archive node fits on one 4 TB drive, so RAID 0 striping is not needed. For failure protection, use a mirrored array, not RAID 0. See [Filesystem](https://docs.erigon.tech/get-started/hardware-requirements#filesystem). |
+| Disk Configuration | A single NVMe device is enough for any pruning mode. | An archive node fits on one 4 TB drive, so striping across a redundant array of independent disks (RAID 0) is not needed. For failure protection, use a mirrored array, not RAID 0. See [Filesystem](https://docs.erigon.tech/get-started/hardware-requirements#filesystem). |
 | Filesystem | ext4 or XFS | See [Filesystem](https://docs.erigon.tech/get-started/hardware-requirements#filesystem) below. |
 | RAM | Adequate memory is crucial | Reduces bottlenecks during sync and improves performance under load. |
 | CPU | 4–8 cores for Full nodes, 8–16 cores for Archive nodes | More cores are generally better for intense sync and query operations. On amd64, the CPU must support the `x86-64-v2` baseline (SSE4.2, POPCNT): Intel Nehalem (2008), AMD Bulldozer (2011) or newer. |
@@ -122,7 +122,7 @@ Use the filesystem UUID (`blkid` prints it) rather than a `/dev/nvme…` name, w
 
 ### Why the filesystem matters
 
-Erigon's bottleneck is disk **latency**, not throughput or IOPS — see [Improving Performance](https://docs.erigon.tech/help-center/known-issues#improving-performance). Erigon does pre-warm what it can, but two properties of the workload mean its reads cannot be fully predicted, so part of every block's reads lands cold:
+Erigon's bottleneck is disk **latency**, not throughput or input/output operations per second (IOPS) — see [Improving Performance](https://docs.erigon.tech/help-center/known-issues#improving-performance). Erigon does pre-warm what it can, but two properties of the workload mean its reads cannot be fully predicted, so part of every block's reads lands cold:
 
 - **EVM execution reads arbitrary state.** Nothing tells you in advance which accounts or storage slots a block will touch. Once the working set no longer fits in RAM, some of those reads land on cold data no cache had reason to hold.
 - **Merkle trie updates pull in neighbours.** Updating one key requires reading the nodes next to it in the trie. Those may be accounts the EVM never touches — they are involved only because of where they sit in the trie.
@@ -151,7 +151,7 @@ It is a warning, not a refusal: the node starts and runs either way. A type Erig
 A few more points that follow from Erigon's storage model — see [Database](https://docs.erigon.tech/fundamentals/database) for the layout:
 
 - **One device is enough.** An archive node fits on a single 4 TB drive, so RAID 0 gains you no capacity you need while doubling the chance of losing the datadir. Stripe only if no single drive you have is large enough.
-- **For failure protection, use redundancy — not RAID 0.** A mirrored array and ECC memory guard against a failing disk or bad RAM, which is what [Best Practices](https://docs.erigon.tech/help-center/best-practices) recommends. RAID 0 does the opposite.
+- **For failure protection, use redundancy — not RAID 0.** A mirrored array and error-correcting code (ECC) memory guard against a failing disk or bad RAM, which is what [Best Practices](https://docs.erigon.tech/help-center/best-practices) recommends. RAID 0 does the opposite.
 - **Most of the datadir is re-downloadable.** Snapshot files are content-addressed and refetched from peers, so `chaindata/` is the part worth backing up.
 - **Erigon memory-maps its database.** Leave RAM free for the page cache rather than handing it to a filesystem or volume manager to cache on its own.
 - **Network and cloud block storage are slow for block execution.** See [known issues](https://docs.erigon.tech/help-center/known-issues#cloud-network-drives).
@@ -833,7 +833,7 @@ The choice of data location directly impacts how you must configure the RPC Daem
 
 Be aware that the default WSL2 environment uses its own internal IP address, which is distinct from the IP address of your Windows host machine.
 
-If you need to connect to Erigon from an external network (e.g., opening a port on your home router for peering on port `30303`), you must account for this separate WSL2 IP address when configuring NAT on your router. Alternatively consider [Mirrored mode networking](https://learn.microsoft.com/en-us/windows/wsl/networking#mirrored-mode-networking).
+If you need to connect to Erigon from an external network (e.g., opening a port on your home router for peering on port `30303`), you must account for this separate WSL2 IP address when configuring Network Address Translation (NAT) on your router. Alternatively consider [Mirrored mode networking](https://learn.microsoft.com/en-us/windows/wsl/networking#mirrored-mode-networking).
 
 ### Ethereum on ARM
 
@@ -955,7 +955,7 @@ URL: https://docs.erigon.tech/get-started/easy-nodes
 
 Guided setup for running a complete node with sensible defaults — pick your network and follow along.
 
-- [Ethereum Node](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-an-ethereum-node): Run a full Ethereum mainnet node using Caplin (built-in consensus layer) or connect an external CL client.
+- [Ethereum Node](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-an-ethereum-node): Run a full Ethereum mainnet node using Caplin (built-in consensus layer) or connect an external Consensus Layer (CL) client.
 - [Gnosis Chain Node](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-gnosis-chain-node): Run a full Gnosis Chain node with Erigon's embedded consensus layer or an external CL client.
 
 ---
@@ -1057,7 +1057,7 @@ and follow the logs when you need them with `docker compose logs -f`.
 - `--chain=mainnet` specifies to run on Ethereum mainnet
 - Add `--prune.mode=minimal` to run minimal [Pruning Mode](https://docs.erigon.tech/fundamentals/pruning-modes) or `--prune.mode=archive` to run an archive node
 - `--datadir=/var/lib/erigon` has to name the same path as the container side of the volume mount. Without it Erigon writes to its default location inside the container instead of your mounted directory, and the data ends up in an anonymous Docker volume rather than where you pointed it
-- `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](https://docs.erigon.tech/fundamentals/web3-wallet). `0.0.0.0` is the address *inside* the container, which is what lets Docker forward to it at all; the `127.0.0.1:8545:8545` port mapping is what keeps it off your LAN. Change that mapping to `8545:8545` only if you intend to expose RPC to other machines
+- `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](https://docs.erigon.tech/fundamentals/web3-wallet). `0.0.0.0` is the address *inside* the container, which is what lets Docker forward to it at all; the `127.0.0.1:8545:8545` port mapping is what keeps it off your local area network (LAN). Change that mapping to `8545:8545` only if you intend to expose RPC to other machines
 - `--nat=extip:<your public IP>` and `--caplin.nat=extip:<your public IP>` advertise a reachable address so other nodes can dial you — the first for the execution layer, the second for Caplin. Without them, and without the forwarded ports, the node still syncs but only through connections it opens itself
 - `--torrent.download.rate` is deliberately not set above, because its default of `512mb` (megabytes per second) is already the maximum this recipe would ask for. During initial sync Erigon uses the full allowance, which is what you want on a dedicated machine. Add the flag only to **lower** the cap if you share the machine with other work (e.g. `--torrent.download.rate=128mb`), or set `--torrent.download.rate=Inf` to remove the limit entirely.
 
@@ -1069,7 +1069,7 @@ Press `Ctrl+C` in your terminal to stop Erigon.
 
 ## Host networking as an alternative
 
-Publishing each port individually is explicit, but Docker's NAT is also what makes `--nat=extip:...` necessary in the first place. Adding `network_mode: host` to the service instead gives the container the host's network stack directly, so peers see the host's own address and there is nothing to map:
+Publishing each port individually is explicit, but Docker's Network Address Translation (NAT) is also what makes `--nat=extip:...` necessary in the first place. Adding `network_mode: host` to the service instead gives the container the host's network stack directly, so peers see the host's own address and there is nothing to map:
 
 ```yaml
 services:
@@ -1276,7 +1276,7 @@ and follow the logs when you need them with `docker compose logs -f`.
 - `--chain=gnosis` specifies to run on Gnosis Chain, use `--chain=chiado` for Chiado testnet
 - Add `--prune.mode=minimal` to run minimal [Pruning Mode](https://docs.erigon.tech/fundamentals/pruning-modes) or `--prune.mode=archive` to run an archive node
 - `--datadir=/var/lib/erigon` has to name the same path as the container side of the volume mount. Without it Erigon writes to its default location inside the container instead of your mounted directory, and the data ends up in an anonymous Docker volume rather than where you pointed it
-- `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](https://docs.erigon.tech/fundamentals/web3-wallet). `0.0.0.0` is the address *inside* the container, which is what lets Docker forward to it at all; the `127.0.0.1:8545:8545` port mapping is what keeps it off your LAN. Change that mapping to `8545:8545` only if you intend to expose RPC to other machines
+- `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](https://docs.erigon.tech/fundamentals/web3-wallet). `0.0.0.0` is the address *inside* the container, which is what lets Docker forward to it at all; the `127.0.0.1:8545:8545` port mapping is what keeps it off your local area network (LAN). Change that mapping to `8545:8545` only if you intend to expose RPC to other machines
 - `--nat=extip:<your public IP>` and `--caplin.nat=extip:<your public IP>` advertise a reachable address so other nodes can dial you — the first for the execution layer, the second for Caplin. Without them, and without the forwarded ports, the node still syncs but only through connections it opens itself
 - `--torrent.download.rate` is deliberately not set above, because its default of `512mb` (megabytes per second) is already the maximum this recipe would ask for. During initial sync Erigon uses the full allowance, which is what you want on a dedicated machine. Add the flag only to **lower** the cap if you share the machine with other work (e.g. `--torrent.download.rate=128mb`), or set `--torrent.download.rate=Inf` to remove the limit entirely.
 
@@ -1288,7 +1288,7 @@ Press `Ctrl+C` in your terminal to stop Erigon.
 
 ## Host networking as an alternative
 
-Publishing each port individually is explicit, but Docker's NAT is also what makes `--nat=extip:...` necessary in the first place. Adding `network_mode: host` to the service instead gives the container the host's network stack directly, so peers see the host's own address and there is nothing to map:
+Publishing each port individually is explicit, but Docker's Network Address Translation (NAT) is also what makes `--nat=extip:...` necessary in the first place. Adding `network_mode: host` to the service instead gives the container the host's network stack directly, so peers see the host's own address and there is nothing to map:
 
 ```yaml
 services:
@@ -1478,7 +1478,7 @@ The all-in-one client is the preferred option for most users:
 
 This CLI command allows you to run an Ethereum **full node** where every process is integrated and no special configuration is needed.
 
-The default Consensus Layer utilized is [Caplin](https://docs.erigon.tech/fundamentals/caplin), the Erigon flagship embedded CL.
+The default Consensus Layer utilized is [Caplin](https://docs.erigon.tech/fundamentals/caplin), the Erigon flagship embedded Consensus Layer (CL).
 
 ## Example of configuration
 
@@ -1715,7 +1715,7 @@ See [Caplin](https://docs.erigon.tech/fundamentals/caplin) for full details.
 Where most clients store account state in a Merkle Patricia Trie *inside* the database, Erigon stores it as **flat key-value pairs** and computes the trie root incrementally as part of Execution. Trade-off:
 
 - **Read path is direct** — `getAccount(addr)` is a single key lookup, not a multi-level trie traversal.
-- **Write path defers trie hashing** — updates accumulate in the KV store and the trie is rebuilt only when state-root computation requires it.
+- **Write path defers trie hashing** — updates accumulate in the key-value (KV) store and the trie is rebuilt only when state-root computation requires it.
 
 This is the single largest reason Erigon's RPC performance stays flat under load: there is no background trie compaction that can spike CPU during an `eth_call` burst.
 
@@ -1746,7 +1746,7 @@ URL: https://docs.erigon.tech/fundamentals/database
 
 Erigon stores all chain data under a single **datadir**. Understanding what lives where is useful when you size hardware, debug disk-usage issues, or split storage across fast and slow drives.
 
-This page covers the *what* and *where* of Erigon's data. For the *why* — flat KV state, immutable snapshots — see [Architecture](https://docs.erigon.tech/fundamentals/architecture). For operational tuning (symlinks, multi-disk layout), see [Optimizing Storage](https://docs.erigon.tech/fundamentals/optimizing-storage).
+This page covers the *what* and *where* of Erigon's data. For the *why* — flat key-value (KV) state, immutable snapshots — see [Architecture](https://docs.erigon.tech/fundamentals/architecture). For operational tuning (symlinks, multi-disk layout), see [Optimizing Storage](https://docs.erigon.tech/fundamentals/optimizing-storage).
 
 ## The datadir at a glance
 
@@ -1866,7 +1866,7 @@ Erigon must be stopped. The command takes the datadir lock and opens each databa
 
 Erigon also compacts at startup, before the node opens its databases: any database whose free pages are at least 10 GB **and** more than four times its live data is rewritten the same way (`[compact] auto-compact` in the log). It needs the same free space for a second copy, delays startup while it runs, and cannot be turned off. A database that fails to compact is left as it was, and startup continues. It skips the step if another process holds the datadir lock.
 
-`erigon db compact` is a manual defragmentation pass, not the background compaction of an LSM engine — MDBX has none, as described in *Storage engine: MDBX* above.
+`erigon db compact` is a manual defragmentation pass, not the background compaction of a log-structured merge-tree (LSM) engine — MDBX has none, as described in *Storage engine: MDBX* above.
 
 ## Where to go next
 
@@ -2236,7 +2236,7 @@ With state archival enabled, Caplin's indexing database (`<datadir>/caplin/index
 
 For nodes participating in PeerDAS (EIP-7594), Caplin retains data column sidecars for a configurable window:
 
-- `--caplin.columns-keep-slots` (default: `0`): Number of slots to retain PeerDAS data column sidecars. `0` uses the chain's own spec window, `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`, so the retained slot count and the wall-clock duration it covers both follow the chain (on Ethereum mainnet, 131072 slots, ~18 days). Increase this value for DA oracle or rollup nodes that require a longer column history.
+- `--caplin.columns-keep-slots` (default: `0`): Number of slots to retain PeerDAS data column sidecars. `0` uses the chain's own spec window, `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`, so the retained slot count and the wall-clock duration it covers both follow the chain (on Ethereum mainnet, 131072 slots, ~18 days). Increase this value for data availability (DA) oracle or rollup nodes that require a longer column history.
 
 Caplin can also be used for [block production](https://docs.erigon.tech/staking/caplin), aka **staking**.
 
@@ -2248,7 +2248,7 @@ When Caplin is running, it exposes a Beacon API that external tools can query. T
 | --- | --- | --- |
 | `--beacon.api.addr` | `localhost` | Listening address for the Beacon API |
 | `--beacon.api.port` | `5555` | Listening port for the Beacon API |
-| `--beacon.api.cors.allow-origins` | (empty) | CORS allowed origins |
+| `--beacon.api.cors.allow-origins` | (empty) | Cross-Origin Resource Sharing (CORS) allowed origins |
 | `--beacon.api.cors.allow-methods` | `GET, POST, PUT, DELETE, OPTIONS` | CORS allowed methods |
 | `--beacon.api.cors.allow-credentials` | `false` | Allow credentials in CORS requests |
 | `--beacon.api.protocol` | `tcp` | Network protocol (`tcp` or `tcp4` or `tcp6`) |
@@ -2344,7 +2344,7 @@ These flags are mainly for dev networks, testing, or specialized block-productio
 - `--allow-insecure-unlock`: Accepted for go-ethereum CLI compatibility but currently has **no effect** — the flag is registered and settable, yet nothing in the codebase reads it and Erigon exposes no account-unlocking RPC.
   - Default: `false`
 
-- `--dev-validator-seed value`: Deterministic BLS key seed for the embedded dev validator. Read only in PoS dev mode, which is selected by `--chain dev`; on any other chain the flag does nothing.
+- `--dev-validator-seed value`: Deterministic BLS key seed for the embedded dev validator. Read only in proof-of-stake (PoS) dev mode, which is selected by `--chain dev`; on any other chain the flag does nothing.
   - Default: `devnet`
 
 - `--dev-validator-count value`: Number of validators for PoS dev mode (`--chain dev`).
@@ -2390,7 +2390,7 @@ These flags control database performance and memory usage. See [Database](https:
 - `--batchSize value`: Sets the batch size for the execution stage.
   - Default: `512M`
 
-- `--etl.bufferSize value`: Buffer size for ETL operations. Also settable through the `ETL_OPTIMAL` environment variable.
+- `--etl.bufferSize value`: Buffer size for extract, transform, load (ETL) operations. Also settable through the `ETL_OPTIMAL` environment variable.
   - Default: `256MB`
 
 - `--bodies.cache value`: Sets the size limit for the block bodies cache.
@@ -2443,10 +2443,10 @@ Flags for managing how old chain data is handled and stored. See [Snapshots Mana
 - `--snap.state.stop`: Workaround for state-related bugs — stops producing new state files (DB will grow as a result).
   - Default: `false`
 
-- `--snap.p2p-manifest` *(New in v3.5)* (experimental): Decentralized snapshot discovery — peers advertise their `chain.toml` manifest via ENR instead of the centralized `preverified.toml`. Opt-in; requires a compatible peer network.
+- `--snap.p2p-manifest` *(New in v3.5)* (experimental): Decentralized snapshot discovery — peers advertise their `chain.toml` manifest via Ethereum Node Record (ENR) instead of the centralized `preverified.toml`. Opt-in; requires a compatible peer network.
   - Default: `false`
 
-- `--snap.chaintoml-url value` *(New in v3.5)*: Fetch the preverified `chain.toml` directly from this URL instead of the default R2/GitHub CDN. Precedence: the `ERIGON_REMOTE_PREVERIFIED` environment variable (path to a local override file) wins over this URL and the default CDN; a local `preverified.toml` in the datadir also takes precedence — delete it to re-fetch from the URL.
+- `--snap.chaintoml-url value` *(New in v3.5)*: Fetch the preverified `chain.toml` directly from this URL instead of the default R2/GitHub content delivery network (CDN). Precedence: the `ERIGON_REMOTE_PREVERIFIED` environment variable (path to a local override file) wins over this URL and the default CDN; a local `preverified.toml` in the datadir also takes precedence — delete it to re-fetch from the URL.
   - Default: `""` (uses the built-in CDN)
 
 - `--snap.download.to.block, --shadow.fork.block value`: Downloads snapshots only up to the given block number (exclusive). Intended for testing and shadow forks.
@@ -2513,7 +2513,7 @@ These flags manage network connectivity, peer discovery, and traffic control. Se
 - `--p2p.protocol value`: The version of the `eth` P2P protocol.
   - Default: `69`, `70`, `71`
 
-- `--nat value`: The NAT port mapping mechanism (See [here](https://docs.erigon.tech/fundamentals/nat) for more details).
+- `--nat value`: The Network Address Translation (NAT) port mapping mechanism (See [here](https://docs.erigon.tech/fundamentals/nat) for more details).
 - `--nodiscover`: Disables peer discovery.
   - Default: `false`
 
@@ -2552,7 +2552,7 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
 
 - `--tls.cert value`: Path to the certificate presented on the internal gRPC API.
 - `--tls.key value`: Path to the private key for `--tls.cert`.
-- `--tls.cacert value`: Path to the certificate authority used to verify gRPC clients. Setting it switches the server to mutual TLS: every gRPC client of `--private.api.addr` must then present a certificate signed by this CA, or the handshake is rejected. Leave it unset for server-only TLS. Read only when `--tls` is set.
+- `--tls.cacert value`: Path to the certificate authority used to verify gRPC clients. Setting it switches the server to mutual TLS: every gRPC client of `--private.api.addr` must then present a certificate signed by this certificate authority (CA), or the handshake is rejected. Leave it unset for server-only TLS. Read only when `--tls` is set.
 - `--http`: Enables the JSON-RPC HTTP server.
   - Default: `true`
 
@@ -2605,7 +2605,7 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
 - `--ws.max.connections value`: Maximum number of concurrent WebSocket connections.
   - Default: `0` (unlimited)
 
-**HTTPS and IPC transports.** *(New in v3.7)* These flags are accepted by both the `erigon` binary and the standalone [RPC Daemon](https://docs.erigon.tech/fundamentals/modules/rpc-daemon) — the embedded RPC server reads them from the same configuration. They serve the same JSON-RPC API as `--http`, over TLS or a separate socket instead.
+**HTTPS and inter-process communication (IPC) transports.** *(New in v3.7)* These flags are accepted by both the `erigon` binary and the standalone [RPC Daemon](https://docs.erigon.tech/fundamentals/modules/rpc-daemon) — the embedded RPC server reads them from the same configuration. They serve the same JSON-RPC API as `--http`, over TLS or a separate socket instead.
 
 :::warning
 `--http=false` is a master switch: it disables the whole RPC stack, including the HTTPS and IPC listeners, so `--http=false --https.enabled` yields no listener at all. To serve TLS only, leave `--http` alone and turn off just the plain HTTP listener with `--http.enabled=false`.
@@ -2785,7 +2785,7 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
 
   - Default: `false`
 
-- `--witness.cache.blocks value` *(New in v3.6)*: Number of recent blocks whose legacy `debug_executionWitness` result is eagerly cached in memory, keyed by block hash in an LRU. Each witness is held as serialized JSON and served verbatim on a hit, so memory use is roughly this count multiplied by the per-block witness size. Embedded RPC only, and requires `--prune.include-commitment-history` (runtime errors from `debug_executionWitness` and `eth_getWitness` name its `--prune.experimental.include-commitment-history` alias instead). This flag also gates `debug_subscribe("executionWitnesses")`, which pushes each witness over WebSocket as the cache builds it. That stream is best-effort rather than contiguous — catch-up bursts, skipped or failed builds, and slow subscribers all leave gaps — so a client that needs every height re-requests the missing ones with `debug_executionWitness`.
+- `--witness.cache.blocks value` *(New in v3.6)*: Number of recent blocks whose legacy `debug_executionWitness` result is eagerly cached in memory, keyed by block hash in a least recently used (LRU) cache. Each witness is held as serialized JSON and served verbatim on a hit, so memory use is roughly this count multiplied by the per-block witness size. Embedded RPC only, and requires `--prune.include-commitment-history` (runtime errors from `debug_executionWitness` and `eth_getWitness` name its `--prune.experimental.include-commitment-history` alias instead). This flag also gates `debug_subscribe("executionWitnesses")`, which pushes each witness over WebSocket as the cache builds it. That stream is best-effort rather than contiguous — catch-up bursts, skipped or failed builds, and slow subscribers all leave gaps — so a client that needs every height re-requests the missing ones with `debug_executionWitness`.
 
   - Default: `0` (cache disabled); values above the cap of `96` are clamped
 
@@ -3040,10 +3040,10 @@ Flags for configuring the [Caplin](https://docs.erigon.tech/fundamentals/caplin)
 - `--caplin.max-peer-count value`: The maximum number of peers to connect to.
   - Default: `128`
 
-- `--caplin.ip-block-limits.disable`: Restores the released connection limits. Without it, Caplin caps connections per IPv4 /24 and IPv6 /48 (an eighth of `--caplin.max-peer-count`, at least 16; for the /48 at most 64, go-libp2p's cap that it replaces) and per IPv4 /16 and IPv6 /32 (half of it, at least the /24 cap), on top of go-libp2p's caps of 8 per IPv4 address or IPv6 /56. Static peers (`--sentinel.staticpeers`) given by IP address keep only the per-address cap. With `--caplin.local-discovery`, private, link-local and IPv6 ULA networks are exempt from all of these caps; this flag also removes that exemption. Networks in `--caplin.ip-block-limits.trusted-cidrs` stay exempt.
+- `--caplin.ip-block-limits.disable`: Restores the released connection limits. Without it, Caplin caps connections per IPv4 /24 and IPv6 /48 (an eighth of `--caplin.max-peer-count`, at least 16; for the /48 at most 64, go-libp2p's cap that it replaces) and per IPv4 /16 and IPv6 /32 (half of it, at least the /24 cap), on top of go-libp2p's caps of 8 per IPv4 address or IPv6 /56. Static peers (`--sentinel.staticpeers`) given by IP address keep only the per-address cap. With `--caplin.local-discovery`, private, link-local and IPv6 unique local address (ULA) networks are exempt from all of these caps; this flag also removes that exemption. Networks in `--caplin.ip-block-limits.trusted-cidrs` stay exempt.
   - Default: `false`
 
-- `--caplin.ip-block-limits.trusted-cidrs value`: Comma-separated networks in CIDR notation, at most an IPv4 /8 or an IPv6 /16 each and without host bits, that are exempt from every per-address and per-block cap. All connections from one listed network share a limit of 8 times `--caplin.max-peer-count` (at least 32). Loopback stays unlimited even when it is listed. Useful for a trusted cluster on public addresses.
+- `--caplin.ip-block-limits.trusted-cidrs value`: Comma-separated networks in Classless Inter-Domain Routing (CIDR) notation, at most an IPv4 /8 or an IPv6 /16 each and without host bits, that are exempt from every per-address and per-block cap. All connections from one listed network share a limit of 8 times `--caplin.max-peer-count` (at least 32). Loopback stays unlimited even when it is listed. Useful for a trusted cluster on public addresses.
 - `--caplin.enable-upnp`: Enables NAT porting for Caplin.
   - Default: `false`
 
@@ -3077,7 +3077,7 @@ Flags for configuring the [Caplin](https://docs.erigon.tech/fundamentals/caplin)
 - `--caplin.blobs-no-pruning`: Disables blob pruning.
   - Default: `false`
 
-- `--caplin.columns-keep-slots value`: Number of slots to retain PeerDAS data column sidecars. Increase for DA oracle or rollup nodes that need longer column history.
+- `--caplin.columns-keep-slots value`: Number of slots to retain PeerDAS data column sidecars. Increase for data availability (DA) oracle or rollup nodes that need longer column history.
   - Default: `0` — uses the chain's spec window, `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`
 
 - `--caplin.checkpoint-sync.disable`: Disables checkpoint sync.
@@ -3089,8 +3089,8 @@ Flags for configuring the [Caplin](https://docs.erigon.tech/fundamentals/caplin)
 - `--caplin.snapgen`: Enables snapshot generation.
   - Default: `false`
 
-- `--caplin.mev-relay-url value`: The MEV relay endpoint.
-- `--caplin.builder.allow-private-urls`: Lets the builder URLs that validators submit as builder preferences resolve to private or loopback addresses, for a builder on the same host or LAN. Other non-public ranges stay blocked. Does not apply to `--caplin.mev-relay-url`.
+- `--caplin.mev-relay-url value`: The Maximal Extractable Value (MEV) relay endpoint.
+- `--caplin.builder.allow-private-urls`: Lets the builder URLs that validators submit as builder preferences resolve to private or loopback addresses, for a builder on the same host or local area network (LAN). Other non-public ranges stay blocked. Does not apply to `--caplin.mev-relay-url`.
   - Default: `false`
 
 - `--caplin.validator-monitor`: Enables Caplin validator monitoring metrics.
@@ -3405,7 +3405,7 @@ Here is a comprehensive list of port-related options:
 - `--http.port [value]`: HTTP-RPC server listening port (default: `8545`)
 - `--https.port [value]`: HTTPS-RPC server listening port, used only when the HTTPS server is enabled (default: `0`, meaning `--http.port` + 363 — `8908` with a default `--http.port`)
 - `--http.url [value]` / `--https.url [value]`: Full listen URL that overrides the corresponding `addr` and `port` pair (`tcp://` or `unix://`)
-- `--socket.url [value]`: IPC server listen URL, used only when the IPC server is enabled (default: `unix:///var/run/erigon.sock`)
+- `--socket.url [value]`: inter-process communication (IPC) server listen URL, used only when the IPC server is enabled (default: `unix:///var/run/erigon.sock`)
 
 ### Caplin
 
@@ -3467,7 +3467,7 @@ Ethereum P2P is bidirectional:
 - your node connects outbound to peers
 - other nodes may connect inbound to you
 
-Nodes that are reachable from the internet (i.e. correctly advertised via NAT) tend to:
+Nodes that are reachable from the internet (i.e. correctly advertised via Network Address Translation (NAT)) tend to:
 
 - receive transactions earlier
 - receive a wider variety of transactions
@@ -3523,7 +3523,7 @@ nat: "extip:203.0.113.114"
 
 ### `nat: any`
 
-Enables automatic NAT detection (e.g. UPnP / NAT-PMP where available).
+Enables automatic NAT detection (e.g. Universal Plug and Play (UPnP) / NAT-PMP where available).
 
 Suitable for:
 
@@ -3534,7 +3534,7 @@ Less deterministic than extip, but generally better than none.
 
 ### `nat: stun`
 
-Uses STUN to discover the external address.
+Uses Session Traversal Utilities for NAT (STUN) to discover the external address.
 
 Useful when:
 
@@ -3544,14 +3544,14 @@ Useful when:
 
 ## Caplin (consensus layer) NAT
 
-If you are running Erigon with the embedded Caplin consensus layer, configure NAT for the CL P2P separately using `--caplin.nat`.
+If you are running Erigon with the embedded Caplin consensus layer, configure NAT for the Consensus Layer (CL) P2P separately using `--caplin.nat`.
 
-This flag sets the external address advertised in the **discv5 ENR** and **libp2p multiaddrs**; the socket itself still binds to `--caplin.discovery.addr`. It accepts the same values as `--nat`:
+This flag sets the external address advertised in the **discv5 Ethereum Node Record (ENR)** and **libp2p multiaddrs**; the socket itself still binds to `--caplin.discovery.addr`. It accepts the same values as `--nat`:
 
 | Value | Behavior |
 | --- | --- |
 | `""` (default) | No NAT mapping — CL peers cannot reach you inbound |
-| `extip:1.2.3.4` | Advertise a fixed public IP — recommended for VPS / datacenters |
+| `extip:1.2.3.4` | Advertise a fixed public IP — recommended for virtual private servers (VPS) / datacenters |
 | `stun` | Discover external IP via STUN |
 | `upnp` | Use UPnP to discover and map the port |
 | `pmp` | Use NAT-PMP; optionally `pmp:192.168.0.1` to specify the gateway |
@@ -4013,7 +4013,7 @@ The RPC Daemon is the primary external interface, making API security critical. 
 | Remove Admin APIs | Never include sensitive namespaces like `admin` or `debug` in the `--http.api` list for public-facing nodes. These APIs are intended for node operators only. | Omit the `admin` and `debug` namespaces from `--http.api`. |
 | Rate Limiting | Protect against DoS attacks by limiting the processing capacity for HTTP requests and batch requests. | Configure `--rpc.max.concurrency` (HTTP admission control: `0` = use `--db.read.concurrency`, `-1` = unlimited), `--rpc.batch.concurrency` and `--rpc.batch.limit`. |
 | Subscription Filters | Control WebSocket subscriptions to prevent Out-of-Memory (OOM) errors caused by a large number of filter requests. | Utilize the various `--rpc.subscription.filters.*` flags. **Note**: These are disabled by default because they increase the risk of OOM issues. |
-| Subscription Limits | Cap the subscriptions one WebSocket or IPC connection may hold, and the number of WebSocket connections, so that a client cannot pin unbounded memory by subscribing repeatedly. | `--rpc.subscription.limit` (default `1024` per connection, `0` = unlimited) and `--ws.max.connections` (default `0` = unlimited). |
+| Subscription Limits | Cap the subscriptions one WebSocket or inter-process communication (IPC) connection may hold, and the number of WebSocket connections, so that a client cannot pin unbounded memory by subscribing repeatedly. | `--rpc.subscription.limit` (default `1024` per connection, `0` = unlimited) and `--ws.max.connections` (default `0` = unlimited). |
 
 ### External Protection Layer (Recommended for Production)
 
@@ -4029,7 +4029,7 @@ For production environments where RPC endpoints are exposed publicly, it is stro
 
 **TLS Encryption**: For remote RPC Daemon deployments, enable TLS authentication. The process involves:
 
-1. Generating CA key pairs
+1. Generating certificate authority (CA) key pairs
 2. Creating certificates for each instance
 3. Deploying certificates to secure communication
 
@@ -4512,7 +4512,7 @@ MCP connects a model to your **running node**. To let a model answer questions a
 | [llms.txt](https://docs.erigon.tech/llms.txt) | Index of the current documentation, with titles and descriptions | The model fetches pages on demand, or its context window is small |
 | [llms-full.txt](https://docs.erigon.tech/llms-full.txt) | The text of those same pages, as one plain-text file | You want the whole corpus in context, offline, with nothing scraped |
 
-Both are generated from this site's built pages by a script in the repository, and CI fails when the committed files differ from what that script produces — except for a difference confined to the Erigon release token, which is reported as a warning so that a new release does not break every open documentation pull request. The check compares the artifacts against the generator's own output, so it does not prove that the generator carried every part of a page across.
+Both are generated from this site's built pages by a script in the repository, and continuous integration (CI) fails when the committed files differ from what that script produces — except for a difference confined to the Erigon release token, which is reported as a warning so that a new release does not break every open documentation pull request. The check compares the artifacts against the generator's own output, so it does not prove that the generator carried every part of a page across.
 
 Two things to know about their scope. They cover the **current** documentation and the help center only — archived versions, published under `/vX.Y/`, are not included. And the text is cleaned rather than copied verbatim: components are expanded and links resolved as the site renders them, and a section index page built as a card grid keeps its prose with each grid rendered as the list of links it presents. Read the corpus as the documentation's prose, not as a byte-for-byte mirror of the rendered site.
 
@@ -5051,7 +5051,7 @@ URL: https://docs.erigon.tech/fundamentals/modules/sentry
 Sentry connects Erigon to the Ethereum P2P network, enabling the discovery of other participants across the Internet and secure communication with them. It performs these main functions:
 
 - Peer discovery via the following:
-  - Kademlia DHT
+  - Kademlia distributed hash table (DHT)
   - DNS lookup
   - Configured static peers
   - Node info saved in the database
@@ -5310,7 +5310,7 @@ For a complete reference on the standard Ethereum JSON-RPC methods, especially t
 
 ## Erigon RPC Transports
 
-Erigon supports [HTTP](https://docs.erigon.tech/interacting-with-erigon#http), [HTTPS](https://docs.erigon.tech/interacting-with-erigon#https), [WebSockets](https://docs.erigon.tech/interacting-with-erigon#websockets), [IPC](https://docs.erigon.tech/interacting-with-erigon#ipc), [gRPC](https://docs.erigon.tech/interacting-with-erigon#grpc) and [GraphQL](https://docs.erigon.tech/interacting-with-erigon#graphql) through its RPC Daemon.
+Erigon supports [HTTP](https://docs.erigon.tech/interacting-with-erigon#http), [HTTPS](https://docs.erigon.tech/interacting-with-erigon#https), [WebSockets](https://docs.erigon.tech/interacting-with-erigon#websockets), [inter-process communication (IPC)](https://docs.erigon.tech/interacting-with-erigon#ipc), [gRPC](https://docs.erigon.tech/interacting-with-erigon#grpc) and [GraphQL](https://docs.erigon.tech/interacting-with-erigon#graphql) through its RPC Daemon.
 
 ### HTTP
 
@@ -5516,7 +5516,7 @@ For API usage refer to the below official resources:
 The sections below cover only the places where Erigon adds a method that is not in that standard set, or where its behaviour differs from it. They are not an exhaustive compliance statement: anything not listed here is expected to follow the spec, but a deviation that has not yet been documented may still exist.
 
 :::info
-`execution-apis` is a living specification rather than a frozen standard — methods are still being added, and some long-standing `eth` behaviour was never specified at all — so parts of what follows are differences from a moving target rather than defects. Erigon runs the specification's own conformance vectors in CI (Hive's `rpc-compat` suite against a pinned `execution-apis` revision) and works with the other client teams on closing these gaps, so this page will change as the two converge.
+`execution-apis` is a living specification rather than a frozen standard — methods are still being added, and some long-standing `eth` behaviour was never specified at all — so parts of what follows are differences from a moving target rather than defects. Erigon runs the specification's own conformance vectors in continuous integration (CI), using Hive's `rpc-compat` suite against a pinned `execution-apis` revision, and works with the other client teams on closing these gaps, so this page will change as the two converge.
 :::
 
 ### Pending state
@@ -5543,7 +5543,7 @@ A call object whose `chainId` is not the node's is rejected with `-32602` (`chai
 
 `eth_syncing` returns `false` when the current block is fewer than 8 blocks from the highest block seen, in either direction; otherwise an object with `startingBlock`, `currentBlock`, `highestBlock` and `stages` (per-stage progress). While snapshots download, `currentBlock` advances with the bytes downloaded, scaled to the block the snapshots reach, and `stages` is empty (as it is while the highest block is not yet known). A node 8 or more blocks ahead of a stale highest block therefore reports syncing, with `highestBlock` equal to `currentBlock`. Both report `startingBlock` as the block where the current sync session began.
 
-`eth_subscribe("syncing")` (WebSocket or IPC) sends the last known state when you subscribe, if the node has reported one, then a message on each change: the same object with `syncing: true` while syncing, or `false` once synced. A slow client can miss intermediate states: each subscription buffers 8 messages and drops the oldest first, so the latest state always arrives.
+`eth_subscribe("syncing")` (WebSocket or inter-process communication (IPC)) sends the last known state when you subscribe, if the node has reported one, then a message on each change: the same object with `syncing: true` while syncing, or `false` once synced. A slow client can miss intermediate states: each subscription buffers 8 messages and drops the oldest first, so the latest state always arrives.
 
 ### eth_getProof
 
@@ -5673,7 +5673,7 @@ Besides the fee-field rules above, a fill fails outright when:
 
 **Returns**
 
-An object with `raw`, the unsigned transaction in its canonical binary encoding, and `tx`, the same transaction in JSON form. `raw` comes from `MarshalBinary`, so it is bare RLP only for a legacy transaction; a typed one is the EIP-2718 type byte followed by the encoded payload, and feeding that straight to an RLP decoder will fail. The standardized result carries only `tx`; the extra `raw` field is the geth-compatible shape.
+An object with `raw`, the unsigned transaction in its canonical binary encoding, and `tx`, the same transaction in JSON form. `raw` comes from `MarshalBinary`, so it is bare Recursive Length Prefix (RLP) only for a legacy transaction; a typed one is the EIP-2718 type byte followed by the encoded payload, and feeding that straight to an RLP decoder will fail. The standardized result carries only `tx`; the extra `raw` field is the geth-compatible shape.
 
 `tx` also carries four fields the standardized unsigned schemas do not define. `v`, `r` and `s` are placeholders — `SignTransactionResult.MarshalJSON` writes `"0x0"` for each — and a typed result adds `yParity`, likewise `0x0`. Nothing is signed here, so none of them is a signature.
 
@@ -6161,7 +6161,7 @@ The `debug` namespace is intended for debugging and development purposes, not fo
 
 - Tracing methods (`debug_traceBlockByHash`, `debug_traceBlockByNumber`, `debug_traceTransaction`, `debug_traceCall`, `debug_traceCallMany`) support streaming for large results to reduce memory usage
 - The `AccountRangeMaxResults` constant limits account range queries to 8192 results, or 256 when storage is included;
-- Memory and GC control methods allow fine-tuning of node performance.
+- Memory and garbage collection (GC) control methods allow fine-tuning of node performance.
 - Some methods like `debug_accountRange` have compatibility layers for both Geth and legacy Erigon parameter formats `debug_api`
 
 #### Integration with Erigon Architecture
@@ -7344,14 +7344,14 @@ The TxPool namespace must be explicitly enabled using the `--http.api` flag when
 
 - Erigon's transaction pool is organized into three sub-pools: pending (executable), baseFee (insufficient base fee), and queued (nonce gaps)
 - The `txpool_content`, `txpool_contentFrom` and `txpool_status` methods expose only the `pending` and `queued` categories, as defined by the `ethereum/execution-apis` specification. Transactions in the internal baseFee sub-pool are nonce-ready and otherwise valid, but are not executable at the current base fee: they wait for the fee condition to change. They are reported as pending, matching Geth
-- Blob transactions (type 3) are not reported by `txpool_content` and `txpool_contentFrom`, matching Geth and Nethermind. They are still counted by `txpool_status`
+- Blob transactions (type 3) are reported by `txpool_content`, `txpool_contentFrom` and `txpool_inspect`, as the `ethereum/execution-apis` specification defines and as Reth does. Geth and Nethermind leave them out
 - The pool can run either integrated within the main Erigon process or as a separate service for scalability
 - Transaction pool methods communicate via gRPC with the TxPool service when running in external mode
 
 ### Implementation Details
 
 - The `TxPoolAPIImpl` uses a `proto_txpool.TxpoolClient` to communicate with the transaction pool service
-- All transactions are decoded from RLP format and converted to `ethapi.RPCTransaction` objects for JSON-RPC responses
+- All transactions are decoded from Recursive Length Prefix (RLP) format and converted to `ethapi.RPCTransaction` objects for JSON-RPC responses
 - The implementation handles transaction categorization based on the `TxnType` field from the pool service
 
 ### External vs Internal Mode
@@ -7379,7 +7379,7 @@ The TxPool namespace must be explicitly enabled using the `--http.api` flag when
 
 ## **txpool_content**
 
-Returns the content of the transaction pool, organized by sender address and categorized into pending and queued transactions. Blob transactions are not returned.
+Returns the content of the transaction pool, organized by sender address and categorized into pending and queued transactions.
 
 **Parameters**
 
@@ -7658,7 +7658,7 @@ The gRPC server can be explicitly enabled using the `--grpc` flag when running t
 ### Performance Considerations
 
 - gRPC APIs provide better performance than JSON-RPC for high-throughput applications
-- Direct database access via KV interface offers the fastest data retrieval
+- Direct database access via key-value (KV) interface offers the fastest data retrieval
 - Shared memory access (when running locally) provides optimal performance
 
 ### Data Format and Buckets
@@ -8025,11 +8025,11 @@ curl -X POST http://localhost:8545/graphql \
 # Staking
 URL: https://docs.erigon.tech/staking
 
-Run an Ethereum validator with Erigon — using the built-in Caplin consensus layer or any external CL client.
+Run an Ethereum validator with Erigon — using the built-in Caplin consensus layer or any external Consensus Layer (CL) client.
 
 - [Caplin (Built-in CL)](https://docs.erigon.tech/staking/caplin): Configure Erigon's embedded consensus layer as a full validator — no external CL dependency required.
 - [External Consensus Client](https://docs.erigon.tech/staking/external-consensus-client-as-validator): Connect Lighthouse, Prysm, Teku, or Nimbus via the Engine API for split EL/CL validator setups.
-- [Shutter Network](https://docs.erigon.tech/staking/shutter-network): Privacy-preserving mempool protection — shield validator transactions from front-running and MEV.
+- [Shutter Network](https://docs.erigon.tech/staking/shutter-network): Privacy-preserving mempool protection — shield validator transactions from front-running and Maximal Extractable Value (MEV).
 
 ---
 
@@ -8089,7 +8089,7 @@ mkdir -p ~/.lighthouse/validators
 
 ### 2.3. Run Lighthouse Validator Client
 
-Start the validator client and connect it to the Caplin CL:
+Start the validator client and connect it to the Caplin Consensus Layer (CL):
 
 ```bash
 lighthouse vc \
@@ -8193,7 +8193,7 @@ erigon \
 - `--externalcl`: Enables the use of an external CL.
 - `--datadir=/data/erigon`: Defines the directory to be used for databases.
 - `--chain=sepolia`: Specifies the Sepolia chain.
-- `--authrpc.jwtsecret=/jwt`: Sets the location of the JWT authentication code in hex encoding. This is used by Erigon (the EL) and the CL (in this case Lighthouse) to authenticate communication.
+- `--authrpc.jwtsecret=/jwt`: Sets the location of the JWT authentication code in hex encoding. This is used by Erigon (the Execution Layer (EL)) and the CL (in this case Lighthouse) to authenticate communication.
 - `--authrpc.addr=0.0.0.0`: Allows the engine API to be accessed from any address.
 - `--http.api=engine,eth,net,web3`: Enables the necessary APIs for external clients and Caplin.
 - `--ws`: enables WebSocket-based communication, which is optional.
@@ -8207,7 +8207,7 @@ Note that many pre-merge flags, such as `--miner.etherbase`, are no longer usefu
 # Shutter Network
 URL: https://docs.erigon.tech/staking/shutter-network
 
-[Shutter Network](https://www.shutter.network) is a privacy-focused protocol that provides encrypted transaction pools using threshold encryption. The main objective is to protect users from malicious MEV (Miner Extractable Value) attacks such as front-running and sandwich attacks by encrypting transactions until they are included in a block.
+[Shutter Network](https://www.shutter.network) is a privacy-focused protocol that provides encrypted transaction pools using threshold encryption. The main objective is to protect users from malicious Maximal Extractable Value (MEV) attacks such as front-running and sandwich attacks by encrypting transactions until they are included in a block.
 
 The key advantages of Shutter Network are:
 
@@ -8258,7 +8258,7 @@ To participate in the Shutter encrypted transaction pool as a validator using Er
    erigon --shutter [other options...]
    ```
 
-   This works with Erigon's internal CL Caplin (enabled by default) or with an external CL client using `--externalcl`.
+   This works with Erigon's internal Consensus Layer (CL) Caplin (enabled by default) or with an external CL client using `--externalcl`.
 
 ## Shutter Network Default Ports
 
@@ -8324,14 +8324,14 @@ The Erigon node software is developed in the [erigontech/erigon](https://github.
 
 - Target the `main` branch for new features and non-critical fixes.
 - Target the relevant `release/x.y` branch for release-specific backports.
-- Keep PRs focused — one logical change per PR makes review faster.
+- Keep PRs focused — one logical change per pull request (PR) makes review faster.
 - Feel free to open a draft PR early if you want feedback on the direction before the implementation is complete.
 - Include a clear description of what changed, why, and how it was tested.
 
 ### Code style and guidelines
 
 - Follow the existing Go conventions in the codebase.
-- Run `make lint` before submitting — the CI will enforce it.
+- Run `make lint` before submitting — continuous integration (CI) will enforce it.
 - All new code should be covered by tests where practical.
 - Use the package-prefix commit message format: `eth, rpc: make trace configs optional`. This keeps the git log scannable by subsystem.
 
@@ -8475,7 +8475,7 @@ This list addresses the most common inquiries from the Erigon community, offerin
 
 27. **What is the difference between deleting `chaindata` and deleting the whole `datadir`?** `chaindata` is Erigon's small, mutable MDBX database (typically 15–20 GB, even on an archive node) holding recent state and sync progress. The `snapshots` directory holds the immutable historical data — roughly 95% of the total footprint. Deleting `chaindata` is recoverable but not free: Erigon re-derives state from the snapshots (re-downloading them if needed) and resyncs the post-snapshot tip from the consensus layer — a chain-tip resync, not an instant rebuild. Deleting the entire `datadir` also discards the snapshots and forces a full re-sync. When in doubt, delete only `chaindata`. See [Database](https://docs.erigon.tech/fundamentals/database).
 
-28. **My node has no peers or won't sync. Which ports do I need to open?** Erigon needs several ports reachable (both TCP and UDP where applicable): `30303`/`30304` (execution-layer P2P), `4000`, `4001` and `4002` (Caplin consensus peering — discovery, TCP and QUIC respectively), and `42069` (BitTorrent snapshot download). Keep the RPC port (`8545`) bound to localhost and never expose it publicly. If your node is behind NAT, set `--nat` and `--caplin.nat` to `stun` or `upnp` and forward those ports on your router. If you can't open the QUIC port specifically, pass `--caplin.quic.disable` to fall back to TCP-only Caplin peering instead. See [Default Ports](https://docs.erigon.tech/fundamentals/default-ports) and [NAT](https://docs.erigon.tech/fundamentals/nat).
+28. **My node has no peers or won't sync. Which ports do I need to open?** Erigon needs several ports reachable (both TCP and UDP where applicable): `30303`/`30304` (execution-layer P2P), `4000`, `4001` and `4002` (Caplin consensus peering — discovery, TCP and QUIC respectively), and `42069` (BitTorrent snapshot download). Keep the RPC port (`8545`) bound to localhost and never expose it publicly. If your node is behind Network Address Translation (NAT), set `--nat` and `--caplin.nat` to `stun` or `upnp` and forward those ports on your router. If you can't open the QUIC port specifically, pass `--caplin.quic.disable` to fall back to TCP-only Caplin peering instead. See [Default Ports](https://docs.erigon.tech/fundamentals/default-ports) and [NAT](https://docs.erigon.tech/fundamentals/nat).
 
 29. **How do I reduce Erigon's memory use or stop it from being OOM-killed?** Erigon and the Go runtime size their memory and CPU use from the resources they can see, so on a shared or memory-constrained host you can make them more conservative. Since 3.7 Erigon sets `GOMEMLIMIT` itself to 80% of the lower of RAM and the container memory limit, unless you set it (`GOMEMLIMIT=off` leaves the heap unbounded); set it explicitly to go lower (e.g. `GOMEMLIMIT=20GiB` on a 32 GB host), lower `GOGC` (e.g. `GOGC=80`), cap `GOMAXPROCS` (e.g. to half your cores), and reduce `--batchSize` (e.g. `--batchSize=256m`). See [Common Errors and Solutions](https://docs.erigon.tech/help-center/common-errors-and-solutions) and [Performance Tricks](https://docs.erigon.tech/fundamentals/performance-tricks).
 
@@ -8492,7 +8492,7 @@ URL: https://docs.erigon.tech/help-center/troubleshooting
 
 Erigon is highly resilient and uses a fully-transactional database. This design makes it safe against hard termination (`kill -9`) and power outages. The database ensures users never see "partial writes," meaning all data changes are atomic (all-or-nothing), and all RPC methods operate within Read-Only Transactions, guaranteeing a consistent data view.
 
-**Protect Against Hardware Failure**: True data corruption is typically only caused by hardware failures (like disk or RAM failure). We strongly recommend using ECC memory, disk RAID, and performing regular backups to mitigate these risks.
+**Protect Against Hardware Failure**: True data corruption is typically only caused by hardware failures (like disk or RAM failure). We strongly recommend using error-correcting code (ECC) memory, a redundant array of independent disks (RAID), and performing regular backups to mitigate these risks.
 
 When an issue arises, follow these steps to methodically diagnose and resolve the problem.
 
@@ -8511,7 +8511,7 @@ When an issue arises, follow these steps to methodically diagnose and resolve th
 13. **Check for Snapshot File Issues:** For version upgrades, a known issue with snapshot filenames can cause problems. Use snapshot [upgrade](https://docs.erigon.tech/get-started/installation/upgrading) and repair options.
 14. **Correct File Ownership:** If using a dedicated user or Docker, confirm that the user has full read/write access to the datadir. See the [Docker Compose](https://docs.erigon.tech/fundamentals/docker-compose) guide for container-specific permission tips.
 15. **Adjust RPC Timeouts:** If specific RPC requests are timing out, try increasing the timeout values to allow more time for heavy requests to complete. See the [RPC & API flags](https://docs.erigon.tech/fundamentals/configuring-erigon#rpc--api) in the CLI Reference.
-16. **Check for `DB.read.concurrency` issues:** If you have high RPC traffic and low TPS, try reducing the `--DB.read.concurrency` flag. See [Configuring Erigon](https://docs.erigon.tech/fundamentals/configuring-erigon) for all database-related flags.
+16. **Check for `DB.read.concurrency` issues:** If you have high RPC traffic and low transactions per second (TPS), try reducing the `--DB.read.concurrency` flag. See [Configuring Erigon](https://docs.erigon.tech/fundamentals/configuring-erigon) for all database-related flags.
 17. **Report a Bug:** If all else fails, open a detailed bug report on GitHub with logs, version info, and a clear description of the problem.
 18. **Engage with the Community:** The Erigon Discord server is an invaluable resource for seeking help from core developers and experienced users.
 
@@ -8526,7 +8526,7 @@ kill -SIGUSR1 $(pidof erigon)
 # Stack traces are printed to the erigon log / stdout
 ```
 
-If the node is wedged and you are ready to lose it, `kill -SIGQUIT <pid>` dumps every goroutine stack and terminates that process in one step. Erigon installs a stack-dump handler for `SIGUSR1` and shutdown handlers for `SIGINT` and `SIGTERM`, but none for `SIGQUIT` — so `SIGQUIT` falls through to the Go runtime's own behaviour, the same one this repository's CI watchdog relies on. Pass an explicit PID rather than `$(pidof erigon)`: `SIGQUIT` is destructive, and on a host running more than one instance `pidof` would kill all of them.
+If the node is wedged and you are ready to lose it, `kill -SIGQUIT <pid>` dumps every goroutine stack and terminates that process in one step. Erigon installs a stack-dump handler for `SIGUSR1` and shutdown handlers for `SIGINT` and `SIGTERM`, but none for `SIGQUIT` — so `SIGQUIT` falls through to the Go runtime's own behaviour, the same one this repository's continuous integration (CI) watchdog relies on. Pass an explicit PID rather than `$(pidof erigon)`: `SIGQUIT` is destructive, and on a host running more than one instance `pidof` would kill all of them.
 
 **Capture a CPU or heap profile via pprof** (requires `--pprof` flag at startup — default address `localhost:6060`; override with `--pprof.addr` and `--pprof.port`):
 
@@ -8547,7 +8547,7 @@ Attach the `.pprof` files and the goroutine dump to your GitHub issue.
 
 Hetzner filters traffic at the network edge, and the two product lines need different rules:
 
-- **Cloud** — the firewall is stateful, so return traffic is handled for you. Outbound is allow-all, but only for as long as no outbound rule exists: per Hetzner's FAQ, *"If you define one or more outbound rules, the outbound direction also changes to implicit 'deny'"*. Adding outbound rules for the ports below would therefore cut off DNS, NTP and HTTPS — including the snapshot webseeds — and break the initial download. Define **inbound rules only** and leave the outbound list empty.
+- **Cloud** — the firewall is stateful, so return traffic is handled for you. Outbound is allow-all, but only for as long as no outbound rule exists: per Hetzner's FAQ, *"If you define one or more outbound rules, the outbound direction also changes to implicit 'deny'"*. Adding outbound rules for the ports below would therefore cut off DNS, Network Time Protocol (NTP) and HTTPS — including the snapshot webseeds — and break the initial download. Define **inbound rules only** and leave the outbound list empty.
 - **Dedicated servers (Robot)** — the firewall is stateless, so nothing is inferred from an outgoing connection. The listening ports in the table below are not enough on their own: replies to Erigon's own outbound connections — DNS, HTTPS to the snapshot webseeds, and outgoing peer dials — arrive on ephemeral local ports and need inbound rules of their own (TCP with `ack` set, plus the UDP ranges you use), and any outbound filtering needs matching reply rules. Follow [Hetzner's notes on stateless-firewall configuration](https://docs.hetzner.com/robot/dedicated-server/firewall/#notes-about-stateless-firewall-configuration) rather than porting a Cloud ruleset across.
 
 The ports to allow inbound:
@@ -8611,7 +8611,7 @@ The **`RES`** (Resident) column in `htop` combines the memory used by the applic
 For a more accurate view of Erigon's memory usage, use one of these tools:
 
 - **`vmmap -summary PID`** *(macOS only)*: Shows a detailed breakdown with separate **`MALLOC ZONE`** and **`REGION TYPE`** sections for application memory and OS page cache.
-- **`pmap -x PID`** *(Linux)*: Prints a per-mapping breakdown of RSS and dirty pages. For the full raw detail use `cat /proc/<PID>/smaps`.
+- **`pmap -x PID`** *(Linux)*: Prints a per-mapping breakdown of resident set size (RSS) and dirty pages. For the full raw detail use `cat /proc/<PID>/smaps`.
 - **Prometheus Dashboard**: This provides a graphical representation of the Go application's memory usage, excluding the OS page cache. You can run it with `make prometheus` and access it in your browser at `localhost:3000` with the credentials `admin/admin`. See [Creating a Dashboard](https://docs.erigon.tech/fundamentals/creating-a-dashboard) for full setup instructions.
 
 Erigon typically uses about **4 GB of RAM** during a genesis sync and about **1 GB** during normal operation. The OS page cache, however, can use an unlimited amount of memory.
@@ -8626,7 +8626,7 @@ Cloud network drives, like gp3, aren't ideal for Erigon's block execution. This 
 
 #### Improving Performance
 
-Erigon3 is designed to download most of the history, making it less sensitive to disk latency. To improve performance, focus on **reducing disk latency**, not on increasing throughput or IOPS. There are several ways to do this:
+Erigon3 is designed to download most of the history, making it less sensitive to disk latency. To improve performance, focus on **reducing disk latency**, not on increasing throughput or input/output operations per second (IOPS). There are several ways to do this:
 
 - **Use latency-critical cloud drives** or attached NVMe storage, especially for the initial sync.
 - **Increase RAM**. More RAM helps buffer data and reduces the need for frequent disk access.
@@ -8676,7 +8676,7 @@ These integrated practices focus on maximizing the reliability, efficiency, and 
 | **Practice** | **Details** | **Rationale** |
 | --- | --- | --- |
 | Use a High-End NVMe SSD | This is a non-negotiable prerequisite. NVMe SSDs are essential for reliable, high-performance node operation. See [Hardware Requirements](https://docs.erigon.tech/get-started/hardware-requirements). | Erigon is highly disk I/O intensive. Fast storage prevents bottlenecks and sync issues. |
-| Integrate Hardware Reliability | Use ECC memory and consider a disk RAID setup. Do regular backups of your chain data. | While Erigon's database is fully-transactional and resilient to graceful shutdowns, crashes, and power outages, it is not protected against hardware failures (disk or RAM corruption). |
+| Integrate Hardware Reliability | Use error-correcting code (ECC) memory and consider a redundant array of independent disks (RAID) setup. Do regular backups of your chain data. | While Erigon's database is fully-transactional and resilient to graceful shutdowns, crashes, and power outages, it is not protected against hardware failures (disk or RAM corruption). |
 | Symlink Data Directories (Advanced) | For systems with multiple disks, consider symlinking `snapshots` and `temp` directories to a cheaper, high-capacity drive, while keeping the main `chaindata` on the fast NVMe. See [Optimizing Storage](https://docs.erigon.tech/fundamentals/optimizing-storage). | Optimizes cost and capacity while retaining performance for critical files. |
 | Maintain Sufficient RAM | Ensure your system has at least the recommended RAM for your chosen network and [pruning mode](https://docs.erigon.tech/fundamentals/pruning-modes). See [Hardware Requirements](https://docs.erigon.tech/get-started/hardware-requirements). | Insufficient RAM, even with Erigon's memory efficiency, will lead to OOM-kill events (Out-of-Memory). |
 
@@ -8700,7 +8700,7 @@ These integrated practices focus on maximizing the reliability, efficiency, and 
 | Monitor Your Node's Health | Implement comprehensive monitoring using tools like Prometheus and Grafana to track key metrics like disk I/O, CPU load, and sync status in real time. See [Creating a Dashboard](https://docs.erigon.tech/fundamentals/creating-a-dashboard). | Essential for proactively identifying performance bottlenecks and stability issues. |
 | Enable JSON-RPC Compression | Use the `--http.compression` flag. See [Configuring Erigon](https://docs.erigon.tech/fundamentals/configuring-erigon). | Reduces network bandwidth usage for RPC requests. |
 | Tune RPC Batch Concurrency | Adjust the `--rpc.batch.concurrency` flag. See [RPC & API flags](https://docs.erigon.tech/fundamentals/configuring-erigon#rpc--api). | Limits the number of parallel database reads to prevent a single batch request from overloading the server. |
-| Harden Public RPC Endpoints | Place a reverse proxy (e.g. Nginx, Caddy) in front of Erigon. Enable rate-limiting, TLS termination, and authentication at the proxy layer. Never bind `--http.addr` to `0.0.0.0` directly on a public interface. See [TLS Authentication](https://docs.erigon.tech/fundamentals/tls-authentication). | A direct public binding exposes the node to DoS attacks and unrestricted calls that can exhaust resources. |
+| Harden Public RPC Endpoints | Place a reverse proxy (e.g. Nginx, Caddy) in front of Erigon. Enable rate-limiting, TLS termination, and authentication at the proxy layer. Never bind `--http.addr` to `0.0.0.0` directly on a public interface. See [TLS Authentication](https://docs.erigon.tech/fundamentals/tls-authentication). | A direct public binding exposes the node to denial-of-service (DoS) attacks and unrestricted calls that can exhaust resources. |
 
 ## Maintenance and Development
 
@@ -8735,7 +8735,7 @@ The following shell snippets can provide meaningful performance gains on the rig
 vmtouch -vldt /your/datadir/snapshots/domain
 ```
 
-**Reduce random-read pressure on cloud / NAS storage** — disable the random-access hint for snapshot files:
+**Reduce random-read pressure on cloud / network-attached storage (NAS)** — disable the random-access hint for snapshot files:
 
 ```bash
 export ERIGON_SNAPSHOT_MADV_RND=false

@@ -162,6 +162,11 @@ func ClStagesCfg(
 	}
 }
 
+// Close releases the resources the stage loop owns.
+func (cfg *Cfg) Close() error {
+	return cfg.blockCollector.Close()
+}
+
 type StageName = string
 
 const (

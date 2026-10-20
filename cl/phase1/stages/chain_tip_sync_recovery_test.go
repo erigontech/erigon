@@ -286,7 +286,7 @@ func newChainTipBatchFixtureWithRecordedStatus(t *testing.T, replayStatus execut
 		nil,
 	)
 	require.NoError(t, err)
-	store.OnTick((parent.Block.Slot + 1) * beaconCfg.SecondsPerSlot)
+	store.OnTick((parent.Block.Slot + 1) * beaconCfg.SecondsPerSlot * 1000)
 	if recordStatus {
 		store.MarkPayloadStatus(parentRoot, envelope.Message.Payload.BlockHash, execution_client.PayloadStatusNone)
 		status, found := store.GetRecentExecutionPayloadStatusByRoot(parentRoot)
@@ -1346,4 +1346,39 @@ func TestChainTipBatchReportsAParentEnvelopeNoPeerServes(t *testing.T) {
 	require.ErrorIs(t, rejected[common.Hash(fullRoot)], errParentEnvelopeUnavailable)
 	require.Contains(t, cfg.chainTipRejections.reasons, errParentEnvelopeUnavailable.Error())
 	require.NotContains(t, cfg.chainTipRejections.reasons, "process block failed")
+}
+
+func TestChainTipSyncFlushesCollectorWithStageContext(t *testing.T) {
+	cfg, _, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	engine.supportInsertion = true
+	collector := &gloasCollectorTest{}
+	cfg.blockCollector = collector
+	header, ok := cfg.forkChoice.GetHeader(headRoot)
+	require.True(t, ok)
+	targetSlot := header.Slot + 1
+
+	ctx, cancel := context.WithCancel(t.Context())
+	_ = chainTipSync(ctx, log.Root(), cfg, Args{seenSlot: targetSlot, targetSlot: targetSlot})
+	cancel()
+
+	require.Equal(t, 1, collector.flushCalls)
+	require.Error(t, collector.flushCtx.Err(), "the flush must stop with the stage context")
+}
+
+// A stop that lands before the flush skips it: the first engine call of a flush panics on the
+// embedded EL when the context is already cancelled.
+func TestChainTipSyncSkipsFlushWhenStopped(t *testing.T) {
+	cfg, _, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	engine.supportInsertion = true
+	collector := &gloasCollectorTest{}
+	cfg.blockCollector = collector
+	header, ok := cfg.forkChoice.GetHeader(headRoot)
+	require.True(t, ok)
+	targetSlot := header.Slot + 1
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_ = chainTipSync(ctx, log.Root(), cfg, Args{seenSlot: targetSlot, targetSlot: targetSlot})
+
+	require.Zero(t, collector.flushCalls)
 }

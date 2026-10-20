@@ -34,7 +34,11 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 )
 
-const deferredColumnSyncInterval = time.Second
+// The worker tick is a quarter of the shortest custody grace, within these bounds.
+const (
+	deferredColumnSyncMinTick = 100 * time.Millisecond
+	deferredColumnSyncMaxTick = time.Second
+)
 
 // BlockGetter is an interface for getting blocks by root.
 // Used to avoid import cycle with forkchoice package.
@@ -1922,16 +1926,21 @@ func (d *peerdas) SyncColumnDataLater(block *cltypes.SignedBeaconBlock) error {
 	if err != nil {
 		return err
 	}
+	// Gossip gets its grace from the later of the slot start and now: a Gloas root is queued
+	// mid-slot, when its envelope is processed and its columns are still arriving.
+	start := time.Now()
+	if slotStart := d.ethClock.GetSlotTime(block.Block.Slot); slotStart.After(start) {
+		start = slotStart
+	}
 	// [Modified in Gloas:EIP7732] Store SignedBeaconBlock directly via ColumnSyncableSignedBlock interface
 	// instead of calling Blinded() which fails for GLOAS blocks
-	d.blocksToCheckSync.add(common.Hash(blockRoot), block, time.Now())
+	d.blocksToCheckSync.add(common.Hash(blockRoot), block, start.Add(d.deferredColumnSyncDelay(block)))
 	return nil
 }
 
 // deferredColumnSync is a block queued for the column sync worker, with its retry state.
 type deferredColumnSync struct {
 	block       cltypes.ColumnSyncableSignedBlock
-	queuedAt    time.Time
 	attempts    int
 	nextAttempt time.Time
 	inFlight    bool
@@ -1944,28 +1953,21 @@ type deferredColumnSyncs struct {
 	entries map[common.Hash]*deferredColumnSync
 }
 
-// add queues root unless it is queued already, which keeps the first enqueue time.
-func (q *deferredColumnSyncs) add(root common.Hash, block cltypes.ColumnSyncableSignedBlock, now time.Time) {
+// add queues root with its first attempt at firstAttempt, unless it is queued already.
+func (q *deferredColumnSyncs) add(root common.Hash, block cltypes.ColumnSyncableSignedBlock, firstAttempt time.Time) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.entries == nil {
 		q.entries = map[common.Hash]*deferredColumnSync{}
 	}
 	if _, ok := q.entries[root]; !ok {
-		q.entries[root] = &deferredColumnSync{block: block, queuedAt: now}
+		q.entries[root] = &deferredColumnSync{block: block, nextAttempt: firstAttempt}
 	}
 }
 
-func (q *deferredColumnSyncs) queued(root common.Hash) bool {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	_, ok := q.entries[root]
-	return ok
-}
-
-// due drops the roots below serveRangeStart and returns the roots that are not in a round, are
-// past their backoff and have given gossip its share of the slot.
-func (q *deferredColumnSyncs) due(now time.Time, serveRangeStart uint64, slotStart func(uint64) time.Time, delay func(cltypes.ColumnSyncableSignedBlock) time.Duration) ([]common.Hash, []cltypes.ColumnSyncableSignedBlock) {
+// due drops the roots below serveRangeStart and returns the roots that are not in a round and
+// whose next attempt is due.
+func (q *deferredColumnSyncs) due(now time.Time, serveRangeStart uint64) ([]common.Hash, []cltypes.ColumnSyncableSignedBlock) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	var roots []common.Hash
@@ -1977,7 +1979,7 @@ func (q *deferredColumnSyncs) due(now time.Time, serveRangeStart uint64, slotSta
 			delete(q.entries, root)
 			continue
 		}
-		if !e.inFlight && !now.Before(e.nextAttempt) && deferredColumnSyncDue(now, slotStart(slot), e.queuedAt, delay(e.block)) {
+		if !e.inFlight && !now.Before(e.nextAttempt) {
 			roots = append(roots, root)
 			blocks = append(blocks, e.block)
 		}
@@ -2028,30 +2030,39 @@ func (q *deferredColumnSyncs) forget(root common.Hash) {
 	delete(q.entries, root)
 }
 
-// deferredColumnSyncDue reports whether gossip has had its share of the slot to deliver a
-// block's columns, counted from the later of the slot start and the moment the root was
-// queued, after which the missing columns are requested from peers.
-func deferredColumnSyncDue(now, slotStart, queuedAt time.Time, delay time.Duration) bool {
-	start := slotStart
-	if queuedAt.After(start) {
-		start = queuedAt
-	}
-	return !now.Before(start.Add(delay))
-}
-
 func (d *peerdas) slotDuration() time.Duration {
 	return time.Duration(d.beaconConfig.SecondsPerSlot) * time.Second
 }
 
 // deferredColumnSyncDelay is how long gossip gets before missing columns are requested. A
-// custody node needs every custody column to see its data available when it attests, so gossip
-// gets half the time to the attestation deadline and the by-root fetch the other half. An archive
-// node recovers from half the columns and gives in-flight gossip a full slot instead.
+// custody node gets the custody grace; an archive node recovers from half the columns and gives
+// in-flight gossip a full slot instead.
 func (d *peerdas) deferredColumnSyncDelay(block cltypes.ColumnSyncableSignedBlock) time.Duration {
 	if d.IsArchivedMode() {
 		return d.slotDuration()
 	}
-	return time.Duration(d.beaconConfig.AttestationDueMs(block.Version() >= clparams.GloasVersion)) * time.Millisecond / 2
+	return d.custodyGrace(block.Version() >= clparams.GloasVersion)
+}
+
+// custodyGrace is half the window in which a custody node needs every custody column; the by-root
+// fetch gets the other half. Before Gloas the columns decide whether the node attests to the
+// block, so the window ends at the attestation deadline. From Gloas they decide the envelope and
+// the PTC's blob_data_available vote, and the root is queued when its envelope is processed, so
+// the window runs from the payload deadline to the PTC deadline.
+func (d *peerdas) custodyGrace(gloas bool) time.Duration {
+	cfg := d.beaconConfig
+	if !gloas {
+		return time.Duration(cfg.AttestationDueMs(false)) * time.Millisecond / 2
+	}
+	payloadDueMs := cfg.SecondsPerSlot * cfg.PayloadDueBps / (clparams.BpsFactor / 1000)
+	return time.Duration(cfg.PayloadAttestationDueMs()-min(payloadDueMs, cfg.PayloadAttestationDueMs())) * time.Millisecond / 2
+}
+
+// deferredColumnSyncTick bounds how late a due root is picked up to a quarter of the shortest
+// custody grace, so the by-root fetch keeps most of its half of the window.
+func (d *peerdas) deferredColumnSyncTick() time.Duration {
+	grace := min(d.custodyGrace(false), d.custodyGrace(true))
+	return min(max(grace/4, deferredColumnSyncMinTick), deferredColumnSyncMaxTick)
 }
 
 // stillCanonical reports whether root may still be canonical at slot. The beacon indices cover
@@ -2082,13 +2093,14 @@ func (d *peerdas) stillCanonical(ctx context.Context, slot uint64, root common.H
 
 // syncColumnDataWorker fetches the custody columns gossip did not deliver. Download rounds run
 // off the ticker with a per-root in-flight marker, so one root nobody serves cannot stall the
-// others. The tick bounds how late a due root is picked up.
+// others.
 func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
-	ticker := time.NewTicker(deferredColumnSyncInterval)
+	ticker := time.NewTicker(d.deferredColumnSyncTick())
 	defer ticker.Stop()
-	// A root whose backoff reached an epoch is kept while it is canonical, since nothing queues
-	// it again; one that is not, such as an orphaned block nobody serves, is given up. The round's
-	// own context has expired by then, so the canonical check uses the worker's.
+	// A root whose backoff reached an epoch is kept while it is canonical, since nothing in this
+	// queue re-queues it; a later SyncColumnDataLater can, for example for a parked Gloas envelope.
+	// A root that is not canonical, such as an orphaned block nobody serves, is given up. The
+	// round's own context has expired by then, so the canonical check uses the worker's.
 	failed := func(root common.Hash, slot uint64, now time.Time) {
 		if d.blocksToCheckSync.failed(root, now, d.slotDuration(), d.beaconConfig.SlotsPerEpoch) && !d.stillCanonical(ctx, slot, root) {
 			log.Debug("[syncColumnDataWorker] column data still missing for a non-canonical block, removing from sync queue", "slot", slot, "blockRoot", root)
@@ -2103,7 +2115,7 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 		}
 		now := time.Now()
 		serveRangeStart := d.beaconConfig.DataColumnSidecarServeRangeStartSlot(d.ethClock.GetCurrentSlot())
-		dueRoots, due := d.blocksToCheckSync.due(now, serveRangeStart, d.ethClock.GetSlotTime, d.deferredColumnSyncDelay)
+		dueRoots, due := d.blocksToCheckSync.due(now, serveRangeStart)
 		if len(due) == 0 {
 			continue
 		}
