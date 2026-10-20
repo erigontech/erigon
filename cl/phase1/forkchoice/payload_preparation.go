@@ -81,6 +81,7 @@ func (p *PayloadPreparationImports) TryBegin(
 	if clear && blockSlot != nil {
 		p.pendingEnvelopes.Range(func(_, value any) bool {
 			slot, known := blockSlot(value.(common.Hash))
+			// Include the head slot so queued gossip envelopes get import priority before EMPTY fallback preparation.
 			clear = !known || slot < firstSlot || slot > lastSlot
 			return clear
 		})
