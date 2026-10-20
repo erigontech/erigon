@@ -4,9 +4,11 @@ description: "Default listening ports for each Erigon service and how to overrid
 sidebar_position: 10
 ---
 
+{/* llms-pinned-version: v3.7.1 and earlier */}
+
 # Default ports
 
-Erigon use the following default port for each service:
+Erigon uses the following default ports for each service:
 
 | Component | Port    | Protocol  | Purpose                     | Should Expose |
 |-----------|---------|-----------|-----------------------------|---------------|
@@ -34,7 +36,7 @@ Here is a comprehensive list of port-related options:
 
 ### Engine
 
-* `--private.api.addr [value]`: Erigon's internal gRPC API, empty string means not to start the listener (default: `127.0.0.1:9090`)
+* `--private.api.addr [value]`: Erigon's internal gRPC API; an empty string means not to start the listener (default: `127.0.0.1:9090`)
 * `--txpool.api.addr [value]`: TxPool api network address, (default: use value of `--private.api.addr`)
 * `--torrent.port [value]`: Port to listen and serve BitTorrent protocol (default: `42069`)
 * `--authrpc.port [value]`: HTTP-RPC server listening port for the Engine API (default: `8551`)
@@ -56,8 +58,8 @@ Here is a comprehensive list of port-related options:
 
 * `--caplin.discovery.port [value]`: Port for Caplin DISCV5 protocol (default: `4000`)
 * `--caplin.discovery.tcpport [value]`: TCP port for Caplin libp2p (default: `4001`)
-* `--caplin.discovery.quicport [value]`: QUIC UDP port for Caplin libp2p (default: `4002`)
-* `--caplin.quic.disable`: Disables the QUIC transport for Caplin libp2p, falling back to TCP only (default: `false`)
+* `--caplin.discovery.quicport [value]`: QUIC UDP port for Caplin libp2p (default: `4002`; `4001` in v3.7.1 and earlier)
+* `--caplin.quic.disable`: Disables the QUIC transport for Caplin libp2p, falling back to TCP only (default: `false`; not available in v3.7.1 and earlier)
 * `--sentinel.port [value]`: Port the Caplin sentinel gRPC service listens on (default: `7777`)
 
 ### BeaconAPI
@@ -74,7 +76,7 @@ The embedded MCP server is enabled by default. To disable it, pass `--mcp.disabl
 
 ## Shutter Network Default Ports
 
-The default peering port for Shutter is `23102` (TCP), to change it use `--shutter.p2p.listen.port <value>`.
+The default peering port for Shutter is `23102` (TCP); to change it, use `--shutter.p2p.listen.port <value>`.
 
 Bootstrap nodes are used to help new nodes discover other nodes in the network. By default, the embedded configuration values are used, but these can be overridden with `--shutter.p2p.bootstrap.nodes <value>`.
 
