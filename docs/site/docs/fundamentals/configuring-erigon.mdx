@@ -70,7 +70,7 @@ These flags are mainly for dev networks, testing, or specialized block-productio
 
 * `--allow-insecure-unlock`: Accepted for go-ethereum CLI compatibility but currently has **no effect** — the flag is registered and settable, yet nothing in the codebase reads it and Erigon exposes no account-unlocking RPC.
   * Default: `false`
-* `--dev-validator-seed value`: Deterministic BLS key seed for the embedded dev validator. Read only in PoS dev mode, which is selected by `--chain dev`; on any other chain the flag does nothing.
+* `--dev-validator-seed value`: Deterministic BLS key seed for the embedded dev validator. Read only in proof-of-stake (PoS) dev mode, which is selected by `--chain dev`; on any other chain the flag does nothing.
   * Default: `devnet`
 * `--dev-validator-count value`: Number of validators for PoS dev mode (`--chain dev`).
   * Default: `64`
@@ -97,13 +97,16 @@ These flags control database performance and memory usage. See [Database](/funda
   * Default: `1TB`
 * `--db.writemap`: Enables `WRITE_MAP` for fast database writes.
   * Default: `true`
+* `--db.safe.nosync`: Lets committed writes reach the disk in the background instead of flushing before each commit returns. After a power cut the node resumes from the last flushed point and re-syncs the seconds in between; the database stays intact either way. Set `--db.safe.nosync=false` to flush before every commit returns, at the cost of write speed.
+  * Default: `true`
+  * When the flag is not passed, the `MDBX_DURABLE=true` environment variable also turns the background flush off.
 * `--db.read.concurrency value`: Maximum number of concurrent open database read transactions (the MDBX read-transaction semaphore); when it is full, extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response instead. Raise it for nodes serving heavy parallel RPC. Lowering it does not reduce read concurrency: each parallel-execution worker holds a long-lived read transaction, so a value below the worker count would deadlock. Erigon raises a lower value, with a warning, to a floor that sums the exec workers, the parallel-commitment readers (GOMAXPROCS + 1, with `--experimental.parallel-commitment`), the BAL warmup readers, the block read-ahead workers and a fixed reserve; rpcdaemon uses the value as given. To genuinely reduce read concurrency, lower `--exec.workers` instead.
   * Default: scales with the host as `min(max(10, GOMAXPROCS * 64), 9000)` — kept well above the CPU count because reads are I/O-bound, and capped below Go's roughly 10,000 OS-thread limit.
 * `--database.verbosity value`: Enables internal database logs.
   * Default: `2`
 * `--batchSize value`: Sets the batch size for the execution stage.
   * Default: `512M`
-* `--etl.bufferSize value`: Buffer size for ETL operations. Also settable through the `ETL_OPTIMAL` environment variable.
+* `--etl.bufferSize value`: Buffer size for extract, transform, load (ETL) operations. Also settable through the `ETL_OPTIMAL` environment variable.
   * Default: `256MB`
 * `--bodies.cache value`: Sets the size limit for the block bodies cache.
   * Default: `268435456`
@@ -141,9 +144,9 @@ Flags for managing how old chain data is handled and stored. See [Snapshots Mana
   * Default: `false`
 * `--snap.state.stop`: Workaround for state-related bugs — stops producing new state files (DB will grow as a result).
   * Default: `false`
-* `--snap.p2p-manifest` *(New in v3.5)* (experimental): Decentralized snapshot discovery — peers advertise their `chain.toml` manifest via ENR instead of the centralized `preverified.toml`. Opt-in; requires a compatible peer network.
+* `--snap.p2p-manifest` *(New in v3.5)* (experimental): Decentralized snapshot discovery — peers advertise their `chain.toml` manifest via Ethereum Node Record (ENR) instead of the centralized `preverified.toml`. Opt-in; requires a compatible peer network.
   * Default: `false`
-* `--snap.chaintoml-url value` *(New in v3.5)*: Fetch the preverified `chain.toml` directly from this URL instead of the default R2/GitHub CDN. Precedence: the `ERIGON_REMOTE_PREVERIFIED` environment variable (path to a local override file) wins over this URL and the default CDN; a local `preverified.toml` in the datadir also takes precedence — delete it to re-fetch from the URL.
+* `--snap.chaintoml-url value` *(New in v3.5)*: Fetches the preverified `chain.toml` directly from this URL instead of the default R2/GitHub content delivery network (CDN). Precedence: the `ERIGON_REMOTE_PREVERIFIED` environment variable (path to a local override file) wins over this URL and the default CDN; a local `preverified.toml` in the datadir also takes precedence — delete it to re-fetch from the URL.
   * Default: `""` (uses the built-in CDN)
 * `--snap.download.to.block, --shadow.fork.block value`: Downloads snapshots only up to the given block number (exclusive). Intended for testing and shadow forks.
   * Default: `0` (disabled — downloads all available snapshots)
@@ -193,7 +196,7 @@ These flags manage network connectivity, peer discovery, and traffic control. Se
   * Default: `30303`
 * `--p2p.protocol value`: The version of the `eth` P2P protocol.
   * Default: `69`, `70`, `71`
-* `--nat value`: The NAT port mapping mechanism (See [here](/fundamentals/nat) for more details).
+* `--nat value`: The Network Address Translation (NAT) port mapping mechanism (See [here](/fundamentals/nat) for more details).
 * `--nodiscover`: Disables peer discovery.
   * Default: `false`
 * `--discovery.v4`, `--discv4`: Enables the Node Discovery Protocol v4 (Discv4) for managed ENRs and topic discovery.
@@ -225,7 +228,7 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * `--tls.cert` and `--tls.key` are both required when this is set. If either is missing Erigon logs a warning and continues without TLS — and because it abandons the rest of that setup step, `--healthcheck` is silently dropped too.
 * `--tls.cert value`: Path to the certificate presented on the internal gRPC API.
 * `--tls.key value`: Path to the private key for `--tls.cert`.
-* `--tls.cacert value`: Path to the certificate authority used to verify gRPC clients. Setting it switches the server to mutual TLS: every gRPC client of `--private.api.addr` must then present a certificate signed by this CA, or the handshake is rejected. Leave it unset for server-only TLS. Read only when `--tls` is set.
+* `--tls.cacert value`: Path to the certificate authority used to verify gRPC clients. Setting it switches the server to mutual TLS: every gRPC client of `--private.api.addr` must then present a certificate signed by this certificate authority (CA), or the handshake is rejected. Leave it unset for server-only TLS. Read only when `--tls` is set.
 * `--http`: Enables the JSON-RPC HTTP server.
   * Default: `true`
 * `--http.enabled`: An alternative flag to enable the HTTP server.
@@ -247,7 +250,7 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
 * `--authrpc.jwtsecret value`: The path to the [JWT secret](/fundamentals/jwt) file for the consensus layer.
 * `--http.compression`: Compresses HTTP-RPC responses of 1 KiB or more with the encoding the client's `Accept-Encoding` allows: Zstandard (preferred) or gzip. A client that accepts neither gets an uncompressed response.
   * Default: `true`
-* `--http.corsdomain value`: A comma-separated list of domains for cross-origin requests.
+* `--http.corsdomain value`: A comma-separated list of domains for cross-origin requests. The same list gates browser WebSocket handshakes and cross-site `GET` calls: a page whose `Origin` is not listed gets `403`. Without the flag, only pages on `http://localhost`, `http://127.0.0.1`, `http://[::1]` or the node's own hostname can open a WebSocket. Clients that send no `Origin` header, such as `curl` or server-side libraries, are not affected.
 * `--http.vhosts value`: A comma-separated list of virtual hostnames.
   * Default: `localhost`
 * `--authrpc.vhosts value`: A comma-separated list of virtual hostnames for the Engine API.
@@ -263,7 +266,7 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
 * `--ws.max.connections value`: Maximum number of concurrent WebSocket connections.
   * Default: `0` (unlimited)
 
-**HTTPS and IPC transports.** *(New in v3.7)* These flags are accepted by both the `erigon` binary and the standalone [RPC Daemon](/fundamentals/modules/rpc-daemon) — the embedded RPC server reads them from the same configuration. They serve the same JSON-RPC API as `--http`, over TLS or a separate socket instead.
+**HTTPS and inter-process communication (IPC) transports.** *(New in v3.7)* These flags are accepted by both the `erigon` binary and the standalone [RPC Daemon](/fundamentals/modules/rpc-daemon) — the embedded RPC server reads them from the same configuration. They serve the same JSON-RPC API as `--http`, over TLS or a separate socket instead.
 
 :::warning
 `--http=false` is a master switch: it disables the whole RPC stack, including the HTTPS and IPC listeners, so `--http=false --https.enabled` yields no listener at all. To serve TLS only, leave `--http` alone and turn off just the plain HTTP listener with `--http.enabled=false`.
@@ -294,7 +297,7 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Set to `-1` to disable admission control (unlimited)
 * `--rpc.streaming.disable`: Disables JSON streaming for heavy endpoints.
   * Default: `false`
-* `--state.stream.disable`: Disables streaming of state changes from the core to the RPC daemon.
+* `--state.stream.disable`: Disables streaming of state changes from the core to the RPC Daemon.
   * Default: `false`
 * `--rpc.accessList value`: Specifies a granular API allowlist.
 * `--rpc.gascap value`: Sets a cap on gas usage for `eth_call`/`estimateGas`.
@@ -349,6 +352,9 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
 * `--rpc.subscription.filters.timeout value`: Timeout before idle subscription filters are evicted.
   * Default: `5m0s`
   * Set to `0` to disable eviction.
+* `--rpc.subscription.filters.maxsubscriptions value`: Maximum number of live filters and subscriptions across all clients, counting `eth_newFilter`, `eth_newBlockFilter`, `eth_newPendingTransactionFilter` and `eth_subscribe`. At the limit, a new one is rejected with `-32005` (`too many filters and subscriptions`) until a filter is uninstalled or evicted as idle, or a subscription's connection closes. The `subscriptions_budget_used` metric reports the live count.
+  * Default: `10000`
+  * Set to `0` to disable the limit.
 * `--http.timeouts.read value`: Maximum duration for reading a request.
   * Default: `30s`
 * `--http.timeouts.write value`: Maximum duration before timing out a response write.
@@ -363,7 +369,7 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `2m0s`
 * `--healthcheck`: Enables gRPC health checks.
   * Default: `false`
-* `--witness.cache.blocks value` *(New in v3.6)*: Number of recent blocks whose legacy `debug_executionWitness` result is eagerly cached in memory, keyed by block hash in an LRU. Each witness is held as serialized JSON and served verbatim on a hit, so memory use is roughly this count multiplied by the per-block witness size. Embedded RPC only, and requires `--prune.include-commitment-history` (runtime errors from `debug_executionWitness` and `eth_getWitness` name its `--prune.experimental.include-commitment-history` alias instead). This flag also gates `debug_subscribe("executionWitnesses")`, which pushes each witness over WebSocket as the cache builds it. That stream is best-effort rather than contiguous — catch-up bursts, skipped or failed builds, and slow subscribers all leave gaps — so a client that needs every height re-requests the missing ones with `debug_executionWitness`.
+* `--witness.cache.blocks value` *(New in v3.6)*: Number of recent blocks whose legacy `debug_executionWitness` result is eagerly cached in memory, keyed by block hash in a least recently used (LRU) cache. Each witness is held as serialized JSON and served verbatim on a hit, so memory use is roughly this count multiplied by the per-block witness size. Embedded RPC only, and requires `--prune.include-commitment-history` (runtime errors from `debug_executionWitness` and `eth_getWitness` name its `--prune.experimental.include-commitment-history` alias instead). This flag also gates `debug_subscribe("executionWitnesses")`, which pushes each witness over WebSocket as the cache builds it. That stream is best-effort rather than contiguous — catch-up bursts, skipped or failed builds, and slow subscribers all leave gaps — so a client that needs every height re-requests the missing ones with `debug_executionWitness`.
   * Default: `0` (cache disabled); values above the cap of `96` are clamped
 * `--witness.cache.head-capture`: Serves recent-block `debug_executionWitness` on a minimal node without commitment-history by building each head block from a pinned parent commitment snapshot and the account/storage/code history the node keeps. Cache-only serving: out-of-window requests miss, and no history recompute is attempted. Embedded RPC only.
   * Default: `false`
@@ -414,6 +420,8 @@ Flags for controlling logging and performance profiling. See [Logs](/fundamental
   * Default: `dbug`
 * `--log.delays`: Enables block delay logging.
   * Default: `false`
+* `--debug.slow-block-threshold value`: Logs per-block execution metrics as a JSON line at `WARN` level (`"msg":"Slow block"`, with execution, state-read, state-hash and commit times, gas, throughput, and state and cache counters) for blocks validated at the chain tip that take at least this long. The field names follow the cross-client [slow-block metrics](https://ethresear.ch/t/a-small-step-towards-data-driven-protocol-decisions-unified-slowblock-metrics-across-clients/23907) proposal. `0` logs every block. Enabling it also times every state read process-wide, RPC included, which adds overhead.
+  * Default: `-1ns` (disabled; any negative value disables it)
 * `--pprof`: Enables the pprof HTTP server.
   * Default: `false`
 * `--pprof.addr value`: The pprof HTTP server listening interface.
@@ -469,6 +477,8 @@ These flags control the block synchronization and data downloading process, incl
   * Default: `false`
 * `--downloader.disable.ipv6`: Disables IPv6 for the Downloader.
   * Default: `false`
+* `--downloader.disable.tcp`: Turns off TCP for the Downloader, leaving uTP as the only BitTorrent transport.
+  * Default: `false`
 * `--no-downloader`: Disables the Downloader component.
   * Default: `false`
 * `--downloader.verify`: Verifies snapshots on startup.
@@ -493,8 +503,8 @@ These flags control the block synchronization and data downloading process, incl
 * `--torrent.upload.rate value`: The upload rate in bytes per second.
   * Default: `16mb`
 * `--torrent.download.rate value`: Sets the torrent download rate cap. Default: `512mb`. Use a lower value on shared machines to avoid saturating the connection; use `Inf` to remove the limit.
-* `--torrent.webseed.download.rate value`: The download rate for webseeds. If not set, rate limit is shared with torrent.
-* `--torrent.verbosity value`: Sets the verbosity level for BitTorrent logs. 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set `--verbosity` to equal or higher level)
+* `--torrent.webseed.download.rate value`: The download rate for webseeds. If not set, the rate limit is shared with the torrent download rate.
+* `--torrent.verbosity value`: Sets the verbosity level for BitTorrent logs. 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set `--verbosity` to an equal or higher level)
   * Default: `1`
 
 The two flags below are registered but hidden, so they do not appear in `erigon --help`, and neither changes any behaviour. They are listed here so their presence in an old command line is not mistaken for a working setting.
@@ -558,9 +568,9 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
   * Default: `false`
 * `--caplin.max-peer-count value`: The maximum number of peers to connect to.
   * Default: `128`
-* `--caplin.ip-block-limits.disable`: Restores the released connection limits. Without it, Caplin caps connections per IPv4 /24 and IPv6 /48 (an eighth of `--caplin.max-peer-count`, at least 16; for the /48 at most 64, go-libp2p's cap that it replaces) and per IPv4 /16 and IPv6 /32 (half of it, at least the /24 cap), on top of go-libp2p's caps of 8 per IPv4 address or IPv6 /56. Static peers (`--sentinel.staticpeers`) given by IP address keep only the per-address cap. With `--caplin.local-discovery`, private, link-local and IPv6 ULA networks are exempt from all of these caps; this flag also removes that exemption. Networks in `--caplin.ip-block-limits.trusted-cidrs` stay exempt.
+* `--caplin.ip-block-limits.disable`: Restores the released connection limits. Without it, Caplin caps connections per IPv4 /24 and IPv6 /48 (an eighth of `--caplin.max-peer-count`, at least 16; for the /48 at most 64, go-libp2p's cap that it replaces) and per IPv4 /16 and IPv6 /32 (half of it, at least the /24 cap), on top of go-libp2p's caps of 8 per IPv4 address or IPv6 /56. Static peers (`--sentinel.staticpeers`) given by IP address keep only the per-address cap. With `--caplin.local-discovery`, private, link-local and IPv6 unique local address (ULA) networks are exempt from all of these caps; this flag also removes that exemption. Networks in `--caplin.ip-block-limits.trusted-cidrs` stay exempt.
   * Default: `false`
-* `--caplin.ip-block-limits.trusted-cidrs value`: Comma-separated networks in CIDR notation, at most an IPv4 /8 or an IPv6 /16 each and without host bits, that are exempt from every per-address and per-block cap. All connections from one listed network share a limit of 8 times `--caplin.max-peer-count` (at least 32). Loopback stays unlimited even when it is listed. Useful for a trusted cluster on public addresses.
+* `--caplin.ip-block-limits.trusted-cidrs value`: Comma-separated networks in Classless Inter-Domain Routing (CIDR) notation, at most an IPv4 /8 or an IPv6 /16 each and without host bits, that are exempt from every per-address and per-block cap. All connections from one listed network share a limit of 8 times `--caplin.max-peer-count` (at least 32). Loopback stays unlimited even when it is listed. Useful for a trusted cluster on public addresses.
 * `--caplin.enable-upnp`: Enables NAT porting for Caplin.
   * Default: `false`
 * `--caplin.local-discovery`: Also attempts to find peers over private IPs. May cause issues with some hosts (for example, Hetzner).
@@ -583,7 +593,7 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
   * Default: `false`
 * `--caplin.blobs-no-pruning`: Disables blob pruning.
   * Default: `false`
-* `--caplin.columns-keep-slots value`: Number of slots to retain PeerDAS data column sidecars. Increase for DA oracle or rollup nodes that need longer column history.
+* `--caplin.columns-keep-slots value`: Number of slots to retain PeerDAS data column sidecars. Increase for data availability (DA) oracle or rollup nodes that need longer column history.
   * Default: `0` — uses the chain's spec window, `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`
 * `--caplin.checkpoint-sync.disable`: Disables checkpoint sync.
   * Default: `false`
@@ -591,8 +601,8 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
   * Default: `0` (resolves to the anchor fork's sidecar-retention window)
 * `--caplin.snapgen`: Enables snapshot generation.
   * Default: `false`
-* `--caplin.mev-relay-url value`: The MEV relay endpoint.
-* `--caplin.builder.allow-private-urls`: Lets the builder URLs that validators submit as builder preferences resolve to private or loopback addresses, for a builder on the same host or LAN. Other non-public ranges stay blocked. Does not apply to `--caplin.mev-relay-url`.
+* `--caplin.mev-relay-url value`: The Maximal Extractable Value (MEV) relay endpoint.
+* `--caplin.builder.allow-private-urls`: Lets the builder URLs that validators submit as builder preferences resolve to private or loopback addresses, for a builder on the same host or local area network (LAN). Other non-public ranges stay blocked. Does not apply to `--caplin.mev-relay-url`.
   * Default: `false`
 * `--caplin.validator-monitor`: Enables Caplin validator monitoring metrics.
   * Default: `false`
@@ -675,8 +685,8 @@ Erigon's own variables — everything below except the [Docker](#docker-environm
 
 **Database and Performance:**
 
-* `MDBX_LOCK_IN_RAM` - Locks MDBX database in RAM for better performance
-* `MDBX_DIRTY_SPACE_MB` - Sets dirty space limit for MDBX database
+* `MDBX_LOCK_IN_RAM` - Locks the MDBX database in RAM for better performance
+* `MDBX_DIRTY_SPACE_MB` - Sets the dirty space limit for the MDBX database
 * `SNAPSHOT_MADV_RND` - Controls snapshot memory advice randomization (default: `true`)
 
 **Synchronization and Pruning:**
@@ -691,12 +701,12 @@ Erigon's own variables — everything below except the [Docker](#docker-environm
 **Execution and Processing:**
 
 * `EXEC3_PARALLEL` - Enables parallel block execution (Block-STM). **Default changed to `true` in v3.5** — parallel execution is now on by default. Set to `false` or use `--exec.serial` to revert to single-threaded execution.
-* `EXEC3_WORKERS` - Sets number of parallel execution workers (default: number of CPU cores)
+* `EXEC3_WORKERS` - Sets the number of parallel execution workers (default: number of CPU cores)
 * `STAGES_ONLY_BLOCKS` - Limits stages to blocks only
 
 **State Cache:**
 
-* `USE_STATE_CACHE` - Enables the executor's domain-shared read cache (default: `true`; flag equivalent: `--exec.state-cache`). When `false` no cache is built, and neither the budgets nor the pin controller below have any effect.
+* `USE_STATE_CACHE` - Enables the executor's domain-shared read cache (default: `true`; flag equivalent: `--exec.state-cache`). When `false` no cache is built, and neither the budgets nor the pin controller below has any effect.
 * `STATE_CACHE_ACCOUNTS` - Byte budget for the account cache (default: `150MB`). **New in v3.6**; the built-in budget it overrides was `1GB` in v3.5.
 * `STATE_CACHE_STORAGE` - Byte budget for the storage cache (default: `1GB`)
 * `STATE_CACHE_CODE` - Byte budget for the code cache, applied separately to each of its two byte-bearing layers; a third, size-only layer is sized independently (default: `512MB`)

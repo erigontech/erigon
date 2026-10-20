@@ -475,6 +475,7 @@ func (p *TxPool) forgetUnusedSenders(ids []uint64) {
 		if p.all.hasTxns(id) {
 			continue
 		}
+		delete(p.senderLastActivity, id)
 		if addr, ok := p.senders.senderID2Addr[id]; ok {
 			delete(p.senders.senderID2Addr, id)
 			delete(p.senders.senderIDs, addr)
@@ -2129,11 +2130,17 @@ func (p *TxPool) deleteMinedBlobTxn(hash string) {
 	if !exists {
 		return
 	}
-	l := len(p.minedBlobTxnsByBlock[mt.minedBlockNum])
-	if l > 1 {
-		p.minedBlobTxnsByBlock[mt.minedBlockNum][mt.bestIndex] = p.minedBlobTxnsByBlock[mt.minedBlockNum][l-1]
+	items := p.minedBlobTxnsByBlock[mt.minedBlockNum]
+	last := len(items) - 1
+	if mt.bestIndex != last {
+		moved := items[last]
+		items[mt.bestIndex] = moved
+		moved.bestIndex = mt.bestIndex
 	}
-	p.minedBlobTxnsByBlock[mt.minedBlockNum] = p.minedBlobTxnsByBlock[mt.minedBlockNum][:l-1]
+	items[last] = nil
+	items = items[:last]
+	p.minedBlobTxnsByBlock[mt.minedBlockNum] = items
+	mt.bestIndex = -1
 	delete(p.minedBlobTxnsByHash, hash)
 }
 
@@ -2641,6 +2648,7 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 		id := mt.TxnSlot.SenderID
 		idHash := mt.TxnSlot.IDHash[:]
 		if !p.all.hasTxns(id) {
+			delete(p.senderLastActivity, id)
 			addr, ok := p.senders.senderID2Addr[id]
 			if ok {
 				delete(p.senders.senderID2Addr, id)

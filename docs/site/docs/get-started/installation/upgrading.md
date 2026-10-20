@@ -74,9 +74,9 @@ If upgrading snapshots(`3.0`to `3.1`) now happens automatically, you should foll
 **WARNING**: This algorithm will remove incompatible `3.1` snapshot files because they are not backward-compatible.
 :::
 
-1. Make sure that you're running Erigon on 3.1.x version, use `erigon --version`.
-2. Run `erigon snapshots reset-to-old-ver-format --datadir /your/datadir` to reset your snapshots to old format.
-3. `git checkout v3.0.x` to checkout to preferred `3.0` version. For example now latest: `git checkout v3.0.15`
+1. Make sure that you're running Erigon on a 3.1.x version; check with `erigon --version`.
+2. Run `erigon snapshots reset-to-old-ver-format --datadir /your/datadir` to reset your snapshots to the old format.
+3. `git checkout v3.0.x` to check out the preferred `3.0` version. For example, the current latest is: `git checkout v3.0.15`
 4. Run your old version of Erigon.
 
 ## Upgrading your Erigon Installation
@@ -89,7 +89,7 @@ Follow the below instructions depending on your installation method:
 
 ### Pre-built Binaries (only Linux and macOS)
 
-Download the latest binary file from [https://github.com/erigontech/erigon/releases](https://github.com/erigontech/erigon/releases), do the [checksum](./#install-prebuilt) and reinstall it, no other operation needed.
+Download the latest binary file from [https://github.com/erigontech/erigon/releases](https://github.com/erigontech/erigon/releases), verify the [checksum](./#install-prebuilt), and reinstall it; no other operation is needed.
 
 ### Docker
 

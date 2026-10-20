@@ -27,7 +27,7 @@ Erigon provides extensive logging configuration through command-line flags. Key 
 
 * `--log.json`: Enable JSON formatting for console logs
 * `--verbosity`: Set console log level (default: `info`)
-* `--log.dir.path`: Specify directory for log files. By default Erigon writing logs to `datadir/logs` directory.
+* `--log.dir.path`: Specify directory for log files. By default, Erigon writes logs to the `datadir/logs` directory.
 * `--log.dir.verbosity`: Set file log level (default: `dbug`)
 * `--log.delays`: Enable block delay logging
 
@@ -70,7 +70,7 @@ The primary synchronization stages include:
 * **Bodies**: Download and validate block bodies
 * **Senders**: Recover transaction senders from signatures
 * **Execution**: Execute transactions and update state
-* **TxLookup**: Generates transaction lookup indices. This indexing is essential for quickly finding transaction by its hash, significantly improving the performance of transaction-related RPC calls.
+* **TxLookup**: Generates transaction lookup indices. This indexing is essential for quickly finding a transaction by its hash, significantly improving the performance of transaction-related RPC calls.
 * **Finish**: The finalization stage of the sync process. This is the point where the node sends out notifications to subscribers about the new blockchain head, ensuring other components and external applications are instantly aware of the latest block.
 
 ### Stage Progress Tracking

@@ -27,6 +27,7 @@ import (
 	"io"
 	"math/big"
 	"math/rand"
+	"strings"
 	"testing"
 	"time"
 
@@ -575,7 +576,6 @@ func TestCallBlobBaseFee(t *testing.T) {
 	}{
 		{"blob hashes, no fee cap", nil, []common.Hash{{1}}, zeroWord},
 		{"blob hashes, priced", (*hexutil.U256)(uint256.NewInt(1e9)), []common.Hash{{1}}, oneWord},
-		{"zero fee cap, no hashes", (*hexutil.U256)(new(uint256.Int)), nil, zeroWord},
 		{"no blob fields", nil, nil, oneWord},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1368,13 +1368,16 @@ func TestGetProofIgnoresNewerSharedBranchCache(t *testing.T) {
 }
 
 func TestGetProofGenesisPrunedCommitmentHistory(t *testing.T) {
+	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
 	m, bankAddr, _, _ := chainWithDeployedContract(t)
 
 	ctx := context.Background()
 	tx, err := m.DB.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
+	require.NoError(t, rawdb.WriteDBCommitmentHistoryEnabled(tx, true))
 	pruneTo, err := m.BlockReader.TxnumReader().Min(ctx, tx, 3)
 	require.NoError(t, err)
 	c, err := tx.RwCursorDupSort(kv.TblCommitmentHistoryKeys)
@@ -1395,6 +1398,18 @@ func TestGetProofGenesisPrunedCommitmentHistory(t *testing.T) {
 	proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(0)))
 	require.ErrorIs(t, err, state.ErrPruned)
 	require.Nil(t, proof)
+
+	caps, err := api.Capabilities(ctx)
+	require.NoError(t, err)
+	require.Zero(t, uint64(*caps.State.OldestBlock), "ordinary state history is still retained")
+	require.False(t, caps.StateProofs.Disabled)
+	oldest := uint64(*caps.StateProofs.OldestBlock)
+	require.Positive(t, oldest, "proofs must not advertise pruned commitment history")
+	proof, err = api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(oldest))))
+	require.NoError(t, err, "the advertised proof boundary must be readable")
+	require.NotNil(t, proof)
+	_, err = api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(oldest-1))))
+	require.ErrorIs(t, err, state.ErrPruned)
 }
 
 // TestGetProofStorageKeyEncoding pins the storage-key echo format eth_getProof shares
@@ -1422,6 +1437,47 @@ func TestGetProofStorageKeyEncoding(t *testing.T) {
 			info := StorageKeysInfo{KeyLength: len(tt.key)}
 			info.Hash.SetBytes(tt.key)
 			require.Equal(t, tt.want, info.EncodeKey())
+		})
+	}
+}
+
+// Odd-length keys are read as if left-padded with a zero digit; every other input decodes,
+// or fails, exactly as it does for []hexutil.Bytes.
+func TestStorageKeysUnmarshalJSON(t *testing.T) {
+	t.Parallel()
+
+	slotOne := common.BytesToHash([]byte{0x01})
+	hashKey := hexutil.Bytes(slotOne[:])
+	tests := []struct {
+		name  string
+		input string
+		want  StorageKeys
+	}{
+		{"empty list", `[]`, StorageKeys{}},
+		{"empty key", `["0x"]`, StorageKeys{{}}},
+		{"odd length", `["0x0","0x1","0xabc","0X1"]`, StorageKeys{{0x00}, {0x01}, {0x0a, 0xbc}, {0x01}}},
+		{"odd length keeps leading zeros", `["0x001"]`, StorageKeys{{0x00, 0x01}}},
+		{"even length", `["0x01","0x0abc"]`, StorageKeys{{0x01}, {0x0a, 0xbc}}},
+		{"63 digits", `["0x` + strings.Repeat("0", 62) + `1"]`, StorageKeys{hashKey}},
+		{"64 digits", `["0x` + strings.Repeat("0", 63) + `1"]`, StorageKeys{hashKey}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var got StorageKeys
+			require.NoError(t, json.Unmarshal([]byte(tt.input), &got))
+			require.Equal(t, tt.want, got)
+		})
+	}
+
+	for _, input := range []string{`["01"]`, `["0x01","01"]`, `["0xg1"]`, `["0x1g"]`, `[1]`, `[null]`} {
+		t.Run("error "+input, func(t *testing.T) {
+			t.Parallel()
+			var want []hexutil.Bytes
+			wantErr := json.Unmarshal([]byte(input), &want)
+			require.Error(t, wantErr)
+			var got StorageKeys
+			require.EqualError(t, json.Unmarshal([]byte(input), &got), wantErr.Error())
 		})
 	}
 }
@@ -1557,6 +1613,23 @@ func TestGetProofRequestShapes(t *testing.T) {
 			require.Equal(t, hexutil.Encode(k), proof.StorageProof[i].Key)
 		}
 		require.Equal(t, proof.StorageProof[0], proof.StorageProof[2])
+	})
+
+	t.Run("odd-length keys match their even-length form", func(t *testing.T) {
+		server := rpc.NewServer(50, false, false, true, log.New(), 100)
+		require.NoError(t, server.RegisterName("eth", EthAPI(api)))
+		client := rpc.DialInProc(server, log.New())
+		t.Cleanup(func() { client.Close(); server.Stop() })
+
+		getProof := func(keys ...string) string {
+			var res json.RawMessage
+			require.NoError(t, client.CallContext(ctx, &res, "eth_getProof", contractAddr, keys, "0x6"))
+			return string(res)
+		}
+		zeros := strings.Repeat("0", 62)
+		require.JSONEq(t,
+			getProof("0x00", "0x04", "0x08", "0x0a", "0x0"+zeros+"4"),
+			getProof("0x0", "0x4", "0x8", "0xa", "0x"+zeros+"4"))
 	})
 }
 
@@ -2136,6 +2209,18 @@ func TestCallRejectsMalformedBlobArgs(t *testing.T) {
 		require.ErrorIs(t, err, types.ErrBlobTxnEmptyBlobs)
 	})
 
+	for _, blobFeeCap := range []uint64{0, 1} {
+		t.Run(fmt.Sprintf("blob fee cap %d without blob hashes is rejected", blobFeeCap), func(t *testing.T) {
+			_, err := api.Call(context.Background(), ethapi.CallArgs{
+				From:             &bankAddr,
+				To:               &contractAddr,
+				Data:             &callData,
+				MaxFeePerBlobGas: (*hexutil.U256)(uint256.NewInt(blobFeeCap)),
+			}, nil, nil, nil)
+			require.ErrorIs(t, err, ethapi.ErrBlobFeeCapWithoutBlobHashes)
+		})
+	}
+
 	t.Run("blob contract creation is rejected", func(t *testing.T) {
 		_, err := api.Call(context.Background(), ethapi.CallArgs{
 			From:                &bankAddr,
@@ -2200,7 +2285,7 @@ func TestCallRejectsBlobHashesBeforeCancun(t *testing.T) {
 	recipient := common.HexToAddress("0x3333333333333333333333333333333333333333")
 	validHash := common.Hash{kzg.BlobCommitmentVersionKZG}
 
-	call := func(t *testing.T, cfg *chain.Config, hashes []common.Hash) error {
+	call := func(t *testing.T, cfg *chain.Config, hashes []common.Hash, blobFeeCap *hexutil.U256) error {
 		t.Helper()
 		m, _, bankAddr := fundedBankGenesis(t, cfg)
 		api := newTestEthAPIWithFilters(t, m)
@@ -2208,24 +2293,29 @@ func TestCallRejectsBlobHashesBeforeCancun(t *testing.T) {
 			From:                &bankAddr,
 			To:                  &recipient,
 			BlobVersionedHashes: hashes,
+			MaxFeePerBlobGas:    blobFeeCap,
 		}, nil, nil, nil)
 		return err
 	}
 
 	t.Run("blob hashes before Cancun are rejected", func(t *testing.T) {
-		require.ErrorIs(t, call(t, preCancun, []common.Hash{validHash}), types.ErrBlobTxnPreCancun)
+		require.ErrorIs(t, call(t, preCancun, []common.Hash{validHash}, nil), types.ErrBlobTxnPreCancun)
 	})
 
 	t.Run("empty but present blob hash list before Cancun is rejected", func(t *testing.T) {
-		require.ErrorIs(t, call(t, preCancun, []common.Hash{}), types.ErrBlobTxnPreCancun)
+		require.ErrorIs(t, call(t, preCancun, []common.Hash{}, nil), types.ErrBlobTxnPreCancun)
+	})
+
+	t.Run("blob fee cap without blob hashes before Cancun is rejected for the missing hashes", func(t *testing.T) {
+		require.ErrorIs(t, call(t, preCancun, nil, (*hexutil.U256)(uint256.NewInt(0))), ethapi.ErrBlobFeeCapWithoutBlobHashes)
 	})
 
 	t.Run("absent blob hashes before Cancun are accepted", func(t *testing.T) {
-		require.NoError(t, call(t, preCancun, nil))
+		require.NoError(t, call(t, preCancun, nil, nil))
 	})
 
 	t.Run("blob hashes from Cancun on are accepted", func(t *testing.T) {
-		require.NoError(t, call(t, chain.TestChainOsakaConfig, []common.Hash{validHash}))
+		require.NoError(t, call(t, chain.TestChainOsakaConfig, []common.Hash{validHash}, nil))
 	})
 }
 
