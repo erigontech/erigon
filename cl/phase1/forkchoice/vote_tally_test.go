@@ -114,15 +114,23 @@ func TestVoteTallyReusesSlotsAndOmitsZeroWeightRoots(t *testing.T) {
 	}
 }
 
-func TestVoteTallyResetsOnGloasAttestation(t *testing.T) {
-	f, _ := newHeadSnapshotTestStore()
-	f.voteTally.votes(f, solid.Checkpoint{Epoch: 1}, newVoteTallyTestState(rand.New(rand.NewSource(1)), 16))
-	require.NotNil(t, f.voteTally.state)
+func TestVoteTallyResetsOnlyOnGloasAttestation(t *testing.T) {
+	for _, gloasForkEpoch := range []uint64{0, 1} {
+		f, _ := newHeadSnapshotTestStore()
+		f.beaconCfg.GloasForkEpoch = gloasForkEpoch
+		f.beaconCfg.InitializeForkSchedule()
+		f.voteTally.votes(f, solid.Checkpoint{Epoch: 1}, newVoteTallyTestState(rand.New(rand.NewSource(1)), 16))
+		require.NotNil(t, f.voteTally.state)
 
-	f.ProcessAttestingIndicies(&solid.Attestation{Data: &solid.AttestationData{
-		Slot:            1,
-		BeaconBlockRoot: common.HexToHash("0xaaaa"),
-	}}, []uint64{1})
+		f.ProcessAttestingIndicies(&solid.Attestation{Data: &solid.AttestationData{
+			Slot:            1,
+			BeaconBlockRoot: common.HexToHash("0xaaaa"),
+		}}, []uint64{1})
 
-	require.Zero(t, f.voteTally)
+		if gloasForkEpoch == 0 {
+			require.Zero(t, f.voteTally)
+		} else {
+			require.NotNil(t, f.voteTally.state)
+		}
+	}
 }
