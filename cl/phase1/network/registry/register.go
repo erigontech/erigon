@@ -108,7 +108,8 @@ func withPayloadAttestationRateLimiter() gossip.ConditionFunc {
 }
 
 // withProposerPreferencesRateLimiter lets one peer relay one preference for every slot of the
-// accepted lookahead epochs at once, for the reason given on withPayloadAttestationRateLimiter.
+// accepted lookahead epochs at once: as with payload attestations, an ignored preference cannot be
+// redelivered by another peer.
 func withProposerPreferencesRateLimiter(beaconCfg *clparams.BeaconChainConfig) gossip.ConditionFunc {
 	return withRateLimiterByPeer(2, int((beaconCfg.MinSeedLookahead+1)*beaconCfg.SlotsPerEpoch))
 }

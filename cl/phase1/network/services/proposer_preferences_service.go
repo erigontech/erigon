@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition"
@@ -139,11 +140,9 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 	if dependentSlot > 0 {
 		dependentSlot--
 	}
+	// The fork graph stores a header only after the block's state transition succeeded, so the
+	// spec's missing-state IGNORE cannot apply here and the state is not loaded.
 	if dependentHeader.Slot > dependentSlot {
-		// The missing-state IGNORE takes precedence over this REJECT.
-		if depState, err := s.forkchoiceStore.GetStateAtBlockRoot(preferences.DependentRoot, false); err != nil || depState == nil {
-			return fmt.Errorf("%w: state for dependent_root %v not available", ErrIgnore, preferences.DependentRoot)
-		}
 		return fmt.Errorf("dependent root slot %d is after shuffling dependent slot %d", dependentHeader.Slot, dependentSlot)
 	}
 	// Ignored with or without the dependent state, so it is checked before loading it.
@@ -300,8 +299,8 @@ func newProposerPreferencesValidationView(validationState *state.CachingBeaconSt
 	return view, nil
 }
 
-// validationView loads the dependent state at most once per dependent root and epoch, also for
-// concurrent messages, because loading it can rebuild a full beacon state.
+// validationView shares one dependent-state load per dependent root and epoch between concurrent
+// messages and reuses its result while cached, because loading it can rebuild a full beacon state.
 func (s *proposerPreferencesService) validationView(dependentRoot common.Hash, proposalEpoch uint64) (*proposerPreferencesValidationView, error) {
 	key := proposerPreferencesViewKey{dependentRoot: dependentRoot, epoch: s.shufflingDependentEpoch(proposalEpoch)}
 	if view, ok := s.validationViews.Get(key); ok {
@@ -351,7 +350,7 @@ func (s *proposerPreferencesService) validateProposerPreferences(msg *cltypes.Si
 
 	pk, ok := view.proposerPubkeys[validatorIndex]
 	if !ok {
-		return fmt.Errorf("validator index %d not found", validatorIndex)
+		return fmt.Errorf("validator index %d not found: %w", validatorIndex, raw.ErrInvalidValidatorIndex)
 	}
 	domain, err := fork.ComputeDomainAtEpoch(s.beaconCfg, s.beaconCfg.DomainProposerPreferences, proposalEpoch, view.genesisValidatorsRoot)
 	if err != nil {

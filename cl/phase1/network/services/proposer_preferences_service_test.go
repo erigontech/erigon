@@ -549,18 +549,23 @@ func TestProposerPreferencesServiceDependentRootStateMissing(t *testing.T) {
 	require.False(t, service.hasSeenPreference(seenKey))
 }
 
-func TestProposerPreferencesServiceMissingStatePrecedesBoundaryReject(t *testing.T) {
+func TestProposerPreferencesServiceLateDependentRootRejectedWithoutStateLoad(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 	service, _, ethClock, _, fc := setupProposerPreferencesService(t, ctrl)
-	msg := newTestSignedProposerPreferences(100, 42)
 	fc.Headers[testDependentRoot] = &cltypes.BeaconBlockHeader{Slot: 64}
-	delete(fc.StateAtBlockRootVal, testDependentRoot)
+	stateLoads := 0
+	fc.GetStateAtBlockRootFn = func(root common.Hash, _ bool) (*state2.CachingBeaconState, error) {
+		stateLoads++
+		return fc.StateAtBlockRootVal[root].Copy()
+	}
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(90))
 
-	err := service.ProcessMessage(context.Background(), nil, msg)
-	require.ErrorIs(t, err, ErrIgnore)
-	require.Contains(t, err.Error(), "state for dependent_root")
+	err := service.ProcessMessage(context.Background(), nil, newTestSignedProposerPreferences(100, 42))
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
+	require.Contains(t, err.Error(), "after shuffling dependent slot")
+	require.Zero(t, stateLoads)
 }
 
 func TestProposerPreferencesServiceImpossibleDependentRootSkipsStateLoad(t *testing.T) {
