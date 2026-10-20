@@ -638,8 +638,22 @@ func (e *ExecModule) filterStreamLocked(ctx context.Context, newTxRLPs [][]byte)
 		next[s] = exp + 1
 	}
 	if nStale+nFuture+nSeen+nBad > 0 {
+		// ⚠ IS THE STREAM ORDERED? A contiguous sequence from one sender, delivered in order, must produce
+		// no future nonces at all. These name what the round was actually offered against what execution
+		// expected, so "the stream is ordered" is a measurement rather than an assumption.
+		var firstN, lastN, firstFut, futExp uint64
+		if len(cands) > 0 {
+			firstN, lastN = cands[0].nonce, cands[len(cands)-1].nonce
+		}
+		for _, c := range cands {
+			if exp := nextNonce(c.sender); c.nonce > exp {
+				firstFut, futExp = c.nonce, exp
+				break
+			}
+		}
 		e.logger.Info("[TRACE-filter] round", "block", e.flash.num, "in", len(newTxRLPs),
-			"kept", len(survivors), "stale", nStale, "future", nFuture, "seen", nSeen, "undecodable", nBad)
+			"kept", len(survivors), "stale", nStale, "future", nFuture, "seen", nSeen, "undecodable", nBad,
+			"firstNonce", firstN, "lastNonce", lastN, "firstFutureNonce", firstFut, "expectedThere", futExp)
 	}
 	return survivors, keptHashes, droppedHashes, nil
 }

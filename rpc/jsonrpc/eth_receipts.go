@@ -92,6 +92,11 @@ func (api *BaseAPI) getCachedReceipts(ctx context.Context, hash common.Hash) (ty
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
 func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error) {
 	var begin, end uint64
+	// endNamed records that the CALLER named an explicit toBlock, as opposed to asking for a tag. The two
+	// deserve different answers when the range runs past what has EXECUTED: a named block that has not
+	// executed is a question about the future and is refused, while "latest" is a request for whatever
+	// exists and must be answered with what exists.
+	endNamed := false
 	logs := types.RPCLogs{}
 
 	tx, beginErr := api.db.BeginTemporalRo(ctx)
@@ -175,6 +180,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 			toBlock := crit.ToBlock.Int64()
 			if toBlock > 0 {
 				end = uint64(toBlock)
+				endNamed = true
 			} else {
 				blockNum := rpc.BlockNumber(toBlock)
 				end, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, api.filters)
@@ -221,12 +227,27 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	}
 
 	// Check if the requested blocks have been executed.
-	// This prevents returning empty results when blocks exist but haven't been executed yet.
+	//
+	// A NAMED block that has not executed is a question about the future and is refused. A TAG — "latest" —
+	// is a request for whatever exists, so it is answered with what exists: end is clamped to the executed
+	// head rather than rejected.
+	//
+	// ⚠ IT USED TO REFUSE BOTH. "latest" resolves to the CANONICAL head, which on a node that pre-executes
+	// runs ahead of the executed head, so an ordinary eth_getLogs with toBlock=latest failed outright with
+	// "requested block range [N, N] is beyond latest executed block N-1". The caller had named no future
+	// block; it asked for what was there. Measured: this broke the load driver's whole correctness audit on
+	// two consecutive runs ("reached New UNKNOWN"), which is the one question the run exists to answer.
 	latestExecuted, err := rpchelper.GetLatestExecutedBlockNumber(tx)
 	if err != nil {
 		return nil, err
 	}
-	if begin > latestExecuted || end > latestExecuted {
+	if end > latestExecuted {
+		if endNamed {
+			return nil, fmt.Errorf("requested block range [%d, %d] is beyond latest executed block %d (node is still syncing)", begin, end, latestExecuted)
+		}
+		end = latestExecuted
+	}
+	if begin > latestExecuted {
 		return nil, fmt.Errorf("requested block range [%d, %d] is beyond latest executed block %d (node is still syncing)", begin, end, latestExecuted)
 	}
 	if begin == 0 && end == 0 && latestExecuted == 0 {

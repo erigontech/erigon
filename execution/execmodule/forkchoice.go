@@ -696,9 +696,19 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		// Hand the semaphore to a background goroutine: FCU cleanup runs first,
 		// so the next acquirer observes settled state whenever it gets in.
 		handOffSemaphore := func(work func() error) {
+			handOffAt := time.Now()
 			shouldReleaseSema = false
 			cleanupBeforeSemaRelease()
 			go func() {
+				defer func() {
+					// ⚠ THE SEMAPHORE OUTLIVES THE FCU. The background flush+commit inherits it and releases it
+					// directly, so updateForkChoice's own recorded hold (108ms max) says nothing about how long
+					// the lock is actually gone. SealBlock queues on it and was measured waiting 3,232ms.
+					if held := time.Since(handOffAt); held > 100*time.Millisecond {
+						e.logger.Warn("[sem-handoff] background FCU work held the semaphore", "heldMs", held.Milliseconds())
+					}
+					e.semDrop()
+				}()
 				defer e.semaphore.Release(1)
 				if err := work(); err != nil && !errors.Is(err, context.Canceled) {
 					e.logger.Error("Error running background post forkchoice", "err", err)

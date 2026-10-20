@@ -354,25 +354,39 @@ func (e *ExecModule) ReconcileAttrs(ctx context.Context, params *builder.Paramet
 	return err
 }
 
-// SealBlock is the marker-driven CLOSE (the UNIVERSAL block-production step). The boundary assembler
-// (the cocoon driver's commits handler) calls it when the block-end MARKER commits in consensus — on EVERY
-// node, decoupled from the CL role. It seals the pre-executed in-progress flashblock via assemblePreconfirmed
-// (zero re-execution) and stores it keyed by the block's PARENT hash, so the CL's GetAssembledBlock (proposer)
-// — riding behind — just RETRIEVES the already-sealed block instead of re-sealing it. Returns the sealed
-// block (or nil if there is no matching preconfirmed flashblock for these params). Acquires the semaphore.
+// SealBlock turns the pre-executed in-progress flashblock into its final form and returns it.
+//
+// IT TAKES NO MODULE SEMAPHORE, BECAUSE A SEAL NEVER LEAVES PRE-EXEC SPACE. Every piece of it was read
+// and checked:
+//
+//   - the header computation (assemblePreconfirmed -> closePreExecutedLocked) runs over the pre-executed
+//     block's OWN in-memory SharedDomains and its generation overlay;
+//   - the ingest (ingestSealedFlashblockLocked) re-keys that block from its provisional hash to its sealed
+//     hash with targets = []kv.RwTx{ov}, the generation overlay alone — "Pre-exec space only. The canonical
+//     path gets the sealed block when newPayload hands it over." It opens its OWN BeginTemporalRo precisely
+//     so a torn-down module context cannot affect it;
+//   - the abandon (abandonExtendingForkLocked) touches e.flash, e.preExec and the state cache, despite its
+//     name: no fork validator, no module context.
+//
+// preexecute.go states the invariant the whole path relies on: "nothing is read from or written to the
+// module context, which is the canonical flow's." So the only exclusion a seal needs is the block's own
+// lifecycle, which is assembleMu — the same domain the assembly takes.
+//
+// ⚠ IT USED TO HOLD THE MODULE SEMAPHORE, AND SO QUEUED BEHIND A DATABASE COMMIT. The forkchoice path
+// hands that semaphore to a BACKGROUND goroutine — "the background FCU commit/prune goroutines inherit the
+// semaphore, releasing it only when their work is done" — so the lock outlives the FCU that took it.
+// Measured on live369-371: the seal's own work is p50 32-40ms, while it waited max 7,540ms for the lock
+// with ZERO other acquisitions during the wait. Narrowing the hold to the ingest alone was not enough —
+// live371 moved the same cost into the work timer (workMs max 3,994ms) because the ingest still queued.
+// An ephemeral block's header has no business waiting on the flush of a different, already-canonical one.
 func (e *ExecModule) SealBlock(ctx context.Context, params *builder.Parameters, forceEmpty bool) (*types.BlockWithReceipts, error) {
-	// ⚠ THE CLOSE SHOULD BE CONSTANT TIME, AND IT IS NOT. Measured on live335 over 1,400 slots:
-	// p50 4ms, p95 55ms, max 1,711ms. Turning an already pre-executed block into its final form is
-	// bounded work, so a 400x tail is something else — and this method still takes the module
-	// semaphore that pre-execution was moved off. Split so the wait is not mistaken for the work.
 	semStart := time.Now()
-	if err := e.semaphore.Acquire(ctx, 1); err != nil {
-		return nil, err
-	}
+	e.assembleMu.Lock()
+	defer e.assembleMu.Unlock()
 	semWait := time.Since(semStart)
-	defer e.semaphore.Release(1)
-	e.semTake("SealBlock")
-	defer e.semDrop()
+	if semWait > 200*time.Millisecond {
+		e.logger.Warn("[seal-starved] seal waited for the assembly lock", "waitMs", semWait.Milliseconds())
+	}
 	workStart := time.Now()
 	defer func() {
 		if w := time.Since(workStart); semWait+w > 20*time.Millisecond {
@@ -993,3 +1007,4 @@ func sameProposerAttrs(a, b FlashblockInputs) bool {
 	return a.Timestamp == b.Timestamp && a.PrevRandao == b.PrevRandao &&
 		a.FeeRecipient == b.FeeRecipient && a.ParentBeaconBlockRoot == b.ParentBeaconBlockRoot
 }
+

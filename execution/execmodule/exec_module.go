@@ -204,6 +204,10 @@ type ExecModule struct {
 	// semHolder names whatever currently holds the semaphore, so a refusal can say who refused it rather
 	// than leaving it to be guessed. Written only under the hold; read without one.
 	semHolder atomic.Value
+	// semAcquires counts every successful take, so a waiter can measure how many others got in ahead of
+	// it. TryAcquire callers BARGE: they take the lock whenever it is momentarily free, jumping the queue
+	// that Acquire waits in.
+	semAcquires atomic.Int64
 	semSince  atomic.Int64
 
 	// roundMu is the INNER LOOP's own mutual-exclusion domain: one pre-execution round at a time.
@@ -1216,6 +1220,7 @@ func (e *ExecModule) HasBlock(ctx context.Context, blockHash *common.Hash, _ *ui
 // semTake records who holds the module semaphore and since when, so a refusal can say who refused it and
 // for how long rather than leaving either to be guessed.
 func (e *ExecModule) semTake(name string) {
+	e.semAcquires.Add(1)
 	e.semHolder.Store(name)
 	e.semSince.Store(time.Now().UnixNano())
 }
