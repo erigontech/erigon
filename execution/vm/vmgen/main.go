@@ -72,6 +72,7 @@ func fastOps() []fastOp {
 		op("EQ", "opEq", "GasFastestStep", 2, 1),
 		op("AND", "opAnd", "GasFastestStep", 2, 1),
 		op("ISZERO", "opIszero", "GasFastestStep", 1, 1),
+		op("CALLVALUE", "opCallValue", "GasQuickStep", 0, 1),
 		{name: "MLOAD", execute: "opMload", gas: "GasFastestStep", pop: 1, push: 1, memorySize: "memoryMLoad"},
 		{name: "MSTORE", execute: "opMstore", gas: "GasFastestStep", pop: 2, memorySize: "memoryMStore"},
 	}

@@ -271,6 +271,13 @@ run:
 					pc++
 					continue run
 				}
+			case CALLVALUE:
+				if sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					callContext.Stack.push(callContext.Contract.value)
+					pc++
+					continue run
+				}
 			case MLOAD:
 				if sLen >= 1 && callContext.Memory.allocated32(stack.peek()) && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
