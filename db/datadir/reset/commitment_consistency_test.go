@@ -247,8 +247,8 @@ func TestResetFollowsTheLoaderPastUnsupportedVersions(t *testing.T) {
 }
 
 // v1- and v1.0- parse to the same version, and startup renames the v1- file onto the v1.0- name the
-// manifest describes. That puts local bytes under a canonical name, which the downloader does not
-// re-hash once the file is complete, so the pair is unsafe.
+// manifest describes. That puts local bytes under a canonical name, and the downloader accepts a
+// file of the expected size without hashing it, so the pair is unsafe.
 func TestResetTreatsALegacyTwinOfACanonicalFileAsLocal(t *testing.T) {
 	withOsRoot(t, func(root *os.Root) {
 		startEntries := []fsEntry{{Name: "snapshots/domain/v1-commitment.0-256.kv"}}
