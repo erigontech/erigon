@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 // makeCodeHash builds a deterministic 32-byte codeHash for tests/benchmarks.
@@ -338,4 +339,27 @@ func TestCodeCache_AddrCodeSlotCollision(t *testing.T) {
 	got, ok = c.Get(a2)
 	require.True(t, ok, "Delete of a colliding address dropped the wrong entry")
 	require.Equal(t, code2, got)
+}
+
+// A fill with a wrong (code, codeHash) pairing must not outlive the
+// authoritative publish of that hash's real code.
+func TestCodeCache_PutWithCodeHashRepairsWrongPairing(t *testing.T) {
+	c := NewCodeCache(datasize.MB, datasize.MB)
+	defer c.Close()
+	addr1, addr2 := common.Address{1}, common.Address{2}
+	x, y := []byte{0x60, 0x01}, []byte{0x60, 0x02, 0x00}
+	hx := crypto.Keccak256(x)
+
+	c.PutWithCodeHashIfAbsent(addr1[:], y, hx, 1)
+	c.PutWithCodeHash(addr2[:], x, hx, 5)
+
+	got, ok := c.Get(addr2[:])
+	require.True(t, ok)
+	require.Equal(t, x, got)
+	got, ok = c.GetByCodeHash(hx)
+	require.True(t, ok)
+	require.Equal(t, x, got)
+	size, ok := c.GetCodeSizeByCodeHash(hx)
+	require.True(t, ok)
+	require.Equal(t, len(x), size)
 }

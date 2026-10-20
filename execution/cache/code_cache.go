@@ -17,6 +17,7 @@
 package cache
 
 import (
+	"bytes"
 	"encoding/binary"
 	"sync"
 	"sync/atomic"
@@ -499,6 +500,9 @@ func (c *CodeCache) putWithCodeHash(addr []byte, code []byte, codeHash []byte, t
 	if len(addr) > 0 {
 		c.bindAddrLocked(addr, kh, hcc, txNum, ep, overwriteAddr)
 	}
+	if overwriteAddr {
+		c.dropMismatchedContentLocked(hcc, kh, code)
+	}
 
 	// Populate the size-only layer alongside the bytes layer — every time
 	// we touch the bytes we can answer a future EXTCODESIZE for free.
@@ -507,6 +511,18 @@ func (c *CodeCache) putWithCodeHash(addr []byte, code []byte, codeHash []byte, t
 	entry := codeEntry{code: code, keyHash: kh, txNum: txNum, epoch: ep}
 	putContentLocked(c.codeHashToCode, hcc, entry, codeEntryStamp, codeEntryCodeLen,
 		&c.coh, &c.codeHashCodeSize, codeEntryBytes)
+}
+
+// dropMismatchedContentLocked removes live entries under codeHash whose bytes
+// differ from code: a fill can pair a codeHash with other bytes, and the
+// content layers keep live entries, so only an authoritative write repairs it.
+func (c *CodeCache) dropMismatchedContentLocked(hcc uint64, kh [32]byte, code []byte) {
+	if e, ok := c.codeHashToCode.Get(hcc); ok && e.keyHash == kh && !bytes.Equal(e.code, code) {
+		c.codeHashToCode.Remove(hcc)
+	}
+	if e, ok := c.codeSizeByCodeHash.Get(hcc); ok && e.keyHash == kh && e.size != len(code) {
+		c.codeSizeByCodeHash.Remove(hcc)
+	}
 }
 
 // GetCodeSizeByCodeHash retrieves the size (in bytes) of a contract by its
@@ -647,7 +663,7 @@ func (c *CodeCache) PrintStatsAndReset() {
 	addrSizeB := c.AddrSizeBytes()
 	codeSizeB := c.CodeSizeBytes()
 	addrUsagePct := float64(addrSizeB) / float64(c.addrCapacityB) * 100
-	codeUsagePct := float64(codeSizeB) / float64(c.codeCapacityB) * 100
+	codeUsagePct := float64(codeSizeB) / float64(max(c.codeCapacityB, 1)) * 100
 
 	log.Debug(
 		"CodeCache stats",
