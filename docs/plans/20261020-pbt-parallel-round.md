@@ -291,15 +291,15 @@ flowchart LR
 - Modify: `execution/commitment/v3/pbt/schedule.go`
 - Modify: `execution/commitment/v3/pbt/schedule_test.go`
 
-- [ ] write a property test first, against the current planner, on random corpora with drops and split buckets:
+- [x] write a property test first, against the current planner, on random corpora with drops and split buckets:
       - every op lands in exactly one task, and each task's ops are a contiguous run of the input;
       - task kinds, prefixes, keys and dependencies equal an independent map-based grouping written in the test;
       - every dependency index is lower than its dependent's
-- [ ] replace the map grouping in `buildPhasePlanWithThreshold` with one scan, using the Technical Details keys.
+- [x] replace the map grouping in `buildPhasePlanWithThreshold` with one scan, using the Technical Details keys.
       Tasks hold `ops[a:b:b]` sub-slices, with no per-op `keyPath`, `EncodeRowKey` or string keys
-- [ ] keep buckets ordered largest first within dependency order
+- [x] keep buckets ordered largest first within dependency order
 - [ ] mutation check, then benchmark before/after through `ab-verdict`
-- [ ] run gates — must pass before Task 5
+- [x] run gates — must pass before Task 5
 
 ### Task 5: Prepare chain descriptors only; buckets read their own roots
 
