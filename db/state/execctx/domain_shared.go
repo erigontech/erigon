@@ -1491,7 +1491,7 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 			fillView = fillView.WithFrontier(sd.cacheFrontierFor(tx))
 		}
 		if fillsCode {
-			v = fillView.FillCode(k, v, opts.codeHash, readTxNum)
+			v = fillView.FillCode(k, v, opts.codeHash, readTxNum, decodedInto(v, opts.buf))
 		} else {
 			fillView.Fill(domain, k, v, readTxNum)
 		}
@@ -1585,6 +1585,12 @@ func (sd *SharedDomains) getLatestValSize(domain kv.Domain, tx kv.TemporalTx, k 
 	}
 	size, found, err = tx.GetLatestValSize(domain, k)
 	return size, found, true, err
+}
+
+// decodedInto reports whether v was decoded into buf, which then holds no more than an eighth of
+// unused capacity: a cache may keep such a v instead of copying it.
+func decodedInto(v, buf []byte) bool {
+	return len(v) > 0 && cap(buf) > 0 && &v[0] == &buf[:1][0] && cap(v) <= len(v)+len(v)/8
 }
 
 // GetCode returns the contract code at addr. The fast path resolves the

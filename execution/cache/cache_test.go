@@ -1551,7 +1551,7 @@ func TestStateCache_FillCodeUsesKnownHash(t *testing.T) {
 	codeHash := makeHash(1)
 	view := c.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 100, true }))
 
-	view.FillCode(addr, code, codeHash[:], 10)
+	view.FillCode(addr, code, codeHash[:], 10, false)
 	code[0]++
 
 	got, ok := view.GetCodeByHash(codeHash[:])

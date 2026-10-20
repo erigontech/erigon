@@ -192,6 +192,63 @@ func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
 	}
 }
 
+// A code value decoded into the lent buffer becomes the cache entry as it is, without a second copy.
+func TestStateGetterCodeFillKeepsDecodedBuffer(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	codes := [][]byte{bytes.Repeat([]byte{0xa1}, 1024), bytes.Repeat([]byte{0xb2}, 1024)}
+	addrs := make([][]byte, len(codes))
+	tx := &lentBufTx{codeBufTx: codeBufTx{TemporalTx: roTx, code: map[string][]byte{}}}
+	for i := range codes {
+		addrs[i] = make([]byte, 20)
+		addrs[i][0] = byte(i + 1)
+		tx.code[string(addrs[i])] = codes[i]
+	}
+
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.BindStateCache(sc)
+	for i, addr := range addrs {
+		acc := accounts.SerialiseV3(&accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(codes[i]))})
+		require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, addr, acc, 5, nil))
+	}
+
+	getter := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})
+	for i, addr := range addrs {
+		got, ok, err := getter.GetCode(addr, 5)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, codes[i], got)
+		if i > 0 { // the first read has no lent buffer yet
+			require.Same(t, &tx.lent[0], &got[0], "read %d must keep the decoded buffer", i)
+		}
+		cached, ok := sc.View(nil).GetCodeByHash(crypto.Keccak256(codes[i]))
+		require.True(t, ok)
+		require.Same(t, &got[0], &cached[0], "read %d must return the cached code", i)
+	}
+}
+
+// lentBufTx records the buffer the last code read decoded into.
+type lentBufTx struct {
+	codeBufTx
+	lent []byte
+}
+
+func (tx *lentBufTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	v, step, err := tx.codeBufTx.GetLatest(domain, key, opts)
+	if domain == kv.CodeDomain && cap(opts.Buf()) >= len(v) {
+		tx.lent = v
+	}
+	return v, step, err
+}
+
 // A read that does not resolve a codeHash skips the cache copy, so it must not
 // be handed the shared buffer either.
 func TestStateGetterCodeBufNotLentWithoutCodeHash(t *testing.T) {

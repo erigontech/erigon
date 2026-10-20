@@ -302,11 +302,14 @@ func (v ReadView) Fill(domain kv.Domain, key []byte, value []byte, readTxNum uin
 	v.c.fillIfFresh(domain, key, value, readTxNum, visibleEnd, v.readViewEpoch)
 }
 
-// FillCode offers code to the cache and returns a copy the caller may keep.
-func (v ReadView) FillCode(addr, code, codeHash []byte, readTxNum uint64) []byte {
-	stored := bytes.Clone(code)
-	v.fillCodeWithHash(addr, stored, codeHash, readTxNum)
-	return stored
+// FillCode offers code to the cache and returns the cache's copy. With owned the cache keeps code
+// itself, so the caller must not write to its memory again.
+func (v ReadView) FillCode(addr, code, codeHash []byte, readTxNum uint64, owned bool) []byte {
+	if !owned {
+		code = bytes.Clone(code)
+	}
+	v.fillCodeWithHash(addr, code, codeHash, readTxNum)
+	return code
 }
 
 // SeedAddrCodeHash offers an addr → codeHash mapping derived from an account

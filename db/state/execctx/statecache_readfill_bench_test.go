@@ -22,11 +22,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // benchSeedDb commits one account so the domain tables are non-empty for
@@ -205,5 +207,42 @@ func BenchmarkValidationCache(b *testing.B) {
 				})
 			}
 		})
+	}
+}
+
+// BenchmarkStateGetterColdCodeFill reads max-size contracts that miss the code
+// cache, so every read decodes the code and fills the cache.
+func BenchmarkStateGetterColdCodeFill(b *testing.B) {
+	ctx := b.Context()
+	db := newTestDb(b, 16)
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(b, err)
+	defer roTx.Rollback()
+
+	const contracts = 512
+	tx := codeBufTx{TemporalTx: roTx, code: map[string][]byte{}}
+	sc := newSmallStateCache()
+	b.Cleanup(sc.Close)
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(b, err)
+	defer sd.Close()
+	sd.BindStateCache(sc)
+	addrs := make([][]byte, contracts)
+	for i := range addrs {
+		addrs[i] = make([]byte, 20)
+		binary.BigEndian.PutUint64(addrs[i], uint64(i+1))
+		code := make([]byte, 24*1024)
+		binary.BigEndian.PutUint64(code, uint64(i))
+		tx.code[string(addrs[i])] = code
+		acc := accounts.SerialiseV3(&accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code))})
+		require.NoError(b, sd.DomainPut(kv.AccountsDomain, tx, addrs[i], acc, 5, nil))
+	}
+
+	getter := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})
+	b.SetBytes(24 * 1024)
+	for i := 0; b.Loop(); i++ {
+		if _, _, err := getter.GetCode(addrs[i%contracts], 5); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
