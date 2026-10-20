@@ -26,10 +26,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -81,6 +83,31 @@ func TestGetSyncDutiesHistoricalPeriod(t *testing.T) {
 			require.NoError(t, json.NewDecoder(rec.Body).Decode(&out))
 			require.Len(t, out.Data, 1)
 			require.Equal(t, tc.validator, out.Data[0].ValidatorIndex)
+		})
+	}
+}
+
+func TestGetSyncDutiesNextPeriodBoundary(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	period := cfg.EpochsPerSyncCommitteePeriod
+	for _, tc := range []struct {
+		name  string
+		epoch uint64
+		code  int
+	}{
+		{"last epoch of the next period", 3*period - 1, http.StatusNotFound},
+		{"first epoch past the next period", 3 * period, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+			clock.EXPECT().GetCurrentEpoch().Return(period + 44).AnyTimes()
+			h.ethClock = clock
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/duties/sync/"+strconv.FormatUint(tc.epoch, 10), strings.NewReader(`["1"]`))
+			rec := httptest.NewRecorder()
+			h.mux.ServeHTTP(rec, req)
+			require.Equal(t, tc.code, rec.Code, rec.Body.String())
 		})
 	}
 }
