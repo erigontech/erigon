@@ -195,6 +195,54 @@ func TestPersistentAttestationSubnetDutyDoesNotShortenExpiry(t *testing.T) {
 	require.Equal(t, persistentExpiry, subscription.expiry)
 }
 
+func TestDutySubscriptionIncludesUpcomingDigest(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	var epoch atomic.Uint64
+	manager, _, _, currentDigest := newPersistentSubnetGossipManager(t, ctrl, &epoch, false)
+	name := gossipnames.TopicNameBeaconAttestation(1)
+	service := &mockService{namesFunc: func() []string { return []string{name} }}
+	_, _, err := manager.registerGossipService(service)
+	require.NoError(t, err)
+	upcomingDigest := common.Bytes4{0xaa, 0xbb, 0xcc, 0xdd}
+	require.NoError(t, manager.subscribeUpcomingTopics(upcomingDigest))
+
+	expiry := time.Now().Add(time.Hour)
+	require.NoError(t, manager.SubscribeWithExpiry(name, expiry))
+
+	for _, digest := range []common.Bytes4{currentDigest, upcomingDigest} {
+		subscription := manager.subscriptions.Get(composeTopic(digest, name))
+		require.NotNil(t, subscription)
+		require.NotNil(t, subscription.sub)
+		require.Equal(t, expiry, subscription.expiry)
+	}
+}
+
+func TestDutySubscriptionContinuesAfterAnotherDigestFails(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	var epoch atomic.Uint64
+	manager, _, _, currentDigest := newPersistentSubnetGossipManager(t, ctrl, &epoch, false)
+	name := gossipnames.TopicNameBeaconAttestation(1)
+	service := &mockService{namesFunc: func() []string { return []string{name} }}
+	_, _, err := manager.registerGossipService(service)
+	require.NoError(t, err)
+	failingDigest := common.Bytes4{0xaa, 0xbb, 0xcc, 0xdd}
+	healthyDigest := common.Bytes4{0x55, 0x66, 0x77, 0x88}
+	require.NoError(t, manager.subscribeUpcomingTopics(failingDigest))
+	require.NoError(t, manager.subscribeUpcomingTopics(healthyDigest))
+	failingTopic := composeTopic(failingDigest, name)
+	require.NoError(t, manager.subscriptions.GetTopic(failingTopic).Close())
+
+	expiry := time.Now().Add(time.Hour)
+	require.NoError(t, manager.SubscribeWithExpiry(name, expiry))
+
+	for _, digest := range []common.Bytes4{currentDigest, healthyDigest} {
+		subscription := manager.subscriptions.Get(composeTopic(digest, name))
+		require.NotNil(t, subscription)
+		require.NotNil(t, subscription.sub)
+		require.Equal(t, expiry, subscription.expiry)
+	}
+}
+
 func TestPersistentAttestationSubnetsSurviveForkRollover(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	var epoch atomic.Uint64

@@ -562,7 +562,7 @@ func TestSubscribedAttestationSubnetCount(t *testing.T) {
 	require.Equal(t, uint64(2), subscriptions.subscribedAttestationSubnetCount())
 }
 
-func newStrictTopicSubscriptions(t *testing.T) (*TopicSubscriptions, *pubsub.PubSub) {
+func newStrictTopicSubscriptions(t *testing.T) (*TopicSubscriptions, *pubsub.PubSub, *mock_services.MockP2PManager) {
 	t.Helper()
 	h, err := libp2p.New(libp2p.NoListenAddrs)
 	require.NoError(t, err)
@@ -570,11 +570,11 @@ func newStrictTopicSubscriptions(t *testing.T) (*TopicSubscriptions, *pubsub.Pub
 	ps, err := pubsub.NewGossipSub(t.Context(), h)
 	require.NoError(t, err)
 	mockP2P := mock_services.NewMockP2PManager(gomock.NewController(t))
-	return NewTopicSubscriptions(t.Context(), mockP2P), ps
+	return NewTopicSubscriptions(t.Context(), mockP2P), ps, mockP2P
 }
 
 func TestAttestationDutySubscriptionDoesNotUpdateENR(t *testing.T) {
-	subscriptions, ps := newStrictTopicSubscriptions(t)
+	subscriptions, ps, _ := newStrictTopicSubscriptions(t)
 	topic := "/eth2/abcd1234/beacon_attestation_3/ssz_snappy"
 	handle, err := ps.Join(topic)
 	require.NoError(t, err)
@@ -585,7 +585,7 @@ func TestAttestationDutySubscriptionDoesNotUpdateENR(t *testing.T) {
 }
 
 func TestAttestationDutyExpiryDoesNotUpdateENR(t *testing.T) {
-	subscriptions, ps := newStrictTopicSubscriptions(t)
+	subscriptions, ps, _ := newStrictTopicSubscriptions(t)
 	topic := "/eth2/abcd1234/beacon_attestation_3/ssz_snappy"
 	handle, err := ps.Join(topic)
 	require.NoError(t, err)
@@ -603,7 +603,7 @@ func TestAttestationDutyExpiryDoesNotUpdateENR(t *testing.T) {
 }
 
 func TestAttestationOldDigestRemovalDoesNotUpdateENR(t *testing.T) {
-	subscriptions, ps := newStrictTopicSubscriptions(t)
+	subscriptions, ps, _ := newStrictTopicSubscriptions(t)
 	oldTopic := "/eth2/abcd1234/beacon_attestation_3/ssz_snappy"
 	newTopic := "/eth2/deadbeef/beacon_attestation_3/ssz_snappy"
 	for _, topic := range []string{oldTopic, newTopic} {
@@ -622,4 +622,69 @@ func TestAttestationOldDigestRemovalDoesNotUpdateENR(t *testing.T) {
 	require.NoError(t, subscriptions.Remove(oldTopic))
 	require.Nil(t, subscriptions.Get(oldTopic))
 	require.NotNil(t, subscriptions.Get(newTopic).sub)
+}
+
+func TestSyncCommitteeOldDigestRemovalKeepsENRWhileNewDigestSubscribed(t *testing.T) {
+	subscriptions, ps, mockP2P := newStrictTopicSubscriptions(t)
+	oldTopic := "/eth2/abcd1234/sync_committee_1/ssz_snappy"
+	newTopic := "/eth2/deadbeef/sync_committee_1/ssz_snappy"
+	expiry := time.Now().Add(time.Hour)
+	mockP2P.EXPECT().UpdateENRSyncNets(1, true).Times(2)
+	for _, topic := range []string{oldTopic, newTopic} {
+		handle, err := ps.Join(topic)
+		require.NoError(t, err)
+		require.NoError(t, subscriptions.Add(topic, handle, nil))
+		require.NoError(t, subscriptions.SubscribeWithExpiry(topic, expiry))
+	}
+
+	require.NoError(t, subscriptions.Unsubscribe(oldTopic))
+	require.NoError(t, subscriptions.Remove(oldTopic))
+	require.Nil(t, subscriptions.Get(oldTopic))
+	require.NotNil(t, subscriptions.Get(newTopic).sub)
+
+	mockP2P.EXPECT().UpdateENRSyncNets(1, false).Times(1)
+	require.NoError(t, subscriptions.Unsubscribe(newTopic))
+}
+
+func TestRemovingSubscribedSyncCommitteeOldDigestKeepsENR(t *testing.T) {
+	subscriptions, ps, mockP2P := newStrictTopicSubscriptions(t)
+	oldTopic := "/eth2/abcd1234/sync_committee_1/ssz_snappy"
+	newTopic := "/eth2/deadbeef/sync_committee_1/ssz_snappy"
+	expiry := time.Now().Add(time.Hour)
+	mockP2P.EXPECT().UpdateENRSyncNets(1, true).Times(2)
+	for _, topic := range []string{oldTopic, newTopic} {
+		handle, err := ps.Join(topic)
+		require.NoError(t, err)
+		require.NoError(t, subscriptions.Add(topic, handle, nil))
+		require.NoError(t, subscriptions.SubscribeWithExpiry(topic, expiry))
+	}
+
+	require.NoError(t, subscriptions.Remove(oldTopic))
+	require.Nil(t, subscriptions.Get(oldTopic))
+	require.NotNil(t, subscriptions.Get(newTopic).sub)
+}
+
+func TestSyncCommitteeTopicsExpiringTogetherClearENROnce(t *testing.T) {
+	subscriptions, ps, mockP2P := newStrictTopicSubscriptions(t)
+	for _, topic := range []string{
+		"/eth2/abcd1234/sync_committee_1/ssz_snappy",
+		"/eth2/deadbeef/sync_committee_1/ssz_snappy",
+	} {
+		handle, err := ps.Join(topic)
+		require.NoError(t, err)
+		sub, err := handle.Subscribe()
+		require.NoError(t, err)
+		subscriptions.subs[topic] = &TopicSubscription{
+			topic:  handle,
+			sub:    sub,
+			expiry: time.Now().Add(-time.Hour),
+		}
+	}
+	mockP2P.EXPECT().UpdateENRSyncNets(1, false).Times(1)
+
+	subscriptions.checkExpiredSubscriptions()
+
+	for _, topic := range subscriptions.AllTopics() {
+		require.Nil(t, subscriptions.Get(topic).sub)
+	}
 }

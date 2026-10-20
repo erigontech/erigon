@@ -134,9 +134,31 @@ func TestOnHeadStateWithBlockRootDemotesPriorHeadToPrevious(t *testing.T) {
 	}))
 }
 
+func TestPublishCopiesIntoTheStateDroppedByTheLastPublish(t *testing.T) {
+	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	var heads []*state.CachingBeaconState
+	for i := range 4 {
+		s := bigValidatorState(t, 1)
+		require.NoError(t, s.SetSlot(uint64(100+i)))
+		require.NoError(t, manager.OnHeadStateWithBlockRoot(s, common.Hash{byte(1 + i)}))
+		require.NoError(t, manager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+			heads = append(heads, headState)
+			return nil
+		}))
+	}
+
+	require.Same(t, heads[0], heads[3])
+	require.Equal(t, uint64(103), heads[3].Slot())
+	require.NoError(t, manager.ViewPreviousHeadState(func(previous *state.CachingBeaconState) error {
+		require.Same(t, heads[2], previous)
+		require.Equal(t, uint64(102), previous.Slot())
+		return nil
+	}))
+}
+
 func TestFailedHeadUpdateKeepsHead(t *testing.T) {
 	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
-	for i := range 2 {
+	for i := range 3 {
 		good := state.New(&clparams.MainnetBeaconConfig)
 		require.NoError(t, good.SetSlot(uint64(100+i)))
 		require.NoError(t, manager.OnHeadStateWithBlockRoot(good, common.Hash{byte(1 + i)}))
@@ -152,14 +174,14 @@ func TestFailedHeadUpdateKeepsHead(t *testing.T) {
 
 	root, slot, ok := manager.StateHead()
 	require.True(t, ok)
-	require.Equal(t, common.Hash{0x02}, root)
-	require.Equal(t, uint64(101), slot)
+	require.Equal(t, common.Hash{0x03}, root)
+	require.Equal(t, uint64(102), slot)
 	require.NoError(t, manager.ViewHeadState(func(headState *state.CachingBeaconState) error {
-		require.Equal(t, uint64(101), headState.Slot())
+		require.Equal(t, uint64(102), headState.Slot())
 		return nil
 	}))
 	require.NoError(t, manager.ViewPreviousHeadState(func(headState *state.CachingBeaconState) error {
-		require.Equal(t, uint64(100), headState.Slot())
+		require.Equal(t, uint64(101), headState.Slot())
 		return nil
 	}))
 }

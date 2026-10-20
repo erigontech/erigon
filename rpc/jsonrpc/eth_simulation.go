@@ -431,6 +431,9 @@ func (s *simulator) makeHeaders(blocks []SimulatedBlock) ([]*types.Header, error
 		if s.chainConfig.IsPostMerge(overrides.Number.Uint64(), uint64(*overrides.Time)) {
 			difficulty = uint256.Int{}
 		}
+		if overrides.Difficulty != nil && difficulty.IsZero() {
+			return nil, &rpc.CustomError{Message: fmt.Sprintf("block %d: difficulty override is not allowed after the merge", overrides.Number.Uint64()), Code: rpc.ErrCodeInvalidParams}
+		}
 		var slotNumber *uint64
 		if header.SlotNumber != nil {
 			slot := *header.SlotNumber + 1
