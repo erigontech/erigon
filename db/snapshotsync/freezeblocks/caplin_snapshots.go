@@ -165,11 +165,11 @@ func beaconBlocksGap(dir string) error {
 	}
 	slices.SortFunc(blocks, func(a, b snaptype.FileInfo) int { return cmp.Compare(a.From, b.From) })
 	var end uint64
-	for i, f := range blocks {
-		if i > 0 && f.From > end {
-			return fmt.Errorf("%w at slots [%d, %d); once the snapshot download is complete, run `erigon snapshots reset`", ErrBeaconBlocksGap, end, f.From)
+	for i := range blocks {
+		if i > 0 && blocks[i].From > end {
+			return fmt.Errorf("%w at slots [%d, %d); once the snapshot download is complete, run `erigon snapshots reset`", ErrBeaconBlocksGap, end, blocks[i].From)
 		}
-		end = max(end, f.To)
+		end = max(end, blocks[i].To)
 	}
 	return nil
 }
