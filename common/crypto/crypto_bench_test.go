@@ -21,6 +21,7 @@ package crypto
 
 import (
 	"encoding/binary"
+	"math/rand/v2"
 	"testing"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -116,4 +117,32 @@ func BenchmarkKeccak256HashCache(b *testing.B) {
 			}
 		})
 	}
+}
+
+// BenchmarkKeccak256HashCacheMixed: 64-byte inputs, 90% from 32k recurring inputs (~67% hits),
+// with 1 KiB of other memory read per call so the 16 MiB table does not stay in L3.
+func BenchmarkKeccak256HashCacheMixed(b *testing.B) {
+	const hot = 1 << 15
+	inputs := make([][64]byte, 1<<22)
+	rng := rand.New(rand.NewPCG(1, 2))
+	for i := range inputs {
+		n := uint64(hot + i)
+		if rng.IntN(10) != 0 {
+			n = rng.Uint64N(hot)
+		}
+		binary.BigEndian.PutUint64(inputs[i][:8], n*0x9e3779b97f4a7c15)
+		binary.BigEndian.PutUint64(inputs[i][56:], n%7)
+	}
+	noise := make([]uint64, 64<<20/8)
+	var sum uint64
+	i, j := 0, 0
+	for b.Loop() {
+		sinkHash = Keccak256Hash(inputs[i&(len(inputs)-1)][:])
+		for k := 0; k < 1024/8; k += 8 {
+			sum += noise[(j+k)&(len(noise)-1)]
+		}
+		i++
+		j += 1024 / 8
+	}
+	sinkHash[0] ^= byte(sum)
 }
