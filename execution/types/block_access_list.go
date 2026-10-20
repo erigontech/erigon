@@ -1057,16 +1057,6 @@ func (bal BlockAccessList) ValidateMaxItems(blockGasLimit uint64) error {
 	return nil
 }
 
-// CountDeclaredReads returns the total number of storage_reads entries across
-// all accounts (R_declared in EIP-7928 Security Considerations).
-func (bal BlockAccessList) CountDeclaredReads() int {
-	var n int
-	for i := range bal {
-		n += len(bal[i].StorageReads)
-	}
-	return n
-}
-
 // DeclaredReadTracker tracks pending BAL storage reads for the gas feasibility check.
 type DeclaredReadTracker struct {
 	pending   map[common.Address]map[common.Hash]struct{}
@@ -1116,24 +1106,11 @@ func (t *DeclaredReadTracker) ObserveRead(addr common.Address, slot common.Hash)
 // Remaining returns the number of pending storage reads at non-excluded addresses.
 func (t *DeclaredReadTracker) Remaining() int { return t.remaining }
 
-// EarlyRejectCheck enforces the EIP-7928 Security Considerations budget:
-//
-//	G_remaining >= R_remaining * BalItemCost
-//
-// where G_remaining = blockGasLimit - gasUsed and R_remaining is the count of
-// declared storage_reads still outstanding. Returns nil when the block can
-// still feasibly satisfy its declared reads, an error otherwise. The check is
-// a non-consensus DoS defense: a malicious proposer could declare phantom
-// reads, and post-execution validation alone would force the client to fetch
-// the state before noticing the mismatch.
-func EarlyRejectCheck(blockGasLimit, gasUsed uint64, remainingDeclaredReads int) error {
-	if gasUsed > blockGasLimit {
-		return fmt.Errorf("gas accounting: used %d exceeds limit %d", gasUsed, blockGasLimit)
-	}
+// EarlyRejectCheck applies the EIP-7928 phantom-read budget to remaining execution gas.
+func EarlyRejectCheck(gasRemaining uint64, remainingDeclaredReads int) error {
 	if remainingDeclaredReads <= 0 {
 		return nil
 	}
-	gasRemaining := blockGasLimit - gasUsed
 	needed := uint64(remainingDeclaredReads) * BalItemCost
 	if gasRemaining < needed {
 		return fmt.Errorf("phantom declared reads: %d × %d = %d gas needed, %d remaining", remainingDeclaredReads, BalItemCost, needed, gasRemaining)

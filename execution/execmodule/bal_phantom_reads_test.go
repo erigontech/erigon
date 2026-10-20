@@ -229,6 +229,6 @@ func generateFullBALBlock(t *testing.T, config *chain.Config) (*execmoduletester
 	require.Equal(t, pack.TopBlock.GasLimit(), pack.TopBlock.GasUsed())
 	bal := pack.TopBlock.BlockAccessList()
 	require.NoError(t, bal.ValidateMaxItems(pack.TopBlock.GasLimit()))
-	require.Positive(t, bal.CountDeclaredReads())
+	require.Positive(t, types.NewDeclaredReadTracker(bal).Remaining())
 	return m, pack
 }

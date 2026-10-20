@@ -2599,7 +2599,6 @@ type blockExecutor struct {
 	blobGasUsed           uint64
 	gasPool               *protocol.GasPool
 
-	blockGasLimit       uint64
 	declaredReadTracker *types.DeclaredReadTracker
 	checkedRequestCode  bool
 
@@ -2674,20 +2673,8 @@ func newBlockExec(block *types.Block, gasPool *protocol.GasPool, accessList type
 		gasPool:             gasPool,
 		blockStateCache:     state.NewBlockStateCache(),
 		exhausted:           exhausted,
-		blockGasLimit:       gasPool.ExecutionGasAvailable(),
 		declaredReadTracker: types.NewDeclaredReadTracker(accessList),
 	}
-}
-
-func (be *blockExecutor) executionGasUsedSoFar() uint64 {
-	if be.gasPool == nil {
-		return 0
-	}
-	remaining := be.gasPool.ExecutionGasAvailable()
-	if remaining >= be.blockGasLimit {
-		return 0
-	}
-	return be.blockGasLimit - remaining
 }
 
 func (be *blockExecutor) checkDeclaredReadSafety(config *chain.Config, reader state.StateReader) error {
@@ -3279,7 +3266,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						be.declaredReadTracker.ObserveRead(addr.Value(), slot.Value())
 					}
 				}
-				if err := types.EarlyRejectCheck(be.blockGasLimit, be.executionGasUsedSoFar(), be.declaredReadTracker.Remaining()); err != nil {
+				if err := types.EarlyRejectCheck(be.gasPool.ExecutionGasAvailable(), be.declaredReadTracker.Remaining()); err != nil {
 					return be.invalidBlockResult(fmt.Errorf("%w, block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.number(), txVersion.TxIndex, err)), nil
 				}
 			}

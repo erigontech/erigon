@@ -696,36 +696,6 @@ func TestBlockAccessListHashEmpty(t *testing.T) {
 	}
 }
 
-func TestBlockAccessListCountDeclaredReads(t *testing.T) {
-	var addrA, addrB, addrC common.Address
-	addrA[19] = 0x01
-	addrB[19] = 0x02
-	addrC[19] = 0x03
-
-	bal := BlockAccessList{
-		{
-			Address: addrA,
-			StorageReads: []accounts.StorageKey{
-				accounts.InternKey(common.HexToHash("0x01")),
-				accounts.InternKey(common.HexToHash("0x02")),
-			},
-		},
-		{
-			Address: addrB,
-			StorageReads: []accounts.StorageKey{
-				accounts.InternKey(common.HexToHash("0x03")),
-			},
-		},
-		{Address: addrC}, // no reads
-	}
-	if got, want := bal.CountDeclaredReads(), 3; got != want {
-		t.Fatalf("CountDeclaredReads: got %d, want %d", got, want)
-	}
-	if got := (BlockAccessList{}).CountDeclaredReads(); got != 0 {
-		t.Fatalf("empty BAL CountDeclaredReads: got %d, want 0", got)
-	}
-}
-
 func TestDeclaredReadTracker(t *testing.T) {
 	var addrA, addrB common.Address
 	addrA[19] = 0x01
@@ -792,22 +762,14 @@ func TestDeclaredReadTrackerEmpty(t *testing.T) {
 }
 
 func TestEarlyRejectCheck(t *testing.T) {
-	// 60M gas limit, 1000 declared reads ⇒ 2,000,000 gas needed.
-	// gasUsed=58,000,000 leaves exactly 2,000,000 → pass.
-	if err := EarlyRejectCheck(60_000_000, 58_000_000, 1000); err != nil {
+	if err := EarlyRejectCheck(2_000_000, 1000); err != nil {
 		t.Fatalf("expected pass at exact boundary, got %v", err)
 	}
-	// gasUsed=58,000,001 leaves 1,999,999 → fail.
-	if err := EarlyRejectCheck(60_000_000, 58_000_001, 1000); err == nil {
+	if err := EarlyRejectCheck(1_999_999, 1000); err == nil {
 		t.Fatal("expected error when gasRemaining < R_remaining * BalItemCost")
 	}
-	// Zero outstanding reads → trivially passes regardless of gas.
-	if err := EarlyRejectCheck(60_000_000, 60_000_000, 0); err != nil {
+	if err := EarlyRejectCheck(0, 0); err != nil {
 		t.Fatalf("zero remaining declared reads must always pass, got %v", err)
-	}
-	// gasUsed > blockGasLimit is a caller bug — surface it.
-	if err := EarlyRejectCheck(100, 101, 0); err == nil {
-		t.Fatal("expected error when gasUsed exceeds blockGasLimit")
 	}
 }
 
