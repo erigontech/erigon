@@ -46,12 +46,12 @@ func TestCatchUpFollowsMovingAnnouncedHead(t *testing.T) {
 func TestCatchUpNearHeadDoesNothing(t *testing.T) {
 	t.Parallel()
 	network := fakeChain(1000)
-	chainRW := newFakeChainRW(network[:950])
+	chainRW := newFakeChainRW(network[:970])
 	cfg := Config{ChainRW: chainRW, Svc: &fakeP2P{peers: 2, chain: network}}
 
 	head, err := catchUp(t.Context(), testlog.Logger(t, log.LvlCrit), cfg, func() (uint64, bool) { return 999, true })
 	require.NoError(t, err)
-	require.Equal(t, uint64(949), head.Number.Uint64())
+	require.Equal(t, uint64(969), head.Number.Uint64())
 	require.Zero(t, chainRW.numInserted())
 }
 

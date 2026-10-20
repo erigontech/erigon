@@ -298,6 +298,66 @@ func TestTipFallsBackOnUnexpectedForkChoiceStatus(t *testing.T) {
 		h.chainRW.setFcuStatus(func(common.Hash) execmodule.ExecutionStatus { return execmodule.ExecutionStatusMissingSegment })
 
 		h.announce(1, blocks[0])
-		require.ErrorIs(t, <-h.runErr, errFallBack)
+		require.ErrorIs(t, h.waitRunErr(), errFallBack)
+	})
+}
+
+func (h *tipHarness) waitRunErr() error {
+	select {
+	case err := <-h.runErr:
+		return err
+	case <-time.After(time.Minute):
+		require.FailNow(h.t, "tip loop did not return")
+		return nil
+	}
+}
+
+func (h *tipHarness) announceHead(num uint64, peers ...uint64) {
+	pkt := eth.NewBlockHashesPacket{{Hash: common.Hash{0xaa, byte(num >> 8), byte(num)}, Number: num}}
+	for _, peer := range peers {
+		h.reg.sendHashes(peer, pkt)
+	}
+	synctest.Wait()
+}
+
+func TestTipFallsBackWhenFarBehind(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h := newTipHarness(t)
+		h.start()
+
+		h.announceHead(100+tipFallbackDistance, 1, 2)
+		time.Sleep(2 * tipRetryInterval)
+		synctest.Wait()
+		require.Empty(t, h.runErr)
+
+		h.announceHead(100+tipFallbackDistance+1, 1, 2)
+		time.Sleep(2 * tipRetryInterval)
+		synctest.Wait()
+		require.ErrorIs(t, h.waitRunErr(), errFallBack)
+	})
+}
+
+func TestTipFallsBackWhenStalled(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h := newTipHarness(t)
+		h.start()
+
+		time.Sleep(2 * tipStallTimeout)
+		synctest.Wait()
+		require.Empty(t, h.runErr, "no fallback while no peer announces a higher head")
+
+		blocks := h.extend(h.local[100], 1, 0)
+		h.announce(1, blocks[0])
+		h.requireHead(blocks[0])
+		h.announceHead(110, 1, 2)
+		time.Sleep(tipStallTimeout - 2*tipRetryInterval)
+		synctest.Wait()
+		require.Empty(t, h.runErr)
+
+		time.Sleep(3 * tipRetryInterval)
+		synctest.Wait()
+		require.ErrorIs(t, h.waitRunErr(), errFallBack)
 	})
 }

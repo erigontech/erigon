@@ -41,7 +41,7 @@ import (
 const (
 	defaultFcuBlocks    = 8192 // fallback FCU interval when LoopBlockLimit is unset
 	peerBackoff         = 3 * time.Second
-	tipHandoverDistance = 64
+	tipHandoverDistance = 32
 	snapshotCacheSize   = 1024
 	announceWait        = time.Second
 )
@@ -123,11 +123,13 @@ func followTip(ctx context.Context, logger log.Logger, cfg Config, ts *tipSync) 
 		if head == nil {
 			return errors.New("bsc/sync: no local head to follow the tip from")
 		}
+		announced, _ := ts.tipEvents.AnnouncedHead()
+		logger.Info("[bsc] switching to tip mode", "head", head.Number.Uint64(), "announced", announced)
 		err = ts.run(ctx, head)
 		if !errors.Is(err, errFallBack) {
 			return err
 		}
-		logger.Info("[bsc] tip mode left, catching up", "reason", err)
+		logger.Info("[bsc] falling back to catch-up", "reason", err)
 	}
 }
 
@@ -176,6 +178,8 @@ func catchUp(ctx context.Context, logger log.Logger, cfg Config, announced func(
 		}
 		return head - tipHandoverDistance
 	}
+	announcedHead, _ := announced()
+	logger.Info("[bsc] catching up to the announced head", "announced", announcedHead, "handoverDistance", tipHandoverDistance)
 	return downloadTo(ctx, logger, cfg, target)
 }
 

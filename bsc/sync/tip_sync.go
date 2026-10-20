@@ -37,6 +37,8 @@ const (
 	downloadRequestsCacheSize = 1024
 	maxBlockBatchDownloadSize = 256
 	tipRetryInterval          = time.Second
+	tipFallbackDistance       = 64
+	tipStallTimeout           = 30 * time.Second
 )
 
 var (
@@ -102,6 +104,7 @@ type tipSync struct {
 	ccb                *CanonicalChainBuilder
 	downloadCtx        context.Context
 	committed          *types.Header
+	lastProgress       time.Time
 	tipSource          EventSource
 	tipPeer            *p2p.PeerId
 	badBlocks          *simplelru.LRU[common.Hash, struct{}]
@@ -147,6 +150,7 @@ func (s *tipSync) run(ctx context.Context, head *types.Header) error {
 	}
 	s.ccb = ccb
 	s.committed = head
+	s.lastProgress = time.Now()
 	s.blockRequestsCache.Purge()
 	downloadCtx, cancelDownloads := context.WithCancel(ctx)
 	defer cancelDownloads()
@@ -171,7 +175,29 @@ func (s *tipSync) run(ctx context.Context, head *types.Header) error {
 		if err := s.commit(ctx); err != nil {
 			return err
 		}
+		if err := s.checkBehind(); err != nil {
+			return err
+		}
 	}
+}
+
+// checkBehind reports errFallBack when the committed head is more than tipFallbackDistance
+// blocks behind the announced head, or has not moved for tipStallTimeout although peers
+// announce a higher head.
+func (s *tipSync) checkBehind() error {
+	announced, ok := s.tipEvents.AnnouncedHead()
+	committed := s.committed.Number.Uint64()
+	if !ok || announced <= committed {
+		s.lastProgress = time.Now()
+		return nil
+	}
+	if announced > committed+tipFallbackDistance {
+		return fmt.Errorf("%w: head %d is %d blocks behind the announced head %d", errFallBack, committed, announced-committed, announced)
+	}
+	if stalled := time.Since(s.lastProgress); stalled > tipStallTimeout {
+		return fmt.Errorf("%w: head %d has not moved for %s, announced head %d", errFallBack, committed, stalled.Round(time.Second), announced)
+	}
+	return nil
 }
 
 func (s *tipSync) applyEvent(ctx context.Context, event *Event) error {
@@ -210,6 +236,7 @@ func (s *tipSync) commit(ctx context.Context) error {
 	switch status {
 	case execmodule.ExecutionStatusSuccess:
 		s.committed = tip
+		s.lastProgress = time.Now()
 		return s.ccb.PruneToFinalized()
 	case execmodule.ExecutionStatusBusy, execmodule.ExecutionStatusTooFarAway:
 		s.logger.Debug("[bsc] forkchoice update deferred", "block", tip.Number.Uint64(), "hash", tip.Hash(), "status", status)
