@@ -19,14 +19,13 @@ package bscsync
 import (
 	"context"
 
-	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 // computeResume returns the last persisted block and its header, from which the
 // driver resumes. Effective head = max(FrozenBlocks, CurrentHeader.Number); the
 // header is nil only when nothing beyond an unavailable genesis is present.
-func computeResume(ctx context.Context, chainRW chainreader.ChainReaderWriterEth1) (uint64, *types.Header) {
+func computeResume(ctx context.Context, chainRW chainReaderWriter) (uint64, *types.Header) {
 	frozen, _ := chainRW.FrozenBlocks(ctx)
 	head := chainRW.CurrentHeader(ctx)
 	var headNum uint64

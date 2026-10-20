@@ -20,12 +20,11 @@ import (
 	"context"
 	"fmt"
 
-	bscp2p "github.com/erigontech/erigon/bsc/p2p"
 	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func fetchRangeFromPeer(ctx context.Context, svc *bscp2p.Service, from, to uint64, peerID *p2p.PeerId) ([]*types.Block, error) {
+func fetchRangeFromPeer(ctx context.Context, svc rangeFetcher, from, to uint64, peerID *p2p.PeerId) ([]*types.Block, error) {
 	hResp, err := svc.FetchHeaders(ctx, from, to+1, peerID)
 	if err != nil {
 		return nil, err

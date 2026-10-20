@@ -32,18 +32,45 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 const (
-	defaultFcuBlocks = 8192 // fallback FCU interval when LoopBlockLimit is unset
-	peerBackoff      = 3 * time.Second
+	defaultFcuBlocks    = 8192 // fallback FCU interval when LoopBlockLimit is unset
+	peerBackoff         = 3 * time.Second
+	tipHandoverDistance = 64
+	announceWait        = time.Second
+)
+
+type chainReaderWriter interface {
+	CurrentHeader(ctx context.Context) *types.Header
+	FrozenBlocks(ctx context.Context) (uint64, bool)
+	GetHeaderByNumber(ctx context.Context, number uint64) *types.Header
+	InsertBlocks(ctx context.Context, blocks []*types.Block) error
+	UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizeHash common.Hash, timeoutOverride ...uint64) (execmodule.ExecutionStatus, *string, common.Hash, error)
+}
+
+type rangeFetcher interface {
+	ListPeersMayHaveBlockNum(blockNum uint64) []*p2p.PeerId
+	FetchHeaders(ctx context.Context, start, end uint64, peerId *p2p.PeerId, opts ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Header], error)
+	FetchBodies(ctx context.Context, headers []*types.Header, peerId *p2p.PeerId, opts ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Body], error)
+}
+
+type p2pService interface {
+	rangeFetcher
+	Run(ctx context.Context) error
+}
+
+var (
+	_ chainReaderWriter = chainreader.ChainReaderWriterEth1{}
+	_ p2pService        = (*bscp2p.Service)(nil)
 )
 
 // Config parameterizes the BSC download driver.
 type Config struct {
-	ChainRW     chainreader.ChainReaderWriterEth1
-	Svc         *bscp2p.Service
+	ChainRW     chainReaderWriter
+	Svc         p2pService
 	TargetBlock uint64 // upper bound for the parallel downloader; required (> 0)
 	FcuInterval uint64 // blocks between UpdateForkChoice calls during catch-up
 }
@@ -71,20 +98,59 @@ func RunBlockDownloader(ctx context.Context, logger log.Logger, cfg Config) erro
 // runParallel downloads [head+1, TargetBlock] with the parallel multi-peer range
 // downloader, persisting each assembled batch and advancing the head via FCU.
 func runParallel(ctx context.Context, logger log.Logger, cfg Config) error {
-	head, parent := computeResume(ctx, cfg.ChainRW)
+	head, _ := computeResume(ctx, cfg.ChainRW)
 	logger.Info("[bsc] block downloader started", "resumeFrom", head, "target", cfg.TargetBlock, "rangeSize", rangeSize)
-	if head >= cfg.TargetBlock {
-		logger.Info("[bsc] reached target", "block", head)
-		return nil
+	if _, err := downloadTo(ctx, logger, cfg, func() uint64 { return cfg.TargetBlock }); err != nil {
+		return err
+	}
+	logger.Info("[bsc] reached target", "block", max(head, cfg.TargetBlock))
+	return nil
+}
+
+// catchUp downloads forward until the local head is at most tipHandoverDistance
+// blocks behind the announced head. The target is recomputed every round, so it
+// follows the chain while the download runs.
+func catchUp(ctx context.Context, logger log.Logger, cfg Config, announced func() (uint64, bool)) (*types.Header, error) {
+	waitLogged := false
+	for {
+		if _, ok := announced(); ok {
+			break
+		}
+		if !waitLogged {
+			logger.Info("[bsc] waiting for peers to announce a head")
+			waitLogged = true
+		}
+		if err := common.Sleep(ctx, announceWait); err != nil {
+			return nil, err
+		}
+	}
+	target := func() uint64 {
+		head, _ := announced()
+		if head < tipHandoverDistance {
+			return 0
+		}
+		return head - tipHandoverDistance
+	}
+	return downloadTo(ctx, logger, cfg, target)
+}
+
+// downloadTo downloads from the resume point up to target, evaluated every round,
+// and commits the last inserted block. It returns the head.
+func downloadTo(ctx context.Context, logger log.Logger, cfg Config, target func() uint64) (*types.Header, error) {
+	head, parent := computeResume(ctx, cfg.ChainRW)
+	fcuInterval := cfg.FcuInterval
+	if fcuInterval == 0 {
+		fcuInterval = defaultFcuBlocks
 	}
 	lastFcu := head
+	var last *types.Block
 	insert := func(ctx context.Context, blocks []*types.Block) error {
 		if err := cfg.ChainRW.InsertBlocks(ctx, blocks); err != nil {
 			return err
 		}
-		last := blocks[len(blocks)-1]
+		last = blocks[len(blocks)-1]
 		head = last.NumberU64()
-		if head-lastFcu >= cfg.FcuInterval || head >= cfg.TargetBlock {
+		if head-lastFcu >= fcuInterval {
 			if err := commitHead(ctx, logger, cfg, last); err != nil {
 				return err
 			}
@@ -92,11 +158,18 @@ func runParallel(ctx context.Context, logger log.Logger, cfg Config) error {
 		}
 		return nil
 	}
-	if err := downloadRanges(ctx, logger, cfg.Svc, head+1, cfg.TargetBlock, parent, insert); err != nil {
-		return err
+	if err := downloadRanges(ctx, logger, cfg.Svc, head+1, target, parent, insert); err != nil {
+		return nil, err
 	}
-	logger.Info("[bsc] reached target", "block", cfg.TargetBlock)
-	return nil
+	if last == nil {
+		return parent, nil
+	}
+	if head > lastFcu {
+		if err := commitHead(ctx, logger, cfg, last); err != nil {
+			return nil, err
+		}
+	}
+	return last.Header(), nil
 }
 
 // commitHead advances the canonical head via the exec module, retrying while the
