@@ -686,7 +686,7 @@ run:
 		}
 
 		if memorySize > 0 {
-			callContext.Memory.Resize(memorySize)
+			callContext.Memory.resizeFor(memorySize, op, &callContext.Stack, len(evm.returnData))
 		}
 
 		// TODO - move this to a trace & set in the worker

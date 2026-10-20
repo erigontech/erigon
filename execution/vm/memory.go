@@ -121,6 +121,56 @@ func (m *Memory) Resize(size uint64) {
 	m.store = store
 }
 
+// resizeFor resizes memory for op like Resize, but leaves the bytes op
+// overwrites right after unzeroed when the buffer is reused.
+func (m *Memory) resizeFor(size uint64, op OpCode, stack *Stack, returnDataLen int) {
+	currLen := uint64(len(m.store))
+	if size <= currLen {
+		return
+	}
+	if uint64(cap(m.store)) < size {
+		m.Resize(size)
+		return
+	}
+	m.store = m.store[:size]
+	from, to := overwrittenSpan(op, stack, currLen, uint64(returnDataLen))
+	clear(m.store[currLen:max(currLen, min(from, size))])
+	clear(m.store[max(currLen, min(to, size)):])
+}
+
+// overwrittenSpan returns the memory span op writes in full, or an empty span.
+// Offsets are below the memory size, which the gas calculation bounds.
+func overwrittenSpan(op OpCode, stack *Stack, currLen, returnDataLen uint64) (from, to uint64) {
+	switch op {
+	case MSTORE:
+		from = stack.back(0).Uint64()
+		return from, from + 32
+	case CALLDATACOPY, CODECOPY:
+		from = stack.back(0).Uint64()
+		return from, from + stack.back(2).Uint64()
+	case EXTCODECOPY:
+		from = stack.back(1).Uint64()
+		return from, from + stack.back(3).Uint64()
+	case RETURNDATACOPY:
+		// The op fails without writing when it reads past the return data.
+		end, overflow := new(uint256.Int).AddOverflow(stack.back(1), stack.back(2))
+		if overflow || !end.IsUint64() || end.Uint64() > returnDataLen {
+			return 0, 0
+		}
+		from = stack.back(0).Uint64()
+		return from, from + stack.back(2).Uint64()
+	case MCOPY:
+		// The source must not read the unzeroed span.
+		length := stack.back(2).Uint64()
+		if stack.back(1).Uint64()+length > currLen {
+			return 0, 0
+		}
+		from = stack.back(0).Uint64()
+		return from, from + length
+	}
+	return 0, 0
+}
+
 func alignUpToPage(n uint64) uint64 {
 	return (n + memoryPageSize - 1) &^ uint64(memoryPageSize-1)
 }

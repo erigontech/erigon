@@ -21,7 +21,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 func TestMemoryCopy(t *testing.T) {
@@ -119,5 +123,69 @@ func TestMemoryResizeCapacity(t *testing.T) {
 	m.Resize(2*memoryPageSize + 32)
 	if got := cap(m.store); got != 4*memoryPageSize {
 		t.Fatalf("grow past two pages: cap %d, want %d", got, 4*memoryPageSize)
+	}
+}
+
+// TestMemoryResizeForMatchesResize runs memory-writing ops on a reused dirty
+// buffer and checks every byte the op did not write still reads as zero.
+func TestMemoryResizeForMatchesResize(t *testing.T) {
+	t.Parallel()
+	seq := func(n int) []byte {
+		b := make([]byte, n)
+		for i := range b {
+			b[i] = byte(i + 1)
+		}
+		return b
+	}
+	for _, tc := range []struct {
+		name    string
+		op      OpCode
+		oldLen  uint64
+		stack   []uint64 // top first
+		memSize uint64
+	}{
+		{"mstore aligned", MSTORE, 32, []uint64{32, 7}, 64},
+		{"mstore unaligned", MSTORE, 32, []uint64{40, 7}, 96},
+		{"mstore beyond end", MSTORE, 0, []uint64{100, 7}, 160},
+		{"mstore8", MSTORE8, 0, []uint64{37, 7}, 64},
+		{"calldatacopy", CALLDATACOPY, 0, []uint64{0, 0, 40}, 64},
+		{"calldatacopy short source", CALLDATACOPY, 0, []uint64{3, 0, 90}, 96},
+		{"calldatacopy offset past source", CALLDATACOPY, 32, []uint64{50, 1000, 20}, 96},
+		{"codecopy short source", CODECOPY, 0, []uint64{5, 10, 70}, 96},
+		{"returndatacopy", RETURNDATACOPY, 0, []uint64{9, 2, 30}, 64},
+		{"returndatacopy out of bounds", RETURNDATACOPY, 0, []uint64{9, 30, 30}, 64},
+		{"mcopy from old memory", MCOPY, 64, []uint64{70, 0, 40}, 128},
+		{"mcopy from new memory", MCOPY, 0, []uint64{0, 16, 32}, 64},
+		{"keccak256", KECCAK256, 0, []uint64{0, 64}, 64},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			run := func(dirty bool) []byte {
+				evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+				evm.returnData = seq(40)
+				ctx := &CallContext{input: seq(40)}
+				ctx.Contract.Code = seq(45)
+				if dirty {
+					ctx.Memory.Resize(memoryPageSize)
+					for i := range ctx.Memory.store {
+						ctx.Memory.store[i] = 0xFF
+					}
+					ctx.Memory.reset()
+				}
+				ctx.Memory.Resize(tc.oldLen)
+				for i := len(tc.stack) - 1; i >= 0; i-- {
+					ctx.Stack.push(*uint256.NewInt(tc.stack[i]))
+				}
+				if dirty {
+					ctx.Memory.resizeFor(tc.memSize, tc.op, &ctx.Stack, len(evm.returnData))
+				} else {
+					ctx.Memory.Resize(tc.memSize)
+				}
+				_, _, _ = evm.jt[tc.op].execute(0, evm, ctx)
+				return bytes.Clone(ctx.Memory.store)
+			}
+			if want, have := run(false), run(true); !bytes.Equal(want, have) {
+				t.Fatalf("want %x\nhave %x", want, have)
+			}
+		})
 	}
 }

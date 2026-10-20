@@ -486,7 +486,7 @@ run:
 		}
 
 		if memorySize > 0 {
-			callContext.Memory.Resize(memorySize)
+			callContext.Memory.resizeFor(memorySize, op, &callContext.Stack, len(evm.returnData))
 		}
 
 		// execute the operation

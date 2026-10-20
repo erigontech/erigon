@@ -424,3 +424,61 @@ func benchmarkNonModifyingCode(gas mdgas.MdGas, code []byte, name string, tracer
 		}
 	})
 }
+
+// BenchmarkEVM_MemWrite grows memory with ops that overwrite the new bytes.
+func BenchmarkEVM_MemWrite(b *testing.B) {
+	calldataCopy := func(size uint64) ([]byte, []byte) {
+		code := []byte{
+			byte(vm.PUSH8), 0, 0, 0, 0, 0, 0, 0, 0, // length
+			byte(vm.PUSH0), // data offset
+			byte(vm.PUSH0), // memory offset
+			byte(vm.CALLDATACOPY),
+			byte(vm.STOP),
+		}
+		binary.BigEndian.PutUint64(code[1:], size)
+		return code, make([]byte, size)
+	}
+	mstoreLoop := func(size uint64) ([]byte, []byte) {
+		code := []byte{
+			byte(vm.PUSH0),
+			byte(vm.JUMPDEST),
+			byte(vm.DUP1), byte(vm.DUP1), byte(vm.MSTORE),
+			byte(vm.PUSH1), 32, byte(vm.ADD),
+			byte(vm.DUP1), byte(vm.PUSH4), 0, 0, 0, 0, byte(vm.GT),
+			byte(vm.PUSH1), 1, byte(vm.JUMPI),
+			byte(vm.STOP),
+		}
+		binary.BigEndian.PutUint32(code[10:], uint32(size))
+		return code, nil
+	}
+
+	db := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(b, db)
+
+	statedb := benchState(b, state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	defer statedb.Close()
+	contractAddr := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
+
+	for _, bc := range []struct {
+		name string
+		prog func(uint64) ([]byte, []byte)
+	}{{"calldatacopy", calldataCopy}, {"mstore", mstoreLoop}} {
+		for _, n := range []uint64{1_024, 32_768} {
+			b.Run(bc.name+"/"+strconv.FormatUint(n, 10), func(b *testing.B) {
+				code, input := bc.prog(n)
+				require.NoError(b, statedb.SetCode(contractAddr, code, tracing.CodeChangeUnspecified))
+
+				cfg := Config{State: statedb}
+				setDefaults(&cfg)
+
+				for b.Loop() {
+					snap := statedb.PushSnapshot()
+					_, left, err := Call(contractAddr, input, &cfg)
+					mustComplete(b, cfg.GasLimit, left, err)
+					statedb.RevertToSnapshot(snap, nil)
+					statedb.PopSnapshot(snap)
+				}
+			})
+		}
+	}
+}
