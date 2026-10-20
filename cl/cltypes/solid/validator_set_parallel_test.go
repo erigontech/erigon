@@ -25,9 +25,27 @@ func TestValidatorRootWorkerPoolTracksGOMAXPROCS(t *testing.T) {
 	require.Equal(t, 8, workers.workerCount())
 }
 
+func TestValidatorRootWorkerPoolLetsOverlappingBuildsRunInParallel(t *testing.T) {
+	previous := runtime.GOMAXPROCS(0)
+	t.Cleanup(func() { runtime.GOMAXPROCS(previous) })
+	runtime.GOMAXPROCS(16)
+	workers := newDefaultValidatorRootWorkerPool()
+
+	first := workers.acquireHelpers(parallelMinValidators)
+	second := workers.acquireHelpers(parallelMinValidators)
+	third := workers.acquireHelpers(parallelMinValidators)
+	require.Equal(t, []int{7, 7, 2}, []int{first, second, third})
+
+	workers.releaseHelpers(first)
+	workers.releaseHelpers(second)
+	workers.releaseHelpers(third)
+	require.Zero(t, workers.liveHelpers.Load())
+}
+
 func TestValidatorRootWorkerPoolHonorsRuntimeBudgetAcrossBuilds(t *testing.T) {
 	workers := newValidatorRootWorkerPool(8)
 	workers.workerLimit = func() int { return 4 }
+	workers.totalHelperLimit = func() int { return 5 }
 	var liveHelpers atomic.Int64
 	workers.helperHook = func(delta int) {
 		liveHelpers.Add(int64(delta))
@@ -38,7 +56,8 @@ func TestValidatorRootWorkerPoolHonorsRuntimeBudgetAcrossBuilds(t *testing.T) {
 		workers.acquireHelpers(parallelMinValidators),
 		workers.acquireHelpers(parallelMinValidators),
 	}
-	require.Equal(t, int64(workers.workerCount()-1), liveHelpers.Load())
+	require.Equal(t, []int{3, 2, 0}, acquired)
+	require.Equal(t, int64(5), liveHelpers.Load())
 
 	for _, helperCount := range acquired {
 		workers.releaseHelpers(helperCount)

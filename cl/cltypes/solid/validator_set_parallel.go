@@ -13,6 +13,7 @@ const parallelMinValidators = 4_000
 type validatorRootWorkerPool struct {
 	maxWorkers          int
 	workerLimit         func() int
+	totalHelperLimit    func() int
 	minValidators       int
 	liveHelpers         atomic.Int64
 	helperHook          func(int)
@@ -22,15 +23,19 @@ type validatorRootWorkerPool struct {
 func newValidatorRootWorkerPool(maxWorkers int) *validatorRootWorkerPool {
 	maxWorkers = max(1, maxWorkers)
 	return &validatorRootWorkerPool{
-		maxWorkers:    maxWorkers,
-		workerLimit:   func() int { return maxWorkers },
-		minValidators: parallelMinValidators,
+		maxWorkers:       maxWorkers,
+		workerLimit:      func() int { return maxWorkers },
+		totalHelperLimit: func() int { return maxWorkers - 1 },
+		minValidators:    parallelMinValidators,
 	}
 }
 
+// Each build uses at most half of GOMAXPROCS, while overlapping builds share
+// up to GOMAXPROCS helpers instead of one build's share.
 func newDefaultValidatorRootWorkerPool() *validatorRootWorkerPool {
 	workers := newValidatorRootWorkerPool(8)
 	workers.workerLimit = func() int { return max(1, runtime.GOMAXPROCS(0)/2) }
+	workers.totalHelperLimit = func() int { return runtime.GOMAXPROCS(0) }
 	return workers
 }
 
@@ -45,10 +50,11 @@ func (p *validatorRootWorkerPool) acquireHelpers(validatorCount int) int {
 		return 0
 	}
 	helperCount := 0
-	helperLimit := int64(p.workerCount() - 1)
-	for int64(helperCount) < helperLimit {
+	buildHelperLimit := p.workerCount() - 1
+	totalHelperLimit := int64(p.totalHelperLimit())
+	for helperCount < buildHelperLimit {
 		liveHelpers := p.liveHelpers.Load()
-		if liveHelpers >= helperLimit {
+		if liveHelpers >= totalHelperLimit {
 			return helperCount
 		}
 		if p.liveHelpers.CompareAndSwap(liveHelpers, liveHelpers+1) {
