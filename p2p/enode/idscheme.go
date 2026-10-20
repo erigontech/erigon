@@ -114,7 +114,7 @@ func (v *Secp256k1) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	*v = (Secp256k1)(*pk)
+	*v = Secp256k1(*pk)
 	return nil
 }
 

@@ -38,7 +38,7 @@ import (
 type indexSeeker interface {
 	WarmUp(g *seg.Reader) error
 	Get(g *seg.Reader, key []byte) (k []byte, found bool, di uint64, err error)
-	//seekInFiles(g *seg.Reader, key []byte) (indexSeekerIterator, error)
+	// seekInFiles(g *seg.Reader, key []byte) (indexSeekerIterator, error)
 	Seek(g *seg.Reader, seek []byte) (k []byte, di uint64, found bool, err error)
 }
 
@@ -673,7 +673,7 @@ func u64At(k []byte, p int) uint64 {
 func (b *BpsTree) Offsets() *eliasfano32.EliasFano { return b.offt }
 func (b *BpsTree) Distances() (map[int]int, error) {
 	distances := map[int]int{}
-	var prev = -1
+	prev := -1
 	it := b.Offsets().Iterator()
 	for it.HasNext() {
 		j, err := it.Next()

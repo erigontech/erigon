@@ -21,6 +21,9 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
+	lru "github.com/hashicorp/golang-lru/v2"
+
+	"github.com/erigontech/erigon/common"
 )
 
 func BenchmarkCodeCache_GetByCodeHash_Hit(b *testing.B) {
@@ -84,4 +87,64 @@ func BenchmarkCodeCache_GetByCodeHash_ManyAddrs_OneCode(b *testing.B) {
 			b.Fatal("expected hit")
 		}
 	}
+}
+
+// One popular address read by every goroutine: a contract every transaction
+// touches. Sharding a mutex cannot help here, because one key is one shard, so
+// this is what separates a lock-free layer from a locked one. Run with
+// -cpu 1,2,4,8,16: the single-core column shows the per-op work is the same and
+// everything above it is contention.
+func BenchmarkAddrCodeHashHotKey(b *testing.B) {
+	const txNum = 1
+	addr := common.BytesToAddress(makeAddr(0xDE))
+	var hash [32]byte
+	copy(hash[:], makeCodeHash(0xAA))
+	entry := addrCodeHashEntry{addr: addr, hash: hash, txNum: txNum}
+
+	b.Run("locked/hashicorp", func(b *testing.B) {
+		c, err := lru.New[common.Address, addrCodeHashEntry](1024)
+		if err != nil {
+			b.Fatal(err)
+		}
+		c.Add(addr, entry)
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				if _, ok := c.Get(addr); !ok {
+					b.Error("miss on the hot key")
+					return
+				}
+			}
+		})
+	})
+
+	b.Run("sharded/generic", func(b *testing.B) {
+		c := NewGenericCacheWithAvg(8*datasize.MB, 52, func([32]byte) int { return 32 }, ModeEvictLRU)
+		c.Put(addr[:], hash, txNum)
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				if _, ok := c.Get(addr[:]); !ok {
+					b.Error("miss on the hot key")
+					return
+				}
+			}
+		})
+	})
+
+	b.Run("lockfree/bytelru", func(b *testing.B) {
+		c := NewByteLRU(8*datasize.MB, func(_ uint64, e addrCodeHashEntry) int64 {
+			return int64(addrToCodeHashEntryBytes)
+		})
+		c.Add(addrSlot(addr), entry)
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				if e, ok := c.Get(addrSlot(addr)); !ok || e.addr != addr {
+					b.Error("miss on the hot key")
+					return
+				}
+			}
+		})
+	})
 }

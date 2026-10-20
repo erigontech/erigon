@@ -199,6 +199,7 @@ type initialGloasHistoryDownloader struct {
 func (d *initialGloasHistoryDownloader) SetOnInitialGloasBlock(_ common.Hash, persist func(*cltypes.SignedBeaconBlock) error) {
 	d.persist = persist
 }
+
 func (d *initialGloasHistoryDownloader) RequestMore(context.Context) error {
 	if d.persist == nil {
 		return errors.New("initial Gloas callback was not configured")
@@ -208,6 +209,7 @@ func (d *initialGloasHistoryDownloader) RequestMore(context.Context) error {
 	}
 	return d.err
 }
+
 func TestHistoryDownloadPersistsInitialGloasBlockWithoutPayloadClassification(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.GloasForkEpoch = 0

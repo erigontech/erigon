@@ -329,8 +329,8 @@ func TestCodeCache_CodeDeduplication(t *testing.T) {
 }
 
 func TestCodeCache_AddrCapacityLimit(t *testing.T) {
-	// addrToHash is an LRU keyed by 20-byte address. Verify eviction is
-	// LRU rather than no-op-when-full so fresh-address workloads warm up.
+	// addrToHash is keyed by 20-byte address. Verify a full cache stays bounded
+	// and keeps serving, rather than going no-op-when-full.
 	// makeAddr / makeCode wrap at 256, so we generate addrs/codes from
 	// a wider 16-bit space directly.
 	wideAddr := func(i int) []byte {
@@ -348,28 +348,32 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 		c.Put(wideAddr(i), wideCode(i), 0)
 	}
 
-	// Len should be exactly the LRU cap (1024), not silently truncated to 0.
-	assert.Equal(t, 1024, c.Len())
+	// Residency stays bounded: the cache neither holds all 1100 nor collapses
+	// to nothing. Which addresses survive is W-TinyLFU's choice, not recency,
+	// so the identity of the evicted entries is not asserted.
+	assert.Positive(t, c.Len())
+	assert.Less(t, c.Len(), 1100)
 
-	// Oldest entries (addrs 0..75) must have been evicted.
-	_, ok := c.Get(wideAddr(0))
-	assert.False(t, ok, "oldest entry should be evicted by LRU")
-	_, ok = c.Get(wideAddr(50))
-	assert.False(t, ok, "second-oldest range should be evicted by LRU")
-
-	// Most recent entry must be present.
-	v, ok := c.Get(wideAddr(1099))
-	assert.True(t, ok, "most recent entry should remain")
-	assert.Equal(t, wideCode(1099), v)
+	// Whatever is admitted answers with its own code, never another address's.
+	admitted := 0
+	for i := range 1100 {
+		v, ok := c.Get(wideAddr(i))
+		if !ok {
+			continue
+		}
+		admitted++
+		assert.Equal(t, wideCode(i), v, "addr %d served the wrong code", i)
+	}
+	assert.Positive(t, admitted, "a full cache must still serve some addresses")
 
 	// hashToCode is bounded by bytes and gets half the configured figure, which
 	// 1100 small codes are nowhere near — they all stay resident.
 	assert.Equal(t, 1100, c.CodeLen())
 	assert.LessOrEqual(t, c.CodeSizeBytes(), int64(1024*1024)/2)
 
-	// Updating an existing addr re-writes the entry (LRU promotes to MRU).
+	// Updating an addr re-writes its entry.
 	c.Put(wideAddr(1099), wideCode(4242), 0)
-	v, ok = c.Get(wideAddr(1099))
+	v, ok := c.Get(wideAddr(1099))
 	assert.True(t, ok)
 	assert.Equal(t, wideCode(4242), v)
 }
@@ -1587,66 +1591,6 @@ func TestApplyOnlyCacheReportsFillsDisabled(t *testing.T) {
 	require.True(t, c2.FillsEnabled())
 }
 
-func TestPublishUsesProducerCodeHash(t *testing.T) {
-	t.Parallel()
-
-	c := closeOnCleanup(t, NewDefaultStateCache())
-	c.Applier().Initialize(1)
-
-	addr := makeAddr(7)
-	code := bytes.Repeat([]byte{0xab}, 96)
-	var sentinel [32]byte
-	sentinel[0] = 0xc0
-	sentinel[31] = 0xde
-
-	c.Applier().Publish(1, 2, []StateUpdate{{
-		Domain:   kv.CodeDomain,
-		Key:      addr,
-		Value:    code,
-		CodeHash: sentinel[:],
-		TxNum:    20,
-	}})
-
-	got, ok := c.View(nil).GetCodeByHash(sentinel[:])
-	require.True(t, ok, "the producer's codeHash must be the one the entry is filed under")
-	require.Equal(t, code, got)
-
-	_, ok = c.View(nil).GetCodeByHash(crypto.Keccak256(code))
-	require.False(t, ok, "the cache must not re-derive a hash of its own")
-
-	got, ok = c.View(nil).Get(kv.CodeDomain, addr)
-	require.True(t, ok)
-	require.Equal(t, code, got)
-}
-
-// A malformed producer hash must be re-derived, not used: it would file the entry
-// under a content address no reader queries, since lookups pass a 32-byte keccak.
-func TestPublishDerivesMalformedCodeHash(t *testing.T) {
-	t.Parallel()
-
-	c := closeOnCleanup(t, NewDefaultStateCache())
-	c.Applier().Initialize(1)
-
-	addr := makeAddr(9)
-	code := bytes.Repeat([]byte{0xcd}, 64)
-	short := []byte{0x01, 0x02, 0x03}
-
-	c.Applier().Publish(1, 2, []StateUpdate{{
-		Domain:   kv.CodeDomain,
-		Key:      addr,
-		Value:    code,
-		CodeHash: short,
-		TxNum:    20,
-	}})
-
-	got, ok := c.View(nil).GetCodeByHash(crypto.Keccak256(code))
-	require.True(t, ok, "a short producer hash must be replaced by the derived one")
-	require.Equal(t, code, got)
-
-	_, ok = c.View(nil).GetCodeByHash(short)
-	require.False(t, ok, "the short hash must not key the entry")
-}
-
 // ByteLRU bounds by the bytes it holds rather than an entry count: mixed-size
 // values evict until the newcomer fits, every removal reports through onEvict,
 // and a value larger than the whole budget is rejected without disturbing the
@@ -1689,4 +1633,30 @@ func TestByteLRU_ByteBoundAndOversizeRejection(t *testing.T) {
 		_, ok := b.Get(k)
 		require.Equal(t, wasResident, ok, "key %d: an oversize Add must not evict the resident set", k)
 	}
+}
+
+// An unwind bumps the read-view epoch, so a view bound to the discarded fork
+// misses even when the replacement fork has an entry for the key. This does not
+// cover an unwind that lands between the entry read and the epoch load; that
+// window has no test seam, and the load order in GetVisible is what closes it.
+func TestStateCache_OldForkViewMissesTheReplacementEntry(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	key := makeAddr(1)
+	sc.Applier().Initialize(1)
+	sc.Applier().Publish(1, 2, []StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: makeValue(1), TxNum: 5}})
+
+	var unwindOnce sync.Once
+	oldFork := FrontierFunc(func(kv.Domain) (uint64, bool) {
+		unwindOnce.Do(func() {
+			sc.Applier().PublishUnwind(2, 3, 4, []StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: makeValue(2), TxNum: 6}})
+		})
+		return 10, true
+	})
+	view := sc.View(FrontierWithStateVersion(oldFork, 2))
+
+	_, _, ok := view.GetVisible(kv.AccountsDomain, key)
+	require.False(t, ok, "an old-fork view must not read the replacement fork's entry")
 }

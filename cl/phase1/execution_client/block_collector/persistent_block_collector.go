@@ -81,19 +81,11 @@ func NewPersistentBlockCollector(
 	beaconChainCfg *clparams.BeaconChainConfig,
 	persistDir string,
 ) *PersistentBlockCollector {
-	ctx := context.Background()
-	db, err := openPersistentDB(ctx, logger, persistDir)
+	db, err := openPersistentDB(context.Background(), logger, persistDir)
 	if err != nil {
 		logger.Error("[PersistentBlockCollector] Failed to open database", "err", err, "path", persistDir)
 		return nil
 	}
-
-	go func() {
-		<-ctx.Done()
-		if db != nil {
-			db.Close()
-		}
-	}()
 
 	return &PersistentBlockCollector{
 		db:             db,
@@ -510,7 +502,8 @@ func (p *PersistentBlockCollector) doForkChoiceUpdate(ctx context.Context, lastB
 	if lastBlock.HeaderNoCopy().SlotNumber != nil {
 		fcuVersion = clparams.GloasVersion
 	}
-	if _, err := p.engine.ForkChoiceUpdate(ctx, lastBlockHash, lastBlockHash, lastBlockHash, nil, fcuVersion); err != nil {
+	// Only consensus checkpoints may set safe and finalized; zero hashes leave the EL's markers unchanged.
+	if _, err := p.engine.ForkChoiceUpdate(ctx, common.Hash{}, common.Hash{}, lastBlockHash, nil, fcuVersion); err != nil {
 		p.logger.Warn("[BlockCollector] Failed to update fork choice", "err", err)
 	}
 }
@@ -550,6 +543,9 @@ func (p *PersistentBlockCollector) HasBlock(blockNumber uint64) bool {
 
 // Close closes the database
 func (p *PersistentBlockCollector) Close() error {
+	if p == nil {
+		return nil
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 

@@ -17,6 +17,7 @@
 package mdgas
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -524,4 +525,31 @@ func TestEIP7981NotActive(t *testing.T) {
 	assert.Equal(t, params.TxGas+32*params.TxDataNonZeroGasEIP2028+params.TxAccessListAddressGas+2*params.TxAccessListStorageKeyGas, result.ExecutionGas)
 	// Floor (EIP-7976, access list not included): 21000 + (32*4)*16 = 23048
 	assert.Equal(t, params.TxGas+32*params.TxStandardTokensPerByte*params.TxTotalCostFloorPerTokenEIP7976, result.FloorGasCost)
+}
+
+// TestMinTxGas pins MinTxGas to the cheapest transaction the intrinsic gas
+// rules allow, a zero-value self-transfer, on both sides of EIP-2780.
+func TestMinTxGas(t *testing.T) {
+	for _, isEIP2780 := range []bool{false, true} {
+		cheapest, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{IsSelfTransfer: true, IsEIP2780: isEIP2780})
+		assert.False(t, overflow)
+		assert.Equal(t, cheapest.ExecutionGas, MinTxGas(isEIP2780), "isEIP2780=%v", isEIP2780)
+	}
+}
+
+func BenchmarkCountNonZeroBytes(b *testing.B) {
+	for _, n := range []int{4, 128, 4096, 731000} {
+		data := make([]byte, n)
+		for i := range data {
+			if i%3 != 0 {
+				data[i] = byte(i)
+			}
+		}
+		b.Run(strconv.Itoa(n), func(b *testing.B) {
+			b.SetBytes(int64(n))
+			for b.Loop() {
+				CountNonZeroBytes(data)
+			}
+		})
+	}
 }

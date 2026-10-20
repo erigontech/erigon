@@ -400,6 +400,7 @@ func TestForkWalk_ForkStartsHelpersOnlyOnIdleLeases(t *testing.T) {
 		}
 		bw := &walker{trie: base}
 		require.NoError(t, fw.attach(ctx, bw))
+		ut.parallel.Build()
 		root := ut.parallel.trie.root
 		err := fw.walk(ctx, bw, root, append(make([]byte, 0, forkPathCap), root.ext...))
 		fw.detach(bw)
@@ -493,6 +494,7 @@ func TestForkWalk_HelperErrorIsNotMaskedByCancellation(t *testing.T) {
 	bw := &walker{trie: base}
 	require.NoError(t, fw.attach(ctx, bw))
 	require.Same(t, first, bw.lease, "the forking walker must hold the lease whose reads wait for the helper to fail")
+	ut.parallel.Build()
 	root := ut.parallel.trie.root
 	err = fw.walk(ctx, bw, root, append(make([]byte, 0, forkPathCap), root.ext...))
 	fw.detach(bw)
@@ -573,9 +575,10 @@ func absentDeleteCorpus(freshRegion bool) (k1 [][]byte, u1 []Update, k2 [][]byte
 
 func TestForkWalk_SplitsExcludesTheNodesOwnKey(t *testing.T) {
 	pu := newParallelUpdate()
-	pu.Insert(nibs(0x01, 0x02), []byte("pk-D"), nil)
-	pu.Insert(nibs(0x01, 0x02, 0x03), []byte("pk-A"), nil)
-	pu.Insert(nibs(0x01, 0x02, 0x04), []byte("pk-B"), nil)
+	pu.Collect(nibs(0x01, 0x02), []byte("pk-D"), nil)
+	pu.Collect(nibs(0x01, 0x02, 0x03), []byte("pk-A"), nil)
+	pu.Collect(nibs(0x01, 0x02, 0x04), []byte("pk-B"), nil)
+	pu.Build()
 	node := pu.trie.root.children[0]
 	require.NotNil(t, node.plainKey)
 	require.Equal(t, uint32(3), node.subtreeCount)
@@ -653,7 +656,8 @@ func TestForkWalk_AbsentDeleteBeforeTheLeafDropsItsTouchBit(t *testing.T) {
 		func(ub *UpdateBuilder) *UpdateBuilder { return ub.Balance(x, 1) },
 		func(ub *UpdateBuilder) *UpdateBuilder {
 			return ub.Delete(addrHex(findAddressForHexPrefix([]byte{2, 2, 0}, 7))).Delete(x)
-		})
+		},
+	)
 	requireForkParityAcrossGrains(t, k0, u0, k1, u1)
 }
 
@@ -663,7 +667,8 @@ func TestForkWalk_EarlierChildKeepsTheDeletedLeafsTouchBit(t *testing.T) {
 		func(ub *UpdateBuilder) *UpdateBuilder { return ub.Balance(x, 1) },
 		func(ub *UpdateBuilder) *UpdateBuilder {
 			return ub.Delete(addrHex(findAddressForHexPrefix([]byte{2, 0}, 7))).Delete(x)
-		})
+		},
+	)
 	requireForkParityAcrossGrains(t, k0, u0, k1, u1)
 }
 
@@ -672,7 +677,8 @@ func TestForkWalk_ExtensionEndingAtTheSplitKeepsItsTouchBit(t *testing.T) {
 	b := addrHex(findAddressForHexPrefix([]byte{2, 2, 5}, 8))
 	k0, u0, k1, u1 := splitRowCorpus(
 		func(ub *UpdateBuilder) *UpdateBuilder { return ub.Balance(a, 1).Balance(b, 1) },
-		func(ub *UpdateBuilder) *UpdateBuilder { return ub.Delete(a).Delete(b) })
+		func(ub *UpdateBuilder) *UpdateBuilder { return ub.Delete(a).Delete(b) },
+	)
 	requireForkParityAcrossGrains(t, k0, u0, k1, u1)
 }
 
@@ -681,7 +687,8 @@ func TestForkWalk_ExtensionPastTheSplitDropsItsTouchBit(t *testing.T) {
 	b := addrHex(findAddressForHexPrefix([]byte{2, 2, 5, 7}, 8))
 	k0, u0, k1, u1 := splitRowCorpus(
 		func(ub *UpdateBuilder) *UpdateBuilder { return ub.Balance(a, 1).Balance(b, 1) },
-		func(ub *UpdateBuilder) *UpdateBuilder { return ub.Delete(a).Delete(b) })
+		func(ub *UpdateBuilder) *UpdateBuilder { return ub.Delete(a).Delete(b) },
+	)
 	requireForkParityAcrossGrains(t, k0, u0, k1, u1)
 }
 

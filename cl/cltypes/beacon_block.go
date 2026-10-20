@@ -90,18 +90,18 @@ func (b *SignedBeaconBlock) Blinded() (*SignedBlindedBeaconBlock, error) {
 	}, nil
 }
 
-func (s *SignedBeaconBlock) SignedBeaconBlockHeader() *SignedBeaconBlockHeader {
-	bodyRoot, err := s.Block.Body.HashSSZ()
+func (b *SignedBeaconBlock) SignedBeaconBlockHeader() *SignedBeaconBlockHeader {
+	bodyRoot, err := b.Block.Body.HashSSZ()
 	if err != nil {
 		panic(err)
 	}
 	return &SignedBeaconBlockHeader{
-		Signature: s.Signature,
+		Signature: b.Signature,
 		Header: &BeaconBlockHeader{
-			Slot:          s.Block.Slot,
-			ProposerIndex: s.Block.ProposerIndex,
-			ParentRoot:    s.Block.ParentRoot,
-			Root:          s.Block.StateRoot,
+			Slot:          b.Block.Slot,
+			ProposerIndex: b.Block.ProposerIndex,
+			ParentRoot:    b.Block.ParentRoot,
+			Root:          b.Block.StateRoot,
 			BodyRoot:      bodyRoot,
 		},
 	}

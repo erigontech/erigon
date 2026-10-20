@@ -35,10 +35,13 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 const (
@@ -51,8 +54,14 @@ const (
 	blobRetryShardShift         = 64 - blobRetryShardBits
 	// bounds a fulu block's column recovery; columns past the custody window are
 	// unfetchable and would otherwise block forever.
-	blobColumnBackfillTimeout = 30 * time.Second
+	blobColumnBackfillTimeout  = 30 * time.Second
+	blobBackfillCompleteMetric = "caplin_blob_backfill_complete"
 )
+
+// Created on the first report, so a node that never runs blob backfill exports no misleading 0.
+var blobBackfillCompleteGauge = sync.OnceValue(func() metrics.Gauge {
+	return metrics.GetOrCreateGauge(blobBackfillCompleteMetric)
+})
 
 type blobRetryRange struct {
 	start          uint64
@@ -104,6 +113,7 @@ type blobPeerClient interface {
 
 type blobSnapshotReader interface {
 	FrozenBlobs() uint64
+	VisibleSegmentsMaxTo(snaptype.Enum) uint64
 }
 
 // BlobHistoryDownloader downloads blob history backwards from a head slot
@@ -111,6 +121,7 @@ type BlobHistoryDownloader struct {
 	ctx context.Context
 
 	beaconCfg   *clparams.BeaconChainConfig
+	ethClock    eth_clock.EthereumClock
 	rpc         blobPeerClient
 	indiciesDB  kv.RoDB
 	blobStorage blob_storage.BlobStorage
@@ -165,6 +176,7 @@ func NewBlobBackfilledNotifier(notify func(bool)) *BlobBackfilledNotifier {
 func NewBlobHistoryDownloader(
 	ctx context.Context,
 	beaconCfg *clparams.BeaconChainConfig,
+	ethClock eth_clock.EthereumClock,
 	rpc *rpc.BeaconRpcP2P,
 	indiciesDB kv.RoDB,
 	blobStorage blob_storage.BlobStorage,
@@ -176,10 +188,14 @@ func NewBlobHistoryDownloader(
 	immediateBlobsBackfilling bool,
 	logger log.Logger,
 ) *BlobHistoryDownloader {
+	if ethClock == nil {
+		panic("ethClock is required")
+	}
 	targetSlot := beaconCfg.DenebForkEpoch * beaconCfg.SlotsPerEpoch
 	return &BlobHistoryDownloader{
 		ctx:                       ctx,
 		beaconCfg:                 beaconCfg,
+		ethClock:                  ethClock,
 		rpc:                       rpc,
 		indiciesDB:                indiciesDB,
 		blobStorage:               blobStorage,
@@ -220,7 +236,16 @@ func (b *BlobHistoryDownloader) SetNotifyBlobBackfilled(notify *BlobBackfilledNo
 	}
 }
 
+func publishBackfillCompleted(completed bool) {
+	if completed {
+		blobBackfillCompleteGauge().SetUint64(1)
+	} else {
+		blobBackfillCompleteGauge().SetUint64(0)
+	}
+}
+
 func (b *BlobHistoryDownloader) setBackfillCompleted(completed bool) {
+	publishBackfillCompleted(completed)
 	if b.backfillCompleted.Swap(completed) == completed {
 		return
 	}
@@ -289,6 +314,7 @@ func (b *BlobHistoryDownloader) Start() {
 
 func (b *BlobHistoryDownloader) run() {
 	defer b.running.Store(false)
+	publishBackfillCompleted(b.backfillCompleted.Load())
 
 	// Do an initial download immediately
 	if err := b.downloadOnce(true); err != nil {
@@ -312,11 +338,27 @@ func (b *BlobHistoryDownloader) run() {
 			downloadTimer.Reset(blobDownloaderInterval)
 		case <-warningTimer.C:
 			if !b.backfillCompleted.Load() {
-				b.logger.Warn("[BlobHistoryDownloader] Blob backfilling is not finished, some blobs might be unavailable", "currentSlot", b.headSlot.Load(), "highestBackfilled", b.highestBackfilledSlot.Load())
+				b.warnBackfillIncomplete()
 			}
 			warningTimer.Reset(blobBackfillWarningInterval)
 		}
 	}
+}
+
+func (b *BlobHistoryDownloader) warnBackfillIncomplete() {
+	logCtx := []any{
+		"currentSlot", b.headSlot.Load(), "highestBackfilled", b.highestBackfilledSlot.Load(),
+		"frozenBlobsTo", b.sn.FrozenBlobs(), "frozenBlocksTo", b.sn.VisibleSegmentsMaxTo(snaptype.BeaconBlocks.Enum()),
+	}
+	if len(b.retryRanges) > 0 {
+		var unresolved uint64
+		for i := range b.retryRanges {
+			unresolved += b.retryRanges[i].workCount()
+		}
+		logCtx = append(logCtx, "unresolvedSlots", unresolved,
+			"lowestUnresolved", b.retryRanges[0].start, "highestUnresolved", b.retryRanges[len(b.retryRanges)-1].end)
+	}
+	b.logger.Warn("[BlobHistoryDownloader] Blob backfilling is not finished, some blobs might be unavailable", logCtx...)
 }
 
 // downloadOnce performs a single download pass
@@ -339,11 +381,15 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	retryPending := true
 	targetSlot := b.nextBackfillTargetSlot
 	retryFloor := uint64(0)
+	blobRetentionFloor := uint64(0)
+	fuluRetentionFloor := uint64(0)
 	// in case of non-archive mode, we only backfill the last relevant epochs
 	if !b.archiveBlobs {
-		retentionFloor := currentSlot - min(currentSlot, b.beaconCfg.MinSlotsForBlobsSidecarsRequest())
-		targetSlot = max(targetSlot, retentionFloor)
-		retryFloor = retentionFloor
+		retentionSlot := b.ethClock.GetCurrentSlot()
+		blobRetentionFloor = b.beaconCfg.BlobSidecarServeRangeStartSlot(retentionSlot)
+		fuluRetentionFloor = b.beaconCfg.DataColumnSidecarServeRangeStartSlot(retentionSlot)
+		targetSlot = min(currentSlot, max(targetSlot, blobRetentionFloor))
+		retryFloor = blobRetentionFloor
 	}
 
 	if shouldLog {
@@ -362,7 +408,7 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 			continue
 		}
 		if retryPending {
-			if err := b.retryFailedRecoveries(retryFloor); err != nil {
+			if err := b.retryFailedRecoveries(retryFloor, fuluRetentionFloor); err != nil {
 				return err
 			}
 			if b.ctx.Err() != nil {
@@ -374,8 +420,12 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 				break
 			}
 		}
-
-		batch, visited, err := b.collectIncompleteBlocks(currentSlot, firstUnfrozenSlot)
+		// Admit a lagging head into the loop so retries can advance, but do not
+		// recreate non-archive work that has already left the blob-serving range.
+		if currentSlot < blobRetentionFloor {
+			break
+		}
+		batch, visited, err := b.collectIncompleteBlocks(currentSlot, firstUnfrozenSlot, fuluRetentionFloor)
 		if err != nil {
 			return err
 		}
@@ -434,7 +484,7 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	return nil
 }
 
-func (b *BlobHistoryDownloader) retryFailedRecoveries(retryFloor uint64) error {
+func (b *BlobHistoryDownloader) retryFailedRecoveries(retryFloor, fuluRetentionFloor uint64) error {
 	if len(b.retryRanges) == 0 {
 		return nil
 	}
@@ -471,7 +521,15 @@ func (b *BlobHistoryDownloader) retryFailedRecoveries(retryFloor uint64) error {
 			b.logger.Warn("[BlobHistoryDownloader] Failed to read retry block", "slot", slot, "err", err)
 			continue
 		}
-		if block == nil || block.Version() < clparams.DenebVersion || block.GetBlobKzgCommitments() == nil {
+		if block == nil {
+			b.resolveRetrySlot(slot)
+			continue
+		}
+		if b.outsideFuluRetention(block, slot, fuluRetentionFloor) {
+			b.resolveRetrySlot(slot)
+			continue
+		}
+		if block.Version() < clparams.DenebVersion || block.GetBlobKzgCommitments() == nil {
 			b.resolveRetrySlot(slot)
 			continue
 		}
@@ -863,7 +921,7 @@ func (b *BlobHistoryDownloader) peersAvailable() bool {
 
 // collectIncompleteBlocks scans backwards from currentSlot for Deneb+ blocks still
 // missing blobs. Its read tx is released before the caller's network download.
-func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot uint64) (batch []incompleteBlock, visited uint64, err error) {
+func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot, fuluRetentionFloor uint64) (batch []incompleteBlock, visited uint64, err error) {
 	tx, err := b.indiciesDB.BeginRo(b.ctx)
 	if err != nil {
 		return nil, 0, err
@@ -885,10 +943,14 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot 
 		if block.Version() < clparams.DenebVersion {
 			break
 		}
+		slot := currentSlot - visited
+		if b.outsideFuluRetention(block, slot, fuluRetentionFloor) {
+			continue
+		}
 		// The canonical root from the index, never block.Block.HashSSZ():
 		// ReadBeaconBlockBodyBySlot strips the execution payload, so hashing the block yields a
 		// root that never existed on chain and the blob-store lookup below always misses.
-		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot-visited)
+		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -897,7 +959,7 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot 
 			// canonical index, so a zero root means indexing has not caught up rather than an empty
 			// slot. Failing the pass leaves the target and completion state intact; skipping would
 			// count the slot as visited and let the pass report success with its blobs unfetched.
-			return nil, 0, fmt.Errorf("no canonical block root for slot %d: snapshot indexing has not caught up", currentSlot-visited)
+			return nil, 0, fmt.Errorf("no canonical block root for slot %d: snapshot indexing has not caught up", slot)
 		}
 		commitments := block.Block.Body.GetBlobKzgCommitments()
 		if commitments == nil {
@@ -911,7 +973,7 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot 
 			return nil, 0, err
 		}
 		if commitments.Len() == int(blobsCount) {
-			available, err := b.storedSidecarsAvailable(blockRoot, currentSlot-visited, commitments.Len())
+			available, err := b.storedSidecarsAvailable(blockRoot, slot, commitments.Len())
 			if err != nil {
 				return nil, 0, err
 			}
@@ -924,15 +986,13 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot 
 	return batch, visited, nil
 }
 
-// storedSidecarsAvailable reports whether a count-equal slot is actually backed by files. Pruning
-// drops sidecar files but leaves their count rows, and a rewrite can fail partway, so on an archive
-// node a matching count alone is not evidence the store can serve the slot.
-//
-// Non-archive nodes prune on purpose, so a missing file there is expected and must not be re-queued.
+func (b *BlobHistoryDownloader) outsideFuluRetention(block *cltypes.SignedBeaconBlock, slot, retentionFloor uint64) bool {
+	return block.Version() >= clparams.FuluVersion && slot < retentionFloor
+}
+
+// storedSidecarsAvailable reports whether a count-equal slot is actually backed by files, since
+// pruning drops sidecar files but leaves their count rows.
 func (b *BlobHistoryDownloader) storedSidecarsAvailable(blockRoot common.Hash, slot uint64, commitments int) (bool, error) {
-	if !b.archiveBlobs {
-		return true, nil
-	}
 	for idx := range commitments {
 		exists, err := b.blobStorage.BlobSidecarExists(b.ctx, slot, blockRoot, uint64(idx))
 		if err != nil {

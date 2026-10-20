@@ -172,6 +172,9 @@ func (s *payloadAttestationService) processMessage(ctx context.Context, msg *clt
 	slot := data.Slot
 	validatorIndex := msg.ValidatorIndex
 	blockRoot := data.BeaconBlockRoot
+	if s.ethClock.StateVersionByEpoch(s.ethClock.GetEpochAtSlot(slot)) < clparams.GloasVersion {
+		return fmt.Errorf("payload attestation slot %d is pre-Gloas", slot)
+	}
 
 	log.Trace("Received payload attestation message via gossip",
 		"slot", slot,
@@ -286,8 +289,8 @@ func isPayloadAttestationSlotCurrent(clock eth_clock.EthereumClock, now time.Tim
 	if expectedSlotUnix > math.MaxInt64 || slotUnix != int64(expectedSlotUnix) || uint64(nextSlotUnix)-expectedSlotUnix != secondsPerSlot {
 		return false
 	}
-	lowerBound := slotStart.Add(-gloasMaximumClockDisparity)
-	upperBound := nextSlotStart.Add(gloasMaximumClockDisparity)
+	lowerBound := slotStart.Add(-maximumGossipClockDisparity)
+	upperBound := nextSlotStart.Add(maximumGossipClockDisparity)
 	if lowerBound.After(slotStart) || upperBound.Before(nextSlotStart) {
 		return false
 	}
@@ -301,8 +304,10 @@ func (s *payloadAttestationService) validatePayloadAttestation(ctx context.Conte
 		return fmt.Errorf("%w: %w: payload attestation validation canceled: %v", ErrIgnore, ErrAttestationRetryable, ctx.Err()) //nolint:errorlint // converting cancellation to IGNORE
 	}
 	defer func() { <-s.validationAdmission }()
-	err := s.forkchoiceStore.OnPayloadAttestationMessage(ctx, msg, false)
-	if err == nil {
+	err := s.forkchoiceStore.OnGossipPayloadAttestationMessage(ctx, msg)
+	// Within the gossip clock disparity the message is valid gossip even though
+	// fork choice no longer counts its vote.
+	if err == nil || errors.Is(err, forkchoice.ErrPayloadAttestationNotCurrentSlot) {
 		return nil
 	}
 	if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

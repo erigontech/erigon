@@ -53,7 +53,6 @@ import (
 )
 
 func newTestBackend(t *testing.T) *execmoduletester.ExecModuleTester {
-
 	var (
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr   = crypto.PubkeyToAddress(key.PublicKey)
@@ -235,6 +234,7 @@ type mockOracleBackend struct {
 	frozen         uint64
 	canonicalErr   error
 	prepareForkErr error
+	rewardsErr     error
 	headerCalls    atomic.Int32
 	forkCalls      atomic.Int32
 	pending        *types.Block
@@ -269,6 +269,10 @@ func (m *mockOracleBackend) HeaderByNumber(_ context.Context, number rpc.BlockNu
 	return header, nil
 }
 
+func (m *mockOracleBackend) LatestHead(context.Context) (uint64, common.Hash, error) {
+	return m.head.Number.Uint64(), m.head.Hash(), nil
+}
+
 func (m *mockOracleBackend) BlockByNumber(ctx context.Context, _ rpc.BlockNumber) (*types.Block, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -293,7 +297,7 @@ func (m *mockOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Recei
 }
 
 func (m *mockOracleBackend) CheckBlockRewardsAvailable(_ context.Context, _ uint64) error {
-	return nil
+	return m.rewardsErr
 }
 
 func (m *mockOracleBackend) CanonicalHashes(_ context.Context, from, to uint64) ([]common.Hash, error) {
@@ -340,6 +344,17 @@ func (m *mockOracleBackend) BlockByHashNumber(ctx context.Context, hash common.H
 func (m *mockOracleBackend) Fork(_ context.Context) (gasprice.OracleBackend, func(), error) {
 	m.forkCalls.Add(1)
 	return nil, nil, nil // sequential mode
+}
+
+func TestFeeHistoryPropagatesRewardAvailabilityError(t *testing.T) {
+	head := types.NewEmptyHeaderForAssembling()
+	head.Number.SetUint64(10)
+	wantErr := errors.New("history lookup failed")
+	backend := &mockOracleBackend{head: head, rewardsErr: wantErr}
+	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{}, jsonrpc.NewGasPriceCache(), gasprice.NewFeeHistoryCache(), log.New())
+
+	_, _, _, _, _, _, err := oracle.FeeHistory(t.Context(), 1, rpc.LatestBlockNumber, []float64{50})
+	require.ErrorIs(t, err, wantErr)
 }
 
 // TestFeeHistory_CanonicalHashErrorDegradesToUncached pins that a transient
@@ -643,6 +658,25 @@ func TestSuggestTipCap_EmptyBlocksFallbackMatchesGeth(t *testing.T) {
 	require.NotNil(t, got)
 	require.Equal(t, uint64(common.GWei/1000), got.Uint64(),
 		"empty-block fallback must be GWei/1000 to match Geth's default start price")
+}
+
+// TestSuggestTipCap_CachedHeadReadsNoHeader pins that a request served from the
+// tip cache identifies the head without reading its header.
+func TestSuggestTipCap_CachedHeadReadsNoHeader(t *testing.T) {
+	head := types.NewEmptyHeaderForAssembling()
+	head.Number.SetUint64(10)
+
+	backend := &mockOracleBackend{head: head}
+	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{Blocks: 2, Percentile: 60}, jsonrpc.NewGasPriceCache(), nil, log.New())
+
+	cold, err := oracle.SuggestTipCap(context.Background())
+	require.NoError(t, err)
+	backend.headerCalls.Store(0)
+
+	cached, err := oracle.SuggestTipCap(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, cold, cached)
+	require.Zero(t, backend.headerCalls.Load(), "a cached request must not read the head header")
 }
 
 // TestSuggestTipCap_ContextCancelled verifies that a cancelled caller context is

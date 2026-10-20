@@ -380,9 +380,9 @@ func TestCodeResolve(t *testing.T) {
 	code, err := state1.GetCode(stateobjaddr0)
 	require.NoError(t, err)
 	require.Equal(t, del, code)
-	code, err = state1.ResolveCode(stateobjaddr0)
+	resolved, err := state1.ResolveCode(stateobjaddr0)
 	require.NoError(t, err)
-	require.Equal(t, target, code)
+	require.Equal(t, target, resolved.Bytes)
 }
 
 func compareStateObjects(so0, so1 *stateObject, t *testing.T) {

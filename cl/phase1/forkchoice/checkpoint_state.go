@@ -27,6 +27,7 @@ import (
 	corestate "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -51,10 +52,11 @@ type checkpointState struct {
 
 	validatorSetSize int
 	// fork data
-	genesisValidatorsRoot common.Hash
-	fork                  *cltypes.Fork
-	activeBalance, epoch  uint64 // current active balance and epoch
-	checkpoint            solid.Checkpoint
+	genesisValidatorsRoot  common.Hash
+	fork                   *cltypes.Fork
+	unslashedActiveBalance uint64
+	epoch                  uint64
+	checkpoint             solid.Checkpoint
 }
 
 func writeToBitset(bitset []byte, i int, value bool) {
@@ -74,7 +76,7 @@ func readFromBitset(bitset []byte, i int) bool {
 }
 
 func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, publicKeysRegistry public_keys_registry.PublicKeyRegistry, validatorSet []solid.Validator, randaoMixes solid.HashVectorSSZ,
-	genesisValidatorsRoot common.Hash, fork *cltypes.Fork, activeBalance, epoch uint64, checkpoint solid.Checkpoint,
+	genesisValidatorsRoot common.Hash, fork *cltypes.Fork, unslashedActiveBalance, epoch uint64, checkpoint solid.Checkpoint,
 ) *checkpointState {
 	balances := make([]uint64, len(validatorSet))
 
@@ -92,22 +94,22 @@ func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, publicKeysRegi
 
 	// bitsets size
 	c := &checkpointState{
-		beaconConfig:          beaconConfig,
-		randaoMixes:           mixes,
-		balances:              balances,
-		genesisValidatorsRoot: genesisValidatorsRoot,
-		fork:                  fork,
-		activeBalance:         activeBalance,
-		slasheds:              slasheds,
-		actives:               actives,
-		validatorSetSize:      len(validatorSet),
-		checkpoint:            checkpoint,
-		epoch:                 epoch,
-		publicKeysRegistry:    publicKeysRegistry,
+		beaconConfig:           beaconConfig,
+		randaoMixes:            mixes,
+		balances:               balances,
+		genesisValidatorsRoot:  genesisValidatorsRoot,
+		fork:                   fork,
+		unslashedActiveBalance: unslashedActiveBalance,
+		slasheds:               slasheds,
+		actives:                actives,
+		validatorSetSize:       len(validatorSet),
+		checkpoint:             checkpoint,
+		epoch:                  epoch,
+		publicKeysRegistry:     publicKeysRegistry,
 	}
 	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
 		beaconConfig.EpochsPerHistoricalVector
-	activeIndicies := c.getActiveIndicies(epoch)
+	activeIndicies := c.getActiveIndicies()
 	monitor.ObserveActiveValidatorsCount(len(activeIndicies))
 	c.shuffledSet = make([]uint64, len(activeIndicies))
 	start := time.Now()
@@ -118,44 +120,50 @@ func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, publicKeysRegi
 
 // getAttestingIndicies retrieves the beacon committee.
 func (c *checkpointState) getAttestingIndicies(attestation *solid.Attestation, aggregationBits []byte) ([]uint64, error) {
-	// First get beacon committee
 	slot := attestation.Data.Slot
 	epoch := c.epochAtSlot(slot)
-	cIndex := attestation.Data.CommitteeIndex
-	clversion := c.beaconConfig.GetCurrentStateVersion(epoch)
-	if clversion.AfterOrEqual(clparams.ElectraVersion) {
-		index, err := attestation.GetCommitteeIndexFromBits()
-		if err != nil {
-			return nil, err
+	lenIndicies := uint64(len(c.shuffledSet))
+	committeesPerSlot := c.committeeCount(lenIndicies)
+	count := committeesPerSlot * c.beaconConfig.SlotsPerEpoch
+	committeeIndices := []uint64{attestation.Data.CommitteeIndex}
+	if c.beaconConfig.GetCurrentStateVersion(epoch).AfterOrEqual(clparams.ElectraVersion) {
+		electraCommitteeIndices := attestation.CommitteeBits.GetOnIndices()
+		if len(electraCommitteeIndices) == 0 {
+			return nil, errors.New("getAttestingIndicies: no committee bits set")
 		}
-		cIndex = index
+		committeeIndices = committeeIndices[:0]
+		for _, committeeIndex := range electraCommitteeIndices {
+			committeeIndices = append(committeeIndices, uint64(committeeIndex))
+		}
 	}
 
-	// Compute shuffled indicies
-	lenIndicies := uint64(len(c.shuffledSet))
-	committeesPerSlot := c.committeeCount(epoch, lenIndicies)
-	count := committeesPerSlot * c.beaconConfig.SlotsPerEpoch
-	index := (slot%c.beaconConfig.SlotsPerEpoch)*committeesPerSlot + cIndex
-	start := (lenIndicies * index) / count
-	end := (lenIndicies * (index + 1)) / count
-	committee := c.shuffledSet[start:end]
-
+	aggregationBitsLen := utils.GetBitlistLength(aggregationBits)
+	committeeOffset := 0
 	attestingIndices := []uint64{}
-	for i, member := range committee {
-		bitIndex := i % 8
-		sliceIndex := i / 8
-		if sliceIndex >= len(aggregationBits) {
-			return nil, fmt.Errorf("getAttestingIndicies: committee is too big, committeeOffset: %d, aggrBitsLen: %d, committeeSize: %d",
-				sliceIndex, len(aggregationBits), len(committee))
+	for _, committeeIndex := range committeeIndices {
+		if committeeIndex >= committeesPerSlot {
+			return nil, fmt.Errorf("getAttestingIndicies: committee index %d is out of bounds for %d committees", committeeIndex, committeesPerSlot)
 		}
-		if (aggregationBits[sliceIndex] & (1 << bitIndex)) > 0 {
-			attestingIndices = append(attestingIndices, member)
+		index := (slot%c.beaconConfig.SlotsPerEpoch)*committeesPerSlot + committeeIndex
+		start := (lenIndicies * index) / count
+		end := (lenIndicies * (index + 1)) / count
+		committee := c.shuffledSet[start:end]
+		if committeeOffset+len(committee) > aggregationBitsLen {
+			return nil, fmt.Errorf("getAttestingIndicies: aggregation bits are too short, committeeOffset: %d, aggrBitsLen: %d, committeeSize: %d",
+				committeeOffset, aggregationBitsLen, len(committee))
 		}
+		for i, member := range committee {
+			bitPosition := committeeOffset + i
+			if aggregationBits[bitPosition/8]&(1<<uint(bitPosition%8)) > 0 {
+				attestingIndices = append(attestingIndices, member)
+			}
+		}
+		committeeOffset += len(committee)
 	}
 	return attestingIndices, nil
 }
 
-func (c *checkpointState) getActiveIndicies(epoch uint64) (activeIndicies []uint64) {
+func (c *checkpointState) getActiveIndicies() (activeIndicies []uint64) {
 	for i := 0; i < c.validatorSetSize; i++ {
 		if !readFromBitset(c.actives, i) {
 			continue
@@ -166,7 +174,7 @@ func (c *checkpointState) getActiveIndicies(epoch uint64) (activeIndicies []uint
 }
 
 // committeeCount retrieves size of sync committee
-func (c *checkpointState) committeeCount(epoch, lenIndicies uint64) uint64 {
+func (c *checkpointState) committeeCount(lenIndicies uint64) uint64 {
 	committeCount := max(min(c.beaconConfig.MaxCommitteesPerSlot, lenIndicies/c.beaconConfig.SlotsPerEpoch/c.beaconConfig.TargetCommitteeSize), 1)
 	return committeCount
 }

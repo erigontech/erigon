@@ -55,7 +55,7 @@ func TestFeeHistory(t *testing.T) {
 		overMaxQuery[i] = float64(1)
 	}
 
-	var cases = []struct {
+	cases := []struct {
 		pending             bool
 		maxHeader, maxBlock int
 		count               int
@@ -167,6 +167,11 @@ func (c *feeChain) HeaderByNumber(_ context.Context, number rpc.BlockNumber) (*t
 	return nil, nil
 }
 
+func (c *feeChain) LatestHead(context.Context) (uint64, common.Hash, error) {
+	head := c.blocks[len(c.blocks)-1]
+	return head.NumberU64(), head.Hash(), nil
+}
+
 func (c *feeChain) BlockByNumber(_ context.Context, number rpc.BlockNumber) (*types.Block, error) {
 	c.fetches.Add(1)
 	return c.block(uint64(number)), nil
@@ -220,8 +225,10 @@ func TestFeeHistoryValues(t *testing.T) {
 	gwei := func(n uint64) *uint256.Int { return uint256.NewInt(n * common.GWei) }
 	u256 := func(v uint64) hexutil.U256 { return hexutil.U256(*uint256.NewInt(v)) }
 	header := func(number, gasLimit, gasUsed, baseFeeGwei, blobGasUsed uint64) *types.Header {
-		return &types.Header{Number: *uint256.NewInt(number), GasLimit: gasLimit, GasUsed: gasUsed,
-			BaseFee: gwei(baseFeeGwei), BlobGasUsed: &blobGasUsed, ExcessBlobGas: new(uint64)}
+		return &types.Header{
+			Number: *uint256.NewInt(number), GasLimit: gasLimit, GasUsed: gasUsed,
+			BaseFee: gwei(baseFeeGwei), BlobGasUsed: &blobGasUsed, ExcessBlobGas: new(uint64),
+		}
 	}
 	dynamicFee := func(tipGwei, feeCapGwei uint64) types.Transaction {
 		return &types.DynamicFeeTransaction{TipCap: *gwei(tipGwei), FeeCap: *gwei(feeCapGwei)}

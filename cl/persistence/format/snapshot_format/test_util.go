@@ -39,5 +39,5 @@ func (t *MockBlockReader) Transactions(number uint64, hash common.Hash) (*solid.
 func (t *MockBlockReader) SetBeaconChainConfig(*clparams.BeaconChainConfig) {
 }
 
-func (t *MockBlockReader) CacheBody(blockNumber uint64, transactions [][]byte, withdrawals []*types.Withdrawal) {
+func (t *MockBlockReader) CacheBody(blockNumber uint64, blockHash common.Hash, transactions [][]byte, withdrawals []*types.Withdrawal) {
 }

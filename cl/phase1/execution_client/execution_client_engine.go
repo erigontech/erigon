@@ -24,11 +24,8 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -357,7 +354,7 @@ func (cc *ExecutionClientEngine) getAssembledBlockV3(ctx context.Context, id []b
 		return nil, nil, nil, nil, fmt.Errorf("%w: GetPayloadV3 returned missing blobs bundle", ErrInvalidGetPayloadResponse)
 	}
 
-	block, err := executionPayloadToEth1Block(resp.ExecutionPayload, version, cc.beaconCfg)
+	block, err := resp.ExecutionPayload.ToEth1Block(version, cc.beaconCfg)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -383,7 +380,7 @@ func (cc *ExecutionClientEngine) getAssembledBlockFromResponse(resp *engine_type
 		return nil, nil, nil, nil, errors.New("beaconCfg not set — call SetBeaconChainConfig before GetAssembledBlock")
 	}
 
-	block, err := executionPayloadToEth1Block(resp.ExecutionPayload, version, cc.beaconCfg)
+	block, err := resp.ExecutionPayload.ToEth1Block(version, cc.beaconCfg)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -428,81 +425,6 @@ func (cc *ExecutionClientEngine) getAssembledBlockV6(ctx context.Context, id []b
 		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV6 failed: %w", err)
 	}
 	return cc.getAssembledBlockFromResponse(resp, version)
-}
-
-func executionPayloadToEth1Block(ep *engine_types.ExecutionPayload, version clparams.StateVersion, beaconCfg *clparams.BeaconChainConfig) (*cltypes.Eth1Block, error) {
-	block := cltypes.NewEth1Block(version, beaconCfg)
-	block.ParentHash = ep.ParentHash
-	block.FeeRecipient = ep.FeeRecipient
-	block.StateRoot = ep.StateRoot
-	block.ReceiptsRoot = ep.ReceiptsRoot
-	block.PrevRandao = ep.PrevRandao
-	block.BlockNumber = uint64(ep.BlockNumber)
-	block.GasLimit = uint64(ep.GasLimit)
-	block.GasUsed = uint64(ep.GasUsed)
-	block.Time = uint64(ep.Timestamp)
-	block.BlockHash = ep.BlockHash
-
-	if len(ep.LogsBloom) == 256 {
-		copy(block.LogsBloom[:], ep.LogsBloom)
-	}
-
-	if ep.ExtraData != nil {
-		block.Extra = solid.NewExtraData()
-		block.Extra.SetBytes(ep.ExtraData)
-	}
-
-	if ep.BaseFeePerGas != nil {
-		_, _ = (*uint256.Int)(ep.BaseFeePerGas).MarshalSSZAppend(block.BaseFeePerGas[:0])
-	}
-
-	if ep.BlobGasUsed != nil {
-		block.BlobGasUsed = uint64(*ep.BlobGasUsed)
-	}
-	if ep.ExcessBlobGas != nil {
-		block.ExcessBlobGas = uint64(*ep.ExcessBlobGas)
-	}
-
-	// Keep transactions encoded while rebuilding their SSZ container.
-	txBytes := make([][]byte, len(ep.Transactions))
-	for i, tx := range ep.Transactions {
-		txBytes[i] = tx
-	}
-	block.Transactions = solid.NewTransactionsSSZFromTransactions(txBytes)
-
-	// Use the chain preset's withdrawal limit when rebuilding the SSZ list.
-	if ep.Withdrawals != nil {
-		maxWithdrawals := 16
-		if beaconCfg != nil {
-			maxWithdrawals = int(beaconCfg.MaxWithdrawalsPerPayload)
-		}
-		block.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](maxWithdrawals, 44)
-		for _, w := range ep.Withdrawals {
-			block.Withdrawals.Append(&cltypes.Withdrawal{
-				Index:     uint64(w.Index),
-				Validator: uint64(w.Validator),
-				Address:   w.Address,
-				Amount:    uint64(w.Amount),
-			})
-		}
-	}
-
-	// Gloas extends the payload with the slot number and block access list.
-	if ep.SlotNumber != nil {
-		block.SlotNumber = uint64(*ep.SlotNumber)
-	}
-	if ep.BlockAccessList != nil && len(*ep.BlockAccessList) > 0 {
-		maxBytes := uint64(1073741824) // MAX_BYTES_PER_TRANSACTION default
-		if beaconCfg != nil {
-			maxBytes = beaconCfg.MaxBytesPerTransaction
-		}
-		block.BlockAccessList = solid.NewByteListSSZ(maxBytes)
-		if err := block.BlockAccessList.SetBytes(*ep.BlockAccessList); err != nil {
-			return nil, err
-		}
-	}
-
-	return block, nil
 }
 
 func (cc *ExecutionClientEngine) HasGapInSnapshots(ctx context.Context) bool {

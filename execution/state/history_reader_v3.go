@@ -29,7 +29,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-var PrunedError = errors.New("old data not available due to pruning")
+var ErrPruned = errors.New("old data not available due to pruning")
 
 // HistoryReaderV3 Implements StateReader and StateWriter.
 //
@@ -100,51 +100,7 @@ func (hr *HistoryReaderV3) SetBlockStateCache(cache *BlockStateCache) {
 // disabled (e.g. the serial executor path), sd.GetAsOf returns an error —
 // we silently fall through to ttx so the same reader type is usable in
 // both modes.
-//
-// blockCache is consulted for the AccountsDomain and StorageDomain only;
-// CodeDomain is not currently cached per block, so for code reads we fall
-// straight through to sd/ttx. For storage we use the full 52-byte
-// composite key (addr||slot) like the rest of the state domain.
 func (hr *HistoryReaderV3) getAsOf(domain kv.Domain, key []byte) (enc []byte, ok bool, err error) {
-	if hr.blockCache != nil {
-		switch domain {
-		case kv.AccountsDomain:
-			if len(key) == 20 {
-				var raw common.Address
-				copy(raw[:], key)
-				addr := accounts.InternAddress(raw)
-				if cached, hit := hr.blockCache.GetCurrentAccount(addr); hit {
-					// hit==true is authoritative for the in-flight block, including the
-					// deletion case (cached==nil). Return immediately rather than falling
-					// through to sd/ttx, which would surface the pre-deletion value from
-					// history. Downstream callers (ReadAccountData) treat enc=nil as
-					// "no account" regardless of ok, so emitting ok=true here just
-					// reflects the cache's authoritative status.
-					if cached == nil {
-						return nil, false, nil
-					}
-					return cached, true, nil
-				}
-			}
-		case kv.StorageDomain:
-			if len(key) == 20+32 {
-				var rawAddr common.Address
-				var rawSlot common.Hash
-				copy(rawAddr[:], key[:20])
-				copy(rawSlot[:], key[20:])
-				addr := accounts.InternAddress(rawAddr)
-				slot := accounts.InternKey(rawSlot)
-				if cached, hit := hr.blockCache.GetCurrentStorage(addr, slot); hit {
-					// Same as the account case above: hit==true is authoritative even
-					// when the slot was cleared (len(cached)==0), so do not fall through.
-					if len(cached) == 0 {
-						return nil, false, nil
-					}
-					return cached, true, nil
-				}
-			}
-		}
-	}
 	if hr.sd != nil {
 		enc, ok, err = hr.sd.GetAsOf(domain, key, hr.txNum)
 		if err == nil && ok {
@@ -165,33 +121,52 @@ func (hr *HistoryReaderV3) SetTrace(trace bool, tracePrefix string) {
 	hr.tracePrefix = tracePrefix
 }
 
-func (r *HistoryReaderV3) Trace() bool {
-	return r.trace
+func (hr *HistoryReaderV3) Trace() bool {
+	return hr.trace
 }
 
-func (r *HistoryReaderV3) TracePrefix() string {
-	return r.tracePrefix
+func (hr *HistoryReaderV3) TracePrefix() string {
+	return hr.tracePrefix
 }
 
-// Gets the txNum where Account, Storage and Code history begins.
-// If the node is an archive node all history will be available therefore
-// the result will be 0.
-//
-// For non-archive node old history files get deleted, so this number will vary
-// but the goal is to know where the historical data begins.
-func StateHistoryStartTxNum(ttx kv.TemporalTx) uint64 {
+// StateHistoryStartTxNum returns a conservative lower bound for account, storage
+// and code history. A domain may start later because it had no earlier changes,
+// so the maximum would reject valid reads. The minimum can still admit a request
+// whose history is missing in another domain.
+func StateHistoryStartTxNum(ttx kv.TemporalTx) (uint64, error) {
 	dbg := ttx.Debug()
-	return min(
-		dbg.HistoryStartFrom(kv.AccountsDomain),
-		dbg.HistoryStartFrom(kv.StorageDomain),
-		dbg.HistoryStartFrom(kv.CodeDomain),
-	)
+	if dbg == nil {
+		return 0, errors.New("state history requires a temporal debug view")
+	}
+	var start uint64
+	for i, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		domainStart, err := dbg.HistoryStartFrom(domain)
+		if err != nil {
+			return 0, err
+		}
+		if i == 0 || domainStart < start {
+			start = domainStart
+		}
+	}
+	return start, nil
 }
 
 func (hr *HistoryReaderV3) DiscardReadList() {}
 
 func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
-	hr.addr = address.Value()
+	return hr.ReadAccountByPlainAddr(address.Value())
+}
+
+func (hr *HistoryReaderV3) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	if hr.blockCache != nil {
+		if acc, hit := hr.blockCache.GetCurrentAccountDecoded(accounts.InternAddress(address)); hit {
+			if hr.trace {
+				fmt.Printf("%sReadAccountData (cache)[%x] => %v\n", hr.tracePrefix, address, acc)
+			}
+			return acc, nil
+		}
+	}
+	hr.addr = address
 	enc, ok, err := hr.getAsOf(kv.AccountsDomain, hr.addr[:])
 	if err != nil || !ok || len(enc) == 0 {
 		if hr.trace {
@@ -209,6 +184,17 @@ func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.
 	return &a, nil
 }
 
+func (hr *HistoryReaderV3) HasAccount(address common.Address) (bool, error) {
+	if hr.blockCache != nil {
+		if acc, hit := hr.blockCache.GetCurrentAccount(accounts.InternAddress(address)); hit {
+			return acc != deletedAccount, nil
+		}
+	}
+	hr.addr = address
+	enc, ok, err := hr.getAsOf(kv.AccountsDomain, hr.addr[:])
+	return ok && len(enc) > 0, err
+}
+
 // ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
 // Used to get `prev` account balance
 func (hr *HistoryReaderV3) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
@@ -216,6 +202,14 @@ func (hr *HistoryReaderV3) ReadAccountDataForDebug(address accounts.Address) (*a
 }
 
 func (hr *HistoryReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	if hr.blockCache != nil {
+		if v, hit := hr.blockCache.GetCurrentStorage(address, key); hit {
+			if hr.trace {
+				fmt.Printf("%sReadAccountStorage (cache)[%x] [%x] => [%x]\n", hr.tracePrefix, address, key, v.Bytes())
+			}
+			return v, !v.IsZero(), nil
+		}
+	}
 	addressValue := address.Value()
 	keyValue := key.Value()
 	copy(hr.composite[:length.Addr], addressValue[:])
@@ -233,7 +227,7 @@ func (hr *HistoryReaderV3) ReadAccountStorage(address accounts.Address, key acco
 
 func (hr *HistoryReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	//  must pass key2=Nil here: because Erigon4 does concatinate key1+key2 under the hood
-	//code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
+	// code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
 	hr.addr = address.Value()
 	code, _, err := hr.getAsOf(kv.CodeDomain, hr.addr[:])
 	if hr.trace {
@@ -250,6 +244,14 @@ func (hr *HistoryReaderV3) ReadAccountCodeSize(address accounts.Address) (int, e
 }
 
 func (hr *HistoryReaderV3) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
+	if hr.blockCache != nil {
+		if acc, hit := hr.blockCache.GetCurrentAccount(address); hit {
+			if acc.Incarnation == 0 {
+				return 0, nil
+			}
+			return acc.Incarnation - 1, nil
+		}
+	}
 	hr.addr = address.Value()
 	enc, ok, err := hr.getAsOf(kv.AccountsDomain, hr.addr[:])
 	if err != nil || !ok || len(enc) == 0 {

@@ -44,12 +44,19 @@ import (
 	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc/contracts"
 	"github.com/erigontech/erigon/txnprovider"
@@ -58,6 +65,8 @@ import (
 	shuttercrypto "github.com/erigontech/erigon/txnprovider/shutter/internal/crypto"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
+	"github.com/erigontech/erigon/txnprovider/txpool"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 //goland:noinspection DuplicatedCode
@@ -312,78 +321,152 @@ func TestPoolProvideTxnsUsesGasTargetAndTxnsIdFilter(t *testing.T) {
 	})
 }
 
-//goland:noinspection DuplicatedCode
-func TestPoolProvideTxnsFiltersByIntrinsicGasNotFullGasLimit(t *testing.T) {
+func TestPoolProvideTxnsAmsterdamGasAdmission(t *testing.T) {
 	t.Parallel()
+	for _, tc := range []struct {
+		name                  string
+		gas, execution, state uint64
+		want                  int
+	}{
+		{"execution insufficient", 100_000, 50_000, 100_000, 0},
+		{"state insufficient", 100_000, 100_000, 99_999, 0},
+		{"both budgets equal", 100_000, 100_000, 100_000, 1},
+		{"above execution cap", 30_000_000, 20_000_000, 40_000_000, 1},
+		{"below execution cap", 30_000_000, params.MaxTxnGasLimit - 1, 40_000_000, 0},
+		{"at execution cap", 30_000_000, params.MaxTxnGasLimit, 30_000_000, 1},
+		{"below legacy minimum", 12_000, 15_000, 15_000, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pt := PoolTest{t}
+			pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
+				handle.DecryptTxns(ctx, t, tc.gas)
+				require.Len(t, pool.AllDecryptedTxns(), 1)
+				txns, err := pool.ProvideTxns(ctx,
+					txnprovider.WithBlockTime(handle.nextBlockTime),
+					txnprovider.WithParentBlockNum(handle.nextBlockNum-1),
+					txnprovider.WithGasTarget(mdgas.NewFullMdGas(tc.execution, tc.state, 0)))
+				require.NoError(t, err)
+				require.Len(t, txns, tc.want)
+			})
+		})
+	}
+}
+
+func TestPoolProvideTxnsUsesRemainingGasForAdmission(t *testing.T) {
+	publicPool, err := txpool.New(t.Context(), make(chan txpool.Announcements, 1),
+		mdbxtest.NewTestPoolDB(t), temporaltest.NewTestDB(t, datadir.New(t.TempDir())),
+		txpoolcfg.DefaultConfig, kvcache.New(kvcache.DefaultCoherentConfig), chain.AllProtocolChanges,
+		nil, nil, func() {}, nil, nil, log.New(), txpool.WithFeeCalculator(nil))
+	require.NoError(t, err)
+
 	pt := PoolTest{t}
 	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
-		ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, 1)
+		decrypted := handle.DecryptTxns(ctx, t, 100_000, 100_000)
+
+		sender := common.Address{1}
+		account := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+		require.NoError(t, publicPool.OnNewBlock(ctx, &remoteproto.StateChangeBatch{
+			BlockGasLimit: 1_000_000,
+			ChangeBatch: []*remoteproto.StateChange{{
+				BlockHeight: handle.nextBlockNum - 1,
+				BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{}),
+				Changes: []*remoteproto.AccountChange{{
+					Action:  remoteproto.Action_UPSERT,
+					Address: gointerfaces.ConvertAddressToH160(sender),
+					Data:    accounts.SerialiseV3(&account),
+				}},
+			}},
+		}, txpool.TxnSlots{}, txpool.TxnSlots{}, txpool.TxnSlots{}))
+		publicTxn := &types.LegacyTx{
+			CommonTx: types.CommonTx{GasLimit: 100_000, To: &sender},
+			GasPrice: *uint256.NewInt(1),
+		}
+		var encoded bytes.Buffer
+		require.NoError(t, publicTxn.MarshalBinary(&encoded))
+		var slots txpool.TxnSlots
+		slots.Append(&txpool.TxnSlot{Txn: publicTxn, IDHash: publicTxn.Hash(), Rlp: encoded.Bytes(), Size: uint32(encoded.Len())}, sender[:], true)
+		reasons, err := publicPool.AddLocalTxns(ctx, slots)
 		require.NoError(t, err)
-		handle.SimulateInitialEonRead(t, ekg)
-		handle.SimulateFilterLogs(common.HexToAddress(handle.config.SequencerContractAddress), []types.Log{})
-		err = handle.SimulateNewBlockChange(ctx)
-		require.NoError(t, err)
-		synctest.Wait()
-		// A simple transfer has intrinsic gas of 21,000 but declares 100,000.
-		const txnGasLimit uint64 = 100_000
-		encTxn := MockEncryptedTxn(t, handle.config.ChainId, ekg.Eon(), MockWithGasLimit(txnGasLimit))
-		err = handle.SimulateLogEvents(ctx, []types.Log{
-			MockTxnSubmittedEventLog(t, handle.config, ekg.Eon(), 1, encTxn),
-		})
-		require.NoError(t, err)
-		handle.SimulateCachedEonRead(t, ekg)
-		err = handle.SimulateNewBlockChange(ctx)
-		require.NoError(t, err)
-		synctest.Wait()
-		require.Len(t, pool.AllEncryptedTxns(), 1)
-		handle.SimulateCurrentSlot()
-		handle.SimulateDecryptionKeys(ctx, t, ekg, 1, encTxn.IdentityPreimage)
-		synctest.Wait()
-		require.Len(t, pool.AllDecryptedTxns(), 1)
-		// Budget enough gas for the intrinsic but less than the declared limit.
-		txns, err := pool.ProvideTxns(
-			ctx,
-			txnprovider.WithBlockTime(handle.nextBlockTime),
-			txnprovider.WithParentBlockNum(handle.nextBlockNum-1),
-			txnprovider.WithGasTarget(mdgas.NewFullMdGas(50_000, txnGasLimit, 0)),
-		)
-		require.NoError(t, err)
-		require.Len(t, txns, 1)
-		require.Equal(t, encTxn.OriginalTxn.Hash(), txns[0].Hash())
+		require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+		for _, tc := range []struct {
+			execution     uint64
+			wantDecrypted int
+			wantTotal     int
+		}{
+			{124_000, 2, 3},
+			{112_000, 2, 2},
+			{111_999, 1, 1},
+			{100_000, 1, 1},
+		} {
+			handle.baseTxnProvider.provide = func(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+				options := txnprovider.ApplyProvideOptions(opts...)
+				require.Equal(t, tc.execution-uint64(tc.wantDecrypted)*params.TxBaseEIP2780, options.GasTarget.Execution)
+				return publicPool.ProvideTxns(ctx, opts...)
+			}
+			txns, err := pool.ProvideTxns(ctx,
+				txnprovider.WithBlockTime(handle.nextBlockTime),
+				txnprovider.WithParentBlockNum(handle.nextBlockNum-1),
+				txnprovider.WithGasTarget(mdgas.NewFullMdGas(tc.execution, 100_000, 0)))
+			require.NoError(t, err)
+			require.Len(t, txns, tc.wantTotal, "execution gas: %d", tc.execution)
+			for i := range tc.wantDecrypted {
+				require.Equal(t, decrypted[i].Hash(), txns[i].Hash())
+			}
+			if tc.wantTotal > tc.wantDecrypted {
+				require.Equal(t, publicTxn.Hash(), txns[tc.wantDecrypted].Hash())
+			}
+		}
 	})
 }
 
-func TestPoolProvideTxnsRejectsGasLimitAboveStateGasTarget(t *testing.T) {
+func TestPoolProvideTxnsContinuesAfterGasRejection(t *testing.T) {
 	t.Parallel()
 	pt := PoolTest{t}
 	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
-		ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, 1)
-		require.NoError(t, err)
-		handle.SimulateInitialEonRead(t, ekg)
-		handle.SimulateFilterLogs(common.HexToAddress(handle.config.SequencerContractAddress), []types.Log{})
-		require.NoError(t, handle.SimulateNewBlockChange(ctx))
-		synctest.Wait()
-
-		const txnGasLimit uint64 = 100_000
-		encTxn := MockEncryptedTxn(t, handle.config.ChainId, ekg.Eon(), MockWithGasLimit(txnGasLimit))
-		require.NoError(t, handle.SimulateLogEvents(ctx, []types.Log{
-			MockTxnSubmittedEventLog(t, handle.config, ekg.Eon(), 1, encTxn),
-		}))
-		handle.SimulateCachedEonRead(t, ekg)
-		require.NoError(t, handle.SimulateNewBlockChange(ctx))
-		synctest.Wait()
-		handle.SimulateCurrentSlot()
-		handle.SimulateDecryptionKeys(ctx, t, ekg, 1, encTxn.IdentityPreimage)
-		synctest.Wait()
-
-		txns, err := pool.ProvideTxns(
-			ctx,
+		decrypted := handle.DecryptTxns(ctx, t, 100_000, 12_000)
+		yielded := mapset.NewThreadUnsafeSet[[32]byte]()
+		opts := []txnprovider.ProvideOption{
 			txnprovider.WithBlockTime(handle.nextBlockTime),
-			txnprovider.WithParentBlockNum(handle.nextBlockNum-1),
-			txnprovider.WithGasTarget(mdgas.NewFullMdGas(50_000, txnGasLimit-1, 0)),
-		)
+			txnprovider.WithParentBlockNum(handle.nextBlockNum - 1),
+			txnprovider.WithTxnIdsFilter(yielded),
+			txnprovider.WithGasTarget(mdgas.NewFullMdGas(50_000, 100_000, 0)),
+		}
+		txns, err := pool.ProvideTxns(ctx, opts...)
 		require.NoError(t, err)
-		require.Empty(t, txns)
+		require.Len(t, txns, 1)
+		require.Equal(t, decrypted[1].Hash(), txns[0].Hash())
+		require.False(t, yielded.Contains(decrypted[0].Hash()))
+		require.True(t, yielded.Contains(decrypted[1].Hash()))
+		require.Len(t, pool.AllDecryptedTxns(), 2)
+
+		opts = append(opts, txnprovider.WithGasTarget(mdgas.NewFullMdGas(100_000, 100_000, 0)))
+		txns, err = pool.ProvideTxns(ctx, opts...)
+		require.NoError(t, err)
+		require.Len(t, txns, 1)
+		require.Equal(t, decrypted[0].Hash(), txns[0].Hash())
+	})
+}
+
+func TestPoolProvideTxnsBeforeAmsterdam(t *testing.T) {
+	t.Parallel()
+	pt := PoolTest{t}
+	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
+		handle.chainConfig.AmsterdamTime = nil
+		handle.DecryptTxns(ctx, t, 100_000)
+		for _, tc := range []struct {
+			execution uint64
+			want      int
+		}{
+			{50_000, 0},
+			{100_000, 1},
+		} {
+			txns, err := pool.ProvideTxns(ctx,
+				txnprovider.WithBlockTime(handle.nextBlockTime),
+				txnprovider.WithParentBlockNum(handle.nextBlockNum-1),
+				txnprovider.WithGasTarget(mdgas.NewFullMdGas(tc.execution, 0, 0)))
+			require.NoError(t, err)
+			require.Len(t, txns, tc.want, "execution gas: %d", tc.execution)
+		}
 	})
 }
 
@@ -441,8 +524,10 @@ func (t PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *shu
 		logger.SetHandler(logHandler)
 		config := shuttercfg.ConfigByChainName(networkname.Chiado)
 		config.ReorgDepthAwareness = 3
+		config.EncryptedGasLimit = 40_000_000
 		config.BeaconChainGenesisTimestamp = uint64(time.Now().Unix())
-		baseTxnProvider := EmptyTxnProvider{}
+		chainConfig := *chain.AllProtocolChanges
+		baseTxnProvider := &TestTxnProvider{}
 		ctrl := gomock.NewController(t)
 		contractBackend := NewMockContractBackend(ctrl, logger)
 		stateChangesClient := NewMockStateChangesClient(ctrl, logger)
@@ -452,7 +537,7 @@ func (t PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *shu
 		pool := shutter.NewPool(
 			logger,
 			config,
-			chain.AllProtocolChanges,
+			&chainConfig,
 			baseTxnProvider,
 			contractBackend,
 			stateChangesClient,
@@ -466,6 +551,8 @@ func (t PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *shu
 		eg := errgroup.Group{}
 		eg.Go(func() error { return pool.Run(ctx) })
 		handle := PoolTestHandle{
+			baseTxnProvider:    baseTxnProvider,
+			chainConfig:        &chainConfig,
 			config:             config,
 			logHandler:         logHandler,
 			stateChangesClient: stateChangesClient,
@@ -485,6 +572,8 @@ func (t PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *shu
 }
 
 type PoolTestHandle struct {
+	baseTxnProvider    *TestTxnProvider
+	chainConfig        *chain.Config
 	config             shuttercfg.Config
 	logHandler         *testhelpers.CollectingLogHandler
 	stateChangesClient *MockStateChangesClient
@@ -493,6 +582,34 @@ type PoolTestHandle struct {
 	keySender          *MockKeySender
 	nextBlockNum       uint64
 	nextBlockTime      uint64
+}
+
+func (h *PoolTestHandle) DecryptTxns(ctx context.Context, t *testing.T, gasLimits ...uint64) []types.Transaction {
+	t.Helper()
+	ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, 1)
+	require.NoError(t, err)
+	h.SimulateInitialEonRead(t, ekg)
+	h.SimulateFilterLogs(common.HexToAddress(h.config.SequencerContractAddress), []types.Log{})
+	require.NoError(t, h.SimulateNewBlockChange(ctx))
+	synctest.Wait()
+	txns := make([]types.Transaction, len(gasLimits))
+	logs := make([]types.Log, len(gasLimits))
+	preimages := make([]*shutter.IdentityPreimage, len(gasLimits))
+	for i, gas := range gasLimits {
+		encTxn := MockEncryptedTxn(t, h.config.ChainId, ekg.Eon(), MockWithGasLimit(gas),
+			func(tx *types.LegacyTx) { tx.Value.Clear() })
+		txns[i] = encTxn.OriginalTxn
+		logs[i] = MockTxnSubmittedEventLog(t, h.config, ekg.Eon(), uint64(i+1), encTxn)
+		preimages[i] = encTxn.IdentityPreimage
+	}
+	require.NoError(t, h.SimulateLogEvents(ctx, logs))
+	h.SimulateCachedEonRead(t, ekg)
+	require.NoError(t, h.SimulateNewBlockChange(ctx))
+	synctest.Wait()
+	h.SimulateCurrentSlot()
+	h.SimulateDecryptionKeys(ctx, t, ekg, 1, preimages...)
+	synctest.Wait()
+	return txns
 }
 
 func (h *PoolTestHandle) SimulateNewBlockChange(ctx context.Context) error {
@@ -596,9 +713,14 @@ func (h *PoolTestHandle) SimulateDecryptionKeys(
 	require.NoError(t, err)
 }
 
-type EmptyTxnProvider struct{}
+type TestTxnProvider struct {
+	provide func(context.Context, ...txnprovider.ProvideOption) ([]types.Transaction, error)
+}
 
-func (p EmptyTxnProvider) ProvideTxns(_ context.Context, _ ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+func (p *TestTxnProvider) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	if p.provide != nil {
+		return p.provide(ctx, opts...)
+	}
 	return nil, nil
 }
 

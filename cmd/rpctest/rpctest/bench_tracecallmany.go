@@ -17,6 +17,7 @@
 package rpctest
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
@@ -27,14 +28,14 @@ import (
 // but also can be used for comparing RPCDaemon with Geth
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
-func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) error {
+func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) (err error) {
 	setRoutes(erigonURL, oeURL)
 
 	rec, errs, cleanup, err := openWriters(recordFile, errorFile)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+	defer func() { err = errors.Join(err, cleanup()) }()
 
 	reqGen := &RequestGenerator{}
 
@@ -55,9 +56,9 @@ func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uin
 		n := len(b.Result.Transactions)
 		from := make([]common.Address, n)
 		to := make([]*common.Address, n)
-		gas := make([]*hexutil.Big, n)
-		gasPrice := make([]*hexutil.Big, n)
-		value := make([]*hexutil.Big, n)
+		gas := make([]*hexutil.U256, n)
+		gasPrice := make([]*hexutil.U256, n)
+		value := make([]*hexutil.U256, n)
 		data := make([]hexutil.Bytes, n)
 
 		for i := range n {

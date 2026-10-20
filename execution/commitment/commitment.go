@@ -30,7 +30,6 @@ import (
 	"sync"
 	"unsafe"
 
-	keccak "github.com/erigontech/fastkeccak"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 
@@ -942,7 +941,7 @@ func (branchData BranchData) Validate(branchKey []byte) error {
 	if err := validateAfterMap(afterMap, row); err != nil {
 		return err
 	}
-	if err := validatePlainKeys(branchKey, row, keccak.NewFastKeccak()); err != nil {
+	if err := validatePlainKeys(branchKey, row); err != nil {
 		return err
 	}
 	return nil
@@ -962,7 +961,7 @@ func validateAfterMap(afterMap uint16, row [16]*cell) error {
 	return nil
 }
 
-func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccak.KeccakState) error {
+func validatePlainKeys(branchKey []byte, row [16]*cell) error {
 	uncompactedBranchKey := nibbles.CompactToHex(branchKey)
 	if nibbles.HasTerm(uncompactedBranchKey) {
 		uncompactedBranchKey = uncompactedBranchKey[:len(uncompactedBranchKey)-1]
@@ -979,7 +978,7 @@ func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccak.KeccakStat
 		if c.accountAddrLen == 0 && c.storageAddrLen == 0 {
 			continue
 		}
-		err := c.deriveHashedKeys(depth, keccak, length.Addr, hashBuf[:])
+		err := c.deriveHashedKeys(depth, length.Addr, hashBuf[:])
 		if err != nil {
 			return err
 		}
@@ -1499,7 +1498,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 		hashedKey := t.hashKey(keyBytes)
 		ik := t.parallel.internKey(keyBytes)
 		t.keys[key] = struct{}{}
-		t.parallel.Insert(hashedKey, ik, nil)
+		t.parallel.Collect(hashedKey, ik, nil)
 	default:
 	}
 }
@@ -1560,7 +1559,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 			ik = t.parallel.internKey(keyBytes)
 			t.keys[key] = struct{}{}
 		}
-		t.parallel.Insert(hashedKey, ik, u)
+		t.parallel.Collect(hashedKey, ik, u)
 	default:
 	}
 }
@@ -1582,7 +1581,7 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 		}
 		dedupKey := string(hashedKey)
 		if _, ok := t.keys[dedupKey]; !ok {
-			t.parallel.Insert(hashedKey, nil, nil)
+			t.parallel.Collect(common.ToBytesZeroCopy(dedupKey), nil, nil)
 			t.keys[dedupKey] = struct{}{}
 		}
 	case ModeUpdate:

@@ -60,11 +60,12 @@ var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_re
 // from the trie (wrong root in TestDeleteRecreateAccount / TestSelfDestructReceive
 // / TestEIP161AccountRemoval, all of which SD a contract whose storage predates
 // the block). Pass nil in unit tests that don't exercise pre-block storage.
-func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stateReader StateReader, domainStorageKeys StorageKeysFn, emptyRemoval bool, isAura bool, eip8246 bool) (*WriteSet, error) {
+func (ws *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stateReader StateReader, domainStorageKeys StorageKeysFn, emptyRemoval bool, isAura bool, eip8246 bool) (*WriteSet, error) {
 	filtered := &WriteSet{}
-	if writes == nil {
+	if ws == nil {
 		return filtered, nil
 	}
+	ws.assertNotArena("normalize")
 
 	// sdStorageSlots returns the union of vm.StorageKeys (this batch) and
 	// domainStorageKeys (committed before this batch), deduped — the complete
@@ -94,17 +95,11 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 		return out, nil
 	}
 
-	// Pre-scan for SD'd addresses. IBS.Selfdestruct emits 3 writes for the
-	// SD'd account (IncarnationPath=preInc, SelfDestructPath=true, BalancePath=0).
-	// If we forward all 3 to applyVersionedWrites, it sees d.balance != nil ||
-	// d.incarnation != nil and routes into the "cleanup-before-recreate"
-	// branch — which writes the account back with {Bal=0, Inc=preInc} encoding
-	// instead of taking the pure-delete branch (DomainDel(Accounts)). The
-	// account stays in sd.mem with non-zero incarnation, and a subsequent
-	// block's CREATE2 at the same address sees a phantom existing account,
-	// producing wrong execution / wrong trie root in TestRecreateAndRewind.
-	// Drop the BalancePath/NoncePath/IncarnationPath/CodeHashPath writes for
-	// SD'd addresses so applyVersionedWrites reaches the pure-delete branch.
+	// Pre-scan for SD'd addresses. IBS.Selfdestruct emits IncarnationPath=0 and
+	// SelfDestructPath=true for the SD'd account, and BalancePath=0 unless
+	// EIP-8246 keeps the balance. Drop its account-field writes, except a kept
+	// balance, so the account is deleted (DomainDel(Accounts)), not written back
+	// as an empty record, which would change the state root.
 	//
 	// Two filters applied here:
 	//   1. Validated-incarnation: mirror the `w.Version.Incarnation != incarnation`
@@ -121,7 +116,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 	//      in agreement. (EIP-6780 narrows this pattern post-Cancun but doesn't
 	//      eliminate it; mainnet-rare, but cheap to get right.)
 	var sdSet map[accounts.Address]bool
-	for addr, vw := range writes.selfDestruct {
+	for addr, vw := range ws.selfDestruct {
 		if vw.Version.Incarnation == incarnation && vw.Val {
 			if sdSet == nil {
 				sdSet = make(map[accounts.Address]bool)
@@ -130,7 +125,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 		}
 	}
 
-	for h := range writes.AllHeaders() {
+	for h := range ws.AllHeaders() {
 		// Drop account-field writes for SD'd addresses so applyVersionedWrites
 		// takes the pure-delete branch instead of cleanup-before-recreate; drop
 		// raw StoragePath writes too (the SelfDestructPath case re-emits an
@@ -154,7 +149,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			if h.Version.Incarnation != incarnation {
 				continue
 			}
-			sw, ok := writes.GetStorage(h.Address, h.Key)
+			sw, ok := ws.GetStorage(h.Address, h.Key)
 			if !ok {
 				continue
 			}
@@ -178,8 +173,9 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			// First check versionMap floor (prior TX's write in this block).
 			// Then fall back to stateReader (pre-block value from domain).
 			originVal, origin, originOK := vm.ReadStorage(h.Address, h.Key, txIndex)
+			// A destruct also wipes the slots its own tx wrote.
 			originValid := originOK && origin.Status() == MVReadResultDone &&
-				!(sdOk && sdTxIdx > origin.Version().TxIndex)
+				!(sdOk && sdTxIdx >= origin.Version().TxIndex)
 			switch {
 			case originValid:
 				if writeVal.Eq(&originVal) {
@@ -220,19 +216,19 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			if !SetAccountFieldFromMap(filtered, vm, h.Address, h.Path, h.Version, txIndex+1) {
 				switch h.Path {
 				case BalancePath:
-					if vw, ok := writes.GetBalance(h.Address); ok {
+					if vw, ok := ws.GetBalance(h.Address); ok {
 						filtered.SetBalance(h.Address, vw)
 					}
 				case NoncePath:
-					if vw, ok := writes.GetNonce(h.Address); ok {
+					if vw, ok := ws.GetNonce(h.Address); ok {
 						filtered.SetNonce(h.Address, vw)
 					}
 				case IncarnationPath:
-					if vw, ok := writes.GetIncarnation(h.Address); ok {
+					if vw, ok := ws.GetIncarnation(h.Address); ok {
 						filtered.SetIncarnation(h.Address, vw)
 					}
 				case CodeHashPath:
-					if vw, ok := writes.GetCodeHash(h.Address); ok {
+					if vw, ok := ws.GetCodeHash(h.Address); ok {
 						filtered.SetCodeHash(h.Address, vw)
 					}
 				}
@@ -241,14 +237,14 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			if h.Version.Incarnation != incarnation {
 				continue
 			}
-			if vw, ok := writes.GetCode(h.Address); ok {
+			if vw, ok := ws.GetCode(h.Address); ok {
 				filtered.SetCode(h.Address, vw)
 			}
 		case CreateContractPath:
 			if h.Version.Incarnation != incarnation {
 				continue
 			}
-			if vw, ok := writes.GetCreateContract(h.Address); ok {
+			if vw, ok := ws.GetCreateContract(h.Address); ok {
 				filtered.SetCreateContract(h.Address, vw)
 			}
 		case SelfDestructPath:
@@ -257,7 +253,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			}
 			// Only emit storage DELETE entries when the account was actually
 			// self-destructed (val=true).
-			sdw, ok := writes.GetSelfDestruct(h.Address)
+			sdw, ok := ws.GetSelfDestruct(h.Address)
 			if !ok || !sdw.Val {
 				continue
 			}
@@ -294,7 +290,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 	// - Addresses whose storage writes were all filtered as no-ops
 	//   (the object was still dirty in the IBS)
 	allAddresses := make(map[accounts.Address]bool)
-	writes.forEachFieldAddr(func(addr accounts.Address) { allAddresses[addr] = true })
+	ws.forEachFieldAddr(func(addr accounts.Address) { allAddresses[addr] = true })
 
 	for addr := range allAddresses {
 		if sdSet[addr] {
@@ -308,30 +304,18 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 		}
 		ver := Version{TxIndex: txIndex, Incarnation: incarnation}
 
-		// If addr was self-destructed by an earlier TX in this block and this
-		// TX re-creates it (it isn't in sdSet — this TX didn't re-destruct it),
-		// missing account fields are the post-destruction defaults, NOT the
-		// pre-SD values still sitting in the versionMap. IBS.Selfdestruct only
-		// records SelfDestructPath/BalancePath/IncarnationPath, so a re-creation
-		// via a plain value transfer (no CREATE) leaves the stale pre-SD nonce
-		// and codeHash in the map — reading them back here resurrects a phantom
-		// contract (wrong trie root: TestSelfDestructReceive, TestCVE2020_26265).
-		// If a later TX between the SD and this one re-created addr via CREATE2,
-		// vm.Read returns that recreate's SelfDestructPath=false, so we correctly
-		// fall through to the normal versionMap lookup.
+		// Missing fields of an account destroyed earlier in this block must not take
+		// their pre-destruct values. A CREATE resets every field; a revival by a
+		// credit writes no nonce, and one by a fee credit no code hash either, so
+		// both follow the readers: zero when a committed destruct follows their last
+		// write, else the map or state reader.
 		sdEarlier := false
 		if v, sd, _ := vm.ReadSelfDestruct(addr, txIndex); sd.Status() == MVReadResultDone && v {
 			sdEarlier = true
 		}
 
-		// Only emit post-SD defaults when this TX created a new contract
-		// (CREATE/CREATE2). A value-transfer resurrect (no CreateContractPath)
-		// inherits the pre-SD account fields via the versionMap last-write-wins
-		// chain — that matches GenerateChain's accumulate-across-txs behaviour
-		// (no per-tx FinalizeTx). Forcing defaults here resets nonce/codeHash
-		// against that canonical state (TestSelfDestructReceive).
 		hasCreateContract := false
-		if vw, ok := writes.GetCreateContract(addr); ok && vw.Val {
+		if vw, ok := ws.GetCreateContract(addr); ok && vw.Val {
 			hasCreateContract = true
 		}
 
@@ -350,7 +334,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 				SetAccountFieldZero(filtered, addr, path, ver)
 				continue
 			}
-			if SetAccountFieldFromMap(filtered, vm, addr, path, ver, txIndex+1) {
+			if setAccountFieldLive(filtered, vm, addr, path, ver, txIndex+1) {
 				continue
 			}
 			// Fall back to stateReader for pre-block account

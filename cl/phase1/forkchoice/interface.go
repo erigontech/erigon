@@ -48,8 +48,10 @@ type ForkChoiceStorageReader interface {
 	// GetFinalizedExecutionHash returns the EL block hash for finalized/justified checkpoints.
 	GetFinalizedExecutionHash(eth2Root common.Hash) common.Hash
 	GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error)
-	GetHeadNode() (ForkChoiceNode, error)
+	GetHeadNode() (ForkChoiceNode, uint64, error)
 	HighestSeen() uint64
+	HasImportedDescendantAfter(root common.Hash, slot uint64) bool
+	BlockProcessing() bool
 	JustifiedCheckpoint() solid.Checkpoint
 	JustifiedSlot() uint64
 	ProposerBoostRoot() common.Hash
@@ -81,6 +83,15 @@ type ForkChoiceStorageReader interface {
 	HasBlockEquivocation(slot, proposerIndex uint64, exceptRoot common.Hash) bool
 	// [New in Gloas:EIP7732] HasEnvelope checks if a signed execution payload envelope exists.
 	HasEnvelope(blockRoot common.Hash) bool
+	// [New in Gloas:EIP7732] HasPendingExecutionPayloadEnvelope reports an envelope that is
+	// waiting for its block or its data columns.
+	HasPendingExecutionPayloadEnvelope(blockRoot common.Hash) bool
+	// [New in Gloas:EIP7732] ExecutionPayloadApplyInFlight reports an envelope that is being
+	// applied after passing its signature check.
+	ExecutionPayloadApplyInFlight(blockRoot common.Hash) bool
+	// [New in Gloas:EIP7732] PayloadVotesRuleOutFull reports PTC votes recorded for blockRoot that
+	// already rule out building on its FULL variant.
+	PayloadVotesRuleOutFull(blockRoot common.Hash) bool
 	ExecutionPayloadReceivedBefore(blockRoot common.Hash, deadline time.Time) bool
 	// IsPayloadVerified reports whether the EL has fully validated the payload.
 	IsPayloadVerified(blockRoot common.Hash) bool
@@ -94,15 +105,12 @@ type ForkChoiceStorageReader interface {
 	// (b) PeerDAS confirms all custody columns are locally available.
 	// Returns false if the envelope does not exist or blob data is missing.
 	IsBlobDataAvailable(slot uint64, blockRoot common.Hash) bool
-	// [New in Gloas:EIP7732] GetHeadPayloadStatus returns the payload status of the current
-	// head node (FULL, EMPTY, or PENDING). Must be called after GetHead.
-	GetHeadPayloadStatus() cltypes.PayloadStatus
 	// [New in Gloas:EIP7732] ShouldExtendPayload returns whether the payload for the given
 	// root should be extended. Used by prepare_execution_payload to decide FULL vs EMPTY path.
 	ShouldExtendPayload(root common.Hash) bool
 	// [New in Gloas:EIP7732] ShouldBuildOnFull returns whether the proposer should build on
-	// the full payload for the given head node. Used for proposer reorg of unavailable blocks.
-	ShouldBuildOnFull(head ForkChoiceNode, slot uint64) bool
+	// the full payload for the given head node at proposalSlot.
+	ShouldBuildOnFull(head ForkChoiceNode, proposalSlot uint64) bool
 
 	GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
 	GetInactivitiesScores(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
@@ -152,6 +160,10 @@ type ForkChoiceStorageWriter interface {
 	// checkBlobData: verify blob data availability via PeerDAS
 	// validatePayload: call engine.NewPayload() to validate with EL
 	OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error
+	// [New in Gloas:EIP7732] RetryPendingExecutionPayloadEnvelope applies the envelope queued for
+	// blockRoot when its data is available and its retry is due, and returns when the next retry
+	// is due, or zero when nothing is queued.
+	RetryPendingExecutionPayloadEnvelope(ctx context.Context, blockRoot common.Hash) time.Time
 	ValidateExecutionPayloadEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
 	ClaimExecutionPayloadEnvelopeForGossip(context.Context, common.Hash, uint64) (ExecutionPayloadEnvelopeAdmissionToken, error)
 	TryClaimExecutionPayloadEnvelopeForGossip(common.Hash, uint64) (ExecutionPayloadEnvelopeAdmissionToken, error)
@@ -163,16 +175,17 @@ type ForkChoiceStorageWriter interface {
 	// self-build envelope, skipping BLS signature verification. EL validation still runs.
 	// MUST only be called from the local block production path.
 	ApplyLocalSelfBuildEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
-	// [New in Gloas:EIP7732] OnPayloadAttestationMessage processes a PTC attestation message from gossip.
-	// Returns error if validation fails (REJECT), nil if accepted or ignored.
-	OnPayloadAttestationMessage(ctx context.Context, msg *cltypes.PayloadAttestationMessage, isFromBlock bool) error
+	// [New in Gloas:EIP7732] OnGossipPayloadAttestationMessage processes a PTC attestation message from gossip.
+	// ErrPayloadAttestationNotCurrentSlot means the message is valid gossip whose vote is not counted.
+	// Otherwise it returns ErrIgnore for IGNORE conditions and other errors for REJECT conditions.
+	OnGossipPayloadAttestationMessage(ctx context.Context, msg *cltypes.PayloadAttestationMessage) error
 	// [New in Gloas:EIP7732] StoreAnchorEnvelope persists an envelope to disk and updates
 	// eth2Roots without running state transition. Used during checkpoint sync where the
 	// finalized state already incorporates the envelope's effects but subsequent blocks
 	// need the envelope on disk to resolve their parent execution payload.
 	StoreAnchorEnvelope(blockRoot common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
 	AddPreverifiedBlobSidecar(blobSidecar *cltypes.BlobSidecar) error
-	OnTick(time uint64)
+	OnTick(timeMs uint64)
 	SetSynced(synced bool)
 	ProcessAttestingIndicies(attestation *solid.Attestation, attestionIndicies []uint64)
 }

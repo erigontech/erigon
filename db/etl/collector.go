@@ -32,9 +32,11 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-type LoadNextFunc func(originalK, k, v []byte) error
-type LoadFunc func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error
-type simpleLoadFunc func(k, v []byte) error
+type (
+	LoadNextFunc   func(originalK, k, v []byte) error
+	LoadFunc       func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error
+	simpleLoadFunc func(k, v []byte) error
+)
 
 type Allocator struct {
 	p     *sync.Pool
@@ -62,6 +64,7 @@ func (a *Allocator) rememberFill(name string, n int) {
 	}
 	a.fills[name] = n
 }
+
 func (a *Allocator) Put(b Buffer) {
 	if b == nil {
 		return
@@ -69,6 +72,7 @@ func (a *Allocator) Put(b Buffer) {
 	b.Reset() // return the buffer's chunks to the pool now — see dataChunks in buffers.go
 	a.p.Put(b)
 }
+
 func (a *Allocator) Get() Buffer {
 	b := a.p.Get().(Buffer)
 	b.Reset()
@@ -106,6 +110,7 @@ func NewCollectorWithAllocator(logPrefix, tmpdir string, allocator *Allocator, l
 	c.Allocator(allocator)
 	return c
 }
+
 func NewCollector(logPrefix, tmpdir string, sortableBuffer Buffer, logger log.Logger) *Collector {
 	return &Collector{bufType: getTypeByBuffer(sortableBuffer), buf: sortableBuffer, logPrefix: logPrefix, tmpdir: tmpdir, logLvl: log.LvlInfo, logger: logger}
 }
@@ -146,6 +151,7 @@ func (c *Collector) LogLvl(v log.Lvl) *Collector {
 	c.logLvl = v
 	return c
 }
+
 func (c *Collector) Allocator(a *Allocator) *Collector {
 	c.allocator = a
 	return c
@@ -245,7 +251,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 		i++
 
 		isNil := (c.bufType == SortableSliceBuffer && v == nil) ||
-			(c.bufType == SortableAppendBuffer && len(v) == 0) || //backward compatibility
+			(c.bufType == SortableAppendBuffer && len(v) == 0) || // backward compatibility
 			(c.bufType == SortableOldestAppearedBuffer && len(v) == 0)
 		if isNil && !args.EmptyVals {
 			if canUseAppend {
@@ -296,13 +302,13 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 func (c *Collector) Close() {
 	// Providers first: a KeepInRAM one reads straight from `buf`, whose chunks
 	// Reset hands to a pool that other collectors draw from.
-	if c.dataProviders != nil { //idempotency
+	if c.dataProviders != nil { // idempotency
 		for _, p := range c.dataProviders {
 			p.Dispose()
 		}
 		c.dataProviders = nil
 	}
-	if c.buf != nil { //idempotency
+	if c.buf != nil { // idempotency
 		c.fill = max(c.fill, c.buf.Len())
 		if c.allocator != nil {
 			c.allocator.Put(c.buf)
