@@ -21,17 +21,27 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 func CheckInclusionListTransactions(
-	evm *vm.EVM,
 	gp *GasPool,
-	signer types.Signer,
 	blockTxns types.Transactions,
 	inclusionListTxns types.Transactions,
+	stateReader state.StateReader,
+	blockContext *evmtypes.BlockContext,
+	chainConfig *chain.Config,
+	vmConfig *vm.Config,
 ) bool {
+	ibs := state.New(stateReader)
+	defer ibs.Close()
+	evm := vm.NewEVM(*blockContext, evmtypes.TxContext{}, ibs, chainConfig, *vmConfig)
+	signer := *types.MakeSigner(chainConfig, blockContext.BlockNumber, blockContext.Time)
+
 	inBlock := make(map[common.Hash]struct{}, len(blockTxns))
 	for _, tx := range blockTxns {
 		inBlock[tx.Hash()] = struct{}{}
@@ -65,11 +75,10 @@ func CheckInclusionListTransactions(
 			continue
 		}
 
-		log.Warn("[EIP-7805]: Inclusion List transaction should have been included in the block")
-		log.Warn("txn:", tx.Hash(), "sender:", msg.From(), "nonce:", msg.Nonce(), "block:", evm.Context.BlockNumber)
+		log.Warn("[EIP-7805] Inclusion list transaction should have been included in the block",
+			"txn", tx.Hash(), "sender", msg.From(), "nonce", msg.Nonce(), "block", evm.Context.BlockNumber)
 
 		return false
 	}
-
 	return true
 }

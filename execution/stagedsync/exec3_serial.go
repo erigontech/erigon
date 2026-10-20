@@ -29,8 +29,6 @@ import (
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node/shards"
 )
 
@@ -401,13 +399,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, block *types.Block, 
 				// End of block transaction in a block
 				if se.cfg.readAheader != nil {
 					if inclusionList, ok := se.cfg.readAheader.ReadInclusionList(txTask.BlockHash()); ok {
-						ilIBS := state.New(state.NewReaderV3(se.rs.Domains().AsStateGetter(se.applyTx, execctxapi.StateGetterOptions{})))
-						defer ilIBS.Close()
-						ilEVM := vm.NewEVM(txTask.EvmBlockContext, evmtypes.TxContext{}, ilIBS, se.cfg.chainConfig, *se.cfg.vmConfig)
-						signer := *types.MakeSigner(se.cfg.chainConfig, txTask.BlockNumber(), txTask.Header.Time)
-
-						ilSatisfied := protocol.CheckInclusionListTransactions(ilEVM, gasPool, signer, txTask.Txs, inclusionList)
-
+						ilSatisfied := protocol.CheckInclusionListTransactions(gasPool, txTask.Txs, inclusionList, state.NewReaderV3(se.rs.Domains().AsStateGetter(se.applyTx, execctxapi.StateGetterOptions{})), &txTask.EvmBlockContext, se.cfg.chainConfig, se.cfg.vmConfig)
 						se.cfg.readAheader.SetInclusionListResult(txTask.BlockHash(), ilSatisfied)
 					}
 				}
