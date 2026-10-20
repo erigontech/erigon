@@ -1240,29 +1240,29 @@ func (ibs *IntraBlockState) readSelfDestructMemo(addr accounts.Address) (bool, R
 // when EIP-8246 removed the SELFDESTRUCT burn: the balance survives, code and
 // nonce are cleared at destruction, and any later per-field map writes overlay
 // the reconstruction so account-level reads agree with the field-level ones.
-// Returns nil when the balance was moved out, leaving an empty account that
-// EIP-161 removes.
+// Returns nil when the result is EIP-161 empty: the balance was moved out and
+// no later tx re-established a nonce or code, so the account is gone.
 func (ibs *IntraBlockState) eip8246PreservedAccount(addr accounts.Address) (*accounts.Account, error) {
 	bal, _, _, err := readBalance(ibs, addr)
 	if err != nil {
 		return nil, err
 	}
-	if bal.IsZero() {
-		return nil, nil
-	}
-	acc := accounts.NewAccount()
-	acc.Balance = bal
 	nonce, _, _, err := readNonce(ibs, addr)
 	if err != nil {
 		return nil, err
 	}
-	acc.Nonce = nonce
 	codeHash, _, _, err := readCodeHash(ibs, addr, false)
 	if err != nil {
 		return nil, err
 	}
+	acc := accounts.NewAccount()
+	acc.Balance = bal
+	acc.Nonce = nonce
 	if codeHash != accounts.NilCodeHash && !codeHash.IsZero() {
 		acc.CodeHash = codeHash
+	}
+	if acc.Empty() {
+		return nil, nil
 	}
 	return &acc, nil
 }
@@ -1729,12 +1729,31 @@ func (ibs *IntraBlockState) setStateVersioned(addr accounts.Address, key account
 // SetStorage replaces the entire storage for the specified account with given
 // storage. This function should only be used for debugging.
 func (ibs *IntraBlockState) SetStorage(addr accounts.Address, storage Storage) error {
-	if dbg.AssertEnabled && ibs.noMaterialize {
-		panic("SetStorage: full state override is not kept on the noMaterialize path")
-	}
 	stateObject, err := ibs.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
+	}
+	if ibs.versionMap != nil {
+		// An incarnation cell wipes storage and code for later transactions: a slot
+		// or code without a newer cell reads as empty, so the code is written again.
+		code, err := ibs.getCode(addr)
+		if err != nil {
+			return err
+		}
+		if code.Len() > 0 {
+			ibs.writeCode(addr, code, false)
+		}
+		ibs.recordWriteIncarnation(addr, stateObject.data.Incarnation)
+		// The incarnation cell does not hide a slot cell of an earlier transaction.
+		for _, key := range ibs.versionMap.StorageKeys(addr) {
+			prev, _, _ := ibs.versionMap.ReadStorage(addr, key, ibs.txIndex)
+			ibs.recordWriteStorage(addr, key, uint256.Int{}, prev)
+		}
+		for key, value := range storage {
+			prev, _, _ := ibs.versionMap.ReadStorage(addr, key, ibs.txIndex)
+			ibs.recordWriteStorage(addr, key, value, prev)
+		}
+		return nil
 	}
 	if stateObject != nil {
 		stateObject.SetStorage(storage)
@@ -1923,25 +1942,12 @@ func (ibs *IntraBlockState) IsNewContract(addr accounts.Address) (bool, error) {
 // SetTransientState sets transient storage for a given account. It
 // adds the change to the journal so that it can be rolled back
 // to its previous value if there is a revert.
-func (ibs *IntraBlockState) SetTransientState(addr accounts.Address, key accounts.StorageKey, value uint256.Int) {
-	prev := ibs.GetTransientState(addr, key)
-	if prev == value {
-		return
-	}
-
-	ibs.journal.transientStorageChange(addr, key, prev)
-
-	ibs.setTransientState(addr, key, value)
-}
-
-// setTransientState is a lower level setter for transient storage. It
-// is called during a revert to prevent modifications to the journal.
-func (ibs *IntraBlockState) setTransientState(addr accounts.Address, key accounts.StorageKey, value uint256.Int) {
-	ibs.transientStorage.Set(addr, key, value)
+func (ibs *IntraBlockState) SetTransientState(addr accounts.Address, key *TransientKey, value *uint256.Int) {
+	ibs.transientStorage.Set(ibs.journal, addr, key, value)
 }
 
 // GetTransientState gets transient storage for a given account.
-func (ibs *IntraBlockState) GetTransientState(addr accounts.Address, key accounts.StorageKey) uint256.Int {
+func (ibs *IntraBlockState) GetTransientState(addr accounts.Address, key TransientKey) uint256.Int {
 	return ibs.transientStorage.Get(addr, key)
 }
 

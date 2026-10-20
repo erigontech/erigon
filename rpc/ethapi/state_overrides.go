@@ -69,6 +69,18 @@ func (so *StateOverrides) override(ibs *state.IntraBlockState, addrs []accounts.
 		}
 		// Apply state diff into specified accounts.
 		if account.StateDiff != nil {
+			// The versioned SetState does not create the absent account the materializing one creates.
+			if ibs.IsVersioned() && len(*account.StateDiff) > 0 {
+				exists, err := ibs.Exist(addr)
+				if err != nil {
+					return err
+				}
+				if !exists {
+					if err := ibs.CreateAccount(addr, false); err != nil {
+						return err
+					}
+				}
+			}
 			for key, value := range *account.StateDiff {
 				intValue := *new(uint256.Int).SetBytes32(value[:])
 				if err := ibs.SetState(addr, accounts.InternKey(key), intValue); err != nil {
@@ -131,5 +143,24 @@ func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.Pr
 	// State overrides are synthetic pre-state and must not trigger EIP-161 account deletion.
 	overrideRules := *rules
 	overrideRules.DisabledEIPs = append(slices.Clone(rules.DisabledEIPs), 161)
-	return ibs.FinalizeTx(&overrideRules, state.NewNoopWriter())
+	if err := FinalizeCallTx(ibs, &overrideRules); err != nil {
+		return err
+	}
+	if ibs.IsVersioned() {
+		ibs.SetTxContext(ibs.BlockNumber(), ibs.TxnIndex()+1)
+	}
+	return nil
+}
+
+// FinalizeCallTx ends one transaction of a request that runs several on the same state.
+// On the versioned path the writes go to the version map, where the next transaction index
+// reads them; on the materializing path FinalizeTx commits them to the state objects.
+func FinalizeCallTx(ibs *state.IntraBlockState, rules *chain.Rules) error {
+	if !ibs.IsVersioned() {
+		return ibs.FinalizeTx(rules, state.NewNoopWriter())
+	}
+	ibs.FlushWritesToVersionMap(ibs.FinalizedWrites(rules))
+	ibs.SoftFinalise()
+	ibs.ResetVersionedIO()
+	return nil
 }

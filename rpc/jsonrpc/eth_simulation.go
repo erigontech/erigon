@@ -350,6 +350,9 @@ func (s *simulator) makeHeaders(blocks []SimulatedBlock) ([]*types.Header, error
 		if s.chainConfig.IsPostMerge(overrides.Number.Uint64(), uint64(*overrides.Time)) {
 			difficulty = uint256.Int{}
 		}
+		if overrides.Difficulty != nil && difficulty.IsZero() {
+			return nil, &rpc.CustomError{Message: fmt.Sprintf("block %d: difficulty override is not allowed after the merge", overrides.Number.Uint64()), Code: rpc.ErrCodeInvalidParams}
+		}
 		var slotNumber *uint64
 		if header.SlotNumber != nil {
 			slot := *header.SlotNumber + 1
@@ -434,7 +437,10 @@ func (s *simulator) sanitizeCall(
 			args.MaxPriorityFeePerGas = new(hexutil.U256)
 		}
 	}
-	if args.MaxFeePerBlobGas == nil && args.BlobVersionedHashes != nil {
+	if args.BlobVersionedHashes == nil {
+		// eth_simulateV1 reads a blob fee cap without blob hashes as absent; the call methods reject it.
+		args.MaxFeePerBlobGas = nil
+	} else if args.MaxFeePerBlobGas == nil {
 		args.MaxFeePerBlobGas = new(hexutil.U256)
 	}
 	return nil
@@ -972,6 +978,17 @@ func (s *simulator) simulateCall(
 	err := s.sanitizeCall(call, intraBlockState, &blockCtx, header.BaseFee, *gasUsed, globalGasCap)
 	if err != nil {
 		return nil, nil, nil, err
+	}
+	// EIP-2681 also limits the nonce when validation is off and the nonce checks are skipped.
+	if !s.validation {
+		from := call.FromOrEmpty()
+		nonce, err := intraBlockState.GetNonce(from)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if nonce == math.MaxUint64 {
+			return nil, nil, nil, txValidationError(fmt.Errorf("%w: address %v, nonce: %d", protocol.ErrNonceMax, from, nonce))
+		}
 	}
 
 	// Prepare the transaction message
