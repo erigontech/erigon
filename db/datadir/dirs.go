@@ -309,7 +309,13 @@ func (d *Dirs) RenameOldVersions(cmdCommand bool) error {
 				}
 				removed++
 			default:
-				if err := os.Rename(path, filepath.Join(filepath.Dir(path), newName)); err != nil {
+				newPath := filepath.Join(filepath.Dir(path), newName)
+				if err := dir.RemoveFile(newPath + ".torrent"); err == nil {
+					torrentsRemoved++
+				} else if !errors.Is(err, fs.ErrNotExist) {
+					return err
+				}
+				if err := os.Rename(path, newPath); err != nil {
 					return err
 				}
 				renamed++

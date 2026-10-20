@@ -161,7 +161,7 @@ Downgrading to v3.5 after v3.6 has written new snapshot files is **not supported
 
 ### Path 1 — re-download the snapshot set (`erigon seg reset`)
 
-Reconciles the local snapshot set against the published preverified set, then lets the next start fetch what is missing in the published v3.6 form, which is already plain. At the default `--local=true` it removes what the preverified set does not describe. Independently of `--local`, it also removes any file whose `.torrent` carries the wrong infohash or cannot be read at all, together with the data file that torrent vouched for. Everything else the set does describe stays.
+Reconciles the local snapshot set against the published preverified set, then lets the next start fetch what is missing or differs, in the published v3.6 form, which is already plain. By default it removes what the preverified set does not describe; `--keep-local-snapshots` keeps those files. It also removes any `.torrent` that carries the wrong infohash or cannot be read at all, but keeps the data file it described: the next start re-hashes that file and fetches only the pieces that differ. Everything else the set does describe stays.
 
 ```bash
 erigon seg reset --datadir /your/datadir
@@ -170,21 +170,22 @@ erigon seg reset --datadir /your/datadir
 | Flag | Description |
 |------|-------------|
 | `--datadir <path>` | Path to the Erigon data directory. |
-| `--local`, `-l` | A single switch over two behaviours: remove snapshot files that are not described in the preverified set (locally generated ones), **and** remove `chaindata/` together with any `heimdall/` and `polygon-bridge/` directories left over from former Polygon support. **Default: `true`.** `--local=false` keeps all of them, subject to the mixed-build check below. |
+| `--keep-local-snapshots` | Keep snapshot files that are not described in the preverified set (locally generated ones), subject to the mixed-build check below. Default: `false`. `chaindata/` and any `heimdall/` and `polygon-bridge/` directories left over from former Polygon support are removed either way. |
+| `--local`, `-l` | Deprecated. `--local=false` means `--keep-local-snapshots`, and no longer keeps `chaindata/`. Passing it together with `--keep-local-snapshots` is an error. |
 | `--allow-mixed-state` | Proceed even when a step range would keep its commitment file and its accounts/storage files from different builds. Default: `false`. |
 | `--dry-run`, `-n` | Print the files that would be removed and exit without removing anything. Default: `false`. |
 | `--preverified <remote\|local>` | Which preverified snapshot list to reset against. Default: `remote`. |
 
-`seg reset` is **destructive and not reversible**: at the default `--local=true` it deletes `chaindata/`, any leftover `heimdall/` and `polygon-bridge/` directories, and any locally generated snapshot files. Independently of `--local` — that is, even with `--local=false` — it also deletes any `.torrent` file whose infohash does not match the preverified list, **together with the snapshot data file that torrent vouched for** (a stale local build is unverifiable, so the downloader must re-fetch the canonical copy). All other preverified snapshots already on disk are kept and corrected by the downloader on the next start. The node must be **stopped** — the command takes an exclusive lock on the datadir.
+`seg reset` is **destructive and not reversible**: it deletes `chaindata/`, any leftover `heimdall/` and `polygon-bridge/` directories, and, unless `--keep-local-snapshots` is set, any locally generated snapshot files. It also deletes any `.torrent` file whose infohash does not match the preverified list; the snapshot data file it described stays. On the next start the downloader re-hashes every preverified snapshot that has no matching `.torrent` and fetches only the pieces that differ; a snapshot with a matching `.torrent` is kept as it is. The node must be **stopped** — the command takes an exclusive lock on the datadir.
 
-At `--local=false` a locally built file can survive next to a canonical one. If that would leave a step range whose commitment file stores references from a different build than its accounts or storage file, `seg reset` refuses before removing anything and names the ranges: those references are byte offsets into the accounts and storage files of the same build. Remove the ranges with `erigon seg rm-state-snapshots --datadir /your/datadir --step=<range>`, or pass `--allow-mixed-state` to proceed anyway. At `--local=true` the check does not apply, since every locally built file is removed.
+With `--keep-local-snapshots` a locally built file can survive next to a canonical one. If that would leave a step range whose commitment file stores references from a different build than its accounts or storage file, `seg reset` refuses before removing anything and names the ranges: those references are byte offsets into the accounts and storage files of the same build. Remove the ranges with `erigon seg rm-state-snapshots --datadir /your/datadir --step=<range>`, or pass `--allow-mixed-state` to proceed anyway. Without `--keep-local-snapshots` the check does not apply, since every locally built file is removed.
 
 Cost: whatever the downloader has to re-fetch, plus rebuilding state on the next start. Run `--dry-run` first, and back up the datadir.
 
 Size that cost by how far the node is past the published preverified manifest, not by download time. The manifest can
 lag the live tip considerably, and only the range it covers can be restored by fetching a torrent. Blocks past it are
-held either in `chaindata/` or in locally built segments — and at `--local=true` `seg reset` removes both (the reset
-path in `db/datadir/reset`). That range then comes back through Caplin's per-block beacon backfill rather than a segment
+held either in `chaindata/` or in locally built segments — `seg reset` always removes `chaindata/`, and the locally
+built segments too unless `--keep-local-snapshots` is set (the reset path in `db/datadir/reset`). That range then comes back through Caplin's per-block beacon backfill rather than a segment
 fetch, which is orders of magnitude slower, and a node far enough behind it may need more than one restart before
 execution resumes.
 

@@ -144,7 +144,6 @@ func (reset *Reset) checkStateBuilds() error {
 		entity := m[1] + "." + m[4]
 		entityEnds[entity] = max(entityEnds[entity], toStep)
 	}
-	renamedOntoManifest := map[string]bool{}
 
 	// A file the manifest describes ends up canonical whether or not it is on disk now: reset drops
 	// the lock file, and the next sync fetches or repairs it.
@@ -182,9 +181,6 @@ func (reset *Reset) checkStateBuilds() error {
 				continue
 			}
 			if _, known := reset.PreverifiedSnapshots.Get("domain/" + name); known {
-				if name != entry.Name() {
-					renamedOntoManifest[name] = true
-				}
 				continue
 			}
 			record(name, true)
@@ -217,7 +213,7 @@ func (reset *Reset) checkStateBuilds() error {
 			if st == nil {
 				continue
 			}
-			if st.retainedLocal != commitment.retainedLocal || renamedOntoManifest[st.name] || renamedOntoManifest[commitment.name] {
+			if st.retainedLocal != commitment.retainedLocal {
 				mixed = append(mixed, stepRange)
 				break
 			}
@@ -331,10 +327,6 @@ type resetItemInfo struct {
 func (reset *Reset) doSnapshots() (err error) {
 	snapDir := reset.dataDirOsPath().Join(datadir.SnapDir)
 	ra := reset.makeRemoveAll(snapDir)
-	// Data files retained this pass, keyed by their preverified name. A data file is walked before
-	// its sibling ".torrent" (os.ReadDir sorts, and "x.ef" < "x.ef.torrent"), so when an incorrect
-	// torrent is later removed we can retract the stale data file it vouched for.
-	retainedDataFiles := map[string]OsFilePath{}
 	ra.wrapRemove(func(inner removeAllRemoveFunc, filePath OsFilePath, info fs.FileInfo) error {
 		itemName := string(filePath.mustLocalRelSlash(snapDir))
 		itemName, _ = strings.CutSuffix(itemName, ".part")
@@ -354,20 +346,6 @@ func (reset *Reset) doSnapshots() (err error) {
 			if err != nil {
 				return fmt.Errorf("removing file %v: %w", filePath, err)
 			}
-			// An incorrect torrent for a preverified file means the data it describes is unverifiable
-			// (stale local build): drop it too so the downloader re-fetches the canonical copy.
-			if isTorrent && ok {
-				if dataPath, retained := retainedDataFiles[itemName]; retained {
-					if err = inner(dataPath, nil); err != nil {
-						return fmt.Errorf("removing stale data file %v: %w", dataPath, err)
-					}
-					delete(retainedDataFiles, itemName)
-					reset.stats.retained.DataFiles--
-					reset.stats.removed.DataFiles++
-				}
-			}
-		} else if !isTorrent {
-			retainedDataFiles[itemName] = filePath
 		}
 		if isTorrent {
 			stats.TorrentFiles++

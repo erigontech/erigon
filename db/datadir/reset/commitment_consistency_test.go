@@ -1,6 +1,7 @@
 package reset
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -23,7 +24,7 @@ func runMixedStateReset(t *testing.T, root *os.Root, preverifiedNames []string, 
 	}
 	makeEntries(t, startEntries, root)
 	r := makeTestingReset(t, startEntries, root, "", ".")
-	// --local=false: files outside the preverified set are kept as-is.
+	// --keep-local-snapshots: files outside the preverified set are kept as-is.
 	r.RemoveUnknown = false
 	r.RemoveLocal = false
 	r.AllowMixedStateBuilds = allow
@@ -122,7 +123,7 @@ func TestResetRefusalRemovesNothing(t *testing.T) {
 	})
 }
 
-// The default --local=true removes everything the manifest does not describe, so nothing local
+// Without --keep-local-snapshots reset removes everything the manifest does not describe, so nothing local
 // survives to be mixed with a canonical file.
 func TestResetSkipsCheckWhenUnknownFilesAreRemoved(t *testing.T) {
 	withOsRoot(t, func(root *os.Root) {
@@ -247,12 +248,14 @@ func TestResetFollowsTheLoaderPastUnsupportedVersions(t *testing.T) {
 	})
 }
 
-// v1- and v1.0- parse to the same version, and startup renames the v1- file onto the v1.0- name the
-// manifest describes. That puts local bytes under a canonical name, and the downloader accepts a
-// file of the expected size without hashing it, so the pair is unsafe.
-func TestResetTreatsALegacyTwinOfACanonicalFileAsLocal(t *testing.T) {
+// Startup renames the v1- file onto the v1.0- name the manifest describes and drops any .torrent under
+// that name, so after a reset the downloader re-hashes the local bytes into the canonical file.
+func TestResetTreatsALegacyFileRenamedOntoAManifestNameAsCanonical(t *testing.T) {
 	withOsRoot(t, func(root *os.Root) {
-		startEntries := []fsEntry{{Name: "snapshots/domain/v1-commitment.0-256.kv"}}
+		startEntries := []fsEntry{
+			{Name: "snapshots/domain/v1-commitment.0-256.kv"},
+			{Name: "snapshots/domain/v1.0-commitment.0-256.kv.torrent"},
+		}
 		makeEntries(t, startEntries, root)
 		r := makeTestingReset(t, startEntries, root, "", ".")
 		r.RemoveUnknown, r.RemoveLocal = false, false
@@ -261,9 +264,10 @@ func TestResetTreatsALegacyTwinOfACanonicalFileAsLocal(t *testing.T) {
 			{Name: "domain/v1.0-accounts.0-256.kv"},
 		}
 		r.PreverifiedSnapshots.Sort()
-		err := r.Run()
-		qt.Assert(t, qt.IsNotNil(err))
-		qt.Assert(t, qt.StringContains(err.Error(), "0-256"))
+		qt.Assert(t, qt.IsNil(r.checkStateBuilds()))
+		qt.Assert(t, qt.IsNil(r.Dirs.RenameOldVersions(false)))
+		_, err := root.Stat("snapshots/domain/v1.0-commitment.0-256.kv.torrent")
+		qt.Assert(t, qt.ErrorIs(err, fs.ErrNotExist))
 	})
 }
 
@@ -408,10 +412,11 @@ func TestResetChecksAdjacentRangesThatDoNotCoverEachOther(t *testing.T) {
 	})
 }
 
-func TestResetRefusesALegacyFileThatStartupRenamesOverItsCanonicalTwin(t *testing.T) {
+func TestResetAllowsALegacyFileThatStartupRenamesOverItsCanonicalTwin(t *testing.T) {
 	withOsRoot(t, func(root *os.Root) {
 		startEntries := []fsEntry{
 			{Name: "snapshots/domain/v1.0-accounts.0-256.kv"},
+			{Name: "snapshots/domain/v1.0-accounts.0-256.kv.torrent"},
 			{Name: "snapshots/domain/v1-accounts.0-256.kv"},
 			{Name: "snapshots/domain/v1.0-storage.0-256.kv"},
 			{Name: "snapshots/domain/v1.0-commitment.0-256.kv"},
@@ -425,9 +430,10 @@ func TestResetRefusesALegacyFileThatStartupRenamesOverItsCanonicalTwin(t *testin
 			{Name: "domain/v1.0-commitment.0-256.kv"},
 		}
 		r.PreverifiedSnapshots.Sort()
-		err := r.Run()
-		qt.Assert(t, qt.IsNotNil(err))
-		qt.Assert(t, qt.StringContains(err.Error(), "0-256"))
+		qt.Assert(t, qt.IsNil(r.checkStateBuilds()))
+		qt.Assert(t, qt.IsNil(r.Dirs.RenameOldVersions(false)))
+		_, err := root.Stat("snapshots/domain/v1.0-accounts.0-256.kv.torrent")
+		qt.Assert(t, qt.ErrorIs(err, fs.ErrNotExist))
 	})
 }
 

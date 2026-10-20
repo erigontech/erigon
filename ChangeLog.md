@@ -1,5 +1,9 @@
 # Erigon v3.9.0 — TBD
 
+### Breaking Changes
+
+- db/datadir/reset: `erigon snapshots reset` now always removes `chaindata/`, and any leftover `heimdall/` and `polygon-bridge/`. `--keep-local-snapshots` keeps snapshot files the preverified set does not describe; `--local` is deprecated, and `--local=false` now means `--keep-local-snapshots` and no longer keeps `chaindata/`. A `.torrent` with a mismatched infohash is removed but its data file stays, so the next start re-hashes it and fetches only the differing pieces instead of the whole file. This can be a breaking change (#25104) — by @awskii
+
 # Erigon v3.8.0 — TBD
 
 ### Breaking Changes
