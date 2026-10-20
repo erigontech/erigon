@@ -191,6 +191,48 @@ func TestMakeHeadersDifficultyAtMergeHeight(t *testing.T) {
 	assert.Equal(t, uint256.Int{}, headers[1].Difficulty, "block at MergeHeight")
 }
 
+func TestMakeHeadersDifficultyOverride(t *testing.T) {
+	mergeAt12 := chain.TestChainBerlinConfig.Copy()
+	mergeAt12.TerminalTotalDifficulty = uint256.NewInt(1)
+	mergeAt12.MergeHeight = common.NewUint64(12)
+	noMergeHeight := chain.TestChainBerlinConfig.Copy()
+	noMergeHeight.TerminalTotalDifficulty = uint256.NewInt(1)
+
+	override := func() SimulatedBlock {
+		return SimulatedBlock{BlockOverrides: &ethapi.BlockOverrides{Difficulty: (*hexutil.U256)(uint256.NewInt(1))}}
+	}
+	makeHeaders := func(config *chain.Config, baseDifficulty uint64, blocks []SimulatedBlock) ([]*types.Header, error) {
+		sim := &simulator{
+			base:        &types.Header{Number: *uint256.NewInt(10), Time: 50, Difficulty: *uint256.NewInt(baseDifficulty)},
+			chainConfig: config,
+		}
+		sanitized, err := sim.sanitizeSimulatedBlocks(blocks)
+		require.NoError(t, err)
+		return sim.makeHeaders(sanitized)
+	}
+	requireInvalidParams := func(t *testing.T, err error, message string) {
+		t.Helper()
+		var rpcErr *rpc.CustomError
+		require.ErrorAs(t, err, &rpcErr)
+		assert.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.Code)
+		assert.Equal(t, message, rpcErr.Message)
+	}
+
+	t.Run("applied before the merge", func(t *testing.T) {
+		headers, err := makeHeaders(mergeAt12, 5, []SimulatedBlock{override()})
+		require.NoError(t, err)
+		assert.Equal(t, *uint256.NewInt(1), headers[0].Difficulty)
+	})
+	t.Run("rejected after the merge", func(t *testing.T) {
+		_, err := makeHeaders(mergeAt12, 5, []SimulatedBlock{{}, override()})
+		requireInvalidParams(t, err, "block 12: difficulty override is not allowed after the merge")
+	})
+	t.Run("rejected on a zero-difficulty parent", func(t *testing.T) {
+		_, err := makeHeaders(noMergeHeight, 0, []SimulatedBlock{override()})
+		requireInvalidParams(t, err, "block 11: difficulty override is not allowed after the merge")
+	})
+}
+
 // TestSanitizeBlocksTooMany verifies the maxSimulateBlocks limit.
 func TestSanitizeBlocksTooMany(t *testing.T) {
 	sim := &simulator{base: &types.Header{Number: *uint256.NewInt(0), Time: 0}}
