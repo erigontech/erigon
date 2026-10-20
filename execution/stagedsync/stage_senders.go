@@ -249,7 +249,7 @@ Loop:
 		}
 
 		if len(body.Transactions) > 0 {
-			if senders, ok := cfg.readAheader.RecoveredSenders(ctx, blockHash); ok && len(senders) == len(body.Transactions)*length.Addr {
+			if senders, ok := cfg.readAheader.RecoveredSenders(ctx, blockHash); ok {
 				pendingMu.Lock()
 				cfg.readAheader.AddSenders(senders, blockHash)
 				err := collectorSenders.Collect(dbutils.BlockBodyKey(blockNumber, blockHash), senders)

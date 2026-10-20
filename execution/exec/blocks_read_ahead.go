@@ -229,7 +229,7 @@ type SendersRecovery struct {
 	err     error
 }
 
-func StartSendersRecovery(signer *types.Signer, txns types.Transactions) *SendersRecovery {
+func StartSendersRecovery(ctx context.Context, signer *types.Signer, txns types.Transactions) *SendersRecovery {
 	r := &SendersRecovery{done: make(chan struct{}), senders: make([]byte, len(txns)*length.Addr)}
 	go func() {
 		defer close(r.done)
@@ -239,6 +239,9 @@ func StartSendersRecovery(signer *types.Signer, txns types.Transactions) *Sender
 			cryptoContext := secp256k1.ContextForThread(w)
 			group.Go(func() error {
 				for i := int(next.Add(1) - 1); i < len(txns); i = int(next.Add(1) - 1) {
+					if err := ctx.Err(); err != nil {
+						return err
+					}
 					from, err := signer.SenderWithContext(cryptoContext, txns[i])
 					if err != nil {
 						return err

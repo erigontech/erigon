@@ -336,7 +336,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	var sendersRecovery *exec.SendersRecovery
 	if invalidTransactionStatus == nil && len(transactions) > 0 {
-		sendersRecovery = exec.StartSendersRecovery(types.MakeSigner(e.config, req.BlockNumber.Uint64(), uint64(req.Timestamp)), transactions)
+		sendersRecovery = exec.StartSendersRecovery(ctx, types.MakeSigner(e.config, req.BlockNumber.Uint64(), uint64(req.Timestamp)), transactions)
 	}
 
 	var baseFee *uint256.Int // a null baseFeePerGas stays nil and fails validation

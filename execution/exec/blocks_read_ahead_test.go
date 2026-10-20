@@ -770,7 +770,7 @@ func TestStartSendersRecovery(t *testing.T) {
 	}
 	blockHash := common.HexToHash("0x01")
 	bra := NewBlockReadAheader()
-	bra.AddSendersRecovery(blockHash, StartSendersRecovery(signer, txns))
+	bra.AddSendersRecovery(blockHash, StartSendersRecovery(context.Background(), signer, txns))
 
 	senders, ok := bra.RecoveredSenders(context.Background(), blockHash)
 	require.True(t, ok)
@@ -787,7 +787,25 @@ func TestRecoveredSendersMissingOrInvalid(t *testing.T) {
 		CommonTx: types.CommonTx{GasLimit: 21_000},
 		GasPrice: *uint256.NewInt(1),
 	}}
-	bra.AddSendersRecovery(common.HexToHash("0x02"), StartSendersRecovery(signer, unsigned))
+	bra.AddSendersRecovery(common.HexToHash("0x02"), StartSendersRecovery(context.Background(), signer, unsigned))
 	_, ok = bra.RecoveredSenders(context.Background(), common.HexToHash("0x02"))
+	require.False(t, ok)
+}
+
+func TestStartSendersRecoveryCancelled(t *testing.T) {
+	signer := types.MakeSigner(chain.TestChainBerlinConfig, 1, 0)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	txn, err := types.SignTx(&types.LegacyTx{
+		CommonTx: types.CommonTx{GasLimit: 21_000},
+		GasPrice: *uint256.NewInt(1),
+	}, *signer, key)
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	bra := NewBlockReadAheader()
+	bra.AddSendersRecovery(common.HexToHash("0x01"), StartSendersRecovery(ctx, signer, types.Transactions{txn}))
+	_, ok := bra.RecoveredSenders(context.Background(), common.HexToHash("0x01"))
 	require.False(t, ok)
 }
