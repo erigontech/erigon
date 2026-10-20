@@ -331,6 +331,9 @@ func TestPoolProvideTxnsReturnsNothingOnceTheParentBlockWaitIsStopped(t *testing
 		handle.SimulateFilterLogs(common.HexToAddress(handle.config.SequencerContractAddress), []types.Log{})
 		require.NoError(t, handle.SimulateNewBlockChange(ctx))
 		synctest.Wait()
+		handle.baseTxnProvider.provide = func(context.Context, ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+			return []types.Transaction{&types.LegacyTx{}}, nil
+		}
 
 		stop := make(chan struct{})
 		type provided struct {
@@ -358,6 +361,32 @@ func TestPoolProvideTxnsReturnsNothingOnceTheParentBlockWaitIsStopped(t *testing
 		default:
 			t.Fatal("ProvideTxns kept waiting for the parent block after the wait was stopped")
 		}
+	})
+}
+
+func TestPoolProvideTxnsFallsBackToBaseProviderWhenTheParentBlockWaitTimesOut(t *testing.T) {
+	t.Parallel()
+	pt := PoolTest{t}
+	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
+		ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, 1)
+		require.NoError(t, err)
+		handle.SimulateInitialEonRead(t, ekg)
+		handle.SimulateFilterLogs(common.HexToAddress(handle.config.SequencerContractAddress), []types.Log{})
+		require.NoError(t, handle.SimulateNewBlockChange(ctx))
+		synctest.Wait()
+		want := &types.LegacyTx{CommonTx: types.CommonTx{Nonce: 1}}
+		handle.baseTxnProvider.provide = func(context.Context, ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+			return []types.Transaction{want}, nil
+		}
+
+		txns, err := pool.ProvideTxns(
+			ctx,
+			txnprovider.WithBlockTime(handle.nextBlockTime),
+			txnprovider.WithParentBlockNum(handle.nextBlockNum),
+			txnprovider.WithParentBlockWaitStop(make(chan struct{})),
+		)
+		require.NoError(t, err)
+		require.Equal(t, []types.Transaction{want}, txns)
 	})
 }
 

@@ -199,22 +199,35 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 	parentBlockWaitTimeout := time.Second * time.Duration(p.slotCalculator.SecondsPerSlot())
 	parentBlockWaitCtx, parentBlockWaitCtxCancel := context.WithTimeout(ctx, parentBlockWaitTimeout)
 	defer parentBlockWaitCtxCancel()
-	go func() {
-		select {
-		case <-provideOpts.ParentBlockWaitStop:
-			parentBlockWaitCtxCancel()
-		case <-parentBlockWaitCtx.Done():
-		}
-	}()
+	if provideOpts.ParentBlockWaitStop != nil {
+		go func() {
+			select {
+			case <-provideOpts.ParentBlockWaitStop:
+				parentBlockWaitCtxCancel()
+			case <-parentBlockWaitCtx.Done():
+			}
+		}()
+	}
 	parentBlockWaitStart := time.Now()
 	err := p.blockTracker.Wait(parentBlockWaitCtx, parentBlockNum)
-	if errors.Is(err, context.Canceled) && ctx.Err() == nil {
-		return nil, nil
-	}
+	parentBlockWaitCtxCancel()
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			parentBlockWaitSecs.ObserveDuration(parentBlockWaitStart)
-			parentBlockMissed.Inc()
+		if ctx.Err() == nil {
+			select {
+			case <-provideOpts.ParentBlockWaitStop:
+				parentBlockWaitStopped.Inc()
+				p.logger.Debug("parent block wait stopped", "parentBlockNum", parentBlockNum,
+					"waited", time.Since(parentBlockWaitStart))
+				return nil, nil
+			default:
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				parentBlockWaitSecs.ObserveDuration(parentBlockWaitStart)
+				parentBlockMissed.Inc()
+				p.logger.Warn("parent block wait timeout, falling back to base txn provider",
+					"parentBlockNum", parentBlockNum, "timeout", parentBlockWaitTimeout)
+				return p.baseTxnProvider.ProvideTxns(ctx, opts...)
+			}
 		}
 
 		return nil, fmt.Errorf("issue while waiting for parent block %d: %w", parentBlockNum, err)
