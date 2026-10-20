@@ -885,15 +885,14 @@ func (a *ApiHandler) startPayloadBuildAttempt(
 	}
 	defer finishImportCheck()
 	id, err := payloadBuilder.StartPayloadBuild(buildCtx, head, attrs)
-	cause := context.Cause(buildCtx)
 	if err != nil {
-		if cause != nil {
+		if cause := context.Cause(buildCtx); cause != nil {
 			return nil, cause
 		}
 		return nil, err
 	}
-	if errors.Is(cause, forkchoice.ErrPayloadImportInProgress) {
-		return nil, cause
+	if finishImportCheck() {
+		return nil, forkchoice.ErrPayloadImportInProgress
 	}
 	return id, nil
 }

@@ -38,12 +38,14 @@ type PayloadPreparationImports struct {
 type payloadPreparationAttempt struct {
 	firstSlot, lastSlot uint64
 	cancel              context.CancelCauseFunc
+	interrupted         atomic.Bool
 }
 
 func (p *PayloadPreparationImports) BeginImport(slot uint64) func() {
 	key := &slot
 	p.active.Store(key, slot)
 	if attempt := p.preparing.Load(); attempt != nil && slot >= attempt.firstSlot && slot <= attempt.lastSlot {
+		attempt.interrupted.Store(true)
 		attempt.cancel(ErrPayloadImportInProgress)
 	}
 	return func() { p.active.Delete(key) }
@@ -55,12 +57,13 @@ func (p *PayloadPreparationImports) BeginPendingEnvelope(blockRoot common.Hash) 
 	return func() { p.pendingEnvelopes.Delete(key) }
 }
 
+// TryBegin returns a finish callback that reports import interruption independently of context cancellation.
 func (p *PayloadPreparationImports) TryBegin(
 	ctx context.Context,
 	firstSlot, lastSlot uint64,
 	pending func() bool,
 	blockSlot func(common.Hash) (uint64, bool),
-) (context.Context, func(), bool) {
+) (context.Context, func() bool, bool) {
 	ctx, cancel := context.WithCancelCause(ctx)
 	attempt := &payloadPreparationAttempt{firstSlot: firstSlot, lastSlot: lastSlot, cancel: cancel}
 	// Publish before sampling active imports so each import is either sampled or cancels this attempt.
@@ -68,9 +71,10 @@ func (p *PayloadPreparationImports) TryBegin(
 		cancel(ErrPayloadImportInProgress)
 		return ctx, nil, false
 	}
-	finish := func() {
+	finish := func() bool {
 		p.preparing.CompareAndSwap(attempt, nil)
 		cancel(context.Canceled)
+		return attempt.interrupted.Load()
 	}
 	clear := true
 	p.active.Range(func(_, value any) bool {
@@ -103,7 +107,7 @@ func (f *ForkChoiceStore) BeginPendingPayloadEnvelope(blockRoot common.Hash) fun
 	return f.payloadPreparation.BeginPendingEnvelope(blockRoot)
 }
 
-func (f *ForkChoiceStore) TryBeginPayloadPreparation(ctx context.Context, firstSlot, lastSlot uint64) (context.Context, func(), bool) {
+func (f *ForkChoiceStore) TryBeginPayloadPreparation(ctx context.Context, firstSlot, lastSlot uint64) (context.Context, func() bool, bool) {
 	return f.payloadPreparation.TryBegin(ctx, firstSlot, lastSlot, func() bool {
 		for _, queue := range []*lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]{f.pendingEnvelopes, f.pendingLocalSelfBuildEnvelopes} {
 			if queue == nil {

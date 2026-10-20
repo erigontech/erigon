@@ -2228,6 +2228,29 @@ func TestPayloadPreparationDiscardsImportInterruptedStartup(t *testing.T) {
 	require.Empty(t, id)
 }
 
+func TestPayloadPreparationDiscardsImportAfterDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		store := mock_services.NewForkChoiceStorageMock(t)
+		ctx, cancel := context.WithDeadlineCause(t.Context(), time.Now().Add(time.Second), errPreparationTooLate)
+		defer cancel()
+		engine := newPayloadBuildEngine(t, gomock.NewController(t))
+		engine.startPayloadBuild = func(buildCtx context.Context, _ common.Hash, _ *engine_types.PayloadAttributes) ([]byte, error) {
+			time.Sleep(time.Second)
+			synctest.Wait()
+			require.ErrorIs(t, buildCtx.Err(), context.DeadlineExceeded)
+			require.ErrorIs(t, context.Cause(buildCtx), errPreparationTooLate)
+			finishImport := store.BeginPayloadImport(10)
+			finishImport()
+			return []byte{1}, nil
+		}
+		handler := &ApiHandler{forkchoiceStore: store}
+
+		id, err := handler.startPayloadBuildAttempt(ctx, engine, 10, 10, common.Hash{}, nil)
+		require.ErrorIs(t, err, forkchoice.ErrPayloadImportInProgress)
+		require.Empty(t, id)
+	})
+}
+
 func TestPayloadPreparationKeepsBuilderStartedBeforeDeadline(t *testing.T) {
 	store := mock_services.NewForkChoiceStorageMock(t)
 	ctx, cancel := context.WithCancelCause(t.Context())

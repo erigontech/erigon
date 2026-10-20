@@ -148,7 +148,7 @@ func (f *ForkChoiceStorageMock) BeginPendingPayloadEnvelope(blockRoot common.Has
 	return f.PreparationImports.BeginPendingEnvelope(blockRoot)
 }
 
-func (f *ForkChoiceStorageMock) TryBeginPayloadPreparation(ctx context.Context, firstSlot, lastSlot uint64) (context.Context, func(), bool) {
+func (f *ForkChoiceStorageMock) TryBeginPayloadPreparation(ctx context.Context, firstSlot, lastSlot uint64) (context.Context, func() bool, bool) {
 	return f.PreparationImports.TryBegin(ctx, firstSlot, lastSlot, nil, f.pendingEnvelopeSlot)
 }
 
