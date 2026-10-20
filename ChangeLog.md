@@ -22,24 +22,41 @@ and resilience under heavy RPC and peer traffic.
 
 ### Breaking Changes
 
+- **Batched database syncing is now the default.** This reduces disk-flush pauses. A power loss can
+  roll back recent unflushed commits; set `--db.safe.nosync=false` for
+  per-commit durability (#24249, #24953) — by @AskAlexSharov, @awskii
 - **Caplin QUIC port changes.** The default moves from UDP `4001` in v3.7.1 to UDP `4002`. Update firewall
-  and container port mappings, or set `--caplin.discovery.quicport` explicitly. New
-  `--caplin.quic.disable` and `--sentinel.quic.disable` flags disable QUIC while keeping TCP; discovery
-  still needs its UDP port (#24443) — by @lystopad
+  and container port mappings, or set `--caplin.discovery.quicport` explicitly (`--sentinel.quic.port`
+  for standalone Caplin). New `--caplin.quic.disable` and `--sentinel.quic.disable` flags disable QUIC
+  while keeping TCP; discovery still needs its UDP port (#24443) — by @lystopad
 - **Upgrade standalone rpcdaemon together with Erigon.** The private ETHBACKEND API is now version 4.2
   (#23777) — by @yperbasis
+- **No cleartext HTTP/2 on the RPC port.** The plain HTTP RPC endpoint serves HTTP/1.1; HTTP/2 requires
+  TLS (`--https.enabled`). Clients and proxies using HTTP/2 with prior knowledge or an h2c upstream
+  must switch to HTTP/1.1 or HTTPS (#24111) — by @AskAlexSharov
+- **Nonstandard Engine API methods removed.** The authenticated endpoint no longer exposes
+  `engine_start`, `engine_setConsuming`, `engine_setBeaconChainConfig`, `engine_handleNewPayload`,
+  `engine_handleForkChoice`, or `engine_sSZRESTHandler`. These methods now return `-32601`; integrations
+  must use supported Engine API methods (#24163) — by @lupin012
 - **RPC access controls apply more widely.** `--rpc.accessList` now covers WebSocket, IPC, and
   subscriptions; allow lists must name the required subscribe methods. WebSocket and IPC batches obey
   `--rpc.batch.concurrency`. Browser WebSocket origins now follow `--http.corsdomain`, and GraphQL
   follows the HTTP host, CORS, request-size, and concurrency limits. Add your browser origins and
-  GraphQL hostname to the corresponding allow lists. Cross-site GET RPC checks depend on browser
-  metadata and do not replace network access controls (#24190, #24485, #24487, #24744) — by
+  GraphQL hostname to `--http.corsdomain` and `--http.vhosts`, respectively. Cross-site GET RPC checks
+  depend on browser metadata and do not replace network access controls (#24190, #24485, #24487, #24744) — by
   @AskAlexSharov, @Bruce039, @kriss39, @lupin012
 - **RPC resource limits.** The default caps are 10,000 live filters and subscriptions across clients,
   and 1,024 subscriptions per WebSocket or IPC connection. Requests above these caps return `-32005`;
   configure `--rpc.subscription.filters.maxsubscriptions` and `--rpc.subscription.limit`, or set either
   to `0` to disable that cap. A shared request-memory budget can also reject large concurrent requests
   with HTTP `503` or close their WebSocket connection (#24734, #24735, #24737) — by @yperbasis
+- **Receipt subscriptions group receipts by block.** `eth_subscribe("transactionReceipts")` now batches
+  matching receipts from one block into the notification's `result` array. Consumers must process
+  every array element instead of assuming one receipt per notification (#24179) — by @AskAlexSharov
+- **Pending transaction gas prices.** For pool transactions of types 2, 3, and 4, `gasPrice` now equals
+  `maxFeePerGas`. `eth_getTransactionByHash`, `txpool_content`, and `txpool_contentFrom` previously
+  reported a projected effective price; full `newPendingTransactions` notifications omitted the field
+  (#24099) — by @lupin012
 - **`trace_filter` defaults and selection.** Omitted block bounds now mean `latest`; specify
   `fromBlock: "earliest"` for a query starting at genesis. When both address lists are set, the default
   is intersection; use `mode: "union"` for the previous behavior. Block bounds accept numbers or tags;
@@ -49,14 +66,16 @@ and resilience under heavy RPC and peer traffic.
 - **Tracing uses transaction-like fees and validation.** `trace_call` and `trace_callMany` now follow
   `eth_call` fee handling and the block's gas limit: priced calls charge the sender, while unpriced
   calls run free. `trace_rawTransaction` charges gas and validates the transaction against the latest
-  state, including its nonce and balance. Use `trace_replayTransaction` for already-mined transactions.
+  state, including its nonce and balance. A gas limit above `--rpc.gascap` is rejected with `-38026`;
+  a cap of `0` disables this limit. Use `trace_replayTransaction` for already-mined transactions.
   Failed trace frames use Parity-style error labels, and reverted contract creation returns
-  `{gasUsed, output}` instead of an address and code (#24343, #24328, #24329, #24352, #24356, #24355) —
-  by @banteg
+  `{gasUsed, output}` instead of an address and code
+  (#24330, #24343, #24328, #24329, #24352, #24356, #24355, #24564) — by @lupin012, @banteg
 - **Tracing error codes.** `trace_block` and `trace_replayBlockTransactions` return `-32001` for
   unknown blocks instead of `-32000`. Tracing methods that reject `pending` now return `-32602`
-  instead of `-32000`. Clients that match these error codes must update
-  (#24598, #24345) — by @lupin012, @banteg
+  instead of `-32000`. Unknown trace types and malformed `trace_rawTransaction` input also return
+  `-32602` instead of `-32000`. Clients that match these error codes must update
+  (#24598, #24345, #24872, #24768) — by @lupin012, @banteg
 - **Stricter call inputs.** Call, simulation, and tracing APIs reject differing `data` and `input`
   fields and EIP-1559 fee fields before London. Call and trace methods also reject a `chainId` that
   differs from the node's chain (#24336, #24536, #24414, #24351) — by @banteg, @lupin012
@@ -84,8 +103,9 @@ and resilience under heavy RPC and peer traffic.
   lists from the public mempool (#24693) — by @SoarinSkySagar
 - `eth_simulateV1` returns `blockAccessListHash` after Amsterdam and accounts for execution gas and
   state gas separately. Fixes address lost code and ignored empty-storage overrides between simulated
-  blocks, and historical state-root replay follows the simulated chain instead of later canonical blocks
-  (#24740, #24276, #24749, #24748) — by @MysticRyuujin, @Sahil-4555
+  blocks, and historical state-root replay follows the simulated chain instead of later canonical blocks.
+  Simulated blocks advance `slotNumber`, apply `blockOverrides.withdrawals`, and avoid duplicate
+  EIP-7708 transfer logs (#24740, #24276, #24749, #24748, #24402) — by @MysticRyuujin, @Sahil-4555
 - Tracers report EIP-8037 execution and state gas, including negative state-gas costs when storage is
   cleared (#24240, #24370) — by @taratorio
 - `vmTrace` reports only operations that executed, removing synthetic `STOP` instructions and
@@ -100,7 +120,7 @@ and resilience under heavy RPC and peer traffic.
 - `eth_getRawTransactionByHash` returns pending transactions from the pool instead of `null`
   (#24463) — by @0xShadowX
 - Log filters with only wildcard topics now receive matching logs instead of silently receiving
-  nothing ([b27b57e](https://github.com/erigontech/erigon/commit/b27b57e94c17a079a3a696f0fc62315a311c3681)) — by @FlashWayne
+  nothing (#24459) — by @FlashWayne
 - Requests using `pending`, such as `eth_getBalance`, `eth_estimateGas`, and `eth_callBundle`, now
   use the latest executed block while a node builds a payload, avoiding `block N+1 is not executed`
   errors. RPCs reading committed data also resolve `latest` against the same view, avoiding missing
@@ -115,14 +135,27 @@ and resilience under heavy RPC and peer traffic.
 - Caplin fixes Gloas block and payload publication, restores the served head and payload status after
   restarts, and avoids restart stalls caused by incorrect finality handling
   (#24545, #24548, #24628) — by @domiwei
+- Caplin validates gossip blocks faster, reducing the delay before new blocks can become the head
+  (#24523) — by @lystopad
 - Caplin avoids a deadlock when publishing its own block and reduces payload-build delays from a busy
-  execution layer or late payload preparation (#25011, #24965, #25029) — by @domiwei, @lystopad
+  execution layer or late payload preparation (#25019, #25005, #25043) — by @domiwei, @lystopad
 - Validator nodes verify and relay aggregates outside their proposal epochs. Attestation and Payload
   Timeliness Committee (PTC) gossip budgets accommodate expected traffic and vote bursts, preventing
-  valid votes from being dropped (#25014, #24970, #24973) — by @lystopad, @domiwei
+  valid votes from being dropped. Gossip attestations and aggregates received before their block are
+  kept in bounded queues for about one slot and retried when the block arrives
+  (#25042, #25000, #24981, #24949) — by @lystopad, @domiwei
+- Caplin selects the sync committee using the message or contribution slot, preventing valid messages
+  from being rejected and peers from being banned at period boundaries (#25067) — by @lystopad
+- Caplin fixes gossip timing checks that discarded valid late blocks and sync committee messages near
+  slot boundaries. Signature checks for sync committee messages from before a fork use the correct domain
+  after the head crosses the fork, avoiding incorrect peer bans (#24489) — by @lystopad
+- Caplin accepts SSZ submissions at `POST /eth/v2/validator/aggregate_and_proofs`, restoring aggregate
+  publication for Prysm validator clients (#24927) — by @domiwei
 - Proposed blocks include locally aggregated attestations and select additional votes by proposer
   reward, with lower memory use. The aggregation pool counts each committee member's vote once
   (#24813, #24566, #24955, #24798) — by @lystopad
+- On Gnosis and Chiado, Caplin uses a 1,666 ms pre-Gloas block-timeliness cutoff to determine proposer
+  boost, replacing the effective 2,000 ms cutoff (#24875) — by @domiwei
 - Standalone Caplin reconstructs pre-Gloas beacon blocks with the matching execution body, preventing
   incorrect block responses and peer bans when serving blocks from competing forks (#25021) — by @domiwei
 - Fulu column sidecars use the correct inclusion proof layout, including older columns served from
@@ -138,30 +171,44 @@ and resilience under heavy RPC and peer traffic.
   preventing invalid proposals after reorgs that change committee assignments (#24937, #24829, #24959) — by
   @yperbasis, @lystopad
 - Duty responses use the correct dependent root after empty slots, preventing false duty-reorg
-  notifications and rejected proposer preferences (#24980) — by @domiwei
+  notifications and rejected proposer preferences (#24995) — by @domiwei
 - Caplin accepts valid proposer slashings and checks pre-Gloas payload withdrawals before importing
   or signing blocks. Fork choice uses the target checkpoint's committees for attestations in imported
   blocks (#24846, #24803, #24807) — by @domiwei, @yperbasis
 - Missing custody columns are fetched within the slot instead of waiting over a minute. Parallel blob
   recovery reduces delays before blocks reach fork choice and execution. Peers returning no columns
-  are briefly skipped to avoid repeated empty requests (#24830, #24861, #24992) — by @lystopad, @domiwei
+  are briefly skipped to avoid repeated empty requests (#24830, #24861, #24996) — by @lystopad, @domiwei
 - Parallel execution fixes balance, nonce, and storage handling after account destruction, recreation,
   and reverted calls, preventing wrong state roots and rejection of valid blocks. Amsterdam account
   existence checks remain consistent during parallel execution
   (#24705, #24653, #24654, #24742, #24866, #24701, #25057) — by @chfast, @yperbasis
-- Execution fixes stale commitment reads after reorgs and recovery from invalid blocks. Fork-choice
-  updates preserve safe and finalized hashes even when the head does not move
-  (#24731, #24836, #24032) — by @Sahil-4555, @AskAlexSharov, @yperbasis
+- On chains with a configured burnt-fee recipient, parallel execution credits both the tip and burnt
+  fee when that recipient is also the block beneficiary, preventing wrong state roots (#24879) — by @chfast
+- Execution fixes stale commitment reads after reorgs and recovery from invalid blocks. Nodes using
+  external consensus clients resume sync after restarts when invalid-header removal left a gap.
+  Fork-choice updates preserve safe and finalized hashes even when the head does not move
+  (#24731, #24836, #24865, #24032) — by @Sahil-4555, @AskAlexSharov, @awskii, @yperbasis
+- Fixes deadlocks and pruning stalls that could stop block execution
+  (#24591) — by @taratorio
 - A rejected transaction replacement no longer removes the original transaction from the pool,
   including during reorg recovery (#24534) — by @Bruce039
 
 #### Operations
 
-- Database syncing is batched by default to reduce disk-flush pauses. A power loss can roll back recent
-  unflushed commits; set `--db.safe.nosync=false` for per-commit durability
-  (#24249, #24953) — by @AskAlexSharov, @awskii
+- Caplin validator nodes subscribed to many attestation subnets may use more CPU because they now
+  verify attestations previously dropped by the gossip limit. Allow CPU headroom for this additional
+  work, especially with `--caplin.subscribe-all-topics` (#25000) — by @domiwei
+- The default RPC block cache limit grows to 512 MiB, from 160 MiB for embedded RPC and remote
+  rpcdaemon, or 32 MiB for rpcdaemon with `--datadir`. Set `RPC_BLOCK_CACHE` to adjust the memory budget
+  (#24120) — by @AskAlexSharov
+- Memory sizing honors cgroup v1 limits in hybrid cgroup setups instead of sizing caches from host RAM
+  (#24885) — by @AskAlexSharov
+- An empty `seg rm-state-snapshots --step=N+` range no longer selects every state snapshot for deletion,
+  including when `N` is the latest available step (#24796) — by @joxerx
 - Gnosis and Chiado retain and serve data columns for 16,384 epochs, about 15 days, instead of 4,096
-  epochs. Operators should allow for roughly four times the column storage (#24720) — by @Bruce039
+  epochs. Operators should allow for roughly four times the column storage. Leave
+  `--caplin.columns-keep-slots` at `0` to follow this window; an explicit value overrides pruning
+  retention and may delete columns the node still needs to serve (#24720) — by @Bruce039
 
 ### Security
 
@@ -171,8 +218,9 @@ and resilience under heavy RPC and peer traffic.
   @yperbasis, @AskAlexSharov
 - RPC rejects oversized transactions before decoding. Caplin bounds SSZ committee vectors and
   rejects invalid validator and slashing indices, preventing excessive allocations and panics.
-  Invalid block access list indices are rejected before execution
-  (#24315, #24614, #24615, #24771, #24908) — by @yperbasis, @domiwei
+  Invalid block access list indices are rejected before execution. The Engine API rejects null
+  withdrawal entries before hashing or building blocks
+  (#24315, #24614, #24615, #24771, #24908, #24650) — by @yperbasis, @domiwei
 - Caplin verifies signatures before forwarding attestations, aggregates, voluntary exits, and
   BLS-to-execution changes. Attestations and aggregates use the correct fork's signing domain and
   gossip topic, preventing invalid relays and rejection of valid messages near upgrades
