@@ -174,11 +174,19 @@ func (r *ilStateReader) ReadAccountCodeSize(addr accounts.Address) (int, error) 
 	return len(r.code[addr]), nil
 }
 
-func ilCheck(reader state.StateReader, cfg *chain.Config, gp *GasPool, blockTxns, inclusionListTxns types.Transactions) bool {
-	return ilCheckWithBaseFee(reader, cfg, 0, gp, blockTxns, inclusionListTxns)
+func ilCheck(t *testing.T, reader state.StateReader, cfg *chain.Config, gp *GasPool, blockTxns, inclusionListTxns types.Transactions) bool {
+	t.Helper()
+	return ilCheckWithBaseFee(t, reader, cfg, 0, gp, blockTxns, inclusionListTxns)
 }
 
-func ilCheckWithBaseFee(reader state.StateReader, cfg *chain.Config, baseFee uint64, gp *GasPool, blockTxns, inclusionListTxns types.Transactions) bool {
+func ilCheckWithBaseFee(t *testing.T, reader state.StateReader, cfg *chain.Config, baseFee uint64, gp *GasPool, blockTxns, inclusionListTxns types.Transactions) bool {
+	t.Helper()
+	satisfied, err := ilCheckResult(reader, cfg, baseFee, gp, blockTxns, inclusionListTxns)
+	require.NoError(t, err)
+	return satisfied
+}
+
+func ilCheckResult(reader state.StateReader, cfg *chain.Config, baseFee uint64, gp *GasPool, blockTxns, inclusionListTxns types.Transactions) (bool, error) {
 	blockCtx := evmtypes.BlockContext{
 		CanTransfer: CanTransfer,
 		Transfer:    misc.Transfer,
@@ -199,16 +207,16 @@ func TestCheckInclusionListTransactions_EmptyInclusionList(t *testing.T) {
 	cfg := chain.AllProtocolChanges
 
 	t.Run("nil block and nil inclusion list", func(t *testing.T) {
-		require.True(t, ilCheck(reader, cfg, ilGasPool(), nil, nil))
+		require.True(t, ilCheck(t, reader, cfg, ilGasPool(), nil, nil))
 	})
 
 	t.Run("non-empty block, empty inclusion list", func(t *testing.T) {
 		blockTxns := types.Transactions{ilValidTxn(t, 0), ilValidTxn(t, 1)}
-		require.True(t, ilCheck(reader, cfg, ilGasPool(), blockTxns, types.Transactions{}))
+		require.True(t, ilCheck(t, reader, cfg, ilGasPool(), blockTxns, types.Transactions{}))
 	})
 
 	t.Run("empty block, empty inclusion list", func(t *testing.T) {
-		require.True(t, ilCheck(reader, cfg, ilGasPool(), types.Transactions{}, types.Transactions{}))
+		require.True(t, ilCheck(t, reader, cfg, ilGasPool(), types.Transactions{}, types.Transactions{}))
 	})
 }
 
@@ -225,19 +233,19 @@ func TestCheckInclusionListTransactions_AllInclusionListTxnsInBlock(t *testing.T
 	t.Run("block equals inclusion list", func(t *testing.T) {
 		blockTxns := types.Transactions{first, second}
 		inclusionListTxns := types.Transactions{first, second}
-		require.True(t, ilCheck(reader, cfg, ilGasPool(), blockTxns, inclusionListTxns))
+		require.True(t, ilCheck(t, reader, cfg, ilGasPool(), blockTxns, inclusionListTxns))
 	})
 
 	t.Run("block is a superset in different order", func(t *testing.T) {
 		blockTxns := types.Transactions{third, first, second}
 		inclusionListTxns := types.Transactions{second, first}
-		require.True(t, ilCheck(reader, cfg, ilGasPool(), blockTxns, inclusionListTxns))
+		require.True(t, ilCheck(t, reader, cfg, ilGasPool(), blockTxns, inclusionListTxns))
 	})
 
 	t.Run("duplicate inclusion list entries", func(t *testing.T) {
 		blockTxns := types.Transactions{first}
 		inclusionListTxns := types.Transactions{first, first, first}
-		require.True(t, ilCheck(reader, cfg, ilGasPool(), blockTxns, inclusionListTxns))
+		require.True(t, ilCheck(t, reader, cfg, ilGasPool(), blockTxns, inclusionListTxns))
 	})
 }
 
@@ -253,7 +261,7 @@ func TestCheckInclusionListTransactions_IncludedTxnIsNotValidated(t *testing.T) 
 	blockTxns := types.Transactions{nonceTooLow, belowIntrinsicGas}
 	inclusionListTxns := types.Transactions{nonceTooLow, belowIntrinsicGas}
 
-	require.True(t, ilCheck(reader, chain.AllProtocolChanges, ilGasPool(), blockTxns, inclusionListTxns))
+	require.True(t, ilCheck(t, reader, chain.AllProtocolChanges, ilGasPool(), blockTxns, inclusionListTxns))
 }
 
 func TestCheckInclusionListTransactions_MissingValidTxn(t *testing.T) {
@@ -265,41 +273,41 @@ func TestCheckInclusionListTransactions_MissingValidTxn(t *testing.T) {
 	missing := ilValidTxn(t, 0)
 
 	t.Run("empty block", func(t *testing.T) {
-		require.False(t, ilCheck(reader, cfg, ilGasPool(), types.Transactions{}, types.Transactions{missing}))
+		require.False(t, ilCheck(t, reader, cfg, ilGasPool(), types.Transactions{}, types.Transactions{missing}))
 	})
 
 	t.Run("block holds unrelated txns", func(t *testing.T) {
 		blockTxns := types.Transactions{ilValidTxn(t, 7), ilLegacyTxn(t, ilOtherKey, 0, ilTxnGasLimit, 0, 0, nil)}
-		require.False(t, ilCheck(reader, cfg, ilGasPool(), blockTxns, types.Transactions{missing}))
+		require.False(t, ilCheck(t, reader, cfg, ilGasPool(), blockTxns, types.Transactions{missing}))
 	})
 
 	t.Run("same sender and nonce but different txn", func(t *testing.T) {
 		sameNonceOtherPayload := ilLegacyTxn(t, ilSenderKey, 0, ilTxnGasLimit, 0, 0, []byte{0x01})
 		require.NotEqual(t, missing.Hash(), sameNonceOtherPayload.Hash())
 		blockTxns := types.Transactions{sameNonceOtherPayload}
-		require.False(t, ilCheck(reader, cfg, ilGasPool(), blockTxns, types.Transactions{missing}))
+		require.False(t, ilCheck(t, reader, cfg, ilGasPool(), blockTxns, types.Transactions{missing}))
 	})
 
 	t.Run("one of several inclusion list txns missing", func(t *testing.T) {
 		included := ilValidTxn(t, 1)
 		blockTxns := types.Transactions{included}
 		inclusionListTxns := types.Transactions{included, missing}
-		require.False(t, ilCheck(reader, cfg, ilGasPool(), blockTxns, inclusionListTxns))
+		require.False(t, ilCheck(t, reader, cfg, ilGasPool(), blockTxns, inclusionListTxns))
 	})
 
 	t.Run("duplicate missing txn", func(t *testing.T) {
 		inclusionListTxns := types.Transactions{missing, missing}
-		require.False(t, ilCheck(reader, cfg, ilGasPool(), types.Transactions{}, inclusionListTxns))
+		require.False(t, ilCheck(t, reader, cfg, ilGasPool(), types.Transactions{}, inclusionListTxns))
 	})
 
 	t.Run("contract creation", func(t *testing.T) {
 		creation := ilCreationTxn(t, 0, ilTxnGasLimit, []byte{byte(vm.STOP)})
-		require.False(t, ilCheck(reader, cfg, ilGasPool(), types.Transactions{}, types.Transactions{creation}))
+		require.False(t, ilCheck(t, reader, cfg, ilGasPool(), types.Transactions{}, types.Transactions{creation}))
 	})
 
 	t.Run("blob txn within the blob budget", func(t *testing.T) {
 		blobTxn := ilBlobTxn(t, 0, 1)
-		require.False(t, ilCheck(reader, cfg, ilGasPool(), types.Transactions{}, types.Transactions{blobTxn}))
+		require.False(t, ilCheck(t, reader, cfg, ilGasPool(), types.Transactions{}, types.Transactions{blobTxn}))
 	})
 }
 
@@ -311,105 +319,109 @@ func TestCheckInclusionListTransactions_MissingInvalidTxn(t *testing.T) {
 	t.Run("nonce too low", func(t *testing.T) {
 		reader := newILStateReader()
 		reader.setNonce(ilSenderAddress, 5)
-		require.True(t, ilCheck(reader, cfg, ilGasPool(), nil, types.Transactions{ilValidTxn(t, 4)}))
+		require.True(t, ilCheck(t, reader, cfg, ilGasPool(), nil, types.Transactions{ilValidTxn(t, 4)}))
 	})
 
 	t.Run("nonce too high", func(t *testing.T) {
 		reader := newILStateReader()
-		require.True(t, ilCheck(reader, cfg, ilGasPool(), nil, types.Transactions{ilValidTxn(t, 5)}))
+		require.True(t, ilCheck(t, reader, cfg, ilGasPool(), nil, types.Transactions{ilValidTxn(t, 5)}))
 	})
 
 	t.Run("nonce at uint64 max", func(t *testing.T) {
 		reader := newILStateReader()
 		reader.setNonce(ilSenderAddress, math.MaxUint64)
-		require.True(t, ilCheck(reader, cfg, ilGasPool(), nil, types.Transactions{ilValidTxn(t, math.MaxUint64)}))
+		require.True(t, ilCheck(t, reader, cfg, ilGasPool(), nil, types.Transactions{ilValidTxn(t, math.MaxUint64)}))
 	})
 
 	t.Run("sender is not an EOA", func(t *testing.T) {
 		reader := newILStateReader()
 		reader.setCode(ilSenderAddress, []byte{byte(vm.STOP)})
-		require.True(t, ilCheck(reader, cfg, ilGasPool(), nil, types.Transactions{ilValidTxn(t, 0)}))
+		require.True(t, ilCheck(t, reader, cfg, ilGasPool(), nil, types.Transactions{ilValidTxn(t, 0)}))
 	})
 
 	t.Run("insufficient funds for value", func(t *testing.T) {
 		reader := newILStateReader()
 		txn := ilLegacyTxn(t, ilSenderKey, 0, ilTxnGasLimit, 0, 1_000, nil)
-		require.True(t, ilCheck(reader, cfg, ilGasPool(), nil, types.Transactions{txn}))
+		require.True(t, ilCheck(t, reader, cfg, ilGasPool(), nil, types.Transactions{txn}))
 	})
 
 	t.Run("insufficient funds for gas", func(t *testing.T) {
 		reader := newILStateReader()
 		reader.setBalance(ilSenderAddress, *uint256.NewInt(1))
 		txn := ilLegacyTxn(t, ilSenderKey, 0, ilTxnGasLimit, 1_000_000_000, 0, nil)
-		require.True(t, ilCheck(reader, cfg, ilGasPool(), nil, types.Transactions{txn}))
+		require.True(t, ilCheck(t, reader, cfg, ilGasPool(), nil, types.Transactions{txn}))
 	})
 
 	t.Run("sufficient funds for gas", func(t *testing.T) {
 		reader := newILStateReader()
 		reader.setBalance(ilSenderAddress, *uint256.NewInt(ilTxnGasLimit * 1_000_000_000))
 		txn := ilLegacyTxn(t, ilSenderKey, 0, ilTxnGasLimit, 1_000_000_000, 0, nil)
-		require.False(t, ilCheck(reader, cfg, ilGasPool(), nil, types.Transactions{txn}))
+		require.False(t, ilCheck(t, reader, cfg, ilGasPool(), nil, types.Transactions{txn}))
 	})
 
 	t.Run("gas limit below intrinsic gas", func(t *testing.T) {
 		reader := newILStateReader()
 		txn := ilLegacyTxn(t, ilSenderKey, 0, 1_000, 0, 0, nil)
-		require.True(t, ilCheck(reader, cfg, ilGasPool(), nil, types.Transactions{txn}))
+		require.True(t, ilCheck(t, reader, cfg, ilGasPool(), nil, types.Transactions{txn}))
 	})
 
 	t.Run("gas limit below the calldata floor", func(t *testing.T) {
 		reader := newILStateReader()
 		txn := ilLegacyTxn(t, ilSenderKey, 0, 30_000, 0, 0, make([]byte, 1_000))
-		require.True(t, ilCheck(reader, cfg, ilGasPool(), nil, types.Transactions{txn}))
+		require.True(t, ilCheck(t, reader, cfg, ilGasPool(), nil, types.Transactions{txn}))
 	})
 
 	t.Run("gas limit at the calldata floor", func(t *testing.T) {
 		reader := newILStateReader()
 		txn := ilLegacyTxn(t, ilSenderKey, 0, ilTxnGasLimit, 0, 0, make([]byte, 1_000))
-		require.False(t, ilCheck(reader, cfg, ilGasPool(), nil, types.Transactions{txn}))
+		require.False(t, ilCheck(t, reader, cfg, ilGasPool(), nil, types.Transactions{txn}))
 	})
 
 	t.Run("init code above the size limit", func(t *testing.T) {
 		reader := newILStateReader()
 		txn := ilCreationTxn(t, 0, params.MaxTxnGasLimit, make([]byte, params.MaxInitCodeSizeAmsterdam+1))
-		require.True(t, ilCheck(reader, cfg, ilGasPool(), nil, types.Transactions{txn}))
+		require.True(t, ilCheck(t, reader, cfg, ilGasPool(), nil, types.Transactions{txn}))
 	})
 
 	t.Run("init code at the size limit", func(t *testing.T) {
 		reader := newILStateReader()
 		txn := ilCreationTxn(t, 0, params.MaxTxnGasLimit, make([]byte, params.MaxInitCodeSizeAmsterdam))
-		require.False(t, ilCheck(reader, cfg, ilGasPool(), nil, types.Transactions{txn}))
+		require.False(t, ilCheck(t, reader, cfg, ilGasPool(), nil, types.Transactions{txn}))
 	})
 
 	t.Run("tip cap above fee cap", func(t *testing.T) {
 		reader := newILStateReader()
 		txn := ilDynamicFeeTxn(t, 0, ilTxnGasLimit, 2, 1)
-		require.True(t, ilCheck(reader, cfg, ilGasPool(), nil, types.Transactions{txn}))
+		require.True(t, ilCheck(t, reader, cfg, ilGasPool(), nil, types.Transactions{txn}))
 	})
 
 	t.Run("fee cap below base fee", func(t *testing.T) {
 		reader := newILStateReader()
 		txn := ilDynamicFeeTxn(t, 0, ilTxnGasLimit, 1, 1)
-		require.True(t, ilCheckWithBaseFee(reader, cfg, 1_000, ilGasPool(), nil, types.Transactions{txn}))
+		require.True(t, ilCheckWithBaseFee(t, reader, cfg, 1_000, ilGasPool(), nil, types.Transactions{txn}))
 	})
 
 	t.Run("fee cap above base fee", func(t *testing.T) {
 		reader := newILStateReader()
 		reader.setBalance(ilSenderAddress, *uint256.NewInt(ilTxnGasLimit * 2_000))
 		txn := ilDynamicFeeTxn(t, 0, ilTxnGasLimit, 1, 2_000)
-		require.False(t, ilCheckWithBaseFee(reader, cfg, 1_000, ilGasPool(), nil, types.Transactions{txn}))
+		require.False(t, ilCheckWithBaseFee(t, reader, cfg, 1_000, ilGasPool(), nil, types.Transactions{txn}))
 	})
 
 	t.Run("more blobs than a single txn may carry", func(t *testing.T) {
 		reader := newILStateReader()
 		txn := ilBlobTxn(t, 0, params.MaxBlobsPerTxn+1)
 		gp := NewGasPool(ilBlockGasLimit, params.GasPerBlob*uint64(params.MaxBlobsPerTxn+1))
-		require.True(t, ilCheck(reader, cfg, gp, nil, types.Transactions{txn}))
+		require.True(t, ilCheck(t, reader, cfg, gp, nil, types.Transactions{txn}))
 	})
 
 	t.Run("state read failure", func(t *testing.T) {
-		reader := &accountErrorReader{StateReader: state.NewNoopReader(), err: errors.New("nonce read failed")}
-		require.True(t, ilCheck(reader, cfg, ilGasPool(), nil, types.Transactions{ilValidTxn(t, 0)}))
+		readErr := errors.New("nonce read failed")
+		reader := &accountErrorReader{StateReader: state.NewNoopReader(), err: readErr}
+		satisfied, err := ilCheckResult(reader, cfg, 0, ilGasPool(), nil, types.Transactions{ilValidTxn(t, 0)})
+		require.ErrorIs(t, err, ErrTxnExecutionFailed)
+		require.ErrorIs(t, err, readErr)
+		require.False(t, satisfied)
 	})
 }
 
@@ -418,13 +430,13 @@ func TestCheckInclusionListTransactions_UndecodableTxn(t *testing.T) {
 
 	t.Run("unsigned txn", func(t *testing.T) {
 		reader := newILStateReader()
-		require.True(t, ilCheck(reader, chain.AllProtocolChanges, ilGasPool(), nil, types.Transactions{ilUnsignedTxn()}))
+		require.True(t, ilCheck(t, reader, chain.AllProtocolChanges, ilGasPool(), nil, types.Transactions{ilUnsignedTxn()}))
 	})
 
 	t.Run("dynamic fee txn before london", func(t *testing.T) {
 		reader := newILStateReader()
 		txn := ilDynamicFeeTxn(t, 0, ilTxnGasLimit, 0, 0)
-		require.True(t, ilCheck(reader, chain.TestChainBerlinConfig, ilGasPool(), nil, types.Transactions{txn}))
+		require.True(t, ilCheck(t, reader, chain.TestChainBerlinConfig, ilGasPool(), nil, types.Transactions{txn}))
 	})
 
 	t.Run("blob txn with an invalid versioned hash", func(t *testing.T) {
@@ -440,7 +452,7 @@ func TestCheckInclusionListTransactions_UndecodableTxn(t *testing.T) {
 			MaxFeePerBlobGas:    *uint256.NewInt(0),
 			BlobVersionedHashes: []common.Hash{{0x02}},
 		})
-		require.True(t, ilCheck(reader, chain.AllProtocolChanges, ilGasPool(), nil, types.Transactions{txn}))
+		require.True(t, ilCheck(t, reader, chain.AllProtocolChanges, ilGasPool(), nil, types.Transactions{txn}))
 	})
 
 	t.Run("signed by a different chain id", func(t *testing.T) {
@@ -450,7 +462,7 @@ func TestCheckInclusionListTransactions_UndecodableTxn(t *testing.T) {
 			types.NewTransaction(0, ilRecipient, uint256.NewInt(0), ilTxnGasLimit, uint256.NewInt(0), nil),
 			otherSigner, ilSenderKey)
 		require.NoError(t, err)
-		require.True(t, ilCheck(reader, chain.AllProtocolChanges, ilGasPool(), nil, types.Transactions{txn}))
+		require.True(t, ilCheck(t, reader, chain.AllProtocolChanges, ilGasPool(), nil, types.Transactions{txn}))
 	})
 }
 
@@ -463,48 +475,48 @@ func TestCheckInclusionListTransactions_BlockGasExhausted(t *testing.T) {
 
 	t.Run("execution gas exhausted", func(t *testing.T) {
 		gp := NewBlockGasPool(ilTxnGasLimit-1, ilBlockGasLimit, params.GasPerBlob)
-		require.True(t, ilCheck(reader, cfg, gp, nil, types.Transactions{txn}))
+		require.True(t, ilCheck(t, reader, cfg, gp, nil, types.Transactions{txn}))
 	})
 
 	t.Run("state gas exhausted", func(t *testing.T) {
 		gp := NewBlockGasPool(ilBlockGasLimit, ilTxnGasLimit-1, params.GasPerBlob)
-		require.True(t, ilCheck(reader, cfg, gp, nil, types.Transactions{txn}))
+		require.True(t, ilCheck(t, reader, cfg, gp, nil, types.Transactions{txn}))
 	})
 
 	t.Run("both dimensions exactly sufficient", func(t *testing.T) {
 		gp := NewBlockGasPool(ilTxnGasLimit, ilTxnGasLimit, params.GasPerBlob)
-		require.False(t, ilCheck(reader, cfg, gp, nil, types.Transactions{txn}))
+		require.False(t, ilCheck(t, reader, cfg, gp, nil, types.Transactions{txn}))
 	})
 
 	t.Run("empty gas pool", func(t *testing.T) {
 		gp := NewGasPool(0, 0)
-		require.True(t, ilCheck(reader, cfg, gp, nil, types.Transactions{txn}))
+		require.True(t, ilCheck(t, reader, cfg, gp, nil, types.Transactions{txn}))
 	})
 
 	t.Run("nil gas pool skips the budget checks", func(t *testing.T) {
-		require.False(t, ilCheck(reader, cfg, nil, nil, types.Transactions{txn}))
+		require.False(t, ilCheck(t, reader, cfg, nil, nil, types.Transactions{txn}))
 	})
 
 	t.Run("blob gas exhausted", func(t *testing.T) {
 		gp := NewGasPool(ilBlockGasLimit, 0)
-		require.True(t, ilCheck(reader, cfg, gp, nil, types.Transactions{ilBlobTxn(t, 0, 1)}))
+		require.True(t, ilCheck(t, reader, cfg, gp, nil, types.Transactions{ilBlobTxn(t, 0, 1)}))
 	})
 
 	t.Run("blob gas exactly sufficient", func(t *testing.T) {
 		gp := NewGasPool(ilBlockGasLimit, params.GasPerBlob)
-		require.False(t, ilCheck(reader, cfg, gp, nil, types.Transactions{ilBlobTxn(t, 0, 1)}))
+		require.False(t, ilCheck(t, reader, cfg, gp, nil, types.Transactions{ilBlobTxn(t, 0, 1)}))
 	})
 
 	t.Run("gas limit above the per-txn cap before amsterdam", func(t *testing.T) {
 		capped := ilLegacyTxn(t, ilSenderKey, 0, params.MaxTxnGasLimit+1, 0, 0, nil)
 		gp := NewGasPool(params.MaxTxnGasLimit*4, 0)
-		require.True(t, ilCheck(newILStateReader(), chain.TestChainOsakaConfig, gp, nil, types.Transactions{capped}))
+		require.True(t, ilCheck(t, newILStateReader(), chain.TestChainOsakaConfig, gp, nil, types.Transactions{capped}))
 	})
 
 	t.Run("gas limit above the per-txn cap fits the execution dimension after amsterdam", func(t *testing.T) {
 		gp := NewBlockGasPool(params.MaxTxnGasLimit, params.MaxTxnGasLimit*2, 0)
 		capped := ilLegacyTxn(t, ilSenderKey, 0, params.MaxTxnGasLimit+1, 0, 0, nil)
-		require.False(t, ilCheck(reader, cfg, gp, nil, types.Transactions{capped}))
+		require.False(t, ilCheck(t, reader, cfg, gp, nil, types.Transactions{capped}))
 	})
 }
 
@@ -522,17 +534,17 @@ func TestCheckInclusionListTransactions_ValidTxnAfterInvalidOnes(t *testing.T) {
 
 	t.Run("all inclusion list txns invalid", func(t *testing.T) {
 		inclusionListTxns := types.Transactions{nonceTooLow, belowIntrinsicGas, unsigned}
-		require.True(t, ilCheck(reader, cfg, ilGasPool(), nil, inclusionListTxns))
+		require.True(t, ilCheck(t, reader, cfg, ilGasPool(), nil, inclusionListTxns))
 	})
 
 	t.Run("valid txn last", func(t *testing.T) {
 		inclusionListTxns := types.Transactions{nonceTooLow, belowIntrinsicGas, unsigned, valid}
-		require.False(t, ilCheck(reader, cfg, ilGasPool(), nil, inclusionListTxns))
+		require.False(t, ilCheck(t, reader, cfg, ilGasPool(), nil, inclusionListTxns))
 	})
 
 	t.Run("valid txn first", func(t *testing.T) {
 		inclusionListTxns := types.Transactions{valid, nonceTooLow, belowIntrinsicGas, unsigned}
-		require.False(t, ilCheck(reader, cfg, ilGasPool(), nil, inclusionListTxns))
+		require.False(t, ilCheck(t, reader, cfg, ilGasPool(), nil, inclusionListTxns))
 	})
 }
 
@@ -559,7 +571,7 @@ func TestCheckInclusionListTransactions_LeavesGasPoolAndStateUntouched(t *testin
 		reader.setBalance(ilSenderAddress, *balance)
 		gp := ilGasPool()
 
-		require.False(t, ilCheck(reader, cfg, gp, nil, types.Transactions{ilValidTxn(t, 0)}))
+		require.False(t, ilCheck(t, reader, cfg, gp, nil, types.Transactions{ilValidTxn(t, 0)}))
 		assertUntouched(t, reader, gp)
 	})
 
@@ -569,7 +581,7 @@ func TestCheckInclusionListTransactions_LeavesGasPoolAndStateUntouched(t *testin
 		gp := ilGasPool()
 
 		txn := ilValidTxn(t, 0)
-		require.True(t, ilCheck(reader, cfg, gp, types.Transactions{txn}, types.Transactions{txn}))
+		require.True(t, ilCheck(t, reader, cfg, gp, types.Transactions{txn}, types.Transactions{txn}))
 		assertUntouched(t, reader, gp)
 	})
 
@@ -579,7 +591,7 @@ func TestCheckInclusionListTransactions_LeavesGasPoolAndStateUntouched(t *testin
 		gp := ilGasPool()
 
 		invalid := ilLegacyTxn(t, ilSenderKey, 9, ilTxnGasLimit, 0, 0, nil)
-		require.True(t, ilCheck(reader, cfg, gp, nil, types.Transactions{invalid}))
+		require.True(t, ilCheck(t, reader, cfg, gp, nil, types.Transactions{invalid}))
 		assertUntouched(t, reader, gp)
 	})
 }

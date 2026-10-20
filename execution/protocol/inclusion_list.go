@@ -17,6 +17,7 @@
 package protocol
 
 import (
+	"errors"
 	"slices"
 
 	"github.com/erigontech/erigon/common"
@@ -36,7 +37,7 @@ func CheckInclusionListTransactions(
 	blockContext *evmtypes.BlockContext,
 	chainConfig *chain.Config,
 	vmConfig *vm.Config,
-) bool {
+) (bool, error) {
 	ibs := state.New(stateReader)
 	defer ibs.Close()
 	evm := vm.NewEVM(*blockContext, evmtypes.TxContext{}, ibs, chainConfig, *vmConfig)
@@ -72,13 +73,16 @@ func CheckInclusionListTransactions(
 		}
 
 		if _, err := executor.preCheck(false, intrinsicGasResult); err != nil {
+			if errors.Is(err, ErrTxnExecutionFailed) {
+				return false, err
+			}
 			continue
 		}
 
 		log.Warn("[EIP-7805] Inclusion list transaction should have been included in the block",
 			"txn", tx.Hash(), "sender", msg.From(), "nonce", msg.Nonce(), "block", evm.Context.BlockNumber)
 
-		return false
+		return false, nil
 	}
-	return true
+	return true, nil
 }
