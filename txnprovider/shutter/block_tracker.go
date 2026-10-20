@@ -124,9 +124,9 @@ func (bt *BlockTracker) Wait(ctx context.Context, blockNum uint64) error {
 	switch {
 	case bt.currentBlockNum >= blockNum:
 		return nil
-	case bt.stopped:
-		return errors.New("block tracker stopped")
-	default:
+	case ctx.Err() != nil:
 		return ctx.Err()
+	default:
+		return errors.New("block tracker stopped")
 	}
 }
