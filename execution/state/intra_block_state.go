@@ -1276,6 +1276,14 @@ func (ibs *IntraBlockState) getVersionedAccount(addr accounts.Address, readStora
 // overlay the per-field versionMap cells. It returns nil when the account is
 // absent or was destroyed with no revival. The AddressPath read it performs
 // records the nil-read that OCC uses to detect create/absent conflicts.
+// readAbsentFromMap reports whether this tx already read addr as absent from the
+// version map (a destruct with no revival). That verdict is final for the tx: the
+// committed record must not revive it, and validation catches a later re-creation.
+func (ibs *IntraBlockState) readAbsentFromMap(addr accounts.Address) bool {
+	tr, ok := ibs.versionedReads.GetAddress(addr)
+	return ok && tr.Source == MapRead && (tr.Val == nil || tr.Val.Account() == nil)
+}
+
 func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStorage bool) (*accounts.Account, ReadSource, Version, error) {
 	if ibs.versionMap == nil {
 		return nil, UnknownSource, UnknownVersion, nil
@@ -1315,6 +1323,9 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 	}
 
 	if readAccount == nil {
+		if ibs.readAbsentFromMap(addr) {
+			return nil, StorageRead, UnknownVersion, nil
+		}
 		if readStorage {
 			readAccount, err = ibs.committedAccount(addr)
 			source = StorageRead
@@ -1984,6 +1995,9 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 
 	if account != nil {
 		return ibs.stateObjectForAccount(addr, account), nil
+	}
+	if ibs.readAbsentFromMap(addr) {
+		return nil, nil
 	}
 
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {

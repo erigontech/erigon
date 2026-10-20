@@ -139,7 +139,15 @@ func TestEIP8246_RecreationSeededByFieldCellsReadsAsAlive(t *testing.T) {
 	require.NoError(t, ibs.TouchAccount(addr))
 
 	vm.FlushVersionedWrites(recreateWrites, true, "")
-	require.Equal(t, VersionValid, validateReads(vm, ibs, 2))
+	rerun := newAmsterdamIBS(reader, vm, 2, true)
+	defer rerun.Close()
+	exists, err = rerun.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists)
+	nonce, err = rerun.GetNonce(addr)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), nonce)
+	require.Equal(t, VersionValid, validateReads(vm, rerun, 2))
 }
 
 // Once a tx has concluded that a destroyed address is absent, a re-creation
