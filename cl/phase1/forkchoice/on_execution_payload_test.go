@@ -1979,17 +1979,22 @@ func TestExecutionPayloadIndexRepairRetainsNotificationAcrossTransientReadFailur
 }
 
 func TestExecutionPayloadOperationEventsDoNotRequireHeadData(t *testing.T) {
+	const slot = uint64(64)
 	blockRoot := common.HexToHash("0x1234")
-	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
-	envelope.Message.BeaconBlockRoot = blockRoot
-	envelope.Message.Payload.SlotNumber = 64
-	envelope.Message.Payload.BlockHash = common.HexToHash("0xabcd")
+	blockHash := common.HexToHash("0xabcd")
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	block.Block.Slot = slot
+	bid := block.Block.Body.SignedExecutionPayloadBid.Message
+	bid.Slot = slot
+	bid.BuilderIndex = clparams.BuilderIndexSelfBuild
+	bid.BlockHash = blockHash
+	envelope := envelopeForIndexRepair(envelopeIndexRepairToken{blockNumber: 42, blockHash: blockHash})
 	emitter := beaconevents.NewEventEmitter()
 	events := make(chan *beaconevents.EventStream, 2)
 	subscription := emitter.Operation().Subscribe(events)
 	defer subscription.Unsubscribe()
 	f := newPayloadVoteTestStore(t, blockRoot, false, false)
-	f.forkGraph = dataAvailabilityForkGraph{}
+	f.forkGraph = dataAvailabilityForkGraph{block: block}
 	f.emitters = emitter
 
 	f.emitExecutionPayloadIntegrationEvents(blockRoot, envelope)
@@ -2002,8 +2007,33 @@ func TestExecutionPayloadOperationEventsDoNotRequireHeadData(t *testing.T) {
 			return nil
 		}
 	}
-	require.Equal(t, beaconevents.OpExecutionPayload, nextEvent().Event)
-	require.Equal(t, beaconevents.OpExecutionPayloadAvailable, nextEvent().Event)
+	payloadEvent := nextEvent()
+	require.Equal(t, beaconevents.OpExecutionPayload, payloadEvent.Event)
+	require.Equal(t, &beaconevents.ExecutionPayloadData{
+		Slot: slot, BuilderIndex: clparams.BuilderIndexSelfBuild, BlockHash: blockHash, BlockRoot: blockRoot,
+	}, payloadEvent.Data)
+	availableEvent := nextEvent()
+	require.Equal(t, beaconevents.OpExecutionPayloadAvailable, availableEvent.Event)
+	require.Equal(t, &beaconevents.ExecutionPayloadAvailableData{Slot: slot, BlockRoot: blockRoot}, availableEvent.Data)
+}
+
+func TestExecutionPayloadOperationEventsSkipMissingBlock(t *testing.T) {
+	blockRoot := common.HexToHash("0x1234")
+	emitter := beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 1)
+	subscription := emitter.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+	f := newPayloadVoteTestStore(t, blockRoot, false, false)
+	f.forkGraph = dataAvailabilityForkGraph{}
+	f.emitters = emitter
+
+	f.emitExecutionPayloadIntegrationEvents(blockRoot, envelopeForIndexRepair(envelopeIndexRepairToken{}))
+
+	select {
+	case event := <-events:
+		t.Fatalf("emitted operation event without the beacon block: %#v", event)
+	default:
+	}
 }
 
 func TestExecutionPayloadIndexWriteHasSingleNotificationOwner(t *testing.T) {

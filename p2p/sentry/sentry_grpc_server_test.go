@@ -1432,3 +1432,110 @@ func TestGrpcServer_SendMessageById_SharedStore_NoDuplicateWrites(t *testing.T) 
 	time.Sleep(100 * time.Millisecond)
 	require.Equal(t, 1, rw.count(), "peer negotiated eth/70: only the eth/70 sentry must write")
 }
+
+// blockPeerWorker runs a task with a size-byte payload that holds the peer's
+// worker until the returned function is called.
+func blockPeerWorker(t *testing.T, pi *PeerInfo, size int) func() {
+	t.Helper()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	pi.Async(func() {
+		close(started)
+		<-release
+	}, size, log.New())
+	<-started
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	t.Cleanup(unblock)
+	return unblock
+}
+
+func TestPeerInfo_AsyncBoundsQueuedBytes(t *testing.T) {
+	pi, _ := newTestPeerInfoWithEth(t)
+	unblock := blockPeerWorker(t, pi, eth.ProtocolMaxMsgSize)
+
+	const size = 2 * 1024 * 1024
+	const tasks = 12
+	var mu sync.Mutex
+	var ran []int
+	for i := range tasks {
+		pi.Async(func() {
+			mu.Lock()
+			ran = append(ran, i)
+			mu.Unlock()
+		}, size, log.New())
+		require.LessOrEqual(t, pi.queuedBytes.Load(), int64(peerTasksByteLimit))
+	}
+	kept := peerTasksByteLimit / size
+	require.Len(t, pi.tasks, kept)
+	require.Equal(t, int64(kept*size), pi.queuedBytes.Load())
+
+	unblock()
+	require.Eventually(t, func() bool { return pi.queuedBytes.Load() == 0 }, time.Second, 5*time.Millisecond)
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(ran) == kept
+	}, time.Second, 5*time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	expected := make([]int, 0, kept)
+	for i := tasks - kept; i < tasks; i++ {
+		expected = append(expected, i)
+	}
+	require.Equal(t, expected, ran, "the newest tasks within the byte budget must run in order")
+}
+
+func TestPeerInfo_AsyncAdmitsMaxSizeMessage(t *testing.T) {
+	pi, _ := newTestPeerInfoWithEth(t)
+	unblock := blockPeerWorker(t, pi, 0)
+
+	for range 4 {
+		pi.Async(func() {}, 4*1024*1024, log.New())
+	}
+	ran := make(chan struct{})
+	pi.Async(func() { close(ran) }, eth.ProtocolMaxMsgSize, log.New())
+	require.LessOrEqual(t, pi.queuedBytes.Load(), int64(peerTasksByteLimit))
+
+	unblock()
+	select {
+	case <-ran:
+	case <-time.After(time.Second):
+		t.Fatal("a maximum-size message must be queued and run")
+	}
+	require.Eventually(t, func() bool { return pi.queuedBytes.Load() == 0 }, time.Second, 5*time.Millisecond)
+}
+
+func TestPeerInfo_AsyncDropsMessageAboveByteLimit(t *testing.T) {
+	pi, _ := newTestPeerInfoWithEth(t)
+	blockPeerWorker(t, pi, 0)
+
+	pi.Async(func() {}, 1, log.New())
+	pi.Async(func() {}, peerTasksByteLimit+1, log.New())
+	require.Len(t, pi.tasks, 1)
+	require.Equal(t, int64(1), pi.queuedBytes.Load())
+}
+
+func TestPeerInfo_AsyncCountEvictionReleasesBytes(t *testing.T) {
+	pi, _ := newTestPeerInfoWithEth(t)
+	unblock := blockPeerWorker(t, pi, 0)
+
+	for range peerTasksQueueSize {
+		pi.Async(func() {}, 1, log.New())
+	}
+	require.Len(t, pi.tasks, peerTasksQueueSize/2)
+	require.Equal(t, int64(peerTasksQueueSize/2), pi.queuedBytes.Load())
+
+	unblock()
+	require.Eventually(t, func() bool { return pi.queuedBytes.Load() == 0 }, time.Second, 5*time.Millisecond)
+}
+
+func TestPeerInfo_AsyncAfterRemoveReleasesBytes(t *testing.T) {
+	pi, _ := newTestPeerInfoWithEth(t)
+	pi.Remove(p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscRequested, nil, "test"))
+
+	for range peerTasksQueueSize {
+		pi.Async(func() {}, 1024, log.New())
+	}
+	require.Eventually(t, func() bool { return pi.queuedBytes.Load() == 0 }, time.Second, 5*time.Millisecond)
+}

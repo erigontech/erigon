@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/testutil"
@@ -914,6 +915,82 @@ func TestRawTransactionMalformed(t *testing.T) {
 
 	_, err := api.RawTransaction(context.Background(), hexutil.Bytes{0xde, 0xad, 0xbe, 0xef}, []string{"trace"})
 	requireErrorCode(t, err, rpc.ErrCodeInvalidParams)
+}
+
+func TestRawTransactionAuthorizationCountBeforeDecode(t *testing.T) {
+	const gasCap = 10 * params.ExecutionPerAuthBaseCostEIP8038
+	for _, tc := range []struct {
+		name           string
+		gasCap         uint64
+		authorizations int
+		wantCode       int
+	}{
+		{"atBound", gasCap, 10, rpc.ErrCodeInvalidParams},
+		{"aboveBound", gasCap, 11, rpc.ErrCodeClientLimitExceeded},
+		{"unlimitedGasCap", 0, 11, rpc.ErrCodeInvalidParams},
+	} {
+		for _, envelope := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/envelope=%t", tc.name, envelope), func(t *testing.T) {
+				txn := &types.SetCodeTransaction{
+					DynamicFeeTransaction: types.DynamicFeeTransaction{
+						CommonTx: types.CommonTx{To: &common.Address{1}},
+					},
+					Authorizations: make([]types.Authorization, tc.authorizations),
+				}
+				var buf bytes.Buffer
+				require.NoError(t, txn.MarshalBinary(&buf))
+				raw := buf.Bytes()
+				// The corrupted signature field after the authorization list makes decoding fail.
+				// ErrCodeClientLimitExceeded therefore proves that the count check ran first.
+				raw[len(raw)-1] = 0xc0
+				if envelope {
+					var err error
+					raw, err = rlp.EncodeToBytes(raw)
+					require.NoError(t, err)
+				}
+				api := &TraceAPIImpl{gasCap: tc.gasCap}
+				_, err := api.RawTransaction(t.Context(), raw, []string{TraceTypeTrace})
+				requireErrorCode(t, err, tc.wantCode)
+			})
+		}
+	}
+}
+
+func TestRawTransactionAuthorizationCountAmsterdam(t *testing.T) {
+	const (
+		gasCap         = 250_000
+		authorizations = 11 // above gasCap/PerEmptyAccountCost, priced at ExecutionPerAuthBaseCostEIP8038 on Amsterdam
+	)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	m := execmoduletester.New(t, execmoduletester.WithKey(key), execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config:   chain.AllProtocolChanges,
+		GasLimit: 60_000_000,
+		Alloc: types.GenesisAlloc{
+			crypto.PubkeyToAddress(key.PublicKey): {Balance: new(big.Int).Mul(big.NewInt(100), big.NewInt(1e18))},
+		},
+	}))
+	auths := make([]types.Authorization, authorizations)
+	for i := range auths {
+		auths[i] = types.Authorization{ChainID: *uint256.NewInt(1), Address: common.Address{2}, R: *uint256.NewInt(1), S: *uint256.NewInt(1)}
+	}
+	txn, err := types.SignTx(&types.SetCodeTransaction{
+		DynamicFeeTransaction: types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{To: &common.Address{1}, GasLimit: gasCap},
+			ChainID:  *m.ChainConfig.ChainID,
+			FeeCap:   *uint256.NewInt(100e9),
+			TipCap:   uint256.Int{},
+		},
+		Authorizations: auths,
+	}, *types.LatestSignerForChainID(m.ChainConfig.ChainID), key)
+	require.NoError(t, err)
+	var buf bytes.Buffer
+	require.NoError(t, txn.MarshalBinary(&buf))
+
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &rpccfg.TraceApiConfig{GasCap: gasCap})
+	result, err := api.RawTransaction(t.Context(), buf.Bytes(), []string{TraceTypeTrace})
+	require.NoError(t, err)
+	require.NotEmpty(t, result.Trace)
 }
 
 func TestRawTransactionStateDiff(t *testing.T) {
