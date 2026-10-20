@@ -792,7 +792,8 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 }
 
 func (iit *InvertedIndexRoTx) CanHashPrune(tx kv.Tx) bool {
-	if min := iit.ii.minTxNumInDB(tx); min == 0 || min < iit.files.EndTxNum() {
+	min, _ := iit.ii.minTxNumInDB(tx)
+	if min == 0 || min < iit.files.EndTxNum() {
 		return true
 	}
 	return false
@@ -814,9 +815,10 @@ func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 	stat, err := GetPruneValProgress(tx, []byte(iit.ii.ValuesTable))
 	if err != nil {
 		iit.ii.logger.Warn("CanPrune GetPruneValProgress error", "err", err)
-		return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum()
+		min, _ := iit.ii.minTxNumInDB(tx)
+		return min < iit.files.EndTxNum()
 	}
-	min := iit.ii.minTxNumInDB(tx)
+	min, _ := iit.ii.minTxNumInDB(tx)
 
 	pruneInProgress := (stat.KeyProgress != prune.Done || stat.ValueProgress != prune.Done) && untilTx == stat.TxTo
 
@@ -1310,13 +1312,15 @@ func (iit *InvertedIndexRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	return from, to
 }
 
-func (ii *InvertedIndex) minTxNumInDB(tx kv.Tx) uint64 {
-	fst, _ := kv.FirstKey(tx, ii.KeysTable)
-	if len(fst) > 0 {
-		fstInDb := binary.BigEndian.Uint64(fst)
-		return fstInDb
+func (ii *InvertedIndex) minTxNumInDB(tx kv.Tx) (uint64, error) {
+	fst, err := kv.FirstKey(tx, ii.KeysTable)
+	if err != nil {
+		return 0, err
 	}
-	return 0
+	if len(fst) > 0 {
+		return binary.BigEndian.Uint64(fst), nil
+	}
+	return 0, nil
 }
 
 func (ii *InvertedIndex) lastTxNumInDB(tx kv.Tx) (uint64, bool) {

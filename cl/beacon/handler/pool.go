@@ -18,6 +18,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/ssz"
 )
@@ -44,6 +46,8 @@ import (
 // Above the largest request the spec allows, about 17 MB: MAX_COMMITTEES_PER_SLOT * TARGET_AGGREGATORS_PER_COMMITTEE
 // aggregates, each with a full Electra aggregation bitlist.
 const maxAggregateAndProofsRequestSize = 32 << 20
+
+const blockArrivalPollInterval = 50 * time.Millisecond
 
 // maxFutureSlotLookahead bounds how far beyond the current slot a
 // sync-committee message's slot is entertained before its expiry is even
@@ -150,6 +154,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 		return
 	}
 
+	blockDeadline := time.Now().Add(time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second)
 	failures := []poolingFailure{}
 	for i, attestation := range req {
 		if a.syncedData.Syncing() {
@@ -179,7 +184,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			return
 		}
 
-		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestationWithGossipData); errors.Is(err, services.ErrAttestationAlreadySeen) {
+		if err := a.processPoolAttestation(r.Context(), blockDeadline, &subnet, attestationWithGossipData, attestation.Data.BeaconBlockRoot); errors.Is(err, services.ErrAttestationAlreadySeen) {
 			continue
 		} else if err != nil {
 			if errors.Is(err, services.ErrIgnore) {
@@ -232,6 +237,7 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
+	blockDeadline := time.Now().Add(time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second)
 	failures := []poolingFailure{}
 	for i, attestation := range req {
 		if a.syncedData.Syncing() {
@@ -261,7 +267,7 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 			return
 		}
 
-		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestationWithGossipData); errors.Is(err, services.ErrAttestationAlreadySeen) {
+		if err := a.processPoolAttestation(r.Context(), blockDeadline, &subnet, attestationWithGossipData, attestation.AttestationData().BeaconBlockRoot); errors.Is(err, services.ErrAttestationAlreadySeen) {
 			continue
 		} else if err != nil {
 			if errors.Is(err, services.ErrIgnore) {
@@ -290,6 +296,33 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// processPoolAttestation processes a submitted attestation. A validator client may attest before the node imports the
+// block it votes for, e.g. while blob data is still awaited, so it waits for that block until the deadline and retries.
+func (a *ApiHandler) processPoolAttestation(ctx context.Context, blockDeadline time.Time, subnet *uint64, att *services.AttestationForGossip, blockRoot common.Hash) error {
+	err := a.attestationService.ProcessMessage(ctx, subnet, att)
+	if !errors.Is(err, services.ErrBlockNotSeen) || !a.awaitBlock(ctx, blockDeadline, blockRoot) {
+		return err
+	}
+	return a.attestationService.ProcessMessage(ctx, subnet, att)
+}
+
+func (a *ApiHandler) awaitBlock(ctx context.Context, deadline time.Time, blockRoot common.Hash) bool {
+	ctx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	ticker := time.NewTicker(blockArrivalPollInterval)
+	defer ticker.Stop()
+	for {
+		if _, ok := a.forkchoiceStore.GetHeader(blockRoot); ok {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+		}
+	}
 }
 
 func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r *http.Request) {

@@ -66,7 +66,8 @@ const MaxTxTTL = 60 * time.Second
 // 7.1.0 - Add maximum-step and branch-cache options to GetLatest
 // 7.2.0 - Add MaxPrunableStepsBacklog
 // 7.3.0 - Remove HasPrefix from the remote KV service
-var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 3, Patch: 0}
+// 7.3.1 - Include pinned history-file generations in transaction replies
+var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 3, Patch: 1}
 
 type KvServer struct {
 	remoteproto.UnimplementedKVServer // must be embedded to have forward compatible implementations.
@@ -213,21 +214,42 @@ func (s *KvServer) with(id uint64, f func(kv.TemporalTx) error) error {
 	return f(tx.TemporalTx)
 }
 
+type txViewStream struct {
+	remoteproto.KV_TxServer
+	viewID                 uint64
+	historyFilesGeneration *uint64
+}
+
+func (s *txViewStream) setView(tx kv.TemporalTx) {
+	s.viewID = tx.ViewID()
+	s.historyFilesGeneration = nil
+	if files, ok := tx.Debug().(interface{ HistoryFilesGeneration() uint64 }); ok {
+		s.historyFilesGeneration = new(files.HistoryFilesGeneration())
+	}
+}
+
+func (s *txViewStream) Send(pair *remoteproto.Pair) error {
+	pair.ViewId = s.viewID
+	pair.HistoryFilesGeneration = s.historyFilesGeneration
+	return s.KV_TxServer.Send(pair)
+}
+
 func (s *KvServer) Tx(stream remoteproto.KV_TxServer) error {
+	viewStream := &txViewStream{KV_TxServer: stream}
+	stream = viewStream
 	id, errBegin := s.begin(stream.Context())
 	if errBegin != nil {
 		return fmt.Errorf("server-side error: %w", errBegin)
 	}
 	defer s.rollback(id)
 
-	var viewID uint64
 	if err := s.with(id, func(tx kv.TemporalTx) error {
-		viewID = tx.ViewID()
+		viewStream.setView(tx)
 		return nil
 	}); err != nil {
 		return fmt.Errorf("kvserver: %w", err)
 	}
-	if err := stream.Send(&remoteproto.Pair{ViewId: viewID, TxId: id}); err != nil {
+	if err := stream.Send(&remoteproto.Pair{TxId: id}); err != nil {
 		return fmt.Errorf("server-side error: %w", err)
 	}
 
@@ -269,6 +291,7 @@ func (s *KvServer) Tx(stream remoteproto.KV_TxServer) error {
 				return err
 			}
 			if err := s.with(id, func(tx kv.TemporalTx) error {
+				viewStream.setView(tx)
 				for _, c := range cursors { // restore all cursors position
 					var err error
 					c.c, err = tx.Cursor(c.bucket) //nolint:gocritic
@@ -767,8 +790,9 @@ func (s *KvServer) Range(_ context.Context, req *remoteproto.RangeReq) (*remotep
 func (s *KvServer) HistoryStartFrom(_ context.Context, req *remoteproto.HistoryStartFromReq) (reply *remoteproto.HistoryStartFromReply, err error) {
 	reply = &remoteproto.HistoryStartFromReply{}
 	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
-		reply.StartFrom = tx.Debug().HistoryStartFrom(kv.Domain(req.Domain))
-		return nil
+		var err error
+		reply.StartFrom, err = tx.Debug().HistoryStartFrom(kv.Domain(req.Domain))
+		return err
 	}); err != nil {
 		return nil, err
 	}
