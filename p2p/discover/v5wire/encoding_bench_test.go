@@ -20,8 +20,12 @@
 package v5wire
 
 import (
+	"encoding/binary"
 	"net/netip"
 	"testing"
+
+	"github.com/erigontech/erigon/common/mclock"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 // This benchmark checks performance of handshake packet decoding.
@@ -76,5 +80,22 @@ func BenchmarkV5_DecodePing(b *testing.B) {
 		if _, ok := packet.(*Ping); !ok {
 			b.Fatalf("wrong packet type %T", packet)
 		}
+	}
+}
+
+func BenchmarkHandshakeGC(b *testing.B) {
+	var (
+		clock mclock.Simulated
+		sc    = NewSessionCache(10, &clock)
+		addr  = netip.MustParseAddrPort("127.0.0.1:30303")
+	)
+	for i := range 10000 {
+		var id enode.ID
+		binary.BigEndian.PutUint64(id[:], uint64(i))
+		sc.storeSentHandshake(id, addr, &Whoareyou{})
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sc.handshakeGC()
 	}
 }

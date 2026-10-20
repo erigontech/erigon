@@ -6,6 +6,10 @@
 
 - rpc: a JSON-RPC call sent over GET (`/?method=...&params=...`) now needs `Content-Type: application/json`, as a POST already does; without it the server answers 415. A cross-site page cannot set this header without a CORS preflight, so this also covers plain-HTTP, non-loopback addresses, where browsers send neither `Origin` nor `Sec-Fetch-Site`. The empty GET health check is unchanged. Callers such as `curl "http://host:8545/?method=..."` must add `-H 'Content-Type: application/json'`. This can be a breaking change (#24969) — by @lupin012
 
+### Changed
+
+- p2p: the discovery endpoint predictor, which fills the local node record's IP and UDP port when they are not configured, now counts endpoint statements once per reporter network (IPv4 /24, IPv6 /48; hosts on the LAN individually) and ignores statements about an endpoint of the other address family. A node whose discovery peers all share one public /24 or /48 no longer predicts its endpoint from them (#24975) — by @mardgez13
+
 ---
 
 # Erigon v3.8.0 — Watery Whiskers — 2026-10-20
