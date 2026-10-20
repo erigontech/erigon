@@ -41,16 +41,9 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 	// Advance the forkchoice store's internal clock so that epoch-boundary
 	// checkpoint promotions (unrealized → realized) happen on time.
 	cfg.forkChoice.OnTick(utils.SecondsToMilliseconds(cfg.ethClock.GenesisTime() + cfg.ethClock.GetCurrentSlot()*cfg.beaconCfg.SecondsPerSlot))
-	_ = cfg.forkChoice.LoadJustifiedCheckpointState()
 
-	if err = cfg.syncedData.ViewHeadState(func(prevHeadState *state.CachingBeaconState) error {
-		// Get the current head of the fork choice
-		headRoot, headSlot, err = cfg.forkChoice.GetHead(prevHeadState)
-		if err != nil {
-			return fmt.Errorf("failed to get head: %w", err)
-		}
-		return nil
-	}); err != nil {
+	headRoot, headSlot, err = cfg.forkChoice.GetHeadWithSyncedHeadState()
+	if err != nil {
 		if errors.Is(err, synced_data.ErrNotSynced) {
 			// Get the current head of the fork choice
 			headRoot, headSlot, err = cfg.forkChoice.GetHead(nil)
@@ -473,20 +466,22 @@ func postForkchoiceOperations(tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot 
 		logger.Debug("Post forkchoice operations", "duration", time.Since(start))
 	}()
 
-	return cfg.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+	if err := cfg.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// Dump the head state on disk for ease of chain reorgs
 		if err := cfg.forkChoice.DumpBeaconStateOnDisk(headState); err != nil {
 			return fmt.Errorf("failed to dump beacon state on disk: %w", err)
 		}
 
-		if err := saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, headState.Slot()); err != nil {
-			return fmt.Errorf("failed to save finalized state on disk: %w", err)
-		}
-
 		// Shuffle validator set for the next epoch
 		preCacheNextShuffledValidatorSet(logger, cfg, headState)
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	if err := saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, headSlot); err != nil {
+		return fmt.Errorf("failed to save finalized state on disk: %w", err)
+	}
+	return nil
 }
 
 // doForkchoiceRoutine performs the fork choice routine by computing the new fork choice, updating the canonical chain in the database,
@@ -531,39 +526,53 @@ func preCacheNextShuffledValidatorSet(logger log.Logger, cfg *Cfg, b *state.Cach
 		return
 	}
 	workingPreCacheNextShuffledValidatorSet.Store(true)
+	currentEpoch := state.Epoch(b)
+	beaconConfig := cfg.beaconCfg
+
+	// Pre-cache shuffled sets for epochs: current-2, current-1, current, and next
+	epochsToCache := []uint64{currentEpoch + 1}
+	switch {
+	case currentEpoch >= 2:
+		epochsToCache = append(epochsToCache, currentEpoch-2, currentEpoch-1, currentEpoch)
+	case currentEpoch >= 1:
+		epochsToCache = append(epochsToCache, currentEpoch-1, currentEpoch)
+	default:
+		epochsToCache = append(epochsToCache, currentEpoch)
+	}
+
+	var inputs []shuffleInput
+	for _, epoch := range epochsToCache {
+		if in, ok := shuffleInputForEpoch(logger, beaconConfig, b, epoch); ok {
+			inputs = append(inputs, in)
+		}
+	}
 	go func() {
 		defer workingPreCacheNextShuffledValidatorSet.Store(false)
-		currentEpoch := state.Epoch(b)
-		beaconConfig := cfg.beaconCfg
-
-		// Pre-cache shuffled sets for epochs: current-2, current-1, current, and next
-		epochsToCache := []uint64{currentEpoch + 1}
-		switch {
-		case currentEpoch >= 2:
-			epochsToCache = append(epochsToCache, currentEpoch-2, currentEpoch-1, currentEpoch)
-		case currentEpoch >= 1:
-			epochsToCache = append(epochsToCache, currentEpoch-1, currentEpoch)
-		default:
-			epochsToCache = append(epochsToCache, currentEpoch)
-		}
-
-		for _, epoch := range epochsToCache {
-			preCacheShuffledSetForEpoch(logger, beaconConfig, b, epoch)
+		for _, in := range inputs {
+			preCacheShuffledSet(in)
 		}
 	}()
 }
 
-func preCacheShuffledSetForEpoch(logger log.Logger, beaconConfig *clparams.BeaconChainConfig, b *state.CachingBeaconState, epoch uint64) {
+type shuffleInput struct {
+	beaconConfig *clparams.BeaconChainConfig
+	epoch        uint64
+	blockRoot    common.Hash
+	indicies     []uint64
+	mix          common.Hash
+}
+
+func shuffleInputForEpoch(logger log.Logger, beaconConfig *clparams.BeaconChainConfig, b *state.CachingBeaconState, epoch uint64) (shuffleInput, bool) {
 	// Check if any action is needed
 	refSlot := ((epoch - 1) * b.BeaconConfig().SlotsPerEpoch) - 1
 	if epoch == 0 || refSlot >= b.Slot() {
-		return
+		return shuffleInput{}, false
 	}
 	// Get the block root at the beginning of the previous epoch
 	blockRootAtBegginingPrevEpoch, err := b.GetBlockRootAtSlot(refSlot)
 	if err != nil {
 		logger.Warn("failed to get block root at slot for pre-caching shuffled set", "err", err)
-		return
+		return shuffleInput{}, false
 	}
 
 	// Pre-cache active validators if not already cached
@@ -571,21 +580,28 @@ func preCacheShuffledSetForEpoch(logger log.Logger, beaconConfig *clparams.Beaco
 
 	// Skip if the shuffled set is already pre-cached
 	if _, ok := caches.ShuffledIndiciesCacheGlobal.Get(epoch, blockRootAtBegginingPrevEpoch); ok {
-		return
+		return shuffleInput{}, false
 	}
 
-	indicies := b.GetActiveValidatorsIndices(epoch)
-	shuffledIndicies := make([]uint64, len(indicies))
 	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
 		beaconConfig.EpochsPerHistoricalVector
-	// Input for the seed hash.
-	mix := b.GetRandaoMix(int(mixPosition))
+	return shuffleInput{
+		beaconConfig: b.BeaconConfig(),
+		epoch:        epoch,
+		blockRoot:    blockRootAtBegginingPrevEpoch,
+		indicies:     b.GetActiveValidatorsIndices(epoch),
+		mix:          b.GetRandaoMix(int(mixPosition)),
+	}, true
+}
+
+func preCacheShuffledSet(in shuffleInput) {
+	shuffledIndicies := make([]uint64, len(in.indicies))
 	start := time.Now()
-	shuffledIndicies = shuffling.ComputeShuffledIndicies(b.BeaconConfig(), mix, shuffledIndicies, indicies, epoch*beaconConfig.SlotsPerEpoch)
+	shuffledIndicies = shuffling.ComputeShuffledIndicies(in.beaconConfig, in.mix, shuffledIndicies, in.indicies, in.epoch*in.beaconConfig.SlotsPerEpoch)
 	shuffling_metrics.ObserveComputeShuffledIndiciesTime(start)
 
-	caches.ShuffledIndiciesCacheGlobal.Put(epoch, blockRootAtBegginingPrevEpoch, shuffledIndicies)
-	log.Info("[CL] pre-cached shuffled set", "epoch", epoch, "len", len(shuffledIndicies), "mix", common.Hash(mix))
+	caches.ShuffledIndiciesCacheGlobal.Put(in.epoch, in.blockRoot, shuffledIndicies)
+	log.Info("[CL] pre-cached shuffled set", "epoch", in.epoch, "len", len(shuffledIndicies), "mix", in.mix)
 }
 
 func preCacheActiveValidatorsForEpoch(b *state.CachingBeaconState, epoch uint64, blockRoot common.Hash) {

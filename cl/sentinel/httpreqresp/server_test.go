@@ -66,6 +66,11 @@ func TestMaxResponseBodySize(t *testing.T) {
 	}
 }
 
+func TestMaxMultiChunkResponse(t *testing.T) {
+	const want = uint64(1024 * (32 + 10485760 + 10485760/6 + 64))
+	require.Equal(t, want, maxMultiChunkResponse)
+}
+
 // maxBytesReader streams up to its limit and then signals ErrResponseTooLarge instead of
 // truncating, so an over-cap peer response surfaces as an explicit read error to the caller.
 func TestMaxBytesReader(t *testing.T) {

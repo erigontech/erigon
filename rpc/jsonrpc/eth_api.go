@@ -135,7 +135,7 @@ type EthAPI interface {
 	Sign(ctx context.Context, _ common.Address, _ hexutil.Bytes) (hexutil.Bytes, error)
 	SignTransaction(_ context.Context, txObject any) (common.Hash, error)
 	FillTransaction(ctx context.Context, args ethapi.CallArgs) (*ethapi.SignTransactionResult, error)
-	GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNr *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error)
+	GetProof(ctx context.Context, address common.Address, storageKeys StorageKeys, blockNr *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error)
 	CreateAccessList(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi.StateOverrides, optimizeGas *bool) (*accessListResult, error)
 
 	// Mining related (see ./eth_mining.go)

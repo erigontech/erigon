@@ -191,6 +191,48 @@ func TestMakeHeadersDifficultyAtMergeHeight(t *testing.T) {
 	assert.Equal(t, uint256.Int{}, headers[1].Difficulty, "block at MergeHeight")
 }
 
+func TestMakeHeadersDifficultyOverride(t *testing.T) {
+	mergeAt12 := chain.TestChainBerlinConfig.Copy()
+	mergeAt12.TerminalTotalDifficulty = uint256.NewInt(1)
+	mergeAt12.MergeHeight = common.NewUint64(12)
+	noMergeHeight := chain.TestChainBerlinConfig.Copy()
+	noMergeHeight.TerminalTotalDifficulty = uint256.NewInt(1)
+
+	override := func() SimulatedBlock {
+		return SimulatedBlock{BlockOverrides: &ethapi.BlockOverrides{Difficulty: (*hexutil.U256)(uint256.NewInt(1))}}
+	}
+	makeHeaders := func(config *chain.Config, baseDifficulty uint64, blocks []SimulatedBlock) ([]*types.Header, error) {
+		sim := &simulator{
+			base:        &types.Header{Number: *uint256.NewInt(10), Time: 50, Difficulty: *uint256.NewInt(baseDifficulty)},
+			chainConfig: config,
+		}
+		sanitized, err := sim.sanitizeSimulatedBlocks(blocks)
+		require.NoError(t, err)
+		return sim.makeHeaders(sanitized)
+	}
+	requireInvalidParams := func(t *testing.T, err error, message string) {
+		t.Helper()
+		var rpcErr *rpc.CustomError
+		require.ErrorAs(t, err, &rpcErr)
+		assert.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.Code)
+		assert.Equal(t, message, rpcErr.Message)
+	}
+
+	t.Run("applied before the merge", func(t *testing.T) {
+		headers, err := makeHeaders(mergeAt12, 5, []SimulatedBlock{override()})
+		require.NoError(t, err)
+		assert.Equal(t, *uint256.NewInt(1), headers[0].Difficulty)
+	})
+	t.Run("rejected after the merge", func(t *testing.T) {
+		_, err := makeHeaders(mergeAt12, 5, []SimulatedBlock{{}, override()})
+		requireInvalidParams(t, err, "block 12: difficulty override is not allowed after the merge")
+	})
+	t.Run("rejected on a zero-difficulty parent", func(t *testing.T) {
+		_, err := makeHeaders(noMergeHeight, 0, []SimulatedBlock{override()})
+		requireInvalidParams(t, err, "block 11: difficulty override is not allowed after the merge")
+	})
+}
+
 // TestSanitizeBlocksTooMany verifies the maxSimulateBlocks limit.
 func TestSanitizeBlocksTooMany(t *testing.T) {
 	sim := &simulator{base: &types.Header{Number: *uint256.NewInt(0), Time: 0}}
@@ -611,6 +653,35 @@ func TestSimulateV1PopulatesMaxUsedGas(t *testing.T) {
 	assert.GreaterOrEqual(t, uint64(call.MaxUsedGas), uint64(call.GasUsed))
 }
 
+func TestSimulateV1IgnoresLoneBlobFeeCap(t *testing.T) {
+	for _, validation := range []bool{false, true} {
+		t.Run(fmt.Sprintf("validation %v", validation), func(t *testing.T) {
+			m, _, bankAddr := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+			api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+			to := common.HexToAddress("0x3333333333333333333333333333333333333333")
+			gas := hexutil.Uint64(21_000)
+			feeCap := (*hexutil.U256)(uint256.NewInt(1_000_000_000))
+
+			result, err := api.SimulateV1(context.Background(), SimulationRequest{
+				BlockStateCalls: []SimulatedBlock{{Calls: []ethapi.CallArgs{{
+					From:                 &bankAddr,
+					To:                   &to,
+					Gas:                  &gas,
+					MaxFeePerGas:         feeCap,
+					MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(0)),
+					MaxFeePerBlobGas:     (*hexutil.U256)(uint256.NewInt(0)),
+				}}}},
+				Validation: validation,
+			}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+			require.NoError(t, err)
+			require.Len(t, result, 1)
+			require.Len(t, result[0].Calls, 1)
+			require.Nil(t, result[0].Calls[0].Error)
+			require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(result[0].Calls[0].Status))
+		})
+	}
+}
+
 // A base fee override must reach the BASEFEE opcode in non-validation mode too,
 // where the call carries no gas price of its own.
 func TestSimulateV1BaseFeeOverrideReachesEVM(t *testing.T) {
@@ -730,6 +801,33 @@ func TestSimulateV1WithdrawalsOverrideCreditsBalance(t *testing.T) {
 	require.Len(t, calls, 1)
 	require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(calls[0].Status))
 	assert.Equal(t, "0x00000000000000000000000000000000000000000000000000000001a13b8600", calls[0].ReturnData)
+}
+
+func TestSimulateV1MaxNonceSender(t *testing.T) {
+	for _, validation := range []bool{false, true} {
+		t.Run(fmt.Sprintf("validation=%v", validation), func(t *testing.T) {
+			m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+			api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+			to := common.HexToAddress("0x00000000000000000000000000000000c0ffee03")
+			maxNonce := hexutil.Uint64(math.MaxUint64)
+			gas := hexutil.Uint64(100_000)
+
+			_, err := api.SimulateV1(context.Background(), SimulationRequest{
+				BlockStateCalls: []SimulatedBlock{{
+					StateOverrides: &ethapi.StateOverrides{
+						accounts.InternAddress(bankAddr): {Nonce: &maxNonce},
+					},
+					Calls: []ethapi.CallArgs{{From: &bankAddr, To: &to, Gas: &gas}},
+				}},
+				Validation: validation,
+			}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+			var customErr *rpc.CustomError
+			require.ErrorAs(t, err, &customErr)
+			assert.Equal(t, rpc.ErrCodeInternalError, customErr.Code)
+			assert.ErrorContains(t, err, protocol.ErrNonceMax.Error())
+		})
+	}
 }
 
 func TestSimulateV1ClientDecodesMaxUsedGas(t *testing.T) {
