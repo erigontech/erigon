@@ -2228,6 +2228,12 @@ func TestValidateRead_DoneBalanceRead(t *testing.T) {
 		vm.WriteIncarnation(addr, Version{TxIndex: 2}, 1, true)
 		require.Equal(t, VersionValid, vm.ValidateVersion(5, newIO(uint256.Int{}), validateEqualVersion, true, false, false, ""))
 	})
+	t.Run("zero read wiped by the cell's own tx stays valid", func(t *testing.T) {
+		vm := NewVersionMap(nil)
+		vm.WriteBalance(addr, Version{TxIndex: 1}, bal, true)
+		vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
+		require.Equal(t, VersionValid, vm.ValidateVersion(5, newIO(uint256.Int{}), validateEqualVersion, true, false, false, ""))
+	})
 	t.Run("settled writer at a newer version stays valid under a settled-only check", func(t *testing.T) {
 		vm := NewVersionMap(nil)
 		vm.WriteBalance(addr, Version{TxIndex: 1, Incarnation: 1}, bal, true)
