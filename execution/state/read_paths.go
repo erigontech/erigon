@@ -378,13 +378,18 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 						ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
 						Val:        true,
 					})
-					// Record the wiped-slot zero anchored on the destruct so validation
-					// checks the destruct dependency, not the stale pre-destruct floor.
-					if path == StoragePath {
-						s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{
-							ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
-							Val:        uint256.Int{},
-						})
+					// Record the wiped zero anchored on the destruct so validation checks the
+					// destruct and a later revival of the field, not the stale pre-destruct floor.
+					hdr := ReadHeader{Source: MapRead, Version: sdVersion}
+					switch path {
+					case StoragePath:
+						s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{ReadHeader: hdr})
+					case BalancePath:
+						s.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader: hdr})
+					case NoncePath:
+						s.versionedReads.SetNonce(addr, VersionedRead[uint64]{ReadHeader: hdr})
+					case CodeSizePath:
+						s.versionedReads.SetCodeSize(addr, VersionedRead[int]{ReadHeader: hdr})
 					}
 					r.outcome = wipedFieldOutcome(s, addr)
 					r.source = MapRead

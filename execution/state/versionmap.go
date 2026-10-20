@@ -1528,6 +1528,10 @@ const (
 	VersionTooEarly
 )
 
+func wipedByDestruct(path AccountPath) bool {
+	return path == BalancePath || path == NoncePath || path == CodeSizePath || path == StoragePath
+}
+
 // validateRead validates one typed read. The recorded value stays typed T (never boxed):
 // readLive fetches the live version-map value for the same path and eq compares them for
 // the rare value tiebreaker. The recursive cross-path core is value-less, so it can't be
@@ -1600,6 +1604,17 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 	checkVersion func(readVersion, writeVersion Version) VersionValidity,
 	traceInvalid bool, tracePrefix string, recursive bool,
 ) VersionValidity {
+	if !recursive && source == MapRead && wipedByDestruct(path) {
+		// A field read wiped by a destruct is recorded at the destruct's version. It
+		// stays valid while that destruct holds and no later write revives the field.
+		if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIndex); ok && sdRR.resolved() && destructed &&
+			version.TxIndex == sdRR.DepIdx() && version.Incarnation == sdRR.Incarnation() {
+			if hi, ok := vm.LatestTxIndex(addr, path, key, txIndex-1); ok && hi > version.TxIndex {
+				return VersionInvalid
+			}
+			return VersionValid
+		}
+	}
 	valid := VersionValid
 	switch rr.Status() {
 	case MVReadResultDone, MVReadResultValidated:

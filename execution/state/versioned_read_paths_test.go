@@ -376,8 +376,11 @@ func TestVersionedRead_RevivedFieldWipedReadCaughtAtCommit(t *testing.T) {
 			t.Parallel()
 			addr := accounts.InternAddress([20]byte{0xcb})
 			vm := NewVersionMap(nil)
-			destructVersion := Version{TxIndex: 1}
-			vm.WriteSelfDestruct(addr, destructVersion, true, true)
+			destructor := newNoMaterializeTx(vm, 1)
+			require.NoError(t, destructor.CreateAccount(addr, true))
+			_, err := destructor.Selfdestruct(addr, false)
+			require.NoError(t, err)
+			vm.FlushVersionedWrites(destructor.VersionedWrites(), true, "")
 			ibs := NewWithVersionMap(&emptyReader{}, vm)
 			defer ibs.Close()
 			ibs.SetTxContext(1, 3)
