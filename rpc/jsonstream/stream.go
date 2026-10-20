@@ -185,7 +185,7 @@ func WriteHexBytes[S ~[]E, E ~[]byte](s *Stream, items S) {
 		size += hexutil.QuotedLen(len(items[i]))
 	}
 	if s.out != nil && size >= FlushThreshold {
-		streamHexBytes(s, items)
+		s.appendArrayChunked(len(items), func(i int) { s.appendHex(items[i]) })
 		s.afterValue()
 		return
 	}
@@ -199,25 +199,6 @@ func WriteHexBytes[S ~[]E, E ~[]byte](s *Stream, items S) {
 	}
 	s.stream.SetBuffer(append(buf, ']'))
 	s.afterValue()
-}
-
-func streamHexBytes[S ~[]E, E ~[]byte](s *Stream, items S) {
-	buf := slices.Grow(s.stream.Buffer(), 2*FlushThreshold)
-	start := len(buf)
-	buf = append(buf, '[')
-	for i := range items {
-		if i > 0 {
-			buf = append(buf, ',')
-		}
-		buf = hexutil.AppendQuoted(buf, items[i])
-		if len(buf)-start >= FlushThreshold {
-			s.stream.SetBuffer(buf[:start])
-			s.writeThrough(buf[start:])
-			buf = s.stream.Buffer()
-			start = len(buf)
-		}
-	}
-	s.stream.SetBuffer(append(buf, ']'))
 }
 
 // WriteQuotedText writes v.AppendText's output as a JSON string, without an escape scan: it is
