@@ -346,12 +346,19 @@ func TestCodeCache_AddrCodeSlotCollision(t *testing.T) {
 func TestCodeCache_PutWithCodeHashRepairsWrongPairing(t *testing.T) {
 	c := NewCodeCache(datasize.MB, datasize.MB)
 	defer c.Close()
-	addr1, addr2 := common.Address{1}, common.Address{2}
+	var addr1, addr2, addr3 common.Address
+	addr1[19], addr2[19], addr3[19] = 1, 2, 3 // distinct addrSlot
 	x, y := []byte{0x60, 0x01}, []byte{0x60, 0x02, 0x00}
 	hx := crypto.Keccak256(x)
 
 	c.PutWithCodeHashIfAbsent(addr1[:], y, hx, 1)
 	c.PutWithCodeHash(addr2[:], x, hx, 5)
+
+	_, ok := c.Get(addr1[:])
+	require.False(t, ok, "addr1 was bound by the wrong fill and must not read the repaired bytes")
+	c.PutWithCodeHashIfAbsent(addr3[:], y, hx, 6)
+	_, ok = c.Get(addr3[:])
+	require.False(t, ok, "a fill whose bytes differ from the live entry must not bind")
 
 	got, ok := c.Get(addr2[:])
 	require.True(t, ok)

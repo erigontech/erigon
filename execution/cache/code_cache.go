@@ -62,8 +62,11 @@ type versionedAddressID struct {
 	// codeHash is the addr's keccak codeHash, used to reject a 64-bit maphash
 	// collision on addrID.
 	codeHash [32]byte
-	txNum    uint64
-	epoch    uint32
+	// codeTxNum is the stamp of the content entry the binding was made against;
+	// a replaced entry has another stamp, so its old bindings miss.
+	codeTxNum uint64
+	txNum     uint64
+	epoch     uint32
 }
 
 type addrCodeHashEntry struct {
@@ -322,6 +325,13 @@ func (c *CodeCache) GetWithTxNum(addr []byte) ([]byte, uint64, bool) {
 		c.codeMisses.Add(1)
 		return nil, 0, false
 	}
+	if ce.txNum != vID.codeTxNum {
+		dropSlotIf(c.addrToHash, &c.addrBindMu, addrSlot(k), func(cur versionedAddressID) bool {
+			return cur.addr == k && cur.codeTxNum == vID.codeTxNum
+		})
+		c.codeMisses.Add(1)
+		return nil, 0, false
+	}
 	c.codeHits.Add(1)
 	// The addr→code binding is what an unwind re-binds; vID.txNum bounds it.
 	return ce.code, vID.txNum, true
@@ -338,7 +348,7 @@ func (c *CodeCache) PutIfAbsent(addr []byte, code []byte, txNum uint64) {
 	c.putWithCodeHash(addr, code, crypto.Keccak256(code), txNum, false)
 }
 
-func (c *CodeCache) bindAddrLocked(addr []byte, keyHash [32]byte, codeID, txNum uint64, ep uint32, overwriteAddr bool) {
+func (c *CodeCache) bindAddrLocked(addr []byte, keyHash [32]byte, codeID, codeTxNum, txNum uint64, ep uint32, overwriteAddr bool) {
 	a := common.BytesToAddress(addr)
 	c.addrBindMu.Lock()
 	bindAddr := overwriteAddr
@@ -351,7 +361,7 @@ func (c *CodeCache) bindAddrLocked(addr []byte, keyHash [32]byte, codeID, txNum 
 		if resident {
 			c.addrToHash.Remove(slot)
 		}
-		c.addrToHash.Add(slot, versionedAddressID{addr: a, addrID: codeID, codeHash: keyHash, txNum: txNum, epoch: ep})
+		c.addrToHash.Add(slot, versionedAddressID{addr: a, addrID: codeID, codeHash: keyHash, codeTxNum: codeTxNum, txNum: txNum, epoch: ep})
 	}
 	c.addrBindMu.Unlock()
 }
@@ -497,9 +507,6 @@ func (c *CodeCache) putWithCodeHash(addr []byte, code []byte, codeHash []byte, t
 	ep := c.coh.Epoch()
 	kh := hash32(codeHash)
 
-	if len(addr) > 0 {
-		c.bindAddrLocked(addr, kh, hcc, txNum, ep, overwriteAddr)
-	}
 	if overwriteAddr {
 		c.dropMismatchedContentLocked(hcc, kh, code)
 	}
@@ -511,6 +518,20 @@ func (c *CodeCache) putWithCodeHash(addr []byte, code []byte, codeHash []byte, t
 	entry := codeEntry{code: code, keyHash: kh, txNum: txNum, epoch: ep}
 	putContentLocked(c.codeHashToCode, hcc, entry, codeEntryStamp, codeEntryCodeLen,
 		&c.coh, &c.codeHashCodeSize, codeEntryBytes)
+
+	if len(addr) == 0 {
+		return
+	}
+	// A fill whose bytes differ from the live entry under its codeHash must not
+	// read that entry back, so it does not bind.
+	codeTxNum := txNum
+	if ce, ok := c.codeHashToCode.Get(hcc); ok && ce.keyHash == kh {
+		if !bytes.Equal(ce.code, code) {
+			return
+		}
+		codeTxNum = ce.txNum
+	}
+	c.bindAddrLocked(addr, kh, hcc, codeTxNum, txNum, ep, overwriteAddr)
 }
 
 // dropMismatchedContentLocked removes live entries under codeHash whose bytes
