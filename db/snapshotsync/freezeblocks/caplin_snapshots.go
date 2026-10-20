@@ -18,10 +18,12 @@ package freezeblocks
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -45,6 +47,8 @@ import (
 )
 
 var sidecarSSZSize = (&cltypes.BlobSidecar{}).EncodingSizeSSZ()
+
+var ErrBeaconBlocksGap = errors.New("beaconblocks segments have a gap")
 
 // value: chunked(ssz(SignedBeaconBlocks))
 // slot       -> beacon_slot_segment_offset
@@ -142,6 +146,32 @@ func (s *CaplinSnapshots) SegFileNames(from, to uint64) []string {
 		}
 	}
 	return res
+}
+
+func (s *CaplinSnapshots) OpenFolder() error {
+	if err := beaconBlocksGap(s.Dir()); err != nil {
+		return err
+	}
+	return s.BaseRoSnapshots.OpenFolder()
+}
+
+// Go embedding has no virtual dispatch: the promoted base version would open past a gap.
+func (s *CaplinSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
+
+func beaconBlocksGap(dir string) error {
+	blocks, err := snapshotsync.AllTypedSegments(dir, []snaptype.Type{snaptype.BeaconBlocks})
+	if err != nil {
+		return err
+	}
+	slices.SortFunc(blocks, func(a, b snaptype.FileInfo) int { return cmp.Compare(a.From, b.From) })
+	var end uint64
+	for i, f := range blocks {
+		if i > 0 && f.From > end {
+			return fmt.Errorf("%w at slots [%d, %d); once the snapshot download is complete, run `erigon snapshots reset`", ErrBeaconBlocksGap, end, f.From)
+		}
+		end = max(end, f.To)
+	}
+	return nil
 }
 
 type snapshotNotifier interface {
@@ -390,6 +420,9 @@ type indexClaim struct {
 func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Logger) error {
 	if s == nil {
 		return nil
+	}
+	if err := beaconBlocksGap(s.Dir()); err != nil {
+		return err
 	}
 	files, err := snapshotsync.AllTypedSegments(s.Dir(), s.Types())
 	if err != nil {
