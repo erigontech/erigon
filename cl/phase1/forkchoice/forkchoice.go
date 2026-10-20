@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"golang.org/x/sync/singleflight"
 )
 
 // ForkNode is a struct that represents a node in the fork choice tree.
@@ -147,6 +148,8 @@ type ForkChoiceStore struct {
 	checkpointStates   sync.Map // We keep ssz snappy of it as the full beacon state is full of rendundant data.
 	publicKeysRegistry public_keys_registry.PublicKeyRegistry
 	localValidators    *validator_params.ValidatorParams
+
+	checkpointStateBuilds singleflight.Group
 
 	latestMessages    *latestMessagesStore
 	syncedDataManager *synced_data.SyncedDataManager
@@ -928,21 +931,29 @@ func (f *ForkChoiceStore) Participation(epoch uint64) (*solid.ParticipationBitLi
 }
 
 func (f *ForkChoiceStore) ForkNodes() []ForkNode {
+	trackGloasWeights := f.trackGloasWeights()
+	if trackGloasWeights {
+		_, _, _ = f.GetHeadNode()
+	}
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	forkNodes := make([]ForkNode, 0, len(f.weights))
-	for blockRoot, weight := range f.weights {
+	weights := f.weights
+	if trackGloasWeights {
+		weights = f.gloasWeightTree.snapshotWeights()
+	}
+	forkNodes := make([]ForkNode, 0, len(weights))
+	for blockRoot, weight := range weights {
 		header, has := f.forkGraph.GetHeader(blockRoot)
 		if !has {
 			continue
 		}
-		justifiedCheckpoint, has := f.forkGraph.GetCurrentJustifiedCheckpoint(blockRoot)
-		if !has {
-			continue
-		}
-		finalizedCheckpoint, has := f.forkGraph.GetFinalizedCheckpoint(blockRoot)
-		if !has {
-			continue
+		justifiedCheckpoint, hasJustified := f.forkGraph.GetCurrentJustifiedCheckpoint(blockRoot)
+		finalizedCheckpoint, hasFinalized := f.forkGraph.GetFinalizedCheckpoint(blockRoot)
+		if !hasJustified || !hasFinalized {
+			if blockRoot != f.forkGraph.AnchorRoot() || blockRoot != f.JustifiedCheckpoint().Root {
+				continue
+			}
+			justifiedCheckpoint, finalizedCheckpoint = f.JustifiedCheckpoint(), f.FinalizedCheckpoint()
 		}
 		blockHash, _ := f.eth2Roots.Get(blockRoot)
 

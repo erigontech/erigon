@@ -1022,7 +1022,8 @@ func (ht *HistoryRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 }
 
 func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
-	minIdxTx, maxIdxTx := ht.iit.ii.minTxNumInDB(tx), ht.iit.ii.maxTxNumInDB(tx)
+	minIdxTx, _ := ht.iit.ii.minTxNumInDB(tx)
+	maxIdxTx := ht.iit.ii.maxTxNumInDB(tx)
 
 	stat, err := GetPruneValProgress(tx, []byte(ht.h.ValuesTable))
 	if err != nil {
@@ -1043,7 +1044,7 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 		}
 		txTo = min(ht.files.EndTxNum(), ht.iit.files.EndTxNum(), untilTx)
 	}
-	minTxDB := ht.h.minTxNumInDB(tx)
+	minTxDB, _ := ht.h.minTxNumInDB(tx)
 	delta := 0.0
 	if txTo > minTxDB {
 		delta = float64(txTo-minTxDB) / float64(ht.stepSize) // TODO: why this is happening?
