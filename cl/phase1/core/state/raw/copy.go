@@ -108,7 +108,11 @@ func (b *BeaconState) CopyInto(dst *BeaconState) error {
 		dst.builderPendingWithdrawals = b.builderPendingWithdrawals.ShallowCopy()
 		dst.latestBlockHash = b.latestBlockHash
 		dst.payloadExpectedWithdrawals = b.payloadExpectedWithdrawals.ShallowCopy()
-		b.ptcWindow.CopyTo(dst.ptcWindow)
+		for i := 0; i < b.ptcWindow.Length(); i++ {
+			ptc := dst.ptcWindow.Get(i)
+			b.ptcWindow.Get(i).CopyTo(ptc)
+			dst.ptcWindow.Set(i, ptc)
+		}
 	}
 	// Now sync internals: copy the cached leaf hashes but mark every leaf
 	// dirty so the destination will recompute them on the next HashSSZ().
