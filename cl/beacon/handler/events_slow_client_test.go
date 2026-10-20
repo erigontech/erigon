@@ -262,3 +262,52 @@ func TestWriteEventStreamReleasesQueuedBytes(t *testing.T) {
 	require.NoError(t, writeEventStream(w, q, nil))
 	require.Zero(t, q.queued.Load())
 }
+
+// flushUntilAbortWriter blocks Flush until a past write deadline arrives, so the writer is still inside Flush
+// when the handler aborts it and can clear or re-arm the deadline afterwards.
+type flushUntilAbortWriter struct {
+	header       http.Header
+	flushOnce    sync.Once
+	flushStarted chan struct{}
+	abortOnce    sync.Once
+	abort        chan struct{}
+	deadline     atomic.Int64
+}
+
+func newFlushUntilAbortWriter() *flushUntilAbortWriter {
+	return &flushUntilAbortWriter{header: http.Header{}, flushStarted: make(chan struct{}), abort: make(chan struct{})}
+}
+
+func (w *flushUntilAbortWriter) Header() http.Header         { return w.header }
+func (w *flushUntilAbortWriter) WriteHeader(int)             {}
+func (w *flushUntilAbortWriter) Write(b []byte) (int, error) { return len(b), nil }
+
+func (w *flushUntilAbortWriter) Flush() {
+	w.flushOnce.Do(func() { close(w.flushStarted) })
+	<-w.abort
+}
+
+func (w *flushUntilAbortWriter) SetWriteDeadline(t time.Time) error {
+	if t.IsZero() {
+		w.deadline.Store(0)
+		return nil
+	}
+	w.deadline.Store(t.UnixNano())
+	if !t.After(time.Now()) {
+		w.abortOnce.Do(func() { close(w.abort) })
+	}
+	return nil
+}
+
+func TestEventStreamTeardownLeavesPastWriteDeadline(t *testing.T) {
+	w := newFlushUntilAbortWriter()
+	a, handlerDone := startEventStream(t, w)
+	waitDone(t, w.flushStarted, "event stream never flushed")
+
+	sendBlocks(t, a, 2*eventStreamWriteQueueSize, "a stalled event stream client blocked the event emitter")
+	waitDone(t, handlerDone, "overflowed event stream did not close")
+
+	d := w.deadline.Load()
+	require.NotZero(t, d, "write deadline was cleared after teardown")
+	require.False(t, time.Unix(0, d).After(time.Now()), "write deadline was re-armed after teardown")
+}
