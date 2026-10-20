@@ -336,12 +336,20 @@ func (f *ForkChoiceStore) buildCheckpointState(checkpoint solid.Checkpoint) (*ch
 	f.publicKeysRegistry.AddState(checkpoint, baseState)
 	checkpointState := newCheckpointState(f.beaconCfg, f.publicKeysRegistry, validators,
 		mixes, baseState.GenesisValidatorsRoot(), baseState.Fork(), getUnslashedActiveBalance(baseState), state.Epoch(baseState.BeaconState), checkpoint)
+	if f.belowFinalized(checkpoint) {
+		return checkpointState, nil
+	}
 	// Cache in memory what we are left with.
 	f.storeCheckpointState(checkpoint, checkpointState)
-	if finalized, ok := f.finalizedCheckpoint.Load().(solid.Checkpoint); ok && checkpoint.Epoch < finalized.Epoch {
+	if f.belowFinalized(checkpoint) {
 		f.checkpointStates.Delete(checkpoint)
 	}
 	return checkpointState, nil
+}
+
+func (f *ForkChoiceStore) belowFinalized(checkpoint solid.Checkpoint) bool {
+	finalized, ok := f.finalizedCheckpoint.Load().(solid.Checkpoint)
+	return ok && checkpoint.Epoch < finalized.Epoch
 }
 
 // storeCheckpointState stores the state, then evicts the lowest-epoch entries

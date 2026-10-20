@@ -1316,6 +1316,27 @@ func TestCheckpointStatesKeepCurrentJustified(t *testing.T) {
 	require.Equal(t, maxCheckpointStates, checkpointStateCacheLen(store))
 }
 
+func TestCheckpointStateBelowFinalizedKeepsFullCache(t *testing.T) {
+	checkpoints := checkpointStateCacheTestCheckpoints(maxCheckpointStates + 1)
+	belowFinalized, valid := checkpoints[0], checkpoints[1:]
+	store := newCheckpointStateCacheTestStore(t, checkpoints, solid.Checkpoint{})
+	store.finalizedCheckpoint.Store(valid[0])
+	for _, checkpoint := range valid {
+		_, err := store.getCheckpointState(checkpoint)
+		require.NoError(t, err)
+	}
+
+	built, err := store.getCheckpointState(belowFinalized)
+	require.NoError(t, err)
+	require.NotNil(t, built)
+
+	require.Equal(t, maxCheckpointStates, checkpointStateCacheLen(store))
+	for _, checkpoint := range valid {
+		_, ok := store.checkpointStates.Load(checkpoint)
+		require.True(t, ok, "epoch %d", checkpoint.Epoch)
+	}
+}
+
 type failOnceStateForkGraph struct {
 	fork_graph.ForkGraph
 	err   error
