@@ -103,8 +103,9 @@ message Pair {
   bytes k = 1;
   bytes v = 2;
   uint32 cursor_id = 3; // send once after new cursor open
-  uint64 view_id = 4;   // return once after tx open. mdbx's tx.ViewID() - id of write transaction in db
+  uint64 view_id = 4;   // MDBX snapshot ID, refreshed when the server renews the transaction.
   uint64 tx_id = 5;     // return once after tx open. internal identifier - use it in other methods - to achieve consistent DB view (to read data from same DB tx on server).
+  optional uint64 history_files_generation = 6; // Pinned history files for view_id, refreshed on renewal; absent when unsupported.
 }
 
 enum Action {

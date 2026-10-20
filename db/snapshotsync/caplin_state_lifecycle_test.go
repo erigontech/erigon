@@ -129,7 +129,17 @@ func TestCaplinStateBlocksAvailableUsesLowestTable(t *testing.T) {
 	writeCaplinStateFixture(t, dirs.SnapCaplin, kv.PendingDepositsDump, 0, 100_000, logger)
 
 	s := openTestCaplinStateSnapshotsWithTables(t, dirs, tables, logger)
-	require.Equal(t, uint64(50_000), s.BlocksAvailable())
+	available := s.BlocksAvailable()
+	require.Equal(t, uint64(49_999), available)
+
+	// Consumers read slots up to and including BlocksAvailable, so every table needs a visible
+	// segment covering it.
+	view := s.View()
+	defer view.Close()
+	for _, table := range tables {
+		_, ok := view.VisibleSegment(available, table)
+		require.True(t, ok, "table %s has no segment for BlocksAvailable()=%d", table, available)
+	}
 }
 
 func TestCaplinStateBlocksAvailableZeroWhenTableHasNoSegments(t *testing.T) {
@@ -248,7 +258,7 @@ func TestCaplinStateBlocksAvailableStopsAtGap(t *testing.T) {
 	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 100_000, 150_000, logger)
 
 	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
-	require.Equal(t, uint64(50_000), s.IndicesMax(), "index height must come from the visible set, not raw dirty coverage")
+	require.Equal(t, uint64(49_999), s.IndicesMax(), "index height must come from the visible set, not raw dirty coverage")
 	require.Equal(t, uint64(49_999), s.SegmentsMax())
 	require.Equal(t, uint64(49_999), s.BlocksAvailable())
 }

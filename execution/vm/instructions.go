@@ -771,6 +771,15 @@ func stMstore(_ uint64, scope *CallContext) string {
 	return fmt.Sprintf("%s %d %d", MSTORE, mStart.Uint64(), &val)
 }
 
+// opMcopy implements the MCOPY opcode (https://eips.ethereum.org/EIPS/eip-5656)
+func opMcopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	// These values are checked for overflow during memory expansion calculation
+	// (the memorySize function on the opcode).
+	dst, src, length := scope.Stack.pop3()
+	scope.Memory.Copy(dst.Uint64(), src.Uint64(), length.Uint64())
+	return pc, nil, nil
+}
+
 func opMstore8(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	off, val := scope.Stack.pop2Uint64()
 	scope.Memory.store[off] = byte(val)

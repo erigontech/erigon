@@ -70,6 +70,15 @@ type commitmentCalculator struct {
 	logPrefix   string
 	logger      log.Logger
 
+	// logCommit emits the periodic commit log/gauges for the executor; nil disables
+	// it. Called on this calculator's goroutine, serialized against the exec
+	// goroutine's LogExecution by Progress.logMu.
+	logCommit func(commitment.CommitProgress)
+
+	// lastCommitProgress is the trie's most recent per-round counters, captured by
+	// recordProgress during compute; touched only on this calculator's goroutine.
+	lastCommitProgress commitment.CommitProgress
+
 	// updates is the calculator's OWN buffer — only this goroutine touches it.
 	updates *commitment.Updates
 
@@ -183,6 +192,7 @@ func newCommitmentCalculator(
 	blockRequests chan *blockRequest,
 	out chan commitmentResult,
 	drTemplate *state.LayeredDomainReader,
+	logCommit func(commitment.CommitProgress),
 ) (*commitmentCalculator, error) {
 	// ModeUpdate carries values in its btree for the trie to read; the parallel
 	// trie reads leaf values from the as-of reader, so keep its ModeParallel buffer.
@@ -220,6 +230,7 @@ func newCommitmentCalculator(
 		chainConfig:          chainConfig,
 		logPrefix:            logPrefix,
 		logger:               logger,
+		logCommit:            logCommit,
 		updates:              calcUpdates,
 		spare:                spareUpdates,
 		state:                newCalcState(asOfReader, logger, logPrefix),
@@ -262,6 +273,8 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 	// commitment behind sd.mem, causing nonce mismatches on batch restart; all
 	// buffered items must be processed. blockRequests is only a compute-ahead
 	// heads-up, not a gate, so it is set to nil once closed rather than drained.
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 	in, reqs := cc.in, cc.blockRequests
 	for in != nil {
 		select {
@@ -280,6 +293,10 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 			cc.handleMessage(ctx, result)
 		case req, ok := <-reqs:
 			reqs = cc.acceptBlockRequest(ctx, reqs, req, ok)
+		case <-logEvery.C:
+			if cc.logCommit != nil {
+				cc.logCommit(cc.lastCommitProgress)
+			}
 		}
 	}
 }
@@ -790,6 +807,15 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	cc.publish(ctx, r)
 }
 
+// recordProgress captures the trie's latest per-round counters during a compute,
+// for the periodic commit log. Called synchronously from ComputeCommitmentWithDiff
+// on this calculator's goroutine.
+func (cc *commitmentCalculator) recordProgress(p *commitment.CommitProgress) {
+	if p != nil {
+		cc.lastCommitProgress = *p
+	}
+}
+
 // computeIsolated computes under a nil changeset accumulator, so a block that
 // owns no changeset records into none. It returns the root and the flush of its
 // own deferred updates, which the caller runs only once the root is accepted.
@@ -807,7 +833,7 @@ func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTar
 		return nil, nil, err
 	}
 
-	rh, err := cc.doms.GetCommitmentContext().ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil, nil)
+	rh, err := cc.doms.GetCommitmentContext().ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.recordProgress, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -890,7 +916,7 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 		return nil, fmt.Errorf("no changeset accumulator saved for block %d (%x)", t.blockNum, t.blockHash)
 	}
 	diff := &cs.Diffs[kv.CommitmentDomain]
-	return cc.doms.GetCommitmentContext().ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil, diff)
+	return cc.doms.GetCommitmentContext().ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.recordProgress, diff)
 }
 
 // asOfStateReader reads account/storage/code at a specific txNum via
