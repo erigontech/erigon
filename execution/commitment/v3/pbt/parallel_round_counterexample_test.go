@@ -22,6 +22,7 @@ import (
 	"math/rand"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -36,7 +37,7 @@ func TestParallelRoundServedViewsRejectsIdleReader(t *testing.T) {
 	require.NoError(t, err)
 	base := newParallelRoundBase(corpus.snapshot)
 	trie := base.trie()
-	holdFirstTaskForSecond(trie)
+	holdFirstTaskForSecondWithin(trie, 5*time.Second)
 	hook := trie.phaseHook
 	joined := make(chan struct{})
 	warmed := make(chan struct{})

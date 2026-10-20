@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"flag"
 	"fmt"
 	"maps"
 	"math/rand"
@@ -257,7 +258,23 @@ func parallelRoundConvertOps(r *rand.Rand, k int) []Op {
 
 var errParallelRoundSerial = errors.New("no second task started while the first task was in progress")
 
+var parallelRoundGateStart = time.Now()
+
+func parallelRoundGateWait() time.Duration {
+	wait := time.Minute
+	if timeout := flag.Lookup("test.timeout"); timeout != nil {
+		if limit, ok := timeout.Value.(flag.Getter).Get().(time.Duration); ok && limit > 0 {
+			wait = min(wait, (limit-time.Since(parallelRoundGateStart))/2)
+		}
+	}
+	return wait
+}
+
 func holdFirstTaskForSecond(trie *Trie) {
+	holdFirstTaskForSecondWithin(trie, parallelRoundGateWait())
+}
+
+func holdFirstTaskForSecondWithin(trie *Trie, wait time.Duration) {
 	var started atomic.Int32
 	both := make(chan struct{})
 	trie.SetPhaseHook(func(_ phaseTask, op *Op) error {
@@ -270,7 +287,7 @@ func holdFirstTaskForSecond(trie *Trie) {
 		select {
 		case <-both:
 			return nil
-		case <-time.After(5 * time.Second):
+		case <-time.After(wait):
 			return errParallelRoundSerial
 		}
 	})

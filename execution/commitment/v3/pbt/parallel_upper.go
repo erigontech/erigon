@@ -72,6 +72,13 @@ func (c *phaseContext) checkOwner(key []byte) error {
 	return nil
 }
 
+func (t *Trie) checkRowOwner(key []byte) error {
+	if ctx, ok := t.ctx.(*phaseContext); ok {
+		return ctx.checkOwner(key)
+	}
+	return nil
+}
+
 func (c *phaseContext) Branch(key []byte) ([]byte, kv.Step, error) {
 	if c.prefix != nil && !ownsRecordKey(key, c.prefix) {
 		return nil, 0, fmt.Errorf("record %x is above subtree prefix", key)
