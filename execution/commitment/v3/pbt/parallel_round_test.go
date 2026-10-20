@@ -531,3 +531,82 @@ func TestParallelRoundJoinRefusesTaskOwnedRecords(t *testing.T) {
 		}
 	}
 }
+
+func parallelRoundStorageStem(first byte) []byte {
+	return append([]byte{eip8297.StorageZone, first}, make([]byte, 31)...)
+}
+
+func TestParallelRoundRemovesAbsentSlotsFromExistingBucket(t *testing.T) {
+	stemX, stemY := parallelRoundStorageStem(0x30), parallelRoundStorageStem(0x50)
+	account := parallelRoundKey(eip8297.AccountZone, 0x10, 1, 0)
+	initial := []Op{
+		{Key: storageKeyWithSuffix(stemX, 0x10, 1), Value: testTrieValue(1)},
+		{Key: storageKeyWithSuffix(stemX, 0x20, 2), Value: testTrieValue(2)},
+		{Key: storageKeyWithSuffix(stemY, 0x10, 1), Value: testTrieValue(3)},
+		{Key: account, Value: testTrieValue(4)},
+	}
+	ops := []Op{
+		{Key: storageKeyWithSuffix(stemX, 0x10, 9)},
+		{Key: storageKeyWithSuffix(stemX, 0x80, 1)},
+		{Key: storageKeyWithSuffix(stemY, 0x10, 1), Value: testTrieValue(9)},
+		{Key: account, Value: testTrieValue(8)},
+	}
+	bucketX := parallelRoundRowKey(t, eip8297.PathFromBits(stemX, 264))
+	var before []byte
+	runParallelRoundCollapse(t, initial, ops, func(t *testing.T, records map[string][]byte) {
+		before = records[string(bucketX)]
+		require.NotEmpty(t, before)
+	}, func(t *testing.T, records map[string][]byte) {
+		require.Equal(t, before, records[string(bucketX)])
+	})
+}
+
+func TestParallelRoundBucketEmptiedByDeletesAloneInChain(t *testing.T) {
+	stemX, stemY := parallelRoundStorageStem(0x30), parallelRoundStorageStem(0x50)
+	x1, x2 := storageKeyWithSuffix(stemX, 0x10, 1), storageKeyWithSuffix(stemX, 0x20, 2)
+	y1 := storageKeyWithSuffix(stemY, 0x10, 1)
+	initial := []Op{{Key: x1, Value: testTrieValue(1)}, {Key: x2, Value: testTrieValue(2)}, {Key: y1, Value: testTrieValue(3)}}
+	ops := []Op{{Key: x1}, {Key: x2}, {Key: y1, Value: testTrieValue(9)}}
+	chainRow := parallelRoundRowKey(t, chainPrefix(eip8297.StorageZone, 3))
+	bucketX := parallelRoundRowKey(t, eip8297.PathFromBits(stemX, 264))
+	runParallelRoundCollapse(t, initial, ops, func(t *testing.T, records map[string][]byte) {
+		require.Contains(t, records, string(bucketX))
+		require.NotContains(t, records, string(chainRow))
+	}, func(t *testing.T, records map[string][]byte) {
+		require.NotContains(t, records, string(bucketX))
+		for key := range records {
+			path, err := eip8297.DecodeBitPath([]byte(key))
+			if err == nil && path.BitLen >= 12 {
+				chain := chainPrefix(eip8297.StorageZone, 3)
+				require.False(t, pathHasPrefix(&path, &chain), "record %x is left under the emptied chain", []byte(key))
+			}
+		}
+	})
+}
+
+func TestParallelRoundSplitBucketSubtaskRemovesOnlyAbsentSlots(t *testing.T) {
+	stem := parallelRoundStorageStem(0x40)
+	var initial, ops []Op
+	for _, first := range []byte{0x10, 0x20} {
+		for last := range byte(4) {
+			initial = append(initial, Op{Key: storageKeyWithSuffix(stem, first+last, last+1), Value: testTrieValue(first + last)})
+			ops = append(ops, Op{Key: storageKeyWithSuffix(stem, first+last, last+1), Value: testTrieValue(first + last + 100)})
+		}
+	}
+	initial = append(initial, Op{Key: storageKeyWithSuffix(stem, 0x30, 1), Value: testTrieValue(7)})
+	ops = append(ops, Op{Key: storageKeyWithSuffix(stem, 0x31, 1)}, Op{Key: storageKeyWithSuffix(stem, 0x32, 1)})
+	plan, err := buildPhasePlan(sortParallelRoundOps(slices.Clone(ops)))
+	require.NoError(t, err)
+	absentOnly := eip8297.PathFromBits(append(slices.Clone(stem), 0x30), 268)
+	require.True(t, slices.ContainsFunc(plan.tasks, func(task phaseTask) bool {
+		return task.kind == phaseBucketSubtask && task.prefix == absentOnly
+	}))
+	bucket := parallelRoundRowKey(t, eip8297.PathFromBits(stem, 264))
+	runParallelRoundCollapse(t, initial, ops, func(t *testing.T, records map[string][]byte) {
+		record := parallelRoundRecord(t, records, bucket)
+		require.Equal(t, 3, parallelRoundCells(&record))
+	}, func(t *testing.T, records map[string][]byte) {
+		record := parallelRoundRecord(t, records, bucket)
+		require.Equal(t, 3, parallelRoundCells(&record))
+	})
+}

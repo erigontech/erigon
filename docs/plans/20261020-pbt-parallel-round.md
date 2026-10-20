@@ -308,19 +308,19 @@ flowchart LR
 - Modify: `execution/commitment/v3/pbt/incremental_upper.go`
 - Modify: `execution/commitment/v3/pbt/parallel_round_test.go`
 
-- [ ] write parity tests first:
+- [x] write parity tests first:
       - removes of absent slots from an existing bucket (this shape reaches the fallback today; same-value rewrites do
         not);
       - a bucket emptied by deletes;
       - a split bucket where one subtask only removes absent slots
-- [ ] `preparePhaseTasks` computes initial descriptors for chain tasks only. Bucket subtasks read the bucket root from
+- [x] `preparePhaseTasks` computes initial descriptors for chain tasks only. Bucket subtasks read the bucket root from
       its record inside the task
-- [ ] delete the root-to-bucket fallback walk. A bucket task with no deltas reports unchanged, and the storage chain
+- [x] delete the root-to-bucket fallback walk. A bucket task with no deltas reports unchanged, and the storage chain
       leaves that bucket's cell as is
-- [ ] confirm `TestTrieParallelChurnParity` and `TestVerifyIsReadOnlyAcrossChurnRounds` pass unchanged. Mutation
+- [x] confirm `TestTrieParallelChurnParity` and `TestVerifyIsReadOnlyAcrossChurnRounds` pass unchanged. Mutation
       check: make the unchanged path report `present=false`, and the package must go red
 - [ ] benchmark before/after through `ab-verdict`
-- [ ] run gates — must pass before Task 6
+- [x] run gates — must pass before Task 6
 
 ### Task 6: Delta parts; no join apply, no merge
 

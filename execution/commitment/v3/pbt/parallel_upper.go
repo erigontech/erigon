@@ -143,12 +143,12 @@ func (t *Trie) inheritHooks(dst *Trie) {
 	dst.coreActivityHook = t.coreActivityHook
 }
 
-func descriptorWithFallback(descriptor bucketDescriptor, present bool, err error, deltas []commitment.BranchDelta, fallbackSeen bool, fallback bucketDescriptor, fallbackPresent bool) (bucketDescriptor, bool, error) {
+func descriptorWithFallback(descriptor bucketDescriptor, present bool, err error, deltas []commitment.BranchDelta, initial *phaseBucketResult) (bucketDescriptor, bool, error) {
 	if err == nil {
 		return descriptor, present, nil
 	}
-	if len(deltas) == 0 && fallbackSeen {
-		return fallback, fallbackPresent, nil
+	if len(deltas) == 0 {
+		return initial.descriptor, initial.present, nil
 	}
 	return bucketDescriptor{}, false, err
 }
@@ -174,6 +174,7 @@ type phaseBucketResult struct {
 	deltas     []commitment.BranchDelta
 	descriptor bucketDescriptor
 	present    bool
+	unchanged  bool
 }
 
 //nolint:gocritic
@@ -190,7 +191,22 @@ func (t *Trie) runSubtreeTask(workerCtx context.Context, workerContext commitmen
 	base := cmp.Or(workerContext, t.phaseBase, t.ctx)
 	local := t.newPhaseContext(base, nil)
 	var subtreeTrie *Trie
+	initial := task.initial
 	switch {
+	case task.kind == phaseBucketSubtask:
+		bucket, err := newBucketTrie(local, []byte(task.key))
+		if err != nil {
+			return phaseBucketResult{}, err
+		}
+		initial.descriptor, initial.present, err = bucket.descriptorAtPrefix(&prefix)
+		if err != nil {
+			return phaseBucketResult{}, err
+		}
+		local.prefix = &prefix
+		subtreeTrie, err = newSubtreeTrie(local, prefix, initial.descriptor, initial.present)
+		if err != nil {
+			return phaseBucketResult{}, err
+		}
 	case task.hasInitial:
 		local.prefix = &prefix
 		subtreeTrie, err = newSubtreeTrie(local, prefix, task.initial.descriptor, task.initial.present)
@@ -219,13 +235,19 @@ func (t *Trie) runSubtreeTask(workerCtx context.Context, workerContext commitmen
 		return phaseBucketResult{}, fmt.Errorf("process subtree %x: %w", []byte(task.key), err)
 	}
 	deltas := subtreeTrie.TakeDeltas()
+	if task.kind == phaseBucket {
+		if len(deltas) == 0 {
+			return phaseBucketResult{prefix: prefix, unchanged: true}, workerCtx.Err()
+		}
+	} else {
+		deltas = ownedDeltas(deltas, &prefix)
+	}
 	descriptor, present, err := subtreeTrie.descriptorFromRoot()
-	descriptor, present, err = descriptorWithFallback(descriptor, present, err, deltas, task.fallbackSeen, task.fallback, task.fallbackOK)
+	if task.kind != phaseBucket {
+		descriptor, present, err = descriptorWithFallback(descriptor, present, err, deltas, &initial)
+	}
 	if err != nil {
 		return phaseBucketResult{}, err
-	}
-	if task.kind != phaseBucket || len(task.dependencies) != 0 {
-		deltas = ownedDeltas(deltas, &prefix)
 	}
 	return phaseBucketResult{prefix: prefix, deltas: deltas, descriptor: descriptor, present: present}, workerCtx.Err()
 }
@@ -290,7 +312,7 @@ func (t *Trie) processParallelPhaseA(ctx context.Context, workers int, plan phas
 	if _, err := t.loadRoot(); err != nil {
 		return common.Hash{}, err
 	}
-	if err := t.preparePhaseTasks(&plan, round); err != nil {
+	if err := t.preparePhaseTasks(&plan); err != nil {
 		return common.Hash{}, err
 	}
 	t.rememberPrev(t.rootRecordKey(), t.root.prev)
@@ -411,8 +433,10 @@ func (t *Trie) runBucketJoin(workerCtx context.Context, workerContext commitment
 		return phaseBucketResult{}, err
 	}
 	deltas := append(childDeltas, bucketTrie.TakeDeltas()...)
+	if len(deltas) == 0 {
+		return phaseBucketResult{prefix: task.prefix, unchanged: true}, workerCtx.Err()
+	}
 	descriptor, present, err := bucketTrie.descriptorFromRoot()
-	descriptor, present, err = descriptorWithFallback(descriptor, present, err, deltas, task.fallbackSeen, task.fallback, task.fallbackOK)
 	if err != nil {
 		return phaseBucketResult{}, err
 	}
@@ -435,8 +459,9 @@ func (t *Trie) runChainTask(workerCtx context.Context, workerContext commitment.
 			if !ready[dependency] {
 				return phaseBucketResult{}, fmt.Errorf("storage chain missing bucket result")
 			}
-			result := results[dependency]
-			changed[string(eip8297.AppendBitPath(nil, &result.prefix))] = result
+			if result := results[dependency]; !result.unchanged {
+				changed[string(eip8297.AppendBitPath(nil, &result.prefix))] = result
+			}
 		}
 		if _, err := chainTrie.processUpperOps(nil, changed); err != nil {
 			return phaseBucketResult{}, err
@@ -453,7 +478,7 @@ func (t *Trie) runChainTask(workerCtx context.Context, workerContext commitment.
 	}
 	deltas := ownedDeltas(chainTrie.TakeDeltas(), &task.prefix)
 	descriptor, present, err := chainTrie.descriptorFromRoot()
-	descriptor, present, err = descriptorWithFallback(descriptor, present, err, deltas, task.hasInitial, task.initial.descriptor, task.initial.present)
+	descriptor, present, err = descriptorWithFallback(descriptor, present, err, deltas, &task.initial)
 	if err != nil {
 		return phaseBucketResult{}, err
 	}
@@ -468,43 +493,18 @@ func ownsRecordKey(key []byte, prefix *eip8297.Bitpath) bool {
 	return err == nil && pathHasPrefix(&path, prefix)
 }
 
-func (t *Trie) preparePhaseTasks(plan *phasePlan, base commitment.PatriciaContext) error {
-	buckets := make(map[string]*Trie)
+func (t *Trie) preparePhaseTasks(plan *phasePlan) error {
 	for i := range plan.tasks {
 		task := &plan.tasks[i]
-		if task.kind != phaseChain && task.kind != phaseBucketSubtask && task.kind != phaseBucket {
+		if task.kind != phaseChain {
 			continue
 		}
-		prefix, err := taskSubtreePrefix(*task)
+		descriptor, present, err := t.descriptorAtPrefix(&task.prefix)
 		if err != nil {
 			return err
 		}
-		var descriptor bucketDescriptor
-		var present bool
-		if task.kind == phaseBucketSubtask {
-			bucket := buckets[task.key]
-			if bucket == nil {
-				bucket, err = newBucketTrie(base, []byte(task.key))
-				if err != nil {
-					return err
-				}
-				buckets[task.key] = bucket
-			}
-			descriptor, present, err = bucket.descriptorAtPrefix(&prefix)
-		} else {
-			descriptor, present, err = t.descriptorAtPrefix(&prefix)
-		}
-		if err != nil {
-			return err
-		}
-		if task.kind == phaseBucket {
-			task.fallback = descriptor
-			task.fallbackSeen = true
-			task.fallbackOK = present
-		} else {
-			task.initial = phaseBucketResult{prefix: prefix, descriptor: descriptor, present: present}
-			task.hasInitial = true
-		}
+		task.initial = phaseBucketResult{prefix: task.prefix, descriptor: descriptor, present: present}
+		task.hasInitial = true
 	}
 	return nil
 }

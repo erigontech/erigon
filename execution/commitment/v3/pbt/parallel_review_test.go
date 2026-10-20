@@ -51,6 +51,8 @@ func TestReviewCachedStorageChainCollapse(t *testing.T) {
 	holdFirstTaskForSecond(trie)
 	prefix := chainPrefix(eip8297.StorageZone, 2)
 	key := parallelRoundRowKey(t, prefix)
+	_, err = trie.loadRow(prefix)
+	require.NoError(t, err)
 	var joined, cached, stale bool
 	var branchErr error
 	trie.joinHook = func(task phaseTask, ctx commitment.PatriciaContext) error {
@@ -69,7 +71,7 @@ func TestReviewCachedStorageChainCollapse(t *testing.T) {
 	}
 	got, err := trie.ProcessParallelContext(t.Context(), ops, 2)
 	require.True(t, joined)
-	require.True(t, cached, "preparation must cache the chain row")
+	require.True(t, cached, "the chain row must be cached before the join")
 	require.True(t, stale, "worker must rewrite the cached chain row")
 	require.ErrorContains(t, branchErr, "is owned by task")
 	if err == nil {
