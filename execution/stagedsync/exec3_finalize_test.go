@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"crypto/ecdsa"
+	"errors"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -1835,4 +1836,44 @@ func TestCalcFees_EIP8246PreservedCoinbase(t *testing.T) {
 			require.Equal(t, *uint256.NewInt(tc.want), bw.Val)
 		})
 	}
+}
+
+// failingAccountReader fails account reads once err is set.
+type failingAccountReader struct {
+	*mapStateReader
+	err error
+}
+
+func (r *failingAccountReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	return r.mapStateReader.ReadAccountData(addr)
+}
+
+// The block-end write-set reads the pre-block account to decide EIP-161 removals; a failed read must
+// come back as an error, not as a write-set built on it.
+func TestFinalizedBlockWritesReturnsStateReadError(t *testing.T) {
+	reader := &failingAccountReader{mapStateReader: newMapStateReader()}
+	vm := state.NewVersionMap(nil)
+	ibs := state.New(state.NewVersionedStateReader(0, state.ReadSet{}, vm, reader))
+	defer ibs.Close()
+	ibs.SetTxContext(1, 0)
+	ibs.SetVersionMap(vm)
+
+	// A storage-only write carries no balance, nonce or code hash, so emptiness comes from the base read.
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	key := accounts.InternKey(common.HexToHash("0x07"))
+	ws := new(state.WriteSet)
+	ws.SetStorage(addr, key, &state.VersionedWrite[uint256.Int]{
+		WriteHeader: state.WriteHeader{Address: addr, Path: state.StoragePath, Key: key, Version: state.Version{BlockNum: 1}},
+		Val:         *uint256.NewInt(9),
+	})
+	require.NoError(t, ibs.ApplyVersionedWrites(ws))
+	require.NoError(t, ibs.StateReadError())
+
+	readErr := errors.New("domain read failed")
+	reader.err = readErr
+	_, err := finalizedBlockWrites(ibs, &chain.Rules{IsSpuriousDragon: true}, 1)
+	require.ErrorIs(t, err, readErr)
 }
