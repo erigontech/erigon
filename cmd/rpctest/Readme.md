@@ -1,11 +1,12 @@
 
 ### Create files with sample requests
 `go run ./cmd/rpctest/main.go bench1` will print tmpDir. 
-And create in tmpDir `results_*.csv` and `vegeta_*.txt` files. 
+And create in tmpDir `results_*.csv`, `vegeta_*.txt` and `<method>.jsonl` files. 
 
 Command takes long time. Kill it when `vegeta_erigon_debug_storageRangeAt.txt` is few MB. 
 
 File `vegeta_erigon_*.txt` will produce load to `erigon` node, `vegeta_geth_*.txt` to `geth`.
+File `<method>.jsonl` holds the same requests, one JSON-RPC request per line, with no URL, header or base64.
 Change host/port in `--gethUrl`, `--erigonUrl` variable. 
 
 By default `go run ./cmd/rpctest/main.go bench1` calling only Erigon node 
@@ -22,6 +23,12 @@ go get -u github.com/tsenart/vegeta
 tmpDir = "/var/folders/x_/1mnbt25s3291zr5_fxhjfnq9n86kng/T/"
 cat $(tmpDir)/erigon_stress_test/vegeta_geth_debug_storageRangeAt.csv | vegeta attack -rate=600 -format=json -duration=20s -timeout=300s | vegeta plot > plot.html
 open plot.html
+```
+
+### Run rpc_perf
+`rpc_perf` from [rpc-tests](https://github.com/erigontech/rpc-tests) replays the `.jsonl` files directly:
+```
+./build/bin/rpc_perf -p $(tmpDir)/erigon_stress_test/debug_storageRangeAt.jsonl -y debug_storageRangeAt -d localhost:8545 -t 600:20
 ```
 
 ### Mac environment changes

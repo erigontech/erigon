@@ -36,7 +36,7 @@ func BenchTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blockFro
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"trace_transaction"}, resultsCh)
+		go writePattern(true, []string{"trace_transaction"}, resultsCh)
 	}
 
 	reqGen := &RequestGenerator{}
