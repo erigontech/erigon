@@ -19,7 +19,7 @@ network_params:
   fulu_fork_epoch: 0
   gloas_fork_epoch: 1
 spamoor_params:
-  image: ethpandaops/spamoor:master
+  image: ethpandaops/spamoor:v1.2.4
   spammers:
     - scenario: evm-fuzz
       config: {throughput: 50, payload_seed: "0x0200", funding_gas_limit: 200000}
