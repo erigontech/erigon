@@ -19,8 +19,10 @@ package bscsync
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"sync"
+	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
@@ -96,6 +98,14 @@ type p2pObserverRegistrar interface {
 	RegisterNewBlockObserver(event.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockPacket]]) event.UnregisterFunc
 	RegisterNewBlockHashesObserver(event.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]]) event.UnregisterFunc
 	RegisterPeerEventObserver(event.Observer[*sentryproto.PeerEvent], ...p2p.RegisterOpt) event.UnregisterFunc
+	PeerEthVersion(ctx context.Context, peerId *p2p.PeerId) (uint, bool)
+}
+
+const announcementSummaryInterval = time.Minute
+
+type announcementCounts struct {
+	NewBlock       uint64
+	NewBlockHashes uint64
 }
 
 func NewTipEvents(logger log.Logger, p2pReg p2pObserverRegistrar) *TipEvents {
@@ -105,6 +115,7 @@ func NewTipEvents(logger log.Logger, p2pReg p2pObserverRegistrar) *TipEvents {
 		p2pObserverRegistrar: p2pReg,
 		blockEventsSpamGuard: newBlockEventsSpamGuard(logger),
 		announcedHeads:       newAnnouncedHeads(),
+		announcements:        map[p2p.PeerId]*announcementCounts{},
 	}
 }
 
@@ -116,6 +127,9 @@ type TipEvents struct {
 	p2pObserverRegistrar p2pObserverRegistrar
 	blockEventsSpamGuard blockEventsSpamGuard
 	announcedHeads       *announcedHeads
+
+	announcementsMu sync.Mutex
+	announcements   map[p2p.PeerId]*announcementCounts
 }
 
 // Next blocks until there is at least one event and returns all queued events, oldest first.
@@ -147,6 +161,7 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	newBlockObserverCancel := te.p2pObserverRegistrar.RegisterNewBlockObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockPacket]) {
 		block := message.Decoded.Block
 		te.announcedHeads.Update(message.PeerId, block.NumberU64())
+		te.countAnnouncement(message.PeerId, func(c *announcementCounts) { c.NewBlock++ })
 
 		if te.blockEventsSpamGuard.Spam(message.PeerId, block.Hash(), block.NumberU64()) {
 			return
@@ -180,6 +195,7 @@ func (te *TipEvents) Run(ctx context.Context) error {
 		for _, h := range blockHashes {
 			te.announcedHeads.Update(message.PeerId, h.Number)
 		}
+		te.countAnnouncement(message.PeerId, func(c *announcementCounts) { c.NewBlockHashes++ })
 
 		if te.blockEventsSpamGuard.Spam(message.PeerId, blockHashes[0].Hash, blockHashes[0].Number) {
 			return
@@ -202,8 +218,54 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	})
 	defer newBlockHashesObserverCancel()
 
-	<-ctx.Done()
-	return ctx.Err()
+	ticker := time.NewTicker(announcementSummaryInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			summary := te.announcementSummary(ctx)
+			args := make([]any, 0, 2*len(summary))
+			for _, key := range slices.Sorted(maps.Keys(summary)) {
+				args = append(args, key, fmt.Sprintf("newBlock=%d hashes=%d", summary[key].NewBlock, summary[key].NewBlockHashes))
+			}
+			te.logger.Info("[bsc] block announcements in the last minute", args...)
+		}
+	}
+}
+
+func (te *TipEvents) countAnnouncement(peerId *p2p.PeerId, inc func(*announcementCounts)) {
+	te.announcementsMu.Lock()
+	defer te.announcementsMu.Unlock()
+	c, ok := te.announcements[*peerId]
+	if !ok {
+		c = &announcementCounts{}
+		te.announcements[*peerId] = c
+	}
+	inc(c)
+}
+
+// announcementSummary returns the NewBlock and NewBlockHashes counts since the last call,
+// grouped by the eth version of the sending peer.
+func (te *TipEvents) announcementSummary(ctx context.Context) map[string]announcementCounts {
+	te.announcementsMu.Lock()
+	perPeer := te.announcements
+	te.announcements = map[p2p.PeerId]*announcementCounts{}
+	te.announcementsMu.Unlock()
+
+	summary := map[string]announcementCounts{}
+	for peerId, c := range perPeer {
+		key := "unknown"
+		if version, ok := te.p2pObserverRegistrar.PeerEthVersion(ctx, &peerId); ok {
+			key = fmt.Sprintf("eth%d", version)
+		}
+		total := summary[key]
+		total.NewBlock += c.NewBlock
+		total.NewBlockHashes += c.NewBlockHashes
+		summary[key] = total
+	}
+	return summary
 }
 
 type announcedHeads struct {

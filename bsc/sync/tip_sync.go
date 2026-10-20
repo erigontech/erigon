@@ -105,6 +105,7 @@ type tipSync struct {
 	downloadCtx        context.Context
 	committed          *types.Header
 	lastProgress       time.Time
+	inserted           int
 	tipSource          EventSource
 	tipPeer            *p2p.PeerId
 	badBlocks          *simplelru.LRU[common.Hash, struct{}]
@@ -222,21 +223,33 @@ func (s *tipSync) commit(ctx context.Context) error {
 		return nil
 	}
 	var safe, finalized common.Hash
+	var justifiedNum, finalizedNum uint64
 	if h := s.ccb.Justified(); h != nil {
-		safe = h.Hash()
+		safe, justifiedNum = h.Hash(), h.Number.Uint64()
 	}
 	if h := s.ccb.Finalized(); h != nil {
-		finalized = h.Hash()
+		finalized, finalizedNum = h.Hash(), h.Number.Uint64()
 	}
 
+	start := time.Now()
 	status, valErr, _, err := s.chainRW.UpdateForkChoice(ctx, tip.Hash(), safe, finalized)
 	if err != nil {
 		return err
 	}
 	switch status {
 	case execmodule.ExecutionStatusSuccess:
+		s.logger.Info("[bsc] tip updated",
+			"number", tip.Number.Uint64(),
+			"hash", tip.Hash(),
+			"age", time.Since(time.UnixMilli(int64(parlia.MilliTimestamp(tip)))).Round(time.Millisecond),
+			"justified", justifiedNum,
+			"finalized", finalizedNum,
+			"inserted", s.inserted,
+			"in", time.Since(start).Round(time.Millisecond),
+		)
 		s.committed = tip
 		s.lastProgress = time.Now()
+		s.inserted = 0
 		return s.ccb.PruneToFinalized()
 	case execmodule.ExecutionStatusBusy, execmodule.ExecutionStatusTooFarAway:
 		s.logger.Debug("[bsc] forkchoice update deferred", "block", tip.Number.Uint64(), "hash", tip.Hash(), "status", status)
@@ -284,6 +297,7 @@ func (s *tipSync) applyNewBlockChainOnTip(ctx context.Context, blockChain []*typ
 	if err := s.chainRW.InsertBlocks(ctx, blockChain[newBlocksStartIdx:newBlocksEndIdx]); err != nil {
 		return err
 	}
+	s.inserted += len(newConnectedHeaders)
 
 	if s.ccb.Tip() != oldTip {
 		s.tipSource = source

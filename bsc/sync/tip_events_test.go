@@ -86,6 +86,7 @@ func TestAnnouncedHeads(t *testing.T) {
 }
 
 type fakeTipRegistrar struct {
+	versions       map[uint64]uint
 	newBlock       event.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockPacket]]
 	newBlockHashes event.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]]
 	peerEvent      event.Observer[*sentryproto.PeerEvent]
@@ -112,6 +113,15 @@ func (f *fakeTipRegistrar) RegisterPeerEventObserver(o event.Observer[*sentrypro
 	f.peerEvent = o
 	f.registered <- struct{}{}
 	return func() {}
+}
+
+func (f *fakeTipRegistrar) PeerEthVersion(_ context.Context, peerId *p2p.PeerId) (uint, bool) {
+	for peer, version := range f.versions {
+		if p2p.PeerIdFromUint64(peer).Equal(peerId) {
+			return version, true
+		}
+	}
+	return 0, false
 }
 
 func (f *fakeTipRegistrar) sendNewBlock(peer uint64, num uint64) *types.Block {
@@ -214,5 +224,26 @@ func TestTipEventsPushBatch(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, events, 1)
 		require.Equal(t, EventTypeNewBlockBatch, events[0].Type)
+	})
+}
+
+func TestTipEventsAnnouncementSummary(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		te, reg := runTipEvents(t)
+		reg.versions = map[uint64]uint{1: 70, 2: 68}
+
+		b := reg.sendNewBlock(1, 10)
+		reg.sendBlock(1, b)
+		reg.sendNewBlockHashes(1, 10)
+		reg.sendNewBlockHashes(2, 10)
+		reg.sendNewBlock(3, 11)
+
+		require.Equal(t, map[string]announcementCounts{
+			"eth70":   {NewBlock: 2, NewBlockHashes: 1},
+			"eth68":   {NewBlockHashes: 1},
+			"unknown": {NewBlock: 1},
+		}, te.announcementSummary(t.Context()))
+		require.Empty(t, te.announcementSummary(t.Context()))
 	})
 }
