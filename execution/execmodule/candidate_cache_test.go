@@ -153,3 +153,24 @@ func TestValidatedCandidateClosedBySetHead(t *testing.T) {
 	require.False(t, m.ForkValidator.HasValidatedState(child.Blocks[0].Hash()))
 	require.Nil(t, state.GetCommitmentCtx())
 }
+
+func TestValidatedCandidateDropsChainedAncestors(t *testing.T) {
+	m := execmoduletester.New(t)
+	chain, err := m.GenerateChainFrom(m.Genesis, 6, func(int, *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	_, err = m.InsertBlocks(t.Context(), chain.Blocks)
+	require.NoError(t, err)
+	for _, block := range chain.Blocks {
+		result, err := m.ValidateChain(t.Context(), block.Header())
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
+	}
+	retained := 0
+	for _, block := range chain.Blocks {
+		if m.ForkValidator.HasValidatedState(block.Hash()) {
+			retained++
+		}
+	}
+	require.True(t, m.ForkValidator.HasValidatedState(chain.Blocks[5].Hash()))
+	require.Equal(t, 1, retained)
+}
