@@ -23,6 +23,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hashicorp/golang-lru/v2/simplelru"
+
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -57,7 +59,7 @@ type validatedCandidate struct {
 }
 
 type ForkValidator struct {
-	candidates    *lru.Cache[common.Hash, *validatedCandidate]
+	candidates    *simplelru.LRU[common.Hash, *validatedCandidate]
 	maxReorgDepth uint64
 	// pipeline executor used for fork validation (ValidateBlock).
 	executor    *PipelineExecutor
@@ -96,7 +98,7 @@ func newForkValidator(ctx context.Context, currentHeight uint64, executor *Pipel
 			panic(err)
 		}
 	}
-	candidates, err := lru.New[common.Hash, *validatedCandidate]("validatedCandidates", retainedCandidateLimit)
+	candidates, err := simplelru.NewLRU(retainedCandidateLimit, func(_ common.Hash, c *validatedCandidate) { c.domains.Close() })
 	if err != nil {
 		panic(err)
 	}
@@ -121,7 +123,7 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 		return
 	}
 	fv.currentHeight = currentHeight
-	fv.clear()
+	fv.candidates.Purge()
 }
 
 func (fv *ForkValidator) HasValidatedState(hash common.Hash) bool {
@@ -171,7 +173,6 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 	fv.timingsCache.Add(hash, timings)
 	candidate.notifications.CopyAndReset(target)
 	fv.candidates.Remove(hash)
-	candidate.domains.Close()
 	return nil
 }
 
@@ -287,9 +288,8 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 		owned := NewAccumulation()
 		notifications.Accumulator.CopyAndReset(owned.Accumulator)
 		notifications.RecentReceipts.CopyAndReset(owned.RecentReceipts)
-		if fv.candidates.Len() == retainedCandidateLimit {
-			_, oldest, _ := fv.candidates.RemoveOldest()
-			oldest.domains.Close()
+		for _, ancestor := range headersChain {
+			fv.candidates.Remove(ancestor.Hash())
 		}
 		if overlay := sd.BlockOverlay(); overlay != nil {
 			overlay.DetachDB()
@@ -301,18 +301,11 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	return
 }
 
-func (fv *ForkValidator) clear() {
-	for _, candidate := range fv.candidates.Values() {
-		candidate.domains.Close()
-	}
-	fv.candidates.Purge()
-}
-
 // ClearWithUnwind releases all retained candidate states.
 func (fv *ForkValidator) ClearWithUnwind() {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
-	fv.clear()
+	fv.candidates.Purge()
 }
 
 // validateAndStorePayload validate and store a payload fork chain if such chain results valid.
