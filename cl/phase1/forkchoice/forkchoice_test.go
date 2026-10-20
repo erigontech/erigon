@@ -1316,6 +1316,34 @@ func TestCheckpointStatesKeepCurrentJustified(t *testing.T) {
 	require.Equal(t, maxCheckpointStates, checkpointStateCacheLen(store))
 }
 
+type failOnceStateForkGraph struct {
+	fork_graph.ForkGraph
+	err   error
+	calls int
+}
+
+func (g *failOnceStateForkGraph) GetState(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+	g.calls++
+	if g.calls == 1 {
+		return nil, g.err
+	}
+	return g.ForkGraph.GetState(blockRoot, alwaysCopy)
+}
+
+func TestFailedCheckpointStateBuildIsNotCached(t *testing.T) {
+	checkpoint := checkpointStateCacheTestCheckpoints(1)[0]
+	store := newCheckpointStateCacheTestStore(t, []solid.Checkpoint{checkpoint}, solid.Checkpoint{})
+	graph := &failOnceStateForkGraph{ForkGraph: store.forkGraph, err: errors.New("state unavailable")}
+	store.forkGraph = graph
+
+	_, err := store.getCheckpointState(checkpoint)
+	require.ErrorIs(t, err, graph.err)
+	built, err := store.getCheckpointState(checkpoint)
+	require.NoError(t, err)
+	require.NotNil(t, built)
+	require.Equal(t, 2, graph.calls)
+}
+
 func TestJustifiedPromotionWaitsForCheckpointStateEviction(t *testing.T) {
 	current := solid.Checkpoint{Epoch: 1, Root: common.Hash{1}}
 	promoted := solid.Checkpoint{Epoch: 2, Root: common.Hash{2}}
