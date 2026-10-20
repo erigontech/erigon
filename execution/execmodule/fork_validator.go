@@ -282,8 +282,7 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	notifications := fv.executor.ValidationNotifications()
 	notifications.Accumulator.Reset(0)
 	notifications.RecentReceipts.Clear()
-	status, latestValidHash, validationError, criticalError =
-		fv.validateAndStorePayload(sd, tx, header, body, unwindPoint, headersChain, bodiesChain)
+	status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(sd, tx, header, body, unwindPoint, headersChain, bodiesChain)
 	if status == engine_types.ValidStatus && criticalError == nil && validationError == nil {
 		owned := NewAccumulation()
 		notifications.Accumulator.CopyAndReset(owned.Accumulator)
