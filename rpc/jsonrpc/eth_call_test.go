@@ -1399,7 +1399,7 @@ func TestGetProofGenesisPrunedCommitmentHistory(t *testing.T) {
 
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(0)))
-	require.ErrorIs(t, err, state.ErrPruned)
+	requirePrunedProofError(t, err)
 	require.Nil(t, proof)
 
 	caps, err := api.Capabilities(ctx)
@@ -1412,7 +1412,22 @@ func TestGetProofGenesisPrunedCommitmentHistory(t *testing.T) {
 	require.NoError(t, err, "the advertised proof boundary must be readable")
 	require.NotNil(t, proof)
 	_, err = api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(oldest-1))))
+	requirePrunedProofError(t, err)
+}
+
+func requirePrunedProofError(t *testing.T, err error) {
+	t.Helper()
 	require.ErrorIs(t, err, state.ErrPruned)
+	var coded rpc.Error
+	require.ErrorAs(t, err, &coded)
+	require.Equal(t, 4444, coded.ErrorCode())
+
+	encoded, err := json.Marshal(rpc.NewJsonErrorFromErr(err))
+	require.NoError(t, err)
+	var wire map[string]any
+	require.NoError(t, json.Unmarshal(encoded, &wire))
+	require.InDelta(t, 4444, wire["code"], 0)
+	require.NotContains(t, wire, "data")
 }
 
 func TestGetProofWithoutCommitmentHistory(t *testing.T) {
@@ -1424,7 +1439,7 @@ func TestGetProofWithoutCommitmentHistory(t *testing.T) {
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 
 	proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(1)))
-	require.ErrorIs(t, err, state.ErrPruned)
+	requirePrunedProofError(t, err)
 	require.Nil(t, proof)
 
 	proof, err = api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)))
@@ -1448,7 +1463,7 @@ func TestGetProofCommitmentNotAtRequestedBlock(t *testing.T) {
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 
 	proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(1)))
-	require.ErrorIs(t, err, state.ErrPruned)
+	requirePrunedProofError(t, err)
 	require.ErrorContains(t, err, "commitment trie for block 1")
 	require.Nil(t, proof)
 }

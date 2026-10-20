@@ -506,7 +506,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 
 	err = api.BaseAPI.checkPruneState(ctx, roTx, blockNumber)
 	if err != nil {
-		return nil, err
+		return nil, wrapPrunedProof(err)
 	}
 
 	storageKeysConverted := make([]StorageKeysInfo, len(storageKeys))
@@ -514,7 +514,24 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 		storageKeysConverted[i].Hash.SetBytes(s)
 		storageKeysConverted[i].KeyLength = len(s)
 	}
-	return api.getProof(ctx, roTx, address, storageKeysConverted, blockNumber, isLatest, api.logger)
+	proof, err := api.getProof(ctx, roTx, address, storageKeysConverted, blockNumber, isLatest, api.logger)
+	if err != nil {
+		return nil, wrapPrunedProof(err)
+	}
+	return proof, nil
+}
+
+type proofPrunedError struct{ err error }
+
+func (e *proofPrunedError) Error() string  { return "Pruned history unavailable: " + e.err.Error() }
+func (e *proofPrunedError) ErrorCode() int { return 4444 }
+func (e *proofPrunedError) Unwrap() error  { return e.err }
+
+func wrapPrunedProof(err error) error {
+	if errors.Is(err, state.ErrPruned) {
+		return &proofPrunedError{err: err}
+	}
+	return err
 }
 
 func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address common.Address, storageKeys []StorageKeysInfo, blockNumber uint64, isLatest bool, logger log.Logger) (*accounts.AccProofResult, error) {
