@@ -64,6 +64,29 @@ func TestIndex(t *testing.T) {
 	require.Zero(t, x.Cursor())
 }
 
+func TestIndexPrune(t *testing.T) {
+	var x Index
+	for _, r := range []Record{record(10, 1, 3), record(12, 2, 5), record(12, 3, 6), record(15, 4, 8)} {
+		require.True(t, x.Append(r))
+	}
+	x.Prune(9)
+	require.True(t, x.Contains(common.Hash{1}), "nothing settled up to the finalized block")
+
+	// The latest settlement up to finality stays, with the others of its L1
+	// block.
+	x.Prune(13)
+	require.False(t, x.Contains(common.Hash{1}))
+	require.True(t, x.Contains(common.Hash{2}))
+	settled, ok := x.SettledAt(13)
+	require.True(t, ok)
+	require.Equal(t, uint64(6), settled)
+	require.Equal(t, uint64(8), x.Cursor())
+
+	x.Prune(15)
+	require.False(t, x.Contains(common.Hash{3}))
+	require.True(t, x.Contains(common.Hash{4}))
+}
+
 func TestCheckpoint(t *testing.T) {
 	dir := t.TempDir()
 	c, err := LoadCheckpoint(dir)

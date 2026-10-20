@@ -140,6 +140,7 @@ func (d *Deriver) Reconcile(ctx context.Context, batches []l1.ScannedBatch) (err
 // l1Finalized, bounded by the safe block.
 func (d *Deriver) OnFinalized(ctx context.Context, l1Finalized uint64) error {
 	n, ok := d.index.SettledAt(l1Finalized)
+	d.index.Prune(l1Finalized)
 	if n = min(n, d.safe); !ok || n <= d.finalized {
 		return nil
 	}

@@ -97,6 +97,19 @@ func (x *Index) RetreatOnReorg(ancestor uint64) int {
 	return dropped
 }
 
+// Prune drops the settlements of L1 blocks before the one holding the latest
+// settlement up to l1Finalized: the scanner never returns below finality, and
+// a reorg there halts.
+func (x *Index) Prune(l1Finalized uint64) {
+	for i, r := range slices.Backward(x.records) {
+		if r.L1Block <= l1Finalized {
+			first := slices.IndexFunc(x.records[:i+1], func(s Record) bool { return s.L1Block == r.L1Block })
+			x.records = slices.Delete(x.records, 0, first)
+			return
+		}
+	}
+}
+
 // SettledAt returns the L2 block the latest settlement in L1 blocks up to
 // number ended at.
 func (x *Index) SettledAt(number uint64) (uint64, bool) {
