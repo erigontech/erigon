@@ -56,10 +56,11 @@ type BlockGetter interface {
 	GetBlock(hash common.Hash, number uint64) *types.Block
 }
 
-// ComputeBlockContext returns the execution environment of a certain block.
+// ComputeBlockContext returns the execution environment of a certain block. memoizeReads is for a
+// versioned state that replays several transactions, see state.ReplayReader.
 func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header *types.Header, cfg *chain.Config,
 	headerReader dbservices.HeaderReader, stateCache kvcache.Cache, txNumsReader rawdbv3.TxNumsReader, dbtx kv.TemporalTx,
-	txIndex int,
+	txIndex int, memoizeReads bool,
 ) (*state.IntraBlockState, evmtypes.BlockContext, state.StateReader, *chain.Rules, *types.Signer, error) {
 	var reader state.StateReader
 	if stateCache != nil {
@@ -80,7 +81,11 @@ func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header 
 	}
 
 	// Create the parent state database
-	statedb := state.New(state.NewReplayReader(reader))
+	stateReader := reader
+	if memoizeReads {
+		stateReader = state.NewReplayReader(reader)
+	}
+	statedb := state.New(stateReader)
 
 	getHeader := func(hash common.Hash, n uint64) (*types.Header, error) {
 		return headerReader.HeaderByNumber(ctx, dbtx, n)

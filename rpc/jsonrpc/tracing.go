@@ -123,7 +123,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		return err
 	}
 
-	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, nil, api._txNumReader, tx, 0)
+	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, nil, api._txNumReader, tx, 0, true)
 	if err != nil {
 		return err
 	}
@@ -254,7 +254,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	}
 	engine := api.engine()
 
-	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, nil, api._txNumReader, tx, txnIndex)
+	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, nil, api._txNumReader, tx, txnIndex, true)
 	if err != nil {
 		return err
 	}
