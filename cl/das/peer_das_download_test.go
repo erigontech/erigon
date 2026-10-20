@@ -25,6 +25,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/spf13/afero"
@@ -64,6 +65,8 @@ type maliciousColumnSentinel struct {
 	columnRequested chan struct{}
 	releaseColumn   chan struct{}
 	columnCalls     atomic.Int32
+	callTimesMu     sync.Mutex
+	columnCallTimes []time.Time
 	banOnce         sync.Once
 	banned          chan struct{}
 }
@@ -83,6 +86,9 @@ func (s *maliciousColumnSentinel) SendPeerRequest(ctx context.Context, req *sent
 		s.metadataOnce.Do(func() { close(s.metadataReady) })
 		return &sentinelproto.ResponseData{Data: s.metadataResponse, Peer: peer}, nil
 	}
+	s.callTimesMu.Lock()
+	s.columnCallTimes = append(s.columnCallTimes, time.Now())
+	s.callTimesMu.Unlock()
 	if s.columnRequested != nil {
 		s.columnOnce.Do(func() { close(s.columnRequested) })
 	}
@@ -472,7 +478,6 @@ func TestRunDownloadAcceptsGloasSidecarWithRecoveryMetadata(t *testing.T) {
 	block, root, columns := recoverableGloasColumns(t, &cfg, currentSlot)
 	metadata, err := newBlobRecoveryMetadata(block, root)
 	require.NoError(t, err)
-	require.True(t, metadata.hasSignature)
 	rpcClient, sentinel := newColumnResponseRPCWithPeerAndForkEpoch(
 		t,
 		&cfg,
@@ -748,6 +753,47 @@ func TestRunDownloadRejectsDuplicateRequestedTupleBeforeStorage(t *testing.T) {
 	require.Equal(t, 1, req.remainingEntriesCount())
 }
 
+func TestRunDownloadDoesNotRepeatRequestsToPeerThatAnsweredNothing(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg := clparams.MainnetBeaconConfig
+		cfg.AltairForkEpoch = 0
+		cfg.BellatrixForkEpoch = 0
+		cfg.CapellaForkEpoch = 0
+		cfg.DenebForkEpoch = 0
+		cfg.ElectraForkEpoch = 0
+		cfg.FuluForkEpoch = 0
+		cfg.InitializeForkSchedule()
+		initTestBeaconConfig(&cfg)
+		rpcClient, sentinel := newColumnResponseRPC(t, &cfg, 100, nil)
+		d := &peerdas{
+			rpc:           rpcClient,
+			beaconConfig:  &cfg,
+			state:         peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+			columnStorage: blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
+		}
+		req := &downloadRequest{
+			beaconConfig: &cfg,
+			downloadTable: map[downloadTableEntry]map[uint64]bool{
+				{blockRoot: common.Hash{1}, slot: 100}: {0: true},
+			},
+		}
+		// Long enough to cross the 15 s peer refresh.
+		ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+		defer cancel()
+		d.runDownload(ctx, req, false)
+		synctest.Wait()
+
+		sentinel.callTimesMu.Lock()
+		defer sentinel.callTimesMu.Unlock()
+		times := sentinel.columnCallTimes
+		require.Greater(t, len(times), 1)
+		for i := 1; i < len(times); i++ {
+			require.GreaterOrEqual(t, times[i].Sub(times[i-1]), 2*time.Second, "gap before request %d", i)
+		}
+		require.Equal(t, 1, req.remainingEntriesCount())
+	})
+}
+
 func TestRunDownloadAcceptsPartialReorderedRequestedSubset(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch = 0
@@ -761,7 +807,6 @@ func TestRunDownloadAcceptsPartialReorderedRequestedSubset(t *testing.T) {
 	block, root, _, columns := recoverableFuluDataAtSlot(t, &cfg, 100)
 	metadata, err := newBlobRecoveryMetadata(&blockHashCountingBlock{ColumnSyncableSignedBlock: block}, root)
 	require.NoError(t, err)
-	require.False(t, metadata.hasSignature)
 	rpcClient, sentinel := newColumnResponseRPC(t, &cfg, block.GetSlot(), []*cltypes.DataColumnSidecar{columns[2], columns[0]}, nil)
 
 	baseStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
@@ -1212,4 +1257,27 @@ func TestRunDownloadRejectsGloasSidecarWithPreGloasSlot(t *testing.T) {
 	saved, err := d.columnStorage.GetSavedColumnIndex(context.Background(), currentSlot, common.HexToHash("0xbeef"))
 	require.NoError(t, err)
 	require.Empty(t, saved)
+}
+
+// The mismatch rejection compares this signature against each column sidecar's header, so it has to
+// come off the block itself — including through a wrapper, which a concrete type switch missed.
+func TestNewBlobRecoveryMetadataCarriesTheSignature(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch = 0, 0, 0
+	cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch = 0, 0, 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+
+	block, root, _, _ := recoverableFuluDataAtSlot(t, &cfg, 100)
+	signature := common.Bytes96{0xaa, 0xbb, 0xcc}
+	block.Signature = signature
+	require.NotEqual(t, common.Bytes96{}, block.BlockSignature(), "a zero signature would make this vacuous")
+
+	direct, err := newBlobRecoveryMetadata(block, root)
+	require.NoError(t, err)
+	require.Equal(t, signature, direct.signature)
+
+	wrapped, err := newBlobRecoveryMetadata(&blockHashCountingBlock{ColumnSyncableSignedBlock: block}, root)
+	require.NoError(t, err)
+	require.Equal(t, signature, wrapped.signature, "a wrapper must not drop the signature")
 }

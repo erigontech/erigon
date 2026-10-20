@@ -102,8 +102,10 @@ func TestSendTxnPropagate(t *testing.T) {
 						Peer: &typesproto.PeerInfo{
 							Id:   r.PeerId.String(),
 							Caps: []string{"eth/68"},
-						}}, nil
-				}).AnyTimes()
+						},
+					}, nil
+				},
+			).AnyTimes()
 
 		m := NewMockSentry(ctx, sentryServer)
 		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
@@ -127,7 +129,7 @@ func TestSendTxnPropagate(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		sentryServer := sentryproto.NewMockSentryServer(ctrl)
 
-		times := 2
+		times := 3
 		requests := make([]*sentryproto.SendMessageToRandomPeersRequest, 0, times)
 		sentryServer.EXPECT().
 			SendMessageToRandomPeers(gomock.Any(), gomock.Any()).
@@ -146,16 +148,19 @@ func TestSendTxnPropagate(t *testing.T) {
 			b := fmt.Appendf(nil, "%x", i)
 			copy(list[i:i+32], b)
 		}
-		send.BroadcastPooledTxns(testRlps(len(list)/32), 100)
+		rlps := testRlps(len(list) / 32)
+		send.BroadcastPooledTxns(rlps, 100)
 		send.AnnouncePooledTxns([]byte{0, 1, 2}, []uint32{10, 12, 14}, list, 100)
 
-		require.Len(t, requests, 2)
+		require.Len(t, requests, 3)
 
 		txnsMessage := requests[0].Data
 		require.Equal(t, sentryproto.MessageId_TRANSACTIONS_66, txnsMessage.Id)
-		require.Positive(t, len(txnsMessage.Data))
+		require.Equal(t, EncodeTransactions(rlps[:maxTransactionsPerPacket], nil), txnsMessage.Data)
+		require.Equal(t, sentryproto.MessageId_TRANSACTIONS_66, requests[1].Data.Id)
+		require.Equal(t, EncodeTransactions(rlps[maxTransactionsPerPacket:], nil), requests[1].Data.Data)
 
-		txnHashesMessage := requests[1].Data
+		txnHashesMessage := requests[2].Data
 		require.Equal(t, sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, txnHashesMessage.Id)
 		require.Positive(t, len(txnHashesMessage.Data))
 	})
@@ -213,8 +218,10 @@ func TestSendTxnPropagate(t *testing.T) {
 						Peer: &typesproto.PeerInfo{
 							Id:   r.PeerId.String(),
 							Caps: []string{"eth/68"},
-						}}, nil
-				}).AnyTimes()
+						},
+					}, nil
+				},
+			).AnyTimes()
 
 		m := NewMockSentry(ctx, sentryServer)
 		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
@@ -282,13 +289,6 @@ func TestOnNewBlock(t *testing.T) {
 
 	pool := NewMockPool(ctrl)
 
-	pool.EXPECT().
-		ValidateSerializedTxn(gomock.Any()).
-		DoAndReturn(func(_ []byte) error {
-			return nil
-		}).
-		Times(3)
-
 	var minedTxns TxnSlots
 	pool.EXPECT().
 		OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
@@ -336,9 +336,11 @@ func (ms *MockSentry) Send(req *sentryproto.InboundMessage) (errs []error) {
 func (ms *MockSentry) SetStatus(context.Context, *sentryproto.StatusData) (*sentryproto.SetStatusReply, error) {
 	return &sentryproto.SetStatusReply{}, nil
 }
+
 func (ms *MockSentry) HandShake(context.Context, *emptypb.Empty) (*sentryproto.HandShakeReply, error) {
 	return &sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH69}, nil
 }
+
 func (ms *MockSentry) Messages(req *sentryproto.MessagesRequest, stream sentryproto.Sentry_MessagesServer) error {
 	ms.lock.Lock()
 	if ms.streams == nil {
@@ -373,6 +375,11 @@ func (ms *MockSentry) PeerEvents(_ *sentryproto.PeerEventsRequest, stream sentry
 func TestPenalizePeerForMalformedMessages(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
+	txn := decodeHex("c98080808080801b0101")
+	oversizedTxns := make([][]byte, maxTransactionsPerPacket+1)
+	for i := range oversizedTxns {
+		oversizedTxns[i] = txn
+	}
 
 	// Each sub-test sends a malformed message of a given type and asserts that PenalizePeer is called.
 	tests := []struct {
@@ -389,6 +396,16 @@ func TestPenalizePeerForMalformedMessages(t *testing.T) {
 			name: "malformed PooledTransactions66",
 			id:   sentryproto.MessageId_POOLED_TRANSACTIONS_66,
 			data: []byte{0xff, 0xfe},
+		},
+		{
+			name: "oversized Transactions66",
+			id:   sentryproto.MessageId_TRANSACTIONS_66,
+			data: EncodeTransactions(oversizedTxns, nil),
+		},
+		{
+			name: "oversized PooledTransactions66",
+			id:   sentryproto.MessageId_POOLED_TRANSACTIONS_66,
+			data: EncodePooledTransactions66(oversizedTxns, 1, nil),
 		},
 		{
 			name: "malformed NewPooledTransactionHashes66",
@@ -672,7 +689,6 @@ func TestNoPenaltyOnInternalDBError(t *testing.T) {
 	sentryServer := sentryproto.NewMockSentryServer(ctrl)
 	pool := NewMockPool(ctrl)
 	pool.EXPECT().Started().Return(true)
-	pool.EXPECT().ValidateSerializedTxn(gomock.Any()).Return(nil).AnyTimes()
 
 	dbErr := fmt.Errorf("mdbx read error")
 	pool.EXPECT().IdHashKnown(gomock.Any(), gomock.Any()).Return(false, dbErr).AnyTimes()

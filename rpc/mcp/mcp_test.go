@@ -152,7 +152,7 @@ func TestReadLogTail(t *testing.T) {
 	for i := range 10 {
 		fmt.Fprintf(&content, "line %d\n", i)
 	}
-	require.NoError(t, os.WriteFile(file, []byte(content.String()), 0600))
+	require.NoError(t, os.WriteFile(file, []byte(content.String()), 0o600))
 
 	lines, err := readLogTail(file, 3, "")
 	require.NoError(t, err)
@@ -181,7 +181,8 @@ func TestLogStatsCountsLevelTokens(t *testing.T) {
 		"[EROR] [09-04|08:52:12.133] rpc failed reason=timeout\n"+
 			"[INFO] [09-04|08:52:12.134] p2p peer dropped err=nil\n"+
 			"[WARN] [09-04|08:52:12.135] no error here\n"+
-			`{"lvl":"eror","msg":"json mode"}`+"\n"), 0600))
+			`{"lvl":"eror","msg":"json mode"}`+"\n",
+	), 0o600))
 
 	stats, err := getLogStats(file)
 	require.NoError(t, err)
@@ -199,7 +200,8 @@ func TestLogStatsCountsSlogLevels(t *testing.T) {
 	require.NoError(t, os.WriteFile(file, []byte(
 		`{"time":"2026-09-04T08:52:12Z","level":"WARN","msg":"piece failed"}`+"\n"+
 			`{"time":"2026-09-04T08:52:13Z","level":"ERROR","msg":"tracker gone"}`+"\n"+
-			`{"time":"2026-09-04T08:52:14Z","level":"INFO","msg":"seeding"}`+"\n"), 0600))
+			`{"time":"2026-09-04T08:52:14Z","level":"INFO","msg":"seeding"}`+"\n",
+	), 0o600))
 
 	stats, err := getLogStats(file)
 	require.NoError(t, err)

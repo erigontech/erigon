@@ -112,7 +112,7 @@ func seedPriorTx(vm *VersionMap, addrs, slots int) {
 			})
 		}
 	}
-	vm.FlushVersionedWrites(prior, true, "")
+	vm.FlushVersionedWrites(prior, true)
 }
 
 func BenchmarkWriteSetNormalize(b *testing.B) {
@@ -122,7 +122,7 @@ func BenchmarkWriteSetNormalize(b *testing.B) {
 			ws := buildNormalizeInput(size.addrs, size.slots, txIndex)
 			vm := NewVersionMap(nil)
 			seedPriorTx(vm, size.addrs, size.slots)
-			vm.FlushVersionedWrites(ws, true, "")
+			vm.FlushVersionedWrites(ws, true)
 			reader := &minimalStateReader{}
 			// Guard the shape the numbers describe: the no-op filter must
 			// actually drop writes, else a regression in it stays invisible.
@@ -203,7 +203,7 @@ func BenchmarkWriteSetNormalizeTransfer(b *testing.B) {
 		b.Fatalf("fixture shape changed: %d of nine per-path maps empty, %d storage writes", empty, storage)
 	}
 	vm := NewVersionMap(nil)
-	vm.FlushVersionedWrites(ws, true, "")
+	vm.FlushVersionedWrites(ws, true)
 	reader := &minimalStateReader{}
 	b.ReportAllocs()
 	for b.Loop() {

@@ -27,7 +27,6 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"strconv"
 	"sync"
@@ -90,7 +89,7 @@ func isLittleEndian() bool {
 
 // memoryMap tries to memory map a file of uint32s for read only access.
 func memoryMap(path string, lock bool) (*os.File, mmap.MMap, []uint32, error) {
-	file, err := os.OpenFile(path, os.O_RDONLY, 0644)
+	file, err := os.OpenFile(path, os.O_RDONLY, 0o644)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -127,14 +126,7 @@ func memoryMapFile(file *os.File, write bool) (mmap.MMap, []uint32, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	// The file is now memory-mapped. Create a []uint32 view of the file.
-	var view []uint32
-	header := (*reflect.SliceHeader)(unsafe.Pointer(&view))
-	header.Data = (*reflect.SliceHeader)(unsafe.Pointer(&mem)).Data
-	header.Len = len(mem) / 4
-	header.Cap = cap(mem) / 4
-
-	return mem, view, nil
+	return mem, unsafe.Slice((*uint32)(unsafe.Pointer(unsafe.SliceData(mem))), len(mem)/4), nil
 }
 
 // memoryMapAndGenerate tries to memory map a temporary file of uint32s for write
@@ -142,7 +134,7 @@ func memoryMapFile(file *os.File, write bool) (mmap.MMap, []uint32, error) {
 // path requested.
 func memoryMapAndGenerate(path string, size uint64, lock bool, generator func(buffer []uint32)) (*os.File, mmap.MMap, []uint32, error) {
 	// Ensure the data folder exists
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, nil, nil, err
 	}
 	suffix, err := math.RandInt64()
@@ -562,7 +554,7 @@ func (ethash *Ethash) Hashrate() float64 {
 	if (ethash.config.PowMode != ethashcfg.ModeNormal && ethash.config.PowMode != ethashcfg.ModeTest) || ethash.remote == nil {
 		return ethash.hashrate.Rate()
 	}
-	var res = make(chan uint64, 1)
+	res := make(chan uint64, 1)
 
 	select {
 	case ethash.remote.fetchRateCh <- res:
@@ -609,6 +601,6 @@ func (ethash *Ethash) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
 	return nil
 }
 
-func (c *Ethash) TxDependencies(h *types.Header) [][]int {
+func (ethash *Ethash) TxDependencies(h *types.Header) [][]int {
 	return nil
 }

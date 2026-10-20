@@ -19,6 +19,8 @@ package state
 import (
 	"testing"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -36,7 +38,7 @@ func BenchmarkCommittedStorage(b *testing.B) {
 	for i := range keys {
 		keys[i] = accounts.InternKey(common.Hash{byte(i), byte(i >> 8)})
 	}
-	val := []byte{1, 2, 3, 4}
+	val := *uint256.NewInt(0x01020304)
 
 	// Warm read: all keys pre-filled, workers only read (the SLOAD cache-hit hot path).
 	b.Run("read_warm", func(b *testing.B) {

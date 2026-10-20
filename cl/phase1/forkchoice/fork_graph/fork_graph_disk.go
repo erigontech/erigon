@@ -40,8 +40,10 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-const dumpSlotFrequency = 4
-const pruneBatchSize = 256
+const (
+	dumpSlotFrequency = 4
+	pruneBatchSize    = 256
+)
 
 type syncCommittees struct {
 	currentSyncCommittee *solid.SyncCommittee
@@ -150,8 +152,9 @@ type forkGraphDisk struct {
 	lightClientUpdates sync.Map // period -> lightclientupdate
 
 	// in-memory cache of block roots that have envelopes on disk [Optimization for Gloas:EIP7732]
-	envelopeExists  sync.Map // common.Hash -> struct{}
-	envelopeMissing sync.Map // common.Hash -> struct{}
+	envelopeExists   sync.Map // common.Hash -> struct{}
+	envelopeMissing  sync.Map // common.Hash -> struct{}
+	invalidEnvelopes sync.Map // common.Hash -> struct{}
 
 	// reusable buffers
 	sszBuffer []byte
@@ -212,7 +215,6 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 	f.lowestAvailableBlock.Store(anchorState.Slot())
 	f.headers.Store(common.Hash(anchorRoot), &anchorHeader)
 	f.sszBuffer = make([]byte, 0, (anchorState.EncodingSizeSSZ()*3)/2)
-
 	if err := f.DumpBeaconStateOnDisk(anchorRoot, anchorState, true); err != nil {
 		return nil, err
 	}
@@ -533,7 +535,10 @@ func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *stat
 		return
 	}
 	if f.syncedData.HeadRoot() == blockRoot {
-		err = f.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		err = f.syncedData.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, headRoot common.Hash, _ uint64) error {
+			if headRoot != blockRoot {
+				return nil
+			}
 			// HeadRoot() already matched blockRoot, so we trust the stored root
 			// rather than recomputing BlockRoot() which can return incorrect results
 			// when the state's incremental hashing cache has been dirtied.
@@ -551,7 +556,9 @@ func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *stat
 		if errors.Is(err, synced_data.ErrNotSynced) {
 			err = nil
 		}
-		return
+		if ok || err != nil {
+			return
+		}
 	}
 
 	// check if the state is in the cache
@@ -617,11 +624,17 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 		block, isSegmentPresent := f.GetBlock(currentIteratorRoot)
 		if !isSegmentPresent {
 			// check if it is in the header
+			// The anchor state is dumped at startup whatever its slot.
 			bHeader, ok := f.GetHeader(currentIteratorRoot)
-			if ok && bHeader.Slot%dumpSlotFrequency == 0 {
+			if ok && (bHeader.Slot%dumpSlotFrequency == 0 || currentIteratorRoot == f.anchorRoot) {
 				copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot)
 				if err != nil {
-					log.Trace("Could not retrieve state", "missing", currentIteratorRoot, "err", err)
+					if currentIteratorRoot == f.anchorRoot {
+						// Once currentState has moved on, this file is the only copy of the anchor state.
+						log.Warn("Could not read the anchor state file", "root", currentIteratorRoot, "err", err)
+					} else {
+						log.Trace("Could not retrieve state", "missing", currentIteratorRoot, "err", err)
+					}
 					return nil, nil
 				}
 				continue
@@ -737,13 +750,13 @@ func (f *forkGraphDisk) IsBlockRetained(blockRoot common.Hash) bool {
 	return f.retainedBlock(blockRoot)
 }
 
-func (f *forkGraphDisk) WithRetainedBlock(blockRoot common.Hash, fn func()) bool {
+func (f *forkGraphDisk) WithRetainedBlock(blockRoot common.Hash, fn func(func(common.Hash) bool)) bool {
 	f.lifecycleMu.RLock()
 	defer f.lifecycleMu.RUnlock()
 	if !f.retainedBlock(blockRoot) {
 		return false
 	}
-	fn()
+	fn(f.retainedBlock)
 	return true
 }
 
@@ -826,6 +839,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 			f.blockRewards.Delete(root)
 			f.envelopeExists.Delete(root)
 			f.envelopeMissing.Delete(root)
+			f.invalidEnvelopes.Delete(root)
 			f.unavailablePayloads.Delete(root)
 			f.acceptedPayloads.Delete(root)
 			f.badBlocks.Delete(root)
@@ -841,11 +855,14 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 	f.removeValidatedChildren(validatedRootsByParent)
 
 	for _, root := range oldRoots {
-		if err := f.fs.Remove(getBeaconStateFilename(root)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			log.Debug("failed to remove pruned beacon state file", "root", root, "err", err)
+		if removeErr := f.fs.Remove(getBeaconStateFilename(root)); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
+			log.Debug("failed to remove pruned beacon state file", "root", root, "err", removeErr)
 		}
-		if err := f.fs.Remove(getEnvelopeFilename(root)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			log.Debug("failed to remove pruned envelope file", "root", root, "err", err)
+		if removeErr := f.fs.Remove(getEnvelopeFilename(root)); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
+			err = errors.Join(err, fmt.Errorf("remove envelope for root %x: %w", root, removeErr))
+		}
+		if removeErr := f.fs.Remove(getEnvelopeTempFilename(root)); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
+			err = errors.Join(err, fmt.Errorf("remove envelope temp for root %x: %w", root, removeErr))
 		}
 	}
 	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot)

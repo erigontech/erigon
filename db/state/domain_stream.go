@@ -153,6 +153,7 @@ func (hi *DomainLatestIterFile) closeCursorItem(item *CursorItem) {
 func (hi *DomainLatestIterFile) Trace(prefix string) *stream.TracedDuo[[]byte, []byte] {
 	return stream.TraceDuo(hi, hi.logger, "[dbg] DomainLatestIterFile.Next "+prefix)
 }
+
 func (hi *DomainLatestIterFile) init(domainRoTx *DomainRoTx) error {
 	// Implementation:
 	//     File endTxNum  = last txNum of file step
@@ -426,8 +427,8 @@ func (hi *DomainLatestIterFile) HasNext() bool {
 		return true
 	}
 
-	//Asc:  [from, to) AND from < to
-	//Desc: [from, to) AND from > to
+	// Asc:  [from, to) AND from < to
+	// Desc: [from, to) AND from > to
 	cmp := bytes.Compare(hi.nextKey, hi.to)
 	return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
 }

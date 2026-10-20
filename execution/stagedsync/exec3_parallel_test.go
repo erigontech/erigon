@@ -3,6 +3,7 @@ package stagedsync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"math/rand"
@@ -17,12 +18,14 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -31,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -39,11 +43,13 @@ import (
 
 type OpType int
 
-const readType = 0
-const writeType = 1
-const otherType = 2
-const greenTick = "✅"
-const redCross = "❌"
+const (
+	readType  = 0
+	writeType = 1
+	otherType = 2
+	greenTick = "✅"
+	redCross  = "❌"
+)
 
 const threeRockets = "🚀🚀🚀"
 
@@ -76,7 +82,6 @@ type Timer func(txIdx int, opIdx int) time.Duration
 type Sender func(int) accounts.Address
 
 func NewTestExecTask(txIdx int, ops []Op, sender accounts.Address, nonce int) *testExecTask {
-
 	return &testExecTask{
 		TxTask: &exec.TxTask{
 			Header: &types.Header{
@@ -110,6 +115,72 @@ func newParallelTestBlockFromTasks(tasks []exec.Task) *types.Block {
 	return types.NewBlockFromStorage(tasks[0].BlockHash(), tasks[0].BlockHeader(), txs, nil, nil, nil)
 }
 
+type rulesEngineWithErrors struct {
+	rules.Engine
+	initializeErr error
+	finalizeErr   error
+}
+
+type failingAccountStateReader struct {
+	*state.NoopReader
+	err error
+}
+
+func (r failingAccountStateReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	return nil, r.err
+}
+
+type panickingAccountStateReader struct {
+	*state.NoopReader
+	panicValue any
+}
+
+func (r panickingAccountStateReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	panic(r.panicValue)
+}
+
+type failingAccountTemporalTx struct {
+	kv.TemporalTx
+	address common.Address
+	err     error
+}
+
+func (tx failingAccountTemporalTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if domain == kv.AccountsDomain && common.BytesToAddress(key) == tx.address {
+		return nil, 0, tx.err
+	}
+	return tx.TemporalTx.GetLatest(domain, key, opts)
+}
+
+func (tx failingAccountTemporalTx) AggTx() any {
+	return nil
+}
+
+func (e rulesEngineWithErrors) Initialize(config *chain.Config, chainReader rules.ChainHeaderReader, header *types.Header,
+	ibs *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
+) error {
+	return e.initializeErr
+}
+
+func (e rulesEngineWithErrors) Finalize(config *chain.Config, header *types.Header, ibs *state.IntraBlockState,
+	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
+	chainReader rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
+) (types.FlatRequests, error) {
+	return nil, e.finalizeErr
+}
+
+type rulesEngineWithFinalizeBalance struct {
+	rules.Engine
+	beneficiary accounts.Address
+}
+
+func (e rulesEngineWithFinalizeBalance) Finalize(_ *chain.Config, _ *types.Header, ibs *state.IntraBlockState,
+	_ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ rules.ChainReader, _ rules.SystemCall,
+	_ bool, _ log.Logger,
+) (types.FlatRequests, error) {
+	return nil, ibs.AddBalance(e.beneficiary, *uint256.NewInt(1), tracing.BalanceIncreaseWithdrawal)
+}
+
 func sleepWithContext(ctx context.Context, d time.Duration) error {
 	select {
 	case <-ctx.Done():
@@ -128,7 +199,8 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	chainConfig *chain.Config,
 	chainReader rules.ChainReader,
 	dirs datadir.Dirs,
-	calcFees bool) *exec.TxResult {
+	calcFees bool,
+) *exec.TxResult {
 	// Sleep for 50 microsecond to simulate setup time
 	sleepWithContext(t.ctx, time.Microsecond*50) //nolint:errcheck
 
@@ -158,7 +230,8 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 					if nonce, _, ok := vm.ReadNonce(k.addr, version.TxIndex); ok && int(nonce) != t.nonce {
 						return &exec.TxResult{Err: protocol.ErrExecAbortError{
 							DependencyTxIndex: -1,
-							OriginError:       fmt.Errorf("invalid nonce: got: %d, expected: %d", nonce, t.nonce)}}
+							OriginError:       fmt.Errorf("invalid nonce: got: %d, expected: %d", nonce, t.nonce),
+						}}
 					}
 				}
 			}
@@ -253,8 +326,8 @@ type opkey struct {
 }
 
 var randomPathGenerator = func(i int, j int, total int) opkey {
-	addr := accounts.InternAddress(common.BigToAddress((big.NewInt(int64(i % 10)))))
-	hash := accounts.InternKey(common.BigToHash((big.NewInt(int64(total)))))
+	addr := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i % 10))))
+	hash := accounts.InternKey(common.BigToHash(big.NewInt(int64(total))))
 	return opkey{addr, hash, state.StoragePath}
 }
 
@@ -268,9 +341,11 @@ var dexPathGenerator = func(i int, j int, total int) opkey {
 	}
 }
 
-var readTime = randTimeGenerator(4*time.Microsecond, 12*time.Microsecond)
-var writeTime = randTimeGenerator(2*time.Microsecond, 6*time.Microsecond)
-var nonIOTime = randTimeGenerator(1*time.Microsecond, 2*time.Microsecond)
+var (
+	readTime  = randTimeGenerator(4*time.Microsecond, 12*time.Microsecond)
+	writeTime = randTimeGenerator(2*time.Microsecond, 6*time.Microsecond)
+	nonIOTime = randTimeGenerator(1*time.Microsecond, 2*time.Microsecond)
+)
 
 func taskFactory(numTask int, sender Sender, readsPerT int, writesPerT int, nonIOPerT int, pathGenerator PathGenerator, readTime Timer, writeTime Timer, nonIOTime Timer) ([]exec.Task, time.Duration) {
 	exec := make([]exec.Task, 0, numTask)
@@ -535,7 +610,9 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 	assert.NoError(tb, err, "error occur during parallel init")
 	assert.NoError(tb, executorContext.Err(), "error occur during parallel init")
 
-	defer executorCancel(nil)
+	defer func() {
+		assert.NoError(tb, executorCancel(nil))
+	}()
 
 	for _, task := range tasks {
 		task := task.(*testExecTask)
@@ -544,9 +621,12 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 	}
 
 	start := time.Now()
-	_, err = executeParallelWithCheck(tb, pe, tasks, false, validation, metadata)
+	result, err := executeParallelWithCheck(tb, pe, tasks, false, validation, metadata)
 
 	assert.NoError(tb, err, "error occur during parallel execution")
+	if result != nil {
+		assert.NoError(tb, result.Err, "block rejected")
+	}
 
 	// Need to apply the final write set to storage
 
@@ -579,12 +659,13 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 
 type propertyCheck func(*parallelExecutor) error
 
+// ParallelValidationsTotal exposes the parallel executor's validation count to stagedsync_test.
+func ParallelValidationsTotal() int64 { return validationsTotal.Load() }
+
 func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.Task, profile bool, check propertyCheck, metadata bool) (result *blockResult, err error) {
 	if len(tasks) == 0 {
 		return nil, nil
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
 
 	applyResults := make(chan applyResult, 1000)
 	block := newParallelTestBlockFromTasks(tasks)
@@ -600,14 +681,89 @@ func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.
 		}
 	}
 
-	cancel()
-	_ = pe.wait(ctx)
+	pe.cancelExecLoop(nil)
+	if err := pe.wait(); err != nil {
+		return result, err
+	}
 
 	if check != nil {
 		err = check(pe)
 	}
 
 	return result, err
+}
+
+func TestExecuteParallelWithCheckCancelsBeforeWait(t *testing.T) {
+	executorCtx, cancelExecLoop := context.WithCancelCause(context.Background())
+	executorGroup, executorCtx := commonerrors.NewGroup(executorCtx)
+	executorGroup.Go(func() error {
+		<-executorCtx.Done()
+		return executorCtx.Err()
+	})
+
+	pe := &parallelExecutor{
+		txExecutor: txExecutor{
+			execRequests:  make(chan *execRequest, 1),
+			execLoopGroup: executorGroup,
+		},
+		cancelExecLoop: cancelExecLoop,
+	}
+	go func() {
+		request := <-pe.execRequests
+		request.applyResults <- &blockResult{Block: request.block}
+	}()
+
+	task := NewTestExecTask(0, nil, accounts.InternAddress(common.Address{}), 0)
+	done := make(chan error, 1)
+	go func() {
+		_, err := executeParallelWithCheck(t, pe, []exec.Task{task}, false, nil, false)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		cancelExecLoop(nil)
+		require.NoError(t, <-done)
+		t.Fatal("executeParallelWithCheck waited without stopping the executor")
+	}
+}
+
+func TestParallelExecutorWorkerPoolSize(t *testing.T) {
+	for _, tc := range []struct {
+		workerCount int
+		poolSize    int
+	}{
+		{workerCount: 1, poolSize: 1},
+		{workerCount: 4, poolSize: 5},
+	} {
+		t.Run(fmt.Sprintf("workers=%d", tc.workerCount), func(t *testing.T) {
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			tx, err := db.BeginTemporalRo(t.Context()) //nolint:gocritic
+			require.NoError(t, err)
+			defer tx.Rollback()
+			domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+			require.NoError(t, err)
+			defer domains.Close()
+
+			chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
+			pe := &parallelExecutor{
+				txExecutor: txExecutor{
+					cfg:    ExecuteBlockCfg{chainConfig: chainSpec.Config, db: db},
+					doms:   domains,
+					rs:     state.NewStateV3Buffered(state.NewStateV3(domains, false, log.New())),
+					logger: log.New(),
+				},
+				workerCount: tc.workerCount,
+			}
+			_, executorCancel, err := pe.run(t.Context())
+			require.NoError(t, err)
+			defer func() { require.NoError(t, executorCancel(nil)) }()
+
+			require.Len(t, pe.execWorkers, tc.poolSize)
+		})
+	}
 }
 
 func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propertyCheck) map[int]map[int]bool {
@@ -643,7 +799,9 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 	}
 
 	executorContext, executorCancel, err := pe.run(ctx)
-	defer executorCancel(nil)
+	defer func() {
+		assert.NoError(tb, executorCancel(nil))
+	}()
 	assert.NoError(tb, err, "error occur during parallel init")
 
 	for _, task := range tasks {
@@ -670,7 +828,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
 
 	// newExecutor creates a fresh domains/state/executor on the shared DB.
-	newExecutor := func() (*parallelExecutor, context.Context, context.CancelCauseFunc, func()) {
+	newExecutor := func() (*parallelExecutor, context.Context, func(error) error, func()) {
 		tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		assert.NoError(tb, err)
 		domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
@@ -690,7 +848,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 		assert.NoError(tb, err, "error during parallel init")
 
 		cleanup := func() {
-			executorCancel(nil)
+			assert.NoError(tb, executorCancel(nil))
 			domains.Close()
 			tx.Rollback()
 		}
@@ -1025,6 +1183,234 @@ func newResumeTestExec(t *testing.T, db kv.TemporalRwDB, config *chain.Config) (
 		},
 	}
 	return pe, roTx
+}
+
+func newParallelResultTestBlock(config *chain.Config, txs ...types.Transaction) (*blockExecutor, *taskVersion) {
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
+	txTask := &exec.TxTask{
+		Header:          header,
+		TxNum:           1,
+		TxIndex:         0,
+		Config:          config,
+		Txs:             txs,
+		Logger:          log.New(),
+		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+	}
+	eTask := &execTask{Task: txTask, index: 0}
+	task := &taskVersion{execTask: eTask, version: state.Version{BlockNum: 1, TxNum: 1, TxIndex: 0}}
+	gasPool := new(protocol.GasPool).AddGas(header.GasLimit)
+	be := newBlockExec(newParallelTestBlock(1), gasPool, nil, make(chan applyResult, 4), nil, false, nil)
+	be.tasks = []*execTask{eTask}
+	be.results = []*execResult{nil}
+	be.txIncarnations = []int{0}
+	be.execFailed = []int{0}
+	be.execAborted = []int{0}
+	be.estimateDeps[0] = []int{}
+	be.execTasks.setInProgress(0)
+	return be, task
+}
+
+func TestParallelInitializeRulesEngineErrorUsesVerdictPath(t *testing.T) {
+	config := chain.TestChainBerlinConfig
+	engineErr := fmt.Errorf("epoch database read failed")
+	engine := rulesEngineWithErrors{Engine: ethash.NewFaker(), initializeErr: engineErr}
+	txTask := &exec.TxTask{
+		Header:          &types.Header{Number: *uint256.NewInt(1)},
+		TxIndex:         -1,
+		Config:          config,
+		Logger:          log.New(),
+		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+	}
+	eTask := &execTask{Task: txTask}
+	task := &taskVersion{
+		execTask: eTask,
+		version:  state.Version{BlockNum: 1, TxIndex: -1},
+	}
+	ibs := state.New(state.NewNoopReader())
+	t.Cleanup(ibs.Close)
+
+	result := task.Execute(&vm.EVM{}, engine, nil, ibs, state.NewNoopWriter(), config, nil, datadir.Dirs{}, false)
+
+	require.False(t, result.Operational)
+	var abort protocol.ErrExecAbortError
+	require.ErrorAs(t, result.Err, &abort)
+	require.ErrorIs(t, abort.OriginError, engineErr)
+}
+
+func TestParallelFinalizeClassifiesRulesEngineError(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		engineErr func(error) error
+	}{
+		{
+			name:      "plain error",
+			engineErr: func(cause error) error { return cause },
+		},
+		{
+			name: "preclassified invalid block",
+			engineErr: func(cause error) error {
+				return fmt.Errorf("%w: %w", rules.ErrInvalidBlock, cause)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newResumeTestDB(t)
+			config := chain.TestChainBerlinConfig
+			pe, roTx := newResumeTestExec(t, db, config)
+			cause := fmt.Errorf("epoch database write failed")
+			pe.cfg.engine = rulesEngineWithErrors{Engine: pe.cfg.engine, finalizeErr: tc.engineErr(cause)}
+			be, task := newParallelResultTestBlock(config)
+
+			result, err := be.nextResult(context.Background(), pe, &exec.TxResult{
+				Task:  task,
+				TxIn:  state.ReadSet{},
+				TxOut: &state.WriteSet{},
+			}, roTx)
+
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.ErrorIs(t, result.Err, rules.ErrInvalidBlock)
+			require.ErrorContains(t, result.Err, cause.Error())
+		})
+	}
+}
+
+func TestParallelFinalizeStateReadErrorUsesOperationalBlockResult(t *testing.T) {
+	db := newResumeTestDB(t)
+	config := chain.TestChainBerlinConfig
+	pe, roTx := newResumeTestExec(t, db, config)
+	cause := errors.New("withdrawal account read failed")
+	beneficiary := accounts.InternAddress(common.Address{19: 0x42})
+	pe.cfg.engine = rulesEngineWithFinalizeBalance{Engine: pe.cfg.engine, beneficiary: beneficiary}
+	be, task := newParallelResultTestBlock(config)
+
+	result, err := be.nextResult(context.Background(), pe, &exec.TxResult{
+		Task:  task,
+		TxIn:  state.ReadSet{},
+		TxOut: &state.WriteSet{},
+	}, failingAccountTemporalTx{TemporalTx: roTx, address: beneficiary.Value(), err: cause})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.Operational)
+	require.ErrorIs(t, result.Err, cause)
+	require.NotErrorIs(t, result.Err, rules.ErrInvalidBlock)
+}
+
+func TestParallelStateReadErrorUsesOperationalBlockResult(t *testing.T) {
+	db := newResumeTestDB(t)
+	config := chain.TestChainBerlinConfig
+	pe, roTx := newResumeTestExec(t, db, config)
+	cause := fmt.Errorf("account domain read failed")
+
+	be, task := newParallelResultTestBlock(config, signSelfSendTx(t, 0, 0, 1, 21_000, config, 0))
+	be.settledInput[0] = true
+	task.versionMap = be.versionMap
+
+	ibs := state.New(failingAccountStateReader{NoopReader: state.NewNoopReader(), err: cause})
+	t.Cleanup(ibs.Close)
+	evm := &vm.EVM{}
+	require.NoError(t, task.Reset(evm, ibs, nil))
+	result := task.Execute(evm, pe.cfg.engine, nil, ibs, state.NewNoopWriter(), config, nil, datadir.Dirs{}, false)
+	result.Task = task
+	require.Zero(t, result.TxIn.Len())
+
+	blockResult, err := be.nextResult(context.Background(), pe, result, roTx)
+
+	require.NoError(t, err)
+	require.NotNil(t, blockResult)
+	require.Same(t, be.block, blockResult.Block)
+	require.True(t, blockResult.Operational)
+	require.ErrorIs(t, blockResult.Err, cause)
+	require.NotErrorIs(t, blockResult.Err, rules.ErrInvalidBlock)
+	require.True(t, result.Operational)
+}
+
+func newRetryLimitTestBlock() (*blockExecutor, *taskVersion) {
+	txTask := &exec.TxTask{
+		Header:  &types.Header{Number: *uint256.NewInt(1)},
+		TxIndex: 0,
+	}
+	eTask := &execTask{Task: txTask, index: 0}
+	be := newBlockExec(newParallelTestBlock(1), nil, nil, nil, nil, false, nil)
+	be.tasks = []*execTask{eTask}
+	be.results = make([]*execResult, len(be.tasks))
+	return be, &taskVersion{
+		execTask: eTask,
+		version:  state.Version{BlockNum: 1, TxIndex: 0, Incarnation: 2},
+	}
+}
+
+func TestParallelIncarnationLimitUsesOperationalBlockResult(t *testing.T) {
+	origin := errors.New("transaction execution failed")
+	for _, tc := range []struct {
+		name   string
+		origin error
+	}{
+		{name: "dependency retry"},
+		{name: "execution error retry", origin: origin},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			be, task := newRetryLimitTestBlock()
+
+			result, err := be.nextResult(context.Background(), nil, &exec.TxResult{
+				Task: task,
+				Err: protocol.ErrExecAbortError{
+					DependencyTxIndex: 0,
+					OriginError:       tc.origin,
+				},
+			}, nil)
+
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.True(t, result.Operational)
+			require.NotErrorIs(t, result.Err, rules.ErrInvalidBlock)
+			require.ErrorContains(t, result.Err, "too many incarnations")
+			if tc.origin != nil {
+				require.ErrorIs(t, result.Err, tc.origin)
+			}
+		})
+	}
+}
+
+func TestParallelValidatorRetryLimitUsesOperationalBlockResult(t *testing.T) {
+	be, _ := newRetryLimitTestBlock()
+	be.txIncarnations = []int{2}
+
+	result := be.retryLimitResult(0, 0, be.txIncarnations[0], "validator-invalid retries", nil)
+
+	require.NotNil(t, result)
+	require.True(t, result.Operational)
+	require.NotErrorIs(t, result.Err, rules.ErrInvalidBlock)
+	require.ErrorContains(t, result.Err, "too many validator-invalid retries")
+}
+
+func TestParallelTransitionPanicUsesOperationalBlockResult(t *testing.T) {
+	db := newResumeTestDB(t)
+	config := chain.TestChainBerlinConfig
+	pe, roTx := newResumeTestExec(t, db, config)
+	panicValue := fmt.Errorf("%w: account reader panic", rules.ErrInvalidBlock)
+
+	be, task := newParallelResultTestBlock(config, signSelfSendTx(t, 0, 0, 1, 21_000, config, 0))
+	be.settledInput[0] = true
+	task.versionMap = be.versionMap
+
+	ibs := state.New(panickingAccountStateReader{NoopReader: state.NewNoopReader(), panicValue: panicValue})
+	t.Cleanup(ibs.Close)
+	evm := &vm.EVM{}
+	require.NoError(t, task.Reset(evm, ibs, nil))
+	result := task.Execute(evm, pe.cfg.engine, nil, ibs, state.NewNoopWriter(), config, nil, datadir.Dirs{}, false)
+	result.Task = task
+
+	blockResult, err := be.nextResult(context.Background(), pe, result, roTx)
+
+	require.NoError(t, err)
+	require.NotNil(t, blockResult)
+	require.Same(t, be.block, blockResult.Block)
+	require.True(t, blockResult.Operational)
+	require.ErrorContains(t, blockResult.Err, "account reader panic")
+	require.NotErrorIs(t, blockResult.Err, rules.ErrInvalidBlock)
+	require.True(t, result.Operational)
 }
 
 func TestParallelResumeBoundaryOffsets(t *testing.T) {
@@ -1385,6 +1771,84 @@ func TestNextResult_NilVsEmptyRecordForkAware(t *testing.T) {
 	}
 }
 
+// A touch removes an empty account (EIP-161) and a credit in the same
+// validation pass creates a new one, which must have incarnation 0 as on serial.
+// Both the latest and the historic state reader must see the removal.
+func TestNextResult_SamePassCreditAfterEmptyAccountRemoval(t *testing.T) {
+	config := chain.TestChainBerlinConfig
+	empty := accounts.InternAddress(common.Address{0xee})
+	emptyKey := empty.Value()
+	for _, tc := range []struct {
+		name     string
+		historic bool
+		coinbase bool
+	}{
+		{"latest", false, false},
+		{"historic", true, false},
+		{"coinbase-tip", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newResumeTestDB(t)
+			seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
+				acc := accounts.Account{Incarnation: 1, CodeHash: accounts.EmptyCodeHash}
+				return putter.DomainPut(kv.AccountsDomain, emptyKey[:], accounts.SerialiseV3(&acc), 0, nil)
+			})
+			pe, roTx := newResumeTestExec(t, db, config)
+			pe.in = exec.NewQueueWithRetry(16)
+			t.Cleanup(pe.in.Close)
+
+			header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
+			txs := types.Transactions{signSelfSendTx(t, 0, 0, 1, 21_000, config, 0), signSelfSendTx(t, 1, 0, 1, 21_000, config, 0)}
+			be := newBlockExec(newParallelTestBlock(1), new(protocol.GasPool).AddGas(header.GasLimit), nil, make(chan applyResult, 8), nil, false, nil)
+			be.results = make([]*execResult, len(txs))
+			be.txIncarnations = make([]int, len(txs))
+			be.execFailed = make([]int, len(txs))
+			be.execAborted = make([]int, len(txs))
+			results := make([]*exec.TxResult, len(txs))
+			for i, balance := range []uint64{0, 1} {
+				version := state.Version{BlockNum: 1, TxNum: uint64(i + 1), TxIndex: i}
+				eTask := &execTask{Task: &exec.TxTask{
+					Header:           header,
+					TxNum:            version.TxNum,
+					TxIndex:          i,
+					Config:           config,
+					Txs:              txs,
+					EvmBlockContext:  evmtypes.BlockContext{BlockNumber: 1},
+					HistoryExecution: tc.historic,
+				}, index: i}
+				be.tasks = append(be.tasks, eTask)
+				be.execTasks.setInProgress(i)
+				results[i] = &exec.TxResult{
+					Task:            &taskVersion{execTask: eTask, version: version},
+					TxOut:           newWS().bal(empty, version, *uint256.NewInt(balance)).build(),
+					ExecutionResult: evmtypes.ExecutionResult{ReceiptGasUsed: 21_000},
+				}
+				if tc.coinbase {
+					results[i].TxOut = newWS().build()
+					results[i].Coinbase = empty
+					results[i].ExecutionResult.FeeTipped = *uint256.NewInt(balance)
+				}
+			}
+
+			// The credit completes first, so the touch's result validates both in one pass.
+			_, err := be.nextResult(t.Context(), pe, results[1], roTx)
+			require.NoError(t, err)
+			require.Nil(t, be.finalizedResults[1])
+			blockResult, err := be.nextResult(t.Context(), pe, results[0], roTx)
+			require.NoError(t, err)
+			require.NotNil(t, blockResult)
+			require.NoError(t, blockResult.Err)
+
+			enc, _, err := pe.rs.Domains().GetLatest(kv.AccountsDomain, roTx, emptyKey[:])
+			require.NoError(t, err)
+			var acc accounts.Account
+			require.NoError(t, accounts.DeserialiseV3(&acc, enc))
+			require.Equal(t, uint64(1), acc.Balance.Uint64())
+			require.Zero(t, acc.Incarnation)
+		})
+	}
+}
+
 func TestDispatchPendingCompaction(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -1507,24 +1971,38 @@ func (e *logEmittingSyscallEngine) Finalize(config *chain.Config, header *types.
 	return nil, nil
 }
 
-// seedLogEmittingContract deploys `LOG0` bytecode at addr so that every system
+// putLogEmittingContract writes `LOG1` bytecode at addr so that every system
 // call to it appends exactly one log to the caller's IntraBlockState.
+func putLogEmittingContract(putter kv.TemporalPutDel, addr common.Address) error {
+	code := []byte{byte(vm.PUSH1), 0x42, byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.LOG1), byte(vm.STOP)}
+	acc := accounts.NewAccount()
+	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	if err := putter.DomainPut(kv.CodeDomain, addr[:], code, 0, nil); err != nil {
+		return err
+	}
+	return putter.DomainPut(kv.AccountsDomain, addr[:], accounts.SerialiseV3(&acc), 0, nil)
+}
+
 func seedLogEmittingContract(t *testing.T, db kv.TemporalRwDB, addr common.Address) {
-	code := []byte{byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.LOG0), byte(vm.STOP)}
 	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
-		acc := accounts.NewAccount()
-		acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
-		if err := putter.DomainPut(kv.CodeDomain, addr[:], code, 0, nil); err != nil {
-			return err
-		}
-		return putter.DomainPut(kv.AccountsDomain, addr[:], accounts.SerialiseV3(&acc), 0, nil)
+		return putLogEmittingContract(putter, addr)
 	})
 }
 
-// TestParallelBlockEndLogsCountEachSyscallOnce pins the block-end log run: the
-// finalize system calls share one IntraBlockState and one txIndex, so the state
-// holds their cumulative logs, and collecting per call counted the earlier ones
-// again — k(k+1)/2 logs for k calls.
+type indexCountingMemBatch struct {
+	kv.TemporalMemBatch
+	adds map[kv.InvertedIdx]int
+}
+
+func (m *indexCountingMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) error {
+	m.adds[table]++
+	return m.TemporalMemBatch.IndexAdd(table, key, txNum)
+}
+
+// Finalize system calls share an IntraBlockState and txIndex, so GetRawLogs
+// returns all logs collected so far. Reading it after each call would process
+// earlier logs again. Count index additions before storage deduplicates equal
+// (key, txNum) pairs, which would hide that duplication in index queries.
 func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
 	const syscalls = 3
 
@@ -1543,9 +2021,30 @@ func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
 		Config:  config,
 	}
 
-	pe, roTx := newResumeTestExec(t, db, config)
-	pe.cfg.engine = &logEmittingSyscallEngine{Engine: ethash.NewFaker(), contract: accounts.InternAddress(contract), calls: syscalls}
-	pe.cfg.vmConfig = &vm.Config{}
+	logger := log.New()
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(roTx.Rollback)
+	indexes := &indexCountingMemBatch{
+		TemporalMemBatch: roTx.Debug().NewMemBatch(kvmetrics.NewDomainMetrics()),
+		adds:             make(map[kv.InvertedIdx]int),
+	}
+	domains, err := execctx.NewSharedDomains(t.Context(), roTx, logger, execctx.WithMemBatch(indexes))
+	require.NoError(t, err)
+	t.Cleanup(domains.Close)
+	pe := &parallelExecutor{
+		txExecutor: txExecutor{
+			cfg: ExecuteBlockCfg{
+				chainConfig: config,
+				db:          db,
+				engine:      &logEmittingSyscallEngine{Engine: ethash.NewFaker(), contract: accounts.InternAddress(contract), calls: syscalls},
+				vmConfig:    &vm.Config{},
+			},
+			doms:   domains,
+			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, false, logger)),
+			logger: logger,
+		},
+	}
 
 	be := newBlockExec(newParallelTestBlock(1), new(protocol.GasPool).AddGas(10_000_000), nil, make(chan applyResult, 4), nil, false, nil)
 	eTask := &execTask{Task: txTask, index: 0}
@@ -1566,5 +2065,286 @@ func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
 	require.NotNil(t, res)
 	require.NoError(t, res.Err)
 
-	assert.Len(t, txResult.Logs, syscalls)
+	assert.Equal(t, syscalls, indexes.adds[kv.LogAddrIdx])
+	assert.Equal(t, syscalls, indexes.adds[kv.LogTopicIdx])
+}
+
+type senderTask struct {
+	*exec.TxTask
+	sender accounts.Address
+	deps   []int
+}
+
+func (t *senderTask) TxSender() (accounts.Address, error) {
+	return t.sender, nil
+}
+
+func (t *senderTask) Dependencies() []int {
+	return t.deps
+}
+
+type schedulerTest struct {
+	t    *testing.T
+	ctx  context.Context
+	pe   *parallelExecutor
+	be   *blockExecutor
+	roTx kv.TemporalTx
+}
+
+func newSchedulerTest(t *testing.T, deps map[int][]int, senders ...accounts.Address) *schedulerTest {
+	return newSchedulerTestWithTxs(t, deps, nil, senders...)
+}
+
+func newSchedulerTestWithTxs(t *testing.T, deps map[int][]int, txs types.Transactions, senders ...accounts.Address) *schedulerTest {
+	t.Helper()
+	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
+	if txs == nil {
+		signedTx := signSelfSendTx(t, 0, 0, 1, 21000, chainSpec.Config, 0)
+		txs = make(types.Transactions, len(senders))
+		for i := range txs {
+			txs[i] = signedTx
+		}
+	}
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
+	pe, roTx := newResumeTestExec(t, newResumeTestDB(t), chainSpec.Config)
+	pe.in = exec.NewQueueWithRetry(16)
+	t.Cleanup(pe.in.Close)
+	be := newBlockExec(newParallelTestBlock(1), new(protocol.GasPool).AddGas(10_000_000), nil, make(chan applyResult, 8), make(chan applyResult, 8), false, nil)
+	pe.blockExecutors = map[uint64]*blockExecutor{1: be}
+	tasks := make([]exec.Task, len(senders))
+	for i, from := range senders {
+		tasks[i] = &senderTask{TxTask: &exec.TxTask{
+			Header:          header,
+			EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+			TxNum:           uint64(i + 1),
+			TxIndex:         i,
+			Config:          chainSpec.Config,
+			Txs:             txs,
+		}, sender: from, deps: deps[i]}
+	}
+	s := &schedulerTest{t: t, ctx: context.Background(), pe: pe, be: be, roTx: roTx}
+	require.NoError(t, pe.processRequest(s.ctx, &execRequest{block: be.block, tasks: tasks}))
+	be.scheduleExecution(s.ctx, pe)
+	return s
+}
+
+func (s *schedulerTest) pop() (*taskVersion, bool) {
+	ctx, cancel := context.WithCancel(s.ctx)
+	cancel()
+	task, ok := s.pe.in.Next(ctx)
+	if !ok {
+		return nil, false
+	}
+	return task.(*taskVersion), true
+}
+
+func (s *schedulerTest) dispatched() *taskVersion {
+	s.t.Helper()
+	tv, ok := s.pop()
+	require.True(s.t, ok, "nothing dispatched")
+	return tv
+}
+
+func (s *schedulerTest) queued() int {
+	if tv, ok := s.pop(); ok {
+		return tv.index
+	}
+	return -1
+}
+
+func (s *schedulerTest) deliver(tv *taskVersion, reads state.ReadSet, err error) {
+	s.t.Helper()
+	res := &exec.TxResult{Task: tv, TxIn: reads, TxOut: &state.WriteSet{}, Err: err, ExecutionResult: evmtypes.ExecutionResult{ReceiptGasUsed: 21000}}
+	blockRes, nextErr := s.be.nextResult(s.ctx, s.pe, res, s.roTx)
+	require.NoError(s.t, nextErr)
+	require.Nil(s.t, blockRes)
+}
+
+func (s *schedulerTest) parked(tx int) bool {
+	return !s.be.execTasks.checkPending(tx) && !s.be.execTasks.checkInProgress(tx)
+}
+
+func TestSameSenderSuccessorWaitsForPredecessorValidation(t *testing.T) {
+	raced := accounts.InternAddress([20]byte{0xfa, 0xde})
+	sender := accounts.InternAddress(common.HexToAddress("0x5e4d"))
+	s := newSchedulerTest(t, nil, raced, sender, sender)
+	s.be.versionMap.WriteAddress(raced, state.Version{TxIndex: -1}, &accounts.Account{CodeHash: accounts.EmptyCodeHash}, true)
+	racedRead := state.ReadSet{}
+	racedRead.SetAddress(raced, state.VersionedRead[state.AccountView]{
+		ReadHeader: state.ReadHeader{Source: state.StorageRead, Version: state.UnknownVersion},
+	})
+	first, predecessor := s.dispatched(), s.dispatched()
+	require.Equal(t, []int{0, 1}, []int{first.index, predecessor.index})
+	require.True(t, s.parked(2), "same-sender successor dispatched alongside its predecessor")
+
+	s.deliver(predecessor, state.ReadSet{}, nil)
+	require.True(t, s.parked(2), "successor released when its predecessor executed")
+
+	s.deliver(first, racedRead, nil)
+	require.False(t, s.be.validateTasks.checkComplete(1))
+	require.True(t, s.parked(2), "successor released by a predecessor validated in a batch with an invalid tx")
+
+	retry := s.dispatched()
+	require.Equal(t, 0, retry.index)
+	s.deliver(retry, state.ReadSet{}, nil)
+	require.True(t, s.be.validateTasks.checkComplete(1))
+	require.Equal(t, 2, s.queued(), "successor not dispatched after its predecessor validated")
+}
+
+func TestTxDependencyWaitsForBlockerValidation(t *testing.T) {
+	s := newSchedulerTest(t, map[int][]int{2: {0}},
+		accounts.InternAddress(common.HexToAddress("0xa0")),
+		accounts.InternAddress(common.HexToAddress("0xb1")),
+		accounts.InternAddress(common.HexToAddress("0xc2")))
+	first, blocker := s.dispatched(), s.dispatched()
+	require.Equal(t, []int{0, 1}, []int{first.index, blocker.index})
+	require.True(t, s.parked(2), "dependent dispatched alongside its blocker")
+
+	s.deliver(blocker, state.ReadSet{}, nil)
+	require.True(t, s.parked(2), "dependent released when its blocker executed")
+
+	s.deliver(first, state.ReadSet{}, nil)
+	require.True(t, s.be.validateTasks.checkComplete(1))
+	require.Equal(t, 2, s.queued(), "dependent not dispatched after its blocker validated")
+}
+
+func TestTxDependencyIgnoresEarlierValidation(t *testing.T) {
+	s := newSchedulerTest(t, map[int][]int{2: {0}},
+		accounts.InternAddress(common.HexToAddress("0xa0")),
+		accounts.InternAddress(common.HexToAddress("0xb1")),
+		accounts.InternAddress(common.HexToAddress("0xc2")))
+	first, blocker := s.dispatched(), s.dispatched()
+
+	s.deliver(first, state.ReadSet{}, nil)
+	require.True(t, s.be.validateTasks.checkComplete(0))
+	require.True(t, s.parked(2), "dependent released by a validation it does not wait on")
+
+	s.deliver(blocker, state.ReadSet{}, nil)
+	require.Equal(t, 2, s.queued(), "dependent not dispatched after its blocker validated")
+}
+
+func TestAbortDependentReleasedWhenBlockerExecutes(t *testing.T) {
+	s := newSchedulerTest(t, nil,
+		accounts.InternAddress(common.HexToAddress("0xa0")),
+		accounts.InternAddress(common.HexToAddress("0xb1")),
+		accounts.InternAddress(common.HexToAddress("0xc2")))
+	first, blocker, dependent := s.dispatched(), s.dispatched(), s.dispatched()
+	require.Equal(t, []int{0, 1, 2}, []int{first.index, blocker.index, dependent.index})
+
+	s.deliver(dependent, state.ReadSet{}, protocol.ErrExecAbortError{DependencyTxIndex: 0})
+	require.True(t, s.be.execTasks.isBlocked(2))
+	require.True(t, s.parked(2), "aborted dependent rescheduled while its blocker ran")
+
+	s.deliver(blocker, state.ReadSet{}, nil)
+	require.False(t, s.be.validateTasks.checkComplete(1))
+	require.False(t, s.be.execTasks.isBlocked(2), "aborted dependent still blocked after its blocker executed")
+	require.True(t, s.be.execTasks.checkPending(2), "aborted dependent not released when its blocker executed")
+
+	s.deliver(first, state.ReadSet{}, nil)
+	require.Equal(t, 2, s.queued(), "released dependent not dispatched once its predecessors validated")
+}
+
+func TestFrontierRetryDispatchedBeforeBatchTail(t *testing.T) {
+	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
+	raced := accounts.InternAddress([20]byte{0xfa, 0xde})
+	db := newResumeTestDB(t)
+	signedTx := signSelfSendTx(t, 0, 0, 1, 21000, chainSpec.Config, 0)
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
+	pe, roTx := newResumeTestExec(t, db, chainSpec.Config)
+	pe.in = exec.NewQueueWithRetry(16)
+	t.Cleanup(pe.in.Close)
+	be := newBlockExec(newParallelTestBlock(1), new(protocol.GasPool).AddGas(10_000_000), nil, make(chan applyResult, 8), make(chan applyResult, 8), false, nil)
+	be.versionMap.WriteAddress(raced, state.Version{TxIndex: -1}, &accounts.Account{CodeHash: accounts.EmptyCodeHash}, true)
+	racedRead := func() state.ReadSet {
+		reads := state.ReadSet{}
+		reads.SetAddress(raced, state.VersionedRead[state.AccountView]{
+			ReadHeader: state.ReadHeader{Source: state.StorageRead, Version: state.UnknownVersion},
+		})
+		return reads
+	}
+	txs := []types.Transaction{signedTx, signedTx, signedTx}
+	for i := range txs {
+		be.tasks = append(be.tasks, &execTask{Task: &exec.TxTask{
+			Header:          header,
+			EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+			TxNum:           uint64(i + 1),
+			TxIndex:         i,
+			Config:          chainSpec.Config,
+			Txs:             txs,
+		}, index: i})
+		be.estimateDeps[i] = []int{}
+	}
+	results := make([]*exec.TxResult, 2)
+	for i := range results {
+		results[i] = &exec.TxResult{
+			Task:            &taskVersion{execTask: be.tasks[i], version: state.Version{BlockNum: 1, TxIndex: i, Incarnation: 3 * i, TxNum: uint64(i + 1)}},
+			TxIn:            racedRead(),
+			ExecutionResult: evmtypes.ExecutionResult{ReceiptGasUsed: 10000},
+		}
+	}
+	be.results = []*execResult{nil, {TxResult: results[1]}, nil}
+	be.txIncarnations = []int{0, 3, 0}
+	be.execFailed = []int{0, 0, 0}
+	be.execAborted = []int{0, 0, 0}
+	be.execTasks.pushPending(2)
+	be.blockIO.RecordReads(results[1].Version(), results[1].TxIn)
+	be.execTasks.setInProgress(1)
+	be.execTasks.markComplete(1)
+	be.validateTasks.pushPending(1)
+	be.execTasks.setInProgress(0)
+
+	res, err := be.nextResult(context.Background(), pe, results[0], roTx)
+
+	require.NoError(t, err)
+	require.Nil(t, res)
+	require.Equal(t, 1, be.cntTotalValidations, "validation must stop at the first invalid result")
+	require.Equal(t, 3, be.txIncarnations[1], "the unvalidated tail must keep its incarnation")
+	require.True(t, be.validateTasks.checkPending(1), "the tail must remain pending validation")
+	for _, index := range []int{0, 2} {
+		tv, ok := pe.in.Next(t.Context())
+		require.True(t, ok)
+		require.Equal(t, index, tv.(*taskVersion).index, "the frontier retry must be dispatched before the tail")
+	}
+}
+
+func TestValueTransferRecipientWaitsForValidation(t *testing.T) {
+	a := accounts.InternAddress(common.HexToAddress("0xa0"))
+	b := accounts.InternAddress(common.HexToAddress("0xb1"))
+	c := accounts.InternAddress(common.HexToAddress("0xc2"))
+	d := accounts.InternAddress(common.HexToAddress("0xd3"))
+	e := accounts.InternAddress(common.HexToAddress("0xe4"))
+	f := accounts.InternAddress(common.HexToAddress("0xf5"))
+	for _, tc := range []struct {
+		name       string
+		senders    [3]accounts.Address
+		recipients [3]accounts.Address
+	}{
+		{"shared_recipient", [3]accounts.Address{a, b, c}, [3]accounts.Address{f, d, d}},
+		{"self_transfer", [3]accounts.Address{a, b, b}, [3]accounts.Address{a, b, b}},
+		{"recipient_then_sender", [3]accounts.Address{a, b, d}, [3]accounts.Address{f, d, e}},
+		{"sender_then_recipient", [3]accounts.Address{a, d, c}, [3]accounts.Address{f, e, d}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			txs := make(types.Transactions, len(tc.senders))
+			for i, sender := range tc.senders {
+				to := tc.recipients[i].Value()
+				tx := &types.LegacyTx{CommonTx: types.CommonTx{To: &to, Value: *uint256.NewInt(1), GasLimit: 21000}}
+				tx.SetSender(sender)
+				txs[i] = tx
+			}
+			s := newSchedulerTestWithTxs(t, nil, txs, tc.senders[:]...)
+			first, blocker := s.dispatched(), s.dispatched()
+			require.Equal(t, []int{0, 1}, []int{first.index, blocker.index})
+			require.True(t, s.parked(2), "successor dispatched alongside its predecessor")
+
+			s.deliver(first, state.ReadSet{}, nil)
+			require.True(t, s.be.validateTasks.checkComplete(0))
+			require.True(t, s.parked(2), "successor released when an unrelated transaction validated")
+			require.Equal(t, -1, s.queued())
+
+			s.deliver(blocker, state.ReadSet{}, nil)
+			require.True(t, s.be.validateTasks.checkComplete(1))
+			require.Equal(t, 2, s.queued(), "successor not dispatched after its predecessor validated")
+		})
+	}
 }

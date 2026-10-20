@@ -28,10 +28,8 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"unsafe"
 
-	keccak "github.com/erigontech/fastkeccak"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 
@@ -41,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -217,18 +214,7 @@ var deferredUpdatePool = &sync.Pool{
 	},
 }
 
-var getDeferredUpdateCount atomic.Int64
-
-func ResetDeferredUpdateMetrics() {
-	getDeferredUpdateCount.Store(0)
-}
-
-func GetDeferredUpdateMetrics() int64 {
-	return getDeferredUpdateCount.Load()
-}
-
 func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
-	getDeferredUpdateCount.Add(1)
 	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
 
 	upd.prefix = reuseBytes(upd.prefix, prefix)
@@ -295,9 +281,9 @@ type BranchEncoder struct {
 	metrics   *Metrics
 
 	deferUpdates       bool
+	callerOwnsDeferred bool
 	maxDeferredUpdates int
 	deferred           []*DeferredBranchUpdate
-	pendingPrefixes    *maphash.NonConcurrentMap[struct{}]
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -309,26 +295,13 @@ func NewBranchEncoder(sz uint64) *BranchEncoder {
 
 func (be *BranchEncoder) setDeferUpdates(defer_ bool) {
 	be.deferUpdates = defer_
-	if defer_ {
-		if be.deferred == nil {
-			be.deferred = make([]*DeferredBranchUpdate, 0, 64)
-		}
-		if be.pendingPrefixes == nil {
-			be.pendingPrefixes = maphash.NewNonConcurrentMap[struct{}]()
-		}
+	if defer_ && be.deferred == nil {
+		be.deferred = make([]*DeferredBranchUpdate, 0, 64)
 	}
 }
 
 func (be *BranchEncoder) DeferUpdatesEnabled() bool {
 	return be.deferUpdates
-}
-
-func (be *BranchEncoder) HasPendingPrefix(prefix []byte) bool {
-	if be.pendingPrefixes == nil {
-		return false
-	}
-	_, found := be.pendingPrefixes.Get(prefix)
-	return found
 }
 
 func (be *BranchEncoder) ClearDeferred() {
@@ -337,10 +310,6 @@ func (be *BranchEncoder) ClearDeferred() {
 	}
 	// Delete, not reslice: this encoder sits inside a pooled trie.
 	be.deferred = slices.Delete(be.deferred, 0, len(be.deferred))
-	if be.pendingPrefixes != nil {
-		be.pendingPrefixes.Clear()
-	}
-	ResetDeferredUpdateMetrics()
 }
 
 func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error {
@@ -462,26 +431,21 @@ func (be *BranchEncoder) setMetrics(metrics *Metrics) {
 	be.metrics = metrics
 }
 
+// prev is the record stored at prefix, empty when the branch is new. The caller
+// supplies it because the trie already read it while unfolding the row.
 func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	cells *[16]cellEncodeData,
-	isNew bool,
+	prev []byte,
 ) error {
-	var prev []byte
-	var err error
-
-	if !isNew {
-		prev, _, err = ctx.Branch(prefix)
-		if err != nil {
-			return err
-		}
+	if be.deferUpdates {
+		return be.CollectDeferredUpdate(ctx, prefix, bitmap, touchMap, afterMap, cells, prev)
 	}
 	if prev == nil {
 		prev = []byte{}
 	}
-
 	update, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
 	if err != nil {
 		return err
@@ -506,43 +470,27 @@ func (be *BranchEncoder) CollectUpdate(
 	return nil
 }
 
+// prev is the record stored at prefix, empty when the branch is new; see CollectUpdate.
 func (be *BranchEncoder) CollectDeferredUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	cells *[16]cellEncodeData,
-	isNew bool,
+	prev []byte,
 ) error {
 	limit := be.maxDeferredUpdates
 	if limit == 0 {
 		limit = DefaultMaxDeferredUpdates
 	}
-	needsFlush := len(be.deferred) >= limit
-	if !needsFlush {
-		_, needsFlush = be.pendingPrefixes.Get(prefix)
-	}
-
-	if needsFlush {
+	if !be.callerOwnsDeferred && len(be.deferred) >= limit {
 		if err := be.ApplyDeferredUpdates(16, ctx.PutBranch); err != nil {
 			return err
 		}
 		be.ClearDeferred()
 	}
-
-	var prev []byte
-	var err error
-
-	if !isNew {
-		prev, _, err = ctx.Branch(prefix)
-		if err != nil {
-			return err
-		}
-	}
 	if prev == nil {
 		prev = []byte{}
 	}
-
-	be.pendingPrefixes.Set(prefix, struct{}{})
 
 	raw, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
 	if err != nil {
@@ -983,7 +931,7 @@ func (branchData BranchData) Validate(branchKey []byte) error {
 	if err := validateAfterMap(afterMap, row); err != nil {
 		return err
 	}
-	if err := validatePlainKeys(branchKey, row, keccak.NewFastKeccak()); err != nil {
+	if err := validatePlainKeys(branchKey, row); err != nil {
 		return err
 	}
 	return nil
@@ -1003,7 +951,7 @@ func validateAfterMap(afterMap uint16, row [16]*cell) error {
 	return nil
 }
 
-func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccak.KeccakState) error {
+func validatePlainKeys(branchKey []byte, row [16]*cell) error {
 	uncompactedBranchKey := nibbles.CompactToHex(branchKey)
 	if nibbles.HasTerm(uncompactedBranchKey) {
 		uncompactedBranchKey = uncompactedBranchKey[:len(uncompactedBranchKey)-1]
@@ -1020,7 +968,7 @@ func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccak.KeccakStat
 		if c.accountAddrLen == 0 && c.storageAddrLen == 0 {
 			continue
 		}
-		err := c.deriveHashedKeys(depth, keccak, length.Addr, hashBuf[:])
+		err := c.deriveHashedKeys(depth, length.Addr, hashBuf[:])
 		if err != nil {
 			return err
 		}
@@ -1385,8 +1333,6 @@ func (t *Updates) IsConcurrentCommitment() bool {
 
 type keyHasher func(key []byte) []byte
 
-func keyHasherNoop(key []byte) []byte { return key }
-
 func hasherReusesAddrPrefix(h keyHasher) bool {
 	return reflect.ValueOf(h).Pointer() == reflect.ValueOf(KeyToHexNibbleHash).Pointer()
 }
@@ -1542,7 +1488,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 		hashedKey := t.hashKey(keyBytes)
 		ik := t.parallel.internKey(keyBytes)
 		t.keys[key] = struct{}{}
-		t.parallel.Insert(hashedKey, ik, nil)
+		t.parallel.Collect(hashedKey, ik, nil)
 	default:
 	}
 }
@@ -1603,7 +1549,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 			ik = t.parallel.internKey(keyBytes)
 			t.keys[key] = struct{}{}
 		}
-		t.parallel.Insert(hashedKey, ik, u)
+		t.parallel.Collect(hashedKey, ik, u)
 	default:
 	}
 }
@@ -1625,7 +1571,7 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 		}
 		dedupKey := string(hashedKey)
 		if _, ok := t.keys[dedupKey]; !ok {
-			t.parallel.Insert(hashedKey, nil, nil)
+			t.parallel.Collect(common.ToBytesZeroCopy(dedupKey), nil, nil)
 			t.keys[dedupKey] = struct{}{}
 		}
 	case ModeUpdate:

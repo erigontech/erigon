@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
 // Handles RLP encoding/decoding for p2p.Msg
@@ -126,47 +127,6 @@ func (m *MockMsgReadWriter) WriteToReadBuffer(data []byte) {
 	m.readMu.Lock()
 	defer m.readMu.Unlock()
 	m.readBuf.Write(data)
-}
-
-// MockPeer implements p2p.Peer for testing purposes
-type MockPeer struct {
-	pubkey [64]byte
-	name   string
-}
-
-func NewMockPeer(pubkey [64]byte, name string) *MockPeer {
-	return &MockPeer{pubkey: pubkey, name: name}
-}
-
-func (m *MockPeer) Pubkey() [64]byte {
-	return m.pubkey
-}
-
-func (m *MockPeer) Name() string {
-	return m.name
-}
-
-func (m *MockPeer) Fullname() string {
-	return fmt.Sprintf("%s/%x", m.name, m.pubkey[:4])
-}
-
-func (m *MockPeer) ID() enode.ID {
-	var id enode.ID
-	copy(id[:], m.pubkey[:])
-	return id
-}
-
-func (m *MockPeer) Info() *p2p.PeerInfo {
-	// Simplified mock, as NetworkInfo is not directly accessible or needed for this test
-	return &p2p.PeerInfo{
-		ID:   m.ID().String(),
-		Name: m.Name(),
-		// Removed Network field entirely to avoid p2p.NetworkInfo dependency
-	}
-}
-
-func (m *MockPeer) Disconnect(reason *p2p.PeerError) {
-	// No-op for mock
 }
 
 func createDummyStatusData(networkID uint64, bestHash common.Hash, totalDifficulty *big.Int, genesisHash common.Hash, minimumBlockHeight uint64, maxBlockHeight uint64) *sentryproto.StatusData {
@@ -547,7 +507,6 @@ func testSentryServer(db kv.Getter, genesis *types.Genesis, genesisHash common.H
 		},
 	}
 	return s
-
 }
 
 func startHandshake(
@@ -847,7 +806,7 @@ func TestRunPeer_NewBlockHashesFloodKicksPeer(t *testing.T) {
 		assert.Equal(t, p2p.PeerErrorInvalidMessage, peerErr.Code)
 	}
 
-	for range newBlockHashesBurst + 10 {
+	for range blockAnnouncementsBurst + 10 {
 		select {
 		case rw.readCh <- freshNewBlockHashesMsg(t, 1):
 		case peerErr := <-errCh:
@@ -899,6 +858,100 @@ func TestRunPeer_NormalNewBlockHashesForwarded(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("timed out waiting for forwarded NewBlockHashes")
 		}
+	}
+}
+
+func TestRunPeer_NewBlockFloodKicksPeer(t *testing.T) {
+	for _, subscribers := range []bool{true, false} {
+		t.Run(fmt.Sprintf("subscribers=%t", subscribers), func(t *testing.T) {
+			peerInfo, peerID := newTestPeerInfoWithEth(t)
+			rw := NewMockMsgReadWriter()
+			for range 40 {
+				require.NoError(t, rw.WriteMsg(p2p.Msg{
+					Code: eth.NewBlockMsg, Size: 1, Payload: bytes.NewReader([]byte{0xc0}),
+				}))
+			}
+			rw.WriteToReadBuffer(rw.ReadAllWritten())
+			forwarded := 0
+			peerErr := runPeer(t.Context(), peerID, p2p.Cap{Name: eth.ProtocolName, Version: direct.ETH68},
+				rw, peerInfo, func(sentryproto.MessageId, [64]byte, []byte) { forwarded++ },
+				func(sentryproto.MessageId) bool { return subscribers }, log.Root())
+			require.NotNil(t, peerErr)
+			require.Equal(t, p2p.PeerErrorInvalidMessage, peerErr.Code)
+			if subscribers {
+				require.Positive(t, forwarded)
+				require.Less(t, forwarded, 40)
+			} else {
+				require.Zero(t, forwarded)
+			}
+		})
+	}
+}
+
+func TestSentryServer_BoundsQueuedPayloadBytes(t *testing.T) {
+	ss := &GrpcServer{}
+	server, client := libsentry.NewSentryStream[*sentryproto.InboundMessage](t.Context())
+	defer ss.addMessagesStream([]sentryproto.MessageId{sentryproto.MessageId_NEW_BLOCK_66}, server)()
+	data := make([]byte, eth.ProtocolMaxMsgSize)
+	for range 20 {
+		ss.send(sentryproto.MessageId_NEW_BLOCK_66, [64]byte{}, data)
+	}
+	server.Close()
+	var queuedBytes, count int
+	for {
+		message, err := client.Recv()
+		if err != nil {
+			require.ErrorIs(t, err, io.EOF)
+			break
+		}
+		queuedBytes += len(message.Data)
+		count++
+	}
+	require.Equal(t, 6, count)
+	require.LessOrEqual(t, queuedBytes, libsentry.MessagesQueueByteLimit)
+}
+
+func TestSentryServer_BoundsMixedUploadRequestBytes(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	ss := &GrpcServer{}
+	ids := []sentryproto.MessageId{
+		sentryproto.MessageId_GET_BLOCK_BODIES_66,
+		sentryproto.MessageId_GET_RECEIPTS_66,
+	}
+	server, client := libsentry.NewSentryStream[*sentryproto.InboundMessage](ctx)
+	defer server.Close()
+	defer ss.addMessagesStream(ids, server)()
+	data, err := rlp.EncodeToBytes(&eth.GetBlockBodiesPacket66{
+		RequestId:            1,
+		GetBlockBodiesPacket: make(eth.GetBlockBodiesPacket, 317700),
+	})
+	require.NoError(t, err)
+	require.LessOrEqual(t, len(data), eth.ProtocolMaxMsgSize)
+	var receipts eth.GetReceiptsPacket66
+	require.NoError(t, rlp.DecodeBytes(data, &receipts))
+	const flood = 20
+	for i := range flood {
+		ss.send(ids[i%len(ids)], [64]byte{byte(i)}, data)
+	}
+	server.Close()
+	var queuedBytes int
+	messages := make([]*sentryproto.InboundMessage, 0, 6)
+	for {
+		message, err := client.Recv()
+		if err != nil {
+			require.ErrorIs(t, err, io.EOF)
+			break
+		}
+		queuedBytes += len(message.Data)
+		messages = append(messages, message)
+	}
+	require.LessOrEqual(t, queuedBytes, libsentry.MessagesQueueByteLimit)
+	require.Len(t, messages, 6)
+	for i, message := range messages {
+		sequence := flood - len(messages) + i
+		require.Equal(t, [64]byte{byte(sequence)}, gointerfaces.ConvertH512ToHash(message.PeerId))
+		require.Equal(t, ids[sequence%len(ids)], message.Id)
 	}
 }
 
@@ -1378,4 +1431,111 @@ func TestGrpcServer_SendMessageById_SharedStore_NoDuplicateWrites(t *testing.T) 
 	require.Eventually(t, func() bool { return rw.count() >= 1 }, time.Second, 5*time.Millisecond)
 	time.Sleep(100 * time.Millisecond)
 	require.Equal(t, 1, rw.count(), "peer negotiated eth/70: only the eth/70 sentry must write")
+}
+
+// blockPeerWorker runs a task with a size-byte payload that holds the peer's
+// worker until the returned function is called.
+func blockPeerWorker(t *testing.T, pi *PeerInfo, size int) func() {
+	t.Helper()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	pi.Async(func() {
+		close(started)
+		<-release
+	}, size, log.New())
+	<-started
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	t.Cleanup(unblock)
+	return unblock
+}
+
+func TestPeerInfo_AsyncBoundsQueuedBytes(t *testing.T) {
+	pi, _ := newTestPeerInfoWithEth(t)
+	unblock := blockPeerWorker(t, pi, eth.ProtocolMaxMsgSize)
+
+	const size = 2 * 1024 * 1024
+	const tasks = 12
+	var mu sync.Mutex
+	var ran []int
+	for i := range tasks {
+		pi.Async(func() {
+			mu.Lock()
+			ran = append(ran, i)
+			mu.Unlock()
+		}, size, log.New())
+		require.LessOrEqual(t, pi.queuedBytes.Load(), int64(peerTasksByteLimit))
+	}
+	kept := peerTasksByteLimit / size
+	require.Len(t, pi.tasks, kept)
+	require.Equal(t, int64(kept*size), pi.queuedBytes.Load())
+
+	unblock()
+	require.Eventually(t, func() bool { return pi.queuedBytes.Load() == 0 }, time.Second, 5*time.Millisecond)
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(ran) == kept
+	}, time.Second, 5*time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	expected := make([]int, 0, kept)
+	for i := tasks - kept; i < tasks; i++ {
+		expected = append(expected, i)
+	}
+	require.Equal(t, expected, ran, "the newest tasks within the byte budget must run in order")
+}
+
+func TestPeerInfo_AsyncAdmitsMaxSizeMessage(t *testing.T) {
+	pi, _ := newTestPeerInfoWithEth(t)
+	unblock := blockPeerWorker(t, pi, 0)
+
+	for range 4 {
+		pi.Async(func() {}, 4*1024*1024, log.New())
+	}
+	ran := make(chan struct{})
+	pi.Async(func() { close(ran) }, eth.ProtocolMaxMsgSize, log.New())
+	require.LessOrEqual(t, pi.queuedBytes.Load(), int64(peerTasksByteLimit))
+
+	unblock()
+	select {
+	case <-ran:
+	case <-time.After(time.Second):
+		t.Fatal("a maximum-size message must be queued and run")
+	}
+	require.Eventually(t, func() bool { return pi.queuedBytes.Load() == 0 }, time.Second, 5*time.Millisecond)
+}
+
+func TestPeerInfo_AsyncDropsMessageAboveByteLimit(t *testing.T) {
+	pi, _ := newTestPeerInfoWithEth(t)
+	blockPeerWorker(t, pi, 0)
+
+	pi.Async(func() {}, 1, log.New())
+	pi.Async(func() {}, peerTasksByteLimit+1, log.New())
+	require.Len(t, pi.tasks, 1)
+	require.Equal(t, int64(1), pi.queuedBytes.Load())
+}
+
+func TestPeerInfo_AsyncCountEvictionReleasesBytes(t *testing.T) {
+	pi, _ := newTestPeerInfoWithEth(t)
+	unblock := blockPeerWorker(t, pi, 0)
+
+	for range peerTasksQueueSize {
+		pi.Async(func() {}, 1, log.New())
+	}
+	require.Len(t, pi.tasks, peerTasksQueueSize/2)
+	require.Equal(t, int64(peerTasksQueueSize/2), pi.queuedBytes.Load())
+
+	unblock()
+	require.Eventually(t, func() bool { return pi.queuedBytes.Load() == 0 }, time.Second, 5*time.Millisecond)
+}
+
+func TestPeerInfo_AsyncAfterRemoveReleasesBytes(t *testing.T) {
+	pi, _ := newTestPeerInfoWithEth(t)
+	pi.Remove(p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscRequested, nil, "test"))
+
+	for range peerTasksQueueSize {
+		pi.Async(func() {}, 1024, log.New())
+	}
+	require.Eventually(t, func() bool { return pi.queuedBytes.Load() == 0 }, time.Second, 5*time.Millisecond)
 }

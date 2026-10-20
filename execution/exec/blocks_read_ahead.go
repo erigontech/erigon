@@ -283,10 +283,11 @@ func uniqueTransactionDestinations(txns types.Transactions) map[accounts.Address
 }
 
 func warmBALStateTask(stateReader *state.ReaderV3, account *types.AccountChanges, task balWarmupTask, codeMode balCodeWarmupMode, txCodeDestinations map[accounts.Address]struct{}) error {
+	address := accounts.InternAddress(account.Address)
 	var accountData *accounts.Account
 	if task.slotFrom == 0 {
 		var err error
-		accountData, err = stateReader.ReadAccountData(account.Address)
+		accountData, err = stateReader.ReadAccountData(address)
 		if err != nil {
 			return err
 		}
@@ -299,7 +300,7 @@ func warmBALStateTask(stateReader *state.ReaderV3, account *types.AccountChanges
 		} else {
 			slot = account.StorageReads[slotIndex-storageChanges]
 		}
-		if _, _, err := stateReader.ReadAccountStorage(account.Address, slot); err != nil {
+		if _, _, err := stateReader.ReadAccountStorage(address, slot); err != nil {
 			return err
 		}
 	}
@@ -309,11 +310,11 @@ func warmBALStateTask(stateReader *state.ReaderV3, account *types.AccountChanges
 	warmCode := false
 	if codeMode == balCodeWarmupAll {
 		warmCode = len(account.CodeChanges) > 0 || (accountData != nil && !accountData.CodeHash.IsEmpty())
-	} else if _, ok := txCodeDestinations[account.Address]; ok {
+	} else if _, ok := txCodeDestinations[address]; ok {
 		warmCode = accountData != nil && !accountData.CodeHash.IsEmpty()
 	}
 	if warmCode {
-		_, err := stateReader.ReadAccountCode(account.Address)
+		_, err := stateReader.ReadAccountCode(address)
 		return err
 	}
 	return nil
@@ -547,6 +548,7 @@ func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.
 		_ = g.Wait()
 	}
 }
+
 func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine rules.Engine, blockReader dbservices.FullBlockReader) error {
 	block, err := blockReader.BlockByNumber(ctx, tx, blockNum)
 	if err != nil {
@@ -571,7 +573,7 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 			continue
 		}
 
-		//Code domain using .bt index - means no false-positives
+		// Code domain using .bt index - means no false-positives
 		if code, _ := stateReader.ReadAccountCode(accounts.InternAddress(sender)); len(code) > 0 {
 			_, _ = code[0], code[len(code)-1]
 		}
@@ -600,7 +602,7 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 					}
 				}
 			}
-			//TODO: exec txn and pre-fetch commitment keys. see also: `func (p *statePrefetcher) Prefetch` in geth
+			// TODO: exec txn and pre-fetch commitment keys. see also: `func (p *statePrefetcher) Prefetch` in geth
 		}
 
 	}

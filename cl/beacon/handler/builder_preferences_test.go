@@ -25,8 +25,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -195,13 +195,21 @@ func TestPostValidatorBuilderPreferencesBoundsSlowEntriesAndContinues(t *testing
 		entries[i] = testBuilderPreferencesEntries()[0].Clone().(*cltypes.BuilderPreferencesEntry)
 		entries[i].ProposerPubkey[0] = byte(i + 1)
 	}
+	// Slow entries block until the pool has that many in flight, so a serial handler
+	// hits its request timeout instead of reporting "slow failure".
+	concurrent := int32(min(builderPreferencesWorkers, len(entries)-1))
+	var inFlight atomic.Int32
+	allInFlight := make(chan struct{})
 	client.EXPECT().SubmitBuilderPreferences(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 		func(ctx context.Context, _ string, proposer common.Bytes48, _ *cltypes.BuilderPreferencesRequest) error {
 			if proposer == entries[len(entries)-1].ProposerPubkey {
 				return nil
 			}
+			if inFlight.Add(1) == concurrent {
+				close(allInFlight)
+			}
 			select {
-			case <-time.After(100 * time.Millisecond):
+			case <-allInFlight:
 				return errors.New("slow failure")
 			case <-ctx.Done():
 				return ctx.Err()
@@ -211,22 +219,19 @@ func TestPostValidatorBuilderPreferencesBoundsSlowEntriesAndContinues(t *testing
 	handler := &ApiHandler{builderClient: client}
 	body, err := entries.MarshalJSON()
 	require.NoError(t, err)
-	requestContext, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	request := httptest.NewRequestWithContext(requestContext, http.MethodPost, "/eth/v1/validator/builder_preferences", bytes.NewReader(body))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/builder_preferences", bytes.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Eth-Consensus-Version", "gloas")
 	recorder := httptest.NewRecorder()
-	started := time.Now()
 
 	handler.PostEthV1ValidatorBuilderPreferences(recorder, request)
 
-	require.Less(t, time.Since(started), 500*time.Millisecond)
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	var response poolingError
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
 	require.Len(t, response.Failures, len(entries)-1)
 	for i, failure := range response.Failures {
 		require.Equal(t, i, failure.Index)
+		require.Equal(t, "slow failure", failure.Message)
 	}
 }

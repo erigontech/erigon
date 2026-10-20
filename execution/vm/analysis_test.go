@@ -20,34 +20,52 @@
 package vm
 
 import (
+	"bytes"
 	"testing"
+
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestJumpDestAnalysis(t *testing.T) {
 	t.Parallel()
+	const J, P1, P2, P32 = byte(JUMPDEST), byte(PUSH1), byte(PUSH2), byte(PUSH32)
 	tests := []struct {
 		code  []byte
 		exp   uint64
 		which int
 	}{
-		{[]byte{byte(PUSH1), 0x01, 0x01, 0x01}, 0x02, 0},
-		{[]byte{byte(PUSH1), byte(PUSH1), byte(PUSH1), byte(PUSH1)}, 0x0a, 0},
-		{[]byte{byte(PUSH8), byte(PUSH8), byte(PUSH8), byte(PUSH8), byte(PUSH8), byte(PUSH8), byte(PUSH8), byte(PUSH8), 0x01, 0x01, 0x01}, 0x01fe, 0},
-		{[]byte{byte(PUSH8), 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01}, 0x01fe, 0},
-		{[]byte{0x01, 0x01, 0x01, 0x01, 0x01, byte(PUSH2), byte(PUSH2), byte(PUSH2), 0x01, 0x01, 0x01}, 0xc0, 0},
-		{[]byte{0x01, 0x01, 0x01, 0x01, 0x01, byte(PUSH2), 0x01, 0x01, 0x01, 0x01, 0x01}, 0xc0, 0},
-		{[]byte{byte(PUSH3), 0x01, 0x01, 0x01, byte(PUSH1), 0x01, 0x01, 0x01, 0x01, 0x01, 0x01}, 0x2e, 0},
-		{[]byte{0x01, byte(PUSH8), 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01}, 0x03fc, 0},
-		{[]byte{byte(PUSH16), 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01}, 0x01fffe, 0},
-		{[]byte{byte(PUSH8), 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, byte(PUSH1), 0x01}, 0x05fe, 0},
-		{[]byte{byte(PUSH32)}, 0x01fffffffe, 0},
-		{[]byte{byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5)}, 0b1110111110111110111110111110111110111110111110111110111110111110, 0},
-		{[]byte{byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5), byte(PUSH5)}, 0b11111011111011111011111011, 1},
+		{[]byte{J, J, J}, 0b111, 0},
+		{[]byte{P1, J, J}, 0b100, 0},
+		{[]byte{P2, J, J, J}, 0b1000, 0},
+		{[]byte{P1, P1, J, P1, J}, 0b00100, 0},
+		{[]byte{P1, P1, P1, J}, 0b0000, 0},
+		{append([]byte{P32}, append(make([]byte, 31), J, J)...), 0b1 << 33, 0},
+		{append(make([]byte, 62), P2, J, J, J), 0b10, 1},
+		{append(make([]byte, 64), J), 0b1, 1},
+		{append(bytes.Repeat([]byte{J}, 61), P2, J, J), 1<<61 - 1, 0},
+		{append(append(bytes.Repeat([]byte{J}, 20), P32), bytes.Repeat([]byte{J}, 44)...), 0xffe0_0000_000f_ffff, 0},
 	}
 	for _, test := range tests {
 		ret := codeBitmap(test.code)
 		if ret[test.which] != test.exp {
-			t.Fatalf("expected %x, got %02x", test.exp, ret[test.which])
+			t.Fatalf("code %x: expected %x, got %x", test.code, test.exp, ret[test.which])
 		}
+	}
+}
+
+func TestValidJumpdest(t *testing.T) {
+	t.Parallel()
+	contract := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	contract.Code = []byte{byte(PUSH1), byte(JUMPDEST), byte(JUMPDEST), byte(ADD)}
+	for dest, want := range []bool{false, false, true, false, false} {
+		if got := contract.validJumpdest(uint256.NewInt(uint64(dest))); got != want {
+			t.Errorf("dest %d: expected %v, got %v", dest, want, got)
+		}
+	}
+	overflow := new(uint256.Int).Lsh(uint256.NewInt(1), 64)
+	if contract.validJumpdest(overflow.AddUint64(overflow, 2)) {
+		t.Error("dest 2^64+2: expected false")
 	}
 }

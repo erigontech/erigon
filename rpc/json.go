@@ -22,6 +22,7 @@ package rpc
 import (
 	"bytes"
 	"context"
+	"encoding"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,6 +31,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 const (
@@ -39,7 +42,7 @@ const (
 	unsubscribeMethodSuffix  = "_unsubscribe"
 	notificationMethodSuffix = "_subscription"
 
-	defaultWriteTimeout = 10 * time.Minute // used if context has no deadline
+	defaultWriteTimeout = 10 * time.Minute
 )
 
 var null = json.RawMessage("null")
@@ -103,26 +106,77 @@ func (msg *jsonrpcMessage) errorResponse(err error) *jsonrpcMessage {
 	return resp
 }
 
-// fastJSONResult lets an RPC result implement fast JSON marshalling where needed — e.g. large payloads that benefit from skipping the reflection-based path.
-type fastJSONResult interface {
-	MarshalFastJSON() ([]byte, error)
+// writeResponse streams result into stream as the response; a result that fails to encode becomes the error.
+// The id is copied verbatim, so unlike json.Marshal it keeps '<', '>', '&' and U+2028/2029 unescaped.
+func (msg *jsonrpcMessage) writeResponse(stream *jsonstream.Stream, result any) error {
+	return writeResultResponse(stream, msg.ID, func(s *jsonstream.Stream) error {
+		if err := encodeResult(s, result); err != nil {
+			return &CustomError{Code: ErrCodeInternalError, Message: err.Error()}
+		}
+		return nil
+	})
 }
 
-func (msg *jsonrpcMessage) response(result any) *jsonrpcMessage {
-	var (
-		enc []byte
-		err error
-	)
-	if fm, ok := result.(fastJSONResult); ok {
-		enc, err = fm.MarshalFastJSON()
-	} else {
-		enc, err = json.Marshal(result)
+func encodeResult(s *jsonstream.Stream, result any) error {
+	if isNilPointer(result) {
+		return json.NewEncoder(encoderWriter{s}).Encode(result)
 	}
-	if err != nil {
-		// TODO: wrap with 'internal server error'
-		return msg.errorResponse(err)
+	if fm, ok := result.(jsonstream.Marshaler); ok {
+		if err := fm.MarshalFastJSONTo(s); err != nil {
+			return err
+		}
+		return s.Err() // a latched write error left a placeholder in the stream
 	}
-	return &jsonrpcMessage{Version: vsn, ID: msg.ID, Result: enc}
+	// A TextAppender's JSON is taken to be its quoted text, so this must stay ahead of the
+	// reflection encoder and must not catch a type whose json.Marshaler writes something else.
+	if ta, ok := result.(encoding.TextAppender); ok {
+		s.WriteQuotedText(ta)
+		return s.Err()
+	}
+	return json.NewEncoder(encoderWriter{s}).Encode(result)
+}
+
+// writeResultResponse writes the response envelope with write filling "result". An error from write
+// is returned for the caller's metrics and logs.
+func writeResultResponse(s *jsonstream.Stream, id json.RawMessage, write func(*jsonstream.Stream) error) error {
+	s.WriteObjectStart()
+	s.Field("jsonrpc")
+	s.WriteString(vsn)
+	if id != nil {
+		s.Field("id")
+		s.WriteRawBytes(id)
+	}
+	err := WriteFieldOrError(s, "result", write)
+	s.WriteObjectEnd()
+	return err
+}
+
+// WriteFieldOrError writes field with the value write streams. When write fails, a field that got no
+// value is taken back so the object carries only "error"; a partial value is closed and "error" follows.
+func WriteFieldOrError(s *jsonstream.Stream, field string, write func(*jsonstream.Stream) error) error {
+	mark, depth := len(s.Buffer()), s.Depth()
+	s.Field(field)
+	err := write(s)
+	if err == nil || !s.RewindField(mark, depth) {
+		_ = s.ClosePending(uint(depth)) // null for a field that got no value, the ends of a partial one
+	}
+	HandleError(err, s)
+	return err
+}
+
+// encoderWriter hands the stream json.Encoder output without its trailing newline. Encode writes once, after
+// the whole value has encoded.
+type encoderWriter struct{ stream *jsonstream.Stream }
+
+func (w encoderWriter) Write(b []byte) (int, error) {
+	w.stream.WriteRawBytes(bytes.TrimSuffix(b, []byte{'\n'}))
+	return len(b), nil
+}
+
+// isNilPointer catches a typed nil whose value-receiver method would panic, where json writes null.
+func isNilPointer(v any) bool {
+	rv := reflect.ValueOf(v)
+	return rv.Kind() == reflect.Pointer && rv.IsNil()
 }
 
 func errorMessage(err error) *jsonrpcMessage {
@@ -200,29 +254,29 @@ type jsonCodec struct {
 	decode  func(v any) error // decoder to allow multiple transports
 	// readFrame is set only by transports that delimit messages themselves. Each
 	// call must return bytes it does not reuse: parsed messages point into them
-	// and are handled asynchronously, so they outlive the call that read them.
-	readFrame func() ([]byte, error)
-	encMu     sync.Mutex        // guards the encoder
-	encode    func(v any) error // encoder to allow multiple transports
-	conn      deadlineCloser
+	// and are handled asynchronously, so they outlive the call that read them. A
+	// frame that holds resources comes with what releases them, nil otherwise.
+	readFrame    func() ([]byte, func(), error)
+	release      func()            // releases the last frame read, until taken
+	encMu        sync.Mutex        // guards the encoder
+	encode       func(v any) error // encoder to allow multiple transports
+	conn         deadlineCloser
+	writeTimeout time.Duration // used if the context has no deadline, counted once the write holds the connection
+	held         *heldConn     // the socket, when the transport can hold writes back; nil otherwise
 }
 
-// NewFuncCodec creates a codec which uses the given functions to read and write. If conn
-// implements ConnRemoteAddr, log messages will use it to include the remote address of
-// the connection. decode must reject invalid JSON, reading a message relies on it.
-func NewFuncCodec(conn deadlineCloser, encode, decode func(v any) error) ServerCodec {
-	return newFuncCodec(conn, encode, decode, nil)
-}
-
-// newFuncCodec is NewFuncCodec plus the frame reader the built-in transports use.
-// A transport with a frame reader never calls decode, so it may be nil.
-func newFuncCodec(conn deadlineCloser, encode, decode func(v any) error, readFrame func() ([]byte, error)) *jsonCodec {
+// newFuncCodec creates a codec that uses the given functions to read and write. If conn
+// implements ConnRemoteAddr, log messages include the remote address. decode must reject
+// invalid JSON, reading a message relies on it. A transport with a frame reader never calls
+// decode, so it may be nil.
+func newFuncCodec(conn deadlineCloser, encode, decode func(v any) error, readFrame func() ([]byte, func(), error)) *jsonCodec {
 	codec := &jsonCodec{
-		closeCh:   make(chan any),
-		encode:    encode,
-		decode:    decode,
-		readFrame: readFrame,
-		conn:      conn,
+		closeCh:      make(chan any),
+		encode:       encode,
+		decode:       decode,
+		readFrame:    readFrame,
+		conn:         conn,
+		writeTimeout: defaultWriteTimeout,
 	}
 	if ra, ok := conn.(ConnRemoteAddr); ok {
 		codec.remote = ra.RemoteAddr()
@@ -234,27 +288,45 @@ func newFuncCodec(conn deadlineCloser, encode, decode func(v any) error, readFra
 // skipping json.Encoder's redundant appendCompact re-scan; a distinct type keeps that path opt-in.
 type rawResponse []byte
 
-// MarshalJSON emits the bytes verbatim so json.Marshal-based transports don't base64-encode the []byte.
-func (r rawResponse) MarshalJSON() ([]byte, error) { return r, nil }
+// rawBatch is a batch response kept as its already-encoded answers in request order, so a
+// transport can stream them instead of first joining them into one buffer.
+type rawBatch [][]byte
+
+func (b rawBatch) writeTo(s *jsonstream.Stream) {
+	s.WriteArrayStart()
+	for _, answer := range b {
+		s.WriteRawBytes(answer)
+	}
+	s.WriteArrayEnd()
+}
 
 // NewCodec creates a codec on the given connection. If conn implements ConnRemoteAddr, log
 // messages will use it to include the remote address of the connection.
 func NewCodec(conn Conn) ServerCodec {
 	dec := json.NewDecoder(conn)
 	dec.UseNumber()
-	return newFuncCodec(conn, newJSONEncoder(conn), dec.Decode, nil)
+	c := newFuncCodec(conn, newJSONEncoder(conn), dec.Decode, nil)
+	c.held, _ = conn.(*heldConn)
+	return c
 }
 
 // newJSONEncoder returns the writer side every JSON transport shares.
 func newJSONEncoder(conn Conn) func(v any) error {
 	enc := json.NewEncoder(conn)
 	return func(v any) error {
-		raw, ok := v.(rawResponse)
-		if !ok {
+		switch r := v.(type) {
+		case rawResponse:
+			_, err := conn.Write(append(r, '\n'))
+			return err
+		case rawBatch:
+			s := jsonstream.Get(conn)
+			defer jsonstream.Put(s)
+			r.writeTo(s)
+			s.WriteRaw("\n")
+			return s.Flush()
+		default:
 			return enc.Encode(v)
 		}
-		_, err := conn.Write(append(raw, '\n'))
-		return err
 	}
 }
 
@@ -274,6 +346,7 @@ func (c *jsonCodec) ReadBatch() (messages []*jsonrpcMessage, batch bool, err err
 	}
 	messages, batch, err = parseMessage(rawmsg)
 	if err != nil {
+		c.releaseFrame()
 		return nil, false, err
 	}
 	for i, msg := range messages {
@@ -298,13 +371,15 @@ func (c *jsonCodec) readMessage() (json.RawMessage, error) {
 	}
 	// The transport delimits the message, so one read and one check will do.
 	// Decoding into a json.RawMessage would scan twice and copy.
-	frame, err := c.readFrame()
+	frame, release, err := c.readFrame()
 	if err != nil {
 		return nil, err
 	}
-	if !json.Valid(frame) {
-		// Decode the broken message to report where it went wrong. Unmarshal
-		// checks syntax the same way Valid does, so it fails here too. The
+	c.release = release
+	if !validJSON(frame) {
+		c.releaseFrame()
+		// Decode the broken message to report where it went wrong. validJSON
+		// only ever accepts more than Unmarshal, so it fails here too. The
 		// fallback only guards against the two ever disagreeing.
 		var rawmsg json.RawMessage
 		if err := json.Unmarshal(frame, &rawmsg); err != nil {
@@ -315,16 +390,50 @@ func (c *jsonCodec) readMessage() (json.RawMessage, error) {
 	return frame, nil
 }
 
+func (c *jsonCodec) takeRelease() func() {
+	release := c.release
+	c.release = nil
+	return release
+}
+
+func (c *jsonCodec) releaseFrame() {
+	if release := c.takeRelease(); release != nil {
+		release()
+	}
+}
+
 func (c *jsonCodec) WriteJSON(ctx context.Context, v any) error {
 	c.encMu.Lock()
 	defer c.encMu.Unlock()
 
 	deadline, ok := ctx.Deadline()
 	if !ok {
-		deadline = time.Now().Add(defaultWriteTimeout)
+		deadline = time.Now().Add(c.writeTimeout)
 	}
-	c.conn.SetWriteDeadline(deadline)
+	if err := c.conn.SetWriteDeadline(deadline); err != nil {
+		return err
+	}
 	return c.encode(v)
+}
+
+// coalesce runs send with the socket held, so the messages it writes leave in one socket write.
+func (c *jsonCodec) coalesce(send func()) (err error) {
+	if c.held == nil {
+		send()
+		return nil
+	}
+	c.held.hold()
+	defer func() {
+		// Writes set the socket deadline under encMu, so the release holds it too: a concurrent write
+		// would re-arm the deadline mid-flush.
+		c.encMu.Lock()
+		defer c.encMu.Unlock()
+		if err = c.held.release(time.Now().Add(c.writeTimeout)); err != nil {
+			_ = c.held.Conn.Close()
+		}
+	}()
+	send()
+	return nil
 }
 
 func (c *jsonCodec) Close() {
@@ -384,18 +493,11 @@ func fillMessage(input []byte, msg *jsonrpcMessage) {
 		}
 		switch string(key) {
 		case "jsonrpc":
-			// The decoded fields go through encoding/json, which unescapes the
-			// strings. A value that does not decode zeroes the field, so a
-			// repeated key cannot leave an earlier value standing.
-			if json.Unmarshal(value, &msg.Version) != nil {
-				msg.Version = ""
-			}
+			decodeStringField(value, &msg.Version)
 		case "id":
 			msg.ID = value
 		case "method":
-			if json.Unmarshal(value, &msg.Method) != nil {
-				msg.Method = ""
-			}
+			decodeStringField(value, &msg.Method)
 		case "params":
 			msg.Params = value
 		case "error":
@@ -406,6 +508,29 @@ func fillMessage(input []byte, msg *jsonrpcMessage) {
 			msg.Result = value
 		}
 	})
+}
+
+// decodeStringField sets dst as json.Unmarshal would: it unescapes the string and replaces invalid
+// UTF-8, and a null leaves dst as it is. Plain printable ASCII is its own text, so it skips the
+// decoder. A value that does not decode zeroes dst.
+func decodeStringField(value []byte, dst *string) {
+	if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+		text := value[1 : len(value)-1]
+		plain := true
+		for _, c := range text {
+			if c < 0x20 || c >= 0x80 || c == '\\' {
+				plain = false
+				break
+			}
+		}
+		if plain {
+			*dst = string(text)
+			return
+		}
+	}
+	if json.Unmarshal(value, dst) != nil {
+		*dst = ""
+	}
 }
 
 // isBatch returns true when the first non-whitespace characters is '['

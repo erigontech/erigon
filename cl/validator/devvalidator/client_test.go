@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -40,7 +41,7 @@ func TestPostAndDecode_AttesterDuties(t *testing.T) {
 			http.Error(w, "bad body", http.StatusBadRequest)
 			return
 		}
-		require.NotEmpty(t, indices)
+		assert.NotEmpty(t, indices)
 
 		// Return duties wrapped in standard Beacon API response.
 		resp := map[string]any{"data": expectedDuties}

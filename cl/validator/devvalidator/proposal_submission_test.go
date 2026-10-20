@@ -100,16 +100,21 @@ func TestGloasProposalRetriesSameEnvelopeWithoutRepublishingBlock(t *testing.T) 
 	firstEnvelopeStarted := make(chan struct{})
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /eth/v3/validator/blocks/1", func(w http.ResponseWriter, _ *http.Request) {
-		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"data": block, "execution_payload_envelope": envelope}))
+		assert.NoError(t, json.NewEncoder(w).Encode(map[string]any{"data": block, "execution_payload_envelope": envelope}))
 	})
 	mux.HandleFunc("POST /eth/v2/beacon/blocks", func(http.ResponseWriter, *http.Request) {
 		blockPosts.Add(1)
 	})
 	mux.HandleFunc("POST /eth/v1/beacon/execution_payload_envelopes", func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
-		require.NoError(t, err)
+		if !assert.NoError(t, err) {
+			return
+		}
+		// Count before queueing: the test waits on the bodies, so a post the
+		// counter has not recorded yet would read as one post short.
+		first := envelopePosts.Add(1) == 1
 		envelopeBodies <- body
-		if envelopePosts.Add(1) == 1 {
+		if first {
 			close(firstEnvelopeStarted)
 			<-r.Context().Done()
 		}
@@ -150,7 +155,7 @@ func TestGloasProposalStopsEnvelopeRetryWithService(t *testing.T) {
 	firstEnvelopeDone := make(chan struct{})
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /eth/v3/validator/blocks/1", func(w http.ResponseWriter, _ *http.Request) {
-		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"data": block, "execution_payload_envelope": envelope}))
+		assert.NoError(t, json.NewEncoder(w).Encode(map[string]any{"data": block, "execution_payload_envelope": envelope}))
 	})
 	mux.HandleFunc("POST /eth/v2/beacon/blocks", func(http.ResponseWriter, *http.Request) {})
 	mux.HandleFunc("POST /eth/v1/beacon/execution_payload_envelopes", func(w http.ResponseWriter, _ *http.Request) {

@@ -18,9 +18,13 @@ package backup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/mdbx-go/mdbx"
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -87,6 +91,75 @@ func findDBs(path string, label kv.Label, depth int, found *[]datadirDB) error {
 		}
 	}
 	return nil
+}
+
+const bloatRatio = 4 // autoCompactDatadir rewrites a db whose free pages exceed its data this many times
+
+var autoCompactMinFree = 10 * datasize.GB // a small db crosses bloatRatio but gives back nothing
+
+// ApplyMigrations compacts bloated dbs; a datadir locked by another process is skipped.
+func ApplyMigrations(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
+	unlock, err := dirs.TryFlock()
+	if errors.Is(err, datadir.ErrDataDirLocked) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	return autoCompactDatadir(ctx, dirs, logger)
+}
+
+// autoCompactDatadir expects the datadir lock held. A db that fails to compact is left as it was.
+func autoCompactDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
+	dbs, err := datadirDBs(dirs)
+	if err != nil {
+		return err
+	}
+	for _, db := range dbs {
+		data, free, err := pageUsage(db.path)
+		if err != nil {
+			logger.Warn("[compact] can't read db page usage", "db", db.path, "err", err)
+			continue
+		}
+		if free <= bloatRatio*data || free < autoCompactMinFree {
+			continue
+		}
+		logger.Info("[compact] auto-compact", "db", db.path, "data", data.HR(), "free", free.HR())
+		if err := CompactInPlace(ctx, db.path, db.label, logger); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			logger.Warn("[compact] auto-compact failed, db left as it was", "db", db.path, "err", err)
+		}
+	}
+	return nil
+}
+
+// pageUsage: free is the pages below the last used page minus table pages. The
+// unused file tail is not counted: mdbx grows the file ahead of use.
+func pageUsage(dbDir string) (data, free datasize.ByteSize, err error) {
+	env, err := mdbx.NewEnv(mdbx.Default)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer env.Close()
+	if err := env.Open(dbDir, mdbx.Readonly, 0o644); err != nil {
+		return 0, 0, err
+	}
+	st, err := env.Stat()
+	if err != nil {
+		return 0, 0, err
+	}
+	info, err := env.Info(nil)
+	if err != nil {
+		return 0, 0, err
+	}
+	pageSize := datasize.ByteSize(st.PSize)
+	data = datasize.ByteSize(st.BranchPages+st.LeafPages+st.OverflowPages) * pageSize
+	used := datasize.ByteSize(info.MiLastPgNo+1) * pageSize
+	return data, used - min(used, data), nil
 }
 
 // CompactDatadir compacts every mdbx db of the datadir in place. It takes the

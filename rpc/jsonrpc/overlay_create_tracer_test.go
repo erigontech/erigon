@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -52,14 +53,14 @@ func TestOverlayCreateTracerCapturesResultCode(t *testing.T) {
 		gasCap:          1_000_000,
 		evm:             evm,
 	}
-	tracer.OnEnter(
+	tracer.OnEnterV2(
 		0,
 		byte(vm.CREATE2),
 		caller,
 		target,
 		false,
 		nil,
-		tracer.gasCap,
+		mdgas.MdGas{Execution: tracer.gasCap},
 		uint256.Int{},
 		nil,
 	)
