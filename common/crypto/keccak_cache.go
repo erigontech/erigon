@@ -24,6 +24,7 @@ import (
 	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 )
 
@@ -47,7 +48,8 @@ type keccakBucket struct {
 
 var (
 	keccakCacheSeed    = maphash.MakeSeed()
-	keccakCacheBuckets = new([1 << 17]keccakBucket)
+	keccakCacheBits    = dbg.EnvInt("KECCAK_CACHE_BITS", 17)
+	keccakCacheBuckets = make([]keccakBucket, 1<<max(keccakCacheBits, 0))
 )
 
 // Keccak256Hash calc Keccak256. Short inputs are memoized in a direct-mapped table; a bucket
@@ -56,7 +58,7 @@ func Keccak256Hash(data []byte) common.Hash {
 	if len(data) == 0 {
 		return empty.CodeHash
 	}
-	if len(data) > keccakCacheMaxInput {
+	if len(data) > keccakCacheMaxInput || keccakCacheBits == 0 {
 		return keccak.Sum256(data)
 	}
 	key := maphash.Bytes(keccakCacheSeed, data)
