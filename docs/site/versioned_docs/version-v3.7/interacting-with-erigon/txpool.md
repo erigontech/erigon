@@ -21,13 +21,13 @@ The TxPool namespace must be explicitly enabled using the `--http.api` flag when
 ### Implementation Details
 
 * The `TxPoolAPIImpl` uses a `proto_txpool.TxpoolClient` to communicate with the transaction pool service
-* All transactions are decoded from RLP format and converted to `ethapi.RPCTransaction` objects for JSON-RPC responses
+* All transactions are decoded from Recursive Length Prefix (RLP) format and converted to `ethapi.RPCTransaction` objects for JSON-RPC responses
 * The implementation handles transaction categorization based on the `TxnType` field from the pool service
 
 ### External vs Internal Mode
 
-* **Internal Mode**: Transaction pool runs within the main Erigon process (default configuration)
-* **External Mode**: Transaction pool runs as a separate service, requiring explicit configuration with `--txpool.api.addr`. External mode requires an external Sentry service and provides better resource isolation
+* **Internal Mode**: The transaction pool runs within the main Erigon process (default configuration)
+* **External Mode**: The transaction pool runs as a separate service, requiring explicit configuration with `--txpool.api.addr`. External mode requires an external Sentry service and provides better resource isolation
 
 ### Usage in Development and Testing
 

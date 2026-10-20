@@ -26,7 +26,7 @@ Some hosting providers add firewall requirements and operational pitfalls on top
 
 #### CORS Protection
 
-When exposing public RPC endpoints (like those on port 8545), use the following practice to mitigate cross-origin attacks:
+When exposing public RPC endpoints (like those on port 8545), use the following practices to mitigate cross-origin attacks:
 
 * Avoid using a wildcard `*` for Cross-Origin Resource Sharing (CORS) domains.
 * Set specific hostnames or IP addresses for CORS to ensure only authorized frontend applications can interact with your RPC service.
@@ -37,10 +37,10 @@ The RPC Daemon is the primary external interface, making API security critical. 
 
 | **Security Measure** | **Description**                                                                                                                                                                                           | **Erigon Configuration**                                                                                                                                                             |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Method Allowlisting  | <p>Restrict the available RPC methods to only those strictly necessary. This significantly reduces the attack surface.</p><p>Can be applied to <code>erigon</code> or <code>RPC Daemon</code> process.</p> | Use the `--rpc.accessList=rules.json` flag, pointing to a JSON file (e.g., `rules.json`) that specifies the allowed methods: `{"allow": ["net_version", "eth_getBlockByHash"]}`      |
+| Method Allowlisting  | <p>Restrict the available RPC methods to only those strictly necessary. This significantly reduces the attack surface.</p><p>Can be applied to the <code>erigon</code> or <code>RPC Daemon</code> process.</p> | Use the `--rpc.accessList=rules.json` flag, pointing to a JSON file (e.g., `rules.json`) that specifies the allowed methods: `{"allow": ["net_version", "eth_getBlockByHash"]}`      |
 | Remove Admin APIs    | Never include sensitive namespaces like `admin` or `debug` in the `--http.api` list for public-facing nodes. These APIs are intended for node operators only.                                             | Omit the `admin` and `debug` namespaces from `--http.api`.                                                                                                                           |
 | Rate Limiting        | Protect against DoS attacks by limiting the processing capacity for HTTP requests and batch requests.                                                                                                               | Configure `--rpc.max.concurrency` (HTTP admission control: `0` = use `--db.read.concurrency`, `-1` = unlimited), `--rpc.batch.concurrency` and `--rpc.batch.limit`. |
-| Subscription Filters | Control WebSocket subscriptions to prevent Out-of-Memory (OOM) errors caused by a large number of filter requests.                                                                                        | <p>Utilize the various <code>--rpc.subscription.filters.*</code> flags.</p><p><strong>Note</strong>: These are disabled by default because they increase the risk of OOM issues.</p> |
+| Subscription Filters | Bound what polling filters and WebSocket subscriptions can hold, to prevent Out-of-Memory (OOM) errors caused by a large number of filter requests. | <p>Tune the <code>--rpc.subscription.filters.*</code> flags. For polling filters (<code>eth_newFilter</code>, <code>eth_newBlockFilter</code> and <code>eth_newPendingTransactionFilter</code>) two limits are on by default: each filter holds at most 10000 logs, headers or transactions between polls, and a filter not polled for 5 minutes is evicted. WebSocket subscriptions (<code>eth_subscribe</code>) stream their results directly, so neither limit applies to them. The address and topic counts of a log filter or log subscription are unlimited unless you set <code>maxaddresses</code> and <code>maxtopics</code>.</p> |
 
 ### External Protection Layer (Recommended for Production)
 
@@ -56,14 +56,14 @@ For production environments where RPC endpoints are exposed publicly, it is stro
 
 **TLS Encryption**: For remote RPC Daemon deployments, enable TLS authentication. The process involves:
 
-1. Generating CA key pairs
+1. Generating certificate authority (CA) key pairs
 2. Creating certificates for each instance
 3. Deploying certificates to secure communication
 
-**Private API Security**: Configure secure communication between RPC Daemon and Erigon instance using TLS certificates.
+**Private API Security**: Configure secure communication between the RPC Daemon and the Erigon instance using TLS certificates.
 
 ## Operational Security
 
 **Dedicated User**: Run Erigon as a dedicated system user rather than root to limit potential damage from security breaches.
 
-**Virtual Host Protection**: Configure `HTTPVirtualHosts` to prevent DNS rebinding attacks. This validates the Host header to ensure requests come from authorized domains.
+**Virtual Host Protection**: Set `--http.vhosts` to prevent DNS rebinding attacks. This validates the Host header to ensure requests come from authorized domains.
