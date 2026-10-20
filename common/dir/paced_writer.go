@@ -30,10 +30,10 @@ func NewPacedWriter(f *os.File, chunk int64, wait func() error) *PacedWriter {
 	return &PacedWriter{f: f, chunk: chunk, wait: wait}
 }
 
-func (w *PacedWriter) Write(p []byte) (written int, err error) {
+func (w *PacedWriter) Write(p []byte) (written int, _ error) {
 	for len(p) > 0 {
 		if w.off%w.chunk == 0 {
-			if err = w.wait(); err != nil {
+			if err := w.wait(); err != nil {
 				return written, err
 			}
 		}
@@ -45,7 +45,7 @@ func (w *PacedWriter) Write(p []byte) (written int, err error) {
 			return written, werr
 		}
 		if w.off%w.chunk == 0 {
-			if err = WriteBack(w.f, w.off-w.chunk, w.chunk, w.chunk); err != nil {
+			if err := WriteBack(w.f, w.off-w.chunk, w.chunk, w.chunk); err != nil {
 				return written, err
 			}
 		}
