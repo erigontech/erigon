@@ -275,7 +275,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			topicsMap[crit.Topics[i][j]] = struct{}{}
 		}
 	}
-	topicMap := types.BuildTopicMap(crit.Topics)
+	filter := types.NewLogFilter(crit.Addresses, crit.Topics)
 
 	// latest logs that match the filter crit
 	it := rawdbv3.TxNums2BlockNums(ctx, tx, api._txNumReader, txNumbers, order.Desc)
@@ -360,7 +360,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		if logOptions.IgnoreTopicsOrder {
 			filtered = blockLogs.ContainingTopics(addrMap, topicsMap, maxLogCount)
 		} else {
-			filtered = blockLogs.FilterWithTopicMap(addrMap, topicMap, maxLogCount)
+			filtered = blockLogs.FilterWith(filter, maxLogCount)
 		}
 		if len(filtered) == 0 {
 			continue
