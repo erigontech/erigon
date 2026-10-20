@@ -138,3 +138,16 @@ func TestProvideTxnsReturnsNothingOnceTheParentBlockWaitIsStopped(t *testing.T) 
 		t.Fatal("ProvideTxns kept waiting for the parent block after the wait was stopped")
 	}
 }
+
+func TestProvideTxnsReportsCancellationWhenTheParentBlockWaitIsAlsoStopped(t *testing.T) {
+	p, _ := newLoggingPool()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	stop := make(chan struct{})
+	close(stop)
+
+	for range 100 {
+		_, err := p.ProvideTxns(ctx, txnprovider.WithParentBlockNum(1), txnprovider.WithParentBlockWaitStop(stop))
+		require.ErrorIs(t, err, context.Canceled)
+	}
+}

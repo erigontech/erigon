@@ -209,11 +209,7 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 	parentBlockWaitStart := time.Now()
 	err := p.blockTracker.Wait(parentBlockWaitCtx, parentBlockNum)
 	if errors.Is(err, context.Canceled) && ctx.Err() == nil {
-		// The stop can win the race against a parent that is already there, so ask the tracker.
-		if !p.blockTracker.reached(parentBlockNum) {
-			return nil, nil
-		}
-		err = nil
+		return nil, nil
 	}
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {

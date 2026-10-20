@@ -94,12 +94,6 @@ func (bt *BlockTracker) Run(ctx context.Context) error {
 	}
 }
 
-func (bt *BlockTracker) reached(blockNum uint64) bool {
-	bt.blockChangeCond.L.Lock()
-	defer bt.blockChangeCond.L.Unlock()
-	return bt.currentBlockNum >= blockNum
-}
-
 func (bt *BlockTracker) Wait(ctx context.Context, blockNum uint64) error {
 	done := make(chan struct{})
 	go func() {
@@ -116,17 +110,23 @@ func (bt *BlockTracker) Wait(ctx context.Context, blockNum uint64) error {
 	select {
 	case <-ctx.Done():
 		// note the below will wake up all waiters prematurely, but thanks to the for loop condition
-		// in the waiting goroutine the ones that still need to wait will go back to sleep
-		bt.blockChangeCond.Broadcast()
-		return ctx.Err()
-	case <-done:
+		// in the waiting goroutine the ones that still need to wait will go back to sleep. Holding the
+		// lock keeps the broadcast out of the gap between that condition and the wait.
 		bt.blockChangeCond.L.Lock()
-		defer bt.blockChangeCond.L.Unlock()
+		bt.blockChangeCond.Broadcast()
+		bt.blockChangeCond.L.Unlock()
+		<-done
+	case <-done:
+	}
 
-		if bt.currentBlockNum < blockNum && bt.stopped {
-			return errors.New("block tracker stopped")
-		}
-
+	bt.blockChangeCond.L.Lock()
+	defer bt.blockChangeCond.L.Unlock()
+	switch {
+	case bt.currentBlockNum >= blockNum:
 		return nil
+	case bt.stopped:
+		return errors.New("block tracker stopped")
+	default:
+		return ctx.Err()
 	}
 }

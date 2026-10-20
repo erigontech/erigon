@@ -731,7 +731,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			return false, 0, ctx.Err()
 		case <-parentBlockWaitStop:
 			p.lock.Unlock()
-			return false, 0, nil
+			return false, 0, ctx.Err()
 		default:
 			// continue
 		}

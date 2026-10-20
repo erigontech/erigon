@@ -20,6 +20,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -67,4 +68,24 @@ func TestBlockTracker(t *testing.T) {
 	defer waitCtxCancel2()
 	err = bt.Wait(waitCtx2, 15)
 	require.NoError(t, err)
+}
+
+// settlingContext lets every other goroutine in the bubble block or exit before it reports done.
+type settlingContext struct{ context.Context }
+
+func (c settlingContext) Done() <-chan struct{} {
+	synctest.Wait()
+	return c.Context.Done()
+}
+
+func TestBlockTrackerWaitReportsCancellationForAnUnseenBlock(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		bt := shutter.NewBlockTracker(testlog.Logger(t, log.LvlTrace), nil, nil)
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		for range 100 {
+			require.ErrorIs(t, bt.Wait(settlingContext{ctx}, 15), context.Canceled)
+		}
+	})
 }

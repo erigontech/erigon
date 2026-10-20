@@ -1248,8 +1248,6 @@ func TestGetAssembledBlockDoesNotWaitForTxPoolBehindParent(t *testing.T) {
 	require.Equal(t, parent.Hash(), result.Block.Block.ParentHash())
 }
 
-// A getPayload that follows the forkchoice update right away can find the txpool still catching up
-// with the new head.
 func TestGetAssembledBlockIncludesTxnsOnceTxPoolCatchesUpSoonAfterStop(t *testing.T) {
 	ctx := t.Context()
 	m, parent, payloadID := assembleWithTxPoolBehindParent(t)
