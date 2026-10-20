@@ -40,8 +40,7 @@ var ErrDiscarded = errors.New("block builder discarded")
 
 // parentBlockWaitGrace is how long a stopped build still waits for its transaction provider to see
 // the parent block. A getPayload that follows the forkchoice update right away can find the txpool
-// still catching up with the new head, which usually takes milliseconds; half of the one second
-// getPayload timeout of the Engine API leaves the rest for packing and sealing.
+// still catching up with the new head. The grace is half the Engine API's one-second getPayload timeout.
 const parentBlockWaitGrace = 500 * time.Millisecond
 
 type stopSignalsKey struct{}
