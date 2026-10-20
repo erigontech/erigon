@@ -225,6 +225,7 @@ func (f *ForkChoiceStore) updateLatestMessages(
 	indicies []uint64,
 ) {
 	if f.trackGloasWeights() {
+		f.voteTally = voteTally{}
 		f.updateLatestMessagesGloas(attestation, indicies)
 	} else {
 		f.updateLatestMessagesPreGloas(attestation, indicies)

@@ -113,3 +113,16 @@ func TestVoteTallyReusesSlotsAndOmitsZeroWeightRoots(t *testing.T) {
 		require.LessOrEqual(t, len(f.voteTally.weights), len(roots)+1, "epoch %d", epoch)
 	}
 }
+
+func TestVoteTallyResetsOnGloasAttestation(t *testing.T) {
+	f, _ := newHeadSnapshotTestStore()
+	f.voteTally.votes(f, solid.Checkpoint{Epoch: 1}, newVoteTallyTestState(rand.New(rand.NewSource(1)), 16))
+	require.NotNil(t, f.voteTally.state)
+
+	f.ProcessAttestingIndicies(&solid.Attestation{Data: &solid.AttestationData{
+		Slot:            1,
+		BeaconBlockRoot: common.HexToHash("0xaaaa"),
+	}}, []uint64{1})
+
+	require.Zero(t, f.voteTally)
+}
