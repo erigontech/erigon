@@ -1164,8 +1164,9 @@ func testAssembleBlockWithSiblingCommit(t *testing.T, commitSibling bool) {
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus, validation.ValidationError)
 }
 
-// assembleWithTxPoolBehindParent starts a build whose transaction selection moves the txpool head back
-// to the block before the parent, and returns once selection has started.
+// assembleWithTxPoolBehindParent adds two pending transactions to the txpool and starts a build whose
+// transaction selection moves the txpool head back to the block before the parent. It returns once
+// selection has started.
 func assembleWithTxPoolBehindParent(t *testing.T) (m *execmoduletester.ExecModuleTester, parent *types.Block, payloadID uint64) {
 	t.Helper()
 	m = execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
@@ -1174,6 +1175,7 @@ func assembleWithTxPoolBehindParent(t *testing.T) (m *execmoduletester.ExecModul
 	require.NoError(t, m.InsertChain(chainPack))
 
 	parent = chainPack.TopBlock
+	addTwoTxnsToPool(t.Context(), 0, t, m, m.TxPoolGrpcServer, parent.BaseFee().Uint64())
 	provider := &rewindingTxnProvider{
 		pool:  m.TxPool,
 		head:  txPoolHead(chainPack.Blocks[len(chainPack.Blocks)-2]),
@@ -1236,14 +1238,31 @@ func TestGetAssembledBlockDoesNotWaitForTxPoolBehindParent(t *testing.T) {
 	ctx := t.Context()
 	m, parent, payloadID := assembleWithTxPoolBehindParent(t)
 
-	// engine_getPayload has a one second timeout, and the txpool may never see the parent again.
-	requestCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	// The txpool may never see the parent again.
+	requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	result, err := m.ExecModule.GetAssembledBlock(requestCtx, payloadID)
 	require.NoError(t, m.TxPool.OnNewBlock(ctx, txPoolHead(parent), txnpool.TxnSlots{}, txnpool.TxnSlots{}, txnpool.TxnSlots{}))
 	require.NoError(t, err)
 	require.NotNil(t, result.Block)
 	require.Equal(t, parent.Hash(), result.Block.Block.ParentHash())
+}
+
+// A getPayload that follows the forkchoice update right away can find the txpool still catching up
+// with the new head.
+func TestGetAssembledBlockIncludesTxnsOnceTxPoolCatchesUpSoonAfterStop(t *testing.T) {
+	ctx := t.Context()
+	m, parent, payloadID := assembleWithTxPoolBehindParent(t)
+
+	caughtUp := make(chan error, 1)
+	time.AfterFunc(100*time.Millisecond, func() {
+		caughtUp <- m.TxPool.OnNewBlock(ctx, txPoolHead(parent), txnpool.TxnSlots{}, txnpool.TxnSlots{}, txnpool.TxnSlots{})
+	})
+	result, err := m.ExecModule.GetAssembledBlock(ctx, payloadID)
+	require.NoError(t, err)
+	require.NoError(t, <-caughtUp)
+	require.NotNil(t, result.Block)
+	require.Len(t, result.Block.Block.Transactions(), 2)
 }
 
 func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {

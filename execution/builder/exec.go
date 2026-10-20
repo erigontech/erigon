@@ -199,7 +199,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 				// since there may be new txns that can arrive
 				select {
 				case <-time.After(50 * time.Millisecond):
-				case <-stopSignal(ctx):
+				case <-stopSignalsOf(ctx).stopped:
 				}
 			} else {
 				break
@@ -294,7 +294,7 @@ func getNextTransactions(
 	provideOpts := []txnprovider.ProvideOption{
 		txnprovider.WithAmount(amount),
 		txnprovider.WithParentBlockNum(executionAt),
-		txnprovider.WithParentBlockWaitStop(stopSignal(ctx)),
+		txnprovider.WithParentBlockWaitStop(stopSignalsOf(ctx).parentBlockWaitStopped),
 		txnprovider.WithBlockTime(header.Time),
 		// EIP-8037: runtime state gas is enforced by post-execution rollback
 		// in the block assembler.

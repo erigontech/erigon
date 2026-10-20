@@ -244,7 +244,7 @@ func TestBlockBuilderStopPrefersPayloadCompletedDuringSelection(t *testing.T) {
 	// Stop's select evaluates channel operands in source order before choosing a ready case.
 	// Completing the builder from the context's Done method makes both cases ready together.
 	for range 100 {
-		builder := &BlockBuilder{done: make(chan struct{}), stopped: make(chan struct{})}
+		builder := &BlockBuilder{done: make(chan struct{}), stopped: make(chan struct{}), parentBlockWaitStopped: make(chan struct{})}
 		stopCtx := &finishOnDoneContext{
 			Context: callerCtx,
 			finish: func() {
