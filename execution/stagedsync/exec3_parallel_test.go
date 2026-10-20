@@ -2092,11 +2092,18 @@ type schedulerTest struct {
 }
 
 func newSchedulerTest(t *testing.T, deps map[int][]int, senders ...accounts.Address) *schedulerTest {
+	return newSchedulerTestWithTxs(t, deps, nil, senders...)
+}
+
+func newSchedulerTestWithTxs(t *testing.T, deps map[int][]int, txs types.Transactions, senders ...accounts.Address) *schedulerTest {
+	t.Helper()
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
-	signedTx := signSelfSendTx(t, 0, 0, 1, 21000, chainSpec.Config, 0)
-	txs := make([]types.Transaction, len(senders))
-	for i := range txs {
-		txs[i] = signedTx
+	if txs == nil {
+		signedTx := signSelfSendTx(t, 0, 0, 1, 21000, chainSpec.Config, 0)
+		txs = make(types.Transactions, len(senders))
+		for i := range txs {
+			txs[i] = signedTx
+		}
 	}
 	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
 	pe, roTx := newResumeTestExec(t, newResumeTestDB(t), chainSpec.Config)
@@ -2297,5 +2304,47 @@ func TestFrontierRetryDispatchedBeforeBatchTail(t *testing.T) {
 		tv, ok := pe.in.Next(t.Context())
 		require.True(t, ok)
 		require.Equal(t, index, tv.(*taskVersion).index, "the frontier retry must be dispatched before the tail")
+	}
+}
+
+func TestValueTransferRecipientWaitsForValidation(t *testing.T) {
+	a := accounts.InternAddress(common.HexToAddress("0xa0"))
+	b := accounts.InternAddress(common.HexToAddress("0xb1"))
+	c := accounts.InternAddress(common.HexToAddress("0xc2"))
+	d := accounts.InternAddress(common.HexToAddress("0xd3"))
+	e := accounts.InternAddress(common.HexToAddress("0xe4"))
+	f := accounts.InternAddress(common.HexToAddress("0xf5"))
+	for _, tc := range []struct {
+		name       string
+		senders    [3]accounts.Address
+		recipients [3]accounts.Address
+	}{
+		{"shared_recipient", [3]accounts.Address{a, b, c}, [3]accounts.Address{f, d, d}},
+		{"self_transfer", [3]accounts.Address{a, b, b}, [3]accounts.Address{a, b, b}},
+		{"recipient_then_sender", [3]accounts.Address{a, b, d}, [3]accounts.Address{f, d, e}},
+		{"sender_then_recipient", [3]accounts.Address{a, d, c}, [3]accounts.Address{f, e, d}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			txs := make(types.Transactions, len(tc.senders))
+			for i, sender := range tc.senders {
+				to := tc.recipients[i].Value()
+				tx := &types.LegacyTx{CommonTx: types.CommonTx{To: &to, Value: *uint256.NewInt(1), GasLimit: 21000}}
+				tx.SetSender(sender)
+				txs[i] = tx
+			}
+			s := newSchedulerTestWithTxs(t, nil, txs, tc.senders[:]...)
+			first, blocker := s.dispatched(), s.dispatched()
+			require.Equal(t, []int{0, 1}, []int{first.index, blocker.index})
+			require.True(t, s.parked(2), "successor dispatched alongside its predecessor")
+
+			s.deliver(first, state.ReadSet{}, nil)
+			require.True(t, s.be.validateTasks.checkComplete(0))
+			require.True(t, s.parked(2), "successor released when an unrelated transaction validated")
+			require.Equal(t, -1, s.queued())
+
+			s.deliver(blocker, state.ReadSet{}, nil)
+			require.True(t, s.be.validateTasks.checkComplete(1))
+			require.Equal(t, 2, s.queued(), "successor not dispatched after its predecessor validated")
+		})
 	}
 }

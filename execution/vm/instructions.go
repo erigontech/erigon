@@ -139,6 +139,12 @@ func opExp(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		} else {
 			exponent.Clear()
 		}
+	case base[0]&base[1]&base[2]&base[3] == math.MaxUint64:
+		if exponent[0]&1 == 0 {
+			exponent.SetOne()
+		} else {
+			exponent.SetAllOne()
+		}
 	default:
 		if base.IsUint64() && exponent.LtUint64(64) && uint64(base.BitLen())*exponent.Uint64() <= 64 {
 			result, factor, power := uint64(1), base.Uint64(), exponent.Uint64()
@@ -381,9 +387,21 @@ func opKeccak256(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 	return pc, nil, nil
 }
 
+func (ctx *CallContext) addressWord(index addressWordIndex, address accounts.Address) *uint256.Int {
+	if !ctx.addressWordsSet[index] {
+		ctx.fillAddressWord(index, address)
+	}
+	return &ctx.addressWords[index]
+}
+
+func (ctx *CallContext) fillAddressWord(index addressWordIndex, address accounts.Address) {
+	value := address.Value()
+	ctx.addressWords[index].SetBytes(value[:])
+	ctx.addressWordsSet[index] = true
+}
+
 func opAddress(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	addrVal := scope.Contract.Address().Value()
-	scope.Stack.pushRef().SetBytes(addrVal[:])
+	*scope.Stack.pushRef() = *scope.addressWord(addressWordSelf, scope.Contract.Address())
 	return pc, nil, nil
 }
 
@@ -401,22 +419,12 @@ func opBalance(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 }
 
 func opOrigin(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if origin := evm.Origin; origin.IsNil() {
-		scope.Stack.pushRef().Clear()
-	} else {
-		originVal := origin.Value()
-		scope.Stack.pushRef().SetBytes(originVal[:])
-	}
+	*scope.Stack.pushRef() = *scope.addressWord(addressWordOrigin, evm.Origin)
 	return pc, nil, nil
 }
 
 func opCaller(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if caller := scope.Contract.Caller(); caller.IsNil() {
-		scope.Stack.pushRef().Clear()
-	} else {
-		callerValue := caller.Value()
-		scope.Stack.pushRef().SetBytes(callerValue[:])
-	}
+	*scope.Stack.pushRef() = *scope.addressWord(addressWordCaller, scope.Contract.Caller())
 	return pc, nil, nil
 }
 
@@ -694,12 +702,7 @@ func stBlockhash(_ uint64, scope *CallContext) string {
 }
 
 func opCoinbase(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if coinbase := evm.Context.Coinbase; coinbase.IsNil() {
-		scope.Stack.pushRef().Clear()
-	} else {
-		coinbaseValue := coinbase.Value()
-		scope.Stack.pushRef().SetBytes(coinbaseValue[:])
-	}
+	*scope.Stack.pushRef() = *scope.addressWord(addressWordCoinbase, evm.Context.Coinbase)
 	return pc, nil, nil
 }
 
