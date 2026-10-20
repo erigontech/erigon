@@ -547,18 +547,44 @@ func TestProposerPreferencesServiceDependentRootStateMissing(t *testing.T) {
 	require.False(t, service.hasSeenPreference(seenKey))
 }
 
-func TestProposerPreferencesServiceMissingStatePrecedesBoundaryReject(t *testing.T) {
+func TestProposerPreferencesServiceBoundaryRejectPrecedesStateLoad(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
-	service, _, ethClock, _, fc := setupProposerPreferencesService(t, ctrl)
+	service, _, ethClock, epbsPool, fc := setupProposerPreferencesService(t, ctrl)
 	msg := newTestSignedProposerPreferences(100, 42)
 	fc.Headers[testDependentRoot] = &cltypes.BeaconBlockHeader{Slot: 64}
-	delete(fc.StateAtBlockRootVal, testDependentRoot)
+	stateLoads := 0
+	fc.GetStateAtBlockRootFn = func(root common.Hash, _ bool) (*state2.CachingBeaconState, error) {
+		stateLoads++
+		return fc.StateAtBlockRootVal[root], nil
+	}
+	ethClock.EXPECT().GetCurrentSlot().Return(uint64(90))
+
+	err := service.ProcessMessage(context.Background(), nil, msg)
+	require.ErrorContains(t, err, "after shuffling dependent slot")
+	require.NotErrorIs(t, err, ErrIgnore)
+	require.Zero(t, stateLoads)
+	require.Empty(t, epbsPool.ProposerPreferences.Keys())
+}
+
+func TestProposerPreferencesServiceInvalidDependentRootPrecedesStateLoad(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	service, _, ethClock, epbsPool, fc := setupProposerPreferencesService(t, ctrl)
+	msg := newTestSignedProposerPreferences(100, 42)
+	fc.HeadVal = common.HexToHash("0x99")
+	stateLoads := 0
+	fc.GetStateAtBlockRootFn = func(root common.Hash, _ bool) (*state2.CachingBeaconState, error) {
+		stateLoads++
+		return fc.StateAtBlockRootVal[root], nil
+	}
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(90))
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.ErrorIs(t, err, ErrIgnore)
-	require.Contains(t, err.Error(), "state for dependent_root")
+	require.ErrorContains(t, err, "not a possible dependent block")
+	require.Zero(t, stateLoads)
+	require.Empty(t, epbsPool.ProposerPreferences.Keys())
 }
 
 func TestProposerPreferencesDependentRootValidity(t *testing.T) {
@@ -654,7 +680,9 @@ func TestProposerPreferencesServiceRequestsIndependentDependentRootState(t *test
 	forkChoiceMock.StateAtBlockRootVal[testDependentRoot] = depState
 	var requestedCopy bool
 	var ownedState *state2.CachingBeaconState
+	stateLoads := 0
 	forkChoiceMock.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
+		stateLoads++
 		requestedCopy = alwaysCopy
 		var err error
 		ownedState, err = forkChoiceMock.StateAtBlockRootVal[root].Copy()
@@ -667,6 +695,7 @@ func TestProposerPreferencesServiceRequestsIndependentDependentRootState(t *test
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.NoError(t, err)
+	require.Equal(t, 1, stateLoads)
 	require.True(t, requestedCopy)
 	require.NotSame(t, depState, ownedState)
 	require.Equal(t, uint64(64), depState.Slot())

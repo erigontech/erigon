@@ -130,10 +130,6 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 	if !ok {
 		return fmt.Errorf("%w: dependent block %v has not been seen", ErrIgnore, preferences.DependentRoot)
 	}
-	depState, err := s.forkchoiceStore.GetStateAtBlockRoot(preferences.DependentRoot, true)
-	if err != nil || depState == nil {
-		return fmt.Errorf("%w: state for dependent_root %v not available", ErrIgnore, preferences.DependentRoot)
-	}
 	dependentSlot := lookaheadEpochStartSlot
 	if dependentSlot > 0 {
 		dependentSlot--
@@ -143,6 +139,10 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 	}
 	if !s.isValidDependentRoot(preferences.DependentRoot, lookaheadEpochStartSlot) {
 		return fmt.Errorf("%w: dependent root is not a possible dependent block", ErrIgnore)
+	}
+	depState, err := s.forkchoiceStore.GetStateAtBlockRoot(preferences.DependentRoot, true)
+	if err != nil || depState == nil {
+		return fmt.Errorf("%w: state for dependent_root %v not available", ErrIgnore, preferences.DependentRoot)
 	}
 
 	validationState, err := s.proposerPreferencesValidationState(depState, proposalEpoch)
