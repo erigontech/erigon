@@ -42,6 +42,7 @@
 
 ### Changed
 
+- p2p: the discovery endpoint predictor, which fills the local node record's IP and UDP port when they are not configured, now counts endpoint statements once per reporter network (IPv4 /24, IPv6 /48; hosts on the LAN individually) and ignores statements about an endpoint of the other address family. A node whose discovery peers all share one public /24 or /48 no longer predicts its endpoint from them (#24975) — by @mardgez13
 - rpc: `eth_getBlockTransactionCountByNumber` and `eth_getBlockTransactionCountByHash` read retained body metadata in both local and remote mode, even when transaction payloads are pruned. They return `null` when the body is missing (#23777) — by @yperbasis
 - rpc: `eth_getWitness`, `eth_getTxWitness`, `overlay_callConstructor` and `ots_getContractCreator` check transaction and state-history retention before replay. `ots_getTransactionBySenderAndNonce` checks transaction retention before reading the matching transaction. These methods can now return a pruning error instead of attempting reads outside the required windows (#23777) — by @yperbasis
 - rpc: `trace_call` and `trace_callMany` treat an explicit `null` `data` or `input` in a call object as omitted, as `eth_call` does, instead of rejecting the request. Their other optional call-object members already did (#24334) — by @banteg
