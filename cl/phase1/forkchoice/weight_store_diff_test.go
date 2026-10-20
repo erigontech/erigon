@@ -137,7 +137,7 @@ func TestGloasWeightTreeMatchesFullScan(t *testing.T) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	full := NewWeightStore(f)
+	full := newWeightStoreFromCheckpointState(f, cs)
 	tree := f.gloasWeightTree.prepare(justified, cs)
 
 	blocks := f.getFilteredBlockTree(justified.Root, justified, f.Slot())
@@ -170,7 +170,7 @@ func TestGloasWeightTreeDeltaMatchesFullScan(t *testing.T) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	full := NewWeightStore(f)
+	full := newWeightStoreFromCheckpointState(f, cs)
 	f.gloasWeightTree.prepare(justified, cs)
 
 	voters := make([]uint64, 0)
