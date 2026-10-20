@@ -89,3 +89,36 @@ func TestBlockTrackerWaitReportsCancellationForAnUnseenBlock(t *testing.T) {
 		}
 	})
 }
+
+// cancelledAfterCheckContext is cancelled by its first Err call, which still reports it as live, so the
+// cancellation lands between the waiter's check and its Cond.Wait.
+type cancelledAfterCheckContext struct {
+	context.Context
+	cancel context.CancelFunc
+	once   sync.Once
+}
+
+func (c *cancelledAfterCheckContext) Err() error {
+	first := false
+	c.once.Do(func() { first = true })
+	if !first {
+		return c.Context.Err()
+	}
+	c.cancel()
+	time.Sleep(10 * time.Millisecond)
+	return nil
+}
+
+func TestBlockTrackerWaitReturnsWhenCancelledRightAfterItsWaiterChecks(t *testing.T) {
+	t.Parallel()
+	bt := shutter.NewBlockTracker(testlog.Logger(t, log.LvlTrace), nil, nil)
+	ctx, cancel := context.WithCancel(t.Context())
+	returned := make(chan error, 1)
+	go func() { returned <- bt.Wait(&cancelledAfterCheckContext{Context: ctx, cancel: cancel}, 15) }()
+	select {
+	case err := <-returned:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Wait missed a cancellation")
+	}
+}
