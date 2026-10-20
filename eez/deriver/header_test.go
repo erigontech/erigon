@@ -95,10 +95,10 @@ func deriveWindow(t *testing.T, name string) {
 	var outbound []protocol.ExecutionEntry
 	var logs []*types.Log
 	for i, recorded := range w.Blocks {
+		var block types.Block
+		require.NoError(t, rlp.DecodeBytes(recorded.RLP, &block))
 		encoded := p.BlockTxs(i)
 		if i == len(w.Blocks)-1 && len(p.Actions) > 0 {
-			var block types.Block
-			require.NoError(t, rlp.DecodeBytes(recorded.RLP, &block))
 			// The system address nonce at the parent; execution checks it.
 			nonce := block.Transactions()[0].GetNonce()
 			sb, err := BuildSyncBlock(p, appliedAll(b), protocol.SyncTxContext{ChainID: cfg.ChainID.Uint64(), RollupID: l2.RollupID}, nonce)
@@ -107,20 +107,19 @@ func deriveWindow(t *testing.T, name string) {
 		}
 		txs, err := DecodeTxs(encoded)
 		require.NoError(t, err)
-		h := newHeader(&cfg, parent, DeriveInputs(l2, parent, p.Span, i))
-		witness := witnessOf(recorded.Witness)
-		res, err := stateless.Execute(&cfg, engine, types.NewBlock(h, txs, nil, nil, []*types.Withdrawal{}, nil), witness,
-			stateless.WithoutPostValidation())
+		derived := types.NewBlock(newHeader(&cfg, parent, DeriveInputs(l2, parent, p.Span, i)), txs, nil, nil, []*types.Withdrawal{}, nil)
+		// Execution's outputs come from the recorded block; Verify checks each
+		// against the derived block's execution.
+		h := derived.Header()
+		h.Root, h.GasUsed, h.ReceiptHash, h.Bloom = block.Root(), block.GasUsed(), block.ReceiptHash(), block.Bloom()
+		derived = derived.WithSeal(h)
+		require.Equal(t, recorded.Hash, derived.Hash(), "block %d", recorded.Number)
+		res, err := stateless.Verify(&cfg, engine, derived, witnessOf(recorded.Witness))
 		require.NoError(t, err, "block %d", recorded.Number)
-		h.Root, h.GasUsed = res.StateRoot, res.GasUsed
-		block := types.NewBlock(h, txs, nil, res.Receipts, []*types.Withdrawal{}, nil)
-		require.Equal(t, recorded.Hash, block.Hash(), "block %d", recorded.Number)
 		for _, r := range res.Receipts {
 			logs = append(logs, r.Logs...)
 		}
-		_, err = stateless.Verify(&cfg, engine, block, witness)
-		require.NoError(t, err, "block %d", recorded.Number)
-		parent = block.Header()
+		parent = derived.Header()
 	}
 	post, err := w.OracleHash("window_post_block_hash")
 	require.NoError(t, err)

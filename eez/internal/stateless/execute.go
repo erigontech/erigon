@@ -58,26 +58,18 @@ type Result struct {
 	// WithTxStateRoots.
 	TxStateRoots []common.Hash
 	Receipts     types.Receipts
-	GasUsed      uint64
 }
 
 // Option configures Execute.
 type Option func(*options)
 
 type options struct {
-	txStateRoots   bool
-	skipPostChecks bool
+	txStateRoots bool
 }
 
 // WithTxStateRoots records the state root after each transaction.
 func WithTxStateRoots() Option {
 	return func(o *options) { o.txStateRoots = true }
-}
-
-// WithoutPostValidation skips the checks of gas used, receipts root and
-// bloom against the header, for a block whose header is still being built.
-func WithoutPostValidation() Option {
-	return func(o *options) { o.skipPostChecks = true }
 }
 
 // Verify executes block on its witness and requires the header's state root.
@@ -161,12 +153,9 @@ func Execute(chainConfig *chain.Config, engine rules.Engine, block *types.Block,
 	if err := checkStateReadOrIncompleteError(); err != nil {
 		return nil, fmt.Errorf("block %d: %w", block.NumberU64(), err)
 	}
-	res.GasUsed = gasUsed.BlockGasUsed()
-	if !o.skipPostChecks {
-		if err := engine.ValidateBlockPostExecution(chainConfig, header, res.GasUsed, gasUsed.Blob, true, true,
-			res.Receipts, block.Transactions(), logger); err != nil {
-			return nil, err
-		}
+	if err := engine.ValidateBlockPostExecution(chainConfig, header, gasUsed.BlockGasUsed(), gasUsed.Blob, true, true,
+		res.Receipts, block.Transactions(), logger); err != nil {
+		return nil, err
 	}
 
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
