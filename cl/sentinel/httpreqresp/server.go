@@ -152,6 +152,10 @@ func Do(handler http.Handler, r *http.Request) (*http.Response, error) {
 	}()
 	select {
 	case resp := <-resultCh:
+		if err := r.Context().Err(); err != nil {
+			resp.Body.Close()
+			return nil, err
+		}
 		return resp, nil
 	case <-r.Context().Done():
 		// The handler may still publish a response whose body owns a live stream; close it once
