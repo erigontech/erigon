@@ -348,6 +348,58 @@ func TestTraceGasUsageAcrossRPCPaths(t *testing.T) {
 	}
 }
 
+// revertingContractOverride replaces the code gasTracingTestChain's transactions call with a REVERT.
+func revertingContractOverride() *tracersConfig.TraceConfig {
+	tracer := "callTracer"
+	reverting := hexutil.Bytes{byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.REVERT)}
+	return &tracersConfig.TraceConfig{Tracer: &tracer, StateOverrides: &ethapi.StateOverrides{
+		accounts.InternAddress(common.HexToAddress("0x2000")): {Code: &reverting},
+	}}
+}
+
+type callTraceError struct {
+	Error string `json:"error"`
+}
+
+func TestTraceBlockSeesStateOverrides(t *testing.T) {
+	m, _, calls := gasTracingTestChain(t)
+	api := newDebugApiForTest(m)
+	var traces []struct {
+		Result callTraceError `json:"result"`
+	}
+	readGasTrace(t, &traces, func(stream *jsonstream.Stream) error {
+		return api.TraceBlockByNumber(m.Ctx, 1, revertingContractOverride(), stream)
+	})
+	require.Len(t, traces, len(calls))
+	for i, trace := range traces {
+		require.Equal(t, "execution reverted", trace.Result.Error, "transaction %d", i)
+	}
+}
+
+func TestTraceTransactionSeesStateOverrides(t *testing.T) {
+	m, generated, _ := gasTracingTestChain(t)
+	api := newDebugApiForTest(m)
+	var trace callTraceError
+	readGasTrace(t, &trace, func(stream *jsonstream.Stream) error {
+		return api.TraceTransaction(m.Ctx, generated.Blocks[0].Transactions()[0].Hash(), revertingContractOverride(), stream)
+	})
+	require.Equal(t, "execution reverted", trace.Error)
+}
+
+func TestTraceCallManySeesStateOverrides(t *testing.T) {
+	m, _, calls := gasTracingTestChain(t)
+	api := newDebugApiForTest(m)
+	var traces [][]callTraceError
+	readGasTrace(t, &traces, func(stream *jsonstream.Stream) error {
+		return api.TraceCallMany(m.Ctx, []Bundle{{Transactions: calls}}, StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(1), TransactionIndex: new(0)}, revertingContractOverride(), stream)
+	})
+	require.Len(t, traces, 1)
+	require.Len(t, traces[0], len(calls))
+	for i, trace := range traces[0] {
+		require.Equal(t, "execution reverted", trace.Error, "call %d", i)
+	}
+}
+
 func TestTraceBlockGasExcludesSystemChanges(t *testing.T) {
 	m, generated, _ := gasTracingTestChain(t)
 	api := newDebugApiForTest(m)

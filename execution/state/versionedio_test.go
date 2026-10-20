@@ -130,6 +130,15 @@ func (r *minimalStateReader) ReadAccountData(addr accounts.Address) (*accounts.A
 	return nil, nil
 }
 
+func (r *minimalStateReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (r *minimalStateReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
 func (r *minimalStateReader) ReadAccountDataForDebug(addr accounts.Address) (*accounts.Account, error) {
 	return nil, nil
 }
@@ -1893,6 +1902,88 @@ func TestArenaSlabsGrowWithTheWrites(t *testing.T) {
 	require.Less(t, len(ws.cells.nonce.slabs), 12, "doubling must reach the cap in a few slabs")
 }
 
+// A reused read set keeps its per-address slot maps, so a call that reads the
+// same contract's slots again does not regrow the map from scratch.
+func TestReusedReadSetKeepsItsSlotMaps(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	keys := make([]accounts.StorageKey, 256)
+	for i := range keys {
+		keys[i] = accounts.InternKey(common.BigToHash(big.NewInt(int64(i))))
+	}
+	var rs ReadSet
+	for _, k := range keys {
+		rs.SetStorage(addr, k, VersionedRead[uint256.Int]{})
+	}
+	require.Len(t, rs.storage[addr], len(keys))
+
+	rs.clearForReuse()
+	require.Empty(t, rs.storage[addr], "the slots are gone")
+
+	allocs := testing.AllocsPerRun(10, func() {
+		for _, k := range keys {
+			rs.SetStorage(addr, k, VersionedRead[uint256.Int]{})
+		}
+		rs.clearForReuse()
+	})
+	require.Zero(t, allocs, "refilling a kept slot map must not allocate")
+}
+
+// Past the bound the outer map is dropped, so one call that touches many
+// contracts cannot pin a slot map for each of them.
+func TestReusedReadSetDropsTooManySlotMaps(t *testing.T) {
+	var rs ReadSet
+	for i := range maxReusedStorageAddrs + 1 {
+		a := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+		rs.SetStorage(a, accounts.InternKey(common.HexToHash("0x01")), VersionedRead[uint256.Int]{})
+	}
+	rs.clearForReuse()
+	// Nil, not empty: clear would keep the buckets the many addresses grew.
+	require.Nil(t, rs.storage, "too many addresses must drop the outer map")
+}
+
+// Slot maps from earlier calls go, so a sequence of calls on different
+// contracts cannot pin one map each while every entries() count stays small.
+func TestReusedReadSetDropsSlotMapsItNoLongerUses(t *testing.T) {
+	var rs ReadSet
+	for i := range maxReusedStorageAddrs {
+		a := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+		rs.SetStorage(a, accounts.InternKey(common.HexToHash("0x01")), VersionedRead[uint256.Int]{})
+		rs.clearForReuse()
+		require.LessOrEqual(t, len(rs.storage), 1, "only the contract this call read stays")
+	}
+}
+
+// A cleared slot map keeps the buckets it grew, so reading one slot of every
+// kept contract while another one grows must not pile up their capacities.
+func TestReusedReadSetBoundsTheSlotsItsMapsHeld(t *testing.T) {
+	var rs ReadSet
+	addrs := make([]accounts.Address, 4)
+	for i := range addrs {
+		addrs[i] = accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+	}
+	held := map[accounts.Address]int{}
+	for call := range addrs {
+		for _, a := range addrs {
+			if _, kept := rs.storage[a]; !kept {
+				held[a] = 0
+			}
+			rs.SetStorage(a, accounts.InternKey(common.HexToHash("0x01")), VersionedRead[uint256.Int]{})
+		}
+		for j := range maxPooledEntries / 2 {
+			rs.SetStorage(addrs[call], accounts.InternKey(common.BigToHash(big.NewInt(int64(j+2)))), VersionedRead[uint256.Int]{})
+		}
+		for _, a := range addrs {
+			held[a] = max(held[a], len(rs.storage[a]))
+		}
+		rs.clearForReuse()
+		kept := 0
+		for a := range rs.storage {
+			kept += held[a]
+		}
+		require.LessOrEqual(t, kept, maxPooledEntries, "call %d: kept slot maps once held too many slots", call)
+	}
+}
+
 // synthesizeCreatedAccountBase must allocate nothing when the version map holds
 // no cell for the address: every probe would miss and the account is dropped.
 func TestSynthesizeWithoutCellsAllocatesNothing(t *testing.T) {
@@ -1910,4 +2001,31 @@ func TestSynthesizeWithoutCellsAllocatesNothing(t *testing.T) {
 		}
 	})
 	require.Zero(t, allocs)
+}
+
+// An arena-backed set copies AddressPath values onto its own slab, and a
+// published snapshot keeps its own copy once the set moves on to the next tx.
+func TestArenaAddressWritesOutliveTheSlab(t *testing.T) {
+	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
+	defer ibs.Close()
+	ibs.versionedWrites.UseArena()
+	addr := accounts.InternAddress(common.HexToAddress("0xacc7"))
+	ibs.recordWriteAddress(addr, &accounts.Account{Nonce: 7, Balance: *uint256.NewInt(9)})
+
+	published := ibs.VersionedWrites()
+	ibs.versionedWrites.ReleaseAndReset()
+	ibs.recordWriteAddress(addr, &accounts.Account{Nonce: 1})
+
+	vw, ok := published.GetAddress(addr)
+	require.True(t, ok)
+	require.Equal(t, uint64(7), vw.Val.Nonce)
+	require.Equal(t, *uint256.NewInt(9), vw.Val.Balance)
+
+	// Prime the slab past the measured count, so the measurement sees steady-state writes, not chunk growth.
+	for i := range 128 {
+		ibs.recordWriteAddress(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i+1)))), &accounts.Account{Nonce: uint64(i)})
+	}
+	ibs.versionedWrites.ReleaseAndReset()
+	acc := &accounts.Account{Nonce: 3}
+	require.Zero(t, testing.AllocsPerRun(100, func() { ibs.recordWriteAddress(addr, acc) }), "no allocation per AddressPath write")
 }

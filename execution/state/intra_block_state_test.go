@@ -187,10 +187,8 @@ func newTestAction(addr accounts.Address, r *rand.Rand) testAction {
 		{
 			name: "SetTransientState",
 			fn: func(a testAction, s *IntraBlockState) error {
-				var key common.Hash
-				binary.BigEndian.PutUint16(key[:], uint16(a.args[0]))
-				val := uint256.NewInt(uint64(a.args[1]))
-				s.SetTransientState(addr, accounts.InternKey(key), *val)
+				key := TransientKey(*uint256.NewInt(uint64(a.args[0])))
+				s.SetTransientState(addr, &key, uint256.NewInt(uint64(a.args[1])))
 				return nil
 			},
 			args: make([]int64, 2),
@@ -423,11 +421,11 @@ func TestTransientStorage(t *testing.T) {
 	state := New(nil)
 	defer state.Close()
 
-	key := accounts.InternKey(common.Hash{0x01})
+	key := TransientKey(*uint256.NewInt(1))
 	value := uint256.NewInt(2)
 	addr := accounts.Address{}
 
-	state.SetTransientState(addr, key, *value)
+	state.SetTransientState(addr, &key, value)
 	if exp, got := 1, state.journal.length(); exp != got {
 		t.Fatalf("journal length mismatch: have %d, want %d", got, exp)
 	}
@@ -441,6 +439,65 @@ func TestTransientStorage(t *testing.T) {
 	state.journal.revert(state, 0)
 	if got, exp := state.GetTransientState(addr, key), (uint256.Int{}); exp != got {
 		t.Fatalf("transient storage mismatch: have %x, want %x", got, exp)
+	}
+}
+
+// Crosses transientScanLimit, so lookups switch from the slot scan to the index.
+func TestTransientStorageManySlots(t *testing.T) {
+	t.Parallel()
+	state := New(nil)
+	defer state.Close()
+
+	addr := accounts.Address{}
+	key := func(i int) TransientKey { return TransientKey(*uint256.NewInt(uint64(i))) }
+	const n = 2 * transientScanLimit
+	for i := range n {
+		k := key(i)
+		state.SetTransientState(addr, &k, uint256.NewInt(uint64(i+1)))
+	}
+	check := func(set int) {
+		t.Helper()
+		for i := range n {
+			want := uint64(0)
+			if i < set {
+				want = uint64(i + 1)
+			}
+			if got := state.GetTransientState(addr, key(i)); got.Uint64() != want {
+				t.Fatalf("slot %d: have %d, want %d", i, got.Uint64(), want)
+			}
+		}
+	}
+	check(n)
+	state.journal.revert(state, transientScanLimit/2)
+	check(transientScanLimit / 2)
+}
+
+func TestTransientStorageRevertAcrossClear(t *testing.T) {
+	t.Parallel()
+	for _, clearLast := range []bool{false, true} {
+		t.Run(fmt.Sprint(clearLast), func(t *testing.T) {
+			state := New(nil)
+			defer state.Close()
+			snapshot := state.PushSnapshot()
+			addr := accounts.Address{}
+			const slots = 2 * transientScanLimit
+			for frame := range 3 {
+				state.Prepare(&chain.Rules{}, addr, addr, addr, nil, nil)
+				for i := range slots - frame {
+					key := TransientKey(*uint256.NewInt(uint64(frame*slots + i)))
+					state.SetTransientState(addr, &key, uint256.NewInt(1))
+					state.SetTransientState(addr, &key, uint256.NewInt(2))
+				}
+			}
+			if clearLast {
+				state.Prepare(&chain.Rules{}, addr, addr, addr, nil, nil)
+			}
+			state.RevertToSnapshot(snapshot, nil)
+			for i := range 3 * slots {
+				key := TransientKey(*uint256.NewInt(uint64(i)))
+				require.Equal(t, uint256.Int{}, state.GetTransientState(addr, key), "slot %d", i)
+			}
+		})
 	}
 }
 
@@ -1433,6 +1490,17 @@ func TestResetForPoolDropsARevertedAddressWarmUp(t *testing.T) {
 }
 
 func big2(i int) *big.Int { return big.NewInt(int64(i)) }
+
+// Slots, not just addresses, decide poolability: one contract's slot map is
+// what a reused read set keeps, and Go maps never shrink.
+func TestResetForPoolDropsAStateWithTooManySlots(t *testing.T) {
+	ibs := New(NewNoopReader())
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	for i := range maxPooledEntries + 1 {
+		ibs.versionedReads.SetStorage(addr, accounts.InternKey(common.BigToHash(big.NewInt(int64(i)))), VersionedRead[uint256.Int]{})
+	}
+	require.False(t, ibs.resetForPool(), "one address with that many slots must not be pooled")
+}
 
 // On a versioned IBS that caches state objects, an account touched and then
 // credited in the same tx is not empty and must survive FinalizeTx.

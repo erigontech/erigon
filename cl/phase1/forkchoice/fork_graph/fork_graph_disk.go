@@ -535,7 +535,10 @@ func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *stat
 		return
 	}
 	if f.syncedData.HeadRoot() == blockRoot {
-		err = f.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		err = f.syncedData.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, headRoot common.Hash, _ uint64) error {
+			if headRoot != blockRoot {
+				return nil
+			}
 			// HeadRoot() already matched blockRoot, so we trust the stored root
 			// rather than recomputing BlockRoot() which can return incorrect results
 			// when the state's incremental hashing cache has been dirtied.
@@ -553,7 +556,9 @@ func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *stat
 		if errors.Is(err, synced_data.ErrNotSynced) {
 			err = nil
 		}
-		return
+		if ok || err != nil {
+			return
+		}
 	}
 
 	// check if the state is in the cache
@@ -619,11 +624,17 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 		block, isSegmentPresent := f.GetBlock(currentIteratorRoot)
 		if !isSegmentPresent {
 			// check if it is in the header
+			// The anchor state is dumped at startup whatever its slot.
 			bHeader, ok := f.GetHeader(currentIteratorRoot)
-			if ok && bHeader.Slot%dumpSlotFrequency == 0 {
+			if ok && (bHeader.Slot%dumpSlotFrequency == 0 || currentIteratorRoot == f.anchorRoot) {
 				copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot)
 				if err != nil {
-					log.Trace("Could not retrieve state", "missing", currentIteratorRoot, "err", err)
+					if currentIteratorRoot == f.anchorRoot {
+						// Once currentState has moved on, this file is the only copy of the anchor state.
+						log.Warn("Could not read the anchor state file", "root", currentIteratorRoot, "err", err)
+					} else {
+						log.Trace("Could not retrieve state", "missing", currentIteratorRoot, "err", err)
+					}
 					return nil, nil
 				}
 				continue

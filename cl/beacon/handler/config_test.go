@@ -37,6 +37,7 @@ func TestGetSpecIncludesGasLimitSchedule(t *testing.T) {
 	}{
 		{name: "mainnet", network: chainspec.MainnetChainID, schedule: `[]`},
 		{name: "sepolia", network: chainspec.SepoliaChainID, schedule: `[{"EPOCH":"353024","GAS_LIMIT":"200000000"}]`},
+		{name: "hoodi", network: chainspec.HoodiChainID, schedule: `[{"EPOCH":"132352","GAS_LIMIT":"200000000"}]`},
 		{name: "custom omitted", customConfig: "GLOAS_FORK_EPOCH: 10\n", schedule: `[]`},
 		{name: "custom empty value", customConfig: "GLOAS_FORK_EPOCH: 10\nGAS_LIMIT_SCHEDULE:\n", schedule: `[]`},
 		{name: "custom null", customConfig: "GLOAS_FORK_EPOCH: 10\nGAS_LIMIT_SCHEDULE: null\n", schedule: `[]`},

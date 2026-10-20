@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -20,6 +21,15 @@ func (r *emptyReader) ReadAccountData(accounts.Address) (*accounts.Account, erro
 
 func (r *emptyReader) ReadAccountDataForDebug(accounts.Address) (*accounts.Account, error) {
 	return nil, nil
+}
+
+func (r *emptyReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (r *emptyReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
 }
 
 func (r *emptyReader) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
@@ -179,10 +189,10 @@ func TestTransientStorageResetInIBSReset(t *testing.T) {
 	defer ibs.Close()
 
 	testAddr := accounts.InternAddress([20]byte{0x42})
-	testKey := accounts.InternKey([32]byte{0x01})
+	testKey := TransientKey(*uint256.NewInt(1))
 
 	// Set transient storage
-	ibs.SetTransientState(testAddr, testKey, *uint256.NewInt(42))
+	ibs.SetTransientState(testAddr, &testKey, uint256.NewInt(42))
 	val := ibs.GetTransientState(testAddr, testKey)
 	assert.False(t, val.IsZero(), "Transient storage should be set")
 

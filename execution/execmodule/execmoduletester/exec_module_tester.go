@@ -394,6 +394,12 @@ func WithSlowBlockThreshold(d time.Duration) Option {
 	}
 }
 
+func WithExecWorkerCount(n int) Option {
+	return func(opts *options) {
+		opts.execWorkerCount = n
+	}
+}
+
 func WithFcuBackgroundPrune() Option {
 	return func(opts *options) {
 		opts.fcuBackgroundPrune = true
@@ -429,6 +435,7 @@ type options struct {
 	alwaysGenerateChangesets *bool
 	maxReorgDepth            *uint64
 	slowBlockThreshold       *time.Duration
+	execWorkerCount          int
 	sentryProtocol           uint
 	stateTransitionObserver  execmodule.StateTransitionObserver
 	skipSystemContracts      bool
@@ -541,6 +548,9 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 	if opt.maxReorgDepth != nil {
 		cfg.Sync.MaxReorgDepth = *opt.maxReorgDepth
+	}
+	if opt.execWorkerCount > 0 {
+		cfg.Sync.ExecWorkerCount = opt.execWorkerCount
 	}
 	cfg.PersistReceiptsCacheV2 = true
 	cfg.ChaosMonkey = false
@@ -757,7 +767,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			mock.Ctx,
 			stagedsync.StageSnapshotsCfg(mock.DB, mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, false, pruneMode, nil, nil),
 			stagedsync.StageHeadersCfg(mock.BlockReader),
-			stagedsync.StageBlockHashesCfg(mock.Dirs.Tmp, blockWriter),
 			stagedsync.StageBodiesCfg(mock.BlockReader, blockWriter),
 			stagedsync.StageSendersCfg(mock.ChainConfig, false /* badBlockHalt */, dirs.Tmp, mock.BlockReader, readAheader),
 			stagedsync.StageExecuteBlocksCfg(
@@ -853,6 +862,12 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	mock.StreamWg.Add(1)
 	mock.bgComponentsEg.Go(func() error {
 		mock.sentriesClient.RecvUploadHeadersMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
+		return nil
+	})
+	mock.StreamWg.Wait()
+	mock.StreamWg.Add(1)
+	mock.bgComponentsEg.Go(func() error {
+		mock.sentriesClient.RecvUploadBlockAccessListsMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
 		return nil
 	})
 	mock.StreamWg.Wait()
