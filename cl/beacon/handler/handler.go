@@ -236,7 +236,6 @@ type ApiHandler struct {
 
 	preparedPayload              preparedPayload
 	payloadPreparationGate       payloadPreparationGate
-	payloadPreparationRunning    atomic.Bool
 	parentExecutionRequests      *commonlru.Cache[common.Hash, *cltypes.ExecutionRequests]
 	parentExecutionRequestsGroup singleflight.Group
 

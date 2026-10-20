@@ -8131,7 +8131,7 @@ PayloadPreparation: primed execution layer
 
 Preparation starts at Capella. It supports the first Gloas slot and steady-state Gloas EMPTY paths whose execution parent is already canonical. Gloas FULL and FULL-to-EMPTY paths wait for normal production's fork-choice update. Missing or mismatched preparation keeps the normal collection window.
 
-The metrics endpoint exposes `caplin_payload_preparation_outcomes_total{outcome="..."}` for scheduler results. Outcomes use fixed reasons such as `success`, `unregistered`, `stale_head`, `busy`, `too_early`, `late`, `needs_forkchoice`, and `unchanged`. `caplin_payload_preparation_collections_total{outcome="reused|absent|mismatch|disabled"}` records whether production reused a prepared payload ID, found no prepared payload while preparation was running, found a different ID, or ran while preparation was not running because it was disabled by flag or unsupported by the node configuration. Head hashes, slots, proposer indices, and error messages are never metric labels.
+The metrics endpoint exposes `caplin_payload_preparation_outcomes_total{outcome="..."}` for scheduler results. Outcomes use fixed reasons such as `success`, `unregistered`, `stale_head`, `busy`, `too_early`, `late`, `needs_forkchoice`, and `unchanged`. `caplin_payload_preparation_collections_total{outcome="reused|absent|mismatch"}` records whether production reused a prepared payload ID, found no prepared payload, or found a different ID. `absent` also covers nodes where preparation is disabled or unsupported. Head hashes, slots, proposer indices, and error messages are never metric labels.
 
 ### 3.2. Fork-Choice Head Published Before the Head-State Copy
 

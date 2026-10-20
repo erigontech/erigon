@@ -218,44 +218,36 @@ func TestPayloadPreparationCollectionWithExecutionModule(t *testing.T) {
 		{name: "full", gloasAtCurrent: true, needsForkChoice: true, buildOnFull: true, wantParentFull: true},
 		{name: "full_to_empty", gloasAtCurrent: true, needsForkChoice: true, canonicalFull: true},
 	}
-	preparations := []struct {
-		name      string
-		prepare   bool
-		fails     bool
-		mismatch  bool
-		wantReuse bool
-	}{
-		{name: "prepared", prepare: true, wantReuse: true},
-		{name: "absent"},
-		{name: "failed", prepare: true, fails: true},
-		{name: "mismatch", prepare: true, mismatch: true},
-	}
 	for _, path := range paths {
+		preparations := []string{"prepared", "absent", "mismatch"}
+		if !path.needsForkChoice {
+			preparations = append(preparations, "failed")
+		}
 		for _, preparation := range preparations {
-			t.Run(path.name+"/"+preparation.name, func(t *testing.T) {
+			t.Run(path.name+"/"+preparation, func(t *testing.T) {
 				fixture := newPreparationCollectionFixture(t, path)
-				if preparation.fails {
+				if preparation == "failed" {
 					fixture.engine.prepareErr = errors.New("temporary execution failure")
 				}
-				if preparation.prepare {
+				if preparation != "absent" {
 					_, err := preparePayloadForTest(t, fixture.handler, fixture.targetSlot)
 					switch {
 					case path.needsForkChoice:
 						require.ErrorIs(t, err, errGloasPathNeedsForkChoice)
-					case preparation.fails:
+					case preparation == "failed":
 						require.ErrorIs(t, err, fixture.engine.prepareErr)
 					default:
 						require.NoError(t, err)
 					}
 				}
 				prepared := fixture.handler.preparedPayload.payloads[fixture.targetSlot]
-				if preparation.mismatch {
+				if preparation == "mismatch" {
 					fixture.handler.validatorParams.SetFeeRecipient(fixture.proposer, common.Address{0x43})
 					if path.needsForkChoice {
 						fixture.handler.preparedPayload.set(fixture.targetSlot, []byte{0xff}, fixture.baseRoot, time.Now().Add(-time.Second))
 					}
 				}
-				reused := preparation.wantReuse && !path.needsForkChoice
+				reused := preparation == "prepared" && !path.needsForkChoice
 				if reused {
 					time.Sleep(maximumPreparedAdvance(&fixture.cfg, fixture.version))
 				}

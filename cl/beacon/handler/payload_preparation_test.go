@@ -24,7 +24,6 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
-	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -65,7 +64,7 @@ import (
 )
 
 func preparedWarmup(p *preparedPayload, slot uint64, payloadID []byte, now time.Time) time.Duration {
-	warmup, _, _ := p.warmupAndMismatch(slot, payloadID, now, true)
+	warmup, _, _ := p.warmupAndMismatch(slot, payloadID, now)
 	return warmup
 }
 
@@ -482,30 +481,6 @@ func TestStartPayloadPreparationSkipsNilEngine(t *testing.T) {
 	require.NotPanics(t, func() {
 		handler.StartPayloadPreparation(t.Context())
 	})
-}
-
-func TestStartPayloadPreparationStartsWithDirectBuilder(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	engine := newPayloadBuildEngine(t, ctrl)
-	clock := eth_clock.NewMockEthereumClock(ctrl)
-	clock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
-	cfg := clparams.MainnetBeaconConfig
-	handler := &ApiHandler{
-		engine:         engine,
-		routerCfg:      &beacon_router_configuration.RouterConfiguration{Validator: true},
-		beaconChainCfg: &cfg,
-		ethClock:       clock,
-		logger:         log.Root(),
-	}
-	previousProcs := runtime.GOMAXPROCS(1)
-	defer runtime.GOMAXPROCS(previousProcs)
-	ctx, cancel := context.WithCancel(t.Context())
-	done := handler.StartPayloadPreparation(ctx)
-	running := handler.payloadPreparationRunning.Load()
-	cancel()
-	<-done
-	require.True(t, running)
-	require.False(t, handler.payloadPreparationRunning.Load())
 }
 
 func TestStartPayloadPreparationCanBeDisabledIndependently(t *testing.T) {
@@ -1994,21 +1969,28 @@ func TestPayloadPreparationCountsOutcomes(t *testing.T) {
 		{"error", errors.New("arbitrary error text must not become a label")},
 	} {
 		t.Run(tc.reason, func(t *testing.T) {
-			config := payloadPreparationLoopConfig(1, 1, 2)
-			currentSlot := config.SlotsPerEpoch
-			handler, root, _, synced := newPayloadPreparationLoopHarness(t, gomock.NewController(t), &config, currentSlot, currentSlot, 750*time.Millisecond)
-			synced.EXPECT().SelectedHead().Return(root, currentSlot, true).AnyTimes()
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
 			outcome := payloadPreparationOutcomes.WithLabelValues(tc.reason)
 			before := outcome.GetValue()
-			handler.preparePayloadLoopWith(ctx, func(_ context.Context, key preparationKey, _ *payloadPreparationScratch) (preparationKey, error) {
-				cancel()
-				return key, tc.err
-			})
+			observePreparationOutcome(tc.err)
 			require.Equal(t, before+1, outcome.GetValue())
 		})
 	}
+}
+
+func TestPreparePayloadLoopRecordsOutcome(t *testing.T) {
+	config := payloadPreparationLoopConfig(1, 1, 2)
+	currentSlot := config.SlotsPerEpoch
+	handler, root, _, synced := newPayloadPreparationLoopHarness(t, gomock.NewController(t), &config, currentSlot, currentSlot, 750*time.Millisecond)
+	synced.EXPECT().SelectedHead().Return(root, currentSlot, true).AnyTimes()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	outcome := payloadPreparationOutcomes.WithLabelValues("error")
+	before := outcome.GetValue()
+	handler.preparePayloadLoopWith(ctx, func(_ context.Context, key preparationKey, _ *payloadPreparationScratch) (preparationKey, error) {
+		cancel()
+		return key, errors.New("preparation failed")
+	})
+	require.Equal(t, before+1, outcome.GetValue())
 }
 
 func TestPayloadPreparationCountsTooEarly(t *testing.T) {
@@ -2039,50 +2021,39 @@ func TestPayloadPreparationCountsTooEarly(t *testing.T) {
 	require.Equal(t, before+1, counter.GetValue())
 }
 
-func TestPayloadPreparationCountsBlockProcessingWaitAsBusy(t *testing.T) {
+func TestPayloadPreparationCountsHeadWaits(t *testing.T) {
 	config := payloadPreparationLoopConfig(1, 1, 2)
 	currentSlot := config.SlotsPerEpoch
-	handler, root, store, synced := newPayloadPreparationLoopHarness(t, gomock.NewController(t), &config, currentSlot, currentSlot-1, 750*time.Millisecond)
-	store.BlockProcessingVal = true
-	ctx, cancel := context.WithCancel(t.Context())
-	synced.EXPECT().SelectedHead().DoAndReturn(func() (common.Hash, uint64, bool) {
-		cancel()
-		return root, currentSlot - 1, true
-	})
-	busy := payloadPreparationOutcomes.WithLabelValues("busy")
-	stale := payloadPreparationOutcomes.WithLabelValues("stale_head")
-	busyBefore, staleBefore := busy.GetValue(), stale.GetValue()
+	for _, tc := range []struct {
+		headSlot        uint64
+		reason          string
+		unchangedReason string
+	}{
+		{currentSlot - 1, "busy", "stale_head"},
+		{currentSlot + 1, "stale_head", "busy"},
+	} {
+		t.Run(tc.reason, func(t *testing.T) {
+			handler, root, store, synced := newPayloadPreparationLoopHarness(t, gomock.NewController(t), &config, currentSlot, tc.headSlot, 750*time.Millisecond)
+			store.BlockProcessingVal = true
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			synced.EXPECT().SelectedHead().DoAndReturn(func() (common.Hash, uint64, bool) {
+				cancel()
+				return root, tc.headSlot, true
+			})
+			outcome := payloadPreparationOutcomes.WithLabelValues(tc.reason)
+			unchanged := payloadPreparationOutcomes.WithLabelValues(tc.unchangedReason)
+			before, unchangedBefore := outcome.GetValue(), unchanged.GetValue()
 
-	handler.preparePayloadLoopWith(ctx, func(context.Context, preparationKey, *payloadPreparationScratch) (preparationKey, error) {
-		t.Fatal("block-processing wait reached payload preparation")
-		return preparationKey{}, nil
-	})
+			handler.preparePayloadLoopWith(ctx, func(context.Context, preparationKey, *payloadPreparationScratch) (preparationKey, error) {
+				t.Fatal("head wait reached payload preparation")
+				return preparationKey{}, nil
+			})
 
-	require.Equal(t, busyBefore+1, busy.GetValue())
-	require.Equal(t, staleBefore, stale.GetValue())
-}
-
-func TestPayloadPreparationCountsFutureHeadWaitAsStale(t *testing.T) {
-	config := payloadPreparationLoopConfig(1, 1, 2)
-	currentSlot := config.SlotsPerEpoch
-	handler, root, store, synced := newPayloadPreparationLoopHarness(t, gomock.NewController(t), &config, currentSlot, currentSlot+1, 750*time.Millisecond)
-	store.BlockProcessingVal = true
-	ctx, cancel := context.WithCancel(t.Context())
-	synced.EXPECT().SelectedHead().DoAndReturn(func() (common.Hash, uint64, bool) {
-		cancel()
-		return root, currentSlot + 1, true
-	})
-	busy := payloadPreparationOutcomes.WithLabelValues("busy")
-	stale := payloadPreparationOutcomes.WithLabelValues("stale_head")
-	busyBefore, staleBefore := busy.GetValue(), stale.GetValue()
-
-	handler.preparePayloadLoopWith(ctx, func(context.Context, preparationKey, *payloadPreparationScratch) (preparationKey, error) {
-		t.Fatal("future-head wait reached payload preparation")
-		return preparationKey{}, nil
-	})
-
-	require.Equal(t, busyBefore, busy.GetValue())
-	require.Equal(t, staleBefore+1, stale.GetValue())
+			require.Equal(t, before+1, outcome.GetValue())
+			require.Equal(t, unchangedBefore, unchanged.GetValue())
+		})
+	}
 }
 
 func TestPayloadPreparationPTCWaitCountsPendingOnce(t *testing.T) {
@@ -2155,18 +2126,6 @@ func TestPayloadPreparationExpiredAdmissionCountsLate(t *testing.T) {
 	require.Equal(t, before+1, late.GetValue())
 }
 
-func TestPayloadPreparationCountsDisabledCollection(t *testing.T) {
-	var prepared preparedPayload
-	disabled := payloadPreparationCollections.WithLabelValues("disabled")
-	absent := payloadPreparationCollections.WithLabelValues("absent")
-	disabledBefore, absentBefore := disabled.GetValue(), absent.GetValue()
-
-	prepared.warmupAndMismatch(1, []byte{1}, time.Now(), false)
-
-	require.Equal(t, disabledBefore+1, disabled.GetValue())
-	require.Equal(t, absentBefore, absent.GetValue())
-}
-
 func TestPayloadPreparationCountsCollectionReuse(t *testing.T) {
 	for _, tc := range []struct {
 		reason      string
@@ -2185,7 +2144,7 @@ func TestPayloadPreparationCountsCollectionReuse(t *testing.T) {
 			counter := payloadPreparationCollections.WithLabelValues(tc.reason)
 			before := counter.GetValue()
 
-			prepared.warmupAndMismatch(1, tc.collectedID, time.Now(), true)
+			prepared.warmupAndMismatch(1, tc.collectedID, time.Now())
 
 			require.Equal(t, before+1, counter.GetValue())
 		})

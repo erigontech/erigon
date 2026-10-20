@@ -181,16 +181,12 @@ func (p *preparedPayload) set(slot uint64, payloadID []byte, head common.Hash, p
 
 // warmupAndMismatch returns inherited build time for an exact payload-ID match. For a mismatch it
 // also returns the head from which the prepared builder started.
-func (p *preparedPayload) warmupAndMismatch(slot uint64, payloadID []byte, now time.Time, preparationRunning bool) (time.Duration, common.Hash, bool) {
+func (p *preparedPayload) warmupAndMismatch(slot uint64, payloadID []byte, now time.Time) (time.Duration, common.Hash, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	record, ok := p.payloads[slot]
 	if !ok || len(payloadID) == 0 {
-		outcome := "absent"
-		if !preparationRunning {
-			outcome = "disabled"
-		}
-		payloadPreparationCollections.WithLabelValues(outcome).Inc()
+		payloadPreparationCollections.WithLabelValues("absent").Inc()
 		return 0, common.Hash{}, false
 	}
 	if !bytes.Equal(record.id, payloadID) {
@@ -299,10 +295,8 @@ func (a *ApiHandler) StartPayloadPreparation(ctx context.Context) <-chan struct{
 		close(done)
 		return done
 	}
-	a.payloadPreparationRunning.Store(true)
 	go func() {
 		defer close(done)
-		defer a.payloadPreparationRunning.Store(false)
 		a.preparePayloadLoop(ctx)
 	}()
 	return done
