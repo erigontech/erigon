@@ -240,6 +240,7 @@ func (f *ForkChoiceStore) computeHeadGloas(justifiedCheckpoint solid.Checkpoint,
 	currentSlot := f.Slot()
 	nodes, nodeChildren := f.getFilteredNodeTree(justifiedCheckpoint.Root, justifiedCheckpoint, currentSlot)
 	f.headIsFallback = len(nodes) == 0
+	ws := f.gloasWeightTree.prepare(justifiedCheckpoint, cs)
 	if len(nodes) == 0 {
 		header, hasHeader := f.forkGraph.GetHeader(justifiedCheckpoint.Root)
 		if !hasHeader {
@@ -256,8 +257,6 @@ func (f *ForkChoiceStore) computeHeadGloas(justifiedCheckpoint solid.Checkpoint,
 		Root:          justifiedCheckpoint.Root,
 		PayloadStatus: cltypes.PayloadStatusPending,
 	}
-
-	ws := f.gloasWeightTree.prepare(justifiedCheckpoint, cs)
 
 	for {
 		children := make([]ForkChoiceNode, 0, 2)
