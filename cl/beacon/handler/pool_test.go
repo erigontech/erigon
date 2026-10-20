@@ -860,6 +860,44 @@ func TestPoolSyncCommitteesPublishesInBackground(t *testing.T) {
 	}
 }
 
+// A validator outside the sync committee has no subnet, so its message is neither validated nor published, and the
+// Beacon API requires a 400 with the failing index.
+func TestPoolSyncCommitteesRejectsValidatorOutsideCommittee(t *testing.T) {
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	// Every fixture validator sits in the committee, so fill both committees with validator 0 alone.
+	member, err := s.ValidatorPublicKey(0)
+	require.NoError(t, err)
+	committee := s.CurrentSyncCommittee().Copy()
+	keys := committee.GetCommittee()
+	for i := range keys {
+		keys[i] = member
+	}
+	committee.SetCommittee(keys)
+	require.NoError(t, s.SetCurrentSyncCommittee(committee))
+	require.NoError(t, s.SetNextSyncCommittee(committee.Copy()))
+	require.NoError(t, sd.OnHeadState(s))
+	const outsider = 1
+
+	ctrl := gomock.NewController(t)
+	mockGossip := gossip_mock.NewMockGossip(ctrl)
+	mockGossip.EXPECT().PublishBackground(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	handler.gossipManager = mockGossip
+
+	msgs := []*cltypes.SyncCommitteeMessage{{Slot: s.Slot(), BeaconBlockRoot: common.Hash{1}, ValidatorIndex: outsider}}
+	body, err := json.Marshal(msgs)
+	require.NoError(t, err)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/sync_committees", bytes.NewReader(body))
+	handler.mux.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	var response poolingError
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Len(t, response.Failures, 1)
+	require.Equal(t, 0, response.Failures[0].Index)
+	require.Contains(t, response.Failures[0].Message, "not in the sync committee")
+}
+
 func TestPoolSyncCommitteesIsUnavailableWhileSyncing(t *testing.T) {
 	msgs := []*cltypes.SyncCommitteeMessage{
 		{

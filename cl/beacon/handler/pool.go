@@ -558,6 +558,10 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 			continue
 		}
+		if len(publishingSubnets) == 0 {
+			failures = append(failures, poolingFailure{Index: idx, Message: fmt.Sprintf("validator %d is not in the sync committee for slot %d", v.ValidatorIndex, v.Slot)})
+			continue
+		}
 
 		expiry := syncCommitteeMessageExpiry(a.ethClock, a.netConfig, v.Slot)
 
