@@ -1423,6 +1423,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 				// conflict, so the read stays valid and does not re-execute.
 				valid = VersionValid
 			} else if valid == VersionValid && path == BalancePath && version == rr.Version() && matchesLive != nil && !matchesLive() {
+				// Fee re-credits rewrite a balance cell in place, so for balance an unchanged version does not prove an unchanged value.
 				lo := rr.Version().TxIndex
 				if vm.eip8246 {
 					lo++
