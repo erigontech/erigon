@@ -304,8 +304,10 @@ func (s *payloadAttestationService) validatePayloadAttestation(ctx context.Conte
 		return fmt.Errorf("%w: %w: payload attestation validation canceled: %v", ErrIgnore, ErrAttestationRetryable, ctx.Err()) //nolint:errorlint // converting cancellation to IGNORE
 	}
 	defer func() { <-s.validationAdmission }()
-	err := s.forkchoiceStore.OnPayloadAttestationMessage(ctx, msg, false)
-	if err == nil {
+	err := s.forkchoiceStore.OnGossipPayloadAttestationMessage(ctx, msg)
+	// Within the gossip clock disparity the message is valid gossip even though
+	// fork choice no longer counts its vote.
+	if err == nil || errors.Is(err, forkchoice.ErrPayloadAttestationNotCurrentSlot) {
 		return nil
 	}
 	if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
