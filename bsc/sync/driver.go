@@ -18,18 +18,20 @@
 // consensus layer. It is an execution-module client: it fetches headers+bodies
 // from peers and hands them to the exec module via InsertBlocks + UpdateForkChoice.
 // It performs no execution itself (the exec module runs blocks-only for BSC until
-// Parlia execution exists) and no seal verification.
+// Parlia execution exists). Catch-up does no seal verification; the tip loop
+// verifies every header with the Parlia verifier.
 package bscsync
 
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	bscp2p "github.com/erigontech/erigon/bsc/p2p"
+	"github.com/erigontech/erigon/bsc/parlia"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/p2p"
@@ -40,11 +42,13 @@ const (
 	defaultFcuBlocks    = 8192 // fallback FCU interval when LoopBlockLimit is unset
 	peerBackoff         = 3 * time.Second
 	tipHandoverDistance = 64
+	snapshotCacheSize   = 1024
 	announceWait        = time.Second
 )
 
 type chainReaderWriter interface {
 	CurrentHeader(ctx context.Context) *types.Header
+	GetHeader(ctx context.Context, hash common.Hash, number uint64) *types.Header
 	FrozenBlocks(ctx context.Context) (uint64, bool)
 	GetHeaderByNumber(ctx context.Context, number uint64) *types.Header
 	InsertBlocks(ctx context.Context, blocks []*types.Block) error
@@ -59,6 +63,9 @@ type rangeFetcher interface {
 
 type p2pService interface {
 	rangeFetcher
+	p2pObserverRegistrar
+	backwardDownloader
+	peerPenalizer
 	Run(ctx context.Context) error
 }
 
@@ -69,30 +76,68 @@ var (
 
 // Config parameterizes the BSC download driver.
 type Config struct {
+	ChainConfig *chain.Config
 	ChainRW     chainReaderWriter
 	Svc         p2pService
-	TargetBlock uint64 // upper bound for the parallel downloader; required (> 0)
+	TargetBlock uint64 // upper bound for the parallel downloader; 0 follows the chain tip
 	FcuInterval uint64 // blocks between UpdateForkChoice calls during catch-up
 }
 
-// RunBlockDownloader runs the p2p service and the forward download loop until ctx
-// is cancelled, the target is reached, or a fatal error occurs.
+// RunBlockDownloader runs the p2p service and the download loop until ctx is
+// cancelled or a fatal error occurs. With a target block it stops at the target,
+// otherwise it follows the chain tip.
 func RunBlockDownloader(ctx context.Context, logger log.Logger, cfg Config) error {
-	if cfg.TargetBlock == 0 {
-		return fmt.Errorf("bsc/sync: --sync.target-block is required (tip-following not implemented)")
-	}
 	if cfg.FcuInterval == 0 {
 		cfg.FcuInterval = defaultFcuBlocks
 	}
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 3)
 	go func() { errCh <- cfg.Svc.Run(ctx) }()
-	go func() { errCh <- runParallel(ctx, logger, cfg) }()
+	if cfg.TargetBlock > 0 {
+		go func() { errCh <- runParallel(ctx, logger, cfg) }()
+	} else {
+		tipEvents := NewTipEvents(logger, cfg.Svc)
+		go func() { errCh <- tipEvents.Run(ctx) }()
+		store, err := parlia.NewSnapshotStore(cfg.ChainConfig, chainHeaderReader{ctx: ctx, chainRW: cfg.ChainRW}, snapshotCacheSize)
+		if err != nil {
+			return err
+		}
+		ts := newTipSync(logger, cfg.ChainRW, cfg.Svc, fetchBackwardsWith(cfg.Svc), tipEvents, store, NewParliaVerifier(cfg.ChainConfig))
+		go func() { errCh <- followTip(ctx, logger, cfg, ts) }()
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case err := <-errCh:
 		return err
 	}
+}
+
+// followTip catches up to the announced head, then follows the tip until the tip loop
+// falls back to catch-up.
+func followTip(ctx context.Context, logger log.Logger, cfg Config, ts *tipSync) error {
+	for {
+		head, err := catchUp(ctx, logger, cfg, ts.tipEvents.AnnouncedHead)
+		if err != nil {
+			return err
+		}
+		if head == nil {
+			return errors.New("bsc/sync: no local head to follow the tip from")
+		}
+		err = ts.run(ctx, head)
+		if !errors.Is(err, errFallBack) {
+			return err
+		}
+		logger.Info("[bsc] tip mode left, catching up", "reason", err)
+	}
+}
+
+type chainHeaderReader struct {
+	ctx     context.Context
+	chainRW chainReaderWriter
+}
+
+func (r chainHeaderReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+	return r.chainRW.GetHeader(r.ctx, hash, number)
 }
 
 // runParallel downloads [head+1, TargetBlock] with the parallel multi-peer range

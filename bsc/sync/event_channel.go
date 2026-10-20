@@ -91,19 +91,19 @@ func (ec *EventChannel[TEvent]) takeEvent() (TEvent, bool) {
 	}
 }
 
-// takeEvent dequeues an event. If the queue was empty, it blocks.
+// waitForEvent dequeues an event. If the queue was empty, it blocks.
 func (ec *EventChannel[TEvent]) waitForEvent(ctx context.Context) (TEvent, error) {
 	waitCtx, waitCancel := context.WithCancel(ctx)
 	defer waitCancel()
 
 	var e TEvent
+	var ok bool
 
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		ec.queueMutex.Lock()
 		defer ec.queueMutex.Unlock()
 
-		var ok bool
 		for e, ok = ec.takeEvent(); !ok && (waitCtx.Err() == nil); e, ok = ec.takeEvent() {
 			ec.queueCond.Wait()
 		}
@@ -121,7 +121,27 @@ func (ec *EventChannel[TEvent]) waitForEvent(ctx context.Context) (TEvent, error
 	ec.queueMutex.Unlock()
 	wg.Wait()
 
+	if ok {
+		return e, nil
+	}
 	return e, ctx.Err()
+}
+
+// TakeAll blocks until there is at least one event and then dequeues all queued events.
+func (ec *EventChannel[TEvent]) TakeAll(ctx context.Context) ([]TEvent, error) {
+	e, err := ec.waitForEvent(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	ec.queueMutex.Lock()
+	defer ec.queueMutex.Unlock()
+
+	events := []TEvent{e}
+	for next, ok := ec.takeEvent(); ok; next, ok = ec.takeEvent() {
+		events = append(events, next)
+	}
+	return events, nil
 }
 
 // Run pumps events from the queue to the events channel.

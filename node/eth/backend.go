@@ -1383,6 +1383,7 @@ func (s *Ethereum) Start() error {
 			s.execModule.Start(s.sentryCtx, hook) // startup snapshot catch-up; returns
 			chainRW := chainreader.NewChainReaderEth1(s.chainConfig, s.execModule, s.config.FcuTimeout)
 			err := bscsync.RunBlockDownloader(s.sentryCtx, s.logger, bscsync.Config{
+				ChainConfig: s.chainConfig,
 				ChainRW:     chainRW,
 				Svc:         s.bscP2PService,
 				TargetBlock: s.config.Sync.TargetBlock,

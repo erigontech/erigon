@@ -18,11 +18,14 @@ package bscsync
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/bsc/parlia"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -31,11 +34,15 @@ import (
 )
 
 func fakeBlock(parent *types.Header, salt byte) *types.Block {
+	return fakeBlockWithDifficulty(parent, salt, 2)
+}
+
+func fakeBlockWithDifficulty(parent *types.Header, salt byte, difficulty uint64) *types.Block {
 	h := &types.Header{
 		TxHash:      empty.RootHash,
 		ReceiptHash: empty.RootHash,
 		UncleHash:   empty.UncleHash,
-		Difficulty:  *uint256.NewInt(2),
+		Difficulty:  *uint256.NewInt(difficulty),
 		Extra:       []byte{salt},
 	}
 	if parent != nil {
@@ -55,10 +62,29 @@ func fakeChain(n int) []*types.Block {
 }
 
 type fakeP2P struct {
+	*fakeTipRegistrar
 	peers int
 
-	mu    sync.Mutex
-	chain []*types.Block
+	mu        sync.Mutex
+	chain     []*types.Block
+	penalized []*p2p.PeerId
+}
+
+func (f *fakeP2P) Penalize(_ context.Context, peerId *p2p.PeerId) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.penalized = append(f.penalized, peerId)
+	return nil
+}
+
+func (f *fakeP2P) FetchBlocksBackwards(context.Context, common.Hash, p2p.BbdHeaderReader, ...p2p.BbdOption) (p2p.BbdResultFeed, error) {
+	return p2p.BbdResultFeed{}, errors.New("fake: use fakeNetwork.fetchBackwards")
+}
+
+func (f *fakeP2P) penalties() []*p2p.PeerId {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.penalized)
 }
 
 func (f *fakeP2P) blocks() []*types.Block {
@@ -194,6 +220,18 @@ func (f *fakeChainRW) lastFcu() fcuCall {
 	return f.fcus[len(f.fcus)-1]
 }
 
+func (f *fakeChainRW) numFcus() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.fcus)
+}
+
+func (f *fakeChainRW) setFcuStatus(fn func(head common.Hash) execmodule.ExecutionStatus) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fcuStatus = fn
+}
+
 func (f *fakeChainRW) numInserted() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -203,4 +241,57 @@ func (f *fakeChainRW) numInserted() int {
 func (f *fakeP2P) Run(ctx context.Context) error {
 	<-ctx.Done()
 	return ctx.Err()
+}
+
+type fakeParliaDB struct {
+	chainRW *fakeChainRW
+}
+
+func (db fakeParliaDB) GetHeader(hash common.Hash, number uint64) *types.Header {
+	return db.chainRW.GetHeader(context.Background(), hash, number)
+}
+
+func (db fakeParliaDB) Snapshot(hash common.Hash, number uint64) (*parlia.Snapshot, error) {
+	if db.GetHeader(hash, number) == nil {
+		return nil, parlia.ErrUnknownAncestor
+	}
+	return &parlia.Snapshot{Number: number, Hash: hash}, nil
+}
+
+type fakeNetwork struct {
+	mu     sync.Mutex
+	blocks map[common.Hash]*types.Block
+}
+
+func newFakeNetwork(blocks ...[]*types.Block) *fakeNetwork {
+	n := &fakeNetwork{blocks: map[common.Hash]*types.Block{}}
+	for _, chain := range blocks {
+		n.add(chain...)
+	}
+	return n
+}
+
+func (n *fakeNetwork) add(blocks ...*types.Block) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	for _, b := range blocks {
+		n.blocks[b.Hash()] = b
+	}
+}
+
+func (n *fakeNetwork) fetchBackwards(ctx context.Context, hash common.Hash, hr p2p.BbdHeaderReader, limit uint64, _ *p2p.PeerId, consume func([]*types.Block) error) error {
+	n.mu.Lock()
+	var chain []*types.Block
+	for b := n.blocks[hash]; b != nil; b = n.blocks[b.ParentHash()] {
+		chain = append(chain, b)
+		if known, _ := hr.HeaderByHash(ctx, b.ParentHash()); known != nil {
+			break
+		}
+	}
+	n.mu.Unlock()
+	if len(chain) == 0 || uint64(len(chain)) > limit {
+		return fmt.Errorf("fake: no chain for %x", hash)
+	}
+	slices.Reverse(chain)
+	return consume(chain)
 }

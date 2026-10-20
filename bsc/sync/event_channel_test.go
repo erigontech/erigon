@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -83,5 +84,33 @@ func TestEventChannel(t *testing.T) {
 			require.Equal(t, "event3", <-events)
 			require.Empty(t, events)
 		})
+	})
+}
+
+func TestEventChannelTakeAll(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		ch := NewEventChannel[string](3)
+
+		done := make(chan []string)
+		go func() {
+			events, err := ch.TakeAll(t.Context())
+			require.NoError(t, err)
+			done <- events
+		}()
+		synctest.Wait()
+		ch.PushEvent("event1")
+		require.Equal(t, []string{"event1"}, <-done)
+
+		ch.PushEvent("event2")
+		ch.PushEvent("event3")
+		events, err := ch.TakeAll(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, []string{"event2", "event3"}, events)
+
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		_, err = ch.TakeAll(ctx)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
 	})
 }

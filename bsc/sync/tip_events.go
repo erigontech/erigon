@@ -55,7 +55,7 @@ type EventNewBlockBatch struct { // new batch of blocks from peer
 	NewBlocks []*types.Block
 	PeerId    *p2p.PeerId
 	Source    EventSource
-	Processed chan<- error // closed with nil error when processed successfully, otherwise error sent
+	Processed chan<- error // buffered; closed when processed successfully, otherwise the error is sent
 }
 
 type EventNewBlockHashes struct {
@@ -118,8 +118,9 @@ type TipEvents struct {
 	announcedHeads       *announcedHeads
 }
 
-func (te *TipEvents) Events() <-chan Event {
-	return te.events.Events()
+// Next blocks until there is at least one event and returns all queued events, oldest first.
+func (te *TipEvents) Next(ctx context.Context) ([]Event, error) {
+	return te.events.TakeAll(ctx)
 }
 
 func (te *TipEvents) PushEvent(e Event) {
@@ -201,7 +202,8 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	})
 	defer newBlockHashesObserverCancel()
 
-	return te.events.Run(ctx)
+	<-ctx.Done()
+	return ctx.Err()
 }
 
 type announcedHeads struct {

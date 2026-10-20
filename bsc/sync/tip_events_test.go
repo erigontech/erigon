@@ -116,11 +116,15 @@ func (f *fakeTipRegistrar) RegisterPeerEventObserver(o event.Observer[*sentrypro
 
 func (f *fakeTipRegistrar) sendNewBlock(peer uint64, num uint64) *types.Block {
 	b := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(num), Extra: []byte{byte(peer)}}, nil)
+	f.sendBlock(peer, b)
+	return b
+}
+
+func (f *fakeTipRegistrar) sendBlock(peer uint64, b *types.Block) {
 	f.newBlock(&p2p.DecodedInboundMessage[*eth.NewBlockPacket]{
 		Decoded: &eth.NewBlockPacket{Block: b},
 		PeerId:  p2p.PeerIdFromUint64(peer),
 	})
-	return b
 }
 
 func (f *fakeTipRegistrar) sendNewBlockHashes(peer uint64, nums ...uint64) {
@@ -131,6 +135,10 @@ func (f *fakeTipRegistrar) sendNewBlockHashes(peer uint64, nums ...uint64) {
 			Number uint64
 		}{Hash: common.Hash{byte(n >> 8), byte(n)}, Number: n})
 	}
+	f.sendHashes(peer, pkt)
+}
+
+func (f *fakeTipRegistrar) sendHashes(peer uint64, pkt eth.NewBlockHashesPacket) {
 	f.newBlockHashes(&p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]{
 		Decoded: &pkt,
 		PeerId:  p2p.PeerIdFromUint64(peer),
@@ -164,18 +172,18 @@ func TestTipEventsFromP2P(t *testing.T) {
 		reg.sendNewBlockHashes(2, 11, 12)
 		reg.sendNewBlockHashes(2, 11, 12)
 
-		e := <-te.Events()
+		events, err := te.Next(t.Context())
+		require.NoError(t, err)
+		require.Len(t, events, 2)
+		e := events[0]
 		require.Equal(t, EventTypeNewBlock, e.Type)
 		require.Equal(t, b.Hash(), e.AsNewBlock().NewBlock.Hash())
 		require.Equal(t, EventSourceP2PNewBlock, e.AsNewBlock().Source)
 		require.Equal(t, p2p.PeerIdFromUint64(1), e.AsNewBlock().PeerId)
 
-		e = <-te.Events()
+		e = events[1]
 		require.Equal(t, EventTypeNewBlockHashes, e.Type)
 		require.Len(t, e.AsNewBlockHashes().NewBlockHashes, 2)
-
-		synctest.Wait()
-		require.Empty(t, te.Events())
 	})
 }
 
@@ -202,6 +210,9 @@ func TestTipEventsPushBatch(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		te, _ := runTipEvents(t)
 		te.PushEvent(Event{Type: EventTypeNewBlockBatch})
-		require.Equal(t, EventTypeNewBlockBatch, (<-te.Events()).Type)
+		events, err := te.Next(t.Context())
+		require.NoError(t, err)
+		require.Len(t, events, 1)
+		require.Equal(t, EventTypeNewBlockBatch, events[0].Type)
 	})
 }
