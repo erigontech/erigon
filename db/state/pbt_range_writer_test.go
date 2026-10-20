@@ -483,7 +483,7 @@ func TestPBinRangeWriterRecordsMatchSequentialTrie(t *testing.T) {
 			gotRecords := make(map[string][]byte)
 			for _, file := range got.files {
 				for _, entry := range file.entries {
-					if commitment.IsCommitmentStateKey(entry.key) {
+					if bytes.Equal(entry.key, commitment.KeyCommitmentState) {
 						continue
 					}
 					require.NotContains(t, gotRecords, string(entry.key), "file=[%d,%d)", file.start, file.end)
@@ -589,6 +589,7 @@ func runPBinRangeWriterCorpus(t *testing.T, leaves []state.PBinLeaf, maxOps int)
 		return nil
 	}, 0)
 	require.NoError(t, err)
+	pbinReviewRewritePersistedStateKey(t, agg)
 	out := agg.BeginFilesRo()
 	defer out.Close()
 	snapshot := pbinRangeWriterSnapshot{root: root}
@@ -604,7 +605,7 @@ func runPBinRangeWriterCorpus(t *testing.T, leaves []state.PBinLeaf, maxOps int)
 			key, _ := reader.Next(nil)
 			require.True(t, reader.HasNext(), "key %x has no value in %s", key, visible.Fullpath())
 			value, _ := reader.Next(nil)
-			if commitment.IsCommitmentStateKey(key) {
+			if bytes.Equal(key, commitment.KeyCommitmentState) {
 				require.Nil(t, snapshot.state, "second state record in %s", visible.Fullpath())
 				snapshot.state = bytes.Clone(value)
 			}
