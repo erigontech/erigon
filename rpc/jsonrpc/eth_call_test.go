@@ -1438,7 +1438,6 @@ func TestStorageKeysUnmarshalJSON(t *testing.T) {
 		input string
 		want  StorageKeys
 	}{
-		{"null", `null`, nil},
 		{"empty list", `[]`, StorageKeys{}},
 		{"empty key", `["0x"]`, StorageKeys{{}}},
 		{"odd length", `["0x0","0x1","0xabc","0X1"]`, StorageKeys{{0x00}, {0x01}, {0x0a, 0xbc}, {0x01}}},

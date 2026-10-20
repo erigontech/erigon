@@ -449,10 +449,6 @@ func (k *StorageKeys) UnmarshalJSON(input []byte) error {
 	if err := json.Unmarshal(input, &raw); err != nil {
 		return err
 	}
-	if raw == nil {
-		*k = nil
-		return nil
-	}
 	keys := make(StorageKeys, len(raw))
 	for i, key := range raw {
 		// Pad an odd number of digits on the left, so "0x1" reads as "0x01".
