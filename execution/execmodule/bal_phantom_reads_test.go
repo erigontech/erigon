@@ -28,9 +28,11 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 func TestBALSystemReadsAfterFullBlock(t *testing.T) {
@@ -77,6 +79,62 @@ func TestBALPhantomReadsAfterFullBlock(t *testing.T) {
 			require.ErrorContains(t, err, wantError)
 		})
 	}
+}
+
+func TestBALReadsAfterStateGasConsumption(t *testing.T) {
+	const readGasLimit = uint64(50_000)
+	const slotsPerContract = 15
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	readers := []common.Address{common.HexToAddress("0x2222"), common.HexToAddress("0x3333")}
+	code := make([]byte, 0, slotsPerContract*4)
+	for slot := range slotsPerContract {
+		code = append(code, byte(vm.PUSH1), byte(slot), byte(vm.SLOAD), byte(vm.POP))
+	}
+	genesis := &types.Genesis{
+		Config:   chain.AllProtocolChanges,
+		GasLimit: params.StateGasNewAccount + readGasLimit,
+		Alloc: types.GenesisAlloc{
+			sender: {Balance: big.NewInt(common.Ether)},
+		},
+	}
+	for _, addr := range readers {
+		genesis.Alloc[addr] = types.GenesisAccount{Balance: new(big.Int), Code: code}
+	}
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(key),
+		execmoduletester.WithExperimentalBAL(),
+	)
+	pack, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
+		gasPrice := uint256.NewInt(m.Genesis.BaseFee().Uint64() * 2)
+		signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+		create, err := types.SignTx(types.NewContractCreation(0, uint256.NewInt(0), genesis.GasLimit,
+			gasPrice, []byte{byte(vm.STOP)}), *signer, key)
+		require.NoError(t, err)
+		gen.AddTx(create)
+		for i, addr := range readers {
+			read, err := types.SignTx(types.NewTransaction(uint64(i+1), addr, uint256.NewInt(0),
+				readGasLimit, gasPrice, nil), *signer, key)
+			require.NoError(t, err)
+			gen.AddTx(read)
+		}
+	})
+	require.NoError(t, err)
+	for _, receipt := range pack.Receipts[0] {
+		require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
+	}
+	require.EqualValues(t, params.StateGasNewAccount, pack.TopBlock.GasUsed())
+	bal := pack.TopBlock.BlockAccessList()
+	require.NoError(t, bal.ValidateMaxItems(pack.TopBlock.GasLimit()))
+	for _, addr := range readers {
+		idx := slices.IndexFunc(bal, func(ac types.AccountChanges) bool { return ac.Address == addr })
+		require.NotEqual(t, -1, idx)
+		require.Len(t, bal[idx].StorageReads, slotsPerContract)
+	}
+	require.Greater(t, uint64(len(readers)*slotsPerContract*types.BalItemCost), readGasLimit)
+	require.NoError(t, m.InsertChain(pack))
 }
 
 func generateFullBALBlock(t *testing.T, config *chain.Config) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {

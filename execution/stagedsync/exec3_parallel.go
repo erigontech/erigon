@@ -2676,11 +2676,11 @@ func newBlockExec(block *types.Block, gasPool *protocol.GasPool, accessList type
 	}
 }
 
-func (be *blockExecutor) gasUsedSoFar() uint64 {
+func (be *blockExecutor) executionGasUsedSoFar() uint64 {
 	if be.gasPool == nil {
 		return 0
 	}
-	remaining := min(be.gasPool.ExecutionGasAvailable(), be.gasPool.StateGasAvailable())
+	remaining := be.gasPool.ExecutionGasAvailable()
 	if remaining >= be.blockGasLimit {
 		return 0
 	}
@@ -3242,7 +3242,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					be.declaredReadTracker.ObserveRead(addr.Value(), slot.Value())
 				}
 			}
-			if err := types.EarlyRejectCheck(be.blockGasLimit, be.gasUsedSoFar(), be.declaredReadTracker.Remaining()); err != nil {
+			if err := types.EarlyRejectCheck(be.blockGasLimit, be.executionGasUsedSoFar(), be.declaredReadTracker.Remaining()); err != nil {
 				return be.invalidBlockResult(fmt.Errorf("%w, block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.number(), txVersion.TxIndex, err)), nil
 			}
 
