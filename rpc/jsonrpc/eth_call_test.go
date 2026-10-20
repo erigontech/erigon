@@ -1092,6 +1092,9 @@ func TestGetProof(t *testing.T) {
 	maxGetProofRewindBlockCount := 1      // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
 	statecfg.EnableHistoricalCommitment() // enable commitment history to test historical proofs
 	m, bankAddr, contractAddr, receiverAddress := chainWithDeployedContract(t)
+	require.NoError(t, m.DB.Update(context.Background(), func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
 	cfg := &rpccfg.EthApiConfig{
 		GasCap:                      5000000,
 		FeeCap:                      ethconfig.Defaults.RPCTxFeeCap,
@@ -1412,6 +1415,44 @@ func TestGetProofGenesisPrunedCommitmentHistory(t *testing.T) {
 	require.ErrorIs(t, err, state.ErrPruned)
 }
 
+func TestGetProofWithoutCommitmentHistory(t *testing.T) {
+	m, bankAddr, _, _ := chainWithDeployedContract(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, false)
+	}))
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(1)))
+	require.ErrorIs(t, err, state.ErrPruned)
+	require.Nil(t, proof)
+
+	proof, err = api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)))
+	require.NoError(t, err)
+	require.NotNil(t, proof)
+}
+
+func TestGetProofCommitmentNotAtRequestedBlock(t *testing.T) {
+	previousSchema := statecfg.Schema
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+	cfg := statecfg.Schema.CommitmentDomain
+	cfg.Hist.HistoryDisabled = true
+	cfg.Hist.SnapshotsDisabled = true
+	statecfg.Schema.CommitmentDomain = cfg
+
+	m, bankAddr, _, _ := chainWithDeployedContract(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(1)))
+	require.ErrorIs(t, err, state.ErrPruned)
+	require.ErrorContains(t, err, "commitment trie for block 1")
+	require.Nil(t, proof)
+}
+
 // TestGetProofStorageKeyEncoding pins the storage-key echo format eth_getProof shares
 // with geth for keys of at most 32 bytes: a shorter key comes back canonicalized, a
 // full 32-byte key comes back verbatim.
@@ -1491,8 +1532,11 @@ func TestGetProofRequestShapes(t *testing.T) {
 	t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 	m, bankAddr, contractAddr, _ := chainWithDeployedContract(t)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	head := bnhPtr(rpc.BlockNumberOrHashWithNumber(6))
 
 	key := func(b byte) hexutil.Bytes {
@@ -2618,6 +2662,9 @@ func TestGetProofSystemContractSlotMatchesProof(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
 	ch, err := m.GenerateChain(3, func(int, *blockgen.BlockGen) {})
 	require.NoError(t, err)
+	require.NoError(t, m.DB.Update(context.Background(), func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
 	require.NoError(t, m.InsertChain(ch))
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, &rpccfg.EthApiConfig{GasCap: 5000000}, log.New())
 

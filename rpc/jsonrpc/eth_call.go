@@ -535,6 +535,13 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	sdCtx := domains.GetCommitmentContext()
 
 	if !isLatest {
+		commitmentHistory, err := api.commitmentHistoryEnabled(roTx)
+		if err != nil {
+			return nil, err
+		}
+		if !commitmentHistory {
+			return nil, fmt.Errorf("%w: eth_getProof for an earlier block requires commitment history, which this node does not keep: sync the node with --prune.include-commitment-history", state.ErrPruned)
+		}
 		// Get first txnum of blockNumber+1 to ensure that correct state root will be restored as of blockNumber has been executed
 		lastTxnInBlock, err := api._txNumReader.Min(ctx, roTx, blockNumber+1)
 		if err != nil {
@@ -549,8 +556,12 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		}
 
 		sdCtx.SetHistoryStateReader(roTx, lastTxnInBlock)
-		if _, _, err := domains.SeekCommitment(context.Background(), roTx); err != nil {
+		_, seekBlockNum, err := domains.SeekCommitment(context.Background(), roTx)
+		if err != nil {
 			return nil, err
+		}
+		if seekBlockNum != blockNumber {
+			return nil, fmt.Errorf("%w: commitment trie for block %d is at block %d", state.ErrPruned, blockNumber, seekBlockNum)
 		}
 	}
 
