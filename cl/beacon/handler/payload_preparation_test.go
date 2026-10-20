@@ -1731,25 +1731,30 @@ func TestPreparePayloadLoopSkipsSlotsTooFarAhead(t *testing.T) {
 	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
 	require.NoError(t, err)
 	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
 
 	// Before genesis the current slot clamps to zero, so the next slot can be hours out.
 	clock := eth_clock.NewMockEthereumClock(ctrl)
-	clock.EXPECT().GetCurrentSlot().Return(targetSlot - 1).AnyTimes()
-	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(time.Hour)).AnyTimes()
+	clock.EXPECT().GetCurrentSlot().Return(targetSlot - 1)
+	clock.EXPECT().GetSlotTime(targetSlot).DoAndReturn(func(uint64) time.Time {
+		cancel()
+		return time.Now().Add(time.Hour)
+	})
 	handler.ethClock = clock
 
 	engine := newPayloadBuildEngine(t, ctrl)
 	handler.engine = engine
+	counter := payloadPreparationOutcomes.WithLabelValues("too_early")
+	before := counter.GetValue()
 
-	ctx, cancel := context.WithTimeout(t.Context(), 250*time.Millisecond)
-	defer cancel()
 	done := handler.StartPayloadPreparation(ctx)
-	<-ctx.Done()
 	select {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("payload preparation did not stop after cancellation")
 	}
+	require.Equal(t, before+1, counter.GetValue())
 }
 
 func TestPreparePayloadLoopStandsOffWhileProducing(t *testing.T) {
@@ -1993,34 +1998,6 @@ func TestPreparePayloadLoopRecordsOutcome(t *testing.T) {
 	require.Equal(t, before+1, outcome.GetValue())
 }
 
-func TestPayloadPreparationCountsTooEarly(t *testing.T) {
-	config := payloadPreparationLoopConfig(1, 1, 2)
-	validatorParams := validator_params.NewValidatorParams()
-	validatorParams.SetFeeRecipient(0, common.Address{1})
-	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
-	clock.EXPECT().GetCurrentSlot().Return(config.SlotsPerEpoch)
-	ctx, cancel := context.WithCancel(t.Context())
-	clock.EXPECT().GetSlotTime(config.SlotsPerEpoch + 1).DoAndReturn(func(uint64) time.Time {
-		cancel()
-		return time.Now().Add(2 * time.Second)
-	})
-	handler := &ApiHandler{
-		logger:          log.Root(),
-		beaconChainCfg:  &config,
-		ethClock:        clock,
-		validatorParams: validatorParams,
-	}
-	counter := payloadPreparationOutcomes.WithLabelValues("too_early")
-	before := counter.GetValue()
-
-	handler.preparePayloadLoopWith(ctx, func(context.Context, preparationKey, *payloadPreparationScratch) (preparationKey, error) {
-		t.Fatal("too-early preparation reached state work")
-		return preparationKey{}, nil
-	})
-
-	require.Equal(t, before+1, counter.GetValue())
-}
-
 func TestPayloadPreparationCountsHeadWaits(t *testing.T) {
 	config := payloadPreparationLoopConfig(1, 1, 2)
 	currentSlot := config.SlotsPerEpoch
@@ -2092,22 +2069,6 @@ func TestPayloadPreparationPTCWaitCountsPendingOnce(t *testing.T) {
 	})
 
 	require.Equal(t, before+1, pending.GetValue())
-}
-
-func TestPayloadPreparationTryBeginRefusalCountsBusy(t *testing.T) {
-	store := mock_services.NewForkChoiceStorageMock(t)
-	finishImport := store.BeginPayloadImport(10)
-	defer finishImport()
-	handler := &ApiHandler{forkchoiceStore: store}
-	engine := newPayloadBuildEngine(t, gomock.NewController(t))
-	busy := payloadPreparationOutcomes.WithLabelValues("busy")
-	before := busy.GetValue()
-
-	_, err := handler.startPayloadBuildAttempt(t.Context(), engine, 10, 10, common.Hash{}, nil)
-	observePreparationOutcome(err)
-
-	require.ErrorIs(t, err, forkchoice.ErrPayloadImportInProgress)
-	require.Equal(t, before+1, busy.GetValue())
 }
 
 func TestPayloadPreparationExpiredAdmissionCountsLate(t *testing.T) {
@@ -2235,6 +2196,9 @@ func TestPayloadPreparationSeesImportAfterAdvisorySample(t *testing.T) {
 		return []byte{1}, nil
 	}
 	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	busy := payloadPreparationOutcomes.WithLabelValues("busy")
+	before := busy.GetValue()
 	var attemptErr error
 
 	handler.preparePayloadLoopWith(ctx, func(callCtx context.Context, key preparationKey, _ *payloadPreparationScratch) (preparationKey, error) {
@@ -2247,6 +2211,7 @@ func TestPayloadPreparationSeesImportAfterAdvisorySample(t *testing.T) {
 
 	require.ErrorIs(t, attemptErr, forkchoice.ErrPayloadImportInProgress)
 	require.False(t, started)
+	require.Equal(t, before+1, busy.GetValue())
 }
 
 func TestPayloadPreparationDiscardsImportInterruptedStartup(t *testing.T) {
