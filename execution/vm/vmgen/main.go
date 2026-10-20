@@ -75,6 +75,9 @@ func fastOps() []fastOp {
 		op("GT", "opGt", "GasFastestStep", 2, 1),
 		op("EQ", "opEq", "GasFastestStep", 2, 1),
 		op("AND", "opAnd", "GasFastestStep", 2, 1),
+		op("OR", "opOr", "GasFastestStep", 2, 1),
+		op("XOR", "opXor", "GasFastestStep", 2, 1),
+		op("NOT", "opNot", "GasFastestStep", 1, 1),
 		op("ISZERO", "opIszero", "GasFastestStep", 1, 1),
 		op("CALLVALUE", "opCallValue", "GasQuickStep", 0, 1),
 		{name: "MLOAD", execute: "opMload", gas: "GasFastestStep", pop: 1, push: 1, memorySize: "memoryMLoad", dynamicGas: "pureMemoryGascost", allocated: allocated32},
@@ -85,7 +88,7 @@ func fastOps() []fastOp {
 	for n := 3; n <= 32; n++ {
 		ops = append(ops, op(fmt.Sprintf("PUSH%d", n), "", "GasFastestStep", 0, 1))
 	}
-	for n := 1; n <= 8; n++ {
+	for n := 1; n <= 16; n++ {
 		ops = append(ops, op(fmt.Sprintf("DUP%d", n), "", "GasFastestStep", n, n+1))
 	}
 	for n := 1; n <= 4; n++ {
@@ -313,7 +316,7 @@ func fastSwitch(instructions []byte, ops []fastOp) string {
 		}
 		cond = append(cond, "gasLeft >= "+gas)
 		code := fmt.Sprintf("if %s {\ngasLeft -= %s\n%s\n}\n", strings.Join(cond, " && "), gas, inlineBody(instructions, *o))
-		// Ops with the same code share a case: each case deepens run's compare tree.
+		// Ops with the same code share a case.
 		if n := len(codes); n > 0 && codes[n-1] == code {
 			names[n-1] += ", " + o.name
 			continue

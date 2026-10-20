@@ -259,6 +259,30 @@ run:
 					pc++
 					continue run
 				}
+			case OR:
+				if sLen >= 2 && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					x, y := callContext.Stack.pop1Peek1()
+					y.Or(x, y)
+					pc++
+					continue run
+				}
+			case XOR:
+				if sLen >= 2 && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					x, y := callContext.Stack.pop1Peek1()
+					y.Xor(x, y)
+					pc++
+					continue run
+				}
+			case NOT:
+				if sLen >= 1 && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					x := callContext.Stack.peek()
+					x.Not(x)
+					pc++
+					continue run
+				}
 			case ISZERO:
 				if sLen >= 1 && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
@@ -389,6 +413,62 @@ run:
 				if sLen >= 8 && sLen < stackLimit && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
 					callContext.Stack.dup(7)
+					pc++
+					continue run
+				}
+			case DUP9:
+				if sLen >= 9 && sLen < stackLimit && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					callContext.Stack.dup(8)
+					pc++
+					continue run
+				}
+			case DUP10:
+				if sLen >= 10 && sLen < stackLimit && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					callContext.Stack.dup(9)
+					pc++
+					continue run
+				}
+			case DUP11:
+				if sLen >= 11 && sLen < stackLimit && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					callContext.Stack.dup(10)
+					pc++
+					continue run
+				}
+			case DUP12:
+				if sLen >= 12 && sLen < stackLimit && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					callContext.Stack.dup(11)
+					pc++
+					continue run
+				}
+			case DUP13:
+				if sLen >= 13 && sLen < stackLimit && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					callContext.Stack.dup(12)
+					pc++
+					continue run
+				}
+			case DUP14:
+				if sLen >= 14 && sLen < stackLimit && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					callContext.Stack.dup(13)
+					pc++
+					continue run
+				}
+			case DUP15:
+				if sLen >= 15 && sLen < stackLimit && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					callContext.Stack.dup(14)
+					pc++
+					continue run
+				}
+			case DUP16:
+				if sLen >= 16 && sLen < stackLimit && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					callContext.Stack.dup(15)
 					pc++
 					continue run
 				}

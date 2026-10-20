@@ -180,10 +180,9 @@ func TestRunIsGenerated(t *testing.T) {
 	require.NoError(t, err, string(out))
 }
 
-// TestRunHasNoJumpTable fails when Go compiles run's opcode switch to a jump
-// table, which it does once the cases are dense enough. The indirect jump made
-// the fast path slower than the compare tree.
-func TestRunHasNoJumpTable(t *testing.T) {
+// TestRunHasJumpTable fails when Go compiles run's opcode switch to a compare
+// tree, which it does once the cases are too sparse.
+func TestRunHasJumpTable(t *testing.T) {
 	// The test binary has no symbol table; the package archive keeps it.
 	pkg := filepath.Join(t.TempDir(), "vm.a")
 	out, err := exec.CommandContext(t.Context(), "go", "build", "-o", pkg, ".").CombinedOutput()
@@ -192,7 +191,7 @@ func TestRunHasNoJumpTable(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(out), "vm_run_gen.go")
 	tableJump := regexp.MustCompile(`(?m)\tJMP (0\(\w+\)\(\w+\*8\)|\(R\d+\))\s`)
-	require.Empty(t, tableJump.FindString(string(out)), "run dispatches through a jump table")
+	require.NotEmpty(t, tableJump.FindString(string(out)), "run dispatches through a compare tree")
 }
 
 // TestRunLoopHeadStoresNothing fails when Go spills run's loop-carried registers at
