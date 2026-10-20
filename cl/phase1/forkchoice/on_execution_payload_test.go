@@ -195,6 +195,11 @@ type commitmentFallbackForkGraph struct {
 	persistingEnvelopeForkGraph
 	blockReads atomic.Int32
 }
+type pendingCommitmentReadinessForkGraph struct {
+	dataAvailabilityForkGraph
+	header     *cltypes.BeaconBlockHeader
+	stateReads atomic.Int32
+}
 type dumpFailingForkGraph struct {
 	dataAvailabilityForkGraph
 	err error
@@ -265,6 +270,13 @@ func (g dataAvailabilityForkGraph) GetBlock(common.Hash) (*cltypes.SignedBeaconB
 	return g.block, g.block != nil
 }
 
+func (g dataAvailabilityForkGraph) GetHeader(common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	if g.state == nil || g.block == nil || g.block.Block == nil {
+		return nil, false
+	}
+	return &cltypes.BeaconBlockHeader{Slot: g.block.Block.Slot, Root: g.block.Block.StateRoot}, true
+}
+
 func (g *admissionYieldForkGraph) GetState(root common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
 	g.once.Do(func() { close(g.stateRead) })
 	return g.dataAvailabilityForkGraph.GetState(root, alwaysCopy)
@@ -280,6 +292,46 @@ func (g *commitmentFallbackForkGraph) GetBlock(root common.Hash) (*cltypes.Signe
 		return nil, false
 	}
 	return g.dataAvailabilityForkGraph.GetBlock(root)
+}
+
+func (g *pendingCommitmentReadinessForkGraph) GetState(root common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
+	g.stateReads.Add(1)
+	return g.dataAvailabilityForkGraph.GetState(root, alwaysCopy)
+}
+
+func (g *pendingCommitmentReadinessForkGraph) GetHeader(common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	return g.header, g.header != nil
+}
+
+func TestValidatePendingEnvelopeCommitmentsUsesHeaderAsReadinessMarker(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+
+	t.Run("block without header is not ready", func(t *testing.T) {
+		graph := &pendingCommitmentReadinessForkGraph{
+			dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
+		}
+		f := &ForkChoiceStore{beaconCfg: cfg, forkGraph: graph}
+
+		ready, err := f.validatePendingEnvelopeCommitments(envelope, false)
+
+		require.NoError(t, err)
+		require.False(t, ready)
+		require.Zero(t, graph.stateReads.Load())
+	})
+
+	t.Run("header is ready without state load", func(t *testing.T) {
+		graph := &pendingCommitmentReadinessForkGraph{
+			dataAvailabilityForkGraph: dataAvailabilityForkGraph{block: block},
+			header:                    &cltypes.BeaconBlockHeader{Root: block.Block.StateRoot},
+		}
+		f := &ForkChoiceStore{beaconCfg: cfg, forkGraph: graph}
+
+		ready, err := f.validatePendingEnvelopeCommitments(envelope, false)
+
+		require.NoError(t, err)
+		require.True(t, ready)
+		require.Zero(t, graph.stateReads.Load())
+	})
 }
 
 func (g *admissionYieldForkGraph) HasEnvelope(common.Hash) bool {
@@ -517,6 +569,11 @@ func TestEnvelopeGossipTryClaimSeesPersistedEnvelopeWhenAdmissionIsSaturated(t *
 	store.envelopeGossipAdmissions.Finish(token, false)
 }
 
+func (g replacingPendingForkGraph) GetHeader(common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	g.replace()
+	return nil, false
+}
+
 func (g replacingPendingForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
 	g.replace()
 	return nil, nil
@@ -569,6 +626,10 @@ func validIngressEnvelope(cfg *clparams.BeaconChainConfig, blockRoot common.Hash
 
 func (g pendingRetryForkGraph) HasEnvelope(root common.Hash) bool { return root == g.completed }
 func (g pendingRetryForkGraph) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	return nil, false
+}
+
+func (g pendingRetryForkGraph) GetHeader(common.Hash) (*cltypes.BeaconBlockHeader, bool) {
 	return nil, false
 }
 
