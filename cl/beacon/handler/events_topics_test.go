@@ -56,6 +56,7 @@ func TestEventStreamSubscribesToEveryTopicsValue(t *testing.T) {
 					a.emitters.State().SendHead(&beaconevents.HeadData{Slot: 7})
 					a.emitters.State().SendBlock(&beaconevents.BlockData{Slot: 7})
 					a.emitters.State().SendFinalizedCheckpoint(&beaconevents.FinalizedCheckpointData{Epoch: 1})
+					a.emitters.State().SendChainReorg(&beaconevents.ChainReorgData{Slot: 7})
 					time.Sleep(10 * time.Millisecond)
 				}
 			}()
@@ -67,12 +68,12 @@ func TestEventStreamSubscribesToEveryTopicsValue(t *testing.T) {
 			require.Equal(t, http.StatusOK, resp.StatusCode)
 			require.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))
 
-			seen := map[string]struct{}{}
+			seen := map[string]int{}
 			scanner := bufio.NewScanner(resp.Body)
-			for len(seen) < len(tc.want) && scanner.Scan() {
+			for slices.ContainsFunc(tc.want, func(topic string) bool { return seen[topic] < 2 }) && scanner.Scan() {
 				if topic, ok := strings.CutPrefix(scanner.Text(), "event: "); ok {
 					require.Contains(t, tc.want, topic)
-					seen[topic] = struct{}{}
+					seen[topic]++
 				}
 			}
 			require.Equal(t, tc.want, slices.Sorted(maps.Keys(seen)))
