@@ -307,6 +307,35 @@ func TestCheckpointStateStoredDuringFinalizationIsDropped(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestCheckpointStateStoreDelayedPastFinalizationIsDropped(t *testing.T) {
+	f := buildExAnteStore(t)
+	_, root := decodeDiffBlock(t, diffBlockc2Enc)
+	next := solid.Checkpoint{Epoch: f.JustifiedCheckpoint().Epoch + 1, Root: root}
+	graph := &blockingStateForkGraph{ForkGraph: f.forkGraph, root: root, release: make(chan struct{})}
+	f.forkGraph = graph
+	release := sync.OnceFunc(func() { close(graph.release) })
+	defer release()
+
+	built := make(chan error, 1)
+	go func() {
+		_, err := f.getCheckpointState(next)
+		built <- err
+	}()
+	require.Eventually(t, func() bool { return graph.calls.Load() == 1 }, 10*time.Second, time.Millisecond)
+
+	f.mu.Lock()
+	f.checkpointStatesMu.Lock()
+	release()
+	time.Sleep(500 * time.Millisecond)
+	f.updateCheckpoints(f.JustifiedCheckpoint(), solid.Checkpoint{Epoch: next.Epoch + 1, Root: root})
+	f.checkpointStatesMu.Unlock()
+	f.mu.Unlock()
+
+	require.NoError(t, <-built)
+	_, ok := f.checkpointStates.Load(next)
+	require.False(t, ok)
+}
+
 type blockingPruneForkGraph struct {
 	fork_graph.ForkGraph
 	started chan uint64
