@@ -31,9 +31,11 @@ const (
 
 // Broadcast returns b in every lane. In a loop over one fixed byte, hoist it and
 // call HasZero(x ^ pat): Go does not move the multiply out of the loop for you.
+// overflow_false_positive
 func Broadcast(b byte) uint64 { return swarLow * uint64(b) }
 
 // HasZero returns a nonzero value if any lane of x is zero, and 0 otherwise.
+// overflow_false_positive
 func HasZero(x uint64) uint64 { return (x - swarLow) &^ x & swarHigh }
 
 // HasByte returns a nonzero value if any lane of x equals b, and 0 otherwise.
@@ -43,4 +45,5 @@ func HasByte(x uint64, b byte) uint64 { return HasZero(x ^ Broadcast(b)) }
 // n must be at most 128. Above that only lanes in [n-128, 128) are reported: a
 // lane below n-128 wraps with its high bit clear, and the &^ x term drops every
 // lane at or above 128. So for n == 200 neither 0 nor 199 is reported.
+// overflow_false_positive
 func HasLess(x uint64, n byte) uint64 { return (x - Broadcast(n)) &^ x & swarHigh }
