@@ -687,6 +687,11 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", blockHash)
 		validationStatus = ExecutionStatusBadBlock
 		e.dropBadChain(blockHash, lvh)
+		if e.retainedBlocks != nil {
+			if err := e.retainSideBlocks(roTx, nil, 0); err != nil {
+				return ValidationResult{}, err
+			}
+		}
 		if err := purgeTx.Commit(); err != nil {
 			return ValidationResult{}, err
 		}

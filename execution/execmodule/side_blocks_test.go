@@ -136,6 +136,40 @@ func TestInvalidPayloadKeepsValidSiblings(t *testing.T) {
 	require.False(t, hasBad, "a rejected payload must not be retained")
 }
 
+func TestInvalidRetainedSideBlockIsDropped(t *testing.T) {
+	m, key, _ := newMetricsTester(t)
+	good := generateTransferBlocks(t, m, key, 1, 0x0b)[0]
+	bad := tamperBlockGasUsed(t, good, 21_000)
+	side := generateTransferBlocks(t, m, key, 1, 0x0c)[0]
+	winner := generateTransferBlocks(t, m, key, 1, 0x0a)[0]
+	_, err := m.InsertBlocks(t.Context(), []*types.Block{bad})
+	require.NoError(t, err)
+	insertAndValidateBlocks(t, m, side, winner)
+	updateForkChoiceTo(t, m, winner)
+
+	badHash, badNumber := bad.Hash(), bad.NumberU64()
+	has, err := m.ExecModule.HasBlock(t.Context(), &badHash, nil)
+	require.NoError(t, err)
+	require.True(t, has)
+
+	result, err := m.ValidateChain(t.Context(), bad.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, result.ValidationStatus)
+
+	header, err := m.ExecModule.GetHeader(t.Context(), &badHash, &badNumber)
+	require.NoError(t, err)
+	require.Nil(t, header)
+	has, err = m.ExecModule.HasBlock(t.Context(), &badHash, nil)
+	require.NoError(t, err)
+	require.False(t, has)
+	sideHash := side.Hash()
+	has, err = m.ExecModule.HasBlock(t.Context(), &sideHash, nil)
+	require.NoError(t, err)
+	require.True(t, has)
+	updateForkChoiceTo(t, m, side)
+	requireCanonicalWithTransactions(t, m, side)
+}
+
 func TestRetainedBlockAboveCommittedSequenceKeepsTransactions(t *testing.T) {
 	m, key, _ := newMetricsTester(t)
 	chainA := generateTransferBlocks(t, m, key, 2, 0x0a)
