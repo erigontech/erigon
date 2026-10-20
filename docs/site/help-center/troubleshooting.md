@@ -4,6 +4,8 @@ description: "Step-by-step diagnostic guides for the most frequent runtime and s
 sidebar_position: 3
 ---
 
+{/* llms-pinned-version: v3.7.1 and earlier */}
+
 # Troubleshooting
 
 ## Resilience and Data Integrity
@@ -20,7 +22,7 @@ When an issue arises, follow these steps to methodically diagnose and resolve th
 4. **Monitor System Resources:** Use `htop`, `top`, or `iostat` to monitor CPU, RAM, and disk I/O. This can help you identify a performance bottleneck. For a full monitoring dashboard, see [Creating a Dashboard](/fundamentals/creating-a-dashboard).
 5. **Look for OOM-kill events:** After an unexpected crash, always check your system logs for an "Out of Memory" killer event. This confirms if a memory issue caused the crash.
 6. **Perform a Simple Restart**: If the node is stalled, simply restart the service using `systemctl restart erigon`. Erigon's transactional database is designed to handle interruption gracefully.
-7. **Disable RPC/CL during Initial Sync**: If you are stalling during snapshot sync, try restarting without the [RPC daemon](/fundamentals/modules/rpc-daemon) or consensus client to reduce concurrent disk access, which is a bottleneck during the slowest stage (Blocks Execution).
+7. **Disable RPC/CL during Initial Sync**: If you are stalling during snapshot sync, try restarting without the [RPC Daemon](/fundamentals/modules/rpc-daemon) or consensus client to reduce concurrent disk access, which is a bottleneck during the slowest stage (Blocks Execution).
 8. **Check for Disk Space:** Regularly check your disk usage. A full disk will cause performance degradation and can lead to a node crash. See [Optimizing Storage](/fundamentals/optimizing-storage) for tips on reducing disk usage.
 9. **Verify Network Time:** Ensure your system's clock is synchronized. Incorrect time can cause issues with block propagation.
 10. **Check P2P Peer Connections:** Use `net_peerCount` or similar RPC methods to check if you have a healthy number of peers. A low count may indicate a network problem. See [Default Ports](/fundamentals/default-ports) to verify firewall rules allow P2P traffic.
@@ -76,13 +78,13 @@ The ports to allow inbound:
 | Snapshot downloader (BitTorrent) | 42069 | TCP+UDP  |
 | Caplin DISCV5 discovery          | 4000  | UDP      |
 | Caplin libp2p peering (TCP)      | 4001  | TCP      |
-| Caplin libp2p peering (QUIC)     | 4002  | UDP      |
+| Caplin libp2p peering (QUIC)     | 4002 (4001 in v3.7.1 and earlier) | UDP      |
 
 This table is not exhaustive — it lists what a default node needs. See [Default ports](/fundamentals/default-ports) for every port Erigon can open, including the opt-in Shutter port.
 
-The Caplin ports are its defaults (`--caplin.discovery.port`, `--caplin.discovery.tcpport`, and `--caplin.discovery.quicport`); change the rules to match if you override them. DISCV5 is UDP-only and runs on `4000`, TCP peering defaults to `4001`, and QUIC/UDP peering defaults to `4002`. If you run an **external** consensus client instead of Caplin, open the ports that client uses rather than the Caplin ones. Lighthouse, Teku and Nimbus default to `9000` TCP+UDP, and Lighthouse additionally uses `9001` UDP for QUIC; Prysm defaults to `13000` TCP and `12000` UDP. Check your client's own documentation rather than assuming `9000`.
+The Caplin ports are its defaults (`--caplin.discovery.port`, `--caplin.discovery.tcpport`, and `--caplin.discovery.quicport`); change the rules to match if you override them. DISCV5 is UDP-only and runs on `4000`, TCP peering defaults to `4001`, and QUIC/UDP peering defaults to `4002` (`4001` in v3.7.1 and earlier). If you run an **external** consensus client instead of Caplin, open the ports that client uses rather than the Caplin ones. Lighthouse, Teku and Nimbus default to `9000` TCP+UDP, and Lighthouse additionally uses `9001` UDP for QUIC; Prysm defaults to `13000` TCP and `12000` UDP. Check your client's own documentation rather than assuming `9000`.
 
-If specifically the QUIC port (`4002`) cannot be opened — for example a Docker or Kubernetes setup where only the TCP peering port was published — pass `--caplin.quic.disable` to fall back to TCP-only peering instead of leaving it unreachable. This does not help if DISCV5 discovery's UDP port (`4000`) is also blocked: Caplin needs that port regardless of whether QUIC is enabled.
+If specifically the QUIC port (`4002`) cannot be opened — for example a Docker or Kubernetes setup where only the TCP peering port was published — pass `--caplin.quic.disable` (not available in v3.7.1 and earlier) to fall back to TCP-only peering instead of leaving it unreachable. This does not help if DISCV5 discovery's UDP port (`4000`) is also blocked: Caplin needs that port regardless of whether QUIC is enabled.
 
 Without these, the node may appear to have peers (via the cloud dashboard) but will suffer poor block propagation. Configure Cloud firewalls in the Hetzner Cloud Console under **Firewalls** or via `hcloud firewall`; for dedicated servers the equivalent lives in the Robot panel under **Server → Firewall**.
 
