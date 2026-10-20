@@ -28,11 +28,13 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/program"
 )
 
 func TestBALSystemReadsAfterFullBlock(t *testing.T) {
@@ -46,6 +48,66 @@ func TestBALSystemReadsAfterFullBlock(t *testing.T) {
 				config.BuilderExitContract = new(common.HexToAddress("0x1004"))
 			}
 			m, pack := generateFullBALBlock(t, config)
+			require.NoError(t, m.InsertChain(pack))
+		})
+	}
+}
+
+func TestBALSystemCallExternalReadAfterFullBlock(t *testing.T) {
+	config := chain.AllProtocolChanges.Copy()
+	contracts := []struct {
+		name string
+		addr accounts.Address
+		code []byte
+	}{
+		{"withdrawal", config.GetWithdrawalRequestContract(), misc.WithdrawalRequestCode},
+		{"consolidation", config.GetConsolidationRequestContract(), misc.ConsolidationRequestCode},
+		{"builder deposit", config.GetBuilderDepositContract(), misc.BuilderDepositRequestCode},
+		{"builder exit", config.GetBuilderExitContract(), misc.BuilderExitRequestCode},
+	}
+	for _, contract := range contracts {
+		t.Run(contract.name, func(t *testing.T) {
+			key, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			sender := crypto.PubkeyToAddress(key.PublicKey)
+			burner := common.HexToAddress("0x1234")
+			reader := common.HexToAddress("0x5678")
+			genesis := &types.Genesis{
+				Config:   config,
+				GasLimit: 100_000,
+				Alloc: types.GenesisAlloc{
+					sender: {Balance: big.NewInt(common.Ether)},
+					burner: {Balance: new(big.Int), Code: []byte{0xfe}},
+					reader: {Balance: new(big.Int), Code: program.New().Push(0).Op(vm.SLOAD, vm.POP, vm.STOP).Bytes()},
+				},
+			}
+			for _, other := range contracts {
+				genesis.Alloc[other.addr.Value()] = types.GenesisAccount{Balance: new(big.Int), Code: other.code}
+			}
+			genesis.Alloc[contract.addr.Value()] = types.GenesisAccount{
+				Balance: new(big.Int),
+				Code:    program.New().StaticCall(nil, reader, 0, 0, 0, 0).Op(vm.POP, vm.STOP).Bytes(),
+			}
+			m := execmoduletester.New(t,
+				execmoduletester.WithGenesisSpec(genesis),
+				execmoduletester.WithKey(key),
+				execmoduletester.WithExperimentalBAL(),
+				execmoduletester.WithoutSystemContracts(),
+			)
+			pack, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
+				tx, err := types.SignTx(types.NewTransaction(0, burner, uint256.NewInt(0), genesis.GasLimit,
+					uint256.NewInt(m.Genesis.BaseFee().Uint64()*2), nil),
+					*types.LatestSignerForChainID(config.ChainID), key)
+				require.NoError(t, err)
+				gen.AddTx(tx)
+			})
+			require.NoError(t, err)
+			require.Equal(t, pack.TopBlock.GasLimit(), pack.TopBlock.GasUsed())
+			bal := pack.TopBlock.BlockAccessList()
+			require.NoError(t, bal.ValidateMaxItems(pack.TopBlock.GasLimit()))
+			idx := slices.IndexFunc(bal, func(ac types.AccountChanges) bool { return ac.Address == reader })
+			require.NotEqual(t, -1, idx)
+			require.Equal(t, []accounts.StorageKey{accounts.InternKey(common.Hash{})}, bal[idx].StorageReads)
 			require.NoError(t, m.InsertChain(pack))
 		})
 	}

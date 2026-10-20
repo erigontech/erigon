@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -33,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/execution/state"
@@ -2599,6 +2601,7 @@ type blockExecutor struct {
 
 	blockGasLimit       uint64
 	declaredReadTracker *types.DeclaredReadTracker
+	checkedRequestCode  bool
 
 	execFailed, execAborted []int
 
@@ -2685,6 +2688,34 @@ func (be *blockExecutor) executionGasUsedSoFar() uint64 {
 		return 0
 	}
 	return be.blockGasLimit - remaining
+}
+
+func (be *blockExecutor) checkDeclaredReadSafety(config *chain.Config, reader state.StateReader) error {
+	be.checkedRequestCode = true
+	if config.Aura != nil || !config.IsAmsterdam(be.block.Time()) {
+		be.declaredReadTracker = nil
+		return nil
+	}
+	for _, contract := range []struct {
+		addr accounts.Address
+		code []byte
+	}{
+		{config.GetWithdrawalRequestContract(), misc.WithdrawalRequestCode},
+		{config.GetConsolidationRequestContract(), misc.ConsolidationRequestCode},
+		{config.GetBuilderDepositContract(), misc.BuilderDepositRequestCode},
+		{config.GetBuilderExitContract(), misc.BuilderExitRequestCode},
+	} {
+		code, err := reader.ReadAccountCode(contract.addr)
+		if err != nil {
+			return err
+		}
+		// Nonstandard system calls may read other accounts without spending block gas.
+		if !bytes.Equal(code, contract.code) {
+			be.declaredReadTracker = nil
+			return nil
+		}
+	}
+	return nil
 }
 
 func (be *blockExecutor) number() uint64 { return be.block.NumberU64() }
@@ -3236,14 +3267,21 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 			}
 
-			reads := be.blockIO.ReadSet(txVersion.TxIndex)
-			for addr, slots := range reads.Storages() {
-				for slot := range slots {
-					be.declaredReadTracker.ObserveRead(addr.Value(), slot.Value())
+			if be.declaredReadTracker != nil && be.declaredReadTracker.Remaining() > 0 && !be.checkedRequestCode {
+				if err := be.checkDeclaredReadSafety(pe.cfg.chainConfig, stateReader); err != nil {
+					return nil, fmt.Errorf("check system contract code: %w", err)
 				}
 			}
-			if err := types.EarlyRejectCheck(be.blockGasLimit, be.executionGasUsedSoFar(), be.declaredReadTracker.Remaining()); err != nil {
-				return be.invalidBlockResult(fmt.Errorf("%w, block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.number(), txVersion.TxIndex, err)), nil
+			if be.declaredReadTracker != nil && be.declaredReadTracker.Remaining() > 0 {
+				reads := be.blockIO.ReadSet(txVersion.TxIndex)
+				for addr, slots := range reads.Storages() {
+					for slot := range slots {
+						be.declaredReadTracker.ObserveRead(addr.Value(), slot.Value())
+					}
+				}
+				if err := types.EarlyRejectCheck(be.blockGasLimit, be.executionGasUsedSoFar(), be.declaredReadTracker.Remaining()); err != nil {
+					return be.invalidBlockResult(fmt.Errorf("%w, block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.number(), txVersion.TxIndex, err)), nil
+				}
 			}
 
 			// Snapshot the finalized result before pushing — prevents
