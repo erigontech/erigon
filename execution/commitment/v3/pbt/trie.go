@@ -54,6 +54,7 @@ type Trie struct {
 	phaseBase              commitment.PatriciaContext
 	phaseReadMu            *sync.Mutex
 	phaseHook              func(phaseTask, *Op) error
+	joinHook               func(phaseTask, commitment.PatriciaContext) error
 	coreApplyHook          func(phaseTask, *Op) error
 	coreEncodeHook         func(phaseTask, []byte) error
 	coreActivityHook       func(bool)

@@ -36,11 +36,48 @@ type phaseContext struct {
 	records map[string][]byte
 	baseMu  *sync.Mutex
 	prefix  *eip8297.Bitpath
+	owners  []phaseOwner
+}
+
+type phaseOwner struct {
+	task   int
+	prefix eip8297.Bitpath
+}
+
+func phaseOwners(tasks []phaseTask, indexes []int) ([]phaseOwner, error) {
+	owners := make([]phaseOwner, len(indexes))
+	for i, index := range indexes {
+		prefix, err := taskSubtreePrefix(tasks[index])
+		if err != nil {
+			return nil, err
+		}
+		owners[i] = phaseOwner{task: index, prefix: prefix}
+	}
+	return owners, nil
+}
+
+func (c *phaseContext) checkOwner(key []byte) error {
+	if len(c.owners) == 0 {
+		return nil
+	}
+	path, err := eip8297.DecodeBitPath(key)
+	if err != nil {
+		return nil
+	}
+	for i := range c.owners {
+		if pathHasPrefix(&path, &c.owners[i].prefix) {
+			return fmt.Errorf("record %x is owned by task %d at %x", key, c.owners[i].task, eip8297.AppendBitPath(nil, &c.owners[i].prefix))
+		}
+	}
+	return nil
 }
 
 func (c *phaseContext) Branch(key []byte) ([]byte, kv.Step, error) {
 	if c.prefix != nil && !ownsRecordKey(key, c.prefix) {
 		return nil, 0, fmt.Errorf("record %x is above subtree prefix", key)
+	}
+	if err := c.checkOwner(key); err != nil {
+		return nil, 0, err
 	}
 	if data, ok := c.records[string(key)]; ok {
 		return bytes.Clone(data), 0, nil
@@ -59,6 +96,9 @@ func (c *phaseContext) Branch(key []byte) ([]byte, kv.Step, error) {
 func (c *phaseContext) PutBranch(key, data, prev []byte) error {
 	if c.prefix != nil && !ownsRecordKey(key, c.prefix) {
 		return fmt.Errorf("record %x is above subtree prefix", key)
+	}
+	if err := c.checkOwner(key); err != nil {
+		return err
 	}
 	current, ok := c.records[string(key)]
 	if !ok {
@@ -266,7 +306,7 @@ func (t *Trie) processParallelPhaseA(ctx context.Context, workers int, plan phas
 			if task.kind == phaseBucketSubtask || len(task.dependencies) == 0 {
 				result, err = t.runSubtreeTask(workerCtx, workerContext, task)
 			} else {
-				result, err = t.runBucketJoin(workerCtx, workerContext, task, results, ready)
+				result, err = t.runBucketJoin(workerCtx, workerContext, task, plan.tasks, results, ready)
 			}
 		case phaseChain:
 			result, err = t.runChainTask(workerCtx, workerContext, task, results, ready)
@@ -290,6 +330,14 @@ func (t *Trie) processParallelPhaseA(ctx context.Context, workers int, plan phas
 				if plan.tasks[index].kind == phaseChain {
 					key := string(eip8297.AppendBitPath(nil, &result.prefix))
 					changed[key] = *result
+				}
+			}
+			if round.owners, err = phaseOwners(plan.tasks, task.dependencies); err != nil {
+				return err
+			}
+			if t.joinHook != nil {
+				if err := t.joinHook(task, round); err != nil {
+					return err
 				}
 			}
 			t.coreTask = &task
@@ -319,7 +367,7 @@ func (t *Trie) processParallelPhaseA(ctx context.Context, workers int, plan phas
 }
 
 //nolint:gocritic
-func (t *Trie) runBucketJoin(workerCtx context.Context, workerContext commitment.PatriciaContext, task phaseTask, results []phaseBucketResult, ready []bool) (phaseBucketResult, error) {
+func (t *Trie) runBucketJoin(workerCtx context.Context, workerContext commitment.PatriciaContext, task phaseTask, tasks []phaseTask, results []phaseBucketResult, ready []bool) (phaseBucketResult, error) {
 	base := cmp.Or(workerContext, t.phaseBase)
 	local := t.newPhaseContext(base, nil)
 	bucketTrie, err := newBucketTrie(local, []byte(task.key))
@@ -343,6 +391,14 @@ func (t *Trie) runBucketJoin(workerCtx context.Context, workerContext commitment
 			childDeltas = append(childDeltas, delta)
 		}
 		changed[string(eip8297.AppendBitPath(nil, &result.prefix))] = result
+	}
+	if local.owners, err = phaseOwners(tasks, task.dependencies); err != nil {
+		return phaseBucketResult{}, err
+	}
+	if t.joinHook != nil {
+		if err := t.joinHook(task, local); err != nil {
+			return phaseBucketResult{}, err
+		}
 	}
 	if _, err := bucketTrie.processUpperOps(nil, changed); err != nil {
 		return phaseBucketResult{}, err

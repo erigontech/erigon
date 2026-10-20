@@ -276,14 +276,14 @@ flowchart LR
 - Modify: `execution/commitment/v3/pbt/parallel_upper.go`
 - Modify: `execution/commitment/v3/pbt/parallel_round_test.go`
 
-- [ ] write parity tests first:
+- [x] write parity tests first:
       - a round's drops empty one chain, so `normalize` collapses an upper row onto a changed sibling chain;
       - a bucket is emptied under a storage chain;
       - a split bucket loses all but one subtask
-- [ ] the global join's and each bucket join's contexts refuse `Branch` and `PutBranch` on keys owned by a task of
+- [x] the global join's and each bucket join's contexts refuse `Branch` and `PutBranch` on keys owned by a task of
       the plan. The check runs before the `records` lookup, and the error names the key and the owning task
-- [ ] write a test that the guard fires: a join hook forcing an owned-key read returns that error
-- [ ] run gates — must pass before Task 4
+- [x] write a test that the guard fires: a join hook forcing an owned-key read returns that error
+- [x] run gates — must pass before Task 4
 
 ### Task 4: One-pass plan over sorted ops
 
