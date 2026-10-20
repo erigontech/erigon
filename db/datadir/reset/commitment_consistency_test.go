@@ -246,6 +246,9 @@ func TestResetFollowsTheLoaderPastUnsupportedVersions(t *testing.T) {
 	})
 }
 
+// v1- and v1.0- parse to the same version, and startup renames the v1- file onto the v1.0- name the
+// manifest describes. That puts local bytes under a canonical name, which the downloader does not
+// re-hash once the file is complete, so the pair is unsafe.
 func TestResetTreatsALegacyTwinOfACanonicalFileAsLocal(t *testing.T) {
 	withOsRoot(t, func(root *os.Root) {
 		startEntries := []fsEntry{{Name: "snapshots/domain/v1-commitment.0-256.kv"}}
@@ -278,14 +281,17 @@ func TestResetIgnoresReversedStepRanges(t *testing.T) {
 	})
 }
 
+// The alias tie is decided by name, not by chance: the loader walks a sorted listing and keeps a
+// candidate only on a strictly greater version, and '-' sorts before '.'. So when the manifest
+// names the legacy spelling, the canonical file wins and the local twin never loads.
 func TestResetKeepsTheWinningAliasWhenTheCanonicalOneSortsFirst(t *testing.T) {
 	withOsRoot(t, func(root *os.Root) {
-		startEntries := []fsEntry{{Name: "snapshots/domain/v1.0-commitment.0-256.kv"}}
+		startEntries := []fsEntry{{Name: "snapshots/domain/v1.0-commitment.0-256.kv"}} // local twin, sorts second
 		makeEntries(t, startEntries, root)
 		r := makeTestingReset(t, startEntries, root, "", ".")
 		r.RemoveUnknown, r.RemoveLocal = false, false
 		r.PreverifiedSnapshots = preverified.SortedItems{
-			{Name: "domain/v1-commitment.0-256.kv"},
+			{Name: "domain/v1-commitment.0-256.kv"}, // canonical, sorts first, so it is the one opened
 			{Name: "domain/v1-accounts.0-256.kv"},
 		}
 		r.PreverifiedSnapshots.Sort()
