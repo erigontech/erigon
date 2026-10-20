@@ -579,20 +579,21 @@ func TestValidateRead_PriorAccountCreation_DetectedViaIncarnationPath(t *testing
 	require.Equal(t, VersionInvalid, vm.ValidateVersion(1, io, validateEqualVersion, true, false, false, ""))
 }
 
+// With no newer nonce write, the recorded and current versions still match.
+// Self-destruct must invalidate the nonzero nonce read even without a revival.
 func TestValidateRead_SDStaleness_InvalidatesPreDestructRead(t *testing.T) {
 	t.Parallel()
 	addr := getAddress(77)
 
 	vm := NewVersionMap(nil)
-	writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(1_000), true)
+	vm.WriteNonce(addr, Version{TxIndex: 0}, 1, true)
 	writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2, Incarnation: 0}, true, true)
-	vm.WriteBalance(addr, Version{TxIndex: 2}, uint256.Int{}, true)
 
 	io := NewVersionedIO(5)
 	rs := ReadSet{}
-	rs.SetBalance(addr, VersionedRead[uint256.Int]{
+	rs.SetNonce(addr, VersionedRead[uint64]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 0, Incarnation: 0}},
-		Val:        *uint256.NewInt(1_000),
+		Val:        1,
 	})
 	io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
 
