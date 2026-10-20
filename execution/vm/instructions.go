@@ -22,7 +22,9 @@ package vm
 import (
 	"fmt"
 	"math"
+	"slices"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -137,8 +139,26 @@ func opExp(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		} else {
 			exponent.Clear()
 		}
+	case base[0]&base[1]&base[2]&base[3] == math.MaxUint64:
+		if exponent[0]&1 == 0 {
+			exponent.SetOne()
+		} else {
+			exponent.SetAllOne()
+		}
 	default:
-		exponent.Exp(base, exponent)
+		if base.IsUint64() && exponent.LtUint64(64) && uint64(base.BitLen())*exponent.Uint64() <= 64 {
+			result, factor, power := uint64(1), base.Uint64(), exponent.Uint64()
+			for power != 0 {
+				if power&1 != 0 {
+					result *= factor
+				}
+				factor *= factor
+				power >>= 1
+			}
+			exponent.SetUint64(result)
+		} else {
+			exponent.Exp(base, exponent)
+		}
 	}
 	return pc, nil, nil
 }
@@ -367,9 +387,21 @@ func opKeccak256(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 	return pc, nil, nil
 }
 
+func (ctx *CallContext) addressWord(index addressWordIndex, address accounts.Address) *uint256.Int {
+	if !ctx.addressWordsSet[index] {
+		ctx.fillAddressWord(index, address)
+	}
+	return &ctx.addressWords[index]
+}
+
+func (ctx *CallContext) fillAddressWord(index addressWordIndex, address accounts.Address) {
+	value := address.Value()
+	ctx.addressWords[index].SetBytes(value[:])
+	ctx.addressWordsSet[index] = true
+}
+
 func opAddress(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	addrVal := scope.Contract.Address().Value()
-	scope.Stack.pushRef().SetBytes(addrVal[:])
+	*scope.Stack.pushRef() = *scope.addressWord(addressWordSelf, scope.Contract.Address())
 	return pc, nil, nil
 }
 
@@ -387,22 +419,12 @@ func opBalance(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 }
 
 func opOrigin(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if origin := evm.Origin; origin.IsNil() {
-		scope.Stack.pushRef().Clear()
-	} else {
-		originVal := origin.Value()
-		scope.Stack.pushRef().SetBytes(originVal[:])
-	}
+	*scope.Stack.pushRef() = *scope.addressWord(addressWordOrigin, evm.Origin)
 	return pc, nil, nil
 }
 
 func opCaller(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if caller := scope.Contract.Caller(); caller.IsNil() {
-		scope.Stack.pushRef().Clear()
-	} else {
-		callerValue := caller.Value()
-		scope.Stack.pushRef().SetBytes(callerValue[:])
-	}
+	*scope.Stack.pushRef() = *scope.addressWord(addressWordCaller, scope.Contract.Caller())
 	return pc, nil, nil
 }
 
@@ -680,12 +702,7 @@ func stBlockhash(_ uint64, scope *CallContext) string {
 }
 
 func opCoinbase(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if coinbase := evm.Context.Coinbase; coinbase.IsNil() {
-		scope.Stack.pushRef().Clear()
-	} else {
-		coinbaseValue := coinbase.Value()
-		scope.Stack.pushRef().SetBytes(coinbaseValue[:])
-	}
+	*scope.Stack.pushRef() = *scope.addressWord(addressWordCoinbase, evm.Context.Coinbase)
 	return pc, nil, nil
 }
 
@@ -808,7 +825,11 @@ func opJump(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		return pc, nil, errStopToken
 	}
 	pos := scope.Stack.pop()
-	if !scope.Contract.analysedJumpdest(pos) && !scope.Contract.validJumpdest(pos) {
+	valid := scope.Contract.analysedJumpdest(pos)
+	if !valid {
+		valid = scope.Contract.validJumpdest(pos)
+	}
+	if !valid {
 		return pc, nil, ErrInvalidJump
 	}
 	// pc will be increased by the interpreter loop
@@ -828,7 +849,11 @@ func opJumpi(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if cond.IsZero() {
 		return pc, nil, nil
 	}
-	if !scope.Contract.analysedJumpdest(pos) && !scope.Contract.validJumpdest(pos) {
+	valid := scope.Contract.analysedJumpdest(pos)
+	if !valid {
+		valid = scope.Contract.validJumpdest(pos)
+	}
+	if !valid {
 		return pc, nil, ErrInvalidJump
 	}
 	return pos.Uint64() - 1, nil, nil // pc will be increased by the interpreter loop
@@ -962,7 +987,7 @@ func stCreate(_ uint64, scope *CallContext) string {
 		value  = stack.data[stack.top-1]
 		offset = stack.data[stack.top-2]
 		size   = stack.data[stack.top-3]
-		input  = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
+		input  = scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
 	)
 
 	return fmt.Sprintf("%s %d %x %d", CREATE.String(), &value, input, &scope.gas)
@@ -1090,7 +1115,7 @@ func stCreate2(_ uint64, scope *CallContext) string {
 		endowment    = stack.data[stack.top-1]
 		offset, size = stack.data[stack.top-2], stack.data[stack.top-3]
 		salt         = stack.data[stack.top-4]
-		input        = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
+		input        = scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
 	)
 
 	return fmt.Sprintf("%s %d %d %x %d", CREATE2.String(), &endowment, &salt, input, &scope.gas)
@@ -1285,15 +1310,37 @@ func stStaticCall(_ uint64, scope *CallContext) string {
 	return fmt.Sprintf("%s %x %x", STATICCALL.String(), toAddr, args)
 }
 
+func (evm *EVM) output(mem *Memory, offset, size uint64) []byte {
+	if buf := evm.outputBuffer(size); buf != nil && size != 0 {
+		*buf = append((*buf)[:0], mem.GetPtr(offset, size)...)
+		return slices.Clip(*buf)
+	}
+	return mem.GetCopy(offset, size)
+}
+
+// outputBuffer returns where the current frame's output goes, or nil for a fresh copy.
+// Tracers keep nested outputs, and a buffer that outgrows the cap is not kept.
+func (evm *EVM) outputBuffer(size uint64) *[]byte {
+	if evm.depth == 1 {
+		return evm.txOutput
+	}
+	if evm.depth >= len(evm.outputs) || size > uint64(64*datasize.KB) || evm.config.Tracer != nil {
+		return nil
+	}
+	if evm.outputs == nil {
+		evm.outputs = new([16][]byte)
+	}
+	return &evm.outputs[evm.depth]
+}
+
 func opReturn(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	offset, size := scope.Stack.pop2Uint64()
-	ret := scope.Memory.GetCopy(offset, size)
-	return pc, ret, errStopToken
+	return pc, evm.output(&scope.Memory, offset, size), errStopToken
 }
 
 func opRevert(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	offset, size := scope.Stack.pop2Uint64()
-	ret := scope.Memory.GetCopy(offset, size)
+	ret := evm.output(&scope.Memory, offset, size)
 	evm.returnData = ret
 	return pc, ret, ErrExecutionReverted
 }
@@ -1508,14 +1555,15 @@ func makeLog(size int) executionFunc {
 			return pc, nil, nil
 		}
 		mem := scope.Memory.GetPtr(mStart, mSize)
-		log := ibs.AllocLog(scope.Contract.Address().Value(), size, len(mem))
+		log := ibs.AllocLog(scope.Contract.Address().Value(), size, 0)
 		// This is a non-consensus field, but assigned here because
 		// execution/state doesn't know the current block number.
 		log.BlockNumber = hexutil.Uint64(evm.Context.BlockNumber)
 		for i := range size {
 			log.Topics[i] = stack.pop().Bytes32()
 		}
-		copy(log.Data, mem)
+		// Append fills a new buffer without zeroing it before the copy.
+		log.Data = append(log.Data, mem...)
 		ibs.NotifyLog(log)
 		return pc, nil, nil
 	}

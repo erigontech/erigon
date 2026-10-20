@@ -19,11 +19,14 @@ package gossip
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -37,11 +40,13 @@ import (
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/p2p"
 	serviceintf "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
+	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 // PeerBanner is an interface for banning misbehaving peers.
@@ -52,7 +57,10 @@ type PeerBanner interface {
 // minPublishQueueSize is the floor for the background-publish queue
 // capacity, used when a chain config's sync committee is smaller than this
 // (e.g. the minimal preset).
-const minPublishQueueSize = 64
+const (
+	minPublishQueueSize = 64
+	peerBanQueueSize    = 256
+)
 
 // publishQueueSizeFor sizes the background-publish queue to hold at least
 // one full sync-committee-sized burst without dropping, when the queue
@@ -117,6 +125,15 @@ type publishJob struct {
 	logCtx []any
 }
 
+type peerBan struct {
+	banner PeerBanner
+	pid    string
+}
+
+type topicForkDigestSetter interface {
+	SetTopicForkDigest(common.Bytes4)
+}
+
 // GossipManager is responsible for managing the gossip subscriptions and publications
 // making sure that this module is simple and don't depend on network services pkg
 type GossipManager struct {
@@ -133,8 +150,10 @@ type GossipManager struct {
 	activeIndicies uint64
 	subscriptions  *TopicSubscriptions
 	subscribeAll   bool
+	localNodeID    atomic.Pointer[enode.ID]
 
 	publishQueue chan publishJob
+	peerBanQueue chan peerBan
 	// nowFunc returns the current time for expiry checks; time.Now unless
 	// overridden in tests.
 	nowFunc func() time.Time
@@ -181,6 +200,7 @@ func NewGossipManager(
 		subscribeAll:       subscribeAll,
 		activeIndicies:     activeIndicies,
 		publishQueue:       make(chan publishJob, publishQueueSizeFor(beaconConfig)),
+		peerBanQueue:       make(chan peerBan, peerBanQueueSize),
 		nowFunc:            time.Now,
 		workerDone:         make(chan struct{}),
 		lifetimeCtx:        cctx,
@@ -190,6 +210,7 @@ func NewGossipManager(
 	go gm.observeBandwidth(cctx, maxInboundTrafficPerPeer, maxOutboundTrafficPerPeer, adaptableTrafficRequirements)
 	go gm.goCheckForkAndResubscribe(cctx)
 	go gm.publishWorker(cctx)
+	go gm.runPeerBans(cctx)
 	//gm.stats.goPrintStats(cctx)
 	return gm
 }
@@ -197,6 +218,11 @@ func NewGossipManager(
 // SetPeerBanner sets the peer banner used to ban peers that fail message verification.
 func (g *GossipManager) SetPeerBanner(pb PeerBanner) {
 	g.peerBanner = pb
+}
+
+func (g *GossipManager) SetLocalNodeID(nodeID enode.ID) {
+	g.localNodeID.Store(&nodeID)
+	g.subscribePersistentAttestationSubnets()
 }
 
 // Close gracefully shuts down the GossipManager and all its goroutines.
@@ -232,6 +258,18 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 		if name == "" {
 			return pubsub.ValidationReject
 		}
+		digestBytes, err := hex.DecodeString(strings.Split(topic, "/")[2])
+		if err != nil || len(digestBytes) != len(common.Bytes4{}) {
+			g.stats.addIgnore(name)
+			return pubsub.ValidationIgnore
+		}
+		var forkDigest common.Bytes4
+		copy(forkDigest[:], digestBytes)
+		version, err := g.ethClock.StateVersionByForkDigest(forkDigest)
+		if err != nil {
+			g.stats.addIgnore(name)
+			return pubsub.ValidationIgnore
+		}
 
 		// check if the message satisfies the extra conditions
 		for _, condition := range conditions {
@@ -248,18 +286,20 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 			g.stats.addReject(name)
 			return pubsub.ValidationReject
 		}
-		msgData, err := utils.DecompressSnappy(msgData, true)
+		msgData, err = utils.DecompressSnappy(msgData, true)
 		if err != nil {
 			log.Debug("[GossipManager] reject decompress message", "topic", name, "err", err)
 			g.stats.addReject(name)
 			return pubsub.ValidationReject
 		}
-		version := g.beaconConfig.GetCurrentStateVersion(g.ethClock.GetCurrentEpoch())
 		msgObj, err := service.DecodeGossipMessage(pid, msgData, version)
 		if err != nil {
 			log.Debug("[GossipManager] reject decode message", "topic", name, "err", err)
 			g.stats.addReject(name)
 			return pubsub.ValidationReject
+		}
+		if message, ok := msgObj.(topicForkDigestSetter); ok {
+			message.SetTopicForkDigest(forkDigest)
 		}
 
 		// process msg
@@ -283,8 +323,12 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 		} else if err != nil {
 			log.Warn("[GossipManager] reject message", "topic", name, "err", err, "peer", pid)
 			g.stats.addReject(name)
-			if g.peerBanner != nil {
-				g.peerBanner.BanPeer(string(pid))
+			if banner := g.peerBanner; banner != nil {
+				select {
+				case g.peerBanQueue <- peerBan{banner: banner, pid: pid.String()}:
+				default:
+					log.Debug("[GossipManager] peer ban queue full, dropping ban", "peer", pid)
+				}
 			}
 			return pubsub.ValidationReject
 		}
@@ -294,6 +338,26 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 		g.stats.addAccept(name)
 		return pubsub.ValidationAccept
 	}
+}
+
+func (g *GossipManager) runPeerBans(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ban := <-g.peerBanQueue:
+			g.runPeerBan(ban)
+		}
+	}
+}
+
+func (g *GossipManager) runPeerBan(ban peerBan) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error("[GossipManager] panic banning peer", "peer", ban.pid, "err", r)
+		}
+	}()
+	ban.banner.BanPeer(ban.pid)
 }
 
 func (g *GossipManager) registerGossipService(service serviceintf.Service[any], conditions ...ConditionFunc) (subscribed, expired int, err error) {
@@ -334,8 +398,42 @@ func (g *GossipManager) registerGossipService(service serviceintf.Service[any], 
 		}
 		log.Debug("[GossipManager] registered topic", "topic", topic)
 	}
+	g.subscribeUpcomingProposerPreferences()
+	g.subscribePersistentAttestationSubnets()
 	err = nil
 	return
+}
+
+func (g *GossipManager) subscribePersistentAttestationSubnets() {
+	if g.subscribeAll {
+		return
+	}
+	nodeID := g.localNodeID.Load()
+	if nodeID == nil {
+		return
+	}
+	epoch := g.ethClock.GetCurrentEpoch()
+	persistentSubnets, err := subnets.ComputeSubscribedSubnets(g.beaconConfig, g.networkConfig, *nodeID, epoch)
+	if err != nil {
+		log.Warn("[GossipManager] failed to compute persistent attestation subnets", "err", err)
+		return
+	}
+	rotationEpoch := subnets.SubscribedSubnetsRotationEpoch(*nodeID, epoch)
+	expiry := g.ethClock.GetSlotTime(rotationEpoch*g.beaconConfig.SlotsPerEpoch + 1)
+	for _, topic := range g.subscriptions.AllTopics() {
+		name := extractTopicName(topic)
+		if !gossip.IsTopicBeaconAttestation(name) {
+			continue
+		}
+		subnet := extractSubnetIndexByGossipTopic(name)
+		if subnet < 0 || !slices.Contains(persistentSubnets, uint64(subnet)) {
+			continue
+		}
+		if err := g.subscriptions.SubscribeWithExpiry(topic, expiry); err != nil {
+			log.Warn("[GossipManager] failed to subscribe persistent attestation subnet", "topic", topic, "err", err)
+		}
+	}
+	g.p2p.SetENRAttSubnets(persistentSubnets)
 }
 
 func (g *GossipManager) defaultExpiryForTopic(name string) time.Time {
@@ -366,18 +464,25 @@ func (g *GossipManager) SubscribeWithExpiry(name string, expiry time.Time) error
 	return nil
 }
 
+func (g *GossipManager) ExpectedAttestations(window time.Duration, activeValidators uint64) uint64 {
+	slotDuration := time.Duration(g.beaconConfig.SecondsPerSlot) * time.Second
+	slotBursts := uint64((window + slotDuration - 1) / slotDuration)
+	return g.subscriptions.subscribedAttestationSubnetCount() * activeValidators * slotBursts /
+		(g.beaconConfig.SlotsPerEpoch * g.networkConfig.AttestationSubnetCount)
+}
+
 func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) error {
 	forkDigest, err := g.ethClock.CurrentForkDigest()
 	if err != nil {
 		return err
 	}
-	return g.publishToDigest(ctx, forkDigest, name, data)
+	return g.PublishToForkDigest(ctx, forkDigest, name, data)
 }
 
-func (g *GossipManager) publishToDigest(ctx context.Context, forkDigest common.Bytes4, name string, data []byte) error {
+func (g *GossipManager) PublishToForkDigest(ctx context.Context, forkDigest common.Bytes4, name string, data []byte) error {
 	compressedData := utils.CompressSnappy(data)
 	topic := composeTopic(forkDigest, name)
-	topicHandle := g.subscriptions.Get(topic)
+	topicHandle := g.subscriptions.GetTopic(topic)
 	if topicHandle == nil {
 		return fmt.Errorf("topic not found: %s", topic)
 	}
@@ -392,7 +497,7 @@ func (g *GossipManager) publishToDigest(ctx context.Context, forkDigest common.B
 	}
 	// Note: before publishing the message to the network, Publish() internally runs the validator function.
 	// Removed MinTopicSize(1) - don't fail if no peers on subnet, message will propagate when peers join
-	return topicHandle.topic.Publish(ctx, compressedData)
+	return topicHandle.Publish(ctx, compressedData)
 }
 
 // PublishBackground queues data for asynchronous publish to the given
@@ -477,7 +582,7 @@ func (g *GossipManager) runPublishJob(ctx context.Context, job publishJob) {
 		publishOutcomeCounter.WithLabelValues(job.name, "expired").Inc()
 		return
 	}
-	if err := g.publishToDigest(ctx, job.forkDigest, job.name, job.data); err != nil {
+	if err := g.PublishToForkDigest(ctx, job.forkDigest, job.name, job.data); err != nil {
 		fields := append([]any{"topic", job.name, "err", err}, job.logCtx...)
 		log.Warn("[GossipManager] failed to publish message to gossip", fields...)
 		publishOutcomeCounter.WithLabelValues(job.name, "publish_error").Inc()
@@ -507,6 +612,9 @@ func (g *GossipManager) goCheckForkAndResubscribe(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
+
+		g.subscribeUpcomingProposerPreferences()
+		g.subscribePersistentAttestationSubnets()
 
 		// compute upcoming ForkDigest
 		epoch := g.ethClock.GetEpochAtSlot(g.ethClock.GetCurrentSlot() + slotLookahead)
@@ -551,18 +659,52 @@ func (g *GossipManager) goCheckForkAndResubscribe(ctx context.Context) {
 	}
 }
 
-func (g *GossipManager) subscribeUpcomingTopics(digest common.Bytes4) error {
+func (g *GossipManager) subscribeUpcomingProposerPreferences() {
+	// Preferences are sent up to one epoch ahead: join the next epoch's digest and,
+	// because the ticker is not slot-aligned, the digest one epoch and two slots ahead,
+	// so that it is joined at least a slot before preferences for its epoch are accepted.
+	forkDigest, err := g.ethClock.CurrentForkDigest()
+	if err != nil {
+		log.Warn("[GossipManager] failed to get current fork digest for proposer preferences", "err", err)
+		return
+	}
+	currentSlot := g.ethClock.GetCurrentSlot()
+	preferencesEpochs := [...]uint64{
+		g.ethClock.GetEpochAtSlot(currentSlot) + 1,
+		g.ethClock.GetEpochAtSlot(currentSlot + g.beaconConfig.SlotsPerEpoch + 2),
+	}
+	for _, preferencesEpoch := range preferencesEpochs {
+		preferencesForkDigest, err := g.ethClock.ComputeForkDigest(preferencesEpoch)
+		if err != nil {
+			log.Warn("[GossipManager] failed to compute proposer preferences fork digest", "err", err)
+		} else if preferencesForkDigest != forkDigest {
+			if err := g.subscribeUpcomingTopics(preferencesForkDigest, gossip.TopicNameProposerPreferences); err != nil {
+				log.Warn("[GossipManager] failed to subscribe upcoming proposer preferences topic", "err", err)
+			}
+		}
+	}
+}
+
+func (g *GossipManager) subscribeUpcomingTopics(digest common.Bytes4, names ...string) error {
 	allTopics := g.subscriptions.AllTopics()
 	for _, oldTopic := range allTopics {
 		// replace fork digest with new one
 		name := extractTopicName(oldTopic)
-		if name == "" {
+		if name == "" || len(names) > 0 && !slices.Contains(names, name) {
+			continue
+		}
+		newTopic := composeTopic(digest, name)
+		if newTopic == oldTopic {
 			continue
 		}
 		prevTopicHandle := g.subscriptions.Get(oldTopic)
-		// register and subscribe new newTopic
-		newTopic := composeTopic(digest, name)
-		if newTopic == oldTopic {
+		if prevTopicHandle == nil {
+			continue
+		}
+		if g.subscriptions.Get(newTopic) != nil {
+			if err := g.subscriptions.SubscribeWithExpiry(newTopic, prevTopicHandle.expiry); err != nil && !errors.Is(err, ErrExpiryInThePast) {
+				return err
+			}
 			continue
 		}
 		topicHandle, err := g.p2p.Pubsub().Join(newTopic)

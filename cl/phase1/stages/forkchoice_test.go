@@ -2,27 +2,227 @@ package stages
 
 import (
 	"context"
+	"math"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
+	network2 "github.com/erigontech/erigon/cl/phase1/network"
+	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/validator/attestation_producer"
+	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
+
+type pausingHeadView struct {
+	synced_data.SyncedData
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *pausingHeadView) ViewHeadState(fn synced_data.ViewHeadStateFn) error {
+	return s.SyncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		close(s.entered)
+		<-s.release
+		return fn(headState)
+	})
+}
+
+type statusSentinel struct {
+	sentinelproto.SentinelClient
+}
+
+func (*statusSentinel) SetStatus(context.Context, *sentinelproto.Status, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	return &sentinelproto.EmptyMessage{}, nil
+}
+
+func (*statusSentinel) PeersInfo(context.Context, *sentinelproto.PeersInfoRequest, ...grpc.CallOption) (*sentinelproto.PeersInfoResponse, error) {
+	return &sentinelproto.PeersInfoResponse{}, nil
+}
+
+type noOpAttestationDataProducer struct {
+	attestation_producer.AttestationDataProducer
+}
+
+func (noOpAttestationDataProducer) ProduceAndCacheAttestationData(kv.Tx, *state.CachingBeaconState, common.Hash, uint64) (solid.AttestationData, error) {
+	return solid.AttestationData{}, nil
+}
+
+type lockOrderFixture struct {
+	cfg        *Cfg
+	syncedData *synced_data.SyncedDataManager
+	headState  *state.CachingBeaconState
+	headRoot   common.Hash
+	view       *pausingHeadView
+}
+
+func newLockOrderFixture(t *testing.T, slot uint64) lockOrderFixture {
+	t.Helper()
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.GloasForkEpoch = math.MaxUint64
+	genesisTime := uint64(time.Now().Unix()) - slot*beaconCfg.SecondsPerSlot
+	clock := eth_clock.NewEthereumClock(genesisTime, common.Hash{}, &beaconCfg)
+	headState := state.New(&beaconCfg)
+	headState.SetGenesisTime(genesisTime)
+	require.NoError(t, headState.SetSlot(slot))
+	headState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: slot})
+
+	manager := synced_data.NewSyncedDataManager(&beaconCfg, true)
+	emitter := beaconevents.NewEventEmitter()
+	graph, err := fork_graph.NewForkGraphDisk(
+		headState,
+		manager,
+		afero.NewMemMapFs(),
+		beacon_router_configuration.RouterConfiguration{},
+	)
+	require.NoError(t, err)
+	store, err := forkchoice.NewForkChoiceStore(
+		clock,
+		headState,
+		nil,
+		pool.NewOperationsPool(&beaconCfg),
+		graph,
+		emitter,
+		manager,
+		nil,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(),
+		validator_params.NewValidatorParams(),
+		false,
+		nil,
+	)
+	require.NoError(t, err)
+	headRoot := graph.AnchorRoot()
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(headState, headRoot))
+
+	viewEntered := make(chan struct{})
+	releaseView := make(chan struct{})
+	pausedView := &pausingHeadView{
+		SyncedData: manager,
+		entered:    viewEntered,
+		release:    releaseView,
+	}
+	return lockOrderFixture{
+		cfg: &Cfg{
+			rpc:        rpc.NewBeaconRpcP2P(t.Context(), &statusSentinel{}, &beaconCfg, clock, headState),
+			ethClock:   clock,
+			beaconCfg:  &beaconCfg,
+			forkChoice: store,
+			syncedData: pausedView,
+			emitter:    emitter,
+		},
+		syncedData: manager,
+		headState:  headState,
+		headRoot:   headRoot,
+		view:       pausedView,
+	}
+}
+
+func requireLockOrderOperationCompletes(t *testing.T, fixture lockOrderFixture, operationDone <-chan error) {
+	t.Helper()
+	select {
+	case err := <-operationDone:
+		// An operation that never takes the synced-data lock cannot invert the order.
+		require.NoError(t, err)
+		return
+	case <-fixture.view.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("operation neither completed nor entered the synced head-state view")
+	}
+
+	writerDone := make(chan error, 1)
+	go func() {
+		writerDone <- fixture.syncedData.OnHeadStateWithBlockRoot(fixture.headState, fixture.headRoot)
+	}()
+	time.Sleep(250 * time.Millisecond)
+
+	slashingDone := make(chan error, 1)
+	go func() {
+		slashingDone <- fixture.cfg.forkChoice.OnAttesterSlashing(cltypes.NewAttesterSlashing(clparams.Phase0Version), true)
+	}()
+	select {
+	case err := <-slashingDone:
+		t.Fatalf("lock-order setup failed: attester slashing completed before the queued writer: %v", err)
+	case <-time.After(250 * time.Millisecond):
+	}
+
+	close(fixture.view.release)
+	select {
+	case err := <-operationDone:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("operation deadlocked: synced-data read lock waited for fork choice while fork choice waited behind a queued synced-data writer")
+	}
+	require.NoError(t, <-writerDone)
+	<-slashingDone
+}
+
+func TestComputeForkChoiceDoesNotInvertSyncedDataLockOrder(t *testing.T) {
+	fixture := newLockOrderFixture(t, 0)
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), fixture.cfg)
+		done <- err
+	}()
+
+	requireLockOrderOperationCompletes(t, fixture, done)
+}
+
+func TestComputeForkChoiceFallsBackWithoutSyncedHeadState(t *testing.T) {
+	fixture := newLockOrderFixture(t, 0)
+	fixture.syncedData.UnsetHeadState()
+
+	headSlot, headRoot, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), fixture.cfg)
+
+	require.NoError(t, err)
+	require.Equal(t, fixture.headState.Slot(), headSlot)
+	require.Equal(t, fixture.headRoot, headRoot)
+}
+
+func TestPostForkchoiceOperationsDoesNotInvertSyncedDataLockOrder(t *testing.T) {
+	fixture := newLockOrderFixture(t, clparams.MainnetBeaconConfig.SlotsPerEpoch*5)
+	fixture.cfg.blobDownloader = &network2.BlobHistoryDownloader{}
+	fixture.cfg.attestationDataProducer = noOpAttestationDataProducer{}
+	fixture.cfg.dirs = datadir.New(t.TempDir())
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+	done := make(chan error, 1)
+	go func() {
+		done <- postForkchoiceOperations(tx, log.New(), fixture.cfg, fixture.headState.Slot(), fixture.headRoot)
+	}()
+
+	requireLockOrderOperationCompletes(t, fixture, done)
+	_, err = checkpoint_sync.ReadLocalFinalizedState(fixture.cfg.dirs, fixture.cfg.beaconCfg)
+	require.NoError(t, err)
+}
 
 func TestPayloadAttributesUseSepoliaGasLimitScheduleAtGloas(t *testing.T) {
 	_, config := clparams.GetConfigsByNetwork(chainspec.SepoliaChainID)
@@ -72,10 +272,10 @@ func TestUpdateCanonicalChainReorgEvent(t *testing.T) {
 	writeBlock := func(root, parentRoot, stateRoot common.Hash, slot uint64, canonical bool) {
 		t.Helper()
 		require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, slot))
-		require.NoError(t, beacon_indicies.WriteParentBlockRoot(ctx, tx, root, parentRoot))
+		require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, root, parentRoot))
 		require.NoError(t, beacon_indicies.WriteStateRoot(tx, root, stateRoot))
 		if canonical {
-			require.NoError(t, beacon_indicies.MarkRootCanonical(ctx, tx, slot, root))
+			require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
 		}
 	}
 
@@ -86,7 +286,7 @@ func TestUpdateCanonicalChainReorgEvent(t *testing.T) {
 	writeBlock(root101b, root100, state101b, 101, false)
 	writeBlock(root102b, root101b, state102b, 102, false)
 
-	reorg := drainReorgEvent(t, ctx, tx, 102, root102b)
+	reorg := drainReorgEvent(t, tx, 102, root102b)
 	require.NotNil(t, reorg, "expected a chain_reorg event to be emitted")
 	require.Equal(t, uint64(102), reorg.Slot, "reorg Slot")
 	require.Equal(t, uint64(2), reorg.Depth, "reorg Depth should be oldHeadSlot - forkPointSlot")
@@ -119,10 +319,10 @@ func TestUpdateCanonicalChainReorgShorterFork(t *testing.T) {
 	writeBlock := func(root, parentRoot, stateRoot common.Hash, slot uint64, canonical bool) {
 		t.Helper()
 		require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, slot))
-		require.NoError(t, beacon_indicies.WriteParentBlockRoot(ctx, tx, root, parentRoot))
+		require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, root, parentRoot))
 		require.NoError(t, beacon_indicies.WriteStateRoot(tx, root, stateRoot))
 		if canonical {
-			require.NoError(t, beacon_indicies.MarkRootCanonical(ctx, tx, slot, root))
+			require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
 		}
 	}
 
@@ -134,7 +334,7 @@ func TestUpdateCanonicalChainReorgShorterFork(t *testing.T) {
 	writeBlock(root101b, root100, common.Hash{0xb1}, 101, false)
 	writeBlock(root102b, root101b, state102b, 102, false)
 
-	reorg := drainReorgEvent(t, ctx, tx, 102, root102b)
+	reorg := drainReorgEvent(t, tx, 102, root102b)
 	require.NotNil(t, reorg, "expected a chain_reorg event to be emitted")
 	require.Equal(t, uint64(102), reorg.Slot, "reorg Slot")
 	require.Equal(t, uint64(3), reorg.Depth, "reorg Depth: old tip 103 - fork point 100 = 3")
@@ -166,10 +366,10 @@ func TestUpdateCanonicalChainReorgLongerFork(t *testing.T) {
 	writeBlock := func(root, parentRoot, stateRoot common.Hash, slot uint64, canonical bool) {
 		t.Helper()
 		require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, slot))
-		require.NoError(t, beacon_indicies.WriteParentBlockRoot(ctx, tx, root, parentRoot))
+		require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, root, parentRoot))
 		require.NoError(t, beacon_indicies.WriteStateRoot(tx, root, stateRoot))
 		if canonical {
-			require.NoError(t, beacon_indicies.MarkRootCanonical(ctx, tx, slot, root))
+			require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
 		}
 	}
 
@@ -181,7 +381,7 @@ func TestUpdateCanonicalChainReorgLongerFork(t *testing.T) {
 	writeBlock(root102b, root101b, common.Hash{0xb2}, 102, false)
 	writeBlock(root103b, root102b, state103b, 103, false)
 
-	reorg := drainReorgEvent(t, ctx, tx, 103, root103b)
+	reorg := drainReorgEvent(t, tx, 103, root103b)
 	require.NotNil(t, reorg, "expected a chain_reorg event to be emitted")
 	require.Equal(t, uint64(103), reorg.Slot, "reorg Slot")
 	require.Equal(t, uint64(2), reorg.Depth, "reorg Depth: old tip 102 - fork point 100 = 2")
@@ -207,10 +407,10 @@ func TestUpdateCanonicalChainNoReorg(t *testing.T) {
 	writeBlock := func(root, parentRoot, stateRoot common.Hash, slot uint64, canonical bool) {
 		t.Helper()
 		require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, slot))
-		require.NoError(t, beacon_indicies.WriteParentBlockRoot(ctx, tx, root, parentRoot))
+		require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, root, parentRoot))
 		require.NoError(t, beacon_indicies.WriteStateRoot(tx, root, stateRoot))
 		if canonical {
-			require.NoError(t, beacon_indicies.MarkRootCanonical(ctx, tx, slot, root))
+			require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
 		}
 	}
 
@@ -219,7 +419,7 @@ func TestUpdateCanonicalChainNoReorg(t *testing.T) {
 
 	writeBlock(root102, root101, common.Hash{0xa2}, 102, false)
 
-	reorg := drainReorgEvent(t, ctx, tx, 102, root102)
+	reorg := drainReorgEvent(t, tx, 102, root102)
 	require.Nil(t, reorg, "chain extension should NOT emit a chain_reorg event")
 }
 
@@ -242,10 +442,10 @@ func TestUpdateCanonicalChainReorgOneSlot(t *testing.T) {
 	writeBlock := func(root, parentRoot, stateRoot common.Hash, slot uint64, canonical bool) {
 		t.Helper()
 		require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, slot))
-		require.NoError(t, beacon_indicies.WriteParentBlockRoot(ctx, tx, root, parentRoot))
+		require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, root, parentRoot))
 		require.NoError(t, beacon_indicies.WriteStateRoot(tx, root, stateRoot))
 		if canonical {
-			require.NoError(t, beacon_indicies.MarkRootCanonical(ctx, tx, slot, root))
+			require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
 		}
 	}
 
@@ -253,7 +453,7 @@ func TestUpdateCanonicalChainReorgOneSlot(t *testing.T) {
 	writeBlock(root101a, root100, state101a, 101, true)
 	writeBlock(root101b, root100, state101b, 101, false)
 
-	reorg := drainReorgEvent(t, ctx, tx, 101, root101b)
+	reorg := drainReorgEvent(t, tx, 101, root101b)
 	require.NotNil(t, reorg, "expected a chain_reorg event to be emitted")
 	require.Equal(t, uint64(101), reorg.Slot, "reorg Slot")
 	require.Equal(t, uint64(1), reorg.Depth, "reorg Depth: old tip 101 - fork point 100 = 1")
@@ -263,7 +463,7 @@ func TestUpdateCanonicalChainReorgOneSlot(t *testing.T) {
 	require.Equal(t, state101b, reorg.NewHeadState, "NewHeadState")
 }
 
-func drainReorgEvent(t *testing.T, ctx context.Context, tx kv.RwTx, headSlot uint64, headRoot common.Hash) *beaconevents.ChainReorgData {
+func drainReorgEvent(t *testing.T, tx kv.RwTx, headSlot uint64, headRoot common.Hash) *beaconevents.ChainReorgData {
 	t.Helper()
 	emitter := beaconevents.NewEventEmitter()
 	ch := make(chan *beaconevents.EventStream, 16)
@@ -275,7 +475,7 @@ func drainReorgEvent(t *testing.T, ctx context.Context, tx kv.RwTx, headSlot uin
 		beaconCfg: &clparams.MainnetBeaconConfig,
 	}
 
-	err := updateCanonicalChainInTheDatabase(ctx, tx, headSlot, headRoot, cfg)
+	err := updateCanonicalChainInTheDatabase(tx, headSlot, headRoot, cfg)
 	require.NoError(t, err)
 
 	for {

@@ -126,9 +126,10 @@ func TestBlobHistoryDownloaderFuluColumnRecoveryIsBounded(t *testing.T) {
 	fulu.Block.Slot = 100
 	fulu.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
 
+	blocks := rootedBlocks(t, fulu)
 	done := make(chan struct{})
 	go func() {
-		b.recoverFuluColumns(rootedBlocks(t, fulu))
+		b.recoverFuluColumns(blocks)
 		close(done)
 	}()
 
@@ -160,8 +161,9 @@ func TestBlobHistoryDownloaderFuluInitialStorageCheckUsesBlockTimeout(t *testing
 		columnBackfillTimeout: 20 * time.Millisecond,
 		logger:                log.New(),
 	}
+	blocks := rootedBlocks(t, block)
 	done := make(chan bool, 1)
-	go func() { done <- downloader.recoverFuluColumns(rootedBlocks(t, block)) }()
+	go func() { done <- downloader.recoverFuluColumns(blocks) }()
 
 	bounded := false
 	select {
@@ -1120,7 +1122,7 @@ func TestCollectIncompleteBlocksSkipsSlotsCompleteUnderTheCanonicalRoot(t *testi
 	downloader.blobStorage = blobStorage
 	// Override the fixture's root for this slot so it is not the block's own hash.
 	require.NoError(t, downloader.indiciesDB.(kv.RwDB).Update(context.Background(), func(tx kv.RwTx) error {
-		return beacon_indicies.MarkRootCanonical(context.Background(), tx, slot, canonical)
+		return beacon_indicies.MarkRootCanonical(tx, slot, canonical)
 	}))
 
 	batch, _, err := downloader.collectIncompleteBlocks(slot, slot, 0)
@@ -1371,7 +1373,7 @@ func TestReadRetryBlockReturnsTheCanonicalRoot(t *testing.T) {
 
 	downloader := newBoundaryDownloader(t, slot, 0, slot, &boundaryBlockReader{block: block})
 	require.NoError(t, downloader.indiciesDB.(kv.RwDB).Update(t.Context(), func(tx kv.RwTx) error {
-		return beacon_indicies.MarkRootCanonical(t.Context(), tx, slot, canonical)
+		return beacon_indicies.MarkRootCanonical(tx, slot, canonical)
 	}))
 
 	got, root, err := downloader.readRetryBlock(slot)

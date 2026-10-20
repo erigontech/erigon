@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,31 +14,11 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package beaconhttp
+//go:build !amd64 && !arm64
 
-import (
-	"encoding/json"
-	"strconv"
-)
+package hexutil
 
-type IntStr int
+import "encoding/hex"
 
-func (i IntStr) MarshalJSON() ([]byte, error) {
-	return json.Marshal(strconv.FormatInt(int64(i), 10))
-}
-
-func (i *IntStr) UnmarshalJSON(b []byte) error {
-	// Try string first
-	var s string
-	if err := json.Unmarshal(b, &s); err == nil {
-		value, err := strconv.ParseInt(s, 10, 64)
-		if err != nil {
-			return err
-		}
-		*i = IntStr(value)
-		return nil
-	}
-
-	// Fallback to number
-	return json.Unmarshal(b, (*int)(i))
-}
+func encodeHex(dst, src []byte)              { hex.Encode(dst, src) }
+func decodeHex(dst, src []byte) (int, error) { return hex.Decode(dst, src) }

@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
-	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -63,6 +62,7 @@ type stubExecutionModule struct {
 	insertBlocksFunc      func(ctx context.Context, blocks []*types.Block) (execmodule.ExecutionStatus, error)
 	validateChainFunc     func(ctx context.Context, blockHash common.Hash, blockNumber uint64) (execmodule.ValidationResult, error)
 	updateForkChoiceFunc  func(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (execmodule.ForkChoiceResult, error)
+	inclusionListFunc     func(ctx context.Context) (types.Transactions, error)
 }
 
 var _ execmodule.ExecutionModule = (*stubExecutionModule)(nil)
@@ -166,6 +166,13 @@ func (s *stubExecutionModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64
 func (s *stubExecutionModule) Ready(_ context.Context) (bool, error) { return true, nil }
 func (s *stubExecutionModule) FrozenBlocks(_ context.Context) (uint64, bool, error) {
 	return 0, false, nil
+}
+
+func (s *stubExecutionModule) InclusionList(ctx context.Context) (types.Transactions, error) {
+	if s.inclusionListFunc != nil {
+		return s.inclusionListFunc(ctx)
+	}
+	return nil, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -1167,7 +1174,7 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 		require.Nil(t, resp)
 		require.Error(t, err)
 		var rpcErr rpc.Error
-		require.True(t, errors.As(err, &rpcErr))
+		require.ErrorAs(t, err, &rpcErr)
 		require.Equal(t, -38003, rpcErr.ErrorCode())
 	})
 
@@ -1209,7 +1216,7 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 		require.Nil(t, resp)
 		require.Error(t, err)
 		var rpcErr rpc.Error
-		require.True(t, errors.As(err, &rpcErr))
+		require.ErrorAs(t, err, &rpcErr)
 		require.Equal(t, -38003, rpcErr.ErrorCode())
 	})
 }
@@ -1258,7 +1265,7 @@ func TestForkchoiceUpdatedV2ValidatesAttributesWhenSyncing(t *testing.T) {
 	require.Nil(t, resp)
 	require.Error(t, err)
 	var rpcErr rpc.Error
-	require.True(t, errors.As(err, &rpcErr))
+	require.ErrorAs(t, err, &rpcErr)
 	require.Equal(t, -38003, rpcErr.ErrorCode())
 }
 
@@ -1355,7 +1362,7 @@ func TestForkchoiceUpdatedV3RejectsMissingBeaconRootWhenValid(t *testing.T) {
 	require.Nil(t, resp)
 	require.Error(t, err)
 	var rpcErr rpc.Error
-	require.True(t, errors.As(err, &rpcErr))
+	require.ErrorAs(t, err, &rpcErr)
 	require.Equal(t, -38003, rpcErr.ErrorCode())
 }
 
@@ -1443,7 +1450,7 @@ func TestValidatePayloadAttributesPostFCU_AmsterdamGate(t *testing.T) {
 		err := srv.validatePayloadAttributesPostFCU(clparams.FuluVersion, attrs)
 		require.Error(t, err)
 		var rpcErr rpc.Error
-		require.True(t, errors.As(err, &rpcErr))
+		require.ErrorAs(t, err, &rpcErr)
 		require.Equal(t, -38003, rpcErr.ErrorCode())
 	})
 

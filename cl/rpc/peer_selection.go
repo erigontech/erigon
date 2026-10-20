@@ -24,6 +24,10 @@ import (
 
 var ErrNoGoodPeer = errors.New("no good peer found")
 
+// columnPeerCooldown is how long the peer selection skips a peer after it answered a column
+// request with no sidecars.
+const columnPeerCooldown = 2 * time.Second
+
 var (
 	peersCandidateRefreshInterval = time.Second * 15
 	allCustodyIndices             = func() map[uint64]bool {
@@ -42,9 +46,10 @@ type columnDataPeers struct {
 	peerMetaCache *lru.CacheWithTTL[peerDataKey, *peerData]
 	beaconState   *state.CachingBeaconState
 
-	peersMutex sync.RWMutex
-	peersQueue []peerData
-	peersIndex int
+	peersMutex   sync.RWMutex
+	peersQueue   []peerData
+	peersIndex   int
+	coolingUntil map[string]time.Time
 }
 
 func newColumnPeers(
@@ -136,6 +141,11 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 		c.peersMutex.Lock()
 		c.peersQueue = newPeers
 		c.peersIndex = 0
+		for pid, until := range c.coolingUntil {
+			if !time.Now().Before(until) {
+				delete(c.coolingUntil, pid)
+			}
+		}
 		c.peersMutex.Unlock()
 		//custodies := []uint64{}
 		//for _, peer := range newPeers {
@@ -176,15 +186,18 @@ func (c *columnDataPeers) simpleReuqest(ctx context.Context, pid string, topic s
 }
 
 func (c *columnDataPeers) pickPeerRoundRobin(
-	ctx context.Context,
 	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
-) (*solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier], string, uint64, error) {
+) (*solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier], string, error) {
 	c.peersMutex.Lock()
 	defer c.peersMutex.Unlock()
 
+	now := time.Now()
 	for range len(c.peersQueue) {
 		c.peersIndex = (c.peersIndex + 1) % len(c.peersQueue)
 		peer := c.peersQueue[c.peersIndex]
+		if now.Before(c.coolingUntil[peer.pid]) {
+			continue
+		}
 		// matching
 		newReq := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](req.Len())
 		req.Range(func(_ int, item *cltypes.DataColumnsByRootIdentifier, length int) bool {
@@ -214,9 +227,18 @@ func (c *columnDataPeers) pickPeerRoundRobin(
 			// no matching columns
 			continue
 		}
-		return newReq, peer.pid, uint64(len(peer.mask)), nil
+		return newReq, peer.pid, nil
 	}
 
 	log.Trace("no good peer found", "peerCount", len(c.peersQueue))
-	return nil, "", 0, ErrNoGoodPeer
+	return nil, "", ErrNoGoodPeer
+}
+
+func (c *columnDataPeers) coolDown(pid string) {
+	c.peersMutex.Lock()
+	defer c.peersMutex.Unlock()
+	if c.coolingUntil == nil {
+		c.coolingUntil = make(map[string]time.Time)
+	}
+	c.coolingUntil[pid] = time.Now().Add(columnPeerCooldown)
 }

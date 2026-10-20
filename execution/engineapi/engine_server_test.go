@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -36,14 +37,17 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
@@ -56,6 +60,120 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
+
+func TestNewPayloadV5BoundsBALAllocations(t *testing.T) {
+	reads := make([]uint64, 100_000)
+	for i := range reads {
+		reads[i] = uint64(i)
+	}
+	raw, err := rlp.EncodeToBytes([]any{[]any{
+		common.Address{}, []any{}, reads, []any{}, []any{}, []any{},
+	}})
+	require.NoError(t, err)
+
+	header := makeParentHeader(1)
+	header.UncleHash = empty.UncleHash
+	header.TxHash = empty.RootHash
+	header.GasLimit = types.BalItemCost
+	withdrawals := types.Withdrawals{}
+	withdrawalsHash := types.DeriveSha(withdrawals)
+	header.WithdrawalsHash = &withdrawalsHash
+	header.BlobGasUsed = new(uint64)
+	header.ExcessBlobGas = new(uint64)
+	header.ParentBeaconBlockRoot = &common.Hash{}
+	header.RequestsHash = (types.FlatRequests{}).Hash()
+	balHash := crypto.Keccak256Hash(raw)
+	header.BlockAccessListHash = &balHash
+	header.SlotNumber = new(uint64)
+	block := types.NewBlockFromStorage(header.Hash(), header, nil, nil, withdrawals, nil)
+	payload, err := engine_types.ExecutionPayloadFromBlock(block)
+	require.NoError(t, err)
+	balBytes := hexutil.Bytes(raw)
+	payload.BlockAccessList = &balBytes
+	srv := NewEngineServer(log.New(), allForksChainConfig(), &stubExecutionModule{}, nil, false, false, false, true, nil, nil, 0, 0)
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	status, err := srv.NewPayloadV5(t.Context(), payload, []common.Hash{}, header.ParentBeaconBlockRoot, []hexutil.Bytes{})
+	runtime.ReadMemStats(&after)
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	require.Equal(t, engine_types.InvalidStatus, status.Status)
+	require.NotNil(t, status.ValidationError)
+	require.ErrorContains(t, status.ValidationError.Error(), "block access list too large")
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
+}
+
+func TestNewPayloadV2WithdrawalsValidation(t *testing.T) {
+	t.Parallel()
+
+	const withdrawal = `{"index":"0x0","validatorIndex":"0x1","address":"0x1111111111111111111111111111111111111111","amount":"0x1"}`
+	for _, test := range []struct {
+		name        string
+		withdrawals string
+		wantError   string
+	}{
+		{"null entry", `[null]`, "null withdrawal at index 0"},
+		{"null after valid entry", `[` + withdrawal + `,null]`, "null withdrawal at index 1"},
+		{"missing list", `null`, "missing withdrawals list"},
+		{"empty list", `[]`, ""},
+		{"valid entry", `[` + withdrawal + `]`, ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			var decoded engine_types.ExecutionPayload
+			require.NoError(t, json.Unmarshal([]byte(`{"withdrawals":`+test.withdrawals+`}`), &decoded))
+			header := makeParentHeader(1001)
+			header.ParentHash = common.Hash{0x1}
+			header.UncleHash = empty.UncleHash
+			header.TxHash = empty.RootHash
+			if decoded.Withdrawals != nil {
+				root := types.DeriveSha(types.Withdrawals(decoded.Withdrawals))
+				header.WithdrawalsHash = &root
+			}
+			block := types.NewBlockFromStorage(header.Hash(), header, nil, nil, decoded.Withdrawals, nil)
+			payload, err := engine_types.ExecutionPayloadFromBlock(block)
+			require.NoError(t, err)
+
+			cfg := preCancunChainConfig()
+			stub := &stubExecutionModule{}
+			downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+			srv.test = true
+
+			status, err := srv.NewPayloadV2(t.Context(), payload)
+			if test.wantError != "" {
+				require.Nil(t, status)
+				var invalidParams *rpc.InvalidParamsError
+				require.ErrorAs(t, err, &invalidParams)
+				require.Equal(t, -32602, invalidParams.ErrorCode())
+				require.Equal(t, test.wantError, invalidParams.Message)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, engine_types.SyncingStatus, status.Status)
+		})
+	}
+}
+
+func TestForkchoiceUpdatedV2RejectsNullWithdrawalWhenSyncing(t *testing.T) {
+	t.Parallel()
+
+	var attributes engine_types.PayloadAttributes
+	require.NoError(t, json.Unmarshal([]byte(`{"timestamp":"0x3e9","withdrawals":[null]}`), &attributes))
+	cfg := preCancunChainConfig()
+	stub := &stubExecutionModule{}
+	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+	srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+	srv.test = true
+
+	response, err := srv.ForkchoiceUpdatedV2(t.Context(), &engine_types.ForkChoiceState{HeadHash: common.Hash{0x1}}, &attributes)
+	require.Nil(t, response)
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	require.Equal(t, -38003, rpcErr.ErrorCode())
+}
 
 // Do 1 step to start txPool
 func oneBlockSteps(m *execmoduletester.ExecModuleTester, require *require.Assertions, blocks int) {

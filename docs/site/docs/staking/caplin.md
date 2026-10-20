@@ -27,7 +27,7 @@ erigon \
   --caplin.discovery.addr=0.0.0.0 \
   --caplin.discovery.port=4000 \
   --caplin.discovery.tcpport=4001 \
-  --caplin.discovery.quicport=4001 \
+  --caplin.discovery.quicport=4002 \
   --beacon.api=beacon,validator,builder,config,debug,events,node,lighthouse 
 ```
 
@@ -58,7 +58,7 @@ mkdir -p ~/.lighthouse/validators
 
 ### 2.3. Run Lighthouse Validator Client
 
-Start the validator client and connect it to the Caplin CL:
+Start the validator client and connect it to the Caplin Consensus Layer (CL):
 
 ```bash
 lighthouse vc \

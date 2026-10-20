@@ -18,6 +18,7 @@ package graphql
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -25,6 +26,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
 )
 
 func TestGraphQLRequestBodyLimit(t *testing.T) {
@@ -50,4 +55,24 @@ func TestGraphQLRequestBodyLimit(t *testing.T) {
 
 	rec = send(bytes.NewReader([]byte(big)), -1)
 	require.NotEqual(t, http.StatusOK, rec.Code, "a body without Content-Length must be cut off at the limit too")
+}
+
+type overloadedGraphQLAPI struct{ jsonrpc.GraphQLAPI }
+
+func (overloadedGraphQLAPI) GasPrice(context.Context) (string, error) {
+	return "", kv.ErrReadTxLimitExceeded
+}
+
+func TestGraphQLReadTxLimitIsServiceUnavailable(t *testing.T) {
+	t.Parallel()
+
+	h := CreateHandler([]rpc.API{{Service: overloadedGraphQLAPI{}}})
+	query := `{"query":"{gasPrice}"}`
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, urlPath, strings.NewReader(query))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+	require.Equal(t, "1", rec.Header().Get("Retry-After"))
 }

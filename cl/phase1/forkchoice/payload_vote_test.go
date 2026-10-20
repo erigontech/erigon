@@ -7,6 +7,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -66,7 +67,6 @@ type payloadVoteForkGraph struct {
 	fork_graph.ForkGraph
 	hasEnvelope        bool
 	dumpedEnvelope     *common.Hash
-	dumpEnvelopeErr    error
 	invalidatedHeader  *common.Hash
 	unavailablePayload *common.Hash
 	acceptedPayloads   map[common.Hash]bool
@@ -197,6 +197,32 @@ func TestGetPTCRejectsPreGloasSlot(t *testing.T) {
 func TestPtcBoolToVote(t *testing.T) {
 	require.Equal(t, int8(1), boolToVote(true))
 	require.Equal(t, int8(-1), boolToVote(false))
+}
+
+func TestPayloadAttestationVotesReportsPresence(t *testing.T) {
+	root := common.HexToHash("0x01")
+	f := &ForkChoiceStore{}
+
+	timeliness, dataAvailability, timelinessPresent, dataAvailabilityPresent := f.PayloadAttestationVotes(root)
+	require.Equal(t, [clparams.PtcSize]int8{}, timeliness)
+	require.Equal(t, [clparams.PtcSize]int8{}, dataAvailability)
+	require.False(t, timelinessPresent)
+	require.False(t, dataAvailabilityPresent)
+
+	f.payloadTimelinessVote.Store(root, [clparams.PtcSize]int8{})
+	_, _, timelinessPresent, dataAvailabilityPresent = f.PayloadAttestationVotes(root)
+	require.True(t, timelinessPresent)
+	require.False(t, dataAvailabilityPresent)
+
+	f.payloadDataAvailabilityVote.Store(root, [clparams.PtcSize]int8{})
+	_, _, timelinessPresent, dataAvailabilityPresent = f.PayloadAttestationVotes(root)
+	require.True(t, timelinessPresent)
+	require.True(t, dataAvailabilityPresent)
+
+	f.payloadTimelinessVote.Delete(root)
+	_, _, timelinessPresent, dataAvailabilityPresent = f.PayloadAttestationVotes(root)
+	require.False(t, timelinessPresent)
+	require.True(t, dataAvailabilityPresent)
 }
 
 func TestPtcPayloadTimelinessVoteCounting(t *testing.T) {
@@ -405,7 +431,7 @@ func TestPtcShouldBuildOnFullReadsOneVoteSnapshot(t *testing.T) {
 func TestPtcShouldBuildOnFullIgnoresVotesBeforePreviousSlot(t *testing.T) {
 	root := common.HexToHash("0x05")
 	f := newPtcVoteTestStore(root)
-	f.time.Store(2 * f.beaconCfg.SecondsPerSlot)
+	f.timeMs.Store(2 * f.beaconCfg.SecondsPerSlot * 1000)
 	f.payloadDataAvailabilityVote.Store(root, ptcVotes(0, ptcVoteThreshold()+1))
 	f.payloadTimelinessVote.Store(root, ptcVotes(0, ptcVoteThreshold()+1))
 
@@ -499,7 +525,7 @@ func TestGloasForkChoiceUsesPersistedPayload(t *testing.T) {
 			children := f.getNodeChildren(ForkChoiceNode{
 				Root:          root,
 				PayloadStatus: cltypes.PayloadStatusPending,
-			}, nil)
+			})
 			require.Equal(t, tt.wantFullChild, hasPayloadStatus(children, cltypes.PayloadStatusFull))
 			require.True(t, hasPayloadStatus(children, cltypes.PayloadStatusEmpty))
 
@@ -508,6 +534,20 @@ func TestGloasForkChoiceUsesPersistedPayload(t *testing.T) {
 			require.Equal(t, tt.wantFullChild, f.payloadDataAvailability(root, true))
 		})
 	}
+}
+
+func TestGetNodeChildrenUsesAllStoreBlocks(t *testing.T) {
+	parentRoot := common.HexToHash("0x1234")
+	childRoot := common.HexToHash("0x5678")
+	f := &ForkChoiceStore{
+		forkGraph: ptcVoteForkGraph{blocks: map[common.Hash]*cltypes.SignedBeaconBlock{
+			childRoot: {Block: &cltypes.BeaconBlock{ParentRoot: parentRoot}},
+		}},
+	}
+	f.updateChildren(0, parentRoot, childRoot)
+
+	children := f.getNodeChildren(ForkChoiceNode{Root: parentRoot, PayloadStatus: cltypes.PayloadStatusEmpty})
+	require.Equal(t, []ForkChoiceNode{{Root: childRoot, PayloadStatus: cltypes.PayloadStatusPending}}, children)
 }
 
 func TestIsPayloadVerifiedStrictSemantics(t *testing.T) {
@@ -568,7 +608,7 @@ func TestMarkPayloadInvalidRecordsELRejection(t *testing.T) {
 	f.MarkPayloadInvalid(root, execHash)
 
 	require.False(t, f.IsPayloadVerified(root))
-	children := f.getNodeChildren(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending}, nil)
+	children := f.getNodeChildren(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending})
 	require.False(t, hasPayloadStatus(children, cltypes.PayloadStatusFull))
 	status, ok := f.GetRecentExecutionPayloadStatus(execHash)
 	require.True(t, ok)
@@ -687,6 +727,39 @@ func TestParentPayloadStatusFromBidsRejectsIncompleteBlocks(t *testing.T) {
 	child := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
 	child.Block.Body = nil
 	require.Equal(t, cltypes.PayloadStatusEmpty, ParentPayloadStatusFromBids(cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion), child.Block))
+}
+
+func TestParentPayloadStatusFromBidsDoesNotAllocate(t *testing.T) {
+	const childSlot uint64 = 1024
+	parentBlockHash := common.Hash{0x01}
+
+	for _, test := range []struct {
+		name                 string
+		childParentBlockHash common.Hash
+		want                 cltypes.PayloadStatus
+	}{
+		{name: "full", childParentBlockHash: parentBlockHash, want: cltypes.PayloadStatusFull},
+		{name: "empty", childParentBlockHash: common.Hash{0x02}, want: cltypes.PayloadStatusEmpty},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			parent := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+			parent.Block.Slot = childSlot - 1
+			parent.Block.Body.SignedExecutionPayloadBid.Message.BlockHash = parentBlockHash
+
+			child := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+			child.Block.Slot = childSlot
+			child.Block.ParentRoot = common.Hash{0x03}
+			child.Block.Body.SignedExecutionPayloadBid.Message.ParentBlockHash = test.childParentBlockHash
+
+			var got cltypes.PayloadStatus
+			allocations := testing.AllocsPerRun(1000, func() {
+				got = ParentPayloadStatusFromBids(parent, child.Block)
+			})
+
+			require.Equal(t, test.want, got)
+			require.Zero(t, allocations)
+		})
+	}
 }
 
 func TestApplyPayloadValidationResultRecordsRootAvailability(t *testing.T) {
@@ -832,27 +905,35 @@ func TestPayloadStatusGetterUsesDurableAuthorityAfterEviction(t *testing.T) {
 	}
 }
 
-func TestStoreAnchorEnvelopeMarksPayloadOptimisticWithoutEngine(t *testing.T) {
-	root := common.HexToHash("0x5678")
-	execHash := common.HexToHash("0xabcd")
-	dumpedEnvelope := common.Hash{}
+// The anchor's payload counts as NotValidated until the EL answers, with or without an engine.
+func TestStoreAnchorEnvelopeMarksPayloadOptimistic(t *testing.T) {
+	for _, withEngine := range []bool{false, true} {
+		t.Run(fmt.Sprintf("engine=%t", withEngine), func(t *testing.T) {
+			root := common.HexToHash("0x5678")
+			execHash := common.HexToHash("0xabcd")
+			dumpedEnvelope := common.Hash{}
 
-	f := newPayloadVoteTestStore(t, root, true, false)
-	f.forkGraph = payloadVoteForkGraph{hasEnvelope: true, dumpedEnvelope: &dumpedEnvelope}
-	envelope := &cltypes.SignedExecutionPayloadEnvelope{
-		Message: &cltypes.ExecutionPayloadEnvelope{
-			BeaconBlockRoot: root,
-			Payload:         &cltypes.Eth1Block{BlockHash: execHash},
-		},
+			f := newPayloadVoteTestStore(t, root, true, false)
+			f.forkGraph = payloadVoteForkGraph{hasEnvelope: true, dumpedEnvelope: &dumpedEnvelope}
+			if withEngine {
+				f.engine = execution_client.NewMockExecutionEngine(gomock.NewController(t))
+			}
+			envelope := &cltypes.SignedExecutionPayloadEnvelope{
+				Message: &cltypes.ExecutionPayloadEnvelope{
+					BeaconBlockRoot: root,
+					Payload:         &cltypes.Eth1Block{BlockHash: execHash},
+				},
+			}
+
+			require.NoError(t, f.StoreAnchorEnvelope(root, envelope))
+			require.False(t, f.IsPayloadVerified(root))
+			status, ok := f.GetRecentExecutionPayloadStatus(execHash)
+			require.True(t, ok)
+			require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated), status)
+			require.True(t, f.isPayloadAvailable(root))
+			require.Equal(t, root, dumpedEnvelope)
+		})
 	}
-
-	require.NoError(t, f.StoreAnchorEnvelope(root, envelope))
-	require.False(t, f.IsPayloadVerified(root))
-	status, ok := f.GetRecentExecutionPayloadStatus(execHash)
-	require.True(t, ok)
-	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated), status)
-	require.True(t, f.isPayloadAvailable(root))
-	require.Equal(t, root, dumpedEnvelope)
 }
 
 func TestStoreAnchorEnvelopeDoesNotRestorePrunedPayloadStatus(t *testing.T) {
@@ -916,7 +997,7 @@ func newPtcVoteTestStore(root common.Hash) *ForkChoiceStore {
 
 		verifiedExecutionPayload: verifiedExecutionPayload,
 	}
-	f.time.Store(cfg.SecondsPerSlot)
+	f.timeMs.Store(cfg.SecondsPerSlot * 1000)
 	return f
 }
 
@@ -955,6 +1036,31 @@ func newPayloadVoteTestStore(t *testing.T, root common.Hash, hasEnvelope, verifi
 	f.payloadDataAvailabilityVote.Store(root, ptcVotes(majority, 0))
 
 	return f
+}
+
+// The recorded votes count before the payload is applied: the votes alone decide whether the FULL
+// variant can still be built on.
+func TestPayloadVotesRuleOutFullCountsVotesBeforeThePayloadIsApplied(t *testing.T) {
+	root := common.HexToHash("0x1")
+	majority := ptcVoteThreshold() + 1
+	for _, tc := range []struct {
+		name                  string
+		timeliness, dataVotes [clparams.PtcSize]int8
+		ruledOut              bool
+	}{
+		{name: "no votes", ruledOut: false},
+		{name: "timely and available", timeliness: ptcVotes(majority, 0), dataVotes: ptcVotes(majority, 0), ruledOut: false},
+		{name: "not timely", timeliness: ptcVotes(0, majority), dataVotes: ptcVotes(majority, 0), ruledOut: true},
+		{name: "data not available", timeliness: ptcVotes(majority, 0), dataVotes: ptcVotes(0, majority), ruledOut: true},
+		{name: "not timely without a majority", timeliness: ptcVotes(0, ptcVoteThreshold()), ruledOut: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPayloadVoteTestStore(t, root, false, false)
+			f.payloadTimelinessVote.Store(root, tc.timeliness)
+			f.payloadDataAvailabilityVote.Store(root, tc.dataVotes)
+			require.Equal(t, tc.ruledOut, f.PayloadVotesRuleOutFull(root))
+		})
+	}
 }
 
 func ptcVoteThreshold() int {

@@ -448,24 +448,24 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 						ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
 						Val:        true,
 					})
-					if path == StoragePath || path == AddressPath {
-						readVersion := sdVersion
-						if pathRead.Status() == MVReadResultDone {
-							readVersion = pathRead.Version()
-						}
+					readVersion := sdVersion
+					if pathRead.Status() == MVReadResultDone {
+						readVersion = pathRead.Version()
+					}
+					if path == StoragePath || path == AddressPath ||
+						path == BalancePath || path == NoncePath || path == CodeSizePath {
 						s.recordWipedRead(addr, path, key, readVersion)
 					}
-					// Per-path revival misses account-level life: a balance-only
-					// credit (fee, transfer) revives the account without writing a
-					// CodeHash entry, and a live account's wiped code hash is
-					// keccak(''), not the nil hash of a nonexistent one.
+					// Per-path revival misses account-level life: a fee credit revives the
+					// account without writing a CodeHash entry, and a live account's wiped code
+					// hash is keccak(''), not the nil hash of a nonexistent one.
 					if path == CodeHashPath && !s.versionMap.destroyedAndUnrevived(addr, s.txIndex) {
 						r.outcome = outcomeMapDone
 						r.mapCodeHashVal = accounts.EmptyCodeHash
-						r.hdr = ReadHeader{Source: MapRead, Version: sdVersion}
+						r.hdr = ReadHeader{Source: MapRead, Version: readVersion}
 						r.recordVR = !commited
 						r.source = MapRead
-						r.version = sdVersion
+						r.version = readVersion
 						return
 					}
 					r.outcome = outcomeReturnZero
@@ -1079,8 +1079,11 @@ func warmField[T any](s *IntraBlockState, addr accounts.Address, writes map[acco
 			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, true
 		}
 	}
-	if tr, ok := reads[addr]; ok && warmSource(tr.Source) {
-		return tr.Val, tr.Source, tr.Version, true
+	// A resident deleted object outranks the read set, as in versionedReadCore.
+	if so, ok := s.stateObjects[addr]; !ok || !so.deleted {
+		if tr, ok := reads[addr]; ok && warmSource(tr.Source) {
+			return tr.Val, tr.Source, tr.Version, true
+		}
 	}
 	var zero T
 	return zero, UnknownSource, UnknownVersion, false
@@ -1319,20 +1322,13 @@ func refreshIncarnation(s *IntraBlockState, addr accounts.Address, currentIncarn
 	}
 }
 
-// readCode returns the contract code with its hash. The commited flag selects whether
-// the version-aware lookup honours the committed-only contract.
-func readCode(s *IntraBlockState, addr accounts.Address, commited bool) (accounts.Code, ReadSource, Version, error) {
-	if !commited {
-		if v, src, ver, ok := warmField(s, addr, s.versionedWrites.code, s.versionedReads.code); ok {
-			return v, src, ver, nil
-		}
-	} else if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetCode(addr); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, nil
-		}
+// readCode returns the contract code with its hash.
+func readCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, ReadSource, Version, error) {
+	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.code, s.versionedReads.code); ok {
+		return v, src, ver, nil
 	}
 	var r readPathResult
-	versionedReadCore(s, addr, CodePath, accounts.NilKey, commited, false, &r)
+	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
 		return accounts.Code{}, r.source, r.version, r.err
 	}
@@ -1408,10 +1404,8 @@ func refreshCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, erro
 
 // readCodeSize returns the contract code size.
 func readCodeSize(s *IntraBlockState, addr accounts.Address) (int, ReadSource, Version, error) {
-	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetCodeSize(addr); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, nil
-		}
+	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.codeSize, s.versionedReads.codeSize); ok {
+		return v, src, ver, nil
 	}
 	var r readPathResult
 	versionedReadCore(s, addr, CodeSizePath, accounts.NilKey, false, false, &r)
@@ -1559,17 +1553,15 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		v, clean, err := so.GetState(key)
 		return v, StorageRead, UnknownVersion, clean, err
 	}
-	if s.versionMap != nil && !s.warmReadable(addr) {
+	if !s.warmReadable(addr) {
 		if vw, ok := s.versionedWrites.GetStorage(addr, key); ok {
 			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, false, nil
 		}
 	}
-	if s.versionMap != nil && s.warmReadable(addr) {
-		// A resident deleted object outranks the read set, as in versionedReadCore.
-		if so, ok := s.stateObjects[addr]; !ok || !so.deleted {
-			if tr, ok := s.versionedReads.GetStorage(addr, key); ok && warmSource(tr.Source) {
-				return tr.Val, tr.Source, tr.Version, false, nil
-			}
+	// A resident deleted object outranks the read set, as in versionedReadCore.
+	if so, ok := s.stateObjects[addr]; !ok || !so.deleted {
+		if tr, ok := s.versionedReads.GetStorage(addr, key); ok && warmSource(tr.Source) {
+			return tr.Val, tr.Source, tr.Version, true, nil
 		}
 	}
 	var r readPathResult
@@ -1582,7 +1574,7 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		return r.vwStorage.Val, r.source, r.version, false, nil
 	case outcomeReadSetHit:
 		tr, _ := s.versionedReads.GetStorage(addr, key)
-		return tr.Val, r.source, r.version, false, nil
+		return tr.Val, r.source, r.version, true, nil
 	case outcomeMapDone:
 		v := r.mapStorageVal
 		if r.recordVR {
