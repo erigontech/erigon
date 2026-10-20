@@ -28,7 +28,9 @@ import (
 
 func TestWritePatternWritesOneRequestPerLine(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("TMPDIR", tmp)
+	t.Setenv("TMPDIR", tmp) // os.TempDir reads TMPDIR on Unix, TMP and TEMP on Windows
+	t.Setenv("TMP", tmp)
+	t.Setenv("TEMP", tmp)
 	setRoutes("http://localhost:8545", "http://localhost:8546")
 	resultsCh := make(chan CallResult)
 	done := make(chan struct{})
