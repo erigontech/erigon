@@ -1,5 +1,5 @@
 {
-  "ci_last_updated": "2026-08-24",
+  "ci_last_updated": "2026-10-19",
   "networks": {
     "chiado": {
       "archive": {
@@ -75,10 +75,10 @@
         "source": "manual"
       },
       "minimal": {
-        "bytes": 510823034880,
-        "display": "510.82 GB",
-        "measured_at": "2026-09-19",
-        "source": "manual"
+        "bytes": 524452724736,
+        "display": "524.45 GB",
+        "measured_at": "2026-10-19",
+        "source": "ci"
       }
     },
     "sepolia": {

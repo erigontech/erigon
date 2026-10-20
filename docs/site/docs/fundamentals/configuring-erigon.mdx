@@ -97,6 +97,9 @@ These flags control database performance and memory usage. See [Database](/funda
   * Default: `1TB`
 * `--db.writemap`: Enables `WRITE_MAP` for fast database writes.
   * Default: `true`
+* `--db.safe.nosync`: Lets committed writes reach the disk in the background instead of flushing before each commit returns. After a power cut the node resumes from the last flushed point and re-syncs the seconds in between; the database stays intact either way. Set `--db.safe.nosync=false` to flush before every commit returns, at the cost of write speed.
+  * Default: `true`
+  * When the flag is not passed, the `MDBX_DURABLE=true` environment variable also turns the background flush off.
 * `--db.read.concurrency value`: Maximum number of concurrent open database read transactions (the MDBX read-transaction semaphore); when it is full, extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response instead. Raise it for nodes serving heavy parallel RPC. Lowering it does not reduce read concurrency: each parallel-execution worker holds a long-lived read transaction, so a value below the worker count would deadlock. Erigon raises a lower value, with a warning, to a floor that sums the exec workers, the parallel-commitment readers (GOMAXPROCS + 1, with `--experimental.parallel-commitment`), the BAL warmup readers, the block read-ahead workers and a fixed reserve; rpcdaemon uses the value as given. To genuinely reduce read concurrency, lower `--exec.workers` instead.
   * Default: scales with the host as `min(max(10, GOMAXPROCS * 64), 9000)` — kept well above the CPU count because reads are I/O-bound, and capped below Go's roughly 10,000 OS-thread limit.
 * `--database.verbosity value`: Enables internal database logs.
@@ -143,7 +146,7 @@ Flags for managing how old chain data is handled and stored. See [Snapshots Mana
   * Default: `false`
 * `--snap.p2p-manifest` *(New in v3.5)* (experimental): Decentralized snapshot discovery — peers advertise their `chain.toml` manifest via Ethereum Node Record (ENR) instead of the centralized `preverified.toml`. Opt-in; requires a compatible peer network.
   * Default: `false`
-* `--snap.chaintoml-url value` *(New in v3.5)*: Fetch the preverified `chain.toml` directly from this URL instead of the default R2/GitHub content delivery network (CDN). Precedence: the `ERIGON_REMOTE_PREVERIFIED` environment variable (path to a local override file) wins over this URL and the default CDN; a local `preverified.toml` in the datadir also takes precedence — delete it to re-fetch from the URL.
+* `--snap.chaintoml-url value` *(New in v3.5)*: Fetches the preverified `chain.toml` directly from this URL instead of the default R2/GitHub content delivery network (CDN). Precedence: the `ERIGON_REMOTE_PREVERIFIED` environment variable (path to a local override file) wins over this URL and the default CDN; a local `preverified.toml` in the datadir also takes precedence — delete it to re-fetch from the URL.
   * Default: `""` (uses the built-in CDN)
 * `--snap.download.to.block, --shadow.fork.block value`: Downloads snapshots only up to the given block number (exclusive). Intended for testing and shadow forks.
   * Default: `0` (disabled — downloads all available snapshots)
@@ -247,7 +250,7 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
 * `--authrpc.jwtsecret value`: The path to the [JWT secret](/fundamentals/jwt) file for the consensus layer.
 * `--http.compression`: Compresses HTTP-RPC responses of 1 KiB or more with the encoding the client's `Accept-Encoding` allows: Zstandard (preferred) or gzip. A client that accepts neither gets an uncompressed response.
   * Default: `true`
-* `--http.corsdomain value`: A comma-separated list of domains for cross-origin requests.
+* `--http.corsdomain value`: A comma-separated list of domains for cross-origin requests. The same list gates browser WebSocket handshakes and cross-site `GET` calls: a page whose `Origin` is not listed gets `403`. Without the flag, only pages on `http://localhost`, `http://127.0.0.1`, `http://[::1]` or the node's own hostname can open a WebSocket. Clients that send no `Origin` header, such as `curl` or server-side libraries, are not affected.
 * `--http.vhosts value`: A comma-separated list of virtual hostnames.
   * Default: `localhost`
 * `--authrpc.vhosts value`: A comma-separated list of virtual hostnames for the Engine API.
@@ -294,7 +297,7 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Set to `-1` to disable admission control (unlimited)
 * `--rpc.streaming.disable`: Disables JSON streaming for heavy endpoints.
   * Default: `false`
-* `--state.stream.disable`: Disables streaming of state changes from the core to the RPC daemon.
+* `--state.stream.disable`: Disables streaming of state changes from the core to the RPC Daemon.
   * Default: `false`
 * `--rpc.accessList value`: Specifies a granular API allowlist.
 * `--rpc.gascap value`: Sets a cap on gas usage for `eth_call`/`estimateGas`.
@@ -349,6 +352,9 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
 * `--rpc.subscription.filters.timeout value`: Timeout before idle subscription filters are evicted.
   * Default: `5m0s`
   * Set to `0` to disable eviction.
+* `--rpc.subscription.filters.maxsubscriptions value`: Maximum number of live filters and subscriptions across all clients, counting `eth_newFilter`, `eth_newBlockFilter`, `eth_newPendingTransactionFilter` and `eth_subscribe`. At the limit, a new one is rejected with `-32005` (`too many filters and subscriptions`) until a filter is uninstalled or evicted as idle, or a subscription's connection closes. The `subscriptions_budget_used` metric reports the live count.
+  * Default: `10000`
+  * Set to `0` to disable the limit.
 * `--http.timeouts.read value`: Maximum duration for reading a request.
   * Default: `30s`
 * `--http.timeouts.write value`: Maximum duration before timing out a response write.
@@ -414,6 +420,8 @@ Flags for controlling logging and performance profiling. See [Logs](/fundamental
   * Default: `dbug`
 * `--log.delays`: Enables block delay logging.
   * Default: `false`
+* `--debug.slow-block-threshold value`: Logs per-block execution metrics as a JSON line at `WARN` level (`"msg":"Slow block"`, with execution, state-read, state-hash and commit times, gas, throughput, and state and cache counters) for blocks validated at the chain tip that take at least this long. The field names follow the cross-client [slow-block metrics](https://ethresear.ch/t/a-small-step-towards-data-driven-protocol-decisions-unified-slowblock-metrics-across-clients/23907) proposal. `0` logs every block. Enabling it also times every state read process-wide, RPC included, which adds overhead.
+  * Default: `-1ns` (disabled; any negative value disables it)
 * `--pprof`: Enables the pprof HTTP server.
   * Default: `false`
 * `--pprof.addr value`: The pprof HTTP server listening interface.
@@ -469,6 +477,8 @@ These flags control the block synchronization and data downloading process, incl
   * Default: `false`
 * `--downloader.disable.ipv6`: Disables IPv6 for the Downloader.
   * Default: `false`
+* `--downloader.disable.tcp`: Turns off TCP for the Downloader, leaving uTP as the only BitTorrent transport.
+  * Default: `false`
 * `--no-downloader`: Disables the Downloader component.
   * Default: `false`
 * `--downloader.verify`: Verifies snapshots on startup.
@@ -493,8 +503,8 @@ These flags control the block synchronization and data downloading process, incl
 * `--torrent.upload.rate value`: The upload rate in bytes per second.
   * Default: `16mb`
 * `--torrent.download.rate value`: Sets the torrent download rate cap. Default: `512mb`. Use a lower value on shared machines to avoid saturating the connection; use `Inf` to remove the limit.
-* `--torrent.webseed.download.rate value`: The download rate for webseeds. If not set, rate limit is shared with torrent.
-* `--torrent.verbosity value`: Sets the verbosity level for BitTorrent logs. 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set `--verbosity` to equal or higher level)
+* `--torrent.webseed.download.rate value`: The download rate for webseeds. If not set, the rate limit is shared with the torrent download rate.
+* `--torrent.verbosity value`: Sets the verbosity level for BitTorrent logs. 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set `--verbosity` to an equal or higher level)
   * Default: `1`
 
 The two flags below are registered but hidden, so they do not appear in `erigon --help`, and neither changes any behaviour. They are listed here so their presence in an old command line is not mistaken for a working setting.
@@ -675,8 +685,8 @@ Erigon's own variables — everything below except the [Docker](#docker-environm
 
 **Database and Performance:**
 
-* `MDBX_LOCK_IN_RAM` - Locks MDBX database in RAM for better performance
-* `MDBX_DIRTY_SPACE_MB` - Sets dirty space limit for MDBX database
+* `MDBX_LOCK_IN_RAM` - Locks the MDBX database in RAM for better performance
+* `MDBX_DIRTY_SPACE_MB` - Sets the dirty space limit for the MDBX database
 * `SNAPSHOT_MADV_RND` - Controls snapshot memory advice randomization (default: `true`)
 
 **Synchronization and Pruning:**
@@ -691,12 +701,12 @@ Erigon's own variables — everything below except the [Docker](#docker-environm
 **Execution and Processing:**
 
 * `EXEC3_PARALLEL` - Enables parallel block execution (Block-STM). **Default changed to `true` in v3.5** — parallel execution is now on by default. Set to `false` or use `--exec.serial` to revert to single-threaded execution.
-* `EXEC3_WORKERS` - Sets number of parallel execution workers (default: number of CPU cores)
+* `EXEC3_WORKERS` - Sets the number of parallel execution workers (default: number of CPU cores)
 * `STAGES_ONLY_BLOCKS` - Limits stages to blocks only
 
 **State Cache:**
 
-* `USE_STATE_CACHE` - Enables the executor's domain-shared read cache (default: `true`; flag equivalent: `--exec.state-cache`). When `false` no cache is built, and neither the budgets nor the pin controller below have any effect.
+* `USE_STATE_CACHE` - Enables the executor's domain-shared read cache (default: `true`; flag equivalent: `--exec.state-cache`). When `false` no cache is built, and neither the budgets nor the pin controller below has any effect.
 * `STATE_CACHE_ACCOUNTS` - Byte budget for the account cache (default: `150MB`). **New in v3.6**; the built-in budget it overrides was `1GB` in v3.5.
 * `STATE_CACHE_STORAGE` - Byte budget for the storage cache (default: `1GB`)
 * `STATE_CACHE_CODE` - Byte budget for the code cache, applied separately to each of its two byte-bearing layers; a third, size-only layer is sized independently (default: `512MB`)

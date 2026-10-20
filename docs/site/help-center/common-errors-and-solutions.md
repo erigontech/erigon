@@ -13,7 +13,7 @@ This section details common error messages and provides clear, actionable steps 
 ### Stalling during snapshot sync (0 B/s download rate)
 
 * **Error Description:** The sync process appears to be stuck, showing a download rate of 0B/s, even with peers.
-* **Cause:** The [RPC daemon](/fundamentals/modules/rpc-daemon) or a connected consensus client may be "spamming" the Erigon node with requests, which interferes with the snapshot sync. This issue is still present in recent versions.
+* **Cause:** The [RPC Daemon](/fundamentals/modules/rpc-daemon) or a connected consensus client may be "spamming" the Erigon node with requests, which interferes with the snapshot sync. This issue is still present in recent versions.
 * **Solution:** Temporarily disable the RPC by removing flags like `--http` and `--ws`, or stop your consensus client until the initial snapshot sync stage is complete.
 
 ### Sync is extremely slow or the node is constantly falling behind
@@ -80,9 +80,9 @@ This section details common error messages and provides clear, actionable steps 
 ### Connect: connection refused or dial tcp... failures
 
 * **Error Description:** The node cannot connect to a component it dials out to, such as a
-  separately run sentry or downloader, or the core instance an external RPC daemon talks to.
+  separately run sentry or downloader, or the core instance an external RPC Daemon talks to.
 * **Cause:** This is a configuration error. The dependent service is either not running, or the command-line flag naming its address points to the wrong one.
-* **Solution:** Confirm that the required services are running and that the address flags for the components you run separately are correct — for example `--sentry.api.addr`, `--downloader.api.addr`, or `--private.api.addr` for an external RPC daemon. Note that `--externalcl` is a switch, not an address: it only disables the embedded Caplin, after which the external consensus client connects inbound to Erigon's Engine API (`--authrpc.addr` / `--authrpc.port`) rather than Erigon dialling out to it. See [Configuring Erigon](/fundamentals/configuring-erigon) for all available flags.
+* **Solution:** Confirm that the required services are running and that the address flags for the components you run separately are correct — for example `--sentry.api.addr`, `--downloader.api.addr`, or `--private.api.addr` for an external RPC Daemon. Note that `--externalcl` is a switch, not an address: it only disables the embedded Caplin, after which the external consensus client connects inbound to Erigon's Engine API (`--authrpc.addr` / `--authrpc.port`) rather than Erigon dialling out to it. See [Configuring Erigon](/fundamentals/configuring-erigon) for all available flags.
 
 ## Chain-Specific Issues
 
