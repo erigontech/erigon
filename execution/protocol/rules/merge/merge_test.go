@@ -327,42 +327,50 @@ func TestInitializeTracesHistoryStorageCall(t *testing.T) {
 	require.Equal(t, []string{"start", "call", "end"}, callOrder)
 }
 
-func TestFinalizeAllowEmptyRequestContracts(t *testing.T) {
+func TestSkipConsensusLayer(t *testing.T) {
 	chainConfig := chain.TestChainOsakaConfig.Copy()
-	chainConfig.DepositContract = common.Address{}
 	requestsHash := empty.RequestsHash
-	header := &types.Header{Difficulty: *ProofOfStakeDifficulty, Time: 1, RequestsHash: &requestsHash}
+	header := &types.Header{
+		Difficulty:            *ProofOfStakeDifficulty,
+		Number:                *uint256.NewInt(1),
+		Time:                  1,
+		ParentBeaconBlockRoot: &common.Hash{1},
+		RequestsHash:          &requestsHash,
+	}
 	logger := log.New()
-	finalize := func(engine *Merge, ibs *state.IntraBlockState, syscall rules.SystemCall) (types.FlatRequests, error) {
-		return engine.Finalize(chainConfig, header, ibs, nil, nil, nil,
-			consensuschain.NewReader(chainConfig, nil, nil, logger), syscall, false, logger)
-	}
-	noCall := func(contract accounts.Address, _ []byte) ([]byte, error) {
-		return nil, fmt.Errorf("unexpected system call to %x", contract)
-	}
-
 	var eth1Engine rules.Engine
-	_, err := finalize(New(eth1Engine), state.New(state.NewNoopReader()), noCall)
-	require.ErrorContains(t, err, "Empty Code")
+	skip := New(eth1Engine)
+	skip.SkipConsensusLayer = true
 
-	allowEmpty := New(eth1Engine)
-	allowEmpty.AllowEmptyRequestContracts = true
-	requests, err := finalize(allowEmpty, state.New(state.NewNoopReader()), noCall)
+	initialize := func(engine *Merge) []accounts.Address {
+		var called []accounts.Address
+		syscall := func(addr accounts.Address, _ []byte, _ *state.IntraBlockState, _ *types.Header, _ bool) ([]byte, error) {
+			called = append(called, addr)
+			return nil, nil
+		}
+		require.NoError(t, engine.Initialize(chainConfig, readerMock{config: chainConfig}, header, state.New(state.NewNoopReader()), syscall, logger, nil))
+		return called
+	}
+	require.Equal(t, []accounts.Address{params.BeaconRootsAddress, params.HistoryStorageAddress}, initialize(New(eth1Engine)))
+	require.Equal(t, []accounts.Address{params.HistoryStorageAddress}, initialize(skip))
+
+	// Request contracts with code and a deposit log the parser rejects.
+	ibs := state.New(state.NewNoopReader())
+	for _, addr := range []accounts.Address{chainConfig.GetWithdrawalRequestContract(), chainConfig.GetConsolidationRequestContract()} {
+		require.NoError(t, ibs.SetCode(addr, []byte{0x00}, tracing.CodeChangeUnspecified))
+	}
+	depositTopic := common.HexToHash("0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")
+	receipts := types.Receipts{{Logs: []*types.Log{{Address: chainConfig.DepositContract, Topics: []common.Hash{depositTopic}}}}}
+	finalize := func(engine *Merge) (types.FlatRequests, error) {
+		return engine.Finalize(chainConfig, header, ibs, nil, receipts, nil, consensuschain.NewReader(chainConfig, nil, nil, logger),
+			func(contract accounts.Address, _ []byte) ([]byte, error) {
+				return nil, fmt.Errorf("unexpected system call to %x", contract)
+			}, false, logger)
+	}
+	_, err := finalize(New(eth1Engine))
+	require.ErrorContains(t, err, "deposit")
+	requests, err := finalize(skip)
 	require.NoError(t, err)
 	require.Empty(t, requests)
 	require.Equal(t, empty.RequestsHash, *requests.Hash())
-
-	// A request contract with code is still called.
-	ibs := state.New(state.NewNoopReader())
-	withdrawals := chainConfig.GetWithdrawalRequestContract()
-	require.NoError(t, ibs.SetCode(withdrawals, []byte{0x00}, tracing.CodeChangeUnspecified))
-	header.RequestsHash = nil
-	requests, err = finalize(allowEmpty, ibs, func(contract accounts.Address, _ []byte) ([]byte, error) {
-		if contract != withdrawals {
-			return nil, fmt.Errorf("unexpected system call to %x", contract)
-		}
-		return []byte{1}, nil
-	})
-	require.NoError(t, err)
-	require.Equal(t, types.FlatRequests{{Type: types.WithdrawalRequestType, RequestData: []byte{1}}}, requests)
 }

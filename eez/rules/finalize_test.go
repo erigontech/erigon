@@ -128,6 +128,32 @@ func TestInitializeAndFinalize(t *testing.T) {
 	require.Equal(t, empty.RequestsHash, *block.Header().RequestsHash)
 }
 
+// TestConsensusLayerContractsIgnored deploys the EIP-4788, 7002 and 7251
+// contracts with code that writes storage when called: an EEZ block calls
+// none of them.
+func TestConsensusLayerContractsIgnored(t *testing.T) {
+	cfg, ibs, header := devnetBlock1(t)
+	e, err := New(cfg)
+	require.NoError(t, err)
+	custom, syscall := syscalls(cfg, e, header, ibs)
+	logger := log.New()
+	contracts := []accounts.Address{params.BeaconRootsAddress, cfg.GetWithdrawalRequestContract(), cfg.GetConsolidationRequestContract()}
+	for _, addr := range contracts {
+		// PUSH1 1 PUSH1 0 SSTORE STOP
+		require.NoError(t, ibs.SetCode(addr, []byte{0x60, 0x01, 0x60, 0x00, 0x55, 0x00}, tracing.CodeChangeUnspecified))
+	}
+
+	require.NoError(t, e.Initialize(cfg, nil, header, ibs, custom, logger, nil))
+	requests, err := e.Finalize(cfg, header, ibs, nil, types.Receipts{}, []*types.Withdrawal{}, nil, syscall, false, logger)
+	require.NoError(t, err)
+	require.Empty(t, requests)
+	for _, addr := range contracts {
+		v, err := ibs.GetState(addr, accounts.InternKey(common.Hash{}))
+		require.NoError(t, err)
+		require.True(t, v.IsZero(), "%x was called", addr)
+	}
+}
+
 func TestFinalizeRejectsWithdrawals(t *testing.T) {
 	cfg, ibs, header := devnetBlock1(t)
 	e, err := New(cfg)
