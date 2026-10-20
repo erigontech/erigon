@@ -1,5 +1,9 @@
 # Erigon v3.9.0 — TBD
 
+### Breaking Changes
+
+- rpc: historical requests now check available state history and block transactions as well as configured retention. Requests below the observed boundary return a pruning error, including while a wider retention window refills. Local and remote history-lookup failures now propagate to RPC callers. `eth_capabilities` reports these availability bounds without changing the configured deletion policy. Reward requests to `eth_feeHistory` stop at the first unavailable block; if the oldest requested block is unavailable, the result is empty without a pruning error. Header-only fee history remains available, and `eth_gasPrice` keeps its fallback behavior. Count-limited `erigon_getLatestLogs` queries can finish within retained history without requiring the full requested range. Unpruned MDBX-only nodes now advertise minimum block 0 to peers. This can be a breaking change (#23776) — by @yperbasis
+
 # Erigon v3.8.0 — TBD
 
 ### Breaking Changes
