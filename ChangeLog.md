@@ -1,5 +1,9 @@
 # Erigon v3.9.0 — TBD
 
+### Breaking Changes
+
+- cl/beacon: `GET /eth/v1/events` now subscribes to every `topics` query parameter, as the Beacon API declares it, and still splits each value on commas; previously only the first value was read. A request with no `topics`, or with an unknown or empty value in any `topics` parameter, now gets `400` instead of a stream: `topics=head&topics=bogus` and `topics=head&topics=` used to open a `head` stream, and a request without `topics` opened a stream that never sent an event. A client that sends a topic Erigon does not support yet, such as `fast_confirmation`, in a later parameter now gets `400`. This can be a breaking change for clients that relied on the old stream (#24722) — by @0xShadowX
+
 # Erigon v3.8.0 — TBD
 
 ### Breaking Changes
