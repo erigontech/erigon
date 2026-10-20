@@ -821,10 +821,14 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 		}
 		return acc, r.source, r.version, nil
 	case outcomeReturnZero, outcomeReturnEmpty:
-		// Absent because a prior tx self-destructed it; the SD dependency is already
-		// recorded. Return absent WITHOUT re-seeding the committed origin — a stale origin
-		// read would be invalidated forever by the same-tx create+destruct cross-check
-		// (same hazard the outcomeMapDone gate above avoids).
+		// Absent because a prior tx self-destructed it. Return absent WITHOUT re-seeding
+		// the committed origin — a stale origin read would be invalidated forever by the
+		// same-tx create+destruct cross-check (same hazard the outcomeMapDone gate above
+		// avoids). The absence is recorded at the destruct, so later loads in this tx
+		// keep it and a re-creation flushed since invalidates it.
+		if _, ok := s.versionedReads.GetAddress(addr); !ok && s.versionMap.IsNetAbsent(addr, s.txIndex) {
+			s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: MapRead, Version: r.version}})
+		}
 		return nil, r.source, r.version, nil
 	case outcomeReturnDefault:
 		// versionMap miss: the single point where the committed whole-account origin

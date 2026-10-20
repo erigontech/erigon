@@ -128,6 +128,19 @@ func TestReceiptRootIntegrity(t *testing.T) {
 	}
 }
 
+func TestReceiptRootIntegrity_EntriesMismatchFailsWithoutFailFast(t *testing.T) {
+	enableHistoricalRCache(t)
+	ctx := t.Context()
+	txsPerBlock := []int{0, 2, 0, 0, 1, 0, 3, 0}
+	db, br := newRCacheChain(t, txsPerBlock, map[uint64]bool{8: true, 9: true})
+
+	sc := integrity.SamplerCfg{Seed: 1, SampleRatio: 1}
+	rangeErr := integrity.CheckRCacheRootAtBlkRange(ctx, sc, db, br, chain.AllProtocolChanges, 1, uint64(len(txsPerBlock)), false, log.New())
+	require.ErrorIs(t, rangeErr, integrity.ErrIntegrity)
+	autoErr := integrity.CheckReceiptRootIntegrity(ctx, sc, db, br, chain.AllProtocolChanges, false, log.New())
+	require.ErrorIs(t, autoErr, integrity.ErrIntegrity)
+}
+
 func TestReceiptRootIntegrity_FilesOnlyTip(t *testing.T) {
 	enableHistoricalRCache(t)
 	ctx := t.Context()

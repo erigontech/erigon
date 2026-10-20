@@ -1529,7 +1529,7 @@ const (
 )
 
 func wipedByDestruct(path AccountPath) bool {
-	return path == BalancePath || path == NoncePath || path == CodeSizePath || path == StoragePath
+	return path == AddressPath || path == BalancePath || path == NoncePath || path == CodeSizePath || path == StoragePath
 }
 
 // validateRead validates one typed read. The recorded value stays typed T (never boxed):

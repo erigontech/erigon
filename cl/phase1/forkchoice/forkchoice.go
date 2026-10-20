@@ -195,12 +195,12 @@ type ForkChoiceStore struct {
 	probabilisticHeadGetter bool
 
 	// [New in Gloas:EIP7732]
-	ptcVoteMu                   sync.Mutex // protects live payload vote updates, paired reads, and first-valid gossip tracking
-	payloadTimelinessVote       sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
-	payloadDataAvailabilityVote sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
-	payloadAttestationSeenSlot  uint64
-	payloadAttestationSeen      map[uint64]struct{}
-	payloadAttestationContexts  *payloadAttestationValidationContexts
+	ptcVoteMu                    sync.Mutex // protects live payload vote updates, paired reads, and first-valid gossip tracking
+	payloadTimelinessVote        sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
+	payloadDataAvailabilityVote  sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
+	payloadAttestationSeen       map[payloadAttestationSeenKey]struct{}
+	payloadAttestationPrunedSlot uint64
+	payloadAttestationContexts   *payloadAttestationValidationContexts
 	// [New in Gloas:EIP7732] Block timeliness tracking.
 	// Pre-GLOAS: stores [block_timely, false] (only index 0 is meaningful).
 	// Post-GLOAS: stores [block_timely, payload_timely] — two independent booleans.
@@ -736,6 +736,10 @@ func (f *ForkChoiceStore) updateChildren(parentSlot uint64, parent, child common
 // Time returns current time
 func (f *ForkChoiceStore) Time() uint64 {
 	return f.timeMs.Load() / 1000
+}
+
+func (f *ForkChoiceStore) GenesisTime() uint64 {
+	return f.genesisTime
 }
 
 // ProposerBoostRoot returns proposer boost root
