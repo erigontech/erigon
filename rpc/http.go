@@ -298,20 +298,32 @@ func newHTTPServerConn(r *http.Request, w http.ResponseWriter, body io.Reader) S
 // readAllBody reads r to the end, sizing the buffer from the hint when there is
 // one so that a large body does not have to be grown into.
 func readAllBody(r io.Reader, hint int) ([]byte, error) {
-	// A byte past the hint, so a body of exactly hint bytes sees EOF without the
-	// buffer doubling right at the end.
+	// A byte past the hint, so a body of exactly hint bytes sees EOF without
+	// another chunk right at the end.
 	buf := make([]byte, 0, max(hint+1, 512))
+	var chunks [][]byte
+	size := 0
 	for {
 		if len(buf) == cap(buf) {
-			buf = slices.Grow(buf, cap(buf))
+			chunks = append(chunks, buf)
+			size += len(buf)
+			buf = make([]byte, 0, size)
 		}
 		n, err := r.Read(buf[len(buf):cap(buf)])
 		buf = buf[:len(buf)+n]
 		if err != nil {
-			if errors.Is(err, io.EOF) {
+			if !errors.Is(err, io.EOF) {
+				return nil, err
+			}
+			if len(chunks) == 0 {
 				return buf, nil
 			}
-			return buf, err
+			// Filled chunks are joined once at the end: growing one slice copies a large body several times.
+			body := make([]byte, 0, size+len(buf))
+			for _, c := range chunks {
+				body = append(body, c...)
+			}
+			return append(body, buf...), nil
 		}
 	}
 }
