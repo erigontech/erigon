@@ -168,6 +168,7 @@ type VersionMap struct {
 	// nonEmpty latches before the first entry is taken: nothing removes entries.
 	nonEmpty atomic.Bool
 	trace    bool
+	eip8246  bool
 }
 
 func NewVersionMap(changes types.BlockAccessList) *VersionMap {
@@ -189,6 +190,10 @@ func (vm *VersionMap) load(addr accounts.Address) *AddressEntry {
 
 func (vm *VersionMap) SetTrace(trace bool) {
 	vm.trace = trace
+}
+
+func (vm *VersionMap) SetEIP8246(enabled bool) {
+	vm.eip8246 = enabled
 }
 
 // StorageKeys returns every storage slot key recorded for addr. Used by
@@ -1418,7 +1423,11 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 				// conflict, so the read stays valid and does not re-execute.
 				valid = VersionValid
 			} else if valid == VersionValid && path == BalancePath && version == rr.Version() && matchesLive != nil && !matchesLive() {
-				if _, wiped := vm.FindDoneSelfDestructInRange(addr, rr.Version().TxIndex, txIndex, true); !absent || !wiped {
+				lo := rr.Version().TxIndex
+				if vm.eip8246 {
+					lo++
+				}
+				if _, wiped := vm.FindDoneSelfDestructInRange(addr, lo, txIndex, true); !absent || !wiped {
 					valid = VersionInvalid
 					invReason = "done-balance"
 				}

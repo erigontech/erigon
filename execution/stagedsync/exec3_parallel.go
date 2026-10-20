@@ -1311,6 +1311,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	executor, ok := pe.blockExecutors[blockNum]
 	if !ok {
 		executor = newBlockExec(execRequest.block, execRequest.gasPool, execRequest.accessList, execRequest.applyResults, execRequest.commitResults, execRequest.profile, execRequest.exhausted)
+		executor.versionMap.SetEIP8246(pe.cfg.chainConfig.IsAmsterdam(execRequest.block.Time()))
 	}
 
 	for i, txTask := range execRequest.tasks {
