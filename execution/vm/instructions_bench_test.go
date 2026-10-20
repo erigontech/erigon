@@ -452,3 +452,109 @@ func BenchmarkExpInterpreter(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkExpNegativeOne(b *testing.B) {
+	for _, tc := range []struct {
+		name           string
+		base, exponent uint256.Int
+	}{
+		{"negative_one/odd", *new(uint256.Int).SetAllOne(), *new(uint256.Int).SetAllOne()},
+		{"negative_one/even", *new(uint256.Int).SetAllOne(), uint256.Int{0, 0, 0, 1}},
+		{"small_base", uint256.Int{3}, uint256.Int{13}},
+		{"other_large_base", uint256.Int{3, 4, 5, 6}, uint256.Int{13}},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			scope := &CallContext{}
+			b.ReportAllocs()
+			for b.Loop() {
+				scope.Stack.Reset()
+				scope.Stack.push(tc.exponent)
+				scope.Stack.push(tc.base)
+				if _, _, err := opExp(0, nil, scope); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkOpTransientStorage(b *testing.B) {
+	const txOps = 20 * 1024
+	cases := []struct {
+		name               string
+		tstore, fixedValue bool
+		opsPerKey          uint64
+	}{
+		{"tload/fixed_key", false, false, txOps},
+		{"tload/key_per_1024_ops", false, false, 1024},
+		{"tload/fresh_key", false, false, 1},
+		{"tstore/fixed_key", true, false, txOps},
+		{"tstore/fixed_key/fixed_value", true, true, txOps},
+		{"tstore/key_per_1024_ops", true, false, 1024},
+		{"tstore/key_per_1024_ops/fixed_value", true, true, 1024},
+		{"tstore/fresh_key", true, false, 1},
+	}
+	for _, c := range cases {
+		b.Run(c.name, func(b *testing.B) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+			addr := accounts.InternAddress(common.Address{1})
+			scope := &CallContext{Contract: *NewContract(addr, addr, addr, uint256.Int{})}
+			tstore := func(key, val uint256.Int) {
+				scope.Stack.push(val)
+				scope.Stack.push(key)
+				opTstore(0, evm, scope)
+			}
+			one := *uint256.NewInt(1)
+			var key, val uint256.Int
+			for i := uint64(0); b.Loop(); i++ {
+				if i%txOps == 0 {
+					b.StopTimer()
+					ibs.Reset()
+					tstore(uint256.Int{^uint64(0)}, one)
+					b.StartTimer()
+				}
+				if i%c.opsPerKey == 0 {
+					key.SetUint64(i % txOps / c.opsPerKey)
+					if !c.tstore && c.opsPerKey > 1 {
+						tstore(key, one)
+					}
+				}
+				switch {
+				case !c.tstore:
+					scope.Stack.push(key)
+					opTload(0, evm, scope)
+					scope.Stack.drop()
+				case c.fixedValue:
+					val.AddUint64(&key, 1)
+					tstore(key, val)
+				default:
+					val.SetUint64(i + 2)
+					tstore(key, val)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkContextAddress(b *testing.B) {
+	address := accounts.InternAddress(common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678"))
+	for _, tc := range []struct {
+		name string
+		op   executionFunc
+	}{{"address", opAddress}, {"caller", opCaller}, {"origin", opOrigin}, {"coinbase", opCoinbase}} {
+		b.Run(tc.name, func(b *testing.B) {
+			evm := &EVM{TxContext: evmtypes.TxContext{Origin: address}, Context: evmtypes.BlockContext{Coinbase: address}}
+			scope := evm.getCallContext(*NewContract(address, address, address, uint256.Int{}), nil, mdgas.MdGas{})
+			defer evm.putCallContext(scope)
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, _, err := tc.op(0, evm, scope); err != nil {
+					b.Fatal(err)
+				}
+				scope.Stack.Reset()
+			}
+		})
+	}
+}

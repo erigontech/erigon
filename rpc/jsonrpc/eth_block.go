@@ -92,7 +92,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	if err != nil {
 		return nil, err
 	}
-	if err := api.BaseAPI.checkPruneHistory(ctx, tx, stateBlockNumber); err != nil {
+	if err := api.BaseAPI.checkPruneStateAfterSystemTx(ctx, tx, stateBlockNumber); err != nil {
 		return nil, err
 	}
 	var stateReader state.StateReader
@@ -406,7 +406,7 @@ func (api *BaseAPI) blockAccessListBytes(ctx context.Context, tx kv.TemporalTx, 
 		return nil, err
 	}
 	if len(data) == 0 {
-		data, err = api.balRegenerator.GetBlockAccessListBytes(ctx, chainConfig, tx, blockHash, blockNum)
+		data, err = api.balRegenerator.GetBlockAccessListBytes(ctx, chainConfig, tx, blockHash, blockNum, nil)
 		if errors.Is(err, state.ErrPruned) {
 			return nil, blockAccessListPrunedHistoryError()
 		}

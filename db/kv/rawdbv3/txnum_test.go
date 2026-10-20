@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -93,6 +94,46 @@ func TestMaxTxNumNilCursor(t *testing.T) {
 		require.NoError(err)
 		require.True(ok)
 		require.Equal(99, int(maxTxNum))
+		return nil
+	}))
+}
+
+func TestExactTxNumBounds(t *testing.T) {
+	db, spans := newTxNumsDB(t, 3)
+	ctx := t.Context()
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		return tx.Delete(kv.MaxTxNum, hexutil.EncodeTs(1))
+	}))
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		cursor, cursorErr := tx.Cursor(kv.MaxTxNum)
+		require.NoError(t, cursorErr)
+		defer cursor.Close()
+		for _, c := range []kv.Cursor{nil, cursor} {
+			for _, tc := range []struct {
+				block, min, max uint64
+				hasMin, hasMax  bool
+			}{
+				{0, 0, spans[0].max, true, true},
+				{1, spans[1].min, 0, true, false},
+				{2, 0, spans[2].max, false, true},
+				{3, spans[2].max + 1, 0, true, false},
+			} {
+				minTxNum, ok, err := TxNums.MinExact(ctx, tx, c, tc.block)
+				require.NoError(t, err)
+				require.Equal(t, tc.hasMin, ok)
+				require.Equal(t, tc.min, minTxNum)
+				maxTxNum, ok, err := TxNums.MaxExact(ctx, tx, c, tc.block)
+				require.NoError(t, err)
+				require.Equal(t, tc.hasMax, ok)
+				require.Equal(t, tc.max, maxTxNum)
+			}
+		}
+		minTxNum, err := TxNums.MinWithCursor(ctx, tx, cursor, 2)
+		require.NoError(t, err)
+		require.Equal(t, spans[2].max+1, minTxNum, "Min retains its latest-state fallback")
+		maxTxNum, err := TxNums.MaxWithCursor(ctx, tx, cursor, 1)
+		require.NoError(t, err)
+		require.Equal(t, spans[2].max, maxTxNum, "Max retains its latest-state fallback")
 		return nil
 	}))
 }

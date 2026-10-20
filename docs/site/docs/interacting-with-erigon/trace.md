@@ -9,13 +9,13 @@ sidebar_position: 7
 
 The `trace` module is for getting a deeper insight into transaction processing. It includes two sets of calls the transaction trace filtering API and the ad-hoc tracing API.
 
-In order to use the Transaction-Trace Filtering API, Erigon must be fully synced with the argument `trace` in `http.api` flag.
+In order to use the Transaction-Trace Filtering API, Erigon must be fully synced with the argument `trace` in the `--http.api` flag.
 
 ```bash
 ./build/bin/erigon --http.api: eth,erigon,trace
 ```
 
-As for the Ad-hoc Tracing API, as long the blocks have not yet been pruned, the RPC calls will work.
+As for the Ad-hoc Tracing API, as long as the blocks have not yet been pruned, the RPC calls will work.
 
 ## The Ad-hoc Tracing API
 
@@ -279,7 +279,7 @@ Executes the given call and returns a number of possible traces for it.
 
 #### Parameters
 
-1. `Object` - \[Transaction object] where `from` field is optional and `nonce` field is omitted.
+1. `Object` - \[Transaction object] where the `from` field is optional and the `nonce` field is omitted.
 2. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
 3. `Quantity` or `Tag` - (optional) Integer of a block number, or the string `'earliest'` or `'latest'`. `'pending'` is not supported and returns `-32602`: the call is executed against committed state, so there is no pending block to execute on top of.
 
@@ -324,7 +324,7 @@ Response
 
 ### trace\_callMany
 
-Performs multiple call traces on top of the same block. i.e. transaction `n` will be executed on top of a pending block with all `n-1` transactions applied (traced) first. Allows to trace dependent transactions.
+Performs multiple call traces on top of the same block. i.e. transaction `n` will be executed on top of the selected block's state with all `n-1` transactions applied (traced) first. Allows to trace dependent transactions.
 
 #### Parameters
 
@@ -597,7 +597,7 @@ Response
 
 ### trace\_block
 
-Returns traces created at given block.
+Returns traces created at the given block.
 
 #### Parameters
 
@@ -659,7 +659,7 @@ Response
 
 ### trace\_filter
 
-Returns traces matching given filter
+Returns traces matching the given filter.
 
 #### Parameters
 
@@ -800,7 +800,7 @@ Response
 
 ### trace\_transaction
 
-Returns all traces of given transaction
+Returns all traces of the given transaction.
 
 #### Parameters
 

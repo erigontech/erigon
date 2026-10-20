@@ -1462,8 +1462,11 @@ func NewP2PConfig(
 		MetricsEnabled:  metricsEnabled,
 	}
 	if netRestrict != "" {
-		cfg.NetRestrict = new(netutil.Netlist)
-		cfg.NetRestrict.Add(netRestrict)
+		list, err := netutil.ParseNetlist(netRestrict)
+		if err != nil {
+			return nil, fmt.Errorf("bad option %s: %w", NetrestrictFlag.Name, err)
+		}
+		cfg.NetRestrict = list
 	}
 	if staticPeers != nil {
 		staticNodes, err := enode.ParseNodesFromURLs(staticPeers)

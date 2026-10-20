@@ -2,6 +2,7 @@
 
 ### Breaking Changes
 
+- rpc: historical requests now check available state history and block transactions as well as configured retention. Requests below the observed boundary return a pruning error, including while a wider retention window refills. Local and remote history-lookup failures now propagate to RPC callers. `eth_capabilities` reports these availability bounds without changing the configured deletion policy. Reward requests to `eth_feeHistory` stop at the first unavailable block; if the oldest requested block is unavailable, the result is empty without a pruning error. Header-only fee history remains available, and `eth_gasPrice` keeps its fallback behavior. Count-limited `erigon_getLatestLogs` queries can finish within retained history without requiring the full requested range. Unpruned MDBX-only nodes now advertise minimum block 0 to peers. This can be a breaking change (#23776) — by @yperbasis
 - db/datadir/reset: `erigon snapshots reset` now always removes `chaindata/`, and any leftover `heimdall/` and `polygon-bridge/`. `--keep-local-snapshots` keeps snapshot files the preverified set does not describe; `--local` is deprecated, and `--local=false` now means `--keep-local-snapshots` and no longer keeps `chaindata/`. A `.torrent` with a mismatched infohash is removed but its data file stays, so the next start re-hashes it and fetches only the differing pieces instead of the whole file. This can be a breaking change (#25104) — by @awskii
 
 # Erigon v3.8.0 — TBD
@@ -42,6 +43,7 @@
 
 ### Changed
 
+- p2p: the discovery endpoint predictor, which fills the local node record's IP and UDP port when they are not configured, now counts endpoint statements once per reporter network (IPv4 /24, IPv6 /48; hosts on the LAN individually) and ignores statements about an endpoint of the other address family. A node whose discovery peers all share one public /24 or /48 no longer predicts its endpoint from them (#24975) — by @mardgez13
 - rpc: `eth_getBlockTransactionCountByNumber` and `eth_getBlockTransactionCountByHash` read retained body metadata in both local and remote mode, even when transaction payloads are pruned. They return `null` when the body is missing (#23777) — by @yperbasis
 - rpc: `eth_getWitness`, `eth_getTxWitness`, `overlay_callConstructor` and `ots_getContractCreator` check transaction and state-history retention before replay. `ots_getTransactionBySenderAndNonce` checks transaction retention before reading the matching transaction. These methods can now return a pruning error instead of attempting reads outside the required windows (#23777) — by @yperbasis
 - rpc: `trace_call` and `trace_callMany` treat an explicit `null` `data` or `input` in a call object as omitted, as `eth_call` does, instead of rejecting the request. Their other optional call-object members already did (#24334) — by @banteg
