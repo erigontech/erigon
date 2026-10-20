@@ -114,18 +114,9 @@ loop:
 	MOVOU X4, X0
 	PMAXSB X9, X0
 	PCMPGTB X11, X0             // PUSH1..PUSH32: the only bytes > 0x5f as int8
-	PMOVMSKB X0, AX
-	TESTL AX, AX
-	JNZ  analyze
-	LEAQ -0x80(R8), CX
-	MOVQ $-1, AX
-	SHLQ CX, AX
-	ANDL AX, R12
-	MOVL R12, 0(DI)
-	MOVQ $0x80, R8
-	JMP  next
+	PTEST  X0, X0
+	JZ   pushfree
 
-analyze:
 	VECTOR(X4, X1, X2, X3, X5)
 	VECTOR(X9, X6, X7, X8, X5)
 
@@ -170,3 +161,12 @@ next:
 	SUBQ $0x80, R8
 	MOVQ R8, entry+32(FP)
 	RET
+
+pushfree:
+	LEAQ -0x80(R8), CX
+	MOVQ $-1, AX
+	SHLQ CX, AX
+	ANDL AX, R12
+	MOVL R12, 0(DI)
+	MOVQ $0x80, R8
+	JMP  next
