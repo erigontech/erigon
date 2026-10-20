@@ -34,7 +34,7 @@ type cachedPrecompile struct {
 
 func cachePrecompile(p PrecompiledContract, tier forkTier, address common.Address) PrecompiledContract {
 	switch p.(type) {
-	case *ecrecover, *bigModExp, *bn254ScalarMulByzantium, *bn254ScalarMulIstanbul,
+	case *bigModExp, *bn254ScalarMulByzantium, *bn254ScalarMulIstanbul,
 		*bn254PairingByzantium, *bn254PairingIstanbul, *blake2F, *pointEvaluation,
 		*bls12381G1MultiExp, *bls12381G2MultiExp, *bls12381Pairing,
 		*bls12381MapFpToG1, *bls12381MapFp2ToG2, *p256Verify:
