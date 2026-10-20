@@ -22,6 +22,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -31,6 +32,8 @@ import (
 	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/gossip"
+	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	"github.com/erigontech/erigon/cl/validator/committee_subscription/mock_services"
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -101,8 +104,7 @@ func TestBeaconCommitteeSubscriptionSucceedsWhenSynced(t *testing.T) {
 
 func TestSyncCommitteeSubscriptionIsUnavailableWhileSyncing(t *testing.T) {
 	_, _, _, _, _, handler, _, syncedDataMgr, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
-	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().ViewHeadState(gomock.Any()).
-		Return(synced_data.ErrNotSynced).AnyTimes()
+	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().Syncing().Return(true).AnyTimes()
 
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
@@ -125,4 +127,57 @@ func TestSyncCommitteeSubscriptionIsUnavailableWhileSyncing(t *testing.T) {
 	defer resp.Body.Close()
 
 	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+}
+
+func postSyncCommitteeSubscriptions(t *testing.T, handler *ApiHandler, subs []ValidatorSyncCommitteeSubscriptionsRequest) int {
+	t.Helper()
+	body, err := json.Marshal(subs)
+	require.NoError(t, err)
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/sync_committee_subscriptions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	handler.mux.ServeHTTP(recorder, req)
+	return recorder.Code
+}
+
+// A validator client subscribes before the period in which its validator joins the committee, so the subnets come
+// from the requested committee positions, not from the head state's committee.
+func TestSyncCommitteeSubscriptionUsesRequestedIndices(t *testing.T) {
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	require.NoError(t, sd.OnHeadState(s))
+	subcommitteeSize := handler.beaconChainCfg.SyncCommitteeSize / handler.beaconChainCfg.SyncCommitteeSubnetCount
+	const untilEpoch = 1_000_000
+	expiry := handler.ethClock.GetSlotTime(untilEpoch * handler.beaconChainCfg.SlotsPerEpoch)
+
+	ctrl := gomock.NewController(t)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	for _, subnet := range []int{0, 2} {
+		gossipManager.EXPECT().SubscribeWithExpiry(gossip.TopicNameSyncCommittee(subnet), expiry).Return(nil).Times(1)
+	}
+	handler.gossipManager = gossipManager
+
+	indices := []string{"1", strconv.FormatUint(2*subcommitteeSize, 10), strconv.FormatUint(3*subcommitteeSize-1, 10)}
+	require.Equal(t, http.StatusOK, postSyncCommitteeSubscriptions(t, handler, []ValidatorSyncCommitteeSubscriptionsRequest{{
+		ValidatorIndex:        uint64(s.ValidatorLength()), // not in the head state: subnets must not depend on it
+		SyncCommitteeIndicies: indices,
+		UntilEpoch:            untilEpoch,
+	}}))
+}
+
+func TestSyncCommitteeSubscriptionRejectsInvalidIndices(t *testing.T) {
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	require.NoError(t, sd.OnHeadState(s))
+	for _, index := range []string{strconv.FormatUint(handler.beaconChainCfg.SyncCommitteeSize, 10), "x", "-1"} {
+		t.Run(index, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			gossipManager := gossip_mock.NewMockGossip(ctrl)
+			gossipManager.EXPECT().SubscribeWithExpiry(gomock.Any(), gomock.Any()).Times(0)
+			handler.gossipManager = gossipManager
+
+			require.Equal(t, http.StatusBadRequest, postSyncCommitteeSubscriptions(t, handler, []ValidatorSyncCommitteeSubscriptionsRequest{
+				{ValidatorIndex: 1, SyncCommitteeIndicies: []string{"0"}, UntilEpoch: 1_000_000},
+				{ValidatorIndex: 2, SyncCommitteeIndicies: []string{index}, UntilEpoch: 1_000_000},
+			}))
+		})
+	}
 }
