@@ -2,6 +2,7 @@ package reset
 
 import (
 	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -461,6 +462,20 @@ func TestResetSkipsLegacyCommitmentHistoryThatStartupRemoves(t *testing.T) {
 		withOsRoot(t, func(root *os.Root) {
 			err := runCoveredRangeReset(t, root, append(slices.Clone(completeLocalMerge), pair[0], pair[1]), nil)
 			qt.Assert(t, qt.IsNotNil(err), qt.Commentf("%s", pair[1]))
+			qt.Assert(t, qt.StringContains(err.Error(), "0-2"))
+		})
+	}
+}
+
+func TestResetCountsLegacyCommitmentHistoryBehindASymlinkedDir(t *testing.T) {
+	for sub, name := range map[string]string{"history": "v1-commitment.0-2.v", "idx": "v1-commitment.0-2.ef"} {
+		withOsRoot(t, func(root *os.Root) {
+			external := t.TempDir()
+			qt.Assert(t, qt.IsNil(os.MkdirAll(filepath.Join(root.Name(), "snapshots"), 0o755)))
+			qt.Assert(t, qt.IsNil(os.Symlink(external, filepath.Join(root.Name(), "snapshots", sub))))
+			qt.Assert(t, qt.IsNil(os.WriteFile(filepath.Join(external, name), nil, 0o644)))
+			err := runCoveredRangeReset(t, root, completeLocalMerge, nil)
+			qt.Assert(t, qt.IsNotNil(err), qt.Commentf("%s", sub))
 			qt.Assert(t, qt.StringContains(err.Error(), "0-2"))
 		})
 	}

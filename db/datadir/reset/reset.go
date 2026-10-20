@@ -164,11 +164,16 @@ func (reset *Reset) checkStateBuilds() error {
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
+		info, err := os.Lstat(dir)
+		walkedAtStartup := err == nil && info.IsDir()
 		for _, entry := range entries {
 			if entry.IsDir() {
 				continue
 			}
-			name, kept := reset.Dirs.RenamedOldVersion(dir, entry.Name())
+			name, kept := entry.Name(), true
+			if walkedAtStartup {
+				name, kept = reset.Dirs.RenamedOldVersion(dir, entry.Name())
+			}
 			if !kept {
 				continue
 			}
