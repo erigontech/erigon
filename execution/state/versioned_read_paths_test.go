@@ -128,6 +128,28 @@ func TestVersionedRead_B_DeletedStateObjectBeatsWarmStorageRead(t *testing.T) {
 	assert.True(t, v.IsZero(), "slot of a destructed account reads as zero, not as the recorded value")
 }
 
+func TestVersionedRead_B_DeletedStateObjectBeatsWarmCodeSizeRead(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xb4})
+	ibs, mvhm := warmReadIBS(t, addr)
+
+	mvhm.WriteCodeSize(addr, Version{TxIndex: 1, Incarnation: 0}, 7, true)
+	size, err := ibs.GetCodeSize(addr)
+	require.NoError(t, err)
+	require.Equal(t, 7, size, "first read resolves from the version map")
+
+	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 2, Incarnation: 0}, true, true)
+	so, err := ibs.getStateObject(addr, true)
+	require.NoError(t, err)
+	require.Nil(t, so)
+	parked, ok := ibs.stateObjects[addr]
+	require.True(t, ok && parked.deleted, "getStateObject must park a deleted object")
+
+	size, err = ibs.GetCodeSize(addr)
+	require.NoError(t, err)
+	assert.Zero(t, size, "code size of a destructed account reads as zero, not as the recorded value")
+}
+
 // The read-once fast path must return exactly what the read-set-hit branch it
 // replaces returns: same value, source, version and clean flag.
 func TestVersionedRead_B_WarmStorageReadReturnsReadSetTuple(t *testing.T) {
@@ -148,7 +170,7 @@ func TestVersionedRead_B_WarmStorageReadReturnsReadSetTuple(t *testing.T) {
 	assert.EqualValues(t, 99, v.Uint64())
 	assert.Equal(t, MapRead, source)
 	assert.Equal(t, version, gotVersion)
-	assert.False(t, clean, "a read-set hit is never clean: it carries no dirty value to keep on revert")
+	assert.True(t, clean, "a read-set hit is clean: this tx has no write of the slot, so a revert deletes the write")
 }
 
 func newTouchTestIBS(t *testing.T, addr accounts.Address, acc accounts.Account, noMaterialize bool) *IntraBlockState {
@@ -275,6 +297,102 @@ func TestVersionedRead_DestructedStorageRecordsBALReadAfterRevert(t *testing.T) 
 	require.Len(t, blockAccessList, 1)
 	require.Equal(t, addr.Value(), blockAccessList[0].Address)
 	require.Equal(t, []accounts.StorageKey{key}, blockAccessList[0].StorageReads)
+}
+
+// A fee credit revives a destroyed account without writing a code-hash cell, so
+// the keccak("") read must carry the version of the stale cell below the destruct.
+func TestVersionedRead_RevivedStaleCodeHashUsesCodeHashVersion(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xca})
+	vm := NewVersionMap(nil)
+	codeHashVersion := Version{TxIndex: 0}
+	vm.WriteCodeHash(addr, codeHashVersion, accounts.InternCodeHash(common.Hash{0x01}), true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
+	revived := accounts.NewAccount()
+	revived.Balance.SetUint64(1)
+	vm.WriteAddress(addr, Version{TxIndex: 2}, &revived, true)
+	vm.WriteBalance(addr, Version{TxIndex: 2}, revived.Balance, true)
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 3)
+	codeHash, err := ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	require.Equal(t, accounts.EmptyCodeHash, codeHash)
+	reads := ibs.VersionedReads()
+	io := NewVersionedIO(4)
+	io.RecordReads(Version{TxIndex: 3}, reads)
+	require.Equal(t, VersionValid, vm.ValidateVersion(3, io, validateEqualVersion, true, ""))
+}
+
+// A field read past a self-destruct returns zero and records the wiped read at
+// the destruct's version, so a lower tx that later revives the field invalidates it.
+func TestVersionedRead_RevivedFieldWipedReadCaughtAtCommit(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		read    func(*IntraBlockState, accounts.Address) (bool, error)
+		version func(ReadSet, accounts.Address) (Version, bool)
+		revive  func(*VersionMap, accounts.Address, Version)
+	}{
+		{
+			"balance",
+			func(ibs *IntraBlockState, a accounts.Address) (bool, error) {
+				v, err := ibs.GetBalance(a)
+				return v.IsZero(), err
+			},
+			func(rs ReadSet, a accounts.Address) (Version, bool) {
+				r, ok := rs.GetBalance(a)
+				return r.Version, ok
+			},
+			func(vm *VersionMap, a accounts.Address, v Version) { vm.WriteBalance(a, v, *uint256.NewInt(777), true) },
+		},
+		{
+			"nonce",
+			func(ibs *IntraBlockState, a accounts.Address) (bool, error) {
+				v, err := ibs.GetNonce(a)
+				return v == 0, err
+			},
+			func(rs ReadSet, a accounts.Address) (Version, bool) {
+				r, ok := rs.GetNonce(a)
+				return r.Version, ok
+			},
+			func(vm *VersionMap, a accounts.Address, v Version) { vm.WriteNonce(a, v, 1, true) },
+		},
+		{
+			"code size",
+			func(ibs *IntraBlockState, a accounts.Address) (bool, error) {
+				v, err := ibs.GetCodeSize(a)
+				return v == 0, err
+			},
+			func(rs ReadSet, a accounts.Address) (Version, bool) {
+				r, ok := rs.GetCodeSize(a)
+				return r.Version, ok
+			},
+			func(vm *VersionMap, a accounts.Address, v Version) { vm.WriteCodeSize(a, v, 3, true) },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			addr := accounts.InternAddress([20]byte{0xcb})
+			vm := NewVersionMap(nil)
+			destructVersion := Version{TxIndex: 1}
+			vm.WriteSelfDestruct(addr, destructVersion, true, true)
+			ibs := NewWithVersionMap(&emptyReader{}, vm)
+			defer ibs.Close()
+			ibs.SetTxContext(1, 3)
+			zero, err := tt.read(ibs, addr)
+			require.NoError(t, err)
+			require.True(t, zero)
+			reads := ibs.VersionedReads()
+
+			io := NewVersionedIO(4)
+			io.RecordReads(Version{TxIndex: 3}, reads)
+			require.Equal(t, VersionValid, vm.ValidateVersion(3, io, validateEqualVersion, true, ""))
+			tt.revive(vm, addr, Version{TxIndex: 2})
+			require.Equal(t, VersionInvalid, vm.ValidateVersion(3, io, validateEqualVersion, true, ""))
+		})
+	}
 }
 
 // CodePath is exempt from the SelfDestruct short-circuit. Even if SD
@@ -611,6 +729,15 @@ func (r *refreshReader) ReadAccountData(accounts.Address) (*accounts.Account, er
 	return r.account, nil
 }
 
+func (r *refreshReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (r *refreshReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
 func (r *refreshReader) ReadAccountDataForDebug(accounts.Address) (*accounts.Account, error) {
 	return r.account, nil
 }
@@ -779,4 +906,60 @@ func TestVersionedRead_D1_WriteSetHitWithStaleReadSetRecordsDep(t *testing.T) {
 	assert.True(t, ibs.HadInvalidRead(), "stale-read writeSet hit must set the invalid-read verdict")
 	assert.Equal(t, 3, ibs.DepTxIndex(), "verdict names the versionMap Done predecessor")
 	assert.Equal(t, uint256.NewInt(77), &bal, "no pause hook: returns the tx's own intra-tx write")
+}
+
+// E2 for a slot this tx did not write on an address it did: the repeat SLOAD
+// serves the recorded read, and commit-time validation catches it if stale.
+func TestVersionedRead_E2_StorageOnWrittenAddressCaughtAtCommit(t *testing.T) {
+	t.Parallel()
+	_, tx, domains := NewTestRwTx(t)
+	mvhm := NewVersionMap(nil)
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 5)
+
+	addr := accounts.InternAddress([20]byte{0xe3})
+	written, read := accounts.InternKey([32]byte{0x01}), accounts.InternKey([32]byte{0x02})
+	mvhm.WriteStorage(addr, read, Version{TxIndex: 3, Incarnation: 0}, *uint256.NewInt(30), true)
+
+	require.NoError(t, ibs.SetState(addr, written, *uint256.NewInt(77)))
+	ibs.versionedReads.SetStorage(addr, read, VersionedRead[uint256.Int]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
+		Val:        *uint256.NewInt(99),
+	})
+	got, err := ibs.GetState(addr, read)
+	require.NoError(t, err)
+	assert.EqualValues(t, 99, got.Uint64(), "read-once returns the recorded value")
+
+	var io VersionedIO
+	ibs.MergeTxIOInto(&io, ibs.VersionedWrites())
+	assert.Equal(t, VersionInvalid, mvhm.ValidateVersion(5, &io, validateEqualVersion, true, ""), "commit-time validation catches the stale read")
+}
+
+// E2 for the code size of an address this tx wrote another field of.
+func TestVersionedRead_E2_CodeSizeOnWrittenAddressCaughtAtCommit(t *testing.T) {
+	t.Parallel()
+	_, tx, domains := NewTestRwTx(t)
+	mvhm := NewVersionMap(nil)
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 5)
+
+	addr := accounts.InternAddress([20]byte{0xe4})
+	mvhm.WriteCodeSize(addr, Version{TxIndex: 3, Incarnation: 0}, 30, true)
+
+	require.NoError(t, ibs.SetBalance(addr, *uint256.NewInt(77), 0))
+	ibs.versionedReads.SetCodeSize(addr, VersionedRead[int]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
+		Val:        99,
+	})
+	got, err := ibs.GetCodeSize(addr)
+	require.NoError(t, err)
+	assert.Equal(t, 99, got, "read-once returns the recorded value")
+
+	var io VersionedIO
+	ibs.MergeTxIOInto(&io, ibs.VersionedWrites())
+	assert.Equal(t, VersionInvalid, mvhm.ValidateVersion(5, &io, validateEqualVersion, true, ""), "commit-time validation catches the stale read")
 }

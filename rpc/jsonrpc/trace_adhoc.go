@@ -1043,6 +1043,22 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 	return nil
 }
 
+func parseTraceTypes(traceTypes []string) (trace, stateDiff, vmTrace bool, err error) {
+	for _, traceType := range traceTypes {
+		switch traceType {
+		case TraceTypeTrace:
+			trace = true
+		case TraceTypeStateDiff:
+			stateDiff = true
+		case TraceTypeVmTrace:
+			vmTrace = true
+		default:
+			return false, false, false, &rpc.InvalidParamsError{Message: "unrecognized trace type: " + traceType}
+		}
+	}
+	return trace, stateDiff, vmTrace, nil
+}
+
 func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Hash, traceTypes []string, gasBailOut *bool, traceConfig *config.TraceConfig) (*TraceCallResult, error) {
 	if gasBailOut == nil {
 		gasBailOut = new(bool) // false by default
@@ -1127,18 +1143,9 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 	if block == nil {
 		return nil, fmt.Errorf("could not find block  %d", blockNumber)
 	}
-	var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
-	for _, traceType := range traceTypes {
-		switch traceType {
-		case TraceTypeTrace:
-			traceTypeTrace = true
-		case TraceTypeStateDiff:
-			traceTypeStateDiff = true
-		case TraceTypeVmTrace:
-			traceTypeVmTrace = true
-		default:
-			return nil, fmt.Errorf("unrecognized trace type: %s", traceType)
-		}
+	traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace, err := parseTraceTypes(traceTypes)
+	if err != nil {
+		return nil, err
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
@@ -1278,18 +1285,17 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	defer cleanup()
 
 	traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
-	var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
-	for _, traceType := range traceTypes {
-		switch traceType {
-		case TraceTypeTrace:
-			traceTypeTrace = true
-		case TraceTypeStateDiff:
-			traceTypeStateDiff = true
-		case TraceTypeVmTrace:
-			traceTypeVmTrace = true
-		default:
-			return nil, fmt.Errorf("unrecognized trace type: %s", traceType)
+	traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace, err := parseTraceTypes(traceTypes)
+	if err != nil {
+		return nil, err
+	}
+	// A state diff is written through FinalizeTx, which the versioned path does not serve.
+	if !traceTypeStateDiff {
+		var stateOverrides *ethapi.StateOverrides
+		if traceConfig != nil {
+			stateOverrides = traceConfig.StateOverrides
 		}
+		transactions.VersionedCallState(ibs, stateOverrides)
 	}
 	if traceTypeVmTrace {
 		traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
@@ -1629,19 +1635,10 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			return nil, nil, err
 		}
 
-		var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
 		args := callParams[txIndex]
-		for _, traceType := range args.traceTypes {
-			switch traceType {
-			case TraceTypeTrace:
-				traceTypeTrace = true
-			case TraceTypeStateDiff:
-				traceTypeStateDiff = true
-			case TraceTypeVmTrace:
-				traceTypeVmTrace = true
-			default:
-				return nil, nil, fmt.Errorf("unrecognized trace type: %s", traceType)
-			}
+		traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace, err := parseTraceTypes(args.traceTypes)
+		if err != nil {
+			return nil, nil, err
 		}
 
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: args.txHash}
@@ -1803,19 +1800,10 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		return nil, err
 	}
 
-	var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
 	args := callParam
-	for _, traceType := range args.traceTypes {
-		switch traceType {
-		case TraceTypeTrace:
-			traceTypeTrace = true
-		case TraceTypeStateDiff:
-			traceTypeStateDiff = true
-		case TraceTypeVmTrace:
-			traceTypeVmTrace = true
-		default:
-			return nil, fmt.Errorf("unrecognized trace type: %s", traceType)
-		}
+	traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace, err := parseTraceTypes(args.traceTypes)
+	if err != nil {
+		return nil, err
 	}
 
 	traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: args.txHash}
@@ -1956,18 +1944,9 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	defer cleanup()
 
 	traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
-	var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
-	for _, traceType := range traceTypes {
-		switch traceType {
-		case TraceTypeTrace:
-			traceTypeTrace = true
-		case TraceTypeStateDiff:
-			traceTypeStateDiff = true
-		case TraceTypeVmTrace:
-			traceTypeVmTrace = true
-		default:
-			return nil, fmt.Errorf("unrecognized trace type: %s", traceType)
-		}
+	traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace, err := parseTraceTypes(traceTypes)
+	if err != nil {
+		return nil, err
 	}
 	if traceTypeVmTrace {
 		traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
@@ -1975,6 +1954,9 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 
 	ibs := state.New(stateReader)
 	defer ibs.Close()
+	if !traceTypeStateDiff {
+		transactions.VersionedCallState(ibs, nil)
+	}
 
 	var ot OeTracer
 	ot.config, err = parseOeTracerConfig(nil)

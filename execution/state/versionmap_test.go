@@ -1250,6 +1250,59 @@ func TestValidateRead_NilReadOfDestroyedAccountStaysValid(t *testing.T) {
 	require.Equal(t, VersionInvalid, valid)
 }
 
+// A balance-only revival writes no nonce or code cells, so a committed read of
+// those fields taken before the destruct has no cell to version-mismatch
+// against. The destruct wiped them, so the non-empty committed values are stale.
+func TestCommittedReadsBeforeDestructWithBalanceOnlyRevival(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		read func(*IntraBlockState, accounts.Address) (bool, error)
+	}{
+		{"nonce", func(ibs *IntraBlockState, a accounts.Address) (bool, error) {
+			v, err := ibs.GetNonce(a)
+			return v != 0, err
+		}},
+		{"code hash", func(ibs *IntraBlockState, a accounts.Address) (bool, error) {
+			v, err := ibs.GetCodeHash(a)
+			return !v.IsEmpty(), err
+		}},
+		{"code size", func(ibs *IntraBlockState, a accounts.Address) (bool, error) {
+			v, err := ibs.GetCodeSize(a)
+			return v != 0, err
+		}},
+		{"code", func(ibs *IntraBlockState, a accounts.Address) (bool, error) {
+			v, err := ibs.GetCode(a)
+			return len(v) != 0, err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			addr := accounts.InternAddress([20]byte{0xc0, 0xe0})
+			reader := &codeReader{addr: addr, account: &accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash([32]byte{0xaa})}, code: []byte{0x60, 0x00}}
+			vm := NewVersionMap(nil)
+			ibs := NewWithVersionMap(reader, vm)
+			defer ibs.Release(false)
+			ibs.SetTxContext(1, 2)
+			ibs.SetVersion(0)
+			nonEmpty, err := tt.read(ibs, addr)
+			require.NoError(t, err)
+			require.True(t, nonEmpty)
+			ibs.PublishOrigins()
+			io := NewVersionedIO(3)
+			io.RecordReads(Version{TxIndex: 2}, ibs.versionedReads)
+			require.Equal(t, VersionValid, vm.ValidateVersion(2, io, validateEqualVersion, true, ""))
+
+			vm.WriteSelfDestruct(addr, Version{TxIndex: 0}, true, true)
+			vm.WriteIncarnation(addr, Version{TxIndex: 0}, 1, true)
+			vm.WriteAddress(addr, Version{TxIndex: 1}, &accounts.Account{Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}, true)
+			vm.WriteBalance(addr, Version{TxIndex: 1}, *uint256.NewInt(1), true)
+			require.Equal(t, VersionInvalid, vm.ValidateVersion(2, io, validateEqualVersion, true, ""))
+		})
+	}
+}
+
 func TestCodeHashReadAfterSelfDestruct(t *testing.T) {
 	for _, tc := range []struct {
 		name             string

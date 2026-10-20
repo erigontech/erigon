@@ -18,6 +18,15 @@ type fakeBaseReader struct {
 	storage map[accounts.Address]map[accounts.StorageKey]uint256.Int
 }
 
+func (f *fakeBaseReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return f.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (f *fakeBaseReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := f.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
 func (f *fakeBaseReader) ReadAccountData(a accounts.Address) (*accounts.Account, error) {
 	return f.accts[a], nil
 }

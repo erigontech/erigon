@@ -946,6 +946,7 @@ type APIImpl struct {
 	RpcTxSyncDefaultTimeout     time.Duration
 	RpcTxSyncMaxTimeout         time.Duration
 	logger                      log.Logger
+	gasOracleLogger             log.Logger
 }
 
 // NewEthAPI returns APIImpl instance
@@ -972,6 +973,7 @@ func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPo
 		RpcTxSyncDefaultTimeout:     cfg.RpcTxSyncDefaultTimeout,
 		RpcTxSyncMaxTimeout:         cfg.RpcTxSyncMaxTimeout,
 		logger:                      logger,
+		gasOracleLogger:             logger.New("app", "gasPriceOracle"),
 	}
 }
 

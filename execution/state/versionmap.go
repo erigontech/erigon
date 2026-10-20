@@ -939,6 +939,47 @@ func highestBelow[T any](cells *btree.Map[int, *WriteCell[T]], limit int, resolv
 	return hi, ok
 }
 
+// FindDoneSelfDestructInRange returns the version of the highest Done
+// SelfDestruct write with lo <= TxIdx < hi whose value == target, if any. It
+// finds an in-block SELFDESTRUCT even when a later revival (SelfDestruct=false)
+// hides it from latest-only ReadSelfDestruct.
+func (vm *VersionMap) FindDoneSelfDestructInRange(addr accounts.Address, lo, hi int, target bool) (Version, bool) {
+	if vm == nil || hi <= lo {
+		return Version{}, false
+	}
+	e := vm.load(addr)
+	if e == nil {
+		return Version{}, false
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return findDoneSelfDestructLocked(e, lo, hi, target)
+}
+
+// findDoneSelfDestructLocked is the destruct scan every consumer shares, for
+// callers already holding e.mu. Estimate cells do not count: a verdict drawn from
+// one is published before the round that retracts it, and the reconstruction
+// readers consume it there without recording a read.
+func findDoneSelfDestructLocked(e *AddressEntry, lo, hi int, target bool) (Version, bool) {
+	if e.SelfDestruct == nil || hi <= lo {
+		return Version{}, false
+	}
+	var ver Version
+	found := false
+	e.SelfDestruct.Descend(hi-1, func(k int, v *WriteCell[bool]) bool {
+		if k < lo {
+			return false
+		}
+		if v.flag == FlagDone && v.Value == target {
+			ver = Version{TxIndex: k, Incarnation: v.incarnation}
+			found = true
+			return false
+		}
+		return true
+	})
+	return ver, found
+}
+
 // IsNetAbsent reports whether the account reads as gone at txIdx (LifecycleAbsent; see AccountLifecycleAt).
 func (vm *VersionMap) IsNetAbsent(addr accounts.Address, txIdx int) bool {
 	state, _, _ := vm.AccountLifecycleAt(addr, txIdx)
@@ -1779,13 +1820,29 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 			return
 		}
 	}
+	// A balance-only revival writes no code cell for a committed code read to
+	// version-mismatch against, but the destruct below it wiped the code.
+	wipedCommitted := func(addr accounts.Address, hdr ReadHeader) VersionValidity {
+		if hdr.Source == StorageRead {
+			if _, ok := vm.FindDoneSelfDestructInRange(addr, hdr.Version.TxIndex+1, txIdx, true); ok {
+				return VersionInvalid
+			}
+		}
+		return VersionValid
+	}
 	for a, tr := range rs.code {
 		if !ok(noValueRead(a, CodePath, accounts.NilKey, tr.ReadHeader)) {
+			return
+		}
+		if len(tr.Val.Bytes) != 0 && !ok(wipedCommitted(a, tr.ReadHeader)) {
 			return
 		}
 	}
 	for a, tr := range rs.codeSize {
 		if !ok(noValueRead(a, CodeSizePath, accounts.NilKey, tr.ReadHeader)) {
+			return
+		}
+		if tr.Val != 0 && !ok(wipedCommitted(a, tr.ReadHeader)) {
 			return
 		}
 	}

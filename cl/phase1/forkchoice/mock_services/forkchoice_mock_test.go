@@ -20,6 +20,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -81,7 +82,7 @@ func TestForkChoiceStorageMockEnvelopeAccessIsConcurrentSafe(t *testing.T) {
 		workers.Add(4)
 		go func() {
 			defer workers.Done()
-			require.NoError(t, mock.OnExecutionPayload(t.Context(), envelope, false, false))
+			assert.NoError(t, mock.OnExecutionPayload(t.Context(), envelope, false, false))
 		}()
 		go func() {
 			defer workers.Done()
@@ -94,7 +95,7 @@ func TestForkChoiceStorageMockEnvelopeAccessIsConcurrentSafe(t *testing.T) {
 		go func() {
 			defer workers.Done()
 			_, err := mock.ReadEnvelopeFromDisk(root)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 		}()
 	}
 	workers.Wait()

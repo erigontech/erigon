@@ -244,6 +244,18 @@ func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, hash common.Ha
 }
 
 func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizeHash common.Hash, timeoutOverride ...uint64) (execmodule.ExecutionStatus, *string, common.Hash, error) {
+	result, err := c.UpdateForkChoiceResult(ctx, headHash, safeHash, finalizeHash, timeoutOverride...)
+	if err != nil {
+		return 0, nil, common.Hash{}, err
+	}
+	var validationError *string
+	if len(result.ValidationError) > 0 {
+		validationError = &result.ValidationError
+	}
+	return result.Status, validationError, result.LatestValidHash, nil
+}
+
+func (c ChainReaderWriterEth1) UpdateForkChoiceResult(ctx context.Context, headHash, safeHash, finalizeHash common.Hash, timeoutOverride ...uint64) (execmodule.ForkChoiceResult, error) {
 	// Apply timeout via context so the native UpdateForkChoice returns Busy on deadline exceeded.
 	timeout := c.fcuTimeout
 	if len(timeoutOverride) > 0 {
@@ -255,15 +267,7 @@ func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, s
 		callCtx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
-	result, err := c.executionModule.UpdateForkChoice(callCtx, headHash, safeHash, finalizeHash)
-	if err != nil {
-		return 0, nil, common.Hash{}, err
-	}
-	var validationError *string
-	if len(result.ValidationError) > 0 {
-		validationError = &result.ValidationError
-	}
-	return result.Status, validationError, result.LatestValidHash, nil
+	return c.executionModule.UpdateForkChoice(callCtx, headHash, safeHash, finalizeHash)
 }
 
 func (c ChainReaderWriterEth1) GetForkChoice(ctx context.Context) (headHash, finalizedHash, safeHash common.Hash, err error) {

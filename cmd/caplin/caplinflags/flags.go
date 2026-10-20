@@ -44,6 +44,8 @@ var CliFlags = []cli.Flag{
 	&utils.BeaconApiAllowOriginsFlag,
 	&utils.CaplinCheckpointSyncUrlFlag,
 	&utils.CaplinMaxPeerCount,
+	&utils.CaplinIPBlockLimitsDisableFlag,
+	&utils.CaplinIPBlockLimitsTrustedCIDRsFlag,
 	&utils.CaplinSubscribeAllTopicsFlag,
 }
 

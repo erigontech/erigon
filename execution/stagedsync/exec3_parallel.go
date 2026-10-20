@@ -2194,6 +2194,14 @@ func (result *execResult) calcFees(
 	}
 	burntAddr := result.ExecutionResult.BurntContractAddress
 	hasBurnt := !burntAddr.IsNil()
+	coinbaseFee := result.ExecutionResult.FeeTipped
+	// Two entries for one account would overwrite each other, so a single entry carries both fees.
+	if hasBurnt && burntAddr == result.Coinbase {
+		if chainRules.IsLondon {
+			coinbaseFee.Add(&coinbaseFee, &result.ExecutionResult.FeeBurnt)
+		}
+		hasBurnt = false
+	}
 	var newBurntBalance uint256.Int
 	var burntAcc *accounts.Account
 	if hasBurnt {
@@ -2256,7 +2264,7 @@ func (result *execResult) calcFees(
 	// below must materialize the revived-codeless account rather than propagate it.
 	coinbaseNetDestructed := burnCoinbaseTip && !coinbaseCreatedContract
 	if !burnCoinbaseTip {
-		newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
+		newCoinbaseBalance.Add(&newCoinbaseBalance, &coinbaseFee)
 	}
 	oldBurntBalance := newBurntBalance
 	if hasBurnt && chainRules.IsLondon {

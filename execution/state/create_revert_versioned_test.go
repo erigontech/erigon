@@ -95,22 +95,16 @@ func TestNoMaterialize_RevivedCreateRevertReadsCellBalance(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xc0, 0x44})
 	vm := NewVersionMap(nil)
-	newTx := func(txIndex int) *IntraBlockState {
-		ibs := NewWithVersionMap(&emptyReader{}, vm)
-		ibs.SetNoMaterialize(true)
-		ibs.SetTxContext(1, txIndex)
-		return ibs
-	}
-	ibs := newTx(0)
+	ibs := newNoMaterializeTx(vm, 0)
 	require.NoError(t, ibs.CreateAccount(addr, true))
 	_, err := ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
 	vm.FlushVersionedWrites(ibs.VersionedWrites(), true, "")
-	ibs = newTx(1)
+	ibs = newNoMaterializeTx(vm, 1)
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
 	vm.FlushVersionedWrites(ibs.VersionedWrites(), true, "")
 
-	ibs = newTx(2)
+	ibs = newNoMaterializeTx(vm, 2)
 	snap := ibs.PushSnapshot()
 	require.NoError(t, ibs.CreateAccount(addr, true))
 	ibs.RevertToSnapshot(snap, nil)
@@ -180,4 +174,105 @@ func TestMaterialized_UncachedCreateRevertKeepsBalance(t *testing.T) {
 	balance, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	require.Equal(t, uint64(8), balance.Uint64())
+}
+
+// Without EIP-8246 a credit received after SELFDESTRUCT in the same tx burns with
+// the account. A later re-creation must not bring it back after a revert.
+func TestNoMaterialize_BurnedCreditCreateRevertReadsZeroBalance(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc0, 0x55})
+	vm := NewVersionMap(nil)
+	ibs := newNoMaterializeTx(vm, 0)
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	_, err := ibs.Selfdestruct(addr, false)
+	require.NoError(t, err)
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(9), tracing.BalanceChangeTransfer))
+	vm.FlushVersionedWrites(ibs.VersionedWrites(), true, "")
+
+	ibs = newNoMaterializeTx(vm, 1)
+	snap := ibs.PushSnapshot()
+	require.NoError(t, ibs.CreateAccount(addr, false))
+	ibs.RevertToSnapshot(snap, nil)
+
+	balance, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.True(t, balance.IsZero(), "balance after revert: %s", balance.String())
+}
+
+// A destruct-only cell above a burned credit (a fee touch of an absent coinbase)
+// must not invalidate the creation's balance read on every validation.
+func TestNoMaterialize_CreateAfterBurnedCreditAndDestructValidates(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc0, 0x66})
+	vm := NewVersionMap(nil)
+	ibs := newNoMaterializeTx(vm, 0)
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	_, err := ibs.Selfdestruct(addr, false)
+	require.NoError(t, err)
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(9), tracing.BalanceChangeTransfer))
+	vm.FlushVersionedWrites(ibs.VersionedWrites(), true, "")
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
+
+	ibs = newNoMaterializeTx(vm, 2)
+	require.NoError(t, ibs.CreateAccount(addr, false))
+
+	io := NewVersionedIO(3)
+	io.RecordReads(Version{TxIndex: 2}, ibs.VersionedReads())
+	require.Equal(t, VersionValid, vm.ValidateVersion(2, io, validateEqualVersion, true, ""))
+}
+
+// The zero balance read by a creation over a burned credit depends on the
+// destruct; when that destruct goes away, the read must be invalidated.
+func TestNoMaterialize_CreateAfterBurnedCreditDependsOnDestruct(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc0, 0x77})
+	vm := NewVersionMap(nil)
+	ibs := newNoMaterializeTx(vm, 0)
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	_, err := ibs.Selfdestruct(addr, false)
+	require.NoError(t, err)
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(9), tracing.BalanceChangeTransfer))
+	vm.FlushVersionedWrites(ibs.VersionedWrites(), true, "")
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
+
+	ibs = newNoMaterializeTx(vm, 2)
+	require.NoError(t, ibs.CreateAccount(addr, false))
+	io := NewVersionedIO(3)
+	io.RecordReads(Version{TxIndex: 2}, ibs.VersionedReads())
+	require.Equal(t, VersionValid, vm.ValidateVersion(2, io, validateEqualVersion, true, ""))
+
+	vm.Delete(addr, SelfDestructPath, accounts.NilKey, 1, true)
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(2, io, validateEqualVersion, true, ""))
+}
+
+func newNoMaterializeTx(vm *VersionMap, txIndex int) *IntraBlockState {
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(1, txIndex)
+	return ibs
+}
+
+// SetCode of an account the tx created skips the transient stateObject on the
+// noMaterialize path; the code must still read back and land in the write set.
+func TestNoMaterialize_CreatedAccountSetCode(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc0, 0x44})
+	code := []byte("created-contract-code")
+	ibs := NewWithVersionMap(&emptyReader{}, NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(0, 0)
+	ibs.SetVersion(0)
+
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	require.NoError(t, ibs.SetCode(addr, code, tracing.CodeChangeContractCreation))
+
+	got, err := ibs.GetCode(addr)
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+	hash, err := ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	require.Equal(t, accounts.InternCodeHash(crypto.Keccak256Hash(code)), hash)
+	cw, ok := ibs.VersionedWrites().GetCode(addr)
+	require.True(t, ok, "the code is this tx's write")
+	require.Equal(t, code, cw.Val.Bytes)
 }

@@ -471,16 +471,17 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 }
 
 func validateAnchorPayloadWithExecutionClient(ctx context.Context, cfg *Cfg, anchorRoot common.Hash, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) error {
-	status := execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated)
-	if canValidateGloasPayloads(cfg) {
-		var err error
-		status, err = validateAnchorPayloadWithEL(ctx, cfg, bid, env)
-		if err != nil {
-			log.Warn("[Caplin] Anchor envelope EL validation failed", "anchorRoot", anchorRoot, "status", status, "err", err)
-		}
+	if !canValidateGloasPayloads(cfg) {
+		return nil // StoreAnchorEnvelope recorded NotValidated
 	}
-	var retained bool
-	status, retained = cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(
+	status, err := validateAnchorPayloadWithEL(ctx, cfg, bid, env)
+	if errors.Is(err, forkchoice.ErrPayloadValidationInterrupted) {
+		return nil // not an EL verdict
+	}
+	if err != nil {
+		log.Warn("[Caplin] Anchor envelope EL validation failed", "anchorRoot", anchorRoot, "status", status, "err", err)
+	}
+	status, retained := cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(
 		anchorRoot,
 		env.Message.Payload.BlockHash,
 		status,

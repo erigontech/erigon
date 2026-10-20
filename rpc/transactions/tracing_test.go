@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -245,4 +246,91 @@ func TestAssembleTracerAcceptsNonNegativeLimit(t *testing.T) {
 func TestAssembleTracerIgnoresLimitForNamedTracer(t *testing.T) {
 	callTracer := "callTracer"
 	require.NoError(t, assembleWithLogConfig(t, &logger.LogConfig{Limit: -1}, &callTracer))
+}
+
+// On the versioned path the next transaction index of the same state reads the finalized
+// writes, and the log index keeps counting across transactions.
+func TestFinalizeCallTxPublishesWritesToNextTx(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x0201"))
+	key := accounts.InternKey(common.HexToHash("0x11"))
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	ibs.SetVersionMap(state.NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+	ibs.SetNoConflictDetection()
+	ibs.SetTxContext(0, 0)
+	require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(7)))
+	ibs.AddLog(&types.Log{Address: addr.Value()})
+	require.NoError(t, FinalizeCallTx(ibs, &chain.Rules{}))
+
+	ibs.SetTxContext(0, 1)
+	got, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.Equal(t, *uint256.NewInt(7), got)
+	ibs.AddLog(&types.Log{Address: addr.Value()})
+	require.Equal(t, hexutil.Uint(1), ibs.Logs()[1].Index)
+}
+
+type emptyAccountReader struct {
+	*state.NoopReader
+	addr accounts.Address
+}
+
+func (r emptyAccountReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	if addr == r.addr {
+		acc := accounts.NewAccount()
+		return &acc, nil
+	}
+	return nil, nil
+}
+
+// An existing account a transaction touches and leaves empty is gone for the next transaction
+// of the same request (EIP-161), as with FinalizeTx on the materializing path.
+func TestFinalizeCallTxRemovesTouchedEmptyAccount(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x0202"))
+	ibs := state.New(emptyAccountReader{NoopReader: state.NewNoopReader(), addr: addr})
+	defer ibs.Close()
+	ibs.SetVersionMap(state.NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+	ibs.SetNoConflictDetection()
+	ibs.SetTxContext(1, 0)
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.NoError(t, ibs.TouchAccount(addr))
+	require.NoError(t, FinalizeCallTx(ibs, &chain.Rules{IsSpuriousDragon: true}))
+
+	ibs.SetTxContext(1, 1)
+	exists, err = ibs.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists)
+}
+
+// An account deleted under EIP-161 by one transaction, recreated empty by the next (a zero-value
+// call to a precompile) and deleted again, stays gone for the transaction after that.
+func TestFinalizeCallTxKeepsARecreatedEmptyAccountDeleted(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x0203"))
+	ibs := state.New(emptyAccountReader{NoopReader: state.NewNoopReader(), addr: addr})
+	defer ibs.Close()
+	ibs.SetVersionMap(state.NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+	ibs.SetNoConflictDetection()
+	rules := &chain.Rules{IsSpuriousDragon: true}
+
+	ibs.SetTxContext(1, 0)
+	require.NoError(t, ibs.TouchAccount(addr))
+	require.NoError(t, FinalizeCallTx(ibs, rules))
+
+	ibs.SetTxContext(1, 1)
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists)
+	require.NoError(t, ibs.CreateAccount(addr, false))
+	require.NoError(t, ibs.TouchAccount(addr))
+	require.NoError(t, FinalizeCallTx(ibs, rules))
+
+	ibs.SetTxContext(1, 2)
+	exists, err = ibs.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists)
 }

@@ -918,6 +918,24 @@ func (ibs *IntraBlockState) warmReadable(addr accounts.Address) bool {
 	return !dirty
 }
 
+// warmField serves a repeat read of an account field without the version-map
+// probe: this tx's own write on a dirty address, else the recorded read.
+func warmField[T any](s *IntraBlockState, addr accounts.Address, writes map[accounts.Address]*VersionedWrite[T], reads map[accounts.Address]VersionedRead[T]) (T, ReadSource, Version, bool) {
+	if !s.warmReadable(addr) {
+		if vw, ok := writes[addr]; ok {
+			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, true
+		}
+	}
+	// A resident deleted object outranks the read set, as in versionedReadCore.
+	if so, ok := s.stateObjects[addr]; !ok || !so.deleted {
+		if tr, ok := reads[addr]; ok && warmSource(tr.Source) {
+			return tr.Val, tr.Source, tr.Version, true
+		}
+	}
+	var zero T
+	return zero, UnknownSource, UnknownVersion, false
+}
+
 // readBalance returns the address's balance using the version-aware
 // read pipeline.  Inlines the storage-read fallback.
 func readBalance(s *IntraBlockState, addr accounts.Address) (uint256.Int, ReadSource, Version, error) {
@@ -1246,10 +1264,8 @@ func refreshCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, erro
 
 // readCodeSize returns the contract code size.
 func readCodeSize(s *IntraBlockState, addr accounts.Address) (int, ReadSource, Version, error) {
-	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetCodeSize(addr); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, nil
-		}
+	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.codeSize, s.versionedReads.codeSize); ok {
+		return v, src, ver, nil
 	}
 	var r readPathResult
 	versionedReadCore(s, addr, CodeSizePath, accounts.NilKey, false, false, &r)
@@ -1411,12 +1427,15 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		v, clean, err := so.GetState(key)
 		return v, StorageRead, UnknownVersion, clean, err
 	}
-	if s.versionMap != nil && s.warmReadable(addr) {
-		// A resident deleted object outranks the read set, as in versionedReadCore.
-		if so, ok := s.stateObjects[addr]; !ok || !so.deleted {
-			if tr, ok := s.versionedReads.GetStorage(addr, key); ok && warmSource(tr.Source) {
-				return tr.Val, tr.Source, tr.Version, false, nil
-			}
+	if !s.warmReadable(addr) {
+		if vw, ok := s.versionedWrites.GetStorage(addr, key); ok {
+			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, false, nil
+		}
+	}
+	// A resident deleted object outranks the read set, as in versionedReadCore.
+	if so, ok := s.stateObjects[addr]; !ok || !so.deleted {
+		if tr, ok := s.versionedReads.GetStorage(addr, key); ok && warmSource(tr.Source) {
+			return tr.Val, tr.Source, tr.Version, true, nil
 		}
 	}
 	var r readPathResult
@@ -1429,7 +1448,7 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		return r.vwStorage.Val, r.source, r.version, false, nil
 	case outcomeReadSetHit:
 		tr, _ := s.versionedReads.GetStorage(addr, key)
-		return tr.Val, r.source, r.version, false, nil
+		return tr.Val, r.source, r.version, true, nil
 	case outcomeMapDone:
 		v := r.mapStorageVal
 		if r.recordVR {
