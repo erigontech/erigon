@@ -35,10 +35,27 @@ func TestPayloadAttestationRateLimiterAdmitsFullCommitteeBurstFromOnePeer(t *tes
 	}
 }
 
-func TestProposerPreferencesRateLimiterAcceptsTwoEpochsFromOnePeer(t *testing.T) {
-	condition := withProposerPreferencesRateLimiter()
-	pid := peer.ID("relaying-peer")
-	for i := range 2 * clparams.MainnetBeaconConfig.SlotsPerEpoch {
-		require.True(t, condition(pid, nil, clparams.GloasVersion), "preference %d", i)
+func TestProposerPreferencesRateLimiterAdmitsLookaheadWindowFromOnePeer(t *testing.T) {
+	minimal := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&minimal)
+	longLookahead := clparams.MainnetBeaconConfig
+	longLookahead.MinSeedLookahead = 2
+	for _, test := range []struct {
+		name   string
+		cfg    clparams.BeaconChainConfig
+		window int
+	}{
+		{name: "mainnet", cfg: clparams.MainnetBeaconConfig, window: 64},
+		{name: "minimal", cfg: minimal, window: 16},
+		{name: "long lookahead", cfg: longLookahead, window: 96},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			condition := withProposerPreferencesRateLimiter(&test.cfg)
+			pid := peer.ID("relaying-peer")
+			for i := range test.window {
+				require.True(t, condition(pid, nil, clparams.GloasVersion), "preference %d", i)
+			}
+			require.False(t, condition(pid, nil, clparams.GloasVersion))
+		})
 	}
 }
