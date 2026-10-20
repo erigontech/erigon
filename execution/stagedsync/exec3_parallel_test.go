@@ -2291,3 +2291,37 @@ func TestFrontierRetryDispatchedBeforeBatchTail(t *testing.T) {
 	require.True(t, be.execTasks.checkPending(2), "frontier dispatch ran past the frontier")
 	require.Equal(t, 1, be.cntExec, "frontier tx 0 must be dispatched before the tail's retry limit ends the batch")
 }
+
+func TestProcessRequestSetsEIP8246FromBlockTime(t *testing.T) {
+	amsterdam := uint64(100)
+	config := chain.AllProtocolChanges.Copy()
+	config.AmsterdamTime = &amsterdam
+	addr := accounts.InternAddress(common.Address{0x82, 0x46})
+	equalVersion := func(r, w state.Version) state.VersionValidity {
+		if r != w {
+			return state.VersionInvalid
+		}
+		return state.VersionValid
+	}
+	for _, tc := range []struct {
+		time uint64
+		want state.VersionValidity
+	}{
+		{amsterdam - 1, state.VersionValid},
+		{amsterdam, state.VersionInvalid},
+	} {
+		pe, _ := newResumeTestExec(t, newResumeTestDB(t), config)
+		pe.blockExecutors = map[uint64]*blockExecutor{0: nil}
+		header := &types.Header{Number: *uint256.NewInt(1), Time: tc.time}
+		block := types.NewBlockFromStorage(common.Hash{}, header, nil, nil, nil, nil)
+		require.NoError(t, pe.processRequest(t.Context(), &execRequest{block: block, tasks: []exec.Task{&exec.TxTask{Header: header}}}))
+		vm := pe.blockExecutors[1].versionMap
+		vm.WriteBalance(addr, state.Version{TxIndex: 0}, *uint256.NewInt(100), true)
+		vm.WriteSelfDestruct(addr, state.Version{TxIndex: 0}, true, true)
+		reads := state.ReadSet{}
+		reads.SetBalance(addr, state.VersionedRead[uint256.Int]{ReadHeader: state.ReadHeader{Source: state.MapRead, Version: state.Version{TxIndex: 0}}})
+		io := state.NewVersionedIO(2)
+		io.RecordReads(state.Version{TxIndex: 1}, reads)
+		require.Equal(t, tc.want, vm.ValidateVersion(1, io, equalVersion, true, false, false, ""), "block time %d", tc.time)
+	}
+}
