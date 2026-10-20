@@ -35,16 +35,17 @@ const (
 	maxLogsPerTxn     = int(params.MaxTxnGasLimit / params.LogGas)     // 44739
 	maxLogBytesPerTxn = int(params.MaxTxnGasLimit / params.LogDataGas) // 2MB
 
-	// Fractions of those, because the pool never shrinks: the whole ceiling would
-	// park 13MB of entries per arena, while a tenth still holds the ~1700 logs of
-	// a p99 block that a caller resetting per block pools in one go.
+	// The pool never shrinks: all entries a transaction may emit would park 13MB
+	// per arena, while a tenth still holds the ~1700 logs of a p99 block that a
+	// caller resetting per block pools in one go. Data is pooled up to what one
+	// transaction may emit, so a transaction of large logs leaves its buffers to
+	// the next one instead of mapping fresh memory.
 	maxPooledLogEntries = maxLogsPerTxn / 10
-	maxPooledLogBytes   = maxLogBytesPerTxn / 2
+	maxPooledLogBytes   = maxLogBytesPerTxn
 
 	// One large log must not take the whole budget and starve the small entries
-	// real traffic is made of, and a cap much lower would throw away the reuse
-	// that makes a block of large logs cheap.
-	maxPooledLogDataCap = maxPooledLogBytes / 8
+	// real traffic is made of.
+	maxPooledLogDataCap = maxPooledLogBytes / 2
 
 	// Slots the arena keeps between resets. The run is a block for a caller that
 	// resets per block, so this is bounded by the memory it costs rather than by
