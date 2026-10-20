@@ -128,6 +128,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		return err
 	}
 	defer ibs.Close()
+	transactions.VersionedCallState(ibs, config.StateOverrides)
 
 	var precompiles vm.PrecompiledContracts
 	if config.BlockOverrides != nil {
@@ -178,7 +179,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			if traceErr != nil {
 				return traceErr
 			}
-			return ibs.FinalizeTx(rules, state.NewNoopWriter())
+			return transactions.FinalizeCallTx(ibs, rules)
 		})
 
 		stream.WriteObjectEnd()
@@ -257,6 +258,11 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		return err
 	}
 	defer ibs.Close()
+	var stateOverrides *ethapi.StateOverrides
+	if config != nil {
+		stateOverrides = config.StateOverrides
+	}
+	transactions.VersionedCallState(ibs, stateOverrides)
 
 	// The state is built from history at txnIndex, so the earlier transactions of
 	// the block never ran and the log counter they left has to be handed in.
@@ -347,6 +353,11 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 	}
 	ibs := state.New(stateReader)
 	defer ibs.Close()
+	var stateOverrides *ethapi.StateOverrides
+	if config != nil {
+		stateOverrides = config.StateOverrides
+	}
+	transactions.VersionedCallState(ibs, stateOverrides)
 
 	baseFee := overrideBaseFee(config, header.BaseFee)
 
@@ -462,6 +473,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 	ibs := state.New(stateReader)
 	defer ibs.Close()
+	transactions.VersionedCallState(ibs, config.StateOverrides)
 
 	getHash := transactions.MakeBlockHashProvider(ctx, tx, api._blockReader, overrideBlockHash)
 
@@ -487,6 +499,8 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	}
 
 	stream.WriteArrayStart()
+	// Every transaction of the request gets the next index, so each sees the ones before it.
+	txIndex := 0
 	for _, bundle := range bundles {
 		stream.WriteArrayStart()
 		// first change block context
@@ -510,13 +524,16 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 			}
 			txCtx = protocol.NewEVMTxContext(msg)
 			ibs := evm.IntraBlockState()
-			ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
+			ibs.SetTxContext(blockCtx.BlockNumber, txIndex)
+			txIndex++
 			_, err = transactions.TraceTx(ctx, api.engine(), transaction, msg, blockCtx, txCtx, nil, common.Hash{}, txnIndex, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout, precompiles)
 			if err != nil {
 				return err
 			}
 
-			_ = ibs.FinalizeTx(rules, state.NewNoopWriter())
+			if err := transactions.FinalizeCallTx(ibs, rules); err != nil {
+				return err
+			}
 
 		}
 		stream.WriteArrayEnd()

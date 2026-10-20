@@ -143,6 +143,15 @@ func (r *recordingReader) ReadAccountData(address accounts.Address) (*accounts.A
 	return a, nil
 }
 
+func (r *recordingReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (r *recordingReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
 func (r *recordingReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	return r.ReadAccountData(address)
 }
@@ -208,6 +217,15 @@ func spin(ns int64) {
 	deadline := time.Now().Add(time.Duration(ns))
 	for time.Now().Before(deadline) {
 	}
+}
+
+func (r *inMemReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
+func (r *inMemReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.fx.Accounts[address].toAccount(), nil
 }
 
 func (r *inMemReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {

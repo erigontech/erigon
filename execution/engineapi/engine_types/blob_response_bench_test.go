@@ -19,6 +19,7 @@ package engine_types
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"testing"
 
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -26,7 +27,7 @@ import (
 )
 
 // BenchmarkBlobsBundleV2Marshal compares the worst-case getBlobsV3 response (128 blobs, each with
-// its full set of cell proofs) encoded by stdlib reflection vs MarshalFastJSONTo.
+// its full set of cell proofs) encoded by stdlib reflection vs MarshalFastJSONTo streamed to a writer, as a served response is.
 func BenchmarkBlobsBundleV2Marshal(b *testing.B) {
 	bundle := worstCaseBundleV2()
 	enc, _ := jsonstream.Marshal(bundle)
@@ -46,7 +47,7 @@ func BenchmarkBlobsBundleV2Marshal(b *testing.B) {
 		b.SetBytes(size)
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			if _, err := jsonstream.Marshal(bundle); err != nil {
+			if err := jsonstream.MarshalTo(io.Discard, bundle); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -77,7 +78,7 @@ func BenchmarkBlobCellsAndProofsV1Marshal(b *testing.B) {
 					b.SetBytes(size)
 					b.ReportAllocs()
 					for b.Loop() {
-						if _, err := jsonstream.Marshal(bundle); err != nil {
+						if err := jsonstream.MarshalTo(io.Discard, bundle); err != nil {
 							b.Fatal(err)
 						}
 					}

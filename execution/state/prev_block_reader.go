@@ -1,6 +1,7 @@
 package state
 
 import (
+	"github.com/erigontech/erigon/common"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -46,6 +47,15 @@ func PrevBlockBaseTxNum(raw StateReader, list *PrevBlockList, txNum uint64) Stat
 // are already gone from the registry, so the chain is at most window-deep.
 func (o *PrevBlockReader) SetBlock(blockNum uint64) {
 	o.chain = layerVersionMaps(o.base, o.reg.Before(blockNum))
+}
+
+func (o *PrevBlockReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return o.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (o *PrevBlockReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := o.ReadAccountByPlainAddr(address)
+	return acc != nil, err
 }
 
 func (o *PrevBlockReader) ReadAccountData(a accounts.Address) (*accounts.Account, error) {

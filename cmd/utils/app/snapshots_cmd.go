@@ -741,6 +741,9 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, label s
 	if err != nil {
 		return false, false, "", err
 	}
+	if c == nil {
+		return false, false, "", nil
+	}
 	defer c.Close()
 
 	if bytes.Equal(c.Key(), []byte(stateKey)) {
@@ -1938,16 +1941,11 @@ func doCheckRCacheRootAtBlkRange(ctx context.Context, cliCtx *cli.Command, logge
 			return err
 		}
 		defer tx.Rollback()
-		rcacheDomainProgress := tx.Debug().DomainProgress(kv.RCacheDomain)
-		rcacheTip, ok, err := blockReader.TxnumReader().FindBlockNum(ctx, tx, rcacheDomainProgress)
+		to, err = integrity.RCacheEndBlockNum(ctx, tx, blockReader.TxnumReader())
 		tx.Rollback()
 		if err != nil {
 			return err
 		}
-		if !ok {
-			return fmt.Errorf("findBlockNum(%d) not found", rcacheDomainProgress)
-		}
-		to = rcacheTip + 1 // exclusive upper bound
 		logger.Info("[check-rcache-root-at-blk-range] auto-detected --to", "to", to)
 	}
 	var seed int64

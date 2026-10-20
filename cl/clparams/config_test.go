@@ -57,6 +57,33 @@ func TestGnosisNetworksUseConfiguredBlockRequestWindow(t *testing.T) {
 	require.Equal(t, uint64(33_024), chiado.MinEpochsForBlockRequests())
 }
 
+func TestGnosisNetworksUseConfiguredDataColumnRequestWindow(t *testing.T) {
+	for _, id := range []NetworkType{chainspec.GnosisChainID, chainspec.ChiadoChainID} {
+		cfg := BeaconConfigs[id]
+		require.Equal(t, uint64(16_384), cfg.MinEpochsForDataColumnSidecarsRequests, cfg.ConfigName)
+		currentSlot := (cfg.FuluForkEpoch + 20_000) * cfg.SlotsPerEpoch
+		require.Equal(t, (cfg.FuluForkEpoch+20_000-16_384)*cfg.SlotsPerEpoch, cfg.DataColumnSidecarServeRangeStartSlot(currentSlot), cfg.ConfigName)
+	}
+}
+
+func TestAttestationDueMs(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		config    BeaconChainConfig
+		preGloas  uint64
+		postGloas uint64
+	}{
+		{name: "mainnet", config: MainnetBeaconConfig, preGloas: 3999, postGloas: 3000},
+		{name: "6 second slots", config: BeaconChainConfig{SecondsPerSlot: 6}, preGloas: 1999, postGloas: 1500},
+		{name: "gnosis", config: BeaconConfigs[chainspec.GnosisChainID], preGloas: 1666, postGloas: 1250},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.preGloas, test.config.AttestationDueMs(false))
+			require.Equal(t, test.postGloas, test.config.AttestationDueMs(true))
+		})
+	}
+}
+
 func TestBlockRequestWindowFallsBackToSpecFormula(t *testing.T) {
 	cfg := BeaconChainConfig{MinValidatorWithdrawabilityDelay: 256, ChurnLimitQuotient: 65_536}
 	require.Equal(t, uint64(33_024), cfg.MinEpochsForBlockRequests())

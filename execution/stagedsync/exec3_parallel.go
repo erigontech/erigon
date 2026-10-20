@@ -2194,6 +2194,14 @@ func (result *execResult) calcFees(
 	}
 	burntAddr := result.ExecutionResult.BurntContractAddress
 	hasBurnt := !burntAddr.IsNil()
+	coinbaseFee := result.ExecutionResult.FeeTipped
+	// Two entries for one account would overwrite each other, so a single entry carries both fees.
+	if hasBurnt && burntAddr == result.Coinbase {
+		if chainRules.IsLondon {
+			coinbaseFee.Add(&coinbaseFee, &result.ExecutionResult.FeeBurnt)
+		}
+		hasBurnt = false
+	}
 	var newBurntBalance uint256.Int
 	var burntAcc *accounts.Account
 	if hasBurnt {
@@ -2256,7 +2264,7 @@ func (result *execResult) calcFees(
 	// below must materialize the revived-codeless account rather than propagate it.
 	coinbaseNetDestructed := burnCoinbaseTip && !coinbaseCreatedContract
 	if !burnCoinbaseTip {
-		newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
+		newCoinbaseBalance.Add(&newCoinbaseBalance, &coinbaseFee)
 	}
 	oldBurntBalance := newBurntBalance
 	if hasBurnt && chainRules.IsLondon {
@@ -2268,8 +2276,15 @@ func (result *execResult) calcFees(
 	// AddressPath sibling) even when the net change is zero, else the worker's raw
 	// gas-debit value is left behind and a later whole-account read gets a stale balance.
 	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance || (cbOverride && !coinbaseNetDestructed)
+	// The fee credit touches the coinbase, so a zero tip removes an empty one (EIP-161).
+	coinbaseEmptied := !emitCoinbase && coinbaseAcc != nil && !coinbaseSelfdestructed && newCoinbaseBalance.IsZero() &&
+		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite &&
+		state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, result.Coinbase)
 
 	addWrites := &state.WriteSet{}
+	if coinbaseEmptied {
+		addWrites.SetEmptyRemoval(result.Coinbase, taskVersion)
+	}
 	if emitCoinbase {
 		{
 			addWrites.SetBalance(result.Coinbase, &state.VersionedWrite[uint256.Int]{

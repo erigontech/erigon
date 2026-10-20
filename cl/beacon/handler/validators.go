@@ -782,7 +782,7 @@ func (a *ApiHandler) GetEthV2ValidatorAggregateAttestation(w http.ResponseWriter
 	if version.Before(clparams.ElectraVersion) {
 		att = a.aggregatePool.GetAggregatationByRoot(attDataRootHash)
 	} else {
-		att = a.aggregatePool.GetAggregatationByRootAndCommittee(attDataRootHash, committeeIndexNum)
+		att = a.aggregatePool.GetAggregatationByRootAndCommittee(attDataRootHash, slotNum, committeeIndexNum)
 	}
 	if att == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("attestation %s not found", attDataRoot))

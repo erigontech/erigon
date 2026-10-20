@@ -70,6 +70,15 @@ func (r *mapStateReader) ReadAccountData(addr accounts.Address) (*accounts.Accou
 	return nil, nil
 }
 
+func (r *mapStateReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (r *mapStateReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
 func (r *mapStateReader) ReadAccountDataForDebug(addr accounts.Address) (*accounts.Account, error) {
 	return r.ReadAccountData(addr)
 }
@@ -840,6 +849,23 @@ func TestFinalizeTxSimple_LondonBurntFees(t *testing.T) {
 	expected := new(uint256.Int).Add(uint256.NewInt(500_000), &s.feeBurnt)
 	assert.Equal(t, *expected, burntBalance,
 		"burnt contract should be existing balance + FeeBurnt")
+}
+
+func TestFinalizeTxSimple_CoinbaseIsBurntContract(t *testing.T) {
+	t.Parallel()
+	s := londonTransferScenario()
+	s.burntAddr = s.coinbase
+	priorBalance := uint256.NewInt(1_000_000)
+	writes := s.runFinalizeTx(t, priorBalance)
+
+	expected := new(uint256.Int).Add(priorBalance, &s.feeTipped)
+	expected.Add(expected, &s.feeBurnt)
+	coinbaseWrite := findBalance(writes, s.coinbase)
+	require.NotNil(t, coinbaseWrite)
+	assert.Equal(t, *expected, coinbaseWrite.Val, "coinbase balance must get both the tip and the burnt fee")
+	coinbaseAcc := findAddress(writes, s.coinbase)
+	require.NotNil(t, coinbaseAcc)
+	assert.Equal(t, *expected, coinbaseAcc.Val.Balance)
 }
 
 // TestFinalizeTxSimple_NoCoinbaseInVersionMap verifies that when there's no
@@ -1744,4 +1770,68 @@ func TestFinalizeTxSimple_SenderIsCoinbase_ZeroTipForcesEmit(t *testing.T) {
 	addrWrite := findAddress(writes, s.coinbase)
 	require.NotNil(t, addrWrite,
 		"the AddressPath sibling must be emitted alongside so a whole-account read sees the current balance")
+}
+
+// Under EIP-8246 a contract created and self-destructed in an earlier tx keeps
+// its balance: the destruct's own balance cell is the live account's balance.
+func TestCalcFees_EIP8246PreservedCoinbase(t *testing.T) {
+	t.Parallel()
+	const kept = 1000
+	for _, tc := range []struct {
+		name  string
+		rules *chain.Rules
+		tip   uint64
+		want  uint64
+	}{
+		{"tip", &chain.Rules{IsSpuriousDragon: true, IsAmsterdam: true}, 3, kept + 3},
+		{"zero tip", &chain.Rules{IsSpuriousDragon: true, IsAmsterdam: true}, 0, 0},
+		{"pre-EIP-8246 burns", &chain.Rules{IsSpuriousDragon: true}, 3, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			coinbase := fAddr("coinbase")
+
+			header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, GasUsed: 21000}
+			version := state.Version{BlockNum: 1, TxNum: 2, TxIndex: 1}
+			txTask := &exec.TxTask{
+				Header: header, TxNum: version.TxNum, TxIndex: version.TxIndex,
+				Config:          chain.TestChainBerlinConfig,
+				EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+			}
+			task := &taskVersion{
+				execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true},
+				version:  version,
+			}
+			result := &execResult{TxResult: &exec.TxResult{
+				Task: task,
+				ExecutionResult: evmtypes.ExecutionResult{
+					FeeTipped:            *uint256.NewInt(tc.tip),
+					BurntContractAddress: accounts.NilAddress,
+				},
+				Coinbase: coinbase,
+			}}
+			result.TxOut = &state.WriteSet{}
+
+			vm := state.NewVersionMap(nil)
+			destructor := state.NewWithVersionMap(state.NewNoopReader(), vm)
+			destructor.SetTxContext(1, 0)
+			require.NoError(t, destructor.CreateAccount(coinbase, true))
+			require.NoError(t, destructor.AddBalance(coinbase, *uint256.NewInt(kept), tracing.BalanceChangeTransfer))
+			_, err := destructor.Selfdestruct(coinbase, tc.rules.IsAmsterdam)
+			require.NoError(t, err)
+			vm.FlushVersionedWrites(destructor.FinalizedWrites(tc.rules), true, "")
+
+			writes, err := result.calcFees(task, vm, newMapStateReader(), tc.rules)
+			require.NoError(t, err)
+			_, deleted := writes.GetSelfDestruct(coinbase)
+			require.False(t, deleted, "the coinbase must not be deleted")
+			if tc.want == 0 {
+				require.True(t, writes.IsEmpty(), "a live coinbase with no tip needs no write at all")
+				return
+			}
+			bw := findBalance(writes, coinbase)
+			require.NotNil(t, bw, "coinbase balance write")
+			require.Equal(t, *uint256.NewInt(tc.want), bw.Val)
+		})
+	}
 }

@@ -82,17 +82,17 @@ func TestStateReader_ReadMethods_Allocs(t *testing.T) {
 		{"ReaderV3.ReadAccountCodeSize", 0, func() { _, _ = r.ReadAccountCodeSize(addr) }},
 		{"ReaderV3.ReadAccountDataForDebug", 1, func() { _, _ = r.ReadAccountDataForDebug(addr) }}, // 1: returns *accounts.Account
 		{"ReaderV3.ReadAccountIncarnation", 0, func() { _, _ = r.ReadAccountIncarnation(addr) }},
-		{"ReaderV3.HasAccount", 0, func() { _, _ = r.HasAccount(addr) }}, // 0: answers from the encoded length
+		{"ReaderV3.HasAccount", 0, func() { _, _ = r.HasAccount(addrValue) }}, // 0: answers from the encoded length
 
 		{"HistoryReaderV3.ReadAccountStorage", 0, func() { _, _, _ = hr.ReadAccountStorage(addr, key) }},
 		{"HistoryReaderV3.ReadAccountCode", 0, func() { _, _ = hr.ReadAccountCode(addr) }},
 		{"HistoryReaderV3.ReadAccountCodeSize", 0, func() { _, _ = hr.ReadAccountCodeSize(addr) }},
 		{"HistoryReaderV3.ReadAccountData", 1, func() { _, _ = hr.ReadAccountData(addr) }},                 // 1: returns *accounts.Account
 		{"HistoryReaderV3.ReadAccountDataForDebug", 1, func() { _, _ = hr.ReadAccountDataForDebug(addr) }}, // 1: returns *accounts.Account
-		{"HistoryReaderV3.HasAccount", 0, func() { _, _ = hr.HasAccount(addr) }},                           // 0: answers from the encoded length
+		{"HistoryReaderV3.HasAccount", 0, func() { _, _ = hr.HasAccount(addrValue) }},                      // 0: answers from the encoded length
 
 		{"CachedReader3.ReadAccountData", 1, func() { _, _ = c3.ReadAccountData(addr) }}, // 1: returns *accounts.Account
-		{"CachedReader3.HasAccount", 0, func() { _, _ = c3.HasAccount(addr) }},           // 0: answers from the encoded length
+		{"CachedReader3.HasAccount", 0, func() { _, _ = c3.HasAccount(addrValue) }},      // 0: answers from the encoded length
 		{"CachedReader3.ReadAccountStorage (cache hit)", 0, func() { _, _, _ = c3.ReadAccountStorage(addr, key) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -121,7 +121,7 @@ func TestStateReader_HasAccount_Existence(t *testing.T) {
 				addr accounts.Address
 				want bool
 			}{{present, true}, {absent, false}} {
-				got, err := HasAccount(r, tc.addr)
+				got, err := r.HasAccount(tc.addr.Value())
 				require.NoError(t, err)
 				require.Equal(t, tc.want, got)
 

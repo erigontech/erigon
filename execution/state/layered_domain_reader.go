@@ -106,6 +106,15 @@ func (b *domainDecodedBase) ReadAccountData(addr accounts.Address) (*accounts.Ac
 	return acc, nil
 }
 
+func (b *domainDecodedBase) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return b.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (b *domainDecodedBase) HasAccount(address common.Address) (bool, error) {
+	acc, err := b.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
 func (b *domainDecodedBase) ReadAccountDataForDebug(addr accounts.Address) (*accounts.Account, error) {
 	return b.ReadAccountData(addr)
 }

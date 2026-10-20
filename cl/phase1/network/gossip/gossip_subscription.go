@@ -53,7 +53,12 @@ func (t *TopicSubscriptions) AllTopics() []string {
 func (t *TopicSubscriptions) Get(topic string) *TopicSubscription {
 	t.mutex.RLock()
 	defer t.mutex.RUnlock()
-	return t.subs[topic]
+	sub := t.subs[topic]
+	if sub == nil {
+		return nil
+	}
+	result := *sub
+	return &result
 }
 
 func (t *TopicSubscriptions) GetTopic(topic string) *pubsub.Topic {
