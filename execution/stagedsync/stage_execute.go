@@ -456,6 +456,11 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	}
 
 	out, execErr := execV3(ctx, cfg, doms, rwTx, s.SyncMode(), s.CurrentSyncCycle.IsInitialCycle, s.LogPrefix(), rng, nil, logger)
+	if s.SyncMode() == stages.ModeForkValidation {
+		if err := writeSendersRecoveredByExec(ctx, cfg, rwTx, s.BlockNumber+1, to, execErr != nil || out.verdict != nil); err != nil {
+			return err
+		}
+	}
 
 	// Write stage progress to the SharedDomains overlay when present; otherwise
 	// use the caller-owned stage transaction, which parallel execution preserves.

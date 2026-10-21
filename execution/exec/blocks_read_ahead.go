@@ -215,6 +215,11 @@ func (bra *BlockReadAheader) AddSenders(senders []byte, blockHash common.Hash) {
 	bra.senders.Add(blockHash, bytes.Clone(senders))
 }
 
+// CachedSenders returns the senders entry of a block; an empty one means exec recovers them.
+func (bra *BlockReadAheader) CachedSenders(blockHash common.Hash) ([]byte, bool) {
+	return bra.senders.Get(blockHash)
+}
+
 func (bra *BlockReadAheader) AddBlockAccessList(blockHash common.Hash, bal *types.BlockAccessListSidecar) {
 	if bal == nil {
 		return
@@ -490,14 +495,16 @@ func (bra *BlockReadAheader) ReadBlockWithSenders(blockHash common.Hash) (*types
 		return nil, false
 	}
 	senders, ok := bra.senders.Get(blockHash)
-	if len(senders) == 0 || !ok {
+	if !ok {
 		return nil, false
 	}
-	sendersAddresses := make([]common.Address, 0, len(senders)/length.Addr)
-	for i := 0; i < len(senders); i += length.Addr {
-		sendersAddresses = append(sendersAddresses, common.BytesToAddress(senders[i:i+length.Addr]))
+	if len(senders) > 0 {
+		sendersAddresses := make([]common.Address, 0, len(senders)/length.Addr)
+		for i := 0; i < len(senders); i += length.Addr {
+			sendersAddresses = append(sendersAddresses, common.BytesToAddress(senders[i:i+length.Addr]))
+		}
+		body.SendersToTxs(sendersAddresses)
 	}
-	body.SendersToTxs(sendersAddresses)
 	bal, _ := bra.bals.Get(blockHash)
 	return types.NewBlockFromStorage(header.Hash(), header, body.Transactions, body.Uncles, body.Withdrawals, bal), true
 }

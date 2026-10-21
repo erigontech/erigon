@@ -23,6 +23,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"math/big"
 	"sort"
 	"strings"
@@ -3897,4 +3898,77 @@ func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
+}
+
+func newBALTransferBlock(t *testing.T) (*execmoduletester.ExecModuleTester, *types.Block, *ecdsa.PrivateKey) {
+	t.Helper()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc:  types.GenesisAlloc{senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)}},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+	chainPack, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(0, common.Address{1}, uint256.NewInt(1), 50000, uint256.NewInt(10*common.GWei), nil),
+			*types.LatestSignerForChainID(nil),
+			privKey,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	block := chainPack.Blocks[0]
+	require.True(t, block.HeaderNoCopy().HasNonEmptyBAL())
+	return m, block, privKey
+}
+
+func TestValidateChainWritesSendersOfBALBlock(t *testing.T) {
+	ctx := t.Context()
+	m, block, privKey := newBALTransferBlock(t)
+	_, err := m.InsertBlocks(ctx, []*types.Block{block})
+	require.NoError(t, err)
+	validation, err := m.ValidateChain(ctx, block.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus, validation.ValidationError)
+
+	hash := block.Hash()
+	senders, ok := m.ReadAheader.CachedSenders(hash)
+	require.True(t, ok)
+	require.Empty(t, senders, "senders stage recovered the senders instead of exec")
+	result, err := m.ExecModule.UpdateForkChoice(ctx, hash, hash, hash)
+	require.NoError(t, err)
+	m.ExecModule.WaitIdle(ctx)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+		senders, err := rawdb.ReadSenders(tx, hash, block.NumberU64())
+		require.NoError(t, err)
+		require.Equal(t, []common.Address{crypto.PubkeyToAddress(privKey.PublicKey)}, senders)
+		return nil
+	}))
+}
+
+func TestValidateChainRejectsBALBlockWithUnrecoverableSender(t *testing.T) {
+	ctx := t.Context()
+	m, block, _ := newBALTransferBlock(t)
+	sig := make([]byte, 65)
+	sig[63] = 1 // r = 0 makes recovery fail
+	badTx, err := block.Transactions()[0].(*types.LegacyTx).WithSignature(*types.LatestSignerForChainID(nil), sig)
+	require.NoError(t, err)
+	txs := types.Transactions{badTx}
+	header := types.CopyHeader(block.HeaderNoCopy())
+	header.TxHash = types.DeriveSha(txs)
+	badBlock := types.NewBlockFromNetwork(header, &types.Body{Transactions: txs, Withdrawals: block.Withdrawals()}, block.BlockAccessListSidecar())
+
+	_, err = m.InsertBlocks(ctx, []*types.Block{badBlock})
+	require.NoError(t, err)
+	validation, err := m.ValidateChain(ctx, badBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, validation.ValidationStatus)
+	require.Contains(t, validation.ValidationError, fmt.Sprintf("error recovering sender for tx=%x", badTx.Hash()))
+	senders, ok := m.ReadAheader.CachedSenders(badBlock.Hash())
+	require.True(t, ok)
+	require.Empty(t, senders, "senders stage rejected the block instead of exec")
 }

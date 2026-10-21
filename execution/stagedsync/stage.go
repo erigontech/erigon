@@ -83,7 +83,7 @@ func (s *StageState) LogPrefix() string {
 }
 
 func (s *StageState) SyncMode() stages.Mode {
-	if s == nil {
+	if s == nil || s.State == nil {
 		return stages.ModeUnknown
 	}
 	return s.State.mode
