@@ -384,4 +384,16 @@ func TestNormalize_CreatedAndDestroyedInTxLeavesNoWrites(t *testing.T) {
 	prefunded := run(t, newAccountStateReader(addr), false)
 	sd, ok := prefunded.GetSelfDestruct(addr)
 	require.True(t, ok && sd.Val, "a CREATE onto a pre-funded address must still delete that account")
+
+	ver := Version{TxIndex: 0}
+	ws := &WriteSet{}
+	ws.SetCreateContract(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath, Version: ver}, Val: true})
+	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: ver}, Val: true})
+	ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: ver}, Val: *uint256.NewInt(5)})
+	kept, err := ws.Normalize(NewVersionMap(nil), 0, 0, &minimalStateReader{}, nil, true, false, true /*eip8246*/)
+	require.NoError(t, err)
+	bal, ok := kept.GetBalance(addr)
+	require.True(t, ok && bal.Val.Eq(uint256.NewInt(5)), "EIP-8246: a created and destroyed account keeps its balance")
+	sd, ok = kept.GetSelfDestruct(addr)
+	require.True(t, ok && sd.Val, "EIP-8246: the self-destruct of an account that keeps its balance must survive")
 }
