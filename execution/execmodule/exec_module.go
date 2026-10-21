@@ -657,6 +657,9 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		doms.Close()
 		return ValidationResult{}, err
 	}
+	if _, pending := e.inclusionListResult(blockHash); pending {
+		e.forkValidator.ForgetValidHash(blockHash)
+	}
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), ensureReadAheadSuspended, e.logger)
 	if criticalError != nil {
 		return ValidationResult{}, criticalError
@@ -702,14 +705,22 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		ValidationStatus: validationStatus,
 		LatestValidHash:  lvh,
 	}
-	res, checked := e.readAheader.ReadInclusionListResult(blockHash)
-	if checked {
-		result.InclusionListSatisfied = &res
-	}
+	result.InclusionListSatisfied, _ = e.inclusionListResult(blockHash)
 	if validationError != nil {
 		result.ValidationError = validationError.Error()
 	}
 	return result, nil
+}
+
+func (e *ExecModule) inclusionListResult(blockHash common.Hash) (satisfied *bool, pending bool) {
+	_, ilHash, ok := e.readAheader.ReadInclusionList(blockHash)
+	if !ok {
+		return nil, false
+	}
+	if res, checked := e.readAheader.ReadInclusionListResult(blockHash, ilHash); checked {
+		return &res, false
+	}
+	return nil, true
 }
 
 func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash common.Hash) error {

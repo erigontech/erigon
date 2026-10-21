@@ -398,12 +398,12 @@ func (se *serialExecutor) executeBlock(ctx context.Context, block *types.Block, 
 				// fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 				// End of block transaction in a block
 				if se.cfg.readAheader != nil {
-					if inclusionList, ok := se.cfg.readAheader.ReadInclusionList(txTask.BlockHash()); ok {
+					if inclusionList, ilHash, ok := se.cfg.readAheader.ReadInclusionList(txTask.BlockHash()); ok {
 						ilSatisfied, err := protocol.CheckInclusionListTransactions(gasPool, txTask.Txs, inclusionList, state.NewReaderV3(se.rs.Domains().AsStateGetter(se.applyTx, execctxapi.StateGetterOptions{})), &txTask.EvmBlockContext, se.cfg.chainConfig, se.cfg.vmConfig)
 						if err != nil {
 							return fmt.Errorf("can't check inclusion list for block %d: %w", txTask.BlockNumber(), err)
 						}
-						se.cfg.readAheader.SetInclusionListResult(txTask.BlockHash(), ilSatisfied)
+						se.cfg.readAheader.SetInclusionListResult(txTask.BlockHash(), ilHash, ilSatisfied)
 					}
 				}
 

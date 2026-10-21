@@ -180,7 +180,9 @@ func TestSerialBlockEndChecksInclusionList(t *testing.T) {
 	_, err = se.executeBlock(t.Context(), block, []exec.Task{task}, true)
 	require.NoError(t, err)
 
-	satisfied, checked := se.cfg.readAheader.ReadInclusionListResult(block.Hash())
+	_, ilHash, ok := se.cfg.readAheader.ReadInclusionList(block.Hash())
+	require.True(t, ok)
+	satisfied, checked := se.cfg.readAheader.ReadInclusionListResult(block.Hash(), ilHash)
 	require.True(t, checked)
 	require.False(t, satisfied)
 }

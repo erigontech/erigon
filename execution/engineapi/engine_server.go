@@ -544,9 +544,8 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			LatestValidHash: possibleStatus.LatestValidHash,
 			CriticalError:   possibleStatus.CriticalError,
 		}
-		if status.Status == engine_types.ValidStatus {
-			ilSatisfied := true
-			status.InclusionListSatisfied = &ilSatisfied
+		if err := e.resolveInclusionListSatisfied(ctx, status, blockHash, uint64(req.BlockNumber), il); err != nil {
+			return nil, err
 		}
 		return status, nil
 	}
@@ -577,7 +576,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
 	}
-
+	if err := e.resolveInclusionListSatisfied(ctx, payloadStatus, blockHash, uint64(req.BlockNumber), il); err != nil {
+		return nil, err
+	}
 	return payloadStatus, nil
 }
 
@@ -1104,7 +1105,7 @@ func (e *EngineServer) HandleNewPayload(
 				e.logger.Debug(fmt.Sprintf("[%s] New payload: Client is still syncing", logPrefix))
 				return &engine_types.PayloadStatusV2{Status: engine_types.SyncingStatus}, nil
 			} else {
-				return &engine_types.PayloadStatusV2{Status: engine_types.ValidStatus, LatestValidHash: &latestValidHash, InclusionListSatisfied: inclusionListSatisfiedOrTrue(ilSatisfied)}, nil
+				return &engine_types.PayloadStatusV2{Status: engine_types.ValidStatus, LatestValidHash: &latestValidHash, InclusionListSatisfied: ilSatisfied}, nil
 			}
 		} else {
 			return &engine_types.PayloadStatusV2{Status: engine_types.SyncingStatus}, nil
@@ -1152,7 +1153,7 @@ func (e *EngineServer) HandleNewPayload(
 		LatestValidHash: &latestValidHash,
 	}
 	if resp.Status == engine_types.ValidStatus {
-		resp.InclusionListSatisfied = inclusionListSatisfiedOrTrue(ilSatisfied)
+		resp.InclusionListSatisfied = ilSatisfied
 	}
 	if validationErr != nil {
 		resp.ValidationError = engine_types.NewStringifiedErrorFromString(*validationErr)
@@ -1161,14 +1162,26 @@ func (e *EngineServer) HandleNewPayload(
 	return resp, nil
 }
 
-// inclusionListSatisfiedOrTrue reports a VALID payload as satisfying its inclusion
-// list when validation skipped the check, e.g. because the block was already validated.
-func inclusionListSatisfiedOrTrue(ilSatisfied *bool) *bool {
-	if ilSatisfied != nil {
-		return ilSatisfied
+func (e *EngineServer) resolveInclusionListSatisfied(ctx context.Context, resp *engine_types.PayloadStatusV2, blockHash common.Hash, blockNumber uint64, il types.Transactions) error {
+	if il == nil || resp.Status != engine_types.ValidStatus || resp.InclusionListSatisfied != nil {
+		return nil
 	}
-	satisfied := true
-	return &satisfied
+	if len(il) == 0 {
+		satisfied := true
+		resp.InclusionListSatisfied = &satisfied
+		return nil
+	}
+	satisfied, err := e.executionService.InclusionListSatisfied(ctx, blockHash, blockNumber, il)
+	if err != nil {
+		return err
+	}
+	if satisfied == nil {
+		resp.Status = engine_types.SyncingStatus
+		resp.LatestValidHash = nil
+		return nil
+	}
+	resp.InclusionListSatisfied = satisfied
+	return nil
 }
 
 func convertGrpcStatusToEngineStatus(status execmodule.ExecutionStatus) engine_types.EngineStatus {

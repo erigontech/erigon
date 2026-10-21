@@ -63,6 +63,8 @@ type stubExecutionModule struct {
 	validateChainFunc     func(ctx context.Context, blockHash common.Hash, blockNumber uint64) (execmodule.ValidationResult, error)
 	updateForkChoiceFunc  func(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (execmodule.ForkChoiceResult, error)
 	inclusionListFunc     func(ctx context.Context) (types.Transactions, error)
+	isCanonicalHashFunc   func(ctx context.Context, hash common.Hash) (bool, error)
+	ilSatisfiedFunc       func(ctx context.Context, blockHash common.Hash, blockNumber uint64, il types.Transactions) (*bool, error)
 }
 
 var _ execmodule.ExecutionModule = (*stubExecutionModule)(nil)
@@ -149,7 +151,10 @@ func (s *stubExecutionModule) GetPayloadBodiesByRange(_ context.Context, _, _ ui
 	return nil, nil
 }
 
-func (s *stubExecutionModule) IsCanonicalHash(_ context.Context, _ common.Hash) (bool, error) {
+func (s *stubExecutionModule) IsCanonicalHash(ctx context.Context, hash common.Hash) (bool, error) {
+	if s.isCanonicalHashFunc != nil {
+		return s.isCanonicalHashFunc(ctx, hash)
+	}
 	return false, nil
 }
 
@@ -171,6 +176,13 @@ func (s *stubExecutionModule) FrozenBlocks(_ context.Context) (uint64, bool, err
 func (s *stubExecutionModule) InclusionList(ctx context.Context) (types.Transactions, error) {
 	if s.inclusionListFunc != nil {
 		return s.inclusionListFunc(ctx)
+	}
+	return nil, nil
+}
+
+func (s *stubExecutionModule) InclusionListSatisfied(ctx context.Context, blockHash common.Hash, blockNumber uint64, il types.Transactions) (*bool, error) {
+	if s.ilSatisfiedFunc != nil {
+		return s.ilSatisfiedFunc(ctx, blockHash, blockNumber, il)
 	}
 	return nil, nil
 }

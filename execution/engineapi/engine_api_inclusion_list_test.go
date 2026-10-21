@@ -155,7 +155,7 @@ func TestNewPayloadV6InclusionListSatisfied(t *testing.T) {
 	}
 }
 
-func TestNewPayloadV6ValidWithoutInclusionListResultIsSatisfied(t *testing.T) {
+func TestNewPayloadV6ValidWithoutInclusionListResultIsSyncing(t *testing.T) {
 	t.Parallel()
 
 	cfg := bogotaChainConfig()
@@ -168,9 +168,120 @@ func TestNewPayloadV6ValidWithoutInclusionListResultIsSatisfied(t *testing.T) {
 	status, err := srv.NewPayloadV6(t.Context(), bogotaPayload(t, parent), []common.Hash{}, &common.Hash{}, []hexutil.Bytes{}, signedInclusionList(t, cfg))
 	require.NoError(t, err)
 	require.NotNil(t, status)
+	require.Equal(t, engine_types.SyncingStatus, status.Status)
+	require.Nil(t, status.LatestValidHash)
+	require.Nil(t, status.InclusionListSatisfied)
+}
+
+func TestNewPayloadV6EmptyInclusionListWithoutResultIsSatisfied(t *testing.T) {
+	t.Parallel()
+
+	cfg := bogotaChainConfig()
+	parent := makeParentHeader(1000)
+	srv, _ := newInclusionListServer(cfg, parent, execmodule.ValidationResult{
+		ValidationStatus: execmodule.ExecutionStatusSuccess,
+		LatestValidHash:  common.Hash{0x1},
+	}, ilTestMaxReorgDepth)
+
+	status, err := srv.NewPayloadV6(t.Context(), bogotaPayload(t, parent), []common.Hash{}, &common.Hash{}, []hexutil.Bytes{}, []hexutil.Bytes{})
+	require.NoError(t, err)
+	require.NotNil(t, status)
 	require.Equal(t, engine_types.ValidStatus, status.Status)
 	require.NotNil(t, status.InclusionListSatisfied)
 	require.True(t, *status.InclusionListSatisfied)
+}
+
+func TestNewPayloadV6ValidWithoutInclusionListResultAsksExecution(t *testing.T) {
+	t.Parallel()
+
+	cfg := bogotaChainConfig()
+	parent := makeParentHeader(1000)
+	payload := bogotaPayload(t, parent)
+	satisfied := false
+	var asked common.Hash
+	stub := &stubExecutionModule{
+		getHeaderFunc: getHeaderReturning(parent.Hash(), parent),
+		currentHeaderFunc: func(context.Context) (*types.Header, error) {
+			return parent, nil
+		},
+		validateChainFunc: func(context.Context, common.Hash, uint64) (execmodule.ValidationResult, error) {
+			return execmodule.ValidationResult{ValidationStatus: execmodule.ExecutionStatusSuccess, LatestValidHash: common.Hash{0x1}}, nil
+		},
+		ilSatisfiedFunc: func(_ context.Context, blockHash common.Hash, _ uint64, _ types.Transactions) (*bool, error) {
+			asked = blockHash
+			return &satisfied, nil
+		},
+	}
+	downloader := engine_block_downloader.NewEngineBlockDownloader(context.Background(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+	srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, ilTestMaxReorgDepth)
+	srv.test = true
+
+	status, err := srv.NewPayloadV6(t.Context(), payload, []common.Hash{}, &common.Hash{}, []hexutil.Bytes{}, signedInclusionList(t, cfg))
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	require.Equal(t, payload.BlockHash, asked)
+	require.Equal(t, engine_types.ValidStatus, status.Status)
+	require.NotNil(t, status.InclusionListSatisfied)
+	require.False(t, *status.InclusionListSatisfied)
+}
+
+func TestNewPayloadV6KnownCanonicalBlockAsksExecution(t *testing.T) {
+	t.Parallel()
+
+	cfg := bogotaChainConfig()
+	parent := makeParentHeader(1000)
+	payload := bogotaPayload(t, parent)
+	satisfied := true
+	stub := &stubExecutionModule{
+		getHeaderFunc: func(_ context.Context, blockHash *common.Hash, _ *uint64) (*types.Header, error) {
+			if blockHash != nil && (*blockHash == parent.Hash() || *blockHash == payload.BlockHash) {
+				return parent, nil
+			}
+			return nil, nil
+		},
+		isCanonicalHashFunc: func(_ context.Context, hash common.Hash) (bool, error) {
+			return hash == payload.BlockHash, nil
+		},
+		ilSatisfiedFunc: func(context.Context, common.Hash, uint64, types.Transactions) (*bool, error) {
+			return &satisfied, nil
+		},
+	}
+	downloader := engine_block_downloader.NewEngineBlockDownloader(context.Background(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+	srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, ilTestMaxReorgDepth)
+	srv.test = true
+
+	status, err := srv.NewPayloadV6(t.Context(), payload, []common.Hash{}, &common.Hash{}, []hexutil.Bytes{}, signedInclusionList(t, cfg))
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	require.Equal(t, engine_types.ValidStatus, status.Status)
+	require.NotNil(t, status.InclusionListSatisfied)
+	require.True(t, *status.InclusionListSatisfied)
+}
+
+func TestNewPayloadV6InclusionListCheckErrorIsReturned(t *testing.T) {
+	t.Parallel()
+
+	cfg := bogotaChainConfig()
+	parent := makeParentHeader(1000)
+	stub := &stubExecutionModule{
+		getHeaderFunc: getHeaderReturning(parent.Hash(), parent),
+		currentHeaderFunc: func(context.Context) (*types.Header, error) {
+			return parent, nil
+		},
+		validateChainFunc: func(context.Context, common.Hash, uint64) (execmodule.ValidationResult, error) {
+			return execmodule.ValidationResult{ValidationStatus: execmodule.ExecutionStatusSuccess, LatestValidHash: common.Hash{0x1}}, nil
+		},
+		ilSatisfiedFunc: func(context.Context, common.Hash, uint64, types.Transactions) (*bool, error) {
+			return nil, errors.New("state read failed")
+		},
+	}
+	downloader := engine_block_downloader.NewEngineBlockDownloader(context.Background(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+	srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, ilTestMaxReorgDepth)
+	srv.test = true
+
+	status, err := srv.NewPayloadV6(t.Context(), bogotaPayload(t, parent), []common.Hash{}, &common.Hash{}, []hexutil.Bytes{}, signedInclusionList(t, cfg))
+	require.ErrorContains(t, err, "state read failed")
+	require.Nil(t, status)
 }
 
 func TestNewPayloadV6InclusionListSatisfiedNullUnlessValid(t *testing.T) {

@@ -39,8 +39,9 @@ type BlockReadAheader struct {
 	// inclusionLists is the only copy of each IL (never persisted), so unlike
 	// the other caches a miss cannot fall back to the DB.
 	inclusionLists *lru.Cache[common.Hash, inclusionListEntry]
-	// inclusionListsMu makes each read-modify-write of an entry atomic.
-	inclusionListsMu sync.Mutex
+	// inclusionListResults is keyed by block and IL so that replacing a
+	// block's IL never hands the old IL's result to the new one.
+	inclusionListResults *lru.Cache[inclusionListKey, bool]
 
 	// The single permit belongs either to one warmup or to the code suspending
 	// warmup across an unwind. Warmups never wait for it: read-ahead is
@@ -56,14 +57,25 @@ type BlockReadAheader struct {
 	stateCache *cache.StateCache
 }
 
+// inclusionListCapacity matches the default MaxReorgDepth so the IL of every
+// branch tip within the reorg window stays available.
+const (
+	inclusionListCapacity       = 96
+	inclusionListResultCapacity = 256
+)
+
 type inclusionListEntry struct {
 	txns types.Transactions
 	hash common.Hash
-	// satisfied is nil until the IL check has run for this block and IL.
-	satisfied *bool
 }
 
-func newInclusionListEntry(txns types.Transactions) inclusionListEntry {
+type inclusionListKey struct {
+	block common.Hash
+	il    common.Hash
+}
+
+// InclusionListHash identifies an IL by its txn hashes, independent of their order.
+func InclusionListHash(txns types.Transactions) common.Hash {
 	txnHashes := make([]common.Hash, len(txns))
 	for i, txn := range txns {
 		txnHashes[i] = txn.Hash()
@@ -73,7 +85,7 @@ func newInclusionListEntry(txns types.Transactions) inclusionListEntry {
 	for _, h := range txnHashes {
 		buf = append(buf, h[:]...)
 	}
-	return inclusionListEntry{txns: txns, hash: crypto.Keccak256Hash(buf)}
+	return crypto.Keccak256Hash(buf)
 }
 
 func NewBlockReadAheader() *BlockReadAheader {
@@ -93,17 +105,22 @@ func NewBlockReadAheader() *BlockReadAheader {
 	if err != nil {
 		panic(err)
 	}
-	ils, err := lru.New[common.Hash, inclusionListEntry](1)
+	ils, err := lru.New[common.Hash, inclusionListEntry](inclusionListCapacity)
+	if err != nil {
+		panic(err)
+	}
+	ilResults, err := lru.New[inclusionListKey, bool](inclusionListResultCapacity)
 	if err != nil {
 		panic(err)
 	}
 	return &BlockReadAheader{
-		headers:        headers,
-		bodies:         bodies,
-		senders:        senders,
-		bals:           bals,
-		inclusionLists: ils,
-		warmupGate:     semaphore.NewWeighted(1),
+		headers:              headers,
+		bodies:               bodies,
+		senders:              senders,
+		bals:                 bals,
+		inclusionLists:       ils,
+		inclusionListResults: ilResults,
+		warmupGate:           semaphore.NewWeighted(1),
 	}
 }
 
@@ -258,24 +275,11 @@ func (bra *BlockReadAheader) AddInclusionList(blockHash common.Hash, il types.Tr
 	if il == nil {
 		return
 	}
-	entry := newInclusionListEntry(il)
-	bra.inclusionListsMu.Lock()
-	defer bra.inclusionListsMu.Unlock()
-	if cached, ok := bra.inclusionLists.Get(blockHash); ok && cached.hash == entry.hash {
-		return
-	}
-	bra.inclusionLists.Add(blockHash, entry)
+	bra.inclusionLists.Add(blockHash, inclusionListEntry{txns: il, hash: InclusionListHash(il)})
 }
 
-func (bra *BlockReadAheader) SetInclusionListResult(blockHash common.Hash, satisfied bool) {
-	bra.inclusionListsMu.Lock()
-	defer bra.inclusionListsMu.Unlock()
-	cached, ok := bra.inclusionLists.Get(blockHash)
-	if !ok {
-		return
-	}
-	cached.satisfied = &satisfied
-	bra.inclusionLists.Add(blockHash, cached)
+func (bra *BlockReadAheader) SetInclusionListResult(blockHash, ilHash common.Hash, satisfied bool) {
+	bra.inclusionListResults.Add(inclusionListKey{block: blockHash, il: ilHash}, satisfied)
 }
 
 const balWarmupStorageChunkSize = 64
@@ -536,17 +540,13 @@ func (bra *BlockReadAheader) ReadBodyWithTransactions(blockHash common.Hash) (*t
 	return bra.bodies.Get(blockHash)
 }
 
-func (bra *BlockReadAheader) ReadInclusionList(blockHash common.Hash) (types.Transactions, bool) {
+func (bra *BlockReadAheader) ReadInclusionList(blockHash common.Hash) (types.Transactions, common.Hash, bool) {
 	cached, ok := bra.inclusionLists.Get(blockHash)
-	return cached.txns, ok
+	return cached.txns, cached.hash, ok
 }
 
-func (bra *BlockReadAheader) ReadInclusionListResult(blockHash common.Hash) (bool, bool) {
-	cached, ok := bra.inclusionLists.Get(blockHash)
-	if !ok || cached.satisfied == nil {
-		return false, false
-	}
-	return *cached.satisfied, true
+func (bra *BlockReadAheader) ReadInclusionListResult(blockHash, ilHash common.Hash) (bool, bool) {
+	return bra.inclusionListResults.Get(inclusionListKey{block: blockHash, il: ilHash})
 }
 
 func (bra *BlockReadAheader) ReadBlockWithSenders(blockHash common.Hash) (*types.Block, bool) {
