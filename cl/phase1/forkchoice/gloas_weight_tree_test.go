@@ -454,6 +454,7 @@ func TestGloasConcurrentHeadReadsShareRecomputation(t *testing.T) {
 	checkpoint := solid.Checkpoint{Root: root}
 	graph := &countingHeadForkGraph{getFinalizedExecutionHashForkGraph: &getFinalizedExecutionHashForkGraph{
 		headers:          map[common.Hash]*cltypes.BeaconBlockHeader{root: {Slot: 10}},
+		states:           map[common.Hash]*state2.CachingBeaconState{root: state2.New(&cfg)},
 		currentJustified: checkpoint,
 		getStateStarted:  make(chan common.Hash, readers),
 		getStateRelease:  make(chan struct{}),
@@ -461,6 +462,7 @@ func TestGloasConcurrentHeadReadsShareRecomputation(t *testing.T) {
 	store := newGloasWeightTreeTestStore()
 	store.beaconCfg = &cfg
 	store.forkGraph = graph
+	store.publicKeysRegistry = public_keys_registry.NewInMemoryPublicKeysRegistry()
 	store.justifiedCheckpoint.Store(checkpoint)
 	store.finalizedCheckpoint.Store(solid.Checkpoint{})
 	store.proposerBoostRoot.Store(common.Hash{})
@@ -480,15 +482,12 @@ func TestGloasConcurrentHeadReadsShareRecomputation(t *testing.T) {
 	}
 	// Park every reader after its cache miss. Once released, only the first
 	// reader needs to walk the tree; the others must reuse that result.
-	timeout := time.NewTimer(5 * time.Second)
-	defer timeout.Stop()
-	for range readers {
-		select {
-		case <-graph.getStateStarted:
-		case <-timeout.C:
-			t.Fatal("head readers did not reach checkpoint lookup")
-		}
+	select {
+	case <-graph.getStateStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("head readers did not reach checkpoint lookup")
 	}
+	require.Never(t, func() bool { return len(graph.getStateStarted) > 0 }, 300*time.Millisecond, 5*time.Millisecond)
 	release()
 	wg.Wait()
 	for range readers {
@@ -907,7 +906,7 @@ func TestGloasWeightTreeEquivocationDeltaMatchesFullScan(t *testing.T) {
 
 	tree := f.gloasWeightTree.prepare(justified, cs)
 	node := ForkChoiceNode{Root: justified.Root, PayloadStatus: cltypes.PayloadStatusPending}
-	require.Equal(t, NewWeightStore(f).GetAttestationScore(node), tree.GetAttestationScore(node))
+	require.Equal(t, newWeightStoreFromCheckpointState(f, cs).GetAttestationScore(node), tree.GetAttestationScore(node))
 
 	var validatorIndex uint64
 	found := false
@@ -924,7 +923,7 @@ func TestGloasWeightTreeEquivocationDeltaMatchesFullScan(t *testing.T) {
 	require.Contains(t, f.gloasWeightTree.dirty, validatorIndex)
 	tree = f.gloasWeightTree.prepare(justified, cs)
 
-	require.Equal(t, NewWeightStore(f).GetAttestationScore(node), tree.GetAttestationScore(node))
+	require.Equal(t, newWeightStoreFromCheckpointState(f, cs).GetAttestationScore(node), tree.GetAttestationScore(node))
 }
 
 func TestGloasWeightTreeFirstPrepareIncludesPreReadyEquivocation(t *testing.T) {
@@ -955,7 +954,7 @@ func TestGloasWeightTreeFirstPrepareIncludesPreReadyEquivocation(t *testing.T) {
 
 	tree := f.gloasWeightTree.prepare(justified, cs)
 
-	require.Equal(t, NewWeightStore(f).GetAttestationScore(node), tree.GetAttestationScore(node))
+	require.Equal(t, newWeightStoreFromCheckpointState(f, cs).GetAttestationScore(node), tree.GetAttestationScore(node))
 	require.Empty(t, f.gloasWeightTree.dirty)
 }
 

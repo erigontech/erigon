@@ -37,12 +37,16 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 var (
+	payloadPreparationOutcomes    = metrics.GetOrCreateCounterVec("caplin_payload_preparation_outcomes_total", []string{"outcome"})
+	payloadPreparationCollections = metrics.GetOrCreateCounterVec("caplin_payload_preparation_collections_total", []string{"outcome"})
+
 	errNotOurProposal           = errors.New("next slot is not proposed by a registered validator")
 	errNoPayloadID              = errors.New("execution layer returned no payload id")
 	errHeadTooFarBack           = errors.New("head state is too far behind the slot to prepare")
@@ -52,6 +56,7 @@ var (
 	errGloasPayloadPending      = errors.New("gloas parent payload decision is not ready")
 	errForkChoiceHeadChanged    = errors.New("fork choice head changed")
 	errGloasPathNeedsForkChoice = errors.New("gloas payload path requires a fork-choice update before preparation")
+	errPreparationDerivation    = errors.New("payload preparation state derivation failed")
 )
 
 // preparedPayloadRetainSlots keeps a primed record alive past the slot it was primed for, so
@@ -84,6 +89,33 @@ type preparedPayloadRecord struct {
 type preparedPayload struct {
 	mu       sync.Mutex
 	payloads map[uint64]preparedPayloadRecord
+}
+
+const maxCachedParentExecutionRequests = 8
+
+func (a *ApiHandler) fullParentExecutionRequests(root common.Hash) (*cltypes.ExecutionRequests, error) {
+	if requests, ok := a.parentExecutionRequests.Get(root); ok {
+		return requests, nil
+	}
+	result, err, _ := a.parentExecutionRequestsGroup.Do(string(root[:]), func() (any, error) {
+		if requests, ok := a.parentExecutionRequests.Get(root); ok {
+			return requests, nil
+		}
+		envelope, err := a.forkchoiceStore.ReadEnvelopeFromDisk(root)
+		if err != nil {
+			return nil, fmt.Errorf("read FULL parent payload envelope: %w", err)
+		}
+		if envelope == nil || envelope.Message == nil || envelope.Message.ExecutionRequests == nil {
+			return nil, fmt.Errorf("FULL parent payload has no execution requests for root %x", root)
+		}
+		requests := envelope.Message.ExecutionRequests
+		a.parentExecutionRequests.Add(root, requests)
+		return requests, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.(*cltypes.ExecutionRequests), nil
 }
 
 type payloadPreparationScratch struct {
@@ -153,11 +185,14 @@ func (p *preparedPayload) warmupAndMismatch(slot uint64, payloadID []byte, now t
 	defer p.mu.Unlock()
 	record, ok := p.payloads[slot]
 	if !ok || len(payloadID) == 0 {
+		payloadPreparationCollections.WithLabelValues("absent").Inc()
 		return 0, common.Hash{}, false
 	}
 	if !bytes.Equal(record.id, payloadID) {
+		payloadPreparationCollections.WithLabelValues("mismatch").Inc()
 		return 0, record.head, true
 	}
+	payloadPreparationCollections.WithLabelValues("reused").Inc()
 	return max(now.Sub(record.primedAt), 0), record.head, false
 }
 
@@ -242,6 +277,11 @@ func slotsWithinOne(first, second uint64) bool {
 func (a *ApiHandler) StartPayloadPreparation(ctx context.Context) <-chan struct{} {
 	done := make(chan struct{})
 	if a.routerCfg == nil || !a.routerCfg.Validator || a.engine == nil {
+		close(done)
+		return done
+	}
+	if a.routerCfg.DisablePayloadPreparation {
+		a.logger.Info("PayloadPreparation: disabled", "reason", "disabled by flag")
 		close(done)
 		return done
 	}
@@ -330,12 +370,14 @@ func (a *ApiHandler) preparePayloadLoopWith(
 		// This early check avoids state work during production. The gate is checked again before
 		// builder startup to cover production that begins after this point.
 		if !a.payloadPreparationGate.idle() {
+			observePreparationOutcome(errBlockWorkInFlight)
 			continue
 		}
 		// Nothing is registered, so nothing here can be ours. Checking first keeps a non-validating
 		// node off the state copy entirely.
 		generation := a.validatorParams.Generation()
 		if generation == 0 {
+			observePreparationOutcome(errNotOurProposal)
 			continue
 		}
 		// Before genesis the current slot clamps to zero, so the next slot can be arbitrarily far
@@ -343,29 +385,43 @@ func (a *ApiHandler) preparePayloadLoopWith(
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
 		currentSlotStart := slotStart.Add(-slotDuration)
 		lead := time.Until(slotStart)
-		if lead > slotDuration || lead <= minimumLead {
+		if lead > slotDuration {
+			payloadPreparationOutcomes.WithLabelValues("too_early").Inc()
+			continue
+		}
+		if lead <= minimumLead {
+			observePreparationOutcome(errPreparationTooLate)
 			continue
 		}
 		selectedRoot, selectedSlot, selected := a.syncedData.SelectedHead()
 		if !selected {
+			observePreparationOutcome(synced_data.ErrNotSynced)
 			continue
 		}
 		if a.payloadPreparationGate.producedBlockPending(currentSlot, selectedSlot, time.Now()) {
+			observePreparationOutcome(errBlockWorkInFlight)
 			continue
 		}
+		blockProcessing := a.forkchoiceStore.BlockProcessing()
 		if shouldWaitForCurrentSlotHead(
 			currentSlot,
 			selectedSlot,
-			a.forkchoiceStore.BlockProcessing(),
+			blockProcessing,
 			time.Now(),
 			currentSlotStart,
 			attestationDue(a.beaconChainCfg, currentVersion),
 		) {
+			if blockProcessing && selectedSlot < currentSlot {
+				observePreparationOutcome(errBlockWorkInFlight)
+			} else {
+				observePreparationOutcome(errHeadTooFarBack)
+			}
 			continue
 		}
 		// Preparation requires the selected and materialized head identities to match. Otherwise
 		// its payload attributes can target stale state.
 		if selectedRoot != a.syncedData.HeadRoot() {
+			observePreparationOutcome(errPreparationHeadChanged)
 			continue
 		}
 		current := preparationKey{
@@ -382,6 +438,7 @@ func (a *ApiHandler) preparePayloadLoopWith(
 			var err error
 			current, err = a.precheckPreparationInputs(current)
 			if err != nil {
+				observePreparationOutcome(err)
 				if !isExpectedPreparationSkip(err) {
 					failureLog.Do(func() {
 						logger.Warn("PayloadPreparation: proposer check failed", "slot", targetSlot, "err", err)
@@ -412,6 +469,7 @@ func (a *ApiHandler) preparePayloadLoopWith(
 				var pathErr error
 				current.gloasPath, pathErr = a.resolveGloasPayloadPath(selectedRoot, targetSlot)
 				if pathErr != nil {
+					observePreparationOutcome(pathErr)
 					if !isExpectedPreparationSkip(pathErr) {
 						failureLog.Do(func() {
 							logger.Warn("PayloadPreparation: Gloas payload path resolution failed", "slot", targetSlot, "head", selectedRoot, "err", pathErr)
@@ -420,6 +478,7 @@ func (a *ApiHandler) preparePayloadLoopWith(
 					continue
 				}
 				if current.gloasPath == gloasPayloadPathPending {
+					observePreparationOutcome(errGloasPayloadPending)
 					pendingLog.Do(func() {
 						logger.Warn("PayloadPreparation: Gloas payload path is still pending", "slot", targetSlot, "head", selectedRoot)
 					})
@@ -428,9 +487,11 @@ func (a *ApiHandler) preparePayloadLoopWith(
 			}
 		}
 		if current == lastSettled {
+			payloadPreparationOutcomes.WithLabelValues("unchanged").Inc()
 			continue
 		}
 		if gloasPathRequiresForkChoiceUpdate(current.gloasPath) {
+			observePreparationOutcome(errGloasPathNeedsForkChoice)
 			lastSettled = current
 			scratch.release()
 			continue
@@ -440,6 +501,7 @@ func (a *ApiHandler) preparePayloadLoopWith(
 		)
 		outcome, err := prepare(prepareCtx, current, &scratch)
 		cancel()
+		observePreparationOutcome(err)
 		if isSettledPreparationOutcome(err) {
 			lastSettled = outcome
 			scratch.release()
@@ -450,6 +512,33 @@ func (a *ApiHandler) preparePayloadLoopWith(
 			})
 		}
 	}
+}
+
+func observePreparationOutcome(err error) {
+	reason := "error"
+	switch {
+	case err == nil:
+		reason = "success"
+	case errors.Is(err, errNotOurProposal):
+		reason = "unregistered"
+	case errors.Is(err, errHeadTooFarBack), errors.Is(err, errPreparationHeadChanged), errors.Is(err, errForkChoiceHeadChanged):
+		reason = "stale_head"
+	case errors.Is(err, errBlockWorkInFlight), errors.Is(err, chainreader.ErrExecutionBusy), errors.Is(err, forkchoice.ErrPayloadImportInProgress):
+		reason = "busy"
+	case errors.Is(err, errPreparationTooLate), errors.Is(err, context.DeadlineExceeded):
+		reason = "late"
+	case errors.Is(err, errGloasPathNeedsForkChoice):
+		reason = "needs_forkchoice"
+	case errors.Is(err, errGloasPayloadPending):
+		reason = "pending"
+	case errors.Is(err, synced_data.ErrNotSynced):
+		reason = "not_synced"
+	case errors.Is(err, context.Canceled):
+		reason = "canceled"
+	case errors.Is(err, errPreparationDerivation):
+		reason = "derivation_error"
+	}
+	payloadPreparationOutcomes.WithLabelValues(reason).Inc()
 }
 
 // preparationKey identifies the effective inputs of a settled attempt.
@@ -535,11 +624,12 @@ func gloasPayloadDecisionDelay(
 // isExpectedPreparationSkip reports whether there was simply nothing to prepare, as opposed to a
 // failure worth reporting.
 func isExpectedPreparationSkip(err error) bool {
-	return isSettledPreparationOutcome(err) ||
+	return (isSettledPreparationOutcome(err) && !errors.Is(err, errPreparationDerivation)) ||
 		errors.Is(err, errHeadTooFarBack) ||
 		errors.Is(err, errPreparationHeadChanged) ||
 		errors.Is(err, errForkChoiceHeadChanged) ||
 		errors.Is(err, errBlockWorkInFlight) ||
+		errors.Is(err, forkchoice.ErrPayloadImportInProgress) ||
 		errors.Is(err, errGloasPayloadPending) ||
 		errors.Is(err, context.DeadlineExceeded) ||
 		errors.Is(err, context.Canceled) ||
@@ -549,7 +639,7 @@ func isExpectedPreparationSkip(err error) bool {
 func isSettledPreparationOutcome(err error) bool {
 	return err == nil ||
 		errors.Is(err, errNotOurProposal) ||
-		errors.Is(err, errNoPayloadID) ||
+		errors.Is(err, errPreparationDerivation) ||
 		errors.Is(err, errPreparationTooLate) ||
 		errors.Is(err, errGloasPathNeedsForkChoice)
 }
@@ -616,7 +706,7 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	}
 
 	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
-		return key, err
+		return key, fmt.Errorf("%w: process slots: %w", errPreparationDerivation, err)
 	}
 	stateWork := time.Since(stateWorkStart)
 	if lookupAfterAdvance {
@@ -662,7 +752,7 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	}
 	withdrawals, err := a.expectedWithdrawals(baseState, withdrawalsState, targetSlot)
 	if err != nil {
-		return key, err
+		return key, fmt.Errorf("%w: %w", errPreparationDerivation, err)
 	}
 	slotNumber := hexutil.Uint64(targetSlot)
 	attrs := a.payloadBuildAttributes(
@@ -807,7 +897,22 @@ func (a *ApiHandler) startPayloadBuildAttempt(
 		return nil, errBlockWorkInFlight
 	}
 	defer finishAttempt()
-	return payloadBuilder.StartPayloadBuild(ctx, head, attrs)
+	buildCtx, finishImportCheck, ok := a.forkchoiceStore.TryBeginPayloadPreparation(ctx, selectedSlot, preparationSlot+1)
+	if !ok {
+		return nil, context.Cause(buildCtx)
+	}
+	defer finishImportCheck()
+	id, err := payloadBuilder.StartPayloadBuild(buildCtx, head, attrs)
+	if err != nil {
+		if cause := context.Cause(buildCtx); cause != nil {
+			return nil, cause
+		}
+		return nil, err
+	}
+	if finishImportCheck() {
+		return nil, forkchoice.ErrPayloadImportInProgress
+	}
+	return id, nil
 }
 
 // payloadBuildAttributes is shared because production reuses a prepared builder only when every
@@ -926,24 +1031,17 @@ func (a *ApiHandler) executionPayloadSourceForGloasPath(
 	if path != gloasPayloadPathFull {
 		return executionPayloadSource{head: baseState.GetLatestBlockHash(), gloasPath: path}
 	}
-	envelope, err := a.forkchoiceStore.ReadEnvelopeFromDisk(baseBlockRoot)
+	requests, err := a.fullParentExecutionRequests(baseBlockRoot)
 	if err != nil {
 		return executionPayloadSource{
 			head:          baseState.GetLatestBlockHash(),
 			gloasPath:     gloasPayloadPathPending,
-			fallbackCause: fmt.Errorf("read FULL parent payload envelope: %w", err),
-		}
-	}
-	if envelope == nil || envelope.Message == nil || envelope.Message.ExecutionRequests == nil {
-		return executionPayloadSource{
-			head:          baseState.GetLatestBlockHash(),
-			gloasPath:     gloasPayloadPathPending,
-			fallbackCause: fmt.Errorf("FULL parent payload has no execution requests for root %x", baseBlockRoot),
+			fallbackCause: err,
 		}
 	}
 	return executionPayloadSource{
 		head:                    parentBid.BlockHash,
-		parentExecutionRequests: envelope.Message.ExecutionRequests,
+		parentExecutionRequests: requests,
 		gloasPath:               path,
 	}
 }
