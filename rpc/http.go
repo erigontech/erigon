@@ -462,10 +462,11 @@ func validateRequest(r *http.Request) (int, error) {
 		err := fmt.Errorf("content length too large (%d>%d)", r.ContentLength, maxRequestContentLength)
 		return http.StatusRequestEntityTooLarge, err
 	}
-	// Allow OPTIONS and GET (regardless of content-type)
-	if r.Method == http.MethodOptions || r.Method == http.MethodGet {
+	if r.Method == http.MethodOptions {
 		return 0, nil
 	}
+	// GET calls need the content type too: a cross-site page can send a GET without a CORS
+	// preflight, but not one carrying this header.
 	// Check content-type
 	if mt, _, err := mime.ParseMediaType(r.Header.Get("content-type")); err == nil {
 		if slices.Contains(acceptedContentTypes, mt) {

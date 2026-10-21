@@ -47,12 +47,17 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
 		return cachedIndicies
 	}
 
-	// Check global cache using block root at beginning of previous epoch
-	blockRootAtBegginingPrevEpoch, err := b.GetBlockRootAtSlot(((epoch - 1) * b.BeaconConfig().SlotsPerEpoch) - 1)
-	if err == nil {
-		if cachedIndicies, _, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, blockRootAtBegginingPrevEpoch); ok && len(cachedIndicies) > 0 {
+	decisionRoot, lookaheadRoot, ok := b.shufflingDecisionRoots(epoch)
+	if ok {
+		if cachedIndicies, hit := caches.ActiveValidatorsCacheGlobal.Get(epoch, decisionRoot); hit && len(cachedIndicies) > 0 {
 			b.activeValidatorsCache.Add(epoch, cachedIndicies)
 			return cachedIndicies
+		}
+		if lookaheadRoot != (common.Hash{}) {
+			if cachedIndicies, hit := caches.LookaheadActiveValidatorsCacheGlobal.Get(epoch, lookaheadRoot); hit && len(cachedIndicies) > 0 {
+				b.activeValidatorsCache.Add(epoch, cachedIndicies)
+				return cachedIndicies
+			}
 		}
 	}
 
@@ -64,10 +69,41 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
 		}
 	}
 
-	// Store in both caches (totalActiveBalance will be set by _refreshActiveBalancesIfNeeded)
 	b.activeValidatorsCache.Add(epoch, indicies)
+	if lookaheadRoot != (common.Hash{}) {
+		caches.LookaheadActiveValidatorsCacheGlobal.Put(epoch, lookaheadRoot, indicies)
+	}
 
 	return indicies
+}
+
+func (b *CachingBeaconState) shufflingDecisionRoots(epoch uint64) (common.Hash, common.Hash, bool) {
+	if epoch < 2 {
+		return common.Hash{}, common.Hash{}, false
+	}
+	slotsPerEpoch := b.BeaconConfig().SlotsPerEpoch
+	decisionSlot := (epoch-1)*slotsPerEpoch - 1
+	if decisionSlot > b.Slot() {
+		return common.Hash{}, common.Hash{}, false
+	}
+	if decisionSlot < b.Slot() {
+		root, err := b.GetBlockRootAtSlot(decisionSlot)
+		return root, common.Hash{}, err == nil
+	}
+	header := b.LatestBlockHeader()
+	if header.Root == (common.Hash{}) {
+		return common.Hash{}, common.Hash{}, false
+	}
+	root, err := header.HashSSZ()
+	if err != nil {
+		return common.Hash{}, common.Hash{}, false
+	}
+	blockRoot := common.Hash(root)
+	index := int(decisionSlot % b.BeaconConfig().SlotsPerHistoricalRoot)
+	if b.BlockRoots().Get(index) != blockRoot {
+		return common.Hash{}, common.Hash{}, false
+	}
+	return blockRoot, b.StateRoots().Get(index), true
 }
 
 // GetTotalActiveBalance return the sum of all balances within active validators.
@@ -99,21 +135,30 @@ func (b *CachingBeaconState) ComputeCommittee(
 	if shuffledIndicesInterface, ok := b.shuffledSetsCache.Get(seed); ok {
 		shuffledIndicies = shuffledIndicesInterface
 	} else {
-		blockRootAtBegginingPrevEpoch, err := b.GetBlockRootAtSlot(((epoch - 1) * b.BeaconConfig().SlotsPerEpoch) - 1)
-		if cachedIndicies, ok := caches.ShuffledIndiciesCacheGlobal.Get(epoch, blockRootAtBegginingPrevEpoch); ok && err == nil {
-			shuffledIndicies = cachedIndicies
-		} else {
-			// print stack trace
+		decisionRoot, lookaheadRoot, ok := b.shufflingDecisionRoots(epoch)
+		if ok {
+			if cachedIndicies, hit := caches.ShuffledIndiciesCacheGlobal.Get(epoch, decisionRoot); hit {
+				shuffledIndicies = cachedIndicies
+			} else if lookaheadRoot != (common.Hash{}) {
+				if cachedIndicies, hit := caches.LookaheadShuffledIndiciesCacheGlobal.Get(epoch, lookaheadRoot); hit {
+					shuffledIndicies = cachedIndicies
+				}
+			}
+		}
+		if shuffledIndicies == nil {
 			shuffledIndicies = make([]uint64, lenIndicies)
 			start := time.Now()
 			shuffledIndicies = shuffling.ComputeShuffledIndicies(b.BeaconConfig(), mix, shuffledIndicies, indicies, slot)
 			shuffling_metrics.ObserveComputeShuffledIndiciesTime(start)
+			if lookaheadRoot != (common.Hash{}) {
+				caches.LookaheadShuffledIndiciesCacheGlobal.Put(epoch, lookaheadRoot, shuffledIndicies)
+			}
 		}
 
 		b.shuffledSetsCache.Add(seed, shuffledIndicies)
 	}
 
-	return shuffledIndicies[start:end], nil
+	return shuffledIndicies[start:end:end], nil
 }
 
 // GetBeaconProposerIndex updates cache and gets the beacon proposer index

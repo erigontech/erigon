@@ -254,6 +254,36 @@ func TestRetire_StandaloneII(t *testing.T) {
 	mustExist(t, recentIdx, true)
 }
 
+func TestRetire_IndexAndHistoryPartitionsCanDiffer(t *testing.T) {
+	const stepSize = uint64(10)
+	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, 2)
+	historyRanges := []testFileRange{{0, 2}, {2, 3}}
+	generateAccountsFile(t, agg.Dirs(), historyRanges)
+	generateCodeFile(t, agg.Dirs(), historyRanges)
+	generateStorageFile(t, agg.Dirs(), historyRanges)
+	indices := []kv.InvertedIdx{kv.TracesFromIdx, kv.TracesToIdx, kv.LogAddrIdx, kv.LogTopicIdx}
+	for _, idx := range indices {
+		generateStandaloneIIFile(t, idx, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {2, 3}})
+	}
+	require.NoError(t, agg.OpenFolder(db))
+	retired, err := aggRetire(t, agg, kv.RetireCutoffs{Default: stepSize})
+	require.NoError(t, err)
+	require.Positive(t, retired)
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		start, err := at.HistoryStartFrom(domain, tx)
+		require.NoError(t, err)
+		require.Zero(t, start, "a merged history file spanning the cutoff is retained")
+	}
+	for _, idx := range indices {
+		require.Equal(t, stepSize, at.IIStartFrom(idx, tx), "standalone-index availability cannot be inferred from state history")
+	}
+}
+
 // TestRetire_ReclaimConcurrent stresses BeginFilesRo/Close
 // against concurrent retirement under the race detector.
 func TestRetire_ReclaimConcurrent(t *testing.T) {

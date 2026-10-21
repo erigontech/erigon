@@ -61,6 +61,46 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
+func TestEngineRejectsMissingRequiredObjects(t *testing.T) {
+	t.Parallel()
+
+	srv := NewEngineServer(log.New(), &chain.Config{}, nil, nil, false, false, false, true, nil, nil, 0, 0)
+	client := newEngineInProcClient(t, srv)
+
+	for _, test := range []struct {
+		method string
+		params []any
+	}{
+		{"engine_newPayloadV1", []any{nil}},
+		{"engine_newPayloadV2", []any{nil}},
+		{"engine_newPayloadV3", []any{nil, []common.Hash{}, common.Hash{}}},
+		{"engine_newPayloadV4", []any{nil, []common.Hash{}, common.Hash{}, []hexutil.Bytes{}}},
+		{"engine_newPayloadV5", []any{nil, []common.Hash{}, common.Hash{}, []hexutil.Bytes{}}},
+		{"engine_forkchoiceUpdatedV1", []any{nil, nil}},
+		{"engine_forkchoiceUpdatedV2", []any{nil, nil}},
+		{"engine_forkchoiceUpdatedV3", []any{nil, nil}},
+		{"engine_forkchoiceUpdatedV4", []any{nil, nil, nil}},
+	} {
+		t.Run(test.method, func(t *testing.T) {
+			for _, params := range []struct {
+				name string
+				args []any
+			}{
+				{"null", test.params},
+				{"empty", []any{}},
+				{"omitted", nil},
+			} {
+				t.Run(params.name, func(t *testing.T) {
+					err := client.CallContext(t.Context(), new(any), test.method, params.args...)
+					var rpcErr rpc.Error
+					require.ErrorAs(t, err, &rpcErr)
+					require.Equal(t, -32602, rpcErr.ErrorCode())
+				})
+			}
+		})
+	}
+}
+
 func TestNewPayloadV5BoundsBALAllocations(t *testing.T) {
 	reads := make([]uint64, 100_000)
 	for i := range reads {

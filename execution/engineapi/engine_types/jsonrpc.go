@@ -420,3 +420,10 @@ func ConvertPayloadId(payloadId uint64) *hexutil.Bytes {
 	ret := hexutil.Bytes(encodedPayloadId)
 	return &ret
 }
+
+func DecodePayloadID(payloadID []byte) (uint64, error) {
+	if len(payloadID) != 8 {
+		return 0, errors.New("invalid payload id: expected 8 bytes")
+	}
+	return binary.BigEndian.Uint64(payloadID), nil
+}

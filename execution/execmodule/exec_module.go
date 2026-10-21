@@ -510,10 +510,12 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		body               *types.Body
 		currentBlockNumber *uint64
 		payloadExecuted    bool
+		canonical          bool
 		err                error
 	)
 	alreadyExecuted := func(tx kv.Getter) (bool, error) {
-		canonical, err := e.blockReader.IsCanonical(ctx, tx, blockHash, blockNumber)
+		var err error
+		canonical, err = e.blockReader.IsCanonical(ctx, tx, blockHash, blockNumber)
 		if err != nil || !canonical {
 			return false, err
 		}
@@ -579,7 +581,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}, nil
 	}
 	// Finality fixes canonical hashes even after their unwind history is pruned.
-	if payloadExecuted {
+	if payloadExecuted || (!canonical && e.forkValidator.IsValidated(blockHash)) {
 		return ValidationResult{
 			ValidationStatus: ExecutionStatusSuccess,
 			LatestValidHash:  blockHash,
