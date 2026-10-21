@@ -63,6 +63,8 @@ var (
 	errPendingEnvelopeAgeBounded       = errors.New("pending execution payload envelope is age bounded")
 )
 
+var blsVerify = bls.Verify
+
 func (f *ForkChoiceStore) claimEnvelopeIndexRepair(root common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, applied bool) (envelopeIndexRepairToken, bool, error) {
 	return f.claimEnvelopeIndexRepairWith(root, signedEnvelope, applied, f.envelopeIndexRepairs.claim)
 }
@@ -292,7 +294,7 @@ func (f *ForkChoiceStore) verifyEnvelopeBuilderSignature(
 	}
 
 	// Verify BLS signature
-	valid, err := bls.Verify(signedEnvelope.Signature[:], signingRoot[:], pk[:])
+	valid, err := blsVerify(signedEnvelope.Signature[:], signingRoot[:], pk[:])
 	if err != nil {
 		return fmt.Errorf("signature verification error: %w", err)
 	}
@@ -922,7 +924,7 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForConsensus(ctx conte
 		return err
 	}
 	blockState.SetPreviousStateRoot(block.Block.StateRoot)
-	if err := transition.ValidatingMachine.ProcessExecutionPayloadEnvelope(blockState, signedEnvelope); err != nil {
+	if err := transition.DefaultMachine.ProcessExecutionPayloadEnvelope(blockState, signedEnvelope); err != nil {
 		return fmt.Errorf("%w: execution payload envelope consensus validation failed: %w", ErrInvalidExecutionPayloadEnvelope, err)
 	}
 	f.mu.Lock()
@@ -1092,7 +1094,12 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 		}
 	}
 	blockState.SetPreviousStateRoot(block.Block.StateRoot)
-	if err := transition.ValidatingMachine.ProcessExecutionPayloadEnvelope(blockState, signedEnvelope); err != nil {
+	// The validatePayload branch above already verified the builder signature.
+	machine := transition.ValidatingMachine
+	if validatePayload {
+		machine = transition.DefaultMachine
+	}
+	if err := machine.ProcessExecutionPayloadEnvelope(blockState, signedEnvelope); err != nil {
 		return false, fmt.Errorf("%w: OnExecutionPayload: failed to verify execution payload: %w", ErrInvalidExecutionPayloadEnvelope, err)
 	}
 
