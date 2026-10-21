@@ -66,6 +66,13 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			hasMore = true
 			break
 		}
+		if blockNumChanged {
+			// Require full replay history even when only a system entry survives.
+			// Trace indices can have a different physical start from state history.
+			if err := api.checkPruneTransactionHistory(ctx, tx, blockNum); err != nil {
+				return nil, nil, false, err
+			}
+		}
 
 		// Avoid reading the same block multiple times; multiple matches in the same block
 		// may be common.
@@ -74,12 +81,12 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 		// it is necessary to track dirty/lazy-must-read block headers
 		// because we skip system txs like rewards (which are not "real" txs
 		// for this rpc purposes)
-		if isFinalTxn {
+		if isFinalTxn || txIndex < 0 {
 			continue
 		}
 
 		if mustReadBlock {
-			if err := api.checkBlockHistoryAvailable(ctx, tx, blockNum); err != nil {
+			if err := api.checkPruneBlocks(ctx, tx, blockNum); err != nil {
 				return nil, nil, false, err
 			}
 			block, err = api.blockByNumberWithSenders(ctx, tx, blockNum)
@@ -91,7 +98,6 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			}
 			mustReadBlock = false
 		}
-
 		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
 			return nil, nil, false, err

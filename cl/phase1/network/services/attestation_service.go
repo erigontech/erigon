@@ -340,7 +340,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 			subnet := *subnet
 			s.awaitingBlock.add(root, func(ctx context.Context) { _ = s.ProcessMessage(ctx, &subnet, att) })
 		}
-		return fmt.Errorf("%w: block not seen: %v", ErrIgnore, root)
+		return fmt.Errorf("%w: %w: %v", ErrIgnore, ErrBlockNotSeen, root)
 	}
 
 	// [New in Gloas] [REJECT] attestation.data.index == 0 if block.slot == attestation.data.slot

@@ -63,7 +63,7 @@ func (g *embeddedPtcVoteForkGraph) IsBlockInvalid(root common.Hash) bool {
 }
 
 func TestHasImportedDescendantAfterCountsDescendantsOnly(t *testing.T) {
-	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false, nil)
 	childRoot, err := child.Block.HashSSZ()
 	require.NoError(t, err)
 
@@ -86,7 +86,7 @@ func TestHasImportedDescendantAfterCountsDescendantsOnly(t *testing.T) {
 }
 
 func TestHasImportedDescendantAfterSkipsBlocksCutOffByAnInvalidPayload(t *testing.T) {
-	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false, nil)
 	require.Equal(t, cltypes.PayloadStatusFull, store.getParentPayloadStatus(child.Block))
 
 	// The child builds on the anchor's payload, so an INVALID verdict leaves no path to it.
@@ -95,7 +95,7 @@ func TestHasImportedDescendantAfterSkipsBlocksCutOffByAnInvalidPayload(t *testin
 }
 
 func TestHasImportedDescendantAfterKeepsBlocksOnTheEmptyVariantOfAnInvalidPayload(t *testing.T) {
-	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false, nil)
 	anchorBlock, ok := store.forkGraph.GetBlock(anchorRoot)
 	require.True(t, ok)
 	anchorBlock.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = common.Hash{0xe1}
@@ -108,7 +108,7 @@ func TestHasImportedDescendantAfterKeepsBlocksOnTheEmptyVariantOfAnInvalidPayloa
 // A pre-Gloas block has no EMPTY alternative: an invalid one cuts off itself and every child,
 // whatever the child's bid claims.
 func TestCutOffByInvalidationAtThePreGloasBoundary(t *testing.T) {
-	store, _, _ := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	store, _, _ := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false, nil)
 	graph := store.forkGraph.(*embeddedPtcVoteForkGraph)
 	add := func(block *cltypes.SignedBeaconBlock) common.Hash {
 		root, err := block.Block.HashSSZ()
@@ -203,7 +203,7 @@ func TestOnBlockFromForwardSyncExpandsEmbeddedPtcVotesForDuplicateValidator(t *t
 		selectedPositions[i] = i
 	}
 
-	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, committee, selectedPositions, true)
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, committee, selectedPositions, true, nil)
 	require.True(t, store.payloadTimeliness(anchorRoot, false))
 	require.True(t, store.payloadDataAvailability(anchorRoot, false))
 	require.False(t, store.ShouldBuildOnFull(ForkChoiceNode{Root: anchorRoot, PayloadStatus: cltypes.PayloadStatusFull}, 2))
@@ -224,7 +224,7 @@ func TestOnBlockFromForwardSyncAppliesEmbeddedPtcVotesForUniqueValidators(t *tes
 		selectedPositions[i] = i
 	}
 
-	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, committee, selectedPositions, true)
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, committee, selectedPositions, true, nil)
 	require.True(t, store.payloadTimeliness(anchorRoot, false))
 	require.True(t, store.payloadDataAvailability(anchorRoot, false))
 	head, _, err := store.GetHeadNode()
@@ -240,20 +240,21 @@ func TestOnBlockFromForwardSyncUsesMaxPtcSizeForZeroConfig(t *testing.T) {
 		committee[i] = uint64(i + 1)
 	}
 
-	store, anchorRoot, _ := runEmbeddedPtcVoteBlock(t, 0, committee, []int{int(clparams.MaxPtcSize - 1)}, true)
-	votes := store.payloadTimelinessVoteValue(anchorRoot)
+	store, anchorRoot, _ := runEmbeddedPtcVoteBlock(t, 0, committee, []int{int(clparams.MaxPtcSize - 1)}, true, nil)
+	votes, _, present, _ := store.PayloadAttestationVotes(anchorRoot)
+	require.True(t, present)
 	require.Equal(t, int8(-1), votes[clparams.MaxPtcSize-1])
 	require.Zero(t, votes[clparams.MaxPtcSize-2])
 }
 
 func TestOnBlockFromForwardSyncAcceptsPersistedParentEnvelopeWithoutEngineStatus(t *testing.T) {
-	store, anchorRoot, _ := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	store, anchorRoot, _ := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false, nil)
 
 	require.True(t, store.HasEnvelope(anchorRoot))
 }
 
 func TestKnownForwardSyncBlockRequiresValidatedParentForLiveIngress(t *testing.T) {
-	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false, nil)
 
 	require.ErrorIs(t, store.ValidateBlockForPublishing(child, false), ErrParentEnvelopePending)
 	require.ErrorIs(t, store.OnBlock(t.Context(), child, true, true, false), ErrParentEnvelopePending)
@@ -263,12 +264,131 @@ func TestKnownForwardSyncBlockRequiresValidatedParentForLiveIngress(t *testing.T
 	require.NoError(t, store.OnBlock(t.Context(), child, true, true, false))
 }
 
+func dropJustifiedCheckpointState(store *ForkChoiceStore, anchorRoot common.Hash) {
+	delete(store.forkGraph.(*embeddedPtcVoteForkGraph).states, anchorRoot)
+	store.checkpointStates.Delete(store.JustifiedCheckpoint())
+	store.mu.Lock()
+	store.invalidateCachedHead()
+	store.mu.Unlock()
+}
+
+func TestGloasHeadFailsWithoutJustifiedCheckpointState(t *testing.T) {
+	store, anchorRoot, _ := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false, nil)
+	dropJustifiedCheckpointState(store, anchorRoot)
+
+	_, _, err := store.GetHeadNode()
+	require.ErrorContains(t, err, "baseState not found")
+}
+
+func TestGloasCurrentSlotBlockFailsWithoutJustifiedCheckpointState(t *testing.T) {
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false, nil)
+	dropJustifiedCheckpointState(store, anchorRoot)
+
+	sibling := cltypes.NewSignedBeaconBlock(store.beaconCfg, clparams.GloasVersion)
+	sibling.Block.Slot = child.Block.Slot
+	sibling.Block.ParentRoot = anchorRoot
+	sibling.Block.ProposerIndex = child.Block.ProposerIndex + 1
+	require.Equal(t, store.Slot(), sibling.Block.Slot)
+
+	err := store.OnBlock(context.Background(), sibling, false, false, false)
+	require.ErrorContains(t, err, "baseState not found")
+}
+
+func TestGloasCurrentSlotBlockUsesAnchorWhenJustifiedRootIsUnknown(t *testing.T) {
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false, nil)
+	store.justifiedCheckpoint.Store(solid.Checkpoint{Epoch: store.JustifiedCheckpoint().Epoch, Root: common.Hash{0xee}})
+
+	sibling := cltypes.NewSignedBeaconBlock(store.beaconCfg, clparams.GloasVersion)
+	sibling.Block.Slot = child.Block.Slot
+	sibling.Block.ParentRoot = anchorRoot
+	sibling.Block.ProposerIndex = child.Block.ProposerIndex + 1
+	require.NoError(t, store.OnBlock(context.Background(), sibling, false, false, false))
+}
+
+type pruningStateForkGraph struct {
+	*embeddedPtcVoteForkGraph
+}
+
+func (g *pruningStateForkGraph) GetState(blockRoot common.Hash, _ bool) (*state.CachingBeaconState, error) {
+	delete(g.headers, blockRoot)
+	delete(g.states, blockRoot)
+	return nil, nil
+}
+
+func TestGloasHeadUsesAnchorWhenJustifiedRootIsPrunedDuringLookup(t *testing.T) {
+	store, anchorRoot, _ := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false, nil)
+	store.forkGraph = &pruningStateForkGraph{store.forkGraph.(*embeddedPtcVoteForkGraph)}
+	store.checkpointStates.Delete(store.JustifiedCheckpoint())
+	store.mu.Lock()
+	store.invalidateCachedHead()
+	store.mu.Unlock()
+
+	head, _, err := store.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, anchorRoot, head.Root)
+}
+
+func TestOnBlockEmbeddedPtcVoteOverridesConflictingGossipVote(t *testing.T) {
+	committee := make([]uint64, clparams.MaxPtcSize)
+	for i := range committee {
+		committee[i] = uint64(i + 1_000)
+	}
+	committee[gossipTestPTCPosition] = gossipTestValidator
+
+	t.Run("gossip before block", func(t *testing.T) {
+		store, anchorRoot, _ := runEmbeddedPtcVoteBlock(
+			t,
+			clparams.MaxPtcSize,
+			committee,
+			[]int{gossipTestPTCPosition},
+			true,
+			func(store *ForkChoiceStore, root common.Hash) {
+				sign := addGossipPayloadAttestationSigner(t, store, root, 1, gossipTestValidator, gossipTestPTCPosition, true)
+				require.NoError(t, store.OnGossipPayloadAttestationMessage(t.Context(), sign(true)))
+				timeliness, dataAvailability, timelinessPresent, dataAvailabilityPresent := store.PayloadAttestationVotes(root)
+				require.True(t, timelinessPresent)
+				require.True(t, dataAvailabilityPresent)
+				require.Equal(t, int8(1), timeliness[gossipTestPTCPosition])
+				require.Equal(t, int8(1), dataAvailability[gossipTestPTCPosition])
+			},
+		)
+
+		timeliness, dataAvailability, timelinessPresent, dataAvailabilityPresent := store.PayloadAttestationVotes(anchorRoot)
+		require.True(t, timelinessPresent)
+		require.True(t, dataAvailabilityPresent)
+		require.Equal(t, int8(-1), timeliness[gossipTestPTCPosition])
+		require.Equal(t, int8(-1), dataAvailability[gossipTestPTCPosition])
+	})
+
+	t.Run("gossip after block", func(t *testing.T) {
+		store, anchorRoot, _ := runEmbeddedPtcVoteBlock(
+			t,
+			clparams.MaxPtcSize,
+			committee,
+			[]int{gossipTestPTCPosition},
+			true,
+			nil,
+		)
+		sign := addGossipPayloadAttestationSigner(t, store, anchorRoot, 1, gossipTestValidator, gossipTestPTCPosition, true)
+
+		err := store.OnGossipPayloadAttestationMessage(t.Context(), sign(true))
+
+		require.ErrorIs(t, err, ErrPayloadAttestationNotCurrentSlot)
+		timeliness, dataAvailability, timelinessPresent, dataAvailabilityPresent := store.PayloadAttestationVotes(anchorRoot)
+		require.True(t, timelinessPresent)
+		require.True(t, dataAvailabilityPresent)
+		require.Equal(t, int8(-1), timeliness[gossipTestPTCPosition])
+		require.Equal(t, int8(-1), dataAvailability[gossipTestPTCPosition])
+	})
+}
+
 func runEmbeddedPtcVoteBlock(
 	t *testing.T,
 	configuredPtcSize uint64,
 	committee []uint64,
 	selectedPositions []int,
 	payloadValidated bool,
+	beforeBlock func(*ForkChoiceStore, common.Hash),
 ) (*ForkChoiceStore, common.Hash, *cltypes.SignedBeaconBlock) {
 	t.Helper()
 	cfg := clparams.MainnetBeaconConfig
@@ -298,6 +418,8 @@ func runEmbeddedPtcVoteBlock(
 	anchorRoot, err := anchor.BlockRoot()
 	require.NoError(t, err)
 
+	baseState, err := anchor.Copy()
+	require.NoError(t, err)
 	postState, err := anchor.Copy()
 	require.NoError(t, err)
 	require.NoError(t, postState.SetSlot(2))
@@ -307,7 +429,7 @@ func runEmbeddedPtcVoteBlock(
 		getFinalizedExecutionHashForkGraph: &getFinalizedExecutionHashForkGraph{
 			blocks:     map[common.Hash]*cltypes.SignedBeaconBlock{anchorRoot: parent},
 			headers:    map[common.Hash]*cltypes.BeaconBlockHeader{anchorRoot: {Slot: 1}},
-			states:     make(map[common.Hash]*state.CachingBeaconState),
+			states:     map[common.Hash]*state.CachingBeaconState{anchorRoot: baseState},
 			anchorRoot: anchorRoot,
 			anchorSlot: 1,
 		},
@@ -330,6 +452,10 @@ func runEmbeddedPtcVoteBlock(
 		nil,
 	)
 	require.NoError(t, err)
+	if beforeBlock != nil {
+		store.OnTick(cfg.SecondsPerSlot * 1000)
+		beforeBlock(store, anchorRoot)
+	}
 	store.OnTick(2 * cfg.SecondsPerSlot * 1000)
 	if payloadValidated {
 		store.payloadStatusByRoot.Add(anchorRoot, execution_client.PayloadStatusValidated)
@@ -1190,6 +1316,55 @@ func TestCheckpointStatesKeepCurrentJustified(t *testing.T) {
 	require.Equal(t, maxCheckpointStates, checkpointStateCacheLen(store))
 }
 
+func TestCheckpointStateBelowFinalizedKeepsFullCache(t *testing.T) {
+	checkpoints := checkpointStateCacheTestCheckpoints(maxCheckpointStates + 1)
+	belowFinalized, valid := checkpoints[0], checkpoints[1:]
+	store := newCheckpointStateCacheTestStore(t, checkpoints, solid.Checkpoint{})
+	store.finalizedCheckpoint.Store(valid[0])
+	for _, checkpoint := range valid {
+		_, err := store.getCheckpointState(checkpoint)
+		require.NoError(t, err)
+	}
+
+	built, err := store.getCheckpointState(belowFinalized)
+	require.NoError(t, err)
+	require.NotNil(t, built)
+
+	require.Equal(t, maxCheckpointStates, checkpointStateCacheLen(store))
+	for _, checkpoint := range valid {
+		_, ok := store.checkpointStates.Load(checkpoint)
+		require.True(t, ok, "epoch %d", checkpoint.Epoch)
+	}
+}
+
+type failOnceStateForkGraph struct {
+	fork_graph.ForkGraph
+	err   error
+	calls int
+}
+
+func (g *failOnceStateForkGraph) GetState(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+	g.calls++
+	if g.calls == 1 {
+		return nil, g.err
+	}
+	return g.ForkGraph.GetState(blockRoot, alwaysCopy)
+}
+
+func TestFailedCheckpointStateBuildIsNotCached(t *testing.T) {
+	checkpoint := checkpointStateCacheTestCheckpoints(1)[0]
+	store := newCheckpointStateCacheTestStore(t, []solid.Checkpoint{checkpoint}, solid.Checkpoint{})
+	graph := &failOnceStateForkGraph{ForkGraph: store.forkGraph, err: errors.New("state unavailable")}
+	store.forkGraph = graph
+
+	_, err := store.getCheckpointState(checkpoint)
+	require.ErrorIs(t, err, graph.err)
+	built, err := store.getCheckpointState(checkpoint)
+	require.NoError(t, err)
+	require.NotNil(t, built)
+	require.Equal(t, 2, graph.calls)
+}
+
 func TestJustifiedPromotionWaitsForCheckpointStateEviction(t *testing.T) {
 	current := solid.Checkpoint{Epoch: 1, Root: common.Hash{1}}
 	promoted := solid.Checkpoint{Epoch: 2, Root: common.Hash{2}}
@@ -1493,7 +1668,7 @@ func (g *getFinalizedExecutionHashForkGraph) HasEnvelope(common.Hash) bool {
 // while that variant is not a candidate.
 func TestHasImportedDescendantAfterFollowsTheServedVariant(t *testing.T) {
 	newStore := func(t *testing.T, childOnFull bool) (*ForkChoiceStore, common.Hash) {
-		store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+		store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false, nil)
 		if !childOnFull {
 			anchorBlock, ok := store.forkGraph.GetBlock(anchorRoot)
 			require.True(t, ok)
@@ -1666,7 +1841,7 @@ func TestHasImportedDescendantAfterCountsBothVariantsOfAFallbackHead(t *testing.
 // A changed payload decision can rule out the served variant before get_head runs again; until it
 // does, the gate counts the children of both variants.
 func TestHasImportedDescendantAfterCountsBothVariantsAfterAPayloadDecisionChanges(t *testing.T) {
-	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false, nil)
 	anchorBlock, ok := store.forkGraph.GetBlock(anchorRoot)
 	require.True(t, ok)
 	anchorBlock.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = common.Hash{0xe1}
@@ -1680,7 +1855,7 @@ func TestHasImportedDescendantAfterCountsBothVariantsAfterAPayloadDecisionChange
 }
 
 func TestGetHeadPublishesTheSelectedNode(t *testing.T) {
-	store, _, _ := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	store, _, _ := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false, nil)
 	head, _, err := store.GetHeadNode()
 	require.NoError(t, err)
 	require.Equal(t, &head, store.selectedHead.Load())
@@ -1689,7 +1864,7 @@ func TestGetHeadPublishesTheSelectedNode(t *testing.T) {
 // The case behind the stuck head: a child imported on the FULL variant of a parent whose payload
 // has no recorded status. get_head stays on the parent, and the gate must see the child.
 func TestHasImportedDescendantAfterSeesAChildGetHeadCannotReach(t *testing.T) {
-	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false, nil)
 	require.Equal(t, cltypes.PayloadStatusFull, store.getParentPayloadStatus(child.Block))
 
 	head, headSlot, err := store.GetHeadNode()
@@ -1703,7 +1878,7 @@ func TestHasImportedDescendantAfterSeesAChildGetHeadCannotReach(t *testing.T) {
 func TestHasImportedDescendantAfterIsFalseForTheSelectedHead(t *testing.T) {
 	for _, onFull := range []bool{true, false} {
 		t.Run(fmt.Sprintf("child on FULL=%t", onFull), func(t *testing.T) {
-			store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+			store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false, nil)
 			if onFull {
 				store.MarkPayloadStatus(anchorRoot, common.Hash{0xe1}, execution_client.PayloadStatusValidated)
 			} else {

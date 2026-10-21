@@ -45,7 +45,7 @@ func Bench9(erigonURL, gethURL string, needCompare, latest bool) error {
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"eth_getProof"}, resultsCh)
+		go writePattern(true, []string{"eth_getProof"}, resultsCh)
 	}
 
 	for len(page) > 0 {

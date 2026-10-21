@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"golang.org/x/sync/singleflight"
 )
 
 // ForkNode is a struct that represents a node in the fork choice tree.
@@ -148,6 +149,8 @@ type ForkChoiceStore struct {
 	publicKeysRegistry public_keys_registry.PublicKeyRegistry
 	localValidators    *validator_params.ValidatorParams
 
+	checkpointStateBuilds singleflight.Group
+
 	latestMessages    *latestMessagesStore
 	syncedDataManager *synced_data.SyncedDataManager
 	// We keep track of them so that we can forkchoice with EL.
@@ -195,12 +198,12 @@ type ForkChoiceStore struct {
 	probabilisticHeadGetter bool
 
 	// [New in Gloas:EIP7732]
-	ptcVoteMu                   sync.Mutex // protects live payload vote updates, paired reads, and first-valid gossip tracking
-	payloadTimelinessVote       sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
-	payloadDataAvailabilityVote sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
-	payloadAttestationSeenSlot  uint64
-	payloadAttestationSeen      map[uint64]struct{}
-	payloadAttestationContexts  *payloadAttestationValidationContexts
+	ptcVoteMu                    sync.Mutex // protects live payload vote updates, paired reads, and first-valid gossip tracking
+	payloadTimelinessVote        sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
+	payloadDataAvailabilityVote  sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
+	payloadAttestationSeen       map[payloadAttestationSeenKey]struct{}
+	payloadAttestationPrunedSlot uint64
+	payloadAttestationContexts   *payloadAttestationValidationContexts
 	// [New in Gloas:EIP7732] Block timeliness tracking.
 	// Pre-GLOAS: stores [block_timely, false] (only index 0 is meaningful).
 	// Post-GLOAS: stores [block_timely, payload_timely] — two independent booleans.
@@ -738,6 +741,10 @@ func (f *ForkChoiceStore) Time() uint64 {
 	return f.timeMs.Load() / 1000
 }
 
+func (f *ForkChoiceStore) GenesisTime() uint64 {
+	return f.genesisTime
+}
+
 // ProposerBoostRoot returns proposer boost root
 func (f *ForkChoiceStore) ProposerBoostRoot() common.Hash {
 	return f.proposerBoostRoot.Load().(common.Hash)
@@ -924,21 +931,29 @@ func (f *ForkChoiceStore) Participation(epoch uint64) (*solid.ParticipationBitLi
 }
 
 func (f *ForkChoiceStore) ForkNodes() []ForkNode {
+	trackGloasWeights := f.trackGloasWeights()
+	if trackGloasWeights {
+		_, _, _ = f.GetHeadNode()
+	}
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	forkNodes := make([]ForkNode, 0, len(f.weights))
-	for blockRoot, weight := range f.weights {
+	weights := f.weights
+	if trackGloasWeights {
+		weights = f.gloasWeightTree.snapshotWeights()
+	}
+	forkNodes := make([]ForkNode, 0, len(weights))
+	for blockRoot, weight := range weights {
 		header, has := f.forkGraph.GetHeader(blockRoot)
 		if !has {
 			continue
 		}
-		justifiedCheckpoint, has := f.forkGraph.GetCurrentJustifiedCheckpoint(blockRoot)
-		if !has {
-			continue
-		}
-		finalizedCheckpoint, has := f.forkGraph.GetFinalizedCheckpoint(blockRoot)
-		if !has {
-			continue
+		justifiedCheckpoint, hasJustified := f.forkGraph.GetCurrentJustifiedCheckpoint(blockRoot)
+		finalizedCheckpoint, hasFinalized := f.forkGraph.GetFinalizedCheckpoint(blockRoot)
+		if !hasJustified || !hasFinalized {
+			if blockRoot != f.forkGraph.AnchorRoot() || blockRoot != f.JustifiedCheckpoint().Root {
+				continue
+			}
+			justifiedCheckpoint, finalizedCheckpoint = f.JustifiedCheckpoint(), f.FinalizedCheckpoint()
 		}
 		blockHash, _ := f.eth2Roots.Get(blockRoot)
 

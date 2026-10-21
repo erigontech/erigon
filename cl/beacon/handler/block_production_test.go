@@ -3410,6 +3410,19 @@ func produceBodyWithNilWithdrawals(t *testing.T, version clparams.StateVersion) 
 	return body, reader, err
 }
 
+func TestCacheExecutionBodyUsesBlockHash(t *testing.T) {
+	reader := tests.NewMockBlockReader()
+	handler := &ApiHandler{blockReader: reader}
+	payload := cltypes.NewEth1Block(clparams.BellatrixVersion, &clparams.MainnetBeaconConfig)
+	payload.BlockNumber = 42
+	payload.BlockHash = common.Hash{0x42}
+
+	handler.cacheExecutionBody(payload)
+
+	require.Equal(t, []uint64{42}, reader.CachedBodies)
+	require.Equal(t, []common.Hash{{0x42}}, reader.CachedBodyHashes)
+}
+
 func TestProduceBeaconBodyRejectsMissingWithdrawalsAtCapella(t *testing.T) {
 	body, reader, err := produceBodyWithNilWithdrawals(t, clparams.CapellaVersion)
 

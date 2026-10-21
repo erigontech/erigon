@@ -525,6 +525,25 @@ func TestPreparePayloadLoopWarnsWhenGloasWindowIsTooShort(t *testing.T) {
 	require.Contains(t, output.String(), "Gloas preparation window is too short")
 }
 
+func TestPreparePayloadLoopWarnsWhenGloasWindowCannotFitStateWork(t *testing.T) {
+	var output bytes.Buffer
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
+	// A quarter of a 4-second slot is left after the payload decision: room for the builder
+	// cutoff, but not for the state work before it.
+	config := payloadPreparationLoopConfig(4, 0, 0)
+	handler := &ApiHandler{
+		beaconChainCfg: &config,
+		logger:         logger,
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	handler.preparePayloadLoop(ctx)
+
+	require.Contains(t, output.String(), "Gloas preparation window is too short")
+}
+
 func TestPreparePayloadLoopDoesNotWarnAboutUnscheduledGloas(t *testing.T) {
 	var output bytes.Buffer
 	logger := log.New()
@@ -850,7 +869,7 @@ func TestPreparePayloadLoopClassifiesGloasPathWarnings(t *testing.T) {
 				config := payloadPreparationLoopConfig(12, 1, 1)
 				currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch + 1
 				handler, baseBlockRoot, forkchoiceStore, syncedData := newPayloadPreparationLoopHarness(
-					t, ctrl, &config, currentSlot, currentSlot, 2*time.Second,
+					t, ctrl, &config, currentSlot, currentSlot, 2500*time.Millisecond,
 				)
 				syncedData.EXPECT().SelectedHead().Return(baseBlockRoot, currentSlot, true).AnyTimes()
 				var output bytes.Buffer
@@ -1337,7 +1356,7 @@ func TestPreparePayloadLoopMemoizesRealPreparation(t *testing.T) {
 			forkchoiceStore.HeadVal = baseBlockRoot
 			forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
 			syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
-			syncedDataMock.EXPECT().HeadRoot().Return(baseBlockRoot).Times(3)
+			syncedDataMock.EXPECT().HeadRoot().Return(baseBlockRoot).Times(2)
 			syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, postState.Slot(), true).AnyTimes()
 			syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).DoAndReturn(
 				func(view synced_data.ViewHeadStateWithIdentityFn) error {
@@ -1348,7 +1367,7 @@ func TestPreparePayloadLoopMemoizesRealPreparation(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				ctrl := gomock.NewController(t)
 				clock := eth_clock.NewMockEthereumClock(ctrl)
-				clock.EXPECT().GetCurrentSlot().Return(currentSlot).Times(3)
+				clock.EXPECT().GetCurrentSlot().Return(currentSlot).Times(2)
 				clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(8 * time.Second)).AnyTimes()
 				handler.ethClock = clock
 				buildAttempts := 0
@@ -1364,7 +1383,7 @@ func TestPreparePayloadLoopMemoizesRealPreparation(t *testing.T) {
 					return payloadID, nil
 				}
 				handler.engine = engine
-				ctx, cancel := context.WithTimeout(t.Context(), 7*time.Second)
+				ctx, cancel := context.WithTimeout(t.Context(), 4*time.Second)
 				defer cancel()
 
 				handler.preparePayloadLoop(ctx)
@@ -1495,7 +1514,7 @@ func TestPreparePayloadLoopMemoizesTheGloasPathItResolved(t *testing.T) {
 		currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch + 1
 		targetSlot := currentSlot + 1
 		handler, baseBlockRoot, forkchoiceStore, syncedData := newPayloadPreparationLoopHarness(
-			t, ctrl, &config, currentSlot, currentSlot-1, 600*time.Millisecond,
+			t, ctrl, &config, currentSlot, currentSlot-1, 700*time.Millisecond,
 		)
 		syncedData.EXPECT().SelectedHead().Return(baseBlockRoot, currentSlot-1, true).AnyTimes()
 		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
@@ -1788,6 +1807,33 @@ func TestPreparePayloadLoopSkipsSlotsWithInsufficientLead(t *testing.T) {
 	clock := eth_clock.NewMockEthereumClock(ctrl)
 	clock.EXPECT().GetCurrentSlot().Return(targetSlot - 1).AnyTimes()
 	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(minimumPreparationLead / 2)).AnyTimes()
+	handler.ethClock = clock
+	handler.engine = newPayloadBuildEngine(t, ctrl)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 250*time.Millisecond)
+	defer cancel()
+	handler.preparePayloadLoop(ctx)
+}
+
+// A copy and slot processing cannot be cancelled once started, so an attempt that is still
+// allowed to start the builder must not start them without room to finish.
+func TestPreparePayloadLoopSkipsStateWorkWithoutItsLead(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	baseBlockRoot := common.Hash{0x41}
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, postState.Slot(), true).AnyTimes()
+	syncedDataMock.EXPECT().HeadRoot().Return(baseBlockRoot).AnyTimes()
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).Times(0)
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(targetSlot - 1).AnyTimes()
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(time.Second)).AnyTimes()
 	handler.ethClock = clock
 	handler.engine = newPayloadBuildEngine(t, ctrl)
 
@@ -2831,6 +2877,34 @@ func TestPreparePayloadForRejectsInsufficientLeadAfterStateWork(t *testing.T) {
 	var scratch payloadPreparationScratch
 	_, err = handler.preparePayloadForWithScratch(t.Context(), preparationKey{targetSlot: targetSlot}, &scratch)
 	require.ErrorIs(t, err, errPreparationTooLate)
+}
+
+// The lead can shrink while the attempt waits for the head-state view, so it is checked again
+// before the copy starts.
+func TestPreparePayloadForRejectsStateWorkWithoutItsLead(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	baseBlockRoot := common.Hash{0x41}
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			return view(postState, baseBlockRoot, postState.Slot())
+		}).AnyTimes()
+	handler.engine = newPayloadBuildEngine(t, ctrl)
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(time.Second)).AnyTimes()
+	handler.ethClock = clock
+
+	var scratch payloadPreparationScratch
+	_, err = handler.preparePayloadForWithScratch(t.Context(), preparationKey{targetSlot: targetSlot}, &scratch)
+	require.ErrorIs(t, err, errPreparationTooLate)
+	require.Nil(t, scratch.state, "the head state must not be copied")
 }
 
 func TestPreparePayloadForRejectsChangedHeadBeforeStartingBuilder(t *testing.T) {

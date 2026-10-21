@@ -125,6 +125,12 @@ linters:
       - linters:
           - modernize
         path: _grpc\.pb\.go
+      # errcheck v2.15+ flags bare channel receives of error types (e.g. <-errCh) as
+      # unchecked errors. These are intentional drains to wait for channel closure.
+      - linters:
+          - errcheck
+        text: "^Error return value is not checked"
+        source: "^\\s*(case\\s+)?<-"
       # shadow runs under db/ only for now; the rest of the tree is not swept yet.
       - linters:
           - govet

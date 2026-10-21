@@ -1009,15 +1009,18 @@ func (c *bls12381G1MultiExp) Run(input []byte) ([]byte, error) {
 		off := 160 * i
 		t0, t1, t2 := off, off+128, off+160
 		// Decode G1 point
-		p, err := decodePointG1(input[t0:t1])
-		if err != nil {
-			return nil, err
+		if i > 0 && bytes.Equal(input[t0:t1], input[t0-160:t1-160]) {
+			points[i] = points[i-1]
+		} else {
+			p, err := decodePointG1(input[t0:t1])
+			if err != nil {
+				return nil, err
+			}
+			if !p.IsInSubGroup() {
+				return nil, errBLS12381G1PointSubgroup
+			}
+			points[i] = p
 		}
-		// Fast subgroup check
-		if !p.IsInSubGroup() {
-			return nil, errBLS12381G1PointSubgroup
-		}
-		points[i] = p
 		// Decode scalar value
 		scalars[i].SetBytes(input[t1:t2])
 	}
@@ -1117,15 +1120,18 @@ func (c *bls12381G2MultiExp) Run(input []byte) ([]byte, error) {
 		off := 288 * i
 		t0, t1, t2 := off, off+256, off+288
 		// Decode G2 point
-		p, err := decodePointG2(input[t0:t1])
-		if err != nil {
-			return nil, err
+		if i > 0 && bytes.Equal(input[t0:t1], input[t0-288:t1-288]) {
+			points[i] = points[i-1]
+		} else {
+			p, err := decodePointG2(input[t0:t1])
+			if err != nil {
+				return nil, err
+			}
+			if !p.IsInSubGroup() {
+				return nil, errBLS12381G2PointSubgroup
+			}
+			points[i] = p
 		}
-		// Fast subgroup check
-		if !p.IsInSubGroup() {
-			return nil, errBLS12381G2PointSubgroup
-		}
-		points[i] = p
 		// Decode scalar value
 		scalars[i].SetBytes(input[t1:t2])
 	}
