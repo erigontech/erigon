@@ -33,6 +33,7 @@ import (
 
 	"github.com/tidwall/btree"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -93,7 +94,21 @@ func getKvGetterForStateTable(db kv.RoDB, tableName string) KeyValueGetter {
 	}
 }
 
-func MakeCaplinStateSnapshotsTypes(db kv.RoDB) SnapshotTypes {
+func requirePtcWindowEpochRows(cfg *clparams.BeaconChainConfig, getter KeyValueGetter) KeyValueGetter {
+	return func(slot uint64) ([]byte, []byte, error) {
+		key, value, err := getter(slot)
+		if err != nil {
+			return nil, nil, err
+		}
+		if cfg != nil && slot%cfg.SlotsPerEpoch == 0 && slot/cfg.SlotsPerEpoch >= cfg.GloasForkEpoch && len(value) == 0 {
+			return nil, nil, fmt.Errorf("%w: %s slot %d", errIncompleteStateRange, kv.PtcWindowEpochTable, slot)
+		}
+		return key, value, nil
+	}
+}
+
+func MakeCaplinStateSnapshotsTypes(db kv.RoDB, cfg *clparams.BeaconChainConfig) SnapshotTypes {
+	ptcWindowEpochGetter := requirePtcWindowEpochRows(cfg, getKvGetterForStateTable(db, kv.PtcWindowEpochTable))
 	return SnapshotTypes{
 		KeyValueGetters: map[string]KeyValueGetter{
 			kv.ValidatorEffectiveBalance:     getKvGetterForStateTable(db, kv.ValidatorEffectiveBalance),
@@ -128,8 +143,8 @@ func MakeCaplinStateSnapshotsTypes(db kv.RoDB) SnapshotTypes {
 			kv.PayloadExpectedWithdrawalsDump:    getKvGetterForStateTable(db, kv.PayloadExpectedWithdrawalsDump),
 			kv.ExecutionPayloadAvailabilityTable: getKvGetterForStateTable(db, kv.ExecutionPayloadAvailabilityTable),
 			kv.BuilderPendingPaymentsTable:       getKvGetterForStateTable(db, kv.BuilderPendingPaymentsTable),
-			kv.PtcWindowTable:                    getKvGetterForStateTable(db, kv.PtcWindowTable),
 			kv.LatestExecutionPayloadBidTable:    getKvGetterForStateTable(db, kv.LatestExecutionPayloadBidTable),
+			kv.PtcWindowEpochTable:               ptcWindowEpochGetter,
 		},
 		Compression: map[string]bool{},
 	}

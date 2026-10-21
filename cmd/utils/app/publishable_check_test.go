@@ -27,6 +27,28 @@ import (
 func Test_CheckEmpty(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, true))
+}
+
+func Test_CheckPtcWindowEpochRequired(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ranges := []snapRange{{0, 10}, {10, 20}}
+	touchFiles(t, dirs, ranges)
+	for _, r := range ranges {
+		delFile(t, dirs.SnapCaplin, fmt.Sprintf("v1.0-%06d-%06d-%s.seg", r.fromStep, r.toStep, kv.PtcWindowEpochTable))
+		delFile(t, dirs.SnapCaplin, fmt.Sprintf("v1.0-%06d-%06d-%s.idx", r.fromStep, r.toStep, kv.PtcWindowEpochTable))
+	}
+	err := checkIfCaplinSnapshotsPublishable(dirs, true)
+	require.ErrorContains(t, err, kv.PtcWindowEpochTable)
+}
+
+func Test_CheckPtcWindowEpochReachesCommonEnd(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	touchFiles(t, dirs, []snapRange{{0, 10}, {10, 20}, {20, 30}})
+	delFile(t, dirs.SnapCaplin, fmt.Sprintf("v1.0-000020-000030-%s.seg", kv.PtcWindowEpochTable))
+	delFile(t, dirs.SnapCaplin, fmt.Sprintf("v1.0-000020-000030-%s.idx", kv.PtcWindowEpochTable))
+	err := checkIfCaplinSnapshotsPublishable(dirs, true)
+	require.ErrorContains(t, err, "must end at")
 }
 
 func Test_CheckNormal(t *testing.T) {
@@ -182,7 +204,7 @@ func Test_CheckEmptyFutureForkTablesTolerated(t *testing.T) {
 		kv.BuilderPendingWithdrawals, kv.BuilderPendingWithdrawalsDump,
 		kv.PayloadExpectedWithdrawals, kv.PayloadExpectedWithdrawalsDump,
 		kv.ExecutionPayloadAvailabilityTable, kv.BuilderPendingPaymentsTable,
-		kv.PtcWindowTable, kv.LatestExecutionPayloadBidTable,
+		kv.LatestExecutionPayloadBidTable,
 	}
 	ranges := []snapRange{{0, 10}, {10, 20}, {20, 30}}
 	dirs := datadir.New(t.TempDir())
@@ -227,7 +249,7 @@ func touchFiles(t *testing.T, dirs datadir.Dirs, ranges []snapRange) {
 			touchFile(t, dirs.Snap, indexfile)
 		}
 	}
-	stateSnapTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(nil)
+	stateSnapTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(nil, nil)
 
 	for table := range stateSnapTypes.KeyValueGetters {
 		// caplin/v1.1-000000-010500-ActiveValidatorIndicies.idx

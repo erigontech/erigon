@@ -202,6 +202,27 @@ func TestCaplinStateBlocksAvailableMainnetPublishedSubset(t *testing.T) {
 	require.Equal(t, uint64(0), s.BlocksAvailable())
 }
 
+func TestCaplinStateBlocksAvailableIgnoresLegacyPtcWindow(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	types := MakeCaplinStateSnapshotsTypes(nil, nil)
+	tables := make([]string, 0, len(types.KeyValueGetters))
+	for table := range types.KeyValueGetters {
+		tables = append(tables, table)
+		if table != kv.PtcWindowEpochTable {
+			writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
+		}
+	}
+	writeCaplinStateFixture(t, dirs.SnapCaplin, kv.PtcWindowTable, 0, 50_000, logger)
+
+	s := openTestCaplinStateSnapshotsWithTables(t, dirs, tables, logger)
+	require.Zero(t, s.BlocksAvailable())
+
+	writeCaplinStateFixture(t, dirs.SnapCaplin, kv.PtcWindowEpochTable, 0, 50_000, logger)
+	require.NoError(t, s.OpenFolder())
+	require.Equal(t, uint64(49_999), s.BlocksAvailable())
+}
+
 func TestCaplinStateSegFileNamesReturnsExistingAbsolutePaths(t *testing.T) {
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())

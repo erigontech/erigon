@@ -161,6 +161,30 @@ func TestReadCompressedSSZ_MissingData(t *testing.T) {
 	require.ErrorContains(t, err, "500")
 }
 
+func TestReadCompressedSSZ_CorruptPtcWindowIsNotMissing(t *testing.T) {
+	const slot = uint64(64)
+	key := string(base_encoding.Encode64ToBytes4(slot))
+	windowSize := solid.NewUint64VectorOfVectors(64, 512).EncodingSizeSSZ()
+	for _, tc := range []struct {
+		name string
+		row  []byte
+	}{
+		{name: "invalid zstd", row: []byte("invalid")},
+		{name: "wrong SSZ length", row: compressRawSSZ(t, []byte{1})},
+		{name: "oversized SSZ", row: compressRawSSZ(t, make([]byte, windowSize+1))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			getter := mockGetValFn(map[string]map[string][]byte{
+				kv.PtcWindowEpochTable: {key: tc.row},
+			})
+			window := solid.NewUint64VectorOfVectors(64, 512)
+			err := readCompressedSSZ(getter, slot, kv.PtcWindowEpochTable, window, int(clparams.GloasVersion))
+			require.Error(t, err)
+			require.NotErrorIs(t, err, ErrMissingGloasData)
+		})
+	}
+}
+
 // TestReadRequiredQueueSSZ_MissingDump verifies that ReadRequiredQueueSSZ
 // returns ErrMissingGloasData when the dump table has no entry for the
 // target dump slot, rather than silently returning an empty list.
@@ -666,7 +690,7 @@ func TestReadHistoricalState_GloasFieldsReconstruction(t *testing.T) {
 	require.NoError(t, tx.Put(kv.LatestExecutionPayloadBidTable, slotKey, compressedBid))
 	require.NoError(t, tx.Put(kv.ExecutionPayloadAvailabilityTable, slotKey, compressedEPA))
 	require.NoError(t, tx.Put(kv.BuilderPendingPaymentsTable, slotKey, compressedBPP))
-	require.NoError(t, tx.Put(kv.PtcWindowTable, slotKey, compressedPtcWindow))
+	require.NoError(t, tx.Put(kv.PtcWindowEpochTable, roundedKey, compressedPtcWindow))
 
 	// GLOAS queue dumps at genesis (slot 0)
 	require.NoError(t, tx.Put(kv.BuildersDump, genesisKey, compressedBuilders))
@@ -756,7 +780,7 @@ func TestReadHistoricalState_GloasFieldsReconstruction(t *testing.T) {
 	// Verify a zero-valued slot is still zero (proves we didn't corrupt adjacent entries).
 	require.Equal(t, uint64(0), gotBPPState.Get(0).Weight, "BuilderPendingPayments[0] should be zero")
 
-	// 9. PtcWindow (from kv.PtcWindowTable)
+	// 9. PtcWindow (from kv.PtcWindowEpochTable)
 	// We seeded outer=2, inner=5 as value 42; verify content.
 	gotPtcWindow := reconstructed.GetPtcWindow()
 	require.NotNil(t, gotPtcWindow, "PtcWindow must not be nil")
