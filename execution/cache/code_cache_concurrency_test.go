@@ -153,7 +153,7 @@ func TestCodeCache_ClearRacingPut_EpochAlias(t *testing.T) {
 	// Model a writer that sampled the epoch before Clear and published after
 	// the relevant layers were purged.
 	a := common.BytesToAddress(addr)
-	cc.addrToHash.Add(addrSlot(a), versionedAddressID{addr: a, addrID: codeID, codeHash: codeHash, codeSeq: 1, txNum: 200, epoch: preClearEpoch})
+	cc.addrToHash.Add(addrSlot(a), versionedAddressID{addr: a, addrID: codeID, codeSeq: 1, txNum: 200, epoch: preClearEpoch})
 	cc.codeHashToCode.Add(codeID, codeEntry{code: code, keyHash: codeHash, seq: 1, txNum: 200, epoch: preClearEpoch})
 	cc.Unwind(150)
 
