@@ -431,8 +431,8 @@ func coldSwitch(srcs map[string][]byte, ops []fastOp) string {
 func coldTable(ops []fastOp) string {
 	var b strings.Builder
 	b.WriteString("\n// isColdOp marks the ops of run's second fast-path switch.\nvar isColdOp = [256]bool{\n")
-	for _, o := range ops {
-		b.WriteString(o.name + ": true,\n")
+	for i := range ops {
+		b.WriteString(ops[i].name + ": true,\n")
 	}
 	b.WriteString("}\n")
 	return b.String()
