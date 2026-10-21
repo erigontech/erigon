@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -417,6 +419,177 @@ run:
 				if sLen >= 5 && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
 					callContext.Stack.swap(4)
+					pc++
+					continue run
+				}
+			}
+			switch op {
+			case ADDRESS:
+				if sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					callContext.gas, callContext.savedPC = gasLeft, pc
+					*callContext.Stack.pushRef() = *callContext.addressWord(addressWordSelf, callContext.Contract.Address())
+					gasLeft, pc = callContext.gas, callContext.savedPC
+					pc++
+					continue run
+				}
+			case ORIGIN:
+				if sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					callContext.gas, callContext.savedPC = gasLeft, pc
+					*callContext.Stack.pushRef() = *callContext.addressWord(addressWordOrigin, evm.Origin)
+					gasLeft, pc = callContext.gas, callContext.savedPC
+					pc++
+					continue run
+				}
+			case CALLER:
+				if sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					callContext.gas, callContext.savedPC = gasLeft, pc
+					*callContext.Stack.pushRef() = *callContext.addressWord(addressWordCaller, callContext.Contract.Caller())
+					gasLeft, pc = callContext.gas, callContext.savedPC
+					pc++
+					continue run
+				}
+			case CALLDATASIZE:
+				if sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					callContext.Stack.pushRef().SetUint64(uint64(len(callContext.input)))
+					pc++
+					continue run
+				}
+			case CODESIZE:
+				if sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					callContext.Stack.pushRef().SetUint64(uint64(len(callContext.Contract.Code)))
+					pc++
+					continue run
+				}
+			case GASPRICE:
+				if sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					callContext.Stack.push(evm.GasPrice)
+					pc++
+					continue run
+				}
+			case RETURNDATASIZE:
+				if jt[RETURNDATASIZE].numPush != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					callContext.Stack.pushRef().SetUint64(uint64(len(evm.returnData)))
+					pc++
+					continue run
+				}
+			case COINBASE:
+				if sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					callContext.gas, callContext.savedPC = gasLeft, pc
+					*callContext.Stack.pushRef() = *callContext.addressWord(addressWordCoinbase, evm.Context.Coinbase)
+					gasLeft, pc = callContext.gas, callContext.savedPC
+					pc++
+					continue run
+				}
+			case TIMESTAMP:
+				if sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					callContext.Stack.pushRef().SetUint64(evm.Context.Time)
+					pc++
+					continue run
+				}
+			case NUMBER:
+				if sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					callContext.Stack.pushRef().SetUint64(evm.Context.BlockNumber)
+					pc++
+					continue run
+				}
+			case DIFFICULTY:
+				if sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					var v uint256.Int
+					if evm.Context.PrevRanDao != nil {
+
+						v.SetBytes32(evm.Context.PrevRanDao[:])
+					} else {
+						v = evm.Context.Difficulty
+					}
+					callContext.Stack.push(v)
+					pc++
+					continue run
+				}
+			case GASLIMIT:
+				if sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					if evm.Context.MaxGasLimit {
+						callContext.Stack.pushRef().SetAllOne()
+					} else {
+						callContext.Stack.pushRef().SetUint64(evm.Context.GasLimit)
+					}
+					pc++
+					continue run
+				}
+			case CHAINID:
+				if jt[CHAINID].numPush != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					chainId := evm.ChainRules().ChainID
+					callContext.Stack.pushRef().Set(chainId)
+					pc++
+					continue run
+				}
+			case BASEFEE:
+				if jt[BASEFEE].numPush != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					baseFee := evm.Context.BaseFee
+					callContext.Stack.push(baseFee)
+					pc++
+					continue run
+				}
+			case BLOBBASEFEE:
+				if jt[BLOBBASEFEE].numPush != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					blobBaseFee := evm.Context.BlobBaseFee
+					callContext.Stack.push(blobBaseFee)
+					pc++
+					continue run
+				}
+			case PUSH0:
+				if jt[PUSH0].numPush != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					callContext.Stack.pushRef().Clear()
+					pc++
+					continue run
+				}
+			case PC:
+				if sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					callContext.Stack.pushRef().SetUint64(pc)
+					pc++
+					continue run
+				}
+			case MSIZE:
+				if sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					callContext.Stack.pushRef().SetUint64(uint64(callContext.Memory.Len()))
+					pc++
+					continue run
+				}
+			case GAS:
+				if sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					callContext.Stack.pushRef().SetUint64(gasLeft)
+					pc++
+					continue run
+				}
+			case DUP9, DUP10, DUP11, DUP12, DUP13, DUP14, DUP15, DUP16:
+				if sLen >= int(op-DUP1)+1 && sLen < stackLimit && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					callContext.Stack.dup(int(op - DUP1))
+					pc++
+					continue run
+				}
+			case SWAP5, SWAP6, SWAP7, SWAP8, SWAP9, SWAP10, SWAP11, SWAP12, SWAP13, SWAP14, SWAP15, SWAP16:
+				if sLen >= int(op-SWAP1)+2 && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					callContext.Stack.swap(int(op-SWAP1) + 1)
 					pc++
 					continue run
 				}

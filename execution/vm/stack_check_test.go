@@ -105,14 +105,8 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 	t.Parallel()
 	// DUPs and PUSH3+ are closures, whose code pointers differ by inlining site,
 	// so they are checked by behaviour instead of by function identity.
-	tables := []*JumpTable{
-		&frontierInstructionSet, &homesteadInstructionSet, &tangerineWhistleInstructionSet,
-		&spuriousDragonInstructionSet, &byzantiumInstructionSet, &constantinopleInstructionSet,
-		&istanbulInstructionSet, &berlinInstructionSet, &londonInstructionSet,
-		&shanghaiInstructionSet, &cancunInstructionSet, &pragueInstructionSet,
-		&osakaInstructionSet, &amsterdamInstructionSet,
-	}
-	for _, jt := range tables {
+	tables := slices.Clone(forkInstructionSets)
+	for _, jt := range forkInstructionSets {
 		for eip := range activators {
 			cp := copyJumpTable(jt)
 			require.NoError(t, EnableEIP(eip, cp))
@@ -122,7 +116,7 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 	for i, jt := range tables {
 		for op, w := range fastPathOps {
 			got := &jt[op]
-			if w.memorySize != nil && got.memorySize == nil {
+			if undefined(got) || w.memorySize != nil && got.memorySize == nil {
 				// The op is not in this fork, and the fast path checks for that.
 				continue
 			}
@@ -154,6 +148,18 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 			require.Equal(t, reflect.ValueOf(w.memorySize).Pointer(), reflect.ValueOf(got.memorySize).Pointer(), "table %d %s memorySize", i, op)
 		}
 	}
+}
+
+var forkInstructionSets = []*JumpTable{
+	&frontierInstructionSet, &homesteadInstructionSet, &tangerineWhistleInstructionSet,
+	&spuriousDragonInstructionSet, &byzantiumInstructionSet, &constantinopleInstructionSet,
+	&istanbulInstructionSet, &berlinInstructionSet, &londonInstructionSet,
+	&shanghaiInstructionSet, &cancunInstructionSet, &pragueInstructionSet,
+	&osakaInstructionSet, &amsterdamInstructionSet,
+}
+
+func undefined(op *operation) bool {
+	return reflect.ValueOf(op.execute).Pointer() == reflect.ValueOf(opUndefined).Pointer()
 }
 
 // fastPathWant is one fastPathOps entry, generated with the fast-path switch in vm_run_gen.go.
@@ -362,4 +368,24 @@ func TestRunRejectsMcopyBeforeCancun(t *testing.T) {
 	_, _, _, err := evm.run(*c, mdgas.MdGas{Execution: 100_000}, nil, false, false, false)
 	var invalid *ErrInvalidOpCode
 	require.ErrorAs(t, err, &invalid)
+}
+
+func TestRunRejectsFastOpsBeforeTheirFork(t *testing.T) {
+	t.Parallel()
+	for _, jt := range forkInstructionSets {
+		for op := range fastPathOps {
+			if !undefined(&jt[op]) {
+				continue
+			}
+			ibs := state.New(state.NewNoopReader())
+			evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+			evm.jt = jt
+			c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+			c.Code = append(bytes.Repeat([]byte{byte(PUSH1), 1}, 16), byte(op))
+			_, _, _, err := evm.run(*c, mdgas.MdGas{Execution: 100_000}, nil, false, false, false)
+			ibs.Close()
+			var invalid *ErrInvalidOpCode
+			require.ErrorAs(t, err, &invalid, "%s", op)
+		}
+	}
 }
