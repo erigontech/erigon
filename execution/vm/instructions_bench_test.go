@@ -125,6 +125,8 @@ func BenchmarkOpModChain(b *testing.B) {
 		b.Run(fmt.Sprintf("MOD/bits=%d", bits), func(b *testing.B) { benchModChain(b, opMod, bits, false) })
 		b.Run(fmt.Sprintf("SMOD/bits=%d", bits), func(b *testing.B) { benchModChain(b, opSmod, bits, true) })
 	}
+	b.Run("MOD/zero", func(b *testing.B) { opBenchmark(b, opMod, "00", opTestArg) })
+	b.Run("SMOD/zero", func(b *testing.B) { opBenchmark(b, opSmod, "00", opTestArg) })
 }
 
 func benchModChain(b *testing.B, op executionFunc, bits int, negate bool) {

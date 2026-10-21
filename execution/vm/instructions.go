@@ -97,7 +97,9 @@ func stSdiv(_ uint64, scope *CallContext) string {
 
 func opMod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x, y := scope.Stack.pop1Peek1()
-	mod(y, x, y)
+	if !y.IsZero() {
+		mod(y, x, y)
+	}
 	return pc, nil, nil
 }
 
@@ -224,6 +226,9 @@ func stMod(_ uint64, scope *CallContext) string {
 
 func opSmod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x, y := scope.Stack.pop1Peek1()
+	if y.IsZero() {
+		return pc, nil, nil
+	}
 	var ax, ay uint256.Int
 	ax.Abs(x)
 	ay.Abs(y)
