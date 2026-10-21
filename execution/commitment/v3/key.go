@@ -23,10 +23,6 @@ const (
 	tagStorageNode byte = 0x41
 )
 
-func AccountNodeKey(path []byte, dst []byte) []byte {
-	return nodeKey(tagAccountNode, nil, path, dst)
-}
-
 func StorageNodeKey(addrHash [32]byte, path []byte, dst []byte) []byte {
 	return nodeKey(tagStorageNode, addrHash[:], path, dst)
 }
