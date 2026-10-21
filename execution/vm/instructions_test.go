@@ -362,16 +362,18 @@ func innerOutputsShareBuffer(cfg Config) bool {
 	return unsafe.SliceData(a) == unsafe.SliceData(b)
 }
 
-func TestInnerFrameOutputReusesBuffer(t *testing.T) {
-	if !innerOutputsShareBuffer(Config{}) {
-		t.Fatal("each inner RETURN got a new buffer")
-	}
-}
-
-// Tracers such as callTracer keep every frame's output.
-func TestTracedInnerFrameOutputIsCopied(t *testing.T) {
-	if innerOutputsShareBuffer(Config{Tracer: &tracing.Hooks{OnExit: func(int, []byte, uint64, error, bool) {}}}) {
-		t.Fatal("a traced inner RETURN reused the buffer")
+// Tracers that see outputs (callTracer, opcode tracers) keep them, so those get copies.
+func TestInnerFrameOutputBufferPerTracer(t *testing.T) {
+	for name, tc := range map[string]struct {
+		hooks *tracing.Hooks
+		share bool
+	}{
+		"none":   {nil, true},
+		"enter":  {&tracing.Hooks{OnEnterV2: func(int, byte, accounts.Address, accounts.Address, bool, []byte, mdgas.MdGas, uint256.Int, []byte) {}}, true},
+		"exit":   {&tracing.Hooks{OnExit: func(int, []byte, uint64, error, bool) {}}, false},
+		"opcode": {&tracing.Hooks{OnOpcode: func(uint64, byte, uint64, uint64, tracing.OpContext, []byte, int, error) {}}, false},
+	} {
+		require.Equal(t, tc.share, innerOutputsShareBuffer(Config{Tracer: tc.hooks}), name)
 	}
 }
 

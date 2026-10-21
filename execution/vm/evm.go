@@ -46,17 +46,24 @@ func (evm *EVM) precompile(addr accounts.Address) (PrecompiledContract, bool) {
 
 // runPrecompile puts the identity output into the buffer a RETURN of the callee frame would use.
 func (evm *EVM) runPrecompile(p PrecompiledContract, input []byte, gas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
-	if _, identity := p.(*dataCopy); identity && evm.depth > 0 && len(input) != 0 {
-		if buf := evm.outputBuffer(evm.depth+1, uint64(len(input))); buf != nil {
-			remaining, err := chargePrecompileGas(p, input, gas, tracer)
-			if err != nil {
-				return nil, gas, err
-			}
-			*buf = append((*buf)[:0], input...)
-			return slices.Clip(*buf), remaining, nil
-		}
+	if _, identity := p.(*dataCopy); !identity || len(input) == 0 {
+		return RunPrecompiledContract(p, input, gas, tracer)
 	}
-	return RunPrecompiledContract(p, input, gas, tracer)
+	buf := evm.outputBuffer(evm.depth+1, uint64(len(input)))
+	if buf == nil {
+		return RunPrecompiledContract(p, input, gas, tracer)
+	}
+	gasCost := p.RequiredGas(input)
+	if gas.Execution < gasCost {
+		return nil, gas, ErrOutOfGas
+	}
+	remaining := gas
+	remaining.Execution -= gasCost
+	if tracer.HasGasChangeHook() {
+		tracer.EmitGasChange(gas, remaining, tracing.GasChangeCallPrecompiledContract)
+	}
+	*buf = append((*buf)[:0], input...)
+	return slices.Clip(*buf), remaining, nil
 }
 
 // EVM is the Ethereum Virtual Machine base object and provides
@@ -82,8 +89,8 @@ type EVM struct {
 	depth int
 	// txOutput receives the top-level frame's output; nil means a fresh copy.
 	txOutput *[]byte
-	// outputs[depth] receives a nested frame's output. Only the parent reads it,
-	// and only until its next call, which is the next frame at that depth.
+	// outputs[depth] receives the output of a nested call at depth, a frame or a
+	// precompile. Only the caller reads it, and only until its next call.
 	outputs *[16][]byte
 
 	// chainConfig contains information about the current chain

@@ -306,6 +306,21 @@ func TestIdentityReusesOutputBufferUnderEnterTracer(t *testing.T) {
 	require.Less(t, allocs, float64(calls))
 }
 
+// An identity call with too little gas fails on the buffer-reusing path too.
+func TestIdentityOutOfGasFails(t *testing.T) {
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	// 1024 bytes cost 15 + 3*32 = 111 gas; 50 is not enough.
+	p := program.New().Mstore([]byte{1}, 1024).
+		StaticCall(uint256.NewInt(50), 0x4, 0, 1024, 0, 0).
+		Push0().Op(vm.MSTORE).Return(0, 32)
+	require.NoError(t, statedb.SetCode(address, p.Bytes(), tracing.CodeChangeUnspecified))
+	ret, _, err := Call(address, nil, &Config{State: statedb})
+	require.NoError(t, err)
+	require.Equal(t, make([]byte, 32), ret, "STATICCALL to identity with too little gas must return 0")
+}
+
 // The identity output must not change when the caller later overwrites the input memory.
 func TestIdentityReturnDataOutlivesInputMemory(t *testing.T) {
 	t.Parallel()
