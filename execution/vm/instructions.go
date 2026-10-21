@@ -106,12 +106,12 @@ func opMod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 // mod sets z = x % y (0 if y == 0). It keeps the Knuth division in registers;
 // uint256.Mod normalizes through slices and is ~2x slower on EVM operands.
 func mod(z, x, y *uint256.Int) {
+	if x.Lt(y) {
+		z.Set(x)
+		return
+	}
 	switch {
 	case y[3] != 0:
-		if x.Lt(y) {
-			z.Set(x)
-			return
-		}
 		if y[3]>>63 != 0 {
 			z.Sub(x, y)
 			return
@@ -134,10 +134,16 @@ func mod(z, x, y *uint256.Int) {
 		r1, r0 = rem3by2(r1, r0, x[0]<<s, v1, v0)
 		z[0], z[1], z[2], z[3] = r0>>s|r1<<(64-s), r1>>s, 0, 0
 	case y[0] != 0:
-		d := y[0]
-		r := x[3] % d
-		_, r = bits.Div64(r, x[2], d)
-		_, r = bits.Div64(r, x[1], d)
+		d, r := y[0], uint64(0)
+		if x[3] != 0 {
+			r = x[3] % d
+		}
+		if r|x[2] != 0 {
+			_, r = bits.Div64(r, x[2], d)
+		}
+		if r|x[1] != 0 {
+			_, r = bits.Div64(r, x[1], d)
+		}
 		_, r = bits.Div64(r, x[0], d)
 		z.SetUint64(r)
 	default:
