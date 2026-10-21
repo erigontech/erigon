@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
 	"slices"
@@ -1621,11 +1622,30 @@ func opPush2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	return pc, nil, nil
 }
 
+var pushMasks = func() (m [33]uint256.Int) {
+	for n := range m {
+		m[n].Lsh(uint256.NewInt(1), uint(8*n)).SubUint64(&m[n], 1)
+	}
+	return m
+}()
+
+func setBytes32Masked(z *uint256.Int, w *[32]byte, mask *uint256.Int) {
+	z[3] = binary.BigEndian.Uint64(w[0:8]) & mask[3]
+	z[2] = binary.BigEndian.Uint64(w[8:16]) & mask[2]
+	z[1] = binary.BigEndian.Uint64(w[16:24]) & mask[1]
+	z[0] = binary.BigEndian.Uint64(w[24:32]) & mask[0]
+}
+
 // make push instruction function
 func makePush(size uint64, pushByteSize int) executionFunc {
 	return func(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-		if end := pc + 1 + size; end <= uint64(len(scope.Contract.Code)) {
-			scope.Stack.pushRef().SetBytes(scope.Contract.Code[pc+1 : end])
+		code := scope.Contract.Code
+		if end := pc + 1 + size; end <= uint64(len(code)) {
+			if end < 32 {
+				scope.Stack.pushRef().SetBytes(code[pc+1 : end])
+				return pc + size, nil, nil
+			}
+			setBytes32Masked(scope.Stack.pushRef(), (*[32]byte)(code[end-32:end]), &pushMasks[size])
 			return pc + size, nil, nil
 		}
 		codeLen := len(scope.Contract.Code)

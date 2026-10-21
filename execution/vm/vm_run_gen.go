@@ -308,10 +308,17 @@ run:
 			case PUSH3, PUSH4, PUSH5, PUSH6, PUSH7, PUSH8, PUSH9, PUSH10, PUSH11, PUSH12, PUSH13, PUSH14, PUSH15, PUSH16, PUSH17, PUSH18, PUSH19, PUSH20, PUSH21, PUSH22, PUSH23, PUSH24, PUSH25, PUSH26, PUSH27, PUSH28, PUSH29, PUSH30, PUSH31, PUSH32:
 				if sLen < stackLimit && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					if end := pc + 1 + uint64(op-PUSH0); end <= uint64(len(callContext.Contract.Code)) {
-						callContext.gas, callContext.savedPC = gasLeft, pc
-						callContext.Stack.pushRef().SetBytes(callContext.Contract.Code[pc+1 : end])
-						gasLeft, pc = callContext.gas, callContext.savedPC
+					code := callContext.Contract.Code
+					if end := pc + 1 + uint64(op-PUSH0); end <= uint64(len(code)) {
+						if end < 32 {
+							callContext.gas, callContext.savedPC = gasLeft, pc
+							callContext.Stack.pushRef().SetBytes(code[pc+1 : end])
+							gasLeft, pc = callContext.gas, callContext.savedPC
+							pc = pc + uint64(op-PUSH0)
+							pc++
+							continue run
+						}
+						setBytes32Masked(callContext.Stack.pushRef(), (*[32]byte)(code[end-32:end]), &pushMasks[uint64(op-PUSH0)])
 						pc = pc + uint64(op-PUSH0)
 						pc++
 						continue run
