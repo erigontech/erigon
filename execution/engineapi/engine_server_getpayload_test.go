@@ -370,6 +370,10 @@ func (s *getPayloadStubModule) GetPayloadBodiesByRange(_ context.Context, _, _ u
 	panic("not implemented")
 }
 
+func (s *getPayloadStubModule) IsValidated(_ common.Hash) bool {
+	return false
+}
+
 func (s *getPayloadStubModule) IsCanonicalHash(_ context.Context, _ common.Hash) (bool, error) {
 	panic("not implemented")
 }

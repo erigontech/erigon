@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -478,5 +479,29 @@ func TestEngineApiForkchoiceToGenesisRewindsHead(t *testing.T) {
 		headAfter, err := eat.RpcApiClient.BlockNumber()
 		require.NoError(t, err)
 		require.Equal(t, uint64(0), headAfter, "head should have rewound to genesis")
+	})
+}
+
+func TestNewPayloadResentHeadKeepsExecutedState(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		forkValidator := eat.ExecutionModule.(*execmodule.ExecModule).ForkValidator()
+		payload, err := eat.MockCl.BuildNewPayload(ctx)
+		require.NoError(t, err)
+		hash := payload.ExecutionPayload.BlockHash
+		for range 2 {
+			status, err := eat.MockCl.InsertNewPayload(ctx, payload)
+			require.NoError(t, err)
+			require.Equal(t, enginetypes.ValidStatus, status.Status)
+			require.Equal(t, hash, forkValidator.ExtendingForkHeadHash())
+		}
+		require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, payload))
 	})
 }
