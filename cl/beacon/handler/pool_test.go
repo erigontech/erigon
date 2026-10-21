@@ -42,6 +42,7 @@ import (
 	clgossip "github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
+	mock_services2 "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/network/gossip"
 	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
@@ -860,6 +861,71 @@ func TestPoolSyncCommitteesPublishesInBackground(t *testing.T) {
 	}
 }
 
+// A validator outside the sync committee has no subnet, so its message is neither validated nor published, and the
+// Beacon API requires a 400 with the failing index.
+func TestPoolSyncCommitteesRejectsValidatorOutsideCommittee(t *testing.T) {
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	// Every fixture validator sits in the committee, so fill both committees with validator 0 alone.
+	member, err := s.ValidatorPublicKey(0)
+	require.NoError(t, err)
+	committee := s.CurrentSyncCommittee().Copy()
+	keys := committee.GetCommittee()
+	for i := range keys {
+		keys[i] = member
+	}
+	committee.SetCommittee(keys)
+	require.NoError(t, s.SetCurrentSyncCommittee(committee))
+	require.NoError(t, s.SetNextSyncCommittee(committee.Copy()))
+	require.NoError(t, sd.OnHeadState(s))
+	const outsider = 1
+
+	ctrl := gomock.NewController(t)
+	mockGossip := gossip_mock.NewMockGossip(ctrl)
+	// Validator 0 fills every committee position, so each of its messages goes to every subnet.
+	mockGossip.EXPECT().PublishBackground(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).Times(2 * int(handler.beaconChainCfg.SyncCommitteeSubnetCount))
+	handler.gossipManager = mockGossip
+
+	msgs := []*cltypes.SyncCommitteeMessage{
+		{Slot: s.Slot(), BeaconBlockRoot: common.Hash{1}, ValidatorIndex: 0},
+		{Slot: s.Slot(), BeaconBlockRoot: common.Hash{1}, ValidatorIndex: outsider},
+		{Slot: s.Slot(), BeaconBlockRoot: common.Hash{1}, ValidatorIndex: 0},
+	}
+	body, err := json.Marshal(msgs)
+	require.NoError(t, err)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/sync_committees", bytes.NewReader(body))
+	handler.mux.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	var response poolingError
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Len(t, response.Failures, 1)
+	require.Equal(t, 1, response.Failures[0].Index)
+	require.Contains(t, response.Failures[0].Message, "not in the sync committee")
+}
+
+// A head state from before Altair has zero-filled sync committees, so the failure must name the head, not the validator.
+func TestPoolSyncCommitteesReportsPreAltairHead(t *testing.T) {
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	require.NoError(t, sd.OnHeadState(s))
+	ctrl := gomock.NewController(t)
+	mockGossip := gossip_mock.NewMockGossip(ctrl)
+	mockGossip.EXPECT().PublishBackground(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	handler.gossipManager = mockGossip
+
+	body, err := json.Marshal([]*cltypes.SyncCommitteeMessage{{Slot: s.Slot(), BeaconBlockRoot: common.Hash{1}, ValidatorIndex: 0}})
+	require.NoError(t, err)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/sync_committees", bytes.NewReader(body))
+	handler.mux.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	var response poolingError
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Len(t, response.Failures, 1)
+	require.Contains(t, response.Failures[0].Message, "before Altair")
+}
+
 func TestPoolSyncCommitteesIsUnavailableWhileSyncing(t *testing.T) {
 	msgs := []*cltypes.SyncCommitteeMessage{
 		{
@@ -1410,29 +1476,44 @@ func TestPoolSyncContributionAndProofs(t *testing.T) {
 // An ignored submission is not published because gossip accepts self-published messages without validating them
 // again. An already-seen attestation succeeds without publishing because the seen check runs before signature
 // validation, so the submitted attestation itself was not validated.
-func TestPoolAttestationsDoNotPublishIgnored(t *testing.T) {
+type poolAttestationRequest struct {
+	name    string
+	path    string
+	version string
+	body    string
+}
+
+// poolAttestationRequests returns v1 and v2 submissions of count attestations that vote for the zero block root.
+func poolAttestationRequests(t *testing.T, count int) []poolAttestationRequest {
 	data, err := json.Marshal(&solid.AttestationData{})
 	require.NoError(t, err)
-	single, err := json.Marshal([]*solid.SingleAttestation{{Data: &solid.AttestationData{}}})
-	require.NoError(t, err)
-	requests := []struct {
-		name    string
-		path    string
-		version string
-		body    string
-	}{
-		{
-			name: "v1",
-			path: "/eth/v1/beacon/pool/attestations",
-			body: fmt.Sprintf(`[{"aggregation_bits":"0x01","data":%s,"signature":"0x%s"}]`, data, strings.Repeat("00", 96)),
-		},
-		{
-			name:    "v2",
-			path:    "/eth/v2/beacon/pool/attestations",
-			version: "electra",
-			body:    string(single),
-		},
+	v1 := make([]string, count)
+	singles := make([]*solid.SingleAttestation, count)
+	for i := range count {
+		v1[i] = fmt.Sprintf(`{"aggregation_bits":"0x01","data":%s,"signature":"0x%s"}`, data, strings.Repeat("00", 96))
+		singles[i] = &solid.SingleAttestation{Data: &solid.AttestationData{}}
 	}
+	v2, err := json.Marshal(singles)
+	require.NoError(t, err)
+	return []poolAttestationRequest{
+		{name: "v1", path: "/eth/v1/beacon/pool/attestations", body: "[" + strings.Join(v1, ",") + "]"},
+		{name: "v2", path: "/eth/v2/beacon/pool/attestations", version: "electra", body: string(v2)},
+	}
+}
+
+func servePoolAttestations(t *testing.T, handler *ApiHandler, tt poolAttestationRequest) *httptest.ResponseRecorder {
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, tt.path, strings.NewReader(tt.body))
+	req.Header.Set("Content-Type", "application/json")
+	if tt.version != "" {
+		req.Header.Set("Eth-Consensus-Version", tt.version)
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	return recorder
+}
+
+func TestPoolAttestationsDoNotPublishIgnored(t *testing.T) {
+	requests := poolAttestationRequests(t, 1)
 	outcomes := []struct {
 		name   string
 		err    error
@@ -1458,13 +1539,7 @@ func TestPoolAttestationsDoNotPublishIgnored(t *testing.T) {
 				mockGossip.EXPECT().PublishToForkDigest(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 				handler.gossipManager = mockGossip
 
-				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, tt.path, strings.NewReader(tt.body))
-				req.Header.Set("Content-Type", "application/json")
-				if tt.version != "" {
-					req.Header.Set("Eth-Consensus-Version", tt.version)
-				}
-				recorder := httptest.NewRecorder()
-				handler.ServeHTTP(recorder, req)
+				recorder := servePoolAttestations(t, handler, tt)
 				require.Equal(t, outcome.status, recorder.Code, recorder.Body.String())
 				if outcome.status == http.StatusBadRequest {
 					require.Equal(t, "application/json", recorder.Header().Get("Content-Type"))
@@ -1474,6 +1549,88 @@ func TestPoolAttestationsDoNotPublishIgnored(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// arrivingHeaderStore reports every block as seen once arrived is set.
+type arrivingHeaderStore struct {
+	*mock_services2.ForkChoiceStorageMock
+	arrived atomic.Bool
+}
+
+func (s *arrivingHeaderStore) GetHeader(common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	return &cltypes.BeaconBlockHeader{}, s.arrived.Load()
+}
+
+// A validator client may attest before the node imports the block it votes for, e.g. while blob data is still
+// awaited. The submission waits for the block, then is processed again and published.
+func TestPoolAttestationsWaitForUnseenBlock(t *testing.T) {
+	blockNotSeen := fmt.Errorf("%w: %w: %v", services.ErrIgnore, services.ErrBlockNotSeen, common.Hash{})
+	for _, tt := range poolAttestationRequests(t, 1) {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, _, s, _, handler, _, sd, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			require.NoError(t, sd.OnHeadState(s))
+			netCfg := clparams.NetworkConfigs[chainspec.MainnetChainID]
+			handler.netConfig = &netCfg
+			store := &arrivingHeaderStore{ForkChoiceStorageMock: fcu}
+			handler.forkchoiceStore = store
+
+			ctrl := gomock.NewController(t)
+			attestationService := services_mock.NewMockAttestationService(ctrl)
+			gomock.InOrder(
+				attestationService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+					func(context.Context, *uint64, *services.AttestationForGossip) error {
+						time.AfterFunc(100*time.Millisecond, func() { store.arrived.Store(true) })
+						return blockNotSeen
+					}),
+				attestationService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil),
+			)
+			handler.attestationService = attestationService
+			mockGossip := gossip_mock.NewMockGossip(ctrl)
+			mockGossip.EXPECT().PublishToForkDigest(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).Times(1)
+			handler.gossipManager = mockGossip
+
+			recorder := servePoolAttestations(t, handler, tt)
+			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		})
+	}
+}
+
+// The wait is bounded by one slot for the whole request, not per attestation.
+func TestPoolAttestationsFailWhenBlockDoesNotArrive(t *testing.T) {
+	blockNotSeen := fmt.Errorf("%w: %w: %v", services.ErrIgnore, services.ErrBlockNotSeen, common.Hash{})
+	for _, tt := range poolAttestationRequests(t, 3) {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, _, s, _, handler, _, sd, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			require.NoError(t, sd.OnHeadState(s))
+			netCfg := clparams.NetworkConfigs[chainspec.MainnetChainID]
+			handler.netConfig = &netCfg
+			cfg := *handler.beaconChainCfg
+			cfg.SecondsPerSlot = 1
+			handler.beaconChainCfg = &cfg
+			handler.forkchoiceStore = &arrivingHeaderStore{ForkChoiceStorageMock: fcu}
+
+			ctrl := gomock.NewController(t)
+			attestationService := services_mock.NewMockAttestationService(ctrl)
+			attestationService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).Return(blockNotSeen).Times(3)
+			handler.attestationService = attestationService
+			mockGossip := gossip_mock.NewMockGossip(ctrl)
+			mockGossip.EXPECT().PublishToForkDigest(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+			handler.gossipManager = mockGossip
+
+			start := time.Now()
+			recorder := servePoolAttestations(t, handler, tt)
+			elapsed := time.Since(start)
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			require.GreaterOrEqual(t, elapsed, 900*time.Millisecond)
+			require.Less(t, elapsed, 1900*time.Millisecond)
+			var response poolingError
+			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+			require.Len(t, response.Failures, 3)
+			for i, failure := range response.Failures {
+				require.Equal(t, poolingFailure{Index: i, Message: blockNotSeen.Error()}, failure)
+			}
+		})
 	}
 }
 
