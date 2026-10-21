@@ -10,6 +10,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -340,4 +342,46 @@ func TestNormalizeReturnsStorageKeysError(t *testing.T) {
 		return nil, want
 	}, false, false, false)
 	require.ErrorIs(t, err, want)
+}
+
+// A contract that did not exist before the tx and is created and self-destructed
+// in it leaves no state, so Normalize must emit nothing for it: no delete for the
+// apply path to replay and no key for the commitment to fold. A CREATE onto an
+// address that already held a balance still deletes that account.
+func TestNormalize_CreatedAndDestroyedInTxLeavesNoWrites(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xC4EA7ED"))
+	run := func(t *testing.T, reader StateReader, eip8246 bool) *WriteSet {
+		t.Helper()
+		vm := NewVersionMap(nil)
+		ibs := NewWithVersionMap(reader, vm)
+		ibs.SetNoMaterialize(true)
+		defer ibs.Close()
+		ibs.SetTxContext(0, 0)
+		ibs.SetVersion(0)
+		ibs.eip8246 = eip8246
+		require.NoError(t, ibs.CreateAccount(addr, true))
+		require.NoError(t, ibs.SetNonce(addr, 1, tracing.NonceChangeNewContract))
+		require.NoError(t, ibs.SetCode(addr, []byte{0x33, 0xff}, tracing.CodeChangeContractCreation))
+		_, err := ibs.Selfdestruct(addr, eip8246)
+		require.NoError(t, err)
+		rules := &chain.Rules{IsSpuriousDragon: true, IsCancun: true, IsAmsterdam: eip8246}
+		out, err := ibs.FinalizedWrites(rules).Normalize(vm, 0, 0, reader, nil, true /*emptyRemoval*/, false /*isAura*/, eip8246)
+		require.NoError(t, err)
+		return out
+	}
+	hasAddr := func(ws *WriteSet) bool {
+		for h := range ws.AllHeaders() {
+			if h.Address == addr {
+				return true
+			}
+		}
+		return false
+	}
+	for _, eip8246 := range []bool{false, true} {
+		require.False(t, hasAddr(run(t, &minimalStateReader{}, eip8246)), "eip8246=%v: absent before the tx and gone after it", eip8246)
+	}
+	prefunded := run(t, newAccountStateReader(addr), false)
+	sd, ok := prefunded.GetSelfDestruct(addr)
+	require.True(t, ok && sd.Val, "a CREATE onto a pre-funded address must still delete that account")
 }

@@ -124,8 +124,24 @@ func (ws *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stat
 			sdSet[addr] = true
 		}
 	}
+	var vanished map[accounts.Address]bool
+	for addr := range sdSet {
+		gone, err := ws.vanishedInTx(addr, incarnation, eip8246, stateReader)
+		if err != nil {
+			return nil, err
+		}
+		if gone {
+			if vanished == nil {
+				vanished = make(map[accounts.Address]bool)
+			}
+			vanished[addr] = true
+		}
+	}
 
 	for h := range ws.AllHeaders() {
+		if vanished[h.Address] {
+			continue
+		}
 		// Drop account-field writes for SD'd addresses so applyVersionedWrites
 		// takes the pure-delete branch instead of cleanup-before-recreate; drop
 		// raw StoragePath writes too (the SelfDestructPath case re-emits an
@@ -483,6 +499,22 @@ func (ws *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stat
 	}
 
 	return filtered, nil
+}
+
+// vanishedInTx reports whether a self-destructed addr was absent before this tx,
+// was created in it and keeps no balance, so the tx leaves no state for it.
+func (ws *WriteSet) vanishedInTx(addr accounts.Address, incarnation int, eip8246 bool, stateReader StateReader) (bool, error) {
+	if stateReader == nil {
+		return false, nil
+	}
+	if cc, ok := ws.GetCreateContract(addr); !ok || !cc.Val || cc.Version.Incarnation != incarnation {
+		return false, nil
+	}
+	if bw, ok := ws.GetBalance(addr); eip8246 && ok && !bw.Val.IsZero() {
+		return false, nil
+	}
+	acc, err := stateReader.ReadAccountData(addr)
+	return acc == nil, err
 }
 
 // StorageKeysFn enumerates the storage slots committed for an address. Normalize
