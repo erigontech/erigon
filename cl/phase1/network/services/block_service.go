@@ -744,7 +744,7 @@ func (b *blockService) computeBlockValidationContext(parentRoot common.Hash, slo
 		}
 	}
 
-	parentState, err := b.forkchoiceStore.GetStateAtBlockRoot(parentRoot, true)
+	parentState, err := b.forkchoiceStore.GetStateAtBlockRoot(parentRoot)
 	if err != nil {
 		return nil, fmt.Errorf("%w: get parent block state: %w", ErrIgnore, err)
 	}

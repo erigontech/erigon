@@ -487,13 +487,16 @@ func TestNewForkGraphDiskCachesAnchorStateRoot(t *testing.T) {
 			}
 			anchorRoot, err := anchorState.BlockRoot()
 			require.NoError(t, err)
+			callerHeaderRoot := anchorState.LatestBlockHeader().Root
 
 			forkGraph, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
 			require.NoError(t, err)
 			graph := forkGraph.(*forkGraphDisk)
 
 			require.Equal(t, common.Hash(expectedStateRoot), anchorState.PeekPreviousStateRoot())
-			require.Equal(t, header.Root, anchorState.LatestBlockHeader().Root)
+			require.Equal(t, callerHeaderRoot, anchorState.LatestBlockHeader().Root)
+			require.Equal(t, common.Hash(expectedStateRoot), graph.currentState.PeekPreviousStateRoot())
+			require.Equal(t, header.Root, graph.currentState.LatestBlockHeader().Root)
 			persistedState, err := graph.readBeaconStateFromDisk(anchorRoot)
 			require.NoError(t, err)
 			require.Equal(t, common.Hash(expectedStateRoot), persistedState.PeekPreviousStateRoot())
@@ -1050,7 +1053,7 @@ func TestAddChainSegmentDoesNotExcludeLifecycleReaders(t *testing.T) {
 	anchorState := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(block, block1, int(clparams.Phase0Version)))
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
-	graph, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	graph, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{Beacon: true})
 	require.NoError(t, err)
 	f := graph.(*forkGraphDisk)
 	blockRoot, err := block.Block.HashSSZ()
@@ -1079,9 +1082,7 @@ func TestAddChainSegmentDoesNotExcludeLifecycleReaders(t *testing.T) {
 	statePublished := make(chan struct{})
 	go func() {
 		for {
-			f.currentStateMu.RLock()
-			published := f.currentStateBlockRoot == common.Hash(blockRoot)
-			f.currentStateMu.RUnlock()
+			_, _, published := f.GetSyncCommittees(f.beaconCfg.SyncCommitteePeriod(block.Block.Slot))
 			if published {
 				close(statePublished)
 				return
