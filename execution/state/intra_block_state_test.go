@@ -38,7 +38,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -1629,14 +1628,10 @@ func TestResetForPoolCountsMapsLostToAnIntermediateReset(t *testing.T) {
 	require.False(t, ibs.resetForPool(), "a map lost to an intermediate reset must still count")
 }
 
-// SetStorage replaces an account's whole storage — a full state override used by
-// eth_simulateV1. On the noMaterialize (parallel) path it has no stateObject to
-// hold the override, so it must be rejected rather than silently dropped.
-func TestSetStorageRejectsNoMaterialize(t *testing.T) {
-	prev := dbg.AssertEnabled
-	dbg.AssertEnabled = true
-	t.Cleanup(func() { dbg.AssertEnabled = prev })
-
+// SetStorage applies a full state override on the noMaterialize (versioned) path
+// too — the RPC eth_call / eth_estimateGas / debug_traceCall override flow relies on
+// it. It must record the override to the versionMap, not panic.
+func TestSetStorageOnNoMaterialize_AppliesOverride(t *testing.T) {
 	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
 	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(0, 0)
@@ -1645,7 +1640,9 @@ func TestSetStorageRejectsNoMaterialize(t *testing.T) {
 
 	addr := accounts.InternAddress([20]byte{0xaa})
 	key := accounts.InternKey([32]byte{0x01})
-	require.Panics(t, func() {
-		_ = ibs.SetStorage(addr, Storage{key: *uint256.NewInt(7)})
-	})
+	require.NoError(t, ibs.SetStorage(addr, Storage{key: *uint256.NewInt(7)}))
+
+	got, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.Equal(t, uint64(7), got.Uint64(), "the override must be recorded on the versioned path")
 }
