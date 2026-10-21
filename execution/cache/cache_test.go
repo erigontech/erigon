@@ -1659,3 +1659,14 @@ func TestStateCache_OldForkViewMissesTheReplacementEntry(t *testing.T) {
 	_, _, ok := view.GetVisible(kv.AccountsDomain, key)
 	require.False(t, ok, "an old-fork view must not read the replacement fork's entry")
 }
+
+// A payload of 4 GiB or more must not wrap to a small weight and slip past the byte bound.
+func TestGenericCache_HugePayloadIsNotAdmitted(t *testing.T) {
+	c := NewGenericCache(datasize.MB, func(int) int { return 1 << 32 }, ModeEvictLRU)
+	t.Cleanup(c.Close)
+
+	c.Put([]byte("k"), 1, 0)
+
+	_, ok := c.Get([]byte("k"))
+	assert.False(t, ok)
+}

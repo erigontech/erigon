@@ -17,6 +17,7 @@
 package cache
 
 import (
+	"math"
 	"sync/atomic"
 	"unsafe"
 
@@ -170,7 +171,7 @@ func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool)
 		if sameKey && !overwrite && !c.coh.IsStale(existing.txNum, existing.epoch) {
 			return existing, otter.CancelOp
 		}
-		e := entry[T]{val: value, size: uint32(newSize), txNum: txNum, epoch: c.coh.Epoch()}
+		e := entry[T]{val: value, size: uint32(min(newSize, math.MaxUint32)), txNum: txNum, epoch: c.coh.Epoch()}
 		// "Drop new keys when full": the lock-free layer would admit and evict.
 		if c.mode == ModeNoOp && !sameKey && c.data.SizeBytes()+weighEntry(h, e) > int64(c.capacityB) {
 			c.dropped.Add(1)
