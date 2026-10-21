@@ -667,7 +667,9 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 	currentHeader := e.chainRW.CurrentHeader(ctx)
 	// If header is already validated or has a missing parent, you can either return VALID or SYNCING.
 	if newPayload {
-		if header != nil && isCanonical {
+		// A validated non-canonical payload is answered before InsertBlocks,
+		// whose ClearWithUnwind would drop the executed state FCU merges.
+		if header != nil && (isCanonical || e.chainRW.IsValidated(blockHash)) {
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 		if shouldWait, _ := waitForResponse(ctx, 50*time.Millisecond, func() (bool, error) {
