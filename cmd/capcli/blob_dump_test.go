@@ -42,6 +42,7 @@ func TestBlobDumpPlan(t *testing.T) {
 	cfg.DenebForkEpoch = 20_000 / cfg.SlotsPerEpoch
 	v10 := snaptype.BlobSidecars.FileName(version.V1_0, 30_000, 40_000)
 	v11 := snaptype.BlobSidecars.FileName(version.V1_1, 30_000, 40_000)
+	v12 := snaptype.BlobSidecars.FileName(version.V1_2, 30_000, 40_000)
 
 	tests := []struct {
 		name      string
@@ -59,6 +60,7 @@ func TestBlobDumpPlan(t *testing.T) {
 		{name: "skips a frozen segment", to: 50_000, frozen: []string{v10}, want: []uint64{20_000, 40_000}},
 		{name: "--overwrite rewrites a current-version segment", to: 50_000, frozen: []string{v11}, overwrite: true, want: []uint64{20_000, 30_000, 40_000}},
 		{name: "--overwrite refuses a segment pinned at a lower version", to: 50_000, frozen: []string{v11, v10}, overwrite: true, wantErr: v10},
+		{name: "--overwrite refuses a segment pinned at a newer version", to: 50_000, frozen: []string{v12}, overwrite: true, wantErr: v12},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

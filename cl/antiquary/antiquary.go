@@ -555,7 +555,7 @@ func (s *Antiquary) antiquateBlobs() error {
 	if err := func() error {
 		compressWorkers, releaseBuildSlot := s.blobCompressWorkers(currentBlobsProgress, backlogTo)
 		defer releaseBuildSlot()
-		return freezeblocks.DumpBlobsSidecar(s.ctx, s.blobStorage, s.mainDB, currentBlobsProgress, to, s.sn.Salt, s.dirs, compressWorkers, freezeblocks.BlobCountFromBlocks(s.ctx, s.snReader), log.LvlDebug, s.logger)
+		return freezeblocks.DumpBlobsSidecar(s.ctx, s.blobStorage, s.mainDB, currentBlobsProgress, to, s.sn.Salt, s.dirs, compressWorkers, freezeblocks.BlobCountFromBlocks(s.ctx, s.sn, s.snReader), log.LvlDebug, s.logger)
 	}(); err != nil {
 		return err
 	}

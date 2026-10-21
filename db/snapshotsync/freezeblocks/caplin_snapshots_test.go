@@ -666,3 +666,24 @@ func TestDumpBlobSidecarsRangeRequiresBlobCount(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, written)
 }
+
+// A slot outside every frozen block segment reads as no block, the same as an empty slot, so
+// counting it as blobless would freeze a hole wherever the blob store is pruned.
+func TestBlobCountFromBlocksRejectsSlotsWithoutBlockSegment(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	dirs := datadir.New(t.TempDir())
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 20_000, 30_000, true, func(uint64) []byte { return nil })
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	require.Equal(t, uint64(30_000), sn.VisibleSegmentsMaxTo(snaptype.BeaconBlocks.Enum()))
+
+	blobCount := BlobCountFromBlocks(t.Context(), sn, NewBeaconSnapshotReader(sn, nil, &clparams.MainnetBeaconConfig))
+	n, err := blobCount(25_000)
+	require.NoError(t, err, "an empty slot inside a frozen block segment is blobless")
+	require.Zero(t, n)
+
+	store := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
+	err = DumpBlobSidecarsRange(t.Context(), db, store, 10_000, 20_000, 0, dirs, 1, blobCount, log.LvlDebug, log.New())
+	require.ErrorContains(t, err, "no frozen beacon block segment")
+}
