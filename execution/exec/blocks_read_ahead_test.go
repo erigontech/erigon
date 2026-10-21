@@ -174,7 +174,7 @@ func TestBlockReadAheaderIgnoresNilGetter(t *testing.T) {
 func TestMakeBALWarmupTasksSplitsStorageHeavyAccount(t *testing.T) {
 	bal := types.BlockAccessList{{
 		StorageChanges: make([]types.SlotChanges, 65),
-		StorageReads:   make([]accounts.StorageKey, 3),
+		StorageReads:   make([]common.Hash, 3),
 	}}
 	tasks, workers := makeBALWarmupPlan(bal, 4)
 	require.Equal(t, 2, workers)
@@ -266,7 +266,7 @@ func TestWarmBALStateTaskDoesNotRepeatCodeForLaterChunks(t *testing.T) {
 	account.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
 	source := &sharedCodeTemporalGetter{account: accounts.SerialiseV3(&account), code: code}
 	address := accounts.InternAddress(common.Address{19: 1})
-	accountChanges := &types.AccountChanges{Address: address.Value(), StorageReads: make([]accounts.StorageKey, 65)}
+	accountChanges := &types.AccountChanges{Address: address.Value(), StorageReads: make([]common.Hash, 65)}
 	reader := state.NewReaderV3(execctx.NewTemporalTxStateGetter(source))
 	require.NoError(t, warmBALStateTask(reader, accountChanges, balWarmupTask{slotFrom: 64, slotTo: 65}, balCodeWarmupAll, nil))
 	require.Zero(t, source.accountReads)
@@ -276,7 +276,7 @@ func TestWarmBALStateTaskDoesNotRepeatCodeForLaterChunks(t *testing.T) {
 func TestMakeBALWarmupTasksKeepsSmallAccountsTogether(t *testing.T) {
 	bal := types.BlockAccessList{
 		{StorageChanges: make([]types.SlotChanges, 1)},
-		{StorageReads: make([]accounts.StorageKey, 1)},
+		{StorageReads: make([]common.Hash, 1)},
 	}
 	tasks, workers := makeBALWarmupPlan(bal, 4)
 	require.Equal(t, 2, workers)

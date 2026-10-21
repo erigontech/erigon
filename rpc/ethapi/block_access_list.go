@@ -85,9 +85,7 @@ func MarshalBlockAccessList(bal types.BlockAccessList) []*RPCAccountAccess {
 			}
 			entry.StorageChanges[j] = slot
 		}
-		for j, sr := range ac.StorageReads {
-			entry.StorageReads[j] = sr.Value()
-		}
+		copy(entry.StorageReads, ac.StorageReads)
 		for j, bc := range ac.BalanceChanges {
 			v := bc.Value.ToBig()
 			entry.BalanceChanges[j] = &RPCBalanceChange{
