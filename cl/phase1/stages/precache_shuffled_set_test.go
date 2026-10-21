@@ -101,7 +101,7 @@ func TestPrecacheDecisionRootMatchesBoundaryState(t *testing.T) {
 	require.Equal(t, common.Hash(wantRoot), root)
 	preCacheShuffledSetForEpoch(log.Root(), cfg, advanced, epoch)
 
-	cachedActive, _, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, root)
+	cachedActive, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, root)
 	require.True(t, ok)
 	active := fresh.GetActiveValidatorsIndices(epoch)
 	require.Same(t, unsafe.SliceData(cachedActive), unsafe.SliceData(active))
@@ -134,4 +134,101 @@ func TestPrecachePromotesLookaheadShuffle(t *testing.T) {
 	main, ok := caches.ShuffledIndiciesCacheGlobal.Get(epoch, blockRoot)
 	require.True(t, ok)
 	require.Same(t, unsafe.SliceData(lookahead), unsafe.SliceData(main))
+}
+
+func TestTotalActiveBalanceIsNotSharedAcrossBranchesForkedInPreviousEpoch(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	epoch := uint64(4)
+
+	type branchPair struct {
+		higher      *state.CachingBeaconState
+		lower       *state.CachingBeaconState
+		cacheRoot   common.Hash
+		higherTotal uint64
+		lowerTotal  uint64
+	}
+
+	newBranches := func(t *testing.T) branchPair {
+		t.Helper()
+		ancestor := preCacheTestState(t, cfg, 64, 0xe5)
+		higher, err := ancestor.Copy()
+		require.NoError(t, err)
+		lower, err := ancestor.Copy()
+		require.NoError(t, err)
+
+		higherHeader := higher.LatestBlockHeader()
+		higherHeader.Root[0] = 1
+		higher.SetLatestBlockHeader(&higherHeader)
+		lowerHeader := lower.LatestBlockHeader()
+		lowerHeader.Root[0] = 2
+		lower.SetLatestBlockHeader(&lowerHeader)
+		require.NoError(t, lower.SetValidatorBalance(0, 31_000_000_000))
+
+		require.NoError(t, transition.DefaultMachine.ProcessSlots(higher, epoch*cfg.SlotsPerEpoch))
+		require.NoError(t, transition.DefaultMachine.ProcessSlots(lower, epoch*cfg.SlotsPerEpoch))
+
+		forkSlot := (epoch-1)*cfg.SlotsPerEpoch + 1
+		higherForkRoot, err := higher.GetBlockRootAtSlot(forkSlot)
+		require.NoError(t, err)
+		lowerForkRoot, err := lower.GetBlockRootAtSlot(forkSlot)
+		require.NoError(t, err)
+		require.NotEqual(t, higherForkRoot, lowerForkRoot)
+
+		decisionSlot := (epoch-1)*cfg.SlotsPerEpoch - 1
+		higherCacheRoot, err := higher.GetBlockRootAtSlot(decisionSlot)
+		require.NoError(t, err)
+		lowerCacheRoot, err := lower.GetBlockRootAtSlot(decisionSlot)
+		require.NoError(t, err)
+		require.Equal(t, higherCacheRoot, lowerCacheRoot)
+		require.Equal(t, higher.GetActiveValidatorsIndices(epoch), lower.GetActiveValidatorsIndices(epoch))
+
+		trueTotal := func(s *state.CachingBeaconState) uint64 {
+			var total uint64
+			for _, index := range s.GetActiveValidatorsIndices(epoch) {
+				total += s.ValidatorSet().Get(int(index)).EffectiveBalance()
+			}
+			return total
+		}
+		higherTotal := trueTotal(higher)
+		lowerTotal := trueTotal(lower)
+		require.NotEqual(t, higherTotal, lowerTotal)
+
+		return branchPair{
+			higher:      higher,
+			lower:       lower,
+			cacheRoot:   higherCacheRoot,
+			higherTotal: higherTotal,
+			lowerTotal:  lowerTotal,
+		}
+	}
+
+	for _, tc := range []struct {
+		name         string
+		polluterHigh bool
+		copyVictim   bool
+	}{
+		{name: "higher_pollutes_lower/state", polluterHigh: true},
+		{name: "higher_pollutes_lower/copy", polluterHigh: true, copyVictim: true},
+		{name: "lower_pollutes_higher/state"},
+		{name: "lower_pollutes_higher/copy", copyVictim: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			useFreshPrecacheValidatorCaches(t)
+			branches := newBranches(t)
+			polluter, victim := branches.lower, branches.higher
+			want := branches.higherTotal
+			if tc.polluterHigh {
+				polluter, victim = branches.higher, branches.lower
+				want = branches.lowerTotal
+			}
+
+			preCacheActiveValidatorsForEpoch(polluter, epoch, branches.cacheRoot)
+			if tc.copyVictim {
+				var err error
+				victim, err = victim.Copy()
+				require.NoError(t, err)
+			}
+			require.Equal(t, want, victim.GetTotalActiveBalance())
+		})
+	}
 }
