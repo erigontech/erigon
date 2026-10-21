@@ -182,6 +182,79 @@ func TestSelfDestructBranchPrune_ReproducesOracle(t *testing.T) {
 	}
 }
 
+// TestSelfDestructBranchTombstone_CarriesRealPrev pins point-3: when a
+// self-destruct tombstones a persisted storage branch, deleteStorageSubtreeBranches
+// must hand the real branch bytes to PutBranch as prev, not an empty prev. The
+// domain diff keys an unwind on that prev — an empty prev records "no previous
+// value", so an unwind across the destruct would leave an empty tombstone instead
+// of restoring the branch (the []byte{} arm of DomainRoTx.unwind).
+func TestSelfDestructBranchTombstone_CarriesRealPrev(t *testing.T) {
+	t.Parallel()
+	a := addrHex(findAddressForNibble(3, 900))
+	sib := addrHex(findAddressForNibble(7, 500))
+	const nOld = 1500
+	const workers = 4
+	recreate := func(ub *UpdateBuilder) {
+		ub.Balance(a, 7777).Nonce(a, 9)
+		for s := 5000; s < 6600; s++ {
+			ub.Storage(a, hex.EncodeToString(slotHashBytes(s)), "cc")
+		}
+	}
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	b1 := NewUpdateBuilder().Balance(a, 100).Nonce(a, 1).Balance(sib, 500)
+	for s := range nOld {
+		b1.Storage(a, hex.EncodeToString(slotHashBytes(s)), "0badc0de")
+	}
+	k1, u1 := b1.Build()
+	_, blob := parUpdateBatch(t, ms, workers, k1, u1, nil, "")
+
+	// Snapshot the persisted branches under A before the destruct.
+	addrBytes, err := hex.DecodeString(a)
+	require.NoError(t, err)
+	accPrefix := KeyToHexNibbleHash(addrBytes)
+	original := map[string][]byte{}
+	for k, v := range ms.cm {
+		if bytes.HasPrefix(nibbles.CompactToHex([]byte(k)), accPrefix) {
+			original[k] = bytes.Clone(v)
+		}
+	}
+	require.NotEmpty(t, original, "A must have persisted storage branches to tombstone")
+
+	clean := NewUpdateBuilder()
+	for s := range nOld {
+		clean.DeleteStorage(a, hex.EncodeToString(slotHashBytes(s)))
+	}
+	ck, cu := clean.Build()
+	require.NoError(t, ms.applyPlainUpdates(ck, cu))
+
+	// Same-block recreate carrying the SD-reset marker — the path that tombstones
+	// A's persisted storage branches via deleteStorageSubtreeBranches.
+	ms.putLog = nil
+	ms.recordPuts.Store(true)
+	b2 := NewUpdateBuilder()
+	recreate(b2)
+	k2, u2 := b2.Build()
+	_, _ = parUpdateBatch(t, ms, workers, k2, u2, blob, a)
+	ms.recordPuts.Store(false)
+
+	tombstones := 0
+	for _, p := range ms.putLog {
+		if BranchData(p.data).ChildCount() != 0 {
+			continue // a real branch write (the recreate), not a tombstone
+		}
+		orig, ok := original[string(p.prefix)]
+		if !ok {
+			continue // a tombstone at a prefix that held no pre-destruct branch
+		}
+		tombstones++
+		require.NotEmpty(t, p.prev, "tombstone must carry the real branch as prev, not an empty prev")
+		require.Equal(t, orig, p.prev, "tombstone prev must equal the pre-destruct branch so unwind restores it")
+	}
+	require.Positive(t, tombstones, "at least one persisted branch under A must be tombstoned with its real prev")
+}
+
 // seqUpdateBatch folds one batch through a seq HexPatriciaHashed via the
 // ModeUpdate path (TouchPlainKeyDirect — the commitment calculator's path, which
 // carries the Update, including the transient SD-reset marker, through to the
