@@ -285,6 +285,27 @@ func TestInnerCreatedCodeOutlivesNextCall(t *testing.T) {
 	require.Equal(t, code, got)
 }
 
+// A tracer that never sees call outputs must not turn off the identity output buffer.
+func TestIdentityReusesOutputBufferUnderEnterTracer(t *testing.T) {
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	const calls = 100
+	p := program.New().Mstore([]byte{1}, 1024)
+	for range calls {
+		p.StaticCall(nil, 0x4, 0, 1024, 0, 0).Op(vm.POP)
+	}
+	require.NoError(t, statedb.SetCode(address, p.Bytes(), tracing.CodeChangeUnspecified))
+	cfg := &Config{State: statedb}
+	cfg.EVMConfig.Tracer = &tracing.Hooks{OnEnterV2: func(int, byte, accounts.Address, accounts.Address, bool, []byte, mdgas.MdGas, uint256.Int, []byte) {}}
+
+	allocs := testing.AllocsPerRun(3, func() {
+		_, _, err := Call(address, nil, cfg)
+		require.NoError(t, err)
+	})
+	require.Less(t, allocs, float64(calls))
+}
+
 // The identity output must not change when the caller later overwrites the input memory.
 func TestIdentityReturnDataOutlivesInputMemory(t *testing.T) {
 	t.Parallel()

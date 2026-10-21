@@ -325,7 +325,7 @@ func TestInnerFrameOutputReusesBuffer(t *testing.T) {
 
 // Tracers such as callTracer keep every frame's output.
 func TestTracedInnerFrameOutputIsCopied(t *testing.T) {
-	if innerOutputsShareBuffer(Config{Tracer: &tracing.Hooks{}}) {
+	if innerOutputsShareBuffer(Config{Tracer: &tracing.Hooks{OnExit: func(int, []byte, uint64, error, bool) {}}}) {
 		t.Fatal("a traced inner RETURN reused the buffer")
 	}
 }

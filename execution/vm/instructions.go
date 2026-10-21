@@ -1328,12 +1328,13 @@ func (evm *EVM) output(mem *Memory, offset, size uint64) []byte {
 }
 
 // outputBuffer returns where the output of a frame at depth goes, or nil for a fresh copy.
-// Tracers keep nested outputs, and a buffer that outgrows the cap is not kept.
+// Tracers that see outputs may keep them, and a buffer that outgrows the cap is not kept.
 func (evm *EVM) outputBuffer(depth int, size uint64) *[]byte {
 	if depth == 1 {
 		return evm.txOutput
 	}
-	if depth >= len(evm.outputs) || size > uint64(256*datasize.KB) || evm.config.Tracer != nil {
+	t := evm.config.Tracer
+	if depth >= len(evm.outputs) || size > uint64(256*datasize.KB) || t.HasExitHook() || t.HasOpcodeHook() || t.HasFaultHook() {
 		return nil
 	}
 	if evm.outputs == nil {
