@@ -155,7 +155,8 @@ Worker contexts come from the trie context factory, and a factory that returns a
 deferral on (fork validation and parallel block apply, the same rule as hex), the bin trie keeps its parts until
 the caller takes them with `TakeDeferredDeltas` and flushes them to its own commitment domain; a round started with
 untaken parts fails. Convert (`PBinRangeWriter.WriteAtBlock`) runs the same round on workers that read its overlay,
-and builds only into a target domain with no rows in files or MDBX. `VerifyPBinDomainRoot` verifies each chain
+and refuses a target domain whose visible files hold a live key or whose MDBX table holds any row, tombstones
+included. `VerifyPBinDomainRoot` verifies each chain
 subtree on a worker view opened from the caller's file pin, then the rows above bit 12; a write-tx caller verifies
 sequentially.
 
