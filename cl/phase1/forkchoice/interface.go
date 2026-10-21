@@ -56,10 +56,8 @@ type ForkChoiceStorageReader interface {
 	JustifiedCheckpoint() solid.Checkpoint
 	JustifiedSlot() uint64
 	ProposerBoostRoot() common.Hash
-	GetStateAtBlockRoot(
-		blockRoot common.Hash,
-		alwaysCopy bool,
-	) (*state.CachingBeaconState, error)
+	GetStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error)
+	// ViewStateAtBlockRoot callbacks must not call fork choice, mutate the state or keep it after returning.
 	ViewStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error
 	GetFinalityCheckpoints(
 		blockRoot common.Hash,
