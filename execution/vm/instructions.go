@@ -185,7 +185,14 @@ func stMod(_ uint64, scope *CallContext) string {
 
 func opSmod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x, y := scope.Stack.pop1Peek1()
-	y.SMod(x, y)
+	var ax, ay uint256.Int
+	ax.Abs(x)
+	ay.Abs(y)
+	xNeg := x.Sign() < 0
+	mod(y, &ax, &ay)
+	if xNeg {
+		y.Neg(y)
+	}
 	return pc, nil, nil
 }
 
