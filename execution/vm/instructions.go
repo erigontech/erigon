@@ -322,8 +322,28 @@ func stAddmod(_ uint64, scope *CallContext) string {
 
 func opMulmod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x, y, z := scope.Stack.pop2Peek1()
-	z.MulMod(x, y, z)
+	if z[3] == 0 {
+		z.MulMod(x, y, z)
+		return pc, nil, nil
+	}
+	c := evm.mulmodCache
+	if c == nil {
+		c = &mulmodReciprocal{}
+		evm.mulmodCache = c
+	}
+	if c.modulus != *z {
+		c.modulus = *z
+		c.mu = uint256.Reciprocal(z)
+	}
+	z.MulModWithReciprocal(x, y, z, &c.mu)
 	return pc, nil, nil
+}
+
+// mulmodReciprocal remembers the last modulus of at least 2^192 and its
+// reciprocal: contracts usually reduce by one constant field order.
+type mulmodReciprocal struct {
+	modulus uint256.Int
+	mu      [5]uint64
 }
 
 func stMulmod(_ uint64, scope *CallContext) string {
