@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -898,6 +899,19 @@ func TestWaitCommittedHeadPanicRollsBack(t *testing.T) {
 	require.True(t, tx.rolledBack)
 }
 
+func newV3HistoryTestExecModule(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
+	t.Helper()
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	statecfg.EnableHistoricalCommitment()
+
+	m, testChain := rpcdaemontest.CreateTestExecModuleNoInsert(t)
+	require.NoError(t, m.DB.Update(context.Background(), func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	return m, testChain
+}
+
 func TestHeadCaptureOverCarriedRecordsMatchesDurablePerBlock(t *testing.T) {
 	previousAssert, previousCarry, previousSchema, previousV3 := dbg.AssertEnabled, dbg.CommitmentBranchCarry, statecfg.Schema, statecfg.ExperimentalCommitmentV3
 	t.Cleanup(func() {
@@ -907,15 +921,8 @@ func TestHeadCaptureOverCarriedRecordsMatchesDurablePerBlock(t *testing.T) {
 	commitmentdb.WantParentReads(true)
 	t.Cleanup(func() { commitmentdb.WantParentReads(false) })
 	t.Cleanup(func() { commitmentdb.PublishParentRecords(nil) })
-	statecfg.ExperimentalCommitmentV3 = true
-	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
-	statecfg.EnableHistoricalCommitment()
-
-	m, testChain := rpcdaemontest.CreateTestExecModuleNoInsert(t)
+	m, testChain := newV3HistoryTestExecModule(t)
 	ctx := context.Background()
-	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
-		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
-	}))
 	require.NoError(t, m.InsertChain(testChain.Slice(0, 1)))
 
 	adopted := metrics.GetOrCreateCounter("commitment_branch_carry_adopted_total").GetValueUint64()
@@ -971,15 +978,8 @@ func TestHeadCaptureWarmPanicIsContained(t *testing.T) {
 	previousSchema, previousV3 := statecfg.Schema, statecfg.ExperimentalCommitmentV3
 	t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousSchema, previousV3 })
 	t.Cleanup(func() { commitmentdb.PublishParentRecords(nil) })
-	statecfg.ExperimentalCommitmentV3 = true
-	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
-	statecfg.EnableHistoricalCommitment()
-
-	m, testChain := rpcdaemontest.CreateTestExecModuleNoInsert(t)
+	m, testChain := newV3HistoryTestExecModule(t)
 	ctx := context.Background()
-	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
-		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
-	}))
 	require.NoError(t, m.InsertChain(testChain.Slice(0, 1)))
 	pin, err := openRollingPin(ctx, m.DB)
 	require.NoError(t, err)
