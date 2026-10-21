@@ -60,7 +60,7 @@ func TestDeltas(t *testing.T) {
 			ctx := newMockContext()
 			n := fork(nil)
 			n.plane = planeStorage
-			path := append([]byte{3}, bytes.Repeat([]byte{4}, 63)...)
+			path := commitmenttest.Path([]byte{3}, 4)
 			n.setLeaf(int(path[0]), packPath(path[1:], nil), []byte{9})
 
 			var acc deltaParts
@@ -121,7 +121,7 @@ func TestDeltas(t *testing.T) {
 			root.setStoredChild(0x0c, bytes.Repeat([]byte{0x11}, 32), []byte{0x06})
 			root.setStoredChild(0x02, bytes.Repeat([]byte{0x22}, 32), nil)
 
-			diverging := append([]byte{0x0c, 0x07}, bytes.Repeat([]byte{0x05}, 62)...)
+			diverging := commitmenttest.Path([]byte{0x0c, 0x07}, 0x05)
 			require.NoError(t, insert(root, diverging, []byte{0x01}))
 			parts, err := g.persistGraph(ctx, root, foldPlan{})
 			require.NoError(t, err)
@@ -175,9 +175,9 @@ func TestDeltas(t *testing.T) {
 		next  []commitmenttest.Op
 		wipe  bool
 	}{
-		{"E41/changed-previous", 1, [][]byte{append([]byte{2}, bytes.Repeat([]byte{3}, 63)...), append([]byte{9}, bytes.Repeat([]byte{4}, 63)...)}, []commitmenttest.Op{{Key: append([]byte{2}, bytes.Repeat([]byte{3}, 63)...), Storage: []byte{3}}}, false},
-		{"E37/E42/wipe-tombstones", 0x71, [][]byte{append([]byte{2, 3}, bytes.Repeat([]byte{4}, 62)...), append([]byte{2, 5}, bytes.Repeat([]byte{6}, 62)...)}, nil, true},
-		{"E42/replay-reload", 0x81, [][]byte{append([]byte{1}, bytes.Repeat([]byte{2}, 63)...), append([]byte{8}, bytes.Repeat([]byte{3}, 63)...)}, []commitmenttest.Op{{Key: append([]byte{1}, bytes.Repeat([]byte{2}, 63)...), Delete: true}, {Key: append([]byte{13}, bytes.Repeat([]byte{4}, 63)...), Storage: []byte{3}}}, false},
+		{"E41/changed-previous", 1, [][]byte{commitmenttest.Path([]byte{2}, 3), commitmenttest.Path([]byte{9}, 4)}, []commitmenttest.Op{{Key: commitmenttest.Path([]byte{2}, 3), Storage: []byte{3}}}, false},
+		{"E37/E42/wipe-tombstones", 0x71, [][]byte{commitmenttest.Path([]byte{2, 3}, 4), commitmenttest.Path([]byte{2, 5}, 6)}, nil, true},
+		{"E42/replay-reload", 0x81, [][]byte{commitmenttest.Path([]byte{1}, 2), commitmenttest.Path([]byte{8}, 3)}, []commitmenttest.Op{{Key: commitmenttest.Path([]byte{1}, 2), Delete: true}, {Key: commitmenttest.Path([]byte{13}, 4), Storage: []byte{3}}}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			addr := [32]byte{tc.addr}

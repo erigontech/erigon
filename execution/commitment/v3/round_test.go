@@ -41,7 +41,7 @@ import (
 )
 
 func TestPartition(t *testing.T) {
-	path := func(n byte) []byte { return bytes.Repeat([]byte{n}, 64) }
+	path := func(n byte) []byte { return commitmenttest.Path(nil, n) }
 	nonce := &commitment.Update{Flags: commitment.NonceUpdate, Nonce: 7}
 	deleted := &commitment.Update{Flags: commitment.DeleteUpdate}
 	for _, tc := range []struct {
@@ -108,7 +108,7 @@ func TestPartition(t *testing.T) {
 			require.Len(t, storage, 1)
 			require.True(t, storage[0].wipe)
 			ctx := newMockContext()
-			storageRound(t, ctx, storage[0].addrHash, []commitmenttest.Op{{Key: append([]byte{1}, bytes.Repeat([]byte{2}, 63)...), Storage: []byte{1}}})
+			storageRound(t, ctx, storage[0].addrHash, []commitmenttest.Op{{Key: commitmenttest.Path([]byte{1}, 2), Storage: []byte{1}}})
 			_, err := runStorageTask(ctx, storage[0])
 			require.NoError(t, err)
 			require.Contains(t, ctx.branches, string(StorageNodeKey(storage[0].addrHash, nil, nil)))
@@ -165,7 +165,7 @@ func TestPartition(t *testing.T) {
 }
 
 func TestStorageTransitions(t *testing.T) {
-	path := func(first, fill byte) []byte { return append([]byte{first}, bytes.Repeat([]byte{fill}, 63)...) }
+	path := func(first, fill byte) []byte { return commitmenttest.Path([]byte{first}, fill) }
 	put := func(p []byte, value byte) commitmenttest.Op { return commitmenttest.Op{Key: p, Storage: []byte{value}} }
 	del := func(p []byte) commitmenttest.Op { return commitmenttest.DeleteAt(p) }
 	for _, tc := range []struct {
@@ -285,12 +285,12 @@ func TestStorageWipe(t *testing.T) {
 		minRecords int
 		borrowed   bool
 	}{
-		{"E37/E39/masks", 0xa1, [][]byte{append([]byte{2, 3}, bytes.Repeat([]byte{4}, 62)...), append([]byte{2, 5}, bytes.Repeat([]byte{6}, 62)...)}, 2, false},
+		{"E37/E39/masks", 0xa1, [][]byte{commitmenttest.Path([]byte{2, 3}, 4), commitmenttest.Path([]byte{2, 5}, 6)}, 2, false},
 		{"E37/missing", 0xb2, nil, 0, false},
 		{"E33/E37/aliasing", 0xd4, [][]byte{
-			append([]byte{1, 1}, bytes.Repeat([]byte{4}, 62)...), append([]byte{1, 2}, bytes.Repeat([]byte{4}, 62)...),
-			append([]byte{1, 3}, bytes.Repeat([]byte{4}, 62)...), append([]byte{1, 4}, bytes.Repeat([]byte{4}, 62)...),
-			append([]byte{5, 7, 1}, bytes.Repeat([]byte{6}, 61)...), append([]byte{5, 7, 2}, bytes.Repeat([]byte{6}, 61)...),
+			commitmenttest.Path([]byte{1, 1}, 4), commitmenttest.Path([]byte{1, 2}, 4),
+			commitmenttest.Path([]byte{1, 3}, 4), commitmenttest.Path([]byte{1, 4}, 4),
+			commitmenttest.Path([]byte{5, 7, 1}, 6), commitmenttest.Path([]byte{5, 7, 2}, 6),
 		}, 3, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

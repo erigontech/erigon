@@ -128,3 +128,12 @@ func Paths(spec Shape) [][]byte {
 	}
 	return paths
 }
+
+func Path(head []byte, fill byte) []byte {
+	path := make([]byte, 64)
+	n := copy(path, head)
+	for i := n; i < len(path); i++ {
+		path[i] = fill
+	}
+	return path
+}
