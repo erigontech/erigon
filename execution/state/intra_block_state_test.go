@@ -38,6 +38,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -1626,4 +1627,25 @@ func TestResetForPoolCountsMapsLostToAnIntermediateReset(t *testing.T) {
 	// The final execution is tiny, but the grown map is still there to reuse.
 	ibs.AddSlotToAccessList(addr, accounts.InternKey(common.BigToHash(big2(0))))
 	require.False(t, ibs.resetForPool(), "a map lost to an intermediate reset must still count")
+}
+
+// SetStorage replaces an account's whole storage — a full state override used by
+// eth_simulateV1. On the noMaterialize (parallel) path it has no stateObject to
+// hold the override, so it must be rejected rather than silently dropped.
+func TestSetStorageRejectsNoMaterialize(t *testing.T) {
+	prev := dbg.AssertEnabled
+	dbg.AssertEnabled = true
+	t.Cleanup(func() { dbg.AssertEnabled = prev })
+
+	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(0, 0)
+	ibs.SetVersion(0)
+	defer ibs.Close()
+
+	addr := accounts.InternAddress([20]byte{0xaa})
+	key := accounts.InternKey([32]byte{0x01})
+	require.Panics(t, func() {
+		_ = ibs.SetStorage(addr, Storage{key: *uint256.NewInt(7)})
+	})
 }

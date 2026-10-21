@@ -1746,6 +1746,9 @@ func (ibs *IntraBlockState) setStateVersioned(addr accounts.Address, key account
 // SetStorage replaces the entire storage for the specified account with given
 // storage. This function should only be used for debugging.
 func (ibs *IntraBlockState) SetStorage(addr accounts.Address, storage Storage) error {
+	if dbg.AssertEnabled && ibs.noMaterialize {
+		panic("SetStorage: full state override is not kept on the noMaterialize path")
+	}
 	stateObject, err := ibs.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
