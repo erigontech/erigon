@@ -56,6 +56,7 @@ type fastOp struct {
 	jump       bool   // a taken jump also charges the JUMPDEST it lands on and steps over it
 	fork       bool   // the op is not in every fork, so the case checks that jt has it
 	index      string // for a DUP or SWAP that shares its case with its neighbours: the op's distance from DUP1 or SWAP1
+	minStack   string // the stack height such a shared case needs, in terms of index
 }
 
 func fastOps() []fastOp {
@@ -142,10 +143,10 @@ func coldOps() []fastOp {
 		op("GAS", "opGas"),
 	}
 	for n := 9; n <= 16; n++ {
-		ops = append(ops, fastOp{name: fmt.Sprintf("DUP%d", n), gas: "GasFastestStep", pop: n, push: n + 1, index: "int(op-DUP1)"})
+		ops = append(ops, fastOp{name: fmt.Sprintf("DUP%d", n), gas: "GasFastestStep", pop: n, push: n + 1, index: "int(op-DUP1)", minStack: "int(op-DUP1)+1"})
 	}
 	for n := 5; n <= 16; n++ {
-		ops = append(ops, fastOp{name: fmt.Sprintf("SWAP%d", n), execute: fmt.Sprintf("opSwap%d", n), gas: "GasFastestStep", pop: n + 1, push: n + 1, index: "int(op-SWAP1)"})
+		ops = append(ops, fastOp{name: fmt.Sprintf("SWAP%d", n), execute: fmt.Sprintf("opSwap%d", n), gas: "GasFastestStep", pop: n + 1, push: n + 1, index: "int(op-SWAP1)", minStack: "int(op-SWAP1)+2"})
 	}
 	return ops
 }
@@ -384,9 +385,8 @@ func fastSwitch(srcs map[string][]byte, ops []fastOp) string {
 			cond = append(cond, "jt["+o.name+"].numPush != 0")
 		}
 		switch {
-		case o.index != "":
-			n, _ := strconv.Atoi(strings.TrimLeft(o.name, "DUPSWAP"))
-			cond = append(cond, fmt.Sprintf("sLen >= %s+%d", o.index, o.pop-n+1))
+		case o.minStack != "":
+			cond = append(cond, "sLen >= "+o.minStack)
 		case o.pop > 0:
 			cond = append(cond, fmt.Sprintf("sLen >= %d", o.pop))
 		}
