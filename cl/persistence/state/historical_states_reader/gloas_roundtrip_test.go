@@ -222,6 +222,44 @@ func TestReadRequiredQueueSSZ_MissedForkSlotBlock(t *testing.T) {
 	require.Equal(t, common.Bytes48{0x02}, got.Get(1).Pubkey)
 }
 
+// TestReadRequiredQueueSSZ_MissingDumpAtForkSlotWithBlock verifies that a
+// missing dump at a fork slot with a block replays the full-list diff stored at
+// the fork slot itself.
+func TestReadRequiredQueueSSZ_MissingDumpAtForkSlotWithBlock(t *testing.T) {
+	forkSlot := uint64(clparams.SlotsPerDump)
+	slot := forkSlot + 1
+	equal := func(a, b *cltypes.Builder) bool { return *a == *b }
+	newList := func() *solid.ListSSZ[*cltypes.Builder] {
+		return solid.NewStaticListSSZ[*cltypes.Builder](1024, new(cltypes.Builder).EncodingSizeSSZ())
+	}
+
+	atFork := newList()
+	atFork.Append(&cltypes.Builder{Pubkey: common.Bytes48{0x01}, Balance: 100})
+	var forkDiff bytes.Buffer
+	require.NoError(t, base_encoding.NewSSZQueueEncoder(equal).WriteDiff(&forkDiff, atFork))
+
+	afterFork := newList()
+	afterFork.Append(&cltypes.Builder{Pubkey: common.Bytes48{0x01}, Balance: 100})
+	afterFork.Append(&cltypes.Builder{Pubkey: common.Bytes48{0x02}, Balance: 200})
+	encoder := base_encoding.NewSSZQueueEncoder(equal)
+	encoder.Initialize(atFork)
+	var nextDiff bytes.Buffer
+	require.NoError(t, encoder.WriteDiff(&nextDiff, afterFork))
+
+	getter := mockGetValFn(map[string]map[string][]byte{
+		kv.Builders: {
+			string(base_encoding.Encode64ToBytes4(forkSlot)): forkDiff.Bytes(),
+			string(base_encoding.Encode64ToBytes4(slot)):     nextDiff.Bytes(),
+		},
+	})
+
+	got := newList()
+	require.NoError(t, ReadRequiredQueueSSZ(getter, slot, forkSlot, kv.BuildersDump, kv.Builders, got))
+	require.Equal(t, 2, got.Len())
+	require.Equal(t, common.Bytes48{0x01}, got.Get(0).Pubkey)
+	require.Equal(t, common.Bytes48{0x02}, got.Get(1).Pubkey)
+}
+
 // TestReadRequiredQueueSSZ_WithData verifies that ReadRequiredQueueSSZ
 // succeeds and returns correct data when the dump table is populated.
 func TestReadRequiredQueueSSZ_WithData(t *testing.T) {
