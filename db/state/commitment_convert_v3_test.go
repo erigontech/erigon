@@ -13,7 +13,6 @@
 //
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
-
 package state_test
 
 import (
@@ -21,6 +20,7 @@ import (
 	"cmp"
 	"encoding/binary"
 	"fmt"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
@@ -368,4 +368,202 @@ func TestConvertCommitmentFiles_V3StorageRootSurvivesBranchCollapseAcrossSteps(t
 	cnt, err := state.FoldCommitmentV3(ctx, agg, math.MaxUint64)
 	require.NoError(t, err)
 	require.Zero(t, cnt.Orphans)
+}
+
+func commitmentFilesByEnd(t *testing.T, snapDomain string) []string {
+	t.Helper()
+	kvs, err := filepath.Glob(filepath.Join(snapDomain, "*-commitment.*.kv"))
+	require.NoError(t, err)
+	rng := func(p string) snaptype.FileInfo {
+		info, _, ok := snaptype.ParseFileName("", p)
+		require.Truef(t, ok, "bad commitment file name %s", p)
+		return info
+	}
+	slices.SortFunc(kvs, func(a, b string) int {
+		ai, bi := rng(a), rng(b)
+		return cmp.Or(cmp.Compare(ai.To, bi.To), cmp.Compare(ai.From, bi.From))
+	})
+	return kvs
+}
+
+func convertFixture(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, mode string) {
+	t.Helper()
+	switch mode {
+	case "native":
+		return
+	case "converted_keysV2":
+		runOrchestrator(t, db, state.ConvertOpts{TargetNibblesV2: true})
+		require.NoError(t, dir.RemoveAll(filepath.Join(agg.Dirs().Snap, "backup", "domains")))
+	}
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
+}
+
+func buildRandomWriteFiles(t *testing.T, mode string) (kv.TemporalRwDB, *state.Aggregator) {
+	t.Helper()
+	const stepSize, steps = 4, 8
+	useCommitmentSchema(t, mode == "native")
+	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
+	_, _, putAccount := domainWriter(t, domains, rwTx)
+	addrs, _ := generateInputData(t, length.Addr, 1, 64)
+	rnd := newRnd(7)
+	for txNum := range uint64(stepSize * steps) {
+		if txNum == 0 {
+			for _, a := range addrs {
+				putAccount(a, txNum)
+			}
+		}
+		putAccount(addrs[rnd.IntN(len(addrs))], txNum)
+		if txNum%stepSize == stepSize-1 {
+			_, err := domains.ComputeCommitment(t.Context(), rwTx, true, txNum/stepSize, txNum, "", nil)
+			require.NoError(t, err)
+		}
+	}
+	require.NoError(t, domains.Flush(t.Context(), rwTx))
+	require.NoError(t, rwTx.Commit())
+	require.NoError(t, agg.BuildFiles(db, stepSize*steps, unboundedFinalityCtx))
+	convertFixture(t, db, agg, mode)
+	return db, agg
+}
+
+func TestConvertCommitmentFiles_V3PrefixFoldMatchesStateRecord(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	fixtures := map[string]func(t *testing.T, mode string) (kv.TemporalRwDB, *state.Aggregator){
+		"random_writes":                buildRandomWriteFiles,
+		"storage_deleted":              wipedStorage(wipeCase{}),
+		"storage_touched_then_deleted": wipedStorage(wipeCase{touchFirst: true}),
+		"storage_recreated":            wipedStorage(wipeCase{recreateAt: 4, incarnation: 2, slots: recreatedSlots}),
+		"recreated_same_incarnation":   wipedStorage(wipeCase{recreateAt: 4, incarnation: 1, slots: recreatedSlots}),
+		"recreated_identical_later":    wipedStorage(wipeCase{recreateAt: 8, incarnation: 2, slots: oldSlots}),
+		"recreated_subtree_later":      wipedStorage(wipeCase{recreateAt: 8, incarnation: 2, slots: append(oldSlots[:3:3], []byte{0x5, 0x7})}),
+	}
+	for _, name := range slices.Sorted(maps.Keys(fixtures)) {
+		for _, mode := range []string{"converted", "converted_keysV2", "native"} {
+			t.Run(name+"/"+mode, func(t *testing.T) {
+				testPrefixFoldMatchesStateRecord(t, fixtures[name], mode)
+			})
+		}
+	}
+}
+
+func testPrefixFoldMatchesStateRecord(t *testing.T, build func(t *testing.T, mode string) (kv.TemporalRwDB, *state.Aggregator), mode string) {
+	db, agg := build(t, mode)
+	latest, err := state.FoldCommitmentV3(t.Context(), agg, math.MaxUint64)
+	require.NoError(t, err)
+	require.Zero(t, latest.Orphans)
+	kvs := commitmentFilesByEnd(t, agg.Dirs().SnapDomain)
+	require.Greater(t, len(kvs), 1)
+	type result struct {
+		name, folded, recorded string
+		err                    error
+	}
+	var results []result
+	for _, path := range slices.Backward(kvs) {
+		keys, vals := readKVFile(t, agg, path)
+		idx := slices.IndexFunc(keys, func(k []byte) bool { return bytes.Equal(k, commitment.KeyCommitmentV3State) })
+		require.GreaterOrEqual(t, idx, 0, "%s has no v3 state record", filepath.Base(path))
+		_, _, recorded, err := commitment.DecodeCommitmentV3State(vals[idx])
+		require.NoError(t, err)
+		c, foldErr := state.FoldCommitmentV3(t.Context(), agg, math.MaxUint64)
+		results = append(results, result{filepath.Base(path), fmt.Sprintf("%x", c.Root), fmt.Sprintf("%x", recorded), foldErr})
+
+		base := strings.TrimSuffix(path, ".kv")
+		for _, ext := range []string{".kv", ".bt", ".kvei", ".kvi"} {
+			if rmErr := dir.RemoveFile(base + ext); rmErr != nil {
+				require.ErrorIs(t, rmErr, os.ErrNotExist)
+			}
+		}
+		require.NoError(t, agg.OpenFolder(db))
+	}
+	var failed []string
+	for _, r := range slices.Backward(results) {
+		t.Logf("file=%s folded=%s record=%s err=%v", r.name, r.folded, r.recorded, r.err)
+		if r.err != nil || r.folded != r.recorded {
+			failed = append(failed, r.name)
+		}
+	}
+	require.Empty(t, failed, "files whose prefix fold does not match their own v3 state record")
+}
+
+var (
+	oldSlots       = [][]byte{{0xa, 0x1, 0x2}, {0xa, 0x1, 0x5}, {0xa, 0x3}, {0x4, 0x2}, {0x4, 0x9}}
+	recreatedSlots = [][]byte{{0x5, 0x1}, {0x5, 0x2}, {0xc}}
+)
+
+type wipeCase struct {
+	recreateAt, incarnation uint64
+	slots                   [][]byte
+	touchFirst              bool
+}
+
+func wipedStorage(c wipeCase) func(t *testing.T, mode string) (kv.TemporalRwDB, *state.Aggregator) {
+	return func(t *testing.T, mode string) (kv.TemporalRwDB, *state.Aggregator) {
+		return buildWipedStorageFiles(t, mode, c)
+	}
+}
+
+func buildWipedStorageFiles(t *testing.T, mode string, c wipeCase) (kv.TemporalRwDB, *state.Aggregator) {
+	t.Helper()
+	const stepSize, steps, wipeTx = 4, 8, 17
+	useCommitmentSchema(t, mode == "native")
+	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
+	put, del, putAccount := domainWriter(t, domains, rwTx)
+	addrs, _ := generateInputData(t, length.Addr, 1, 16)
+	next := uint64(1)
+	owner := addressWithHashPrefix(t, []byte{0x7}, &next)
+	slotsOf := func(prefixes ...[]byte) [][]byte {
+		var slots [][]byte
+		for _, p := range prefixes {
+			slots = append(slots, append(bytes.Clone(owner), storageSlotWithHashPrefix(t, p, &next)...))
+		}
+		return slots
+	}
+	old := slotsOf(oldSlots...)
+	recreated := slotsOf(c.slots...)
+	for i, p := range c.slots {
+		if j := slices.IndexFunc(oldSlots, func(o []byte) bool { return bytes.Equal(o, p) }); j >= 0 {
+			recreated[i] = old[j]
+		}
+	}
+	putOwner := func(incarnation, txNum uint64) {
+		acc := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(txNum + 1), CodeHash: accounts.EmptyCodeHash, Incarnation: incarnation}
+		put(kv.AccountsDomain, owner, accounts.SerialiseV3(&acc), txNum)
+	}
+	deleteTx := uint64(wipeTx)
+	if c.touchFirst {
+		deleteTx += stepSize
+	}
+	rnd := newRnd(3)
+	for txNum := range uint64(stepSize * steps) {
+		switch {
+		case txNum == 0:
+			putOwner(1, txNum)
+			for _, s := range old {
+				put(kv.StorageDomain, s, []byte{1}, txNum)
+			}
+		case c.touchFirst && txNum == wipeTx:
+			put(kv.StorageDomain, old[0], []byte{3}, txNum)
+		case txNum == deleteTx:
+			for _, s := range old {
+				del(kv.StorageDomain, s, txNum)
+			}
+			del(kv.AccountsDomain, owner, txNum)
+		case c.recreateAt != 0 && txNum == wipeTx+c.recreateAt:
+			putOwner(c.incarnation, txNum)
+			for _, s := range recreated {
+				put(kv.StorageDomain, s, []byte{1}, txNum)
+			}
+		}
+		putAccount(addrs[rnd.IntN(len(addrs))], txNum)
+		if txNum%stepSize == stepSize-1 {
+			_, err := domains.ComputeCommitment(t.Context(), rwTx, true, txNum/stepSize, txNum, "", nil)
+			require.NoError(t, err)
+		}
+	}
+	require.NoError(t, domains.Flush(t.Context(), rwTx))
+	require.NoError(t, rwTx.Commit())
+	require.NoError(t, agg.BuildFiles(db, stepSize*steps, unboundedFinalityCtx))
+	convertFixture(t, db, agg, mode)
+	return db, agg
 }
