@@ -1202,7 +1202,7 @@ func (c *DumpBlobsSnapshots) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	starts, err := blobDumpPlan(beaconConfig, c.From, min(to, frozenBlocks), frozen, c.Overwrite)
+	starts, err := blobDumpPlan(beaconConfig, c.From, to, frozenBlocks, frozen, c.Overwrite)
 	if err != nil {
 		return err
 	}
@@ -1224,7 +1224,7 @@ func (c *DumpBlobsSnapshots) Run(ctx context.Context) error {
 	return nil
 }
 
-func blobDumpPlan(beaconConfig *clparams.BeaconChainConfig, from, to uint64, frozen []snaptype.FileInfo, overwrite bool) ([]uint64, error) {
+func blobDumpPlan(beaconConfig *clparams.BeaconChainConfig, from, to, frozenBlocks uint64, frozen []snaptype.FileInfo, overwrite bool) ([]uint64, error) {
 	denebStart := ((beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 	if from == 0 {
 		from = denebStart
@@ -1235,6 +1235,7 @@ func blobDumpPlan(beaconConfig *clparams.BeaconChainConfig, from, to uint64, fro
 	if from < denebStart {
 		return nil, fmt.Errorf("--from %d is below the Deneb fork boundary %d", from, denebStart)
 	}
+	to = min(to, frozenBlocks)
 	current := snaptype.BlobSidecars.Versions().Current
 	var starts []uint64
 	for start := from; start+snaptype.CaplinMergeLimit <= to; start += snaptype.CaplinMergeLimit {
