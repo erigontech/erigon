@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // benchSeedDb commits one account so the domain tables are non-empty for
@@ -205,5 +206,45 @@ func BenchmarkValidationCache(b *testing.B) {
 				})
 			}
 		})
+	}
+}
+
+// BenchmarkStateGetterReadOnceCode reads a max-size contract under a new codeHash
+// every iteration, so no read can hit the code cache.
+func BenchmarkStateGetterReadOnceCode(b *testing.B) {
+	ctx := b.Context()
+	db := newTestDb(b, 16)
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(b, err)
+	defer roTx.Rollback()
+
+	code := make([]byte, 24*1024)
+	addrs := make([][]byte, 1<<14)
+	tx := borrowedCodeTx{TemporalTx: roTx, code: map[string][]byte{}}
+	for i := range addrs {
+		addrs[i] = make([]byte, 20)
+		binary.BigEndian.PutUint64(addrs[i], uint64(i))
+		tx.code[string(addrs[i])] = code
+	}
+	sc := newSmallStateCache()
+	b.Cleanup(sc.Close)
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(b, err)
+	defer sd.Close()
+	sd.BindStateCache(sc)
+	getter := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})
+
+	var codeHash [32]byte
+	b.SetBytes(24 * 1024)
+	for i := uint64(1); b.Loop(); i++ {
+		addr := addrs[i%uint64(len(addrs))]
+		binary.BigEndian.PutUint64(codeHash[:], i)
+		acc := accounts.SerialiseV3(&accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(codeHash)})
+		if err := sd.DomainPut(kv.AccountsDomain, tx, addr, acc, 5, nil); err != nil {
+			b.Fatal(err)
+		}
+		if _, _, err := getter.GetCode(addr, 5); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

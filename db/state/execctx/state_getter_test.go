@@ -144,7 +144,16 @@ func (tx codeBufTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOpt
 	return append(opts.Buf()[:0], tx.code[string(key)]...), 0, nil
 }
 
+// Covers both a first read, which is not admitted, and a repeated read, which is.
 func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
+	for _, seen := range []bool{false, true} {
+		t.Run(map[bool]string{false: "first read", true: "seen before"}[seen], func(t *testing.T) {
+			testStateGetterCodeBufDoesNotAliasEarlierResult(t, seen)
+		})
+	}
+}
+
+func testStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T, seen bool) {
 	ctx := t.Context()
 	db := newTestDb(t, 16)
 	roTx, err := db.BeginTemporalRo(ctx)
@@ -176,6 +185,9 @@ func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
 			CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(codes[i])),
 		})
 		require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, addr, acc, 5, nil))
+		if seen {
+			sc.View(nil).FillCodeSize(crypto.Keccak256(codes[i]), len(codes[i]), 5)
+		}
 	}
 
 	getter := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})
@@ -186,6 +198,8 @@ func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.Equal(t, codes[i], got[i])
+		_, cached := sc.View(nil).GetCodeByHash(crypto.Keccak256(codes[i]))
+		require.Equal(t, seen, cached)
 	}
 	for i := range codes {
 		require.Equal(t, codes[i], got[i], "read %d must not alias the buffer a later read decodes into", i)
@@ -513,4 +527,66 @@ func TestInitStateCacheVersionThenCommitServesTheNewValue(t *testing.T) {
 			require.Equal(t, encAccount(2), v)
 		})
 	}
+}
+
+// borrowedCodeTx returns its stored code without a copy, the way an MDBX value or an
+// uncompressed snapshot word points into memory the reader does not own.
+type borrowedCodeTx struct {
+	kv.TemporalTx
+	code map[string][]byte
+}
+
+func (tx borrowedCodeTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if domain != kv.CodeDomain {
+		return tx.TemporalTx.GetLatest(domain, key, opts)
+	}
+	return tx.code[string(key)], 0, nil
+}
+
+// Code read once is not copied into the cache; the second read of the same codeHash
+// admits a copy that does not alias the source memory.
+func TestStateGetterCodeAdmittedOnSecondRead(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	code := bytes.Repeat([]byte{0xa7}, 24*1024)
+	want := bytes.Clone(code)
+	codeHash := crypto.Keccak256(code)
+	addrs := [][]byte{make([]byte, 20), make([]byte, 20)}
+	addrs[0][0], addrs[1][0] = 1, 2
+	tx := borrowedCodeTx{TemporalTx: roTx, code: map[string][]byte{string(addrs[0]): code, string(addrs[1]): code}}
+
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.BindStateCache(sc)
+	acc := accounts.SerialiseV3(&accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code))})
+	for _, addr := range addrs {
+		require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, addr, acc, 5, nil))
+	}
+	getter := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})
+
+	got, ok, err := getter.GetCode(addrs[0], 5)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, want, got)
+	_, cached := sc.View(nil).GetCodeByHash(codeHash)
+	require.False(t, cached, "code read once must not be copied into the cache")
+	size, ok := sc.View(nil).GetCodeSizeByHash(codeHash)
+	require.True(t, ok)
+	require.Equal(t, len(code), size)
+
+	got, ok, err = getter.GetCode(addrs[1], 5)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, want, got)
+	clear(code)
+	cachedCode, cached := sc.View(nil).GetCodeByHash(codeHash)
+	require.True(t, cached, "the second read of a codeHash must fill the cache")
+	require.Equal(t, want, cachedCode, "the cache must own its copy")
 }

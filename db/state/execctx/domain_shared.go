@@ -1475,7 +1475,12 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		getOpts = getOpts.WithBranchCache()
 	}
 	willFill := !sd.hasLocalCacheUnwind() && maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
-	fillsCode := willFill && len(opts.codeHash) == len(common.Hash{})
+	knowsCodeHash := willFill && len(opts.codeHash) == len(common.Hash{})
+	fillsCode := false
+	if knowsCodeHash {
+		// The size layer is the doorkeeper: code read only once is never copied into the cache.
+		_, fillsCode = view.GetCodeSizeByHash(opts.codeHash)
+	}
 	if fillsCode {
 		getOpts = getOpts.WithBuf(opts.buf)
 	}
@@ -1494,9 +1499,14 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 			// amortized by the backing read. Stale views do not request a retry.
 			fillView = fillView.WithFrontier(sd.cacheFrontierFor(tx))
 		}
-		if fillsCode {
+		switch {
+		case fillsCode:
 			v = fillView.FillCode(k, v, opts.codeHash, readTxNum)
-		} else {
+		case knowsCodeHash:
+			if len(v) > 0 {
+				fillView.FillCodeSize(opts.codeHash, len(v), readTxNum)
+			}
+		default:
 			fillView.Fill(domain, k, v, readTxNum)
 		}
 	}
