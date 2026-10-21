@@ -18,19 +18,30 @@ package vm
 
 import (
 	"bytes"
-	"crypto/sha256"
+	"hash/maphash"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/cache"
 )
 
-var precompileResults = cache.NewHashByteLRU[[]byte](8*datasize.MB, func(output []byte) int64 { return int64(len(output)) + 24 })
+var (
+	precompileSeed    = maphash.MakeSeed()
+	precompileResults = cache.NewByteLRU(8*datasize.MB, func(_ uint64, r precompileResult) int64 {
+		return int64(len(r.input) + len(r.output) + 64)
+	})
+)
+
+// precompileResult keeps the domain and input, so a hit is an exact match, not a hash match.
+type precompileResult struct {
+	domain        [21]byte
+	input, output []byte
+}
 
 type cachedPrecompile struct {
 	PrecompiledContract
-	domain [21]byte
-	minGas uint64 // cheaper calls run directly: building the key costs more than the call
+	domain     [21]byte
+	domainHash uint64
 }
 
 func cachePrecompile(p PrecompiledContract, tier forkTier, address common.Address) PrecompiledContract {
@@ -42,9 +53,7 @@ func cachePrecompile(p PrecompiledContract, tier forkTier, address common.Addres
 		c := &cachedPrecompile{PrecompiledContract: p}
 		c.domain[0] = byte(tier)
 		copy(c.domain[1:], address[:])
-		if _, ok := p.(*blake2F); ok {
-			c.minGas = 1000 // gas = rounds
-		}
+		c.domainHash = maphash.Bytes(precompileSeed, c.domain[:])
 		return c
 	default:
 		return p
@@ -52,24 +61,20 @@ func cachePrecompile(p PrecompiledContract, tier forkTier, address common.Addres
 }
 
 func (c *cachedPrecompile) Run(input []byte) ([]byte, error) {
-	if gas := c.RequiredGas(input); gas < c.minGas || gas < uint64(len(input)) {
+	if c.RequiredGas(input) < uint64(len(input)) {
 		return c.PrecompiledContract.Run(input)
 	}
 	if len(input) > 64*1024 {
 		output, err := c.PrecompiledContract.Run(input)
 		return bytes.Clone(output), err
 	}
-	var keyData [53]byte
-	copy(keyData[:21], c.domain[:])
-	inputHash := sha256.Sum256(input)
-	copy(keyData[21:], inputHash[:])
-	key := common.Hash(sha256.Sum256(keyData[:]))
-	if output, ok := precompileResults.Get(key); ok {
-		return bytes.Clone(output), nil
+	key := maphash.Bytes(precompileSeed, input) ^ c.domainHash
+	if r, ok := precompileResults.Get(key); ok && r.domain == c.domain && bytes.Equal(r.input, input) {
+		return bytes.Clone(r.output), nil
 	}
 	output, err := c.PrecompiledContract.Run(input)
 	if err == nil && len(output) <= 1024 {
-		precompileResults.Add(key, bytes.Clone(output))
+		precompileResults.Add(key, precompileResult{domain: c.domain, input: bytes.Clone(input), output: bytes.Clone(output)})
 		return bytes.Clone(output), nil
 	}
 	return output, err

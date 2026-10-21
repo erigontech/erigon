@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/maphash"
 	"maps"
 	"math/big"
 	"os"
@@ -563,14 +564,10 @@ func TestCachedPrecompileDomainAndErrors(t *testing.T) {
 		t.Fatal("wrapped custom contract")
 	}
 	p = &countingPrecompile{output: []byte{7}}
-	c = &cachedPrecompile{PrecompiledContract: p, domain: [21]byte{207}, minGas: 101}
-	for range 2 {
-		if _, err := c.Run(input); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if p.calls != 2 {
-		t.Fatal("cached a call cheaper than the lookup")
+	c = &cachedPrecompile{PrecompiledContract: p, domain: [21]byte{207}}
+	precompileResults.Add(maphash.Bytes(precompileSeed, input)^c.domainHash, precompileResult{domain: c.domain, input: []byte("other"), output: []byte{9}})
+	if out, err := c.Run(input); err != nil || !bytes.Equal(out, []byte{7}) || p.calls != 1 {
+		t.Fatalf("hash collision returned another input's result: %x", out)
 	}
 	p = &countingPrecompile{output: []byte{7}}
 	c = &cachedPrecompile{PrecompiledContract: p, domain: [21]byte{208}}
