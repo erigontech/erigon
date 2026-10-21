@@ -1318,26 +1318,30 @@ func stStaticCall(_ uint64, scope *CallContext) string {
 }
 
 func (evm *EVM) output(mem *Memory, offset, size uint64) []byte {
-	if buf := evm.outputBuffer(size); buf != nil && size != 0 {
+	if buf := evm.outputBuffer(evm.depth, size); buf != nil && size != 0 {
 		*buf = append((*buf)[:0], mem.GetPtr(offset, size)...)
 		return slices.Clip(*buf)
 	}
 	return mem.GetCopy(offset, size)
 }
 
-// outputBuffer returns where the current frame's output goes, or nil for a fresh copy.
-// Tracers keep nested outputs, and a buffer that outgrows the cap is not kept.
-func (evm *EVM) outputBuffer(size uint64) *[]byte {
-	if evm.depth == 1 {
+// outputBuffer returns where the output of a frame at depth goes, or nil for a fresh copy.
+// Tracers that see outputs may keep them, and a buffer that outgrows the cap is not kept.
+// maxKeptCallOutput bounds each per-depth output buffer; an EVM keeps one per depth, up to 16.
+const maxKeptCallOutput = uint64(256 * datasize.KB)
+
+func (evm *EVM) outputBuffer(depth int, size uint64) *[]byte {
+	if depth == 1 {
 		return evm.txOutput
 	}
-	if evm.depth >= len(evm.outputs) || size > uint64(64*datasize.KB) || evm.config.Tracer != nil {
+	t := evm.config.Tracer
+	if depth >= len(evm.outputs) || size > maxKeptCallOutput || t.HasExitHook() || t.HasOpcodeHook() {
 		return nil
 	}
 	if evm.outputs == nil {
 		evm.outputs = new([16][]byte)
 	}
-	return &evm.outputs[evm.depth]
+	return &evm.outputs[depth]
 }
 
 func opReturn(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
