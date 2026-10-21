@@ -302,8 +302,7 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 	lastProgressTime := time.Now()
 	lastProgressSlot := currentSlot.Load()
 
-	// Run the log loop until the highest processed slot reaches the chain tip slot
-	for downloader.GetHighestProcessedSlot() < chainTipSlot {
+	for !downloader.CaughtUpTo(chainTipSlot) {
 		downloader.RequestMore(ctx)
 
 		// Detect stale progress: if no new slots processed for staleTimeout, exit.
