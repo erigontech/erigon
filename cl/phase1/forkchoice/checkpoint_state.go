@@ -122,9 +122,7 @@ func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, publicKeysRegi
 func (c *checkpointState) getAttestingIndicies(attestation *solid.Attestation, aggregationBits []byte) ([]uint64, error) {
 	slot := attestation.Data.Slot
 	epoch := c.epochAtSlot(slot)
-	lenIndicies := uint64(len(c.shuffledSet))
-	committeesPerSlot := c.committeeCount(lenIndicies)
-	count := committeesPerSlot * c.beaconConfig.SlotsPerEpoch
+	committeesPerSlot := c.committeeCount(uint64(len(c.shuffledSet)))
 	committeeIndices := []uint64{attestation.Data.CommitteeIndex}
 	if c.beaconConfig.GetCurrentStateVersion(epoch).AfterOrEqual(clparams.ElectraVersion) {
 		electraCommitteeIndices := attestation.CommitteeBits.GetOnIndices()
@@ -144,10 +142,7 @@ func (c *checkpointState) getAttestingIndicies(attestation *solid.Attestation, a
 		if committeeIndex >= committeesPerSlot {
 			return nil, fmt.Errorf("getAttestingIndicies: committee index %d is out of bounds for %d committees", committeeIndex, committeesPerSlot)
 		}
-		index := (slot%c.beaconConfig.SlotsPerEpoch)*committeesPerSlot + committeeIndex
-		start := (lenIndicies * index) / count
-		end := (lenIndicies * (index + 1)) / count
-		committee := c.shuffledSet[start:end]
+		committee, _ := c.beaconCommittee(slot, committeeIndex)
 		if committeeOffset+len(committee) > aggregationBitsLen {
 			return nil, fmt.Errorf("getAttestingIndicies: aggregation bits are too short, committeeOffset: %d, aggrBitsLen: %d, committeeSize: %d",
 				committeeOffset, aggregationBitsLen, len(committee))
@@ -161,6 +156,19 @@ func (c *checkpointState) getAttestingIndicies(attestation *solid.Attestation, a
 		committeeOffset += len(committee)
 	}
 	return attestingIndices, nil
+}
+
+func (c *checkpointState) beaconCommittee(slot, committeeIndex uint64) ([]uint64, uint64) {
+	validatorCount := uint64(len(c.shuffledSet))
+	committeesPerSlot := c.committeeCount(validatorCount)
+	if committeeIndex >= committeesPerSlot {
+		return nil, committeesPerSlot
+	}
+	committeeCount := committeesPerSlot * c.beaconConfig.SlotsPerEpoch
+	index := (slot%c.beaconConfig.SlotsPerEpoch)*committeesPerSlot + committeeIndex
+	start := (validatorCount * index) / committeeCount
+	end := (validatorCount * (index + 1)) / committeeCount
+	return c.shuffledSet[start:end], committeesPerSlot
 }
 
 func (c *checkpointState) getActiveIndicies() (activeIndicies []uint64) {
