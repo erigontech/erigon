@@ -1,7 +1,9 @@
 package services
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -9,8 +11,10 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 	"github.com/stretchr/testify/require"
+	blst "github.com/supranational/blst/bindings/go"
 	"google.golang.org/grpc"
 )
 
@@ -222,6 +226,214 @@ func TestBatchSignatureVerifierSharesFallbackConcurrencyBudget(t *testing.T) {
 
 		release()
 		group.Wait()
+	})
+}
+
+func TestVerifyPayloadAttestationBatchMatchesSinglePath(t *testing.T) {
+	saveSignatureGlobals(t)
+	const count = batchSignatureVerificationThreshold
+	const nonSubgroupSignatureHex = "85aa7e829cefd96a733fd7ed9cb646a95ebdafebe514ce732fe79ba85b52b396589bd2d567630fc39fd90ec5e6c134e412ec50905c7a53491aece65571eec1dea528e1e0091049cce4c4720f656a55428bdf665caf30662ec15e87269afe0061"
+	nonSubgroupSignature, err := hex.DecodeString(nonSubgroupSignatureHex)
+	require.NoError(t, err)
+	nonSubgroupPoint := new(blst.P2Affine).Uncompress(nonSubgroupSignature)
+	require.NotNil(t, nonSubgroupPoint)
+	require.False(t, nonSubgroupPoint.SigValidate(false))
+	realVerifyMultipleSignatures := blsVerifyMultipleSignatures
+	firstBatchSize := make(chan int, 1)
+	var recordFirstBatch sync.Once
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		recordFirstBatch.Do(func() { firstBatchSize <- len(signatures) })
+		return realVerifyMultipleSignatures(signatures, signRoots, pks)
+	}
+
+	root := make([]byte, 32)
+	otherRoot := make([]byte, 32)
+	root[0], otherRoot[0] = 1, 2
+	entries := make([]*AggregateVerificationData, 0, count)
+	expectedValid := make([]bool, 0, count)
+	keys := make([]*bls.PrivateKey, 0, count+1)
+	for range count + 1 {
+		key, err := bls.GenerateKey()
+		require.NoError(t, err)
+		keys = append(keys, key)
+	}
+	for i := range count {
+		publicKey := bls.CompressPublicKey(keys[i].PublicKey())
+		signature := keys[i].Sign(root).Bytes()
+		signingRoot := root
+		switch i {
+		case count - 6:
+			signature = make([]byte, 96)
+			signature[0] = 0xc0
+		case count - 5:
+			publicKey = bls.CompressPublicKey(keys[count].PublicKey())
+		case count - 4:
+			signingRoot = otherRoot
+		case count - 3:
+			signature = nonSubgroupSignature
+		case count - 2:
+			signature = bytes.Repeat([]byte{0xff}, 96)
+			signature[0] = 0x9f
+		case count - 1:
+			signature = make([]byte, 96)
+			signature[0] = 0xc0
+			signature[len(signature)-1] = 1
+		}
+		valid, _ := bls.VerifyAggregate(signature, signingRoot, [][]byte{publicKey})
+		expectedValid = append(expectedValid, valid)
+		entries = append(entries, &AggregateVerificationData{
+			Signatures: [][]byte{signature},
+			SignRoots:  [][]byte{signingRoot},
+			Pks:        [][]byte{publicKey},
+			F:          func() {},
+		})
+	}
+
+	verifier := NewBatchSignatureVerifier(t.Context(), nil)
+	results := make([]chan error, count)
+	for i := range entries {
+		results[i] = make(chan error, 1)
+		go func() {
+			results[i] <- verifier.VerifyPayloadAttestation(t.Context(), entries[i])
+		}()
+	}
+	waitForQueuedVerification(t, verifier.payloadAttestationVerify, count)
+	verifier.Start()
+
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	for i := range entries {
+		var err error
+		select {
+		case err = <-results[i]:
+		case <-deadline.C:
+			t.Fatalf("timed out waiting for payload attestation result %d", i)
+		}
+		if expectedValid[i] {
+			require.NoError(t, err, "entry %d", i)
+			continue
+		}
+		require.Error(t, err, "entry %d", i)
+		require.NotErrorIs(t, err, ErrIgnore, "entry %d", i)
+	}
+	select {
+	case size := <-firstBatchSize:
+		require.Equal(t, count, size)
+	case <-deadline.C:
+		t.Fatal("timed out waiting for first payload attestation batch size")
+	}
+}
+
+func TestBatchSignatureVerifierUsesPayloadAttestationFlushInterval(t *testing.T) {
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		return true, nil
+	}
+	require.Equal(t, 20*time.Millisecond, payloadAttestationBatchCheckInterval)
+
+	synctest.Test(t, func(t *testing.T) {
+		type verificationResult struct {
+			queue   string
+			elapsed time.Duration
+			err     error
+		}
+
+		ctx, cancel := context.WithCancel(t.Context())
+		defer func() {
+			cancel()
+			synctest.Wait()
+		}()
+		verifier := NewBatchSignatureVerifier(ctx, nil)
+		verifier.Start()
+		startedAt := time.Now()
+		results := make(chan verificationResult, 7)
+		newData := func(callback func()) *AggregateVerificationData {
+			return &AggregateVerificationData{
+				Signatures: [][]byte{{1}},
+				SignRoots:  [][]byte{{1}},
+				Pks:        [][]byte{{1}},
+				F:          callback,
+			}
+		}
+		verify := func(queue string, verify func(context.Context, *AggregateVerificationData) error) {
+			go func() {
+				err := verify(ctx, newData(func() {}))
+				results <- verificationResult{queue: queue, elapsed: time.Since(startedAt), err: err}
+			}()
+		}
+		verifyAsync := func(queue string, verify func(*AggregateVerificationData)) {
+			verify(newData(func() {
+				results <- verificationResult{queue: queue, elapsed: time.Since(startedAt)}
+			}))
+		}
+
+		verify("attestation", verifier.VerifyAttestation)
+		verify("aggregate proof", verifier.VerifyAggregateProof)
+		verify("bls to execution change", verifier.VerifyBlsToExecutionChange)
+		verify("voluntary exit", verifier.VerifyVoluntaryExit)
+		verify("payload attestation", verifier.VerifyPayloadAttestation)
+		verifyAsync("sync contribution", verifier.AsyncVerifySyncContribution)
+		verifyAsync("sync committee message", verifier.AsyncVerifySyncCommitteeMessage)
+		synctest.Wait()
+
+		time.Sleep(payloadAttestationBatchCheckInterval)
+		synctest.Wait()
+		require.Len(t, results, 1)
+		payloadResult := <-results
+		require.Equal(t, "payload attestation", payloadResult.queue)
+		require.NoError(t, payloadResult.err)
+		require.Equal(t, payloadAttestationBatchCheckInterval, payloadResult.elapsed)
+
+		time.Sleep(batchCheckInterval - payloadAttestationBatchCheckInterval)
+		synctest.Wait()
+		require.Len(t, results, 6)
+		elapsed := make(map[string]time.Duration, 7)
+		for range 6 {
+			result := <-results
+			require.NoError(t, result.err, result.queue)
+			require.NotContains(t, elapsed, result.queue)
+			elapsed[result.queue] = result.elapsed
+		}
+		for _, queue := range []string{
+			"attestation",
+			"aggregate proof",
+			"bls to execution change",
+			"voluntary exit",
+			"sync contribution",
+			"sync committee message",
+		} {
+			require.Equal(t, batchCheckInterval, elapsed[queue], queue)
+		}
+
+		fullBatchResults := make(chan verificationResult, batchSignatureVerificationThreshold)
+		fullBatchStartedAt := time.Now()
+		for range batchSignatureVerificationThreshold {
+			go func() {
+				err := verifier.VerifyPayloadAttestation(ctx, newData(func() {}))
+				fullBatchResults <- verificationResult{elapsed: time.Since(fullBatchStartedAt), err: err}
+			}()
+		}
+		synctest.Wait()
+		require.Len(t, fullBatchResults, batchSignatureVerificationThreshold)
+		for range batchSignatureVerificationThreshold {
+			result := <-fullBatchResults
+			require.NoError(t, result.err)
+			require.Zero(t, result.elapsed)
+		}
+
+		partialBatchStartedAt := time.Now()
+		partialBatchResult := make(chan verificationResult, 1)
+		go func() {
+			err := verifier.VerifyPayloadAttestation(ctx, newData(func() {}))
+			partialBatchResult <- verificationResult{elapsed: time.Since(partialBatchStartedAt), err: err}
+		}()
+		synctest.Wait()
+		time.Sleep(payloadAttestationBatchCheckInterval)
+		synctest.Wait()
+		require.Len(t, partialBatchResult, 1)
+		result := <-partialBatchResult
+		require.NoError(t, result.err)
+		require.Equal(t, payloadAttestationBatchCheckInterval, result.elapsed)
 	})
 }
 

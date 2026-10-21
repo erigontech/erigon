@@ -17,10 +17,11 @@ import (
 )
 
 const (
-	batchSignatureVerificationThreshold = 50
-	reservedSize                        = 512
-	batchCheckInterval                  = 50 * time.Millisecond
-	peerBanQueueSize                    = 256
+	batchSignatureVerificationThreshold  = 50
+	reservedSize                         = 512
+	batchCheckInterval                   = 50 * time.Millisecond
+	payloadAttestationBatchCheckInterval = 20 * time.Millisecond
+	peerBanQueueSize                     = 256
 )
 
 var blsVerifyMultipleSignatures = bls.VerifyMultipleSignatures
@@ -33,6 +34,7 @@ type BatchSignatureVerifier struct {
 	syncContributionVerify     chan *AggregateVerificationData
 	syncCommitteeMessage       chan *AggregateVerificationData
 	voluntaryExitVerify        chan *AggregateVerificationData
+	payloadAttestationVerify   chan *AggregateVerificationData
 	peerBanQueue               chan *sentinelproto.Peer
 	fallbackVerificationBudget int64
 	fallbackVerificationLimit  *semaphore.Weighted
@@ -62,6 +64,7 @@ func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinelproto.Senti
 		syncContributionVerify:     make(chan *AggregateVerificationData, 1024),
 		syncCommitteeMessage:       make(chan *AggregateVerificationData, 1024),
 		voluntaryExitVerify:        make(chan *AggregateVerificationData, 1024),
+		payloadAttestationVerify:   make(chan *AggregateVerificationData, 1024),
 		fallbackVerificationBudget: fallbackVerificationBudget,
 		fallbackVerificationLimit:  semaphore.NewWeighted(fallbackVerificationBudget),
 	}
@@ -93,6 +96,10 @@ func (b *BatchSignatureVerifier) AsyncVerifySyncCommitteeMessage(data *Aggregate
 
 func (b *BatchSignatureVerifier) VerifyVoluntaryExit(ctx context.Context, data *AggregateVerificationData) error {
 	return b.verifyAndWait(ctx, b.voluntaryExitVerify, data)
+}
+
+func (b *BatchSignatureVerifier) VerifyPayloadAttestation(ctx context.Context, data *AggregateVerificationData) error {
+	return b.verifyAndWait(ctx, b.payloadAttestationVerify, data)
 }
 
 // verifyAndWait blocks until the entry's batch is verified so libp2p forwards gossip only after signature checks.
@@ -131,12 +138,13 @@ func (b *BatchSignatureVerifier) Start() {
 	if b.peerBanQueue != nil {
 		go b.runPeerBans()
 	}
-	b.startVerifier(b.attVerifyAndExecute)
-	b.startVerifier(b.aggregateProofVerify)
-	b.startVerifier(b.blsToExecutionChangeVerify)
-	b.startVerifier(b.syncContributionVerify)
-	b.startVerifier(b.syncCommitteeMessage)
-	b.startVerifier(b.voluntaryExitVerify)
+	b.startVerifier(b.attVerifyAndExecute, batchCheckInterval)
+	b.startVerifier(b.aggregateProofVerify, batchCheckInterval)
+	b.startVerifier(b.blsToExecutionChangeVerify, batchCheckInterval)
+	b.startVerifier(b.syncContributionVerify, batchCheckInterval)
+	b.startVerifier(b.syncCommitteeMessage, batchCheckInterval)
+	b.startVerifier(b.voluntaryExitVerify, batchCheckInterval)
+	b.startVerifier(b.payloadAttestationVerify, payloadAttestationBatchCheckInterval)
 }
 
 func (b *BatchSignatureVerifier) runPeerBans() {
@@ -152,16 +160,16 @@ func (b *BatchSignatureVerifier) runPeerBans() {
 	}
 }
 
-func (b *BatchSignatureVerifier) startVerifier(incoming chan *AggregateVerificationData) {
+func (b *BatchSignatureVerifier) startVerifier(incoming chan *AggregateVerificationData, interval time.Duration) {
 	callbacks := make(chan func(), cap(incoming))
 	go b.runCallbacks(callbacks)
-	go b.start(incoming, callbacks)
+	go b.start(incoming, callbacks, interval)
 }
 
 // When receiving AggregateVerificationData, we simply collect all the signature verification data
 // and verify them together - running all the final functions afterwards
-func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData, callbacks chan<- func()) {
-	ticker := time.NewTicker(batchCheckInterval)
+func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData, callbacks chan<- func(), interval time.Duration) {
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	aggregateVerificationData := make([]*AggregateVerificationData, 0, reservedSize)
 	for {
@@ -174,7 +182,7 @@ func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData,
 				if !b.processBatch(aggregateVerificationData, callbacks) {
 					return
 				}
-				ticker.Reset(batchCheckInterval)
+				ticker.Reset(interval)
 				// clear the slice
 				aggregateVerificationData = make([]*AggregateVerificationData, 0, reservedSize)
 			}

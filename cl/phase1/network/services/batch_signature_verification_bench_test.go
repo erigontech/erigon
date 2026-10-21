@@ -18,6 +18,7 @@ package services
 
 import (
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/utils/bls"
@@ -71,11 +72,24 @@ func BenchmarkBatchSignatureVerifierFallback(b *testing.B) {
 				b.Fatalf("got %d valid callbacks, want %d", len(callbacks), len(entries)-benchmark.invalidCount)
 			}
 
-			b.ResetTimer()
-			for range b.N {
-				_, _ = verifier.processSignatureVerification(entries)
-			}
-			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*len(entries)), "ns/msg")
+			b.Run("batch", func(b *testing.B) {
+				for range b.N {
+					_, _ = verifier.processSignatureVerification(entries)
+				}
+				b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*len(entries)), "ns/msg")
+			})
+			b.Run("individual", func(b *testing.B) {
+				for range b.N {
+					var group sync.WaitGroup
+					for _, entry := range entries {
+						group.Go(func() {
+							_, _ = bls.VerifyAggregate(entry.Signatures[0], entry.SignRoots[0], [][]byte{entry.Pks[0]})
+						})
+					}
+					group.Wait()
+				}
+				b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*len(entries)), "ns/msg")
+			})
 		})
 	}
 }
