@@ -188,11 +188,38 @@ func TestReadRequiredQueueSSZ_MissingDump(t *testing.T) {
 	require.ErrorIs(t, err, ErrMissingGloasData)
 	require.ErrorContains(t, err, kv.PayloadExpectedWithdrawalsDump)
 
-	boundarySlot := uint64(clparams.SlotsPerDump)
-	boundaryBuilders := solid.NewStaticListSSZ[*cltypes.Builder](1024, new(cltypes.Builder).EncodingSizeSSZ())
-	err = ReadRequiredQueueSSZ(getter, boundarySlot, boundarySlot, kv.BuildersDump, kv.Builders, boundaryBuilders)
+	dumpSlot := uint64(clparams.SlotsPerDump)
+	forkJustBeforeDump := dumpSlot - 32
+	afterForkBuilders := solid.NewStaticListSSZ[*cltypes.Builder](1024, new(cltypes.Builder).EncodingSizeSSZ())
+	err = ReadRequiredQueueSSZ(getter, dumpSlot, forkJustBeforeDump, kv.BuildersDump, kv.Builders, afterForkBuilders)
 	require.ErrorIs(t, err, ErrMissingGloasData)
 	require.ErrorContains(t, err, kv.BuildersDump)
+}
+
+// TestReadRequiredQueueSSZ_MissedForkSlotBlock verifies that a missing dump at
+// the fork slot starts from an empty list: the antiquary writes no Gloas dump
+// when the fork-slot block is missed, and the first Gloas diff holds the full list.
+func TestReadRequiredQueueSSZ_MissedForkSlotBlock(t *testing.T) {
+	forkSlot := uint64(clparams.SlotsPerDump)
+	slot := forkSlot + 1
+
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](1024, new(cltypes.Builder).EncodingSizeSSZ())
+	builders.Append(&cltypes.Builder{Pubkey: common.Bytes48{0x01}, Balance: 100})
+	builders.Append(&cltypes.Builder{Pubkey: common.Bytes48{0x02}, Balance: 200})
+
+	encoder := base_encoding.NewSSZQueueEncoder[*cltypes.Builder](func(a, b *cltypes.Builder) bool { return *a == *b })
+	var diff bytes.Buffer
+	require.NoError(t, encoder.WriteDiff(&diff, builders))
+
+	getter := mockGetValFn(map[string]map[string][]byte{
+		kv.Builders: {string(base_encoding.Encode64ToBytes4(slot)): diff.Bytes()},
+	})
+
+	got := solid.NewStaticListSSZ[*cltypes.Builder](1024, new(cltypes.Builder).EncodingSizeSSZ())
+	require.NoError(t, ReadRequiredQueueSSZ(getter, slot, forkSlot, kv.BuildersDump, kv.Builders, got))
+	require.Equal(t, 2, got.Len())
+	require.Equal(t, common.Bytes48{0x01}, got.Get(0).Pubkey)
+	require.Equal(t, common.Bytes48{0x02}, got.Get(1).Pubkey)
 }
 
 // TestReadRequiredQueueSSZ_WithData verifies that ReadRequiredQueueSSZ

@@ -1071,15 +1071,17 @@ func ReadQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValF
 }
 
 // ReadRequiredQueueSSZ is like ReadQueueSSZ but returns ErrMissingGloasData when
-// the dump is missing and its slot is at or after forkSlot. A dump slot before
-// forkSlot has no dump, so the diffs are applied to an empty list.
+// the dump is missing and its slot is after forkSlot. The antiquary writes no
+// Gloas dump at a dump slot whose state is still pre-Gloas, including the fork
+// slot when its block is missed, and the diff at the first Gloas block holds the
+// full list, so such a dump slot starts from an empty list.
 func ReadRequiredQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValFn, slot, forkSlot uint64, dumpTable, diffsTable string, out *solid.ListSSZ[T]) error {
 	freshDumpSlot := slot - slot%clparams.SlotsPerDump
 	compressed, err := kvGetter(dumpTable, base_encoding.Encode64ToBytes4(freshDumpSlot))
 	if err != nil {
 		return err
 	}
-	if len(compressed) == 0 && freshDumpSlot >= forkSlot {
+	if len(compressed) == 0 && freshDumpSlot > forkSlot {
 		return fmt.Errorf("%w: table %s, slot %d", ErrMissingGloasData, dumpTable, slot)
 	}
 
