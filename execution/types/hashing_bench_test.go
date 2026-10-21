@@ -49,3 +49,14 @@ func BenchmarkRlpHashHeader(b *testing.B) {
 		RlpHash(benchHeader)
 	}
 }
+
+func BenchmarkDeriveShaFullDataBlock(b *testing.B) {
+	txs := make(BinaryTransactions, 5)
+	for i := range txs {
+		txs[i] = make([]byte, 1660*1024)
+		txs[i][0] = byte(i)
+	}
+	for b.Loop() {
+		DeriveSha(txs)
+	}
+}
