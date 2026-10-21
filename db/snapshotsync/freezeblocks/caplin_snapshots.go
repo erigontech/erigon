@@ -149,6 +149,21 @@ func (s *CaplinSnapshots) SegFileNames(from, to uint64) []string {
 // segments past a gap, so SegmentsMax never reports data the backfill can't walk back to.
 func (s *CaplinSnapshots) OpenFolder() error { return s.openFolder(false) }
 
+func (s *CaplinSnapshots) OpenBeaconBlocks() error {
+	files, _, err := snapshotsync.SegmentsCaplin(s.Dir())
+	if err != nil {
+		return err
+	}
+	var list []string
+	for i := range files {
+		if files[i].Type != nil && files[i].Type.Enum() == snaptype.CaplinEnums.BeaconBlocks {
+			_, fName := filepath.Split(files[i].Path)
+			list = append(list, fName)
+		}
+	}
+	return s.OpenList(list, false)
+}
+
 // Shadowed so the promoted base versions cannot reach the unfiltered directory scan:
 // Go embedding has no virtual dispatch, so they would call the base OpenFolder.
 func (s *CaplinSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
