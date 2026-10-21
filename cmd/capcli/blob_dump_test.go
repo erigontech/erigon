@@ -118,3 +118,11 @@ func TestFrozenBlobSegmentsWithoutPreverifiedLock(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, frozen, 1)
 }
+
+func TestFrozenBlobSegmentsRejectsAMalformedPreverifiedLock(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.WriteFile(dirs.PreverifiedPath(), []byte("not toml ="), 0o444))
+
+	_, err := frozenBlobSegments(dirs)
+	require.ErrorContains(t, err, datadir.PreverifiedFileName)
+}
