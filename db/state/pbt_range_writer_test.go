@@ -21,11 +21,13 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -512,41 +514,110 @@ func TestPBinRangeWriterRowsLandInLeafStampRange(t *testing.T) {
 	selectPBinRangeWriterHash(t)
 	for _, corpus := range pbinRangeWriterCorpora() {
 		t.Run(corpus.name, func(t *testing.T) {
-			var maximum uint64
-			for _, leaf := range corpus.leaves {
-				maximum = max(maximum, leaf.Stamp)
-			}
-			expected := func(key []byte) uint64 {
-				if bytes.Equal(key, pbt.GlobalRootKey()) {
-					return maximum
-				}
-				path, err := eip8297.DecodeBitPath(key)
-				require.NoError(t, err, "%x", key)
-				var stamp uint64
-				found := false
-				for _, leaf := range corpus.leaves {
-					leafPath := eip8297.PathFromBits(leaf.Key, int16(len(leaf.Key)*8))
-					if eip8297.CommonPrefixBitsAt(&path, 0, &leafPath) == path.BitLen {
-						stamp = max(stamp, leaf.Stamp)
-						found = true
-					}
-				}
-				require.True(t, found, "row %x covers no leaf", key)
-				return stamp
-			}
 			for _, maxOps := range []int{100000, 7, 1} {
-				got := runPBinRangeWriterCorpus(t, corpus.leaves, maxOps)
-				for _, file := range got.files {
-					for _, entry := range file.entries {
-						if bytes.Equal(entry.key, commitment.KeyCommitmentState) {
-							continue
-						}
-						stamp := expected(entry.key)
-						require.True(t, stamp >= file.start && stamp < file.end, "maxOps=%d: row %x with leaf stamp %d is in file [%d,%d)", maxOps, entry.key, stamp, file.start, file.end)
-					}
-				}
+				requirePBinRowsInLeafStampRanges(t, corpus.leaves, runPBinRangeWriterCorpus(t, corpus.leaves, maxOps), fmt.Sprintf("maxOps=%d", maxOps))
 			}
 		})
+	}
+}
+
+func TestPBinRangeWriterPastFrontierRange(t *testing.T) {
+	selectPBinRangeWriterHash(t)
+	var leaves []state.PBinLeaf
+	for bucket, stamp := range []uint64{0, 33} {
+		prefix := append([]byte{eip8297.StorageZone}, bytes.Repeat([]byte{byte(0x30 + bucket)}, 32)...)
+		for slot := range byte(3) {
+			key := make([]byte, eip8297.StorageKeyLength)
+			copy(key, prefix)
+			key[33] = slot << 4
+			key[len(key)-1] = slot + 1
+			leaves = append(leaves, state.PBinLeaf{Key: key, Value: pbinRangeWriterValue(byte(bucket*3) + slot + 1), Stamp: stamp})
+		}
+	}
+	sort.Slice(leaves, func(i, j int) bool { return bytes.Compare(leaves[i].Key, leaves[j].Key) < 0 })
+	for _, maxOps := range []int{100000, 2} {
+		label := fmt.Sprintf("maxOps=%d", maxOps)
+		run := openPBinRangeWriterRun(t, maxOps, 0, 39)
+		started := time.Now()
+		_, err := run.write(t.Context(), leaves)
+		require.NoError(t, err, label)
+		got := readPBinRangeWriterFilesOnDisk(t, run.agg.Dirs().SnapDomain, run.agg.StepSize(), started)
+		ranges := make([][2]uint64, 0, len(got.files))
+		entries := make([]int, 0, len(got.files))
+		for _, file := range got.files {
+			ranges = append(ranges, [2]uint64{file.start, file.end})
+			entries = append(entries, len(file.entries))
+		}
+		require.Equal(t, [][2]uint64{{0, 8}, {8, 16}, {16, 24}, {24, 40}}, ranges, label)
+		requirePBinRowsInLeafStampRanges(t, leaves, got, label)
+		require.Equal(t, []int{entries[0], 0, 0, entries[3]}, entries, "%s: rows in the ranges no leaf stamp selects", label)
+		require.Positive(t, entries[0], label)
+		require.Positive(t, entries[3], label)
+	}
+}
+
+func readPBinRangeWriterFilesOnDisk(t *testing.T, snapDomain string, stepSize uint64, writtenAfter time.Time) pbinRangeWriterSnapshot {
+	t.Helper()
+	names, err := filepath.Glob(filepath.Join(snapDomain, "*-"+kv.CommitmentBinDomain.String()+".*.kv"))
+	require.NoError(t, err)
+	var snapshot pbinRangeWriterSnapshot
+	for _, name := range names {
+		var from, to uint64
+		base := filepath.Base(name)
+		_, err := fmt.Sscanf(base[strings.Index(base, kv.CommitmentBinDomain.String())+len(kv.CommitmentBinDomain.String()):], ".%d-%d.kv", &from, &to)
+		require.NoError(t, err, base)
+		info, err := os.Stat(name)
+		require.NoError(t, err)
+		require.False(t, info.ModTime().Before(writtenAfter), "%s was not written by this run", base)
+		file := pbinRangeWriterFile{start: from * stepSize, end: to * stepSize, entries: []pbinRangeWriterEntry{}}
+		decompressor, err := seg.NewDecompressor(name)
+		require.NoError(t, err)
+		reader := seg.NewReader(decompressor.MakeGetter(), seg.CompressNone)
+		for reader.HasNext() {
+			key, _ := reader.Next(nil)
+			require.True(t, reader.HasNext(), "key %x has no value in %s", key, name)
+			value, _ := reader.Next(nil)
+			file.entries = append(file.entries, pbinRangeWriterEntry{key: bytes.Clone(key), value: bytes.Clone(value)})
+		}
+		decompressor.Close()
+		snapshot.files = append(snapshot.files, file)
+	}
+	sort.Slice(snapshot.files, func(i, j int) bool { return snapshot.files[i].start < snapshot.files[j].start })
+	return snapshot
+}
+
+func requirePBinRowsInLeafStampRanges(t *testing.T, leaves []state.PBinLeaf, got pbinRangeWriterSnapshot, label string) {
+	t.Helper()
+	var maximum uint64
+	for _, leaf := range leaves {
+		maximum = max(maximum, leaf.Stamp)
+	}
+	expected := func(key []byte) uint64 {
+		if bytes.Equal(key, pbt.GlobalRootKey()) {
+			return maximum
+		}
+		path, err := eip8297.DecodeBitPath(key)
+		require.NoError(t, err, "%x", key)
+		var stamp uint64
+		found := false
+		for _, leaf := range leaves {
+			leafPath := eip8297.PathFromBits(leaf.Key, int16(len(leaf.Key)*8))
+			if eip8297.CommonPrefixBitsAt(&path, 0, &leafPath) == path.BitLen {
+				stamp = max(stamp, leaf.Stamp)
+				found = true
+			}
+		}
+		require.True(t, found, "row %x covers no leaf", key)
+		return stamp
+	}
+	for _, file := range got.files {
+		for _, entry := range file.entries {
+			if bytes.Equal(entry.key, commitment.KeyCommitmentState) {
+				continue
+			}
+			stamp := expected(entry.key)
+			require.True(t, stamp >= file.start && stamp < file.end, "%s: row %x with leaf stamp %d is in file [%d,%d)", label, entry.key, stamp, file.start, file.end)
+		}
 	}
 }
 
@@ -664,7 +735,7 @@ type pbinRangeWriterRun struct {
 	activity *atomic.Int32
 }
 
-func openPBinRangeWriterRun(t testing.TB, maxOps, workers int) *pbinRangeWriterRun {
+func openPBinRangeWriterRun(t testing.TB, maxOps, workers int, endTxNum uint64) *pbinRangeWriterRun {
 	t.Helper()
 	db, agg := commitmenttemporal.Open(t, 8)
 	writePBinRangeWriterAccounts(t, db, 32)
@@ -694,7 +765,7 @@ func openPBinRangeWriterRun(t testing.TB, maxOps, workers int) *pbinRangeWriterR
 			}
 		})
 	}
-	run.writer, err = state.NewPBinRangeWriterWithLimitsForTest(agg, kv.CommitmentBinDomain, 23, maxOps, 1<<30)
+	run.writer, err = state.NewPBinRangeWriterWithLimitsForTest(agg, kv.CommitmentBinDomain, endTxNum, maxOps, 1<<30)
 	require.NoError(t, err)
 	return run
 }
@@ -712,7 +783,12 @@ func (r *pbinRangeWriterRun) write(ctx context.Context, leaves []state.PBinLeaf)
 
 func runPBinRangeWriterCorpusWith(t *testing.T, leaves []state.PBinLeaf, maxOps, workers int) pbinRangeWriterSnapshot {
 	t.Helper()
-	run := openPBinRangeWriterRun(t, maxOps, workers)
+	return runPBinRangeWriterCorpusAt(t, leaves, maxOps, workers, 23)
+}
+
+func runPBinRangeWriterCorpusAt(t *testing.T, leaves []state.PBinLeaf, maxOps, workers int, endTxNum uint64) pbinRangeWriterSnapshot {
+	t.Helper()
+	run := openPBinRangeWriterRun(t, maxOps, workers, endTxNum)
 	agg := run.agg
 	phaseActivity := run.activity
 	root, err := run.write(t.Context(), leaves)

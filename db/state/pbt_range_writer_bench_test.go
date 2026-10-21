@@ -58,7 +58,7 @@ func BenchmarkPBinRangeWriterWorkers(b *testing.B) {
 			}
 			b.StopTimer()
 			for range b.N {
-				run := openPBinRangeWriterRun(b, 100_000, factoryWorkers)
+				run := openPBinRangeWriterRun(b, 100_000, factoryWorkers, 23)
 				runtime.GC()
 				b.StartTimer()
 				_, err := run.write(b.Context(), leaves)
