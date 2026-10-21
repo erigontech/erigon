@@ -27,6 +27,7 @@ import (
 	"maps"
 	"math/big"
 	"math/bits"
+	"runtime"
 	"slices"
 
 	"github.com/consensys/gnark-crypto/ecc"
@@ -663,9 +664,10 @@ func modexpU256(dst, base, exp, mod []byte) {
 	if b.IsZero() {
 		return // 0^exp with exp > 0; dst is already zero
 	}
-	// evmone's 4-limb Montgomery loop is faster from an 18-bit exponent on; the
-	// base reduction above still turns a base that is a multiple of m into 0.
-	if bitLenBytes(exp) > 17 {
+	// On amd64 evmone's 4-limb Montgomery loop is faster from an 18-bit exponent
+	// on (on arm64 uint256 stays faster); the base reduction above still turns a
+	// base that is a multiple of m into 0.
+	if runtime.GOARCH == "amd64" && bitLenBytes(exp) > 17 {
 		reduced := b.Bytes32()
 		evmone.ModExp(dst, reduced[:], exp, mod)
 		return
