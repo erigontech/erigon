@@ -3635,6 +3635,9 @@ func TestGloasPreparationRechecksParentDuringExecutionRetry(t *testing.T) {
 			calls := 0
 			engine.startPayloadBuild = func(context.Context, common.Hash, *engine_types.PayloadAttributes) ([]byte, error) {
 				calls++
+				if calls > 1 {
+					return nil, errors.New("unexpected builder retry after parent changed")
+				}
 				switch change {
 				case "head":
 					store.HeadVal = common.Hash{9}
@@ -3652,7 +3655,7 @@ func TestGloasPreparationRechecksParentDuringExecutionRetry(t *testing.T) {
 			id, err := handler.startPayloadBuildForPreparation(t.Context(), 11, root, payload, gloasPayloadPathFull, new(engine_types.PayloadAttributes))
 			require.Error(t, err)
 			require.Empty(t, id)
-			require.Equal(t, 1, calls)
+			require.Equal(t, 1, calls, "a changed parent must stop retries before another builder call")
 			require.True(t, handler.payloadPreparationGate.idle())
 		})
 	}

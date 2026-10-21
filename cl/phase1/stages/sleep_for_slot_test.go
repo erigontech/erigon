@@ -19,6 +19,7 @@ package stages
 import (
 	"context"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -46,7 +47,7 @@ func (f sleepForSlotForkChoiceFake) GetHeadNode() (forkchoice.ForkChoiceNode, ui
 	return forkchoice.ForkChoiceNode{Root: f.head, PayloadStatus: f.payloadStatus}, f.headSlot, nil
 }
 
-func TestSleepForSlotGloasPayloadStatusChange(t *testing.T) {
+func TestSleepForSlotGloasPayloadStatusChangeBypassesRewakeInterval(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		status   cltypes.PayloadStatus
@@ -56,17 +57,22 @@ func TestSleepForSlotGloasPayloadStatusChange(t *testing.T) {
 		{"FULL to EMPTY", cltypes.PayloadStatusEmpty, common.Hash{0xee}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			head := common.Hash{1}
-			clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: time.Now().Add(5 * sleepForSlotHeadPollInterval)}
-			wake, changed, err := waitForNextSlotOrHeadChange(
-				t.Context(), 11, sleepForSlotConfig(10),
-				sleepForSlotForkChoiceFake{head: head, payloadStatus: tc.status},
-				sleepForSlotSyncedDataFake{head: head}, clock,
-				sleepForSlotWake{root: head, executionHead: tc.previous}, tc.previous,
-			)
-			require.NoError(t, err)
-			require.True(t, changed, "a payload decision at the same beacon root must wake canonical fork choice")
-			require.Equal(t, head, wake.root)
+			synctest.Test(t, func(t *testing.T) {
+				head := common.Hash{1}
+				started := time.Now()
+				clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: started.Add(2 * sleepForSlotRewakeInterval)}
+				wake, changed, err := waitForNextSlotOrHeadChange(
+					t.Context(), 11, sleepForSlotConfig(10),
+					sleepForSlotForkChoiceFake{head: head, payloadStatus: tc.status},
+					sleepForSlotSyncedDataFake{head: head}, clock,
+					sleepForSlotWake{root: head, executionHead: tc.previous, at: started}, tc.previous,
+				)
+				require.NoError(t, err)
+				require.True(t, changed, "a payload decision at the same beacon root must wake canonical fork choice")
+				require.Equal(t, head, wake.root)
+				require.NotEqual(t, tc.previous, wake.executionHead)
+				require.Equal(t, sleepForSlotHeadPollInterval, time.Since(started), "execution-head changes must wake on the first poll, even after a recent wake")
+			})
 		})
 	}
 }
