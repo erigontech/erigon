@@ -282,6 +282,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, version clparams.StateVersion,
 ) (*engine_types.PayloadStatus, error) {
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
+	if req == nil {
+		return nil, &rpc.InvalidParamsError{Message: "missing payload"}
+	}
 	if !e.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
 	}
@@ -800,6 +803,9 @@ func (e *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 func (e *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes, version clparams.StateVersion,
 ) (*engine_types.ForkChoiceUpdatedResponse, error) {
 	defer engineForkchoiceUpdatedDuration.ObserveDuration(time.Now())
+	if forkchoiceState == nil {
+		return nil, &rpc.InvalidParamsError{Message: "missing forkchoiceState"}
+	}
 	if !e.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
 	}
