@@ -466,14 +466,20 @@ flowchart LR
 - [x] commitmentdb accepts deferral for bin through an interface with only those two methods, shared by v3 and pbt.
       Update `pbin_unsupported_test.go` and `TestPBinComputeCommitmentRefusesDeferredTake`: the feature is now
       supported. Test that a canonical-bin context with deferral on gives the same records after the flush as inline
-- [ ] `exec3.go`: rewire only. `deferCommitmentUpdates` applies hex's rule to bin, and the existing deferred-flush
+- [x] `exec3.go`: rewire only. `deferCommitmentUpdates` applies hex's rule to bin, and the existing deferred-flush
       wiring reaches the bin context. No new exec3 mechanism. Update `TestPBinDeferCommitmentUpdatesExcludesBin` with that
-      reason. Test a fork-validation round and an unwind across a deferred bin block
-- [ ] dual committer: when the shadow arm's trie supports deferral, take its parts after the fold, and apply them
+      reason. Test a fork-validation round and an unwind across a deferred bin block. The rule became
+      `setDeferCommitmentUpdates(doms, …)`, shared by both exec3 call sites; the test is now
+      `TestPBinDeferCommitmentUpdatesIncludesBin`
+- ➕ [x] a deferred pbt round encoded its state from the base's root record, which the flush had not written yet: the
+      persisted bin `state` held the previous block's root row. The trie keeps the root record of its untaken parts and
+      `EncodeCurrentState` uses it. The buffered dual shadow had the same stale `state`; the deferred shadow fixes it
+- [x] dual committer: when the shadow arm's trie supports deferral, take its parts after the fold, and apply them
       through the inner context where `Replay` runs today. The buffer stays for the state record and collector drains.
       Clear the parts on every exit (canonical error, cancel, no canonical root). Tests cover each exit and the
-      isolated path; shadow root and bin records are equal across the deferred and buffered paths
-- [ ] run gates (now including the stagedsync filter) — must pass before Task 13
+      isolated path; shadow root and bin records are equal across the deferred and buffered paths, except the `state`
+      record, which the buffered path wrote stale (see above)
+- [x] run gates (now including the stagedsync filter) — must pass before Task 13
 
 ### Task 13: Verify per partition
 

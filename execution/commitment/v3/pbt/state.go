@@ -24,8 +24,8 @@ import (
 )
 
 func (t *Trie) EncodeCurrentState(buf []byte) ([]byte, error) {
-	var root []byte
-	if t.ctx != nil {
+	root := t.deferredRoot
+	if !t.deferredRootSet && t.ctx != nil {
 		var err error
 		root, _, err = t.ctx.Branch(GlobalRootKey())
 		if err != nil {

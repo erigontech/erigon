@@ -85,3 +85,33 @@ func TestPBinDeferredRoundRefusesUntakenParts(t *testing.T) {
 		})
 	}
 }
+
+func TestPBinDeferredRoundEncodesNewRootState(t *testing.T) {
+	corpus := newParallelRoundCorpus(t, parallelRoundTestShape)
+	ops := corpus.updates(rand.New(rand.NewSource(14)), 200, 20)
+	for _, tc := range []struct {
+		name    string
+		ops     []Op
+		workers int
+	}{
+		{name: "parallel", ops: ops, workers: 4},
+		{name: "one-op", ops: ops[:1], workers: 4},
+		{name: "workers=1", ops: ops, workers: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sequential := NewTrie(&trieTestContext{records: maps.Clone(corpus.snapshot)})
+			_, err := sequential.Process(tc.ops)
+			require.NoError(t, err)
+			want, err := sequential.EncodeCurrentState(nil)
+			require.NoError(t, err)
+			trie := newParallelRoundBase(corpus.snapshot).trie()
+			trie.SetDeferCommitmentUpdates(true)
+			_, err = trie.ProcessParallelContext(t.Context(), tc.ops, tc.workers)
+			require.NoError(t, err)
+			require.NotEmpty(t, trie.TakeDeferredDeltas())
+			got, err := trie.EncodeCurrentState(nil)
+			require.NoError(t, err)
+			require.Equal(t, want, got, "state encoded between the round and the flush")
+		})
+	}
+}

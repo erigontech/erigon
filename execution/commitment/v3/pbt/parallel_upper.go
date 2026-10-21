@@ -393,7 +393,7 @@ func (t *Trie) processParallelPhaseA(ctx context.Context, workers int, plan phas
 		}
 	}
 	t.deltas = deltas
-	t.deferred = parts
+	t.keepDeferred(parts)
 	return finalRoot, nil
 }
 

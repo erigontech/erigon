@@ -387,7 +387,7 @@ func (t *Trie) processParallelContext(ctx context.Context, ops []Op, workers int
 	if err := ctx.Err(); err != nil {
 		return common.Hash{}, err
 	}
-	if err := t.checkDeferredTaken(); err != nil {
+	if err := t.beginDeferredRound(); err != nil {
 		return common.Hash{}, err
 	}
 	if t.roundPending {

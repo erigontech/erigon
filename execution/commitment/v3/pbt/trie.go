@@ -58,6 +58,8 @@ type Trie struct {
 	phaseSchedule          phaseSchedule
 	deferUpdates           bool
 	deferred               [][]commitment.BranchDelta
+	deferredRoot           []byte
+	deferredRootSet        bool
 	coreApplyHook          func(phaseTask, *Op) error
 	coreEncodeHook         func(phaseTask, []byte) error
 	coreActivityHook       func(bool)
@@ -107,6 +109,7 @@ func (t *Trie) SetVerifyProgress(progress func([]byte)) {
 
 func (t *Trie) Reset() {
 	t.mergeCreatedStems = make(map[string]struct{})
+	t.deferredRoot, t.deferredRootSet = nil, false
 	t.ResetContext(t.ctx)
 }
 
@@ -197,11 +200,23 @@ func (t *Trie) TakeDeferredDeltas() [][]commitment.BranchDelta {
 
 var errDeferredNotTaken = errors.New("pbin: deferred updates were not taken")
 
-func (t *Trie) checkDeferredTaken() error {
+func (t *Trie) beginDeferredRound() error {
 	if t.deferUpdates && len(t.deferred) != 0 {
 		return errDeferredNotTaken
 	}
+	t.deferredRoot, t.deferredRootSet = nil, false
 	return nil
+}
+
+func (t *Trie) keepDeferred(parts [][]commitment.BranchDelta) {
+	t.deferred = parts
+	for _, part := range parts {
+		for i := range part {
+			if bytes.Equal(part[i].Key, GlobalRootKey()) {
+				t.deferredRoot, t.deferredRootSet = part[i].Data, true
+			}
+		}
+	}
 }
 
 func (t *Trie) deferBaseWrites() bool {
@@ -284,7 +299,7 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 	if t.ctx == nil {
 		return common.Hash{}, fmt.Errorf("nil Patricia context")
 	}
-	if err := t.checkDeferredTaken(); err != nil {
+	if err := t.beginDeferredRound(); err != nil {
 		return common.Hash{}, err
 	}
 	if t.roundPending {
@@ -373,7 +388,7 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 		return common.Hash{}, err
 	}
 	if t.deferBaseWrites() && len(t.deltas) != 0 {
-		t.deferred = [][]commitment.BranchDelta{slices.Clone(t.deltas)}
+		t.keepDeferred([][]commitment.BranchDelta{slices.Clone(t.deltas)})
 	}
 	return t.rootHash()
 }
