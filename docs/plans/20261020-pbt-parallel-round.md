@@ -396,10 +396,17 @@ flowchart LR
       - a run of small buckets in one storage nibble becomes one task up to the grain;
       - a bucket splits into subtasks only above the grain;
       - order is largest first within dependency order
-- [ ] implement the grain, starting from the hex fork walk's `max(128, roundKeys/(4·workers))`. Compare it with v3's
-      1024 fan-out on the benchmark and keep the better
-- [ ] try the worker default: half the CPUs (today) against all CPUs, and storage oversubscription like v3's ×4. Land a
-      knob only on an `ab-verdict` win; record null results here
+- [x] implement the grain, starting from the hex fork walk's `max(128, roundKeys/(4·workers))`. Compare it with v3's
+      1024 fan-out on the benchmark and keep the better. Kept grain over v3's 1024 fan-out. `ab-verdict`, 8 vs 8 runs
+      of `BenchmarkParallelRound{Tip,Reexec}` at `-benchtime=5x`, α .05 split over 2, at w=8:
+      - old → grain: Tip −2.6% (grain wins, p .00016), Reexec −1.3% (inconclusive, p .38); grain is the default;
+      - grain → 1024 fan-out: Reexec +5.5%, Tip +9.5% (grain wins both); the fan-out schedule was removed, the
+        test-only switch keeps `old` and `grain`
+- [x] try the worker default: half the CPUs (today) against all CPUs, and storage oversubscription like v3's ×4. Land a
+      knob only on an `ab-verdict` win; record null results here. Measured; default unchanged pending owner. Grain
+      w=8 → w=16 (same run): Reexec −19.9%, Tip −14.7% (w=16 wins both). The default comes from
+      `TIP_TRIE_WARMUPERS`, which also drives the hex warmup, so the owner decides. Storage oversubscription was not
+      tried
 - [x] parity over every Task 1 corpus; run gates — must pass before Task 11
 
 ### Task 11: Convert on the shared round

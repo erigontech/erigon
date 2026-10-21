@@ -110,13 +110,11 @@ type phaseSchedule uint8
 const (
 	phaseScheduleGrain phaseSchedule = iota
 	phaseScheduleOld
-	phaseScheduleFanOut
 )
 
 const (
 	phaseGrainMin       = 128
 	phaseGrainPerWorker = 4
-	phaseFanOut         = 1024
 )
 
 func phaseGrainFor(roundKeys, workers int) int {
@@ -384,9 +382,6 @@ func (t *Trie) buildPhasePlan(ops []Op, workers, threshold int) (phasePlan, erro
 	}
 	if t.phaseSchedule == phaseScheduleOld || t.bucketBatch > 1 {
 		return buildPhasePlanBatched(ops, fanOutMin, t.bucketBatch)
-	}
-	if t.phaseSchedule == phaseScheduleFanOut {
-		return buildPhasePlanGrain(ops, phaseFanOut)
 	}
 	return buildPhasePlanGrain(ops, phaseGrainFor(len(ops), workers))
 }

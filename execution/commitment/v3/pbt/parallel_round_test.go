@@ -353,10 +353,6 @@ func TestParallelRoundOldScheduleMatchesSequential(t *testing.T) {
 	runParallelRoundCasesWith(t, phaseScheduleOld, 1, func(*testing.T, *parallelRoundBase, *Trie, string) {})
 }
 
-func TestParallelRoundFanOutScheduleMatchesSequential(t *testing.T) {
-	runParallelRoundCasesWith(t, phaseScheduleFanOut, 1, func(*testing.T, *parallelRoundBase, *Trie, string) {})
-}
-
 func TestParallelRoundPartsHoldEachKeyOnce(t *testing.T) {
 	runParallelRoundCases(t, func(t *testing.T, base *parallelRoundBase, trie *Trie, label string) {
 		deltas := trie.TakeDeltas()

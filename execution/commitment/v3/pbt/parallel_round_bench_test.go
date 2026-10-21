@@ -72,7 +72,6 @@ func benchmarkParallelRoundSchedules(b *testing.B, snapshot map[string][]byte, r
 		{"grain", phaseScheduleGrain, 1},
 		{"grain", phaseScheduleGrain, 8},
 		{"grain", phaseScheduleGrain, 16},
-		{"fanout", phaseScheduleFanOut, 8},
 	} {
 		b.Run(fmt.Sprintf("sched=%s/workers=%d", cell.name, cell.workers), func(b *testing.B) {
 			runParallelRoundBench(b, snapshot, false, cell.schedule, cell.workers, roundOps)
