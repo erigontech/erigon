@@ -163,7 +163,7 @@ func TestReadCompressedSSZ_MissingData(t *testing.T) {
 
 // TestReadRequiredQueueSSZ_MissingDump verifies that ReadRequiredQueueSSZ
 // returns ErrMissingGloasData when the dump table has no entry for the
-// target dump slot at or after the fork.
+// target dump slot after the fork.
 func TestReadRequiredQueueSSZ_MissingDump(t *testing.T) {
 	// Use a slot that is NOT dump-aligned so the function computes a dump slot
 	// and looks it up.
