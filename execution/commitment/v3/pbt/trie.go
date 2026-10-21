@@ -54,6 +54,7 @@ type Trie struct {
 	phaseHook              func(phaseTask, *Op) error
 	joinHook               func(phaseTask, commitment.PatriciaContext) error
 	bucketBatch            int
+	phaseSchedule          phaseSchedule
 	coreApplyHook          func(phaseTask, *Op) error
 	coreEncodeHook         func(phaseTask, []byte) error
 	coreActivityHook       func(bool)

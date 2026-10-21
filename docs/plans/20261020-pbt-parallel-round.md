@@ -392,7 +392,7 @@ flowchart LR
 - Modify: `execution/commitment/v3/pbt/schedule.go`
 - Modify: `execution/commitment/v3/pbt/schedule_test.go`
 
-- [ ] write planner tests first:
+- [x] write planner tests first:
       - a run of small buckets in one storage nibble becomes one task up to the grain;
       - a bucket splits into subtasks only above the grain;
       - order is largest first within dependency order
@@ -400,7 +400,7 @@ flowchart LR
       1024 fan-out on the benchmark and keep the better
 - [ ] try the worker default: half the CPUs (today) against all CPUs, and storage oversubscription like v3's ×4. Land a
       knob only on an `ab-verdict` win; record null results here
-- [ ] parity over every Task 1 corpus; run gates — must pass before Task 11
+- [x] parity over every Task 1 corpus; run gates — must pass before Task 11
 
 ### Task 11: Convert on the shared round
 

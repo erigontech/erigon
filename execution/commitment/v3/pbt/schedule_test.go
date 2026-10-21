@@ -1269,3 +1269,131 @@ func TestBuildPhasePlanRejectsShortKeys(t *testing.T) {
 		})
 	}
 }
+
+func grainStorageOps(first byte, count int, drop bool) []Op {
+	stem := append([]byte{eip8297.StorageZone, first}, make([]byte, 31)...)
+	var ops []Op
+	if drop {
+		ops = append(ops, Drop(stem))
+	}
+	for i := range count {
+		ops = append(ops, Op{Key: storageKeyWithSuffix(stem, byte(i)<<4|byte(i>>4), byte(i+1)), Value: testTrieValue(byte(i + 1))})
+	}
+	return ops
+}
+
+func grainSortedOps(groups ...[]Op) []Op {
+	var ops []Op
+	for _, group := range groups {
+		ops = append(ops, group...)
+	}
+	slices.SortFunc(ops, func(a, b Op) int { return bytes.Compare(opKey(a), opKey(b)) })
+	return ops
+}
+
+func grainUnitOps(task *phaseTask, tasks []phaseTask) int {
+	switch {
+	case len(task.batch) != 0:
+		total := 0
+		for i := range task.batch {
+			total += len(task.batch[i].ops)
+		}
+		return total
+	case len(task.dependencies) != 0:
+		total := 0
+		for _, dependency := range task.dependencies {
+			total += len(tasks[dependency].ops)
+		}
+		return total
+	default:
+		return len(task.ops)
+	}
+}
+
+func TestPhaseGrainFor(t *testing.T) {
+	require.Equal(t, 128, phaseGrainFor(100, 8))
+	require.Equal(t, 128, phaseGrainFor(4096, 8))
+	require.Equal(t, 3125, phaseGrainFor(100_000, 8))
+	require.Equal(t, 25_000, phaseGrainFor(100_000, 1))
+	require.Equal(t, 25_000, phaseGrainFor(100_000, 0))
+}
+
+func TestBuildPhasePlanGrainBatchesOneNibbleRun(t *testing.T) {
+	ops := grainSortedOps(grainStorageOps(0x30, 3, false), grainStorageOps(0x31, 3, false), grainStorageOps(0x32, 3, false), grainStorageOps(0x33, 3, false), grainStorageOps(0x50, 2, false))
+	plan, err := buildPhasePlanGrain(ops, 10)
+	require.NoError(t, err)
+	var batches [][]string
+	for index := range plan.tasks {
+		task := &plan.tasks[index]
+		if len(task.batch) == 0 {
+			continue
+		}
+		require.Equal(t, phaseBucket, task.kind)
+		require.LessOrEqual(t, grainUnitOps(task, plan.tasks), 10)
+		var keys []string
+		for _, part := range task.batch {
+			require.Equal(t, task.batch[0].key[1]>>4, part.key[1]>>4, "batch spans storage nibbles")
+			keys = append(keys, part.key)
+		}
+		batches = append(batches, keys)
+	}
+	stem := func(first byte) string {
+		path := eip8297.PathFromBits(append([]byte{eip8297.StorageZone, first}, make([]byte, 31)...), 264)
+		key, err := EncodeRowKey(&path)
+		require.NoError(t, err)
+		return string(key)
+	}
+	require.Equal(t, [][]string{{stem(0x30), stem(0x31), stem(0x32)}}, batches)
+	bucketTasks := 0
+	for index := range plan.tasks {
+		if plan.tasks[index].kind == phaseBucket {
+			bucketTasks++
+		}
+	}
+	require.Equal(t, 3, bucketTasks)
+}
+
+func TestBuildPhasePlanGrainSplitsOnlyAboveGrain(t *testing.T) {
+	ops := grainSortedOps(grainStorageOps(0x30, 11, false), grainStorageOps(0x50, 10, false), grainStorageOps(0x70, 11, true))
+	plan, err := buildPhasePlanGrain(ops, 10)
+	require.NoError(t, err)
+	split := make(map[string]bool)
+	for index := range plan.tasks {
+		task := &plan.tasks[index]
+		if task.kind == phaseBucket && len(task.batch) == 0 {
+			split[task.key[:2]] = len(task.dependencies) != 0
+		}
+	}
+	require.Equal(t, map[string]bool{"\xff\x30": true, "\xff\x50": false, "\xff\x70": false}, split)
+}
+
+func TestBuildPhasePlanGrainOrdersLargestFirst(t *testing.T) {
+	r := rand.New(rand.NewSource(0x6a1))
+	for corpus := range 200 {
+		var groups [][]Op
+		for i := range 1 + r.Intn(12) {
+			groups = append(groups, grainStorageOps(byte(0x10*(1+r.Intn(4))+i), 1+r.Intn(24), r.Intn(6) == 0))
+		}
+		ops := grainSortedOps(groups...)
+		plan, err := buildPhasePlanGrain(ops, 16)
+		require.NoError(t, err, "corpus=%d", corpus)
+		last := -1
+		for index := range plan.tasks {
+			task := &plan.tasks[index]
+			for _, dependency := range task.dependencies {
+				require.Less(t, dependency, index, "corpus=%d", corpus)
+			}
+			if task.kind == phaseBucketSubtask {
+				continue
+			}
+			if task.kind != phaseBucket {
+				break
+			}
+			size := grainUnitOps(task, plan.tasks)
+			if last >= 0 {
+				require.LessOrEqual(t, size, last, "corpus=%d task=%d", corpus, index)
+			}
+			last = size
+		}
+	}
+}

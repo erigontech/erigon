@@ -324,10 +324,10 @@ func parallelRoundCases(corpus *parallelRoundCorpus) []parallelRoundCase {
 }
 
 func runParallelRoundCases(t *testing.T, check func(t *testing.T, base *parallelRoundBase, trie *Trie, label string)) {
-	runParallelRoundCasesBatched(t, 1, check)
+	runParallelRoundCasesWith(t, phaseScheduleGrain, 1, check)
 }
 
-func runParallelRoundCasesBatched(t *testing.T, bucketBatch int, check func(t *testing.T, base *parallelRoundBase, trie *Trie, label string)) {
+func runParallelRoundCasesWith(t *testing.T, schedule phaseSchedule, bucketBatch int, check func(t *testing.T, base *parallelRoundBase, trie *Trie, label string)) {
 	corpus := newParallelRoundCorpus(t, parallelRoundTestShape)
 	for _, tc := range parallelRoundCases(corpus) {
 		for _, workers := range []int{2, 4, 8} {
@@ -336,7 +336,7 @@ func runParallelRoundCasesBatched(t *testing.T, bucketBatch int, check func(t *t
 				snapshot := tc.base
 				for round := range 3 {
 					label := fmt.Sprintf("round=%d", round)
-					base, trie := requireParallelRoundMatches(t, snapshot, tc.ops(r), workers, tc.concurrent, bucketBatch, label)
+					base, trie := requireParallelRoundMatches(t, snapshot, tc.ops(r), workers, tc.concurrent, schedule, bucketBatch, label)
 					check(t, base, trie, label)
 					snapshot = base.main.records
 				}
@@ -347,6 +347,14 @@ func runParallelRoundCasesBatched(t *testing.T, bucketBatch int, check func(t *t
 
 func TestParallelRoundMatchesSequential(t *testing.T) {
 	runParallelRoundCases(t, func(*testing.T, *parallelRoundBase, *Trie, string) {})
+}
+
+func TestParallelRoundOldScheduleMatchesSequential(t *testing.T) {
+	runParallelRoundCasesWith(t, phaseScheduleOld, 1, func(*testing.T, *parallelRoundBase, *Trie, string) {})
+}
+
+func TestParallelRoundFanOutScheduleMatchesSequential(t *testing.T) {
+	runParallelRoundCasesWith(t, phaseScheduleFanOut, 1, func(*testing.T, *parallelRoundBase, *Trie, string) {})
 }
 
 func TestParallelRoundPartsHoldEachKeyOnce(t *testing.T) {
@@ -369,13 +377,14 @@ func TestParallelRoundPartsHoldEachKeyOnce(t *testing.T) {
 	})
 }
 
-func requireParallelRoundMatches(t *testing.T, snapshot map[string][]byte, ops []Op, workers int, concurrent bool, bucketBatch int, label string) (*parallelRoundBase, *Trie) {
+func requireParallelRoundMatches(t *testing.T, snapshot map[string][]byte, ops []Op, workers int, concurrent bool, schedule phaseSchedule, bucketBatch int, label string) (*parallelRoundBase, *Trie) {
 	t.Helper()
 	sequential := &trieTestContext{records: maps.Clone(snapshot)}
 	wantRoot, err := NewTrie(sequential).Process(ops)
 	require.NoError(t, err, label)
 	base := newParallelRoundBase(snapshot)
 	trie := base.trie()
+	trie.phaseSchedule = schedule
 	trie.bucketBatch = bucketBatch
 	if bucketBatch > 1 {
 		requireParallelRoundPlanBatches(t, ops, bucketBatch, label)
@@ -433,7 +442,7 @@ func runParallelRoundCollapse(t *testing.T, initial, ops []Op, before, after fun
 	ops = sortParallelRoundOps(ops)
 	for _, workers := range []int{2, 4, 8} {
 		t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
-			base, _ := requireParallelRoundMatches(t, seed.records, ops, workers, true, 1, "collapse")
+			base, _ := requireParallelRoundMatches(t, seed.records, ops, workers, true, phaseScheduleOld, 1, "collapse")
 			after(t, base.main.records)
 		})
 	}
@@ -567,6 +576,7 @@ func TestParallelRoundJoinRefusesTaskOwnedRecords(t *testing.T) {
 				owner := slices.IndexFunc(plan.tasks, tc.owner)
 				require.NotEqual(t, -1, owner)
 				trie := newParallelRoundBase(seed.records).trie()
+				trie.phaseSchedule = phaseScheduleOld
 				joined := false
 				trie.joinHook = func(task phaseTask, ctx commitment.PatriciaContext) error {
 					if !tc.join(task) {
@@ -867,7 +877,7 @@ func requireParallelRoundPlanBatches(t *testing.T, ops []Op, bucketBatch int, la
 }
 
 func TestParallelRoundBatchedBucketsMatchSequential(t *testing.T) {
-	runParallelRoundCasesBatched(t, 2, func(*testing.T, *parallelRoundBase, *Trie, string) {})
+	runParallelRoundCasesWith(t, phaseScheduleOld, 2, func(*testing.T, *parallelRoundBase, *Trie, string) {})
 }
 
 func parallelRoundBatchCorpus() []Op {
@@ -957,4 +967,31 @@ func TestParallelRoundBatchedDependentsClaimedEarly(t *testing.T) {
 	require.Positive(t, batches.Load())
 	require.Equal(t, wantRoot, gotRoot)
 	require.Equal(t, sequential.records, base.main.records)
+}
+
+func TestParallelRoundGrainSplitsLargeBucket(t *testing.T) {
+	big := parallelRoundStorageStem(0x40)
+	var initial []Op
+	for slot := range 300 {
+		initial = append(initial, Op{Key: parallelRoundStorageKey(big[1:], slot), Value: testTrieValue(byte(slot%250 + 1))})
+	}
+	for i := range 40 {
+		initial = append(initial, Op{Key: parallelRoundKey(eip8297.AccountZone, byte(0x10*(i%8)), byte(i), 0), Value: testTrieValue(byte(i + 1))})
+	}
+	var ops []Op
+	for slot := range 200 {
+		ops = append(ops, Op{Key: parallelRoundStorageKey(big[1:], slot), Value: testTrieValue(byte(slot%200 + 3))})
+	}
+	for i := range 40 {
+		ops = append(ops, Op{Key: parallelRoundKey(eip8297.AccountZone, byte(0x10*(i%8)), byte(i), 0), Value: testTrieValue(byte(i + 100))})
+	}
+	ops = sortParallelRoundOps(ops)
+	seed := newTrieTestContext()
+	requireProcess(t, seed, sortParallelRoundOps(initial))
+	for _, workers := range []int{2, 4, 8} {
+		plan, err := buildPhasePlanGrain(ops, phaseGrainFor(len(ops), workers))
+		require.NoError(t, err)
+		require.True(t, slices.ContainsFunc(plan.tasks, func(task phaseTask) bool { return task.kind == phaseBucketSubtask }), "workers=%d", workers)
+		requireParallelRoundMatches(t, seed.records, ops, workers, true, phaseScheduleGrain, 1, fmt.Sprintf("workers=%d", workers))
+	}
 }
