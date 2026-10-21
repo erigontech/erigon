@@ -8,7 +8,6 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -2609,6 +2608,10 @@ type blockExecutor struct {
 	// blockStateCache buffers the block's applied writes for the exec loop's state
 	// readers until Flush writes them to the domains; workers use a separate cache.
 	blockStateCache *state.BlockStateCache
+
+	pipeOn    bool
+	pipe      *applyPipe
+	applyTxMu sync.Mutex
 }
 
 // sendResult fans out an applyResult to the apply loop and commitment
@@ -2664,6 +2667,7 @@ func newBlockExec(block *types.Block, gasPool *protocol.GasPool, accessList type
 		gasPool:          gasPool,
 		blockStateCache:  state.NewBlockStateCache(),
 		exhausted:        exhausted,
+		pipeOn:           dbg.ExecBALApplyPipeline && len(accessList) > 0,
 	}
 }
 
@@ -2849,6 +2853,11 @@ func (be *blockExecutor) retryLimitResult(tx, txIndex, attempts int, label strin
 }
 
 func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, res *exec.TxResult, applyTx kv.TemporalTx) (result *blockResult, err error) {
+	defer func() {
+		if result != nil || err != nil {
+			_ = be.drainPipe()
+		}
+	}()
 	task, ok := res.Task.(*taskVersion)
 
 	if !ok {
@@ -3061,7 +3070,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if txTask.IsHistoric() {
 					stateReader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, txTask.Version().TxNum)
 				} else {
-					stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsStateGetter(applyTx, execctxapi.StateGetterOptions{}), be.blockStateCache)
+					var getter execctxapi.StateGetter = pe.rs.Domains().AsStateGetter(applyTx, execctxapi.StateGetterOptions{})
+					if be.pipeOn {
+						getter = &lockedGetter{StateGetter: getter, mu: &be.applyTxMu}
+					}
+					stateReader = state.NewCurrentCachedReaderV3(getter, be.blockStateCache)
 				}
 			}
 			existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
@@ -3107,7 +3120,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			// skips receipt creation for other task types (tests), whose
 			// results legitimately carry no receipt.
 			_, isChainTx := txTask.(*exec.TxTask)
-			if isChainTx && txVersion.TxIndex > 0 && !txTask.IsBlockEnd() {
+			piped := be.pipeOn && isChainTx && txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && !txTask.IsHistoric() && be.tasks[0].Version().TxIndex == -1
+			if !piped {
+				if err := be.drainPipe(); err != nil {
+					return nil, err
+				}
+			}
+			if !piped && isChainTx && txVersion.TxIndex > 0 && !txTask.IsBlockEnd() {
 				if tx > 0 {
 					// In-order finalization guarantees the previous regular tx
 					// already has its receipt; a miss means corrupted offsets
@@ -3149,6 +3168,16 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					return be.invalidBlockResult(fmt.Errorf("%w, block=%d blob gas used overflow: %w", rules.ErrInvalidBlock, be.number(), err)), nil
 				}
 				be.blobGasUsed += blobGasUsed
+			}
+
+			if piped {
+				txResult.cumulativeBlobGasUsed = be.blobGasUsed
+				if err := be.publishValidated(ctx, pe, applyTx, tx-1); err != nil {
+					return nil, err
+				}
+				be.publishTasks.setComplete(tx)
+				be.pushPipe(ctx, pe, applyTx, pipeItem{tx: tx, res: txResult, writes: be.blockIO.WriteSet(txVersion.TxIndex)})
+				continue
 			}
 
 			if stateReader == nil {
@@ -3259,71 +3288,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	maxValidated := be.validateTasks.maxComplete()
 	be.scheduleExecution(ctx, pe)
 
-	if be.publishTasks.minPending() != -1 {
-		toPublish := make(sort.IntSlice, 0, 2)
-
-		for be.publishTasks.minPending() <= maxValidated && be.publishTasks.minPending() >= 0 {
-			toPublish = append(toPublish, be.publishTasks.takeNextPending())
-		}
-
-		for i := 0; i < len(toPublish); i++ {
-			tx := toPublish[i]
-			task := be.tasks[tx].Task
-			// Use the finalized snapshot — be.results[tx] may have been
-			// overwritten by a later incarnation from a concurrent worker.
-			result := be.finalizedResults[tx]
-
-			applyResult := txResult{
-				blockNum:              be.number(),
-				blockHash:             be.hash(),
-				traceFroms:            result.TraceFroms,
-				traceTos:              result.TraceTos,
-				txNum:                 task.Version().TxNum,
-				rules:                 task.Rules(),
-				cumulativeBlobGasUsed: result.cumulativeBlobGasUsed,
-			}
-
-			if result.Receipt != nil {
-				// EIP-8037 / EIP-7778: block-level gas is max(cum execution,
-				// cum state) — NOT sum of per-tx receipt gas. Receipt gas
-				// accounts for refunds and (post-Amsterdam) carries the
-				// FloorGasCost floor; summing it bears no fixed relationship
-				// to header.GasUsed, which the builder sets via
-				// protocol.SetGasUsed = max(cumBlockExecution, cumBlockState).
-				be.blockExecutionGasUsed += result.ExecutionResult.BlockExecutionGasUsed
-				be.blockStateGasUsed += result.ExecutionResult.BlockStateGasUsed
-				be.blockGasUsed = max(be.blockExecutionGasUsed, be.blockStateGasUsed)
-				// applyResult.blockGasUsed is the per-tx contribution used for
-				// progress / uncommittedGas tracking; receipt gas is fine here.
-				applyResult.blockGasUsed = int64(result.Receipt.GasUsed)
-
-				applyResult.receipt = result.Receipt
-				applyResult.logs = result.Receipt.Logs
-				pe.executedGas.Add(int64(applyResult.blockGasUsed))
-			}
-
-			be.cntFinalized++
-			be.publishTasks.markComplete(tx)
-
-			pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
-			if result.writes != nil {
-				applyResult.writes = result.writes
-				be.applyCount += applyResult.writes.Count()
-			}
-
-			// Apply per-tx indexes (logs, traces, receipt cache) here in the
-			// exec loop, on the SAME goroutine that owns sd.mem mutations.
-			// Doing this in the apply loop instead used to race with the next
-			// tx / block-end ApplyStateWrites on SharedDomains.mem.
-			if err := pe.rs.ApplyTxIndexes(applyTx, applyResult.txNum, applyResult.receipt, applyResult.cumulativeBlobGasUsed,
-				applyResult.logs, applyResult.traceFroms, applyResult.traceTos); err != nil {
-				return nil, fmt.Errorf("ApplyTxIndexes block=%d txNum=%d: %w", applyResult.blockNum, applyResult.txNum, err)
-			}
-
-			if err := be.sendResult(ctx, &applyResult, false); err != nil {
-				return nil, err
-			}
-		}
+	if err := be.publishValidated(ctx, pe, applyTx, maxValidated); err != nil {
+		return nil, err
 	}
 
 	if be.publishTasks.countComplete() == len(be.tasks) && be.execTasks.countComplete() == len(be.tasks) {
@@ -3529,6 +3495,194 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	// Block not yet complete — return nil. The caller (processResults)
 	// only acts on complete blockResults (blockResult.complete == true).
 	return nil, nil
+}
+
+// publishValidated publishes, in tx order, every validated tx up to upTo that the
+// exec loop finalized itself.
+func (be *blockExecutor) publishValidated(ctx context.Context, pe *parallelExecutor, applyTx kv.TemporalTx, upTo int) error {
+	for be.publishTasks.minPending() >= 0 && be.publishTasks.minPending() <= upTo {
+		tx := be.publishTasks.takeNextPending()
+		// Use the finalized snapshot — be.results[tx] may have been
+		// overwritten by a later incarnation from a concurrent worker.
+		if err := be.publishTx(ctx, pe, applyTx, tx, be.finalizedResults[tx]); err != nil {
+			return err
+		}
+		be.publishTasks.markComplete(tx)
+	}
+	return nil
+}
+
+func (be *blockExecutor) publishTx(ctx context.Context, pe *parallelExecutor, applyTx kv.TemporalTx, tx int, result *execResult) error {
+	task := be.tasks[tx].Task
+
+	applyResult := txResult{
+		blockNum:              be.number(),
+		blockHash:             be.hash(),
+		traceFroms:            result.TraceFroms,
+		traceTos:              result.TraceTos,
+		txNum:                 task.Version().TxNum,
+		rules:                 task.Rules(),
+		cumulativeBlobGasUsed: result.cumulativeBlobGasUsed,
+	}
+
+	if result.Receipt != nil {
+		// EIP-8037 / EIP-7778: block-level gas is max(cum execution,
+		// cum state) — NOT sum of per-tx receipt gas. Receipt gas
+		// accounts for refunds and (post-Amsterdam) carries the
+		// FloorGasCost floor; summing it bears no fixed relationship
+		// to header.GasUsed, which the builder sets via
+		// protocol.SetGasUsed = max(cumBlockExecution, cumBlockState).
+		be.blockExecutionGasUsed += result.ExecutionResult.BlockExecutionGasUsed
+		be.blockStateGasUsed += result.ExecutionResult.BlockStateGasUsed
+		be.blockGasUsed = max(be.blockExecutionGasUsed, be.blockStateGasUsed)
+		// applyResult.blockGasUsed is the per-tx contribution used for
+		// progress / uncommittedGas tracking; receipt gas is fine here.
+		applyResult.blockGasUsed = int64(result.Receipt.GasUsed)
+
+		applyResult.receipt = result.Receipt
+		applyResult.logs = result.Receipt.Logs
+		pe.executedGas.Add(int64(applyResult.blockGasUsed))
+	}
+
+	be.cntFinalized++
+
+	pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
+	if result.writes != nil {
+		applyResult.writes = result.writes
+		be.applyCount += applyResult.writes.Count()
+	}
+
+	// Apply per-tx indexes (logs, traces, receipt cache) here in the
+	// exec loop, on the SAME goroutine that owns sd.mem mutations.
+	// Doing this in the apply loop instead used to race with the next
+	// tx / block-end ApplyStateWrites on SharedDomains.mem.
+	if err := pe.rs.ApplyTxIndexes(applyTx, applyResult.txNum, applyResult.receipt, applyResult.cumulativeBlobGasUsed,
+		applyResult.logs, applyResult.traceFroms, applyResult.traceTos); err != nil {
+		return fmt.Errorf("ApplyTxIndexes block=%d txNum=%d: %w", applyResult.blockNum, applyResult.txNum, err)
+	}
+	return be.sendResult(ctx, &applyResult, false)
+}
+
+// pipeItem is a validated tx handed to the apply pipeline with the write set
+// it validated with.
+type pipeItem struct {
+	tx     int
+	res    *execResult
+	writes *state.WriteSet
+}
+
+// applyPipe finalizes, normalizes, applies and publishes validated txs in tx
+// order on its own goroutine, so the exec loop only validates.
+type applyPipe struct {
+	items chan pipeItem
+	done  chan struct{}
+	err   error
+}
+
+func (be *blockExecutor) pushPipe(ctx context.Context, pe *parallelExecutor, applyTx kv.TemporalTx, item pipeItem) {
+	if be.pipe == nil {
+		var prev *types.Receipt
+		if r := be.finalizedResults[item.tx-1]; r != nil {
+			prev = r.Receipt
+		}
+		p := &applyPipe{items: make(chan pipeItem, len(be.tasks)), done: make(chan struct{})}
+		be.pipe = p
+		go func() {
+			defer close(p.done)
+			for it := range p.items {
+				if p.err == nil {
+					prev, p.err = be.finishTx(ctx, pe, applyTx, it, prev)
+				}
+			}
+		}()
+	}
+	be.pipe.items <- item
+}
+
+// drainPipe waits until the pipeline has published every tx handed to it.
+func (be *blockExecutor) drainPipe() error {
+	p := be.pipe
+	if p == nil {
+		return nil
+	}
+	be.pipe = nil
+	close(p.items)
+	<-p.done
+	return p.err
+}
+
+func (be *blockExecutor) finishTx(ctx context.Context, pe *parallelExecutor, applyTx kv.TemporalTx, item pipeItem, prev *types.Receipt) (*types.Receipt, error) {
+	be.applyTxMu.Lock()
+	defer be.applyTxMu.Unlock()
+	txResult := item.res
+	txTask := be.tasks[item.tx].Task
+	txVersion := txResult.Task.Version()
+
+	var cumulativeGasUsed uint64
+	var firstLogIndex uint32
+	if txVersion.TxIndex > 0 {
+		if prev == nil {
+			return nil, fmt.Errorf("parallel exec: missing finalized receipt for tx %d in block %d", txVersion.TxIndex-1, be.number())
+		}
+		cumulativeGasUsed = prev.CumulativeGasUsed
+		firstLogIndex = prev.FirstLogIndexWithinBlock + uint32(len(prev.Logs))
+	}
+
+	stateReader := state.NewCurrentCachedReaderV3(pe.rs.Domains().AsStateGetter(applyTx, execctxapi.StateGetterOptions{}), be.blockStateCache)
+	_, addReads, addWrites, err := txResult.finalize(cumulativeGasUsed, firstLogIndex, pe.cfg.engine, be.versionMap, stateReader)
+	if err != nil {
+		return nil, err
+	}
+	if addReads.Len() > 0 || !addWrites.IsEmpty() {
+		return nil, fmt.Errorf("parallel exec: finalize of tx %d in block %d touched state", txVersion.TxIndex, be.number())
+	}
+
+	domainStorageKeys := state.CommittedStorageKeysFn(pe.rs.Domains(), applyTx)
+	emptyRemoval := be.number() != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.number())
+	normWrites, err := item.writes.Normalize(be.versionMap, txVersion.TxIndex, txVersion.Incarnation, stateReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, txTask.Rules().IsAmsterdam)
+	if err != nil {
+		return nil, fmt.Errorf("[parallel] normalize block writes: %w", err)
+	}
+	txResult.writes = normWrites
+	if err := pe.rs.ApplyStateWrites(ctx, applyTx, be.number(), txTask.Version().TxNum, normWrites,
+		nil, txTask.Rules(), be.blockStateCache); err != nil {
+		return nil, fmt.Errorf("[parallel] apply block writes: %w", err)
+	}
+	if err := be.publishTx(ctx, pe, applyTx, item.tx, txResult); err != nil {
+		return nil, err
+	}
+	return txResult.Receipt, nil
+}
+
+// lockedGetter serializes the exec loop's reads through applyTx with the
+// apply pipeline, which uses the same tx.
+type lockedGetter struct {
+	execctxapi.StateGetter
+	mu *sync.Mutex
+}
+
+func (g *lockedGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.StateGetter.GetLatest(name, k, opts)
+}
+
+func (g *lockedGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.StateGetter.StepsInFiles(entitySet...)
+}
+
+func (g *lockedGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.StateGetter.GetCode(addr, txNum)
+}
+
+func (g *lockedGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.StateGetter.GetCodeSize(addr, txNum)
 }
 
 func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExecutor) {

@@ -19,6 +19,7 @@ package exec
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"runtime/pprof"
 	"sync"
 	"sync/atomic"
@@ -414,6 +415,9 @@ func (rw *Worker) Run() (err error) {
 			return err
 		}
 		rw.PublishReadMetrics()
+		if dbg.ExecWorkerYield {
+			runtime.Gosched()
+		}
 	}
 	// Worker is done: flush whatever the collector buffer was too full to take
 	// during the run. Blocking is fine here (off the hot path, at teardown), and
