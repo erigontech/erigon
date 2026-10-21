@@ -23,6 +23,7 @@ package vm
 import (
 	"bytes"
 	"fmt"
+	"math/rand/v2"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -114,6 +115,48 @@ func BenchmarkOpMod(b *testing.B) {
 	y := opTestArg
 
 	opBenchmark(b, opMod, x, y)
+}
+
+// BenchmarkOpModChain replays MOD chains shaped like the EEST test_mod
+// benchmark: 256-bit numerators and a modulus that is the previous remainder.
+func BenchmarkOpModChain(b *testing.B) {
+	for _, bits := range []int{63, 127, 191, 255} {
+		b.Run(fmt.Sprintf("bits=%d", bits), func(b *testing.B) {
+			rng := rand.New(rand.NewPCG(uint64(bits), 1))
+			var nums [15]uint256.Int
+			for i := range nums {
+				nums[i] = uint256.Int{rng.Uint64(), rng.Uint64(), rng.Uint64(), rng.Uint64() | 1<<63}
+			}
+			var m uint256.Int
+			m.Lsh(uint256.NewInt(1), uint(bits-1))
+			m[0] |= rng.Uint64()
+			minMod := new(uint256.Int).Lsh(uint256.NewInt(1), uint(bits-63))
+			var xs, ms []uint256.Int
+			for !m.Lt(minMod) && len(xs) < 1024 {
+				var best, r uint256.Int
+				bi := 0
+				for i := range nums {
+					if r.Mod(&nums[i], &m); r.Gt(&best) {
+						best, bi = r, i
+					}
+				}
+				xs, ms = append(xs, nums[bi]), append(ms, m)
+				m = best
+			}
+			evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+			callContext := &CallContext{}
+			i := 0
+			for b.Loop() {
+				callContext.Stack.push(ms[i])
+				callContext.Stack.push(xs[i])
+				opMod(0, evm, callContext)
+				callContext.Stack.popCopy()
+				if i++; i == len(xs) {
+					i = 0
+				}
+			}
+		})
+	}
 }
 
 func BenchmarkOpSmod(b *testing.B) {
