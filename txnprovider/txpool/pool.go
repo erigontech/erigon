@@ -1620,6 +1620,13 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 		logger.Warn("[pool-census] in, held, out", "admitted", p.admitted, "heldNow", held,
 			"leftTotal", left, "unaccounted", p.admitted-held-left, "byReason", p.discardSummary(),
 			"senders", len(p.admittedBySender), "topSenders", p.topSendersSummary(5))
+		// ⚠ UNCONDITIONAL, AND DELIBERATELY SO. Two probes before this one guarded themselves against
+		// the ordinary in-flight window and in doing so excluded the very case they were written to
+		// catch: a front hole sitting BELOW the builder's frontier. A sender's run is contiguous or it
+		// is not, and the three numbers that decide it — the chain's next nonce, the pool's lowest, and
+		// how many the pool holds — are cheap. Report them and let the reader do the arithmetic.
+		logger.Warn("[sender-run] the busiest sender's sequence, as the pool holds it",
+			"run", p.busiestSenderRun(cacheView))
 	}
 
 	for senderID := range sendersWithChangedState {
@@ -3209,4 +3216,40 @@ func (p *TxPool) topSendersSummary(n int) string {
 type admitCount struct {
 	n        int
 	maxNonce uint64
+}
+
+// busiestSenderRun describes the sequence of the sender with the most transactions in this pool:
+// what the chain's next nonce for it is, the lowest and highest the pool holds, how many it holds,
+// and therefore whether the run between those bounds is complete.
+//
+// A contiguous run satisfies: count == highest - lowest + 1, and lowest == chainNonce. Anything else
+// is a hole, and the arithmetic says how big without needing a second instrument.
+func (p *TxPool) busiestSenderRun(cacheView kvcache.CacheView) string {
+	var best uint64
+	var bestN int
+	for id, a := range p.admittedBySender {
+		if a.n > bestN {
+			best, bestN = id, a.n
+		}
+	}
+	if bestN == 0 {
+		return "none"
+	}
+	lowest, haveLow := p.all.nonceFront(best)
+	highest, haveHigh := p.all.nonce(best)
+	if !haveLow || !haveHigh {
+		return fmt.Sprintf("sender=%d holds nothing", best)
+	}
+	held := p.all.senderIDTxnCount[best]
+	span := highest - lowest + 1
+	chainNonce := uint64(0)
+	if n, _, err := p.senders.info(cacheView, best); err == nil {
+		chainNonce = n
+	}
+	name := fmt.Sprintf("id%d", best)
+	if addr, ok := p.senders.senderID2Addr[best]; ok {
+		name = addr.String()
+	}
+	return fmt.Sprintf("%s chainNext=%d poolLowest=%d poolHighest=%d held=%d span=%d holesInSpan=%d frontGap=%d",
+		name, chainNonce, lowest, highest, held, span, int(span)-held, int64(lowest)-int64(chainNonce))
 }
