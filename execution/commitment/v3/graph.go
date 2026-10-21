@@ -257,6 +257,24 @@ func (p foldPlan) parallel() bool {
 	return p.factory != nil && p.workers > 1
 }
 
+func (p foldPlan) run(nibs []int, fn func(commitment.PatriciaContext, int, int) error) error {
+	eg, egCtx := errgroup.WithContext(p.ctx)
+	eg.SetLimit(min(p.workers, len(nibs)))
+	for k, nib := range nibs {
+		eg.Go(func() error {
+			workerCtx, cleanup := p.factory(egCtx)
+			if cleanup != nil {
+				defer cleanup()
+			}
+			if workerCtx == nil {
+				return errNodeRecord
+			}
+			return fn(workerCtx, k, nib)
+		})
+	}
+	return eg.Wait()
+}
+
 func (g graph) materializeRootChildren(root *node, plan foldPlan) ([]deltaParts, error) {
 	nibs := make([]int, 0, 16)
 	for nib := range 16 {
@@ -270,23 +288,12 @@ func (g graph) materializeRootChildren(root *node, plan foldPlan) ([]deltaParts,
 
 	accs := make([]deltaParts, len(nibs))
 	hashes := make([][32]byte, len(nibs))
-	eg, egCtx := errgroup.WithContext(plan.ctx)
-	eg.SetLimit(min(plan.workers, len(nibs)))
-	for k, nib := range nibs {
-		eg.Go(func() error {
-			workerCtx, cleanup := plan.factory(egCtx)
-			if cleanup != nil {
-				defer cleanup()
-			}
-			if workerCtx == nil {
-				return errNodeRecord
-			}
-			hash, err := g.materialize(workerCtx, root.child(nib), root, &accs[k])
-			hashes[k] = hash
-			return err
-		})
-	}
-	if err := eg.Wait(); err != nil {
+	err := plan.run(nibs, func(workerCtx commitment.PatriciaContext, k, nib int) error {
+		hash, err := g.materialize(workerCtx, root.child(nib), root, &accs[k])
+		hashes[k] = hash
+		return err
+	})
+	if err != nil {
 		return nil, err
 	}
 	for k, nib := range nibs {

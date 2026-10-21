@@ -406,27 +406,15 @@ func (g graph) fanOutRoot(ctx commitment.PatriciaContext, root *node, n int, nib
 	if err := g.ensureRootChildren(ctx, root, nibs); err != nil {
 		return true, err
 	}
-	eg, egCtx := errgroup.WithContext(plan.ctx)
-	eg.SetLimit(min(plan.workers, len(nibs)))
-	for _, nib := range nibs {
-		eg.Go(func() error {
-			workerCtx, cleanup := plan.factory(egCtx)
-			if cleanup != nil {
-				defer cleanup()
+	return true, plan.run(nibs, func(workerCtx commitment.PatriciaContext, _, nib int) error {
+		for _, i := range groups[nib] {
+			if err := fn(workerCtx, i); err != nil {
+				return err
 			}
-			if workerCtx == nil {
-				return errNodeRecord
-			}
-			for _, i := range groups[nib] {
-				if err := fn(workerCtx, i); err != nil {
-					return err
-				}
-			}
-			if after != nil {
-				return after(workerCtx, nib, groups[nib])
-			}
-			return nil
-		})
-	}
-	return true, eg.Wait()
+		}
+		if after != nil {
+			return after(workerCtx, nib, groups[nib])
+		}
+		return nil
+	})
 }

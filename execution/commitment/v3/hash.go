@@ -52,7 +52,10 @@ func appendLeafRLP(dst, suffix, payload []byte) []byte {
 
 func leafRef(suffix []byte, payload []byte, dst []byte) []byte {
 	start := len(dst)
-	dst = appendLeafRLP(dst, suffix, payload)
+	return hashLongRef(appendLeafRLP(dst, suffix, payload), start)
+}
+
+func hashLongRef(dst []byte, start int) []byte {
 	if len(dst)-start < 32 {
 		return dst
 	}
@@ -84,23 +87,15 @@ func appendStorageLeafRLP(dst, suffix, payload []byte) []byte {
 
 func storageLeafRef(suffix []byte, payload []byte, dst []byte) []byte {
 	start := len(dst)
-	dst = appendStorageLeafRLP(dst, suffix, payload)
+	dst = hashLongRef(appendStorageLeafRLP(dst, suffix, payload), start)
 	if len(dst)-start < 32 {
 		return dst[start:]
 	}
-	hash := keccak.Sum256(dst[start:])
-	return append(dst[:start], hash[:]...)
+	return dst
 }
 
 func appendExtensionRLP(dst, ext, childHash []byte) []byte {
-	compact := nibbles.HexToCompact(ext)
-	contentLen := rlp.StringLen(compact) + rlp.StringLen(childHash)
-	start := len(dst)
-	dst = append(dst, make([]byte, rlp.ListLen(contentLen))...)
-	pos := start + rlp.EncodeListPrefixToBuf(contentLen, dst[start:])
-	pos += rlp.EncodeStringToBuf(compact, dst[pos:])
-	pos += rlp.EncodeStringToBuf(childHash, dst[pos:])
-	return dst[:pos]
+	return appendLeafRLP(dst, nibbles.HexToCompact(ext), childHash)
 }
 
 func extensionRef(ext []byte, childHash []byte) [32]byte {
