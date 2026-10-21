@@ -62,8 +62,10 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/execution/chain"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/aura"
+	"github.com/erigontech/erigon/execution/protocol/rules/clique"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/state"
@@ -541,6 +543,15 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 
 	if cfg.WithDatadir {
 		switch {
+		case cc != nil && cc.Clique != nil:
+			consensusDB, err := kv2.New(dbcfg.ConsensusDB, logger).Path(filepath.Join(cfg.DataDir, "clique")).Accede(true).Open(ctx)
+			if err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, ff, err
+			}
+			engine = clique.New(cc, chainspec.CliqueSnapshot, consensusDB, logger)
+			if cc.TerminalTotalDifficulty != nil {
+				engine = merge.New(engine) // the Merge
+			}
 		case cc != nil && cc.Aura != nil:
 			consensusDB, err := kv2.New(dbcfg.ConsensusDB, logger).Path(filepath.Join(cfg.DataDir, "aura")).Accede(true).Open(ctx)
 			if err != nil {
@@ -1003,6 +1014,14 @@ func (e *remoteRulesEngine) init(db kv.RoDB, blockReader dbservices.FullBlockRea
 	// TODO(yperbasis): try to unify with CreateRulesEngine
 	var eng rules.Engine
 	switch {
+	case cc.Clique != nil:
+		cliqueKV, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteKV).
+			WithBucketsConfig(kv.ConsensusTablesCfg).
+			Open()
+		if err != nil {
+			return err
+		}
+		eng = clique.New(cc, chainspec.CliqueSnapshot, cliqueKV, logger)
 	case cc.Aura != nil:
 		auraKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteKV).
 			WithBucketsConfig(kv.AuRaTablesCfg).

@@ -88,6 +88,17 @@ func TestConfigValueLookup(t *testing.T) {
 	assert.Equal(t, address2, ConfigValueLookup(burntContract, 41874000+1))
 }
 
+func TestCliqueConfigJSONRoundTrip(t *testing.T) {
+	input := []byte(`{"chainId":59141,"clique":{"period":1,"epoch":30000}}`)
+	var config Config
+	require.NoError(t, json.Unmarshal(input, &config))
+	encoded, err := json.Marshal(&config)
+	require.NoError(t, err)
+	var fields map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(encoded, &fields))
+	require.JSONEq(t, `{"period":1,"epoch":30000}`, string(fields["clique"]))
+}
+
 func TestEmptyConfigValueLookup(t *testing.T) {
 	blobSchedule := make(map[uint64]*params.BlobConfig)
 	assert.Nil(t, ConfigValueLookup(blobSchedule, 0))
