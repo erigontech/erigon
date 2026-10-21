@@ -130,8 +130,8 @@ func TestProcessPtcWindowIgnoresCachesWithoutSlotTransitionEvidence(t *testing.T
 	}
 	resetCaches()
 	for _, root := range []common.Hash{headerRoot, blockRoot, stateRoot} {
-		caches.ActiveValidatorsCacheGlobal.Put(targetEpoch, root, activePoison, 1)
-		caches.LookaheadActiveValidatorsCacheGlobal.Put(targetEpoch, root, activePoison, 1)
+		caches.ActiveValidatorsCacheGlobal.Put(targetEpoch, root, activePoison)
+		caches.LookaheadActiveValidatorsCacheGlobal.Put(targetEpoch, root, activePoison)
 		caches.ShuffledIndiciesCacheGlobal.Put(targetEpoch, root, shuffledPoison)
 		caches.LookaheadShuffledIndiciesCacheGlobal.Put(targetEpoch, root, shuffledPoison)
 	}
@@ -139,14 +139,12 @@ func TestProcessPtcWindowIgnoresCachesWithoutSlotTransitionEvidence(t *testing.T
 	got := processPtcWindowCopy(t, base)
 	require.Equal(t, want, ptcWindowValues(got))
 	for _, root := range []common.Hash{headerRoot, blockRoot, stateRoot} {
-		mainActive, mainBalance, ok := caches.ActiveValidatorsCacheGlobal.Get(targetEpoch, root)
+		mainActive, ok := caches.ActiveValidatorsCacheGlobal.Get(targetEpoch, root)
 		require.True(t, ok)
 		require.Same(t, unsafe.SliceData(activePoison), unsafe.SliceData(mainActive))
-		require.Equal(t, uint64(1), mainBalance)
-		lookaheadActive, lookaheadBalance, ok := caches.LookaheadActiveValidatorsCacheGlobal.Get(targetEpoch, root)
+		lookaheadActive, ok := caches.LookaheadActiveValidatorsCacheGlobal.Get(targetEpoch, root)
 		require.True(t, ok)
 		require.Same(t, unsafe.SliceData(activePoison), unsafe.SliceData(lookaheadActive))
-		require.Equal(t, uint64(1), lookaheadBalance)
 		mainShuffled, ok := caches.ShuffledIndiciesCacheGlobal.Get(targetEpoch, root)
 		require.True(t, ok)
 		require.Same(t, unsafe.SliceData(shuffledPoison), unsafe.SliceData(mainShuffled))
@@ -203,9 +201,9 @@ func TestProcessPtcWindowDoesNotCacheUnknownDecisionRoot(t *testing.T) {
 		require.False(t, ok)
 		_, ok = caches.LookaheadShuffledIndiciesCacheGlobal.Get(epoch, root)
 		require.False(t, ok)
-		_, _, ok = caches.ActiveValidatorsCacheGlobal.Get(epoch, root)
+		_, ok = caches.ActiveValidatorsCacheGlobal.Get(epoch, root)
 		require.False(t, ok)
-		_, _, ok = caches.LookaheadActiveValidatorsCacheGlobal.Get(epoch, root)
+		_, ok = caches.LookaheadActiveValidatorsCacheGlobal.Get(epoch, root)
 		require.False(t, ok)
 	}
 }
@@ -217,7 +215,7 @@ func TestProcessPtcWindowReplaysDoNotEvictMainCaches(t *testing.T) {
 	root := common.Hash{0xff}
 	active := []uint64{1, 2, 3}
 	shuffled := []uint64{3, 2, 1}
-	caches.ActiveValidatorsCacheGlobal.Put(epoch, root, active, 123)
+	caches.ActiveValidatorsCacheGlobal.Put(epoch, root, active)
 	caches.ShuffledIndiciesCacheGlobal.Put(epoch, root, shuffled)
 
 	for i := range caches.MaxShuffledIndiciesCacheSize + 1 {
@@ -227,10 +225,9 @@ func TestProcessPtcWindowReplaysDoNotEvictMainCaches(t *testing.T) {
 		require.NoError(t, statechange.ProcessPtcWindow(replay))
 	}
 
-	gotActive, gotBalance, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, root)
+	gotActive, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, root)
 	require.True(t, ok)
 	require.Equal(t, active, gotActive)
-	require.Equal(t, uint64(123), gotBalance)
 	gotShuffled, ok := caches.ShuffledIndiciesCacheGlobal.Get(epoch, root)
 	require.True(t, ok)
 	require.Equal(t, shuffled, gotShuffled)
@@ -246,8 +243,8 @@ func TestUnavailableDecisionRootsStayUncached(t *testing.T) {
 	}
 	for _, epoch := range []uint64{0, 1, state.Epoch(base) + 3} {
 		resetCaches()
-		caches.ActiveValidatorsCacheGlobal.Put(epoch, common.Hash{}, poison, 1)
-		caches.LookaheadActiveValidatorsCacheGlobal.Put(epoch, common.Hash{}, poison, 1)
+		caches.ActiveValidatorsCacheGlobal.Put(epoch, common.Hash{}, poison)
+		caches.LookaheadActiveValidatorsCacheGlobal.Put(epoch, common.Hash{}, poison)
 		caches.ShuffledIndiciesCacheGlobal.Put(epoch, common.Hash{}, poison)
 		caches.LookaheadShuffledIndiciesCacheGlobal.Put(epoch, common.Hash{}, poison)
 		copied, err := base.Copy()
@@ -259,14 +256,12 @@ func TestUnavailableDecisionRootsStayUncached(t *testing.T) {
 		committee, err := copied.GetBeaconCommitee(epoch*cfg.SlotsPerEpoch, 0)
 		require.NoError(t, err)
 		require.NotEqual(t, uint64(math.MaxUint64), committee[0])
-		mainActive, mainTotal, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, common.Hash{})
+		mainActive, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, common.Hash{})
 		require.True(t, ok)
 		require.Same(t, unsafe.SliceData(poison), unsafe.SliceData(mainActive))
-		require.Equal(t, uint64(1), mainTotal)
-		lookaheadActive, lookaheadTotal, ok := caches.LookaheadActiveValidatorsCacheGlobal.Get(epoch, common.Hash{})
+		lookaheadActive, ok := caches.LookaheadActiveValidatorsCacheGlobal.Get(epoch, common.Hash{})
 		require.True(t, ok)
 		require.Same(t, unsafe.SliceData(poison), unsafe.SliceData(lookaheadActive))
-		require.Equal(t, uint64(1), lookaheadTotal)
 		mainShuffled, ok := caches.ShuffledIndiciesCacheGlobal.Get(epoch, common.Hash{})
 		require.True(t, ok)
 		require.Same(t, unsafe.SliceData(poison), unsafe.SliceData(mainShuffled))
@@ -274,9 +269,9 @@ func TestUnavailableDecisionRootsStayUncached(t *testing.T) {
 		require.True(t, ok)
 		require.Same(t, unsafe.SliceData(poison), unsafe.SliceData(lookaheadShuffled))
 		root := ptcDecisionRoot(t, base)
-		_, _, ok = caches.ActiveValidatorsCacheGlobal.Get(epoch, root)
+		_, ok = caches.ActiveValidatorsCacheGlobal.Get(epoch, root)
 		require.False(t, ok)
-		_, _, ok = caches.LookaheadActiveValidatorsCacheGlobal.Get(epoch, root)
+		_, ok = caches.LookaheadActiveValidatorsCacheGlobal.Get(epoch, root)
 		require.False(t, ok)
 		_, ok = caches.ShuffledIndiciesCacheGlobal.Get(epoch, root)
 		require.False(t, ok)
@@ -299,8 +294,8 @@ func TestMainCachesTakePrecedenceOverLookaheadCaches(t *testing.T) {
 		main[i] = uint64(i)
 		lookahead[i] = uint64(len(lookahead) - i - 1)
 	}
-	caches.ActiveValidatorsCacheGlobal.Put(epoch, blockRoot, main, 0)
-	caches.LookaheadActiveValidatorsCacheGlobal.Put(epoch, stateRoot, lookahead, 0)
+	caches.ActiveValidatorsCacheGlobal.Put(epoch, blockRoot, main)
+	caches.LookaheadActiveValidatorsCacheGlobal.Put(epoch, stateRoot, lookahead)
 	caches.ShuffledIndiciesCacheGlobal.Put(epoch, blockRoot, main)
 	caches.LookaheadShuffledIndiciesCacheGlobal.Put(epoch, stateRoot, lookahead)
 
@@ -309,22 +304,6 @@ func TestMainCachesTakePrecedenceOverLookaheadCaches(t *testing.T) {
 	committee, err := fresh.GetBeaconCommitee(epoch*base.BeaconConfig().SlotsPerEpoch, 0)
 	require.NoError(t, err)
 	require.Same(t, unsafe.SliceData(main), unsafe.SliceData(committee))
-}
-
-func TestLookaheadActiveValidatorsDoNotSupplyTotalBalance(t *testing.T) {
-	useFreshValidatorCaches(t)
-	base := ptcWindowTestState(t, 2_048)
-	processed := processPtcWindowCopy(t, base)
-	epoch := nextPtcEpochFirstSlot(base) / base.BeaconConfig().SlotsPerEpoch
-	lookaheadRoot := base.StateRoots().Get(int(base.Slot() % base.BeaconConfig().SlotsPerHistoricalRoot))
-	indices, total, ok := caches.LookaheadActiveValidatorsCacheGlobal.Get(epoch, lookaheadRoot)
-	require.True(t, ok)
-	require.Len(t, indices, base.ValidatorLength())
-	require.Zero(t, total)
-	want := uint64(base.ValidatorLength()) * base.BeaconConfig().MaxEffectiveBalance
-	caches.LookaheadActiveValidatorsCacheGlobal.Put(epoch, lookaheadRoot, indices, want+1)
-	require.NoError(t, processed.SetSlot(epoch*base.BeaconConfig().SlotsPerEpoch))
-	require.Equal(t, want, processed.GetTotalActiveBalance())
 }
 
 func TestProcessPtcWindowConcurrentSharedCache(t *testing.T) {

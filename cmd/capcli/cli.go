@@ -142,7 +142,7 @@ func (c *Chain) Run(ctx context.Context) error {
 	}
 	defer db.Close()
 
-	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, ethClock, nil)
+	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, ethClock)
 
 	bRoot, err := bs.BlockRoot()
 	if err != nil {

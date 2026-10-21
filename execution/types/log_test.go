@@ -400,6 +400,22 @@ func TestAppendFilteredLogs(t *testing.T) {
 	}
 }
 
+func TestAppendFilteredLogsAllocatesOncePerCall(t *testing.T) {
+	logs := make(Logs, 8)
+	for i := range logs {
+		logs[i] = &Log{Address: common.Address{byte(i)}}
+	}
+	f := NewLogFilter(nil, nil)
+	dst := make(Logs, 0, len(logs))
+	allocs := testing.AllocsPerRun(10, func() {
+		dst = logs.AppendFilteredLogs(dst[:0], f, 7, 0)
+	})
+	require.Equal(t, 1.0, allocs)
+
+	*dst[0].BlockTimestamp = 0
+	require.Equal(t, at(7), dst[1].BlockTimestamp, "each log owns its timestamp")
+}
+
 func TestAppendFilteredLogsEmpty(t *testing.T) {
 	t.Parallel()
 
