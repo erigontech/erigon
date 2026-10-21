@@ -1075,7 +1075,7 @@ func TestUpdateWrite_StorageReadThenWriteDifferentValue_BecomesWrite(t *testing.
 	changes := account.changes
 	require.Len(t, changes.StorageChanges, 1,
 		"a write to a different value is a real state change and must be recorded")
-	require.Equal(t, slot, changes.StorageChanges[0].Slot)
+	require.Equal(t, slot.Value(), changes.StorageChanges[0].Slot)
 	require.NotContains(t, account.storageReads, slot,
 		"a real write supersedes the recorded read")
 }
@@ -1596,7 +1596,7 @@ func TestAccountState_IndexCrossoverKeepsSlotsFindable(t *testing.T) {
 	for _, slot := range []accounts.StorageKey{early, late} {
 		seen := 0
 		for _, sc := range changes.StorageChanges {
-			if sc.Slot == slot {
+			if sc.Slot == slot.Value() {
 				seen++
 				require.Len(t, sc.Changes, 2, "the second write must append to the existing slot")
 			}
@@ -1659,7 +1659,7 @@ func newReferenceAccount(addr accounts.Address) *referenceAccount {
 
 func (a *referenceAccount) written(slot accounts.StorageKey) int {
 	for i := range a.changes.StorageChanges {
-		if a.changes.StorageChanges[i].Slot == slot {
+		if a.changes.StorageChanges[i].Slot == slot.Value() {
 			return i
 		}
 	}
@@ -1703,7 +1703,7 @@ func (a *referenceAccount) write(slot accounts.StorageKey, val uint256.Int, idx 
 		return
 	}
 	a.changes.StorageChanges = append(a.changes.StorageChanges, types.SlotChanges{
-		Slot:    slot,
+		Slot:    slot.Value(),
 		Changes: []*types.StorageChange{{Index: idx, Value: val}},
 	})
 }

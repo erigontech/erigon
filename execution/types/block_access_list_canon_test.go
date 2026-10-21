@@ -42,7 +42,7 @@ func TestSlotChangesRejectsNonCanonicalSlot(t *testing.T) {
 	nonCanonical := common.FromHex("0xc7820001c3c20101")
 	var sc SlotChanges
 	if err := rlp.DecodeBytes(nonCanonical, &sc); !errors.Is(err, rlp.ErrCanonInt) {
-		t.Fatalf("expected ErrCanonInt for non-canonical slot, got %v (slot=%x)", err, sc.Slot.Value())
+		t.Fatalf("expected ErrCanonInt for non-canonical slot, got %v (slot=%x)", err, sc.Slot)
 	}
 	// The minimal form 0x01 of the same slot must still decode.
 	canonical := common.FromHex("0xc501c3c20101")

@@ -18,7 +18,6 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
@@ -219,7 +218,7 @@ type AccountChanges struct {
 }
 
 type SlotChanges struct {
-	Slot    accounts.StorageKey
+	Slot    common.Hash
 	Changes []*StorageChange
 }
 
@@ -463,7 +462,7 @@ func (ac *AccountChanges) Normalize() {
 }
 
 func (sc *SlotChanges) EncodingSize() int {
-	size := rlp.Uint256Len(hashToUint256(sc.Slot.Value())) // minimal slot key
+	size := rlp.Uint256Len(hashToUint256(sc.Slot)) // minimal slot key
 	changesLen := encodingSizeBlockAccessList(sc.Changes)
 	size += rlp.ListPrefixLen(changesLen) + changesLen
 	return size
@@ -477,7 +476,7 @@ func (sc *SlotChanges) EncodeRLP(w io.Writer) error {
 	if err := rlp.EncodeListPrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeUint256(hashToUint256(sc.Slot.Value()), w, b[:]); err != nil {
+	if err := rlp.EncodeUint256(hashToUint256(sc.Slot), w, b[:]); err != nil {
 		return err
 	}
 
@@ -496,7 +495,7 @@ func (sc *SlotChanges) decodeRLP(s *rlp.Stream, budget *blockAccessListDecodeBud
 	if err != nil {
 		return fmt.Errorf("read Slot: %w", err)
 	}
-	sc.Slot = accounts.InternKey(slot)
+	sc.Slot = slot
 	changes, err := decodeChangeList[StorageChange](s, budget)
 	if err != nil {
 		return fmt.Errorf("read Changes: %w", err)
@@ -1069,7 +1068,7 @@ func (ac *AccountChanges) validate() error {
 	if len(ac.StorageChanges) > 0 && len(ac.StorageReads) > 0 {
 		changeSlots := make(map[common.Hash]struct{}, len(ac.StorageChanges))
 		for _, sc := range ac.StorageChanges {
-			changeSlots[sc.Slot.Value()] = struct{}{}
+			changeSlots[sc.Slot] = struct{}{}
 		}
 		for _, key := range ac.StorageReads {
 			if _, exists := changeSlots[key]; exists {
@@ -1159,7 +1158,7 @@ func (bal BlockAccessList) DebugPrint(w io.Writer) {
 			fmt.Fprint(w, "\n  storageChanges:")
 			for _, slotChange := range account.StorageChanges {
 				fmt.Fprint(w, "\n    - slot=")
-				fmt.Fprint(w, slotChange.Slot.Value().Hex())
+				fmt.Fprint(w, slotChange.Slot.Hex())
 				fmt.Fprint(w, " changes=[")
 				for j, change := range slotChange.Changes {
 					if j > 0 {
@@ -1242,7 +1241,7 @@ func ConvertBlockAccessListFromTypesProto(protoList []*typesproto.BlockAccessLis
 			bal[i].StorageChanges = make([]SlotChanges, len(acc.StorageChanges))
 			for j, sc := range acc.StorageChanges {
 				bal[i].StorageChanges[j] = SlotChanges{
-					Slot: accounts.InternKey(gointerfaces.ConvertH256ToHash(sc.Slot)),
+					Slot: gointerfaces.ConvertH256ToHash(sc.Slot),
 				}
 				if sc.Changes != nil {
 					bal[i].StorageChanges[j].Changes = make([]*StorageChange, len(sc.Changes))
@@ -1311,7 +1310,7 @@ func ConvertBlockAccessListToTypesProto(bal BlockAccessList) []*typesproto.Block
 		for si := range account.StorageChanges {
 			storageChange := &account.StorageChanges[si]
 			slotChanges := &typesproto.BlockAccessListSlotChanges{
-				Slot: gointerfaces.ConvertHashToH256(storageChange.Slot.Value()),
+				Slot: gointerfaces.ConvertHashToH256(storageChange.Slot),
 			}
 			for _, change := range storageChange.Changes {
 				if change == nil {
@@ -1391,7 +1390,7 @@ func ConvertBlockAccessListToExecutionProto(bal BlockAccessList) []*executionpro
 		for si := range account.StorageChanges {
 			storageChange := &account.StorageChanges[si]
 			slotChanges := &executionproto.BlockAccessListSlotChanges{
-				Slot: gointerfaces.ConvertHashToH256(storageChange.Slot.Value()),
+				Slot: gointerfaces.ConvertHashToH256(storageChange.Slot),
 			}
 			for _, change := range storageChange.Changes {
 				if change == nil {
@@ -1464,7 +1463,7 @@ func ConvertExecutionProtoToBlockAccessList(protoList []*executionproto.BlockAcc
 			if storageChange.Slot == nil {
 				return nil, fmt.Errorf("blockAccessList account %d storageChanges[%d] missing slot", accountIdx, slotIdx)
 			}
-			slotChanges := &SlotChanges{Slot: accounts.InternKey(gointerfaces.ConvertH256ToHash(storageChange.Slot))}
+			slotChanges := &SlotChanges{Slot: gointerfaces.ConvertH256ToHash(storageChange.Slot)}
 			for changeIdx, change := range storageChange.Changes {
 				if change == nil {
 					return nil, fmt.Errorf("blockAccessList account %d storageChanges[%d].changes[%d] is nil", accountIdx, slotIdx, changeIdx)

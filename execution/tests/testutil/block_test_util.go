@@ -135,7 +135,7 @@ func (bal btBlockAccessList) toBAL() types.BlockAccessList {
 		}
 		for _, sc := range ac.StorageChanges {
 			slotChanges := types.SlotChanges{
-				Slot:    accounts.InternKey(common.BytesToHash(sc.Slot)),
+				Slot:    common.BytesToHash(sc.Slot),
 				Changes: make([]*types.StorageChange, 0, len(sc.SlotChanges)),
 			}
 			for _, change := range sc.SlotChanges {

@@ -22,7 +22,7 @@ func TestBlockAccessListCopy(t *testing.T) {
 	bal := BlockAccessList{{
 		Address: common.Address{1},
 		StorageChanges: []SlotChanges{{
-			Slot:    accounts.InternKey(common.Hash{2}),
+			Slot:    common.Hash{2},
 			Changes: []*StorageChange{{Index: 1, Value: *uint256.NewInt(3)}},
 		}},
 		StorageReads:   []common.Hash{{4}},
@@ -60,8 +60,8 @@ func TestDecodeBlockAccessListSidecarForHeaderRejectsDuplicateItems(t *testing.T
 	}{
 		{name: "accounts", bal: BlockAccessList{{}, {}}},
 		{name: "storage slots", bal: BlockAccessList{{StorageChanges: []SlotChanges{
-			{Slot: accounts.ZeroKey, Changes: []*StorageChange{{}}},
-			{Slot: accounts.ZeroKey, Changes: []*StorageChange{{}}},
+			{Slot: common.Hash{}, Changes: []*StorageChange{{}}},
+			{Slot: common.Hash{}, Changes: []*StorageChange{{}}},
 		}}}},
 		{name: "storage reads", bal: BlockAccessList{{StorageReads: []common.Hash{{}, {}}}}},
 	} {
@@ -171,7 +171,7 @@ func TestBlockAccessListValidateForBlockBoundsIndices(t *testing.T) {
 	accountWith := map[string]func(index uint32) AccountChanges{
 		"storage change": func(index uint32) AccountChanges {
 			return AccountChanges{Address: common.Address{1}, StorageChanges: []SlotChanges{{
-				Slot:    accounts.InternKey(common.Hash{1}),
+				Slot:    common.Hash{1},
 				Changes: []*StorageChange{{Index: index}},
 			}}}
 		},
@@ -327,7 +327,7 @@ func TestBlockAccessListCodecLeavesSemanticValidationToValidateForBlock(t *testi
 			bal: BlockAccessList{{
 				Address: common.Address{1},
 				StorageChanges: []SlotChanges{{
-					Slot: accounts.InternKey(common.Hash{1}),
+					Slot: common.Hash{1},
 				}},
 			}},
 			wantError: "empty slot changes",
@@ -368,7 +368,7 @@ func TestEncodeBlockAccessListRejectsNestedNil(t *testing.T) {
 			bal: BlockAccessList{{
 				Address: common.Address{1},
 				StorageChanges: []SlotChanges{{
-					Slot:    accounts.InternKey(common.Hash{1}),
+					Slot:    common.Hash{1},
 					Changes: []*StorageChange{nil},
 				}},
 			}},
@@ -410,7 +410,7 @@ func TestBlockAccessListRLPEncoding(t *testing.T) {
 			Address: common.HexToAddress("0x00000000000000000000000000000000000000aa"),
 			StorageChanges: []SlotChanges{
 				{
-					Slot: accounts.InternKey(common.HexToHash("0x01")),
+					Slot: common.HexToHash("0x01"),
 					Changes: []*StorageChange{
 						{Index: 1, Value: *uint256.NewInt(2)},
 						{Index: 5, Value: *uint256.NewInt(3)},
@@ -525,7 +525,7 @@ func TestBlockAccessListLargeLists(t *testing.T) {
 					key := common.Hash{0: 1}
 					binary.BigEndian.PutUint64(key[24:], uint64(i))
 					slots[i] = SlotChanges{
-						Slot:    accounts.InternKey(key),
+						Slot:    key,
 						Changes: []*StorageChange{{Index: 1, Value: *uint256.NewInt(1)}},
 					}
 				}
@@ -543,7 +543,7 @@ func TestBlockAccessListLargeLists(t *testing.T) {
 					}
 				}
 				return BlockAccessList{{StorageChanges: []SlotChanges{{
-					Slot:    accounts.InternKey(common.Hash{1}),
+					Slot:    common.Hash{1},
 					Changes: changes,
 				}}}}
 			},
@@ -608,7 +608,7 @@ func TestBlockAccessListValidateForHeaderRejectsOversizedEarly(t *testing.T) {
 		var key common.Hash
 		binary.BigEndian.PutUint64(key[24:], uint64(i+1))
 		slots[i] = SlotChanges{
-			Slot:    accounts.InternKey(key),
+			Slot:    key,
 			Changes: []*StorageChange{{Index: 1}},
 		}
 	}
@@ -673,7 +673,7 @@ func TestBlockAccessListSlotUniqueness(t *testing.T) {
 		Address: addr,
 		StorageChanges: []SlotChanges{
 			{
-				Slot:    accounts.InternKey(slot),
+				Slot:    slot,
 				Changes: []*StorageChange{{Index: 0, Value: *uint256.NewInt(1)}},
 			},
 		},
@@ -788,7 +788,7 @@ func TestBlockAccessListRejectsEmptySlotChanges(t *testing.T) {
 		Address: addr,
 		StorageChanges: []SlotChanges{
 			{
-				Slot:    accounts.InternKey(slot),
+				Slot:    slot,
 				Changes: []*StorageChange{}, // Intentionally empty list
 			},
 		},
@@ -831,7 +831,7 @@ func TestAccountChangesDecodeRLPClearsStorageChanges(t *testing.T) {
 	withSlots := AccountChanges{
 		Address: common.Address{1},
 		StorageChanges: []SlotChanges{{
-			Slot:    accounts.InternKey(common.Hash{2}),
+			Slot:    common.Hash{2},
 			Changes: []*StorageChange{{Index: 1, Value: *uint256.NewInt(3)}},
 		}},
 	}

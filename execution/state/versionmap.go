@@ -248,6 +248,7 @@ func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 			)
 		}
 		for _, storageChanges := range accountChanges.StorageChanges {
+			slot := accounts.InternKey(storageChanges.Slot)
 			for _, change := range storageChanges.Changes {
 				if dbg.TraceBALFeed {
 					fmt.Printf(
@@ -259,7 +260,7 @@ func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 						change.Value.Hex(),
 					)
 				}
-				vm.WriteStorage(addr, storageChanges.Slot, Version{TxIndex: int(change.Index) - 1}, change.Value, true)
+				vm.WriteStorage(addr, slot, Version{TxIndex: int(change.Index) - 1}, change.Value, true)
 			}
 		}
 		for _, balanceChange := range accountChanges.BalanceChanges {

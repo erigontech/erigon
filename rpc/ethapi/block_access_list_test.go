@@ -9,7 +9,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestMarshalBlockAccessList(t *testing.T) {
@@ -18,7 +17,7 @@ func TestMarshalBlockAccessList(t *testing.T) {
 			Address: common.HexToAddress("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"),
 			StorageChanges: []types.SlotChanges{
 				{
-					Slot: accounts.InternKey(common.Hash{}),
+					Slot: common.Hash{},
 					Changes: []*types.StorageChange{
 						{Index: 0, Value: *uint256.NewInt(0)},
 						{Index: 1, Value: *uint256.NewInt(256)},

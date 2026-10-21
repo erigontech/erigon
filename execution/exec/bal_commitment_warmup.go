@@ -47,7 +47,7 @@ func balCommitmentWarmupKeys(bal types.BlockAccessList) [][]byte {
 			keys = append(keys, commitment.KeyToHexNibbleHash(address[:]))
 		}
 		for _, storage := range account.StorageChanges {
-			slot := storage.Slot.Value()
+			slot := storage.Slot
 			plainKey := make([]byte, len(address)+len(slot))
 			copy(plainKey, address[:])
 			copy(plainKey[len(address):], slot[:])

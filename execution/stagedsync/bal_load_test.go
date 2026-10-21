@@ -65,11 +65,11 @@ func TestLoadFromBAL_MatchesApplyWrites(t *testing.T) {
 		{
 			Address: addrB.Value(),
 			StorageChanges: []types.SlotChanges{
-				{Slot: slotS1, Changes: []*types.StorageChange{
+				{Slot: slotS1.Value(), Changes: []*types.StorageChange{
 					{Index: 0, Value: *uint256.NewInt(1)},
 					{Index: 2, Value: *uint256.NewInt(77)}, // final
 				}},
-				{Slot: slotS2, Changes: []*types.StorageChange{
+				{Slot: slotS2.Value(), Changes: []*types.StorageChange{
 					{Index: 1, Value: *uint256.NewInt(42)},
 				}},
 			},

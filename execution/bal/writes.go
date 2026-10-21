@@ -61,8 +61,9 @@ func ToWriteSet(blockAccessList types.BlockAccessList, maxTxIndex uint32) *state
 		}
 		for _, slotChanges := range accountChanges.StorageChanges {
 			if change, ok := finalChangeUpTo(slotChanges.Changes, maxTxIndex); ok {
-				writes.SetStorage(addr, slotChanges.Slot, &state.VersionedWrite[uint256.Int]{
-					WriteHeader: state.WriteHeader{Address: addr, Path: state.StoragePath, Key: slotChanges.Slot}, Val: change.Value,
+				slot := accounts.InternKey(slotChanges.Slot)
+				writes.SetStorage(addr, slot, &state.VersionedWrite[uint256.Int]{
+					WriteHeader: state.WriteHeader{Address: addr, Path: state.StoragePath, Key: slot}, Val: change.Value,
 				})
 			}
 		}

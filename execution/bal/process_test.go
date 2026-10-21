@@ -95,7 +95,7 @@ func TestCreateBALOrdering(t *testing.T) {
 		t.Fatalf("expected two storage slots for addrB, got %d", len(accountB.StorageChanges))
 	}
 
-	if accountB.StorageChanges[0].Slot != slot1 || accountB.StorageChanges[1].Slot != slot2 {
+	if accountB.StorageChanges[0].Slot != slot1.Value() || accountB.StorageChanges[1].Slot != slot2.Value() {
 		t.Fatalf("storage slots not sorted: %x %x", accountB.StorageChanges[0].Slot, accountB.StorageChanges[1].Slot)
 	}
 
@@ -211,7 +211,7 @@ func TestBALBlock943Direct(t *testing.T) {
 			Address: eip2935Addr.Value(),
 			StorageChanges: []types.SlotChanges{
 				{
-					Slot:    slot2935,
+					Slot:    slot2935.Value(),
 					Changes: []*types.StorageChange{{Index: 0, Value: *val2935}},
 				},
 			},
@@ -221,11 +221,11 @@ func TestBALBlock943Direct(t *testing.T) {
 			Address: eip4788Addr.Value(),
 			StorageChanges: []types.SlotChanges{
 				{
-					Slot:    slot4788Timestamp,
+					Slot:    slot4788Timestamp.Value(),
 					Changes: []*types.StorageChange{{Index: 0, Value: *val4788Timestamp}},
 				},
 				{
-					Slot:    slot4788Root,
+					Slot:    slot4788Root.Value(),
 					Changes: []*types.StorageChange{{Index: 0, Value: *val4788Root}},
 				},
 			},
@@ -331,7 +331,7 @@ func TestBALBlock943ViaVersionedIO(t *testing.T) {
 			len(ac.BalanceChanges), len(ac.NonceChanges), len(ac.CodeChanges))
 		for _, sc := range ac.StorageChanges {
 			for _, ch := range sc.Changes {
-				t.Logf("    slot %s [%d] -> %s", sc.Slot.Value().Hex(), ch.Index, ch.Value.Hex())
+				t.Logf("    slot %s [%d] -> %s", sc.Slot.Hex(), ch.Index, ch.Value.Hex())
 			}
 		}
 		for _, sr := range ac.StorageReads {

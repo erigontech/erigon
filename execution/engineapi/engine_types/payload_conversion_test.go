@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestExecutionPayloadToEth1BlockRejectsNilConfig(t *testing.T) {
@@ -147,7 +146,7 @@ func TestExecutionPayloadFromBlockReturnsSidecarEncodingError(t *testing.T) {
 	sidecar := types.NewBlockAccessListSidecar(types.BlockAccessList{{
 		Address: common.Address{2},
 		StorageChanges: []types.SlotChanges{{
-			Slot:    accounts.InternKey(common.Hash{3}),
+			Slot:    common.Hash{3},
 			Changes: []*types.StorageChange{nil},
 		}},
 	}})

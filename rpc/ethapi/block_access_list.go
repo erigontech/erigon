@@ -74,7 +74,7 @@ func MarshalBlockAccessList(bal types.BlockAccessList) []*RPCAccountAccess {
 		}
 		for j, sc := range ac.StorageChanges {
 			slot := &RPCSlotChanges{
-				Key:     sc.Slot.Value(),
+				Key:     sc.Slot,
 				Changes: make([]*RPCStorageChange, len(sc.Changes)),
 			}
 			for k, ch := range sc.Changes {

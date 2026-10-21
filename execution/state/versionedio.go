@@ -2945,6 +2945,7 @@ type accountState struct {
 	balanceValue        *uint256.Int                        // tracks latest seen balance
 	initialBalanceValue *uint256.Int                        // tracks pre-block balance for net-zero detection
 	storageReadValues   map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
+	storageWrites       []accounts.StorageKey               // the slot of each changes.StorageChanges entry, same order
 	slotWrites          map[accounts.StorageKey]int         // slot -> index into changes.StorageChanges, built past slotIndexMin
 	storageReads        []accounts.StorageKey               // copied into changes.StorageReads by finalize
 	slotReads           map[accounts.StorageKey]int         // slot -> index into storageReads, built with slotWrites
@@ -3204,8 +3205,8 @@ func (account *accountState) storageWriteIndex(slot accounts.StorageKey) int {
 		}
 		return -1
 	}
-	for i := range account.changes.StorageChanges {
-		if account.changes.StorageChanges[i].Slot == slot {
+	for i, s := range account.storageWrites {
+		if s == slot {
 			return i
 		}
 	}
@@ -3237,14 +3238,15 @@ func (account *accountState) addStorageUpdate(at int, slot accounts.StorageKey, 
 	if account.slotWrites != nil {
 		account.slotWrites[slot] = len(ac.StorageChanges)
 	}
+	account.storageWrites = append(account.storageWrites, slot)
 	ac.StorageChanges = append(ac.StorageChanges, types.SlotChanges{
-		Slot:    slot,
+		Slot:    slot.Value(),
 		Changes: []*types.StorageChange{{Index: txIndex, Value: val}},
 	})
 	if account.slotWrites == nil && len(ac.StorageChanges) >= slotIndexMin {
 		account.slotWrites = make(map[accounts.StorageKey]int, len(ac.StorageChanges))
-		for i := range ac.StorageChanges {
-			account.slotWrites[ac.StorageChanges[i].Slot] = i
+		for i, s := range account.storageWrites {
+			account.slotWrites[s] = i
 		}
 		// StorageReads can hold the same slot twice: below the threshold reads are
 		// appended unchecked, and Normalize is what dedups them. The index needs

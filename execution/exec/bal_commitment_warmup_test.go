@@ -123,7 +123,7 @@ func TestBALCommitmentWarmupKeysUseChangesOnly(t *testing.T) {
 		{Address: readOnlyAddress.Value(), StorageReads: []common.Hash{readSlot.Value()}},
 		{Address: accountAddress.Value(), BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}}},
 		{Address: storageAddress.Value(), StorageChanges: []types.SlotChanges{{
-			Slot: changedSlot, Changes: []*types.StorageChange{{Value: *uint256.NewInt(2)}},
+			Slot: changedSlot.Value(), Changes: []*types.StorageChange{{Value: *uint256.NewInt(2)}},
 		}}},
 	}
 

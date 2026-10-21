@@ -294,13 +294,13 @@ func warmBALStateTask(stateReader *state.ReaderV3, account *types.AccountChanges
 	}
 	storageChanges := uint32(len(account.StorageChanges))
 	for slotIndex := task.slotFrom; slotIndex < task.slotTo; slotIndex++ {
-		var slot accounts.StorageKey
+		var slot common.Hash
 		if slotIndex < storageChanges {
 			slot = account.StorageChanges[slotIndex].Slot
 		} else {
-			slot = accounts.InternKey(account.StorageReads[slotIndex-storageChanges])
+			slot = account.StorageReads[slotIndex-storageChanges]
 		}
-		if _, _, err := stateReader.ReadAccountStorage(address, slot); err != nil {
+		if _, _, err := stateReader.ReadAccountStorage(address, accounts.InternKey(slot)); err != nil {
 			return err
 		}
 	}
