@@ -59,7 +59,7 @@ func (t *TopicSubscriptions) subscribedAttestationSubnetCount() uint64 {
 		if subscription.sub == nil {
 			continue
 		}
-		name := extractTopicName(topic)
+		name := gossip.ExtractTopicName(topic)
 		if !gossip.IsTopicBeaconAttestation(name) {
 			continue
 		}
@@ -133,10 +133,7 @@ func (t *TopicSubscriptions) Remove(topic string) error {
 	if sub.sub != nil {
 		sub.sub.Cancel()
 		sub.sub = nil
-		name := extractTopicName(topic)
-		if gossip.IsTopicSyncCommittee(name) {
-			t.p2p.UpdateENRSyncNets(extractSubnetIndexByGossipTopic(name), false)
-		}
+		t.clearENRSyncNetsIfUnused(topic)
 	}
 	sub.topic.Close()
 	sub.topic = nil
@@ -154,10 +151,7 @@ func (t *TopicSubscriptions) Unsubscribe(topic string) error {
 	if sub.sub != nil {
 		sub.sub.Cancel()
 		sub.sub = nil
-		name := extractTopicName(topic)
-		if gossip.IsTopicSyncCommittee(name) {
-			t.p2p.UpdateENRSyncNets(extractSubnetIndexByGossipTopic(name), false)
-		}
+		t.clearENRSyncNetsIfUnused(topic)
 	}
 	sub.expiry = time.Unix(0, 0) // reset
 	return nil
@@ -187,7 +181,7 @@ func (t *TopicSubscriptions) SubscribeWithExpiry(topic string, expiry time.Time)
 		log.Debug("[GossipManager] Subscribed to topic", "topic", topic, "expiration", expiry)
 		sub.sub = s
 
-		name := extractTopicName(topic)
+		name := gossip.ExtractTopicName(topic)
 		if gossip.IsTopicSyncCommittee(name) {
 			t.p2p.UpdateENRSyncNets(extractSubnetIndexByGossipTopic(name), true)
 		}
@@ -222,10 +216,20 @@ func (t *TopicSubscriptions) checkExpiredSubscriptions() {
 			sub.sub.Cancel()
 			sub.sub = nil
 			topic := sub.topic.String()
-			name := extractTopicName(topic)
-			if gossip.IsTopicSyncCommittee(name) {
-				t.p2p.UpdateENRSyncNets(extractSubnetIndexByGossipTopic(name), false)
-			}
+			t.clearENRSyncNetsIfUnused(topic)
 		}
 	}
+}
+
+func (t *TopicSubscriptions) clearENRSyncNetsIfUnused(topic string) {
+	name := gossip.ExtractTopicName(topic)
+	if !gossip.IsTopicSyncCommittee(name) {
+		return
+	}
+	for registeredTopic, subscription := range t.subs {
+		if subscription.sub != nil && gossip.ExtractTopicName(registeredTopic) == name {
+			return
+		}
+	}
+	t.p2p.UpdateENRSyncNets(extractSubnetIndexByGossipTopic(name), false)
 }
