@@ -147,7 +147,8 @@ Selecting the binary trie is process-global, not a per-tester option: set `state
 
 The EIP-8297 engine lives in `execution/commitment/v3/pbt`; shared rules and the independent reference live in `execution/commitment/eip8297`. Binary state uses the `0xB1` marker and row format `0x20`, checked by `PBinValidateRowStateFormat`; legacy binary formats are refused at datadir open. `BinFeedFromState` in `execution/commitment/commitmentdb/pbin_feed.go` is the input adapter for SharedDomains, calcState and BAL sources. `erigondb.toml` records `trie_variant` and `trie_hash`, but the embedding itself is not versioned, so rebuild bin datadirs from genesis whenever key derivation or leaf layout changes.
 
-A PBT round splits its ops into one task per 12-bit chain and per storage bucket. A task reads and writes only
+A PBT round splits its ops into chain tasks (12-bit prefixes) and storage-bucket tasks; small buckets are batched
+into one task and large ones split into subtasks. A task reads and writes only
 records under its own prefix, every task reads one round-start view that nobody writes during the round, and
 writes come back as delta parts that the round applies after the join; a join refuses records owned by a task.
 Worker contexts come from the trie context factory, and a factory that returns a nil context fails the round. With
