@@ -401,7 +401,7 @@ func (ctx *CallContext) fillAddressWord(index addressWordIndex, address accounts
 }
 
 func opAddress(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	*scope.Stack.pushRef() = *scope.addressWord(addressWordSelf, scope.Contract.Address())
+	scope.Stack.pushRef().Set(scope.addressWord(addressWordSelf, scope.Contract.Address()))
 	return pc, nil, nil
 }
 
@@ -419,12 +419,12 @@ func opBalance(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 }
 
 func opOrigin(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	*scope.Stack.pushRef() = *scope.addressWord(addressWordOrigin, evm.Origin)
+	scope.Stack.pushRef().Set(scope.addressWord(addressWordOrigin, evm.Origin))
 	return pc, nil, nil
 }
 
 func opCaller(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	*scope.Stack.pushRef() = *scope.addressWord(addressWordCaller, scope.Contract.Caller())
+	scope.Stack.pushRef().Set(scope.addressWord(addressWordCaller, scope.Contract.Caller()))
 	return pc, nil, nil
 }
 
@@ -702,7 +702,7 @@ func stBlockhash(_ uint64, scope *CallContext) string {
 }
 
 func opCoinbase(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	*scope.Stack.pushRef() = *scope.addressWord(addressWordCoinbase, evm.Context.Coinbase)
+	scope.Stack.pushRef().Set(scope.addressWord(addressWordCoinbase, evm.Context.Coinbase))
 	return pc, nil, nil
 }
 
