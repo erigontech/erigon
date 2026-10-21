@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1509,13 +1510,17 @@ func supersededEqualRangeVersions(list []snaptype.FileInfo) (kept, superseded []
 // keepUnindexedlyCovered moves back any removal whose covering superset has no index on
 // disk. buildVisibleSegments requires IsIndexed, so unlinking an indexed subset for an
 // unindexed superset leaves the range unreadable until someone rebuilds indexes.
-func keepUnindexedlyCovered(dirPath string, keep, remove []snaptype.FileInfo) ([]snaptype.FileInfo, []snaptype.FileInfo) {
+func keepUnindexedlyCovered(idxList, keep, remove []snaptype.FileInfo) ([]snaptype.FileInfo, []snaptype.FileInfo) {
 	if len(remove) == 0 {
 		return keep, remove
 	}
+	onDisk := make(map[string]struct{}, len(idxList))
+	for i := range idxList {
+		onDisk[unversionedName(idxList[i].Name())] = struct{}{}
+	}
 	indexed := make([]snaptype.FileInfo, 0, len(keep))
 	for i := range keep {
-		if isIndexedOnDisk(dirPath, keep[i]) {
+		if isIndexedOnDisk(onDisk, keep[i]) {
 			indexed = append(indexed, keep[i])
 		}
 	}
@@ -1543,20 +1548,21 @@ func hasIndexedKeeper(indexed []snaptype.FileInfo, rm *snaptype.FileInfo) bool {
 	return false
 }
 
-func isIndexedOnDisk(dirPath string, f snaptype.FileInfo) bool {
+func isIndexedOnDisk(onDisk map[string]struct{}, f snaptype.FileInfo) bool {
 	if f.Type == nil {
 		return false
 	}
 	for _, name := range f.Type.IdxFileNames(f.From, f.To) {
-		mask, err := version.ReplaceVersionWithMask(name)
-		if err != nil {
-			return false
-		}
-		if _, _, ok, err := version.FindFilesWithVersionsByPattern(filepath.Join(dirPath, mask)); err != nil || !ok {
+		if _, ok := onDisk[unversionedName(name)]; !ok {
 			return false
 		}
 	}
 	return true
+}
+
+func unversionedName(name string) string {
+	_, rest, _ := strings.Cut(name, "-")
+	return rest
 }
 
 func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
@@ -1569,20 +1575,19 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 	list, superseded := supersededEqualRangeVersions(list)
 	keepSegments, segmentsToRemove := findOverlaps(list)
 	segmentsToRemove = append(segmentsToRemove, superseded...)
+	idxList, err := snaptype.IdxFiles(s.dir)
+	if err != nil {
+		return err
+	}
+	idxList = slices.DeleteFunc(idxList, notOwned)
 	if s.keepUnindexedlyCovered {
-		keepSegments, segmentsToRemove = keepUnindexedlyCovered(s.dir, keepSegments, segmentsToRemove)
+		keepSegments, segmentsToRemove = keepUnindexedlyCovered(idxList, keepSegments, segmentsToRemove)
 	}
 
 	keepNames := make([]string, 0, len(keepSegments))
 	for i := range keepSegments {
 		keepNames = append(keepNames, keepSegments[i].Name())
 	}
-
-	idxList, err := snaptype.IdxFiles(s.dir)
-	if err != nil {
-		return err
-	}
-	idxList = slices.DeleteFunc(idxList, notOwned)
 	idxList, supersededIdx := supersededEqualRangeVersions(idxList)
 	_, accessorsToRemove := findOverlaps(idxList)
 	accessorsToRemove = append(accessorsToRemove, supersededIdx...)
