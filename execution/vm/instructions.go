@@ -149,10 +149,7 @@ func mod(z, x, y *uint256.Int) {
 // is non-zero exactly while it is negative, and at most two add-backs fix it.
 
 func rem5by4(u4, u3, u2, u1, u0, v3, v2, v1, v0 uint64) (uint64, uint64, uint64, uint64) {
-	q := ^uint64(0)
-	if u4 < v3 {
-		q, _ = bits.Div64(u4, u3, v3)
-	}
+	q, _ := bits.Div64(u4, u3, v3) // the only caller has u4 < 2^63 <= v3
 	h0, l0 := bits.Mul64(q, v0)
 	h1, l1 := bits.Mul64(q, v1)
 	h2, l2 := bits.Mul64(q, v2)
