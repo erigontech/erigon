@@ -477,7 +477,9 @@ run:
 					if sLen >= 2 && gasLeft >= GasFastestStep {
 						gasLeft -= GasFastestStep
 						th, val := callContext.Stack.pop1Peek1()
+						callContext.gas, callContext.savedPC = gasLeft, pc
 						val.Byte(th)
+						gasLeft, pc = callContext.gas, callContext.savedPC
 						pc++
 						continue run
 					}
@@ -486,7 +488,9 @@ run:
 						gasLeft -= GasFastestStep
 						shift, value := callContext.Stack.pop1Peek1()
 						if shift.LtUint64(256) {
+							callContext.gas, callContext.savedPC = gasLeft, pc
 							value.Lsh(value, uint(shift.Uint64()))
+							gasLeft, pc = callContext.gas, callContext.savedPC
 						} else {
 							value.Clear()
 						}
@@ -498,7 +502,9 @@ run:
 						gasLeft -= GasFastestStep
 						shift, value := callContext.Stack.pop1Peek1()
 						if shift.LtUint64(256) {
+							callContext.gas, callContext.savedPC = gasLeft, pc
 							value.Rsh(value, uint(shift.Uint64()))
+							gasLeft, pc = callContext.gas, callContext.savedPC
 						} else {
 							value.Clear()
 						}
@@ -520,7 +526,9 @@ run:
 							continue run
 						}
 						n := uint(shift.Uint64())
+						callContext.gas, callContext.savedPC = gasLeft, pc
 						value.SRsh(value, n)
+						gasLeft, pc = callContext.gas, callContext.savedPC
 						pc++
 						continue run
 					}
