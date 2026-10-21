@@ -371,20 +371,29 @@ func (t *Trie) processParallelPhaseA(ctx context.Context, workers int, plan phas
 	}
 	t.ctx = base
 	var deltas []commitment.BranchDelta
+	var parts [][]commitment.BranchDelta
 	for index := range plan.tasks {
 		if plan.tasks[index].kind == phaseBucketSubtask {
 			continue
 		}
 		for r := plan.tasks[index].resultStart; r < plan.tasks[index].resultEnd; r++ {
-			for _, delta := range results[r].deltas {
-				if err := base.PutBranch(delta.Key, delta.Data, delta.Prev); err != nil {
-					return common.Hash{}, err
+			if len(results[r].deltas) == 0 {
+				continue
+			}
+			if t.deferUpdates {
+				parts = append(parts, results[r].deltas)
+			} else {
+				for _, delta := range results[r].deltas {
+					if err := base.PutBranch(delta.Key, delta.Data, delta.Prev); err != nil {
+						return common.Hash{}, err
+					}
 				}
 			}
 			deltas = append(deltas, results[r].deltas...)
 		}
 	}
 	t.deltas = deltas
+	t.deferred = parts
 	return finalRoot, nil
 }
 

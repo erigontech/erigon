@@ -18,6 +18,7 @@ package execctx_test
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -474,5 +475,61 @@ func TestSharedDomainsRestoresAfterShadowStopsAdvancing(t *testing.T) {
 				require.Equal(t, hexRoot, root)
 			}
 		})
+	}
+}
+
+func TestPBinDeferredCommitmentMatchesInlineAfterFlush(t *testing.T) {
+	withDualCommitmentFlags(t)
+	run := func(deferred bool) (map[string][]byte, []byte) {
+		db := newTestDb(t, 16)
+		tx, err := db.BeginTemporalRw(t.Context())
+		require.NoError(t, err)
+		defer tx.Rollback()
+		sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithCommitmentDomain(kv.CommitmentBinDomain))
+		require.NoError(t, err)
+		defer sd.Close()
+		require.Equal(t, commitment.VariantBinPatriciaTrie, sd.GetCommitmentCtx().Trie().Variant())
+		sd.SetDeferCommitmentUpdates(deferred)
+		for b := byte(1); b <= 40; b++ {
+			require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, bytes.Repeat([]byte{b}, 20), encAccount(uint64(b)), 1, nil))
+		}
+		root, err := sd.ComputeCommitment(t.Context(), tx, false, 0, 1, "test", nil)
+		require.NoError(t, err)
+		if deferred {
+			require.True(t, sd.GetCommitmentCtx().HasPendingUpdate())
+			upd := sd.GetCommitmentCtx().PeekPendingUpdate()
+			require.NotEmpty(t, upd.Deltas)
+			require.Equal(t, uint64(1), upd.TxNum)
+			for _, part := range upd.Deltas {
+				for _, delta := range part {
+					latest, _, err := sd.GetLatest(kv.CommitmentBinDomain, tx, delta.Key)
+					require.NoError(t, err)
+					require.Equal(t, delta.Prev, latest, "record %x was written before the flush", delta.Key)
+				}
+			}
+			require.NoError(t, sd.FlushPendingUpdates(tx))
+			require.False(t, sd.GetCommitmentCtx().HasPendingUpdate())
+		}
+		require.NoError(t, sd.Flush(t.Context(), tx))
+		records := make(map[string][]byte)
+		for _, domain := range []kv.Domain{kv.CommitmentBinDomain, kv.CommitmentDomain} {
+			it, err := tx.Debug().RangeLatest(domain, nil, nil, kv.Unlim)
+			require.NoError(t, err)
+			for it.HasNext() {
+				key, value, err := it.Next()
+				require.NoError(t, err)
+				records[domain.String()+"/"+string(key)] = bytes.Clone(value)
+			}
+			it.Close()
+		}
+		return records, root
+	}
+	wantRecords, wantRoot := run(false)
+	gotRecords, gotRoot := run(true)
+	require.NotEmpty(t, wantRecords)
+	require.Equal(t, wantRoot, gotRoot)
+	require.Equal(t, wantRecords, gotRecords)
+	for key := range gotRecords {
+		require.True(t, strings.HasPrefix(key, kv.CommitmentBinDomain.String()+"/"), "record %q outside the bin domain", key)
 	}
 }

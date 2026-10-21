@@ -455,15 +455,15 @@ flowchart LR
 - Modify: `execution/stagedsync/committer.go`
 - Create or modify: tests next to each
 
-- [ ] add no-op `SetDeferCommitmentUpdates`/`TakeDeferredDeltas` on `pbt.Trie`/`registeredTrie`, then write red tests:
+- [x] add no-op `SetDeferCommitmentUpdates`/`TakeDeferredDeltas` on `pbt.Trie`/`registeredTrie`, then write red tests:
       - with deferral on, a parallel round, a one-op round and a workers=1 round each leave the base untouched;
         applying the taken parts gives the same records as inline;
       - a round with untaken parts errors;
       - `RootHash` between the round and the flush returns the new root
-- [ ] implement v3's contract on every round path (Technical Details)
-- [ ] `PutOwnedCommitmentBranches` writes to the caller's commitment domain instead of the hardcoded
+- [x] implement v3's contract on every round path (Technical Details)
+- [x] `PutOwnedCommitmentBranches` writes to the caller's commitment domain instead of the hardcoded
       `kv.CommitmentDomain`. Test: with `WithCommitmentDomain(kv.CommitmentBinDomain)`, the hex domain is untouched
-- [ ] commitmentdb accepts deferral for bin through an interface with only those two methods, shared by v3 and pbt.
+- [x] commitmentdb accepts deferral for bin through an interface with only those two methods, shared by v3 and pbt.
       Update `pbin_unsupported_test.go` and `TestPBinComputeCommitmentRefusesDeferredTake`: the feature is now
       supported. Test that a canonical-bin context with deferral on gives the same records after the flush as inline
 - [ ] `exec3.go`: rewire only. `deferCommitmentUpdates` applies hex's rule to bin, and the existing deferred-flush

@@ -103,9 +103,12 @@ type SharedDomainsCommitmentContext struct {
 
 type v3Trie interface {
 	ProcessFeed(ctx context.Context, feed *commitment.Feed, onProgress func(*commitment.CommitProgress)) ([]byte, error)
+	SetStorageFanOutMin(int)
+}
+
+type deferredDeltaTrie interface {
 	SetDeferCommitmentUpdates(bool)
 	TakeDeferredDeltas() [][]commitment.BranchDelta
-	SetStorageFanOutMin(int)
 }
 
 type trieContextFactorySetter interface {
@@ -186,15 +189,12 @@ func (sdc *SharedDomainsCommitmentContext) EnableParaTrieDB(db kv.TemporalRoDB) 
 // instead of being applied inline. Used during fork validation where the update is
 // flushed later via FlushPendingUpdate.
 func (sdc *SharedDomainsCommitmentContext) SetDeferCommitmentUpdates(defer_ bool) {
-	if defer_ && sdc.variant == commitment.VariantBinPatriciaTrie {
-		panic(pbinUnsupported("deferred commitment updates"))
-	}
 	sdc.deferCommitmentUpdates = defer_
 }
 
-// pbinUnsupported names a code path only the hex trie implements — deferred
-// updates, collapse tracing, hex-prefixed branch reads, trie-trace replay — so
-// asking for one under the bin variant fails instead of yielding a zero value.
+// pbinUnsupported names a code path only the hex trie implements — collapse
+// tracing, hex-prefixed branch reads, trie-trace replay — so asking for one
+// under the bin variant fails instead of yielding a zero value.
 func pbinUnsupported(what string) error {
 	return fmt.Errorf("%w: %s", commitment.ErrPBinUnsupported, what)
 }
@@ -669,13 +669,8 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 		panic("sdCtx.ComputeCommitment called directly with non-nil pendingUpdate; use SharedDomains.ComputeCommitment wrapper instead")
 	}
 	traceFile := trieTraceFile(blockNum)
-	if sdc.variant == commitment.VariantBinPatriciaTrie {
-		switch {
-		case sdc.deferCommitmentUpdates:
-			return nil, pbinUnsupported("deferred commitment updates")
-		case traceFile != "":
-			return nil, pbinUnsupported("trie trace capture")
-		}
+	if sdc.variant == commitment.VariantBinPatriciaTrie && traceFile != "" {
+		return nil, pbinUnsupported("trie trace capture")
 	}
 	if err := sdc.checkParaTrieWired(); err != nil {
 		return nil, err
@@ -868,7 +863,7 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 			defer trie.SetLeaveDeferredForCaller(false)
 		}
 	}
-	if trie, ok := sdc.patriciaTrie.(v3Trie); ok && sdc.deferCommitmentUpdates {
+	if trie, ok := sdc.patriciaTrie.(deferredDeltaTrie); ok && sdc.deferCommitmentUpdates {
 		trie.SetDeferCommitmentUpdates(true)
 		defer trie.SetDeferCommitmentUpdates(false)
 	}
@@ -950,7 +945,7 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 			}
 		}
 	}
-	if trie, ok := sdc.patriciaTrie.(v3Trie); ok && sdc.deferCommitmentUpdates {
+	if trie, ok := sdc.patriciaTrie.(deferredDeltaTrie); ok && sdc.deferCommitmentUpdates {
 		if deltas := trie.TakeDeferredDeltas(); deltas != nil {
 			sdc.pendingUpdate = &commitment.PendingCommitmentUpdate{
 				BlockNum: blockNum,

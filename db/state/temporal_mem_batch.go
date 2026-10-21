@@ -196,7 +196,7 @@ func (sd *TemporalMemBatch) addPutMetrics(domain kv.Domain, puts int64, putKeySi
 	dm.CachePutValueSize += putValueSize
 }
 
-func (sd *TemporalMemBatch) PutOwnedCommitmentBranches(parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error {
+func (sd *TemporalMemBatch) PutOwnedCommitmentBranches(domain kv.Domain, parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error {
 	count := 0
 	for _, part := range parts {
 		count += len(part)
@@ -218,18 +218,17 @@ func (sd *TemporalMemBatch) PutOwnedCommitmentBranches(parts [][]commitment.Bran
 			}
 			written <- err
 		}()
-		err = sd.writeCommitmentOps(flat, sameTxNum, ready, txNum, diff)
+		err = sd.writeCommitmentOps(domain, flat, sameTxNum, ready, txNum, diff)
 	}()
-	putKeySize, putValueSize := sd.insertOwnedCommitmentBranches(flat, sameTxNum, make([]dataWithTxNum, count), txNum, ready)
+	putKeySize, putValueSize := sd.insertOwnedCommitmentBranches(domain, flat, sameTxNum, make([]dataWithTxNum, count), txNum, ready)
 	err := <-written
-	sd.addPutMetrics(kv.CommitmentDomain, int64(len(flat)), putKeySize, putValueSize)
+	sd.addPutMetrics(domain, int64(len(flat)), putKeySize, putValueSize)
 	return err
 }
 
 const commitmentWriteChunk = 8192
 
-func (sd *TemporalMemBatch) insertOwnedCommitmentBranches(flat []*commitment.BranchDelta, sameTxNum []bool, versions []dataWithTxNum, txNum uint64, ready chan<- int) (putKeySize, putValueSize int) {
-	const domain = kv.CommitmentDomain
+func (sd *TemporalMemBatch) insertOwnedCommitmentBranches(domain kv.Domain, flat []*commitment.BranchDelta, sameTxNum []bool, versions []dataWithTxNum, txNum uint64, ready chan<- int) (putKeySize, putValueSize int) {
 	defer close(ready)
 	sd.latestStateLocks[domain].Lock()
 	defer sd.latestStateLocks[domain].Unlock()
@@ -273,8 +272,8 @@ func (sd *TemporalMemBatch) insertOwnedCommitmentBranches(flat []*commitment.Bra
 	return putKeySize, putValueSize
 }
 
-func (sd *TemporalMemBatch) writeCommitmentOps(flat []*commitment.BranchDelta, sameTxNum []bool, ready <-chan int, txNum uint64, diff *kv.DomainDiff) error {
-	writer := sd.domainWriters[kv.CommitmentDomain]
+func (sd *TemporalMemBatch) writeCommitmentOps(domain kv.Domain, flat []*commitment.BranchDelta, sameTxNum []bool, ready <-chan int, txNum uint64, diff *kv.DomainDiff) error {
+	writer := sd.domainWriters[domain]
 	step := kv.Step(txNum / sd.stepSize)
 	lo := 0
 	var err error

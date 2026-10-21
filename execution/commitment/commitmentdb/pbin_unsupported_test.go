@@ -40,33 +40,14 @@ func pbinRecoveredError(t *testing.T, fn func()) (err error) {
 	return nil
 }
 
-// Silently accepting the request would leave the flag set with no trie
-// honouring it: Process would apply inline while the caller waited for a flush.
-func TestPBinRefusesDeferredCommitmentUpdates(t *testing.T) {
-	t.Parallel()
-
-	hexCtx := pbinStateTestCtx(t, commitment.VariantHexPatriciaTrie)
-	hexCtx.SetDeferCommitmentUpdates(true)
-	require.True(t, hexCtx.deferCommitmentUpdates)
-
-	binCtx := pbinStateTestCtx(t, commitment.VariantBinPatriciaTrie)
-	err := pbinRecoveredError(t, func() { binCtx.SetDeferCommitmentUpdates(true) })
-	require.ErrorIs(t, err, commitment.ErrPBinUnsupported)
-	require.False(t, binCtx.deferCommitmentUpdates, "the refused request must not leave the flag set")
-
-	require.NoError(t, pbinRecoveredError(t, func() { binCtx.SetDeferCommitmentUpdates(false) }))
-}
-
-// Were the flag ever set under bin, the post-Process type switch would find no
-// trie carrying deferred updates and hand back an empty pendingUpdate.
-func TestPBinComputeCommitmentRefusesDeferredTake(t *testing.T) {
+func TestPBinAcceptsDeferredCommitmentUpdates(t *testing.T) {
 	t.Parallel()
 
 	binCtx := pbinStateTestCtx(t, commitment.VariantBinPatriciaTrie)
-	binCtx.deferCommitmentUpdates = true
-
-	_, err := binCtx.ComputeCommitment(t.Context(), nil, false, 1, 1, "test", nil)
-	require.ErrorIs(t, err, commitment.ErrPBinUnsupported)
+	require.NoError(t, pbinRecoveredError(t, func() { binCtx.SetDeferCommitmentUpdates(true) }))
+	require.True(t, binCtx.deferCommitmentUpdates)
+	binCtx.SetDeferCommitmentUpdates(false)
+	require.False(t, binCtx.deferCommitmentUpdates)
 }
 
 // The trace replays recorded branch records through the hex trie, so a bin

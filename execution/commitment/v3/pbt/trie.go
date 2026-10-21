@@ -18,6 +18,7 @@ package pbt
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -55,6 +56,8 @@ type Trie struct {
 	joinHook               func(phaseTask, commitment.PatriciaContext) error
 	bucketBatch            int
 	phaseSchedule          phaseSchedule
+	deferUpdates           bool
+	deferred               [][]commitment.BranchDelta
 	coreApplyHook          func(phaseTask, *Op) error
 	coreEncodeHook         func(phaseTask, []byte) error
 	coreActivityHook       func(bool)
@@ -184,6 +187,27 @@ func (t *Trie) SetCoreHooks(apply func(phaseTask, *Op) error, encode func(phaseT
 
 func (t *Trie) SetCoreActivityHook(hook func(bool)) { t.coreActivityHook = hook }
 
+func (t *Trie) SetDeferCommitmentUpdates(deferUpdates bool) { t.deferUpdates = deferUpdates }
+
+func (t *Trie) TakeDeferredDeltas() [][]commitment.BranchDelta {
+	parts := t.deferred
+	t.deferred = nil
+	return parts
+}
+
+var errDeferredNotTaken = errors.New("pbin: deferred updates were not taken")
+
+func (t *Trie) checkDeferredTaken() error {
+	if t.deferUpdates && len(t.deferred) != 0 {
+		return errDeferredNotTaken
+	}
+	return nil
+}
+
+func (t *Trie) deferBaseWrites() bool {
+	return t.deferUpdates && t.phaseBase == nil
+}
+
 func (t *Trie) SetFoldHook(hook func([]byte)) { t.foldHook = hook }
 
 func (t *Trie) foldRowResult(row *rowNode) (FoldResult, error) {
@@ -259,6 +283,9 @@ func (t *Trie) rootRecordPath() eip8297.Bitpath {
 func (t *Trie) Process(ops []Op) (common.Hash, error) {
 	if t.ctx == nil {
 		return common.Hash{}, fmt.Errorf("nil Patricia context")
+	}
+	if err := t.checkDeferredTaken(); err != nil {
+		return common.Hash{}, err
 	}
 	if t.roundPending {
 		t.ResetContext(t.ctx)
@@ -344,6 +371,9 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 	}
 	if err := t.write(); err != nil {
 		return common.Hash{}, err
+	}
+	if t.deferBaseWrites() && len(t.deltas) != 0 {
+		t.deferred = [][]commitment.BranchDelta{slices.Clone(t.deltas)}
 	}
 	return t.rootHash()
 }
@@ -456,8 +486,10 @@ func (t *Trie) write() error {
 		if bytes.Equal(data, old) {
 			continue
 		}
-		if err := t.ctx.PutBranch([]byte(key), data, old); err != nil {
-			return err
+		if !t.deferBaseWrites() {
+			if err := t.ctx.PutBranch([]byte(key), data, old); err != nil {
+				return err
+			}
 		}
 		t.addDelta([]byte(key), data, old)
 	}
