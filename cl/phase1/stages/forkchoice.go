@@ -568,6 +568,13 @@ func preCacheShuffledSetForEpoch(logger log.Logger, beaconConfig *clparams.Beaco
 	if _, ok := caches.ShuffledIndiciesCacheGlobal.Get(epoch, blockRootAtBegginingPrevEpoch); ok {
 		return
 	}
+	stateRoot := b.StateRoots().Get(int(refSlot % beaconConfig.SlotsPerHistoricalRoot))
+	if stateRoot != (common.Hash{}) {
+		if shuffledIndicies, ok := caches.LookaheadShuffledIndiciesCacheGlobal.Get(epoch, stateRoot); ok {
+			caches.ShuffledIndiciesCacheGlobal.Put(epoch, blockRootAtBegginingPrevEpoch, shuffledIndicies)
+			return
+		}
+	}
 
 	indicies := b.GetActiveValidatorsIndices(epoch)
 	shuffledIndicies := make([]uint64, len(indicies))
