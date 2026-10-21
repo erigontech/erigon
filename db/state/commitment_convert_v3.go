@@ -438,7 +438,7 @@ func (w *legacyDelta) children(k, prev, v []byte, live bool, conv *v3.LegacyConv
 	return nil
 }
 
-func (w *legacyDelta) reemit(path []byte, conv *v3.LegacyConverter, emit v3.LegacyEmitFunc) error {
+func (w *legacyDelta) walk(path []byte, visit func(key, value, old []byte) (descend bool, err error)) error {
 	w.stack = append(w.stack[:0], legacyChild{path: path})
 	for len(w.stack) > 0 {
 		path := w.stack[len(w.stack)-1].path
@@ -451,14 +451,11 @@ func (w *legacyDelta) reemit(path []byte, conv *v3.LegacyConverter, emit v3.Lega
 		if !unchanged {
 			continue
 		}
-		if convErr := conv.Convert(key, value, old, emit); convErr != nil {
-			return convErr
-		}
-		liveBefore, err := w.reachBefore.reachable(key, old)
+		descend, err := visit(key, value, old)
 		if err != nil {
 			return err
 		}
-		if !liveBefore {
+		if descend {
 			if w.stack, err = appendLegacyChildren(w.stack, path, value); err != nil {
 				return err
 			}
@@ -467,34 +464,27 @@ func (w *legacyDelta) reemit(path []byte, conv *v3.LegacyConverter, emit v3.Lega
 	return nil
 }
 
+func (w *legacyDelta) reemit(path []byte, conv *v3.LegacyConverter, emit v3.LegacyEmitFunc) error {
+	return w.walk(path, func(key, value, old []byte) (bool, error) {
+		if err := conv.Convert(key, value, old, emit); err != nil {
+			return false, err
+		}
+		liveBefore, err := w.reachBefore.reachable(key, old)
+		return !liveBefore, err
+	})
+}
+
 func (w *legacyDelta) drop(path []byte, conv *v3.LegacyConverter, reach *legacyReach, emit v3.LegacyEmitFunc) error {
-	w.stack = append(w.stack[:0], legacyChild{path: path})
-	for len(w.stack) > 0 {
-		path := w.stack[len(w.stack)-1].path
-		w.stack = w.stack[:len(w.stack)-1]
-		key := encodeLegacyPrefix(path, w.keysV2)
-		value, _, unchanged, err := w.unchanged(key)
-		if err != nil {
-			return err
-		}
-		if !unchanged {
-			continue
-		}
+	return w.walk(path, func(key, value, _ []byte) (bool, error) {
 		live, err := reach.reachable(key, value)
-		if err != nil {
-			return err
+		if err != nil || live {
+			return false, err
 		}
-		if live {
-			continue
+		if err := conv.Tombstone(key, emit); err != nil {
+			return false, err
 		}
-		if tombErr := conv.Tombstone(key, emit); tombErr != nil {
-			return tombErr
-		}
-		if w.stack, err = appendLegacyChildren(w.stack, path, value); err != nil {
-			return err
-		}
-	}
-	return nil
+		return true, nil
+	})
 }
 
 func (w *legacyDelta) unchanged(key []byte) (value, old []byte, unchanged bool, err error) {
