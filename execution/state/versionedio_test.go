@@ -1672,7 +1672,7 @@ func (a *referenceAccount) read(slot accounts.StorageKey, val uint256.Int) {
 	if a.written(slot) >= 0 {
 		return
 	}
-	a.changes.StorageReads = append(a.changes.StorageReads, slot)
+	a.changes.StorageReads = append(a.changes.StorageReads, slot.Value())
 }
 
 func (a *referenceAccount) write(slot accounts.StorageKey, val uint256.Int, idx uint32) {
@@ -1684,7 +1684,7 @@ func (a *referenceAccount) write(slot accounts.StorageKey, val uint256.Int, idx 
 	}
 	kept := a.changes.StorageReads[:0]
 	for _, s := range a.changes.StorageReads {
-		if s != slot {
+		if s != slot.Value() {
 			kept = append(kept, s)
 		}
 	}

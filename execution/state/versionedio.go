@@ -2946,7 +2946,7 @@ type accountState struct {
 	initialBalanceValue *uint256.Int                        // tracks pre-block balance for net-zero detection
 	storageReadValues   map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
 	slotWrites          map[accounts.StorageKey]int         // slot -> index into changes.StorageChanges, built past slotIndexMin
-	slotReads           map[accounts.StorageKey]int         // slot -> index into changes.StorageReads, built with slotWrites
+	slotReads           map[common.Hash]int                 // slot -> index into changes.StorageReads, built with slotWrites
 	initialCodeEmpty    bool                                // pre-block code was empty (created contract or empty-codehash read)
 }
 
@@ -3154,13 +3154,14 @@ func (account *accountState) updateReadStorage(key accounts.StorageKey, val uint
 	if account.hasStorageWrite(key) {
 		return
 	}
+	slot := key.Value()
 	if account.slotReads != nil {
-		if _, seen := account.slotReads[key]; seen {
+		if _, seen := account.slotReads[slot]; seen {
 			return
 		}
-		account.slotReads[key] = len(account.changes.StorageReads)
+		account.slotReads[slot] = len(account.changes.StorageReads)
 	}
-	account.changes.StorageReads = append(account.changes.StorageReads, key)
+	account.changes.StorageReads = append(account.changes.StorageReads, slot)
 }
 
 func (account *accountState) updateReadBalance(val uint256.Int) {
@@ -3242,7 +3243,7 @@ func (account *accountState) addStorageUpdate(at int, slot accounts.StorageKey, 
 		// StorageReads can hold the same slot twice: below the threshold reads are
 		// appended unchecked, and Normalize is what dedups them. The index needs
 		// one entry per slot, so drop the repeats while building it.
-		account.slotReads = make(map[accounts.StorageKey]int, len(ac.StorageReads))
+		account.slotReads = make(map[common.Hash]int, len(ac.StorageReads))
 		deduped := ac.StorageReads[:0]
 		for _, slot := range ac.StorageReads {
 			if _, seen := account.slotReads[slot]; seen {
@@ -3258,11 +3259,12 @@ func (account *accountState) addStorageUpdate(at int, slot accounts.StorageKey, 
 // removeStorageRead drops slot from StorageReads, because a write to it takes
 // precedence. Past slotIndexMin the position is indexed and the last entry is
 // swapped in; order does not survive Normalize's sort anyway.
-func (account *accountState) removeStorageRead(slot accounts.StorageKey) {
+func (account *accountState) removeStorageRead(key accounts.StorageKey) {
 	ac := account.changes
 	if len(ac.StorageReads) == 0 {
 		return
 	}
+	slot := key.Value()
 	if account.slotReads == nil {
 		out := ac.StorageReads[:0]
 		for _, s := range ac.StorageReads {
