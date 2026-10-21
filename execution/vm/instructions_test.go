@@ -788,6 +788,30 @@ func TestOpCLZ(t *testing.T) {
 	}
 }
 
+func TestOpDifficulty(t *testing.T) {
+	t.Parallel()
+	randao := common.HexToHash("0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20")
+	tests := []struct {
+		name     string
+		blockCtx evmtypes.BlockContext
+		want     uint256.Int
+	}{
+		{"prevrandao", evmtypes.BlockContext{PrevRanDao: &randao, Difficulty: *uint256.NewInt(7)}, *new(uint256.Int).SetBytes(randao[:])},
+		{"difficulty", evmtypes.BlockContext{Difficulty: *uint256.NewInt(7)}, *uint256.NewInt(7)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			evm := NewEVM(tc.blockCtx, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+			callContext := &CallContext{}
+			callContext.Stack.push(*uint256.NewInt(1))
+			opDifficulty(0, evm, callContext)
+			require.Equal(t, 2, callContext.Stack.len())
+			require.Equal(t, tc.want, *callContext.Stack.peek())
+			require.Equal(t, uint64(1), callContext.Stack.back(1).Uint64())
+		})
+	}
+}
+
 // TestPush sanity-checks how code with immediates are handled when the code size is
 // smaller than the size of the immediate.
 func TestPush(t *testing.T) {
