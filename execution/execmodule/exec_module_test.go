@@ -3911,13 +3911,15 @@ func newBALTransferBlock(t *testing.T) (*execmoduletester.ExecModuleTester, *typ
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
 	chainPack, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
-		tx, err := types.SignTx(
-			types.NewTransaction(0, common.Address{1}, uint256.NewInt(1), 50000, uint256.NewInt(10*common.GWei), nil),
-			*types.LatestSignerForChainID(nil),
-			privKey,
-		)
-		require.NoError(t, err)
-		b.AddTx(tx)
+		for nonce := range uint64(64) {
+			tx, err := types.SignTx(
+				types.NewTransaction(nonce, common.Address{1}, uint256.NewInt(1), 50000, uint256.NewInt(10*common.GWei), nil),
+				*types.LatestSignerForChainID(nil),
+				privKey,
+			)
+			require.NoError(t, err)
+			b.AddTx(tx)
+		}
 	})
 	require.NoError(t, err)
 	block := chainPack.Blocks[0]
@@ -3942,7 +3944,10 @@ func TestValidateChainWritesSendersOfBALBlock(t *testing.T) {
 	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
 		senders, err := rawdb.ReadSenders(tx, hash, block.NumberU64())
 		require.NoError(t, err)
-		require.Equal(t, []common.Address{crypto.PubkeyToAddress(privKey.PublicKey)}, senders)
+		require.Len(t, senders, len(block.Transactions()))
+		for _, sender := range senders {
+			require.Equal(t, crypto.PubkeyToAddress(privKey.PublicKey), sender)
+		}
 		return nil
 	}))
 }
@@ -3954,7 +3959,7 @@ func TestValidateChainRejectsBALBlockWithUnrecoverableSender(t *testing.T) {
 	sig[63] = 1 // r = 0 makes recovery fail
 	badTx, err := block.Transactions()[0].(*types.LegacyTx).WithSignature(*types.LatestSignerForChainID(nil), sig)
 	require.NoError(t, err)
-	txs := types.Transactions{badTx}
+	txs := append(types.Transactions{badTx}, block.Transactions()[1:]...)
 	header := types.CopyHeader(block.HeaderNoCopy())
 	header.TxHash = types.DeriveSha(txs)
 	badBlock := types.NewBlockFromNetwork(header, &types.Body{Transactions: txs, Withdrawals: block.Withdrawals()}, block.BlockAccessListSidecar())
