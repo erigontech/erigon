@@ -264,6 +264,7 @@ func TestMulModRepeatedAndAlternatingModuli(t *testing.T) {
 			}
 		}
 	}
+}
 
 func TestModMatchesBigInt(t *testing.T) {
 	var edges []uint256.Int
