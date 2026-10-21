@@ -584,17 +584,19 @@ func TestOpenStopsAtBeaconBlocksGap(t *testing.T) {
 	const limit = snaptype.CaplinMergeLimit
 
 	dirs := datadir.New(t.TempDir())
+	writeIndexSalt(t, dirs)
 	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true)
-	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, 2*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, 2*limit, false)
 	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, true)
 	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 3*limit, 4*limit, true)
 	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 3*limit, 5*limit, true)
 
-	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet", ProduceE2: true}, &clparams.MainnetBeaconConfig, dirs, log.New())
 	t.Cleanup(sn.Close)
 
 	require.NoError(t, sn.OpenFolder())
 	require.NoError(t, sn.BuildMissingIndices(t.Context(), log.New()))
+	require.Len(t, caplinIdxFiles(t, dirs), 5)
 	require.Equal(t, uint64(2*limit-1), sn.SegmentsMax(), "the dirty set must stop at the gap")
 	require.NoError(t, sn.RemoveOverlaps(nil))
 
@@ -653,6 +655,13 @@ func TestOpenAcceptsCoveredBeaconBlocks(t *testing.T) {
 
 	require.NoError(t, sn.OpenFolder(), "a covered segment is not a gap")
 	require.Equal(t, uint64(4*limit-1), sn.SegmentsMax())
+}
+
+func writeIndexSalt(t *testing.T, dirs datadir.Dirs) {
+	t.Helper()
+	salt := make([]byte, 4)
+	binary.BigEndian.PutUint32(salt, 1)
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, "salt-blocks.txt"), salt, 0o600))
 }
 
 func caplinIdxFiles(t *testing.T, dirs datadir.Dirs) []string {
