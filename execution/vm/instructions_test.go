@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"math/rand/v2"
 	"os"
 	"strings"
 	"testing"
@@ -218,6 +219,42 @@ func TestSAR(t *testing.T) {
 	}
 
 	testTwoOperandOp(t, tests, opSAR, "sar")
+}
+
+func TestModMatchesBigInt(t *testing.T) {
+	var edges []uint256.Int
+	for _, bits := range []uint{0, 1, 63, 64, 65, 127, 128, 191, 192, 193, 254, 255} {
+		p := new(uint256.Int).Lsh(uint256.NewInt(1), bits)
+		edges = append(edges, *p, *new(uint256.Int).AddUint64(p, 1), *new(uint256.Int).SubUint64(p, 1))
+	}
+	edges = append(edges, uint256.Int{}, *new(uint256.Int).SetAllOne(),
+		uint256.Int{0, 0, ^uint64(0), 1<<62 - 1}, uint256.Int{^uint64(0), ^uint64(0), ^uint64(0), 1 << 62})
+	rng := rand.New(rand.NewPCG(1, 2))
+	for range 20000 {
+		var v uint256.Int
+		for i := range rng.IntN(4) + 1 {
+			v[i] = rng.Uint64()
+		}
+		v.Rsh(&v, uint(rng.IntN(64)))
+		edges = append(edges, v)
+	}
+	check := func(x, y uint256.Int) {
+		want := new(big.Int)
+		if !y.IsZero() {
+			want.Mod(x.ToBig(), y.ToBig())
+		}
+		z := y
+		mod(&z, &x, &z)
+		if z.ToBig().Cmp(want) != 0 {
+			t.Fatalf("%x %% %x = %x, want %x", &x, &y, &z, want)
+		}
+	}
+	for i := range edges {
+		for j := range 64 {
+			check(edges[i], edges[(i*31+j)%len(edges)])
+			check(edges[i], edges[j])
+		}
+	}
 }
 
 func TestAddMod(t *testing.T) {

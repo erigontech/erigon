@@ -22,6 +22,7 @@ package vm
 import (
 	"fmt"
 	"math"
+	"math/bits"
 	"slices"
 
 	"github.com/c2h5oh/datasize"
@@ -96,8 +97,85 @@ func stSdiv(_ uint64, scope *CallContext) string {
 
 func opMod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x, y := scope.Stack.pop1Peek1()
-	y.Mod(x, y)
+	mod(y, x, y)
 	return pc, nil, nil
+}
+
+// mod sets z = x % y (0 if y == 0). One- and four-limb moduli stay in
+// registers; uint256.Mod normalizes through slices and is ~2x slower there.
+func mod(z, x, y *uint256.Int) {
+	if y[3]|y[2]|y[1] == 0 {
+		d := y[0]
+		if d == 0 {
+			z.Clear()
+			return
+		}
+		r := x[3] % d
+		_, r = bits.Div64(r, x[2], d)
+		_, r = bits.Div64(r, x[1], d)
+		_, r = bits.Div64(r, x[0], d)
+		z.SetUint64(r)
+		return
+	}
+	if y[3] == 0 {
+		z.Mod(x, y)
+		return
+	}
+	if x.Lt(y) {
+		z.Set(x)
+		return
+	}
+	if y[3]>>63 != 0 {
+		z.Sub(x, y)
+		return
+	}
+	mod256By256(z, x, y)
+}
+
+// mod256By256 needs x >= y and 2^192 <= y < 2^255: the quotient is one limb
+// and the normalization shift is 1..63.
+func mod256By256(z, x, y *uint256.Int) {
+	s := uint(bits.LeadingZeros64(y[3]))
+	v0 := y[0] << s
+	v1 := y[1]<<s | y[0]>>(64-s)
+	v2 := y[2]<<s | y[1]>>(64-s)
+	v3 := y[3]<<s | y[2]>>(64-s)
+	u0 := x[0] << s
+	u1 := x[1]<<s | x[0]>>(64-s)
+	u2 := x[2]<<s | x[1]>>(64-s)
+	u3 := x[3]<<s | x[2]>>(64-s)
+	u4 := x[3] >> (64 - s)
+
+	// u4 < 2^s <= 2^63 <= v3, so Div64 cannot overflow; Knuth's bound
+	// q <= qhat <= q+2 holds because v is normalized.
+	qhat, _ := bits.Div64(u4, u3, v3)
+	h0, l0 := bits.Mul64(qhat, v0)
+	h1, l1 := bits.Mul64(qhat, v1)
+	h2, l2 := bits.Mul64(qhat, v2)
+	h3, l3 := bits.Mul64(qhat, v3)
+	p1, c := bits.Add64(l1, h0, 0)
+	p2, c := bits.Add64(l2, h1, c)
+	p3, c := bits.Add64(l3, h2, c)
+	p4 := h3 + c
+
+	var b uint64
+	u0, b = bits.Sub64(u0, l0, 0)
+	u1, b = bits.Sub64(u1, p1, b)
+	u2, b = bits.Sub64(u2, p2, b)
+	u3, b = bits.Sub64(u3, p3, b)
+	u4, _ = bits.Sub64(u4, p4, b)
+	// A remainder in [-2v, 0) leaves u4 all ones; adding v back carries it to 0.
+	for u4 != 0 {
+		u0, c = bits.Add64(u0, v0, 0)
+		u1, c = bits.Add64(u1, v1, c)
+		u2, c = bits.Add64(u2, v2, c)
+		u3, c = bits.Add64(u3, v3, c)
+		u4 += c
+	}
+	z[0] = u0>>s | u1<<(64-s)
+	z[1] = u1>>s | u2<<(64-s)
+	z[2] = u2>>s | u3<<(64-s)
+	z[3] = u3 >> s
 }
 
 func stMod(_ uint64, scope *CallContext) string {
