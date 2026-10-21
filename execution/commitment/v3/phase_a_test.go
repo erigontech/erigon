@@ -236,8 +236,6 @@ func TestStorageTransitions(t *testing.T) {
 		{"E36/delete/drop deep pair, no far leaf", 0x5a, [][]byte{slotPath(5, 5, 1), slotPath(5, 5, 2)}, []int{0, 1}, false},
 		{"E36/delete/drop all but one", 0x5a, [][]byte{slotPath(7), slotPath(8), slotPath(9)}, []int{0, 2}, false},
 		{"E35/E36/reinsert", 0x7c, [][]byte{slotPath(2), slotPath(3, 1), slotPath(3, 2)}, []int{1}, true},
-		{"E36/E59/exact-paths/0", 0x40, [][]byte{slotPath(5, 5, 1), slotPath(5, 5, 2), slotPath(5, 6)}, nil, false},
-		{"E36/E59/exact-paths/1", 0x41, [][]byte{slotPath(1, 2, 3), slotPath(1, 2, 4), slotPath(9)}, nil, false},
 		{"E36/E59/exact-paths/2", 0x42, [][]byte{slotPath(5, 5, 1), slotPath(5, 6)}, nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

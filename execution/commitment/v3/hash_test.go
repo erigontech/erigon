@@ -102,7 +102,7 @@ func TestConsensusHash(t *testing.T) {
 		}},
 		{"E23/StorageLeafRefRandom", func(t *testing.T) {
 			rnd := rand.New(rand.NewSource(11))
-			for _, suffixLen := range []int{1, 2, 17, 33} {
+			for _, suffixLen := range []int{0, 1, 2, 17, 33} {
 				suffix := make([]byte, suffixLen)
 				for l := 1; l <= 32; l++ {
 					for trial := range 400 {

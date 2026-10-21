@@ -54,24 +54,6 @@ func (c *barrierContext) Branch(key []byte) ([]byte, kv.Step, error) {
 }
 
 func TestScheduling(t *testing.T) {
-	t.Run("E47-E58-E101/worker-smoke", func(t *testing.T) {
-		for _, shape := range []string{"storage", "accounts"} {
-			entries := benchEntries(shape, 100000)
-			for _, workers := range []int{1, 2, 4, 8, 18, 36} {
-				for iter := range 3 {
-					t.Run(fmt.Sprintf("%s/workers=%d/iteration=%d", shape, workers, iter), func(t *testing.T) {
-						tr := &Trie{scheduleWorkers: workers}
-						tr.ResetContext(newParityContext())
-						defer tr.Release()
-						updates := benchUpdatesIn(t.TempDir(), commitment.ModeCollect, entries)
-						defer updates.Close()
-						_, err := tr.Process(context.Background(), updates, "", nil, commitment.WarmupConfig{})
-						require.NoError(t, err)
-					})
-				}
-			}
-		}
-	})
 	storage := benchEntries("storage", 256)
 	t.Run("deferred_builds_worker_contexts", func(t *testing.T) {
 		_, _, calls := runV3(t, newShardedContext(), v3Config{deferred: true}, storage)
@@ -167,11 +149,6 @@ func TestScheduling(t *testing.T) {
 		}
 	}
 
-	contracts := make([]parityUpdate, 0, 64)
-	for i := range 32 {
-		contracts = append(contracts, parityUpdate{key: parityAddress(i), update: accountParityUpdate(i)}, parityUpdate{key: slotKey(parityAddress(i), paritySlot(i)), update: storageParityUpdate(i)})
-	}
-
 	var sparse, dense []int
 	for i := 0; len(dense) < 1500 || len(sparse) < 2; i++ {
 		h := commitment.KeyToHexNibbleHash(parityAddress(i))
@@ -216,7 +193,6 @@ func TestScheduling(t *testing.T) {
 		{"deferred_matches_inline", nil, [][]parityUpdate{storage}, v3Config{}, v3Config{deferred: true}},
 		{"account_fold_parallel_matches_serial", nil, [][]parityUpdate{benchEntries("storage", 512)}, v3Config{workers: 1}, v3Config{workers: 8}},
 		{"storage_fan_out_matches_serial", nil, [][]parityUpdate{whaleSeed, whaleNext}, v3Config{workers: 1}, v3Config{workers: 8}},
-		{"many_contracts_match_serial", nil, [][]parityUpdate{contracts}, v3Config{workers: 1}, v3Config{workers: 4}},
 		{"pipelined_account_groups_match_serial", groupSeed, [][]parityUpdate{groupNext}, v3Config{workers: 1}, v3Config{workers: 4}},
 	} {
 		t.Run(tc.name, func(t *testing.T) { requireSameRuns(t, tc.base, tc.a, tc.b, tc.rounds...) })

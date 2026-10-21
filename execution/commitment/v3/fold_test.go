@@ -98,7 +98,6 @@ func TestFoldParity(t *testing.T) {
 			}
 		}},
 		{"E30-E39/FoldUsesStoredChildHashWithoutStateReads", func(t *testing.T) {
-			ctx := newMockContext()
 			n := fork(nil)
 			n.plane = planeStorage
 			stored := bytes.Repeat([]byte{0x31}, 32)
@@ -114,9 +113,6 @@ func TestFoldParity(t *testing.T) {
 			refs[5] = storageLeafRef(nibbles.HexToCompact(append(append([]byte(nil), path[1:]...), nibbles.Terminator)), []byte{7}, nil)
 			want := branchRef(&refs)
 			require.Equal(t, want, got)
-			require.Empty(t, ctx.accountCalls)
-			require.Empty(t, ctx.storageCalls)
-			require.Empty(t, ctx.branchCalls)
 		}},
 		{"E30/FoldRejectsUnknownPlane", func(t *testing.T) {
 			n := fork(nil)

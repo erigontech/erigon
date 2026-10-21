@@ -58,8 +58,7 @@ func BenchmarkV3Incremental(b *testing.B) {
 	dir := b.TempDir()
 	b.ReportAllocs()
 	b.ResetTimer()
-	for range b.N {
-		b.StopTimer()
+	timedProcess(b, func() (func() error, func()) {
 		c := newShardedContext()
 		for s := range base.shards {
 			c.shards[s].branches = maps.Clone(base.shards[s].branches)
@@ -68,12 +67,9 @@ func BenchmarkV3Incremental(b *testing.B) {
 		tr.ResetContext(c)
 		tr.SetTrieContextFactory(c.factory)
 		u := benchUpdatesIn(dir, commitment.ModeCollect, next)
-		b.StartTimer()
-		if _, err := tr.Process(context.Background(), u, "", nil, commitment.WarmupConfig{}); err != nil {
-			b.Fatal(err)
-		}
-		b.StopTimer()
-		tr.Release()
-		b.StartTimer()
-	}
+		return func() error {
+			_, err := tr.Process(context.Background(), u, "", nil, commitment.WarmupConfig{})
+			return err
+		}, tr.Release
+	})
 }

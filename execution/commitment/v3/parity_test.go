@@ -82,8 +82,6 @@ func paritySlot(i int) []byte {
 	return commitmenttest.Key(commitmenttest.KeySpec{Kind: "wrapping-slot", Size: 32}, i)
 }
 
-func parityFuzzAddress(i int) []byte { return incrAddress(i) }
-
 func incrAddress(i int) []byte {
 	return commitmenttest.Key(commitmenttest.KeySpec{Kind: "integer", Size: 20}, i)
 }
@@ -263,31 +261,33 @@ func TestDifferential(t *testing.T) {
 		}
 	})
 
-	t.Run("whale_batches", func(t *testing.T) {
-		for seed := int64(1); seed <= 40; seed++ {
-			for _, b1 := range []int{2, 3, 5} {
-				for _, b2 := range []int{1, 2, 3} {
-					c := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: "whale", BatchSizes: []int{b1, b2}})
-					c.ID = fmt.Sprintf("whale/%d+%d", b1, b2)
-					differential(t, c, serialEngines)
-				}
-			}
-		}
-	})
-
-	t.Run("one_slot_per_account", func(t *testing.T) {
-		for _, rewrite := range []bool{false, true} {
-			for seed := int64(1); seed <= 40; seed++ {
-				for _, n1 := range []int{2, 5, 20} {
-					for _, n2 := range []int{1, 2, 5} {
-						c := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: "one-slot", BatchSizes: []int{n1, n2}, Rewrite: rewrite})
-						c.ID = fmt.Sprintf("one-slot/%d+%d/rewrite=%t", n1, n2, rewrite)
-						differential(t, c, serialEngines)
+	for _, tt := range []struct {
+		name    string
+		kind    string
+		first   []int
+		second  []int
+		rewrite []bool
+	}{
+		{"whale_batches", "whale", []int{2, 3, 5}, []int{1, 2, 3}, []bool{false}},
+		{"one_slot_per_account", "one-slot", []int{2, 5, 20}, []int{1, 2, 5}, []bool{false, true}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, rewrite := range tt.rewrite {
+				for seed := int64(1); seed <= 40; seed++ {
+					for _, b1 := range tt.first {
+						for _, b2 := range tt.second {
+							c := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: tt.kind, BatchSizes: []int{b1, b2}, Rewrite: rewrite})
+							c.ID = fmt.Sprintf("%s/%d+%d", tt.kind, b1, b2)
+							if tt.kind == "one-slot" {
+								c.ID += fmt.Sprintf("/rewrite=%t", rewrite)
+							}
+							differential(t, c, serialEngines)
+						}
 					}
 				}
 			}
-		}
-	})
+		})
+	}
 
 	t.Run("E61/two-slot-seeds", func(t *testing.T) {
 		for seed := range int64(200) {
@@ -392,7 +392,7 @@ func FuzzParityRandomSequences(f *testing.F) {
 		state := make(commitmenttest.State)
 		for step := range 24 {
 			account := rng.Intn(8)
-			op := commitmenttest.Op{Key: parityFuzzAddress(account), Delete: true}
+			op := commitmenttest.Op{Key: incrAddress(account), Delete: true}
 			if rng.Intn(4) != 0 {
 				op = accountOp(op.Key, commitmenttest.AccountSpec{Kind: "parity", Number: step + account})
 			}

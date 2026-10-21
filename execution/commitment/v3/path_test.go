@@ -74,9 +74,7 @@ func TestPathCodec(t *testing.T) {
 			}
 			slices.SortFunc(keys, bytes.Compare)
 
-			require.True(t, bytes.Equal(keys[1], []byte{0x40, 0xa0, 0x00, 0x03}))
-			require.True(t, bytes.Equal(keys[2], []byte{0x40, 0xa0, 0x01}))
-			require.True(t, bytes.Equal(keys[3], []byte{0x40, 0xa0, 0x20, 0x03}))
+			require.Equal(t, [][]byte{{0x40, 0xa0, 0x00, 0x03}, {0x40, 0xa0, 0x01}, {0x40, 0xa0, 0x20, 0x03}}, keys[1:4])
 
 			first, last := -1, -1
 			for i, key := range keys {
@@ -93,8 +91,6 @@ func TestPathCodec(t *testing.T) {
 				path := unpackPath(key[1:len(key)-1], int(key[len(key)-1]), nil)
 				require.Equal(t, byte(0x0a), path[0])
 			}
-			require.Less(t, bytes.Compare(keys[1], keys[2]), 0)
-			require.Less(t, bytes.Compare(keys[2], keys[3]), 0)
 		}},
 		{"E6/PackPathIntoDirtyBufferMatchesFreshBuffer", func(t *testing.T) {
 			for count := range 65 {

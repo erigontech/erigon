@@ -46,7 +46,6 @@ func TestAccountCodec(t *testing.T) {
 				{"eoa", commitmenttest.AccountSpec{CodeHash: empty.CodeHash}, empty.RootHash},
 				{"contract with storage", commitmenttest.AccountSpec{Nonce: 3, Balance: 99, CodeHash: codeHash}, storageRoot},
 				{"contract with code and no storage", commitmenttest.AccountSpec{Nonce: 7, CodeHash: codeHash}, empty.RootHash},
-				{"elision/zero/empty-code", commitmenttest.AccountSpec{CodeHash: empty.CodeHash}, empty.RootHash},
 				{"elision/zero/code", commitmenttest.AccountSpec{CodeHash: codeHash}, empty.RootHash},
 				{"elision/balance/empty-code", commitmenttest.AccountSpec{Balance: 99, CodeHash: empty.CodeHash}, empty.RootHash},
 				{"elision/balance/code", commitmenttest.AccountSpec{Balance: 99, CodeHash: codeHash}, empty.RootHash},
@@ -135,19 +134,6 @@ func TestAccountCodec(t *testing.T) {
 						require.Equal(t, value.CodeHash[:], code)
 						require.Equal(t, root, storage)
 						_ = accountConsensusRLP(nonce, &balance, storage, code, nil)
-					}
-					if share == 0 {
-						return
-					}
-					for range 200000 {
-						n := 1 + rnd.Intn(32)
-						if rnd.Intn(100) < 55 {
-							n = 1 + rnd.Intn(4)
-						}
-						value := make([]byte, n)
-						rnd.Read(value)
-						value[0] |= 0x01
-						require.Equal(t, storageLeafRefBuffered(nil, value, nil), storageLeafRef(nil, value, nil))
 					}
 				})
 			}

@@ -26,11 +26,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -174,11 +171,7 @@ func requireSameNodes(t *testing.T, want, got [][]byte, label string) {
 }
 
 func randomWitnessAccount(rng *rand.Rand) *commitmenttest.AccountValue {
-	value := commitmenttest.Account(commitmenttest.AccountSpec{Nonce: uint64(rng.Intn(1 << 20)), Balance: rng.Uint64()})
-	value.CodeHash = empty.CodeHash
-	if rng.Intn(3) == 0 {
-		value.CodeHash = common.BigToHash(uint256.NewInt(rng.Uint64()).ToBig())
-	}
+	value := commitmenttest.RandomAccount(rng)
 	return &value
 }
 
@@ -337,17 +330,20 @@ func witnessEdgeKeys(rng *rand.Rand, b *witnessBed) witnessKeys {
 	return keys
 }
 
+var commonWitnessShapes = []witnessShape{
+	{name: "single-account", accounts: 1},
+	{name: "single-slot", accounts: 1, slots: 1, slotPrefixes: [][]byte{nil}},
+	{name: "random", accounts: 24, slots: 4},
+	{name: "root-extension", accounts: 3, accountPrefixes: [][]byte{{0x7, 0x2}}},
+	{name: "inner-extension", accounts: 6, accountPrefixes: [][]byte{{0x1, 0x2, 0x3}, {0x1, 0x2, 0x3}, {0x4}, {0x9}}},
+	{name: "storage-root-extension", accounts: 2, slots: 3, slotPrefixes: [][]byte{{0x5, 0x5}}},
+	{name: "storage-inner-extension", accounts: 1, slots: 5, slotPrefixes: [][]byte{{0x3, 0xa, 0x1}, {0x3, 0xa, 0x1}, {0xc}}},
+}
+
 func TestWitnessMatchesHPH(t *testing.T) {
-	shapes := []witnessShape{
-		{name: "single-account", accounts: 1},
-		{name: "single-slot", accounts: 1, slots: 1, slotPrefixes: [][]byte{nil}},
-		{name: "random", accounts: 24, slots: 4},
-		{name: "root-extension", accounts: 3, accountPrefixes: [][]byte{{0x7, 0x2}}},
-		{name: "inner-extension", accounts: 6, accountPrefixes: [][]byte{{0x1, 0x2, 0x3}, {0x1, 0x2, 0x3}, {0x4}, {0x9}}},
-		{name: "storage-root-extension", accounts: 2, slots: 3, slotPrefixes: [][]byte{{0x5, 0x5}}},
-		{name: "storage-inner-extension", accounts: 1, slots: 5, slotPrefixes: [][]byte{{0x3, 0xa, 0x1}, {0x3, 0xa, 0x1}, {0xc}}},
+	shapes := append(commonWitnessShapes, []witnessShape{
 		{name: "shared-storage-extension", accounts: 3, slots: 5, slotPrefixes: [][]byte{{0x3, 0xa, 0x1}, {0x3, 0xa, 0x1}, {0xc}}, sharedSlots: true},
-	}
+	}...)
 	for _, shape := range shapes {
 		t.Run(shape.name, func(t *testing.T) {
 			for seed := range int64(25) {
@@ -440,17 +436,13 @@ func (b *witnessBed) hphCollapses(t *testing.T, batch []commitmenttest.Op) ([]st
 	require.NoError(t, hph.SetState(b.hphState))
 	var events []string
 	hph.SetCollapseTracer(func(sibling, prefix []byte) { events = append(events, fmt.Sprintf("%x/%x", sibling, prefix)) })
-	u := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash)
-	defer u.Close()
-	for _, op := range batch {
-		u.TouchPlainKeyDirect(string(op.Key), runner.Update(op))
-	}
+	u := testUpdates(t, commitment.ModeUpdate, batch)
 	root, err := hph.Process(ctx, u, "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
 	return events, root
 }
 
-func (b *witnessBed) v3Collapses(t *testing.T, batch []commitmenttest.Op) ([]string, []byte) {
+func (b *witnessBed) v3Collapses(t *testing.T, batch []commitmenttest.Op, traceOnly bool) ([]string, []byte) {
 	t.Helper()
 	ctx := context.Background()
 	b.v3Mem.Apply(batch)
@@ -458,48 +450,25 @@ func (b *witnessBed) v3Collapses(t *testing.T, batch []commitmenttest.Op) ([]str
 	_, _, err := tr.RestoreState(b.v3State)
 	require.NoError(t, err)
 	var events []string
-	tr.SetCollapseTracer(func(sibling, prefix []byte) { events = append(events, fmt.Sprintf("%x/%x", sibling, prefix)) })
-	u := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
-	defer u.Close()
-	for _, op := range batch {
-		u.TouchPlainKeyDirect(string(op.Key), runner.Update(op))
+	record := func(sibling, prefix []byte) { events = append(events, fmt.Sprintf("%x/%x", sibling, prefix)) }
+	u := testUpdates(t, commitment.ModeCollect, batch)
+	if traceOnly {
+		before, err := tr.RootHash()
+		require.NoError(t, err)
+		require.NoError(t, tr.TraceCollapses(ctx, u, record))
+		after, err := tr.RootHash()
+		require.NoError(t, err)
+		require.Equal(t, before, after, "trace-only leaves the trie at the parent root")
+		return events, nil
 	}
+	tr.SetCollapseTracer(record)
 	root, err := tr.Process(ctx, u, "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
 	return events, root
 }
 
-func (b *witnessBed) v3TraceOnly(t *testing.T, batch []commitmenttest.Op) []string {
-	t.Helper()
-	ctx := context.Background()
-	b.v3Mem.Apply(batch)
-	tr := b.openV3(ctx)
-	_, _, err := tr.RestoreState(b.v3State)
-	require.NoError(t, err)
-	before, err := tr.RootHash()
-	require.NoError(t, err)
-	var events []string
-	u := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
-	defer u.Close()
-	for _, op := range batch {
-		u.TouchPlainKeyDirect(string(op.Key), runner.Update(op))
-	}
-	require.NoError(t, tr.TraceCollapses(ctx, u, func(sibling, prefix []byte) { events = append(events, fmt.Sprintf("%x/%x", sibling, prefix)) }))
-	after, err := tr.RootHash()
-	require.NoError(t, err)
-	require.Equal(t, before, after, "trace-only leaves the trie at the parent root")
-	return events
-}
-
 func TestCollapseTracerMatchesHPH(t *testing.T) {
-	shapes := []witnessShape{
-		{name: "single-account", accounts: 1},
-		{name: "single-slot", accounts: 1, slots: 1, slotPrefixes: [][]byte{nil}},
-		{name: "random", accounts: 24, slots: 4},
-		{name: "root-extension", accounts: 3, accountPrefixes: [][]byte{{0x7, 0x2}}},
-		{name: "inner-extension", accounts: 6, accountPrefixes: [][]byte{{0x1, 0x2, 0x3}, {0x1, 0x2, 0x3}, {0x4}, {0x9}}},
-		{name: "storage-root-extension", accounts: 2, slots: 3, slotPrefixes: [][]byte{{0x5, 0x5}}},
-		{name: "storage-inner-extension", accounts: 1, slots: 5, slotPrefixes: [][]byte{{0x3, 0xa, 0x1}, {0x3, 0xa, 0x1}, {0xc}}},
+	shapes := append(commonWitnessShapes, []witnessShape{
 		{name: "propagate", accounts: 3, accountPrefixes: [][]byte{{0x2, 0x1}, {0x2, 0x9}, {0x8}}},
 		{name: "propagate-deep", accounts: 5, accountPrefixes: [][]byte{{0x2, 0x1}, {0x2, 0x9}, {0x8, 0x1}, {0x8, 0x5}, {0xc}}},
 		{name: "storage-propagate", accounts: 1, slots: 3, slotPrefixes: [][]byte{{0x2, 0x1}, {0x2, 0x9}, {0x8}}},
@@ -521,7 +490,7 @@ func TestCollapseTracerMatchesHPH(t *testing.T) {
 				}
 			},
 		},
-	}
+	}...)
 	for _, shape := range shapes {
 		t.Run(shape.name, func(t *testing.T) {
 			for seed := range int64(40) {
@@ -533,11 +502,12 @@ func TestCollapseTracerMatchesHPH(t *testing.T) {
 				}
 				b := newWitnessBed(t, pre)
 				wantEvents, wantRoot := b.hphCollapses(t, batch)
-				gotEvents, gotRoot := b.v3Collapses(t, batch)
+				gotEvents, gotRoot := b.v3Collapses(t, batch, false)
 				label := fmt.Sprintf("seed=%d batch=%d ops", seed, len(batch))
 				require.Equal(t, wantRoot, gotRoot, label)
 				require.Equal(t, wantEvents, gotEvents, label)
-				require.Equal(t, wantEvents, newWitnessBed(t, pre).v3TraceOnly(t, batch), label+" trace-only")
+				traceEvents, _ := newWitnessBed(t, pre).v3Collapses(t, batch, true)
+				require.Equal(t, wantEvents, traceEvents, label+" trace-only")
 				requireSameChildCounts(t, b, pre, batch, wantEvents, label)
 			}
 		})
@@ -560,7 +530,7 @@ func TestTracedProcessReadsEachRecordOnce(t *testing.T) {
 		rng := rand.New(rand.NewSource(seed))
 		pre := witnessState(rng, witnessShape{accounts: 24, slots: 4})
 		batch := collapseBatch(rng, newWitnessBed(t, pre))
-		wantEvents, wantRoot := newWitnessBed(t, pre).v3Collapses(t, batch)
+		wantEvents, wantRoot := newWitnessBed(t, pre).v3Collapses(t, batch, false)
 
 		b := newWitnessBed(t, pre)
 		b.v3Mem.Apply(batch)
@@ -573,12 +543,8 @@ func TestTracedProcessReadsEachRecordOnce(t *testing.T) {
 		counting.reads = map[string]int{}
 		var events []string
 		tr.SetCollapseTracer(func(sibling, prefix []byte) { events = append(events, fmt.Sprintf("%x/%x", sibling, prefix)) })
-		u := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
-		for _, op := range batch {
-			u.TouchPlainKeyDirect(string(op.Key), runner.Update(op))
-		}
+		u := testUpdates(t, commitment.ModeCollect, batch)
 		root, err := tr.Process(ctx, u, "", nil, commitment.WarmupConfig{})
-		u.Close()
 		require.NoError(t, err)
 		require.Equalf(t, wantRoot, root, "seed %d", seed)
 		require.Equalf(t, wantEvents, events, "seed %d", seed)
@@ -610,10 +576,7 @@ func witnessAfterTraceReusesReads(t *testing.T, seed int64, traceOnly bool) {
 	tr.ResetContext(counting)
 	_, _, err := tr.RestoreState(b.v3State)
 	require.NoError(t, err)
-	u := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
-	for _, op := range batch {
-		u.TouchPlainKeyDirect(string(op.Key), runner.Update(op))
-	}
+	u := testUpdates(t, commitment.ModeCollect, batch)
 	if traceOnly {
 		err = tr.TraceCollapses(ctx, u, func([]byte, []byte) {})
 	} else {
@@ -621,7 +584,6 @@ func witnessAfterTraceReusesReads(t *testing.T, seed int64, traceOnly bool) {
 		_, err = tr.Process(ctx, u, "", nil, commitment.WarmupConfig{})
 		tr.SetCollapseTracer(nil)
 	}
-	u.Close()
 	require.NoError(t, err)
 	require.NotEmpty(t, counting.reads, "seed %d traceOnly=%v", seed, traceOnly)
 

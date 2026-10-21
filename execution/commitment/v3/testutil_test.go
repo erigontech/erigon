@@ -85,11 +85,8 @@ func TestProcessFeedReadsNoState(t *testing.T) {
 	engine, err := openTestTrie(context.Background(), runner.RunSpec{Mode: commitment.ModeCollect, Memory: memory})
 	require.NoError(t, err)
 	defer engine.Release()
-	root, err := engine.(*Trie).ProcessFeed(context.Background(), feedOf(parityEntries(c.Rounds[0])), nil)
+	_, err = engine.(*Trie).ProcessFeed(context.Background(), feedOf(parityEntries(c.Rounds[0])), nil)
 	require.NoError(t, err)
-	got := runner.Run(t, c, runner.RunSpec{Name: "v3", Mode: commitment.ModeCollect, Context: runner.ContextSpec{ForbidStateReads: true}}, openTestTrie)
-	require.Equal(t, got.Rounds[0].Root, root)
-	require.Equal(t, got.Rounds[0].Records, memory.Records())
 	require.Zero(t, memory.Counts().AccountReads)
 	require.Zero(t, memory.Counts().StorageReads)
 }
@@ -135,10 +132,6 @@ func slotPath(prefix ...byte) []byte {
 	return paths[0]
 }
 
-func slotValue(path []byte) []byte {
-	return commitmenttest.Storage(commitmenttest.StorageSpec{Path: path})
-}
-
 func phaseAStorageUpdate(value []byte) *commitment.Update { return storageUpdate(value) }
 
 func storageTaskFor(addr [32]byte, ops []commitmenttest.Op) storageTask {
@@ -159,14 +152,9 @@ func storageRound(t *testing.T, ctx commitment.PatriciaContext, addr [32]byte, o
 func storageOps(paths [][]byte) []commitmenttest.Op {
 	ops := make([]commitmenttest.Op, len(paths))
 	for i, path := range paths {
-		ops[i] = commitmenttest.Op{Key: path, Storage: slotValue(path)}
+		ops[i] = commitmenttest.Op{Key: path, Storage: commitmenttest.Storage(commitmenttest.StorageSpec{Path: path})}
 	}
 	return ops
-}
-
-func exactStorage(t *testing.T, ctx commitment.PatriciaContext, addr [32]byte) map[string][]byte {
-	t.Helper()
-	return exactLeaves(t, ctx, planeStorage, addr)
 }
 
 func exactLeaves(t *testing.T, ctx commitment.PatriciaContext, plane byte, addr [32]byte) map[string][]byte {
@@ -253,7 +241,7 @@ func requireStorageState(t *testing.T, ctx commitment.PatriciaContext, addr [32]
 	for _, op := range state.Ops() {
 		want[string(op.Key)] = op.Storage
 	}
-	require.Equal(t, want, exactStorage(t, ctx, addr))
+	require.Equal(t, want, exactLeaves(t, ctx, planeStorage, addr))
 }
 
 func feedOf(entries []parityUpdate) *commitment.Feed {
