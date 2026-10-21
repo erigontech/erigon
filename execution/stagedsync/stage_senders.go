@@ -232,6 +232,11 @@ Loop:
 			logger.Warn(fmt.Sprintf("[%s] senders stage can't find header", logPrefix), "num", blockNumber, "hash", blockHash)
 			continue
 		}
+		if cfg.sendersRecoveredByExec(s, header) {
+			cfg.readAheader.AddSenders(nil, blockHash)
+			continue
+		}
+
 		body, ok := cfg.readAheader.ReadBodyWithTransactions(blockHash)
 		if body == nil || !ok {
 			if body, err = cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber); err != nil {
@@ -241,10 +246,6 @@ Loop:
 				logger.Warn(fmt.Sprintf("[%s] ReadBodyWithTransactions can't find block", logPrefix), "num", blockNumber, "hash", blockHash)
 				continue
 			}
-		}
-		if cfg.sendersRecoveredByExec(s, header, len(body.Transactions)) {
-			cfg.readAheader.AddSenders(nil, blockHash)
-			continue
 		}
 
 		blockIndex := int(blockNumber) - int(s.BlockNumber) - 1
@@ -405,13 +406,10 @@ func senderRecoveryErr(txn types.Transaction, err error) error {
 	return fmt.Errorf("%w: error recovering sender for tx=%x, %w", rules.ErrInvalidBlock, txn.Hash(), err)
 }
 
-// minTxsForSendersRecoveryInExec: below it, recovery inside exec workers costs more than the parallel senders pass saves.
-const minTxsForSendersRecoveryInExec = 64
-
 // sendersRecoveredByExec skips the separate recovery pass for blocks that parallel exec schedules by their BAL:
 // exec workers recover senders while executing, and writeSendersRecoveredByExec stores them afterwards.
-func (cfg SendersCfg) sendersRecoveredByExec(s *StageState, header *types.Header, txCount int) bool {
-	return txCount >= minTxsForSendersRecoveryInExec && s.SyncMode() == stages.ModeForkValidation && dbg.Exec3Parallel && !dbg.IgnoreBAL &&
+func (cfg SendersCfg) sendersRecoveredByExec(s *StageState, header *types.Header) bool {
+	return s.SyncMode() == stages.ModeForkValidation && dbg.Exec3Parallel && !dbg.IgnoreBAL &&
 		cfg.chainConfig.IsAmsterdam(header.Time) && header.HasNonEmptyBAL()
 }
 
