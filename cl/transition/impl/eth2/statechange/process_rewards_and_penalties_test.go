@@ -76,6 +76,40 @@ func TestProcessRewardsAndPenaltiesComputeErrorWritesNoBalance(t *testing.T) {
 	require.Equal(t, before, after)
 }
 
+// The spec applies each flag's and the inactivity rewards and penalties in turn
+// and clamps the balance at zero after each penalty, so a reward that follows a
+// clamped penalty is not absorbed by it.
+func TestProcessRewardsAndPenaltiesClampsEachDeltaSet(t *testing.T) {
+	s := newRewardsTestState(t, 4096)
+	cfg := s.BeaconConfig()
+	const index = 2
+	require.NoError(t, s.SetValidatorBalance(index, 1))
+	eligible := state.EligibleValidatorsIndicies(s)
+	require.Contains(t, eligible, uint64(index))
+	flags := GetUnslashedIndiciesSet(cfg, state.PreviousEpoch(s), s.ValidatorSet(), s.PreviousEpochParticipation())
+	require.False(t, flags[cfg.TimelySourceFlagIndex][index])
+	require.True(t, flags[cfg.TimelyTargetFlagIndex][index])
+	require.False(t, flags[cfg.TimelyHeadFlagIndex][index])
+	require.False(t, state.InactivityLeaking(s))
+
+	baseReward, err := s.BaseReward(index)
+	require.NoError(t, err)
+	totals, err := getFlagsTotalBalances(s, flags)
+	require.NoError(t, err)
+	weights := cfg.ParticipationWeights()
+	inc := cfg.EffectiveBalanceIncrement
+	sourcePenalty := baseReward * weights[cfg.TimelySourceFlagIndex] / cfg.WeightDenominator
+	targetReward := baseReward * weights[cfg.TimelyTargetFlagIndex] * (totals[cfg.TimelyTargetFlagIndex] / inc) /
+		(s.GetTotalActiveBalance() / inc * cfg.WeightDenominator)
+	require.Positive(t, targetReward)
+	require.Greater(t, sourcePenalty, 1+targetReward)
+
+	require.NoError(t, ProcessRewardsAndPenalties(s, eligible, flags))
+	balance, err := s.ValidatorBalance(index)
+	require.NoError(t, err)
+	require.Equal(t, targetReward, balance)
+}
+
 func newRewardsTestState(t testing.TB, validatorCount int) *state.CachingBeaconState {
 	t.Helper()
 	cfg := &clparams.MainnetBeaconConfig
