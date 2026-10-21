@@ -984,8 +984,8 @@ func (f *ForkChoiceStore) validateKnownEnvelopeCommitments(signedEnvelope *cltyp
 func (f *ForkChoiceStore) validatePendingEnvelopeCommitments(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, validatePayload bool) (bool, error) {
 	root := signedEnvelope.Message.BeaconBlockRoot
 	f.mu.RLock()
-	blockState, stateErr := f.forkGraph.GetState(root, false)
-	if stateErr != nil || blockState == nil {
+	header, ok := f.forkGraph.GetHeader(root)
+	if !ok || header == nil {
 		f.mu.RUnlock()
 		return false, nil
 	}
