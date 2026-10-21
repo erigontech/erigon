@@ -39,7 +39,6 @@ type Reset struct {
 	RemoveFunc           func(name OsFilePath) error
 	PreverifiedSnapshots preverified.SortedItems
 	RemoveUnknown        bool
-	RemoveLocal          bool
 	// AllowMixedStateBuilds skips the commitment/state build check.
 	AllowMixedStateBuilds bool
 	Dirs                  *datadir.Dirs
@@ -304,28 +303,26 @@ func (reset *Reset) Run() (err error) {
 		"torrents", reset.stats.removed.TorrentFiles,
 		"data", reset.stats.removed.DataFiles)
 	// Remove chaindata last, so that the config is available if there's an error.
-	if reset.RemoveLocal {
-		// Left over from Polygon support; harmless on chains that never had them.
-		for _, extraDir := range []slashName{
-			"heimdall",
-			"polygon-bridge",
-		} {
-			// Probably shouldn't log these unless they existed, it would confuse the user for
-			// unrelated chains.
-			ra := reset.makeRemoveAll(reset.dataDirOsPath().Join(extraDir.MustLocalize()))
-			ra.warnNoRoot = false
-			err = ra.do()
-			if err != nil {
-				return fmt.Errorf("removing extra dir %q: %w", extraDir, err)
-			}
-		}
-		logger.Info("Removing chaindata dir", "path", reset.pathForLog(dbcfg.ChainDB))
-		ra := reset.makeRemoveAll(slashName(dbcfg.ChainDB).MustLocalize())
+	// Left over from Polygon support; harmless on chains that never had them.
+	for _, extraDir := range []slashName{
+		"heimdall",
+		"polygon-bridge",
+	} {
+		// Probably shouldn't log these unless they existed, it would confuse the user for
+		// unrelated chains.
+		ra := reset.makeRemoveAll(reset.dataDirOsPath().Join(extraDir.MustLocalize()))
+		ra.warnNoRoot = false
 		err = ra.do()
 		if err != nil {
-			err = fmt.Errorf("removing chaindata dir: %w", err)
-			return
+			return fmt.Errorf("removing extra dir %q: %w", extraDir, err)
 		}
+	}
+	logger.Info("Removing chaindata dir", "path", reset.pathForLog(dbcfg.ChainDB))
+	ra := reset.makeRemoveAll(slashName(dbcfg.ChainDB).MustLocalize())
+	err = ra.do()
+	if err != nil {
+		err = fmt.Errorf("removing chaindata dir: %w", err)
+		return
 	}
 	err = reset.remove(OsFilePath(reset.Dirs.PreverifiedPath()))
 	if err == nil {

@@ -30,7 +30,6 @@ func runMixedStateReset(t *testing.T, root *os.Root, preverifiedNames []string, 
 	r := makeTestingReset(t, startEntries, root, "", ".")
 	// --keep-local-snapshots: files outside the preverified set are kept as-is.
 	r.RemoveUnknown = false
-	r.RemoveLocal = false
 	r.AllowMixedStateBuilds = allow
 	for _, name := range preverifiedNames {
 		r.PreverifiedSnapshots = append(r.PreverifiedSnapshots, preverified.Item{Name: name})
@@ -85,7 +84,7 @@ func TestResetIgnoresRangesWithoutBothSides(t *testing.T) {
 		}
 		makeEntries(t, startEntries, root)
 		r := makeTestingReset(t, startEntries, root, "", ".")
-		r.RemoveUnknown, r.RemoveLocal = false, false
+		r.RemoveUnknown = false
 		r.PreverifiedSnapshots = preverified.SortedItems{{Name: "domain/v1.0-accounts.0-256.kv"}}
 		r.PreverifiedSnapshots.Sort()
 		qt.Assert(t, qt.IsNil(r.Run()))
@@ -94,7 +93,7 @@ func TestResetIgnoresRangesWithoutBothSides(t *testing.T) {
 		startEntries := []fsEntry{{Name: "snapshots/domain/v1.0-commitment.0-256.kv"}}
 		makeEntries(t, startEntries, root)
 		r := makeTestingReset(t, startEntries, root, "", ".")
-		r.RemoveUnknown, r.RemoveLocal = false, false
+		r.RemoveUnknown = false
 		r.PreverifiedSnapshots = preverified.SortedItems{{Name: "domain/v1.0-commitment.0-256.kv"}}
 		r.PreverifiedSnapshots.Sort()
 		qt.Assert(t, qt.IsNil(r.Run()))
@@ -137,7 +136,7 @@ func TestResetSkipsCheckWhenUnknownFilesAreRemoved(t *testing.T) {
 		}
 		makeEntries(t, startEntries, root)
 		r := makeTestingReset(t, startEntries, root, "", ".")
-		r.RemoveUnknown, r.RemoveLocal = true, true
+		r.RemoveUnknown = true
 		r.PreverifiedSnapshots = preverified.SortedItems{{Name: "domain/v1.0-accounts.0-256.kv"}}
 		r.PreverifiedSnapshots.Sort()
 		qt.Assert(t, qt.IsNil(r.Run()))
@@ -151,7 +150,7 @@ func TestResetCountsPreverifiedFilesNotYetOnDisk(t *testing.T) {
 		startEntries := []fsEntry{{Name: "snapshots/domain/v1.0-accounts.0-256.kv"}}
 		makeEntries(t, startEntries, root)
 		r := makeTestingReset(t, startEntries, root, "", ".")
-		r.RemoveUnknown, r.RemoveLocal = false, false
+		r.RemoveUnknown = false
 		// Only the commitment file is described, so it arrives canonical beside a local accounts.
 		r.PreverifiedSnapshots = preverified.SortedItems{{Name: "domain/v1.0-commitment.0-256.kv"}}
 		r.PreverifiedSnapshots.Sort()
@@ -171,7 +170,7 @@ func TestResetAllowsMixedBuildsForPlainCommitment(t *testing.T) {
 		}
 		makeEntries(t, startEntries, root)
 		r := makeTestingReset(t, startEntries, root, "", ".")
-		r.RemoveUnknown, r.RemoveLocal = false, false
+		r.RemoveUnknown = false
 		r.PreverifiedSnapshots = preverified.SortedItems{{Name: "domain/v2.2-accounts.0-256.kv"}}
 		r.PreverifiedSnapshots.Sort()
 		qt.Assert(t, qt.IsNil(r.Run()))
@@ -187,7 +186,7 @@ func TestResetAllowsMixedBuildsBelowReferencingThreshold(t *testing.T) {
 		}
 		makeEntries(t, startEntries, root)
 		r := makeTestingReset(t, startEntries, root, "", ".")
-		r.RemoveUnknown, r.RemoveLocal = false, false
+		r.RemoveUnknown = false
 		r.PreverifiedSnapshots = preverified.SortedItems{{Name: "domain/v1.0-accounts.0-1.kv"}}
 		r.PreverifiedSnapshots.Sort()
 		qt.Assert(t, qt.IsNil(r.Run()))
@@ -201,7 +200,7 @@ func TestResetRefusesMixedBuildsWithLegacyVersionNames(t *testing.T) {
 		startEntries := []fsEntry{{Name: "snapshots/domain/v1-commitment.0-256.kv"}}
 		makeEntries(t, startEntries, root)
 		r := makeTestingReset(t, startEntries, root, "", ".")
-		r.RemoveUnknown, r.RemoveLocal = false, false
+		r.RemoveUnknown = false
 		r.PreverifiedSnapshots = preverified.SortedItems{{Name: "domain/v1.0-accounts.0-256.kv"}}
 		r.PreverifiedSnapshots.Sort()
 		err := r.Run()
@@ -221,7 +220,7 @@ func TestResetJudgesTheHighestVersionOfEachDomain(t *testing.T) {
 		}
 		makeEntries(t, startEntries, root)
 		r := makeTestingReset(t, startEntries, root, "", ".")
-		r.RemoveUnknown, r.RemoveLocal = false, false
+		r.RemoveUnknown = false
 		r.PreverifiedSnapshots = preverified.SortedItems{
 			{Name: "domain/v1.1-accounts.0-256.kv"},   // canonical, and the one that wins
 			{Name: "domain/v1.0-commitment.0-256.kv"}, // canonical, superseded
@@ -244,7 +243,7 @@ func TestResetFollowsTheLoaderPastUnsupportedVersions(t *testing.T) {
 		}
 		makeEntries(t, startEntries, root)
 		r := makeTestingReset(t, startEntries, root, "", ".")
-		r.RemoveUnknown, r.RemoveLocal = false, false
+		r.RemoveUnknown = false
 		r.PreverifiedSnapshots = preverified.SortedItems{{Name: "domain/v2.0-accounts.0-256.kv"}}
 		r.PreverifiedSnapshots.Sort()
 		// v3.0 carries plain keys, so the range holds no offsets to invalidate.
@@ -262,7 +261,7 @@ func TestResetTreatsALegacyFileRenamedOntoAManifestNameAsCanonical(t *testing.T)
 		}
 		makeEntries(t, startEntries, root)
 		r := makeTestingReset(t, startEntries, root, "", ".")
-		r.RemoveUnknown, r.RemoveLocal = false, false
+		r.RemoveUnknown = false
 		r.PreverifiedSnapshots = preverified.SortedItems{
 			{Name: "domain/v1.0-commitment.0-256.kv"},
 			{Name: "domain/v1.0-accounts.0-256.kv"},
@@ -283,7 +282,7 @@ func TestResetIgnoresReversedStepRanges(t *testing.T) {
 		startEntries := []fsEntry{{Name: "snapshots/domain/v1.0-commitment.256-0.kv"}}
 		makeEntries(t, startEntries, root)
 		r := makeTestingReset(t, startEntries, root, "", ".")
-		r.RemoveUnknown, r.RemoveLocal = false, false
+		r.RemoveUnknown = false
 		r.PreverifiedSnapshots = preverified.SortedItems{{Name: "domain/v1.0-accounts.256-0.kv"}}
 		r.PreverifiedSnapshots.Sort()
 		qt.Assert(t, qt.IsNil(r.Run()))
@@ -298,7 +297,7 @@ func TestResetKeepsTheWinningAliasWhenTheCanonicalOneSortsFirst(t *testing.T) {
 		startEntries := []fsEntry{{Name: "snapshots/domain/v1.0-commitment.0-256.kv"}} // local twin, sorts second
 		makeEntries(t, startEntries, root)
 		r := makeTestingReset(t, startEntries, root, "", ".")
-		r.RemoveUnknown, r.RemoveLocal = false, false
+		r.RemoveUnknown = false
 		r.PreverifiedSnapshots = preverified.SortedItems{
 			{Name: "domain/v1-commitment.0-256.kv"}, // canonical, sorts first, so it is the one opened
 			{Name: "domain/v1-accounts.0-256.kv"},
@@ -317,7 +316,7 @@ func TestResetRefusesLegacyStateThatStartupRenamesIntoTheManifest(t *testing.T) 
 		}
 		makeEntries(t, startEntries, root)
 		r := makeTestingReset(t, startEntries, root, "", ".")
-		r.RemoveUnknown, r.RemoveLocal = false, false
+		r.RemoveUnknown = false
 		r.PreverifiedSnapshots = preverified.SortedItems{
 			{Name: "domain/v1.0-accounts.0-256.kv"},
 			{Name: "domain/v1.0-storage.0-256.kv"},
@@ -349,7 +348,7 @@ func runCoveredRangeReset(t *testing.T, root *os.Root, local, manifest []string)
 func runCoveredRangeResetEntries(t *testing.T, root *os.Root, startEntries []fsEntry, manifest []string) error {
 	makeEntries(t, startEntries, root)
 	r := makeTestingReset(t, startEntries, root, "", ".")
-	r.RemoveUnknown, r.RemoveLocal = false, false
+	r.RemoveUnknown = false
 	r.PreverifiedSnapshots = preverified.SortedItems{
 		{Name: "domain/v1.0-accounts.0-2.kv"},
 		{Name: "domain/v1.0-storage.0-2.kv"},
@@ -524,7 +523,7 @@ func TestResetAllowsALegacyFileThatStartupRenamesOverItsCanonicalTwin(t *testing
 		}
 		makeEntries(t, startEntries, root)
 		r := makeTestingReset(t, startEntries, root, "", ".")
-		r.RemoveUnknown, r.RemoveLocal = false, false
+		r.RemoveUnknown = false
 		r.PreverifiedSnapshots = preverified.SortedItems{
 			{Name: "domain/v1.0-accounts.0-256.kv"},
 			{Name: "domain/v1.0-storage.0-256.kv"},

@@ -153,7 +153,6 @@ func resetCliAction(ctx context.Context, cliCtx *cli.Command) (err error) {
 	r := reset.Reset{
 		Dirs:                  &dirs,
 		RemoveUnknown:         !keepLocal,
-		RemoveLocal:           true,
 		AllowMixedStateBuilds: allowMixedState,
 		Logger:                logger,
 		PreverifiedSnapshots:  cfg.Preverified.Items,

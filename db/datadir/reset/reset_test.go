@@ -454,7 +454,6 @@ func makeTestingReset(
 		Logger:               logger,
 		PreverifiedSnapshots: nil,
 		RemoveUnknown:        true,
-		RemoveLocal:          true,
 		RemoveFunc: func(osFilePath OsFilePath) error {
 			slashName := osFilePath.mustLocalRelSlash(osRootPath)
 			for _, entry := range entries {
