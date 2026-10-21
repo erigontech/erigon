@@ -1182,6 +1182,8 @@ func TestContextAddressWordsReusedFrame(t *testing.T) {
 			value := tc.address.Value()
 			want := new(uint256.Int).SetBytes(value[:])
 			for range 2 {
+				scope.Stack.push(*uint256.MustFromHex("0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"))
+				scope.Stack.pop()
 				_, _, err := tc.op(0, evm, scope)
 				if err != nil || *scope.Stack.peek() != *want {
 					t.Fatalf("frame %d %s: got %x, %v; want %x", frame, tc.name, scope.Stack.peek(), err, want)
