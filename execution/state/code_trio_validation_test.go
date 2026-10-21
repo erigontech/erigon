@@ -42,7 +42,7 @@ func TestCodeTrio_ValidationClassAsymmetry(t *testing.T) {
 	vm.WriteCodeSize(addr, Version{TxIndex: 1}, code.Len(), true)
 
 	// tx3's reads were served from storage (cold) and now collide with the flush.
-	readStorage := ReadHeader{Source: StorageRead, Version: Version{TxIndex: 3}}
+	readStorage := NewReadHeader(StorageRead, Version{TxIndex: 3})
 
 	ioHash := NewVersionedIO(4)
 	rsHash := ReadSet{}

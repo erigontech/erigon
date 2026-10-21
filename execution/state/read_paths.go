@@ -349,7 +349,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			sdVer := Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}
 			if !commited {
 				s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
-					ReadHeader: ReadHeader{Source: MapRead, Version: sdVer},
+					ReadHeader: NewReadHeader(MapRead, sdVer),
 					Val:        true,
 				})
 			}
@@ -384,7 +384,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				(prHeader.Source == MapRead || prHeader.Source == StorageRead) {
 				r.outcome = outcomeReadSetHit
 				r.source = prHeader.Source
-				r.version = prHeader.Version
+				r.version = prHeader.Version()
 				return
 			}
 		}
@@ -421,7 +421,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				// live account, not a zeroed one. Record the SelfDestructPath
 				// dependency for validation, then fall through to the actual value.
 				s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
-					ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
+					ReadHeader: NewReadHeader(MapRead, sdVersion),
 					Val:        true,
 				})
 			} else {
@@ -445,7 +445,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				}
 				if !sdOK || sd {
 					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
-						ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
+						ReadHeader: NewReadHeader(MapRead, sdVersion),
 						Val:        true,
 					})
 					readVersion := sdVersion
@@ -462,7 +462,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 					if path == CodeHashPath && !s.versionMap.destroyedAndUnrevived(addr, s.txIndex) {
 						r.outcome = outcomeMapDone
 						r.mapCodeHashVal = accounts.EmptyCodeHash
-						r.hdr = ReadHeader{Source: MapRead, Version: readVersion}
+						r.hdr = NewReadHeader(MapRead, readVersion)
 						r.recordVR = !commited
 						r.source = MapRead
 						r.version = readVersion
@@ -513,15 +513,15 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		panic(fmt.Errorf("readPaths: unknown path %v", path))
 	}
 
-	hdr := ReadHeader{Version: Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}}
+	hdr := NewReadHeader(UnknownSource, Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()})
 
 	if !commited {
 		if hasWrite := s.versionedWriteHit(addr, path, key, r); hasWrite {
 			if res.Status() == MVReadResultDone {
 				if prHeader, prOK := s.versionedReads.getHeader(addr, path, key); prOK {
-					if hdr.Version.TxIndex > destructedVersion.TxIndex && hdr.Version != prHeader.Version && !s.readValueUnchanged(addr, path, key, r) {
-						if hdr.Version.TxIndex > s.dep {
-							s.dep = hdr.Version.TxIndex
+					if hdr.Version().TxIndex > destructedVersion.TxIndex && hdr.Version() != prHeader.Version() && !s.readValueUnchanged(addr, path, key, r) {
+						if hdr.Version().TxIndex > s.dep {
+							s.dep = hdr.Version().TxIndex
 						}
 						if dbg.TraceReexec {
 							fmt.Printf(
@@ -531,17 +531,17 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 								s.version,
 								addr,
 								AccountKey{path, key},
-								prHeader.Version.TxIndex,
-								prHeader.Version.Incarnation,
-								hdr.Version.TxIndex,
-								hdr.Version.Incarnation,
+								prHeader.Version().TxIndex,
+								prHeader.Version().Incarnation,
+								hdr.Version().TxIndex,
+								hdr.Version().Incarnation,
 							)
 						}
 						if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
 							fmt.Printf("%d (%d.%d) WR DEP (%d.%d)!=(%d.%d) %x %s\n",
 								s.blockNum, s.txIndex, s.version,
-								prHeader.Version.TxIndex, prHeader.Version.Incarnation,
-								hdr.Version.TxIndex, hdr.Version.Incarnation,
+								prHeader.Version().TxIndex, prHeader.Version().Incarnation,
+								hdr.Version().TxIndex, hdr.Version().Incarnation,
 								addr, AccountKey{path, key})
 						}
 						s.versionedReads.SetHeader(addr, path, key, hdr)
@@ -568,7 +568,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		// in between was never consumed, so adopt it below and let the load's
 		// reconciliation re-record the read.
 		if prHeader, ok := s.versionedReads.getHeader(addr, path, key); ok && prHeader.Source != ProvisionalRead {
-			if prHeader.Version == hdr.Version {
+			if prHeader.Version() == hdr.Version() {
 				if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
 					fmt.Printf("%d (%d.%d) RD (%s:%s) %x %s\n",
 						s.blockNum, s.txIndex, s.version, MapRead, res.DepString(),
@@ -576,7 +576,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				}
 				r.outcome = outcomeReadSetHit
 				r.source = MapRead
-				r.version = hdr.Version
+				r.version = hdr.Version()
 				return
 			}
 			if s.readValueUnchanged(addr, path, key, r) {
@@ -585,11 +585,11 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				// version-only dependency. Keep the recorded read, do not abort.
 				r.outcome = outcomeReadSetHit
 				r.source = MapRead
-				r.version = prHeader.Version
+				r.version = prHeader.Version()
 				return
 			}
-			if hdr.Version.TxIndex > s.dep {
-				s.dep = hdr.Version.TxIndex
+			if hdr.Version().TxIndex > s.dep {
+				s.dep = hdr.Version().TxIndex
 			}
 			if dbg.TraceReexec {
 				fmt.Printf(
@@ -599,11 +599,11 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 					s.version,
 					addr,
 					AccountKey{path, key},
-					prHeader.Version.TxIndex,
-					prHeader.Version.Incarnation,
+					prHeader.Version().TxIndex,
+					prHeader.Version().Incarnation,
 					prHeader.Source,
-					hdr.Version.TxIndex,
-					hdr.Version.Incarnation,
+					hdr.Version().TxIndex,
+					hdr.Version().Incarnation,
 				)
 				if path == AddressPath {
 					s.traceDepReadContext(addr, r)
@@ -612,8 +612,8 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
 				fmt.Printf("%d (%d.%d) RD DEP (%d.%d)!=(%d.%d) %x %s\n",
 					s.blockNum, s.txIndex, s.version,
-					prHeader.Version.TxIndex, prHeader.Version.Incarnation,
-					hdr.Version.TxIndex, hdr.Version.Incarnation,
+					prHeader.Version().TxIndex, prHeader.Version().Incarnation,
+					hdr.Version().TxIndex, hdr.Version().Incarnation,
 					addr, AccountKey{path, key})
 			}
 			s.versionedReads.SetHeader(addr, path, key, hdr)
@@ -640,15 +640,15 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		// away.
 		if path == StoragePath || path == CodePath || path == CodeSizePath || path == NoncePath ||
 			path == CodeHashPath || path == BalancePath {
-			lo := hdr.Version.TxIndex
+			lo := hdr.Version().TxIndex
 			if path == CodeHashPath || path == BalancePath {
 				lo++
 			}
 			if sdVer, ok := s.versionMap.FindDoneSelfDestructInRange(addr, lo, s.txIndex, true); ok {
 				if !commited {
-					s.recordWipedRead(addr, path, key, hdr.Version)
+					s.recordWipedRead(addr, path, key, hdr.Version())
 					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
-						ReadHeader: ReadHeader{Source: MapRead, Version: sdVer},
+						ReadHeader: NewReadHeader(MapRead, sdVer),
 						Val:        true,
 					})
 				}
@@ -661,15 +661,15 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				if path == CodeHashPath && !s.versionMap.destroyedAndUnrevived(addr, s.txIndex) {
 					r.outcome = outcomeMapDone
 					r.mapCodeHashVal = accounts.EmptyCodeHash
-					r.hdr = ReadHeader{Source: MapRead, Version: hdr.Version}
+					r.hdr = NewReadHeader(MapRead, hdr.Version())
 					r.recordVR = false
 					r.source = MapRead
-					r.version = hdr.Version
+					r.version = hdr.Version()
 					return
 				}
 				r.outcome = outcomeReturnZero
 				r.source = MapRead
-				r.version = hdr.Version
+				r.version = hdr.Version()
 				return
 			}
 		}
@@ -677,7 +677,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		r.hdr = hdr
 		r.recordVR = true
 		r.source = MapRead
-		r.version = hdr.Version
+		r.version = hdr.Version()
 		return
 
 	case MVReadResultDependency:
@@ -709,7 +709,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	case MVReadResultNone:
 		if !commited {
 			if prHeader, ok := s.versionedReads.getHeader(addr, path, key); ok {
-				if prHeader.Version == hdr.Version {
+				if prHeader.Version() == hdr.Version() {
 					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
 						fmt.Printf("%d (%d.%d) RD (%s) %x %s\n",
 							s.blockNum, s.txIndex, s.version, ReadSetRead,
@@ -717,24 +717,24 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 					}
 					r.outcome = outcomeReadSetHit
 					r.source = ReadSetRead
-					r.version = prHeader.Version
+					r.version = prHeader.Version()
 					return
 				}
 				if prHeader.Source == MapRead {
 					if path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath {
 						_, accSource, accVersion, _ := readAccountInternal(s, addr)
-						if accSource == prHeader.Source && accVersion == prHeader.Version {
+						if accSource == prHeader.Source && accVersion == prHeader.Version() {
 							r.outcome = outcomeReadSetHit
 							r.source = ReadSetRead
-							r.version = prHeader.Version
+							r.version = prHeader.Version()
 							return
 						}
 					}
 					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
 						fmt.Printf("%d (%d.%d) RM DEP FALLTHROUGH (%d.%d)!=(%d.%d) %x %s\n",
 							s.blockNum, s.txIndex, s.version,
-							prHeader.Version.TxIndex, prHeader.Version.Incarnation,
-							hdr.Version.TxIndex, hdr.Version.Incarnation,
+							prHeader.Version().TxIndex, prHeader.Version().Incarnation,
+							hdr.Version().TxIndex, hdr.Version().Incarnation,
 							addr, AccountKey{path, key})
 					}
 					// Fall through to storage read.
@@ -759,7 +759,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			if sdVer, ok := s.versionMap.FindDoneSelfDestructInRange(addr, 0, s.txIndex, true); ok {
 				if !commited {
 					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
-						ReadHeader: ReadHeader{Source: MapRead, Version: sdVer},
+						ReadHeader: NewReadHeader(MapRead, sdVer),
 						Val:        true,
 					})
 					s.recordWipedRead(addr, path, key, sdVer)
@@ -767,7 +767,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				if path == CodeHashPath && !s.versionMap.destroyedAndUnrevived(addr, s.txIndex) {
 					r.outcome = outcomeMapDone
 					r.mapCodeHashVal = accounts.EmptyCodeHash
-					r.hdr = ReadHeader{Source: MapRead, Version: sdVer}
+					r.hdr = NewReadHeader(MapRead, sdVer)
 					r.recordVR = !commited
 					r.source = MapRead
 					r.version = sdVer
@@ -790,7 +790,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				s.versionedReads.SetHeader(addr, path, key, hdr)
 				incVersion := Version{TxIndex: incRes.DepIdx(), Incarnation: incRes.Incarnation()}
 				s.versionedReads.SetIncarnation(addr, VersionedRead[uint64]{
-					ReadHeader: ReadHeader{Source: MapRead, Version: incVersion},
+					ReadHeader: NewReadHeader(MapRead, incVersion),
 					Val:        inc,
 				})
 				if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
@@ -841,14 +841,14 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				if accSource == ReadSetRead {
 					if pr, ok := s.versionedReads.GetAddress(addr); ok {
 						accSource = pr.Source
-						accVersion = pr.Version
+						accVersion = pr.Version()
 					} else {
 						accSource = StorageRead
 						accVersion = UnknownVersion
 					}
 				}
 				hdr.Source = accSource
-				hdr.Version = accVersion
+				hdr.SetVersion(accVersion)
 				so = newObject(s, addr, readAccount, readAccount)
 			}
 		}
@@ -877,7 +877,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				r.hdr = hdr
 				r.recordVR = true
 				r.source = hdr.Source
-				r.version = hdr.Version
+				r.version = hdr.Version()
 				return
 			}
 		}
@@ -916,7 +916,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				r.hdr = hdr
 				r.recordVR = true
 				r.source = hdr.Source
-				r.version = hdr.Version
+				r.version = hdr.Version()
 				return
 			}
 		}
@@ -941,7 +941,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		// None and wrongly invalidate the tx. Same rule as accountRead.
 		r.recordVR = hdr.Source != WriteSetRead
 		r.source = hdr.Source
-		r.version = hdr.Version
+		r.version = hdr.Version()
 		return
 	}
 
@@ -961,9 +961,9 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 	}
 	if tr, ok := s.versionedReads.GetAddress(addr); ok && warmSource(tr.Source) {
 		if tr.Val != nil {
-			return tr.Val.Account(), tr.Source, tr.Version, nil
+			return tr.Val.Account(), tr.Source, tr.Version(), nil
 		}
-		return nil, tr.Source, tr.Version, nil
+		return nil, tr.Source, tr.Version(), nil
 	}
 	var r readPathResult
 	versionedReadCore(s, addr, AddressPath, accounts.NilKey, false, true, &r)
@@ -1036,7 +1036,7 @@ func (ibs *IntraBlockState) traceDepReadContext(addr accounts.Address, r *readPa
 // the zero/empty value the reader returns, stamped with the version of the
 // stale entry it replaces.
 func (ibs *IntraBlockState) recordWipedRead(addr accounts.Address, path AccountPath, key accounts.StorageKey, ver Version) {
-	hdr := ReadHeader{Source: MapRead, Version: ver}
+	hdr := NewReadHeader(MapRead, ver)
 	switch path {
 	case AddressPath:
 		ibs.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: hdr})
@@ -1082,7 +1082,7 @@ func warmField[T any](s *IntraBlockState, addr accounts.Address, writes map[acco
 	// A resident deleted object outranks the read set, as in versionedReadCore.
 	if so, ok := s.stateObjects[addr]; !ok || !so.deleted {
 		if tr, ok := reads[addr]; ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, true
+			return tr.Val, tr.Source, tr.Version(), true
 		}
 	}
 	var zero T
@@ -1253,7 +1253,7 @@ func refreshNonce(s *IntraBlockState, addr accounts.Address, currentNonce uint64
 func readIncarnation(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
 		if tr, ok := s.versionedReads.GetIncarnation(addr); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, nil
+			return tr.Val, tr.Source, tr.Version(), nil
 		}
 	}
 	var r readPathResult
@@ -1561,7 +1561,7 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 	// A resident deleted object outranks the read set, as in versionedReadCore.
 	if so, ok := s.stateObjects[addr]; !ok || !so.deleted {
 		if tr, ok := s.versionedReads.GetStorage(addr, key); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, true, nil
+			return tr.Val, tr.Source, tr.Version(), true, nil
 		}
 	}
 	var r readPathResult
@@ -1624,7 +1624,7 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 		created, _ := s.versionedWriteCreateContract(addr)
 		if (!resident || !so.deleted) && !created {
 			if tr, ok := s.versionedReads.GetStorage(addr, key); ok && warmSource(tr.Source) {
-				return tr.Val, tr.Source, tr.Version, nil
+				return tr.Val, tr.Source, tr.Version(), nil
 			}
 		}
 	}
@@ -1673,7 +1673,7 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 func readSelfDestruct(s *IntraBlockState, addr accounts.Address) (bool, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
 		if tr, ok := s.versionedReads.GetSelfDestruct(addr); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, nil
+			return tr.Val, tr.Source, tr.Version(), nil
 		}
 	}
 	var r readPathResult

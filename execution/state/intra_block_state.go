@@ -1416,7 +1416,7 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 				// A wiped MapRead can use an older AddressPath cell's version because
 				// self-destruct snapshots omit the account record.
 				if tr, ok := ibs.versionedReads.GetAddress(addr); ok && tr.Source != ProvisionalRead && (tr.Val == nil || tr.Val.Account() == nil) &&
-					!(tr.Source == MapRead && tr.Version.TxIndex <= sdRes.DepIdx()) {
+					!(tr.Source == MapRead && tr.Version().TxIndex <= sdRes.DepIdx()) {
 					if sdRes.DepIdx() > ibs.dep {
 						ibs.dep = sdRes.DepIdx()
 					}
@@ -2542,12 +2542,12 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap != nil && !ibs.noConflictDetection {
 		if vr, seen := ibs.versionedReads.GetBalance(addr); !seen {
-			ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader{Source: balSource, Version: balVersion}, preTxBalance})
+			ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{NewReadHeader(balSource, balVersion), preTxBalance})
 		} else if vr.internal {
 			vr.internal = false
 			ibs.versionedReads.SetBalance(addr, vr)
 		}
-		ibs.versionedReads.SetIncarnation(addr, VersionedRead[uint64]{ReadHeader{Source: incSource, Version: incVersion}, prevInc})
+		ibs.versionedReads.SetIncarnation(addr, VersionedRead[uint64]{NewReadHeader(incSource, incVersion), prevInc})
 	}
 	ibs.recordWriteBalance(addr, newObj.Balance())
 	ibs.recordWriteIncarnation(addr, newObj.data.Incarnation)
@@ -3156,7 +3156,7 @@ func (ibs *IntraBlockState) accountRead(addr accounts.Address, account *accounts
 			}
 		}
 		ibs.versionedReads.SetAddress(addr, VersionedRead[AccountView]{
-			ReadHeader: ReadHeader{Source: source, Version: version},
+			ReadHeader: NewReadHeader(source, version),
 			Val:        NewAccountView(&data),
 		})
 	}

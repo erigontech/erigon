@@ -344,7 +344,7 @@ func TestValidateRead_NewAddressEntryInvalidatesStorageRead(t *testing.T) {
 	io := NewVersionedIO(2)
 	rs := ReadSet{}
 	rs.SetAddress(addr, VersionedRead[AccountView]{
-		ReadHeader: ReadHeader{Source: StorageRead, Version: Version{TxIndex: 2, Incarnation: 1}},
+		ReadHeader: NewReadHeader(StorageRead, Version{TxIndex: 2, Incarnation: 1}),
 	})
 	io.RecordReads(Version{TxIndex: 2, Incarnation: 1}, rs)
 
@@ -376,7 +376,7 @@ func TestValidateRead_ChangedValueInvalidatesStorageRead(t *testing.T) {
 			// Tx 2 originally read from storage (no map entry).
 			io := NewVersionedIO(2)
 			rs := ReadSet{}
-			rs.SetHeader(addr, path, accounts.NilKey, ReadHeader{Source: StorageRead, Version: Version{TxIndex: 2, Incarnation: 1}})
+			rs.SetHeader(addr, path, accounts.NilKey, NewReadHeader(StorageRead, Version{TxIndex: 2, Incarnation: 1}))
 			io.RecordReads(Version{TxIndex: 2, Incarnation: 1}, rs)
 
 			valid := vm.ValidateVersion(2, io, checkVersionEqual, true, false, false, "")
@@ -489,7 +489,7 @@ func TestValidateRead_StoragePath_ValueTiebreaker(t *testing.T) {
 	io := NewVersionedIO(10)
 	rs := ReadSet{}
 	rs.SetStorage(addr, storageKey, VersionedRead[uint256.Int]{
-		ReadHeader: ReadHeader{Source: StorageRead, Version: Version{TxIndex: UnknownDep, Incarnation: -1}},
+		ReadHeader: NewReadHeader(StorageRead, Version{TxIndex: UnknownDep, Incarnation: -1}),
 		Val:        storageVal,
 	})
 	io.RecordReads(Version{TxIndex: 10, Incarnation: 1}, rs)
@@ -572,7 +572,7 @@ func TestValidateRead_PriorAccountCreation_DetectedViaIncarnationPath(t *testing
 	io := NewVersionedIO(2)
 	rs := ReadSet{}
 	rs.SetAddress(addr, VersionedRead[AccountView]{
-		ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion},
+		ReadHeader: NewReadHeader(StorageRead, UnknownVersion),
 	})
 	io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, rs)
 
@@ -596,7 +596,7 @@ func TestValidateRead_SDStaleness_InvalidatesPreDestructRead(t *testing.T) {
 	io := NewVersionedIO(5)
 	rs := ReadSet{}
 	rs.SetBalance(addr, VersionedRead[uint256.Int]{
-		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 0, Incarnation: 0}},
+		ReadHeader: NewReadHeader(MapRead, Version{TxIndex: 0, Incarnation: 0}),
 		Val:        *uint256.NewInt(1_000),
 	})
 	io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
@@ -620,7 +620,7 @@ func TestValidateRead_SDStaleness_RevivalDoesNotResurrectPreDestructRead(t *test
 	io := NewVersionedIO(5)
 	rs := ReadSet{}
 	rs.SetBalance(addr, VersionedRead[uint256.Int]{
-		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 0, Incarnation: 0}},
+		ReadHeader: NewReadHeader(MapRead, Version{TxIndex: 0, Incarnation: 0}),
 		Val:        *uint256.NewInt(1_000),
 	})
 	io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
@@ -704,17 +704,17 @@ func TestBALPrePop_SameSenderTxs_NoConflicts(t *testing.T) {
 	io := NewVersionedIO(numTxs)
 	for txIdx := range numTxs {
 		rs := ReadSet{}
-		rs.SetAddress(sender, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion}})
+		rs.SetAddress(sender, VersionedRead[AccountView]{ReadHeader: NewReadHeader(StorageRead, UnknownVersion)})
 		balVal, balRes, _ := readFor(vm, sender, BalancePath, accounts.NilKey, txIdx)
 		bv, _ := balVal.(uint256.Int)
-		rs.SetBalance(sender, VersionedRead[uint256.Int]{ReadHeader: ReadHeader{Source: sourceFor(balRes), Version: balRes.Version()}, Val: bv})
+		rs.SetBalance(sender, VersionedRead[uint256.Int]{ReadHeader: NewReadHeader(sourceFor(balRes), balRes.Version()), Val: bv})
 		nonceVal, nonceRes, _ := readFor(vm, sender, NoncePath, accounts.NilKey, txIdx)
 		nv, _ := nonceVal.(uint64)
-		rs.SetNonce(sender, VersionedRead[uint64]{ReadHeader: ReadHeader{Source: sourceFor(nonceRes), Version: nonceRes.Version()}, Val: nv})
-		rs.SetAddress(coinbase, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion}})
+		rs.SetNonce(sender, VersionedRead[uint64]{ReadHeader: NewReadHeader(sourceFor(nonceRes), nonceRes.Version()), Val: nv})
+		rs.SetAddress(coinbase, VersionedRead[AccountView]{ReadHeader: NewReadHeader(StorageRead, UnknownVersion)})
 		cbBalVal, cbBalRes, _ := readFor(vm, coinbase, BalancePath, accounts.NilKey, txIdx)
 		cbv, _ := cbBalVal.(uint256.Int)
-		rs.SetBalance(coinbase, VersionedRead[uint256.Int]{ReadHeader: ReadHeader{Source: sourceFor(cbBalRes), Version: cbBalRes.Version()}, Val: cbv})
+		rs.SetBalance(coinbase, VersionedRead[uint256.Int]{ReadHeader: NewReadHeader(sourceFor(cbBalRes), cbBalRes.Version()), Val: cbv})
 		io.RecordReads(Version{TxIndex: txIdx, Incarnation: 0}, rs)
 	}
 
@@ -749,9 +749,9 @@ func TestNoBAL_SameSenderTxs_DetectsConflicts(t *testing.T) {
 	io := NewVersionedIO(numTxs)
 	for txIdx := range numTxs {
 		rs := ReadSet{}
-		rs.SetBalance(sender, VersionedRead[uint256.Int]{ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion}, Val: origBalance})
-		rs.SetNonce(sender, VersionedRead[uint64]{ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion}, Val: origNonce})
-		rs.SetAddress(sender, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion}})
+		rs.SetBalance(sender, VersionedRead[uint256.Int]{ReadHeader: NewReadHeader(StorageRead, UnknownVersion), Val: origBalance})
+		rs.SetNonce(sender, VersionedRead[uint64]{ReadHeader: NewReadHeader(StorageRead, UnknownVersion), Val: origNonce})
+		rs.SetAddress(sender, VersionedRead[AccountView]{ReadHeader: NewReadHeader(StorageRead, UnknownVersion)})
 		io.RecordReads(Version{TxIndex: txIdx, Incarnation: 0}, rs)
 	}
 
@@ -1026,7 +1026,7 @@ func TestValidateRead_StaleAliveReadOfDestroyedAccountMustInvalidate(t *testing.
 	io := NewVersionedIO(4)
 	rs := ReadSet{}
 	rs.SetAddress(addr, VersionedRead[AccountView]{
-		ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion},
+		ReadHeader: NewReadHeader(StorageRead, UnknownVersion),
 		Val:        NewAccountView(alive),
 	})
 	io.RecordReads(Version{TxIndex: 3, Incarnation: 0}, rs)
@@ -1043,7 +1043,7 @@ func TestValidateRead_StaleCodeReadOfDestroyedAccountMustInvalidate(t *testing.T
 	io := NewVersionedIO(4)
 	rs := ReadSet{}
 	rs.SetCode(addr, VersionedRead[accounts.Code]{
-		ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion},
+		ReadHeader: NewReadHeader(StorageRead, UnknownVersion),
 		Val:        accounts.NewCode([]byte{0x60, 0x00}),
 	})
 	io.RecordReads(Version{TxIndex: 3, Incarnation: 0}, rs)
@@ -1062,7 +1062,7 @@ func TestValidateRead_TiebreakerMustNotBypassLaterSD(t *testing.T) {
 	io := NewVersionedIO(6)
 	rs := ReadSet{}
 	rs.SetAddress(addr, VersionedRead[AccountView]{
-		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 0}},
+		ReadHeader: NewReadHeader(MapRead, Version{TxIndex: 0}),
 		Val:        NewAccountView(alive),
 	})
 	io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
@@ -1081,7 +1081,7 @@ func TestValidateRead_CodeReadMustSeeLaterSD(t *testing.T) {
 	newIO := func(readVer Version) *VersionedIO {
 		io := NewVersionedIO(6)
 		rs := ReadSet{}
-		rs.SetCode(addr, VersionedRead[accounts.Code]{ReadHeader: ReadHeader{Source: MapRead, Version: readVer}, Val: accounts.NewCode(code)})
+		rs.SetCode(addr, VersionedRead[accounts.Code]{ReadHeader: NewReadHeader(MapRead, readVer), Val: accounts.NewCode(code)})
 		io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
 		return io
 	}
@@ -1114,7 +1114,7 @@ func TestValidateRead_NilReadOfPreservedBalanceDestructInvalid(t *testing.T) {
 		io := NewVersionedIO(2)
 		rs := ReadSet{}
 		rs.SetAddress(addr, VersionedRead[AccountView]{
-			ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion},
+			ReadHeader: NewReadHeader(StorageRead, UnknownVersion),
 		})
 		io.RecordReads(Version{TxIndex: 1}, rs)
 		return io
@@ -1166,7 +1166,7 @@ func TestValidateRead_StorageReadMustSeeShadowedSD(t *testing.T) {
 		io := NewVersionedIO(6)
 		rs := ReadSet{}
 		rs.SetStorage(addr, key, VersionedRead[uint256.Int]{
-			ReadHeader: ReadHeader{Source: MapRead, Version: readVer},
+			ReadHeader: NewReadHeader(MapRead, readVer),
 			Val:        val,
 		})
 		io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
@@ -1211,7 +1211,7 @@ func TestValidateRead_MetamorphicRecreateInvalidatesSlotNotRecord(t *testing.T) 
 		io := NewVersionedIO(6)
 		rs := ReadSet{}
 		rs.SetAddress(addr, VersionedRead[AccountView]{
-			ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 0}},
+			ReadHeader: NewReadHeader(MapRead, Version{TxIndex: 0}),
 			Val:        NewAccountView(recreated),
 		})
 		io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
@@ -1221,7 +1221,7 @@ func TestValidateRead_MetamorphicRecreateInvalidatesSlotNotRecord(t *testing.T) 
 		io := NewVersionedIO(6)
 		rs := ReadSet{}
 		rs.SetStorage(addr, key, VersionedRead[uint256.Int]{
-			ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}},
+			ReadHeader: NewReadHeader(MapRead, Version{TxIndex: 1}),
 			Val:        val,
 		})
 		io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
@@ -1253,10 +1253,10 @@ func TestValidateRead_FieldReadsOfPreservedAccountCrossValidate(t *testing.T) {
 		io := NewVersionedIO(2)
 		rs := ReadSet{}
 		rs.SetNonce(addr, VersionedRead[uint64]{
-			ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion},
+			ReadHeader: NewReadHeader(StorageRead, UnknownVersion),
 		})
 		rs.SetCode(addr, VersionedRead[accounts.Code]{
-			ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion},
+			ReadHeader: NewReadHeader(StorageRead, UnknownVersion),
 		})
 		io.RecordReads(Version{TxIndex: 1}, rs)
 		require.Equal(t, VersionValid, newVM().ValidateVersion(1, io, checkVersionEqual, true, false, false, ""))
@@ -1265,7 +1265,7 @@ func TestValidateRead_FieldReadsOfPreservedAccountCrossValidate(t *testing.T) {
 		io := NewVersionedIO(2)
 		rs := ReadSet{}
 		rs.SetNonce(addr, VersionedRead[uint64]{
-			ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion},
+			ReadHeader: NewReadHeader(StorageRead, UnknownVersion),
 			Val:        5,
 		})
 		io.RecordReads(Version{TxIndex: 1}, rs)
@@ -1289,7 +1289,7 @@ func TestValidateRead_FoldedNonceSurvivesRecordChurn(t *testing.T) {
 		io := NewVersionedIO(100)
 		rs := ReadSet{}
 		rs.SetNonce(addr, VersionedRead[uint64]{
-			ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 4}},
+			ReadHeader: NewReadHeader(MapRead, Version{TxIndex: 4}),
 			Val:        69,
 		})
 		io.RecordReads(Version{TxIndex: 99}, rs)
@@ -1711,7 +1711,7 @@ func TestValidateRead_NilVsEmptyRecordForkAware(t *testing.T) {
 		io := NewVersionedIO(3)
 		rs := ReadSet{}
 		rs.SetAddress(addr, VersionedRead[AccountView]{
-			ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion},
+			ReadHeader: NewReadHeader(StorageRead, UnknownVersion),
 		})
 		io.RecordReads(Version{TxIndex: 2, Incarnation: 0}, rs)
 		return io
@@ -1731,7 +1731,7 @@ func TestValidateRead_AuraSystemAddressNotDeadEquivalent(t *testing.T) {
 		io := NewVersionedIO(3)
 		rs := ReadSet{}
 		rs.SetAddress(addr, VersionedRead[AccountView]{
-			ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion},
+			ReadHeader: NewReadHeader(StorageRead, UnknownVersion),
 		})
 		io.RecordReads(Version{TxIndex: 2, Incarnation: 0}, rs)
 		return io
@@ -1765,7 +1765,7 @@ func TestValidateRead_NilReadOfCreatedThenFundedAccountInvalid(t *testing.T) {
 		io := NewVersionedIO(3)
 		rs := ReadSet{}
 		rs.SetAddress(addr, VersionedRead[AccountView]{
-			ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion},
+			ReadHeader: NewReadHeader(StorageRead, UnknownVersion),
 		})
 		io.RecordReads(Version{TxIndex: 2, Incarnation: 0}, rs)
 		return io
@@ -1824,7 +1824,7 @@ func TestValidateRead_NilReadOfDestroyedAccountStaysValid(t *testing.T) {
 		io := NewVersionedIO(4)
 		rs := ReadSet{}
 		rs.SetAddress(addr, VersionedRead[AccountView]{
-			ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion},
+			ReadHeader: NewReadHeader(StorageRead, UnknownVersion),
 		})
 		io.RecordReads(Version{TxIndex: 3, Incarnation: 0}, rs)
 		return io
@@ -1857,7 +1857,7 @@ func TestValidateRead_SameIndexSDStorage(t *testing.T) {
 	newIO := func(readVer Version, readVal uint256.Int) *VersionedIO {
 		io := NewVersionedIO(6)
 		rs := ReadSet{}
-		rs.SetStorage(addr, key, VersionedRead[uint256.Int]{ReadHeader: ReadHeader{Source: MapRead, Version: readVer}, Val: readVal})
+		rs.SetStorage(addr, key, VersionedRead[uint256.Int]{ReadHeader: NewReadHeader(MapRead, readVer), Val: readVal})
 		io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
 		return io
 	}
@@ -1897,13 +1897,13 @@ func TestValidateRead_CodeReadRevivedWithoutCode(t *testing.T) {
 		return io
 	}
 	t.Run("cold read of dead bytes invalidates", func(t *testing.T) {
-		require.Equal(t, VersionInvalid, newVM().ValidateVersion(5, newIO(ReadHeader{Source: StorageRead, Version: UnknownVersion}, code), validateEqualVersion, true, false, false, ""))
+		require.Equal(t, VersionInvalid, newVM().ValidateVersion(5, newIO(NewReadHeader(StorageRead, UnknownVersion), code), validateEqualVersion, true, false, false, ""))
 	})
 	t.Run("version-match read of dead bytes invalidates", func(t *testing.T) {
-		require.Equal(t, VersionInvalid, newVM().ValidateVersion(5, newIO(ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, code), validateEqualVersion, true, false, false, ""))
+		require.Equal(t, VersionInvalid, newVM().ValidateVersion(5, newIO(NewReadHeader(MapRead, Version{TxIndex: 1}), code), validateEqualVersion, true, false, false, ""))
 	})
 	t.Run("wiped empty read at the cell version stays valid", func(t *testing.T) {
-		require.Equal(t, VersionValid, newVM().ValidateVersion(5, newIO(ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, nil), validateEqualVersion, true, false, false, ""))
+		require.Equal(t, VersionValid, newVM().ValidateVersion(5, newIO(NewReadHeader(MapRead, Version{TxIndex: 1}), nil), validateEqualVersion, true, false, false, ""))
 	})
 }
 
@@ -2129,16 +2129,16 @@ func TestValidateRead_DistinctDestructWitnessesBothValidated(t *testing.T) {
 		rs := ReadSet{}
 		// Slot A read as the post-tx20 wipe: zero, floored at the pre-wipe cell.
 		rs.SetStorage(addr, keyA, VersionedRead[uint256.Int]{
-			ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 15}},
+			ReadHeader: NewReadHeader(MapRead, Version{TxIndex: 15}),
 		})
 		// Witness of the tx20 destruct, recorded first...
 		rs.SetSelfDestruct(addr, VersionedRead[bool]{
-			ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 20}},
+			ReadHeader: NewReadHeader(MapRead, Version{TxIndex: 20}),
 			Val:        true,
 		})
 		// ...then a wiped read of another slot records the tx10 destruct.
 		rs.SetSelfDestruct(addr, VersionedRead[bool]{
-			ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 10}},
+			ReadHeader: NewReadHeader(MapRead, Version{TxIndex: 10}),
 			Val:        true,
 		})
 		io.RecordReads(Version{TxIndex: 30, Incarnation: 0}, rs)

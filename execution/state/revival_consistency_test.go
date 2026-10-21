@@ -82,7 +82,7 @@ func TestRevivalConsistency_SameTxMetamorphic_ReaderAndValidatorAgree(t *testing
 	io := NewVersionedIO(5)
 	rs := ReadSet{}
 	rs.SetBalance(addr, VersionedRead[uint256.Int]{
-		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 0}},
+		ReadHeader: NewReadHeader(MapRead, Version{TxIndex: 0}),
 		Val:        *uint256.NewInt(1_000),
 	})
 	io.RecordReads(Version{TxIndex: 4}, rs)
@@ -122,7 +122,7 @@ func TestRevivalConsistency_AddressPathOnly_ReaderAndValidatorDiverge(t *testing
 	io := NewVersionedIO(6)
 	rs := ReadSet{}
 	rs.SetBalance(addr, VersionedRead[uint256.Int]{
-		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 0}},
+		ReadHeader: NewReadHeader(MapRead, Version{TxIndex: 0}),
 		Val:        *uint256.NewInt(1_000),
 	})
 	io.RecordReads(Version{TxIndex: 5}, rs)

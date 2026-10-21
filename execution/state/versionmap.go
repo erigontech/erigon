@@ -1620,7 +1620,7 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 	// (self-destruct / create-contract / code / code-size): the version/status
 	// check is authoritative. One ReadStatus, no value comparison.
 	noValueRead := func(addr accounts.Address, path AccountPath, key accounts.StorageKey, hdr ReadHeader) VersionValidity {
-		return vm.validateReadImpl(txIdx, addr, path, key, hdr.Source, hdr.Version,
+		return vm.validateReadImpl(txIdx, addr, path, key, hdr.Source, hdr.Version(),
 			vm.ReadStatus(addr, path, key, txIdx), nil, nil, false, checkVersion, traceInvalid, tracePrefix, false)
 	}
 
@@ -1636,22 +1636,22 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 		if eip161 {
 			eqAccount = func(x *accounts.Account, y *accounts.Account) bool { return vm.eqAccountDead(txIdx, a, isAura, x, y) }
 		}
-		if !ok(validateRead(vm, txIdx, a, AddressPath, accounts.NilKey, tr.Source, tr.Version, rv, liveAddress, eqAccount, absentAccount, nil, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, txIdx, a, AddressPath, accounts.NilKey, tr.Source, tr.Version(), rv, liveAddress, eqAccount, absentAccount, nil, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, tr := range rs.balance {
-		if !ok(validateRead(vm, txIdx, a, BalancePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveBalance, eqUint256, absentUint256, recordBalance, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, txIdx, a, BalancePath, accounts.NilKey, tr.Source, tr.Version(), tr.Val, liveBalance, eqUint256, absentUint256, recordBalance, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, tr := range rs.nonce {
-		if !ok(validateRead(vm, txIdx, a, NoncePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveNonce, eqUint64, absentUint64, recordNonce, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, txIdx, a, NoncePath, accounts.NilKey, tr.Source, tr.Version(), tr.Val, liveNonce, eqUint64, absentUint64, recordNonce, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, tr := range rs.incarnation {
-		if !ok(validateRead(vm, txIdx, a, IncarnationPath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveIncarnation, eqUint64, absentUint64, recordIncarnation, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, txIdx, a, IncarnationPath, accounts.NilKey, tr.Source, tr.Version(), tr.Val, liveIncarnation, eqUint64, absentUint64, recordIncarnation, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
@@ -1659,13 +1659,13 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 		absentCodeHashLive := func(ch accounts.CodeHash) bool {
 			return vm.absentCodeHash(a, txIdx, ch)
 		}
-		if !ok(validateRead(vm, txIdx, a, CodeHashPath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCodeHash, eqCodeHash, absentCodeHashLive, recordCodeHash, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, txIdx, a, CodeHashPath, accounts.NilKey, tr.Source, tr.Version(), tr.Val, liveCodeHash, eqCodeHash, absentCodeHashLive, recordCodeHash, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, inner := range rs.storage {
 		for k, tr := range inner {
-			if !ok(validateRead(vm, txIdx, a, StoragePath, k, tr.Source, tr.Version, tr.Val, liveStorage, eqUint256, absentUint256, nil, checkVersion, traceInvalid, tracePrefix)) {
+			if !ok(validateRead(vm, txIdx, a, StoragePath, k, tr.Source, tr.Version(), tr.Val, liveStorage, eqUint256, absentUint256, nil, checkVersion, traceInvalid, tracePrefix)) {
 				return
 			}
 		}
@@ -1677,11 +1677,11 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 		// version is still Done with the recorded value (an Estimate or a
 		// changed value re-executes, fail-safe). Storage-versioned records
 		// keep the floor check: any destruct appearing invalidates them.
-		if tr.Source == MapRead && tr.Version.TxIndex >= 0 {
-			if _, found := vm.FindDoneSelfDestructInRange(a, tr.Version.TxIndex, tr.Version.TxIndex+1, tr.Val); !found {
+		if tr.Source == MapRead && tr.Version().TxIndex >= 0 {
+			if _, found := vm.FindDoneSelfDestructInRange(a, tr.Version().TxIndex, tr.Version().TxIndex+1, tr.Val); !found {
 				if traceInvalid && dbg.TraceReexec {
 					fmt.Printf("VINV-R tx=%d %x SelfDestruct src=%s reason=sd-witness rv=(%d.%d)\n",
-						txIdx, a, tr.Source, tr.Version.TxIndex, tr.Version.Incarnation)
+						txIdx, a, tr.Source, tr.Version().TxIndex, tr.Version().Incarnation)
 				}
 				valid = VersionInvalid
 				return false
@@ -1709,12 +1709,12 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 		}
 	}
 	for a, tr := range rs.code {
-		if !ok(validateRead(vm, txIdx, a, CodePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCode, eqCode, absentCode, nil, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, txIdx, a, CodePath, accounts.NilKey, tr.Source, tr.Version(), tr.Val, liveCode, eqCode, absentCode, nil, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, tr := range rs.codeSize {
-		if !ok(validateRead(vm, txIdx, a, CodeSizePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCodeSize, eqInt, absentInt, nil, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, txIdx, a, CodeSizePath, accounts.NilKey, tr.Source, tr.Version(), tr.Val, liveCodeSize, eqInt, absentInt, nil, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}

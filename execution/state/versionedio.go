@@ -23,7 +23,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-type ReadSource int
+type ReadSource uint8
 
 func (s ReadSource) String() string {
 	switch s {
@@ -74,10 +74,25 @@ const (
 // ReadHeader is the type-agnostic part of a versioned read: the tx-version
 // that produced the value and the tier it came from.  Shared by every
 // per-path read via embedding in VersionedRead.
+// Only TxIndex and Incarnation of the version are kept: versions published
+// to the version map carry no block or tx number, so validation never sees them.
 type ReadHeader struct {
-	Source   ReadSource
-	Version  Version
-	internal bool // conflict-detection only; excluded from the block access list
+	txIndex     int32
+	incarnation int32
+	Source      ReadSource
+	internal    bool // conflict-detection only; excluded from the block access list
+}
+
+func NewReadHeader(source ReadSource, v Version) ReadHeader {
+	return ReadHeader{txIndex: int32(v.TxIndex), incarnation: int32(v.Incarnation), Source: source}
+}
+
+func (h ReadHeader) Version() Version {
+	return Version{TxIndex: int(h.txIndex), Incarnation: int(h.incarnation)}
+}
+
+func (h *ReadHeader) SetVersion(v Version) {
+	h.txIndex, h.incarnation = int32(v.TxIndex), int32(v.Incarnation)
 }
 
 // VersionedRead is a single versioned read.  The per-path map it lives in fixes
@@ -219,9 +234,9 @@ func (s *ReadSet) SetIncarnation(addr accounts.Address, tr VersionedRead[uint64]
 }
 
 func (s *ReadSet) SetSelfDestruct(addr accounts.Address, tr VersionedRead[bool]) {
-	if prev, ok := s.selfDestruct[addr]; ok && prev.Version != tr.Version {
+	if prev, ok := s.selfDestruct[addr]; ok && prev.Version() != tr.Version() {
 		for _, w := range s.selfDestructWitnesses[addr] {
-			if w.Version == prev.Version {
+			if w.Version() == prev.Version() {
 				readSetPut(&s.selfDestruct, addr, tr)
 				return
 			}
@@ -581,7 +596,7 @@ func (s ReadSet) TraceReads(prefix string) {
 }
 
 func traceReadStr(addr accounts.Address, path AccountPath, key accounts.StorageKey, hdr ReadHeader, valStr string) string {
-	return fmt.Sprintf("(%s) %x %s: %s", hdr.Source.VersionedString(hdr.Version), addr, AccountKey{Path: path, Key: key}, valStr)
+	return fmt.Sprintf("(%s) %x %s: %s", hdr.Source.VersionedString(hdr.Version()), addr, AccountKey{Path: path, Key: key}, valStr)
 }
 
 func accountViewString(v AccountView) string {

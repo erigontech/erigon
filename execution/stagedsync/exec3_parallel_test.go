@@ -252,7 +252,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 			sleepWithContext(t.ctx, op.duration) //nolint:errcheck
 
-			t.readMap.SetHeader(k.addr, k.path, k.key, state.ReadHeader{Source: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}})
+			t.readMap.SetHeader(k.addr, k.path, k.key, state.NewReadHeader(readKind, state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}))
 		case writeType:
 			testWriteSetInt(t.writeMap, k.addr, k.path, k.key, version, op.val)
 		case otherType:
@@ -1050,8 +1050,8 @@ func dexPostValidation(pe *parallelExecutor) error {
 			for i, inputs := range blockStatus.result.TxIO.Inputs() {
 				var err error
 				for hdr := range inputs.AllHeaders() {
-					if hdr.Version.TxIndex != i-1 {
-						err = fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, hdr.Version.TxIndex)
+					if hdr.Version().TxIndex != i-1 {
+						err = fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, hdr.Version().TxIndex)
 						break
 					}
 				}
@@ -1749,7 +1749,7 @@ func TestNextResult_NilVsEmptyRecordForkAware(t *testing.T) {
 			be.versionMap.WriteAddress(raced, state.Version{TxIndex: -1}, &accounts.Account{CodeHash: accounts.EmptyCodeHash}, true)
 			reads := state.ReadSet{}
 			reads.SetAddress(raced, state.VersionedRead[state.AccountView]{
-				ReadHeader: state.ReadHeader{Source: state.StorageRead, Version: state.UnknownVersion},
+				ReadHeader: state.NewReadHeader(state.StorageRead, state.UnknownVersion),
 			})
 			txResult := &exec.TxResult{
 				Task: &taskVersion{
@@ -2171,7 +2171,7 @@ func TestSameSenderSuccessorWaitsForPredecessorValidation(t *testing.T) {
 	s.be.versionMap.WriteAddress(raced, state.Version{TxIndex: -1}, &accounts.Account{CodeHash: accounts.EmptyCodeHash}, true)
 	racedRead := state.ReadSet{}
 	racedRead.SetAddress(raced, state.VersionedRead[state.AccountView]{
-		ReadHeader: state.ReadHeader{Source: state.StorageRead, Version: state.UnknownVersion},
+		ReadHeader: state.NewReadHeader(state.StorageRead, state.UnknownVersion),
 	})
 	first, predecessor := s.dispatched(), s.dispatched()
 	require.Equal(t, []int{0, 1}, []int{first.index, predecessor.index})
@@ -2258,7 +2258,7 @@ func TestFrontierRetryDispatchedBeforeBatchTail(t *testing.T) {
 	racedRead := func() state.ReadSet {
 		reads := state.ReadSet{}
 		reads.SetAddress(raced, state.VersionedRead[state.AccountView]{
-			ReadHeader: state.ReadHeader{Source: state.StorageRead, Version: state.UnknownVersion},
+			ReadHeader: state.NewReadHeader(state.StorageRead, state.UnknownVersion),
 		})
 		return reads
 	}

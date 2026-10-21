@@ -914,11 +914,8 @@ func TestFinalizeTxSimple_FeeWriteInvalidatesStaleCoinbaseRead(t *testing.T) {
 		io := state.NewVersionedIO(2)
 		rs := state.ReadSet{}
 		rs.SetBalance(s.coinbase, state.VersionedRead[uint256.Int]{
-			ReadHeader: state.ReadHeader{
-				Source:  source,
-				Version: state.Version{TxIndex: 0, Incarnation: 0},
-			},
-			Val: readVal,
+			ReadHeader: state.NewReadHeader(source, state.Version{TxIndex: 0, Incarnation: 0}),
+			Val:        readVal,
 		})
 		io.RecordReads(state.Version{TxIndex: 1}, rs)
 		return vm.ValidateVersion(1, io, checkVersion, true, false, false, "")

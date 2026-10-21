@@ -441,7 +441,7 @@ func TestVersionedIO_RemovedDependencyFallsThroughToStorage(t *testing.T) {
 
 	ibs.versionedReads = ReadSet{}
 	ibs.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{
-		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
+		ReadHeader: NewReadHeader(MapRead, Version{TxIndex: 1, Incarnation: 0}),
 		Val:        *uint256.NewInt(0xBB),
 	})
 
@@ -1210,7 +1210,7 @@ func TestVersionedStateReader_RecordedAbsentSkipsDomain(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xab5e17"))
 	reads := ReadSet{}
 	reads.SetAddress(addr, VersionedRead[AccountView]{
-		ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion},
+		ReadHeader: NewReadHeader(StorageRead, UnknownVersion),
 	})
 
 	reader := &countingStateReader{failOnAccounts: true}
@@ -1363,7 +1363,7 @@ func TestVersionedIO_mergeTxEquivalentToMerge(t *testing.T) {
 	reads := func(x txIO) ReadSet {
 		rs := ReadSet{}
 		rs.SetStorage(x.addr, x.slot, VersionedRead[uint256.Int]{
-			ReadHeader: ReadHeader{Source: StorageRead, Version: Version{TxIndex: x.txIdx, Incarnation: x.inc}},
+			ReadHeader: NewReadHeader(StorageRead, Version{TxIndex: x.txIdx, Incarnation: x.inc}),
 			Val:        *uint256.NewInt(x.val),
 		})
 		// Access marks travel on the read-set now.
@@ -2028,4 +2028,24 @@ func TestArenaAddressWritesOutliveTheSlab(t *testing.T) {
 	ibs.versionedWrites.ReleaseAndReset()
 	acc := &accounts.Account{Nonce: 3}
 	require.Zero(t, testing.AllocsPerRun(100, func() { ibs.recordWriteAddress(addr, acc) }), "no allocation per AddressPath write")
+}
+
+func TestReadSet_StorageReadKeepsVersion(t *testing.T) {
+	addr := accounts.InternAddress(common.Address{1})
+	cold, warm := accounts.InternKey(common.Hash{1}), accounts.InternKey(common.Hash{2})
+	var rs ReadSet
+	rs.SetStorage(addr, cold, VersionedRead[uint256.Int]{ReadHeader: NewReadHeader(StorageRead, UnknownVersion), Val: *uint256.NewInt(5)})
+	rs.SetStorage(addr, warm, VersionedRead[uint256.Int]{ReadHeader: NewReadHeader(MapRead, Version{TxIndex: 7, Incarnation: 3}), Val: *uint256.NewInt(6)})
+
+	got, ok := rs.GetStorage(addr, cold)
+	require.True(t, ok)
+	require.Equal(t, StorageRead, got.Source)
+	require.Equal(t, UnknownVersion, got.Version())
+	require.Equal(t, uint64(5), got.Val.Uint64())
+
+	got, ok = rs.GetStorage(addr, warm)
+	require.True(t, ok)
+	require.Equal(t, MapRead, got.Source)
+	require.Equal(t, Version{TxIndex: 7, Incarnation: 3}, got.Version())
+	require.Equal(t, uint64(6), got.Val.Uint64())
 }

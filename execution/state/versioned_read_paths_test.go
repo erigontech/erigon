@@ -437,7 +437,7 @@ func TestVersionedRead_DestructedStaleStorageUsesStorageVersion(t *testing.T) {
 	reads := ibs.VersionedReads()
 	read, ok := reads.GetStorage(addr, key)
 	require.True(t, ok)
-	require.Equal(t, storageVersion, read.Version)
+	require.Equal(t, storageVersion, read.Version())
 	io := NewVersionedIO(3)
 	io.RecordReads(Version{TxIndex: 2}, reads)
 	require.Equal(t, VersionValid, vm.ValidateVersion(2, io, validateEqualVersion, true, false, false, ""))
@@ -465,7 +465,7 @@ func TestVersionedRead_RevivedStaleCodeHashUsesCodeHashVersion(t *testing.T) {
 	reads := ibs.VersionedReads()
 	read, ok := reads.GetCodeHash(addr)
 	require.True(t, ok)
-	require.Equal(t, codeHashVersion, read.Version)
+	require.Equal(t, codeHashVersion, read.Version())
 	io := NewVersionedIO(4)
 	io.RecordReads(Version{TxIndex: 3}, reads)
 	require.Equal(t, VersionValid, vm.ValidateVersion(3, io, validateEqualVersion, true, false, false, ""))
@@ -489,7 +489,7 @@ func TestVersionedRead_RevivedFieldWipedReadCaughtAtCommit(t *testing.T) {
 			},
 			func(rs ReadSet, a accounts.Address) (Version, bool) {
 				r, ok := rs.GetBalance(a)
-				return r.Version, ok
+				return r.Version(), ok
 			},
 			func(vm *VersionMap, a accounts.Address, v Version) { vm.WriteBalance(a, v, *uint256.NewInt(777), true) },
 		},
@@ -501,7 +501,7 @@ func TestVersionedRead_RevivedFieldWipedReadCaughtAtCommit(t *testing.T) {
 			},
 			func(rs ReadSet, a accounts.Address) (Version, bool) {
 				r, ok := rs.GetNonce(a)
-				return r.Version, ok
+				return r.Version(), ok
 			},
 			func(vm *VersionMap, a accounts.Address, v Version) { vm.WriteNonce(a, v, 1, true) },
 		},
@@ -513,7 +513,7 @@ func TestVersionedRead_RevivedFieldWipedReadCaughtAtCommit(t *testing.T) {
 			},
 			func(rs ReadSet, a accounts.Address) (Version, bool) {
 				r, ok := rs.GetCodeSize(a)
-				return r.Version, ok
+				return r.Version(), ok
 			},
 			func(vm *VersionMap, a accounts.Address, v Version) { vm.WriteCodeSize(a, v, 3, true) },
 		},
@@ -995,7 +995,7 @@ func TestVersionedRead_E2_StaleMapReadCaughtAtCommit(t *testing.T) {
 
 	// Manually seed readSet with a stale version (TxIndex 1).
 	ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{
-		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
+		ReadHeader: NewReadHeader(MapRead, Version{TxIndex: 1, Incarnation: 0}),
 		Val:        *uint256.NewInt(99),
 	})
 
@@ -1069,7 +1069,7 @@ func TestVersionedRead_D1_WriteSetHitWithStaleReadSetCaughtAtCommit(t *testing.T
 	// seeding it first would already panic inside SetBalance's account
 	// refresh.
 	ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{
-		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
+		ReadHeader: NewReadHeader(MapRead, Version{TxIndex: 1, Incarnation: 0}),
 		Val:        *uint256.NewInt(99),
 	})
 	got, err := ibs.GetBalance(addr)
@@ -1098,7 +1098,7 @@ func TestVersionedRead_D1_StorageWriteSetHitWithStaleReadSetCaughtAtCommit(t *te
 
 	require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(77)))
 	ibs.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{
-		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
+		ReadHeader: NewReadHeader(MapRead, Version{TxIndex: 1, Incarnation: 0}),
 		Val:        *uint256.NewInt(99),
 	})
 	got, err := ibs.GetState(addr, key)
@@ -1127,7 +1127,7 @@ func TestVersionedRead_E2_StorageOnWrittenAddressCaughtAtCommit(t *testing.T) {
 
 	require.NoError(t, ibs.SetState(addr, written, *uint256.NewInt(77)))
 	ibs.versionedReads.SetStorage(addr, read, VersionedRead[uint256.Int]{
-		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
+		ReadHeader: NewReadHeader(MapRead, Version{TxIndex: 1, Incarnation: 0}),
 		Val:        *uint256.NewInt(99),
 	})
 	got, err := ibs.GetState(addr, read)
@@ -1154,7 +1154,7 @@ func TestVersionedRead_E2_CodeSizeOnWrittenAddressCaughtAtCommit(t *testing.T) {
 
 	require.NoError(t, ibs.SetBalance(addr, *uint256.NewInt(77), 0))
 	ibs.versionedReads.SetCodeSize(addr, VersionedRead[int]{
-		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
+		ReadHeader: NewReadHeader(MapRead, Version{TxIndex: 1, Incarnation: 0}),
 		Val:        99,
 	})
 	got, err := ibs.GetCodeSize(addr)
@@ -1177,7 +1177,7 @@ func TestReadValueUnchanged_NilEmptyArmGated(t *testing.T) {
 		ibs.eip161 = eip161
 		ibs.isAura = isAura
 		ibs.versionedReads.SetAddress(addr, VersionedRead[AccountView]{
-			ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion},
+			ReadHeader: NewReadHeader(StorageRead, UnknownVersion),
 		})
 		return ibs
 	}
