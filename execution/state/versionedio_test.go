@@ -1047,14 +1047,14 @@ func TestUpdateWrite_StorageReadThenWriteBackSameValue_StaysRead(t *testing.T) {
 	account := newAccountState(addr)
 
 	account.updateReadStorage(slot, orig)
-	require.Contains(t, account.changes.StorageReads, slot, "the read must be recorded")
+	require.Contains(t, account.changes.StorageReads, slot.Value(), "the read must be recorded")
 
 	account.applyWriteStorage(slot, orig, 0)
 
 	changes := account.changes
 	require.Empty(t, changes.StorageChanges,
 		"write-back to the originally-read value is net-zero and must NOT be recorded as a storage write")
-	require.Contains(t, changes.StorageReads, slot,
+	require.Contains(t, changes.StorageReads, slot.Value(),
 		"the net-zero write-back must remain a read")
 }
 
@@ -1076,7 +1076,7 @@ func TestUpdateWrite_StorageReadThenWriteDifferentValue_BecomesWrite(t *testing.
 	require.Len(t, changes.StorageChanges, 1,
 		"a write to a different value is a real state change and must be recorded")
 	require.Equal(t, slot, changes.StorageChanges[0].Slot)
-	require.NotContains(t, changes.StorageReads, slot,
+	require.NotContains(t, changes.StorageReads, slot.Value(),
 		"a real write supersedes the recorded read")
 }
 
@@ -1602,7 +1602,7 @@ func TestAccountState_IndexCrossoverKeepsSlotsFindable(t *testing.T) {
 			}
 		}
 		require.Equal(t, 1, seen, "the slot must appear exactly once")
-		require.NotContains(t, changes.StorageReads, slot, "a write supersedes the recorded read")
+		require.NotContains(t, changes.StorageReads, slot.Value(), "a write supersedes the recorded read")
 	}
 	require.Len(t, changes.StorageReads, 4*slotIndexMin)
 }
