@@ -126,7 +126,7 @@ func (ws *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stat
 	}
 	var vanished map[accounts.Address]bool
 	for addr := range sdSet {
-		gone, err := ws.vanishedInTx(addr, incarnation, eip8246, stateReader)
+		gone, err := ws.vanishedInTx(vm, addr, txIndex, incarnation, eip8246, stateReader)
 		if err != nil {
 			return nil, err
 		}
@@ -503,8 +503,9 @@ func (ws *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stat
 
 // vanishedInTx reports whether a self-destructed addr was absent before this tx,
 // was created in it and keeps no balance, so the tx leaves no state for it.
-func (ws *WriteSet) vanishedInTx(addr accounts.Address, incarnation int, eip8246 bool, stateReader StateReader) (bool, error) {
-	if stateReader == nil {
+func (ws *WriteSet) vanishedInTx(vm *VersionMap, addr accounts.Address, txIndex, incarnation int, eip8246 bool, stateReader StateReader) (bool, error) {
+	// An earlier tx of the block may have funded addr where the reader cannot see it.
+	if stateReader == nil || vm.accountLiveAt(addr, txIndex) {
 		return false, nil
 	}
 	if cc, ok := ws.GetCreateContract(addr); !ok || !cc.Val || cc.Version.Incarnation != incarnation {

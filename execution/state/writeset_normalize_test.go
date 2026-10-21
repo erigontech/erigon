@@ -385,6 +385,24 @@ func TestNormalize_CreatedAndDestroyedInTxLeavesNoWrites(t *testing.T) {
 	sd, ok := prefunded.GetSelfDestruct(addr)
 	require.True(t, ok && sd.Val, "a CREATE onto a pre-funded address must still delete that account")
 
+	// An earlier tx of the block funded the address; a reader that does not see the
+	// block's earlier txs must not make its delete look unneeded.
+	funded := NewVersionMap(nil)
+	funded.FlushVersionedWrites(func() *WriteSet {
+		w := &WriteSet{}
+		w.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(5)})
+		return w
+	}(), true)
+	tx1 := Version{TxIndex: 1}
+	later := &WriteSet{}
+	later.SetCreateContract(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath, Version: tx1}, Val: true})
+	later.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: tx1}, Val: true})
+	later.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: tx1}, Val: uint256.Int{}})
+	out, err := later.Normalize(funded, 1, 0, &minimalStateReader{}, nil, true, false, false)
+	require.NoError(t, err)
+	sd, ok = out.GetSelfDestruct(addr)
+	require.True(t, ok && sd.Val, "an account funded earlier in the block must still be deleted")
+
 	ver := Version{TxIndex: 0}
 	ws := &WriteSet{}
 	ws.SetCreateContract(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath, Version: ver}, Val: true})
