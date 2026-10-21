@@ -310,7 +310,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		if uint64(len(req.Transactions)) > uint64(req.GasLimit)/minTxGas {
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
-				ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("too many transactions for gas limit: %d", len(req.Transactions))),
+				ValidationError: engine_types.NewStringifiedError(fmt.Errorf("%w: %d transactions use at least %d gas each", protocol.ErrGasLimitReached, len(req.Transactions), minTxGas)),
 			}, nil
 		}
 	}
