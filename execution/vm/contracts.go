@@ -586,7 +586,7 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	case len(base) > 0 && !bitutil.TestBytes(base[:len(base)-1]) && base[len(base)-1] == 1:
 		// If base == 1 (and mod > 1), then the result is 1
 		result[modLen-1] = 1
-	case modexpMathBigFaster(modLen, bitLenBytes(exp)):
+	case modexpMathBigFaster(modLen, exp):
 		baseBig := new(big.Int).SetBytes(base)
 		expBig := new(big.Int).SetBytes(exp)
 		modBig := new(big.Int).SetBytes(mod)
@@ -604,8 +604,12 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 // modexpMathBigFaster reports whether math/big beats evmone for a modulus field
 // wider than 256 bits: evmone's Montgomery setup does not pay off for a few
 // squarings, and math/big switches to a windowed method above a 64-bit exponent.
-func modexpMathBigFaster(modLen uint64, expBits int) bool {
-	return modLen > 32 && (expBits <= 8 || modLen >= 256 || modLen >= 64 && expBits > 64)
+func modexpMathBigFaster(modLen uint64, exp []byte) bool {
+	if modLen <= 32 {
+		return false
+	}
+	expBits := bitLenBytes(exp)
+	return expBits <= 8 || modLen >= 256 || modLen >= 64 && expBits > 64
 }
 
 // bitLenBytes returns the bit length of the big-endian number b.
