@@ -162,3 +162,41 @@ func TestModexpU256Random(t *testing.T) {
 		}
 	}
 }
+
+// TestModExpRunAtRoutingBounds cross-checks Run against math/big for operand
+// shapes on both sides of each backend routing bound.
+func TestModExpRunAtRoutingBounds(t *testing.T) {
+	rng := rand.New(rand.NewSource(1))
+	operand := func(bits int) []byte {
+		v := new(big.Int).Rand(rng, bigLsh(uint(bits)))
+		return v.SetBit(v, bits-1, 1).Bytes()
+	}
+	p := &bigModExp{osaka: true}
+	for _, modLen := range []int{24, 32, 33, 63, 64, 127, 128, 255, 256} {
+		for _, expBits := range []int{0, 1, 8, 9, 17, 18, 64, 65, 300} {
+			mod := operand(modLen * 8)
+			bases := [][]byte{operand(modLen*8 - 1), mod}
+			for _, base := range bases {
+				var exp []byte
+				if expBits > 0 {
+					exp = operand(expBits)
+				}
+				input := make([]byte, 96)
+				input[31], input[63], input[95] = byte(len(base)), byte(len(exp)), byte(len(mod))
+				input[30], input[62], input[94] = byte(len(base)>>8), byte(len(exp)>>8), byte(len(mod)>>8)
+				input = append(append(append(input, base...), exp...), mod...)
+
+				got, err := p.Run(input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := make([]byte, len(mod))
+				m := new(big.Int).SetBytes(mod)
+				new(big.Int).Exp(new(big.Int).SetBytes(base), new(big.Int).SetBytes(exp), m).FillBytes(want)
+				if !bytes.Equal(got, want) {
+					t.Fatalf("modLen=%d expBits=%d base=%x: got %x want %x", modLen, expBits, base, got, want)
+				}
+			}
+		}
+	}
+}
