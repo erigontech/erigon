@@ -20,14 +20,12 @@ import (
 	"bytes"
 	"fmt"
 	"math/rand"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
@@ -36,34 +34,6 @@ import (
 type parityUpdate struct {
 	key    []byte
 	update *commitment.Update
-}
-
-type parityContext struct {
-	mu       sync.Mutex
-	branches map[string][]byte
-}
-
-func newParityContext() *parityContext { return &parityContext{branches: make(map[string][]byte)} }
-
-func (p *parityContext) Branch(key []byte) ([]byte, kv.Step, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return bytes.Clone(p.branches[string(key)]), 0, nil
-}
-
-func (p *parityContext) PutBranch(key, data, _ []byte) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.branches[string(key)] = bytes.Clone(data)
-	return nil
-}
-
-func (p *parityContext) Account([]byte) (*commitment.Update, error) {
-	return &commitment.Update{Flags: commitment.DeleteUpdate}, nil
-}
-
-func (p *parityContext) Storage([]byte) (*commitment.Update, error) {
-	return &commitment.Update{Flags: commitment.DeleteUpdate}, nil
 }
 
 func accountParityUpdate(i int) *commitment.Update {
