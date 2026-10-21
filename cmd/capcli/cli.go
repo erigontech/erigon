@@ -1213,7 +1213,7 @@ func (c *DumpBlobsSnapshots) Run(ctx context.Context) error {
 		return err
 	}
 
-	blobCount := freezeblocks.BlobCountFromBlocks(ctx, freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig))
+	blobCount := freezeblocks.BlobCountFromBlocks(ctx, csn, freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig))
 
 	for _, start := range starts {
 		log.Info("Dumping blobs sidecars", "from", start, "to", start+snaptype.CaplinMergeLimit)
@@ -1243,8 +1243,8 @@ func blobDumpPlan(beaconConfig *clparams.BeaconChainConfig, from, to uint64, fro
 			if !overwrite {
 				continue
 			}
-			if i := slices.IndexFunc(frozen, func(f snaptype.FileInfo) bool { return covers(f) && f.Version.Less(current) }); i >= 0 {
-				return nil, fmt.Errorf("%s covers slots %d-%d below %s, so overwriting it would leave two segments for one range; re-download it instead", frozen[i].Name(), start, start+snaptype.CaplinMergeLimit, current)
+			if i := slices.IndexFunc(frozen, func(f snaptype.FileInfo) bool { return covers(f) && f.Version != current }); i >= 0 {
+				return nil, fmt.Errorf("%s covers slots %d-%d at a version other than %s, so overwriting it would leave two segments for one range", frozen[i].Name(), start, start+snaptype.CaplinMergeLimit, current)
 			}
 		}
 		starts = append(starts, start)

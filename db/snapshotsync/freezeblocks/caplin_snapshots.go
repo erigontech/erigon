@@ -380,13 +380,19 @@ func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, fromSlot, toSlot uint64, 
 
 type BlobCountBySlotFn func(slot uint64) (uint64, error)
 
-func BlobCountFromBlocks(ctx context.Context, r BeaconSnapshotReader) BlobCountBySlotFn {
+func BlobCountFromBlocks(ctx context.Context, sn *CaplinSnapshots, r BeaconSnapshotReader) BlobCountBySlotFn {
 	return func(slot uint64) (uint64, error) {
 		block, err := r.ReadBeaconBlockBodyBySlot(ctx, nil, slot)
 		if err != nil {
 			return 0, err
 		}
 		if block == nil {
+			view := sn.View()
+			_, ok := view.BeaconBlocksSegment(slot)
+			view.Close()
+			if !ok {
+				return 0, fmt.Errorf("slot %d: no frozen beacon block segment to count its blobs against", slot)
+			}
 			return 0, nil
 		}
 		commitments := block.Block.Body.GetBlobKzgCommitments()
