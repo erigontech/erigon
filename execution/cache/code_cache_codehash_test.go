@@ -360,6 +360,16 @@ func TestCodeCache_PutWithCodeHashRepairsWrongPairing(t *testing.T) {
 	_, ok = c.Get(addr3[:])
 	require.False(t, ok, "a fill whose bytes differ from the live entry must not bind")
 
+	// Same txNum for the wrong fill and the publish: the stamp alone cannot tell them apart.
+	var addr4, addr5 common.Address
+	addr4[19], addr5[19] = 4, 5
+	z, w := []byte{0x60, 0x03}, []byte{0x60, 0x04, 0x00}
+	hz := crypto.Keccak256(z)
+	c.PutWithCodeHashIfAbsent(addr4[:], w, hz, 7)
+	c.PutWithCodeHash(addr5[:], z, hz, 7)
+	_, ok = c.Get(addr4[:])
+	require.False(t, ok, "a publish at the same txNum must still invalidate the wrong fill's binding")
+
 	got, ok := c.Get(addr2[:])
 	require.True(t, ok)
 	require.Equal(t, x, got)

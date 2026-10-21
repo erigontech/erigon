@@ -62,11 +62,11 @@ type versionedAddressID struct {
 	// codeHash is the addr's keccak codeHash, used to reject a 64-bit maphash
 	// collision on addrID.
 	codeHash [32]byte
-	// codeTxNum is the stamp of the content entry the binding was made against;
-	// a replaced entry has another stamp, so its old bindings miss.
-	codeTxNum uint64
-	txNum     uint64
-	epoch     uint32
+	// codeSeq is the seq of the content entry the binding was made against; a
+	// replaced entry has another seq, so its old bindings miss.
+	codeSeq uint64
+	txNum   uint64
+	epoch   uint32
 }
 
 type addrCodeHashEntry struct {
@@ -107,8 +107,11 @@ type codeEntry struct {
 	// compare keyHash against the requested key to reject a collision serving
 	// a different contract's code.
 	keyHash [32]byte
-	txNum   uint64
-	epoch   uint32
+	// seq is unique per inserted entry, so a binding can tell a replacement
+	// apart even when both entries carry the same txNum.
+	seq   uint64
+	txNum uint64
+	epoch uint32
 }
 
 type codeSizeEntry struct {
@@ -142,6 +145,7 @@ type CodeCache struct {
 	// freshly seen address can be refused rather than displacing a warm one, and
 	// a miss falls through to the authoritative read.
 	addrToHash *ByteLRU[versionedAddressID]
+	contentSeq atomic.Uint64
 
 	// addrToCodeHash maps a 20-byte address to its 32-byte Ethereum codeHash
 	// (keccak), separately from addrToHash (which uses the cheap maphash
@@ -325,9 +329,9 @@ func (c *CodeCache) GetWithTxNum(addr []byte) ([]byte, uint64, bool) {
 		c.codeMisses.Add(1)
 		return nil, 0, false
 	}
-	if ce.txNum != vID.codeTxNum {
+	if ce.seq != vID.codeSeq {
 		dropSlotIf(c.addrToHash, &c.addrBindMu, addrSlot(k), func(cur versionedAddressID) bool {
-			return cur.addr == k && cur.codeTxNum == vID.codeTxNum
+			return cur.addr == k && cur.codeSeq == vID.codeSeq
 		})
 		c.codeMisses.Add(1)
 		return nil, 0, false
@@ -348,7 +352,7 @@ func (c *CodeCache) PutIfAbsent(addr []byte, code []byte, txNum uint64) {
 	c.putWithCodeHash(addr, code, crypto.Keccak256(code), txNum, false)
 }
 
-func (c *CodeCache) bindAddrLocked(addr []byte, keyHash [32]byte, codeID, codeTxNum, txNum uint64, ep uint32, overwriteAddr bool) {
+func (c *CodeCache) bindAddrLocked(addr []byte, keyHash [32]byte, codeID, codeSeq, txNum uint64, ep uint32, overwriteAddr bool) {
 	a := common.BytesToAddress(addr)
 	c.addrBindMu.Lock()
 	bindAddr := overwriteAddr
@@ -361,7 +365,7 @@ func (c *CodeCache) bindAddrLocked(addr []byte, keyHash [32]byte, codeID, codeTx
 		if resident {
 			c.addrToHash.Remove(slot)
 		}
-		c.addrToHash.Add(slot, versionedAddressID{addr: a, addrID: codeID, codeHash: keyHash, codeTxNum: codeTxNum, txNum: txNum, epoch: ep})
+		c.addrToHash.Add(slot, versionedAddressID{addr: a, addrID: codeID, codeHash: keyHash, codeSeq: codeSeq, txNum: txNum, epoch: ep})
 	}
 	c.addrBindMu.Unlock()
 }
@@ -515,7 +519,7 @@ func (c *CodeCache) putWithCodeHash(addr []byte, code []byte, codeHash []byte, t
 	// we touch the bytes we can answer a future EXTCODESIZE for free.
 	c.putCodeSizeByCodeHashLocked(codeHash, len(code), hcc, txNum, ep)
 
-	entry := codeEntry{code: code, keyHash: kh, txNum: txNum, epoch: ep}
+	entry := codeEntry{code: code, keyHash: kh, seq: c.contentSeq.Add(1), txNum: txNum, epoch: ep}
 	putContentLocked(c.codeHashToCode, hcc, entry, codeEntryStamp, codeEntryCodeLen,
 		&c.coh, &c.codeHashCodeSize, codeEntryBytes)
 
@@ -524,14 +528,14 @@ func (c *CodeCache) putWithCodeHash(addr []byte, code []byte, codeHash []byte, t
 	}
 	// A fill whose bytes differ from the live entry under its codeHash must not
 	// read that entry back, so it does not bind.
-	codeTxNum := txNum
+	codeSeq := entry.seq
 	if ce, ok := c.codeHashToCode.Get(hcc); ok && ce.keyHash == kh {
 		if !bytes.Equal(ce.code, code) {
 			return
 		}
-		codeTxNum = ce.txNum
+		codeSeq = ce.seq
 	}
-	c.bindAddrLocked(addr, kh, hcc, codeTxNum, txNum, ep, overwriteAddr)
+	c.bindAddrLocked(addr, kh, hcc, codeSeq, txNum, ep, overwriteAddr)
 }
 
 // dropMismatchedContentLocked removes live entries under codeHash whose bytes
