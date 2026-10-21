@@ -16,6 +16,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -70,6 +71,8 @@ type resumeBALFixture struct {
 	genesis *types.Block
 	block   *types.Block
 	senders []common.Address
+	// wipeHistory drops the account, storage and code history after seeding.
+	wipeHistory bool
 }
 
 func newResumeBALFixture(t *testing.T) *resumeBALFixture {
@@ -133,11 +136,6 @@ func hasStorageChangeAt(bal types.BlockAccessList, index uint32) bool {
 		}
 	}
 	return false
-}
-
-func storageKey(addr common.Address, slot accounts.StorageKey) []byte {
-	key := slot.Value()
-	return append(append(make([]byte, 0, len(addr)+len(key)), addr[:]...), key[:]...)
 }
 
 func allocAccount(ga types.GenesisAccount) accounts.Account {
@@ -223,7 +221,7 @@ func (fx *resumeBALFixture) seed(t *testing.T, db kv.TemporalRwDB, point resumeP
 							if change.Index != index {
 								continue
 							}
-							if err := domains.DomainPut(kv.StorageDomain, tx, storageKey(changes.Address, slot.Slot), change.Value.Bytes(), txNum, nil); err != nil {
+							if err := domains.DomainPut(kv.StorageDomain, tx, dbutils.GenerateStoragePlainKey(changes.Address, slot.Slot.Value()), change.Value.Bytes(), txNum, nil); err != nil {
 								return err
 							}
 						}
@@ -332,13 +330,7 @@ func (fx *resumeBALFixture) withAccessList(t *testing.T, bal types.BlockAccessLi
 	header := types.CopyHeader(fx.block.HeaderNoCopy())
 	balHash := bal.Hash()
 	header.BlockAccessListHash = &balHash
-	block := types.NewBlockFromNetwork(header, &types.Body{
-		Transactions: fx.block.Transactions(),
-		Uncles:       fx.block.Uncles(),
-		Withdrawals:  fx.block.Withdrawals(),
-	}, types.NewBlockAccessListSidecar(bal))
-	block.SendersToTxs(fx.senders)
-	return block
+	return fx.block.WithSeal(header).WithBlockAccessListSidecar(types.NewBlockAccessListSidecar(bal))
 }
 
 // phantomAccountBlock lists an extra untouched account.
@@ -379,6 +371,20 @@ func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumeP
 	dirs := datadir.New(t.TempDir())
 	db := newResumeTestDB(t)
 	fx.seed(t, db, point)
+	if fx.wipeHistory {
+		require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+			for _, table := range []string{
+				kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx,
+				kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx,
+				kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx,
+			} {
+				if err := tx.ClearTable(table); err != nil {
+					return err
+				}
+			}
+			return nil
+		}))
+	}
 
 	blockRLP, err := rlp.EncodeToBytes(block)
 	require.NoError(t, err)
@@ -410,7 +416,6 @@ func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumeP
 	rng := execRange{blockNum: 1, initialTxNum: resumeBALGenesisTxNum, inputTxNum: resumeBALBlockStartTxNum, maxBlockNum: 1}
 	if point != fromBlockStart {
 		rng.initialTxNum = resumeBALBlockStartTxNum + uint64(point)
-		rng.offsetFromBlockBeginning = 1
 	}
 	src := &singleBlockSource{block: block, num: 1, parent: fx.genesis.Header(), bal: block.BlockAccessList()}
 	out, err := execV3(ctx, cfg, domains, rwTx, stages.ModeForkValidation, false, "resume-bal", rng, src, logger)
@@ -421,21 +426,6 @@ func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumeP
 	return out.verdict, nil
 }
 
-func requireAccepted(t *testing.T, verdict *blockVerdict, err error, msg string) {
-	t.Helper()
-	require.NoError(t, err, msg)
-	if verdict != nil {
-		t.Fatalf("%s: %v", msg, verdict.err)
-	}
-}
-
-func requireAccessListMismatch(t *testing.T, verdict *blockVerdict, err error, msg string) {
-	t.Helper()
-	require.NoError(t, err, msg)
-	require.NotNil(t, verdict, msg)
-	require.ErrorContains(t, verdict.err, "block access list mismatch", msg)
-}
-
 // TestResumedBlockValidatesBlockAccessList pins that a block resumed after a
 // mid-block commit still has its EIP-7928 block access list checked against
 // the header, exactly like a block executed from its start.
@@ -443,25 +433,67 @@ func TestResumedBlockValidatesBlockAccessList(t *testing.T) {
 	fx := newResumeBALFixture(t)
 	phantom := fx.phantomAccountBlock(t)
 	droppedInit := fx.droppedInitWritesBlock(t)
-
-	verdict, err := fx.exec(t, fx.block, fromBlockStart)
-	requireAccepted(t, verdict, err, "full execution must accept the block")
-	verdict, err = fx.exec(t, phantom, fromBlockStart)
-	requireAccessListMismatch(t, verdict, err, "full execution must reject the phantom account")
-	verdict, err = fx.exec(t, droppedInit, fromBlockStart)
-	requireAccessListMismatch(t, verdict, err, "full execution must reject the dropped block-start writes")
-
-	verdict, err = fx.exec(t, fx.block, afterTx0)
-	requireAccepted(t, verdict, err, "the block resumed after tx0 must still be accepted")
-	verdict, err = fx.exec(t, phantom, afterTx0)
-	requireAccessListMismatch(t, verdict, err, "the block resumed after tx0 must reject the phantom account")
-
-	verdict, err = fx.exec(t, fx.block, afterBlockInit)
-	requireAccepted(t, verdict, err, "the block resumed after its start must still be accepted")
-	verdict, err = fx.exec(t, droppedInit, afterBlockInit)
-	requireAccessListMismatch(t, verdict, err, "the block resumed after its start must reject the dropped block-start writes")
+	for _, tc := range []struct {
+		name         string
+		block        *types.Block
+		point        resumePoint
+		wantMismatch bool
+	}{
+		{"full/valid", fx.block, fromBlockStart, false},
+		{"full/phantom account", phantom, fromBlockStart, true},
+		{"full/dropped block-start writes", droppedInit, fromBlockStart, true},
+		{"after tx0/valid", fx.block, afterTx0, false},
+		{"after tx0/phantom account", phantom, afterTx0, true},
+		{"after block start/valid", fx.block, afterBlockInit, false},
+		{"after block start/dropped block-start writes", droppedInit, afterBlockInit, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			verdict, err := fx.exec(t, tc.block, tc.point)
+			require.NoError(t, err)
+			if !tc.wantMismatch {
+				if verdict != nil {
+					t.Fatal(verdict.err)
+				}
+				return
+			}
+			require.NotNil(t, verdict)
+			require.ErrorContains(t, verdict.err, "block access list mismatch")
+		})
+	}
 }
 
 // TestResumedBlockWithoutPrefixHistoryIsOperational pins that a resumed block
-// whose prefix cannot be replayed from history is neither accepted nor marked
+// whose prefix is missing from the state history is neither accepted nor marked
 // invalid: a history read silently answers from the latest state, which would
+// turn the prefix's writes into no-ops.
+func TestResumedBlockWithoutPrefixHistoryIsOperational(t *testing.T) {
+	fx := newResumeBALFixture(t)
+	fx.wipeHistory = true
+	droppedInit := fx.droppedInitWritesBlock(t)
+
+	for _, point := range []resumePoint{afterBlockInit, afterTx0} {
+		verdict, err := fx.exec(t, fx.block, point)
+		require.ErrorIs(t, err, state.ErrPruned, "the real block must not be judged without history")
+		require.Nil(t, verdict)
+		verdict, err = fx.exec(t, droppedInit, point)
+		require.ErrorIs(t, err, state.ErrPruned, "the forged block must not be judged without history")
+		require.Nil(t, verdict)
+	}
+}
+
+// TestResumedBlockWithWrongRequestsHashIsInvalid pins that a block failing
+// finalization is rejected when resumed mid-block, as when executed from its
+// start, although its access list matches.
+func TestResumedBlockWithWrongRequestsHashIsInvalid(t *testing.T) {
+	fx := newResumeBALFixture(t)
+	header := types.CopyHeader(fx.block.HeaderNoCopy())
+	header.RequestsHash = &common.Hash{1}
+	block := fx.block.WithSeal(header)
+
+	for _, point := range []resumePoint{fromBlockStart, afterBlockInit, afterTx0} {
+		verdict, err := fx.exec(t, block, point)
+		require.NoError(t, err, "resume point %d", point)
+		require.NotNil(t, verdict, "resume point %d", point)
+		require.ErrorIs(t, verdict.err, rules.ErrInvalidBlock, "resume point %d", point)
+	}
+}

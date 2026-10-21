@@ -2378,6 +2378,11 @@ func (at *AggregatorRoTx) HistoryStartFrom(name kv.Domain, tx kv.Tx) (uint64, er
 	return at.d[name].HistoryStartFrom(tx)
 }
 
+// HistoryCoverageStart returns the first txNum the history of a given domain covers
+func (at *AggregatorRoTx) HistoryCoverageStart(name kv.Domain, tx kv.Tx) (uint64, error) {
+	return at.d[name].HistoryCoverageStart(tx)
+}
+
 // Returns the first known txNum available in a standalone inverted index (files, then DB)
 func (at *AggregatorRoTx) IIStartFrom(name kv.InvertedIdx, tx kv.Tx) uint64 {
 	iit := at.searchII(name)

@@ -855,6 +855,18 @@ func (tx *RwTx) HistoryStartFrom(name kv.Domain) (uint64, error) {
 	return tx.historyStartFrom(name, tx.RwTx)
 }
 
+func (tx *tx) historyCoverageStart(name kv.Domain, roTx kv.Tx) (uint64, error) {
+	return tx.aggtx.HistoryCoverageStart(name, roTx)
+}
+
+func (tx *Tx) HistoryCoverageStart(name kv.Domain) (uint64, error) {
+	return tx.historyCoverageStart(name, tx.Tx)
+}
+
+func (tx *RwTx) HistoryCoverageStart(name kv.Domain) (uint64, error) {
+	return tx.historyCoverageStart(name, tx.RwTx)
+}
+
 func (tx *Tx) DomainProgress(domain kv.Domain) uint64 {
 	return tx.aggtx.DomainProgress(domain, tx.Tx)
 }

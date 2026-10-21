@@ -689,8 +689,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// per-block blockValidator was spawned earlier (~30 LOC up)
 					// and runs concurrently with the work above.
 					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(block.Time())
-					// A partial block records only suffix I/O, so it cannot be checked
-					// against a full-block BAL.
+					// A partial block records only suffix I/O; nextResult checks its
+					// BAL against a re-derived one instead.
 					if validateFullBlock && (isAmsterdam || pe.cfg.experimentalBAL) {
 						if err := bal.Process(header, block.BlockAccessList(), applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger); err != nil {
 							recordApplyFailure(err)
@@ -3424,10 +3424,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		receiptsComplete := !isPartial
 		if isPartial && be.number() > 0 && header != nil {
 			startTxIndex := be.tasks[0].Version().TxIndex
+			lastCommittedTxNum := be.tasks[0].Version().TxNum - 1
+			blockStartTxNum := lastCommittedTxNum - uint64(startTxIndex)
 			receiptsComplete = startTxIndex == 0
 			if startTxIndex > 0 && len(txs) > 0 {
-				blockStartTxNum := be.tasks[0].Version().TxNum - uint64(startTxIndex)
-				priorReceipts, err := pe.reconstructPriorReceipts(ctx, applyTx, header, txs, startTxIndex, blockStartTxNum)
+				tx0TxNum := blockStartTxNum + 1
+				priorReceipts, err := pe.reconstructPriorReceipts(ctx, applyTx, header, txs, startTxIndex, tx0TxNum)
 				if err != nil {
 					pe.logger.Warn("["+pe.logPrefix+"] failed to reconstruct prior receipts for partial block",
 						"block", be.number(), "startTxIndex", startTxIndex, "err", err)
@@ -3442,12 +3444,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			receipts.DeriveFields(blockReceipts, be.hash())
 
 			if pe.cfg.chainConfig.IsAmsterdam(header.Time) {
-				blockStartTxNum := be.tasks[0].Version().TxNum - uint64(startTxIndex) - 1
-				computedBal, err := pe.rederiveResumedBlockAccessList(ctx, applyTx, be.block, blockStartTxNum)
+				computedBal, err := pe.rederiveResumedBlockAccessList(ctx, applyTx, be.block, blockStartTxNum, lastCommittedTxNum)
 				if err != nil {
-					return be.operationalBlockResult(fmt.Errorf("block %d: rederive access list of resumed block: %w", be.number(), err)), nil
+					if errors.Is(err, rules.ErrInvalidBlock) {
+						return be.invalidBlockResult(fmt.Errorf("block %d: %w", be.number(), err)), nil
+					}
+					return be.operationalBlockResult(fmt.Errorf("block %d resumed mid-block: cannot re-derive its block access list: %w", be.number(), err)), nil
 				}
-				if err := bal.Validate(header, be.block.BlockAccessList(), computedBal, true, pe.cfg.dirs.DataDir, pe.logger); err != nil {
+				if err := bal.Validate(header, be.block.BlockAccessList(), computedBal, pe.cfg.dirs.DataDir, pe.logger); err != nil {
 					if errors.Is(err, rules.ErrInvalidBlock) {
 						return be.invalidBlockResult(err), nil
 					}

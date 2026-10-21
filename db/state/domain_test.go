@@ -3898,3 +3898,54 @@ func TestDomainDisabledDiscardsWrites(t *testing.T) {
 		require.Zerof(t, n, "table %s must stay empty", table)
 	}
 }
+
+// TestDomain_HistoryCoverageStart pins that HistoryCoverageStart reports where
+// history coverage begins rather than where the first change happens to be
+// recorded: sparse history held only in the DB covers from txNum 0, while frozen
+// domain files without history files leave the DB covering only what follows them.
+func TestDomain_HistoryCoverageStart(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+
+	t.Run("sparse history in the DB", func(t *testing.T) {
+		t.Parallel()
+		db, d := testDbAndDomain(t, logger)
+		ctx := t.Context()
+		tx, err := db.BeginRw(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		dc := d.beginForTests()
+		writer := dc.NewWriter(db)
+		require.NoError(t, writer.PutWithPrev([]byte("key"), []byte("value"), 5, nil))
+		require.NoError(t, writer.Flush(ctx, tx))
+		writer.Close()
+		dc.Close()
+
+		dc = d.beginForTests()
+		defer dc.Close()
+		start, err := dc.HistoryCoverageStart(tx)
+		require.NoError(t, err)
+		require.Zero(t, start)
+	})
+
+	t.Run("domain files without history files", func(t *testing.T) {
+		t.Parallel()
+		db, d, _ := filledDomainFixedSize(t, 4, 64, 16, logger)
+		ctx := t.Context()
+		tx, err := db.BeginRw(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		collateAndMerge(t, tx, d, 64)
+		for _, table := range []string{d.History.InvertedIndex.KeysTable, d.History.InvertedIndex.ValuesTable, d.History.ValuesTable} {
+			require.NoError(t, tx.ClearTable(table))
+		}
+
+		dc := d.beginForTests()
+		defer dc.Close()
+		dc.ht.files = nil
+		require.NotZero(t, dc.files.EndTxNum())
+		start, err := dc.HistoryCoverageStart(tx)
+		require.NoError(t, err)
+		require.Equal(t, dc.files.EndTxNum(), start)
+	})
+}
