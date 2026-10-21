@@ -338,11 +338,11 @@ func (w *legacyWorld) apply(op commitmenttest.Op) {
 }
 
 func (w *legacyWorld) setAccount(addr []byte, nonce, balance uint64) {
-	w.apply(accountOp(addr, commitmenttest.AccountSpec{Nonce: nonce, Balance: balance, CodeHash: empty.CodeHash}))
+	w.apply(commitmenttest.AccountAt(addr, commitmenttest.AccountSpec{Nonce: nonce, Balance: balance, CodeHash: empty.CodeHash}))
 }
 
 func (w *legacyWorld) setSlot(addr, slot []byte, value uint64) {
-	w.apply(commitmenttest.Op{Key: slotKey(addr, slot), Storage: bytes.TrimLeft(binary.BigEndian.AppendUint64(nil, value), "\x00")})
+	w.apply(commitmenttest.Op{Key: commitmenttest.SlotKey(addr, slot), Storage: bytes.TrimLeft(binary.BigEndian.AppendUint64(nil, value), "\x00")})
 }
 
 func (w *legacyWorld) live(key []byte) bool {
@@ -496,7 +496,7 @@ func TestConversion(t *testing.T) {
 		restoredRoot, err := tr.RootHash()
 		require.NoError(t, err)
 		require.Equal(t, root, restoredRoot)
-		op := accountOp(accounts[0].addr, commitmenttest.AccountSpec{Nonce: 12, Balance: 23, CodeHash: empty.CodeHash})
+		op := commitmenttest.AccountAt(accounts[0].addr, commitmenttest.AccountSpec{Nonce: 12, Balance: 23, CodeHash: empty.CodeHash})
 		w.apply(op)
 		nextRoot, err := tr.Process(context.Background(), testUpdates(t, commitment.ModeCollect, []commitmenttest.Op{op}), "", nil, commitment.WarmupConfig{})
 		require.NoError(t, err)
@@ -512,7 +512,7 @@ func TestConversion(t *testing.T) {
 		prevs := w.Records()
 		dropSlots := func(acc legacyAccount, keep int) {
 			for _, slot := range acc.slots[keep:] {
-				w.apply(commitmenttest.Op{Key: slotKey(acc.addr, slot), Delete: true})
+				w.apply(commitmenttest.DeleteAt(commitmenttest.SlotKey(acc.addr, slot)))
 			}
 		}
 		for i, acc := range accounts {
@@ -522,7 +522,7 @@ func TestConversion(t *testing.T) {
 			case len(acc.slots) == 1 && i%2 == 0:
 				dropSlots(acc, 0)
 			case len(acc.slots) == 1:
-				w.apply(commitmenttest.Op{Key: acc.addr, Delete: true})
+				w.apply(commitmenttest.DeleteAt(acc.addr))
 				dropSlots(acc, 0)
 			case len(acc.slots) == 2:
 				dropSlots(acc, 1)
@@ -536,7 +536,7 @@ func TestConversion(t *testing.T) {
 		root := w.process(t)
 		require.Equal(t, root, w.convert(t, prevs, true, records))
 		for _, acc := range accounts {
-			if !slices.ContainsFunc(acc.slots, func(slot []byte) bool { return w.live(slotKey(acc.addr, slot)) }) {
+			if !slices.ContainsFunc(acc.slots, func(slot []byte) bool { return w.live(commitmenttest.SlotKey(acc.addr, slot)) }) {
 				require.Empty(t, records[string(StorageNodeKey(keccak.Sum256(acc.addr), nil, nil))], "account %x has no storage but keeps a storage root record", acc.addr)
 			}
 		}
@@ -567,7 +567,7 @@ func TestConversion(t *testing.T) {
 		stale := w.Records()[storageRootKey]
 		require.NotEmpty(t, stale)
 
-		w.apply(commitmenttest.Op{Key: slotKey(owner, slots[1]), Delete: true})
+		w.apply(commitmenttest.DeleteAt(commitmenttest.SlotKey(owner, slots[1])))
 		root := w.process(t)
 		w.written = w.Records()
 		w.written[storageRootKey] = stale

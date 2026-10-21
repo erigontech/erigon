@@ -31,17 +31,8 @@ import (
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
 )
 
-type parityUpdate struct {
-	key    []byte
-	update *commitment.Update
-}
-
-func accountParityUpdate(i int) *commitment.Update {
-	return testAccountUpdate(commitmenttest.Account(commitmenttest.AccountSpec{Kind: "parity", Number: i}))
-}
-
-func storageParityUpdate(i int) *commitment.Update {
-	return storageUpdate(commitmenttest.Storage(commitmenttest.StorageSpec{Number: i}))
+func parityAccount(key []byte, i int) commitmenttest.Op {
+	return commitmenttest.AccountAt(key, commitmenttest.AccountSpec{Kind: "parity", Number: i})
 }
 
 func parityAddress(i int) []byte {
@@ -57,18 +48,7 @@ func incrAddress(i int) []byte {
 }
 
 func incrSlot(addr []byte, j int) []byte {
-	return slotKey(addr, commitmenttest.Key(commitmenttest.KeySpec{Kind: "integer", Size: 32}, j))
-}
-
-func slotKey(addr, slot []byte) []byte { return append(bytes.Clone(addr), slot...) }
-
-func accountOp(key []byte, spec commitmenttest.AccountSpec) commitmenttest.Op {
-	value := commitmenttest.Account(spec)
-	return commitmenttest.Op{Key: key, Account: &value}
-}
-
-func slotOp(key []byte, number int) commitmenttest.Op {
-	return commitmenttest.Op{Key: key, Storage: commitmenttest.Storage(commitmenttest.StorageSpec{Number: number})}
+	return commitmenttest.SlotKey(addr, commitmenttest.Key(commitmenttest.KeySpec{Kind: "integer", Size: 32}, j))
 }
 
 var (
@@ -109,23 +89,23 @@ func withInitial(initial, ops []commitmenttest.Op) [][]commitmenttest.Op {
 
 func TestDifferential(t *testing.T) {
 	parity := func(i int) commitmenttest.Op {
-		return accountOp(parityAddress(i), commitmenttest.AccountSpec{Kind: "parity", Number: i})
+		return commitmenttest.AccountAt(parityAddress(i), commitmenttest.AccountSpec{Kind: "parity", Number: i})
 	}
 	t.Run("wide_round_without_factory", func(t *testing.T) {
 		var initial, ops []commitmenttest.Op
 		for i := range 4096 {
-			initial = append(initial, accountOp(incrAddress(i), commitmenttest.AccountSpec{Kind: "parity", Number: i}))
+			initial = append(initial, commitmenttest.AccountAt(incrAddress(i), commitmenttest.AccountSpec{Kind: "parity", Number: i}))
 			switch {
 			case i%7 == 0:
-				ops = append(ops, commitmenttest.Op{Key: incrAddress(i), Delete: true})
+				ops = append(ops, commitmenttest.DeleteAt(incrAddress(i)))
 			case i%3 == 0:
-				ops = append(ops, slotOp(incrSlot(incrAddress(i), i), i+1))
+				ops = append(ops, commitmenttest.StorageAt(incrSlot(incrAddress(i), i), i+1))
 			default:
-				ops = append(ops, accountOp(incrAddress(i), commitmenttest.AccountSpec{Kind: "parity", Number: i + 8192}))
+				ops = append(ops, commitmenttest.AccountAt(incrAddress(i), commitmenttest.AccountSpec{Kind: "parity", Number: i + 8192}))
 			}
 		}
 		for i := 4096; i < 4096+512; i++ {
-			ops = append(ops, accountOp(incrAddress(i), commitmenttest.AccountSpec{Kind: "parity", Number: i}))
+			ops = append(ops, commitmenttest.AccountAt(incrAddress(i), commitmenttest.AccountSpec{Kind: "parity", Number: i}))
 		}
 		engines := []runner.RunSpec{{Name: "v3", Mode: commitment.ModeCollect, Workers: 4, NoContextFactory: true}, {Name: "hph", Mode: commitment.ModeUpdate}}
 		differential(t, commitmenttest.Case{ID: "wide_round_without_factory", Rounds: [][]commitmenttest.Op{initial, ops}}, engines)
@@ -136,7 +116,7 @@ func TestDifferential(t *testing.T) {
 			for _, count := range []int{1, 2, 16, 1000, 100000} {
 				var initial, ops []commitmenttest.Op
 				for i := range count {
-					slot := slotOp(slotKey(parityAddress(i), paritySlot(i)), i)
+					slot := commitmenttest.StorageAt(commitmenttest.SlotKey(parityAddress(i), paritySlot(i)), i)
 					switch kind {
 					case "accounts":
 						ops = append(ops, parity(i))
@@ -153,22 +133,22 @@ func TestDifferential(t *testing.T) {
 
 	t.Run("correctness", func(t *testing.T) {
 		address := parityAddress(7)
-		slotA, slotB := slotKey(address, paritySlot(8)), slotKey(address, paritySlot(9))
+		slotA, slotB := commitmenttest.SlotKey(address, paritySlot(8)), commitmenttest.SlotKey(address, paritySlot(9))
 		account := []commitmenttest.Op{parity(7)}
 		fields := func(spec commitmenttest.AccountSpec) commitmenttest.Op {
 			spec.CodeHash = empty.CodeHash
-			return accountOp(address, spec)
+			return commitmenttest.AccountAt(address, spec)
 		}
 		for _, tc := range []struct {
 			name         string
 			initial, ops []commitmenttest.Op
 		}{
 			{"account", nil, account},
-			{"slot_after_account", account, []commitmenttest.Op{slotOp(slotA, 8)}},
-			{"two_slots_after_account", account, []commitmenttest.Op{slotOp(slotA, 8), slotOp(slotB, 9)}},
-			{"account_with_slot", nil, []commitmenttest.Op{parity(7), slotOp(slotA, 8)}},
-			{"account_with_other_slot", nil, []commitmenttest.Op{accountOp(address, commitmenttest.AccountSpec{Kind: "parity", Number: 12}), slotOp(slotB, 13)}},
-			{"delete_absent_account", nil, []commitmenttest.Op{{Key: address, Delete: true}}},
+			{"slot_after_account", account, []commitmenttest.Op{commitmenttest.StorageAt(slotA, 8)}},
+			{"two_slots_after_account", account, []commitmenttest.Op{commitmenttest.StorageAt(slotA, 8), commitmenttest.StorageAt(slotB, 9)}},
+			{"account_with_slot", nil, []commitmenttest.Op{parity(7), commitmenttest.StorageAt(slotA, 8)}},
+			{"account_with_other_slot", nil, []commitmenttest.Op{commitmenttest.AccountAt(address, commitmenttest.AccountSpec{Kind: "parity", Number: 12}), commitmenttest.StorageAt(slotB, 13)}},
+			{"delete_absent_account", nil, []commitmenttest.Op{commitmenttest.DeleteAt(address)}},
 			{"zeroed_account", nil, []commitmenttest.Op{fields(commitmenttest.AccountSpec{})}},
 			{"zeroed_account_with_neighbour", nil, []commitmenttest.Op{fields(commitmenttest.AccountSpec{}), parity(9)}},
 			{"nonce_only", nil, []commitmenttest.Op{fields(commitmenttest.AccountSpec{Nonce: 1})}},
@@ -193,7 +173,7 @@ func TestDifferential(t *testing.T) {
 
 		deletes := make([]commitmenttest.Op, len(final))
 		for i, op := range final {
-			deletes[i] = commitmenttest.Op{Key: op.Key, Delete: true}
+			deletes[i] = commitmenttest.DeleteAt(op.Key)
 		}
 		roots, _, _ = differential(t, commitmenttest.Case{ID: "incremental/unwind", Rounds: [][]commitmenttest.Op{final, deletes, final}}, serialEngines)
 		require.Equal(t, empty.RootHash[:], roots[1])
@@ -207,26 +187,26 @@ func TestDifferential(t *testing.T) {
 		seed = append(seed, whale.Rounds[0]...)
 		var next []commitmenttest.Op
 		for i := range 300 {
-			addr, slot := benchAddr(i), slotKey(benchAddr(i), benchSlot(i))
+			addr, slot := benchAddr(i), commitmenttest.SlotKey(benchAddr(i), benchSlot(i))
 			switch i % 5 {
 			case 0:
-				next = append(next, accountOp(addr, commitmenttest.AccountSpec{Kind: "parity", Number: i + 1000}))
+				next = append(next, commitmenttest.AccountAt(addr, commitmenttest.AccountSpec{Kind: "parity", Number: i + 1000}))
 			case 1:
-				next = append(next, slotOp(slot, i+1000))
+				next = append(next, commitmenttest.StorageAt(slot, i+1000))
 			case 2:
-				next = append(next, commitmenttest.Op{Key: slot, Delete: true})
+				next = append(next, commitmenttest.DeleteAt(slot))
 			case 3:
-				next = append(next, commitmenttest.Op{Key: addr, Delete: true})
+				next = append(next, commitmenttest.DeleteAt(addr))
 			default:
-				next = append(next, commitmenttest.Op{Key: addr, Delete: true}, commitmenttest.Op{Key: slot, Delete: true})
+				next = append(next, commitmenttest.DeleteAt(addr), commitmenttest.DeleteAt(slot))
 			}
 		}
 		for i := 1; i < len(whale.Rounds[0]); i += 3 {
-			next = append(next, commitmenttest.Op{Key: whale.Rounds[0][i].Key, Delete: true})
+			next = append(next, commitmenttest.DeleteAt(whale.Rounds[0][i].Key))
 		}
 		want, _, _ := differential(t, commitmenttest.Case{ID: "feed", Rounds: [][]commitmenttest.Op{seed, next}}, serialEngines)
 		for _, deferred := range []bool{false, true} {
-			roots := requireSameRuns(t, nil, v3Config{deferred: deferred}, v3Config{deferred: deferred, feed: true}, parityEntries(seed), parityEntries(next))
+			roots := requireSameRuns(t, nil, v3Config{deferred: deferred}, v3Config{deferred: deferred, feed: true}, seed, next)
 			require.Equal(t, want, roots)
 		}
 	})
@@ -299,7 +279,7 @@ func TestDifferential(t *testing.T) {
 			}
 		}
 		account := func(key []byte, number int) commitmenttest.Op {
-			return accountOp(key, commitmenttest.AccountSpec{Kind: "parity", Number: number})
+			return commitmenttest.AccountAt(key, commitmenttest.AccountSpec{Kind: "parity", Number: number})
 		}
 		a, b, c, d, e := hashedPrefix(3, 1), hashedPrefix(3, 2), hashedPrefix(3, 5), hashedPrefix(9, 0), hashedPrefix(9, 1)
 		seed := []commitmenttest.Op{account(a, 1), account(b, 2), account(d, 3), account(e, 4)}
@@ -307,8 +287,8 @@ func TestDifferential(t *testing.T) {
 			name string
 			next []commitmenttest.Op
 		}{
-			{"delete", []commitmenttest.Op{{Key: a, Delete: true}, account(d, 5)}},
-			{"delete_and_recreate", []commitmenttest.Op{{Key: a, Delete: true}, account(c, 6), account(d, 5)}},
+			{"delete", []commitmenttest.Op{commitmenttest.DeleteAt(a), account(d, 5)}},
+			{"delete_and_recreate", []commitmenttest.Op{commitmenttest.DeleteAt(a), account(c, 6), account(d, 5)}},
 		} {
 			differential(t, commitmenttest.Case{ID: "pending_collapse/" + tc.name, Rounds: [][]commitmenttest.Op{seed, tc.next}}, []runner.RunSpec{{Name: "v3", Mode: commitment.ModeCollect, Workers: 4}})
 		}
@@ -322,7 +302,7 @@ func TestDifferential(t *testing.T) {
 
 	t.Run("literal", func(t *testing.T) {
 		account := func(id, number int) commitmenttest.Op {
-			return accountOp(incrAddress(id), commitmenttest.AccountSpec{Kind: "plain", Number: number})
+			return commitmenttest.AccountAt(incrAddress(id), commitmenttest.AccountSpec{Kind: "plain", Number: number})
 		}
 		accounts := func(ids ...int) []commitmenttest.Op {
 			ops := make([]commitmenttest.Op, len(ids))
@@ -334,7 +314,7 @@ func TestDifferential(t *testing.T) {
 		slot := func(id, slot int, value byte) commitmenttest.Op {
 			return commitmenttest.Op{Key: incrSlot(incrAddress(id), slot), Storage: []byte{value}}
 		}
-		remove := func(id int) commitmenttest.Op { return commitmenttest.Op{Key: incrAddress(id), Delete: true} }
+		remove := func(id int) commitmenttest.Op { return commitmenttest.DeleteAt(incrAddress(id)) }
 		for _, tc := range []struct {
 			name   string
 			rounds [][]commitmenttest.Op
@@ -362,9 +342,9 @@ func FuzzParityRandomSequences(f *testing.F) {
 		state := make(commitmenttest.State)
 		for step := range 24 {
 			account := rng.Intn(8)
-			op := commitmenttest.Op{Key: incrAddress(account), Delete: true}
+			op := commitmenttest.DeleteAt(incrAddress(account))
 			if rng.Intn(4) != 0 {
-				op = accountOp(op.Key, commitmenttest.AccountSpec{Kind: "parity", Number: step + account})
+				op = commitmenttest.AccountAt(op.Key, commitmenttest.AccountSpec{Kind: "parity", Number: step + account})
 			}
 			state.Apply([]commitmenttest.Op{op})
 			differential(t, commitmenttest.Case{ID: fmt.Sprintf("fuzz/%d/%d", seed, step), Rounds: [][]commitmenttest.Op{state.Ops()}}, parityEngines)

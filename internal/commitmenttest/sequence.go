@@ -293,3 +293,13 @@ func collapseRounds(rng *rand.Rand, spec SequenceSpec) [][]Op {
 	return rounds
 }
 func accountOp(key []byte, value AccountValue) Op { return Op{Key: key, Account: &value} }
+
+func AccountAt(key []byte, spec AccountSpec) Op { return accountOp(key, Account(spec)) }
+
+func StorageAt(key []byte, number int) Op {
+	return Op{Key: key, Storage: Storage(StorageSpec{Number: number})}
+}
+
+func DeleteAt(key []byte) Op { return Op{Key: key, Delete: true} }
+
+func SlotKey(addr, slot []byte) []byte { return append(bytes.Clone(addr), slot...) }

@@ -35,10 +35,10 @@ import (
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
 )
 
-func benchUpdatesIn(dir string, mode commitment.Mode, entries []parityUpdate) *commitment.Updates {
+func benchUpdatesIn(dir string, mode commitment.Mode, ops []commitmenttest.Op, updates []*commitment.Update) *commitment.Updates {
 	u := commitment.NewUpdates(mode, dir, commitment.KeyToHexNibbleHash)
-	for _, e := range entries {
-		u.TouchPlainKeyDirect(string(e.key), e.update)
+	for i, op := range ops {
+		u.TouchPlainKeyDirect(string(op.Key), updates[i])
 	}
 	return u
 }
@@ -51,7 +51,7 @@ func benchSlot(i int) []byte {
 	return commitmenttest.Key(commitmenttest.KeySpec{Kind: "bench-slot", Size: 32}, i)
 }
 
-func benchEntries(shape string, n int) []parityUpdate {
+func benchEntries(shape string, n int) []commitmenttest.Op {
 	seed := int64(0)
 	switch shape {
 	case "accounts", "storage":
@@ -61,7 +61,7 @@ func benchEntries(shape string, n int) []parityUpdate {
 		shape = "storage"
 	}
 	c := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: shape, Count: n})
-	return parityEntries(c.Rounds[0])
+	return c.Rounds[0]
 }
 
 func BenchmarkFoldV3VsHPH(b *testing.B) {
@@ -69,6 +69,7 @@ func BenchmarkFoldV3VsHPH(b *testing.B) {
 	for _, shape := range []string{"accounts", "storage", "whale"} {
 		for _, n := range []int{10000, 100000} {
 			entries := benchEntries(shape, n)
+			updates := updatesOf(entries)
 
 			b.Run(fmt.Sprintf("%s/%d/v3", shape, n), func(b *testing.B) {
 				dir := b.TempDir()
@@ -78,7 +79,7 @@ func BenchmarkFoldV3VsHPH(b *testing.B) {
 					tr.ResetContext(c)
 					tr.SetTrieContextFactory(c.factory)
 					return func() error {
-						u := benchUpdatesIn(dir, commitment.ModeCollect, entries)
+						u := benchUpdatesIn(dir, commitment.ModeCollect, entries, updates)
 						_, err := tr.Process(ctxb, u, "", nil, commitment.WarmupConfig{})
 						return err
 					}, tr.Release
@@ -91,7 +92,7 @@ func BenchmarkFoldV3VsHPH(b *testing.B) {
 					c := newShardedContext()
 					tr := commitment.NewHexPatriciaHashed(length.Addr, c, commitment.DefaultTrieConfig())
 					return func() error {
-						u := benchUpdatesIn(dir, commitment.ModeUpdate, entries)
+						u := benchUpdatesIn(dir, commitment.ModeUpdate, entries, updates)
 						_, err := tr.Process(ctxb, u, "", nil, commitment.WarmupConfig{})
 						return err
 					}, tr.Release
@@ -104,7 +105,7 @@ func BenchmarkFoldV3VsHPH(b *testing.B) {
 					c := newShardedContext()
 					tr := commitment.NewParallelPatriciaHashed(c.factory, length.Addr, commitment.DefaultTrieConfig())
 					return func() error {
-						u := benchUpdatesIn(dir, commitment.ModeParallel, entries)
+						u := benchUpdatesIn(dir, commitment.ModeParallel, entries, updates)
 						_, err := tr.Process(ctxb, u, "", nil, commitment.WarmupConfig{})
 						return err
 					}, tr.Release
@@ -167,6 +168,7 @@ func BenchmarkV3Workers(b *testing.B) {
 	ctxb := context.Background()
 	for _, shape := range []string{"storage", "whale"} {
 		entries := benchEntries(shape, 100000)
+		updates := updatesOf(entries)
 		for _, w := range []int{1, 2, 4, 8, 18, 36} {
 			b.Run(fmt.Sprintf("%s/%d", shape, w), func(b *testing.B) {
 				dir := b.TempDir()
@@ -176,7 +178,7 @@ func BenchmarkV3Workers(b *testing.B) {
 					tr.ResetContext(c)
 					tr.SetTrieContextFactory(c.factory)
 					return func() error {
-						u := benchUpdatesIn(dir, commitment.ModeCollect, entries)
+						u := benchUpdatesIn(dir, commitment.ModeCollect, entries, updates)
 						_, err := tr.Process(ctxb, u, "", nil, commitment.WarmupConfig{})
 						return err
 					}, tr.Release
@@ -202,35 +204,36 @@ func timedProcess(b *testing.B, prepare func() (process func() error, release fu
 
 func BenchmarkV3Incremental(b *testing.B) {
 	const contracts = 100000
-	seed := make([]parityUpdate, 0, contracts*5)
-	next := make([]parityUpdate, 0, contracts)
+	seed := make([]commitmenttest.Op, 0, contracts*5)
+	next := make([]commitmenttest.Op, 0, contracts)
 	for i := range contracts {
 		addr := benchAddr(i)
-		seed = append(seed, parityUpdate{key: addr, update: accountParityUpdate(i)})
+		seed = append(seed, parityAccount(addr, i))
 		for j := range 4 {
-			seed = append(seed, parityUpdate{key: append(bytes.Clone(addr), benchSlot(i*4+j)...), update: storageParityUpdate(i + j)})
+			seed = append(seed, commitmenttest.StorageAt(append(bytes.Clone(addr), benchSlot(i*4+j)...), i+j))
 		}
 		if i%5 == 0 {
 			next = append(next,
-				parityUpdate{key: addr, update: accountParityUpdate(i + 1)},
-				parityUpdate{key: append(bytes.Clone(addr), benchSlot(i*4)...), update: storageParityUpdate(i + 7)},
-				parityUpdate{key: append(bytes.Clone(addr), benchSlot(contracts*4+i)...), update: storageParityUpdate(i + 9)})
+				parityAccount(addr, i+1),
+				commitmenttest.StorageAt(append(bytes.Clone(addr), benchSlot(i*4)...), i+7),
+				commitmenttest.StorageAt(append(bytes.Clone(addr), benchSlot(contracts*4+i)...), i+9))
 		}
 	}
 	for i := contracts; i < contracts+contracts/20; i++ {
-		next = append(next, parityUpdate{key: benchAddr(i), update: accountParityUpdate(i)})
+		next = append(next, parityAccount(benchAddr(i), i))
 	}
 
 	base := newShardedContext()
 	tr := &Trie{}
 	tr.ResetContext(base)
 	tr.SetTrieContextFactory(base.factory)
-	if _, err := tr.Process(context.Background(), benchUpdatesIn(b.TempDir(), commitment.ModeCollect, seed), "", nil, commitment.WarmupConfig{}); err != nil {
+	if _, err := tr.Process(context.Background(), benchUpdatesIn(b.TempDir(), commitment.ModeCollect, seed, updatesOf(seed)), "", nil, commitment.WarmupConfig{}); err != nil {
 		b.Fatal(err)
 	}
 	tr.Release()
 
 	dir := b.TempDir()
+	nextUpdates := updatesOf(next)
 	b.ReportAllocs()
 	b.ResetTimer()
 	timedProcess(b, func() (func() error, func()) {
@@ -241,7 +244,7 @@ func BenchmarkV3Incremental(b *testing.B) {
 		tr := &Trie{}
 		tr.ResetContext(c)
 		tr.SetTrieContextFactory(c.factory)
-		u := benchUpdatesIn(dir, commitment.ModeCollect, next)
+		u := benchUpdatesIn(dir, commitment.ModeCollect, next, nextUpdates)
 		return func() error {
 			_, err := tr.Process(context.Background(), u, "", nil, commitment.WarmupConfig{})
 			return err
@@ -269,7 +272,7 @@ func BenchmarkWitness(b *testing.B) {
 		case i < 800:
 			batch = append(batch, commitmenttest.Op{Key: bed.accounts[rng.Intn(len(bed.accounts))], Account: randomWitnessAccount(rng)})
 		case i < 1100:
-			batch = append(batch, commitmenttest.Op{Key: bed.slots[rng.Intn(len(bed.slots))], Delete: true})
+			batch = append(batch, commitmenttest.DeleteAt(bed.slots[rng.Intn(len(bed.slots))]))
 		default:
 			addr := bed.accounts[rng.Intn(len(bed.accounts))]
 			batch = append(batch, commitmenttest.Op{Key: append(bytes.Clone(addr), craftKey(rng, length.Hash, nil, slotNibbles(addr))...), Storage: randomWitnessValue(rng)})

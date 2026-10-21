@@ -167,7 +167,7 @@ func TestPartition(t *testing.T) {
 func TestStorageTransitions(t *testing.T) {
 	path := func(first, fill byte) []byte { return append([]byte{first}, bytes.Repeat([]byte{fill}, 63)...) }
 	put := func(p []byte, value byte) commitmenttest.Op { return commitmenttest.Op{Key: p, Storage: []byte{value}} }
-	del := func(p []byte) commitmenttest.Op { return commitmenttest.Op{Key: p, Delete: true} }
+	del := func(p []byte) commitmenttest.Op { return commitmenttest.DeleteAt(p) }
 	for _, tc := range []struct {
 		name     string
 		addr     byte
@@ -346,13 +346,13 @@ func TestStorageWipe(t *testing.T) {
 
 func TestDeletedAccountWipesStorageWrittenInTheSameBatch(t *testing.T) {
 	addr := parityAddress(7)
-	slotA, slotB := slotKey(addr, paritySlot(8)), slotKey(addr, paritySlot(9))
+	slotA, slotB := commitmenttest.SlotKey(addr, paritySlot(8)), commitmenttest.SlotKey(addr, paritySlot(9))
 	differential(t, commitmenttest.Case{
 		ID: "delete-with-slot-write",
 		Rounds: [][]commitmenttest.Op{
-			{accountOp(addr, commitmenttest.AccountSpec{Kind: "parity", Number: 7}), slotOp(slotA, 8), slotOp(slotB, 9)},
-			{slotOp(slotA, 80), {Key: addr, Delete: true}},
-			{accountOp(addr, commitmenttest.AccountSpec{Kind: "parity", Number: 70})},
+			{commitmenttest.AccountAt(addr, commitmenttest.AccountSpec{Kind: "parity", Number: 7}), commitmenttest.StorageAt(slotA, 8), commitmenttest.StorageAt(slotB, 9)},
+			{commitmenttest.StorageAt(slotA, 80), commitmenttest.DeleteAt(addr)},
+			{commitmenttest.AccountAt(addr, commitmenttest.AccountSpec{Kind: "parity", Number: 70})},
 		},
 		Assertions: commitmenttest.Assertions{TolerateHPHDrift: true},
 	}, []runner.RunSpec{{Name: "v3", Mode: commitment.ModeCollect, Workers: 1}})
@@ -390,13 +390,13 @@ func TestScheduling(t *testing.T) {
 
 	t.Run("worker_bound_during_trie_process", func(t *testing.T) {
 		first := commitment.KeyToHexNibbleHash(parityAddress(0))[0]
-		entries := make([]parityUpdate, 0, 16)
+		entries := make([]commitmenttest.Op, 0, 16)
 		for i := 0; i < 256 && len(entries) < 16; i++ {
 			address := parityAddress(i)
 			if commitment.KeyToHexNibbleHash(address)[0] != first {
 				continue
 			}
-			entries = append(entries, parityUpdate{key: address, update: accountParityUpdate(i)}, parityUpdate{key: slotKey(address, paritySlot(i)), update: storageParityUpdate(i)})
+			entries = append(entries, parityAccount(address, i), commitmenttest.StorageAt(commitmenttest.SlotKey(address, paritySlot(i)), i))
 		}
 		require.Len(t, entries, 16)
 		_, _, calls := runV3(t, newShardedContext(), v3Config{workers: 2}, entries)
@@ -453,27 +453,27 @@ func TestScheduling(t *testing.T) {
 			require.NoError(t, err)
 			return storageRoot
 		}
-		runV3(t, ctx, v3Config{workers: 1}, []parityUpdate{{key: address, update: accountParityUpdate(3)}, {key: slotKey(address, paritySlot(3)), update: storageParityUpdate(3)}})
+		runV3(t, ctx, v3Config{workers: 1}, []commitmenttest.Op{parityAccount(address, 3), commitmenttest.StorageAt(commitmenttest.SlotKey(address, paritySlot(3)), 3)})
 		before := storageRoot()
-		runV3(t, ctx, v3Config{workers: 1}, []parityUpdate{{key: address, update: &commitment.Update{Flags: commitment.BalanceUpdate, Balance: *uint256.NewInt(99)}}})
+		runV3(t, ctx, v3Config{workers: 1}, []commitmenttest.Op{commitmenttest.Op{Key: address, Account: &commitmenttest.AccountValue{Fields: commitmenttest.BalanceField, Balance: *uint256.NewInt(99)}}})
 		require.Equal(t, before, storageRoot())
 	})
 
 	whale := benchAddr(7)
-	whaleSeed := []parityUpdate{{key: whale, update: accountParityUpdate(7)}}
-	whaleNext := []parityUpdate{{key: whale, update: accountParityUpdate(8)}}
+	whaleSeed := []commitmenttest.Op{parityAccount(whale, 7)}
+	whaleNext := []commitmenttest.Op{parityAccount(whale, 8)}
 	for i := range 5 * defaultStorageFanOutMin {
-		slot := slotKey(whale, benchSlot(i))
+		slot := commitmenttest.SlotKey(whale, benchSlot(i))
 		switch {
 		case i >= 4*defaultStorageFanOutMin:
-			whaleNext = append(whaleNext, parityUpdate{key: slot, update: storageParityUpdate(i)})
+			whaleNext = append(whaleNext, commitmenttest.StorageAt(slot, i))
 		case i%3 == 0:
-			whaleNext = append(whaleNext, parityUpdate{key: slot, update: &commitment.Update{Flags: commitment.DeleteUpdate}})
+			whaleNext = append(whaleNext, commitmenttest.DeleteAt(slot))
 		case i%3 == 1:
-			whaleNext = append(whaleNext, parityUpdate{key: slot, update: storageParityUpdate(i + 1)})
+			whaleNext = append(whaleNext, commitmenttest.StorageAt(slot, i+1))
 		}
 		if i < 4*defaultStorageFanOutMin {
-			whaleSeed = append(whaleSeed, parityUpdate{key: slot, update: storageParityUpdate(i)})
+			whaleSeed = append(whaleSeed, commitmenttest.StorageAt(slot, i))
 		}
 	}
 
@@ -491,37 +491,36 @@ func TestScheduling(t *testing.T) {
 			sparse = append(sparse, i)
 		}
 	}
-	groupSeed := make([]parityUpdate, 0, 2*len(dense))
+	groupSeed := make([]commitmenttest.Op, 0, 2*len(dense))
 	for _, i := range append(append([]int(nil), dense...), sparse...) {
-		groupSeed = append(groupSeed, parityUpdate{key: parityAddress(i), update: accountParityUpdate(i)})
+		groupSeed = append(groupSeed, parityAccount(parityAddress(i), i))
 		if i%3 == 0 {
-			groupSeed = append(groupSeed, parityUpdate{key: slotKey(parityAddress(i), paritySlot(i)), update: storageParityUpdate(i)})
+			groupSeed = append(groupSeed, commitmenttest.StorageAt(commitmenttest.SlotKey(parityAddress(i), paritySlot(i)), i))
 		}
 	}
-	deleted := &commitment.Update{Flags: commitment.DeleteUpdate}
-	groupNext := []parityUpdate{{key: parityAddress(sparse[0]), update: deleted}, {key: parityAddress(dense[3]), update: deleted}}
+	groupNext := []commitmenttest.Op{commitmenttest.DeleteAt(parityAddress(sparse[0])), commitmenttest.DeleteAt(parityAddress(dense[3]))}
 	for k, i := range dense[10:400] {
-		groupNext = append(groupNext, parityUpdate{key: parityAddress(i), update: accountParityUpdate(i + 1)})
+		groupNext = append(groupNext, parityAccount(parityAddress(i), i+1))
 		if k%4 == 0 {
-			groupNext = append(groupNext, parityUpdate{key: slotKey(parityAddress(i), paritySlot(i+7)), update: storageParityUpdate(i + 2)})
+			groupNext = append(groupNext, commitmenttest.StorageAt(commitmenttest.SlotKey(parityAddress(i), paritySlot(i+7)), i+2))
 		}
 	}
 	for i := 100000; i < 100200; i++ {
 		if commitment.KeyToHexNibbleHash(parityAddress(i))[0] != 0 {
-			groupNext = append(groupNext, parityUpdate{key: parityAddress(i), update: accountParityUpdate(i)})
+			groupNext = append(groupNext, parityAccount(parityAddress(i), i))
 		}
 	}
 
 	for _, tc := range []struct {
 		name   string
-		base   []parityUpdate
-		rounds [][]parityUpdate
+		base   []commitmenttest.Op
+		rounds [][]commitmenttest.Op
 		a, b   v3Config
 	}{
-		{"deferred_matches_inline", nil, [][]parityUpdate{storage}, v3Config{}, v3Config{deferred: true}},
-		{"account_fold_parallel_matches_serial", nil, [][]parityUpdate{benchEntries("storage", 512)}, v3Config{workers: 1}, v3Config{workers: 8}},
-		{"storage_fan_out_matches_serial", nil, [][]parityUpdate{whaleSeed, whaleNext}, v3Config{workers: 1}, v3Config{workers: 8}},
-		{"pipelined_account_groups_match_serial", groupSeed, [][]parityUpdate{groupNext}, v3Config{workers: 1}, v3Config{workers: 4}},
+		{"deferred_matches_inline", nil, [][]commitmenttest.Op{storage}, v3Config{}, v3Config{deferred: true}},
+		{"account_fold_parallel_matches_serial", nil, [][]commitmenttest.Op{benchEntries("storage", 512)}, v3Config{workers: 1}, v3Config{workers: 8}},
+		{"storage_fan_out_matches_serial", nil, [][]commitmenttest.Op{whaleSeed, whaleNext}, v3Config{workers: 1}, v3Config{workers: 8}},
+		{"pipelined_account_groups_match_serial", groupSeed, [][]commitmenttest.Op{groupNext}, v3Config{workers: 1}, v3Config{workers: 4}},
 	} {
 		t.Run(tc.name, func(t *testing.T) { requireSameRuns(t, tc.base, tc.a, tc.b, tc.rounds...) })
 	}
@@ -545,11 +544,11 @@ func (c *leafRefContext) LeafRefs(key, data []byte) *commitment.LeafRefs {
 func TestPrefetch(t *testing.T) {
 	serial := v3Config{workers: 1}
 	seeded := func(t *testing.T, contracts int) (*mockContext, *Trie) {
-		seed := make([]parityUpdate, 0, contracts*3)
+		seed := make([]commitmenttest.Op, 0, contracts*3)
 		for i := range contracts {
-			seed = append(seed, parityUpdate{key: benchAddr(i), update: accountParityUpdate(i)})
+			seed = append(seed, parityAccount(benchAddr(i), i))
 			for j := range 2 {
-				seed = append(seed, parityUpdate{key: slotKey(benchAddr(i), benchSlot(i*2+j)), update: storageParityUpdate(i + j)})
+				seed = append(seed, commitmenttest.StorageAt(commitmenttest.SlotKey(benchAddr(i), benchSlot(i*2+j)), i+j))
 			}
 		}
 		ctx := newMockContext()
@@ -590,9 +589,9 @@ func TestPrefetch(t *testing.T) {
 			PrefetchPath(read, addrHash[:], slotHash[:], 64)
 
 			ctx.branchCalls = nil
-			runV3(t, ctx, v3Config{workers: 1, trie: tr}, []parityUpdate{
-				{key: addr, update: accountParityUpdate(c.account + 1)},
-				{key: slotKey(addr, slot), update: storageParityUpdate(c.slot + 5)},
+			runV3(t, ctx, v3Config{workers: 1, trie: tr}, []commitmenttest.Op{
+				parityAccount(addr, c.account+1),
+				commitmenttest.StorageAt(commitmenttest.SlotKey(addr, slot), c.slot+5),
 			})
 			require.NotEmpty(t, ctx.branchCalls)
 			for _, key := range ctx.branchCalls {
@@ -604,12 +603,12 @@ func TestPrefetch(t *testing.T) {
 	t.Run("leaf_refs_keep_roots_and_records", func(t *testing.T) {
 		const contracts = 2000
 		base, _ := seeded(t, contracts)
-		next := make([]parityUpdate, 0, 600)
+		next := make([]commitmenttest.Op, 0, 600)
 		for i := 0; i < contracts; i += 10 {
 			next = append(next,
-				parityUpdate{key: benchAddr(i), update: accountParityUpdate(i + 3)},
-				parityUpdate{key: slotKey(benchAddr(i), benchSlot(i*2)), update: storageParityUpdate(i + 7)},
-				parityUpdate{key: benchAddr(contracts + i), update: accountParityUpdate(i + 11)})
+				parityAccount(benchAddr(i), i+3),
+				commitmenttest.StorageAt(commitmenttest.SlotKey(benchAddr(i), benchSlot(i*2)), i+7),
+				parityAccount(benchAddr(contracts+i), i+11))
 		}
 		run := func(refs, corrupt bool) ([]byte, map[string][]byte) {
 			clone := newMockContext()

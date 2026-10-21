@@ -42,12 +42,12 @@ func storageUpdate(value []byte) *commitment.Update {
 	return runner.Update(commitmenttest.Op{Storage: value})
 }
 
-func parityEntries(ops []commitmenttest.Op) []parityUpdate {
-	entries := make([]parityUpdate, len(ops))
+func updatesOf(ops []commitmenttest.Op) []*commitment.Update {
+	updates := make([]*commitment.Update, len(ops))
 	for i, op := range ops {
-		entries[i] = parityUpdate{key: op.Key, update: runner.Update(op)}
+		updates[i] = runner.Update(op)
 	}
-	return entries
+	return updates
 }
 
 func openTestTrie(ctx context.Context, spec runner.RunSpec) (commitment.Trie, error) {
@@ -86,7 +86,7 @@ func TestProcessFeedReadsNoState(t *testing.T) {
 	engine, err := openTestTrie(context.Background(), runner.RunSpec{Mode: commitment.ModeCollect, Memory: memory})
 	require.NoError(t, err)
 	defer engine.Release()
-	_, err = engine.(*Trie).ProcessFeed(context.Background(), feedOf(parityEntries(c.Rounds[0])), nil)
+	_, err = engine.(*Trie).ProcessFeed(context.Background(), feedOf(c.Rounds[0]), nil)
 	require.NoError(t, err)
 	require.Zero(t, memory.Counts().AccountReads)
 	require.Zero(t, memory.Counts().StorageReads)
@@ -249,25 +249,25 @@ func requireStorageState(t *testing.T, ctx commitment.PatriciaContext, addr [32]
 	require.Equal(t, want, exactLeaves(t, ctx, planeStorage, addr))
 }
 
-func feedOf(entries []parityUpdate) *commitment.Feed {
-	feed := &commitment.Feed{Keys: len(entries)}
+func feedOf(ops []commitmenttest.Op) *commitment.Feed {
+	feed := &commitment.Feed{Keys: len(ops)}
 	index := make(map[string]int)
-	for _, e := range entries {
-		addr := string(e.key[:length.Addr])
+	for _, e := range ops {
+		addr := string(e.Key[:length.Addr])
 		at, ok := index[addr]
 		if !ok {
 			at = len(feed.Accounts)
 			index[addr] = at
-			feed.Accounts = append(feed.Accounts, commitment.FeedAccount{Hash: keccak.Sum256(e.key[:length.Addr])})
+			feed.Accounts = append(feed.Accounts, commitment.FeedAccount{Hash: keccak.Sum256(e.Key[:length.Addr])})
 		}
 		account := &feed.Accounts[at]
-		if len(e.key) == length.Addr {
-			account.Update = e.update
+		if len(e.Key) == length.Addr {
+			account.Update = runner.Update(e)
 			continue
 		}
-		slot := commitment.FeedSlot{Hash: keccak.Sum256(e.key[length.Addr:])}
-		if !e.update.Deleted() {
-			slot.Value = e.update.Storage[:e.update.StorageLen]
+		slot := commitment.FeedSlot{Hash: keccak.Sum256(e.Key[length.Addr:])}
+		if u := runner.Update(e); !u.Deleted() {
+			slot.Value = u.Storage[:u.StorageLen]
 		}
 		account.Slots = append(account.Slots, slot)
 	}
@@ -282,7 +282,7 @@ type v3Config struct {
 	wrap     func(commitment.PatriciaContext) commitment.PatriciaContext
 }
 
-func runV3(t *testing.T, ctx commitment.PatriciaContext, cfg v3Config, rounds ...[]parityUpdate) ([][]byte, []string, int32) {
+func runV3(t *testing.T, ctx commitment.PatriciaContext, cfg v3Config, rounds ...[]commitmenttest.Op) ([][]byte, []string, int32) {
 	t.Helper()
 	var calls atomic.Int32
 	tr := cfg.trie
@@ -308,7 +308,7 @@ func runV3(t *testing.T, ctx commitment.PatriciaContext, cfg v3Config, rounds ..
 		if cfg.feed {
 			root, err = tr.ProcessFeed(context.Background(), feedOf(round), nil)
 		} else {
-			updates := benchUpdatesIn(t.TempDir(), commitment.ModeCollect, round)
+			updates := benchUpdatesIn(t.TempDir(), commitment.ModeCollect, round, updatesOf(round))
 			root, err = tr.Process(context.Background(), updates, "", nil, commitment.WarmupConfig{})
 			updates.Close()
 		}
@@ -339,7 +339,7 @@ func storeSnapshot(c *shardedContext) map[string]string {
 	return out
 }
 
-func requireSameRuns(t *testing.T, base []parityUpdate, a, b v3Config, rounds ...[]parityUpdate) [][]byte {
+func requireSameRuns(t *testing.T, base []commitmenttest.Op, a, b v3Config, rounds ...[]commitmenttest.Op) [][]byte {
 	t.Helper()
 	seeded := newShardedContext()
 	if base != nil {

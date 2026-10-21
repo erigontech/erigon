@@ -369,7 +369,7 @@ func collapseBatch(rng *rand.Rand, b *witnessBed) []commitmenttest.Op {
 		switch rng.Intn(10) {
 		case 0, 1, 2:
 			deleted[string(addr)] = true
-			ops = append(ops, commitmenttest.Op{Key: addr, Delete: true})
+			ops = append(ops, commitmenttest.DeleteAt(addr))
 		case 3, 4:
 			ops = append(ops, commitmenttest.Op{Key: addr, Account: randomWitnessAccount(rng)})
 		}
@@ -378,7 +378,7 @@ func collapseBatch(rng *rand.Rand, b *witnessBed) []commitmenttest.Op {
 		dead := deleted[string(slot[:length.Addr])]
 		switch n := rng.Intn(10); {
 		case n < 4:
-			ops = append(ops, commitmenttest.Op{Key: slot, Delete: true})
+			ops = append(ops, commitmenttest.DeleteAt(slot))
 		case n < 6 && !dead:
 			ops = append(ops, commitmenttest.Op{Key: slot, Storage: randomWitnessValue(rng)})
 		}
@@ -397,7 +397,7 @@ func collapseBatch(rng *rand.Rand, b *witnessBed) []commitmenttest.Op {
 			near := accountNibbles(b.accounts[rng.Intn(len(b.accounts))])
 			prefix = near[:1+rng.Intn(3)]
 		}
-		ops = append(ops, commitmenttest.Op{Key: craftKey(rng, length.Addr, prefix, accountNibbles), Delete: true})
+		ops = append(ops, commitmenttest.DeleteAt(craftKey(rng, length.Addr, prefix, accountNibbles)))
 	}
 	for range rng.Intn(4) {
 		if len(b.accounts) == 0 {
