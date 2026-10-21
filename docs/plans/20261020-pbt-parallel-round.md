@@ -375,13 +375,13 @@ flowchart LR
 - Modify: `execution/commitment/v3/pbt/parallel_upper.go`
 - Modify: `execution/commitment/v3/pbt/schedule_test.go`
 
-- [ ] write tests first:
+- [x] write tests first:
       - a task that carries several whole buckets returns one result per bucket;
       - storage chains find each bucket's result;
       - parity over every Task 1 corpus with buckets batched two per task
-- [ ] give tasks a result range instead of one `resultIndex`; storage chain dependencies resolve per bucket
-- [ ] add a workers=2 test where every dependent is claimed before its dependencies finish, and the round completes
-- [ ] run gates — must pass before Task 10
+- [x] give tasks a result range instead of one `resultIndex`; storage chain dependencies resolve per bucket
+- [x] add a workers=2 test where every dependent is claimed before its dependencies finish, and the round completes
+- [x] run gates — must pass before Task 10
 
 ### Task 10: Grain-sized scheduling (from v3)
 

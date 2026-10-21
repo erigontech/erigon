@@ -321,6 +321,10 @@ func parallelRoundCases(corpus *parallelRoundCorpus) []parallelRoundCase {
 }
 
 func runParallelRoundCases(t *testing.T, check func(t *testing.T, base *parallelRoundBase, trie *Trie, label string)) {
+	runParallelRoundCasesBatched(t, 1, check)
+}
+
+func runParallelRoundCasesBatched(t *testing.T, bucketBatch int, check func(t *testing.T, base *parallelRoundBase, trie *Trie, label string)) {
 	corpus := newParallelRoundCorpus(t, parallelRoundTestShape)
 	for _, tc := range parallelRoundCases(corpus) {
 		for _, workers := range []int{2, 4, 8} {
@@ -329,7 +333,7 @@ func runParallelRoundCases(t *testing.T, check func(t *testing.T, base *parallel
 				snapshot := tc.base
 				for round := range 3 {
 					label := fmt.Sprintf("round=%d", round)
-					base, trie := requireParallelRoundMatches(t, snapshot, tc.ops(r), workers, tc.concurrent, label)
+					base, trie := requireParallelRoundMatches(t, snapshot, tc.ops(r), workers, tc.concurrent, bucketBatch, label)
 					check(t, base, trie, label)
 					snapshot = base.main.records
 				}
@@ -362,13 +366,17 @@ func TestParallelRoundPartsHoldEachKeyOnce(t *testing.T) {
 	})
 }
 
-func requireParallelRoundMatches(t *testing.T, snapshot map[string][]byte, ops []Op, workers int, concurrent bool, label string) (*parallelRoundBase, *Trie) {
+func requireParallelRoundMatches(t *testing.T, snapshot map[string][]byte, ops []Op, workers int, concurrent bool, bucketBatch int, label string) (*parallelRoundBase, *Trie) {
 	t.Helper()
 	sequential := &trieTestContext{records: maps.Clone(snapshot)}
 	wantRoot, err := NewTrie(sequential).Process(ops)
 	require.NoError(t, err, label)
 	base := newParallelRoundBase(snapshot)
 	trie := base.trie()
+	trie.bucketBatch = bucketBatch
+	if bucketBatch > 1 {
+		requireParallelRoundPlanBatches(t, ops, bucketBatch, label)
+	}
 	if concurrent {
 		holdFirstTaskForSecond(trie)
 	}
@@ -422,7 +430,7 @@ func runParallelRoundCollapse(t *testing.T, initial, ops []Op, before, after fun
 	ops = sortParallelRoundOps(ops)
 	for _, workers := range []int{2, 4, 8} {
 		t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
-			base, _ := requireParallelRoundMatches(t, seed.records, ops, workers, true, "collapse")
+			base, _ := requireParallelRoundMatches(t, seed.records, ops, workers, true, 1, "collapse")
 			after(t, base.main.records)
 		})
 	}
@@ -826,4 +834,113 @@ func TestParallelRoundNewRowOverStoredRecordFails(t *testing.T) {
 	trie.SetTrieContextFactory(base.view)
 	_, err = trie.ProcessParallelContext(t.Context(), ops, 4)
 	require.ErrorContains(t, err, fmt.Sprintf("previous record mismatch for %x", stray))
+}
+
+func requireParallelRoundPlanBatches(t *testing.T, ops []Op, bucketBatch int, label string) {
+	t.Helper()
+	single, err := buildPhasePlan(ops)
+	require.NoError(t, err, label)
+	wholeBuckets := 0
+	for i := range single.tasks {
+		if single.tasks[i].kind == phaseBucket && len(single.tasks[i].dependencies) == 0 {
+			wholeBuckets++
+		}
+	}
+	plan, err := buildPhasePlanBatched(ops, fanOutMin, bucketBatch)
+	require.NoError(t, err, label)
+	batched := slices.ContainsFunc(plan.tasks, func(task phaseTask) bool { return len(task.batch) >= 2 })
+	require.Equal(t, wholeBuckets >= 2, batched, "%s: whole buckets=%d", label, wholeBuckets)
+}
+
+func TestParallelRoundBatchedBucketsMatchSequential(t *testing.T) {
+	runParallelRoundCasesBatched(t, 2, func(*testing.T, *parallelRoundBase, *Trie, string) {})
+}
+
+func parallelRoundBatchCorpus() []Op {
+	var ops []Op
+	for i, first := range []byte{0x32, 0x51, 0x31, 0x50, 0x30} {
+		stem := parallelRoundStorageStem(first)
+		for slot := range byte(i + 1) {
+			ops = append(ops, Op{Key: storageKeyWithSuffix(stem, 0x10+slot, slot+1), Value: testTrieValue(first + slot)})
+		}
+	}
+	split := parallelRoundStorageStem(0x70)
+	for slot := range byte(fanOutMin) {
+		ops = append(ops, Op{Key: storageKeyWithSuffix(split, slot<<4, slot+1), Value: testTrieValue(slot + 1)})
+	}
+	ops = append(ops, Op{Key: parallelRoundKey(eip8297.AccountZone, 0x10, 1, 0), Value: testTrieValue(9)})
+	return sortParallelRoundOps(ops)
+}
+
+func TestBuildPhasePlanBatchesWholeBuckets(t *testing.T) {
+	ops := parallelRoundBatchCorpus()
+	plan, err := buildPhasePlanBatched(ops, fanOutMin, 2)
+	require.NoError(t, err)
+	owner := make(map[string]int)
+	results := 0
+	for index := range plan.tasks {
+		task := &plan.tasks[index]
+		require.Equal(t, results, task.resultStart)
+		require.Equal(t, max(1, len(task.batch)), task.resultEnd-task.resultStart)
+		results = task.resultEnd
+		for _, dependency := range task.dependencies {
+			require.Less(t, dependency, index)
+		}
+		if len(task.batch) == 0 {
+			continue
+		}
+		require.Equal(t, phaseBucket, task.kind)
+		require.Empty(t, task.dependencies)
+		require.LessOrEqual(t, len(task.batch), 2)
+		for _, part := range task.batch {
+			require.Equal(t, phaseBucket, part.kind)
+			require.Empty(t, part.dependencies)
+			require.NotEmpty(t, part.ops)
+			require.NotContains(t, owner, part.key)
+			owner[part.key] = index
+		}
+	}
+	require.Equal(t, results, plan.results)
+	require.Len(t, owner, 5)
+	require.True(t, slices.ContainsFunc(plan.tasks, func(task phaseTask) bool {
+		return len(task.batch) == 2 && task.batch[0].key[1]>>4 != task.batch[1].key[1]>>4
+	}), "no batch spans two storage chains")
+	for index := range plan.tasks {
+		task := &plan.tasks[index]
+		if task.kind != phaseChain || task.zone != eip8297.StorageZone {
+			continue
+		}
+		for key, carrier := range owner {
+			path, err := bucketPathForKey([]byte(key))
+			require.NoError(t, err)
+			if pathHasPrefix(&path, &task.prefix) {
+				require.Contains(t, task.dependencies, carrier, "chain %x misses the task carrying bucket %x", task.nibble, []byte(key))
+			}
+		}
+	}
+}
+
+func TestParallelRoundBatchedDependentsClaimedEarly(t *testing.T) {
+	ops := parallelRoundBatchCorpus()
+	sequential := newTrieTestContext()
+	wantRoot, err := NewTrie(sequential).Process(ops)
+	require.NoError(t, err)
+	base := newParallelRoundBase(map[string][]byte{})
+	trie := base.trie()
+	trie.bucketBatch = 2
+	var batches atomic.Int32
+	trie.SetPhaseHook(func(task phaseTask, op *Op) error {
+		if op == nil && len(task.batch) != 0 {
+			batches.Add(1)
+			time.Sleep(100 * time.Millisecond)
+		}
+		return nil
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	gotRoot, err := trie.ProcessParallelContext(ctx, ops, 2)
+	require.NoError(t, err)
+	require.Positive(t, batches.Load())
+	require.Equal(t, wantRoot, gotRoot)
+	require.Equal(t, sequential.records, base.main.records)
 }

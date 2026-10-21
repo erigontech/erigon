@@ -43,13 +43,19 @@ type phaseOwner struct {
 }
 
 func phaseOwners(tasks []phaseTask, indexes []int) ([]phaseOwner, error) {
-	owners := make([]phaseOwner, len(indexes))
-	for i, index := range indexes {
-		prefix, err := taskSubtreePrefix(tasks[index])
-		if err != nil {
-			return nil, err
+	owners := make([]phaseOwner, 0, len(indexes))
+	for _, index := range indexes {
+		parts := tasks[index].batch
+		if len(parts) == 0 {
+			parts = tasks[index : index+1]
 		}
-		owners[i] = phaseOwner{task: index, prefix: prefix}
+		for i := range parts {
+			prefix, err := taskSubtreePrefix(parts[i])
+			if err != nil {
+				return nil, err
+			}
+			owners = append(owners, phaseOwner{task: index, prefix: prefix})
+		}
 	}
 	return owners, nil
 }
@@ -299,8 +305,8 @@ func (t *Trie) processParallelPhaseA(ctx context.Context, workers int, plan phas
 		return common.Hash{}, err
 	}
 	t.rememberPrev(t.rootRecordKey(), t.root.prev)
-	results := make([]phaseBucketResult, len(plan.tasks))
-	ready := make([]bool, len(plan.tasks))
+	results := make([]phaseBucketResult, plan.results)
+	ready := make([]bool, plan.results)
 	phaseWorkers := workers
 	factory := t.ctxFactory
 	if factory == nil {
@@ -310,6 +316,17 @@ func (t *Trie) processParallelPhaseA(ctx context.Context, workers int, plan phas
 	if err := runPhasePlanWithFactory(ctx, phaseWorkers, plan, factory, func(workerCtx context.Context, workerContext commitment.PatriciaContext, task phaseTask) error {
 		if err := t.phaseHookCall(task, nil); err != nil {
 			return err
+		}
+		if len(task.batch) != 0 {
+			for i := range task.batch {
+				result, err := t.runSubtreeTask(workerCtx, workerContext, task.batch[i])
+				if err != nil {
+					return err
+				}
+				results[task.resultStart+i] = result
+				ready[task.resultStart+i] = true
+			}
+			return nil
 		}
 		var result phaseBucketResult
 		var err error
@@ -321,11 +338,11 @@ func (t *Trie) processParallelPhaseA(ctx context.Context, workers int, plan phas
 				result, err = t.runBucketJoin(workerCtx, workerContext, task, plan.tasks, results, ready)
 			}
 		case phaseChain:
-			result, err = t.runChainTask(workerCtx, workerContext, task, results, ready)
+			result, err = t.runChainTask(workerCtx, workerContext, task, plan.tasks, results, ready)
 		case phaseJoin:
 			changed := make(map[string]phaseBucketResult, len(task.dependencies))
 			for _, dependency := range task.dependencies {
-				result := &results[dependency]
+				result := &results[plan.tasks[dependency].resultStart]
 				changed[string(eip8297.AppendBitPath(nil, &result.prefix))] = *result
 			}
 			if round.owners, err = phaseOwners(plan.tasks, task.dependencies); err != nil {
@@ -346,24 +363,26 @@ func (t *Trie) processParallelPhaseA(ctx context.Context, workers int, plan phas
 		if err != nil {
 			return err
 		}
-		results[task.resultIndex] = result
-		ready[task.resultIndex] = true
+		results[task.resultStart] = result
+		ready[task.resultStart] = true
 		return nil
 	}); err != nil {
 		return common.Hash{}, err
 	}
 	t.ctx = base
 	var deltas []commitment.BranchDelta
-	for index := range results {
+	for index := range plan.tasks {
 		if plan.tasks[index].kind == phaseBucketSubtask {
 			continue
 		}
-		for _, delta := range results[index].deltas {
-			if err := base.PutBranch(delta.Key, delta.Data, delta.Prev); err != nil {
-				return common.Hash{}, err
+		for r := plan.tasks[index].resultStart; r < plan.tasks[index].resultEnd; r++ {
+			for _, delta := range results[r].deltas {
+				if err := base.PutBranch(delta.Key, delta.Data, delta.Prev); err != nil {
+					return common.Hash{}, err
+				}
 			}
+			deltas = append(deltas, results[r].deltas...)
 		}
-		deltas = append(deltas, results[index].deltas...)
 	}
 	t.deltas = deltas
 	return finalRoot, nil
@@ -384,10 +403,11 @@ func (t *Trie) runBucketJoin(workerCtx context.Context, workerContext commitment
 	childDeltas := make([]commitment.BranchDelta, 0)
 	changed := make(map[string]phaseBucketResult, len(task.dependencies))
 	for _, dependency := range task.dependencies {
-		if !ready[dependency] {
+		index := tasks[dependency].resultStart
+		if !ready[index] {
 			return phaseBucketResult{}, fmt.Errorf("bucket %x missing subtree result", []byte(task.key))
 		}
-		result := results[dependency]
+		result := results[index]
 		childDeltas = append(childDeltas, result.deltas...)
 		changed[string(eip8297.AppendBitPath(nil, &result.prefix))] = result
 	}
@@ -414,7 +434,7 @@ func (t *Trie) runBucketJoin(workerCtx context.Context, workerContext commitment
 }
 
 //nolint:gocritic
-func (t *Trie) runChainTask(workerCtx context.Context, workerContext commitment.PatriciaContext, task phaseTask, results []phaseBucketResult, ready []bool) (phaseBucketResult, error) {
+func (t *Trie) runChainTask(workerCtx context.Context, workerContext commitment.PatriciaContext, task phaseTask, tasks []phaseTask, results []phaseBucketResult, ready []bool) (phaseBucketResult, error) {
 	base := cmp.Or(workerContext, t.phaseBase)
 	local := t.newPhaseContext(base, &task.prefix)
 	chainTrie, err := newSubtreeTrie(local, task.prefix, task.initial.descriptor, task.initial.present)
@@ -426,11 +446,13 @@ func (t *Trie) runChainTask(workerCtx context.Context, workerContext commitment.
 	if task.zone == eip8297.StorageZone {
 		changed := make(map[string]phaseBucketResult)
 		for _, dependency := range task.dependencies {
-			if !ready[dependency] {
-				return phaseBucketResult{}, fmt.Errorf("storage chain missing bucket result")
-			}
-			if result := results[dependency]; !result.unchanged {
-				changed[string(eip8297.AppendBitPath(nil, &result.prefix))] = result
+			for index := tasks[dependency].resultStart; index < tasks[dependency].resultEnd; index++ {
+				if !ready[index] {
+					return phaseBucketResult{}, fmt.Errorf("storage chain missing bucket result")
+				}
+				if result := results[index]; !result.unchanged && pathHasPrefix(&result.prefix, &task.prefix) {
+					changed[string(eip8297.AppendBitPath(nil, &result.prefix))] = result
+				}
 			}
 		}
 		if _, err := chainTrie.processUpperOps(nil, changed); err != nil {

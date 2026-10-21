@@ -1093,14 +1093,15 @@ type phasePlanShape struct {
 	nibble       byte
 	ops          [][]byte
 	dependencies []int
-	resultIndex  int
+	resultStart  int
+	resultEnd    int
 }
 
 func phasePlanShapes(plan phasePlan) []phasePlanShape {
 	shapes := make([]phasePlanShape, len(plan.tasks))
 	for i := range plan.tasks {
 		task := &plan.tasks[i]
-		shapes[i] = phasePlanShape{kind: task.kind, key: task.key, prefix: task.prefix, zone: task.zone, nibble: task.nibble, ops: churnOpKeys(task.ops), dependencies: task.dependencies, resultIndex: task.resultIndex}
+		shapes[i] = phasePlanShape{kind: task.kind, key: task.key, prefix: task.prefix, zone: task.zone, nibble: task.nibble, ops: churnOpKeys(task.ops), dependencies: task.dependencies, resultStart: task.resultStart, resultEnd: task.resultEnd}
 		if len(shapes[i].ops) == 0 {
 			shapes[i].ops = nil
 		}
@@ -1128,7 +1129,7 @@ func expectedPhasePlanShapes(t *testing.T, ops []Op, threshold int) []phasePlanS
 	chainKeys := slices.SortedFunc(maps.Keys(chainOps), func(a, b [2]byte) int { return bytes.Compare(a[:], b[:]) })
 	for _, key := range chainKeys {
 		joinDependencies = append(joinDependencies, len(shapes))
-		shapes = append(shapes, phasePlanShape{kind: phaseChain, prefix: chainPrefix(key[0], key[1]), zone: key[0], nibble: key[1], ops: churnOpKeys(chainOps[key]), resultIndex: len(shapes)})
+		shapes = append(shapes, phasePlanShape{kind: phaseChain, prefix: chainPrefix(key[0], key[1]), zone: key[0], nibble: key[1], ops: churnOpKeys(chainOps[key]), resultStart: len(shapes), resultEnd: len(shapes) + 1})
 	}
 	stems := slices.Sorted(maps.Keys(bucketOps))
 	slices.SortStableFunc(stems, func(a, b string) int { return len(bucketOps[b]) - len(bucketOps[a]) })
@@ -1148,21 +1149,21 @@ func expectedPhasePlanShapes(t *testing.T, ops []Op, threshold int) []phasePlanS
 				subtaskPath, err := keyPath(groups[nibble][0].Key)
 				require.NoError(t, err)
 				subtasks = append(subtasks, len(shapes))
-				shapes = append(shapes, phasePlanShape{kind: phaseBucketSubtask, key: string(rowKey), prefix: subtaskPath.Slice(0, 268), ops: churnOpKeys(groups[nibble]), resultIndex: len(shapes)})
+				shapes = append(shapes, phasePlanShape{kind: phaseBucketSubtask, key: string(rowKey), prefix: subtaskPath.Slice(0, 268), ops: churnOpKeys(groups[nibble]), resultStart: len(shapes), resultEnd: len(shapes) + 1})
 			}
 			storageDependencies[stem[1]>>4] = append(storageDependencies[stem[1]>>4], len(shapes))
-			shapes = append(shapes, phasePlanShape{kind: phaseBucket, key: string(rowKey), prefix: path, dependencies: subtasks, resultIndex: len(shapes)})
+			shapes = append(shapes, phasePlanShape{kind: phaseBucket, key: string(rowKey), prefix: path, dependencies: subtasks, resultStart: len(shapes), resultEnd: len(shapes) + 1})
 			continue
 		}
 		storageDependencies[stem[1]>>4] = append(storageDependencies[stem[1]>>4], len(shapes))
-		shapes = append(shapes, phasePlanShape{kind: phaseBucket, key: string(rowKey), prefix: path, ops: churnOpKeys(bucket), resultIndex: len(shapes)})
+		shapes = append(shapes, phasePlanShape{kind: phaseBucket, key: string(rowKey), prefix: path, ops: churnOpKeys(bucket), resultStart: len(shapes), resultEnd: len(shapes) + 1})
 	}
 	for _, nibble := range slices.Sorted(maps.Keys(storageDependencies)) {
 		dependencies := slices.Sorted(slices.Values(storageDependencies[nibble]))
 		joinDependencies = append(joinDependencies, len(shapes))
-		shapes = append(shapes, phasePlanShape{kind: phaseChain, prefix: chainPrefix(eip8297.StorageZone, nibble), zone: eip8297.StorageZone, nibble: nibble, dependencies: dependencies, resultIndex: len(shapes)})
+		shapes = append(shapes, phasePlanShape{kind: phaseChain, prefix: chainPrefix(eip8297.StorageZone, nibble), zone: eip8297.StorageZone, nibble: nibble, dependencies: dependencies, resultStart: len(shapes), resultEnd: len(shapes) + 1})
 	}
-	return append(shapes, phasePlanShape{kind: phaseJoin, dependencies: joinDependencies, resultIndex: len(shapes)})
+	return append(shapes, phasePlanShape{kind: phaseJoin, dependencies: joinDependencies, resultStart: len(shapes), resultEnd: len(shapes) + 1})
 }
 
 func randomPhasePlanOps(r *rand.Rand) []Op {

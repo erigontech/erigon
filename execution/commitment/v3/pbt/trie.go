@@ -53,6 +53,7 @@ type Trie struct {
 	phaseBase              commitment.PatriciaContext
 	phaseHook              func(phaseTask, *Op) error
 	joinHook               func(phaseTask, commitment.PatriciaContext) error
+	bucketBatch            int
 	coreApplyHook          func(phaseTask, *Op) error
 	coreEncodeHook         func(phaseTask, []byte) error
 	coreActivityHook       func(bool)
