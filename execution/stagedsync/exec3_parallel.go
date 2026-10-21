@@ -3440,6 +3440,20 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			// blocks, skips partial ones — do it here, even when prior receipts
 			// couldn't be reconstructed (the suffix receipts still need blooms).
 			receipts.DeriveFields(blockReceipts, be.hash())
+
+			if pe.cfg.chainConfig.IsAmsterdam(header.Time) {
+				blockStartTxNum := be.tasks[0].Version().TxNum - uint64(startTxIndex) - 1
+				computedBal, err := pe.rederiveResumedBlockAccessList(ctx, applyTx, be.block, blockStartTxNum)
+				if err != nil {
+					return be.operationalBlockResult(fmt.Errorf("block %d: rederive access list of resumed block: %w", be.number(), err)), nil
+				}
+				if err := bal.Validate(header, be.block.BlockAccessList(), computedBal, true, pe.cfg.dirs.DataDir, pe.logger); err != nil {
+					if errors.Is(err, rules.ErrInvalidBlock) {
+						return be.invalidBlockResult(err), nil
+					}
+					return be.operationalBlockResult(err), nil
+				}
+			}
 		}
 
 		// Block finalize: run engine.Finalize + MakeWriteSet on the producer

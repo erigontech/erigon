@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -584,6 +585,26 @@ func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.T
 		return nil, fmt.Errorf("failed to reconstruct prior receipts for partial block %d (startTxIndex %d): %w", header.Number.Uint64(), startTxIndex, err)
 	}
 	return priorReceipts, nil
+}
+
+// rederiveResumedBlockAccessList re-executes a block resumed mid-block from the
+// state history at the block start: the executor ran only the block's suffix.
+func (te *txExecutor) rederiveResumedBlockAccessList(ctx context.Context, applyTx kv.TemporalTx, block *types.Block, blockStartTxNum uint64) (types.BlockAccessList, error) {
+	historyStart, err := state.StateHistoryStartTxNum(applyTx)
+	if err != nil {
+		return nil, err
+	}
+	if blockStartTxNum < historyStart {
+		return nil, fmt.Errorf("%w: state history starts at txNum %d, the block at %d", state.ErrPruned, historyStart, blockStartTxNum)
+	}
+	ibs := state.New(state.NewHistoryReaderV3(applyTx, blockStartTxNum))
+	defer ibs.Close()
+	ibs.SetVersionMap(state.NewVersionMap(nil))
+	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+		return te.cfg.blockReader.Header(ctx, applyTx, hash, number)
+	}
+	chainReader := exec.NewChainReader(te.cfg.chainConfig, applyTx, te.cfg.blockReader, te.logger)
+	return bal.RederiveBlockAccessList(ctx, te.cfg.chainConfig, te.cfg.engine, chainReader, getHeader, block.HeaderNoCopy(), block.Transactions(), block.Uncles(), block.Withdrawals(), ibs, te.logger)
 }
 
 func (te *txExecutor) onBlockStart(ctx context.Context, block *types.Block) {

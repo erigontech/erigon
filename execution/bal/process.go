@@ -60,9 +60,14 @@ func Process(h *types.Header, blockBal types.BlockAccessList, vio *state.Version
 	if h == nil {
 		return nil
 	}
+	return Validate(h, blockBal, Create(h.Number.Uint64(), vio, dataDir, logger), isEIP7928, dataDir, logger)
+}
+
+// Validate checks a block access list computed by executing the block against
+// the block's header.
+func Validate(h *types.Header, blockBal types.BlockAccessList, computedBlockBal types.BlockAccessList, isEIP7928 bool, dataDir string, logger log.Logger) error {
 	blockNum := h.Number.Uint64()
 	blockHash := h.Hash()
-	computedBlockBal := Create(blockNum, vio, dataDir, logger)
 	err := computedBlockBal.Validate()
 	if err != nil {
 		return fmt.Errorf("block %d: invalid computed block access list: %w", blockNum, err)
