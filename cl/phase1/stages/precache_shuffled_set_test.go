@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 
@@ -28,9 +29,28 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/caches"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
+
+func useFreshPrecacheValidatorCaches(t *testing.T) {
+	t.Helper()
+	previousShuffled := caches.ShuffledIndiciesCacheGlobal
+	previousLookaheadShuffled := caches.LookaheadShuffledIndiciesCacheGlobal
+	previousActive := caches.ActiveValidatorsCacheGlobal
+	previousLookaheadActive := caches.LookaheadActiveValidatorsCacheGlobal
+	caches.ShuffledIndiciesCacheGlobal = caches.NewShuffledIndiciesCache("shuffled_indicies", caches.MaxShuffledIndiciesCacheSize)
+	caches.LookaheadShuffledIndiciesCacheGlobal = caches.NewShuffledIndiciesCache("lookahead_shuffled_indicies", caches.MaxLookaheadShuffledIndiciesCacheSize)
+	caches.ActiveValidatorsCacheGlobal = caches.NewActiveValidatorsCache("active_validators", caches.MaxActiveValidatorsCacheSize)
+	caches.LookaheadActiveValidatorsCacheGlobal = caches.NewActiveValidatorsCache("lookahead_active_validators", caches.MaxLookaheadActiveValidatorsCacheSize)
+	t.Cleanup(func() {
+		caches.ShuffledIndiciesCacheGlobal = previousShuffled
+		caches.LookaheadShuffledIndiciesCacheGlobal = previousLookaheadShuffled
+		caches.ActiveValidatorsCacheGlobal = previousActive
+		caches.LookaheadActiveValidatorsCacheGlobal = previousLookaheadActive
+	})
+}
 
 func preCacheTestState(t *testing.T, cfg *clparams.BeaconChainConfig, validators int, seed byte) *state.CachingBeaconState {
 	t.Helper()
@@ -57,6 +77,7 @@ func preCacheTestState(t *testing.T, cfg *clparams.BeaconChainConfig, validators
 }
 
 func TestPreCacheNextShuffledValidatorSetReadsTheStateBeforeReturning(t *testing.T) {
+	useFreshPrecacheValidatorCaches(t)
 	cfg := &clparams.MainnetBeaconConfig
 	head := preCacheTestState(t, cfg, 50_000, 0xa1)
 	other := preCacheTestState(t, cfg, 40_000, 0xb2)
@@ -78,4 +99,69 @@ func TestPreCacheNextShuffledValidatorSetReadsTheStateBeforeReturning(t *testing
 	got, ok := caches.ShuffledIndiciesCacheGlobal.Get(epoch, root)
 	require.True(t, ok)
 	require.Equal(t, want, got)
+}
+
+func TestPrecacheDecisionRootMatchesBoundaryState(t *testing.T) {
+	useFreshPrecacheValidatorCaches(t)
+	cfg := &clparams.MainnetBeaconConfig
+	boundary := preCacheTestState(t, cfg, 2_048, 0xc3)
+	require.NoError(t, boundary.SetSlot(4*cfg.SlotsPerEpoch-1))
+	header := boundary.LatestBlockHeader()
+	header.Root[0] = 1
+	boundary.SetLatestBlockHeader(&header)
+	stateRoot, err := boundary.HashSSZ()
+	require.NoError(t, err)
+	wantRoot, err := header.HashSSZ()
+	require.NoError(t, err)
+	index := int(boundary.Slot() % cfg.SlotsPerHistoricalRoot)
+	require.NoError(t, boundary.SetBlockRootAt(index, wantRoot))
+	require.NoError(t, boundary.SetStateRootAt(index, stateRoot))
+	fresh, err := boundary.Copy()
+	require.NoError(t, err)
+	advanced, err := boundary.Copy()
+	require.NoError(t, err)
+	require.NoError(t, advanced.SetSlot(boundary.Slot()+1))
+	epoch := state.Epoch(boundary) + 2
+
+	root, err := advanced.GetBlockRootAtSlot(boundary.Slot())
+	require.NoError(t, err)
+	require.Equal(t, common.Hash(wantRoot), root)
+	in, ok := shuffleInputForEpoch(log.Root(), cfg, advanced, epoch)
+	require.True(t, ok)
+	preCacheShuffledSet(in)
+
+	cachedActive, _, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, root)
+	require.True(t, ok)
+	active := fresh.GetActiveValidatorsIndices(epoch)
+	require.Same(t, unsafe.SliceData(cachedActive), unsafe.SliceData(active))
+	cachedShuffle, ok := caches.ShuffledIndiciesCacheGlobal.Get(epoch, root)
+	require.True(t, ok)
+	committee, err := fresh.GetBeaconCommitee(epoch*cfg.SlotsPerEpoch, 0)
+	require.NoError(t, err)
+	require.Same(t, unsafe.SliceData(cachedShuffle), unsafe.SliceData(committee))
+}
+
+func TestPrecachePromotesLookaheadShuffle(t *testing.T) {
+	useFreshPrecacheValidatorCaches(t)
+	cfg := &clparams.MainnetBeaconConfig
+	head := preCacheTestState(t, cfg, 2_048, 0xd4)
+	head.SetVersion(clparams.GloasVersion)
+	boundarySlot := 4*cfg.SlotsPerEpoch - 1
+	require.NoError(t, head.SetSlot(boundarySlot-1))
+	head.SetCurrentEpochParticipation(solid.NewParticipationBitList(head.ValidatorLength(), int(cfg.ValidatorRegistryLimit)))
+	head.SetPreviousEpochParticipation(solid.NewParticipationBitList(head.ValidatorLength(), int(cfg.ValidatorRegistryLimit)))
+	head.SetInactivityScores(make([]uint64, head.ValidatorLength()))
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(head, boundarySlot+1))
+	epoch := state.Epoch(head) + 1
+	stateRoot := head.StateRoots().Get(int(boundarySlot % cfg.SlotsPerHistoricalRoot))
+	lookahead, ok := caches.LookaheadShuffledIndiciesCacheGlobal.Get(epoch, stateRoot)
+	require.True(t, ok)
+	blockRoot, err := head.GetBlockRootAtSlot(boundarySlot)
+	require.NoError(t, err)
+
+	_, ok = shuffleInputForEpoch(log.Root(), cfg, head, epoch)
+	require.False(t, ok)
+	main, ok := caches.ShuffledIndiciesCacheGlobal.Get(epoch, blockRoot)
+	require.True(t, ok)
+	require.Same(t, unsafe.SliceData(lookahead), unsafe.SliceData(main))
 }
