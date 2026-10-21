@@ -1957,24 +1957,10 @@ type versionedStateReader struct {
 	reads       ReadSet
 	versionMap  *VersionMap
 	stateReader StateReader
-	// deferReconstruct suppresses the self-destruct-preserve reconstruction so a
-	// net-absent preserved account reads as absent at this layer and the IBS field
-	// path above materializes it instead. Set only for the prev-block base layers
-	// (layerVersionMaps), which sit beneath that field path; a direct whole-account
-	// reader keeps it false and reconstructs. Branch-agnostic: it governs which
-	// layer owns reconstruction, not whether a destruct preserves (the write stamp
-	// decides that).
-	deferReconstruct bool
 }
 
 func NewVersionedStateReader(txIndex int, reads ReadSet, versionMap *VersionMap, stateReader StateReader) *versionedStateReader {
 	return &versionedStateReader{txIndex: txIndex, reads: reads, versionMap: versionMap, stateReader: stateReader}
-}
-
-// newPrevBlockLayerReader builds a prev-block base-layer reader that defers
-// self-destruct-preserve reconstruction to the IBS field path above it.
-func newPrevBlockLayerReader(txIndex int, versionMap *VersionMap, stateReader StateReader) *versionedStateReader {
-	return &versionedStateReader{txIndex: txIndex, versionMap: versionMap, stateReader: stateReader, deferReconstruct: true}
 }
 
 func (vr *versionedStateReader) SetTrace(trace bool, tracePrefix string) {
@@ -2009,12 +1995,10 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 			// delete/preserve decision rides the write, so no fork flag is needed. A
 			// net-absent account with a non-zero kept balance surfaces (an empty one is
 			// EIP-161-removed).
-			if !vr.deferReconstruct {
-				if _, res, ok := vr.versionMap.ReadBalance(address, vr.txIndex); ok && res.ValStatus() != ValueDeleted {
-					var synth accounts.Account
-					if updated := vr.applyVersionedUpdates(address, synth); !updated.Balance.IsZero() {
-						return &updated, nil
-					}
+			if _, res, ok := vr.versionMap.ReadBalance(address, vr.txIndex); ok && res.ValStatus() != ValueDeleted {
+				var synth accounts.Account
+				if updated := vr.applyVersionedUpdates(address, synth); !updated.Balance.IsZero() {
+					return &updated, nil
 				}
 			}
 			return nil, nil
