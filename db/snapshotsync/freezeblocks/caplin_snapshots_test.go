@@ -27,6 +27,7 @@ import (
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -648,4 +650,19 @@ func writeIndexSalt(t *testing.T, dirs datadir.Dirs) {
 	salt := make([]byte, 4)
 	binary.BigEndian.PutUint32(salt, 1)
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, "salt-blocks.txt"), salt, 0o600))
+}
+
+// Without a count from the blocks, a slot whose count row is missing from the blob store
+// reads as blobless and freezes as an empty entry.
+func TestDumpBlobSidecarsRangeRequiresBlobCount(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	dirs := datadir.New(t.TempDir())
+	store := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
+
+	err := DumpBlobSidecarsRange(t.Context(), db, store, 0, snaptype.CaplinMergeLimit, 0, dirs, 1, nil, log.LvlDebug, log.New())
+	require.ErrorContains(t, err, "blob count")
+
+	written, err := filepath.Glob(filepath.Join(dirs.Snap, "*blobsidecars*"))
+	require.NoError(t, err)
+	require.Empty(t, written)
 }
