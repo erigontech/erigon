@@ -1265,14 +1265,25 @@ func blobDumpPlan(beaconConfig *clparams.BeaconChainConfig, from, to, frozenBloc
 
 func removeBlobIndexAndTorrents(snapDir string, from, to uint64) error {
 	idx := snaptype.IdxFileMask(from, to, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
-	for _, mask := range []string{idx, idx + ".torrent", snaptype.SegmentFileMask(from, to, snaptype.CaplinEnums.BlobSidecars) + ".torrent"} {
-		paths, err := filepath.Glob(filepath.Join(snapDir, mask))
-		if err != nil {
-			return err
+	masks := []string{idx, idx + ".torrent", snaptype.SegmentFileMask(from, to, snaptype.CaplinEnums.BlobSidecars) + ".torrent"}
+	entries, err := os.ReadDir(snapDir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
 		}
-		for _, path := range paths {
-			if err := dir.RemoveFile(path); err != nil {
+		for _, mask := range masks {
+			matched, err := filepath.Match(mask, e.Name())
+			if err != nil {
 				return err
+			}
+			if matched {
+				if err := dir.RemoveFile(filepath.Join(snapDir, e.Name())); err != nil {
+					return err
+				}
+				break
 			}
 		}
 	}

@@ -139,7 +139,7 @@ func TestFrozenBlobSegmentsRejectsAMalformedPreverifiedLock(t *testing.T) {
 }
 
 func TestRemoveBlobIndexAndTorrents(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
+	dirs := datadir.New(filepath.Join(t.TempDir(), "dd[1]"))
 	idx := func(v version.Version, from, to uint64) string {
 		return snaptype.IdxFileName(v, from, to, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
 	}
