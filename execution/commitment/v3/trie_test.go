@@ -47,14 +47,14 @@ func TestNodeMutations(t *testing.T) {
 			require.Zero(t, n.leafMask)
 
 			n.setLeaf(3, []byte{4, 5}, []byte{6})
-			assertNodeSlot(t, n, 3, true, true)
+			assertNodeSlot(t, n, true, true)
 			suffix, value := n.leafAt(3)
 			require.Equal(t, []byte{4, 5}, suffix)
 			require.Equal(t, []byte{6}, value)
 
 			child := fork([]byte{1, 2, 3})
 			n.setChild(3, child)
-			assertNodeSlot(t, n, 3, true, false)
+			assertNodeSlot(t, n, true, false)
 			require.Same(t, child, n.child(3))
 			require.Nil(t, n.childHashAt(3))
 			require.Nil(t, n.childExtAt(3))
@@ -65,13 +65,13 @@ func TestNodeMutations(t *testing.T) {
 			hash := bytes.Repeat([]byte{0xab}, 32)
 			ext := []byte{7, 8}
 			n.setStoredChild(3, hash, ext)
-			assertNodeSlot(t, n, 3, true, false)
+			assertNodeSlot(t, n, true, false)
 			require.Nil(t, n.child(3))
 			require.Equal(t, hash, n.childHashAt(3))
 			require.Equal(t, ext, n.childExtAt(3))
 
 			n.setLeaf(3, []byte{9}, []byte{10, 11})
-			assertNodeSlot(t, n, 3, true, true)
+			assertNodeSlot(t, n, true, true)
 			require.Nil(t, n.child(3))
 			require.Nil(t, n.childHashAt(3))
 			require.Nil(t, n.childExtAt(3))
@@ -80,7 +80,7 @@ func TestNodeMutations(t *testing.T) {
 			require.Equal(t, []byte{10, 11}, value)
 
 			n.clear(3)
-			assertNodeSlot(t, n, 3, false, false)
+			assertNodeSlot(t, n, false, false)
 			require.Nil(t, n.child(3))
 			require.Nil(t, n.childHashAt(3))
 			require.Nil(t, n.childExtAt(3))
@@ -137,9 +137,9 @@ func TestNodeMutations(t *testing.T) {
 	}
 }
 
-func assertNodeSlot(t *testing.T, n *node, nib int, child, leaf bool) {
+func assertNodeSlot(t *testing.T, n *node, child, leaf bool) {
 	t.Helper()
-	bit := uint16(1) << nib
+	bit := uint16(1) << 3
 	if child {
 		require.NotZero(t, n.childMask&bit)
 	} else {
@@ -692,7 +692,7 @@ func TestFoldParity(t *testing.T) {
 		}},
 		{"E29/FoldSingleLeafMatchesHexPatriciaHashed", func(t *testing.T) {
 			for _, plane := range []byte{planeAccount, planeStorage} {
-				key := foldKey(plane, 1)
+				key := foldKey(1)
 				path := commitment.KeyToHexNibbleHash(key)
 				value := foldValue(plane, 1)
 				n := fork(nil)
@@ -718,7 +718,7 @@ func TestFoldParity(t *testing.T) {
 					{"mixed-planes/16", 16, 91 + int64(plane), false},
 				} {
 					t.Run(fmtPlane(plane)+"/"+tc.name, func(t *testing.T) {
-						keys, paths := distinctKeysAndPaths(plane, tc.count, tc.seed)
+						keys, paths := distinctKeysAndPaths(tc.count, tc.seed)
 						updates := make([]commitment.Update, tc.count)
 						n := fork(nil)
 						n.plane = plane
@@ -826,7 +826,7 @@ func foldUpdate(plane byte, number int) commitment.Update {
 	return *testAccountUpdate(commitmenttest.Account(commitmenttest.AccountSpec{Kind: "fold", Number: number}))
 }
 
-func distinctKeysAndPaths(plane byte, count int, seed int64) ([][]byte, [][]byte) {
+func distinctKeysAndPaths(count int, seed int64) ([][]byte, [][]byte) {
 	keys := commitmenttest.Keys(commitmenttest.MathRand(seed), commitmenttest.KeySpec{Kind: "random-distinct", Size: 20, Count: count})
 	paths := make([][]byte, 0, len(keys))
 	for _, key := range keys {
@@ -835,7 +835,7 @@ func distinctKeysAndPaths(plane byte, count int, seed int64) ([][]byte, [][]byte
 	return keys, paths
 }
 
-func foldKey(plane byte, number int) []byte {
+func foldKey(number int) []byte {
 	return commitmenttest.Key(commitmenttest.KeySpec{Kind: "fold", Size: 20}, number)
 }
 
