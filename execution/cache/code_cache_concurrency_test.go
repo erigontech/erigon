@@ -108,6 +108,8 @@ func TestCodeCache_ConcurrentDistinctPuts_RespectCap(t *testing.T) {
 		})
 	}
 	wg.Wait()
+	// otter applies evictions on a background drain; settle it before reading the size.
+	cc.codeHashToCode.c.CleanUp()
 
 	// Residency settled far below the 128 distinct puts rather than freezing at
 	// the first. No byte assertion at this size: the layer holds single-digit
