@@ -29,80 +29,65 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 )
 
-// PrecompilesFunc builds a chain's precompile overlay at an L2 version. The
-// merged result is cached per (chainID, fork tier, L2Version) with no
-// eviction: an overlay that varied on anything else in Rules is served stale
-// on a hit, and an L2Version derived from block number grows the cache forever.
-type PrecompilesFunc func(l2Version uint64) PrecompiledContracts
-
 var (
-	registryMu  sync.Mutex
-	providers   atomic.Pointer[map[uint256.Int]PrecompilesFunc]
-	mergedCache sync.Map
+	registryMu sync.Mutex
+	chainSets  atomic.Pointer[map[uint256.Int]*[forkTierCount]mergedPrecompileSet]
 )
 
-func providerSnapshot() map[uint256.Int]PrecompilesFunc {
-	if m := providers.Load(); m != nil {
+func chainSetsSnapshot() map[uint256.Int]*[forkTierCount]mergedPrecompileSet {
+	if m := chainSets.Load(); m != nil {
 		return *m
 	}
 	return nil
 }
 
-// RegisterPrecompiles registers f as chainID's precompile provider; its entries
-// overlay the fork-selected built-ins and win on address collision. Must return
-// before any EVM exists for the chain: the set is snapshotted per EVM but
-// resolved live by state.Prepare, so a mid-run change desyncs the EIP-2929 warm
-// set from what dispatches and splits parallel workers across two sets.
-func RegisterPrecompiles(chainID *uint256.Int, f PrecompilesFunc) {
-	if f == nil {
-		panic("vm: RegisterPrecompiles: nil PrecompilesFunc")
+func storeChainSets(chainID uint256.Int, sets *[forkTierCount]mergedPrecompileSet) {
+	next := maps.Clone(chainSetsSnapshot())
+	if next == nil {
+		next = map[uint256.Int]*[forkTierCount]mergedPrecompileSet{}
 	}
+	next[chainID] = sets
+	chainSets.Store(&next)
+}
+
+func RegisterPrecompiles(chainID *uint256.Int, overlay PrecompiledContracts) {
 	if chainID == nil || chainID.IsZero() {
 		// Chain ID 0 is what nil-ChainID (bare/genesis/test) Rules map to.
 		panic("vm: RegisterPrecompiles: chain ID 0")
 	}
+	for addr, p := range overlay {
+		if isNilContract(p) {
+			panic(fmt.Sprintf("vm: RegisterPrecompiles: chain ID %s has a nil contract at %x", chainID, addr))
+		}
+	}
+	var sets [forkTierCount]mergedPrecompileSet
+	for tier := range sets {
+		contracts := maps.Clone(forkSets[tier].contracts)
+		maps.Copy(contracts, overlay)
+		sets[tier] = mergedPrecompileSet{contracts: contracts, addresses: slices.Collect(maps.Keys(contracts))}
+	}
 	registryMu.Lock()
 	defer registryMu.Unlock()
-	if _, exists := providerSnapshot()[*chainID]; exists {
+	switch existing, ok := chainSetsSnapshot()[*chainID]; {
+	case existing == &forkSets:
+		panic(fmt.Sprintf("vm: RegisterPrecompiles: chain ID %s precompiles already resolved", chainID))
+	case ok:
 		panic(fmt.Sprintf("vm: RegisterPrecompiles: chain ID %s already registered", chainID))
 	}
-	next := maps.Clone(providerSnapshot())
-	if next == nil {
-		next = map[uint256.Int]PrecompilesFunc{}
-	}
-	next[*chainID] = f
-	providers.Store(&next)
-	dropCached(*chainID)
+	storeChainSets(*chainID, &sets)
 }
 
-// unregisterPrecompiles removes chainID's provider and its cached merged sets.
 func unregisterPrecompiles(chainID *uint256.Int) {
 	if chainID == nil || chainID.IsZero() {
 		panic("vm: unregisterPrecompiles: chain ID 0")
 	}
 	registryMu.Lock()
 	defer registryMu.Unlock()
-	if _, exists := providerSnapshot()[*chainID]; exists {
-		next := maps.Clone(providerSnapshot())
+	if _, exists := chainSetsSnapshot()[*chainID]; exists {
+		next := maps.Clone(chainSetsSnapshot())
 		delete(next, *chainID)
-		providers.Store(&next)
+		chainSets.Store(&next)
 	}
-	dropCached(*chainID)
-}
-
-func dropCached(chainID uint256.Int) {
-	mergedCache.Range(func(k, _ any) bool {
-		if k.(precompileCacheKey).chainID == chainID {
-			mergedCache.Delete(k)
-		}
-		return true
-	})
-}
-
-type precompileCacheKey struct {
-	chainID   uint256.Int
-	fork      forkTier
-	l2Version uint64
 }
 
 func rulesChainID(rules *chain.Rules) uint256.Int {
@@ -112,30 +97,18 @@ func rulesChainID(rules *chain.Rules) uint256.Int {
 	return *rules.ChainID
 }
 
-func lookupProvider(chainID uint256.Int) (PrecompilesFunc, bool) {
-	f, ok := providerSnapshot()[chainID]
-	return f, ok
-}
-
-func mergedSetFor(rules *chain.Rules, fork forkTier, chainID uint256.Int, provider PrecompilesFunc) *mergedPrecompileSet {
-	key := precompileCacheKey{chainID: chainID, fork: fork, l2Version: rules.L2Version}
-
-	if set, ok := mergedCache.Load(key); ok {
-		return set.(*mergedPrecompileSet)
+func resolveChainSets(chainID uint256.Int) *[forkTierCount]mergedPrecompileSet {
+	if sets, ok := chainSetsSnapshot()[chainID]; ok {
+		return sets
 	}
-
-	overlay := provider(rules.L2Version)
-	for addr, p := range overlay {
-		if isNilContract(p) {
-			panic(fmt.Sprintf("vm: precompile provider for chain %s returned a nil contract at %x", &chainID, addr))
-		}
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	sets, ok := chainSetsSnapshot()[chainID]
+	if !ok {
+		sets = &forkSets
+		storeChainSets(chainID, sets)
 	}
-	contracts := maps.Clone(forkSets[fork].contracts)
-	maps.Copy(contracts, overlay)
-	set := &mergedPrecompileSet{contracts: contracts, addresses: slices.Collect(maps.Keys(contracts))}
-
-	actual, _ := mergedCache.LoadOrStore(key, set)
-	return actual.(*mergedPrecompileSet)
+	return sets
 }
 
 func isNilContract(p PrecompiledContract) bool {

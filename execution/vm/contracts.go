@@ -113,13 +113,7 @@ func forkTierFor(chainRules *chain.Rules) forkTier {
 }
 
 func activeSet(chainRules *chain.Rules) *mergedPrecompileSet {
-	fork := forkTierFor(chainRules)
-	chainID := rulesChainID(chainRules)
-	provider, ok := lookupProvider(chainID)
-	if !ok {
-		return &forkSets[fork]
-	}
-	return mergedSetFor(chainRules, fork, chainID, provider)
+	return &resolveChainSets(rulesChainID(chainRules))[forkTierFor(chainRules)]
 }
 
 // Precompiles returns the precompiles active under chainRules.

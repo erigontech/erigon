@@ -18,7 +18,6 @@ package vm
 
 import (
 	"fmt"
-	"reflect"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -35,13 +34,13 @@ func (s stubPrecompile) RequiredGas([]byte) uint64        { return 0 }
 func (s stubPrecompile) Run(input []byte) ([]byte, error) { return input, nil }
 func (s stubPrecompile) Name() string                     { return s.name }
 
-func registerPrecompiles(t *testing.T, chainID uint64, f PrecompilesFunc) {
+func registerPrecompiles(t *testing.T, chainID uint64, overlay PrecompiledContracts) {
 	t.Helper()
-	RegisterPrecompiles(uint256.NewInt(chainID), f)
+	RegisterPrecompiles(uint256.NewInt(chainID), overlay)
 	t.Cleanup(func() { unregisterPrecompiles(uint256.NewInt(chainID)) })
 }
 
-func rulesForChain(chainID, l2Version uint64) *chain.Rules {
+func rulesForChain(chainID uint64) *chain.Rules {
 	return &chain.Rules{
 		ChainID:     uint256.NewInt(chainID),
 		IsHomestead: true,
@@ -49,7 +48,6 @@ func rulesForChain(chainID, l2Version uint64) *chain.Rules {
 		IsIstanbul:  true,
 		IsBerlin:    true,
 		IsCancun:    true,
-		L2Version:   l2Version,
 	}
 }
 
@@ -59,12 +57,10 @@ func TestRegisteredProviderScopedToChainID(t *testing.T) {
 	extraAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x99}))
 	ecrecoverAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x01}))
 
-	registerPrecompiles(t, registeredChainID, func(uint64) PrecompiledContracts {
-		return PrecompiledContracts{extraAddr: stubPrecompile{"EXTRA"}}
-	})
+	registerPrecompiles(t, registeredChainID, PrecompiledContracts{extraAddr: stubPrecompile{"EXTRA"}})
 
-	registered := Precompiles(rulesForChain(registeredChainID, 0))
-	other := Precompiles(rulesForChain(otherChainID, 0))
+	registered := Precompiles(rulesForChain(registeredChainID))
+	other := Precompiles(rulesForChain(otherChainID))
 
 	_, ok := registered[extraAddr]
 	require.True(t, ok, "registered chain must expose the provider's precompile")
@@ -73,45 +69,19 @@ func TestRegisteredProviderScopedToChainID(t *testing.T) {
 	_, ok = registered[ecrecoverAddr]
 	require.True(t, ok, "built-ins must still be present alongside a provider")
 
-	require.Contains(t, ActivePrecompiles(rulesForChain(registeredChainID, 0)), extraAddr)
-}
-
-func TestRegisteredProviderVersionGating(t *testing.T) {
-	const chainID = 900201
-	addrV30 := accounts.InternAddress(common.BytesToAddress([]byte{0x77}))
-
-	registerPrecompiles(t, chainID, func(l2Version uint64) PrecompiledContracts {
-		if l2Version >= 30 {
-			return PrecompiledContracts{addrV30: stubPrecompile{"V30"}}
-		}
-		return PrecompiledContracts{}
-	})
-
-	_, ok := Precompiles(rulesForChain(chainID, 0))[addrV30]
-	require.False(t, ok, "precompile must be absent below its activation version")
-	_, ok = Precompiles(rulesForChain(chainID, 30))[addrV30]
-	require.True(t, ok, "precompile must be present at/above its activation version")
-
-	first := Precompiles(rulesForChain(chainID, 30))
-	second := Precompiles(rulesForChain(chainID, 30))
-	require.Equal(t, reflect.ValueOf(first).Pointer(), reflect.ValueOf(second).Pointer(),
-		"identical (chainID, fork, L2Version) must hit the cache and return the same map instance")
+	require.Contains(t, ActivePrecompiles(rulesForChain(registeredChainID)), extraAddr)
 }
 
 func TestRegisterPrecompilesPanics(t *testing.T) {
 	const chainID = 900301
-	registerPrecompiles(t, chainID, func(uint64) PrecompiledContracts { return nil })
+	registerPrecompiles(t, chainID, nil)
 
 	require.Panics(t, func() {
-		RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) PrecompiledContracts { return nil })
+		RegisterPrecompiles(uint256.NewInt(chainID), nil)
 	}, "duplicate chainID registration must panic")
 
-	require.Panics(t, func() {
-		RegisterPrecompiles(uint256.NewInt(900302), nil)
-	}, "nil PrecompilesFunc must panic")
-
 	for _, id := range []*uint256.Int{nil, new(uint256.Int)} {
-		require.Panics(t, func() { RegisterPrecompiles(id, func(uint64) PrecompiledContracts { return nil }) },
+		require.Panics(t, func() { RegisterPrecompiles(id, nil) },
 			"a nil or zero chain ID must be refused on register")
 		require.Panics(t, func() { unregisterPrecompiles(id) },
 			"and refused on unregister too, or the same argument has two contracts")
@@ -123,14 +93,11 @@ func TestRegisteredProviderForkDimension(t *testing.T) {
 	extraAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x55}))
 	osakaOnly := accounts.InternAddress(common.BytesToAddress([]byte{0x01, 0x00}))
 
-	registerPrecompiles(t, chainID, func(uint64) PrecompiledContracts {
-		return PrecompiledContracts{extraAddr: stubPrecompile{"EXTRA"}}
-	})
+	registerPrecompiles(t, chainID, PrecompiledContracts{extraAddr: stubPrecompile{"EXTRA"}})
 
 	cancun := &chain.Rules{ChainID: uint256.NewInt(chainID), IsCancun: true}
 	osaka := &chain.Rules{ChainID: uint256.NewInt(chainID), IsCancun: true, IsPrague: true, IsOsaka: true}
 
-	// Resolve Cancun first: a fork-blind key would then serve that set to Osaka too.
 	_, ok := Precompiles(cancun)[osakaOnly]
 	require.False(t, ok, "0x0100 is not a Cancun built-in")
 
@@ -145,40 +112,33 @@ func TestRegisteredProviderWinsOnCollision(t *testing.T) {
 	const chainID = 900502
 	ecrecoverAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x01}))
 
-	registerPrecompiles(t, chainID, func(uint64) PrecompiledContracts {
-		return PrecompiledContracts{ecrecoverAddr: stubPrecompile{"CHAIN-ECRECOVER"}}
-	})
+	registerPrecompiles(t, chainID, PrecompiledContracts{ecrecoverAddr: stubPrecompile{"CHAIN-ECRECOVER"}})
 
-	p, ok := Precompiles(rulesForChain(chainID, 0))[ecrecoverAddr]
+	p, ok := Precompiles(rulesForChain(chainID))[ecrecoverAddr]
 	require.True(t, ok)
 	require.Equal(t, "CHAIN-ECRECOVER", p.Name(), "the chain's own entry must replace the built-in")
 }
 
-func TestRegisterSweepsStaleCache(t *testing.T) {
+func TestReRegisterServesNewOverlay(t *testing.T) {
 	const chainID = 900503
 	oldAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x44}))
 	newAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x45}))
-	rules := rulesForChain(chainID, 0)
+	rules := rulesForChain(chainID)
 
-	registerPrecompiles(t, chainID, func(uint64) PrecompiledContracts {
-		return PrecompiledContracts{oldAddr: stubPrecompile{"OLD"}}
-	})
+	registerPrecompiles(t, chainID, PrecompiledContracts{oldAddr: stubPrecompile{"OLD"}})
 	_, ok := Precompiles(rules)[oldAddr]
-	require.True(t, ok, "the first provider's overlay must resolve and cache")
+	require.True(t, ok, "the first overlay must resolve")
 
 	unregisterPrecompiles(uint256.NewInt(chainID))
-	registerPrecompiles(t, chainID, func(uint64) PrecompiledContracts {
-		return PrecompiledContracts{newAddr: stubPrecompile{"NEW"}}
-	})
+	registerPrecompiles(t, chainID, PrecompiledContracts{newAddr: stubPrecompile{"NEW"}})
 
 	merged := Precompiles(rules)
 	_, ok = merged[newAddr]
-	require.True(t, ok, "the newly registered provider's overlay must be served")
+	require.True(t, ok, "the newly registered overlay must be served")
 	_, ok = merged[oldAddr]
-	require.False(t, ok, "the unregistered provider's overlay must not survive re-registration")
+	require.False(t, ok, "the unregistered overlay must not survive re-registration")
 }
 
-// Rejected where the sets merge, not at evm.call on a live transaction.
 func TestProviderNilContractPanics(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -191,15 +151,21 @@ func TestProviderNilContractPanics(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			badAddr := accounts.InternAddress(common.BytesToAddress([]byte{tc.addrByte}))
-			registerPrecompiles(t, tc.chainID, func(uint64) PrecompiledContracts {
-				return PrecompiledContracts{badAddr: tc.contract}
-			})
-
 			require.PanicsWithValue(t,
-				fmt.Sprintf("vm: precompile provider for chain %d returned a nil contract at %x", tc.chainID, badAddr),
-				func() { Precompiles(rulesForChain(tc.chainID, 0)) })
+				fmt.Sprintf("vm: RegisterPrecompiles: chain ID %d has a nil contract at %x", tc.chainID, badAddr),
+				func() { RegisterPrecompiles(uint256.NewInt(tc.chainID), PrecompiledContracts{badAddr: tc.contract}) })
 		})
 	}
+}
+
+func TestRegisterAfterResolvePanics(t *testing.T) {
+	const chainID = 900506
+	_ = Precompiles(rulesForChain(chainID))
+	t.Cleanup(func() { unregisterPrecompiles(uint256.NewInt(chainID)) })
+
+	require.PanicsWithValue(t,
+		fmt.Sprintf("vm: RegisterPrecompiles: chain ID %d precompiles already resolved", chainID),
+		func() { RegisterPrecompiles(uint256.NewInt(chainID), PrecompiledContracts{}) })
 }
 
 func TestPrecompilesNilChainID(t *testing.T) {
@@ -226,7 +192,7 @@ func BenchmarkActivePrecompilesParallel(b *testing.B) {
 	b.Run("none_registered", func(b *testing.B) { resolve(b, mainnet) })
 
 	chainID := uint256.NewInt(900904)
-	RegisterPrecompiles(chainID, func(uint64) PrecompiledContracts { return PrecompiledContracts{} })
+	RegisterPrecompiles(chainID, PrecompiledContracts{})
 	defer unregisterPrecompiles(chainID)
 
 	b.Run("provider_chain", func(b *testing.B) {

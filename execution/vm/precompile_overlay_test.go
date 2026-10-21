@@ -65,9 +65,7 @@ func TestRegisteredOverlayInheritsForkTier(t *testing.T) {
 		tmHeader:  overlayPrecompile{"TMHeaderValidate"},
 		iavlProof: overlayPrecompile{"IAVLMerkleProofValidate"},
 	}
-	vm.RegisterPrecompiles(uint256.NewInt(chapelChainID), func(uint64) vm.PrecompiledContracts {
-		return maps.Clone(overlay)
-	})
+	vm.RegisterPrecompiles(uint256.NewInt(chapelChainID), overlay)
 	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chapelChainID)) })
 
 	cfg := chapelConfig()
