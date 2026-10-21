@@ -805,12 +805,15 @@ func TestOpDifficulty(t *testing.T) {
 			evm := NewEVM(tc.blockCtx, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
 			callContext := &CallContext{}
 			callContext.Stack.push(*uint256.NewInt(1))
-			callContext.Stack.push(*new(uint256.Int).SetAllOne())
+			callContext.Stack.push(*uint256.MustFromHex("0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"))
 			callContext.Stack.pop()
-			opDifficulty(0, evm, callContext)
+			pc, res, err := opDifficulty(0, evm, callContext)
+			require.NoError(t, err)
+			require.Nil(t, res)
+			require.Zero(t, pc)
 			require.Equal(t, 2, callContext.Stack.len())
 			require.Equal(t, tc.want, *callContext.Stack.peek())
-			require.Equal(t, uint64(1), callContext.Stack.back(1).Uint64())
+			require.Equal(t, *uint256.NewInt(1), *callContext.Stack.back(1))
 		})
 	}
 }
