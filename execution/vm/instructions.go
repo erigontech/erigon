@@ -722,14 +722,12 @@ func opSlotNum(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 }
 
 func opDifficulty(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	var v uint256.Int
 	if evm.Context.PrevRanDao != nil {
 		// EIP-4399: Supplant DIFFICULTY opcode with PREVRANDAO
-		v.SetBytes32(evm.Context.PrevRanDao[:])
+		scope.Stack.pushRef().SetBytes32(evm.Context.PrevRanDao[:])
 	} else {
-		v = evm.Context.Difficulty
+		*scope.Stack.pushRef() = evm.Context.Difficulty
 	}
-	scope.Stack.push(v)
 	return pc, nil, nil
 }
 
