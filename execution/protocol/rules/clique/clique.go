@@ -492,27 +492,22 @@ func (c *Clique) snapshots(latest uint64, total int) ([]*Snapshot, error) {
 	defer cur.Close()
 
 	res := make([]*Snapshot, 0, total)
-	for k, v, err := cur.Seek(blockEncoded); k != nil; k, v, err = cur.Prev() {
-		if err != nil {
-			return nil, err
-		}
-
+	k, v, err := cur.Seek(blockEncoded)
+	for ; err == nil && k != nil; k, v, err = cur.Prev() {
 		s := new(Snapshot)
-		err = json.Unmarshal(v, s)
-		if err != nil {
+		if err = json.Unmarshal(v, s); err != nil {
 			return nil, err
 		}
-
 		s.config = c.config
-
 		res = append(res, s)
-
 		total--
 		if total == 0 {
 			break
 		}
 	}
-
+	if err != nil {
+		return nil, err
+	}
 	return res, nil
 }
 

@@ -134,7 +134,23 @@ func (s *Snapshot) store(db kv.RwDB) error {
 		return err
 	}
 	return db.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Put(kv.CliqueSeparate, SnapshotFullKey(s.Number, s.Hash), blob)
+		if err := tx.Put(kv.CliqueSeparate, SnapshotFullKey(s.Number, s.Hash), blob); err != nil {
+			return err
+		}
+		lastEnc, err := tx.GetOne(kv.CliqueLastSnapshot, LastSnapshotKey())
+		if err != nil {
+			return err
+		}
+		if len(lastEnc) > 0 {
+			lastNum, err := dbutils.DecodeBlockNumber(lastEnc)
+			if err != nil {
+				return err
+			}
+			if lastNum >= s.Number {
+				return nil
+			}
+		}
+		return tx.Put(kv.CliqueLastSnapshot, LastSnapshotKey(), dbutils.EncodeBlockNumber(s.Number))
 	})
 }
 

@@ -236,7 +236,7 @@ func (c *Clique) verifySeal(chain rules.ChainHeaderReader, header *types.Header,
 
 	for seen, recent := range snap.Recents {
 		if recent == signer {
-			if limit := uint64(len(snap.Signers)/2 + 1); seen > number-limit {
+			if limit := uint64(len(snap.Signers)/2 + 1); number < limit || seen > number-limit {
 				return ErrRecentlySigned
 			}
 		}

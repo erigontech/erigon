@@ -20,6 +20,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
 // A test for https://github.com/erigontech/erigon/issues/18424
@@ -29,4 +32,9 @@ func TestCalcGasLimit(t *testing.T) {
 	desiredLimit := uint64(17_000_000)
 	gasLimit := CalcGasLimit(parentGasLimit, desiredLimit)
 	assert.Equal(t, desiredLimit, gasLimit)
+}
+
+func TestVerifyGaslimitRejectsLimitAboveMaximum(t *testing.T) {
+	err := VerifyGaslimit(params.MaxBlockGasLimit, params.MaxBlockGasLimit+1)
+	require.ErrorContains(t, err, "max")
 }
