@@ -102,7 +102,7 @@ func TestPBinReviewMDBXRowsAreNotAbsent(t *testing.T) {
 		TargetDomain: kv.CommitmentBinDomain, EndTxNum: 7, Hash: eip8297.HashBytes,
 	})
 	if err == nil {
-		t.Fatalf("convert accepted nil prev over %d MDBX-only rows: want previous record mismatch, got err=%v", seeded, err)
+		t.Fatalf("convert accepted nil prev over %d MDBX-only rows: want the populated target refused, got err=%v", seeded, err)
 	}
-	require.ErrorContains(t, err, "previous record mismatch")
+	require.ErrorContains(t, err, "already holds rows")
 }

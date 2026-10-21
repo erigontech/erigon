@@ -110,7 +110,6 @@ type pbinRangeWriterWrite struct {
 type pbinRangeWriterOverlay struct {
 	commitment.PatriciaContext
 	writes   map[string]pbinRangeWriterWrite
-	fresh    bool
 	views    *atomic.Int32
 	release  func([]byte)
 	write    func([]byte, []byte, []byte) error
@@ -118,9 +117,6 @@ type pbinRangeWriterOverlay struct {
 }
 
 func (o *pbinRangeWriterOverlay) Absent(key []byte) bool {
-	if !o.fresh {
-		return false
-	}
 	_, held := o.writes[string(key)]
 	return !held
 }
@@ -329,11 +325,17 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		return common.Hash{}, fmt.Errorf("pbin range writer: shared domains use %s, want %s", domains.GetCommitmentCtx().CommitmentDomain(), w.domain)
 	}
 	defer w.closeRanges()
+	fresh, err := w.freshDomain(tx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if !fresh {
+		return common.Hash{}, fmt.Errorf("pbin range writer: target domain %s already holds rows; the range writer builds only into an empty domain", w.domain)
+	}
 	var tracker pbinStampTracker = newPBinRowStampTracker()
 	if w.stampTracker != nil {
 		tracker = w.stampTracker()
 	}
-	var err error
 	var (
 		overlay *pbinRangeWriterOverlay
 		root    []byte
@@ -379,13 +381,8 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		}
 		return overlay.FlushFinished(lookahead)
 	}
-	fresh, err := w.freshDomain(tx)
-	if err != nil {
-		return common.Hash{}, err
-	}
 	overlay = &pbinRangeWriterOverlay{
 		writes: make(map[string]pbinRangeWriterWrite),
-		fresh:  fresh,
 		views:  &w.workerViews,
 		write:  onRow,
 		finished: func() error {
@@ -438,7 +435,12 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 func (w *PBinRangeWriter) freshDomain(tx kv.Tx) (bool, error) {
 	at := w.aggregator.BeginFilesRo()
 	defer at.Close()
-	if len(at.Files(w.domain)) > 0 {
+	inFiles, err := at.DebugRangeLatestFromFiles(w.domain, nil, nil, 1)
+	if err != nil {
+		return false, err
+	}
+	defer inFiles.Close()
+	if inFiles.HasNext() {
 		return false, nil
 	}
 	firstKey, err := kv.FirstKey(tx, w.aggregator.d[w.domain].ValuesTable)
