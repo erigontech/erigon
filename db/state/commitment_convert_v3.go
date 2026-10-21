@@ -228,7 +228,7 @@ func convertCommitmentFileV3(
 				res := convertedBatchPool.Get().(*convertedBatch)
 				res.buf, res.ents = res.buf[:0], res.ents[:0]
 				for _, p := range batch.pairs {
-					if convErr := convertLegacyPairV3(p[0], p[1], incremental, stepFrom, prevs, conv, reach, delta, res.emit); convErr != nil {
+					if convErr := convertLegacyPairV3(p[0], p[1], incremental, stepFrom, conv, reach, delta, res.emit); convErr != nil {
 						return convErr
 					}
 				}
@@ -351,7 +351,7 @@ func readOwned(reader *seg.Reader, batch *kvBatch, compressed bool) []byte {
 	return batch.buf[start:]
 }
 
-func convertLegacyPairV3(k, v []byte, incremental bool, stepFrom kv.Step, prevs *DomainRoTx, conv *v3.LegacyConverter, reach *legacyReach, delta *legacyDelta, emit v3.LegacyEmitFunc) error {
+func convertLegacyPairV3(k, v []byte, incremental bool, stepFrom kv.Step, conv *v3.LegacyConverter, reach *legacyReach, delta *legacyDelta, emit v3.LegacyEmitFunc) error {
 	if commitment.IsCommitmentStateKey(k) {
 		if !bytes.Equal(k, commitment.KeyCommitmentState) {
 			return fmt.Errorf("unexpected state key %x in a legacy file", k)
