@@ -644,7 +644,8 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		tracer.EmitGasChange(mdgas.MdGas{Execution: st.msg.Gas()}, st.gasRemaining, tracing.GasChangeTxIntrinsicGas)
 	}
 
-	var bailout bool
+	// A deferred sender's value debit is charged at validation, like its gas.
+	bailout := st.deferSender
 	// Gas bailout (for trace_call) should only be applied if there is not sufficient balance to perform value transfer
 	if gasBailout {
 		canTransfer, err := st.evm.Context.CanTransfer(st.state, msg.From(), *msg.Value())

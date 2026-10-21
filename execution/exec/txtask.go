@@ -301,12 +301,12 @@ func (t *TxTask) DefersSenderCharge(incarnation int) bool {
 		return false
 	}
 	txn := t.Tx()
-	if txn == nil || txn.GetTo() == nil || !txn.GetValue().IsZero() || len(txn.GetAuthorizations()) > 0 ||
+	if txn == nil || txn.GetTo() == nil || len(txn.GetAuthorizations()) > 0 ||
 		len(txn.GetBlobHashes()) > 0 || txn.Type() == types.AccountAbstractionTxType {
 		return false
 	}
 	sender, err := t.TxSender()
-	return err == nil && !sender.IsNil() && sender.Value() != t.Header.Coinbase
+	return err == nil && !sender.IsNil() && sender.Value() != t.Header.Coinbase && sender.Value() != *txn.GetTo()
 }
 
 func (t *TxTask) TxMessage() (*types.Message, error) {

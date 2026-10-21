@@ -2453,10 +2453,16 @@ func chargeDeferredSender(txTask *exec.TxTask, result *execResult, version state
 		feeCap = msg.FeeCap()
 	}
 	limit, overflow := u256.MulOverflow(u256.U64(msg.Gas()), *feeCap)
+	if !overflow {
+		limit, overflow = u256.AddOverflow(limit, *msg.Value())
+	}
 	if overflow || acc.Balance.Lt(&limit) {
 		return nil, nil
 	}
 	charge := u256.Mul(u256.U64(result.ExecutionResult.ReceiptGasUsed), *msg.GasPrice())
+	if result.ExecutionResult.Err == nil {
+		charge = u256.Add(charge, *msg.Value())
+	}
 	ws := &state.WriteSet{}
 	ws.SetBalance(sender, &state.VersionedWrite[uint256.Int]{
 		WriteHeader: state.WriteHeader{Address: sender, Path: state.BalancePath, Version: version, Reason: tracing.BalanceDecreaseGasBuy},
