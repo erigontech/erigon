@@ -62,6 +62,7 @@ type GenStructStepData interface {
 
 type GenStructStepLeafData struct {
 	Value rlp.RlpSerializable
+	Hash  []byte // precomputed leaf node hash, nil = compute it
 }
 
 func (GenStructStepLeafData) GenStructStepData() {}
@@ -152,6 +153,10 @@ func GenStructStep(
 				/* building leafs */
 				if retain(curr[:maxLen]) {
 					if err := e.leaf(remainderLen, curr, v.Value); err != nil {
+						return nil, nil, nil, err
+					}
+				} else if v.Hash != nil {
+					if err := e.hash(v.Hash); err != nil {
 						return nil, nil, nil, err
 					}
 				} else {

@@ -104,6 +104,34 @@ func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlp.RlpSerializable) 
 
 // To be called internally
 func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val rlp.RlpSerializable) error {
+	if err := hb.leafRef(key, val); err != nil {
+		return err
+	}
+	if hb.trace {
+		fmt.Printf("leafHashWithKeyVal [%x]=>[%x]\nHash [%x]\n", key, val, hb.hashBuf[:])
+	}
+
+	hb.hashStack = append(hb.hashStack, hb.hashBuf[:]...)
+	if len(hb.hashStack) > hashStackStride*len(hb.nodeStack) {
+		hb.nodeStack = append(hb.nodeStack, nil)
+	}
+	return nil
+}
+
+// LeafHash returns the hash of the leaf node with the key suffix keyHex (nibbles), or nil if the node is
+// short enough to be embedded into its parent. The result aliases an internal buffer of hb.
+func (hb *HashBuilder) LeafHash(keyHex []byte, val rlp.RlpSerializable) ([]byte, error) {
+	if err := hb.leafRef(keyHex, val); err != nil {
+		return nil, err
+	}
+	if hb.hashBuf[0] != 0x80+length2.Hash {
+		return nil, nil
+	}
+	return hb.hashBuf[1:], nil
+}
+
+// leafRef writes the reference to the leaf node (its hash or embedded RLP) into hb.hashBuf.
+func (hb *HashBuilder) leafRef(key []byte, val rlp.RlpSerializable) error {
 	// Compute the total length of binary representation
 	var kp, kl int
 	// Write key
@@ -133,19 +161,7 @@ func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val rlp.RlpSerializable) e
 		kl = 1
 	}
 
-	err := hb.completeLeafHash(kp, kl, compactLen, key, compact0, ni, val)
-	if err != nil {
-		return err
-	}
-	if hb.trace {
-		fmt.Printf("leafHashWithKeyVal [%x]=>[%x]\nHash [%x]\n", key, val, hb.hashBuf[:])
-	}
-
-	hb.hashStack = append(hb.hashStack, hb.hashBuf[:]...)
-	if len(hb.hashStack) > hashStackStride*len(hb.nodeStack) {
-		hb.nodeStack = append(hb.nodeStack, nil)
-	}
-	return nil
+	return hb.completeLeafHash(kp, kl, compactLen, key, compact0, ni, val)
 }
 
 func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, compact0 byte, ni int, val rlp.RlpSerializable) error {

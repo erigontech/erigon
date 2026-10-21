@@ -23,10 +23,14 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"runtime"
+	"sync"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/rlp"
 )
@@ -37,48 +41,100 @@ type DerivableList interface {
 }
 
 func DeriveSha(list DerivableList) common.Hash {
-	if list.Len() < 1 {
+	n := list.Len()
+	if n < 1 {
 		return empty.RootHash
 	}
 
-	var curr bytes.Buffer
-	var succ bytes.Buffer
-	var value bytes.Buffer
+	var keyBuf, valBuf bytes.Buffer
+	keyEnds := make([]int, n)
+	valEnds := make([]int, n)
+	hexWriter := &hexWriter{&keyBuf}
+	p := 0
+	traverseInLexOrder(list, func(i int, _ int) {
+		if i < 0 {
+			return
+		}
+		encodeUint(uint(i), hexWriter)
+		if err := hexWriter.Commit(); err != nil {
+			panic(fmt.Errorf("fatal in DeriveSha: %w", err))
+		}
+		list.EncodeIndex(i, &valBuf)
+		keyEnds[p], valEnds[p] = keyBuf.Len(), valBuf.Len()
+		p++
+	})
+	keys := splitAt(keyBuf.Bytes(), keyEnds)
+	vals := splitAt(valBuf.Bytes(), valEnds)
+
+	var leafHashes [][]byte
+	if n > 1 && valBuf.Len() >= parallelLeafHashMinBytes {
+		leafHashes = parallelLeafHashes(keys, vals)
+	}
 
 	hb := trie.NewHashBuilder(false)
-
-	hb.Reset()
-	curr.Reset()
-	succ.Reset()
-
-	hexWriter := &hexWriter{&succ}
-
 	var groups, branches, hashes []uint16
 	var leafData trie.GenStructStepLeafData
-
-	traverseInLexOrder(list, func(i int, next int) {
-		curr.Reset()
-		curr.Write(succ.Bytes())
-		succ.Reset()
-
-		if next >= 0 {
-			encodeUint(uint(next), hexWriter)
-			if err := hexWriter.Commit(); err != nil {
-				panic(fmt.Errorf("fatal in DeriveSha: %w", err))
-			}
+	for p := range n {
+		var succ []byte
+		if p+1 < n {
+			succ = keys[p+1]
 		}
-
-		value.Reset()
-
-		if curr.Len() > 0 {
-			list.EncodeIndex(i, &value)
-			leafData.Value = rlp.RlpEncodedBytes(value.Bytes())
-			groups, branches, hashes, _ = trie.GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &leafData, groups, branches, hashes, false)
+		leafData.Value = rlp.RlpEncodedBytes(vals[p])
+		if leafHashes != nil {
+			leafData.Hash = leafHashes[p]
 		}
-	})
+		groups, branches, hashes, _ = trie.GenStructStep(retain, keys[p], succ, hb, nil /* hashCollector */, &leafData, groups, branches, hashes, false)
+	}
 
 	hash, _ := hb.RootHash()
 	return hash
+}
+
+// Below this size a block's leaf keccak is cheaper than spreading it over goroutines.
+const parallelLeafHashMinBytes = 128 * 1024
+
+func splitAt(b []byte, ends []int) [][]byte {
+	parts := make([][]byte, len(ends))
+	start := 0
+	for i, end := range ends {
+		parts[i] = b[start:end:end]
+		start = end
+	}
+	return parts
+}
+
+// parallelLeafHashes hashes the leaf nodes of keys (in lex order, n > 1); nil marks an embedded leaf.
+func parallelLeafHashes(keys, vals [][]byte) [][]byte {
+	n := len(keys)
+	out := make([][]byte, n)
+	slab := make([]common.Hash, n)
+	var next atomic.Int64
+	var wg sync.WaitGroup
+	for range min(runtime.GOMAXPROCS(0), n) {
+		wg.Go(func() {
+			hb := trie.NewHashBuilder(false)
+			for p := int(next.Add(1) - 1); p < n; p = int(next.Add(1) - 1) {
+				// a leaf hangs under the branch at the longest prefix it shares with a neighbour
+				depth := 0
+				if p > 0 {
+					depth = nibbles.CommonPrefixLen(keys[p-1], keys[p])
+				}
+				if p+1 < n {
+					depth = max(depth, nibbles.CommonPrefixLen(keys[p], keys[p+1]))
+				}
+				h, err := hb.LeafHash(keys[p][depth+1:], rlp.RlpEncodedBytes(vals[p]))
+				if err != nil {
+					panic(fmt.Errorf("fatal in DeriveSha: %w", err))
+				}
+				if h != nil {
+					out[p] = slab[p][:]
+					copy(out[p], h)
+				}
+			}
+		})
+	}
+	wg.Wait()
+	return out
 }
 
 type bytesWriter interface {

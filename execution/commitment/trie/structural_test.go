@@ -128,7 +128,7 @@ func TestV2HashBuilding(t *testing.T) {
 		hexKeys[i] = nibblizeKey([]byte(key), true)
 	}
 	genStructStepsOver(t, hb, retainNone, nil, hexKeys, func(i int) GenStructStepData {
-		return &GenStructStepLeafData{rlp.RlpSerializableBytes(valueOf(i))}
+		return &GenStructStepLeafData{Value: rlp.RlpSerializableBytes(valueOf(i))}
 	}, nil)
 
 	builtHash := hb.rootHash()
@@ -163,7 +163,7 @@ func TestV2Resolution(t *testing.T) {
 		hexKeys[i] = nibblizeKey([]byte(key), true)
 	}
 	genStructStepsOver(t, hb, rl.Retain, nil, hexKeys, func(i int) GenStructStepData {
-		return &GenStructStepLeafData{rlp.RlpSerializableBytes(value)}
+		return &GenStructStepLeafData{Value: rlp.RlpSerializableBytes(value)}
 	}, nil)
 
 	tr1 := newEmpty()
@@ -225,7 +225,7 @@ func TestEmbeddedStorage(t *testing.T) {
 	finalSucc := append(bytes.Clone(last[:cutoff-1]), last[cutoff-1]+1)
 
 	genStructStepsOver(t, hb, retainAll, nil, hexKeys, func(i int) GenStructStepData {
-		return &GenStructStepLeafData{rlp.RlpSerializableBytes(valueShort)}
+		return &GenStructStepLeafData{Value: rlp.RlpSerializableBytes(valueShort)}
 	}, finalSucc)
 
 	builtHash := hb.rootHash()
@@ -277,7 +277,7 @@ func TestEmbeddedStorage11(t *testing.T) {
 	finalSucc := append(bytes.Clone(last[:cutoff-1]), last[cutoff-1]+1)
 
 	genStructStepsOver(t, hb, retainNone, nil, hexKeys, func(i int) GenStructStepData {
-		return &GenStructStepLeafData{rlp.RlpSerializableBytes(keys[i].v)}
+		return &GenStructStepLeafData{Value: rlp.RlpSerializableBytes(keys[i].v)}
 	}, finalSucc)
 	require.NotEmpty(t, hb.rootHash())
 }
@@ -312,7 +312,7 @@ func TestAccountsOnly(t *testing.T) {
 		hexKeys[i] = nibblizeKey(key.k, true)
 	}
 	genStructStepsOver(t, hb, retainNone, hc, hexKeys, func(i int) GenStructStepData {
-		return &GenStructStepLeafData{rlp.RlpSerializableBytes(keys[i].v)}
+		return &GenStructStepLeafData{Value: rlp.RlpSerializableBytes(keys[i].v)}
 	}, []byte{})
 	require.Equal(t, 4, i)
 }
@@ -397,7 +397,7 @@ func TestStorageOnly(t *testing.T) {
 		hexKeys[i] = nibblizeKey(key.k, len(key.k) == 32 || len(key.k) == 72)
 	}
 	genStructStepsOver(t, hb, retainNone, hc, hexKeys, func(i int) GenStructStepData {
-		return &GenStructStepLeafData{rlp.RlpSerializableBytes(keys[i].v)}
+		return &GenStructStepLeafData{Value: rlp.RlpSerializableBytes(keys[i].v)}
 	}, []byte{})
 	require.Equal(t, 2, i)
 }
