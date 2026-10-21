@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"runtime"
 	"runtime/pprof"
@@ -2445,7 +2446,7 @@ func chargeDeferredSender(txTask *exec.TxTask, result *execResult, version state
 	if err != nil {
 		return nil, err
 	}
-	if acc == nil || acc.Nonce != msg.Nonce() {
+	if acc == nil || acc.Nonce != msg.Nonce() || acc.Nonce == math.MaxUint64 {
 		return nil, nil
 	}
 	feeCap := msg.GasPrice()
