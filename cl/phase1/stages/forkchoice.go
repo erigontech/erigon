@@ -582,6 +582,13 @@ func shuffleInputForEpoch(logger log.Logger, beaconConfig *clparams.BeaconChainC
 	if _, ok := caches.ShuffledIndiciesCacheGlobal.Get(epoch, blockRootAtBegginingPrevEpoch); ok {
 		return shuffleInput{}, false
 	}
+	stateRoot := b.StateRoots().Get(int(refSlot % beaconConfig.SlotsPerHistoricalRoot))
+	if stateRoot != (common.Hash{}) {
+		if shuffledIndicies, ok := caches.LookaheadShuffledIndiciesCacheGlobal.Get(epoch, stateRoot); ok {
+			caches.ShuffledIndiciesCacheGlobal.Put(epoch, blockRootAtBegginingPrevEpoch, shuffledIndicies)
+			return shuffleInput{}, false
+		}
+	}
 
 	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
 		beaconConfig.EpochsPerHistoricalVector

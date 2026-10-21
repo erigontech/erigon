@@ -18,9 +18,14 @@ package jsonrpc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
+	"reflect"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -83,6 +88,82 @@ type SimulatedBlock struct {
 	Calls          []ethapi.CallArgs      `json:"calls"`
 }
 
+// UnmarshalJSON rejects block and account override keys that are not defined.
+// encoding/json alone ignores unknown keys.
+func (b *SimulatedBlock) UnmarshalJSON(input []byte) error {
+	var dec struct {
+		BlockOverrides json.RawMessage                    `json:"blockOverrides"`
+		StateOverrides map[common.Address]json.RawMessage `json:"stateOverrides"`
+		Calls          []ethapi.CallArgs                  `json:"calls"`
+	}
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
+	}
+	var res SimulatedBlock
+	if dec.BlockOverrides != nil {
+		if err := checkOverrideKeys(dec.BlockOverrides, reflect.TypeFor[ethapi.BlockOverrides](), "block override"); err != nil {
+			return err
+		}
+		if err := json.Unmarshal(dec.BlockOverrides, &res.BlockOverrides); err != nil {
+			return err
+		}
+	}
+	if dec.StateOverrides != nil {
+		overrides := make(ethapi.StateOverrides, len(dec.StateOverrides))
+		for addr, raw := range dec.StateOverrides {
+			if err := checkOverrideKeys(raw, reflect.TypeFor[ethapi.Account](), "state override for "+addr.Hex()); err != nil {
+				return err
+			}
+			var account ethapi.Account
+			if err := json.Unmarshal(raw, &account); err != nil {
+				return err
+			}
+			overrides[accounts.InternAddress(addr)] = account
+		}
+		res.StateOverrides = &overrides
+	}
+	res.Calls = dec.Calls
+	*b = res
+	return nil
+}
+
+// checkOverrideKeys returns an error for a key of the JSON object that does not
+// name a field of t, or that names a field another key already names. Names
+// match case-insensitively, as in encoding/json. Repeated identical keys cannot
+// be seen here; encoding/json keeps the last one.
+func checkOverrideKeys(input json.RawMessage, t reflect.Type, what string) error {
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(input, &keys); err != nil || keys == nil {
+		return nil
+	}
+	seen := make(map[int]string)
+	for _, key := range slices.Sorted(maps.Keys(keys)) {
+		field := -1
+		for i := range t.NumField() {
+			f := t.Field(i)
+			name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+			if !f.IsExported() || name == "-" {
+				continue
+			}
+			if name == "" {
+				name = f.Name
+			}
+			if strings.EqualFold(key, name) {
+				field = i
+				break
+			}
+		}
+		if field < 0 {
+			return fmt.Errorf("unknown field %q in %s", key, what)
+		}
+		if prev, ok := seen[field]; ok {
+			return fmt.Errorf("keys %q and %q in %s name the same field", prev, key, what)
+		}
+		seen[field] = key
+	}
+	return nil
+}
+
 // SimulatedBlockResult represents the result of the simulated calls for a single block (i.e. one SimulatedBlock).
 type SimulatedBlockResult = *ethapi.RPCBlock
 
@@ -125,7 +206,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	if err := api.checkPruneHistory(ctx, tx, blockNumber); err != nil {
+	if err := api.checkPruneState(ctx, tx, blockNumber); err != nil {
 		return nil, err
 	}
 
@@ -887,12 +968,21 @@ func (s *simulator) newStateReaderForBlock(
 		return state.NewReaderV3(sharedDomains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), minTxNum, firstMinTxNum, nil
 	}
 
-	if minTxNum < state.StateHistoryStartTxNum(tx) {
+	minHistoryTxNum, err := state.StateHistoryStartTxNum(tx)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	if minTxNum < minHistoryTxNum {
 		return nil, 0, 0, fmt.Errorf("%w: min tx: %d", state.ErrPruned, minTxNum)
 	}
-	commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
-	if s.commitmentHistory && minTxNum < commitmentStartingTxNum {
-		return nil, 0, 0, fmt.Errorf("%w: min commitment: %d, min tx: %d", state.ErrPruned, commitmentStartingTxNum, minTxNum)
+	if s.commitmentHistory {
+		commitmentStartingTxNum, err := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+		if err != nil {
+			return nil, 0, 0, err
+		}
+		if minTxNum < commitmentStartingTxNum {
+			return nil, 0, 0, fmt.Errorf("%w: min commitment: %d, min tx: %d", state.ErrPruned, commitmentStartingTxNum, minTxNum)
+		}
 	}
 
 	if len(ancestors) > 0 {
