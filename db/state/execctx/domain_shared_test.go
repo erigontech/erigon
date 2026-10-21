@@ -2005,42 +2005,38 @@ func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
 	require.Equal(t, trieState1, state2[16:])
 }
 
-func TestSeekCommitmentV3RejectsLegacyCommitmentState(t *testing.T) {
+func TestSeekCommitmentRejectsOtherPlaneState(t *testing.T) {
 	previousV3 := statecfg.ExperimentalCommitmentV3
 	t.Cleanup(func() { statecfg.ExperimentalCommitmentV3 = previousV3 })
 
-	ctx := t.Context()
-	db := newTestDb(t, 16)
-	rwTx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer rwTx.Rollback()
+	for _, tc := range []struct {
+		name    string
+		key     []byte
+		openV3  bool
+		wantErr string
+	}{
+		{"v3 rejects legacy state", commitmentdb.KeyCommitmentState, true, "legacy commitment"},
+		{"legacy rejects v3 state", commitment.KeyCommitmentV3State, false, "commitment v3 records"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			statecfg.ExperimentalCommitmentV3 = false
+			ctx := t.Context()
+			db := newTestDb(t, 16)
+			rwTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
 
-	legacy, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.NoError(t, err)
-	require.NoError(t, legacy.DomainPut(kv.CommitmentDomain, rwTx, commitmentdb.KeyCommitmentState, make([]byte, 32), 1, nil))
-	require.NoError(t, legacy.Flush(ctx, rwTx))
-	legacy.Close()
+			sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			require.NoError(t, sd.DomainPut(kv.CommitmentDomain, rwTx, tc.key, make([]byte, 32), 1, nil))
+			require.NoError(t, sd.Flush(ctx, rwTx))
+			sd.Close()
 
-	statecfg.ExperimentalCommitmentV3 = true
-	_, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.ErrorContains(t, err, "legacy commitment")
-}
-
-func TestSeekCommitmentLegacyRejectsV3CommitmentState(t *testing.T) {
-	ctx := t.Context()
-	db := newTestDb(t, 16)
-	rwTx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer rwTx.Rollback()
-
-	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.NoError(t, err)
-	require.NoError(t, sd.DomainPut(kv.CommitmentDomain, rwTx, commitment.KeyCommitmentV3State, make([]byte, 32), 1, nil))
-	require.NoError(t, sd.Flush(ctx, rwTx))
-	sd.Close()
-
-	_, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.ErrorContains(t, err, "commitment v3 records")
+			statecfg.ExperimentalCommitmentV3 = tc.openV3
+			_, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
 }
 
 func TestTouchChangedKeysFromHistoryRestoresTheStoredRoot(t *testing.T) {
