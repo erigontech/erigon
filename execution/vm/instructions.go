@@ -145,22 +145,20 @@ func opExp(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		} else {
 			exponent.SetAllOne()
 		}
-	default:
-		if base.IsUint64() && exponent.LtUint64(64) && uint64(base.BitLen())*exponent.Uint64() <= 64 {
-			result, factor, power := uint64(1), base.Uint64(), exponent.Uint64()
-			for power != 0 {
-				if power&1 != 0 {
-					result *= factor
-				}
-				factor *= factor
-				power >>= 1
+	case base.IsUint64() && exponent.LtUint64(64) && uint64(base.BitLen())*exponent.Uint64() <= 64:
+		result, factor, power := uint64(1), base.Uint64(), exponent.Uint64()
+		for power != 0 {
+			if power&1 != 0 {
+				result *= factor
 			}
-			exponent.SetUint64(result)
-		} else if base[0]&1 != 0 && !exponent.IsUint64() {
-			*exponent = expOdd(base, exponent)
-		} else {
-			exponent.Exp(base, exponent)
+			factor *= factor
+			power >>= 1
 		}
+		exponent.SetUint64(result)
+	case base[0]&1 != 0 && !exponent.IsUint64():
+		*exponent = expOdd(base, exponent)
+	default:
+		exponent.Exp(base, exponent)
 	}
 	return pc, nil, nil
 }
