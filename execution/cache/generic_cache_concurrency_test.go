@@ -131,6 +131,27 @@ func TestGenericCache_ClearRacingPut_EpochAlias(t *testing.T) {
 	}
 }
 
+// A Put that lands after Clear's purge and is unwind-invalidated before Clear's
+// coherence reset must not be revived by that reset: the lifted floor would make
+// the dead-fork entry readable again.
+func TestGenericCache_ClearRacingPutThenUnwind_DeadEntryStaysDead(t *testing.T) {
+	c := NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
+	defer c.Close()
+	key := []byte("put-unwind-key")
+	for round := range 200000 {
+		var wg sync.WaitGroup
+		wg.Go(func() { c.Clear() })
+		wg.Go(func() {
+			c.Put(key, []byte("dead-fork-value"), 200)
+			c.Unwind(150)
+		})
+		wg.Wait()
+		_, ok := c.Get(key)
+		require.False(t, ok, "round %d: Clear revived an entry an unwind had invalidated", round)
+		c.Delete(key)
+	}
+}
+
 // A reader that captures a dead (unwind-invalidated) entry before Clear wipes
 // it must not have it revalidated by Clear's coherence reset: judged against
 // the post-Reset state (new epoch, lifted floor), the entry passes IsStale and

@@ -18,6 +18,7 @@ package cache
 
 import (
 	"math"
+	"sync"
 	"sync/atomic"
 	"unsafe"
 
@@ -61,7 +62,14 @@ type GenericCache[T any] struct {
 	staleEvicted atomic.Uint64 // stale entries detected on read after an unwind; dropped unless a racing put revived them
 
 	sizeFunc func(T) int
+
+	// putStripes keep puts out of Clear's purge-then-reset window: a put landing
+	// in it keeps the retired epoch, and an unwind before the reset would be
+	// lifted with the floor, reviving a dead-fork entry.
+	putStripes [putStripeCount]sync.Mutex
 }
+
+const putStripeCount = 256
 
 // NewGenericCache creates a cache bounded by capacityBytes, drawing its
 // reservation from the shared envelope as it fills. mode selects ModeEvictLRU
@@ -165,6 +173,9 @@ func (c *GenericCache[T]) PutIfAbsent(key []byte, value T, txNum uint64) {
 
 func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool) {
 	h := maphash.Hash(key)
+	mu := &c.putStripes[h&(putStripeCount-1)]
+	mu.Lock()
+	defer mu.Unlock()
 	newSize := len(key) + c.sizeFunc(value)
 	c.data.compute(h, func(existing entry[T], found bool) (entry[T], otter.ComputeOp) {
 		sameKey := found && existing.key == string(key)
@@ -205,6 +216,14 @@ func (c *GenericCache[T]) dropStale(h uint64, key []byte) {
 // floor, so subsequent puts are not constrained by an unwind that belongs to
 // the retired data.
 func (c *GenericCache[T]) Clear() {
+	for i := range c.putStripes {
+		c.putStripes[i].Lock()
+	}
+	defer func() {
+		for i := range c.putStripes {
+			c.putStripes[i].Unlock()
+		}
+	}()
 	c.data.Purge()
 	// Reset coherence only after emptying, so an entry still in flight from the
 	// retired data is judged by pre-Reset coherence that carries the unwind.
