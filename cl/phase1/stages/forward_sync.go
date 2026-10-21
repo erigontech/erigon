@@ -318,6 +318,8 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 			// Before handing off to ChainTipSync, try to set the head state so that
 			// gossip beacon_block messages won't be ignored (Syncing() becomes false).
 			setHeadStateFromForkChoice(cfg, logger)
+			// A failing batch does not advance currentSlot, but its earlier blocks were imported.
+			requestCustodyBackfill(cfg, startSlot, max(currentSlot.Load(), cfg.forkChoice.HighestSeen()))
 			return ErrForwardSyncStale
 		}
 
@@ -347,7 +349,16 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 			logger.Warn("[Caplin] Forward sync: failed to flush the block collector", "err", err)
 		}
 	}
+	requestCustodyBackfill(cfg, startSlot, currentSlot.Load())
 	return nil
+}
+
+// requestCustodyBackfill asks for the custody columns of the blocks forward sync imported: it
+// imports them without checking their data.
+func requestCustodyBackfill(cfg *Cfg, fromSlot, toSlot uint64) {
+	if cfg.peerDas != nil && toSlot > fromSlot {
+		cfg.peerDas.BackfillCustodyColumns(fromSlot, toSlot)
+	}
 }
 
 // setHeadStateFromForkChoice retrieves the current head state from the fork choice store

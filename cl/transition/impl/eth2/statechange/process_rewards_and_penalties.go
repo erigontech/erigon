@@ -102,8 +102,9 @@ func processRewardsAndPenaltiesPostAltair(s abstract.BeaconState, eligibleValida
 	}
 	rewardDenominator := (totalActiveBalance / beaconConfig.EffectiveBalanceIncrement) * beaconConfig.WeightDenominator
 	inactivityLeaking := state.InactivityLeaking(s)
+	deltas := make([]int64, len(eligibleValidators))
 
-	return threading.ParallellForLoop(runtime.NumCPU(), 0, len(eligibleValidators), func(i int) error {
+	if err := threading.ParallellForLoop(runtime.NumCPU(), 0, len(eligibleValidators), func(i int) error {
 		index := eligibleValidators[i]
 		baseReward, err := s.BaseReward(index)
 		if err != nil {
@@ -131,6 +132,14 @@ func processRewardsAndPenaltiesPostAltair(s abstract.BeaconState, eligibleValida
 			}
 			delta -= int64((effectiveBalance * inactivityScore) / inactivityPenaltyDenominator)
 		}
+		deltas[i] = delta
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	for i, index := range eligibleValidators {
+		delta := deltas[i]
 		if delta > 0 {
 			if err := state.IncreaseBalance(s, index, uint64(delta)); err != nil {
 				return err
@@ -138,8 +147,8 @@ func processRewardsAndPenaltiesPostAltair(s abstract.BeaconState, eligibleValida
 		} else if err := state.DecreaseBalance(s, index, uint64(-delta)); err != nil {
 			return err
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // processRewardsAndPenaltiesPhase0 process rewards and penalties for phase0 state.
