@@ -513,9 +513,17 @@ func (s *Service) maybeAttest(ctx context.Context, slot uint64) {
 	// Attester duties is POST-only per the Beacon API spec (the request body
 	// carries the validator index list). Use postAndDecode to send the indices
 	// and parse the response in a single round-trip.
+	dutiesStart := time.Now()
 	if err := s.client.postAndDecode(ctx, path, indices, &duties); err != nil {
 		return
 	}
+	dutiesMs := time.Since(dutiesStart).Milliseconds()
+
+	// WHERE THE ATTEST ACTUALLY GOES. Every duty is served one at a time, and each one costs a GET for
+	// attestation data, a POST to submit, and on Electra a second POST to aggregate. The slot loop is
+	// single-threaded, so this is subtracted from the next slot's proposal.
+	var attDataMs, signMs, submitMs, aggMs int64
+	dutiesAtSlot := 0
 
 	attested := 0
 	for _, duty := range duties {
@@ -547,13 +555,18 @@ func (s *Service) maybeAttest(ctx context.Context, slot uint64) {
 		attPath := fmt.Sprintf("/eth/v1/validator/attestation_data?slot=%d&committee_index=%d",
 			slot, committeeIndex)
 
+		dutiesAtSlot++
+		attDataStart := time.Now()
 		var attData solid.AttestationData
 		if err := s.client.get(ctx, attPath, &attData); err != nil {
 			continue
 		}
+		attDataMs += time.Since(attDataStart).Milliseconds()
 
 		// Sign the attestation data.
+		signStart := time.Now()
 		sig, err := signAttestation(key, &attData, slot, s.cfg, s.genesisValidatorsRoot)
+		signMs += time.Since(signStart).Milliseconds()
 		if err != nil {
 			s.logger.Warn("[dev-validator] attestation sign failed", "err", err)
 			continue
@@ -569,12 +582,14 @@ func (s *Service) maybeAttest(ctx context.Context, slot uint64) {
 		}
 
 		sub := buildAttestationSubmission(version, committeeIndex, key.ValidatorIndex, &attData, sig, committeeLength, validatorPosition)
+		submitStart := time.Now()
 		var submitErr error
 		if sub.version != "" {
 			submitErr = s.client.postJSON(ctx, sub.path, sub.body, sub.version)
 		} else {
 			submitErr = s.client.post(ctx, sub.path, sub.body)
 		}
+		submitMs += time.Since(submitStart).Milliseconds()
 		if submitErr != nil {
 			s.logger.Debug("[dev-validator] attestation submit failed", "slot", slot, "err", submitErr)
 			continue
@@ -582,11 +597,18 @@ func (s *Service) maybeAttest(ctx context.Context, slot uint64) {
 		attested++
 
 		if version >= clparams.ElectraVersion {
+			aggStart := time.Now()
 			s.submitAggregateAndProof(ctx, slot, committeeIndex, key, &attData, sig, committeeLength, validatorPosition)
+			aggMs += time.Since(aggStart).Milliseconds()
 		}
 	}
 
-	if attested > 0 {
-		s.logger.Debug("[dev-validator] attested", "slot", slot, "count", attested)
+	// Idle this is ~40ms and says nothing; under load it reaches 765ms and is the slot overrun. Only
+	// the loaded case is news, so only that is reported.
+	if total := dutiesMs + attDataMs + signMs + submitMs + aggMs; total > 200 {
+		s.logger.Warn("[attest-phases] the attest took a share of the slot", "slot", slot,
+			"totalMs", total, "dutiesAtSlot", dutiesAtSlot, "attested", attested,
+			"dutiesMs", dutiesMs, "attDataMs", attDataMs, "signMs", signMs,
+			"submitMs", submitMs, "aggMs", aggMs)
 	}
 }

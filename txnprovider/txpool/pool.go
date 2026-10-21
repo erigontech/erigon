@@ -24,6 +24,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -140,41 +142,49 @@ type TxPool struct {
 	promoted             Announcements
 	// nonceGapEvictions counts transactions dropped because their sender's sequence has a hole; see the
 	// [nonce-gap] log. A contiguous stream should never produce one.
-	nonceGapEvictions    int
-	cfg                  txpoolcfg.Config
-	chainID              uint256.Int
-	chainConfig          *chain.Config
-	lastSeenBlock        atomic.Uint64
-	lastSeenCond         *sync.Cond
-	lastFinalizedBlock   atomic.Uint64
-	started              atomic.Bool
-	pendingBaseFee       atomic.Uint64
-	pendingBlobFee       atomic.Uint64 // For gas accounting for blobs, which has its own dimension
-	blockGasLimit        atomic.Uint64
-	totalBlobsInPool     atomic.Uint64
-	shanghaiTime         *uint64
-	isPostShanghai       atomic.Bool
-	agraBlock            *uint64
-	isPostAgra           atomic.Bool
-	bhilaiBlock          *uint64
-	isPostBhilai         atomic.Bool
-	cancunTime           *uint64
-	isPostCancun         atomic.Bool
-	pragueTime           *uint64
-	isPostPrague         atomic.Bool
-	osakaTime            *uint64
-	isPostOsaka          atomic.Bool
-	amsterdamTime        *uint64
-	isPostAmsterdam      atomic.Bool
-	feeCalculator        FeeCalculator
-	p2pFetcher           *Fetch
-	p2pSender            *Send
-	newSlotsStreams      *NewSlotsStreams
-	ethBackend           remoteproto.ETHBACKENDClient
-	builderNotifyNewTxns func()
-	logger               log.Logger
-	auths                map[AuthAndNonce]*metaTxn // All authority accounts with a pooled authorization
-	blobs                *blobStore
+	nonceGapEvictions int
+	// frontHoles counts senders whose NEXT nonce the pool does not hold; see the [nonce-front] log.
+	frontHoles int
+	// admitted, discardCounts and discardUnderBuilder are the pool conservation check: in, out, why.
+	admitted              int
+	discardCounts         map[txpoolcfg.DiscardReason]int
+	discardUnderBuilder   int
+	highestStateNonce     map[uint64]uint64
+	stateNonceRegressions int
+	cfg                   txpoolcfg.Config
+	chainID               uint256.Int
+	chainConfig           *chain.Config
+	lastSeenBlock         atomic.Uint64
+	lastSeenCond          *sync.Cond
+	lastFinalizedBlock    atomic.Uint64
+	started               atomic.Bool
+	pendingBaseFee        atomic.Uint64
+	pendingBlobFee        atomic.Uint64 // For gas accounting for blobs, which has its own dimension
+	blockGasLimit         atomic.Uint64
+	totalBlobsInPool      atomic.Uint64
+	shanghaiTime          *uint64
+	isPostShanghai        atomic.Bool
+	agraBlock             *uint64
+	isPostAgra            atomic.Bool
+	bhilaiBlock           *uint64
+	isPostBhilai          atomic.Bool
+	cancunTime            *uint64
+	isPostCancun          atomic.Bool
+	pragueTime            *uint64
+	isPostPrague          atomic.Bool
+	osakaTime             *uint64
+	isPostOsaka           atomic.Bool
+	amsterdamTime         *uint64
+	isPostAmsterdam       atomic.Bool
+	feeCalculator         FeeCalculator
+	p2pFetcher            *Fetch
+	p2pSender             *Send
+	newSlotsStreams       *NewSlotsStreams
+	ethBackend            remoteproto.ETHBACKENDClient
+	builderNotifyNewTxns  func()
+	logger                log.Logger
+	auths                 map[AuthAndNonce]*metaTxn // All authority accounts with a pooled authorization
+	blobs                 *blobStore
 
 	// Dormancy eviction: tracks the block number of the last on-chain state change (nonce or
 	// balance) for each sender that has transactions in the queued sub-pool. Senders absent
@@ -1582,10 +1592,23 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 			continue
 		}
 		discardReasons[i] = txpoolcfg.NotSet // unnecessary
+		p.admitted++
 		if txn.Traced {
 			logger.Info(fmt.Sprintf("TX TRACING: schedule sendersWithChangedState idHash=%x senderId=%d", txn.IDHash, mt.TxnSlot.SenderID))
 		}
 		sendersWithChangedState[mt.TxnSlot.SenderID] = struct{}{}
+	}
+
+	// ⚠ THE POOL'S HALF OF A CONSERVATION CHECK. What went in, what is still held, and every way one
+	// left — so "admitted = held + left" either balances or names what is unaccounted for. Counting
+	// only what leaves cannot do that, and counting per-reason without the total cannot either.
+	if p.admitted > 0 && p.admitted%500 == 0 {
+		held, left := len(p.byHash), 0
+		for _, n := range p.discardCounts {
+			left += n
+		}
+		logger.Warn("[pool-census] in, held, out", "admitted", p.admitted, "heldNow", held,
+			"leftTotal", left, "unaccounted", p.admitted-held-left, "byReason", p.discardSummary())
 	}
 
 	for senderID := range sendersWithChangedState {
@@ -1862,6 +1885,24 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 // dropping transaction from all sub-structures and from db
 // Important: don't call it while iterating by all
 func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
+	// EVERY WAY A TRANSACTION LEAVES THIS POOL PASSES THROUGH HERE, so this is the only place that can
+	// say why one is gone. A transaction the block builder has taken but the chain has not mined must
+	// not leave by any reason other than Mined; if it does, the builder's body references work the pool
+	// can no longer re-offer and execution asks for that nonce for good. See the [nonce-front] log.
+	if p.discardCounts == nil {
+		p.discardCounts = map[txpoolcfg.DiscardReason]int{}
+	}
+	p.discardCounts[reason]++
+	if reason != txpoolcfg.Mined {
+		if bn, held := p.builderNonce[mt.TxnSlot.SenderID]; held && mt.TxnSlot.Nonce <= bn {
+			p.discardUnderBuilder++
+			if p.discardUnderBuilder == 1 || p.discardUnderBuilder%200 == 0 {
+				p.logger.Warn("[discard-live] dropped a nonce the OPEN BLOCK is holding",
+					"senderID", mt.TxnSlot.SenderID, "nonce", mt.TxnSlot.Nonce,
+					"builderNonce", bn, "reason", reason.String(), "seenSoFar", p.discardUnderBuilder)
+			}
+		}
+	}
 	hashStr := string(mt.TxnSlot.IDHash[:])
 	delete(p.byHash, hashStr)
 	p.deletedTxns = append(p.deletedTxns, mt)
@@ -2164,6 +2205,44 @@ func (p *TxPool) hasBuilderNonce(senderID uint64) bool {
 // nonces, and also affect other transactions from the same sender with higher nonce, it loops through all transactions
 // for a given senderID
 func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint256.Int, blockGasLimit uint64, logger log.Logger) {
+
+	// ⚠ DOES THE STATE NONCE EVER GO BACKWARDS? NonceTooLow discards against it, and a discard is
+	// permanent, so a view that later regresses leaves a hole nothing can refill. Record the highest
+	// value ever seen for this sender so the [nonce-front] log can say whether that is what happened.
+	if p.highestStateNonce == nil {
+		p.highestStateNonce = map[uint64]uint64{}
+	}
+	if prev, ok := p.highestStateNonce[senderID]; !ok || senderNonce > prev {
+		p.highestStateNonce[senderID] = senderNonce
+	} else if senderNonce < prev {
+		p.stateNonceRegressions++
+		if p.stateNonceRegressions == 1 || p.stateNonceRegressions%500 == 0 {
+			logger.Warn("[state-nonce-back] the sender's state nonce went BACKWARDS",
+				"senderID", senderID, "now", senderNonce, "highestSeen", prev,
+				"droppedBy", prev-senderNonce, "seenSoFar", p.stateNonceRegressions)
+		}
+	}
+
+	// ⚠ AN UNEXPLAINED HOLE AT THE FRONT, WHICH NO EVICTION REPORTS. A gap at the committed nonce does
+	// not evict: the walk below is contiguous from the transaction AFTER it, so everything behind
+	// promotes and the pool looks healthy while execution asks for the missing nonce on every round.
+	//
+	// ⚠ A FRONT GAP IS NORMAL AND IS NOT WHAT THIS REPORTS. The local builder routinely holds a run of
+	// this sender's transactions in a block that has not imported, so the pool's lowest sitting above
+	// the committed nonce is the ordinary in-flight window — it is the common case, not a fault, and a
+	// probe that fires on it says nothing. Only a gap the BUILDER cannot account for is unexplained,
+	// which is why builderNonce bounds this: lowest must also be past everything the builder claims.
+	if lowest, have := p.all.nonceFront(senderID); have && lowest > senderNonce &&
+		lowest > p.builderNonce[senderID]+1 {
+		p.frontHoles++
+		if p.frontHoles == 1 || p.frontHoles%2000 == 0 {
+			logger.Warn("[nonce-front] a front gap the open block does not account for",
+				"senderID", senderID, "onChainNonce", senderNonce, "lowestInPool", lowest,
+				"missingAtFront", lowest-senderNonce, "builderNonce", p.builderNonce[senderID],
+				"builderNonceHeld", p.hasBuilderNonce(senderID), "seenSoFar", p.frontHoles,
+				"discards", p.discardSummary(), "highestStateNonce", p.highestStateNonce[senderID])
+		}
+	}
 
 	noGapsNonce := senderNonce
 	cumulativeRequiredBalance := uint256.NewInt(0)
@@ -3051,4 +3130,28 @@ func (p *TxPool) OnBuilderNonces(byAddr map[common.Address]uint64) {
 	var announcements Announcements
 	p.promote(p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), &announcements, p.logger)
 	p.pending.EnforceBestInvariants()
+}
+
+// discardSummary renders every reason a transaction has left this pool, most frequent first.
+func (p *TxPool) discardSummary() string {
+	if len(p.discardCounts) == 0 {
+		return "none"
+	}
+	type rc struct {
+		r txpoolcfg.DiscardReason
+		n int
+	}
+	rows := make([]rc, 0, len(p.discardCounts))
+	for r, n := range p.discardCounts {
+		rows = append(rows, rc{r, n})
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].n > rows[j].n })
+	var b strings.Builder
+	for i, row := range rows {
+		if i > 0 {
+			b.WriteString(" ")
+		}
+		fmt.Fprintf(&b, "%s=%d", row.r.String(), row.n)
+	}
+	return b.String()
 }

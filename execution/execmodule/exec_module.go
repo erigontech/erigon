@@ -191,6 +191,9 @@ func (c *CacheView) HasStorage(address common.Address) (bool, error) {
 
 type ExecModule struct {
 	bacgroundCtx context.Context
+	// census* are the running totals behind [exec-census]: what was offered to execution and what
+	// came out into a body. See filterStreamLocked.
+	censusOffered, censusKept, censusStale, censusFuture, censusSeen, censusLastLogged uint64
 	// Snapshots + MDBX
 	blockReader services.FullBlockReader
 

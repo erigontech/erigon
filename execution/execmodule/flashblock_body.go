@@ -641,19 +641,41 @@ func (e *ExecModule) filterStreamLocked(ctx context.Context, newTxRLPs [][]byte)
 		// ⚠ IS THE STREAM ORDERED? A contiguous sequence from one sender, delivered in order, must produce
 		// no future nonces at all. These name what the round was actually offered against what execution
 		// expected, so "the stream is ordered" is a measurement rather than an assumption.
-		var firstN, lastN, firstFut, futExp uint64
-		if len(cands) > 0 {
-			firstN, lastN = cands[0].nonce, cands[len(cands)-1].nonce
-		}
+		// ⚠ A ROUND MIXES SENDERS, SO THERE IS NO SINGLE NONCE RANGE. This printed cands[0] and
+		// cands[last] as "firstNonce"/"lastNonce", which reads as a window but is just two unrelated
+		// senders' nonces — it produced lines like firstNonce=4650 lastNonce=318 and invited exactly
+		// the wrong reading. A nonce only means anything beside the sender it belongs to, so the gap
+		// is reported for ONE sender: the worst offender, and how far ahead it is.
+		senders := make(map[accounts.Address]struct{}, len(cands))
+		var futSender accounts.Address
+		var futNonce, futExp, futGap uint64
 		for _, c := range cands {
-			if exp := nextNonce(c.sender); c.nonce > exp {
-				firstFut, futExp = c.nonce, exp
-				break
+			senders[c.sender] = struct{}{}
+			if exp := nextNonce(c.sender); c.nonce > exp && c.nonce-exp > futGap {
+				futSender, futNonce, futExp, futGap = c.sender, c.nonce, exp, c.nonce-exp
 			}
 		}
 		e.logger.Info("[TRACE-filter] round", "block", e.flash.num, "in", len(newTxRLPs),
 			"kept", len(survivors), "stale", nStale, "future", nFuture, "seen", nSeen, "undecodable", nBad,
-			"firstNonce", firstN, "lastNonce", lastN, "firstFutureNonce", firstFut, "expectedThere", futExp)
+			"senders", len(senders), "worstFutureSender", futSender, "itsNonce", futNonce,
+			"itsExpected", futExp, "aheadBy", futGap)
+	}
+
+	// ⚠ EXECUTION'S HALF OF THE CONSERVATION CHECK: everything offered to exec, and everything that
+	// came out the far side into a body. A per-round line cannot show a stream that is re-offered
+	// forever — 4,034 deferred every block reads the same as 4,034 new arrivals — so the running
+	// totals are what separate "the work is arriving" from "the same work is going round again".
+	e.censusOffered += uint64(len(newTxRLPs))
+	e.censusKept += uint64(len(survivors))
+	e.censusStale += uint64(nStale)
+	e.censusFuture += uint64(nFuture)
+	e.censusSeen += uint64(nSeen)
+	if e.censusOffered-e.censusLastLogged >= 50_000 {
+		e.censusLastLogged = e.censusOffered
+		e.logger.Warn("[exec-census] offered in, kept out",
+			"offered", e.censusOffered, "kept", e.censusKept, "stale", e.censusStale,
+			"future", e.censusFuture, "seen", e.censusSeen,
+			"keptPerThousandOffered", e.censusKept*1000/max(e.censusOffered, 1))
 	}
 	return survivors, keptHashes, droppedHashes, nil
 }

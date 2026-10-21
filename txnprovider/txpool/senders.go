@@ -302,3 +302,20 @@ func EncodeSender(nonce uint64, balance uint256.Int, buffer []byte) {
 
 	buffer[0] = byte(fieldSet)
 }
+
+// nonceFront is the LOWEST nonce this pool holds for a sender — the counterpart of nonce(), which
+// returns the highest. The highest says nothing about whether the front of the sequence is present,
+// which is what decides whether execution can ever make progress on this sender.
+func (b *BySenderAndNonce) nonceFront(senderID uint64) (nonce uint64, ok bool) {
+	s := b.search
+	s.TxnSlot.SenderID = senderID
+	s.TxnSlot.Nonce = 0
+	b.tree.AscendGreaterOrEqual(s, func(mt *metaTxn) bool {
+		if mt.TxnSlot.SenderID == senderID {
+			nonce = mt.TxnSlot.Nonce
+			ok = true
+		}
+		return false
+	})
+	return nonce, ok
+}
