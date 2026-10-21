@@ -3902,6 +3902,9 @@ func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
 
 func newBALTransferBlock(t *testing.T) (*execmoduletester.ExecModuleTester, *types.Block, *ecdsa.PrivateKey) {
 	t.Helper()
+	prevParallel, prevIgnoreBAL := dbg.Exec3Parallel, dbg.IgnoreBAL
+	dbg.Exec3Parallel, dbg.IgnoreBAL = true, false
+	t.Cleanup(func() { dbg.Exec3Parallel, dbg.IgnoreBAL = prevParallel, prevIgnoreBAL })
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)

@@ -418,6 +418,9 @@ func (cfg SendersCfg) sendersRecoveredByExec(s *StageState, header *types.Header
 // returns the first sender recovery error, which takes precedence because the senders stage would have reported it first.
 func writeSendersRecoveredByExec(ctx context.Context, cfg ExecuteBlockCfg, tx kv.RwTx, from, to uint64, execFailed bool) error {
 	for blockNum := from; blockNum <= to; blockNum++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		hash, ok, err := cfg.blockReader.CanonicalHash(ctx, tx, blockNum)
 		if err != nil || !ok {
 			return err
