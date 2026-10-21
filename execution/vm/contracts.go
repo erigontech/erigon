@@ -262,25 +262,18 @@ func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
 // - the _remaining_ gas,
 // - any error that occurred
 func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
-	remaining, err := chargePrecompileGas(p, input, suppliedGas, tracer)
-	if err != nil {
-		return nil, suppliedGas, err
-	}
-	output, err := p.Run(input)
-	return output, remaining, err
-}
-
-func chargePrecompileGas(p PrecompiledContract, input []byte, suppliedGas mdgas.MdGas, tracer *tracing.Hooks) (mdgas.MdGas, error) {
 	gasCost := p.RequiredGas(input)
 	if suppliedGas.Execution < gasCost {
-		return suppliedGas, ErrOutOfGas
+		return nil, suppliedGas, ErrOutOfGas
 	}
+
 	remaining := suppliedGas
 	remaining.Execution -= gasCost
 	if tracer.HasGasChangeHook() {
 		tracer.EmitGasChange(suppliedGas, remaining, tracing.GasChangeCallPrecompiledContract)
 	}
-	return remaining, nil
+	output, err := p.Run(input)
+	return output, remaining, err
 }
 
 // ECRECOVER implemented as a native contract.
