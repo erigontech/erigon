@@ -2267,9 +2267,11 @@ func (result *execResult) calcFees(
 	coinbaseSelfdestructed := false
 	coinbaseCreatedContract := false
 	cbOverride := false
+	cbBalanceDeleted := false
 	if bw, ok := result.TxOut.GetBalance(result.Coinbase); ok {
 		newCoinbaseBalance = bw.Val
 		cbOverride = true
+		cbBalanceDeleted = bw.Deletes()
 	}
 	if nw, ok := result.TxOut.GetNonce(result.Coinbase); ok {
 		coinbaseNonce = nw.Val
@@ -2316,14 +2318,21 @@ func (result *execResult) calcFees(
 	// (the gas debit). calcFees must then re-materialize the coinbase (Balance + its
 	// AddressPath sibling) even when the net change is zero, else the worker's raw
 	// gas-debit value is left behind and a later whole-account read gets a stale balance.
-	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance || (cbOverride && !coinbaseNetDestructed)
+	// The worker destroyed the coinbase (its balance write is stamped ValueDeleted) and
+	// the fee left it empty: the account is gone. Emit the removal so the deletion
+	// verdict rides the write-set directly — otherwise WriteSet.Merge copies this fee
+	// phase's live balance over the worker's ValueDeleted and the deletion survives only
+	// because calc_state re-derives it (EIP-161 empty-removal). Matching serial, which
+	// removes the destroyed empty account.
+	coinbaseNetDeleted := cbOverride && cbBalanceDeleted && newCoinbaseBalance.IsZero()
+	emitCoinbase := (newCoinbaseBalance != oldCoinbaseBalance || (cbOverride && !coinbaseNetDestructed)) && !coinbaseNetDeleted
 	// The fee credit touches the coinbase, so a zero tip removes an empty one (EIP-161).
-	coinbaseEmptied := !emitCoinbase && coinbaseAcc != nil && !coinbaseSelfdestructed && newCoinbaseBalance.IsZero() &&
+	coinbaseEmptied := !emitCoinbase && !coinbaseNetDeleted && coinbaseAcc != nil && !coinbaseSelfdestructed && newCoinbaseBalance.IsZero() &&
 		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite &&
 		state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, result.Coinbase)
 
 	addWrites := &state.WriteSet{}
-	if coinbaseEmptied {
+	if coinbaseNetDeleted || coinbaseEmptied {
 		addWrites.SetEmptyRemoval(result.Coinbase, taskVersion)
 	}
 	if emitCoinbase {
