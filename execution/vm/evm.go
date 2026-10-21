@@ -44,6 +44,21 @@ func (evm *EVM) precompile(addr accounts.Address) (PrecompiledContract, bool) {
 	return p, ok
 }
 
+// runPrecompile puts the identity output into the buffer a RETURN of the callee frame would use.
+func (evm *EVM) runPrecompile(p PrecompiledContract, input []byte, gas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
+	if _, identity := p.(*dataCopy); identity && evm.depth > 0 && len(input) != 0 {
+		if buf := evm.outputBuffer(evm.depth+1, uint64(len(input))); buf != nil {
+			remaining, err := chargePrecompileGas(p, input, gas, tracer)
+			if err != nil {
+				return nil, gas, err
+			}
+			*buf = append((*buf)[:0], input...)
+			return slices.Clip(*buf), remaining, nil
+		}
+	}
+	return RunPrecompiledContract(p, input, gas, tracer)
+}
+
 // EVM is the Ethereum Virtual Machine base object and provides
 // the necessary tools to run a contract on the given state with
 // the provided context. It should be noted that any error
@@ -465,7 +480,7 @@ func (evm *EVM) Call(caller accounts.Address, addr accounts.Address, input []byt
 
 	switch {
 	case isPrecompile:
-		ret, gasRemaining, err = RunPrecompiledContract(p, input, gasRemaining, tracer)
+		ret, gasRemaining, err = evm.runPrecompile(p, input, gasRemaining, tracer)
 	case code.Len() > 0:
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.
@@ -540,7 +555,7 @@ func (evm *EVM) CallCode(caller accounts.Address, addr accounts.Address, input [
 
 	switch {
 	case isPrecompile:
-		ret, gasRemaining, err = RunPrecompiledContract(p, input, gasRemaining, tracer)
+		ret, gasRemaining, err = evm.runPrecompile(p, input, gasRemaining, tracer)
 	case code.Len() > 0:
 		contract := Contract{caller: caller, addr: caller, value: value, Code: code.Bytes, CodeHash: code.Hash}
 		ret, gasRemaining, gasUsed, err = evm.Run(contract, gasRemaining, input, false)
@@ -599,7 +614,7 @@ func (evm *EVM) DelegateCall(caller accounts.Address, callerAddress accounts.Add
 
 	switch {
 	case isPrecompile:
-		ret, gasRemaining, err = RunPrecompiledContract(p, input, gasRemaining, tracer)
+		ret, gasRemaining, err = evm.runPrecompile(p, input, gasRemaining, tracer)
 	case code.Len() > 0:
 		contract := Contract{caller: callerAddress, addr: caller, value: value, Code: code.Bytes, CodeHash: code.Hash}
 		ret, gasRemaining, gasUsed, err = evm.Run(contract, gasRemaining, input, false)
@@ -671,7 +686,7 @@ func (evm *EVM) StaticCall(caller accounts.Address, addr accounts.Address, input
 
 	switch {
 	case isPrecompile:
-		ret, gasRemaining, err = RunPrecompiledContract(p, input, gasRemaining, tracer)
+		ret, gasRemaining, err = evm.runPrecompile(p, input, gasRemaining, tracer)
 	case code.Len() > 0:
 		contract := Contract{caller: caller, addr: addr, Code: code.Bytes, CodeHash: code.Hash}
 		ret, gasRemaining, gasUsed, err = evm.Run(contract, gasRemaining, input, true)
