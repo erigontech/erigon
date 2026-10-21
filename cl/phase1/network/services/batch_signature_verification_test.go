@@ -4,7 +4,9 @@ import (
 	"context"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
@@ -23,6 +25,18 @@ func (s *blockingBanSentinel) BanPeer(context.Context, *sentinelproto.Peer, ...g
 	s.startedOnce.Do(func() { close(s.started) })
 	<-s.release
 	return &sentinelproto.EmptyMessage{}, nil
+}
+
+func newRepeatedSignatureEntry(signature byte, signatureCount int) *AggregateVerificationData {
+	signatures := make([][]byte, signatureCount)
+	for i := range signatures {
+		signatures[i] = []byte{signature}
+	}
+	return &AggregateVerificationData{
+		Signatures: signatures,
+		SignRoots:  make([][]byte, signatureCount),
+		Pks:        make([][]byte, signatureCount),
+	}
 }
 
 func TestBatchSignatureVerifierReportsEachEntryResult(t *testing.T) {
@@ -81,6 +95,134 @@ func TestBatchSignatureVerifierReportsEachEntryResult(t *testing.T) {
 		t.Fatal("invalid callback ran")
 	default:
 	}
+}
+
+func TestBatchSignatureVerifierChecksFailedBatchEntriesConcurrently(t *testing.T) {
+	saveSignatureGlobals(t)
+	previousGOMAXPROCS := runtime.GOMAXPROCS(2)
+	t.Cleanup(func() { runtime.GOMAXPROCS(previousGOMAXPROCS) })
+
+	synctest.Test(t, func(t *testing.T) {
+		firstStarted := make(chan struct{})
+		secondDone := make(chan struct{})
+		laterEntriesDone := make(chan struct{})
+		blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+			if len(signatures) > 1 {
+				return false, nil
+			}
+			signature := signatures[0][0]
+			switch signature {
+			case 1:
+				close(firstStarted)
+				<-laterEntriesDone
+			case 2:
+				<-firstStarted
+				close(secondDone)
+			case 3:
+				<-secondDone
+				close(laterEntriesDone)
+			}
+			return signature%2 == 1, nil
+		}
+
+		callbackOrder := make([]byte, 0, 2)
+		resultOrder := make(chan error, 3)
+		entries := make([]*AggregateVerificationData, 3)
+		for i := range entries {
+			signature := byte(i + 1)
+			entries[i] = &AggregateVerificationData{
+				Signatures: [][]byte{{signature}},
+				SignRoots:  [][]byte{{signature}},
+				Pks:        [][]byte{{signature}},
+				F:          func() { callbackOrder = append(callbackOrder, signature) },
+				result:     resultOrder,
+			}
+		}
+
+		verifier := NewBatchSignatureVerifier(t.Context(), nil)
+		callbacks, err := verifier.processSignatureVerification(entries)
+		require.ErrorIs(t, err, ErrInvalidBlsSignature)
+		require.NoError(t, <-resultOrder)
+		require.ErrorIs(t, <-resultOrder, ErrInvalidBlsSignature)
+		require.NoError(t, <-resultOrder)
+		for _, callback := range callbacks {
+			callback()
+		}
+		require.Equal(t, []byte{1, 3}, callbackOrder)
+	})
+}
+
+func TestBatchSignatureVerifierCapsFallbackWeightAtBudget(t *testing.T) {
+	saveSignatureGlobals(t)
+	const budget = 2
+	previousGOMAXPROCS := runtime.GOMAXPROCS(budget)
+	t.Cleanup(func() { runtime.GOMAXPROCS(previousGOMAXPROCS) })
+
+	synctest.Test(t, func(t *testing.T) {
+		blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+			if signatures[0][0] == 1 && signatures[len(signatures)-1][0] == 2 {
+				return false, nil
+			}
+			return signatures[0][0] == 1, nil
+		}
+
+		results := make(chan error, 2)
+		entries := []*AggregateVerificationData{newRepeatedSignatureEntry(1, 3), newRepeatedSignatureEntry(2, 1)}
+		for _, entry := range entries {
+			entry.result = results
+		}
+
+		verifier := NewBatchSignatureVerifier(t.Context(), nil)
+		callbacks, err := verifier.processSignatureVerification(entries)
+		require.ErrorIs(t, err, ErrInvalidBlsSignature)
+		require.NoError(t, <-results)
+		require.ErrorIs(t, <-results, ErrInvalidBlsSignature)
+		require.Len(t, callbacks, 1)
+	})
+}
+
+func TestBatchSignatureVerifierSharesFallbackConcurrencyBudget(t *testing.T) {
+	saveSignatureGlobals(t)
+	const budget = 4
+	previousGOMAXPROCS := runtime.GOMAXPROCS(budget)
+	t.Cleanup(func() { runtime.GOMAXPROCS(previousGOMAXPROCS) })
+
+	synctest.Test(t, func(t *testing.T) {
+		const batchCount = 3
+		releaseFallbacks := make(chan struct{})
+		var releaseOnce sync.Once
+		release := func() { releaseOnce.Do(func() { close(releaseFallbacks) }) }
+		t.Cleanup(release)
+		var inFlightWeight atomic.Int32
+		blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+			if signatures[0][0] == 1 && signatures[len(signatures)-1][0] == 2 {
+				return false, nil
+			}
+
+			weight := int32(len(signatures))
+			inFlight := inFlightWeight.Add(weight)
+			if inFlight > budget {
+				t.Errorf("fallback weight %d exceeds budget %d", inFlight, budget)
+			}
+			<-releaseFallbacks
+			inFlightWeight.Add(-weight)
+			return true, nil
+		}
+
+		verifier := NewBatchSignatureVerifier(t.Context(), nil)
+		var group sync.WaitGroup
+		group.Add(batchCount)
+		for range batchCount {
+			go func() {
+				defer group.Done()
+				_, _ = verifier.processSignatureVerification([]*AggregateVerificationData{newRepeatedSignatureEntry(1, 3), newRepeatedSignatureEntry(2, 1)})
+			}()
+		}
+		synctest.Wait()
+
+		release()
+		group.Wait()
+	})
 }
 
 func TestBatchSignatureVerifierContinuesAfterBlockingBan(t *testing.T) {

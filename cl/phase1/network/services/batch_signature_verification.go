@@ -4,7 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
+	"sync"
 	"time"
+
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/utils/bls"
@@ -30,6 +34,8 @@ type BatchSignatureVerifier struct {
 	syncCommitteeMessage       chan *AggregateVerificationData
 	voluntaryExitVerify        chan *AggregateVerificationData
 	peerBanQueue               chan *sentinelproto.Peer
+	fallbackVerificationBudget int64
+	fallbackVerificationLimit  *semaphore.Weighted
 	ctx                        context.Context
 }
 
@@ -46,6 +52,7 @@ type AggregateVerificationData struct {
 }
 
 func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinelproto.SentinelClient) *BatchSignatureVerifier {
+	fallbackVerificationBudget := int64(runtime.GOMAXPROCS(0))
 	verifier := &BatchSignatureVerifier{
 		ctx:                        ctx,
 		sentinel:                   sentinel,
@@ -55,6 +62,8 @@ func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinelproto.Senti
 		syncContributionVerify:     make(chan *AggregateVerificationData, 1024),
 		syncCommitteeMessage:       make(chan *AggregateVerificationData, 1024),
 		voluntaryExitVerify:        make(chan *AggregateVerificationData, 1024),
+		fallbackVerificationBudget: fallbackVerificationBudget,
+		fallbackVerificationLimit:  semaphore.NewWeighted(fallbackVerificationBudget),
 	}
 	if sentinel != nil {
 		verifier.peerBanQueue = make(chan *sentinelproto.Peer, peerBanQueueSize)
@@ -234,10 +243,25 @@ func (b *BatchSignatureVerifier) processSignatureVerification(aggregateVerificat
 
 // we could locate failing signature with binary search but for now let's choose simplicity over optimisation.
 func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerificationData []*AggregateVerificationData) []func() {
+	verificationResults := make([]struct {
+		valid bool
+		err   error
+	}, len(aggregateVerificationData))
+	var group sync.WaitGroup
+	for i, v := range aggregateVerificationData {
+		weight := min(int64(len(v.Signatures)), b.fallbackVerificationBudget)
+		_ = b.fallbackVerificationLimit.Acquire(context.Background(), weight)
+		group.Go(func() {
+			defer b.fallbackVerificationLimit.Release(weight)
+			verificationResults[i].valid, verificationResults[i].err = blsVerifyMultipleSignatures(v.Signatures, v.SignRoots, v.Pks)
+		})
+	}
+	group.Wait()
+
 	callbacks := make([]func(), 0, len(aggregateVerificationData))
 	var peerToBan *sentinelproto.Peer
-	for _, v := range aggregateVerificationData {
-		valid, err := blsVerifyMultipleSignatures(v.Signatures, v.SignRoots, v.Pks)
+	for i, v := range aggregateVerificationData {
+		valid, err := verificationResults[i].valid, verificationResults[i].err
 		if err != nil {
 			log.Debug("[BatchVerifier] signature verification failed", "err", err)
 			reported := v.report(err)
