@@ -634,8 +634,8 @@ func TestWarmup(t *testing.T) {
 	var scratch [66]byte
 	accountRecords := func() map[string][]byte {
 		return map[string][]byte{
-			string(AccountNodeKey(nil, nil)):       recordFixture(0, 0, 1<<2, 0, 0, nil, nil, nil),
-			string(AccountNodeKey([]byte{2}, nil)): recordFixture(0, 1, 1<<3, 1<<3, 0, nil, nil, nil),
+			string(AccountNodeKey(nil, nil)):       commitmenttest.Record(&commitmenttest.RecordSpec{ChildMask: 1 << 2}),
+			string(AccountNodeKey([]byte{2}, nil)): commitmenttest.Record(&commitmenttest.RecordSpec{ChildMask: 1 << 3, LeafMask: 1 << 3}),
 		}
 	}
 
@@ -692,7 +692,7 @@ func TestWarmup(t *testing.T) {
 	})
 
 	t.Run("step_self_extension_and_truncated", func(t *testing.T) {
-		record := recordFixture(hdrHasSelfExt, 0, 1<<4, 0, 0, extFixture([]byte{1, 2}), nil, nil)
+		record := commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasSelfExt, ChildMask: 1 << 4, SelfExtension: extFixture([]byte{1, 2})})
 		hashedKey := make([]byte, 64)
 		copy(hashedKey, []byte{1, 2, 4})
 		nextDepth, stop := warmupStepV3(record, hashedKey, 0)
@@ -712,15 +712,14 @@ func TestWarmup(t *testing.T) {
 	})
 
 	t.Run("step_plane_depth_and_extension_length", func(t *testing.T) {
-		record := recordFixture(hdrHasChildExt, 0, 1<<4, 0, 1<<4, nil, map[int][]byte{4: extFixture([]byte{1, 2})}, nil)
+		record := commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 1 << 4, ExtensionMask: 1 << 4, Extensions: [16][]byte{4: extFixture([]byte{1, 2})}})
 		hashedKey := make([]byte, 128)
 		hashedKey[64] = 4
 		nextDepth, stop := warmupStepV3(record, hashedKey, 64)
 		require.False(t, stop)
 		require.Equal(t, 67, nextDepth)
 
-		leafRecord := recordFixture(0, 0, 1<<4, 1<<4, 0, nil, nil,
-			map[int]leafFixture{4: {suffix: bytes.Repeat([]byte{0x0c}, 31), value: []byte{9}}})
+		leafRecord := commitmenttest.Record(&commitmenttest.RecordSpec{ChildMask: 1 << 4, LeafMask: 1 << 4, Leaves: [16]commitmenttest.Leaf{4: {Suffix: bytes.Repeat([]byte{0x0c}, 31), Value: []byte{9}}}})
 		nextDepth, stop = warmupStepV3(leafRecord, hashedKey, 64)
 		require.True(t, stop, "a storage-plane leaf must end the descent, not restart it")
 		require.NotEqual(t, 64, nextDepth, "restarting at 64 from the storage plane rewinds and re-reads the same record")

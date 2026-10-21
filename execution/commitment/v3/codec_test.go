@@ -383,28 +383,25 @@ func TestRecordCodec(t *testing.T) {
 				{
 					name:  "branch",
 					flags: 0,
-					data:  recordFixture(0, 3, 0x0003, 0, 0, nil, nil, nil),
+					data:  commitmenttest.Record(&commitmenttest.RecordSpec{ChildMask: 0x0003}),
 					depth: 3,
 				},
 				{
 					name:  "child extension",
 					flags: hdrHasChildExt,
-					data: recordFixture(hdrHasChildExt, 3, 0x0001, 0, 0x0001, nil,
-						map[int][]byte{0: extFixture([]byte{1, 2})}, nil),
+					data:  commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 0x0001, ExtensionMask: 0x0001, Extensions: [16][]byte{0: extFixture([]byte{1, 2})}}),
 					depth: 3,
 				},
 				{
 					name:  "leaf child",
 					flags: 0,
-					data: recordFixture(0, 3, 0x0001, 0x0001, 0, nil, nil,
-						map[int]leafFixture{0: {suffix: suffix, value: []byte{0x42}}}),
+					data:  commitmenttest.Record(&commitmenttest.RecordSpec{ChildMask: 0x0001, LeafMask: 0x0001, Leaves: [16]commitmenttest.Leaf{0: {Suffix: suffix, Value: []byte{0x42}}}}),
 					depth: 3,
 				},
 				{
 					name:  "self extension",
 					flags: hdrHasSelfExt,
-					data: recordFixture(hdrHasSelfExt, 0, 0x0001, 0, 0,
-						extFixture([]byte{3, 4, 5}), nil, nil),
+					data:  commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasSelfExt, ChildMask: 0x0001, SelfExtension: extFixture([]byte{3, 4, 5})}),
 					depth: 0,
 				},
 			}
@@ -436,7 +433,7 @@ func TestRecordCodec(t *testing.T) {
 
 				child := uint16(1)
 				ext := uint16(0)
-				extAt := make(map[int][]byte)
+				var extAt [16][]byte
 				if flags&hdrHasChildExt != 0 {
 					ext |= 1
 					extAt[0] = extFixture([]byte{1})
@@ -445,7 +442,7 @@ func TestRecordCodec(t *testing.T) {
 				if flags&hdrHasSelfExt != 0 {
 					self = extFixture([]byte{1})
 				}
-				data := recordFixture(flags, depth, child, 0, ext, self, extAt, nil)
+				data := commitmenttest.Record(&commitmenttest.RecordSpec{Flags: flags, ChildMask: child, ExtensionMask: ext, SelfExtension: self, Extensions: extAt})
 				wantErr := flags&hdrHasEmb != 0
 				t.Run(string(rune('a'+combination)), func(t *testing.T) {
 					err := Validate(data, depth)
@@ -458,11 +455,12 @@ func TestRecordCodec(t *testing.T) {
 			suffix := packPath(bytes.Repeat([]byte{1}, 60), nil)
 			extension := extFixture([]byte{6, 7, 8})
 			second := extFixture([]byte{9})
-			data := recordFixture(hdrHasChildExt, depth, 0x000f, 0x000a, 0x0005, nil,
-				map[int][]byte{0: extension, 2: second}, map[int]leafFixture{
-					1: {suffix: suffix, value: []byte{0x11, 0x12}},
-					3: {suffix: suffix, value: []byte{0x31}},
-				})
+			data := commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 0x000f, LeafMask: 0x000a, ExtensionMask: 0x0005,
+				Extensions: [16][]byte{0: extension, 2: second},
+				Leaves: [16]commitmenttest.Leaf{
+					1: {Suffix: suffix, Value: []byte{0x11, 0x12}},
+					3: {Suffix: suffix, Value: []byte{0x31}},
+				}})
 			require.NoError(t, Validate(data, depth))
 			r := Record{data: data, depth: depth}
 			l := r.layout()
@@ -488,7 +486,7 @@ func TestRecordCodec(t *testing.T) {
 				require.Equal(t, tc.value, gotValue)
 			}
 
-			root := recordFixture(hdrHasSelfExt, 0, 1, 0, 0, extFixture([]byte{1, 2}), nil, nil)
+			root := commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasSelfExt, ChildMask: 1, SelfExtension: extFixture([]byte{1, 2})})
 			require.Equal(t, extFixture([]byte{1, 2}), (Record{data: root, depth: 0}).SelfExt())
 		}},
 		{"E28/RecordDecodeLeafRoot", func(t *testing.T) {
@@ -503,11 +501,12 @@ func TestRecordCodec(t *testing.T) {
 			require.Equal(t, value, gotValue)
 		}},
 		{"E27/RecordDecodeNoAllocations", func(t *testing.T) {
-			data := recordFixture(hdrHasChildExt, 3, 0x000f, 0x000a, 0x0001, nil,
-				map[int][]byte{0: extFixture([]byte{6, 7})}, map[int]leafFixture{
-					1: {suffix: packPath(bytes.Repeat([]byte{1}, 60), nil), value: []byte{1}},
-					3: {suffix: packPath(bytes.Repeat([]byte{1}, 60), nil), value: []byte{3}},
-				})
+			data := commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 0x000f, LeafMask: 0x000a, ExtensionMask: 0x0001,
+				Extensions: [16][]byte{0: extFixture([]byte{6, 7})},
+				Leaves: [16]commitmenttest.Leaf{
+					1: {Suffix: packPath(bytes.Repeat([]byte{1}, 60), nil), Value: []byte{1}},
+					3: {Suffix: packPath(bytes.Repeat([]byte{1}, 60), nil), Value: []byte{3}},
+				}})
 			r := Record{data: data, depth: 3}
 			require.Zero(t, testing.AllocsPerRun(100, func() {
 				l := r.layout()
@@ -517,7 +516,7 @@ func TestRecordCodec(t *testing.T) {
 			}))
 		}},
 		{"E25/RecordDecodeRejectsMalformedRecords", func(t *testing.T) {
-			valid := recordFixture(0, 3, 1, 0, 0, nil, nil, nil)
+			valid := commitmenttest.Record(&commitmenttest.RecordSpec{ChildMask: 1})
 			tests := []struct {
 				name  string
 				data  []byte
@@ -525,12 +524,12 @@ func TestRecordCodec(t *testing.T) {
 				want  error
 			}{
 				{name: "truncated body", data: valid[:len(valid)-1], depth: 3, want: ErrRecordTruncated},
-				{name: "leaf outside child mask", data: recordFixture(0, 3, 1, 2, 0, nil, nil, nil), depth: 3, want: ErrRecordMasks},
-				{name: "extension overlaps leaf", data: recordFixture(hdrHasChildExt, 3, 1, 1, 1, nil, map[int][]byte{0: extFixture([]byte{1})}, nil), depth: 3, want: ErrRecordMasks},
+				{name: "leaf outside child mask", data: commitmenttest.Record(&commitmenttest.RecordSpec{ChildMask: 1, LeafMask: 2}), depth: 3, want: ErrRecordMasks},
+				{name: "extension overlaps leaf", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 1, LeafMask: 1, ExtensionMask: 1, Extensions: [16][]byte{0: extFixture([]byte{1})}}), depth: 3, want: ErrRecordMasks},
 				{name: "leaf root and self extension", data: append([]byte{hdrIsLeafRoot | hdrHasSelfExt}, make([]byte, 33)...), depth: 0, want: ErrRecordRoot},
-				{name: "self extension has two children", data: recordFixture(hdrHasSelfExt, 0, 3, 0, 0, extFixture([]byte{1}), nil, nil), depth: 0, want: ErrRecordRoot},
-				{name: "short extension trailer", data: recordFixture(hdrHasChildExt, 3, 1, 0, 1, nil, map[int][]byte{0: {3, 0x12}}, nil), depth: 3, want: ErrRecordTruncated},
-				{name: "embedded flag", data: recordFixture(hdrHasEmb, 3, 1, 0, 0, nil, nil, nil), depth: 3, want: ErrRecordFormat},
+				{name: "self extension has two children", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasSelfExt, ChildMask: 3, SelfExtension: extFixture([]byte{1})}), depth: 0, want: ErrRecordRoot},
+				{name: "short extension trailer", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 1, ExtensionMask: 1, Extensions: [16][]byte{0: {3, 0x12}}}), depth: 3, want: ErrRecordTruncated},
+				{name: "embedded flag", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasEmb, ChildMask: 1}), depth: 3, want: ErrRecordFormat},
 			}
 			for _, tt := range tests {
 				t.Run(tt.name, func(t *testing.T) {
@@ -658,22 +657,6 @@ func TestRecordCodec(t *testing.T) {
 	} {
 		t.Run(tc.name, tc.run)
 	}
-}
-
-type leafFixture struct {
-	suffix []byte
-	value  []byte
-}
-
-func recordFixture(flags byte, depth int, child, leaf, ext uint16, self []byte, extAt map[int][]byte, leafAt map[int]leafFixture) []byte {
-	spec := commitmenttest.RecordSpec{Flags: flags, ChildMask: child, LeafMask: leaf, ExtensionMask: ext, SelfExtension: self}
-	for nib, path := range extAt {
-		spec.Extensions[nib] = path
-	}
-	for nib, entry := range leafAt {
-		spec.Leaves[nib] = commitmenttest.Leaf{Suffix: entry.suffix, Value: entry.value}
-	}
-	return commitmenttest.Record(&spec)
 }
 
 func extFixture(path []byte) []byte {
