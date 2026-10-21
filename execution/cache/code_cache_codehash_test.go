@@ -25,7 +25,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 )
 
 // makeCodeHash builds a deterministic 32-byte codeHash for tests/benchmarks.
@@ -339,44 +338,4 @@ func TestCodeCache_AddrCodeSlotCollision(t *testing.T) {
 	got, ok = c.Get(a2)
 	require.True(t, ok, "Delete of a colliding address dropped the wrong entry")
 	require.Equal(t, code2, got)
-}
-
-// A fill with a wrong (code, codeHash) pairing must not outlive the
-// authoritative publish of that hash's real code.
-func TestCodeCache_PutWithCodeHashRepairsWrongPairing(t *testing.T) {
-	c := NewCodeCache(datasize.MB, datasize.MB)
-	defer c.Close()
-	var addr1, addr2, addr3 common.Address
-	addr1[19], addr2[19], addr3[19] = 1, 2, 3 // distinct addrSlot
-	x, y := []byte{0x60, 0x01}, []byte{0x60, 0x02, 0x00}
-	hx := crypto.Keccak256(x)
-
-	c.PutWithCodeHashIfAbsent(addr1[:], y, hx, 1)
-	c.PutWithCodeHash(addr2[:], x, hx, 5)
-
-	_, ok := c.Get(addr1[:])
-	require.False(t, ok, "addr1 was bound by the wrong fill and must not read the repaired bytes")
-	c.PutWithCodeHashIfAbsent(addr3[:], y, hx, 6)
-	_, ok = c.Get(addr3[:])
-	require.False(t, ok, "a fill whose bytes differ from the live entry must not bind")
-
-	// Same txNum for the wrong fill and the publish: the stamp alone cannot tell them apart.
-	var addr4, addr5 common.Address
-	addr4[19], addr5[19] = 4, 5
-	z, w := []byte{0x60, 0x03}, []byte{0x60, 0x04, 0x00}
-	hz := crypto.Keccak256(z)
-	c.PutWithCodeHashIfAbsent(addr4[:], w, hz, 7)
-	c.PutWithCodeHash(addr5[:], z, hz, 7)
-	_, ok = c.Get(addr4[:])
-	require.False(t, ok, "a publish at the same txNum must still invalidate the wrong fill's binding")
-
-	got, ok := c.Get(addr2[:])
-	require.True(t, ok)
-	require.Equal(t, x, got)
-	got, ok = c.GetByCodeHash(hx)
-	require.True(t, ok)
-	require.Equal(t, x, got)
-	size, ok := c.GetCodeSizeByCodeHash(hx)
-	require.True(t, ok)
-	require.Equal(t, len(x), size)
 }

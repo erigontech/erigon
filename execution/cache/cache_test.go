@@ -1548,7 +1548,7 @@ func TestStateCache_FillCodeUsesKnownHash(t *testing.T) {
 	t.Cleanup(c.Close)
 	addr := makeAddr(1)
 	code := makeCode(1)
-	codeHash := makeHash(1)
+	codeHash := crypto.Keccak256Hash(code)
 	view := c.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 100, true }))
 
 	view.FillCode(addr, code, codeHash[:], 10)
