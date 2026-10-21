@@ -271,10 +271,44 @@ run:
 					pc++
 					continue run
 				}
+			case ADDRESS:
+				if sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					callContext.gas, callContext.savedPC = gasLeft, pc
+					*callContext.Stack.pushRef() = *callContext.addressWord(addressWordSelf, callContext.Contract.Address())
+					gasLeft, pc = callContext.gas, callContext.savedPC
+					pc++
+					continue run
+				}
+			case ORIGIN:
+				if sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					callContext.gas, callContext.savedPC = gasLeft, pc
+					*callContext.Stack.pushRef() = *callContext.addressWord(addressWordOrigin, evm.Origin)
+					gasLeft, pc = callContext.gas, callContext.savedPC
+					pc++
+					continue run
+				}
+			case CALLER:
+				if sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					callContext.gas, callContext.savedPC = gasLeft, pc
+					*callContext.Stack.pushRef() = *callContext.addressWord(addressWordCaller, callContext.Contract.Caller())
+					gasLeft, pc = callContext.gas, callContext.savedPC
+					pc++
+					continue run
+				}
 			case CALLVALUE:
 				if sLen < stackLimit && gasLeft >= GasQuickStep {
 					gasLeft -= GasQuickStep
 					callContext.Stack.push(callContext.Contract.value)
+					pc++
+					continue run
+				}
+			case GASPRICE:
+				if sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					callContext.Stack.push(evm.GasPrice)
 					pc++
 					continue run
 				}

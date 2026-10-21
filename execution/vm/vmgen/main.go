@@ -76,7 +76,11 @@ func fastOps() []fastOp {
 		op("EQ", "opEq", "GasFastestStep", 2, 1),
 		op("AND", "opAnd", "GasFastestStep", 2, 1),
 		op("ISZERO", "opIszero", "GasFastestStep", 1, 1),
+		op("ADDRESS", "opAddress", "GasQuickStep", 0, 1),
+		op("ORIGIN", "opOrigin", "GasQuickStep", 0, 1),
+		op("CALLER", "opCaller", "GasQuickStep", 0, 1),
 		op("CALLVALUE", "opCallValue", "GasQuickStep", 0, 1),
+		op("GASPRICE", "opGasprice", "GasQuickStep", 0, 1),
 		{name: "MLOAD", execute: "opMload", gas: "GasFastestStep", pop: 1, push: 1, memorySize: "memoryMLoad", dynamicGas: "pureMemoryGascost", allocated: allocated32},
 		{name: "MSTORE", execute: "opMstore", gas: "GasFastestStep", pop: 2, memorySize: "memoryMStore", dynamicGas: "pureMemoryGascost", allocated: allocated32},
 		// MCOPY is in the jump table only from Cancun on.
@@ -168,7 +172,7 @@ func inlineBody(instructions []byte, o fastOp) string {
 }
 
 // outOfLine are the funcs run's inlined bodies call that Go does not inline.
-var outOfLine = []string{"Mul", "Div", "SetBytes", "ILsh", "validJumpdest", "Copy"}
+var outOfLine = []string{"Mul", "Div", "SetBytes", "ILsh", "validJumpdest", "Copy", "addressWord"}
 
 // saveAroundCalls stores gasLeft and pc in callContext before each statement of body
 // that calls an outOfLine func, and loads them back after it. Neither is then live
