@@ -19,10 +19,69 @@ package raw
 import (
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/stretchr/testify/require"
 )
+
+func TestBeaconStateReadersWaitForStateLock(t *testing.T) {
+	tests := map[string]func(*BeaconState) error{
+		"copy": func(source *BeaconState) error {
+			return source.CopyInto(New(source.BeaconConfig()))
+		},
+		"current sync committee branch": func(source *BeaconState) error {
+			_, err := source.CurrentSyncCommitteeBranch()
+			return err
+		},
+		"next sync committee branch": func(source *BeaconState) error {
+			_, err := source.NextSyncCommitteeBranch()
+			return err
+		},
+		"finality root branch": func(source *BeaconState) error {
+			_, err := source.FinalityRootBranch()
+			return err
+		},
+	}
+
+	for name, read := range tests {
+		t.Run(name, func(t *testing.T) {
+			source := New(&clparams.MainnetBeaconConfig)
+			source.mu.Lock()
+			done := make(chan error, 1)
+			go func() { done <- read(source) }()
+
+			select {
+			case err := <-done:
+				t.Fatalf("reader completed while state lock was held: %v", err)
+			case <-time.After(20 * time.Millisecond):
+			}
+
+			source.mu.Unlock()
+			select {
+			case err := <-done:
+				require.NoError(t, err)
+			case <-time.After(2 * time.Second):
+				t.Fatal("reader did not complete after state lock was released")
+			}
+		})
+	}
+}
+
+func TestBeaconStateCopyIntoSharesReadLock(t *testing.T) {
+	source := New(&clparams.MainnetBeaconConfig)
+	source.mu.RLock()
+	defer source.mu.RUnlock()
+	done := make(chan error, 1)
+	go func() { done <- source.CopyInto(New(source.BeaconConfig())) }()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("copy waited for a read lock held by another reader")
+	}
+}
 
 func TestBeaconStateCopyIntoDeepCopiesPtcWindow(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig

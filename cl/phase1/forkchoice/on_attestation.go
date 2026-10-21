@@ -118,7 +118,7 @@ func (f *ForkChoiceStore) verifyAttestationWithCheckpointState(
 	attestation *solid.Attestation,
 	fromBlock bool,
 ) (attestationIndicies []uint64, err error) {
-	targetState, err := f.getCheckpointState(target)
+	targetState, err := f.getCheckpointStateLocked(target)
 	if err != nil {
 		return nil, err
 	}

@@ -339,7 +339,7 @@ func TestExecutionPayloadServiceEmitsGossipEvent(t *testing.T) {
 	stateRoot := common.Hash{2}
 	forkchoiceMock.Blocks[blockRoot] = newTestGloasBlock(100, 7, stateRoot)
 	var stateCopies atomic.Int32
-	forkchoiceMock.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+	forkchoiceMock.GetStateAtBlockRootFn = func(common.Hash) (*state.CachingBeaconState, error) {
 		stateCopies.Add(1)
 		return nil, errors.New("unexpected state copy")
 	}

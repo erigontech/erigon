@@ -46,10 +46,13 @@ import (
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"golang.org/x/sync/singleflight"
 )
+
+var currentStateCopy = metrics.GetOrCreateSummary("caplin_forkchoice_current_state_copy")
 
 // ForkNode is a struct that represents a node in the fork choice tree.
 type ForkNode struct {
@@ -829,16 +832,55 @@ func (f *ForkChoiceStore) AnchorExecutionPayloadBuilderIndex() (uint64, bool) {
 	return f.anchorExecutionPayloadBuilderIndex, f.anchorHasExecutionPayloadBid
 }
 
-func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.forkGraph.GetState(blockRoot, alwaysCopy)
+func (f *ForkChoiceStore) copyCurrentStateLocked(blockRoot common.Hash) (*state.CachingBeaconState, bool, error) {
+	current := f.forkGraph.CurrentStateLocked(blockRoot)
+	if current == nil {
+		return nil, false, nil
+	}
+	start := time.Now()
+	defer currentStateCopy.ObserveDuration(start)
+	copied, err := current.Copy()
+	return copied, true, err
+}
+
+func (f *ForkChoiceStore) copyStateAtBlockRootLocked(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	copied, current, err := f.copyCurrentStateLocked(blockRoot)
+	if current || err != nil {
+		return copied, err
+	}
+	return f.forkGraph.ReplayState(blockRoot)
+}
+
+func (f *ForkChoiceStore) getStateLocked(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	if current := f.forkGraph.CurrentStateLocked(blockRoot); current != nil {
+		return current, nil
+	}
+	return f.forkGraph.ReplayState(blockRoot)
+}
+
+func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	var copied *state.CachingBeaconState
+	var current bool
+	var err error
+	func() {
+		f.mu.RLock()
+		defer f.mu.RUnlock()
+		copied, current, err = f.copyCurrentStateLocked(blockRoot)
+	}()
+	if current || err != nil {
+		return copied, err
+	}
+	return f.forkGraph.ReplayState(blockRoot)
 }
 
 func (f *ForkChoiceStore) ViewStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error {
 	f.mu.RLock()
-	defer f.mu.RUnlock()
-	blockState, err := f.forkGraph.GetState(blockRoot, false)
+	if current := f.forkGraph.CurrentStateLocked(blockRoot); current != nil {
+		defer f.mu.RUnlock()
+		return fn(current)
+	}
+	f.mu.RUnlock()
+	blockState, err := f.forkGraph.ReplayState(blockRoot)
 	if err != nil {
 		return err
 	}
@@ -1331,12 +1373,31 @@ func (f *ForkChoiceStore) ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.
 	return f.forkGraph.ReadEnvelopeFromDisk(blockRoot)
 }
 
+func (f *ForkChoiceStore) existingStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	st, err := f.GetStateAtBlockRoot(blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	if st == nil {
+		return nil, fork_graph.ErrStateNotFound
+	}
+	return st, nil
+}
+
 func (f *ForkChoiceStore) GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error) {
-	return f.forkGraph.GetBalances(blockRoot)
+	st, err := f.existingStateAtBlockRoot(blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	return st.Balances(), nil
 }
 
 func (f *ForkChoiceStore) GetInactivitiesScores(blockRoot common.Hash) (solid.Uint64ListSSZ, error) {
-	return f.forkGraph.GetInactivitiesScores(blockRoot)
+	st, err := f.existingStateAtBlockRoot(blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	return st.InactivityScores(), nil
 }
 
 func (f *ForkChoiceStore) GetPreviousParticipationIndicies(blockRoot common.Hash) (*solid.ParticipationBitList, error) {
@@ -1348,7 +1409,11 @@ func (f *ForkChoiceStore) GetPreviousParticipationIndicies(blockRoot common.Hash
 }
 
 func (f *ForkChoiceStore) GetValidatorSet(blockRoot common.Hash) (*solid.ValidatorSet, error) {
-	return f.forkGraph.GetValidatorSet(blockRoot)
+	st, err := f.existingStateAtBlockRoot(blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	return st.ValidatorSet(), nil
 }
 
 func (f *ForkChoiceStore) GetCurrentParticipationIndicies(blockRoot common.Hash) (*solid.ParticipationBitList, error) {

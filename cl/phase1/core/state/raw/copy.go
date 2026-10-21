@@ -25,6 +25,9 @@ import (
 )
 
 func (b *BeaconState) CopyInto(dst *BeaconState) error {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
 	dst.version = b.version
 	dst.genesisTime = b.genesisTime
 	dst.genesisValidatorsRoot = b.genesisValidatorsRoot
