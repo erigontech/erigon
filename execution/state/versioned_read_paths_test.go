@@ -296,7 +296,7 @@ func TestVersionedRead_DestructedStorageRecordsBALReadAfterRevert(t *testing.T) 
 	blockAccessList := io.AsBlockAccessList()
 	require.Len(t, blockAccessList, 1)
 	require.Equal(t, addr.Value(), blockAccessList[0].Address)
-	require.Equal(t, []accounts.StorageKey{key}, blockAccessList[0].StorageReads)
+	require.Equal(t, []common.Hash{key.Value()}, blockAccessList[0].StorageReads)
 }
 
 // A fee credit revives a destroyed account without writing a code-hash cell, so

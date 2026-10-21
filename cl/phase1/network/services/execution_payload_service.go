@@ -49,10 +49,11 @@ type pendingEnvelopeKey struct {
 }
 
 type pendingEnvelopeJob struct {
-	envelope   *cltypes.SignedExecutionPayloadEnvelope
-	ownedBytes uint64
-	receivedAt time.Time
-	processing atomic.Bool
+	envelope              *cltypes.SignedExecutionPayloadEnvelope
+	ownedBytes            uint64
+	receivedAt            time.Time
+	processing            atomic.Bool
+	finishPendingEnvelope func()
 }
 
 type pendingEnvelopeLookupRetry struct {
@@ -121,10 +122,10 @@ func (s *executionPayloadService) newPendingQueue(ctx context.Context) *pendingJ
 	},
 		s.tryProcessPendingEnvelope,
 		func(_ context.Context, _ pendingEnvelopeKey, job *pendingEnvelopeJob) {
-			s.releasePendingEnvelopeBytes(job.ownedBytes)
+			s.releasePendingEnvelope(job)
 		},
 		func(key pendingEnvelopeKey, job *pendingEnvelopeJob) {
-			s.releasePendingEnvelopeBytes(job.ownedBytes)
+			s.releasePendingEnvelope(job)
 			if job.envelope != nil && job.envelope.Message != nil {
 				seenKey := seenEnvelopeKey{key.blockRoot, job.envelope.Message.BuilderIndex}
 				s.clearPendingLookupRetryIfUnused(seenKey)
@@ -248,7 +249,7 @@ func (s *executionPayloadService) processMessage(
 	// [IGNORE] The envelope's block root has been seen (via gossip or non-gossip sources)
 	// A client MAY queue payload for processing once the block is retrieved.
 	if !blockKnown || block == nil {
-		queued, err := s.queuePendingEnvelope(beaconBlockRoot, signedEnvelope, receivedAt)
+		queued, err := s.queuePendingEnvelope(beaconBlockRoot, signedEnvelope, receivedAt, true)
 		if err != nil {
 			return fmt.Errorf("%w: %w", errEnvelopeBlockUnavailable, err)
 		}
@@ -290,7 +291,7 @@ func (s *executionPayloadService) processMessage(
 		}
 		if err != nil {
 			if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeAdmissionBusy) {
-				queued, queueErr := s.queuePendingEnvelope(beaconBlockRoot, signedEnvelope, receivedAt)
+				queued, queueErr := s.queuePendingEnvelope(beaconBlockRoot, signedEnvelope, receivedAt, false)
 				if queueErr != nil {
 					return fmt.Errorf("%w: %w", ErrIgnore, queueErr)
 				}
@@ -386,7 +387,7 @@ func (s *executionPayloadService) emitExecutionPayloadGossip(block *cltypes.Sign
 	})
 }
 
-func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, receivedAt time.Time) (bool, error) {
+func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, receivedAt time.Time, holdPreparation bool) (bool, error) {
 	envelopeHash, err := envelope.HashSSZ()
 	if err != nil {
 		return false, fmt.Errorf("failed to hash envelope for pending queue: %w", err)
@@ -415,12 +416,23 @@ func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, en
 		return false, fmt.Errorf("pending execution payload envelope capacity reached: %w", errPendingJobQueueFull)
 	}
 	s.pendingBytes.Store(currentBytes + ownedBytes64)
-	s.pending.storeReserved(key, &pendingEnvelopeJob{
+	job := &pendingEnvelopeJob{
 		envelope:   envelope,
 		ownedBytes: ownedBytes64,
 		receivedAt: receivedAt,
-	})
+	}
+	if holdPreparation {
+		job.finishPendingEnvelope = s.forkchoiceStore.BeginPendingPayloadEnvelope(blockRoot)
+	}
+	s.pending.storeReserved(key, job)
 	return true, nil
+}
+
+func (s *executionPayloadService) releasePendingEnvelope(job *pendingEnvelopeJob) {
+	if job.finishPendingEnvelope != nil {
+		job.finishPendingEnvelope()
+	}
+	s.releasePendingEnvelopeBytes(job.ownedBytes)
 }
 
 func (s *executionPayloadService) releasePendingEnvelopeBytes(ownedBytes uint64) {

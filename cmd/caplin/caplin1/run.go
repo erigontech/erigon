@@ -493,7 +493,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 
 	peerDasState.SetLocalNodeID(localNode)
 	gossipManager.SetLocalNodeID(localNode.ID())
-	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock, state)
+	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock)
 	gossipManager.SetPeerBanner(beaconRpc)
 	peerDas := das.NewPeerDas(beaconRpc, beaconConfig, &config, columnStorage, blobStorage, sentinel, localNode.ID(), ethClock, peerDasState, gossipManager, rcsn, indexDB)
 	forkChoice.InitPeerDas(peerDas)   // hack init
@@ -520,6 +520,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		gossipManager,
 		forkChoice,
 		ethClock,
+		beaconConfig,
 		syncedDataManager.ActiveValidatorCount,
 		blockService,
 		attesterSlashingService,

@@ -201,6 +201,10 @@ type ExecutionModule interface {
 	// chain.
 	IsCanonicalHash(ctx context.Context, blockHash common.Hash) (bool, error)
 
+	// IsValidated reports whether a payload with blockHash already passed
+	// validation.
+	IsValidated(blockHash common.Hash) bool
+
 	// GetHeaderHashNumber returns the block number for blockHash, or nil
 	// when the hash is unknown.
 	GetHeaderHashNumber(ctx context.Context, blockHash common.Hash) (*uint64, error)
