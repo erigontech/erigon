@@ -197,6 +197,50 @@ func TestNewPayloadV2WithdrawalsValidation(t *testing.T) {
 	}
 }
 
+func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
+	t.Parallel()
+
+	const gasLimit = 4 * 16_800 // the per-transaction minimum after London
+	for _, test := range []struct {
+		txCount    int
+		wantStatus engine_types.EngineStatus
+	}{
+		{4, engine_types.SyncingStatus},
+		{5, engine_types.InvalidStatus},
+	} {
+		t.Run(fmt.Sprintf("%d txs", test.txCount), func(t *testing.T) {
+			t.Parallel()
+
+			to := common.Address{0x1}
+			txs := make(types.Transactions, test.txCount)
+			for i := range txs {
+				txs[i] = &types.LegacyTx{CommonTx: types.CommonTx{Nonce: uint64(i), To: &to, GasLimit: 21_000}}
+			}
+			header := makeParentHeader(1001)
+			header.ParentHash = common.Hash{0x1}
+			header.UncleHash = empty.UncleHash
+			header.GasLimit = gasLimit
+			header.TxHash = types.DeriveSha(txs)
+			withdrawals := types.Withdrawals{}
+			withdrawalsHash := types.DeriveSha(withdrawals)
+			header.WithdrawalsHash = &withdrawalsHash
+			block := types.NewBlockFromStorage(header.Hash(), header, txs, nil, withdrawals, nil)
+			payload, err := engine_types.ExecutionPayloadFromBlock(block)
+			require.NoError(t, err)
+
+			cfg := preCancunChainConfig()
+			stub := &stubExecutionModule{}
+			downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+			srv.test = true
+
+			status, err := srv.NewPayloadV2(t.Context(), payload)
+			require.NoError(t, err)
+			require.Equal(t, test.wantStatus, status.Status)
+		})
+	}
+}
+
 func TestForkchoiceUpdatedV2RejectsNullWithdrawalWhenSyncing(t *testing.T) {
 	t.Parallel()
 

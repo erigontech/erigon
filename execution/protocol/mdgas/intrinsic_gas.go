@@ -292,6 +292,21 @@ func MinTxGas(isEIP2780 bool) uint64 {
 	return params.TxGas
 }
 
+// MinTxBlockGas is the least block gas a non-AA transaction uses: MinTxGas less
+// the largest refund. Since Prague the EIP-7623 floor is not refundable, and
+// since Amsterdam block gas does not count refunds (EIP-7778).
+func MinTxBlockGas(isLondon, isPrague, isAmsterdam bool) uint64 {
+	minTxGas := MinTxGas(isAmsterdam)
+	switch {
+	case isPrague:
+		return minTxGas
+	case isLondon:
+		return minTxGas - minTxGas/params.RefundQuotientEIP3529
+	default:
+		return minTxGas - minTxGas/params.RefundQuotient
+	}
+}
+
 // toWordSize returns the ceiled word size required for memory expansion.
 func toWordSize(size uint64) uint64 {
 	if size > math.MaxUint64-31 {

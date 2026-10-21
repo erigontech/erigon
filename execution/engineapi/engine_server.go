@@ -56,6 +56,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -302,6 +303,17 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 	var bloom types.Bloom
 	copy(bloom[:], req.LogsBloom)
+
+	if !e.config.AllowAA {
+		blockNum, blockTime := req.BlockNumber.Uint64(), uint64(req.Timestamp)
+		minTxGas := mdgas.MinTxBlockGas(e.config.IsLondon(blockNum), e.config.IsPrague(blockTime), e.config.IsAmsterdam(blockTime))
+		if uint64(len(req.Transactions)) > uint64(req.GasLimit)/minTxGas {
+			return &engine_types.PayloadStatus{
+				Status:          engine_types.InvalidStatus,
+				ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("too many transactions for gas limit: %d", len(req.Transactions))),
+			}, nil
+		}
+	}
 
 	var err error
 	txs := make([][]byte, len(req.Transactions))
