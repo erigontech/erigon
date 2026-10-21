@@ -52,7 +52,6 @@ var (
 	errHeadTooFarBack           = errors.New("head state is too far behind the slot to prepare")
 	errPreparationHeadChanged   = errors.New("selected head changed while preparing payload")
 	errBlockWorkInFlight        = errors.New("block production, publication, or adoption is in progress")
-	errPreparationTooEarly      = errors.New("slot is too far away to prime payload production")
 	errPreparationTooLate       = errors.New("slot is too close to prime a payload production would use")
 	errGloasPayloadPending      = errors.New("gloas parent payload decision is not ready")
 	errForkChoiceHeadChanged    = errors.New("fork choice head changed")
@@ -387,7 +386,7 @@ func (a *ApiHandler) preparePayloadLoopWith(
 		currentSlotStart := slotStart.Add(-slotDuration)
 		lead := time.Until(slotStart)
 		if lead > slotDuration {
-			observePreparationOutcome(errPreparationTooEarly)
+			payloadPreparationOutcomes.WithLabelValues("too_early").Inc()
 			continue
 		}
 		if lead <= minimumLead {
@@ -526,8 +525,6 @@ func observePreparationOutcome(err error) {
 		reason = "stale_head"
 	case errors.Is(err, errBlockWorkInFlight), errors.Is(err, chainreader.ErrExecutionBusy), errors.Is(err, forkchoice.ErrPayloadImportInProgress):
 		reason = "busy"
-	case errors.Is(err, errPreparationTooEarly):
-		reason = "too_early"
 	case errors.Is(err, errPreparationTooLate), errors.Is(err, context.DeadlineExceeded):
 		reason = "late"
 	case errors.Is(err, errGloasPathNeedsForkChoice):
@@ -709,7 +706,7 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	}
 
 	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
-		return key, err
+		return key, fmt.Errorf("%w: process slots: %w", errPreparationDerivation, err)
 	}
 	stateWork := time.Since(stateWorkStart)
 	if lookupAfterAdvance {

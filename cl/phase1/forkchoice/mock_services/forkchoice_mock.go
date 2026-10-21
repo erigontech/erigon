@@ -42,8 +42,6 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-// Make mocks with maps and simple setters and getters, panic on methods from ForkChoiceStorageWriter
-
 type ForkChoiceStorageMock struct {
 	PreparationImports                    forkchoice.PayloadPreparationImports
 	ProposerLookaheadVal                  solid.Uint64VectorSSZ
@@ -158,9 +156,6 @@ func (f *ForkChoiceStorageMock) pendingEnvelopeSlot(root common.Hash) (uint64, b
 	}
 	if block := f.Blocks[root]; block != nil && block.Block != nil {
 		return block.Block.Slot, true
-	}
-	if header := f.Headers[root]; header != nil {
-		return header.Slot, true
 	}
 	return 0, false
 }

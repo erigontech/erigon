@@ -198,10 +198,16 @@ func newPreparationCollectionFixture(t *testing.T, path preparationCollectionPat
 	fixture := &preparationCollectionFixture{
 		handler: handler, engine: engine, cfg: cfg, headState: headState, productionState: productionState,
 		parentHash: parent.Hash(), fullHash: full.Hash(), baseRoot: baseRoot, currentSlot: currentSlot,
-		targetSlot: targetSlot, version: version, proposer: proposer, slotStart: time.Now().Add(4 * time.Second),
+		targetSlot: targetSlot, version: version, proposer: proposer,
 	}
 	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
-	clock.EXPECT().GetSlotTime(targetSlot).DoAndReturn(func(uint64) time.Time { return fixture.slotStart }).AnyTimes()
+	clock.EXPECT().GetSlotTime(targetSlot).DoAndReturn(func(uint64) time.Time {
+		// Only collection timing depends on elapsed wall-clock time in this test.
+		if fixture.slotStart.IsZero() {
+			return time.Now().Add(time.Duration(cfg.SecondsPerSlot) * time.Second)
+		}
+		return fixture.slotStart
+	}).AnyTimes()
 	handler.ethClock = clock
 	return fixture
 }

@@ -52,7 +52,7 @@ type ForkChoiceStorageReader interface {
 	HighestSeen() uint64
 	HasImportedDescendantAfter(root common.Hash, slot uint64) bool
 	BlockProcessing() bool
-	TryBeginPayloadPreparation(context.Context, uint64, uint64) (context.Context, func() bool, bool)
+	TryBeginPayloadPreparation(ctx context.Context, firstSlot, lastSlot uint64) (attemptCtx context.Context, finish func() bool, ok bool)
 	JustifiedCheckpoint() solid.Checkpoint
 	JustifiedSlot() uint64
 	ProposerBoostRoot() common.Hash

@@ -76,22 +76,22 @@ func (p *PayloadPreparationImports) TryBegin(
 		cancel(context.Canceled)
 		return attempt.interrupted.Load()
 	}
-	clear := true
+	available := true
 	p.active.Range(func(_, value any) bool {
 		slot := value.(uint64)
-		clear = slot < firstSlot || slot > lastSlot
-		return clear
+		available = slot < firstSlot || slot > lastSlot
+		return available
 	})
-	if clear && blockSlot != nil {
+	if available && blockSlot != nil {
 		p.pendingEnvelopes.Range(func(_, value any) bool {
 			slot, known := blockSlot(value.(common.Hash))
 			// Include the head slot so queued gossip envelopes get import priority before EMPTY fallback preparation.
-			clear = !known || slot < firstSlot || slot > lastSlot
-			return clear
+			available = !known || slot < firstSlot || slot > lastSlot
+			return available
 		})
 	}
-	clear = clear && (pending == nil || !pending())
-	if !clear || ctx.Err() != nil {
+	available = available && (pending == nil || !pending())
+	if !available || ctx.Err() != nil {
 		p.preparing.CompareAndSwap(attempt, nil)
 		cancel(ErrPayloadImportInProgress)
 		return ctx, nil, false

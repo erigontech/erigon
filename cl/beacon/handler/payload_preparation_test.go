@@ -1920,44 +1920,72 @@ func TestPreparePayloadLoopRetriesExecutionFailures(t *testing.T) {
 	}
 }
 
-func TestPreparePayloadLoopMemoizesWithdrawalFailureUntilHeadChanges(t *testing.T) {
-	_, _, _, _, head, handler, _, synced, _, validators := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
-	handler.beaconChainCfg.SecondsPerSlot = 1
-	targetSlot := head.Slot() + 1
-	proposer, err := head.GetBeaconProposerIndexForSlot(targetSlot)
-	require.NoError(t, err)
-	validators.SetFeeRecipient(proposer, common.Address{1})
-	head.SetNextWithdrawalValidatorIndex(uint64(head.ValidatorLength()))
-	root := common.Hash{1}
-	ticks, views := 0, 0
-	syncedMock := synced.(*sync_mock_services.MockSyncedData)
-	syncedMock.EXPECT().SelectedHead().DoAndReturn(func() (common.Hash, uint64, bool) {
-		ticks++
-		if ticks >= 3 {
-			root = common.Hash{2}
-		}
-		return root, head.Slot(), true
-	}).AnyTimes()
-	syncedMock.EXPECT().HeadRoot().DoAndReturn(func() common.Hash { return root }).AnyTimes()
-	syncedMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
-		views++
-		return view(head, root, head.Slot())
-	}).AnyTimes()
-	synctest.Test(t, func(t *testing.T) {
-		clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
-		clock.EXPECT().GetCurrentSlot().Return(head.Slot()).AnyTimes()
-		clock.EXPECT().GetSlotTime(targetSlot).DoAndReturn(func(uint64) time.Time { return time.Now().Add(750 * time.Millisecond) }).AnyTimes()
-		handler.ethClock = clock
-		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-		defer cancel()
-		handler.preparePayloadLoopWith(ctx, func(ctx context.Context, key preparationKey, scratch *payloadPreparationScratch) (preparationKey, error) {
-			outcome, err := handler.preparePayloadForWithScratch(ctx, key, scratch)
-			require.ErrorContains(t, err, "next_withdrawal_validator_index")
-			return outcome, err
+func TestPreparePayloadLoopMemoizesDerivationFailureUntilHeadChanges(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		invalidate func(*testing.T, *state.CachingBeaconState)
+		failure    string
+	}{
+		{
+			name: "withdrawals",
+			invalidate: func(_ *testing.T, head *state.CachingBeaconState) {
+				head.SetNextWithdrawalValidatorIndex(uint64(head.ValidatorLength()))
+			},
+			failure: "next_withdrawal_validator_index",
+		},
+		{
+			name: "slot_transition",
+			invalidate: func(t *testing.T, head *state.CachingBeaconState) {
+				slotsPerEpoch := head.BeaconConfig().SlotsPerEpoch
+				require.NoError(t, transition.DefaultMachine.ProcessSlots(head, (head.Slot()/slotsPerEpoch+1)*slotsPerEpoch-1))
+				require.NoError(t, head.SetValidatorSlashed(0, false))
+				require.NoError(t, head.SetWithdrawableEpochForValidatorAtIndex(0, 0))
+				head.GetPendingConsolidations().Clear()
+				head.AppendPendingConsolidation(&solid.PendingConsolidation{SourceIndex: 0, TargetIndex: uint64(head.ValidatorLength())})
+			},
+			failure: "invalid validator index",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, _, _, head, handler, _, synced, _, validators := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+			handler.beaconChainCfg.SecondsPerSlot = 1
+			tc.invalidate(t, head)
+			targetSlot := head.Slot() + 1
+			proposer, err := head.GetBeaconProposerIndexForSlot(targetSlot)
+			require.NoError(t, err)
+			validators.SetFeeRecipient(proposer, common.Address{1})
+			root := common.Hash{1}
+			ticks, views := 0, 0
+			syncedMock := synced.(*sync_mock_services.MockSyncedData)
+			syncedMock.EXPECT().SelectedHead().DoAndReturn(func() (common.Hash, uint64, bool) {
+				ticks++
+				if ticks >= 3 {
+					root = common.Hash{2}
+				}
+				return root, head.Slot(), true
+			}).AnyTimes()
+			syncedMock.EXPECT().HeadRoot().DoAndReturn(func() common.Hash { return root }).AnyTimes()
+			syncedMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+				views++
+				return view(head, root, head.Slot())
+			}).AnyTimes()
+			synctest.Test(t, func(t *testing.T) {
+				clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+				clock.EXPECT().GetCurrentSlot().Return(targetSlot - 1).AnyTimes()
+				clock.EXPECT().GetSlotTime(targetSlot).DoAndReturn(func(uint64) time.Time { return time.Now().Add(750 * time.Millisecond) }).AnyTimes()
+				handler.ethClock = clock
+				ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+				defer cancel()
+				handler.preparePayloadLoopWith(ctx, func(ctx context.Context, key preparationKey, scratch *payloadPreparationScratch) (preparationKey, error) {
+					outcome, err := handler.preparePayloadForWithScratch(ctx, key, scratch)
+					require.ErrorContains(t, err, tc.failure)
+					return outcome, err
+				})
+			})
+			require.GreaterOrEqual(t, ticks, 4)
+			require.Equal(t, 2, views)
 		})
-	})
-	require.GreaterOrEqual(t, ticks, 4)
-	require.Equal(t, 2, views)
+	}
 }
 
 func TestPayloadPreparationCountsOutcomes(t *testing.T) {
