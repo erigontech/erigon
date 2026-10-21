@@ -18,11 +18,13 @@ package state_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"math"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -548,6 +550,18 @@ func TestPBinRangeWriterRowsLandInLeafStampRange(t *testing.T) {
 	}
 }
 
+func TestPBinRangeWriterFactoryMatchesSequentialEngine(t *testing.T) {
+	selectPBinRangeWriterHash(t)
+	for _, corpus := range pbinRangeWriterCorpora() {
+		t.Run(corpus.name, func(t *testing.T) {
+			want := runPBinRangeWriterCorpus(t, corpus.leaves, 100000)
+			for _, maxOps := range []int{100000, 1000, 7, 1} {
+				require.Equal(t, want, runPBinRangeWriterCorpusWith(t, corpus.leaves, maxOps, 4), "maxOps=%d", maxOps)
+			}
+		})
+	}
+}
+
 func TestPBinRangeWriterFewerOpsThanPartitions(t *testing.T) {
 	selectPBinRangeWriterHash(t)
 	var leaves []state.PBinLeaf
@@ -639,22 +653,54 @@ type pbinRangeWriterEntry struct {
 
 func runPBinRangeWriterCorpus(t *testing.T, leaves []state.PBinLeaf, maxOps int) pbinRangeWriterSnapshot {
 	t.Helper()
+	return runPBinRangeWriterCorpusWith(t, leaves, maxOps, 0)
+}
+
+type pbinRangeWriterRun struct {
+	agg      *state.Aggregator
+	tx       kv.TemporalRwTx
+	domains  *execctx.SharedDomains
+	writer   *state.PBinRangeWriter
+	activity *atomic.Int32
+}
+
+func openPBinRangeWriterRun(t testing.TB, maxOps, workers int) *pbinRangeWriterRun {
+	t.Helper()
 	db, agg := commitmenttemporal.Open(t, 8)
 	writePBinRangeWriterAccounts(t, db, 32)
 	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 3, unboundedFinalityCtx, false))
 	agg.WaitForFiles()
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
-	defer tx.Rollback()
+	t.Cleanup(tx.Rollback)
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantCommitmentV3
 	cfg.EnableTrieWarmup = false
-	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(kv.CommitmentBinDomain), execctx.WithoutCommitmentSeek())
+	options := []execctx.SharedDomainOption{execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(kv.CommitmentBinDomain), execctx.WithoutCommitmentSeek()}
+	if workers > 0 {
+		cfg.WarmupNumWorkers = workers
+		options = append(options, execctx.WithTrieConfig(cfg), execctx.WithParaTrieDB(db))
+	}
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), options...)
 	require.NoError(t, err)
-	defer domains.Close()
-	writer, err := state.NewPBinRangeWriterWithLimitsForTest(agg, kv.CommitmentBinDomain, 23, maxOps, 1<<30)
+	t.Cleanup(domains.Close)
+	run := &pbinRangeWriterRun{agg: agg, tx: tx, domains: domains, activity: new(atomic.Int32)}
+	if workers > 0 {
+		activity, ok := domains.GetCommitmentCtx().Trie().(interface{ SetCoreActivityHook(func(bool)) })
+		require.True(t, ok)
+		activity.SetCoreActivityHook(func(active bool) {
+			if active {
+				run.activity.Add(1)
+			}
+		})
+	}
+	run.writer, err = state.NewPBinRangeWriterWithLimitsForTest(agg, kv.CommitmentBinDomain, 23, maxOps, 1<<30)
 	require.NoError(t, err)
-	root, err := writer.WriteAtBlock(t.Context(), tx, domains, func(emit func(state.PBinLeaf) error) error {
+	return run
+}
+
+func (r *pbinRangeWriterRun) write(ctx context.Context, leaves []state.PBinLeaf) (common.Hash, error) {
+	return r.writer.WriteAtBlock(ctx, r.tx, r.domains, func(emit func(state.PBinLeaf) error) error {
 		for _, leaf := range leaves {
 			if emitErr := emit(leaf); emitErr != nil {
 				return emitErr
@@ -662,6 +708,14 @@ func runPBinRangeWriterCorpus(t *testing.T, leaves []state.PBinLeaf, maxOps int)
 		}
 		return nil
 	}, 0)
+}
+
+func runPBinRangeWriterCorpusWith(t *testing.T, leaves []state.PBinLeaf, maxOps, workers int) pbinRangeWriterSnapshot {
+	t.Helper()
+	run := openPBinRangeWriterRun(t, maxOps, workers)
+	agg := run.agg
+	phaseActivity := run.activity
+	root, err := run.write(t.Context(), leaves)
 	require.NoError(t, err)
 	pbinReviewRewritePersistedStateKey(t, agg)
 	out := agg.BeginFilesRo()
@@ -690,6 +744,9 @@ func runPBinRangeWriterCorpus(t *testing.T, leaves []state.PBinLeaf, maxOps int)
 	}
 	require.NotEmpty(t, snapshot.files)
 	require.NotNil(t, snapshot.state)
+	if workers > 0 && maxOps > 1 {
+		require.Greater(t, phaseActivity.Load(), int32(1), "maxOps=%d: the parallel round did not run", maxOps)
+	}
 	return snapshot
 }
 
@@ -807,7 +864,7 @@ func pbinRangeWriterRows(t *testing.T, at *state.AggregatorRoTx) map[string][]by
 	return rows
 }
 
-func selectPBinRangeWriterHash(t *testing.T) {
+func selectPBinRangeWriterHash(t testing.TB) {
 	commitmentflags.Restore(t)
 	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
 	statecfg.ExperimentalHexBinCommitment = true
@@ -815,7 +872,7 @@ func selectPBinRangeWriterHash(t *testing.T) {
 	require.NoError(t, eip8297.SetHashSuite(eip8297.HashBlake3))
 }
 
-func writePBinRangeWriterAccounts(t *testing.T, db kv.TemporalRwDB, endTxNum uint64) {
+func writePBinRangeWriterAccounts(t testing.TB, db kv.TemporalRwDB, endTxNum uint64) {
 	t.Helper()
 	for i := uint64(0); i < endTxNum; i += 8 {
 		func() {

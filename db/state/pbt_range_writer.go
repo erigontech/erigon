@@ -96,9 +96,42 @@ type pbinRangeWriterWrite struct {
 type pbinRangeWriterOverlay struct {
 	commitment.PatriciaContext
 	writes   map[string]pbinRangeWriterWrite
+	fresh    bool
 	release  func([]byte)
 	write    func([]byte, []byte, []byte) error
 	finished func() error
+}
+
+func (o *pbinRangeWriterOverlay) Absent(key []byte) bool {
+	if !o.fresh {
+		return false
+	}
+	_, held := o.writes[string(key)]
+	return !held
+}
+
+func (o *pbinRangeWriterOverlay) DecorateWorkerContext(worker commitment.PatriciaContext) commitment.PatriciaContext {
+	return &pbinRangeWriterView{PatriciaContext: worker, overlay: o}
+}
+
+type pbinRangeWriterView struct {
+	commitment.PatriciaContext
+	overlay *pbinRangeWriterOverlay
+}
+
+func (v *pbinRangeWriterView) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	if write, ok := v.overlay.writes[string(prefix)]; ok {
+		return bytes.Clone(write.data), 0, nil
+	}
+	return v.PatriciaContext.Branch(prefix)
+}
+
+func (v *pbinRangeWriterView) PutBranch(prefix, _, _ []byte) error {
+	return fmt.Errorf("pbin range writer: worker write of row %x during a round", prefix)
+}
+
+func (v *pbinRangeWriterView) Absent(key []byte) bool {
+	return v.overlay.Absent(key)
 }
 
 func (o *pbinRangeWriterOverlay) FlushFinished(lookahead [][]byte) error {
@@ -329,6 +362,7 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 	}
 	overlay = &pbinRangeWriterOverlay{
 		writes: make(map[string]pbinRangeWriterWrite),
+		fresh:  w.freshDomain(),
 		write:  onRow,
 		finished: func() error {
 			tracker.clearClosed()
@@ -375,6 +409,12 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		return common.Hash{}, err
 	}
 	return common.BytesToHash(root), nil
+}
+
+func (w *PBinRangeWriter) freshDomain() bool {
+	at := w.aggregator.BeginFilesRo()
+	defer at.Close()
+	return len(at.Files(w.domain)) == 0
 }
 
 func (w *PBinRangeWriter) rangeForStamp(stamp uint64) (int, error) {

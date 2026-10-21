@@ -55,9 +55,10 @@ var (
 )
 
 type pbtConvertHooks struct {
-	afterOutput       func() error
-	standalone        func(datadir.Dirs) error
-	rangeWriterLimits *dbstate.PBinRangeWriterLimits
+	afterOutput          func() error
+	standalone           func(datadir.Dirs) error
+	rangeWriterLimits    *dbstate.PBinRangeWriterLimits
+	sequentialCommitment bool
 }
 
 func init() {
@@ -263,11 +264,16 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		return err
 	}
 	defer targetTx.Rollback()
+	var parallelDB kv.TemporalRoDB = targetDB
+	if hooks.sequentialCommitment {
+		parallelDB = nil
+	}
 	root, err := dbstate.ConvertPBin(ctx, dbstate.PBinConvertOptions{
 		SourceAggregator:  sourceAgg,
 		SourceTx:          sourceTx,
 		TargetAggregator:  targetAgg,
 		TargetTx:          targetTx,
+		TargetDB:          parallelDB,
 		TargetDomain:      targetDomain,
 		BlockNum:          point.BlockNum,
 		EndTxNum:          point.TxNum,

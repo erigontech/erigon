@@ -112,6 +112,10 @@ type trieContextFactorySetter interface {
 	SetTrieContextFactory(commitment.TrieContextFactory)
 }
 
+type workerContextDecorator interface {
+	DecorateWorkerContext(commitment.PatriciaContext) commitment.PatriciaContext
+}
+
 // checkParaTrieWired reports a context that selected the parallel trie and never
 // received the DB it needs. Falling back to the sequential trie is deliberate for
 // the DB-less RPC and integrity contexts, and a bug for anything that computes a
@@ -834,6 +838,13 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 			// after Process and merged into the main writer below.
 			var concurrentFactory commitment.TrieContextFactory
 			concurrentFactory, drainCollectors = sdc.concurrentTrieContextFactory(ctx, sdc.paraTrieDB, workerPin, tx, txNum)
+			if decorator, ok := activeContext.(workerContextDecorator); ok {
+				undecorated := concurrentFactory
+				concurrentFactory = func(ctx context.Context) (commitment.PatriciaContext, func()) {
+					worker, cleanup := undecorated(ctx)
+					return decorator.DecorateWorkerContext(worker), cleanup
+				}
+			}
 			trie.SetTrieContextFactory(concurrentFactory)
 		}
 	}

@@ -421,7 +421,7 @@ flowchart LR
 - Modify: `db/state/pbt_range_writer_test.go`
 - Modify: `db/state/squeeze_pbin_rebuild_test.go`
 
-- [ ] red test first: apply `~/org/mode/e/research/pbt-stream-row-builder/t03-red-test.patch` onto the Task 2 tests.
+- [x] red test first: apply `~/org/mode/e/research/pbt-stream-row-builder/t03-red-test.patch` onto the Task 2 tests.
       It runs the factory-wired variant (4 workers, `WithParaTrieDB`) at `MaxOps` 100k/1k/7/1, and is red today with
       `row 001004 is missing` at batch 2 of `MaxOps=7`
 - [x] leaf stamps travel with each op through the sort, replacing the side file; `visit` no longer reads stamps by
@@ -433,14 +433,14 @@ flowchart LR
       a shared aggregate for the rows above partitions. `finished` clears the closed stamps of every partition, not only
       the flushed keys: a closed prefix never gets a later leaf, so its row is final, and keeping unflushed entries
       would only accumulate the non-row 4-bit prefixes of every leaf
-- [ ] factory contexts read through the range-writer overlay, decorated like the main context and read-only during a
+- [x] factory contexts read through the range-writer overlay, decorated like the main context and read-only during a
       round. On a fresh convert the overlay implements the Task 8 `Absent(key)` as "not held in `writes` and not
       flushed"
-- [ ] `PBinConvertOptions` carries the DB, `ConvertPBin` installs the factory, and `convert-pbt` passes it
-- [ ] write a test: bin `.kv` files and state are byte-equal between factory and non-factory convert, on the oracle
+- [x] `PBinConvertOptions` carries the DB, `ConvertPBin` installs the factory, and `convert-pbt` passes it
+- [x] write a test: bin `.kv` files and state are byte-equal between factory and non-factory convert, on the oracle
       corpora and in the `cmd/integration` convert fixture
 - [ ] run the `db/state` PBin tests under `-race`; benchmark convert before/after through `ab-verdict`
-- [ ] run gates (now including `cmd/integration/commands`) — must pass before Task 12
+- [x] run gates (now including `cmd/integration/commands`) — must pass before Task 12
 
 ### Task 12: Optional deferred branch updates for the bin trie (v3 parity)
 

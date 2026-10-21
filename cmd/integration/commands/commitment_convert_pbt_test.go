@@ -341,6 +341,48 @@ func convertedPBTAcceptanceRows(t *testing.T, sharedCode []byte, maxOps int) (ma
 	return binLeaves, binRoot, wantRoot, string(entries[len(entries)-1].Key), binLeaves, referenceRows, output
 }
 
+func TestConvertPBTWorkersMatchSequentialFiles(t *testing.T) {
+	selectPBTHexCommandSuite(t)
+	source, err := execmoduletester.NewPBTAcceptanceChainWithSharedCode(t, false, false, nil)
+	require.NoError(t, err)
+	require.NoError(t, source.Tester.InsertChain(source.Chain))
+	buildPBTAcceptanceFiles(t, source)
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.ExperimentalHexBinCommitment = true
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.ExperimentalParallelCommitment = false
+	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+	statecfg.InitSchemas()
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	binFiles := func(output string) map[string][]byte {
+		snapDomain := datadir.Open(output).SnapDomain
+		names, err := dir.ListFiles(snapDomain, ".kv")
+		require.NoError(t, err)
+		files := make(map[string][]byte)
+		for _, name := range names {
+			if !strings.Contains(filepath.Base(name), kv.CommitmentBinDomain.String()) {
+				continue
+			}
+			data, err := os.ReadFile(name)
+			require.NoError(t, err)
+			files[filepath.Base(name)] = data
+		}
+		require.NotEmpty(t, files)
+		return files
+	}
+	for _, maxOps := range []int{100000, 7} {
+		converted := make(map[bool]map[string][]byte, 2)
+		for _, sequential := range []bool{true, false} {
+			output := filepath.Join(t.TempDir(), "output")
+			hooks := pbtConvertHooks{rangeWriterLimits: &dbstate.PBinRangeWriterLimits{MaxOps: maxOps, MaxBytes: 1 << 30}, sequentialCommitment: sequential}
+			require.NoError(t, convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), hooks), "maxOps=%d sequential=%v", maxOps, sequential)
+			converted[sequential] = binFiles(output)
+		}
+		require.Equal(t, converted[true], converted[false], "maxOps=%d", maxOps)
+	}
+}
+
 func pbtAcceptanceReferenceEntries(source *execmoduletester.PBTAcceptanceChain) []eip8297.Entry {
 	addressBytes := func(address common.Address) []byte { return append([]byte(nil), address[:]...) }
 	hashBytes := func(hash common.Hash) []byte { return append([]byte(nil), hash[:]...) }

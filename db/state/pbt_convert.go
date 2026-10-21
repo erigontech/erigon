@@ -35,6 +35,7 @@ type PBinConvertOptions struct {
 	SourceTx          kv.TemporalTx
 	TargetAggregator  *Aggregator
 	TargetTx          kv.TemporalRwTx
+	TargetDB          kv.TemporalRoDB
 	TargetDomain      kv.Domain
 	BlockNum          uint64
 	EndTxNum          uint64
@@ -70,7 +71,11 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 		return common.Hash{}, fmt.Errorf("pbin conversion: nil hash function")
 	}
 	cfg := pbinConversionTrieConfig()
-	domains, err := execctx.NewSharedDomains(ctx, opts.TargetTx, log.Root(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomainOnly(opts.TargetDomain), execctx.WithoutCommitmentSeek())
+	options := []execctx.SharedDomainOption{execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomainOnly(opts.TargetDomain), execctx.WithoutCommitmentSeek()}
+	if opts.TargetDB != nil {
+		options = append(options, execctx.WithParaTrieDB(opts.TargetDB))
+	}
+	domains, err := execctx.NewSharedDomains(ctx, opts.TargetTx, log.Root(), options...)
 	if err != nil {
 		return common.Hash{}, err
 	}
