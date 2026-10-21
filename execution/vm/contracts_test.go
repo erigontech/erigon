@@ -572,6 +572,26 @@ func TestCachedPrecompileDomainAndErrors(t *testing.T) {
 	if p.calls != 2 {
 		t.Fatal("cached a call cheaper than the lookup")
 	}
+	p = &countingPrecompile{output: []byte{7}}
+	c = &cachedPrecompile{PrecompiledContract: p, domain: [21]byte{208}}
+	for range 2 {
+		if _, err := c.Run(make([]byte, 101)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if p.calls != 2 {
+		t.Fatal("hashed an input longer than the call's gas")
+	}
+	pairing := &cachedPrecompile{PrecompiledContract: &bn254PairingIstanbul{}, domain: [21]byte{209}}
+	zeroPairs := make([]byte, 342*192)
+	out, err := pairing.Run(zeroPairs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out[31] = 9
+	if out, _ = pairing.Run(zeroPairs); out[31] != 1 {
+		t.Fatal("oversized-input output aliases the precompile result")
+	}
 }
 
 func TestCachedPrecompileParallel(t *testing.T) {
