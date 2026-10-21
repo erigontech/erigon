@@ -503,38 +503,6 @@ case pushConst:
 		continue run
 	}
 	op = OpCode(callContext.Contract.Code[in.pc()])
-case jumpTo:
-	if left, borrow := bits.Sub64(gasLeft, GasFastestStep+GasMidStep, 0); borrow == 0 && uint(sLen) < stackLimit {
-		gasLeft = left
-		if evm.Cancelled() {
-			res, err = nil, errStopToken
-			break run
-		}
-		skip := min(gasLeft, params.JumpdestGas) / params.JumpdestGas
-		gasLeft -= skip * params.JumpdestGas
-		i = uint64(in.arg()) + skip
-		continue run
-	}
-	op = OpCode(callContext.Contract.Code[in.pc()])
-case jumpiTo:
-	if left, borrow := bits.Sub64(gasLeft, GasFastestStep+GasSlowStep, 0); borrow == 0 && sLen >= 1 && sLen < stackLimit {
-		gasLeft = left
-		if evm.Cancelled() {
-			res, err = nil, errStopToken
-			break run
-		}
-		cond := callContext.Stack.popAt(top)
-		top -= 1
-		if cond.IsZero() {
-			i += 2
-			continue run
-		}
-		skip := min(gasLeft, params.JumpdestGas) / params.JumpdestGas
-		gasLeft -= skip * params.JumpdestGas
-		i = uint64(in.arg()) + skip
-		continue run
-	}
-	op = OpCode(callContext.Contract.Code[in.pc()])
 case KECCAK256:
 	if sLen >= 2 && sLen <= stackLimit {
 		offset, size := callContext.Stack.pop1Peek1At(top)

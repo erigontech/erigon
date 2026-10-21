@@ -93,8 +93,6 @@ func (in instr) arg() uint32  { return uint32(in >> 32) }
 const (
 	pushImm   = PUSH1 // pushes arg
 	pushConst = PUSH2 // pushes consts[arg]
-	jumpTo    = PUSH3 // PUSHn dest JUMP to a valid dest, whose instruction index is arg
-	jumpiTo   = PUSH4 // PUSHn dest JUMPI, as jumpTo
 )
 
 // jumpdestBit marks the JUMPDESTs in program.idx.
@@ -145,21 +143,6 @@ func decode(code []byte) *program {
 		pc = next
 	}
 	p.idx[len(code)] = uint16(len(p.ins))
-	for i := 1; i < len(p.ins); i++ {
-		push := p.ins[i-1]
-		if push.kind() != pushImm || push.arg() >= uint32(len(code)) || p.idx[push.arg()]&jumpdestBit == 0 {
-			continue
-		}
-		kind := jumpTo
-		switch p.ins[i].kind() {
-		case JUMP:
-		case JUMPI:
-			kind = jumpiTo
-		default:
-			continue
-		}
-		p.ins[i-1] = newInstr(kind, int(push.pc()), uint32(p.idx[push.arg()]&^jumpdestBit))
-	}
 	return p
 }
 
