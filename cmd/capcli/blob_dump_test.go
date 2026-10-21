@@ -50,7 +50,8 @@ func TestBlobDumpPlan(t *testing.T) {
 		name         string
 		from, to     uint64
 		frozenBlocks uint64
-		frozen       []string
+		onDisk       []string
+		pinned       []string
 		overwrite    bool
 		want         []uint64
 		wantErr      string
@@ -58,21 +59,27 @@ func TestBlobDumpPlan(t *testing.T) {
 		{name: "starts at the Deneb segment", to: 50_000, want: []uint64{20_000, 30_000, 40_000}},
 		{name: "drops a trailing partial segment", to: 45_000, want: []uint64{20_000, 30_000}},
 		{name: "stops at the frozen block frontier", to: 50_000, frozenBlocks: 40_000, want: []uint64{20_000, 30_000}},
+		{name: "plans nothing for a --from within a segment of the slot limit", from: math.MaxUint64 / snaptype.CaplinMergeLimit * snaptype.CaplinMergeLimit, to: 30_000},
 		{name: "starts at --from", from: 30_000, to: 50_000, want: []uint64{30_000, 40_000}},
 		{name: "--from off a segment boundary", from: 25_000, to: 50_000, wantErr: "multiple of"},
 		{name: "--from below the Deneb segment", from: 10_000, to: 50_000, wantErr: "below the Deneb"},
-		{name: "skips a frozen segment", to: 50_000, frozen: []string{v10}, want: []uint64{20_000, 40_000}},
-		{name: "--overwrite rewrites a current-version segment", to: 50_000, frozen: []string{v11}, overwrite: true, want: []uint64{20_000, 30_000, 40_000}},
-		{name: "--overwrite refuses a segment pinned at a lower version", to: 50_000, frozen: []string{v11, v10}, overwrite: true, wantErr: v10},
-		{name: "--overwrite refuses a segment pinned at a newer version", to: 50_000, frozen: []string{v12}, overwrite: true, wantErr: v12},
+		{name: "skips a segment on disk", to: 50_000, onDisk: []string{v10}, want: []uint64{20_000, 40_000}},
+		{name: "skips a pinned segment", to: 50_000, pinned: []string{v11}, want: []uint64{20_000, 40_000}},
+		{name: "--overwrite rewrites a current-version segment", to: 50_000, onDisk: []string{v11}, overwrite: true, want: []uint64{20_000, 30_000, 40_000}},
+		{name: "--overwrite refuses a pinned segment", to: 50_000, onDisk: []string{v11}, pinned: []string{v11}, overwrite: true, wantErr: datadir.PreverifiedFileName},
+		{name: "--overwrite refuses a segment at a lower version", to: 50_000, onDisk: []string{v11, v10}, overwrite: true, wantErr: v10},
+		{name: "--overwrite refuses a segment at a newer version", to: 50_000, onDisk: []string{v12}, overwrite: true, wantErr: v12},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var frozen []snaptype.FileInfo
-			for _, name := range tt.frozen {
-				frozen = append(frozen, blobSegment(t, name))
+			var onDisk, pinned []snaptype.FileInfo
+			for _, name := range tt.onDisk {
+				onDisk = append(onDisk, blobSegment(t, name))
 			}
-			got, err := blobDumpPlan(&cfg, tt.from, tt.to, cmp.Or(tt.frozenBlocks, math.MaxUint64), frozen, tt.overwrite)
+			for _, name := range tt.pinned {
+				pinned = append(pinned, blobSegment(t, name))
+			}
+			got, err := blobDumpPlan(&cfg, tt.from, tt.to, cmp.Or(tt.frozenBlocks, math.MaxUint64), onDisk, pinned, tt.overwrite)
 			if tt.wantErr != "" {
 				require.ErrorContains(t, err, tt.wantErr)
 				return
@@ -96,33 +103,67 @@ func TestFrozenBlobSegmentsReadsDiskAndPreverifiedLock(t *testing.T) {
 		snaptype.BlobSidecars.FileName(version.V1_0, 30_000, 40_000), snaptype.BeaconBlocks.FileName(version.V1_1, 30_000, 40_000))
 	require.NoError(t, os.WriteFile(dirs.PreverifiedPath(), []byte(lock), 0o444))
 
-	frozen, err := frozenBlobSegments(dirs)
+	onDisk, pinned, err := frozenBlobSegments(dirs)
 	require.NoError(t, err)
 
 	type seg struct {
 		from, to uint64
 		v        version.Version
 	}
-	var got []seg
-	for _, f := range frozen {
-		got = append(got, seg{f.From, f.To, f.Version})
+	segs := func(files []snaptype.FileInfo) (out []seg) {
+		for _, f := range files {
+			out = append(out, seg{f.From, f.To, f.Version})
+		}
+		return out
 	}
-	require.ElementsMatch(t, []seg{{20_000, 30_000, version.V1_1}, {30_000, 40_000, version.V1_0}}, got)
+	require.Equal(t, []seg{{20_000, 30_000, version.V1_1}}, segs(onDisk))
+	require.Equal(t, []seg{{30_000, 40_000, version.V1_0}}, segs(pinned))
 }
 
 func TestFrozenBlobSegmentsWithoutPreverifiedLock(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	writeSegment(t, dirs, snaptype.BlobSidecars.FileName(version.V1_1, 20_000, 30_000))
 
-	frozen, err := frozenBlobSegments(dirs)
+	onDisk, pinned, err := frozenBlobSegments(dirs)
 	require.NoError(t, err)
-	require.Len(t, frozen, 1)
+	require.Len(t, onDisk, 1)
+	require.Empty(t, pinned)
 }
 
 func TestFrozenBlobSegmentsRejectsAMalformedPreverifiedLock(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, os.WriteFile(dirs.PreverifiedPath(), []byte("not toml ="), 0o444))
 
-	_, err := frozenBlobSegments(dirs)
+	_, _, err := frozenBlobSegments(dirs)
 	require.ErrorContains(t, err, datadir.PreverifiedFileName)
+}
+
+func TestRemoveBlobIndexAndTorrents(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	idx := func(v version.Version, from, to uint64) string {
+		return snaptype.IdxFileName(v, from, to, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
+	}
+	seg := snaptype.BlobSidecars.FileName(version.V1_1, 30_000, 40_000)
+	removed := []string{seg + ".torrent", idx(version.V1_1, 30_000, 40_000), idx(version.V1_1, 30_000, 40_000) + ".torrent", idx(version.V1_0, 30_000, 40_000)}
+	kept := []string{
+		seg,
+		snaptype.BlobSidecars.FileName(version.V1_1, 40_000, 50_000) + ".torrent",
+		idx(version.V1_1, 40_000, 50_000),
+		snaptype.BeaconBlocks.FileName(version.V1_1, 30_000, 40_000) + ".torrent",
+	}
+	for _, name := range append(removed, kept...) {
+		writeSegment(t, dirs, name)
+	}
+
+	require.NoError(t, removeBlobIndexAndTorrents(dirs.Snap, 30_000, 40_000))
+
+	entries, err := os.ReadDir(dirs.Snap)
+	require.NoError(t, err)
+	var left []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			left = append(left, e.Name())
+		}
+	}
+	require.ElementsMatch(t, kept, left)
 }
