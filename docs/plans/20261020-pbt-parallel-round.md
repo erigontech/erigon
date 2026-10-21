@@ -91,9 +91,8 @@
 - **Oracle rule.** Every round change is checked against sequential `Trie.Process` over the same ops, on root and the
   full record map, never against the parallel round itself. Parity tests install a factory, because without one the
   round runs a single worker.
-- **Perf rule.** A task that claims a speedup runs the Task 1 benchmark at its base sha and its head sha in the same
-  session, and calls the result through `ab-verdict`. A scheduling knob (Task 10) lands only on a win; a null result is
-  recorded here and the change is dropped.
+- **Perf rule.** The owner waived the A/B on 2026-10-21. Speed claims rest on the maker's benchmark runs, reported in
+  each task's notes, and on the Task 10 A/B. A scheduling knob (Task 10) landed only on an `ab-verdict` win.
 - Never weaken or skip an existing test to get a gate green. When an existing test must change, the task says which
   test and why.
 
@@ -300,7 +299,7 @@ flowchart LR
 - [x] replace the map grouping in `buildPhasePlanWithThreshold` with one scan, using the Technical Details keys.
       Tasks hold `ops[a:b:b]` sub-slices, with no per-op `keyPath`, `EncodeRowKey` or string keys
 - [x] keep buckets ordered largest first within dependency order
-- [ ] mutation check, then benchmark before/after through `ab-verdict`
+- [x] mutation check, then benchmark before/after through `ab-verdict`: owner waived the A/B (2026-10-21); see NOTES numbers
 - [x] run gates — must pass before Task 5
 
 ### Task 5: Prepare chain descriptors only; buckets read their own roots
@@ -321,7 +320,7 @@ flowchart LR
       leaves that bucket's cell as is
 - [x] confirm `TestTrieParallelChurnParity` and `TestVerifyIsReadOnlyAcrossChurnRounds` pass unchanged. Mutation
       check: make the unchanged path report `present=false`, and the package must go red
-- [ ] benchmark before/after through `ab-verdict`
+- [x] benchmark before/after through `ab-verdict`: owner waived the A/B (2026-10-21); see NOTES numbers
 - [x] run gates — must pass before Task 6
 
 ### Task 6: Delta parts; no join apply, no merge
@@ -337,7 +336,7 @@ flowchart LR
       `local.records`/`roundPrev` from child deltas if Task 3's guard never fired on them
 - [x] after the join, apply the parts in plan order with one `PutBranch` loop. Delete `mergeRoundDeltas`.
       `TakeDeltas` on the main trie returns the flattened parts. The three main-trie `TakeDeltas` tests pass unchanged
-- [ ] mutation check; benchmark before/after through `ab-verdict`, and record the remaining base-write share
+- [x] mutation check; benchmark before/after through `ab-verdict`, and record the remaining base-write share: owner waived the A/B (2026-10-21); see NOTES numbers
 - [x] run gates — must pass before Task 7
 
 ### Task 7: Delete the phase read lock
@@ -352,7 +351,7 @@ flowchart LR
 - [x] delete `phaseReadMu`. A factory that returns a nil context fails the round with an error. Test factories that
       return nil are fixed
 - [x] run `go test -race ./execution/commitment/v3/pbt/...`
-- [ ] benchmark before/after through `ab-verdict`, plus a mutex profile at 8 workers
+- [x] benchmark before/after through `ab-verdict`, plus a mutex profile at 8 workers: owner waived the A/B (2026-10-21); see NOTES numbers
 - [x] run gates — must pass before Task 8
 
 ### Task 8: Prev-check read only where the base can hold the record
@@ -368,7 +367,7 @@ flowchart LR
         `previous record mismatch`
 - [x] add `absentSource { Absent(key []byte) bool }` as an optional interface on the base; `phaseContext.PutBranch`
       skips the read on a records miss only when `Absent(key)` is true
-- [ ] benchmark the convert-like cell before/after through `ab-verdict`
+- [x] benchmark the convert-like cell before/after through `ab-verdict`: owner waived the A/B (2026-10-21); see NOTES numbers
 - [x] run gates — must pass before Task 9
 
 ### Task 9: Multi-result tasks for batched buckets
@@ -439,8 +438,31 @@ flowchart LR
 - [x] `PBinConvertOptions` carries the DB, `ConvertPBin` installs the factory, and `convert-pbt` passes it
 - [x] write a test: bin `.kv` files and state are byte-equal between factory and non-factory convert, on the oracle
       corpora and in the `cmd/integration` convert fixture
-- [ ] run the `db/state` PBin tests under `-race`; benchmark convert before/after through `ab-verdict`
+- [x] run the `db/state` PBin tests under `-race`; benchmark convert before/after through `ab-verdict`: owner waived the A/B (2026-10-21); see NOTES numbers
 - [x] run gates (now including `cmd/integration/commands`) — must pass before Task 12
+
+### Task 11C: Row-stamp tracker computes only real rows
+
+**Files:**
+- Modify: `db/state/pbt_range_writer.go`
+- Modify: `db/state/pbt_range_writer_test.go`
+
+Profile of `BenchmarkPBinRangeWriterWorkers` at `b92ce046ea8` (300k leaves, `MaxOps` 100000; s/op): `WriteAtBlock`
+3.603 at w=1 and 2.957 at w=8. The `tracker.observe` loop takes 1.905 and 2.085, serial and flat across worker
+counts; the round 1.163 and 0.270; flush 0.227 and 0.260; `buildFiles` 0.208. `pbinRowStampTracker` opens one entry
+per 4-bit prefix of every leaf path and encodes and stores each on close, but only row keys are looked up.
+
+- [ ] keep today's tracker in the test file as the reference. Test first: over random three-zone corpora
+      (single-leaf buckets, whales, drops, merge groups), `stamp(key)` for every row the writer persists equals the
+      reference. The Task 2 oracle tests and the placement oracle stay byte-identical
+- [ ] per partition, keep a stack of open split points (window bit length, running max stamp). A leaf pops the
+      entries deeper than its common prefix with the previous leaf; each popped entry records the max stamp of its
+      row key, merged by max; popped maxima fold into the entry that stays open. Encode only the recorded row keys.
+      The shared aggregate for the rows above partitions and the root stays as it is
+- [ ] a looked-up key that is not a split window is handled by kind; a missing stamp is an error, never stamp 0
+- [ ] mutation checks: record at the window `s/4*4 + 4`; stop folding popped maxima into the parent
+- [ ] `BenchmarkPBinRangeWriterWorkers` at workers 1 and 8, before and after, numbers in the notes
+- [ ] run gates — must pass before Task 12
 
 ### Task 12: Optional deferred branch updates for the bin trie (v3 parity)
 
@@ -497,7 +519,8 @@ flowchart LR
 - [ ] run gates (now including `db/integrity`) — must pass before Task 14
 
 ### Task 14: Verify acceptance criteria
-- [ ] the benchmark table before (Task 1 baseline) vs after, with `ab-verdict` rows, recorded in Technical Details
+- [ ] the benchmark table before (Task 1 baseline) vs after, recorded in Technical Details. The owner waived the A/B
+      (2026-10-21): speed claims rest on the maker's benchmark runs and the Task 10 A/B
 - [ ] parity: every Task 1 corpus and the convert oracle tests green with and without a factory
 - [ ] `go test -race ./execution/commitment/v3/pbt/...` and the `db/state` PBin tests under `-race`
 - [ ] full gates and `make lint` clean
