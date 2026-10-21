@@ -72,7 +72,7 @@ func buildExAnteStore(tb testing.TB) *ForkChoiceStore {
 	store, bd4 := buildExAnteStorePendingLast(tb, nil)
 	require.NoError(tb, store.OnBlock(context.Background(), bd4, false, true, false))
 	store.SetSynced(true)
-	s0, err := store.GetStateAtBlockRoot(store.ProposerBoostRoot(), true)
+	s0, err := store.GetStateAtBlockRoot(store.ProposerBoostRoot())
 	require.NoError(tb, err)
 	require.NoError(tb, store.syncedDataManager.OnHeadState(s0))
 	att := &solid.Attestation{}
