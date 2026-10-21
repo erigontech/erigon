@@ -835,6 +835,37 @@ func TestOpCLZ(t *testing.T) {
 	}
 }
 
+func TestOpDifficulty(t *testing.T) {
+	t.Parallel()
+	randao := common.HexToHash("0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20")
+	difficulty := uint256.MustFromHex("0x7000000000000007600000000000000650000000000000054000000000000004")
+	tests := []struct {
+		name     string
+		blockCtx evmtypes.BlockContext
+		want     uint256.Int
+	}{
+		{"prevrandao", evmtypes.BlockContext{PrevRanDao: &randao, Difficulty: *difficulty}, *new(uint256.Int).SetBytes(randao[:])},
+		{"zero prevrandao", evmtypes.BlockContext{PrevRanDao: &common.Hash{}, Difficulty: *difficulty}, uint256.Int{}},
+		{"difficulty", evmtypes.BlockContext{Difficulty: *difficulty}, *difficulty},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			evm := NewEVM(tc.blockCtx, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+			callContext := &CallContext{}
+			callContext.Stack.push(*uint256.NewInt(1))
+			callContext.Stack.push(*uint256.MustFromHex("0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"))
+			callContext.Stack.pop()
+			pc, res, err := opDifficulty(42, evm, callContext)
+			require.NoError(t, err)
+			require.Nil(t, res)
+			require.Equal(t, uint64(42), pc)
+			require.Equal(t, 2, callContext.Stack.len())
+			require.Equal(t, tc.want, *callContext.Stack.peek())
+			require.Equal(t, *uint256.NewInt(1), *callContext.Stack.back(1))
+		})
+	}
+}
+
 // TestPush sanity-checks how code with immediates are handled when the code size is
 // smaller than the size of the immediate.
 func TestPush(t *testing.T) {
