@@ -327,6 +327,12 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		return append(b, byte(MCOPY), byte(MSIZE), byte(PUSH1), 0, byte(RETURN))
 	}
 	n := func(v int) []byte { return []byte{byte(v)} }
+	// 2^bits + low, as a big-endian push operand.
+	pow2 := func(bits int, low byte) []byte {
+		b := make([]byte, bits/8+1)
+		b[0], b[len(b)-1] = 1, low
+		return b
+	}
 	for name, args := range map[string][3][]byte{
 		"mcopydstend":      {n(32), n(0), n(32)},
 		"mcopydstpastend":  {n(33), n(0), n(32)},
@@ -340,6 +346,12 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		"mcopydsthuge":     {{1, 0, 0, 0, 0, 0, 0, 0, 0}, n(0), n(1)},
 		"mcopysrchuge":     {n(0), {1, 0, 0, 0, 0, 0, 0, 0, 0}, n(1)},
 		"mcopylenhuge":     {n(0), n(0), {1, 0, 0, 0, 0, 0, 0, 0, 32}},
+		"mcopydst2pow128":  {pow2(128, 0), n(0), n(1)},
+		"mcopydst2pow192":  {pow2(192, 0), n(0), n(1)},
+		"mcopysrc2pow128":  {n(0), pow2(128, 0), n(1)},
+		"mcopysrc2pow192":  {n(0), pow2(192, 0), n(1)},
+		"mcopylen2pow128":  {n(0), n(0), pow2(128, 32)},
+		"mcopylen2pow192":  {n(0), n(0), pow2(192, 32)},
 	} {
 		programs[name] = mcopy(args[0], args[1], args[2])
 	}
