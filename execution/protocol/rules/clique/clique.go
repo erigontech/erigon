@@ -495,7 +495,7 @@ func (c *Clique) snapshots(latest uint64, total int) ([]*Snapshot, error) {
 	k, v, err := cur.Seek(blockEncoded)
 	for ; err == nil && k != nil; k, v, err = cur.Prev() {
 		s := new(Snapshot)
-		if err = json.Unmarshal(v, s); err != nil {
+		if err := json.Unmarshal(v, s); err != nil {
 			return nil, err
 		}
 		s.config = c.config
