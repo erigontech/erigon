@@ -293,33 +293,65 @@ func holdFirstTaskForSecondWithin(trie *Trie, wait time.Duration) {
 	})
 }
 
-func TestParallelRoundMatchesSequential(t *testing.T) {
-	corpus := newParallelRoundCorpus(t, parallelRoundTestShape)
-	cases := []struct {
-		name       string
-		base       map[string][]byte
-		concurrent bool
-		ops        func(*rand.Rand) []Op
-	}{
+type parallelRoundCase struct {
+	name       string
+	base       map[string][]byte
+	concurrent bool
+	ops        func(*rand.Rand) []Op
+}
+
+func parallelRoundCases(corpus *parallelRoundCorpus) []parallelRoundCase {
+	return []parallelRoundCase{
 		{name: "tip", base: corpus.snapshot, concurrent: true, ops: func(r *rand.Rand) []Op { return corpus.updates(r, 200, 20) }},
 		{name: "reexec", base: corpus.snapshot, concurrent: true, ops: func(r *rand.Rand) []Op { return corpus.updates(r, 600, 0) }},
 		{name: "convert", base: map[string][]byte{}, ops: func(r *rand.Rand) []Op { return parallelRoundConvertOps(r, 300) }},
 		{name: "churn", base: corpus.snapshot, concurrent: true, ops: func(r *rand.Rand) []Op { return corpus.churn(r, 300, 12) }},
 	}
-	for _, tc := range cases {
+}
+
+func runParallelRoundCases(t *testing.T, check func(t *testing.T, base *parallelRoundBase, trie *Trie, label string)) {
+	corpus := newParallelRoundCorpus(t, parallelRoundTestShape)
+	for _, tc := range parallelRoundCases(corpus) {
 		for _, workers := range []int{2, 4, 8} {
 			t.Run(fmt.Sprintf("%s/workers=%d", tc.name, workers), func(t *testing.T) {
 				r := rand.New(rand.NewSource(int64(100 + workers)))
 				snapshot := tc.base
 				for round := range 3 {
-					snapshot = requireParallelRoundMatches(t, snapshot, tc.ops(r), workers, tc.concurrent, fmt.Sprintf("round=%d", round))
+					label := fmt.Sprintf("round=%d", round)
+					base, trie := requireParallelRoundMatches(t, snapshot, tc.ops(r), workers, tc.concurrent, label)
+					check(t, base, trie, label)
+					snapshot = base.main.records
 				}
 			})
 		}
 	}
 }
 
-func requireParallelRoundMatches(t *testing.T, snapshot map[string][]byte, ops []Op, workers int, concurrent bool, label string) map[string][]byte {
+func TestParallelRoundMatchesSequential(t *testing.T) {
+	runParallelRoundCases(t, func(*testing.T, *parallelRoundBase, *Trie, string) {})
+}
+
+func TestParallelRoundPartsHoldEachKeyOnce(t *testing.T) {
+	runParallelRoundCases(t, func(t *testing.T, base *parallelRoundBase, trie *Trie, label string) {
+		deltas := trie.TakeDeltas()
+		require.NotEmpty(t, deltas, label)
+		byKey := make(map[string]commitment.BranchDelta, len(deltas))
+		for _, delta := range deltas {
+			require.NotContains(t, byKey, string(delta.Key), "%s: key %x appears twice", label, delta.Key)
+			require.NotEqual(t, delta.Prev, delta.Data, "%s: key %x has Data == Prev", label, delta.Key)
+			byKey[string(delta.Key)] = delta
+		}
+		require.Len(t, base.main.writes, len(deltas), label)
+		for _, write := range base.main.writes {
+			delta, ok := byKey[string(write.key)]
+			require.True(t, ok, "%s: base write %x is not in the parts", label, write.key)
+			require.Equal(t, delta.Data, write.data, label)
+			require.Equal(t, delta.Prev, write.prev, label)
+		}
+	})
+}
+
+func requireParallelRoundMatches(t *testing.T, snapshot map[string][]byte, ops []Op, workers int, concurrent bool, label string) (*parallelRoundBase, *Trie) {
 	t.Helper()
 	sequential := &trieTestContext{records: maps.Clone(snapshot)}
 	wantRoot, err := NewTrie(sequential).Process(ops)
@@ -335,7 +367,7 @@ func requireParallelRoundMatches(t *testing.T, snapshot map[string][]byte, ops [
 	require.Equal(t, wantRoot, gotRoot, label)
 	require.Equal(t, sequential.records, base.main.records, label)
 	require.Positive(t, base.servedViews(), "%s: views that served reads", label)
-	return base.main.records
+	return base, trie
 }
 
 func parallelRoundKey(zone, first, tail, subIndex byte) []byte {
@@ -379,7 +411,8 @@ func runParallelRoundCollapse(t *testing.T, initial, ops []Op, before, after fun
 	ops = sortParallelRoundOps(ops)
 	for _, workers := range []int{2, 4, 8} {
 		t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
-			after(t, requireParallelRoundMatches(t, seed.records, ops, workers, true, "collapse"))
+			base, _ := requireParallelRoundMatches(t, seed.records, ops, workers, true, "collapse")
+			after(t, base.main.records)
 		})
 	}
 }

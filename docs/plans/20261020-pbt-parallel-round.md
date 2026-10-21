@@ -329,14 +329,14 @@ flowchart LR
 - Modify: `execution/commitment/v3/pbt/delta.go`
 - Modify: `execution/commitment/v3/pbt/parallel_round_test.go`
 
-- [ ] write a test first: a round's parts hold each key once and no entry with Data == Prev, on every Task 1 corpus
-- [ ] non-subtask results hand over their delta slices without the extra clone (task tries are discarded)
-- [ ] the global join builds the upper rows from descriptors only. The bucket join drops its seeding of
+- [x] write a test first: a round's parts hold each key once and no entry with Data == Prev, on every Task 1 corpus
+- [x] non-subtask results hand over their delta slices without the extra clone (task tries are discarded)
+- [x] the global join builds the upper rows from descriptors only. The bucket join drops its seeding of
       `local.records`/`roundPrev` from child deltas if Task 3's guard never fired on them
-- [ ] after the join, apply the parts in plan order with one `PutBranch` loop. Delete `mergeRoundDeltas`.
+- [x] after the join, apply the parts in plan order with one `PutBranch` loop. Delete `mergeRoundDeltas`.
       `TakeDeltas` on the main trie returns the flattened parts. The three main-trie `TakeDeltas` tests pass unchanged
 - [ ] mutation check; benchmark before/after through `ab-verdict`, and record the remaining base-write share
-- [ ] run gates — must pass before Task 7
+- [x] run gates — must pass before Task 7
 
 ### Task 7: Delete the phase read lock
 
