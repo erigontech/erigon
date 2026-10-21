@@ -115,3 +115,31 @@ func TestPBinDeferredRoundEncodesNewRootState(t *testing.T) {
 		})
 	}
 }
+
+func TestPBinDeferredRootStateFollowsContextReset(t *testing.T) {
+	corpus := newParallelRoundCorpus(t, parallelRoundTestShape)
+	ops := corpus.updates(rand.New(rand.NewSource(15)), 200, 20)
+	sequential := NewTrie(&trieTestContext{records: maps.Clone(corpus.snapshot)})
+	_, err := sequential.Process(ops)
+	require.NoError(t, err)
+	deferredState, err := sequential.EncodeCurrentState(nil)
+	require.NoError(t, err)
+	baseState, err := NewTrie(&trieTestContext{records: maps.Clone(corpus.snapshot)}).EncodeCurrentState(nil)
+	require.NoError(t, err)
+	require.NotEqual(t, baseState, deferredState)
+
+	base := newParallelRoundBase(corpus.snapshot)
+	trie := base.trie()
+	trie.SetDeferCommitmentUpdates(true)
+	_, err = trie.ProcessParallelContext(t.Context(), ops, 4)
+	require.NoError(t, err)
+	trie.ResetContext(base.main)
+	kept, err := trie.EncodeCurrentState(nil)
+	require.NoError(t, err)
+	require.Equal(t, deferredState, kept, "a reset with untaken parts dropped their root")
+	require.NotEmpty(t, trie.TakeDeferredDeltas())
+	trie.ResetContext(base.main)
+	reset, err := trie.EncodeCurrentState(nil)
+	require.NoError(t, err)
+	require.Equal(t, baseState, reset, "a reset after the take kept the deferred root")
+}

@@ -192,6 +192,10 @@ func (sdc *SharedDomainsCommitmentContext) SetDeferCommitmentUpdates(defer_ bool
 	sdc.deferCommitmentUpdates = defer_
 }
 
+func (sdc *SharedDomainsCommitmentContext) DeferCommitmentUpdates() bool {
+	return sdc.deferCommitmentUpdates
+}
+
 // pbinUnsupported names a code path only the hex trie implements — collapse
 // tracing, hex-prefixed branch reads, trie-trace replay — so asking for one
 // under the bin variant fails instead of yielding a zero value.

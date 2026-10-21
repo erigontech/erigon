@@ -242,6 +242,9 @@ func (t *Trie) foldRowResult(row *rowNode) (FoldResult, error) {
 
 func (t *Trie) ResetContext(ctx commitment.PatriciaContext) {
 	t.ctx = ctx
+	if len(t.deferred) == 0 {
+		t.deferredRoot, t.deferredRootSet = nil, false
+	}
 	t.phaseBase = nil
 	t.root = nil
 	t.rootLoaded = false

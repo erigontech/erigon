@@ -32,6 +32,8 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
@@ -174,6 +176,81 @@ func TestDualShadowDeferredPartsMatchBufferedWrites(t *testing.T) {
 			rootRecord := got.records[string(pbt.GlobalRootKey())]
 			require.NotEmpty(t, rootRecord)
 			require.True(t, bytes.HasSuffix(got.records[stateKey], rootRecord), "the bin state does not embed the stored root record")
+		})
+	}
+}
+
+func runShadowWithSelectedContext(t *testing.T, buffered bool, selected kv.Domain, blockTime uint64) (root []byte, records map[string][]byte) {
+	t.Helper()
+	db, tx, _ := dualCalculatorTest(t)
+	doms, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithCommitmentDomain(selected), execctx.WithParaTrieDB(db))
+	require.NoError(t, err)
+	t.Cleanup(doms.Close)
+	doms.SetInMemHistoryReads(true)
+	doms.SetDisableInlineTouchKey(true)
+	setDeferCommitmentUpdates(doms, true, true, true)
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(roTx.Rollback)
+	activation := uint64(10)
+	cc := &commitmentCalculator{doms: doms, db: db, roTx: roTx, logger: log.New(), chainConfig: &chain.Config{BinaryTrieTime: &activation}, bufferShadowParts: buffered}
+	shadow := otherCommitmentDomain(cc.canonicalCommitmentDomain(blockTime))
+	require.Equal(t, selected, shadow, "the selected context must be the shadow")
+	shadowDefers := doms.GetCommitmentCtxForDomain(shadow).DeferCommitmentUpdates()
+	updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash)
+	defer updates.Close()
+	feed := &commitment.Feed{}
+	for b := byte(1); b <= 24; b++ {
+		key := bytes.Repeat([]byte{b}, 20)
+		account := accounts.Account{Nonce: uint64(b)}
+		value := accounts.SerialiseV3(&account)
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, key, value, 1, nil))
+		updates.TouchPlainKey(string(key), value, updates.TouchAccount)
+		var hash [32]byte
+		copy(hash[:], crypto.Keccak256(key))
+		feed.Accounts = append(feed.Accounts, commitment.FeedAccount{Hash: hash, Update: &commitment.Update{Flags: commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate, Nonce: account.Nonce, CodeHash: empty.CodeHash}})
+	}
+	sort.Slice(feed.Accounts, func(i, j int) bool { return bytes.Compare(feed.Accounts[i].Hash[:], feed.Accounts[j].Hash[:]) < 0 })
+	feed.Keys = len(feed.Accounts)
+	result, err := cc.computeDualFromUpdatesWithRole(t.Context(), commitTarget{blockNum: 1, blockHash: common.Hash{1}, lastTxNum: 1, blockTime: blockTime}, updates,
+		&asOfStateReader{sd: doms, roTx: roTx, commitmentDomain: kv.CommitmentDomain}, doms.GetCommitmentCtxForDomain(kv.CommitmentDomain), doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain), feed, nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, result.shadowRoot)
+	if shadow == kv.CommitmentBinDomain {
+		require.True(t, shadowDefers)
+		require.True(t, doms.GetCommitmentCtxForDomain(shadow).DeferCommitmentUpdates(), "the shadow context's deferral was not restored")
+	}
+	require.False(t, doms.GetCommitmentCtxForDomain(shadow).HasPendingUpdate(), "the shadow fold left a pending update")
+	require.NoError(t, doms.Flush(t.Context(), tx))
+	records = make(map[string][]byte)
+	it, err := tx.Debug().RangeLatest(shadow, nil, nil, kv.Unlim)
+	require.NoError(t, err)
+	defer it.Close()
+	for it.HasNext() {
+		key, value, err := it.Next()
+		require.NoError(t, err)
+		if !bytes.Equal(key, commitment.KeyCommitmentState) && !bytes.Equal(key, commitment.KeyCommitmentV3State) {
+			records[string(key)] = bytes.Clone(value)
+		}
+	}
+	require.NotEmpty(t, records)
+	return result.shadowRoot, records
+}
+
+func TestDualShadowDeferralWithShadowContextSelected(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		selected  kv.Domain
+		blockTime uint64
+	}{
+		{name: "hex canonical, bin shadow", selected: kv.CommitmentBinDomain, blockTime: 1},
+		{name: "bin canonical, hex shadow", selected: kv.CommitmentDomain, blockTime: 10},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wantRoot, wantRecords := runShadowWithSelectedContext(t, true, tc.selected, tc.blockTime)
+			gotRoot, gotRecords := runShadowWithSelectedContext(t, false, tc.selected, tc.blockTime)
+			require.Equal(t, wantRoot, gotRoot)
+			require.Equal(t, wantRecords, gotRecords)
 		})
 	}
 }

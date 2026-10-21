@@ -1390,6 +1390,9 @@ func (cc *commitmentCalculator) computeDualFromUpdatesWithRole(ctx context.Conte
 	hexCtx.SetDeferCommitmentUpdates(false)
 	hexCtx.SetMetricsEnabled(canonicalDomain == kv.CommitmentDomain)
 	binCtx.SetMetricsEnabled(canonicalDomain == kv.CommitmentBinDomain)
+	shadowDefers := shadowArm.ctx.DeferCommitmentUpdates()
+	shadowArm.ctx.SetDeferCommitmentUpdates(false)
+	defer shadowArm.ctx.SetDeferCommitmentUpdates(shadowDefers)
 	if trie, ok := shadowArm.ctx.Trie().(deferredDeltaTrie); ok && !cc.bufferShadowParts {
 		shadowArm.deferred = trie
 	}
