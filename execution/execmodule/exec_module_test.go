@@ -528,6 +528,65 @@ func TestValidateChainCanonicalNotExecutedAfterPrune(t *testing.T) {
 	require.ErrorContains(t, err, "too far unwind")
 }
 
+// A re-sent side block that already passed validation is answered from the
+// cache: it must not unwind the head, which here would fail after the prune.
+func TestValidateChainResentSideBlockSkipsUnwind(t *testing.T) {
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithKey(privKey),
+		execmoduletester.WithAlwaysGenerateChangesets(false),
+		execmoduletester.WithFcuBackgroundPrune(),
+	)
+	chainPack, err := m.GenerateChain(5, transferGen(t, privKey, common.Address{0x42}, 1_000))
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks[:1]))
+	side, err := m.GenerateChainFrom(chainPack.Blocks[0], 1, func(_ int, b *blockgen.BlockGen) {
+		transferGen(t, privKey, common.Address{0x43}, 2_000)(1, b)
+	})
+	require.NoError(t, err)
+	sideBlock := side.Blocks[0]
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks[1:2]))
+
+	insertStatus, err := m.InsertBlocks(ctx, []*types.Block{sideBlock})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
+	validation, err := m.ValidateChain(ctx, sideBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+
+	insertStatus, err = m.InsertBlocks(ctx, chainPack.Blocks[2:4])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
+	tip := chainPack.Blocks[3]
+	fcuResult, err := m.UpdateForkChoice(
+		ctx,
+		tip.Header(),
+		execmoduletester.WithSafeHash(tip.Hash()),
+		execmoduletester.WithFinalisedHash(tip.Hash()),
+	)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuResult.Status)
+	m.ExecModule.WaitIdle(ctx)
+
+	insertStatus, err = m.InsertBlocks(ctx, []*types.Block{sideBlock})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
+	validation, err = m.ValidateChain(ctx, sideBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	require.Equal(t, sideBlock.Hash(), validation.LatestValidHash)
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		require.Equal(t, tip.Hash(), rawdb.ReadHeadBlockHash(tx))
+		executionProgress, err := stages.GetStageProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		require.Equal(t, tip.NumberU64(), executionProgress)
+		return nil
+	}))
+}
+
 // newChainPrunedBelowFinalizedTip executes blocks 1-4, finalizes block 4 and
 // waits for the background prune, after which an unwind to block 2 fails with
 // "too far unwind".
