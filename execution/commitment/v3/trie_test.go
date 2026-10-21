@@ -238,11 +238,9 @@ func TestTrieMutations(t *testing.T) {
 			eachPlane(t, func(t *testing.T, plane byte) {
 				for depth := 0; depth <= 62; depth++ {
 					prefix := repeatedPath(depth, 3)
-					existing := appendPath(prefix, 4, bytes.Repeat([]byte{5}, 63-depth))
 					incoming := appendPath(prefix, 4, bytes.Repeat([]byte{6}, 63-depth))
-					n := fork(prefix)
-					n.plane = plane
-					n.setLeaf(4, packPath(existing[depth+1:], nil), []byte{0x11})
+					n := newNode(plane, prefix...)
+					n.addLeaf(4, 5, 0x11)
 
 					err := insert(n, incoming, []byte{0x22})
 					require.NoError(t, err, "depth %d", depth)
@@ -306,10 +304,8 @@ func TestTrieMutations(t *testing.T) {
 		}},
 		{"E9-E14-E16/RemoveClearsLeafAndMasks", func(t *testing.T) {
 			n := fork([]byte{2})
-			path := appendPath(n.path, 3, bytes.Repeat([]byte{4}, 62))
-			n.setLeaf(3, packPath(path[2:], nil), []byte{1})
-			other := appendPath(n.path, 5, bytes.Repeat([]byte{6}, 62))
-			n.setLeaf(5, packPath(other[2:], nil), []byte{2})
+			path := n.addLeaf(3, 4, 1)
+			other := n.addLeaf(5, 6, 2)
 
 			require.NoError(t, removeErr(n, path))
 			require.Zero(t, n.childMask&(1<<3))
@@ -325,10 +321,8 @@ func TestTrieMutations(t *testing.T) {
 		{"E14/RemovePromotesSoleLeafSurvivor", func(t *testing.T) {
 			parent := fork([]byte{4})
 			child := fork([]byte{4, 0, 1, 2})
-			removed := appendPath(child.path, 3, bytes.Repeat([]byte{5}, 59))
-			survivor := appendPath(child.path, 6, bytes.Repeat([]byte{7}, 59))
-			child.setLeaf(3, packPath(removed[len(child.path)+1:], nil), []byte{1})
-			child.setLeaf(6, packPath(survivor[len(child.path)+1:], nil), []byte{2})
+			removed := child.addLeaf(3, 5, 1)
+			survivor := child.addLeaf(6, 7, 2)
 			parent.setChild(0, child)
 
 			require.NoError(t, removeErr(parent, removed))
@@ -354,8 +348,7 @@ func TestTrieMutations(t *testing.T) {
 					parent := fork([]byte{7})
 					hash := bytes.Repeat([]byte{tt.fill}, 32)
 					parent.setStoredChild(0, hash, tt.ext)
-					removed := appendPath(parent.path, 1, bytes.Repeat([]byte{3}, 62))
-					parent.setLeaf(1, packPath(removed[len(parent.path)+1:], nil), []byte{9})
+					removed := parent.addLeaf(1, 3, 9)
 
 					require.NoError(t, removeErr(parent, removed))
 					require.Zero(t, parent.leafMask)
@@ -375,8 +368,7 @@ func TestTrieMutations(t *testing.T) {
 			child := fork([]byte{7, 0, 1, 2})
 			hash := bytes.Repeat([]byte{0x4c}, 32)
 			child.setStoredChild(3, hash, []byte{4, 5})
-			removed := appendPath(child.path, 6, bytes.Repeat([]byte{8}, 59))
-			child.setLeaf(6, packPath(removed[len(child.path)+1:], nil), []byte{9})
+			removed := child.addLeaf(6, 8, 9)
 			parent.setChild(0, child)
 
 			require.NoError(t, removeErr(parent, removed))
@@ -389,15 +381,13 @@ func TestTrieMutations(t *testing.T) {
 		}},
 		{"E16/RemoveTreatsDivergedPathsAsNotFound", func(t *testing.T) {
 			ext := fork([]byte{1, 2, 3})
-			kept := appendPath(ext.path, 4, bytes.Repeat([]byte{5}, 60))
-			ext.setLeaf(4, packPath(kept[4:], nil), []byte{1})
+			ext.addLeaf(4, 5, 1)
 			diverged := appendPath([]byte{1, 2, 9}, 4, bytes.Repeat([]byte{5}, 60))
 			require.ErrorIs(t, removeErr(ext, diverged), ErrRemoveNotFound)
 
 			root := fork(nil)
 			branch := fork([]byte{7, 8, 8})
-			branchLeaf := appendPath(branch.path, 1, bytes.Repeat([]byte{2}, 60))
-			branch.setLeaf(1, packPath(branchLeaf[4:], nil), []byte{3})
+			branch.addLeaf(1, 2, 3)
 			root.setChild(7, branch)
 			pastBranch := appendPath([]byte{7, 8, 9}, 1, bytes.Repeat([]byte{2}, 60))
 			require.ErrorIs(t, removeErr(root, pastBranch), ErrRemoveNotFound)
@@ -422,10 +412,8 @@ func TestTrieMutations(t *testing.T) {
 		}},
 		{"E17/RootRecordFormsAcrossPlanes", func(t *testing.T) {
 			eachPlane(t, func(t *testing.T, plane byte) {
-				n := fork(nil)
-				n.plane = plane
-				path := appendPath(nil, 3, bytes.Repeat([]byte{4}, 63))
-				n.setLeaf(3, packPath(path[1:], nil), []byte{1})
+				n := newNode(plane)
+				n.addLeaf(3, 4, 1)
 				require.Equal(t, byte(hdrIsLeafRoot), encodeRecord(n, 0, nil)[0])
 
 				second := appendPath(nil, 9, bytes.Repeat([]byte{5}, 63))
@@ -443,8 +431,7 @@ func TestTrieMutations(t *testing.T) {
 			eachPlane(t, func(t *testing.T, plane byte) {
 				hash := bytes.Repeat([]byte{0xa5}, 32)
 				childRecordPath := []byte{1, 2, 3}
-				n := fork(childRecordPath)
-				n.plane = plane
+				n := newNode(plane, childRecordPath...)
 				n.setStoredChild(int(childRecordPath[0]), hash, nil)
 				require.NoError(t, Validate(encodeRecord(n, 0, nil), 0))
 				incoming := append([]byte{1, 9}, bytes.Repeat([]byte{7}, 62)...)
@@ -466,11 +453,9 @@ func TestTrieMutations(t *testing.T) {
 		{"E15-E17/RootCollapseRewritesOnlyTheRoot", func(t *testing.T) {
 			eachPlane(t, func(t *testing.T, plane byte) {
 				hash := bytes.Repeat([]byte{0x31}, 32)
-				n := fork(nil)
-				n.plane = plane
+				n := newNode(plane)
 				n.setStoredChild(3, hash, []byte{4, 5})
-				removed := appendPath(nil, 9, bytes.Repeat([]byte{6}, 63))
-				n.setLeaf(9, packPath(removed[1:], nil), []byte{0x44})
+				removed := n.addLeaf(9, 6, 0x44)
 
 				require.NoError(t, removeRoot(n, removed))
 				require.Equal(t, []byte{3, 4, 5}, n.path)
@@ -492,16 +477,12 @@ func TestTrieMutations(t *testing.T) {
 		}},
 		{"E19/RootCollapseAdoptsInMemoryChild", func(t *testing.T) {
 			eachPlane(t, func(t *testing.T, plane byte) {
-				n := fork(nil)
-				n.plane = plane
+				n := newNode(plane)
 				child := fork([]byte{3})
-				leafA := appendPath([]byte{3}, 1, bytes.Repeat([]byte{7}, 62))
-				leafB := appendPath([]byte{3}, 2, bytes.Repeat([]byte{8}, 62))
-				child.setLeaf(1, packPath(leafA[2:], nil), []byte{0xa1})
-				child.setLeaf(2, packPath(leafB[2:], nil), []byte{0xa2})
+				child.addLeaf(1, 7, 0xa1)
+				child.addLeaf(2, 8, 0xa2)
 				n.setChild(3, child)
-				removed := appendPath(nil, 9, bytes.Repeat([]byte{6}, 63))
-				n.setLeaf(9, packPath(removed[1:], nil), []byte{0x44})
+				removed := n.addLeaf(9, 6, 0x44)
 
 				require.NoError(t, removeRoot(n, removed))
 				require.Equal(t, []byte{3}, n.path)
@@ -515,13 +496,11 @@ func TestTrieMutations(t *testing.T) {
 				b := appendPath(nil, 5, append([]byte{5, 2}, bytes.Repeat([]byte{4}, 61)...))
 				c := appendPath(nil, 6, bytes.Repeat([]byte{4}, 63))
 
-				viaLeafRoot := fork(nil)
-				viaLeafRoot.plane = plane
+				viaLeafRoot := newNode(plane)
 				require.NoError(t, insertRoot(viaLeafRoot, a, []byte{1}))
 				require.NoError(t, insertRoot(viaLeafRoot, b, []byte{2}))
 
-				viaCollapse := fork(nil)
-				viaCollapse.plane = plane
+				viaCollapse := newNode(plane)
 				require.NoError(t, insertRoot(viaCollapse, a, []byte{1}))
 				require.NoError(t, insertRoot(viaCollapse, c, []byte{3}))
 				require.NoError(t, insertRoot(viaCollapse, b, []byte{2}))
@@ -683,8 +662,7 @@ func TestFoldParity(t *testing.T) {
 	}{
 		{"E29/FoldEmptyTrie", func(t *testing.T) {
 			for _, plane := range []byte{planeAccount, planeStorage} {
-				n := fork(nil)
-				n.plane = plane
+				n := newNode(plane)
 				got, err := fold(n, 0)
 				require.NoError(t, err)
 				require.Equal(t, empty.RootHash[:], got[:])
@@ -695,8 +673,7 @@ func TestFoldParity(t *testing.T) {
 				key := foldKey(1)
 				path := commitment.KeyToHexNibbleHash(key)
 				value := foldValue(plane, 1)
-				n := fork(nil)
-				n.plane = plane
+				n := newNode(plane)
 				require.NoError(t, insert(n, path, value))
 
 				want := hexPatriciaRoot(t, plane, [][]byte{key}, [][]byte{path}, []commitment.Update{foldUpdate(plane, 1)})
@@ -720,8 +697,7 @@ func TestFoldParity(t *testing.T) {
 					t.Run(fmtPlane(plane)+"/"+tc.name, func(t *testing.T) {
 						keys, paths := distinctKeysAndPaths(tc.count, tc.seed)
 						updates := make([]commitment.Update, tc.count)
-						n := fork(nil)
-						n.plane = plane
+						n := newNode(plane)
 						for i, path := range paths {
 							updates[i] = foldUpdate(plane, i+1)
 							require.NoError(t, insert(n, path, foldValue(plane, i+1)))
@@ -743,12 +719,10 @@ func TestFoldParity(t *testing.T) {
 			}
 		}},
 		{"E30-E39/FoldUsesStoredChildHashWithoutStateReads", func(t *testing.T) {
-			n := fork(nil)
-			n.plane = planeStorage
+			n := newNode(planeStorage)
 			stored := bytes.Repeat([]byte{0x31}, 32)
 			n.setStoredChild(2, stored, []byte{3, 4})
-			path := append([]byte{5}, bytes.Repeat([]byte{6}, 63)...)
-			n.setLeaf(5, packPath(path[1:], nil), []byte{7})
+			path := n.addLeaf(5, 6, 7)
 
 			got, err := fold(n, 0)
 			require.NoError(t, err)
@@ -760,9 +734,8 @@ func TestFoldParity(t *testing.T) {
 			require.Equal(t, want, got)
 		}},
 		{"E30/FoldRejectsUnknownPlane", func(t *testing.T) {
-			n := fork(nil)
-			n.plane = 0xff
-			n.setLeaf(0, packPath(bytes.Repeat([]byte{1}, 63), nil), []byte{1})
+			n := newNode(0xff)
+			n.addLeaf(0, 1, 1)
 			_, err := fold(n, 0)
 			require.ErrorIs(t, err, errFoldPlane)
 		}},
@@ -781,8 +754,7 @@ func foldPlaneRoot(t *testing.T, n *node) []byte {
 		return got[:]
 	}
 	owner := foldUpdate(planeAccount, 1)
-	account := fork(nil)
-	account.plane = planeAccount
+	account := newNode(planeAccount)
 	require.NoError(t, insert(account, commitment.KeyToHexNibbleHash(foldStorageAddr), encodeAccountLeaf(&owner, got[:], nil)))
 	root, err := fold(account, 0)
 	require.NoError(t, err)

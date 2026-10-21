@@ -92,6 +92,18 @@ func TestProcessFeedReadsNoState(t *testing.T) {
 	require.Zero(t, memory.Counts().StorageReads)
 }
 
+func newNode(plane byte, path ...byte) *node {
+	n := fork(path)
+	n.plane = plane
+	return n
+}
+
+func (n *node) addLeaf(nib int, fill byte, value ...byte) []byte {
+	full := append(append(bytes.Clone(n.path), byte(nib)), bytes.Repeat([]byte{fill}, 63-len(n.path))...)
+	n.setLeaf(nib, packPath(full[len(n.path)+1:], nil), value)
+	return full
+}
+
 func materializeNode(path []byte, plane byte, spec *commitmenttest.RecordSpec) *node {
 	n := fork(path)
 	n.plane = plane

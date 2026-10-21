@@ -58,10 +58,8 @@ func TestDeltas(t *testing.T) {
 		}},
 		{"E40/MaterializeFoldsAndEncodesRecordInOneWalk", func(t *testing.T) {
 			ctx := newMockContext()
-			n := fork(nil)
-			n.plane = planeStorage
-			path := commitmenttest.Path([]byte{3}, 4)
-			n.setLeaf(int(path[0]), packPath(path[1:], nil), []byte{9})
+			n := newNode(planeStorage)
+			n.addLeaf(3, 4, 9)
 
 			var acc deltaParts
 			hash, err := graph{plane: planeStorage, addrHash: make([]byte, 32)}.materialize(ctx, n, n, &acc)
@@ -80,8 +78,7 @@ func TestDeltas(t *testing.T) {
 				t.Run(itoa(count), func(t *testing.T) {
 					ctx := newMockContext()
 					var addr [32]byte
-					root := fork(nil)
-					root.plane = planeStorage
+					root := newNode(planeStorage)
 					for i := range count {
 						path := make([]byte, 64)
 						path[0] = byte(i % 16)
@@ -116,8 +113,7 @@ func TestDeltas(t *testing.T) {
 			siblingKey := StorageNodeKey(addr, []byte{0x02}, nil)
 			ctx.branches[string(siblingKey)] = []byte{0xca, 0xfe}
 
-			root := fork(nil)
-			root.plane = planeStorage
+			root := newNode(planeStorage)
 			root.setStoredChild(0x0c, bytes.Repeat([]byte{0x11}, 32), []byte{0x06})
 			root.setStoredChild(0x02, bytes.Repeat([]byte{0x22}, 32), nil)
 
@@ -245,8 +241,7 @@ func TestRecordGraph(t *testing.T) {
 		run  func(*testing.T)
 	}{
 		{"E66/RecordHasherExpectsEveryExtensionChild", func(t *testing.T) {
-			n := fork(nil)
-			n.plane = planeAccount
+			n := newNode(planeAccount)
 			n.setStoredChild(1, bytes.Repeat([]byte{0x11}, 32), []byte{2, 3})
 			n.setStoredChild(4, bytes.Repeat([]byte{0x44}, 32), []byte{5, 6, 7})
 			record := encodeRecord(n, 0, nil)
