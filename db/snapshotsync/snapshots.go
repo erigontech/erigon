@@ -469,7 +469,7 @@ type BaseRoSnapshots struct {
 	operators map[snaptype.Enum]*retireOperators
 	alignMin  bool // do we want to align all visible segments to the minimum available
 	// keepUnindexedlyCovered opts RemoveOverlaps into refusing to unlink a subset whose only
-	// covering superset has no index. EL relies on the plain behaviour; caplin state does not.
+	// covering superset has no index. EL relies on the plain behaviour; caplin does not.
 	keepUnindexedlyCovered bool
 
 	// (type, from, to) of files a producer is currently building — a merge
@@ -520,11 +520,11 @@ type snapshotVisible struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func (s *BaseRoSnapshots) KeepUnindexedlyCovered() { s.keepUnindexedlyCovered = true }
-
 func NewBaseRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, baseSegType snaptype.Type, alignMin bool, logger log.Logger) *BaseRoSnapshots {
 	return newRoSnapshots(cfg, snapDir, types, baseSegType, alignMin, logger)
 }
+
+func (s *BaseRoSnapshots) KeepUnindexedlyCovered() { s.keepUnindexedlyCovered = true }
 
 func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, baseSegType snaptype.Type, alignMin bool, logger log.Logger) *BaseRoSnapshots {
 	if cfg.ChainName == "" {
