@@ -896,7 +896,7 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, kvGetter state_acc
 			continue
 		}
 		var parentPayloadAvailable bool
-		if block.Version() >= clparams.GloasVersion {
+		if block.Version() >= clparams.GloasVersion && block.Block.Body.Attestations.Len() > 0 {
 			parentSlot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, block.Block.ParentRoot)
 			if err != nil {
 				return nil, nil, err

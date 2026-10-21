@@ -41,7 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
-func setupGloasReplay(t *testing.T, fixture string) (kv.RwDB, []*cltypes.SignedBeaconBlock, map[uint64]*state.CachingBeaconState, *historical_states_reader.HistoricalStatesReader) {
+func setupGloasReplay(t *testing.T, fixture string) (kv.RwDB, []*cltypes.SignedBeaconBlock, map[uint64]*state.CachingBeaconState, *historical_states_reader.HistoricalStatesReader, *tests.MockBlockReader) {
 	t.Helper()
 	gloas := tests.GetGloasFixture(fixture, false, 0)
 	blocks, preState, cfg := gloas.Blocks, gloas.PreState, gloas.Config
@@ -73,7 +73,7 @@ func setupGloasReplay(t *testing.T, fixture string) (kv.RwDB, []*cltypes.SignedB
 	genesisState, err := preState.Copy()
 	require.NoError(t, err)
 	hr := historical_states_reader.NewHistoricalStatesReader(cfg, reader, readerVT, genesisState, nil, sn)
-	return db, blocks, expected, hr
+	return db, blocks, expected, hr, reader
 }
 
 func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postState *state.CachingBeaconState) {
@@ -131,7 +131,7 @@ func TestStateAntiquaryBellatrix(t *testing.T) {
 func TestReadHistoricalStateGloasParticipation(t *testing.T) {
 	for _, fixture := range []string{"missed_slot_payload_availability", "attestation"} {
 		t.Run(fixture, func(t *testing.T) {
-			db, blocks, expected, hr := setupGloasReplay(t, fixture)
+			db, blocks, expected, hr, _ := setupGloasReplay(t, fixture)
 			tx, err := db.BeginRo(context.Background())
 			require.NoError(t, err)
 			defer tx.Rollback()
@@ -149,8 +149,31 @@ func TestReadHistoricalStateGloasParticipation(t *testing.T) {
 	}
 }
 
+func TestReadHistoricalStateGloasGenesisBlockWithoutAttestations(t *testing.T) {
+	db, blocks, expected, hr, reader := setupGloasReplay(t, "missed_slot_payload_availability")
+	gloas := tests.GetGloasFixture("missed_slot_payload_availability", false, 0)
+	preState, cfg := gloas.PreState, gloas.Config
+	genesisBlock := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	genesisBlock.Block.Slot = preState.Slot()
+	genesisBlock.Block.ParentRoot = preState.LatestBlockHeader().ParentRoot
+	reader.U[preState.Slot()] = genesisBlock
+
+	tx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	slot := blocks[0].Block.Slot
+	got, err := hr.ReadHistoricalState(context.Background(), tx, slot)
+	require.NoError(t, err)
+	require.Equal(t, expected[slot].CurrentEpochParticipation().Bytes(), got.CurrentEpochParticipation().Bytes())
+	require.Equal(t, expected[slot].PreviousEpochParticipation().Bytes(), got.PreviousEpochParticipation().Bytes())
+	root, err := got.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, blocks[0].Block.StateRoot, common.Hash(root))
+}
+
 func TestReadParticipationsReturnsBlockRootError(t *testing.T) {
-	db, _, _, hr := setupGloasReplay(t, "missed_slot_payload_availability")
+	db, _, _, hr, _ := setupGloasReplay(t, "missed_slot_payload_availability")
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()

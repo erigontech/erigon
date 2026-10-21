@@ -17,6 +17,7 @@
 package historical_states_reader
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -58,4 +59,66 @@ func TestGloasSameSlotAttestationRejectsNonzeroIndex(t *testing.T) {
 
 	_, err := reader.getAttestationParticipationFlagIndicies(getter, clparams.GloasVersion, 1, data, 1, false, true)
 	require.ErrorContains(t, err, "committee index is not zero")
+}
+
+func TestGloasSameSlotAttestationAfterGenesisSlot(t *testing.T) {
+	previousRoot := common.HexToHash("0x1234")
+	headRoot := common.HexToHash("0x5678")
+	getter := mockGetValFn(map[string]map[string][]byte{
+		kv.BlockRoot: {
+			string(base_encoding.Encode64ToBytes4(0)): previousRoot[:],
+			string(base_encoding.Encode64ToBytes4(1)): headRoot[:],
+		},
+	})
+	cfg := &clparams.MainnetBeaconConfig
+	reader := NewHistoricalStatesReader(cfg, nil, nil, state.New(cfg), nil, nil)
+	data := solid.AttestationData{
+		Slot:            1,
+		BeaconBlockRoot: headRoot,
+		Target:          solid.Checkpoint{Root: previousRoot},
+	}
+
+	t.Run("rejects nonzero index", func(t *testing.T) {
+		data := data
+		data.CommitteeIndex = 1
+		_, err := reader.getAttestationParticipationFlagIndicies(getter, clparams.GloasVersion, 2, data, 1, false, true)
+		require.ErrorContains(t, err, "committee index is not zero")
+	})
+
+	t.Run("ignores parent payload availability", func(t *testing.T) {
+		flags, err := reader.getAttestationParticipationFlagIndicies(getter, clparams.GloasVersion, 2, data, 1, true, true)
+		require.NoError(t, err)
+		require.Contains(t, flags, cfg.TimelyHeadFlagIndex)
+	})
+}
+
+func TestPayloadMatchAppliesFromGloas(t *testing.T) {
+	root := common.HexToHash("0x1234")
+	getter := mockGetValFn(map[string]map[string][]byte{
+		kv.BlockRoot: {
+			string(base_encoding.Encode64ToBytes4(0)): root[:],
+			string(base_encoding.Encode64ToBytes4(1)): root[:],
+		},
+	})
+	cfg := &clparams.MainnetBeaconConfig
+	reader := NewHistoricalStatesReader(cfg, nil, nil, state.New(cfg), nil, nil)
+	data := solid.AttestationData{
+		Slot:            1,
+		BeaconBlockRoot: root,
+		Target:          solid.Checkpoint{Root: root},
+	}
+
+	for _, tc := range []struct {
+		version    clparams.StateVersion
+		timelyHead bool
+	}{
+		{clparams.FuluVersion, true},
+		{clparams.GloasVersion, false},
+	} {
+		t.Run(tc.version.String(), func(t *testing.T) {
+			flags, err := reader.getAttestationParticipationFlagIndicies(getter, tc.version, 2, data, 1, true, true)
+			require.NoError(t, err)
+			require.Equal(t, tc.timelyHead, slices.Contains(flags, cfg.TimelyHeadFlagIndex))
+		})
+	}
 }
