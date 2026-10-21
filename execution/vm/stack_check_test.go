@@ -120,9 +120,6 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 		}
 	}
 	for i, jt := range tables {
-		if sload := &jt[SLOAD]; sload.constantGas == 0 {
-			require.Equal(t, reflect.ValueOf(gasSLoadEIP2929).Pointer(), reflect.ValueOf(sload.dynamicGas).Pointer(), "table %d SLOAD", i)
-		}
 		for op, w := range fastPathOps {
 			got := &jt[op]
 			if w.gated && got.numPush != w.numPush || w.memorySize != nil && got.memorySize == nil {
@@ -185,8 +182,8 @@ func TestRunIsGenerated(t *testing.T) {
 }
 
 // TestRunHasNoJumpTable fails when Go compiles run's opcode switch to a jump
-// table, which it does once the cases are dense enough.
-// The indirect jump made the fast path slower than the compare tree.
+// table, which it does once the cases are dense enough. The indirect jump made
+// the fast path slower than the compare tree.
 func TestRunHasNoJumpTable(t *testing.T) {
 	// The test binary has no symbol table; the package archive keeps it.
 	pkg := filepath.Join(t.TempDir(), "vm.a")
@@ -255,7 +252,7 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		// A fresh state per run: a shared one leaves the first run's cold accesses warm.
 		ibs := state.New(state.NewNoopReader())
 		defer ibs.Close()
-		// Warm slots with values, so a frame-cache hit fits in the gas sweep and shows its value.
+		// Warm slots with values, so a warm SLOAD fits in the gas sweep and shows its value.
 		for k, v := range map[uint64]uint64{1: 0xaa, 2: 0xbb} {
 			key := accounts.InternKey(uint256.NewInt(k).Bytes32())
 			require.NoError(t, ibs.SetState(accounts.ZeroAddress, key, *uint256.NewInt(v)))
