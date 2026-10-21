@@ -424,13 +424,15 @@ flowchart LR
 - [ ] red test first: apply `~/org/mode/e/research/pbt-stream-row-builder/t03-red-test.patch` onto the Task 2 tests.
       It runs the factory-wired variant (4 workers, `WithParaTrieDB`) at `MaxOps` 100k/1k/7/1, and is red today with
       `row 001004 is missing` at batch 2 of `MaxOps=7`
-- [ ] leaf stamps travel with each op through the sort, replacing the side file; `visit` no longer reads stamps by
+- [x] leaf stamps travel with each op through the sort, replacing the side file; `visit` no longer reads stamps by
       position
-- [ ] `pbinForEachRebuildOpStream` records partition starts and draws batches across partitions (Technical Details).
+- [x] `pbinForEachRebuildOpStream` records partition starts and draws batches across partitions (Technical Details).
       Update `TestPBinRebuildBatchesFollowTreeKeyOrder`: order now holds within each partition's cursor. Add a test for
       `MergeGroupKey` groups under partition batching, or record that the range writer never emits merges
-- [ ] `FlushFinished` keeps the open path of every live partition. `pbinRowStampTracker` keeps per-partition state and
-      a shared aggregate for the rows above partitions, and `finished` clears only the keys it flushed
+- [x] `FlushFinished` keeps the open path of every live partition. `pbinRowStampTracker` keeps per-partition state and
+      a shared aggregate for the rows above partitions. `finished` clears the closed stamps of every partition, not only
+      the flushed keys: a closed prefix never gets a later leaf, so its row is final, and keeping unflushed entries
+      would only accumulate the non-row 4-bit prefixes of every leaf
 - [ ] factory contexts read through the range-writer overlay, decorated like the main context and read-only during a
       round. On a fresh convert the overlay implements the Task 8 `Absent(key)` as "not held in `writes` and not
       flushed"

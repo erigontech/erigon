@@ -506,6 +506,80 @@ func TestPBinRangeWriterRecordsMatchSequentialTrie(t *testing.T) {
 	}
 }
 
+func TestPBinRangeWriterRowsLandInLeafStampRange(t *testing.T) {
+	selectPBinRangeWriterHash(t)
+	for _, corpus := range pbinRangeWriterCorpora() {
+		t.Run(corpus.name, func(t *testing.T) {
+			var maximum uint64
+			for _, leaf := range corpus.leaves {
+				maximum = max(maximum, leaf.Stamp)
+			}
+			expected := func(key []byte) uint64 {
+				if bytes.Equal(key, pbt.GlobalRootKey()) {
+					return maximum
+				}
+				path, err := eip8297.DecodeBitPath(key)
+				require.NoError(t, err, "%x", key)
+				var stamp uint64
+				found := false
+				for _, leaf := range corpus.leaves {
+					leafPath := eip8297.PathFromBits(leaf.Key, int16(len(leaf.Key)*8))
+					if eip8297.CommonPrefixBitsAt(&path, 0, &leafPath) == path.BitLen {
+						stamp = max(stamp, leaf.Stamp)
+						found = true
+					}
+				}
+				require.True(t, found, "row %x covers no leaf", key)
+				return stamp
+			}
+			for _, maxOps := range []int{100000, 7, 1} {
+				got := runPBinRangeWriterCorpus(t, corpus.leaves, maxOps)
+				for _, file := range got.files {
+					for _, entry := range file.entries {
+						if bytes.Equal(entry.key, commitment.KeyCommitmentState) {
+							continue
+						}
+						stamp := expected(entry.key)
+						require.True(t, stamp >= file.start && stamp < file.end, "maxOps=%d: row %x with leaf stamp %d is in file [%d,%d)", maxOps, entry.key, stamp, file.start, file.end)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestPBinRangeWriterFewerOpsThanPartitions(t *testing.T) {
+	selectPBinRangeWriterHash(t)
+	var leaves []state.PBinLeaf
+	for nibble := range byte(16) {
+		for i := range byte(3) {
+			key := make([]byte, eip8297.StorageKeyLength)
+			key[0] = eip8297.StorageZone
+			key[1] = nibble<<4 | i
+			key[33] = i << 4
+			key[len(key)-1] = i + 1
+			leaves = append(leaves, state.PBinLeaf{Key: key, Value: pbinRangeWriterValue(nibble*3 + i + 1), Stamp: uint64(nibble+i) % 24})
+		}
+	}
+	for nibble := range byte(4) {
+		for i := range byte(2) {
+			stem := make([]byte, 32)
+			stem[0] = nibble<<4 | i
+			leaves = append(leaves, state.PBinLeaf{Key: eip8297.TreeKey(eip8297.CodeZone, stem, i), Value: pbinRangeWriterCodeValue(nibble*2 + i + 1), Stamp: uint64(nibble*5+i) % 24})
+		}
+	}
+	sort.Slice(leaves, func(i, j int) bool { return bytes.Compare(leaves[i].Key, leaves[j].Key) < 0 })
+	partitions := make(map[[2]byte]struct{})
+	for _, leaf := range leaves {
+		partitions[[2]byte{leaf.Key[0], leaf.Key[1] >> 4}] = struct{}{}
+	}
+	require.Len(t, partitions, 20)
+	want := runPBinRangeWriterCorpus(t, leaves, 100000)
+	for _, maxOps := range []int{3, 1} {
+		require.Equal(t, want, runPBinRangeWriterCorpus(t, leaves, maxOps), "maxOps=%d", maxOps)
+	}
+}
+
 type pbinSequentialContext struct {
 	records map[string][]byte
 }

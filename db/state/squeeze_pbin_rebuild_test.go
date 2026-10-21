@@ -23,18 +23,19 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 )
 
 func pbinRebuildBatches(ops []pbt.Op, tmpDir string, maxOps, maxBytes int) ([][]pbt.Op, error) {
 	var batches [][]pbt.Op
-	err := pbinForEachRebuildOpStream(tmpDir, maxOps, maxBytes, func(batch []pbt.Op, _ []byte, _ bool) error {
+	err := pbinForEachRebuildOpStream(tmpDir, maxOps, maxBytes, func(batch []pbt.Op, _ []uint64, _ [][]byte, _ bool) error {
 		batches = append(batches, append([]pbt.Op(nil), batch...))
 		return nil
-	}, func(emit func(pbt.Op) error) error {
+	}, func(emit func(pbt.Op, uint64) error) error {
 		for i := range ops {
-			if err := emit(ops[i]); err != nil {
+			if err := emit(ops[i], 0); err != nil {
 				return err
 			}
 		}
@@ -55,17 +56,64 @@ func TestPBinRebuildBatchesFollowTreeKeyOrder(t *testing.T) {
 
 	batches, err := pbinRebuildBatches(ops, t.TempDir(), 2, 1<<20)
 	require.NoError(t, err)
-	require.Len(t, batches, 2)
-	require.Len(t, batches[0], 2)
-	require.Len(t, batches[1], 2)
-	var ordered [][]byte
+	lastInPartition := make(map[pbinPartition][]byte)
+	seen := 0
 	for _, batch := range batches {
-		for _, op := range batch {
-			ordered = append(ordered, op.Key)
+		require.NotEmpty(t, batch)
+		for i, op := range batch {
+			if i > 0 {
+				require.Less(t, bytes.Compare(batch[i-1].Key, op.Key), 0, "batch is not sorted")
+			}
+			partition := pbinPartitionOf(op.Key)
+			if last, ok := lastInPartition[partition]; ok {
+				require.Less(t, bytes.Compare(last, op.Key), 0, "partition %x is out of order", partition[:])
+			}
+			lastInPartition[partition] = op.Key
+			seen++
 		}
 	}
-	for i := 1; i < len(ordered); i++ {
-		require.Less(t, bytes.Compare(ordered[i-1], ordered[i]), 0)
+	require.Equal(t, len(ops), seen)
+}
+
+func TestPBinRebuildBatchesKeepMergeGroupsAcrossPartitions(t *testing.T) {
+	var ops []pbt.Op
+	emitter := pbt.NewRebuildFeedOpEmitter()
+	for i := range 64 {
+		account := commitment.PBinFeedAccount{Address: bytes.Repeat([]byte{byte(i + 1)}, 20), Exists: true, Nonce: uint64(i + 1)}
+		require.NoError(t, emitter.EmitAccount(account, func(op pbt.Op) error {
+			ops = append(ops, op)
+			return nil
+		}))
+	}
+	groups := make(map[string]int)
+	partitions := make(map[pbinPartition]struct{})
+	for _, op := range ops {
+		if group := pbt.MergeGroupKey(op); len(group) != 0 {
+			groups[string(group)]++
+			partitions[pbinPartitionOf(op.Key)] = struct{}{}
+		}
+	}
+	require.Len(t, groups, 64)
+	require.Greater(t, len(partitions), 8)
+	for _, maxOps := range []int{1, 3, 1000} {
+		batches, err := pbinRebuildBatches(ops, t.TempDir(), maxOps, 1<<20)
+		require.NoError(t, err)
+		batchOf := make(map[string]int)
+		count := 0
+		for index, batch := range batches {
+			for _, op := range batch {
+				count++
+				group := pbt.MergeGroupKey(op)
+				if len(group) == 0 {
+					continue
+				}
+				if first, ok := batchOf[string(group)]; ok {
+					require.Equal(t, first, index, "maxOps=%d: merge group %x split across batches", maxOps, group)
+				}
+				batchOf[string(group)] = index
+			}
+		}
+		require.Equal(t, len(ops), count, "maxOps=%d", maxOps)
 	}
 }
 

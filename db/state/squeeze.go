@@ -1353,16 +1353,65 @@ const (
 	pbinRebuildOpCollectorBufferBudget = 64 * datasize.MB
 )
 
-func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func([]pbt.Op, []byte, bool) error, stream func(func(pbt.Op) error) error) error {
+type pbinPartition [2]byte
+
+func pbinPartitionOf(key []byte) pbinPartition {
+	if len(key) < 2 {
+		return pbinPartition{}
+	}
+	return pbinPartition{key[0], key[1] >> 4}
+}
+
+type pbinPartitionRange struct {
+	partition pbinPartition
+	offset    int64
+	size      int64
+	count     int
+}
+
+type pbinPartitionCursor struct {
+	partition pbinPartition
+	reader    *bufio.Reader
+	remaining int
+	next      pbt.Op
+	stamp     uint64
+	has       bool
+}
+
+func (c *pbinPartitionCursor) advance() error {
+	if c.remaining == 0 {
+		c.has = false
+		return nil
+	}
+	op, stamp, eof, err := readPBinRebuildOp(c.reader)
+	if err != nil {
+		return err
+	}
+	if eof {
+		return fmt.Errorf("commitment rebuild: partition %x ended early", c.partition[:])
+	}
+	c.remaining--
+	c.next, c.stamp, c.has = op, stamp, true
+	return nil
+}
+
+func pbinSameMergeGroup(a, b pbt.Op) bool {
+	group := pbt.MergeGroupKey(a)
+	return len(group) != 0 && bytes.Equal(group, pbt.MergeGroupKey(b))
+}
+
+func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func(batch []pbt.Op, stamps []uint64, lookahead [][]byte, final bool) error, stream func(func(pbt.Op, uint64) error) error) error {
 	collector := etl.NewCollector("[rebuild_commitment_pbin]", tmpDir, etl.NewSortableBuffer(pbinRebuildOpCollectorBufferBudget), log.Root()).SortAndFlushInBackground(true)
 	defer collector.Close()
-	emit := func(op pbt.Op) error {
+	var stampBuf [8]byte
+	emit := func(op pbt.Op, stamp uint64) error {
 		key := batchOperationKey(op)
 		encoded, err := pbt.EncodeOp(op)
 		if err != nil {
 			return err
 		}
-		return collector.Collect(key, encoded)
+		binary.BigEndian.PutUint64(stampBuf[:], stamp)
+		return collector.Collect(key, append(stampBuf[:], encoded...))
 	}
 	if err := stream(emit); err != nil {
 		return err
@@ -1382,6 +1431,8 @@ func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func(
 	}()
 	sortedWriter := bufio.NewWriter(sortedFile)
 	var lengthBuf [4]byte
+	var partitions []pbinPartitionRange
+	var offset int64
 	if err := collector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		if bytes.Equal(previousOpKey, key) {
 			if !bytes.Equal(previousOpValue, value) {
@@ -1391,12 +1442,21 @@ func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func(
 		}
 		previousOpKey = bytes.Clone(key)
 		previousOpValue = bytes.Clone(value)
+		if partition := pbinPartitionOf(key); len(partitions) == 0 || partitions[len(partitions)-1].partition != partition {
+			partitions = append(partitions, pbinPartitionRange{partition: partition, offset: offset})
+		}
 		binary.BigEndian.PutUint32(lengthBuf[:], uint32(len(value)))
 		if _, err := sortedWriter.Write(lengthBuf[:]); err != nil {
 			return err
 		}
-		_, err := sortedWriter.Write(value)
-		return err
+		if _, err := sortedWriter.Write(value); err != nil {
+			return err
+		}
+		size := int64(len(lengthBuf) + len(value))
+		offset += size
+		partitions[len(partitions)-1].size += size
+		partitions[len(partitions)-1].count++
+		return nil
 	}, etl.TransformArgs{}); err != nil {
 		return err
 	}
@@ -1413,36 +1473,57 @@ func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func(
 	if maxBytes <= 0 {
 		maxBytes = int(^uint(0) >> 1)
 	}
-	batch := make([]pbt.Op, 0, min(maxOps, 1024))
-	batchBytes := 0
 	readerFile, err := os.Open(sortedPath)
 	if err != nil {
 		return err
 	}
 	defer readerFile.Close()
-	reader := bufio.NewReader(readerFile)
-	for {
-		op, eof, err := readPBinRebuildOp(reader)
-		if err != nil {
+	live := make([]*pbinPartitionCursor, 0, len(partitions))
+	for _, partition := range partitions {
+		cursor := &pbinPartitionCursor{partition: partition.partition, reader: bufio.NewReader(io.NewSectionReader(readerFile, partition.offset, partition.size)), remaining: partition.count}
+		if err := cursor.advance(); err != nil {
 			return err
 		}
-		if eof {
-			break
-		}
-		opBytes := len(op.Key) + len(op.Drop) + len(op.Value)
-		keepMergeGroup := len(batch) > 0 && len(pbt.MergeGroupKey(batch[len(batch)-1])) != 0 && bytes.Equal(pbt.MergeGroupKey(batch[len(batch)-1]), pbt.MergeGroupKey(op))
-		if len(batch) > 0 && (len(batch) >= maxOps || batchBytes+opBytes > maxBytes) && !keepMergeGroup {
-			if err := visit(batch, batchOperationKey(op), false); err != nil {
-				return err
-			}
-			batch = batch[:0]
-			batchBytes = 0
-		}
-		batch = append(batch, op)
-		batchBytes += opBytes
+		live = append(live, cursor)
 	}
-	if len(batch) > 0 {
-		if err := visit(batch, nil, true); err != nil {
+	batch := make([]pbt.Op, 0, min(maxOps, 1024))
+	stamps := make([]uint64, 0, cap(batch))
+	lookahead := make([][]byte, 0, len(live))
+	for len(live) > 0 {
+		quota := max(1, maxOps/len(live))
+		batch, stamps = batch[:0], stamps[:0]
+		batchBytes := 0
+		full := false
+		for _, cursor := range live {
+			for taken := 0; cursor.has && !full; taken++ {
+				op := cursor.next
+				opBytes := len(op.Key) + len(op.Drop) + len(op.Value)
+				keepGroup := taken > 0 && pbinSameMergeGroup(batch[len(batch)-1], op)
+				if taken >= quota && !keepGroup {
+					break
+				}
+				if len(batch) > 0 && batchBytes+opBytes > maxBytes && !keepGroup {
+					full = true
+					break
+				}
+				batch = append(batch, op)
+				stamps = append(stamps, cursor.stamp)
+				batchBytes += opBytes
+				if err := cursor.advance(); err != nil {
+					return err
+				}
+			}
+		}
+		next := live[:0]
+		lookahead = lookahead[:0]
+		for _, cursor := range live {
+			if cursor.has {
+				next = append(next, cursor)
+				lookahead = append(lookahead, batchOperationKey(cursor.next))
+			}
+		}
+		live = next
+		if err := visit(batch, stamps, lookahead, len(live) == 0); err != nil {
 			return err
 		}
 	}
@@ -1456,20 +1537,23 @@ func batchOperationKey(op pbt.Op) []byte {
 	return op.Key
 }
 
-func readPBinRebuildOp(r io.Reader) (pbt.Op, bool, error) {
+func readPBinRebuildOp(r io.Reader) (pbt.Op, uint64, bool, error) {
 	var lengthBuf [4]byte
 	if _, err := io.ReadFull(r, lengthBuf[:]); errors.Is(err, io.EOF) {
-		return pbt.Op{}, true, nil
+		return pbt.Op{}, 0, true, nil
 	} else if err != nil {
-		return pbt.Op{}, false, err
+		return pbt.Op{}, 0, false, err
 	}
 	length := binary.BigEndian.Uint32(lengthBuf[:])
+	if length < 8 {
+		return pbt.Op{}, 0, false, fmt.Errorf("commitment rebuild: operation record of %d bytes", length)
+	}
 	encoded := make([]byte, length)
 	if _, err := io.ReadFull(r, encoded); err != nil {
-		return pbt.Op{}, false, err
+		return pbt.Op{}, 0, false, err
 	}
-	op, err := pbt.DecodeOp(encoded)
-	return op, false, err
+	op, err := pbt.DecodeOp(encoded[8:])
+	return op, binary.BigEndian.Uint64(encoded[:8]), false, err
 }
 
 func dumpCommitmentStep(ctx context.Context, a *Aggregator, sd *execctx.SharedDomains, step kv.Step) error {
