@@ -173,8 +173,8 @@ func (s *CaplinSnapshots) segmentsUpToGap() ([]string, error) {
 	stopped := false
 	for i := range files {
 		if files[i].Type.Enum() == snaptype.CaplinEnums.BeaconBlocks {
-			stopped = stopped || (end > 0 && (files[i].From > end || files[i].From < end && files[i].To > end))
-			if stopped {
+			stopped = stopped || (end > 0 && files[i].From > end)
+			if stopped || files[i].From < end && files[i].To > end {
 				continue
 			}
 			end = max(end, files[i].To)
