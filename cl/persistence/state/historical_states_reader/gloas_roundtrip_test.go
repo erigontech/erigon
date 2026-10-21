@@ -637,6 +637,7 @@ func seedGloasHistoricalState(t *testing.T, cfg *clparams.BeaconChainConfig, slo
 	roundedSlot := cfg.RoundSlotToEpoch(slot)
 	roundedKey := base_encoding.Encode64ToBytes4(roundedSlot)
 	genesisKey := base_encoding.Encode64ToBytes4(0)
+	dumpKey := base_encoding.Encode64ToBytes4(slot - slot%clparams.SlotsPerDump)
 
 	block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
 	block.Block.Slot = slot
@@ -673,8 +674,8 @@ func seedGloasHistoricalState(t *testing.T, cfg *clparams.BeaconChainConfig, slo
 	require.NoError(t, tx.Put(kv.StatesProcessingProgress, kv.StatesProcessingKey, slotKey))
 	require.NoError(t, tx.Put(kv.SlotData, slotKey, slotDataBuf.Bytes()))
 	require.NoError(t, tx.Put(kv.EpochData, roundedKey, epochDataBuf.Bytes()))
-	require.NoError(t, tx.Put(kv.BalancesDump, genesisKey, compressedBalances))
-	require.NoError(t, tx.Put(kv.EffectiveBalancesDump, genesisKey, compressedEffBalances))
+	require.NoError(t, tx.Put(kv.BalancesDump, dumpKey, compressedBalances))
+	require.NoError(t, tx.Put(kv.EffectiveBalancesDump, dumpKey, compressedEffBalances))
 	require.NoError(t, tx.Put(kv.IntraRandaoMixes, slotKey, intraRandaoMix))
 	require.NoError(t, tx.Put(kv.ValidatorSlashings, genesisKey, compressedSlashings))
 	require.NoError(t, tx.Put(kv.InactivityScores, genesisKey, compressedInactivity))
@@ -704,11 +705,12 @@ func seedGloasHistoricalState(t *testing.T, cfg *clparams.BeaconChainConfig, slo
 }
 
 // TestReadHistoricalState_GloasQueuesBeforeFirstDump uses a fork slot that is
-// not aligned to SlotsPerDump, so the pre-fork dump is absent. The state is
-// rebuilt from the full-list diffs written at the fork slot.
+// not aligned to SlotsPerDump and a pre-fork dump slot above zero, so the
+// pre-fork dump is absent. The state is rebuilt from the full-list diffs
+// written at the fork slot.
 func TestReadHistoricalState_GloasQueuesBeforeFirstDump(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
-	cfg.GloasForkEpoch = 1
+	cfg.GloasForkEpoch = 49
 	slot := cfg.GloasForkEpoch * cfg.SlotsPerEpoch
 	fixture := seedGloasHistoricalState(t, &cfg, slot)
 
@@ -745,6 +747,22 @@ func TestReadHistoricalState_GloasQueuesBeforeFirstDump(t *testing.T) {
 	require.Equal(t, uint64(777), reconstructed.GetBuilderPendingWithdrawals().Get(0).Amount)
 	require.Equal(t, uint64(3), reconstructed.GetBuilderPendingWithdrawals().Get(0).BuilderIndex)
 	require.Equal(t, 0, reconstructed.GetPayloadExpectedWithdrawals().Len())
+}
+
+// TestReadHistoricalState_GloasQueuesMissingDumpAfterFork reads a slot whose
+// dump slot is after the fork slot while the Gloas queue dumps are missing.
+func TestReadHistoricalState_GloasQueuesMissingDumpAfterFork(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.GloasForkEpoch = 1
+	slot := uint64(clparams.SlotsPerDump)
+	fixture := seedGloasHistoricalState(t, &cfg, slot)
+
+	roTx, err := fixture.db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	_, err = fixture.reader.ReadHistoricalState(context.Background(), roTx, slot)
+	require.ErrorIs(t, err, ErrMissingGloasData)
 }
 
 // TestReadHistoricalState_GloasFieldsReconstruction populates a memdb with the
