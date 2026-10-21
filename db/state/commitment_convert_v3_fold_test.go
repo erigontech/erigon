@@ -18,6 +18,7 @@ package state_test
 
 import (
 	"bytes"
+	"cmp"
 	"fmt"
 	"maps"
 	"math"
@@ -33,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -42,15 +44,15 @@ func commitmentFilesByEnd(t *testing.T, snapDomain string) []string {
 	t.Helper()
 	kvs, err := filepath.Glob(filepath.Join(snapDomain, "*-commitment.*.kv"))
 	require.NoError(t, err)
-	end := func(p string) int {
-		var from, to int
-		name := filepath.Base(p)
-		name = name[strings.Index(name, "commitment.")+len("commitment."):]
-		_, scanErr := fmt.Sscanf(name, "%d-%d.kv", &from, &to)
-		require.NoError(t, scanErr)
-		return to*1000 + from
+	rng := func(p string) snaptype.FileInfo {
+		info, _, ok := snaptype.ParseFileName("", p)
+		require.Truef(t, ok, "bad commitment file name %s", p)
+		return info
 	}
-	slices.SortFunc(kvs, func(a, b string) int { return end(a) - end(b) })
+	slices.SortFunc(kvs, func(a, b string) int {
+		ai, bi := rng(a), rng(b)
+		return cmp.Or(cmp.Compare(ai.To, bi.To), cmp.Compare(ai.From, bi.From))
+	})
 	return kvs
 }
 

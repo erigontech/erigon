@@ -18,6 +18,7 @@ package state_test
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -37,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -67,8 +69,11 @@ func TestConvertCommitmentFiles_V3(t *testing.T) {
 	snapDir := agg.Dirs().SnapDomain
 	kvs, err := filepath.Glob(filepath.Join(snapDir, "*-commitment.*.kv"))
 	require.NoError(t, err)
-	require.NotEmpty(t, kvs)
+	require.Greater(t, len(kvs), 1)
 	for _, p := range kvs {
+		keys, _ := readKVFile(t, agg, p)
+		has := slices.ContainsFunc(keys, func(k []byte) bool { return bytes.Equal(k, commitment.KeyCommitmentV3State) })
+		require.Truef(t, has, "%s has no v3 state record", filepath.Base(p))
 		name := filepath.Base(p)
 		require.Truef(t, strings.HasPrefix(name, "v3.0-"), "%s is not a v3.0 file", name)
 		rangeName := strings.TrimSuffix(strings.TrimPrefix(name, "v3.0-"), ".kv")
@@ -93,10 +98,9 @@ func TestConvertCommitmentFiles_V3(t *testing.T) {
 
 func commitmentFileRange(t *testing.T, path string) (from, to uint64) {
 	t.Helper()
-	name := filepath.Base(path)
-	_, err := fmt.Sscanf(name[strings.Index(name, "commitment.")+len("commitment."):], "%d-%d.kv", &from, &to)
-	require.NoError(t, err)
-	return from, to
+	info, _, ok := snaptype.ParseFileName("", path)
+	require.Truef(t, ok, "bad commitment file name %s", path)
+	return info.From, info.To
 }
 
 func branchCells(value []byte) (string, bool) {
@@ -116,7 +120,7 @@ func dropLeafOnlyRewrites(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregato
 	slices.SortFunc(paths, func(a, b string) int {
 		af, _ := commitmentFileRange(t, a)
 		bf, _ := commitmentFileRange(t, b)
-		return int(af) - int(bf)
+		return cmp.Compare(af, bf)
 	})
 	older := map[string][]byte{}
 	for _, p := range paths[:len(paths)-1] {
@@ -240,13 +244,13 @@ func TestConvertCommitmentFiles_V3CollapsedStorageBranch(t *testing.T) {
 	}
 }
 
-func testConvertCommitmentFilesV3CollapsedStorageBranch(t *testing.T, keysV2 bool) {
-	const stepSize, steps = 4, 2
+func buildRecreatedOwnerFiles(t *testing.T, stepSize, steps uint64, accounts int, laterSlot bool) (kv.TemporalRwDB, *state.Aggregator, []byte) {
+	t.Helper()
 	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
 	put, del, putAccount := domainWriter(t, domains, rwTx)
 	ctx := t.Context()
 
-	addrs, _ := generateInputData(t, length.Addr, 1, 2)
+	addrs, _ := generateInputData(t, length.Addr, 1, accounts)
 	owner := addrs[0]
 	next := uint64(1)
 	live := [][]byte{
@@ -254,32 +258,38 @@ func testConvertCommitmentFilesV3CollapsedStorageBranch(t *testing.T, keysV2 boo
 		storageSlotWithHashPrefix(t, []byte{0xe, 0x5}, &next),
 		storageSlotWithHashPrefix(t, []byte{0x3}, &next),
 	}
-	collapsing := [][]byte{
+	old := [][]byte{
 		storageSlotWithHashPrefix(t, []byte{0xe, 0x1, 0x7, 0x0}, &next),
 		storageSlotWithHashPrefix(t, []byte{0xe, 0x1, 0x7, 0x9}, &next),
 		storageSlotWithHashPrefix(t, []byte{0xe, 0x1, 0xe, 0x5}, &next),
 		storageSlotWithHashPrefix(t, []byte{0xe, 0x1, 0xe, 0xa}, &next),
 	}
+	var later []byte
+	if laterSlot {
+		later = storageSlotWithHashPrefix(t, []byte{0xe, 0x1, 0x7, 0x3}, &next)
+	}
 	slot := func(s []byte) []byte { return append(bytes.Clone(owner), s...) }
-	for txNum := range uint64(stepSize * steps) {
-		switch txNum {
-		case 0:
+	for txNum := range stepSize * steps {
+		switch {
+		case txNum == 0:
 			for _, a := range addrs {
 				putAccount(a, txNum)
 			}
-			for _, s := range append(slices.Clone(live), collapsing...) {
+			for _, s := range append(slices.Clone(live), old...) {
 				put(kv.StorageDomain, slot(s), []byte{1}, txNum)
 			}
-		case 1:
-			for _, s := range append(slices.Clone(live), collapsing...) {
+		case txNum == 1:
+			for _, s := range append(slices.Clone(live), old...) {
 				del(kv.StorageDomain, slot(s), txNum)
 			}
 			del(kv.AccountsDomain, owner, txNum)
-		case 2:
+		case txNum == 2:
 			putAccount(owner, txNum)
 			for _, s := range live {
 				put(kv.StorageDomain, slot(s), []byte{2}, txNum)
 			}
+		case txNum == 4 && laterSlot:
+			put(kv.StorageDomain, slot(later), []byte{3}, txNum)
 		default:
 			putAccount(addrs[1], txNum)
 		}
@@ -289,6 +299,12 @@ func testConvertCommitmentFilesV3CollapsedStorageBranch(t *testing.T, keysV2 boo
 	require.NoError(t, domains.Flush(ctx, rwTx))
 	require.NoError(t, rwTx.Commit())
 	require.NoError(t, agg.BuildFiles(db, stepSize*steps, unboundedFinalityCtx))
+	return db, agg, owner
+}
+
+func testConvertCommitmentFilesV3CollapsedStorageBranch(t *testing.T, keysV2 bool) {
+	db, agg, owner := buildRecreatedOwnerFiles(t, 4, 2, 2, false)
+	ctx := t.Context()
 
 	roTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
@@ -308,23 +324,6 @@ func testConvertCommitmentFilesV3CollapsedStorageBranch(t *testing.T, keysV2 boo
 	c, err := state.FoldCommitmentV3(ctx, agg, math.MaxUint64)
 	require.NoError(t, err)
 	require.Zero(t, c.Orphans)
-}
-
-func TestConvertCommitmentFiles_V3StateRecordInEveryFile(t *testing.T) {
-	if testing.Short() {
-		t.Skip("long-running test")
-	}
-	db, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true})
-	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
-
-	kvs, err := filepath.Glob(filepath.Join(agg.Dirs().SnapDomain, "*-commitment.*.kv"))
-	require.NoError(t, err)
-	require.Greater(t, len(kvs), 1)
-	for _, p := range kvs {
-		keys, _ := readKVFile(t, agg, p)
-		has := slices.ContainsFunc(keys, func(k []byte) bool { return bytes.Equal(k, commitment.KeyCommitmentV3State) })
-		require.Truef(t, has, "%s has no v3 state record", filepath.Base(p))
-	}
 }
 
 func TestConvertCommitmentFiles_V3StorageRootSurvivesBranchCollapseAcrossSteps(t *testing.T) {

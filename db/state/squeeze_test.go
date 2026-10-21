@@ -389,6 +389,11 @@ func testRebuildCommitmentBasedOnFiles(t *testing.T, v3 bool) {
 	}
 
 	useCommitmentSchema(t, v3)
+	rebuildCommitmentFromScratch(t, db, agg, rootInFiles, fPaths, true, v3)
+}
+
+func rebuildCommitmentFromScratch(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, rootInFiles []byte, fPaths []string, rebuildFiles, foldV3 bool) {
+	t.Helper()
 	agg = testAgg(t, agg.Dirs(), agg.StepSize(), log.New())
 	db, err := temporal.New(db, agg, nil)
 	require.NoError(t, err)
@@ -403,10 +408,6 @@ func testRebuildCommitmentBasedOnFiles(t *testing.T, v3 bool) {
 	require.NoError(t, err)
 	for _, b := range buckets {
 		if strings.Contains(strings.ToLower(b), kv.CommitmentDomain.String()) {
-			//size, err := rwTx.BucketSize(b)
-			//require.NoError(t, err)
-			//t.Logf("cleaned table %s: %d keys", b, size)
-
 			err = rwTx.ClearTable(b)
 			require.NoError(t, err)
 		}
@@ -416,20 +417,19 @@ func testRebuildCommitmentBasedOnFiles(t *testing.T, v3 bool) {
 	for _, fn := range fPaths {
 		if strings.Contains(fn, kv.CommitmentDomain.String()) {
 			require.NoError(t, dir.RemoveFile(fn))
-			//t.Logf("removed file %s", filepath.Base(fn))
 		}
 	}
 	err = agg.OpenFolder(db)
 	require.NoError(t, err)
 
 	ctx := t.Context()
-	finalRoot, err := state.RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, log.New(), true)
+	finalRoot, err := state.RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, log.New(), rebuildFiles)
 	require.NoError(t, err)
 	require.NotEmpty(t, finalRoot)
 	require.NotEqual(t, empty.RootHash[:], finalRoot)
 
 	require.Equal(t, rootInFiles, finalRoot)
-	if v3 {
+	if foldV3 {
 		check, err := state.FoldCommitmentV3(ctx, agg, math.MaxUint64)
 		require.NoError(t, err)
 		require.Zero(t, check.Orphans)
