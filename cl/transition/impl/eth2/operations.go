@@ -814,6 +814,9 @@ func (imp *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedE
 	if payload == nil {
 		return errors.New("ProcessExecutionPayloadEnvelope: envelope has nil payload")
 	}
+	if payload.Transactions == nil {
+		return errors.New("ProcessExecutionPayloadEnvelope: payload has nil transactions")
+	}
 
 	// Verify signature
 	if imp.FullValidation {
@@ -873,17 +876,13 @@ func (imp *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedE
 	if envelope.BuilderIndex != committedBid.BuilderIndex {
 		return fmt.Errorf("ProcessExecutionPayloadEnvelope: builder_index %d != committed bid builder_index %d", envelope.BuilderIndex, committedBid.BuilderIndex)
 	}
-	payloadHeader, err := payload.PayloadHeader()
-	if err != nil {
-		return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to get payload header: %w", err)
-	}
-	if committedBid.PrevRandao != payloadHeader.PrevRandao {
+	if committedBid.PrevRandao != payload.PrevRandao {
 		return errors.New("ProcessExecutionPayloadEnvelope: prev_randao mismatch with committed bid")
 	}
-	if committedBid.GasLimit != payloadHeader.GasLimit {
-		return fmt.Errorf("ProcessExecutionPayloadEnvelope: gas_limit %d != committed bid gas_limit %d", payloadHeader.GasLimit, committedBid.GasLimit)
+	if committedBid.GasLimit != payload.GasLimit {
+		return fmt.Errorf("ProcessExecutionPayloadEnvelope: gas_limit %d != committed bid gas_limit %d", payload.GasLimit, committedBid.GasLimit)
 	}
-	if committedBid.BlockHash != payloadHeader.BlockHash {
+	if committedBid.BlockHash != payload.BlockHash {
 		return errors.New("ProcessExecutionPayloadEnvelope: block_hash mismatch with committed bid")
 	}
 
@@ -901,11 +900,11 @@ func (imp *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedE
 	}
 
 	// Verify consistency of the parent hash with respect to the previous execution payload
-	if payloadHeader.ParentHash != s.GetLatestBlockHash() {
+	if payload.ParentHash != s.GetLatestBlockHash() {
 		return errors.New("ProcessExecutionPayloadEnvelope: parent_hash mismatch with latest block hash")
 	}
 	// Verify timestamp
-	if payloadHeader.Time != state.ComputeTimestampAtSlot(s, s.Slot()) {
+	if payload.Time != state.ComputeTimestampAtSlot(s, s.Slot()) {
 		return errors.New("ProcessExecutionPayloadEnvelope: invalid timestamp")
 	}
 

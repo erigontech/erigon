@@ -53,6 +53,11 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
+const (
+	admissionSigningKey = "01234567890123456789012345678901"
+	otherSigningKey     = "abcdefghijklmnopqrstuvwxyz123456"
+)
+
 type failingUpdateDB struct {
 	kv.RwDB
 	fail  bool
@@ -4760,11 +4765,11 @@ func TestExecutionPayloadEnvelopeValidationUsesFinalizedEpochStart(t *testing.T)
 	}
 }
 
-func validAdmissionCancellationFixture(t *testing.T) (*clparams.BeaconChainConfig, *state2.CachingBeaconState, *cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) {
+func validAdmissionCancellationFixture(t testing.TB) (*clparams.BeaconChainConfig, *state2.CachingBeaconState, *cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) {
 	return validAdmissionCancellationFixtureAtSlot(t, 64)
 }
 
-func validAdmissionCancellationFixtureAtSlot(t *testing.T, slot uint64) (*clparams.BeaconChainConfig, *state2.CachingBeaconState, *cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) {
+func validAdmissionCancellationFixtureAtSlot(t testing.TB, slot uint64) (*clparams.BeaconChainConfig, *state2.CachingBeaconState, *cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) {
 	t.Helper()
 	cfg := clparams.MainnetBeaconConfig
 	clparams.ApplyMinimalPreset(&cfg)
@@ -4782,7 +4787,7 @@ func validAdmissionCancellationFixtureAtSlot(t *testing.T, slot uint64) (*clpara
 	})
 	parentRoot := common.HexToHash("0x11")
 	blockState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{ProposerIndex: 0, ParentRoot: parentRoot})
-	privateKey, err := bls.NewPrivateKeyFromIKM([]byte("01234567890123456789012345678901"))
+	privateKey, err := bls.NewPrivateKeyFromIKM([]byte(admissionSigningKey))
 	require.NoError(t, err)
 	publicKey := common.Bytes48(bls.CompressPublicKey(privateKey.PublicKey()))
 	require.NoError(t, blockState.AddValidator(solid.NewValidatorFromParameters(publicKey, common.Hash{}, cfg.MaxEffectiveBalance, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch), cfg.MaxEffectiveBalance))
@@ -4826,7 +4831,25 @@ func validAdmissionCancellationFixtureAtSlot(t *testing.T, slot uint64) (*clpara
 		StateRoot:  stateRoot,
 		Body:       body,
 	}}
-	bodyRoot, err := body.HashSSZ()
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+		Payload:               payload,
+		ExecutionRequests:     requests,
+		BuilderIndex:          bid.BuilderIndex,
+		ParentBeaconBlockRoot: parentRoot,
+	}}
+	rebindAdmissionBlockRoot(t, blockState, block, envelope)
+	signAdmissionEnvelopeWithKey(t, &cfg, blockState, envelope, admissionSigningKey)
+	return &cfg, blockState, block, envelope
+}
+
+func rebindAdmissionBlockRoot(
+	t testing.TB,
+	blockState *state2.CachingBeaconState,
+	block *cltypes.SignedBeaconBlock,
+	envelope *cltypes.SignedExecutionPayloadEnvelope,
+) {
+	t.Helper()
+	bodyRoot, err := block.Block.Body.HashSSZ()
 	require.NoError(t, err)
 	blockState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{
 		Slot:          block.Block.Slot,
@@ -4836,33 +4859,32 @@ func validAdmissionCancellationFixtureAtSlot(t *testing.T, slot uint64) (*clpara
 	})
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
-	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
-		Payload:               payload,
-		ExecutionRequests:     requests,
-		BuilderIndex:          bid.BuilderIndex,
-		BeaconBlockRoot:       blockRoot,
-		ParentBeaconBlockRoot: parentRoot,
-	}}
-	domain, err := blockState.GetDomain(cfg.DomainBeaconBuilder, state2.GetEpochAtSlot(&cfg, blockState.Slot()))
-	require.NoError(t, err)
-	signingRoot, err := fork.ComputeSigningRoot(envelope.Message, domain)
-	require.NoError(t, err)
-	copy(envelope.Signature[:], privateKey.Sign(signingRoot[:]).Bytes())
-	return &cfg, blockState, block, envelope
+	envelope.Message.BeaconBlockRoot = blockRoot
 }
 
-func resignAdmissionEnvelope(
-	t *testing.T,
+func signAdmissionEnvelopeWithKey(
+	t testing.TB,
 	cfg *clparams.BeaconChainConfig,
 	blockState *state2.CachingBeaconState,
 	envelope *cltypes.SignedExecutionPayloadEnvelope,
+	keyMaterial string,
 ) {
 	t.Helper()
-	privateKey, err := bls.NewPrivateKeyFromIKM([]byte("01234567890123456789012345678901"))
+	privateKey, err := bls.NewPrivateKeyFromIKM([]byte(keyMaterial))
 	require.NoError(t, err)
 	domain, err := blockState.GetDomain(cfg.DomainBeaconBuilder, state2.GetEpochAtSlot(cfg, blockState.Slot()))
 	require.NoError(t, err)
 	signingRoot, err := fork.ComputeSigningRoot(envelope.Message, domain)
 	require.NoError(t, err)
 	copy(envelope.Signature[:], privateKey.Sign(signingRoot[:]).Bytes())
+}
+
+func resignAdmissionEnvelope(
+	t testing.TB,
+	cfg *clparams.BeaconChainConfig,
+	blockState *state2.CachingBeaconState,
+	envelope *cltypes.SignedExecutionPayloadEnvelope,
+) {
+	t.Helper()
+	signAdmissionEnvelopeWithKey(t, cfg, blockState, envelope, admissionSigningKey)
 }

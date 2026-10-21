@@ -5,7 +5,10 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-const MaxActiveValidatorsCacheSize = 8
+const (
+	MaxActiveValidatorsCacheSize          = 8
+	MaxLookaheadActiveValidatorsCacheSize = 4
+)
 
 type activeValidatorsCacheKey struct {
 	epoch uint64
@@ -21,10 +24,13 @@ type ActiveValidatorsCache struct {
 	cache *lru.Cache[activeValidatorsCacheKey, activeValidatorsCacheVal]
 }
 
-var ActiveValidatorsCacheGlobal = NewActiveValidatorsCache(MaxActiveValidatorsCacheSize)
+var (
+	ActiveValidatorsCacheGlobal          = NewActiveValidatorsCache("active_validators", MaxActiveValidatorsCacheSize)
+	LookaheadActiveValidatorsCacheGlobal = NewActiveValidatorsCache("lookahead_active_validators", MaxLookaheadActiveValidatorsCacheSize)
+)
 
-func NewActiveValidatorsCache(size int) *ActiveValidatorsCache {
-	cache, err := lru.New[activeValidatorsCacheKey, activeValidatorsCacheVal]("active_validators", size)
+func NewActiveValidatorsCache(name string, size int) *ActiveValidatorsCache {
+	cache, err := lru.New[activeValidatorsCacheKey, activeValidatorsCacheVal](name, size)
 	if err != nil {
 		panic(err)
 	}
