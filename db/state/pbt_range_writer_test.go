@@ -54,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 	commitmenttemporal "github.com/erigontech/erigon/internal/commitmenttest/temporal"
 )
@@ -497,13 +498,13 @@ func TestPBinRangeWriterRecordsMatchSequentialTrie(t *testing.T) {
 				}
 			}
 			require.Equal(t, wantRoot, got.root)
-			require.Equal(t, wantContext.records, gotRecords)
+			require.Equal(t, wantContext.Records, gotRecords)
 			require.Equal(t, wantState, got.state)
 			if corpus.name == "bucket-heavy" {
 				bucket := eip8297.PathFromBits(pbinRangeWriterSplit271Prefix(), 264)
 				bucketKey, err := pbt.EncodeRowKey(&bucket)
 				require.NoError(t, err)
-				record, err := pbt.DecodeRecord(bucketKey, wantContext.records[string(bucketKey)])
+				record, err := pbt.DecodeRecord(bucketKey, wantContext.Records[string(bucketKey)])
 				require.NoError(t, err)
 				require.Equal(t, pbt.ExtRoot, record.Form)
 				require.Equal(t, int16(271-264), record.SelfExt.BitLen)
@@ -719,28 +720,11 @@ func TestPBinRangeWriterFewerOpsThanPartitions(t *testing.T) {
 }
 
 type pbinSequentialContext struct {
-	records map[string][]byte
+	commitmenttest.MapBranchStore
 }
 
 func newPBinSequentialContext() *pbinSequentialContext {
-	return &pbinSequentialContext{records: make(map[string][]byte)}
-}
-
-func (c *pbinSequentialContext) Branch(key []byte) ([]byte, kv.Step, error) {
-	return bytes.Clone(c.records[string(key)]), 0, nil
-}
-
-func (c *pbinSequentialContext) PutBranch(key, data, prev []byte) error {
-	old := c.records[string(key)]
-	if !bytes.Equal(old, prev) {
-		return fmt.Errorf("previous record mismatch for %x", key)
-	}
-	if len(data) == 0 {
-		delete(c.records, string(key))
-	} else {
-		c.records[string(key)] = bytes.Clone(data)
-	}
-	return nil
+	return &pbinSequentialContext{MapBranchStore: commitmenttest.NewMapBranchStore()}
 }
 
 func (c *pbinSequentialContext) Account([]byte) (*commitment.Update, error) {
@@ -837,12 +821,7 @@ func (r *pbinRangeWriterRun) write(ctx context.Context, leaves []state.PBinLeaf)
 
 func runPBinRangeWriterCorpusWith(t *testing.T, leaves []state.PBinLeaf, maxOps, workers int) pbinRangeWriterSnapshot {
 	t.Helper()
-	return runPBinRangeWriterCorpusAt(t, leaves, maxOps, workers, 23)
-}
-
-func runPBinRangeWriterCorpusAt(t *testing.T, leaves []state.PBinLeaf, maxOps, workers int, endTxNum uint64) pbinRangeWriterSnapshot {
-	t.Helper()
-	run := openPBinRangeWriterRun(t, maxOps, workers, endTxNum)
+	run := openPBinRangeWriterRun(t, maxOps, workers, 23)
 	agg := run.agg
 	phaseActivity := run.activity
 	stampLookups := run.writer.CheckRowStampsForTest()

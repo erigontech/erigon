@@ -1283,12 +1283,7 @@ func grainStorageOps(first byte, count int, drop bool) []Op {
 }
 
 func grainSortedOps(groups ...[]Op) []Op {
-	var ops []Op
-	for _, group := range groups {
-		ops = append(ops, group...)
-	}
-	slices.SortFunc(ops, func(a, b Op) int { return bytes.Compare(opKey(a), opKey(b)) })
-	return ops
+	return sortParallelRoundOps(slices.Concat(groups...))
 }
 
 func grainUnitOps(task *phaseTask, tasks []phaseTask) int {

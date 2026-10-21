@@ -71,7 +71,7 @@ func TestPBinReviewMDBXRowsAreNotAbsent(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 	seeded := 0
-	for key, value := range records.records {
+	for key, value := range records.Records {
 		path, decodeErr := eip8297.DecodeBitPath([]byte(key))
 		if decodeErr != nil || path.BitLen <= 12 {
 			continue
@@ -86,7 +86,7 @@ func TestPBinReviewMDBXRowsAreNotAbsent(t *testing.T) {
 	targetTx, err := targetDB.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer targetTx.Rollback()
-	for key, value := range records.records {
+	for key, value := range records.Records {
 		path, decodeErr := eip8297.DecodeBitPath([]byte(key))
 		if decodeErr != nil || path.BitLen <= 12 {
 			continue
