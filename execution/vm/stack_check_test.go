@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
@@ -256,8 +257,14 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		// A fresh state per run: a shared one leaves the first run's cold accesses warm.
 		ibs := state.New(state.NewNoopReader())
 		defer ibs.Close()
-		evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
-		c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, *uint256.NewInt(7))
+		// Distinct context values, so an inlined context op that reads the wrong field shows.
+		block := gasTraceBlockContext()
+		block.Coinbase = accounts.InternAddress(common.HexToAddress("0x0b"))
+		block.GasLimit, block.BlockNumber, block.Time = 21, 22, 23
+		block.Difficulty, block.BaseFee, block.BlobBaseFee = *uint256.NewInt(24), *uint256.NewInt(25), *uint256.NewInt(26)
+		txCtx := evmtypes.TxContext{Origin: accounts.InternAddress(common.HexToAddress("0x0a")), GasPrice: *uint256.NewInt(27)}
+		evm := NewEVM(block, txCtx, ibs, chain.AllProtocolChanges, Config{})
+		c := NewContract(accounts.InternAddress(common.HexToAddress("0x0c")), accounts.InternAddress(common.HexToAddress("0x0d")), accounts.InternAddress(common.HexToAddress("0x0e")), *uint256.NewInt(7))
 		c.Code = code
 		f := evm.run
 		if traced {
