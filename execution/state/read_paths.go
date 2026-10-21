@@ -454,6 +454,7 @@ reread:
 						}
 						s.versionedReads.SetHeader(addr, path, key, hdr)
 						if s.waitCommit != nil && s.waitCommit(hdr.Version.TxIndex) {
+							s.wakeGen++
 							goto reread
 						}
 						// Shutdown / no pause hook: fall through to the tx's own write.
@@ -557,6 +558,7 @@ reread:
 		// only on shutdown; callers with no pause hook (serial/historical) never observe
 		// an Estimate and fall back to the in-flight value.
 		if s.waitCommit != nil && s.waitCommit(res.DepIdx()) {
+			s.wakeGen++
 			goto reread
 		}
 		r.outcome = outcomeMapDone
@@ -1661,11 +1663,21 @@ func refreshAccount(s *IntraBlockState, addr accounts.Address) (*accounts.Accoun
 }
 
 // ReadStamp is the token the vm's frame slot cache uses to detect state changes
-// between storage reads. The parallel write-side-validation path does not maintain
-// the journal epoch that token needs, so ReadStamp reports !ok and the vm leaves
-// the slot cache off (opSload's slots.on gate).
-type ReadStamp struct{}
+// between storage reads. journalLen and epoch cover the frame's own writes and
+// reverts; wakeGen covers a dep-wait resume — a lower-txIndex writer may have
+// committed a new value while this worker slept in waitCommit, which no journal
+// entry records. A change in any field invalidates the cached slot on the next
+// lookup, which is what makes the frame caches safe under the dep-wait executor.
+// Disabled under read tracing, which must observe every read.
+type ReadStamp struct {
+	journalLen int
+	epoch      uint64
+	wakeGen    uint64
+}
 
 func (ibs *IntraBlockState) ReadStamp() (ReadStamp, bool) {
-	return ReadStamp{}, false
+	if ibs == nil || ibs.journal == nil || dbg.TraceTransactionIO {
+		return ReadStamp{}, false
+	}
+	return ReadStamp{len(ibs.journal.entries), ibs.journal.epoch, ibs.wakeGen}, true
 }

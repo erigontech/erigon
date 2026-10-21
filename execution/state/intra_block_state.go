@@ -183,7 +183,13 @@ type IntraBlockState struct {
 	// waitCommit blocks a read that observes an in-flight (estimate) predecessor
 	// write until that predecessor commits, so execution pauses in place instead
 	// of aborting via ErrDependency. Returns false on shutdown.
-	waitCommit      func(depTxIndex int) bool
+	waitCommit func(depTxIndex int) bool
+	// wakeGen counts resumes from a dep-wait pause. A lower-txIndex writer may
+	// commit a new value while this worker sleeps in waitCommit, so any frame
+	// read cached before the pause can be stale on wake. ReadStamp folds wakeGen
+	// in, so a resume invalidates the vm's frame caches on the next lookup — what
+	// makes those caches safe under the dep-wait executor.
+	wakeGen         uint64
 	versionedWrites WriteSet
 	versionedReads  ReadSet
 	// versionedOrigins collects committed pre-block base cells (at originIndex) that a cold
@@ -2436,6 +2442,7 @@ func EIP161EmptyRemoval(eip161Enabled, isAura bool, addr accounts.Address) bool 
 }
 
 func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, addr accounts.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks, useBlockOrigin bool, eip8246 bool) error {
+	stateObject.db.journal.epoch++ // storage moves to committed, deletions apply — bump the slot-cache stamp
 	emptyRemoval := EIP161EmptyRemoval(eip161Enabled, isAura, addr) && stateObject.data.Empty()
 	// EIP-8246: a self-destructed account that still holds a balance is reset to
 	// a balance-only account (nonce 0, empty code, empty storage) not deleted.
