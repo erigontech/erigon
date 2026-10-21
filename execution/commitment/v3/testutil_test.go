@@ -13,7 +13,6 @@
 //
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
-
 package v3
 
 import (
@@ -25,12 +24,14 @@ import (
 	"testing"
 
 	keccak "github.com/erigontech/fastkeccak"
+	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
-	"github.com/stretchr/testify/require"
 )
 
 func testAccountUpdate(value commitmenttest.AccountValue) *commitment.Update {
@@ -359,4 +360,72 @@ func requireSameRuns(t *testing.T, base []parityUpdate, a, b v3Config, rounds ..
 		require.Equal(t, deltasA, deltasB)
 	}
 	return rootsA
+}
+
+func fullAccountUpdate(nonce, balance uint64, codeHash common.Hash) commitment.Update {
+	return *testAccountUpdate(commitmenttest.Account(commitmenttest.AccountSpec{Nonce: nonce, Balance: balance, CodeHash: codeHash}))
+}
+
+type mockContext struct {
+	branches     map[string][]byte
+	branchBuf    []byte
+	branchCalls  [][]byte
+	putCalls     int
+	accountCalls int
+	storageCalls int
+}
+
+func newMockContext() *mockContext {
+	return &mockContext{branches: make(map[string][]byte)}
+}
+
+func (m *mockContext) Branch(key []byte) ([]byte, kv.Step, error) {
+	m.branchCalls = append(m.branchCalls, bytes.Clone(key))
+	data, ok := m.branches[string(key)]
+	if !ok {
+		return nil, 0, nil
+	}
+	if m.branchBuf == nil {
+		m.branchBuf = make([]byte, 0, len(data))
+	}
+	m.branchBuf = append(m.branchBuf[:0], data...)
+	return m.branchBuf, 0, nil
+}
+
+func (m *mockContext) PutBranch(key, data, _ []byte) error {
+	m.putCalls++
+	m.branches[string(key)] = bytes.Clone(data)
+	return nil
+}
+
+func (m *mockContext) Account([]byte) (*commitment.Update, error) {
+	m.accountCalls++
+	return &commitment.Update{}, nil
+}
+
+func (m *mockContext) Storage([]byte) (*commitment.Update, error) {
+	m.storageCalls++
+	return &commitment.Update{}, nil
+}
+
+var _ commitment.PatriciaContext = (*mockContext)(nil)
+
+type phaseAInput struct {
+	hashedKey []byte
+	plainKey  []byte
+	update    *commitment.Update
+}
+
+func partition(stream []phaseAInput) ([]storageTask, []accountEntry) {
+	sorted := slices.Clone(stream)
+	slices.SortStableFunc(sorted, func(a, b phaseAInput) int {
+		return bytes.Compare(a.hashedKey, b.hashedKey)
+	})
+	p := &partitioner{}
+	for _, item := range sorted {
+		if err := p.add(item.hashedKey, item.update); err != nil {
+			panic(err)
+		}
+	}
+	return p.done()
 }
