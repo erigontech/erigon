@@ -100,7 +100,6 @@ func fastOps() []fastOp {
 // coldOps are cheap constant-gas ops that run inline in a second switch after
 // the fastOps one. A separate switch keeps the hot ops' compare tree as shallow
 // as it was; the DUPs and SWAPs share a case each, or Go compiles it to a jump table.
-// They are in opcode order: the switch is skipped for ops below the first or above the last.
 func coldOps() []fastOp {
 	op := func(name, execute string) fastOp {
 		return fastOp{name: name, execute: execute, gas: "GasQuickStep", push: 1}
@@ -422,16 +421,27 @@ func fastSwitch(srcs map[string][]byte, ops []fastOp) string {
 	return b.String()
 }
 
-// coldSwitch is fastSwitch behind a range check, so the ops outside the range
-// skip its compare tree with one compare.
+// coldSwitch is fastSwitch behind a lookup in isColdOp, so a generic op skips
+// its compare tree with one branch.
 func coldSwitch(srcs map[string][]byte, ops []fastOp) string {
-	return fmt.Sprintf("if op >= %s && op <= %s {\n%s}\n", ops[0].name, ops[len(ops)-1].name, fastSwitch(srcs, ops))
+	return "if isColdOp[op] {\n" + fastSwitch(srcs, ops) + "}\n"
+}
+
+// coldTable declares isColdOp, which is true for the ops of coldSwitch.
+func coldTable(ops []fastOp) string {
+	var b strings.Builder
+	b.WriteString("\n// isColdOp marks the ops of run's second fast-path switch.\nvar isColdOp = [256]bool{\n")
+	for _, o := range ops {
+		b.WriteString(o.name + ": true,\n")
+	}
+	b.WriteString("}\n")
+	return b.String()
 }
 
 // untraced returns runTraced as run in a file of its own, with anyTrace set
-// to false, without the code this makes dead, and with fast in place of the
-// switchHere comment.
-func untraced(traced []byte, fast string) []byte {
+// to false, without the code this makes dead, with fast in place of the
+// switchHere comment, and with decls after it.
+func untraced(traced []byte, fast, decls string) []byte {
 	if !bytes.Contains(traced, []byte(switchHere)) {
 		log.Fatal("interpreter.go: the fast-path switch comment is missing")
 	}
@@ -471,6 +481,7 @@ func untraced(traced []byte, fast string) []byte {
 			b.WriteString("// run is runTraced without the tracing code and with the fast path.\n" + text(fset, &printer.CommentedNode{Node: d, Comments: f.Comments}) + "\n")
 		}
 	}
+	b.WriteString(decls)
 	out, err := format.Source(b.Bytes())
 	if err != nil {
 		log.Fatal(err)
@@ -575,7 +586,7 @@ func main() {
 		name string
 		data []byte
 	}{
-		{"vm_run_gen.go", untraced(read("interpreter.go"), switches)},
+		{"vm_run_gen.go", untraced(read("interpreter.go"), switches, coldTable(coldOps()))},
 		{"fast_path_gen_test.go", testTable(ops)},
 	}
 	var stale []string
