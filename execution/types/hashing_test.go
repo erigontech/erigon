@@ -80,12 +80,17 @@ func TestDeriveShaParallelLeafHashes(t *testing.T) {
 	t.Parallel()
 	for _, n := range []int{2, 3, 16, 17, 127, 128, 129, 130, 256, 257, 300} {
 		txs := make(Transactions, n)
+		binTxs := make(BinaryTransactions, n)
 		dataLen := parallelLeafHashMinBytes/n + 1
 		for i := range txs {
 			data := bytes.Repeat([]byte{byte(i)}, dataLen)
 			txs[i] = NewTransaction(uint64(i), common.Address{}, uint256.NewInt(1), 21000, uint256.NewInt(1), data)
+			var buf bytes.Buffer
+			txs.EncodeIndex(i, &buf)
+			binTxs[i] = buf.Bytes()
 		}
 		checkDeriveSha(t, txs)
+		checkDeriveSha(t, binTxs)
 	}
 }
 

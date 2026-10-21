@@ -49,8 +49,10 @@ func DeriveSha(list DerivableList) common.Hash {
 	var keyBuf, valBuf bytes.Buffer
 	keyEnds := make([]int, n)
 	valEnds := make([]int, n)
+	vals := make([][]byte, n)
+	binTxs, isBinary := list.(BinaryTransactions) // already encoded: skip the copy
 	hexWriter := &hexWriter{&keyBuf}
-	p := 0
+	p, size := 0, 0
 	traverseInLexOrder(list, func(i int, _ int) {
 		if i < 0 {
 			return
@@ -59,15 +61,24 @@ func DeriveSha(list DerivableList) common.Hash {
 		if err := hexWriter.Commit(); err != nil {
 			panic(fmt.Errorf("fatal in DeriveSha: %w", err))
 		}
-		list.EncodeIndex(i, &valBuf)
-		keyEnds[p], valEnds[p] = keyBuf.Len(), valBuf.Len()
+		keyEnds[p] = keyBuf.Len()
+		if isBinary {
+			vals[p] = binTxs[i]
+			size += len(vals[p])
+		} else {
+			list.EncodeIndex(i, &valBuf)
+			valEnds[p] = valBuf.Len()
+		}
 		p++
 	})
-	keys := splitAt(keyBuf.Bytes(), keyEnds)
-	vals := splitAt(valBuf.Bytes(), valEnds)
+	keys := splitAt(keyBuf.Bytes(), keyEnds, make([][]byte, n))
+	if !isBinary {
+		splitAt(valBuf.Bytes(), valEnds, vals)
+		size = valBuf.Len()
+	}
 
 	var leafHashes [][]byte
-	if n > 1 && valBuf.Len() >= parallelLeafHashMinBytes {
+	if n > 1 && size >= parallelLeafHashMinBytes {
 		leafHashes = parallelLeafHashes(keys, vals)
 	}
 
@@ -93,8 +104,7 @@ func DeriveSha(list DerivableList) common.Hash {
 // Below this size a block's leaf keccak is cheaper than spreading it over goroutines.
 const parallelLeafHashMinBytes = 128 * 1024
 
-func splitAt(b []byte, ends []int) [][]byte {
-	parts := make([][]byte, len(ends))
+func splitAt(b []byte, ends []int, parts [][]byte) [][]byte {
 	start := 0
 	for i, end := range ends {
 		parts[i] = b[start:end:end]
