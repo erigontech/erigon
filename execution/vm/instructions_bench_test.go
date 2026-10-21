@@ -134,7 +134,11 @@ func benchModChain(b *testing.B, op executionFunc, bits int, negate bool) {
 	rng := rand.New(rand.NewPCG(uint64(bits), 1))
 	var nums [15]uint256.Int
 	for i := range nums {
-		nums[i] = uint256.Int{rng.Uint64(), rng.Uint64(), rng.Uint64(), rng.Uint64() | 1<<63}
+		top := rng.Uint64() | 1<<63
+		if negate {
+			top >>= 1 // a positive signed magnitude, so the negated numerator is negative
+		}
+		nums[i] = uint256.Int{rng.Uint64(), rng.Uint64(), rng.Uint64(), top}
 	}
 	var m uint256.Int
 	m.Lsh(uint256.NewInt(1), uint(bits-1))
