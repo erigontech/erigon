@@ -17,7 +17,9 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -45,15 +47,17 @@ func TestBlobDumpPlan(t *testing.T) {
 	v12 := snaptype.BlobSidecars.FileName(version.V1_2, 30_000, 40_000)
 
 	tests := []struct {
-		name      string
-		from, to  uint64
-		frozen    []string
-		overwrite bool
-		want      []uint64
-		wantErr   string
+		name         string
+		from, to     uint64
+		frozenBlocks uint64
+		frozen       []string
+		overwrite    bool
+		want         []uint64
+		wantErr      string
 	}{
 		{name: "starts at the Deneb segment", to: 50_000, want: []uint64{20_000, 30_000, 40_000}},
 		{name: "drops a trailing partial segment", to: 45_000, want: []uint64{20_000, 30_000}},
+		{name: "stops at the frozen block frontier", to: 50_000, frozenBlocks: 40_000, want: []uint64{20_000, 30_000}},
 		{name: "starts at --from", from: 30_000, to: 50_000, want: []uint64{30_000, 40_000}},
 		{name: "--from off a segment boundary", from: 25_000, to: 50_000, wantErr: "multiple of"},
 		{name: "--from below the Deneb segment", from: 10_000, to: 50_000, wantErr: "below the Deneb"},
@@ -68,7 +72,7 @@ func TestBlobDumpPlan(t *testing.T) {
 			for _, name := range tt.frozen {
 				frozen = append(frozen, blobSegment(t, name))
 			}
-			got, err := blobDumpPlan(&cfg, tt.from, tt.to, frozen, tt.overwrite)
+			got, err := blobDumpPlan(&cfg, tt.from, tt.to, cmp.Or(tt.frozenBlocks, math.MaxUint64), frozen, tt.overwrite)
 			if tt.wantErr != "" {
 				require.ErrorContains(t, err, tt.wantErr)
 				return
