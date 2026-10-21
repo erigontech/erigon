@@ -599,7 +599,14 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 	}
 
-	header := e.chainRW.GetHeaderByHash(ctx, blockHash)
+	var header *types.Header
+	if newPayload {
+		// The payload's number is bound to its verified hash. A hash-only lookup of a block that
+		// is not stored yet searches every header snapshot file before it misses.
+		header = e.chainRW.GetHeader(ctx, blockHash, blockNumber)
+	} else {
+		header = e.chainRW.GetHeaderByHash(ctx, blockHash)
+	}
 
 	// Retrieve parent and total difficulty.
 	var parent *types.Header
