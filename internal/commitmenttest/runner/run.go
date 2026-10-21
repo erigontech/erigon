@@ -51,7 +51,6 @@ type roundResult struct {
 	Root     []byte
 	Records  map[string][]byte
 	Counts   counts
-	Deltas   []commitment.BranchDelta
 	Err      error
 	Rebuilt  bool
 }
@@ -127,7 +126,7 @@ func execute(tb testing.TB, c commitmenttest.Case, spec RunSpec, open openFunc) 
 		if round.Err == nil && spec.Reload {
 			engine = reload(tb, engine, spec, open, &round, uint64(i+1))
 		}
-		round.Counts, round.Records, round.Deltas = spec.Memory.Counts(), spec.Memory.Records(), spec.Memory.Deltas()
+		round.Counts, round.Records = spec.Memory.Counts(), spec.Memory.Records()
 		got.Rounds = append(got.Rounds, round)
 		if round.Err != nil && engine != nil {
 			engine.Release()

@@ -24,7 +24,6 @@ import (
 type KeySpec struct {
 	Kind  string
 	Size  int
-	Start int
 	Count int
 }
 
@@ -78,7 +77,7 @@ func Keys(seed Seed, spec KeySpec) [][]byte {
 			panic(fmt.Sprintf("unknown key kind: %s", spec.Kind))
 		}
 		for i := range spec.Count {
-			keys = append(keys, Key(spec, spec.Start+i))
+			keys = append(keys, Key(spec, i))
 		}
 		return keys
 	}

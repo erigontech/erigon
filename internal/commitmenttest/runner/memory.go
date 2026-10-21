@@ -35,11 +35,8 @@ type ContextSpec struct {
 }
 
 type counts struct {
-	BranchReads  int
 	AccountReads int
 	StorageReads int
-	Writes       int
-	Readers      int
 }
 
 type Memory struct {
@@ -62,16 +59,12 @@ func NewMemory(spec ContextSpec) *Memory {
 }
 
 func (m *Memory) Open(context.Context) (commitment.PatriciaContext, func()) {
-	m.store.Lock()
-	m.store.counts.Readers++
-	m.store.Unlock()
 	return &Memory{spec: m.spec, store: m.store}, nil
 }
 
 func (m *Memory) read(key []byte) ([]byte, kv.Step, error) {
 	m.store.Lock()
 	defer m.store.Unlock()
-	m.store.counts.BranchReads++
 	return m.store.records[string(key)], 0, nil
 }
 
@@ -98,7 +91,6 @@ func (m *Memory) PutBranch(key, data, prev []byte) error {
 	if m.spec.CheckPrevious && !bytes.Equal(m.store.records[string(key)], prev) {
 		return fmt.Errorf("previous value mismatch for %x", key)
 	}
-	m.store.counts.Writes++
 	if m.spec.CaptureDeltas {
 		m.store.deltas = append(m.store.deltas, commitment.BranchDelta{Key: bytes.Clone(key), Data: bytes.Clone(data), Prev: bytes.Clone(prev)})
 	}

@@ -72,7 +72,7 @@ func Account(spec AccountSpec) AccountValue {
 	return value
 }
 
-func randomAccount(rng *rand.Rand) AccountValue {
+func RandomAccount(rng *rand.Rand) AccountValue {
 	value := AccountValue{Fields: allFields, Nonce: uint64(rng.Intn(1 << 20)), Balance: *uint256.NewInt(rng.Uint64()), CodeHash: empty.CodeHash}
 	if rng.Intn(3) == 0 {
 		value.CodeHash = common.BigToHash(uint256.NewInt(rng.Uint64()).ToBig())
@@ -98,14 +98,10 @@ func SizedAccount(number int, contract bool, rng *rand.Rand) (AccountValue, []by
 
 type StorageSpec struct {
 	Number int
-	Value  []byte
 	Path   []byte
 }
 
 func Storage(spec StorageSpec) []byte {
-	if spec.Value != nil {
-		return bytes.Clone(spec.Value)
-	}
 	if spec.Path != nil {
 		return []byte{spec.Path[0] + 1, spec.Path[1] + 1, spec.Path[2] + 1, spec.Path[3] + 1}
 	}

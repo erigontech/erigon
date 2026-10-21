@@ -233,7 +233,7 @@ func stressRounds(rng *rand.Rand, spec SequenceSpec) [][]Op {
 			case !alive:
 				touched[string(addr)] = struct{}{}
 				live[string(addr)] = struct{}{}
-				entries = append(entries, accountOp(addr, randomAccount(rng)))
+				entries = append(entries, accountOp(addr, RandomAccount(rng)))
 			case rng.Intn(16) == 0:
 				touched[string(addr)] = struct{}{}
 				delete(live, string(addr))
@@ -241,7 +241,7 @@ func stressRounds(rng *rand.Rand, spec SequenceSpec) [][]Op {
 			default:
 				touched[string(addr)] = struct{}{}
 				if rng.Intn(4) == 0 {
-					entries = append(entries, accountOp(addr, randomAccount(rng)))
+					entries = append(entries, accountOp(addr, RandomAccount(rng)))
 				}
 				for range 1 + rng.Intn(3) {
 					key := append(bytes.Clone(addr), Key(KeySpec{Kind: "integer", Size: 32}, rng.Intn(spec.Slots))...)
