@@ -18,10 +18,12 @@ package freezeblocks
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -83,6 +85,7 @@ func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.Beacon
 	})
 	c.SetIndexBuilder(snaptype.BeaconBlocks, beaconIdx)
 	c.SetIndexBuilder(snaptype.BlobSidecars, beaconIdx)
+	c.KeepUnindexedlyCovered()
 	return c
 }
 
@@ -142,6 +145,43 @@ func (s *CaplinSnapshots) SegFileNames(from, to uint64) []string {
 		}
 	}
 	return res
+}
+
+func (s *CaplinSnapshots) OpenFolder() error {
+	list, err := s.segmentsUpToGap()
+	if err != nil {
+		return err
+	}
+	return s.OpenList(list, false)
+}
+
+// Go embedding has no virtual dispatch: the promoted base version would open past a gap.
+func (s *CaplinSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
+
+// SegmentsMax is dirty-backed, so a beaconblocks segment past a gap or crossing must stay
+// closed: backfill stops at SegmentsMax and would never write the missing slots.
+func (s *CaplinSnapshots) segmentsUpToGap() ([]string, error) {
+	files, err := snapshotsync.AllTypedSegments(s.Dir(), s.Types())
+	if err != nil {
+		return nil, err
+	}
+	slices.SortFunc(files, func(a, b snaptype.FileInfo) int {
+		return cmp.Or(cmp.Compare(a.From, b.From), cmp.Compare(b.To, a.To))
+	})
+	list := make([]string, 0, len(files))
+	var end uint64
+	stopped := false
+	for i := range files {
+		if files[i].Type.Enum() == snaptype.CaplinEnums.BeaconBlocks {
+			stopped = stopped || (end > 0 && (files[i].From > end || files[i].From < end && files[i].To > end))
+			if stopped {
+				continue
+			}
+			end = max(end, files[i].To)
+		}
+		list = append(list, files[i].Name())
+	}
+	return list, nil
 }
 
 type snapshotNotifier interface {
@@ -391,13 +431,9 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	if s == nil {
 		return nil
 	}
-	files, err := snapshotsync.AllTypedSegments(s.Dir(), s.Types())
+	list, err := s.segmentsUpToGap()
 	if err != nil {
 		return err
-	}
-	list := make([]string, 0, len(files))
-	for i := range files {
-		list = append(list, files[i].Name())
 	}
 	if err := s.OpenList(list, true); err != nil {
 		return err

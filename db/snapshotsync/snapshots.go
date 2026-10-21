@@ -520,6 +520,8 @@ type snapshotVisible struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
+func (s *BaseRoSnapshots) KeepUnindexedlyCovered() { s.keepUnindexedlyCovered = true }
+
 func NewBaseRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, baseSegType snaptype.Type, alignMin bool, logger log.Logger) *BaseRoSnapshots {
 	return newRoSnapshots(cfg, snapDir, types, baseSegType, alignMin, logger)
 }
@@ -1546,8 +1548,11 @@ func isIndexedOnDisk(dirPath string, f snaptype.FileInfo) bool {
 		return false
 	}
 	for _, name := range f.Type.IdxFileNames(f.From, f.To) {
-		ok, err := dir.FileExist(filepath.Join(dirPath, name))
-		if err != nil || !ok {
+		mask, err := version.ReplaceVersionWithMask(name)
+		if err != nil {
+			return false
+		}
+		if _, _, ok, err := version.FindFilesWithVersionsByPattern(filepath.Join(dirPath, mask)); err != nil || !ok {
 			return false
 		}
 	}
