@@ -275,6 +275,9 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 }
 
 func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage.BlobStorage, fromSlot uint64, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, blobCountFn BlobCountBySlotFn, lvl log.Lvl, logger log.Logger) error {
+	if blobCountFn == nil {
+		return errors.New("dump blob sidecars: a blob count from the blocks is required to tell a blobless slot from a missing count row")
+	}
 	tmpDir, snapDir := dirs.Tmp, dirs.Snap
 
 	segName := snaptype.BlobSidecars.FileName(version.ZeroVersion, fromSlot, toSlot)
@@ -296,8 +299,6 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 
 	reusableBuf := []byte{}
 
-	sanityCheckBlobCount := blobCountFn != nil
-
 	// Generate .seg file, which is just the list of beacon blocks.
 	for i := fromSlot; i < toSlot; i++ {
 		// read root.
@@ -310,15 +311,12 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 		if err != nil {
 			return err
 		}
-		var blobCount uint64
-		if sanityCheckBlobCount {
-			blobCount, err = blobCountFn(i)
-			if err != nil {
-				return err
-			}
-			if blobCount != uint64(commitmentsCount) {
-				return fmt.Errorf("blob storage count mismatch at slot %d: %d != %d", i, blobCount, commitmentsCount)
-			}
+		blobCount, err := blobCountFn(i)
+		if err != nil {
+			return err
+		}
+		if blobCount != uint64(commitmentsCount) {
+			return fmt.Errorf("blob storage count mismatch at slot %d: %d != %d", i, blobCount, commitmentsCount)
 		}
 		if commitmentsCount == 0 {
 			if err := sn.AddWord(nil); err != nil {
@@ -330,7 +328,7 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 		if err != nil {
 			return err
 		}
-		if sanityCheckBlobCount && uint64(len(sidecars)) != blobCount {
+		if uint64(len(sidecars)) != blobCount {
 			return fmt.Errorf("blob sidecars count mismatch at slot %d: %d != %d", i, len(sidecars), blobCount)
 		}
 		if !found {
@@ -381,6 +379,23 @@ func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, fromSlot, toSlot uint64, 
 }
 
 type BlobCountBySlotFn func(slot uint64) (uint64, error)
+
+func BlobCountFromBlocks(ctx context.Context, r BeaconSnapshotReader) BlobCountBySlotFn {
+	return func(slot uint64) (uint64, error) {
+		block, err := r.ReadBeaconBlockBodyBySlot(ctx, nil, slot)
+		if err != nil {
+			return 0, err
+		}
+		if block == nil {
+			return 0, nil
+		}
+		commitments := block.Block.Body.GetBlobKzgCommitments()
+		if commitments == nil {
+			return 0, nil
+		}
+		return uint64(commitments.Len()), nil
+	}
+}
 
 func DumpBlobsSidecar(ctx context.Context, blobStorage blob_storage.BlobStorage, db kv.RoDB, fromSlot, toSlot uint64, salt uint32, dirs datadir.Dirs, compressWorkers int, blobCountFn BlobCountBySlotFn, lvl log.Lvl, logger log.Logger) error {
 	cfg := snapcfg.KnownCfgOrDevnet("")

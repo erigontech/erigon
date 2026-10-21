@@ -549,28 +549,13 @@ func (s *Antiquary) antiquateBlobs() error {
 	}
 	roTx.Rollback()
 	s.logger.Info("[Antiquary] Antiquating blobs", "from", currentBlobsProgress, "to", to, "backlogTo", backlogTo)
-	blobCountFn := func(slot uint64) (uint64, error) {
-		block, err := s.snReader.ReadBeaconBlockBodyBySlot(s.ctx, nil, slot)
-		if err != nil {
-			return 0, err
-		}
-		if block == nil {
-			return 0, nil
-		}
-		commitments := block.Block.Body.GetBlobKzgCommitments()
-		if commitments == nil {
-			return 0, nil
-		}
-		return uint64(commitments.Len()), nil
-	}
-
 	// now, we need to retire the blobs
 	// The build slot is held for the compression only: opening the folder, seeding and pruning
 	// below draw nothing from the build budget, and EL retirement blocks on the same slot.
 	if err := func() error {
 		compressWorkers, releaseBuildSlot := s.blobCompressWorkers(currentBlobsProgress, backlogTo)
 		defer releaseBuildSlot()
-		return freezeblocks.DumpBlobsSidecar(s.ctx, s.blobStorage, s.mainDB, currentBlobsProgress, to, s.sn.Salt, s.dirs, compressWorkers, blobCountFn, log.LvlDebug, s.logger)
+		return freezeblocks.DumpBlobsSidecar(s.ctx, s.blobStorage, s.mainDB, currentBlobsProgress, to, s.sn.Salt, s.dirs, compressWorkers, freezeblocks.BlobCountFromBlocks(s.ctx, s.snReader), log.LvlDebug, s.logger)
 	}(); err != nil {
 		return err
 	}
