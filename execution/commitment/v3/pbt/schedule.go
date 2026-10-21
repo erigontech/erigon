@@ -363,30 +363,27 @@ func runPhasePlanWithFactory(ctx context.Context, workers int, plan phasePlan, f
 }
 
 func (t *Trie) ProcessParallel(ops []Op, workers int) (common.Hash, error) {
-	return t.processParallelContext(context.Background(), ops, workers, phaseDefaultThreshold)
+	return t.processParallelContext(context.Background(), ops, workers, t.defaultPhasePlan)
 }
 
 func (t *Trie) ProcessParallelWithThreshold(ops []Op, workers, threshold int) (common.Hash, error) {
-	return t.processParallelContext(context.Background(), ops, workers, threshold)
+	return t.processParallelContext(context.Background(), ops, workers, func(ops []Op, _ int) (phasePlan, error) {
+		return buildPhasePlanBatched(ops, threshold, t.bucketBatch)
+	})
 }
 
 func (t *Trie) ProcessParallelContext(ctx context.Context, ops []Op, workers int) (common.Hash, error) {
-	return t.processParallelContext(ctx, ops, workers, phaseDefaultThreshold)
+	return t.processParallelContext(ctx, ops, workers, t.defaultPhasePlan)
 }
 
-const phaseDefaultThreshold = -1
-
-func (t *Trie) buildPhasePlan(ops []Op, workers, threshold int) (phasePlan, error) {
-	if threshold != phaseDefaultThreshold {
-		return buildPhasePlanBatched(ops, threshold, t.bucketBatch)
-	}
+func (t *Trie) defaultPhasePlan(ops []Op, workers int) (phasePlan, error) {
 	if t.phaseSchedule == phaseScheduleOld || t.bucketBatch > 1 {
 		return buildPhasePlanBatched(ops, fanOutMin, t.bucketBatch)
 	}
 	return buildPhasePlanGrain(ops, phaseGrainFor(len(ops), workers))
 }
 
-func (t *Trie) processParallelContext(ctx context.Context, ops []Op, workers, threshold int) (common.Hash, error) {
+func (t *Trie) processParallelContext(ctx context.Context, ops []Op, workers int, buildPlan func([]Op, int) (phasePlan, error)) (common.Hash, error) {
 	if err := ctx.Err(); err != nil {
 		return common.Hash{}, err
 	}
@@ -396,7 +393,7 @@ func (t *Trie) processParallelContext(ctx context.Context, ops []Op, workers, th
 	if t.ctx == nil || workers == 1 || len(ops) < 2 {
 		return t.Process(ops)
 	}
-	plan, err := t.buildPhasePlan(ops, workers, threshold)
+	plan, err := buildPlan(ops, workers)
 	if err != nil {
 		return common.Hash{}, err
 	}
