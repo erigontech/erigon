@@ -331,18 +331,22 @@ func TestResetRefusesLegacyStateThatStartupRenamesIntoTheManifest(t *testing.T) 
 }
 
 func runCoveredRangeReset(t *testing.T, root *os.Root, local, manifest []string) error {
-	var startEntries []fsEntry
-	for _, name := range local {
+	return runCoveredRangeResetEntries(t, root, validEntries(t, local), manifest)
+}
+
+func validEntries(t *testing.T, names []string) []fsEntry {
+	var entries []fsEntry
+	for _, name := range names {
 		entry := fsEntry{Name: slashName(name)}
-		switch {
-		case strings.HasSuffix(name, ".kv"):
+		switch filepath.Ext(name) {
+		case ".kv", ".v", ".ef":
 			entry.Data = validSegment(t)
-		case strings.HasSuffix(name, ".kvi"):
+		case ".kvi":
 			entry.Data = validIndex(t)
 		}
-		startEntries = append(startEntries, entry)
+		entries = append(entries, entry)
 	}
-	return runCoveredRangeResetEntries(t, root, startEntries, manifest)
+	return entries
 }
 
 func runCoveredRangeResetEntries(t *testing.T, root *os.Root, startEntries []fsEntry, manifest []string) error {
@@ -579,9 +583,47 @@ func TestResetCountsLegacyCommitmentHistoryBehindASymlinkedDir(t *testing.T) {
 			external := t.TempDir()
 			qt.Assert(t, qt.IsNil(os.MkdirAll(filepath.Join(root.Name(), "snapshots"), 0o755)))
 			qt.Assert(t, qt.IsNil(os.Symlink(external, filepath.Join(root.Name(), "snapshots", sub))))
-			qt.Assert(t, qt.IsNil(os.WriteFile(filepath.Join(external, name), nil, 0o644)))
+			qt.Assert(t, qt.IsNil(os.WriteFile(filepath.Join(external, name), []byte(validSegment(t)), 0o644)))
 			err := runCoveredRangeReset(t, root, completeLocalMerge, nil)
 			qt.Assert(t, qt.IsNotNil(err), qt.Commentf("%s", sub))
+			qt.Assert(t, qt.StringContains(err.Error(), "0-2"))
+		})
+	}
+}
+
+func TestResetChecksAMixedRangeWhenTheAccessorStartupOpensIsCorrupt(t *testing.T) {
+	for _, pair := range [][2]string{
+		{"snapshots/domain/v2.10-commitment.0-4.kvi", "snapshots/domain/v2.9-commitment.0-4.kvi"},
+		{"snapshots/domain/v1-commitment.0-4.kvi", "snapshots/domain/v1.0-commitment.0-4.kvi"},
+	} {
+		withOsRoot(t, func(root *os.Root) {
+			local := slices.DeleteFunc(slices.Clone(completeLocalMerge), func(name string) bool {
+				return strings.HasSuffix(name, ".kvi")
+			})
+			entries := append(validEntries(t, local),
+				fsEntry{Name: slashName(pair[0]), Data: "x"},
+				fsEntry{Name: slashName(pair[1]), Data: validIndex(t)})
+			err := runCoveredRangeResetEntries(t, root, entries, nil)
+			qt.Assert(t, qt.IsNotNil(err), qt.Commentf("%s", pair[0]))
+			qt.Assert(t, qt.StringContains(err.Error(), "0-2"))
+		})
+	}
+}
+
+func TestResetChecksAMixedRangeWhenACorruptFileExtendsAnEntity(t *testing.T) {
+	for _, files := range [][]string{
+		{"snapshots/domain/v1.0-code.0-2.kv", "snapshots/domain/v1.0-code.0-4.kv"},
+		{"snapshots/history/v1.0-accounts.0-2.v", "snapshots/history/v1.0-accounts.0-4.v"},
+		{"snapshots/idx/v1.0-logaddrs.0-2.ef", "snapshots/idx/v1.0-logaddrs.0-4.ef"},
+		{"snapshots/domain/v1.0-code.0-2.kv", "snapshots/domain/v1.0-code.0-4.kv", "snapshots/domain/v1.1-code.0-4.kv"},
+	} {
+		withOsRoot(t, func(root *os.Root) {
+			valid, corrupt := files[:len(files)-1], files[len(files)-1]
+			truncated := validSegment(t)
+			entries := append(validEntries(t, append(slices.Clone(completeLocalMerge), valid...)),
+				fsEntry{Name: slashName(corrupt), Data: truncated[:len(truncated)/2]})
+			err := runCoveredRangeResetEntries(t, root, entries, nil)
+			qt.Assert(t, qt.IsNotNil(err), qt.Commentf("%s", corrupt))
 			qt.Assert(t, qt.StringContains(err.Error(), "0-2"))
 		})
 	}

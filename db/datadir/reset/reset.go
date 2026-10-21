@@ -75,7 +75,7 @@ func parseStateFile(name string) (stateFile, bool) {
 	return stateFile{ver: m[1], entity: m[2], ext: m[5], stepRange: m[3] + "-" + m[4], fromStep: fromStep, toStep: toStep}, true
 }
 
-// domainBuild is the file a step range will hold for one domain once reset is done and the
+// domainBuild is the file a step range will hold for one entity once reset is done and the
 // downloader has fetched what the manifest describes. Only the highest version of a logical file is
 // opened, so that is the one recorded.
 type domainBuild struct {
@@ -92,6 +92,10 @@ type domainBuild struct {
 // of one, since the file name already counts in steps.
 func (b *domainBuild) referenced() bool {
 	return state.CommitmentBranchReferenced(b.ver, 1, b.fromStep, b.toStep)
+}
+
+func (b *domainBuild) keeps(ver version.Version, name string) bool {
+	return b != nil && (b.ver.Cmp(ver) > 0 || (b.ver.Cmp(ver) == 0 && b.name <= name))
 }
 
 // checkStateBuilds reports step ranges whose commitment file would end up from a different build
@@ -111,27 +115,21 @@ func (reset *Reset) checkStateBuilds() error {
 	builds := map[string]map[string]*domainBuild{}
 	record := func(fileName, path string) {
 		f, ok := parseStateFile(fileName)
-		if !ok || f.ext != "kv" || (f.entity != "accounts" && f.entity != "storage" && f.entity != "commitment") {
+		if !ok {
 			return
 		}
 		ver, err := version.ParseVersion(f.ver)
 		if err != nil {
 			return
 		}
-		stepRange, domain := f.stepRange, f.entity
+		stepRange, entity := f.stepRange, f.entity+"."+f.ext
 		if builds[stepRange] == nil {
 			builds[stepRange] = map[string]*domainBuild{}
 		}
-		// The loader walks a sorted directory listing and keeps a candidate only on a strictly
-		// greater version, so among equal versions the first name wins. One version can be spelled
-		// two ways, and the manifest names only one of them, which decides the tie rather than
-		// leaving it open.
-		if b := builds[stepRange][domain]; b != nil {
-			if b.ver.Cmp(ver) > 0 || (b.ver.Cmp(ver) == 0 && b.name <= fileName) {
-				return
-			}
+		if builds[stepRange][entity].keeps(ver, fileName) {
+			return
 		}
-		builds[stepRange][domain] = &domainBuild{
+		builds[stepRange][entity] = &domainBuild{
 			name:          fileName,
 			path:          path,
 			retainedLocal: path != "",
@@ -141,21 +139,17 @@ func (reset *Reset) checkStateBuilds() error {
 		}
 	}
 
-	accessors := map[string]string{}
+	accessors := map[string]*domainBuild{}
 	recordAccessor := func(fileName, path string) {
-		if _, unversioned, ok := strings.Cut(fileName, "-"); ok {
-			if _, seen := accessors[unversioned]; !seen || path != "" {
-				accessors[unversioned] = path
-			}
+		v, unversioned, ok := strings.Cut(fileName, "-")
+		if !ok {
+			return
 		}
-	}
-
-	entityEnds := map[string]uint64{}
-	recordEnd := func(fileName string) {
-		if f, ok := parseStateFile(fileName); ok {
-			entity := f.entity + "." + f.ext
-			entityEnds[entity] = max(entityEnds[entity], f.toStep)
+		ver, err := version.ParseVersion(v)
+		if err != nil || accessors[unversioned].keeps(ver, fileName) {
+			return
 		}
+		accessors[unversioned] = &domainBuild{name: fileName, path: path, ver: ver}
 	}
 
 	// A file the manifest describes ends up canonical whether or not it is on disk now: reset drops
@@ -165,10 +159,9 @@ func (reset *Reset) checkStateBuilds() error {
 		switch dir {
 		case "domain":
 			record(name, "")
-			recordEnd(name)
 			recordAccessor(name, "")
 		case "history", "idx":
-			recordEnd(name)
+			record(name, "")
 		}
 	}
 
@@ -190,19 +183,25 @@ func (reset *Reset) checkStateBuilds() error {
 			if !kept {
 				continue
 			}
-			recordEnd(name)
-			if dir != reset.Dirs.SnapDomain {
-				continue
+			path := filepath.Join(dir, entry.Name())
+			if _, known := reset.PreverifiedSnapshots.Get(filepath.Base(dir) + "/" + name); known {
+				path = ""
 			}
-			if _, known := reset.PreverifiedSnapshots.Get("domain/" + name); known {
-				recordAccessor(name, "")
-				continue
+			record(name, path)
+			if dir == reset.Dirs.SnapDomain {
+				recordAccessor(name, path)
 			}
-			recordAccessor(name, filepath.Join(dir, entry.Name()))
-			record(name, filepath.Join(dir, entry.Name()))
 		}
 	}
 
+	entityEnds := map[string]uint64{}
+	for _, files := range builds {
+		for entity, f := range files {
+			if f.path == "" || opens(f.path) {
+				entityEnds[entity] = max(entityEnds[entity], f.toStep)
+			}
+		}
+	}
 	visibleEnd := uint64(math.MaxUint64)
 	for _, end := range entityEnds {
 		visibleEnd = min(visibleEnd, end)
@@ -221,24 +220,16 @@ func (reset *Reset) checkStateBuilds() error {
 			if !statecfg.Schema.CommitmentDomain.Accessors.Has(accessor.kind) {
 				continue
 			}
-			path, ok := accessors[span+accessor.ext]
-			if !ok || (path != "" && accessor.open != nil && accessor.open(path) != nil) {
+			a, ok := accessors[span+accessor.ext]
+			if !ok || (a.path != "" && accessor.open != nil && accessor.open(a.path) != nil) {
 				return false
 			}
 		}
-		if commitment.path == "" {
-			return true
-		}
-		d, err := seg.NewDecompressor(commitment.path)
-		if err != nil {
-			return false
-		}
-		d.Close()
-		return true
+		return commitment.path == "" || opens(commitment.path)
 	}
 	hidden := func(commitment *domainBuild) bool {
 		for _, domains := range builds {
-			merged := domains["commitment"]
+			merged := domains["commitment.kv"]
 			if merged != nil && merged != commitment && merged.toStep <= visibleEnd &&
 				merged.fromStep <= commitment.fromStep && commitment.toStep <= merged.toStep && usable(merged) {
 				return true
@@ -249,12 +240,12 @@ func (reset *Reset) checkStateBuilds() error {
 
 	var mixed []string
 	for stepRange, domains := range builds {
-		commitment := domains["commitment"]
+		commitment := domains["commitment.kv"]
 		if commitment == nil || !commitment.referenced() || hidden(commitment) {
 			continue
 		}
 		for _, domain := range []string{"accounts", "storage"} {
-			st := domains[domain]
+			st := domains[domain+".kv"]
 			if st == nil {
 				continue
 			}
@@ -272,6 +263,15 @@ func (reset *Reset) checkStateBuilds() error {
 		"builds for step ranges %s, which breaks the byte offsets commitment holds into them. "+
 		"Remove those ranges first with 'erigon snapshots rm-state-snapshots --step=<range>', or "+
 		"re-run with --allow-mixed-state to proceed anyway", strings.Join(mixed, ", "))
+}
+
+func opens(path string) bool {
+	d, err := seg.NewDecompressor(path)
+	if err != nil {
+		return false
+	}
+	d.Close()
+	return true
 }
 
 func openHashMap(path string) error {
