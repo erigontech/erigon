@@ -42,12 +42,8 @@ import (
 
 var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
 
-func TestCheckStateVerify(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-	t.Parallel()
-
+func checkStateVerifyOnRandomWrites(t *testing.T, v3 bool) {
+	t.Helper()
 	logger := log.New()
 	ctx := t.Context()
 	stepSize := uint64(100)
@@ -62,14 +58,22 @@ func TestCheckStateVerify(t *testing.T) {
 
 	// Sequential: the parallel trie leaves the last step's storage keys unreferenced by any
 	// commitment branch, which is what CheckStateVerify inspects here.
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithSequentialCommitment())
+	var opts []execctx.SharedDomainOption
+	if !v3 {
+		opts = append(opts, execctx.WithSequentialCommitment())
+	}
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger, opts...)
 	require.NoError(t, err)
 	defer domains.Close()
 
+	steps := uint64(5)
+	if v3 {
+		steps = 3
+	}
 	// Generate 500 txs (5 steps with stepSize=100).
 	// Compute commitment at EVERY txNum to ensure all accounts/storage entries
 	// have their trie branch data in the same step (no boundary effects).
-	txs := stepSize * 5
+	txs := stepSize * steps
 	rnd := rand.New(rand.NewSource(42))
 
 	for txNum := uint64(1); txNum <= txs; txNum++ {
@@ -116,6 +120,18 @@ func TestCheckStateVerify(t *testing.T) {
 	// Run the state verification check
 	err = integrity.CheckStateVerify(ctx, db, true /* failFast */, 0 /* fromStep */, logger)
 	require.NoError(t, err)
+	if v3 {
+		require.NoError(t, integrity.CheckCommitmentKvDeref(ctx, db, nil, true, logger))
+		require.NoError(t, integrity.CheckCommitmentKvi(ctx, integrity.SamplerCfg{SampleRatio: 1}, db, nil, true, logger))
+	}
+}
+
+func TestCheckStateVerify(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+	checkStateVerifyOnRandomWrites(t, false)
 }
 
 // TestCheckStateVerify_NoopWrite verifies that no-op writes (same value re-written)
@@ -351,39 +367,5 @@ func TestCheckStateVerifyOnCommitmentV3Records(t *testing.T) {
 	t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = schema, enabled })
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	statecfg.ExperimentalCommitmentV3 = true
-
-	logger := log.New()
-	ctx := t.Context()
-	stepSize := uint64(100)
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(stepSize))
-	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
-
-	tx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
-	require.NoError(t, err)
-	defer domains.Close()
-
-	txs := stepSize * 3
-	rnd := rand.New(rand.NewSource(42))
-	for txNum := uint64(1); txNum <= txs; txNum++ {
-		addr := make([]byte, length.Addr)
-		loc := make([]byte, length.Hash)
-		rnd.Read(addr)
-		rnd.Read(loc)
-		acc := accounts.Account{Nonce: txNum, Balance: *uint256.NewInt(txNum * 1000), CodeHash: accounts.EmptyCodeHash}
-		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addr, accounts.SerialiseV3(&acc), txNum, nil))
-		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, append(bytes.Clone(addr), loc...), []byte{addr[0], loc[0]}, txNum, nil))
-		_, err = domains.ComputeCommitment(ctx, tx, true, txNum, txNum, "test", nil)
-		require.NoError(t, err)
-	}
-	require.NoError(t, domains.Flush(ctx, tx))
-	require.NoError(t, tx.Commit())
-	require.NoError(t, agg.BuildFiles(db, txs, unboundedFinalityCtx))
-	require.Greater(t, agg.EndTxNumMinimax(), uint64(0))
-
-	require.NoError(t, integrity.CheckStateVerify(ctx, db, true, 0, logger))
-	require.NoError(t, integrity.CheckCommitmentKvDeref(ctx, db, nil, true, logger))
-	require.NoError(t, integrity.CheckCommitmentKvi(ctx, integrity.SamplerCfg{SampleRatio: 1}, db, nil, true, logger))
+	checkStateVerifyOnRandomWrites(t, true)
 }
