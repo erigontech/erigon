@@ -147,8 +147,10 @@
 - **Lock.** `phaseReadMu` guards nothing in any configuration. Without a factory the round runs one worker, and the
   production factory never returns a nil context. It is deleted, and a nil context from a factory is an error.
 - **Prev check.** `phaseContext.PutBranch` reads the base only to check prev. That is the only production check that a
-  new row does not overwrite a stored record, so it stays, except on a base that declares itself empty (a fresh
-  convert).
+  new row does not overwrite a stored record, so it stays. A base may implement `absentSource { Absent(key []byte) bool
+  }`, evaluated per key at check time; on a records miss the read is skipped only when `Absent(key)` is true, meaning
+  the base guarantees it holds no record for that key. A round-level "empty" flag is wrong: it outlives the base's
+  emptiness after the first batch.
 - **Scheduling from v3.** Small buckets in one storage nibble are batched into one task, up to a grain. A bucket splits
   into subtasks only above the grain: today the threshold is 8 ops, which gives 19,352 tasks per 100k ops. Tasks keep
   dependencies at lower indexes than their dependents. Chains are not split; a chain straggler in the measurements is
@@ -360,11 +362,12 @@ flowchart LR
 - Modify: `execution/commitment/v3/pbt/parallel_round_test.go`
 
 - [x] write tests first:
-      - on a base that declares itself empty, a convert-like round makes 0 base reads from `phaseContext.PutBranch`
-        (a counting base);
-      - on an ordinary base, a new row written over a stored record still fails with `previous record mismatch`
-- [x] add the empty-base declaration as an optional interface on the base; `phaseContext.PutBranch` skips the read
-      only when the base declares it
+      - on a base that answers `Absent(key)`, a convert-like round makes 0 prev-check base reads for new rows from
+        `phaseContext.PutBranch`, in the first round and in a later one (a counting base);
+      - on an ordinary base, and on one answering `Absent`, a new row written over a stored record still fails with
+        `previous record mismatch`
+- [x] add `absentSource { Absent(key []byte) bool }` as an optional interface on the base; `phaseContext.PutBranch`
+      skips the read on a records miss only when `Absent(key)` is true
 - [ ] benchmark the convert-like cell before/after through `ab-verdict`
 - [x] run gates — must pass before Task 9
 
@@ -422,7 +425,8 @@ flowchart LR
 - [ ] `FlushFinished` keeps the open path of every live partition. `pbinRowStampTracker` keeps per-partition state and
       a shared aggregate for the rows above partitions, and `finished` clears only the keys it flushed
 - [ ] factory contexts read through the range-writer overlay, decorated like the main context and read-only during a
-      round. The overlay declares the Task 8 empty base on a fresh convert
+      round. On a fresh convert the overlay implements the Task 8 `Absent(key)` as "not held in `writes` and not
+      flushed"
 - [ ] `PBinConvertOptions` carries the DB, `ConvertPBin` installs the factory, and `convert-pbt` passes it
 - [ ] write a test: bin `.kv` files and state are byte-equal between factory and non-factory convert, on the oracle
       corpora and in the `cmd/integration` convert fixture

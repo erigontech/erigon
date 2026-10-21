@@ -30,11 +30,11 @@ import (
 )
 
 type phaseContext struct {
-	base      commitment.PatriciaContext
-	baseEmpty bool
-	records   map[string][]byte
-	prefix    *eip8297.Bitpath
-	owners    []phaseOwner
+	base    commitment.PatriciaContext
+	absent  absentSource
+	records map[string][]byte
+	prefix  *eip8297.Bitpath
+	owners  []phaseOwner
 }
 
 type phaseOwner struct {
@@ -108,7 +108,7 @@ func (c *phaseContext) PutBranch(key, data, prev []byte) error {
 		return err
 	}
 	current, ok := c.records[string(key)]
-	if !ok && !c.baseEmpty {
+	if !ok && (c.absent == nil || !c.absent.Absent(key)) {
 		var err error
 		current, _, err = c.base.Branch(key)
 		if err != nil {
@@ -130,12 +130,12 @@ func (c *phaseContext) LeafRefs(key, data []byte) *commitment.LeafRefs {
 }
 
 func (t *Trie) newPhaseContext(base commitment.PatriciaContext, prefix *eip8297.Bitpath) *phaseContext {
-	empty, ok := base.(emptyBaseSource)
-	return &phaseContext{base: base, baseEmpty: ok && empty.EmptyBase(), records: make(map[string][]byte), prefix: prefix}
+	absent, _ := base.(absentSource)
+	return &phaseContext{base: base, absent: absent, records: make(map[string][]byte), prefix: prefix}
 }
 
-type emptyBaseSource interface {
-	EmptyBase() bool
+type absentSource interface {
+	Absent(key []byte) bool
 }
 
 func (t *Trie) inheritHooks(dst *Trie) {
@@ -507,6 +507,10 @@ func (t *Trie) phaseHookOps(task *phaseTask) error {
 	for i := range task.ops {
 		task.ops[i].Key = bytes.Clone(task.ops[i].Key)
 		task.ops[i].Drop = bytes.Clone(task.ops[i].Drop)
+		if merge := task.ops[i].merge; merge != nil {
+			copied := *merge
+			task.ops[i].merge = &copied
+		}
 		if err := t.phaseHook(*task, &task.ops[i]); err != nil {
 			return err
 		}

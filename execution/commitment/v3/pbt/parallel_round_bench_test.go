@@ -61,7 +61,7 @@ func benchmarkParallelRound(b *testing.B, snapshot map[string][]byte, empty bool
 				ops := roundOps(rand.New(rand.NewSource(int64(100 + i))))
 				base := newParallelRoundBase(snapshot)
 				if empty {
-					base.declareEmpty()
+					base.answerAbsent()
 				}
 				trie := base.trie()
 				runtime.GC()

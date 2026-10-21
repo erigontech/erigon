@@ -38,11 +38,16 @@ type trieTestContext struct {
 	writes         []trieTestWrite
 	rejectNilPrev  bool
 	keepTombstones bool
-	empty          bool
+	reportAbsent   bool
 	readHook       func([]byte)
 }
 
-func (c *trieTestContext) EmptyBase() bool { return c.empty }
+func (c *trieTestContext) Absent(key []byte) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, ok := c.records[string(key)]
+	return c.reportAbsent && !ok
+}
 
 type trieTestWrite struct {
 	key  []byte
