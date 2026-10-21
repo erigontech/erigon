@@ -222,6 +222,25 @@ func BenchmarkOpMulmod(b *testing.B) {
 	opBenchmark(b, opMulmod, x, y, z)
 }
 
+func BenchmarkOpMulmodAlternatingModuli(b *testing.B) {
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+	callContext := &CallContext{}
+	x := *new(uint256.Int).SetBytes(common.Hex2Bytes(opTestArg))
+	moduli := [2]uint256.Int{
+		*uint256.MustFromHex("0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f"),
+		*uint256.MustFromHex("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"),
+	}
+	i := 0
+	for b.Loop() {
+		callContext.Stack.push(moduli[i&1])
+		callContext.Stack.push(x)
+		callContext.Stack.push(x)
+		opMulmod(0, evm, callContext)
+		callContext.Stack.popCopy()
+		i++
+	}
+}
+
 func BenchmarkOpSHL(b *testing.B) {
 	x := "FBCDEF090807060504030201ffffffffFBCDEF090807060504030201ffffffff"
 	y := "ff"
