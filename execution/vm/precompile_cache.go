@@ -30,6 +30,7 @@ var precompileResults = cache.NewHashByteLRU[[]byte](8*datasize.MB, func(output 
 type cachedPrecompile struct {
 	PrecompiledContract
 	domain [21]byte
+	minGas uint64 // cheaper calls run directly: hashing the key costs more than the call
 }
 
 func cachePrecompile(p PrecompiledContract, tier forkTier, address common.Address) PrecompiledContract {
@@ -41,6 +42,9 @@ func cachePrecompile(p PrecompiledContract, tier forkTier, address common.Addres
 		c := &cachedPrecompile{PrecompiledContract: p}
 		c.domain[0] = byte(tier)
 		copy(c.domain[1:], address[:])
+		if _, ok := p.(*blake2F); ok {
+			c.minGas = 1000 // gas = rounds
+		}
 		return c
 	default:
 		return p
@@ -48,7 +52,7 @@ func cachePrecompile(p PrecompiledContract, tier forkTier, address common.Addres
 }
 
 func (c *cachedPrecompile) Run(input []byte) ([]byte, error) {
-	if len(input) > 64*1024 {
+	if len(input) > 64*1024 || c.RequiredGas(input) < c.minGas {
 		return c.PrecompiledContract.Run(input)
 	}
 	var keyData [53]byte

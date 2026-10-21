@@ -562,6 +562,16 @@ func TestCachedPrecompileDomainAndErrors(t *testing.T) {
 	if cachePrecompile(p, forkOsaka, common.Address{}) != p {
 		t.Fatal("wrapped custom contract")
 	}
+	p = &countingPrecompile{output: []byte{7}}
+	c = &cachedPrecompile{PrecompiledContract: p, domain: [21]byte{207}, minGas: 101}
+	for range 2 {
+		if _, err := c.Run(input); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if p.calls != 2 {
+		t.Fatal("cached a call cheaper than the lookup")
+	}
 }
 
 func TestCachedPrecompileParallel(t *testing.T) {
