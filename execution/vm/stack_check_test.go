@@ -393,24 +393,26 @@ func TestRunTakesMcopyFastPath(t *testing.T) {
 	t.Parallel()
 	errJumpTable := errors.New("jump table MCOPY")
 	for _, traced := range []bool{false, true} {
-		ibs := state.New(state.NewNoopReader())
-		defer ibs.Close()
-		evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
-		jt := *evm.jt
-		jt[MCOPY].execute = func(uint64, *EVM, *CallContext) (uint64, []byte, error) { return 0, nil, errJumpTable }
-		evm.jt = &jt
-		c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
-		c.Code = []byte{byte(PUSH1), 32, byte(PUSH1), 0, byte(MSTORE), byte(PUSH1), 8, byte(PUSH1), 0, byte(PUSH1), 1, byte(MCOPY)}
-		f := evm.run
-		if traced {
-			f = evm.runTraced
-		}
-		_, _, _, err := f(*c, mdgas.MdGas{Execution: 100_000}, nil, false, false, false)
-		if traced {
-			require.ErrorIs(t, err, errJumpTable)
-		} else {
-			require.NoError(t, err)
-		}
+		t.Run(fmt.Sprintf("traced=%v", traced), func(t *testing.T) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+			jt := *evm.jt
+			jt[MCOPY].execute = func(uint64, *EVM, *CallContext) (uint64, []byte, error) { return 0, nil, errJumpTable }
+			evm.jt = &jt
+			c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+			c.Code = []byte{byte(PUSH1), 32, byte(PUSH1), 0, byte(MSTORE), byte(PUSH1), 8, byte(PUSH1), 0, byte(PUSH1), 1, byte(MCOPY)}
+			f := evm.run
+			if traced {
+				f = evm.runTraced
+			}
+			_, _, _, err := f(*c, mdgas.MdGas{Execution: 100_000}, nil, false, false, false)
+			if traced {
+				require.ErrorIs(t, err, errJumpTable)
+			} else {
+				require.NoError(t, err)
+			}
+		})
 	}
 }
 
