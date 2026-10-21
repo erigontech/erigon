@@ -147,6 +147,17 @@ Selecting the binary trie is process-global, not a per-tester option: set `state
 
 The EIP-8297 engine lives in `execution/commitment/v3/pbt`; shared rules and the independent reference live in `execution/commitment/eip8297`. Binary state uses the `0xB1` marker and row format `0x20`, checked by `PBinValidateRowStateFormat`; legacy binary formats are refused at datadir open. `BinFeedFromState` in `execution/commitment/commitmentdb/pbin_feed.go` is the input adapter for SharedDomains, calcState and BAL sources. `erigondb.toml` records `trie_variant` and `trie_hash`, but the embedding itself is not versioned, so rebuild bin datadirs from genesis whenever key derivation or leaf layout changes.
 
+A PBT round splits its ops into one task per 12-bit chain and per storage bucket. A task reads and writes only
+records under its own prefix, every task reads one round-start view that nobody writes during the round, and
+writes come back as delta parts that the round applies after the join; a join refuses records owned by a task.
+Worker contexts come from the trie context factory, and a factory that returns a nil context fails the round. With
+deferral on (fork validation and parallel block apply, the same rule as hex), the bin trie keeps its parts until
+the caller takes them with `TakeDeferredDeltas` and flushes them to its own commitment domain; a round started with
+untaken parts fails. Convert (`PBinRangeWriter.WriteAtBlock`) runs the same round on workers that read its overlay,
+and builds only into a target domain with no rows in files or MDBX. `VerifyPBinDomainRoot` verifies each chain
+subtree on a worker view opened from the caller's file pin, then the rows above bit 12; a write-tx caller verifies
+sequentially.
+
 Dual commitment keeps trie ownership and canonical role separate. `kv.CommitmentDomain` is the hex
 domain and `kv.CommitmentBinDomain` is the binary domain in `hex+bin` mode; a binary-only datadir
 uses the existing commitment domain with the binary algorithm. Block-correct code must derive the
