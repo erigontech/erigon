@@ -204,6 +204,10 @@ func (b *ByteLRU[V]) charge(w int64) {
 func (b *ByteLRU[V]) grow() {
 	b.growMu.Lock()
 	defer b.growMu.Unlock()
+	b.growLocked()
+}
+
+func (b *ByteLRU[V]) growLocked() {
 	if b.closed {
 		return
 	}
@@ -240,6 +244,8 @@ func (b *ByteLRU[V]) Purge() {
 	b.limit.Store(floor)
 	b.ceiling.Store(b.maxBytes)
 	b.c.SetMaximum(uint64(b.maxBytes))
+	// A write that raced InvalidateAll was charged against the old limit and did not grow.
+	b.growLocked()
 }
 
 // Close empties the cache and returns a budgeted cache's envelope reservation. Idempotent.

@@ -256,3 +256,25 @@ func TestByteLRUGrowCoversLargeWrite(t *testing.T) {
 	b.c.CleanUp()
 	require.LessOrEqual(t, b.resident.Load(), b.limit.Load())
 }
+
+// A write that lands between Purge's invalidation and its reservation reset is
+// charged against the old limit; Purge must reserve for it again, or the entry
+// stays resident while other caches spend the released budget.
+func TestByteLRUPurgeRacingAddKeepsResidencyReserved(t *testing.T) {
+	prev := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prev })
+	cachebudget.Global = cachebudget.New(1 << 40)
+
+	val := make([]byte, 8*datasize.MB)
+	b := newByteLRU(64*datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
+	defer b.Close()
+	for round := range 2000 {
+		b.Add(1, val)
+		var wg sync.WaitGroup
+		wg.Go(b.Purge)
+		wg.Go(func() { b.Add(2, val) })
+		wg.Wait()
+		b.c.CleanUp()
+		require.LessOrEqual(t, b.resident.Load(), b.limit.Load(), "round %d: resident bytes outgrew the reservation", round)
+	}
+}
