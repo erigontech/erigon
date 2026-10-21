@@ -48,8 +48,6 @@ import (
 
 var sidecarSSZSize = (&cltypes.BlobSidecar{}).EncodingSizeSSZ()
 
-var ErrBeaconBlocksGap = errors.New("beaconblocks segments have a gap")
-
 // value: chunked(ssz(SignedBeaconBlocks))
 // slot       -> beacon_slot_segment_offset
 
@@ -87,6 +85,7 @@ func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.Beacon
 	})
 	c.SetIndexBuilder(snaptype.BeaconBlocks, beaconIdx)
 	c.SetIndexBuilder(snaptype.BlobSidecars, beaconIdx)
+	c.KeepUnindexedlyCovered()
 	return c
 }
 
@@ -149,29 +148,40 @@ func (s *CaplinSnapshots) SegFileNames(from, to uint64) []string {
 }
 
 func (s *CaplinSnapshots) OpenFolder() error {
-	if err := beaconBlocksGap(s.Dir()); err != nil {
+	list, err := s.segmentsUpToGap()
+	if err != nil {
 		return err
 	}
-	return s.BaseRoSnapshots.OpenFolder()
+	return s.OpenList(list, false)
 }
 
 // Go embedding has no virtual dispatch: the promoted base version would open past a gap.
 func (s *CaplinSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
 
-func beaconBlocksGap(dir string) error {
-	blocks, err := snapshotsync.AllTypedSegments(dir, []snaptype.Type{snaptype.BeaconBlocks})
+// SegmentsMax is dirty-backed, so a beaconblocks segment past a gap or crossing must stay
+// closed: backfill stops at SegmentsMax and would never write the missing slots.
+func (s *CaplinSnapshots) segmentsUpToGap() ([]string, error) {
+	files, err := snapshotsync.AllTypedSegments(s.Dir(), s.Types())
 	if err != nil {
-		return err
+		return nil, err
 	}
-	slices.SortFunc(blocks, func(a, b snaptype.FileInfo) int { return cmp.Compare(a.From, b.From) })
+	slices.SortFunc(files, func(a, b snaptype.FileInfo) int {
+		return cmp.Or(cmp.Compare(a.From, b.From), cmp.Compare(b.To, a.To))
+	})
+	list := make([]string, 0, len(files))
 	var end uint64
-	for i := range blocks {
-		if i > 0 && blocks[i].From > end {
-			return fmt.Errorf("%w at slots [%d, %d); once the snapshot download is complete, run `erigon snapshots reset`", ErrBeaconBlocksGap, end, blocks[i].From)
+	stopped := false
+	for i := range files {
+		if files[i].Type.Enum() == snaptype.CaplinEnums.BeaconBlocks {
+			stopped = stopped || (end > 0 && (files[i].From > end || files[i].From < end && files[i].To > end))
+			if stopped {
+				continue
+			}
+			end = max(end, files[i].To)
 		}
-		end = max(end, blocks[i].To)
+		list = append(list, files[i].Name())
 	}
-	return nil
+	return list, nil
 }
 
 type snapshotNotifier interface {
@@ -421,16 +431,9 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	if s == nil {
 		return nil
 	}
-	if err := beaconBlocksGap(s.Dir()); err != nil {
-		return err
-	}
-	files, err := snapshotsync.AllTypedSegments(s.Dir(), s.Types())
+	list, err := s.segmentsUpToGap()
 	if err != nil {
 		return err
-	}
-	list := make([]string, 0, len(files))
-	for i := range files {
-		list = append(list, files[i].Name())
 	}
 	if err := s.OpenList(list, true); err != nil {
 		return err

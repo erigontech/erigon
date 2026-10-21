@@ -604,9 +604,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			case <-ctx.Done():
 				return
 			case <-time.After(10 * time.Second):
-				if err := antiq.Loop(); errors.Is(err, freezeblocks.ErrBeaconBlocksGap) {
-					logger.Warn("Antiquary failed", "err", err)
-				} else if err != nil {
+				if err := antiq.Loop(); err != nil {
 					logger.Debug("Antiquary failed", "err", err)
 				} else {
 					keepGoing = false
