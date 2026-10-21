@@ -26,7 +26,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
 
@@ -67,6 +70,29 @@ func BenchmarkPBinRangeWriterWorkers(b *testing.B) {
 				if factoryWorkers > 0 {
 					require.Greater(b, run.activity.Load(), int32(1))
 				}
+			}
+		})
+	}
+}
+
+func BenchmarkPBinVerifyWorkers(b *testing.B) {
+	selectPBinRangeWriterHash(b)
+	statecfg.ExperimentalCommitmentV3 = true
+	run := openPBinRangeWriterRun(b, 100_000, 0, 23)
+	_, err := run.write(b.Context(), pbinRangeWriterBenchLeaves(75_000))
+	require.NoError(b, err)
+	run.tx.Rollback()
+	workers := dbg.TipTrieWarmupers
+	b.Cleanup(func() { dbg.TipTrieWarmupers = workers })
+	for _, workers := range []int{1, 8} {
+		b.Run(fmt.Sprintf("workers=%d", workers), func(b *testing.B) {
+			dbg.TipTrieWarmupers = workers
+			for b.Loop() {
+				tx, err := run.db.BeginTemporalRo(b.Context()) //nolint:gocritic
+				require.NoError(b, err)
+				_, err = state.VerifyPBinDomainRoot(b.Context(), tx, run.agg, kv.CommitmentBinDomain)
+				tx.Rollback()
+				require.NoError(b, err)
 			}
 		})
 	}

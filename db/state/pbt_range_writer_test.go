@@ -786,6 +786,7 @@ func runPBinRangeWriterCorpus(t *testing.T, leaves []state.PBinLeaf, maxOps int)
 }
 
 type pbinRangeWriterRun struct {
+	db       kv.TemporalRwDB
 	agg      *state.Aggregator
 	tx       kv.TemporalRwTx
 	domains  *execctx.SharedDomains
@@ -813,7 +814,7 @@ func openPBinRangeWriterRun(t testing.TB, maxOps, workers int, endTxNum uint64) 
 	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), options...)
 	require.NoError(t, err)
 	t.Cleanup(domains.Close)
-	run := &pbinRangeWriterRun{agg: agg, tx: tx, domains: domains, activity: new(atomic.Int32)}
+	run := &pbinRangeWriterRun{db: db, agg: agg, tx: tx, domains: domains, activity: new(atomic.Int32)}
 	if workers > 0 {
 		activity, ok := domains.GetCommitmentCtx().Trie().(interface{ SetCoreActivityHook(func(bool)) })
 		require.True(t, ok)

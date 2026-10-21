@@ -142,7 +142,9 @@ func VerifyPBinDomainRoot(ctx context.Context, tx kv.TemporalTx, aggregator *Agg
 	}
 	commitmentCtx.PrepareForVerification(tx)
 	trie := commitmentCtx.Trie()
-	verifier, ok := trie.(interface{ Verify() error })
+	verifier, ok := trie.(interface {
+		VerifyContext(context.Context, int, commitment.TrieContextFactory) error
+	})
 	if !ok {
 		return common.Hash{}, fmt.Errorf("pbin verification: trie does not support verification")
 	}
@@ -163,7 +165,9 @@ func VerifyPBinDomainRoot(ctx context.Context, tx kv.TemporalTx, aggregator *Agg
 		})
 		defer progressTrie.SetVerifyProgress(nil)
 	}
-	if verifyErr := verifier.Verify(); verifyErr != nil {
+	factory, release := commitmentCtx.VerificationContextFactory(tx)
+	defer release()
+	if verifyErr := verifier.VerifyContext(ctx, cfg.WarmupNumWorkersOrDefault(), factory); verifyErr != nil {
 		return common.Hash{}, verifyErr
 	}
 	root, err := trie.RootHash()

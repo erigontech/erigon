@@ -429,6 +429,37 @@ func (sdc *SharedDomainsCommitmentContext) PrepareForVerification(tx kv.Temporal
 	sdc.trieContext(tx, 0, 0, context.Background(), nil, nil)
 }
 
+var errVerificationViewDrifted = errors.New("verification worker view drifted from the caller's snapshot")
+
+func (sdc *SharedDomainsCommitmentContext) VerificationContextFactory(tx kv.TemporalTx) (commitment.TrieContextFactory, func()) {
+	caller := resolveCallerView(tx)
+	pinner, ok := tx.(filesPinner)
+	if caller.unresolved || caller.writer || !ok {
+		return nil, func() {}
+	}
+	pin := pinner.Pin()
+	if pin == nil {
+		return nil, func() {}
+	}
+	factory := func(ctx context.Context) (commitment.PatriciaContext, func()) {
+		roTx, err := BeginWorkerRo(ctx, nil, pin)
+		if err != nil {
+			return &errorTrieContext{err: err}, func() {}
+		}
+		if caller.mayDrift(roTx) {
+			roTx.Rollback()
+			return &errorTrieContext{err: errVerificationViewDrifted}, func() {}
+		}
+		return &TrieContext{
+			putter:           sdc.sharedDomains.AsPutDel(roTx),
+			stateReader:      NewLatestStateReader(roTx, sdc.sharedDomains, LatestStateReaderOptions{}),
+			commitmentDomain: sdc.CommitmentDomain(),
+			stepSize:         sdc.sharedDomains.StepSize(),
+		}, roTx.Rollback
+	}
+	return factory, pin.Close
+}
+
 // TouchKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
 func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val []byte) {

@@ -96,6 +96,7 @@ type Trie struct {
 	droppedLeafKeys        map[string]struct{}
 	mergeCreatedStems      map[string]struct{}
 	verifiedBucketKeys     map[string]struct{}
+	verifiedChains         map[string]verifiedChain
 	verifyProgress         func([]byte)
 }
 

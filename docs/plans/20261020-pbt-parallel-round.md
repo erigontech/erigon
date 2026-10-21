@@ -513,13 +513,15 @@ per 4-bit prefix of every leaf path and encodes and stores each on close, but on
 - Modify: `db/state/pbt_convert.go`
 - Modify: `execution/commitment/v3/pbt/verify_test.go`
 
-- [ ] write a red test first: verify on a base whose `Branch` blocks until a second concurrent `Branch` arrives.
+- [x] write a red test first: verify on a base whose `Branch` blocks until a second concurrent `Branch` arrives.
       Sequential verify times out
-- [ ] write tests: a corrupt row inside one partition, a missing row, and an orphan bucket each report the same error as
+- [x] write tests: a corrupt row inside one partition, a missing row, and an orphan bucket each report the same error as
       the sequential verify
-- [ ] `VerifyPBinDomainRoot` verifies each chain subtree on its own pinned worker view, then the rows above bit 12,
-      merging progress and `verifiedBucketKeys`
-- [ ] run gates (now including `db/integrity`) — must pass before Task 14
+- [x] `VerifyPBinDomainRoot` verifies each chain subtree on its own pinned worker view, then the rows above bit 12,
+      merging progress and `verifiedBucketKeys`. Workers open views from the caller's file pin; a write-tx caller or
+      one without a pin verifies sequentially, and a worker view that drifted from the caller's snapshot is an error.
+      Verify over the Task 11B benchmark corpus, `-count=3 -benchtime=3x`, ms/op: w=1 2562/2545/2587, w=8 413/420/423
+- [x] run gates (now including `db/integrity`) — must pass before Task 14
 
 ### Task 14: Verify acceptance criteria
 - [ ] the benchmark table before (Task 1 baseline) vs after, recorded in Technical Details. The owner waived the A/B
