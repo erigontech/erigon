@@ -130,6 +130,10 @@ type TxnExecutor struct {
 	// ExecutionResult, which caller can use the values to update the balance of burner and coinbase account.
 	// This is useful during parallel txn execution, where the common account read/write should be minimized.
 	noFeeBurnAndTip bool
+
+	// deferSender skips the sender nonce check, gas debit/refund and nonce bump;
+	// the parallel executor applies them in tx order at validation.
+	deferSender bool
 }
 
 // Message represents a message sent to a contract.
@@ -186,10 +190,10 @@ func NewTxnExecutor(evm *vm.EVM, msg Message, gp *GasPool) *TxnExecutor {
 // `gasBailout` is true when it is not required to fail transaction if the balance is not enough to pay gas.
 // for trace_call to replicate OE/Parity behaviour
 func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, engine rules.EngineReader) (*evmtypes.ExecutionResult, error) {
-	return applyMessage(evm, msg, gp, refunds, gasBailout, false, engine)
+	return applyMessage(evm, msg, gp, refunds, gasBailout, false, false, engine)
 }
 
-func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, noFeeBurnAndTip bool, engine rules.EngineReader) (
+func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, noFeeBurnAndTip bool, deferSender bool, engine rules.EngineReader) (
 	*evmtypes.ExecutionResult, error,
 ) {
 	// Only zero-gas transactions may be service ones
@@ -204,11 +208,18 @@ func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 	}
 	st := NewTxnExecutor(evm, msg, gp)
 	st.noFeeBurnAndTip = noFeeBurnAndTip
+	st.deferSender = deferSender
 	return st.Execute(refunds, gasBailout)
 }
 
 func ApplyMessageNoFeeBurnOrTip(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, engine rules.EngineReader) (*evmtypes.ExecutionResult, error) {
-	return applyMessage(evm, msg, gp, refunds, gasBailout, true, engine)
+	return applyMessage(evm, msg, gp, refunds, gasBailout, true, false, engine)
+}
+
+// ApplyMessageDeferSender is ApplyMessageNoFeeBurnOrTip without any sender
+// nonce/balance access; the caller must check and charge the sender itself.
+func ApplyMessageDeferSender(evm *vm.EVM, msg Message, gp *GasPool, engine rules.EngineReader) (*evmtypes.ExecutionResult, error) {
+	return applyMessage(evm, msg, gp, true, false, true, true, engine)
 }
 
 func ApplyFrame(evm *vm.EVM, msg Message, gp *GasPool) (*evmtypes.ExecutionResult, error) {
@@ -239,7 +250,7 @@ func (st *TxnExecutor) buyGas(fees upfrontTxnFees, gasBailout bool) error {
 		}
 	}
 
-	if !gasBailout {
+	if !gasBailout && !st.deferSender {
 		if err := st.state.SubBalance(st.msg.From(), fees.gasVal, tracing.BalanceDecreaseGasBuy); err != nil {
 			return err
 		}
@@ -277,7 +288,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 	}
 
 	// Make sure this transaction's nonce is correct.
-	if st.msg.CheckNonce() {
+	if st.msg.CheckNonce() && !st.deferSender {
 		stNonce, err := st.state.GetNonce(from)
 		if err != nil {
 			return upfrontTxnFees{}, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
@@ -399,7 +410,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	if !gasBailout {
+	if !gasBailout && !st.deferSender {
 		balanceCheck := fees.gasVal
 		if st.feeCap != nil {
 			balanceCheck, overflow = u256.MulOverflow(u256.U64(gas), *st.feeCap)
@@ -576,9 +587,12 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	}
 
 	coinbase := st.evm.Context.Coinbase
-	senderInitBalance, err := st.state.GetBalance(st.msg.From())
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+	var senderInitBalance uint256.Int
+	if !st.deferSender {
+		senderInitBalance, err = st.state.GetBalance(st.msg.From())
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+		}
 	}
 
 	var coinbaseInitBalance uint256.Int
@@ -612,7 +626,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 
-	if !contractCreation {
+	if !contractCreation && !st.deferSender {
 		// Increment the nonce for the next transaction
 		nonce, err := st.state.GetNonce(sender)
 		if err != nil {
@@ -630,7 +644,8 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		tracer.EmitGasChange(mdgas.MdGas{Execution: st.msg.Gas()}, st.gasRemaining, tracing.GasChangeTxIntrinsicGas)
 	}
 
-	var bailout bool
+	// A deferred sender's value debit is charged at validation, like its gas.
+	bailout := st.deferSender
 	// Gas bailout (for trace_call) should only be applied if there is not sufficient balance to perform value transfer
 	if gasBailout {
 		canTransfer, err := st.evm.Context.CanTransfer(st.state, msg.From(), *msg.Value())
@@ -755,8 +770,10 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		if !rules.IsAmsterdam {
 			st.blockExecutionGasUsed = st.txnGasUsed
 		}
-		if err := st.refundGas(gasLeft); err != nil {
-			return nil, err
+		if !st.deferSender {
+			if err := st.refundGas(gasLeft); err != nil {
+				return nil, err
+			}
 		}
 	} else if !rules.IsAmsterdam {
 		st.blockExecutionGasUsed = st.msg.Gas()
