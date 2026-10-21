@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"math"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -14,7 +15,10 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/preverified"
+	"github.com/erigontech/erigon/db/recsplit"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 
 	g "github.com/anacrolix/generics"
@@ -77,6 +81,7 @@ func parseStateFile(name string) (stateFile, bool) {
 // opened, so that is the one recorded.
 type domainBuild struct {
 	name          string
+	path          string
 	retainedLocal bool
 	ver           version.Version
 	fromStep      uint64
@@ -105,7 +110,7 @@ func (reset *Reset) checkStateBuilds() error {
 	}
 
 	builds := map[string]map[string]*domainBuild{}
-	record := func(fileName string, retainedLocal bool) {
+	record := func(fileName, path string) {
 		f, ok := parseStateFile(fileName)
 		if !ok || f.ext != "kv" || (f.entity != "accounts" && f.entity != "storage" && f.entity != "commitment") {
 			return
@@ -129,10 +134,20 @@ func (reset *Reset) checkStateBuilds() error {
 		}
 		builds[stepRange][domain] = &domainBuild{
 			name:          fileName,
-			retainedLocal: retainedLocal,
+			path:          path,
+			retainedLocal: path != "",
 			ver:           ver,
 			fromStep:      f.fromStep,
 			toStep:        f.toStep,
+		}
+	}
+
+	accessors := map[string]string{}
+	recordAccessor := func(fileName, path string) {
+		if _, unversioned, ok := strings.Cut(fileName, "-"); ok {
+			if _, seen := accessors[unversioned]; !seen || path != "" {
+				accessors[unversioned] = path
+			}
 		}
 	}
 
@@ -150,8 +165,9 @@ func (reset *Reset) checkStateBuilds() error {
 		dir, name, _ := strings.Cut(item.Name, "/")
 		switch dir {
 		case "domain":
-			record(name, false)
+			record(name, "")
 			recordEnd(name)
+			recordAccessor(name, "")
 		case "history", "idx":
 			recordEnd(name)
 		}
@@ -180,9 +196,11 @@ func (reset *Reset) checkStateBuilds() error {
 				continue
 			}
 			if _, known := reset.PreverifiedSnapshots.Get("domain/" + name); known {
+				recordAccessor(name, "")
 				continue
 			}
-			record(name, true)
+			recordAccessor(name, filepath.Join(dir, entry.Name()))
+			record(name, filepath.Join(dir, entry.Name()))
 		}
 	}
 
@@ -190,11 +208,40 @@ func (reset *Reset) checkStateBuilds() error {
 	for _, end := range entityEnds {
 		visibleEnd = min(visibleEnd, end)
 	}
+	usable := func(commitment *domainBuild) bool {
+		span := fmt.Sprintf("commitment.%d-%d.", commitment.fromStep, commitment.toStep)
+		for _, accessor := range []struct {
+			kind statecfg.Accessors
+			ext  string
+			open func(path string) error
+		}{
+			{statecfg.AccessorHashMap, "kvi", openHashMap},
+			{statecfg.AccessorBTree, "bt", nil},
+			{statecfg.AccessorExistence, "kvei", nil},
+		} {
+			if !statecfg.Schema.CommitmentDomain.Accessors.Has(accessor.kind) {
+				continue
+			}
+			path, ok := accessors[span+accessor.ext]
+			if !ok || (path != "" && accessor.open != nil && accessor.open(path) != nil) {
+				return false
+			}
+		}
+		if commitment.path == "" {
+			return true
+		}
+		d, err := seg.NewDecompressor(commitment.path)
+		if err != nil {
+			return false
+		}
+		d.Close()
+		return true
+	}
 	hidden := func(commitment *domainBuild) bool {
 		for _, domains := range builds {
 			merged := domains["commitment"]
 			if merged != nil && merged != commitment && merged.toStep <= visibleEnd &&
-				merged.fromStep <= commitment.fromStep && commitment.toStep <= merged.toStep {
+				merged.fromStep <= commitment.fromStep && commitment.toStep <= merged.toStep && usable(merged) {
 				return true
 			}
 		}
@@ -226,6 +273,15 @@ func (reset *Reset) checkStateBuilds() error {
 		"builds for step ranges %s, which breaks the byte offsets commitment holds into them. "+
 		"Remove those ranges first with 'erigon snapshots rm-state-snapshots --step=<range>', or "+
 		"re-run with --allow-mixed-state to proceed anyway", strings.Join(mixed, ", "))
+}
+
+func openHashMap(path string) error {
+	idx, err := recsplit.OpenIndex(path)
+	if err != nil {
+		return err
+	}
+	idx.Close()
+	return nil
 }
 
 func (reset *Reset) Run() (err error) {

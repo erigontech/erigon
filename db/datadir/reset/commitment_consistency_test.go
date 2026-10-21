@@ -5,11 +5,15 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/go-quicktest/qt"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/preverified"
+	"github.com/erigontech/erigon/db/recsplit"
+	"github.com/erigontech/erigon/db/seg"
 )
 
 // Commitment values reference accounts and storage records by byte offset into the .kv of the same
@@ -330,8 +334,19 @@ func TestResetRefusesLegacyStateThatStartupRenamesIntoTheManifest(t *testing.T) 
 func runCoveredRangeReset(t *testing.T, root *os.Root, local, manifest []string) error {
 	var startEntries []fsEntry
 	for _, name := range local {
-		startEntries = append(startEntries, fsEntry{Name: slashName(name)})
+		entry := fsEntry{Name: slashName(name)}
+		switch {
+		case strings.HasSuffix(name, ".kv"):
+			entry.Data = validSegment(t)
+		case strings.HasSuffix(name, ".kvi"):
+			entry.Data = validIndex(t)
+		}
+		startEntries = append(startEntries, entry)
 	}
+	return runCoveredRangeResetEntries(t, root, startEntries, manifest)
+}
+
+func runCoveredRangeResetEntries(t *testing.T, root *os.Root, startEntries []fsEntry, manifest []string) error {
 	makeEntries(t, startEntries, root)
 	r := makeTestingReset(t, startEntries, root, "", ".")
 	r.RemoveUnknown, r.RemoveLocal = false, false
@@ -346,9 +361,44 @@ func runCoveredRangeReset(t *testing.T, root *os.Root, local, manifest []string)
 	return r.Run()
 }
 
+func validSegment(t *testing.T) string {
+	fPath := filepath.Join(t.TempDir(), "v1.0-accounts.0-1.kv")
+	comp, err := seg.NewCompressor(t.Context(), t.Name(), fPath, t.TempDir(), seg.DefaultCfg, log.LvlDebug, log.New())
+	qt.Assert(t, qt.IsNil(err))
+	defer comp.Close()
+	comp.DisableFsync()
+	qt.Assert(t, qt.IsNil(comp.AddWord([]byte("word"))))
+	qt.Assert(t, qt.IsNil(comp.Compress()))
+	data, err := os.ReadFile(fPath)
+	qt.Assert(t, qt.IsNil(err))
+	return string(data)
+}
+
+func validIndex(t *testing.T) string {
+	fPath := filepath.Join(t.TempDir(), "v1.0-accounts.0-1.kvi")
+	salt := uint32(1)
+	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+		KeyCount:   1,
+		BucketSize: 10,
+		Salt:       &salt,
+		TmpDir:     t.TempDir(),
+		IndexFile:  fPath,
+		LeafSize:   8,
+	}, log.New())
+	qt.Assert(t, qt.IsNil(err))
+	defer rs.Close()
+	rs.DisableFsync()
+	qt.Assert(t, qt.IsNil(rs.AddKey([]byte("key"), 0)))
+	qt.Assert(t, qt.IsNil(rs.Build(t.Context())))
+	data, err := os.ReadFile(fPath)
+	qt.Assert(t, qt.IsNil(err))
+	return string(data)
+}
+
 var completeLocalMerge = []string{
 	"snapshots/domain/v2.1-commitment.0-2.kv",
 	"snapshots/domain/v2.1-commitment.0-4.kv",
+	"snapshots/domain/v2.0-commitment.0-4.kvi",
 	"snapshots/domain/v1.0-accounts.0-4.kv",
 	"snapshots/domain/v1.0-storage.0-4.kv",
 }
@@ -361,6 +411,57 @@ func TestResetAllowsAMixedRangeHiddenByACompleteMerge(t *testing.T) {
 		qt.Assert(t, qt.IsNil(runCoveredRangeReset(t, root, append(slices.Clone(completeLocalMerge),
 			"snapshots/history/v1.0-accounts.0-4.v",
 			"snapshots/idx/v1.0-logaddrs.0-4.ef"), []string{"history/v1.0-accounts.0-2.v"})))
+	})
+}
+
+func TestResetChecksAMixedRangeWhenTheMergeHasNoAccessor(t *testing.T) {
+	withOsRoot(t, func(root *os.Root) {
+		local := slices.DeleteFunc(slices.Clone(completeLocalMerge), func(name string) bool {
+			return strings.HasSuffix(name, ".kvi")
+		})
+		err := runCoveredRangeReset(t, root, local, nil)
+		qt.Assert(t, qt.IsNotNil(err))
+		qt.Assert(t, qt.StringContains(err.Error(), "0-2"))
+	})
+}
+
+func TestResetChecksAMixedRangeWhenTheMergeDoesNotOpen(t *testing.T) {
+	for _, broken := range []string{".kv", ".kvi"} {
+		withOsRoot(t, func(root *os.Root) {
+			var entries []fsEntry
+			for _, name := range completeLocalMerge {
+				entry := fsEntry{Name: slashName(name)}
+				if !strings.Contains(name, "commitment.0-4"+broken) || !strings.HasSuffix(name, broken) {
+					switch {
+					case strings.HasSuffix(name, ".kv"):
+						entry.Data = validSegment(t)
+					case strings.HasSuffix(name, ".kvi"):
+						entry.Data = validIndex(t)
+					}
+				}
+				entries = append(entries, entry)
+			}
+			err := runCoveredRangeResetEntries(t, root, entries, nil)
+			qt.Assert(t, qt.IsNotNil(err), qt.Commentf("%s", broken))
+			qt.Assert(t, qt.StringContains(err.Error(), "0-2"))
+		})
+	}
+}
+
+func TestResetHidesAMixedRangeOnlyBehindAManifestMergeWithItsAccessor(t *testing.T) {
+	manifestMerge := []string{
+		"domain/v2.1-commitment.0-4.kv",
+		"domain/v1.0-accounts.0-4.kv",
+		"domain/v1.0-storage.0-4.kv",
+	}
+	withOsRoot(t, func(root *os.Root) {
+		qt.Assert(t, qt.IsNil(runCoveredRangeReset(t, root, []string{"snapshots/domain/v2.1-commitment.0-2.kv"},
+			append(slices.Clone(manifestMerge), "domain/v2.0-commitment.0-4.kvi"))))
+	})
+	withOsRoot(t, func(root *os.Root) {
+		err := runCoveredRangeReset(t, root, []string{"snapshots/domain/v2.1-commitment.0-2.kv"}, manifestMerge)
+		qt.Assert(t, qt.IsNotNil(err))
+		qt.Assert(t, qt.StringContains(err.Error(), "0-2"))
 	})
 }
 
