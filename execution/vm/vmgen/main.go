@@ -255,9 +255,15 @@ func saveAroundCalls(body *ast.BlockStmt) {
 		}
 		var list []ast.Stmt
 		for _, s := range block.List {
-			switch s.(type) {
+			switch st := s.(type) {
 			case *ast.ExprStmt, *ast.AssignStmt:
 				if callsOutOfLine(s) {
+					list = append(list, save, s, load)
+					continue
+				}
+			case *ast.IfStmt:
+				// A call in the condition: the branches must reach the load after the if.
+				if st.Init == nil && callsOutOfLine(st.Cond) && !returns(st) {
 					list = append(list, save, s, load)
 					continue
 				}
@@ -269,7 +275,15 @@ func saveAroundCalls(body *ast.BlockStmt) {
 	})
 }
 
-func callsOutOfLine(s ast.Stmt) (found bool) {
+func returns(n ast.Node) (found bool) {
+	ast.Inspect(n, func(n ast.Node) bool {
+		_, found = n.(*ast.ReturnStmt)
+		return !found
+	})
+	return found
+}
+
+func callsOutOfLine(s ast.Node) (found bool) {
 	ast.Inspect(s, func(n ast.Node) bool {
 		if c, ok := n.(*ast.CallExpr); ok {
 			if sel, ok := c.Fun.(*ast.SelectorExpr); ok && slices.Contains(outOfLine, sel.Sel.Name) {

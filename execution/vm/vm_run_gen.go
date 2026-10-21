@@ -429,11 +429,13 @@ run:
 					if sLen >= 2 && gasLeft >= GasFastestStep {
 						gasLeft -= GasFastestStep
 						x, y := callContext.Stack.pop1Peek1()
+						callContext.gas, callContext.savedPC = gasLeft, pc
 						if x.Slt(y) {
 							y.SetOne()
 						} else {
 							y.Clear()
 						}
+						gasLeft, pc = callContext.gas, callContext.savedPC
 						pc++
 						continue run
 					}
@@ -441,11 +443,13 @@ run:
 					if sLen >= 2 && gasLeft >= GasFastestStep {
 						gasLeft -= GasFastestStep
 						x, y := callContext.Stack.pop1Peek1()
+						callContext.gas, callContext.savedPC = gasLeft, pc
 						if x.Sgt(y) {
 							y.SetOne()
 						} else {
 							y.Clear()
 						}
+						gasLeft, pc = callContext.gas, callContext.savedPC
 						pc++
 						continue run
 					}
