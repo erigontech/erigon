@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -41,6 +42,7 @@ type PBinConvertOptions struct {
 	EndTxNum          uint64
 	Hash              eip8297.HashFn
 	RangeWriterLimits *PBinRangeWriterLimits
+	WorkerViews       *atomic.Int32
 }
 
 func PBinRootFromStream(hash eip8297.HashFn, stream func(func(PBinLeaf) error) error) (common.Hash, error) {
@@ -106,6 +108,9 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 		return common.Hash{}, err
 	}
 	root, err := writer.WriteAtBlock(ctx, opts.TargetTx, domains, leaves, opts.BlockNum)
+	if opts.WorkerViews != nil {
+		opts.WorkerViews.Add(writer.workerViews.Load())
+	}
 	if err != nil {
 		return common.Hash{}, err
 	}

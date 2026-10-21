@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -375,8 +376,12 @@ func TestConvertPBTWorkersMatchSequentialFiles(t *testing.T) {
 		converted := make(map[bool]map[string][]byte, 2)
 		for _, sequential := range []bool{true, false} {
 			output := filepath.Join(t.TempDir(), "output")
-			hooks := pbtConvertHooks{rangeWriterLimits: &dbstate.PBinRangeWriterLimits{MaxOps: maxOps, MaxBytes: 1 << 30}, sequentialCommitment: sequential}
+			workerViews := new(atomic.Int32)
+			hooks := pbtConvertHooks{rangeWriterLimits: &dbstate.PBinRangeWriterLimits{MaxOps: maxOps, MaxBytes: 1 << 30}, sequentialCommitment: sequential, workerViews: workerViews}
 			require.NoError(t, convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), hooks), "maxOps=%d sequential=%v", maxOps, sequential)
+			if !sequential {
+				require.Greater(t, workerViews.Load(), int32(1), "maxOps=%d: the parallel round acquired no worker contexts", maxOps)
+			}
 			converted[sequential] = binFiles(output)
 		}
 		require.Equal(t, converted[true], converted[false], "maxOps=%d", maxOps)

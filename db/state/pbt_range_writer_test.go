@@ -822,6 +822,7 @@ func runPBinRangeWriterCorpusAt(t *testing.T, leaves []state.PBinLeaf, maxOps, w
 	require.NotNil(t, snapshot.state)
 	if workers > 0 && maxOps > 1 {
 		require.Greater(t, phaseActivity.Load(), int32(1), "maxOps=%d: the parallel round did not run", maxOps)
+		require.Greater(t, run.writer.WorkerViewsForTest(), int32(1), "maxOps=%d: the round acquired no worker contexts from the factory", maxOps)
 	}
 	return snapshot
 }

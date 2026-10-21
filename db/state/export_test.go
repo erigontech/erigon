@@ -28,3 +28,7 @@ func NewPBinRangeWriterWithLimitsForTest(aggregator *Aggregator, domain kv.Domai
 	}
 	return newPBinRangeWriter(aggregator, domain, endTxNum, PBinRangeWriterLimits{MaxOps: maxOps, MaxBytes: maxBytes})
 }
+
+func (w *PBinRangeWriter) WorkerViewsForTest() int32 {
+	return w.workerViews.Load()
+}

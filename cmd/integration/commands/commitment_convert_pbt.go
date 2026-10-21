@@ -23,6 +23,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 
 	"github.com/spf13/cobra"
 
@@ -59,6 +60,7 @@ type pbtConvertHooks struct {
 	standalone           func(datadir.Dirs) error
 	rangeWriterLimits    *dbstate.PBinRangeWriterLimits
 	sequentialCommitment bool
+	workerViews          *atomic.Int32
 }
 
 func init() {
@@ -279,6 +281,7 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		EndTxNum:          point.TxNum,
 		Hash:              eip8297.HashBytes,
 		RangeWriterLimits: hooks.rangeWriterLimits,
+		WorkerViews:       hooks.workerViews,
 	})
 	targetTx.Rollback()
 	if err != nil {

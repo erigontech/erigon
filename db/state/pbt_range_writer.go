@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -46,6 +47,7 @@ type PBinRangeWriter struct {
 	maxBytes     int
 	state        []byte
 	stateInFiles bool
+	workerViews  atomic.Int32
 }
 
 type PBinRangeWriterLimits struct {
@@ -97,6 +99,7 @@ type pbinRangeWriterOverlay struct {
 	commitment.PatriciaContext
 	writes   map[string]pbinRangeWriterWrite
 	fresh    bool
+	views    *atomic.Int32
 	release  func([]byte)
 	write    func([]byte, []byte, []byte) error
 	finished func() error
@@ -111,6 +114,7 @@ func (o *pbinRangeWriterOverlay) Absent(key []byte) bool {
 }
 
 func (o *pbinRangeWriterOverlay) DecorateWorkerContext(worker commitment.PatriciaContext) commitment.PatriciaContext {
+	o.views.Add(1)
 	return &pbinRangeWriterView{PatriciaContext: worker, overlay: o}
 }
 
@@ -360,9 +364,14 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		}
 		return overlay.FlushFinished(lookahead)
 	}
+	fresh, err := w.freshDomain(tx)
+	if err != nil {
+		return common.Hash{}, err
+	}
 	overlay = &pbinRangeWriterOverlay{
 		writes: make(map[string]pbinRangeWriterWrite),
-		fresh:  w.freshDomain(),
+		fresh:  fresh,
+		views:  &w.workerViews,
 		write:  onRow,
 		finished: func() error {
 			tracker.clearClosed()
@@ -411,10 +420,17 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 	return common.BytesToHash(root), nil
 }
 
-func (w *PBinRangeWriter) freshDomain() bool {
+func (w *PBinRangeWriter) freshDomain(tx kv.Tx) (bool, error) {
 	at := w.aggregator.BeginFilesRo()
 	defer at.Close()
-	return len(at.Files(w.domain)) == 0
+	if len(at.Files(w.domain)) > 0 {
+		return false, nil
+	}
+	firstKey, err := kv.FirstKey(tx, w.aggregator.d[w.domain].ValuesTable)
+	if err != nil {
+		return false, err
+	}
+	return len(firstKey) == 0, nil
 }
 
 func (w *PBinRangeWriter) rangeForStamp(stamp uint64) (int, error) {
