@@ -226,10 +226,8 @@ func (t *Trie) runSubtreeTask(workerCtx context.Context, workerContext commitmen
 	}
 	subtreeTrie.coreTask = &task
 	t.inheritHooks(subtreeTrie)
-	for i := range task.ops {
-		if err := t.phaseHookCall(task, &task.ops[i]); err != nil {
-			return phaseBucketResult{}, err
-		}
+	if err := t.phaseHookOps(&task); err != nil {
+		return phaseBucketResult{}, err
 	}
 	if _, err := subtreeTrie.Process(task.ops); err != nil {
 		return phaseBucketResult{}, fmt.Errorf("process subtree %x: %w", []byte(task.key), err)
@@ -467,10 +465,8 @@ func (t *Trie) runChainTask(workerCtx context.Context, workerContext commitment.
 			return phaseBucketResult{}, err
 		}
 	} else {
-		for i := range task.ops {
-			if err := t.phaseHookCall(task, &task.ops[i]); err != nil {
-				return phaseBucketResult{}, err
-			}
+		if err := t.phaseHookOps(&task); err != nil {
+			return phaseBucketResult{}, err
 		}
 		if _, err := chainTrie.Process(task.ops); err != nil {
 			return phaseBucketResult{}, err
@@ -531,6 +527,19 @@ func mergeRoundDeltas(deltas []commitment.BranchDelta) []commitment.BranchDelta 
 		result = append(result, delta)
 	}
 	return result
+}
+
+func (t *Trie) phaseHookOps(task *phaseTask) error {
+	if t.phaseHook == nil {
+		return nil
+	}
+	task.ops = slices.Clone(task.ops)
+	for i := range task.ops {
+		if err := t.phaseHook(*task, &task.ops[i]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 //nolint:gocritic
