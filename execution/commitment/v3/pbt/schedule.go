@@ -53,7 +53,6 @@ type phaseTask struct {
 	resultEnd    int
 	batch        []phaseTask
 	initial      phaseBucketResult
-	hasInitial   bool
 }
 
 type phasePlan struct {

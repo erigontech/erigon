@@ -24,6 +24,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -668,13 +669,7 @@ func pbinRandomThreeZoneLeaves(r *rand.Rand) []state.PBinLeaf {
 		}
 	}
 	sort.Slice(leaves, func(i, j int) bool { return bytes.Compare(leaves[i].Key, leaves[j].Key) < 0 })
-	unique := leaves[:0]
-	for _, leaf := range leaves {
-		if len(unique) == 0 || !bytes.Equal(unique[len(unique)-1].Key, leaf.Key) {
-			unique = append(unique, leaf)
-		}
-	}
-	return unique
+	return slices.CompactFunc(leaves, func(a, b state.PBinLeaf) bool { return bytes.Equal(a.Key, b.Key) })
 }
 
 func TestPBinRangeWriterRowStampsMatchReferenceTracker(t *testing.T) {

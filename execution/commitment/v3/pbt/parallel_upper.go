@@ -45,17 +45,11 @@ type phaseOwner struct {
 func phaseOwners(tasks []phaseTask, indexes []int) ([]phaseOwner, error) {
 	owners := make([]phaseOwner, 0, len(indexes))
 	for _, index := range indexes {
-		parts := tasks[index].batch
-		if len(parts) == 0 {
-			parts = tasks[index : index+1]
+		prefix, err := taskSubtreePrefix(tasks[index])
+		if err != nil {
+			return nil, err
 		}
-		for i := range parts {
-			prefix, err := taskSubtreePrefix(parts[i])
-			if err != nil {
-				return nil, err
-			}
-			owners = append(owners, phaseOwner{task: index, prefix: prefix})
-		}
+		owners = append(owners, phaseOwner{task: index, prefix: prefix})
 	}
 	return owners, nil
 }
@@ -185,8 +179,7 @@ func (t *Trie) runSubtreeTask(workerCtx context.Context, workerContext commitmen
 	local := t.newPhaseContext(base, nil)
 	var subtreeTrie *Trie
 	initial := task.initial
-	switch {
-	case task.kind == phaseBucketSubtask:
+	if task.kind == phaseBucketSubtask {
 		bucket, err := newBucketTrie(local, []byte(task.key))
 		if err != nil {
 			return phaseBucketResult{}, err
@@ -200,22 +193,11 @@ func (t *Trie) runSubtreeTask(workerCtx context.Context, workerContext commitmen
 		if err != nil {
 			return phaseBucketResult{}, err
 		}
-	case task.hasInitial:
-		local.prefix = &prefix
-		subtreeTrie, err = newSubtreeTrie(local, prefix, task.initial.descriptor, task.initial.present)
-		if err != nil {
-			return phaseBucketResult{}, err
-		}
-	case task.kind == phaseBucket && len(task.dependencies) == 0:
+	} else {
 		subtreeTrie, err = newBucketTrie(local, []byte(task.key))
 		if err != nil {
 			return phaseBucketResult{}, err
 		}
-	default:
-		subtreeTrie = NewTrie(local)
-		subtreeTrie.ownedPrefix = &prefix
-		subtreeTrie.suppressRoot = true
-		subtreeTrie.suppressBucketRecords = true
 	}
 	subtreeTrie.coreTask = &task
 	t.inheritHooks(subtreeTrie)
@@ -503,7 +485,6 @@ func (t *Trie) preparePhaseTasks(plan *phasePlan) error {
 			return err
 		}
 		task.initial = phaseBucketResult{prefix: task.prefix, descriptor: descriptor, present: present}
-		task.hasInitial = true
 	}
 	return nil
 }

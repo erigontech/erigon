@@ -33,7 +33,7 @@ func TestReviewGateDelayedFactory(t *testing.T) {
 	requireProcess(t, seed, sortParallelRoundOps(initial))
 	base := newParallelRoundBase(seed.records)
 	trie := base.trie()
-	holdFirstTaskForSecond(trie)
+	holdFirstTaskForSecond(t, trie)
 	hook := trie.phaseHook
 	started := make(chan struct{})
 	var calls atomic.Int32

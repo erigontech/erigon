@@ -61,7 +61,7 @@ func TestVerifyReadsChainRowsConcurrently(t *testing.T) {
 	base := newParallelRoundBase(corpus.snapshot)
 	var arrived atomic.Int32
 	met := make(chan struct{})
-	wait := parallelRoundGateWait()
+	wait := parallelRoundGateWait(t)
 	main := &verifyRendezvousContext{PatriciaContext: base.main, arrived: &arrived, met: met, wait: wait}
 	err := NewTrie(main).VerifyContext(t.Context(), 4, func(ctx context.Context) (commitment.PatriciaContext, func()) {
 		view, cleanup := base.view(ctx)

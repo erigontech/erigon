@@ -21,7 +21,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
-	"flag"
 	"fmt"
 	"maps"
 	"math/rand"
@@ -272,20 +271,15 @@ func parallelRoundConvertOps(r *rand.Rand, k int) []Op {
 
 var errParallelRoundSerial = errors.New("no second task started while the first task was in progress")
 
-var parallelRoundGateStart = time.Now()
-
-func parallelRoundGateWait() time.Duration {
-	wait := time.Minute
-	if timeout := flag.Lookup("test.timeout"); timeout != nil {
-		if limit, ok := timeout.Value.(flag.Getter).Get().(time.Duration); ok && limit > 0 {
-			wait = min(wait, (limit-time.Since(parallelRoundGateStart))/2)
-		}
+func parallelRoundGateWait(t *testing.T) time.Duration {
+	if deadline, ok := t.Deadline(); ok {
+		return min(time.Minute, time.Until(deadline)/2)
 	}
-	return wait
+	return time.Minute
 }
 
-func holdFirstTaskForSecond(trie *Trie) {
-	holdFirstTaskForSecondWithin(trie, parallelRoundGateWait())
+func holdFirstTaskForSecond(t *testing.T, trie *Trie) {
+	holdFirstTaskForSecondWithin(trie, parallelRoundGateWait(t))
 }
 
 func holdFirstTaskForSecondWithin(trie *Trie, wait time.Duration) {
@@ -408,7 +402,7 @@ func requireParallelRoundMatches(t *testing.T, snapshot map[string][]byte, ops [
 		requireParallelRoundPlanBatches(t, ops, bucketBatch, label)
 	}
 	if concurrent {
-		holdFirstTaskForSecond(trie)
+		holdFirstTaskForSecond(t, trie)
 	}
 	gotRoot, err := trie.ProcessParallelContext(t.Context(), ops, workers)
 	require.NotErrorIs(t, err, errParallelRoundSerial, label)
@@ -762,7 +756,7 @@ func TestParallelRoundWorkerReadsRunConcurrently(t *testing.T) {
 			trie := NewTrie(main)
 			var arrived atomic.Int32
 			met := make(chan struct{})
-			wait := parallelRoundGateWait()
+			wait := parallelRoundGateWait(t)
 			trie.SetTrieContextFactory(func(ctx context.Context) (commitment.PatriciaContext, func()) {
 				view, cleanup := base.view(ctx)
 				return &parallelRoundRendezvousView{parallelRoundView: view.(*parallelRoundView), arrived: &arrived, met: met, wait: wait}, cleanup

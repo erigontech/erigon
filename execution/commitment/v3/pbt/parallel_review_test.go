@@ -18,7 +18,6 @@ package pbt
 
 import (
 	"bytes"
-	"maps"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -43,15 +42,12 @@ func TestReviewCachedStorageChainCollapse(t *testing.T) {
 	}
 	seed := newTrieTestContext()
 	requireProcess(t, seed, sortParallelRoundOps(initial))
-	sequential := &trieTestContext{records: maps.Clone(seed.records)}
-	want, err := NewTrie(sequential).Process(sortParallelRoundOps(ops))
-	require.NoError(t, err)
 	base := newParallelRoundBase(seed.records)
 	trie := base.trie()
-	holdFirstTaskForSecond(trie)
+	holdFirstTaskForSecond(t, trie)
 	prefix := chainPrefix(eip8297.StorageZone, 2)
 	key := parallelRoundRowKey(t, prefix)
-	_, err = trie.loadRow(prefix)
+	_, err := trie.loadRow(prefix)
 	require.NoError(t, err)
 	var joined, cached, stale bool
 	var branchErr error
@@ -69,18 +65,10 @@ func TestReviewCachedStorageChainCollapse(t *testing.T) {
 		_, err := trie.loadRow(prefix)
 		return err
 	}
-	got, err := trie.ProcessParallelContext(t.Context(), ops, 2)
+	_, err = trie.ProcessParallelContext(t.Context(), ops, 2)
 	require.True(t, joined)
 	require.True(t, cached, "the chain row must be cached before the join")
 	require.True(t, stale, "worker must rewrite the cached chain row")
 	require.ErrorContains(t, branchErr, "is owned by task")
-	if err == nil {
-		require.Equal(t, want, got)
-		require.Equal(t, sequential.records, base.main.records)
-		require.NotContains(t, base.main.records, string(parallelRoundRowKey(t, eip8297.PathFromBits([]byte{eip8297.StorageZone}, 8))))
-		root := parallelRoundRecord(t, base.main.records, GlobalRootKey())
-		require.Equal(t, ExtRoot, root.Form)
-		require.True(t, pathHasPrefix(&root.SelfExt, &prefix))
-	}
 	require.ErrorContains(t, err, "is owned by task", "cached chain-owned row read was accepted by the join")
 }
