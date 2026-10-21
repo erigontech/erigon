@@ -147,6 +147,7 @@ type TxPool struct {
 	frontHoles int
 	// admitted, discardCounts and discardUnderBuilder are the pool conservation check: in, out, why.
 	admitted              int
+	admittedBySender      map[uint64]admitCount
 	discardCounts         map[txpoolcfg.DiscardReason]int
 	discardUnderBuilder   int
 	highestStateNonce     map[uint64]uint64
@@ -1593,6 +1594,15 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 		}
 		discardReasons[i] = txpoolcfg.NotSet // unnecessary
 		p.admitted++
+		if p.admittedBySender == nil {
+			p.admittedBySender = map[uint64]admitCount{}
+		}
+		a := p.admittedBySender[mt.TxnSlot.SenderID]
+		a.n++
+		if mt.TxnSlot.Nonce > a.maxNonce {
+			a.maxNonce = mt.TxnSlot.Nonce
+		}
+		p.admittedBySender[mt.TxnSlot.SenderID] = a
 		if txn.Traced {
 			logger.Info(fmt.Sprintf("TX TRACING: schedule sendersWithChangedState idHash=%x senderId=%d", txn.IDHash, mt.TxnSlot.SenderID))
 		}
@@ -1608,7 +1618,8 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 			left += n
 		}
 		logger.Warn("[pool-census] in, held, out", "admitted", p.admitted, "heldNow", held,
-			"leftTotal", left, "unaccounted", p.admitted-held-left, "byReason", p.discardSummary())
+			"leftTotal", left, "unaccounted", p.admitted-held-left, "byReason", p.discardSummary(),
+			"senders", len(p.admittedBySender), "topSenders", p.topSendersSummary(5))
 	}
 
 	for senderID := range sendersWithChangedState {
@@ -3154,4 +3165,48 @@ func (p *TxPool) discardSummary() string {
 		fmt.Fprintf(&b, "%s=%d", row.r.String(), row.n)
 	}
 	return b.String()
+}
+
+// topSendersSummary names the accounts putting the most work into this pool, with their addresses.
+//
+// ⚠ A MEASUREMENT IS ONLY AS CLEAN AS ITS TRAFFIC. A burst run is supposed to be the only thing
+// creating transactions; a round was measured holding 889 distinct senders, which makes every
+// aggregate over "the burst" a mixture of the burst and whatever else the node does on a timer.
+// This says who they are so the rig can be made quiet, rather than the totals being discounted.
+func (p *TxPool) topSendersSummary(n int) string {
+	if len(p.admittedBySender) == 0 {
+		return "none"
+	}
+	type sc struct {
+		id uint64
+		a  admitCount
+	}
+	rows := make([]sc, 0, len(p.admittedBySender))
+	for id, c := range p.admittedBySender {
+		rows = append(rows, sc{id, c})
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].a.n > rows[j].a.n })
+	var b strings.Builder
+	for i, row := range rows {
+		if i >= n {
+			break
+		}
+		if i > 0 {
+			b.WriteString(" ")
+		}
+		// The count says how much this sender put in; maxNonce says how far its sequence reached,
+		// which is the number that lines up against execution's and the chain's for the same account.
+		name := fmt.Sprintf("id%d", row.id)
+		if addr, ok := p.senders.senderID2Addr[row.id]; ok {
+			name = addr.String()
+		}
+		fmt.Fprintf(&b, "%s=%d,maxNonce=%d", name, row.a.n, row.a.maxNonce)
+	}
+	return b.String()
+}
+
+// admitCount is how much one sender put into the pool, and how far its sequence reached.
+type admitCount struct {
+	n        int
+	maxNonce uint64
 }

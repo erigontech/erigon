@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -670,12 +671,52 @@ func (e *ExecModule) filterStreamLocked(ctx context.Context, newTxRLPs [][]byte)
 	e.censusStale += uint64(nStale)
 	e.censusFuture += uint64(nFuture)
 	e.censusSeen += uint64(nSeen)
-	if e.censusOffered-e.censusLastLogged >= 50_000 {
+	// ⚠ OFFERINGS ARE NOT TRANSACTIONS, and only the distinct counts can be reconciled against what
+	// was submitted. 14,766,923 offerings for a 4,800 burst is ~3,000 presentations of the same work;
+	// against the cumulative total alone that is indistinguishable from 14.7M arrivals. The sets are
+	// bounded because they only ever hold transactions this node has actually seen.
+	if e.censusOfferedSet == nil {
+		e.censusOfferedSet = make(map[common.Hash]struct{})
+		e.censusKeptSet = make(map[common.Hash]struct{})
+		e.censusBySender = make(map[accounts.Address]senderCensus)
+	}
+	// ⚠ SPLIT BY SENDER, BECAUSE THE SENDERS ARE NOT DOING THE SAME THING. The burst is one sponsor's
+	// ordered run; the coin work is many one-time accounts with a nonce or two each. Added together
+	// they produce a funnel that describes neither — "4,800 submitted, 1,432 kept" cannot be checked
+	// against a total that also holds every coin transaction. Per sender, how far each one's work got
+	// is a fact; in aggregate it is an average over two unrelated populations.
+	kept := make(map[common.Hash]struct{}, len(keptHashes))
+	for _, h := range keptHashes {
+		kept[h] = struct{}{}
+		e.censusKeptSet[h] = struct{}{}
+	}
+	for _, c := range cands {
+		if _, dup := e.censusOfferedSet[c.hash]; !dup {
+			e.censusOfferedSet[c.hash] = struct{}{}
+			s := e.censusBySender[c.sender]
+			s.offered++
+			if !s.haveOffered || c.nonce > s.maxOffered {
+				s.maxOffered, s.haveOffered = c.nonce, true
+			}
+			e.censusBySender[c.sender] = s
+		}
+		if _, ok := kept[c.hash]; ok {
+			s := e.censusBySender[c.sender]
+			s.kept++
+			if !s.haveKept || c.nonce > s.maxKept {
+				s.maxKept, s.haveKept = c.nonce, true
+			}
+			e.censusBySender[c.sender] = s
+		}
+	}
+	if e.censusOffered-e.censusLastLogged >= 10_000 {
 		e.censusLastLogged = e.censusOffered
 		e.logger.Warn("[exec-census] offered in, kept out",
-			"offered", e.censusOffered, "kept", e.censusKept, "stale", e.censusStale,
-			"future", e.censusFuture, "seen", e.censusSeen,
-			"keptPerThousandOffered", e.censusKept*1000/max(e.censusOffered, 1))
+			"offerings", e.censusOffered, "distinctOffered", len(e.censusOfferedSet),
+			"kept", e.censusKept, "distinctKept", len(e.censusKeptSet),
+			"reofferFactor", e.censusOffered/uint64(max(len(e.censusOfferedSet), 1)),
+			"stale", e.censusStale, "future", e.censusFuture, "seen", e.censusSeen,
+			"senders", len(e.censusBySender), "topSenders", e.censusBySenderSummary(4))
 	}
 	return survivors, keptHashes, droppedHashes, nil
 }
@@ -863,4 +904,44 @@ func (e *ExecModule) BuilderNonces() map[common.Address]uint64 {
 		out[a.Value()] = n
 	}
 	return out
+}
+
+// senderCensus is how far one sender's work got: offered to execution, and accepted into a body.
+//
+// ⚠ THE COUNTS SAY HOW MUCH, THE NONCES SAY HOW FAR. For an ordered run from one sponsor those are
+// different questions: 1,400 of 4,800 kept is consistent both with a stream that got 1,400 deep and
+// stopped, and with one that took scattered transactions and left holes everywhere. The high-water
+// nonce at each boundary distinguishes them, and the gap between boundaries is where it stalled.
+type senderCensus struct {
+	offered, kept         int
+	maxOffered, maxKept   uint64
+	haveOffered, haveKept bool
+}
+
+// censusBySenderSummary names the busiest senders and how much of their work execution took.
+func (e *ExecModule) censusBySenderSummary(n int) string {
+	type row struct {
+		a accounts.Address
+		c senderCensus
+	}
+	rows := make([]row, 0, len(e.censusBySender))
+	for a, c := range e.censusBySender {
+		rows = append(rows, row{a, c})
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].c.offered > rows[j].c.offered })
+	var b strings.Builder
+	for i, r := range rows {
+		if i >= n {
+			break
+		}
+		if i > 0 {
+			b.WriteString(" ")
+		}
+		fmt.Fprintf(&b, "%s:kept=%d/%d,maxNonce=%d/%d", r.a.Value(),
+			r.c.kept, r.c.offered, r.c.maxKept, r.c.maxOffered)
+	}
+	if b.Len() == 0 {
+		return "none"
+	}
+	return b.String()
 }

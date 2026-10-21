@@ -194,6 +194,8 @@ type ExecModule struct {
 	// census* are the running totals behind [exec-census]: what was offered to execution and what
 	// came out into a body. See filterStreamLocked.
 	censusOffered, censusKept, censusStale, censusFuture, censusSeen, censusLastLogged uint64
+	censusOfferedSet, censusKeptSet                                                    map[common.Hash]struct{}
+	censusBySender                                                                     map[accounts.Address]senderCensus
 	// Snapshots + MDBX
 	blockReader services.FullBlockReader
 
