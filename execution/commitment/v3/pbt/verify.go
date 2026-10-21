@@ -76,6 +76,7 @@ const verifyChainBits = 12
 type verifiedChain struct {
 	row    *rowNode
 	result FoldResult
+	err    error
 }
 
 func (t *Trie) trackBucketKeys() {
@@ -97,7 +98,7 @@ func (t *Trie) verifyChains(ctx context.Context, workers int, factory commitment
 	}
 	var paths []eip8297.Bitpath
 	if err := t.collectChainPaths(root.row, &paths); err != nil {
-		return err
+		return nil
 	}
 	if len(paths) < 2 {
 		return nil
@@ -112,9 +113,19 @@ func (t *Trie) verifyChains(ctx context.Context, workers int, factory commitment
 			t.verifyProgress(key)
 		}
 	}
+	keys := make([]string, len(paths))
+	for i := range paths {
+		key, err := rowKeyForPath(&paths[i])
+		if err != nil {
+			return nil
+		}
+		keys[i] = string(key)
+	}
 	chains := make([]verifiedChain, len(paths))
 	bucketKeys := make([]map[string]struct{}, len(paths))
 	var next atomic.Int64
+	var firstFailed atomic.Int64
+	firstFailed.Store(int64(len(paths)))
 	g, gctx := errgroup.WithContext(ctx)
 	for range min(workers, len(paths)) {
 		g.Go(func() error {
@@ -133,21 +144,25 @@ func (t *Trie) verifyChains(ctx context.Context, workers int, factory commitment
 				if i >= len(paths) {
 					return nil
 				}
+				if int64(i) > firstFailed.Load() {
+					continue
+				}
 				worker := t.newVerifier()
 				worker.ctx = view
 				worker.verifyProgress = progress
 				if t.verifiedBucketKeys != nil {
 					worker.verifiedBucketKeys = make(map[string]struct{})
 				}
-				row, err := worker.loadRow(paths[i])
-				if err != nil {
-					return err
+				chain := verifiedChain{}
+				chain.row, chain.err = worker.loadRow(paths[i])
+				if chain.err == nil {
+					chain.result, chain.err = worker.verifyRow(chain.row)
 				}
-				result, err := worker.verifyRow(row)
-				if err != nil {
-					return err
+				if chain.err != nil {
+					for failed := firstFailed.Load(); int64(i) < failed && !firstFailed.CompareAndSwap(failed, int64(i)); failed = firstFailed.Load() {
+					}
 				}
-				chains[i] = verifiedChain{row: row, result: result}
+				chains[i] = chain
 				bucketKeys[i] = worker.verifiedBucketKeys
 			}
 		})
@@ -157,7 +172,10 @@ func (t *Trie) verifyChains(ctx context.Context, workers int, factory commitment
 	}
 	t.verifiedChains = make(map[string]verifiedChain, len(chains))
 	for i := range chains {
-		t.verifiedChains[chains[i].row.name] = chains[i]
+		if int64(i) > firstFailed.Load() {
+			continue
+		}
+		t.verifiedChains[keys[i]] = chains[i]
 		for key := range bucketKeys[i] {
 			t.verifiedBucketKeys[key] = struct{}{}
 		}
@@ -206,7 +224,7 @@ func (t *Trie) verifyBranchChild(row *rowNode, slot int) (*rowNode, FoldResult, 
 			if !ok {
 				return nil, FoldResult{}, fmt.Errorf("chain row %x was not verified", key)
 			}
-			return chain.row, chain.result, nil
+			return chain.row, chain.result, chain.err
 		}
 	}
 	child, err := t.loadBranchChild(row, slot)

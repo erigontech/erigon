@@ -163,3 +163,25 @@ func TestVerifyParallelMatchesSequential(t *testing.T) {
 		require.EqualError(t, parallel, sequential.Error())
 	})
 }
+
+func TestVerifyParallelMissingUpperRowKeepsTraversalOrder(t *testing.T) {
+	corpus := newParallelRoundCorpus(t, parallelRoundTestShape)
+	records := maps.Clone(corpus.snapshot)
+	var upper []string
+	for key, data := range records {
+		path, err := eip8297.DecodeBitPath([]byte(key))
+		if err == nil && path.BitLen > 0 && path.BitLen < 12 && len(data) != 0 {
+			upper = append(upper, key)
+		}
+	}
+	sort.Strings(upper)
+	require.NotEmpty(t, upper)
+	rows := verifyParallelRows(t, records)
+	delete(records, upper[len(upper)-1])
+	delete(records, rows[0])
+	sequential := NewTrie(&trieTestContext{records: maps.Clone(records)}).Verify()
+	require.ErrorContains(t, sequential, "is missing")
+	base := newParallelRoundBase(records)
+	parallel := NewTrie(base.main).VerifyContext(t.Context(), 4, base.view)
+	require.EqualError(t, parallel, sequential.Error())
+}
