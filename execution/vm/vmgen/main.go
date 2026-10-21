@@ -150,6 +150,17 @@ func coldOps() []fastOp {
 	return ops
 }
 
+func rareOps() []fastOp {
+	return []fastOp{
+		{name: "CLZ", execute: "opCLZ", gas: "GasFastStep", pop: 1, push: 1, fork: true},
+		{name: "BLOBHASH", execute: "opBlobHash", gas: "GasFastestStep", pop: 1, push: 1, fork: true},
+		{name: "SLOTNUM", execute: "opSlotNum", gas: "GasQuickStep", push: 1, fork: true},
+		{name: "DUPN", execute: "opDupN", gas: "GasFastestStep", push: 1, fork: true},
+		{name: "SWAPN", execute: "opSwapN", gas: "GasFastestStep", fork: true},
+		{name: "EXCHANGE", execute: "opExchange", gas: "GasFastestStep", fork: true},
+	}
+}
+
 const allocated32 = "callContext.Memory.allocated32(stack.peek())"
 
 const switchHere = "// execution/vm/vmgen inserts the fastOps switch here.\n"
@@ -383,7 +394,7 @@ func fastSwitch(srcs map[string][]byte, ops []fastOp) string {
 		o := &ops[i]
 		var cond []string
 		if o.fork {
-			cond = append(cond, "jt["+o.name+"].numPush != 0")
+			cond = append(cond, "jt["+o.name+"].constantGas != 0")
 		}
 		switch {
 		case o.minStack != "":
@@ -423,16 +434,16 @@ func fastSwitch(srcs map[string][]byte, ops []fastOp) string {
 	return b.String()
 }
 
-// coldSwitch is fastSwitch behind a lookup in isColdOp, so a generic op skips
+// coldSwitch is fastSwitch behind a lookup in table, so a generic op skips
 // its compare tree with one branch.
-func coldSwitch(srcs map[string][]byte, ops []fastOp) string {
-	return "if isColdOp[op] {\n" + fastSwitch(srcs, ops) + "}\n"
+func coldSwitch(srcs map[string][]byte, ops []fastOp, table string) string {
+	return "if " + table + "[op] {\n" + fastSwitch(srcs, ops) + "}\n"
 }
 
-// coldTable declares isColdOp, which is true for the ops of coldSwitch.
-func coldTable(ops []fastOp) string {
+// coldTable declares table, which is true for the ops of the coldSwitch it guards.
+func coldTable(ops []fastOp, table, which string) string {
 	var b strings.Builder
-	b.WriteString("\n// isColdOp marks the ops of run's second fast-path switch.\nvar isColdOp = [256]bool{\n")
+	fmt.Fprintf(&b, "\n// %s marks the ops of run's %s fast-path switch.\nvar %s = [256]bool{\n", table, which, table)
 	for i := range ops {
 		b.WriteString(ops[i].name + ": true,\n")
 	}
@@ -582,13 +593,13 @@ func read(name string) []byte {
 func main() {
 	check := len(os.Args) > 1 && os.Args[1] == "-check"
 	srcs := map[string][]byte{"instructions.go": read("instructions.go"), "eips.go": read("eips.go")}
-	switches := "sLen := stack.len()\n" + fastSwitch(srcs, fastOps()) + coldSwitch(srcs, coldOps())
-	ops := append(fastOps(), coldOps()...)
+	switches := "sLen := stack.len()\n" + fastSwitch(srcs, fastOps()) + coldSwitch(srcs, coldOps(), "isColdOp") + coldSwitch(srcs, rareOps(), "isRareOp")
+	ops := slices.Concat(fastOps(), coldOps(), rareOps())
 	files := []struct {
 		name string
 		data []byte
 	}{
-		{"vm_run_gen.go", untraced(read("interpreter.go"), switches, coldTable(coldOps()))},
+		{"vm_run_gen.go", untraced(read("interpreter.go"), switches, coldTable(coldOps(), "isColdOp", "second")+coldTable(rareOps(), "isRareOp", "third"))},
 		{"fast_path_gen_test.go", testTable(ops)},
 	}
 	var stale []string

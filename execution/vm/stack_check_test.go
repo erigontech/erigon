@@ -208,26 +208,29 @@ func TestRunHasNoJumpTable(t *testing.T) {
 func TestRunLoopHeadStoresNothing(t *testing.T) {
 	src, err := os.ReadFile("vm_run_gen.go")
 	require.NoError(t, err)
-	head := slices.IndexFunc(strings.Split(string(src), "\n"), func(l string) bool {
+	srcLines := strings.Split(string(src), "\n")
+	head := slices.IndexFunc(srcLines, func(l string) bool {
 		return strings.Contains(l, "pc >= uint64(len(contract.Code))")
 	}) + 1
 	require.Positive(t, head)
+	dispatch := slices.IndexFunc(srcLines[head:], func(l string) bool { return strings.Contains(l, "switch op {") })
+	require.GreaterOrEqual(t, dispatch, 0)
 	pkg := filepath.Join(t.TempDir(), "vm.a")
 	out, err := exec.CommandContext(t.Context(), "go", "build", "-o", pkg, ".").CombinedOutput()
 	require.NoError(t, err, string(out))
 	out, err = exec.CommandContext(t.Context(), "go", "tool", "objdump", "-s", `vm\.\(\*EVM\)\.run$`, pkg).Output()
 	require.NoError(t, err)
-	// The loop head is the first run of instructions from its line; the out-of-line
-	// stop path comes from the same line further down.
+	// The loop head runs from the first instruction of its line to the first compare
+	// of the opcode switch; the out-of-line stop path comes from the same line further down.
 	at := fmt.Sprintf("vm_run_gen.go:%d\t", head)
+	switchAt := fmt.Sprintf("vm_run_gen.go:%d\t", head+dispatch+1)
 	lines := strings.Split(string(out), "\n")
 	first := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, at) })
 	require.Positive(t, first)
 	spill := regexp.MustCompile(`\tMOV\w*\s+[^,\s]+, -?\w*\(R?SP\)`)
-	for _, l := range lines[first:] {
-		if !strings.Contains(l, at) {
-			break
-		}
+	last := slices.IndexFunc(lines[first:], func(l string) bool { return strings.Contains(l, switchAt) })
+	require.Positive(t, last)
+	for _, l := range lines[first : first+last] {
 		require.False(t, spill.MatchString(l), "run spills at the top of its loop: %s", l)
 	}
 }
@@ -262,7 +265,9 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		block.Coinbase = accounts.InternAddress(common.HexToAddress("0x0b"))
 		block.GasLimit, block.BlockNumber, block.Time = 21, 22, 23
 		block.Difficulty, block.BaseFee, block.BlobBaseFee = *uint256.NewInt(24), *uint256.NewInt(25), *uint256.NewInt(26)
+		block.SlotNumber = 28
 		txCtx := evmtypes.TxContext{Origin: accounts.InternAddress(common.HexToAddress("0x0a")), GasPrice: *uint256.NewInt(27)}
+		txCtx.BlobHashes = []common.Hash{common.HexToHash("0x5a5a01"), common.HexToHash("0xa5a502")}
 		evm := NewEVM(block, txCtx, ibs, chain.AllProtocolChanges, Config{})
 		c := NewContract(accounts.InternAddress(common.HexToAddress("0x0c")), accounts.InternAddress(common.HexToAddress("0x0d")), accounts.InternAddress(common.HexToAddress("0x0e")), *uint256.NewInt(7))
 		c.Code = code
@@ -289,6 +294,13 @@ func TestRunMatchesRunTraced(t *testing.T) {
 			byte(PUSH1), 96, byte(MSTORE), byte(PUSH1), 128, byte(PUSH1), 0, byte(RETURN))
 	}
 	pushes := func(n int) []byte { return bytes.Repeat([]byte{byte(PUSH1), 1}, n) }
+	dirty := func(n int) []byte {
+		var b []byte
+		for i := range n {
+			b = append(append(b, byte(PUSH32)), bytes.Repeat([]byte{0x5a ^ byte(i)}, 32)...)
+		}
+		return b
+	}
 	programs := map[string][]byte{
 		"arith":    prog(PUSH1, 7, PUSH1, 3, SUB, PUSH1, 5, MUL, PUSH1, 2, DIV, PUSH1, 9, LT, PUSH1, 1, GT, PUSH1, 0, EQ, ISZERO, PUSH2, 0xff, 0x0f, AND, PUSH1, 4, ADD, PUSH1, 0, ISZERO, PUSH1, 6, PUSH1, 6, EQ),
 		"loop":     prog(PUSH1, 5, JUMPDEST, PUSH1, 1, SWAP1, SUB, DUP1, PUSH1, 2, JUMPI, PUSH1, 17, JUMP, INVALID, INVALID, INVALID, JUMPDEST, pushes(3)),
@@ -306,6 +318,15 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		// A failed frame returns no data, whatever the last CALL returned.
 		"callthenbadjump": {byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 4, byte(GAS), byte(CALL), byte(PUSH1), 0, byte(JUMP)},
 		"callthenend":     {byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 4, byte(GAS), byte(CALL)},
+		"blobhash":        prog(dirty(2), PUSH1, 2, BLOBHASH, PUSH1, 1, BLOBHASH, PUSH1, 0, BLOBHASH, SLOTNUM),
+		"clz":             prog(dirty(3), CLZ, PUSH1, 0, CLZ),
+		"dupn":            prog(dirty(20), DUPN, 128, DUPN, 130),
+		"dupnbad":         prog(dirty(20), DUPN, 91),
+		"dupnend":         append(dirty(20), byte(DUPN)),
+		"swapn":           prog(dirty(20), SWAPN, 128, SWAPN, 129),
+		"swapnbad":        prog(dirty(20), SWAPN, 127),
+		"exchange":        prog(dirty(20), EXCHANGE, 142, EXCHANGE, 128),
+		"exchangebad":     prog(dirty(20), EXCHANGE, 82),
 	}
 	for op, w := range fastPathOps {
 		if w.numPop > 0 {

@@ -1473,6 +1473,11 @@ func decodePair(x byte) (int, int) {
 	return r + 1, 29 - q
 }
 
+//go:noinline
+func stackUnderflow(stackLen, required int) error {
+	return &ErrStackUnderflow{stackLen: stackLen, required: required}
+}
+
 func opDupN(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	code := scope.Contract.Code
 	pc++
@@ -1490,7 +1495,7 @@ func opDupN(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 
 	// DUPN duplicates the n'th stack item, so the stack must contain at least n elements.
 	if scope.Stack.len() < n {
-		return pc, nil, &ErrStackUnderflow{stackLen: scope.Stack.len(), required: n}
+		return pc, nil, stackUnderflow(scope.Stack.len(), n)
 	}
 
 	scope.Stack.dup(n - 1)
@@ -1514,7 +1519,7 @@ func opSwapN(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 
 	// SWAPN operates on the top and n+1 stack items, so the stack must contain at least n+1 elements.
 	if scope.Stack.len() < n+1 {
-		return pc, nil, &ErrStackUnderflow{stackLen: scope.Stack.len(), required: n + 1}
+		return pc, nil, stackUnderflow(scope.Stack.len(), n+1)
 	}
 
 	// The (n+1)‘th stack item is swapped with the top of the stack.
@@ -1542,7 +1547,7 @@ func opExchange(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	// EXCHANGE operates on the (n+1)'th and (m+1)'th stack items,
 	// so the stack must contain at least max(n, m)+1 elements.
 	if scope.Stack.len() < need {
-		return pc, nil, &ErrStackUnderflow{stackLen: scope.Stack.len(), required: need}
+		return pc, nil, stackUnderflow(scope.Stack.len(), need)
 	}
 
 	scope.Stack.exchange(n, m)

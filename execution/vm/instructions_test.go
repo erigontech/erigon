@@ -1091,8 +1091,12 @@ func TestEIP8024_Execution(t *testing.T) {
 						}
 					}
 				case errors.As(tc.wantErr, &stackUnderflow):
-					if _, ok := errors.AsType[*ErrStackUnderflow](err); !ok {
+					got, ok := errors.AsType[*ErrStackUnderflow](err)
+					if !ok {
 						t.Fatalf("expected ErrStackUnderflow, got %v", err)
+					}
+					if got.stackLen != callContext.Stack.len() || got.required <= got.stackLen {
+						t.Fatalf("ErrStackUnderflow=%+v with %d stack items", *got, callContext.Stack.len())
 					}
 				default:
 					t.Fatalf("unsupported wantErr type %T", tc.wantErr)
