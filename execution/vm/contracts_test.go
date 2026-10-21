@@ -565,7 +565,7 @@ func TestCachedPrecompileDomainAndErrors(t *testing.T) {
 	}
 	p = &countingPrecompile{output: []byte{7}}
 	c = &cachedPrecompile{PrecompiledContract: p, domain: [21]byte{207}}
-	precompileResults.Add(maphash.Bytes(precompileSeed, input)^c.domainHash, precompileResult{domain: c.domain, input: []byte("other"), output: []byte{9}})
+	precompileResults.Add(maphash.Bytes(precompileSeed, input)^c.domainHash, precompileResult{domain: c.domain, check: maphash.Bytes(precompileCheckSeed, []byte("other")), output: []byte{9}})
 	if out, err := c.Run(input); err != nil || !bytes.Equal(out, []byte{7}) || p.calls != 1 {
 		t.Fatalf("hash collision returned another input's result: %x", out)
 	}
