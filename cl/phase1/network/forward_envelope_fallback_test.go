@@ -44,6 +44,10 @@ type invalidEnvelopeSentinel struct {
 	calls    atomic.Int32
 }
 
+type blockingEnvelopeSentinel struct {
+	sentinelproto.SentinelClient
+}
+
 func (s *invalidEnvelopeSentinel) SendRequest(context.Context, *sentinelproto.RequestData, ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
 	s.calls.Add(1)
 	return &sentinelproto.ResponseData{Data: s.response, Peer: &sentinelproto.Peer{Pid: "envelope-peer"}}, nil
@@ -51,6 +55,300 @@ func (s *invalidEnvelopeSentinel) SendRequest(context.Context, *sentinelproto.Re
 
 func (s *invalidEnvelopeSentinel) PeersInfo(context.Context, *sentinelproto.PeersInfoRequest, ...grpc.CallOption) (*sentinelproto.PeersInfoResponse, error) {
 	return &sentinelproto.PeersInfoResponse{}, nil
+}
+
+func (s *blockingEnvelopeSentinel) SendRequest(ctx context.Context, _ *sentinelproto.RequestData, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (s *blockingEnvelopeSentinel) PeersInfo(context.Context, *sentinelproto.PeersInfoRequest, ...grpc.CallOption) (*sentinelproto.PeersInfoResponse, error) {
+	return &sentinelproto.PeersInfoResponse{}, nil
+}
+
+func makeFullGloasBlockAndEnvelope(t *testing.T, cfg *clparams.BeaconChainConfig, slot uint64) (*cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope, common.Hash) {
+	t.Helper()
+	block := makeGloasBlock(slot, common.Hash{}, common.Hash{})
+	bid := block.Block.Body.SignedExecutionPayloadBid.Message
+	bid.Slot = slot
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
+	envelope.Message.Payload.SlotNumber = slot
+	_, err := envelope.Message.Payload.EncodeSSZ(nil)
+	require.NoError(t, err)
+	bid.ExecutionRequestsRoot, err = envelope.Message.ExecutionRequests.HashSSZ()
+	require.NoError(t, err)
+	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(cfg, envelope.Message.ExecutionRequests))
+	envelope.Message.Payload.BlockHash = common.HexToHash("0xefd641f283ac9ad546ad48be6207db401e3f70fe94adc9a10d6c858d845b67e3")
+	header, err := envelope.Message.Payload.RlpHeader(&envelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
+	require.NoError(t, err)
+	envelope.Message.Payload.BlockHash = header.Hash()
+	bid.BlockHash = header.Hash()
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	envelope.Message.BeaconBlockRoot = root
+	require.NoError(t, ValidateDownloadedGloasEnvelope(cfg, block, envelope))
+	return block, envelope, root
+}
+
+func TestForwardBeaconDownloaderProcessesTipEnvelopeAfterEmptyRange(t *testing.T) {
+	for _, currentSlot := range []uint64{11, 12} {
+		t.Run(fmt.Sprint(currentSlot), func(t *testing.T) {
+			cfg := gloasFromGenesisConfig()
+			cfg.InitializeForkSchedule()
+			clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
+			digest, err := clock.ComputeForkDigest(0)
+			require.NoError(t, err)
+			tip, envelope, root := makeFullGloasBlockAndEnvelope(t, cfg, 10)
+			envelopeBytes, err := envelope.EncodeSSZ(nil)
+			require.NoError(t, err)
+			var wire bytes.Buffer
+			require.NoError(t, ssz_snappy.EncodeAndWrite(&wire, envelope, digest[:]...))
+			sentinel := &invalidEnvelopeSentinel{response: wire.Bytes()}
+			client := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock, nil)
+			downloader := NewForwardBeaconDownloader(t.Context(), client, cfg)
+			downloader.SetHighestProcessedSlot(9)
+			downloader.gloasLookahead = tip
+			downloader.gloasLookaheadPeer = "tip-peer"
+			downloader.gloasNextUnscanned = 11
+			downloader.SetCurrentSlotSampler(func() uint64 { return currentSlot })
+			downloader.requestBlocksByRange = func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+				return []*cltypes.SignedBeaconBlock{}, "range-peer", nil
+			}
+			type processResult struct {
+				blocks    []*cltypes.SignedBeaconBlock
+				envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+			}
+			processed := make(chan processResult, 1)
+			downloader.SetProcessFunction(func(_ uint64, blocks []*cltypes.SignedBeaconBlock, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+				processed <- processResult{blocks: blocks, envelopes: envelopes}
+				return tip.Block.Slot, nil
+			})
+
+			ctx, cancel := context.WithCancel(t.Context())
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				downloader.RequestMore(ctx)
+			}()
+			select {
+			case result := <-processed:
+				cancel()
+				<-done
+				require.Equal(t, []*cltypes.SignedBeaconBlock{tip}, result.blocks)
+				require.Equal(t, envelopeBytes, mustEncodeEnvelope(t, result.envelopes[root]))
+				require.Equal(t, uint64(10), downloader.GetHighestProcessedSlot())
+				require.True(t, downloader.CaughtUpTo(currentSlot))
+			case <-time.After(time.Second):
+				cancel()
+				<-done
+				t.Fatalf("tip was not processed; highest=%d caught_up=%t", downloader.GetHighestProcessedSlot(), downloader.CaughtUpTo(currentSlot))
+			}
+		})
+	}
+}
+
+func TestForwardBeaconDownloaderProcessesTipWithoutAvailableEnvelope(t *testing.T) {
+	previousTimeout := forwardTipEnvelopeTimeout
+	forwardTipEnvelopeTimeout = 25 * time.Millisecond
+	t.Cleanup(func() { forwardTipEnvelopeTimeout = previousTimeout })
+
+	cfg := gloasFromGenesisConfig()
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
+	tip, _, _ := makeFullGloasBlockAndEnvelope(t, cfg, 10)
+	client := rpc.NewBeaconRpcP2P(t.Context(), &invalidEnvelopeSentinel{}, cfg, clock, nil)
+	downloader := NewForwardBeaconDownloader(t.Context(), client, cfg)
+	downloader.SetHighestProcessedSlot(9)
+	downloader.gloasLookahead = tip
+	downloader.gloasLookaheadPeer = "tip-peer"
+	downloader.gloasNextUnscanned = 11
+	downloader.SetCurrentSlotSampler(func() uint64 { return 11 })
+	downloader.requestBlocksByRange = func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+		return []*cltypes.SignedBeaconBlock{}, "range-peer", nil
+	}
+	processed := make(chan map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, 1)
+	downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		if len(blocks) == 0 {
+			return highest, nil
+		}
+		processed <- envelopes
+		return blocks[len(blocks)-1].Block.Slot, nil
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		downloader.RequestMore(ctx)
+	}()
+	select {
+	case envelopes := <-processed:
+		cancel()
+		<-done
+		require.Empty(t, envelopes)
+		require.Equal(t, uint64(10), downloader.GetHighestProcessedSlot())
+		require.True(t, downloader.CaughtUpTo(11))
+	case <-time.After(500 * time.Millisecond):
+		cancel()
+		<-done
+		t.Fatalf("tip was not processed before its envelope budget; highest=%d", downloader.GetHighestProcessedSlot())
+	}
+}
+
+func TestForwardBeaconDownloaderUsesHTTPForTipAfterP2PEnvelopeTimeout(t *testing.T) {
+	previousTimeout := forwardTipEnvelopeTimeout
+	forwardTipEnvelopeTimeout = time.Second
+	t.Cleanup(func() { forwardTipEnvelopeTimeout = previousTimeout })
+
+	cfg := gloasFromGenesisConfig()
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
+	tip, envelope, root := makeFullGloasBlockAndEnvelope(t, cfg, 10)
+	envelopeBytes, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	sentinel := &blockingEnvelopeSentinel{}
+	client := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock, nil)
+	var httpCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		httpCalls.Add(1)
+		w.Header().Set("Eth-Consensus-Version", "gloas")
+		_, _ = w.Write(envelopeBytes)
+	}))
+	t.Cleanup(server.Close)
+
+	downloader := NewForwardBeaconDownloader(t.Context(), client, cfg)
+	downloader.SetHighestProcessedSlot(9)
+	downloader.gloasLookahead = tip
+	downloader.gloasLookaheadPeer = "tip-peer"
+	downloader.gloasNextUnscanned = 11
+	downloader.SetCurrentSlotSampler(func() uint64 { return 11 })
+	downloader.SetHTTPFallbackURL(server.URL)
+	downloader.requestBlocksByRange = func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+		return []*cltypes.SignedBeaconBlock{}, "range-peer", nil
+	}
+	downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		if envelopes[root] == nil {
+			return highest, nil
+		}
+		return blocks[len(blocks)-1].Block.Slot, nil
+	})
+
+	downloader.RequestMore(t.Context())
+	require.Equal(t, int32(1), httpCalls.Load())
+	require.Equal(t, uint64(10), downloader.GetHighestProcessedSlot())
+	require.True(t, downloader.CaughtUpTo(11))
+}
+
+func TestForwardBeaconDownloaderHTTPPreferredProcessesTipAfterEmptyRange(t *testing.T) {
+	cfg := gloasFromGenesisConfig()
+	tip, _, _ := makeFullGloasBlockAndEnvelope(t, cfg, 10)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+	downloader := NewForwardBeaconDownloader(t.Context(), nil, cfg)
+	downloader.SetHighestProcessedSlot(9)
+	downloader.gloasLookahead = tip
+	downloader.gloasLookaheadPeer = "http-fallback"
+	downloader.gloasNextUnscanned = 11
+	downloader.SetCurrentSlotSampler(func() uint64 { return 11 })
+	downloader.SetHTTPFallbackURL(server.URL)
+	downloader.httpPreferred.Store(true)
+	processed := make(chan []*cltypes.SignedBeaconBlock, 1)
+	downloader.SetProcessFunction(func(_ uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		processed <- blocks
+		return blocks[len(blocks)-1].Block.Slot, nil
+	})
+
+	downloader.RequestMore(t.Context())
+	select {
+	case blocks := <-processed:
+		require.Equal(t, []*cltypes.SignedBeaconBlock{tip}, blocks)
+		require.Equal(t, uint64(10), downloader.GetHighestProcessedSlot())
+		require.True(t, downloader.CaughtUpTo(11))
+	default:
+		t.Fatalf("tip was not processed; highest=%d", downloader.GetHighestProcessedSlot())
+	}
+}
+
+func TestForwardBeaconDownloaderHTTPFallbackProcessesTipAfterEmptyRange(t *testing.T) {
+	previousFallbackDelay := forwardBeaconFallbackDelay
+	forwardBeaconFallbackDelay = time.Millisecond
+	t.Cleanup(func() { forwardBeaconFallbackDelay = previousFallbackDelay })
+
+	cfg := gloasFromGenesisConfig()
+	tip, _, _ := makeFullGloasBlockAndEnvelope(t, cfg, 10)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+	downloader := NewForwardBeaconDownloader(t.Context(), nil, cfg)
+	downloader.SetHighestProcessedSlot(9)
+	downloader.gloasLookahead = tip
+	downloader.gloasLookaheadPeer = "http-fallback"
+	downloader.gloasNextUnscanned = 11
+	downloader.SetCurrentSlotSampler(func() uint64 { return 11 })
+	downloader.SetHTTPFallbackURL(server.URL)
+	downloader.requestBlocksByRange = func(ctx context.Context, _, _ uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+		<-ctx.Done()
+		return nil, "", ctx.Err()
+	}
+	processed := make(chan []*cltypes.SignedBeaconBlock, 1)
+	downloader.SetProcessFunction(func(_ uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		processed <- blocks
+		return blocks[len(blocks)-1].Block.Slot, nil
+	})
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	downloader.RequestMore(ctx)
+	select {
+	case blocks := <-processed:
+		require.Equal(t, []*cltypes.SignedBeaconBlock{tip}, blocks)
+		require.Equal(t, uint64(10), downloader.GetHighestProcessedSlot())
+		require.True(t, downloader.CaughtUpTo(11))
+	default:
+		t.Fatalf("tip was not processed; highest=%d", downloader.GetHighestProcessedSlot())
+	}
+}
+
+func TestForwardBeaconDownloaderRetainsTipWhenProcessingDoesNotAdvance(t *testing.T) {
+	cfg := gloasFromGenesisConfig()
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
+	digest, err := clock.ComputeForkDigest(0)
+	require.NoError(t, err)
+	tip, envelope, _ := makeFullGloasBlockAndEnvelope(t, cfg, 10)
+	var wire bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&wire, envelope, digest[:]...))
+	client := rpc.NewBeaconRpcP2P(t.Context(), &invalidEnvelopeSentinel{response: wire.Bytes()}, cfg, clock, nil)
+	downloader := NewForwardBeaconDownloader(t.Context(), client, cfg)
+	downloader.SetHighestProcessedSlot(9)
+	downloader.gloasLookahead = tip
+	downloader.gloasLookaheadPeer = "tip-peer"
+	downloader.gloasNextUnscanned = 11
+	downloader.SetCurrentSlotSampler(func() uint64 { return 11 })
+	downloader.requestBlocksByRange = func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+		return []*cltypes.SignedBeaconBlock{}, "range-peer", nil
+	}
+	downloader.SetProcessFunction(func(highest uint64, _ []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		return highest, nil
+	})
+
+	downloader.RequestMore(t.Context())
+	start, pending := downloader.nextRequestStart(false)
+	require.True(t, pending)
+	require.Equal(t, uint64(11), start)
+	require.Equal(t, uint64(9), downloader.GetHighestProcessedSlot())
+	require.False(t, downloader.CaughtUpTo(11))
+}
+
+func mustEncodeEnvelope(t *testing.T, envelope *cltypes.SignedExecutionPayloadEnvelope) []byte {
+	t.Helper()
+	require.NotNil(t, envelope)
+	encoded, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	return encoded
 }
 
 func TestForwardInvalidEnvelopeUsesAvailableFallback(t *testing.T) {
