@@ -156,16 +156,16 @@ func opExp(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		}
 		exponent.SetUint64(result)
 	case base[0]&1 != 0 && !exponent.IsUint64():
-		*exponent = expOdd(base, exponent)
+		expOdd(exponent, base, exponent)
 	default:
 		exponent.Exp(base, exponent)
 	}
 	return pc, nil, nil
 }
 
-// expOdd returns b**e mod 2**256 for odd b. Then p = b**(2**62) = 1 + u with u = 0 mod 2**64,
+// expOdd sets z = b**e mod 2**256 for odd b. Then p = b**(2**62) = 1 + u with u = 0 mod 2**64,
 // so p**h = 1 + h*u + C(h,2)*u**2 + C(h,3)*u**3 replaces the remaining squarings.
-func expOdd(b, e *uint256.Int) uint256.Int {
+func expOdd(z, b, e *uint256.Int) {
 	res, p := uint256.Int{1}, *b
 	for i := range 62 {
 		if e[0]>>i&1 != 0 {
@@ -186,7 +186,7 @@ func expOdd(b, e *uint256.Int) uint256.Int {
 	poly.Mul(&poly, &u).Add(&poly, &c2)
 	poly.Mul(&poly, &u).Add(&poly, &h)
 	poly.Mul(&poly, &u).AddUint64(&poly, 1)
-	return *res.Mul(&res, &poly)
+	z.Mul(&res, &poly)
 }
 
 func opSignExtend(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
