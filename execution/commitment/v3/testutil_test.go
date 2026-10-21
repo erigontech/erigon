@@ -230,7 +230,7 @@ func AccountNodeKey(path []byte, dst []byte) []byte {
 	return nodeKey(tagAccountNode, nil, path, dst)
 }
 
-func testUpdates(t *testing.T, mode commitment.Mode, ops []commitmenttest.Op) *commitment.Updates {
+func testUpdates(t testing.TB, mode commitment.Mode, ops []commitmenttest.Op) *commitment.Updates {
 	t.Helper()
 	updates := commitment.NewUpdates(mode, t.TempDir(), commitment.KeyToHexNibbleHash)
 	t.Cleanup(updates.Close)

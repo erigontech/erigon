@@ -76,22 +76,14 @@ func newWitnessBed(t testing.TB, ops []commitmenttest.Op) *witnessBed {
 
 	reader, _ := b.hphMem.Open(ctx)
 	hph := commitment.NewHexPatriciaHashed(length.Addr, reader, commitment.DefaultTrieConfig())
-	hu := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash)
-	defer hu.Close()
-	for _, op := range ops {
-		hu.TouchPlainKeyDirect(string(op.Key), runner.Update(op))
-	}
+	hu := testUpdates(t, commitment.ModeUpdate, ops)
 	hphRoot, err := hph.Process(ctx, hu, "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
 	b.hphState, err = hph.EncodeCurrentState(nil)
 	require.NoError(t, err)
 
 	tr := b.openV3(ctx)
-	vu := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
-	defer vu.Close()
-	for _, op := range ops {
-		vu.TouchPlainKeyDirect(string(op.Key), runner.Update(op))
-	}
+	vu := testUpdates(t, commitment.ModeCollect, ops)
 	v3Root, err := tr.Process(ctx, vu, "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
 	require.Equal(t, hphRoot, v3Root)
