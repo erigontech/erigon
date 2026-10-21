@@ -20,8 +20,8 @@
   - put convert on the same round;
   - add v3's optional deferred branch updates for the bin trie;
   - split verify by partition.
-- Evidence: `~/org/mode/e/research/pbt-parallel-convert.org`, facts F13–F18 and ideas I4/I5. The scratch benchmark and
-  instrumentation patch sit beside it.
+- Evidence: the owner's parallel-convert research notes, facts F13–F18 and ideas I4/I5, with the scratch benchmark and
+  an instrumentation patch.
 
 ## Context (from discovery)
 - Round: `processParallelPhaseA`, `runSubtreeTask`, `runBucketJoin`, `runChainTask`, `preparePhaseTasks`,
@@ -275,7 +275,7 @@ flowchart LR
 
 - [x] add a test base whose factory gives each worker a read-only, lock-free view of a frozen record snapshot. Writes
       go only to the main context
-- [x] port the scratch grid (`~/org/mode/e/research/pbt-parallel-convert/par-bench_test.go.txt`) onto that base as
+- [x] port the scratch grid benchmark from the research notes onto that base as
       `BenchmarkParallelRound{Tip,Reexec,Convert}`, with sub-benchmarks per workers 1/2/4/8/16 and the same corpus
       shape:
       - 400k account, 100k code, 500k storage leaves;
@@ -451,7 +451,7 @@ flowchart LR
 - Modify: `db/state/pbt_range_writer_test.go`
 - Modify: `db/state/squeeze_pbin_rebuild_test.go`
 
-- [x] red test first: apply `~/org/mode/e/research/pbt-stream-row-builder/t03-red-test.patch` onto the Task 2 tests.
+- [x] red test first: apply the stream-row-builder red-test patch from the research notes onto the Task 2 tests.
       It runs the factory-wired variant (4 workers, `WithParaTrieDB`) at `MaxOps` 100k/1k/7/1, and is red today with
       `row 001004 is missing` at batch 2 of `MaxOps=7`
 - [x] leaf stamps travel with each op through the sort, replacing the side file; `visit` no longer reads stamps by
@@ -563,8 +563,10 @@ per 4-bit prefix of every leaf path and encodes and stores each on close, but on
 - [x] full gates and `make lint` clean
 
 ### Task 15: [Final] Update documentation
-- [ ] update the PBT notes in `CLAUDE.md` where they name the old behaviour (round ownership, deferral for bin)
-- [ ] remove local `~/org` paths from this plan, then move it to `docs/plans/completed/`
+- [x] update the PBT notes in `CLAUDE.md` where they name the old behaviour (round ownership, deferral for bin). The
+      notes named none of it, so one paragraph now states the round's ownership rule, bin deferral, and convert and
+      verify on workers
+- [x] remove local paths from this plan, then move it to `docs/plans/completed/`
 
 ## Post-Completion
 *Run by the owner or the supervisor on remote hosts; no checkboxes.*
