@@ -277,7 +277,9 @@ func saveAroundCalls(body *ast.BlockStmt) {
 
 func returns(n ast.Node) (found bool) {
 	ast.Inspect(n, func(n ast.Node) bool {
-		_, found = n.(*ast.ReturnStmt)
+		if _, ok := n.(*ast.ReturnStmt); ok {
+			found = true
+		}
 		return !found
 	})
 	return found
