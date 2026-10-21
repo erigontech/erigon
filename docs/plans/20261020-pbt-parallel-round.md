@@ -359,14 +359,14 @@ flowchart LR
 - Modify: `execution/commitment/v3/pbt/parallel_upper.go`
 - Modify: `execution/commitment/v3/pbt/parallel_round_test.go`
 
-- [ ] write tests first:
+- [x] write tests first:
       - on a base that declares itself empty, a convert-like round makes 0 base reads from `phaseContext.PutBranch`
         (a counting base);
       - on an ordinary base, a new row written over a stored record still fails with `previous record mismatch`
-- [ ] add the empty-base declaration as an optional interface on the base; `phaseContext.PutBranch` skips the read
+- [x] add the empty-base declaration as an optional interface on the base; `phaseContext.PutBranch` skips the read
       only when the base declares it
 - [ ] benchmark the convert-like cell before/after through `ab-verdict`
-- [ ] run gates — must pass before Task 9
+- [x] run gates — must pass before Task 9
 
 ### Task 9: Multi-result tasks for batched buckets
 

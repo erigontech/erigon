@@ -25,7 +25,9 @@ import (
 	"fmt"
 	"maps"
 	"math/rand"
+	"runtime"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -41,7 +43,10 @@ import (
 type parallelRoundView struct {
 	records map[string][]byte
 	reads   int
+	empty   bool
 }
+
+func (v *parallelRoundView) EmptyBase() bool { return v.empty }
 
 func (v *parallelRoundView) Branch(key []byte) ([]byte, kv.Step, error) {
 	v.reads++
@@ -63,8 +68,14 @@ func (v *parallelRoundView) Storage([]byte) (*commitment.Update, error) {
 type parallelRoundBase struct {
 	snapshot map[string][]byte
 	main     *trieTestContext
+	empty    bool
 	mu       sync.Mutex
 	views    []*parallelRoundView
+}
+
+func (b *parallelRoundBase) declareEmpty() {
+	b.empty = true
+	b.main.empty = true
 }
 
 func newParallelRoundBase(snapshot map[string][]byte) *parallelRoundBase {
@@ -78,7 +89,7 @@ func (b *parallelRoundBase) trie() *Trie {
 }
 
 func (b *parallelRoundBase) view(context.Context) (commitment.PatriciaContext, func()) {
-	view := &parallelRoundView{records: b.snapshot}
+	view := &parallelRoundView{records: b.snapshot, empty: b.empty}
 	b.mu.Lock()
 	b.views = append(b.views, view)
 	b.mu.Unlock()
@@ -737,4 +748,82 @@ func TestParallelRoundRejectsNilFactoryContext(t *testing.T) {
 	_, err := trie.ProcessParallelContext(t.Context(), corpus.updates(rand.New(rand.NewSource(8)), 200, 20), 2)
 	require.ErrorContains(t, err, "trie context factory returned a nil context")
 	require.Positive(t, cleaned.Load())
+}
+
+type parallelRoundPutReadCounter struct {
+	commitment.PatriciaContext
+	putReads *atomic.Int32
+}
+
+func (c *parallelRoundPutReadCounter) Branch(key []byte) ([]byte, kv.Step, error) {
+	if pc, _, _, ok := runtime.Caller(1); ok && strings.HasSuffix(runtime.FuncForPC(pc).Name(), ".(*phaseContext).PutBranch") {
+		c.putReads.Add(1)
+	}
+	return c.PatriciaContext.Branch(key)
+}
+
+func (c *parallelRoundPutReadCounter) EmptyBase() bool {
+	empty, ok := c.PatriciaContext.(interface{ EmptyBase() bool })
+	return ok && empty.EmptyBase()
+}
+
+func TestParallelRoundEmptyBaseSkipsPrevReads(t *testing.T) {
+	for _, declared := range []bool{true, false} {
+		t.Run(fmt.Sprintf("declared=%v", declared), func(t *testing.T) {
+			ops := parallelRoundConvertOps(rand.New(rand.NewSource(9)), 300)
+			sequential := newTrieTestContext()
+			wantRoot, err := NewTrie(sequential).Process(ops)
+			require.NoError(t, err)
+			base := newParallelRoundBase(map[string][]byte{})
+			if declared {
+				base.declareEmpty()
+			}
+			var putReads atomic.Int32
+			trie := NewTrie(&parallelRoundPutReadCounter{PatriciaContext: base.main, putReads: &putReads})
+			trie.SetTrieContextFactory(func(ctx context.Context) (commitment.PatriciaContext, func()) {
+				view, cleanup := base.view(ctx)
+				return &parallelRoundPutReadCounter{PatriciaContext: view, putReads: &putReads}, cleanup
+			})
+			gotRoot, err := trie.ProcessParallelContext(t.Context(), ops, 4)
+			require.NoError(t, err)
+			require.Equal(t, wantRoot, gotRoot)
+			require.Equal(t, sequential.records, base.main.records)
+			if declared {
+				require.Zero(t, putReads.Load(), "base reads from phaseContext.PutBranch on a base that declares itself empty")
+			} else {
+				require.Positive(t, putReads.Load())
+			}
+		})
+	}
+}
+
+type parallelRoundBlindContext struct {
+	*trieTestContext
+}
+
+func (c *parallelRoundBlindContext) PutBranch(key, data, _ []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.records[string(key)] = bytes.Clone(data)
+	return nil
+}
+
+func TestParallelRoundNewRowOverStoredRecordFails(t *testing.T) {
+	ops := parallelRoundConvertOps(rand.New(rand.NewSource(10)), 300)
+	reference := newTrieTestContext()
+	_, err := NewTrie(reference).Process(ops)
+	require.NoError(t, err)
+	var stray []byte
+	for key := range reference.records {
+		path, err := eip8297.DecodeBitPath([]byte(key))
+		if err == nil && path.BitLen > 12 && (stray == nil || bytes.Compare([]byte(key), stray) < 0) {
+			stray = []byte(key)
+		}
+	}
+	require.NotNil(t, stray)
+	base := newParallelRoundBase(map[string][]byte{string(stray): {0x01, 0x02, 0x03}})
+	trie := NewTrie(&parallelRoundBlindContext{trieTestContext: base.main})
+	trie.SetTrieContextFactory(base.view)
+	_, err = trie.ProcessParallelContext(t.Context(), ops, 4)
+	require.ErrorContains(t, err, fmt.Sprintf("previous record mismatch for %x", stray))
 }

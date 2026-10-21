@@ -30,10 +30,11 @@ import (
 )
 
 type phaseContext struct {
-	base    commitment.PatriciaContext
-	records map[string][]byte
-	prefix  *eip8297.Bitpath
-	owners  []phaseOwner
+	base      commitment.PatriciaContext
+	baseEmpty bool
+	records   map[string][]byte
+	prefix    *eip8297.Bitpath
+	owners    []phaseOwner
 }
 
 type phaseOwner struct {
@@ -101,7 +102,7 @@ func (c *phaseContext) PutBranch(key, data, prev []byte) error {
 		return err
 	}
 	current, ok := c.records[string(key)]
-	if !ok {
+	if !ok && !c.baseEmpty {
 		var err error
 		current, _, err = c.base.Branch(key)
 		if err != nil {
@@ -123,7 +124,12 @@ func (c *phaseContext) LeafRefs(key, data []byte) *commitment.LeafRefs {
 }
 
 func (t *Trie) newPhaseContext(base commitment.PatriciaContext, prefix *eip8297.Bitpath) *phaseContext {
-	return &phaseContext{base: base, records: make(map[string][]byte), prefix: prefix}
+	empty, ok := base.(emptyBaseSource)
+	return &phaseContext{base: base, baseEmpty: ok && empty.EmptyBase(), records: make(map[string][]byte), prefix: prefix}
+}
+
+type emptyBaseSource interface {
+	EmptyBase() bool
 }
 
 func (t *Trie) inheritHooks(dst *Trie) {

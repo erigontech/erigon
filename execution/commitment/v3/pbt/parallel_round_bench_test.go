@@ -34,18 +34,18 @@ var parallelRoundBenchShape = parallelRoundShape{accounts: 400_000, code: 100_00
 func BenchmarkParallelRoundTip(b *testing.B) {
 	setParallelRoundBenchHash(b)
 	corpus := newParallelRoundCorpus(b, parallelRoundBenchShape)
-	benchmarkParallelRound(b, corpus.snapshot, func(r *rand.Rand) []Op { return corpus.updates(r, 2_000, 200) })
+	benchmarkParallelRound(b, corpus.snapshot, false, func(r *rand.Rand) []Op { return corpus.updates(r, 2_000, 200) })
 }
 
 func BenchmarkParallelRoundReexec(b *testing.B) {
 	setParallelRoundBenchHash(b)
 	corpus := newParallelRoundCorpus(b, parallelRoundBenchShape)
-	benchmarkParallelRound(b, corpus.snapshot, func(r *rand.Rand) []Op { return corpus.updates(r, 100_000, 0) })
+	benchmarkParallelRound(b, corpus.snapshot, false, func(r *rand.Rand) []Op { return corpus.updates(r, 100_000, 0) })
 }
 
 func BenchmarkParallelRoundConvert(b *testing.B) {
 	setParallelRoundBenchHash(b)
-	benchmarkParallelRound(b, map[string][]byte{}, func(r *rand.Rand) []Op { return parallelRoundConvertOps(r, 100_000) })
+	benchmarkParallelRound(b, map[string][]byte{}, true, func(r *rand.Rand) []Op { return parallelRoundConvertOps(r, 100_000) })
 }
 
 func setParallelRoundBenchHash(b *testing.B) {
@@ -53,13 +53,17 @@ func setParallelRoundBenchHash(b *testing.B) {
 	require.NoError(b, eip8297.SetHashSuite(eip8297.HashBlake3))
 }
 
-func benchmarkParallelRound(b *testing.B, snapshot map[string][]byte, roundOps func(*rand.Rand) []Op) {
+func benchmarkParallelRound(b *testing.B, snapshot map[string][]byte, empty bool, roundOps func(*rand.Rand) []Op) {
 	for _, workers := range []int{1, 2, 4, 8, 16} {
 		b.Run(fmt.Sprintf("workers=%d", workers), func(b *testing.B) {
 			b.StopTimer()
 			for i := range b.N {
 				ops := roundOps(rand.New(rand.NewSource(int64(100 + i))))
-				trie := newParallelRoundBase(snapshot).trie()
+				base := newParallelRoundBase(snapshot)
+				if empty {
+					base.declareEmpty()
+				}
+				trie := base.trie()
 				runtime.GC()
 				b.StartTimer()
 				_, err := trie.ProcessParallelContext(context.Background(), ops, workers)
