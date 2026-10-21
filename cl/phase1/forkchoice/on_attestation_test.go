@@ -172,6 +172,28 @@ func TestOnAttestationUsesTargetShuffling(t *testing.T) {
 	}
 }
 
+func TestTargetBeaconCommitteeUsesCheckpointState(t *testing.T) {
+	fixture := newTargetShufflingFixture(t)
+	graph := fixture.forkGraph(false)
+	graph.states[fixture.targetRoot] = fixture.targetState
+	store := newAttestationTestStore(t, fixture.cfg, fixture.headState, fixture.headRoot, fixture.attestationSlot, graph)
+	target := solid.Checkpoint{Epoch: fixture.targetEpoch, Root: fixture.targetRoot}
+
+	committee, committeesPerSlot, err := store.TargetBeaconCommittee(target, fixture.attestationSlot, fixture.committeeIndex)
+	require.NoError(t, err)
+	require.Equal(t, fixture.targetState.CommitteeCount(fixture.targetEpoch), committeesPerSlot)
+	require.Equal(t, fixture.targetValidator, committee[fixture.committeePosition])
+	require.NotContains(t, committee, fixture.headValidator)
+
+	committee, count, err := store.TargetBeaconCommittee(target, fixture.attestationSlot, committeesPerSlot)
+	require.NoError(t, err)
+	require.Nil(t, committee)
+	require.Equal(t, committeesPerSlot, count)
+
+	_, _, err = store.TargetBeaconCommittee(solid.Checkpoint{Epoch: fixture.targetEpoch, Root: common.Hash{0xff}}, fixture.attestationSlot, fixture.committeeIndex)
+	require.Error(t, err)
+}
+
 func TestOnAttestationHeadStateTooOldUsesTargetState(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	baseState := decodeAttestationAnchorState(t, cfg)
