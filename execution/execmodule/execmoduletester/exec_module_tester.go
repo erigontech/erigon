@@ -112,6 +112,7 @@ type ExecModuleTester struct {
 	Engine               rules.Engine
 	ChainConfig          *chain.Config
 	Sync                 *stagedsync.Sync
+	ReadAheader          *exec.BlockReadAheader
 	MiningSync           *stagedsync.Sync
 	PendingBlocks        chan *types.Block
 	MinedBlocks          chan *types.BlockWithReceipts
@@ -726,6 +727,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	sealCancel := make(chan struct{})
 
 	readAheader := exec.NewBlockReadAheader()
+	mock.ReadAheader = readAheader
 	blkBuilder := builder.NewBuilder(
 		mock.DB,
 		&cfg.Builder,

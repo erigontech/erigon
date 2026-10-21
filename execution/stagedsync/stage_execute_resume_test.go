@@ -79,3 +79,9 @@ func TestResolveExecResumePoint(t *testing.T) {
 		require.Equal(t, commitmentTxNum, txNum)
 	})
 }
+
+func TestWriteSendersRecoveredByExecStopsOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	require.ErrorIs(t, writeSendersRecoveredByExec(ctx, ExecuteBlockCfg{}, nil, 1, 1, false), context.Canceled)
+}

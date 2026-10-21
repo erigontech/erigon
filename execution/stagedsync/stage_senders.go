@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -231,8 +232,11 @@ Loop:
 			logger.Warn(fmt.Sprintf("[%s] senders stage can't find header", logPrefix), "num", blockNumber, "hash", blockHash)
 			continue
 		}
-
 		body, ok := cfg.readAheader.ReadBodyWithTransactions(blockHash)
+		if body != nil && ok && startFrom == to && cfg.sendersRecoveredByExec(s, header) {
+			cfg.readAheader.AddSenders(nil, blockHash)
+			continue
+		}
 		if body == nil || !ok {
 			if body, err = cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber); err != nil {
 				return err
@@ -373,8 +377,7 @@ func recoverSenders(ctx context.Context, cryptoContext *secp256k1.Context, confi
 		signer := types.MakeSigner(config, job.blockNumber, job.blockTime)
 		from, err := signer.SenderWithContext(cryptoContext, job.txn)
 		if err != nil {
-			job.err = fmt.Errorf("%w: error recovering sender for tx=%x, %w",
-				rules.ErrInvalidBlock, job.txn.Hash(), err)
+			job.err = senderRecoveryErr(job.txn, err)
 		} else {
 			job.from = from
 		}
@@ -396,6 +399,66 @@ func recoverSenders(ctx context.Context, cryptoContext *secp256k1.Context, confi
 			return
 		}
 	}
+}
+
+func senderRecoveryErr(txn types.Transaction, err error) error {
+	return fmt.Errorf("%w: error recovering sender for tx=%x, %w", rules.ErrInvalidBlock, txn.Hash(), err)
+}
+
+// sendersRecoveredByExec skips the separate recovery pass for blocks that parallel exec schedules by their BAL:
+// exec workers recover senders while executing, and writeSendersRecoveredByExec stores them afterwards.
+// The caller applies it only to a single read-ahead block, so exec and the writer share its transactions
+// and the senders the workers cached on them.
+func (cfg SendersCfg) sendersRecoveredByExec(s *StageState, header *types.Header) bool {
+	return s.SyncMode() == stages.ModeForkValidation && dbg.Exec3Parallel && !dbg.IgnoreBAL &&
+		cfg.chainConfig.IsAmsterdam(header.Time) && header.HasNonEmptyBAL()
+}
+
+// writeSendersRecoveredByExec stores senders of blocks in [from, to] that have none yet. With execFailed it only
+// returns the first sender recovery error, which takes precedence because the senders stage would have reported it first.
+func writeSendersRecoveredByExec(ctx context.Context, cfg ExecuteBlockCfg, tx kv.RwTx, from, to uint64, execFailed bool) error {
+	for blockNum := from; blockNum <= to; blockNum++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		hash, ok, err := cfg.blockReader.CanonicalHash(ctx, tx, blockNum)
+		if err != nil || !ok {
+			return err
+		}
+		has, err := cfg.blockReader.HasSenders(ctx, tx, hash, blockNum)
+		if err != nil {
+			return err
+		}
+		if has {
+			continue
+		}
+		body, ok := cfg.readAheader.ReadBodyWithTransactions(hash)
+		if body == nil || !ok {
+			if body, err = cfg.blockReader.BodyWithTransactions(ctx, tx, hash, blockNum); err != nil || body == nil {
+				return err
+			}
+		}
+		header, err := cfg.blockReader.Header(ctx, tx, hash, blockNum)
+		if err != nil || header == nil {
+			return err
+		}
+		signer := types.MakeSigner(cfg.chainConfig, blockNum, header.Time)
+		senders := make([]common.Address, len(body.Transactions))
+		for i, txn := range body.Transactions {
+			from, err := txn.Sender(*signer)
+			if err != nil {
+				return senderRecoveryErr(txn, err)
+			}
+			senders[i] = from.Value()
+		}
+		if execFailed {
+			continue
+		}
+		if err := rawdb.WriteSenders(tx, hash, blockNum, senders); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func UnwindSendersStage(u *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
