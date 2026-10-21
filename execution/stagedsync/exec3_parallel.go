@@ -86,10 +86,13 @@ When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rota
 
 type parallelExecutor struct {
 	txExecutor
-	// failedBlock/failedHash record the implicated block when execution fails,
-	// so the stage wrapper can target the unwind.
-	failedBlock uint64
-	failedHash  common.Hash
+	// verdict and exhausted carry the apply loop's typed outcome as data, out of a
+	// run whose executor stayed healthy. At most one is set, and neither is set when
+	// exec() returns an operational error: operational outranks verdict outranks
+	// exhaustion, so the stage boundary classifies on these fields, never by
+	// errors.Is over a joined error.
+	verdict     *blockVerdict
+	exhausted   *ErrLoopExhausted
 	execWorkers []*exec.WorkerContext
 	stopWorkers func()
 	// prevBlocks lists the finished-but-not-yet-committed blocks' versionMaps. A
@@ -577,7 +580,13 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						if deferVerdictToOperational(fail.exec, opStop) {
 							return opStop.err
 						}
-						pe.failedBlock, pe.failedHash = fail.block, fail.blockHash
+						// A definitive invalid-block verdict travels as typed data; a
+						// commit-side infrastructure error (not an ErrInvalidBlock) is
+						// operational and surfaces as the error return, no bad block.
+						if errors.Is(fail.err, rules.ErrInvalidBlock) {
+							pe.verdict = &blockVerdict{blockNum: fail.block, blockHash: fail.blockHash, err: fail.err}
+							return nil
+						}
 						return fail.err
 					}
 					// An operational abort is an infrastructure failure, not a block
@@ -596,8 +605,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						return context.Cause(executorContext)
 					}
 					if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
-						return fmt.Errorf("%w: apply loop exited (lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult: %v",
-							rules.ErrInvalidBlock, lastBlockResult.BlockNum, pe.maxBlockNum, len(missing), missing)
+						pe.verdict = &blockVerdict{blockNum: lastBlockResult.BlockNum, err: fmt.Errorf("%w: apply loop exited (lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult: %v",
+							rules.ErrInvalidBlock, lastBlockResult.BlockNum, pe.maxBlockNum, len(missing), missing)}
+						return nil
 					}
 					// The stop kind rides in the shared context's cause: stopReachedMax
 					// is a clean batch end (nil), stopMoreWork a partial batch to resume
@@ -607,7 +617,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						case stopReachedMax:
 							return nil
 						case stopMoreWork:
-							return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
+							pe.exhausted = &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
+							return nil
 						}
 					}
 					// Fallback for exit paths that publish no cause (single-block
@@ -617,7 +628,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					if applyLoopCloseIsClean(lastBlockResult.BlockNum, pe.maxBlockNum, len(txResultBlocks)) {
 						return nil
 					}
-					return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
+					pe.exhausted = &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
+					return nil
 				}
 				switch applyResult := applyResult.(type) {
 				case *txResult:
@@ -858,8 +870,12 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// Commitment is computed per-block by the calculator. Stage progress
 	// is updated in handleCommitResult when results are consumed.
 
+	// execErr now carries only an operational failure or cancellation — a block
+	// verdict and a resumable boundary ride pe.verdict / pe.exhausted as data. A
+	// concurrent operational failure (incl. a worker drain error joined above)
+	// therefore outranks a recorded verdict at the stage boundary.
 	if execErr != nil {
-		if !(errors.Is(execErr, context.Canceled) || errors.Is(execErr, &ErrLoopExhausted{})) {
+		if !errors.Is(execErr, context.Canceled) {
 			if lastHeader != nil {
 				pe.logger.Warn(fmt.Sprintf("[%s] Execution failed", pe.logPrefix), "err", execErr, "block", lastHeader.Number.Uint64(), "hash", lastHeader.Hash())
 			} else {
@@ -1356,6 +1372,18 @@ func applyLoopMissingBlocks(txResultBlocks, appliedBlocks map[uint64]struct{}) [
 		}
 	}
 	return missing
+}
+
+// blockVerdict is a definitive invalid-block verdict from the apply loop's
+// fail-candidate decision point: err wraps rules.ErrInvalidBlock (a wrong trie
+// root additionally matches ErrWrongTrieRoot). It travels as data, not as an
+// error, and only out of a run whose executor stayed healthy — an operational
+// failure in the same batch withholds it, because the machinery that produced the
+// verdict was itself failing.
+type blockVerdict struct {
+	blockNum  uint64
+	blockHash common.Hash
+	err       error
 }
 
 // failCandidate is the apply loop's running "worst" block-validity failure across

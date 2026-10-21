@@ -462,7 +462,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	// Stage progress: target the SharedDomains overlay (not replaced during exec)
 	// when present, else the live post-exec applyTx (parallel exec may have rolled
 	// the passed-in rwTx via Flush/CommitAndBegin).
-	if savesExecProgress(execErr) && out.applyTx != nil {
+	if savesExecProgress(execErr, out) && out.applyTx != nil {
 		if overlay := doms.BlockOverlay(); overlay != nil {
 			if err := s.Update(overlay, out.lastCommittedBlockNum); err != nil {
 				return err
@@ -472,44 +472,50 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		}
 	}
 
-	return unwindOnExecError(execErr, out, cfg, s, u, logger)
+	return renderExecOutcome(execErr, out, cfg, s, u, logger)
 }
 
-// savesExecProgress reports whether an exec outcome may advance stage progress: a
-// clean run or a PURELY loop-exhausted one. Parallel exec joins the drain's waitErr
-// onto the return (errors.Join), so a loop-exhausted error can carry a real failure
-// alongside it; errors.Is would still match ErrLoopExhausted and save progress past
-// the failure, so this uses IsOnlyLoopExhausted (every branch must be exhausted).
-func savesExecProgress(execErr error) bool {
-	return execErr == nil || IsOnlyLoopExhausted(execErr)
+// savesExecProgress reports whether a parallel-exec outcome may advance stage
+// progress: a clean or purely-exhausted batch. An operational failure (execErr) or
+// an invalid-block verdict (out.verdict) must not — progress would move past an
+// unexecuted or bad block. Exhaustion and verdict are typed on the outcome, so this
+// no longer has to disambiguate a joined error.
+func savesExecProgress(execErr error, out execV3Outcome) bool {
+	return execErr == nil && out.verdict == nil
 }
 
-// unwindOnExecError performs the bad-block unwind at the stage boundary after
-// parallel exec reports an invalid block. A non-initial-cycle wrong trie root
-// binary-searches from the implicated block (out.failedBlock/Hash); any other
-// invalid block unwinds to the last executed header minus one. Under
-// badBlockHalt (in-memory fork validation) or a non-invalid error it unwinds
-// nothing and returns execErr unchanged for the caller to propagate.
-func unwindOnExecError(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s *StageState, u Unwinder, logger log.Logger) error {
-	if !errors.Is(execErr, rules.ErrInvalidBlock) || cfg.badBlockHalt || u == nil {
+// renderExecOutcome converts the parallel executor's typed outcome back to the
+// stage's error contracts. Precedence is fixed by the order of the checks: an
+// operational failure (execErr) outranks a verdict, which outranks a resumable
+// boundary. A non-initial-cycle wrong trie root binary-searches the bad-block
+// unwind from the implicated block; any other verdict propagates for the caller to
+// unwind. Under badBlockHalt (in-memory fork validation), or on the initial cycle,
+// it unwinds nothing and returns the verdict unchanged.
+func renderExecOutcome(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s *StageState, u Unwinder, logger log.Logger) error {
+	if execErr != nil {
 		return execErr
 	}
 
-	if errors.Is(execErr, ErrWrongTrieRoot) {
-		// During the initial cycle a wrong trie root is fatal: there is no fork to
-		// recover from, and handleIncorrectRootHashError can return nil (hiding the
-		// mismatch) or unwind a canonical block. Propagate it instead.
-		if s.CurrentSyncCycle.IsInitialCycle {
-			return execErr
+	if v := out.verdict; v != nil {
+		if errors.Is(v.err, ErrWrongTrieRoot) && !cfg.badBlockHalt && u != nil {
+			// During the initial cycle a wrong trie root is fatal: there is no fork to
+			// recover from, and handleIncorrectRootHashError can return nil (hiding the
+			// mismatch) or unwind a canonical block. Propagate it instead.
+			if !s.CurrentSyncCycle.IsInitialCycle {
+				return handleIncorrectRootHashError(v.blockNum, v.blockHash, out.applyTx, cfg, s, logger, u)
+			}
 		}
-		return handleIncorrectRootHashError(out.failedBlock, out.failedHash, out.applyTx, cfg, s, logger, u)
+		// A plain invalid block propagates the error without setting a stage unwind
+		// point — the caller owns the unwind. Setting one here would leave a stale
+		// bad-block verdict that blocks a fresh canonical block at the same height
+		// from being re-executed on the next fork-choice.
+		return v.err
 	}
 
-	// A plain invalid block propagates the error without setting a stage unwind
-	// point — the caller owns the unwind. Setting one here would leave a stale
-	// bad-block verdict that blocks a fresh canonical block at the same height
-	// from being re-executed on the next fork-choice.
-	return execErr
+	if out.exhausted != nil {
+		return out.exhausted
+	}
+	return nil
 }
 
 // unwindDomsToBlock drops in-mem state of blocks (unwindToBlock, ∞) and
