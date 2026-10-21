@@ -477,6 +477,8 @@ func (t *Trie) phaseHookOps(task *phaseTask) error {
 	}
 	task.ops = slices.Clone(task.ops)
 	for i := range task.ops {
+		task.ops[i].Key = bytes.Clone(task.ops[i].Key)
+		task.ops[i].Drop = bytes.Clone(task.ops[i].Drop)
 		if err := t.phaseHook(*task, &task.ops[i]); err != nil {
 			return err
 		}
