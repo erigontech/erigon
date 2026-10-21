@@ -48,6 +48,7 @@ type PBinRangeWriter struct {
 	state        []byte
 	stateInFiles bool
 	workerViews  atomic.Int32
+	stampTracker func() pbinStampTracker
 }
 
 type PBinRangeWriterLimits struct {
@@ -67,12 +68,22 @@ type pbinRange struct {
 	collector *etl.Collector
 }
 
-type pbinStampBranch struct {
-	path  eip8297.Bitpath
-	stamp uint64
+type pbinStampSplit struct {
+	bitLen int16
+	stamp  uint64
 }
 
-const pbinPartitionBits = 12
+type pbinStampTracker interface {
+	observe(key []byte, stamp uint64) error
+	advance(lookahead [][]byte) error
+	clearClosed()
+	stamp(key []byte) (uint64, error)
+}
+
+const (
+	pbinPartitionBits = 12
+	pbinBucketBits    = 264
+)
 
 type pbinRowStampTracker struct {
 	partitions map[pbinPartition]*pbinPartitionStamps
@@ -81,9 +92,10 @@ type pbinRowStampTracker struct {
 }
 
 type pbinPartitionStamps struct {
-	open     []pbinStampBranch
+	open     []pbinStampSplit
 	closed   map[string]uint64
 	previous eip8297.Bitpath
+	last     uint64
 }
 
 func newPBinRowStampTracker() *pbinRowStampTracker {
@@ -317,7 +329,10 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		return common.Hash{}, fmt.Errorf("pbin range writer: shared domains use %s, want %s", domains.GetCommitmentCtx().CommitmentDomain(), w.domain)
 	}
 	defer w.closeRanges()
-	tracker := newPBinRowStampTracker()
+	var tracker pbinStampTracker = newPBinRowStampTracker()
+	if w.stampTracker != nil {
+		tracker = w.stampTracker()
+	}
 	var err error
 	var (
 		overlay *pbinRangeWriterOverlay
@@ -522,20 +537,22 @@ func (t *pbinRowStampTracker) observe(key []byte, stamp uint64) error {
 }
 
 func (p *pbinPartitionStamps) observe(path *eip8297.Bitpath, stamp uint64) {
-	p.closeDeeper(eip8297.CommonPrefixBitsAt(&p.previous, 0, path))
-	for i := range p.open {
-		p.open[i].stamp = max(p.open[i].stamp, stamp)
+	if len(p.open) == 0 {
+		p.open = append(p.open, pbinStampSplit{bitLen: pbinPartitionBits})
+	} else {
+		window := eip8297.CommonPrefixBitsAt(&p.previous, 0, path) / 4 * 4
+		p.closeDeeper(window)
+		if top := &p.open[len(p.open)-1]; top.bitLen == window {
+			top.stamp = max(top.stamp, p.last)
+		} else {
+			p.open = append(p.open, pbinStampSplit{bitLen: window, stamp: p.last})
+		}
 	}
-	start := int16(pbinPartitionBits)
-	if len(p.open) > 0 {
-		start = p.open[len(p.open)-1].path.BitLen + 4
-	}
-	for bitLen := start; bitLen <= path.BitLen; bitLen += 4 {
-		prefix := *path
-		prefix.Truncate(bitLen)
-		p.open = append(p.open, pbinStampBranch{path: prefix, stamp: stamp})
+	if byte(path.Words[0]>>56) == eip8297.StorageZone && p.open[len(p.open)-1].bitLen < pbinBucketBits {
+		p.open = append(p.open, pbinStampSplit{bitLen: pbinBucketBits})
 	}
 	p.previous = *path
+	p.last = stamp
 }
 
 func (t *pbinRowStampTracker) advance(lookahead [][]byte) error {
@@ -564,12 +581,17 @@ func (t *pbinRowStampTracker) clearClosed() {
 }
 
 func (p *pbinPartitionStamps) closeDeeper(bitLen int16) {
-	for len(p.open) > 0 && (bitLen < 0 || p.open[len(p.open)-1].path.BitLen > bitLen) {
-		branch := p.open[len(p.open)-1]
-		key := string(eip8297.EncodeBitPath(&branch.path))
-		p.closed[key] = max(p.closed[key], branch.stamp)
+	carry := p.last
+	for len(p.open) > 0 && (bitLen < 0 || p.open[len(p.open)-1].bitLen > bitLen) {
+		split := p.open[len(p.open)-1]
+		carry = max(carry, split.stamp)
+		prefix := p.previous
+		prefix.Truncate(split.bitLen)
+		key := string(eip8297.EncodeBitPath(&prefix))
+		p.closed[key] = max(p.closed[key], carry)
 		p.open = p.open[:len(p.open)-1]
 	}
+	p.last = carry
 }
 
 func (t *pbinRowStampTracker) stamp(key []byte) (uint64, error) {
@@ -586,14 +608,8 @@ func (t *pbinRowStampTracker) stamp(key []byte) (uint64, error) {
 		}
 		return 0, fmt.Errorf("pbin range writer: row %x has no leaf stamp", key)
 	}
-	stamps := t.partition(&path)
-	if stamp, ok := stamps.closed[string(key)]; ok {
+	if stamp, ok := t.partition(&path).closed[string(key)]; ok {
 		return stamp, nil
-	}
-	for i := range stamps.open {
-		if stamps.open[i].path == path {
-			return stamps.open[i].stamp, nil
-		}
 	}
 	return 0, fmt.Errorf("pbin range writer: row %x has no leaf stamp", key)
 }

@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"sort"
@@ -633,6 +634,63 @@ func TestPBinRangeWriterFactoryMatchesSequentialEngine(t *testing.T) {
 	}
 }
 
+func pbinRandomThreeZoneLeaves(r *rand.Rand) []state.PBinLeaf {
+	var leaves []state.PBinLeaf
+	stamp := func() uint64 { return uint64(r.Intn(24)) }
+	for range 20 + r.Intn(40) {
+		address := make([]byte, 20)
+		r.Read(address)
+		leaves = append(leaves,
+			state.PBinLeaf{Key: eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey), Value: pbinRangeWriterBasicValue(byte(r.Intn(250) + 1)), Stamp: stamp()},
+			state.PBinLeaf{Key: eip8297.TreeKeyAccount(address, eip8297.HeaderStorageOffset), Value: pbinRangeWriterHeaderValue(byte(r.Intn(250) + 1)), Stamp: stamp()},
+		)
+		if r.Intn(2) == 0 {
+			leaves = append(leaves, state.PBinLeaf{Key: eip8297.TreeKeyAccount(address, eip8297.CodeHashLeafKey), Value: pbinRangeWriterCodeHashValue(byte(r.Intn(250) + 1)), Stamp: stamp()})
+			var codeHash [32]byte
+			r.Read(codeHash[:])
+			for chunk := range 1 + r.Intn(3) {
+				leaves = append(leaves, state.PBinLeaf{Key: eip8297.TreeKeyCodeChunk(common.Hash(codeHash), chunk), Value: pbinRangeWriterCodeValue(byte(r.Intn(250) + 1)), Stamp: stamp()})
+			}
+		}
+		slots := 0
+		switch r.Intn(4) {
+		case 0:
+			slots = 1
+		case 1:
+			slots = 2 + r.Intn(6)
+		case 2:
+			slots = 100 + r.Intn(200)
+		}
+		for range slots {
+			slot := make([]byte, 32)
+			r.Read(slot)
+			leaves = append(leaves, state.PBinLeaf{Key: eip8297.TreeKeyStorage(address, slot), Value: pbinRangeWriterValue(byte(r.Intn(250) + 1)), Stamp: stamp()})
+		}
+	}
+	sort.Slice(leaves, func(i, j int) bool { return bytes.Compare(leaves[i].Key, leaves[j].Key) < 0 })
+	unique := leaves[:0]
+	for _, leaf := range leaves {
+		if len(unique) == 0 || !bytes.Equal(unique[len(unique)-1].Key, leaf.Key) {
+			unique = append(unique, leaf)
+		}
+	}
+	return unique
+}
+
+func TestPBinRangeWriterRowStampsMatchReferenceTracker(t *testing.T) {
+	selectPBinRangeWriterHash(t)
+	for seed := range int64(4) {
+		leaves := pbinRandomThreeZoneLeaves(rand.New(rand.NewSource(seed)))
+		for _, maxOps := range []int{100000, 1000, 7, 1} {
+			for _, workers := range []int{0, 4} {
+				t.Run(fmt.Sprintf("seed=%d/maxOps=%d/workers=%d", seed, maxOps, workers), func(t *testing.T) {
+					runPBinRangeWriterCorpusWith(t, leaves, maxOps, workers)
+				})
+			}
+		}
+	}
+}
+
 func TestPBinRangeWriterFewerOpsThanPartitions(t *testing.T) {
 	selectPBinRangeWriterHash(t)
 	var leaves []state.PBinLeaf
@@ -791,8 +849,10 @@ func runPBinRangeWriterCorpusAt(t *testing.T, leaves []state.PBinLeaf, maxOps, w
 	run := openPBinRangeWriterRun(t, maxOps, workers, endTxNum)
 	agg := run.agg
 	phaseActivity := run.activity
+	stampLookups := run.writer.CheckRowStampsForTest()
 	root, err := run.write(t.Context(), leaves)
 	require.NoError(t, err)
+	require.Positive(t, stampLookups(), "no row stamp was looked up")
 	pbinReviewRewritePersistedStateKey(t, agg)
 	out := agg.BeginFilesRo()
 	defer out.Close()

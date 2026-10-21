@@ -32,3 +32,11 @@ func NewPBinRangeWriterWithLimitsForTest(aggregator *Aggregator, domain kv.Domai
 func (w *PBinRangeWriter) WorkerViewsForTest() int32 {
 	return w.workerViews.Load()
 }
+
+func (w *PBinRangeWriter) CheckRowStampsForTest() func() int {
+	lookups := 0
+	w.stampTracker = func() pbinStampTracker {
+		return &pbinCheckedStampTracker{got: newPBinRowStampTracker(), want: newPBinReferenceRowStampTracker(), lookups: &lookups}
+	}
+	return func() int { return lookups }
+}

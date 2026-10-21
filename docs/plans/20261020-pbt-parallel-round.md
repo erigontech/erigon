@@ -452,17 +452,20 @@ Profile of `BenchmarkPBinRangeWriterWorkers` at `b92ce046ea8` (300k leaves, `Max
 counts; the round 1.163 and 0.270; flush 0.227 and 0.260; `buildFiles` 0.208. `pbinRowStampTracker` opens one entry
 per 4-bit prefix of every leaf path and encodes and stores each on close, but only row keys are looked up.
 
-- [ ] keep today's tracker in the test file as the reference. Test first: over random three-zone corpora
+- [x] keep today's tracker in the test file as the reference. Test first: over random three-zone corpora
       (single-leaf buckets, whales, drops, merge groups), `stamp(key)` for every row the writer persists equals the
       reference. The Task 2 oracle tests and the placement oracle stay byte-identical
-- [ ] per partition, keep a stack of open split points (window bit length, running max stamp). A leaf pops the
+- [x] per partition, keep a stack of open split points (window bit length, running max stamp). A leaf pops the
       entries deeper than its common prefix with the previous leaf; each popped entry records the max stamp of its
       row key, merged by max; popped maxima fold into the entry that stays open. Encode only the recorded row keys.
       The shared aggregate for the rows above partitions and the root stays as it is
-- [ ] a looked-up key that is not a split window is handled by kind; a missing stamp is an error, never stamp 0
-- [ ] mutation checks: record at the window `s/4*4 + 4`; stop folding popped maxima into the parent
-- [ ] `BenchmarkPBinRangeWriterWorkers` at workers 1 and 8, before and after, numbers in the notes
-- [ ] run gates — must pass before Task 12
+- [x] a looked-up key that is not a split window is handled by kind; a missing stamp is an error, never stamp 0.
+      The only such kind is the storage bucket record at bit 264: a storage leaf opens a 264-bit entry when the stack
+      is shallower
+- [x] mutation checks: record at the window `s/4*4 + 4`; stop folding popped maxima into the parent
+- [x] `BenchmarkPBinRangeWriterWorkers` at workers 1 and 8, before and after, numbers in the notes. `-count=3
+      -benchtime=3x`, back to back, ms/op: w=1 3477/3604/3636 → 1646/1630/1974; w=8 3790/3354/3176 → 758/805/1072
+- [x] run gates — must pass before Task 12
 
 ### Task 12: Optional deferred branch updates for the bin trie (v3 parity)
 
