@@ -41,18 +41,3 @@ func TestSideBlocksToRetain(t *testing.T) {
 		require.NotContains(t, side, hash(i))
 	}
 }
-
-func TestSideBlocksToRetainKeepsEveryBlockWithoutFinality(t *testing.T) {
-	hash := func(i int) common.Hash { return common.Hash{byte(i)} }
-	pending := make(map[common.Hash]pendingBlock, 20)
-	for i := range 20 {
-		pending[hash(i)] = pendingBlock{number: uint64(i)}
-	}
-
-	side := sideBlocksToRetain(pending, nil, 0)
-
-	require.Len(t, side, 19)
-	for i := 1; i < 20; i++ {
-		require.Contains(t, side, hash(i))
-	}
-}

@@ -98,11 +98,7 @@ func sideBlocksToRetain(pending map[common.Hash]pendingBlock, committed []common
 	for _, hash := range committed {
 		delete(side, hash)
 	}
-	for hash, block := range side {
-		if block.number <= finalized {
-			delete(side, hash)
-		}
-	}
+	maps.DeleteFunc(side, func(_ common.Hash, b pendingBlock) bool { return b.number <= finalized })
 	return side
 }
 
