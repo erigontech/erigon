@@ -30,8 +30,9 @@ import (
 // A serial IBS (no versionMap, waitCommit nil) reports a usable stamp, so the vm
 // frame slot cache is on; read tracing disables it, since tracing must observe
 // every read.
+// Not parallel: it toggles the global dbg.TraceTransactionIO, which other tests
+// read (e.g. CreateAccount), so a parallel run would data-race on it.
 func TestReadStamp_Gating(t *testing.T) {
-	t.Parallel()
 	ibs := New(&emptyReader{})
 	defer ibs.Close()
 
