@@ -66,7 +66,7 @@ func TestStateReader_ReadMethods_Allocs(t *testing.T) {
 	hr := NewHistoryReaderV3(histMockTx{val: accEnc}, 0)
 
 	cache := NewBlockStateCache()
-	cache.PutCommittedStorage(addr, key, make([]byte, 32))
+	cache.PutCommittedStorage(addr, key, *uint256.NewInt(1))
 	cache.PutCommittedAccount(addr, &acc)
 	cr := NewCachedReaderV3(execctx.NewTemporalTxStateGetter(fixedTemporalTx{val: make([]byte, 32)}), cache)
 	addrValue := addr.Value()
@@ -83,14 +83,14 @@ func TestStateReader_ReadMethods_Allocs(t *testing.T) {
 		{"ReaderV3.ReadAccountCodeSize", 0, func() { _, _ = r.ReadAccountCodeSize(addr) }},
 		{"ReaderV3.ReadAccountDataForDebug", 1, func() { _, _ = r.ReadAccountDataForDebug(addr) }}, // 1: returns *accounts.Account
 		{"ReaderV3.ReadAccountIncarnation", 0, func() { _, _ = r.ReadAccountIncarnation(addr) }},
-		{"ReaderV3.HasAccount", 0, func() { _, _ = r.HasAccount(addr) }}, // 0: answers from the encoded length
+		{"ReaderV3.HasAccount", 0, func() { _, _ = r.HasAccount(addrValue) }}, // 0: answers from the encoded length
 
 		{"HistoryReaderV3.ReadAccountStorage", 0, func() { _, _, _ = hr.ReadAccountStorage(addr, key) }},
 		{"HistoryReaderV3.ReadAccountCode", 0, func() { _, _ = hr.ReadAccountCode(addr) }},
 		{"HistoryReaderV3.ReadAccountCodeSize", 0, func() { _, _ = hr.ReadAccountCodeSize(addr) }},
 		{"HistoryReaderV3.ReadAccountData", 1, func() { _, _ = hr.ReadAccountData(addr) }},                 // 1: returns *accounts.Account
 		{"HistoryReaderV3.ReadAccountDataForDebug", 1, func() { _, _ = hr.ReadAccountDataForDebug(addr) }}, // 1: returns *accounts.Account
-		{"HistoryReaderV3.HasAccount", 0, func() { _, _ = hr.HasAccount(addr) }},                           // 0: answers from the encoded length
+		{"HistoryReaderV3.HasAccount", 0, func() { _, _ = hr.HasAccount(addrValue) }},                      // 0: answers from the encoded length
 
 		{"CachedReaderV3.ReadAccountStorage (cache hit)", 0, func() { _, _, _ = cr.ReadAccountStorage(addr, key) }},
 		{"CachedReaderV3.ReadAccountData (cache hit)", 1, func() { _, _ = cr.ReadAccountData(addr) }}, // 1: returns *accounts.Account
@@ -98,7 +98,7 @@ func TestStateReader_ReadMethods_Allocs(t *testing.T) {
 		{"CachedReaderV3.ReadAccountCodeSize", 0, func() { _, _ = cr.ReadAccountCodeSize(addr) }},
 
 		{"CachedReader3.ReadAccountData", 1, func() { _, _ = c3.ReadAccountData(addr) }}, // 1: returns *accounts.Account
-		{"CachedReader3.HasAccount", 0, func() { _, _ = c3.HasAccount(addr) }},           // 0: answers from the encoded length
+		{"CachedReader3.HasAccount", 0, func() { _, _ = c3.HasAccount(addrValue) }},      // 0: answers from the encoded length
 		{"CachedReader3.ReadAccountStorage (cache hit)", 0, func() { _, _, _ = c3.ReadAccountStorage(addr, key) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -127,7 +127,7 @@ func TestStateReader_HasAccount_Existence(t *testing.T) {
 				addr accounts.Address
 				want bool
 			}{{present, true}, {absent, false}} {
-				got, err := HasAccount(r, tc.addr)
+				got, err := r.HasAccount(tc.addr.Value())
 				require.NoError(t, err)
 				require.Equal(t, tc.want, got)
 
@@ -201,8 +201,6 @@ func TestCachedReaderV3_CurrentReadsCommittedWhenUnwritten(t *testing.T) {
 	require.NotSame(t, want, got, "the caller must not be able to mutate the cached account")
 }
 
-// A write this block shadows the committed view, and a nil write means the
-// account was destroyed — neither may fall through to the committed entry.
 func TestCachedReaderV3_CurrentPrefersBlockWrite(t *testing.T) {
 	t.Parallel()
 
@@ -212,13 +210,13 @@ func TestCachedReaderV3_CurrentPrefersBlockWrite(t *testing.T) {
 
 	written := cacheReadTestAccount()
 	written.Nonce = 43
-	cache.WriteAccount(addr, accounts.SerialiseV3(written), 1)
+	cache.WriteAccount(addr, *written, 1)
 	got, err := NewCurrentCachedReaderV3(nil, cache).ReadAccountData(addr)
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Equal(t, uint64(43), got.Nonce)
 
-	cache.WriteAccount(addr, nil, 2)
+	cache.DeleteAccount(addr, 2)
 	got, err = NewCurrentCachedReaderV3(nil, cache).ReadAccountData(addr)
 	require.NoError(t, err)
 	require.Nil(t, got)

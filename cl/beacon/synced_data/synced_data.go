@@ -52,6 +52,7 @@ type SyncedDataManager struct {
 
 	headState         *state.CachingBeaconState
 	previousHeadState *state.CachingBeaconState
+	spareHeadState    *state.CachingBeaconState
 
 	accessLock sync.RWMutex // lock used for accessing atomic methods
 	mu         sync.RWMutex
@@ -124,7 +125,8 @@ func (s *SyncedDataManager) OnHeadStateWithBlockRoot(newState *state.CachingBeac
 // resolving its root or copying its state faster; readers only ever wait
 // for the pointer swap below.
 func (s *SyncedDataManager) publishHeadStateLocked(newState *state.CachingBeaconState, blockRoot common.Hash) error {
-	copied, err := s.copyState(newState)
+	copied, err := s.copyState(newState, s.spareHeadState)
+	s.spareHeadState = nil
 	if err != nil {
 		return err
 	}
@@ -134,6 +136,7 @@ func (s *SyncedDataManager) publishHeadStateLocked(newState *state.CachingBeacon
 	s.accessLock.Lock()
 	defer s.accessLock.Unlock()
 
+	s.spareHeadState = s.previousHeadState
 	s.previousHeadState = s.headState
 	s.headState = copied
 	s.stateHead.Store(&headIdentity{root: blockRoot, slot: newState.Slot()})
@@ -144,14 +147,19 @@ func (s *SyncedDataManager) publishHeadStateLocked(newState *state.CachingBeacon
 // when set, runs immediately before it - bundled into the same call so that
 // wherever the copy ends up relative to other locks, the hook's pause point
 // moves with it.
-func (s *SyncedDataManager) copyState(newState *state.CachingBeaconState) (*state.CachingBeaconState, error) {
+func (s *SyncedDataManager) copyState(newState, dst *state.CachingBeaconState) (*state.CachingBeaconState, error) {
 	if copyHookForTest != nil {
 		copyHookForTest()
 	}
-	return newState.Copy()
+	if dst == nil || dst.BeaconConfig() != newState.BeaconConfig() {
+		return newState.Copy()
+	}
+	return dst, newState.CopyInto(dst)
 }
 
-// ViewHeadState allows safe, read-only access to the current head state.
+// ViewHeadState gives read-only access to the head state. fn must not keep the
+// state, or anything that points into its storage, after it returns: a later
+// publish may overwrite it in place.
 func (s *SyncedDataManager) ViewHeadState(fn ViewHeadStateFn) error {
 	if !s.enabled || s.stateHead.Load() == nil {
 		return ErrNotSynced
@@ -180,6 +188,17 @@ func (s *SyncedDataManager) ViewHeadState(fn ViewHeadStateFn) error {
 	return nil
 }
 
+func (s *SyncedDataManager) ActiveValidatorCount() uint64 {
+	var count uint64
+	if err := s.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		count = uint64(len(headState.GetActiveValidatorsIndices(state.Epoch(headState))))
+		return nil
+	}); err != nil {
+		return 0
+	}
+	return count
+}
+
 func (s *SyncedDataManager) ViewHeadStateWithIdentity(fn ViewHeadStateWithIdentityFn) error {
 	return s.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		head := s.stateHead.Load()
@@ -190,7 +209,9 @@ func (s *SyncedDataManager) ViewHeadStateWithIdentity(fn ViewHeadStateWithIdenti
 	})
 }
 
-// ViewPreviousHeadState allows safe, read-only access to the previous head state.
+// ViewPreviousHeadState gives read-only access to the previous head state. fn must
+// not keep the state, or anything that points into its storage, after it returns:
+// a later publish may overwrite it in place.
 func (s *SyncedDataManager) ViewPreviousHeadState(fn ViewHeadStateFn) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -252,6 +273,7 @@ func (s *SyncedDataManager) UnsetHeadState() {
 	s.selectedHead.Store(nil)
 	s.headState = nil
 	s.previousHeadState = nil
+	s.spareHeadState = nil
 }
 
 func (s *SyncedDataManager) ValidatorPublicKeyByIndex(index int) (common.Bytes48, error) {

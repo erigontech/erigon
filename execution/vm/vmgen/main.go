@@ -41,15 +41,19 @@ import (
 )
 
 // fastOp is one opcode the untraced loop runs inline, without the jump table.
-// Every entry must charge only constant gas and must not fail once its checks
-// pass. TestFastPathMatchesJumpTables pins the constants against all forks, and
-// TestRunMatchesRunTraced pins the inlined bodies against the jump-table ops.
+// Every entry must charge only constant gas, plus copy gas per word for copies,
+// and must not fail once its checks pass. TestFastPathMatchesJumpTables pins
+// the constants against all forks, and TestRunMatchesRunTraced pins the inlined
+// bodies against the jump-table ops.
 type fastOp struct {
 	name       string
 	execute    string // jump-table execute func, inlined as the case body; "" for the makeDup and makePush closures
 	gas        string
 	pop, push  int
 	memorySize string // set for memory ops, which take the fast path only when memory need not grow
+	dynamicGas string // the jump-table gas func of a memory op
+	allocated  string // a memory op's condition that memory need not grow
+	copyLen    string // the stack item a copy charges params.CopyGas per word of
 	jump       bool   // a taken jump also charges the JUMPDEST it lands on and steps over it
 	// call makes the case call execute instead of inlining its body: the body
 	// calls out anyway, and pc would live across that call in memory.
@@ -80,8 +84,11 @@ func fastOps() []fastOp {
 		op("EQ", "opEq", "GasFastestStep", 2, 1),
 		op("AND", "opAnd", "GasFastestStep", 2, 1),
 		op("ISZERO", "opIszero", "GasFastestStep", 1, 1),
-		{name: "MLOAD", execute: "opMload", gas: "GasFastestStep", pop: 1, push: 1, memorySize: "memoryMLoad"},
-		{name: "MSTORE", execute: "opMstore", gas: "GasFastestStep", pop: 2, memorySize: "memoryMStore"},
+		op("CALLVALUE", "opCallValue", "GasQuickStep", 0, 1),
+		{name: "MLOAD", execute: "opMload", gas: "GasFastestStep", pop: 1, push: 1, memorySize: "memoryMLoad", dynamicGas: "pureMemoryGascost", allocated: allocated32},
+		{name: "MSTORE", execute: "opMstore", gas: "GasFastestStep", pop: 2, memorySize: "memoryMStore", dynamicGas: "pureMemoryGascost", allocated: allocated32},
+		// MCOPY is in the jump table only from Cancun on.
+		{name: "MCOPY", execute: "opMcopy", gas: "GasFastestStep", pop: 3, memorySize: "memoryMcopy", dynamicGas: "gasMcopy", allocated: "evm.jt[MCOPY].memorySize != nil && callContext.Memory.allocatedCopy(callContext.Stack.peekAt(top), callContext.Stack.backAt(top, 1), callContext.Stack.backAt(top, 2))", copyLen: "callContext.Stack.backAt(top, 2)", call: true},
 	}
 	for n := 3; n <= 32; n++ {
 		ops = append(ops, op(fmt.Sprintf("PUSH%d", n), "", "GasFastestStep", 0, 1))
@@ -94,6 +101,8 @@ func fastOps() []fastOp {
 	}
 	return ops
 }
+
+const allocated32 = "callContext.Memory.allocated32(callContext.Stack.peekAt(top))"
 
 const switchHere = "// execution/vm/vmgen inserts the fastOps switch here.\n"
 
@@ -168,7 +177,7 @@ func inlineBody(instructions []byte, o fastOp) string {
 }
 
 // stackDelta is how far each Stack op an inlined body calls moves the top.
-var stackDelta = map[string]int{"pushRef": 1, "drop": -1, "pop": -1, "pop2": -2, "pop1Peek1": -1, "peek": 0, "dup": 1, "swap": 0}
+var stackDelta = map[string]int{"pushRef": 1, "drop": -1, "pop": -1, "pop2": -2, "pop1Peek1": -1, "push": 1, "peek": 0, "dup": 1, "swap": 0}
 
 // localTop rewrites body's callContext.Stack ops to their *At forms on run's
 // local top, and moves top after each statement that calls one.
@@ -232,7 +241,7 @@ func localTop(body *ast.BlockStmt) {
 }
 
 // outOfLine are the funcs run's inlined bodies call that Go does not inline.
-var outOfLine = []string{"Mul", "Div", "SetBytes", "ILsh", "validJumpdest"}
+var outOfLine = []string{"Mul", "Div", "SetBytes", "ILsh", "validJumpdest", "Copy"}
 
 // saveAroundCalls stores gasLeft and pc in callContext before each statement of body
 // that calls an outOfLine func, and loads them back after it. Neither is then live
@@ -368,30 +377,38 @@ func fastCases(instructions []byte, ops []fastOp) string {
 		switch o.push - o.pop {
 		case 1:
 			upper = "sLen < stackLimit"
-		case 0, -1, -2:
+		case 0, -1, -2, -3:
 		default:
 			log.Fatalf("%s: stack growth %d needs its own bound", o.name, o.push-o.pop)
 		}
+		var stackCond []string
 		switch {
 		case o.pop > 0:
-			cond = append(cond, fmt.Sprintf("sLen >= %d", o.pop), upper)
+			stackCond = []string{fmt.Sprintf("sLen >= %d", o.pop), upper}
 		case o.push > 0:
-			cond = append(cond, "uint(sLen) < stackLimit")
+			stackCond = []string{"uint(sLen) < stackLimit"}
 		}
-		if o.memorySize != "" {
-			cond = append(cond, "callContext.Memory.allocated32(callContext.Stack.peekAt(top))")
+		if o.allocated != "" {
+			stackCond = append(stackCond, o.allocated)
 		}
 		if o.gated {
 			// An op a table does not have is opUndefined there, which pushes nothing.
-			cond = append(cond, fmt.Sprintf("evm.jt[%s].numPush == %d", o.name, o.push))
+			stackCond = append(stackCond, fmt.Sprintf("evm.jt[%s].numPush == %d", o.name, o.push))
 		}
 		body := "callContext.Stack.top = top\npc, _, _ = " + o.execute + "(pc, evm, callContext)\ntop = callContext.Stack.top\npc++\ncontinue run"
 		if !o.call {
 			body = inlineBody(instructions, o)
 		}
-		// Sub64 computes the gas left with the check, before any call in the body,
-		// so the case never needs the old gasLeft after one.
-		code := fmt.Sprintf("if left, borrow := bits.Sub64(gasLeft, %s, 0); %s {\ngasLeft = left\n%s\n}\n", o.gas, strings.Join(cond, " && "), body)
+		var code string
+		if o.copyLen == "" {
+			// Sub64 computes the gas left with the check, before any call in the body,
+			// so the case never needs the old gasLeft after one.
+			code = fmt.Sprintf("if left, borrow := bits.Sub64(gasLeft, %s, 0); %s {\ngasLeft = left\n%s\n}\n", o.gas, strings.Join(append(cond, stackCond...), " && "), body)
+		} else {
+			// The copy gas reads the stack, so the stack checks go first.
+			gas := o.gas + " + params.CopyGas*ToWordSize(" + o.copyLen + ".Uint64())"
+			code = fmt.Sprintf("if %s {\nif left, borrow := bits.Sub64(gasLeft, %s, 0); %s {\ngasLeft = left\n%s\n}\n}\n", strings.Join(stackCond, " && "), gas, strings.Join(cond, " && "), body)
+		}
 		if o.jump {
 			code = handoff + code
 		}
@@ -756,8 +773,8 @@ func testTable(ops []fastOp) []byte {
 	b.WriteString("import \"github.com/erigontech/erigon/execution/protocol/params\"\n\n")
 	b.WriteString("var fastPathOps = map[OpCode]fastPathWant{\n")
 	for _, o := range ops {
-		execute, memorySize := cmp.Or(o.execute, "nil"), cmp.Or(o.memorySize, "nil")
-		fmt.Fprintf(&b, "%s: {%s, %s, %d, %d, %s, %t},\n", o.name, execute, o.gas, o.pop, o.push, memorySize, o.gated)
+		execute, memorySize, dynamicGas := cmp.Or(o.execute, "nil"), cmp.Or(o.memorySize, "nil"), cmp.Or(o.dynamicGas, "nil")
+		fmt.Fprintf(&b, "%s: {%s, %s, %d, %d, %s, %s, %t},\n", o.name, execute, o.gas, o.pop, o.push, memorySize, dynamicGas, o.gated)
 	}
 	b.WriteString("}\n")
 	out, err := format.Source([]byte(b.String()))

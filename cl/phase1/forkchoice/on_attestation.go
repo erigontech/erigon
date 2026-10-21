@@ -60,19 +60,25 @@ func (f *ForkChoiceStore) OnAttestation(
 	var err error
 	target := data.Target
 
-	if f.syncedDataManager.Syncing() {
-		attestationIndicies, err = f.verifyAttestationWithCheckpointState(
-			target,
-			attestation,
-			fromBlock,
-		)
-	} else {
-		if err := f.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+	useCheckpointState := f.syncedDataManager.Syncing()
+	if !useCheckpointState {
+		if err := f.syncedDataManager.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, headRoot common.Hash, _ uint64) error {
+			if !f.headStateHasTargetShuffling(headState, headRoot, target) {
+				useCheckpointState = true
+				return nil
+			}
 			attestationIndicies, err = f.verifyAttestationWithState(headState, attestation, fromBlock)
 			return err
 		}); err != nil {
 			return err
 		}
+	}
+	if useCheckpointState {
+		attestationIndicies, err = f.verifyAttestationWithCheckpointState(
+			target,
+			attestation,
+			fromBlock,
+		)
 	}
 	if err != nil {
 		return err
@@ -82,6 +88,20 @@ func (f *ForkChoiceStore) OnAttestation(
 	f.updateLatestMessages(attestation, attestationIndicies)
 
 	return nil
+}
+
+// The one-epoch window preserves the target's final seed mix; the dependent block then identifies the same committees.
+func (f *ForkChoiceStore) headStateHasTargetShuffling(headState *state.CachingBeaconState, headRoot common.Hash, target solid.Checkpoint) bool {
+	headEpoch := state.Epoch(headState)
+	if target.Epoch > headEpoch+1 || target.Epoch+1 < headEpoch {
+		return false
+	}
+	dependentSlot := computeShufflingDependentSlot(target.Epoch, f.beaconCfg.MinSeedLookahead, f.beaconCfg.SlotsPerEpoch)
+	targetDependentRoot := f.Ancestor(target.Root, dependentSlot).Root
+	if targetDependentRoot == (common.Hash{}) {
+		return false
+	}
+	return targetDependentRoot == f.Ancestor(headRoot, dependentSlot).Root
 }
 
 func (f *ForkChoiceStore) ProcessAttestingIndicies(

@@ -18,10 +18,12 @@ package forkchoice
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/transition"
+	"github.com/erigontech/erigon/cl/utils"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -31,7 +33,11 @@ import (
 
 // Slot calculates the current slot number using the time and genesis slot.
 func (f *ForkChoiceStore) Slot() uint64 {
-	return f.beaconCfg.GenesisSlot + ((f.time.Load() - f.genesisTime) / f.beaconCfg.SecondsPerSlot)
+	return f.slotAtTimeMs(f.timeMs.Load())
+}
+
+func (f *ForkChoiceStore) slotAtTimeMs(timeMs uint64) uint64 {
+	return f.beaconCfg.GenesisSlot + ((timeMs - utils.SecondsToMilliseconds(f.genesisTime)) / (f.beaconCfg.SecondsPerSlot * 1000))
 }
 
 // queueEmit defers an event send until after f.mu is released: Feed.Send blocks
@@ -118,12 +124,14 @@ func (f *ForkChoiceStore) runOperationPruner() {
 // updateCheckpoints updates the justified and finalized checkpoints if new checkpoints have higher epochs.
 func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckpoint solid.Checkpoint) {
 	if justifiedCheckpoint.Epoch > f.justifiedCheckpoint.Load().(solid.Checkpoint).Epoch {
+		f.checkpointStatesMu.Lock()
 		f.justifiedCheckpoint.Store(justifiedCheckpoint)
+		f.checkpointStatesMu.Unlock()
 	}
 	if finalizedCheckpoint.Epoch > f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch {
+		f.finalizedCheckpoint.Store(finalizedCheckpoint)
 		f.queueOperationPrune(finalizedCheckpoint)
 		f.onNewFinalized(finalizedCheckpoint)
-		f.finalizedCheckpoint.Store(finalizedCheckpoint)
 
 		blockRoot := finalizedCheckpoint.Root
 		blockHeader, ok := f.forkGraph.GetHeader(blockRoot)
@@ -287,8 +295,19 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 	if state, ok := f.checkpointStates.Load(checkpoint); ok {
 		return state.(*checkpointState), nil
 	}
+	cs, err, _ := f.checkpointStateBuilds.Do(fmt.Sprintf("%d:%x", checkpoint.Epoch, checkpoint.Root), func() (any, error) {
+		if state, ok := f.checkpointStates.Load(checkpoint); ok {
+			return state.(*checkpointState), nil
+		}
+		return f.buildCheckpointState(checkpoint)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return cs.(*checkpointState), nil
+}
 
-	// If it is not in cache compute it and then put in cache.
+func (f *ForkChoiceStore) buildCheckpointState(checkpoint solid.Checkpoint) (*checkpointState, error) {
 	if f.forkGraph == nil {
 		return nil, errors.New("getCheckpointState: forkGraph not initialized")
 	}
@@ -316,8 +335,63 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 	})
 	f.publicKeysRegistry.AddState(checkpoint, baseState)
 	checkpointState := newCheckpointState(f.beaconCfg, f.publicKeysRegistry, validators,
-		mixes, baseState.GenesisValidatorsRoot(), baseState.Fork(), baseState.GetTotalActiveBalance(), state.Epoch(baseState.BeaconState), checkpoint)
+		mixes, baseState.GenesisValidatorsRoot(), baseState.Fork(), getUnslashedActiveBalance(baseState), state.Epoch(baseState.BeaconState), checkpoint)
+	if f.belowFinalized(checkpoint) {
+		return checkpointState, nil
+	}
 	// Cache in memory what we are left with.
-	f.checkpointStates.Store(checkpoint, checkpointState)
+	f.storeCheckpointState(checkpoint, checkpointState)
+	if f.belowFinalized(checkpoint) {
+		f.checkpointStates.Delete(checkpoint)
+	}
 	return checkpointState, nil
+}
+
+func (f *ForkChoiceStore) belowFinalized(checkpoint solid.Checkpoint) bool {
+	finalized, ok := f.finalizedCheckpoint.Load().(solid.Checkpoint)
+	return ok && checkpoint.Epoch < finalized.Epoch
+}
+
+// storeCheckpointState stores the state, then evicts the lowest-epoch entries
+// above maxCheckpointStates, but never the current justified state, which is read
+// to compute the head, or the state just stored.
+func (f *ForkChoiceStore) storeCheckpointState(checkpoint solid.Checkpoint, checkpointState *checkpointState) {
+	f.checkpointStatesMu.Lock()
+	defer f.checkpointStatesMu.Unlock()
+
+	f.checkpointStates.Store(checkpoint, checkpointState)
+	for {
+		justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+		count := 0
+		var oldest solid.Checkpoint
+		hasOldest := false
+		f.checkpointStates.Range(func(key, _ any) bool {
+			count++
+			candidate := key.(solid.Checkpoint)
+			if candidate == justified || candidate == checkpoint {
+				return true
+			}
+			if !hasOldest || candidate.Epoch < oldest.Epoch {
+				oldest = candidate
+				hasOldest = true
+			}
+			return true
+		})
+		if count <= maxCheckpointStates || !hasOldest {
+			return
+		}
+		f.checkpointStates.Delete(oldest)
+	}
+}
+
+func getUnslashedActiveBalance(beaconState *state.CachingBeaconState) uint64 {
+	epoch := state.Epoch(beaconState)
+	var total uint64
+	beaconState.ForEachValidator(func(validator solid.Validator, _, _ int) bool {
+		if validator.Active(epoch) && !validator.Slashed() {
+			total += validator.EffectiveBalance()
+		}
+		return true
+	})
+	return max(beaconState.BeaconConfig().EffectiveBalanceIncrement, total)
 }

@@ -359,7 +359,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	// if we've pruned this history away for this block then just return early
 	// to save any red herring errors
 
-	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, dbtx, fromBlock)
+	err = api.BaseAPI.checkBlockHistoryRangeAvailable(ctx, dbtx, fromBlock, toBlock)
 	if err != nil {
 		return err
 	}
@@ -381,7 +381,7 @@ func (api *TraceAPIImpl) resolveFilterBound(ctx context.Context, tx kv.Tx, bound
 	}
 	blockNum, err := api.resolveCommittedBlockNumber(ctx, tx, rpc.BlockNumberOrHashWithNumber(bound))
 	if err != nil {
-		return 0, err
+		return 0, unknownBlockAsResourceNotFound(err)
 	}
 	if blockNum > latest {
 		return 0, errBlockRangeIntoFuture
@@ -408,7 +408,8 @@ func (api *TraceAPIImpl) resolveFilterBlockHash(ctx context.Context, tx kv.Tx, h
 }
 
 func unknownBlockAsResourceNotFound(err error) error {
-	if errors.As(err, &rpc.BlockNotFoundErr{}) {
+	var unresolvedTag *rpc.CustomError
+	if errors.As(err, &rpc.BlockNotFoundErr{}) || (errors.As(err, &unresolvedTag) && unresolvedTag.Code == rpchelper.UnknownBlockCode) {
 		return &rpc.ResourceNotFoundError{Message: err.Error()}
 	}
 	return err
@@ -517,7 +518,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		ot.config = oeConfig
 		ot.compat = api.compatibility
 		ot.r = traceResult
-		ot.idx = []string{fmt.Sprintf("%d-", txIndex)}
 		ot.traceAddr = []int{}
 		vmConfig.Tracer = ot.Tracer().Hooks
 
@@ -946,6 +946,16 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 			}
 			defer workerTx.Rollback()
 
+			// Workers pin their own history view. Check the first replay position
+			// here; all jobs in this block read at or after it.
+			startTxNum, err := state.StateHistoryStartTxNum(workerTx)
+			if err != nil {
+				return err
+			}
+			if baseTxNum < startTxNum {
+				return fmt.Errorf("%w: requested block %d, history is available from txNum %d", state.ErrPruned, header.Number.Uint64(), startTxNum)
+			}
+
 			// Per-worker constants: same for every job this worker processes.
 			// blockCtx captures workerTx in its GetHash closure, so it cannot
 			// be shared across workers (each needs its own copy).
@@ -975,7 +985,6 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 				ot.config = oeConfig
 				ot.compat = api.compatibility
 				ot.r = traceResult
-				ot.idx = []string{fmt.Sprintf("%d-", job.txIndex)}
 				// TraceTypeTrace is always active here; initialise traceAddr unconditionally.
 				ot.traceAddr = []int{}
 
@@ -1109,6 +1118,15 @@ type TraceFilterRequest struct {
 	Mode        TraceFilterMode   `json:"mode,omitempty"`
 	After       *uint64           `json:"after"`
 	Count       *uint64           `json:"count"`
+}
+
+// UnmarshalJSON rejects unknown fields, so a misspelled filter member fails
+// instead of silently widening the match.
+func (r *TraceFilterRequest) UnmarshalJSON(data []byte) error {
+	type plain TraceFilterRequest
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	return dec.Decode((*plain)(r))
 }
 
 type TraceFilterMode string

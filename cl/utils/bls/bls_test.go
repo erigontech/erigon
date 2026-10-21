@@ -134,3 +134,26 @@ func TestAggregateSignatures(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, valid)
 }
+
+func TestSignatureAggregatorMatchesAggregateSignatures(t *testing.T) {
+	var sigs [][]byte
+	var aggregator bls.SignatureAggregator
+	for i := range 5 {
+		key, err := bls.GenerateKey()
+		require.NoError(t, err)
+		sig := key.Sign([]byte{byte(i)}).Bytes()
+		sigs = append(sigs, sig)
+		require.NoError(t, aggregator.AddValidated(sig))
+	}
+	expected, err := bls.AggregateSignatures(sigs)
+	require.NoError(t, err)
+
+	got := aggregator.Compressed()
+	require.Equal(t, expected, got[:])
+}
+
+func TestSignatureAggregatorRejectsMalformedSignature(t *testing.T) {
+	var aggregator bls.SignatureAggregator
+	require.ErrorIs(t, aggregator.AddValidated(make([]byte, 96)), bls.ErrDeserializeSignature)
+	require.Error(t, aggregator.AddValidated(make([]byte, 95)))
+}

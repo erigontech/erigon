@@ -191,6 +191,8 @@ func (st *Stack) len() int {
 
 func (st *Stack) pushRefAt(top int) *uint256.Int { return &st.data[top] }
 
+func (st *Stack) pushAt(top int, d uint256.Int) { st.data[top] = d }
+
 func (st *Stack) popAt(top int) *uint256.Int { return &st.data[top-1] }
 
 func (st *Stack) peekAt(top int) *uint256.Int { return &st.data[top-1] }
@@ -198,6 +200,8 @@ func (st *Stack) peekAt(top int) *uint256.Int { return &st.data[top-1] }
 func (st *Stack) pop2At(top int) (x, y *uint256.Int) { return &st.data[top-1], &st.data[top-2] }
 
 func (st *Stack) pop1Peek1At(top int) (x, y *uint256.Int) { return &st.data[top-1], &st.data[top-2] }
+
+func (st *Stack) backAt(top, n int) *uint256.Int { return &st.data[top-n-1] }
 
 func (st *Stack) dupAt(top, n int) { st.data[top] = st.data[top-n-1] }
 

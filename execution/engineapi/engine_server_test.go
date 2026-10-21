@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -46,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
@@ -58,6 +60,89 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
+
+func TestEngineRejectsMissingRequiredObjects(t *testing.T) {
+	t.Parallel()
+
+	srv := NewEngineServer(log.New(), &chain.Config{}, nil, nil, false, false, false, true, nil, nil, 0, 0)
+	client := newEngineInProcClient(t, srv)
+
+	for _, test := range []struct {
+		method string
+		params []any
+	}{
+		{"engine_newPayloadV1", []any{nil}},
+		{"engine_newPayloadV2", []any{nil}},
+		{"engine_newPayloadV3", []any{nil, []common.Hash{}, common.Hash{}}},
+		{"engine_newPayloadV4", []any{nil, []common.Hash{}, common.Hash{}, []hexutil.Bytes{}}},
+		{"engine_newPayloadV5", []any{nil, []common.Hash{}, common.Hash{}, []hexutil.Bytes{}}},
+		{"engine_forkchoiceUpdatedV1", []any{nil, nil}},
+		{"engine_forkchoiceUpdatedV2", []any{nil, nil}},
+		{"engine_forkchoiceUpdatedV3", []any{nil, nil}},
+		{"engine_forkchoiceUpdatedV4", []any{nil, nil, nil}},
+	} {
+		t.Run(test.method, func(t *testing.T) {
+			for _, params := range []struct {
+				name string
+				args []any
+			}{
+				{"null", test.params},
+				{"empty", []any{}},
+				{"omitted", nil},
+			} {
+				t.Run(params.name, func(t *testing.T) {
+					err := client.CallContext(t.Context(), new(any), test.method, params.args...)
+					var rpcErr rpc.Error
+					require.ErrorAs(t, err, &rpcErr)
+					require.Equal(t, -32602, rpcErr.ErrorCode())
+				})
+			}
+		})
+	}
+}
+
+func TestNewPayloadV5BoundsBALAllocations(t *testing.T) {
+	reads := make([]uint64, 100_000)
+	for i := range reads {
+		reads[i] = uint64(i)
+	}
+	raw, err := rlp.EncodeToBytes([]any{[]any{
+		common.Address{}, []any{}, reads, []any{}, []any{}, []any{},
+	}})
+	require.NoError(t, err)
+
+	header := makeParentHeader(1)
+	header.UncleHash = empty.UncleHash
+	header.TxHash = empty.RootHash
+	header.GasLimit = types.BalItemCost
+	withdrawals := types.Withdrawals{}
+	withdrawalsHash := types.DeriveSha(withdrawals)
+	header.WithdrawalsHash = &withdrawalsHash
+	header.BlobGasUsed = new(uint64)
+	header.ExcessBlobGas = new(uint64)
+	header.ParentBeaconBlockRoot = &common.Hash{}
+	header.RequestsHash = (types.FlatRequests{}).Hash()
+	balHash := crypto.Keccak256Hash(raw)
+	header.BlockAccessListHash = &balHash
+	header.SlotNumber = new(uint64)
+	block := types.NewBlockFromStorage(header.Hash(), header, nil, nil, withdrawals, nil)
+	payload, err := engine_types.ExecutionPayloadFromBlock(block)
+	require.NoError(t, err)
+	balBytes := hexutil.Bytes(raw)
+	payload.BlockAccessList = &balBytes
+	srv := NewEngineServer(log.New(), allForksChainConfig(), &stubExecutionModule{}, nil, false, false, false, true, nil, nil, 0, 0)
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	status, err := srv.NewPayloadV5(t.Context(), payload, []common.Hash{}, header.ParentBeaconBlockRoot, []hexutil.Bytes{})
+	runtime.ReadMemStats(&after)
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	require.Equal(t, engine_types.InvalidStatus, status.Status)
+	require.NotNil(t, status.ValidationError)
+	require.ErrorContains(t, status.ValidationError.Error(), "block access list too large")
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
+}
 
 func TestNewPayloadV2WithdrawalsValidation(t *testing.T) {
 	t.Parallel()

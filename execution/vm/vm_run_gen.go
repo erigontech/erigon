@@ -306,6 +306,14 @@ run:
 					pc++
 					continue run
 				}
+			case CALLVALUE:
+				if left, borrow := bits.Sub64(gasLeft, GasQuickStep, 0); borrow == 0 && uint(sLen) < stackLimit {
+					gasLeft = left
+					callContext.Stack.pushAt(top, callContext.Contract.value)
+					top += 1
+					pc++
+					continue run
+				}
 			case MLOAD:
 				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 1 && sLen <= stackLimit && callContext.Memory.allocated32(callContext.Stack.peekAt(top)) {
 					gasLeft = left
@@ -323,6 +331,17 @@ run:
 					callContext.Memory.Set32(mStart.Uint64(), val)
 					pc++
 					continue run
+				}
+			case MCOPY:
+				if sLen >= 3 && sLen <= stackLimit && evm.jt[MCOPY].memorySize != nil && callContext.Memory.allocatedCopy(callContext.Stack.peekAt(top), callContext.Stack.backAt(top, 1), callContext.Stack.backAt(top, 2)) {
+					if left, borrow := bits.Sub64(gasLeft, GasFastestStep+params.CopyGas*ToWordSize(callContext.Stack.backAt(top, 2).Uint64()), 0); borrow == 0 {
+						gasLeft = left
+						callContext.Stack.top = top
+						pc, _, _ = opMcopy(pc, evm, callContext)
+						top = callContext.Stack.top
+						pc++
+						continue run
+					}
 				}
 			case PUSH3, PUSH4, PUSH5, PUSH6, PUSH7, PUSH8, PUSH9, PUSH10, PUSH11, PUSH12, PUSH13, PUSH14, PUSH15, PUSH16, PUSH17, PUSH18, PUSH19, PUSH20, PUSH21, PUSH22, PUSH23, PUSH24, PUSH25, PUSH26, PUSH27, PUSH28, PUSH29, PUSH30, PUSH31, PUSH32:
 				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && uint(sLen) < stackLimit {
@@ -857,6 +876,14 @@ run:
 				i++
 				continue run
 			}
+		case CALLVALUE:
+			if left, borrow := bits.Sub64(gasLeft, GasQuickStep, 0); borrow == 0 && uint(sLen) < stackLimit {
+				gasLeft = left
+				callContext.Stack.pushAt(top, callContext.Contract.value)
+				top += 1
+				i++
+				continue run
+			}
 		case MLOAD:
 			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 1 && sLen <= stackLimit && callContext.Memory.allocated32(callContext.Stack.peekAt(top)) {
 				gasLeft = left
@@ -874,6 +901,17 @@ run:
 				callContext.Memory.Set32(mStart.Uint64(), val)
 				i++
 				continue run
+			}
+		case MCOPY:
+			if sLen >= 3 && sLen <= stackLimit && evm.jt[MCOPY].memorySize != nil && callContext.Memory.allocatedCopy(callContext.Stack.peekAt(top), callContext.Stack.backAt(top, 1), callContext.Stack.backAt(top, 2)) {
+				if left, borrow := bits.Sub64(gasLeft, GasFastestStep+params.CopyGas*ToWordSize(callContext.Stack.backAt(top, 2).Uint64()), 0); borrow == 0 {
+					gasLeft = left
+					callContext.Stack.top = top
+					i, _, _ = opMcopy(i, evm, callContext)
+					top = callContext.Stack.top
+					i++
+					continue run
+				}
 			}
 		case DUP1:
 			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 1 && sLen < stackLimit {

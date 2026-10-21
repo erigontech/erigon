@@ -84,6 +84,17 @@ func buildExAnteStore(tb testing.TB) *ForkChoiceStore {
 func buildExAnteStorePendingLast(tb testing.TB, engine execution_client.ExecutionEngine) (*ForkChoiceStore, *cltypes.SignedBeaconBlock) {
 	tb.Helper()
 	ctx := context.Background()
+	store, b3a, bc2, bd4 := buildExAnteStoreBeforeBlocks(tb, engine, nil)
+	store.OnTick(0)
+	store.OnTick(12 * 1000)
+	require.NoError(tb, store.OnBlock(ctx, b3a, false, true, false))
+	store.OnTick(36 * 1000)
+	require.NoError(tb, store.OnBlock(ctx, bc2, false, true, false))
+	return store, bd4
+}
+
+func buildExAnteStoreBeforeBlocks(tb testing.TB, engine execution_client.ExecutionEngine, genesisTime *uint64) (*ForkChoiceStore, *cltypes.SignedBeaconBlock, *cltypes.SignedBeaconBlock, *cltypes.SignedBeaconBlock) {
+	tb.Helper()
 	cfg := &clparams.MainnetBeaconConfig
 	sd := synced_data.NewSyncedDataManager(cfg, true)
 	b3a := cltypes.NewSignedBeaconBlock(cfg, clparams.DenebVersion)
@@ -94,6 +105,9 @@ func buildExAnteStorePendingLast(tb testing.TB, engine execution_client.Executio
 	require.NoError(tb, utils.DecodeSSZSnappy(bd4, diffBlockd4Enc, int(clparams.AltairVersion)))
 	anchor := state2.New(cfg)
 	require.NoError(tb, utils.DecodeSSZSnappy(anchor, diffAnchorEnc, int(clparams.AltairVersion)))
+	if genesisTime != nil {
+		anchor.SetGenesisTime(*genesisTime)
+	}
 	em := beaconevents.NewEventEmitter()
 	gs, err := initial_state.GetGenesisState(tb.Context(), 1)
 	require.NoError(tb, err)
@@ -105,12 +119,7 @@ func buildExAnteStorePendingLast(tb testing.TB, engine execution_client.Executio
 		forkGraphDisk,
 		em, sd, bs, public_keys_registry.NewInMemoryPublicKeysRegistry(), validator_params.NewValidatorParams(), false, nil)
 	require.NoError(tb, err)
-	store.OnTick(0)
-	store.OnTick(12)
-	require.NoError(tb, store.OnBlock(ctx, b3a, false, true, false))
-	store.OnTick(36)
-	require.NoError(tb, store.OnBlock(ctx, bc2, false, true, false))
-	return store, bd4
+	return store, b3a, bc2, bd4
 }
 
 // TestGloasWeightTreeMatchesFullScan asserts the maintained delta tree returns
@@ -128,7 +137,7 @@ func TestGloasWeightTreeMatchesFullScan(t *testing.T) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	full := NewWeightStore(f)
+	full := newWeightStoreFromCheckpointState(f, cs)
 	tree := f.gloasWeightTree.prepare(justified, cs)
 
 	blocks := f.getFilteredBlockTree(justified.Root, justified, f.Slot())
@@ -161,7 +170,7 @@ func TestGloasWeightTreeDeltaMatchesFullScan(t *testing.T) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	full := NewWeightStore(f)
+	full := newWeightStoreFromCheckpointState(f, cs)
 	f.gloasWeightTree.prepare(justified, cs)
 
 	voters := make([]uint64, 0)

@@ -527,6 +527,65 @@ func TestValidateChainCanonicalNotExecutedAfterPrune(t *testing.T) {
 	require.ErrorContains(t, err, "too far unwind")
 }
 
+// A re-sent side block that already passed validation is answered from the
+// cache: it must not unwind the head, which here would fail after the prune.
+func TestValidateChainResentSideBlockSkipsUnwind(t *testing.T) {
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithKey(privKey),
+		execmoduletester.WithAlwaysGenerateChangesets(false),
+		execmoduletester.WithFcuBackgroundPrune(),
+	)
+	chainPack, err := m.GenerateChain(5, transferGen(t, privKey, common.Address{0x42}, 1_000))
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks[:1]))
+	side, err := m.GenerateChainFrom(chainPack.Blocks[0], 1, func(_ int, b *blockgen.BlockGen) {
+		transferGen(t, privKey, common.Address{0x43}, 2_000)(1, b)
+	})
+	require.NoError(t, err)
+	sideBlock := side.Blocks[0]
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks[1:2]))
+
+	insertStatus, err := m.InsertBlocks(ctx, []*types.Block{sideBlock})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
+	validation, err := m.ValidateChain(ctx, sideBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+
+	insertStatus, err = m.InsertBlocks(ctx, chainPack.Blocks[2:4])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
+	tip := chainPack.Blocks[3]
+	fcuResult, err := m.UpdateForkChoice(
+		ctx,
+		tip.Header(),
+		execmoduletester.WithSafeHash(tip.Hash()),
+		execmoduletester.WithFinalisedHash(tip.Hash()),
+	)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuResult.Status)
+	m.ExecModule.WaitIdle(ctx)
+
+	insertStatus, err = m.InsertBlocks(ctx, []*types.Block{sideBlock})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
+	validation, err = m.ValidateChain(ctx, sideBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	require.Equal(t, sideBlock.Hash(), validation.LatestValidHash)
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		require.Equal(t, tip.Hash(), rawdb.ReadHeadBlockHash(tx))
+		executionProgress, err := stages.GetStageProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		require.Equal(t, tip.NumberU64(), executionProgress)
+		return nil
+	}))
+}
+
 // newChainPrunedBelowFinalizedTip executes blocks 1-4, finalizes block 4 and
 // waits for the background prune, after which an unwind to block 2 fails with
 // "too far unwind".
@@ -2733,6 +2792,44 @@ func TestInsertBlocksRejectsInvalidBlockAccessList(t *testing.T) {
 
 	_, err = m.InsertBlocks(t.Context(), []*types.Block{block})
 	require.ErrorIs(t, err, types.ErrInvalidBlockAccessList)
+}
+
+func TestInsertBlocksBoundsBlockAccessIndexByTransactionCount(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(0, m.Address, uint256.NewInt(0), 50_000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID),
+			m.Key,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	block := chainPack.Blocks[0]
+	require.Len(t, block.Transactions(), 1)
+
+	withNonceChangeAt := func(index uint32) *types.Block {
+		header := block.Header()
+		bal := types.BlockAccessList{{
+			Address:      common.Address{1},
+			NonceChanges: []*types.NonceChange{{Index: index}},
+		}}
+		encoded, err := types.EncodeBlockAccessListBytes(bal)
+		require.NoError(t, err)
+		balHash := crypto.Keccak256Hash(encoded)
+		header.BlockAccessListHash = &balHash
+		return types.NewBlockFromNetwork(header, block.Body(), types.NewBlockAccessListSidecar(bal))
+	}
+	postExecutionIndex := uint32(len(block.Transactions())) + 1
+
+	_, err = m.InsertBlocks(t.Context(), []*types.Block{withNonceChangeAt(postExecutionIndex + 1)})
+	require.ErrorIs(t, err, types.ErrInvalidBlockAccessList)
+	require.ErrorContains(t, err, "block access index")
+
+	_, err = m.InsertBlocks(t.Context(), []*types.Block{withNonceChangeAt(postExecutionIndex)})
+	require.NoError(t, err)
 }
 
 func TestInsertBlocksRejectsBlockAccessListHashMismatch(t *testing.T) {

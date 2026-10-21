@@ -34,6 +34,7 @@ var (
 	// A streamed response the client did not receive in full. Batch and
 	// non-streaming replies never touch the stream, so they are not counted.
 	undeliveredGauge = metrics.GetOrCreateCounter("rpc_undelivered_total")
+	ingressRejected  = metrics.GetOrCreateCounter("rpc_ingress_rejected_total")
 )
 
 // PreAllocateRPCMetricLabels pre-allocates labels for all rpc methods inside API List

@@ -122,6 +122,8 @@ func runCaplinNode(ctx context.Context, cliCtx *cli.Command) error {
 		CustomConfigPath:          cfg.CustomConfig,
 		CustomGenesisStatePath:    cfg.CustomGenesisState,
 		MaxPeerCount:              cfg.MaxPeerCount,
+		DisableIPBlockLimits:      cfg.DisableIPBlockLimits,
+		TrustedCIDRs:              cfg.TrustedCIDRs,
 		SubscribeAllTopics:        cfg.SubscribeAllTopics,
 		MaxInboundTrafficPerPeer:  datasize.MB,
 		MaxOutboundTrafficPerPeer: datasize.MB,

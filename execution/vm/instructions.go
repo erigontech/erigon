@@ -143,8 +143,26 @@ func opExp(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		} else {
 			exponent.Clear()
 		}
+	case base[0]&base[1]&base[2]&base[3] == math.MaxUint64:
+		if exponent[0]&1 == 0 {
+			exponent.SetOne()
+		} else {
+			exponent.SetAllOne()
+		}
 	default:
-		exponent.Exp(base, exponent)
+		if base.IsUint64() && exponent.LtUint64(64) && uint64(base.BitLen())*exponent.Uint64() <= 64 {
+			result, factor, power := uint64(1), base.Uint64(), exponent.Uint64()
+			for power != 0 {
+				if power&1 != 0 {
+					result *= factor
+				}
+				factor *= factor
+				power >>= 1
+			}
+			exponent.SetUint64(result)
+		} else {
+			exponent.Exp(base, exponent)
+		}
 	}
 	return pc, nil, nil
 }
@@ -373,9 +391,21 @@ func opKeccak256(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 	return pc, nil, nil
 }
 
+func (ctx *CallContext) addressWord(index addressWordIndex, address accounts.Address) *uint256.Int {
+	if !ctx.addressWordsSet[index] {
+		ctx.fillAddressWord(index, address)
+	}
+	return &ctx.addressWords[index]
+}
+
+func (ctx *CallContext) fillAddressWord(index addressWordIndex, address accounts.Address) {
+	value := address.Value()
+	ctx.addressWords[index].SetBytes(value[:])
+	ctx.addressWordsSet[index] = true
+}
+
 func opAddress(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	addrVal := scope.Contract.Address().Value()
-	scope.Stack.pushRef().SetBytes(addrVal[:])
+	*scope.Stack.pushRef() = *scope.addressWord(addressWordSelf, scope.Contract.Address())
 	return pc, nil, nil
 }
 
@@ -393,22 +423,12 @@ func opBalance(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 }
 
 func opOrigin(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if origin := evm.Origin; origin.IsNil() {
-		scope.Stack.pushRef().Clear()
-	} else {
-		originVal := origin.Value()
-		scope.Stack.pushRef().SetBytes(originVal[:])
-	}
+	*scope.Stack.pushRef() = *scope.addressWord(addressWordOrigin, evm.Origin)
 	return pc, nil, nil
 }
 
 func opCaller(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if caller := scope.Contract.Caller(); caller.IsNil() {
-		scope.Stack.pushRef().Clear()
-	} else {
-		callerValue := caller.Value()
-		scope.Stack.pushRef().SetBytes(callerValue[:])
-	}
+	*scope.Stack.pushRef() = *scope.addressWord(addressWordCaller, scope.Contract.Caller())
 	return pc, nil, nil
 }
 
@@ -686,12 +706,7 @@ func stBlockhash(_ uint64, scope *CallContext) string {
 }
 
 func opCoinbase(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if coinbase := evm.Context.Coinbase; coinbase.IsNil() {
-		scope.Stack.pushRef().Clear()
-	} else {
-		coinbaseValue := coinbase.Value()
-		scope.Stack.pushRef().SetBytes(coinbaseValue[:])
-	}
+	*scope.Stack.pushRef() = *scope.addressWord(addressWordCoinbase, evm.Context.Coinbase)
 	return pc, nil, nil
 }
 
@@ -758,6 +773,15 @@ func opMstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 func stMstore(_ uint64, scope *CallContext) string {
 	mStart, val := scope.Stack.data[scope.Stack.top-1], scope.Stack.data[scope.Stack.top-2]
 	return fmt.Sprintf("%s %d %d", MSTORE, mStart.Uint64(), &val)
+}
+
+// opMcopy implements the MCOPY opcode (https://eips.ethereum.org/EIPS/eip-5656)
+func opMcopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	// These values are checked for overflow during memory expansion calculation
+	// (the memorySize function on the opcode).
+	dst, src, length := scope.Stack.pop3()
+	scope.Memory.Copy(dst.Uint64(), src.Uint64(), length.Uint64())
+	return pc, nil, nil
 }
 
 func opMstore8(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
@@ -1544,14 +1568,15 @@ func makeLog(size int) executionFunc {
 			return pc, nil, nil
 		}
 		mem := scope.Memory.GetPtr(mStart, mSize)
-		log := ibs.AllocLog(scope.Contract.Address().Value(), size, len(mem))
+		log := ibs.AllocLog(scope.Contract.Address().Value(), size, 0)
 		// This is a non-consensus field, but assigned here because
 		// execution/state doesn't know the current block number.
 		log.BlockNumber = hexutil.Uint64(evm.Context.BlockNumber)
 		for i := range size {
 			log.Topics[i] = stack.pop().Bytes32()
 		}
-		copy(log.Data, mem)
+		// Append fills a new buffer without zeroing it before the copy.
+		log.Data = append(log.Data, mem...)
 		ibs.NotifyLog(log)
 		return pc, nil, nil
 	}
