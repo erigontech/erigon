@@ -27,7 +27,7 @@ import (
 
 var (
 	precompileSeed, precompileCheckSeed = maphash.MakeSeed(), maphash.MakeSeed()
-	precompileResults                   = cache.NewByteLRU(8*datasize.MB, func(_ uint64, r precompileResult) int64 {
+	precompileResults                   = cache.NewByteLRU(32*datasize.MB, func(_ uint64, r precompileResult) int64 {
 		return int64(len(r.output) + 64)
 	})
 )
