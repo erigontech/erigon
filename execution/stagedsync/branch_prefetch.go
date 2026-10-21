@@ -246,30 +246,26 @@ func (p *branchPrefetcher) shard(key []byte) *prefetchedShard {
 	return &p.shards[maphash.Bytes(p.seed, key)%branchPrefetchShards]
 }
 
-func (p *branchPrefetcher) get(key []byte) ([]byte, kv.Step, bool) {
+func (p *branchPrefetcher) lookup(key []byte) (prefetchedRecord, bool) {
 	if ov := p.overlay.Load(); ov != nil {
 		if r, ok := (*ov)[string(key)]; ok {
-			return r.data, r.step, true
+			return r, true
 		}
 	}
 	s := p.shard(key)
 	s.mu.RLock()
 	r, ok := s.records[string(key)]
 	s.mu.RUnlock()
+	return r, ok
+}
+
+func (p *branchPrefetcher) get(key []byte) ([]byte, kv.Step, bool) {
+	r, ok := p.lookup(key)
 	return r.data, r.step, ok
 }
 
 func (p *branchPrefetcher) leafRefs(key, data []byte) *commitment.LeafRefs {
-	r, ok := prefetchedRecord{}, false
-	if ov := p.overlay.Load(); ov != nil {
-		r, ok = (*ov)[string(key)]
-	}
-	if !ok {
-		s := p.shard(key)
-		s.mu.RLock()
-		r, ok = s.records[string(key)]
-		s.mu.RUnlock()
-	}
+	r, ok := p.lookup(key)
 	if !ok || len(r.data) != len(data) || &r.data[0] != &data[0] {
 		return nil
 	}
