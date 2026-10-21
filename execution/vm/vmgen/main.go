@@ -99,32 +99,44 @@ func fastOps() []fastOp {
 // coldOps are cheap constant-gas ops that run inline in a second switch after
 // the fastOps one. A separate switch keeps the hot ops' compare tree as shallow
 // as it was; the DUPs and SWAPs share a case each, or Go compiles it to a jump table.
+// They are in opcode order: the switch is skipped for ops below the first or above the last.
 func coldOps() []fastOp {
 	op := func(name, execute string) fastOp {
 		return fastOp{name: name, execute: execute, gas: "GasQuickStep", push: 1}
 	}
-	forked := func(name, execute string) fastOp {
-		o := op(name, execute)
+	forked := func(o fastOp) fastOp {
 		o.fork = true
 		return o
 	}
+	alu := func(name, execute string, pop int) fastOp {
+		return fastOp{name: name, execute: execute, gas: "GasFastestStep", pop: pop, push: 1}
+	}
 	ops := []fastOp{
+		alu("SLT", "opSlt", 2),
+		alu("SGT", "opSgt", 2),
+		alu("OR", "opOr", 2),
+		alu("XOR", "opXor", 2),
+		alu("NOT", "opNot", 1),
+		alu("BYTE", "opByte", 2),
+		forked(alu("SHL", "opSHL", 2)),
+		forked(alu("SHR", "opSHR", 2)),
+		forked(alu("SAR", "opSAR", 2)),
 		op("ADDRESS", "opAddress"),
 		op("ORIGIN", "opOrigin"),
 		op("CALLER", "opCaller"),
 		op("CALLDATASIZE", "opCallDataSize"),
 		op("CODESIZE", "opCodeSize"),
 		op("GASPRICE", "opGasprice"),
-		forked("RETURNDATASIZE", "opReturnDataSize"),
+		forked(op("RETURNDATASIZE", "opReturnDataSize")),
 		op("COINBASE", "opCoinbase"),
 		op("TIMESTAMP", "opTimestamp"),
 		op("NUMBER", "opNumber"),
 		op("DIFFICULTY", "opDifficulty"),
 		op("GASLIMIT", "opGasLimit"),
-		forked("CHAINID", "opChainID"),
-		forked("BASEFEE", "opBaseFee"),
-		forked("BLOBBASEFEE", "opBlobBaseFee"),
-		forked("PUSH0", "opPush0"),
+		forked(op("CHAINID", "opChainID")),
+		forked(op("BASEFEE", "opBaseFee")),
+		forked(op("BLOBBASEFEE", "opBlobBaseFee")),
+		forked(op("PUSH0", "opPush0")),
 		op("PC", "opPc"),
 		op("MSIZE", "opMsize"),
 		op("GAS", "opGas"),
@@ -359,7 +371,7 @@ func fastSwitch(srcs map[string][]byte, ops []fastOp) string {
 		}
 		switch {
 		case o.index != "":
-			n, _ := strconv.Atoi(strings.TrimLeft(o.name, "DUPSWA"))
+			n, _ := strconv.Atoi(strings.TrimLeft(o.name, "DUPSWAP"))
 			cond = append(cond, fmt.Sprintf("sLen >= %s+%d", o.index, o.pop-n+1))
 		case o.pop > 0:
 			cond = append(cond, fmt.Sprintf("sLen >= %d", o.pop))
@@ -394,6 +406,12 @@ func fastSwitch(srcs map[string][]byte, ops []fastOp) string {
 	}
 	b.WriteString("}\n")
 	return b.String()
+}
+
+// coldSwitch is fastSwitch behind a range check, so the ops outside the range
+// skip its compare tree with one compare.
+func coldSwitch(srcs map[string][]byte, ops []fastOp) string {
+	return fmt.Sprintf("if op >= %s && op <= %s {\n%s}\n", ops[0].name, ops[len(ops)-1].name, fastSwitch(srcs, ops))
 }
 
 // untraced returns runTraced as run in a file of its own, with anyTrace set
@@ -537,7 +555,7 @@ func read(name string) []byte {
 func main() {
 	check := len(os.Args) > 1 && os.Args[1] == "-check"
 	srcs := map[string][]byte{"instructions.go": read("instructions.go"), "eips.go": read("eips.go")}
-	switches := "sLen := stack.len()\n" + fastSwitch(srcs, fastOps()) + fastSwitch(srcs, coldOps())
+	switches := "sLen := stack.len()\n" + fastSwitch(srcs, fastOps()) + coldSwitch(srcs, coldOps())
 	ops := append(fastOps(), coldOps()...)
 	files := []struct {
 		name string
