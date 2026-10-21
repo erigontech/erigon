@@ -352,24 +352,21 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	}
 	ret.SetLatestExecutionPayloadBid(latestBid)
 
-	// Queue-based fields: Builders, BuilderPendingWithdrawals, PayloadExpectedWithdrawals.
-	// Use ReadRequiredQueueSSZ (not ReadQueueSSZ) so that missing dump data on
-	// upgraded DBs surfaces ErrMissingGloasData instead of silently producing
-	// empty lists.
+	gloasForkSlot := r.cfg.GloasForkEpoch * r.cfg.SlotsPerEpoch
 	builders := solid.NewStaticListSSZ[*cltypes.Builder](int(r.cfg.BuilderRegistryLimit), new(cltypes.Builder).EncodingSizeSSZ())
-	if err := ReadRequiredQueueSSZ(kvGetter, slot, kv.BuildersDump, kv.Builders, builders); err != nil {
+	if err := ReadRequiredQueueSSZ(kvGetter, slot, gloasForkSlot, kv.BuildersDump, kv.Builders, builders); err != nil {
 		return nil, fmt.Errorf("failed to read builders: %w", err)
 	}
 	ret.SetBuilders(builders)
 
 	builderPendingWithdrawals := solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](int(r.cfg.BuilderPendingWithdrawalsLimit), new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ())
-	if err := ReadRequiredQueueSSZ(kvGetter, slot, kv.BuilderPendingWithdrawalsDump, kv.BuilderPendingWithdrawals, builderPendingWithdrawals); err != nil {
+	if err := ReadRequiredQueueSSZ(kvGetter, slot, gloasForkSlot, kv.BuilderPendingWithdrawalsDump, kv.BuilderPendingWithdrawals, builderPendingWithdrawals); err != nil {
 		return nil, fmt.Errorf("failed to read builder pending withdrawals: %w", err)
 	}
 	ret.SetBuilderPendingWithdrawals(builderPendingWithdrawals)
 
 	payloadExpectedWithdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(r.cfg.MaxWithdrawalsPerPayload), new(cltypes.Withdrawal).EncodingSizeSSZ())
-	if err := ReadRequiredQueueSSZ(kvGetter, slot, kv.PayloadExpectedWithdrawalsDump, kv.PayloadExpectedWithdrawals, payloadExpectedWithdrawals); err != nil {
+	if err := ReadRequiredQueueSSZ(kvGetter, slot, gloasForkSlot, kv.PayloadExpectedWithdrawalsDump, kv.PayloadExpectedWithdrawals, payloadExpectedWithdrawals); err != nil {
 		return nil, fmt.Errorf("failed to read payload expected withdrawals: %w", err)
 	}
 	ret.SetPayloadExpectedWithdrawals(payloadExpectedWithdrawals)
@@ -1073,38 +1070,34 @@ func ReadQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValF
 	return nil
 }
 
-// ReadRequiredQueueSSZ is like ReadQueueSSZ but returns ErrMissingGloasData if
-// the dump table contains no entry for the target dump slot. Used for GLOAS
-// queue fields where missing data indicates an unbackfilled DB upgrade rather
-// than a genuinely empty list.
-//
-// Unlike calling ReadQueueSSZ after a separate existence check, this function
-// reads the dump key exactly once and reuses the bytes for decoding.
-func ReadRequiredQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValFn, slot uint64, dumpTable, diffsTable string, out *solid.ListSSZ[T]) error {
+// ReadRequiredQueueSSZ is like ReadQueueSSZ but returns ErrMissingGloasData when
+// the dump is missing and its slot is at or after forkSlot. A dump slot before
+// forkSlot has no dump, so the diffs are applied to an empty list.
+func ReadRequiredQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValFn, slot, forkSlot uint64, dumpTable, diffsTable string, out *solid.ListSSZ[T]) error {
 	freshDumpSlot := slot - slot%clparams.SlotsPerDump
 	compressed, err := kvGetter(dumpTable, base_encoding.Encode64ToBytes4(freshDumpSlot))
 	if err != nil {
 		return err
 	}
-	if len(compressed) == 0 {
+	if len(compressed) == 0 && freshDumpSlot >= forkSlot {
 		return fmt.Errorf("%w: table %s, slot %d", ErrMissingGloasData, dumpTable, slot)
 	}
 
-	// Decompress and decode the dump.
-	zstdReader, err := base_encoding.GetZstdReader(bytes.NewReader(compressed))
-	if err != nil {
-		return err
-	}
-	sszEnc, err := io.ReadAll(zstdReader)
-	base_encoding.PutZstdReader(zstdReader)
-	if err != nil {
-		return err
-	}
-	if err := out.DecodeSSZ(sszEnc, 0); err != nil {
-		return err
+	if len(compressed) != 0 {
+		zstdReader, err := base_encoding.GetZstdReader(bytes.NewReader(compressed))
+		if err != nil {
+			return err
+		}
+		sszEnc, err := io.ReadAll(zstdReader)
+		base_encoding.PutZstdReader(zstdReader)
+		if err != nil {
+			return err
+		}
+		if err := out.DecodeSSZ(sszEnc, 0); err != nil {
+			return err
+		}
 	}
 
-	// Apply per-slot diffs from dump+1 to target slot.
 	for currSlot := freshDumpSlot + 1; currSlot <= slot; currSlot++ {
 		key := base_encoding.Encode64ToBytes4(currSlot)
 		v, err := kvGetter(diffsTable, key)

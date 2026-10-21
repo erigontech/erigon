@@ -163,29 +163,36 @@ func TestReadCompressedSSZ_MissingData(t *testing.T) {
 
 // TestReadRequiredQueueSSZ_MissingDump verifies that ReadRequiredQueueSSZ
 // returns ErrMissingGloasData when the dump table has no entry for the
-// target dump slot, rather than silently returning an empty list.
+// target dump slot at or after the fork.
 func TestReadRequiredQueueSSZ_MissingDump(t *testing.T) {
 	// Use a slot that is NOT dump-aligned so the function computes a dump slot
 	// and looks it up.
 	slot := uint64(clparams.SlotsPerDump + 10) // dump slot = SlotsPerDump, query slot = SlotsPerDump+10
+	forkSlot := uint64(32)
 	getter := mockGetValFn(map[string]map[string][]byte{})
 
 	builders := solid.NewStaticListSSZ[*cltypes.Builder](1024, new(cltypes.Builder).EncodingSizeSSZ())
-	err := ReadRequiredQueueSSZ(getter, slot, kv.BuildersDump, kv.Builders, builders)
+	err := ReadRequiredQueueSSZ(getter, slot, forkSlot, kv.BuildersDump, kv.Builders, builders)
 	require.ErrorIs(t, err, ErrMissingGloasData)
 	require.ErrorContains(t, err, kv.BuildersDump)
 
 	// Same for BuilderPendingWithdrawals
 	bpw := solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](1024, new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ())
-	err = ReadRequiredQueueSSZ(getter, slot, kv.BuilderPendingWithdrawalsDump, kv.BuilderPendingWithdrawals, bpw)
+	err = ReadRequiredQueueSSZ(getter, slot, forkSlot, kv.BuilderPendingWithdrawalsDump, kv.BuilderPendingWithdrawals, bpw)
 	require.ErrorIs(t, err, ErrMissingGloasData)
 	require.ErrorContains(t, err, kv.BuilderPendingWithdrawalsDump)
 
 	// Same for PayloadExpectedWithdrawals
 	pew := solid.NewStaticListSSZ[*cltypes.Withdrawal](16, new(cltypes.Withdrawal).EncodingSizeSSZ())
-	err = ReadRequiredQueueSSZ(getter, slot, kv.PayloadExpectedWithdrawalsDump, kv.PayloadExpectedWithdrawals, pew)
+	err = ReadRequiredQueueSSZ(getter, slot, forkSlot, kv.PayloadExpectedWithdrawalsDump, kv.PayloadExpectedWithdrawals, pew)
 	require.ErrorIs(t, err, ErrMissingGloasData)
 	require.ErrorContains(t, err, kv.PayloadExpectedWithdrawalsDump)
+
+	boundarySlot := uint64(clparams.SlotsPerDump)
+	boundaryBuilders := solid.NewStaticListSSZ[*cltypes.Builder](1024, new(cltypes.Builder).EncodingSizeSSZ())
+	err = ReadRequiredQueueSSZ(getter, boundarySlot, boundarySlot, kv.BuildersDump, kv.Builders, boundaryBuilders)
+	require.ErrorIs(t, err, ErrMissingGloasData)
+	require.ErrorContains(t, err, kv.BuildersDump)
 }
 
 // TestReadRequiredQueueSSZ_WithData verifies that ReadRequiredQueueSSZ
@@ -208,7 +215,7 @@ func TestReadRequiredQueueSSZ_WithData(t *testing.T) {
 	})
 
 	got := solid.NewStaticListSSZ[*cltypes.Builder](1024, new(cltypes.Builder).EncodingSizeSSZ())
-	require.NoError(t, ReadRequiredQueueSSZ(getter, slot, kv.BuildersDump, kv.Builders, got))
+	require.NoError(t, ReadRequiredQueueSSZ(getter, slot, slot, kv.BuildersDump, kv.Builders, got))
 	require.Equal(t, 1, got.Len())
 	require.Equal(t, common.Bytes48{0x01}, got.Get(0).Pubkey)
 }
@@ -462,29 +469,28 @@ func TestReadQueueSSZ_BuildersDumpWithDiffs(t *testing.T) {
 // Integration test: ReadHistoricalState() end-to-end for GLOAS
 // ---------------------------------------------------------------------------
 
-// TestReadHistoricalState_GloasFieldsReconstruction populates a memdb with the
-// minimal data needed for ReadHistoricalState() to succeed at a GLOAS-version
-// slot, then verifies that all 9 GLOAS fields are correctly reconstructed.
-//
-// This is the key integration test: it calls ReadHistoricalState() end-to-end,
-// proving the version gate, table names, type construction, and setter wiring
-// are all correct.
-func TestReadHistoricalState_GloasFieldsReconstruction(t *testing.T) {
-	cfg := &clparams.MainnetBeaconConfig
-	// Use slot at an epoch boundary to simplify balance reconstruction
-	// (no per-slot diff needed when slot % SlotsPerEpoch == 0).
-	slot := cfg.SlotsPerEpoch // = 32
+type gloasHistoricalStateFixture struct {
+	db                                 kv.RwDB
+	reader                             *HistoricalStatesReader
+	expectedLatestBlockHash            common.Hash
+	expectedNextWithdrawalBuilderIndex uint64
+	expectedBid                        *cltypes.ExecutionPayloadBid
+	expectedBuilders                   *solid.ListSSZ[*cltypes.Builder]
+	expectedBPW                        *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal]
+	expectedPEW                        *solid.ListSSZ[*cltypes.Withdrawal]
+}
 
-	// ---- Genesis state (mainnet has real validators) ----
+func seedGloasHistoricalState(t *testing.T, cfg *clparams.BeaconChainConfig, slot uint64) *gloasHistoricalStateFixture {
+	t.Helper()
+	require.Zero(t, slot%cfg.SlotsPerEpoch)
+
 	genesisState, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 	numValidators := uint64(genesisState.ValidatorLength())
 
-	// ---- Build the expected GLOAS test data ----
 	expectedLatestBlockHash := common.HexToHash("0xabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
 	expectedNextWithdrawalBuilderIndex := uint64(42)
 
-	// ExecutionPayloadBid
 	expectedBid := &cltypes.ExecutionPayloadBid{
 		ParentBlockHash:       common.HexToHash("0x1100000000000000000000000000000000000000000000000000000000000011"),
 		BlockHash:             common.HexToHash("0x2200000000000000000000000000000000000000000000000000000000000022"),
@@ -495,14 +501,12 @@ func TestReadHistoricalState_GloasFieldsReconstruction(t *testing.T) {
 		ExecutionRequestsRoot: common.HexToHash("0x3300000000000000000000000000000000000000000000000000000000000033"),
 	}
 
-	// Builders list
 	expectedBuilders := solid.NewStaticListSSZ[*cltypes.Builder](int(cfg.BuilderRegistryLimit), new(cltypes.Builder).EncodingSizeSSZ())
 	expectedBuilders.Append(&cltypes.Builder{
 		Pubkey: common.Bytes48{0xAA}, Version: 1, Balance: 999,
 		ExecutionAddress: common.HexToAddress("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"),
 	})
 
-	// BuilderPendingWithdrawals list
 	expectedBPW := solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](
 		int(cfg.BuilderPendingWithdrawalsLimit), new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ(),
 	)
@@ -511,17 +515,14 @@ func TestReadHistoricalState_GloasFieldsReconstruction(t *testing.T) {
 		Amount:       777, BuilderIndex: 3,
 	})
 
-	// PayloadExpectedWithdrawals list
 	expectedPEW := solid.NewStaticListSSZ[*cltypes.Withdrawal](
 		int(cfg.MaxWithdrawalsPerPayload), new(cltypes.Withdrawal).EncodingSizeSSZ(),
 	)
 
-	// ExecutionPayloadAvailability bit-vector — seed two non-zero bits
 	expectedEPA := solid.NewBitVector(int(cfg.SlotsPerHistoricalRoot))
 	require.NoError(t, expectedEPA.SetBitAt(7, true))
 	require.NoError(t, expectedEPA.SetBitAt(100, true))
 
-	// BuilderPendingPayments vector — seed a non-zero entry at index 3
 	expectedBPP := solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](int(2 * cfg.SlotsPerEpoch))
 	expectedBPP.Set(3, &cltypes.BuilderPendingPayment{
 		Weight: 12345,
@@ -532,11 +533,9 @@ func TestReadHistoricalState_GloasFieldsReconstruction(t *testing.T) {
 		},
 	})
 
-	// PtcWindow vector of vectors — seed a non-zero entry at outer=2, inner=5
 	expectedPtcWindow := solid.NewUint64VectorOfVectors(int((2+cfg.MinSeedLookahead)*cfg.SlotsPerEpoch), int(cfg.PtcSize))
 	expectedPtcWindow.Get(2).Set(5, 42)
 
-	// ---- Build SlotData (GLOAS version, use real numValidators from genesis) ----
 	slotData := &state_accessors.SlotData{
 		Version:                      clparams.GloasVersion,
 		ValidatorLength:              numValidators,
@@ -550,7 +549,6 @@ func TestReadHistoricalState_GloasFieldsReconstruction(t *testing.T) {
 		LatestBlockHash:              expectedLatestBlockHash,
 	}
 
-	// ---- Build EpochData (GLOAS requires >= FuluVersion, so ProposerLookahead included) ----
 	epochData := &state_accessors.EpochData{
 		TotalActiveBalance:          1_000_000,
 		JustificationBits:           &cltypes.JustificationBits{},
@@ -564,7 +562,6 @@ func TestReadHistoricalState_GloasFieldsReconstruction(t *testing.T) {
 		Version:                     clparams.GloasVersion,
 	}
 
-	// ---- Serialize SlotData / EpochData ----
 	var slotDataBuf bytes.Buffer
 	require.NoError(t, slotData.WriteTo(&slotDataBuf))
 
@@ -572,11 +569,10 @@ func TestReadHistoricalState_GloasFieldsReconstruction(t *testing.T) {
 	require.NoError(t, epochData.WriteTo(&epochDataBuf))
 
 	slotKey := base_encoding.Encode64ToBytes4(slot)
-	roundedSlot := cfg.RoundSlotToEpoch(slot) // = slot for epoch boundary
+	roundedSlot := cfg.RoundSlotToEpoch(slot)
 	roundedKey := base_encoding.Encode64ToBytes4(roundedSlot)
 	genesisKey := base_encoding.Encode64ToBytes4(0)
 
-	// ---- Create a block at the target slot ----
 	block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
 	block.Block.Slot = slot
 	block.Block.ProposerIndex = 0
@@ -584,53 +580,24 @@ func TestReadHistoricalState_GloasFieldsReconstruction(t *testing.T) {
 
 	mockReader := tests.NewMockBlockReader()
 	mockReader.U[slot] = block
-	// Also provide blocks for participation loop (beginSlot..slot).
-	// The reader returns nil for missing slots, which is handled gracefully.
 
-	// ---- Prepare compressed data for DB tables ----
-	// Balance dump at genesis (slot 0): real genesis has numValidators balances.
 	genesisBalances := make([]byte, numValidators*8)
 	compressedBalances := compressRawSSZ(t, genesisBalances)
-
-	// Effective balance dump at genesis
 	compressedEffBalances := compressRawSSZ(t, genesisBalances)
-
-	// Slashings dump (EpochsPerSlashingsVector * 8 bytes)
 	compressedSlashings := compressZeros(t, int(cfg.EpochsPerSlashingsVector)*8)
-
-	// Inactivity scores dump (numValidators * 8 bytes)
 	compressedInactivity := compressZeros(t, int(numValidators)*8)
-
-	// IntraRandaoMixes: 32 zero bytes
 	intraRandaoMix := make([]byte, 32)
 
-	// GLOAS compressed fields
 	compressedBid := compressSSZ(t, expectedBid)
 	compressedEPA := compressSSZ(t, expectedEPA)
 	compressedBPP := compressSSZ(t, expectedBPP)
 	compressedPtcWindow := compressSSZ(t, expectedPtcWindow)
 
-	// GLOAS queue dumps
-	buildersSSZ, err := expectedBuilders.EncodeSSZ(nil)
-	require.NoError(t, err)
-	compressedBuilders := compressRawSSZ(t, buildersSSZ)
-
-	bpwSSZ, err := expectedBPW.EncodeSSZ(nil)
-	require.NoError(t, err)
-	compressedBPW := compressRawSSZ(t, bpwSSZ)
-
-	pewSSZ, err := expectedPEW.EncodeSSZ(nil)
-	require.NoError(t, err)
-	compressedPEW := compressRawSSZ(t, pewSSZ)
-
-	// ---- Populate memdb ----
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	// Block roots and state roots: ReadHistoricalState needs 32 entries
-	// (one per slot from 0 to slot-1) for readHistoryHashVector.
 	zeroHash := make([]byte, 32)
 	for i := range slot {
 		k := base_encoding.Encode64ToBytes4(i)
@@ -638,58 +605,119 @@ func TestReadHistoricalState_GloasFieldsReconstruction(t *testing.T) {
 		require.NoError(t, tx.Put(kv.StateRoot, k, zeroHash))
 	}
 
-	// State processing progress
 	require.NoError(t, tx.Put(kv.StatesProcessingProgress, kv.StatesProcessingKey, slotKey))
-
-	// SlotData
 	require.NoError(t, tx.Put(kv.SlotData, slotKey, slotDataBuf.Bytes()))
-
-	// EpochData
 	require.NoError(t, tx.Put(kv.EpochData, roundedKey, epochDataBuf.Bytes()))
-
-	// Balance dump at genesis
 	require.NoError(t, tx.Put(kv.BalancesDump, genesisKey, compressedBalances))
-
-	// Effective balance dump at genesis
 	require.NoError(t, tx.Put(kv.EffectiveBalancesDump, genesisKey, compressedEffBalances))
-
-	// IntraRandaoMixes
 	require.NoError(t, tx.Put(kv.IntraRandaoMixes, slotKey, intraRandaoMix))
-
-	// Slashings dump at genesis
 	require.NoError(t, tx.Put(kv.ValidatorSlashings, genesisKey, compressedSlashings))
-
-	// Inactivity scores dump at genesis
 	require.NoError(t, tx.Put(kv.InactivityScores, genesisKey, compressedInactivity))
-
-	// GLOAS per-slot compressed fields
 	require.NoError(t, tx.Put(kv.LatestExecutionPayloadBidTable, slotKey, compressedBid))
 	require.NoError(t, tx.Put(kv.ExecutionPayloadAvailabilityTable, slotKey, compressedEPA))
 	require.NoError(t, tx.Put(kv.BuilderPendingPaymentsTable, slotKey, compressedBPP))
 	require.NoError(t, tx.Put(kv.PtcWindowTable, slotKey, compressedPtcWindow))
 
-	// GLOAS queue dumps at genesis (slot 0)
-	require.NoError(t, tx.Put(kv.BuildersDump, genesisKey, compressedBuilders))
-	require.NoError(t, tx.Put(kv.BuilderPendingWithdrawalsDump, genesisKey, compressedBPW))
-	require.NoError(t, tx.Put(kv.PayloadExpectedWithdrawalsDump, genesisKey, compressedPEW))
-
 	require.NoError(t, tx.Commit())
 
-	// ---- Set up HistoricalStatesReader ----
 	vt := state_accessors.NewStaticValidatorTable()
-	vt.SetSlot(slot) // validator table must cover the target slot
+	vt.SetSlot(slot)
 
 	sn := synced_data.NewSyncedDataManager(cfg, true)
 	require.NoError(t, sn.OnHeadState(genesisState))
 
-	hr := NewHistoricalStatesReader(cfg, mockReader, vt, genesisState, nil, sn)
+	return &gloasHistoricalStateFixture{
+		db:                                 db,
+		reader:                             NewHistoricalStatesReader(cfg, mockReader, vt, genesisState, nil, sn),
+		expectedLatestBlockHash:            expectedLatestBlockHash,
+		expectedNextWithdrawalBuilderIndex: expectedNextWithdrawalBuilderIndex,
+		expectedBid:                        expectedBid,
+		expectedBuilders:                   expectedBuilders,
+		expectedBPW:                        expectedBPW,
+		expectedPEW:                        expectedPEW,
+	}
+}
 
-	// ---- Call ReadHistoricalState ----
-	roTx, err := db.BeginRo(context.Background())
+// TestReadHistoricalState_GloasQueuesBeforeFirstDump uses a fork slot that is
+// not aligned to SlotsPerDump, so the pre-fork dump is absent. The state is
+// rebuilt from the full-list diffs written at the fork slot.
+func TestReadHistoricalState_GloasQueuesBeforeFirstDump(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.GloasForkEpoch = 1
+	slot := cfg.GloasForkEpoch * cfg.SlotsPerEpoch
+	fixture := seedGloasHistoricalState(t, &cfg, slot)
+
+	tx, err := fixture.db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	var diff bytes.Buffer
+	buildersEncoder := base_encoding.NewSSZQueueEncoder[*cltypes.Builder](func(a, b *cltypes.Builder) bool { return *a == *b })
+	require.NoError(t, buildersEncoder.WriteDiff(&diff, fixture.expectedBuilders))
+	require.NoError(t, tx.Put(kv.Builders, base_encoding.Encode64ToBytes4(slot), diff.Bytes()))
+
+	diff.Reset()
+	bpwEncoder := base_encoding.NewSSZQueueEncoder[*cltypes.BuilderPendingWithdrawal](func(a, b *cltypes.BuilderPendingWithdrawal) bool { return *a == *b })
+	require.NoError(t, bpwEncoder.WriteDiff(&diff, fixture.expectedBPW))
+	require.NoError(t, tx.Put(kv.BuilderPendingWithdrawals, base_encoding.Encode64ToBytes4(slot), diff.Bytes()))
+
+	diff.Reset()
+	pewEncoder := base_encoding.NewSSZQueueEncoder[*cltypes.Withdrawal](func(a, b *cltypes.Withdrawal) bool { return *a == *b })
+	require.NoError(t, pewEncoder.WriteDiff(&diff, fixture.expectedPEW))
+	require.NoError(t, tx.Put(kv.PayloadExpectedWithdrawals, base_encoding.Encode64ToBytes4(slot), diff.Bytes()))
+	require.NoError(t, tx.Commit())
+
+	roTx, err := fixture.db.BeginRo(context.Background())
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	reconstructed, err := hr.ReadHistoricalState(context.Background(), roTx, slot)
+	reconstructed, err := fixture.reader.ReadHistoricalState(context.Background(), roTx, slot)
+	require.NoError(t, err)
+	require.Equal(t, 1, reconstructed.GetBuilders().Len())
+	require.Equal(t, common.Bytes48{0xAA}, reconstructed.GetBuilders().Get(0).Pubkey)
+	require.Equal(t, uint64(999), reconstructed.GetBuilders().Get(0).Balance)
+	require.Equal(t, 1, reconstructed.GetBuilderPendingWithdrawals().Len())
+	require.Equal(t, uint64(777), reconstructed.GetBuilderPendingWithdrawals().Get(0).Amount)
+	require.Equal(t, uint64(3), reconstructed.GetBuilderPendingWithdrawals().Get(0).BuilderIndex)
+	require.Equal(t, 0, reconstructed.GetPayloadExpectedWithdrawals().Len())
+}
+
+// TestReadHistoricalState_GloasFieldsReconstruction populates a memdb with the
+// minimal data needed for ReadHistoricalState() to succeed at a GLOAS-version
+// slot, then verifies that all 9 GLOAS fields are correctly reconstructed.
+func TestReadHistoricalState_GloasFieldsReconstruction(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	slot := cfg.SlotsPerEpoch
+	fixture := seedGloasHistoricalState(t, cfg, slot)
+
+	expectedLatestBlockHash := fixture.expectedLatestBlockHash
+	expectedNextWithdrawalBuilderIndex := fixture.expectedNextWithdrawalBuilderIndex
+	expectedBid := fixture.expectedBid
+	expectedBuilders := fixture.expectedBuilders
+	expectedBPW := fixture.expectedBPW
+	expectedPEW := fixture.expectedPEW
+
+	buildersSSZ, err := expectedBuilders.EncodeSSZ(nil)
+	require.NoError(t, err)
+	bpwSSZ, err := expectedBPW.EncodeSSZ(nil)
+	require.NoError(t, err)
+	pewSSZ, err := expectedPEW.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	tx, err := fixture.db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	genesisKey := base_encoding.Encode64ToBytes4(0)
+	require.NoError(t, tx.Put(kv.BuildersDump, genesisKey, compressRawSSZ(t, buildersSSZ)))
+	require.NoError(t, tx.Put(kv.BuilderPendingWithdrawalsDump, genesisKey, compressRawSSZ(t, bpwSSZ)))
+	require.NoError(t, tx.Put(kv.PayloadExpectedWithdrawalsDump, genesisKey, compressRawSSZ(t, pewSSZ)))
+	require.NoError(t, tx.Commit())
+
+	roTx, err := fixture.db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	reconstructed, err := fixture.reader.ReadHistoricalState(context.Background(), roTx, slot)
 	require.NoError(t, err)
 	require.NotNil(t, reconstructed, "ReadHistoricalState must not return nil for a GLOAS slot")
 
