@@ -280,6 +280,8 @@ func opExp(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		} else {
 			exponent.SetAllOne()
 		}
+	case base[0]&1 != 0 && !exponent.IsUint64():
+		expOdd(exponent, base, exponent)
 	default:
 		if base.IsUint64() && exponent.LtUint64(64) && uint64(base.BitLen())*exponent.Uint64() <= 64 {
 			result, factor, power := uint64(1), base.Uint64(), exponent.Uint64()
@@ -296,6 +298,32 @@ func opExp(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		}
 	}
 	return pc, nil, nil
+}
+
+// expOdd sets z = b**e mod 2**256 for odd b. Then p = b**(2**62) = 1 + u with u = 0 mod 2**64,
+// so p**h = 1 + h*u + C(h,2)*u**2 + C(h,3)*u**3 replaces the remaining squarings.
+func expOdd(z, b, e *uint256.Int) {
+	res, p := uint256.Int{1}, *b
+	for i := range 62 {
+		if e[0]>>i&1 != 0 {
+			res.Mul(&res, &p)
+		}
+		p.Mul(&p, &p)
+	}
+	var h, u, h1, h2, c2, poly uint256.Int
+	h.Rsh(e, 62)
+	u.SubUint64(&p, 1)
+	h1.SubUint64(&h, 1)
+	h2.SubUint64(&h, 2)
+	c2.Mul(&h, &h1)
+	poly.Mul(&c2, &h2)
+	c3 := poly.Rsh(&poly, 1)[0] * 0xaaaaaaaaaaaaaaab // C(h,3) mod 2**64; 0xaa..ab = 3**-1 mod 2**64
+	c2.Rsh(&c2, 1)
+	poly = uint256.Int{c3}
+	poly.Mul(&poly, &u).Add(&poly, &c2)
+	poly.Mul(&poly, &u).Add(&poly, &h)
+	poly.Mul(&poly, &u).AddUint64(&poly, 1)
+	z.Mul(&res, &poly)
 }
 
 func opSignExtend(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {

@@ -511,6 +511,19 @@ func BenchmarkExpSmallOperands(b *testing.B) {
 	}
 }
 
+func BenchmarkExpTower(b *testing.B) {
+	// Fixed points x = base**x mod 2**256: the operands of every EXP in EEST exp_bench_arithmetic.
+	for _, tc := range []struct{ base, exponent string }{
+		{"03", "8a5e0b27221309b932be85af9c8a042a0b3ad21d2543c3646504dbb73cb57b3b"},
+		{"07", "12770d0214a04265a8b18f64aebe54b60d92f96e13c9a6244f5768f4377a1e77"},
+		{"081f7721", "f7bcb1106bd6d3afaa5c95433be3b1bfc6f620b89ed0a439a7edafc1008cfb21"},
+	} {
+		b.Run(tc.base, func(b *testing.B) {
+			opBenchmark(b, opExp, tc.exponent, tc.base)
+		})
+	}
+}
+
 func BenchmarkExpInterpreter(b *testing.B) {
 	for _, base := range []uint64{3, 13, 136279841} {
 		b.Run(fmt.Sprint(base), func(b *testing.B) {
