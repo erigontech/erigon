@@ -18,6 +18,7 @@ package cache
 
 import (
 	"bytes"
+	"fmt"
 	"math"
 	"strings"
 	"sync"
@@ -302,6 +303,9 @@ func (c *StateCache) fillCodeWithHashIfFresh(key, value, codeHash []byte, readTx
 	codeCache, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok || len(value) == 0 || len(codeHash) != len(common.Hash{}) {
 		return
+	}
+	if dbg.AssertEnabled && !bytes.Equal(crypto.Keccak256(value), codeHash) {
+		panic(fmt.Sprintf("code fill: codeHash %x does not match the code", codeHash))
 	}
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
