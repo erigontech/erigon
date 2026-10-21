@@ -19,6 +19,7 @@ package pbt
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"runtime"
 	"slices"
@@ -218,6 +219,9 @@ func runPhasePlanWithFactory(ctx context.Context, workers int, plan phasePlan, f
 				workerContext, cleanup = factory(gctx)
 				if cleanup != nil {
 					defer cleanup()
+				}
+				if workerContext == nil {
+					return errors.New("trie context factory returned a nil context")
 				}
 			}
 			for {

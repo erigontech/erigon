@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"sync"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -52,7 +51,6 @@ type Trie struct {
 	ctx                    commitment.PatriciaContext
 	ctxFactory             commitment.TrieContextFactory
 	phaseBase              commitment.PatriciaContext
-	phaseReadMu            *sync.Mutex
 	phaseHook              func(phaseTask, *Op) error
 	joinHook               func(phaseTask, commitment.PatriciaContext) error
 	coreApplyHook          func(phaseTask, *Op) error

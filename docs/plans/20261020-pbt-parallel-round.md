@@ -345,13 +345,13 @@ flowchart LR
 - Modify: `execution/commitment/v3/pbt/schedule.go`
 - Modify: `execution/commitment/v3/pbt/parallel_round_test.go`
 
-- [ ] write a test first with a base whose `Branch` blocks until a second concurrent `Branch` arrives (with a
+- [x] write a test first with a base whose `Branch` blocks until a second concurrent `Branch` arrives (with a
       timeout). It times out under the lock and passes without it
-- [ ] delete `phaseReadMu`. A factory that returns a nil context fails the round with an error. Test factories that
+- [x] delete `phaseReadMu`. A factory that returns a nil context fails the round with an error. Test factories that
       return nil are fixed
-- [ ] run `go test -race ./execution/commitment/v3/pbt/...`
+- [x] run `go test -race ./execution/commitment/v3/pbt/...`
 - [ ] benchmark before/after through `ab-verdict`, plus a mutex profile at 8 workers
-- [ ] run gates — must pass before Task 8
+- [x] run gates — must pass before Task 8
 
 ### Task 8: Prev-check read only where the base can hold the record
 

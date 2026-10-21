@@ -22,7 +22,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"sync"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -33,7 +32,6 @@ import (
 type phaseContext struct {
 	base    commitment.PatriciaContext
 	records map[string][]byte
-	baseMu  *sync.Mutex
 	prefix  *eip8297.Bitpath
 	owners  []phaseOwner
 }
@@ -88,10 +86,6 @@ func (c *phaseContext) Branch(key []byte) ([]byte, kv.Step, error) {
 	if data, ok := c.records[string(key)]; ok {
 		return bytes.Clone(data), 0, nil
 	}
-	if c.baseMu != nil {
-		c.baseMu.Lock()
-		defer c.baseMu.Unlock()
-	}
 	data, step, err := c.base.Branch(key)
 	if err == nil {
 		c.records[string(key)] = bytes.Clone(data)
@@ -109,10 +103,6 @@ func (c *phaseContext) PutBranch(key, data, prev []byte) error {
 	current, ok := c.records[string(key)]
 	if !ok {
 		var err error
-		if c.baseMu != nil {
-			c.baseMu.Lock()
-			defer c.baseMu.Unlock()
-		}
 		current, _, err = c.base.Branch(key)
 		if err != nil {
 			return err
@@ -133,7 +123,7 @@ func (c *phaseContext) LeafRefs(key, data []byte) *commitment.LeafRefs {
 }
 
 func (t *Trie) newPhaseContext(base commitment.PatriciaContext, prefix *eip8297.Bitpath) *phaseContext {
-	return &phaseContext{base: base, records: make(map[string][]byte), baseMu: t.phaseReadMu, prefix: prefix}
+	return &phaseContext{base: base, records: make(map[string][]byte), prefix: prefix}
 }
 
 func (t *Trie) inheritHooks(dst *Trie) {
@@ -153,18 +143,10 @@ func descriptorWithFallback(descriptor bucketDescriptor, present bool, err error
 }
 
 func (c *phaseContext) Account(key []byte) (*commitment.Update, error) {
-	if c.baseMu != nil {
-		c.baseMu.Lock()
-		defer c.baseMu.Unlock()
-	}
 	return c.base.Account(key)
 }
 
 func (c *phaseContext) Storage(key []byte) (*commitment.Update, error) {
-	if c.baseMu != nil {
-		c.baseMu.Lock()
-		defer c.baseMu.Unlock()
-	}
 	return c.base.Storage(key)
 }
 
@@ -294,8 +276,6 @@ func opInSubtree(op Op, prefix *eip8297.Bitpath) error {
 
 func (t *Trie) processParallelPhaseA(ctx context.Context, workers int, plan phasePlan) (common.Hash, error) {
 	base := t.ctx
-	t.phaseReadMu = &sync.Mutex{}
-	defer func() { t.phaseReadMu = nil }()
 	round := t.newPhaseContext(base, nil)
 	t.ctx = round
 	t.phaseBase = base

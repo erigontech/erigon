@@ -643,3 +643,98 @@ func TestParallelRoundSplitBucketSubtaskRemovesOnlyAbsentSlots(t *testing.T) {
 		require.Equal(t, 3, parallelRoundCells(&record))
 	})
 }
+
+type parallelRoundRendezvousView struct {
+	*parallelRoundView
+	arrived *atomic.Int32
+	met     chan struct{}
+	wait    time.Duration
+}
+
+var errParallelRoundReadsSerialized = errors.New("no second worker read arrived while the first was in progress")
+
+func (v *parallelRoundRendezvousView) Branch(key []byte) ([]byte, kv.Step, error) {
+	if v.arrived.Add(1) == 2 {
+		close(v.met)
+	}
+	select {
+	case <-v.met:
+	case <-time.After(v.wait):
+		return nil, 0, errParallelRoundReadsSerialized
+	}
+	return v.parallelRoundView.Branch(key)
+}
+
+type parallelRoundExclusiveContext struct {
+	*trieTestContext
+	inFlight atomic.Int32
+	overlap  atomic.Bool
+}
+
+func (c *parallelRoundExclusiveContext) enter() func() {
+	if c.inFlight.Add(1) > 1 {
+		c.overlap.Store(true)
+	}
+	return func() { c.inFlight.Add(-1) }
+}
+
+func (c *parallelRoundExclusiveContext) Branch(key []byte) ([]byte, kv.Step, error) {
+	defer c.enter()()
+	return c.trieTestContext.Branch(key)
+}
+
+func (c *parallelRoundExclusiveContext) PutBranch(key, data, prev []byte) error {
+	defer c.enter()()
+	return c.trieTestContext.PutBranch(key, data, prev)
+}
+
+func (c *parallelRoundExclusiveContext) Account(key []byte) (*commitment.Update, error) {
+	defer c.enter()()
+	return c.trieTestContext.Account(key)
+}
+
+func (c *parallelRoundExclusiveContext) Storage(key []byte) (*commitment.Update, error) {
+	defer c.enter()()
+	return c.trieTestContext.Storage(key)
+}
+
+func TestParallelRoundWorkerReadsRunConcurrently(t *testing.T) {
+	corpus := newParallelRoundCorpus(t, parallelRoundTestShape)
+	r := rand.New(rand.NewSource(7))
+	for _, workers := range []int{2, 4, 8} {
+		t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
+			ops := corpus.updates(r, 200, 20)
+			sequential := &trieTestContext{records: maps.Clone(corpus.snapshot)}
+			wantRoot, err := NewTrie(sequential).Process(ops)
+			require.NoError(t, err)
+			base := newParallelRoundBase(corpus.snapshot)
+			main := &parallelRoundExclusiveContext{trieTestContext: base.main}
+			trie := NewTrie(main)
+			var arrived atomic.Int32
+			met := make(chan struct{})
+			wait := parallelRoundGateWait()
+			trie.SetTrieContextFactory(func(ctx context.Context) (commitment.PatriciaContext, func()) {
+				view, cleanup := base.view(ctx)
+				return &parallelRoundRendezvousView{parallelRoundView: view.(*parallelRoundView), arrived: &arrived, met: met, wait: wait}, cleanup
+			})
+			gotRoot, err := trie.ProcessParallelContext(t.Context(), ops, workers)
+			require.NotErrorIs(t, err, errParallelRoundReadsSerialized)
+			require.NoError(t, err)
+			require.Equal(t, wantRoot, gotRoot)
+			require.Equal(t, sequential.records, base.main.records)
+			require.False(t, main.overlap.Load(), "two goroutines were inside the main context at once")
+		})
+	}
+}
+
+func TestParallelRoundRejectsNilFactoryContext(t *testing.T) {
+	corpus := newParallelRoundCorpus(t, parallelRoundTestShape)
+	trie := newParallelRoundBase(corpus.snapshot).trie()
+	cleaned := atomic.Int32{}
+	trie.SetTrieContextFactory(func(context.Context) (commitment.PatriciaContext, func()) {
+		return nil, func() { cleaned.Add(1) }
+	})
+	_, err := trie.ProcessParallelContext(t.Context(), corpus.updates(rand.New(rand.NewSource(8)), 200, 20), 2)
+	require.ErrorContains(t, err, "trie context factory returned a nil context")
+	require.Positive(t, cleaned.Load())
+}
