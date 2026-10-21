@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"math/big"
 	"math/rand"
+	"slices"
 	"testing"
 )
 
@@ -181,10 +182,10 @@ func TestModExpRunAtRoutingBounds(t *testing.T) {
 				if expBits > 0 {
 					exp = operand(expBits)
 				}
-				input := make([]byte, 96)
-				input[31], input[63], input[95] = byte(len(base)), byte(len(exp)), byte(len(mod))
-				input[30], input[62], input[94] = byte(len(base)>>8), byte(len(exp)>>8), byte(len(mod)>>8)
-				input = append(append(append(input, base...), exp...), mod...)
+				header := make([]byte, 96)
+				header[31], header[63], header[95] = byte(len(base)), byte(len(exp)), byte(len(mod))
+				header[30], header[62], header[94] = byte(len(base)>>8), byte(len(exp)>>8), byte(len(mod)>>8)
+				input := slices.Concat(header, base, exp, mod)
 
 				got, err := p.Run(input)
 				if err != nil {
