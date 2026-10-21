@@ -3935,6 +3935,9 @@ func TestValidateChainWritesSendersOfBALBlock(t *testing.T) {
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus, validation.ValidationError)
 
 	hash := block.Hash()
+	senders, ok := m.ReadAheader.CachedSenders(hash)
+	require.True(t, ok)
+	require.Empty(t, senders, "senders stage recovered the senders instead of exec")
 	result, err := m.ExecModule.UpdateForkChoice(ctx, hash, hash, hash)
 	require.NoError(t, err)
 	m.ExecModule.WaitIdle(ctx)
@@ -3965,4 +3968,7 @@ func TestValidateChainRejectsBALBlockWithUnrecoverableSender(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBadBlock, validation.ValidationStatus)
 	require.Contains(t, validation.ValidationError, fmt.Sprintf("error recovering sender for tx=%x", badTx.Hash()))
+	senders, ok := m.ReadAheader.CachedSenders(badBlock.Hash())
+	require.True(t, ok)
+	require.Empty(t, senders, "senders stage rejected the block instead of exec")
 }

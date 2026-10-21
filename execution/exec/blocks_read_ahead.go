@@ -215,6 +215,11 @@ func (bra *BlockReadAheader) AddSenders(senders []byte, blockHash common.Hash) {
 	bra.senders.Add(blockHash, bytes.Clone(senders))
 }
 
+// CachedSenders returns the senders entry of a block; an empty one means exec recovers them.
+func (bra *BlockReadAheader) CachedSenders(blockHash common.Hash) ([]byte, bool) {
+	return bra.senders.Get(blockHash)
+}
+
 func (bra *BlockReadAheader) AddBlockAccessList(blockHash common.Hash, bal *types.BlockAccessListSidecar) {
 	if bal == nil {
 		return

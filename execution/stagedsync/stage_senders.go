@@ -232,12 +232,11 @@ Loop:
 			logger.Warn(fmt.Sprintf("[%s] senders stage can't find header", logPrefix), "num", blockNumber, "hash", blockHash)
 			continue
 		}
-		if cfg.sendersRecoveredByExec(s, header) {
+		body, ok := cfg.readAheader.ReadBodyWithTransactions(blockHash)
+		if body != nil && ok && startFrom == to && cfg.sendersRecoveredByExec(s, header) {
 			cfg.readAheader.AddSenders(nil, blockHash)
 			continue
 		}
-
-		body, ok := cfg.readAheader.ReadBodyWithTransactions(blockHash)
 		if body == nil || !ok {
 			if body, err = cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber); err != nil {
 				return err
@@ -408,6 +407,8 @@ func senderRecoveryErr(txn types.Transaction, err error) error {
 
 // sendersRecoveredByExec skips the separate recovery pass for blocks that parallel exec schedules by their BAL:
 // exec workers recover senders while executing, and writeSendersRecoveredByExec stores them afterwards.
+// The caller applies it only to a single read-ahead block, so exec and the writer share its transactions
+// and the senders the workers cached on them.
 func (cfg SendersCfg) sendersRecoveredByExec(s *StageState, header *types.Header) bool {
 	return s.SyncMode() == stages.ModeForkValidation && dbg.Exec3Parallel && !dbg.IgnoreBAL &&
 		cfg.chainConfig.IsAmsterdam(header.Time) && header.HasNonEmptyBAL()
