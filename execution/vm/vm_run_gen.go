@@ -423,7 +423,7 @@ run:
 					continue run
 				}
 			}
-			if op >= SLT && op <= SWAP16 {
+			if isColdOp[op] {
 				switch op {
 				case SLT:
 					if sLen >= 2 && gasLeft >= GasFastestStep {
@@ -790,4 +790,56 @@ run:
 	}
 
 	return res, callContext.Gas(), mdgas.MdGasUsage{}, err
+}
+
+// isColdOp marks the ops of run's second fast-path switch.
+var isColdOp = [256]bool{
+	SLT:            true,
+	SGT:            true,
+	OR:             true,
+	XOR:            true,
+	NOT:            true,
+	BYTE:           true,
+	SHL:            true,
+	SHR:            true,
+	SAR:            true,
+	ADDRESS:        true,
+	ORIGIN:         true,
+	CALLER:         true,
+	CALLDATASIZE:   true,
+	CODESIZE:       true,
+	GASPRICE:       true,
+	RETURNDATASIZE: true,
+	COINBASE:       true,
+	TIMESTAMP:      true,
+	NUMBER:         true,
+	DIFFICULTY:     true,
+	GASLIMIT:       true,
+	CHAINID:        true,
+	BASEFEE:        true,
+	BLOBBASEFEE:    true,
+	PUSH0:          true,
+	PC:             true,
+	MSIZE:          true,
+	GAS:            true,
+	DUP9:           true,
+	DUP10:          true,
+	DUP11:          true,
+	DUP12:          true,
+	DUP13:          true,
+	DUP14:          true,
+	DUP15:          true,
+	DUP16:          true,
+	SWAP5:          true,
+	SWAP6:          true,
+	SWAP7:          true,
+	SWAP8:          true,
+	SWAP9:          true,
+	SWAP10:         true,
+	SWAP11:         true,
+	SWAP12:         true,
+	SWAP13:         true,
+	SWAP14:         true,
+	SWAP15:         true,
+	SWAP16:         true,
 }
