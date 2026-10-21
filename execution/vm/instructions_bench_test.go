@@ -23,6 +23,7 @@ package vm
 import (
 	"bytes"
 	"fmt"
+	"math/rand/v2"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -114,6 +115,61 @@ func BenchmarkOpMod(b *testing.B) {
 	y := opTestArg
 
 	opBenchmark(b, opMod, x, y)
+}
+
+// BenchmarkOpModChain replays MOD chains shaped like the EEST test_mod
+// benchmark: 256-bit numerators and a modulus that is the previous remainder.
+// SMOD negates both operands, as the EEST SMOD variant does.
+func BenchmarkOpModChain(b *testing.B) {
+	for _, bits := range []int{63, 127, 191, 255} {
+		b.Run(fmt.Sprintf("MOD/bits=%d", bits), func(b *testing.B) { benchModChain(b, opMod, bits, false) })
+		b.Run(fmt.Sprintf("SMOD/bits=%d", bits), func(b *testing.B) { benchModChain(b, opSmod, bits, true) })
+	}
+	b.Run("MOD/zero", func(b *testing.B) { opBenchmark(b, opMod, "00", opTestArg) })
+	b.Run("MOD/small", func(b *testing.B) { opBenchmark(b, opMod, "07", "05f5e100") })
+	b.Run("SMOD/zero", func(b *testing.B) { opBenchmark(b, opSmod, "00", opTestArg) })
+}
+
+func benchModChain(b *testing.B, op executionFunc, bits int, negate bool) {
+	rng := rand.New(rand.NewPCG(uint64(bits), 1))
+	var nums [15]uint256.Int
+	for i := range nums {
+		nums[i] = uint256.Int{rng.Uint64(), rng.Uint64(), rng.Uint64(), rng.Uint64() | 1<<63}
+	}
+	var m uint256.Int
+	m.Lsh(uint256.NewInt(1), uint(bits-1))
+	m[0] |= rng.Uint64()
+	minMod := new(uint256.Int).Lsh(uint256.NewInt(1), uint(bits-63))
+	var xs, ms []uint256.Int
+	for !m.Lt(minMod) && len(xs) < 1024 {
+		var best, r uint256.Int
+		bi := 0
+		for i := range nums {
+			if r.Mod(&nums[i], &m); r.Gt(&best) {
+				best, bi = r, i
+			}
+		}
+		xs, ms = append(xs, nums[bi]), append(ms, m)
+		m = best
+	}
+	if negate {
+		for i := range xs {
+			xs[i].Neg(&xs[i])
+			ms[i].Neg(&ms[i])
+		}
+	}
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+	callContext := &CallContext{}
+	i := 0
+	for b.Loop() {
+		callContext.Stack.push(ms[i])
+		callContext.Stack.push(xs[i])
+		op(0, evm, callContext)
+		callContext.Stack.popCopy()
+		if i++; i == len(xs) {
+			i = 0
+		}
+	}
 }
 
 func BenchmarkOpSmod(b *testing.B) {
