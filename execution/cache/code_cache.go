@@ -17,6 +17,7 @@
 package cache
 
 import (
+	"bytes"
 	"encoding/binary"
 	"sync"
 	"sync/atomic"
@@ -61,8 +62,11 @@ type versionedAddressID struct {
 	// codeHash is the addr's keccak codeHash, used to reject a 64-bit maphash
 	// collision on addrID.
 	codeHash [32]byte
-	txNum    uint64
-	epoch    uint32
+	// codeSeq is the seq of the content entry the binding was made against; a
+	// replaced entry has another seq, so its old bindings miss.
+	codeSeq uint64
+	txNum   uint64
+	epoch   uint32
 }
 
 type addrCodeHashEntry struct {
@@ -103,8 +107,11 @@ type codeEntry struct {
 	// compare keyHash against the requested key to reject a collision serving
 	// a different contract's code.
 	keyHash [32]byte
-	txNum   uint64
-	epoch   uint32
+	// seq is unique per inserted entry, so a binding can tell a replacement
+	// apart even when both entries carry the same txNum.
+	seq   uint64
+	txNum uint64
+	epoch uint32
 }
 
 type codeSizeEntry struct {
@@ -138,6 +145,7 @@ type CodeCache struct {
 	// freshly seen address can be refused rather than displacing a warm one, and
 	// a miss falls through to the authoritative read.
 	addrToHash *ByteLRU[versionedAddressID]
+	contentSeq atomic.Uint64
 
 	// addrToCodeHash maps a 20-byte address to its 32-byte Ethereum codeHash
 	// (keccak), separately from addrToHash (which uses the cheap maphash
@@ -321,6 +329,13 @@ func (c *CodeCache) GetWithTxNum(addr []byte) ([]byte, uint64, bool) {
 		c.codeMisses.Add(1)
 		return nil, 0, false
 	}
+	if ce.seq != vID.codeSeq {
+		dropSlotIf(c.addrToHash, &c.addrBindMu, addrSlot(k), func(cur versionedAddressID) bool {
+			return cur.addr == k && cur.codeSeq == vID.codeSeq
+		})
+		c.codeMisses.Add(1)
+		return nil, 0, false
+	}
 	c.codeHits.Add(1)
 	// The addr→code binding is what an unwind re-binds; vID.txNum bounds it.
 	return ce.code, vID.txNum, true
@@ -337,7 +352,7 @@ func (c *CodeCache) PutIfAbsent(addr []byte, code []byte, txNum uint64) {
 	c.putWithCodeHash(addr, code, crypto.Keccak256(code), txNum, false)
 }
 
-func (c *CodeCache) bindAddrLocked(addr []byte, keyHash [32]byte, codeID, txNum uint64, ep uint32, overwriteAddr bool) {
+func (c *CodeCache) bindAddrLocked(addr []byte, keyHash [32]byte, codeID, codeSeq, txNum uint64, ep uint32, overwriteAddr bool) {
 	a := common.BytesToAddress(addr)
 	c.addrBindMu.Lock()
 	bindAddr := overwriteAddr
@@ -350,7 +365,7 @@ func (c *CodeCache) bindAddrLocked(addr []byte, keyHash [32]byte, codeID, txNum 
 		if resident {
 			c.addrToHash.Remove(slot)
 		}
-		c.addrToHash.Add(slot, versionedAddressID{addr: a, addrID: codeID, codeHash: keyHash, txNum: txNum, epoch: ep})
+		c.addrToHash.Add(slot, versionedAddressID{addr: a, addrID: codeID, codeHash: keyHash, codeSeq: codeSeq, txNum: txNum, epoch: ep})
 	}
 	c.addrBindMu.Unlock()
 }
@@ -496,17 +511,43 @@ func (c *CodeCache) putWithCodeHash(addr []byte, code []byte, codeHash []byte, t
 	ep := c.coh.Epoch()
 	kh := hash32(codeHash)
 
-	if len(addr) > 0 {
-		c.bindAddrLocked(addr, kh, hcc, txNum, ep, overwriteAddr)
+	if overwriteAddr {
+		c.dropMismatchedContentLocked(hcc, kh, code)
 	}
 
 	// Populate the size-only layer alongside the bytes layer — every time
 	// we touch the bytes we can answer a future EXTCODESIZE for free.
 	c.putCodeSizeByCodeHashLocked(codeHash, len(code), hcc, txNum, ep)
 
-	entry := codeEntry{code: code, keyHash: kh, txNum: txNum, epoch: ep}
+	entry := codeEntry{code: code, keyHash: kh, seq: c.contentSeq.Add(1), txNum: txNum, epoch: ep}
 	putContentLocked(c.codeHashToCode, hcc, entry, codeEntryStamp, codeEntryCodeLen,
 		&c.coh, &c.codeHashCodeSize, codeEntryBytes)
+
+	if len(addr) == 0 {
+		return
+	}
+	// A fill whose bytes differ from the live entry under its codeHash must not
+	// read that entry back, so it does not bind.
+	codeSeq := entry.seq
+	if ce, ok := c.codeHashToCode.Get(hcc); ok && ce.keyHash == kh {
+		if !bytes.Equal(ce.code, code) {
+			return
+		}
+		codeSeq = ce.seq
+	}
+	c.bindAddrLocked(addr, kh, hcc, codeSeq, txNum, ep, overwriteAddr)
+}
+
+// dropMismatchedContentLocked removes live entries under codeHash whose bytes
+// differ from code: a fill can pair a codeHash with other bytes, and the
+// content layers keep live entries, so only an authoritative write repairs it.
+func (c *CodeCache) dropMismatchedContentLocked(hcc uint64, kh [32]byte, code []byte) {
+	if e, ok := c.codeHashToCode.Get(hcc); ok && e.keyHash == kh && !bytes.Equal(e.code, code) {
+		c.codeHashToCode.Remove(hcc)
+	}
+	if e, ok := c.codeSizeByCodeHash.Get(hcc); ok && e.keyHash == kh && e.size != len(code) {
+		c.codeSizeByCodeHash.Remove(hcc)
+	}
 }
 
 // GetCodeSizeByCodeHash retrieves the size (in bytes) of a contract by its
@@ -647,7 +688,7 @@ func (c *CodeCache) PrintStatsAndReset() {
 	addrSizeB := c.AddrSizeBytes()
 	codeSizeB := c.CodeSizeBytes()
 	addrUsagePct := float64(addrSizeB) / float64(c.addrCapacityB) * 100
-	codeUsagePct := float64(codeSizeB) / float64(c.codeCapacityB) * 100
+	codeUsagePct := float64(codeSizeB) / float64(max(c.codeCapacityB, 1)) * 100
 
 	log.Debug(
 		"CodeCache stats",
