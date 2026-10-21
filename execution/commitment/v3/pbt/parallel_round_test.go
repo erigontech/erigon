@@ -349,6 +349,28 @@ func TestParallelRoundMatchesSequential(t *testing.T) {
 	runParallelRoundCases(t, func(*testing.T, *parallelRoundBase, *Trie, string) {})
 }
 
+func TestParallelRoundWithoutFactoryMatchesSequential(t *testing.T) {
+	corpus := newParallelRoundCorpus(t, parallelRoundTestShape)
+	for _, tc := range parallelRoundCases(corpus) {
+		t.Run(tc.name, func(t *testing.T) {
+			r := rand.New(rand.NewSource(100))
+			snapshot := tc.base
+			for round := range 3 {
+				ops := tc.ops(r)
+				sequential := &trieTestContext{records: maps.Clone(snapshot)}
+				wantRoot, err := NewTrie(sequential).Process(ops)
+				require.NoError(t, err)
+				main := &trieTestContext{records: maps.Clone(snapshot)}
+				gotRoot, err := NewTrie(main).ProcessParallelContext(t.Context(), ops, 4)
+				require.NoError(t, err)
+				require.Equal(t, wantRoot, gotRoot, "round=%d", round)
+				require.Equal(t, sequential.records, main.records, "round=%d", round)
+				snapshot = main.records
+			}
+		})
+	}
+}
+
 func TestParallelRoundOldScheduleMatchesSequential(t *testing.T) {
 	runParallelRoundCasesWith(t, phaseScheduleOld, 1, func(*testing.T, *parallelRoundBase, *Trie, string) {})
 }

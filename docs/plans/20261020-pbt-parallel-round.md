@@ -190,6 +190,37 @@ flowchart LR
   | re-exec, K=100,000 random | 1421.6 | 930.4 | 710.1 | 613.9 | 588.6 |
   | convert, K=100,000 in one partition | 256.5 | 293.2 | 290.9 | 307.9 | 305.3 |
 
+- **Final measurement (Task 14).** These are single runs on a shared machine (same Apple M5 Max, 18 logical CPUs), not an
+  A/B: the owner waived the A/B on 2026-10-21. Each cell lists the mean ms/op of three runs (`-count=3`). Machine load is
+  the `top -l 1` one-minute average before and after each call.
+
+  `BenchmarkParallelRound{Tip,Reexec}`, grain schedule, `-benchtime=5x`. The baseline is the Task 1 table above, taken
+  with the phase read lock still in place:
+
+  | round | workers | Task 1 baseline | final, runs 1 / 2 / 3 |
+  |---|---|---|---|
+  | tip, K=2,000 | 1 | 59.8 | 57.2 / 56.9 / 57.3 |
+  | tip, K=2,000 | 8 | 25.4 | 11.4 / 11.6 / 11.4 |
+  | tip, K=2,000 | 16 | 24.7 | 9.8 / 9.8 / 9.7 |
+  | re-exec, K=100,000 | 1 | 1421.6 | 1406.7 / 1412.6 / 1404.9 |
+  | re-exec, K=100,000 | 8 | 613.9 | 261.5 / 273.7 / 262.9 |
+  | re-exec, K=100,000 | 16 | 588.6 | 204.8 / 205.0 / 206.8 |
+
+  Load: tip 9.40 → 8.58, re-exec 8.05 → 6.76.
+
+  `BenchmarkPBinRangeWriterWorkers` (300k leaves, `MaxOps` 100,000) and `BenchmarkPBinVerifyWorkers` (the same
+  corpus), `-benchtime=3x`. "Before" for the range writer is the Task 11C before-arm, with the old row-stamp tracker.
+  Verify at one worker is the sequential verify:
+
+  | benchmark | workers | before, runs 1 / 2 / 3 | final, runs 1 / 2 / 3 |
+  |---|---|---|---|
+  | range writer | 1 | 3477 / 3604 / 3636 | 1612 / 1609 / 1593 |
+  | range writer | 8 | 3790 / 3354 / 3176 | 745 / 730 / 743 |
+  | verify | 1 | — | 2678 / 2702 / 2708 |
+  | verify | 8 | — | 420 / 425 / 430 |
+
+  Load: 6.46 → 4.03.
+
 - Previous measurement, superseded by the table above. It came from a harness whose shared test base serialized reads,
   so it must not be used for before/after. Mac, 18 logical CPUs, 1M-leaf blake3 trie, median ms; w=1 is sequential
   `Process`:
@@ -524,11 +555,12 @@ per 4-bit prefix of every leaf path and encodes and stores each on close, but on
 - [x] run gates (now including `db/integrity`) — must pass before Task 14
 
 ### Task 14: Verify acceptance criteria
-- [ ] the benchmark table before (Task 1 baseline) vs after, recorded in Technical Details. The owner waived the A/B
+- [x] the benchmark table before (Task 1 baseline) vs after, recorded in Technical Details. The owner waived the A/B
       (2026-10-21): speed claims rest on the maker's benchmark runs and the Task 10 A/B
-- [ ] parity: every Task 1 corpus and the convert oracle tests green with and without a factory
-- [ ] `go test -race ./execution/commitment/v3/pbt/...` and the `db/state` PBin tests under `-race`
-- [ ] full gates and `make lint` clean
+- [x] parity: every Task 1 corpus and the convert oracle tests green with and without a factory.
+      `TestParallelRoundWithoutFactoryMatchesSequential` covers the Task 1 corpora without a factory
+- [x] `go test -race ./execution/commitment/v3/pbt/...` and the `db/state` PBin tests under `-race`
+- [x] full gates and `make lint` clean
 
 ### Task 15: [Final] Update documentation
 - [ ] update the PBT notes in `CLAUDE.md` where they name the old behaviour (round ownership, deferral for bin)
