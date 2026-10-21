@@ -84,7 +84,7 @@ func TestCheckCommitmentRootRejectsCorruptedBinRoot(t *testing.T) {
 }
 
 func TestCheckCommitmentRootAcceptsZeroBinRoot(t *testing.T) {
-	fixture := newPBinIntegrityFixture(t)
+	fixture := newPBinIntegrityFixtureWith(t, false)
 	tx, err := fixture.db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -108,6 +108,10 @@ type pbinIntegrityFixture struct {
 }
 
 func newPBinIntegrityFixture(t *testing.T) pbinIntegrityFixture {
+	return newPBinIntegrityFixtureWith(t, true)
+}
+
+func newPBinIntegrityFixtureWith(t *testing.T, convert bool) pbinIntegrityFixture {
 	selectPBinIntegritySuite(t)
 	db, agg := commitmenttemporal.Open(t, 8)
 	probeTx, err := db.BeginTemporalRw(t.Context())
@@ -157,6 +161,9 @@ func newPBinIntegrityFixture(t *testing.T) pbinIntegrityFixture {
 	domains.Close()
 	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, unboundedFinalityCtx, false))
 	agg.WaitForFiles()
+	if !convert {
+		return pbinIntegrityFixture{db: db, agg: agg}
+	}
 	sourceTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer sourceTx.Rollback()
