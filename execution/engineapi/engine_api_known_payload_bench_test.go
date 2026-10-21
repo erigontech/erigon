@@ -36,43 +36,8 @@ import (
 func BenchmarkNewPayloadKnownSideBlock(b *testing.B) {
 	const numTx = 1000
 	ctx := b.Context()
-	logger := log.New()
-	logger.SetHandler(log.DiscardHandler())
-	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
-	require.NoError(b, err)
-	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
-		Logger:      logger,
-		DataDir:     b.TempDir(),
-		Genesis:     genesis,
-		CoinbaseKey: coinbaseKey,
-		EthConfigTweaker: func(config *ethconfig.Config) {
-			config.TxPool.AccountSlots = 2 * numTx
-		},
-	})
-	require.NoError(b, err)
-	b.Cleanup(func() { require.NoError(b, eat.Close()) })
-
-	sender := crypto.PubkeyToAddress(coinbaseKey.PublicKey)
-	nonce, err := eat.RpcApiClient.GetTransactionCount(sender, rpc.PendingBlock)
-	require.NoError(b, err)
-	signer := types.LatestSignerForChainID(eat.ChainId())
-	for i := range uint64(numTx) {
-		txn := types.MustSignNewTx(coinbaseKey, *signer, &types.DynamicFeeTransaction{
-			CommonTx: types.CommonTx{Nonce: nonce.Uint64() + i, GasLimit: 21_000, To: &sender},
-			ChainID:  *eat.ChainId(),
-			TipCap:   *uint256.NewInt(1_000_000_000),
-			FeeCap:   *uint256.NewInt(100_000_000_000),
-		})
-		_, err := eat.RpcApiClient.SendTransaction(txn)
-		require.NoError(b, err)
-	}
-
-	var known *engineapitester.MockClPayload
-	require.Eventually(b, func() bool {
-		known, err = eat.MockCl.BuildNewPayload(ctx)
-		require.NoError(b, err)
-		return len(known.ExecutionPayload.Transactions) == numTx
-	}, time.Minute, 100*time.Millisecond)
+	eat := newKnownPayloadTester(b, numTx)
+	known := buildPayloadWithTransfers(b, eat, numTx)
 	status, err := eat.MockCl.InsertNewPayload(ctx, known)
 	require.NoError(b, err)
 	require.Equal(b, enginetypes.ValidStatus, status.Status)
@@ -85,4 +50,71 @@ func BenchmarkNewPayloadKnownSideBlock(b *testing.B) {
 		require.NoError(b, err)
 		require.Equal(b, enginetypes.ValidStatus, status.Status)
 	}
+}
+
+// BenchmarkNewPayloadResentHeadThenFcu re-sends a validated head payload before its forkchoice update.
+func BenchmarkNewPayloadResentHeadThenFcu(b *testing.B) {
+	const numTx = 200
+	ctx := b.Context()
+	eat := newKnownPayloadTester(b, numTx)
+	for b.Loop() {
+		b.StopTimer()
+		payload := buildPayloadWithTransfers(b, eat, numTx)
+		status, err := eat.MockCl.InsertNewPayload(ctx, payload)
+		require.NoError(b, err)
+		require.Equal(b, enginetypes.ValidStatus, status.Status)
+		b.StartTimer()
+		status, err = eat.MockCl.InsertNewPayload(ctx, payload)
+		require.NoError(b, err)
+		require.Equal(b, enginetypes.ValidStatus, status.Status)
+		require.NoError(b, eat.MockCl.UpdateForkChoice(ctx, payload))
+	}
+}
+
+func newKnownPayloadTester(b *testing.B, numTx int) engineapitester.EngineApiTester {
+	logger := log.New()
+	logger.SetHandler(log.DiscardHandler())
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(b, err)
+	eat, err := engineapitester.InitialiseEngineApiTester(b.Context(), engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
+		DataDir:     b.TempDir(),
+		Genesis:     genesis,
+		CoinbaseKey: coinbaseKey,
+		EthConfigTweaker: func(config *ethconfig.Config) {
+			config.TxPool.AccountSlots = 2 * uint64(numTx)
+		},
+	})
+	require.NoError(b, err)
+	b.Cleanup(func() { require.NoError(b, eat.Close()) })
+	return eat
+}
+
+func sendTransfers(b *testing.B, eat engineapitester.EngineApiTester, numTx int) {
+	sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
+	nonce, err := eat.RpcApiClient.GetTransactionCount(sender, rpc.PendingBlock)
+	require.NoError(b, err)
+	signer := types.LatestSignerForChainID(eat.ChainId())
+	for i := range uint64(numTx) {
+		txn := types.MustSignNewTx(eat.CoinbaseKey, *signer, &types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: nonce.Uint64() + i, GasLimit: 21_000, To: &sender},
+			ChainID:  *eat.ChainId(),
+			TipCap:   *uint256.NewInt(1_000_000_000),
+			FeeCap:   *uint256.NewInt(100_000_000_000),
+		})
+		_, err := eat.RpcApiClient.SendTransaction(txn)
+		require.NoError(b, err)
+	}
+}
+
+func buildPayloadWithTransfers(b *testing.B, eat engineapitester.EngineApiTester, numTx int) *engineapitester.MockClPayload {
+	sendTransfers(b, eat, numTx)
+	var payload *engineapitester.MockClPayload
+	require.Eventually(b, func() bool {
+		var err error
+		payload, err = eat.MockCl.BuildNewPayload(b.Context())
+		require.NoError(b, err)
+		return len(payload.ExecutionPayload.Transactions) == numTx
+	}, time.Minute, 100*time.Millisecond)
+	return payload
 }
