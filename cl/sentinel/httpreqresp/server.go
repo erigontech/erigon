@@ -48,7 +48,7 @@ const (
 )
 
 const (
-	// maxResponseChunks is MAX_REQUEST_BLOCKS; with MaxChunkSize it sets the absolute
+	// maxResponseChunks is MAX_REQUEST_BLOCKS; with MAX_PAYLOAD_SIZE it sets the absolute
 	// multi-chunk ceiling (maxMultiChunkResponse).
 	maxResponseChunks = 1024
 	// maxSingleObjectResponse bounds single-chunk protocols (status, ping, metadata,
@@ -56,10 +56,10 @@ const (
 	maxSingleObjectResponse = 1024 * 1024
 )
 
-// maxMultiChunkResponse is the on-wire MAX_REQUEST_BLOCKS × MAX_CHUNK_SIZE ceiling: the backstop a
+// maxMultiChunkResponse is the on-wire MAX_REQUEST_BLOCKS × MAX_PAYLOAD_SIZE ceiling: the backstop a
 // caller-supplied multi-chunk budget is clamped to, so a miscomputed or overflowed budget can't make
 // the handler stream more than a spec-maximal response.
-var maxMultiChunkResponse = communication.MaxWireResponseBytes(int(clparams.MaxChunkSize), maxResponseChunks)
+var maxMultiChunkResponse = communication.MaxWireResponseBytes(int(clparams.MaxPayloadSize), maxResponseChunks)
 
 // ErrResponseTooLarge is surfaced by the response body when a peer's response exceeds the per-topic
 // size cap. Callers treat it as a peer failure rather than a valid (truncated) response.
@@ -152,6 +152,10 @@ func Do(handler http.Handler, r *http.Request) (*http.Response, error) {
 	}()
 	select {
 	case resp := <-resultCh:
+		if err := r.Context().Err(); err != nil {
+			resp.Body.Close()
+			return nil, err
+		}
 		return resp, nil
 	case <-r.Context().Done():
 		// The handler may still publish a response whose body owns a live stream; close it once

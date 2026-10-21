@@ -297,15 +297,6 @@ func enable5656(jt *JumpTable) {
 	}
 }
 
-// opMcopy implements the MCOPY opcode (https://eips.ethereum.org/EIPS/eip-5656)
-func opMcopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	// These values are checked for overflow during memory expansion calculation
-	// (the memorySize function on the opcode).
-	dst, src, length := scope.Stack.pop3()
-	scope.Memory.Copy(dst.Uint64(), src.Uint64(), length.Uint64())
-	return pc, nil, nil
-}
-
 // enable6780 applies EIP-6780 (deactivate SELFDESTRUCT)
 func enable6780(jt *JumpTable) {
 	jt[SELFDESTRUCT].execute = opSelfdestruct6780
