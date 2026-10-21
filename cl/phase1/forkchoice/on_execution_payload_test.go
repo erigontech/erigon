@@ -3160,6 +3160,35 @@ func TestNewPayloadWithAdmissionSerializesCallers(t *testing.T) {
 	require.NoError(t, <-done)
 }
 
+func TestNewPayloadWithAdmissionHoldsPayloadPreparation(t *testing.T) {
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	started := make(chan struct{})
+	release := make(chan struct{})
+	engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+			close(started)
+			<-release
+			return execution_client.PayloadStatusValidated, nil
+		},
+	)
+	f := &ForkChoiceStore{engine: engine}
+	payload := &cltypes.Eth1Block{SlotNumber: 10}
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.NewPayloadWithAdmission(t.Context(), payload, nil, nil, nil)
+		done <- err
+	}()
+	<-started
+
+	_, _, ok := f.TryBeginPayloadPreparation(t.Context(), 10, 11)
+	require.False(t, ok)
+	close(release)
+	require.NoError(t, <-done)
+	_, finish, ok := f.TryBeginPayloadPreparation(t.Context(), 10, 11)
+	require.True(t, ok)
+	finish()
+}
+
 func TestPersistedEnvelopeDoesNotSynthesizeValidatedELResult(t *testing.T) {
 	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
 	require.NoError(t, envelope.Message.Payload.BlockAccessList.SetBytes([]byte{0xc0}))
@@ -4634,6 +4663,37 @@ func TestValidateExecutionPayloadEnvelopeForConsensusRequiresELValidation(t *tes
 			}
 		})
 	}
+}
+
+func TestValidateExecutionPayloadEnvelopeForConsensusHoldsPayloadPreparation(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	started := make(chan struct{})
+	release := make(chan struct{})
+	engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+			close(started)
+			<-release
+			return execution_client.PayloadStatusValidated, nil
+		},
+	)
+	store := &ForkChoiceStore{
+		beaconCfg: cfg,
+		forkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
+		engine:    engine,
+	}
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+	done := make(chan error, 1)
+	go func() { done <- store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope) }()
+	<-started
+
+	_, _, ok := store.TryBeginPayloadPreparation(t.Context(), block.Block.Slot, block.Block.Slot+1)
+	require.False(t, ok)
+	close(release)
+	require.NoError(t, <-done)
+	_, finish, ok := store.TryBeginPayloadPreparation(t.Context(), block.Block.Slot, block.Block.Slot+1)
+	require.True(t, ok)
+	finish()
 }
 
 func TestValidateExecutionPayloadEnvelopeForConsensusRechecksAfterEL(t *testing.T) {

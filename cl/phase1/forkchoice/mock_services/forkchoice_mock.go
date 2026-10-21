@@ -42,9 +42,8 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-// Make mocks with maps and simple setters and getters, panic on methods from ForkChoiceStorageWriter
-
 type ForkChoiceStorageMock struct {
+	PreparationImports                    forkchoice.PayloadPreparationImports
 	ProposerLookaheadVal                  solid.Uint64VectorSSZ
 	Ancestors                             map[uint64]forkchoice.ForkChoiceNode
 	AncestorCalls                         atomic.Int64
@@ -137,6 +136,28 @@ type ForkChoiceStorageMock struct {
 	PayloadStatusByRootMap    map[common.Hash]execution_client.PayloadStatus
 	// [New in Gloas:EIP7732] Execution payload gas limit by execution block hash
 	ExecutionPayloadGasLimitMap map[common.Hash]uint64
+}
+
+func (f *ForkChoiceStorageMock) BeginPayloadImport(slot uint64) func() {
+	return f.PreparationImports.BeginImport(slot)
+}
+
+func (f *ForkChoiceStorageMock) BeginPendingPayloadEnvelope(blockRoot common.Hash) func() {
+	return f.PreparationImports.BeginPendingEnvelope(blockRoot)
+}
+
+func (f *ForkChoiceStorageMock) TryBeginPayloadPreparation(ctx context.Context, firstSlot, lastSlot uint64) (context.Context, func() bool, bool) {
+	return f.PreparationImports.TryBegin(ctx, firstSlot, lastSlot, nil, f.pendingEnvelopeSlot)
+}
+
+func (f *ForkChoiceStorageMock) pendingEnvelopeSlot(root common.Hash) (uint64, bool) {
+	if f.HasEnvelope(root) {
+		return 0, false
+	}
+	if block := f.Blocks[root]; block != nil && block.Block != nil {
+		return block.Block.Slot, true
+	}
+	return 0, false
 }
 
 func makeSyncContributionPoolMock(t *testing.T) sync_contribution_pool.SyncContributionPool {
