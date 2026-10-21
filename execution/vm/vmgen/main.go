@@ -14,9 +14,9 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// vmgen writes run in vm_run_gen.go from runTraced in interpreter.go: the
-// same loop with anyTrace false and the fast-path switch, whose cases inline
-// the fastOps' execute funcs from instructions.go. It also writes
+// vmgen writes run and step in vm_run_gen.go from runTraced and stepTraced in
+// interpreter.go: the same code with anyTrace false and the fast-path switch,
+// whose cases inline the fastOps' execute funcs from instructions.go. It also writes
 // fast_path_gen_test.go. With -check it reports stale files instead of writing them.
 package main
 
@@ -29,6 +29,7 @@ import (
 	"go/parser"
 	"go/printer"
 	"go/token"
+	"go/types"
 	"log"
 	"os"
 	"reflect"
@@ -54,6 +55,12 @@ type fastOp struct {
 	allocated  string // a memory op's condition that memory need not grow
 	copyLen    string // the stack item a copy charges params.CopyGas per word of
 	jump       bool   // a taken jump also charges the JUMPDEST it lands on and steps over it
+	// call makes the case call execute instead of inlining its body: the body
+	// calls out anyway, and pc would live across that call in memory.
+	call bool
+	// gated ops are missing from older forks, and an EIP in vm.Config can add
+	// them to any fork, so the case first checks that the active table has the op.
+	gated bool
 }
 
 func fastOps() []fastOp {
@@ -61,6 +68,7 @@ func fastOps() []fastOp {
 		return fastOp{name: name, execute: execute, gas: gas, pop: pop, push: push}
 	}
 	ops := []fastOp{
+		{name: "PUSH0", execute: "opPush0", gas: "GasQuickStep", push: 1, gated: true},
 		op("PUSH1", "opPush1", "GasFastestStep", 0, 1),
 		op("PUSH2", "opPush2", "GasFastestStep", 0, 1),
 		op("ADD", "opAdd", "GasFastestStep", 2, 1),
@@ -69,8 +77,8 @@ func fastOps() []fastOp {
 		{name: "JUMP", execute: "opJump", gas: "GasMidStep", pop: 1, jump: true},
 		{name: "JUMPI", execute: "opJumpi", gas: "GasSlowStep", pop: 2, jump: true},
 		op("SUB", "opSub", "GasFastestStep", 2, 1),
-		op("MUL", "opMul", "GasFastStep", 2, 1),
-		op("DIV", "opDiv", "GasFastStep", 2, 1),
+		{name: "MUL", execute: "opMul", gas: "GasFastStep", pop: 2, push: 1, call: true},
+		{name: "DIV", execute: "opDiv", gas: "GasFastStep", pop: 2, push: 1, call: true},
 		op("LT", "opLt", "GasFastestStep", 2, 1),
 		op("GT", "opGt", "GasFastestStep", 2, 1),
 		op("EQ", "opEq", "GasFastestStep", 2, 1),
@@ -80,7 +88,7 @@ func fastOps() []fastOp {
 		{name: "MLOAD", execute: "opMload", gas: "GasFastestStep", pop: 1, push: 1, memorySize: "memoryMLoad", dynamicGas: "pureMemoryGascost", allocated: allocated32},
 		{name: "MSTORE", execute: "opMstore", gas: "GasFastestStep", pop: 2, memorySize: "memoryMStore", dynamicGas: "pureMemoryGascost", allocated: allocated32},
 		// MCOPY is in the jump table only from Cancun on.
-		{name: "MCOPY", execute: "opMcopy", gas: "GasFastestStep", pop: 3, memorySize: "memoryMcopy", dynamicGas: "gasMcopy", allocated: "jt[MCOPY].memorySize != nil && callContext.Memory.allocatedCopy(stack.peek(), stack.back(1), stack.back(2))", copyLen: "stack.back(2)"},
+		{name: "MCOPY", execute: "opMcopy", gas: "GasFastestStep", pop: 3, memorySize: "memoryMcopy", dynamicGas: "gasMcopy", allocated: "evm.jt[MCOPY].memorySize != nil && callContext.Memory.allocatedCopy(callContext.Stack.peekAt(top), callContext.Stack.backAt(top, 1), callContext.Stack.backAt(top, 2))", copyLen: "callContext.Stack.backAt(top, 2)", call: true},
 	}
 	for n := 3; n <= 32; n++ {
 		ops = append(ops, op(fmt.Sprintf("PUSH%d", n), "", "GasFastestStep", 0, 1))
@@ -94,12 +102,12 @@ func fastOps() []fastOp {
 	return ops
 }
 
-const allocated32 = "callContext.Memory.allocated32(stack.peek())"
+const allocated32 = "callContext.Memory.allocated32(callContext.Stack.peekAt(top))"
 
 const switchHere = "// execution/vm/vmgen inserts the fastOps switch here.\n"
 
 // runLocals are run's variables an inlined body may use or the inliner writes.
-var runLocals = []string{"pc", "evm", "callContext", "res", "err", "gasLeft", "sLen", "stack", "contract", "op"}
+var runLocals = []string{"pc", "evm", "callContext", "res", "err", "gasLeft", "sLen", "contract", "op", "code", "left", "borrow", "top"}
 
 // inlineBody returns o's execute func body as statements of run's loop: its
 // parameters renamed to run's pc, evm and callContext, and each return turned
@@ -163,8 +171,73 @@ func inlineBody(instructions []byte, o fastOp) string {
 			id.Name = rename[id.Name]
 		}
 	}
+	localTop(body)
 	saveAroundCalls(body)
 	return inlineReturns(text(fset, body), o)
+}
+
+// stackDelta is how far each Stack op an inlined body calls moves the top.
+var stackDelta = map[string]int{"pushRef": 1, "drop": -1, "pop": -1, "pop2": -2, "pop1Peek1": -1, "push": 1, "peek": 0, "dup": 1, "swap": 0}
+
+// localTop rewrites body's callContext.Stack ops to their *At forms on run's
+// local top, and moves top after each statement that calls one.
+func localTop(body *ast.BlockStmt) {
+	ast.Inspect(body, func(n ast.Node) bool {
+		var list *[]ast.Stmt
+		switch n := n.(type) {
+		case *ast.BlockStmt:
+			list = &n.List
+		case *ast.CaseClause:
+			list = &n.Body
+		default:
+			return true
+		}
+		var out []ast.Stmt
+		for _, s := range *list {
+			delta, drop := 0, false
+			ast.Inspect(s, func(m ast.Node) bool {
+				switch m := m.(type) {
+				case *ast.BlockStmt, *ast.CaseClause:
+					return false // nested statement lists move top on their own
+				case *ast.CallExpr:
+					sel, ok := m.Fun.(*ast.SelectorExpr)
+					if !ok || types.ExprString(sel.X) != "callContext.Stack" {
+						return true
+					}
+					d, ok := stackDelta[sel.Sel.Name]
+					if !ok {
+						log.Fatalf("Stack.%s has no form on run's local top", sel.Sel.Name)
+					}
+					delta += d
+					drop = drop || sel.Sel.Name == "drop"
+					sel.Sel.Name += "At"
+					m.Args = append([]ast.Expr{ast.NewIdent("top")}, m.Args...)
+				}
+				return true
+			})
+			switch s.(type) {
+			case *ast.ExprStmt, *ast.AssignStmt:
+			default:
+				if delta != 0 {
+					log.Fatalf("a stack op that moves top must be a statement of its own")
+				}
+			}
+			if !drop {
+				out = append(out, s)
+			}
+			if delta != 0 {
+				tok := token.ADD_ASSIGN
+				if delta < 0 {
+					tok, delta = token.SUB_ASSIGN, -delta
+				}
+				// The position keeps the printer from opening a blank line where drop was.
+				top := &ast.Ident{Name: "top", NamePos: s.Pos()}
+				out = append(out, &ast.AssignStmt{Lhs: []ast.Expr{top}, Tok: tok, Rhs: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(delta)}}})
+			}
+		}
+		*list = out
+		return true
+	})
 }
 
 // outOfLine are the funcs run's inlined bodies call that Go does not inline.
@@ -291,28 +364,47 @@ func text(fset *token.FileSet, n any) string {
 
 func fastSwitch(instructions []byte, ops []fastOp) string {
 	var names, codes []string
-	for i := range ops {
-		o := &ops[i]
-		var cond []string
-		if o.pop > 0 {
-			cond = append(cond, fmt.Sprintf("sLen >= %d", o.pop))
-		}
+	for _, o := range ops {
+		// The borrow test comes first, so it branches on the flags of the subtraction.
+		cond := []string{"borrow == 0"}
+		// Both bounds of top are checked, so the prove pass drops the bounds
+		// checks of the stack ops on it.
+		upper := "sLen <= stackLimit"
 		switch o.push - o.pop {
 		case 1:
-			cond = append(cond, "sLen < stackLimit")
+			upper = "sLen < stackLimit"
 		case 0, -1, -2, -3:
 		default:
 			log.Fatalf("%s: stack growth %d needs its own bound", o.name, o.push-o.pop)
 		}
+		var stackCond []string
+		switch {
+		case o.pop > 0:
+			stackCond = []string{fmt.Sprintf("sLen >= %d", o.pop), upper}
+		case o.push > 0:
+			stackCond = []string{"uint(sLen) < stackLimit"}
+		}
 		if o.allocated != "" {
-			cond = append(cond, o.allocated)
+			stackCond = append(stackCond, o.allocated)
 		}
-		gas := o.gas
-		if o.copyLen != "" {
-			gas += " + params.CopyGas*ToWordSize(" + o.copyLen + ".Uint64())"
+		if o.gated {
+			// An op a table does not have is opUndefined there, which pushes nothing.
+			stackCond = append(stackCond, fmt.Sprintf("evm.jt[%s].numPush == %d", o.name, o.push))
 		}
-		cond = append(cond, "gasLeft >= "+gas)
-		code := fmt.Sprintf("if %s {\ngasLeft -= %s\n%s\n}\n", strings.Join(cond, " && "), gas, inlineBody(instructions, *o))
+		body := "callContext.Stack.top = top\npc, _, _ = " + o.execute + "(pc, evm, callContext)\ntop = callContext.Stack.top\npc++\ncontinue run"
+		if !o.call {
+			body = inlineBody(instructions, o)
+		}
+		var code string
+		if o.copyLen == "" {
+			// Sub64 computes the gas left with the check, before any call in the body,
+			// so the case never needs the old gasLeft after one.
+			code = fmt.Sprintf("if left, borrow := bits.Sub64(gasLeft, %s, 0); %s {\ngasLeft = left\n%s\n}\n", o.gas, strings.Join(append(cond, stackCond...), " && "), body)
+		} else {
+			// The copy gas reads the stack, so the stack checks go first.
+			gas := o.gas + " + params.CopyGas*ToWordSize(" + o.copyLen + ".Uint64())"
+			code = fmt.Sprintf("if %s {\nif left, borrow := bits.Sub64(gasLeft, %s, 0); %s {\ngasLeft = left\n%s\n}\n}\n", strings.Join(stackCond, " && "), gas, strings.Join(cond, " && "), body)
+		}
 		// Ops with the same code share a case: each case deepens run's compare tree.
 		if n := len(codes); n > 0 && codes[n-1] == code {
 			names[n-1] += ", " + o.name
@@ -321,7 +413,7 @@ func fastSwitch(instructions []byte, ops []fastOp) string {
 		names, codes = append(names, o.name), append(codes, code)
 	}
 	var b strings.Builder
-	b.WriteString("sLen := stack.len()\nswitch op {\n")
+	b.WriteString("sLen := top\nswitch op {\n")
 	for i := range names {
 		fmt.Fprintf(&b, "case %s:\n%s", names[i], codes[i])
 	}
@@ -329,9 +421,9 @@ func fastSwitch(instructions []byte, ops []fastOp) string {
 	return b.String()
 }
 
-// untraced returns runTraced as run in a file of its own, with anyTrace set
-// to false, without the code this makes dead, and with fast in place of the
-// switchHere comment.
+// untraced returns runTraced and stepTraced as run and step in a file of their
+// own, with anyTrace set to false, without the code this makes dead in run, and
+// with fast in place of the switchHere comment.
 func untraced(traced []byte, fast string) []byte {
 	if !bytes.Contains(traced, []byte(switchHere)) {
 		log.Fatal("interpreter.go: the fast-path switch comment is missing")
@@ -342,10 +434,14 @@ func untraced(traced []byte, fast string) []byte {
 	if err != nil {
 		log.Fatal(err)
 	}
-	// interpreter.go holds more than runTraced: keep only it and the imports it uses.
+	docs := map[string]string{
+		"runTraced":  "// run is runTraced without the tracing code and with the fast path.\n",
+		"stepTraced": "// step is stepTraced without the tracing code.\n//\n//go:noinline\n",
+	}
+	// interpreter.go holds more than these: keep only them and the imports they use.
 	f.Decls = slices.DeleteFunc(f.Decls, func(d ast.Decl) bool {
 		if d, ok := d.(*ast.FuncDecl); ok {
-			return d.Name.Name != "runTraced"
+			return docs[d.Name.Name] == ""
 		}
 		return d.(*ast.GenDecl).Tok != token.IMPORT
 	})
@@ -356,6 +452,7 @@ func untraced(traced []byte, fast string) []byte {
 	}
 	// The fast path charges params.JumpdestGas; runTraced itself does not use params.
 	astutil.AddImport(fset, f, "github.com/erigontech/erigon/execution/protocol/params")
+	astutil.AddImport(fset, f, "math/bits")
 	var b bytes.Buffer
 	b.WriteString("// Code generated by execution/vm/vmgen from interpreter.go. DO NOT EDIT.\n\npackage vm\n\n")
 	for _, d := range f.Decls {
@@ -363,13 +460,19 @@ func untraced(traced []byte, fast string) []byte {
 		case *ast.GenDecl:
 			b.WriteString(text(fset, d) + "\n\n")
 		case *ast.FuncDecl:
-			d.Doc, d.Name.Name = nil, "run"
+			doc := docs[d.Name.Name]
+			d.Doc = nil
 			for n := range ast.Preorder(d) {
-				if id, ok := n.(*ast.Ident); ok && id.Name == "anyTrace" {
-					id.Name = "false"
+				if id, ok := n.(*ast.Ident); ok {
+					switch id.Name {
+					case "anyTrace":
+						id.Name = "false"
+					case "runTraced", "stepTraced":
+						id.Name = strings.TrimSuffix(id.Name, "Traced")
+					}
 				}
 			}
-			b.WriteString("// run is runTraced without the tracing code and with the fast path.\n" + text(fset, &printer.CommentedNode{Node: d, Comments: f.Comments}) + "\n")
+			b.WriteString(doc + text(fset, &printer.CommentedNode{Node: d, Comments: f.Comments}) + "\n")
 		}
 	}
 	out, err := format.Source(b.Bytes())
@@ -445,10 +548,9 @@ func testTable(ops []fastOp) []byte {
 	b.WriteString("// Code generated by execution/vm/vmgen. DO NOT EDIT.\n\npackage vm\n\n")
 	b.WriteString("import \"github.com/erigontech/erigon/execution/protocol/params\"\n\n")
 	b.WriteString("var fastPathOps = map[OpCode]fastPathWant{\n")
-	for i := range ops {
-		o := &ops[i]
+	for _, o := range ops {
 		execute, memorySize, dynamicGas := cmp.Or(o.execute, "nil"), cmp.Or(o.memorySize, "nil"), cmp.Or(o.dynamicGas, "nil")
-		fmt.Fprintf(&b, "%s: {%s, %s, %d, %d, %s, %s},\n", o.name, execute, o.gas, o.pop, o.push, memorySize, dynamicGas)
+		fmt.Fprintf(&b, "%s: {%s, %s, %d, %d, %s, %s, %t},\n", o.name, execute, o.gas, o.pop, o.push, memorySize, dynamicGas, o.gated)
 	}
 	b.WriteString("}\n")
 	out, err := format.Source([]byte(b.String()))
