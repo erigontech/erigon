@@ -255,6 +255,9 @@ func TestModMatchesBigInt(t *testing.T) {
 			check(edges[i], edges[j])
 		}
 	}
+	// The one-limb quotient estimate is two too large and needs two add-backs.
+	check(*uint256.MustFromHex("0xfffeb423951318f710ad975bf498c2f6f7f330d96a383d52b0920186cc20dc51"),
+		*uint256.MustFromHex("0x1087cfdf8163c1873b0e15b27a0946e3efe19fe32cc147117"))
 }
 
 func TestAddMod(t *testing.T) {
