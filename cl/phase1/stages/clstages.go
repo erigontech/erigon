@@ -87,8 +87,10 @@ type Cfg struct {
 	gloasSkippedAnchorValidation skippedAnchorValidation
 	sleepForSlotLastWake         sleepForSlotWake
 	sleepForSlotHeadChanged      bool
-	executionHead                common.Hash
-	chainTipRejections           *chainTipRejections
+	// executionHead tracks the canonical execution-head decision for wake detection, not confirmed
+	// EL adoption. Tolerated FCU timeouts still update it.
+	executionHead      common.Hash
+	chainTipRejections *chainTipRejections
 }
 
 type Args struct {

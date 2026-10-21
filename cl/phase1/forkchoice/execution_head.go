@@ -22,6 +22,9 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
+// GetExecutionHead resolves the execution hash for a Gloas fork-choice node.
+// The boolean means the hash was resolved, not that the EL verified or adopted it.
+// Canonical FCU permits an unverified FULL head; preparation checks verification separately.
 func (f *ForkChoiceStore) GetExecutionHead(head ForkChoiceNode) (common.Hash, bool) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
