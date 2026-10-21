@@ -167,6 +167,9 @@ func (b *ByteLRU[V]) compute(key uint64, fn func(prev V, found bool) (V, otter.C
 		}
 		w := b.weigh(key, v)
 		if w > b.maxBytes {
+			if found {
+				return prev, otter.InvalidateOp // the write supersedes prev, so prev must not stay live
+			}
 			return prev, otter.CancelOp
 		}
 		if found {
@@ -201,17 +204,20 @@ func (b *ByteLRU[V]) charge(w int64) {
 func (b *ByteLRU[V]) grow() {
 	b.growMu.Lock()
 	defer b.growMu.Unlock()
+	if b.closed {
+		return
+	}
 	lim, ceil := b.limit.Load(), b.ceiling.Load()
-	if b.closed || lim >= ceil || b.resident.Load() <= lim {
-		return
+	for lim < ceil && b.resident.Load() > lim {
+		chunk := min(byteLRUChunkBytes, ceil-lim)
+		if !cachebudget.Global.Reserve(chunk) {
+			b.ceiling.Store(lim) // envelope full: stop asking until Purge/Close frees it
+			b.c.SetMaximum(uint64(lim))
+			return
+		}
+		lim += chunk
+		b.limit.Store(lim)
 	}
-	chunk := min(byteLRUChunkBytes, ceil-lim)
-	if !cachebudget.Global.Reserve(chunk) {
-		b.ceiling.Store(lim) // envelope full: stop asking until Purge/Close frees it
-		b.c.SetMaximum(uint64(lim))
-		return
-	}
-	b.limit.Store(lim + chunk)
 }
 
 func (b *ByteLRU[V]) Remove(key uint64) { b.c.Invalidate(key) }

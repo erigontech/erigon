@@ -242,3 +242,17 @@ func TestByteLRUUnbudgetedStaysBoundedAndCorrect(t *testing.T) {
 	// The limit never moves: there is nothing to grow into.
 	require.Equal(t, int64(maxBytes), b.limit.Load())
 }
+
+// One write larger than a chunk must still be covered by the reservation.
+func TestByteLRUGrowCoversLargeWrite(t *testing.T) {
+	prev := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prev })
+	cachebudget.Global = cachebudget.New(1 << 40)
+
+	b := newByteLRU(64*datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
+	defer b.Close()
+
+	require.True(t, b.Add(1, make([]byte, 40*datasize.MB)))
+	b.c.CleanUp()
+	require.LessOrEqual(t, b.resident.Load(), b.limit.Load())
+}

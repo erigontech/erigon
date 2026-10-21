@@ -154,6 +154,18 @@ func TestDomainCache_PutUpdateValue(t *testing.T) {
 	assert.Equal(t, value2, v)
 }
 
+// A replacement too big for the whole cache must not leave the old value live.
+func TestDomainCache_OversizedPutDropsOldValue(t *testing.T) {
+	c := closeOnCleanup(t, NewDomainCacheMode(datasize.KB, ModeEvictLRU))
+
+	addr := makeAddr(1)
+	c.Put(addr, []byte{1, 2, 3}, 0)
+	c.Put(addr, make([]byte, 2*datasize.KB), 1)
+
+	_, ok := c.Get(addr)
+	assert.False(t, ok)
+}
+
 func TestDomainCache_PutCapacityLimit_NoOpMode(t *testing.T) {
 	// ModeNoOp keeps the historical fill-and-freeze behaviour: once
 	// full, new keys are silently dropped. Counted via the dropped metric.
