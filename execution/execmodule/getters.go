@@ -371,6 +371,10 @@ func (e *ExecModule) isCanonicalHash(ctx context.Context, tx kv.Tx, hash common.
 	return expectedHash == hash, nil
 }
 
+func (e *ExecModule) IsValidated(blockHash common.Hash) bool {
+	return e.forkValidator.IsValidated(blockHash)
+}
+
 func (e *ExecModule) IsCanonicalHash(ctx context.Context, blockHash common.Hash) (bool, error) {
 	tx, cleanup, err := e.beginOverlayOrRo(ctx)
 	if err != nil {
