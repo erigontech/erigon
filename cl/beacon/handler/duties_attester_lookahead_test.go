@@ -60,7 +60,10 @@ func TestGetAttesterDutiesRejectsEpochBeyondNext(t *testing.T) {
 				{currentEpoch + 2, http.StatusBadRequest},
 			} {
 				t.Run(strconv.FormatUint(tc.epoch, 10), func(t *testing.T) {
-					resp, err := server.Client().Post(server.URL+"/eth/v1/validator/duties/attester/"+strconv.FormatUint(tc.epoch, 10), "application/json", strings.NewReader(`["0","1","2"]`))
+					req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/eth/v1/validator/duties/attester/"+strconv.FormatUint(tc.epoch, 10), strings.NewReader(`["0","1","2"]`))
+					require.NoError(t, err)
+					req.Header.Set("Content-Type", "application/json")
+					resp, err := server.Client().Do(req)
 					require.NoError(t, err)
 					defer resp.Body.Close()
 					require.Equal(t, tc.code, resp.StatusCode)
