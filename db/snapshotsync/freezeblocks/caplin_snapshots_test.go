@@ -18,6 +18,7 @@ package freezeblocks
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"math"
 	"os"
@@ -25,6 +26,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/require"
@@ -48,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -507,6 +510,42 @@ func TestBuildMissingIndicesSkipsClaimedRange(t *testing.T) {
 	view := sn.View()
 	defer view.Close()
 	require.Len(t, view.BeaconBlocks(), 1, "a freshly indexed segment must be published")
+}
+
+func TestBuildMissingIndicesWaitsForOutstandingBuild(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, false)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, false)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	started, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	sn.SetIndexBuilder(snaptype.BeaconBlocks, snaptype.IndexBuilderFunc(func(ctx context.Context, info snaptype.FileInfo, salt uint32, _ *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
+		once.Do(func() {
+			close(started)
+			<-release
+		})
+		return snapshotsync.BeaconSimpleIdx(ctx, info, salt, tmpDir, p, lvl, logger)
+	}))
+
+	first := make(chan error, 1)
+	go func() { first <- sn.BuildMissingIndices(t.Context(), log.New()) }()
+	<-started
+	tipAtReturn := make(chan uint64, 1)
+	go func() {
+		if err := sn.BuildMissingIndices(t.Context(), log.New()); err != nil {
+			t.Error(err)
+		}
+		tipAtReturn <- sn.BlocksAvailable()
+	}()
+	time.Sleep(100 * time.Millisecond)
+	close(release)
+
+	require.NoError(t, <-first)
+	require.Equal(t, uint64(2*limit-1), <-tipAtReturn, "a second build must return only once the outstanding one is visible")
 }
 
 // A corrupt .idx is not a missing one: the strict open rejects it, so the discovery open

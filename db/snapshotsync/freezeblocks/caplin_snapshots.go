@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -60,6 +61,10 @@ type CaplinSnapshots struct {
 	// salt-blocks.txt is the EL blocks salt; caplin has no salt file of its own, so its
 	// indexes stay on 0 as they always have been.
 	Salt uint32
+
+	// Range claims alone let a second BuildMissingIndices return before the first one's
+	// segments are visible.
+	buildMu sync.Mutex
 
 	tmpdir string
 	logger log.Logger
@@ -467,6 +472,8 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	if s == nil {
 		return nil
 	}
+	s.buildMu.Lock()
+	defer s.buildMu.Unlock()
 	list, _, _, err := s.segmentsUpToGap()
 	if err != nil {
 		return err
