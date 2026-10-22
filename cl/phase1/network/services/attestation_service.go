@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -72,6 +73,7 @@ func beaconCommittee(
 	slot,
 	committeeIndex,
 	slotsPerEpoch uint64,
+	verifyBeforeBuild func() error,
 ) ([]uint64, uint64, error) {
 	var (
 		committee         []uint64
@@ -89,6 +91,7 @@ func beaconCommittee(
 		}
 		var err error
 		committee, err = headState.GetBeaconCommitee(slot, committeeIndex)
+		committee = slices.Clone(committee)
 		return err
 	})
 	if err != nil {
@@ -97,14 +100,53 @@ func beaconCommittee(
 	if !useTargetState {
 		return committee, committeesPerSlot, nil
 	}
-	if derivedRoot := fc.Ancestor(blockRoot, target.Epoch*slotsPerEpoch).Root; derivedRoot != (common.Hash{}) {
-		target.Root = derivedRoot
+	target.Root = fc.Ancestor(blockRoot, target.Epoch*slotsPerEpoch).Root
+	if target.Root == (common.Hash{}) {
+		return nil, 0, fmt.Errorf("%w: target block ancestor is unknown", ErrIgnore)
+	}
+	if verifyBeforeBuild != nil {
+		if err := verifyBeforeBuild(); err != nil {
+			return nil, 0, err
+		}
 	}
 	committee, committeesPerSlot, err = fc.TargetBeaconCommittee(target, slot, committeeIndex)
 	if err != nil {
 		return nil, 0, fmt.Errorf("%w: target beacon committee: %w", ErrIgnore, err)
 	}
 	return committee, committeesPerSlot, nil
+}
+
+func attestationSignatureData(
+	syncedData synced_data.SyncedData,
+	beaconCfg *clparams.BeaconChainConfig,
+	data *solid.AttestationData,
+	validatorIndex,
+	targetEpoch uint64,
+) (common.Bytes48, [32]byte, error) {
+	var (
+		domain []byte
+		pubKey common.Bytes48
+	)
+	if err := syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		// Committee members are active, so their indices were created before the finalized checkpoint and the head state has the same keys.
+		var err error
+		pubKey, err = headState.ValidatorPublicKey(int(validatorIndex))
+		if err != nil {
+			return fmt.Errorf("unable to get public key: %w", err)
+		}
+		domain, err = fork.ComputeDomainAtEpoch(beaconCfg, beaconCfg.DomainBeaconAttester, targetEpoch, headState.GenesisValidatorsRoot())
+		if err != nil {
+			return fmt.Errorf("unable to get the domain: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return common.Bytes48{}, [32]byte{}, err
+	}
+	signingRoot, err := computeSigningRoot(data, domain)
+	if err != nil {
+		return common.Bytes48{}, [32]byte{}, fmt.Errorf("unable to get signing root: %w", err)
+	}
+	return pubKey, signingRoot, nil
 }
 
 type attestationService struct {
@@ -300,7 +342,37 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return fmt.Errorf("%w: %w: %v", ErrIgnore, ErrBlockNotSeen, root)
 	}
 
-	committee, committeesPerSlot, err := beaconCommittee(s.forkchoiceStore, s.syncedDataManager, data.Target, root, slot, committeeIndex, s.beaconCfg.SlotsPerEpoch)
+	var verifyBeforeBuild func() error
+	if clVersion >= clparams.ElectraVersion {
+		verifyBeforeBuild = func() error {
+			validatorIndex := att.SingleAttestation.AttesterIndex
+			if epochLastTime, ok := s.validatorAttestationSeen.Get(validatorIndex); ok && epochLastTime == targetEpoch {
+				return fmt.Errorf("%w: %w", ErrIgnore, ErrAttestationAlreadySeen)
+			}
+			pubKey, signingRoot, err := attestationSignatureData(
+				s.syncedDataManager, s.beaconCfg, data, validatorIndex, targetEpoch,
+			)
+			if err != nil {
+				return err
+			}
+			valid, err := blsVerifyMultipleSignatures(
+				[][]byte{signature[:]},
+				[][]byte{signingRoot[:]},
+				[][]byte{pubKey[:]},
+			)
+			if err != nil {
+				return err
+			}
+			if !valid {
+				return ErrInvalidBlsSignature
+			}
+			return nil
+		}
+	}
+	committee, committeesPerSlot, err := beaconCommittee(
+		s.forkchoiceStore, s.syncedDataManager, data.Target, root, slot, committeeIndex,
+		s.beaconCfg.SlotsPerEpoch, verifyBeforeBuild,
+	)
 	if err != nil {
 		return err
 	}
@@ -392,28 +464,10 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return fmt.Errorf("invalid finalized checkpoint %w", ErrIgnore)
 	}
 
-	var (
-		domain []byte
-		pubKey common.Bytes48
-	)
-	if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
-		// Committee members are active, so their indices were created before the finalized checkpoint and the head state has the same keys.
-		pubKey, err = headState.ValidatorPublicKey(int(vIndex))
-		if err != nil {
-			return fmt.Errorf("unable to get public key: %w", err)
-		}
-		domain, err = fork.ComputeDomainAtEpoch(s.beaconCfg, s.beaconCfg.DomainBeaconAttester, targetEpoch, headState.GenesisValidatorsRoot())
-		if err != nil {
-			return fmt.Errorf("unable to get the domain: %w", err)
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
 	// [REJECT] The signature of attestation is valid.
-	signingRoot, err := computeSigningRoot(data, domain)
+	pubKey, signingRoot, err := attestationSignatureData(s.syncedDataManager, s.beaconCfg, data, vIndex, targetEpoch)
 	if err != nil {
-		return fmt.Errorf("unable to get signing root: %w", err)
+		return err
 	}
 
 	aggregateVerificationData := &AggregateVerificationData{

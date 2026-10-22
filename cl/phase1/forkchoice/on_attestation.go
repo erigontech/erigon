@@ -116,6 +116,13 @@ func (f *ForkChoiceStore) TargetBeaconCommittee(target solid.Checkpoint, slot, c
 			return nil, 0, errors.New("too many target committee builds")
 		}
 		defer f.targetCommitteeBuilds.Add(-1)
+		header, ok := f.forkGraph.GetHeader(target.Root)
+		if !ok {
+			return nil, 0, errors.New("target checkpoint block does not exist")
+		}
+		if header.Slot+maxTargetCheckpointBlockAge*f.beaconCfg.SlotsPerEpoch < slot {
+			return nil, 0, errors.New("target checkpoint block is too old")
+		}
 		if finalized, ok := f.finalizedCheckpoint.Load().(solid.Checkpoint); ok &&
 			f.Ancestor(target.Root, finalized.Epoch*f.beaconCfg.SlotsPerEpoch).Root != finalized.Root {
 			return nil, 0, errors.New("target checkpoint does not descend from finalized checkpoint")
