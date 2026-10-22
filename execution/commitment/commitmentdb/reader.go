@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -151,6 +152,13 @@ func (r *syncStateReader) CloneForWorker(context.Context, kv.TemporalTx) StateRe
 }
 
 func (r *syncStateReader) BindsWorkerTx() bool { return false }
+
+func (r *syncStateReader) LeafRefs(key, data []byte) *commitment.LeafRefs {
+	if refs, ok := r.src.(leafRefReader); ok {
+		return refs.LeafRefs(key, data)
+	}
+	return nil
+}
 
 // HistoryStateReader reads *full* historical state at specified txNum.
 // `limitReadAsOfTxNum` here is used as timestamp for usual GetAsOf.
