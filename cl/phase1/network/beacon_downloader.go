@@ -69,6 +69,7 @@ type ForwardBeaconDownloader struct {
 	gloasLookahead           *cltypes.SignedBeaconBlock
 	gloasLookaheadPeer       string
 	gloasTipEmptyPeer        string
+	gloasTipEmptyThrough     uint64
 	gloasNextUnscanned       uint64
 	gloasTipProcessedThrough uint64
 }
@@ -743,6 +744,7 @@ Process:
 	if nextGloasLookahead != nil && nextGloasLookahead.Block.Slot > f.highestSlotProcessed {
 		if f.gloasLookahead != nextGloasLookahead {
 			f.gloasTipEmptyPeer = ""
+			f.gloasTipEmptyThrough = 0
 		}
 		f.gloasLookahead = nextGloasLookahead
 		f.gloasLookaheadPeer = pid
@@ -764,8 +766,10 @@ func (f *ForwardBeaconDownloader) tipWithoutSuccessorResponse(peerID string, ran
 	if f.gloasLookahead == nil {
 		return nil
 	}
-	if peerID != "http-fallback" && (f.gloasTipEmptyPeer == "" || f.gloasTipEmptyPeer == peerID) {
+	lastSlot := lastSlotInRange(rangeStart, rangeCount)
+	if peerID != "http-fallback" && (f.gloasTipEmptyPeer == "" || f.gloasTipEmptyPeer == peerID || f.gloasTipEmptyThrough != lastSlot) {
 		f.gloasTipEmptyPeer = peerID
+		f.gloasTipEmptyThrough = lastSlot
 		return nil
 	}
 	return &peerAndBlocks{
@@ -851,6 +855,7 @@ func (f *ForwardBeaconDownloader) clearGloasScan() {
 	f.gloasLookahead = nil
 	f.gloasLookaheadPeer = ""
 	f.gloasTipEmptyPeer = ""
+	f.gloasTipEmptyThrough = 0
 	f.gloasNextUnscanned = 0
 }
 
