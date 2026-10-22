@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -79,9 +80,10 @@ func TestBALPhantomReadAttackCancelsWarmup(t *testing.T) {
 		result, err = m.ValidateChain(t.Context(), block.Header())
 	}()
 	select {
-	case <-warmupCtx.Done():
-	case <-time.After(time.Second):
-		t.Error("rejected block left BAL warmup running")
+	case <-done:
+		assert.ErrorIs(t, warmupCtx.Err(), context.Canceled, "rejected block left BAL warmup running")
+	case <-time.After(time.Minute):
+		t.Error("block validation did not finish")
 	}
 	cancel()
 	<-done
