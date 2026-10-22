@@ -146,6 +146,8 @@ type TxPool struct {
 	nonceGapEvictions int
 	// frontHoles counts senders whose NEXT nonce the pool does not hold; see the [nonce-front] log.
 	frontHoles int
+	// lowNonceDiscards counts transactions the state nonce has already passed; see the [low-nonce] log.
+	lowNonceDiscards int
 	// admitted, discardCounts and discardUnderBuilder are the pool conservation check: in, out, why.
 	admitted              int
 	admittedBySender      map[uint64]admitCount
@@ -2317,6 +2319,26 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		discardReason := txpoolcfg.NonceTooLow
 		if senderNonce > mt.TxnSlot.Nonce {
 			deleteAndContinueReasonLog = "low nonce"
+			// ⚠ BENIGN OR A LOSS, AND THE COUNT ALONE CANNOT SAY WHICH. The state nonce is past this
+			// transaction, so SOMETHING with its nonce executed — either this one (the pool is clearing
+			// a copy of work already done, which is the whole point of the rule) or a DIFFERENT
+			// transaction that took the slot, in which case this one is gone and its sender never
+			// learns. The discard is permanent either way, so the two have to be told apart by name:
+			// sender, nonce, how far the state has moved past it, and whether the open block was still
+			// holding it — a builder that still has it is the case worth alarm, because the block being
+			// built references work the pool has just destroyed.
+			p.lowNonceDiscards++
+			if p.lowNonceDiscards == 1 || p.lowNonceDiscards%50 == 0 {
+				name := fmt.Sprintf("id%d", senderID)
+				if addr, ok := p.senders.senderID2Addr[senderID]; ok {
+					name = addr.String()
+				}
+				bn, held := p.builderNonce[senderID]
+				logger.Warn("[low-nonce] discarding a transaction the state has already passed",
+					"sender", name, "nonce", mt.TxnSlot.Nonce, "stateNonce", senderNonce,
+					"behindBy", senderNonce-mt.TxnSlot.Nonce, "builderHolds", held && mt.TxnSlot.Nonce <= bn,
+					"builderNonce", bn, "seenSoFar", p.lowNonceDiscards)
+			}
 		} else if p.cfg.MaxNonceGap > 0 && mt.TxnSlot.Nonce > noGapsNonce && mt.TxnSlot.Nonce-noGapsNonce > p.cfg.MaxNonceGap {
 			// Evict "zombie" queued transactions whose nonce is so far ahead of the sender's
 			// on-chain nonce (accounting for any consecutive txns already in the pool) that they
@@ -3326,9 +3348,10 @@ func (p *TxPool) senderExits(cacheView kvcache.CacheView) string {
 	// admittedBySender while the mapping has gone. A diagnostic must never be able to stop the thing it
 	// is measuring: this crashed live403 outright. Resolve the address first and read nothing if absent.
 	chainNonce := uint64(0)
+	chainKnown := false
 	if _, mapped := p.senders.senderID2Addr[best]; mapped {
 		if n, _, err := p.senders.info(cacheView, best); err == nil {
-			chainNonce = n
+			chainNonce, chainKnown = n, true
 		}
 	}
 	var b strings.Builder
@@ -3342,8 +3365,13 @@ func (p *TxPool) senderExits(cacheView kvcache.CacheView) string {
 			continue
 		}
 		hi := p.discardHighNonce[k]
+		// ⚠ ONLY MEANINGFUL WHEN THE CHAIN NONCE IS KNOWN. An unmapped senderID leaves chainNonce at
+		// zero, against which every mined nonce reads as "above chain" — the flag then fires on healthy
+		// senders and means nothing. A probe that cries wolf is worse than no probe.
 		flag := ""
-		if k.reason == txpoolcfg.Mined && hi >= chainNonce {
+		if !chainKnown {
+			flag = " (chainNext unknown — sender not mapped)"
+		} else if k.reason == txpoolcfg.Mined && hi >= chainNonce {
 			flag = " ⚠ABOVE-CHAIN"
 		}
 		fmt.Fprintf(&b, " | %s=%d highestNonce=%d%s", k.reason.String(), n, hi, flag)
