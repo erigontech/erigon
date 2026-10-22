@@ -162,7 +162,10 @@ func (r *ephemeralReplay) exec(tx kv.TemporalRwTx, doms *execctx.SharedDomains) 
 // seedBAL (the BAL round-trip's run 2).
 func (r *ephemeralReplay) execSeeded(tx kv.TemporalRwTx, doms *execctx.SharedDomains, seedBAL types.BlockAccessList) error {
 	src := &singleBlockSource{block: r.block, num: r.num, parent: r.parent, bal: seedBAL}
-	_, err := ExecV3(r.ctx, r.cfg, doms, tx, stages.ModeApplyingBlocks, false, "replay", r.rng, src, r.logger)
+	out, err := ExecV3(r.ctx, r.cfg, doms, tx, stages.ModeApplyingBlocks, false, "replay", r.rng, src, r.logger)
+	if err == nil && out.verdict != nil {
+		err = out.verdict.err
+	}
 	return err
 }
 

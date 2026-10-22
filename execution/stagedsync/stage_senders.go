@@ -248,6 +248,17 @@ Loop:
 			panic(blockIndex) //uint-underflow
 		}
 
+		if senders, ok := cfg.readAheader.RecoveredSenders(ctx, blockHash); ok {
+			pendingMu.Lock()
+			cfg.readAheader.AddSenders(senders, blockHash)
+			err := collectorSenders.Collect(dbutils.BlockBodyKey(blockNumber, blockHash), senders)
+			pendingMu.Unlock()
+			if err != nil {
+				return err
+			}
+			continue
+		}
+
 		// Register pending block
 		pendingMu.Lock()
 		// Skip blocks with no transactions

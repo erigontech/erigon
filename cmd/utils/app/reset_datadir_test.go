@@ -23,6 +23,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -156,4 +157,38 @@ func TestGetChainNameFromChainData_NonExistentDir(t *testing.T) {
 	result, err := getChainNameFromChainData(ctx, nil, logger, chainDataDir)
 	require.Error(t, err)
 	require.False(t, result.Ok)
+}
+
+func TestResetKeepLocalSnapshotsFlag(t *testing.T) {
+	for _, tc := range []struct {
+		args    []string
+		keep    bool
+		wantErr bool
+	}{
+		{args: nil, keep: false},
+		{args: []string{"--keep-local-snapshots"}, keep: true},
+		{args: []string{"--local=false"}, keep: true},
+		{args: []string{"--local"}, keep: false},
+		{args: []string{"-l=false"}, keep: true},
+		{args: []string{"--local=false", "--keep-local-snapshots"}, wantErr: true},
+	} {
+		local, keepFlag := removeLocalFlag, keepLocalSnapshotsFlag
+		var keep bool
+		var err error
+		cmd := &cli.Command{
+			Name:  "reset",
+			Flags: []cli.Flag{&local, &keepFlag},
+			Action: func(_ context.Context, cmd *cli.Command) error {
+				keep, err = keepLocalSnapshots(cmd)
+				return nil
+			},
+		}
+		require.NoError(t, cmd.Run(context.Background(), append([]string{"reset"}, tc.args...)), "%v", tc.args)
+		if tc.wantErr {
+			require.Error(t, err, "%v", tc.args)
+			continue
+		}
+		require.NoError(t, err, "%v", tc.args)
+		require.Equal(t, tc.keep, keep, "%v", tc.args)
+	}
 }
