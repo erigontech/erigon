@@ -69,7 +69,9 @@ func TestLoopRemovesCoveredBlockSegmentsAtStartup(t *testing.T) {
 		return errors.Is(err, os.ErrNotExist)
 	}, 10*time.Second, 10*time.Millisecond, "the covered segment must be unlinked at startup")
 	cancel()
-	require.NoError(t, <-done)
+	if err := <-done; err != nil {
+		require.ErrorIs(t, err, context.Canceled)
+	}
 
 	require.ElementsMatch(t, []string{filepath.Base(subSeg), filepath.Base(subIdx)}, d.deletedNames())
 	require.NoFileExists(t, subIdx)

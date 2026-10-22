@@ -1477,7 +1477,7 @@ func supersededEqualRangeVersions(list []snaptype.FileInfo) (kept, superseded []
 // keepUnindexedlyCovered moves back any removal whose covering superset has no index on
 // disk. buildVisibleSegments requires IsIndexed, so unlinking an indexed subset for an
 // unindexed superset leaves the range unreadable until someone rebuilds indexes.
-func keepUnindexedlyCovered(idxList, keep, remove []snaptype.FileInfo) ([]snaptype.FileInfo, []snaptype.FileInfo) {
+func keepUnindexedlyCovered(idxList, keep, remove []snaptype.FileInfo, eligibleKeepers []string) ([]snaptype.FileInfo, []snaptype.FileInfo) {
 	if len(remove) == 0 {
 		return keep, remove
 	}
@@ -1487,6 +1487,9 @@ func keepUnindexedlyCovered(idxList, keep, remove []snaptype.FileInfo) ([]snapty
 	}
 	indexed := make([]snaptype.FileInfo, 0, len(keep))
 	for i := range keep {
+		if eligibleKeepers != nil && !slices.Contains(eligibleKeepers, keep[i].Name()) {
+			continue
+		}
 		if isIndexedOnDisk(onDisk, keep[i]) {
 			indexed = append(indexed, keep[i])
 		}
@@ -1533,6 +1536,10 @@ func unversionedName(name string) string {
 }
 
 func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
+	return s.RemoveOverlapsWithKeepers(onDelete, nil)
+}
+
+func (s *BaseRoSnapshots) RemoveOverlapsWithKeepers(onDelete func(l []string) error, eligibleKeepers []string) error {
 	notOwned := func(f snaptype.FileInfo) bool { return !s.HasType(f.Type) }
 	list, err := snaptype.Segments(s.dir)
 	if err != nil {
@@ -1547,8 +1554,8 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 		return err
 	}
 	idxList = slices.DeleteFunc(idxList, notOwned)
-	if s.keepUnindexedlyCovered {
-		keepSegments, segmentsToRemove = keepUnindexedlyCovered(idxList, keepSegments, segmentsToRemove)
+	if s.keepUnindexedlyCovered || eligibleKeepers != nil {
+		keepSegments, segmentsToRemove = keepUnindexedlyCovered(idxList, keepSegments, segmentsToRemove, eligibleKeepers)
 	}
 
 	keepNames := make([]string, 0, len(keepSegments))

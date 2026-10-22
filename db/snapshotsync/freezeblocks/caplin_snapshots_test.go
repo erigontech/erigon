@@ -627,9 +627,21 @@ func TestOpenSkipsCrossingBeaconBlocks(t *testing.T) {
 		}
 
 		sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+		t.Cleanup(sn.Close)
 		require.NoError(t, sn.OpenFolder())
 		require.Equal(t, tc.max, sn.SegmentsMax(), "followers: %v", tc.followers)
+		require.Equal(t, tc.max, sn.BlocksAvailable())
+		require.NoError(t, sn.RemoveOverlaps(nil))
+		for i := 1; i < len(tc.followers); i++ {
+			require.FileExists(t, filepath.Join(dirs.Snap, snaptype.BeaconBlocks.FileName(version.ZeroVersion, tc.followers[i-1], tc.followers[i])))
+		}
+		require.Equal(t, tc.max, sn.BlocksAvailable())
 		sn.Close()
+
+		reopened := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+		t.Cleanup(reopened.Close)
+		require.NoError(t, reopened.OpenFolder())
+		require.Equal(t, tc.max, reopened.SegmentsMax())
 	}
 }
 

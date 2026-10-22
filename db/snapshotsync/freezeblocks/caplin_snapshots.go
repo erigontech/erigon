@@ -155,6 +155,14 @@ func (s *CaplinSnapshots) OpenFolder() error {
 	return s.OpenList(list, false)
 }
 
+func (s *CaplinSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
+	list, err := s.segmentsUpToGap()
+	if err != nil {
+		return err
+	}
+	return s.BaseRoSnapshots.RemoveOverlapsWithKeepers(onDelete, list)
+}
+
 // Go embedding has no virtual dispatch: the promoted base version would open past a gap.
 func (s *CaplinSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
 
