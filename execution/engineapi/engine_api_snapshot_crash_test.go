@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -256,11 +255,7 @@ func assertSnapshotCrashState(t *testing.T, db kv.TemporalRoDB, want crashRecove
 		for _, domain := range kv.StateDomains {
 			require.NotEmpty(t, tx.Debug().DomainFiles(domain), "recovery must read %s files", domain)
 		}
-		got := readCrashRecoveryTx(t, tx)
-		want.Domains = maps.Clone(want.Domains)
-		want.Domains[kv.CommitmentDomain] = crashRecoveryLiveCommitment(t, want.Domains[kv.CommitmentDomain])
-		got.Domains[kv.CommitmentDomain] = crashRecoveryLiveCommitment(t, got.Domains[kv.CommitmentDomain])
-		assertCrashRecoveryState(t, want, got)
+		assertEquivalentCrashRecoveryState(t, want, readCrashRecoveryTx(t, tx))
 		return nil
 	}))
 }
@@ -391,7 +386,7 @@ func continueSnapshotPruning(ctx context.Context, eat engineapitester.EngineApiT
 		return fmt.Errorf("snapshot pruning requires a writable temporal database")
 	}
 	for ctx.Err() == nil {
-		_, finished, err := eat.StateAgg.CollateAndPrune(context.Background(), db, func(tx kv.TemporalRwTx) (kv.FinalityContext, error) {
+		_, finished, err := db.CollateAndPrune(context.Background(), func(tx kv.TemporalRwTx) (kv.FinalityContext, error) {
 			finality, err := execfinality.Resolve(tx, snapshotCrashReorgDepth, false, rawdbv3.TxNums)
 			if err != nil {
 				return nil, err

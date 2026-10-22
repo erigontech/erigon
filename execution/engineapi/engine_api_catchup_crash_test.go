@@ -160,7 +160,7 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 					}
 					// Inspect persisted state before node initialization can change it.
 					checkpoint, blocks := readCrashRecoveryDataDir(t, request.DataDir, replacement.payloads)
-					assertCatchupRecoveryState(t, want, checkpoint)
+					assertEquivalentCrashRecoveryState(t, want, checkpoint)
 					require.Equal(t, downloaded, blocks, "bulk-imported blocks and BALs must survive every crash")
 
 					args := baseArgs
@@ -177,14 +177,14 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 					// Bulk import is durable before the FCU; recovery must not re-import.
 					// Re-importing would hide missing headers, bodies, or BALs after the crash.
 					require.NoError(t, eat.MockCl.UpdateForkChoice(t.Context(), replacement.payloads[len(replacement.payloads)-1]))
-					assertCatchupRecoveryState(t, replacement.state, readCrashRecoveryState(t, eat.ChainDB))
+					assertEquivalentCrashRecoveryState(t, replacement.state, readCrashRecoveryState(t, eat.ChainDB))
 					churn, bindErr := contracts.NewStateChurn(addr, eat.ContractBackend)
 					require.NoError(t, bindErr)
 					assertChurnState(t.Context(), t, eat, churn, replacement.payloads[len(replacement.payloads)-1], replacement.sum)
 					for _, target := range []crashRecoveryChain{canonical, replacement} {
 						insertCrashRecoveryPayloads(t.Context(), t, eat, target.payloads)
 						require.NoError(t, eat.MockCl.UpdateForkChoice(t.Context(), target.payloads[len(target.payloads)-1]))
-						assertCatchupRecoveryState(t, target.state, readCrashRecoveryState(t, eat.ChainDB))
+						assertEquivalentCrashRecoveryState(t, target.state, readCrashRecoveryState(t, eat.ChainDB))
 						assertChurnState(t.Context(), t, eat, churn, target.payloads[len(target.payloads)-1], target.sum)
 					}
 					assertCrashRecoveryContinuation(t, eat, churn, replacement)
@@ -260,11 +260,11 @@ func waitCrashRecoveryExecution(ctx context.Context, db kv.TemporalRoDB, head ui
 	}
 }
 
-func assertCatchupRecoveryState(t *testing.T, want, got crashRecoveryState) {
+func assertEquivalentCrashRecoveryState(t *testing.T, want, got crashRecoveryState) {
 	t.Helper()
-	require.Equal(t, want.CommitmentBlock, got.CommitmentBlock, "persisted catch-up checkpoint: got block %d, want %d", got.CommitmentBlock, want.CommitmentBlock)
-	require.Equal(t, want.CommitmentTx, got.CommitmentTx, "persisted catch-up checkpoint: got transaction %d, want %d", got.CommitmentTx, want.CommitmentTx)
-	require.Equal(t, want.StageProgress, got.StageProgress, "persisted catch-up stage progress")
+	require.Equal(t, want.CommitmentBlock, got.CommitmentBlock, "persisted checkpoint: got block %d, want %d", got.CommitmentBlock, want.CommitmentBlock)
+	require.Equal(t, want.CommitmentTx, got.CommitmentTx, "persisted checkpoint: got transaction %d, want %d", got.CommitmentTx, want.CommitmentTx)
+	require.Equal(t, want.StageProgress, got.StageProgress, "persisted stage progress")
 	// Different flush boundaries can keep or remove empty branch records.
 	// Compare every live branch, including its child hashes and plain keys.
 	for _, state := range []*crashRecoveryState{&want, &got} {
