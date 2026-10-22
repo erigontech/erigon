@@ -277,11 +277,24 @@ func (pe *parallelExecutor) startBlockValidator(blockNum, gasUsed, blobGasUsed u
 }
 
 func (pe *parallelExecutor) foldTx(ctx context.Context, rwTx kv.TemporalTx, r *txResult) error {
+	if err := pe.foldTxState(ctx, rwTx, r); err != nil {
+		return err
+	}
+	return pe.foldTxIndexes(rwTx, r)
+}
+
+func (pe *parallelExecutor) foldTxState(ctx context.Context, rwTx kv.TemporalTx, r *txResult) error {
 	restoreCS := pe.bindBlockChangesetForFold(r.blockNum, r.blockHash)
 	defer restoreCS()
 	if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules); err != nil {
 		return fmt.Errorf("fold state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
 	}
+	return nil
+}
+
+func (pe *parallelExecutor) foldTxIndexes(rwTx kv.TemporalTx, r *txResult) error {
+	restoreCS := pe.bindBlockChangesetForFold(r.blockNum, r.blockHash)
+	defer restoreCS()
 	if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos, r.isFinalize); err != nil {
 		return fmt.Errorf("fold index block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
 	}
@@ -673,7 +686,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// The apply loop is the sole sd.mem writer. Folding mid-block is safe:
 					// every cell a published tx wrote is in the versionMap, so later txs
 					// resolve it there and never read it from sd.mem.
-					if applyResult.foldAtBlockEnd {
+					if applyResult.foldStateAtBlockEnd {
+						if !finalized && foldErr == nil {
+							foldErr = pe.foldTxIndexes(rwTx, applyResult)
+						}
 						pendingFolds = append(pendingFolds, applyResult)
 					} else if !finalized && foldErr == nil {
 						foldErr = pe.foldTx(ctx, rwTx, applyResult)
@@ -686,7 +702,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 				case *blockResult:
 					for _, r := range pendingFolds {
 						if !finalized && foldErr == nil {
-							foldErr = pe.foldTx(ctx, rwTx, r)
+							foldErr = pe.foldTxState(ctx, rwTx, r)
 						}
 					}
 					pendingFolds = pendingFolds[:0]
@@ -1761,10 +1777,11 @@ type txResult struct {
 	// so its indexing skips the receipt cache; its logs are the block-end syscall
 	// logs (no receipt), indexed on the apply loop rather than racing the exec loop.
 	isFinalize bool
-	// foldAtBlockEnd defers the fold to the block's blockResult. Under a BAL,
-	// workers read sd.mem for cells the BAL does not cover, and a fold running
-	// beside them contends with those reads on the domain locks.
-	foldAtBlockEnd bool
+	// foldStateAtBlockEnd defers the state fold to the block's blockResult. Under
+	// a BAL, workers read sd.mem for cells the BAL does not cover, and a state fold
+	// running beside them contends with those reads on the domain locks. Workers
+	// never read the index domains, so indexes still fold as the tx arrives.
+	foldStateAtBlockEnd bool
 }
 
 // Block-STM model: workers own execution AND validation. Each worker flushes its
@@ -3720,7 +3737,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				txNum:                 task.Version().TxNum,
 				rules:                 task.Rules(),
 				cumulativeBlobGasUsed: result.cumulativeBlobGasUsed,
-				foldAtBlockEnd:        be.versionMap.HasBAL,
+				foldStateAtBlockEnd:   be.versionMap.HasBAL,
 			}
 
 			if result.Receipt != nil {
@@ -3909,14 +3926,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			// apply loop indexes them with skipReceiptCache, since finalize shares the
 			// last regular tx's txNum.
 			if err := be.sendResult(ctx, &txResult{
-				blockNum:       be.blockNum,
-				blockHash:      be.blockHash,
-				txNum:          txTask.Version().TxNum,
-				rules:          lastResult.Rules(),
-				writes:         finalizeWrites,
-				logs:           blockEndLogs,
-				isFinalize:     true,
-				foldAtBlockEnd: be.versionMap.HasBAL,
+				blockNum:            be.blockNum,
+				blockHash:           be.blockHash,
+				txNum:               txTask.Version().TxNum,
+				rules:               lastResult.Rules(),
+				writes:              finalizeWrites,
+				logs:                blockEndLogs,
+				isFinalize:          true,
+				foldStateAtBlockEnd: be.versionMap.HasBAL,
 			}, false); err != nil {
 				return nil, err
 			}
