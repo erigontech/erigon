@@ -427,6 +427,8 @@ func prepareTargetShufflingAggregate(
 	includeHeader bool,
 ) {
 	t.Helper()
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) { return true, nil }
 	data := aggregate.SignedAggregateAndProof.Message.Aggregate.Data
 	epoch := data.Slot / clparams.MainnetBeaconConfig.SlotsPerEpoch
 	expectedCommitteeIndex := data.CommitteeIndex
@@ -451,8 +453,6 @@ func prepareTargetShufflingAggregate(
 }
 
 func TestAggregateAndProofUsesTargetShuffling(t *testing.T) {
-	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) { return true, nil }
 	aggregate, s := getAggregateAndProofAndState()
 	service, syncedDataManager, fc := setupAggregateAndProofGossipTestWithConfig(t, &clparams.MainnetBeaconConfig)
 	require.NoError(t, syncedDataManager.OnHeadState(s))
@@ -462,6 +462,17 @@ func TestAggregateAndProofUsesTargetShuffling(t *testing.T) {
 	require.NotEmpty(t, headCommittee)
 	targetCommittee := targetCommitteeOutsideHead(t, s, headCommittee, 2)
 	prepareTargetShufflingAggregate(t, s, fc, aggregate, targetCommittee, true)
+	var callOrder []string
+	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) {
+		callOrder = append(callOrder, "bls")
+		return true, nil
+	}
+	targetCommitteeFn := fc.TargetBeaconCommitteeFn
+	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64) ([]uint64, uint64, error) {
+		require.Equal(t, []string{"bls"}, callOrder)
+		callOrder = append(callOrder, "target")
+		return targetCommitteeFn(target, slot, committeeIndex)
+	}
 	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = targetCommittee[0]
 	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048)
 	aggregate.ImmediateProcess = true
@@ -476,6 +487,64 @@ func TestAggregateAndProofUsesTargetShuffling(t *testing.T) {
 
 	require.NoError(t, service.ProcessMessage(context.Background(), nil, aggregate))
 	require.Equal(t, targetCommittee, capture.attestingIndices)
+	require.Equal(t, []string{"bls", "target", "bls"}, callOrder)
+}
+
+func TestAggregateAndProofRejectsInvalidSignatureBeforeTargetShuffling(t *testing.T) {
+	aggregate, s := getAggregateAndProofAndState()
+	service, syncedDataManager, fc := setupAggregateAndProofTest(t)
+	require.NoError(t, syncedDataManager.OnHeadState(s))
+	data := aggregate.SignedAggregateAndProof.Message.Aggregate.Data
+	headCommittee, err := s.GetBeaconCommitee(data.Slot, data.CommitteeIndex)
+	require.NoError(t, err)
+	targetCommittee := targetCommitteeOutsideHead(t, s, headCommittee, 2)
+	prepareTargetShufflingAggregate(t, s, fc, aggregate, targetCommittee, true)
+	targetCalls := 0
+	targetCommitteeFn := fc.TargetBeaconCommitteeFn
+	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64) ([]uint64, uint64, error) {
+		targetCalls++
+		return targetCommitteeFn(target, slot, committeeIndex)
+	}
+	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) { return false, nil }
+	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = targetCommittee[0]
+	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048)
+
+	err = service.ProcessMessage(context.Background(), nil, aggregate)
+	require.ErrorIs(t, err, ErrInvalidBlsSignature)
+	require.NotErrorIs(t, err, ErrIgnore)
+	require.Zero(t, targetCalls)
+}
+
+func TestAggregateAndProofAlreadySeenBeforeTargetShuffling(t *testing.T) {
+	aggregate, s := getAggregateAndProofAndState()
+	service, syncedDataManager, fc := setupAggregateAndProofTest(t)
+	require.NoError(t, syncedDataManager.OnHeadState(s))
+	data := aggregate.SignedAggregateAndProof.Message.Aggregate.Data
+	headCommittee, err := s.GetBeaconCommitee(data.Slot, data.CommitteeIndex)
+	require.NoError(t, err)
+	targetCommittee := targetCommitteeOutsideHead(t, s, headCommittee, 2)
+	prepareTargetShufflingAggregate(t, s, fc, aggregate, targetCommittee, true)
+	targetCalls := 0
+	targetCommitteeFn := fc.TargetBeaconCommitteeFn
+	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64) ([]uint64, uint64, error) {
+		targetCalls++
+		return targetCommitteeFn(target, slot, committeeIndex)
+	}
+	aggregatorIndex := targetCommittee[0]
+	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = aggregatorIndex
+	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048)
+	aggregate.ImmediateProcess = true
+	aggregateRoot, err := aggregate.SignedAggregateAndProof.HashSSZ()
+	require.NoError(t, err)
+	service.(*aggregateAndProofServiceImpl).seenAggreatorIndexes.Add(seenAggregateIndex{
+		epoch: data.Target.Epoch,
+		index: aggregatorIndex,
+	}, aggregateRoot)
+
+	err = service.ProcessMessage(context.Background(), nil, aggregate)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorIs(t, err, ErrAggregatorAlreadySeen)
+	require.Zero(t, targetCalls)
 }
 
 func TestAggregateAndProofRejectsAggregatorOutsideTargetCommittee(t *testing.T) {
@@ -592,17 +661,26 @@ func TestAggregateAndProofIgnoresUnavailableTargetShuffling(t *testing.T) {
 	require.NoError(t, err)
 	targetCommittee := targetCommitteeOutsideHead(t, s, headCommittee, 2)
 	prepareTargetShufflingAggregate(t, s, fc, aggregate, targetCommittee, true)
+	blsCalls := 0
+	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) {
+		blsCalls++
+		return true, nil
+	}
+	targetCalls := 0
 	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64) ([]uint64, uint64, error) {
+		targetCalls++
 		require.Equal(t, data.Target, target)
 		require.Equal(t, data.Slot, slot)
 		require.Equal(t, data.CommitteeIndex, committeeIndex)
 		return nil, 0, errors.New("target state unavailable")
 	}
+	delete(fc.Ancestors, data.Target.Epoch*clparams.MainnetBeaconConfig.SlotsPerEpoch)
 	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = targetCommittee[0]
 	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048)
 
 	err = service.ProcessMessage(context.Background(), nil, aggregate)
 	require.ErrorIs(t, err, ErrIgnore)
+	require.Equal(t, []int{0, 0}, []int{blsCalls, targetCalls})
 }
 
 func TestAggregateAndProofGossipDoesNotAcceptBeforeBLSVerification(t *testing.T) {
