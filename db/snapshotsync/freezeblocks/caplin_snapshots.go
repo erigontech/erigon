@@ -151,7 +151,7 @@ func (s *CaplinSnapshots) SegFileNames(from, to uint64) []string {
 }
 
 func (s *CaplinSnapshots) OpenFolder() error {
-	list, err := s.segmentsUpToGap()
+	list, _, _, err := s.segmentsUpToGap()
 	if err != nil {
 		return err
 	}
@@ -159,19 +159,14 @@ func (s *CaplinSnapshots) OpenFolder() error {
 }
 
 func (s *CaplinSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
-	list, err := s.segmentsUpToGap()
+	list, crossings, end, err := s.segmentsUpToGap()
 	if err != nil {
 		return err
 	}
-	files, err := snapshotsync.AllTypedSegments(s.Dir(), []snaptype.Type{snaptype.BeaconBlocks})
-	if err != nil {
-		return err
-	}
-	end := s.SegmentsMax() + 1
 	var toRemove []string
-	for i := range files {
-		f := &files[i]
-		if f.To > end || slices.Contains(list, f.Name()) {
+	for i := range crossings {
+		f := &crossings[i]
+		if f.To > end {
 			continue
 		}
 		indexes, err := filepath.Glob(filepath.Join(s.Dir(), snaptype.IdxFileMask(f.From, f.To, snaptype.BeaconBlocks.Name())))
@@ -201,28 +196,33 @@ func (s *CaplinSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
 
 // SegmentsMax is dirty-backed, so a beaconblocks segment past a gap or crossing must stay
 // closed: backfill stops at SegmentsMax and would never write the missing slots.
-func (s *CaplinSnapshots) segmentsUpToGap() ([]string, error) {
+func (s *CaplinSnapshots) segmentsUpToGap() ([]string, []snaptype.FileInfo, uint64, error) {
 	files, err := snapshotsync.AllTypedSegments(s.Dir(), s.Types())
 	if err != nil {
-		return nil, err
+		return nil, nil, 0, err
 	}
 	slices.SortFunc(files, func(a, b snaptype.FileInfo) int {
 		return cmp.Or(cmp.Compare(a.From, b.From), cmp.Compare(b.To, a.To))
 	})
 	list := make([]string, 0, len(files))
+	var crossings []snaptype.FileInfo
 	var end uint64
 	stopped := false
 	for i := range files {
 		if files[i].Type.Enum() == snaptype.CaplinEnums.BeaconBlocks {
 			stopped = stopped || (end > 0 && files[i].From > end)
-			if stopped || files[i].From < end && files[i].To > end {
+			if stopped {
+				continue
+			}
+			if files[i].From < end && files[i].To > end {
+				crossings = append(crossings, files[i])
 				continue
 			}
 			end = max(end, files[i].To)
 		}
 		list = append(list, files[i].Name())
 	}
-	return list, nil
+	return list, crossings, end, nil
 }
 
 type snapshotNotifier interface {
@@ -472,7 +472,7 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	if s == nil {
 		return nil
 	}
-	list, err := s.segmentsUpToGap()
+	list, _, _, err := s.segmentsUpToGap()
 	if err != nil {
 		return err
 	}
