@@ -788,12 +788,8 @@ func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.
 		// progress not 0 ? we need to load the state from the DB
 		s.currentState, err = historicalReader.ReadHistoricalState(ctx, tx, attempt)
 		if err != nil {
-			// If GLOAS snapshot data is missing (DB upgraded but not yet
-			// re-antiquated), back off to an earlier slot so the antiquary
-			// can rebuild forward from a valid pre-GLOAS state.
-			if errors.Is(err, historical_states_reader.ErrMissingGloasData) ||
-				errors.Is(err, historical_states_reader.ErrMissingHistoryVectorData) {
-				log.Warn("historical snapshot data missing, backing off to re-antiquate", "slot", attempt, "err", err)
+			if shouldBackoffHistoricalStateRead(err) {
+				log.Warn("historical snapshot data missing or corrupt, backing off to re-antiquate", "slot", attempt, "err", err)
 				backoffStep += backoffStrides
 				continue
 			}
@@ -852,6 +848,12 @@ func ptcWindowEpochReconstructionStart(tx kv.Tx, cfg *clparams.BeaconChainConfig
 		return 0, false, err
 	}
 	return max(start, genesisSlot), true, nil
+}
+
+func shouldBackoffHistoricalStateRead(err error) bool {
+	return errors.Is(err, historical_states_reader.ErrMissingGloasData) ||
+		errors.Is(err, historical_states_reader.ErrMissingHistoryVectorData) ||
+		errors.Is(err, base_encoding.ErrCorruptQueueDiff)
 }
 
 func computeSlotToBeRequested(tx kv.Tx, cfg *clparams.BeaconChainConfig, genesisSlot uint64, targetSlot uint64, backoffStep uint64) (uint64, error) {
