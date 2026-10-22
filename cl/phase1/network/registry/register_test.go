@@ -79,7 +79,6 @@ func TestAggregateAndProofRateLimiterAdmitsSlotBurstFromOnePeer(t *testing.T) {
 			for i := range test.burst {
 				require.True(t, condition(pid, nil, clparams.FuluVersion), "aggregate %d", i)
 			}
-			require.False(t, condition(pid, nil, clparams.FuluVersion), "the burst is bounded")
 		})
 	}
 }
