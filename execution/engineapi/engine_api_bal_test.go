@@ -1353,3 +1353,84 @@ func TestEngineApiNewPayloadBALInvalid(t *testing.T) {
 			"an in-range index is only refuted by the post-execution comparison")
 	})
 }
+
+// A BAL with valid structure but wrong values seeds the parallel executor's reads,
+// so it must make the payload INVALID, and the node must still accept the true payload.
+func TestEngineApiNewPayloadBALWrongValues(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	receiver := common.HexToAddress("0x333")
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		for range 3 {
+			_, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(1))
+			require.NoError(t, err)
+		}
+		payload, err := eat.MockCl.BuildNewPayload(ctx)
+		require.NoError(t, err)
+		executionRequests := payload.ExecutionRequests
+		if executionRequests == nil {
+			executionRequests = []hexutil.Bytes{}
+		}
+		goodBAL := decodeAndValidateBAL(t, payload)
+		receiverChanges := func(bal types.BlockAccessList) *types.AccountChanges {
+			for i := range bal {
+				if bal[i].Address == receiver {
+					return &bal[i]
+				}
+			}
+			t.Fatal("receiver not in BAL")
+			return nil
+		}
+		require.Len(t, receiverChanges(goodBAL).BalanceChanges, 3)
+		send := func(bal types.BlockAccessList) *enginetypes.PayloadStatus {
+			balBytes, err := types.EncodeBlockAccessListBytes(bal)
+			require.NoError(t, err)
+			elPayload := *payload.ExecutionPayload
+			b := hexutil.Bytes(balBytes)
+			elPayload.BlockAccessList = &b
+			response := *payload.GetPayloadResponse
+			response.ExecutionPayload = &elPayload
+			payloadCopy := *payload
+			payloadCopy.GetPayloadResponse = &response
+			header := engineapitester.MockClPayloadToHeader(&payloadCopy)
+			balHash := crypto.Keccak256Hash(balBytes)
+			header.BlockAccessListHash = &balHash
+			elPayload.BlockHash = header.Hash()
+			status, err := eat.EngineApiClient.NewPayloadV5(ctx, &elPayload, []common.Hash{}, payload.ParentBeaconBlockRoot, executionRequests)
+			require.NoError(t, err)
+			return status
+		}
+		for name, tamper := range map[string]func(bal types.BlockAccessList) types.BlockAccessList{
+			"first receiver balance off by one": func(bal types.BlockAccessList) types.BlockAccessList {
+				c := receiverChanges(bal).BalanceChanges[0]
+				c.Value = *new(uint256.Int).AddUint64(&c.Value, 1)
+				return bal
+			},
+			"receiver balance change missing": func(bal types.BlockAccessList) types.BlockAccessList {
+				rc := receiverChanges(bal)
+				rc.BalanceChanges = rc.BalanceChanges[1:]
+				return bal
+			},
+			"spurious receiver balance change": func(bal types.BlockAccessList) types.BlockAccessList {
+				rc := receiverChanges(bal)
+				rc.BalanceChanges = append([]*types.BalanceChange{{Index: 0, Value: *uint256.NewInt(7)}}, rc.BalanceChanges...)
+				return bal
+			},
+		} {
+			bal := tamper(decodeAndValidateBAL(t, payload))
+			status := send(bal)
+			require.Equalf(t, enginetypes.InvalidStatus, status.Status, "%s: %v", name, status.ValidationError)
+		}
+		status := send(goodBAL)
+		require.Equal(t, enginetypes.ValidStatus, status.Status, "%v", status.ValidationError)
+	})
+}
