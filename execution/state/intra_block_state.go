@@ -53,6 +53,7 @@ var _ evmtypes.IntraBlockState = new(IntraBlockState) // compile-time interface-
 type revision struct {
 	id           int
 	journalIndex int
+	logCount     int
 }
 
 type revisions struct {
@@ -65,10 +66,10 @@ func (r *revisions) init() {
 	r.valid = r.buf[:0]
 }
 
-func (r *revisions) snapshot(journal *journal) int {
+func (r *revisions) snapshot(journal *journal, logCount int) int {
 	id := r.nextId
 	r.nextId++
-	r.valid = append(r.valid, revision{id, journal.length()})
+	r.valid = append(r.valid, revision{id, journal.length(), logCount})
 	return id
 }
 
@@ -90,7 +91,7 @@ func (r *revisions) reset() {
 	r.nextId = 0
 }
 
-func (r *revisions) revertToSnapshot(revid int) int {
+func (r *revisions) revertToSnapshot(revid int) revision {
 	// Find the snapshot in the stack of valid snapshots.
 	idx := sort.Search(len(r.valid), func(i int) bool {
 		return r.valid[i].id >= revid
@@ -107,7 +108,7 @@ func (r *revisions) revertToSnapshot(revid int) int {
 	if r.nextId == snapshot.id+1 {
 		r.nextId = snapshot.id
 	}
-	return snapshot.journalIndex
+	return snapshot
 }
 
 // Snapshot depth tracks EVM call depth: the inline buf covers typical depth
@@ -520,7 +521,7 @@ const maxKeptTxOutput = int(datasize.MB)
 // held the entry before. The entry is owned by the arena and handed to a later
 // transaction, so it must never be passed on without copying.
 func (ibs *IntraBlockState) AllocLog(addr common.Address, numTopics, dataSize int) *types.Log {
-	return ibs.logs.alloc(ibs.journal, addr, ibs.txIndex, numTopics, dataSize)
+	return ibs.logs.alloc(addr, ibs.txIndex, numTopics, dataSize)
 }
 
 // NotifyLog runs the OnLog hook after a log's fields are populated.
@@ -2560,7 +2561,7 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 
 // Snapshot returns an identifier for the current revision of the state.
 func (ibs *IntraBlockState) PushSnapshot() int {
-	return ibs.revisions.snapshot(ibs.journal)
+	return ibs.revisions.snapshot(ibs.journal, len(ibs.logs.entries))
 }
 
 func (ibs *IntraBlockState) PopSnapshot(snapshot int) {
@@ -2585,10 +2586,11 @@ func (ibs *IntraBlockState) RevertToSnapshot(revid int, err error) {
 
 	snapshot := ibs.revisions.revertToSnapshot(revid)
 	// Replay the journal to undo changes and remove invalidated snapshots
-	ibs.journal.revert(ibs, snapshot)
+	ibs.journal.revert(ibs, snapshot.journalIndex)
+	ibs.logs.truncate(snapshot.logCount)
 
 	if traced {
-		fmt.Printf("%d (%d.%d) Reverted: %d:%d\n", ibs.blockNum, ibs.txIndex, ibs.version, revid, snapshot)
+		fmt.Printf("%d (%d.%d) Reverted: %d:%d\n", ibs.blockNum, ibs.txIndex, ibs.version, revid, snapshot.journalIndex)
 	}
 }
 
