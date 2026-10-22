@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"runtime"
 	"runtime/pprof"
@@ -20,6 +21,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -1353,6 +1355,9 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 				return err
 			}
 			addresses := make([]common.Address, 0, 2)
+			if txTask, ok := t.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(0) {
+				sender = accounts.NilAddress
+			}
 			if !sender.IsNil() {
 				addresses = append(addresses, sender.Value())
 			}
@@ -2409,6 +2414,56 @@ func (result *execResult) runPostApplyMessageOnMinIBS(
 	return nil
 }
 
+// touchedSenderAccount reports whether a run that charges the sender at validation read or wrote the sender's nonce or balance.
+func touchedSenderAccount(txTask *exec.TxTask, result *exec.TxResult) bool {
+	sender, err := txTask.TxSender()
+	if err != nil {
+		return true
+	}
+	_, readBalance := result.TxIn.GetBalance(sender)
+	_, readNonce := result.TxIn.GetNonce(sender)
+	_, wroteBalance := result.TxOut.GetBalance(sender)
+	_, wroteNonce := result.TxOut.GetNonce(sender)
+	return readBalance || readNonce || wroteBalance || wroteNonce
+}
+
+// chargeSenderAtValidation returns the sender charge writes, or nil when the sender's nonce or balance after prior txs rejects the tx.
+func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version state.Version, vm *state.VersionMap, stateReader state.StateReader) (*state.WriteSet, error) {
+	msg, err := txTask.TxMessage()
+	if err != nil {
+		return nil, err
+	}
+	sender := msg.From()
+	acc, err := state.NewVersionedStateReader(version.TxIndex, state.ReadSet{}, vm, stateReader).ReadAccountData(sender)
+	if err != nil {
+		return nil, err
+	}
+	if acc == nil || acc.Nonce != msg.Nonce() || acc.Nonce == math.MaxUint64 {
+		return nil, nil
+	}
+	limit, overflow := u256.MulOverflow(u256.U64(msg.Gas()), *msg.FeeCap())
+	if !overflow {
+		limit, overflow = u256.AddOverflow(limit, *msg.Value())
+	}
+	if overflow || acc.Balance.Lt(&limit) {
+		return nil, nil
+	}
+	charge := u256.Mul(u256.U64(result.ExecutionResult.ReceiptGasUsed), *msg.GasPrice())
+	if result.ExecutionResult.Err == nil {
+		charge = u256.Add(charge, *msg.Value())
+	}
+	ws := &state.WriteSet{}
+	ws.SetBalance(sender, &state.VersionedWrite[uint256.Int]{
+		WriteHeader: state.WriteHeader{Address: sender, Path: state.BalancePath, Version: version, Reason: tracing.BalanceDecreaseGasBuy},
+		Val:         u256.Sub(acc.Balance, charge),
+	})
+	ws.SetNonce(sender, &state.VersionedWrite[uint64]{
+		WriteHeader: state.WriteHeader{Address: sender, Path: state.NoncePath, Version: version, NonceReason: tracing.NonceChangeEoACall},
+		Val:         acc.Nonce + 1,
+	})
+	return ws, nil
+}
+
 type taskVersion struct {
 	*execTask
 	version    state.Version
@@ -2450,6 +2505,11 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	}
 
 	if result.Err != nil {
+		return result
+	}
+
+	if txTask, ok := ev.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(ev.version.Incarnation) && touchedSenderAccount(txTask, result) {
+		result.Err = protocol.ErrExecAbortError{DependencyTxIndex: ev.version.TxIndex - 1}
 		return result
 	}
 
@@ -2888,7 +2948,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// after a genuine error can never be settledInput, since its
 				// erroring predecessor never validates — so out of a cascade of
 				// speculative errors only the genuinely-first one is returned.
-				if be.settledInput[tx] {
+				// A run without the sender checks re-runs with them: serial execution reports a sender error first.
+				txTask, isTxTask := be.tasks[tx].Task.(*exec.TxTask)
+				skippedSenderChecks := isTxTask && txTask.ChargesSenderAtValidation(res.Version().Incarnation)
+				if be.settledInput[tx] && !skippedSenderChecks {
 					txVersion := res.Version()
 					taskRules := be.tasks[tx].Task.Rules()
 					validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
@@ -3081,6 +3144,16 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		// a result is committed only if validation explicitly passed it.
 		valid := validity == state.VersionValid
 
+		var senderWrites *state.WriteSet
+		if valid {
+			if txTask, ok := txTask.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(txVersion.Incarnation) {
+				if senderWrites, err = chargeSenderAtValidation(txTask, txResult, txVersion, be.versionMap, stateReader); err != nil {
+					return nil, err
+				}
+				valid = senderWrites != nil
+			}
+		}
+
 		be.versionMap.SetTrace(trace)
 		writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
 		be.versionMap.FlushVersionedWrites(writeSet, valid)
@@ -3160,6 +3233,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				return nil, err
 			}
 			addWrites := finalizeWrites
+			if senderWrites != nil {
+				addWrites = senderWrites.MergeInto(addWrites)
+			}
 
 			// Merge any additional reads/writes produced during finalize (fee calc, post apply, etc)
 			if addReads.Len() > 0 {

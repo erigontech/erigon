@@ -1413,6 +1413,43 @@ func TestParallelTransitionPanicUsesOperationalBlockResult(t *testing.T) {
 	require.True(t, result.Operational)
 }
 
+// A first run without the sender checks fails on intrinsic gas for a sender that cannot pay.
+// Serial execution reports the sender failure first, so the tx must re-run with the checks on.
+func TestParallelChargeSenderAtValidationRetriesFirstRunError(t *testing.T) {
+	db := newResumeTestDB(t)
+	config := chain.TestChainBerlinConfig
+	pe, roTx := newResumeTestExec(t, db, config)
+	pe.in = exec.NewQueueWithRetry(16)
+	txn, err := types.SignTx(&types.LegacyTx{
+		CommonTx: types.CommonTx{To: &common.Address{0xaa}, GasLimit: 20_000},
+		GasPrice: *uint256.NewInt(1),
+	}, *types.MakeSigner(config, 1, 0), senderIsCoinbaseKey.key)
+	require.NoError(t, err)
+
+	be, task := newParallelResultTestBlock(config, txn)
+	be.settledInput[0] = true
+	task.versionMap = be.versionMap
+	task.shouldDelayFeeCalc = true
+	require.True(t, task.Task.(*exec.TxTask).ChargesSenderAtValidation(0))
+
+	ibs := state.New(state.NewNoopReader())
+	t.Cleanup(ibs.Close)
+	evm := &vm.EVM{}
+	require.NoError(t, task.Reset(evm, ibs, nil))
+	result := task.Execute(evm, pe.cfg.engine, nil, ibs, state.NewNoopWriter(), config, nil, datadir.Dirs{}, false)
+	result.Task = task
+	var abort protocol.ErrExecAbortError
+	require.ErrorAs(t, result.Err, &abort)
+	require.ErrorIs(t, abort.OriginError, protocol.ErrIntrinsicGas)
+
+	blockResult, err := be.nextResult(context.Background(), pe, result, roTx)
+
+	require.NoError(t, err)
+	require.Nil(t, blockResult)
+	require.Equal(t, 1, be.txIncarnations[0])
+	require.Equal(t, 1, pe.in.RetriesLen(), "the re-run is queued at incarnation 1, with the sender checks on")
+}
+
 func TestParallelResumeBoundaryOffsets(t *testing.T) {
 	assert := assert.New(t)
 	db := newResumeTestDB(t)
