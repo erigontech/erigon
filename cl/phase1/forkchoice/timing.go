@@ -258,7 +258,7 @@ func (f *ForkChoiceStore) isHeadLate(root common.Hash) bool {
 // [New in Gloas:EIP7732] This function considers equivocating validators.
 func (f *ForkChoiceStore) isHeadWeak(root common.Hash) bool {
 	justifiedCheckpoint := f.JustifiedCheckpoint()
-	checkpointState, err := f.getCheckpointState(justifiedCheckpoint)
+	checkpointState, err := f.getCheckpointStateLocked(justifiedCheckpoint)
 	if err != nil || checkpointState == nil {
 		return false
 	}

@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"strconv"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -192,6 +193,43 @@ func TestDoClosesStreamingBodyOnContextCancel(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("Do leaked the streaming body: it was never closed after context cancel")
 	}
+}
+
+func TestDoPrefersContextErrorToReadyResponse(t *testing.T) {
+	for range 100 {
+		synctest.Test(t, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			closed := make(chan struct{})
+			h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.(*captureWriter).setStreamingBody(&signalCloser{closed: closed})
+				cancel()
+			})
+			req, err := http.NewRequestWithContext(waitForHandlerContext{ctx}, "GET", "http://service.internal/", http.NoBody)
+			require.NoError(t, err)
+
+			resp, err := Do(h, req)
+			if resp != nil {
+				resp.Body.Close()
+			}
+			require.ErrorIs(t, err, context.Canceled)
+			require.Nil(t, resp)
+			synctest.Wait()
+			select {
+			case <-closed:
+			default:
+				t.Fatal("Do did not close the cancelled response body")
+			}
+		})
+	}
+}
+
+type waitForHandlerContext struct{ context.Context }
+
+func (c waitForHandlerContext) Done() <-chan struct{} {
+	// Let the handler finish so its response and cancellation are both ready.
+	synctest.Wait()
+	return c.Context.Done()
 }
 
 func TestRequestContextCancelClosesEstablishedStream(t *testing.T) {
