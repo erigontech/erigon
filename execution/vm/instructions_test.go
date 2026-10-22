@@ -144,6 +144,24 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 	}
 }
 
+func TestOpMulmodModulusChange(t *testing.T) {
+	t.Parallel()
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+	callContext := &CallContext{}
+	stark := uint256.MustFromHex("0x800000000000011000000000000000000000000000000000000000000000001")
+	secp := uint256.MustFromHex("0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f")
+	x := new(uint256.Int).SetAllOne()
+	y := uint256.MustFromHex("0x87ffb8b26394face67d77fae3608d0891ff3f9014f20db29ae04af2c2d265de1")
+	for _, m := range []*uint256.Int{stark, stark, secp, uint256.NewInt(97), stark, secp, secp} {
+		callContext.Stack.push(*m)
+		callContext.Stack.push(*y)
+		callContext.Stack.push(*x)
+		opMulmod(0, evm, callContext)
+		got, want := callContext.Stack.popCopy(), new(uint256.Int).MulMod(x, y, m)
+		require.Equal(t, want, &got, "mod %x", m)
+	}
+}
+
 func TestByteOp(t *testing.T) {
 	t.Parallel()
 	tests := []TwoOperandTestcase{

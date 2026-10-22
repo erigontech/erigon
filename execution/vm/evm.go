@@ -120,6 +120,10 @@ type EVM struct {
 	addrOps     uint32
 
 	spareFrame *CallContext // a finished nested frame's context, see putCallContext
+
+	// MULMOD reuses the reciprocal of the last 256-bit modulus: computing it costs more than the reduction.
+	mulmodMod uint256.Int
+	mulmodMu  [5]uint64
 }
 
 // evmSizeClass is the Go allocation size class EVM fills. Growing it from the
