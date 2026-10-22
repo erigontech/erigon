@@ -4084,3 +4084,78 @@ func TestSameSenderSpeculationRejectsLikeSerialExecution(t *testing.T) {
 		})
 	}
 }
+
+// TestBALComputeAheadUnwindRestoresCommitment pins unwind of a block whose
+// commitment was computed ahead from its BAL during payload validation: the
+// unwind must restore the commitment domain to its exact pre-block content.
+func TestBALComputeAheadUnwindRestoresCommitment(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
+	defer func(prev bool) { dbg.BALShadowCompute = prev }(dbg.BALShadowCompute)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+	dbg.BALShadowCompute = false
+
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithKey(privKey),
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.AllProtocolChanges, // Amsterdam-at-0 → every block carries a BAL
+			Alloc:  types.GenesisAlloc{senderAddr: {Balance: big.NewInt(1 * common.Ether)}},
+		}),
+		execmoduletester.WithExperimentalBAL(),
+	)
+	const chainLen = 3
+	chainPack, err := m.GenerateChain(chainLen, func(i int, b *blockgen.BlockGen) {
+		// A fresh recipient per block adds trie leaves, so the last block changes branches.
+		tx, txErr := types.SignTx(
+			types.NewTransaction(uint64(i), common.Address{0x42, byte(i)}, uint256.NewInt(1_000), 50000, uint256.NewInt(10_000_000_000), nil),
+			*types.LatestSignerForChainID(nil), privKey,
+		)
+		require.NoError(t, txErr)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+
+	commitmentContent := func() map[string]string {
+		content := map[string]string{}
+		require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+			it, err := tx.Debug().RangeLatest(kv.CommitmentDomain, nil, nil, kv.Unlim)
+			require.NoError(t, err)
+			defer it.Close()
+			for it.HasNext() {
+				k, v, err := it.Next()
+				require.NoError(t, err)
+				content[string(k)] = string(v)
+			}
+			return nil
+		}))
+		return content
+	}
+
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks[:chainLen-1]))
+	m.ExecModule.WaitIdle(ctx)
+	before := commitmentContent()
+
+	stagedsync.ResetComputedAheadForTest()
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks[chainLen-1:]))
+	m.ExecModule.WaitIdle(ctx)
+	require.Positive(t, stagedsync.ComputedAheadCountForTest(), "the last block must compute its commitment ahead")
+	require.NotEqual(t, before, commitmentContent())
+
+	fcuRes, err := m.UpdateForkChoice(ctx, chainPack.Blocks[chainLen-2].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuRes.Status, "validationError=%q", fcuRes.ValidationError)
+	m.ExecModule.WaitIdle(ctx)
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		execProg, err := stages.GetStageProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		require.Equal(t, uint64(chainLen-1), execProg, "FCU back must unwind execution")
+		return nil
+	}))
+	require.Equal(t, before, commitmentContent(), "unwind must restore the pre-block commitment domain")
+}

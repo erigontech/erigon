@@ -145,6 +145,11 @@ type commitmentCalculator struct {
 	computedAhead map[uint64]bool
 	balRoots      map[uint64][]byte
 
+	// aheadDiffs holds the commitment diff of a changeset-owning block computed
+	// ahead until its blockResult: the exec loop saves the block's changeset only
+	// by then.
+	aheadDiffs map[uint64]*kv.DomainDiff
+
 	// lastComputedAheadBlock is the highest block computed ahead so far.
 	// Compute-ahead reads the commitment domain for its baseline, so it may only
 	// run when the preceding block advanced the domain (was itself computed ahead,
@@ -243,6 +248,7 @@ func newCommitmentCalculator(
 		pending:              map[uint64]*pendingBlock{},
 		computedAhead:        map[uint64]bool{},
 		balRoots:             map[uint64][]byte{},
+		aheadDiffs:           map[uint64]*kv.DomainDiff{},
 		forcePerBlockCompute: forcePerBlockCompute,
 		perBlockFrom:         perBlockFrom,
 		done:                 make(chan struct{}),
@@ -384,6 +390,10 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		cc.lastBlockResult = r
 		cc.lastBlockResultSeen = r.BlockNum
 		cc.hasSeenBlockResult = true
+		if err := cc.saveAheadDiff(r); err != nil {
+			cc.fail(ctx, r, err)
+			return
+		}
 
 		commitStart := time.Now()
 		switch {
@@ -488,18 +498,12 @@ func (cc *commitmentCalculator) computeAheadGateOpen(n uint64) bool {
 	return cc.hasSeenBlockResult && cc.lastBlockResultSeen+1 >= n
 }
 
-// maybeComputeAhead computes block n from its BAL when it is BAL-driven, the
-// compute-ahead gate is open, and doing so is safe — overlapping with block n's
-// execution. Idempotent (computedAhead guard).
-//
-// Two safety restrictions:
-//   - Only pre-window blocks (!ownsChangeset) compute ahead, under computeIsolated
-//     (nil accumulator), so nothing leaks into a later window block's changeset.
-//     A changeset-owning block computes incrementally at its own boundary.
-//   - Compute ahead only contiguously from the batch's first block: n's baseline
-//     comes from the commitment domain, which only a prior compute-ahead (or the
-//     prior cycle) advanced. Computing across a missing-BAL block would read a
-//     stale trie.
+// maybeComputeAhead computes block n from its BAL when it is BAL-driven and the
+// compute-ahead gate is open — overlapping with block n's execution. Idempotent
+// (computedAhead guard). It computes ahead only contiguously from the batch's
+// first block: n's baseline comes from the commitment domain, which only a prior
+// compute-ahead (or the prior cycle) advanced. Computing across a missing-BAL
+// block would read a stale trie.
 func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64) {
 	pb, ok := cc.pending[n]
 	if !ok || pb.mode != calcModeBALDriven || cc.computedAhead[n] {
@@ -508,9 +512,6 @@ func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64)
 	// Cap compute-ahead at the batch's coalesce block so commitment cannot outrun
 	// the state exec will stop at. Read the signal context, not the compute ctx.
 	if sc, stopping := stopCauseOf(cc.signalCtx); stopping && n > sc.block {
-		return
-	}
-	if cc.ownsChangeset(n) {
 		return
 	}
 	if !cc.computeAheadGateOpen(n) {
@@ -624,14 +625,40 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 	}
 	balUpdates := cc.balUpdates
 	balState.FlushToUpdates(balUpdates)
-	return cc.computeRootFromUpdates(ctx, t, balUpdates, reader)
+	var diff *kv.DomainDiff
+	if cc.ownsChangeset(req.blockNum) {
+		if diff = cc.aheadDiffs[req.blockNum]; diff == nil {
+			diff = &kv.DomainDiff{}
+			cc.aheadDiffs[req.blockNum] = diff
+		}
+	}
+	return cc.computeRootFromUpdates(ctx, t, balUpdates, reader, diff)
+}
+
+// saveAheadDiff moves the commitment diff of a block computed ahead into the
+// block's changeset.
+func (cc *commitmentCalculator) saveAheadDiff(r *blockResult) error {
+	diff, ok := cc.aheadDiffs[r.BlockNum]
+	if !ok {
+		return nil
+	}
+	delete(cc.aheadDiffs, r.BlockNum)
+	cs := cc.doms.GetChangesetByHash(r.BlockNum, r.BlockHash)
+	if cs == nil {
+		return fmt.Errorf("no changeset accumulator saved for computed-ahead block %d (%x)", r.BlockNum, r.BlockHash)
+	}
+	if cs.Diffs[kv.CommitmentDomain].Len() != 0 {
+		return fmt.Errorf("changeset of computed-ahead block %d (%x) already has commitment diffs", r.BlockNum, r.BlockHash)
+	}
+	cs.Diffs[kv.CommitmentDomain] = *diff
+	return nil
 }
 
 // computeRootFromUpdates installs an explicit updates buffer + reader on the
 // commitment context and computes the root, routed by ownsChangeset like
 // compute(). Used by BAL compute-ahead, which supplies its own balState-derived
-// updates rather than cc.state.
-func (cc *commitmentCalculator) computeRootFromUpdates(ctx context.Context, t commitTarget, updates *commitment.Updates, reader *asOfStateReader) ([]byte, func() error, error) {
+// updates rather than cc.state. A nil diff routes into the block's saved changeset.
+func (cc *commitmentCalculator) computeRootFromUpdates(ctx context.Context, t commitTarget, updates *commitment.Updates, reader *asOfStateReader, diff *kv.DomainDiff) ([]byte, func() error, error) {
 	sdCtx := cc.doms.GetCommitmentContext()
 	sdCtx.SetUpdates(updates)
 	reader.txNum = t.lastTxNum + 1
@@ -639,7 +666,7 @@ func (cc *commitmentCalculator) computeRootFromUpdates(ctx context.Context, t co
 	if !cc.ownsChangeset(t.blockNum) {
 		return cc.computeIsolated(ctx, t)
 	}
-	rh, err := cc.computeWithBlockAccumulator(ctx, t)
+	rh, err := cc.computeWithBlockAccumulator(ctx, t, diff)
 	return rh, nil, err
 }
 
@@ -660,7 +687,7 @@ func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, r *blockRe
 	cc.state.flushToUpdates(cc.updates)
 	cc.state.ResetBlockFlags()
 	incUpdates := cc.handOffUpdates()
-	rh, flushOwn, err := cc.computeRootFromUpdates(ctx, targetOf(r), incUpdates, cc.asOfReader)
+	rh, flushOwn, err := cc.computeRootFromUpdates(ctx, targetOf(r), incUpdates, cc.asOfReader, nil)
 	if err != nil {
 		cc.fail(ctx, r, fmt.Errorf("shadow incremental compute: %w", err))
 		return
@@ -766,7 +793,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	if !cc.ownsChangeset(t.blockNum) {
 		rh, flushOwn, err = cc.computeIsolated(ctx, t)
 	} else {
-		rh, err = cc.computeWithBlockAccumulator(ctx, t)
+		rh, err = cc.computeWithBlockAccumulator(ctx, t, nil)
 	}
 	if err != nil {
 		cc.publish(ctx, commitmentResult{
@@ -890,7 +917,7 @@ func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult)
 // match, misrouting the [state] write and producing off-by-one wrong roots. It
 // also stamps the pending deferred update with the block's hash so the next
 // call's FlushPendingUpdates uses the same hash-aware routing.
-func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context, t commitTarget) ([]byte, error) {
+func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context, t commitTarget, diff *kv.DomainDiff) ([]byte, error) {
 	defer func() {
 		if upd := cc.doms.GetCommitmentContext().PeekPendingUpdate(); upd != nil && upd.BlockNum == t.blockNum {
 			upd.BlockHash = t.blockHash
@@ -911,11 +938,13 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	// The exec loop saves the accumulator by hash before dispatching the block, so
 	// this identifies the block's changeset whatever the loop rotated to since. A
 	// live-accumulator fallback would fold these writes into whichever block is bound.
-	cs := cc.doms.GetChangesetByHash(t.blockNum, t.blockHash)
-	if cs == nil {
-		return nil, fmt.Errorf("no changeset accumulator saved for block %d (%x)", t.blockNum, t.blockHash)
+	if diff == nil {
+		cs := cc.doms.GetChangesetByHash(t.blockNum, t.blockHash)
+		if cs == nil {
+			return nil, fmt.Errorf("no changeset accumulator saved for block %d (%x)", t.blockNum, t.blockHash)
+		}
+		diff = &cs.Diffs[kv.CommitmentDomain]
 	}
-	diff := &cs.Diffs[kv.CommitmentDomain]
 	return cc.doms.GetCommitmentContext().ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.recordProgress, diff)
 }
 

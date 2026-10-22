@@ -884,3 +884,94 @@ func TestStepBoundaryRecordsIntoTheExecutorsChangeset(t *testing.T) {
 	require.True(t, sawStateKey,
 		"the mid-block checkpoint must record KeyCommitmentState into the changeset the executor opened for the block, or a reorg cannot unwind it")
 }
+
+// TestComputeAhead_InWindowBlockRecordsIntoOwnChangeset pins compute-ahead for a
+// changeset-owning block: it runs before the exec loop saves the block's
+// changeset, and its commitment writes must still end up in that changeset, so
+// an unwind of the block reverts commitment together with state.
+func TestComputeAhead_InWindowBlockRecordsIntoOwnChangeset(t *testing.T) {
+	defer func(p bool) { dbg.BALDrivenCommitment = p }(dbg.BALDrivenCommitment)
+	defer func(p bool) { dbg.IgnoreBAL = p }(dbg.IgnoreBAL)
+	defer func(p bool) { dbg.BALShadowCompute = p }(dbg.BALShadowCompute)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+	dbg.BALShadowCompute = false
+
+	ctx := context.Background()
+	logger := log.New()
+	const lastTxNum = uint64(3)
+	blockHash := common.Hash{0xEF}
+
+	rnd := rand.New(rand.NewSource(42))
+	var bList types.BlockAccessList
+	var writes []*state.WriteSet
+	for txNum := uint64(1); txNum <= lastTxNum; txNum++ {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		bal := *uint256.NewInt(txNum * 1000)
+		idx := uint32(txNum - 1)
+		bList = append(bList, types.AccountChanges{
+			Address:        [20]byte(addrBytes),
+			BalanceChanges: []*types.BalanceChange{{Index: idx, Value: bal}},
+			NonceChanges:   []*types.NonceChange{{Index: idx, Value: txNum}},
+		})
+		writes = append(writes, nonceBalanceWrites(accounts.InternAddress([20]byte(addrBytes)), txNum, bal))
+	}
+
+	// The incremental root of the same writes is the header root compute-ahead must reproduce.
+	var stateRoot common.Hash
+	{
+		db, _, doms := setupStepTest(t)
+		cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, nil, nil, nil, state.NewLayeredDomainReader(doms, nil, nil), nil)
+		require.NoError(t, err)
+		t.Cleanup(cc.Stop)
+		for i, ws := range writes {
+			cc.handleMessage(ctx, &txResult{rules: &chain.Rules{}, blockNum: 1, blockHash: blockHash, txNum: uint64(i + 1), writes: ws})
+		}
+		cc.state.flushToUpdates(cc.updates)
+		rh, _, err := cc.computeRootFromUpdates(ctx, commitTarget{blockNum: 1, blockHash: blockHash, lastTxNum: lastTxNum}, cc.handOffUpdates(), cc.asOfReader, nil)
+		require.NoError(t, err)
+		stateRoot = common.BytesToHash(rh)
+	}
+
+	db, _, doms := setupStepTest(t)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1, nil, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	t.Cleanup(cc.Stop)
+	cc.hasFirstBlock = true
+	cc.firstBlockNum = 1
+
+	cc.handleBlockRequest(ctx, &blockRequest{
+		blockNum:   1,
+		blockHash:  blockHash,
+		firstTxNum: 1,
+		lastTxNum:  lastTxNum,
+		stateRoot:  stateRoot,
+		bal:        bList,
+	})
+	require.True(t, cc.computedAhead[1], "a changeset-owning block must compute ahead")
+	res := <-out
+	require.NoError(t, res.err)
+	require.Equal(t, stateRoot[:], res.rootHash)
+
+	// The exec loop saves the block's changeset before it sends the blockResult.
+	cs := &changeset.StateChangeSet{}
+	doms.SavePastChangesetAccumulator(blockHash, 1, cs)
+	cc.handleMessage(ctx, newTestBlockResult(1, blockHash, lastTxNum, false))
+	select {
+	case res := <-out:
+		t.Fatalf("unexpected result at blockResult: %+v", res)
+	default:
+	}
+
+	stateKey := string(commitmentdb.KeyCommitmentState)
+	sawStateKey := false
+	for _, d := range cs.Diffs[kv.CommitmentDomain].GetDiffSet() {
+		if len(d.Key) == len(stateKey)+8 && strings.HasPrefix(d.Key, stateKey) {
+			sawStateKey = true
+			break
+		}
+	}
+	require.True(t, sawStateKey, "compute-ahead must record KeyCommitmentState into the block's own changeset")
+}
