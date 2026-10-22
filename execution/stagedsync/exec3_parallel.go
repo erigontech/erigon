@@ -2420,17 +2420,11 @@ func touchedSenderAccount(txTask *exec.TxTask, result *exec.TxResult) bool {
 	if err != nil {
 		return true
 	}
-	if _, ok := result.TxIn.GetBalance(sender); ok {
-		return true
-	}
-	if _, ok := result.TxIn.GetNonce(sender); ok {
-		return true
-	}
-	if _, ok := result.TxOut.GetBalance(sender); ok {
-		return true
-	}
-	_, ok := result.TxOut.GetNonce(sender)
-	return ok
+	_, readBalance := result.TxIn.GetBalance(sender)
+	_, readNonce := result.TxIn.GetNonce(sender)
+	_, wroteBalance := result.TxOut.GetBalance(sender)
+	_, wroteNonce := result.TxOut.GetNonce(sender)
+	return readBalance || readNonce || wroteBalance || wroteNonce
 }
 
 // chargeDeferredSender checks a deferred-sender tx's nonce and balance
@@ -2449,11 +2443,7 @@ func chargeDeferredSender(txTask *exec.TxTask, result *execResult, version state
 	if acc == nil || acc.Nonce != msg.Nonce() || acc.Nonce == math.MaxUint64 {
 		return nil, nil
 	}
-	feeCap := msg.GasPrice()
-	if msg.FeeCap() != nil {
-		feeCap = msg.FeeCap()
-	}
-	limit, overflow := u256.MulOverflow(u256.U64(msg.Gas()), *feeCap)
+	limit, overflow := u256.MulOverflow(u256.U64(msg.Gas()), *msg.FeeCap())
 	if !overflow {
 		limit, overflow = u256.AddOverflow(limit, *msg.Value())
 	}
