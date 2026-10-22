@@ -31,6 +31,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/cl/cltypes"
 	das_mock_services "github.com/erigontech/erigon/cl/das/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/rpc"
@@ -146,7 +147,9 @@ func TestForwardSyncFlushesBlockCollectorAfterInsertion(t *testing.T) {
 	}
 }
 
-func TestForwardSyncRecordsTipRootAfterEmptySuccessorRange(t *testing.T) {
+func newForwardSyncTipFixture(t *testing.T) (*Cfg, common.Hash, *cltypes.SignedBeaconBlock, uint64) {
+	t.Helper()
+
 	cfg, graph, tipRoot, _, nextBlock, _ := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
 	tip := graph.parents[tipRoot]
 	envelope := graph.envelopes[tipRoot]
@@ -175,6 +178,11 @@ func TestForwardSyncRecordsTipRootAfterEmptySuccessorRange(t *testing.T) {
 	}
 	cfg.ethClock = clock
 	cfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg.beaconCfg, clock, nil)
+	return cfg, tipRoot, nextBlock, targetSlot
+}
+
+func TestForwardSyncRecordsTipRootAfterEmptySuccessorRange(t *testing.T) {
+	cfg, tipRoot, nextBlock, targetSlot := newForwardSyncTipFixture(t)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
@@ -201,6 +209,17 @@ func TestForwardSyncRecordsTipRootAfterEmptySuccessorRange(t *testing.T) {
 	require.NoError(t, cfg.forkChoice.OnBlock(ctx, nextBlock, false, false, false))
 	require.NotEqual(t, tipRoot, cfg.forkChoice.HighestSeenRoot())
 	require.False(t, ConsensusClStages().ArgsFunc(ctx, cfg).atForwardSyncTip)
+}
+
+func TestForwardSyncDoesNotRecordTipRootAboveProcessedSlot(t *testing.T) {
+	cfg, _, nextBlock, _ := newForwardSyncTipFixture(t)
+	cfg.forkChoice.OnTick((nextBlock.Block.Slot + 1) * cfg.beaconCfg.SecondsPerSlot * 1000)
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), nextBlock, false, false, false))
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, forwardSync(ctx, log.Root(), cfg, Args{}))
+	require.Zero(t, cfg.forwardSyncTipRoot)
 }
 
 // Forward sync imports blocks without their columns, so it asks for a backfill of the range it
