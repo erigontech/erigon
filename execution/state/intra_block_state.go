@@ -310,11 +310,7 @@ func (ibs *IntraBlockState) CodeReadCount() int64 {
 	return ibs.codeReadCount
 }
 
-// SetVersionMap binds the IBS to a versionMap and, by that binding, to the
-// cache-free noMaterialize path. noMaterialize is derived from versionMap presence
-// and has no external setter, so the unsafe combination — a versionMap present but
-// the stateObject-materialize path still on — cannot be constructed: versioned
-// execution always runs noMaterialize.
+// SetVersionMap binds the IBS to a versionMap; noMaterialize follows versionMap presence.
 func (ibs *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
 	noMaterialize := versionMap != nil
 	if dbg.AssertEnabled && noMaterialize != ibs.noMaterialize && !ibs.stateObjectArena.empty() {
