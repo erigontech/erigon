@@ -2947,7 +2947,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// after a genuine error can never be settledInput, since its
 				// erroring predecessor never validates — so out of a cascade of
 				// speculative errors only the genuinely-first one is returned.
-				if be.settledInput[tx] {
+				// A run without the sender checks re-runs with them: serial execution reports a sender error first.
+				txTask, isTxTask := be.tasks[tx].Task.(*exec.TxTask)
+				skippedSenderChecks := isTxTask && txTask.ChargesSenderAtValidation(res.Version().Incarnation)
+				if be.settledInput[tx] && !skippedSenderChecks {
 					txVersion := res.Version()
 					taskRules := be.tasks[tx].Task.Rules()
 					validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,

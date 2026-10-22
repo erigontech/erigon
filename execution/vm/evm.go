@@ -440,7 +440,7 @@ func (evm *EVM) Call(caller accounts.Address, addr accounts.Address, input []byt
 		if err != nil {
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, err
 		}
-		if !canTransfer && !bailout {
+		if !canTransfer {
 			return nil, gasRemaining, mdgas.MdGasUsage{}, ErrInsufficientBalance
 		}
 	}
