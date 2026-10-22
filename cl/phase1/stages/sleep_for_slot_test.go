@@ -88,9 +88,10 @@ func (f sleepForSlotForkChoiceFake) RetryDataAvailablePendingExecutionPayloadEnv
 }
 
 type blockingSleepForSlotForkChoiceFake struct {
-	head    common.Hash
-	started chan<- struct{}
-	release <-chan struct{}
+	head               common.Hash
+	started            chan<- struct{}
+	release            <-chan struct{}
+	blockExecutionHead bool
 }
 
 func (blockingSleepForSlotForkChoiceFake) RetryDataAvailablePendingExecutionPayloadEnvelopes(context.Context, uint64) {
@@ -311,29 +312,70 @@ func TestSleepForSlotDoesNotBypassRewakeIntervalWhenExecutionHeadBecomesUnavaila
 }
 
 func TestSleepForSlotPollCompletingAfterNextSlotDoesNotWakeEarly(t *testing.T) {
-	started := make(chan struct{})
-	release := make(chan struct{})
-	nextSlot := time.Now().Add(5 * sleepForSlotHeadPollInterval)
-	clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: nextSlot}
-	releaseTimer := time.AfterFunc(time.Until(nextSlot)+20*time.Millisecond, func() {
-		close(release)
-	})
-	defer releaseTimer.Stop()
+	for _, blockedCall := range []string{"GetHeadNode", "GetExecutionHead"} {
+		t.Run(blockedCall, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				started := make(chan struct{})
+				release := make(chan struct{})
+				nextSlot := time.Now().Add(5 * sleepForSlotHeadPollInterval)
+				clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: nextSlot}
+				releaseTimer := time.AfterFunc(time.Until(nextSlot)+20*time.Millisecond, func() {
+					close(release)
+				})
+				defer releaseTimer.Stop()
 
-	_, headChanged, err := waitForNextSlotOrHeadChange(
-		t.Context(), 11, sleepForSlotConfig(10),
-		blockingSleepForSlotForkChoiceFake{head: common.Hash{2}, started: started, release: release},
-		sleepForSlotSyncedDataFake{head: common.Hash{1}},
-		clock,
-		sleepForSlotWake{}, common.Hash{},
-	)
+				wake, headChanged, err := waitForNextSlotOrHeadChange(
+					t.Context(), 11, sleepForSlotConfig(10),
+					blockingSleepForSlotForkChoiceFake{head: common.Hash{2}, started: started, release: release, blockExecutionHead: blockedCall == "GetExecutionHead"},
+					sleepForSlotSyncedDataFake{head: common.Hash{1}},
+					clock,
+					sleepForSlotWake{}, common.Hash{},
+				)
 
-	require.NoError(t, err)
-	require.False(t, headChanged)
-	select {
-	case <-started:
-	default:
-		require.Fail(t, "fork choice head was not polled")
+				require.NoError(t, err)
+				require.False(t, headChanged)
+				require.Zero(t, wake)
+				require.Equal(t, ChainTipSync, sleepForSlotNextStage(headChanged, readySleepForSlotArgs()))
+				select {
+				case <-started:
+				default:
+					t.Fatalf("%s was not called", blockedCall)
+				}
+			})
+		})
+	}
+}
+
+func TestSleepForSlotPollCompletingAfterCancellationDoesNotWake(t *testing.T) {
+	for _, blockedCall := range []string{"GetHeadNode", "GetExecutionHead"} {
+		t.Run(blockedCall, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				started := make(chan struct{})
+				release := make(chan struct{})
+				go func() {
+					select {
+					case <-started:
+						cancel()
+						close(release)
+					case <-ctx.Done():
+					}
+				}()
+
+				wake, headChanged, err := waitForNextSlotOrHeadChange(
+					ctx, 11, sleepForSlotConfig(10),
+					blockingSleepForSlotForkChoiceFake{head: common.Hash{2}, started: started, release: release, blockExecutionHead: blockedCall == "GetExecutionHead"},
+					sleepForSlotSyncedDataFake{head: common.Hash{1}},
+					sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: time.Now().Add(time.Second)},
+					sleepForSlotWake{}, common.Hash{},
+				)
+
+				require.ErrorIs(t, err, context.Canceled)
+				require.False(t, headChanged)
+				require.Zero(t, wake)
+			})
+		})
 	}
 }
 
@@ -396,11 +438,17 @@ func (f sleepForSlotForkChoiceFake) GetExecutionHead(head forkchoice.ForkChoiceN
 }
 
 func (f blockingSleepForSlotForkChoiceFake) GetHeadNode() (forkchoice.ForkChoiceNode, uint64, error) {
-	close(f.started)
-	<-f.release
+	if !f.blockExecutionHead {
+		close(f.started)
+		<-f.release
+	}
 	return forkchoice.ForkChoiceNode{Root: f.head}, 0, nil
 }
 
-func (blockingSleepForSlotForkChoiceFake) GetExecutionHead(forkchoice.ForkChoiceNode) (common.Hash, bool) {
+func (f blockingSleepForSlotForkChoiceFake) GetExecutionHead(forkchoice.ForkChoiceNode) (common.Hash, bool) {
+	if f.blockExecutionHead {
+		close(f.started)
+		<-f.release
+	}
 	return common.Hash{}, true
 }

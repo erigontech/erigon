@@ -101,6 +101,15 @@ func waitForNextSlotOrHeadChange(
 				continue
 			}
 			executionHead, ready := forkChoice.GetExecutionHead(head)
+			// Both fork-choice reads can block past cancellation or the slot boundary.
+			select {
+			case <-ctx.Done():
+				return sleepForSlotWake{}, false, ctx.Err()
+			default:
+			}
+			if !time.Now().Before(nextSlotTime) {
+				return sleepForSlotWake{}, false, nil
+			}
 			changed := head.Root != syncedData.HeadRoot() || (ready && executionHead != lastExecutionHead)
 			if changed && (head.Root != lastWake.root || (ready && executionHead != lastWake.executionHead) || time.Since(lastWake.at) >= sleepForSlotRewakeInterval) {
 				return sleepForSlotWake{root: head.Root, executionHead: executionHead, at: time.Now()}, true, nil
