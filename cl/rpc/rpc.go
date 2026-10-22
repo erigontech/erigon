@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils"
@@ -75,7 +74,7 @@ type BeaconRpcP2P struct {
 
 // NewBeaconRpcP2P creates a new BeaconRpcP2P struct and returns a pointer to it.
 // It takes a context, a sentinelproto.Sent
-func NewBeaconRpcP2P(ctx context.Context, sentinel sentinelproto.SentinelClient, beaconConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock, beaconState *state.CachingBeaconState) *BeaconRpcP2P {
+func NewBeaconRpcP2P(ctx context.Context, sentinel sentinelproto.SentinelClient, beaconConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock) *BeaconRpcP2P {
 	rpc := &BeaconRpcP2P{
 		ctx:          ctx,
 		sentinel:     sentinel,
@@ -87,7 +86,6 @@ func NewBeaconRpcP2P(ctx context.Context, sentinel sentinelproto.SentinelClient,
 		sentinel,
 		beaconConfig,
 		ethClock,
-		beaconState,
 	)
 	return rpc
 }
