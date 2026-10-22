@@ -2512,19 +2512,19 @@ func touchedSenderAccount(txTask *exec.TxTask, result *exec.TxResult) bool {
 	return readBalance || readNonce || wroteBalance || wroteNonce
 }
 
-// chargeSenderAtValidation returns the sender charge writes, or nil when the sender's nonce or balance after prior txs rejects the tx.
-func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version state.Version, vm *state.VersionMap, stateReader state.StateReader) (*state.WriteSet, error) {
+// chargeSenderAtValidation returns the sender charge writes and the account it charged, or nil when the sender's nonce or balance after prior txs rejects the tx.
+func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version state.Version, vm *state.VersionMap, stateReader state.StateReader) (*state.WriteSet, *accounts.Account, error) {
 	msg, err := txTask.TxMessage()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sender := msg.From()
 	acc, err := state.NewVersionedStateReader(version.TxIndex, state.ReadSet{}, vm, stateReader).ReadAccountData(sender)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if acc == nil || acc.Nonce != msg.Nonce() || acc.Nonce == math.MaxUint64 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	// The charge writes only Balance and Nonce; the origin keeps the rest of the account.
 	state.SeedOrigin(vm, sender, acc)
@@ -2533,7 +2533,7 @@ func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version s
 		limit, overflow = u256.AddOverflow(limit, *msg.Value())
 	}
 	if overflow || acc.Balance.Lt(&limit) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	charge := u256.Mul(u256.U64(result.ExecutionResult.ReceiptGasUsed), *msg.GasPrice())
 	if result.ExecutionResult.Err == nil {
@@ -2548,7 +2548,7 @@ func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version s
 		WriteHeader: state.WriteHeader{Address: sender, Path: state.NoncePath, Version: version, NonceReason: tracing.NonceChangeEoACall},
 		Val:         acc.Nonce + 1,
 	})
-	return ws, nil
+	return ws, acc, nil
 }
 
 type taskVersion struct {
@@ -3094,7 +3094,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				}
 			}
 			if chainTx, ok := txTask.(*exec.TxTask); ok && chainTx.ChargesSenderAtValidation(int(txVersion.Incarnation)) {
-				senderWrites, err := chargeSenderAtValidation(chainTx, txResult, txVersion, be.versionMap, *stateReader)
+				senderWrites, charged, err := chargeSenderAtValidation(chainTx, txResult, txVersion, be.versionMap, *stateReader)
 				if err != nil {
 					return nil, err
 				}
@@ -3103,6 +3103,14 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 					be.signalSelfLoopReexec(tx)
 					break
 				}
+				// Serial execution reads the sender before charging it; the block access list
+				// needs that read to tell a balance spent to zero from a no-op touch.
+				reads := be.blockIO.ReadSet(txVersion.TxIndex)
+				for sender := range senderWrites.Balances() {
+					reads.SetBalance(sender, state.VersionedRead[uint256.Int]{ReadHeader: state.ReadHeader{Source: state.StorageRead}, Val: charged.Balance})
+					reads.SetNonce(sender, state.VersionedRead[uint64]{ReadHeader: state.ReadHeader{Source: state.StorageRead}, Val: charged.Nonce})
+				}
+				be.blockIO.RecordReads(txVersion, reads)
 				be.blockIO.RecordWrites(txVersion, be.blockIO.WriteSet(txVersion.TxIndex).Merge(senderWrites))
 				be.versionMap.FlushVersionedWrites(senderWrites, false, "")
 				be.markReadersDirty(tx, senderWrites)
