@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/optimistic"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -152,7 +153,7 @@ type concurrentPayloadValidationForkGraph struct {
 	verified    atomic.Bool
 }
 
-func (g *concurrentPayloadValidationForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
+func (g *concurrentPayloadValidationForkGraph) ReplayState(common.Hash) (*state2.CachingBeaconState, error) {
 	if g.stateReads.Add(1) == 2 {
 		g.readOnce.Do(func() { close(g.bothRead) })
 	}
@@ -200,6 +201,11 @@ type commitmentFallbackForkGraph struct {
 	persistingEnvelopeForkGraph
 	blockReads atomic.Int32
 }
+type pendingCommitmentReadinessForkGraph struct {
+	dataAvailabilityForkGraph
+	header     *cltypes.BeaconBlockHeader
+	stateReads atomic.Int32
+}
 type dumpFailingForkGraph struct {
 	dataAvailabilityForkGraph
 	err error
@@ -218,6 +224,22 @@ type persistingEnvelopeForkGraph struct {
 	invalid  atomic.Bool
 	accepted atomic.Bool
 	verified atomic.Bool
+}
+
+type currentEnvelopeForkGraph struct {
+	*persistingEnvelopeForkGraph
+	root common.Hash
+}
+
+func (g *currentEnvelopeForkGraph) CurrentStateLocked(root common.Hash) *state2.CachingBeaconState {
+	if root != g.root {
+		return nil
+	}
+	return g.state
+}
+
+func (g *currentEnvelopeForkGraph) ReplayState(common.Hash) (*state2.CachingBeaconState, error) {
+	return g.state.Copy()
 }
 
 type interleavingIndexRepairForkGraph struct {
@@ -259,7 +281,11 @@ func (g dataAvailabilityForkGraph) HasEnvelope(common.Hash) bool {
 	return false
 }
 
-func (g dataAvailabilityForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
+func (g dataAvailabilityForkGraph) CurrentStateLocked(common.Hash) *state2.CachingBeaconState {
+	return nil
+}
+
+func (g dataAvailabilityForkGraph) ReplayState(common.Hash) (*state2.CachingBeaconState, error) {
 	if g.stateErr != nil && *g.stateErr != nil {
 		return nil, *g.stateErr
 	}
@@ -270,14 +296,21 @@ func (g dataAvailabilityForkGraph) GetBlock(common.Hash) (*cltypes.SignedBeaconB
 	return g.block, g.block != nil
 }
 
-func (g *admissionYieldForkGraph) GetState(root common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
-	g.once.Do(func() { close(g.stateRead) })
-	return g.dataAvailabilityForkGraph.GetState(root, alwaysCopy)
+func (g dataAvailabilityForkGraph) GetHeader(common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	if g.state == nil || g.block == nil || g.block.Block == nil {
+		return nil, false
+	}
+	return &cltypes.BeaconBlockHeader{Slot: g.block.Block.Slot, Root: g.block.Block.StateRoot}, true
 }
 
-func (g *admissionPersistingForkGraph) GetState(root common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
+func (g *admissionYieldForkGraph) ReplayState(root common.Hash) (*state2.CachingBeaconState, error) {
 	g.once.Do(func() { close(g.stateRead) })
-	return g.persistingEnvelopeForkGraph.GetState(root, alwaysCopy)
+	return g.dataAvailabilityForkGraph.ReplayState(root)
+}
+
+func (g *admissionPersistingForkGraph) ReplayState(root common.Hash) (*state2.CachingBeaconState, error) {
+	g.once.Do(func() { close(g.stateRead) })
+	return g.persistingEnvelopeForkGraph.ReplayState(root)
 }
 
 func (g *commitmentFallbackForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
@@ -287,19 +320,64 @@ func (g *commitmentFallbackForkGraph) GetBlock(root common.Hash) (*cltypes.Signe
 	return g.dataAvailabilityForkGraph.GetBlock(root)
 }
 
+func (g *pendingCommitmentReadinessForkGraph) CurrentStateLocked(root common.Hash) *state2.CachingBeaconState {
+	g.stateReads.Add(1)
+	return g.dataAvailabilityForkGraph.CurrentStateLocked(root)
+}
+
+func (g *pendingCommitmentReadinessForkGraph) ReplayState(root common.Hash) (*state2.CachingBeaconState, error) {
+	g.stateReads.Add(1)
+	return g.dataAvailabilityForkGraph.ReplayState(root)
+}
+
+func (g *pendingCommitmentReadinessForkGraph) GetHeader(common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	return g.header, g.header != nil
+}
+
+func TestValidatePendingEnvelopeCommitmentsUsesHeaderAsReadinessMarker(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+
+	t.Run("block without header is not ready", func(t *testing.T) {
+		graph := &pendingCommitmentReadinessForkGraph{
+			dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
+		}
+		f := &ForkChoiceStore{beaconCfg: cfg, forkGraph: graph}
+
+		ready, err := f.validatePendingEnvelopeCommitments(envelope, false)
+
+		require.NoError(t, err)
+		require.False(t, ready)
+		require.Zero(t, graph.stateReads.Load())
+	})
+
+	t.Run("header is ready without state load", func(t *testing.T) {
+		graph := &pendingCommitmentReadinessForkGraph{
+			dataAvailabilityForkGraph: dataAvailabilityForkGraph{block: block},
+			header:                    &cltypes.BeaconBlockHeader{Root: block.Block.StateRoot},
+		}
+		f := &ForkChoiceStore{beaconCfg: cfg, forkGraph: graph}
+
+		ready, err := f.validatePendingEnvelopeCommitments(envelope, false)
+
+		require.NoError(t, err)
+		require.True(t, ready)
+		require.Zero(t, graph.stateReads.Load())
+	})
+}
+
 func (g *admissionYieldForkGraph) HasEnvelope(common.Hash) bool {
 	return g.hasEnvelope.Load()
 }
 
-func (g *blockingValidationForkGraph) GetState(root common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
+func (g *blockingValidationForkGraph) ReplayState(root common.Hash) (*state2.CachingBeaconState, error) {
 	if root == g.blockedRoot {
 		g.once.Do(func() { close(g.stateRead) })
 		<-g.release
 	}
-	return g.dataAvailabilityForkGraph.GetState(root, alwaysCopy)
+	return g.dataAvailabilityForkGraph.ReplayState(root)
 }
 
-func (g *boundedGossipValidationForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
+func (g *boundedGossipValidationForkGraph) ReplayState(common.Hash) (*state2.CachingBeaconState, error) {
 	active := g.activeCopies.Add(1)
 	defer g.activeCopies.Add(-1)
 	for {
@@ -315,11 +393,11 @@ func (g *boundedGossipValidationForkGraph) GetState(common.Hash, bool) (*state2.
 	return g.state.Copy()
 }
 
-func (g *panickingGossipValidationForkGraph) GetState(root common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
+func (g *panickingGossipValidationForkGraph) ReplayState(root common.Hash) (*state2.CachingBeaconState, error) {
 	if g.panicIn == "state" {
 		panic("injected state panic")
 	}
-	return g.dataAvailabilityForkGraph.GetState(root, alwaysCopy)
+	return g.dataAvailabilityForkGraph.ReplayState(root)
 }
 
 func (g *panickingGossipValidationForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
@@ -388,7 +466,11 @@ func (g blockRefreshForkGraph) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock
 	return g.block, g.block != nil
 }
 
-func (blockRefreshForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
+func (blockRefreshForkGraph) CurrentStateLocked(common.Hash) *state2.CachingBeaconState {
+	return nil
+}
+
+func (blockRefreshForkGraph) ReplayState(common.Hash) (*state2.CachingBeaconState, error) {
 	panic("refresh must not replay state")
 }
 
@@ -522,14 +604,23 @@ func TestEnvelopeGossipTryClaimSeesPersistedEnvelopeWhenAdmissionIsSaturated(t *
 	store.envelopeGossipAdmissions.Finish(token, false)
 }
 
-func (g replacingPendingForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
+func (g replacingPendingForkGraph) GetHeader(common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	g.replace()
+	return nil, false
+}
+
+func (g replacingPendingForkGraph) CurrentStateLocked(common.Hash) *state2.CachingBeaconState {
+	return nil
+}
+
+func (g replacingPendingForkGraph) ReplayState(common.Hash) (*state2.CachingBeaconState, error) {
 	g.replace()
 	return nil, nil
 }
 
 func (g replacingPendingForkGraph) HasEnvelope(common.Hash) bool { return false }
 
-func (g missingBlockForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
+func (g missingBlockForkGraph) ReplayState(common.Hash) (*state2.CachingBeaconState, error) {
 	return g.state, nil
 }
 
@@ -577,6 +668,10 @@ func (g pendingRetryForkGraph) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock
 	return nil, false
 }
 
+func (g pendingRetryForkGraph) GetHeader(common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	return nil, false
+}
+
 func (g pendingRetryForkGraph) ReadEnvelopeFromDisk(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	if root != g.completed {
 		return nil, nil
@@ -584,7 +679,11 @@ func (g pendingRetryForkGraph) ReadEnvelopeFromDisk(root common.Hash) (*cltypes.
 	return g.completedEnvelope, nil
 }
 
-func (g pendingRetryForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
+func (g pendingRetryForkGraph) CurrentStateLocked(common.Hash) *state2.CachingBeaconState {
+	return nil
+}
+
+func (g pendingRetryForkGraph) ReplayState(common.Hash) (*state2.CachingBeaconState, error) {
 	return nil, nil
 }
 
@@ -2598,7 +2697,7 @@ func TestValidateExecutionPayloadEnvelopeDoesNotBlockStateReaders(t *testing.T) 
 
 	readDone := make(chan error, 1)
 	go func() {
-		_, err := store.GetStateAtBlockRoot(otherRoot, false)
+		_, err := store.GetStateAtBlockRoot(otherRoot)
 		readDone <- err
 	}()
 	select {
@@ -3193,6 +3292,35 @@ func TestNewPayloadWithAdmissionSerializesCallers(t *testing.T) {
 	release <- struct{}{}
 	require.NoError(t, <-done)
 	require.NoError(t, <-done)
+}
+
+func TestNewPayloadWithAdmissionHoldsPayloadPreparation(t *testing.T) {
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	started := make(chan struct{})
+	release := make(chan struct{})
+	engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+			close(started)
+			<-release
+			return execution_client.PayloadStatusValidated, nil
+		},
+	)
+	f := &ForkChoiceStore{engine: engine}
+	payload := &cltypes.Eth1Block{SlotNumber: 10}
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.NewPayloadWithAdmission(t.Context(), payload, nil, nil, nil)
+		done <- err
+	}()
+	<-started
+
+	_, _, ok := f.TryBeginPayloadPreparation(t.Context(), 10, 11)
+	require.False(t, ok)
+	close(release)
+	require.NoError(t, <-done)
+	_, finish, ok := f.TryBeginPayloadPreparation(t.Context(), 10, 11)
+	require.True(t, ok)
+	finish()
 }
 
 func TestPersistedEnvelopeDoesNotSynthesizeValidatedELResult(t *testing.T) {
@@ -4572,6 +4700,89 @@ func TestExecutionPayloadCommitmentFallbackRefreshesAfterYield(t *testing.T) {
 	require.True(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
 }
 
+func TestExecutionPayloadEnvelopeCurrentStateCopiesAreCoherent(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	validator := blockState.ValidatorSet().Get(0)
+	for range 1_000 {
+		require.NoError(t, blockState.AddValidator(validator, cfg.MaxEffectiveBalance))
+	}
+	root := envelope.Message.BeaconBlockRoot
+	beforeRoot, err := blockState.HashSSZ()
+	require.NoError(t, err)
+	expectedAfter, err := blockState.Copy()
+	require.NoError(t, err)
+	expectedAfter.SetPreviousStateRoot(block.Block.StateRoot)
+	require.NoError(t, transition.ValidatingMachine.ProcessExecutionPayloadEnvelope(expectedAfter, envelope))
+	afterRoot, err := expectedAfter.HashSSZ()
+	require.NoError(t, err)
+
+	graph := &currentEnvelopeForkGraph{
+		persistingEnvelopeForkGraph: &persistingEnvelopeForkGraph{
+			dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
+		},
+		root: root,
+	}
+	eth2Roots, err := lru.New[common.Hash, common.Hash](1)
+	require.NoError(t, err)
+	store := &ForkChoiceStore{beaconCfg: cfg, forkGraph: graph, eth2Roots: eth2Roots}
+
+	checkCopy := func() error {
+		copied, err := store.GetStateAtBlockRoot(root)
+		if err != nil {
+			return err
+		}
+		cachedRoot, err := copied.HashSSZ()
+		if err != nil {
+			return err
+		}
+		encoded, err := copied.EncodeSSZ(nil)
+		if err != nil {
+			return err
+		}
+		decoded := state2.New(cfg)
+		if err := decoded.DecodeSSZ(encoded, int(copied.Version())); err != nil {
+			return err
+		}
+		freshRoot, err := decoded.HashSSZ()
+		if err != nil {
+			return err
+		}
+		if cachedRoot != freshRoot || cachedRoot != beforeRoot && cachedRoot != afterRoot {
+			return fmt.Errorf("incoherent copied state: cached %x, fresh %x", cachedRoot, freshRoot)
+		}
+		return nil
+	}
+	start := make(chan struct{})
+	errs := make(chan error, 4)
+	var readers sync.WaitGroup
+	for range 4 {
+		readers.Go(func() {
+			<-start
+			for range 4 {
+				if err := checkCopy(); err != nil {
+					errs <- err
+					return
+				}
+			}
+		})
+	}
+	writerDone := make(chan error, 1)
+	go func() {
+		<-start
+		writerDone <- store.OnExecutionPayload(t.Context(), envelope, false, false)
+	}()
+	close(start)
+	require.NoError(t, <-writerDone)
+	readers.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	actualAfter, err := blockState.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, afterRoot, actualAfter)
+}
+
 func TestExecutionPayloadAdmissionCancellationReconcilesConcurrentOwner(t *testing.T) {
 	for _, persisted := range []bool{false, true} {
 		for _, local := range []bool{false, true} {
@@ -4669,6 +4880,37 @@ func TestValidateExecutionPayloadEnvelopeForConsensusRequiresELValidation(t *tes
 			}
 		})
 	}
+}
+
+func TestValidateExecutionPayloadEnvelopeForConsensusHoldsPayloadPreparation(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	started := make(chan struct{})
+	release := make(chan struct{})
+	engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+			close(started)
+			<-release
+			return execution_client.PayloadStatusValidated, nil
+		},
+	)
+	store := &ForkChoiceStore{
+		beaconCfg: cfg,
+		forkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
+		engine:    engine,
+	}
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+	done := make(chan error, 1)
+	go func() { done <- store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope) }()
+	<-started
+
+	_, _, ok := store.TryBeginPayloadPreparation(t.Context(), block.Block.Slot, block.Block.Slot+1)
+	require.False(t, ok)
+	close(release)
+	require.NoError(t, <-done)
+	_, finish, ok := store.TryBeginPayloadPreparation(t.Context(), block.Block.Slot, block.Block.Slot+1)
+	require.True(t, ok)
+	finish()
 }
 
 func TestValidateExecutionPayloadEnvelopeForConsensusRechecksAfterEL(t *testing.T) {

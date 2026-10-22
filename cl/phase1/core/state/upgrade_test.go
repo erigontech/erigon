@@ -45,6 +45,30 @@ func TestUpgradeAndExpectedWithdrawals(t *testing.T) {
 	assert.Empty(t, w.Withdrawals)
 }
 
+func TestUpgradeToGloasStateRootMatchesDecodedState(t *testing.T) {
+	s := New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(s, stateEncoded, int(clparams.Phase0Version)))
+	require.NoError(t, s.UpgradeToAltair())
+	require.NoError(t, s.UpgradeToBellatrix())
+	require.NoError(t, s.UpgradeToCapella())
+	require.NoError(t, s.UpgradeToDeneb())
+	require.NoError(t, s.UpgradeToElectra())
+	require.NoError(t, s.UpgradeToFulu())
+	_, err := s.HashSSZ()
+	require.NoError(t, err)
+
+	require.NoError(t, s.UpgradeToGloas())
+	actual, err := s.HashSSZ()
+	require.NoError(t, err)
+	encoded, err := s.EncodeSSZ(nil)
+	require.NoError(t, err)
+	fresh := New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, fresh.DecodeSSZ(encoded, int(clparams.GloasVersion)))
+	expected, err := fresh.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, expected, actual)
+}
+
 // TestUpgradeToElectraPropagatesQueueExcessActiveBalanceError pins that a
 // failure while queuing a compounding-credential validator's excess active
 // balance aborts the Electra upgrade instead of being silently dropped,

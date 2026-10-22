@@ -49,12 +49,12 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
 
 	decisionRoot, lookaheadRoot, ok := b.shufflingDecisionRoots(epoch)
 	if ok {
-		if cachedIndicies, _, hit := caches.ActiveValidatorsCacheGlobal.Get(epoch, decisionRoot); hit && len(cachedIndicies) > 0 {
+		if cachedIndicies, hit := caches.ActiveValidatorsCacheGlobal.Get(epoch, decisionRoot); hit && len(cachedIndicies) > 0 {
 			b.activeValidatorsCache.Add(epoch, cachedIndicies)
 			return cachedIndicies
 		}
 		if lookaheadRoot != (common.Hash{}) {
-			if cachedIndicies, _, hit := caches.LookaheadActiveValidatorsCacheGlobal.Get(epoch, lookaheadRoot); hit && len(cachedIndicies) > 0 {
+			if cachedIndicies, hit := caches.LookaheadActiveValidatorsCacheGlobal.Get(epoch, lookaheadRoot); hit && len(cachedIndicies) > 0 {
 				b.activeValidatorsCache.Add(epoch, cachedIndicies)
 				return cachedIndicies
 			}
@@ -71,7 +71,7 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
 
 	b.activeValidatorsCache.Add(epoch, indicies)
 	if lookaheadRoot != (common.Hash{}) {
-		caches.LookaheadActiveValidatorsCacheGlobal.Put(epoch, lookaheadRoot, indicies, 0)
+		caches.LookaheadActiveValidatorsCacheGlobal.Put(epoch, lookaheadRoot, indicies)
 	}
 
 	return indicies

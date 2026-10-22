@@ -1378,7 +1378,7 @@ func (a *ApiHandler) processProducedBlockWithProcessor(
 	// Candidate processing includes work unrelated to the bid. Evict only errors
 	// marked as deterministic bid-validation failures.
 	bidEvicted := false
-	if a.epbsPool != nil && errors.Is(candidateErr, eth2.ErrInvalidExecutionPayloadBid) {
+	if a.epbsPool != nil && errors.Is(candidateErr, machine.ErrInvalidExecutionPayloadBid) {
 		bidEvicted = a.epbsPool.RemoveHighestBid(bidKey, externalBid)
 	}
 	if selfBuildErr != nil {
@@ -3203,7 +3203,7 @@ func (a *ApiHandler) storeDataColumnSidecars(ctx context.Context, blockRoot comm
 }
 
 func (a *ApiHandler) selectedHeadState(auxiliaryRoot common.Hash) (common.Hash, uint64, *state.CachingBeaconState, error) {
-	auxiliaryState, err := a.forkchoiceStore.GetStateAtBlockRoot(auxiliaryRoot, false)
+	auxiliaryState, err := a.forkchoiceStore.GetStateAtBlockRoot(auxiliaryRoot)
 	if err != nil {
 		return common.Hash{}, 0, nil, err
 	}
@@ -3217,7 +3217,7 @@ func (a *ApiHandler) selectedHeadState(auxiliaryRoot common.Hash) (common.Hash, 
 	if headRoot == auxiliaryRoot {
 		return headRoot, headSlot, auxiliaryState, nil
 	}
-	headState, err := a.forkchoiceStore.GetStateAtBlockRoot(headRoot, false)
+	headState, err := a.forkchoiceStore.GetStateAtBlockRoot(headRoot)
 	if err != nil {
 		return common.Hash{}, 0, nil, err
 	}

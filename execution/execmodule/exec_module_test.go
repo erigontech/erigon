@@ -23,6 +23,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
+	"math"
 	"math/big"
 	"sort"
 	"strings"
@@ -50,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -60,6 +62,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/txnprovider"
@@ -3897,4 +3900,91 @@ func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
+}
+
+// Same-sender txs that send value, revert with value and read the sender's
+// balance must reach the state root of serial execution when parallel exec
+// charges the sender at validation.
+func TestSameSenderSpeculationMatchesSerialExecution(t *testing.T) {
+	prevParallel := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
+
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	reader, reverter, sink := common.Address{0xaa}, common.Address{0xbb}, common.Address{0xcc}
+	genesis := &types.Genesis{
+		Config: chain.TestChainOsakaConfig,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+			reader:     {Code: []byte{byte(vm.CALLER), byte(vm.BALANCE), byte(vm.PUSH0), byte(vm.CALLDATALOAD), byte(vm.SSTORE), byte(vm.STOP)}},
+			reverter:   {Code: []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.REVERT)}},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+	chainPack, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
+		for n := range uint64(24) {
+			to, value := reader, uint64(0)
+			switch n % 4 {
+			case 1:
+				to, value = sink, 1
+			case 2:
+				to, value = reverter, 5
+			case 3:
+				to, value = common.Address{0xdd, byte(n)}, 7
+			}
+			slot := common.BigToHash(new(big.Int).SetUint64(n))
+			tx, err := types.SignTx(types.NewTransaction(n, to, uint256.NewInt(value), 100_000, uint256.NewInt(10*common.GWei), slot[:]),
+				*types.LatestSignerForChainID(nil), privKey)
+			require.NoError(t, err)
+			b.AddTx(tx)
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chainPack.Blocks))
+}
+
+// A tx that serial execution rejects on its sender's nonce or balance must reject the
+// block with the same error when parallel exec charges the sender at validation.
+func TestSameSenderSpeculationRejectsLikeSerialExecution(t *testing.T) {
+	prevParallel := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
+
+	balance := new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
+	feeCap := *uint256.NewInt(10 * common.GWei)
+	for _, tc := range []struct {
+		name               string
+		senderNonce, nonce uint64
+		value, feeCap      uint256.Int
+		wantErr            error
+	}{
+		{name: "nonce too high", nonce: 1, feeCap: feeCap, wantErr: protocol.ErrNonceTooHigh},
+		{name: "max nonce", senderNonce: math.MaxUint64, nonce: math.MaxUint64, feeCap: feeCap, wantErr: protocol.ErrNonceMax},
+		{name: "value plus gas above balance", value: *uint256.MustFromBig(balance), feeCap: feeCap, wantErr: protocol.ErrInsufficientFunds},
+		{name: "gas limit times fee cap overflows", feeCap: *new(uint256.Int).SetAllOne(), wantErr: protocol.ErrInsufficientFunds},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			privKey, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			genesis := &types.Genesis{
+				Config: chain.TestChainOsakaConfig,
+				Alloc:  types.GenesisAlloc{crypto.PubkeyToAddress(privKey.PublicKey): {Balance: balance, Nonce: tc.senderNonce}},
+			}
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+			chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+				tx, err := types.SignTx(&types.DynamicFeeTransaction{
+					CommonTx: types.CommonTx{Nonce: tc.nonce, GasLimit: 21_000, To: &common.Address{0xaa}, Value: tc.value},
+					ChainID:  *chain.TestChainOsakaConfig.ChainID,
+					TipCap:   *uint256.NewInt(common.GWei),
+					FeeCap:   tc.feeCap,
+				}, *types.LatestSignerForChainID(chain.TestChainOsakaConfig.ChainID), privKey)
+				require.NoError(t, err)
+				b.AddUncheckedTx(tx)
+			})
+			require.NoError(t, err)
+			require.ErrorContains(t, m.InsertValidateAndUfc1By1(t.Context(), chainPack.Blocks), tc.wantErr.Error())
+		})
+	}
 }

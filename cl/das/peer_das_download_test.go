@@ -170,7 +170,7 @@ func newColumnResponseRPCWithPeerAndForkEpoch(t *testing.T, cfg *clparams.Beacon
 		metadataReady:    make(chan struct{}),
 		banned:           make(chan struct{}),
 	}
-	rpcClient := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock, nil)
+	rpcClient := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock)
 	select {
 	case <-sentinel.metadataReady:
 	case <-time.After(30 * time.Second):
@@ -1211,7 +1211,7 @@ func TestRunDownloadRejectsGloasSidecarWithPreGloasSlot(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	rpcClient := rpc.NewBeaconRpcP2P(ctx, sentinel, &cfg, clock, nil)
+	rpcClient := rpc.NewBeaconRpcP2P(ctx, sentinel, &cfg, clock)
 
 	select {
 	case <-sentinel.metadataReady:
