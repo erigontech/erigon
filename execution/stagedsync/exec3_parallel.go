@@ -1278,7 +1278,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		t := &execTask{
 			Task:               txTask,
 			index:              i,
-			shouldDelayFeeCalc: true,
+			shouldDelayFeeCalc: len(execRequest.accessList) == 0,
 		}
 
 		blockNum := t.Version().BlockNum
@@ -1919,6 +1919,21 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			// tx running against a dead roTx; its result is meaningless — stop here.
 			if aborted {
 				pe.releaseWorker(w)
+				return
+			}
+			if be.versionMap.HasBAL {
+				if result.Dep >= 0 {
+					pe.releaseWorker(w)
+					if !waitTo(be.taskIndexOf(result.Dep)) || !reExec() {
+						return
+					}
+					continue
+				}
+				if result.Err == nil {
+					be.selfLoopFlush(tv.version, result, prevWrites)
+				}
+				pe.releaseWorker(w)
+				send(result)
 				return
 			}
 			// A run without the sender checks that failed or used the sender's account
@@ -3176,6 +3191,25 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 	return nil, nil
 }
 
+// commitBALPrefix finalizes the contiguous executed prefix in block order. Under a
+// BAL every tx reads the BAL state before it, so its run is final and needs no
+// validation: a wrong BAL fails the block at the block-end BAL hash check.
+func (be *blockExecutor) commitBALPrefix(pe *parallelExecutor, applyTx kv.TemporalTx, stateReader *state.StateReader) (*blockResult, error) {
+	for tx := be.coinbaseFlushedUpTo + 1; be.execTasks.checkComplete(tx); tx++ {
+		txTask := be.tasks[tx].Task
+		txResult := be.results[tx]
+		txVersion := txResult.Task.Version()
+		be.validateTasks.setComplete(tx)
+		be.coinbaseFlushedUpTo = tx
+		be.versionMap.MarkWritesComplete(be.blockIO.WriteSet(txVersion.TxIndex))
+		if r, err := be.finalizeValidatedTx(pe, applyTx, tx, txTask, txResult, txVersion, stateReader); err != nil || r != nil {
+			return r, err
+		}
+		be.signalCommitted(tx)
+	}
+	return nil, nil
+}
+
 // signalCommitted advances the commit frontier to tx and wakes exactly the tasks
 // waiting for that frontier value — directed, no broadcast.
 func (be *blockExecutor) signalCommitted(tx int) {
@@ -3446,14 +3480,17 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	}
 
 	txVersion := res.Version()
+	balExec := be.versionMap.HasBAL
 
 	be.blockIO.RecordReads(txVersion, res.TxIn)
-	be.indexReads(tx, res.TxIn)
-	// This tx's writes just published; flag any successor that already read one of
-	// its cells for finalize-boundary re-validation.
-	be.markReadersDirty(tx, res.TxOut)
+	if !balExec {
+		be.indexReads(tx, res.TxIn)
+		// This tx's writes just published; flag any successor that already read one of
+		// its cells for finalize-boundary re-validation.
+		be.markReadersDirty(tx, res.TxOut)
+	}
 
-	if res.Version().Incarnation == 0 {
+	if res.Version().Incarnation == 0 || balExec {
 		be.blockIO.RecordWrites(txVersion, res.TxOut)
 	} else {
 		prevWrites := be.blockIO.WriteSet(txVersion.TxIndex)
@@ -3489,7 +3526,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 	}
 
-	be.validateTasks.pushPending(tx)
+	if !balExec {
+		be.validateTasks.pushPending(tx)
+	}
 	// A re-executed self-loop result already has execTasks complete (only its
 	// validation was cleared); markComplete would panic on the non-in-progress task,
 	// so skip it and let the re-validation below re-commit it.
@@ -3498,10 +3537,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		be.execTasks.removeDependency(tx)
 	}
 
-	// do validations ...
 	var stateReader state.StateReader
-
-	if r, derr := be.runDepOrderValidation(pe, applyTx, &stateReader); derr != nil || r != nil {
+	if balExec {
+		if r, derr := be.commitBALPrefix(pe, applyTx, &stateReader); derr != nil || r != nil {
+			return r, derr
+		}
+	} else if r, derr := be.runDepOrderValidation(pe, applyTx, &stateReader); derr != nil || r != nil {
 		return r, derr
 	}
 
