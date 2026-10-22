@@ -5159,7 +5159,7 @@ func TestFeeRecipientDeduplicatesWarningsWhileCached(t *testing.T) {
 	warned, err := lru.New[uint64, struct{}]("unregisteredProposers", 2)
 	require.NoError(t, err)
 	params := validator_params.NewValidatorParams()
-	a := &ApiHandler{validatorParams: params, warnedUnregisteredProposers: warned}
+	a := &ApiHandler{validatorParams: params, unregisteredProposers: warned}
 
 	registered := common.Address{0x11}
 	params.SetFeeRecipient(7, registered)
@@ -5188,7 +5188,7 @@ func TestFeeRecipientDeduplicatesConcurrentWarnings(t *testing.T) {
 	logs := captureProductionLogs(t)
 	warned, err := lru.New[uint64, struct{}]("unregisteredProposers", 8)
 	require.NoError(t, err)
-	a := &ApiHandler{validatorParams: validator_params.NewValidatorParams(), warnedUnregisteredProposers: warned}
+	a := &ApiHandler{validatorParams: validator_params.NewValidatorParams(), unregisteredProposers: warned}
 
 	// Several block template requests for the same slot arrive together, and each would otherwise
 	// find the proposer absent and report it.

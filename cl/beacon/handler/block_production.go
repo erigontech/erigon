@@ -482,13 +482,13 @@ func (a *ApiHandler) feeRecipientForProposal(
 	if found {
 		return feeRecipient
 	}
-	shouldWarn := true
-	if a.warnedUnregisteredProposers != nil {
+	firstTime := true
+	if a.unregisteredProposers != nil {
 		// Check and add atomically so matching requests cannot both claim the same absent entry.
-		alreadyWarned, _ := a.warnedUnregisteredProposers.ContainsOrAdd(proposerIndex, struct{}{})
-		shouldWarn = !alreadyWarned
+		alreadyWarned, _ := a.unregisteredProposers.ContainsOrAdd(proposerIndex, struct{}{})
+		firstTime = !alreadyWarned
 	}
-	if shouldWarn {
+	if firstTime {
 		log.Warn("BlockProduction: no fee recipient from proposer preferences or prepare_beacon_proposer, using zero address",
 			"proposerIndex", proposerIndex, "slot", targetSlot)
 	}
@@ -507,26 +507,13 @@ const (
 	productionErrorActionable
 )
 
-// productionOperationCanceledError distinguishes an internal cancellation from the request ending.
-type productionOperationCanceledError struct {
-	operation string
-	cause     error
-}
-
-func (e *productionOperationCanceledError) Error() string {
-	return e.operation + " canceled while request remained active: " + e.cause.Error()
-}
-
-func (e *productionOperationCanceledError) Unwrap() error {
-	return e.cause
-}
+var errProductionOperationCanceled = errors.New("canceled while request remained active")
 
 func classifyProductionError(err error) productionErrorSeverity {
-	var operationCanceled *productionOperationCanceledError
 	switch {
 	case err == nil:
 		return productionErrorNone
-	case errors.As(err, &operationCanceled):
+	case errors.Is(err, errProductionOperationCanceled):
 		return productionErrorUnexpectedCancellation
 	case errors.Is(err, context.Canceled):
 		return productionErrorCanceled
@@ -567,7 +554,7 @@ func reportProductionFailure(err error, targetSlot uint64) {
 // observed.
 func preserveProductionCancellation(requestErr error, operation string, err error) error {
 	if requestErr == nil && errors.Is(err, context.Canceled) {
-		return &productionOperationCanceledError{operation: operation, cause: err}
+		return fmt.Errorf("%s %w: %w", operation, errProductionOperationCanceled, err)
 	}
 	return err
 }
