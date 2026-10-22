@@ -1091,6 +1091,42 @@ func TestAsBlockAccessList_SelfdestructNoBurn(t *testing.T) {
 		"the balance write records as-is: EIP-8246 removed the destroy-time burn")
 }
 
+// Before EIP-8246 a SELFDESTRUCT burns the destroyed account's balance, so a
+// balance write by the destroying tx must not survive as the account's post-tx
+// balance.
+func TestAsPreEIP8246BlockAccessList_SelfdestructBurnsBalance(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x9e1989c1ba17e9b8fdae0b5d43a2b0c676a2070f"))
+	io := NewVersionedIO(1)
+	readSets := ReadSet{}
+	readSets.SetBalance(addr, VersionedRead[uint256.Int]{Val: *uint256.NewInt(100000)})
+	io.RecordReads(Version{TxIndex: 0}, readSets)
+	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(1)},
+		&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 0}}, Val: true},
+	))
+	bal := io.AsPreEIP8246BlockAccessList()
+	require.Len(t, bal, 1)
+	require.Len(t, bal[0].BalanceChanges, 1)
+	require.True(t, bal[0].BalanceChanges[0].Value.IsZero(), "the destroy-time burn leaves a zero balance")
+}
+
+func TestAsPreEIP8246BlockAccessList_SelfdestructOfUnfundedAccountHasNoBalanceChange(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xd576e0893afad18b6ffd746d0c022f5e7bf9afe1"))
+	io := NewVersionedIO(1)
+	readSets := ReadSet{}
+	readSets.SetBalance(addr, VersionedRead[uint256.Int]{Val: uint256.Int{}})
+	io.RecordReads(Version{TxIndex: 0}, readSets)
+	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(314310922397266)},
+		&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 0}}, Val: true},
+	))
+	bal := io.AsPreEIP8246BlockAccessList()
+	require.Len(t, bal, 1, "the destroyed account stays a touched entry")
+	require.Empty(t, bal[0].BalanceChanges, "zero before the block and burned to zero is net-zero")
+}
+
 func TestAsBlockAccessList_SelfdestructTouchKeepsEntry(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x2222"))

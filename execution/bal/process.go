@@ -29,8 +29,13 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func Create(blockNum uint64, txIO *state.VersionedIO, dataDir string, logger log.Logger) types.BlockAccessList {
-	bal := txIO.AsBlockAccessList()
+func Create(blockNum uint64, txIO *state.VersionedIO, isEIP7928 bool, dataDir string, logger log.Logger) types.BlockAccessList {
+	var bal types.BlockAccessList
+	if isEIP7928 {
+		bal = txIO.AsBlockAccessList()
+	} else {
+		bal = txIO.AsPreEIP8246BlockAccessList()
+	}
 	if dbg.TraceBlockAccessLists {
 		writeBALToFile(bal, dataDir, fmt.Sprintf("computed_bal_%d.txt", blockNum), logger)
 	}
@@ -66,7 +71,7 @@ func Process(h *types.Header, blockBal types.BlockAccessList, vio *state.Version
 	}
 	blockNum := h.Number.Uint64()
 	blockHash := h.Hash()
-	computedBlockBal := Create(blockNum, vio, dataDir, logger)
+	computedBlockBal := Create(blockNum, vio, isEIP7928, dataDir, logger)
 	err := computedBlockBal.Validate()
 	if err != nil {
 		return fmt.Errorf("block %d: invalid computed block access list: %w", blockNum, err)
