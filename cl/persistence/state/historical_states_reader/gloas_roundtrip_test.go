@@ -187,9 +187,9 @@ func TestReadCompressedSSZ_CorruptPtcWindowIsNotMissing(t *testing.T) {
 	}
 }
 
-// TestReadRequiredQueueSSZ_MissingDump verifies that ReadRequiredQueueSSZ
-// returns ErrMissingGloasData when the dump table has no entry for the
-// target dump slot after the fork.
+// TestReadRequiredQueueSSZ_MissingDump verifies that ReadBuildersSSZ and
+// ReadRequiredQueueSSZ return ErrMissingGloasData when the dump table has no
+// entry for the target dump slot after the fork.
 func TestReadRequiredQueueSSZ_MissingDump(t *testing.T) {
 	// Use a slot that is NOT dump-aligned so the function computes a dump slot
 	// and looks it up.
@@ -198,7 +198,7 @@ func TestReadRequiredQueueSSZ_MissingDump(t *testing.T) {
 	getter := mockGetValFn(map[string]map[string][]byte{})
 
 	builders := solid.NewStaticListSSZ[*cltypes.Builder](1024, new(cltypes.Builder).EncodingSizeSSZ())
-	err := ReadRequiredQueueSSZ(getter, slot, forkSlot, kv.BuildersDump, kv.Builders, builders)
+	err := ReadBuildersSSZ(getter, slot, forkSlot, 1024, builders)
 	require.ErrorIs(t, err, ErrMissingGloasData)
 	require.ErrorContains(t, err, kv.BuildersDump)
 
@@ -217,15 +217,15 @@ func TestReadRequiredQueueSSZ_MissingDump(t *testing.T) {
 	dumpSlot := uint64(clparams.SlotsPerDump)
 	forkJustBeforeDump := dumpSlot - 32
 	afterForkBuilders := solid.NewStaticListSSZ[*cltypes.Builder](1024, new(cltypes.Builder).EncodingSizeSSZ())
-	err = ReadRequiredQueueSSZ(getter, dumpSlot, forkJustBeforeDump, kv.BuildersDump, kv.Builders, afterForkBuilders)
+	err = ReadBuildersSSZ(getter, dumpSlot, forkJustBeforeDump, 1024, afterForkBuilders)
 	require.ErrorIs(t, err, ErrMissingGloasData)
 	require.ErrorContains(t, err, kv.BuildersDump)
 }
 
-// TestReadRequiredQueueSSZ_MissedForkSlotBlock verifies that a missing dump at
+// TestReadBuildersSSZ_MissedForkSlotBlock verifies that a missing dump at
 // the fork slot starts from an empty list: the antiquary writes no Gloas dump
 // when the fork-slot block is missed, and the first Gloas diff holds the full list.
-func TestReadRequiredQueueSSZ_MissedForkSlotBlock(t *testing.T) {
+func TestReadBuildersSSZ_MissedForkSlotBlock(t *testing.T) {
 	forkSlot := uint64(clparams.SlotsPerDump)
 	slot := forkSlot + 1
 
@@ -233,62 +233,55 @@ func TestReadRequiredQueueSSZ_MissedForkSlotBlock(t *testing.T) {
 	builders.Append(&cltypes.Builder{Pubkey: common.Bytes48{0x01}, Balance: 100})
 	builders.Append(&cltypes.Builder{Pubkey: common.Bytes48{0x02}, Balance: 200})
 
-	encoder := base_encoding.NewSSZQueueEncoder[*cltypes.Builder](func(a, b *cltypes.Builder) bool { return *a == *b })
-	var diff bytes.Buffer
-	require.NoError(t, encoder.WriteDiff(&diff, builders))
+	diff := encodeBuildersRow(t, readerBuilders(), builders)
 
 	getter := mockGetValFn(map[string]map[string][]byte{
-		kv.Builders: {string(base_encoding.Encode64ToBytes4(slot)): diff.Bytes()},
+		kv.Builders: {string(base_encoding.Encode64ToBytes4(slot)): diff},
 	})
 
 	got := solid.NewStaticListSSZ[*cltypes.Builder](1024, new(cltypes.Builder).EncodingSizeSSZ())
-	require.NoError(t, ReadRequiredQueueSSZ(getter, slot, forkSlot, kv.BuildersDump, kv.Builders, got))
+	require.NoError(t, ReadBuildersSSZ(getter, slot, forkSlot, 1024, got))
 	require.Equal(t, 2, got.Len())
 	require.Equal(t, common.Bytes48{0x01}, got.Get(0).Pubkey)
 	require.Equal(t, common.Bytes48{0x02}, got.Get(1).Pubkey)
 }
 
-// TestReadRequiredQueueSSZ_MissingDumpAtForkSlotWithBlock verifies that a
+// TestReadBuildersSSZ_MissingDumpAtForkSlotWithBlock verifies that a
 // missing dump at a fork slot with a block replays the full-list diff stored at
 // the fork slot itself.
-func TestReadRequiredQueueSSZ_MissingDumpAtForkSlotWithBlock(t *testing.T) {
+func TestReadBuildersSSZ_MissingDumpAtForkSlotWithBlock(t *testing.T) {
 	forkSlot := uint64(clparams.SlotsPerDump)
 	slot := forkSlot + 1
-	equal := func(a, b *cltypes.Builder) bool { return *a == *b }
 	newList := func() *solid.ListSSZ[*cltypes.Builder] {
 		return solid.NewStaticListSSZ[*cltypes.Builder](1024, new(cltypes.Builder).EncodingSizeSSZ())
 	}
 
 	atFork := newList()
 	atFork.Append(&cltypes.Builder{Pubkey: common.Bytes48{0x01}, Balance: 100})
-	var forkDiff bytes.Buffer
-	require.NoError(t, base_encoding.NewSSZQueueEncoder(equal).WriteDiff(&forkDiff, atFork))
+	forkDiff := encodeBuildersRow(t, newList(), atFork)
 
 	afterFork := newList()
 	afterFork.Append(&cltypes.Builder{Pubkey: common.Bytes48{0x01}, Balance: 100})
 	afterFork.Append(&cltypes.Builder{Pubkey: common.Bytes48{0x02}, Balance: 200})
-	encoder := base_encoding.NewSSZQueueEncoder(equal)
-	encoder.Initialize(atFork)
-	var nextDiff bytes.Buffer
-	require.NoError(t, encoder.WriteDiff(&nextDiff, afterFork))
+	nextDiff := encodeBuildersRow(t, atFork, afterFork)
 
 	getter := mockGetValFn(map[string]map[string][]byte{
 		kv.Builders: {
-			string(base_encoding.Encode64ToBytes4(forkSlot)): forkDiff.Bytes(),
-			string(base_encoding.Encode64ToBytes4(slot)):     nextDiff.Bytes(),
+			string(base_encoding.Encode64ToBytes4(forkSlot)): forkDiff,
+			string(base_encoding.Encode64ToBytes4(slot)):     nextDiff,
 		},
 	})
 
 	got := newList()
-	require.NoError(t, ReadRequiredQueueSSZ(getter, slot, forkSlot, kv.BuildersDump, kv.Builders, got))
+	require.NoError(t, ReadBuildersSSZ(getter, slot, forkSlot, 1024, got))
 	require.Equal(t, 2, got.Len())
 	require.Equal(t, common.Bytes48{0x01}, got.Get(0).Pubkey)
 	require.Equal(t, common.Bytes48{0x02}, got.Get(1).Pubkey)
 }
 
-// TestReadRequiredQueueSSZ_WithData verifies that ReadRequiredQueueSSZ
-// succeeds and returns correct data when the dump table is populated.
-func TestReadRequiredQueueSSZ_WithData(t *testing.T) {
+// TestReadBuildersSSZ_WithData verifies that ReadBuildersSSZ succeeds and
+// returns correct data when the dump at the fork slot is populated.
+func TestReadBuildersSSZ_WithData(t *testing.T) {
 	builders := solid.NewStaticListSSZ[*cltypes.Builder](1024, new(cltypes.Builder).EncodingSizeSSZ())
 	builders.Append(&cltypes.Builder{
 		Pubkey: common.Bytes48{0x01}, Balance: 100,
@@ -306,7 +299,7 @@ func TestReadRequiredQueueSSZ_WithData(t *testing.T) {
 	})
 
 	got := solid.NewStaticListSSZ[*cltypes.Builder](1024, new(cltypes.Builder).EncodingSizeSSZ())
-	require.NoError(t, ReadRequiredQueueSSZ(getter, slot, slot, kv.BuildersDump, kv.Builders, got))
+	require.NoError(t, ReadBuildersSSZ(getter, slot, slot, 1024, got))
 	require.Equal(t, 1, got.Len())
 	require.Equal(t, common.Bytes48{0x01}, got.Get(0).Pubkey)
 }
@@ -360,9 +353,9 @@ func TestReadCompressedSSZ_BuilderPendingPayments(t *testing.T) {
 	require.Equal(t, uint64(5), p1.Withdrawal.BuilderIndex)
 }
 
-// TestReadQueueSSZ_BuildersDump tests ReadQueueSSZ for the Builders list by
-// writing a dump at a SlotsPerDump-aligned slot and reading it back.
-func TestReadQueueSSZ_BuildersDump(t *testing.T) {
+// TestReadBuildersSSZ_Dump writes a Builders dump at a SlotsPerDump-aligned
+// slot after the fork and reads every field back.
+func TestReadBuildersSSZ_Dump(t *testing.T) {
 	// Create a list with two builders
 	builders := solid.NewStaticListSSZ[*cltypes.Builder](1024, new(cltypes.Builder).EncodingSizeSSZ())
 	builders.Append(&cltypes.Builder{
@@ -396,7 +389,7 @@ func TestReadQueueSSZ_BuildersDump(t *testing.T) {
 	})
 
 	got := solid.NewStaticListSSZ[*cltypes.Builder](1024, new(cltypes.Builder).EncodingSizeSSZ())
-	require.NoError(t, ReadQueueSSZ(getter, slot, kv.BuildersDump, kv.Builders, got))
+	require.NoError(t, ReadBuildersSSZ(getter, slot, 0, 1024, got))
 
 	require.Equal(t, 2, got.Len())
 
@@ -447,14 +440,45 @@ func TestReadQueueSSZ_BuilderPendingWithdrawals_DumpOnly(t *testing.T) {
 	require.Equal(t, uint64(42), w0.BuilderIndex)
 }
 
+func TestReadQueueSSZ_BuilderPendingWithdrawals_DumpWithDiff(t *testing.T) {
+	newList := func() *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal] {
+		return solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](1024, new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ())
+	}
+	first := &cltypes.BuilderPendingWithdrawal{Amount: 1, BuilderIndex: 1}
+	second := &cltypes.BuilderPendingWithdrawal{Amount: 2, BuilderIndex: 2}
+	dump := newList()
+	dump.Append(first)
+	sszDump, err := dump.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	updated := newList()
+	updated.Append(first)
+	updated.Append(second)
+	encoder := base_encoding.NewSSZQueueEncoder(func(a, b *cltypes.BuilderPendingWithdrawal) bool { return *a == *b })
+	encoder.Initialize(dump)
+	var diff bytes.Buffer
+	require.NoError(t, encoder.WriteDiff(&diff, updated))
+
+	getter := mockGetValFn(map[string]map[string][]byte{
+		kv.BuilderPendingWithdrawalsDump: {string(base_encoding.Encode64ToBytes4(0)): compressRawSSZ(t, sszDump)},
+		kv.BuilderPendingWithdrawals:     {string(base_encoding.Encode64ToBytes4(1)): diff.Bytes()},
+	})
+
+	got := newList()
+	require.NoError(t, ReadQueueSSZ(getter, 1, kv.BuilderPendingWithdrawalsDump, kv.BuilderPendingWithdrawals, got))
+	require.Equal(t, 2, got.Len())
+	require.Equal(t, *first, *got.Get(0))
+	require.Equal(t, *second, *got.Get(1))
+}
+
 // TestReadQueueSSZ_EmptyDumpNoDiffs ensures ReadQueueSSZ returns an empty list
 // when neither dump nor diffs are present.
 func TestReadQueueSSZ_EmptyDumpNoDiffs(t *testing.T) {
 	getter := mockGetValFn(map[string]map[string][]byte{})
 	slot := uint64(100)
 
-	got := solid.NewStaticListSSZ[*cltypes.Builder](1024, new(cltypes.Builder).EncodingSizeSSZ())
-	require.NoError(t, ReadQueueSSZ(getter, slot, kv.BuildersDump, kv.Builders, got))
+	got := solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](1024, new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ())
+	require.NoError(t, ReadQueueSSZ(getter, slot, kv.BuilderPendingWithdrawalsDump, kv.BuilderPendingWithdrawals, got))
 	require.Equal(t, 0, got.Len())
 }
 
@@ -489,111 +513,44 @@ func TestReadCompressedSSZ_ExecutionPayloadAvailability(t *testing.T) {
 	require.False(t, got.GetBitAt(100))
 }
 
-// TestReadQueueSSZ_BuildersDumpWithDiffs tests ReadQueueSSZ applying incremental
-// diffs on top of a dump to verify the queue diff mechanism works for Builders.
-func TestReadQueueSSZ_BuildersDumpWithDiffs(t *testing.T) {
-	// Start with one builder at the dump slot
-	initialBuilders := solid.NewStaticListSSZ[*cltypes.Builder](1024, new(cltypes.Builder).EncodingSizeSSZ())
-	initialBuilders.Append(&cltypes.Builder{
-		Pubkey:            common.Bytes48{0x01},
-		Version:           1,
-		ExecutionAddress:  common.HexToAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-		Balance:           100,
-		DepositEpoch:      1,
-		WithdrawableEpoch: 10,
-	})
-
-	sszDump, err := initialBuilders.EncodeSSZ(nil)
-	require.NoError(t, err)
-	compressedDump := compressRawSSZ(t, sszDump)
-
-	// Create a diff that adds a second builder
-	newBuilder := &cltypes.Builder{
-		Pubkey:            common.Bytes48{0x02},
-		Version:           2,
-		ExecutionAddress:  common.HexToAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
-		Balance:           200,
-		DepositEpoch:      2,
-		WithdrawableEpoch: 20,
-	}
-
-	// Use the real SSZQueueEncoder to produce a correct diff
-	encoder := base_encoding.NewSSZQueueEncoder[*cltypes.Builder](func(a, b *cltypes.Builder) bool {
-		return a.Pubkey == b.Pubkey && a.Balance == b.Balance
-	})
-	encoder.Initialize(initialBuilders)
-
-	updatedBuilders := solid.NewStaticListSSZ[*cltypes.Builder](1024, new(cltypes.Builder).EncodingSizeSSZ())
-	updatedBuilders.Append(initialBuilders.Get(0))
-	updatedBuilders.Append(newBuilder)
-
-	var diffBuf bytes.Buffer
-	require.NoError(t, encoder.WriteDiff(&diffBuf, updatedBuilders))
-
-	// The dump is at slot 0, diff is at slot 1, we query slot 1
-	dumpSlot := uint64(0)
-	diffSlot := uint64(1)
-	dumpKey := string(base_encoding.Encode64ToBytes4(dumpSlot))
-	diffKey := string(base_encoding.Encode64ToBytes4(diffSlot))
-
-	getter := mockGetValFn(map[string]map[string][]byte{
-		kv.BuildersDump: {dumpKey: compressedDump},
-		kv.Builders:     {diffKey: diffBuf.Bytes()},
-	})
-
-	got := solid.NewStaticListSSZ[*cltypes.Builder](1024, new(cltypes.Builder).EncodingSizeSSZ())
-	require.NoError(t, ReadQueueSSZ(getter, diffSlot, kv.BuildersDump, kv.Builders, got))
-
-	require.Equal(t, 2, got.Len())
-
-	b0 := got.Get(0)
-	require.Equal(t, common.Bytes48{0x01}, b0.Pubkey)
-	require.Equal(t, uint64(100), b0.Balance)
-
-	b1 := got.Get(1)
-	require.Equal(t, common.Bytes48{0x02}, b1.Pubkey)
-	require.Equal(t, uint64(200), b1.Balance)
-	require.Equal(t, uint8(2), b1.Version)
-}
-
 func TestReadQueueSSZWrapsCorruptDiff(t *testing.T) {
-	builders := solid.NewStaticListSSZ[*cltypes.Builder](1024, new(cltypes.Builder).EncodingSizeSSZ())
-	builders.Append(&cltypes.Builder{Balance: 100})
-	dump, err := builders.EncodeSSZ(nil)
+	withdrawals := solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](1024, new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ())
+	withdrawals.Append(&cltypes.BuilderPendingWithdrawal{Amount: 100})
+	dump, err := withdrawals.EncodeSSZ(nil)
 	require.NoError(t, err)
 
 	diff := make([]byte, 4)
-	binary.LittleEndian.PutUint32(diff, uint32(builders.Len()+1))
+	binary.LittleEndian.PutUint32(diff, uint32(withdrawals.Len()+1))
 	dumpSlot := uint64(clparams.SlotsPerDump)
 	diffSlot := dumpSlot + 1
 	getter := mockGetValFn(map[string]map[string][]byte{
-		kv.BuildersDump: {string(base_encoding.Encode64ToBytes4(dumpSlot)): compressRawSSZ(t, dump)},
-		kv.Builders:     {string(base_encoding.Encode64ToBytes4(diffSlot)): diff},
+		kv.BuilderPendingWithdrawalsDump: {string(base_encoding.Encode64ToBytes4(dumpSlot)): compressRawSSZ(t, dump)},
+		kv.BuilderPendingWithdrawals:     {string(base_encoding.Encode64ToBytes4(diffSlot)): diff},
 	})
 
 	tests := []struct {
 		name string
-		read func(*solid.ListSSZ[*cltypes.Builder]) error
+		read func(*solid.ListSSZ[*cltypes.BuilderPendingWithdrawal]) error
 	}{
 		{
 			name: "optional dump",
-			read: func(out *solid.ListSSZ[*cltypes.Builder]) error {
-				return ReadQueueSSZ(getter, diffSlot, kv.BuildersDump, kv.Builders, out)
+			read: func(out *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal]) error {
+				return ReadQueueSSZ(getter, diffSlot, kv.BuilderPendingWithdrawalsDump, kv.BuilderPendingWithdrawals, out)
 			},
 		},
 		{
 			name: "required dump",
-			read: func(out *solid.ListSSZ[*cltypes.Builder]) error {
-				return ReadRequiredQueueSSZ(getter, diffSlot, 0, kv.BuildersDump, kv.Builders, out)
+			read: func(out *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal]) error {
+				return ReadRequiredQueueSSZ(getter, diffSlot, 0, kv.BuilderPendingWithdrawalsDump, kv.BuilderPendingWithdrawals, out)
 			},
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			out := solid.NewStaticListSSZ[*cltypes.Builder](1024, new(cltypes.Builder).EncodingSizeSSZ())
+			out := solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](1024, new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ())
 			err := test.read(out)
 			require.ErrorIs(t, err, base_encoding.ErrCorruptQueueDiff)
-			require.ErrorContains(t, err, kv.Builders)
+			require.ErrorContains(t, err, kv.BuilderPendingWithdrawals)
 			require.ErrorContains(t, err, fmt.Sprint(diffSlot))
 		})
 	}
@@ -788,9 +745,8 @@ func TestReadHistoricalState_GloasQueuesBeforeFirstDump(t *testing.T) {
 	defer tx.Rollback()
 
 	var diff bytes.Buffer
-	buildersEncoder := base_encoding.NewSSZQueueEncoder[*cltypes.Builder](func(a, b *cltypes.Builder) bool { return *a == *b })
-	require.NoError(t, buildersEncoder.WriteDiff(&diff, fixture.expectedBuilders))
-	require.NoError(t, tx.Put(kv.Builders, base_encoding.Encode64ToBytes4(slot), diff.Bytes()))
+	buildersDiff := encodeBuildersRow(t, readerBuilders(), fixture.expectedBuilders)
+	require.NoError(t, tx.Put(kv.Builders, base_encoding.Encode64ToBytes4(slot), buildersDiff))
 
 	diff.Reset()
 	bpwEncoder := base_encoding.NewSSZQueueEncoder[*cltypes.BuilderPendingWithdrawal](func(a, b *cltypes.BuilderPendingWithdrawal) bool { return *a == *b })
@@ -861,6 +817,7 @@ func TestReadHistoricalState_GloasFieldsReconstruction(t *testing.T) {
 	defer tx.Rollback()
 	genesisKey := base_encoding.Encode64ToBytes4(0)
 	require.NoError(t, tx.Put(kv.BuildersDump, genesisKey, compressRawSSZ(t, buildersSSZ)))
+	require.NoError(t, tx.Put(kv.Builders, base_encoding.Encode64ToBytes4(slot), encodeBuildersRow(t, expectedBuilders, expectedBuilders)))
 	require.NoError(t, tx.Put(kv.BuilderPendingWithdrawalsDump, genesisKey, compressRawSSZ(t, bpwSSZ)))
 	require.NoError(t, tx.Put(kv.PayloadExpectedWithdrawalsDump, genesisKey, compressRawSSZ(t, pewSSZ)))
 	require.NoError(t, tx.Commit())

@@ -18,6 +18,7 @@ package antiquary
 
 import (
 	"bytes"
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -26,7 +27,13 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 func newBuildersList(builders ...cltypes.Builder) *solid.ListSSZ[*cltypes.Builder] {
@@ -35,33 +42,6 @@ func newBuildersList(builders ...cltypes.Builder) *solid.ListSSZ[*cltypes.Builde
 		l.Append(&builders[i])
 	}
 	return l
-}
-
-// Builders is a registry, so a builder that is not the last one can change in place.
-func TestBuildersDiffKeepsInPlaceChange(t *testing.T) {
-	collector := newBeaconStatesCollector(&clparams.MainnetBeaconConfig, t.TempDir(), log.New())
-	defer collector.close()
-
-	pre := newBuildersList(
-		cltypes.Builder{Balance: 100, WithdrawableEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch},
-		cltypes.Builder{Balance: 200, WithdrawableEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch},
-	)
-	post := newBuildersList(
-		cltypes.Builder{Balance: 40, WithdrawableEpoch: 10},
-		cltypes.Builder{Balance: 200, WithdrawableEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch},
-	)
-
-	collector.buildersWriter.Initialize(pre)
-	var diff bytes.Buffer
-	require.NoError(t, collector.buildersWriter.WriteDiff(&diff, post))
-
-	reconstructed := newBuildersList(*pre.Get(0), *pre.Get(1))
-	require.NoError(t, base_encoding.ApplySSZQueueDiff(&diff, reconstructed, 0))
-
-	require.Equal(t, post.Len(), reconstructed.Len())
-	for i := 0; i < post.Len(); i++ {
-		require.Equal(t, *post.Get(i), *reconstructed.Get(i), "builder %d", i)
-	}
 }
 
 func TestBuilderPendingWithdrawalsDiffKeepsDuplicateAppend(t *testing.T) {
@@ -86,4 +66,151 @@ func TestBuilderPendingWithdrawalsDiffKeepsDuplicateAppend(t *testing.T) {
 	reconstructed := newList(1)
 	require.NoError(t, base_encoding.ApplySSZQueueDiff(&diff, reconstructed, 0))
 	require.Equal(t, post.Len(), reconstructed.Len())
+}
+
+func TestBeaconStatesCollectorBuildersRoundTrip(t *testing.T) {
+	collector := newBeaconStatesCollector(&clparams.MainnetBeaconConfig, t.TempDir(), log.New())
+	defer collector.close()
+
+	dumpSlot := uint64(clparams.SlotsPerDump)
+	initial := newBuildersList(
+		cltypes.Builder{Balance: 100},
+		cltypes.Builder{Balance: 200},
+	)
+	changed := newBuildersList(
+		cltypes.Builder{Balance: 101},
+		cltypes.Builder{Balance: 200},
+	)
+	appended := newBuildersList(
+		cltypes.Builder{Balance: 101},
+		cltypes.Builder{Balance: 200},
+		cltypes.Builder{Balance: 300},
+	)
+	emptyWithdrawals := solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](1, new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ())
+	emptyPayloadWithdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](1, new(cltypes.Withdrawal).EncodingSizeSSZ())
+
+	require.NoError(t, collector.collectBuildersDump(dumpSlot, initial))
+	collector.buildersWriter.Initialize(initial)
+	require.NoError(t, collector.collectGloasQueuesDiffs(dumpSlot+1, changed, emptyWithdrawals, emptyPayloadWithdrawals))
+	require.NoError(t, collector.slotDataCollector.Collect(base_encoding.Encode64ToBytes4(dumpSlot+1), []byte{1}))
+	collector.buildersWriter.Initialize(changed)
+	require.NoError(t, collector.collectGloasQueuesDiffs(dumpSlot+2, appended, emptyWithdrawals, emptyPayloadWithdrawals))
+	require.NoError(t, collector.slotDataCollector.Collect(base_encoding.Encode64ToBytes4(dumpSlot+2), []byte{1}))
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, collector.flush(context.Background(), tx))
+	require.NoError(t, tx.Commit())
+
+	roTx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	got := newBuildersList()
+	getter := state_accessors.GetValFnTxAndSnapshot(roTx, nil)
+	require.NoError(t, historical_states_reader.ReadBuildersSSZ(getter, dumpSlot+2, 0, clparams.MainnetBeaconConfig.BuilderRegistryLimit, got))
+	require.Equal(t, appended.Len(), got.Len())
+	for i := 0; i < appended.Len(); i++ {
+		require.Equal(t, *appended.Get(i), *got.Get(i))
+	}
+
+	row, err := roTx.GetOne(kv.Builders, base_encoding.Encode64ToBytes4(dumpSlot+1))
+	require.NoError(t, err)
+	require.Len(t, row, 26+101)
+}
+
+func TestBeaconStatesCollectorBuildersAcrossGloasFork(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	collector := newBeaconStatesCollector(cfg, t.TempDir(), log.New())
+	defer collector.close()
+
+	forkSlot := uint64(clparams.SlotsPerDump)
+	fuluState := state.New(cfg)
+	fuluState.SetVersion(clparams.FuluVersion)
+	gloasState := state.New(cfg)
+	gloasState.SetVersion(clparams.GloasVersion)
+	gloasState.SetBuilders(newBuildersList(
+		cltypes.Builder{Balance: 100},
+		cltypes.Builder{Balance: 200},
+		cltypes.Builder{Balance: 300},
+	))
+	collectBlock := func(preState *state.CachingBeaconState, slot uint64, transition func()) {
+		collector.preStateTransitionHook(preState)
+		transition()
+		require.NoError(t, collector.collectGloasQueuesDiffs(slot, gloasState.GetBuilders(), gloasState.GetBuilderPendingWithdrawals(), gloasState.GetPayloadExpectedWithdrawals()))
+		require.NoError(t, collector.slotDataCollector.Collect(base_encoding.Encode64ToBytes4(slot), []byte{1}))
+	}
+
+	collectBlock(fuluState, forkSlot, func() {})
+	afterFork := []uint64{100, 200, 300}
+	collectBlock(gloasState, forkSlot+1, func() { gloasState.GetBuilders().Get(1).Balance = 250 })
+	afterChange := []uint64{100, 250, 300}
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, collector.flush(context.Background(), tx))
+	require.NoError(t, tx.Commit())
+
+	roTx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	getter := state_accessors.GetValFnTxAndSnapshot(roTx, nil)
+	for slot, want := range map[uint64][]uint64{forkSlot: afterFork, forkSlot + 1: afterChange} {
+		got := newBuildersList()
+		require.NoError(t, historical_states_reader.ReadBuildersSSZ(getter, slot, forkSlot, cfg.BuilderRegistryLimit, got))
+		balances := make([]uint64, got.Len())
+		for i := range balances {
+			balances[i] = got.Get(i).Balance
+		}
+		require.Equal(t, want, balances, "slot %d", slot)
+	}
+
+	changeRow, err := roTx.GetOne(kv.Builders, base_encoding.Encode64ToBytes4(forkSlot+1))
+	require.NoError(t, err)
+	require.Len(t, changeRow, 26+101)
+}
+
+func TestBeaconStatesCollectorGloasGenesisBuilders(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	for name, genesisSlot := range map[string]uint64{"dump slot": 0, "unaligned slot": 32} {
+		t.Run(name, func(t *testing.T) {
+			collector := newBeaconStatesCollector(cfg, t.TempDir(), log.New())
+			defer collector.close()
+
+			genesis := state.New(cfg)
+			genesis.SetVersion(clparams.GloasVersion)
+			require.NoError(t, genesis.SetSlot(genesisSlot))
+			genesis.SetBuilders(newBuildersList(cltypes.Builder{Balance: 100}, cltypes.Builder{Balance: 200}))
+			require.NoError(t, collector.addGenesisState(genesis))
+
+			collector.preStateTransitionHook(genesis)
+			genesis.GetBuilders().Get(1).Balance = 250
+			require.NoError(t, collector.collectGloasQueuesDiffs(genesisSlot+1, genesis.GetBuilders(), genesis.GetBuilderPendingWithdrawals(), genesis.GetPayloadExpectedWithdrawals()))
+			require.NoError(t, collector.slotDataCollector.Collect(base_encoding.Encode64ToBytes4(genesisSlot+1), []byte{1}))
+
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			tx, err := db.BeginRw(context.Background())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			require.NoError(t, collector.flush(context.Background(), tx))
+
+			getter := state_accessors.GetValFnTxAndSnapshot(tx, nil)
+			for slot, want := range map[uint64][]uint64{genesisSlot: {100, 200}, genesisSlot + 1: {100, 250}} {
+				got := newBuildersList()
+				require.NoError(t, historical_states_reader.ReadBuildersSSZ(getter, slot, 0, cfg.BuilderRegistryLimit, got))
+				balances := make([]uint64, got.Len())
+				for i := range balances {
+					balances[i] = got.Get(i).Balance
+				}
+				require.Equal(t, want, balances, "slot %d", slot)
+			}
+
+			genesisRow, err := tx.GetOne(kv.Builders, base_encoding.Encode64ToBytes4(genesisSlot))
+			require.NoError(t, err)
+			require.Len(t, genesisRow, 26)
+		})
+	}
 }
