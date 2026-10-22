@@ -1274,16 +1274,12 @@ func removeBlobIndexAndTorrents(snapDir string, from, to uint64) error {
 		if e.IsDir() {
 			continue
 		}
-		for _, mask := range masks {
-			matched, err := filepath.Match(mask, e.Name())
-			if err != nil {
+		if slices.ContainsFunc(masks, func(mask string) bool {
+			matched, _ := filepath.Match(mask, e.Name())
+			return matched
+		}) {
+			if err := dir.RemoveFile(filepath.Join(snapDir, e.Name())); err != nil {
 				return err
-			}
-			if matched {
-				if err := dir.RemoveFile(filepath.Join(snapDir, e.Name())); err != nil {
-					return err
-				}
-				break
 			}
 		}
 	}
