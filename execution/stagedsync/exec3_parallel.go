@@ -2033,7 +2033,7 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 // execution slot that claims tasks in block order and keeps its roTx for the block.
 func (pe *parallelExecutor) runBALWorkers(be *blockExecutor) {
 	var next atomic.Int64
-	for range cap(pe.execSem) {
+	for range min(cap(pe.execSem), len(be.tasks)) {
 		pe.runWG.Go(func() { pe.balWorker(be, &next) })
 	}
 }
@@ -2069,6 +2069,10 @@ func (pe *parallelExecutor) balWorker(be *blockExecutor, next *atomic.Int64) {
 		}
 	}
 
+	i := claim()
+	if i >= len(be.tasks) {
+		return
+	}
 	select {
 	case <-pe.execSem:
 	case <-pe.workersCtx.Done():
@@ -2082,16 +2086,15 @@ func (pe *parallelExecutor) balWorker(be *blockExecutor, next *atomic.Int64) {
 	defer pe.releaseWorker(w)
 	roTx, err := pe.cfg.db.BeginTemporalRo(pe.workersCtx)
 	if err != nil {
-		sendOperational(claim(), fmt.Errorf("block %d: open roTx: %w", be.blockNum, err))
+		sendOperational(i, fmt.Errorf("block %d: open roTx: %w", be.blockNum, err))
 		return
 	}
 	defer roTx.Rollback()
 	if err := w.ResetTx(roTx); err != nil {
-		sendOperational(claim(), fmt.Errorf("block %d: reset roTx: %w", be.blockNum, err))
+		sendOperational(i, fmt.Errorf("block %d: reset roTx: %w", be.blockNum, err))
 		return
 	}
 
-	i := claim()
 	defer func() {
 		if rec := recover(); rec != nil {
 			sendOperational(i, fmt.Errorf("BAL worker panic (block %d task %d): %v\n%s", be.blockNum, i, rec, dbg.Stack()))
