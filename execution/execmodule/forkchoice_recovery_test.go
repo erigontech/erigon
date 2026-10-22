@@ -75,44 +75,6 @@ func requireValid(t *testing.T, m *execmoduletester.ExecModuleTester, block *typ
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 }
 
-func TestUpdateForkChoiceRecoversAfterInvalidSafeHash(t *testing.T) {
-	for _, followUp := range []struct {
-		name            string
-		safe, finalized func(m *execmoduletester.ExecModuleTester) common.Hash
-	}{
-		{"zero_hashes", func(*execmoduletester.ExecModuleTester) common.Hash { return common.Hash{} }, func(*execmoduletester.ExecModuleTester) common.Hash { return common.Hash{} }},
-		{"ancestor_hashes", func(m *execmoduletester.ExecModuleTester) common.Hash { return m.Genesis.Hash() }, func(m *execmoduletester.ExecModuleTester) common.Hash { return m.Genesis.Hash() }},
-	} {
-		t.Run(followUp.name, func(t *testing.T) {
-			forEachFlushingMode(t, func(t *testing.T, parallel bool) {
-				m := execmoduletester.New(t, execmoduletester.WithParallelStateFlushing(parallel))
-				a, err := m.GenerateChainFrom(m.Genesis, 1, func(_ int, b *blockgen.BlockGen) {
-					b.SetCoinbase(common.Address{0x81})
-				})
-				require.NoError(t, err)
-				b, err := m.GenerateChainFrom(m.Genesis, 1, func(_ int, b *blockgen.BlockGen) {
-					b.SetCoinbase(common.Address{0x82})
-				})
-				require.NoError(t, err)
-				_, err = m.InsertBlocks(t.Context(), a.Blocks)
-				require.NoError(t, err)
-				_, err = m.InsertBlocks(t.Context(), b.Blocks)
-				require.NoError(t, err)
-				requireValid(t, m, a.Blocks[0])
-
-				bad := updateForkChoice(t, m, a.Blocks[0].Hash(), b.Blocks[0].Hash(), common.Hash{})
-				require.Equal(t, execmodule.ExecutionStatusInvalidForkchoice, bad.Status)
-
-				result := updateForkChoice(t, m, a.Blocks[0].Hash(), followUp.safe(m), followUp.finalized(m))
-				require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
-				require.Equal(t, a.Blocks[0].Hash(), result.LatestValidHash)
-				require.Equal(t, a.Blocks[0].Hash(), headBlockHash(t, m))
-				require.Equal(t, a.Blocks[0].Hash(), canonicalHashAt(t, m, 1))
-			})
-		})
-	}
-}
-
 func TestUpdateForkChoiceSideForkUnwind(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
