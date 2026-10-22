@@ -575,6 +575,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 			Err:  err,
 		}
 	}
+	// Task reset may clear EVM cancellation, so check the worker context afterward.
 	if err := rw.ctx.Err(); err != nil {
 		return &TxResult{Task: txTask, Err: err, Operational: true}
 	}
@@ -586,6 +587,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 	}
 
 	result := txTask.Execute(rw.evm, rw.engine, rw.genesis, rw.ibs, rw.stateWriter, rw.chainConfig, rw.chain, rw.dirs, true)
+	// EVM cancellation can return partial results without an execution error.
 	if err := rw.ctx.Err(); err != nil {
 		return &TxResult{Task: txTask, Err: err, Operational: true}
 	}

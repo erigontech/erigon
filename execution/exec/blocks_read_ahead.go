@@ -186,6 +186,7 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, t
 		bal = balSidecar.BlockAccessList()
 	}
 	go func() {
+		// Clear the cancel function before releasing the gate to another warmup.
 		defer bra.warmupGate.Release(1)
 		defer func() {
 			bra.warmupMu.Lock()
@@ -197,6 +198,8 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, t
 	}()
 }
 
+// CancelWarmup requests cancellation of the active warmup without waiting for it
+// to finish. It does not prevent later warmups from starting.
 func (bra *BlockReadAheader) CancelWarmup() {
 	bra.warmupMu.Lock()
 	defer bra.warmupMu.Unlock()
