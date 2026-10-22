@@ -34,7 +34,7 @@ func BenchmarkBALPhantomReads(b *testing.B) {
 				b.ReportAllocs()
 				for range b.N {
 					b.StopTimer()
-					m, block := phantomReadFixture(b, workload, workers, "canonical")
+					m, block := phantomReadFixture(b, workload, workers)
 					status, err := m.InsertBlocks(b.Context(), []*types.Block{block})
 					require.NoError(b, err)
 					require.Equal(b, execmodule.ExecutionStatusSuccess, status)
@@ -44,7 +44,7 @@ func BenchmarkBALPhantomReads(b *testing.B) {
 					require.NoError(b, err)
 					if workload == "attack" {
 						require.Equal(b, execmodule.ExecutionStatusBadBlock, result.ValidationStatus)
-						require.Regexp(b, "phantom declared reads|block access list mismatch", result.ValidationError)
+						require.Contains(b, result.ValidationError, "block access list mismatch")
 					} else {
 						require.Equal(b, execmodule.ExecutionStatusSuccess, result.ValidationStatus, result.ValidationError)
 					}
