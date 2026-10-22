@@ -206,6 +206,7 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 		txCount       int
 		cfg           *chain.Config
 		noWithdrawals bool
+		nilBlobHashes bool
 		wantStatus    engine_types.EngineStatus
 		wantErrCode   int
 	}{
@@ -213,6 +214,7 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 		{name: "5 txs", txCount: 5, cfg: preCancunChainConfig(), wantStatus: engine_types.InvalidStatus},
 		{name: "5 txs without withdrawals", txCount: 5, cfg: preCancunChainConfig(), noWithdrawals: true, wantErrCode: -32602},
 		{name: "5 txs after Cancun", txCount: 5, cfg: prePragueChainConfig(), wantErrCode: -38005},
+		{name: "5 txs with null blob hashes", txCount: 5, cfg: prePragueChainConfig(), nilBlobHashes: true, wantErrCode: -32602},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -230,6 +232,11 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 			withdrawals := types.Withdrawals{}
 			withdrawalsHash := types.DeriveSha(withdrawals)
 			header.WithdrawalsHash = &withdrawalsHash
+			if test.nilBlobHashes {
+				header.BlobGasUsed = new(uint64)
+				header.ExcessBlobGas = new(uint64)
+				header.ParentBeaconBlockRoot = &common.Hash{}
+			}
 			block := types.NewBlockFromStorage(header.Hash(), header, txs, nil, withdrawals, nil)
 			payload, err := engine_types.ExecutionPayloadFromBlock(block)
 			require.NoError(t, err)
@@ -242,7 +249,12 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 			srv := NewEngineServer(log.New(), test.cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
 			srv.test = true
 
-			status, err := srv.NewPayloadV2(t.Context(), payload)
+			var status *engine_types.PayloadStatus
+			if test.nilBlobHashes {
+				status, err = srv.NewPayloadV3(t.Context(), payload, nil, header.ParentBeaconBlockRoot)
+			} else {
+				status, err = srv.NewPayloadV2(t.Context(), payload)
+			}
 			if test.wantErrCode != 0 {
 				var rpcErr rpc.Error
 				require.ErrorAs(t, err, &rpcErr)
