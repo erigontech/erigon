@@ -180,10 +180,8 @@ func TestCaplinWatermarks(t *testing.T) {
 	require.Len(t, view.BeaconBlocks(), 2, "the unindexed tail segment must not be visible")
 	require.Len(t, view.BlobSidecars(), 1)
 
-	// dirty-backed: counts the unindexed tail, inclusive To-1.
-	require.Equal(t, uint64(3*limit-1), sn.SegmentsMax())
-	// visible-backed, inclusive To-1. BlocksAvailable is min(SegmentsMax, IndicesMax),
-	// so it follows IndicesMax whenever the tip is dumped but not yet indexed.
+	// visible-backed, inclusive To-1: the unindexed tail is not counted.
+	require.Equal(t, uint64(2*limit-1), sn.SegmentsMax())
 	require.Equal(t, uint64(2*limit-1), sn.IndicesMax())
 	require.Equal(t, uint64(2*limit-1), sn.BlocksAvailable())
 	// visible-backed, exclusive To — cl/beacon/handler/blobs.go compares slot < FrozenBlobs().
@@ -607,6 +605,26 @@ func TestOpenStopsAtBeaconBlocksGap(t *testing.T) {
 		filepath.Join(dirs.Snap, snaptype.BeaconBlocks.FileName(version.ZeroVersion, 3*limit, 4*limit)),
 		filepath.Join(dirs.Snap, snaptype.BeaconBlocks.FileName(version.ZeroVersion, 3*limit, 5*limit)),
 	}, segs, "only covered segments before the gap may be unlinked")
+}
+
+func TestSegmentsMaxIgnoresBlobsPastBeaconBlocksGap(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 2*limit, 3*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BlobSidecars, 0, limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BlobSidecars, limit, 2*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BlobSidecars, 2*limit, 3*limit, true)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+
+	view := sn.View()
+	defer view.Close()
+	require.Len(t, view.BlobSidecars(), 3)
+	require.Equal(t, uint64(limit-1), sn.SegmentsMax(), "the backfill has to fill the beaconblocks gap")
 }
 
 func TestOpenSkipsCrossingBeaconBlocks(t *testing.T) {

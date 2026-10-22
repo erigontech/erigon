@@ -27,13 +27,21 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 )
 
 type recordingBlobHistoryDownloader struct {
@@ -232,6 +240,111 @@ func TestHistoryDownloadPersistsInitialGloasBlockWithoutPayloadClassification(t 
 		require.Equal(t, common.Hash{}, executionHash)
 		return nil
 	}))
+}
+
+type firstBlockHistoryDownloader struct {
+	failingHistoryDownloader
+	onNewBlock network.OnNewBlock
+	deliver    func(network.OnNewBlock)
+}
+
+func (d *firstBlockHistoryDownloader) SetOnNewBlock(onNewBlock network.OnNewBlock) {
+	d.onNewBlock = onNewBlock
+}
+
+func (d *firstBlockHistoryDownloader) RequestMore(context.Context) error {
+	d.deliver(d.onNewBlock)
+	return d.err
+}
+
+func writeUnindexedBeaconBlocks(t *testing.T, dirs datadir.Dirs, from, to uint64) {
+	t.Helper()
+	f, _, ok := snaptype.ParseFileName(dirs.Snap, snaptype.BeaconBlocks.FileName(version.ZeroVersion, from, to))
+	require.True(t, ok)
+	c, err := seg.NewCompressor(t.Context(), "test beaconblocks", f.Path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+	defer c.Close()
+	for range to - from {
+		require.NoError(t, c.AddWord(nil))
+	}
+	require.NoError(t, c.Compress())
+}
+
+func TestHistoryDownloadIndexesCaplinSegmentsBeforeFirstBlock(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	writeSegments := func(t *testing.T, dirs datadir.Dirs) {
+		writeUnindexedBeaconBlocks(t, dirs, 0, limit)
+		writeUnindexedBeaconBlocks(t, dirs, limit, 2*limit)
+	}
+	for _, tc := range []struct {
+		name   string
+		engine func(*testing.T, datadir.Dirs) execution_client.ExecutionEngine
+	}{
+		{"standalone", func(t *testing.T, dirs datadir.Dirs) execution_client.ExecutionEngine {
+			writeSegments(t, dirs)
+			return nil
+		}},
+		{"embedded", func(t *testing.T, dirs datadir.Dirs) execution_client.ExecutionEngine {
+			engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+			engine.EXPECT().SupportInsertion().Return(true).AnyTimes()
+			polls := 0
+			engine.EXPECT().Ready(gomock.Any()).DoAndReturn(func(context.Context) (bool, error) {
+				polls++
+				if polls == 1 {
+					writeSegments(t, dirs)
+					return false, nil
+				}
+				return true, nil
+			}).AnyTimes()
+			return engine
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			cfg := clparams.MainnetBeaconConfig
+			sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
+			t.Cleanup(sn.Close)
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			t.Cleanup(db.Close)
+
+			block := cltypes.NewSignedBeaconBlock(&cfg, clparams.Phase0Version)
+			block.Block.Slot = limit
+			var blocksAvailable uint64
+			var finished bool
+			var blockErr error
+			stop := errors.New("stop after the first block")
+			downloader := &firstBlockHistoryDownloader{failingHistoryDownloader: failingHistoryDownloader{err: stop}}
+			downloader.deliver = func(onNewBlock network.OnNewBlock) {
+				blocksAvailable = sn.BlocksAvailable()
+				finished, blockErr = onNewBlock(block, nil)
+			}
+
+			err := SpawnStageHistoryDownload(StageHistoryReconstructionCfg{
+				beaconCfg:          &cfg,
+				downloader:         downloader,
+				sn:                 sn,
+				engine:             tc.engine(t, dirs),
+				waitForAllRoutines: true,
+				startingSlot:       2 * limit,
+				indiciesDB:         db,
+				caplinConfig:       clparams.CaplinConfig{ArchiveBlocks: true},
+				logger:             log.New(),
+			}, t.Context(), log.New())
+			if err != nil {
+				require.ErrorIs(t, err, stop)
+			}
+			require.NoError(t, blockErr)
+			require.Equal(t, uint64(2*limit-1), blocksAvailable, "caplin segments must be indexed before the first block")
+			require.Equal(t, uint64(2*limit-1), sn.SegmentsMax())
+			require.True(t, finished, "the archive backfill must stop at the snapshot tip")
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, limit)
+				require.NoError(t, err)
+				require.Equal(t, common.Hash{}, root, "a block held by snapshots must not be written to the DB")
+				return nil
+			}))
+		})
+	}
 }
 
 func TestWaitForHistoryCompletion(t *testing.T) {

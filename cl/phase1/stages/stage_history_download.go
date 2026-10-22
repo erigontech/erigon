@@ -141,6 +141,14 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		cfg.caplinConfig.ArchiveBlocks = false // disable backfilling if not on a supported network
 	}
 
+	if err := waitForEngineReady(ctx, cfg.engine); err != nil {
+		return err
+	}
+	logger.Info("[Caplin] Building missing snapshot indices")
+	if err := cfg.sn.BuildMissingIndices(ctx, logger); err != nil {
+		return err
+	}
+
 	var hasFinishedDownloadingElBlocks atomic.Bool
 
 	// Start the procedure
@@ -344,12 +352,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 					continue
 				}
 
-				if cfg.sn != nil && cfg.sn.SegmentsMax() == 0 {
-					if err := cfg.sn.OpenFolder(); err != nil {
-						log.Warn("could not open snapshot folder", "err", err)
-					}
-				}
-
 				highestBlockSeen := initialBeaconBlock.Block.Slot
 				lowestBlockToReach := cfg.sn.SegmentsMax()
 
@@ -448,6 +450,23 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	cfg.logger.Info("Ready to insert history, waiting for sync cycle to finish")
 
 	return waitForHistoryCompletion(ctx, finishCh, cfg.waitForAllRoutines)
+}
+
+func waitForEngineReady(ctx context.Context, engine execution_client.ExecutionEngine) error {
+	if engine == nil || !engine.SupportInsertion() {
+		return nil
+	}
+	for {
+		ready, err := engine.Ready(ctx)
+		if err != nil || ready {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
 }
 
 func startBlobHistoryDownload(blockHistoryFinished bool, downloader blobHistoryDownloader, headSlot uint64, notify func(bool)) {

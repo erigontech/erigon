@@ -99,11 +99,8 @@ func (s *CaplinSnapshots) Close() {
 	s.BaseRoSnapshots.Close()
 }
 
-// SegmentsMax is dirty-backed and counts a segment as soon as its .seg opens, index or
-// not: the archive backfill stop condition asks how far data has been dumped, not how
-// far it is readable.
 func (s *CaplinSnapshots) SegmentsMax() uint64 {
-	return s.DirtySegmentsMax(snaptype.CaplinEnums.BeaconBlocks)
+	return s.BlocksAvailable()
 }
 
 func (s *CaplinSnapshots) LogStat(str string) {
@@ -194,8 +191,6 @@ func (s *CaplinSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 // Go embedding has no virtual dispatch: the promoted base version would open past a gap.
 func (s *CaplinSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
 
-// SegmentsMax is dirty-backed, so a beaconblocks segment past a gap or crossing must stay
-// closed: backfill stops at SegmentsMax and would never write the missing slots.
 func (s *CaplinSnapshots) segmentsUpToGap() ([]string, []snaptype.FileInfo, uint64, error) {
 	files, err := snapshotsync.AllTypedSegments(s.Dir(), s.Types())
 	if err != nil {
