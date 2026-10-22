@@ -228,8 +228,9 @@ type SendersRecovery struct {
 	senders []byte
 	// state[i] is senderPending until the background or an exec worker claims tx i,
 	// and senderDone once the background stored its sender.
-	state []atomic.Uint32
-	err   error
+	state  []atomic.Uint32
+	err    error
+	cancel context.CancelFunc
 }
 
 const (
@@ -239,9 +240,11 @@ const (
 )
 
 func StartSendersRecovery(ctx context.Context, signer *types.Signer, txns types.Transactions) *SendersRecovery {
-	r := &SendersRecovery{done: make(chan struct{}), senders: make([]byte, len(txns)*length.Addr), state: make([]atomic.Uint32, len(txns))}
+	ctx, cancel := context.WithCancel(ctx)
+	r := &SendersRecovery{done: make(chan struct{}), senders: make([]byte, len(txns)*length.Addr), state: make([]atomic.Uint32, len(txns)), cancel: cancel}
 	go func() {
 		defer close(r.done)
+		defer cancel()
 		var next atomic.Int64
 		group, groupCtx := errgroup.WithContext(ctx)
 		for w := range min(secp256k1.NumOfContexts(), len(txns)) {
@@ -269,6 +272,9 @@ func StartSendersRecovery(ctx context.Context, signer *types.Signer, txns types.
 	}()
 	return r
 }
+
+// Stop abandons the recovery; RecoveredSenders then reports it incomplete.
+func (r *SendersRecovery) Stop() { r.cancel() }
 
 // TakeSender returns the sender of tx i if the background recovery has it. Otherwise
 // it claims tx i, so the background skips it, and the caller recovers it itself.

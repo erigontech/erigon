@@ -529,6 +529,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return nil, err
 	}
 	if possibleStatus != nil {
+		if sendersRecovery != nil {
+			sendersRecovery.Stop()
+		}
 		e.logger.Debug("[NewPayload] got quick payload status", "payloadStatus", possibleStatus)
 		return possibleStatus, nil
 	}
