@@ -831,9 +831,7 @@ func TestPushMatchesSetBytes(t *testing.T) {
 		for pc := range uint64(len(code)) {
 			scope := &CallContext{}
 			scope.Contract.Code = code
-			scope.Stack.pushRef().SetAllOne()
-			scope.Stack.pushRef().SetAllOne()
-			scope.Stack.pop()
+			fillSlotAboveTopWithOnes(&scope.Stack)
 			next, _, err := push(pc, nil, scope)
 			require.NoError(t, err)
 			require.Equal(t, pc+size, next)
@@ -843,6 +841,12 @@ func TestPushMatchesSetBytes(t *testing.T) {
 			require.Equal(t, 2, scope.Stack.len())
 		}
 	}
+}
+
+func fillSlotAboveTopWithOnes(st *Stack) {
+	st.pushRef().SetAllOne()
+	st.pushRef().SetAllOne()
+	st.pop()
 }
 
 // TestPush sanity-checks how code with immediates are handled when the code size is

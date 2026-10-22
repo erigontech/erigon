@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -1624,7 +1625,7 @@ func opPush2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 
 var pushMasks = func() (m [33]uint256.Int) {
 	for n := range m {
-		m[n].Lsh(uint256.NewInt(1), uint(8*n)).SubUint64(&m[n], 1)
+		m[n].SetBytes(bytes.Repeat([]byte{0xff}, n))
 	}
 	return m
 }()
