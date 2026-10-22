@@ -307,7 +307,8 @@ func (t *TxTask) DefersSenderCharge(incarnation int) (chargeSenderAtValidation b
 		return false
 	}
 	sender, err := t.TxSender()
-	return err == nil && !sender.IsNil() && sender.Value() != t.Header.Coinbase && sender.Value() != *txn.GetTo()
+	senderOnlyPays := err == nil && !sender.IsNil() && sender.Value() != t.Header.Coinbase && sender.Value() != *txn.GetTo()
+	return senderOnlyPays
 }
 
 func (t *TxTask) TxMessage() (*types.Message, error) {
