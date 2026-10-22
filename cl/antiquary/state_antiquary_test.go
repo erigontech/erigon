@@ -49,6 +49,7 @@ func TestShouldBackoffHistoricalStateRead(t *testing.T) {
 		{name: "missing GLOAS data", err: historical_states_reader.ErrMissingGloasData, want: true},
 		{name: "missing history vector", err: historical_states_reader.ErrMissingHistoryVectorData, want: true},
 		{name: "corrupt queue diff", err: base_encoding.ErrCorruptQueueDiff, want: true},
+		{name: "history rebuild required", err: state_accessors.ErrHistoryRebuildRequired, want: true},
 		{name: "generic error", err: errors.New("read failed"), want: false},
 	}
 	for _, test := range tests {
