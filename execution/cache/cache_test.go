@@ -366,10 +366,10 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 	}
 	assert.Positive(t, admitted, "a full cache must still serve some addresses")
 
-	// hashToCode is bounded by bytes and gets half the configured figure, which
-	// 1100 small codes are nowhere near — they all stay resident.
+	// The code layer is bounded by bytes, which 1100 small codes are nowhere
+	// near — they all stay resident.
 	assert.Equal(t, 1100, c.CodeLen())
-	assert.LessOrEqual(t, c.CodeSizeBytes(), int64(1024*1024)/2)
+	assert.LessOrEqual(t, c.CodeSizeBytes(), int64(1024*1024))
 
 	// Updating an addr re-writes its entry.
 	c.Put(wideAddr(1099), wideCode(4242), 0)
@@ -381,8 +381,7 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 func TestCodeCache_CodeCapacityLimit(t *testing.T) {
 	// A budget with room for one entry. Successive distinct codes evict rather
 	// than freezing the layer, and residency never exceeds the budget.
-	// The budget is split across the two content layers, so size it for one entry each.
-	const codeCap = 2 * (codeEntryBytes + 8)
+	const codeCap = codeEntryBytes + 8
 	c := closeOnCleanup(t, NewCodeCache(datasize.ByteSize(codeCap), 1024*1024))
 
 	c.Put(makeAddr(1), makeCode(1), 0)
@@ -392,7 +391,7 @@ func TestCodeCache_CodeCapacityLimit(t *testing.T) {
 	// Addr LRU keeps all three mappings (1MB); the code layer holds one.
 	assert.Equal(t, 3, c.Len())
 	assert.Equal(t, 1, c.CodeLen())
-	assert.LessOrEqual(t, c.CodeSizeBytes(), int64(codeCap)/2)
+	assert.LessOrEqual(t, c.CodeSizeBytes(), int64(codeCap))
 
 	// Exactly one of the three addrs still resolves to its code — which one is
 	// the eviction policy's call, not the test's.
@@ -461,8 +460,8 @@ func TestCodeCache_GetMissingCode(t *testing.T) {
 	c.Put(addr, code, 0)
 
 	// Clear the code cache but keep addr mapping
-	c.hashToCode.Purge()
-	c.codeSize.Store(0)
+	c.codeHashToCode.Purge()
+	c.codeHashCodeSize.Store(0)
 
 	// Get should fail at code lookup stage
 	_, ok := c.Get(addr)
@@ -1549,7 +1548,7 @@ func TestStateCache_FillCodeUsesKnownHash(t *testing.T) {
 	t.Cleanup(c.Close)
 	addr := makeAddr(1)
 	code := makeCode(1)
-	codeHash := makeHash(1)
+	codeHash := crypto.Keccak256Hash(code)
 	view := c.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 100, true }))
 
 	view.FillCode(addr, code, codeHash[:], 10)
