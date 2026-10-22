@@ -357,7 +357,6 @@ func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
 func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 	for i := range changes {
 		accountChanges := &changes[i]
-		addr := accounts.InternAddress(accountChanges.Address)
 		if dbg.TraceBALFeed {
 			fmt.Printf(
 				"BAL-ACCT %x storage=%d balance=%d nonce=%d code=%d reads=%d\n",
@@ -369,6 +368,11 @@ func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 				len(accountChanges.StorageReads),
 			)
 		}
+		if len(accountChanges.StorageChanges) == 0 && len(accountChanges.BalanceChanges) == 0 &&
+			len(accountChanges.NonceChanges) == 0 && len(accountChanges.CodeChanges) == 0 {
+			continue
+		}
+		addr := accounts.InternAddress(accountChanges.Address)
 		for _, storageChanges := range accountChanges.StorageChanges {
 			for _, change := range storageChanges.Changes {
 				if dbg.TraceBALFeed {
