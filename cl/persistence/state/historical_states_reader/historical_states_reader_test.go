@@ -183,3 +183,52 @@ func TestReadParticipationsReturnsBlockRootError(t *testing.T) {
 	_, _, err = hr.ReadParticipations(tx, getter, 3)
 	require.ErrorContains(t, err, "invalid block root length")
 }
+
+func TestReadParticipationsReturnsMissingParentBlockError(t *testing.T) {
+	db, blocks, _, hr, _ := setupGloasReplay(t, "attestation")
+	block := blocks[1]
+	block.Block.Body.Attestations = blocks[0].Block.Body.Attestations
+	require.Positive(t, block.Block.Body.Attestations.Len())
+	parentRoot, err := blocks[0].Block.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, common.Hash(parentRoot), block.Block.ParentRoot)
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, tx.Delete(kv.BlockRootToSlot, block.Block.ParentRoot[:]))
+
+	getter := state_accessors.GetValFnTxAndSnapshot(tx, nil)
+	_, _, err = hr.ReadParticipations(tx, getter, block.Block.Slot)
+	require.ErrorIs(t, err, historical_states_reader.ErrMissingParentBlock)
+}
+
+func TestReadParticipationsReturnsMalformedGenesisRootError(t *testing.T) {
+	db, blocks, _, hr, _ := setupGloasReplay(t, "attestation")
+	preState := tests.GetGloasFixture("attestation", false, 0).PreState
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, tx.Put(kv.BlockRoot, base_encoding.Encode64ToBytes4(preState.Slot()), make([]byte, 31)))
+
+	getter := state_accessors.GetValFnTxAndSnapshot(tx, nil)
+	_, _, err = hr.ReadParticipations(tx, getter, blocks[0].Block.Slot)
+	require.ErrorContains(t, err, "invalid genesis block root length 31")
+	require.NotErrorIs(t, err, historical_states_reader.ErrMissingParentBlock)
+}
+
+func TestReadHistoricalStateReturnsMissingParentBlockError(t *testing.T) {
+	db, blocks, _, hr, _ := setupGloasReplay(t, "attestation")
+	block := blocks[1]
+	block.Block.Body.Attestations = blocks[0].Block.Body.Attestations
+	require.Positive(t, block.Block.Body.Attestations.Len())
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, tx.Delete(kv.BlockRootToSlot, block.Block.ParentRoot[:]))
+
+	_, err = hr.ReadHistoricalState(context.Background(), tx, block.Block.Slot)
+	require.ErrorIs(t, err, historical_states_reader.ErrMissingParentBlock)
+}

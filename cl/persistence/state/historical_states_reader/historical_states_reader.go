@@ -907,8 +907,11 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, kvGetter state_acc
 				if err != nil {
 					return nil, nil, err
 				}
-				if len(genesisRoot) != 32 || block.Block.ParentRoot != common.BytesToHash(genesisRoot) {
-					return nil, nil, fmt.Errorf("parent block root %x not found", block.Block.ParentRoot)
+				if len(genesisRoot) != 0 && len(genesisRoot) != 32 {
+					return nil, nil, fmt.Errorf("invalid genesis block root length %d at slot %d", len(genesisRoot), genesisSlot)
+				}
+				if len(genesisRoot) == 0 || block.Block.ParentRoot != common.BytesToHash(genesisRoot) {
+					return nil, nil, fmt.Errorf("%w: root %x", ErrMissingParentBlock, block.Block.ParentRoot)
 				}
 				genesisParentSlot := r.genesisState.LatestBlockHeader().Slot
 				parentSlot = &genesisParentSlot
@@ -1197,6 +1200,10 @@ var ErrMissingGloasData = errors.New("missing GLOAS snapshot data (re-antiquatio
 // fabricate a root. A non-empty entry of the wrong length is corruption and
 // surfaces as a hard error instead.
 var ErrMissingHistoryVectorData = errors.New("missing block/state root history (re-antiquation required)")
+
+// ErrMissingParentBlock is returned when a block's parent root is neither in the
+// block index nor the genesis block root.
+var ErrMissingParentBlock = errors.New("missing parent block in block index")
 
 // readCompressedSSZ reads a zstd-compressed SSZ value from the given table at the given slot,
 // decompresses it and decodes it into `out`. Used for per-slot GLOAS fields.
