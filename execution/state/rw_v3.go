@@ -172,9 +172,12 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 			return bytes.Compare(av[:], bv[:])
 		})
 
-		getLatestAcct := func(k []byte) ([]byte, error) {
+		readLatestAcct := func(k []byte, acc *accounts.Account) error {
 			v, _, err := domains.GetLatest(kv.AccountsDomain, roTx, k)
-			return v, err
+			if err != nil || len(v) == 0 {
+				return err
+			}
+			return accounts.DeserialiseV3(acc, v)
 		}
 
 		for _, addr := range addrs {
@@ -229,14 +232,8 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				// its base stays empty so cleared fields cannot be resurrected.
 				acc := accounts.NewAccount()
 				if !d.selfDestruct {
-					enc0, err := getLatestAcct(address[:])
-					if err != nil {
+					if err := readLatestAcct(address[:], &acc); err != nil {
 						return err
-					}
-					if len(enc0) > 0 {
-						if err := accounts.DeserialiseV3(&acc, enc0); err != nil {
-							return err
-						}
 					}
 				}
 				if d.balance != nil {
