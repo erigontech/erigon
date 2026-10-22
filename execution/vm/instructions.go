@@ -22,6 +22,7 @@ package vm
 import (
 	"fmt"
 	"math"
+	"math/bits"
 	"slices"
 
 	"github.com/c2h5oh/datasize"
@@ -173,7 +174,7 @@ func expOdd(z, b, e *uint256.Int) {
 		if e[0]>>i&1 != 0 {
 			res.Mul(&res, &p)
 		}
-		p.Mul(&p, &p)
+		square(&p)
 	}
 	var h, u, h1, h2, c2, poly uint256.Int
 	h.Rsh(e, 62)
@@ -189,6 +190,19 @@ func expOdd(z, b, e *uint256.Int) {
 	poly.Mul(&poly, &u).Add(&poly, &h)
 	poly.Mul(&poly, &u).AddUint64(&poly, 1)
 	z.Mul(&res, &poly)
+}
+
+// square sets z = z*z mod 2**256 with 6 multiplications instead of Mul's 10.
+func square(z *uint256.Int) {
+	c0, r0 := bits.Mul64(z[0], z[0])
+	h01, l01 := bits.Mul64(z[0], z[1])
+	h02, l02 := bits.Mul64(z[0], z[2])
+	h11, l11 := bits.Mul64(z[1], z[1])
+	r1, k := bits.Add64(c0, l01<<1, 0)
+	r2, k1 := bits.Add64(h01<<1|l01>>63, l11, k)
+	r2, k2 := bits.Add64(r2, l02<<1, 0)
+	z[3] = h01>>63 + k1 + k2 + h11 + (h02<<1 | l02>>63) + 2*(z[0]*z[3]+z[1]*z[2])
+	z[0], z[1], z[2] = r0, r1, r2
 }
 
 func opSignExtend(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
