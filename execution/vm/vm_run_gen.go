@@ -209,9 +209,15 @@ run:
 				if sLen >= 2 && gasLeft >= GasFastStep {
 					gasLeft -= GasFastStep
 					x, y := callContext.Stack.pop1Peek1()
-					callContext.gas, callContext.savedPC = gasLeft, pc
-					y.Div(x, y)
-					gasLeft, pc = callContext.gas, callContext.savedPC
+					if n, ok := log2Exact(y); ok {
+						callContext.gas, callContext.savedPC = gasLeft, pc
+						y.Rsh(x, n)
+						gasLeft, pc = callContext.gas, callContext.savedPC
+					} else {
+						callContext.gas, callContext.savedPC = gasLeft, pc
+						y.Div(x, y)
+						gasLeft, pc = callContext.gas, callContext.savedPC
+					}
 					pc++
 					continue run
 				}
