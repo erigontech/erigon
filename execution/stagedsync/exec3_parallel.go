@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -24,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -725,17 +727,21 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						checkBloom := !pe.cfg.vmConfig.StatelessExec && !pe.cfg.vmConfig.NoReceipts
 						checkReceipts := checkBloom && pe.cfg.chainConfig.IsByzantium(applyResult.BlockNum)
 
-						b, _, err := pe.cfg.blockReader.BlockWithSenders(ctx, rwTx, applyResult.BlockHash, applyResult.BlockNum)
-						if err != nil {
-							failInfra(fmt.Errorf("can't retrieve block %d: for post validation: %w", applyResult.BlockNum, err))
-							continue
-						}
-						if b == nil {
-							failInfra(fmt.Errorf("nil block %d (hash %x)", applyResult.BlockNum, applyResult.BlockHash))
-							continue
+						header, txs := applyResult.Header, applyResult.Txs
+						if header == nil {
+							b, _, err := pe.cfg.blockReader.BlockWithSenders(ctx, rwTx, applyResult.BlockHash, applyResult.BlockNum)
+							if err != nil {
+								failInfra(fmt.Errorf("can't retrieve block %d: for post validation: %w", applyResult.BlockNum, err))
+								continue
+							}
+							if b == nil {
+								failInfra(fmt.Errorf("nil block %d (hash %x)", applyResult.BlockNum, applyResult.BlockHash))
+								continue
+							}
+							header, txs = b.HeaderNoCopy(), b.Transactions()
 						}
 
-						lastHeader = b.HeaderNoCopy()
+						lastHeader = header
 
 						if lastHeader.Number.Uint64() != applyResult.BlockNum {
 							failInfra(fmt.Errorf("block numbers don't match expected: %d: got: %d for hash %x", applyResult.BlockNum, lastHeader.Number.Uint64(), applyResult.BlockHash))
@@ -750,8 +756,31 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						// Spawn per-block validation concurrently; joined via Wait() below
 						// after the other per-result work has run alongside it.
 						blockValidatorWaiter = newBlockValidator(pe.cfg.engine, applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, checkBloom, applyResult.Receipts,
-							lastHeader, b.Transactions(), pe.cfg.chainConfig, pe.logger)
+							lastHeader, txs, pe.cfg.chainConfig, pe.logger)
 
+					}
+
+					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
+					var computedBAL types.BlockAccessList
+					var balErr error
+					balDone := make(chan struct{})
+					if isAmsterdam || pe.cfg.experimentalBAL {
+						var storedBAL []byte
+						if isAmsterdam && lastHeader != nil {
+							storedBAL, balErr = rawdb.ReadBlockAccessListBytes(rwTx, applyResult.BlockHash, applyResult.BlockNum)
+							storedBAL = bytes.Clone(storedBAL)
+						}
+						if balErr == nil {
+							h, txIO := lastHeader, applyResult.TxIO
+							go func() {
+								defer close(balDone)
+								computedBAL, balErr = bal.Process(storedBAL, h, txIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
+							}()
+						} else {
+							close(balDone)
+						}
+					} else {
+						close(balDone)
 					}
 
 					// StartChange + NotifyAccumulator both run in the apply goroutine to
@@ -761,6 +790,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					if pe.accumulator != nil && applyResult.Header != nil {
 						rawTxs, marshalErr := types.MarshalTransactionsBinary(applyResult.Txs)
 						if marshalErr != nil {
+							<-balDone
 							failInfra(fmt.Errorf("marshal transactions for accumulator, block %d: %w", applyResult.BlockNum, marshalErr))
 							continue
 						}
@@ -785,13 +815,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					blockUpdateCount = 0
 					blockApplyCount = 0
 
-					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
-					var computedBAL types.BlockAccessList
-					var balErr error
-					if isAmsterdam || pe.cfg.experimentalBAL {
-						computedBAL, balErr = bal.Process(rwTx, lastHeader, applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
-					}
-
+					<-balDone
 					// Join the per-block validator spawned above; its verdict wins over
 					// a bal.Process error.
 					if err := blockValidatorWaiter.Wait(); err != nil {
