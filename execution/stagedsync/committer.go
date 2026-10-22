@@ -358,7 +358,8 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// with seekInFiles(txNum=0) on datadirs whose history window starts past
 		// genesis. computeAndPublish resets this to lastTxNum+1 before compute, so
 		// it only affects the lazy-load path, never the trie fold.
-		if r.writes != nil && !r.writes.IsEmpty() {
+		// A computed-ahead block needs its writes only for the shadow cross-check.
+		if r.writes != nil && !r.writes.IsEmpty() && (!cc.computedAhead[r.blockNum] || dbg.BALShadowCompute) {
 			cc.asOfReader.txNum = r.txNum
 			cc.state.ApplyWrites(r.writes)
 		}
@@ -400,12 +401,12 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		case cc.computedAhead[r.BlockNum]:
 			// Already computed ahead from its BAL. In shadow mode, recompute
 			// incrementally and cross-check; otherwise the verified root was already
-			// published. Either way clear the per-block dirty flags so a later
-			// transition compute doesn't re-flush them.
+			// published and cc.state skipped the block's writes, so drop its cached
+			// values for later blocks to reload.
 			if dbg.BALShadowCompute {
 				cc.shadowCrossCheck(ctx, r)
 			} else {
-				cc.state.ResetBlockFlags()
+				cc.state = newCalcState(cc.asOfReader, cc.logger, cc.logPrefix)
 			}
 		case cc.perBlockCompute(r.BlockNum):
 			if cc.lastComputedBlock == 0 && r.isPartial {
