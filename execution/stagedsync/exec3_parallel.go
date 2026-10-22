@@ -1966,7 +1966,7 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			// Valid: wait for its dependencies to commit, then re-validate — a
 			// dependency may have re-executed to a new value, forcing a re-exec;
 			// otherwise the verdict is authoritative and we commit out of order.
-			if !waitTo(target) {
+			if !be.versionMap.HasBAL && !waitTo(target) {
 				return
 			}
 			if v, _, _ := be.selfLoopEvaluate(tv, result); v {
@@ -2841,13 +2841,42 @@ func (be *blockExecutor) indexReads(taskIdx int, rs state.ReadSet) {
 	seenAddr := map[accounts.Address]struct{}{}
 	rs.RangeFullHeaders(func(a accounts.Address, p state.AccountPath, k accounts.StorageKey, _ state.ReadHeader) bool {
 		rk := readerKey{a, p, k}
-		be.readerIdx[rk] = append(be.readerIdx[rk], taskIdx)
+		be.readerIdx[rk] = insertSorted(be.readerIdx[rk], taskIdx)
 		if _, ok := seenAddr[a]; !ok {
 			seenAddr[a] = struct{}{}
-			be.readerByAddr[a] = append(be.readerByAddr[a], taskIdx)
+			be.readerByAddr[a] = insertSorted(be.readerByAddr[a], taskIdx)
 		}
 		return true
 	})
+}
+
+// balDispatchWindow bounds how far past the commit frontier a BAL block dispatches tasks.
+const balDispatchWindow = 32
+
+// insertSorted adds tx to the ascending, duplicate-free list l.
+func insertSorted(l []int, tx int) []int {
+	if n := len(l); n == 0 || l[n-1] < tx {
+		return append(l, tx)
+	}
+	i, found := slices.BinarySearch(l, tx)
+	if found {
+		return l
+	}
+	return slices.Insert(l, i, tx)
+}
+
+// balSeededPath reports whether a BAL pre-populates cells of path p.
+func balSeededPath(p state.AccountPath) bool {
+	return p == state.BalancePath || p == state.NoncePath || p == state.CodePath || p == state.StoragePath
+}
+
+// readersAbove returns the readers in the ascending list l that are > tx.
+func readersAbove(l []int, tx int) []int {
+	i, found := slices.BinarySearch(l, tx)
+	if found {
+		i++
+	}
+	return l[i:]
 }
 
 // readersOf returns the reader task indices whose reads a write of header h may have
@@ -2873,10 +2902,8 @@ func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
 		return
 	}
 	for h := range ws.AllHeaders() {
-		for _, tx := range be.readersOf(h) {
-			if tx > writerTx {
-				be.revalidate[tx] = true
-			}
+		for _, tx := range readersAbove(be.readersOf(h), writerTx) {
+			be.revalidate[tx] = true
 		}
 	}
 }
@@ -3285,16 +3312,20 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 // reverse index records for changedTx's changed keys (new ∪ old write-sets), sorted
 // ascending so the cascade order matches the scan.
 func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *state.WriteSet) []int {
+	// A BAL-seeded cell already holds its final value, so a reader of it stays valid; a
+	// wrong BAL fails the block, and the finalize re-validation still checks dirty readers.
+	skipBALSeeded := be.versionMap.HasBAL
 	set := map[int]struct{}{}
 	add := func(ws *state.WriteSet) {
 		if ws == nil {
 			return
 		}
 		for h := range ws.AllHeaders() {
-			for _, tx := range be.readersOf(h) {
-				if tx > changedTx {
-					set[tx] = struct{}{}
-				}
+			if skipBALSeeded && balSeededPath(h.Path) {
+				continue
+			}
+			for _, tx := range readersAbove(be.readersOf(h), changedTx) {
+				set[tx] = struct{}{}
 			}
 		}
 	}
@@ -3758,9 +3789,15 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			return 0
 		}
 		budget := len(be.tasks)
+		// Dispatch at most window tasks past the commit frontier, so results arrive
+		// close to block order and the per-result reader scans stay short.
+		lastTx := len(be.tasks) - 1
+		if be.versionMap.HasBAL {
+			lastTx = min(lastTx, be.frontier()+balDispatchWindow)
+		}
 		for {
 			nextTx := be.execTasks.minPending()
-			if nextTx < 0 {
+			if nextTx < 0 || nextTx > lastTx {
 				break
 			}
 			// A tx needs a free input-channel slot. If none, leave it in pending
