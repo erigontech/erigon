@@ -1597,15 +1597,23 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 		}
 		discardReasons[i] = txpoolcfg.NotSet // unnecessary
 		p.admitted++
-		if p.admittedBySender == nil {
+		// ⚠ PER-SENDER DIAGNOSTIC STATE GROWS WITH DISTINCT SENDERS, so it is off by default: a burst rig
+		// has a handful of senders, a public demo has no bound. The pool-wide counters stay — they are a
+		// few dozen entries and answer the conservation question on their own.
+		if txtrace.On() && p.admittedBySender == nil {
 			p.admittedBySender = map[uint64]admitCount{}
 		}
-		a := p.admittedBySender[mt.TxnSlot.SenderID]
+		a := admitCount{}
+		if p.admittedBySender != nil {
+			a = p.admittedBySender[mt.TxnSlot.SenderID]
+		}
 		a.n++
 		if mt.TxnSlot.Nonce > a.maxNonce {
 			a.maxNonce = mt.TxnSlot.Nonce
 		}
-		p.admittedBySender[mt.TxnSlot.SenderID] = a
+		if p.admittedBySender != nil {
+			p.admittedBySender[mt.TxnSlot.SenderID] = a
+		}
 		if txtrace.On() {
 			if addr, ok := p.senders.senderID2Addr[mt.TxnSlot.SenderID]; ok && txtrace.Tracks(addr.String()) {
 				txtrace.Record(txtrace.PoolAdmitted, mt.TxnSlot.Nonce, mt.TxnSlot.IDHash, 0, 0)

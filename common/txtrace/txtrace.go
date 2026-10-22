@@ -103,14 +103,19 @@ func Record(s Stage, nonce uint64, hash [32]byte, aux uint64, kind uint8) {
 	if !on.Load() {
 		return
 	}
-	if nonce != 0 {
+	// ⚠ KEYED ON THE STAGE, NOT ON nonce != 0. The hash-only stages pass nonce 0 as a placeholder, so
+	// that test also excluded the genuine nonce 0 — its hash was never learned, and it went unrecorded
+	// at every hash-only stage. The result read as "4,799 of 4,800 crossed pool->DAG", which looks
+	// exactly like one lost transaction and is not.
+	if s.carriesNonce() {
 		known.Store(hash, struct{}{})
 	}
 	i := next.Add(1) - 1
-	if i >= ringSize {
-		return // full: drop rather than overwrite, so what IS recorded stays ordered and true
-	}
-	ring[i] = rec{at: time.Now().UnixMicro(), nonce: nonce, aux: aux, hash: hash, stage: s, kind: kind}
+	// ⚠ WRAPS, AND SAYS SO WHEN IT LOSES. Dropping on full was fine for a single burst and silently
+	// truncates a soak: 19,200 orders is ~150k rows and hours of rotation is millions. The writer
+	// drains every 2s, so wrapping only loses data if it cannot keep up — which lost() reports
+	// rather than leaving a short file that looks like a short run.
+	ring[i%ringSize] = rec{at: time.Now().UnixMicro(), nonce: nonce, aux: aux, hash: hash, stage: s, kind: kind}
 }
 
 var auxName = [...]string{"", "block", "expected", "reason"}
@@ -126,11 +131,12 @@ func writer(path string) {
 	for {
 		time.Sleep(2 * time.Second)
 		end := next.Load()
-		if end > ringSize {
-			end = ringSize
+		if end-written > ringSize {
+			lostRows.Add(end - written - ringSize)
+			written = end - ringSize
 		}
 		for ; written < end; written++ {
-			r := &ring[written]
+			r := &ring[written%ringSize]
 			w.WriteString(strconv.FormatInt(r.at, 10))
 			w.WriteByte(' ')
 			w.WriteString(r.stage.String())
@@ -168,3 +174,20 @@ func Known(h [32]byte) bool {
 	_, ok := known.Load(h)
 	return ok
 }
+
+// carriesNonce reports whether this stage knows the transaction's nonce. Those stages teach `known`
+// which hashes are the traced sender's; the rest have only a hash and are filtered through it.
+func (s Stage) carriesNonce() bool {
+	switch s {
+	case PoolAdmitted, PoolExit, ExecOffered, ExecFiltered, ExecFuture, ExecStale:
+		return true
+	}
+	return false
+}
+
+// lostRows counts records the writer could not drain before the ring wrapped over them. Non-zero
+// means the trace is incomplete and any count taken from it is a floor, not a total.
+var lostRows atomic.Int64
+
+// Lost reports how many records were overwritten before being written out.
+func Lost() int64 { return lostRows.Load() }

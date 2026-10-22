@@ -699,7 +699,14 @@ func (e *ExecModule) filterStreamLocked(ctx context.Context, newTxRLPs [][]byte)
 	// ⚠ OFFERINGS ARE NOT TRANSACTIONS, and only the distinct counts can be reconciled against what
 	// was submitted. 14,766,923 offerings for a 4,800 burst is ~3,000 presentations of the same work;
 	// against the cumulative total alone that is indistinguishable from 14.7M arrivals. The sets are
-	// bounded because they only ever hold transactions this node has actually seen.
+	// ⚠ THE DISTINCT SETS ARE UNBOUNDED AND DO NOT SHIP ENABLED. One entry per distinct transaction,
+	// never pruned — fine for a burst rig, a leak on a long-running node, and this one already has an
+	// OOM problem of its own. They answer "offerings versus transactions", which only a diagnostic run
+	// asks, so they are allocated only when tracing is on. The cumulative scalars above cost nothing
+	// and stay.
+	if !txtrace.On() {
+		return survivors, keptHashes, droppedHashes, nil
+	}
 	if e.censusOfferedSet == nil {
 		e.censusOfferedSet = make(map[common.Hash]struct{})
 		e.censusKeptSet = make(map[common.Hash]struct{})
