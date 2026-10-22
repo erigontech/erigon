@@ -15,6 +15,6 @@ type P2PManager interface {
 	SetDialPolicy(func(peer.ID) bool)
 	BandwidthCounter() *metrics.BandwidthCounter
 	UDPv5Listener() *discover.UDPv5
-	UpdateENRAttSubnets(subnetIndex int, on bool)
+	SetENRAttSubnets(subnets []uint64)
 	UpdateENRSyncNets(subnetIndex int, on bool)
 }

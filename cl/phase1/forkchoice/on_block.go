@@ -152,7 +152,7 @@ func (f *ForkChoiceStore) ValidateBlockForPublishing(block *cltypes.SignedBeacon
 		f.mu.RUnlock()
 		return nil
 	}
-	parentState, err := f.forkGraph.GetState(block.Block.ParentRoot, true)
+	parentState, err := f.copyStateAtBlockRootLocked(block.Block.ParentRoot)
 	f.mu.RUnlock()
 	if err != nil {
 		return err
@@ -213,6 +213,10 @@ func (f *ForkChoiceStore) validateBlockAdmissionLocked(block *cltypes.SignedBeac
 }
 
 func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability, rejectEquivocation bool) error {
+	if block != nil && block.Block != nil {
+		finishImport := f.BeginPayloadImport(block.Block.Slot)
+		defer finishImport()
+	}
 	// Count before taking the store mutex so queued imports are visible as in progress.
 	f.blocksProcessing.Add(1)
 	defer f.blocksProcessing.Add(-1)
@@ -264,7 +268,10 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	headBeforeBlock := common.Hash{}
 	if isGloas && f.Slot() == block.Block.Slot {
 		justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
-		cs, _ := f.getCheckpointState(justifiedCheckpoint)
+		cs, err := f.gloasHeadCheckpointState(justifiedCheckpoint, f.getCheckpointStateLocked)
+		if err != nil {
+			return err
+		}
 		head, _, err := f.computeHeadGloasWithAnchorFallback(justifiedCheckpoint, cs)
 		if err != nil {
 			return err
@@ -477,9 +484,9 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	// record_block_timeliness: store [block_timely, ptc_timely] vector.
 	// [Modified in Gloas:EIP7732] Post-GLOAS stores a two-element timeliness vector;
 	// pre-GLOAS stores [block_timely, false]. See recordBlockTimeliness for details.
-	f.recordBlockTimeliness(block.Block, common.Hash(blockRoot))
+	currentSlot := f.recordBlockTimeliness(block.Block, common.Hash(blockRoot))
 	// update_proposer_boost_root: conditionally set proposer boost root.
-	f.updateProposerBoostRoot(headBeforeBlock, common.Hash(blockRoot))
+	f.updateProposerBoostRoot(headBeforeBlock, common.Hash(blockRoot), currentSlot)
 
 	// [New in Gloas:EIP7732] GLOAS-specific on_block logic (post state transition)
 	var pendingEnvelopeFound bool

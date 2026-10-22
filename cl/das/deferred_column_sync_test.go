@@ -163,6 +163,12 @@ func TestDeferredColumnSyncQueueFailedAfterForgetLeavesNoEntry(t *testing.T) {
 	require.Empty(t, queue.entries)
 }
 
+// preGloasCustodyGrace is half the time to the attestation deadline: 1999.5 ms on 12 s slots,
+// where ATTESTATION_DUE_BPS puts the deadline at 3999 ms.
+func preGloasCustodyGrace(cfg *clparams.BeaconChainConfig) time.Duration {
+	return time.Duration(cfg.AttestationDueMs(false)) * time.Millisecond / 2
+}
+
 // A custody node gives gossip half the time to the attestation deadline before Gloas, and half the
 // window from the payload deadline to the PTC deadline from Gloas; an archive node gives it a full
 // slot.
@@ -171,7 +177,7 @@ func TestDeferredColumnSyncDelay(t *testing.T) {
 	fulu := cltypes.NewSignedBeaconBlock(&cfg, clparams.FuluVersion)
 	gloas := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
 	custody := &peerdas{beaconConfig: &cfg, caplinConfig: &clparams.CaplinConfig{}}
-	require.Equal(t, 2*time.Second, custody.deferredColumnSyncDelay(fulu))
+	require.Equal(t, preGloasCustodyGrace(&cfg), custody.deferredColumnSyncDelay(fulu))
 	require.Equal(t, 1500*time.Millisecond, custody.deferredColumnSyncDelay(gloas))
 	archive := &peerdas{beaconConfig: &cfg, caplinConfig: &clparams.CaplinConfig{ArchiveBlobs: true}}
 	require.Equal(t, 12*time.Second, archive.deferredColumnSyncDelay(gloas))
@@ -215,10 +221,11 @@ func TestSyncColumnDataLaterSchedulesTheFirstAttempt(t *testing.T) {
 			require.NoError(t, d.SyncColumnDataLater(block))
 			after := time.Now()
 			first := d.blocksToCheckSync.entries[root].nextAttempt
+			grace := preGloasCustodyGrace(&cfg)
 			if tc.slotStart > 0 {
-				require.Equal(t, slotStart.Add(2*time.Second), first)
+				require.Equal(t, slotStart.Add(grace), first)
 			} else {
-				require.WithinRange(t, first, before.Add(2*time.Second), after.Add(2*time.Second))
+				require.WithinRange(t, first, before.Add(grace), after.Add(grace))
 			}
 
 			require.NoError(t, d.SyncColumnDataLater(block))
@@ -318,7 +325,7 @@ func TestSyncColumnDataWorkerSkipsTheAvailabilityScanWithoutPeers(t *testing.T) 
 		caplinConfig:  &clparams.CaplinConfig{ArchiveBlobs: true},
 		columnStorage: columnStorage,
 		blobStorage:   blobStorage,
-		rpc:           rpc.NewBeaconRpcP2P(t.Context(), sentinel, &cfg, clock, nil),
+		rpc:           rpc.NewBeaconRpcP2P(t.Context(), sentinel, &cfg, clock),
 	}
 	require.NoError(t, d.SyncColumnDataLater(block))
 
@@ -361,7 +368,7 @@ func unservedRootWorker(t *testing.T, canonicalAtSlot func(root common.Hash) com
 		columnStorage: columnStorage,
 		blobStorage:   blobStorage,
 		indiciesDB:    db,
-		rpc:           rpc.NewBeaconRpcP2P(t.Context(), &peerCountSentinel{active: 1}, &cfg, clock, nil),
+		rpc:           rpc.NewBeaconRpcP2P(t.Context(), &peerCountSentinel{active: 1}, &cfg, clock),
 	}
 	require.NoError(t, d.SyncColumnDataLater(block))
 	return d, root

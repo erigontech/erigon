@@ -483,7 +483,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logg
 		OverlayGetLogsTimeout:     ctx.Duration(OverlayGetLogsFlag.Name),
 		OverlayReplayBlockTimeout: ctx.Duration(OverlayReplayBlockFlag.Name),
 		WebsocketPort:             ctx.Int(utils.WSPortFlag.Name),
-		WebsocketEnabled:          ctx.IsSet(utils.WSEnabledFlag.Name),
+		WebsocketEnabled:          ctx.Bool(utils.WSEnabledFlag.Name),
 		RpcBatchConcurrency:       ctx.Uint(utils.RpcBatchConcurrencyFlag.Name),
 		RpcStreamingDisable:       ctx.Bool(utils.RpcStreamingDisableFlag.Name),
 		DBReadConcurrency:         ctx.Int(utils.DBReadConcurrencyFlag.Name),

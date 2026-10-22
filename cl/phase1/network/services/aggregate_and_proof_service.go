@@ -77,9 +77,6 @@ type aggregateAndProofServiceImpl struct {
 	seenAggreatorIndexes   *lru.Cache[seenAggregateIndex, common.Hash]
 	validatorParams        *validator_params.ValidatorParams
 
-	// Cached proposer indices per epoch (for current epoch check)
-	proposerIndicesCache *lru.Cache[uint64, []uint64]
-
 	awaitingBlock *blockArrivalQueue
 }
 
@@ -98,10 +95,6 @@ func NewAggregateAndProofService(
 	if err != nil {
 		panic(err)
 	}
-	proposerIndicesCache, err := lru.New[uint64, []uint64]("proposerIndices", 3)
-	if err != nil {
-		panic(err)
-	}
 	a := &aggregateAndProofServiceImpl{
 		syncedDataManager:      syncedDataManager,
 		forkchoiceStore:        forkchoiceStore,
@@ -112,7 +105,6 @@ func NewAggregateAndProofService(
 		batchSignatureVerifier: batchSignatureVerifier,
 		seenAggreatorIndexes:   seenAggCache,
 		validatorParams:        validatorParams,
-		proposerIndicesCache:   proposerIndicesCache,
 		awaitingBlock: newBlockArrivalQueue(
 			forkchoiceStore,
 			int(beaconCfg.MaxCommitteesPerSlot*beaconCfg.TargetAggregatorsPerCommittee),
@@ -129,41 +121,6 @@ func (a *aggregateAndProofServiceImpl) Names() []string {
 
 func (a *aggregateAndProofServiceImpl) IsMyGossipMessage(name string) bool {
 	return name == gossip.TopicNameBeaconAggregateAndProof
-}
-
-// isLocalValidatorProposer checks if any local validator is a proposer in the current or next epoch.
-// For current epoch: uses cached GetBeaconProposerIndices.
-// For next epoch: uses GetProposerLookahead() (Fulu+) or always returns true (pre-Fulu).
-func (a *aggregateAndProofServiceImpl) isLocalValidatorProposer(headState *state.CachingBeaconState, currentEpoch uint64, localValidators []uint64) bool {
-	if headState.Version() < clparams.FuluVersion {
-		return true
-	}
-	// Check current epoch using cached proposer indices
-	currentProposers, ok := a.proposerIndicesCache.Get(currentEpoch)
-	if !ok {
-		var err error
-		currentProposers, err = headState.GetBeaconProposerIndices(currentEpoch)
-		if err == nil {
-			a.proposerIndicesCache.Add(currentEpoch, currentProposers)
-		}
-	}
-	for _, validatorIndex := range localValidators {
-		if slices.Contains(currentProposers, validatorIndex) {
-			return true
-		}
-	}
-
-	// For Fulu+, use the efficient proposer lookahead for next epoch
-	lookahead := headState.GetProposerLookahead()
-	// The lookahead contains proposers for current and next epoch, skip current epoch slots
-	slotsPerEpoch := int(a.beaconCfg.SlotsPerEpoch)
-	for i := slotsPerEpoch; i < lookahead.Length(); i++ {
-		proposerIndex := lookahead.Get(i)
-		if slices.Contains(localValidators, proposerIndex) {
-			return true
-		}
-	}
-	return false
 }
 
 func (a *aggregateAndProofServiceImpl) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*SignedAggregateAndProofForGossip, error) {
@@ -244,7 +201,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		aggregateRoot             common.Hash
 		attestingIndices          []uint64
 		seenIndex                 seenAggregateIndex
-		localValidatorIsProposer  bool
 	)
 	if err := a.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// If our head state is too far from the aggregate's epoch, committee
@@ -364,14 +320,8 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		monitor.ObserveAggregateQuality(len(attestingIndices), len(committee))
 		monitor.ObserveCommitteeSize(float64(len(committee)))
 
-		// Check if any local validator is a proposer in this or the next epoch
-		localValidators := a.validatorParams.GetValidators()
-		if len(localValidators) > 0 {
-			currentEpoch := state.Epoch(headState)
-			localValidatorIsProposer = a.isLocalValidatorProposer(headState, currentEpoch, localValidators)
-		}
-
-		if localValidatorIsProposer || aggregateAndProof.ImmediateProcess {
+		// A node with validators verifies every aggregate: it relays them and packs them into its own blocks.
+		if len(a.validatorParams.GetValidators()) > 0 || aggregateAndProof.ImmediateProcess {
 			// Set beacon config on the aggregate's attestation so HashSSZ uses the correct
 			// AggregationBits limit for the active preset (e.g. minimal: 8192, mainnet: 131072).
 			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.SetBeaconConfig(a.beaconCfg)

@@ -1,0 +1,229 @@
+---
+title: "Interacting with Erigon"
+sidebar_position: 4
+description: "Complete API reference for Erigon — JSON-RPC namespaces, GraphQL, and gRPC interfaces for querying and controlling your node."
+---
+
+# RPC Service
+
+The Erigon RPC Service, managed by Erigon's modular [RPC Daemon](/v3.7/fundamentals/modules/rpc-daemon), supports various API namespaces, which can be enabled or disabled using the `--http.api` flag. The available namespaces include:
+
+* [`eth`](/v3.7/interacting-with-erigon/eth): Standard Ethereum API.
+* [`erigon`](/v3.7/interacting-with-erigon/erigon): Erigon-specific extensions.
+* [`engine`](/v3.7/interacting-with-erigon/engine): The JSON-RPC Interface for Execution and Consensus Layer Communication.
+* [`web3`](/v3.7/interacting-with-erigon/web3): Web3 compatibility API.
+* [`net`](/v3.7/interacting-with-erigon/net): Network information API.
+* [`debug`](/v3.7/interacting-with-erigon/debug): Debugging and tracing API.
+* [`trace`](/v3.7/interacting-with-erigon/trace): Transaction tracing API.
+* [`txpool`](/v3.7/interacting-with-erigon/txpool): Transaction pool API.
+* [`admin`](/v3.7/interacting-with-erigon/admin): Node administration API
+* [`ots`](/v3.7/interacting-with-erigon/ots): These methods are specifically tailored for use with Otterscan, an open-source, fast block explorer.
+* [`internal`](/v3.7/interacting-with-erigon/internal): Erigon specific API for development and debugging purposes.
+* [`gRPC`](/v3.7/interacting-with-erigon/grpc): API for lower-level data access.
+* [`overlay`](/v3.7/interacting-with-erigon/overlay): Erigon-specific overlay API for replaying blocks with state overrides (archive nodes only).
+* [`parity`](/v3.7/interacting-with-erigon/parity): Partial OpenEthereum compatibility (`parity_listStorageKeys`).
+* [`graphql`](/v3.7/interacting-with-erigon/graphql): GraphQL endpoint following the ethereum/execution-apis schema.
+
+For a complete reference on the standard Ethereum JSON-RPC methods, especially those in the `eth`, `net`, and `web3` namespaces, it is recommended to consult the general documentation on [ethereum.org's JSON-RPC API page](https://ethereum.org/en/developers/docs/apis/json-rpc/). Additionally, for the formal specification of the `debug`, `engine`, and `eth` namespaces, including unique, detailed descriptions for methods like `eth_getProof` and `eth_simulateV1`, refer to the [Execution APIs documentation](https://ethereum.github.io/execution-apis).
+
+## Erigon RPC Transports
+
+Erigon supports [HTTP](#http), [HTTPS](#https), [WebSockets](#websockets), [inter-process communication (IPC)](#ipc), [gRPC](#grpc) and [GraphQL](#graphql) through its RPC Daemon.
+
+### HTTP
+
+Using the HTTP transport, clients send a request to the server and immediately get a response back. The connection is closed after the response for a given request is sent.
+
+Because HTTP is unidirectional, subscriptions are not supported.
+
+To start an HTTP server, you can either run Erigon with built-in RPC or use the separate `rpcdaemon`:
+
+```bash
+# Built-in RPC (default)
+erigon --http
+
+# Or separate RPC daemon
+rpcdaemon --http.enabled
+```
+
+The default port is `8545`, and the default listen address is localhost. _node/nodecfg/defaults.go:30-31_
+
+You can configure the listen address and port using `--http.addr` and `--http.port` respectively:
+
+```bash
+erigon --http --http.addr 127.0.0.1 --http.port 12345
+# Or with rpcdaemon
+rpcdaemon --http.addr 127.0.0.1 --http.port 12345
+```
+
+To enable JSON-RPC namespaces on the HTTP server, pass each namespace separated by a comma to `--http.api`:
+
+```bash
+erigon --http --http.api eth,net,debug,trace
+# Or with rpcdaemon
+rpcdaemon --http.api eth,net,debug,trace
+```
+
+The default APIs enabled are `eth` and `erigon`. Available namespaces include: `admin`, `debug`, `eth`, `erigon`, `net`, `trace`, `txpool`, `web3`, and `internal`.
+
+You can also restrict who can access the HTTP server by specifying domains for Cross-Origin requests using `--http.corsdomain`:
+
+```bash
+erigon --http --http.corsdomain https://mycoolapp.com
+```
+
+Alternatively, if you want to allow any domain, you can pass `*`:
+
+```bash
+erigon --http --http.corsdomain "*"
+```
+
+### HTTPS
+
+Erigon supports HTTPS and HTTP/2 out of the box:
+
+```bash
+rpcdaemon --https.enabled --https.cert /path/to/cert.pem --https.key /path/to/key.pem
+```
+
+**New in v3.7:** the same flags work on the `erigon` binary, so the embedded RPC server can serve TLS without a separate
+daemon:
+
+```bash
+erigon --https.enabled --https.cert /path/to/cert.pem --https.key /path/to/key.pem
+```
+
+The HTTPS listener is independent of the plain HTTP one and binds its own port: `--https.port`, which defaults to
+`--http.port` + 363 (`8908` with a default `--http.port`) — the derivation reads `--http.port` whether or not the plain
+HTTP listener is running. Both `--https.cert` and `--https.key` are required — if either is missing the
+port still binds but TLS serving fails with only a `Failed to serve https endpoint` warning in the log. Setting
+`--https.url` enables the HTTPS server on its own and overrides `--https.addr` and `--https.port`.
+
+Note that `--http=false` switches off the entire RPC stack, HTTPS included. For a TLS-only node, keep `--http` and
+disable just the plain HTTP listener with `--http.enabled=false`.
+
+### WebSockets
+
+WebSockets is a bidirectional transport protocol. Most modern browsers support WebSockets.
+
+A WebSocket connection is maintained until it is explicitly terminated by either the client or the node.
+
+Because WebSocket connections are bidirectional, nodes can push events to clients, which enables clients to subscribe to specific events, such as new transactions in the transaction pool, and new logs for smart contracts.
+
+The configuration of the WebSocket server follows the same pattern as the HTTP server:
+
+* Enable it using `--ws`
+* Configure the server port by passing `--ws.port` (default `8546`). WebSocket upgrades are also accepted on the HTTP port.
+* Erigon has no `--ws.origins` flag, and `--http.corsdomain` does not apply to WebSocket handshakes: a browser page on any origin can open a WebSocket. Do not expose the WebSocket port to untrusted networks without a proxy that checks the `Origin` header.
+* WebSocket APIs inherit from the HTTP API configuration
+
+```bash
+erigon --http --ws --http.api eth,net,debug,trace
+```
+
+### IPC
+
+IPC is a simpler transport protocol for use in local environments where the node and the client exist on the same machine.
+
+**New in v3.7:** the `erigon` binary accepts `--socket.enabled` and `--socket.url` directly, so IPC no longer requires a
+separate process:
+
+```bash
+erigon --datadir=<path-to-datadir> --socket.enabled --socket.url unix:///<path-to-datadir>/erigon.ipc
+```
+
+The default `--socket.url` is `unix:///var/run/erigon.sock`, which is usually not writable by the Erigon user — point it
+at your datadir as above. On earlier releases these flags exist only on `rpcdaemon`, and the geth-style `--ipcpath`
+endpoint remains permanently disabled in the `erigon` binary regardless of release.
+
+#### Enabling IPC with RPC Daemon
+
+IPC is also available from the standalone daemon, which is still the right choice when RPC serving runs on its own
+process or host.
+
+First, start Erigon with the private API enabled:
+
+```bash
+erigon --datadir=<path-to-datadir> --private.api.addr=localhost:9090
+```
+
+Then, in a separate terminal, start the RPC Daemon with IPC enabled:
+
+```bash
+rpcdaemon --private.api.addr=localhost:9090 --socket.enabled --socket.url unix:///<path-to-datadir>/erigon.ipc
+```
+
+**Important:** Make sure you have write permissions to the directory where the socket will be created.
+
+On Linux and macOS, Erigon uses UNIX sockets. On Windows, IPC is provided using named pipes (use `\\.\pipe\erigon.ipc`
+format). The socket inherits the API namespaces from the `--http.api` flag passed to `rpcdaemon`:
+
+```bash
+rpcdaemon --private.api.addr=localhost:9090 --socket.enabled --socket.url unix:///<path-to-datadir>/erigon.ipc --http.api eth,net,web3,debug,trace
+```
+
+#### TCP Socket Alternative (Advanced)
+
+You can also serve the raw JSON-RPC2 protocol over TCP instead of Unix sockets:
+
+```bash
+rpcdaemon --private.api.addr=localhost:9090 --socket.enabled --socket.url tcp://127.0.0.1:8546
+```
+
+**Note**: This creates a raw JSON-RPC2 socket without HTTP wrapping. Most users should use the HTTP endpoint (enabled by
+default on port 8545) instead. The TCP socket is for specialized clients that support the raw JSON-RPC2 protocol.
+
+#### Testing IPC Connection
+
+Test your IPC connection using curl:
+
+```bash
+curl --unix-socket <path-to-datadir>/erigon.ipc \
+     -X POST http://localhost/ \
+     -H "Content-Type: application/json" \
+     --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+```
+
+Or use the HTTP endpoint (enabled by default on port 8545):
+
+```bash
+curl http://127.0.0.1:8545 \
+     -X POST \
+     -H "Content-Type: application/json" \
+     --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+```
+
+### gRPC
+
+Erigon also supports gRPC for high-performance access to blockchain data:
+
+```bash
+rpcdaemon --grpc --grpc.addr localhost --grpc.port 9090
+```
+
+### GraphQL
+
+Erigon uses the standard GraphQL documented by Geth at [https://geth.ethereum.org/docs/interacting-with-geth/rpc/graphql](https://geth.ethereum.org/docs/interacting-with-geth/rpc/graphql).
+
+## Interacting with the RPC
+
+You can easily interact with these APIs using `curl`, a programming language with a low-level library, or tools like [Foundry](https://getfoundry.sh/) to interact with the chain at the exposed HTTP or WebSocket port.
+
+To enable all APIs using an HTTP transport:
+
+```bash
+erigon --http --http.api "admin,debug,eth,erigon,net,trace,txpool,web3"
+```
+
+This allows you to then call:
+
+```bash
+curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' localhost:8545
+
+# With cast (if using Foundry)
+cast block-number
+cast rpc admin_nodeInfo  
+cast rpc debug_traceTransaction <tx_hash>
+cast rpc erigon_forks
+```
+

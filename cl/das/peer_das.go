@@ -62,6 +62,9 @@ type PeerDas interface {
 	// to support both pre-GLOAS (blinded) and GLOAS (non-blinded) blocks
 	DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error
 	DownloadOnlyCustodyColumns(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error
+	// BackfillCustodyColumns fetches, in the background, the custody columns of blocks imported
+	// between fromSlot and toSlot without them.
+	BackfillCustodyColumns(fromSlot, toSlot uint64)
 	IsDataAvailable(slot uint64, blockRoot common.Hash) (bool, error)
 	PruneBelow(slot uint64) error
 	UpdateValidatorsCustody(cgc uint64)
@@ -112,6 +115,9 @@ type peerdas struct {
 	recoverySlotQueue   blobRecoverySlotHeap
 	recoveryPruneFloor  uint64
 	blocksToCheckSync   deferredColumnSyncs
+	backfills           chan struct{}
+	backfillMu          sync.Mutex
+	backfillPending     *slotRange
 
 	// [New in Gloas:EIP7732] For fetching blocks to get kzg_commitments
 	forkChoice     BlockGetter
@@ -149,6 +155,7 @@ func NewPeerDas(
 		ethClock:          ethClock,
 		gossipManager:     gossipManager,
 		recoverBlobsQueue: make(chan recoverBlobsRequest, 128),
+		backfills:         make(chan struct{}, 1),
 
 		recoveringMutex:     sync.Mutex{},
 		isRecovering:        make(map[common.Hash]bool),
@@ -172,6 +179,7 @@ func (d *peerdas) Start(ctx context.Context) {
 			go d.blobsRecoverWorker(ctx)
 		}
 		go d.syncColumnDataWorker(ctx)
+		go d.custodyBackfillWorker(ctx)
 	})
 }
 
@@ -1944,6 +1952,8 @@ type deferredColumnSync struct {
 	attempts    int
 	nextAttempt time.Time
 	inFlight    bool
+	// atMaxBackoff marks a root retried once per maximum backoff, which may never complete.
+	atMaxBackoff bool
 }
 
 // deferredColumnSyncs holds the roots whose columns gossip did not deliver. A failed round grows
@@ -2011,7 +2021,8 @@ func (q *deferredColumnSyncs) failed(root common.Hash, now time.Time, slot time.
 	e.attempts++
 	backoffSlots := min(uint64(e.attempts), maxBackoffSlots)
 	e.nextAttempt = now.Add(slot * time.Duration(backoffSlots))
-	return backoffSlots == maxBackoffSlots
+	e.atMaxBackoff = backoffSlots == maxBackoffSlots
+	return e.atMaxBackoff
 }
 
 // retryLater defers a root by one slot without counting an attempt, for a local storage error.
@@ -2022,6 +2033,31 @@ func (q *deferredColumnSyncs) retryLater(root common.Hash, now time.Time, slot t
 		e.inFlight = false
 		e.nextAttempt = now.Add(slot)
 	}
+}
+
+// activeLen counts the roots below the maximum backoff, which are retried at least once an epoch.
+func (q *deferredColumnSyncs) activeLen() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	n := 0
+	for _, e := range q.entries {
+		if !e.atMaxBackoff {
+			n++
+		}
+	}
+	return n
+}
+
+// isBackfill reports whether root was queued by the custody backfill.
+func (q *deferredColumnSyncs) isBackfill(root common.Hash) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	e := q.entries[root]
+	if e == nil {
+		return false
+	}
+	_, ok := e.block.(*backfillColumnBlock)
+	return ok
 }
 
 func (q *deferredColumnSyncs) forget(root common.Hash) {
@@ -2091,22 +2127,31 @@ func (d *peerdas) stillCanonical(ctx context.Context, slot uint64, root common.H
 	return canonical
 }
 
+// columnSyncRoundFailed records a round that left a root's columns missing. A root whose backoff
+// reached an epoch is kept while it is canonical, since nothing in this queue re-queues it; a later
+// SyncColumnDataLater can, for example for a parked Gloas envelope. A root that is not canonical,
+// such as an orphaned block nobody serves, is given up. So is a root the custody backfill queued:
+// on a range peers cannot serve, keeping them would retry a growing set every epoch.
+func (d *peerdas) columnSyncRoundFailed(ctx context.Context, root common.Hash, slot uint64, now time.Time) {
+	if !d.blocksToCheckSync.failed(root, now, d.slotDuration(), d.beaconConfig.SlotsPerEpoch) {
+		return
+	}
+	switch {
+	case d.blocksToCheckSync.isBackfill(root):
+		log.Warn("[custodyBackfill] peers did not serve the custody columns, giving up the block", "slot", slot, "blockRoot", root)
+		d.blocksToCheckSync.forget(root)
+	case !d.stillCanonical(ctx, slot, root):
+		log.Debug("[syncColumnDataWorker] column data still missing for a non-canonical block, removing from sync queue", "slot", slot, "blockRoot", root)
+		d.blocksToCheckSync.forget(root)
+	}
+}
+
 // syncColumnDataWorker fetches the custody columns gossip did not deliver. Download rounds run
 // off the ticker with a per-root in-flight marker, so one root nobody serves cannot stall the
 // others.
 func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 	ticker := time.NewTicker(d.deferredColumnSyncTick())
 	defer ticker.Stop()
-	// A root whose backoff reached an epoch is kept while it is canonical, since nothing in this
-	// queue re-queues it; a later SyncColumnDataLater can, for example for a parked Gloas envelope.
-	// A root that is not canonical, such as an orphaned block nobody serves, is given up. The
-	// round's own context has expired by then, so the canonical check uses the worker's.
-	failed := func(root common.Hash, slot uint64, now time.Time) {
-		if d.blocksToCheckSync.failed(root, now, d.slotDuration(), d.beaconConfig.SlotsPerEpoch) && !d.stillCanonical(ctx, slot, root) {
-			log.Debug("[syncColumnDataWorker] column data still missing for a non-canonical block, removing from sync queue", "slot", slot, "blockRoot", root)
-			d.blocksToCheckSync.forget(root)
-		}
-	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -2173,7 +2218,8 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 					continue
 				}
 				if !available {
-					failed(root, blocks[i].GetSlot(), time.Now())
+					// The round's own context has expired by then, so the canonical check uses the worker's.
+					d.columnSyncRoundFailed(ctx, root, blocks[i].GetSlot(), time.Now())
 					continue
 				}
 				d.blocksToCheckSync.forget(root)

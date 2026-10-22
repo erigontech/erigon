@@ -63,7 +63,7 @@ func (s *anchorEnvelopeTestStore) HasEnvelope(root common.Hash) bool {
 	return root == s.root && s.envelope != nil
 }
 
-func (s *anchorEnvelopeTestStore) GetStateAtBlockRoot(root common.Hash, _ bool) (*state2.CachingBeaconState, error) {
+func (s *anchorEnvelopeTestStore) GetStateAtBlockRoot(root common.Hash) (*state2.CachingBeaconState, error) {
 	if root != s.root {
 		return nil, nil
 	}
@@ -662,6 +662,10 @@ func (c *gloasCollectorTest) Flush(ctx context.Context) error {
 
 func (c *gloasCollectorTest) HasBlock(uint64) bool {
 	return false
+}
+
+func (c *gloasCollectorTest) Close() error {
+	return nil
 }
 
 func TestProcessDownloadedGloasEnvelopeCollectorReconciliation(t *testing.T) {

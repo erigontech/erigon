@@ -123,6 +123,8 @@ func (args *CallArgs) setField(key []byte, f *fastjson.Value) bool {
 		return setText(&args.Input, f)
 	case "chainId":
 		return setText(&args.ChainID, f)
+	case "accessList":
+		return setAccessList(&args.AccessList, f)
 	}
 	for _, name := range callArgsJSONNames {
 		if bytes.EqualFold(key, []byte(name)) {
@@ -158,6 +160,70 @@ func setText[T any, PT interface {
 		return false
 	}
 	*dst = (*T)(v)
+	return true
+}
+
+// setAccessList decodes an access list; a repeated "accessList" member goes to encoding/json,
+// which reuses the earlier slice.
+func setAccessList(dst **types.AccessList, f *fastjson.Value) bool {
+	if f.Type() == fastjson.TypeNull {
+		*dst = nil
+		return true
+	}
+	arr, err := f.Array()
+	if err != nil || *dst != nil {
+		return false
+	}
+	al := make(types.AccessList, len(arr))
+	for i, e := range arr {
+		if !setAccessTuple(&al[i], e) {
+			return false
+		}
+	}
+	*dst = &al
+	return true
+}
+
+func setAccessTuple(dst *types.AccessTuple, f *fastjson.Value) bool {
+	o, err := f.Object()
+	if err != nil {
+		return false
+	}
+	ok := true
+	o.Visit(func(key []byte, v *fastjson.Value) {
+		if !ok {
+			return
+		}
+		switch string(key) {
+		case "address":
+			s, err := v.StringBytes()
+			ok = err == nil && dst.Address.UnmarshalText(s) == nil
+		case "storageKeys":
+			ok = setStorageKeys(&dst.StorageKeys, v)
+		default:
+			ok = !bytes.EqualFold(key, []byte("address")) && !bytes.EqualFold(key, []byte("storageKeys"))
+		}
+	})
+	return ok
+}
+
+func setStorageKeys(dst *[]common.Hash, f *fastjson.Value) bool {
+	if f.Type() == fastjson.TypeNull {
+		*dst = nil
+		return true
+	}
+	arr, err := f.Array()
+	if err != nil {
+		return false
+	}
+	keys := make([]common.Hash, len(arr))
+	for i, e := range arr {
+		s, err := e.StringBytes()
+		if err != nil || keys[i].UnmarshalText(s) != nil {
+			return false
+		}
+	}
+	*dst = keys
 	return true
 }
 
@@ -299,6 +365,8 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 
 	if args.BlobVersionedHashes != nil {
 		msg.SetBlobVersionedHashes(args.BlobVersionedHashes)
+	} else if args.MaxFeePerBlobGas != nil {
+		return nil, ErrBlobFeeCapWithoutBlobHashes
 	}
 
 	if args.AuthorizationList != nil {
@@ -316,17 +384,20 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 	return msg, nil
 }
 
-// BlobsUnpriced reports whether the caller named blob fields but put no price on
+// ErrBlobFeeCapWithoutBlobHashes rejects a call that sets maxFeePerBlobGas without
+// blobVersionedHashes: only a blob transaction carries a blob fee cap, and it carries at
+// least one versioned hash.
+var ErrBlobFeeCapWithoutBlobHashes = fmt.Errorf("maxFeePerBlobGas requires blobVersionedHashes: %w", types.ErrBlobTxnEmptyBlobs)
+
+// BlobsUnpriced reports whether the caller named blob hashes but put no price on
 // them.
 func (args *CallArgs) BlobsUnpriced() bool {
 	blobFeeCap := (*uint256.Int)(args.MaxFeePerBlobGas)
-	namesBlobs := blobFeeCap != nil || args.BlobVersionedHashes != nil
-	cappedAtZero := blobFeeCap == nil || blobFeeCap.IsZero()
-	return namesBlobs && cappedAtZero
+	return args.BlobVersionedHashes != nil && (blobFeeCap == nil || blobFeeCap.IsZero())
 }
 
 // ZeroUnpricedBlobBaseFee drops the block's blob fee when the caller named blob
-// fields but put no price on them, the way BaseFee is dropped for a call with no
+// hashes but put no price on them, the way BaseFee is dropped for a call with no
 // gas price.
 func (args *CallArgs) ZeroUnpricedBlobBaseFee(blockCtx *evmtypes.BlockContext) {
 	if args.BlobsUnpriced() {

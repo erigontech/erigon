@@ -492,7 +492,8 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	gossipManager := gossip.NewGossipManager(ctx, p2p, beaconConfig, networkConfig, ethClock, config.SubscribeAllTopics, uint64(len(activeIndicies)), config.MaxInboundTrafficPerPeer, config.MaxOutboundTrafficPerPeer, config.AdptableTrafficRequirements)
 
 	peerDasState.SetLocalNodeID(localNode)
-	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock, state)
+	gossipManager.SetLocalNodeID(localNode.ID())
+	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock)
 	gossipManager.SetPeerBanner(beaconRpc)
 	peerDas := das.NewPeerDas(beaconRpc, beaconConfig, &config, columnStorage, blobStorage, sentinel, localNode.ID(), ethClock, peerDasState, gossipManager, rcsn, indexDB)
 	forkChoice.InitPeerDas(peerDas)   // hack init
@@ -519,6 +520,8 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		gossipManager,
 		forkChoice,
 		ethClock,
+		beaconConfig,
+		syncedDataManager.ActiveValidatorCount,
 		blockService,
 		attesterSlashingService,
 		blobService,
@@ -547,7 +550,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			for {
 				select {
 				case <-tickInterval.C:
-					forkChoice.OnTick(uint64(time.Now().Unix()))
+					forkChoice.OnTick(uint64(time.Now().UnixMilli()))
 				case <-ctx.Done():
 					return
 				}
@@ -692,6 +695,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		attestationProducer,
 		peerDas,
 	)
+	defer stageCfg.Close()
 	sync := stages.ConsensusClStages()
 
 	logger.Info("[Caplin] starting clstages loop")

@@ -340,7 +340,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 			subnet := *subnet
 			s.awaitingBlock.add(root, func(ctx context.Context) { _ = s.ProcessMessage(ctx, &subnet, att) })
 		}
-		return fmt.Errorf("%w: block not seen: %v", ErrIgnore, root)
+		return fmt.Errorf("%w: %w: %v", ErrIgnore, ErrBlockNotSeen, root)
 	}
 
 	// [New in Gloas] [REJECT] attestation.data.index == 0 if block.slot == attestation.data.slot
@@ -400,10 +400,10 @@ func (s *attestationService) onVerifiedAttestation(vIndex, targetEpoch uint64, a
 	if !s.claimValidatorAttestation(vIndex, targetEpoch) {
 		return
 	}
-	if err := s.aggregationPool.AddAttestation(attestation); errors.Is(err, aggregation.ErrPoolLimit) {
+	if err := s.aggregationPool.AddAttestation(attestation); errors.Is(err, aggregation.ErrPoolLimit) || errors.Is(err, aggregation.ErrVoterAlreadyCounted) {
 		dataRoot, _ := attestation.Data.HashSSZ()
 		log.Debug("aggregation pool refused attestation", "slot", attestation.Data.Slot,
-			"committees", attestation.CommitteeBits.GetOnIndices(), "dataRoot", common.Hash(dataRoot))
+			"committees", attestation.CommitteeBits.GetOnIndices(), "dataRoot", common.Hash(dataRoot), "err", err)
 	} else if err != nil && !errors.Is(err, aggregation.ErrIsSuperset) {
 		log.Warn("could not add attestation to the aggregation pool", "slot", attestation.Data.Slot, "err", err)
 	}

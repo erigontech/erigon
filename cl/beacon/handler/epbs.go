@@ -93,6 +93,9 @@ type ptcDutyResponse struct {
 // POST /eth/v1/validator/duties/ptc/{epoch}
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	if err := a.refuseLaggingHead(); err != nil {
+		return nil, err
+	}
 	epoch, err := beaconhttp.EpochFromRequest(r)
 	if err != nil {
 		return nil, err
@@ -188,7 +191,8 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 	)
 	if err := a.viewHeadStateWithIdentity(func(s *state.CachingBeaconState, headRoot common.Hash, headSlot uint64) error {
 		stateEpoch := state.Epoch(s)
-		nextEpoch := a.ethClock.GetCurrentEpoch() + 1
+		clockEpoch := a.ethClock.GetCurrentEpoch()
+		nextEpoch := clockEpoch + 1
 		if epoch < stateEpoch || epoch > nextEpoch {
 			return beaconhttp.NewEndpointError(http.StatusBadRequest,
 				fmt.Errorf("PTC duties only available for epochs %d to %d, requested %d", stateEpoch, nextEpoch, epoch))
@@ -197,12 +201,14 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 			return beaconhttp.NewEndpointError(http.StatusServiceUnavailable,
 				fmt.Errorf("PTC duties for epoch %d are not available while the head is in epoch %d", epoch, stateEpoch))
 		}
-		if epoch < stateEpoch+2 {
+		// upgrade_to_gloas computes the fork epoch's PTC after the last Fulu epoch processing has updated effective
+		// balances, so a pre-Gloas head serves it from a copy advanced into the fork, once the clock is there.
+		advanceIntoFork := s.Version() < clparams.GloasVersion && clockEpoch >= epoch
+		if epoch < stateEpoch+2 && !advanceIntoFork {
 			return fillDuties(s, headRoot, headSlot)
 		}
-		// The head has not crossed into the clock's epoch yet. The epoch transition computes the PTC of the requested
-		// epoch, and its dependent root (the last slot of the head's epoch) covers every input. The copy is advanced
-		// after the head-state view is released.
+		// The epoch transition computes the PTC of the requested epoch. The copy is advanced after the head-state view
+		// is released.
 		var err error
 		advanced, err = a.copyHeadStateForDuties(s)
 		advancedHeadRoot, advancedHeadSlot = headRoot, headSlot
@@ -230,8 +236,8 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 // GetEthV1ValidatorPayloadAttestationData returns PayloadAttestationData for PTC validators.
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) GetEthV1ValidatorPayloadAttestationData(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	if a.syncedData.Syncing() {
-		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("beacon node is syncing"))
+	if err := a.refuseLaggingHead(); err != nil {
+		return nil, err
 	}
 	slotStr, err := beaconhttp.StringFromRequest(r, "slot")
 	if err != nil {
@@ -593,8 +599,6 @@ func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWrite
 			continue
 		}
 
-		// Validate via PayloadAttestationService (handles dedup, clock disparity, pending queue,
-		// and delegates to forkchoice.OnPayloadAttestationMessage for signature + PTC checks)
 		if a.payloadAttestationService == nil {
 			failures = append(failures, poolingFailure{Index: i, Message: "payload attestation validation unavailable"})
 			continue
