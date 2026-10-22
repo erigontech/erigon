@@ -2108,10 +2108,14 @@ func (pe *parallelExecutor) balWorker(be *blockExecutor, next *atomic.Int64) {
 			}
 		}
 		result := w.RunTxTask(tv)
-		// The run read a predecessor's in-flight write: re-run once that predecessor commits.
-		for result.Err == nil && result.Dep >= 0 {
+		// The run read a predecessor's in-flight write. Once that predecessor commits,
+		// keep the run if every read still matches the versionMap, else run again.
+		for result.Dep >= 0 {
 			if !be.waitDep(i, be.taskIndexOf(result.Dep)) {
 				return
+			}
+			if result.Err == nil && be.versionMap.ValidateReadSet(tv.version.TxIndex, result.TxIn, sameVersion, false, "") == state.VersionValid {
+				break
 			}
 			tv.version.Incarnation++
 			result = w.RunTxTask(tv)
@@ -2123,6 +2127,13 @@ func (pe *parallelExecutor) balWorker(be *blockExecutor, next *atomic.Int64) {
 			return
 		}
 	}
+}
+
+func sameVersion(rv, wv state.Version) state.VersionValidity {
+	if rv != wv {
+		return state.VersionInvalid
+	}
+	return state.VersionValid
 }
 
 // selfLoopFlush publishes tv's writes to the versionMap, plus deletion of any key
