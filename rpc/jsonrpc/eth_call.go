@@ -176,12 +176,14 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	defer dbtx.Rollback()
 
-	requestedSelector := blockOrLatest(blockNrOrHash)
-	stateSelector := requestedSelector
-	isPending := false
-	if number, ok := requestedSelector.Number(); ok && number == rpc.PendingBlockNumber {
-		stateSelector = latestExecutedNumOrHash
-		isPending = true
+	// Use latest block by default
+	if blockNrOrHash == nil {
+		blockNrOrHash = &latestNumOrHash
+	}
+	// The pending block is a proposal with no executed state behind it, so
+	// estimate at the latest executed block instead.
+	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
+		blockNrOrHash = &latestExecutedNumOrHash
 	}
 
 	chainConfig, err := api.chainConfig(ctx, dbtx)
@@ -193,41 +195,31 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	engine := api.engine()
 
-	stateHeader, isLatest, err := api.canonicalHeaderByNumberOrHash(ctx, dbtx, stateSelector)
+	header, isLatest, err := api.canonicalHeaderByNumberOrHash(ctx, dbtx, *blockNrOrHash)
 	if err != nil {
 		return 0, err
 	}
-	if stateHeader == nil {
-		return 0, fmt.Errorf("could not find the header %s in cache or db", requestedSelector.String())
+	if header == nil {
+		return 0, fmt.Errorf("could not find the header %s in cache or db", blockNrOrHash.String())
 	}
 
-	header := stateHeader
-	stateBlockNum := stateHeader.Number.Uint64()
-	if isPending {
-		if pendingBlock := api.pendingBlock(); pendingBlock != nil {
-			pendingHeader := pendingBlock.HeaderNoCopy()
-			// A pending environment is valid only on top of the selected state head.
-			// A stale or missing template retains the established latest fallback.
-			if pendingHeader.Number.Uint64() == stateBlockNum+1 && pendingHeader.ParentHash == stateHeader.Hash() {
-				header = pendingHeader
-			}
-		}
-	}
-
-	// Overrides change the execution environment, not the selected state block.
+	// Use overridden header for fork-detection and gas ceiling; keep original for
+	// DB lookups (state reader, prune history) which must reference the on-chain block.
 	effectiveHeader := blockOverrides.OverrideHeader(header)
 
-	err = api.BaseAPI.checkPruneStateAfterSystemTx(ctx, dbtx, stateBlockNum)
+	blockNum := header.Number
+
+	err = api.BaseAPI.checkPruneStateAfterSystemTx(ctx, dbtx, blockNum.Uint64())
 	if err != nil {
 		return 0, err
 	}
 
-	err = rpchelper.CheckBlockExecuted(dbtx, stateBlockNum)
+	err = rpchelper.CheckBlockExecuted(dbtx, header.Number.Uint64())
 	if err != nil {
 		return 0, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, stateBlockNum, isLatest, 0, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, blockNum.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return 0, err
 	}
@@ -267,7 +259,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		feeCap = common.Big0
 	}
 
-	caller, err := transactions.NewReusableCaller(engine, stateReader, stateOverrides, blockOverrides, effectiveHeader, args, api.GasCap, requestedSelector, dbtx, api._blockReader, chainConfig, api.evmCallTimeout)
+	caller, err := transactions.NewReusableCaller(engine, stateReader, stateOverrides, blockOverrides, effectiveHeader, args, api.GasCap, *blockNrOrHash, dbtx, api._blockReader, chainConfig, api.evmCallTimeout)
 	if err != nil {
 		return 0, err
 	}
