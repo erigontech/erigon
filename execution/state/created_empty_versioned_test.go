@@ -17,6 +17,7 @@
 package state
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -102,6 +103,95 @@ func TestDestroyedAccountReadRemainsValid(t *testing.T) {
 	io := NewVersionedIO(3)
 	io.RecordReads(Version{TxIndex: 2}, ibs.VersionedReads())
 	require.Equal(t, VersionValid, vm.ValidateVersion(2, io, validateEqualVersion, true, false, false, ""))
+}
+
+// An account that exists before a tx and that the tx touches and leaves empty
+// is removed under EIP-161: a higher tx must see it as absent, and a higher tx
+// that already read it must fail validation.
+func TestFinalizedWritesRemoveTouchedEmptyAccount(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xe4})
+	empty := accounts.NewAccount()
+	reader := &emptyAccountReader{addr: addr, acc: &empty}
+	vm := NewVersionMap(nil)
+	newTx := func(txIndex int) *IntraBlockState {
+		ibs := NewWithVersionMap(reader, vm)
+		t.Cleanup(ibs.Close)
+		ibs.SetNoMaterialize(true)
+		ibs.SetTxContext(1, txIndex)
+		return ibs
+	}
+
+	early := newTx(2)
+	exists, err := early.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists)
+	io := NewVersionedIO(3)
+	io.RecordReads(Version{TxIndex: 2}, early.VersionedReads())
+
+	toucher := newTx(1)
+	exists, err = toucher.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.NoError(t, toucher.AddBalance(addr, uint256.Int{}, 0))
+	vm.FlushVersionedWrites(toucher.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true}), true)
+
+	exists, err = newTx(2).Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists)
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(2, io, validateEqualVersion, true, false, false, ""))
+}
+
+// Sequential executors run FinalizeTx, which clears the journal, before
+// FinalizedWrites. The removal verdict must still see the tx's own writes.
+func TestFinalizedWritesAfterFinalizeTx(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		apply   func(ibs *IntraBlockState, addr accounts.Address) error
+		removed bool
+	}{
+		{"zero-value call", func(ibs *IntraBlockState, addr accounts.Address) error {
+			if _, err := ibs.Exist(addr); err != nil {
+				return err
+			}
+			return ibs.AddBalance(addr, uint256.Int{}, 0)
+		}, true},
+		{"zero tip", func(ibs *IntraBlockState, addr accounts.Address) error {
+			if _, err := ibs.GetBalance(addr); err != nil {
+				return err
+			}
+			return ibs.AddBalance(addr, uint256.Int{}, 0)
+		}, true},
+		{"value call", func(ibs *IntraBlockState, addr accounts.Address) error {
+			if _, err := ibs.Empty(addr); err != nil {
+				return err
+			}
+			if _, err := ibs.Exist(addr); err != nil {
+				return err
+			}
+			return ibs.AddBalance(addr, *uint256.NewInt(1), 0)
+		}, false},
+	} {
+		for _, materialize := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/materialize=%v", tc.name, materialize), func(t *testing.T) {
+				t.Parallel()
+				addr := accounts.InternAddress([20]byte{0xe6})
+				empty := accounts.NewAccount()
+				ibs := NewWithVersionMap(&emptyAccountReader{addr: addr, acc: &empty}, NewVersionMap(nil))
+				t.Cleanup(ibs.Close)
+				ibs.SetNoMaterialize(!materialize)
+				ibs.SetTxContext(1, 0)
+				rules := &chain.Rules{IsSpuriousDragon: true}
+
+				require.NoError(t, tc.apply(ibs, addr))
+				require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+
+				sd, ok := ibs.FinalizedWrites(rules).GetSelfDestruct(addr)
+				require.Equal(t, tc.removed, ok && sd.Val)
+			})
+		}
+	}
 }
 
 func TestFinalizedWritesLeavesVersionMapForApplyLoop(t *testing.T) {
