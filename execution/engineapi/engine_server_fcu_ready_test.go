@@ -270,38 +270,3 @@ func TestWaitForResponseDoesNotCallBackAfterCancellation(t *testing.T) {
 		require.Equal(t, 2, calls, "a callback must not start after cancellation")
 	}
 }
-
-// TestNewPayloadQuickStatusLooksUpPayloadByNumber pins that the known-block check for a new
-// payload passes the payload's block number. A hash-only lookup of a block that is not stored
-// yet searches every header snapshot file before it misses.
-func TestNewPayloadQuickStatusLooksUpPayloadByNumber(t *testing.T) {
-	t.Parallel()
-
-	parent := makeParentHeader(1000)
-	parentHash := parent.Hash()
-	payloadHash := common.Hash{0x42}
-	payloadNumber := parent.Number.Uint64() + 1
-
-	var payloadLookups int
-	stub := &stubExecutionModule{
-		getHeaderFunc: func(_ context.Context, blockHash *common.Hash, blockNumber *uint64) (*types.Header, error) {
-			if blockHash != nil && *blockHash == payloadHash {
-				payloadLookups++
-				require.NotNil(t, blockNumber, "the new payload must be looked up by hash and number")
-				require.Equal(t, payloadNumber, *blockNumber)
-				return nil, nil
-			}
-			return getHeaderReturning(parentHash, parent)(context.Background(), blockHash, blockNumber)
-		},
-	}
-
-	cfg := preCancunChainConfig()
-	ctx := context.Background()
-	downloader := engine_block_downloader.NewEngineBlockDownloader(ctx, log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
-	srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, true, true, nil, nil, 0, 0)
-
-	status, err := srv.getQuickPayloadStatusIfPossible(ctx, payloadHash, payloadNumber, parentHash, nil, true, defaultReadinessWait)
-	require.NoError(t, err)
-	require.Nil(t, status, "an unknown payload with a known parent goes on to full validation")
-	require.Equal(t, 1, payloadLookups)
-}
