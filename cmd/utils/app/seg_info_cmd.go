@@ -20,9 +20,9 @@ func segInfo(ctx context.Context, cliCtx *cli.Command) error {
 	logger := log.Root()
 
 	// Compression settings
-	compress := cliCtx.String("compress")
-	if compress != "all" && compress != "none" && compress != "keys" && compress != "values" {
-		return errors.New("invalid compression type: " + compress)
+	var compression seg.FileCompression
+	if err := compression.FromString(cliCtx.String("compress")); err != nil {
+		return err
 	}
 
 	// Opens datadir/file
@@ -35,41 +35,33 @@ func segInfo(ctx context.Context, cliCtx *cli.Command) error {
 	fullFilepath := filepath.Join(dirs.Snap, file)
 	logger.Info("Opening file...", "file", fullFilepath)
 
-	seg, err := seg.NewDecompressor(fullFilepath)
+	d, err := seg.NewDecompressor(fullFilepath)
 	if err != nil {
 		return err
 	}
-	defer seg.Close()
+	defer d.Close()
 
 	// Scan entire file and collect statistics
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	logger.Info("Scanning file...")
-	g := seg.MakeGetter()
-	sizes := make([]int, 0, seg.Count())
+	r := seg.NewReader(d.MakeGetter(), compression)
+	sizes := make([]int, 0, d.Count())
 	i := 0
-	var w []byte
-	compressedKeys := compress == "all" || compress == "keys"
-	compressedValues := compress == "all" || compress == "values"
-	for g.HasNext() {
-		if (i%2 == 0 && compressedKeys) || (i%2 == 1 && compressedValues) {
-			w, _ = g.Next(w[:0])
-		} else {
-			w, _ = g.NextUncompressed()
-		}
-
+	for r.HasNext() {
+		_, wordLen := r.Skip()
 		i++
-		sizes = append(sizes, len(w))
+		sizes = append(sizes, wordLen)
 
 		select {
 		case <-ticker.C:
-			logger.Info("Still scanning file...", "i", i, "total", seg.Count())
+			logger.Info("Still scanning file...", "i", i, "total", d.Count())
 		default:
 		}
 	}
-	if len(sizes) != seg.Count() {
-		logger.Warn("Full scan of words doesn't match word count in file header", "header", seg.Count(), "scanned", len(sizes))
+	if len(sizes) != d.Count() {
+		logger.Warn("Full scan of words doesn't match word count in file header", "header", d.Count(), "scanned", len(sizes))
 	}
 	slices.Sort(sizes)
 	minWordLen := sizes[0]
@@ -90,17 +82,17 @@ func segInfo(ctx context.Context, cliCtx *cli.Command) error {
 	// Print stats
 	p := message.NewPrinter(language.English)
 	p.Printf("\nFile statistics:\n\n")
-	p.Printf("File size: %d byte(s)\n", seg.Size())
-	p.Printf("Serialized dict size: %d byte(s)\n", seg.SerializedDictSize()) // word 3
-	p.Printf("Dict words: %d\n", seg.DictWords())
-	p.Printf("Serialized len size: %d byte(s)\n", seg.SerializedLenSize()) // word 4
-	p.Printf("Dict lens: %d\n", seg.DictLens())
+	p.Printf("File size: %d byte(s)\n", d.Size())
+	p.Printf("Serialized dict size: %d byte(s)\n", d.SerializedDictSize()) // word 3
+	p.Printf("Dict words: %d\n", d.DictWords())
+	p.Printf("Serialized len size: %d byte(s)\n", d.SerializedLenSize()) // word 4
+	p.Printf("Dict lens: %d\n", d.DictLens())
 	p.Printf("Unique lengths: %d\n", uniqueLengths)
-	p.Printf("Data length: %d byte(s)\n", g.DataLen())
+	p.Printf("Data length: %d byte(s)\n", r.DataLen())
 	p.Printf("Total raw words length: %d byte(s)\n", rawWordLen)
 
-	p.Printf("\nWord count: %d\n", seg.Count())                // word 1
-	p.Printf("Empty words count: %d\n", seg.EmptyWordsCount()) // word 2
+	p.Printf("\nWord count: %d\n", d.Count())                // word 1
+	p.Printf("Empty words count: %d\n", d.EmptyWordsCount()) // word 2
 	p.Printf("\nMin word length: %d byte(s)\n", minWordLen)
 	p.Printf("Max word length: %d byte(s)\n", maxWordLen)
 	p.Printf("Median word length: %d byte(s)\n", sizes[len(sizes)/2])

@@ -155,7 +155,9 @@ func (tr *tableRevalidation) handleResponse(tab *Table, resp revalidationRespons
 	// This is done via defer to avoid holding Table lock while writing to DB.
 	defer func() {
 		if n.isValidatedLive && n.livenessChecks > 5 {
-			tab.db.UpdateNode(resp.n.Node)
+			if err := tab.db.UpdateNode(resp.n.Node); err != nil {
+				tab.log.Trace("[p2p] Failed to store seed node", "id", n.ID(), "err", err)
+			}
 		}
 	}()
 

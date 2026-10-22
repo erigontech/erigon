@@ -156,6 +156,31 @@ func TestAssembleBlockKeepsBuildersApartByTimestamp(t *testing.T) {
 	require.Equal(t, adjacentID, module.buildersByTimestamp[timestamp+1])
 }
 
+func TestAssembleBlockReusesBuilderAfterHeadFlip(t *testing.T) {
+	module := newTestModule(t, func(ctx context.Context, _ *builder.Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	t.Cleanup(func() {
+		for _, entry := range module.builders {
+			entry.builder.Discard()
+		}
+	})
+	timestamp := newTestTimestamp()
+	a := &builder.Parameters{Timestamp: timestamp, ParentHash: common.Hash{1}}
+	b := &builder.Parameters{Timestamp: timestamp, ParentHash: common.Hash{2}}
+	first, err := module.AssembleBlock(t.Context(), a)
+	require.NoError(t, err)
+	second, err := module.AssembleBlock(t.Context(), b)
+	require.NoError(t, err)
+	require.NotEqual(t, first.PayloadID, second.PayloadID)
+	repeated, err := module.AssembleBlock(t.Context(), a)
+	require.NoError(t, err)
+	require.Equal(t, first.PayloadID, repeated.PayloadID)
+	require.Len(t, module.builders, 2)
+	require.Equal(t, first.PayloadID, module.buildersByTimestamp[timestamp])
+}
+
 func TestEvictionReleasesABuilderBlockedOnItsProvider(t *testing.T) {
 	timestamp := newTestTimestamp()
 	// A transaction provider can wait for most of a slot before returning, and the interrupt flag
@@ -210,7 +235,7 @@ func TestSupersededBuilderKeepsPackingAndStaysRetrievable(t *testing.T) {
 		for !interrupt.Load() {
 			time.Sleep(time.Millisecond)
 		}
-		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
 	})
 
 	first, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: timestamp, ParentHash: common.Hash{0x01}})
@@ -241,7 +266,7 @@ func TestCollectedPayloadIsHandedBackToARepeatedRequest(t *testing.T) {
 		for !interrupt.Load() {
 			time.Sleep(time.Millisecond)
 		}
-		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
 	})
 
 	params := func() *builder.Parameters {
@@ -324,7 +349,7 @@ func TestGetAssembledBlockKeepsBuilderWhenTheCallerGivesUpMidStop(t *testing.T) 
 		}
 		close(interrupted)
 		<-release
-		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
 	})
 
 	result, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: timestamp, ParentHash: common.Hash{0x01}})
@@ -681,7 +706,7 @@ func TestGetAssembledBlockReportsDiscardDuringStopAsUnknown(t *testing.T) {
 func TestGetAssembledBlockKeepsPayloadCompletedAsDiscardLands(t *testing.T) {
 	timestamp := newTestTimestamp()
 	finish := make(chan struct{})
-	want := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}
+	want := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}
 	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
 		for !interrupt.Load() {
 			time.Sleep(time.Millisecond)
@@ -757,7 +782,7 @@ func TestEvictionTakesAFailedCurrentBuilderBeforeALiveSupersededOne(t *testing.T
 		for !interrupt.Load() {
 			time.Sleep(time.Millisecond)
 		}
-		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
 	})
 	t.Cleanup(func() {
 		for _, entry := range module.builders {
@@ -820,4 +845,12 @@ func TestEvictionKeepsTheBuilderCacheBounded(t *testing.T) {
 
 	require.LessOrEqual(t, len(module.builders), engine_helpers.MaxBuilders)
 	require.LessOrEqual(t, len(module.buildersByTimestamp), engine_helpers.MaxBuilders)
+}
+
+func TestInclusionListWithoutBuilderFails(t *testing.T) {
+	module := newTestModule(t, nil)
+
+	txns, err := module.InclusionList(t.Context())
+	require.Error(t, err)
+	require.Nil(t, txns)
 }

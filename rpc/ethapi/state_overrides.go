@@ -18,9 +18,7 @@ package ethapi
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
-	"math/big"
 	"slices"
 
 	"github.com/holiman/uint256"
@@ -51,11 +49,7 @@ func (so *StateOverrides) override(ibs *state.IntraBlockState, addrs []accounts.
 		}
 		// Override account balance.
 		if account.Balance != nil {
-			balance, overflow := uint256.FromBig((*big.Int)(*account.Balance))
-			if overflow {
-				return errors.New("account.Balance higher than 2^256-1")
-			}
-			if err := ibs.SetBalance(addr, *balance, tracing.BalanceChangeUnspecified); err != nil {
+			if err := ibs.SetBalance(addr, uint256.Int(**account.Balance), tracing.BalanceChangeUnspecified); err != nil {
 				return err
 			}
 		}
@@ -75,6 +69,18 @@ func (so *StateOverrides) override(ibs *state.IntraBlockState, addrs []accounts.
 		}
 		// Apply state diff into specified accounts.
 		if account.StateDiff != nil {
+			// The versioned SetState does not create the absent account the materializing one creates.
+			if ibs.IsVersioned() && len(*account.StateDiff) > 0 {
+				exists, err := ibs.Exist(addr)
+				if err != nil {
+					return err
+				}
+				if !exists {
+					if err := ibs.CreateAccount(addr, false); err != nil {
+						return err
+					}
+				}
+			}
 			for key, value := range *account.StateDiff {
 				intValue := *new(uint256.Int).SetBytes32(value[:])
 				if err := ibs.SetState(addr, accounts.InternKey(key), intValue); err != nil {
@@ -134,18 +140,40 @@ func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.Pr
 		}
 	}
 
-	// Disable EIP-161 empty-account removal when finalizing state overrides.
-	// FinalizeTx with a NoopWriter commits dirty storage into originStorage
-	// (needed for correct SSTORE gas), but EIP-161 would also mark any account
-	// that becomes empty (nonce=0, code=0x, balance=0) as deleted in the IBS —
-	// even though the deletion is never written to the DB.  That spurious
-	// deleted=true flag causes IntraBlockState.HasStorage to short-circuit to
-	// false before reaching the state reader, breaking EIP-7610 collision
-	// detection in multi-block eth_simulateV1 when a prior simulated block
-	// deployed a contract at the overridden address.
-	// State overrides are simulation-only mutations and must not trigger
-	// EIP-161 empty-account clearing.
-	noEIP161Rules := *rules
-	noEIP161Rules.DisabledEIPs = append(slices.Clone(rules.DisabledEIPs), 161)
-	return ibs.FinalizeTx(&noEIP161Rules, state.NewNoopWriter())
+	// State overrides are synthetic pre-state and must not trigger EIP-161 account deletion.
+	overrideRules := *rules
+	overrideRules.DisabledEIPs = append(slices.Clone(rules.DisabledEIPs), 161)
+	if err := FinalizeCallTx(ibs, &overrideRules); err != nil {
+		return err
+	}
+	if ibs.IsVersioned() {
+		ibs.SetTxContext(ibs.BlockNumber(), ibs.TxnIndex()+1)
+	}
+	return nil
+}
+
+// FinalizeCallTx ends one transaction of a request that runs several on the same state.
+// On the versioned path the writes go to the version map, where the next transaction index
+// reads them; on the materializing path FinalizeTx commits them to the state objects.
+func FinalizeCallTx(ibs *state.IntraBlockState, rules *chain.Rules) error {
+	if !ibs.IsVersioned() {
+		return ibs.FinalizeTx(rules, state.NewNoopWriter())
+	}
+	writes := ibs.FinalizedWrites(rules)
+	ibs.FlushWritesToVersionMap(writes)
+	// A touched empty account has no write of its own: its EIP-161 removal is derived and published.
+	normalized, err := writes.Normalize(ibs.VersionMap(), ibs.TxnIndex(), 0, ibs.StateReader(), nil, rules.IsEIP161Enabled(), rules.IsAura, rules.IsAmsterdam)
+	if err != nil {
+		return err
+	}
+	for addr, removal := range normalized.SelfDestructs() {
+		if raw, ok := writes.GetSelfDestruct(addr); removal.Val && (!ok || !raw.Val) {
+			// The transaction's own cells of the account would read as its revival.
+			ibs.VersionMap().DeleteAll(addr, ibs.TxnIndex())
+			ibs.VersionMap().WriteSelfDestruct(addr, removal.Version, true, true)
+		}
+	}
+	ibs.SoftFinalise()
+	ibs.ResetVersionedIO()
+	return nil
 }

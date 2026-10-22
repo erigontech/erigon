@@ -26,9 +26,22 @@ import (
 var (
 	removeLocalFlag = cli.BoolFlag{
 		Name:     "local",
-		Usage:    "Remove files not described in snapshot set (probably generated locally).",
+		Usage:    "(DEPRECATED: use --keep-local-snapshots) --local=false keeps files not described in snapshot set. Chaindata is removed either way.",
 		Value:    true,
 		Aliases:  []string{"l"},
+		Category: "Reset",
+		Hidden:   true,
+	}
+	keepLocalSnapshotsFlag = cli.BoolFlag{
+		Name:     "keep-local-snapshots",
+		Usage:    "Keep snapshot files not described in snapshot set (probably generated locally). Chaindata is removed either way.",
+		Value:    false,
+		Category: "Reset",
+	}
+	allowMixedStateFlag = cli.BoolFlag{
+		Name:     "allow-mixed-state",
+		Usage:    "Proceed even when a step range would keep its commitment and accounts/storage files from different builds.",
+		Value:    false,
 		Category: "Reset",
 	}
 	dryRunFlag = cli.BoolFlag{
@@ -52,10 +65,27 @@ func isSetLineage(cliCtx *cli.Command, flagName string) bool {
 	return false
 }
 
+func keepLocalSnapshots(cliCtx *cli.Command) (bool, error) {
+	if !isSetLineage(cliCtx, removeLocalFlag.Name) {
+		return cliCtx.Bool(keepLocalSnapshotsFlag.Name), nil
+	}
+	if isSetLineage(cliCtx, keepLocalSnapshotsFlag.Name) {
+		return false, fmt.Errorf("--%s is deprecated, pass only --%s", removeLocalFlag.Name, keepLocalSnapshotsFlag.Name)
+	}
+	return !cliCtx.Bool(removeLocalFlag.Name), nil
+}
+
 func resetCliAction(ctx context.Context, cliCtx *cli.Command) (err error) {
 	// This is set up in snapshots cli.Command.Before.
 	logger := log.Root()
-	removeLocal := cliCtx.Bool(removeLocalFlag.Name)
+	keepLocal, err := keepLocalSnapshots(cliCtx)
+	if err != nil {
+		return err
+	}
+	if isSetLineage(cliCtx, removeLocalFlag.Name) {
+		logger.Warn("--local is deprecated, use --keep-local-snapshots; chaindata is removed either way")
+	}
+	allowMixedState := cliCtx.Bool(allowMixedStateFlag.Name)
 	dryRun := cliCtx.Bool(dryRunFlag.Name)
 	dataDirPath := cliCtx.String(utils.DataDirFlag.Name)
 	logger.Info("resetting datadir", "path", dataDirPath)
@@ -79,7 +109,8 @@ func resetCliAction(ctx context.Context, cliCtx *cli.Command) (err error) {
 		}
 		if !configChainName.Ok {
 			return errors.New(
-				"chain flag not set and chain name not found in chaindata. datadir is ready for sync, invalid, or requires chain flag to reset")
+				"chain flag not set and chain name not found in chaindata. datadir is ready for sync, invalid, or requires chain flag to reset",
+			)
 		}
 		chainName = configChainName.Unwrap()
 		logger.Info("read chain name from config", "chain", chainName)
@@ -120,11 +151,11 @@ func resetCliAction(ctx context.Context, cliCtx *cli.Command) (err error) {
 	//}
 
 	r := reset.Reset{
-		Dirs:                 &dirs,
-		RemoveUnknown:        removeLocal,
-		RemoveLocal:          removeLocal,
-		Logger:               logger,
-		PreverifiedSnapshots: cfg.Preverified.Items,
+		Dirs:                  &dirs,
+		RemoveUnknown:         !keepLocal,
+		AllowMixedStateBuilds: allowMixedState,
+		Logger:                logger,
+		PreverifiedSnapshots:  cfg.Preverified.Items,
 		RemoveFunc: func(osName reset.OsFilePath) error {
 			if dryRun {
 				println(osName)

@@ -18,6 +18,7 @@ package cache
 
 import (
 	"bytes"
+	"fmt"
 	"math"
 	"strings"
 	"sync"
@@ -36,12 +37,11 @@ const (
 	DefaultAccountCacheBytes = 150 * datasize.MB
 	DefaultStorageCacheBytes = 1 * datasize.GB
 
-	// Per-domain avg entry size used to translate the byte budget into the
-	// entry-count cap the underlying sharded LRU is sized against. Account
-	// and storage are near-fixed: addr + record or addr+slot + value plus
-	// entry overhead.
-	avgAccountEntryBytes = 96 // 20 addr + ~50 account record + 24 overhead
-	avgStorageEntryBytes = 88 // 52 addr+slot + ~12 value + 24 overhead
+	// Per-domain avg bytes held outside freelru's element, translating the byte
+	// budget into the entry-count cap. Entry bookkeeping is excluded: it sits
+	// inside the element, which the slot charge already covers.
+	avgAccountPayloadBytes = 70 // 20 addr + ~50 account record
+	avgStoragePayloadBytes = 64 // 52 addr+slot + ~12 value
 )
 
 // StateCache is a unified cache for domain data (Account, Storage, Code).
@@ -88,8 +88,8 @@ func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.Byt
 		sc.disableFills = true
 		log.Info("[cache] STATE_CACHE_FILLS=false — read fills disabled, only post-commit publication populates the cache")
 	}
-	sc.caches[kv.AccountsDomain] = newDomainCacheBytes(accountBytes, avgAccountEntryBytes, mode)
-	sc.caches[kv.StorageDomain] = newDomainCacheBytes(storageBytes, avgStorageEntryBytes, mode)
+	sc.caches[kv.AccountsDomain] = newDomainCacheBytes(accountBytes, avgAccountPayloadBytes, mode)
+	sc.caches[kv.StorageDomain] = newDomainCacheBytes(storageBytes, avgStoragePayloadBytes, mode)
 	sc.caches[kv.CodeDomain] = NewCodeCache(codeBytes, addrBytes)
 	// CommitmentDomain deliberately gets no cache: commitment data lives in the
 	// BranchCache, and the nil slot short-circuits every StateCache path for it
@@ -229,7 +229,8 @@ func (c *StateCache) getAddrCodeHashWithTxNum(addr []byte) ([32]byte, uint64, bo
 // The mapping derives from an account record, so admission checks the accounts
 // frontier even though the mapping lives in the code cache.
 func (c *StateCache) seedAddrCodeHash(addr []byte, h [32]byte, txNum, visibleEnd,
-	viewEpoch uint64) {
+	viewEpoch uint64,
+) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return
@@ -256,13 +257,12 @@ func (c *StateCache) deleteAddrCodeHash(addr []byte) {
 // read view without replacing an authoritative entry. Negatives use the view's
 // last included txNum. Code goes through fillCodeIfFresh.
 func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, readTxNum, visibleEnd,
-	viewEpoch uint64) {
+	viewEpoch uint64,
+) {
 	cache := c.caches[domain]
 	if cache == nil {
 		return
 	}
-	// Clone outside the lock so admission never waits on the copy.
-	cloned := bytes.Clone(value)
 	if len(value) == 0 {
 		readTxNum = 0
 		if visibleEnd > 0 {
@@ -276,7 +276,7 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 		visibleEnd < c.appliedEnd[domain] {
 		return
 	}
-	cache.PutIfAbsent(key, cloned, readTxNum)
+	cache.PutIfAbsent(key, bytes.Clone(value), readTxNum)
 }
 
 // fillCodeIfFresh is fillIfFresh for the code domain. An addr-keyed code entry
@@ -285,7 +285,8 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 // negatives are not cached here: "no code" is cached at the addr→codeHash
 // mapping instead (the zero-hash sentinel seeded by SeedAddrCodeHash).
 func (c *StateCache) fillCodeIfFresh(key []byte, value []byte, readTxNum, visibleEnd, accountsVisibleEnd,
-	viewEpoch uint64) {
+	viewEpoch uint64,
+) {
 	if len(value) == 0 {
 		return
 	}
@@ -295,10 +296,14 @@ func (c *StateCache) fillCodeIfFresh(key []byte, value []byte, readTxNum, visibl
 }
 
 func (c *StateCache) fillCodeWithHashIfFresh(key, value, codeHash []byte, readTxNum, visibleEnd, accountsVisibleEnd,
-	viewEpoch uint64) {
+	viewEpoch uint64,
+) {
 	codeCache, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok || len(value) == 0 || len(codeHash) != len(common.Hash{}) {
 		return
+	}
+	if dbg.AssertEnabled && !bytes.Equal(crypto.Keccak256(value), codeHash) {
+		panic(fmt.Sprintf("code fill: codeHash %x does not match the code", codeHash))
 	}
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
@@ -472,7 +477,8 @@ func (c *StateCache) initialize(stateVersion uint64) {
 }
 
 func (c *StateCache) beginPublication(sourceStateVersion, committedStateVersion, unwindToTxNum uint64,
-	hasUnwind bool) bool {
+	hasUnwind bool,
+) bool {
 	c.admissionMu.Lock()
 	defer c.admissionMu.Unlock()
 	if committedStateVersion <= sourceStateVersion || !c.canAdvanceStateVersionLocked(committedStateVersion) {
@@ -504,12 +510,8 @@ func (c *StateCache) finishPublication(committedStateVersion uint64) {
 }
 
 func (c *StateCache) publish(sourceStateVersion, committedStateVersion, unwindToTxNum uint64,
-	hasUnwind bool, updates []StateUpdate) {
-	prepared := make([]preparedStateUpdate, len(updates))
-	for i := range updates {
-		prepared[i] = prepareStateUpdate(updates[i])
-	}
-
+	hasUnwind bool, updates []StateUpdate,
+) {
 	c.applierMu.Lock()
 	defer c.applierMu.Unlock()
 	if !c.beginPublication(sourceStateVersion, committedStateVersion, unwindToTxNum, hasUnwind) {
@@ -519,8 +521,9 @@ func (c *StateCache) publish(sourceStateVersion, committedStateVersion, unwindTo
 	// Sub-caches synchronize their own reads and writes. While publishing is
 	// true, admission-gated fills cannot mutate state entries or read appliedEnd,
 	// so the serialized applier can install the batch without admissionMu.
-	for i := range prepared {
-		c.applyPrepared(prepared[i])
+	// One at a time: preparing the batch up front clones every value at once.
+	for i := range updates {
+		c.applyPrepared(prepareStateUpdate(updates[i]))
 	}
 
 	c.finishPublication(committedStateVersion)

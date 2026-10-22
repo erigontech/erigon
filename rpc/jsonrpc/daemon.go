@@ -24,7 +24,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -35,7 +34,6 @@ func NewBaseApiConfig(cfg *httpcfg.HttpCfg) *rpccfg.BaseApiConfig {
 		return &rpccfg.BaseApiConfig{}
 	}
 	return &rpccfg.BaseApiConfig{
-		SingleNodeMode:    cfg.WithDatadir,
 		EvmCallTimeout:    cfg.EvmCallTimeout,
 		Dirs:              cfg.Dirs,
 		BlockRangeLimit:   cfg.BlockRangeLimit,
@@ -91,14 +89,13 @@ func NewOverlayApiConfig(cfg *httpcfg.HttpCfg) *rpccfg.OverlayApiConfig {
 func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient,
 	filters *rpchelper.Filters, stateCache kvcache.Cache,
 	blockReader dbservices.FullBlockReader, cfg *httpcfg.HttpCfg, engine rules.Engine,
-	logger log.Logger, bridgeReader bridgeReader, spanProducersReader spanProducersReader,
-	testingEntry *rpc.API, witnessCache *witnessResultCache,
+	logger log.Logger, testingEntry *rpc.API, witnessCache *witnessResultCache,
 ) (list []rpc.API) {
-	base := NewBaseApi(filters, stateCache, blockReader, engine, bridgeReader, NewBaseApiConfig(cfg))
+	base := NewBaseApi(filters, stateCache, blockReader, engine, NewBaseApiConfig(cfg))
 	base.witnessCache = witnessCache
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, NewEthApiConfig(cfg), logger)
 	erigonImpl := NewErigonAPI(base, db, eth)
-	txpoolImpl := NewTxPoolAPI(base, db, txPool)
+	txpoolImpl := NewTxPoolAPI(base, txPool)
 	netImpl := NewNetAPIImpl(eth)
 	debugImpl := NewPrivateDebugAPI(base, db, eth, NewDebugApiConfig(cfg))
 	debugImpl.witnessCache = witnessCache
@@ -106,22 +103,6 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 	web3Impl := NewWeb3APIImpl(eth)
 	adminImpl := NewAdminAPI(eth)
 	parityImpl := NewParityAPIImpl(base, db)
-
-	var borImpl *BorImpl
-
-	type lazy interface {
-		HasEngine() bool
-		Engine() rules.EngineReader
-	}
-
-	switch engine := engine.(type) {
-	case *bor.Bor:
-		borImpl = NewBorAPI(base, db, spanProducersReader)
-	case lazy:
-		if _, ok := engine.Engine().(*bor.Bor); !engine.HasEngine() || ok {
-			borImpl = NewBorAPI(base, db, spanProducersReader)
-		}
-	}
 
 	otsImpl := NewOtterscanAPI(base, db, cfg.OtsMaxPageSize)
 	internalImpl := NewInternalAPI(base, db)
@@ -201,15 +182,6 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 				Service:   ErigonAPI(erigonImpl),
 				Version:   "1.0",
 			})
-		case "bor":
-			if borImpl != nil {
-				list = append(list, rpc.API{
-					Namespace: "bor",
-					Public:    true,
-					Service:   BorAPI(borImpl),
-					Version:   "1.0",
-				})
-			}
 		case "admin":
 			list = append(list, rpc.API{
 				Namespace: "admin",

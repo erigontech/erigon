@@ -20,6 +20,7 @@
 package types
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -27,6 +28,8 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjsontest"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/stretchr/testify/require"
@@ -53,6 +56,19 @@ func TestLogsCopyPreservesNilEntries(t *testing.T) {
 	logs[1].Data[0] = 0xff
 	require.Equal(t, common.HexToHash("0xaa"), cp[1].Topics[0])
 	require.Equal(t, hexutil.Bytes{1, 2}, cp[1].Data)
+}
+
+// A copy owns its timestamp, so writing through one log's pointer cannot reach the other.
+func TestLogCopyOwnsItsTimestamp(t *testing.T) {
+	src := &Log{Address: common.HexToAddress("0x1"), BlockTimestamp: at(7)}
+
+	for name, cp := range map[string]*Log{"Log.Copy": src.Copy(), "Logs.Copy": Logs{src}.Copy()[0]} {
+		t.Run(name, func(t *testing.T) {
+			require.NotSame(t, src.BlockTimestamp, cp.BlockTimestamp)
+			*cp.BlockTimestamp = 9
+			require.Equal(t, at(7), src.BlockTimestamp)
+		})
+	}
 }
 
 // A LOG0 entry carries nil Topics. Both copy paths normalize that to an empty
@@ -206,7 +222,7 @@ func TestFilterLogsTopics(t *testing.T) {
 		filter [][]common.Hash  // the topic filter we want to use
 		want   []common.Address // slice of addresses that should pass the filter
 	}
-	var basicSet = Logs{
+	basicSet := Logs{
 		{
 			Address: a1,
 			Topics:  []common.Hash{F, F, F, F, F, B, B},
@@ -232,7 +248,7 @@ func TestFilterLogsTopics(t *testing.T) {
 			Topics:  []common.Hash{F, F, F, D},
 		},
 	}
-	var filterLogTests = map[string]filterLogTest{
+	filterLogTests := map[string]filterLogTest{
 		"1. no topics, should return all topics": {
 			input:  basicSet,
 			filter: [][]common.Hash{},
@@ -277,11 +293,11 @@ func TestFilterLogsTopics(t *testing.T) {
 		},
 	}
 	for name, v := range filterLogTests {
-		ares := testFLExtractAddress(v.input.Filter(map[common.Address]struct{}{}, v.filter, 0))
+		ares := testFLExtractAddress(v.input.Filter(nil, v.filter, 0))
 		if !reflect.DeepEqual(ares, v.want) {
 			t.Errorf("Fail %s, got %v want %v", name, ares, v.want)
 		}
-		oldRes := testFLExtractAddress(v.input.Filter(map[common.Address]struct{}{}, v.filter, 0))
+		oldRes := testFLExtractAddress(v.input.Filter(nil, v.filter, 0))
 		if !reflect.DeepEqual(oldRes, v.want) {
 			t.Errorf("Fail Old %s, got %v want %v", name, oldRes, v.want)
 		}
@@ -295,53 +311,355 @@ func testFLExtractAddress(xs Logs) (o []common.Address) {
 	return
 }
 
-// TestFilterWithTopicMapEquivalence verifies that FilterWithTopicMap(addrMap, BuildTopicMap(topics), maxLogs)
-// produces identical results to Filter(addrMap, topics, maxLogs) for all topic shapes,
-// including wildcard positions (empty slices → nil map entry) and maxLogs limits.
-func TestFilterWithTopicMapEquivalence(t *testing.T) {
+func TestLogJSONBlockTimestamp(t *testing.T) {
 	t.Parallel()
 
-	var (
-		A common.Hash = [32]byte{1}
-		B common.Hash = [32]byte{2}
-		C common.Hash = [32]byte{3}
-		D common.Hash = [32]byte{4}
+	el := &Log{
+		Address:        common.HexToAddress("0x1111111111111111111111111111111111111111"),
+		Topics:         []common.Hash{common.HexToHash("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")},
+		Data:           hexutil.MustDecode("0x112233"),
+		TxHash:         common.HexToHash("0x1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff"),
+		BlockTimestamp: at(1700000000),
+	}
 
-		a1 common.Address = [20]byte{1}
-		a2 common.Address = [20]byte{2}
-		a3 common.Address = [20]byte{3}
-		a4 common.Address = [20]byte{4}
-		a5 common.Address = [20]byte{5}
-	)
+	b, err := json.Marshal(el)
+	require.NoError(t, err)
+	s := string(b)
+
+	require.Contains(t, s, `"blockTimestamp":"0x6553f100"`)
+	require.NotContains(t, s, `"timestamp"`)
+
+	var decoded Log
+	require.NoError(t, json.Unmarshal(b, &decoded))
+	require.Equal(t, el.BlockTimestamp, decoded.BlockTimestamp)
+	require.Equal(t, el.Address, decoded.Address)
+	require.Equal(t, el.TxHash, decoded.TxHash)
+}
+
+func TestLogUnmarshalJSONBlockTimestamp(t *testing.T) {
+	t.Parallel()
+
+	input := `{"address":"0x2222222222222222222222222222222222222222","blockHash":"0x222233334444555566667777888899990000aaaabbbbccccddddeeeeffff1111","blockNumber":"0x200000","blockTimestamp":"0x60000000","data":"0x4455","logIndex":"0x5","topics":["0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],"transactionHash":"0x33334444555566667777888899990000aaaabbbbccccddddeeeeffff11112222","transactionIndex":"0x6"}`
+
+	var log Log
+	require.NoError(t, json.Unmarshal([]byte(input), &log))
+	require.Equal(t, at(0x60000000), log.BlockTimestamp)
+	require.Equal(t, common.HexToAddress("0x2222222222222222222222222222222222222222"), log.Address)
+}
+
+func TestLogUnmarshalJSONLegacyTimestampIgnored(t *testing.T) {
+	t.Parallel()
+
+	input := `{"address":"0x3333333333333333333333333333333333333333","blockHash":"0x4444555566667777888899990000aaaabbbbccccddddeeeeffff111122223333","blockNumber":"0x300000","timestamp":"0x70000000","data":"0x6677","logIndex":"0x8","topics":["0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"],"transactionHash":"0x555566667777888899990000aaaabbbbccccddddeeeeffff1111222233334444","transactionIndex":"0x9"}`
+
+	var log Log
+	require.NoError(t, json.Unmarshal([]byte(input), &log))
+	require.Nil(t, log.BlockTimestamp, "the legacy `timestamp` key is not blockTimestamp")
+	require.Equal(t, common.HexToAddress("0x3333333333333333333333333333333333333333"), log.Address)
+}
+
+func TestAppendFilteredLogs(t *testing.T) {
+	t.Parallel()
 
 	logs := Logs{
-		{Address: a1, Topics: []common.Hash{A, B, C}},
-		{Address: a2, Topics: []common.Hash{A, C, D}},
-		{Address: a3, Topics: []common.Hash{B, B}},
-		{Address: a4, Topics: []common.Hash{A, B}},
-		{Address: a5, Topics: []common.Hash{C}},
+		{
+			Address:     common.HexToAddress("0x5555555555555555555555555555555555555555"),
+			Topics:      []common.Hash{common.HexToHash("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")},
+			Data:        hexutil.Bytes{0xaa},
+			BlockNumber: 0x1234,
+			TxHash:      common.HexToHash("0x1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff"),
+			TxIndex:     7,
+			BlockHash:   common.HexToHash("0x99990000aaaabbbbccccddddeeeeffff11112222333344445555666677778888"),
+			Index:       1,
+			Removed:     false,
+		},
+		{
+			Address:     common.HexToAddress("0x6666666666666666666666666666666666666666"),
+			Topics:      []common.Hash{common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")},
+			Data:        hexutil.Bytes{0xbb},
+			BlockNumber: 0x1234,
+			TxHash:      common.HexToHash("0x2222333344445555666677778888999900001111aaaabbbbccccddddeeeeffff"),
+			TxIndex:     8,
+			BlockHash:   common.HexToHash("0x99990000aaaabbbbccccddddeeeeffff11112222333344445555666677778888"),
+			Index:       2,
+			Removed:     true,
+		},
 	}
-	addrMap := map[common.Address]struct{}{}
 
-	cases := []struct {
-		name    string
-		topics  [][]common.Hash
-		maxLogs uint64
+	rpcLogs := logs.AppendFilteredLogs(nil, NewLogFilter(nil, nil), 1900000000, 0)
+
+	require.Len(t, rpcLogs, len(logs))
+	for i, rpcLog := range rpcLogs {
+		require.Equal(t, at(1900000000), rpcLog.BlockTimestamp)
+		// Stamping must copy: the source keeps no timestamp and the reply is a distinct log.
+		require.Nil(t, logs[i].BlockTimestamp, "the source log must not be stamped in place")
+		require.NotSame(t, logs[i], rpcLog)
+		unstamped := *rpcLog
+		unstamped.BlockTimestamp = nil
+		require.Equal(t, *logs[i], unstamped, "only the timestamp differs")
+	}
+}
+
+func TestAppendFilteredLogsAllocatesOncePerCall(t *testing.T) {
+	logs := make(Logs, 8)
+	for i := range logs {
+		logs[i] = &Log{Address: common.Address{byte(i)}}
+	}
+	f := NewLogFilter(nil, nil)
+	dst := make(Logs, 0, len(logs))
+	allocs := testing.AllocsPerRun(10, func() {
+		dst = logs.AppendFilteredLogs(dst[:0], f, 7, 0)
+	})
+	require.Equal(t, 1.0, allocs)
+
+	*dst[0].BlockTimestamp = 0
+	require.Equal(t, at(7), dst[1].BlockTimestamp, "each log owns its timestamp")
+}
+
+func TestAppendFilteredLogsEmpty(t *testing.T) {
+	t.Parallel()
+
+	// Appending nothing must leave dst as it was, so an empty eth_getLogs result
+	// stays non-nil and serialises `[]` and not `null`.
+	for _, logs := range []Logs{{}, nil} {
+		rpcLogs := logs.AppendFilteredLogs(Logs{}, NewLogFilter(nil, nil), 1, 0)
+		require.NotNil(t, rpcLogs)
+		require.Len(t, rpcLogs, 0)
+	}
+}
+
+// A set of one value is matched without a map, so every case runs with one and with several values.
+func TestLogFilterSelects(t *testing.T) {
+	t.Parallel()
+
+	a1, a2, a3 := common.HexToAddress("0xa1"), common.HexToAddress("0xa2"), common.HexToAddress("0xa3")
+	x, y, z := common.HexToHash("0x11"), common.HexToHash("0x22"), common.HexToHash("0x33")
+	logs := Logs{
+		{Address: a1, Topics: []common.Hash{x, y, z}},
+		{Address: a2, Topics: []common.Hash{y, x}},
+		{Address: a3, Topics: []common.Hash{x}},
+		{Address: a1},
+	}
+
+	for name, tc := range map[string]struct {
+		addrs  []common.Address
+		topics [][]common.Hash
+		want   []int
 	}{
-		{"no topics", [][]common.Hash{}, 0},
-		{"all wildcards", [][]common.Hash{{}, {}, {}}, 0},
-		{"exact match slot 0", [][]common.Hash{{A}}, 0},
-		{"wildcard slot 0, exact slot 1", [][]common.Hash{{}, {B}}, 0},
-		{"alternatives in slot 0", [][]common.Hash{{A, B}}, 0},
-		{"wildcard in middle", [][]common.Hash{{A}, {}, {C}}, 0},
-		{"maxLogs limit", [][]common.Hash{{A}}, 1},
+		"no filter":                         {want: []int{0, 1, 2, 3}},
+		"one address":                       {addrs: []common.Address{a1}, want: []int{0, 3}},
+		"one address, duplicated":           {addrs: []common.Address{a2, a2}, want: []int{1}},
+		"two addresses":                     {addrs: []common.Address{a2, a3}, want: []int{1, 2}},
+		"unknown address":                   {addrs: []common.Address{common.HexToAddress("0xcc")}},
+		"one topic at 0":                    {topics: [][]common.Hash{{x}}, want: []int{0, 2}},
+		"two topics at 0":                   {topics: [][]common.Hash{{x, y}}, want: []int{0, 1, 2}},
+		"wildcard then one topic":           {topics: [][]common.Hash{nil, {x}}, want: []int{1}},
+		"wildcard in the middle":            {topics: [][]common.Hash{{x}, {}, {z}}, want: []int{0}},
+		"more positions than topics":        {topics: [][]common.Hash{nil, nil, nil, nil}},
+		"one address and one topic":         {addrs: []common.Address{a1}, topics: [][]common.Hash{{x}}, want: []int{0}},
+		"two addresses and two topics at 1": {addrs: []common.Address{a1, a2}, topics: [][]common.Hash{nil, {x, y}}, want: []int{0, 1}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var want Logs
+			for _, i := range tc.want {
+				want = append(want, StampedLog(logs[i], 7))
+			}
+			require.Equal(t, want, logs.AppendFilteredLogs(nil, NewLogFilter(tc.addrs, tc.topics), 7, 0))
+		})
+	}
+}
+
+// AppendFilteredLogs must select exactly what FilterWith selects.
+func TestAppendFilteredLogsMatchesFilter(t *testing.T) {
+	t.Parallel()
+
+	addrA := common.HexToAddress("0xaa")
+	addrB := common.HexToAddress("0xbb")
+	topicX := common.HexToHash("0x11")
+	topicY := common.HexToHash("0x22")
+	logs := Logs{
+		{Address: addrA, Topics: []common.Hash{topicX, topicY}},
+		{Address: addrA, Topics: []common.Hash{topicY, topicX}},
+		{Address: addrB, Topics: []common.Hash{topicX}},
+		{Address: addrB},
 	}
 
-	for _, tc := range cases {
-		want := logs.Filter(addrMap, tc.topics, tc.maxLogs)
-		got := logs.FilterWithTopicMap(addrMap, BuildTopicMap(tc.topics), tc.maxLogs)
-		if !reflect.DeepEqual(want, got) {
-			t.Errorf("case %q: Filter=%v FilterWithTopicMap=%v", tc.name, testFLExtractAddress(want), testFLExtractAddress(got))
+	for name, tc := range map[string]struct {
+		addrs  []common.Address
+		topics [][]common.Hash
+	}{
+		"no filter":        {},
+		"address":          {addrs: []common.Address{addrB}},
+		"topic position 0": {topics: [][]common.Hash{{topicX}}},
+		"topic position 1": {topics: [][]common.Hash{nil, {topicX}}},
+		"topic union":      {topics: [][]common.Hash{{topicX, topicY}}},
+		"address + topic":  {addrs: []common.Address{addrA}, topics: [][]common.Hash{{topicX}}},
+		"no match":         {addrs: []common.Address{common.HexToAddress("0xcc")}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := NewLogFilter(tc.addrs, tc.topics)
+
+			var want Logs
+			for _, l := range logs.FilterWith(f, 0) {
+				want = append(want, StampedLog(l, 7))
+			}
+			require.Equal(t, want, logs.AppendFilteredLogs(nil, f, 7, 0))
+
+			if len(want) > 1 {
+				// limit stops the walk, so an over-cap receipt is not fully converted.
+				require.Len(t, logs.AppendFilteredLogs(nil, f, 7, 1), 1)
+			}
+		})
+	}
+}
+
+// Pins the maxLogs accounting matchFilter's two return values exist to preserve: the
+// budget is spent on every log the filter considers, matching or not, and never on one
+// it skips outright.
+func TestFilterWithMaxLogsCountsNonMatching(t *testing.T) {
+	t.Parallel()
+
+	addr := common.HexToAddress("0xaa")
+	topicX := common.HexToHash("0x11")
+	topicY := common.HexToHash("0x22")
+	logs := Logs{
+		{Address: addr, Topics: []common.Hash{topicY}},
+		{Address: addr, Topics: []common.Hash{topicX}},
+	}
+	f := NewLogFilter([]common.Address{addr}, [][]common.Hash{{topicX}})
+
+	require.Empty(t, logs.FilterWith(f, 1))
+	require.Len(t, logs.FilterWith(f, 2), 1)
+
+	// A skipped log does not spend the budget.
+	other := Logs{{Address: common.HexToAddress("0xbb"), Topics: []common.Hash{topicX}}, logs[1]}
+	require.Len(t, other.FilterWith(f, 1), 1)
+}
+
+// MarshalFastJSONTo replaces json.Marshal for these results, so it must match it byte for byte,
+// maximal values included.
+func TestLogsMarshalFastJSON(t *testing.T) {
+	maxed := func(topics []common.Hash, data []byte, removed bool) *Log {
+		return &Log{
+			Address:        common.HexToAddress("0xdAC17F958D2ee523a2206206994597C13D831ec7"),
+			Topics:         topics,
+			Data:           data,
+			BlockNumber:    hexutil.Uint64(^uint64(0)),
+			TxHash:         common.HexToHash("0xaabb"),
+			TxIndex:        hexutil.Uint(^uint(0)),
+			BlockHash:      common.HexToHash("0xccdd"),
+			Index:          hexutil.Uint(^uint(0)),
+			Removed:        removed,
+			BlockTimestamp: at(^uint64(0)),
 		}
 	}
+	topic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+
+	for name, logs := range map[string]Logs{
+		"nil":                nil,
+		"empty":              {},
+		"zero":               {{}},
+		"nil-topics":         {maxed(nil, []byte{1, 2, 3}, false)},
+		"empty-topics":       {maxed([]common.Hash{}, nil, false)},
+		"many-topics":        {maxed([]common.Hash{topic, {}, topic, {}}, make([]byte, 4096), false)},
+		"removed-nil-topics": {maxed(nil, nil, true)},
+		"nil-entries":        {nil, maxed([]common.Hash{topic}, []byte{9}, false), nil},
+		"many-nil-topics":    {maxed(nil, nil, false), maxed(nil, nil, true), maxed(nil, nil, false)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			want, err := json.Marshal(logs)
+			require.NoError(t, err)
+			got, err := jsonstream.Marshal(logs)
+			require.NoError(t, err)
+			require.Equal(t, string(want), string(got))
+
+			for _, l := range logs {
+				want, err := json.Marshal(l)
+				require.NoError(t, err)
+				got, err := jsonstream.Marshal(l)
+				require.NoError(t, err)
+				require.Equal(t, string(want), string(got))
+			}
+		})
+	}
+}
+
+func TestLogsMarshalFastJSONTo(t *testing.T) {
+	full := &Log{
+		Address:        common.HexToAddress("0x1234567890123456789012345678901234567890"),
+		Topics:         []common.Hash{common.HexToHash("0xaa"), common.HexToHash("0xbb")},
+		Data:           hexutil.Bytes{0xde, 0xad, 0xbe, 0xef},
+		BlockNumber:    0x1234,
+		TxHash:         common.HexToHash("0xcc"),
+		TxIndex:        7,
+		BlockHash:      common.HexToHash("0xdd"),
+		Index:          3,
+		Removed:        true,
+		BlockTimestamp: at(0x64),
+	}
+	for name, logs := range map[string]Logs{
+		"nil":          nil,
+		"empty":        {},
+		"zero log":     {{}},
+		"nil element":  {nil},
+		"nil topics":   {{Data: hexutil.Bytes{}}},
+		"empty topics": {{Topics: []common.Hash{}}},
+		"full":         {full},
+		"several":      {full, {}, full},
+		"large": func() Logs {
+			out := make(Logs, 2*jsonstream.FlushThreshold/128)
+			for i := range out {
+				out[i] = full
+			}
+			return out
+		}(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			want, err := json.Marshal(logs)
+			require.NoError(t, err)
+			var sink bytes.Buffer
+			s := jsonstream.Get(&sink)
+			defer jsonstream.Put(s)
+			require.NoError(t, logs.MarshalFastJSONTo(s))
+			require.NoError(t, s.Flush())
+			require.NoError(t, s.Err())
+			require.Equal(t, string(want), sink.String())
+		})
+	}
+}
+
+// Every Log field says which of the spec's forms it is written as, and the encoder
+// is held to that: a dropped field, a wrong form or a reordered key fails here.
+func TestLogMatchesItsTags(t *testing.T) {
+	t.Parallel()
+	topic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+	for name, l := range map[string]*Log{
+		"every field set": {
+			Address:        common.HexToAddress("0xdAC17F958D2ee523a2206206994597C13D831ec7"),
+			Topics:         []common.Hash{topic, {}},
+			Data:           []byte{1, 2, 3},
+			BlockNumber:    hexutil.Uint64(^uint64(0)),
+			TxHash:         common.HexToHash("0xaabb"),
+			TxIndex:        hexutil.Uint(^uint(0)),
+			BlockHash:      common.HexToHash("0xccdd"),
+			Index:          hexutil.Uint(^uint(0)),
+			Removed:        true,
+			BlockTimestamp: at(^uint64(0)),
+		},
+		"zero": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			want, err := ethjsontest.ExpectedJSON(l)
+			require.NoError(t, err)
+			got, err := jsonstream.Marshal(l)
+			require.NoError(t, err)
+			require.Equal(t, string(want), string(got))
+		})
+	}
+}
+
+// at is a stamped timestamp, which a reply carries as a pointer so an unstamped log omits the key.
+func at(v uint64) *hexutil.Uint64 {
+	h := hexutil.Uint64(v)
+	return &h
 }

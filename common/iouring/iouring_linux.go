@@ -16,11 +16,10 @@
 
 //go:build linux
 
-// Package iouring is a minimal hand-rolled io_uring facility for file reads at a
-// controlled queue depth — enough to warm the page cache without blocking the
-// goroutine's P (io_uring_enter goes through the syscall path, so a slow read
-// hands the P off). Not a general async reactor: BatchReadWarm submits a batch
-// and waits for all of it.
+// Package iouring is a minimal hand-rolled io_uring facility for blocking file
+// reads that do not hold the goroutine's P. Waiting in io_uring_enter uses the
+// syscall path, so the Go runtime releases the P. It is not a general async
+// reactor: BlockingBatchRead submits a batch and waits for all of it.
 package iouring
 
 import (
@@ -126,9 +125,8 @@ func New(entries uint32) (*Ring, error) {
 }
 
 // reset resyncs the cached indices to the kernel's, discarding any half-submitted
-// SQE or pending CQE left by a failed io_uring_enter so the ring is reusable. Safe
-// for warming: a dropped completion just means a page isn't pre-warmed and takes an
-// ordinary fault.
+// SQE or pending CQE left by a failed io_uring_enter so the ring is reusable. A
+// dropped completion only moves the read to the following mmap access.
 func (r *Ring) reset() {
 	atomic.StoreUint32(r.sqTail, atomic.LoadUint32(r.sqHead))
 	atomic.StoreUint32(r.cqHead, atomic.LoadUint32(r.cqTail))
@@ -136,15 +134,15 @@ func (r *Ring) reset() {
 
 func (r *Ring) Close() {
 	if r.sqRing != nil {
-		unix.Munmap(r.sqRing)
+		_ = unix.Munmap(r.sqRing)
 	}
 	if r.cqRing != nil {
-		unix.Munmap(r.cqRing)
+		_ = unix.Munmap(r.cqRing)
 	}
 	if r.sqes != nil {
-		unix.Munmap(r.sqes)
+		_ = unix.Munmap(r.sqes)
 	}
-	unix.Close(r.fd)
+	_ = unix.Close(r.fd)
 }
 
 func (r *Ring) fillSQE(idx uint32, fd int, off uint64, buf []byte, userData uint64) {
@@ -161,10 +159,9 @@ func (r *Ring) fillSQE(idx uint32, fd int, off uint64, buf []byte, userData uint
 	*(*uint64)(unsafe.Add(base, 32)) = userData                                 // user_data @32
 }
 
-// BatchReadWarm reads each (offset,len) request into scratch buffers using
-// io_uring, keeping up to the ring size in flight. Returns after all complete.
-// The reads populate the page cache; buffer contents are discarded.
-func (r *Ring) BatchReadWarm(fd int, offsets []int64, lens []int, scratch [][]byte) error {
+// BlockingBatchRead reads each (offset,len) request into scratch buffers using
+// io_uring, keeping up to the ring size in flight. It returns after all complete.
+func (r *Ring) BlockingBatchRead(fd int, offsets []int64, lens []int, scratch [][]byte) error {
 	n := len(offsets)
 	done := 0
 	for done < n {
@@ -195,8 +192,8 @@ func (r *Ring) BatchReadWarm(fd int, offsets []int64, lens []int, scratch [][]by
 		for reaped < wave {
 			ch := atomic.LoadUint32(r.cqHead)
 			ct := atomic.LoadUint32(r.cqTail)
-			// A CQE result (res @8) is discarded: a failed warm just means the
-			// following mmap access takes an ordinary fault. Only the count matters.
+			// A CQE result (res @8) is discarded: a failed read moves the work
+			// to the following mmap access. Only the count matters.
 			for ch != ct {
 				ch++
 				reaped++

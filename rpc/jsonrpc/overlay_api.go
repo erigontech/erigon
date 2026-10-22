@@ -50,7 +50,7 @@ import (
 
 type OverlayAPI interface {
 	GetLogs(ctx context.Context, crit filters.FilterCriteria, stateOverride *ethapi.StateOverrides, rules *chain.Rules) ([]*types.Log, error)
-	CallConstructor(ctx context.Context, address common.Address, code *hexutil.Bytes) (*CreationCode, error)
+	CallConstructor(ctx context.Context, address common.Address, code hexutil.Bytes) (*CreationCode, error)
 }
 
 // OverlayAPIImpl is implementation of the OverlayAPIImpl interface based on remote Db access
@@ -90,7 +90,7 @@ func NewOverlayAPI(base *BaseAPI, db kv.TemporalRoDB, cfg *rpccfg.OverlayApiConf
 	}
 }
 
-func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.Address, code *hexutil.Bytes) (*CreationCode, error) {
+func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.Address, code hexutil.Bytes) (*CreationCode, error) {
 	var (
 		replayTransactions types.Transactions
 		evm                *vm.EVM
@@ -99,7 +99,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		overrideBlockHash  map[uint64]common.Hash
 	)
 
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -115,6 +115,9 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	if err != nil {
 		return nil, err
 	}
+	if creationData == nil {
+		return nil, fmt.Errorf("no contract at %x", address)
+	}
 
 	blockNum, _, ok, err := api.txnLookup(ctx, tx, creationData.Tx)
 	if err != nil {
@@ -125,7 +128,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, errors.New("contract construction txn not found")
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -155,12 +158,12 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 
 	replayTransactions = block.Transactions()[:transactionIndex]
 
-	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), blockNum)
+	err = rpchelper.CheckBlockExecuted(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.filters, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateHistoryStateReader(ctx, tx, blockNum, 0, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -215,12 +218,12 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	contractAddr := types.CreateAddress(msg.From().Value(), msg.Nonce())
 	if creationTx.GetTo() == nil && contractAddr == address {
 		// CREATE: adapt message with new code so it's replaced instantly
-		msg = types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), api.GasCap, msg.GasPrice(), msg.FeeCap(), msg.TipCap(), *code, msg.AccessList(), msg.CheckNonce(), msg.CheckTransaction(), msg.CheckGas(), msg.IsFree(), msg.MaxFeePerBlobGas())
+		msg = types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), api.GasCap, msg.GasPrice(), msg.FeeCap(), msg.TipCap(), code, msg.AccessList(), msg.CheckNonce(), msg.CheckTransaction(), msg.CheckGas(), msg.IsFree(), msg.MaxFeePerBlobGas())
 	} else {
 		msg.ChangeGas(api.GasCap, api.GasCap)
 	}
 	txCtx = protocol.NewEVMTxContext(msg)
-	ct := OverlayCreateTracer{contractAddress: accounts.InternAddress(address), code: *code, gasCap: api.GasCap}
+	ct := OverlayCreateTracer{contractAddress: accounts.InternAddress(address), code: code, gasCap: api.GasCap}
 	evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Tracer: ct.Tracer().Hooks})
 	ct.evm = evm
 
@@ -231,7 +234,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	}
 
 	resultCode := &CreationCode{}
-	if ct.resultCode != nil && len(ct.resultCode) > 0 {
+	if len(ct.resultCode) > 0 {
 		c := hexutil.Bytes(ct.resultCode)
 		resultCode.Code = &c
 		return resultCode, nil
@@ -256,7 +259,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	return nil, nil
 }
 
-func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria, stateOverride *ethapi.StateOverrides, rules *chain.Rules) ([]*types.Log, error) {
+func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria, stateOverride *ethapi.StateOverrides, _ *chain.Rules) ([]*types.Log, error) {
 	timeout := api.OverlayGetLogsTimeout
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
@@ -287,7 +290,8 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, begin)
+	// Re-executes with overridden code, so stored receipts cannot answer for it.
+	err = api.BaseAPI.checkBlockHistoryRangeAvailable(ctx, tx, begin, end)
 	if err != nil {
 		return nil, err
 	}
@@ -295,10 +299,6 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 	if api.blockRangeLimit != 0 && (end-begin) > uint64(api.blockRangeLimit) {
 		return nil, fmt.Errorf("%s: %d", errExceedBlockRange, api.blockRangeLimit)
 	}
-
-	// State overrides can flip an originally failed txn to success, so replayBlock
-	// must re-execute failed txns instead of trusting the original receipt.
-	hasStateOverrides := stateOverride != nil && len(*stateOverride) > 0
 
 	numBlocks := end - begin + 1
 	var (
@@ -324,7 +324,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 				}
 
 				// try to recompute the state
-				stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNumber-1)), 0, api.filters, api.stateCache, api._txNumReader)
+				stateReader, err := rpchelper.CreateHistoryStateReader(ctx, tx, uint64(blockNumber), 0, api._txNumReader)
 				if err != nil {
 					results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
 					continue
@@ -332,13 +332,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 				statedb := state.New(stateReader)
 				func() {
 					defer statedb.Close()
-					if hasStateOverrides {
-						if err := stateOverride.Override(statedb, nil, rules); err != nil {
-							results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
-							return
-						}
-					}
-					blockLogs, err := api.replayBlock(ctx, uint64(blockNumber), statedb, chainConfig, tx, hasStateOverrides)
+					blockLogs, err := api.replayBlock(ctx, uint64(blockNumber), statedb, chainConfig, tx, stateOverride)
 					if err != nil {
 						results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
 						return
@@ -419,14 +413,10 @@ blockLoop:
 }
 
 func filterLogs(logs types.Logs, addresses []common.Address, topics [][]common.Hash) []*types.Log {
-	addrMap := make(map[common.Address]struct{}, len(addresses))
-	for _, v := range addresses {
-		addrMap[v] = struct{}{}
-	}
-	return logs.Filter(addrMap, topics, 0)
+	return logs.Filter(addresses, topics, 0)
 }
 
-func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, statedb *state.IntraBlockState, chainConfig *chain.Config, tx kv.TemporalTx, replayFailedTxns bool) ([]*types.Log, error) {
+func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, statedb *state.IntraBlockState, chainConfig *chain.Config, tx kv.TemporalTx, stateOverride *ethapi.StateOverrides) ([]*types.Log, error) {
 	log.Debug("[replayBlock] begin", "block", blockNum)
 	var (
 		hash               common.Hash
@@ -441,7 +431,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	overrideBlockHash = make(map[uint64]common.Hash)
 
 	blockNumber := rpc.BlockNumber(blockNum)
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNumber}, tx, api._blockReader, api.filters)
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNumber}, tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -471,6 +461,15 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
 	rules := blockCtx.Rules(chainConfig)
 
+	// State overrides can flip an originally failed txn to success, so failed
+	// txns must be re-executed instead of trusting the original receipt.
+	hasStateOverrides := stateOverride != nil && len(*stateOverride) > 0
+	if hasStateOverrides {
+		if err := stateOverride.Override(statedb, nil, rules); err != nil {
+			return nil, err
+		}
+	}
+
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
 	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
@@ -494,7 +493,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 
 		receipt := receipts[uint64(idx)]
 		log.Debug("[replayBlock]", "receipt.TransactionIndex", receipt.TransactionIndex, "receipt.TxHash", receipt.TxHash, "receipt.Status", receipt.Status)
-		if receipt.Status == types.ReceiptStatusFailed && !replayFailedTxns {
+		if receipt.Status == types.ReceiptStatusFailed && !hasStateOverrides {
 			log.Debug("[replayBlock] skipping transaction because it has status=failed", "transactionHash", txn.Hash())
 
 			contractCreation := msg.To().IsNil()
@@ -541,7 +540,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			log.Debug("[replayBlock] res result for transaction", "transactionHash", txn.Hash(), "failed", res.Failed(), "revert", res.Revert(), "error", res.Err)
 			log.Debug("[replayBlock] discarding txLogs because txn has status=failed", "transactionHash", txn.Hash())
 		} else {
-			//append logs only if txn has not reverted
+			// append logs only if txn has not reverted
 			txLogs := statedb.GetLogs(statedb.TxnIndex(), txn.Hash(), blockNum, header.Hash())
 			log.Debug("[replayBlock]", "len(txLogs)", len(txLogs), "transactionHash", txn.Hash())
 			blockLogs = append(blockLogs, txLogs...)
@@ -560,6 +559,7 @@ func getBeginEnd(ctx context.Context, tx kv.Tx, api *OverlayAPIImpl, crit filter
 		return 0, 0, fmt.Errorf("end (%d) < begin (%d)", end, begin)
 	}
 	if end > roaring.MaxUint32 {
+		// Open-ended ranges use the forkchoice head visible to the caller's transaction.
 		latest, err := rpchelper.GetLatestBlockNumber(tx)
 		if err != nil {
 			return 0, 0, err

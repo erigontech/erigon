@@ -63,7 +63,11 @@ const MaxTxTTL = 60 * time.Second
 // 6.0.0 - Blocks now have system-txs - in the begin/end of block
 // 6.1.0 - Add methods Range, IndexRange, HistorySeek, HistoryRange
 // 6.2.0 - Add HistoryFiles to reply of Snapshots() method
-var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 0, Patch: 0}
+// 7.1.0 - Add maximum-step and branch-cache options to GetLatest
+// 7.2.0 - Add MaxPrunableStepsBacklog
+// 7.3.0 - Remove HasPrefix from the remote KV service
+// 7.3.1 - Include pinned history-file generations in transaction replies
+var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 3, Patch: 1}
 
 type KvServer struct {
 	remoteproto.UnimplementedKVServer // must be embedded to have forward compatible implementations.
@@ -71,11 +75,10 @@ type KvServer struct {
 	kv                 kv.TemporalRoDB
 	stateChangeStreams *StateChangePubSub
 	blockSnapshots     Snapshots
-	borSnapshots       Snapshots
 	historySnapshots   Snapshots
 	ctx                context.Context
 
-	//v3 fields
+	// v3 fields
 	txIdGen    atomic.Uint64
 	txsMapLock *sync.RWMutex
 	txs        map[uint64]*threadSafeTx
@@ -95,7 +98,7 @@ type Snapshots interface {
 	Files() []string
 }
 
-func NewKvServer(ctx context.Context, db kv.TemporalRoDB, snapshots Snapshots, borSnapshots Snapshots, historySnapshots Snapshots, logger log.Logger) *KvServer {
+func NewKvServer(ctx context.Context, db kv.TemporalRoDB, snapshots Snapshots, historySnapshots Snapshots, logger log.Logger) *KvServer {
 	return &KvServer{
 		trace:              false,
 		rangeStep:          1024,
@@ -103,7 +106,6 @@ func NewKvServer(ctx context.Context, db kv.TemporalRoDB, snapshots Snapshots, b
 		stateChangeStreams: newStateChangeStreams(),
 		ctx:                ctx,
 		blockSnapshots:     snapshots,
-		borSnapshots:       borSnapshots,
 		historySnapshots:   historySnapshots,
 		txs:                map[uint64]*threadSafeTx{},
 		txsMapLock:         &sync.RWMutex{},
@@ -212,21 +214,42 @@ func (s *KvServer) with(id uint64, f func(kv.TemporalTx) error) error {
 	return f(tx.TemporalTx)
 }
 
+type txViewStream struct {
+	remoteproto.KV_TxServer
+	viewID                 uint64
+	historyFilesGeneration *uint64
+}
+
+func (s *txViewStream) setView(tx kv.TemporalTx) {
+	s.viewID = tx.ViewID()
+	s.historyFilesGeneration = nil
+	if files, ok := tx.Debug().(interface{ HistoryFilesGeneration() uint64 }); ok {
+		s.historyFilesGeneration = new(files.HistoryFilesGeneration())
+	}
+}
+
+func (s *txViewStream) Send(pair *remoteproto.Pair) error {
+	pair.ViewId = s.viewID
+	pair.HistoryFilesGeneration = s.historyFilesGeneration
+	return s.KV_TxServer.Send(pair)
+}
+
 func (s *KvServer) Tx(stream remoteproto.KV_TxServer) error {
+	viewStream := &txViewStream{KV_TxServer: stream}
+	stream = viewStream
 	id, errBegin := s.begin(stream.Context())
 	if errBegin != nil {
 		return fmt.Errorf("server-side error: %w", errBegin)
 	}
 	defer s.rollback(id)
 
-	var viewID uint64
 	if err := s.with(id, func(tx kv.TemporalTx) error {
-		viewID = tx.ViewID()
+		viewStream.setView(tx)
 		return nil
 	}); err != nil {
 		return fmt.Errorf("kvserver: %w", err)
 	}
-	if err := stream.Send(&remoteproto.Pair{ViewId: viewID, TxId: id}); err != nil {
+	if err := stream.Send(&remoteproto.Pair{TxId: id}); err != nil {
 		return fmt.Errorf("server-side error: %w", err)
 	}
 
@@ -234,7 +257,7 @@ func (s *KvServer) Tx(stream remoteproto.KV_TxServer) error {
 	type CursorInfo struct {
 		bucket string
 		c      kv.Cursor
-		k, v   []byte //fields to save current position of cursor - used when Tx reopen
+		k, v   []byte // fields to save current position of cursor - used when Tx reopen
 	}
 	cursors := map[uint32]*CursorInfo{}
 
@@ -251,7 +274,7 @@ func (s *KvServer) Tx(stream remoteproto.KV_TxServer) error {
 			return fmt.Errorf("server-side error: %w", recvErr)
 		}
 
-		//TODO: protect against client - which doesn't send any requests
+		// TODO: protect against client - which doesn't send any requests
 		select {
 		default:
 		case <-txTicker.C:
@@ -268,6 +291,7 @@ func (s *KvServer) Tx(stream remoteproto.KV_TxServer) error {
 				return err
 			}
 			if err := s.with(id, func(tx kv.TemporalTx) error {
+				viewStream.setView(tx)
 				for _, c := range cursors { // restore all cursors position
 					var err error
 					c.c, err = tx.Cursor(c.bucket) //nolint:gocritic
@@ -458,9 +482,6 @@ func (s *KvServer) Snapshots(_ context.Context, _ *remoteproto.SnapshotsRequest)
 	}
 
 	blockFiles := s.blockSnapshots.Files()
-	if s.borSnapshots != nil && !reflect.ValueOf(s.borSnapshots).IsNil() { // nolint
-		blockFiles = append(blockFiles, s.borSnapshots.Files()...)
-	}
 
 	reply = &remoteproto.SnapshotsReply{BlocksFiles: blockFiles}
 	if s.historySnapshots != nil && !reflect.ValueOf(s.historySnapshots).IsNil() { // nolint
@@ -470,11 +491,19 @@ func (s *KvServer) Snapshots(_ context.Context, _ *remoteproto.SnapshotsRequest)
 	return reply, nil
 }
 
-func (s *KvServer) Sequence(_ context.Context, req *remoteproto.SequenceReq) (reply *remoteproto.SequenceReply, err error) {
+func (s *KvServer) MaxPrunableStepsBacklog(context.Context, *emptypb.Empty) (*remoteproto.MaxPrunableStepsBacklogReply, error) {
+	if s.kv == nil {
+		return nil, errors.New("temporal db is not configured")
+	}
+	return &remoteproto.MaxPrunableStepsBacklogReply{Steps: s.kv.MaxPrunableStepsBacklog()}, nil
+}
+
+func (s *KvServer) Sequence(_ context.Context, req *remoteproto.SequenceReq) (reply *remoteproto.SequenceReply, _ error) {
 	reply = &remoteproto.SequenceReply{}
 	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
+		var err error
 		reply.Value, err = tx.ReadSequence(req.Table)
-		return nil
+		return err
 	}); err != nil {
 		return nil, err
 	}
@@ -533,15 +562,23 @@ func (s *StateChangePubSub) remove(id uint) {
 // Temporal methods
 //
 
-func (s *KvServer) GetLatest(_ context.Context, req *remoteproto.GetLatestReq) (reply *remoteproto.GetLatestReply, err error) {
+func (s *KvServer) GetLatest(_ context.Context, req *remoteproto.GetLatestReq) (reply *remoteproto.GetLatestReply, _ error) {
 	domainName, err := kv.String2Domain(req.Table)
 	if err != nil {
 		return nil, err
 	}
 	reply = &remoteproto.GetLatestReply{}
 	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
+		var err error
 		if req.Latest {
-			reply.V, _, err = tx.GetLatest(domainName, req.K)
+			opts := kv.GetLatestOptions{}
+			if req.MaxStep != nil {
+				opts = opts.WithMaxStep(kv.Step(req.GetMaxStep()))
+			}
+			if req.BranchCache {
+				opts = opts.WithBranchCache()
+			}
+			reply.V, _, err = tx.GetLatest(domainName, req.K, opts)
 			if err != nil {
 				return err
 			}
@@ -555,24 +592,6 @@ func (s *KvServer) GetLatest(_ context.Context, req *remoteproto.GetLatestReq) (
 	}); err != nil {
 		return nil, err
 	}
-	return reply, nil
-}
-
-func (s *KvServer) HasPrefix(_ context.Context, req *remoteproto.HasPrefixReq) (*remoteproto.HasPrefixReply, error) {
-	domain, err := kv.String2Domain(req.Table)
-	if err != nil {
-		return nil, err
-	}
-
-	reply := &remoteproto.HasPrefixReply{}
-	err = s.with(req.TxId, func(tx kv.TemporalTx) error {
-		reply.FirstKey, reply.FirstVal, reply.HasPrefix, err = tx.HasPrefix(domain, req.Prefix)
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-
 	return reply, nil
 }
 
@@ -771,8 +790,9 @@ func (s *KvServer) Range(_ context.Context, req *remoteproto.RangeReq) (*remotep
 func (s *KvServer) HistoryStartFrom(_ context.Context, req *remoteproto.HistoryStartFromReq) (reply *remoteproto.HistoryStartFromReply, err error) {
 	reply = &remoteproto.HistoryStartFromReply{}
 	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
-		reply.StartFrom = tx.Debug().HistoryStartFrom(kv.Domain(req.Domain))
-		return nil
+		var err error
+		reply.StartFrom, err = tx.Debug().HistoryStartFrom(kv.Domain(req.Domain))
+		return err
 	}); err != nil {
 		return nil, err
 	}

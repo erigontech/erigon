@@ -46,7 +46,7 @@ const (
 
 	// HistoryNoSystemTxs verifies system transactions don't appear at block start.
 	// Samples history data to ensure the first transaction in each block's history
-	// is not a system transaction (except genesis). Used in Polygon chain validation.
+	// is not a system transaction (except genesis).
 	HistoryNoSystemTxs Check = "HistoryNoSystemTxs"
 
 	// ReceiptsNoDups validates receipt data monotonicity. Checks that cumulative gas used
@@ -59,18 +59,6 @@ const (
 	// and CumulativeGasUsed are monotonically increasing. Differs from ReceiptsNoDups in that
 	// it works on the cached representation rather than the raw receipt domain.
 	RCacheNoDups Check = "RCacheNoDups"
-
-	// BorEvents validates Polygon Bor event snapshots (Heimdall events). Only runs on Bor chains.
-	// Checks consistency of Bor bridge events. Skipped silently on non-Bor chains.
-	BorEvents Check = "BorEvents"
-
-	// BorSpans validates Polygon Bor span snapshots (validator spans). Only runs on Bor chains.
-	// Checks consistency of Bor validator span data. Skipped silently on non-Bor chains.
-	BorSpans Check = "BorSpans"
-
-	// BorCheckpoints validates Polygon Bor checkpoint snapshots. Only runs on Bor chains.
-	// Checks consistency of Bor checkpoint data. Skipped silently on non-Bor chains.
-	BorCheckpoints Check = "BorCheckpoints"
 
 	// CommitmentRoot verifies commitment state roots are present and correct. Checks that
 	// each commitment snapshot file contains the state root key, and optionally recomputes
@@ -133,6 +121,9 @@ const (
 	// breaks historical-state reads. Cheap: iterates the .seg words, no DB or re-derivation.
 	CaplinStateRoots Check = "CaplinStateRoots"
 
+	// CaplinBlobSidecars validates frozen blob sidecars against canonical beacon blocks and their cryptographic proofs.
+	CaplinBlobSidecars Check = "CaplinBlobSidecars"
+
 	// TorrentPieces re-hashes data files against their .torrent piece hashes. It runs as a
 	// pre-pass rather than from the check loop, because only --file-integrity-cache enables
 	// it, but it is named so --skip-check can turn it off like any other check.
@@ -147,12 +138,13 @@ var FastChecks = []Check{
 	HistoryNoSystemTxs, CommitmentHistVal, StateRootVerifyByHistory,
 }
 
-var SlowChecks = []Check{StateVerify}
-var DeprecatedChecks = []Check{
-	BorEvents, BorSpans, BorCheckpoints,
-	CommitmentKvDeref, //StateVerify - will overcome
-	StateProgress,
-}
+var (
+	SlowChecks       = []Check{CaplinBlobSidecars, StateVerify}
+	DeprecatedChecks = []Check{
+		CommitmentKvDeref, // StateVerify - will overcome
+		StateProgress,
+	}
+)
 var AllChecks = append(append(append([]Check{TorrentPieces}, FastChecks...), SlowChecks...), DeprecatedChecks...)
 
 // SortChecksByCost returns a copy of checks ordered by their position in FastChecks

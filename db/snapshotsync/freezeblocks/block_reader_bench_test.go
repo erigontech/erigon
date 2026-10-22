@@ -201,7 +201,7 @@ func BenchmarkCanonicalHash_RealSnapshot(b *testing.B) {
 		b.Skip("no blocks available in snapshot dir")
 	}
 
-	blockReader := NewBlockReader(snapshots, nil)
+	blockReader := NewBlockReader(snapshots)
 
 	// Use an empty memdb so every lookup misses the DB and falls through to snapshots.
 	tx, err := db.BeginRo(context.Background())
@@ -260,7 +260,7 @@ func BenchmarkCanonicalHash_RealSnapshot_MainEquivalent(b *testing.B) {
 		b.Skip("no blocks available in snapshot dir")
 	}
 
-	blockReader := NewBlockReader(snapshots, nil)
+	blockReader := NewBlockReader(snapshots)
 
 	ctx := context.Background()
 	tx, err := db.BeginRo(ctx)
@@ -321,7 +321,7 @@ func BenchmarkCanonicalHash_RealSnapshot_Cold(b *testing.B) {
 		b.Skip("no blocks available in snapshot dir")
 	}
 
-	blockReader := NewBlockReader(snapshots, nil)
+	blockReader := NewBlockReader(snapshots)
 
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {

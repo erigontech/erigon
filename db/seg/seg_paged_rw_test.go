@@ -33,7 +33,7 @@ import (
 
 func prepareLoremDictOnPagedWriter(t *testing.T, pageSize int, pageCompression bool) *Decompressor {
 	t.Helper()
-	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	logger, require := log.New(), require.New(t)
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed1")
@@ -59,12 +59,12 @@ func prepareLoremDictOnPagedWriter(t *testing.T, pageSize int, pageCompression b
 }
 
 func TestPagedReader(t *testing.T) {
-	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 
 	require := require.New(t)
 	d := prepareLoremDictOnPagedWriter(t, 2, false)
 	defer d.Close()
-	g1 := NewPagedReader(d.MakeGetter(), 2, false)
+	g1 := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), 2, false)
 	var buf []byte
 	_, _, buf, o1 := g1.Next2(buf[:0])
 	require.Zero(o1)
@@ -73,7 +73,7 @@ func TestPagedReader(t *testing.T) {
 	_, _, buf, o1 = g1.Next2(buf[:0])
 	require.NotZero(o1)
 
-	g := NewPagedReader(d.MakeGetter(), 2, false)
+	g := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), 2, false)
 	i := 0
 	for g.HasNext() {
 		w := loremStrings[i]
@@ -151,13 +151,13 @@ func TestPage(t *testing.T) {
 }
 
 func TestPagedReaderWithCompression(t *testing.T) {
-	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 
 	require := require.New(t)
 	d := prepareLoremDictOnPagedWriter(t, 2, true) // Enable page-level compression
 	defer d.Close()
 
-	g := NewPagedReader(d.MakeGetter(), 2, true) // Read with compression enabled
+	g := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), 2, true) // Read with compression enabled
 	var buf []byte
 	i := 0
 	for g.HasNext() {
@@ -180,11 +180,20 @@ func TestPagedWriterCRC32Sequential(t *testing.T) {
 
 	// Add test data
 	testData := []struct{ k, v string }{
-		{"k1", "v1"}, {"k2", "v2"}, {"k3", "v3"},
-		{"k4", "v4"}, {"k5", "v5"}, {"k6", "v6"},
-		{"k7", "v7"}, {"k8", "v8"}, {"k9", "v9"},
-		{"k10", "v10"}, {"k11", "v11"}, {"k12", "v12"},
-		{"k13", "longer_value_here"}, {"k14", "another_longer_value"},
+		{"k1", "v1"},
+		{"k2", "v2"},
+		{"k3", "v3"},
+		{"k4", "v4"},
+		{"k5", "v5"},
+		{"k6", "v6"},
+		{"k7", "v7"},
+		{"k8", "v8"},
+		{"k9", "v9"},
+		{"k10", "v10"},
+		{"k11", "v11"},
+		{"k12", "v12"},
+		{"k13", "longer_value_here"},
+		{"k14", "another_longer_value"},
 		{"k15", ""}, // empty value
 		{"key_with_spaces", "value with spaces"},
 		{"unicode_key_αβγ", "unicode_value_δεζ"},
@@ -297,9 +306,15 @@ func TestPageLayoutConsistency(t *testing.T) {
 	pw := NewPagedWriter(t.Context(), mock, false, 1)
 
 	testPairs := []struct{ k, v string }{
-		{"alpha", "one"}, {"beta", "two"}, {"gamma", "three"},
-		{"delta", "four"}, {"epsilon", "five"}, {"zeta", "six"},
-		{"eta", "seven"}, {"theta", "eight"}, {"iota", "nine"},
+		{"alpha", "one"},
+		{"beta", "two"},
+		{"gamma", "three"},
+		{"delta", "four"},
+		{"epsilon", "five"},
+		{"zeta", "six"},
+		{"eta", "seven"},
+		{"theta", "eight"},
+		{"iota", "nine"},
 	}
 	for _, kv := range testPairs {
 		require.NoError(t, pw.Add([]byte(kv.k), []byte(kv.v)))
@@ -378,9 +393,14 @@ func TestPagedReaderSortedKeyOrder(t *testing.T) {
 
 	// Keys written in strictly increasing lexicographic order.
 	sortedPairs := []struct{ k, v string }{
-		{"a", "v1"}, {"b", "v2"}, {"c", "v3"},
-		{"d", "v4"}, {"e", "v5"}, {"f", "v6"},
-		{"g", "v7"}, {"h", "v8"},
+		{"a", "v1"},
+		{"b", "v2"},
+		{"c", "v3"},
+		{"d", "v4"},
+		{"e", "v5"},
+		{"f", "v6"},
+		{"g", "v7"},
+		{"h", "v8"},
 	}
 
 	tmpDir := t.TempDir()
@@ -404,7 +424,7 @@ func TestPagedReaderSortedKeyOrder(t *testing.T) {
 	require.NoError(err)
 	defer d.Close()
 
-	g := NewPagedReader(d.MakeGetter(), 3, false)
+	g := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), 3, false)
 	var buf []byte
 	var prevKey []byte
 	i := 0
@@ -419,58 +439,6 @@ func TestPagedReaderSortedKeyOrder(t *testing.T) {
 		i++
 	}
 	require.Equal(len(sortedPairs), i, "should have read all %d pairs", len(sortedPairs))
-}
-
-func BenchmarkPagedWriterAdd(b *testing.B) {
-	const pageSize = 16
-	key := make([]byte, 20)
-	val := make([]byte, 100)
-	for i := range key {
-		key[i] = byte(i)
-	}
-	for i := range val {
-		val[i] = byte(i)
-	}
-
-	cases := []struct {
-		name       string
-		compress   bool
-		numWorkers int
-	}{
-		{"noCompression", false, 1},
-		{"compression_sync", true, 1},
-		{"compression_workers2", true, 2},
-		{"compression_workers4", true, 4},
-	}
-	for _, tc := range cases {
-		b.Run(tc.name, func(b *testing.B) {
-			buf := &multyBytesWriter{pageSize: pageSize}
-			w := NewPagedWriter(b.Context(), buf, tc.compress, tc.numWorkers)
-			b.ResetTimer()
-			for b.Loop() {
-				w.Add(key, val) //nolint:errcheck
-			}
-			w.Flush() //nolint:errcheck
-		})
-	}
-}
-
-func BenchmarkName(b *testing.B) {
-	buf := &multyBytesWriter{pageSize: 16}
-	w := NewPagedWriter(b.Context(), buf, false, 1)
-	for i := range 16 {
-		w.Add([]byte{byte(i)}, []byte{10 + byte(i)}) //nolint:errcheck
-	}
-	bts := buf.Bytes()[0]
-
-	k := []byte{15}
-
-	b.Run("1", func(b *testing.B) {
-		for b.Loop() {
-			GetFromPage(k, bts, nil, false)
-		}
-	})
-
 }
 
 // prepareKVUncompressedKeysCompressedVals creates a file with sorted KV pairs:
@@ -660,4 +628,126 @@ func TestReaderBinarySearch(t *testing.T) {
 	g.Reset(lastOffset)
 	cmpResult = g.MatchCmp(lastKey)
 	require.Equal(t, 0, cmpResult, "exact last key should match")
+}
+
+// PagedReader.Reset seeks to a page boundary and re-decodes from there. Nothing else covers the
+// seek: every production caller builds a fresh reader per lookup, so this path is only ever
+// entered on a cold page.
+func TestPagedReaderResetSeeksToPage(t *testing.T) {
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "")
+	require := require.New(t)
+	const pageSize = 2
+	d := prepareLoremDictOnPagedWriter(t, pageSize, true)
+	defer d.Close()
+
+	// record where each entry lives, and what it should read back as
+	type entry struct {
+		k, v      string
+		pageStart uint64
+	}
+	var entries []entry
+	g := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), pageSize, true)
+	for i := 0; g.HasNext(); i++ {
+		k, v, _, offset := g.Next2(nil)
+		entries = append(entries, entry{string(k), string(v), offset})
+	}
+	require.Len(entries, len(loremStrings))
+
+	// seeking to an entry's own page must replay that page from its first entry
+	for i, want := range entries {
+		if i == 0 || entries[i-1].pageStart == want.pageStart {
+			continue // not the first entry of its page
+		}
+		g := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), pageSize, true)
+		g.Reset(want.pageStart)
+		require.True(g.HasNext(), "seek to offset %d left the reader empty", want.pageStart)
+		k, v, _, offset := g.Next2(nil)
+		require.Equal(want.k, string(k), "seek to %d landed on the wrong key", want.pageStart)
+		require.Equal(want.v, string(v))
+		require.Equal(want.pageStart, offset)
+
+		// and the rest of the file must follow in order
+		for j := i + 1; j < len(entries) && g.HasNext(); j++ {
+			k, v, _, _ := g.Next2(nil)
+			require.Equal(entries[j].k, string(k), "entry %d after seeking to %d", j, want.pageStart)
+			require.Equal(entries[j].v, string(v))
+		}
+	}
+}
+
+// Reset to the offset the reader already sits on must not rewind it: callers seek to the same
+// page repeatedly while walking a sorted key range, and re-reading consumed entries would
+// duplicate them.
+func TestPagedReaderResetToCurrentPageKeepsPosition(t *testing.T) {
+	require := require.New(t)
+	const pageSize = 4
+	d := prepareLoremDictOnPagedWriter(t, pageSize, true)
+	defer d.Close()
+
+	ref := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), pageSize, true)
+	k0, v0, _, pageStart := ref.Next2(nil)
+	first := string(k0) + "|" + string(v0)
+	k1, v1, _, _ := ref.Next2(nil)
+	second := string(k1) + "|" + string(v1)
+	require.NotEqual(first, second)
+
+	g := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), pageSize, true)
+	_, _, _, offset := g.Next2(nil)
+	require.Equal(pageStart, offset)
+
+	g.Reset(pageStart)
+	require.True(g.HasNext(), "re-seeking the current page emptied the reader")
+	k, v, _, _ := g.Next2(nil)
+	require.Equal(second, string(k)+"|"+string(v),
+		"re-seeking the current page rewound it, so the caller re-reads a consumed entry")
+}
+
+// A fresh reader sits at offset 0, which must not be mistaken for "page 0 is already loaded".
+func TestPagedReaderResetLoadsFirstPage(t *testing.T) {
+	require := require.New(t)
+	d := prepareLoremDictOnPagedWriter(t, 2, false)
+	defer d.Close()
+
+	g := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), 2, false)
+	g.Reset(0)
+	require.True(g.HasNextOnPage(), "Reset must leave the page of that offset loaded")
+}
+
+// Get must not depend on where iteration left the page cursor: a reader keeps its page across seeks to the
+// same offset, so lookups and iteration share one decoded page.
+func TestPageGetIsCursorIndependent(t *testing.T) {
+	sampling := 2
+	buf, require := &multyBytesWriter{pageSize: sampling}, require.New(t)
+	w := NewPagedWriter(t.Context(), buf, false, 1)
+	for i := range sampling {
+		require.NoError(w.Add([]byte(fmt.Sprintf("k %d", i)), []byte(fmt.Sprintf("v %d", i))))
+	}
+	require.NoError(w.Flush())
+
+	p := &Page{}
+	p.Reset(buf.Bytes()[0], false)
+	p.Next()
+
+	v, ok := p.Get([]byte("k 0"))
+	require.True(ok)
+	require.Equal("v 0", string(v))
+	v, ok = p.Get([]byte("k 1"))
+	require.True(ok)
+	require.Equal("v 1", string(v))
+	_, ok = p.Get([]byte("k 9"))
+	require.False(ok)
+	require.True(p.HasNext(), "Get left the iteration cursor alone")
+}
+
+// A fresh reader starts at offset 0, which must not be mistaken for "page 0 is already loaded".
+func TestPagedReaderGetOnFirstPage(t *testing.T) {
+	require := require.New(t)
+	d := prepareLoremDictOnPagedWriter(t, 2, false)
+	defer d.Close()
+
+	g := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), 2, false)
+	g.Reset(0)
+	v, err := g.GetFromPage([]byte("key 0"))
+	require.NoError(err)
+	require.Equal("lorem 0", string(v))
 }

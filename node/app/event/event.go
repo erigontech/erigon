@@ -48,8 +48,7 @@ type Event[E event] interface {
 	WithSource(source any) E
 }
 
-type UndeliveredEvent struct {
-}
+type UndeliveredEvent struct{}
 
 type BaseEvent[E event] struct {
 	event

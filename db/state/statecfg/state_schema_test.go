@@ -28,3 +28,26 @@ func TestCommitmentReferencesDefault(t *testing.T) {
 	assert.False(t, config3.DefaultReferencesInCommitmentBranches)
 	assert.Equal(t, config3.DefaultReferencesInCommitmentBranches, Schema.CommitmentDomain.ReferencesInCommitmentBranches)
 }
+
+// TestSchemaEntityEnabled pins which schema entities participate in writes and
+// produce files. A missed literal in Schema silently changes this matrix.
+func TestSchemaEntityEnabled(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		cfg     InvIdxCfg
+		enabled bool
+	}{
+		{"accounts.hist.ii", Schema.AccountsDomain.Hist.IiCfg, true},
+		{"storage.hist.ii", Schema.StorageDomain.Hist.IiCfg, true},
+		{"code.hist.ii", Schema.CodeDomain.Hist.IiCfg, true},
+		{"commitment.hist.ii", Schema.CommitmentDomain.Hist.IiCfg, true},
+		{"receipt.hist.ii", Schema.ReceiptDomain.Hist.IiCfg, true},
+		{"rcache.hist.ii", Schema.RCacheDomain.Hist.IiCfg, false},
+		{"logAddrIdx", Schema.LogAddrIdx, true},
+		{"logTopicIdx", Schema.LogTopicIdx, true},
+		{"tracesFromIdx", Schema.TracesFromIdx, true},
+		{"tracesToIdx", Schema.TracesToIdx, true},
+	} {
+		assert.Equal(t, tc.enabled, tc.cfg.Enabled, tc.name)
+	}
+}

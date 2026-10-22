@@ -25,10 +25,13 @@ verified against the Go code in this repository.
 | `forkchoice.go`: `GetRecentExecutionPayloadStatus`, `IsBlobDataAvailable`, `HasEnvelope`, `ReadEnvelopeFromDisk`, pending EL payload helpers | Gloas `Store`, `on_execution_payload_envelope`; Gloas `Store.payload_states`, `Store.payloads`; Gloas payload-attestation API support; Fulu data-column availability support |
 | `types.go`: `LatestMessage`, `ForkChoiceNode` | Phase0 `LatestMessage`; Gloas modified `LatestMessage`, `ForkChoiceNode` |
 | `get_head.go`: `accountWeights`, `computeVotes`, `getHead`, `GetHead` | Phase0 `get_attestation_score`, `get_weight`, `get_head`; Gloas dispatch boundary for modified `get_head` |
-| `get_head.go`: `getHeadGloas` | Gloas `get_head`, `get_node_children`, `get_weight`, `get_payload_status_tiebreaker` |
-| `get_head.go`: `getFilteredBlockTree`, `getFilterBlockTree` | Phase0 `get_filtered_block_tree`, `filter_block_tree`, `get_voting_source`; Gloas inherits filtered-tree viability |
+| `get_head.go`: `getHeadGloas`, `computeHeadGloas` | Gloas `get_head`, `get_node_children`, `get_weight`, `get_payload_status_tiebreaker` |
+| `get_head.go`: `getFilteredBlockTree`, `getFilterBlockTree`, `isViableLeaf`, `hasCorrectJustification` | Phase0 `get_filtered_node_tree`, `filter_node_tree`, `get_voting_source`, `get_checkpoint_block` |
+| `get_head.go`: `getFilteredNodeTree`, `hasCorrectJustification` | Gloas modified `get_filtered_node_tree`, `get_checkpoint_block`; inherited `filter_node_tree`, `get_voting_source` |
+| `utils.go`: `getUnslashedActiveBalance` | Phase0 `calculate_committee_fraction` |
 | `weight_store.go`, `gloas_weight_tree.go`: `GetWeight`, `GetAttestationScore`, `GetProposerScore`, `ShouldApplyProposerBoost` | Phase0 `get_weight`, `get_attestation_score`, `get_proposer_score`; Gloas modified `get_weight`, `get_attestation_score`, delta-maintained `LatestMessage` weights; delegates Gloas proposer-boost checks to `timing.go` |
-| `payload_vote.go`: `notifyPtcMessages`, `applyPayloadAttestationVote` | Gloas `notify_ptc_messages`, `on_payload_attestation_message` vote application |
+| `payload_vote.go`: `notifyPtcMessages`, `applyPayloadAttestationVotes` | Gloas `notify_ptc_messages`, `on_payload_attestation_message` vote application |
+| `payload_vote.go`: `PayloadAttestationVotes` | Gloas `Store.payload_timeliness_vote`, `Store.payload_data_availability_vote` spectest inspection |
 | `payload_vote.go`: `payloadTimeliness`, `payloadDataAvailability` | Gloas `payload_timeliness`, `payload_data_availability`; requires local envelope availability plus independent PTC majorities |
 | `payload_vote.go`: `getParentPayloadStatus`, `isParentNodeFull`, `getSupportedNode`, `isAncestor` | Gloas `get_parent_payload_status`, `is_parent_node_full`, `get_supported_node`, `is_ancestor` |
 | `payload_vote.go`: `ShouldExtendPayload`, `getPayloadStatusTiebreaker`, `getNodeChildren`, `validateParentPayloadPath` | Gloas `should_extend_payload`, `get_payload_status_tiebreaker`, `get_node_children`, modified `on_block` parent payload path checks |
@@ -40,9 +43,11 @@ verified against the Go code in this repository.
 | `on_block.go`: `verifyKzgCommitmentsAgainstTransactions` | Deneb execution payload blob versioned-hash checks; Electra/Fulu maximum blob count plumbing |
 | `on_block.go`: `isDataAvailable` | Deneb `is_data_available` for blob sidecars; pre-Gloas local blob storage path |
 | `on_block.go`: PeerDAS `IsDataAvailable` and `SyncColumnDataLater` branch inside `OnBlock` | Fulu modified `is_data_available`: data availability is checked by block root through data column sidecars, without passing `blob_kzg_commitments`; modified Fulu `on_block` calls it as `is_data_available(hash_tree_root(block))` |
-| `on_execution_payload.go`: `OnExecutionPayload`, `applyEnvelope`, `applyEnvelopeLocked`, `ApplyLocalSelfBuildEnvelope`, `StoreAnchorEnvelope` | Gloas `on_execution_payload_envelope`, `Store.payloads`, `Store.payload_timeliness_vote`, `Store.payload_data_availability_vote` |
+| `on_execution_payload.go`: `OnExecutionPayload`, `applyEnvelope`, `applyEnvelopeCoordinated`, `ApplyLocalSelfBuildEnvelope`, `StoreAnchorEnvelope` | Gloas `on_execution_payload_envelope`, `Store.payloads`, `Store.payload_timeliness_vote`, `Store.payload_data_availability_vote` |
 | `on_execution_payload.go`: `validateEnvelopeAgainstBlock`, `verifyEnvelopeBuilderSignature`, `checkDataAvailability`, `validatePayloadWithEL` | Gloas `on_execution_payload_envelope`; Gloas/Fulu data availability for committed bid blob data; Bellatrix `ExecutionEngine.notify_forkchoice_updated`/payload validation context |
-| `on_payload_attestation_message.go`: `OnPayloadAttestationMessage` | Gloas `on_payload_attestation_message`, PTC membership/signature/current-slot checks |
+| `on_payload_attestation_message.go`: `OnPayloadAttestationMessage` | Gloas wire `on_payload_attestation_message`, PTC membership and signature checks |
+| `on_payload_attestation_message.go`: `applyWirePayloadAttestation` | Gloas wire `on_payload_attestation_message` current-slot check |
+| `on_payload_attestation_message.go`: `OnGossipPayloadAttestationMessage`, `claimFirstValidPayloadAttestation` | Gloas p2p-interface first-valid rule per slot and validator |
 | `on_attestation.go`: `OnAttestation`, `ProcessAttestingIndicies`, `ValidateOnAttestation`, `validateTargetEpochAgainstCurrentTime` | Phase0 `on_attestation`, `validate_on_attestation`, `validate_target_epoch_against_current_time`; Gloas modified `validate_on_attestation` |
 | `on_attestation.go`: `updateLatestMessages`, `updateLatestMessagesPreGloas`, `updateLatestMessagesGloas`, latest-message accessors | Phase0 `update_latest_messages`; Gloas modified `update_latest_messages` with slot ordering and payload-present tracking |
 | `on_attester_slashing.go`: `OnAttesterSlashing`, `onProcessAttesterSlashing`, `getIndexedAttestationPublicKeys` | Phase0 `on_attester_slashing`, `is_valid_indexed_attestation` |
@@ -90,7 +95,7 @@ only from the persisted finalized state (`finalized.ssz_snappy`), never a head s
   preserve that exact fallback behavior. Be suspicious of local shortcuts that
   return `false`, zero roots, empty payload status, or `nil` when the spec would
   continue through a later disjunct.
-- Missing disjuncts: compare every `or` in `filter_block_tree`,
+- Missing disjuncts: compare every `or` in `filter_node_tree`,
   `should_extend_payload`, `should_apply_proposer_boost`,
   `validate_on_attestation`, `get_proposer_head`-related helpers, and payload
   status tiebreaking. A missing permissive disjunct can reject a viable branch;
@@ -98,7 +103,7 @@ only from the persisted finalized state (`finalized.ssz_snappy`), never a head s
 - Epoch boundaries: explicitly test genesis epoch, first slot of an epoch,
   current vs previous epoch attestations, and slots where
   `compute_slots_since_epoch_start(slot) == 0`. These paths affect
-  `filter_block_tree`, `on_tick_per_slot`, pulled-up unrealized checkpoints, and
+  `filter_node_tree`, `on_tick_per_slot`, pulled-up unrealized checkpoints, and
   proposer reorg helper behavior.
 - Timeliness boundaries: check `<` vs `<=` against the spec for attestation,
   aggregate, contribution, sync-message, PTC, and proposer reorg cutoffs. Tests

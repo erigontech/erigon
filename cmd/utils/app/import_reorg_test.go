@@ -85,7 +85,7 @@ func TestImportReorgUnwindToGenesis(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	var storedGenesis, head common.Hash
+	var storedGenesis, head, safe, finalized common.Hash
 	var headNumber *uint64
 	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
 		var err error
@@ -94,6 +94,8 @@ func TestImportReorgUnwindToGenesis(t *testing.T) {
 		}
 		head = rawdb.ReadHeadBlockHash(tx)
 		headNumber = rawdb.ReadHeaderNumber(tx, head)
+		safe = rawdb.ReadForkchoiceSafe(tx)
+		finalized = rawdb.ReadForkchoiceFinalized(tx)
 		return nil
 	}))
 	require.Equal(t, genesisHash, storedGenesis.Hex(), "genesis hash mismatch — chain config drift?")
@@ -103,6 +105,8 @@ func TestImportReorgUnwindToGenesis(t *testing.T) {
 		"head did not advance to the heavier side chain (block 4); import err: %v", importErr)
 	require.Equalf(t, tc.LastBlockHash, head.Hex(),
 		"final head mismatch (import err: %v)", importErr)
+	require.Equal(t, head, safe, "safe block is not the final imported head")
+	require.Equal(t, head, finalized, "finalized block is not the final imported head")
 }
 
 // TestImportClosesChaindataOnInitError makes ethereum.Init fail after eth.New

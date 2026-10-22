@@ -77,7 +77,6 @@ func (l *OperatorUnmarshaller) ReadUInt64() (uint64, error) {
 		return 0, err
 	}
 	return value, nil
-
 }
 
 // OperatorMarshaller is responsible for encoding operators to a stream

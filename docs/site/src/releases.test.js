@@ -1,4 +1,4 @@
-// node --test src/releases.test.js
+// npm test (from docs/site)
 //
 // Every case here is a list ordered the way the GitHub API returns it — by
 // publish date, newest first — so a selector that trusts that order fails.

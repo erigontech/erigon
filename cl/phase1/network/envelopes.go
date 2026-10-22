@@ -19,21 +19,42 @@ package network
 import (
 	"context"
 	"errors"
+	"slices"
 	"time"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-var requestEnvelopeBatchExpiration = 30 * time.Second
+var (
+	requestEnvelopeBatchExpiration = 30 * time.Second
+	requestEnvelopeAttemptTimeout  = 21 * time.Second
+	requestEnvelopeRetryInterval   = 300 * time.Millisecond
+)
 
 // RequestEnvelopesFrantically requests execution payload envelopes from the network for the given beacon block roots.
 // It first tries by-root, then falls back to by-range using the slot range of fullBlocks.
 // EMPTY blocks will not have envelopes on the network, so timeout is non-fatal.
 // Returns a map of beacon block root -> envelope for all received envelopes.
 func RequestEnvelopesFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, roots [][32]byte, fullBlocks ...*cltypes.SignedBeaconBlock) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+	return requestEnvelopesFranticallyWithValidator(ctx, r, roots, nil, fullBlocks...)
+}
+
+type envelopeCandidateValidator func(*cltypes.SignedExecutionPayloadEnvelope) error
+
+func requestEnvelopesFranticallyWithValidator(
+	ctx context.Context,
+	r *rpc.BeaconRpcP2P,
+	roots [][32]byte,
+	validate envelopeCandidateValidator,
+	fullBlocks ...*cltypes.SignedBeaconBlock,
+) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+	requestCtx, cancelRequests := context.WithTimeout(ctx, requestEnvelopeBatchExpiration)
+	defer cancelRequests()
+
 	received := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(roots))
 	needed := make([][32]byte, len(roots))
 	copy(needed, roots)
@@ -44,16 +65,17 @@ func RequestEnvelopesFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, roots
 		requestedRoots[common.Hash(root)] = struct{}{}
 	}
 
-	timer := time.NewTimer(requestEnvelopeBatchExpiration)
-	defer timer.Stop()
-
 	byRootAttempts := 0
 	byRangeAttempted := false
 	for len(needed) > 0 {
+		if err := ctx.Err(); err != nil {
+			return received, err
+		}
 		select {
-		case <-ctx.Done():
-			return received, ctx.Err()
-		case <-timer.C:
+		case <-requestCtx.Done():
+			if err := ctx.Err(); err != nil {
+				return received, err
+			}
 			log.Debug("RequestEnvelopesFrantically: timeout, some envelopes not received", "missing", len(needed))
 			return received, nil
 		default:
@@ -64,31 +86,57 @@ func RequestEnvelopesFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, roots
 		// protocol but return EOF, wasting the entire 30s timeout budget.
 		if byRootAttempts >= 3 && len(fullBlocks) > 0 && !byRangeAttempted {
 			byRangeAttempted = true
-			requestEnvelopesByRange(ctx, r, fullBlocks, requestedRoots, received)
+			rangeCtx, cancelRange := context.WithTimeout(requestCtx, requestEnvelopeAttemptTimeout)
+			rejected := requestEnvelopesByRangeWithValidator(rangeCtx, r, fullBlocks, requestedRoots, received, validate)
+			cancelRange()
+			if rejected {
+				return received, errors.New("invalid execution payload envelope response")
+			}
 			needed = filterReceived(needed, received)
 			if len(needed) == 0 {
 				break
 			}
 		}
 
-		responses, err := requestEnvelopesByRoot(ctx, r, needed)
-		acceptEnvelopeResponses(responses, requestedRoots, received)
+		attemptCtx, cancelAttempt := context.WithTimeout(requestCtx, requestEnvelopeAttemptTimeout)
+		responses, err := requestEnvelopesByRoot(attemptCtx, r, needed)
+		attemptTimedOut := errors.Is(attemptCtx.Err(), context.DeadlineExceeded) && requestCtx.Err() == nil
+		cancelAttempt()
+		if acceptEnvelopeResponsesWithValidator(responses, requestedRoots, received, validate) {
+			return received, errors.New("invalid execution payload envelope response")
+		}
 		needed = filterReceived(needed, received)
 		if len(needed) == 0 {
 			break
 		}
+		if requestCtx.Err() != nil {
+			continue
+		}
 		if err != nil {
 			log.Trace("RequestEnvelopesFrantically: by-root error", "err", err)
+			if attemptTimedOut {
+				byRootAttempts = 3
+				continue
+			}
 			byRootAttempts++
-			time.Sleep(300 * time.Millisecond)
+			waitForEnvelopeRetry(requestCtx)
 			continue
 		}
 		if len(needed) > 0 {
 			byRootAttempts++
-			time.Sleep(300 * time.Millisecond)
+			waitForEnvelopeRetry(requestCtx)
 		}
 	}
 	return received, nil
+}
+
+func waitForEnvelopeRetry(ctx context.Context) {
+	timer := time.NewTimer(requestEnvelopeRetryInterval)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+	case <-timer.C:
+	}
 }
 
 func requestEnvelopesByRoot(ctx context.Context, r *rpc.BeaconRpcP2P, roots [][32]byte) ([]*cltypes.SignedExecutionPayloadEnvelope, error) {
@@ -100,15 +148,21 @@ func requestEnvelopesByRoot(ctx context.Context, r *rpc.BeaconRpcP2P, roots [][3
 	for start := 0; start < len(roots); start += maxRoots {
 		end := min(start+maxRoots, len(roots))
 		responses, _, err := r.SendExecutionPayloadEnvelopesByRootReq(ctx, roots[start:end])
+		envelopes = append(envelopes, responses...)
 		if err != nil {
 			return envelopes, err
 		}
-		envelopes = append(envelopes, responses...)
 	}
 	return envelopes, nil
 }
 
-func acceptEnvelopeResponses(responses []*cltypes.SignedExecutionPayloadEnvelope, requestedRoots map[common.Hash]struct{}, received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) {
+func acceptEnvelopeResponsesWithValidator(
+	responses []*cltypes.SignedExecutionPayloadEnvelope,
+	requestedRoots map[common.Hash]struct{},
+	received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope,
+	validate envelopeCandidateValidator,
+) bool {
+	rejected := false
 	for _, env := range responses {
 		if env == nil || env.Message == nil {
 			continue
@@ -117,8 +171,16 @@ func acceptEnvelopeResponses(responses []*cltypes.SignedExecutionPayloadEnvelope
 			log.Debug("RequestEnvelopesFrantically: ignoring unsolicited envelope", "root", env.Message.BeaconBlockRoot)
 			continue
 		}
+		if validate != nil {
+			if err := validate(env); err != nil {
+				log.Debug("RequestEnvelopesFrantically: ignoring invalid envelope", "root", env.Message.BeaconBlockRoot, "err", err)
+				rejected = true
+				continue
+			}
+		}
 		received[env.Message.BeaconBlockRoot] = env
 	}
+	return rejected
 }
 
 func filterReceived(needed [][32]byte, received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) [][32]byte {
@@ -131,27 +193,97 @@ func filterReceived(needed [][32]byte, received map[common.Hash]*cltypes.SignedE
 	return remaining
 }
 
-func requestEnvelopesByRange(ctx context.Context, r *rpc.BeaconRpcP2P, blocks []*cltypes.SignedBeaconBlock, requestedRoots map[common.Hash]struct{}, received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) {
-	if len(blocks) == 0 {
-		return
-	}
-	startSlot := blocks[0].Block.Slot
-	endSlot := blocks[len(blocks)-1].Block.Slot
-	count := endSlot - startSlot + 1
-	log.Debug("envelope fetch: falling back to by-range", "startSlot", startSlot, "count", count)
-
+func requestEnvelopesByRangeWithValidator(
+	ctx context.Context,
+	r *rpc.BeaconRpcP2P,
+	blocks []*cltypes.SignedBeaconBlock,
+	requestedRoots map[common.Hash]struct{},
+	received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope,
+	validate envelopeCandidateValidator,
+) bool {
 	maxCount := r.MaxRequestPayloads()
 	if maxCount == 0 {
 		log.Debug("envelope fetch: by-range disabled, MAX_REQUEST_PAYLOADS is zero")
-		return
+		return false
 	}
-	for offset := uint64(0); offset < count; offset += maxCount {
-		chunkCount := min(maxCount, count-offset)
-		envelopes, _, err := r.SendExecutionPayloadEnvelopesByRangeReq(ctx, startSlot+offset, chunkCount)
+	ranges := envelopeRequestSlotRanges(blocks, requestedRoots, maxCount)
+	if len(ranges) == 0 {
+		return false
+	}
+	log.Debug("envelope fetch: falling back to by-range", "ranges", len(ranges))
+	for _, slotRange := range ranges {
+		if ctx.Err() != nil || len(received) == len(requestedRoots) {
+			return false
+		}
+		envelopes, _, err := r.SendExecutionPayloadEnvelopesByRangeReq(ctx, slotRange.start, slotRange.count)
+		if acceptEnvelopeResponsesWithValidator(envelopes, requestedRoots, received, validate) {
+			return true
+		}
 		if err != nil {
 			log.Debug("envelope fetch: by-range error", "err", err)
-			return
+			return false
 		}
-		acceptEnvelopeResponses(envelopes, requestedRoots, received)
+	}
+	return false
+}
+
+type envelopeSlotRange struct {
+	start uint64
+	count uint64
+}
+
+func envelopeRequestSlotRanges(blocks []*cltypes.SignedBeaconBlock, requestedRoots map[common.Hash]struct{}, maxCount uint64) []envelopeSlotRange {
+	if maxCount == 0 {
+		return nil
+	}
+	uniqueSlots := make(map[uint64]struct{}, len(requestedRoots))
+	for _, block := range blocks {
+		if block == nil || block.Block == nil {
+			continue
+		}
+		root, err := block.Block.HashSSZ()
+		if err != nil {
+			continue
+		}
+		if _, ok := requestedRoots[root]; ok {
+			uniqueSlots[block.Block.Slot] = struct{}{}
+		}
+	}
+	slots := make([]uint64, 0, len(uniqueSlots))
+	for slot := range uniqueSlots {
+		slots = append(slots, slot)
+	}
+	slices.Sort(slots)
+	if len(slots) == 0 {
+		return nil
+	}
+	ranges := make([]envelopeSlotRange, 0, len(slots))
+	start := slots[0]
+	end := start
+	for _, slot := range slots[1:] {
+		if slot == end+1 && slot-start < maxCount {
+			end = slot
+			continue
+		}
+		ranges = append(ranges, envelopeSlotRange{start: start, count: end - start + 1})
+		start = slot
+		end = slot
+	}
+	return append(ranges, envelopeSlotRange{start: start, count: end - start + 1})
+}
+
+func newEnvelopeCommitmentValidator(beaconCfg *clparams.BeaconChainConfig, blocks []*cltypes.SignedBeaconBlock) envelopeCandidateValidator {
+	blocksByRoot := make(map[common.Hash]*cltypes.SignedBeaconBlock, len(blocks))
+	for _, block := range blocks {
+		if block == nil || block.Block == nil {
+			continue
+		}
+		root, err := block.Block.HashSSZ()
+		if err == nil {
+			blocksByRoot[root] = block
+		}
+	}
+	return func(envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+		return ValidateDownloadedGloasEnvelope(beaconCfg, blocksByRoot[envelope.Message.BeaconBlockRoot], envelope)
 	}
 }

@@ -50,9 +50,9 @@ func TestSnapshots(t *testing.T) {
 	})
 }
 
-// A data file whose torrent has an infohash that doesn't match preverified is a stale local build:
-// reset must drop both the torrent and the data file so the downloader re-fetches the canonical copy.
-func TestIncorrectTorrentRemovesDataFile(t *testing.T) {
+// A torrent whose infohash doesn't match preverified no longer vouches for its data file. Reset drops
+// the torrent and keeps the data: the next start re-hashes it and fetches only the differing pieces.
+func TestIncorrectTorrentKeepsDataFile(t *testing.T) {
 	withOsRoot(t, func(root *os.Root) {
 		var mi metainfo.MetaInfo
 		infoBytes, err := bencode.Marshal(metainfo.Info{Name: "foo.ef", PieceLength: 16384, Pieces: make([]byte, 20)})
@@ -73,7 +73,11 @@ func TestIncorrectTorrentRemovesDataFile(t *testing.T) {
 		r.PreverifiedSnapshots = preverified.SortedItems{{Name: "idx/foo.ef", Hash: wrongHash}}
 		r.PreverifiedSnapshots.Sort()
 		qt.Assert(t, qt.IsNil(r.Run()))
-		checkFs(t, root.FS(), haveEntries(fsEntry{Name: "snapshots", Mode: fs.ModeDir})...)
+		checkFs(t, root.FS(), haveEntries(
+			fsEntry{Name: "snapshots", Mode: fs.ModeDir},
+			fsEntry{Name: "snapshots/idx", Mode: fs.ModeDir},
+			fsEntry{Name: "snapshots/idx/foo.ef"},
+		)...)
 	})
 }
 
@@ -138,7 +142,8 @@ func TestResetCheapDiskExample(t *testing.T) {
 		}
 		endEntries := append(
 			slices.Clone(startEntries[:7]),
-			fsEntry{Name: ".", Mode: fs.ModeDir})
+			fsEntry{Name: ".", Mode: fs.ModeDir},
+		)
 		makeEntries(t, startEntries, testRoot)
 		rootFS := testRoot.FS()
 		printFs(t, rootFS)
@@ -349,14 +354,14 @@ func checkFs(t *testing.T, fsRoot fs.FS, checkers ...fsChecker) {
 			println("checkFs", path, d, err)
 			matched := false
 			for _, c := range checkers {
-				stop, err := c.OnWalkDir(fsCheckerWalkInput{
+				stop, checkErr := c.OnWalkDir(fsCheckerWalkInput{
 					name: slashName(path),
 					d:    d,
 					err:  err,
 					fs:   fsRoot,
 				})
-				if err != nil {
-					return err
+				if checkErr != nil {
+					return checkErr
 				}
 				if stop {
 					matched = true
@@ -393,7 +398,8 @@ func makeEntries(t *testing.T, entries []fsEntry, root *os.Root) {
 	for _, entry := range entries {
 		localName, err := filepath.Localize(string(entry.Name))
 		qt.Assert(t, qt.IsNil(err), qt.Commentf("localizing entry name %q", entry.Name))
-		root.MkdirAll(filepath.Dir(localName), dir.DirPerm)
+		err = root.MkdirAll(filepath.Dir(localName), dir.DirPerm)
+		qt.Assert(t, qt.IsNil(err), qt.Commentf("mkdir for entry %q", entry.Name))
 		switch {
 		case entry.Mode&fs.ModeSymlink != 0:
 			// Windows doesn't seem to create SYMLINKD types when going through os.Root. So we do
@@ -448,7 +454,6 @@ func makeTestingReset(
 		Logger:               logger,
 		PreverifiedSnapshots: nil,
 		RemoveUnknown:        true,
-		RemoveLocal:          true,
 		RemoveFunc: func(osFilePath OsFilePath) error {
 			slashName := osFilePath.mustLocalRelSlash(osRootPath)
 			for _, entry := range entries {

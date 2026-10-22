@@ -20,10 +20,16 @@
 package rpc
 
 import (
+	"bufio"
+	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -31,17 +37,21 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/coder/websocket"
 	mapset "github.com/deckarep/golang-set/v2"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 const (
 	wsPingInterval     = 60 * time.Second
 	wsPingWriteTimeout = 5 * time.Second
-	wsMessageSizeLimit = 32 * 1024 * 1024
+	wsMessageSizeLimit = maxRequestContentLength
+	heldWriteLimit     = int(64 * datasize.KB) // held bytes past which a coalesced batch writes out early
 )
 
 // WebsocketHandler returns a handler that serves JSON-RPC to WebSocket connections.
@@ -66,7 +76,8 @@ func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, com
 			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
 		}
-		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		hw := &hijackRecorder{ResponseWriter: w}
+		conn, err := websocket.Accept(hw, r, &websocket.AcceptOptions{
 			InsecureSkipVerify: true, // origin already validated above
 			CompressionMode:    compressionMode,
 		})
@@ -74,7 +85,7 @@ func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, com
 			logger.Warn("WebSocket upgrade failed", "err", err)
 			return
 		}
-		codec := NewWebsocketCodec(conn, r.Host, r.Header, r.RemoteAddr)
+		codec := newWebsocketCodec(conn, hw.conn, &s.ingress, r.Host, r.Header, r.RemoteAddr)
 		// Tag the connection context so BeginRo fails fast (ErrReadTxLimitExceeded)
 		// instead of blocking indefinitely when the DB semaphore is full.
 		// r.Context() remains valid for the lifetime of the WebSocket session because
@@ -103,6 +114,8 @@ func wsHandshakeValidator(allowedOrigins []string, logger log.Logger) func(*http
 	// allow localhost if no allowedOrigins are specified.
 	if len(origins.ToSlice()) == 0 {
 		origins.Add("http://localhost")
+		origins.Add("http://127.0.0.1")
+		origins.Add("http://[::1]")
 		if hostname, err := os.Hostname(); err == nil {
 			origins.Add("http://" + hostname)
 		}
@@ -147,8 +160,7 @@ func (e wsHandshakeError) Unwrap() error {
 }
 
 func originIsAllowed(allowedOrigins mapset.Set[string], browserOrigin string, logger log.Logger) bool {
-	it := allowedOrigins.Iterator()
-	for origin := range it.C {
+	for _, origin := range allowedOrigins.ToSlice() {
 		if ruleAllowsOrigin(origin, browserOrigin, logger) {
 			return true
 		}
@@ -211,12 +223,39 @@ func parseOriginURL(origin string) (string, string, string, error) {
 // The context is used for the initial connection establishment. It does not
 // affect subsequent interactions with the client.
 func DialWebsocket(ctx context.Context, endpoint, origin string, logger log.Logger) (*Client, error) {
-	endpoint, header, err := wsClientHeaders(endpoint, origin)
+	cfg := new(clientConfig)
+	if origin != "" {
+		cfg.headers().Set("origin", origin)
+	}
+	connect, err := newClientTransportWS(endpoint, cfg)
 	if err != nil {
 		return nil, err
 	}
-	return newClient(ctx, func(ctx context.Context) (ServerCodec, error) {
-		conn, resp, err := websocket.Dial(ctx, endpoint, &websocket.DialOptions{HTTPHeader: header})
+	return newClient(ctx, cfg, connect, logger)
+}
+
+func newClientTransportWS(endpoint string, cfg *clientConfig) (reconnectFunc, error) {
+	dialOpts := cfg.wsDialOptions
+	dialURL, urlHeader, err := wsClientHeaders(endpoint, "")
+	if err != nil {
+		return nil, err
+	}
+	header := make(http.Header)
+	for _, h := range []http.Header{dialOpts.HTTPHeader, urlHeader, cfg.httpHeaders} {
+		setHeaders(header, h)
+	}
+	readLimit := cmp.Or(cfg.wsMessageSizeLimit, wsMessageSizeLimit)
+
+	connect := func(ctx context.Context) (ServerCodec, error) {
+		header := header.Clone()
+		if cfg.httpAuth != nil {
+			if err := cfg.httpAuth(header); err != nil {
+				return nil, err
+			}
+		}
+		opts := dialOpts
+		opts.HTTPHeader = header
+		conn, resp, err := websocket.Dial(ctx, dialURL, &opts)
 		if err != nil {
 			// Only close resp.Body on error; on success the connection owns it.
 			hErr := wsHandshakeError{err: err}
@@ -226,8 +265,11 @@ func DialWebsocket(ctx context.Context, endpoint, origin string, logger log.Logg
 			}
 			return nil, hErr
 		}
-		return NewWebsocketCodec(conn, endpoint, header, endpoint), nil
-	}, logger)
+		codec := NewWebsocketCodec(conn, dialURL, header, dialURL)
+		conn.SetReadLimit(readLimit)
+		return codec, nil
+	}
+	return connect, nil
 }
 
 func wsClientHeaders(endpoint, origin string) (string, http.Header, error) {
@@ -248,12 +290,99 @@ func wsClientHeaders(endpoint, origin string) (string, http.Header, error) {
 }
 
 // wsConnAdapter adapts coder/websocket.Conn to satisfy the deadlineCloser interface
-// used by jsonCodec. Write deadlines set by jsonCodec are stored and applied as
-// context deadlines on the underlying coder write calls.
+// used by jsonCodec. A write deadline set by jsonCodec bounds the next write: on the
+// hijacked socket on the server side, as a context deadline on the client side.
 type wsConnAdapter struct {
 	conn     *websocket.Conn
+	netConn  *heldConn      // the hijacked socket on the server side, nil on the client side
+	budget   *ingressBudget // the server's, nil on the client side
 	mu       sync.Mutex
 	deadline time.Time
+}
+
+// hijackRecorder keeps the socket websocket.Accept hijacks, so writes can bound it directly.
+type hijackRecorder struct {
+	http.ResponseWriter
+	conn *heldConn
+}
+
+func (h *hijackRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	c, rw, err := http.NewResponseController(h.ResponseWriter).Hijack()
+	if err != nil {
+		return c, rw, err
+	}
+	h.conn = &heldConn{Conn: c}
+	rw.Writer.Reset(h.conn)
+	return h.conn, rw, nil
+}
+
+// heldConn holds back its writes while a batch is open, so the batch leaves in one socket write.
+type heldConn struct {
+	net.Conn
+	mu      sync.Mutex
+	batches int
+	held    *bytes.Buffer
+}
+
+func (c *heldConn) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.batches == 0 {
+		return c.Conn.Write(p)
+	}
+	if len(p) >= heldWriteLimit { // holding it saves no socket write, only copies it
+		if c.held != nil {
+			if err := c.flushLocked(); err != nil {
+				return 0, err
+			}
+		}
+		return c.Conn.Write(p)
+	}
+	if c.held == nil {
+		c.held = pool.GetBuffer()
+	}
+	c.held.Write(p)
+	if c.held.Len() < heldWriteLimit {
+		return len(p), nil
+	}
+	return len(p), c.flushLocked()
+}
+
+func (c *heldConn) hold() {
+	c.mu.Lock()
+	c.batches++
+	c.mu.Unlock()
+}
+
+// release ends a batch and writes out all held bytes, those of other open batches too: bytes
+// leave in the order they were written either way.
+func (c *heldConn) release(deadline time.Time) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.batches--
+	if c.held == nil {
+		return nil
+	}
+	if err := c.Conn.SetWriteDeadline(deadline); err != nil {
+		return err
+	}
+	defer c.Conn.SetWriteDeadline(time.Time{}) //nolint:errcheck
+	return c.flushLocked()
+}
+
+func (c *heldConn) flushLocked() error {
+	_, err := c.Conn.Write(c.held.Bytes())
+	pool.PutBuffer(c.held)
+	c.held = nil
+	return err
+}
+
+// WriteHeaderNow passes on the probe coder makes after writing the 101, so a writer that
+// delays its header still sends it.
+func (h *hijackRecorder) WriteHeaderNow() {
+	if w, ok := h.ResponseWriter.(interface{ WriteHeaderNow() }); ok {
+		w.WriteHeaderNow()
+	}
 }
 
 func (a *wsConnAdapter) Close() error {
@@ -272,30 +401,72 @@ func (a *wsConnAdapter) encode(v any) error {
 	dl := a.deadline
 	a.mu.Unlock()
 
+	// The deadline goes on the socket rather than the context when there is one: for a context
+	// that can expire, coder arms a timer and a callback per frame, which doubled the cost of a
+	// small notification. coder's own pongs and close frames carry their own 5s context, well
+	// inside it.
 	ctx := context.Background()
-	if !dl.IsZero() {
+	if a.netConn != nil {
+		if !dl.IsZero() {
+			if err := a.netConn.SetWriteDeadline(dl); err != nil {
+				return err
+			}
+			defer a.netConn.SetWriteDeadline(time.Time{}) //nolint:errcheck
+		}
+	} else if !dl.IsZero() {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithDeadline(ctx, dl)
 		defer cancel()
 	}
-	data, ok := v.(rawResponse)
-	if !ok {
+	var data []byte
+	switch r := v.(type) {
+	case rawResponse:
+		data = r
+	case rawBatch:
+		s := jsonstream.Get(nil)
+		defer jsonstream.Put(s)
+		r.writeTo(s)
+		data = s.Buffer()
+	default:
 		marshaled, err := json.Marshal(v)
 		if err != nil {
 			return err
 		}
 		data = marshaled
 	}
-	return a.conn.Write(ctx, websocket.MessageText, data)
+	err := a.conn.Write(ctx, websocket.MessageText, data)
+	if err != nil && a.netConn != nil {
+		// A write cut off by the socket deadline can leave half a frame. coder closes the
+		// connection when a context expires; do the same.
+		_ = a.conn.CloseNow()
+	}
+	return err
 }
 
-func (a *wsConnAdapter) decode(v any) error {
-	// Uses context.Background() — dead connections are detected via the ping loop.
-	_, data, err := a.conn.Read(context.Background())
-	if err != nil {
-		return err
+// readFrame returns the next message. Every websocket frame is one message, so
+// it can be read in one go and checked once. On the server a message is charged to
+// the ingress budget until its handler is done; one that does not fit closes the connection.
+func (a *wsConnAdapter) readFrame() ([]byte, func(), error) {
+	if a.budget == nil {
+		_, data, err := a.conn.Read(context.Background())
+		return data, nil, err
 	}
-	return json.Unmarshal(data, v)
+	_, r, err := a.conn.Reader(context.Background())
+	if err != nil {
+		return nil, nil, err
+	}
+	body := a.budget.reader(r)
+	data, err := readAllBody(body, 0)
+	if err != nil {
+		body.release()
+		if errors.Is(err, errServerOverloaded) {
+			// A graceful close drains the rest of the refused frame with no read
+			// deadline, which a peer withholding it can stall; drop the socket instead.
+			_ = a.conn.CloseNow()
+		}
+		return nil, nil, err
+	}
+	return data, body.release, nil
 }
 
 type websocketCodec struct {
@@ -303,38 +474,46 @@ type websocketCodec struct {
 	conn *websocket.Conn
 	info PeerInfo
 
-	wg        sync.WaitGroup
-	pingReset chan struct{}
+	pingTimer *time.Timer
 }
 
 // NewWebsocketCodec wraps a coder websocket connection as a ServerCodec.
 // remoteAddr should be r.RemoteAddr on the server side, or the endpoint URL on the client side.
 func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header, remoteAddr string) ServerCodec {
+	return newWebsocketCodec(conn, nil, nil, host, req, remoteAddr)
+}
+
+// newWebsocketCodec is NewWebsocketCodec with the hijacked socket, which bounds and coalesces
+// server writes, and the server's ingress budget.
+func newWebsocketCodec(conn *websocket.Conn, netConn *heldConn, budget *ingressBudget, host string, req http.Header, remoteAddr string) *websocketCodec {
 	conn.SetReadLimit(wsMessageSizeLimit)
-	adapter := &wsConnAdapter{conn: conn}
+	adapter := &wsConnAdapter{conn: conn, netConn: netConn, budget: budget}
 	wc := &websocketCodec{
-		jsonCodec: NewFuncCodec(adapter, adapter.encode, adapter.decode).(*jsonCodec),
+		jsonCodec: newFuncCodec(adapter, adapter.encode, nil, adapter.readFrame),
 		conn:      conn,
-		pingReset: make(chan struct{}, 1),
 		info: PeerInfo{
 			Transport:  "ws",
 			RemoteAddr: remoteAddr,
 		},
 	}
+	wc.held = netConn
+	wc.writeTimeout = wsPingInterval
 	// Fill in connection details.
 	wc.info.HTTP.Host = host
 	if req != nil {
 		wc.info.HTTP.Origin = req.Get("Origin")
 		wc.info.HTTP.UserAgent = req.Get("User-Agent")
 	}
-	// Start pinger.
-	wc.wg.Go(wc.pingLoop)
+	// ping reads wc.pingTimer, so the timer must not fire before the assignment:
+	// create it unarmed, then arm it.
+	wc.pingTimer = time.AfterFunc(math.MaxInt64, wc.ping)
+	wc.pingTimer.Reset(wsPingInterval)
 	return wc
 }
 
 func (wc *websocketCodec) Close() {
 	wc.jsonCodec.Close()
-	wc.wg.Wait()
+	wc.pingTimer.Stop()
 }
 
 func (wc *websocketCodec) peerInfo() PeerInfo {
@@ -342,41 +521,34 @@ func (wc *websocketCodec) peerInfo() PeerInfo {
 }
 
 func (wc *websocketCodec) WriteJSON(ctx context.Context, v any) error {
-	if _, ok := ctx.Deadline(); !ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, wsPingInterval)
-		defer cancel()
-	}
+	wc.resetPing()
 	err := wc.jsonCodec.WriteJSON(ctx, v)
 	if err == nil {
-		// Notify pingLoop to delay the next idle ping.
-		select {
-		case wc.pingReset <- struct{}{}:
-		default:
-		}
+		wc.resetPing()
 	}
 	return err
 }
 
-// pingLoop sends periodic ping frames when the connection is idle.
-func (wc *websocketCodec) pingLoop() {
-	timer := time.NewTimer(wsPingInterval)
-	defer timer.Stop()
+// ping sends a ping frame once the connection has been idle for wsPingInterval.
+func (wc *websocketCodec) ping() {
+	pingCtx, cancel := context.WithTimeout(context.Background(), wsPingWriteTimeout)
+	err := wc.conn.Ping(pingCtx)
+	cancel()
+	if err != nil {
+		// coder/websocket leaves the connection open when the pong does not arrive in time.
+		_ = wc.conn.CloseNow()
+		return
+	}
+	wc.resetPing()
+}
 
-	for {
-		select {
-		case <-wc.closed():
-			return
-		case <-wc.pingReset:
-			if !timer.Stop() {
-				<-timer.C
-			}
-			timer.Reset(wsPingInterval)
-		case <-timer.C:
-			pingCtx, cancel := context.WithTimeout(context.Background(), wsPingWriteTimeout)
-			wc.conn.Ping(pingCtx) //nolint:errcheck
-			cancel()
-			timer.Reset(wsPingInterval)
-		}
+// resetPing checks closed after Reset: Close closes before its Stop, so a Reset
+// racing with Close is undone by one of the two Stops.
+func (wc *websocketCodec) resetPing() {
+	wc.pingTimer.Reset(wsPingInterval)
+	select {
+	case <-wc.closed():
+		wc.pingTimer.Stop()
+	default:
 	}
 }

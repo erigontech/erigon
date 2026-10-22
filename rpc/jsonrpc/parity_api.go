@@ -75,6 +75,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 		return nil, errors.New("acc not found")
 	}
 
+	// Use the committed head that matches the state version visible to RangeAsOf.
 	bn := rawdb.ReadCurrentBlockNumber(tx)
 	if bn == nil {
 		return nil, errors.New("current block number not found")

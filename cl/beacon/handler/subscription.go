@@ -22,14 +22,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -53,56 +53,62 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 		return
 	}
 
-	var err error
-	// process each sub request
+	// Validate every request before subscribing to any subnet.
+	syncnets := make([][]uint64, len(req))
+	for i, subRequest := range req {
+		if subRequest.DEBUG {
+			for subnet := uint64(0); subnet < a.beaconChainCfg.SyncCommitteeSubnetCount; subnet++ {
+				syncnets[i] = append(syncnets[i], subnet)
+			}
+			continue
+		}
+		if subRequest.SyncCommitteeIndicies == nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("request %d: sync_committee_indices is required", i)).WriteTo(w)
+			return
+		}
+		sn, err := a.syncCommitteeSubnets(subRequest.SyncCommitteeIndicies)
+		if err != nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("request %d: %w", i, err)).WriteTo(w)
+			return
+		}
+		syncnets[i] = sn
+	}
 	for _, subRequest := range req {
+		a.validatorParams.AddAttachedValidator(subRequest.ValidatorIndex)
+	}
+
+	for i, subRequest := range req {
 		expiry := a.ethClock.GetSlotTime(subRequest.UntilEpoch * a.beaconChainCfg.SlotsPerEpoch)
 		if expiry.Before(time.Now()) {
 			continue
 		}
-
-		var syncnets []uint64
-		if subRequest.DEBUG {
-			for i := 0; i < int(a.beaconChainCfg.SyncCommitteeSubnetCount); i++ {
-				syncnets = append(syncnets, uint64(i))
-			}
-		} else {
-			// headState, cn := a.syncedData.HeadState()
-			// defer cn()
-			// if headState == nil {
-			// 	http.Error(w, "head state not available", http.StatusServiceUnavailable)
-			// 	return
-			// }
-			if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
-				syncnets, err = subnets.ComputeSubnetsForSyncCommittee(headState, subRequest.ValidatorIndex)
-				if err != nil {
-					return err
-				}
-				return nil
-			}); err != nil {
-				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
-				return
-			}
-			//cn()
-		}
-
-		// subscribe to subnets
-		for _, subnet := range syncnets {
-			/*if _, err := a.sentinel.SetSubscribeExpiry(r.Context(), &sentinelproto.RequestSubscribeExpiry{
-				Topic:          gossip.TopicNameSyncCommittee(int(subnet)),
-				ExpiryUnixSecs: uint64(expiry.Unix()),
-			}); err != nil {
-				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
-				return
-			}*/
-			topicName := gossip.TopicNameSyncCommittee(int(subnet))
-			if err := a.gossipManager.SubscribeWithExpiry(topicName, expiry); err != nil {
+		for _, subnet := range syncnets[i] {
+			if err := a.gossipManager.SubscribeWithExpiry(gossip.TopicNameSyncCommittee(int(subnet)), expiry); err != nil {
 				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 				return
 			}
 		}
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// syncCommitteeSubnets maps the validator's positions in the sync committee to their subnets, each once.
+func (a *ApiHandler) syncCommitteeSubnets(indices []string) ([]uint64, error) {
+	subcommitteeSize := a.beaconChainCfg.SyncCommitteeSize / a.beaconChainCfg.SyncCommitteeSubnetCount
+	var syncnets []uint64
+	for _, s := range indices {
+		index, err := strconv.ParseUint(s, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid sync committee index %q: %w", s, err)
+		}
+		if index >= a.beaconChainCfg.SyncCommitteeSize {
+			return nil, fmt.Errorf("sync committee index %d is out of range", index)
+		}
+		if subnet := index / subcommitteeSize; !slices.Contains(syncnets, subnet) {
+			syncnets = append(syncnets, subnet)
+		}
+	}
+	return syncnets, nil
 }
 
 func (a *ApiHandler) PostEthV1ValidatorBeaconCommitteeSubscription(w http.ResponseWriter, r *http.Request) {
@@ -117,9 +123,14 @@ func (a *ApiHandler) PostEthV1ValidatorBeaconCommitteeSubscription(w http.Respon
 		return
 	}
 	for _, sub := range req {
+		a.validatorParams.AddAttachedValidator(sub.ValidatorIndex)
+	}
+	for _, sub := range req {
 		if err := a.committeeSub.AddAttestationSubscription(context.Background(), sub); err != nil {
-			log.Error("failed to add attestation subscription", "err", err)
-			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+			if !errors.Is(err, synced_data.ErrNotSynced) {
+				log.Error("failed to add attestation subscription", "err", err)
+			}
+			beaconhttp.WrapEndpointError(err).WriteTo(w)
 			return
 		}
 	}

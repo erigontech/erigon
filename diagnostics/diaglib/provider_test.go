@@ -59,7 +59,7 @@ func TestProviderRegistration(t *testing.T) {
 	ctx, ch, cancel := diaglib.Context[testInfo](context.Background(), 1)
 	diaglib.StartProviders(ctx, diaglib.TypeOf(testInfo{}), log.Root())
 
-	go StartDiagnostics(ctx)
+	go func() { _ = StartDiagnostics(ctx) }()
 
 	for info := range ch {
 		if info.count == 3 {

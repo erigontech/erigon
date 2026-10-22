@@ -339,7 +339,7 @@ func TestServerPeerLimits(t *testing.T) {
 	clientkey := newkey()
 	clientnode := enode.NewV4(&clientkey.PublicKey, nil, 0, 0)
 
-	var tp = &setupTransport{
+	tp := &setupTransport{
 		pubkey: &clientkey.PublicKey,
 		phs: protoHandshake{
 			Pubkey: crypto.MarshalPubkey(&clientkey.PublicKey),
@@ -472,7 +472,7 @@ func TestServerSetupConn(t *testing.T) {
 				defer srv.Stop()
 			}
 			p1, _ := net.Pipe()
-			srv.SetupConn(p1, test.flags, test.dialDest)
+			_ = srv.SetupConn(p1, test.flags, test.dialDest)
 			if !reflect.DeepEqual(test.tt.closeErr, test.wantCloseErr) {
 				t.Errorf("test %d: close error mismatch: got %q, want %q", i, test.tt.closeErr, test.wantCloseErr)
 			}
@@ -653,7 +653,9 @@ func TestServerInboundThrottle(t *testing.T) {
 	}
 	defer conn.Close()
 	go func() {
-		conn.SetDeadline(time.Now().Add(timeout))
+		if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+			t.Errorf("SetDeadline: %v", err)
+		}
 		buf := make([]byte, 10)
 		if n, err := conn.Read(buf); !errors.Is(err, io.EOF) || n != 0 {
 			t.Errorf("expected io.EOF and n == 0, got error %q and n == %d", err, n)

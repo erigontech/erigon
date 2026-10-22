@@ -25,11 +25,23 @@ GraphQL shares the same port as the HTTP JSON-RPC server (default `8545`). It do
 | `http://localhost:8545/graphql` | GraphQL API endpoint |
 | `http://localhost:8545/graphql/ui` | GraphiQL browser UI for interactive queries |
 
+## Access Control
+
+`/graphql` passes the same checks as the JSON-RPC endpoint on that port (the `/graphql/ui` page itself is served without them, but the queries it sends go to `/graphql`):
+
+* `--http.vhosts` (default `localhost`): a request whose `Host` header names a host that is not listed gets `403`. Requests addressed by IP are served. If you expose GraphQL under a hostname, for example behind a reverse proxy, add that hostname to `--http.vhosts`.
+* `--http.corsdomain`: a browser page on another origin is served only if its origin is listed.
+* `--rpc.max.concurrency`: GraphQL requests are subject to the same admission limit, enforced separately from the JSON-RPC endpoint, and request bodies are capped at 32 MiB.
+
 ## Schema Reference
 
 Erigon follows the GraphQL schema maintained in [`ethereum/execution-apis`](https://github.com/ethereum/execution-apis), which is kept in sync with major clients such as Geth and Besu. For human-readable field descriptions and query examples, the [Geth GraphQL reference](https://geth.ethereum.org/docs/interacting-with-geth/rpc/graphql) is a useful companion.
 
 The schema includes queries for blocks, transactions, accounts, logs, and pending state, as well as the `sendRawTransaction` mutation.
+
+## Pending calls
+
+The GraphQL `call` field does not support execution against a pending block. Erigon returns `pending state is not supported` because it cannot currently acquire a pending block header and matching state in one view. Other pending-state fields keep their existing behavior.
 
 ## Example Query
 

@@ -253,7 +253,7 @@ func TestPeerTrackerNewBlocksObserver(t *testing.T) {
 		send(ctx, t, newBlocksStream, &DecodedInboundMessage[*eth.NewBlockPacket]{
 			PeerId: PeerIdFromUint64(2),
 			Decoded: &eth.NewBlockPacket{
-				Block: types.NewBlockWithHeader(header),
+				Block: types.NewBlockWithHeader(header, nil),
 			},
 		})
 
