@@ -17,6 +17,7 @@
 package rpctest
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 )
@@ -26,37 +27,33 @@ import (
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 //
-//	false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
+//	false value - to generate the pattern files (vegeta_*.txt and <method>.jsonl), it's faster
 //	recordFile stores all eth_getlogs returned with success
 //	errorFile stores information when erigon and geth doesn't return same data
-func BenchOverlayGetLogs(erigonURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) error {
+func BenchOverlayGetLogs(erigonURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) (err error) {
 	setRoutes(erigonURL, erigonURL)
 
 	rec, errs, cleanup, err := openWriters(recordFile, errorFile)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+	defer func() { err = errors.Join(err, cleanup()) }()
 
 	var resultsCh chan CallResult = nil
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"debug_getModifiedAccountsByNumber", "eth_getLogs"}, resultsCh)
+		go writePattern(true, []string{"debug_getModifiedAccountsByNumber", "eth_getLogs"}, resultsCh)
 	}
 
-	var res CallResult
 	reqGen := &RequestGenerator{}
 
-	var blockNumber EthBlockNumber
-	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
-	if res.Err != nil {
-		return fmt.Errorf("Could not get block number: %v\n", res.Err)
+	lastBlock, err := reqGen.latestBlockNumber()
+	if err != nil {
+		return err
 	}
-	if blockNumber.Error != nil {
-		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
-	}
-	fmt.Printf("Last block: %d\n", blockNumber.Number)
+	fmt.Printf("Last block: %d\n", lastBlock)
+	var res CallResult
 
 	prevBn := blockFrom
 	rnd := rand.New(rand.NewSource(42)) // nolint:gosec
@@ -67,10 +64,10 @@ func BenchOverlayGetLogs(erigonURL string, needCompare bool, blockFrom uint64, b
 		var mag DebugModifiedAccounts
 		res = reqGen.Erigon("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
 		if res.Err != nil {
-			return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
+			return fmt.Errorf("could not get modified accounts (Erigon): %w", res.Err)
 		}
 		if mag.Error != nil {
-			return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", mag.Error.Code, mag.Error.Message)
+			return fmt.Errorf("error getting modified accounts (Erigon): %d %s", mag.Error.Code, mag.Error.Message)
 		}
 		if res.Err == nil && mag.Error == nil {
 			accountSet := extractAccountMap(&mag)

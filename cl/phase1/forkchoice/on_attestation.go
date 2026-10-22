@@ -60,19 +60,25 @@ func (f *ForkChoiceStore) OnAttestation(
 	var err error
 	target := data.Target
 
-	if f.syncedDataManager.Syncing() {
-		attestationIndicies, err = f.verifyAttestationWithCheckpointState(
-			target,
-			attestation,
-			fromBlock,
-		)
-	} else {
-		if err := f.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+	useCheckpointState := f.syncedDataManager.Syncing()
+	if !useCheckpointState {
+		if err := f.syncedDataManager.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, headRoot common.Hash, _ uint64) error {
+			if !f.headStateHasTargetShuffling(headState, headRoot, target) {
+				useCheckpointState = true
+				return nil
+			}
 			attestationIndicies, err = f.verifyAttestationWithState(headState, attestation, fromBlock)
 			return err
 		}); err != nil {
 			return err
 		}
+	}
+	if useCheckpointState {
+		attestationIndicies, err = f.verifyAttestationWithCheckpointState(
+			target,
+			attestation,
+			fromBlock,
+		)
 	}
 	if err != nil {
 		return err
@@ -82,6 +88,20 @@ func (f *ForkChoiceStore) OnAttestation(
 	f.updateLatestMessages(attestation, attestationIndicies)
 
 	return nil
+}
+
+// The one-epoch window preserves the target's final seed mix; the dependent block then identifies the same committees.
+func (f *ForkChoiceStore) headStateHasTargetShuffling(headState *state.CachingBeaconState, headRoot common.Hash, target solid.Checkpoint) bool {
+	headEpoch := state.Epoch(headState)
+	if target.Epoch > headEpoch+1 || target.Epoch+1 < headEpoch {
+		return false
+	}
+	dependentSlot := computeShufflingDependentSlot(target.Epoch, f.beaconCfg.MinSeedLookahead, f.beaconCfg.SlotsPerEpoch)
+	targetDependentRoot := f.Ancestor(target.Root, dependentSlot).Root
+	if targetDependentRoot == (common.Hash{}) {
+		return false
+	}
+	return targetDependentRoot == f.Ancestor(headRoot, dependentSlot).Root
 }
 
 func (f *ForkChoiceStore) ProcessAttestingIndicies(
@@ -98,7 +118,7 @@ func (f *ForkChoiceStore) verifyAttestationWithCheckpointState(
 	attestation *solid.Attestation,
 	fromBlock bool,
 ) (attestationIndicies []uint64, err error) {
-	targetState, err := f.getCheckpointState(target)
+	targetState, err := f.getCheckpointStateLocked(target)
 	if err != nil {
 		return nil, err
 	}
@@ -152,6 +172,7 @@ func (f *ForkChoiceStore) verifyAttestationWithState(
 func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage) {
 	f.latestMessages.set(int(index), message)
 	f.gloasWeightTree.markDirty(index)
+	f.voteTally.markDirty(index)
 }
 
 func (f *ForkChoiceStore) trackGloasWeights() bool {
@@ -165,12 +186,12 @@ func (f *ForkChoiceStore) getLatestMessage(validatorIndex uint64) (LatestMessage
 
 func (f *ForkChoiceStore) isUnequivocating(validatorIndex uint64) bool {
 	// f.equivocatingIndicies is a bitlist
-	index := int(validatorIndex) / 8
-	if index >= len(f.equivocatingIndicies) {
+	index := validatorIndex / 8
+	if index >= uint64(len(f.equivocatingIndicies)) {
 		return false
 	}
-	subIndex := int(validatorIndex) % 8
-	return f.equivocatingIndicies[index]&(1<<uint(subIndex)) != 0
+	subIndex := validatorIndex % 8
+	return f.equivocatingIndicies[index]&(1<<subIndex) != 0
 }
 
 func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
@@ -196,6 +217,7 @@ func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
 	subIndex := int(validatorIndex) % 8
 	f.equivocatingIndicies[index] |= 1 << uint(subIndex)
 	f.gloasWeightTree.markDirty(validatorIndex)
+	f.voteTally.markDirty(validatorIndex)
 }
 
 func (f *ForkChoiceStore) updateLatestMessages(
@@ -203,6 +225,7 @@ func (f *ForkChoiceStore) updateLatestMessages(
 	indicies []uint64,
 ) {
 	if f.trackGloasWeights() {
+		f.voteTally = voteTally{}
 		f.updateLatestMessagesGloas(attestation, indicies)
 	} else {
 		f.updateLatestMessagesPreGloas(attestation, indicies)
@@ -242,6 +265,7 @@ func (f *ForkChoiceStore) updateLatestMessagesGloas(
 	slot := attestation.Data.Slot
 	beaconBlockRoot := attestation.Data.BeaconBlockRoot
 	payloadPresent := attestation.Data.CommitteeIndex == 1
+	updated := false
 
 	for _, index := range indicies {
 		if f.isUnequivocating(index) {
@@ -254,7 +278,12 @@ func (f *ForkChoiceStore) updateLatestMessagesGloas(
 				Root:           beaconBlockRoot,
 				PayloadPresent: payloadPresent,
 			})
+			updated = true
 		}
+	}
+	if updated {
+		f.headHash = common.Hash{}
+		f.headPayloadStatus = cltypes.PayloadStatusPending
 	}
 }
 

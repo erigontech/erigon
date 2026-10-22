@@ -68,20 +68,21 @@ const (
 	LessFalsePositives Features = 0b10 //
 )
 
-// SupportedFeaturs - if see feature not from this list (likely after downgrade) - return IncompatibleErr and recommend for user manually delete file
-var SupportedFeatures = []Features{Enums, LessFalsePositives}
-var IncompatibleErr = errors.New("incompatible. can re-build such files by command 'erigon snapshots index'")
+// SupportedFeaturs - if see feature not from this list (likely after downgrade) - return ErrIncompatible and recommend for user manually delete file
+var (
+	SupportedFeatures = []Features{Enums, LessFalsePositives}
+	ErrIncompatible   = errors.New("incompatible. can re-build such files by command 'erigon snapshots index'")
+)
 
 // Index implements index lookup from the file created by the RecSplit
 type Index struct {
 	offsetEf           *eliasfano32.EliasFano
 	f                  *os.File
-	mmapHandle2        *[mmap.MaxMapSize]byte // mmap handle for windows (this is used to close mmap)
 	filePath, fileName string
 
 	grData      []uint64
-	data        []byte // slice of correct size for the index to work with
-	mmapHandle1 []byte // mmap handle for unix (this is used to close mmap)
+	data        []byte  // slice of correct size for the index to work with
+	mmapHandle1 mmap.Ro // mmap handle for unix (this is used to close mmap)
 	golombRice  []uint32
 
 	dataStructureVersion version.DataStructureVersion
@@ -140,12 +141,12 @@ func OpenIndex(indexFilePath string) (_ *Index, err error) {
 	}
 	idx.size = stat.Size()
 	idx.modTime = stat.ModTime()
-	if idx.mmapHandle1, idx.mmapHandle2, err = mmap.Mmap(idx.f, int(idx.size)); err != nil {
+	if idx.mmapHandle1, err = mmap.OpenRo(idx.f, int(idx.size)); err != nil {
 		return nil, err
 	}
 	idx.data = idx.mmapHandle1[:idx.size]
 
-	if err = idx.init(); err != nil {
+	if err := idx.init(); err != nil {
 		return nil, err
 	}
 
@@ -167,7 +168,7 @@ func OpenIndex(indexFilePath string) (_ *Index, err error) {
 }
 
 func (idx *Index) init() (err error) {
-	var validationPassed = false
+	validationPassed := false
 	defer func() {
 		// recover from panic if one occurred. Set err to nil if no panic
 		if rec := recover(); rec != nil {
@@ -194,7 +195,7 @@ func (idx *Index) init() (err error) {
 	offset := 16 + 1 + int(idx.keyCount)*idx.bytesPerRec
 
 	if offset < 0 {
-		return fmt.Errorf("file %s %w. offset is: %d which is below zero", idx.fileName, IncompatibleErr, offset)
+		return fmt.Errorf("file %s %w. offset is: %d which is below zero", idx.fileName, ErrIncompatible, offset)
 	}
 
 	// Bucket count, bucketSize, leafSize
@@ -238,7 +239,7 @@ func (idx *Index) init() (err error) {
 		arrSz := binary.BigEndian.Uint64(idx.data[offset:])
 		offset += 8
 		if arrSz != idx.keyCount {
-			return fmt.Errorf("%w. size of existence filter %d != keys count %d", IncompatibleErr, arrSz, idx.keyCount)
+			return fmt.Errorf("%w. size of existence filter %d != keys count %d", ErrIncompatible, arrSz, idx.keyCount)
 		}
 		idx.existenceV0 = idx.data[offset : offset+int(arrSz)]
 		offset += int(arrSz)
@@ -274,7 +275,7 @@ func (idx *Index) init() (err error) {
 			}
 			offset += sz
 		default:
-			return fmt.Errorf("%w. unsupported existence filter version %d", IncompatibleErr, idx.dataStructureVersion)
+			return fmt.Errorf("%w. unsupported existence filter version %d", ErrIncompatible, idx.dataStructureVersion)
 		}
 	}
 
@@ -283,24 +284,25 @@ func (idx *Index) init() (err error) {
 	offset += 4
 	idx.golombRice = make([]uint32, golombParamSize)
 	for i := range golombParamSize {
-		if i == 0 {
+		switch {
+		case i == 0:
 			idx.golombRice[i] = (bijMemo[i] << 27) | bijMemo[i]
-		} else if i <= idx.leafSize {
+		case i <= idx.leafSize:
 			idx.golombRice[i] = (bijMemo[i] << 27) | (uint32(1) << 16) | bijMemo[i]
-		} else {
+		default:
 			computeGolombRice(i, idx.golombRice, idx.leafSize, idx.primaryAggrBound, idx.secondaryAggrBound)
 		}
 	}
 
 	l := binary.BigEndian.Uint64(idx.data[offset:])
 	offset += 8
-	p := (*[maxDataSize / 8]uint64)(unsafe.Pointer(&idx.data[offset]))
-	idx.grData = p[:l]
+	idx.grData = unsafe.Slice((*uint64)(unsafe.Pointer(&idx.data[offset])), l)
 	offset += 8 * int(l)
 	idx.ef.Read(idx.data[offset:])
 	validationPassed = true
 	return nil
 }
+
 func (idx *Index) ForceExistenceFilterWillNeed() {
 	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
 	if !existanceSupported {
@@ -328,6 +330,7 @@ func (idx *Index) ForceExistenceFilterNormal() {
 		idx.existenceV2.MadvNormal()
 	}
 }
+
 func (idx *Index) ForceExistenceFilterRandom() {
 	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
 	if !existanceSupported {
@@ -341,6 +344,7 @@ func (idx *Index) ForceExistenceFilterRandom() {
 		idx.existenceV2.MadvRandom()
 	}
 }
+
 func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
 	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
 	if !existanceSupported {
@@ -360,13 +364,9 @@ func onlyKnownFeatures(features Features) error {
 		features &^= f
 	}
 	if features != No {
-		return fmt.Errorf("%w. unknown features bitmap: %b", IncompatibleErr, features)
+		return fmt.Errorf("%w. unknown features bitmap: %b", ErrIncompatible, features)
 	}
 	return nil
-}
-
-func (idx *Index) DataHandle() unsafe.Pointer {
-	return unsafe.Pointer(&idx.data[0])
 }
 
 func (idx *Index) Size() int64 { return idx.size }
@@ -392,7 +392,7 @@ func (idx *Index) Close() {
 	if idx == nil || idx.f == nil {
 		return
 	}
-	if err := mmap.Munmap(idx.mmapHandle1, idx.mmapHandle2); err != nil {
+	if err := idx.mmapHandle1.Unmap(); err != nil {
 		log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", idx.FileName(), "stack", dbg.Stack())
 	}
 	if err := idx.f.Close(); err != nil {
@@ -591,6 +591,7 @@ func (idx *Index) DisableReadAhead() {
 		log.Warn("read-ahead negative counter", "file", idx.FileName())
 	}
 }
+
 func (idx *Index) MadvSequential() *Index {
 	if idx == nil || idx.mmapHandle1 == nil {
 		return idx
@@ -599,6 +600,7 @@ func (idx *Index) MadvSequential() *Index {
 	_ = mmap.MadviseSequential(idx.mmapHandle1)
 	return idx
 }
+
 func (idx *Index) MadvNormal() *Index {
 	if idx == nil || idx.mmapHandle1 == nil {
 		return idx
@@ -607,6 +609,7 @@ func (idx *Index) MadvNormal() *Index {
 	_ = mmap.MadviseNormal(idx.mmapHandle1)
 	return idx
 }
+
 func (idx *Index) MadvWillNeed() *Index {
 	if idx == nil || idx.mmapHandle1 == nil {
 		return idx

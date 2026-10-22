@@ -182,9 +182,11 @@ Only replace these values when the user explicitly requests another release.
 
 ### Phase 2: Run Tests
 
-Use `--sim.parallelism 4` for EEST EngineX runs to match the GitHub-hosted CI
-runners and avoid simulator connection exhaustion on the larger devnet shards.
-Use up to 12 for the smaller engine and RPC suites when local resources allow it.
+Read `sim-parallelism` from the selected CI matrix row and use that exact value
+for every reproduction and acceptance run, including focused single-test runs.
+Do not lower it because the local test selection is smaller. The current EEST
+EngineX rows use `--sim.parallelism=4`. Use up to 12 for smaller engine and RPC
+suites only when their CI configuration permits it and local resources allow it.
 
 When running multiple suites, launch **separate hive sessions in parallel** (as
 background shell commands) whenever the suites use different simulators. This gives

@@ -19,7 +19,7 @@ type RpcClient struct {
 
 func (me *RpcClient) fixPath(path string) (string, error) {
 	if !filepath.IsAbs(path) {
-		return path, nil
+		return filepath.ToSlash(path), nil
 	}
 	rel, err := filepath.Rel(me.rootDir, path)
 	if err != nil {
@@ -28,7 +28,8 @@ func (me *RpcClient) fixPath(path string) (string, error) {
 	if !filepath.IsLocal(rel) {
 		return "", errRpcSnapName{fmt.Errorf("relative path %q is not local to %q", rel, me.rootDir)}
 	}
-	return rel, nil
+	// Torrent names are slash-separated everywhere; filepath.Rel yields backslashes on Windows.
+	return filepath.ToSlash(rel), nil
 }
 
 func (me *RpcClient) fixPaths(paths iter.Seq[*string]) (err error) {
@@ -85,8 +86,21 @@ func (me *RpcClient) Delete(ctx context.Context, paths []string) (err error) {
 	return
 }
 
+// DownloadProgress exposes the wrapped client's progress capability; nil when
+// the underlying downloader (e.g. an external one reached over gRPC) cannot
+// report progress.
+func (me *RpcClient) DownloadProgress() dbservices.DownloadProgressReport {
+	if p, ok := me.inner.(dbservices.DownloadProgressProvider); ok {
+		return p.DownloadProgress()
+	}
+	return nil
+}
+
 func NewRpcClient(inner downloaderproto.DownloaderClient, rootDir string) *RpcClient {
 	return &RpcClient{inner: inner, rootDir: rootDir}
 }
 
-var _ dbservices.DownloaderClient = (*RpcClient)(nil)
+var (
+	_ dbservices.DownloaderClient         = (*RpcClient)(nil)
+	_ dbservices.DownloadProgressProvider = (*RpcClient)(nil)
+)

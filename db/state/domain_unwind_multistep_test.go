@@ -61,7 +61,7 @@ func TestDomain_MultiStepUnwindMatchesGroundTruth(t *testing.T) {
 	defer tx.Rollback()
 
 	dt := d.beginForTests()
-	w := dt.NewWriter()
+	w := dt.NewWriter(db)
 	defer w.Close()
 
 	ringKey := func(i int) []byte { return fmt.Appendf(nil, "ring-%03d", i) }

@@ -23,47 +23,44 @@ import (
 // MarshalTOML marshals as TOML.
 func (c Config) MarshalTOML() (interface{}, error) {
 	type Config struct {
-		Genesis                             *types.Genesis `toml:",omitempty"`
-		NetworkID                           uint64
-		EthDiscoveryURLs                    []string
-		Prune                               prune.Mode
-		BatchSize                           datasize.ByteSize
-		BadBlockHash                        common.Hash
-		Snapshot                            BlocksFreezing
-		Downloader                          *downloadercfg.Cfg
-		CaplinConfig                        clparams.CaplinConfig
-		Dirs                                datadir.Dirs
-		ExternalSnapshotDownloaderAddr      string
-		Whitelist                           map[uint64]common.Hash `toml:"-"`
-		Builder                             buildercfg.BuilderConfig
-		Ethash                              ethashcfg.Config
-		Aura                                chain.AuRaConfig
-		TxPool                              txpoolcfg.Config
-		Shutter                             shuttercfg.Config
-		GPO                                 gaspricecfg.Config
-		RPCGasCap                           uint64  `toml:",omitempty"`
-		RPCTxFeeCap                         float64 `toml:",omitempty"`
-		StateStream                         bool
-		ExperimentalBAL                     bool
-		HeimdallURL                         string
-		WithoutHeimdall                     bool
-		Ethstats                            string
-		InternalCL                          bool
-		OverrideOsakaTime                   *uint64 `toml:",omitempty"`
-		OverrideAmsterdamTime               *uint64 `toml:",omitempty"`
-		KeepStoredChainConfig               bool
-		PolygonPosSingleSlotFinality        bool
-		PolygonPosSingleSlotFinalityBlockAt uint64
-		AllowAA                             bool
-		FcuTimeout                          time.Duration
-		FcuBackgroundPrune                  bool
-		FcuBackgroundCommit                 bool
-		MCPAddress                          string
-		ErigondbDomainStepsInFrozenFile     *uint64 `toml:",omitempty"`
-		CommitmentPlainValues               *bool   `toml:",omitempty"`
-		WarmupKzgCtxOnInit                  bool
+		StateCacheBudget                datasize.ByteSize
+		Genesis                         *types.Genesis `toml:",omitempty"`
+		NetworkID                       uint64
+		EthDiscoveryURLs                []string
+		Prune                           prune.Mode
+		BatchSize                       datasize.ByteSize
+		BadBlockHash                    common.Hash
+		Snapshot                        BlocksFreezing
+		Downloader                      *downloadercfg.Cfg
+		CaplinConfig                    clparams.CaplinConfig
+		Dirs                            datadir.Dirs
+		ExternalSnapshotDownloaderAddr  string
+		Whitelist                       map[uint64]common.Hash `toml:"-"`
+		Builder                         buildercfg.BuilderConfig
+		Ethash                          ethashcfg.Config
+		Aura                            chain.AuRaConfig
+		TxPool                          txpoolcfg.Config
+		Shutter                         shuttercfg.Config
+		GPO                             gaspricecfg.Config
+		RPCGasCap                       uint64  `toml:",omitempty"`
+		RPCTxFeeCap                     float64 `toml:",omitempty"`
+		StateStream                     bool
+		ExperimentalBAL                 bool
+		Ethstats                        string
+		InternalCL                      bool
+		OverrideOsakaTime               *uint64 `toml:",omitempty"`
+		OverrideAmsterdamTime           *uint64 `toml:",omitempty"`
+		KeepStoredChainConfig           bool
+		AllowAA                         bool
+		FcuTimeout                      time.Duration
+		FcuBackgroundPrune              bool
+		MCPAddress                      string
+		ErigondbDomainStepsInFrozenFile *uint64 `toml:",omitempty"`
+		CommitmentPlainValues           *bool   `toml:",omitempty"`
+		WarmupKzgCtxOnInit              bool
 	}
 	var enc Config
+	enc.StateCacheBudget = c.StateCacheBudget
 	enc.Genesis = c.Genesis
 	enc.NetworkID = c.NetworkID
 	enc.EthDiscoveryURLs = c.EthDiscoveryURLs
@@ -86,19 +83,14 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.RPCTxFeeCap = c.RPCTxFeeCap
 	enc.StateStream = c.StateStream
 	enc.ExperimentalBAL = c.ExperimentalBAL
-	enc.HeimdallURL = c.HeimdallURL
-	enc.WithoutHeimdall = c.WithoutHeimdall
 	enc.Ethstats = c.Ethstats
 	enc.InternalCL = c.InternalCL
 	enc.OverrideOsakaTime = c.OverrideOsakaTime
 	enc.OverrideAmsterdamTime = c.OverrideAmsterdamTime
 	enc.KeepStoredChainConfig = c.KeepStoredChainConfig
-	enc.PolygonPosSingleSlotFinality = c.PolygonPosSingleSlotFinality
-	enc.PolygonPosSingleSlotFinalityBlockAt = c.PolygonPosSingleSlotFinalityBlockAt
 	enc.AllowAA = c.AllowAA
 	enc.FcuTimeout = c.FcuTimeout
 	enc.FcuBackgroundPrune = c.FcuBackgroundPrune
-	enc.FcuBackgroundCommit = c.FcuBackgroundCommit
 	enc.MCPAddress = c.MCPAddress
 	enc.ErigondbDomainStepsInFrozenFile = c.ErigondbDomainStepsInFrozenFile
 	enc.CommitmentPlainValues = c.CommitmentPlainValues
@@ -109,49 +101,48 @@ func (c Config) MarshalTOML() (interface{}, error) {
 // UnmarshalTOML unmarshals from TOML.
 func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	type Config struct {
-		Genesis                             *types.Genesis `toml:",omitempty"`
-		NetworkID                           *uint64
-		EthDiscoveryURLs                    []string
-		Prune                               *prune.Mode
-		BatchSize                           *datasize.ByteSize
-		BadBlockHash                        *common.Hash
-		Snapshot                            *BlocksFreezing
-		Downloader                          *downloadercfg.Cfg
-		CaplinConfig                        *clparams.CaplinConfig
-		Dirs                                *datadir.Dirs
-		ExternalSnapshotDownloaderAddr      *string
-		Whitelist                           map[uint64]common.Hash `toml:"-"`
-		Builder                             *buildercfg.BuilderConfig
-		Ethash                              *ethashcfg.Config
-		Aura                                *chain.AuRaConfig
-		TxPool                              *txpoolcfg.Config
-		Shutter                             *shuttercfg.Config
-		GPO                                 *gaspricecfg.Config
-		RPCGasCap                           *uint64  `toml:",omitempty"`
-		RPCTxFeeCap                         *float64 `toml:",omitempty"`
-		StateStream                         *bool
-		ExperimentalBAL                     *bool
-		HeimdallURL                         *string
-		WithoutHeimdall                     *bool
-		Ethstats                            *string
-		InternalCL                          *bool
-		OverrideOsakaTime                   *uint64 `toml:",omitempty"`
-		OverrideAmsterdamTime               *uint64 `toml:",omitempty"`
-		KeepStoredChainConfig               *bool
-		PolygonPosSingleSlotFinality        *bool
-		PolygonPosSingleSlotFinalityBlockAt *uint64
-		AllowAA                             *bool
-		FcuTimeout                          *time.Duration
-		FcuBackgroundPrune                  *bool
-		FcuBackgroundCommit                 *bool
-		MCPAddress                          *string
-		ErigondbDomainStepsInFrozenFile     *uint64 `toml:",omitempty"`
-		CommitmentPlainValues               *bool   `toml:",omitempty"`
-		WarmupKzgCtxOnInit                  *bool
+		StateCacheBudget                *datasize.ByteSize
+		Genesis                         *types.Genesis `toml:",omitempty"`
+		NetworkID                       *uint64
+		EthDiscoveryURLs                []string
+		Prune                           *prune.Mode
+		BatchSize                       *datasize.ByteSize
+		BadBlockHash                    *common.Hash
+		Snapshot                        *BlocksFreezing
+		Downloader                      *downloadercfg.Cfg
+		CaplinConfig                    *clparams.CaplinConfig
+		Dirs                            *datadir.Dirs
+		ExternalSnapshotDownloaderAddr  *string
+		Whitelist                       map[uint64]common.Hash `toml:"-"`
+		Builder                         *buildercfg.BuilderConfig
+		Ethash                          *ethashcfg.Config
+		Aura                            *chain.AuRaConfig
+		TxPool                          *txpoolcfg.Config
+		Shutter                         *shuttercfg.Config
+		GPO                             *gaspricecfg.Config
+		RPCGasCap                       *uint64  `toml:",omitempty"`
+		RPCTxFeeCap                     *float64 `toml:",omitempty"`
+		StateStream                     *bool
+		ExperimentalBAL                 *bool
+		Ethstats                        *string
+		InternalCL                      *bool
+		OverrideOsakaTime               *uint64 `toml:",omitempty"`
+		OverrideAmsterdamTime           *uint64 `toml:",omitempty"`
+		KeepStoredChainConfig           *bool
+		AllowAA                         *bool
+		FcuTimeout                      *time.Duration
+		FcuBackgroundPrune              *bool
+		MCPAddress                      *string
+		ErigondbDomainStepsInFrozenFile *uint64 `toml:",omitempty"`
+		CommitmentPlainValues           *bool   `toml:",omitempty"`
+		WarmupKzgCtxOnInit              *bool
 	}
 	var dec Config
 	if err := unmarshal(&dec); err != nil {
 		return err
+	}
+	if dec.StateCacheBudget != nil {
+		c.StateCacheBudget = *dec.StateCacheBudget
 	}
 	if dec.Genesis != nil {
 		c.Genesis = dec.Genesis
@@ -219,12 +210,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.ExperimentalBAL != nil {
 		c.ExperimentalBAL = *dec.ExperimentalBAL
 	}
-	if dec.HeimdallURL != nil {
-		c.HeimdallURL = *dec.HeimdallURL
-	}
-	if dec.WithoutHeimdall != nil {
-		c.WithoutHeimdall = *dec.WithoutHeimdall
-	}
 	if dec.Ethstats != nil {
 		c.Ethstats = *dec.Ethstats
 	}
@@ -240,12 +225,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.KeepStoredChainConfig != nil {
 		c.KeepStoredChainConfig = *dec.KeepStoredChainConfig
 	}
-	if dec.PolygonPosSingleSlotFinality != nil {
-		c.PolygonPosSingleSlotFinality = *dec.PolygonPosSingleSlotFinality
-	}
-	if dec.PolygonPosSingleSlotFinalityBlockAt != nil {
-		c.PolygonPosSingleSlotFinalityBlockAt = *dec.PolygonPosSingleSlotFinalityBlockAt
-	}
 	if dec.AllowAA != nil {
 		c.AllowAA = *dec.AllowAA
 	}
@@ -254,9 +233,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.FcuBackgroundPrune != nil {
 		c.FcuBackgroundPrune = *dec.FcuBackgroundPrune
-	}
-	if dec.FcuBackgroundCommit != nil {
-		c.FcuBackgroundCommit = *dec.FcuBackgroundCommit
 	}
 	if dec.MCPAddress != nil {
 		c.MCPAddress = *dec.MCPAddress

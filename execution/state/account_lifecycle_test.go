@@ -22,6 +22,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -109,13 +110,14 @@ func TestAccountLifecycle_LayersOwnTxWrites(t *testing.T) {
 
 	newIBS := func() (*IntraBlockState, *VersionMap) {
 		vm := NewVersionMap(nil)
-		ibs := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), vm)
+		ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), vm)
 		ibs.SetTxContext(0, 5)
 		return ibs, vm
 	}
 	ownSD := func(ibs *IntraBlockState, addr accounts.Address, val bool) {
 		ibs.versionedWrites.SetSelfDestruct(addr, &VersionedWrite[bool]{
-			WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 5}}, Val: val})
+			WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 5}}, Val: val,
+		})
 		ibs.journal.dirties[addr] = 1
 	}
 

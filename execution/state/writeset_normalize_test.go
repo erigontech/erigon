@@ -8,6 +8,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -82,11 +86,11 @@ func TestNormalize_SelfDestructDeletesVmAndDomainStorageSlots(t *testing.T) {
 	kDomain := accounts.InternKey(common.HexToHash("0x02")) // pre-block, in domain only
 	vm := NewVersionMap(nil)
 	vm.WriteStorage(addr, kVM, Version{TxIndex: 0}, *uint256.NewInt(9), true)
-	domainKeys := func(a accounts.Address) []accounts.StorageKey {
+	domainKeys := func(a accounts.Address) ([]accounts.StorageKey, error) {
 		if a == addr {
-			return []accounts.StorageKey{kDomain}
+			return []accounts.StorageKey{kDomain}, nil
 		}
-		return nil
+		return nil, nil
 	}
 
 	ws := &WriteSet{}
@@ -137,4 +141,279 @@ func TestNormalize_SelfDestructBalanceRetention_EIP8246(t *testing.T) {
 	post, _ := build().Normalize(vm, 1, 0, &minimalStateReader{}, nil, false, false, true /*eip8246*/)
 	_, postBal := post.GetBalance(addr)
 	require.True(t, postBal, "EIP-8246 SD retains the balance write")
+}
+
+// A self-destructed address must keep none of its account-field or raw storage
+// writes: any survivor makes Apply see a non-empty account and take the
+// cleanup-before-recreate branch instead of the pure delete, leaving a phantom
+// account. Only
+// SelfDestructPath (and, under EIP-8246, the balance) may remain.
+func TestNormalize_SelfDestructDropsAccountFieldAndStorageWrites(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x5DEAD"))
+	kRaw := accounts.InternKey(common.HexToHash("0x03"))
+	code := accounts.NewCode([]byte{0x60, 0x00})
+	ver := Version{TxIndex: 1}
+
+	ws := &WriteSet{}
+	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{
+		WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: ver},
+		Val:         true,
+	})
+	ws.SetNonce(addr, &VersionedWrite[uint64]{
+		WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: ver},
+		Val:         7,
+	})
+	ws.SetIncarnation(addr, &VersionedWrite[uint64]{
+		WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath, Version: ver},
+		Val:         3,
+	})
+	ws.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{
+		WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: ver},
+		Val:         code.Hash,
+	})
+	ws.SetCode(addr, &VersionedWrite[accounts.Code]{
+		WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: ver},
+		Val:         code,
+	})
+	// Not present in the versionMap or the domain, so the SD storage cascade
+	// cannot re-emit it — if it shows up, the raw write survived the SD filter.
+	ws.SetStorage(addr, kRaw, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: kRaw, Version: ver},
+		Val:         *uint256.NewInt(42),
+	})
+
+	out, err := ws.Normalize(NewVersionMap(nil), 1, 0, &minimalStateReader{}, nil, false /*emptyRemoval*/, false /*isAura*/, false /*eip8246*/)
+	require.NoError(t, err)
+
+	_, sdOK := out.GetSelfDestruct(addr)
+	require.True(t, sdOK, "the self-destruct itself must survive")
+	_, nonceOK := out.GetNonce(addr)
+	require.False(t, nonceOK, "nonce write of a self-destructed address must be dropped")
+	_, incOK := out.GetIncarnation(addr)
+	require.False(t, incOK, "incarnation write of a self-destructed address must be dropped")
+	_, codeHashOK := out.GetCodeHash(addr)
+	require.False(t, codeHashOK, "codeHash write of a self-destructed address must be dropped")
+	_, codeOK := out.GetCode(addr)
+	require.False(t, codeOK, "code write of a self-destructed address must be dropped")
+	_, storageOK := out.GetStorage(addr, kRaw)
+	require.False(t, storageOK, "raw storage write of a self-destructed address must be dropped")
+}
+
+// The account-field writes of a self-destructed address are what make Apply
+// compute pureDelete=false and take the cleanup-before-recreate branch, leaving
+// a phantom account. Normalize drops them; this asserts the guarantee at the
+// consumer so a filter regression surfaces on the block that triggers it rather
+// than as a wrong trie root later.
+func TestAssertSelfDestructNormalized(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xA55E27"))
+	ver := Version{TxIndex: 1}
+	sd := func(ws *WriteSet) *WriteSet {
+		ws.SetSelfDestruct(addr, &VersionedWrite[bool]{
+			WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: ver},
+			Val:         true,
+		})
+		return ws
+	}
+
+	require.Panics(t, func() {
+		ws := sd(&WriteSet{})
+		ws.SetNonce(addr, &VersionedWrite[uint64]{
+			WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: ver},
+			Val:         1,
+		})
+		ws.assertSelfDestructNormalized()
+	}, "a nonce write on a self-destructed address must trip the assert")
+
+	require.Panics(t, func() {
+		ws := sd(&WriteSet{})
+		ws.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{
+			WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: ver},
+			Val:         accounts.NewCode([]byte{0x00}).Hash,
+		})
+		ws.assertSelfDestructNormalized()
+	}, "a codeHash write on a self-destructed address must trip the assert")
+
+	require.Panics(t, func() {
+		ws := sd(&WriteSet{})
+		ws.SetIncarnation(addr, &VersionedWrite[uint64]{
+			WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath, Version: ver},
+			Val:         2,
+		})
+		ws.assertSelfDestructNormalized()
+	}, "an incarnation write on a self-destructed address must trip the assert")
+
+	// Balance (kept under EIP-8246) and the storage-delete cascade are the two
+	// things a normalized self-destruct legitimately carries.
+	require.NotPanics(t, func() {
+		ws := sd(&WriteSet{})
+		ws.SetBalance(addr, &VersionedWrite[uint256.Int]{
+			WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: ver},
+			Val:         *uint256.NewInt(9),
+		})
+		k := accounts.InternKey(common.HexToHash("0x01"))
+		ws.SetStorage(addr, k, &VersionedWrite[uint256.Int]{
+			WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: k, Version: ver},
+		})
+		ws.assertSelfDestructNormalized()
+	}, "balance and storage deletes are legal on a self-destructed address")
+}
+
+// TestCommittedStorageKeys pins the account probe that guards the self-destruct
+// storage walk. A contract created and destroyed inside one batch never has a
+// committed account, which is what makes the probe worth its own read.
+func TestCommittedStorageKeys(t *testing.T) {
+	_, tx, domains := NewTestRwTx(t)
+	slot := common.HexToHash("0x01")
+
+	putStorage := func(t *testing.T, addr accounts.Address) {
+		t.Helper()
+		av := addr.Value()
+		key := append(append([]byte{}, av[:]...), slot[:]...)
+		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, key, []byte{0x42}, 0, nil))
+	}
+
+	t.Run("walks when the account is committed", func(t *testing.T) {
+		addr := accounts.InternAddress(common.HexToAddress("0xaa"))
+		av := addr.Value()
+		acc := accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, av[:], accounts.SerialiseV3(&acc), 0, nil))
+		putStorage(t, addr)
+
+		keys, err := CommittedStorageKeys(domains, tx, addr)
+		require.NoError(t, err)
+		require.Equal(t, []accounts.StorageKey{accounts.InternKey(slot)}, keys)
+	})
+
+	t.Run("skips the walk without a committed account", func(t *testing.T) {
+		// Storage with no account is the state the guard treats as unreachable.
+		// Writing it is what makes the skip observable: a walk would return it.
+		defer func(v bool) { dbg.AssertEnabled = v }(dbg.AssertEnabled)
+		dbg.AssertEnabled = false
+		addr := accounts.InternAddress(common.HexToAddress("0xbb"))
+		putStorage(t, addr)
+
+		keys, err := CommittedStorageKeys(domains, tx, addr)
+		require.NoError(t, err)
+		require.Empty(t, keys, "walked the storage prefix for an address with no committed account")
+	})
+
+	t.Run("skips silently when neither account nor storage is committed", func(t *testing.T) {
+		defer func(v bool) { dbg.AssertEnabled = v }(dbg.AssertEnabled)
+		dbg.AssertEnabled = true
+		addr := accounts.InternAddress(common.HexToAddress("0xee"))
+
+		keys, err := CommittedStorageKeys(domains, tx, addr)
+		require.NoError(t, err)
+		require.Empty(t, keys)
+	})
+
+	t.Run("asserts on storage without an account", func(t *testing.T) {
+		defer func(v bool) { dbg.AssertEnabled = v }(dbg.AssertEnabled)
+		dbg.AssertEnabled = true
+		addr := accounts.InternAddress(common.HexToAddress("0xcc"))
+		putStorage(t, addr)
+
+		require.Panics(t, func() { _, _ = CommittedStorageKeys(domains, tx, addr) },
+			"the skip rests on this invariant, so breaking it must not stay silent")
+	})
+}
+
+// A storage-key lookup failure must reach the caller as an error, not be
+// swallowed into an empty slot list that silently drops the self-destruct
+// cascade.
+func TestNormalizeReturnsStorageKeysError(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xbeef"))
+	want := errors.New("domain read failed")
+	vm := NewVersionMap(nil)
+
+	ws := &WriteSet{}
+	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{
+		WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 1}},
+		Val:         true,
+	})
+	ws.SetBalance(addr, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 1}},
+		Val:         *uint256.NewInt(0),
+	})
+
+	_, err := ws.Normalize(vm, 1, 0, &minimalStateReader{}, func(accounts.Address) ([]accounts.StorageKey, error) {
+		return nil, want
+	}, false, false, false)
+	require.ErrorIs(t, err, want)
+}
+
+// A contract that did not exist before the tx and is created and self-destructed
+// in it leaves no state, so Normalize must emit nothing for it: no delete for the
+// apply path to replay and no key for the commitment to fold. A CREATE onto an
+// address that already held a balance still deletes that account.
+func TestNormalize_CreatedAndDestroyedInTxLeavesNoWrites(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xC4EA7ED"))
+	run := func(t *testing.T, reader StateReader, eip8246 bool) *WriteSet {
+		t.Helper()
+		vm := NewVersionMap(nil)
+		ibs := NewWithVersionMap(reader, vm)
+		ibs.SetNoMaterialize(true)
+		defer ibs.Close()
+		ibs.SetTxContext(0, 0)
+		ibs.SetVersion(0)
+		ibs.eip8246 = eip8246
+		require.NoError(t, ibs.CreateAccount(addr, true))
+		require.NoError(t, ibs.SetNonce(addr, 1, tracing.NonceChangeNewContract))
+		require.NoError(t, ibs.SetCode(addr, []byte{0x33, 0xff}, tracing.CodeChangeContractCreation))
+		_, err := ibs.Selfdestruct(addr, eip8246)
+		require.NoError(t, err)
+		rules := &chain.Rules{IsSpuriousDragon: true, IsCancun: true, IsAmsterdam: eip8246}
+		writes, err := ibs.FinalizedWrites(rules)
+		require.NoError(t, err)
+		out, err := writes.Normalize(vm, 0, 0, reader, nil, true /*emptyRemoval*/, false /*isAura*/, eip8246)
+		require.NoError(t, err)
+		return out
+	}
+	hasAddr := func(ws *WriteSet) bool {
+		for h := range ws.AllHeaders() {
+			if h.Address == addr {
+				return true
+			}
+		}
+		return false
+	}
+	for _, eip8246 := range []bool{false, true} {
+		require.False(t, hasAddr(run(t, &minimalStateReader{}, eip8246)), "eip8246=%v: absent before the tx and gone after it", eip8246)
+	}
+	prefunded := run(t, newAccountStateReader(addr), false)
+	sd, ok := prefunded.GetSelfDestruct(addr)
+	require.True(t, ok && sd.Val, "a CREATE onto a pre-funded address must still delete that account")
+
+	// An earlier tx of the block funded the address; a reader that does not see the
+	// block's earlier txs must not make its delete look unneeded.
+	funded := NewVersionMap(nil)
+	funded.FlushVersionedWrites(func() *WriteSet {
+		w := &WriteSet{}
+		w.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(5)})
+		return w
+	}(), true)
+	tx1 := Version{TxIndex: 1}
+	later := &WriteSet{}
+	later.SetCreateContract(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath, Version: tx1}, Val: true})
+	later.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: tx1}, Val: true})
+	later.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: tx1}, Val: uint256.Int{}})
+	out, err := later.Normalize(funded, 1, 0, &minimalStateReader{}, nil, true, false, false)
+	require.NoError(t, err)
+	sd, ok = out.GetSelfDestruct(addr)
+	require.True(t, ok && sd.Val, "an account funded earlier in the block must still be deleted")
+
+	ver := Version{TxIndex: 0}
+	ws := &WriteSet{}
+	ws.SetCreateContract(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath, Version: ver}, Val: true})
+	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: ver}, Val: true})
+	ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: ver}, Val: *uint256.NewInt(5)})
+	kept, err := ws.Normalize(NewVersionMap(nil), 0, 0, &minimalStateReader{}, nil, true, false, true /*eip8246*/)
+	require.NoError(t, err)
+	bal, ok := kept.GetBalance(addr)
+	require.True(t, ok && bal.Val.Eq(uint256.NewInt(5)), "EIP-8246: a created and destroyed account keeps its balance")
+	sd, ok = kept.GetSelfDestruct(addr)
+	require.True(t, ok && sd.Val, "EIP-8246: the self-destruct of an account that keeps its balance must survive")
 }

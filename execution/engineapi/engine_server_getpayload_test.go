@@ -24,14 +24,15 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/rpc"
 )
 
 func TestGetPayloadV4RejectsNilRequests(t *testing.T) {
@@ -42,7 +43,7 @@ func TestGetPayloadV4RejectsNilRequests(t *testing.T) {
 		getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
 			require.Equal(t, payloadID, id)
 			return execmodule.AssembledBlockResult{
-				Block: minimalPragueBlock(1, nil /* nil Requests */),
+				Block: minimalPayloadBlock(1, nil /* nil Requests */),
 			}, nil
 		},
 	}
@@ -62,7 +63,7 @@ func TestGetPayloadV4AcceptsEmptyRequestsBundle(t *testing.T) {
 		getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
 			require.Equal(t, payloadID, id)
 			return execmodule.AssembledBlockResult{
-				Block: minimalPragueBlock(1, make(types.FlatRequests, 0)),
+				Block: minimalPayloadBlock(1, make(types.FlatRequests, 0)),
 			}, nil
 		},
 	}
@@ -76,36 +77,168 @@ func TestGetPayloadV4AcceptsEmptyRequestsBundle(t *testing.T) {
 	require.Len(t, resp.ExecutionRequests, 0)
 }
 
-func TestAssembledBlockToPayloadResponseIncludesCanonicalEmptyBAL(t *testing.T) {
+func TestGetPayloadV4AcceptsMatchingBlobsBundleCounts(t *testing.T) {
 	t.Parallel()
 
-	baseFee := uint256.NewInt(1_000_000_000)
-	emptyBALHash := empty.BlockAccessListHash
-	header := &types.Header{
-		Number:              *uint256.NewInt(101),
-		Time:                1,
-		BaseFee:             baseFee,
-		GasLimit:            30_000_000,
-		BlockAccessListHash: &emptyBALHash,
+	const payloadID uint64 = 48
+	cfg := preOsakaChainConfig()
+	stub := &getPayloadStubModule{
+		getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
+			require.Equal(t, payloadID, id)
+			return execmodule.AssembledBlockResult{
+				Block:      blobPayloadBlock(cfg.ChainID, 0 /* wrapperVersion */, 1 /* commitments */, 1 /* blobs */, 1 /* proofs */),
+				BlockValue: uint256.NewInt(0),
+			}, nil
+		},
 	}
-	block := types.NewBlockWithHeader(header)
-	br := &types.BlockWithReceipts{Block: block, BlockAccessList: make(types.BlockAccessList, 0), Requests: make(types.FlatRequests, 0)}
+	srv := newProposingEngineServerWithConfig(cfg, stub)
 
-	resp, err := assembledBlockToPayloadResponse(br, uint256.NewInt(0), clparams.GloasVersion)
-	require.NoError(t, err)
+	resp, err := srv.GetPayloadV4(context.Background(), payloadIDBytes(payloadID))
 
-	emptyBAL, err := types.EncodeBlockAccessListBytes(make(types.BlockAccessList, 0))
 	require.NoError(t, err)
-	require.NotNil(t, resp.ExecutionPayload.BlockAccessList)
-	require.Equal(t, hexutil.Bytes(emptyBAL), *resp.ExecutionPayload.BlockAccessList)
+	require.NotNil(t, resp)
+	require.Len(t, resp.BlobsBundle.Blobs, 1)
+	require.Len(t, resp.BlobsBundle.Proofs, 1)
 }
 
-func newProposingEngineServerForGetPayloadTests(stub execmodule.ExecutionModule) *EngineServer {
-	cfg := allForksChainConfig()
-	// GetPayloadV4 is valid on Prague but invalid once Osaka activates.
-	cfg.OsakaTime = nil
-	cfg.AmsterdamTime = nil
+func TestGetPayloadV3RejectsMismatchedBlobsBundleCounts(t *testing.T) {
+	t.Parallel()
 
+	const payloadID uint64 = 47
+	cfg := prePragueChainConfig()
+	stub := &getPayloadStubModule{
+		getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
+			require.Equal(t, payloadID, id)
+			return execmodule.AssembledBlockResult{
+				Block:      blobPayloadBlock(cfg.ChainID, 0 /* wrapperVersion */, 1 /* commitments */, 1 /* blobs */, 2 /* proofs */),
+				BlockValue: uint256.NewInt(0),
+			}, nil
+		},
+	}
+	srv := newProposingEngineServerWithConfig(cfg, stub)
+
+	resp, err := srv.GetPayloadV3(context.Background(), payloadIDBytes(payloadID))
+
+	require.ErrorContains(t, err, "built invalid blobsBundle")
+	require.Nil(t, resp)
+}
+
+func TestGetPayloadV6RejectsMismatchedBlobsBundleCounts(t *testing.T) {
+	t.Parallel()
+
+	const payloadID uint64 = 44
+	cfg := allForksChainConfig()
+	stub := &getPayloadStubModule{
+		getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
+			require.Equal(t, payloadID, id)
+			return execmodule.AssembledBlockResult{
+				Block:      blobPayloadBlock(cfg.ChainID, 1 /* wrapperVersion */, 1 /* commitments */, 1 /* blobs */, 1 /* proofs */),
+				BlockValue: uint256.NewInt(0),
+			}, nil
+		},
+	}
+	srv := newProposingEngineServerWithConfig(cfg, stub)
+
+	resp, err := srv.GetPayloadV6(context.Background(), payloadIDBytes(payloadID))
+
+	require.ErrorContains(t, err, "built invalid blobsBundle")
+	require.Nil(t, resp)
+}
+
+func TestGetPayloadV1AcceptsParisPayload(t *testing.T) {
+	t.Parallel()
+
+	const payloadID uint64 = 49
+	stub := &getPayloadStubModule{
+		getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
+			require.Equal(t, payloadID, id)
+			return execmodule.AssembledBlockResult{
+				Block:      minimalPayloadBlock(99, nil),
+				BlockValue: uint256.NewInt(0),
+			}, nil
+		},
+	}
+	srv := newProposingEngineServerWithConfig(parisShanghaiChainConfig(), stub)
+
+	resp, err := srv.GetPayloadV1(context.Background(), payloadIDBytes(payloadID))
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Nil(t, resp.Withdrawals)
+}
+
+func TestGetPayloadV1RejectsShanghaiPayload(t *testing.T) {
+	t.Parallel()
+
+	const payloadID uint64 = 44
+	stub := &getPayloadStubModule{
+		getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
+			require.Equal(t, payloadID, id)
+			return execmodule.AssembledBlockResult{
+				Block:      minimalPayloadBlock(100, nil),
+				BlockValue: uint256.NewInt(0),
+			}, nil
+		},
+	}
+	srv := newProposingEngineServerWithConfig(parisShanghaiChainConfig(), stub)
+
+	resp, err := srv.GetPayloadV1(context.Background(), payloadIDBytes(payloadID))
+
+	require.Nil(t, resp)
+	var unsupported *rpc.UnsupportedForkError
+	require.ErrorAs(t, err, &unsupported)
+}
+
+func TestGetPayloadV2AcceptsParisPayload(t *testing.T) {
+	t.Parallel()
+
+	const payloadID uint64 = 45
+	stub := &getPayloadStubModule{
+		getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
+			require.Equal(t, payloadID, id)
+			return execmodule.AssembledBlockResult{
+				Block:      minimalPayloadBlock(99, nil),
+				BlockValue: uint256.NewInt(0),
+			}, nil
+		},
+	}
+	srv := newProposingEngineServerWithConfig(parisShanghaiChainConfig(), stub)
+
+	resp, err := srv.GetPayloadV2(context.Background(), payloadIDBytes(payloadID))
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Nil(t, resp.ExecutionPayload.Withdrawals)
+}
+
+func TestGetPayloadV2AcceptsShanghaiPayload(t *testing.T) {
+	t.Parallel()
+
+	const payloadID uint64 = 46
+	stub := &getPayloadStubModule{
+		getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
+			require.Equal(t, payloadID, id)
+			return execmodule.AssembledBlockResult{
+				Block:      minimalPayloadBlock(100, nil),
+				BlockValue: uint256.NewInt(0),
+			}, nil
+		},
+	}
+	srv := newProposingEngineServerWithConfig(parisShanghaiChainConfig(), stub)
+
+	resp, err := srv.GetPayloadV2(context.Background(), payloadIDBytes(payloadID))
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+}
+
+// newProposingEngineServerForGetPayloadTests returns a server on a Prague-window
+// config: GetPayloadV4 is valid on Prague but invalid once Osaka activates.
+func newProposingEngineServerForGetPayloadTests(stub execmodule.ExecutionModule) *EngineServer {
+	return newProposingEngineServerWithConfig(preOsakaChainConfig(), stub)
+}
+
+func newProposingEngineServerWithConfig(cfg *chain.Config, stub execmodule.ExecutionModule) *EngineServer {
 	return NewEngineServer(
 		log.New(),
 		cfg,
@@ -122,9 +255,13 @@ func newProposingEngineServerForGetPayloadTests(stub execmodule.ExecutionModule)
 	)
 }
 
-// minimalPragueBlock builds the smallest possible BlockWithReceipts for Prague
-// (timestamp=1, BaseFee set, no transactions) with the given requests slice.
-func minimalPragueBlock(timestamp uint64, requests types.FlatRequests) *types.BlockWithReceipts {
+func parisShanghaiChainConfig() *chain.Config {
+	cfg := preCancunChainConfig()
+	cfg.ShanghaiTime = common.NewUint64(100)
+	return cfg
+}
+
+func minimalPayloadBlock(timestamp uint64, requests types.FlatRequests) *types.BlockWithReceipts {
 	baseFee := uint256.NewInt(1_000_000_000)
 	header := &types.Header{
 		Number:   *uint256.NewInt(101),
@@ -132,10 +269,33 @@ func minimalPragueBlock(timestamp uint64, requests types.FlatRequests) *types.Bl
 		BaseFee:  baseFee,
 		GasLimit: 30_000_000,
 	}
-	block := types.NewBlockWithHeader(header)
+	block := types.NewBlockWithHeader(header, nil)
 	return &types.BlockWithReceipts{
 		Block:    block,
 		Requests: requests,
+	}
+}
+
+func blobPayloadBlock(chainID *uint256.Int, wrapperVersion byte, commitments, blobs, proofs int) *types.BlockWithReceipts {
+	to := common.Address{0x01}
+	wrappedTxn := &types.BlobTxWrapper{WrapperVersion: wrapperVersion}
+	wrappedTxn.Tx.To = &to
+	wrappedTxn.Tx.ChainID = *chainID
+	wrappedTxn.Tx.BlobVersionedHashes = []common.Hash{{0x01}}
+	wrappedTxn.Commitments = make(types.BlobKzgs, commitments)
+	wrappedTxn.Blobs = make(types.Blobs, blobs)
+	wrappedTxn.Proofs = make(types.KZGProofs, proofs)
+
+	header := &types.Header{
+		Number:   *uint256.NewInt(101),
+		Time:     1,
+		BaseFee:  uint256.NewInt(1_000_000_000),
+		GasLimit: 30_000_000,
+	}
+	block := types.NewBlock(header, []types.Transaction{wrappedTxn}, nil, nil, nil, nil)
+	return &types.BlockWithReceipts{
+		Block:    block,
+		Requests: make(types.FlatRequests, 0),
 	}
 }
 
@@ -151,58 +311,84 @@ type getPayloadStubModule struct {
 	getAssembledBlockFunc func(ctx context.Context, payloadID uint64) (execmodule.AssembledBlockResult, error)
 }
 
+func (s *getPayloadStubModule) AddSendersRecovery(common.Hash, *exec.SendersRecovery) {}
+
 func (s *getPayloadStubModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (execmodule.AssembledBlockResult, error) {
 	return s.getAssembledBlockFunc(ctx, payloadID)
 }
 func (s *getPayloadStubModule) Ready(_ context.Context) (bool, error) { return true, nil }
-func (s *getPayloadStubModule) InsertBlocks(_ context.Context, _ []*types.RawBlock) (execmodule.ExecutionStatus, error) {
+func (s *getPayloadStubModule) InsertBlocks(_ context.Context, _ []*types.Block) (execmodule.ExecutionStatus, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) ValidateChain(_ context.Context, _ common.Hash, _ uint64) (execmodule.ValidationResult, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) UpdateForkChoice(_ context.Context, _, _, _ common.Hash) (execmodule.ForkChoiceResult, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetForkChoice(_ context.Context) (execmodule.ForkChoiceState, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) AssembleBlock(_ context.Context, _ *builder.Parameters) (execmodule.AssembleBlockResult, error) {
 	panic("not implemented")
 }
+
+func (s *getPayloadStubModule) InclusionList(_ context.Context) (types.Transactions, error) {
+	panic("not implemented")
+}
+
 func (s *getPayloadStubModule) CurrentHeader(_ context.Context) (*types.Header, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetHeader(_ context.Context, _ *common.Hash, _ *uint64) (*types.Header, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetBody(_ context.Context, _ *common.Hash, _ *uint64) (*types.RawBody, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) HasBlock(_ context.Context, _ *common.Hash, _ *uint64) (bool, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetBodiesByRange(_ context.Context, _, _ uint64) ([]*types.RawBody, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetBodiesByHashes(_ context.Context, _ []common.Hash) ([]*types.RawBody, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetPayloadBodiesByHash(_ context.Context, _ []common.Hash) ([]*execmodule.PayloadBody, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetPayloadBodiesByRange(_ context.Context, _, _ uint64) ([]*execmodule.PayloadBody, error) {
 	panic("not implemented")
 }
+
+func (s *getPayloadStubModule) IsValidated(_ common.Hash) bool {
+	return false
+}
+
 func (s *getPayloadStubModule) IsCanonicalHash(_ context.Context, _ common.Hash) (bool, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetHeaderHashNumber(_ context.Context, _ common.Hash) (*uint64, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64) (*uint256.Int, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) FrozenBlocks(_ context.Context) (uint64, bool, error) {
 	panic("not implemented")
 }

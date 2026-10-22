@@ -5,11 +5,16 @@ participants_matrix:
       el_log_level: "debug"
   cl:
     - cl_type: teku
-      cl_image: consensys/teku:25.9.1
+      cl_image: consensys/teku:26.4.0
+      cl_log_level: "debug"
+      count: 2
     - cl_type: lighthouse
       cl_image: sigp/lighthouse:v7.0.1
+      cl_log_level: "debug"
+      count: 2
 
 network_params:
+  num_validator_keys_per_node: 32
   electra_fork_epoch: 1
   min_validator_withdrawability_delay: 1
   shard_committee_period: 1

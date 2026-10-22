@@ -20,13 +20,19 @@ func chargeGas(
 	tx *types.AccountAbstractionTransaction,
 	gasPool *protocol.GasPool,
 	ibs *state.IntraBlockState,
-	preTxCost uint64,
 ) error {
 	baseFee := header.BaseFee
 	effectiveGasTip := tx.GetEffectiveGasTip(baseFee)
 	effectiveGasPrice := new(uint256.Int).Add(baseFee, &effectiveGasTip)
 
-	totalGasLimit := preTxCost + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit
+	// RIP-7560 maxPossibleGasCost is AA_BASE_GAS_COST plus the four declared
+	// limits. preTxCost carries the dynamic calldata charges too, which the
+	// validation frame already takes out of ValidationGasLimit — charging it
+	// here would precharge more than refundGas and the gas pool ever return.
+	totalGasLimit, ok := tx.TotalGasLimit(params.TxAAGas)
+	if !ok {
+		return fmt.Errorf("%w: RIP-7560 gas limits sum overflows uint64", protocol.ErrGasLimitReached)
+	}
 	preCharge := new(uint256.Int).SetUint64(totalGasLimit)
 	preCharge = preCharge.Mul(preCharge, effectiveGasPrice)
 
@@ -62,7 +68,10 @@ func refundGas(
 	effectiveGasPrice := new(uint256.Int).Add(baseFee, &effectiveGasTip)
 	actualGasCost := new(uint256.Int).Mul(effectiveGasPrice, new(uint256.Int).SetUint64(gasUsed))
 
-	totalGasLimit := params.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit
+	totalGasLimit, ok := tx.TotalGasLimit(params.TxAAGas)
+	if !ok {
+		return fmt.Errorf("%w: RIP-7560 gas limits sum overflows uint64", protocol.ErrGasLimitReached)
+	}
 	preCharge := new(uint256.Int).SetUint64(totalGasLimit)
 	preCharge = preCharge.Mul(preCharge, effectiveGasPrice)
 

@@ -38,11 +38,11 @@ func (rf BbdResultFeed) Next(ctx context.Context) (BlockBatchResult, error) {
 	}
 }
 
-func (rf BbdResultFeed) consumeData(ctx context.Context, blocks []*types.Block, bals [][]byte) error {
+func (rf BbdResultFeed) consumeData(ctx context.Context, blocks []*types.Block) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case rf.ch <- BlockBatchResult{Blocks: blocks, BALs: bals}:
+	case rf.ch <- BlockBatchResult{Blocks: blocks}:
 		return nil
 	}
 }
@@ -61,6 +61,5 @@ func (rf BbdResultFeed) close() {
 
 type BlockBatchResult struct {
 	Blocks []*types.Block
-	BALs   [][]byte
 	Err    error
 }

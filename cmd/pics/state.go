@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/chain"
@@ -45,45 +45,6 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 )
-
-/*func statePicture(t *trie.Trie, number int, keyCompression int, codeCompressed bool, valCompressed bool,
-	quadTrie bool, quadColors bool, highlights [][]byte) (*trie.Trie, error) {
-	filename := fmt.Sprintf("state_%d.dot", number)
-	f, err := os.Create(filename)
-	if err != nil {
-		return nil, err
-	}
-	indexColors := visual.HexIndexColors
-	fontColors := visual.HexFontColors
-	if quadTrie {
-		t = trie.HexToQuad(t)
-	}
-	if quadColors {
-		indexColors = visual.QuadIndexColors
-		fontColors = visual.QuadFontColors
-	}
-	visual.StartGraph(f, false)
-	trie.Visual(t, f, &trie.VisualOpts{
-		Highlights:     highlights,
-		IndexColors:    indexColors,
-		FontColors:     fontColors,
-		Values:         true,
-		CutTerminals:   keyCompression,
-		CodeCompressed: codeCompressed,
-		ValCompressed:  valCompressed,
-		ValHex:         true,
-	})
-	visual.EndGraph(f)
-	if err := f.Close(); err != nil {
-		return nil, err
-	}
-	//nolint:gosec
-	cmd := exec.CommandContext(context.Background(), "dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		fmt.Printf("error: %v, output: %s\n", err, output)
-	}
-	return t, nil
-}*/
 
 var bucketLabels = map[string]string{
 	kv.Headers:           "Headers",
@@ -95,12 +56,6 @@ var bucketLabels = map[string]string{
 	kv.SyncStageProgress: "Sync Progress",
 	kv.Senders:           "Transaction Senders",
 }
-
-/*dbutils.PlainContractCode,
-dbutils.Code,
-dbutils.AccountsHistory,
-dbutils.StorageHistory,
-dbutils.TxLookup,*/
 
 func hexPalette() error {
 	filename := "hex_palette.dot"
@@ -135,7 +90,7 @@ func stateDatabaseComparison(first kv.RwDB, second kv.RwDB, number int) error {
 	noValues := make(map[int]struct{})
 	perBucketFiles := make(map[string]*os.File)
 
-	if err = second.View(context.Background(), func(readTx kv.Tx) error {
+	if err := second.View(context.Background(), func(readTx kv.Tx) error {
 		return first.View(context.Background(), func(firstTx kv.Tx) error {
 			for bucketName := range bucketLabels {
 				if err := readTx.ForEach(bucketName, nil, func(k, v []byte) error {
@@ -305,8 +260,8 @@ func initialState1() error {
 	}
 
 	var tokenContract *contracts.Token
-	// We generate the blocks without plainstant because it's not supported in blockgen.GenerateChain
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, func(i int, block *blockgen.BlockGen) {
+	// We generate the blocks without plain state because GenerateChain does not support it.
+	chain, err := m.GenerateChain(8, func(i int, block *blockgen.BlockGen) {
 		var (
 			txn types.Transaction
 			txs []types.Transaction
@@ -418,12 +373,12 @@ func initialState1() error {
 	m2 := execmoduletester.New(nil, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	defer m2.DB.Close()
 
-	if err = hexPalette(); err != nil {
+	if err := hexPalette(); err != nil {
 		return err
 	}
 
-	emptyKv := memdb.New(nil, "", dbcfg.ChainDB)
-	if err = stateDatabaseComparison(emptyKv, m.DB, 0); err != nil {
+	emptyKv := mdbx.New(dbcfg.ChainDB, log.New()).InMem("").MustOpen()
+	if err := stateDatabaseComparison(emptyKv, m.DB, 0); err != nil {
 		return err
 	}
 	defer emptyKv.Close()
@@ -431,18 +386,18 @@ func initialState1() error {
 	// BLOCKS
 
 	for i := 0; i < chain.Length(); i++ {
-		if err = m2.InsertChain(chain.Slice(i, i+1)); err != nil {
+		if err := m2.InsertChain(chain.Slice(i, i+1)); err != nil {
 			return err
 		}
-		if err = stateDatabaseComparison(m.DB, m2.DB, i+1); err != nil {
+		if err := stateDatabaseComparison(m.DB, m2.DB, i+1); err != nil {
 			return err
 		}
-		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
+		if err := m.InsertChain(chain.Slice(i, i+1)); err != nil {
 			return err
 		}
 	}
 
-	if err = stateDatabaseComparison(emptyKv, m.DB, 9); err != nil {
+	if err := stateDatabaseComparison(emptyKv, m.DB, 9); err != nil {
 		return err
 	}
 	return nil

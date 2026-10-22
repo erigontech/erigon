@@ -97,8 +97,9 @@ func NewServerWithOpts(creds credentials.TransportCredentials, extraOpts ...grpc
 	return grpcServer
 }
 
-func StartServer(srv *grpc.Server, addr string, healthCheck bool, logger log.Logger, serveErrMsg string) error {
-	lis, err := net.Listen("tcp", addr)
+func StartServer(ctx context.Context, srv *grpc.Server, addr string, healthCheck bool, logger log.Logger, serveErrMsg string) error {
+	var lc net.ListenConfig
+	lis, err := lc.Listen(ctx, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("could not create listener: %w, addr=%s", err, addr)
 	}

@@ -76,7 +76,9 @@ var phase0_post_state_ssz_snappy []byte
 var bellatrixFS embed.FS
 
 type MockBlockReader struct {
-	U map[uint64]*cltypes.SignedBeaconBlock
+	U                map[uint64]*cltypes.SignedBeaconBlock
+	CachedBodies     []uint64
+	CachedBodyHashes []common.Hash
 }
 
 func NewMockBlockReader() *MockBlockReader {
@@ -121,11 +123,12 @@ func (m *MockBlockReader) FrozenSlots() uint64 {
 	panic("implement me")
 }
 
-func (m *MockBlockReader) CacheBlockBody(blockNumber uint64, transactions [][]byte, withdrawals []*types.Withdrawal) {
-	// no-op in tests
+func (m *MockBlockReader) CacheBlockBody(blockNumber uint64, blockHash common.Hash, transactions [][]byte, withdrawals []*types.Withdrawal) {
+	m.CachedBodies = append(m.CachedBodies, blockNumber)
+	m.CachedBodyHashes = append(m.CachedBodyHashes, blockHash)
 }
 
-func LoadChain(blocks []*cltypes.SignedBeaconBlock, s *state.CachingBeaconState, db kv.RwDB, t *testing.T) *MockBlockReader {
+func LoadChain(blocks []*cltypes.SignedBeaconBlock, db kv.RwDB, t *testing.T) *MockBlockReader {
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -133,7 +136,7 @@ func LoadChain(blocks []*cltypes.SignedBeaconBlock, s *state.CachingBeaconState,
 	m := NewMockBlockReader()
 	for _, block := range blocks {
 		m.U[block.Block.Slot] = block
-		require.NoError(t, beacon_indicies.WriteBeaconBlockAndIndicies(context.Background(), tx, block, true))
+		require.NoError(t, beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true))
 		require.NoError(t, beacon_indicies.WriteHighestFinalized(tx, block.Block.Slot+64))
 	}
 

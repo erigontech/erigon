@@ -25,19 +25,19 @@ import (
 
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 func TestSetStorageModeIfNotExist(t *testing.T) {
 	t.Run("default", func(t *testing.T) {
-		_, tx := memdb.NewTestTx(t)
+		_, tx := mdbxtest.NewTestTx(t)
 		prune, err := Get(tx)
 		assert.NoError(t, err)
 		assert.Equal(t, DefaultMode, prune)
 	})
 
 	t.Run("setIfNotExist", func(t *testing.T) {
-		_, tx := memdb.NewTestTx(t)
+		_, tx := mdbxtest.NewTestTx(t)
 		prune, err := Get(tx)
 		assert.NoError(t, err)
 		assert.Equal(t, DefaultMode, prune)
@@ -211,7 +211,7 @@ func TestFromCli_Receipts(t *testing.T) {
 func TestGet_ReceiptsLegacyDefaultsToKeepAll(t *testing.T) {
 	// Legacy datadir: only History/Blocks keys were ever written. The missing
 	// receipts key must resolve to KeepAllBlocksPruneMode.
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	require.NoError(t, setOnEmpty(tx, kv.PruneHistory, Distance(100_000)))
 	require.NoError(t, setOnEmpty(tx, kv.PruneBlocks, Distance(100_000)))
 
@@ -221,7 +221,7 @@ func TestGet_ReceiptsLegacyDefaultsToKeepAll(t *testing.T) {
 }
 
 func TestGet_ReceiptsRoundTrips(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	m := Mode{Initialised: true, History: Distance(100_000), Blocks: Distance(100_000), Receipts: Distance(80_000)}
 	require.NoError(t, overwriteStoredMode(tx, m))
 
@@ -266,7 +266,7 @@ func TestModeValidate(t *testing.T) {
 func TestGet_CommitmentHistoryLegacyDefaultsToKeepAll(t *testing.T) {
 	// Legacy datadir: only History/Blocks keys were ever written. The missing
 	// commitment-history key must resolve to KeepAllBlocksPruneMode.
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	require.NoError(t, setOnEmpty(tx, kv.PruneHistory, Distance(100_000)))
 	require.NoError(t, setOnEmpty(tx, kv.PruneBlocks, Distance(100_000)))
 
@@ -276,7 +276,7 @@ func TestGet_CommitmentHistoryLegacyDefaultsToKeepAll(t *testing.T) {
 }
 
 func TestGet_CommitmentHistoryRoundTrips(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	m := Mode{Initialised: true, History: Distance(100_000), Blocks: Distance(100_000), CommitmentHistory: Distance(80_000)}
 	require.NoError(t, overwriteStoredMode(tx, m))
 
@@ -422,14 +422,14 @@ func TestEnsureNotChanged_CommitmentHistory(t *testing.T) {
 	}
 
 	t.Run("first-set-bounded", func(t *testing.T) {
-		_, tx := memdb.NewTestTx(t)
+		_, tx := mdbxtest.NewTestTx(t)
 		got, err := EnsureNotChanged(tx, mk(Distance(100_000)))
 		require.NoError(t, err)
 		assert.Equal(t, Distance(100_000), got.CommitmentHistory)
 	})
 
 	t.Run("shrink-allowed", func(t *testing.T) {
-		_, tx := memdb.NewTestTx(t)
+		_, tx := mdbxtest.NewTestTx(t)
 		initStoredMode(t, tx, mk(Distance(200_000)))
 		got, err := EnsureNotChanged(tx, mk(Distance(50_000)))
 		require.NoError(t, err)
@@ -438,7 +438,7 @@ func TestEnsureNotChanged_CommitmentHistory(t *testing.T) {
 
 	// FLIP: expanding a bounded window used to be rejected; now allow+warn.
 	t.Run("expand-now-allowed", func(t *testing.T) {
-		_, tx := memdb.NewTestTx(t)
+		_, tx := mdbxtest.NewTestTx(t)
 		initStoredMode(t, tx, mk(Distance(50_000)))
 		got, err := EnsureNotChanged(tx, mk(Distance(200_000)))
 		require.NoError(t, err)
@@ -450,7 +450,7 @@ func TestEnsureNotChanged_CommitmentHistory(t *testing.T) {
 	})
 
 	t.Run("unlimited-to-bounded-allowed", func(t *testing.T) {
-		_, tx := memdb.NewTestTx(t)
+		_, tx := mdbxtest.NewTestTx(t)
 		initStoredMode(t, tx, mk(KeepAllBlocksPruneMode))
 		got, err := EnsureNotChanged(tx, mk(Distance(100_000)))
 		require.NoError(t, err)
@@ -459,7 +459,7 @@ func TestEnsureNotChanged_CommitmentHistory(t *testing.T) {
 
 	// FLIP: bounded→unlimited used to be rejected; now allow+warn.
 	t.Run("bounded-to-unlimited-now-allowed", func(t *testing.T) {
-		_, tx := memdb.NewTestTx(t)
+		_, tx := mdbxtest.NewTestTx(t)
 		initStoredMode(t, tx, mk(Distance(50_000)))
 		got, err := EnsureNotChanged(tx, mk(KeepAllBlocksPruneMode))
 		require.NoError(t, err)
@@ -469,7 +469,7 @@ func TestEnsureNotChanged_CommitmentHistory(t *testing.T) {
 	t.Run("validates-against-history", func(t *testing.T) {
 		// Commitment window wider than state-history retention must be rejected
 		// by EnsureNotChanged (Validate backstop), even on first set.
-		_, tx := memdb.NewTestTx(t)
+		_, tx := mdbxtest.NewTestTx(t)
 		bad := Mode{Initialised: true, History: Distance(100_000), Blocks: Distance(100_000), CommitmentHistory: Distance(200_000)}
 		_, err := EnsureNotChanged(tx, bad)
 		require.Error(t, err)
@@ -484,7 +484,7 @@ func initStoredMode(t *testing.T, tx kv.RwTx, m Mode) {
 }
 
 func TestEnsureNotChanged_PersistedEqualsRequested(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	initStoredMode(t, tx, MinimalMode)
 
 	got, err := EnsureNotChanged(tx, MinimalMode)
@@ -496,7 +496,7 @@ func TestEnsureNotChanged_LegacyMinimalNoOp(t *testing.T) {
 	// MinimalMode now references MinimalPruneDistance (still 100_000), so a node
 	// initialized before the rescope has identical persisted state and starts
 	// without warning or DB rewrite.
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	legacy := Mode{Initialised: true, History: Distance(100_000), Blocks: Distance(100_000), CommitmentHistory: KeepAllBlocksPruneMode, Receipts: KeepAllBlocksPruneMode}
 	initStoredMode(t, tx, legacy)
 
@@ -511,7 +511,7 @@ func TestEnsureNotChanged_BlocksHistoryBumpRewritesDB(t *testing.T) {
 	// The new binary's BlocksMode has History=Distance(262_144). The compat
 	// shim should accept the finite→finite History change, return the new mode,
 	// and persist it so the next restart sees no mismatch.
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	legacyBlocks := Mode{Initialised: true, History: Distance(100_000), Blocks: KeepAllBlocksPruneMode}
 	initStoredMode(t, tx, legacyBlocks)
 
@@ -531,7 +531,7 @@ func TestEnsureNotChanged_FullSentinelToFiniteAccepted(t *testing.T) {
 	// retention-window change so existing full nodes upgrade without operator
 	// intervention. (Frozen .seg files won't actually be deleted until #21306
 	// lands; the config-level transition is still recorded.)
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	legacyFull := Mode{Initialised: true, History: Distance(100_000), Blocks: KeepPostMergeBlocksPruneMode}
 	initStoredMode(t, tx, legacyFull)
 
@@ -550,7 +550,7 @@ func TestEnsureNotChanged_BlocksFiniteToDefaultAccepted(t *testing.T) {
 	// rewrote Blocks to a finite distance. The shim accepts this reverse
 	// transition so the chain-history-expiry policy can be restored without
 	// manual DB intervention or a re-sync.
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	persisted := Mode{Initialised: true, History: Distance(262_144), Blocks: Distance(262_144), CommitmentHistory: KeepAllBlocksPruneMode, Receipts: KeepAllBlocksPruneMode}
 	initStoredMode(t, tx, persisted)
 
@@ -569,7 +569,7 @@ func TestEnsureNotChanged_BlocksKeepAllToFiniteRejected(t *testing.T) {
 	// to a finite distance remains rejected — it's a destructive transition
 	// that the operator must opt into explicitly (e.g., by switching modes
 	// from a fresh datadir).
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	persisted := Mode{Initialised: true, History: Distance(100_000), Blocks: KeepAllBlocksPruneMode, CommitmentHistory: KeepAllBlocksPruneMode, Receipts: KeepAllBlocksPruneMode}
 	initStoredMode(t, tx, persisted)
 
@@ -580,7 +580,7 @@ func TestEnsureNotChanged_BlocksKeepAllToFiniteRejected(t *testing.T) {
 }
 
 func TestEnsureNotChanged_ArchiveUnchanged(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	initStoredMode(t, tx, ArchiveMode)
 
 	got, err := EnsureNotChanged(tx, ArchiveMode)
@@ -591,7 +591,7 @@ func TestEnsureNotChanged_ArchiveUnchanged(t *testing.T) {
 func TestEnsureNotChanged_ArbitraryDistanceChangeAccepted(t *testing.T) {
 	// Operator passes --prune.distance=500_000 on an existing minimal datadir.
 	// Both sides are finite Distance values, so the shim accepts and rewrites.
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	initStoredMode(t, tx, MinimalMode)
 
 	custom := Mode{Initialised: true, History: Distance(500_000), Blocks: Distance(500_000), CommitmentHistory: KeepAllBlocksPruneMode, Receipts: KeepAllBlocksPruneMode}
@@ -608,7 +608,7 @@ func TestEnsureNotChanged_ArchiveDefaultBumpCompat(t *testing.T) {
 	// Pre-existing compat path: archive nodes initialized when Blocks defaulted
 	// to KeepPostMergeBlocksPruneMode must still start under the current ArchiveMode
 	// (which uses KeepAllBlocksPruneMode for Blocks).
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	legacyArchive := Mode{Initialised: true, History: KeepPostMergeBlocksPruneMode, Blocks: KeepPostMergeBlocksPruneMode}
 	initStoredMode(t, tx, legacyArchive)
 

@@ -20,15 +20,12 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/phase1/core/caches"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
-	"github.com/erigontech/erigon/common/maphash"
-
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 )
@@ -46,7 +43,7 @@ type CachingBeaconState struct {
 	*raw.BeaconState
 
 	// Internals
-	publicKeyIndicies *maphash.NonConcurrentMap[uint64]
+	publicKeyIndices pubkeyIndex
 	// Caches
 	activeValidatorsCache *lru.Cache[uint64, []uint64]
 	shuffledSetsCache     *lru.Cache[common.Hash, []uint64]
@@ -61,7 +58,11 @@ func New(cfg *clparams.BeaconChainConfig) *CachingBeaconState {
 	state := &CachingBeaconState{
 		BeaconState: raw.New(cfg),
 	}
-	state.InitBeaconState()
+	// An empty, default-version state cannot fail to initialize: the caches have
+	// constant positive sizes and there are no validators to walk.
+	if err := state.InitBeaconState(); err != nil {
+		panic(err)
+	}
 	return state
 }
 
@@ -106,7 +107,7 @@ func (b *CachingBeaconState) _updateProposerIndex() (err error) {
 		beaconConfig.EpochsPerHistoricalVector
 	// Input for the seed hash.
 	mix := b.GetRandaoMix(int(mixPosition))
-	input := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainBeaconProposer)
+	input := shuffling.GetSeed(mix, epoch, b.BeaconConfig().DomainBeaconProposer)
 	slotByteArray := make([]byte, 8)
 	binary.LittleEndian.PutUint64(slotByteArray, b.Slot())
 
@@ -241,16 +242,6 @@ func (b *CachingBeaconState) _refreshActiveBalancesIfNeeded() {
 	b.totalActiveBalanceCache = new(uint64)
 	*b.totalActiveBalanceCache = 0
 
-	// Check global cache using block root at beginning of previous epoch
-	blockRootAtBegginingPrevEpoch, err := b.GetBlockRootAtSlot(((epoch - 1) * b.BeaconConfig().SlotsPerEpoch) - 1)
-	if err == nil {
-		if _, cachedBalance, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, blockRootAtBegginingPrevEpoch); ok && cachedBalance != 0 {
-			*b.totalActiveBalanceCache = cachedBalance
-			b.totalActiveBalanceRootCache = utils.IntegerSquareRoot(*b.totalActiveBalanceCache)
-			return
-		}
-	}
-
 	for i := 0; i < b.ValidatorSet().Length(); i++ {
 		validator := b.ValidatorSet().Get(i)
 		if validator.Active(epoch) {
@@ -275,17 +266,21 @@ func (b *CachingBeaconState) initCaches() error {
 }
 
 func (b *CachingBeaconState) InitBeaconState() error {
-	b.publicKeyIndicies = maphash.NewNonConcurrentMap[uint64]()
-	b.ForEachValidator(func(validator solid.Validator, i, total int) bool {
-		pk := validator.PublicKey()
-		b.publicKeyIndicies.Set(pk[:], uint64(i))
-		return true
-	})
+	b.rebuildPubkeyIndex()
+	return b.reinitCaches()
+}
 
+func (b *CachingBeaconState) rebuildPubkeyIndex() {
+	b.publicKeyIndices = newPubkeyIndex(b.ValidatorSet())
+}
+
+func (b *CachingBeaconState) reinitCaches() error {
 	b.totalActiveBalanceCache = nil
 	b._refreshActiveBalancesIfNeeded()
 	b.previousStateRoot = common.Hash{}
-	b.initCaches()
+	if err := b.initCaches(); err != nil {
+		return err
+	}
 	if err := b._updateProposerIndex(); err != nil {
 		return err
 	}

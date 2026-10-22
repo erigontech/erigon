@@ -288,7 +288,7 @@ func TestMergeRangeSnapRepo(t *testing.T) {
 	execTestCase := func(ranges []testFileRange, vfCount int, needMerge bool, mergeFromStep, mergeToStep uint64) {
 		testFn(ranges, vfCount, needMerge, mergeFromStep, mergeToStep)
 		// Clean up temporary files created by compressors/decompressors in dirs.Tmp
-		filepath.WalkDir(dirs.Tmp, func(path string, d os.DirEntry, err error) error {
+		require.NoError(t, filepath.WalkDir(dirs.Tmp, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				if os.IsNotExist(err) {
 					return nil
@@ -300,7 +300,7 @@ func TestMergeRangeSnapRepo(t *testing.T) {
 			}
 			_ = dir.RemoveFile(path)
 			return nil
-		})
+		}))
 	}
 
 	// 0-1, 1-2 => 0-2
@@ -330,7 +330,7 @@ func TestMergeRangeSnapRepo(t *testing.T) {
 	// 0-1, 1-2, ..... 14-15 => 0-1....12-13, 13-15
 	execTestCase([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 14}, {14, 15}}, 15, true, 13, 15)
 
-	//0-1....12-13, 13-15, 15-16 => 0-16
+	// 0-1....12-13, 13-15, 15-16 => 0-16
 	execTestCase([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 15}, {15, 16}}, 15, true, 0, 16)
 }
 
@@ -538,7 +538,7 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 	// 0-1, 1-2, ..... 14-15 => 0-1....12-13, 13-15
 	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 14}, {14, 15}}, true, 2, 14, 14)
 
-	//0-1....12-13, 13-15, 15-16 => 0-16
+	// 0-1....12-13, 13-15, 15-16 => 0-16
 	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 15}, {15, 16}}, true, 15, 1, 1)
 }
 
@@ -549,9 +549,9 @@ func cleanupFiles(t *testing.T, repo *SnapshotRepo, dirs datadir.Dirs) {
 	repo.Close()
 	repo.RecalcVisibleFiles(0)
 
-	filepath.WalkDir(dirs.DataDir, func(path string, d os.DirEntry, err error) error {
+	require.NoError(t, filepath.WalkDir(dirs.DataDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) { //skip magically disappeared files
+			if os.IsNotExist(err) { // skip magically disappeared files
 				return nil
 			}
 			return err
@@ -564,7 +564,7 @@ func cleanupFiles(t *testing.T, repo *SnapshotRepo, dirs datadir.Dirs) {
 			panic(err)
 		}
 		return nil
-	})
+	}))
 }
 
 func stepToRootNum(t *testing.T, step uint64, repo *SnapshotRepo) RootNum {
@@ -701,7 +701,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 			seg3, err := seg.NewDecompressor(sampleFile)
 			require.NoError(t, err)
 			defer seg3.Close()
-			defer dir.RemoveFile(sampleFile)
+			defer dir.RemoveFile(sampleFile) //nolint:errcheck
 
 			r := seg.NewReader(seg3.MakeGetter(), seg.CompressNone)
 			kveiFile := strings.TrimSuffix(filename, ".bt") + ".kvei"
@@ -795,5 +795,4 @@ func fileExistsCheck(t *testing.T, repo *SnapshotRepo, startStep, endStep uint64
 		require.Error(t, err)
 		require.True(t, os.IsNotExist(err))
 	}
-
 }

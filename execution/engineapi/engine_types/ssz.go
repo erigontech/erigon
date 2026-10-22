@@ -49,9 +49,23 @@ func (p *ExecutionPayload) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (p *ExecutionPayload) DecodeSSZ(buf []byte, version int) error {
+	return p.decodeSSZ(buf, version, false)
+}
+
+func (p *ExecutionPayload) DecodeSSZStrict(buf []byte, version int) error {
+	return p.decodeSSZ(buf, version, true)
+}
+
+func (p *ExecutionPayload) decodeSSZ(buf []byte, version int, strict bool) error {
 	p.SSZVersion = clparams.StateVersion(version)
 	block := cltypes.NewEth1Block(p.SSZVersion, mainnetBeaconCfg)
-	if err := block.DecodeSSZ(buf, version); err != nil {
+	var err error
+	if strict {
+		err = block.DecodeSSZStrict(buf, version)
+	} else {
+		err = block.DecodeSSZ(buf, version)
+	}
+	if err != nil {
 		return err
 	}
 	*p = *ExecutionPayloadFromSSZBlock(block, p.SSZVersion)
@@ -95,8 +109,7 @@ func (p *ExecutionPayload) ToSSZBlock(version clparams.StateVersion) (*cltypes.E
 	block.Extra = solid.NewExtraData()
 	block.Extra.SetBytes(p.ExtraData)
 	if p.BaseFeePerGas != nil {
-		baseFee := uint256.MustFromBig(p.BaseFeePerGas.ToInt())
-		_, _ = baseFee.MarshalSSZAppend(block.BaseFeePerGas[:0])
+		_, _ = (*uint256.Int)(p.BaseFeePerGas).MarshalSSZAppend(block.BaseFeePerGas[:0])
 	}
 	block.BlockHash = p.BlockHash
 	txs := make([][]byte, len(p.Transactions))
@@ -107,7 +120,7 @@ func (p *ExecutionPayload) ToSSZBlock(version clparams.StateVersion) (*cltypes.E
 	if version >= clparams.CapellaVersion {
 		block.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(mainnetBeaconCfg.MaxWithdrawalsPerPayload), 44)
 		for _, w := range p.Withdrawals {
-			block.Withdrawals.Append(&cltypes.Withdrawal{Index: w.Index, Validator: w.Validator, Address: w.Address, Amount: w.Amount})
+			block.Withdrawals.Append(&cltypes.Withdrawal{Index: uint64(w.Index), Validator: uint64(w.Validator), Address: w.Address, Amount: uint64(w.Amount)})
 		}
 	}
 	if p.BlobGasUsed != nil {
@@ -146,8 +159,9 @@ func ExecutionPayloadFromSSZBlock(block *cltypes.Eth1Block, version clparams.Sta
 		GasUsed:       hexutil.Uint64(block.GasUsed),
 		Timestamp:     hexutil.Uint64(block.Time),
 		ExtraData:     block.Extra.Bytes(),
-		BaseFeePerGas: (*hexutil.Big)(baseFee.ToBig()),
+		BaseFeePerGas: (*hexutil.U256)(baseFee),
 		BlockHash:     block.BlockHash,
+		Transactions:  make([]hexutil.Bytes, 0, len(body.Transactions)),
 		Withdrawals:   body.Withdrawals,
 		SSZVersion:    version,
 	}
@@ -173,7 +187,7 @@ func ExecutionPayloadFromSSZBlock(block *cltypes.Eth1Block, version clparams.Sta
 func newWithdrawalList(ws []*types.Withdrawal) *solid.ListSSZ[*cltypes.Withdrawal] {
 	l := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(mainnetBeaconCfg.MaxWithdrawalsPerPayload), 44)
 	for _, w := range ws {
-		l.Append(&cltypes.Withdrawal{Index: w.Index, Validator: w.Validator, Address: w.Address, Amount: w.Amount})
+		l.Append(&cltypes.Withdrawal{Index: uint64(w.Index), Validator: uint64(w.Validator), Address: w.Address, Amount: uint64(w.Amount)})
 	}
 	return l
 }
@@ -184,7 +198,7 @@ func withdrawalsFromList(l *solid.ListSSZ[*cltypes.Withdrawal]) []*types.Withdra
 	}
 	out := make([]*types.Withdrawal, 0, l.Len())
 	l.Range(func(_ int, w *cltypes.Withdrawal, _ int) bool {
-		out = append(out, &types.Withdrawal{Index: w.Index, Validator: w.Validator, Address: w.Address, Amount: w.Amount})
+		out = append(out, &types.Withdrawal{Index: hexutil.Uint64(w.Index), Validator: hexutil.Uint64(w.Validator), Address: w.Address, Amount: hexutil.Uint64(w.Amount)})
 		return true
 	})
 	return out
@@ -278,6 +292,7 @@ func (*ForkChoiceState) EncodingSizeSSZ() int { return 96 }
 func (s *ForkChoiceState) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(dst, s.HeadHash[:], s.SafeBlockHash[:], s.FinalizedBlockHash[:])
 }
+
 func (s *ForkChoiceState) DecodeSSZ(buf []byte, version int) error {
 	return ssz2.UnmarshalSSZ(buf, version, s.HeadHash[:], s.SafeBlockHash[:], s.FinalizedBlockHash[:])
 }
@@ -309,7 +324,7 @@ func (a *PayloadAttributes) EncodeSSZ(dst []byte) ([]byte, error) {
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:])
 	case clparams.CapellaVersion:
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals)
-	case clparams.DenebVersion:
+	case clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion:
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:])
 	default: // GloasVersion+
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:], slot, targetGasLimit)
@@ -317,40 +332,63 @@ func (a *PayloadAttributes) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (a *PayloadAttributes) DecodeSSZ(buf []byte, version int) error {
-	a.SSZVersion = clparams.StateVersion(version)
-	withdrawals := newWithdrawalList(nil)
-	var timestamp uint64
-	var root common.Hash
-	var slot uint64
+	return a.decodeSSZ(buf, version, false)
+}
+
+func (a *PayloadAttributes) DecodeSSZStrict(buf []byte, version int) error {
+	return a.decodeSSZ(buf, version, true)
+}
+
+type payloadAttributesDecodeFields struct {
+	timestamp             uint64
+	withdrawals           *solid.ListSSZ[*cltypes.Withdrawal]
+	parentBeaconBlockRoot common.Hash
+	slotNumber            uint64
+	targetGasLimit        uint64
+}
+
+func (a *PayloadAttributes) decodeSSZSchema(fields *payloadAttributesDecodeFields) []any {
+	schema := []any{&fields.timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:]}
 	switch a.SSZVersion {
 	case clparams.BellatrixVersion:
-		if err := ssz2.UnmarshalSSZ(buf, version, &timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:]); err != nil {
-			return err
-		}
 	case clparams.CapellaVersion:
-		if err := ssz2.UnmarshalSSZ(buf, version, &timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals); err != nil {
-			return err
-		}
-		a.Withdrawals = withdrawalsFromList(withdrawals)
-	case clparams.DenebVersion:
-		if err := ssz2.UnmarshalSSZ(buf, version, &timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:]); err != nil {
-			return err
-		}
-		a.Withdrawals = withdrawalsFromList(withdrawals)
-		a.ParentBeaconBlockRoot = &root
+		schema = append(schema, fields.withdrawals)
+	case clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion:
+		schema = append(schema, fields.withdrawals, fields.parentBeaconBlockRoot[:])
 	default: // GloasVersion+
-		var targetGasLimit uint64
-		if err := ssz2.UnmarshalSSZ(buf, version, &timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:], &slot, &targetGasLimit); err != nil {
-			return err
-		}
-		a.Withdrawals = withdrawalsFromList(withdrawals)
-		a.ParentBeaconBlockRoot = &root
-		slotNumber := hexutil.Uint64(slot)
+		schema = append(schema, fields.withdrawals, fields.parentBeaconBlockRoot[:], &fields.slotNumber, &fields.targetGasLimit)
+	}
+	return schema
+}
+
+func (a *PayloadAttributes) decodeSSZ(buf []byte, version int, strict bool) error {
+	a.SSZVersion = clparams.StateVersion(version)
+	fields := payloadAttributesDecodeFields{withdrawals: newWithdrawalList(nil)}
+	unmarshal := ssz2.UnmarshalSSZ
+	if strict {
+		unmarshal = ssz2.UnmarshalSSZStrict
+	}
+	if err := unmarshal(buf, version, a.decodeSSZSchema(&fields)...); err != nil {
+		return err
+	}
+	switch a.SSZVersion {
+	case clparams.BellatrixVersion:
+	case clparams.CapellaVersion:
+		a.Withdrawals = withdrawalsFromList(fields.withdrawals)
+	case clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion:
+		a.Withdrawals = withdrawalsFromList(fields.withdrawals)
+		parentBeaconBlockRoot := fields.parentBeaconBlockRoot
+		a.ParentBeaconBlockRoot = &parentBeaconBlockRoot
+	default: // GloasVersion+
+		a.Withdrawals = withdrawalsFromList(fields.withdrawals)
+		parentBeaconBlockRoot := fields.parentBeaconBlockRoot
+		a.ParentBeaconBlockRoot = &parentBeaconBlockRoot
+		slotNumber := hexutil.Uint64(fields.slotNumber)
 		a.SlotNumber = &slotNumber
-		tgl := hexutil.Uint64(targetGasLimit)
+		tgl := hexutil.Uint64(fields.targetGasLimit)
 		a.TargetGasLimit = &tgl
 	}
-	a.Timestamp = hexutil.Uint64(timestamp)
+	a.Timestamp = hexutil.Uint64(fields.timestamp)
 	return nil
 }
 
@@ -514,6 +552,7 @@ func (*BlobAndProofV1) EncodingSizeSSZ() int { return sszBlobBytes + sszKZGBytes
 func (b *BlobAndProofV1) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(dst, newBlob(b.Blob), newKZGProof(b.Proof))
 }
+
 func (b *BlobAndProofV1) DecodeSSZ(buf []byte, version int) error {
 	blob := &cltypes.Blob{}
 	proof := &cltypes.KZGProof{}
@@ -535,6 +574,7 @@ func (b *BlobAndProofV2) EncodeSSZ(dst []byte) ([]byte, error) {
 	}
 	return ssz2.MarshalSSZ(dst, newBlob(b.Blob), proofs)
 }
+
 func (b *BlobAndProofV2) DecodeSSZ(buf []byte, version int) error {
 	blob := &cltypes.Blob{}
 	proofs := solid.NewStaticListSSZ[*cltypes.KZGProof](sszCellsPerExtBlob, sszKZGBytes)
@@ -580,9 +620,11 @@ func (n *NullableBlobAndProofV2) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (n *NullableBlobAndProofV2) EncodingSizeSSZ() int { out, _ := n.EncodeSSZ(nil); return len(out) }
+
 func (n *NullableBlobAndProofV2) HashSSZ() ([32]byte, error) {
 	return [32]byte{}, nil
 }
+
 func (*NullableBlobAndProofV2) Clone() clonable.Clonable {
 	return &NullableBlobAndProofV2{}
 }

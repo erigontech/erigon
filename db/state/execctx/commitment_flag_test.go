@@ -17,11 +17,13 @@
 package execctx_test
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -33,13 +35,10 @@ import (
 
 func withCommitmentFlag(t *testing.T, variant commitment.TrieVariant) {
 	t.Helper()
-	origStream := statecfg.ExperimentalStreamingCommitment
 	origPar := statecfg.ExperimentalParallelCommitment
 	t.Cleanup(func() {
-		statecfg.ExperimentalStreamingCommitment = origStream
 		statecfg.ExperimentalParallelCommitment = origPar
 	})
-	statecfg.ExperimentalStreamingCommitment = variant == commitment.VariantStreamingHexPatricia
 	statecfg.ExperimentalParallelCommitment = variant == commitment.VariantParallelHexPatricia
 }
 
@@ -110,57 +109,112 @@ func TestSharedDomains_ParallelFlag_RootEquivalence(t *testing.T) {
 		seqRoot, parRoot)
 }
 
-func TestPickTrieVariant_StreamingFlag(t *testing.T) {
+// TestSharedDomains_WithParaTrieDB_SelectsParallelTrie pins the construction-time
+// wiring: selecting the parallel trie and supplying the DB it needs happen in one
+// expression, so there is no second call left to forget.
+func TestSharedDomains_WithParaTrieDB_SelectsParallelTrie(t *testing.T) {
 	// No t.Parallel: mutates process-global statecfg flags.
-	withCommitmentFlag(t, commitment.VariantStreamingHexPatricia)
-	require.Equal(t, commitment.VariantStreamingHexPatricia, execctx.PickTrieVariant())
+	withCommitmentFlag(t, commitment.VariantParallelHexPatricia)
 
-	statecfg.ExperimentalParallelCommitment = true
-	require.Equal(t, commitment.VariantStreamingHexPatricia, execctx.PickTrieVariant())
+	db := newTestDb(t, 16)
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
 
-	statecfg.ExperimentalStreamingCommitment = false
-	require.Equal(t, commitment.VariantParallelHexPatricia, execctx.PickTrieVariant())
+	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New(), execctx.WithParaTrieDB(db))
+	require.NoError(t, err)
+	defer sd.Close()
+
+	require.Equal(t, commitment.VariantParallelHexPatricia, sd.GetCommitmentCtx().Trie().Variant())
 }
 
-func TestSharedDomains_StreamingFlag_RootEquivalence(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-	// No t.Parallel: mutates process-global statecfg flags.
+// TestSharedDomains_ParallelTrieNotWired_IsLoudOnComputeCommitment pins the
+// fallback as loud. Selecting the parallel trie without ever supplying a DB
+// leaves the context on the sequential trie, which is the intended escape hatch
+// for DB-less RPC and integrity contexts and a bug for anything computing a root.
+func TestSharedDomains_ParallelTrieNotWired_IsLoudOnComputeCommitment(t *testing.T) {
+	// No t.Parallel: mutates process-global statecfg, dbg and root-logger state.
+	withCommitmentFlag(t, commitment.VariantParallelHexPatricia)
+	defer func(v bool) { dbg.AssertEnabled = v }(dbg.AssertEnabled)
 
-	stepSize := uint64(16)
-
-	runOnce := func(t *testing.T, streaming bool) []byte {
+	compute := func(t *testing.T) ([]byte, error) {
 		t.Helper()
-		variant := commitment.VariantHexPatriciaTrie
-		if streaming {
-			variant = commitment.VariantStreamingHexPatricia
-		}
-		withCommitmentFlag(t, variant)
-
-		db := newTestDb(t, stepSize)
-
-		ctx := t.Context()
-		rwTx, err := db.BeginTemporalRw(ctx)
+		db := newTestDb(t, 16)
+		rwTx, err := db.BeginTemporalRw(t.Context())
 		require.NoError(t, err)
-		defer rwTx.Rollback()
+		t.Cleanup(rwTx.Rollback)
 
-		sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+		sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
 		require.NoError(t, err)
-		defer sd.Close()
+		t.Cleanup(sd.Close)
 
-		sd.EnableParaTrieDB(db)
-
-		got := sd.GetCommitmentCtx().Trie().Variant()
-		require.Equalf(t, variant, got, "trie variant for streaming=%v", streaming)
-
-		return runWriteCommitBatch(t, sd, rwTx)
+		return sd.ComputeCommitment(t.Context(), rwTx, false, 0, 1, "", nil)
 	}
 
-	seqRoot := runOnce(t, false)
-	strRoot := runOnce(t, true)
+	t.Run("errors under assertions", func(t *testing.T) {
+		dbg.AssertEnabled = true
+		_, err := compute(t)
+		require.ErrorContains(t, err, "no DB was wired",
+			"an unwired parallel selection computed a root silently")
+	})
 
-	require.Equalf(t, seqRoot, strRoot,
-		"sequential and streaming commitment roots must match: sequential=%x streaming=%x",
-		seqRoot, strRoot)
+	t.Run("warns and still computes with assertions off", func(t *testing.T) {
+		dbg.AssertEnabled = false
+		logs := captureRootLog(t)
+
+		rh, err := compute(t)
+		require.NoError(t, err, "the sequential fallback must stay usable in production")
+		require.NotEmpty(t, rh, "the fallback must still produce a root")
+		require.Contains(t, logs.String(), "no DB was wired",
+			"the fallback is silent on a non-assert build")
+	})
+}
+
+// captureRootLog redirects the root logger — the one the package-level log.Warn
+// in commitmentdb writes to — into a buffer for the duration of the test.
+func captureRootLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := log.Root().GetHandler()
+	log.Root().SetHandler(log.StreamHandler(&buf, log.LogfmtFormat()))
+	t.Cleanup(func() { log.Root().SetHandler(prev) })
+	return &buf
+}
+
+// TestSharedDomains_WithParaTrieDB_BindsPinController pins the half of the wiring
+// the trie variant does not show: WithParaTrieDB must also install the adaptive
+// pin controller's cache-miss callback, as the EnableParaTrieDB wrapper does.
+// Skipping it leaves roots correct and silently stops all pinning.
+func TestSharedDomains_WithParaTrieDB_BindsPinController(t *testing.T) {
+	// No t.Parallel: mutates process-global statecfg and dbg flags.
+	withCommitmentFlag(t, commitment.VariantParallelHexPatricia)
+	defer func(v bool) { dbg.DisableAdaptivePin = v }(dbg.DisableAdaptivePin)
+	dbg.DisableAdaptivePin = false
+
+	db := newTestDb(t, 16)
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	p, ok := rwTx.AggTx().(commitment.BranchCacheProvider)
+	require.True(t, ok)
+	cache := p.BranchCache()
+	require.NotNil(t, cache, "test aggregator has no branch cache, nothing to bind")
+
+	// A storage prefix, so a miss reaches the controller's own callback too.
+	prefix := make([]byte, 33)
+	prefix[0] = 0x20
+
+	misses := 0
+	cache.SetMissCallback(func([]byte) { misses++ })
+	cache.Get(prefix)
+	require.Equal(t, 1, misses, "an absent prefix must fire the miss callback")
+
+	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New(), execctx.WithParaTrieDB(db))
+	require.NoError(t, err)
+	defer sd.Close()
+
+	cache.Get(prefix)
+	require.Equal(t, 1, misses,
+		"WithParaTrieDB left the pin controller unbound: the callback is still the test's, so onCacheMiss never fires and nothing is pinned")
 }

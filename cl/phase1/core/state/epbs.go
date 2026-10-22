@@ -59,59 +59,63 @@ func IsActiveBuilder(state abstract.BeaconState, builderIndex uint64) bool {
 }
 
 // IsBuilderWithdrawalCredential checks if the withdrawal credentials belong to a builder.
-// Builder withdrawal credentials have the BUILDER_WITHDRAWAL_PREFIX (0x03) as the first byte.
+// Builder withdrawal credentials start with the configured builder prefix.
 func IsBuilderWithdrawalCredential(withdrawalCredentials [32]byte, beaconConfig *clparams.BeaconChainConfig) bool {
 	return withdrawalCredentials[0] == byte(beaconConfig.BuilderWithdrawalPrefix)
 }
 
-// IsValidIndexedPayloadAttestation checks if the indexed payload attestation is valid.
-// It verifies that:
-// - Indices are non-empty and sorted
-// - The aggregate signature is valid
-func IsValidIndexedPayloadAttestation(s abstract.BeaconState, attestation *cltypes.IndexedPayloadAttestation) (bool, error) {
+func IndexedPayloadAttestationSignatureSet(s abstract.BeaconState, attestation *cltypes.IndexedPayloadAttestation) (signature, signingRoot, aggregatePublicKey []byte, err error) {
 	indices := attestation.AttestingIndices
 	if indices.Length() == 0 || !solid.IsUint64Sorted(indices) {
-		return false, errors.New("isValidIndexedPayloadAttestation: attesting indices are empty or not sorted")
+		return nil, nil, nil, errors.New("indexedPayloadAttestationSignatureSet: attesting indices are empty or not sorted")
 	}
 
-	// Collect public keys from validators
 	pks := make([][]byte, 0, indices.Length())
-	indices.Range(func(_ int, idx uint64, _ int) bool {
-		val, err := s.ValidatorForValidatorIndex(int(idx))
+	for i := range indices.Length() {
+		val, err := s.ValidatorForValidatorIndex(int(indices.Get(i)))
 		if err != nil {
-			return false
+			return nil, nil, nil, fmt.Errorf("indexedPayloadAttestationSignatureSet: failed to get validator public key: %w", err)
 		}
-		pk := val.PublicKeyBytes()
-		pks = append(pks, pk)
-		return true
-	})
-	if len(pks) != indices.Length() {
-		return false, errors.New("isValidIndexedPayloadAttestation: failed to get all validator public keys")
+		pks = append(pks, val.PublicKeyBytes())
 	}
 
-	// Get domain for PTC attester
 	epoch := GetEpochAtSlot(s.BeaconConfig(), attestation.Data.Slot)
 	domain, err := s.GetDomain(s.BeaconConfig().DomainPtcAttester, epoch)
 	if err != nil {
-		return false, fmt.Errorf("unable to get the domain: %v", err)
+		return nil, nil, nil, fmt.Errorf("unable to get the domain: %w", err)
 	}
 
-	// Compute signing root
-	signingRoot, err := fork.ComputeSigningRoot(attestation.Data, domain)
+	root, err := fork.ComputeSigningRoot(attestation.Data, domain)
 	if err != nil {
-		return false, fmt.Errorf("unable to get signing root: %v", err)
+		return nil, nil, nil, fmt.Errorf("unable to get signing root: %w", err)
 	}
 
-	// Verify aggregate signature
-	valid, err := bls.VerifyAggregate(attestation.Signature[:], signingRoot[:], pks)
+	aggregate, err := bls.AggregatePublickKeys(pks)
 	if err != nil {
-		return false, fmt.Errorf("error while validating signature: %v", err)
-	}
-	if !valid {
-		return false, errors.New("invalid aggregate signature")
+		return nil, nil, nil, fmt.Errorf("unable to aggregate public keys: %w", err)
 	}
 
-	return true, nil
+	return attestation.Signature[:], root[:], aggregate, nil
+}
+
+func ExecutionPayloadBidSignatureSet(s abstract.BeaconState, signedBid *cltypes.SignedExecutionPayloadBid) (signature, signingRoot, publicKey []byte, err error) {
+	builders := s.GetBuilders()
+	if builders == nil || signedBid.Message.BuilderIndex >= uint64(builders.Len()) {
+		return nil, nil, nil, fmt.Errorf("builder index %d out of range", signedBid.Message.BuilderIndex)
+	}
+	builder := builders.Get(int(signedBid.Message.BuilderIndex))
+
+	domain, err := s.GetDomain(s.BeaconConfig().DomainBeaconBuilder, Epoch(s))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	root, err := fork.ComputeSigningRoot(signedBid.Message, domain)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	return signedBid.Signature[:], root[:], builder.Pubkey[:], nil
 }
 
 // CanBuilderCoverBid returns true if the builder has enough balance to cover the bid amount
@@ -145,14 +149,13 @@ func CanBuilderCoverBid(s abstract.BeaconState, builderIndex uint64, bidAmount u
 
 func GetProposerDependentRoot(s abstract.BeaconState, epoch uint64) (common.Hash, error) {
 	cfg := s.BeaconConfig()
-	if epoch < cfg.MinSeedLookahead {
-		return common.Hash{}, fmt.Errorf("proposer dependent root epoch %d before min seed lookahead %d", epoch, cfg.MinSeedLookahead)
+	if epoch <= cfg.MinSeedLookahead {
+		if s.Slot() == 0 {
+			return s.BlockRoot()
+		}
+		return s.GetBlockRootAtSlot(0)
 	}
-	dependentEpoch := epoch - cfg.MinSeedLookahead
-	if dependentEpoch == 0 {
-		return common.Hash{}, fmt.Errorf("proposer dependent root slot underflow for epoch %d", epoch)
-	}
-	dependentSlot := dependentEpoch*cfg.SlotsPerEpoch - 1
+	dependentSlot := (epoch-cfg.MinSeedLookahead)*cfg.SlotsPerEpoch - 1
 	return s.GetBlockRootAtSlot(dependentSlot)
 }
 
@@ -377,6 +380,9 @@ func ApplyDepositForBuilder(s abstract.BeaconState, pubkey common.Bytes48, withd
 }
 
 func ApplyBuilderDepositRequest(s abstract.BeaconState, request *solid.BuilderDepositRequest) error {
+	if !IsBuilderWithdrawalCredential(request.WithdrawalCredentials, s.BeaconConfig()) {
+		return nil
+	}
 	builders := s.GetBuilders()
 	builderIndex := -1
 	if builders != nil {
@@ -397,7 +403,7 @@ func ApplyBuilderDepositRequest(s abstract.BeaconState, request *solid.BuilderDe
 		return AddBuilderToRegistry(
 			s,
 			request.PubKey,
-			request.WithdrawalCredentials[0],
+			s.BeaconConfig().PayloadBuilderVersion,
 			common.BytesToAddress(request.WithdrawalCredentials[12:]),
 			request.Amount,
 			s.Slot(),
@@ -409,7 +415,7 @@ func ApplyBuilderDepositRequest(s abstract.BeaconState, request *solid.BuilderDe
 		return nil
 	}
 	newBuilder := *builder
-	if newBuilder.WithdrawableEpoch != s.BeaconConfig().FarFutureEpoch {
+	if newBuilder.WithdrawableEpoch != s.BeaconConfig().FarFutureEpoch && newBuilder.Balance == 0 {
 		newBuilder.WithdrawableEpoch = GetEpochAtSlot(s.BeaconConfig(), s.Slot()) + s.BeaconConfig().MinBuilderWithdrawabilityDelay
 	}
 	if request.Amount > math.MaxUint64-newBuilder.Balance {

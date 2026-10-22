@@ -61,7 +61,7 @@ var (
 
 // makeBlockChain creates a deterministic chain of blocks rooted at parent.
 func makeBlockChain(parent *types.Block, n int, m *execmoduletester.ExecModuleTester, seed int) *blockgen.ChainPack {
-	chain, _ := blockgen.GenerateChain(m.ChainConfig, parent, m.Engine, m.DB, n, func(i int, b *blockgen.BlockGen) {
+	chain, _ := m.GenerateChainFrom(parent, n, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{0: byte(seed), 19: byte(i)})
 	})
 	return chain
@@ -106,7 +106,7 @@ func testFork(t *testing.T, m *execmoduletester.ExecModuleTester, i, n int, comp
 	})
 	require.NoError(t, err)
 
-	canonicalMock.DB.View(ctx, func(tx kv.Tx) error {
+	err = canonicalMock.DB.View(ctx, func(tx kv.Tx) error {
 		if hash2, _, err = m.BlockReader.CanonicalHash(m.Ctx, tx, uint64(i)); err != nil {
 			t.Fatalf("Failed to read canonical hash: %v", err)
 		}
@@ -252,10 +252,10 @@ func testShorterFork(t *testing.T) {
 
 // Tests that given a starting canonical chain of a given size, creating longer
 // forks do take canonical ownership.
-func TestLongerForkHeaders(t *testing.T) { testLongerFork(t, false) }
-func TestLongerForkBlocks(t *testing.T)  { testLongerFork(t, true) }
+func TestLongerForkHeaders(t *testing.T) { testLongerFork(t) }
+func TestLongerForkBlocks(t *testing.T)  { testLongerFork(t) }
 
-func testLongerFork(t *testing.T, full bool) {
+func testLongerFork(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
@@ -341,13 +341,13 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	// Create a pristine chain and database
 	m := newCanonical(t, 0)
 	// Insert one chain first, then the other
-	firstChain, err := blockgen.GenerateChain(m.ChainConfig, m.Current(nil), m.Engine, m.DB, len(first), func(i int, b *blockgen.BlockGen) {
+	firstChain, err := m.GenerateChainFrom(m.Current(nil), len(first), func(i int, b *blockgen.BlockGen) {
 		b.OffsetTime(first[i])
 	})
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
-	secondChain, err := blockgen.GenerateChain(m.ChainConfig, m.Current(nil), m.Engine, m.DB, len(second), func(i int, b *blockgen.BlockGen) {
+	secondChain, err := m.GenerateChainFrom(m.Current(nil), len(second), func(i int, b *blockgen.BlockGen) {
 		b.OffsetTime(second[i])
 	})
 	if err != nil {
@@ -493,7 +493,7 @@ func TestChainTxReorgs(t *testing.T) {
 	//  - futureAdd: transaction added after the reorg has already finished
 	var pastAdd, freshAdd, futureAdd types.Transaction
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, gen *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(3, func(i int, gen *blockgen.BlockGen) {
 		switch i {
 		case 0:
 			pastDrop, _ = types.SignTx(types.NewTransaction(gen.TxNonce(addr2), addr2, uint256.NewInt(1000), params.TxGas, nil, nil), *signer, key2)
@@ -519,7 +519,7 @@ func TestChainTxReorgs(t *testing.T) {
 	}
 
 	// overwrite the old chain
-	chain, err = blockgen.GenerateChain(m2.ChainConfig, m2.Genesis, m2.Engine, m2.DB, 5, func(i int, gen *blockgen.BlockGen) {
+	chain, err = m2.GenerateChain(5, func(i int, gen *blockgen.BlockGen) {
 		switch i {
 		case 0:
 			pastAdd, _ = types.SignTx(types.NewTransaction(gen.TxNonce(addr3), addr3, uint256.NewInt(1000), params.TxGas, nil, nil), *signer, key3)
@@ -630,7 +630,7 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 	t.Parallel()
 	m := newCanonical(t, 0)
 
-	chain, err2 := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *blockgen.BlockGen) {})
+	chain, err2 := m.GenerateChain(10, func(i int, gen *blockgen.BlockGen) {})
 	if err2 != nil {
 		t.Fatalf("generate chain: %v", err2)
 	}
@@ -686,7 +686,7 @@ func TestEIP155Transition(t *testing.T) {
 	)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
-	chain, chainErr := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *blockgen.BlockGen) {
+	chain, chainErr := m.GenerateChain(4, func(i int, block *blockgen.BlockGen) {
 		var (
 			tx      types.Transaction
 			err     error
@@ -754,12 +754,10 @@ func TestEIP155Transition(t *testing.T) {
 
 	// generate an invalid chain id transaction
 	config := &libchain.Config{ChainID: uint256.NewInt(2), TangerineWhistleBlock: common.NewUint64(0), SpuriousDragonBlock: common.NewUint64(2), HomesteadBlock: common.NewUint64(0)}
-	chain, chainErr = blockgen.GenerateChain(config, chain.TopBlock, m.Engine, m.DB, 4, func(i int, block *blockgen.BlockGen) {
-		var (
-			basicTx = func(signer types.Signer) (types.Transaction, error) {
-				return types.SignTx(types.NewTransaction(block.TxNonce(address), common.Address{}, new(uint256.Int), 21000, new(uint256.Int), nil), signer, key)
-			}
-		)
+	chain, chainErr = m.GenerateChainWithConfig(config, chain.TopBlock, 4, func(i int, block *blockgen.BlockGen) {
+		basicTx := func(signer types.Signer) (types.Transaction, error) {
+			return types.SignTx(types.NewTransaction(block.TxNonce(address), common.Address{}, new(uint256.Int), 21000, new(uint256.Int), nil), signer, key)
+		}
 		if i == 0 {
 			tx, txErr := basicTx(*types.LatestSigner(config))
 			if txErr != nil {
@@ -806,7 +804,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key), execmoduletester.WithPruneMode(pm))
 
 	head := uint64(4)
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, int(head), func(i int, block *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(int(head), func(i int, block *blockgen.BlockGen) {
 		var (
 			tx      types.Transaction
 			err     error
@@ -851,7 +849,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		return fmt.Errorf("generate blocks: %w", err)
 	}
 
-	if err = m.InsertChain(chain); err != nil {
+	if err := m.InsertChain(chain); err != nil {
 		return err
 	}
 
@@ -987,7 +985,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(3, func(i int, block *blockgen.BlockGen) {
 		var (
 			txn    types.Transaction
 			err    error
@@ -1086,7 +1084,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 
 	var theAddr common.Address
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(3, func(i int, block *blockgen.BlockGen) {
 		nonce := block.TxNonce(bankAddress)
 		switch i {
 		case 0:
@@ -1165,7 +1163,7 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 	// Generate a canonical chain to act as the main dataset
 	m, m2 := execmoduletester.New(t), execmoduletester.New(t)
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64, func(i int, b *blockgen.BlockGen) { b.SetCoinbase(common.Address{1}) })
+	chain, err := m.GenerateChain(64, func(i int, b *blockgen.BlockGen) { b.SetCoinbase(common.Address{1}) })
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -1173,7 +1171,7 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 	// Generate a bunch of fork blocks, each side forking from the canonical chain
 	forks := make([]*blockgen.ChainPack, chain.Length())
 	for i := range forks {
-		fork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, i+1, func(j int, b *blockgen.BlockGen) {
+		fork, err := m.GenerateChain(i+1, func(j int, b *blockgen.BlockGen) {
 			if j == i {
 				b.SetCoinbase(common.Address{2})
 				b.OffsetTime(-2) // By reducing time, we increase difficulty of the fork, so that it can overwrite the canonical chain
@@ -1238,13 +1236,13 @@ func TestLargeReorgTrieGC(t *testing.T) {
 	// MaxReorgDepth, so the inserting node needs changesets for every block.
 	m, m2 := execmoduletester.New(t), execmoduletester.New(t, execmoduletester.WithAlwaysGenerateChangesets(true))
 
-	shared, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64, func(i int, b *blockgen.BlockGen) {
+	shared, err := m.GenerateChain(64, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
 		t.Fatalf("generate shared chain: %v", err)
 	}
-	original, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64+2*triesInMemory, func(i int, b *blockgen.BlockGen) {
+	original, err := m.GenerateChain(64+2*triesInMemory, func(i int, b *blockgen.BlockGen) {
 		if i < 64 {
 			b.SetCoinbase(common.Address{1})
 		} else {
@@ -1254,7 +1252,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate original chain: %v", err)
 	}
-	competitor, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64+2*triesInMemory+1, func(i int, b *blockgen.BlockGen) {
+	competitor, err := m.GenerateChain(64+2*triesInMemory+1, func(i int, b *blockgen.BlockGen) {
 		if i < 64 {
 			b.SetCoinbase(common.Address{1})
 		} else {
@@ -1303,7 +1301,7 @@ func TestLowDiffLongChain(t *testing.T) {
 
 	// We must use a pretty long chain to ensure that the fork doesn't overtake us
 	// until after at least 128 blocks post tip
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 6*triesInMemory, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(6*triesInMemory, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		b.OffsetTime(-9)
 	})
@@ -1311,7 +1309,7 @@ func TestLowDiffLongChain(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 	// Generate fork chain, starting from an early block
-	fork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 11+8*triesInMemory, func(i int, b *blockgen.BlockGen) {
+	fork, err := m.GenerateChain(11+8*triesInMemory, func(i int, b *blockgen.BlockGen) {
 		if i < 11 {
 			b.SetCoinbase(common.Address{1})
 			b.OffsetTime(-9)
@@ -1414,7 +1412,7 @@ func TestDeleteCreateRevert(t *testing.T) {
 	)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AAAA
 		tx, _ := types.SignTx(types.NewTransaction(0, aa,
@@ -1487,7 +1485,8 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	}
 	bbCode := []byte{
 		// Push initcode onto stack
-		byte(vm.PUSH1) + byte(len(initCode)-1)}
+		byte(vm.PUSH1) + byte(len(initCode)-1),
+	}
 	bbCode = append(bbCode, initCode...)
 	bbCode = append(bbCode, []byte{
 		byte(vm.PUSH1), 0x0, // memory start on stack
@@ -1523,7 +1522,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 		},
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
 		tx, _ := types.SignTx(types.NewTransaction(0, aa.Value(),
@@ -1650,7 +1649,7 @@ func TestCVE2020_26265(t *testing.T) {
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
 		tx, _ := types.SignTx(types.NewTransaction(0, caller,
@@ -1725,7 +1724,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
 		tx, _ := types.SignTx(types.NewTransaction(0, aa.Value(),
@@ -1822,7 +1821,8 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 	}
 	bbCode := []byte{
 		// Push initcode onto stack
-		byte(vm.PUSH1) + byte(len(initCode)-1)}
+		byte(vm.PUSH1) + byte(len(initCode)-1),
+	}
 	bbCode = append(bbCode, initCode...)
 	bbCode = append(bbCode, []byte{
 		byte(vm.PUSH1), 0x0, // memory start on stack
@@ -1864,13 +1864,13 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		exist    bool
 		blocknum int
 	}
-	var current = &expectation{
+	current := &expectation{
 		exist:    true, // exists in genesis
 		blocknum: 0,
 		values:   map[int]int{1: 1, 2: 2},
 	}
 	var expectations []*expectation
-	var newDestruct = func(e *expectation) types.Transaction {
+	newDestruct := func(e *expectation) types.Transaction {
 		tx, _ := types.SignTx(types.NewTransaction(nonce, aa.Value(),
 			&u256.Num0, 50000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		nonce++
@@ -1881,7 +1881,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		//t.Logf("block %d; adding destruct\n", e.blocknum)
 		return tx
 	}
-	var newResurrect = func(e *expectation) types.Transaction {
+	newResurrect := func(e *expectation) types.Transaction {
 		tx, _ := types.SignTx(types.NewTransaction(nonce, bb,
 			&u256.Num0, 100000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		nonce++
@@ -1893,8 +1893,8 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		return tx
 	}
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 150, func(i int, b *blockgen.BlockGen) {
-		var exp = new(expectation)
+	chain, err := m.GenerateChain(150, func(i int, b *blockgen.BlockGen) {
+		exp := new(expectation)
 		exp.blocknum = i + 1
 		exp.values = make(map[int]int)
 		maps.Copy(exp.values, current.values)
@@ -1920,7 +1920,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 	// Import the canonical chain
-	var asHash = func(num int) common.Hash {
+	asHash := func(num int) common.Hash {
 		return common.BytesToHash([]byte{byte(num)})
 	}
 	for i := range chain.Blocks {
@@ -1929,7 +1929,6 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 			t.Fatalf("block %d: failed to insert into chain: %v", i, err)
 		}
 		err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
-
 			statedb := state.New(m.NewStateReader(tx))
 			defer statedb.Close()
 			// If all is correct, then slot 1 and 2 are zero
@@ -2028,7 +2027,8 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	}
 	bbCode := []byte{
 		// Push initcode onto stack
-		byte(vm.PUSH1) + byte(len(initCode)-1)}
+		byte(vm.PUSH1) + byte(len(initCode)-1),
+	}
 	bbCode = append(bbCode, initCode...)
 	bbCode = append(bbCode, []byte{
 		byte(vm.PUSH1), 0x0, // memory start on stack
@@ -2060,7 +2060,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	nonce := uint64(0)
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(4, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to BB
 		tx, _ := types.SignTx(types.NewTransaction(nonce, bb,
@@ -2073,7 +2073,6 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	}
 
 	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
-
 		// Import the canonical chain
 		statedb := state.New(m.NewHistoryStateReader(2, tx))
 		defer statedb.Close()
@@ -2150,7 +2149,7 @@ func TestEIP2718Transition(t *testing.T) {
 	)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		gasPrice, _ := uint256.FromBig(big.NewInt(1))
 		chainID := gspec.Config.ChainID
@@ -2197,7 +2196,6 @@ func TestEIP2718Transition(t *testing.T) {
 		vm.GasQuickStep*2 + params.WarmStorageReadCostEIP2929 + params.ColdSloadCostEIP2929
 	if block.GasUsed() != expected {
 		t.Fatalf("incorrect amount of gas spent: expected %d, got %d", expected, block.GasUsed())
-
 	}
 }
 
@@ -2266,7 +2264,7 @@ func TestEIP1559Transition(t *testing.T) {
 	)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key1))
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 501, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(501, func(i int, b *blockgen.BlockGen) {
 		if i == 500 {
 			b.SetCoinbase(common.Address{1})
 		} else {
@@ -2347,7 +2345,7 @@ func TestEIP1559Transition(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	chain, err = blockgen.GenerateChain(m.ChainConfig, block, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
+	chain, err = m.GenerateChainFrom(block, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{2})
 
 		var txn types.Transaction = types.NewTransaction(0, aa, &u256.Num0, 30000, new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(common.GWei)), nil)

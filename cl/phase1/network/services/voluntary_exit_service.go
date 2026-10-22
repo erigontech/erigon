@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -28,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -43,6 +45,8 @@ type voluntaryExitService struct {
 	beaconCfg              *clparams.BeaconChainConfig
 	ethClock               eth_clock.EthereumClock
 	batchSignatureVerifier *BatchSignatureVerifier
+	seen                   *lru.Cache[uint64, struct{}]
+	now                    func() time.Time
 }
 
 // SignedVoluntaryExitForGossip type represents SignedVoluntaryExit with the gossip data where it's coming from.
@@ -60,6 +64,10 @@ func NewVoluntaryExitService(
 	ethClock eth_clock.EthereumClock,
 	batchSignatureVerifier *BatchSignatureVerifier,
 ) VoluntaryExitService {
+	seen, err := lru.New[uint64, struct{}]("voluntary_exit_seen", operationSeenCacheSize)
+	if err != nil {
+		panic(err)
+	}
 	return &voluntaryExitService{
 		operationsPool:         operationsPool,
 		emitters:               emitters,
@@ -67,6 +75,8 @@ func NewVoluntaryExitService(
 		beaconCfg:              beaconCfg,
 		ethClock:               ethClock,
 		batchSignatureVerifier: batchSignatureVerifier,
+		seen:                   seen,
+		now:                    time.Now,
 	}
 }
 
@@ -90,12 +100,30 @@ func (s *voluntaryExitService) DecodeGossipMessage(pid peer.ID, data []byte, ver
 }
 
 func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint64, msg *SignedVoluntaryExitForGossip) error {
+	if msg == nil || msg.SignedVoluntaryExit == nil || msg.SignedVoluntaryExit.VoluntaryExit == nil {
+		return errors.New("invalid voluntary exit")
+	}
 	// ref: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#voluntary_exit
 	voluntaryExit := msg.SignedVoluntaryExit.VoluntaryExit
 
 	// [IGNORE] The voluntary exit is the first valid voluntary exit received for the validator with index signed_voluntary_exit.message.validator_index.
+	if _, ok := s.seen.Get(voluntaryExit.ValidatorIndex); ok {
+		return ErrIgnore
+	}
 	if s.operationsPool.VoluntaryExitsPool.Has(voluntaryExit.ValidatorIndex) {
-		return nil
+		return ErrIgnore
+	}
+
+	currentEpoch := uint64(0)
+	now := s.now().Add(maximumGossipClockDisparity)
+	if !now.Before(s.ethClock.GetSlotTime(0)) {
+		currentEpoch = s.ethClock.GetEpochAtSlot(s.ethClock.GetSlotByTime(now))
+	}
+	if voluntaryExit.Epoch > currentEpoch {
+		if msg.ImmediateVerification {
+			return errors.New("exits must specify an epoch when they become valid; they are not valid before then")
+		}
+		return ErrIgnore
 	}
 
 	var (
@@ -111,29 +139,30 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 		if err != nil {
 			return ErrIgnore
 		}
-		curEpoch := s.ethClock.GetCurrentEpoch()
+		curEpoch := state.Slot() / s.beaconCfg.SlotsPerEpoch
 
+		if val.ExitEpoch() != s.beaconCfg.FarFutureEpoch {
+			if msg.ImmediateVerification {
+				return fmt.Errorf("verify exit has not been initiated. exitEpoch: %d, farFutureEpoch: %d", val.ExitEpoch(), s.beaconCfg.FarFutureEpoch)
+			}
+			return ErrIgnore
+		}
 		// Verify the validator is active
 		// assert is_active_validator(validator, get_current_epoch(state))
 		if !val.Active(curEpoch) {
+			if !msg.ImmediateVerification && val.Active(currentEpoch) {
+				return ErrIgnore
+			}
 			return errors.New("validator is not active")
-		}
-
-		// Verify exit has not been initiated
-		// assert validator.exit_epoch == FAR_FUTURE_EPOCH
-		if val.ExitEpoch() != s.beaconCfg.FarFutureEpoch {
-			return fmt.Errorf("verify exit has not been initiated. exitEpoch: %d, farFutureEpoch: %d", val.ExitEpoch(), s.beaconCfg.FarFutureEpoch)
-		}
-
-		// Exits must specify an epoch when they become valid; they are not valid before then
-		// assert get_current_epoch(state) >= voluntary_exit.epoch
-		if curEpoch < voluntaryExit.Epoch {
-			return errors.New("exits must specify an epoch when they become valid; they are not valid before then")
 		}
 
 		// Verify the validator has been active long enough
 		// assert get_current_epoch(state) >= validator.activation_epoch + SHARD_COMMITTEE_PERIOD
-		if curEpoch < val.ActivationEpoch()+s.beaconCfg.ShardCommitteePeriod {
+		eligibleEpoch := val.ActivationEpoch() + s.beaconCfg.ShardCommitteePeriod
+		if curEpoch < eligibleEpoch {
+			if !msg.ImmediateVerification && currentEpoch >= eligibleEpoch {
+				return ErrIgnore
+			}
 			return errors.New("verify the validator has been active long enough")
 		}
 
@@ -167,8 +196,7 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 		Pks:         [][]byte{pk[:]},
 		SendingPeer: msg.Receiver,
 		F: func() {
-			s.operationsPool.VoluntaryExitsPool.Insert(voluntaryExit.ValidatorIndex, msg.SignedVoluntaryExit)
-			s.emitters.Operation().SendVoluntaryExit(msg.SignedVoluntaryExit)
+			s.storeVerifiedExit(msg.SignedVoluntaryExit)
 		},
 	}
 
@@ -176,12 +204,13 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
 	}
 
-	// push the signatures to verify asynchronously and run final functions after that.
-	s.batchSignatureVerifier.AsyncVerifyVoluntaryExit(aggregateVerificationData)
+	return s.batchSignatureVerifier.VerifyVoluntaryExit(ctx, aggregateVerificationData)
+}
 
-	// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
-	// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
-	// in BatchSignatureVerifier service. After validating signatures, if they are valid we will publish the
-	// gossip ourselves or ban the peer which sent that particular invalid signature.
-	return nil
+func (s *voluntaryExitService) storeVerifiedExit(exit *cltypes.SignedVoluntaryExit) {
+	if seen, _ := s.seen.ContainsOrAdd(exit.VoluntaryExit.ValidatorIndex, struct{}{}); seen {
+		return
+	}
+	s.operationsPool.VoluntaryExitsPool.Insert(exit.VoluntaryExit.ValidatorIndex, exit)
+	s.emitters.Operation().SendVoluntaryExit(exit)
 }

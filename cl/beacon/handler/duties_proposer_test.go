@@ -66,9 +66,9 @@ func TestGetDutiesProposerHistoricalEpochIgnoresHeadEffectiveBalance(t *testing.
 	require.NotEmpty(t, activeIndices)
 	chosenIndex := activeIndices[0]
 	for _, validatorIndex := range activeIndices {
-		headWithChangedBalances.SetEffectiveBalanceForValidatorAtIndex(int(validatorIndex), 0)
+		require.NoError(t, headWithChangedBalances.SetEffectiveBalanceForValidatorAtIndex(int(validatorIndex), 0))
 	}
-	headWithChangedBalances.SetEffectiveBalanceForValidatorAtIndex(int(chosenIndex), handler.beaconChainCfg.MaxEffectiveBalanceForVersion(headWithChangedBalances.Version()))
+	require.NoError(t, headWithChangedBalances.SetEffectiveBalanceForValidatorAtIndex(int(chosenIndex), handler.beaconChainCfg.MaxEffectiveBalanceForVersion(headWithChangedBalances.Version())))
 
 	manager, ok := syncedData.(*synced_data.SyncedDataManager)
 	require.True(t, ok)
@@ -86,7 +86,7 @@ func TestGetHistoricalProposerDependentRootEpochZeroReturnsGenesisRoot(t *testin
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	require.NoError(t, beacon_indicies.MarkRootCanonical(context.Background(), tx, 0, genesisRoot))
+	require.NoError(t, beacon_indicies.MarkRootCanonical(tx, 0, genesisRoot))
 	require.NoError(t, tx.Commit())
 
 	roTx, err := db.BeginRo(context.Background())
@@ -100,15 +100,15 @@ func TestGetHistoricalProposerDependentRootEpochZeroReturnsGenesisRoot(t *testin
 func TestGetDutiesProposerEpochZeroReturnsGenesisRootAndDuties(t *testing.T) {
 	db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 
-	genesisState, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	genesisState, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 	handler.stateReader = historical_states_reader.NewHistoricalStatesReader(handler.beaconChainCfg, nil, state_accessors.NewStaticValidatorTable(), genesisState, nil, handler.syncedData)
 
 	genesisRoot := common.Hash{1, 2, 3}
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	require.NoError(t, beacon_indicies.MarkRootCanonical(context.Background(), tx, 0, genesisRoot))
+	require.NoError(t, beacon_indicies.MarkRootCanonical(tx, 0, genesisRoot))
 	require.NoError(t, tx.Commit())
 
 	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 0, Root: genesisRoot}
@@ -301,25 +301,22 @@ func TestGetDutiesProposerFutureEpochTooFarReturnsBadRequest(t *testing.T) {
 
 	headEpoch := postState.Slot() / handler.beaconChainCfg.SlotsPerEpoch
 	epoch := headEpoch + maxEpochsLookaheadForDuties + 1
-	request := httptest.NewRequest(http.MethodGet, "/eth/v1/validator/duties/proposer/"+strconv.FormatUint(epoch, 10), http.NoBody)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/validator/duties/proposer/"+strconv.FormatUint(epoch, 10), http.NoBody)
 	recorder := httptest.NewRecorder()
 	handler.mux.ServeHTTP(recorder, request)
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 }
 
-func TestGetDependentRootReturnsNotFoundWhenRootUnavailable(t *testing.T) {
-	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+// Processing the empty slots after the head would carry the head root into their block roots.
+func TestGetDependentRootUsesHeadRootForSlotsAfterHead(t *testing.T) {
+	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
-	headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
-	require.NoError(t, err)
-	fcu.HeadVal = headRoot
-	fcu.HeadSlotVal = postState.Slot()
-
-	epoch := postState.Slot()/handler.beaconChainCfg.SlotsPerEpoch + maxEpochsLookaheadForDuties*3
-	root, err := handler.getDependentRoot(epoch, false)
-	require.Error(t, err)
-	require.Equal(t, common.Hash{}, root)
-	require.Contains(t, err.Error(), "dependent root not found")
+	headEpoch := syncedData.HeadSlot() / handler.beaconChainCfg.SlotsPerEpoch
+	for _, attester := range []bool{false, true} {
+		root, err := handler.getDependentRoot(headEpoch+2, attester)
+		require.NoError(t, err)
+		require.Equal(t, syncedData.HeadRoot(), root)
+	}
 }
 
 type proposerDutiesResponse struct {
@@ -342,7 +339,7 @@ func TestGetDutiesProposerEpochOverflowReturnsBadRequest(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	epoch := uint64(math.MaxUint64)
-	request := httptest.NewRequest(http.MethodGet, "/eth/v1/validator/duties/proposer/"+strconv.FormatUint(epoch, 10), http.NoBody)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/validator/duties/proposer/"+strconv.FormatUint(epoch, 10), http.NoBody)
 	recorder := httptest.NewRecorder()
 	handler.mux.ServeHTTP(recorder, request)
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
@@ -418,7 +415,7 @@ func TestGetAttesterDutiesEpochOverflowReturnsBadRequest(t *testing.T) {
 
 	epoch := uint64(math.MaxUint64)
 	body := strings.NewReader(`["0"]`)
-	request := httptest.NewRequest(http.MethodPost, "/eth/v1/validator/duties/attester/"+strconv.FormatUint(epoch, 10), body)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/duties/attester/"+strconv.FormatUint(epoch, 10), body)
 	recorder := httptest.NewRecorder()
 	handler.mux.ServeHTTP(recorder, request)
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
@@ -430,7 +427,7 @@ func TestPostPtcDutiesEpochOverflowReturnsBadRequest(t *testing.T) {
 
 	epoch := uint64(math.MaxUint64)
 	body := strings.NewReader(`["0"]`)
-	request := httptest.NewRequest(http.MethodPost, "/eth/v1/validator/duties/ptc/"+strconv.FormatUint(epoch, 10), body)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/duties/ptc/"+strconv.FormatUint(epoch, 10), body)
 	recorder := httptest.NewRecorder()
 	handler.mux.ServeHTTP(recorder, request)
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
@@ -446,7 +443,7 @@ func getProposerDutiesForEpoch(t *testing.T, handler *ApiHandler, epoch uint64) 
 func getProposerDutiesForPath(t *testing.T, handler *ApiHandler, path string) proposerDutiesResponse {
 	t.Helper()
 
-	request := httptest.NewRequest(http.MethodGet, path, http.NoBody)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody)
 	recorder := httptest.NewRecorder()
 	handler.mux.ServeHTTP(recorder, request)
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())

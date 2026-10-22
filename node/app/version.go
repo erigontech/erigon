@@ -91,7 +91,6 @@ func NewVersion(major any, minor ...uint64) Version {
 //
 //	info which will be appended with - & + respectively
 func NewPreReleaseVersion(major, minor, patch uint64, preReleaseInfo, buildInfo []string) Version {
-
 	preReleaseValues := []PreReleaseValue{}
 	for _, prvalstr := range preReleaseInfo {
 		prval, err := newPreReleaseValue(prvalstr)
@@ -195,35 +194,36 @@ func (v *SemanticVersion) CompareTo(other Version) int {
 		return -1
 	}
 
-	// Quick comparison if a version has no prerelease versioning
-	if len(v.PreReleaseInfo) == 0 && len(o.PreReleaseInfo) == 0 {
+	switch {
+	case len(v.PreReleaseInfo) == 0 && len(o.PreReleaseInfo) == 0:
 		return 0
-	} else if len(v.PreReleaseInfo) == 0 && len(o.PreReleaseInfo) > 0 {
+	case len(v.PreReleaseInfo) == 0 && len(o.PreReleaseInfo) > 0:
 		return 1
-	} else if len(v.PreReleaseInfo) > 0 && len(o.PreReleaseInfo) == 0 {
+	case len(v.PreReleaseInfo) > 0 && len(o.PreReleaseInfo) == 0:
 		return -1
 	}
 
 	i := 0
 	for ; i < len(v.PreReleaseInfo) && i < len(o.PreReleaseInfo); i++ {
-		if comp := v.PreReleaseInfo[i].CompareTo(o.PreReleaseInfo[i]); comp == 0 {
+		switch comp := v.PreReleaseInfo[i].CompareTo(o.PreReleaseInfo[i]); {
+		case comp == 0:
 			continue
-		} else if comp == 1 {
+		case comp == 1:
 			return 1
-		} else {
+		default:
 			return -1
 		}
 	}
 
 	// If all pr versioning are the equal but one has further prversion, this one greater
-	if i == len(v.PreReleaseInfo) && i == len(o.PreReleaseInfo) {
+	switch {
+	case i == len(v.PreReleaseInfo) && i == len(o.PreReleaseInfo):
 		return 0
-	} else if i == len(v.PreReleaseInfo) && i < len(o.PreReleaseInfo) {
+	case i == len(v.PreReleaseInfo) && i < len(o.PreReleaseInfo):
 		return -1
-	} else {
+	default:
 		return 1
 	}
-
 }
 
 // Validate validates v and returns error in case
@@ -231,7 +231,7 @@ func (v *SemanticVersion) Validate() error {
 	// Major, Minor, Patch already validated using uint64
 
 	for _, pre := range v.PreReleaseInfo {
-		if !pre.isNumeric { //Numeric prerelease versioning already uint64
+		if !pre.isNumeric { // Numeric prerelease versioning already uint64
 			if len(pre.strValue) == 0 {
 				return fmt.Errorf("prerelease can not be empty %q", pre.strValue)
 			}
@@ -395,22 +395,22 @@ func newPreReleaseValue(s string) (PreReleaseValue, error) {
 		return PreReleaseValue{}, errors.New("prerelease is empty")
 	}
 	v := PreReleaseValue{}
-	if containsOnly(s, numbers) {
+	switch {
+	case containsOnly(s, numbers):
 		if hasLeadingZeroes(s) {
 			return PreReleaseValue{}, fmt.Errorf("numeric PreRelease version must not contain leading zeroes %q", s)
 		}
 		num, err := strconv.ParseUint(s, 10, 64)
-
 		// Might never be hit, but just in case
 		if err != nil {
 			return PreReleaseValue{}, err
 		}
 		v.numValue = num
 		v.isNumeric = true
-	} else if containsOnly(s, alphanum) {
+	case containsOnly(s, alphanum):
 		v.strValue = s
 		v.isNumeric = false
-	} else {
+	default:
 		return PreReleaseValue{}, fmt.Errorf("invalid character(s) found in prerelease %q", s)
 	}
 	return v, nil
@@ -426,25 +426,27 @@ func (v PreReleaseValue) IsNumeric() bool {
 // 0 == v is equal to o
 // 1 == v is greater than o
 func (v PreReleaseValue) CompareTo(o PreReleaseValue) int {
-
-	if v.isNumeric && !o.isNumeric {
+	switch {
+	case v.isNumeric && !o.isNumeric:
 		return -1
-	} else if !v.isNumeric && o.isNumeric {
+	case !v.isNumeric && o.isNumeric:
 		return 1
-	} else if v.isNumeric && o.isNumeric {
-		if v.numValue == o.numValue {
+	case v.isNumeric && o.isNumeric:
+		switch {
+		case v.numValue == o.numValue:
 			return 0
-		} else if v.numValue > o.numValue {
+		case v.numValue > o.numValue:
 			return 1
-		} else {
+		default:
 			return -1
 		}
-	} else { // both are Alphas
-		if v.strValue == o.strValue {
+	default: // both are Alphas
+		switch {
+		case v.strValue == o.strValue:
 			return 0
-		} else if v.strValue > o.strValue {
+		case v.strValue > o.strValue:
 			return 1
-		} else {
+		default:
 			return -1
 		}
 	}
@@ -456,17 +458,6 @@ func (v PreReleaseValue) String() string {
 		return strconv.FormatUint(v.numValue, 10)
 	}
 	return v.strValue
-}
-
-func newBuildValue(s string) (string, error) {
-
-	if len(s) == 0 {
-		return "", errors.New("build version is empty")
-	}
-	if !containsOnly(s, alphanum) {
-		return "", fmt.Errorf("invalid character(s) found in build meta data %q", s)
-	}
-	return s, nil
 }
 
 func containsOnly(s string, set string) bool {

@@ -18,7 +18,11 @@ package execution_client
 
 import (
 	"context"
+	"errors"
 	"math/big"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -29,7 +33,30 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
-var errContextExceeded = "rpc error: code = DeadlineExceeded desc = context deadline exceeded"
+// ErrForkChoiceUpdateTimeout reports that the execution layer did not answer a forkchoice update
+// in time. The update is not refused by it - the execution layer may still apply it - and no
+// payload id came back, so a caller that needed one has to treat this as a failure rather than as
+// an empty success.
+var ErrForkChoiceUpdateTimeout = errors.New("forkchoice update timed out")
+
+// ErrForkChoiceUpdateNoPayloadID reports that an attribute-bearing update did not start a payload build.
+var ErrForkChoiceUpdateNoPayloadID = errors.New("forkchoice update returned no payload ID")
+
+// legacyGrpcDeadlineMessage is what a deadline used to be recognised by. Kept as a last resort for
+// a transport that reports one without a status code or a wrapped context error.
+const legacyGrpcDeadlineMessage = "rpc error: code = DeadlineExceeded desc = context deadline exceeded"
+
+// isDeadlineExceeded reports whether err is the execution layer running out of time, by the
+// context, by the gRPC status, or by the message a transport that carries neither would produce.
+func isDeadlineExceeded(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	if status.Code(err) == codes.DeadlineExceeded {
+		return true
+	}
+	return err.Error() == legacyGrpcDeadlineMessage
+}
 
 // ExecutionEngine is used only for syncing up very close to chain tip and to stay in sync.
 // It pretty much mimics engine API.
@@ -39,8 +66,8 @@ type ExecutionEngine interface {
 	NewPayload(ctx context.Context, payload *cltypes.Eth1Block, beaconParentRoot *common.Hash, versionedHashes []common.Hash, executionRequestsList []hexutil.Bytes) (PayloadStatus, error)
 	ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attributes *engine_types.PayloadAttributes, version clparams.StateVersion) ([]byte, error)
 	SupportInsertion() bool
-	InsertBlocks(ctx context.Context, blocks []*types.Block, bals [][]byte) error
-	InsertBlock(ctx context.Context, block *types.Block, bal []byte) error
+	InsertBlocks(ctx context.Context, blocks []*types.Block) error
+	InsertBlock(ctx context.Context, block *types.Block) error
 	CurrentHeader(ctx context.Context) (*types.Header, error)
 	IsCanonicalHash(ctx context.Context, hash common.Hash) (bool, error)
 	Ready(ctx context.Context) (bool, error)

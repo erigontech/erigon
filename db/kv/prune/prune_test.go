@@ -28,16 +28,18 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/prune"
 )
 
-const testTxLookupTable = "TestTxLookup"
-const testDupSortTable = "TestDupSort"
+const (
+	testTxLookupTable = "TestTxLookup"
+	testDupSortTable  = "TestDupSort"
+)
 
 func openTestDB(tb testing.TB) kv.RwDB {
 	tb.Helper()
-	return mdbx2.New(dbcfg.ChainDB, log.New()).
-		InMem(tb, tb.TempDir()).
+	return mdbxtest.InMem(tb, mdbx2.New(dbcfg.ChainDB, log.New()), tb.TempDir()).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
 			return kv.TableCfg{testTxLookupTable: {}}
 		}).MustOpen()
@@ -45,8 +47,7 @@ func openTestDB(tb testing.TB) kv.RwDB {
 
 func openTestDupSortDB(tb testing.TB) kv.RwDB {
 	tb.Helper()
-	return mdbx2.New(dbcfg.ChainDB, log.New()).
-		InMem(tb, tb.TempDir()).
+	return mdbxtest.InMem(tb, mdbx2.New(dbcfg.ChainDB, log.New()), tb.TempDir()).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
 			return kv.TableCfg{testDupSortTable: {Flags: kv.DupSort}}
 		}).MustOpen()
@@ -117,7 +118,7 @@ func TestTableScanningPrune_Basic(t *testing.T) {
 	stat, err := prune.TableScanningPrune(
 		t.Context(), "test", "txlookup",
 		5, 15, 1, logEvery, log.New(),
-		nil, cur, false, &prune.Stat{}, prune.ValueOffset8StorageMode,
+		nil, cur, &prune.Stat{}, prune.ValueOffset8StorageMode,
 	)
 	require.NoError(t, err)
 	require.Equal(t, prune.Done, stat.ValueProgress)
@@ -166,7 +167,7 @@ func TestTableScanningPrune_RollingCursor(t *testing.T) {
 	stat1, err := prune.TableScanningPrune(
 		t.Context(), "test", "txlookup",
 		0, 8, 1, logEvery, log.New(),
-		nil, cur, false, prevStat, prune.ValueOffset8StorageMode,
+		nil, cur, prevStat, prune.ValueOffset8StorageMode,
 	)
 	cur.Close()
 	require.NoError(t, err)
@@ -189,7 +190,7 @@ func TestTableScanningPrune_RollingCursor(t *testing.T) {
 	stat2, err := prune.TableScanningPrune(
 		t.Context(), "test", "txlookup",
 		0, 10, 1, logEvery, log.New(),
-		nil, cur, false, newRotStat, prune.ValueOffset8StorageMode,
+		nil, cur, newRotStat, prune.ValueOffset8StorageMode,
 	)
 	cur.Close()
 	require.NoError(t, err)
@@ -229,7 +230,7 @@ func TestTableScanningPrune_CtxCancelOnOutOfRange(t *testing.T) {
 	stat, err := prune.TableScanningPrune(
 		ctx, "test", "txlookup",
 		0, 5, 1, logEvery, log.New(),
-		nil, cur, false, &prune.Stat{}, prune.ValueOffset8StorageMode,
+		nil, cur, &prune.Stat{}, prune.ValueOffset8StorageMode,
 	)
 	require.NoError(t, err)
 
@@ -323,7 +324,7 @@ func TestDupSortPrune_SingleDupAllInRange(t *testing.T) {
 	stat, err := prune.TableScanningPrune(
 		t.Context(), "test", "dup",
 		0, 64, stepSize, logEvery, log.New(),
-		nil, cur, false, &prune.Stat{}, prune.StepValueStorageMode,
+		nil, cur, &prune.Stat{}, prune.StepValueStorageMode,
 	)
 	require.NoError(t, err)
 	require.Equal(t, prune.Done, stat.ValueProgress)
@@ -368,7 +369,7 @@ func TestDupSortPrune_MultipleDupsAllInRange(t *testing.T) {
 	stat, err := prune.TableScanningPrune(
 		t.Context(), "test", "dup",
 		0, 64, stepSize, logEvery, log.New(),
-		nil, cur, false, &prune.Stat{}, prune.StepValueStorageMode,
+		nil, cur, &prune.Stat{}, prune.StepValueStorageMode,
 	)
 	require.NoError(t, err)
 	require.Equal(t, prune.Done, stat.ValueProgress)
@@ -410,7 +411,7 @@ func TestDupSortPrune_MixedDupsPartialRange(t *testing.T) {
 	stat, err := prune.TableScanningPrune(
 		t.Context(), "test", "dup",
 		0, 64, stepSize, logEvery, log.New(),
-		nil, cur, false, &prune.Stat{}, prune.StepValueStorageMode,
+		nil, cur, &prune.Stat{}, prune.StepValueStorageMode,
 	)
 	require.NoError(t, err)
 	require.Equal(t, prune.Done, stat.ValueProgress)
@@ -469,7 +470,7 @@ func TestDupSortPrune_ProductionLike(t *testing.T) {
 	_, err = prune.TableScanningPrune(
 		t.Context(), "test", "dup",
 		0, txTo, stepSize, logEvery, log.New(),
-		nil, cur, false, &prune.Stat{}, prune.StepValueStorageMode,
+		nil, cur, &prune.Stat{}, prune.StepValueStorageMode,
 	)
 	require.NoError(t, err)
 
@@ -493,30 +494,4 @@ func TestDupSortPrune_ProductionLike(t *testing.T) {
 		t.Errorf("BUG: in-range row survived: key=%d step=%d (txTo=%d)", r.keyIdx, r.step, txTo)
 	}
 	t.Logf("survivors=%d", len(got))
-}
-
-func BenchmarkTableScanningPrune(b *testing.B) {
-	db := openTestDB(b)
-	defer db.Close()
-
-	const N = 10_000
-	tx, err := db.BeginRw(b.Context())
-	require.NoError(b, err)
-	defer tx.Rollback()
-	insertEntries(b, tx, N, 0) // txNums 0..N-1; prune [0, N/2)
-
-	logEvery := time.NewTicker(time.Hour)
-	defer logEvery.Stop()
-	logger := log.New()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		cur := openPseudoCursor(b, tx)
-		prune.TableScanningPrune( //nolint:errcheck
-			b.Context(), "bench", "txlookup",
-			0, N/2, 1, logEvery, logger,
-			nil, cur, false, &prune.Stat{}, prune.ValueOffset8StorageMode,
-		)
-		cur.Close()
-	}
 }

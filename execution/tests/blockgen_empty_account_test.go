@@ -17,8 +17,6 @@
 package executiontests
 
 import (
-	"bytes"
-	"crypto/ecdsa"
 	"math/big"
 	"testing"
 
@@ -28,11 +26,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -96,13 +92,15 @@ func runGeneratedChainClearsTouchedEmptyAccount(t *testing.T, preexisting bool) 
 		b.AddTx(touch)
 
 		// The authorization's gas depends on whether the account exists.
+		authorization, err := types.SignAuthorization(emptyKey, *chainID, common.Address{0xaa}, 0)
+		require.NoError(t, err)
 		authorize, err := types.SignTx(&types.SetCodeTransaction{
 			DynamicFeeTransaction: types.DynamicFeeTransaction{
 				CommonTx: types.CommonTx{Nonce: 1, GasLimit: params.MaxTxnGasLimit, To: &senderAddr},
 				ChainID:  *chainID, TipCap: *feeCap, FeeCap: *feeCap,
 			},
 			Authorizations: []types.Authorization{
-				signTestAuthorization(t, emptyKey, chainID, common.Address{0xaa}, 0),
+				authorization,
 			},
 		}, *signer, senderKey)
 		require.NoError(t, err)
@@ -110,36 +108,4 @@ func runGeneratedChainClearsTouchedEmptyAccount(t *testing.T, preexisting bool) 
 	})
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(chainPack))
-}
-
-// signTestAuthorization builds an EIP-7702 authorization tuple signed by key.
-func signTestAuthorization(t *testing.T, key *ecdsa.PrivateKey, chainID *uint256.Int, target common.Address, nonce uint64) types.Authorization {
-	t.Helper()
-	var buf [33]byte
-	data := bytes.NewBuffer(nil)
-
-	authLen := rlp.Uint256Len(*chainID)
-	authLen += 1 + length.Addr
-	authLen += rlp.U64Len(nonce)
-	require.NoError(t, rlp.EncodeListPrefix(authLen, data, buf[:]))
-	require.NoError(t, rlp.EncodeUint256(*chainID, data, buf[:]))
-	require.NoError(t, types.EncodeOptionalAddress(&target, data, buf[:]))
-	require.NoError(t, rlp.EncodeU64(nonce, data, buf[:]))
-
-	hash := crypto.Keccak256Hash(append([]byte{params.SetCodeMagicPrefix}, data.Bytes()...))
-	sig, err := crypto.Sign(hash[:], key)
-	require.NoError(t, err)
-
-	auth := types.Authorization{
-		ChainID: *chainID,
-		Address: target,
-		Nonce:   nonce,
-		YParity: sig[64],
-		R:       *uint256.NewInt(0).SetBytes(sig[:32]),
-		S:       *uint256.NewInt(0).SetBytes(sig[32:64]),
-	}
-	recovered, err := auth.RecoverSigner(bytes.NewBuffer(nil), buf[:])
-	require.NoError(t, err)
-	require.Equal(t, crypto.PubkeyToAddress(key.PublicKey), *recovered)
-	return auth
 }

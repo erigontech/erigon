@@ -129,8 +129,8 @@ func (s *E2SnapSchema) IndexTags() []string {
 	return s.indexFileTags
 }
 
-func (a *E2SnapSchema) AccessorList() statecfg.Accessors {
-	return a.accessors
+func (s *E2SnapSchema) AccessorList() statecfg.Accessors {
+	return s.accessors
 }
 
 // fileName assumes no folderName in it
@@ -420,13 +420,14 @@ func (s *E3SnapSchema) Parse(baseFileName string) (f *SnapInfo, ok bool) {
 
 	info.Ext = "." + subs[6]
 
-	if s.dataExtension.Equals(info.Ext) {
+	switch {
+	case s.dataExtension.Equals(info.Ext):
 		return info, true
-	} else if s.accessorIdxExtension.Equals(info.Ext) && s.indexFileMetadata.supported {
+	case s.accessorIdxExtension.Equals(info.Ext) && s.indexFileMetadata.supported:
 		return info, true
-	} else if info.Ext == ".kvei" && s.existenceFileMetadata.supported {
+	case info.Ext == ".kvei" && s.existenceFileMetadata.supported:
 		return info, true
-	} else if info.Ext == ".bt" && s.btIdxFileMetadata.supported {
+	case info.Ext == ".bt" && s.btIdxFileMetadata.supported:
 		return info, true
 	}
 

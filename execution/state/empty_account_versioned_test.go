@@ -77,7 +77,7 @@ func TestVersionedWritesClearTouchedEmptyAccount(t *testing.T) {
 	afterPriorWrites := func(t *testing.T, prior *WriteSet) *IntraBlockState {
 		t.Helper()
 		vm := NewVersionMap(nil)
-		vm.FlushVersionedWrites(prior, true, "")
+		vm.FlushVersionedWrites(prior, true)
 		return newVersionedTestState(t, existingReader(), vm, 1)
 	}
 
@@ -103,7 +103,7 @@ func TestVersionedWritesClearTouchedEmptyAccount(t *testing.T) {
 
 	t.Run("next tx does not observe the account", func(t *testing.T) {
 		vm := NewVersionMap(nil)
-		vm.FlushVersionedWrites(touchedWrites(t, &minimalStateReader{}, spuriousDragon), true, "")
+		vm.FlushVersionedWrites(touchedWrites(t, &minimalStateReader{}, spuriousDragon), true)
 
 		next := newVersionedTestState(t, &minimalStateReader{}, vm, 1)
 		exists, err := next.Exist(addr)
@@ -123,7 +123,7 @@ func TestVersionedWritesClearTouchedEmptyAccount(t *testing.T) {
 	t.Run("next tx does not observe an existing empty account", func(t *testing.T) {
 		reader := existingReader()
 		vm := NewVersionMap(nil)
-		vm.FlushVersionedWrites(touchedWrites(t, reader, spuriousDragon), true, "")
+		vm.FlushVersionedWrites(touchedWrites(t, reader, spuriousDragon), true)
 
 		next := newVersionedTestState(t, reader, vm, 1)
 		exists, err := next.Exist(addr)
@@ -210,7 +210,7 @@ func TestVersionedWritesClearTouchedEmptyAccount(t *testing.T) {
 			},
 			Val: &empty,
 		})
-		vm.FlushVersionedWrites(previous, true, "")
+		vm.FlushVersionedWrites(previous, true)
 
 		ibs := newVersionedTestState(t, &minimalStateReader{}, vm, 1)
 		require.NoError(t, ibs.TouchAccount(addr))
@@ -316,7 +316,7 @@ func TestLateAccountDeleteInvalidatesExistenceRead(t *testing.T) {
 		},
 		Val: true,
 	})
-	versionMap.FlushVersionedWrites(deleteWrites, true, "")
+	versionMap.FlushVersionedWrites(deleteWrites, true)
 
-	require.Equal(t, VersionInvalid, versionMap.ValidateVersion(1, io, validateEqualVersion, false, ""))
+	require.Equal(t, VersionInvalid, versionMap.ValidateVersion(1, io, validateEqualVersion, true, false, false, ""))
 }

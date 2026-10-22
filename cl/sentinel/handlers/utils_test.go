@@ -17,7 +17,6 @@
 package handlers
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -29,12 +28,12 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
 
 func setupStore(t *testing.T) (freezeblocks.BeaconSnapshotReader, kv.RwDB) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	return tests.NewMockBlockReader(), db
 }
 
@@ -52,11 +51,10 @@ func populateDatabaseWithBlocks(t *testing.T, store *tests.MockBlockReader, tx k
 		canonical := true
 
 		store.U[block.Block.Slot] = block
-		require.NoError(t, beacon_indicies.WriteBeaconBlock(context.Background(), tx, block))
+		require.NoError(t, beacon_indicies.WriteBeaconBlock(tx, block))
 
 		// Populate indiciesDB
 		require.NoError(t, beacon_indicies.WriteBeaconBlockHeaderAndIndicies(
-			context.Background(),
 			tx,
 			&cltypes.SignedBeaconBlockHeader{
 				Signature: block.Signature,

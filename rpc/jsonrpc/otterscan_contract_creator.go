@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -41,7 +42,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	}
 	defer tx.Rollback()
 
-	latestState := rpchelper.NewLatestStateReader(tx)
+	latestState := rpchelper.NewLatestStateReader(execctx.NewTemporalTxStateGetter(tx))
 	plainStateAcc, err := latestState.ReadAccountData(accounts.InternAddress(addr))
 	if err != nil {
 		return nil, err

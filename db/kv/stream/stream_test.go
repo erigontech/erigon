@@ -19,13 +19,14 @@ package stream_test
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 )
@@ -52,7 +53,6 @@ func TestUnion(t *testing.T) {
 		res, err = stream.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{8, 7}, res)
-
 	})
 	t.Run("empty left", func(t *testing.T) {
 		s1 := stream.EmptyU64
@@ -79,8 +79,9 @@ func TestUnion(t *testing.T) {
 		require.Nil(t, res)
 	})
 }
+
 func TestUnionPairs(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	ctx := t.Context()
 	t.Run("simple", func(t *testing.T) {
 		require := require.New(t)
@@ -141,8 +142,8 @@ func TestUnionPairs(t *testing.T) {
 		tx, err := db.BeginRw(ctx)
 		require.NoError(err)
 		defer tx.Rollback()
-		it := stream.PairsWithError(10)
-		it2 := stream.PairsWithError(12)
+		it := PairsWithError(10)
+		it2 := PairsWithError(12)
 		keys, _, err := stream.ToArrayKV(stream.UnionKV(it, it2, -1))
 		require.Equal("expected error at iteration: 10", err.Error())
 		require.Len(keys, 10)
@@ -150,7 +151,7 @@ func TestUnionPairs(t *testing.T) {
 }
 
 func TestMultisetKV(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	ctx := t.Context()
 	t.Run("preserves duplicates", func(t *testing.T) {
 		require := require.New(t)
@@ -342,7 +343,7 @@ func TestPaginated(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, []uint64{1, 2, 3, 4, 5, 6, 7}, res)
 
-		//idempotency
+		// idempotency
 		require.False(t, s1.HasNext())
 		require.False(t, s1.HasNext())
 	})
@@ -365,7 +366,7 @@ func TestPaginated(t *testing.T) {
 		require.ErrorIs(t, err, testErr)
 		require.Equal(t, []uint64{1, 2, 3}, res)
 
-		//idempotency
+		// idempotency
 		require.True(t, s1.HasNext())
 		require.True(t, s1.HasNext())
 		_, err = s1.Next()
@@ -379,7 +380,7 @@ func TestPaginated(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, res)
 
-		//idempotency
+		// idempotency
 		require.False(t, s1.HasNext())
 		require.False(t, s1.HasNext())
 	})
@@ -408,7 +409,7 @@ func TestPaginatedDual(t *testing.T) {
 		require.Equal(t, [][]byte{{1}, {2}, {3}, {4}, {5}, {6}, {7}}, keys)
 		require.Equal(t, [][]byte{{1}, {2}, {3}, {4}, {5}, {6}, {7}}, values)
 
-		//idempotency
+		// idempotency
 		require.False(t, s1.HasNext())
 		require.False(t, s1.HasNext())
 	})
@@ -432,7 +433,7 @@ func TestPaginatedDual(t *testing.T) {
 		require.Equal(t, [][]byte{{1}, {2}, {3}}, keys)
 		require.Equal(t, [][]byte{{1}, {2}, {3}}, values)
 
-		//idempotency
+		// idempotency
 		require.True(t, s1.HasNext())
 		require.True(t, s1.HasNext())
 		_, _, err = s1.Next()
@@ -447,7 +448,7 @@ func TestPaginatedDual(t *testing.T) {
 		require.Nil(t, keys)
 		require.Nil(t, values)
 
-		//idempotency
+		// idempotency
 		require.False(t, s1.HasNext())
 		require.False(t, s1.HasNext())
 	})
@@ -466,7 +467,6 @@ func TestFiler(t *testing.T) {
 			}
 			return
 		})
-
 	}
 	t.Run("dual", func(t *testing.T) {
 		s2 := stream.FilterKV(createKVIter(), func(k, v []byte) bool { return bytes.Equal(k, []byte{1}) })
@@ -517,4 +517,22 @@ func TestFiler(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, res)
 	})
+}
+
+// PairsWithErrorIter - return N, keys and then error
+type PairsWithErrorIter struct {
+	errorAt, i int
+}
+
+func PairsWithError(errorAt int) *PairsWithErrorIter {
+	return &PairsWithErrorIter{errorAt: errorAt}
+}
+func (m *PairsWithErrorIter) Close()        {}
+func (m *PairsWithErrorIter) HasNext() bool { return true }
+func (m *PairsWithErrorIter) Next() ([]byte, []byte, error) {
+	if m.i >= m.errorAt {
+		return nil, nil, fmt.Errorf("expected error at iteration: %d", m.errorAt)
+	}
+	m.i++
+	return fmt.Appendf(nil, "%x", m.i), fmt.Appendf(nil, "%x", m.i), nil
 }

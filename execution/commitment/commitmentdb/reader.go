@@ -3,8 +3,11 @@ package commitmentdb
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 )
 
 type StateReader interface {
@@ -18,35 +21,41 @@ type StateReader interface {
 	// workers never touch the main goroutine's lock-free accumulator (a race)
 	// or take the global metrics lock.
 	CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) StateReader
-}
-
-// ctxGetter is the optional context-aware read method (see
-// temporalGetter.GetLatestContext). Worker readers type-assert for it so reads
-// meter into the per-worker accumulator carried by the worker context.
-type ctxGetter interface {
-	GetLatestContext(ctx context.Context, name kv.Domain, k []byte) (v []byte, step kv.Step, err error)
+	// BindsWorkerTx reports whether CloneForWorker resolves every read on the tx
+	// it is handed. A reader that keeps its own source instead gives all workers
+	// one transaction, which a concurrent fold has to serialize.
+	BindsWorkerTx() bool
 }
 
 type LatestStateReader struct {
 	sharedDomains sd
-	getter        kv.TemporalGetter
+	getter        execctxapi.StateGetter
 	srcTx         kv.TemporalTx
-	// workerCtx, when non-nil, carries this worker's lock-free metrics
-	// accumulator; reads route through getter.GetLatestContext(workerCtx, …) so
-	// concurrent workers don't share the main accumulator. Nil on the main
-	// reader, which meters into sd.mainWM via the plain GetLatest.
-	workerCtx context.Context
+	metrics       *kvmetrics.DomainMetrics
 }
 
-func NewLatestStateReader(tx kv.TemporalTx, sd sd) *LatestStateReader {
-	return &LatestStateReader{sharedDomains: sd, getter: sd.AsGetter(tx), srcTx: tx}
+type LatestStateReaderOptions struct {
+	metrics *kvmetrics.DomainMetrics
 }
 
-// NewLatestStateReaderForWorker is like NewLatestStateReader but reads meter
-// into the per-worker accumulator carried by workerCtx (for concurrent
-// workers). See LatestStateReader.workerCtx.
-func NewLatestStateReaderForWorker(workerCtx context.Context, tx kv.TemporalTx, sd sd) *LatestStateReader {
-	return &LatestStateReader{sharedDomains: sd, getter: sd.AsGetter(tx), srcTx: tx, workerCtx: workerCtx}
+func (opts LatestStateReaderOptions) WithMetrics(metrics *kvmetrics.DomainMetrics) LatestStateReaderOptions {
+	opts.metrics = metrics
+	return opts
+}
+
+// NewLatestStateReader creates a reader over latest shared-domain state.
+func NewLatestStateReader(tx kv.TemporalTx, sd sd, opts LatestStateReaderOptions) *LatestStateReader {
+	getterOpts := execctxapi.StateGetterOptions{}
+	if opts.metrics != nil {
+		getterOpts = getterOpts.WithMetrics(opts.metrics)
+	}
+	getter := sd.AsStateGetter(tx, getterOpts)
+	return &LatestStateReader{
+		sharedDomains: sd,
+		getter:        getter,
+		srcTx:         tx,
+		metrics:       opts.metrics,
+	}
 }
 
 func (r *LatestStateReader) WithHistory() bool {
@@ -62,38 +71,79 @@ func (r *LatestStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error 
 }
 
 func (r *LatestStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
-	if r.workerCtx != nil {
-		if cg, ok := r.getter.(ctxGetter); ok {
-			enc, step, err = cg.GetLatestContext(r.workerCtx, d, plainKey)
-			if err != nil {
-				return nil, 0, fmt.Errorf("LatestStateReader(GetLatestContext) %q: %w", d, err)
-			}
-			return enc, step, nil
-		}
-	}
-	enc, step, err = r.getter.GetLatest(d, plainKey)
+	enc, step, err = r.getter.GetLatest(d, plainKey, kv.GetLatestOptions{})
 	if err != nil {
 		return nil, 0, fmt.Errorf("LatestStateReader(GetLatest) %q: %w", d, err)
 	}
 	return enc, step, nil
 }
 
-func (r *LatestStateReader) Clone(tx kv.TemporalTx) StateReader {
+func (r *LatestStateReader) Clone(_ kv.TemporalTx) StateReader {
 	// Keep reading the source this reader was bound to. The tx passed by
 	// clone/warmup callers targets the *compute* database, which may differ
 	// from this reader's source — e.g. recomputing commitment in an empty db
 	// while reading committed state from the source db (TouchChangedKeysFromHistory).
 	// Before flush drained sd.mem this was masked because the in-memory batch
-	// still held the source values; rebinding sd.AsGetter to the foreign compute
+	// still held the source values; rebinding the getter to the foreign compute
 	// tx reads the wrong database and yields empty state (wrong root).
-	return &LatestStateReader{sharedDomains: r.sharedDomains, getter: r.sharedDomains.AsGetter(r.srcTx), srcTx: r.srcTx, workerCtx: r.workerCtx}
+	if r.metrics != nil {
+		return NewLatestStateReader(r.srcTx, r.sharedDomains, LatestStateReaderOptions{}.WithMetrics(r.metrics))
+	}
+	return NewLatestStateReader(r.srcTx, r.sharedDomains, LatestStateReaderOptions{})
 }
 
 // CloneForWorker clones into a worker reader that meters into workerCtx's
 // per-worker accumulator. Source tx preserved, same as Clone.
 func (r *LatestStateReader) CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) StateReader {
-	return NewLatestStateReaderForWorker(workerCtx, r.srcTx, r.sharedDomains)
+	return NewLatestStateReader(r.srcTx, r.sharedDomains, LatestStateReaderOptions{}.WithMetrics(kvmetrics.MetricsFromContext(workerCtx)))
 }
+
+func (r *LatestStateReader) BindsWorkerTx() bool { return false }
+
+// syncStateReader lets several fold workers share one reader bound to the
+// caller's snapshot: the tx behind it takes one goroutine at a time, and the
+// bytes it hands back alias a buffer its next read reuses, so the copy is made
+// under the same lock.
+type syncStateReader struct {
+	mu  *sync.Mutex
+	src StateReader
+	buf []byte
+}
+
+var _ StateReader = (*syncStateReader)(nil)
+
+func newSyncStateReader(mu *sync.Mutex, src StateReader) *syncStateReader {
+	return &syncStateReader{mu: mu, src: src}
+}
+
+func (r *syncStateReader) WithHistory() bool { return r.src.WithHistory() }
+
+func (r *syncStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.src.CheckDataAvailable(d, step)
+}
+
+func (r *syncStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	enc, step, err := r.src.Read(d, plainKey, stepSize)
+	if err != nil || enc == nil {
+		return nil, step, err
+	}
+	r.buf = append(r.buf[:0], enc...)
+	return r.buf, step, nil
+}
+
+// Clone/CloneForWorker keep the source reader and its lock: the point of this
+// wrapper is that every copy resolves against the one pinned snapshot.
+func (r *syncStateReader) Clone(kv.TemporalTx) StateReader { return newSyncStateReader(r.mu, r.src) }
+
+func (r *syncStateReader) CloneForWorker(context.Context, kv.TemporalTx) StateReader {
+	return newSyncStateReader(r.mu, r.src)
+}
+
+func (r *syncStateReader) BindsWorkerTx() bool { return false }
 
 // HistoryStateReader reads *full* historical state at specified txNum.
 // `limitReadAsOfTxNum` here is used as timestamp for usual GetAsOf.
@@ -138,6 +188,10 @@ func (r *HistoryStateReader) CloneForWorker(_ context.Context, tx kv.TemporalTx)
 	return NewHistoryStateReader(tx, r.limitReadAsOfTxNum)
 }
 
+// BindsWorkerTx: GetAsOf on the worker's own tx resolves at limitReadAsOfTxNum
+// whatever that tx's view is, so a newer view cannot change the answer.
+func (r *HistoryStateReader) BindsWorkerTx() bool { return true }
+
 // FilesOnlyStateReader reads from .kv files only, capped at limitTxNum.
 // On miss (key not present in any frozen .kv file ≤ limitTxNum), returns nil
 // without any fallback. This is the right semantic for integrity checks and
@@ -178,6 +232,8 @@ func (r *FilesOnlyStateReader) Clone(tx kv.TemporalTx) StateReader {
 func (r *FilesOnlyStateReader) CloneForWorker(_ context.Context, tx kv.TemporalTx) StateReader {
 	return NewFilesOnlyStateReader(tx, r.limitTxNum)
 }
+
+func (r *FilesOnlyStateReader) BindsWorkerTx() bool { return true }
 
 // SplitStateReader implements commitmentdb.StateReader using (potentially) different state readers for commitment
 // data and account/storage/code data.
@@ -235,6 +291,10 @@ func (r *SplitStateReader) CloneForWorker(workerCtx context.Context, tx kv.Tempo
 	return NewCommitmentSplitStateReader(r.commitmentReader.CloneForWorker(workerCtx, tx), r.plainStateReader.CloneForWorker(workerCtx, tx), r.withHistory)
 }
 
+func (r *SplitStateReader) BindsWorkerTx() bool {
+	return r.commitmentReader.BindsWorkerTx() && r.plainStateReader.BindsWorkerTx()
+}
+
 func NewCommitmentSplitStateReader(commitmentReader StateReader, plainStateReader StateReader, withHistory bool) *SplitStateReader {
 	return &SplitStateReader{
 		commitmentReader: commitmentReader,
@@ -249,15 +309,12 @@ type CommitmentReplayStateReader struct {
 
 func NewCommitmentReplayStateReader(ttx, tx kv.TemporalTx, tsd sd, plainStateAsOf uint64) *CommitmentReplayStateReader {
 	return &CommitmentReplayStateReader{
-		NewCommitmentSplitStateReader(NewLatestStateReader(ttx, tsd), NewHistoryStateReader(tx, plainStateAsOf), false),
+		NewCommitmentSplitStateReader(NewLatestStateReader(ttx, tsd, LatestStateReaderOptions{}), NewHistoryStateReader(tx, plainStateAsOf), false),
 	}
 }
 
-// txLatestReader reads a domain's latest state straight from a pinned RO tx via
-// tx.GetLatest, bypassing any SharedDomains in-memory batch or aggregator-shared
-// branch cache. The head-capture build's own commitment fold mutates that shared
-// cache, so a SharedDomains-backed latest reader would observe post-state branches;
-// reading the pinned snapshot directly keeps the parent(B) commitment plane clean.
+// txLatestReader reads directly from a pinned RO transaction, bypassing
+// SharedDomains memory so commitment reads remain on the pinned parent view.
 type txLatestReader struct {
 	tx kv.TemporalTx
 }
@@ -266,7 +323,7 @@ func (r *txLatestReader) WithHistory() bool                           { return f
 func (r *txLatestReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
 
 func (r *txLatestReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
-	enc, step, err := r.tx.GetLatest(d, plainKey)
+	enc, step, err := r.tx.GetLatest(d, plainKey, kv.GetLatestOptions{})
 	if err != nil {
 		return nil, 0, fmt.Errorf("txLatestReader(GetLatest) %q: %w", d, err)
 	}
@@ -278,9 +335,12 @@ func (r *txLatestReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]
 // parent commitment. The witness build runs sequential commitment, so these
 // are not exercised on the hot path, but preserving the pinned tx is correct.
 func (r *txLatestReader) Clone(kv.TemporalTx) StateReader { return &txLatestReader{tx: r.tx} }
+
 func (r *txLatestReader) CloneForWorker(context.Context, kv.TemporalTx) StateReader {
 	return &txLatestReader{tx: r.tx}
 }
+
+func (r *txLatestReader) BindsWorkerTx() bool { return false }
 
 // NewHeadCaptureStateReader composes the dual-tx reader used by minimal-node
 // witness head-capture collapse detection. The CommitmentDomain resolves from
@@ -340,6 +400,10 @@ func (crsr *CommitmentReplayStateReader) CloneForWorker(workerCtx context.Contex
 	}
 }
 
+// BindsWorkerTx: CloneForWorker hands plainStateReader on unchanged, so every
+// clone reads history through the one outer-DB tx.
+func (crsr *CommitmentReplayStateReader) BindsWorkerTx() bool { return false }
+
 // RebuildStateReader creates a StateReader for building commitment from scratch, block-by-block.
 // Commitment is read from SharedDomains' in-memory batch (LatestStateReader) because we are generating
 // it incrementally - prior commitment state lives in the MemBatch, not yet on disk.
@@ -358,7 +422,7 @@ var _ StateReader = (*RebuildStateReader)(nil)
 
 func NewRebuildStateReader(tx kv.TemporalTx, sharedDomains sd, plainStateAsOf uint64) *RebuildStateReader {
 	return &RebuildStateReader{
-		commitmentReader: NewLatestStateReader(tx, sharedDomains),
+		commitmentReader: NewLatestStateReader(tx, sharedDomains, LatestStateReaderOptions{}),
 		plainStateReader: NewHistoryStateReader(tx, plainStateAsOf),
 		plainStateAsOf:   plainStateAsOf,
 		sd:               sharedDomains,
@@ -389,9 +453,11 @@ func (r *RebuildStateReader) Clone(tx kv.TemporalTx) StateReader {
 // the per-worker accumulator carried by workerCtx.
 func (r *RebuildStateReader) CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) StateReader {
 	return &RebuildStateReader{
-		commitmentReader: NewLatestStateReaderForWorker(workerCtx, tx, r.sd),
+		commitmentReader: NewLatestStateReader(tx, r.sd, LatestStateReaderOptions{}.WithMetrics(kvmetrics.MetricsFromContext(workerCtx))),
 		plainStateReader: NewHistoryStateReader(tx, r.plainStateAsOf),
 		plainStateAsOf:   r.plainStateAsOf,
 		sd:               r.sd,
 	}
 }
+
+func (r *RebuildStateReader) BindsWorkerTx() bool { return true }

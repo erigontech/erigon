@@ -81,6 +81,27 @@ func TestKeybytesHex(t *testing.T) {
 	}
 }
 
+func TestExpandMatchesBytewise(t *testing.T) {
+	rng := rand.New(rand.NewSource(1))
+	for n := range 70 {
+		src := make([]byte, n)
+		rng.Read(src)
+		want := make([]byte, 0, 2*n)
+		for _, b := range src {
+			want = append(want, b>>4, b&0x0f)
+		}
+		got := make([]byte, 2*n)
+		Expand(src, got)
+		require.Equal(t, want, got, "len %d", n)
+	}
+}
+
+func TestExpandShortDstPanics(t *testing.T) {
+	dst := make([]byte, 8)
+	require.Panics(t, func() { Expand([]byte{0xab, 0xcd, 0xef, 0x12}, dst[:7]) })
+	require.Panics(t, func() { Expand([]byte{0xab}, dst[:1]) })
+}
+
 func TestHexCompactRoundtrip(t *testing.T) {
 	rng := rand.New(rand.NewSource(42))
 
@@ -94,7 +115,7 @@ func TestHexCompactRoundtrip(t *testing.T) {
 
 		// half with terminator, half without
 		if i%2 == 0 {
-			hex = append(hex, Terminator)
+			hex = append(hex, Terminator) //nolint:makezero
 		}
 
 		compact := HexToCompact(hex)
@@ -182,30 +203,46 @@ func FuzzHexCompactRoundtrip(f *testing.F) {
 	})
 }
 
-func BenchmarkHexToCompact(b *testing.B) {
-	testBytes := []byte{0, 15, 1, 12, 11, 8, Terminator /*term*/}
-	for b.Loop() {
-		HexToCompact(testBytes)
-	}
+func TestHexToCompactInto(t *testing.T) {
+	hex := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	want := HexToCompact(hex)
+
+	t.Run("dst large enough is reused", func(t *testing.T) {
+		dst := make([]byte, 64)
+		got := HexToCompactInto(dst, hex)
+		require.Equal(t, want, got)
+		require.Same(t, &dst[0], &got[0], "result must alias dst when capacity allows")
+	})
+
+	t.Run("dst too small allocates independently", func(t *testing.T) {
+		dst := make([]byte, 2)
+		got := HexToCompactInto(dst, hex)
+		require.Equal(t, want, got)
+		require.NotSame(t, &dst[0], &got[0], "result must not alias an undersized dst")
+	})
+
+	t.Run("nil dst matches HexToCompact", func(t *testing.T) {
+		require.Equal(t, want, HexToCompactInto(nil, hex))
+	})
 }
 
-func BenchmarkCompactToHex(b *testing.B) {
-	testBytes := []byte{0, 15, 1, 12, 11, 8, Terminator /*term*/}
-	for b.Loop() {
-		CompactToHex(testBytes)
-	}
-}
-
-func BenchmarkKeybytesToHex(b *testing.B) {
-	testBytes := []byte{7, 6, 6, 5, 7, 2, 6, 2, Terminator}
-	for b.Loop() {
-		KeybytesToHex(testBytes)
-	}
-}
-
-func BenchmarkHexToKeybytes(b *testing.B) {
-	testBytes := []byte{7, 6, 6, 5, 7, 2, 6, 2, Terminator}
-	for b.Loop() {
-		HexToKeybytes(testBytes)
+func TestDecodeNibblesMatchesBytewise(t *testing.T) {
+	rng := rand.New(rand.NewSource(1))
+	for n := range 131 {
+		in := make([]byte, n)
+		rng.Read(in)
+		if n > 0 && in[n-1] == Terminator {
+			in[n-1]++
+		}
+		want := make([]byte, (n+1)/2)
+		for i := 0; i+1 < n; i += 2 {
+			want[i/2] = in[i]<<4 | in[i+1]
+		}
+		if n&1 == 1 {
+			want[n/2] = in[n-1] << 4
+		}
+		got := make([]byte, (n+1)/2)
+		decodeNibbles(in, got)
+		require.Equal(t, want, got, "len %d", n)
 	}
 }

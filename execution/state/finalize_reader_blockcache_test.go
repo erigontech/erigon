@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -80,7 +81,8 @@ func TestFinalizeReaderSeesBlockCacheWrite(t *testing.T) {
 	const finalTxNum uint64 = 30 // block-finalize / withdrawal txNum
 
 	domains.SetTxNum(preBlockTxNum)
-	require.NoError(t,
+	require.NoError(
+		t,
 		domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], preEnc, preBlockTxNum, nil),
 	)
 
@@ -94,15 +96,13 @@ func TestFinalizeReaderSeesBlockCacheWrite(t *testing.T) {
 		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 0,
 	}
-	postEnc := accounts.SerialiseV3(postAcc)
-
 	blockCache := NewBlockStateCache()
 	blockCache.PutCommittedAccount(addr, preAcc)
-	blockCache.WriteAccount(addr, postEnc, 100)
+	blockCache.WriteAccount(addr, *postAcc, 100)
 
 	// Sanity: CurrentCachedReaderV3 (the reader used for non-historic
 	// blocks) sees the post-tx28 value.
-	curReader := NewCurrentCachedReaderV3(domains.AsGetter(tx), blockCache)
+	curReader := NewCurrentCachedReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}), blockCache)
 	curAcc, err := curReader.ReadAccountData(addr)
 	require.NoError(t, err)
 	require.NotNil(t, curAcc, "current-cached reader should see the blockCache write")

@@ -17,15 +17,19 @@
 package accounts
 
 import (
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
 // Result structs for GetProof
 type AccProofResult struct {
 	Address      common.Address    `json:"address"`
 	AccountProof []hexutil.Bytes   `json:"accountProof"`
-	Balance      *hexutil.Big      `json:"balance"`
+	Balance      *hexutil.U256     `json:"balance"`
 	CodeHash     common.Hash       `json:"codeHash"`
 	Nonce        hexutil.Uint64    `json:"nonce"`
 	StorageHash  common.Hash       `json:"storageHash"`
@@ -33,6 +37,37 @@ type AccProofResult struct {
 }
 type StorProofResult struct {
 	Key   string          `json:"key"`
-	Value *hexutil.Big    `json:"value"`
+	Value *hexutil.U256   `json:"value"`
 	Proof []hexutil.Bytes `json:"proof"`
+}
+
+func (r *AccProofResult) MarshalFastJSONTo(s *jsonstream.Stream) error {
+	s.WriteObjectStart()
+	ethjson.Data(s, "address", r.Address[:])
+	writeHexArray(s, "accountProof", r.AccountProof)
+	ethjson.Quantity256(s, "balance", (*uint256.Int)(r.Balance))
+	ethjson.Data(s, "codeHash", r.CodeHash[:])
+	ethjson.Quantity(s, "nonce", r.Nonce)
+	ethjson.Data(s, "storageHash", r.StorageHash[:])
+	s.Field("storageProof")
+	jsonstream.ArrayValue(s, r.StorageProof, writeStorProofElem)
+	s.WriteObjectEnd()
+	return nil
+}
+
+func writeHexArray(s *jsonstream.Stream, name string, nodes []hexutil.Bytes) {
+	s.Field(name)
+	if nodes == nil {
+		s.WriteNil()
+		return
+	}
+	jsonstream.WriteHexBytes(s, nodes)
+}
+
+func writeStorProofElem(s *jsonstream.Stream, sp *StorProofResult) {
+	s.WriteObjectStart()
+	s.Field("key").WriteString(sp.Key)
+	ethjson.Quantity256(s, "value", (*uint256.Int)(sp.Value))
+	writeHexArray(s, "proof", sp.Proof)
+	s.WriteObjectEnd()
 }

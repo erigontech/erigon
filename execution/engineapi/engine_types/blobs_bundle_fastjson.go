@@ -17,100 +17,63 @@
 package engine_types
 
 import (
-	"encoding/json"
+	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
-// MarshalFastJSON serializes the getPayload blobs bundle into one pre-sized buffer (direct hex
-// encoding) instead of reflection, byte-identical to json.Marshal of the bundle.
-func (b *BlobsBundle) MarshalFastJSON() ([]byte, error) {
-	if b == nil {
-		return jsonNull(), nil
-	}
-	size := len(`{"commitments":`) + hexArrayLen(b.Commitments) +
-		len(`,"proofs":`) + hexArrayLen(b.Proofs) +
-		len(`,"blobs":`) + hexArrayLen(b.Blobs) + len("}")
-	out := make([]byte, 0, size)
-	out = append(out, `{"commitments":`...)
-	out = appendHexArray(out, b.Commitments)
-	out = append(out, `,"proofs":`...)
-	out = appendHexArray(out, b.Proofs)
-	out = append(out, `,"blobs":`...)
-	out = appendHexArray(out, b.Blobs)
-	return append(out, '}'), nil
-}
-
-func appendHexArray(dst []byte, arr []hexutil.Bytes) []byte {
-	if arr == nil {
-		return append(dst, "null"...)
-	}
-	dst = append(dst, '[')
-	for i, b := range arr {
-		if i > 0 {
-			dst = append(dst, ',')
-		}
-		dst = appendQuotedHex(dst, b)
-	}
-	return append(dst, ']')
-}
-
-func hexArrayLen(arr []hexutil.Bytes) int {
-	if arr == nil {
-		return len("null")
-	}
-	n := len("[]")
-	for i, b := range arr {
-		if i > 0 {
-			n++
-		}
-		n += quotedHexLen(len(b))
-	}
-	return n
-}
-
-// MarshalFastJSON assembles the getPayload envelope field-by-field, fast-marshaling the
-// (reflection-heavy) BlobsBundle and deferring to json.Marshal for the smaller fields.
-// Byte-identical to json.Marshal(r).
-func (r *GetPayloadResponse) MarshalFastJSON() ([]byte, error) {
+// MarshalFastJSONTo writes the getPayload envelope, byte-identical to json.Marshal(r).
+func (r *GetPayloadResponse) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if r == nil {
-		return jsonNull(), nil
+		s.WriteNil()
+		return nil
 	}
-	executionPayload, err := json.Marshal(r.ExecutionPayload)
-	if err != nil {
-		return nil, err
+	s.WriteObjectStart()
+	s.Field("executionPayload")
+	r.ExecutionPayload.writeTo(s)
+	ethjson.Quantity256(s, "blockValue", (*uint256.Int)(r.BlockValue))
+	s.Field("blobsBundle")
+	if err := r.BlobsBundle.MarshalFastJSONTo(s); err != nil {
+		return err
 	}
-	blockValue, err := json.Marshal(r.BlockValue)
-	if err != nil {
-		return nil, err
+	ethjson.Datas(s, "executionRequests", r.ExecutionRequests)
+	s.Field("shouldOverrideBuilder").WriteBool(r.ShouldOverrideBuilder)
+	s.WriteObjectEnd()
+	return nil
+}
+
+// writeTo writes the payload in its struct's field order and encoding/json's forms.
+func (p *ExecutionPayload) writeTo(s *jsonstream.Stream) {
+	if p == nil {
+		s.WriteNil()
+		return
 	}
-	blobsBundle, err := r.BlobsBundle.MarshalFastJSON()
-	if err != nil {
-		return nil, err
+	s.WriteObjectStart()
+	ethjson.Data(s, "parentHash", p.ParentHash[:])
+	ethjson.Data(s, "feeRecipient", p.FeeRecipient[:])
+	ethjson.Data(s, "stateRoot", p.StateRoot[:])
+	ethjson.Data(s, "receiptsRoot", p.ReceiptsRoot[:])
+	ethjson.Data(s, "logsBloom", p.LogsBloom)
+	ethjson.Data(s, "prevRandao", p.PrevRandao[:])
+	ethjson.Quantity(s, "blockNumber", p.BlockNumber)
+	ethjson.Quantity(s, "gasLimit", p.GasLimit)
+	ethjson.Quantity(s, "gasUsed", p.GasUsed)
+	ethjson.Quantity(s, "timestamp", p.Timestamp)
+	ethjson.Data(s, "extraData", p.ExtraData)
+	ethjson.Quantity256(s, "baseFeePerGas", (*uint256.Int)(p.BaseFeePerGas))
+	ethjson.Data(s, "blockHash", p.BlockHash[:])
+	ethjson.Datas(s, "transactions", p.Transactions)
+	s.Field("withdrawals")
+	_ = types.Withdrawals(p.Withdrawals).MarshalFastJSONTo(s)
+	jsonstream.Text(s, "blobGasUsed", p.BlobGasUsed)
+	jsonstream.Text(s, "excessBlobGas", p.ExcessBlobGas)
+	if p.SlotNumber != nil {
+		jsonstream.Text(s, "slotNumber", p.SlotNumber)
 	}
-	executionRequests, err := json.Marshal(r.ExecutionRequests)
-	if err != nil {
-		return nil, err
+	if p.BlockAccessList != nil {
+		ethjson.Data(s, "blockAccessList", *p.BlockAccessList)
 	}
-	shouldOverrideBuilder, err := json.Marshal(r.ShouldOverrideBuilder)
-	if err != nil {
-		return nil, err
-	}
-	size := len(`{"executionPayload":`) + len(executionPayload) +
-		len(`,"blockValue":`) + len(blockValue) +
-		len(`,"blobsBundle":`) + len(blobsBundle) +
-		len(`,"executionRequests":`) + len(executionRequests) +
-		len(`,"shouldOverrideBuilder":`) + len(shouldOverrideBuilder) + len("}")
-	out := make([]byte, 0, size)
-	out = append(out, `{"executionPayload":`...)
-	out = append(out, executionPayload...)
-	out = append(out, `,"blockValue":`...)
-	out = append(out, blockValue...)
-	out = append(out, `,"blobsBundle":`...)
-	out = append(out, blobsBundle...)
-	out = append(out, `,"executionRequests":`...)
-	out = append(out, executionRequests...)
-	out = append(out, `,"shouldOverrideBuilder":`...)
-	out = append(out, shouldOverrideBuilder...)
-	return append(out, '}'), nil
+	s.WriteObjectEnd()
 }

@@ -169,7 +169,7 @@ func (t *gloasWeightTree) ensureTopology(root common.Hash) {
 			if !hasParentBlock || parentBlock == nil {
 				childNode.parentPayloadStatus = cltypes.PayloadStatusEmpty
 			} else {
-				childNode.parentPayloadStatus = parentPayloadStatusFromBids(parentBlock, block.Block)
+				childNode.parentPayloadStatus = ParentPayloadStatusFromBids(parentBlock, block.Block)
 			}
 			t.stack = append(t.stack, child)
 		}
@@ -228,10 +228,10 @@ func growGloasContributions(applied []gloasVoteContribution, size int) []gloasVo
 	if len(applied) >= size {
 		return applied
 	}
-	nextCap := max(cap(applied)*2, size)
-	next := make([]gloasVoteContribution, size, nextCap)
-	copy(next, applied)
-	return next
+	oldLen := len(applied)
+	applied = slices.Grow(applied, size-oldLen)[:size]
+	clear(applied[oldLen:])
+	return applied
 }
 
 func (t *gloasWeightTree) addValidatorContribution(validatorIndex uint64, cs *checkpointState) {
@@ -386,8 +386,8 @@ func (t *gloasWeightTree) recompute(root common.Hash) {
 	}
 }
 
-func (t *gloasWeightTree) GetWeight(node ForkChoiceNode) uint64 {
-	return getWeight(t, t.f, node)
+func (t *gloasWeightTree) GetWeight(node ForkChoiceNode, currentSlot uint64) uint64 {
+	return getWeight(t, t.f, node, currentSlot)
 }
 
 func (t *gloasWeightTree) GetAttestationScore(node ForkChoiceNode) uint64 {
@@ -415,20 +415,20 @@ func (t *gloasWeightTree) GetProposerScore() uint64 {
 }
 
 func (t *gloasWeightTree) ShouldApplyProposerBoost() bool {
-	if t.boostKnown {
-		return t.boost
-	}
-	proposerBoostRoot := t.f.ProposerBoostRoot()
-	if proposerBoostRoot == (common.Hash{}) {
+	if !t.boostKnown {
+		t.boost = t.proposerBoostApplies(t.f.ProposerBoostRoot())
 		t.boostKnown = true
-		t.boost = false
+	}
+	return t.boost
+}
+
+func (t *gloasWeightTree) proposerBoostApplies(proposerBoostRoot common.Hash) bool {
+	if proposerBoostRoot == (common.Hash{}) {
 		return false
 	}
-	t.boost = t.f.shouldApplyProposerBoostGloasWith(proposerBoostRoot, func(root common.Hash) bool {
+	return t.f.shouldApplyProposerBoostGloasWith(proposerBoostRoot, func(root common.Hash) bool {
 		return t.f.isHeadWeakWith(root, t.state, t.headWeight)
 	})
-	t.boostKnown = true
-	return t.boost
 }
 
 // headWeight serves the prepared tree's O(1) aggregate for roots reached by the
@@ -439,6 +439,37 @@ func (t *gloasWeightTree) headWeight(root common.Hash) uint64 {
 		return t.GetAttestationScore(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending})
 	}
 	return pendingAttestationScore(newWeightStoreFromCheckpointState(t.f, t.state))(root)
+}
+
+func (t *gloasWeightTree) snapshotWeights() map[common.Hash]uint64 {
+	if t.state == nil || t.allDirty || t.checkpoint != t.f.JustifiedCheckpoint() {
+		return nil
+	}
+	weights := make(map[common.Hash]uint64, len(t.topologySeen))
+	for root := range t.topologySeen {
+		weights[root] = t.GetAttestationScore(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending})
+	}
+	proposerBoostRoot := t.f.ProposerBoostRoot()
+	score := t.GetProposerScore()
+	boostChecked := false
+	for root := proposerBoostRoot; root != (common.Hash{}); {
+		if weight, ok := weights[root]; ok {
+			if !boostChecked && !t.proposerBoostApplies(proposerBoostRoot) {
+				return weights
+			}
+			boostChecked = true
+			weights[root] = weight + score
+		}
+		if root == t.checkpoint.Root {
+			break
+		}
+		block, ok := t.f.forkGraph.GetBlock(root)
+		if !ok || block == nil {
+			break
+		}
+		root = block.Block.ParentRoot
+	}
+	return weights
 }
 
 func (t *gloasWeightTree) pruneFinalized(finalizedSlot uint64) {

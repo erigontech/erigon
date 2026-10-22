@@ -413,10 +413,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "e":
 			m.edit = cCurrent
-			return m, m.beginEdit()
+			cmd := m.beginEdit()
+			return m, cmd
 		case "m":
 			m.edit = cMin
-			return m, m.beginEdit()
+			cmd := m.beginEdit()
+			return m, cmd
 		case ".":
 			m.bump(minor)
 			return m, nil
@@ -565,6 +567,7 @@ func equal(a, b schema.Schema) bool {
 	}
 	return true
 }
+
 func eqGroup(x, y schema.Group) bool {
 	if len(x) != len(y) {
 		return false

@@ -9,7 +9,7 @@ sidebar_position: 3
 Sentry connects Erigon to the Ethereum P2P network, enabling the discovery of other participants across the Internet and secure communication with them. It performs these main functions:
 
 * Peer discovery via the following:
-  * Kademlia DHT
+  * Kademlia distributed hash table (DHT)
   * DNS lookup
   * Configured static peers
   * Node info saved in the database
@@ -22,7 +22,7 @@ The ETH core interacts with the Ethereum p2p network through the Sentry componen
 
 ## Running with one or more external Sentry instances
 
-It is possible to have multiple Sentry to increase connectivity to the network or to obscure the location of the core computer. In this case it is necessary to define address and port of each Sentry that should be connected to the Core.
+It is possible to have multiple Sentry instances to increase connectivity to the network or to obscure the location of the core computer. In this case it is necessary to define the address and port of each Sentry that should be connected to the Core.
 
 Before using the Sentry component the executable must be built:
 
@@ -59,7 +59,7 @@ Erigon might be attached to several Sentry instances running across different ma
 --sentry.api.addr value
 ```
 
-Where `value` is comma separated Sentry addresses `<host>:<port>,<host>:<port>`.
+Where `value` is a comma-separated list of Sentry addresses `<host>:<port>,<host>:<port>`.
 
 ## More info
 
@@ -67,7 +67,7 @@ For other information regarding Sentry functionality, configuration, and usage, 
 
 ### Command Line Options
 
-To display available options for Sentry digit:
+To display available options for Sentry, run:
 
 ```bash
 ./build/bin/sentry --help

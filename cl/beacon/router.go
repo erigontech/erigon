@@ -18,6 +18,8 @@ package beacon
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"time"
@@ -34,11 +36,11 @@ type LayeredBeaconHandler struct {
 	ArchiveApi *handler.ApiHandler
 }
 
-func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router_configuration.RouterConfiguration) error {
-	listener, err := net.Listen(routerCfg.Protocol, routerCfg.Address)
+func ListenAndServe(ctx context.Context, beaconHandler *LayeredBeaconHandler, routerCfg beacon_router_configuration.RouterConfiguration) error {
+	var lc net.ListenConfig
+	listener, err := lc.Listen(ctx, routerCfg.Protocol, routerCfg.Address)
 	if err != nil {
-		log.Warn("[Beacon API] Failed to start listening", "addr", routerCfg.Address, "err", err)
-		return err
+		return fmt.Errorf("failed to start listening on %s: %w", routerCfg.Address, err)
 	}
 	defer listener.Close()
 	mux := chi.NewRouter()
@@ -53,15 +55,10 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 	))
 
 	mux.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {
-		nfw := &notFoundNoWriter{ResponseWriter: w, r: r} //nolint:govet
 		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, chi.NewRouteContext()))
-		if isNotFound(nfw.code) || nfw.code == 0 {
-			start := time.Now()
-			beaconHandler.ArchiveApi.ServeHTTP(w, r)
-			log.Trace("[Beacon API] Request", "uri", r.URL.String(), "path", r.URL.Path, "time", time.Since(start))
-		} else {
-			log.Warn("[Beacon API] Request to unavailable endpoint, check --beacon.api flag", "uri", r.URL.String(), "path", r.URL.Path)
-		}
+		start := time.Now()
+		beaconHandler.ArchiveApi.ServeHTTP(w, r)
+		log.Trace("[Beacon API] Request", "uri", r.URL.String(), "path", r.URL.Path, "time", time.Since(start))
 	})
 	mux.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		log.Warn("[Beacon API] Not found", "method", r.Method, "path", r.URL.Path)
@@ -75,9 +72,23 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 		WriteTimeout: routerCfg.WriteTimeout,
 	}
 
-	if err := server.Serve(listener); err != nil {
-		log.Warn("[Beacon API] failed to start serving", "addr", routerCfg.Address, "err", err)
-		return err
+	// No BaseContext from ctx: cancelling ctx is what starts the shutdown, so
+	// handing it to each request would cancel every in-flight one instead of
+	// letting the grace period below drain them.
+	serveDone := make(chan struct{})
+	defer close(serveDone)
+	go func() {
+		select {
+		case <-ctx.Done():
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = server.Shutdown(shutdownCtx)
+		case <-serveDone:
+		}
+	}()
+
+	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("failed to serve on %s: %w", routerCfg.Address, err)
 	}
 	log.Info("[Beacon API] Listening", "addr", routerCfg.Address)
 	return nil

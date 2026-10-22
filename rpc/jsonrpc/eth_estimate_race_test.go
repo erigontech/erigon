@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -59,10 +60,11 @@ func TestEstimateGasDeterminism(t *testing.T) {
 	}
 
 	if len(estimates) > 1 {
-		msg := fmt.Sprintf("eth_estimateGas returned %d distinct values over %d identical serial requests at a fixed head:", len(estimates), iterations)
+		var sb strings.Builder
+		fmt.Fprintf(&sb, "eth_estimateGas returned %d distinct values over %d identical serial requests at a fixed head:", len(estimates), iterations)
 		for _, v := range order {
-			msg += fmt.Sprintf("\n  %d (x%d)", uint64(v), estimates[v])
+			fmt.Fprintf(&sb, "\n  %d (x%d)", uint64(v), estimates[v])
 		}
-		t.Fatal(msg)
+		t.Fatal(sb.String())
 	}
 }

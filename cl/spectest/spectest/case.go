@@ -7,8 +7,6 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/transition/machine"
-
-	"gfx.cafe/util/go/generic"
 )
 
 type TestCase struct {
@@ -27,40 +25,11 @@ func (t *TestCase) Version() clparams.StateVersion {
 	return v
 }
 
-type TestCases struct {
-	tc   []TestCase
-	tree generic.Map6[string, string, string, string, string, string, TestCase]
+func (t *TestCase) path() [6]string {
+	return [6]string{t.ConfigName, t.ForkPhaseName, t.RunnerName, t.HandlerName, t.SuiteName, t.CaseName}
 }
 
-func (tx *TestCases) add(t TestCase) {
-	tx.tc = append(tx.tc, t)
-	tx.tree.Store(
-		t.ConfigName,
-		t.ForkPhaseName,
-		t.RunnerName,
-		t.HandlerName,
-		t.SuiteName,
-		t.CaseName,
-		t,
-	)
-}
-
-func (t *TestCases) Slice() []TestCase {
-	return t.tc
-}
-
-func (t *TestCases) Filter(fn func(t TestCase) bool) *TestCases {
-	o := &TestCases{}
-	for _, v := range t.tc {
-		if fn(v) {
-			o.add(v)
-		}
-	}
-	return o
-}
-
-func ReadTestCases(root fs.FS) (out *TestCases, err error) {
-	out = &TestCases{}
+func ReadTestCases(root fs.FS) (out []TestCase, err error) {
 	if err := fs.WalkDir(root, ".", func(path string, d fs.DirEntry, err error) error {
 		pathList := strings.Split(path, string(os.PathSeparator))
 		// Skip hidden folders (those starting with '.')
@@ -82,7 +51,7 @@ func ReadTestCases(root fs.FS) (out *TestCases, err error) {
 			SuiteName:     pathList[4],
 			CaseName:      pathList[5],
 		}
-		out.add(c)
+		out = append(out, c)
 		return nil
 	}); err != nil {
 		return out, err

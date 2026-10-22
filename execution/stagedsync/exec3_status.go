@@ -57,16 +57,45 @@ func (m *execStatusList) takeNextPending() int {
 
 	x := m.pending[0]
 	m.pending = m.pending[1:]
-	m.ensureLen(x)
-	if !m.inProgress[x] {
-		m.inProgress[x] = true
-		m.inProgressCnt++
-	}
-	if x < m.minInProgressHint {
-		m.minInProgressHint = x
-	}
+	m.setInProgress(x)
 
 	return x
+}
+
+type dispatchAction uint8
+
+const (
+	dispatchStop     dispatchAction = iota // leave tx and the rest in pending, end the pass
+	dispatchConsume                        // tx dispatched: drop it from pending
+	dispatchHold                           // tx held back: keep it in pending
+	dispatchHoldStop                       // hold tx back, then end the pass
+)
+
+// dispatchPending walks pending front-to-back, dispatching or holding each tx
+// per decide. Held-back txs are compacted ahead of the suffix in O(consumed
+// prefix): the suffix is never moved and nothing is allocated, and the compacted
+// prefix stays sorted below the suffix, so it needs no re-sort or dedup.
+func (m *execStatusList) dispatchPending(decide func(tx int) dispatchAction) {
+	read, write := 0, 0
+	for read < len(m.pending) {
+		act := decide(m.pending[read])
+		if act == dispatchStop {
+			break
+		}
+		m.setInProgress(m.pending[read])
+		if act == dispatchHold || act == dispatchHoldStop {
+			m.pending[write] = m.pending[read]
+			write++
+		}
+		read++
+		if act == dispatchHoldStop {
+			break
+		}
+	}
+	if write > 0 {
+		copy(m.pending[read-write:read], m.pending[:write])
+	}
+	m.pending = m.pending[read-write:]
 }
 
 func (m execStatusList) maxComplete() int {
@@ -201,7 +230,7 @@ func (m *execStatusList) countComplete() int {
 	return m.completeCnt
 }
 
-func (m *execStatusList) addDependency(blocker int, dependent int) bool {
+func (m *execStatusList) addDependency(blocker int, dependent int, atValidation bool) bool {
 	if blocker < 0 || blocker >= dependent {
 		return false
 	}
@@ -224,7 +253,7 @@ func (m *execStatusList) addDependency(blocker int, dependent int) bool {
 		}
 	}
 
-	m.dependency[blocker][dependent] = true
+	m.dependency[blocker][dependent] = atValidation
 
 	if curblockers == nil {
 		curblockers = map[int]bool{}
@@ -246,18 +275,22 @@ func (m *execStatusList) isBlocked(tx int) bool {
 	return len(m.blocker[tx]) > 0
 }
 
-func (m *execStatusList) removeDependency(tx int) {
-	if deps, ok := m.dependency[tx]; ok && len(deps) > 0 {
-		for k := range deps {
-			delete(m.blocker[k], tx)
+func (m *execStatusList) removeDependency(tx int, validated bool) {
+	deps := m.dependency[tx]
+	for k, atValidation := range deps {
+		if atValidation && !validated {
+			continue
+		}
+		delete(deps, k)
+		delete(m.blocker[k], tx)
 
-			if len(m.blocker[k]) == 0 {
-				if !m.checkComplete(k) && !m.checkPending(k) && !m.checkInProgress(k) {
-					m.pushPending(k)
-				}
+		if len(m.blocker[k]) == 0 {
+			if !m.checkComplete(k) && !m.checkPending(k) && !m.checkInProgress(k) {
+				m.pushPending(k)
 			}
 		}
-
+	}
+	if len(deps) == 0 {
 		delete(m.dependency, tx)
 	}
 }

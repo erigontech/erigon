@@ -26,7 +26,7 @@ import (
 func TestLatestBlockBuilt(t *testing.T) {
 	t.Parallel()
 	s := NewLatestBlockBuiltStore()
-	b := types.NewBlockWithHeader(&types.Header{})
+	b := types.NewBlockWithHeader(&types.Header{}, nil)
 	s.AddBlockBuilt(b)
 	assert.Equal(t, b.Header(), s.BlockBuilt().Header())
 }

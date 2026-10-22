@@ -311,6 +311,7 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, cache *Inte
 		fps  []fileFingerprint // nil when cache is disabled
 	}
 	var works []workItem
+	var cached int
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".kv") {
 			continue
@@ -332,6 +333,7 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, cache *Inte
 			}
 			if cache.has(string(CommitmentKvDeref), fps) {
 				logger.Info("skipping (cache hit)", "kv", filepath.Base(kvPath))
+				cached++
 				continue
 			}
 		}
@@ -370,10 +372,14 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, cache *Inte
 	for _, fps := range successFps {
 		cache.add(string(CommitmentKvDeref), fps)
 	}
+	// cachedFiles contributed no keys to the tally below: without it a warm-cache run and a run
+	// that walked nothing print the same zeros.
 	logger.Info(
 		"[integrity] CommitmentKvDeref",
 		"dur", time.Since(start),
 		"files", len(files),
+		"scannedFiles", len(works),
+		"cachedFiles", cached,
 		"branchKeys", branchKeys.Load(),
 		"referencedAccounts", referencedAccounts.Load(),
 		"plainAccounts", plainAccounts.Load(),
@@ -512,47 +518,66 @@ func checkDerefBranch(
 	return dc, newBranchData, integrityErr
 }
 
-// commitmentReferencingMemo caches commitmentFileReferencing per file path. Integrity checks run
+// commitmentFileScan is what the referencing full-scan learned about one file. counts is complete
+// only when referenced is false: the scan stops at the first shortened key and leaves the tally to
+// the dereferencing pass, which walks the whole file anyway.
+type commitmentFileScan struct {
+	referenced bool
+	counts     derefCounts
+}
+
+// commitmentReferencingMemo caches scanCommitmentFile per file path. Integrity checks run
 // over an immutable file set within a process and several phases query the same file, so the full
 // content scan is done once per file.
-var commitmentReferencingMemo sync.Map // string -> bool
+var commitmentReferencingMemo sync.Map // string -> commitmentFileScan
 
 // commitmentFileReferencing reports whether a commitment file carries shortened key references.
-// The integrity tool full-scans the content (not the file's version stamp) to catch a mis-stamped
-// file; any read error returns true rather than under-report as plain. Memoized per path.
 func commitmentFileReferencing(file state.VisibleFile) bool {
+	return scanCommitmentFile(file).referenced
+}
+
+// scanCommitmentFile full-scans the content (not the file's version stamp) to catch a mis-stamped
+// file; any read error reports referenced rather than under-report as plain. Memoized per path.
+func scanCommitmentFile(file state.VisibleFile) commitmentFileScan {
 	if v, ok := commitmentReferencingMemo.Load(file.Fullpath()); ok {
-		return v.(bool)
+		return v.(commitmentFileScan)
 	}
-	r := computeCommitmentFileReferencing(file)
+	r := computeCommitmentFileScan(file)
 	commitmentReferencingMemo.Store(file.Fullpath(), r)
 	return r
 }
 
-func computeCommitmentFileReferencing(file state.VisibleFile) bool {
+func computeCommitmentFileScan(file state.VisibleFile) commitmentFileScan {
 	decomp, err := seg.NewDecompressor(file.Fullpath())
 	if err != nil {
-		log.Root().Warn("[integrity] commitmentFileReferencing: open failed, treating as referenced", "file", file.Fullpath(), "err", err)
-		return true
+		log.Root().Warn("[integrity] scanCommitmentFile: open failed, treating as referenced", "file", file.Fullpath(), "err", err)
+		return commitmentFileScan{referenced: true}
 	}
 	defer decomp.Close()
 
 	g := seg.NewReader(decomp.MakeGetter(), statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Compression)
+	var counts derefCounts
 	var k, v []byte
 	for g.HasNext() {
 		k, _ = g.Next(k[:0])
 		if !g.HasNext() {
-			break
+			// A dangling key is ErrIntegrity in the deref pass, which only runs on a referencing
+			// file — so report referencing and let it name the fault.
+			return commitmentFileScan{referenced: true}
 		}
 		v, _ = g.Next(v[:0])
 		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
 			continue
 		}
-		if commitment.BranchData(v).HasShortenedKeys() {
-			return true
+		counts.branchKeys++
+		plainAccounts, plainStorages, shortened, err := commitment.BranchData(v).CountPlainKeys()
+		if err != nil || shortened > 0 {
+			return commitmentFileScan{referenced: true}
 		}
+		counts.plainAccounts += plainAccounts
+		counts.plainStorages += plainStorages
 	}
-	return false
+	return commitmentFileScan{counts: counts}
 }
 
 func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) (derefCounts, error) {
@@ -560,15 +585,18 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 	fileName := filepath.Base(file.Fullpath())
 	startTxNum := file.StartRootNum()
 	endTxNum := file.EndRootNum()
-	if !commitmentFileReferencing(file) {
+	if scan := scanCommitmentFile(file); !scan.referenced {
 		logger.Info(
 			"[integrity] CommitmentKvDeref skipped, no shortened keys found (full scan)",
 			"file", fileName,
 			"startTxNum", startTxNum,
 			"endTxNum", endTxNum,
 			"steps", (endTxNum-startTxNum)/stepSize,
+			"branchKeys", scan.counts.branchKeys,
+			"plainAccounts", scan.counts.plainAccounts,
+			"plainStorages", scan.counts.plainStorages,
 		)
-		return derefCounts{}, nil
+		return scan.counts, nil
 	}
 	trace := logger.Enabled(ctx, log.LvlTrace)
 	workers := max(dbg.EnvInt("CHECK_COMMITMENT_KVS_DEREF_WORKERS", 4), 1)
@@ -866,7 +894,8 @@ func CheckCommitmentHistVal(ctx context.Context, sc SamplerCfg, db kv.TemporalRo
 					if elapsed > 0 {
 						rate = float64(vals) / elapsed
 					}
-					logger.Info("[integrity] CommitmentHistVal progress",
+					logger.Info(
+						"[integrity] CommitmentHistVal progress",
 						"buckets", fmt.Sprintf("%d/%d", completedBuckets.Load(), totalBuckets),
 						"vals", vals,
 						"vals/s", rate,
@@ -1150,7 +1179,8 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 				done := checked.Load()
 				wDone := windowsDone.Load()
 				blkRate := float64(done) / time.Since(start).Seconds()
-				logger.Info("[integrity] "+string(StateRootVerifyByHistory),
+				logger.Info(
+					"[integrity] "+string(StateRootVerifyByHistory),
 					"blks/s", fmt.Sprintf("%.1f", blkRate),
 					"checked", fmt.Sprintf("%s/%s", common.PrettyCounter(done), common.PrettyCounter(expectedBlks)),
 					"windows", fmt.Sprintf("%d/%d", wDone, totalWindows),
@@ -1191,7 +1221,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 			for blockNum := range sampler.BlockNums(windowStart, windowEnd) {
 				// Fresh SharedDomains per block: an SD is committed-or-closed,
 				// never reset in place.
-				sd, err := execctx.NewSharedDomains(wCtx, tx, logger, execctx.WithoutDeferredBranchUpdates())
+				sd, err := execctx.NewSharedDomains(wCtx, tx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
 				if err != nil {
 					return err
 				}
@@ -1243,7 +1273,7 @@ func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fr
 		var checkErr error
 		if startTxNum == 0 {
 			// Base file: forward check (commitment refs count <= domain entries count)
-			checkErr = checkStateCorrespondenceBase(ctx, file, stepSize, failFast, logger)
+			checkErr = checkStateCorrespondenceBase(ctx, file, failFast, logger)
 		} else {
 			// Non-base file: reverse check (every domain key is in commitment refs)
 			// Include the next commitment file's refs to handle step boundary effects:
@@ -1260,7 +1290,7 @@ func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fr
 					prevFiles = append(prevFiles, files[j])
 				}
 			}
-			checkErr = checkStateCorrespondenceReverse(ctx, file, nextFile, prevFiles, stepSize, failFast, logger)
+			checkErr = checkStateCorrespondenceReverse(ctx, file, nextFile, prevFiles, failFast, logger)
 		}
 		if checkErr != nil {
 			if !errors.Is(checkErr, ErrIntegrity) {
@@ -1281,7 +1311,7 @@ func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fr
 // checkStateCorrespondenceBase verifies base files (startTxNum==0) where commitment
 // branches reference ALL keys in the trie, and the accounts/storage files contain
 // all those keys. Forward check: commitment ref count <= domain entry count.
-func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) error {
+func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, failFast bool, logger log.Logger) error {
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
 	startTxNum := file.StartRootNum()
@@ -1349,9 +1379,9 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 		if !commReader.HasNext() {
 			err = errors.New("invalid key/value pair during decompression")
 			if failFast {
-				return fmt.Errorf("%w: %s in %s", ErrIntegrity, err, fileName)
+				return fmt.Errorf("%w: %w in %s", ErrIntegrity, err, fileName)
 			}
-			integrityErr = fmt.Errorf("%w: %s in %s", ErrIntegrity, err, fileName)
+			integrityErr = fmt.Errorf("%w: %w in %s", ErrIntegrity, err, fileName)
 			logger.Warn(err.Error())
 			continue
 		}
@@ -1363,6 +1393,10 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 		branchKeys++
 
 		branchData := commitment.BranchData(branchValue)
+
+		if branchData.IsTombstone() {
+			continue // tombstones kept across merges, not corruption
+		}
 
 		// Check completeness
 		if !branchData.IsComplete() {
@@ -1481,7 +1515,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 
 		// Phase 2: Hash verification — only runs if key correspondence passes.
 		numWorkers := dbg.EnvInt("CHECK_VERIFY_STATE_WORKERS", estimate.AlmostAllCPUs())
-		hashErr := checkHashVerification(ctx, file, stepSize, failFast, numWorkers, logger)
+		hashErr := checkHashVerification(ctx, file, failFast, numWorkers, logger)
 		if hashErr != nil {
 			integrityErr = hashErr
 		}
@@ -1498,7 +1532,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 //
 // Approach: walk commitment branches → write all extracted plain keys to temp files →
 // sort+dedup → merge-join with domain .kv files (which are also sorted by key).
-func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile, nextFile state.VisibleFile, prevFiles []state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) error {
+func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile, nextFile state.VisibleFile, prevFiles []state.VisibleFile, failFast bool, logger log.Logger) error {
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
 	startTxNum := file.StartRootNum()
@@ -1573,6 +1607,9 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 		branchKeys++
 
 		branchData := commitment.BranchData(branchValue)
+		if branchData.IsTombstone() {
+			continue
+		}
 
 		if !branchData.IsComplete() {
 			touchMap := uint16(0)
@@ -1664,14 +1701,14 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 	slices.SortFunc(prevCommitmentPaths, func(a, b string) int {
 		return cmp.Compare(b, a)
 	})
-	accMissing, err := reverseCheckDomainKeys(ctx, accDecomp, kv.AccountsDomain, accCollector, prevCommitmentPaths, fileName, failFast, logger)
+	accMissing, err := reverseCheckDomainKeys(ctx, accDecomp, kv.AccountsDomain, accCollector, prevCommitmentPaths, fileName, logger)
 	if err != nil && !errors.Is(err, ErrIntegrity) {
 		return err
 	}
 	if err != nil {
 		integrityErr = err
 	}
-	stoMissing, err := reverseCheckDomainKeys(ctx, stoDecomp, kv.StorageDomain, stoCollector, prevCommitmentPaths, fileName, failFast, logger)
+	stoMissing, err := reverseCheckDomainKeys(ctx, stoDecomp, kv.StorageDomain, stoCollector, prevCommitmentPaths, fileName, logger)
 	if err != nil && !errors.Is(err, ErrIntegrity) {
 		return err
 	}
@@ -1688,7 +1725,7 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 
 		// Phase 2: Hash verification — only runs if key correspondence passes.
 		numWorkers := dbg.EnvInt("CHECK_VERIFY_STATE_WORKERS", estimate.AlmostAllCPUs())
-		hashErr := checkHashVerification(ctx, file, stepSize, failFast, numWorkers, logger)
+		hashErr := checkHashVerification(ctx, file, failFast, numWorkers, logger)
 		if hashErr != nil {
 			integrityErr = hashErr
 		}
@@ -1708,7 +1745,7 @@ type missingEntry struct {
 // prevCommitmentPaths are commitment file paths for previous steps (newest-first).
 // When a key is missing from refs, its value is compared with previous domain files
 // to detect no-op writes (same value recorded redundantly).
-func reverseCheckDomainKeys(ctx context.Context, decomp *seg.Decompressor, domain kv.Domain, sortedKeys *etl.Collector, prevCommitmentPaths []string, commitFileName string, failFast bool, logger log.Logger) (missing uint64, retErr error) {
+func reverseCheckDomainKeys(ctx context.Context, decomp *seg.Decompressor, domain kv.Domain, sortedKeys *etl.Collector, prevCommitmentPaths []string, commitFileName string, logger log.Logger) (missing uint64, retErr error) {
 	compression := statecfg.Schema.GetDomainCfg(domain).Compression
 	reader := seg.NewReader(decomp.MakeGetter(), compression)
 	reader.Reset(0) // start from beginning
@@ -2005,7 +2042,7 @@ var valMapPool = sync.Pool{New: func() any { return make(map[string][]byte, 8) }
 // matches the hash recomputed from the actual domain values. Uses a producer-consumer
 // pattern: 1 producer reads the commitment file sequentially, N workers each open their
 // own domain readers and verify hashes in parallel.
-func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, numWorkers int, logger log.Logger) error {
+func checkHashVerification(ctx context.Context, file state.VisibleFile, failFast bool, numWorkers int, logger log.Logger) error {
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
 

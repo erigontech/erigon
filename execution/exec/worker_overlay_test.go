@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -51,16 +52,15 @@ func TestWorker_ChainReader_SeesOverlayHeader(t *testing.T) {
 
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	rawDB := mdbx.New(dbcfg.ChainDB, logger).
-		InMem(t, dirs.Chaindata).
+	rawDB := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).
 		GrowthStep(32 * datasize.MB).
 		MapSize(2 * datasize.GB).
 		MustOpen()
 	t.Cleanup(rawDB.Close)
 
-	agg := dbstate.NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context(), rawDB)
+	agg := dbstate.NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context())
 	t.Cleanup(agg.Close)
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(rawDB))
 
 	db, err := temporal.New(rawDB, agg, nil)
 	require.NoError(t, err)
@@ -72,7 +72,7 @@ func TestWorker_ChainReader_SeesOverlayHeader(t *testing.T) {
 	doms, err := execctx.NewSharedDomains(t.Context(), roTx, logger)
 	require.NoError(t, err)
 	t.Cleanup(doms.Close)
-	require.NoError(t, doms.InitBlockOverlay(roTx, dirs.Tmp))
+	require.NoError(t, doms.InitBlockOverlay(roTx))
 
 	header := &types.Header{
 		Number:     *uint256.NewInt(2_713_395),
@@ -118,16 +118,15 @@ func TestWorker_ChainReader_NoOverlayStillWorks(t *testing.T) {
 
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	rawDB := mdbx.New(dbcfg.ChainDB, logger).
-		InMem(t, dirs.Chaindata).
+	rawDB := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).
 		GrowthStep(32 * datasize.MB).
 		MapSize(2 * datasize.GB).
 		MustOpen()
 	t.Cleanup(rawDB.Close)
 
-	agg := dbstate.NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context(), rawDB)
+	agg := dbstate.NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context())
 	t.Cleanup(agg.Close)
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(rawDB))
 
 	db, err := temporal.New(rawDB, agg, nil)
 	require.NoError(t, err)

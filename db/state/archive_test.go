@@ -26,7 +26,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/seg"
 )
 
@@ -141,18 +140,4 @@ func TestArchiveWriter(t *testing.T) {
 		r := seg.NewReader(decomp.MakeGetter(), seg.CompressVals)
 		checkLatest(t, r, td)
 	})
-
-}
-
-func TestPrunableProgress(t *testing.T) {
-	t.Parallel()
-	_, tx := memdb.NewTestTx(t)
-	SaveExecV3PrunableProgress(tx, []byte("test"), 100)
-	s, err := GetExecV3PrunableProgress(tx, []byte("test"))
-	require.NoError(t, err)
-	require.EqualValues(t, 100, s)
-	SaveExecV3PrunableProgress(tx, []byte("test"), 120)
-	s, err = GetExecV3PrunableProgress(tx, []byte("test"))
-	require.NoError(t, err)
-	require.EqualValues(t, 120, s)
 }

@@ -24,15 +24,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/sync/errgroup"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
@@ -122,11 +122,13 @@ type Worker struct {
 	historyMode bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
 	chainConfig *chain.Config
 
-	ctx     context.Context
-	engine  rules.Engine
-	genesis *types.Genesis
-	results *ResultsQueue
-	chain   rules.ChainReader
+	ctx       context.Context
+	engine    rules.Engine
+	genesis   *types.Genesis
+	results   *ResultsQueue
+	chain     rules.ChainReader
+	runFault  func() error
+	taskFault func()
 
 	evm *vm.EVM
 	ibs *state.IntraBlockState
@@ -241,9 +243,9 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.TemporalTx, s
 	if stateReader != nil {
 		rw.SetReader(stateReader)
 	} else {
-		var getter kv.TemporalGetter
+		var getter execctxapi.StateGetter
 		if chainTx != nil {
-			getter = rs.Domains().AsGetterMetered(chainTx, rw.readMetrics)
+			getter = rs.Domains().AsStateGetter(chainTx, execctxapi.StateGetterOptions{}.WithMetrics(rw.readMetrics))
 		}
 		// Use CachedReaderV3 for parallel workers — caches account data
 		// on first read per block, providing a stable pre-block committed
@@ -323,7 +325,7 @@ func (rw *Worker) resetTx(chainTx kv.TemporalTx) error {
 
 	if rw.chainTx != nil {
 		type latest interface {
-			SetGetter(kv.TemporalGetter)
+			SetGetter(execctxapi.StateGetter)
 		}
 
 		type historic interface {
@@ -332,7 +334,7 @@ func (rw *Worker) resetTx(chainTx kv.TemporalTx) error {
 
 		switch typedReader := rw.stateReader.(type) {
 		case latest:
-			typedReader.SetGetter(rw.rs.Domains().AsGetterMetered(rw.chainTx, rw.readMetrics))
+			typedReader.SetGetter(rw.rs.Domains().AsStateGetter(rw.chainTx, execctxapi.StateGetterOptions{}.WithMetrics(rw.readMetrics)))
 		case historic:
 			typedReader.SetTx(rw.chainTx)
 		default:
@@ -372,7 +374,7 @@ func (rw *Worker) Run() (err error) {
 	pprof.SetGoroutineLabels(pprof.WithLabels(rw.ctx, pprof.Labels("sub", "exec-worker")))
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("exec.Worker panic: %s, %s", rec, dbg.Stack())
+			err = fmt.Errorf("exec.Worker panic: %v, %s", rec, dbg.Stack())
 			rw.logger.Warn("Worker failed", "err", err)
 		}
 	}()
@@ -386,47 +388,61 @@ func (rw *Worker) Run() (err error) {
 		}
 	}()
 
+	if rw.runFault != nil {
+		if err := rw.runFault(); err != nil {
+			return err
+		}
+	}
+
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		result := func() (result *TxResult) {
 			defer func() {
 				if rec := recover(); rec != nil {
 					result = &TxResult{
-						Task: txTask,
-						Err:  fmt.Errorf("exec task panic: %s, %s", rec, dbg.Stack()),
+						Task:        txTask,
+						Err:         fmt.Errorf("exec task panic: %v, %s", rec, dbg.Stack()),
+						Operational: true,
 					}
 				}
 			}()
+			if rw.taskFault != nil {
+				rw.taskFault()
+			}
 			return rw.RunTxTask(txTask)
 		}()
 		if err := rw.results.Add(rw.ctx, result); err != nil {
 			return err
 		}
-		// Fold this task's reads into the per-batch log aggregate and the
-		// retained collector accumulator, then reset. Off the hot path (the
-		// result is already queued). The collector hand-off is a non-blocking
-		// TrySend: on a full buffer it is skipped and collectorAcc keeps growing
-		// (retried next task), so execution never blocks and no count is lost.
-		// Skipped entirely when read metrics are off.
-		if dbg.KVReadLevelledMetrics && rw.rs != nil {
-			doms := rw.rs.Domains()
-			doms.LogMergeMetrics(rw.readMetrics)
-			rw.collectorAcc.Merge(rw.readMetrics)
-			rw.readMetrics.Reset()
-			if c := doms.Collector(); c != nil && c.TrySend(kvmetrics.SourceExec, rw.collectorAcc) {
-				rw.collectorAcc = kvmetrics.NewDomainMetrics()
-			}
-		}
+		rw.PublishReadMetrics()
 	}
 	// Worker is done: flush whatever the collector buffer was too full to take
 	// during the run. Blocking is fine here (off the hot path, at teardown), and
 	// it must not be lost. Only the collector — the per-task log merges already
-	// folded this data into sd.metrics via LogMergeMetrics.
+	// folded this data into sd.metrics via MergeExecMetrics.
 	if dbg.KVReadLevelledMetrics && rw.rs != nil {
 		if c := rw.rs.Domains().Collector(); c != nil {
 			c.Send(kvmetrics.SourceExec, rw.collectorAcc)
 		}
 	}
 	return nil
+}
+
+// PublishReadMetrics folds this worker's task reads into the per-batch log
+// aggregate and the retained collector accumulator, then resets. Off the hot
+// path: the result is already queued. The collector hand-off is a non-blocking
+// TrySend, so execution never blocks and no count is lost. Callers that drive
+// RunTxTask directly must call it, or their reads never reach sd.metrics.
+func (rw *Worker) PublishReadMetrics() {
+	if !dbg.KVReadLevelledMetrics || rw.rs == nil {
+		return
+	}
+	doms := rw.rs.Domains()
+	doms.MergeExecMetrics(rw.readMetrics)
+	rw.collectorAcc.Merge(rw.readMetrics)
+	rw.readMetrics.Reset()
+	if c := doms.Collector(); c != nil && c.TrySend(kvmetrics.SourceExec, rw.collectorAcc) {
+		rw.collectorAcc = kvmetrics.NewDomainMetrics()
+	}
 }
 
 func (rw *Worker) RunTxTask(txTask Task) (result *TxResult) {
@@ -470,7 +486,7 @@ func (rw *Worker) RunTxTask(txTask Task) (result *TxResult) {
 func (rw *Worker) SetReader(reader state.StateReader) {
 	rw.stateReader = reader
 	type latest interface {
-		SetGetter(kv.TemporalGetter)
+		SetGetter(execctxapi.StateGetter)
 	}
 
 	type historic interface {
@@ -479,7 +495,7 @@ func (rw *Worker) SetReader(reader state.StateReader) {
 
 	switch typedReader := rw.stateReader.(type) {
 	case latest:
-		typedReader.SetGetter(rw.rs.Domains().AsGetterMetered(rw.chainTx, rw.readMetrics))
+		typedReader.SetGetter(rw.rs.Domains().AsStateGetter(rw.chainTx, execctxapi.StateGetterOptions{}.WithMetrics(rw.readMetrics)))
 	case historic:
 		typedReader.SetTx(rw.chainTx)
 	}
@@ -514,7 +530,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 		// the coinbase race investigation).
 		rw.SetReader(state.NewHistoryReaderV3WithSharedDomains(rw.chainTx, rw.rs.Domains(), txTask.Version().TxNum))
 	} else if !txTask.IsHistoric() && (rw.stateReader == nil || rw.historyMode) {
-		rw.SetReader(state.NewCachedReaderV3(rw.rs.Domains().AsGetterMetered(rw.chainTx, rw.readMetrics), nil))
+		rw.SetReader(state.NewCachedReaderV3(rw.rs.Domains().AsStateGetter(rw.chainTx, execctxapi.StateGetterOptions{}.WithMetrics(rw.readMetrics)), nil))
 	}
 
 	// Set the per-block committed state cache from the task.
@@ -524,18 +540,19 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 
 	if rw.background && rw.chainTx == nil {
 		chainTx, err := rw.chainDb.BeginTemporalRo(rw.ctx) //nolint
-
 		if err != nil {
 			return &TxResult{
-				Task: txTask,
-				Err:  err,
+				Task:        txTask,
+				Err:         fmt.Errorf("worker setup: %w", err),
+				Operational: true,
 			}
 		}
 
 		if err = rw.resetTx(chainTx); err != nil {
 			return &TxResult{
-				Task: txTask,
-				Err:  err,
+				Task:        txTask,
+				Err:         fmt.Errorf("worker setup: %w", err),
+				Operational: true,
 			}
 		}
 	}
@@ -577,16 +594,25 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 	return result
 }
 
-func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, chainDb kv.TemporalRoDB,
+// WorkerFaults carries optional fault-injection hooks for tests; the zero
+// value disables both.
+type WorkerFaults struct {
+	RunStart func() error // fires once when a worker's Run starts
+	TaskBody func()       // fires inside each task's recover scope
+}
+
+func NewWorkersPool(ctx context.Context, faults WorkerFaults, accumulator *shards.Accumulator, background bool, chainDb kv.TemporalRoDB,
 	rs *state.StateV3Buffered, stateReader state.StateReader, stateWriter state.StateWriter, in *QueueWithRetry, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
-	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *ResultsQueue, clear func(), wait func(), err error) {
+	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, logger log.Logger,
+) (reconWorkers []*Worker, applyWorker *Worker, rws *ResultsQueue, clear func(), wait func() error, err error) {
 	// Appended, so a part-way failure leaves clear only the workers actually built.
 	reconWorkers = make([]*Worker, 0, workerCount)
 
 	resultsSize := workerCount * 8
 	rws = NewResultsQueue(resultsSize, workerCount)
 
-	g, gctx := errgroup.WithContext(ctx)
+	g, gctx := commonerrors.NewGroup(ctx)
+	wait = g.Wait
 	applyWorker = NewWorker(ctx, false, nil, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
 
 	// Assigned before anything can fail: every return path must hand back a callable clear.
@@ -596,7 +622,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 			return
 		}
 		clearDone = true
-		g.Wait()
+		_ = g.Wait()
 		applyWorker.Close()
 		for _, w := range reconWorkers {
 			w.Close()
@@ -605,13 +631,15 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 
 	for range workerCount {
 		w := NewWorker(gctx, background, metrics, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
+		w.runFault = faults.RunStart
+		w.taskFault = faults.TaskBody
 		reconWorkers = append(reconWorkers, w)
 
 		if rs != nil {
 			reader := stateReader
 
 			if reader == nil {
-				reader = state.NewReaderV3(rs.Domains().AsGetterMetered(nil, w.readMetrics))
+				reader = state.NewReaderV3(rs.Domains().AsStateGetter(nil, execctxapi.StateGetterOptions{}.WithMetrics(w.readMetrics)))
 			}
 
 			if err = w.ResetState(rs, nil, reader, stateWriter, accumulator); err != nil {
@@ -621,11 +649,8 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 	}
 	if background {
 		for i := range workerCount {
-			g.Go(func() error {
-				return reconWorkers[i].Run()
-			})
+			g.Go(reconWorkers[i].Run)
 		}
-		wait = func() { g.Wait() }
 	}
 
 	return reconWorkers, applyWorker, rws, clear, wait, err

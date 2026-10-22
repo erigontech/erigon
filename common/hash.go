@@ -24,13 +24,13 @@ import (
 	"math/rand/v2"
 	"reflect"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 )
 
-var (
-	hashT = reflect.TypeFor[Hash]()
-)
+var hashT = reflect.TypeFor[Hash]()
 
 // Hash represents the 32 byte Keccak256 hash of arbitrary data.
 type Hash [length.Hash]byte
@@ -62,8 +62,15 @@ func (h Hash) Cmp(other Hash) int {
 	return bytes.Compare(h[:], other[:])
 }
 
-// Big converts a hash to a big integer.
-func (h Hash) Big() *big.Int { return new(big.Int).SetBytes(h[:]) }
+// U256 converts a hash to a 256-bit integer. Returned by value so the
+// conversion allocates nothing; take its address when a pointer is needed.
+func (h Hash) U256() (u uint256.Int) {
+	u.SetBytes32(h[:])
+	return u
+}
+
+// U256ToHash sets the byte representation of u to hash.
+func U256ToHash(u uint256.Int) Hash { return Hash(u.Bytes32()) }
 
 // Hex converts a hash to a hex string.
 func (h Hash) Hex() string { return hexutil.Encode(h[:]) }
