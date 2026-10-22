@@ -670,7 +670,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 
 	// Publishing the finalized write-set to the versionMap carries the wipe, so
 	// later txs read the destroyed account as empty.
-	states[3].versionMap.FlushVersionedWrites(states[3].FinalizedWrites(&chain.Rules{}), true, "")
+	states[3].versionMap.FlushVersionedWrites(finalizedWrites(t, states[3], &chain.Rules{}), true, "")
 
 	// Tx4 read
 	v, err = states[4].GetState(addr, key)
