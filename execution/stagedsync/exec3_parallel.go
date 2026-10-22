@@ -270,6 +270,12 @@ func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash
 // foldTx applies one published tx's versionMap view and indexes to sd.mem. The
 // finalize tx skips ApplyTxIndexes' receipt-cache write: it shares the last regular
 // tx's txNum, so a write here would clobber that entry.
+func (pe *parallelExecutor) startBlockValidator(blockNum, gasUsed, blobGasUsed uint64, receipts types.Receipts, header *types.Header, txs types.Transactions) *blockValidator {
+	checkBloom := !pe.cfg.vmConfig.StatelessExec && !pe.cfg.vmConfig.NoReceipts
+	checkReceipts := checkBloom && pe.cfg.chainConfig.IsByzantium(blockNum)
+	return newBlockValidator(pe.cfg.engine, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, header, txs, pe.cfg.chainConfig, pe.logger)
+}
+
 func (pe *parallelExecutor) foldTx(ctx context.Context, rwTx kv.TemporalTx, r *txResult) error {
 	restoreCS := pe.bindBlockChangesetForFold(r.blockNum, r.blockHash)
 	defer restoreCS()
@@ -724,9 +730,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					pe.prevBlocks.RemoveTail()
 					var blockValidatorWaiter *blockValidator
 					if applyResult.BlockNum > 0 && !applyResult.isPartial { // Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-						checkBloom := !pe.cfg.vmConfig.StatelessExec && !pe.cfg.vmConfig.NoReceipts
-						checkReceipts := checkBloom && pe.cfg.chainConfig.IsByzantium(applyResult.BlockNum)
-
 						header, txs := applyResult.Header, applyResult.Txs
 						if header == nil {
 							b, _, err := pe.cfg.blockReader.BlockWithSenders(ctx, rwTx, applyResult.BlockHash, applyResult.BlockNum)
@@ -753,10 +756,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 							continue
 						}
 
-						// Spawn per-block validation concurrently; joined via Wait() below
-						// after the other per-result work has run alongside it.
-						blockValidatorWaiter = newBlockValidator(pe.cfg.engine, applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, checkBloom, applyResult.Receipts,
-							lastHeader, txs, pe.cfg.chainConfig, pe.logger)
+						// Joined via Wait() below after the other per-result work has run alongside it.
+						blockValidatorWaiter = applyResult.validator
+						if blockValidatorWaiter == nil {
+							blockValidatorWaiter = pe.startBlockValidator(applyResult.BlockNum, applyResult.BlockGasUsed, applyResult.BlobGasUsed, applyResult.Receipts, lastHeader, txs)
+						}
 					}
 
 					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
@@ -1720,8 +1724,10 @@ type blockResult struct {
 	Exhausted        *ErrLoopExhausted
 	Header           *types.Header      // for accumulator.StartChange in apply loop
 	Txs              types.Transactions // for accumulator.StartChange in apply loop
-	// computedBAL delivers bal.Create of TxIO, started when the block's execution
-	// ends so it overlaps with the apply loop's fold backlog; nil when not started.
+	// validator and computedBAL (bal.Create of TxIO) start when the block's
+	// execution ends, so they overlap with the apply loop's fold backlog; nil when
+	// not started.
+	validator   *blockValidator
 	computedBAL chan types.BlockAccessList
 
 	// Exec window for newPayload wall attribution; the calculator pairs these with
@@ -3906,6 +3912,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		// drains them to sd.mem; dropped on commit.
 		pe.prevBlocks.PushHead(be.blockNum, txTask.Version().TxNum, be.versionMap)
 
+		var validator *blockValidator
+		if header != nil && be.blockNum > 0 && !isPartial {
+			validator = pe.startBlockValidator(be.blockNum, be.blockGasUsed, be.blobGasUsed, blockReceipts, header, txs)
+		}
 		var computedBAL chan types.BlockAccessList
 		if header != nil && (pe.cfg.chainConfig.IsAmsterdam(header.Time) || pe.cfg.experimentalBAL) {
 			computedBAL = make(chan types.BlockAccessList, 1)
@@ -3934,6 +3944,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			Exhausted:        be.exhausted,
 			Header:           header,
 			Txs:              txs,
+			validator:        validator,
 			computedBAL:      computedBAL,
 			execStartedAt:    be.execStarted,
 			execEndedAt:      time.Now(),
