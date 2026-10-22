@@ -3904,9 +3904,9 @@ func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
 // balance must reach the state root of serial execution when parallel exec
 // defers the sender charge to validation.
 func TestSameSenderSpeculationMatchesSerialExecution(t *testing.T) {
-	prevSpec, prevParallel := dbg.ExecSameSenderSpec, dbg.Exec3Parallel
-	dbg.ExecSameSenderSpec, dbg.Exec3Parallel = true, true
-	t.Cleanup(func() { dbg.ExecSameSenderSpec, dbg.Exec3Parallel = prevSpec, prevParallel })
+	prevParallel := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
 
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)

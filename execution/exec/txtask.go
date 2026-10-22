@@ -297,7 +297,7 @@ func (t *TxTask) TxSender() (accounts.Address, error) {
 // DefersSenderCharge reports whether this incarnation runs without sender
 // nonce/balance access, leaving the nonce check and gas charge to validation.
 func (t *TxTask) DefersSenderCharge(incarnation int) bool {
-	if !dbg.ExecSameSenderSpec || incarnation != 0 || t.Config.Aura != nil || t.Rules().IsAmsterdam {
+	if incarnation != 0 || t.Config.Aura != nil || t.Rules().IsAmsterdam {
 		return false
 	}
 	txn := t.Tx()

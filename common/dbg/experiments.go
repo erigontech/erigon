@@ -128,9 +128,6 @@ var (
 	BadBlockHalt          = EnvBool("BAD_BLOCK_HALT", false)
 	IgnoreBAL             = EnvBool("IGNORE_BAL", false)
 	BatchCommitments      = EnvBool("BATCH_COMMITMENTS", true)
-	// ExecSameSenderSpec lets BAL-off parallel exec run a sender's txs
-	// speculatively: the sender nonce check and gas charge move to validation.
-	ExecSameSenderSpec = EnvBool("EXEC_SAME_SENDER_SPEC", true)
 	// BALDrivenCommitment folds a block's commitment from its BAL ahead of the
 	// per-tx result stream, overlapping execution. On by default; set
 	// BAL_DRIVEN_COMMITMENT=false (or IGNORE_BAL=true) to fall back to the
