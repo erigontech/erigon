@@ -597,6 +597,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 							pe.cancelOperational(blockNum, applyResult.Err)
 						} else {
 							fail.consider(blockNum, blockHash, true, applyResult.Err)
+							deliberateCancel()
 						}
 						continue
 					}
@@ -699,15 +700,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					}
 
 					if err := blockValidatorWaiter.Wait(); err != nil {
-						// Block-validity verdict from post-execution validation. Route it
-						// through failCandidate (earliest-block-wins, exec supersedes a
-						// commit wrong-root at the same block) and keep draining rather
-						// than bare-returning — a bare return here would strand the exec
-						// loop in a terminal mustDeliver send on a full applyResults and
-						// wedge pe.wait. No cancel: mirror the blockResult.Err path.
-						appliedBlocks[blockNum] = struct{}{}
-						fail.consider(blockNum, blockHash, true, fmt.Errorf("%w, block=%d, %w", rules.ErrInvalidBlock, blockNum, err))
-						finalized = true
+						recordApplyFailure(fmt.Errorf("%w, block=%d, %w", rules.ErrInvalidBlock, blockNum, err))
 						continue
 					}
 
@@ -1133,12 +1126,6 @@ func (pe *parallelExecutor) drainOnCancel(ctx context.Context, applyTx kv.Tempor
 // exit=true means the exec loop should return cleanly — a terminal stop, or an
 // invalid block whose Err the apply loop surfaces.
 func (pe *parallelExecutor) completeBlock(ctx context.Context, blockResult *blockResult, sizeCutPending *bool) (exit bool, err error) {
-	if blockResult.Err != nil {
-		pe.cancelWorkers()
-		if pe.cfg.readAheader != nil {
-			pe.cfg.readAheader.CancelWarmup()
-		}
-	}
 	blockNum := blockResult.Block.NumberU64()
 	blockHash := blockResult.Block.Hash()
 	pe.RLock()
@@ -1802,7 +1789,15 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, func(erro
 	// contexts before joining the group.
 	execLoopCtx, execLoopCtxCancel := context.WithCancelCause(ctx)
 	pe.execLoopGroup, execLoopCtx = commonerrors.NewGroup(execLoopCtx)
-	pe.cancelExecLoop = execLoopCtxCancel
+	pe.cancelExecLoop = func(cause error) {
+		stop, ok := errors.AsType[*stopCause](cause)
+		if !ok || stop.kind == stopBadBlock || stop.kind == stopOperational {
+			if pe.cfg.readAheader != nil {
+				pe.cfg.readAheader.CancelWarmup()
+			}
+		}
+		execLoopCtxCancel(cause)
+	}
 
 	workersCtx, cancelWorkers := context.WithCancel(execLoopCtx)
 	pe.cancelWorkers = cancelWorkers

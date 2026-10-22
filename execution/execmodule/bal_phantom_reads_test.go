@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"math/big"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -55,49 +57,111 @@ func (db *blockedWarmupDB) BeginRo(ctx context.Context) (kv.Tx, error) {
 	return nil, ctx.Err()
 }
 
-func TestBALPhantomReadAttackCancelsWarmup(t *testing.T) {
+type warmupVerdictObserver struct {
+	log.Handler
+	warmupCtx context.Context
+	atVerdict chan error
+}
+
+func (h *warmupVerdictObserver) Enabled(context.Context, log.Lvl) bool { return true }
+
+func (h *warmupVerdictObserver) Log(record *log.Record) error {
+	if strings.HasSuffix(record.Msg, "] Invalid block") {
+		// The executor reports its verdict before ValidateChain's deferred cleanup.
+		h.atVerdict <- h.warmupCtx.Err()
+	}
+	return h.Handler.Log(record)
+}
+
+func TestValidateChainCancelsWarmup(t *testing.T) {
 	oldReadAhead := dbg.ReadAhead
 	dbg.SetReadAhead(true)
 	defer dbg.SetReadAhead(oldReadAhead)
-	m, block := phantomReadFixture(t, "attack", 2)
-	defer m.Close()
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	db := &blockedWarmupDB{started: make(chan context.Context, 1)}
-	m.ReadAheader.AddBlockAccessList(block.Hash(), block.BlockAccessListSidecar())
-	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
-		m.ReadAheader.AddHeaderAndBody(ctx, db, tx, block.Header(), block.Body())
-		return nil
-	}))
-	warmupCtx := <-db.started
-	status, err := m.InsertBlocks(t.Context(), []*types.Block{block})
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
-	done := make(chan struct{})
-	var result execmodule.ValidationResult
-	go func() {
-		defer close(done)
-		result, err = m.ValidateChain(t.Context(), block.Header())
-	}()
-	select {
-	case <-done:
-		assert.ErrorIs(t, warmupCtx.Err(), context.Canceled, "rejected block left BAL warmup running")
-	case <-time.After(time.Minute):
-		t.Error("block validation did not finish")
+	for _, kind := range []string{"valid", "BAL mismatch", "wrong trie root", "wrong receipts", "invalid transaction"} {
+		t.Run(kind, func(t *testing.T) {
+			workload := "valid"
+			if kind == "BAL mismatch" {
+				workload = "attack"
+			}
+			m, block := phantomReadFixture(t, workload, 2)
+			header := block.Header()
+			body := block.Body()
+			switch kind {
+			case "wrong trie root":
+				header.Root[0] ^= 1
+			case "wrong receipts":
+				header.ReceiptHash[0] ^= 1
+			case "invalid transaction":
+				tx := body.Transactions[0]
+				invalidTx, err := types.SignTx(types.NewTransaction(tx.GetNonce()+1, *tx.GetTo(), tx.GetValue(), tx.GetGasLimit(), tx.GetFeeCap(), tx.GetData()),
+					*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+				require.NoError(t, err)
+				body.Transactions[0] = invalidTx
+				header.TxHash = types.DeriveSha(types.Transactions(body.Transactions))
+			}
+			block = types.NewBlockFromNetwork(header, body, block.BlockAccessListSidecar())
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			db := &blockedWarmupDB{started: make(chan context.Context, 1)}
+			m.ReadAheader.AddBlockAccessList(block.Hash(), block.BlockAccessListSidecar())
+			require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+				m.ReadAheader.AddHeaderAndBody(ctx, db, tx, block.Header(), block.Body())
+				return nil
+			}))
+			warmupCtx := <-db.started
+			observer := &warmupVerdictObserver{
+				Handler: m.Log.GetHandler(), warmupCtx: warmupCtx, atVerdict: make(chan error, 1),
+			}
+			m.Log.SetHandler(observer)
+			defer m.Log.SetHandler(observer.Handler)
+			status, err := m.InsertBlocks(t.Context(), []*types.Block{block})
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+			done := make(chan struct{})
+			var result execmodule.ValidationResult
+			go func() {
+				defer close(done)
+				result, err = m.ValidateChain(t.Context(), block.Header())
+			}()
+			select {
+			case <-done:
+				assert.ErrorIs(t, warmupCtx.Err(), context.Canceled, "validation returned with warmup still active")
+			case <-time.After(time.Minute):
+				t.Error("block validation did not finish")
+			}
+			cancel()
+			<-done
+			require.NoError(t, err)
+			if kind == "valid" {
+				require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus, result.ValidationError)
+			} else {
+				require.Equal(t, execmodule.ExecutionStatusBadBlock, result.ValidationStatus, result.ValidationError)
+				switch kind {
+				case "BAL mismatch":
+					require.Contains(t, result.ValidationError, "block access list mismatch")
+				case "wrong trie root":
+					require.Contains(t, result.ValidationError, "wrong trie root")
+				case "wrong receipts":
+					require.Contains(t, result.ValidationError, "receiptHash mismatch")
+				case "invalid transaction":
+					require.Contains(t, result.ValidationError, "nonce too high")
+				}
+				select {
+				case err := <-observer.atVerdict:
+					require.ErrorIs(t, err, context.Canceled, "executor reported an invalid block with warmup still active")
+				default:
+					t.Fatal("executor did not report the invalid block")
+				}
+			}
+			m.ReadAheader.WaitForWarmup(t.Context())
+		})
 	}
-	cancel()
-	<-done
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusBadBlock, result.ValidationStatus)
-	require.Contains(t, result.ValidationError, "block access list mismatch")
-	m.ReadAheader.WaitForWarmup(t.Context())
 }
 
 func TestBALPhantomReadAttack(t *testing.T) {
 	for _, name := range []string{"valid", "reads", "attack"} {
 		t.Run(name, func(t *testing.T) {
 			m, block := phantomReadFixture(t, name, 2)
-			defer m.Close()
 			status, err := m.InsertBlocks(t.Context(), []*types.Block{block})
 			require.NoError(t, err)
 			require.Equal(t, execmodule.ExecutionStatusSuccess, status)
@@ -130,8 +194,8 @@ func phantomReadFixture(tb testing.TB, workload string, workers int) (*execmodul
 		}
 		code.Op(vm.POP)
 	}
-	loop := len(code.Bytes())
-	code.Op(vm.JUMPDEST).Push(loop).Op(vm.JUMP)
+	_, loop := code.Jumpdest()
+	code.Jump(loop)
 	genesis := &types.Genesis{
 		Config:   chain.AllProtocolChanges.Copy(),
 		GasLimit: uint64(txCount) * txGas,
@@ -140,7 +204,7 @@ func phantomReadFixture(tb testing.TB, workload string, workers int) (*execmodul
 			burner: {Balance: new(big.Int), Code: code.Bytes()},
 		},
 	}
-	m := execmoduletester.New(nil,
+	m := execmoduletester.New(tb,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(key),
 		execmoduletester.WithExperimentalBAL(),

@@ -46,23 +46,20 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-type loopingTask struct {
+type workerTestTask struct {
 	TxTask
-	started chan struct{}
+	execute func(*vm.EVM) *TxResult
 }
 
-func (task *loopingTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, _ *calltracer.CallTracer) error {
+func (task *workerTestTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, _ *calltracer.CallTracer) error {
 	evm.Reset(evmtypes.TxContext{}, ibs)
 	return nil
 }
 
-func (task *loopingTask) Execute(evm *vm.EVM, _ rules.Engine, _ *types.Genesis, _ *state.IntraBlockState,
+func (task *workerTestTask) Execute(evm *vm.EVM, _ rules.Engine, _ *types.Genesis, _ *state.IntraBlockState,
 	_ state.StateWriter, _ *chain.Config, _ rules.ChainReader, _ datadir.Dirs, _ bool,
 ) *TxResult {
-	close(task.started)
-	_, _, _, err := evm.Run(vm.Contract{Code: []byte{byte(vm.JUMPDEST), byte(vm.PUSH1), 0, byte(vm.JUMP)}},
-		mdgas.MdGas{Execution: 1 << 63}, nil, false)
-	return &TxResult{Err: err}
+	return task.execute(evm)
 }
 
 func TestWorkerCancellationStopsRunningEVM(t *testing.T) {
@@ -74,14 +71,20 @@ func TestWorkerCancellationStopsRunningEVM(t *testing.T) {
 	w := NewWorker(ctx, false, nil, nil, in, nil, chain.AllProtocolChanges, nil, results, nil, datadir.Dirs{}, log.New())
 	defer w.Close()
 	w.SetReader(stubStateReader{})
-	task := &loopingTask{
-		TxTask:  TxTask{TxIndex: -1, Header: &types.Header{Number: *uint256.NewInt(1)}},
-		started: make(chan struct{}),
+	started := make(chan struct{})
+	task := &workerTestTask{
+		TxTask: TxTask{TxIndex: -1, Header: &types.Header{Number: *uint256.NewInt(1)}},
+		execute: func(evm *vm.EVM) *TxResult {
+			close(started)
+			_, _, _, err := evm.Run(vm.Contract{Code: []byte{byte(vm.JUMPDEST), byte(vm.PUSH1), 0, byte(vm.JUMP)}},
+				mdgas.MdGas{Execution: 1 << 63}, nil, false)
+			return &TxResult{Err: err}
+		},
 	}
 	in.Add(ctx, task)
 	done := make(chan error, 1)
 	go func() { done <- w.Run() }()
-	<-task.started
+	<-started
 	cancel()
 	select {
 	case err := <-done:
@@ -158,9 +161,16 @@ func TestCancelledWorkerDoesNotInvalidateBlock(t *testing.T) {
 	w := NewWorker(ctx, false, nil, nil, nil, nil, chain.AllProtocolChanges, nil, nil, nil, datadir.Dirs{}, log.New())
 	defer w.Close()
 	w.SetReader(stubStateReader{})
-	result := w.RunTxTask(&loopingTask{
+	executed := false
+	result := w.RunTxTask(&workerTestTask{
 		TxTask: TxTask{TxIndex: -1, Header: &types.Header{Number: *uint256.NewInt(1)}},
+		execute: func(*vm.EVM) *TxResult {
+			executed = true
+			return &TxResult{}
+		},
 	})
+
+	require.False(t, executed, "a cancelled worker must not execute another task")
 	require.ErrorIs(t, result.Err, context.Canceled)
 	require.True(t, result.Operational, "cancellation is not evidence that a block is invalid")
 }

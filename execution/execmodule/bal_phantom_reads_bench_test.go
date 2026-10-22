@@ -27,30 +27,52 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
+type benchmarkIteration struct {
+	*testing.B
+	cleanups []func()
+}
+
+func (b *benchmarkIteration) Cleanup(f func()) {
+	b.cleanups = append(b.cleanups, f)
+}
+
+func (b *benchmarkIteration) close() {
+	if len(b.cleanups) > 0 {
+		defer b.close()
+		last := len(b.cleanups) - 1
+		cleanup := b.cleanups[last]
+		b.cleanups = b.cleanups[:last]
+		cleanup()
+	}
+}
+
 func BenchmarkBALPhantomReads(b *testing.B) {
 	for _, workers := range []int{1, 4} {
 		for _, workload := range []string{"valid", "reads", "attack"} {
 			b.Run(fmt.Sprintf("workers=%d/%s", workers, workload), func(b *testing.B) {
 				b.ReportAllocs()
 				for range b.N {
-					b.StopTimer()
-					m, block := phantomReadFixture(b, workload, workers)
-					status, err := m.InsertBlocks(b.Context(), []*types.Block{block})
-					require.NoError(b, err)
-					require.Equal(b, execmodule.ExecutionStatusSuccess, status)
-					runtime.GC()
-					b.StartTimer()
-					result, err := m.ValidateChain(b.Context(), block.Header())
-					require.NoError(b, err)
-					if workload == "attack" {
-						require.Equal(b, execmodule.ExecutionStatusBadBlock, result.ValidationStatus)
-						require.Contains(b, result.ValidationError, "block access list mismatch")
-					} else {
-						require.Equal(b, execmodule.ExecutionStatusSuccess, result.ValidationStatus, result.ValidationError)
-					}
-					m.ReadAheader.WaitForWarmup(b.Context())
-					b.StopTimer()
-					m.Close()
+					func() {
+						b.StopTimer()
+						iteration := &benchmarkIteration{B: b}
+						defer iteration.close()
+						m, block := phantomReadFixture(iteration, workload, workers)
+						status, err := m.InsertBlocks(b.Context(), []*types.Block{block})
+						require.NoError(b, err)
+						require.Equal(b, execmodule.ExecutionStatusSuccess, status)
+						runtime.GC()
+						b.StartTimer()
+						result, err := m.ValidateChain(b.Context(), block.Header())
+						require.NoError(b, err)
+						if workload == "attack" {
+							require.Equal(b, execmodule.ExecutionStatusBadBlock, result.ValidationStatus)
+							require.Contains(b, result.ValidationError, "block access list mismatch")
+						} else {
+							require.Equal(b, execmodule.ExecutionStatusSuccess, result.ValidationStatus, result.ValidationError)
+						}
+						m.ReadAheader.WaitForWarmup(b.Context())
+						b.StopTimer()
+					}()
 				}
 			})
 		}

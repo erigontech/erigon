@@ -541,6 +541,9 @@ func (bra *BlockReadAheader) warmTxns(ctx context.Context, db kv.RoDB, txns type
 				}
 				// Warm transaction access list accounts and their code
 				for _, entry := range txn.GetAccessList() {
+					if err := workerCtx.Err(); err != nil {
+						return err
+					}
 					addr := accounts.InternAddress(entry.Address)
 					acct, err := stateReader.ReadAccountData(addr)
 					if err != nil {
@@ -551,6 +554,9 @@ func (bra *BlockReadAheader) warmTxns(ctx context.Context, db kv.RoDB, txns type
 						}
 					}
 					for _, slot := range entry.StorageKeys {
+						if err := workerCtx.Err(); err != nil {
+							return err
+						}
 						if _, _, err := stateReader.ReadAccountStorage(addr, accounts.InternKey(slot)); err != nil {
 							log.Warn("[warmTxns] access-list storage read failed", "worker", w, "tx", txIdx, "address", addr, "slot", slot, "err", err)
 						}

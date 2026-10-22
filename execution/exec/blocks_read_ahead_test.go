@@ -74,14 +74,15 @@ type firstAccountReadErrorTx struct {
 	accountReads int
 }
 
-type cancelOnStorageReadTx struct {
+type cancelOnReadTx struct {
 	kv.TemporalTx
 	cancel context.CancelFunc
+	domain kv.Domain
 	reads  int
 }
 
-func (tx *cancelOnStorageReadTx) GetLatest(domain kv.Domain, _ []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
-	if domain == kv.StorageDomain {
+func (tx *cancelOnReadTx) GetLatest(domain kv.Domain, _ []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if domain == tx.domain {
 		tx.reads++
 		tx.cancel()
 	}
@@ -95,7 +96,7 @@ func TestBALWarmupStopsWithinStorageChunk(t *testing.T) {
 	tx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	counted := &cancelOnStorageReadTx{TemporalTx: tx, cancel: cancel}
+	counted := &cancelOnReadTx{TemporalTx: tx, cancel: cancel, domain: kv.StorageDomain}
 	bal := types.BlockAccessList{{Address: common.Address{19: 1}, StorageReads: make([]common.Hash, 64)}}
 	for i := range bal[0].StorageReads {
 		bal[0].StorageReads[i] = common.Hash{31: byte(i)}
@@ -359,6 +360,41 @@ func TestWarmTxnsContinuesAfterReadError(t *testing.T) {
 	}
 	require.NoError(t, NewBlockReadAheader().warmTxns(ctx, readDB, txns, 1))
 	require.Equal(t, 2, tx.accountReads)
+}
+
+func TestWarmTxnsStopsWithinAccessListStorage(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	counted := &cancelOnReadTx{TemporalTx: tx, cancel: cancel, domain: kv.StorageDomain}
+	accessList := types.AccessList{{Address: common.Address{19: 1}, StorageKeys: make([]common.Hash, 64)}}
+	for i := range accessList[0].StorageKeys {
+		accessList[0].StorageKeys[i] = common.Hash{31: byte(i)}
+	}
+	txns := types.Transactions{&types.AccessListTx{AccessList: accessList}}
+
+	err = NewBlockReadAheader().warmTxns(ctx, &singleTxRoDB{tx: counted}, txns, 1)
+	require.Equal(t, 1, counted.reads, "cancellation must stop before the next storage read")
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestWarmTxnsStopsWithinAccessListAccounts(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	counted := &cancelOnReadTx{TemporalTx: tx, cancel: cancel, domain: kv.AccountsDomain}
+	accessList := types.AccessList{{Address: common.Address{19: 1}}, {Address: common.Address{19: 2}}}
+	txns := types.Transactions{&types.AccessListTx{AccessList: accessList}}
+
+	err = NewBlockReadAheader().warmTxns(ctx, &singleTxRoDB{tx: counted}, txns, 1)
+	require.Equal(t, 1, counted.reads, "cancellation must stop before the next account read")
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestBlockReadAheaderWarmsOverlayBlockAccessList(t *testing.T) {
