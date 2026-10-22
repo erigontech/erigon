@@ -703,3 +703,33 @@ func TestOpenBeaconBlocksIgnoresDamagedBlobSegments(t *testing.T) {
 	require.Equal(t, uint64(30_000), sn.VisibleSegmentsMaxTo(snaptype.BeaconBlocks.Enum()))
 	require.Zero(t, sn.VisibleSegmentsMaxTo(snaptype.BlobSidecars.Enum()))
 }
+
+func TestRemoveBlobIndexAndTorrents(t *testing.T) {
+	dirs := datadir.New(filepath.Join(t.TempDir(), "dd[1]"))
+	idx := func(v version.Version, from, to uint64) string {
+		return snaptype.IdxFileName(v, from, to, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
+	}
+	seg := snaptype.BlobSidecars.FileName(version.V1_1, 30_000, 40_000)
+	removed := []string{seg + ".torrent", idx(version.V1_1, 30_000, 40_000), idx(version.V1_1, 30_000, 40_000) + ".torrent", idx(version.V1_0, 30_000, 40_000)}
+	kept := []string{
+		seg,
+		snaptype.BlobSidecars.FileName(version.V1_1, 40_000, 50_000) + ".torrent",
+		idx(version.V1_1, 40_000, 50_000),
+		snaptype.BeaconBlocks.FileName(version.V1_1, 30_000, 40_000) + ".torrent",
+	}
+	for _, name := range append(removed, kept...) {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), []byte{1}, 0o644))
+	}
+
+	require.NoError(t, removeBlobIndexAndTorrents(dirs.Snap, 30_000, 40_000))
+
+	entries, err := os.ReadDir(dirs.Snap)
+	require.NoError(t, err)
+	var left []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			left = append(left, e.Name())
+		}
+	}
+	require.ElementsMatch(t, kept, left)
+}
