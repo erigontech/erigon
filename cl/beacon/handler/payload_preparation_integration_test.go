@@ -240,9 +240,9 @@ func runGloasIntegrationForkChoice(
 	synced *synced_data.SyncedDataManager,
 ) (forkchoice.ForkChoiceNode, common.Hash) {
 	t.Helper()
-	anchor, err := store.GetStateAtBlockRoot(store.AnchorRoot(), false)
+	anchor, err := store.GetStateAtBlockRoot(store.AnchorRoot())
 	require.NoError(t, err)
-	beaconRPC := rpc.NewBeaconRpcP2P(t.Context(), &preparationSentinel{}, handler.beaconChainCfg, handler.ethClock, anchor)
+	beaconRPC := rpc.NewBeaconRpcP2P(t.Context(), &preparationSentinel{}, handler.beaconChainCfg, handler.ethClock)
 	cfg := stages.ClStagesCfg(
 		t.Context(), beaconRPC, nil, handler.ethClock, handler.beaconChainCfg, anchor,
 		engine, store, handler.indiciesDB, nil, handler.blockReader, datadir.New(t.TempDir()),
@@ -305,20 +305,21 @@ func applyGossipIntegrationEnvelope(
 	require.NoError(t, store.OnBlock(t.Context(), block, true, false, false))
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
-	blockState, err := store.GetStateAtBlockRoot(root, false)
+	blockState, err := store.GetStateAtBlockRoot(root)
 	require.NoError(t, err)
 	require.NotNil(t, blockState)
 	emitter := beaconevents.NewEventEmitter()
 	events := make(chan *beaconevents.EventStream, 1)
 	subscription := emitter.Operation().Subscribe(events)
 	defer subscription.Unsubscribe()
-	key, err := bls.GenerateKey()
+	// The fixture uses validator index + 1 as the BLS secret key. Reuse it so envelope
+	// signatures can be checked without changing the stored validator keys.
+	keyBytes := new(big.Int).SetUint64(block.Block.ProposerIndex + 1).FillBytes(make([]byte, 32))
+	key, err := bls.NewPrivateKeyFromBytes(keyBytes)
 	require.NoError(t, err)
 	validator, err := blockState.ValidatorForValidatorIndex(int(block.Block.ProposerIndex))
 	require.NoError(t, err)
-	originalPublicKey := validator.PublicKey()
-	validator.SetPublicKey(common.Bytes48(bls.CompressPublicKey(key.PublicKey())))
-	blockState.SetValidatorAtIndex(int(block.Block.ProposerIndex), validator)
+	require.Equal(t, validator.PublicKey(), [48]byte(bls.CompressPublicKey(key.PublicKey())), "the signing key must match the fixture's proposer")
 	signExecutionPayloadEnvelope(t, blockState, block.Block.Slot, envelope, key)
 	service := services.NewExecutionPayloadService(t.Context(), store, blockState.BeaconConfig(), emitter)
 	encoded, err := envelope.EncodeSSZ(nil)
@@ -326,8 +327,6 @@ func applyGossipIntegrationEnvelope(
 	decoded, err := service.DecodeGossipMessage("", encoded, clparams.GloasVersion)
 	require.NoError(t, err)
 	require.NoError(t, service.ProcessMessage(t.Context(), nil, decoded))
-	validator.SetPublicKey(originalPublicKey)
-	blockState.SetValidatorAtIndex(int(block.Block.ProposerIndex), validator)
 	select {
 	case event := <-events:
 		require.Equal(t, beaconevents.OpExecutionPayloadGossip, event.Event)

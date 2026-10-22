@@ -55,6 +55,35 @@ func setupTestDB(t *testing.T) kv.RwDB {
 	return db
 }
 
+func TestHighestCustodyGroupCountNeverDecreases(t *testing.T) {
+	db := setupTestDB(t)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := WriteHighestCustodyGroupCount(tx, 96); err != nil {
+			return err
+		}
+		return WriteHighestCustodyGroupCount(tx, 8)
+	}))
+
+	var got uint64
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		got, err = ReadHighestCustodyGroupCount(tx)
+		return err
+	}))
+	require.Equal(t, uint64(96), got)
+}
+
+func TestHighestCustodyGroupCountDefaultsToZero(t *testing.T) {
+	db := setupTestDB(t)
+	var got uint64
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		got, err = ReadHighestCustodyGroupCount(tx)
+		return err
+	}))
+	require.Zero(t, got)
+}
+
 func TestWriteBlockRoot(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()

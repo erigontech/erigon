@@ -159,7 +159,7 @@ func newLockOrderFixtureWithConfig(t *testing.T, slot uint64, engine execution_c
 	}
 	return lockOrderFixture{
 		cfg: &Cfg{
-			rpc:        rpc.NewBeaconRpcP2P(t.Context(), &statusSentinel{}, &beaconCfg, clock, headState),
+			rpc:        rpc.NewBeaconRpcP2P(t.Context(), &statusSentinel{}, &beaconCfg, clock),
 			ethClock:   clock,
 			beaconCfg:  &beaconCfg,
 			forkChoice: store,
@@ -283,7 +283,7 @@ func newGloasCanonicalForkChoiceFixture(t *testing.T, full bool) (*Cfg, *chainTi
 	clock.EXPECT().CurrentForkDigest().Return(common.Bytes4{}, nil).AnyTimes()
 	clock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.GloasVersion).AnyTimes()
 	cfg.ethClock = clock
-	cfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), &statusSentinel{}, cfg.beaconCfg, clock, graph.parentState)
+	cfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), &statusSentinel{}, cfg.beaconCfg, clock)
 	return cfg, graph, headRoot, headBlock, envelope, engine
 }
 

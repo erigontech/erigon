@@ -772,6 +772,11 @@ func (f *ForkChoiceStore) applyEnvelope(
 		log.Warn("[applyEnvelope] received signed envelope with nil message")
 		return false, fmt.Errorf("%w: signed envelope has nil message", ErrInvalidExecutionPayloadEnvelope)
 	}
+
+	if signedEnvelope.Message.Payload != nil && !f.forkGraph.HasEnvelope(signedEnvelope.Message.BeaconBlockRoot) {
+		// Warm the payload root caches outside f.mu.
+		_, _ = signedEnvelope.Message.Payload.HashSSZ()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -798,7 +803,7 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForGossip(signedEnvelo
 		}
 	}()
 	root := signedEnvelope.Message.BeaconBlockRoot
-	blockState, err := f.forkGraph.GetState(root, true)
+	blockState, err := f.copyStateAtBlockRootLocked(root)
 	if err != nil || blockState == nil {
 		return fmt.Errorf("%w: beacon block state %v is unavailable", ErrIgnore, root)
 	}
@@ -906,7 +911,7 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForConsensus(ctx conte
 
 	f.mu.RLock()
 	root := signedEnvelope.Message.BeaconBlockRoot
-	blockState, err := f.forkGraph.GetState(root, true)
+	blockState, err := f.copyStateAtBlockRootLocked(root)
 	if err != nil || blockState == nil {
 		f.mu.RUnlock()
 		return fmt.Errorf("beacon block state %v is unavailable", root)
@@ -1033,7 +1038,7 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 	// Envelope verification only reads the state (the consume-once
 	// PreviousStateRoot it takes is restored), so the shared reference is safe
 	// and avoids a full state copy per envelope under the write lock.
-	blockState, err := f.forkGraph.GetState(beaconBlockRoot, false)
+	blockState, err := f.getStateLocked(beaconBlockRoot)
 	if err != nil {
 		return false, fmt.Errorf("%w: OnExecutionPayload: failed to get block state: %w", errPendingEnvelopeAgeBounded, err)
 	}
@@ -1067,7 +1072,7 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 			}
 			return false, fmt.Errorf("OnExecutionPayload: failed to refresh block after commitment validation: %w", err)
 		}
-		blockState, err = f.forkGraph.GetState(beaconBlockRoot, false)
+		blockState, err = f.getStateLocked(beaconBlockRoot)
 		if err != nil {
 			return false, fmt.Errorf("%w: OnExecutionPayload: failed to refresh block state: %w", errPendingEnvelopeAgeBounded, err)
 		}
@@ -1475,7 +1480,7 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelope(ctx context.Context, 
 	if !ok || block == nil {
 		return fmt.Errorf("block not found for beacon_block_root %v", blockRoot)
 	}
-	blockState, err := f.forkGraph.GetState(blockRoot, false)
+	blockState, err := f.getStateLocked(blockRoot)
 	if err != nil {
 		return fmt.Errorf("failed to get block state: %w", err)
 	}
@@ -1747,7 +1752,7 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 		return false, nil
 	}
 
-	blockState, err := f.forkGraph.GetState(beaconBlockRoot, false)
+	blockState, err := f.getStateLocked(beaconBlockRoot)
 	if err != nil {
 		return false, fmt.Errorf("%w: applyLocalSelfBuildEnvelopeCoordinated: failed to get block state: %w", errPendingEnvelopeAgeBounded, err)
 	}
