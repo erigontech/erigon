@@ -85,6 +85,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		var storageKey []byte
 		type addrState struct {
 			balance        *uint256.Int
+			balanceDeleted bool
 			nonce          *uint64
 			incarnation    *uint64
 			codeHash       *accounts.CodeHash
@@ -106,7 +107,9 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		}
 		for a, vw := range writes.Balances() {
 			v := vw.Val
-			ensure(a).balance = &v
+			d := ensure(a)
+			d.balance = &v
+			d.balanceDeleted = vw.Deletes()
 		}
 		for a, vw := range writes.Nonces() {
 			v := vw.Val
@@ -142,10 +145,13 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 
 		// Drop a self-destructed address's own field/storage writes so it reaches
 		// the pure-delete branch below (a raw versionMap view still carries them).
-		// Balance is kept: its zero-ness drives the EIP-8246 preserved-balance vs
-		// pure-delete decision.
+		// Balance is kept unless the destruct burned it (a later same-tx credit keeps
+		// the burn stamp): a kept non-zero balance is the EIP-8246 preserved account.
 		for _, d := range perAddr {
 			if d.selfDestruct {
+				if d.balanceDeleted {
+					d.balance = nil
+				}
 				d.nonce = nil
 				d.incarnation = nil
 				d.codeHash = nil

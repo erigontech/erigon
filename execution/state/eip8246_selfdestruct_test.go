@@ -125,7 +125,7 @@ func TestEIP8246_FinalizeTx_PreservesSameTxCredit(t *testing.T) {
 	_, err := ibs.Selfdestruct(addr, true /* preserveBalance */)
 	require.NoError(t, err)
 	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
-	vm.FlushVersionedWrites(ibs.FinalizedWrites(rules), true, "")
+	vm.FlushVersionedWrites(finalizedWrites(t, ibs, rules), true, "")
 	ibs.ResetVersionedIO()
 
 	ibs.SetTxContext(1, 1)
@@ -210,7 +210,7 @@ func TestEIP8246_VersionedStateReader_BurnReadsAbsent(t *testing.T) {
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(500), tracing.BalanceChangeTransfer))
 	_, err := ibs.Selfdestruct(addr, false /* burn */)
 	require.NoError(t, err)
-	vm.FlushVersionedWrites(ibs.FinalizedWrites(&chain.Rules{IsAmsterdam: true}), true, "")
+	vm.FlushVersionedWrites(finalizedWrites(t, ibs, &chain.Rules{IsAmsterdam: true}), true, "")
 
 	vsr := NewVersionedStateReader(6, ReadSet{}, vm, nil)
 	acc, err := vsr.ReadAccountData(addr)

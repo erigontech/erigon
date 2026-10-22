@@ -77,8 +77,10 @@ ifeq ($(shell uname -s), Darwin)
 	endif
 endif
 
+# No -DNDEBUG: evmone's own build keeps assertions, and with gcc 13 -O2/-O3 NDEBUG
+# makes its generic MODEXP Montgomery loop 3-7x slower.
 ifeq ($(origin CGO_CXXFLAGS),undefined)
-	CGO_CXXFLAGS := -g -O3 -DNDEBUG
+	CGO_CXXFLAGS := -g -O3
 endif
 CGO_CXXFLAGS += $(CGO_MARCH)
 export CGO_CXXFLAGS

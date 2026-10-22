@@ -131,15 +131,6 @@ type execV3Outcome struct {
 	exhausted             *ErrLoopExhausted
 }
 
-// finalizeExecV3Outcome clears a recorded resumable boundary when the run also
-// returns an error: a failure is not a clean batch cut to resume from.
-func finalizeExecV3Outcome(out execV3Outcome, err error) (execV3Outcome, error) {
-	if err != nil {
-		out.exhausted = nil
-	}
-	return out, err
-}
-
 // haltOnBadBlockDebug freezes the process on an invalid-block verdict when both
 // the BAD_BLOCK_HALT env flag and cfg.badBlockHalt are set: the switch's purpose
 // is to keep the datadir at the pre-block state, and returning would run deferred
@@ -269,16 +260,16 @@ func ExecV3(ctx context.Context,
 	// failure or an invalid-block verdict left nothing durable to persist. An
 	// operational failure outranks a recorded verdict, which outranks exhaustion.
 	if execErr != nil {
-		return finalizeExecV3Outcome(out, execErr)
+		return out, execErr
 	}
 	if out.verdict != nil {
 		haltOnBadBlockDebug(cfg, logPrefix, out.verdict.err, logger)
 		return out, nil
 	}
 
-	execErr = execV3Finalize(ctx, execErr, cfg, doms, pe.lastCommittedTxNum.Load(), out.lastCommittedBlockNum,
+	execErr = execV3Finalize(ctx, nil, cfg, doms, pe.lastCommittedTxNum.Load(), out.lastCommittedBlockNum,
 		lastHeader, shouldReportToTxPool, logPrefix, logger)
-	return finalizeExecV3Outcome(out, execErr)
+	return out, execErr
 }
 
 // execV3Serial runs the serial executor. It stays welded to the stage
@@ -438,16 +429,7 @@ func execV3Finalize(ctx context.Context, execErr error, cfg ExecuteBlockCfg, dom
 	// propagate the error so the caller can unwind. The step-frozen check only
 	// makes sense when execution succeeded and we need to persist the commitment.
 	if execErr != nil && errors.Is(execErr, rules.ErrInvalidBlock) {
-		// Intentional os.Exit under BAD_BLOCK_HALT (both the env flag dbg.BadBlockHalt
-		// and cfg.badBlockHalt): a debug switch whose whole purpose is to freeze
-		// process state at the bad block. Returning would run deferred
-		// rollback/commit/flush and overwrite the state we want to inspect.
-		// cfg.badBlockHalt alone (fork validation) must NOT exit — it needs the
-		// error to propagate for in-memory validation.
-		if cfg.badBlockHalt && dbg.BadBlockHalt {
-			logger.Error(fmt.Sprintf("[%s] BAD_BLOCK_HALT: halting on invalid block (debug mode, no commit)", logPrefix), "err", execErr)
-			os.Exit(1) //nolint:gocritic // exitAfterDefer: intentional process halt without running deferred rollback to preserve state
-		}
+		haltOnBadBlockDebug(cfg, logPrefix, execErr, logger)
 		return execErr
 	}
 
