@@ -1791,7 +1791,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, func(erro
 	pe.execLoopGroup, execLoopCtx = commonerrors.NewGroup(execLoopCtx)
 	pe.cancelExecLoop = func(cause error) {
 		stop, ok := errors.AsType[*stopCause](cause)
-		if !ok || stop.kind == stopBadBlock || stop.kind == stopOperational {
+		if !ok || (stop.kind != stopReachedMax && stop.kind != stopMoreWork) {
 			if pe.cfg.readAheader != nil {
 				pe.cfg.readAheader.CancelWarmup()
 			}

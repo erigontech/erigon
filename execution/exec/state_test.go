@@ -175,6 +175,24 @@ func TestCancelledWorkerDoesNotInvalidateBlock(t *testing.T) {
 	require.True(t, result.Operational, "cancellation is not evidence that a block is invalid")
 }
 
+func TestWorkerCancellationDuringExecutionReturnsOperationalError(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	w := NewWorker(ctx, false, nil, nil, nil, nil, chain.AllProtocolChanges, nil, nil, nil, datadir.Dirs{}, log.New())
+	defer w.Close()
+	w.SetReader(stubStateReader{})
+	result := w.RunTxTask(&workerTestTask{
+		TxTask: TxTask{TxIndex: -1, Header: &types.Header{Number: *uint256.NewInt(1)}},
+		execute: func(*vm.EVM) *TxResult {
+			cancel()
+			return &TxResult{}
+		},
+	})
+
+	require.ErrorIs(t, result.Err, context.Canceled)
+	require.True(t, result.Operational, "cancellation is not evidence that a block is invalid")
+}
+
 func TestNewWorkersPoolForegroundReturnsWait(t *testing.T) {
 	in := NewQueueWithRetry(1)
 	t.Cleanup(in.Release)

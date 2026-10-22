@@ -169,7 +169,10 @@ type blockedWarmupDB struct {
 }
 
 func (db *blockedWarmupDB) BeginRo(ctx context.Context) (kv.Tx, error) {
-	db.started <- ctx
+	select {
+	case db.started <- ctx:
+	default:
+	}
 	<-ctx.Done()
 	return nil, ctx.Err()
 }

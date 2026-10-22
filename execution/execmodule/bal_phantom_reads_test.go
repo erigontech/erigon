@@ -68,7 +68,10 @@ func (h *warmupVerdictObserver) Enabled(context.Context, log.Lvl) bool { return 
 func (h *warmupVerdictObserver) Log(record *log.Record) error {
 	if strings.HasSuffix(record.Msg, "] Invalid block") {
 		// The executor reports its verdict before ValidateChain's deferred cleanup.
-		h.atVerdict <- h.warmupCtx.Err()
+		select {
+		case h.atVerdict <- h.warmupCtx.Err():
+		default:
+		}
 	}
 	return h.Handler.Log(record)
 }
@@ -77,6 +80,9 @@ func TestValidateChainCancelsWarmup(t *testing.T) {
 	oldReadAhead := dbg.ReadAhead
 	dbg.SetReadAhead(true)
 	defer dbg.SetReadAhead(oldReadAhead)
+	oldReadAheadWait := dbg.ReadAheadWait
+	dbg.ReadAheadWait = false
+	defer func() { dbg.ReadAheadWait = oldReadAheadWait }()
 	for _, kind := range []string{"valid", "BAL mismatch", "wrong trie root", "wrong receipts", "invalid transaction"} {
 		t.Run(kind, func(t *testing.T) {
 			workload := "valid"

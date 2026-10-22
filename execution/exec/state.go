@@ -587,6 +587,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 	}
 
 	result := txTask.Execute(rw.evm, rw.engine, rw.genesis, rw.ibs, rw.stateWriter, rw.chainConfig, rw.chain, rw.dirs, true)
+	if err := rw.ctx.Err(); err != nil {
+		return &TxResult{Task: txTask, Err: err, Operational: true}
+	}
 
 	if result.Task == nil {
 		result.Task = txTask
