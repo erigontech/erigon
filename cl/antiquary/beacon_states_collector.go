@@ -219,6 +219,14 @@ func (i *beaconStatesCollector) addGenesisState(state *state.CachingBeaconState)
 		if err := antiquateListSSZ(slot, state.GetBuilders(), i.buf, i.compressor, i.buildersCollectorDump); err != nil {
 			return err
 		}
+		i.buildersWriter.Initialize(state.GetBuilders())
+		i.buf.Reset()
+		if err := i.buildersWriter.WriteDiff(i.buf, state.GetBuilders()); err != nil {
+			return err
+		}
+		if err := i.buildersCollector.Collect(base_encoding.Encode64ToBytes4(slot), i.buf.Bytes()); err != nil {
+			return err
+		}
 		if err := antiquateListSSZ(slot, state.GetBuilderPendingWithdrawals(), i.buf, i.compressor, i.builderPendingWithdrawalsCollectorDump); err != nil {
 			return err
 		}

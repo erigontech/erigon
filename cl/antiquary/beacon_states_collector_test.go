@@ -172,3 +172,45 @@ func TestBeaconStatesCollectorBuildersAcrossGloasFork(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, changeRow, 26+101)
 }
+
+func TestBeaconStatesCollectorGloasGenesisBuilders(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	for name, genesisSlot := range map[string]uint64{"dump slot": 0, "unaligned slot": 32} {
+		t.Run(name, func(t *testing.T) {
+			collector := newBeaconStatesCollector(cfg, t.TempDir(), log.New())
+			defer collector.close()
+
+			genesis := state.New(cfg)
+			genesis.SetVersion(clparams.GloasVersion)
+			require.NoError(t, genesis.SetSlot(genesisSlot))
+			genesis.SetBuilders(newBuildersList(cltypes.Builder{Balance: 100}, cltypes.Builder{Balance: 200}))
+			require.NoError(t, collector.addGenesisState(genesis))
+
+			collector.preStateTransitionHook(genesis)
+			genesis.GetBuilders().Get(1).Balance = 250
+			require.NoError(t, collector.collectGloasQueuesDiffs(genesisSlot+1, genesis.GetBuilders(), genesis.GetBuilderPendingWithdrawals(), genesis.GetPayloadExpectedWithdrawals()))
+			require.NoError(t, collector.slotDataCollector.Collect(base_encoding.Encode64ToBytes4(genesisSlot+1), []byte{1}))
+
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			tx, err := db.BeginRw(context.Background())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			require.NoError(t, collector.flush(context.Background(), tx))
+
+			getter := state_accessors.GetValFnTxAndSnapshot(tx, nil)
+			for slot, want := range map[uint64][]uint64{genesisSlot: {100, 200}, genesisSlot + 1: {100, 250}} {
+				got := newBuildersList()
+				require.NoError(t, historical_states_reader.ReadBuildersSSZ(getter, slot, 0, cfg.BuilderRegistryLimit, got))
+				balances := make([]uint64, got.Len())
+				for i := range balances {
+					balances[i] = got.Get(i).Balance
+				}
+				require.Equal(t, want, balances, "slot %d", slot)
+			}
+
+			genesisRow, err := tx.GetOne(kv.Builders, base_encoding.Encode64ToBytes4(genesisSlot))
+			require.NoError(t, err)
+			require.Len(t, genesisRow, 26)
+		})
+	}
+}
