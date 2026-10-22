@@ -19,10 +19,10 @@ package pbt
 import (
 	"bytes"
 	"context"
-	"maps"
+	"errors"
+	"fmt"
 	"runtime"
 	"slices"
-	"sort"
 	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
@@ -49,16 +49,15 @@ type phaseTask struct {
 	nibble       byte
 	ops          []Op
 	dependencies []int
-	resultIndex  int
+	resultStart  int
+	resultEnd    int
+	batch        []phaseTask
 	initial      phaseBucketResult
-	hasInitial   bool
-	fallback     bucketDescriptor
-	fallbackSeen bool
-	fallbackOK   bool
 }
 
 type phasePlan struct {
-	tasks []phaseTask
+	tasks   []phaseTask
+	results int
 }
 
 const fanOutMin = 8
@@ -67,129 +66,228 @@ func buildPhasePlan(ops []Op) (phasePlan, error) {
 	return buildPhasePlanWithThreshold(ops, fanOutMin)
 }
 
+type phaseGroup struct {
+	zone   byte
+	nibble byte
+	stem   []byte
+}
+
+func phaseOpGroup(op *Op) (phaseGroup, error) {
+	if len(op.Drop) != 0 {
+		if len(op.Drop) != 33 || (op.Drop[0] != eip8297.AccountZone && op.Drop[0] != eip8297.StorageZone) {
+			return phaseGroup{}, errInsertKey
+		}
+		group := phaseGroup{zone: op.Drop[0], nibble: op.Drop[1] >> 4}
+		if group.zone == eip8297.StorageZone {
+			group.stem = op.Drop[:33]
+		}
+		return group, nil
+	}
+	if len(op.Key) == 0 {
+		return phaseGroup{}, errInsertKey
+	}
+	if keyLen, ok := eip8297.ZoneKeyLength(op.Key[0]); !ok || len(op.Key) != keyLen {
+		return phaseGroup{}, fmt.Errorf("invalid tree key")
+	}
+	group := phaseGroup{zone: op.Key[0], nibble: op.Key[1] >> 4}
+	if group.zone == eip8297.StorageZone {
+		group.stem = op.Key[:33]
+	}
+	return group, nil
+}
+
+func (g *phaseGroup) same(other *phaseGroup) bool {
+	return g.zone == other.zone && g.nibble == other.nibble && bytes.Equal(g.stem, other.stem)
+}
+
 func buildPhasePlanWithThreshold(ops []Op, threshold int) (phasePlan, error) {
+	return buildPhasePlanBatched(ops, threshold, 1)
+}
+
+type phaseSchedule uint8
+
+const (
+	phaseScheduleGrain phaseSchedule = iota
+	phaseScheduleOld
+)
+
+const (
+	phaseGrainMin       = 128
+	phaseGrainPerWorker = 4
+)
+
+func phaseGrainFor(roundKeys, workers int) int {
+	return max(phaseGrainMin, roundKeys/(phaseGrainPerWorker*max(workers, 1)))
+}
+
+type phaseScan struct {
+	tasks        []phaseTask
+	chainIndexes []int
+	buckets      []phaseGroup
+	bucketOps    [][]Op
+}
+
+func scanPhaseOps(ops []Op) (phaseScan, error) {
+	var scan phaseScan
 	if err := validateOps(ops); err != nil {
+		return scan, err
+	}
+	add := func(group phaseGroup, run []Op) {
+		if group.stem == nil {
+			scan.chainIndexes = append(scan.chainIndexes, len(scan.tasks))
+			scan.tasks = append(scan.tasks, phaseTask{kind: phaseChain, zone: group.zone, nibble: group.nibble, prefix: chainPrefix(group.zone, group.nibble), ops: run})
+			return
+		}
+		scan.buckets = append(scan.buckets, group)
+		scan.bucketOps = append(scan.bucketOps, run)
+	}
+	var group phaseGroup
+	start := 0
+	for i := range ops {
+		next, err := phaseOpGroup(&ops[i])
+		if err != nil {
+			return phaseScan{}, err
+		}
+		if i > 0 && !next.same(&group) {
+			add(group, ops[start:i:i])
+			start = i
+		}
+		group = next
+	}
+	if len(ops) > 0 {
+		add(group, ops[start:len(ops):len(ops)])
+	}
+	scan.tasks = slices.Grow(scan.tasks, len(scan.buckets)+17)
+	return scan, nil
+}
+
+func (s *phaseScan) bucketTask(b int) (phaseTask, error) {
+	path := eip8297.PathFromBits(s.buckets[b].stem, 264)
+	key, err := EncodeRowKey(&path)
+	if err != nil {
+		return phaseTask{}, err
+	}
+	return phaseTask{kind: phaseBucket, key: string(key), prefix: path, ops: s.bucketOps[b]}, nil
+}
+
+func (s *phaseScan) appendSplitBucket(bucket phaseTask) int {
+	dependencies := make([]int, 0, 16)
+	ops := bucket.ops
+	start := 0
+	for i := 1; i <= len(ops); i++ {
+		if i < len(ops) && ops[i].Key[33]>>4 == ops[start].Key[33]>>4 {
+			continue
+		}
+		dependencies = append(dependencies, len(s.tasks))
+		s.tasks = append(s.tasks, phaseTask{kind: phaseBucketSubtask, key: bucket.key, prefix: eip8297.PathFromBits(ops[start].Key, bucket.prefix.BitLen+4), ops: ops[start:i:i]})
+		start = i
+	}
+	s.tasks = append(s.tasks, phaseTask{kind: phaseBucket, key: bucket.key, prefix: bucket.prefix, dependencies: dependencies})
+	return len(s.tasks) - 1
+}
+
+func (s *phaseScan) finish(bucketIndex []int) phasePlan {
+	for first := 0; first < len(s.buckets); {
+		nibble := s.buckets[first].nibble
+		task := phaseTask{kind: phaseChain, zone: eip8297.StorageZone, nibble: nibble, prefix: chainPrefix(eip8297.StorageZone, nibble)}
+		for ; first < len(s.buckets) && s.buckets[first].nibble == nibble; first++ {
+			task.dependencies = append(task.dependencies, bucketIndex[first])
+		}
+		slices.Sort(task.dependencies)
+		task.dependencies = slices.Compact(task.dependencies)
+		s.chainIndexes = append(s.chainIndexes, len(s.tasks))
+		s.tasks = append(s.tasks, task)
+	}
+	s.tasks = append(s.tasks, phaseTask{kind: phaseJoin, dependencies: s.chainIndexes})
+	results := 0
+	for i := range s.tasks {
+		s.tasks[i].resultStart = results
+		results += max(1, len(s.tasks[i].batch))
+		s.tasks[i].resultEnd = results
+	}
+	return phasePlan{tasks: s.tasks, results: results}
+}
+
+func buildPhasePlanBatched(ops []Op, threshold, bucketBatch int) (phasePlan, error) {
+	scan, err := scanPhaseOps(ops)
+	if err != nil {
 		return phasePlan{}, err
 	}
-	bucketOps := make(map[string][]Op)
-	bucketKeys := make(map[string][]byte)
-	chains := make(map[[2]byte]struct{})
-	chainOps := make(map[[2]byte][]Op)
-	for _, op := range ops {
-		if len(op.Drop) != 0 {
-			if len(op.Drop) == 33 && op.Drop[0] == eip8297.AccountZone {
-				key := [2]byte{eip8297.AccountZone, op.Drop[1] >> 4}
-				chainOps[key] = append(chainOps[key], op)
-				chains[key] = struct{}{}
-				continue
-			}
-			key, err := bucketKeyForPrefix(op.Drop)
-			if err != nil {
-				return phasePlan{}, err
-			}
-			bucketKeys[string(key)] = key
-			bucketOps[string(key)] = append(bucketOps[string(key)], op)
-			chains[[2]byte{eip8297.StorageZone, key[1] >> 4}] = struct{}{}
-			continue
-		}
-		if len(op.Key) == 0 {
-			return phasePlan{}, errInsertKey
-		}
-		if _, err := keyPath(op.Key); err != nil {
-			return phasePlan{}, err
-		}
-		zone := op.Key[0]
-		if zone == eip8297.StorageZone {
-			key, err := bucketKeyForStorage(op.Key)
-			if err != nil {
-				return phasePlan{}, err
-			}
-			bucketKeys[string(key)] = key
-			bucketOps[string(key)] = append(bucketOps[string(key)], op)
-		} else {
-			chainOps[[2]byte{zone, op.Key[1] >> 4}] = append(chainOps[[2]byte{zone, op.Key[1] >> 4}], op)
-		}
-		chains[[2]byte{zone, op.Key[1] >> 4}] = struct{}{}
+	order := make([]int, len(scan.buckets))
+	for i := range order {
+		order[i] = i
 	}
-	bucketList := make([][]byte, 0, len(bucketKeys))
-	for _, key := range bucketKeys {
-		bucketList = append(bucketList, key)
-	}
-	sort.Slice(bucketList, func(i, j int) bool {
-		if len(bucketOps[string(bucketList[i])]) != len(bucketOps[string(bucketList[j])]) {
-			return len(bucketOps[string(bucketList[i])]) > len(bucketOps[string(bucketList[j])])
-		}
-		return bytes.Compare(bucketList[i], bucketList[j]) < 0
-	})
-	tasks := make([]phaseTask, 0, len(bucketList)+len(chains)+1)
-	chainKeys := make([][2]byte, 0, len(chains))
-	for key := range chains {
-		chainKeys = append(chainKeys, key)
-	}
-	slices.SortFunc(chainKeys, func(a, b [2]byte) int {
-		return bytes.Compare(a[:], b[:])
-	})
-	chainIndexes := make([]int, 0, len(chainKeys))
-	for _, key := range chainKeys {
-		if key[0] == eip8297.StorageZone {
-			continue
-		}
-		index := len(tasks)
-		chainIndexes = append(chainIndexes, index)
-		tasks = append(tasks, phaseTask{kind: phaseChain, zone: key[0], nibble: key[1], prefix: chainPrefix(key[0], key[1]), ops: chainOps[key], resultIndex: index})
-	}
-	bucketIndex := make(map[string]int, len(bucketList))
-	for _, key := range bucketList {
-		bucketKey := string(key)
-		bucket := bucketOps[bucketKey]
-		bucketPath, err := bucketPathForKey(key)
+	slices.SortStableFunc(order, func(a, b int) int { return len(scan.bucketOps[b]) - len(scan.bucketOps[a]) })
+	bucketIndex := make([]int, len(scan.buckets))
+	open := -1
+	for _, b := range order {
+		single, err := scan.bucketTask(b)
 		if err != nil {
 			return phasePlan{}, err
 		}
-		if threshold > 0 && len(bucket) >= threshold && !hasDrop(bucket) {
-			groups := make(map[string][]Op)
-			prefixes := make(map[string]eip8297.Bitpath)
-			for _, op := range bucket {
-				path, err := keyPath(op.Key)
-				if err != nil {
-					return phasePlan{}, err
-				}
-				prefix := path.Slice(0, bucketPath.BitLen+4)
-				name := string(eip8297.AppendBitPath(nil, &prefix))
-				groups[name] = append(groups[name], op)
-				prefixes[name] = prefix
-			}
-			groupNames := slices.AppendSeq(make([]string, 0, len(groups)), maps.Keys(groups))
-			slices.Sort(groupNames)
-			dependencies := make([]int, 0, len(groupNames))
-			for _, name := range groupNames {
-				index := len(tasks)
-				dependencies = append(dependencies, index)
-				tasks = append(tasks, phaseTask{kind: phaseBucketSubtask, key: bucketKey, prefix: prefixes[name], ops: groups[name], resultIndex: index})
-			}
-			bucketIndex[bucketKey] = len(tasks)
-			tasks = append(tasks, phaseTask{kind: phaseBucket, key: bucketKey, prefix: bucketPath, dependencies: dependencies, resultIndex: len(tasks)})
+		if threshold > 0 && len(single.ops) >= threshold && !hasDrop(single.ops) {
+			bucketIndex[b] = scan.appendSplitBucket(single)
 			continue
 		}
-		bucketIndex[bucketKey] = len(tasks)
-		tasks = append(tasks, phaseTask{kind: phaseBucket, key: bucketKey, prefix: bucketPath, ops: bucket, resultIndex: len(tasks)})
-	}
-	for _, key := range chainKeys {
-		if key[0] != eip8297.StorageZone {
+		if bucketBatch > 1 {
+			if open < 0 || len(scan.tasks[open].batch) == bucketBatch {
+				open = len(scan.tasks)
+				scan.tasks = append(scan.tasks, phaseTask{kind: phaseBucket})
+			}
+			scan.tasks[open].batch = append(scan.tasks[open].batch, single)
+			bucketIndex[b] = open
 			continue
 		}
-		task := phaseTask{kind: phaseChain, zone: key[0], nibble: key[1], prefix: chainPrefix(key[0], key[1]), resultIndex: len(tasks)}
-		for _, bucket := range bucketList {
-			if bucket[1]>>4 == key[1] {
-				task.dependencies = append(task.dependencies, bucketIndex[string(bucket)])
-			}
-		}
-		sort.Ints(task.dependencies)
-		chainIndexes = append(chainIndexes, len(tasks))
-		tasks = append(tasks, task)
+		bucketIndex[b] = len(scan.tasks)
+		scan.tasks = append(scan.tasks, single)
 	}
-	tasks = append(tasks, phaseTask{kind: phaseJoin, dependencies: chainIndexes, resultIndex: len(tasks)})
-	return phasePlan{tasks: tasks}, nil
+	return scan.finish(bucketIndex), nil
+}
+
+func buildPhasePlanGrain(ops []Op, grain int) (phasePlan, error) {
+	scan, err := scanPhaseOps(ops)
+	if err != nil {
+		return phasePlan{}, err
+	}
+	type unit struct{ first, last, ops int }
+	units := make([]unit, 0, len(scan.buckets))
+	for b := 0; b < len(scan.buckets); {
+		u := unit{first: b, last: b + 1, ops: len(scan.bucketOps[b])}
+		for u.ops <= grain && u.last < len(scan.buckets) && scan.buckets[u.last].nibble == scan.buckets[b].nibble && u.ops+len(scan.bucketOps[u.last]) <= grain {
+			u.ops += len(scan.bucketOps[u.last])
+			u.last++
+		}
+		units = append(units, u)
+		b = u.last
+	}
+	slices.SortStableFunc(units, func(a, b unit) int { return b.ops - a.ops })
+	bucketIndex := make([]int, len(scan.buckets))
+	for _, u := range units {
+		if u.last-u.first == 1 {
+			single, err := scan.bucketTask(u.first)
+			if err != nil {
+				return phasePlan{}, err
+			}
+			if len(single.ops) > grain && !hasDrop(single.ops) {
+				bucketIndex[u.first] = scan.appendSplitBucket(single)
+				continue
+			}
+			bucketIndex[u.first] = len(scan.tasks)
+			scan.tasks = append(scan.tasks, single)
+			continue
+		}
+		batch := phaseTask{kind: phaseBucket, batch: make([]phaseTask, 0, u.last-u.first)}
+		for b := u.first; b < u.last; b++ {
+			single, err := scan.bucketTask(b)
+			if err != nil {
+				return phasePlan{}, err
+			}
+			batch.batch = append(batch.batch, single)
+			bucketIndex[b] = len(scan.tasks)
+		}
+		scan.tasks = append(scan.tasks, batch)
+	}
+	return scan.finish(bucketIndex), nil
 }
 
 func chainPrefix(zone, nibble byte) eip8297.Bitpath {
@@ -234,6 +332,9 @@ func runPhasePlanWithFactory(ctx context.Context, workers int, plan phasePlan, f
 				if cleanup != nil {
 					defer cleanup()
 				}
+				if workerContext == nil {
+					return errors.New("trie context factory returned a nil context")
+				}
 			}
 			for {
 				if err := gctx.Err(); err != nil {
@@ -261,19 +362,31 @@ func runPhasePlanWithFactory(ctx context.Context, workers int, plan phasePlan, f
 }
 
 func (t *Trie) ProcessParallel(ops []Op, workers int) (common.Hash, error) {
-	return t.ProcessParallelWithThreshold(ops, workers, fanOutMin)
+	return t.processParallelContext(context.Background(), ops, workers, t.defaultPhasePlan)
 }
 
 func (t *Trie) ProcessParallelWithThreshold(ops []Op, workers, threshold int) (common.Hash, error) {
-	return t.processParallelContext(context.Background(), ops, workers, threshold)
+	return t.processParallelContext(context.Background(), ops, workers, func(ops []Op, _ int) (phasePlan, error) {
+		return buildPhasePlanBatched(ops, threshold, t.bucketBatch)
+	})
 }
 
 func (t *Trie) ProcessParallelContext(ctx context.Context, ops []Op, workers int) (common.Hash, error) {
-	return t.processParallelContext(ctx, ops, workers, fanOutMin)
+	return t.processParallelContext(ctx, ops, workers, t.defaultPhasePlan)
 }
 
-func (t *Trie) processParallelContext(ctx context.Context, ops []Op, workers, threshold int) (common.Hash, error) {
+func (t *Trie) defaultPhasePlan(ops []Op, workers int) (phasePlan, error) {
+	if t.phaseSchedule == phaseScheduleOld || t.bucketBatch > 1 {
+		return buildPhasePlanBatched(ops, fanOutMin, t.bucketBatch)
+	}
+	return buildPhasePlanGrain(ops, phaseGrainFor(len(ops), workers))
+}
+
+func (t *Trie) processParallelContext(ctx context.Context, ops []Op, workers int, buildPlan func([]Op, int) (phasePlan, error)) (common.Hash, error) {
 	if err := ctx.Err(); err != nil {
+		return common.Hash{}, err
+	}
+	if err := t.beginDeferredRound(); err != nil {
 		return common.Hash{}, err
 	}
 	if t.roundPending {
@@ -282,7 +395,7 @@ func (t *Trie) processParallelContext(ctx context.Context, ops []Op, workers, th
 	if t.ctx == nil || workers == 1 || len(ops) < 2 {
 		return t.Process(ops)
 	}
-	plan, err := buildPhasePlanWithThreshold(ops, threshold)
+	plan, err := buildPlan(ops, workers)
 	if err != nil {
 		return common.Hash{}, err
 	}

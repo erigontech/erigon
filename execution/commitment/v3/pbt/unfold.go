@@ -78,6 +78,9 @@ func (t *Trie) loadRow(path eip8297.Bitpath) (*rowNode, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := t.checkRowOwner(key); err != nil {
+		return nil, err
+	}
 	if !t.verifyOnly {
 		if row := t.rows[string(key)]; row != nil {
 			return row, nil
@@ -111,6 +114,9 @@ func (t *Trie) loadRow(path eip8297.Bitpath) (*rowNode, error) {
 func (t *Trie) loadBranchChild(parent *rowNode, slot int) (*rowNode, error) {
 	cell := parent.cell(slot)
 	if cell.child != nil {
+		if err := t.checkRowOwner(cell.child.key); err != nil {
+			return nil, err
+		}
 		return cell.child, nil
 	}
 	split := branchSplit(parent, cell)

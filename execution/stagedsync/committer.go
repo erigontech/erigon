@@ -195,6 +195,7 @@ type commitmentCalculator struct {
 	binFeedObserver   func(*commitment.PBinFeed)
 	shadowStopped     map[kv.Domain]bool
 	onDualArmComplete func(kv.Domain)
+	bufferShadowParts bool
 
 	// lastComputedAheadBlock is the highest block computed ahead so far. Computing
 	// ahead reads the commitment domain for its baseline, so it may only run when
@@ -1271,6 +1272,12 @@ type commitmentFoldArm struct {
 	feed     *commitment.Feed
 	pbinFeed *commitment.PBinFeed
 	buffered *commitmentdb.BufferedPatriciaContext
+	deferred deferredDeltaTrie
+}
+
+type deferredDeltaTrie interface {
+	SetDeferCommitmentUpdates(bool)
+	TakeDeferredDeltas() [][]commitment.BranchDelta
 }
 
 func (cc *commitmentCalculator) dualCommitmentContexts() (*commitmentdb.SharedDomainsCommitmentContext, *commitmentdb.SharedDomainsCommitmentContext, bool) {
@@ -1383,6 +1390,12 @@ func (cc *commitmentCalculator) computeDualFromUpdatesWithRole(ctx context.Conte
 	hexCtx.SetDeferCommitmentUpdates(false)
 	hexCtx.SetMetricsEnabled(canonicalDomain == kv.CommitmentDomain)
 	binCtx.SetMetricsEnabled(canonicalDomain == kv.CommitmentBinDomain)
+	shadowDefers := shadowArm.ctx.DeferCommitmentUpdates()
+	shadowArm.ctx.SetDeferCommitmentUpdates(false)
+	defer shadowArm.ctx.SetDeferCommitmentUpdates(shadowDefers)
+	if trie, ok := shadowArm.ctx.Trie().(deferredDeltaTrie); ok && !cc.bufferShadowParts {
+		shadowArm.deferred = trie
+	}
 	arms := []*commitmentFoldArm{&hexArm, &binArm}
 	folds := make([]dualFoldResult, len(arms))
 	var wg sync.WaitGroup
@@ -1392,6 +1405,10 @@ func (cc *commitmentCalculator) computeDualFromUpdatesWithRole(ctx context.Conte
 			continue
 		}
 		wg.Go(func() {
+			if arm.deferred != nil {
+				arm.deferred.SetDeferCommitmentUpdates(true)
+				defer arm.deferred.SetDeferCommitmentUpdates(false)
+			}
 			decorate := func(inner commitment.PatriciaContext) commitment.PatriciaContext {
 				if arm.ctx.CommitmentDomain() == shadowDomain {
 					arm.buffered = commitmentdb.NewBufferedPatriciaContext(inner)
@@ -1412,6 +1429,10 @@ func (cc *commitmentCalculator) computeDualFromUpdatesWithRole(ctx context.Conte
 }
 
 func (cc *commitmentCalculator) finishDualFolds(canonicalDomain, shadowDomain kv.Domain, folds []dualFoldResult, shadowArm *commitmentFoldArm) (dualCommitmentResult, error) {
+	var parts [][]commitment.BranchDelta
+	if shadowArm.deferred != nil {
+		parts = shadowArm.deferred.TakeDeferredDeltas()
+	}
 	var result dualCommitmentResult
 	for _, fold := range folds {
 		if fold.domain == canonicalDomain {
@@ -1434,20 +1455,31 @@ func (cc *commitmentCalculator) finishDualFolds(canonicalDomain, shadowDomain kv
 		}
 		result.shadowRoot = fold.root
 	}
+	if result.canonicalRoot == nil {
+		return result, fmt.Errorf("commitment: canonical domain %s did not produce a root", canonicalDomain)
+	}
 	if shadowArm.buffered != nil && result.shadowRoot != nil {
-		if err := shadowArm.buffered.Replay(); err != nil {
+		if err := replayShadowArm(shadowArm.buffered, parts); err != nil {
 			cc.logShadowStop(shadowDomain, err)
 			cc.stopShadowDomain(shadowDomain)
 			result.shadowRoot = nil
 		}
 	}
-	if result.canonicalRoot == nil {
-		return result, fmt.Errorf("commitment: canonical domain %s did not produce a root", canonicalDomain)
-	}
 	if result.shadowRoot != nil {
 		mxCommitmentShadowFolds.Inc()
 	}
 	return result, nil
+}
+
+func replayShadowArm(buffered *commitmentdb.BufferedPatriciaContext, parts [][]commitment.BranchDelta) error {
+	for _, part := range parts {
+		for i := range part {
+			if err := buffered.PatriciaContext.PutBranch(part[i].Key, part[i].Data, part[i].Prev); err != nil {
+				return err
+			}
+		}
+	}
+	return buffered.Replay()
 }
 
 func otherCommitmentDomain(domain kv.Domain) kv.Domain {

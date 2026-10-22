@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"maps"
 	"math/rand"
 	"slices"
 	"sort"
@@ -1081,5 +1082,313 @@ func TestTrieParallelRandomParity(t *testing.T) {
 				assertPersistedTrie(t, parallelContext, entries)
 			}
 		})
+	}
+}
+
+type phasePlanShape struct {
+	kind         phaseTaskKind
+	key          string
+	prefix       eip8297.Bitpath
+	zone         byte
+	nibble       byte
+	ops          [][]byte
+	dependencies []int
+	resultStart  int
+	resultEnd    int
+}
+
+func phasePlanShapes(plan phasePlan) []phasePlanShape {
+	shapes := make([]phasePlanShape, len(plan.tasks))
+	for i := range plan.tasks {
+		task := &plan.tasks[i]
+		shapes[i] = phasePlanShape{kind: task.kind, key: task.key, prefix: task.prefix, zone: task.zone, nibble: task.nibble, ops: churnOpKeys(task.ops), dependencies: task.dependencies, resultStart: task.resultStart, resultEnd: task.resultEnd}
+		if len(shapes[i].ops) == 0 {
+			shapes[i].ops = nil
+		}
+		if len(shapes[i].dependencies) == 0 {
+			shapes[i].dependencies = nil
+		}
+	}
+	return shapes
+}
+
+func expectedPhasePlanShapes(t *testing.T, ops []Op, threshold int) []phasePlanShape {
+	t.Helper()
+	chainOps := make(map[[2]byte][]Op)
+	bucketOps := make(map[string][]Op)
+	for _, op := range ops {
+		key := opKey(op)
+		if key[0] == eip8297.StorageZone {
+			bucketOps[string(key[:33])] = append(bucketOps[string(key[:33])], op)
+			continue
+		}
+		chainOps[[2]byte{key[0], key[1] >> 4}] = append(chainOps[[2]byte{key[0], key[1] >> 4}], op)
+	}
+	var shapes []phasePlanShape
+	var joinDependencies []int
+	chainKeys := slices.SortedFunc(maps.Keys(chainOps), func(a, b [2]byte) int { return bytes.Compare(a[:], b[:]) })
+	for _, key := range chainKeys {
+		joinDependencies = append(joinDependencies, len(shapes))
+		shapes = append(shapes, phasePlanShape{kind: phaseChain, prefix: chainPrefix(key[0], key[1]), zone: key[0], nibble: key[1], ops: churnOpKeys(chainOps[key]), resultStart: len(shapes), resultEnd: len(shapes) + 1})
+	}
+	stems := slices.Sorted(maps.Keys(bucketOps))
+	slices.SortStableFunc(stems, func(a, b string) int { return len(bucketOps[b]) - len(bucketOps[a]) })
+	storageDependencies := make(map[byte][]int)
+	for _, stem := range stems {
+		bucket := bucketOps[stem]
+		path := eip8297.PathFromBits([]byte(stem), 264)
+		rowKey, err := EncodeRowKey(&path)
+		require.NoError(t, err)
+		if threshold > 0 && len(bucket) >= threshold && !slices.ContainsFunc(bucket, func(op Op) bool { return len(op.Drop) != 0 }) {
+			groups := make(map[byte][]Op)
+			for _, op := range bucket {
+				groups[op.Key[33]>>4] = append(groups[op.Key[33]>>4], op)
+			}
+			var subtasks []int
+			for _, nibble := range slices.Sorted(maps.Keys(groups)) {
+				subtaskPath, err := keyPath(groups[nibble][0].Key)
+				require.NoError(t, err)
+				subtasks = append(subtasks, len(shapes))
+				shapes = append(shapes, phasePlanShape{kind: phaseBucketSubtask, key: string(rowKey), prefix: subtaskPath.Slice(0, 268), ops: churnOpKeys(groups[nibble]), resultStart: len(shapes), resultEnd: len(shapes) + 1})
+			}
+			storageDependencies[stem[1]>>4] = append(storageDependencies[stem[1]>>4], len(shapes))
+			shapes = append(shapes, phasePlanShape{kind: phaseBucket, key: string(rowKey), prefix: path, dependencies: subtasks, resultStart: len(shapes), resultEnd: len(shapes) + 1})
+			continue
+		}
+		storageDependencies[stem[1]>>4] = append(storageDependencies[stem[1]>>4], len(shapes))
+		shapes = append(shapes, phasePlanShape{kind: phaseBucket, key: string(rowKey), prefix: path, ops: churnOpKeys(bucket), resultStart: len(shapes), resultEnd: len(shapes) + 1})
+	}
+	for _, nibble := range slices.Sorted(maps.Keys(storageDependencies)) {
+		dependencies := slices.Sorted(slices.Values(storageDependencies[nibble]))
+		joinDependencies = append(joinDependencies, len(shapes))
+		shapes = append(shapes, phasePlanShape{kind: phaseChain, prefix: chainPrefix(eip8297.StorageZone, nibble), zone: eip8297.StorageZone, nibble: nibble, dependencies: dependencies, resultStart: len(shapes), resultEnd: len(shapes) + 1})
+	}
+	return append(shapes, phasePlanShape{kind: phaseJoin, dependencies: joinDependencies, resultStart: len(shapes), resultEnd: len(shapes) + 1})
+}
+
+func randomPhasePlanOps(r *rand.Rand) []Op {
+	stem := func() []byte {
+		s := make([]byte, 32)
+		r.Read(s)
+		s[0] &= 0x3f
+		return s
+	}
+	storageStems := make([][]byte, 1+r.Intn(6))
+	for i := range storageStems {
+		storageStems[i] = stem()
+	}
+	byKey := make(map[string]Op)
+	for range 1 + r.Intn(80) {
+		var op Op
+		switch x := r.Intn(10); {
+		case x < 3:
+			key := eip8297.TreeKey(eip8297.AccountZone, stem(), byte(r.Intn(3)))
+			op = Op{Key: key, Value: testTrieValue(byte(1 + r.Intn(200)))}
+		case x < 4:
+			op = Drop(eip8297.TreeKey(eip8297.AccountZone, stem(), 0)[:33])
+		case x < 5:
+			op = Op{Key: eip8297.TreeKey(eip8297.CodeZone, stem(), byte(r.Intn(256))), Value: testTrieValue(byte(1 + r.Intn(200)))}
+		case x < 6 && r.Intn(4) == 0:
+			op = Drop(append([]byte{eip8297.StorageZone}, storageStems[r.Intn(len(storageStems))]...))
+		default:
+			slot := make([]byte, eip8297.StorageKeyLength-33)
+			r.Read(slot)
+			key := append(append([]byte{eip8297.StorageZone}, storageStems[r.Intn(len(storageStems))]...), slot...)
+			op = Op{Key: key}
+		}
+		byKey[string(opKey(op))] = op
+	}
+	ops := slices.Collect(maps.Values(byKey))
+	slices.SortFunc(ops, func(a, b Op) int { return bytes.Compare(opKey(a), opKey(b)) })
+	return ops
+}
+
+func TestBuildPhasePlanMatchesIndependentGrouping(t *testing.T) {
+	r := rand.New(rand.NewSource(0x9a7e))
+	var splits, accountDrops, storageDrops int
+	for corpus := range 500 {
+		ops := randomPhasePlanOps(r)
+		for _, threshold := range []int{0, 2, fanOutMin} {
+			label := fmt.Sprintf("corpus=%d threshold=%d", corpus, threshold)
+			plan, err := buildPhasePlanWithThreshold(ops, threshold)
+			require.NoError(t, err, label)
+			covered := 0
+			for index, task := range plan.tasks {
+				for _, dependency := range task.dependencies {
+					require.Less(t, dependency, index, label)
+				}
+				if len(task.ops) == 0 {
+					continue
+				}
+				start := slices.IndexFunc(ops, func(op Op) bool { return bytes.Equal(opKey(op), opKey(task.ops[0])) })
+				require.NotEqual(t, -1, start, label)
+				require.LessOrEqual(t, start+len(task.ops), len(ops), label)
+				require.Equal(t, churnOpKeys(ops[start:start+len(task.ops)]), churnOpKeys(task.ops), "%s task=%d", label, index)
+				covered += len(task.ops)
+			}
+			require.Equal(t, len(ops), covered, label)
+			require.Equal(t, expectedPhasePlanShapes(t, ops, threshold), phasePlanShapes(plan), label)
+			if threshold != fanOutMin {
+				continue
+			}
+			for _, task := range plan.tasks {
+				switch {
+				case task.kind == phaseBucketSubtask:
+					splits++
+				case task.kind == phaseChain && hasDrop(task.ops):
+					accountDrops++
+				case task.kind == phaseBucket && hasDrop(task.ops):
+					storageDrops++
+				}
+			}
+		}
+	}
+	require.Positive(t, splits)
+	require.Positive(t, accountDrops)
+	require.Positive(t, storageDrops)
+}
+
+func TestBuildPhasePlanRejectsShortKeys(t *testing.T) {
+	storage := eip8297.TreeKeyStorage(bytes.Repeat([]byte{0x31}, 20), storageSlot(64))
+	for _, tc := range []struct {
+		name string
+		op   Op
+		want string
+	}{
+		{name: "empty", op: Op{Key: nil, Value: testTrieValue(1)}, want: errInsertKey.Error()},
+		{name: "zone only", op: Op{Key: []byte{eip8297.AccountZone}, Value: testTrieValue(1)}, want: "invalid tree key"},
+		{name: "short account", op: Op{Key: make([]byte, eip8297.AccountKeyLength-1), Value: testTrieValue(1)}, want: "invalid tree key"},
+		{name: "short storage", op: Op{Key: storage[:40], Value: testTrieValue(1)}, want: "invalid tree key"},
+		{name: "unknown zone", op: Op{Key: append([]byte{0x7f}, make([]byte, 33)...), Value: testTrieValue(1)}, want: "invalid tree key"},
+		{name: "short drop", op: Drop([]byte{eip8297.StorageZone, 1}), want: errInsertKey.Error()},
+		{name: "code drop", op: Drop(append([]byte{eip8297.CodeZone}, make([]byte, 32)...)), want: errInsertKey.Error()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := buildPhasePlan([]Op{tc.op})
+			require.EqualError(t, err, tc.want)
+		})
+	}
+}
+
+func grainStorageOps(first byte, count int, drop bool) []Op {
+	stem := append([]byte{eip8297.StorageZone, first}, make([]byte, 31)...)
+	var ops []Op
+	if drop {
+		ops = append(ops, Drop(stem))
+	}
+	for i := range count {
+		ops = append(ops, Op{Key: storageKeyWithSuffix(stem, byte(i)<<4|byte(i>>4), byte(i+1)), Value: testTrieValue(byte(i + 1))})
+	}
+	return ops
+}
+
+func grainSortedOps(groups ...[]Op) []Op {
+	return sortParallelRoundOps(slices.Concat(groups...))
+}
+
+func grainUnitOps(task *phaseTask, tasks []phaseTask) int {
+	switch {
+	case len(task.batch) != 0:
+		total := 0
+		for i := range task.batch {
+			total += len(task.batch[i].ops)
+		}
+		return total
+	case len(task.dependencies) != 0:
+		total := 0
+		for _, dependency := range task.dependencies {
+			total += len(tasks[dependency].ops)
+		}
+		return total
+	default:
+		return len(task.ops)
+	}
+}
+
+func TestPhaseGrainFor(t *testing.T) {
+	require.Equal(t, 128, phaseGrainFor(100, 8))
+	require.Equal(t, 128, phaseGrainFor(4096, 8))
+	require.Equal(t, 3125, phaseGrainFor(100_000, 8))
+	require.Equal(t, 25_000, phaseGrainFor(100_000, 1))
+	require.Equal(t, 25_000, phaseGrainFor(100_000, 0))
+}
+
+func TestBuildPhasePlanGrainBatchesOneNibbleRun(t *testing.T) {
+	ops := grainSortedOps(grainStorageOps(0x30, 3, false), grainStorageOps(0x31, 3, false), grainStorageOps(0x32, 3, false), grainStorageOps(0x33, 3, false), grainStorageOps(0x50, 2, false))
+	plan, err := buildPhasePlanGrain(ops, 10)
+	require.NoError(t, err)
+	var batches [][]string
+	for index := range plan.tasks {
+		task := &plan.tasks[index]
+		if len(task.batch) == 0 {
+			continue
+		}
+		require.Equal(t, phaseBucket, task.kind)
+		require.LessOrEqual(t, grainUnitOps(task, plan.tasks), 10)
+		var keys []string
+		for _, part := range task.batch {
+			require.Equal(t, task.batch[0].key[1]>>4, part.key[1]>>4, "batch spans storage nibbles")
+			keys = append(keys, part.key)
+		}
+		batches = append(batches, keys)
+	}
+	stem := func(first byte) string {
+		path := eip8297.PathFromBits(append([]byte{eip8297.StorageZone, first}, make([]byte, 31)...), 264)
+		key, err := EncodeRowKey(&path)
+		require.NoError(t, err)
+		return string(key)
+	}
+	require.Equal(t, [][]string{{stem(0x30), stem(0x31), stem(0x32)}}, batches)
+	bucketTasks := 0
+	for index := range plan.tasks {
+		if plan.tasks[index].kind == phaseBucket {
+			bucketTasks++
+		}
+	}
+	require.Equal(t, 3, bucketTasks)
+}
+
+func TestBuildPhasePlanGrainSplitsOnlyAboveGrain(t *testing.T) {
+	ops := grainSortedOps(grainStorageOps(0x30, 11, false), grainStorageOps(0x50, 10, false), grainStorageOps(0x70, 11, true))
+	plan, err := buildPhasePlanGrain(ops, 10)
+	require.NoError(t, err)
+	split := make(map[string]bool)
+	for index := range plan.tasks {
+		task := &plan.tasks[index]
+		if task.kind == phaseBucket && len(task.batch) == 0 {
+			split[task.key[:2]] = len(task.dependencies) != 0
+		}
+	}
+	require.Equal(t, map[string]bool{"\xff\x30": true, "\xff\x50": false, "\xff\x70": false}, split)
+}
+
+func TestBuildPhasePlanGrainOrdersLargestFirst(t *testing.T) {
+	r := rand.New(rand.NewSource(0x6a1))
+	for corpus := range 200 {
+		var groups [][]Op
+		for i := range 1 + r.Intn(12) {
+			groups = append(groups, grainStorageOps(byte(0x10*(1+r.Intn(4))+i), 1+r.Intn(24), r.Intn(6) == 0))
+		}
+		ops := grainSortedOps(groups...)
+		plan, err := buildPhasePlanGrain(ops, 16)
+		require.NoError(t, err, "corpus=%d", corpus)
+		last := -1
+		for index := range plan.tasks {
+			task := &plan.tasks[index]
+			for _, dependency := range task.dependencies {
+				require.Less(t, dependency, index, "corpus=%d", corpus)
+			}
+			if task.kind == phaseBucketSubtask {
+				continue
+			}
+			if task.kind != phaseBucket {
+				break
+			}
+			size := grainUnitOps(task, plan.tasks)
+			if last >= 0 {
+				require.LessOrEqual(t, size, last, "corpus=%d task=%d", corpus, index)
+			}
+			last = size
+		}
 	}
 }

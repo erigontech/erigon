@@ -118,16 +118,12 @@ func executeInParallel(variant commitment.TrieVariant, exec3Parallel, experiment
 	return exec3Parallel || experimentalBAL
 }
 
-// deferCommitmentUpdates reports whether Process() may leave branch updates as a
+// setDeferCommitmentUpdates sets whether Process() may leave branch updates as a
 // pending update flushed at the block boundary instead of applying them inline.
 // Deferring cuts re-org validation overhead; the parallel apply path also needs
-// Flush() to carry the pending update across sync cycles. The bin trie has no
-// deferred-update path and refuses the request, so it stays on the inline path.
-func deferCommitmentUpdates(variant commitment.TrieVariant, isForkValidation, parallel, isApplyingBlocks bool) bool {
-	if variant == commitment.VariantBinPatriciaTrie {
-		return false
-	}
-	return isForkValidation || (parallel && isApplyingBlocks)
+// Flush() to carry the pending update across sync cycles.
+func setDeferCommitmentUpdates(doms *execctx.SharedDomains, isForkValidation, parallel, isApplyingBlocks bool) {
+	doms.SetDeferCommitmentUpdates(isForkValidation || (parallel && isApplyingBlocks))
 }
 
 func storageFanOutMin(initialCycle bool) int {
@@ -232,15 +228,12 @@ func execV3(ctx context.Context,
 	// would panic on the dropped sequential-buffer keys (ERIGON_COMMITMENT_PARALLEL).
 	if !cfg.discardCommitment {
 		doms.EnableParaTrieDB(cfg.db)
-		doms.SetDeferCommitmentUpdates(false)
 		// Enable deferred commitment updates for fork validation and parallel initial sync.
 		// Deferred updates batch commitment calculations to block boundaries rather than
 		// per-transaction, significantly reducing re-org validation overhead.
 		// For the parallel path during initial sync, Flush() now includes pending updates,
 		// so they are no longer silently discarded between StageLoopIteration cycles.
-		if deferCommitmentUpdates(doms.GetCommitmentCtx().Trie().Variant(), isForkValidation, true, isApplyingBlocks) {
-			doms.SetDeferCommitmentUpdates(true)
-		}
+		setDeferCommitmentUpdates(doms, isForkValidation, true, isApplyingBlocks)
 		defer doms.SetDeferCommitmentUpdates(false)
 		doms.SetStorageFanOutMin(storageFanOutMin(initialCycle))
 	}
@@ -376,10 +369,7 @@ func execV3Serial(ctx context.Context,
 	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
 
 	doms.EnableParaTrieDB(cfg.db)
-	doms.SetDeferCommitmentUpdates(false)
-	if deferCommitmentUpdates(doms.GetCommitmentCtx().Trie().Variant(), isForkValidation, false, isApplyingBlocks) {
-		doms.SetDeferCommitmentUpdates(true)
-	}
+	setDeferCommitmentUpdates(doms, isForkValidation, false, isApplyingBlocks)
 	defer doms.SetDeferCommitmentUpdates(false)
 	doms.SetStorageFanOutMin(storageFanOutMin(initialCycle))
 	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {

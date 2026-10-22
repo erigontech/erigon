@@ -103,13 +103,20 @@ type SharedDomainsCommitmentContext struct {
 
 type v3Trie interface {
 	ProcessFeed(ctx context.Context, feed *commitment.Feed, onProgress func(*commitment.CommitProgress)) ([]byte, error)
+	SetStorageFanOutMin(int)
+}
+
+type deferredDeltaTrie interface {
 	SetDeferCommitmentUpdates(bool)
 	TakeDeferredDeltas() [][]commitment.BranchDelta
-	SetStorageFanOutMin(int)
 }
 
 type trieContextFactorySetter interface {
 	SetTrieContextFactory(commitment.TrieContextFactory)
+}
+
+type workerContextDecorator interface {
+	DecorateWorkerContext(commitment.PatriciaContext) commitment.PatriciaContext
 }
 
 // checkParaTrieWired reports a context that selected the parallel trie and never
@@ -182,15 +189,16 @@ func (sdc *SharedDomainsCommitmentContext) EnableParaTrieDB(db kv.TemporalRoDB) 
 // instead of being applied inline. Used during fork validation where the update is
 // flushed later via FlushPendingUpdate.
 func (sdc *SharedDomainsCommitmentContext) SetDeferCommitmentUpdates(defer_ bool) {
-	if defer_ && sdc.variant == commitment.VariantBinPatriciaTrie {
-		panic(pbinUnsupported("deferred commitment updates"))
-	}
 	sdc.deferCommitmentUpdates = defer_
 }
 
-// pbinUnsupported names a code path only the hex trie implements — deferred
-// updates, collapse tracing, hex-prefixed branch reads, trie-trace replay — so
-// asking for one under the bin variant fails instead of yielding a zero value.
+func (sdc *SharedDomainsCommitmentContext) DeferCommitmentUpdates() bool {
+	return sdc.deferCommitmentUpdates
+}
+
+// pbinUnsupported names a code path only the hex trie implements — collapse
+// tracing, hex-prefixed branch reads, trie-trace replay — so asking for one
+// under the bin variant fails instead of yielding a zero value.
 func pbinUnsupported(what string) error {
 	return fmt.Errorf("%w: %s", commitment.ErrPBinUnsupported, what)
 }
@@ -419,6 +427,37 @@ func (sdc *SharedDomainsCommitmentContext) Trie() commitment.Trie {
 
 func (sdc *SharedDomainsCommitmentContext) PrepareForVerification(tx kv.TemporalTx) {
 	sdc.trieContext(tx, 0, 0, context.Background(), nil, nil)
+}
+
+var errVerificationViewDrifted = errors.New("verification worker view drifted from the caller's snapshot")
+
+func (sdc *SharedDomainsCommitmentContext) VerificationContextFactory(tx kv.TemporalTx) (commitment.TrieContextFactory, func()) {
+	caller := resolveCallerView(tx)
+	pinner, ok := tx.(filesPinner)
+	if caller.unresolved || caller.writer || !ok {
+		return nil, func() {}
+	}
+	pin := pinner.Pin()
+	if pin == nil {
+		return nil, func() {}
+	}
+	factory := func(ctx context.Context) (commitment.PatriciaContext, func()) {
+		roTx, err := BeginWorkerRo(ctx, nil, pin)
+		if err != nil {
+			return &errorTrieContext{err: err}, func() {}
+		}
+		if caller.mayDrift(roTx) {
+			roTx.Rollback()
+			return &errorTrieContext{err: errVerificationViewDrifted}, func() {}
+		}
+		return &TrieContext{
+			putter:           sdc.sharedDomains.AsPutDel(roTx),
+			stateReader:      NewLatestStateReader(roTx, sdc.sharedDomains, LatestStateReaderOptions{}),
+			commitmentDomain: sdc.CommitmentDomain(),
+			stepSize:         sdc.sharedDomains.StepSize(),
+		}, roTx.Rollback
+	}
+	return factory, pin.Close
 }
 
 // TouchKey marks plainKey as updated and applies different fn for different key types
@@ -665,13 +704,8 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 		panic("sdCtx.ComputeCommitment called directly with non-nil pendingUpdate; use SharedDomains.ComputeCommitment wrapper instead")
 	}
 	traceFile := trieTraceFile(blockNum)
-	if sdc.variant == commitment.VariantBinPatriciaTrie {
-		switch {
-		case sdc.deferCommitmentUpdates:
-			return nil, pbinUnsupported("deferred commitment updates")
-		case traceFile != "":
-			return nil, pbinUnsupported("trie trace capture")
-		}
+	if sdc.variant == commitment.VariantBinPatriciaTrie && traceFile != "" {
+		return nil, pbinUnsupported("trie trace capture")
 	}
 	if err := sdc.checkParaTrieWired(); err != nil {
 		return nil, err
@@ -834,6 +868,13 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 			// after Process and merged into the main writer below.
 			var concurrentFactory commitment.TrieContextFactory
 			concurrentFactory, drainCollectors = sdc.concurrentTrieContextFactory(ctx, sdc.paraTrieDB, workerPin, tx, txNum)
+			if decorator, ok := activeContext.(workerContextDecorator); ok {
+				undecorated := concurrentFactory
+				concurrentFactory = func(ctx context.Context) (commitment.PatriciaContext, func()) {
+					worker, cleanup := undecorated(ctx)
+					return decorator.DecorateWorkerContext(worker), cleanup
+				}
+			}
 			trie.SetTrieContextFactory(concurrentFactory)
 		}
 	}
@@ -857,7 +898,7 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 			defer trie.SetLeaveDeferredForCaller(false)
 		}
 	}
-	if trie, ok := sdc.patriciaTrie.(v3Trie); ok && sdc.deferCommitmentUpdates {
+	if trie, ok := sdc.patriciaTrie.(deferredDeltaTrie); ok && sdc.deferCommitmentUpdates {
 		trie.SetDeferCommitmentUpdates(true)
 		defer trie.SetDeferCommitmentUpdates(false)
 	}
@@ -939,7 +980,7 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 			}
 		}
 	}
-	if trie, ok := sdc.patriciaTrie.(v3Trie); ok && sdc.deferCommitmentUpdates {
+	if trie, ok := sdc.patriciaTrie.(deferredDeltaTrie); ok && sdc.deferCommitmentUpdates {
 		if deltas := trie.TakeDeferredDeltas(); deltas != nil {
 			sdc.pendingUpdate = &commitment.PendingCommitmentUpdate{
 				BlockNum: blockNum,

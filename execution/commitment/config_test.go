@@ -43,6 +43,12 @@ func TestTrieConfig_OrDefaultHelpers(t *testing.T) {
 	if got := cfg.WarmupNumWorkersOrDefault(); got != 3 {
 		t.Errorf("WarmupNumWorkersOrDefault: expected 3, got %d", got)
 	}
+	if got := cfg.PBinWorkersOrDefault(); got != 3 {
+		t.Errorf("PBinWorkersOrDefault: expected 3, got %d", got)
+	}
+	if got := (TrieConfig{}).PBinWorkersOrDefault(); got != dbg.PBTWorkers {
+		t.Errorf("PBinWorkersOrDefault: expected %d, got %d", dbg.PBTWorkers, got)
+	}
 }
 
 func TestTrieConfig_WarmupNumWorkers_EnvDisable(t *testing.T) {

@@ -18,13 +18,16 @@ package state_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"sort"
+	"sync/atomic"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -275,4 +278,131 @@ func writePBinConvertStateN(t *testing.T, db kv.TemporalRwDB, count int) {
 	}
 	require.NoError(t, domains.Flush(t.Context(), tx))
 	require.NoError(t, tx.Commit())
+}
+
+type pbinVerifyPinTx struct {
+	kv.TemporalTx
+	begun, closed *atomic.Int32
+}
+
+func (tx *pbinVerifyPinTx) UnderlyingTx() kv.TemporalTx { return tx.TemporalTx }
+
+func (tx *pbinVerifyPinTx) Pin() kv.TemporalFilesPin {
+	pin := tx.TemporalTx.(interface{ Pin() kv.TemporalFilesPin }).Pin()
+	if pin == nil {
+		return nil
+	}
+	return &pbinVerifyPin{TemporalFilesPin: pin, begun: tx.begun, closed: tx.closed}
+}
+
+type pbinVerifyPin struct {
+	kv.TemporalFilesPin
+	begun, closed *atomic.Int32
+}
+
+func (p *pbinVerifyPin) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	tx, err := p.TemporalFilesPin.BeginTemporalRo(ctx) //nolint:gocritic
+	if err != nil {
+		return nil, err
+	}
+	p.begun.Add(1)
+	return &pbinVerifyWorkerTx{TemporalTx: tx, closed: p.closed}, nil
+}
+
+type pbinVerifyWorkerTx struct {
+	kv.TemporalTx
+	closed *atomic.Int32
+}
+
+func (tx *pbinVerifyWorkerTx) Rollback() {
+	tx.closed.Add(1)
+	tx.TemporalTx.Rollback()
+}
+
+func verifyPBinDomainWith(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, workers int, writer bool) (error, int32) {
+	t.Helper()
+	previous := dbg.PBTWorkers
+	dbg.PBTWorkers = workers
+	defer func() { dbg.PBTWorkers = previous }()
+	var tx kv.TemporalTx
+	var err error
+	if writer {
+		tx, err = db.BeginTemporalRw(t.Context())
+	} else {
+		tx, err = db.BeginTemporalRo(t.Context())
+	}
+	require.NoError(t, err)
+	defer tx.Rollback()
+	var begun, closed atomic.Int32
+	_, verifyErr := state.VerifyPBinDomainRoot(t.Context(), &pbinVerifyPinTx{TemporalTx: tx, begun: &begun, closed: &closed}, agg, kv.CommitmentDomain)
+	require.Equal(t, begun.Load(), closed.Load(), "worker transactions left open")
+	return verifyErr, begun.Load()
+}
+
+func TestVerifyPBinDomainVerifiesChainsOnPinnedWorkerViews(t *testing.T) {
+	selectPBinBinOnlyHash(t)
+	db, agg := temporal.Open(t, 8)
+	writePBinConvertStateN(t, db, 1024)
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+	sourceTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer sourceTx.Rollback()
+	targetTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer targetTx.Rollback()
+	_, err = state.ConvertPBin(t.Context(), state.PBinConvertOptions{
+		SourceAggregator: agg, SourceTx: sourceTx, TargetAggregator: agg, TargetTx: targetTx,
+		TargetDomain: kv.CommitmentDomain, EndTxNum: 7, Hash: eip8297.HashBytes,
+	})
+	require.NoError(t, err)
+	targetTx.Rollback()
+
+	verifyErr, begun := verifyPBinDomainWith(t, db, agg, 4, false)
+	require.NoError(t, verifyErr)
+	require.Greater(t, begun, int32(1), "the verify opened no pinned worker views")
+	verifyErr, begun = verifyPBinDomainWith(t, db, agg, 1, false)
+	require.NoError(t, verifyErr)
+	require.Zero(t, begun)
+	verifyErr, begun = verifyPBinDomainWith(t, db, agg, 4, true)
+	require.NoError(t, verifyErr)
+	require.Zero(t, begun, "a write tx caller opened worker views that cannot see its rows")
+
+	at := agg.BeginFilesRo()
+	iter, err := at.DebugRangeLatestFromFiles(kv.CommitmentDomain, nil, nil, kv.Unlim)
+	require.NoError(t, err)
+	var rowKey, rowValue []byte
+	for iter.HasNext() {
+		key, value, nextErr := iter.Next()
+		require.NoError(t, nextErr)
+		path, decodeErr := eip8297.DecodeBitPath(key)
+		if decodeErr == nil && path.BitLen > 12 && path.BitLen < 264 {
+			rowKey, rowValue = bytes.Clone(key), bytes.Clone(value)
+		}
+	}
+	iter.Close()
+	at.Close()
+	require.NotEmpty(t, rowKey)
+	badTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer badTx.Rollback()
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = commitment.VariantBinPatriciaTrie
+	cfg.EnableTrieWarmup = false
+	domains, err := execctx.NewSharedDomains(t.Context(), badTx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithoutCommitmentSeek())
+	require.NoError(t, err)
+	previousValue, _, err := domains.GetLatest(kv.CommitmentDomain, badTx, rowKey)
+	require.NoError(t, err)
+	corrupted := bytes.Clone(rowValue)
+	corrupted[len(corrupted)-1] ^= 1
+	require.NoError(t, domains.DomainPut(kv.CommitmentDomain, badTx, rowKey, corrupted, 9, previousValue))
+	require.NoError(t, domains.Flush(t.Context(), badTx))
+	require.NoError(t, badTx.Commit())
+	domains.Close()
+
+	sequentialErr, _ := verifyPBinDomainWith(t, db, agg, 1, false)
+	require.Error(t, sequentialErr)
+	parallelErr, begun := verifyPBinDomainWith(t, db, agg, 4, false)
+	require.Greater(t, begun, int32(1))
+	require.EqualError(t, parallelErr, sequentialErr.Error())
 }

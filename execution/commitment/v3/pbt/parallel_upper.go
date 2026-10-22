@@ -21,9 +21,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"maps"
 	"slices"
-	"sync"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -33,21 +31,61 @@ import (
 
 type phaseContext struct {
 	base    commitment.PatriciaContext
+	absent  absentSource
 	records map[string][]byte
-	baseMu  *sync.Mutex
 	prefix  *eip8297.Bitpath
+	owners  []phaseOwner
+}
+
+type phaseOwner struct {
+	task   int
+	prefix eip8297.Bitpath
+}
+
+func phaseOwners(tasks []phaseTask, indexes []int) ([]phaseOwner, error) {
+	owners := make([]phaseOwner, 0, len(indexes))
+	for _, index := range indexes {
+		prefix, err := taskSubtreePrefix(tasks[index])
+		if err != nil {
+			return nil, err
+		}
+		owners = append(owners, phaseOwner{task: index, prefix: prefix})
+	}
+	return owners, nil
+}
+
+func (c *phaseContext) checkOwner(key []byte) error {
+	if len(c.owners) == 0 {
+		return nil
+	}
+	path, err := eip8297.DecodeBitPath(key)
+	if err != nil {
+		return nil
+	}
+	for i := range c.owners {
+		if pathHasPrefix(&path, &c.owners[i].prefix) {
+			return fmt.Errorf("record %x is owned by task %d at %x", key, c.owners[i].task, eip8297.AppendBitPath(nil, &c.owners[i].prefix))
+		}
+	}
+	return nil
+}
+
+func (t *Trie) checkRowOwner(key []byte) error {
+	if ctx, ok := t.ctx.(*phaseContext); ok {
+		return ctx.checkOwner(key)
+	}
+	return nil
 }
 
 func (c *phaseContext) Branch(key []byte) ([]byte, kv.Step, error) {
 	if c.prefix != nil && !ownsRecordKey(key, c.prefix) {
 		return nil, 0, fmt.Errorf("record %x is above subtree prefix", key)
 	}
+	if err := c.checkOwner(key); err != nil {
+		return nil, 0, err
+	}
 	if data, ok := c.records[string(key)]; ok {
 		return bytes.Clone(data), 0, nil
-	}
-	if c.baseMu != nil {
-		c.baseMu.Lock()
-		defer c.baseMu.Unlock()
 	}
 	data, step, err := c.base.Branch(key)
 	if err == nil {
@@ -60,13 +98,12 @@ func (c *phaseContext) PutBranch(key, data, prev []byte) error {
 	if c.prefix != nil && !ownsRecordKey(key, c.prefix) {
 		return fmt.Errorf("record %x is above subtree prefix", key)
 	}
+	if err := c.checkOwner(key); err != nil {
+		return err
+	}
 	current, ok := c.records[string(key)]
-	if !ok {
+	if !ok && (c.absent == nil || !c.absent.Absent(key)) {
 		var err error
-		if c.baseMu != nil {
-			c.baseMu.Lock()
-			defer c.baseMu.Unlock()
-		}
 		current, _, err = c.base.Branch(key)
 		if err != nil {
 			return err
@@ -87,7 +124,12 @@ func (c *phaseContext) LeafRefs(key, data []byte) *commitment.LeafRefs {
 }
 
 func (t *Trie) newPhaseContext(base commitment.PatriciaContext, prefix *eip8297.Bitpath) *phaseContext {
-	return &phaseContext{base: base, records: make(map[string][]byte), baseMu: t.phaseReadMu, prefix: prefix}
+	absent, _ := base.(absentSource)
+	return &phaseContext{base: base, absent: absent, records: make(map[string][]byte), prefix: prefix}
+}
+
+type absentSource interface {
+	Absent(key []byte) bool
 }
 
 func (t *Trie) inheritHooks(dst *Trie) {
@@ -96,29 +138,21 @@ func (t *Trie) inheritHooks(dst *Trie) {
 	dst.coreActivityHook = t.coreActivityHook
 }
 
-func descriptorWithFallback(descriptor bucketDescriptor, present bool, err error, deltas []commitment.BranchDelta, fallbackSeen bool, fallback bucketDescriptor, fallbackPresent bool) (bucketDescriptor, bool, error) {
+func descriptorWithFallback(descriptor bucketDescriptor, present bool, err error, deltas []commitment.BranchDelta, initial *phaseBucketResult) (bucketDescriptor, bool, error) {
 	if err == nil {
 		return descriptor, present, nil
 	}
-	if len(deltas) == 0 && fallbackSeen {
-		return fallback, fallbackPresent, nil
+	if len(deltas) == 0 {
+		return initial.descriptor, initial.present, nil
 	}
 	return bucketDescriptor{}, false, err
 }
 
 func (c *phaseContext) Account(key []byte) (*commitment.Update, error) {
-	if c.baseMu != nil {
-		c.baseMu.Lock()
-		defer c.baseMu.Unlock()
-	}
 	return c.base.Account(key)
 }
 
 func (c *phaseContext) Storage(key []byte) (*commitment.Update, error) {
-	if c.baseMu != nil {
-		c.baseMu.Lock()
-		defer c.baseMu.Unlock()
-	}
 	return c.base.Storage(key)
 }
 
@@ -127,6 +161,7 @@ type phaseBucketResult struct {
 	deltas     []commitment.BranchDelta
 	descriptor bucketDescriptor
 	present    bool
+	unchanged  bool
 }
 
 //nolint:gocritic
@@ -143,42 +178,49 @@ func (t *Trie) runSubtreeTask(workerCtx context.Context, workerContext commitmen
 	base := cmp.Or(workerContext, t.phaseBase, t.ctx)
 	local := t.newPhaseContext(base, nil)
 	var subtreeTrie *Trie
-	switch {
-	case task.hasInitial:
-		local.prefix = &prefix
-		subtreeTrie, err = newSubtreeTrie(local, prefix, task.initial.descriptor, task.initial.present)
+	initial := task.initial
+	if task.kind == phaseBucketSubtask {
+		bucket, err := newBucketTrie(local, []byte(task.key))
 		if err != nil {
 			return phaseBucketResult{}, err
 		}
-	case task.kind == phaseBucket && len(task.dependencies) == 0:
+		initial.descriptor, initial.present, err = bucket.descriptorAtPrefix(&prefix)
+		if err != nil {
+			return phaseBucketResult{}, err
+		}
+		local.prefix = &prefix
+		subtreeTrie, err = newSubtreeTrie(local, prefix, initial.descriptor, initial.present)
+		if err != nil {
+			return phaseBucketResult{}, err
+		}
+	} else {
 		subtreeTrie, err = newBucketTrie(local, []byte(task.key))
 		if err != nil {
 			return phaseBucketResult{}, err
 		}
-	default:
-		subtreeTrie = NewTrie(local)
-		subtreeTrie.ownedPrefix = &prefix
-		subtreeTrie.suppressRoot = true
-		subtreeTrie.suppressBucketRecords = true
 	}
 	subtreeTrie.coreTask = &task
 	t.inheritHooks(subtreeTrie)
-	for i := range task.ops {
-		if err := t.phaseHookCall(task, &task.ops[i]); err != nil {
-			return phaseBucketResult{}, err
-		}
+	if err := t.phaseHookOps(&task); err != nil {
+		return phaseBucketResult{}, err
 	}
 	if _, err := subtreeTrie.Process(task.ops); err != nil {
 		return phaseBucketResult{}, fmt.Errorf("process subtree %x: %w", []byte(task.key), err)
 	}
-	deltas := subtreeTrie.TakeDeltas()
+	deltas := subtreeTrie.takeDeltaPart()
+	if task.kind == phaseBucket {
+		if len(deltas) == 0 {
+			return phaseBucketResult{prefix: prefix, unchanged: true}, workerCtx.Err()
+		}
+	} else {
+		deltas = ownedDeltas(deltas, &prefix)
+	}
 	descriptor, present, err := subtreeTrie.descriptorFromRoot()
-	descriptor, present, err = descriptorWithFallback(descriptor, present, err, deltas, task.fallbackSeen, task.fallback, task.fallbackOK)
+	if task.kind != phaseBucket {
+		descriptor, present, err = descriptorWithFallback(descriptor, present, err, deltas, &initial)
+	}
 	if err != nil {
 		return phaseBucketResult{}, err
-	}
-	if task.kind != phaseBucket || len(task.dependencies) != 0 {
-		deltas = ownedDeltas(deltas, &prefix)
 	}
 	return phaseBucketResult{prefix: prefix, deltas: deltas, descriptor: descriptor, present: present}, workerCtx.Err()
 }
@@ -228,8 +270,6 @@ func opInSubtree(op Op, prefix *eip8297.Bitpath) error {
 
 func (t *Trie) processParallelPhaseA(ctx context.Context, workers int, plan phasePlan) (common.Hash, error) {
 	base := t.ctx
-	t.phaseReadMu = &sync.Mutex{}
-	defer func() { t.phaseReadMu = nil }()
 	round := t.newPhaseContext(base, nil)
 	t.ctx = round
 	t.phaseBase = base
@@ -243,12 +283,12 @@ func (t *Trie) processParallelPhaseA(ctx context.Context, workers int, plan phas
 	if _, err := t.loadRoot(); err != nil {
 		return common.Hash{}, err
 	}
-	if err := t.preparePhaseTasks(&plan, round); err != nil {
+	if err := t.preparePhaseTasks(&plan); err != nil {
 		return common.Hash{}, err
 	}
 	t.rememberPrev(t.rootRecordKey(), t.root.prev)
-	results := make([]phaseBucketResult, len(plan.tasks))
-	ready := make([]bool, len(plan.tasks))
+	results := make([]phaseBucketResult, plan.results)
+	ready := make([]bool, plan.results)
 	phaseWorkers := workers
 	factory := t.ctxFactory
 	if factory == nil {
@@ -259,6 +299,17 @@ func (t *Trie) processParallelPhaseA(ctx context.Context, workers int, plan phas
 		if err := t.phaseHookCall(task, nil); err != nil {
 			return err
 		}
+		if len(task.batch) != 0 {
+			for i := range task.batch {
+				result, err := t.runSubtreeTask(workerCtx, workerContext, task.batch[i])
+				if err != nil {
+					return err
+				}
+				results[task.resultStart+i] = result
+				ready[task.resultStart+i] = true
+			}
+			return nil
+		}
 		var result phaseBucketResult
 		var err error
 		switch task.kind {
@@ -266,60 +317,70 @@ func (t *Trie) processParallelPhaseA(ctx context.Context, workers int, plan phas
 			if task.kind == phaseBucketSubtask || len(task.dependencies) == 0 {
 				result, err = t.runSubtreeTask(workerCtx, workerContext, task)
 			} else {
-				result, err = t.runBucketJoin(workerCtx, workerContext, task, results, ready)
+				result, err = t.runBucketJoin(workerCtx, workerContext, task, plan.tasks, results, ready)
 			}
 		case phaseChain:
-			result, err = t.runChainTask(workerCtx, workerContext, task, results, ready)
+			result, err = t.runChainTask(workerCtx, workerContext, task, plan.tasks, results, ready)
 		case phaseJoin:
-			changed := make(map[string]phaseBucketResult)
-			for index := range results {
-				result := &results[index]
-				if !ready[index] || plan.tasks[index].kind == phaseBucketSubtask {
-					continue
-				}
-				for _, delta := range result.deltas {
-					if _, ok := round.records[string(delta.Key)]; !ok {
-						round.records[string(delta.Key)] = bytes.Clone(delta.Prev)
-					}
-					if err := t.ctx.PutBranch(delta.Key, delta.Data, delta.Prev); err != nil {
-						return fmt.Errorf("apply phase delta %x: %w", delta.Key, err)
-					}
-					t.rememberPrev(delta.Key, delta.Prev)
-					t.addDelta(delta.Key, delta.Data, delta.Prev)
-				}
-				if plan.tasks[index].kind == phaseChain {
-					key := string(eip8297.AppendBitPath(nil, &result.prefix))
-					changed[key] = *result
+			changed := make(map[string]phaseBucketResult, len(task.dependencies))
+			for _, dependency := range task.dependencies {
+				result := &results[plan.tasks[dependency].resultStart]
+				changed[string(eip8297.AppendBitPath(nil, &result.prefix))] = *result
+			}
+			if round.owners, err = phaseOwners(plan.tasks, task.dependencies); err != nil {
+				return err
+			}
+			if t.joinHook != nil {
+				if err := t.joinHook(task, round); err != nil {
+					return err
 				}
 			}
 			t.coreTask = &task
 			finalRoot, err = t.processUpperOps(nil, changed)
 			t.coreTask = nil
+			result.deltas = t.takeDeltaPart()
 		default:
 			return fmt.Errorf("unknown phase task %d", task.kind)
 		}
 		if err != nil {
 			return err
 		}
-		results[task.resultIndex] = result
-		ready[task.resultIndex] = true
+		results[task.resultStart] = result
+		ready[task.resultStart] = true
 		return nil
 	}); err != nil {
 		return common.Hash{}, err
 	}
-	merged := mergeRoundDeltas(t.deltas)
-	t.deltas = merged
 	t.ctx = base
-	for _, delta := range merged {
-		if err := base.PutBranch(delta.Key, delta.Data, delta.Prev); err != nil {
-			return common.Hash{}, err
+	var deltas []commitment.BranchDelta
+	var parts [][]commitment.BranchDelta
+	for index := range plan.tasks {
+		if plan.tasks[index].kind == phaseBucketSubtask {
+			continue
+		}
+		for r := plan.tasks[index].resultStart; r < plan.tasks[index].resultEnd; r++ {
+			if len(results[r].deltas) == 0 {
+				continue
+			}
+			if t.deferUpdates {
+				parts = append(parts, results[r].deltas)
+			} else {
+				for _, delta := range results[r].deltas {
+					if err := base.PutBranch(delta.Key, delta.Data, delta.Prev); err != nil {
+						return common.Hash{}, err
+					}
+				}
+			}
+			deltas = append(deltas, results[r].deltas...)
 		}
 	}
+	t.deltas = deltas
+	t.keepDeferred(parts)
 	return finalRoot, nil
 }
 
 //nolint:gocritic
-func (t *Trie) runBucketJoin(workerCtx context.Context, workerContext commitment.PatriciaContext, task phaseTask, results []phaseBucketResult, ready []bool) (phaseBucketResult, error) {
+func (t *Trie) runBucketJoin(workerCtx context.Context, workerContext commitment.PatriciaContext, task phaseTask, tasks []phaseTask, results []phaseBucketResult, ready []bool) (phaseBucketResult, error) {
 	base := cmp.Or(workerContext, t.phaseBase)
 	local := t.newPhaseContext(base, nil)
 	bucketTrie, err := newBucketTrie(local, []byte(task.key))
@@ -333,23 +394,30 @@ func (t *Trie) runBucketJoin(workerCtx context.Context, workerContext commitment
 	childDeltas := make([]commitment.BranchDelta, 0)
 	changed := make(map[string]phaseBucketResult, len(task.dependencies))
 	for _, dependency := range task.dependencies {
-		if !ready[dependency] {
+		index := tasks[dependency].resultStart
+		if !ready[index] {
 			return phaseBucketResult{}, fmt.Errorf("bucket %x missing subtree result", []byte(task.key))
 		}
-		result := results[dependency]
-		for _, delta := range result.deltas {
-			local.records[string(delta.Key)] = bytes.Clone(delta.Data)
-			bucketTrie.roundPrev[string(delta.Key)] = bytes.Clone(delta.Prev)
-			childDeltas = append(childDeltas, delta)
-		}
+		result := results[index]
+		childDeltas = append(childDeltas, result.deltas...)
 		changed[string(eip8297.AppendBitPath(nil, &result.prefix))] = result
+	}
+	if local.owners, err = phaseOwners(tasks, task.dependencies); err != nil {
+		return phaseBucketResult{}, err
+	}
+	if t.joinHook != nil {
+		if err := t.joinHook(task, local); err != nil {
+			return phaseBucketResult{}, err
+		}
 	}
 	if _, err := bucketTrie.processUpperOps(nil, changed); err != nil {
 		return phaseBucketResult{}, err
 	}
-	deltas := append(childDeltas, bucketTrie.TakeDeltas()...)
+	deltas := append(childDeltas, bucketTrie.takeDeltaPart()...)
+	if len(deltas) == 0 {
+		return phaseBucketResult{prefix: task.prefix, unchanged: true}, workerCtx.Err()
+	}
 	descriptor, present, err := bucketTrie.descriptorFromRoot()
-	descriptor, present, err = descriptorWithFallback(descriptor, present, err, deltas, task.fallbackSeen, task.fallback, task.fallbackOK)
 	if err != nil {
 		return phaseBucketResult{}, err
 	}
@@ -357,7 +425,7 @@ func (t *Trie) runBucketJoin(workerCtx context.Context, workerContext commitment
 }
 
 //nolint:gocritic
-func (t *Trie) runChainTask(workerCtx context.Context, workerContext commitment.PatriciaContext, task phaseTask, results []phaseBucketResult, ready []bool) (phaseBucketResult, error) {
+func (t *Trie) runChainTask(workerCtx context.Context, workerContext commitment.PatriciaContext, task phaseTask, tasks []phaseTask, results []phaseBucketResult, ready []bool) (phaseBucketResult, error) {
 	base := cmp.Or(workerContext, t.phaseBase)
 	local := t.newPhaseContext(base, &task.prefix)
 	chainTrie, err := newSubtreeTrie(local, task.prefix, task.initial.descriptor, task.initial.present)
@@ -369,28 +437,29 @@ func (t *Trie) runChainTask(workerCtx context.Context, workerContext commitment.
 	if task.zone == eip8297.StorageZone {
 		changed := make(map[string]phaseBucketResult)
 		for _, dependency := range task.dependencies {
-			if !ready[dependency] {
-				return phaseBucketResult{}, fmt.Errorf("storage chain missing bucket result")
+			for index := tasks[dependency].resultStart; index < tasks[dependency].resultEnd; index++ {
+				if !ready[index] {
+					return phaseBucketResult{}, fmt.Errorf("storage chain missing bucket result")
+				}
+				if result := results[index]; !result.unchanged && pathHasPrefix(&result.prefix, &task.prefix) {
+					changed[string(eip8297.AppendBitPath(nil, &result.prefix))] = result
+				}
 			}
-			result := results[dependency]
-			changed[string(eip8297.AppendBitPath(nil, &result.prefix))] = result
 		}
 		if _, err := chainTrie.processUpperOps(nil, changed); err != nil {
 			return phaseBucketResult{}, err
 		}
 	} else {
-		for i := range task.ops {
-			if err := t.phaseHookCall(task, &task.ops[i]); err != nil {
-				return phaseBucketResult{}, err
-			}
+		if err := t.phaseHookOps(&task); err != nil {
+			return phaseBucketResult{}, err
 		}
 		if _, err := chainTrie.Process(task.ops); err != nil {
 			return phaseBucketResult{}, err
 		}
 	}
-	deltas := ownedDeltas(chainTrie.TakeDeltas(), &task.prefix)
+	deltas := ownedDeltas(chainTrie.takeDeltaPart(), &task.prefix)
 	descriptor, present, err := chainTrie.descriptorFromRoot()
-	descriptor, present, err = descriptorWithFallback(descriptor, present, err, deltas, task.hasInitial, task.initial.descriptor, task.initial.present)
+	descriptor, present, err = descriptorWithFallback(descriptor, present, err, deltas, &task.initial)
 	if err != nil {
 		return phaseBucketResult{}, err
 	}
@@ -405,69 +474,38 @@ func ownsRecordKey(key []byte, prefix *eip8297.Bitpath) bool {
 	return err == nil && pathHasPrefix(&path, prefix)
 }
 
-func (t *Trie) preparePhaseTasks(plan *phasePlan, base commitment.PatriciaContext) error {
-	buckets := make(map[string]*Trie)
+func (t *Trie) preparePhaseTasks(plan *phasePlan) error {
 	for i := range plan.tasks {
 		task := &plan.tasks[i]
-		if task.kind != phaseChain && task.kind != phaseBucketSubtask && task.kind != phaseBucket {
+		if task.kind != phaseChain {
 			continue
 		}
-		prefix, err := taskSubtreePrefix(*task)
+		descriptor, present, err := t.descriptorAtPrefix(&task.prefix)
 		if err != nil {
 			return err
 		}
-		var descriptor bucketDescriptor
-		var present bool
-		if task.kind == phaseBucketSubtask {
-			bucket := buckets[task.key]
-			if bucket == nil {
-				bucket, err = newBucketTrie(base, []byte(task.key))
-				if err != nil {
-					return err
-				}
-				buckets[task.key] = bucket
-			}
-			descriptor, present, err = bucket.descriptorAtPrefix(&prefix)
-		} else {
-			descriptor, present, err = t.descriptorAtPrefix(&prefix)
-		}
-		if err != nil {
-			return err
-		}
-		if task.kind == phaseBucket {
-			task.fallback = descriptor
-			task.fallbackSeen = true
-			task.fallbackOK = present
-		} else {
-			task.initial = phaseBucketResult{prefix: prefix, descriptor: descriptor, present: present}
-			task.hasInitial = true
-		}
+		task.initial = phaseBucketResult{prefix: task.prefix, descriptor: descriptor, present: present}
 	}
 	return nil
 }
 
-func mergeRoundDeltas(deltas []commitment.BranchDelta) []commitment.BranchDelta {
-	byKey := make(map[string]commitment.BranchDelta, len(deltas))
-	for _, delta := range deltas {
-		key := string(delta.Key)
-		if existing, ok := byKey[key]; ok {
-			existing.Data = bytes.Clone(delta.Data)
-			byKey[key] = existing
-			continue
-		}
-		byKey[key] = commitment.BranchDelta{Key: bytes.Clone(delta.Key), Data: bytes.Clone(delta.Data), Prev: bytes.Clone(delta.Prev)}
+func (t *Trie) phaseHookOps(task *phaseTask) error {
+	if t.phaseHook == nil {
+		return nil
 	}
-	keys := slices.AppendSeq(make([]string, 0, len(byKey)), maps.Keys(byKey))
-	slices.Sort(keys)
-	result := make([]commitment.BranchDelta, 0, len(keys))
-	for _, key := range keys {
-		delta := byKey[key]
-		if bytes.Equal(delta.Data, delta.Prev) {
-			continue
+	task.ops = slices.Clone(task.ops)
+	for i := range task.ops {
+		task.ops[i].Key = bytes.Clone(task.ops[i].Key)
+		task.ops[i].Drop = bytes.Clone(task.ops[i].Drop)
+		if merge := task.ops[i].merge; merge != nil {
+			copied := *merge
+			task.ops[i].merge = &copied
 		}
-		result = append(result, delta)
+		if err := t.phaseHook(*task, &task.ops[i]); err != nil {
+			return err
+		}
 	}
-	return result
+	return nil
 }
 
 //nolint:gocritic

@@ -18,10 +18,10 @@ package pbt
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
-	"sync"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -52,8 +52,14 @@ type Trie struct {
 	ctx                    commitment.PatriciaContext
 	ctxFactory             commitment.TrieContextFactory
 	phaseBase              commitment.PatriciaContext
-	phaseReadMu            *sync.Mutex
 	phaseHook              func(phaseTask, *Op) error
+	joinHook               func(phaseTask, commitment.PatriciaContext) error
+	bucketBatch            int
+	phaseSchedule          phaseSchedule
+	deferUpdates           bool
+	deferred               [][]commitment.BranchDelta
+	deferredRoot           []byte
+	deferredRootSet        bool
 	coreApplyHook          func(phaseTask, *Op) error
 	coreEncodeHook         func(phaseTask, []byte) error
 	coreActivityHook       func(bool)
@@ -90,6 +96,7 @@ type Trie struct {
 	droppedLeafKeys        map[string]struct{}
 	mergeCreatedStems      map[string]struct{}
 	verifiedBucketKeys     map[string]struct{}
+	verifiedChains         map[string]verifiedChain
 	verifyProgress         func([]byte)
 }
 
@@ -103,6 +110,7 @@ func (t *Trie) SetVerifyProgress(progress func([]byte)) {
 
 func (t *Trie) Reset() {
 	t.mergeCreatedStems = make(map[string]struct{})
+	t.deferredRoot, t.deferredRootSet = nil, false
 	t.ResetContext(t.ctx)
 }
 
@@ -183,6 +191,39 @@ func (t *Trie) SetCoreHooks(apply func(phaseTask, *Op) error, encode func(phaseT
 
 func (t *Trie) SetCoreActivityHook(hook func(bool)) { t.coreActivityHook = hook }
 
+func (t *Trie) SetDeferCommitmentUpdates(deferUpdates bool) { t.deferUpdates = deferUpdates }
+
+func (t *Trie) TakeDeferredDeltas() [][]commitment.BranchDelta {
+	parts := t.deferred
+	t.deferred = nil
+	return parts
+}
+
+var errDeferredNotTaken = errors.New("pbin: deferred updates were not taken")
+
+func (t *Trie) beginDeferredRound() error {
+	if t.deferUpdates && len(t.deferred) != 0 {
+		return errDeferredNotTaken
+	}
+	t.deferredRoot, t.deferredRootSet = nil, false
+	return nil
+}
+
+func (t *Trie) keepDeferred(parts [][]commitment.BranchDelta) {
+	t.deferred = parts
+	for _, part := range parts {
+		for i := range part {
+			if bytes.Equal(part[i].Key, GlobalRootKey()) {
+				t.deferredRoot, t.deferredRootSet = part[i].Data, true
+			}
+		}
+	}
+}
+
+func (t *Trie) deferBaseWrites() bool {
+	return t.deferUpdates && t.phaseBase == nil
+}
+
 func (t *Trie) SetFoldHook(hook func([]byte)) { t.foldHook = hook }
 
 func (t *Trie) foldRowResult(row *rowNode) (FoldResult, error) {
@@ -202,6 +243,9 @@ func (t *Trie) foldRowResult(row *rowNode) (FoldResult, error) {
 
 func (t *Trie) ResetContext(ctx commitment.PatriciaContext) {
 	t.ctx = ctx
+	if len(t.deferred) == 0 {
+		t.deferredRoot, t.deferredRootSet = nil, false
+	}
 	t.phaseBase = nil
 	t.root = nil
 	t.rootLoaded = false
@@ -258,6 +302,9 @@ func (t *Trie) rootRecordPath() eip8297.Bitpath {
 func (t *Trie) Process(ops []Op) (common.Hash, error) {
 	if t.ctx == nil {
 		return common.Hash{}, fmt.Errorf("nil Patricia context")
+	}
+	if err := t.beginDeferredRound(); err != nil {
+		return common.Hash{}, err
 	}
 	if t.roundPending {
 		t.ResetContext(t.ctx)
@@ -343,6 +390,9 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 	}
 	if err := t.write(); err != nil {
 		return common.Hash{}, err
+	}
+	if t.deferBaseWrites() && len(t.deltas) != 0 {
+		t.keepDeferred([][]commitment.BranchDelta{slices.Clone(t.deltas)})
 	}
 	return t.rootHash()
 }
@@ -455,8 +505,10 @@ func (t *Trie) write() error {
 		if bytes.Equal(data, old) {
 			continue
 		}
-		if err := t.ctx.PutBranch([]byte(key), data, old); err != nil {
-			return err
+		if !t.deferBaseWrites() {
+			if err := t.ctx.PutBranch([]byte(key), data, old); err != nil {
+				return err
+			}
 		}
 		t.addDelta([]byte(key), data, old)
 	}

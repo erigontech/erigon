@@ -96,9 +96,9 @@ func TestSubtreeTaskDoesNotReadAbovePrefix(t *testing.T) {
 	descriptor, present, err := parent.descriptorAtPrefix(&prefix)
 	require.NoError(t, err)
 	ctx.reads = nil
-	task := phaseTask{kind: phaseChain, prefix: prefix, ops: []Op{{Key: account, Value: testTrieValue(3)}}, initial: phaseBucketResult{prefix: prefix, descriptor: descriptor, present: present}, hasInitial: true}
+	task := phaseTask{kind: phaseChain, prefix: prefix, ops: []Op{{Key: account, Value: testTrieValue(3)}}, initial: phaseBucketResult{prefix: prefix, descriptor: descriptor, present: present}}
 	trie := NewTrie(ctx)
-	_, err = trie.runSubtreeTask(context.Background(), ctx, task)
+	_, err = trie.runChainTask(context.Background(), ctx, task, nil, nil, nil)
 	require.NoError(t, err)
 	for _, key := range ctx.reads {
 		require.NotEqual(t, GlobalRootKey(), key)

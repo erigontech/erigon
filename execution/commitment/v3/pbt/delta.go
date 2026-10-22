@@ -31,6 +31,12 @@ func (t *Trie) addDelta(key, data, prev []byte) {
 	})
 }
 
+func (t *Trie) takeDeltaPart() []commitment.BranchDelta {
+	deltas := t.deltas
+	t.deltas = nil
+	return deltas
+}
+
 func (t *Trie) TakeDeltas() []commitment.BranchDelta {
 	deltas := make([]commitment.BranchDelta, len(t.deltas))
 	for i := range t.deltas {

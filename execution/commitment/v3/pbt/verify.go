@@ -18,10 +18,17 @@ package pbt
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"reflect"
+	"sync"
+	"sync/atomic"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
 
@@ -48,10 +55,184 @@ func (t *Trie) newVerifier() *Trie {
 }
 
 func (t *Trie) Verify() error {
+	return t.VerifyContext(context.Background(), 1, nil)
+}
+
+func (t *Trie) VerifyContext(ctx context.Context, workers int, factory commitment.TrieContextFactory) error {
 	if t.ctx == nil {
 		return fmt.Errorf("nil Patricia context")
 	}
-	return t.newVerifier().verify()
+	verifier := t.newVerifier()
+	if workers > 1 && factory != nil {
+		if err := verifier.verifyChains(ctx, workers, factory); err != nil {
+			return err
+		}
+	}
+	return verifier.verify()
+}
+
+const verifyChainBits = 12
+
+type verifiedChain struct {
+	row    *rowNode
+	result FoldResult
+	err    error
+}
+
+func (t *Trie) trackBucketKeys() {
+	if t.verifiedBucketKeys != nil {
+		return
+	}
+	if _, ok := t.ctx.(interface{ Records() map[string][]byte }); ok {
+		t.verifiedBucketKeys = make(map[string]struct{})
+	}
+}
+
+func (t *Trie) verifyChains(ctx context.Context, workers int, factory commitment.TrieContextFactory) error {
+	root, err := t.loadRoot()
+	if err != nil {
+		return err
+	}
+	if root.form != RowRoot || root.row == nil || root.row.path.BitLen >= verifyChainBits {
+		return nil
+	}
+	var paths []eip8297.Bitpath
+	if err := t.collectChainPaths(root.row, &paths); err != nil {
+		return nil
+	}
+	if len(paths) < 2 {
+		return nil
+	}
+	t.trackBucketKeys()
+	progress := t.verifyProgress
+	if progress != nil {
+		var mu sync.Mutex
+		progress = func(key []byte) {
+			mu.Lock()
+			defer mu.Unlock()
+			t.verifyProgress(key)
+		}
+	}
+	keys := make([]string, len(paths))
+	for i := range paths {
+		key, err := rowKeyForPath(&paths[i])
+		if err != nil {
+			return nil
+		}
+		keys[i] = string(key)
+	}
+	chains := make([]verifiedChain, len(paths))
+	bucketKeys := make([]map[string]struct{}, len(paths))
+	var next atomic.Int64
+	var firstFailed atomic.Int64
+	firstFailed.Store(int64(len(paths)))
+	g, gctx := errgroup.WithContext(ctx)
+	for range min(workers, len(paths)) {
+		g.Go(func() error {
+			view, cleanup := factory(gctx)
+			if cleanup != nil {
+				defer cleanup()
+			}
+			if view == nil {
+				return errors.New("trie context factory returned a nil context")
+			}
+			for {
+				if err := gctx.Err(); err != nil {
+					return err
+				}
+				i := int(next.Add(1)) - 1
+				if i >= len(paths) {
+					return nil
+				}
+				if int64(i) > firstFailed.Load() {
+					continue
+				}
+				worker := t.newVerifier()
+				worker.ctx = view
+				worker.verifyProgress = progress
+				if t.verifiedBucketKeys != nil {
+					worker.verifiedBucketKeys = make(map[string]struct{})
+				}
+				chain := verifiedChain{}
+				chain.row, chain.err = worker.loadRow(paths[i])
+				if chain.err == nil {
+					chain.result, chain.err = worker.verifyRow(chain.row)
+				}
+				if chain.err != nil {
+					for failed := firstFailed.Load(); int64(i) < failed && !firstFailed.CompareAndSwap(failed, int64(i)); failed = firstFailed.Load() {
+					}
+				}
+				chains[i] = chain
+				bucketKeys[i] = worker.verifiedBucketKeys
+			}
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return err
+	}
+	t.verifiedChains = make(map[string]verifiedChain, len(chains))
+	for i := range chains {
+		if int64(i) > firstFailed.Load() {
+			continue
+		}
+		t.verifiedChains[keys[i]] = chains[i]
+		for key := range bucketKeys[i] {
+			t.verifiedBucketKeys[key] = struct{}{}
+		}
+	}
+	return nil
+}
+
+func (t *Trie) collectChainPaths(row *rowNode, paths *[]eip8297.Bitpath) error {
+	for slot := range row.cells {
+		cell := row.cell(slot)
+		if cell.Kind != BranchCell {
+			continue
+		}
+		path, err := rowChildPath(row, slot, cell.Prefix, branchSplit(row, cell))
+		if err != nil {
+			return err
+		}
+		if path.BitLen >= verifyChainBits {
+			*paths = append(*paths, path)
+			continue
+		}
+		child, err := t.loadBranchChild(row, slot)
+		if err != nil {
+			return err
+		}
+		if err := t.collectChainPaths(child, paths); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (t *Trie) verifyBranchChild(row *rowNode, slot int) (*rowNode, FoldResult, error) {
+	if t.verifiedChains != nil && row.path.BitLen < verifyChainBits {
+		cell := row.cell(slot)
+		path, err := rowChildPath(row, slot, cell.Prefix, branchSplit(row, cell))
+		if err != nil {
+			return nil, FoldResult{}, err
+		}
+		if path.BitLen >= verifyChainBits {
+			key, err := rowKeyForPath(&path)
+			if err != nil {
+				return nil, FoldResult{}, err
+			}
+			chain, ok := t.verifiedChains[string(key)]
+			if !ok {
+				return nil, FoldResult{}, fmt.Errorf("chain row %x was not verified", key)
+			}
+			return chain.row, chain.result, chain.err
+		}
+	}
+	child, err := t.loadBranchChild(row, slot)
+	if err != nil {
+		return nil, FoldResult{}, err
+	}
+	result, err := t.verifyRow(child)
+	return child, result, err
 }
 
 func (t *Trie) verify() error {
@@ -59,11 +240,7 @@ func (t *Trie) verify() error {
 	if err != nil {
 		return err
 	}
-	if _, ok := t.ctx.(interface{ Records() map[string][]byte }); ok {
-		t.verifiedBucketKeys = make(map[string]struct{})
-	} else {
-		t.verifiedBucketKeys = nil
-	}
+	t.trackBucketKeys()
 	if root.row == nil && root.form == RowRoot {
 		return t.verifyBuckets()
 	}
@@ -179,11 +356,7 @@ func (t *Trie) verifyRow(row *rowNode) (FoldResult, error) {
 		if cell.Kind != BranchCell {
 			continue
 		}
-		child, err := t.loadBranchChild(row, slot)
-		if err != nil {
-			return FoldResult{}, err
-		}
-		childResult, err := t.verifyRow(child)
+		child, childResult, err := t.verifyBranchChild(row, slot)
 		if err != nil {
 			return FoldResult{}, err
 		}

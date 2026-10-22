@@ -35,7 +35,7 @@ func init() {
 }
 
 func newRegisteredTrie(tmpdir string, cfg commitment.TrieConfig) (commitment.Trie, *commitment.Updates) {
-	return &registeredTrie{Trie: NewTrie(nil), workers: cfg.WarmupNumWorkersOrDefault()}, commitment.NewUpdates(commitment.ModeDirect, tmpdir, commitment.KeyToHexNibbleHash)
+	return &registeredTrie{Trie: NewTrie(nil), workers: cfg.PBinWorkersOrDefault()}, commitment.NewUpdates(commitment.ModeDirect, tmpdir, commitment.KeyToHexNibbleHash)
 }
 
 func (t *registeredTrie) RootHash() ([]byte, error) {

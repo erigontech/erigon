@@ -623,7 +623,7 @@ func (sd *SharedDomains) FlushPendingUpdatesWithoutChangeset(tx kv.TemporalTx) e
 
 func (sd *SharedDomains) PutCommitmentBranches(roTx kv.TemporalTx, parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error {
 	if batch, ok := sd.mem.(commitmentBranchBatchWriter); ok {
-		return batch.PutOwnedCommitmentBranches(parts, txNum, diff)
+		return batch.PutOwnedCommitmentBranches(sd.commitmentDomainValue(), parts, txNum, diff)
 	}
 	for _, part := range parts {
 		for i := range part {
@@ -854,7 +854,7 @@ type domainCounter interface {
 }
 
 type commitmentBranchBatchWriter interface {
-	PutOwnedCommitmentBranches(parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error
+	PutOwnedCommitmentBranches(domain kv.Domain, parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error
 }
 
 type commitmentDiffPutDel struct {

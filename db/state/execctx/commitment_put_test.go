@@ -137,3 +137,25 @@ func TestFlushPendingDeltasLandInTheBlockChangeset(t *testing.T) {
 	require.Equal(t, wantBlock, gotBlock)
 	require.Equal(t, wantLive, gotLive)
 }
+
+func TestPutCommitmentBranchesTargetsConfiguredDomain(t *testing.T) {
+	withDualCommitmentFlags(t)
+	seed := commitmentPutCorpus(64)
+	db := newTestDb(t, 16)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithCommitmentDomain(kv.CommitmentBinDomain))
+	require.NoError(t, err)
+	defer sd.Close()
+
+	require.NoError(t, sd.PutCommitmentBranches(tx, slices.Collect(slices.Chunk(runner.CloneDeltas(seed), 7)), 1, nil))
+	for _, d := range seed {
+		bin, _, err := sd.GetLatest(kv.CommitmentBinDomain, tx, d.Key)
+		require.NoError(t, err)
+		require.Equal(t, d.Data, bin, "bin record %x", d.Key)
+		hex, _, err := sd.GetLatest(kv.CommitmentDomain, tx, d.Key)
+		require.NoError(t, err)
+		require.Empty(t, hex, "hex record %x", d.Key)
+	}
+}
