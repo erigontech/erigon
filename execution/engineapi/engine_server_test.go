@@ -782,3 +782,51 @@ func TestGetPayloadBodiesByRangeV2(t *testing.T) {
 	req.Equal(hexutil.Bytes(balBytes1), *bodies[0].BlockAccessList)
 	req.Equal(hexutil.Bytes(balBytes2), *bodies[1].BlockAccessList)
 }
+
+// TestQuickStatusHeaderLookup pins how the known-block check looks up its block. A new payload
+// passes its number: a hash-only lookup of a block that is not stored yet searches every header
+// snapshot file before it misses. A forkchoice update does not know its head's number (it passes
+// 0), so it must look the head up by hash only.
+func TestQuickStatusHeaderLookup(t *testing.T) {
+	t.Parallel()
+
+	parent := makeParentHeader(1000)
+	parentHash := parent.Hash()
+	blockHash := common.Hash{0x42}
+	payloadNumber := parent.Number.Uint64() + 1
+
+	for _, test := range []struct {
+		name       string
+		newPayload bool
+		number     uint64
+		forkchoice *engine_types.ForkChoiceState
+		wantNumber *uint64
+	}{
+		{name: "newPayload", newPayload: true, number: payloadNumber, wantNumber: &payloadNumber},
+		{name: "forkchoiceUpdated", forkchoice: &engine_types.ForkChoiceState{HeadHash: blockHash}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			var lookups int
+			stub := &stubExecutionModule{
+				getHeaderFunc: func(_ context.Context, hash *common.Hash, number *uint64) (*types.Header, error) {
+					if hash != nil && *hash == blockHash {
+						lookups++
+						require.Equal(t, test.wantNumber, number)
+						return nil, nil
+					}
+					return getHeaderReturning(parentHash, parent)(context.Background(), hash, number)
+				},
+			}
+
+			cfg := preCancunChainConfig()
+			ctx := context.Background()
+			downloader := engine_block_downloader.NewEngineBlockDownloader(ctx, log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, true, true, nil, nil, 0, 0)
+
+			_, err := srv.getQuickPayloadStatusIfPossible(ctx, blockHash, test.number, parentHash, test.forkchoice, test.newPayload, defaultReadinessWait)
+			require.NoError(t, err)
+			require.Equal(t, 1, lookups)
+		})
+	}
+}
