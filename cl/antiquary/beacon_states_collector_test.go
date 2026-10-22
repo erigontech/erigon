@@ -136,7 +136,7 @@ func TestBeaconStatesCollectorBuildersAcrossGloasFork(t *testing.T) {
 		cltypes.Builder{Balance: 300},
 	))
 	collectBlock := func(preState *state.CachingBeaconState, slot uint64, transition func()) {
-		collector.preStateTransitionHook(preState)
+		require.NoError(t, collector.preStateTransitionHook(preState))
 		transition()
 		require.NoError(t, collector.collectGloasQueuesDiffs(slot, gloasState.GetBuilders(), gloasState.GetBuilderPendingWithdrawals(), gloasState.GetPayloadExpectedWithdrawals()))
 		require.NoError(t, collector.slotDataCollector.Collect(base_encoding.Encode64ToBytes4(slot), []byte{1}))
@@ -171,4 +171,77 @@ func TestBeaconStatesCollectorBuildersAcrossGloasFork(t *testing.T) {
 	changeRow, err := roTx.GetOne(kv.Builders, base_encoding.Encode64ToBytes4(forkSlot+1))
 	require.NoError(t, err)
 	require.Len(t, changeRow, 26+101)
+}
+
+func collectorPendingPayments(slotsPerEpoch uint64) *solid.VectorSSZ[*cltypes.BuilderPendingPayment] {
+	return solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](int(2 * slotsPerEpoch))
+}
+
+func TestBeaconStatesCollectorPendingPaymentsRoundTripAcrossRestart(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	first := newBeaconStatesCollector(cfg, t.TempDir(), log.New())
+	second := newBeaconStatesCollector(cfg, t.TempDir(), log.New())
+	defer first.close()
+	defer second.close()
+
+	st := state.New(cfg)
+	st.SetVersion(clparams.FuluVersion)
+	expected := make(map[uint64][]byte)
+	collect := func(collector *beaconStatesCollector, slot uint64, upgrade func()) {
+		require.NoError(t, collector.preStateTransitionHook(st))
+		upgrade()
+		payments := st.GetBuilderPendingPayments()
+		payments.Get(int(slot % uint64(payments.Length()))).Weight = slot
+		require.NoError(t, collector.collectBuilderPendingPayments(slot, payments))
+		require.NoError(t, collector.slotDataCollector.Collect(base_encoding.Encode64ToBytes4(slot), []byte{1}))
+		encoded, err := payments.EncodeSSZ(nil)
+		require.NoError(t, err)
+		expected[slot] = encoded
+	}
+	noUpgrade := func() {}
+
+	collect(first, 30, func() {
+		st.SetVersion(clparams.GloasVersion)
+		st.SetBuilderPendingPayments(collectorPendingPayments(cfg.SlotsPerEpoch))
+	})
+	for slot := uint64(31); slot <= 33; slot++ {
+		collect(first, slot, noUpgrade)
+	}
+	for slot := uint64(34); slot <= 35; slot++ {
+		collect(second, slot, noUpgrade)
+	}
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, first.flush(context.Background(), tx))
+	require.NoError(t, second.flush(context.Background(), tx))
+	require.NoError(t, tx.Commit())
+
+	roTx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	for _, slot := range []uint64{30, 32, 34} {
+		row, err := roTx.GetOne(kv.BuilderPendingPaymentsTable, base_encoding.Encode64ToBytes4(slot))
+		require.NoError(t, err)
+		kind, err := state_accessors.PendingPaymentsRowKind(row)
+		require.NoError(t, err)
+		require.Equal(t, state_accessors.PendingPaymentsBaseKind, kind, "slot %d", slot)
+	}
+	for _, slot := range []uint64{31, 33, 35} {
+		row, err := roTx.GetOne(kv.BuilderPendingPaymentsTable, base_encoding.Encode64ToBytes4(slot))
+		require.NoError(t, err)
+		kind, err := state_accessors.PendingPaymentsRowKind(row)
+		require.NoError(t, err)
+		require.Equal(t, state_accessors.PendingPaymentsDeltaKind, kind, "slot %d", slot)
+	}
+	getter := state_accessors.GetValFnTxAndSnapshot(roTx, nil)
+	for slot := uint64(30); slot <= 35; slot++ {
+		got := collectorPendingPayments(cfg.SlotsPerEpoch)
+		require.NoError(t, historical_states_reader.ReadBuilderPendingPayments(getter, slot, cfg.SlotsPerEpoch, got))
+		gotSSZ, err := got.EncodeSSZ(nil)
+		require.NoError(t, err)
+		require.Equal(t, expected[slot], gotSSZ, "slot %d", slot)
+	}
 }

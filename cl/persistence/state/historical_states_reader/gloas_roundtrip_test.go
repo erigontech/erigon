@@ -304,9 +304,7 @@ func TestReadBuildersSSZ_WithData(t *testing.T) {
 	require.Equal(t, common.Bytes48{0x01}, got.Get(0).Pubkey)
 }
 
-// TestReadCompressedSSZ_BuilderPendingPayments round-trips a BuilderPendingPayments
-// VectorSSZ through compress -> readCompressedSSZ.
-func TestReadCompressedSSZ_BuilderPendingPayments(t *testing.T) {
+func TestReadBuilderPendingPayments(t *testing.T) {
 	slotsPerEpoch := uint64(32)
 	payments := solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](int(2 * slotsPerEpoch))
 	// Populate a couple of entries.
@@ -327,19 +325,15 @@ func TestReadCompressedSSZ_BuilderPendingPayments(t *testing.T) {
 		},
 	})
 
-	sszData, err := payments.EncodeSSZ(nil)
-	require.NoError(t, err)
-	compressed := compressRawSSZ(t, sszData)
-
 	slot := uint64(2000)
 	key := string(base_encoding.Encode64ToBytes4(slot))
 
 	getter := mockGetValFn(map[string]map[string][]byte{
-		kv.BuilderPendingPaymentsTable: {key: compressed},
+		kv.BuilderPendingPaymentsTable: {key: pendingPaymentsBaseRowWithSlots(t, slot, slotsPerEpoch, payments)},
 	})
 
 	got := solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](int(2 * slotsPerEpoch))
-	require.NoError(t, readCompressedSSZ(getter, slot, kv.BuilderPendingPaymentsTable, got, int(clparams.GloasVersion)))
+	require.NoError(t, ReadBuilderPendingPayments(getter, slot, slotsPerEpoch, got))
 
 	require.Equal(t, payments.Length(), got.Length())
 	p0 := got.Get(0)
@@ -682,7 +676,7 @@ func seedGloasHistoricalState(t *testing.T, cfg *clparams.BeaconChainConfig, slo
 
 	compressedBid := compressSSZ(t, expectedBid)
 	compressedEPA := compressSSZ(t, expectedEPA)
-	compressedBPP := compressSSZ(t, expectedBPP)
+	pendingPaymentsRow := pendingPaymentsBaseRowWithSlots(t, slot, cfg.SlotsPerEpoch, expectedBPP)
 	compressedPtcWindow := compressSSZ(t, expectedPtcWindow)
 
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
@@ -707,7 +701,7 @@ func seedGloasHistoricalState(t *testing.T, cfg *clparams.BeaconChainConfig, slo
 	require.NoError(t, tx.Put(kv.InactivityScores, genesisKey, compressedInactivity))
 	require.NoError(t, tx.Put(kv.LatestExecutionPayloadBidTable, slotKey, compressedBid))
 	require.NoError(t, tx.Put(kv.ExecutionPayloadAvailabilityTable, slotKey, compressedEPA))
-	require.NoError(t, tx.Put(kv.BuilderPendingPaymentsTable, slotKey, compressedBPP))
+	require.NoError(t, tx.Put(kv.BuilderPendingPaymentsTable, slotKey, pendingPaymentsRow))
 	require.NoError(t, tx.Put(kv.PtcWindowEpochTable, roundedKey, compressedPtcWindow))
 
 	require.NoError(t, tx.Commit())

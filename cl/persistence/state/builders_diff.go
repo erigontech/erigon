@@ -17,9 +17,7 @@
 package state_accessors
 
 import (
-	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 
@@ -28,17 +26,10 @@ import (
 )
 
 const (
-	buildersDiffPreambleSize = 14
-	buildersDiffHeaderSize   = buildersDiffPreambleSize + 8 + 4
-	builderSSZSize           = 93
-	buildersDiffEntrySize    = 8 + builderSSZSize
-	buildersDiffVersion      = byte(1)
-	buildersDiffKind         = byte(1)
-)
-
-var (
-	buildersDiffPreamble      = [buildersDiffPreambleSize]byte{0, 0, 0, 0, 0, 0, 0, 0, 'G', 'L', 'O', 'A', buildersDiffVersion, buildersDiffKind}
-	ErrHistoryRebuildRequired = errors.New("historical state row needs a rebuild")
+	buildersDiffHeaderSize = historyRowPreambleSize + 8 + 4
+	builderSSZSize         = 93
+	buildersDiffEntrySize  = 8 + builderSSZSize
+	buildersDiffKind       = byte(1)
 )
 
 type BuildersDiffWriter struct {
@@ -57,7 +48,7 @@ func (w *BuildersDiffWriter) WriteDiff(dst io.Writer, post *solid.ListSSZ[*cltyp
 		return fmt.Errorf("builders registry shrank from %d to %d", len(w.baseline), post.Len())
 	}
 
-	row := append(make([]byte, 0, buildersDiffHeaderSize), buildersDiffPreamble[:]...)
+	row := appendHistoryRowPreamble(make([]byte, 0, buildersDiffHeaderSize), buildersDiffKind)
 	row = binary.LittleEndian.AppendUint64(row, uint64(post.Len()))
 	row = binary.LittleEndian.AppendUint32(row, 0)
 	count := 0
@@ -73,34 +64,26 @@ func (w *BuildersDiffWriter) WriteDiff(dst io.Writer, post *solid.ListSSZ[*cltyp
 			return fmt.Errorf("encode builder at index %d: %w", i, err)
 		}
 	}
-	binary.LittleEndian.PutUint32(row[buildersDiffPreambleSize+8:], uint32(count))
+	binary.LittleEndian.PutUint32(row[historyRowPreambleSize+8:], uint32(count))
 
 	_, err := dst.Write(row)
 	return err
 }
 
 func ApplyBuildersDiff(row []byte, builders *solid.ListSSZ[*cltypes.Builder], registryLimit uint64) error {
-	if len(row) < buildersDiffPreambleSize {
-		return rebuildRequired("row shorter than preamble")
+	kind, body, err := parseHistoryRow(row, "builders diff")
+	if err != nil {
+		return err
 	}
-	if binary.LittleEndian.Uint32(row[:4]) != 0 || binary.LittleEndian.Uint32(row[4:8]) != 0 {
-		return rebuildRequired("legacy row preamble")
-	}
-	if !bytes.Equal(row[8:12], buildersDiffPreamble[8:12]) {
-		return rebuildRequired("unknown row magic")
-	}
-	if row[12] != buildersDiffVersion {
-		return rebuildRequired("unsupported builders diff version %d", row[12])
-	}
-	if row[13] != buildersDiffKind {
-		return rebuildRequired("unsupported historical state row kind %d", row[13])
+	if kind != buildersDiffKind {
+		return rebuildRequired("unsupported historical state row kind %d", kind)
 	}
 	if len(row) < buildersDiffHeaderSize {
 		return rebuildRequired("truncated builders diff header")
 	}
 
-	newLength := binary.LittleEndian.Uint64(row[buildersDiffPreambleSize:])
-	count := binary.LittleEndian.Uint32(row[buildersDiffPreambleSize+8:])
+	newLength := binary.LittleEndian.Uint64(body)
+	count := binary.LittleEndian.Uint32(body[8:])
 	expectedLength := uint64(buildersDiffHeaderSize) + uint64(count)*uint64(buildersDiffEntrySize)
 	if uint64(len(row)) != expectedLength {
 		return rebuildRequired("builders diff length is %d, want %d", len(row), expectedLength)
@@ -154,8 +137,4 @@ func ApplyBuildersDiff(row []byte, builders *solid.ListSSZ[*cltypes.Builder], re
 		}
 	}
 	return nil
-}
-
-func rebuildRequired(reason string, args ...any) error {
-	return fmt.Errorf("%w: %s", ErrHistoryRebuildRequired, fmt.Sprintf(reason, args...))
 }
