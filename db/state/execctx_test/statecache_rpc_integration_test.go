@@ -407,19 +407,13 @@ func TestEmbeddedRPCPinnedViewIgnoresLaterCachePublications(t *testing.T) {
 			countedTx := &rpcCountingTx{TemporalTx: rpcTx}
 			rpcView, err := rpcCache.View(ctx, rpchelper.PinToOverlay(countedTx, selectedDomains.BlockOverlay()))
 			require.NoError(t, err)
-			read := func() []byte {
-				t.Helper()
-				var value []byte
-				var readErr error
-				if tc.domain == kv.CodeDomain {
-					value, readErr = rpcView.GetCode(key)
-				} else {
-					value, readErr = rpcView.Get(key)
-				}
-				require.NoError(t, readErr)
-				return value
+			read := rpcView.Get
+			if tc.domain == kv.CodeDomain {
+				read = rpcView.GetCode
 			}
-			require.Equal(t, tc.oldValue, read())
+			value, err := read(key)
+			require.NoError(t, err)
+			require.Equal(t, tc.oldValue, value)
 			require.Zero(t, countedTx.reads, "values visible to this snapshot should still use the cache")
 
 			commitTx, err := db.BeginTemporalRw(ctx)
@@ -436,7 +430,9 @@ func TestEmbeddedRPCPinnedViewIgnoresLaterCachePublications(t *testing.T) {
 			committed, _, err := rpcTx.GetLatest(tc.domain, key, kv.GetLatestOptions{})
 			require.NoError(t, err)
 			require.Equal(t, tc.oldValue, committed)
-			require.Equal(t, tc.oldValue, read(), "a later cache publication must not change the pinned RPC state")
+			value, err = read(key)
+			require.NoError(t, err)
+			require.Equal(t, tc.oldValue, value, "a later cache publication must not change the pinned RPC state")
 			require.Equal(t, 1, countedTx.reads, "a newer cache value must fall back to the original transaction")
 			overlaid, err := rpcView.Get(otherKey)
 			require.NoError(t, err)
