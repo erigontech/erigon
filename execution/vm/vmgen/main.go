@@ -583,6 +583,9 @@ func main() {
 	check := len(os.Args) > 1 && os.Args[1] == "-check"
 	srcs := map[string][]byte{"instructions.go": read("instructions.go"), "eips.go": read("eips.go")}
 	switches := "sLen := stack.len()\n" + fastSwitch(srcs, fastOps()) + coldSwitch(srcs, coldOps())
+	if os.Getenv("VMGEN_ONE_SWITCH") != "" {
+		switches = "sLen := stack.len()\n" + fastSwitch(srcs, append(fastOps(), coldOps()...))
+	}
 	ops := append(fastOps(), coldOps()...)
 	files := []struct {
 		name string
