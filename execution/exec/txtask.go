@@ -613,7 +613,7 @@ func (t *TxTask) Execute(evm *vm.EVM,
 		// write-set is not applied for it, so keep genesis on the MakeWriteSet path.
 		isGenesis := t.TxIndex == -1 && t.BlockNumber() == 0
 		if ibs.IsVersioned() && !isGenesis {
-			result.TxOut = ibs.FinalizedWrites(rules)
+			result.TxOut, _ = ibs.FinalizedWrites(rules) // the read error is checked below for both branches
 		} else {
 			if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
 				panic(err)

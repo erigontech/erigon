@@ -25,7 +25,7 @@ func selfDestructBurnWrites(t *testing.T, addr accounts.Address, balance uint256
 	require.NoError(t, ibs.AddBalance(addr, balance, tracing.BalanceChangeTransfer))
 	_, err := ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
-	return ibs.FinalizedWrites(&chain.Rules{})
+	return finalizedWrites(t, ibs, &chain.Rules{})
 }
 
 // seededReader returns one pre-existing account; every other address is absent.
@@ -59,7 +59,7 @@ func sdPreExistingWrites(t *testing.T, addr accounts.Address, balance uint256.In
 	ibs.SetTxContext(1, 0)
 	_, err := ibs.Selfdestruct(addr, preserve)
 	require.NoError(t, err)
-	return ibs.FinalizedWrites(&chain.Rules{})
+	return finalizedWrites(t, ibs, &chain.Rules{})
 }
 
 // countViewPath counts the writes a read-only WriteSetView yields for the given
@@ -210,4 +210,11 @@ func testWriteSetInt(ws *state.WriteSet, addr accounts.Address, path state.Accou
 	default:
 		ws.SetBalance(addr, &state.VersionedWrite[uint256.Int]{WriteHeader: h, Val: *uint256.NewInt(uint64(val))})
 	}
+}
+
+func finalizedWrites(t testing.TB, ibs *state.IntraBlockState, rules *chain.Rules) *state.WriteSet {
+	t.Helper()
+	writes, err := ibs.FinalizedWrites(rules)
+	require.NoError(t, err)
+	return writes
 }

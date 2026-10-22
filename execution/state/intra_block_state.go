@@ -2715,8 +2715,9 @@ func (ibs *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 }
 
 // FinalizedWrites applies EIP-6780 normalization and EIP-161 filtering, then
-// returns a detached committable snapshot.
-func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) *WriteSet {
+// returns a detached committable snapshot. The EIP-161 filtering reads pre-tx state,
+// so it returns the IBS state read error, which ResetVersionedIO would clear.
+func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet, error) {
 	// Publish this tx's cold-read committed origins to the versionMap before EIP-161
 	// composition below reads it (encodeExistingEmptyRemovals builds a versionMap-backed
 	// account view). Every FinalizedWrites caller is covered here, so no read path needs
@@ -2725,7 +2726,7 @@ func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) *WriteSet {
 	writes := ibs.versionedWrites.Finalize()
 	ibs.withholdCreatedEmptyAccounts(chainRules, writes)
 	ibs.encodeExistingEmptyRemovals(chainRules, writes)
-	return writes
+	return writes, ibs.StateReadError()
 }
 
 // encodeExistingEmptyRemovals emits the EIP-161 delete for a pre-existing account

@@ -147,7 +147,10 @@ func TestEphemeralMultiBlockReplay(t *testing.T) {
 		doms.SetTxNum(rng.inputTxNum)
 
 		src := &multiBlockSource{blocks: blocks, headers: headers}
-		_, execErr := ExecV3(ctx, cfg, doms, tx, stages.ModeApplyingBlocks, false, "mb-replay", rng, src, logger)
+		out, execErr := ExecV3(ctx, cfg, doms, tx, stages.ModeApplyingBlocks, false, "mb-replay", rng, src, logger)
+		if execErr == nil && out.verdict != nil {
+			execErr = out.verdict.err
+		}
 		if execErr != nil {
 			doms.Close()
 			tx.Rollback()
@@ -268,7 +271,10 @@ func TestEphemeralMultiBlockPerBlock(t *testing.T) {
 		}
 		doms.SetTxNum(cursor + 1)
 		src := &multiBlockSource{blocks: blocks[i : i+1], headers: headers}
-		_, execErr := ExecV3(ctx, cfg, doms, tx, stages.ModeApplyingBlocks, false, "mb-perblock", rng, src, logger)
+		out, execErr := ExecV3(ctx, cfg, doms, tx, stages.ModeApplyingBlocks, false, "mb-perblock", rng, src, logger)
+		if execErr == nil && out.verdict != nil {
+			execErr = out.verdict.err
+		}
 		require.NoErrorf(t, execErr, "block %d (idx %d): exec", num, i)
 		cursor = doms.TxNum()
 

@@ -1820,7 +1820,7 @@ func TestCalcFees_EIP8246PreservedCoinbase(t *testing.T) {
 			require.NoError(t, destructor.AddBalance(coinbase, *uint256.NewInt(kept), tracing.BalanceChangeTransfer))
 			_, err := destructor.Selfdestruct(coinbase, tc.rules.IsAmsterdam)
 			require.NoError(t, err)
-			vm.FlushVersionedWrites(destructor.FinalizedWrites(tc.rules), true, "")
+			vm.FlushVersionedWrites(finalizedWrites(t, destructor, tc.rules), true, "")
 
 			writes, err := result.calcFees(task, vm, newMapStateReader(), tc.rules)
 			require.NoError(t, err)
@@ -1874,7 +1874,7 @@ func TestCalcFees_SameTxDestroyedCoinbase_EmitsRemoval(t *testing.T) {
 	require.NoError(t, worker.AddBalance(coinbase, *uint256.NewInt(500), tracing.BalanceChangeTransfer))
 	_, err := worker.Selfdestruct(coinbase, rules.IsAmsterdam)
 	require.NoError(t, err)
-	result.TxOut = worker.FinalizedWrites(rules)
+	result.TxOut = finalizedWrites(t, worker, rules)
 
 	wbw := findBalance(result.TxOut, coinbase)
 	require.NotNil(t, wbw)
