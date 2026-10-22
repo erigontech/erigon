@@ -756,7 +756,16 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		// revival) is keccak(''), not the nil hash of a nonexistent account.
 		if path == BalancePath || path == NoncePath || path == IncarnationPath ||
 			path == CodeHashPath || path == CodePath || path == CodeSizePath {
+			if s.versionMap.fieldMissHook != nil {
+				s.versionMap.fieldMissHook()
+			}
 			if sdVer, ok := s.versionMap.FindDoneSelfDestructInRange(addr, 0, s.txIndex, true); ok {
+				// The destruct may have been flushed after the field probe
+				// above, together with a field cell it keeps.
+				if s.versionMap.ReadStatus(addr, path, key, s.txIndex).Status() != MVReadResultNone {
+					versionedReadCore(s, addr, path, key, commited, skipStorage, r)
+					return
+				}
 				if !commited {
 					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
 						ReadHeader: ReadHeader{Source: MapRead, Version: sdVer},
@@ -824,9 +833,6 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		// account-field paths, else direct getStateObject fallback).
 		var so *stateObject
 		if path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath {
-			if fieldProbeMissHook != nil {
-				fieldProbeMissHook()
-			}
 			readAccount, accSource, accVersion, err := readAccountInternal(s, addr)
 			if err != nil {
 				r.err = err
@@ -838,7 +844,6 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			// The record may have been flushed after the field probe above,
 			// together with a field cell that supersedes the record's field.
 			if accSource == MapRead && s.versionMap.ReadStatus(addr, path, key, s.txIndex).Status() != MVReadResultNone {
-				*r = readPathResult{}
 				versionedReadCore(s, addr, path, key, commited, skipStorage, r)
 				return
 			}
@@ -959,10 +964,6 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	r.source = UnknownSource
 	r.version = UnknownVersion
 }
-
-// fieldProbeMissHook runs between a missed account-field probe and the account
-// record fallback. Tests set it to land a concurrent flush in that window.
-var fieldProbeMissHook func()
 
 // readAccountInternal performs an AddressPath versionedReadCore + typed
 // extraction of *accounts.Account.  Used internally by versionedReadCore
