@@ -1626,7 +1626,6 @@ func TestResetForPoolCountsMapsLostToAnIntermediateReset(t *testing.T) {
 // it. It must record the override to the versionMap, not panic.
 func TestSetStorageOnNoMaterialize_AppliesOverride(t *testing.T) {
 	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(0, 0)
 	ibs.SetVersion(0)
 	defer ibs.Close()

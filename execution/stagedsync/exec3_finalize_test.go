@@ -1869,7 +1869,6 @@ func TestCalcFees_SameTxDestroyedCoinbase_EmitsRemoval(t *testing.T) {
 	// the destruction with the balance stamped ValueDeleted.
 	worker := state.NewWithVersionMap(state.NewNoopReader(), vm)
 	worker.SetTxContext(1, 1)
-	worker.SetNoMaterialize(true)
 	worker.SetVersion(0)
 	require.NoError(t, worker.CreateAccount(coinbase, true))
 	require.NoError(t, worker.AddBalance(coinbase, *uint256.NewInt(500), tracing.BalanceChangeTransfer))
