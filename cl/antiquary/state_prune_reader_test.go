@@ -306,20 +306,25 @@ func TestPruneStateBalancesForwardAndReverseDumpPaths(t *testing.T) {
 	checkBalances(reverseSlot)
 }
 
-func TestPruneStateBuildersReplayAcrossSegmentAndDBBoundaries(t *testing.T) {
+func TestPruneStateGloasHistoryReplayAcrossSegmentAndDBBoundaries(t *testing.T) {
 	ctx := context.Background()
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	cfg := &clparams.MainnetBeaconConfig
 	const snapshotBoundary = uint64(2_000)
 	const lastSlot = uint64(2_100)
 	targets := []uint64{1_200, 1_999, 2_050}
+	pendingTargets := []uint64{1_001, 2_005}
 	compressor, err := zstd.NewWriter(nil)
 	require.NoError(t, err)
 	defer compressor.Close()
 
 	expected := make(map[uint64][]byte, len(targets))
+	expectedPending := make(map[uint64][]byte, len(pendingTargets))
 	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
 		previous := newBuildersList()
 		current := []cltypes.Builder{{Balance: 1}, {Balance: 2}}
+		pending := collectorPendingPayments(cfg.SlotsPerEpoch)
+		pendingWriter := state_accessors.NewPendingPaymentsWriter(cfg.SlotsPerEpoch)
 		for slot := uint64(0); slot <= lastSlot; slot++ {
 			if slot > 0 && slot%257 == 0 {
 				current[0].Balance = slot
@@ -337,6 +342,24 @@ func TestPruneStateBuildersReplayAcrossSegmentAndDBBoundaries(t *testing.T) {
 			key := base_encoding.Encode64ToBytes4(slot)
 			if err := tx.Put(kv.Builders, key, row.Bytes()); err != nil {
 				return err
+			}
+			if err := pendingWriter.Initialize(pending); err != nil {
+				return err
+			}
+			pending.Get(int(slot % uint64(pending.Length()))).Weight = slot + 1
+			row.Reset()
+			if err := pendingWriter.WriteRow(&row, slot, pending); err != nil {
+				return err
+			}
+			if err := tx.Put(kv.BuilderPendingPaymentsTable, key, row.Bytes()); err != nil {
+				return err
+			}
+			if slices.Contains(pendingTargets, slot) {
+				encoded, err := pending.EncodeSSZ(nil)
+				if err != nil {
+					return err
+				}
+				expectedPending[slot] = encoded
 			}
 			if err := tx.Put(kv.SlotData, key, []byte{1}); err != nil {
 				return err
@@ -388,9 +411,28 @@ func TestPruneStateBuildersReplayAcrossSegmentAndDBBoundaries(t *testing.T) {
 		require.NoError(t, err)
 		return encoded
 	}
+	readPendingPayments := func(snapshot *snapshotsync.CaplinStateSnapshots, slot uint64) []byte {
+		tx, err := db.BeginRo(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		var view *snapshotsync.CaplinStateView
+		if snapshot != nil {
+			view = snapshot.View()
+			defer view.Close()
+		}
+		payments := collectorPendingPayments(cfg.SlotsPerEpoch)
+		getter := state_accessors.GetValFnTxAndSnapshot(tx, view)
+		require.NoError(t, historical_states_reader.ReadBuilderPendingPayments(getter, slot, cfg.SlotsPerEpoch, payments))
+		encoded, err := payments.EncodeSSZ(nil)
+		require.NoError(t, err)
+		return encoded
+	}
 
 	for _, target := range targets {
 		require.Equal(t, expected[target], readBuilders(nil, target), "slot %d", target)
+	}
+	for _, target := range pendingTargets {
+		require.Equal(t, expectedPending[target], readPendingPayments(nil, target), "slot %d", target)
 	}
 
 	dirs := datadir.New(t.TempDir())
@@ -400,17 +442,27 @@ func TestPruneStateBuildersReplayAcrossSegmentAndDBBoundaries(t *testing.T) {
 	require.NoError(t, stateSn.OpenFolder())
 	require.Equal(t, snapshotBoundary, stateSn.ContiguousCoverageEnd(kv.Builders))
 	require.Equal(t, snapshotBoundary, stateSn.ContiguousCoverageEnd(kv.BuildersDump))
+	require.Equal(t, snapshotBoundary, stateSn.ContiguousCoverageEnd(kv.BuilderPendingPaymentsTable))
 
 	_, err = pruneStateTables(ctx, db, stateSn.TypeNames(), stateSn.ContiguousCoverageEnd, 0, 1000, log.New())
 	require.NoError(t, err)
 	require.NotContains(t, tableSlots(t, db, kv.Builders), uint64(1_999))
 	require.Contains(t, tableSlots(t, db, kv.Builders), uint64(2_000))
 	require.NotContains(t, tableSlots(t, db, kv.BuildersDump), uint64(clparams.SlotsPerDump))
+	require.NotContains(t, tableSlots(t, db, kv.BuilderPendingPaymentsTable), uint64(1_999))
+	require.Contains(t, tableSlots(t, db, kv.BuilderPendingPaymentsTable), snapshotBoundary)
 	frozenDump, err := stateSn.Get(kv.BuildersDump, clparams.SlotsPerDump)
 	require.NoError(t, err)
 	require.NotEmpty(t, frozenDump)
 
-	for _, target := range targets {
-		require.Equal(t, expected[target], readBuilders(stateSn, target), "slot %d", target)
-	}
+	t.Run("builders", func(t *testing.T) {
+		for _, target := range targets {
+			require.Equal(t, expected[target], readBuilders(stateSn, target), "slot %d", target)
+		}
+	})
+	t.Run("pending payments", func(t *testing.T) {
+		for _, target := range pendingTargets {
+			require.Equal(t, expectedPending[target], readPendingPayments(stateSn, target), "slot %d", target)
+		}
+	})
 }

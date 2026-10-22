@@ -476,7 +476,9 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		fullValidation := slot%1000 == 0 || first
 		blockRewardsCollector := &eth2.BlockRewardsCollector{}
 
-		stateAntiquaryCollector.preStateTransitionHook(s.currentState)
+		if err := stateAntiquaryCollector.preStateTransitionHook(s.currentState); err != nil {
+			return err
+		}
 		reachesGloasFork := s.currentState.Version() < clparams.GloasVersion && block.Block.Slot/s.cfg.SlotsPerEpoch >= s.cfg.GloasForkEpoch
 		var forkSlot uint64
 		if reachesGloasFork {

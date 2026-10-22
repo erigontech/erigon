@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -372,7 +373,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	}
 	ret.SetPayloadExpectedWithdrawals(payloadExpectedWithdrawals)
 
-	// Per-slot compressed fields: ExecutionPayloadAvailability, BuilderPendingPayments, PtcWindow
+	// Per-slot compressed fields: ExecutionPayloadAvailability and PtcWindow
 	executionPayloadAvailability := solid.NewBitVector(int(r.cfg.SlotsPerHistoricalRoot))
 	if err := readCompressedSSZ(kvGetter, slot, kv.ExecutionPayloadAvailabilityTable, executionPayloadAvailability, int(ret.Version())); err != nil {
 		return nil, fmt.Errorf("failed to read execution payload availability: %w", err)
@@ -380,7 +381,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetExecutionPayloadAvailabilityRaw(executionPayloadAvailability)
 
 	builderPendingPayments := solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](int(2 * r.cfg.SlotsPerEpoch))
-	if err := readCompressedSSZ(kvGetter, slot, kv.BuilderPendingPaymentsTable, builderPendingPayments, int(ret.Version())); err != nil {
+	if err := ReadBuilderPendingPayments(kvGetter, slot, r.cfg.SlotsPerEpoch, builderPendingPayments); err != nil {
 		return nil, fmt.Errorf("failed to read builder pending payments: %w", err)
 	}
 	ret.SetBuilderPendingPayments(builderPendingPayments)
@@ -1180,6 +1181,60 @@ func ReadBuildersSSZ(kvGetter state_accessors.GetValFn, slot, forkSlot, registry
 			return fmt.Errorf("%w: missing row from table %s at slot %d", state_accessors.ErrHistoryRebuildRequired, kv.Builders, currSlot)
 		}
 	}
+	return nil
+}
+
+func ReadBuilderPendingPayments(kvGetter state_accessors.GetValFn, slot, slotsPerEpoch uint64, out *solid.VectorSSZ[*cltypes.BuilderPendingPayment]) error {
+	type paymentRow struct {
+		slot uint64
+		row  []byte
+	}
+	epochStart := slot - slot%slotsPerEpoch
+	deltas := make([]paymentRow, 0, slot-epochStart)
+	var base paymentRow
+	for current := slot; ; current-- {
+		key := base_encoding.Encode64ToBytes4(current)
+		row, err := kvGetter(kv.BuilderPendingPaymentsTable, key)
+		if err != nil {
+			return err
+		}
+		if len(row) == 0 {
+			slotData, err := kvGetter(kv.SlotData, key)
+			if err != nil {
+				return err
+			}
+			if len(slotData) != 0 {
+				return fmt.Errorf("%w: missing row from table %s at slot %d", state_accessors.ErrHistoryRebuildRequired, kv.BuilderPendingPaymentsTable, current)
+			}
+		} else {
+			kind, err := state_accessors.PendingPaymentsRowKind(row)
+			if err != nil {
+				return fmt.Errorf("read pending payments row from table %s at slot %d: %w", kv.BuilderPendingPaymentsTable, current, err)
+			}
+			if kind == state_accessors.PendingPaymentsBaseKind {
+				base = paymentRow{slot: current, row: bytes.Clone(row)}
+				break
+			}
+			deltas = append(deltas, paymentRow{slot: current, row: bytes.Clone(row)})
+		}
+		if current == epochStart {
+			break
+		}
+	}
+	if base.row == nil {
+		return fmt.Errorf("%w: no pending payments base in epoch for slot %d", state_accessors.ErrHistoryRebuildRequired, slot)
+	}
+
+	decoded := solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](out.Length())
+	if err := state_accessors.ApplyPendingPaymentsRow(base.row, decoded); err != nil {
+		return fmt.Errorf("apply pending payments base from table %s at slot %d: %w", kv.BuilderPendingPaymentsTable, base.slot, err)
+	}
+	for _, delta := range slices.Backward(deltas) {
+		if err := state_accessors.ApplyPendingPaymentsRow(delta.row, decoded); err != nil {
+			return fmt.Errorf("apply pending payments delta from table %s at slot %d: %w", kv.BuilderPendingPaymentsTable, delta.slot, err)
+		}
+	}
+	decoded.CopyTo(out)
 	return nil
 }
 
