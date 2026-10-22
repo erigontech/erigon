@@ -140,6 +140,9 @@ func coldOps() []fastOp {
 		op("PC", "opPc"),
 		op("MSIZE", "opMsize"),
 		op("GAS", "opGas"),
+		copyOp("CALLDATACOPY", "opCallDataCopy", "memoryCallDataCopy", "gasCallDataCopy"),
+		copyOp("CODECOPY", "opCodeCopy", "memoryCodeCopy", "gasCodeCopy"),
+		copyOp("RETURNDATACOPY", "opReturnDataCopy", "memoryReturnDataCopy", "gasReturnDataCopy"),
 	}
 	for n := 9; n <= 16; n++ {
 		ops = append(ops, fastOp{name: fmt.Sprintf("DUP%d", n), gas: "GasFastestStep", pop: n, push: n + 1, index: "int(op-DUP1)", minStack: "int(op-DUP1)+1"})
@@ -151,6 +154,16 @@ func coldOps() []fastOp {
 }
 
 const allocated32 = "callContext.Memory.allocated32(stack.peek())"
+
+// copyOp is a copy into memory from outside it, which writes length bytes at the stack top.
+func copyOp(name, execute, memorySize, dynamicGas string) fastOp {
+	allocated := "callContext.Memory.allocatedCopy(stack.peek(), stack.peek(), stack.back(2))"
+	if name == "RETURNDATACOPY" {
+		// RETURNDATACOPY is in the jump table only from Byzantium on.
+		allocated = "jt[RETURNDATACOPY].memorySize != nil && " + allocated
+	}
+	return fastOp{name: name, execute: execute, gas: "GasFastestStep", pop: 3, memorySize: memorySize, dynamicGas: dynamicGas, allocated: allocated, copyLen: "stack.back(2)"}
+}
 
 const switchHere = "// execution/vm/vmgen inserts the fastOps switch here.\n"
 
@@ -240,7 +253,7 @@ func inlineBody(srcs map[string][]byte, o fastOp) string {
 }
 
 // outOfLine are the funcs run's inlined bodies call that Go does not inline.
-var outOfLine = []string{"Mul", "Div", "SetBytes", "ILsh", "validJumpdest", "Copy", "addressWord", "Slt", "Sgt", "Byte", "Lsh", "Rsh", "SRsh"}
+var outOfLine = []string{"Mul", "Div", "SetBytes", "ILsh", "validJumpdest", "Copy", "addressWord", "Slt", "Sgt", "Byte", "Lsh", "Rsh", "SRsh", "SetFromData", "Set"}
 
 // saveAroundCalls stores gasLeft and pc in callContext before each statement of body
 // that calls an outOfLine func, and loads them back after it. Neither is then live
