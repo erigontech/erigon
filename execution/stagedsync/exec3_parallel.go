@@ -1914,32 +1914,12 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 					break
 				}
 			}
-			if txTask, ok := tv.Task.(*exec.TxTask); ok && be.senders != nil && tv.version.Incarnation == 0 {
-				if sender, ok := be.senders.TakeSender(txTask.TxIndex); ok {
-					txTask.Tx().SetSender(sender)
-				}
-			}
 			result := w.RunTxTask(tv)
 			releaseSlot()
 			// A mid-EVM waitCommit failure already sent a terminal result and left the
 			// tx running against a dead roTx; its result is meaningless — stop here.
 			if aborted {
 				pe.releaseWorker(w)
-				return
-			}
-			if be.versionMap.HasBAL {
-				if result.Dep >= 0 {
-					pe.releaseWorker(w)
-					if !waitTo(be.taskIndexOf(result.Dep)) || !reExec() {
-						return
-					}
-					continue
-				}
-				if result.Err == nil {
-					be.selfLoopFlush(tv.version, result, prevWrites)
-				}
-				pe.releaseWorker(w)
-				send(result)
 				return
 			}
 			// A run without the sender checks that failed or used the sender's account
@@ -2030,6 +2010,99 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			}
 		}
 	})
+}
+
+// runBALWorkers executes every task of a BAL block once, on one goroutine per
+// execution slot that claims tasks in block order and keeps its roTx for the block.
+func (pe *parallelExecutor) runBALWorkers(be *blockExecutor) {
+	var next atomic.Int64
+	for range cap(pe.execSem) {
+		pe.runWG.Go(func() { pe.balWorker(be, &next) })
+	}
+}
+
+func (pe *parallelExecutor) balWorker(be *blockExecutor, next *atomic.Int64) {
+	claim := func() int { return int(next.Add(1) - 1) }
+	send := func(r *exec.TxResult) bool {
+		select {
+		case pe.results <- r:
+			return true
+		case <-pe.workersCtx.Done():
+			return false
+		}
+	}
+	newTask := func(i int) *taskVersion {
+		tv := &taskVersion{
+			execTask:     be.tasks[i],
+			versionMap:   be.versionMap,
+			version:      be.tasks[i].Version(),
+			profile:      be.profile,
+			stats:        be.stats,
+			statsMutex:   &be.Mutex,
+			execCpuNanos: &be.execCpuNanos,
+		}
+		tv.version.Incarnation = 0
+		tv.waitCommit = func(dep int) bool { return be.waitDep(i, be.taskIndexOf(dep)) }
+		return tv
+	}
+	// A claimed task must always produce a result, else the exec loop waits forever.
+	sendOperational := func(i int, err error) {
+		if i < len(be.tasks) {
+			send(&exec.TxResult{Task: newTask(i), Err: err, Operational: true})
+		}
+	}
+
+	select {
+	case <-pe.execSem:
+	case <-pe.workersCtx.Done():
+		return
+	}
+	defer func() { pe.execSem <- struct{}{} }()
+	w := pe.acquireWorker()
+	if w == nil {
+		return
+	}
+	defer pe.releaseWorker(w)
+	roTx, err := pe.cfg.db.BeginTemporalRo(pe.workersCtx)
+	if err != nil {
+		sendOperational(claim(), fmt.Errorf("block %d: open roTx: %w", be.blockNum, err))
+		return
+	}
+	defer roTx.Rollback()
+	if err := w.ResetTx(roTx); err != nil {
+		sendOperational(claim(), fmt.Errorf("block %d: reset roTx: %w", be.blockNum, err))
+		return
+	}
+
+	i := claim()
+	defer func() {
+		if rec := recover(); rec != nil {
+			sendOperational(i, fmt.Errorf("BAL worker panic (block %d task %d): %v\n%s", be.blockNum, i, rec, dbg.Stack()))
+		}
+	}()
+	for ; i < len(be.tasks); i = claim() {
+		tv := newTask(i)
+		if txTask, ok := tv.Task.(*exec.TxTask); ok && be.senders != nil {
+			if sender, ok := be.senders.TakeSender(txTask.TxIndex); ok {
+				txTask.Tx().SetSender(sender)
+			}
+		}
+		result := w.RunTxTask(tv)
+		// The run read a predecessor's in-flight write: re-run once that predecessor commits.
+		for result.Err == nil && result.Dep >= 0 {
+			if !be.waitDep(i, be.taskIndexOf(result.Dep)) {
+				return
+			}
+			tv.version.Incarnation++
+			result = w.RunTxTask(tv)
+		}
+		if result.Err == nil {
+			be.selfLoopFlush(tv.version, result, nil)
+		}
+		if !send(result) {
+			return
+		}
+	}
 }
 
 // selfLoopFlush publishes tv's writes to the versionMap, plus deletion of any key
@@ -2812,6 +2885,8 @@ type blockExecutor struct {
 	// already owns: the worker owns all re-execution, so the scheduler dispatches
 	// each task exactly once. Touched only on the exec-loop goroutine.
 	selfLoopDispatched map[int]bool
+	// balStarted: the BAL workers of this block are running. Exec-loop only.
+	balStarted bool
 }
 
 // readyForDepOrderValidation decides whether tx may be validated out of contiguous
@@ -3830,6 +3905,16 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			be.runInc[i].Store(-1)
 		}
 		be.wakeAt = map[int][]int{}
+	}
+
+	if be.versionMap.HasBAL {
+		if !be.balStarted {
+			be.balStarted = true
+			for be.execTasks.takeNextPending() >= 0 {
+			}
+			pe.runBALWorkers(be)
+		}
+		return
 	}
 
 	maxValidated := be.validateTasks.maxComplete()
