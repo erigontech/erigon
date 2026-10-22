@@ -23,6 +23,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"slices"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -33,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -159,6 +162,36 @@ func (s *CaplinSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 	list, err := s.segmentsUpToGap()
 	if err != nil {
 		return err
+	}
+	files, err := snapshotsync.AllTypedSegments(s.Dir(), []snaptype.Type{snaptype.BeaconBlocks})
+	if err != nil {
+		return err
+	}
+	end := s.SegmentsMax() + 1
+	var toRemove []string
+	for i := range files {
+		f := &files[i]
+		if f.To > end || slices.Contains(list, f.Name()) {
+			continue
+		}
+		indexes, err := filepath.Glob(filepath.Join(s.Dir(), snaptype.IdxFileMask(f.From, f.To, snaptype.BeaconBlocks.Name())))
+		if err != nil {
+			return err
+		}
+		for _, index := range indexes {
+			toRemove = append(toRemove, filepath.Base(index))
+		}
+		toRemove = append(toRemove, f.Name())
+	}
+	if onDelete != nil && len(toRemove) > 0 {
+		if err := onDelete(toRemove); err != nil {
+			return fmt.Errorf("onDelete: %w", err)
+		}
+	}
+	for _, name := range toRemove {
+		if err := dir.RemoveFile(filepath.Join(s.Dir(), name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 	}
 	return s.BaseRoSnapshots.RemoveOverlapsWithKeepers(onDelete, list)
 }
