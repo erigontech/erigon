@@ -255,6 +255,76 @@ func TestSelfDestructBranchTombstone_CarriesRealPrev(t *testing.T) {
 	require.Positive(t, tombstones, "at least one persisted branch under A must be tombstoned with its real prev")
 }
 
+// TestSelfDestructBranchTombstone_ReusedBranchBuffer is CarriesRealPrev under a
+// buffer-reusing Branch — the production TrieContext shape, where ctx.Branch returns
+// a reused per-context buffer. deleteStorageSubtreeBranches reads a branch, recurses
+// into children (each overwriting that buffer), then records the branch as the
+// tombstone's prev; without bytes.Clone it records a child's bytes. Uses the seq
+// engine (one context, one goroutine), matching TrieContext's per-goroutine
+// ownership — a shared buffer across parallel workers would just data-race instead.
+func TestSelfDestructBranchTombstone_ReusedBranchBuffer(t *testing.T) {
+	t.Parallel()
+	a := addrHex(findAddressForNibble(3, 900))
+	sib := addrHex(findAddressForNibble(7, 500))
+	const nOld = 1500
+	recreate := func(ub *UpdateBuilder) {
+		ub.Balance(a, 7777).Nonce(a, 9)
+		for s := 5000; s < 6600; s++ {
+			ub.Storage(a, hex.EncodeToString(slotHashBytes(s)), "cc")
+		}
+	}
+
+	ms := NewMockState(t)
+	ms.reuseBranchBuf.Store(true)
+	b1 := NewUpdateBuilder().Balance(a, 100).Nonce(a, 1).Balance(sib, 500)
+	for s := range nOld {
+		b1.Storage(a, hex.EncodeToString(slotHashBytes(s)), "0badc0de")
+	}
+	k1, u1 := b1.Build()
+	_, blob := seqUpdateBatch(t, ms, k1, u1, nil, "")
+
+	addrBytes, err := hex.DecodeString(a)
+	require.NoError(t, err)
+	accPrefix := KeyToHexNibbleHash(addrBytes)
+	original := map[string][]byte{}
+	for k, v := range ms.cm {
+		if bytes.HasPrefix(nibbles.CompactToHex([]byte(k)), accPrefix) {
+			original[k] = bytes.Clone(v)
+		}
+	}
+	require.NotEmpty(t, original, "A must have persisted storage branches to tombstone")
+
+	clean := NewUpdateBuilder()
+	for s := range nOld {
+		clean.DeleteStorage(a, hex.EncodeToString(slotHashBytes(s)))
+	}
+	ck, cu := clean.Build()
+	require.NoError(t, ms.applyPlainUpdates(ck, cu))
+
+	ms.putLog = nil
+	ms.recordPuts.Store(true)
+	b2 := NewUpdateBuilder()
+	recreate(b2)
+	k2, u2 := b2.Build()
+	_, _ = seqUpdateBatch(t, ms, k2, u2, blob, a)
+	ms.recordPuts.Store(false)
+
+	tombstones := 0
+	for _, p := range ms.putLog {
+		if BranchData(p.data).ChildCount() != 0 {
+			continue // a real branch write (the recreate), not a tombstone
+		}
+		orig, ok := original[string(p.prefix)]
+		if !ok {
+			continue // a tombstone at a prefix that held no pre-destruct branch
+		}
+		tombstones++
+		require.Equal(t, orig, p.prev,
+			"tombstone prev must be this branch's own bytes, not a child's left in the reused read buffer")
+	}
+	require.Positive(t, tombstones, "the nested subtree must produce tombstones to check")
+}
+
 // seqUpdateBatch folds one batch through a seq HexPatriciaHashed via the
 // ModeUpdate path (TouchPlainKeyDirect — the commitment calculator's path, which
 // carries the Update, including the transient SD-reset marker, through to the

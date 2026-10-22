@@ -2331,12 +2331,14 @@ func (result *execResult) calcFees(
 	// AddressPath sibling) even when the net change is zero, else the worker's raw
 	// gas-debit value is left behind and a later whole-account read gets a stale balance.
 	// The worker destroyed the coinbase (its balance write is stamped ValueDeleted) and
-	// the fee left it empty: the account is gone. Emit the removal so the deletion
-	// verdict rides the write-set directly — otherwise WriteSet.Merge copies this fee
-	// phase's live balance over the worker's ValueDeleted and the deletion survives only
-	// because calc_state re-derives it (EIP-161 empty-removal). Matching serial, which
-	// removes the destroyed empty account.
-	coinbaseNetDeleted := cbOverride && cbBalanceDeleted && newCoinbaseBalance.IsZero()
+	// the destruct leaves it gone: either the fee left it empty, or it was a tip-burning
+	// destruct (burnCoinbaseTip), which removes the account regardless of a non-zero
+	// residual from a later same-tx credit. Emit the removal so the deletion verdict
+	// rides the write-set directly — otherwise WriteSet.Merge copies this fee phase's
+	// live balance over the worker's ValueDeleted and the deletion survives only because
+	// calc_state re-derives it (EIP-161 empty-removal). Matching serial, which removes
+	// the destroyed account.
+	coinbaseNetDeleted := cbOverride && cbBalanceDeleted && (newCoinbaseBalance.IsZero() || burnCoinbaseTip)
 	emitCoinbase := (newCoinbaseBalance != oldCoinbaseBalance || (cbOverride && !coinbaseNetDestructed)) && !coinbaseNetDeleted
 	// The fee credit touches the coinbase, so a zero tip removes an empty one (EIP-161).
 	coinbaseEmptied := !emitCoinbase && !coinbaseNetDeleted && coinbaseAcc != nil && !coinbaseSelfdestructed && newCoinbaseBalance.IsZero() &&
