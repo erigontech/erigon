@@ -645,6 +645,34 @@ func TestOpenSkipsCrossingBeaconBlocks(t *testing.T) {
 	}
 }
 
+func TestRemoveOverlapsDoesNotReportBeaconBlocksBehindCrossingCover(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, 2*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 3*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 2*limit, 3*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 3*limit, 4*limit, true)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+
+	var reported []string
+	require.NoError(t, sn.RemoveOverlaps(func(paths []string) error {
+		reported = append(reported, paths...)
+		return nil
+	}))
+
+	for _, name := range reported {
+		require.NotContains(t, name, "000020-000030", "kept segments and their indexes must keep seeding")
+	}
+	segment := filepath.Join(dirs.Snap, snaptype.BeaconBlocks.FileName(version.ZeroVersion, 2*limit, 3*limit))
+	require.FileExists(t, segment)
+	require.FileExists(t, strings.TrimSuffix(segment, ".seg")+".idx")
+	require.Equal(t, uint64(4*limit-1), sn.BlocksAvailable())
+}
+
 func TestRemoveOverlapsKeepsIndexedBeaconBlocksBehindUnindexedCover(t *testing.T) {
 	const limit = snaptype.CaplinMergeLimit
 

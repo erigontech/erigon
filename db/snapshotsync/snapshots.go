@@ -1565,6 +1565,27 @@ func (s *BaseRoSnapshots) RemoveOverlapsWithKeepers(onDelete func(l []string) er
 	idxList, supersededIdx := supersededEqualRangeVersions(idxList)
 	_, accessorsToRemove := findOverlaps(idxList)
 	accessorsToRemove = append(accessorsToRemove, supersededIdx...)
+	if eligibleKeepers != nil {
+		keptIndexes := make(map[string]struct{})
+		for _, typ := range s.enums {
+			s.WalkDirtySegments(typ, func(seg *DirtySegment) bool {
+				if slices.Contains(keepNames, seg.FileName()) {
+					for _, index := range seg.indexes {
+						if index != nil {
+							keptIndexes[index.FilePath()] = struct{}{}
+						}
+					}
+				}
+				return true
+			})
+		}
+		isKeptIndex := func(f snaptype.FileInfo) bool {
+			_, kept := keptIndexes[f.Path]
+			return kept
+		}
+		accessorsToRemove = slices.DeleteFunc(accessorsToRemove, isKeptIndex)
+		supersededIdx = slices.DeleteFunc(supersededIdx, isKeptIndex)
+	}
 
 	// Notify the seeder before deletion. Includes idx overlaps whose .seg is already gone
 	// (kill between deletes): those have no DirtySegment, so reclamation can't reach them.
