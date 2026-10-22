@@ -126,7 +126,7 @@ func TestExecutionPayloadServicePendingRetryPreservesExpiry(t *testing.T) {
 	}
 	for range 2 {
 		service.pending.processPending(t.Context())
-		queued, err := service.queuePendingEnvelope(root, envelope, time.Now())
+		queued, err := service.queuePendingEnvelope(root, envelope, time.Now(), true)
 		require.NoError(t, err)
 		require.False(t, queued)
 		require.Equal(t, created, job.creationTime)
@@ -168,7 +168,7 @@ func TestExecutionPayloadServicePendingSerializesRetries(t *testing.T) {
 	}
 	wg.Wait()
 	require.Equal(t, int32(1), calls.Load())
-	queued, err := service.queuePendingEnvelope(root, envelope, time.Now())
+	queued, err := service.queuePendingEnvelope(root, envelope, time.Now(), true)
 	require.NoError(t, err)
 	require.False(t, queued)
 	require.Equal(t, int32(1), service.pending.count.Load())
@@ -217,7 +217,7 @@ func TestExecutionPayloadServiceExpiredAttemptCannotRemoveReplacement(t *testing
 			service.pending.processPending(t.Context())
 			require.Zero(t, service.pending.count.Load())
 			require.Zero(t, service.pendingBytes.Load())
-			queued, err := service.queuePendingEnvelope(root, envelope, time.Now())
+			queued, err := service.queuePendingEnvelope(root, envelope, time.Now(), true)
 			require.NoError(t, err)
 			require.True(t, queued)
 			release()

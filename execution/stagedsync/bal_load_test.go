@@ -85,7 +85,7 @@ func TestLoadFromBAL_MatchesApplyWrites(t *testing.T) {
 		},
 		{
 			Address:      addrD.Value(),
-			StorageReads: []accounts.StorageKey{slotS1}, // pure read — ignored
+			StorageReads: []common.Hash{slotS1.Value()}, // pure read — ignored
 		},
 		{
 			Address: addrE.Value(),
