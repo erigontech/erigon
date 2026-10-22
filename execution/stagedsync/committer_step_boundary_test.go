@@ -975,3 +975,37 @@ func TestComputeAhead_InWindowBlockRecordsIntoOwnChangeset(t *testing.T) {
 	}
 	require.True(t, sawStateKey, "compute-ahead must record KeyCommitmentState into the block's own changeset")
 }
+
+// TestComputedAheadBlockDropsCachedState pins that a block computed ahead, whose
+// writes the calculator skips, leaves no stale account in cc.state: a later
+// incremental block touching the same account must reload it from the domain.
+func TestComputedAheadBlockDropsCachedState(t *testing.T) {
+	defer func(p bool) { dbg.BALShadowCompute = p }(dbg.BALShadowCompute)
+	dbg.BALShadowCompute = false
+
+	ctx := context.Background()
+	db, tx, doms := setupStepTest(t)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1<<62, nil, nil, nil, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	t.Cleanup(cc.Stop)
+
+	addrBytes := [20]byte{0x11}
+	addr := accounts.InternAddress(addrBytes)
+	put := func(txNum, nonce uint64) {
+		acc := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(nonce * 1000), CodeHash: accounts.EmptyCodeHash}
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes[:], accounts.SerialiseV3(&acc), txNum, nil))
+	}
+
+	put(1, 1)
+	cc.handleMessage(ctx, &txResult{rules: &chain.Rules{}, blockNum: 1, txNum: 1, writes: nonceBalanceWrites(addr, 1, *uint256.NewInt(1000))})
+	cc.state.ResetBlockFlags()
+
+	cc.computedAhead[2] = true
+	put(2, 2)
+	cc.handleMessage(ctx, &txResult{rules: &chain.Rules{}, blockNum: 2, txNum: 2, writes: nonceBalanceWrites(addr, 2, *uint256.NewInt(2000))})
+	cc.handleMessage(ctx, &blockResult{BlockNum: 2, lastTxNum: 2})
+
+	cc.handleMessage(ctx, &txResult{rules: &chain.Rules{}, blockNum: 3, txNum: 3, writes: &state.WriteSet{}})
+	cc.asOfReader.txNum = 3
+	require.Equal(t, uint64(2), cc.state.ensureAccount(addr).Nonce, "block 3 must see the nonce block 2 wrote")
+}
