@@ -882,14 +882,12 @@ func (r *parentStateReader) ReadAccountDataForDebug(address accounts.Address) (*
 }
 
 func (r *parentStateReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
-	val, ok := r.parent.GetCommittedStorage(address, key)
+	v, ok := r.parent.GetCommittedStorage(address, key)
 	if !ok {
 		mxParentStateMiss.Inc()
 		return r.StateReader.ReadAccountStorage(address, key)
 	}
 	mxParentStateHit.Inc()
-	var v uint256.Int
-	v.SetBytes(val)
 	if dbg.AssertEnabled {
 		want, wantOK, err := r.StateReader.ReadAccountStorage(address, key)
 		if err != nil {
@@ -903,7 +901,7 @@ func (r *parentStateReader) ReadAccountStorage(address accounts.Address, key acc
 			return v, false, err
 		}
 	}
-	return v, len(val) > 0, nil
+	return v, !v.IsZero(), nil
 }
 
 // ExecutionWitness implements debug_executionWitness.
@@ -1288,7 +1286,10 @@ func (api *DebugAPIImpl) checkWitnessAvailability(ctx context.Context, tx kv.Tem
 		return witnessAvailability{}, fmt.Errorf("%s commitment was stopped before parent block %d", trieName, info.ParentNum)
 	}
 	if !skipHistory {
-		historyStart := tx.Debug().HistoryStartFrom(domain)
+		historyStart, err := tx.Debug().HistoryStartFrom(domain)
+		if err != nil {
+			return witnessAvailability{}, err
+		}
 		if info.FirstTxNumInBlock < historyStart {
 			return witnessAvailability{}, fmt.Errorf("%s commitment history pruned: start %d, last tx: %d", trieName, historyStart, info.FirstTxNumInBlock)
 		}
@@ -1893,7 +1894,10 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
 		return nil, err
 	}
-	if err := api.checkBlockHistoryAvailable(ctx, tx, blockNum); err != nil {
+	if err := api.checkPruneBlocks(ctx, tx, blockNum); err != nil {
+		return nil, err
+	}
+	if err := api.checkPruneHistory(ctx, tx, blockNum); err != nil {
 		return nil, err
 	}
 

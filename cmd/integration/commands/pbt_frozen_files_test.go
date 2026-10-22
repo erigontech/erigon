@@ -70,7 +70,7 @@ func TestPBTCommandsUseFrozenBlockFiles(t *testing.T) {
 		require.True(t, chainConfig.IsBinaryTrie(wantHeader.Time))
 		var found bool
 		var maxErr error
-		wantMaxTx, found, maxErr = rawdbv3.TxNums.MaxExact(t.Context(), tx, blockNum)
+		wantMaxTx, found, maxErr = rawdbv3.TxNums.MaxExact(t.Context(), tx, nil, blockNum)
 		require.True(t, found)
 		return maxErr
 	}))
@@ -90,7 +90,7 @@ func TestPBTCommandsUseFrozenBlockFiles(t *testing.T) {
 		canonical, err := rawdb.ReadCanonicalHash(tx, blockNum)
 		require.NoError(t, err)
 		require.Equal(t, common.Hash{}, canonical)
-		_, found, err := rawdbv3.TxNums.MaxExact(t.Context(), tx, blockNum)
+		_, found, err := rawdbv3.TxNums.MaxExact(t.Context(), tx, nil, blockNum)
 		require.NoError(t, err)
 		require.False(t, found)
 		return nil
@@ -104,7 +104,7 @@ func TestPBTCommandsUseFrozenBlockFiles(t *testing.T) {
 	header, err := reader.HeaderByNumber(t.Context(), readerTx, blockNum)
 	require.NoError(t, err)
 	require.Equal(t, wantHeader.Hash(), header.Hash())
-	maxTx, found, err := reader.TxnumReader().MaxExact(t.Context(), readerTx, blockNum)
+	maxTx, found, err := reader.TxnumReader().MaxExact(t.Context(), readerTx, nil, blockNum)
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, wantMaxTx, maxTx)

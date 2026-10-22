@@ -33,6 +33,8 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
@@ -145,7 +147,6 @@ type VmTraceOp struct {
 	Pc           int        `json:"pc"`
 	Sub          *VmTrace   `json:"sub"`
 	Op           string     `json:"op,omitempty"`
-	Idx          string     `json:"idx,omitempty"`
 }
 
 type VmTraceEx struct {
@@ -289,7 +290,6 @@ type OeTracer struct {
 	memLenStack  []uint64
 	lastOffStack *VmTraceOp
 	vmOpStack    []*VmTraceOp // Stack of vmTrace operations as call depth increases
-	idx          []string     // Prefix for the "idx" inside operations, for easier navigation
 	config       OeTracerConfig
 }
 
@@ -429,15 +429,6 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 	if ot.r.VmTrace != nil {
 		var vmTrace *VmTrace
 		if deep {
-			var vmT *VmTrace
-			if len(ot.vmOpStack) > 0 {
-				vmT = ot.vmOpStack[len(ot.vmOpStack)-1].Sub
-			} else {
-				vmT = ot.r.VmTrace
-			}
-			if !ot.compat {
-				ot.idx = append(ot.idx, fmt.Sprintf("%d-", len(vmT.Ops)-1))
-			}
 			ot.memOffStack = append(ot.memOffStack, ot.callMemOff)
 			ot.memLenStack = append(ot.memLenStack, ot.callMemLen)
 		}
@@ -560,9 +551,6 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed mdgas.MdG
 			if errors.Is(err, vm.ErrDepth) || errors.Is(err, vm.ErrInsufficientBalance) || errors.Is(err, vm.ErrNonceUintOverflow) {
 				ot.lastOffStack.Sub = nil
 			}
-		}
-		if !ot.compat && deep {
-			ot.idx = ot.idx[:len(ot.idx)-1]
 		}
 		if deep {
 			ot.lastMemOff = ot.memOffStack[len(ot.memOffStack)-1]
@@ -757,14 +745,6 @@ func (ot *OeTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.M
 		}
 		ot.lastVmOp = &VmTraceOp{Ex: &VmTraceEx{}}
 		vmTrace.Ops = append(vmTrace.Ops, ot.lastVmOp)
-		if !ot.compat {
-			var sb strings.Builder
-			sb.Grow(len(ot.idx))
-			for _, idx := range ot.idx {
-				sb.WriteString(idx)
-			}
-			ot.lastVmOp.Idx = fmt.Sprintf("%s%d", sb.String(), len(vmTrace.Ops)-1)
-		}
 		ot.lastOp = vm.OpCode(op)
 		ot.lastVmOp.Cost = int(cost.Execution)
 		ot.lastVmOp.StateGasCost = cost.State
@@ -1252,10 +1232,10 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, *blockNrOrHash, tx, api._blockReader)
 	if err != nil {
-		return nil, err
+		return nil, unknownBlockAsResourceNotFound(err)
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	err = api.BaseAPI.checkPruneState(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1288,6 +1268,10 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace, err := parseTraceTypes(traceTypes)
 	if err != nil {
 		return nil, err
+	}
+	// A state diff is written through FinalizeTx, which the versioned path does not serve.
+	if !traceTypeStateDiff {
+		transactions.VersionedCallState(ibs)
 	}
 	if traceTypeVmTrace {
 		traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
@@ -1345,7 +1329,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	var execResult *evmtypes.ExecutionResult
-	ibs.SetTxContext(blockCtx.BlockNumber, 0)
+	ibs.SetTxContext(blockCtx.BlockNumber, ibs.TxnIndex())
 	ibs.SetHooks(vmConfig.Tracer)
 
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxStart != nil {
@@ -1498,10 +1482,10 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	}
 	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, *parentNrOrHash, tx, api._blockReader)
 	if err != nil {
-		return nil, err
+		return nil, unknownBlockAsResourceNotFound(err)
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	err = api.BaseAPI.checkPruneState(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1643,7 +1627,6 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			}
 			ot.compat = api.compatibility
 			ot.r = traceResult
-			ot.idx = []string{fmt.Sprintf("%d-", txIndex)}
 			if traceTypeTrace {
 				ot.traceAddr = []int{}
 			}
@@ -1808,7 +1791,6 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		}
 		ot.compat = api.compatibility
 		ot.r = traceResult
-		ot.idx = []string{fmt.Sprintf("%d-", txIndex)}
 		if traceTypeTrace {
 			ot.traceAddr = []int{}
 		}
@@ -1881,6 +1863,11 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 
 // RawTransaction implements trace_rawTransaction.
 func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.Bytes, traceTypes []string) (*TraceCallResult, error) {
+	// Checked before decoding to bound its allocations: on every fork an authorization costs at
+	// least ExecutionPerAuthBaseCostEIP8038 of intrinsic gas, so a larger list cannot fit under the gas cap.
+	if n := setCodeAuthorizationCount(encodedTx); api.gasCap != 0 && uint64(n) > api.gasCap/params.ExecutionPerAuthBaseCostEIP8038 {
+		return nil, clientLimitExceededError(fmt.Sprintf("authorization list of %d entries exceeds the RPC gas cap %d", n, api.gasCap))
+	}
 	txn, err := types.DecodeWrappedTransaction(encodedTx)
 	if err != nil {
 		return nil, &rpc.InvalidParamsError{Message: "invalid raw transaction: " + err.Error()}
@@ -1909,7 +1896,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNumber)
+	err = api.BaseAPI.checkPruneStateAfterSystemTx(ctx, dbtx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1946,6 +1933,9 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 
 	ibs := state.New(stateReader)
 	defer ibs.Close()
+	if !traceTypeStateDiff {
+		transactions.VersionedCallState(ibs)
+	}
 
 	var ot OeTracer
 	ot.config, err = parseOeTracerConfig(nil)
@@ -2021,4 +2011,37 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	}
 
 	return traceResult, nil
+}
+
+// setCodeAuthorizationCount returns the authorization-list length of a canonical or
+// RLP-enveloped SetCode transaction without decoding it, or 0 for any other input.
+func setCodeAuthorizationCount(encoded []byte) int {
+	if len(encoded) > 0 && encoded[0] >= rlp.EmptyStringCode {
+		dataPos, dataLen, isList, err := rlp.Prefix(encoded, 0)
+		if err != nil || isList {
+			return 0
+		}
+		encoded = encoded[dataPos : dataPos+dataLen]
+	}
+	if len(encoded) == 0 || encoded[0] != types.SetCodeTxType {
+		return 0
+	}
+	payload := encoded[1:]
+	pos, _, err := rlp.ParseList(payload, 0)
+	if err != nil {
+		return 0
+	}
+	// chainID, nonce, tip, feeCap, gas, to, value, data and accessList precede the authorization list.
+	for range 9 {
+		dataPos, dataLen, _, err := rlp.Prefix(payload, pos)
+		if err != nil {
+			return 0
+		}
+		pos = dataPos + dataLen
+	}
+	dataPos, dataLen, err := rlp.ParseList(payload, pos)
+	if err != nil {
+		return 0
+	}
+	return rlp.CountItems(payload[dataPos : dataPos+dataLen])
 }

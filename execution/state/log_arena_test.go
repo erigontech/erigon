@@ -253,6 +253,25 @@ func TestLogPoolReusesLargeDataAcrossTxs(t *testing.T) {
 	require.Len(t, ibs.logs.pool, 1)
 }
 
+// A transaction that spends its whole gas on log data leaves buffers the next
+// one reuses, so a block of such transactions maps fresh memory only once.
+func TestLogPoolReusesTxMaxLogDataAcrossTxs(t *testing.T) {
+	t.Parallel()
+
+	const dataSize = maxLogBytesPerTxn / 2
+	ibs := New(nil)
+	ibs.SetTxContext(1, 0)
+	first := [2]*byte{&ibs.AllocLog(common.HexToAddress("0x1"), 0, dataSize).Data[0], &ibs.AllocLog(common.HexToAddress("0x1"), 0, dataSize).Data[0]}
+	ibs.Reset()
+
+	ibs.SetTxContext(1, 1)
+	for i := range 2 {
+		lp := ibs.AllocLog(common.HexToAddress("0x2"), 0, dataSize)
+		p := &lp.Data[0]
+		require.True(t, p == first[0] || p == first[1], "log %d reallocated its buffer", i)
+	}
+}
+
 // Data past the per-entry cap is not pooled: one buffer that size would take the
 // whole budget and leave nothing for the small entries.
 func TestLogPoolRejectsOversizedData(t *testing.T) {
@@ -547,5 +566,5 @@ func TestArenaRetentionStaysBounded(t *testing.T) {
 	require.LessOrEqual(t, ibs.logs.poolBytes, maxPooledLogBytes, "pooled Data")
 
 	held := slotBytes + len(ibs.logs.pool)*304 + ibs.logs.poolBytes
-	require.Less(t, held, 3<<20, "an arena holds %dKB after mixed traffic", held/1024)
+	require.Less(t, held, 4<<20, "an arena holds %dKB after mixed traffic", held/1024)
 }

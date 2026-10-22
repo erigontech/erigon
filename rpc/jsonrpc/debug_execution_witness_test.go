@@ -849,7 +849,7 @@ func TestWitnessStatelessVerifyOnlyRunsUnderAssert(t *testing.T) {
 
 type fixedParentState struct {
 	acc  map[accounts.Address]*accounts.Account
-	slot map[accounts.StorageKey][]byte
+	slot map[accounts.StorageKey]uint256.Int
 }
 
 func (p fixedParentState) GetCommittedAccount(addr accounts.Address) (*accounts.Account, bool) {
@@ -857,7 +857,7 @@ func (p fixedParentState) GetCommittedAccount(addr accounts.Address) (*accounts.
 	return a, ok
 }
 
-func (p fixedParentState) GetCommittedStorage(_ accounts.Address, key accounts.StorageKey) ([]byte, bool) {
+func (p fixedParentState) GetCommittedStorage(_ accounts.Address, key accounts.StorageKey) (uint256.Int, bool) {
 	v, ok := p.slot[key]
 	return v, ok
 }
@@ -888,7 +888,7 @@ func TestParentStateReaderServesTheValidationsParentState(t *testing.T) {
 	}
 	parent := fixedParentState{
 		acc:  map[accounts.Address]*accounts.Account{cached: {Nonce: 7}, absent: nil},
-		slot: map[accounts.StorageKey][]byte{full: {5}, empty: nil},
+		slot: map[accounts.StorageKey]uint256.Int{full: *uint256.NewInt(5), empty: {}},
 	}
 	for _, asserts := range []bool{false, true} {
 		dbg.AssertEnabled = asserts
@@ -918,7 +918,7 @@ func TestParentStateReaderServesTheValidationsParentState(t *testing.T) {
 	}
 
 	dbg.AssertEnabled = true
-	wrong := fixedParentState{acc: map[accounts.Address]*accounts.Account{cached: {Nonce: 1}}, slot: map[accounts.StorageKey][]byte{full: {4}}}
+	wrong := fixedParentState{acc: map[accounts.Address]*accounts.Account{cached: {Nonce: 1}}, slot: map[accounts.StorageKey]uint256.Int{full: *uint256.NewInt(4)}}
 	r := &parentStateReader{StateReader: history, parent: wrong}
 	_, err := r.ReadAccountData(cached)
 	require.Error(t, err, "asserts reject a cached account that differs from history")

@@ -793,6 +793,44 @@ func (a *vwArena[T]) reset(release func(*VersionedWrite[T])) {
 	}
 }
 
+const acctChunk = 32
+
+// acctSlab holds an arena-backed set's AddressPath values; a value stays valid
+// until the arena resets, so Snapshot copies it out.
+type acctSlab struct {
+	chunks [][]accounts.Account
+	n      int
+}
+
+func (s *acctSlab) copyOf(a *accounts.Account) *accounts.Account {
+	i, j := s.n/acctChunk, s.n%acctChunk
+	if i == len(s.chunks) {
+		if s.n >= vwMaxCells {
+			return a.SelfCopy()
+		}
+		s.chunks = append(s.chunks, make([]accounts.Account, acctChunk))
+	}
+	p := &s.chunks[i][j]
+	*p = *a
+	s.n++
+	return p
+}
+
+func (s *acctSlab) reset() {
+	for i := 0; i*acctChunk < s.n; i++ {
+		clear(s.chunks[i][:min(acctChunk, s.n-i*acctChunk)])
+	}
+	s.n = 0
+}
+
+// copyAccount returns a copy of a for an AddressPath write.
+func (ws *WriteSet) copyAccount(a *accounts.Account) *accounts.Account {
+	if ws.cells != nil {
+		return ws.cells.accounts.copyOf(a)
+	}
+	return a.SelfCopy()
+}
+
 func (ws *WriteSet) newVWAddress() *VersionedWrite[*accounts.Account] {
 	if ws.cells != nil {
 		return ws.cells.address.alloc(getVWAddress)
@@ -896,9 +934,11 @@ type vwArenas struct {
 	codeHash       vwArena[accounts.CodeHash]
 	codeSize       vwArena[int]
 	storage        vwArena[uint256.Int]
+	accounts       acctSlab
 }
 
 func (a *vwArenas) reset() {
+	a.accounts.reset()
 	a.address.reset(releaseVWAddress)
 	a.balance.reset(releaseVWBalance)
 	a.nonce.reset(releaseVWNonce)
@@ -1235,7 +1275,11 @@ func (ws *WriteSet) Snapshot() *WriteSet {
 		}
 		if !sd {
 			if vw, ok := ws.address[addr]; ok {
-				out.SetAddress(addr, cloneVW(vw))
+				c := cloneVW(vw)
+				if ws.cells != nil && c.Val != nil {
+					c.Val = c.Val.SelfCopy()
+				}
+				out.SetAddress(addr, c)
 			}
 			if vw, ok := ws.nonce[addr]; ok {
 				out.SetNonce(addr, cloneVW(vw))
@@ -2902,12 +2946,19 @@ type accountState struct {
 	initialBalanceValue *uint256.Int                        // tracks pre-block balance for net-zero detection
 	storageReadValues   map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
 	slotWrites          map[accounts.StorageKey]int         // slot -> index into changes.StorageChanges, built past slotIndexMin
-	slotReads           map[accounts.StorageKey]int         // slot -> index into changes.StorageReads, built with slotWrites
+	storageReads        []accounts.StorageKey               // copied into changes.StorageReads by finalize
+	slotReads           map[accounts.StorageKey]int         // slot -> index into storageReads, built with slotWrites
 	initialCodeEmpty    bool                                // pre-block code was empty (created contract or empty-codehash read)
 }
 
 // check pre- and post-values, add to BAL if different
 func (account *accountState) finalize() {
+	if len(account.storageReads) > 0 {
+		account.changes.StorageReads = make([]common.Hash, len(account.storageReads))
+		for i, slot := range account.storageReads {
+			account.changes.StorageReads[i] = slot.Value()
+		}
+	}
 	applyToBalance(account.balance, account.changes, account.initialBalanceValue)
 	applyToNonce(account.nonce, account.changes)
 	applyToCode(account.code, account.changes, account.initialCodeEmpty)
@@ -3114,9 +3165,9 @@ func (account *accountState) updateReadStorage(key accounts.StorageKey, val uint
 		if _, seen := account.slotReads[key]; seen {
 			return
 		}
-		account.slotReads[key] = len(account.changes.StorageReads)
+		account.slotReads[key] = len(account.storageReads)
 	}
-	account.changes.StorageReads = append(account.changes.StorageReads, key)
+	account.storageReads = append(account.storageReads, key)
 }
 
 func (account *accountState) updateReadBalance(val uint256.Int) {
@@ -3198,16 +3249,16 @@ func (account *accountState) addStorageUpdate(at int, slot accounts.StorageKey, 
 		// StorageReads can hold the same slot twice: below the threshold reads are
 		// appended unchecked, and Normalize is what dedups them. The index needs
 		// one entry per slot, so drop the repeats while building it.
-		account.slotReads = make(map[accounts.StorageKey]int, len(ac.StorageReads))
-		deduped := ac.StorageReads[:0]
-		for _, slot := range ac.StorageReads {
+		account.slotReads = make(map[accounts.StorageKey]int, len(account.storageReads))
+		deduped := account.storageReads[:0]
+		for _, slot := range account.storageReads {
 			if _, seen := account.slotReads[slot]; seen {
 				continue
 			}
 			account.slotReads[slot] = len(deduped)
 			deduped = append(deduped, slot)
 		}
-		ac.StorageReads = deduped
+		account.storageReads = deduped
 	}
 }
 
@@ -3215,22 +3266,18 @@ func (account *accountState) addStorageUpdate(at int, slot accounts.StorageKey, 
 // precedence. Past slotIndexMin the position is indexed and the last entry is
 // swapped in; order does not survive Normalize's sort anyway.
 func (account *accountState) removeStorageRead(slot accounts.StorageKey) {
-	ac := account.changes
-	if len(ac.StorageReads) == 0 {
+	reads := account.storageReads
+	if len(reads) == 0 {
 		return
 	}
 	if account.slotReads == nil {
-		out := ac.StorageReads[:0]
-		for _, s := range ac.StorageReads {
+		out := reads[:0]
+		for _, s := range reads {
 			if s != slot {
 				out = append(out, s)
 			}
 		}
-		if len(out) == 0 {
-			ac.StorageReads = nil
-		} else {
-			ac.StorageReads = out
-		}
+		account.storageReads = out
 		return
 	}
 	i, ok := account.slotReads[slot]
@@ -3238,16 +3285,12 @@ func (account *accountState) removeStorageRead(slot accounts.StorageKey) {
 		return
 	}
 	delete(account.slotReads, slot)
-	last := len(ac.StorageReads) - 1
+	last := len(reads) - 1
 	if i != last {
-		ac.StorageReads[i] = ac.StorageReads[last]
-		account.slotReads[ac.StorageReads[i]] = i
+		reads[i] = reads[last]
+		account.slotReads[reads[i]] = i
 	}
-	if last == 0 {
-		ac.StorageReads = nil
-		return
-	}
-	ac.StorageReads = ac.StorageReads[:last]
+	account.storageReads = reads[:last]
 }
 
 type versionedReadSet struct {
@@ -3408,4 +3451,59 @@ func (ws *WriteSet) createdEmpty(addr accounts.Address) bool {
 	_, createdContract := ws.createContract[addr]
 	_, hasCodeSize := ws.codeSize[addr]
 	return !hasCode && !hasIncarnation && !destroyed && !createdContract && !hasCodeSize && len(ws.storage[addr]) == 0
+}
+
+func versionedUpdateBalance(vm *VersionMap, addr accounts.Address, txIndex int) (uint256.Int, bool) {
+	val, res, ok := vm.ReadBalance(addr, txIndex)
+	if ok && res.Status() != MVReadResultNone {
+		return val, true
+	}
+	return uint256.Int{}, false
+}
+
+func versionedUpdateNonce(vm *VersionMap, addr accounts.Address, txIndex int) (uint64, bool) {
+	val, res, ok := vm.ReadNonce(addr, txIndex)
+	if ok && res.Status() != MVReadResultNone {
+		return val, true
+	}
+	return 0, false
+}
+
+func versionedUpdateIncarnation(vm *VersionMap, addr accounts.Address, txIndex int) (uint64, bool) {
+	val, res, ok := vm.ReadIncarnation(addr, txIndex)
+	if ok && res.Status() != MVReadResultNone {
+		return val, true
+	}
+	return 0, false
+}
+
+func versionedUpdateCode(vm *VersionMap, addr accounts.Address, txIndex int) ([]byte, bool) {
+	val, res, ok := vm.ReadCode(addr, txIndex)
+	if ok && res.Status() != MVReadResultNone {
+		return val.Bytes, true
+	}
+	return nil, false
+}
+
+func versionedUpdateCodeHash(vm *VersionMap, addr accounts.Address, txIndex int) (accounts.CodeHash, bool) {
+	val, res, ok := vm.ReadCodeHash(addr, txIndex)
+	if ok && res.Status() != MVReadResultNone {
+		return val, true
+	}
+	return accounts.CodeHash{}, false
+}
+
+func versionedUpdateStorage(vm *VersionMap, addr accounts.Address, key accounts.StorageKey, txIndex int) (uint256.Int, bool) {
+	val, res, ok := vm.ReadStorage(addr, key, txIndex)
+	if ok && res.Status() != MVReadResultNone {
+		return val, true
+	}
+	return uint256.Int{}, false
+}
+
+func (ws *WriteSet) CreateContracts() iter.Seq2[accounts.Address, *VersionedWrite[bool]] {
+	if ws == nil {
+		return maps.All(map[accounts.Address]*VersionedWrite[bool](nil))
+	}
+	return maps.All(ws.createContract)
 }

@@ -269,7 +269,7 @@ func (s *CaplinStateSnapshots) IndicesMax() uint64 {
 	if minTo == math.MaxUint64 {
 		return 0
 	}
-	return minTo
+	return minTo - 1
 }
 
 func (s *CaplinStateSnapshots) LogStat(str string) {
@@ -556,7 +556,7 @@ func planStateDump(coverage map[string][]Range, toSlot, blocksPerFile uint64) []
 	return jobs
 }
 
-// DumpCaplinState must not run concurrently with RemoveOverlaps, which sweeps every .tmp in
+// DumpCaplinState must not run concurrently with RemoveOverlaps, which sweeps its own .tmp files in
 // the output directory. Both run on loopStates; parallelising the dump breaks that.
 func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
 	coverage := make(map[string][]Range, len(s.snapshotTypes.KeyValueGetters))

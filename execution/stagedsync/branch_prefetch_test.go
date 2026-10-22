@@ -357,7 +357,7 @@ func TestHandleBlockRequestQueuesBALWrites(t *testing.T) {
 	bal := types.BlockAccessList{
 		{Address: balanceOnly, BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}},
 		{Address: storageOnly, StorageChanges: []types.SlotChanges{{Slot: slotA, Changes: change}, {Slot: slotB, Changes: change}}},
-		{Address: readOnly, StorageReads: []accounts.StorageKey{slotA}},
+		{Address: readOnly, StorageReads: []common.Hash{slotA.Value()}},
 	}
 
 	cc.handleBlockRequest(context.Background(), &blockRequest{blockNum: 5, bal: bal})

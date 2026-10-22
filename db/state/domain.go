@@ -1643,12 +1643,11 @@ func (dt *DomainRoTx) GetLatestValSize(key []byte, roTx kv.Tx) (size int, found 
 }
 
 // Returns the first txNum from available history
-func (dt *DomainRoTx) HistoryStartFrom(tx kv.Tx) uint64 {
+func (dt *DomainRoTx) HistoryStartFrom(tx kv.Tx) (uint64, error) {
 	if len(dt.ht.files) == 0 { // if no history files, check in MDBX
-		firstTxNumInMdbx := dt.ht.h.minTxNumInDB(tx)
-		return firstTxNumInMdbx
+		return dt.ht.h.minTxNumInDB(tx)
 	}
-	return dt.ht.files[0].startTxNum
+	return dt.ht.files[0].startTxNum, nil
 }
 
 // GetAsOf does not always require usage of roTx. If it is possible to determine

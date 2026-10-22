@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"maps"
 	"sync"
 	"time"
 
@@ -10,13 +11,14 @@ import (
 type timeBasedRateLimiter struct {
 	duration    time.Duration
 	start       time.Time
-	maxRequests int
+	maxRequests func() int
+	limit       int
 	counter     int
 
 	mu sync.Mutex
 }
 
-func newTimeBasedRateLimiter(duration time.Duration, maxRequests int) *timeBasedRateLimiter {
+func newTimeBasedRateLimiter(duration time.Duration, maxRequests func() int) *timeBasedRateLimiter {
 	return &timeBasedRateLimiter{
 		duration:    duration,
 		maxRequests: maxRequests,
@@ -30,10 +32,11 @@ func (r *timeBasedRateLimiter) tryAcquire() bool {
 
 	if time.Since(r.start) > r.duration {
 		r.start = time.Now()
+		r.limit = r.maxRequests()
 		r.counter = 0
 	}
 
-	if r.counter < r.maxRequests {
+	if r.counter < r.limit {
 		r.counter++
 		return true
 	}
@@ -47,46 +50,39 @@ type tokenBucketLimiter struct {
 }
 
 type tokenBucketRateLimiter struct {
-	limiter map[string]tokenBucketLimiter
-	mu      sync.Mutex
-	rate    rate.Limit
-	burst   int
+	limiter   map[string]*tokenBucketLimiter
+	mu        sync.Mutex
+	rate      rate.Limit
+	burst     int
+	lastSweep time.Time
 }
 
 func newTokenBucketRateLimiter(ratePerSecond float64, burst int) *tokenBucketRateLimiter {
-	tb := &tokenBucketRateLimiter{
-		limiter: make(map[string]tokenBucketLimiter),
-		mu:      sync.Mutex{},
+	return &tokenBucketRateLimiter{
+		limiter: make(map[string]*tokenBucketLimiter),
 		rate:    rate.Limit(ratePerSecond),
 		burst:   burst,
 	}
-	go tb.cleanup()
-	return tb
 }
 
 func (r *tokenBucketRateLimiter) acquire(key string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	now := time.Now()
+	if now.Sub(r.lastSweep) > 10*time.Second {
+		r.lastSweep = now
+		maps.DeleteFunc(r.limiter, func(_ string, l *tokenBucketLimiter) bool {
+			return now.Sub(l.lastAccess) > 3*time.Minute
+		})
+	}
+
 	limiter, ok := r.limiter[key]
 	if !ok {
-		limiter.limiter = rate.NewLimiter(r.rate, r.burst)
+		limiter = &tokenBucketLimiter{limiter: rate.NewLimiter(r.rate, r.burst)}
 		r.limiter[key] = limiter
 	}
 
-	limiter.lastAccess = time.Now()
+	limiter.lastAccess = now
 	return limiter.limiter.Allow()
-}
-
-func (r *tokenBucketRateLimiter) cleanup() {
-	for {
-		time.Sleep(10 * time.Second)
-		r.mu.Lock()
-		for key, limiter := range r.limiter {
-			if time.Since(limiter.lastAccess) > 3*time.Minute {
-				delete(r.limiter, key)
-			}
-		}
-		r.mu.Unlock()
-	}
 }

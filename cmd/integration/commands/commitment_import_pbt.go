@@ -616,7 +616,7 @@ func validatePBTImportTarget(ctx context.Context, rawDB kv.RoDB, blockReader *fr
 	if progress != meta.Block {
 		return "", pbtImportProgressError(progress, meta, dataDir, cmp.Or(chainConfig.ChainName, chainName))
 	}
-	lastTx, found, err := blockReader.TxnumReader().MaxExact(ctx, readerTx, meta.Block)
+	lastTx, found, err := blockReader.TxnumReader().MaxExact(ctx, readerTx, nil, meta.Block)
 	if err != nil {
 		return "", err
 	}

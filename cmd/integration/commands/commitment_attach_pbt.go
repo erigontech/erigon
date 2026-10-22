@@ -407,7 +407,7 @@ func pbtAttachBlockEnd(ctx context.Context, dirs datadir.Dirs, blockNum, txNum u
 	}
 	defer tx.Rollback()
 	blockTx := pbtBlockFilesTx{Tx: tx, view: blockView}
-	maxTxNum, found, err := blockReader.TxnumReader().MaxExact(ctx, blockTx, blockNum)
+	maxTxNum, found, err := blockReader.TxnumReader().MaxExact(ctx, blockTx, nil, blockNum)
 	if err != nil {
 		return common.Hash{}, common.Hash{}, false, false, 0, err
 	}

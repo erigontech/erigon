@@ -407,7 +407,7 @@ func buildFrozenPBTExportDatadir(t *testing.T) datadir.Dirs {
 	var lastTxNum uint64
 	require.NoError(t, rawDB.View(t.Context(), func(rawTx kv.Tx) error {
 		var found bool
-		lastTxNum, found, err = rawdbv3.TxNums.MaxExact(t.Context(), rawTx, blockNum)
+		lastTxNum, found, err = rawdbv3.TxNums.MaxExact(t.Context(), rawTx, nil, blockNum)
 		require.True(t, found)
 		return err
 	}))

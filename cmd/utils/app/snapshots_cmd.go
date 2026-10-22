@@ -327,6 +327,7 @@ var snapshotCommand = cli.Command{
 			Flags: []cli.Flag{
 				&utils.DataDirFlag,
 				&dryRunFlag,
+				&keepLocalSnapshotsFlag,
 				&removeLocalFlag,
 				&allowMixedStateFlag,
 				&PreverifiedFlag,
@@ -960,16 +961,6 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 			minS, maxS = _maxFrom, math.MaxUint64
 		}
 
-		removeAll := false
-		if minS == maxS {
-			q := "remove ALL snapshot files?\n\t1) RemoveFile\n\t4) NONONO (Exit)\n (pick number): "
-			if promptExit(q) {
-				os.Exit(0)
-			}
-			minS, maxS = 0, math.MaxUint64
-			removeAll = true
-		}
-
 		// Pre-compute files to remove
 		for i := range files {
 			res := &files[i]
@@ -1016,53 +1007,51 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 			}
 		}
 
-		if !removeAll {
-			// Print header with datadir and step range
-			if snapDir != "" {
-				fmt.Printf("\nDatadir: %s\n", snapDir)
-			}
-			if removeLatest {
-				fmt.Printf("Step range: latest (stepFrom>=%d)\n", _maxFrom)
+		// Print header with datadir and step range
+		if snapDir != "" {
+			fmt.Printf("\nDatadir: %s\n", snapDir)
+		}
+		if removeLatest {
+			fmt.Printf("Step range: latest (stepFrom>=%d)\n", _maxFrom)
+		} else {
+			fmt.Printf("Step range: [%d, %d)\n", minS, maxS)
+		}
+
+		// Display commitment files with KEEP/REMOVE markers, sizes, and labels
+		fmt.Println()
+		for i := range commitmentFilesWithState {
+			cf := &commitmentFilesWithState[i]
+			var sizeStr string
+			if info, err := os.Stat(cf.file.Path); err == nil {
+				sizeStr = common.ByteCount(uint64(info.Size()))
 			} else {
-				fmt.Printf("Step range: [%d, %d)\n", minS, maxS)
+				sizeStr = "unknown"
 			}
 
-			// Display commitment files with KEEP/REMOVE markers, sizes, and labels
-			fmt.Println()
-			for i := range commitmentFilesWithState {
-				cf := &commitmentFilesWithState[i]
-				var sizeStr string
-				if info, err := os.Stat(cf.file.Path); err == nil {
-					sizeStr = common.ByteCount(uint64(info.Size()))
-				} else {
-					sizeStr = "unknown"
-				}
-
-				_, isRemoved := toRemove[cf.file.Path]
-				action := "KEEP  "
-				if isRemoved {
-					action = "REMOVE"
-				}
-				labelStr := ""
-				if cf.label != "" {
-					labelStr = "  " + cf.label
-				}
-				fmt.Printf("  %s %s  (%s)%s\n", action, filepath.Base(cf.file.Path), sizeStr, labelStr)
+			_, isRemoved := toRemove[cf.file.Path]
+			action := "KEEP  "
+			if isRemoved {
+				action = "REMOVE"
 			}
-			for _, typ := range commitmentStateTypesFullyRemoved(commitmentFilesWithState, toRemove) {
-				fmt.Printf("\nthis will remove ALL %s files with state trie\n", typ)
-				q := "Do that anyway?\n\t1) RemoveFile\n\t4) NONONO (Exit)\n (pick number): "
-				if promptExit(q) {
-					os.Exit(0)
-				}
+			labelStr := ""
+			if cf.label != "" {
+				labelStr = "  " + cf.label
 			}
-
-			// Prompt with file count and estimated deletion size
-			q := fmt.Sprintf("\nremove %d files (~%s)?\n1) RemoveFile\n4) Exit\n (pick number): ",
-				len(toRemove), common.ByteCount(removeSize))
+			fmt.Printf("  %s %s  (%s)%s\n", action, filepath.Base(cf.file.Path), sizeStr, labelStr)
+		}
+		for _, typ := range commitmentStateTypesFullyRemoved(commitmentFilesWithState, toRemove) {
+			fmt.Printf("\nthis will remove ALL %s files with state trie\n", typ)
+			q := "Do that anyway?\n\t1) RemoveFile\n\t4) NONONO (Exit)\n (pick number): "
 			if promptExit(q) {
 				os.Exit(0)
 			}
+		}
+
+		// Prompt with file count and estimated deletion size
+		q := fmt.Sprintf("\nremove %d files (~%s)?\n1) RemoveFile\n4) Exit\n (pick number): ",
+			len(toRemove), common.ByteCount(removeSize))
+		if promptExit(q) {
+			os.Exit(0)
 		}
 	} else {
 		for i := range files {
@@ -1770,7 +1759,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 		if parentErr := ctx.Err(); parentErr != nil {
 			return parentErr
 		}
-		if errors.Is(err, context.DeadlineExceeded) {
+		if integrity.BudgetExhausted(err) {
 			logger.Info("[integrity] budget exhausted, moving on", "check", chk, "elapsed", elapsed)
 			continue
 		}
@@ -1940,16 +1929,11 @@ func doCheckRCacheRootAtBlkRange(ctx context.Context, cliCtx *cli.Command, logge
 			return err
 		}
 		defer tx.Rollback()
-		rcacheDomainProgress := tx.Debug().DomainProgress(kv.RCacheDomain)
-		rcacheTip, ok, err := blockReader.TxnumReader().FindBlockNum(ctx, tx, rcacheDomainProgress)
+		to, err = integrity.RCacheEndBlockNum(ctx, tx, blockReader.TxnumReader())
 		tx.Rollback()
 		if err != nil {
 			return err
 		}
-		if !ok {
-			return fmt.Errorf("findBlockNum(%d) not found", rcacheDomainProgress)
-		}
-		to = rcacheTip + 1 // exclusive upper bound
 		logger.Info("[check-rcache-root-at-blk-range] auto-detected --to", "to", to)
 	}
 	var seed int64

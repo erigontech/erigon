@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/clparams/devgenesis"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
@@ -56,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	mock_services "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -302,51 +304,162 @@ func TestPostPtcDutiesDependentRootUnchangedWithinEpoch(t *testing.T) {
 	require.Equal(t, nextBefore, postPtcDutiesDependentRoot(t, handler, headEpoch+1))
 }
 
-func TestPostPtcDutiesForkEpochUnavailableBeforeGloasHead(t *testing.T) {
-	_, _, _, _, preForkState, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-	forkEpoch := state.Epoch(preForkState) + 1
-	previousHandlerForkEpoch := handler.beaconChainCfg.GloasForkEpoch
-	previousStateForkEpoch := preForkState.BeaconConfig().GloasForkEpoch
-	t.Cleanup(func() {
-		handler.beaconChainCfg.GloasForkEpoch = previousHandlerForkEpoch
-		preForkState.BeaconConfig().GloasForkEpoch = previousStateForkEpoch
-	})
-	handler.beaconChainCfg.GloasForkEpoch = forkEpoch
-	preForkState.BeaconConfig().GloasForkEpoch = forkEpoch
+type ptcForkEpochDutiesFixture struct {
+	handler          *ApiHandler
+	syncedData       *synced_data.SyncedDataManager
+	forkEpoch        uint64
+	headRoot         common.Hash
+	dependentRoot    common.Hash
+	predictedPtc     []uint64
+	advancedPtc      []uint64
+	wantDuties       map[[2]uint64]struct{}
+	validatorRequest string
+}
 
-	slotsPerEpoch := handler.beaconChainCfg.SlotsPerEpoch
-	publishPtcDutiesHead(t, syncedData, preForkState, common.Hash{0x71})
-	predictedPtc, err := preForkState.GetPTC(forkEpoch * slotsPerEpoch)
+func newPtcForkEpochDutiesFixture(t *testing.T, clockEpoch uint64) ptcForkEpochDutiesFixture {
+	t.Helper()
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 2
+	cfg.InitializeForkSchedule()
+
+	headState, _, err := devgenesis.BuildGenesisState("ptc-fork-epoch-duties", 64, &cfg, 1, common.Hash{0x80})
 	require.NoError(t, err)
-	require.NotEmpty(t, predictedPtc)
-	requestedValidator := predictedPtc[0]
+	require.Equal(t, clparams.FuluVersion, headState.Version())
 
-	postDuties := func() *httptest.ResponseRecorder {
-		request := httptest.NewRequestWithContext(
-			t.Context(),
-			http.MethodPost,
-			fmt.Sprintf("/eth/v1/validator/duties/ptc/%d", forkEpoch),
-			strings.NewReader(fmt.Sprintf(`["%d"]`, requestedValidator)),
-		)
-		recorder := httptest.NewRecorder()
-		handler.mux.ServeHTTP(recorder, request)
-		return recorder
+	forkEpoch := cfg.GloasForkEpoch
+	headSlot := forkEpoch*cfg.SlotsPerEpoch - 1
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(headState, headSlot))
+	dependentRoot := common.Hash{0x81}
+	dependentRootSlot := forkEpoch*cfg.SlotsPerEpoch - cfg.SlotsPerEpoch - 1
+	require.NoError(t, headState.SetBlockRootAt(int(dependentRootSlot), dependentRoot))
+
+	predictedPtc, err := headState.ComputePTC(forkEpoch * cfg.SlotsPerEpoch)
+	require.NoError(t, err)
+	uniquePredicted := make(map[uint64]struct{})
+	for _, validatorIndex := range predictedPtc {
+		uniquePredicted[validatorIndex] = struct{}{}
+	}
+	require.Greater(t, len(uniquePredicted), 1)
+	keptOne := false
+	for validatorIndex := range uniquePredicted {
+		if !keptOne {
+			keptOne = true
+			continue
+		}
+		require.NoError(t, headState.SetValidatorBalance(int(validatorIndex), 0))
+	}
+	predictedPtc, err = headState.ComputePTC(forkEpoch * cfg.SlotsPerEpoch)
+	require.NoError(t, err)
+
+	advancedState, err := headState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(advancedState, forkEpoch*cfg.SlotsPerEpoch))
+	require.Equal(t, clparams.GloasVersion, advancedState.Version())
+	advancedPtc, err := advancedState.GetPTC(forkEpoch * cfg.SlotsPerEpoch)
+	require.NoError(t, err)
+
+	wantDuties := make(map[[2]uint64]struct{})
+	for slot := forkEpoch * cfg.SlotsPerEpoch; slot < (forkEpoch+1)*cfg.SlotsPerEpoch; slot++ {
+		ptc, err := advancedState.GetPTC(slot)
+		require.NoError(t, err)
+		for _, validatorIndex := range ptc {
+			wantDuties[[2]uint64{validatorIndex, slot}] = struct{}{}
+		}
+	}
+	indices := make([]string, 0, headState.ValidatorLength())
+	for validatorIndex := range headState.ValidatorLength() {
+		indices = append(indices, fmt.Sprintf(`"%d"`, validatorIndex))
 	}
 
-	preForkResponse := postDuties()
-	require.Equal(t, http.StatusServiceUnavailable, preForkResponse.Code, preForkResponse.Body.String())
+	headRoot := common.Hash{0x82}
+	syncedData := synced_data.NewSyncedDataManager(&cfg, true)
+	require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, headRoot))
+	handler.beaconChainCfg = &cfg
+	handler.syncedData = syncedData
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentEpoch().Return(clockEpoch).AnyTimes()
+	handler.ethClock = clock
 
-	gloasState, err := preForkState.Copy()
-	require.NoError(t, err)
-	gloasState.SetVersion(clparams.GloasVersion)
-	require.NoError(t, gloasState.SetSlot(forkEpoch*slotsPerEpoch))
-	gloasState.SetPtcWindow(solid.NewUint64VectorOfVectors(
-		int((2+handler.beaconChainCfg.MinSeedLookahead)*slotsPerEpoch),
-		int(handler.beaconChainCfg.PtcSize),
-	))
-	publishPtcDutiesHead(t, syncedData, gloasState, common.Hash{0x72})
-	gloasResponse := postDuties()
-	require.Equal(t, http.StatusOK, gloasResponse.Code, gloasResponse.Body.String())
+	return ptcForkEpochDutiesFixture{
+		handler:          handler,
+		syncedData:       syncedData,
+		forkEpoch:        forkEpoch,
+		headRoot:         headRoot,
+		dependentRoot:    dependentRoot,
+		predictedPtc:     predictedPtc,
+		advancedPtc:      advancedPtc,
+		wantDuties:       wantDuties,
+		validatorRequest: "[" + strings.Join(indices, ",") + "]",
+	}
+}
+
+func (f ptcForkEpochDutiesFixture) post(t *testing.T) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
+		fmt.Sprintf("/eth/v1/validator/duties/ptc/%d", f.forkEpoch), strings.NewReader(f.validatorRequest))
+	recorder := httptest.NewRecorder()
+	f.handler.mux.ServeHTTP(recorder, request)
+	return recorder
+}
+
+func TestPostPtcDutiesForkEpochUsesAdvancedFuluState(t *testing.T) {
+	fixture := newPtcForkEpochDutiesFixture(t, 2)
+	require.NotEqual(t, fixture.predictedPtc, fixture.advancedPtc)
+
+	recorder := fixture.post(t)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var response struct {
+		DependentRoot common.Hash       `json:"dependent_root"`
+		Data          []ptcDutyResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Equal(t, fixture.dependentRoot, response.DependentRoot)
+	gotDuties := make(map[[2]uint64]struct{}, len(response.Data))
+	for _, duty := range response.Data {
+		gotDuties[[2]uint64{duty.ValidatorIndex, duty.Slot}] = struct{}{}
+	}
+	require.Equal(t, fixture.wantDuties, gotDuties)
+}
+
+func TestPostPtcDutiesForkEpochUnavailableBeforeClockReachesFork(t *testing.T) {
+	fixture := newPtcForkEpochDutiesFixture(t, 1)
+
+	recorder := fixture.post(t)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "not available until the head reaches the Gloas fork")
+}
+
+func TestPostPtcDutiesForkEpochDoesNotMutatePublishedHead(t *testing.T) {
+	fixture := newPtcForkEpochDutiesFixture(t, 2)
+	var beforeRoot common.Hash
+	require.NoError(t, fixture.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		root, err := headState.HashSSZ()
+		beforeRoot = common.Hash(root)
+		return err
+	}))
+
+	recorder := fixture.post(t)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.NoError(t, fixture.syncedData.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, headRoot common.Hash, headSlot uint64) error {
+		require.Equal(t, clparams.FuluVersion, headState.Version())
+		require.Equal(t, fixture.forkEpoch*headState.BeaconConfig().SlotsPerEpoch-1, headSlot)
+		require.Equal(t, fixture.headRoot, headRoot)
+		root, err := headState.HashSSZ()
+		require.Equal(t, beforeRoot, common.Hash(root))
+		return err
+	}))
 }
 
 func TestGetPayloadAttestationDataUsesEnvelopeReceiptDeadline(t *testing.T) {
@@ -473,7 +586,7 @@ func TestGetPayloadAttestationDataReportsSyncing(t *testing.T) {
 		t.Run(path, func(t *testing.T) {
 			_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 			handler.beaconChainCfg.GloasForkEpoch = 0
-			syncedData.(*sync_mock_services.MockSyncedData).EXPECT().Syncing().Return(true)
+			syncedData.(*sync_mock_services.MockSyncedData).EXPECT().StateHead().Return(common.Hash{}, uint64(0), false)
 
 			recorder := httptest.NewRecorder()
 			handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
@@ -483,19 +596,17 @@ func TestGetPayloadAttestationDataReportsSyncing(t *testing.T) {
 	}
 }
 
-func TestGetPayloadAttestationDataPreservesUnavailableHeadStatus(t *testing.T) {
+// The stale-head gate answers before a gated endpoint reads the head, so the selected-head
+// lookup keeps its own test for a missing head state.
+func TestGetSelectedHeadReportsAMissingHeadStateAsUnavailable(t *testing.T) {
 	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
-	handler.beaconChainCfg.GloasForkEpoch = 0
 	handler.enableMemoizedHeadState = true
-	mockSyncedData := syncedData.(*sync_mock_services.MockSyncedData)
-	mockSyncedData.EXPECT().Syncing().Return(false)
-	mockSyncedData.EXPECT().StateHead().Return(common.Hash{}, uint64(0), false)
+	syncedData.(*sync_mock_services.MockSyncedData).EXPECT().StateHead().Return(common.Hash{}, uint64(0), false)
 
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/validator/payload_attestation_data?slot=64", http.NoBody)
-	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, request)
+	_, _, statusCode, err := handler.getSelectedHead()
 
-	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+	require.Error(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, statusCode)
 }
 
 func TestGetPayloadAttestationDataRejectsInvalidCanonicalSlotQuery(t *testing.T) {
@@ -556,6 +667,7 @@ func TestPostPayloadAttestationsRejectsNullMessage(t *testing.T) {
 	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.Equal(t, "application/json", recorder.Header().Get("Content-Type"))
 	require.Contains(t, recorder.Body.String(), "missing payload attestation message data")
 }
 
@@ -1238,6 +1350,48 @@ func TestPostExecutionPayloadEnvelopeRetriesAfterBroadcastFailure(t *testing.T) 
 	second := post()
 	require.Equal(t, http.StatusOK, second.Code, second.Body.String())
 	require.EqualValues(t, 2, integrations.Load())
+}
+
+// A retried POST whose validation is interrupted keeps the retry record, so the client can retry the
+// persisted envelope again.
+func TestPostExecutionPayloadEnvelopeKeepsTheRetryRecordWhenARetryIsInterrupted(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.gossipManager = gossip_mock.NewMockGossip(gomock.NewController(t))
+	handler.sentinel = &nonNilSentinelClient{}
+	gomock.InOrder(
+		handler.gossipManager.(*gossip_mock.MockGossip).EXPECT().Publish(
+			gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any(),
+		).Return(errors.New("gossip unavailable")),
+		handler.gossipManager.(*gossip_mock.MockGossip).EXPECT().Publish(
+			gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any(),
+		).Return(nil).AnyTimes(),
+	)
+	var validationErr error
+	fcu.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+		return validationErr
+	}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	post := func() *httptest.ResponseRecorder {
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+		request.Header.Set("Eth-Blob-Data-Included", "false")
+		recorder := httptest.NewRecorder()
+		handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+		return recorder
+	}
+
+	first := post()
+	require.Equal(t, http.StatusInternalServerError, first.Code, first.Body.String())
+	fcu.Envelopes[common.Hash{}] = envelope
+	validationErr = fmt.Errorf("%w: %w", forkchoice.ErrPayloadValidationInterrupted, context.DeadlineExceeded)
+	interrupted := post()
+	require.Equal(t, http.StatusAccepted, interrupted.Code, interrupted.Body.String())
+	validationErr = nil
+	last := post()
+	require.Equal(t, http.StatusOK, last.Code, last.Body.String())
 }
 
 func TestPostExecutionPayloadEnvelopeBroadcastFailureDoesNotAuthorizeDifferentEnvelope(t *testing.T) {
@@ -2093,11 +2247,12 @@ func TestEmitFullHeadV2DoesNotCopyState(t *testing.T) {
 	fcu.HeadPayloadStatusVal = cltypes.PayloadStatusFull
 	fcu.StateAtBlockRootVal[root] = headState
 	var stateCopies atomic.Int32
-	fcu.GetStateAtBlockRootFn = func(_ common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
-		if alwaysCopy {
-			stateCopies.Add(1)
-		}
+	fcu.GetStateAtBlockRootFn = func(common.Hash) (*state.CachingBeaconState, error) {
+		stateCopies.Add(1)
 		return headState, nil
+	}
+	fcu.ViewStateAtBlockRootFn = func(_ common.Hash, fn func(*state.CachingBeaconState) error) error {
+		return fn(headState)
 	}
 
 	handler.emitFullHeadV2(block, root)
@@ -2280,6 +2435,151 @@ func TestPostExecutionPayloadEnvelopesClassifiesIntegrationFailureByValidationMo
 			require.Equal(t, test.status, recorder.Code, recorder.Body.String())
 		})
 	}
+}
+
+// A client that gives up while the EL validates must not stop the publication, whether the
+// validation was interrupted or completed.
+func TestPostExecutionPayloadEnvelopePublishesAfterTheClientGaveUp(t *testing.T) {
+	for _, outcome := range []struct {
+		name   string
+		err    error
+		status int
+	}{
+		{name: "interrupted", err: fmt.Errorf("%w: %w", forkchoice.ErrPayloadValidationInterrupted, context.Canceled), status: http.StatusAccepted},
+		{name: "validated", status: http.StatusOK},
+	} {
+		for _, path := range []string{
+			"/eth/v1/beacon/execution_payload_envelope",
+			"/eth/v1/beacon/execution_payload_envelopes?broadcast_validation=gossip",
+			"/eth/v1/beacon/execution_payload_envelopes?broadcast_validation=consensus",
+		} {
+			t.Run(outcome.name+" "+path, func(t *testing.T) {
+				_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+				gossipManager := gossip_mock.NewMockGossip(gomock.NewController(t))
+				// A topic publish gives up on a done context, as the request's is here, and may
+				// otherwise block for as long as its context allows.
+				gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any()).
+					DoAndReturn(func(ctx context.Context, _ string, _ []byte) error {
+						if _, bounded := ctx.Deadline(); !bounded {
+							return errors.New("publish without a deadline")
+						}
+						return ctx.Err()
+					})
+				handler.gossipManager = gossipManager
+				handler.sentinel = &nonNilSentinelClient{}
+				requestCtx, cancelRequest := context.WithCancel(t.Context())
+				fcu.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+					cancelRequest()
+					return outcome.err
+				}
+				handler.emitters = beaconevents.NewEventEmitter()
+				events := make(chan *beaconevents.EventStream, 4)
+				subscription := handler.emitters.Operation().Subscribe(events)
+				defer subscription.Unsubscribe()
+				root := common.Hash{1}
+				fcu.Blocks[root] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 12, Body: cltypes.NewBeaconBody(handler.beaconChainCfg, clparams.GloasVersion)}}
+				envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+				envelope.Message.BeaconBlockRoot = root
+				body, err := json.Marshal(envelope)
+				require.NoError(t, err)
+				request := httptest.NewRequestWithContext(requestCtx, http.MethodPost, path, bytes.NewReader(body))
+				request.Header.Set("Content-Type", "application/json")
+				request.Header.Set("Eth-Consensus-Version", "gloas")
+				request.Header.Set("Eth-Blob-Data-Included", "false")
+				recorder := httptest.NewRecorder()
+
+				handler.ServeHTTP(recorder, request)
+
+				require.Equal(t, outcome.status, recorder.Code, recorder.Body.String())
+				select {
+				case event := <-events:
+					require.Equal(t, beaconevents.OpExecutionPayloadGossip, event.Event)
+				case <-time.After(time.Second):
+					t.Fatal("no execution payload gossip event")
+				}
+			})
+		}
+	}
+}
+
+// An interrupted validation parks the envelope without persisting it, so the client's re-POST
+// must be processed again instead of being refused as already seen.
+func TestPostExecutionPayloadEnvelopeAcceptsARepostAfterAnInterruptedValidation(t *testing.T) {
+	for _, path := range []string{
+		"/eth/v1/beacon/execution_payload_envelope",
+		"/eth/v1/beacon/execution_payload_envelopes?broadcast_validation=gossip",
+		"/eth/v1/beacon/execution_payload_envelopes?broadcast_validation=consensus",
+	} {
+		t.Run(path, func(t *testing.T) {
+			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			gossipManager := gossip_mock.NewMockGossip(gomock.NewController(t))
+			gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any()).Return(nil).AnyTimes()
+			handler.gossipManager = gossipManager
+			handler.sentinel = &nonNilSentinelClient{}
+			validationErr := fmt.Errorf("%w: %w", forkchoice.ErrPayloadValidationInterrupted, context.DeadlineExceeded)
+			fcu.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+				return validationErr
+			}
+			root := common.Hash{1}
+			fcu.Blocks[root] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 12, Body: cltypes.NewBeaconBody(handler.beaconChainCfg, clparams.GloasVersion)}}
+			envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+			envelope.Message.BeaconBlockRoot = root
+			body, err := json.Marshal(envelope)
+			require.NoError(t, err)
+			post := func() *httptest.ResponseRecorder {
+				request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, bytes.NewReader(body))
+				request.Header.Set("Content-Type", "application/json")
+				request.Header.Set("Eth-Consensus-Version", "gloas")
+				request.Header.Set("Eth-Blob-Data-Included", "false")
+				recorder := httptest.NewRecorder()
+				handler.ServeHTTP(recorder, request)
+				return recorder
+			}
+
+			first := post()
+			require.Equal(t, http.StatusAccepted, first.Code, first.Body.String())
+			validationErr = nil
+			second := post()
+			require.Equal(t, http.StatusOK, second.Code, second.Body.String())
+		})
+	}
+}
+
+// The publish window starts when publishing starts: a validation slower than a slot must not use
+// it up.
+func TestPostExecutionPayloadEnvelopePublishesAfterASlowValidation(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	slot := time.Duration(handler.beaconChainCfg.SecondsPerSlot) * time.Second
+	const validation = 100 * time.Millisecond
+	gossipManager := gossip_mock.NewMockGossip(gomock.NewController(t))
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any()).
+		DoAndReturn(func(ctx context.Context, _ string, _ []byte) error {
+			deadline, ok := ctx.Deadline()
+			require.True(t, ok)
+			require.Greater(t, time.Until(deadline), slot-validation/2, "the window must not include the validation")
+			return nil
+		})
+	handler.gossipManager = gossipManager
+	handler.sentinel = &nonNilSentinelClient{}
+	fcu.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+		time.Sleep(validation)
+		return nil
+	}
+	root := common.Hash{1}
+	fcu.Blocks[root] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 12, Body: cltypes.NewBeaconBody(handler.beaconChainCfg, clparams.GloasVersion)}}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	envelope.Message.BeaconBlockRoot = root
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 }
 
 func TestPostExecutionPayloadEnvelopeGossipsPersistenceFailureBeforeReturningError(t *testing.T) {
@@ -2800,7 +3100,7 @@ func TestGetValidatorExecutionPayloadBidBuildsUnsignedBidWithoutGossip(t *testin
 		handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
 		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 	}
-	require.NotContains(t, logs(), "no fee recipient from prepare_beacon_proposer")
+	require.NotContains(t, logs(), "no fee recipient")
 }
 
 func TestGetValidatorExecutionPayloadBidRejectsChangedHeadBeforeBuilding(t *testing.T) {
@@ -2856,14 +3156,17 @@ func TestGetValidatorExecutionPayloadBidRevalidatesOneHeadSnapshot(t *testing.T)
 	require.Empty(t, handler.pendingBuilderPayloads.entries)
 }
 
-func TestGetValidatorExecutionPayloadBidRechecksPtcDecisionAfterEnvelopeRead(t *testing.T) {
+func TestGetValidatorExecutionPayloadBidRechecksPtcDecisionWithEnvelopeCache(t *testing.T) {
 	for _, test := range []struct {
-		name                 string
-		buildOnFullAfterRead bool
-		wantStatus           int
+		name          string
+		evictRequests bool
+		buildOnFull   bool
+		wantStatus    int
 	}{
-		{name: "unchanged FULL path", buildOnFullAfterRead: true, wantStatus: http.StatusOK},
-		{name: "PTC decision changes to EMPTY", wantStatus: http.StatusNotFound},
+		{name: "cached FULL path", buildOnFull: true, wantStatus: http.StatusOK},
+		{name: "cached requests with new EMPTY decision", wantStatus: http.StatusNotFound},
+		{name: "unchanged FULL path after eviction", evictRequests: true, buildOnFull: true, wantStatus: http.StatusOK},
+		{name: "PTC decision changes during envelope reread", evictRequests: true, wantStatus: http.StatusNotFound},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
@@ -2888,9 +3191,8 @@ func TestGetValidatorExecutionPayloadBidRechecksPtcDecisionAfterEnvelopeRead(t *
 			forkchoiceStore.SetEnvelope(baseRoot, envelope)
 			var envelopeReads atomic.Int32
 			forkchoiceStore.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
-				// The first read supplies production inputs; the second revalidates the bid.
 				if envelopeReads.Add(1) == 2 {
-					buildOnFull = test.buildOnFullAfterRead
+					buildOnFull = test.buildOnFull
 				}
 				return envelope, nil
 			}
@@ -2898,7 +3200,14 @@ func TestGetValidatorExecutionPayloadBidRechecksPtcDecisionAfterEnvelopeRead(t *
 			engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), payload.ParentHash, gomock.Any(), clparams.GloasVersion).
 				Return([]byte{1}, nil)
 			engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.GloasVersion).
-				Return(payload, &engine_types.BlobsBundle{}, nil, big.NewInt(2_000_000_000), nil)
+				DoAndReturn(func(context.Context, []byte, clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+					if test.evictRequests {
+						handler.parentExecutionRequests.Remove(baseRoot)
+					} else {
+						buildOnFull = test.buildOnFull
+					}
+					return payload, &engine_types.BlobsBundle{}, nil, big.NewInt(2_000_000_000), nil
+				})
 			handler.engine = engine
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
 				fmt.Sprintf("/eth/v1/validator/execution_payload_bids/%d/3", slot), http.NoBody)
@@ -2906,7 +3215,11 @@ func TestGetValidatorExecutionPayloadBidRechecksPtcDecisionAfterEnvelopeRead(t *
 
 			handler.ServeHTTP(recorder, request)
 
-			require.EqualValues(t, 2, envelopeReads.Load())
+			wantReads := 1
+			if test.evictRequests {
+				wantReads = 2
+			}
+			require.EqualValues(t, wantReads, envelopeReads.Load())
 			require.Equal(t, baseRoot, forkchoiceStore.HeadVal)
 			require.Equal(t, cltypes.PayloadStatusFull, forkchoiceStore.HeadPayloadStatusVal)
 			require.Equal(t, test.wantStatus, recorder.Code, recorder.Body.String())
@@ -3728,6 +4041,92 @@ func TestPostProposerPreferencesRejectsTransientIgnore(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 }
 
+func TestPostProposerPreferencesRecordsFeeRecipientFromValidPastPreference(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		path           string
+		gloasForkEpoch uint64
+		validatorIndex uint64
+		headAvailable  bool
+		invalidKey     bool
+		want           common.Address
+		wantFound      bool
+	}{
+		{name: "valid signature", validatorIndex: 7, headAvailable: true, want: common.Address{0x42}, wantFound: true},
+		{name: "invalid signature", validatorIndex: 7, headAvailable: true, invalidKey: true},
+		{name: "head unavailable", validatorIndex: 7},
+		{name: "validator outside head state", validatorIndex: 8, headAvailable: true},
+		{name: "beacon pool route", path: "/eth/v1/beacon/pool/proposer_preferences", validatorIndex: 7, headAvailable: true},
+		{name: "before Gloas", gloasForkEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch, validatorIndex: 7, headAvailable: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, _, _, _, _, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			cfg := handler.beaconChainCfg
+			cfg.GloasForkEpoch = test.gloasForkEpoch
+			cfg.InitializeForkSchedule()
+
+			key, err := bls.GenerateKey()
+			require.NoError(t, err)
+			pubkey := common.Bytes48(bls.CompressPublicKey(key.PublicKey()))
+			genesisValidatorsRoot := common.Hash{0x91}
+			headState := state.New(cfg)
+			headState.SetGenesisValidatorsRoot(genesisValidatorsRoot)
+			for i := range 8 {
+				validatorPubkey := common.Bytes48{}
+				if i == 7 {
+					validatorPubkey = pubkey
+				}
+				require.NoError(t, headState.AddValidator(solid.NewValidatorFromParameters(
+					validatorPubkey, common.Hash{}, 0, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch,
+				), 0))
+			}
+			manager := synced_data.NewSyncedDataManager(cfg, true)
+			if test.headAvailable {
+				require.NoError(t, manager.OnHeadStateWithBlockRoot(headState, common.Hash{0x11}))
+			}
+			handler.syncedData = manager
+			handler.epbsPool = nil
+
+			preference := &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+				ProposalSlot:   32,
+				ValidatorIndex: test.validatorIndex,
+				FeeRecipient:   common.Address{0x42},
+			}}
+			domain, err := fork.ComputeDomainAtEpoch(cfg, cfg.DomainProposerPreferences, 1, genesisValidatorsRoot)
+			require.NoError(t, err)
+			signingRoot, err := fork.ComputeSigningRoot(preference.Message, domain)
+			require.NoError(t, err)
+			signingKey := key
+			if test.invalidKey {
+				signingKey, err = bls.GenerateKey()
+				require.NoError(t, err)
+			}
+			copy(preference.Signature[:], signingKey.Sign(signingRoot[:]).Bytes())
+
+			service := mock_services.NewMockProposerPreferencesService(gomock.NewController(t))
+			service.EXPECT().ProcessMessage(gomock.Any(), nil, gomock.Any()).Return(fmt.Errorf("%w: proposal slot already passed", services.ErrIgnore))
+			handler.proposerPreferencesService = service
+			path := test.path
+			if path == "" {
+				path = "/eth/v1/validator/proposer_preferences"
+			}
+			body, err := json.Marshal([]*cltypes.SignedProposerPreferences{preference})
+			require.NoError(t, err)
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, bytes.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Eth-Consensus-Version", "gloas")
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			require.Equal(t, test.want, handler.feeRecipientForProposal(nil, 64, test.validatorIndex, clparams.GloasVersion))
+			_, found := validatorParams.GetFeeRecipient(test.validatorIndex)
+			require.Equal(t, test.wantFound, found)
+		})
+	}
+}
+
 func TestPostProposerPreferencesRejectsFarFutureSlotWithoutService(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.epbsPool = pool.NewEpbsPool()
@@ -3967,4 +4366,79 @@ func newTestExecutionPayloadBid(slot, builderIndex, value uint64) *cltypes.Execu
 		ExecutionPayment:   0,
 		BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
 	}
+}
+
+func TestPostPtcDutiesNextEpochWhileHeadIsInPreviousEpoch(t *testing.T) {
+	_, _, _, _, headState, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	previousStateForkEpoch := headState.BeaconConfig().GloasForkEpoch
+	t.Cleanup(func() { headState.BeaconConfig().GloasForkEpoch = previousStateForkEpoch })
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	headState.BeaconConfig().GloasForkEpoch = 0
+	headState.SetVersion(clparams.GloasVersion)
+	slotsPerEpoch := handler.beaconChainCfg.SlotsPerEpoch
+	headEpoch := state.Epoch(headState)
+	require.NoError(t, headState.SetSlot((headEpoch+1)*slotsPerEpoch-1))
+	// The epoch transition drops the effective balance of the even validators to zero, so they leave the PTC.
+	for i := 0; i < headState.ValidatorLength(); i += 2 {
+		require.NoError(t, headState.SetValidatorBalance(i, 0))
+	}
+	require.NoError(t, headState.InitializePtcWindow())
+	publishPtcDutiesHead(t, syncedData, headState, common.Hash{0x51})
+
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentEpoch().Return(headEpoch + 1).AnyTimes()
+	handler.ethClock = clock
+
+	requestedEpoch := headEpoch + 2
+	advanced, err := headState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(advanced, (headEpoch+1)*slotsPerEpoch))
+	want := map[[2]uint64]struct{}{}
+	for slot := requestedEpoch * slotsPerEpoch; slot < (requestedEpoch+1)*slotsPerEpoch; slot++ {
+		ptc, err := advanced.GetPTC(slot)
+		require.NoError(t, err)
+		for _, idx := range ptc {
+			want[[2]uint64{idx, slot}] = struct{}{}
+		}
+	}
+	require.NotEmpty(t, want)
+	indices := make([]string, 0, headState.ValidatorLength())
+	for i := range headState.ValidatorLength() {
+		indices = append(indices, fmt.Sprintf(`"%d"`, i))
+	}
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
+		fmt.Sprintf("/eth/v1/validator/duties/ptc/%d", requestedEpoch), strings.NewReader("["+strings.Join(indices, ",")+"]"))
+	recorder := httptest.NewRecorder()
+	handler.mux.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var response struct {
+		DependentRoot common.Hash       `json:"dependent_root"`
+		Data          []ptcDutyResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Equal(t, common.Hash{0x51}, response.DependentRoot)
+	got := map[[2]uint64]struct{}{}
+	for _, duty := range response.Data {
+		got[[2]uint64{duty.ValidatorIndex, duty.Slot}] = struct{}{}
+	}
+	require.Equal(t, want, got)
+}
+
+func TestPostPtcDutiesUnavailableWhileHeadLagsMoreThanOneEpoch(t *testing.T) {
+	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	headEpoch := uint64(2)
+	publishPtcDutiesHead(t, syncedData, newPtcDutiesHeadState(t, handler.beaconChainCfg, (headEpoch+1)*handler.beaconChainCfg.SlotsPerEpoch-1), common.Hash{0x52})
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentEpoch().Return(headEpoch + 2).AnyTimes()
+	handler.ethClock = clock
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
+		fmt.Sprintf("/eth/v1/validator/duties/ptc/%d", headEpoch+3), strings.NewReader(`["0"]`))
+	recorder := httptest.NewRecorder()
+	handler.mux.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
 }

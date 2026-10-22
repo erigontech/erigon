@@ -147,7 +147,7 @@ func exportCheckpoint(tx kv.TemporalTx, domain kv.Domain) (blockNum, txNum uint6
 }
 
 func checkExportPinTxNum(ctx context.Context, tx kv.TemporalTx, txNums rawdbv3.TxNumsReader, blockNum, txNum uint64) error {
-	maxTxNum, found, err := txNums.MaxExact(ctx, tx, blockNum)
+	maxTxNum, found, err := txNums.MaxExact(ctx, tx, nil, blockNum)
 	if err != nil {
 		return err
 	}

@@ -131,7 +131,7 @@ func (bal btBlockAccessList) toBAL() types.BlockAccessList {
 		entry := &types.AccountChanges{
 			Address:        ac.Address,
 			StorageChanges: make([]types.SlotChanges, 0, len(ac.StorageChanges)),
-			StorageReads:   make([]accounts.StorageKey, 0, len(ac.StorageReads)),
+			StorageReads:   make([]common.Hash, 0, len(ac.StorageReads)),
 			BalanceChanges: make([]*types.BalanceChange, 0, len(ac.BalanceChanges)),
 			NonceChanges:   make([]*types.NonceChange, 0, len(ac.NonceChanges)),
 			CodeChanges:    make([]*types.CodeChange, 0, len(ac.CodeChanges)),
@@ -150,7 +150,7 @@ func (bal btBlockAccessList) toBAL() types.BlockAccessList {
 			entry.StorageChanges = append(entry.StorageChanges, slotChanges)
 		}
 		for _, sr := range ac.StorageReads {
-			entry.StorageReads = append(entry.StorageReads, accounts.InternKey(common.BytesToHash(sr)))
+			entry.StorageReads = append(entry.StorageReads, common.BytesToHash(sr))
 		}
 		for _, bc := range ac.BalanceChanges {
 			entry.BalanceChanges = append(entry.BalanceChanges, &types.BalanceChange{

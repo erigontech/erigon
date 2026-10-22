@@ -578,7 +578,7 @@ func readPBinForkPoint(ctx context.Context, tx kv.Tx, blockReader *freezeblocks.
 		return header, false, false, nil
 	}
 	afterFork = chainConfig.IsBinaryTrie(header.Time)
-	maxTxNum, found, txErr := blockReader.TxnumReader().MaxExact(ctx, tx, point.BlockNum)
+	maxTxNum, found, txErr := blockReader.TxnumReader().MaxExact(ctx, tx, nil, point.BlockNum)
 	if txErr != nil {
 		return nil, false, false, txErr
 	}

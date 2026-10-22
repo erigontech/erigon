@@ -37,12 +37,16 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 var (
+	payloadPreparationOutcomes    = metrics.GetOrCreateCounterVec("caplin_payload_preparation_outcomes_total", []string{"outcome"})
+	payloadPreparationCollections = metrics.GetOrCreateCounterVec("caplin_payload_preparation_collections_total", []string{"outcome"})
+
 	errNotOurProposal           = errors.New("next slot is not proposed by a registered validator")
 	errNoPayloadID              = errors.New("execution layer returned no payload id")
 	errHeadTooFarBack           = errors.New("head state is too far behind the slot to prepare")
@@ -52,15 +56,24 @@ var (
 	errGloasPayloadPending      = errors.New("gloas parent payload decision is not ready")
 	errForkChoiceHeadChanged    = errors.New("fork choice head changed")
 	errGloasPathNeedsForkChoice = errors.New("gloas payload path requires a fork-choice update before preparation")
+	errPreparationDerivation    = errors.New("payload preparation state derivation failed")
 )
 
 // preparedPayloadRetainSlots keeps a primed record alive past the slot it was primed for, so
 // priming the next slot cannot evict the record for a proposal that is still being produced.
 const preparedPayloadRetainSlots = 2
 
-// minimumPreparationLead leaves a best-effort margin for useful warmup before the proposal slot.
-// State copying and slot processing cannot be cancelled mid-call and may still overlap production.
+// minimumPreparationLead is the last point before the proposal slot at which preparation may still
+// start the execution builder.
 const minimumPreparationLead = 500 * time.Millisecond
+
+// stateWorkLead is the lead an attempt needs before it copies the head state and processes slots.
+// Neither can be cancelled mid-call, so work started later competes with production for CPU and the
+// head-state lock, and the builder cutoff then discards it. An eighth of a slot covers the copy and
+// an epoch transition: about 0.5 s and 0.3 s on a mainnet node.
+func stateWorkLead(slotDuration time.Duration) time.Duration {
+	return minimumPreparationLead + slotDuration/8
+}
 
 const (
 	payloadBuildBusyRetryDelay         = 100 * time.Millisecond
@@ -76,6 +89,33 @@ type preparedPayloadRecord struct {
 type preparedPayload struct {
 	mu       sync.Mutex
 	payloads map[uint64]preparedPayloadRecord
+}
+
+const maxCachedParentExecutionRequests = 8
+
+func (a *ApiHandler) fullParentExecutionRequests(root common.Hash) (*cltypes.ExecutionRequests, error) {
+	if requests, ok := a.parentExecutionRequests.Get(root); ok {
+		return requests, nil
+	}
+	result, err, _ := a.parentExecutionRequestsGroup.Do(string(root[:]), func() (any, error) {
+		if requests, ok := a.parentExecutionRequests.Get(root); ok {
+			return requests, nil
+		}
+		envelope, err := a.forkchoiceStore.ReadEnvelopeFromDisk(root)
+		if err != nil {
+			return nil, fmt.Errorf("read FULL parent payload envelope: %w", err)
+		}
+		if envelope == nil || envelope.Message == nil || envelope.Message.ExecutionRequests == nil {
+			return nil, fmt.Errorf("FULL parent payload has no execution requests for root %x", root)
+		}
+		requests := envelope.Message.ExecutionRequests
+		a.parentExecutionRequests.Add(root, requests)
+		return requests, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.(*cltypes.ExecutionRequests), nil
 }
 
 type payloadPreparationScratch struct {
@@ -145,11 +185,14 @@ func (p *preparedPayload) warmupAndMismatch(slot uint64, payloadID []byte, now t
 	defer p.mu.Unlock()
 	record, ok := p.payloads[slot]
 	if !ok || len(payloadID) == 0 {
+		payloadPreparationCollections.WithLabelValues("absent").Inc()
 		return 0, common.Hash{}, false
 	}
 	if !bytes.Equal(record.id, payloadID) {
+		payloadPreparationCollections.WithLabelValues("mismatch").Inc()
 		return 0, record.head, true
 	}
+	payloadPreparationCollections.WithLabelValues("reused").Inc()
 	return max(now.Sub(record.primedAt), 0), record.head, false
 }
 
@@ -237,6 +280,11 @@ func (a *ApiHandler) StartPayloadPreparation(ctx context.Context) <-chan struct{
 		close(done)
 		return done
 	}
+	if a.routerCfg.DisablePayloadPreparation {
+		a.logger.Info("PayloadPreparation: disabled", "reason", "disabled by flag")
+		close(done)
+		return done
+	}
 	// Only the direct execution client exposes builder startup without a fork-choice update.
 	if _, ok := a.engine.(execution_client.PayloadBuilder); !ok {
 		a.logger.Info(
@@ -273,12 +321,13 @@ func (a *ApiHandler) preparePayloadLoopWith(
 	}
 	payloadAttestationDeadline := time.Duration(a.beaconChainCfg.PayloadAttestationDueMs()) * time.Millisecond
 	gloasWindow := slotDuration - payloadAttestationDeadline
+	minimumLead := stateWorkLead(slotDuration)
 	if a.beaconChainCfg.GloasForkEpoch != a.beaconChainCfg.FarFutureEpoch &&
-		gloasWindow <= minimumPreparationLead {
+		gloasWindow <= minimumLead {
 		logger.Warn(
 			"PayloadPreparation: Gloas preparation window is too short",
 			"available", gloasWindow,
-			"minimum", minimumPreparationLead,
+			"minimum", minimumLead,
 		)
 	}
 	// Preparation is silent on a node that rarely proposes, so say once that it is running:
@@ -321,12 +370,14 @@ func (a *ApiHandler) preparePayloadLoopWith(
 		// This early check avoids state work during production. The gate is checked again before
 		// builder startup to cover production that begins after this point.
 		if !a.payloadPreparationGate.idle() {
+			observePreparationOutcome(errBlockWorkInFlight)
 			continue
 		}
 		// Nothing is registered, so nothing here can be ours. Checking first keeps a non-validating
 		// node off the state copy entirely.
 		generation := a.validatorParams.Generation()
 		if generation == 0 {
+			observePreparationOutcome(errNotOurProposal)
 			continue
 		}
 		// Before genesis the current slot clamps to zero, so the next slot can be arbitrarily far
@@ -334,29 +385,43 @@ func (a *ApiHandler) preparePayloadLoopWith(
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
 		currentSlotStart := slotStart.Add(-slotDuration)
 		lead := time.Until(slotStart)
-		if lead > slotDuration || lead <= minimumPreparationLead {
+		if lead > slotDuration {
+			payloadPreparationOutcomes.WithLabelValues("too_early").Inc()
+			continue
+		}
+		if lead <= minimumLead {
+			observePreparationOutcome(errPreparationTooLate)
 			continue
 		}
 		selectedRoot, selectedSlot, selected := a.syncedData.SelectedHead()
 		if !selected {
+			observePreparationOutcome(synced_data.ErrNotSynced)
 			continue
 		}
 		if a.payloadPreparationGate.producedBlockPending(currentSlot, selectedSlot, time.Now()) {
+			observePreparationOutcome(errBlockWorkInFlight)
 			continue
 		}
+		blockProcessing := a.forkchoiceStore.BlockProcessing()
 		if shouldWaitForCurrentSlotHead(
 			currentSlot,
 			selectedSlot,
-			a.forkchoiceStore.BlockProcessing(),
+			blockProcessing,
 			time.Now(),
 			currentSlotStart,
 			attestationDue(a.beaconChainCfg, currentVersion),
 		) {
+			if blockProcessing && selectedSlot < currentSlot {
+				observePreparationOutcome(errBlockWorkInFlight)
+			} else {
+				observePreparationOutcome(errHeadTooFarBack)
+			}
 			continue
 		}
 		// Preparation requires the selected and materialized head identities to match. Otherwise
 		// its payload attributes can target stale state.
 		if selectedRoot != a.syncedData.HeadRoot() {
+			observePreparationOutcome(errPreparationHeadChanged)
 			continue
 		}
 		current := preparationKey{
@@ -373,6 +438,7 @@ func (a *ApiHandler) preparePayloadLoopWith(
 			var err error
 			current, err = a.precheckPreparationInputs(current)
 			if err != nil {
+				observePreparationOutcome(err)
 				if !isExpectedPreparationSkip(err) {
 					failureLog.Do(func() {
 						logger.Warn("PayloadPreparation: proposer check failed", "slot", targetSlot, "err", err)
@@ -403,6 +469,7 @@ func (a *ApiHandler) preparePayloadLoopWith(
 				var pathErr error
 				current.gloasPath, pathErr = a.resolveGloasPayloadPath(selectedRoot, targetSlot)
 				if pathErr != nil {
+					observePreparationOutcome(pathErr)
 					if !isExpectedPreparationSkip(pathErr) {
 						failureLog.Do(func() {
 							logger.Warn("PayloadPreparation: Gloas payload path resolution failed", "slot", targetSlot, "head", selectedRoot, "err", pathErr)
@@ -411,6 +478,7 @@ func (a *ApiHandler) preparePayloadLoopWith(
 					continue
 				}
 				if current.gloasPath == gloasPayloadPathPending {
+					observePreparationOutcome(errGloasPayloadPending)
 					pendingLog.Do(func() {
 						logger.Warn("PayloadPreparation: Gloas payload path is still pending", "slot", targetSlot, "head", selectedRoot)
 					})
@@ -419,9 +487,11 @@ func (a *ApiHandler) preparePayloadLoopWith(
 			}
 		}
 		if current == lastSettled {
+			payloadPreparationOutcomes.WithLabelValues("unchanged").Inc()
 			continue
 		}
 		if gloasPathRequiresForkChoiceUpdate(current.gloasPath) {
+			observePreparationOutcome(errGloasPathNeedsForkChoice)
 			lastSettled = current
 			scratch.release()
 			continue
@@ -431,6 +501,7 @@ func (a *ApiHandler) preparePayloadLoopWith(
 		)
 		outcome, err := prepare(prepareCtx, current, &scratch)
 		cancel()
+		observePreparationOutcome(err)
 		if isSettledPreparationOutcome(err) {
 			lastSettled = outcome
 			scratch.release()
@@ -443,17 +514,51 @@ func (a *ApiHandler) preparePayloadLoopWith(
 	}
 }
 
-// preparationKey identifies the inputs of a settled attempt. Comparing the effective gas limit
-// avoids repeating state work for unrelated preference updates. Attribute presence is part of
-// the key: an omitted gas limit and an explicit zero are different build requests.
+func observePreparationOutcome(err error) {
+	reason := "error"
+	switch {
+	case err == nil:
+		reason = "success"
+	case errors.Is(err, errNotOurProposal):
+		reason = "unregistered"
+	case errors.Is(err, errHeadTooFarBack), errors.Is(err, errPreparationHeadChanged), errors.Is(err, errForkChoiceHeadChanged):
+		reason = "stale_head"
+	case errors.Is(err, errBlockWorkInFlight), errors.Is(err, chainreader.ErrExecutionBusy), errors.Is(err, forkchoice.ErrPayloadImportInProgress):
+		reason = "busy"
+	case errors.Is(err, errPreparationTooLate), errors.Is(err, context.DeadlineExceeded):
+		reason = "late"
+	case errors.Is(err, errGloasPathNeedsForkChoice):
+		reason = "needs_forkchoice"
+	case errors.Is(err, errGloasPayloadPending):
+		reason = "pending"
+	case errors.Is(err, synced_data.ErrNotSynced):
+		reason = "not_synced"
+	case errors.Is(err, context.Canceled):
+		reason = "canceled"
+	case errors.Is(err, errPreparationDerivation):
+		reason = "derivation_error"
+	}
+	payloadPreparationOutcomes.WithLabelValues(reason).Inc()
+}
+
+// preparationKey identifies the effective inputs of a settled attempt.
+// An omitted gas limit and an explicit zero are different build requests.
 type preparationKey struct {
 	targetSlot          uint64
 	headRoot            common.Hash
 	validatorGeneration uint64
 	gloasPath           gloasPayloadPath
 	proposerIndex       uint64
+	feeRecipient        common.Address
 	targetGasLimit      hexutil.Uint64
 	targetGasLimitSet   bool
+}
+
+func (k *preparationKey) setFeeRecipient(feeRecipient common.Address, stateVersion clparams.StateVersion) {
+	k.feeRecipient = common.Address{}
+	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
+		k.feeRecipient = feeRecipient
+	}
 }
 
 func (k *preparationKey) setTargetGasLimit(limit *hexutil.Uint64) {
@@ -519,11 +624,12 @@ func gloasPayloadDecisionDelay(
 // isExpectedPreparationSkip reports whether there was simply nothing to prepare, as opposed to a
 // failure worth reporting.
 func isExpectedPreparationSkip(err error) bool {
-	return isSettledPreparationOutcome(err) ||
+	return (isSettledPreparationOutcome(err) && !errors.Is(err, errPreparationDerivation)) ||
 		errors.Is(err, errHeadTooFarBack) ||
 		errors.Is(err, errPreparationHeadChanged) ||
 		errors.Is(err, errForkChoiceHeadChanged) ||
 		errors.Is(err, errBlockWorkInFlight) ||
+		errors.Is(err, forkchoice.ErrPayloadImportInProgress) ||
 		errors.Is(err, errGloasPayloadPending) ||
 		errors.Is(err, context.DeadlineExceeded) ||
 		errors.Is(err, context.Canceled) ||
@@ -533,7 +639,7 @@ func isExpectedPreparationSkip(err error) bool {
 func isSettledPreparationOutcome(err error) bool {
 	return err == nil ||
 		errors.Is(err, errNotOurProposal) ||
-		errors.Is(err, errNoPayloadID) ||
+		errors.Is(err, errPreparationDerivation) ||
 		errors.Is(err, errPreparationTooLate) ||
 		errors.Is(err, errGloasPathNeedsForkChoice)
 }
@@ -558,6 +664,7 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 		feeRecipient       common.Address
 		baseState          *state.CachingBeaconState
 		lookupAfterAdvance bool
+		stateWorkStart     time.Time
 	)
 	// Root, proposer and state all come from one view of the head. Reading them separately would
 	// let a head update in between pair a parent beacon block root with a different state, priming
@@ -586,6 +693,12 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 		if !a.payloadPreparationGate.idle() {
 			return errBlockWorkInFlight
 		}
+		// The view can wait behind a head-state writer, so check the lead again before the copy.
+		slotDuration := time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second
+		if time.Until(a.ethClock.GetSlotTime(targetSlot)) <= stateWorkLead(slotDuration) {
+			return errPreparationTooLate
+		}
+		stateWorkStart = time.Now()
 		baseState, err = scratch.copyFrom(headState, a.beaconChainCfg)
 		return err
 	}); err != nil {
@@ -593,8 +706,9 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	}
 
 	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
-		return key, err
+		return key, fmt.Errorf("%w: process slots: %w", errPreparationDerivation, err)
 	}
+	stateWork := time.Since(stateWorkStart)
 	if lookupAfterAdvance {
 		var err error
 		proposerIndex, feeRecipient, err = a.registeredProposer(baseState, targetSlot)
@@ -605,7 +719,7 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	}
 
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch)
-	// State derivation can consume the entry lead, so enforce the same floor again.
+	// State derivation consumes part of the lead, so check the builder cutoff again.
 	if time.Until(a.ethClock.GetSlotTime(targetSlot)) <= minimumPreparationLead {
 		return key, errPreparationTooLate
 	}
@@ -613,6 +727,9 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 		baseState, targetSlot, proposerIndex, stateVersion,
 	)
 	key.setTargetGasLimit(targetGasLimit)
+	preference := a.proposerPreferencesForProposal(baseState, targetSlot, proposerIndex, stateVersion)
+	feeRecipient, _ = resolveFeeRecipient(preference, feeRecipient, true)
+	key.setFeeRecipient(feeRecipient, stateVersion)
 	// The loop-level path is an early filter. Resolve it again after state work because the Gloas
 	// decision can change without changing the beacon head root.
 	payloadSource, err := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
@@ -635,7 +752,7 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	}
 	withdrawals, err := a.expectedWithdrawals(baseState, withdrawalsState, targetSlot)
 	if err != nil {
-		return key, err
+		return key, fmt.Errorf("%w: %w", errPreparationDerivation, err)
 	}
 	slotNumber := hexutil.Uint64(targetSlot)
 	attrs := a.payloadBuildAttributes(
@@ -654,7 +771,7 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	}
 
 	a.preparedPayload.set(targetSlot, payloadID, baseBlockRoot, time.Now())
-	a.logger.Info("PayloadPreparation: primed execution layer", "slot", targetSlot, "proposer", proposerIndex, "head", baseBlockRoot)
+	a.logger.Info("PayloadPreparation: primed execution layer", "slot", targetSlot, "proposer", proposerIndex, "head", baseBlockRoot, "stateWork", stateWork)
 	return key, nil
 }
 
@@ -688,12 +805,18 @@ func (a *ApiHandler) precheckPreparationInputs(key preparationKey) (preparationK
 		// makes this check possible without copying or advancing the state.
 		if headState.Version().AfterOrEqual(clparams.FuluVersion) {
 			var err error
-			key.proposerIndex, _, err = a.registeredProposer(headState, key.targetSlot)
+			key.proposerIndex, key.feeRecipient, err = a.registeredProposer(headState, key.targetSlot)
 			if err != nil {
 				return err
 			}
+		} else {
+			key.feeRecipient, _ = a.validatorParams.GetFeeRecipient(key.proposerIndex)
 		}
-		key.setTargetGasLimit(a.targetGasLimitForProposal(headState, key.targetSlot, key.proposerIndex, clparams.GloasVersion))
+		stateVersion := a.beaconChainCfg.GetCurrentStateVersion(key.targetSlot / a.beaconChainCfg.SlotsPerEpoch)
+		preference := a.proposerPreferencesForProposal(headState, key.targetSlot, key.proposerIndex, stateVersion)
+		feeRecipient, _ := resolveFeeRecipient(preference, key.feeRecipient, true)
+		key.setFeeRecipient(feeRecipient, stateVersion)
+		key.setTargetGasLimit(a.targetGasLimitForProposal(headState, key.targetSlot, key.proposerIndex, stateVersion))
 		return nil
 	})
 	return key, err
@@ -753,7 +876,22 @@ func (a *ApiHandler) startPayloadBuildAttempt(
 		return nil, errBlockWorkInFlight
 	}
 	defer finishAttempt()
-	return payloadBuilder.StartPayloadBuild(ctx, head, attrs)
+	buildCtx, finishImportCheck, ok := a.forkchoiceStore.TryBeginPayloadPreparation(ctx, selectedSlot, preparationSlot+1)
+	if !ok {
+		return nil, context.Cause(buildCtx)
+	}
+	defer finishImportCheck()
+	id, err := payloadBuilder.StartPayloadBuild(buildCtx, head, attrs)
+	if err != nil {
+		if cause := context.Cause(buildCtx); cause != nil {
+			return nil, cause
+		}
+		return nil, err
+	}
+	if finishImportCheck() {
+		return nil, forkchoice.ErrPayloadImportInProgress
+	}
+	return id, nil
 }
 
 // payloadBuildAttributes is shared because production reuses a prepared builder only when every
@@ -828,11 +966,34 @@ func (a *ApiHandler) resolveExecutionPayloadSource(
 	if err != nil {
 		return executionPayloadSource{}, err
 	}
-	path := gloasPayloadPathPreFork
-	if baseState.GetLatestExecutionPayloadBid() != nil && !a.isPreGloasParent(baseState) {
-		path = a.gloasPayloadPathForHead(head, targetSlot)
+	return a.executionPayloadSourceForGloasPath(baseState, baseBlockRoot, a.proposalGloasPath(baseState, head, targetSlot)), nil
+}
+
+func (a *ApiHandler) proposalGloasPath(baseState *state.CachingBeaconState, head forkchoice.ForkChoiceNode, targetSlot uint64) gloasPayloadPath {
+	if baseState.GetLatestExecutionPayloadBid() == nil || a.isPreGloasParent(baseState) {
+		return gloasPayloadPathPreFork
 	}
-	return a.executionPayloadSourceForGloasPath(baseState, baseBlockRoot, path), nil
+	return a.gloasPayloadPathForHead(head, targetSlot)
+}
+
+// parentEnvelopeParked reports a proposal that would build on the EMPTY head while that head's
+// envelope is parked, which can still make it FULL. Preparation primes the EMPTY fallback;
+// production waits for the decision.
+func (a *ApiHandler) parentEnvelopeParked(baseState *state.CachingBeaconState, baseBlockRoot common.Hash, targetSlot uint64) (bool, error) {
+	head, err := a.resolveProposalHead(baseBlockRoot)
+	if err != nil {
+		return false, err
+	}
+	return a.proposalGloasPath(baseState, head, targetSlot) == gloasPayloadPathEmpty && a.envelopeParked(head.Root), nil
+}
+
+// envelopeParked reports an EMPTY head whose envelope has arrived but is not applied yet: parked
+// for its data, or with its apply still in flight. An envelope already persisted does not count.
+func (a *ApiHandler) envelopeParked(root common.Hash) bool {
+	if a.forkchoiceStore.HasEnvelope(root) {
+		return false
+	}
+	return a.forkchoiceStore.HasPendingExecutionPayloadEnvelope(root) || a.forkchoiceStore.ExecutionPayloadApplyInFlight(root)
 }
 
 func (a *ApiHandler) executionPayloadSourceForGloasPath(
@@ -849,24 +1010,17 @@ func (a *ApiHandler) executionPayloadSourceForGloasPath(
 	if path != gloasPayloadPathFull {
 		return executionPayloadSource{head: baseState.GetLatestBlockHash(), gloasPath: path}
 	}
-	envelope, err := a.forkchoiceStore.ReadEnvelopeFromDisk(baseBlockRoot)
+	requests, err := a.fullParentExecutionRequests(baseBlockRoot)
 	if err != nil {
 		return executionPayloadSource{
 			head:          baseState.GetLatestBlockHash(),
 			gloasPath:     gloasPayloadPathPending,
-			fallbackCause: fmt.Errorf("read FULL parent payload envelope: %w", err),
-		}
-	}
-	if envelope == nil || envelope.Message == nil || envelope.Message.ExecutionRequests == nil {
-		return executionPayloadSource{
-			head:          baseState.GetLatestBlockHash(),
-			gloasPath:     gloasPayloadPathPending,
-			fallbackCause: fmt.Errorf("FULL parent payload has no execution requests for root %x", baseBlockRoot),
+			fallbackCause: err,
 		}
 	}
 	return executionPayloadSource{
 		head:                    parentBid.BlockHash,
-		parentExecutionRequests: envelope.Message.ExecutionRequests,
+		parentExecutionRequests: requests,
 		gloasPath:               path,
 	}
 }
@@ -939,18 +1093,29 @@ func (a *ApiHandler) targetGasLimitForProposal(
 		gasLimit := hexutil.Uint64(parentBid.GasLimit)
 		targetGasLimit = &gasLimit
 	}
-	if a.epbsPool == nil {
-		return targetGasLimit
+	if preference := a.proposerPreferencesForProposal(baseState, targetSlot, proposerIndex, stateVersion); preference != nil {
+		gasLimit := hexutil.Uint64(preference.TargetGasLimit)
+		return &gasLimit
 	}
-	dependentRoot, err := state.GetProposerDependentRoot(baseState, proposalEpoch)
+	return targetGasLimit
+}
+
+func (a *ApiHandler) proposerPreferencesForProposal(
+	baseState *state.CachingBeaconState,
+	targetSlot, proposerIndex uint64,
+	stateVersion clparams.StateVersion,
+) *cltypes.ProposerPreferences {
+	if stateVersion.Before(clparams.GloasVersion) || a.epbsPool == nil {
+		return nil
+	}
+	dependentRoot, err := state.GetProposerDependentRoot(baseState, state.GetEpochAtSlot(a.beaconChainCfg, targetSlot))
 	if err != nil {
-		log.Trace("Skipping proposer preferences target gas limit", "slot", targetSlot, "err", err)
-		return targetGasLimit
+		log.Trace("Skipping proposer preferences", "slot", targetSlot, "err", err)
+		return nil
 	}
 	preference, ok := a.epbsPool.GetPreference(targetSlot, dependentRoot)
 	if !ok || preference == nil || preference.Message == nil || preference.Message.ValidatorIndex != proposerIndex {
-		return targetGasLimit
+		return nil
 	}
-	gasLimit := hexutil.Uint64(preference.Message.TargetGasLimit)
-	return &gasLimit
+	return preference.Message
 }

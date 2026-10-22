@@ -1675,7 +1675,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 		hashedKey := t.hashKey(keyBytes)
 		ik := t.parallel.internKey(keyBytes)
 		t.keys[key] = struct{}{}
-		t.parallel.Insert(hashedKey, ik, nil)
+		t.parallel.Collect(hashedKey, ik, nil)
 	case ModeCollect:
 		existing, ok := t.treeIdx[key]
 		if !ok {
@@ -1738,7 +1738,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 			ik = t.parallel.internKey(keyBytes)
 			t.keys[key] = struct{}{}
 		}
-		t.parallel.Insert(hashedKey, ik, u)
+		t.parallel.Collect(hashedKey, ik, u)
 	case ModeCollect:
 		if existing, ok := t.treeIdx[key]; ok {
 			mergeUpdateInto(existing.update, update)
@@ -1810,7 +1810,7 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 		}
 		dedupKey := string(hashedKey)
 		if _, ok := t.keys[dedupKey]; !ok {
-			t.parallel.Insert(hashedKey, nil, nil)
+			t.parallel.Collect(common.ToBytesZeroCopy(dedupKey), nil, nil)
 			t.keys[dedupKey] = struct{}{}
 		}
 	case ModeUpdate:

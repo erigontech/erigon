@@ -18,6 +18,7 @@ package rpctest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"iter"
 	"maps"
@@ -44,23 +45,23 @@ const maxTopicPositions = 4
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 //
-//	false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
+//	false value - to generate the pattern files (vegeta_*.txt and <method>.jsonl), it's faster
 //	recordFile stores all eth_getlogs returned with success
 //	errorFile stores information when erigon and geth doesn't return same data
-func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) error {
+func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) (err error) {
 	setRoutes(erigonURL, gethURL)
 
 	rec, errs, cleanup, err := openWriters(recordFile, errorFile)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+	defer func() { err = errors.Join(err, cleanup()) }()
 
 	var resultsCh chan CallResult = nil
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"debug_getModifiedAccountsByNumber", "eth_getLogs"}, resultsCh)
+		go writePattern(true, []string{"debug_getModifiedAccountsByNumber", "eth_getLogs"}, resultsCh)
 	}
 
 	reqGen := &RequestGenerator{}

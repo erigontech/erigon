@@ -75,6 +75,30 @@ func ReadHighestFinalized(tx kv.Tx) (uint64, error) {
 	return base_encoding.Decode64FromBytes4(val), nil
 }
 
+var highestCustodyGroupCountKey = []byte("HighestCustodyGroupCount")
+
+func WriteHighestCustodyGroupCount(tx kv.RwTx, cgc uint64) error {
+	highest, err := ReadHighestCustodyGroupCount(tx)
+	if err != nil {
+		return err
+	}
+	if cgc <= highest {
+		return nil
+	}
+	return tx.Put(kv.DatabaseInfo, highestCustodyGroupCountKey, base_encoding.Encode64ToBytes4(cgc))
+}
+
+func ReadHighestCustodyGroupCount(tx kv.Tx) (uint64, error) {
+	val, err := tx.GetOne(kv.DatabaseInfo, highestCustodyGroupCountKey)
+	if err != nil {
+		return 0, err
+	}
+	if len(val) == 0 {
+		return 0, nil
+	}
+	return base_encoding.Decode64FromBytes4(val), nil
+}
+
 // WriteHeaderSlot writes the slot associated with a block root.
 func WriteHeaderSlot(tx kv.RwTx, blockRoot common.Hash, slot uint64) error {
 	return tx.Put(kv.BlockRootToSlot, blockRoot[:], base_encoding.Encode64ToBytes4(slot))

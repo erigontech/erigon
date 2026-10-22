@@ -7,6 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
@@ -340,7 +342,7 @@ type ParentRecords struct {
 
 type ParentState interface {
 	GetCommittedAccount(addr accounts.Address) (*accounts.Account, bool)
-	GetCommittedStorage(addr accounts.Address, key accounts.StorageKey) ([]byte, bool)
+	GetCommittedStorage(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool)
 }
 
 var (

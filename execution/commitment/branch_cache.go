@@ -78,8 +78,8 @@ type BranchCache struct {
 
 	putStripes [256]sync.Mutex
 
-	coh         coherence.Gen
-	unwoundView atomic.Uint64 // MDBX txn that committed the latest unwind
+	coh           coherence.Gen
+	committedView atomic.Uint64 // MDBX txn that committed the latest published branches or unwind
 }
 
 type branchCacheEntry struct {
@@ -532,7 +532,7 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
 	}
 	if slot := st.slot(&nibBuf, n, true); slot != nil {
 		// Swap publishes and reads prior occupancy in one step: eviction
-		// (Invalidate from a stale Get) takes no put stripe, so a separate
+		// (evict from a stale Get) takes no put stripe, so a separate
 		// load-then-store here would let it interleave.
 		if slot.Swap(entry) == nil {
 			st.entries.Add(1)
@@ -590,7 +590,7 @@ func (c *BranchCache) GetBefore(prefix []byte, txNum uint64) ([]byte, uint64, bo
 		return nil, 0, false
 	}
 	if coh.IsStale(entry.txN, entry.epoch) {
-		c.Invalidate(prefix)
+		c.evict(prefix)
 		c.staleEvicted.Add(1)
 		return nil, 0, false
 	}
@@ -622,10 +622,10 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 }
 
 // Fill copies a branch read through MDBX txn viewID. It drops the read if that txn is older than the latest
-// committed unwind, or if an Unwind or Clear ran during the read.
+// committed publication or unwind, or if an Unwind or Clear ran during the read.
 func (c *BranchCache) Fill(prefix []byte, data []byte, step, txN, viewID uint64) {
 	epoch := c.coh.Epoch()
-	if viewID < c.unwoundView.Load() || isCommitmentStateKey(prefix) {
+	if viewID < c.committedView.Load() || isCommitmentStateKey(prefix) {
 		return
 	}
 	dataCopy := make([]byte, len(data))
@@ -635,7 +635,8 @@ func (c *BranchCache) Fill(prefix []byte, data []byte, step, txN, viewID uint64)
 	stripe.Lock()
 	defer stripe.Unlock()
 
-	if c.coh.Epoch() != epoch {
+	// Rechecked under the stripe: a commit records its view before it publishes or deletes under this stripe.
+	if c.coh.Epoch() != epoch || viewID < c.committedView.Load() {
 		return
 	}
 	c.store(prefix, &branchCacheEntry{
@@ -646,7 +647,15 @@ func (c *BranchCache) Fill(prefix []byte, data []byte, step, txN, viewID uint64)
 	})
 }
 
+// Invalidate drops prefix under its put stripe, so a Fill cannot store over the deletion.
 func (c *BranchCache) Invalidate(prefix []byte) {
+	stripe := c.putStripe(prefix)
+	stripe.Lock()
+	defer stripe.Unlock()
+	c.evict(prefix)
+}
+
+func (c *BranchCache) evict(prefix []byte) {
 	if isRootPrefix(prefix) {
 		c.root.Store(nil)
 		return
@@ -676,9 +685,19 @@ func (c *BranchCache) Unwind(unwindToTxN uint64) {
 	c.coh.Unwind(unwindToTxN)
 }
 
+// Committed records MDBX txn viewID as committed; older txns can no longer Fill. Call it after the
+// commit succeeds and before publishing the commit's branches or deletions.
+func (c *BranchCache) Committed(viewID uint64) {
+	for cur := c.committedView.Load(); viewID > cur; cur = c.committedView.Load() {
+		if c.committedView.CompareAndSwap(cur, viewID) {
+			return
+		}
+	}
+}
+
 // UnwindCommitted is Unwind for an unwind committed by MDBX txn viewID; older txns can no longer Fill.
 func (c *BranchCache) UnwindCommitted(unwindToTxN, viewID uint64) {
-	c.unwoundView.Store(viewID) // before the epoch bump, see Fill
+	c.Committed(viewID) // before the epoch bump, see Fill
 	c.Unwind(unwindToTxN)
 }
 

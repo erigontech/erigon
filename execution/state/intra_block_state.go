@@ -306,6 +306,8 @@ func (ibs *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
 	ibs.versionMap = versionMap
 }
 
+func (ibs *IntraBlockState) StateReader() StateReader { return ibs.stateReader }
+
 func (ibs *IntraBlockState) VersionMap() *VersionMap {
 	return ibs.versionMap
 }
@@ -1332,29 +1334,29 @@ func (ibs *IntraBlockState) readSelfDestructMemo(addr accounts.Address) (bool, R
 // when EIP-8246 removed the SELFDESTRUCT burn: the balance survives, code and
 // nonce are cleared at destruction, and any later per-field map writes overlay
 // the reconstruction so account-level reads agree with the field-level ones.
-// Returns nil when the balance was moved out, leaving an empty account that
-// EIP-161 removes.
+// Returns nil when the result is EIP-161 empty: the balance was moved out and
+// no later tx re-established a nonce or code, so the account is gone.
 func (ibs *IntraBlockState) eip8246PreservedAccount(addr accounts.Address) (*accounts.Account, error) {
 	bal, _, _, err := readBalance(ibs, addr)
 	if err != nil {
 		return nil, err
 	}
-	if bal.IsZero() {
-		return nil, nil
-	}
-	acc := accounts.NewAccount()
-	acc.Balance = bal
 	nonce, _, _, err := readNonce(ibs, addr)
 	if err != nil {
 		return nil, err
 	}
-	acc.Nonce = nonce
 	codeHash, _, _, err := readCodeHash(ibs, addr)
 	if err != nil {
 		return nil, err
 	}
+	acc := accounts.NewAccount()
+	acc.Balance = bal
+	acc.Nonce = nonce
 	if codeHash != accounts.NilCodeHash && !codeHash.IsZero() {
 		acc.CodeHash = codeHash
+	}
+	if acc.Empty() {
+		return nil, nil
 	}
 	return &acc, nil
 }
@@ -1374,6 +1376,10 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 		return nil, UnknownSource, UnknownVersion, nil
 	}
 
+	// A nil record read left by an earlier load is the verdict this tx consumed:
+	// only this load's own probe may be resolved from the committed record, or
+	// the tx's view of the address forks mid-execution.
+	consumed := ibs.consumedAddressAbsence(addr)
 	readAccount, source, version, err := readAccount(ibs, addr)
 	if err != nil {
 		return nil, UnknownSource, UnknownVersion, err
@@ -1426,6 +1432,9 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 	}
 
 	if readAccount == nil {
+		if consumed {
+			return nil, StorageRead, UnknownVersion, nil
+		}
 		if readStorage {
 			if cached, ok := ibs.committedBase[addr]; ok {
 				readAccount = cached
@@ -1750,19 +1759,29 @@ func (ibs *IntraBlockState) journalCodeChange(addr accounts.Address, prevHash ac
 // path: its prior code is this tx's own cells, so no transient stateObject is
 // rebuilt, and the net-zero check against the tx-start code does not apply.
 func (ibs *IntraBlockState) setCreatedCode(addr accounts.Address, code accounts.Code, reason tracing.CodeChangeReason) error {
-	baseCodeHash, err := ibs.GetCodeHash(addr)
-	if err != nil {
-		return err
-	}
-	prev, err := ibs.codeSeed(addr, baseCodeHash)
-	if err != nil {
-		return err
+	cw, hadCode := ibs.versionedWrites.GetCode(addr)
+	hw, hadHash := ibs.versionedWrites.GetCodeHash(addr)
+	var prev accounts.Code
+	switch {
+	case hadCode:
+		prev = cw.Val
+	case hadHash && hw.Val == accounts.EmptyCodeHash:
+		prev = accounts.Code{Hash: accounts.EmptyCodeHash}
+	default:
+		// An unchanged SetCode drops the code hash write createObject made.
+		baseCodeHash, err := ibs.GetCodeHash(addr)
+		if err != nil {
+			return err
+		}
+		if prev, err = ibs.codeSeed(addr, baseCodeHash); err != nil {
+			return err
+		}
 	}
 	if prev.Hash == code.Hash && bytes.Equal(prev.Bytes, code.Bytes) {
 		return nil
 	}
-	ibs.journalCodeChange(addr, prev.Hash, prev.Bytes, code, !ibs.hasWrite(addr, CodePath, accounts.NilKey), reason)
-	ibs.writeCode(addr, code, code.Hash == baseCodeHash)
+	ibs.journalCodeChange(addr, prev.Hash, prev.Bytes, code, !hadCode, reason)
+	ibs.writeCode(addr, code, code.Hash == prev.Hash)
 	return nil
 }
 
@@ -1868,12 +1887,29 @@ func (ibs *IntraBlockState) setStateVersioned(addr accounts.Address, key account
 // SetStorage replaces the entire storage for the specified account with given
 // storage. This function should only be used for debugging.
 func (ibs *IntraBlockState) SetStorage(addr accounts.Address, storage Storage) error {
-	if dbg.AssertEnabled && ibs.noMaterialize {
-		panic("SetStorage: full state override is not kept on the noMaterialize path")
-	}
 	stateObject, err := ibs.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
+	}
+	if ibs.versionMap != nil {
+		// An incarnation cell wipes storage and code for later transactions: a slot
+		// or code without a newer cell reads as empty, so the code is written again.
+		code, err := ibs.getCode(addr)
+		if err != nil {
+			return err
+		}
+		if code.Len() > 0 {
+			ibs.writeCode(addr, code, false)
+		}
+		ibs.recordWriteIncarnation(addr, stateObject.data.Incarnation)
+		// The incarnation cell does not hide a slot cell of an earlier transaction.
+		for _, key := range ibs.versionMap.StorageKeys(addr) {
+			ibs.recordWriteStorage(addr, key, uint256.Int{})
+		}
+		for key, value := range storage {
+			ibs.recordWriteStorage(addr, key, value)
+		}
+		return nil
 	}
 	if stateObject != nil {
 		stateObject.SetStorage(storage)
@@ -2064,25 +2100,12 @@ func (ibs *IntraBlockState) IsNewContract(addr accounts.Address) (bool, error) {
 // SetTransientState sets transient storage for a given account. It
 // adds the change to the journal so that it can be rolled back
 // to its previous value if there is a revert.
-func (ibs *IntraBlockState) SetTransientState(addr accounts.Address, key accounts.StorageKey, value uint256.Int) {
-	prev := ibs.GetTransientState(addr, key)
-	if prev == value {
-		return
-	}
-
-	ibs.journal.transientStorageChange(addr, key, prev)
-
-	ibs.setTransientState(addr, key, value)
-}
-
-// setTransientState is a lower level setter for transient storage. It
-// is called during a revert to prevent modifications to the journal.
-func (ibs *IntraBlockState) setTransientState(addr accounts.Address, key accounts.StorageKey, value uint256.Int) {
-	ibs.transientStorage.Set(addr, key, value)
+func (ibs *IntraBlockState) SetTransientState(addr accounts.Address, key *TransientKey, value *uint256.Int) {
+	ibs.transientStorage.Set(ibs.journal, addr, key, value)
 }
 
 // GetTransientState gets transient storage for a given account.
-func (ibs *IntraBlockState) GetTransientState(addr accounts.Address, key accounts.StorageKey) uint256.Int {
+func (ibs *IntraBlockState) GetTransientState(addr accounts.Address, key TransientKey) uint256.Int {
 	return ibs.transientStorage.Get(addr, key)
 }
 
@@ -2113,6 +2136,7 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		return nil, nil
 	}
 
+	consumed := ibs.consumedAddressAbsence(addr)
 	account, _, _, err := ibs.getVersionedAccount(addr, false)
 	if err != nil {
 		return nil, err
@@ -2120,6 +2144,10 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 
 	if account != nil {
 		return ibs.stateObjectForAccount(addr, account), nil
+	}
+	// Same rule as versionedAccountBase: a consumed absence is final for this tx.
+	if consumed {
+		return nil, nil
 	}
 
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
@@ -2948,6 +2976,14 @@ func (ibs *IntraBlockState) clearJournalAndRefund() {
 	ibs.stateObjectArena.reset() // same lifetime with `journal`
 }
 
+// SetForkRules sets the fork flags that the versioned read paths use. Prepare sets them for
+// each transaction; a caller that runs system calls before any transaction sets them here.
+func (ibs *IntraBlockState) SetForkRules(rules *chain.Rules) {
+	ibs.eip8246 = rules.IsAmsterdam
+	ibs.eip161 = rules.IsEIP161Enabled()
+	ibs.isAura = rules.IsAura
+}
+
 // Prepare handles the preparatory steps for executing a state transition.
 // This method must be invoked before state transition.
 //
@@ -2968,9 +3004,7 @@ func (ibs *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(sender.Handle()) || !dst.IsNil() && dbg.TraceAccount(dst.Handle())) {
 		fmt.Printf("%d (%d.%d) ibs.Prepare: sender: %x, coinbase: %x, dest: %x, %x, %v, %v\n", ibs.blockNum, ibs.txIndex, ibs.version, sender, coinbase, dst, precompiles, list, rules)
 	}
-	ibs.eip8246 = rules.IsAmsterdam
-	ibs.eip161 = rules.IsEIP161Enabled()
-	ibs.isAura = rules.IsAura
+	ibs.SetForkRules(rules)
 	ibs.txOutputFree = true
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
@@ -3289,7 +3323,7 @@ func (ibs *IntraBlockState) recordWriteAddress(addr accounts.Address, account *a
 		return
 	}
 	// A copy, made only here: the caller's account keeps changing.
-	val := account.SelfCopy()
+	val := ibs.versionedWrites.copyAccount(account)
 	if vw, ok := ibs.versionedWrites.GetAddress(addr); ok {
 		vw.Version = ibs.Version()
 		vw.Val = val
