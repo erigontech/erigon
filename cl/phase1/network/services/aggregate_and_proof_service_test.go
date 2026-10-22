@@ -651,7 +651,7 @@ func TestAggregateAndProofUnseenBlockIsIgnoredBeforeCommitteeRange(t *testing.T)
 	require.ErrorIs(t, err, ErrIgnore)
 }
 
-func TestAggregateAndProofIgnoresUnavailableTargetShuffling(t *testing.T) {
+func TestAggregateAndProofIgnoresUnknownVotedBlockTargetAncestor(t *testing.T) {
 	aggregate, s := getAggregateAndProofAndState()
 	service, syncedDataManager, fc := setupAggregateAndProofTest(t)
 	require.NoError(t, syncedDataManager.OnHeadState(s))
@@ -680,6 +680,36 @@ func TestAggregateAndProofIgnoresUnavailableTargetShuffling(t *testing.T) {
 	err = service.ProcessMessage(context.Background(), nil, aggregate)
 	require.ErrorIs(t, err, ErrIgnore)
 	require.Equal(t, []int{0, 0}, []int{blsCalls, targetCalls})
+}
+
+func TestAggregateAndProofIgnoresUnavailableTargetCheckpointState(t *testing.T) {
+	aggregate, s := getAggregateAndProofAndState()
+	service, syncedDataManager, fc := setupAggregateAndProofTest(t)
+	require.NoError(t, syncedDataManager.OnHeadState(s))
+	data := aggregate.SignedAggregateAndProof.Message.Aggregate.Data
+	headCommittee, err := s.GetBeaconCommitee(data.Slot, data.CommitteeIndex)
+	require.NoError(t, err)
+	targetCommittee := targetCommitteeOutsideHead(t, s, headCommittee, 2)
+	prepareTargetShufflingAggregate(t, s, fc, aggregate, targetCommittee, true)
+	blsCalls := 0
+	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) {
+		blsCalls++
+		return true, nil
+	}
+	targetCalls := 0
+	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64) ([]uint64, uint64, error) {
+		targetCalls++
+		require.Equal(t, data.Target, target)
+		require.Equal(t, data.Slot, slot)
+		require.Equal(t, data.CommitteeIndex, committeeIndex)
+		return nil, 0, errors.New("target state unavailable")
+	}
+	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = targetCommittee[0]
+	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048)
+
+	err = service.ProcessMessage(context.Background(), nil, aggregate)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Equal(t, []int{1, 1}, []int{blsCalls, targetCalls})
 }
 
 func TestAggregateAndProofGossipDoesNotAcceptBeforeBLSVerification(t *testing.T) {
