@@ -757,31 +757,24 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						// after the other per-result work has run alongside it.
 						blockValidatorWaiter = newBlockValidator(pe.cfg.engine, applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, checkBloom, applyResult.Receipts,
 							lastHeader, txs, pe.cfg.chainConfig, pe.logger)
-
 					}
 
 					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
 					var computedBAL types.BlockAccessList
 					var balErr error
-					balDone := make(chan struct{})
-					if isAmsterdam || pe.cfg.experimentalBAL {
-						var storedBAL []byte
-						if isAmsterdam && lastHeader != nil {
-							storedBAL, balErr = rawdb.ReadBlockAccessListBytes(rwTx, applyResult.BlockHash, applyResult.BlockNum)
-							storedBAL = bytes.Clone(storedBAL)
-						}
-						if balErr == nil {
-							h, txIO := lastHeader, applyResult.TxIO
-							go func() {
-								defer close(balDone)
-								computedBAL, balErr = bal.Process(storedBAL, h, txIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
-							}()
-						} else {
-							close(balDone)
-						}
-					} else {
-						close(balDone)
+					var storedBAL []byte
+					if isAmsterdam && lastHeader != nil {
+						storedBAL, balErr = rawdb.ReadBlockAccessListBytes(rwTx, applyResult.BlockHash, applyResult.BlockNum)
+						storedBAL = bytes.Clone(storedBAL)
 					}
+					balDone := make(chan struct{})
+					h, txIO := lastHeader, applyResult.TxIO
+					go func() {
+						defer close(balDone)
+						if balErr == nil {
+							computedBAL, balErr = bal.Process(storedBAL, h, txIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
+						}
+					}()
 
 					// StartChange + NotifyAccumulator both run in the apply goroutine to
 					// keep accumulator access single-threaded. StartChange must precede
