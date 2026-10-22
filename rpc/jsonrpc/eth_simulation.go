@@ -803,6 +803,11 @@ func (s *simulator) simulateBlock(
 		recordPhase = func() error {
 			// The finalized writes carry the EIP-161 removals, so the next call reads them from the version map.
 			writes := intraBlockState.FinalizedWrites(rules)
+			// FinalizedWrites composes pre-tx state for EIP-161 and can hit a base-read
+			// failure; surface it before ResetVersionedIO clears it.
+			if err := intraBlockState.StateReadError(); err != nil {
+				return err
+			}
 			intraBlockState.MergeTxIOInto(balIO, writes)
 			intraBlockState.FlushWritesToVersionMap(writes)
 			stateWriter.trackWrites(writes)

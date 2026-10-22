@@ -1620,3 +1620,22 @@ func TestResetForPoolCountsMapsLostToAnIntermediateReset(t *testing.T) {
 	ibs.AddSlotToAccessList(addr, accounts.InternKey(common.BigToHash(big2(0))))
 	require.False(t, ibs.resetForPool(), "a map lost to an intermediate reset must still count")
 }
+
+// SetStorage applies a full state override on the noMaterialize (versioned) path
+// too — the RPC eth_call / eth_estimateGas / debug_traceCall override flow relies on
+// it. It must record the override to the versionMap, not panic.
+func TestSetStorageOnNoMaterialize_AppliesOverride(t *testing.T) {
+	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(0, 0)
+	ibs.SetVersion(0)
+	defer ibs.Close()
+
+	addr := accounts.InternAddress([20]byte{0xaa})
+	key := accounts.InternKey([32]byte{0x01})
+	require.NoError(t, ibs.SetStorage(addr, Storage{key: *uint256.NewInt(7)}))
+
+	got, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.Equal(t, uint64(7), got.Uint64(), "the override must be recorded on the versioned path")
+}

@@ -19,13 +19,14 @@ tasks:
       minEpochNumber: ".tasks.specs.outputs.specs.GLOAS_FORK_EPOCH | tonumber"
 
   - name: check_consensus_block_proposals
-    title: "Wait for three new Caplin blocks with execution payloads"
+    title: "Wait for three new Caplin blocks with transactions"
     timeout: 3m
     config:
       checkLookback: 0
       blockCount: 3
       validatorNamePattern: "caplin"
       extraDataPattern: "^caplin-glamsterdam$"
+      minTransactionCount: 1
 
   - name: check_execution_sync_status
     title: "Check Erigon imports blocks after Glamsterdam"

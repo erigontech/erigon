@@ -3111,6 +3111,9 @@ Flags for configuring the [Caplin](https://docs.erigon.tech/fundamentals/caplin)
 - `--caplin.validator-monitor`: Enables Caplin validator monitoring metrics.
   - Default: `false`
 
+- `--caplin.payload-preparation.disable`: Disables speculative payload preparation.
+  - Default: `false`
+
 - `--caplin.custom-config value`: Sets a custom config for Caplin.
 - `--caplin.custom-genesis value`: Sets a custom genesis for Caplin.
 - `--caplin.use-engine-api`: Uses the Engine API for internal Caplin.
@@ -3356,20 +3359,6 @@ To run an op-node alongside Erigon, follow these steps:
 2. **Run the Op-Node**: Configure the op-node with the `--l1.trustrpc` flag to trust the Erigon RPC layer as the L1 node. This setup ensures smooth communication and synchronization.
 
 This configuration enables the op-node to function effectively with Erigon serving as both the L1 node and the CL.
-
-### How to run Erigon Nitro for Sepolia (experimental)
-
-To start an Erigon Nitro node, simply use this Docker command:
-
-```shell
-mkdir /disk/datadir && \
-docker run -d -v /disk/datadir/:/home/user/erigon-data/ erigontech/nitro-erigon:main-fe4c973 --torrent.download.rate=10G --prune.mode=archive --l2rpc="http://rpcserver:port --sync.loop.block.limit 100000
-```
-
-- **Arbitrum Sequencer**: We're currently working on adding support for the Arbitrum Sequencer. Until that work is complete, you must point Erigon to an external L2 Arbitrum RPC to get the most recent transactions and blocks. This can be either a pruned Nitro node you operate or a publicly available RPC. Any data beyond that is queried via the configured `l2rpc` during setup and synchronization, so keep this in mind when bringing a node online.
-- **RPC compatibility**: Before declaring full Arbitrum One support, we are targeting complete RPC compatibility with the Nitro node. Please note that the `timeboosted` field will remain unavailable until Sequencer integration is complete.
-
-For more recent versions, please check [https://hub.docker.com/r/erigontech/nitro-erigon/tags](https://hub.docker.com/r/erigontech/nitro-erigon/tags).
 
 ---
 
@@ -6642,7 +6631,7 @@ Beacon-chain withdrawals credit balances outside of any transaction, so by defau
 
 The default is off — omit the object, or leave the field out, and withdrawals are not reported. How they appear depends on the method:
 
-- **`trace_block`** appends one entry per withdrawal to the flat trace list. Each is a `"reward"` entry whose `action.rewardType` is `"withdrawal"`, with `action.author` set to the withdrawal address and `action.value` to the amount **in wei** (the beacon chain denominates withdrawals in Gwei). These entries carry no `transactionHash` or `transactionPosition`, since no transaction caused them.
+- **`trace_block`** appends one entry per withdrawal to the flat trace list. Each is a `"reward"` entry whose `action.rewardType` is `"withdrawal"`, with `action.author` set to the withdrawal address and `action.value` to the amount **in wei** (the beacon chain denominates withdrawals in Gwei). These entries carry `transactionHash` and `transactionPosition` as `null`, since no transaction caused them.
 
 - **`trace_replayBlockTransactions`** has no block-level slot in its per-transaction result shape, so withdrawals surface only through `stateDiff`. You must request `"stateDiff"` in the trace types; when you do, one extra entry is appended to the result array, carrying the withdrawal state changes. Its shape depends on whether the recipient already existed: an existing account gets a `"*"` balance change with `code` and `nonce` marked `"="`, while an account created by the withdrawal itself gets `"+"` entries for `balance`, `code` (`"0x"`) and `nonce` (`"0x0"`). Storage is empty either way. Multiple withdrawals to the same address are merged into a single balance change.
 
@@ -6700,7 +6689,7 @@ All `trace_*` methods return objects built from the same set of fields. Each met
 | `output` | DATA | Return data of the top-level call (`0x` if no data was returned). |
 | `stateDiff` | Object \| null | Set when `"stateDiff"` is requested in the trace types array. Maps each touched account address to an object describing changes to `balance`, `nonce`, `code`, and per-key `storage` entries. `null` if not requested. |
 | `trace` | Array of TraceEntry | Set when `"trace"` is requested. Flat list of call frames executed during the transaction. Empty array (never `null`) if not requested. See **TraceEntry fields** below. |
-| `vmTrace` | Object \| null | Set when `"vmTrace"` is requested. Step-by-step EVM trace including `code`, per-step `ops` (with `pc`, `cost`, `ex` execution result, and `sub` for nested calls). `ops` holds only operations that executed, so every `pc` lies inside `code`: an undefined opcode or a stack underflow or overflow is omitted, and an operation that halted exceptionally has `ex: null`. `null` if not requested. |
+| `vmTrace` | Object \| null | Set when `"vmTrace"` is requested. Step-by-step EVM trace including `code`, per-step `ops` (with `pc`, `cost`, `op` name, `ex` execution result, and `sub` for nested calls). `ops` holds only operations that executed, so every `pc` lies inside `code`: an undefined opcode or a stack underflow or overflow is omitted, and an operation that halted exceptionally has `ex: null`. `null` if not requested. |
 | `transactionHash` | DATA, 32 BYTES | (Only in `trace_replayBlockTransactions` entries) Hash of the transaction this trace belongs to. |
 
 ### TraceEntry fields
@@ -6717,8 +6706,8 @@ A `TraceEntry` represents a single call frame (root call, internal call, contrac
 | `type` | String | One of `"call"`, `"create"`, `"suicide"` (self-destruct), `"reward"` (block/uncle reward — appears in `trace_block` and in `trace_filter` results when the filter matches block coinbases or uncle authors). |
 | `blockHash` | DATA, 32 BYTES | (Only in block-level methods: `trace_block`, `trace_filter`, `trace_transaction`, `trace_get`) Hash of the block containing the transaction. |
 | `blockNumber` | QUANTITY | (Block-level methods only) Number of the block containing the transaction. |
-| `transactionHash` | DATA, 32 BYTES | (Block-level methods only) Hash of the transaction containing this call frame. Absent for `"reward"` entries. |
-| `transactionPosition` | QUANTITY | (Block-level methods only) Index of the transaction within the block. Absent for `"reward"` entries. |
+| `transactionHash` | DATA, 32 BYTES | (Block-level methods only) Hash of the transaction containing this call frame. `null` for `"reward"` entries. |
+| `transactionPosition` | QUANTITY | (Block-level methods only) Index of the transaction within the block. `null` for `"reward"` entries. |
 
 ### Action variants
 
@@ -8165,7 +8154,7 @@ lighthouse account validator import --directory <path_to_validator_keys>
 
 ### 3.1. Payload Preparation Ahead of the Proposer Slot
 
-Since v3.6, Caplin primes the execution layer one slot before the slot this node is due to propose, so the execution layer has already begun assembling a payload when the proposal is requested. There is no flag for this; it is on whenever all of the following hold:
+Since v3.6, Caplin primes the execution layer one slot before the slot this node is due to propose, so the execution layer has already begun assembling a payload when the proposal is requested. Preparation is enabled by default. Use `--caplin.payload-preparation.disable` to disable it while keeping the validator API and normal block production enabled. Preparation runs when all of the following hold:
 
 - The Beacon API is running with the `validator` namespace enabled — for example `--beacon.api=beacon,validator,...` as in the command above. Without `validator`, preparation never starts.
 - A validator client has registered a fee recipient for the proposer index, which Lighthouse does through the standard `prepare_beacon_proposer` call. A node with no registered validators never does the work.
@@ -8178,7 +8167,9 @@ PayloadPreparation: watching for proposals
 PayloadPreparation: primed execution layer
 ```
 
-Preparation is skipped for the Gloas (EIP-7732) fork, where builders gossip bids instead, and before Capella.
+Preparation starts at Capella. It supports the first Gloas slot and steady-state Gloas EMPTY paths whose execution parent is already canonical. Gloas FULL and FULL-to-EMPTY paths wait for normal production's fork-choice update. Missing or mismatched preparation keeps the normal collection window.
+
+The metrics endpoint exposes `caplin_payload_preparation_outcomes_total{outcome="..."}` for scheduler results. Outcomes use fixed reasons such as `success`, `unregistered`, `stale_head`, `busy`, `too_early`, `late`, `needs_forkchoice`, and `unchanged`. `caplin_payload_preparation_collections_total{outcome="reused|absent|mismatch"}` records whether production reused a prepared payload ID, found no prepared payload, or found a different ID. `absent` also covers nodes where preparation is disabled or unsupported. Head hashes, slots, proposer indices, and error messages are never metric labels.
 
 ### 3.2. Fork-Choice Head Published Before the Head-State Copy
 

@@ -251,7 +251,7 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		ibs := state.New(state.NewNoopReader())
 		defer ibs.Close()
 		evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
-		c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+		c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, *uint256.NewInt(7))
 		c.Code = code
 		f := evm.run
 		if traced {

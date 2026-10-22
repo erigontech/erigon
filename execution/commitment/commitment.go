@@ -207,6 +207,9 @@ type DeferredBranchUpdate struct {
 	// Backing store for a merged encoded value. encoded either aliases raw or points
 	// here, so it is never itself reused — this is the buffer that survives pooling.
 	encodedBuf []byte
+	// rawWrite writes raw as-is without merging it against prev, for a tombstone whose
+	// prev is carried only for the domain diff (see CollectTombstone).
+	rawWrite bool
 }
 
 var deferredUpdatePool = &sync.Pool{
@@ -222,6 +225,7 @@ func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
 	upd.raw = reuseBytes(upd.raw, raw)
 	upd.prev = reuseBytes(upd.prev, prev)
 	upd.encoded = nil
+	upd.rawWrite = false
 
 	return upd
 }
@@ -317,6 +321,10 @@ func (be *BranchEncoder) ClearDeferred() {
 }
 
 func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error {
+	if upd.rawWrite {
+		upd.encoded = upd.raw
+		return nil
+	}
 	if len(upd.prev) > 0 {
 		if bytes.Equal(upd.prev, upd.raw) {
 			upd.encoded = nil
@@ -507,6 +515,42 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		return err
 	}
 	be.deferred = append(be.deferred, getDeferredUpdate(prefix, raw, prev))
+	return nil
+}
+
+// CollectTombstone writes an empty-branch tombstone at prefix (touchMap present,
+// afterMap zero, no cells) without merging it against prev. The tombstone carries
+// no cells, and a real stored branch can be shorter than its bitmap implies (state
+// hashes, extensions, inlined leaves), so Merge would overrun it. prev is still
+// forwarded to PutBranch so the domain diff records the real previous branch and an
+// unwind across the destruct restores it rather than an empty tombstone.
+func (be *BranchEncoder) CollectTombstone(ctx PatriciaContext, prefix []byte, touchMap uint16, prev []byte) error {
+	raw, err := be.EncodeBranch(0, touchMap, 0, nil)
+	if err != nil {
+		return err
+	}
+	if be.deferUpdates {
+		limit := be.maxDeferredUpdates
+		if limit == 0 {
+			limit = DefaultMaxDeferredUpdates
+		}
+		if !be.callerOwnsDeferred && len(be.deferred) >= limit {
+			if err := be.ApplyDeferredUpdates(16, ctx.PutBranch); err != nil {
+				return err
+			}
+			be.ClearDeferred()
+		}
+		upd := getDeferredUpdate(prefix, raw, prev)
+		upd.rawWrite = true
+		be.deferred = append(be.deferred, upd)
+		return nil
+	}
+	prefixCopy := bytes.Clone(prefix)
+	updateCopy := bytes.Clone(raw)
+	if err := ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
+		return err
+	}
+	publishBranchWrites(1, len(updateCopy), be.metrics)
 	return nil
 }
 

@@ -45,6 +45,13 @@ type MockState struct {
 	numBuf [binary.MaxVarintLen64]byte
 
 	putBranches int
+
+	recordPuts atomic.Bool
+	putLog     []recordedBranchPut
+}
+
+type recordedBranchPut struct {
+	prefix, data, prev []byte
 }
 
 func NewMockState(t testing.TB) *MockState {
@@ -73,6 +80,9 @@ func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte) erro
 	// pooled buffers. Storing data directly silently corrupts branches on pool reuse.
 	ms.cm[string(prefix)] = bytes.Clone(data)
 	ms.putBranches++
+	if ms.recordPuts.Load() {
+		ms.putLog = append(ms.putLog, recordedBranchPut{bytes.Clone(prefix), bytes.Clone(data), bytes.Clone(prevData)})
+	}
 	return nil
 }
 

@@ -159,7 +159,13 @@ func FinalizeCallTx(ibs *state.IntraBlockState, rules *chain.Rules) error {
 	if !ibs.IsVersioned() {
 		return ibs.FinalizeTx(rules, state.NewNoopWriter())
 	}
-	ibs.FlushWritesToVersionMap(ibs.FinalizedWrites(rules))
+	writes := ibs.FinalizedWrites(rules)
+	// FinalizedWrites composes pre-tx state for EIP-161 and can hit a base-read
+	// failure; surface it before ResetVersionedIO clears it.
+	if err := ibs.StateReadError(); err != nil {
+		return err
+	}
+	ibs.FlushWritesToVersionMap(writes)
 	ibs.SoftFinalise()
 	ibs.ResetVersionedIO()
 	return nil

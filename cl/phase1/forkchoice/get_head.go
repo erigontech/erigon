@@ -186,9 +186,10 @@ func (f *ForkChoiceStore) GetHeadNode() (ForkChoiceNode, uint64, error) {
 func (f *ForkChoiceStore) getHeadGloas() (ForkChoiceNode, uint64, error) {
 	for {
 		justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
-		// Fetch the checkpoint state before acquiring f.mu (it can read from disk);
-		// a nil state degrades to zero attestation weight, as before.
-		cs, _ := f.getCheckpointState(justifiedCheckpoint)
+		cs, err := f.gloasHeadCheckpointState(justifiedCheckpoint, f.getCheckpointState)
+		if err != nil {
+			return ForkChoiceNode{}, 0, err
+		}
 
 		head, headSlot, ok, err := func() (ForkChoiceNode, uint64, bool, error) {
 			f.mu.Lock()
@@ -220,6 +221,16 @@ func (f *ForkChoiceStore) getHeadGloas() (ForkChoiceNode, uint64, error) {
 			return head, headSlot, nil
 		}
 	}
+}
+
+func (f *ForkChoiceStore) gloasHeadCheckpointState(justifiedCheckpoint solid.Checkpoint, getCheckpointState func(solid.Checkpoint) (*checkpointState, error)) (*checkpointState, error) {
+	cs, err := getCheckpointState(justifiedCheckpoint)
+	if err != nil {
+		if _, hasJustified := f.forkGraph.GetHeader(justifiedCheckpoint.Root); !hasJustified {
+			return nil, nil
+		}
+	}
+	return cs, err
 }
 
 func (f *ForkChoiceStore) computeHeadGloasWithAnchorFallback(justifiedCheckpoint solid.Checkpoint, cs *checkpointState) (ForkChoiceNode, uint64, error) {

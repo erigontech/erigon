@@ -117,15 +117,39 @@ type execRange struct {
 	maxBlockNum              uint64
 }
 
-// execV3Outcome carries what the stage wrapper needs after the parallel
-// executor returns. applyTx is the live post-exec tx (parallel exec may have
-// rolled the stageloop tx via Flush/CommitAndBegin, leaving the caller's rwTx
-// stale); the failed* fields name the block implicated in a bad-block unwind.
+// execV3Outcome carries what the stage wrapper needs after the parallel executor
+// returns. applyTx is the live post-exec tx (parallel exec may have rolled the
+// stageloop tx via Flush/CommitAndBegin, leaving the caller's rwTx stale). verdict
+// carries the invalid-block verdict of a healthy run, exhausted its resumable batch
+// boundary; at most one of {error, verdict, exhausted} is set, and the error return
+// carries an operational failure or cancellation, never a verdict. renderExecOutcome
+// converts these back to the stage's error contracts.
 type execV3Outcome struct {
 	applyTx               kv.TemporalRwTx
 	lastCommittedBlockNum uint64
-	failedBlock           uint64
-	failedHash            common.Hash
+	verdict               *blockVerdict
+	exhausted             *ErrLoopExhausted
+}
+
+// finalizeExecV3Outcome clears a recorded resumable boundary when the run also
+// returns an error: a failure is not a clean batch cut to resume from.
+func finalizeExecV3Outcome(out execV3Outcome, err error) (execV3Outcome, error) {
+	if err != nil {
+		out.exhausted = nil
+	}
+	return out, err
+}
+
+// haltOnBadBlockDebug freezes the process on an invalid-block verdict when both
+// the BAD_BLOCK_HALT env flag and cfg.badBlockHalt are set: the switch's purpose
+// is to keep the datadir at the pre-block state, and returning would run deferred
+// rollback/commit paths that overwrite it. Fork validation alone (cfg.badBlockHalt
+// without the env flag) must not exit — it needs the verdict to propagate.
+func haltOnBadBlockDebug(cfg ExecuteBlockCfg, logPrefix string, cause error, logger log.Logger) {
+	if cfg.badBlockHalt && dbg.BadBlockHalt {
+		logger.Error(fmt.Sprintf("[%s] BAD_BLOCK_HALT: halting on invalid block (debug mode, no commit)", logPrefix), "err", cause)
+		os.Exit(1) //nolint:gocritic // exitAfterDefer: intentional process halt without running deferred rollback to preserve state
+	}
 }
 
 // ExecV3 runs the parallel executor over the resolved window rng. It is
@@ -236,13 +260,25 @@ func ExecV3(ctx context.Context,
 	out = execV3Outcome{
 		applyTx:               applyTx,
 		lastCommittedBlockNum: pe.lastCommittedBlockNum.Load(),
-		failedBlock:           pe.failedBlock,
-		failedHash:            pe.failedHash,
+		verdict:               pe.verdict,
+		exhausted:             pe.exhausted,
+	}
+
+	// The finalize tail (BAD_BLOCK_HALT, frozen-step commitment guard, tx-pool
+	// notification) runs only for a healthy or resumable batch — an operational
+	// failure or an invalid-block verdict left nothing durable to persist. An
+	// operational failure outranks a recorded verdict, which outranks exhaustion.
+	if execErr != nil {
+		return finalizeExecV3Outcome(out, execErr)
+	}
+	if out.verdict != nil {
+		haltOnBadBlockDebug(cfg, logPrefix, out.verdict.err, logger)
+		return out, nil
 	}
 
 	execErr = execV3Finalize(ctx, execErr, cfg, doms, pe.lastCommittedTxNum.Load(), out.lastCommittedBlockNum,
 		lastHeader, shouldReportToTxPool, logPrefix, logger)
-	return out, execErr
+	return finalizeExecV3Outcome(out, execErr)
 }
 
 // execV3Serial runs the serial executor. It stays welded to the stage
