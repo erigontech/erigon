@@ -202,13 +202,19 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 
 	const gasLimit = 4 * 16_800 // the per-transaction minimum after London
 	for _, test := range []struct {
-		txCount    int
-		wantStatus engine_types.EngineStatus
+		name          string
+		txCount       int
+		cfg           *chain.Config
+		noWithdrawals bool
+		wantStatus    engine_types.EngineStatus
+		wantErrCode   int
 	}{
-		{4, engine_types.SyncingStatus},
-		{5, engine_types.InvalidStatus},
+		{name: "4 txs", txCount: 4, cfg: preCancunChainConfig(), wantStatus: engine_types.SyncingStatus},
+		{name: "5 txs", txCount: 5, cfg: preCancunChainConfig(), wantStatus: engine_types.InvalidStatus},
+		{name: "5 txs without withdrawals", txCount: 5, cfg: preCancunChainConfig(), noWithdrawals: true, wantErrCode: -32602},
+		{name: "5 txs after Cancun", txCount: 5, cfg: prePragueChainConfig(), wantErrCode: -38005},
 	} {
-		t.Run(fmt.Sprintf("%d txs", test.txCount), func(t *testing.T) {
+		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
 			to := common.Address{0x1}
@@ -227,14 +233,22 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 			block := types.NewBlockFromStorage(header.Hash(), header, txs, nil, withdrawals, nil)
 			payload, err := engine_types.ExecutionPayloadFromBlock(block)
 			require.NoError(t, err)
+			if test.noWithdrawals {
+				payload.Withdrawals = nil
+			}
 
-			cfg := preCancunChainConfig()
 			stub := &stubExecutionModule{}
-			downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
-			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+			downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, test.cfg, ethconfig.Sync{}, nil)
+			srv := NewEngineServer(log.New(), test.cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
 			srv.test = true
 
 			status, err := srv.NewPayloadV2(t.Context(), payload)
+			if test.wantErrCode != 0 {
+				var rpcErr rpc.Error
+				require.ErrorAs(t, err, &rpcErr)
+				require.Equal(t, test.wantErrCode, rpcErr.ErrorCode())
+				return
+			}
 			require.NoError(t, err)
 			require.Equal(t, test.wantStatus, status.Status)
 		})
