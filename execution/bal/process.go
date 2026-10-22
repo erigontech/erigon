@@ -25,8 +25,6 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -59,8 +57,9 @@ func writeBALToFile(bal types.BlockAccessList, dataDir string, name string, logg
 // Process derives the block's access list from the executed VersionedIO and,
 // once Amsterdam is active, cross-checks it against the header commitment. It
 // returns the computed BAL so callers (e.g. the pre-Amsterdam experimental
-// path, where the header carries no BAL hash) can capture it.
-func Process(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isEIP7928 bool, experimental bool, dataDir string, logger log.Logger) (types.BlockAccessList, error) {
+// path, where the header carries no BAL hash) can capture it. blockBalBytes is
+// the stored BAL sidecar, nil when absent.
+func Process(blockBalBytes []byte, h *types.Header, vio *state.VersionedIO, isEIP7928 bool, experimental bool, dataDir string, logger log.Logger) (types.BlockAccessList, error) {
 	if !isEIP7928 && !experimental {
 		return nil, nil
 	}
@@ -85,10 +84,6 @@ func Process(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isEIP7
 		return nil, fmt.Errorf("block %d: EIP-7928 active but BlockAccessListHash is nil in header", blockNum)
 	}
 	blockBalHash := *h.BlockAccessListHash
-	blockBalBytes, err := rawdb.ReadBlockAccessListBytes(tx, blockHash, blockNum)
-	if err != nil {
-		return nil, fmt.Errorf("block %d: read stored block access list: %w", blockNum, err)
-	}
 	// A stored BAL sidecar may be absent, so cross-check it only when present.
 	// The stored bytes are canonical RLP, so their Keccak is the BAL hash.
 	var blockBal types.BlockAccessList
