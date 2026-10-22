@@ -718,23 +718,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						panic(fmt.Sprintf("prevBlocks tail block %d != committed block %d", tb, applyResult.BlockNum))
 					}
 					pe.prevBlocks.RemoveTail()
-					// StartChange + NotifyAccumulator both run in the apply goroutine to
-					// keep accumulator access single-threaded. StartChange must precede
-					// NotifyAccumulator: it initialises the latestChange entry the notify
-					// writes into.
-					if pe.accumulator != nil && applyResult.Header != nil {
-						rawTxs, marshalErr := types.MarshalTransactionsBinary(applyResult.Txs)
-						if marshalErr != nil {
-							failInfra(fmt.Errorf("marshal transactions for accumulator, block %d: %w", applyResult.BlockNum, marshalErr))
-							continue
-						}
-						pe.accumulator.StartChange(applyResult.Header, rawTxs, false)
-						for _, writes := range pendingAccumulatorWrites {
-							state.NotifyAccumulator(pe.accumulator, writes)
-						}
-						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
-					}
-
 					var blockValidatorWaiter *blockValidator
 					if applyResult.BlockNum > 0 && !applyResult.isPartial { // Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 						checkBloom := !pe.cfg.vmConfig.StatelessExec && !pe.cfg.vmConfig.NoReceipts
@@ -769,6 +752,23 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 
 					}
 
+					// StartChange + NotifyAccumulator both run in the apply goroutine to
+					// keep accumulator access single-threaded. StartChange must precede
+					// NotifyAccumulator: it initialises the latestChange entry the notify
+					// writes into.
+					if pe.accumulator != nil && applyResult.Header != nil {
+						rawTxs, marshalErr := types.MarshalTransactionsBinary(applyResult.Txs)
+						if marshalErr != nil {
+							failInfra(fmt.Errorf("marshal transactions for accumulator, block %d: %w", applyResult.BlockNum, marshalErr))
+							continue
+						}
+						pe.accumulator.StartChange(applyResult.Header, rawTxs, false)
+						for _, writes := range pendingAccumulatorWrites {
+							state.NotifyAccumulator(pe.accumulator, writes)
+						}
+						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
+					}
+
 					if applyResult.BlockNum > 0 && applyResult.receiptsComplete && !initialCycle && applyResult.Header != nil &&
 						pe.cfg.notifications != nil && pe.cfg.notifications.RecentReceipts != nil {
 						pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, applyResult.Txs, applyResult.Header)
@@ -783,8 +783,15 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					blockUpdateCount = 0
 					blockApplyCount = 0
 
-					// Join the per-block validator spawned above (post-execution
-					// receipt/BAL checks).
+					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
+					var computedBAL types.BlockAccessList
+					var balErr error
+					if isAmsterdam || pe.cfg.experimentalBAL {
+						computedBAL, balErr = bal.Process(rwTx, lastHeader, applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
+					}
+
+					// Join the per-block validator spawned above; its verdict wins over
+					// a bal.Process error.
 					if err := blockValidatorWaiter.Wait(); err != nil {
 						// Block-validity verdict: route through failCandidate and keep
 						// draining rather than bare-returning (which would wedge pe.wait).
@@ -795,17 +802,12 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						continue
 					}
 
-					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
-					if isAmsterdam || pe.cfg.experimentalBAL {
-						var computedBAL types.BlockAccessList
-						computedBAL, err = bal.Process(rwTx, lastHeader, applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
-						if err != nil {
-							failInfra(err)
-							continue
-						}
-						if pe.cfg.balSink != nil {
-							pe.cfg.balSink(applyResult.BlockNum, computedBAL)
-						}
+					if balErr != nil {
+						failInfra(balErr)
+						continue
+					}
+					if (isAmsterdam || pe.cfg.experimentalBAL) && pe.cfg.balSink != nil {
+						pe.cfg.balSink(applyResult.BlockNum, computedBAL)
 					}
 
 					appliedBlocks[applyResult.BlockNum] = struct{}{}
