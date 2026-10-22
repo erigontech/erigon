@@ -3093,6 +3093,9 @@ func (account *accountState) updateReadStorage(key accounts.StorageKey, val uint
 		account.slotReads[key] = len(account.storageReads)
 	}
 	account.storageReads = append(account.storageReads, key)
+	if account.slotReads == nil && len(account.storageReads) >= slotIndexMin {
+		account.indexStorageReads()
+	}
 }
 
 func (account *accountState) updateReadBalance(val uint256.Int) {
@@ -3165,20 +3168,24 @@ func (account *accountState) addStorageUpdate(at int, slot accounts.StorageKey, 
 		for i := range ac.StorageChanges {
 			account.slotWrites[ac.StorageChanges[i].Slot] = i
 		}
-		// StorageReads can hold the same slot twice: below the threshold reads are
-		// appended unchecked, and Normalize is what dedups them. The index needs
-		// one entry per slot, so drop the repeats while building it.
-		account.slotReads = make(map[accounts.StorageKey]int, len(account.storageReads))
-		deduped := account.storageReads[:0]
-		for _, slot := range account.storageReads {
-			if _, seen := account.slotReads[slot]; seen {
-				continue
-			}
-			account.slotReads[slot] = len(deduped)
-			deduped = append(deduped, slot)
-		}
-		account.storageReads = deduped
+		account.indexStorageReads()
 	}
+}
+
+// indexStorageReads builds slotReads. Below slotIndexMin reads are appended
+// unchecked and Normalize dedups them; the index needs one entry per slot, so
+// it drops the repeats.
+func (account *accountState) indexStorageReads() {
+	account.slotReads = make(map[accounts.StorageKey]int, len(account.storageReads))
+	deduped := account.storageReads[:0]
+	for _, slot := range account.storageReads {
+		if _, seen := account.slotReads[slot]; seen {
+			continue
+		}
+		account.slotReads[slot] = len(deduped)
+		deduped = append(deduped, slot)
+	}
+	account.storageReads = deduped
 }
 
 // removeStorageRead drops slot from StorageReads, because a write to it takes
