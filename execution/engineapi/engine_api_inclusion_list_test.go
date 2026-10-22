@@ -17,6 +17,7 @@
 package engineapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -35,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -231,7 +233,8 @@ func TestNewPayloadV6KnownCanonicalBlockAsksExecution(t *testing.T) {
 	cfg := bogotaChainConfig()
 	parent := makeParentHeader(1000)
 	payload := bogotaPayload(t, parent)
-	satisfied := true
+	satisfied := false
+	var askedHash common.Hash
 	stub := &stubExecutionModule{
 		getHeaderFunc: func(_ context.Context, blockHash *common.Hash, _ *uint64) (*types.Header, error) {
 			if blockHash != nil && (*blockHash == parent.Hash() || *blockHash == payload.BlockHash) {
@@ -242,7 +245,8 @@ func TestNewPayloadV6KnownCanonicalBlockAsksExecution(t *testing.T) {
 		isCanonicalHashFunc: func(_ context.Context, hash common.Hash) (bool, error) {
 			return hash == payload.BlockHash, nil
 		},
-		ilSatisfiedFunc: func(context.Context, common.Hash, uint64, types.Transactions) (*bool, error) {
+		ilSatisfiedFunc: func(_ context.Context, blockHash common.Hash, _ uint64, _ types.Transactions) (*bool, error) {
+			askedHash = blockHash
 			return &satisfied, nil
 		},
 	}
@@ -255,7 +259,8 @@ func TestNewPayloadV6KnownCanonicalBlockAsksExecution(t *testing.T) {
 	require.NotNil(t, status)
 	require.Equal(t, engine_types.ValidStatus, status.Status)
 	require.NotNil(t, status.InclusionListSatisfied)
-	require.True(t, *status.InclusionListSatisfied)
+	require.False(t, *status.InclusionListSatisfied)
+	require.Equal(t, payload.BlockHash, askedHash)
 }
 
 func TestNewPayloadV6InclusionListCheckErrorIsReturned(t *testing.T) {
@@ -370,6 +375,44 @@ func TestNewPayloadV6ForwardsInclusionListToExecution(t *testing.T) {
 	il := (*inserted)[0].InclusionList()
 	require.Len(t, il, len(inclusionList))
 	want, err := types.DecodeTransactions([][]byte{inclusionList[0]})
+	require.NoError(t, err)
+	require.Equal(t, want[0].Hash(), il[0].Hash())
+}
+
+func TestNewPayloadV6SkipsUndecodableInclusionListEntries(t *testing.T) {
+	t.Parallel()
+
+	cfg := bogotaChainConfig()
+	parent := makeParentHeader(1000)
+	srv, inserted := newInclusionListServer(cfg, parent, execmodule.ValidationResult{
+		ValidationStatus: execmodule.ExecutionStatusSuccess,
+	}, ilTestMaxReorgDepth)
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	valid := makeSignedRawTx(t, key, cfg, 0, 101, 1012)
+
+	typed, err := types.SignTx(&types.DynamicFeeTransaction{
+		CommonTx: types.CommonTx{Nonce: 1, GasLimit: 21_000, To: &common.Address{0x22}},
+		ChainID:  *cfg.ChainID,
+		FeeCap:   *uint256.NewInt(1_000_000_000),
+	}, *types.MakeSigner(cfg, 101, 1012), key)
+	require.NoError(t, err)
+	var typedBuf bytes.Buffer
+	require.NoError(t, typed.MarshalBinary(&typedBuf))
+	rlpWrapped, err := rlp.EncodeToBytes(typedBuf.Bytes())
+	require.NoError(t, err)
+	require.True(t, types.TypedTransactionMarshalledAsRlpString(rlpWrapped))
+
+	undecodable := hexutil.Bytes{types.DynamicFeeTxType, 0xc0}
+	inclusionList := []hexutil.Bytes{undecodable, rlpWrapped, valid}
+
+	_, err = srv.NewPayloadV6(t.Context(), bogotaPayload(t, parent), []common.Hash{}, &common.Hash{}, []hexutil.Bytes{}, inclusionList)
+	require.NoError(t, err)
+	require.Len(t, *inserted, 1)
+	il := (*inserted)[0].InclusionList()
+	require.Len(t, il, 1)
+	want, err := types.DecodeTransactions([][]byte{valid})
 	require.NoError(t, err)
 	require.Equal(t, want[0].Hash(), il[0].Hash())
 }

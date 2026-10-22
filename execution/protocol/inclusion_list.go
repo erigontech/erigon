@@ -79,7 +79,7 @@ func CheckInclusionListTransactions(
 			continue
 		}
 
-		log.Warn("[EIP-7805] Inclusion list transaction should have been included in the block",
+		log.Debug("[EIP-7805] Inclusion list transaction should have been included in the block",
 			"txn", tx.Hash(), "sender", msg.From(), "nonce", msg.Nonce(), "block", evm.Context.BlockNumber)
 
 		return false, nil

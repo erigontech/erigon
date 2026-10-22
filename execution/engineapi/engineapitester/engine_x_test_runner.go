@@ -540,9 +540,7 @@ func processNewPayload(ctx context.Context, tester EngineApiTester, payload Engi
 			case "6":
 				var r6 *enginetypes.PayloadStatusV2
 				r6, err = tester.EngineApiClient.NewPayloadV6(ctx, &enginePayload, blobHashes, &parentBeaconRoot, executionRequests, inclusionList)
-				if r6 != nil {
-					r = &enginetypes.PayloadStatus{Status: r6.Status, ValidationError: r6.ValidationError, LatestValidHash: r6.LatestValidHash}
-				}
+				r = r6.ToPayloadStatus()
 			default:
 				return nil, "", fmt.Errorf("unsupported new payload version: %s", payload.NewPayloadVersion)
 			}

@@ -244,11 +244,7 @@ func (e *EngineServer) NewPayloadV5(ctx context.Context, payload *engine_types.E
 func (e *EngineServer) NewPayloadV6(ctx context.Context, payload *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, inclusionList []hexutil.Bytes,
 ) (*engine_types.PayloadStatusV2, error) {
-	resp, err := e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, inclusionList, clparams.HezeVersion)
-	if err != nil {
-		return nil, err
-	}
-	return resp, nil
+	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, inclusionList, clparams.HezeVersion)
 }
 
 // Returns an array of execution payload bodies referenced by their block hashes
