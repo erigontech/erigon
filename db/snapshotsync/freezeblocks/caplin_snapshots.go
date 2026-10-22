@@ -22,7 +22,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -32,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -364,10 +367,36 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 	if err := sn.Compress(); err != nil {
 		return fmt.Errorf("compress: %w", err)
 	}
+	if err := removeBlobIndexAndTorrents(snapDir, fromSlot, toSlot); err != nil {
+		return err
+	}
 	// Generate .idx file, which is the slot => offset mapping.
 	p := &background.Progress{}
 
 	return snapshotsync.BeaconSimpleIdx(ctx, f, salt, tmpDir, p, lvl, logger)
+}
+
+func removeBlobIndexAndTorrents(snapDir string, from, to uint64) error {
+	idx := snaptype.IdxFileMask(from, to, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
+	masks := []string{idx, idx + ".torrent", snaptype.SegmentFileMask(from, to, snaptype.CaplinEnums.BlobSidecars) + ".torrent"}
+	entries, err := os.ReadDir(snapDir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if slices.ContainsFunc(masks, func(mask string) bool {
+			matched, _ := filepath.Match(mask, e.Name())
+			return matched
+		}) {
+			if err := dir.RemoveFile(filepath.Join(snapDir, e.Name())); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, fromSlot, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {

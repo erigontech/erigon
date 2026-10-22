@@ -27,7 +27,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"runtime"
 	"slices"
 	"strconv"
@@ -60,7 +59,6 @@ import (
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -1218,16 +1216,17 @@ func (c *DumpBlobsSnapshots) Run(ctx context.Context) error {
 	blobCount := freezeblocks.BlobCountFromBlocks(ctx, csn, freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig))
 
 	for _, start := range starts {
-		end := start + snaptype.CaplinMergeLimit
-		if err := removeBlobIndexAndTorrents(dirs.Snap, start, end); err != nil {
-			return err
-		}
-		log.Info("Dumping blobs sidecars", "from", start, "to", end)
-		if err := freezeblocks.DumpBlobSidecarsRange(ctx, db, blobStorage, start, end, salt, dirs, estimate.CompressSnapshot.Workers(), blobCount, log.LvlInfo, log.Root()); err != nil {
+		if err := dumpBlobSegment(ctx, db, blobStorage, start, salt, dirs, blobCount); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func dumpBlobSegment(ctx context.Context, db kv.RoDB, blobStorage blob_storage.BlobStorage, start uint64, salt uint32, dirs datadir.Dirs, blobCount freezeblocks.BlobCountBySlotFn) error {
+	end := start + snaptype.CaplinMergeLimit
+	log.Info("Dumping blobs sidecars", "from", start, "to", end)
+	return freezeblocks.DumpBlobSidecarsRange(ctx, db, blobStorage, start, end, salt, dirs, estimate.CompressSnapshot.Workers(), blobCount, log.LvlInfo, log.Root())
 }
 
 func blobDumpPlan(beaconConfig *clparams.BeaconChainConfig, from, to, frozenBlocks uint64, onDisk, pinned []snaptype.FileInfo, overwrite bool) ([]uint64, error) {
@@ -1261,29 +1260,6 @@ func blobDumpPlan(beaconConfig *clparams.BeaconChainConfig, from, to, frozenBloc
 		starts = append(starts, start)
 	}
 	return starts, nil
-}
-
-func removeBlobIndexAndTorrents(snapDir string, from, to uint64) error {
-	idx := snaptype.IdxFileMask(from, to, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
-	masks := []string{idx, idx + ".torrent", snaptype.SegmentFileMask(from, to, snaptype.CaplinEnums.BlobSidecars) + ".torrent"}
-	entries, err := os.ReadDir(snapDir)
-	if err != nil {
-		return err
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		if slices.ContainsFunc(masks, func(mask string) bool {
-			matched, _ := filepath.Match(mask, e.Name())
-			return matched
-		}) {
-			if err := dir.RemoveFile(filepath.Join(snapDir, e.Name())); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
 func frozenBlobSegments(dirs datadir.Dirs) (onDisk, pinned []snaptype.FileInfo, err error) {
