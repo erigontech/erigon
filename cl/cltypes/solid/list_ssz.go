@@ -412,11 +412,9 @@ func (l *ListSSZ[T]) ShallowCopy() *ListSSZ[T] {
 		progressive:     l.progressive,
 		root:            common.Hash(bytes.Clone(l.root[:])),
 	}
+	cpy.progressiveRoot = &progressiveRootCache[T]{owner: cpy}
 	if cache := l.ownedProgressiveRoot(); cache != nil {
-		if root := cache.root.Load(); root != nil {
-			cpy.progressiveRoot = &progressiveRootCache[T]{owner: cpy}
-			cpy.progressiveRoot.root.Store(root)
-		}
+		cpy.progressiveRoot.root.Store(cache.root.Load())
 	}
 	copy(cpy.list, l.list)
 	return cpy

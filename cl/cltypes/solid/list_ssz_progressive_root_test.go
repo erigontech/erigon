@@ -304,6 +304,42 @@ func TestListSSZWarmShallowCopyReusesProgressiveRoot(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
+func TestListSSZColdShallowCopyCachesProgressiveRoot(t *testing.T) {
+	sources := map[string]func() *ListSSZ[*PendingPartialWithdrawal]{
+		"holder without root": func() *ListSSZ[*PendingPartialWithdrawal] {
+			return newProgressiveRootTestList(progressiveRootTestValues(1024)...)
+		},
+		"no holder": func() *ListSSZ[*PendingPartialWithdrawal] {
+			return NewStaticListSSZFromList(newProgressiveRootTestList(progressiveRootTestValues(1024)...).list, progressiveRootTestLimit, SizePendingPartialWithdrawal)
+		},
+	}
+	for name, newSource := range sources {
+		t.Run(name, func(t *testing.T) {
+			source := newSource()
+			want := requireProgressiveRoot(t, newProgressiveRootTestList(progressiveRootTestValues(1024)...))
+
+			cpy := source.ShallowCopy()
+			require.Equal(t, want, requireProgressiveRoot(t, cpy))
+			var got [32]byte
+			var err error
+			allocs := testing.AllocsPerRun(100, func() {
+				got, err = cpy.HashSSZProgressive(nil)
+			})
+			require.Zero(t, allocs)
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+
+			copyOfCopy := cpy.ShallowCopy()
+			allocs = testing.AllocsPerRun(100, func() {
+				got, err = copyOfCopy.HashSSZProgressive(nil)
+			})
+			require.Zero(t, allocs)
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+		})
+	}
+}
+
 func TestListSSZProgressiveAndLegacyRootsAreSeparate(t *testing.T) {
 	values := []uint64{1, 2, 3}
 	reference := newProgressiveRootTestList(values...)
