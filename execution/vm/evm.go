@@ -286,6 +286,12 @@ func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs *state.IntraBlockState) {
 }
 
 func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state.IntraBlockState, vmConfig Config, chainRules *chain.Rules) {
+	evm.ResetForSystemCall(blockCtx, txCtx, ibs, vmConfig, chainRules)
+	evm.abort.Store(false)
+}
+
+// ResetForSystemCall resets the EVM state without clearing cancellation.
+func (evm *EVM) ResetForSystemCall(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state.IntraBlockState, vmConfig Config, chainRules *chain.Rules) {
 	evm.Context = blockCtx
 	evm.TxContext = txCtx
 	evm.intraBlockState = ibs
@@ -296,9 +302,6 @@ func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtype
 	evm.returnData = nil
 	evm.jt = jumpTable(chainRules, vmConfig)
 	evm.precompiles = Precompiles(chainRules)
-
-	// ensure the evm is reset to be used again
-	evm.abort.Store(false)
 }
 
 // Cancel cancels any running EVM operation. This may be called concurrently and

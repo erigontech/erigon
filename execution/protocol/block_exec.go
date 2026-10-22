@@ -206,8 +206,7 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 	return sysCallContract(nil, contract, data, chainConfig, ibs, blockContext, constCall, vmCfg)
 }
 
-// NewSysCallEVM builds an EVM for SysCallContractWithEVM to reuse. Only
-// chainConfig survives a call, so there is nothing else to seed.
+// NewSysCallEVM builds an EVM for SysCallContractWithEVM to reuse.
 func NewSysCallEVM(chainConfig *chain.Config, vmCfg vm.Config) *vm.EVM {
 	return vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vmCfg)
 }
@@ -245,7 +244,7 @@ func sysCallContract(evm *vm.EVM, contract accounts.Address, data []byte, chainC
 	if evm == nil || evm.ChainConfig() != chainConfig {
 		evm = vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 	} else {
-		evm.ResetBetweenBlocks(blockContext, txContext, ibs, vmConfig, blockContext.Rules(chainConfig))
+		evm.ResetForSystemCall(blockContext, txContext, ibs, vmConfig, blockContext.Rules(chainConfig))
 	}
 	mdGas := mdgas.MdGas{
 		Execution: msg.Gas(),
