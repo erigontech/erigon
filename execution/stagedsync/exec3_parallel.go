@@ -2097,7 +2097,7 @@ func (pe *parallelExecutor) balWorker(be *blockExecutor, next *atomic.Int64) {
 			result = w.RunTxTask(tv)
 		}
 		if result.Err == nil {
-			be.selfLoopFlush(tv.version, result, nil)
+			be.balEstimated[i] = be.versionMap.FlushVersionedWrites(result.TxOut, false, "")
 		}
 		if !send(result) {
 			return
@@ -2887,6 +2887,9 @@ type blockExecutor struct {
 	selfLoopDispatched map[int]bool
 	// balStarted: the BAL workers of this block are running. Exec-loop only.
 	balStarted bool
+	// balEstimated[i]: task i's flush left Estimate cells. Set by its worker before
+	// the result send, read by the exec loop after the receive.
+	balEstimated []bool
 }
 
 // readyForDepOrderValidation decides whether tx may be validated out of contiguous
@@ -3286,7 +3289,9 @@ func (be *blockExecutor) commitBALPrefix(pe *parallelExecutor, applyTx kv.Tempor
 		txVersion := txResult.Task.Version()
 		be.validateTasks.setComplete(tx)
 		be.coinbaseFlushedUpTo = tx
-		be.versionMap.MarkWritesComplete(be.blockIO.WriteSet(txVersion.TxIndex))
+		if be.balEstimated[tx] {
+			be.versionMap.MarkWritesComplete(be.blockIO.WriteSet(txVersion.TxIndex))
+		}
 		if r, err := be.finalizeValidatedTx(pe, applyTx, tx, txTask, txResult, txVersion, stateReader); err != nil || r != nil {
 			return r, err
 		}
@@ -3908,6 +3913,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 	if be.versionMap.HasBAL {
 		if !be.balStarted {
 			be.balStarted = true
+			be.balEstimated = make([]bool, len(be.tasks))
 			for be.execTasks.takeNextPending() >= 0 {
 			}
 			pe.runBALWorkers(be)

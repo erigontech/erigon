@@ -1142,9 +1142,10 @@ func flushAllNoOp(e *AddressEntry, writes *WriteSet, addr accounts.Address, flag
 
 // FlushVersionedWrites routes a tx's typed write collections into the version map. Each
 // cell is positioned by the write's (txIndex, incarnation), so the loop order is irrelevant.
-func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, tracePrefix string) {
+// It reports whether it left an Estimate cell, which MarkWritesComplete must promote.
+func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, tracePrefix string) (estimated bool) {
 	if writes == nil {
-		return
+		return false
 	}
 	flag := flagFor(complete)
 	// Flush per account under that account's lock so all of a tx's writes to one account
@@ -1170,6 +1171,7 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, trac
 				}
 			}
 		}
+		estimated = estimated || !complete
 		e := vm.entryOrCreate(addr)
 		e.mu.Lock()
 		// A lifecycle transition (self-destruct/create/incarnation) on this account this tx
@@ -1222,6 +1224,7 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, trac
 		}
 		e.mu.Unlock()
 	})
+	return estimated
 }
 
 // MarkWritesComplete advances every cell named by writes from Estimate to Done, writing
