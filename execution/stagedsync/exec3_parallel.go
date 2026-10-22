@@ -768,12 +768,19 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						storedBAL = bytes.Clone(storedBAL)
 					}
 					balDone := make(chan struct{})
-					h, txIO := lastHeader, applyResult.TxIO
+					h, txIO, created := lastHeader, applyResult.TxIO, applyResult.computedBAL
 					go func() {
 						defer close(balDone)
-						if balErr == nil {
-							computedBAL, balErr = bal.Process(storedBAL, h, txIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
+						if balErr != nil {
+							return
 						}
+						var computed types.BlockAccessList
+						if created != nil {
+							computed = <-created
+						} else if (isAmsterdam || pe.cfg.experimentalBAL) && h != nil {
+							computed = bal.Create(applyResult.BlockNum, txIO, pe.cfg.dirs.DataDir, pe.logger)
+						}
+						computedBAL, balErr = bal.Process(storedBAL, h, computed, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
 					}()
 
 					// StartChange + NotifyAccumulator both run in the apply goroutine to
@@ -1713,6 +1720,9 @@ type blockResult struct {
 	Exhausted        *ErrLoopExhausted
 	Header           *types.Header      // for accumulator.StartChange in apply loop
 	Txs              types.Transactions // for accumulator.StartChange in apply loop
+	// computedBAL delivers bal.Create of TxIO, started when the block's execution
+	// ends so it overlaps with the apply loop's fold backlog; nil when not started.
+	computedBAL chan types.BlockAccessList
 
 	// Exec window for newPayload wall attribution; the calculator pairs these with
 	// its own commit-window timestamps to measure exec/commit overlap.
@@ -3896,6 +3906,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		// drains them to sd.mem; dropped on commit.
 		pe.prevBlocks.PushHead(be.blockNum, txTask.Version().TxNum, be.versionMap)
 
+		var computedBAL chan types.BlockAccessList
+		if header != nil && (pe.cfg.chainConfig.IsAmsterdam(header.Time) || pe.cfg.experimentalBAL) {
+			computedBAL = make(chan types.BlockAccessList, 1)
+			go func(blockNum uint64, txIO *state.VersionedIO) {
+				computedBAL <- bal.Create(blockNum, txIO, pe.cfg.dirs.DataDir, pe.logger)
+			}(be.blockNum, be.blockIO)
+		}
+
 		be.result = &blockResult{
 			BlockNum:         be.blockNum,
 			BlockTime:        txTask.BlockTime(),
@@ -3916,6 +3934,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			Exhausted:        be.exhausted,
 			Header:           header,
 			Txs:              txs,
+			computedBAL:      computedBAL,
 			execStartedAt:    be.execStarted,
 			execEndedAt:      time.Now(),
 		}

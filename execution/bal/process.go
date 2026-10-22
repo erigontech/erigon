@@ -54,12 +54,12 @@ func writeBALToFile(bal types.BlockAccessList, dataDir string, name string, logg
 	}
 }
 
-// Process derives the block's access list from the executed VersionedIO and,
-// once Amsterdam is active, cross-checks it against the header commitment. It
+// Process validates the block's access list computed by Create and, once
+// Amsterdam is active, cross-checks it against the header commitment. It
 // returns the computed BAL so callers (e.g. the pre-Amsterdam experimental
 // path, where the header carries no BAL hash) can capture it. blockBalBytes is
 // the stored BAL sidecar, nil when absent.
-func Process(blockBalBytes []byte, h *types.Header, vio *state.VersionedIO, isEIP7928 bool, experimental bool, dataDir string, logger log.Logger) (types.BlockAccessList, error) {
+func Process(blockBalBytes []byte, h *types.Header, computedBlockBal types.BlockAccessList, isEIP7928 bool, experimental bool, dataDir string, logger log.Logger) (types.BlockAccessList, error) {
 	if !isEIP7928 && !experimental {
 		return nil, nil
 	}
@@ -68,7 +68,6 @@ func Process(blockBalBytes []byte, h *types.Header, vio *state.VersionedIO, isEI
 	}
 	blockNum := h.Number.Uint64()
 	blockHash := h.Hash()
-	computedBlockBal := Create(blockNum, vio, dataDir, logger)
 	err := computedBlockBal.Validate()
 	if err != nil {
 		return nil, fmt.Errorf("block %d: invalid computed block access list: %w", blockNum, err)
