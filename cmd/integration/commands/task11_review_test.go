@@ -27,17 +27,17 @@ import (
 
 func TestPBinReviewConvertOracleRejectsSerialFallback(t *testing.T) {
 	if os.Getenv("ERIGON_REVIEW_SERIAL_ORACLE") == "1" {
-		require.Equal(t, 1, dbg.TipTrieWarmupers)
+		require.Equal(t, 1, dbg.PBTWorkers)
 		TestConvertPBTWorkersMatchSequentialFiles(t)
 		return
 	}
 	executable, err := os.Executable()
 	require.NoError(t, err)
 	cmd := exec.CommandContext(t.Context(), executable, "-test.run=^TestPBinReviewConvertOracleRejectsSerialFallback$", "-test.count=1")
-	cmd.Env = append(os.Environ(), "ERIGON_REVIEW_SERIAL_ORACLE=1", "TIP_TRIE_WARMUPERS=1")
+	cmd.Env = append(os.Environ(), "ERIGON_REVIEW_SERIAL_ORACLE=1", "PBT_WORKERS=1")
 	output, err := cmd.CombinedOutput()
 	require.NotContains(t, string(output), "panic:")
 	if err == nil {
-		t.Fatalf("convert byte oracle accepted serial fallback: TIP_TRIE_WARMUPERS=1, child exit=0")
+		t.Fatalf("convert byte oracle accepted serial fallback: PBT_WORKERS=1, child exit=0")
 	}
 }

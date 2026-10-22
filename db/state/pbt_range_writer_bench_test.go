@@ -82,11 +82,11 @@ func BenchmarkPBinVerifyWorkers(b *testing.B) {
 	_, err := run.write(b.Context(), pbinRangeWriterBenchLeaves(75_000))
 	require.NoError(b, err)
 	run.tx.Rollback()
-	workers := dbg.TipTrieWarmupers
-	b.Cleanup(func() { dbg.TipTrieWarmupers = workers })
+	workers := dbg.PBTWorkers
+	b.Cleanup(func() { dbg.PBTWorkers = workers })
 	for _, workers := range []int{1, 8} {
 		b.Run(fmt.Sprintf("workers=%d", workers), func(b *testing.B) {
-			dbg.TipTrieWarmupers = workers
+			dbg.PBTWorkers = workers
 			for b.Loop() {
 				tx, err := run.db.BeginTemporalRo(b.Context()) //nolint:gocritic
 				require.NoError(b, err)

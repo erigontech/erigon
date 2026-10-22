@@ -35,9 +35,9 @@ import (
 
 func TestPBinReviewMDBXRowsAreNotAbsent(t *testing.T) {
 	selectPBinConvertHash(t)
-	workers := dbg.TipTrieWarmupers
-	t.Cleanup(func() { dbg.TipTrieWarmupers = workers })
-	dbg.TipTrieWarmupers = 4
+	workers := dbg.PBTWorkers
+	t.Cleanup(func() { dbg.PBTWorkers = workers })
+	dbg.PBTWorkers = 4
 	db, agg := temporal.Open(t, 8)
 	writePBinConvertState(t, db)
 	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, unboundedFinalityCtx, false))

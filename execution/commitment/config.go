@@ -16,7 +16,7 @@ type TrieConfig struct {
 	CsvMetricsFilePrefix   string // empty falls back to the env var
 
 	MemoizationOff bool
-	// 0 = use dbg.TipTrieWarmupers (env TIP_TRIE_WARMUPERS)
+	// 0 = use dbg.TipTrieWarmupers (env TIP_TRIE_WARMUPERS), or dbg.PBTWorkers (env PBT_WORKERS) for bin
 	WarmupNumWorkers int
 }
 
@@ -33,4 +33,11 @@ func (c TrieConfig) WarmupNumWorkersOrDefault() int {
 		return c.WarmupNumWorkers
 	}
 	return dbg.TipTrieWarmupers
+}
+
+func (c TrieConfig) PBinWorkersOrDefault() int {
+	if c.WarmupNumWorkers != 0 {
+		return c.WarmupNumWorkers
+	}
+	return dbg.PBTWorkers
 }

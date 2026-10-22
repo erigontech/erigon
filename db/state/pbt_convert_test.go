@@ -321,9 +321,9 @@ func (tx *pbinVerifyWorkerTx) Rollback() {
 
 func verifyPBinDomainWith(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, workers int, writer bool) (error, int32) {
 	t.Helper()
-	previous := dbg.TipTrieWarmupers
-	dbg.TipTrieWarmupers = workers
-	defer func() { dbg.TipTrieWarmupers = previous }()
+	previous := dbg.PBTWorkers
+	dbg.PBTWorkers = workers
+	defer func() { dbg.PBTWorkers = previous }()
 	var tx kv.TemporalTx
 	var err error
 	if writer {

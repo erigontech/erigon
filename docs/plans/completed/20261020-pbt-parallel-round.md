@@ -433,7 +433,7 @@ flowchart LR
       - grain → 1024 fan-out: Reexec +5.5%, Tip +9.5% (grain wins both); the fan-out schedule was removed, the
         test-only switch keeps `old` and `grain`
 - [x] try the worker default: half the CPUs (today) against all CPUs, and storage oversubscription like v3's ×4. Land a
-      knob only on an `ab-verdict` win; record null results here. Measured; default unchanged pending owner. Grain
+      knob only on an `ab-verdict` win; record null results here. Measured. The owner set the PBT default to 16 (`PBT_WORKERS`); the hex warmup keeps `TIP_TRIE_WARMUPERS`. Grain
       w=8 → w=16 (same run): Reexec −19.9%, Tip −14.7% (w=16 wins both). The default comes from
       `TIP_TRIE_WARMUPERS`, which also drives the hex warmup, so the owner decides. Storage oversubscription was not
       tried

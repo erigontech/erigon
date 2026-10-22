@@ -172,6 +172,7 @@ var (
 	RpcDropResponse  = EnvBool("RPC_DROP_RESPONSE", false)
 	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", estimate.HalfCPUs())
 	TrieBALWarmupers = EnvInt("TRIE_BAL_WARMUPERS", balCommitmentWarmupWorkersDefault(runtime.GOMAXPROCS(-1)))
+	PBTWorkers       = EnvInt("PBT_WORKERS", 16)
 
 	PerfProfiles = EnvBool("PERF_PROFILES", false)
 )

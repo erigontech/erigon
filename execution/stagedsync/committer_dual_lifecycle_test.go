@@ -74,9 +74,9 @@ func TestDualCalculatorUsesHexCollectorWithBinarySelected(t *testing.T) {
 }
 
 func TestBinComputeCommitmentUsesProductionWorkerFactory(t *testing.T) {
-	workers := dbg.TipTrieWarmupers
-	dbg.TipTrieWarmupers = 8
-	t.Cleanup(func() { dbg.TipTrieWarmupers = workers })
+	workers := dbg.PBTWorkers
+	dbg.PBTWorkers = 8
+	t.Cleanup(func() { dbg.PBTWorkers = workers })
 	db, tx, doms := dualCalculatorTest(t)
 	cc, err := newCommitmentCalculator(t.Context(), t.Context(), doms, db, &chain.Config{}, "prefetch", log.New(), false, math.MaxUint64, nil, nil, nil)
 	require.NoError(t, err)

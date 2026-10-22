@@ -167,7 +167,7 @@ func VerifyPBinDomainRoot(ctx context.Context, tx kv.TemporalTx, aggregator *Agg
 	}
 	factory, release := commitmentCtx.VerificationContextFactory(tx)
 	defer release()
-	if verifyErr := verifier.VerifyContext(ctx, cfg.WarmupNumWorkersOrDefault(), factory); verifyErr != nil {
+	if verifyErr := verifier.VerifyContext(ctx, cfg.PBinWorkersOrDefault(), factory); verifyErr != nil {
 		return common.Hash{}, verifyErr
 	}
 	root, err := trie.RootHash()
