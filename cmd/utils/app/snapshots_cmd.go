@@ -320,6 +320,7 @@ var snapshotCommand = cli.Command{
 			Flags: []cli.Flag{
 				&utils.DataDirFlag,
 				&dryRunFlag,
+				&keepLocalSnapshotsFlag,
 				&removeLocalFlag,
 				&allowMixedStateFlag,
 				&PreverifiedFlag,
