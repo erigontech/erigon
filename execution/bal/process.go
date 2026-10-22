@@ -60,27 +60,15 @@ func Process(h *types.Header, blockBal types.BlockAccessList, vio *state.Version
 	if h == nil {
 		return nil
 	}
-	computedBlockBal := Create(h.Number.Uint64(), vio, dataDir, logger)
-	if !isEIP7928 {
-		return validateComputed(h.Number.Uint64(), computedBlockBal)
-	}
-	return Validate(h, blockBal, computedBlockBal, dataDir, logger)
-}
-
-func validateComputed(blockNum uint64, computedBlockBal types.BlockAccessList) error {
-	if err := computedBlockBal.Validate(); err != nil {
-		return fmt.Errorf("block %d: invalid computed block access list: %w", blockNum, err)
-	}
-	return nil
-}
-
-// Validate checks a block access list computed by executing the block against
-// the EIP-7928 commitment in the block's header.
-func Validate(h *types.Header, blockBal types.BlockAccessList, computedBlockBal types.BlockAccessList, dataDir string, logger log.Logger) error {
 	blockNum := h.Number.Uint64()
 	blockHash := h.Hash()
-	if err := validateComputed(blockNum, computedBlockBal); err != nil {
-		return err
+	computedBlockBal := Create(blockNum, vio, dataDir, logger)
+	err := computedBlockBal.Validate()
+	if err != nil {
+		return fmt.Errorf("block %d: invalid computed block access list: %w", blockNum, err)
+	}
+	if !isEIP7928 {
+		return nil
 	}
 	// EIP-7928 size bound is only consensus-binding once Amsterdam activates.
 	if err := computedBlockBal.ValidateMaxItems(h.GasLimit); err != nil {

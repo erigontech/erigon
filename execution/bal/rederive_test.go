@@ -48,6 +48,9 @@ func (r *rederiveTestReader) ReadAccountStorage(accounts.Address, accounts.Stora
 	return uint256.Int{}, false, r.storageErr
 }
 
+// noHeader is a header lookup that finds nothing.
+func noHeader(common.Hash, uint64) (*types.Header, error) { return nil, nil }
+
 // rederiveCall re-derives a block whose only transaction calls a contract
 // running code.
 func rederiveCall(t *testing.T, code []byte, storageErr error, getHeader GetHeaderFunc) error {
@@ -91,7 +94,7 @@ func rederiveCall(t *testing.T, code []byte, storageErr error, getHeader GetHead
 func TestRederiveBlockAccessListReportsStateReadError(t *testing.T) {
 	t.Parallel()
 	readErr := errors.New("storage read failed")
-	err := rederiveCall(t, []byte{byte(vm.PUSH1), 0, byte(vm.SLOAD), byte(vm.STOP)}, readErr, nil)
+	err := rederiveCall(t, []byte{byte(vm.PUSH1), 0, byte(vm.SLOAD), byte(vm.STOP)}, readErr, noHeader)
 	require.ErrorIs(t, err, readErr)
 	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 }
@@ -105,5 +108,15 @@ func TestRederiveBlockAccessListReportsHeaderLookupError(t *testing.T) {
 	getHeader := func(common.Hash, uint64) (*types.Header, error) { return nil, lookupErr }
 	err := rederiveCall(t, []byte{byte(vm.PUSH1), 1, byte(vm.BLOCKHASH), byte(vm.STOP)}, nil, getHeader)
 	require.ErrorIs(t, err, lookupErr)
+	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
+}
+
+// TestRederiveBlockAccessListReportsMissingHeader pins that an ancestor header
+// lookup that finds nothing is reported as the node's failure: BLOCKHASH would
+// otherwise read a zero hash.
+func TestRederiveBlockAccessListReportsMissingHeader(t *testing.T) {
+	t.Parallel()
+	err := rederiveCall(t, []byte{byte(vm.PUSH1), 1, byte(vm.BLOCKHASH), byte(vm.STOP)}, nil, noHeader)
+	require.ErrorContains(t, err, "not found")
 	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 }

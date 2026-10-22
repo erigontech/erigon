@@ -3443,12 +3443,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 			if pe.cfg.chainConfig.IsAmsterdam(header.Time) {
 				err := state.RequireStateHistory(applyTx.Debug(), blockStartTxNum, be.tasks[0].Version().TxNum)
-				var computedBal types.BlockAccessList
+				var vio *state.VersionedIO
 				if err == nil {
-					computedBal, err = bal.RederiveFromHistory(ctx, pe.cfg.chainConfig, pe.cfg.engine, pe.cfg.blockReader, applyTx, be.block, blockStartTxNum, pe.logger)
+					vio, err = bal.RederiveFromHistory(ctx, pe.cfg.chainConfig, pe.cfg.engine, pe.cfg.blockReader, applyTx, be.block, blockStartTxNum, pe.logger)
 				}
 				if err == nil {
-					err = bal.Validate(header, be.block.BlockAccessList(), computedBal, pe.cfg.dirs.DataDir, pe.logger)
+					err = bal.Process(header, be.block.BlockAccessList(), vio, true, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
 				}
 				if errors.Is(err, rules.ErrInvalidBlock) {
 					return be.invalidBlockResult(fmt.Errorf("block %d resumed mid-block: %w", be.number(), err)), nil

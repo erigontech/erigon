@@ -146,10 +146,11 @@ func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Co
 	if block == nil {
 		return nil, nil
 	}
-	bal, err := RederiveFromHistory(ctx, cfg, g.engine, g.blockReader, tx, block, blockStartTxNum, g.logger)
+	vio, err := RederiveFromHistory(ctx, cfg, g.engine, g.blockReader, tx, block, blockStartTxNum, g.logger)
 	if err != nil {
 		return nil, err
 	}
+	bal := vio.AsBlockAccessList()
 	computedHash := bal.Hash()
 	if computedHash != *header.BlockAccessListHash {
 		// A canonical block whose replay diverges from its commitment is a
@@ -183,9 +184,10 @@ func (g *Regenerator) historyStartTxNum(ctx context.Context, tx kv.TemporalTx, b
 	return minTxNum, nil
 }
 
-// RederiveFromHistory re-derives the access list of block by replaying it on
-// the state history at blockStartTxNum, the txNum of its init system call.
-func RederiveFromHistory(ctx context.Context, cfg *chain.Config, engine rules.Engine, blockReader dbservices.FullBlockReader, tx kv.TemporalTx, block *types.Block, blockStartTxNum uint64, logger log.Logger) (types.BlockAccessList, error) {
+// RederiveFromHistory replays block on the state history at blockStartTxNum,
+// the txNum of its init system call, and returns the I/O its access list is
+// built from.
+func RederiveFromHistory(ctx context.Context, cfg *chain.Config, engine rules.Engine, blockReader dbservices.FullBlockReader, tx kv.TemporalTx, block *types.Block, blockStartTxNum uint64, logger log.Logger) (*state.VersionedIO, error) {
 	ibs := state.New(state.NewHistoryReaderV3(tx, blockStartTxNum))
 	defer ibs.Close()
 	ibs.SetVersionMap(state.NewVersionMap(nil))
