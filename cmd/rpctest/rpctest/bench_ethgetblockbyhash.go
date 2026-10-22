@@ -26,7 +26,7 @@ import (
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 //
-//			    false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
+//			    false value - to generate the pattern files (vegeta_*.txt and <method>.jsonl), it's faster
 //	                 recordFileName stores all eth_call returned wite success
 //	                 errorFileName stores information when erigon and geth doesn't return same data
 func BenchEthGetBlockByHash(erigonURL, gethURL string, needCompare, latest bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) (err error) {
@@ -44,7 +44,7 @@ func BenchEthGetBlockByHash(erigonURL, gethURL string, needCompare, latest bool,
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"eth_getBlockByHash"}, resultsCh)
+		go writePattern(true, []string{"eth_getBlockByHash"}, resultsCh)
 	}
 	reqGen := &RequestGenerator{}
 

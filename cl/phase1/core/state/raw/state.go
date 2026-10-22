@@ -112,7 +112,7 @@ type BeaconState struct {
 	beaconConfig *clparams.BeaconChainConfig
 	events       Events
 
-	mu sync.Mutex
+	mu sync.RWMutex
 }
 
 func New(cfg *clparams.BeaconChainConfig) *BeaconState {

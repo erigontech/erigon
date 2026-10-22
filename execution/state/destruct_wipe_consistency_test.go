@@ -6,6 +6,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -34,7 +35,7 @@ func TestDestructWipe_WipedStorageReadRecorded(t *testing.T) {
 	io.RecordReads(Version{TxIndex: 1}, reads)
 	bal := io.AsBlockAccessList()
 	require.Len(t, bal, 1)
-	require.Equal(t, []accounts.StorageKey{key}, bal[0].StorageReads, "slot must appear in BAL storage_reads")
+	require.Equal(t, []common.Hash{key.Value()}, bal[0].StorageReads, "slot must appear in BAL storage_reads")
 }
 
 // versionedStateReader must be revival-aware: a slot wiped by a destruct that a

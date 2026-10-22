@@ -479,10 +479,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		if needsVersionMap {
 			versionMap = state.NewVersionMap(nil)
 			ibs.SetVersionMap(versionMap)
-			// Generation must match the parallel executor's cache-free path: the
-			// stateObject cache lets a reused IBS serve stale account state across
-			// txs (e.g. a revived account's code hash), producing a header the
-			// executor's noMaterialize run then disagrees with.
 		}
 
 		b := &BlockGen{
@@ -539,6 +535,11 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			if ibs.IsVersioned() && b.blockIO != nil {
 				initVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: -1}
 				writes := ibs.FinalizedWrites(b.blockRules())
+				// FinalizedWrites composes pre-tx state for EIP-161 and can hit a
+				// base-read failure; surface it before ResetVersionedIO clears it.
+				if err := ibs.StateReadError(); err != nil {
+					return nil, nil, err
+				}
 				b.blockIO.RecordReads(initVersion, ibs.VersionedReads())
 				b.blockIO.RecordWrites(initVersion, writes)
 				if b.versionMap != nil {
@@ -578,6 +579,11 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			if ibs.IsVersioned() && b.blockIO != nil {
 				finalizeVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: len(b.txs)}
 				writes := ibs.FinalizedWrites(b.blockRules())
+				// FinalizedWrites composes pre-tx state for EIP-161 and can hit a
+				// base-read failure; surface it before ResetVersionedIO clears it.
+				if err := ibs.StateReadError(); err != nil {
+					return nil, nil, err
+				}
 				b.blockIO.RecordReads(finalizeVersion, ibs.VersionedReads())
 				b.blockIO.RecordWrites(finalizeVersion, writes)
 				if b.versionMap != nil {

@@ -1957,24 +1957,10 @@ type versionedStateReader struct {
 	reads       ReadSet
 	versionMap  *VersionMap
 	stateReader StateReader
-	// deferReconstruct suppresses the self-destruct-preserve reconstruction so a
-	// net-absent preserved account reads as absent at this layer and the IBS field
-	// path above materializes it instead. Set only for the prev-block base layers
-	// (layerVersionMaps), which sit beneath that field path; a direct whole-account
-	// reader keeps it false and reconstructs. Branch-agnostic: it governs which
-	// layer owns reconstruction, not whether a destruct preserves (the write stamp
-	// decides that).
-	deferReconstruct bool
 }
 
 func NewVersionedStateReader(txIndex int, reads ReadSet, versionMap *VersionMap, stateReader StateReader) *versionedStateReader {
 	return &versionedStateReader{txIndex: txIndex, reads: reads, versionMap: versionMap, stateReader: stateReader}
-}
-
-// newPrevBlockLayerReader builds a prev-block base-layer reader that defers
-// self-destruct-preserve reconstruction to the IBS field path above it.
-func newPrevBlockLayerReader(txIndex int, versionMap *VersionMap, stateReader StateReader) *versionedStateReader {
-	return &versionedStateReader{txIndex: txIndex, versionMap: versionMap, stateReader: stateReader, deferReconstruct: true}
 }
 
 func (vr *versionedStateReader) SetTrace(trace bool, tracePrefix string) {
@@ -2009,12 +1995,10 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 			// delete/preserve decision rides the write, so no fork flag is needed. A
 			// net-absent account with a non-zero kept balance surfaces (an empty one is
 			// EIP-161-removed).
-			if !vr.deferReconstruct {
-				if _, res, ok := vr.versionMap.ReadBalance(address, vr.txIndex); ok && res.ValStatus() != ValueDeleted {
-					var synth accounts.Account
-					if updated := vr.applyVersionedUpdates(address, synth); !updated.Balance.IsZero() {
-						return &updated, nil
-					}
+			if _, res, ok := vr.versionMap.ReadBalance(address, vr.txIndex); ok && res.ValStatus() != ValueDeleted {
+				var synth accounts.Account
+				if updated := vr.applyVersionedUpdates(address, synth); !updated.Balance.IsZero() {
+					return &updated, nil
 				}
 			}
 			return nil, nil
@@ -2893,12 +2877,19 @@ type accountState struct {
 	initialBalanceValue *uint256.Int                        // tracks pre-block balance for net-zero detection
 	storageReadValues   map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
 	slotWrites          map[accounts.StorageKey]int         // slot -> index into changes.StorageChanges, built past slotIndexMin
-	slotReads           map[accounts.StorageKey]int         // slot -> index into changes.StorageReads, built with slotWrites
+	storageReads        []accounts.StorageKey               // copied into changes.StorageReads by finalize
+	slotReads           map[accounts.StorageKey]int         // slot -> index into storageReads, built with slotWrites
 	initialCodeEmpty    bool                                // pre-block code was empty (created contract or empty-codehash read)
 }
 
 // check pre- and post-values, add to BAL if different
 func (account *accountState) finalize() {
+	if len(account.storageReads) > 0 {
+		account.changes.StorageReads = make([]common.Hash, len(account.storageReads))
+		for i, slot := range account.storageReads {
+			account.changes.StorageReads[i] = slot.Value()
+		}
+	}
 	applyToBalance(account.balance, account.changes, account.initialBalanceValue)
 	applyToNonce(account.nonce, account.changes)
 	applyToCode(account.code, account.changes, account.initialCodeEmpty)
@@ -3097,9 +3088,9 @@ func (account *accountState) updateReadStorage(key accounts.StorageKey, val uint
 		if _, seen := account.slotReads[key]; seen {
 			return
 		}
-		account.slotReads[key] = len(account.changes.StorageReads)
+		account.slotReads[key] = len(account.storageReads)
 	}
-	account.changes.StorageReads = append(account.changes.StorageReads, key)
+	account.storageReads = append(account.storageReads, key)
 }
 
 func (account *accountState) updateReadBalance(val uint256.Int) {
@@ -3175,16 +3166,16 @@ func (account *accountState) addStorageUpdate(at int, slot accounts.StorageKey, 
 		// StorageReads can hold the same slot twice: below the threshold reads are
 		// appended unchecked, and Normalize is what dedups them. The index needs
 		// one entry per slot, so drop the repeats while building it.
-		account.slotReads = make(map[accounts.StorageKey]int, len(ac.StorageReads))
-		deduped := ac.StorageReads[:0]
-		for _, slot := range ac.StorageReads {
+		account.slotReads = make(map[accounts.StorageKey]int, len(account.storageReads))
+		deduped := account.storageReads[:0]
+		for _, slot := range account.storageReads {
 			if _, seen := account.slotReads[slot]; seen {
 				continue
 			}
 			account.slotReads[slot] = len(deduped)
 			deduped = append(deduped, slot)
 		}
-		ac.StorageReads = deduped
+		account.storageReads = deduped
 	}
 }
 
@@ -3192,22 +3183,18 @@ func (account *accountState) addStorageUpdate(at int, slot accounts.StorageKey, 
 // precedence. Past slotIndexMin the position is indexed and the last entry is
 // swapped in; order does not survive Normalize's sort anyway.
 func (account *accountState) removeStorageRead(slot accounts.StorageKey) {
-	ac := account.changes
-	if len(ac.StorageReads) == 0 {
+	reads := account.storageReads
+	if len(reads) == 0 {
 		return
 	}
 	if account.slotReads == nil {
-		out := ac.StorageReads[:0]
-		for _, s := range ac.StorageReads {
+		out := reads[:0]
+		for _, s := range reads {
 			if s != slot {
 				out = append(out, s)
 			}
 		}
-		if len(out) == 0 {
-			ac.StorageReads = nil
-		} else {
-			ac.StorageReads = out
-		}
+		account.storageReads = out
 		return
 	}
 	i, ok := account.slotReads[slot]
@@ -3215,16 +3202,12 @@ func (account *accountState) removeStorageRead(slot accounts.StorageKey) {
 		return
 	}
 	delete(account.slotReads, slot)
-	last := len(ac.StorageReads) - 1
+	last := len(reads) - 1
 	if i != last {
-		ac.StorageReads[i] = ac.StorageReads[last]
-		account.slotReads[ac.StorageReads[i]] = i
+		reads[i] = reads[last]
+		account.slotReads[reads[i]] = i
 	}
-	if last == 0 {
-		ac.StorageReads = nil
-		return
-	}
-	ac.StorageReads = ac.StorageReads[:last]
+	account.storageReads = reads[:last]
 }
 
 type versionedReadSet struct {

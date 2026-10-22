@@ -187,8 +187,8 @@ type IntraBlockState struct {
 	// wakeGen counts resumes from a dep-wait pause. A lower-txIndex writer may
 	// commit a new value while this worker sleeps in waitCommit, so any frame
 	// read cached before the pause can be stale on wake. ReadStamp folds wakeGen
-	// in, so a resume invalidates the vm's frame caches (slot/etc.) on the next
-	// lookup — what makes those caches safe under the dep-wait executor.
+	// in, so a resume invalidates the vm's frame caches on the next lookup — what
+	// makes those caches safe under the dep-wait executor.
 	wakeGen         uint64
 	versionedWrites WriteSet
 	versionedReads  ReadSet
@@ -310,11 +310,7 @@ func (ibs *IntraBlockState) CodeReadCount() int64 {
 	return ibs.codeReadCount
 }
 
-// SetVersionMap binds the IBS to a versionMap and, by that binding, to the
-// cache-free noMaterialize path. noMaterialize is derived from versionMap presence
-// and has no external setter, so the unsafe combination — a versionMap present but
-// the stateObject-materialize path still on — cannot be constructed: versioned
-// execution always runs noMaterialize.
+// SetVersionMap binds the IBS to a versionMap; noMaterialize follows versionMap presence.
 func (ibs *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
 	noMaterialize := versionMap != nil
 	if dbg.AssertEnabled && noMaterialize != ibs.noMaterialize && !ibs.stateObjectArena.empty() {
@@ -2458,6 +2454,7 @@ func EIP161EmptyRemoval(eip161Enabled, isAura bool, addr accounts.Address) bool 
 }
 
 func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, addr accounts.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks, useBlockOrigin bool, eip8246 bool) error {
+	stateObject.db.journal.epoch++ // storage moves to committed, deletions apply — bump the slot-cache stamp
 	emptyRemoval := EIP161EmptyRemoval(eip161Enabled, isAura, addr) && stateObject.data.Empty()
 	// EIP-8246: a self-destructed account that still holds a balance is reset to
 	// a balance-only account (nonce 0, empty code, empty storage) not deleted.

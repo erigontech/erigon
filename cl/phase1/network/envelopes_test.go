@@ -453,7 +453,6 @@ func newMixedEnvelopeResponseClient(t *testing.T) (*rpc.BeaconRpcP2P, common.Has
 		&envelopeResponseSentinel{response: response.Bytes()},
 		&cfg,
 		clock,
-		nil,
 	)
 	return client, requestedRoot, block
 }

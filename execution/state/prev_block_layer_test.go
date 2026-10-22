@@ -107,6 +107,56 @@ func TestLayerVersionMaps_EmptyIsBase(t *testing.T) {
 	assert.Equal(t, uint64(7), acc.Balance.Uint64())
 }
 
+// preservedSelfdestructMap builds the map a block leaves behind when a
+// balance-preserving SELFDESTRUCT (EIP-8246) keeps a non-zero balance: the
+// account is net-absent (destroyed, not revived above the destruct) yet its
+// balance cell survives non-deleted. The balance write shares the destruct tx,
+// so it is not a strictly-higher revival and the account stays LifecycleAbsent.
+func preservedSelfdestructMap(addr accounts.Address, bal uint64) *VersionMap {
+	const sdTx = 5
+	m := NewVersionMap(nil)
+	m.WriteSelfDestruct(addr, Version{TxIndex: sdTx}, true, true)
+	m.WriteBalance(addr, Version{TxIndex: sdTx}, *uint256.NewInt(bal), true)
+	m.SealUpTo(sdTx)
+	return m
+}
+
+func TestLayerVersionMaps_ReconstructsPreservedSelfdestruct(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(6)
+	base := &fakeBaseReader{} // the preserved account lives only in the prev block's map
+	prevBlock := preservedSelfdestructMap(addr, 500)
+
+	r := layerVersionMaps(base, []*VersionMap{prevBlock})
+	acc, err := r.ReadAccountData(addr)
+	require.NoError(t, err)
+	require.NotNil(t, acc, "prev-block layer must reconstruct the balance-only EOA itself")
+	assert.Equal(t, uint64(500), acc.Balance.Uint64())
+}
+
+// TestPrevBlockLayer_NextBlockSeesPreservedBalance is the two-block regression:
+// block N preserves a self-destructed account's balance (EIP-8246) and seals,
+// then block N+1 — still in the uncommitted pipeline window — reads it through
+// the prev-block layer. The next block must see the account existing with the
+// preserved balance, not absent.
+func TestPrevBlockLayer_NextBlockSeesPreservedBalance(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(7)
+	prevBlock := preservedSelfdestructMap(addr, 500)
+	base := layerVersionMaps(&fakeBaseReader{}, []*VersionMap{prevBlock})
+
+	ibs := NewWithVersionMap(base, NewVersionMap(nil))
+	t.Cleanup(ibs.Close)
+	ibs.SetTxContext(1, 0)
+
+	bal, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(500), bal.Uint64(), "next block must see the preserved balance")
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	assert.True(t, exists, "preserved account must exist for the next block")
+}
+
 func TestLayerVersionMaps_Storage(t *testing.T) {
 	t.Parallel()
 	addr := getAddress(5)
