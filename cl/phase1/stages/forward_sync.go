@@ -345,7 +345,7 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 
 	if downloader.GetHighestProcessedSlot() < chainTipSlot {
 		cfg.forwardSyncTipRoot = cfg.forkChoice.HighestSeenRoot()
-		cfg.forwardSyncTipSlot = chainTipSlot
+		cfg.forwardSyncTipSlot = cfg.ethClock.GetCurrentSlot()
 	}
 	if shouldInsert && ctx.Err() == nil {
 		if err := cfg.blockCollector.Flush(ctx); err != nil {
