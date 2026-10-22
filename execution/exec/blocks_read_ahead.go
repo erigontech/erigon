@@ -38,7 +38,9 @@ type BlockReadAheader struct {
 	// The single permit belongs either to one warmup or to the code suspending
 	// warmup across an unwind. Warmups never wait for it: read-ahead is
 	// best-effort, and queued work would be stale by the time an unwind ends.
-	warmupGate *semaphore.Weighted
+	warmupGate   *semaphore.Weighted
+	warmupMu     sync.Mutex
+	cancelWarmup context.CancelFunc
 
 	// stateCache is the process-global state cache that SharedDomains.GetLatest
 	// consults on the EVM hot path. When set, warmBody routes its prefetches
@@ -153,6 +155,10 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, t
 	if !bra.warmupGate.TryAcquire(1) {
 		return
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	bra.warmupMu.Lock()
+	bra.cancelWarmup = cancel
+	bra.warmupMu.Unlock()
 	var bal types.BlockAccessList
 	if header.HasNonEmptyBAL() {
 		balSidecar, ok := bra.bals.Get(blockHash)
@@ -173,8 +179,22 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, t
 	}
 	go func() {
 		defer bra.warmupGate.Release(1)
+		defer func() {
+			bra.warmupMu.Lock()
+			bra.cancelWarmup = nil
+			bra.warmupMu.Unlock()
+			cancel()
+		}()
 		bra.warmBody(ctx, db, header, body, bal, dbg.ReadAheadWorkers)
 	}()
+}
+
+func (bra *BlockReadAheader) CancelWarmup() {
+	bra.warmupMu.Lock()
+	defer bra.warmupMu.Unlock()
+	if bra.cancelWarmup != nil {
+		bra.cancelWarmup()
+	}
 }
 
 func (bra *BlockReadAheader) startWarmup(warm func()) bool {
@@ -282,7 +302,7 @@ func uniqueTransactionDestinations(txns types.Transactions) map[accounts.Address
 	return destinations
 }
 
-func warmBALStateTask(stateReader *state.ReaderV3, account *types.AccountChanges, task balWarmupTask, codeMode balCodeWarmupMode, txCodeDestinations map[accounts.Address]struct{}) error {
+func warmBALStateTask(ctx context.Context, stateReader *state.ReaderV3, account *types.AccountChanges, task balWarmupTask, codeMode balCodeWarmupMode, txCodeDestinations map[accounts.Address]struct{}) error {
 	address := accounts.InternAddress(account.Address)
 	var accountData *accounts.Account
 	if task.slotFrom == 0 {
@@ -294,6 +314,9 @@ func warmBALStateTask(stateReader *state.ReaderV3, account *types.AccountChanges
 	}
 	storageChanges := uint32(len(account.StorageChanges))
 	for slotIndex := task.slotFrom; slotIndex < task.slotTo; slotIndex++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		var slot accounts.StorageKey
 		if slotIndex < storageChanges {
 			slot = account.StorageChanges[slotIndex].Slot
@@ -391,7 +414,10 @@ func (bra *BlockReadAheader) warmBALState(ctx context.Context, db kv.RoDB, bal t
 				}
 				task := tasks[taskIndex]
 				account := &bal[task.accountIndex]
-				if err := warmBALStateTask(stateReader, account, task, codeMode, txCodeDestinations); err != nil {
+				if err := warmBALStateTask(workerCtx, stateReader, account, task, codeMode, txCodeDestinations); err != nil {
+					if workerCtx.Err() != nil {
+						return workerCtx.Err()
+					}
 					log.Warn("[warmBAL] state task failed", "worker", w, "account", account.Address, "err", err)
 				}
 				tasksProcessed++

@@ -128,6 +128,7 @@ type ExecModuleTester struct {
 	Address              common.Address
 	ForkValidator        *execmodule.ForkValidator
 	ExecModule           *execmodule.ExecModule
+	ReadAheader          *exec.BlockReadAheader
 	BlockBuilder         *builder.Builder
 	StateCache           *execmodule.Cache
 	retirementStart      chan bool
@@ -726,6 +727,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	sealCancel := make(chan struct{})
 
 	readAheader := exec.NewBlockReadAheader()
+	mock.ReadAheader = readAheader
 	blkBuilder := builder.NewBuilder(
 		mock.DB,
 		&cfg.Builder,

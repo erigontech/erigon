@@ -316,10 +316,6 @@ func (s *ReadSet) GetStorage(addr accounts.Address, key accounts.StorageKey) (Ve
 	return tr, ok
 }
 
-func (s ReadSet) Storages() iter.Seq2[accounts.Address, map[accounts.StorageKey]VersionedRead[uint256.Int]] {
-	return maps.All(s.storage)
-}
-
 // getHeader probes the read set for path and returns the type-agnostic
 // header only.  This is the single read-set probe versionedReadCore uses —
 // uniform return type, so the runtime path switch works without the value

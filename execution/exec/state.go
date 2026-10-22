@@ -371,6 +371,8 @@ func (rw *Worker) resetTx(chainTx kv.TemporalTx) error {
 }
 
 func (rw *Worker) Run() (err error) {
+	stopCancel := context.AfterFunc(rw.ctx, rw.evm.Cancel)
+	defer stopCancel()
 	pprof.SetGoroutineLabels(pprof.WithLabels(rw.ctx, pprof.Labels("sub", "exec-worker")))
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -573,6 +575,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 			Err:  err,
 		}
 	}
+	if err := rw.ctx.Err(); err != nil {
+		return &TxResult{Task: txTask, Err: err, Operational: true}
+	}
 
 	// Override GetHash with a per-worker function that uses the worker's
 	// own chainTx. The shared blockTx from executeBlocks is not thread-safe.
@@ -581,6 +586,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 	}
 
 	result := txTask.Execute(rw.evm, rw.engine, rw.genesis, rw.ibs, rw.stateWriter, rw.chainConfig, rw.chain, rw.dirs, true)
+	if err := rw.ctx.Err(); err != nil {
+		return &TxResult{Task: txTask, Err: err, Operational: true}
+	}
 
 	if result.Task == nil {
 		result.Task = txTask

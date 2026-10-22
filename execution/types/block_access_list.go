@@ -1057,67 +1057,6 @@ func (bal BlockAccessList) ValidateMaxItems(blockGasLimit uint64) error {
 	return nil
 }
 
-// DeclaredReadTracker tracks pending BAL storage reads for the gas feasibility check.
-type DeclaredReadTracker struct {
-	pending   map[common.Address]map[common.Hash]struct{}
-	remaining int
-}
-
-func NewDeclaredReadTracker(bal BlockAccessList) *DeclaredReadTracker {
-	t := &DeclaredReadTracker{pending: make(map[common.Address]map[common.Hash]struct{}, len(bal))}
-	for i := range bal {
-		ac := &bal[i]
-		if len(ac.StorageReads) == 0 {
-			continue
-		}
-		slots := make(map[common.Hash]struct{}, len(ac.StorageReads))
-		for _, k := range ac.StorageReads {
-			slots[k.Value()] = struct{}{}
-		}
-		t.pending[ac.Address] = slots
-		t.remaining += len(slots)
-	}
-	return t
-}
-
-func (t *DeclaredReadTracker) ExcludeAddress(addr common.Address) {
-	t.remaining -= len(t.pending[addr])
-	delete(t.pending, addr)
-}
-
-// ObserveRead marks (addr, slot) as observed. First-time observation of a
-// declared storage_read decrements Remaining; reads of undeclared slots or
-// repeats are no-ops.
-func (t *DeclaredReadTracker) ObserveRead(addr common.Address, slot common.Hash) {
-	slots, ok := t.pending[addr]
-	if !ok {
-		return
-	}
-	if _, ok := slots[slot]; !ok {
-		return
-	}
-	delete(slots, slot)
-	if len(slots) == 0 {
-		delete(t.pending, addr)
-	}
-	t.remaining--
-}
-
-// Remaining returns the number of pending storage reads at non-excluded addresses.
-func (t *DeclaredReadTracker) Remaining() int { return t.remaining }
-
-// EarlyRejectCheck applies the EIP-7928 phantom-read budget to remaining execution gas.
-func EarlyRejectCheck(gasRemaining uint64, remainingDeclaredReads int) error {
-	if remainingDeclaredReads <= 0 {
-		return nil
-	}
-	needed := uint64(remainingDeclaredReads) * BalItemCost
-	if gasRemaining < needed {
-		return fmt.Errorf("phantom declared reads: %d × %d = %d gas needed, %d remaining", remainingDeclaredReads, BalItemCost, needed, gasRemaining)
-	}
-	return nil
-}
-
 func (ac *AccountChanges) validate() error {
 	if ac == nil {
 		return errors.New("nil account changes")

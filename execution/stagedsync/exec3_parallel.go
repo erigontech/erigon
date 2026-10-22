@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -34,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/execution/state"
@@ -1133,6 +1131,12 @@ func (pe *parallelExecutor) drainOnCancel(ctx context.Context, applyTx kv.Tempor
 // exit=true means the exec loop should return cleanly — a terminal stop, or an
 // invalid block whose Err the apply loop surfaces.
 func (pe *parallelExecutor) completeBlock(ctx context.Context, blockResult *blockResult, sizeCutPending *bool) (exit bool, err error) {
+	if blockResult.Err != nil {
+		pe.cancelWorkers()
+		if pe.cfg.readAheader != nil {
+			pe.cfg.readAheader.CancelWarmup()
+		}
+	}
 	blockNum := blockResult.Block.NumberU64()
 	blockHash := blockResult.Block.Hash()
 	pe.RLock()
@@ -1315,10 +1319,6 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	executor, ok := pe.blockExecutors[blockNum]
 	if !ok {
 		executor = newBlockExec(execRequest.block, execRequest.gasPool, execRequest.accessList, execRequest.applyResults, execRequest.commitResults, execRequest.profile, execRequest.exhausted)
-		// System calls do not use block gas; their reads are checked against the final BAL.
-		for _, addr := range pe.cfg.chainConfig.SystemContracts(execRequest.block.Time()) {
-			executor.declaredReadTracker.ExcludeAddress(addr.Value())
-		}
 	}
 
 	for i, txTask := range execRequest.tasks {
@@ -2599,9 +2599,6 @@ type blockExecutor struct {
 	blobGasUsed           uint64
 	gasPool               *protocol.GasPool
 
-	declaredReadTracker *types.DeclaredReadTracker
-	checkedRequestCode  bool
-
 	execFailed, execAborted []int
 
 	// Stores the execution statistics for the last incarnation of each task
@@ -2657,52 +2654,23 @@ func (be *blockExecutor) deliver(ctx context.Context, ch chan<- applyResult, r a
 
 func newBlockExec(block *types.Block, gasPool *protocol.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, commitResults chan applyResult, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
 	return &blockExecutor{
-		block:               block,
-		begin:               time.Now(),
-		stats:               map[int]ExecutionStat{},
-		finalizedResults:    map[int]*execResult{},
-		feeMergeTemp:        map[int]feeMerge{},
-		settledInput:        map[int]bool{},
-		estimateDeps:        map[int][]int{},
-		preValidated:        map[int]bool{},
-		blockIO:             &state.VersionedIO{},
-		versionMap:          state.NewVersionMap(accessList),
-		profile:             profile,
-		applyResults:        applyResults,
-		commitResults:       commitResults,
-		gasPool:             gasPool,
-		blockStateCache:     state.NewBlockStateCache(),
-		exhausted:           exhausted,
-		declaredReadTracker: types.NewDeclaredReadTracker(accessList),
+		block:            block,
+		begin:            time.Now(),
+		stats:            map[int]ExecutionStat{},
+		finalizedResults: map[int]*execResult{},
+		feeMergeTemp:     map[int]feeMerge{},
+		settledInput:     map[int]bool{},
+		estimateDeps:     map[int][]int{},
+		preValidated:     map[int]bool{},
+		blockIO:          &state.VersionedIO{},
+		versionMap:       state.NewVersionMap(accessList),
+		profile:          profile,
+		applyResults:     applyResults,
+		commitResults:    commitResults,
+		gasPool:          gasPool,
+		blockStateCache:  state.NewBlockStateCache(),
+		exhausted:        exhausted,
 	}
-}
-
-func (be *blockExecutor) checkDeclaredReadSafety(config *chain.Config, reader state.StateReader) error {
-	be.checkedRequestCode = true
-	if config.Aura != nil || !config.IsAmsterdam(be.block.Time()) {
-		be.declaredReadTracker = nil
-		return nil
-	}
-	for _, contract := range []struct {
-		addr accounts.Address
-		code []byte
-	}{
-		{config.GetWithdrawalRequestContract(), misc.WithdrawalRequestCode},
-		{config.GetConsolidationRequestContract(), misc.ConsolidationRequestCode},
-		{config.GetBuilderDepositContract(), misc.BuilderDepositRequestCode},
-		{config.GetBuilderExitContract(), misc.BuilderExitRequestCode},
-	} {
-		code, err := reader.ReadAccountCode(contract.addr)
-		if err != nil {
-			return err
-		}
-		// Nonstandard system calls may read other accounts without spending block gas.
-		if !bytes.Equal(code, contract.code) {
-			be.declaredReadTracker = nil
-			return nil
-		}
-	}
-	return nil
 }
 
 func (be *blockExecutor) number() uint64 { return be.block.NumberU64() }
@@ -3251,23 +3219,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if err := pe.rs.ApplyStateWrites(ctx, applyTx, be.number(), txTask.Version().TxNum, normWrites,
 					nil, txTask.Rules(), be.blockStateCache); err != nil {
 					return nil, fmt.Errorf("[parallel] apply block writes: %w", err)
-				}
-			}
-
-			if be.declaredReadTracker != nil && be.declaredReadTracker.Remaining() > 0 && !be.checkedRequestCode {
-				if err := be.checkDeclaredReadSafety(pe.cfg.chainConfig, stateReader); err != nil {
-					return nil, fmt.Errorf("check system contract code: %w", err)
-				}
-			}
-			if be.declaredReadTracker != nil && be.declaredReadTracker.Remaining() > 0 {
-				reads := be.blockIO.ReadSet(txVersion.TxIndex)
-				for addr, slots := range reads.Storages() {
-					for slot := range slots {
-						be.declaredReadTracker.ObserveRead(addr.Value(), slot.Value())
-					}
-				}
-				if err := types.EarlyRejectCheck(be.gasPool.ExecutionGasAvailable(), be.declaredReadTracker.Remaining()); err != nil {
-					return be.invalidBlockResult(fmt.Errorf("%w, block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.number(), txVersion.TxIndex, err)), nil
 				}
 			}
 

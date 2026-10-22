@@ -23,15 +23,83 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing/calltracer"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
+
+type loopingTask struct {
+	TxTask
+	started chan struct{}
+}
+
+func (task *loopingTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, _ *calltracer.CallTracer) error {
+	evm.Reset(evmtypes.TxContext{}, ibs)
+	return nil
+}
+
+func (task *loopingTask) Execute(evm *vm.EVM, _ rules.Engine, _ *types.Genesis, _ *state.IntraBlockState,
+	_ state.StateWriter, _ *chain.Config, _ rules.ChainReader, _ datadir.Dirs, _ bool,
+) *TxResult {
+	close(task.started)
+	_, _, _, err := evm.Run(vm.Contract{Code: []byte{byte(vm.JUMPDEST), byte(vm.PUSH1), 0, byte(vm.JUMP)}},
+		mdgas.MdGas{Execution: 1 << 63}, nil, false)
+	return &TxResult{Err: err}
+}
+
+func TestWorkerCancellationStopsRunningEVM(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	in := NewQueueWithRetry(1)
+	defer in.Release()
+	results := NewResultsQueue(1, 1)
+	w := NewWorker(ctx, false, nil, nil, in, nil, chain.AllProtocolChanges, nil, results, nil, datadir.Dirs{}, log.New())
+	defer w.Close()
+	w.SetReader(stubStateReader{})
+	task := &loopingTask{
+		TxTask:  TxTask{TxIndex: -1, Header: &types.Header{Number: *uint256.NewInt(1)}},
+		started: make(chan struct{}),
+	}
+	in.Add(ctx, task)
+	done := make(chan error, 1)
+	go func() { done <- w.Run() }()
+	<-task.started
+	cancel()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		w.evm.Cancel()
+		<-done
+		t.Fatal("worker context cancellation did not interrupt the running EVM")
+	}
+}
+
+func TestCancelledWorkerDoesNotInvalidateBlock(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	w := NewWorker(ctx, false, nil, nil, nil, nil, chain.AllProtocolChanges, nil, nil, nil, datadir.Dirs{}, log.New())
+	defer w.Close()
+	w.SetReader(stubStateReader{})
+	result := w.RunTxTask(&loopingTask{
+		TxTask: TxTask{TxIndex: -1, Header: &types.Header{Number: *uint256.NewInt(1)}},
+	})
+	require.ErrorIs(t, result.Err, context.Canceled)
+	require.True(t, result.Operational, "cancellation is not evidence that a block is invalid")
+}
 
 func TestNewWorkersPoolForegroundReturnsWait(t *testing.T) {
 	in := NewQueueWithRetry(1)

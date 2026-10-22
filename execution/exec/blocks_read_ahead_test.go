@@ -72,6 +72,38 @@ type firstAccountReadErrorTx struct {
 	accountReads int
 }
 
+type cancelOnStorageReadTx struct {
+	kv.TemporalTx
+	cancel context.CancelFunc
+	reads  int
+}
+
+func (tx *cancelOnStorageReadTx) GetLatest(domain kv.Domain, _ []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if domain == kv.StorageDomain {
+		tx.reads++
+		tx.cancel()
+	}
+	return nil, 0, nil
+}
+
+func TestBALWarmupStopsWithinStorageChunk(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	counted := &cancelOnStorageReadTx{TemporalTx: tx, cancel: cancel}
+	bal := types.BlockAccessList{{Address: common.Address{19: 1}, StorageReads: make([]accounts.StorageKey, 64)}}
+	for i := range bal[0].StorageReads {
+		bal[0].StorageReads[i] = accounts.InternKey(common.Hash{31: byte(i)})
+	}
+	tasks, workers := makeBALWarmupPlan(bal, 1)
+	err = NewBlockReadAheader().warmBALState(ctx, &singleTxRoDB{tx: counted}, bal, tasks, balCodeWarmupNone, nil, workers)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, 1, counted.reads, "cancellation must stop before the next storage read")
+}
+
 func (g *countingGetter) GetOne(string, []byte) ([]byte, error) {
 	g.getOneCalls++
 	return nil, nil
@@ -253,7 +285,7 @@ func TestWarmBALStateTaskLoadsSelectedCode(t *testing.T) {
 			}
 			getter := &cachePopulatingGetter{TemporalGetter: source, view: stateCache.View(frontier), stepSize: 16}
 			reader := state.NewReaderV3(getter)
-			require.NoError(t, warmBALStateTask(reader, accountChanges, balWarmupTask{}, test.mode, destinations))
+			require.NoError(t, warmBALStateTask(t.Context(), reader, accountChanges, balWarmupTask{}, test.mode, destinations))
 			require.Equal(t, 1, source.accountReads)
 			require.Equal(t, test.wantCodeReads, source.codeReads)
 		})
@@ -268,7 +300,7 @@ func TestWarmBALStateTaskDoesNotRepeatCodeForLaterChunks(t *testing.T) {
 	address := accounts.InternAddress(common.Address{19: 1})
 	accountChanges := &types.AccountChanges{Address: address.Value(), StorageReads: make([]accounts.StorageKey, 65)}
 	reader := state.NewReaderV3(execctx.NewTemporalTxStateGetter(source))
-	require.NoError(t, warmBALStateTask(reader, accountChanges, balWarmupTask{slotFrom: 64, slotTo: 65}, balCodeWarmupAll, nil))
+	require.NoError(t, warmBALStateTask(t.Context(), reader, accountChanges, balWarmupTask{slotFrom: 64, slotTo: 65}, balCodeWarmupAll, nil))
 	require.Zero(t, source.accountReads)
 	require.Zero(t, source.codeReads)
 }

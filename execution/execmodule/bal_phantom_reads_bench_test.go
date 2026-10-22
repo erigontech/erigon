@@ -1,0 +1,58 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package execmodule_test
+
+import (
+	"fmt"
+	"runtime"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/types"
+)
+
+func BenchmarkBALPhantomReads(b *testing.B) {
+	for _, workers := range []int{1, 4} {
+		for _, workload := range []string{"valid", "reads", "attack"} {
+			b.Run(fmt.Sprintf("workers=%d/%s", workers, workload), func(b *testing.B) {
+				b.ReportAllocs()
+				for range b.N {
+					b.StopTimer()
+					m, block := phantomReadFixture(b, workload, workers, "canonical")
+					status, err := m.InsertBlocks(b.Context(), []*types.Block{block})
+					require.NoError(b, err)
+					require.Equal(b, execmodule.ExecutionStatusSuccess, status)
+					runtime.GC()
+					b.StartTimer()
+					result, err := m.ValidateChain(b.Context(), block.Header())
+					require.NoError(b, err)
+					if workload == "attack" {
+						require.Equal(b, execmodule.ExecutionStatusBadBlock, result.ValidationStatus)
+						require.Regexp(b, "phantom declared reads|block access list mismatch", result.ValidationError)
+					} else {
+						require.Equal(b, execmodule.ExecutionStatusSuccess, result.ValidationStatus, result.ValidationError)
+					}
+					m.ReadAheader.WaitForWarmup(b.Context())
+					b.StopTimer()
+					m.Close()
+				}
+			})
+		}
+	}
+}
