@@ -6,6 +6,7 @@ import (
 	"math"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/spf13/afero"
@@ -327,27 +328,78 @@ func TestComputeForkChoiceFallsBackForUnresolvedGloasHead(t *testing.T) {
 }
 
 func TestComputeForkChoiceRecordsGloasExecutionHeadAfterTimeout(t *testing.T) {
-	cfg, _, _, headBlock, _, engine := newGloasCanonicalForkChoiceFixture(t, true)
+	cfg, _, headRoot, headBlock, _, engine := newGloasCanonicalForkChoiceFixture(t, true)
 	bid := headBlock.Block.Body.GetSignedExecutionPayloadBid().Message
+	previousWake := sleepForSlotWake{root: headRoot, executionHead: bid.ParentBlockHash, at: time.Now()}
+	cfg.sleepForSlotLastWake = previousWake
 	engine.forkChoiceErr = execution_client.ErrForkChoiceUpdateTimeout
 
 	_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
 
 	require.NoError(t, err)
 	require.Equal(t, bid.BlockHash, cfg.executionHead)
+	previousWake.executionHead = bid.BlockHash
+	require.Equal(t, previousWake, cfg.sleepForSlotLastWake)
 }
 
 func TestComputeForkChoiceKeepsGloasExecutionHeadAfterFatalError(t *testing.T) {
-	cfg, _, _, _, _, engine := newGloasCanonicalForkChoiceFixture(t, true)
+	cfg, _, headRoot, headBlock, _, engine := newGloasCanonicalForkChoiceFixture(t, true)
+	bid := headBlock.Block.Body.GetSignedExecutionPayloadBid().Message
 	previousHash := common.Hash{0x42}
+	previousWake := sleepForSlotWake{root: headRoot, executionHead: bid.ParentBlockHash, at: time.Now()}
 	wantErr := errors.New("fork choice failed")
 	cfg.executionHead = previousHash
+	cfg.sleepForSlotLastWake = previousWake
 	engine.forkChoiceErr = wantErr
 
 	_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
 
 	require.ErrorIs(t, err, wantErr)
 	require.Equal(t, previousHash, cfg.executionHead)
+	require.Equal(t, previousWake, cfg.sleepForSlotLastWake)
+}
+
+func TestGloasExecutionHeadChangeBypassesThrottleAfterDifferentStageDecision(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		stageFull bool
+	}{
+		{"FULL wake, EMPTY stage, FULL poll", false},
+		{"EMPTY wake, FULL stage, EMPTY poll", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, _, headRoot, headBlock, _, engine := newGloasCanonicalForkChoiceFixture(t, tc.stageFull)
+			bid := headBlock.Block.Body.GetSignedExecutionPayloadBid().Message
+			wakeHead, stageHead := bid.BlockHash, bid.ParentBlockHash
+			if tc.stageFull {
+				wakeHead, stageHead = stageHead, wakeHead
+			}
+
+			synctest.Test(t, func(t *testing.T) {
+				started := time.Now()
+				cfg.sleepForSlotLastWake = sleepForSlotWake{root: headRoot, executionHead: wakeHead, at: started}
+				_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
+				require.NoError(t, err)
+				require.Equal(t, []common.Hash{stageHead}, engine.forkChoiceHeads)
+				require.Equal(t, stageHead, cfg.executionHead)
+				require.Equal(t, headRoot, cfg.sleepForSlotLastWake.root)
+				require.Equal(t, started, cfg.sleepForSlotLastWake.at)
+
+				ready := true
+				wake, changed, err := waitForNextSlotOrHeadChange(
+					t.Context(), headBlock.Block.Slot+1, cfg.beaconCfg,
+					sleepForSlotForkChoiceFake{head: headRoot, executionHead: wakeHead, ready: &ready},
+					sleepForSlotSyncedDataFake{head: headRoot},
+					sleepForSlotClockFake{currentSlot: headBlock.Block.Slot, nextSlot: started.Add(2 * sleepForSlotRewakeInterval)},
+					cfg.sleepForSlotLastWake, cfg.executionHead,
+				)
+				require.NoError(t, err)
+				require.True(t, changed)
+				require.Equal(t, wakeHead, wake.executionHead)
+				require.Equal(t, sleepForSlotHeadPollInterval, time.Since(started), "the next poll must compare with the stage's decision, not the triggering wake")
+			})
+		})
+	}
 }
 
 func TestGloasExecutionHeadChangeWakesAndSendsFullHash(t *testing.T) {

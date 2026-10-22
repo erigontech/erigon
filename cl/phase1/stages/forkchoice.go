@@ -100,6 +100,9 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		}
 	}
 	cfg.executionHead = executionHead
+	// The stage's payload decision may differ from the poll that woke it.
+	// Keep the wake's throttle key current without changing its timestamp.
+	cfg.sleepForSlotLastWake.executionHead = executionHead
 
 	// Set the status in the RPC
 	if err2 := cfg.rpc.SetStatus(
