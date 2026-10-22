@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -233,6 +234,9 @@ Loop:
 		}
 
 		body, ok := cfg.readAheader.ReadBodyWithTransactions(blockHash)
+		if ok && body != nil && execRecoversSenders(header) {
+			continue
+		}
 		if body == nil || !ok {
 			if body, err = cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber); err != nil {
 				return err
@@ -402,6 +406,48 @@ func UnwindSendersStage(u *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.
 	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
 	if err := u.Done(tx); err != nil {
 		return err
+	}
+	return nil
+}
+
+// execRecoversSenders reports whether execution recovers this block's senders in its workers; the Execution stage then writes them.
+func execRecoversSenders(header *types.Header) bool {
+	return dbg.SendersOverlap && !dbg.IgnoreBAL && header.HasNonEmptyBAL()
+}
+
+func writeSendersRecoveredByExec(ctx context.Context, tx kv.RwTx, cfg ExecuteBlockCfg, from, to uint64) error {
+	for blockNum := from; blockNum <= to; blockNum++ {
+		hash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+		if err != nil {
+			return err
+		}
+		has, err := cfg.blockReader.HasSenders(ctx, tx, hash, blockNum)
+		if err != nil {
+			return err
+		}
+		if has {
+			continue
+		}
+		header, err := cfg.blockReader.Header(ctx, tx, hash, blockNum)
+		if err != nil {
+			return err
+		}
+		body, ok := cfg.readAheader.ReadBodyWithTransactions(hash)
+		if header == nil || body == nil || !ok {
+			return fmt.Errorf("no senders for block %d %x", blockNum, hash)
+		}
+		signer := types.MakeSigner(cfg.chainConfig, blockNum, header.Time)
+		senders := make([]common.Address, len(body.Transactions))
+		for i, txn := range body.Transactions {
+			from, err := txn.Sender(*signer)
+			if err != nil {
+				return fmt.Errorf("%w: error recovering sender for tx=%x, %w", rules.ErrInvalidBlock, txn.Hash(), err)
+			}
+			senders[i] = from.Value()
+		}
+		if err := rawdb.WriteSenders(tx, hash, blockNum, senders); err != nil {
+			return err
+		}
 	}
 	return nil
 }
