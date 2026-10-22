@@ -657,7 +657,7 @@ func (t *attestationTestSuite) TestAttestationForUnseenBlockWithNilSubnetIsIgnor
 	t.Require().ErrorIs(err, ErrBlockNotSeen)
 }
 
-func (t *attestationTestSuite) TestAttestationIgnoresUnavailableTargetShuffling() {
+func (t *attestationTestSuite) TestAttestationIgnoresUnknownVotedBlockTargetAncestor() {
 	headState, slot, epoch := t.setupTargetShufflingAttestation(clparams.ElectraVersion)
 	blsCalls := 0
 	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) {
@@ -686,6 +686,36 @@ func (t *attestationTestSuite) TestAttestationIgnoresUnavailableTargetShuffling(
 	})
 	t.Require().ErrorIs(err, ErrIgnore)
 	t.Require().Equal([]int{0, 0}, []int{blsCalls, targetCalls})
+}
+
+func (t *attestationTestSuite) TestAttestationIgnoresUnavailableTargetCheckpointState() {
+	headState, slot, epoch := t.setupTargetShufflingAttestation(clparams.ElectraVersion)
+	blsCalls := 0
+	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) {
+		blsCalls++
+		return true, nil
+	}
+	data := t.targetShufflingAttestationData(slot, epoch)
+	headCommittee, err := headState.GetBeaconCommitee(slot, 0)
+	t.Require().NoError(err)
+	attester := validatorOutsideCommittee(t.T(), headState.ValidatorLength(), headCommittee)
+	singleAttestation := &solid.SingleAttestation{CommitteeIndex: 0, AttesterIndex: attester, Data: data}
+	targetCalls := 0
+	t.mockForkChoice.TargetBeaconCommitteeFn = func(target solid.Checkpoint, gotSlot, committeeIndex uint64) ([]uint64, uint64, error) {
+		targetCalls++
+		t.Require().Equal(data.Target, target)
+		t.Require().Equal(slot, gotSlot)
+		t.Require().Equal(singleAttestation.CommitteeIndex, committeeIndex)
+		return nil, 0, errors.New("target state unavailable")
+	}
+	t.addTargetShufflingAncestors(data)
+
+	err = t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
+		SingleAttestation: singleAttestation,
+		ImmediateProcess:  true,
+	})
+	t.Require().ErrorIs(err, ErrIgnore)
+	t.Require().Equal([]int{1, 1}, []int{blsCalls, targetCalls})
 }
 
 func (t *attestationTestSuite) TestAttestationKeepsHeadShufflingFastPath() {
