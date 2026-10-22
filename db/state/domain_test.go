@@ -3923,9 +3923,7 @@ func TestDomain_HistoryCoverageStart(t *testing.T) {
 
 		dc = d.beginForTests()
 		defer dc.Close()
-		start, err := dc.HistoryCoverageStart(tx)
-		require.NoError(t, err)
-		require.Zero(t, start)
+		require.Zero(t, dc.HistoryCoverageStart())
 	})
 
 	t.Run("domain files without history files", func(t *testing.T) {
@@ -3944,8 +3942,6 @@ func TestDomain_HistoryCoverageStart(t *testing.T) {
 		defer dc.Close()
 		dc.ht.files = nil
 		require.NotZero(t, dc.files.EndTxNum())
-		start, err := dc.HistoryCoverageStart(tx)
-		require.NoError(t, err)
-		require.Equal(t, dc.files.EndTxNum(), start)
+		require.Equal(t, dc.files.EndTxNum(), dc.HistoryCoverageStart())
 	})
 }

@@ -3424,12 +3424,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		receiptsComplete := !isPartial
 		if isPartial && be.number() > 0 && header != nil {
 			startTxIndex := be.tasks[0].Version().TxIndex
-			lastCommittedTxNum := be.tasks[0].Version().TxNum - 1
-			blockStartTxNum := lastCommittedTxNum - uint64(startTxIndex)
+			blockStartTxNum := be.tasks[0].Version().TxNum - uint64(startTxIndex) - 1
 			receiptsComplete = startTxIndex == 0
 			if startTxIndex > 0 && len(txs) > 0 {
-				tx0TxNum := blockStartTxNum + 1
-				priorReceipts, err := pe.reconstructPriorReceipts(ctx, applyTx, header, txs, startTxIndex, tx0TxNum)
+				priorReceipts, err := pe.reconstructPriorReceipts(ctx, applyTx, header, txs, startTxIndex, blockStartTxNum+1)
 				if err != nil {
 					pe.logger.Warn("["+pe.logPrefix+"] failed to reconstruct prior receipts for partial block",
 						"block", be.number(), "startTxIndex", startTxIndex, "err", err)
@@ -3444,7 +3442,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			receipts.DeriveFields(blockReceipts, be.hash())
 
 			if pe.cfg.chainConfig.IsAmsterdam(header.Time) {
-				err := state.RequireStateHistory(applyTx.Debug(), blockStartTxNum, lastCommittedTxNum)
+				err := state.RequireStateHistory(applyTx.Debug(), blockStartTxNum, be.tasks[0].Version().TxNum)
 				var computedBal types.BlockAccessList
 				if err == nil {
 					computedBal, err = bal.RederiveFromHistory(ctx, pe.cfg.chainConfig, pe.cfg.engine, pe.cfg.blockReader, applyTx, be.block, blockStartTxNum, pe.logger)

@@ -1636,17 +1636,14 @@ func (dt *DomainRoTx) HistoryStartFrom(tx kv.Tx) (uint64, error) {
 // HistoryCoverageStart returns the first txNum the domain's history covers, as
 // opposed to the first txNum it happens to hold a record for. With history
 // files that is the first file's start. Without them the DB holds every change
-// made after the domain's frozen files, since pruning never reaches past them;
-// only a history without snapshots is pruned on its own and reports its first
-// remaining record.
-func (dt *DomainRoTx) HistoryCoverageStart(tx kv.Tx) (uint64, error) {
+// made after the domain's frozen files, since pruning never reaches past them.
+// This does not hold for a history with snapshots disabled, which is pruned on
+// its own.
+func (dt *DomainRoTx) HistoryCoverageStart() uint64 {
 	if len(dt.ht.files) > 0 {
-		return dt.ht.files[0].startTxNum, nil
+		return dt.ht.files[0].startTxNum
 	}
-	if dt.ht.h.SnapshotsDisabled {
-		return dt.ht.h.minTxNumInDB(tx)
-	}
-	return dt.files.EndTxNum(), nil
+	return dt.files.EndTxNum()
 }
 
 // GetAsOf does not always require usage of roTx. If it is possible to determine

@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -130,6 +129,8 @@ func (hr *HistoryReaderV3) TracePrefix() string {
 	return hr.tracePrefix
 }
 
+var stateHistoryDomains = []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
+
 // StateHistoryStartTxNum returns a conservative lower bound for account, storage
 // and code history. A domain may start later because it had no earlier changes,
 // so the maximum would reject valid reads. The minimum can still admit a request
@@ -140,7 +141,7 @@ func StateHistoryStartTxNum(ttx kv.TemporalTx) (uint64, error) {
 		return 0, errors.New("state history requires a temporal debug view")
 	}
 	var start uint64
-	for i, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+	for i, domain := range stateHistoryDomains {
 		domainStart, err := dbg.HistoryStartFrom(domain)
 		if err != nil {
 			return 0, err
@@ -153,35 +154,28 @@ func StateHistoryStartTxNum(ttx kv.TemporalTx) (uint64, error) {
 }
 
 // RequireStateHistory returns an ErrPruned error unless account, storage and
-// code history cover the txNums [fromTxNum, toTxNum]. History held only in the
+// code history cover the txNums [fromTxNum, toTxNum). History held only in the
 // DB must show a record in that range: an empty history table reports no start,
 // and a history read then answers from the latest state.
 func RequireStateHistory(dbg kv.TemporalDebugTx, fromTxNum, toTxNum uint64) error {
-	domains := []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
-	for _, domain := range domains {
-		start, err := dbg.HistoryCoverageStart(domain)
-		if err != nil {
-			return err
-		}
-		if fromTxNum < start {
+	for _, domain := range stateHistoryDomains {
+		if start := dbg.HistoryCoverageStart(domain); fromTxNum < start {
 			return fmt.Errorf("%w: %s history starts at txNum %d, requested %d", ErrPruned, domain, start, fromTxNum)
 		}
 	}
-	if fromTxNum < dbg.TxNumsInFiles(domains...) {
+	if fromTxNum < dbg.TxNumsInFiles(stateHistoryDomains...) {
 		return nil
 	}
-	for _, domain := range domains {
-		it, err := dbg.HistoryKeyTxNumRange(domain, int(fromTxNum), int(toTxNum)+1, order.Asc, 1)
+	for _, domain := range stateHistoryDomains {
+		recorded, err := dbg.HistoryRecordedInDB(domain, fromTxNum, toTxNum)
 		if err != nil {
 			return err
 		}
-		recorded := it.HasNext()
-		it.Close()
 		if recorded {
 			return nil
 		}
 	}
-	return fmt.Errorf("%w: no state history recorded for txNums %d-%d", ErrPruned, fromTxNum, toTxNum)
+	return fmt.Errorf("%w: no state history recorded in txNums [%d, %d)", ErrPruned, fromTxNum, toTxNum)
 }
 
 func (hr *HistoryReaderV3) DiscardReadList() {}

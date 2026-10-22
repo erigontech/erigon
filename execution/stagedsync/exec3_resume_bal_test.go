@@ -58,6 +58,7 @@ const (
 	fromBlockStart resumePoint = -1
 	afterBlockInit resumePoint = 0
 	afterTx0       resumePoint = 1
+	beforeBlockEnd resumePoint = 3
 )
 
 // resumeBALFixture is a three-transaction Amsterdam block over a tiny genesis.
@@ -446,6 +447,8 @@ func TestResumedBlockValidatesBlockAccessList(t *testing.T) {
 		{"after tx0/phantom account", phantom, afterTx0, true},
 		{"after block start/valid", fx.block, afterBlockInit, false},
 		{"after block start/dropped block-start writes", droppedInit, afterBlockInit, true},
+		{"before block end/valid", fx.block, beforeBlockEnd, false},
+		{"before block end/phantom account", phantom, beforeBlockEnd, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			verdict, err := fx.exec(t, tc.block, tc.point)
@@ -471,7 +474,7 @@ func TestResumedBlockWithoutPrefixHistoryIsOperational(t *testing.T) {
 	fx.wipeHistory = true
 	droppedInit := fx.droppedInitWritesBlock(t)
 
-	for _, point := range []resumePoint{afterBlockInit, afterTx0} {
+	for _, point := range []resumePoint{afterBlockInit, afterTx0, beforeBlockEnd} {
 		verdict, err := fx.exec(t, fx.block, point)
 		require.ErrorIs(t, err, state.ErrPruned, "the real block must not be judged without history")
 		require.Nil(t, verdict)
@@ -490,7 +493,7 @@ func TestResumedBlockWithWrongRequestsHashIsInvalid(t *testing.T) {
 	header.RequestsHash = &common.Hash{1}
 	block := fx.block.WithSeal(header)
 
-	for _, point := range []resumePoint{fromBlockStart, afterBlockInit, afterTx0} {
+	for _, point := range []resumePoint{fromBlockStart, afterBlockInit, afterTx0, beforeBlockEnd} {
 		verdict, err := fx.exec(t, block, point)
 		require.NoError(t, err, "resume point %d", point)
 		require.NotNil(t, verdict, "resume point %d", point)
