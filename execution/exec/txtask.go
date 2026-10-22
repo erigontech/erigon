@@ -301,8 +301,9 @@ func (t *TxTask) DefersSenderCharge(incarnation int) bool {
 		return false
 	}
 	txn := t.Tx()
-	if txn == nil || txn.GetTo() == nil || len(txn.GetAuthorizations()) > 0 ||
-		len(txn.GetBlobHashes()) > 0 || txn.Type() == types.AccountAbstractionTxType {
+	isPlainCall := txn != nil && txn.GetTo() != nil && len(txn.GetAuthorizations()) == 0 &&
+		len(txn.GetBlobHashes()) == 0 && txn.Type() != types.AccountAbstractionTxType
+	if !isPlainCall {
 		return false
 	}
 	sender, err := t.TxSender()
