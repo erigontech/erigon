@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"os"
 	"runtime/pprof"
 	"slices"
@@ -19,6 +20,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -1324,6 +1326,9 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			if err != nil {
 				return err
 			}
+			if txTask, ok := t.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(0) {
+				sender = accounts.NilAddress
+			}
 			if !sender.IsNil() {
 				if tx, ok := prevSenderTx[sender]; ok {
 					executor.execTasks.addDependency(tx, i)
@@ -1914,6 +1919,16 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 				pe.releaseWorker(w)
 				return
 			}
+			// A run without the sender checks that failed or used the sender's account
+			// re-runs with the checks on: serial execution reports a sender error first.
+			if txTask, ok := tv.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) &&
+				(result.Err != nil || touchedSenderAccount(txTask, result)) {
+				pe.releaseWorker(w)
+				if !waitTo(tv.index-1) || !reExec() {
+					return
+				}
+				continue
+			}
 			if result.Err != nil {
 				pe.releaseWorker(w)
 				if finalExec {
@@ -2484,6 +2499,58 @@ func (result *execResult) runPostApplyMessageOnMinIBS(
 	return nil
 }
 
+// touchedSenderAccount reports whether a run that charges the sender at validation read or wrote the sender's nonce or balance.
+func touchedSenderAccount(txTask *exec.TxTask, result *exec.TxResult) bool {
+	sender, err := txTask.TxSender()
+	if err != nil {
+		return true
+	}
+	_, readBalance := result.TxIn.GetBalance(sender)
+	_, readNonce := result.TxIn.GetNonce(sender)
+	_, wroteBalance := result.TxOut.GetBalance(sender)
+	_, wroteNonce := result.TxOut.GetNonce(sender)
+	return readBalance || readNonce || wroteBalance || wroteNonce
+}
+
+// chargeSenderAtValidation returns the sender charge writes, or nil when the sender's nonce or balance after prior txs rejects the tx.
+func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version state.Version, vm *state.VersionMap, stateReader state.StateReader) (*state.WriteSet, error) {
+	msg, err := txTask.TxMessage()
+	if err != nil {
+		return nil, err
+	}
+	sender := msg.From()
+	acc, err := state.NewVersionedStateReader(version.TxIndex, state.ReadSet{}, vm, stateReader).ReadAccountData(sender)
+	if err != nil {
+		return nil, err
+	}
+	if acc == nil || acc.Nonce != msg.Nonce() || acc.Nonce == math.MaxUint64 {
+		return nil, nil
+	}
+	// The charge writes only Balance and Nonce; the origin keeps the rest of the account.
+	state.SeedOrigin(vm, sender, acc)
+	limit, overflow := u256.MulOverflow(u256.U64(msg.Gas()), *msg.FeeCap())
+	if !overflow {
+		limit, overflow = u256.AddOverflow(limit, *msg.Value())
+	}
+	if overflow || acc.Balance.Lt(&limit) {
+		return nil, nil
+	}
+	charge := u256.Mul(u256.U64(result.ExecutionResult.ReceiptGasUsed), *msg.GasPrice())
+	if result.ExecutionResult.Err == nil {
+		charge = u256.Add(charge, *msg.Value())
+	}
+	ws := &state.WriteSet{}
+	ws.SetBalance(sender, &state.VersionedWrite[uint256.Int]{
+		WriteHeader: state.WriteHeader{Address: sender, Path: state.BalancePath, Version: version, Reason: tracing.BalanceDecreaseGasBuy},
+		Val:         u256.Sub(acc.Balance, charge),
+	})
+	ws.SetNonce(sender, &state.VersionedWrite[uint64]{
+		WriteHeader: state.WriteHeader{Address: sender, Path: state.NoncePath, Version: version, NonceReason: tracing.NonceChangeEoACall},
+		Val:         acc.Nonce + 1,
+	})
+	return ws, nil
+}
+
 type taskVersion struct {
 	*execTask
 	version      state.Version
@@ -3026,6 +3093,20 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				} else {
 					*stateReader = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(applyTx)), be.blockNum)
 				}
+			}
+			if chainTx, ok := txTask.(*exec.TxTask); ok && chainTx.ChargesSenderAtValidation(int(txVersion.Incarnation)) {
+				senderWrites, err := chargeSenderAtValidation(chainTx, txResult, txVersion, be.versionMap, *stateReader)
+				if err != nil {
+					return nil, err
+				}
+				if senderWrites == nil {
+					be.validateTasks.clearComplete(tx)
+					be.signalSelfLoopReexec(tx)
+					break
+				}
+				be.blockIO.RecordWrites(txVersion, be.blockIO.WriteSet(txVersion.TxIndex).Merge(senderWrites))
+				be.versionMap.FlushVersionedWrites(senderWrites, false, "")
+				be.markReadersDirty(tx, senderWrites)
 			}
 			tipWrites, err := txResult.calcFees(taskVer, be.versionMap, *stateReader, txTask.Rules())
 			if err != nil {

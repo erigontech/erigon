@@ -348,7 +348,7 @@ func TestOnBlockEmbeddedPtcVoteOverridesConflictingGossipVote(t *testing.T) {
 			true,
 			func(store *ForkChoiceStore, root common.Hash) {
 				sign := addGossipPayloadAttestationSigner(t, store, root, 1, gossipTestValidator, gossipTestPTCPosition, true)
-				require.NoError(t, store.OnGossipPayloadAttestationMessage(t.Context(), sign(true)))
+				require.NoError(t, store.OnGossipPayloadAttestationMessage(t.Context(), sign(true), nil))
 				timeliness, dataAvailability, timelinessPresent, dataAvailabilityPresent := store.PayloadAttestationVotes(root)
 				require.True(t, timelinessPresent)
 				require.True(t, dataAvailabilityPresent)
@@ -375,7 +375,7 @@ func TestOnBlockEmbeddedPtcVoteOverridesConflictingGossipVote(t *testing.T) {
 		)
 		sign := addGossipPayloadAttestationSigner(t, store, anchorRoot, 1, gossipTestValidator, gossipTestPTCPosition, true)
 
-		err := store.OnGossipPayloadAttestationMessage(t.Context(), sign(true))
+		err := store.OnGossipPayloadAttestationMessage(t.Context(), sign(true), nil)
 
 		require.ErrorIs(t, err, ErrPayloadAttestationNotCurrentSlot)
 		timeliness, dataAvailability, timelinessPresent, dataAvailabilityPresent := store.PayloadAttestationVotes(anchorRoot)
