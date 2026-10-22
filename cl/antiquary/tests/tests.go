@@ -221,6 +221,40 @@ func GetElectraRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState
 	return []*cltypes.SignedBeaconBlock{block1, block2}, preState, postState
 }
 
+func GetGloasReplayFixture(name string) ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState, *clparams.BeaconChainConfig) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+
+	blocks := make([]*cltypes.SignedBeaconBlock, 0, 2)
+	for i := range 2 {
+		block := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+		encoded, err := gloasFS.ReadFile("test_data/gloas/" + name + "/blocks_" + strconv.Itoa(i) + ".ssz_snappy")
+		if err != nil {
+			panic(err)
+		}
+		if err := utils.DecodeSSZSnappy(block, encoded, int(clparams.GloasVersion)); err != nil {
+			panic(err)
+		}
+		blocks = append(blocks, block)
+	}
+
+	preState := state.New(&cfg)
+	encoded, err := gloasFS.ReadFile("test_data/gloas/" + name + "/pre.ssz_snappy")
+	if err != nil {
+		panic(err)
+	}
+	if err := utils.DecodeSSZSnappy(preState, encoded, int(clparams.GloasVersion)); err != nil {
+		panic(err)
+	}
+	return blocks, preState, &cfg
+}
+
 func GetCapellaRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState, *state.CachingBeaconState) {
 	block1 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.CapellaVersion)
 	block2 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.CapellaVersion)
