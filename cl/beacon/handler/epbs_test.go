@@ -4040,6 +4040,92 @@ func TestPostProposerPreferencesRejectsTransientIgnore(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 }
 
+func TestPostProposerPreferencesRecordsFeeRecipientFromValidPastPreference(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		path           string
+		gloasForkEpoch uint64
+		validatorIndex uint64
+		headAvailable  bool
+		invalidKey     bool
+		want           common.Address
+		wantFound      bool
+	}{
+		{name: "valid signature", validatorIndex: 7, headAvailable: true, want: common.Address{0x42}, wantFound: true},
+		{name: "invalid signature", validatorIndex: 7, headAvailable: true, invalidKey: true},
+		{name: "head unavailable", validatorIndex: 7},
+		{name: "validator outside head state", validatorIndex: 8, headAvailable: true},
+		{name: "beacon pool route", path: "/eth/v1/beacon/pool/proposer_preferences", validatorIndex: 7, headAvailable: true},
+		{name: "before Gloas", gloasForkEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch, validatorIndex: 7, headAvailable: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, _, _, _, _, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			cfg := handler.beaconChainCfg
+			cfg.GloasForkEpoch = test.gloasForkEpoch
+			cfg.InitializeForkSchedule()
+
+			key, err := bls.GenerateKey()
+			require.NoError(t, err)
+			pubkey := common.Bytes48(bls.CompressPublicKey(key.PublicKey()))
+			genesisValidatorsRoot := common.Hash{0x91}
+			headState := state.New(cfg)
+			headState.SetGenesisValidatorsRoot(genesisValidatorsRoot)
+			for i := range 8 {
+				validatorPubkey := common.Bytes48{}
+				if i == 7 {
+					validatorPubkey = pubkey
+				}
+				require.NoError(t, headState.AddValidator(solid.NewValidatorFromParameters(
+					validatorPubkey, common.Hash{}, 0, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch,
+				), 0))
+			}
+			manager := synced_data.NewSyncedDataManager(cfg, true)
+			if test.headAvailable {
+				require.NoError(t, manager.OnHeadStateWithBlockRoot(headState, common.Hash{0x11}))
+			}
+			handler.syncedData = manager
+			handler.epbsPool = nil
+
+			preference := &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+				ProposalSlot:   32,
+				ValidatorIndex: test.validatorIndex,
+				FeeRecipient:   common.Address{0x42},
+			}}
+			domain, err := fork.ComputeDomainAtEpoch(cfg, cfg.DomainProposerPreferences, 1, genesisValidatorsRoot)
+			require.NoError(t, err)
+			signingRoot, err := fork.ComputeSigningRoot(preference.Message, domain)
+			require.NoError(t, err)
+			signingKey := key
+			if test.invalidKey {
+				signingKey, err = bls.GenerateKey()
+				require.NoError(t, err)
+			}
+			copy(preference.Signature[:], signingKey.Sign(signingRoot[:]).Bytes())
+
+			service := mock_services.NewMockProposerPreferencesService(gomock.NewController(t))
+			service.EXPECT().ProcessMessage(gomock.Any(), nil, gomock.Any()).Return(fmt.Errorf("%w: proposal slot already passed", services.ErrIgnore))
+			handler.proposerPreferencesService = service
+			path := test.path
+			if path == "" {
+				path = "/eth/v1/validator/proposer_preferences"
+			}
+			body, err := json.Marshal([]*cltypes.SignedProposerPreferences{preference})
+			require.NoError(t, err)
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, bytes.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Eth-Consensus-Version", "gloas")
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			require.Equal(t, test.want, handler.feeRecipientForProposal(nil, 64, test.validatorIndex, clparams.GloasVersion))
+			_, found := validatorParams.GetFeeRecipient(test.validatorIndex)
+			require.Equal(t, test.wantFound, found)
+		})
+	}
+}
+
 func TestPostProposerPreferencesRejectsFarFutureSlotWithoutService(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.epbsPool = pool.NewEpbsPool()
