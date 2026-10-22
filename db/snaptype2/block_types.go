@@ -438,7 +438,15 @@ func TxsAmountBasedOnBodiesSnapshots(bodiesSegment *seg.Decompressor, len uint64
 	}
 	baseTxID = firstBody.BaseTxnID
 
+	// A segment of one block has no entry after the first, and len is then 0 —
+	// the walk below never reaches it and lastBody would keep its zero value,
+	// which reads as a count running backwards. The one body already decoded is
+	// both the first and the last. Unwinds cut boundary segments at their
+	// target, so single-block ranges reach here.
 	lastBody := new(types.BodyForStorage)
+	if len == 0 {
+		lastBody = firstBody
+	}
 	i := uint64(0)
 	for gg.HasNext() {
 		i++
