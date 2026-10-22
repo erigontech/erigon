@@ -61,7 +61,9 @@ func (g *stateGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return g.tx.StepsInFiles(entitySet...)
 }
 
-// AsSnapshotGetter reads this SD over tx, with snapshot-bounded cache hits.
+// AsSnapshotGetter reads this SD's in-memory values first. The shared cache
+// can advance independently of this SD, so entries newer than tx's snapshot
+// are ignored and the value is read from tx instead.
 // The SD's in-memory values must remain unchanged while the getter is in use.
 func (sd *SharedDomains) AsSnapshotGetter(tx kv.TemporalTx) kv.TemporalGetter {
 	return &snapshotGetter{sd: sd, TemporalGetter: NewCachedTemporalTxStateGetter(tx, sd.stateCache)}

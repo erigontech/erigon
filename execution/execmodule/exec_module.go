@@ -98,10 +98,10 @@ func GetBlockHashFromMissingSegmentError(err error) (common.Hash, bool) {
 	return common.HexToHash(hashStr), true
 }
 
-// Cache bridges RPC reads to the execution module's in-memory state via
-// SharedDomains. Pinned transactions keep their selected SD; unpinned
-// transactions use the current SD under a read lock. Domain reads fall through
-// to the caller's DB tx for committed data.
+// Cache bridges RPC reads to SharedDomains and the caller's DB tx.
+// Pinned transactions keep their selected SD. Unpinned transactions select
+// the exec module's current SD, or the published SD if none is available.
+// The exec module's read lock protects selection of its current SD, not later reads.
 //
 // OnNewBlock is intentionally a no-op: in the embedded (non-remote) rpcdaemon
 // the SD is the authoritative source, so the coherent cache's state-tracking
@@ -111,8 +111,8 @@ type Cache struct {
 	publishedSD func() *execctx.SharedDomains // returns the latest published SD from Events
 }
 
-// SetPublishedSD wires the Cache to fall back to the published SD from Events
-// when the exec module's currentContext is nil (e.g. while an FCU commits).
+// SetPublishedSD sets the published SD provider used by unpinned transactions
+// when no exec module is attached or its currentContext is nil.
 func (c *Cache) SetPublishedSD(provider func() *execctx.SharedDomains) {
 	c.publishedSD = provider
 }
