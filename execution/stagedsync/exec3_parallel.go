@@ -1951,10 +1951,12 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			// Valid: wait for its dependencies to commit, then re-validate — a
 			// dependency may have re-executed to a new value, forcing a re-exec;
 			// otherwise the verdict is authoritative and we commit out of order.
-			if !waitTo(target) {
+			// With a BAL the reads are already the final values, so the in-order
+			// validation in the apply loop is enough and waiting only serializes.
+			if !be.versionMap.HasBAL && !waitTo(target) {
 				return
 			}
-			if v, _, _ := be.selfLoopEvaluate(tv, result); v {
+			if v := be.versionMap.HasBAL; v || func() bool { v, _, _ := be.selfLoopEvaluate(tv, result); return v }() {
 				send(result)
 				// Stay alive rather than exit: the committed-dependent re-check signals
 				// slReexec (via a sticky flag, so a dropped wake is recovered on the next
@@ -2004,8 +2006,9 @@ func (be *blockExecutor) selfLoopFlush(version state.Version, result *exec.TxRes
 		}
 	}
 	// Flush as ESTIMATE (complete=false) so a downstream read observes the in-flight
-	// dependency and pauses until this tx commits.
-	be.versionMap.FlushVersionedWrites(result.TxOut, false, "")
+	// dependency and pauses until this tx commits. With a BAL a downstream read can
+	// use the value at once: a wrong one fails that reader's validation.
+	be.versionMap.FlushVersionedWrites(result.TxOut, be.versionMap.HasBAL, "")
 }
 
 // taskIndexOf maps a versionMap block-TxIndex into this block's dense task-list
