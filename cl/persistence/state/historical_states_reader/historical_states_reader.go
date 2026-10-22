@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -894,10 +895,36 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, kvGetter state_acc
 		if block == nil {
 			continue
 		}
+		var parentPayloadAvailable bool
+		if block.Version() >= clparams.GloasVersion && block.Block.Body.Attestations.Len() > 0 {
+			parentSlot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, block.Block.ParentRoot)
+			if err != nil {
+				return nil, nil, err
+			}
+			if parentSlot == nil {
+				genesisSlot := r.genesisState.Slot()
+				genesisRoot, err := kvGetter(kv.BlockRoot, base_encoding.Encode64ToBytes4(genesisSlot))
+				if err != nil {
+					return nil, nil, err
+				}
+				if len(genesisRoot) != 32 || block.Block.ParentRoot != common.BytesToHash(genesisRoot) {
+					return nil, nil, fmt.Errorf("parent block root %x not found", block.Block.ParentRoot)
+				}
+				genesisParentSlot := r.genesisState.LatestBlockHeader().Slot
+				parentSlot = &genesisParentSlot
+			}
+
+			availability := solid.NewBitVector(int(r.cfg.SlotsPerHistoricalRoot))
+			if err := readCompressedSSZ(kvGetter, i, kv.ExecutionPayloadAvailabilityTable, availability, int(block.Version())); err != nil {
+				return nil, nil, err
+			}
+			parentPayloadAvailable = availability.GetBitAt(int(*parentSlot % r.cfg.SlotsPerHistoricalRoot))
+		}
 		currentEpoch := i / r.cfg.SlotsPerEpoch
 
 		// Read the participation flags
-		block.Block.Body.Attestations.Range(func(index int, attestation *solid.Attestation, length int) bool {
+		for index := 0; index < block.Block.Body.Attestations.Len(); index++ {
+			attestation := block.Block.Body.Attestations.Get(index)
 			data := attestation.Data
 			isCurrentEpoch := data.Target.Epoch == currentEpoch
 			var activeIndicies []uint64
@@ -910,7 +937,7 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, kvGetter state_acc
 				}
 			} else {
 				if currentEpoch == prevEpoch {
-					return true
+					continue
 				}
 				activeIndicies = previousActiveIndicies
 			}
@@ -920,41 +947,32 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, kvGetter state_acc
 			mixPosition := (attestationEpoch + r.cfg.EpochsPerHistoricalVector - r.cfg.MinSeedLookahead - 1) % r.cfg.EpochsPerHistoricalVector
 			mix, err := r.ReadRandaoMixBySlotAndIndex(kvGetter, data.Slot, mixPosition)
 			if err != nil {
-				return false
+				return nil, nil, err
 			}
 
-			var attestingIndicies []uint64
-			attestingIndicies, err = r.attestingIndicies(attestation, true, mix, activeIndicies)
+			attestingIndicies, err := r.attestingIndicies(attestation, true, mix, activeIndicies)
 			if err != nil {
-				return false
+				return nil, nil, err
 			}
-			var participationFlagsIndicies []uint8
-			participationFlagsIndicies, err = r.getAttestationParticipationFlagIndicies(kvGetter, block.Version(), i, *data, i-data.Slot, true)
+			participationFlagsIndicies, err := r.getAttestationParticipationFlagIndicies(kvGetter, block.Version(), i, *data, i-data.Slot, parentPayloadAvailable, true)
 			if err != nil {
-				return false
+				return nil, nil, err
 			}
-			prevIdxs := isCurrentEpoch && currentEpoch != prevEpoch
+			participation := previousIdxs
+			if data.Target.Epoch == epoch {
+				participation = currentIdxs
+			}
 			// apply the flags
 			for _, idx := range attestingIndicies {
 				for _, flagIndex := range participationFlagsIndicies {
-					var flagParticipation cltypes.ParticipationFlags
-					if prevIdxs {
-						flagParticipation = cltypes.ParticipationFlags(currentIdxs.Get(int(idx)))
-					} else {
-						flagParticipation = cltypes.ParticipationFlags(previousIdxs.Get(int(idx)))
-					}
+					flagParticipation := cltypes.ParticipationFlags(participation.Get(int(idx)))
 					if flagParticipation.HasFlag(int(flagIndex)) {
 						continue
 					}
-					if prevIdxs {
-						currentIdxs.Set(int(idx), byte(flagParticipation.Add(int(flagIndex))))
-					} else {
-						previousIdxs.Set(int(idx), byte(flagParticipation.Add(int(flagIndex))))
-					}
+					participation.Set(int(idx), byte(flagParticipation.Add(int(flagIndex))))
 				}
 			}
-			return true
-		})
+		}
 	}
 	return currentIdxs, previousIdxs, nil
 }

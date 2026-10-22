@@ -183,6 +183,10 @@ func (i *beaconStatesCollector) addGenesisState(state *state.CachingBeaconState)
 	if err := i.storeEpochData(state); err != nil {
 		return err
 	}
+	epoch := slot / i.beaconCfg.SlotsPerEpoch
+	if err := i.collectActiveIndices(epoch, state.GetActiveValidatorsIndices(epoch)); err != nil {
+		return err
+	}
 
 	if state.Version() >= clparams.AltairVersion {
 		// dump inactivity scores
