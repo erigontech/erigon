@@ -3147,10 +3147,12 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 		}
 	}
 
-	{
+	if rawWrites := be.blockIO.WriteSet(txVersion.TxIndex); be.versionMap.HasBAL {
+		// A BAL tx ran once with its fees inline, so its own write-set is final.
+		txResult.writes = rawWrites
+	} else {
 		// A read-only versionMap-slice view over the tx's raw write-set; apply and
 		// the calculator resolve each account's base from the versionMap.
-		rawWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 		txResult.writes = state.NewVersionMapWriteView(rawWrites, be.versionMap, txVersion.TxIndex)
 	}
 
