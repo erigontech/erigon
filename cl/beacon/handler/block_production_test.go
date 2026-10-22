@@ -5009,8 +5009,8 @@ func TestPollAssembledPayloadReportsAWindowThatNeverProducedOnce(t *testing.T) {
 
 	require.NotZero(t, calls)
 
-	// The reason goes to the caller, which knows the slot and owns the record, carrying the first
-	// failure - the one that says what went wrong - and how many there were.
+	// The returned error carries the highest-priority failure and poll counts.
+	// Logging belongs to the caller.
 	require.ErrorIs(t, err, boom)
 	require.Contains(t, err.Error(), "attempt")
 	require.Empty(t, logs(), "the poll does not report; its caller does")

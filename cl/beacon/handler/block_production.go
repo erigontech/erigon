@@ -526,7 +526,7 @@ func classifyProductionError(err error) productionErrorSeverity {
 	}
 }
 
-// mostActionableProductionError returns the higher-severity error and preserves the first on ties.
+// mostActionableProductionError returns the higher-priority error, keeping the first argument on ties.
 func mostActionableProductionError(first, second error) error {
 	if classifyProductionError(second) > classifyProductionError(first) {
 		return second
@@ -534,7 +534,7 @@ func mostActionableProductionError(first, second error) error {
 	return first
 }
 
-// Fork-choice head changes are reported by the caller after retrying.
+// The caller owns retries and logging for fork-choice head changes.
 func reportProductionFailure(err error, targetSlot uint64) {
 	if errors.Is(err, errForkChoiceHeadChanged) {
 		return
@@ -550,8 +550,9 @@ func reportProductionFailure(err error, targetSlot uint64) {
 	}
 }
 
-// preserveProductionCancellation records whether the request was active when cancellation was
-// observed.
+// preserveProductionCancellation marks an operation cancellation observed while the request was active.
+// The marker keeps it distinct from caller cancellation even if the request is canceled
+// before the failure is reported.
 func preserveProductionCancellation(requestErr error, operation string, err error) error {
 	if requestErr == nil && errors.Is(err, context.Canceled) {
 		return fmt.Errorf("%s %w: %w", operation, errProductionOperationCanceled, err)
@@ -563,9 +564,8 @@ func shouldRetryGetPayload(now, deadline time.Time) bool {
 	return now.Before(deadline)
 }
 
-// pollAssembledPayload waits out the collection window and reports why no payload arrived rather
-// than logging it: the caller knows which slot it was for and is the one answering the validator
-// client. Contention that clears is invisible, and a caller that gave up produces no record at all.
+// pollAssembledPayload returns a payload or an error without logging; the caller owns reporting.
+// A successful collection discards earlier failures.
 func pollAssembledPayload(
 	ctx context.Context,
 	window blockBuilderWindow,
@@ -627,9 +627,8 @@ func pollAssembledPayload(
 	}
 }
 
-// terminalCause says why the window ended without a payload. A caller that went away with nothing
-// having failed took the slot with it, and there is nothing anyone can act on; anything that did
-// fail is worth reporting however the window ended, since giving up is often the consequence of it.
+// terminalCause returns the highest-priority failure, even if the request was later canceled.
+// Without a recorded failure, it returns the context error when present or a no-payload error.
 func terminalCause(ctx context.Context, attempts, failures int, bestErr error) error {
 	if failures == 0 && ctx.Err() != nil {
 		return ctx.Err()
