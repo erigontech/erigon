@@ -86,27 +86,6 @@ func TestSSZQueueDiffFrontCutAndPostponedReappend(t *testing.T) {
 	}
 }
 
-func TestSSZQueueDiffReplacementAndEmptyLists(t *testing.T) {
-	a := &solid.PendingPartialWithdrawal{ValidatorIndex: 1}
-	b := &solid.PendingPartialWithdrawal{ValidatorIndex: 2}
-	c := &solid.PendingPartialWithdrawal{ValidatorIndex: 3}
-	tests := []struct {
-		name     string
-		previous []*solid.PendingPartialWithdrawal
-		updated  []*solid.PendingPartialWithdrawal
-	}{
-		{name: "full replacement", previous: []*solid.PendingPartialWithdrawal{a, b}, updated: []*solid.PendingPartialWithdrawal{c}},
-		{name: "empty previous", updated: []*solid.PendingPartialWithdrawal{a}},
-		{name: "empty updated", previous: []*solid.PendingPartialWithdrawal{a}},
-		{name: "both empty"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			executeTestSSZQueue(t, test.previous, test.updated)
-		})
-	}
-}
-
 func TestApplySSZQueueDiffAllowsTruncateAll(t *testing.T) {
 	a := &solid.PendingPartialWithdrawal{ValidatorIndex: 1}
 	b := &solid.PendingPartialWithdrawal{ValidatorIndex: 2}
@@ -195,6 +174,71 @@ func TestSSZQueueDiffEqualityCallsAreLinear(t *testing.T) {
 	if got, want := len(diff), 4+len(updatedValues)*(4+24); got != want {
 		t.Fatalf("diff length %d, want %d", got, want)
 	}
+}
+
+func TestSSZQueueDiffSharedPointersSkipEquality(t *testing.T) {
+	previousValues := make([]*solid.PendingPartialWithdrawal, 1000)
+	for i := range previousValues {
+		previousValues[i] = &solid.PendingPartialWithdrawal{ValidatorIndex: uint64(i)}
+	}
+	appended := []*solid.PendingPartialWithdrawal{{ValidatorIndex: 1000}, {ValidatorIndex: 1001}, {ValidatorIndex: 1002}, {ValidatorIndex: 1003}}
+	updatedValues := append(previousValues[16:len(previousValues):len(previousValues)], appended...)
+	previous := pendingWithdrawalList(previousValues...)
+	updated := pendingWithdrawalList(updatedValues...)
+
+	calls := 0
+	diff := encodePendingWithdrawalDiff(t, previous, updated, func(a, b *solid.PendingPartialWithdrawal) bool {
+		calls++
+		return *a == *b
+	})
+	if calls > len(appended) {
+		t.Fatalf("equality called %d times, want at most %d", calls, len(appended))
+	}
+	if got, want := len(diff), 4+len(appended)*(4+24); got != want {
+		t.Fatalf("diff length %d, want %d", got, want)
+	}
+	if err := ApplySSZQueueDiff(bytes.NewReader(diff), previous, 0); err != nil {
+		t.Fatal(err)
+	}
+	assertPendingWithdrawalListEqual(t, updated, previous)
+}
+
+func TestSSZQueueDiffDifferentPointersFallBackToValues(t *testing.T) {
+	a := &solid.PendingPartialWithdrawal{ValidatorIndex: 1}
+	b := &solid.PendingPartialWithdrawal{ValidatorIndex: 2}
+	c := &solid.PendingPartialWithdrawal{ValidatorIndex: 3}
+	d := &solid.PendingPartialWithdrawal{ValidatorIndex: 4}
+	equal := func(a, b *solid.PendingPartialWithdrawal) bool { return *a == *b }
+
+	t.Run("value-equal copy", func(t *testing.T) {
+		bCopy := *b
+		updated := pendingWithdrawalList(&bCopy, c, d)
+		diff := encodePendingWithdrawalDiff(t, pendingWithdrawalList(a, b, c), updated, equal)
+		if got, want := len(diff), 4+(4+24); got != want {
+			t.Fatalf("diff length %d, want %d", got, want)
+		}
+		result := pendingWithdrawalList(a, b, c)
+		if err := ApplySSZQueueDiff(bytes.NewReader(diff), result, 0); err != nil {
+			t.Fatal(err)
+		}
+		assertPendingWithdrawalListEqual(t, updated, result)
+	})
+
+	t.Run("same-list set", func(t *testing.T) {
+		list := pendingWithdrawalList(a, b, c)
+		encoder := NewSSZQueueEncoder(equal)
+		encoder.Initialize(list)
+		list.Set(1, &solid.PendingPartialWithdrawal{ValidatorIndex: 2, Amount: 20})
+		var diff bytes.Buffer
+		if err := encoder.WriteDiff(&diff, list); err != nil {
+			t.Fatal(err)
+		}
+		result := pendingWithdrawalList(a, b, c)
+		if err := ApplySSZQueueDiff(&diff, result, 0); err != nil {
+			t.Fatal(err)
+		}
+		assertPendingWithdrawalListEqual(t, list, result)
+	})
 }
 
 func executeTestSSZQueue(t *testing.T, oldQueue, newQueue []*solid.PendingPartialWithdrawal) {

@@ -13,13 +13,18 @@ import (
 
 var ErrCorruptQueueDiff = errors.New("corrupt queue diff")
 
-type SSZQueueEncoder[T solid.EncodableHashableSSZ] struct {
+type queueElement interface {
+	solid.EncodableHashableSSZ
+	comparable
+}
+
+type SSZQueueEncoder[T queueElement] struct {
 	previousQueue []T
 	prefix        []int
 	equalFunc     func(a, b T) bool
 }
 
-func NewSSZQueueEncoder[T solid.EncodableHashableSSZ](equalFunc func(a, b T) bool) *SSZQueueEncoder[T] {
+func NewSSZQueueEncoder[T queueElement](equalFunc func(a, b T) bool) *SSZQueueEncoder[T] {
 	return &SSZQueueEncoder[T]{equalFunc: equalFunc}
 }
 
@@ -31,7 +36,31 @@ func (q *SSZQueueEncoder[T]) Initialize(oldQueue *solid.ListSSZ[T]) {
 	}
 }
 
+// Queue elements are copy-on-write, so equal pointers hold equal values.
+func (q *SSZQueueEncoder[T]) sharedPointerOverlap(updatedQueue *solid.ListSSZ[T]) (int, bool) {
+	if updatedQueue.Len() == 0 {
+		return 0, false
+	}
+	start := slices.Index(q.previousQueue, updatedQueue.Get(0))
+	if start < 0 {
+		return 0, false
+	}
+	overlap := len(q.previousQueue) - start
+	if overlap > updatedQueue.Len() {
+		return 0, false
+	}
+	for i := 1; i < overlap; i++ {
+		if q.previousQueue[start+i] != updatedQueue.Get(i) {
+			return 0, false
+		}
+	}
+	return overlap, true
+}
+
 func (q *SSZQueueEncoder[T]) longestOverlap(updatedQueue *solid.ListSSZ[T]) int {
+	if overlap, ok := q.sharedPointerOverlap(updatedQueue); ok {
+		return overlap
+	}
 	patternLength := min(len(q.previousQueue), updatedQueue.Len())
 	if patternLength == 0 {
 		return 0
