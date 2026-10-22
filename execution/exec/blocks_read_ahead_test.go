@@ -214,7 +214,7 @@ func TestUniqueTransactionDestinations(t *testing.T) {
 		types.NewContractCreation(2, nil, 0, nil, []byte{0x02}),
 		types.NewTransaction(3, destinationB, nil, 0, nil, nil),
 	}
-	require.Equal(t, map[common.Address]struct{}{destinationA: {}, destinationB: {}}, uniqueTransactionDestinations(txns))
+	require.Equal(t, map[accounts.Address]struct{}{accounts.InternAddress(destinationA): {}, accounts.InternAddress(destinationB): {}}, uniqueTransactionDestinations(txns))
 }
 
 func TestWarmBALStateTaskLoadsSelectedCode(t *testing.T) {
@@ -245,16 +245,17 @@ func TestWarmBALStateTaskLoadsSelectedCode(t *testing.T) {
 			t.Cleanup(stateCache.Close)
 			frontier := cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 16, true })
 			address := accounts.InternAddress(common.Address{19: 1})
-			destinations := make(map[common.Address]struct{})
+			destinations := make(map[accounts.Address]struct{})
 			if test.destination {
-				destinations[address.Value()] = struct{}{}
+				destinations[address] = struct{}{}
 			}
 			accountChanges := &types.AccountChanges{Address: address.Value()}
 			if test.codeChanges {
 				accountChanges.CodeChanges = []*types.CodeChange{{Bytecode: code}}
 			}
 			getter := &cachePopulatingGetter{TemporalGetter: source, view: stateCache.View(frontier), stepSize: 16}
-			require.NoError(t, warmBALStateTask(getter, accountChanges, balWarmupTask{}, test.mode, destinations))
+			reader := state.NewReaderV3(getter)
+			require.NoError(t, warmBALStateTask(reader, accountChanges, balWarmupTask{}, test.mode, destinations))
 			require.Equal(t, 1, source.accountReads)
 			require.Equal(t, test.wantCodeReads, source.codeReads)
 		})
@@ -268,7 +269,8 @@ func TestWarmBALStateTaskDoesNotRepeatCodeForLaterChunks(t *testing.T) {
 	source := &sharedCodeTemporalGetter{account: accounts.SerialiseV3(&account), code: code}
 	address := accounts.InternAddress(common.Address{19: 1})
 	accountChanges := &types.AccountChanges{Address: address.Value(), StorageReads: make([]common.Hash, 65)}
-	require.NoError(t, warmBALStateTask(execctx.NewTemporalTxStateGetter(source), accountChanges, balWarmupTask{slotFrom: 64, slotTo: 65}, balCodeWarmupAll, nil))
+	reader := state.NewReaderV3(execctx.NewTemporalTxStateGetter(source))
+	require.NoError(t, warmBALStateTask(reader, accountChanges, balWarmupTask{slotFrom: 64, slotTo: 65}, balCodeWarmupAll, nil))
 	require.Zero(t, source.accountReads)
 	require.Zero(t, source.codeReads)
 }
