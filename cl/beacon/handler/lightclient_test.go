@@ -33,7 +33,7 @@ import (
 func TestGetLightClientUpdatesRange(t *testing.T) {
 	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 
-	for period := uint64(0); period < 300; period++ {
+	for period := range uint64(300) {
 		update := cltypes.NewLightClientUpdate(postState.Version(), postState.BeaconConfig())
 		update.SignatureSlot = period
 		fcu.LCUpdates[period] = update
@@ -93,7 +93,9 @@ func fetchLightClientUpdatePeriods(t *testing.T, handler *ApiHandler, start, cou
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
 
-	resp, err := http.Get(fmt.Sprintf("%s/eth/v1/beacon/light_client/updates?start_period=%d&count=%d", server.URL, start, count))
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("%s/eth/v1/beacon/light_client/updates?start_period=%d&count=%d", server.URL, start, count), nil)
+	require.NoError(t, err)
+	resp, err := server.Client().Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
