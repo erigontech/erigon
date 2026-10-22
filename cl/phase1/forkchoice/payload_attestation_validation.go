@@ -242,12 +242,18 @@ func (c *payloadAttestationValidationContext) ptcPositions(msg *cltypes.PayloadA
 	return positions, nil
 }
 
-func (c *payloadAttestationValidationContext) validateSignature(msg *cltypes.PayloadAttestationMessage) error {
+func (c *payloadAttestationValidationContext) validateSignature(ctx context.Context, msg *cltypes.PayloadAttestationMessage, verifySignature PayloadAttestationSignatureVerifier) error {
 	signingRoot, err := fork.ComputeSigningRoot(msg.Data, c.domain[:])
 	if err != nil {
 		return fmt.Errorf("unable to get signing root: %w", err)
 	}
 	publicKey := c.publicKeys[msg.ValidatorIndex]
+	if verifySignature != nil {
+		if err := verifySignature(ctx, msg.Signature[:], signingRoot[:], publicKey[:]); err != nil {
+			return fmt.Errorf("error while validating signature: %w", err)
+		}
+		return nil
+	}
 	valid, err := bls.VerifyAggregate(msg.Signature[:], signingRoot[:], [][]byte{publicKey[:]})
 	if err != nil {
 		return fmt.Errorf("error while validating signature: %w", err)
