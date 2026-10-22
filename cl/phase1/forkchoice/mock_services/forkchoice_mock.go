@@ -42,9 +42,8 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-// Make mocks with maps and simple setters and getters, panic on methods from ForkChoiceStorageWriter
-
 type ForkChoiceStorageMock struct {
+	PreparationImports                    forkchoice.PayloadPreparationImports
 	ProposerLookaheadVal                  solid.Uint64VectorSSZ
 	Ancestors                             map[uint64]forkchoice.ForkChoiceNode
 	AncestorCalls                         atomic.Int64
@@ -60,7 +59,7 @@ type ForkChoiceStorageMock struct {
 	HeadPayloadStatusVal                  cltypes.PayloadStatus
 	BlockProcessingVal                    bool
 	GetHeadNodeFn                         func() (forkchoice.ForkChoiceNode, uint64, error)
-	GetStateAtBlockRootFn                 func(common.Hash, bool) (*state.CachingBeaconState, error)
+	GetStateAtBlockRootFn                 func(common.Hash) (*state.CachingBeaconState, error)
 	ViewStateAtBlockRootFn                func(common.Hash, func(*state.CachingBeaconState) error) error
 	HighestSeenVal                        uint64
 	// HighestImportedDescendantVal is the slot of the highest imported descendant of any root,
@@ -137,6 +136,28 @@ type ForkChoiceStorageMock struct {
 	PayloadStatusByRootMap    map[common.Hash]execution_client.PayloadStatus
 	// [New in Gloas:EIP7732] Execution payload gas limit by execution block hash
 	ExecutionPayloadGasLimitMap map[common.Hash]uint64
+}
+
+func (f *ForkChoiceStorageMock) BeginPayloadImport(slot uint64) func() {
+	return f.PreparationImports.BeginImport(slot)
+}
+
+func (f *ForkChoiceStorageMock) BeginPendingPayloadEnvelope(blockRoot common.Hash) func() {
+	return f.PreparationImports.BeginPendingEnvelope(blockRoot)
+}
+
+func (f *ForkChoiceStorageMock) TryBeginPayloadPreparation(ctx context.Context, firstSlot, lastSlot uint64) (context.Context, func() bool, bool) {
+	return f.PreparationImports.TryBegin(ctx, firstSlot, lastSlot, nil, f.pendingEnvelopeSlot)
+}
+
+func (f *ForkChoiceStorageMock) pendingEnvelopeSlot(root common.Hash) (uint64, bool) {
+	if f.HasEnvelope(root) {
+		return 0, false
+	}
+	if block := f.Blocks[root]; block != nil && block.Block != nil {
+		return block.Block.Slot, true
+	}
+	return 0, false
 }
 
 func makeSyncContributionPoolMock(t *testing.T) sync_contribution_pool.SyncContributionPool {
@@ -347,16 +368,13 @@ func (f *ForkChoiceStorageMock) ProposerBoostRoot() common.Hash {
 	return f.ProposerBoostRootVal
 }
 
-func (f *ForkChoiceStorageMock) GetStateAtBlockRoot(
-	blockRoot common.Hash,
-	alwaysCopy bool,
-) (*state.CachingBeaconState, error) {
+func (f *ForkChoiceStorageMock) GetStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error) {
 	if f.GetStateAtBlockRootFn != nil {
-		return f.GetStateAtBlockRootFn(blockRoot, alwaysCopy)
+		return f.GetStateAtBlockRootFn(blockRoot)
 	}
 	st := f.StateAtBlockRootVal[blockRoot]
-	if st == nil || !alwaysCopy {
-		return st, nil
+	if st == nil {
+		return nil, nil
 	}
 	return st.Copy()
 }
@@ -365,7 +383,7 @@ func (f *ForkChoiceStorageMock) ViewStateAtBlockRoot(blockRoot common.Hash, fn f
 	if f.ViewStateAtBlockRootFn != nil {
 		return f.ViewStateAtBlockRootFn(blockRoot, fn)
 	}
-	blockState, err := f.GetStateAtBlockRoot(blockRoot, false)
+	blockState, err := f.GetStateAtBlockRoot(blockRoot)
 	if err != nil {
 		return err
 	}
@@ -579,7 +597,7 @@ func (f *ForkChoiceStorageMock) StoreAnchorEnvelope(blockRoot common.Hash, signe
 	return nil
 }
 
-func (f *ForkChoiceStorageMock) OnPayloadAttestationMessage(ctx context.Context, msg *cltypes.PayloadAttestationMessage, isFromBlock bool) error {
+func (f *ForkChoiceStorageMock) OnGossipPayloadAttestationMessage(ctx context.Context, msg *cltypes.PayloadAttestationMessage) error {
 	return nil
 }
 

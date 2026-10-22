@@ -45,6 +45,13 @@ func (g retryPendingForkGraph) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock
 	return g.block, g.block != nil
 }
 
+func (g retryPendingForkGraph) GetHeader(common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	if g.block == nil || g.block.Block == nil {
+		return nil, false
+	}
+	return &cltypes.BeaconBlockHeader{Slot: g.block.Block.Slot, Root: g.block.Block.StateRoot}, true
+}
+
 // With a gate, HasEnvelope blocks until it opens and then reports the envelope as present, so
 // the apply ends on the already-persisted path without touching a config the stub lacks.
 func (g retryPendingForkGraph) HasEnvelope(common.Hash) bool {

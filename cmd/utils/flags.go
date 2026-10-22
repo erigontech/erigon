@@ -1001,6 +1001,10 @@ var (
 		Usage: "Enable caplin validator monitoring metrics",
 		Value: false,
 	}
+	CaplinPayloadPreparationDisableFlag = cli.BoolFlag{
+		Name:  "caplin.payload-preparation.disable",
+		Usage: "disable speculative payload preparation while keeping the validator API and normal block production enabled",
+	}
 	CaplinMaxPeerCount = cli.Uint64Flag{
 		Name:  "caplin.max-peer-count",
 		Usage: "Max number of peers to connect",
@@ -1462,8 +1466,11 @@ func NewP2PConfig(
 		MetricsEnabled:  metricsEnabled,
 	}
 	if netRestrict != "" {
-		cfg.NetRestrict = new(netutil.Netlist)
-		cfg.NetRestrict.Add(netRestrict)
+		list, err := netutil.ParseNetlist(netRestrict)
+		if err != nil {
+			return nil, fmt.Errorf("bad option %s: %w", NetrestrictFlag.Name, err)
+		}
+		cfg.NetRestrict = list
 	}
 	if staticPeers != nil {
 		staticNodes, err := enode.ParseNodesFromURLs(staticPeers)
@@ -1602,7 +1609,7 @@ func SetNodeConfig(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logger) err
 	setNodeUserIdent(ctx, cfg)
 	SetP2PConfig(ctx, &cfg.P2P, cfg.NodeName(), cfg.Dirs.DataDir, logger)
 
-	cfg.SentryLogPeerInfo = ctx.IsSet(SentryLogPeerInfoFlag.Name)
+	cfg.SentryLogPeerInfo = ctx.Bool(SentryLogPeerInfoFlag.Name)
 	return nil
 }
 
@@ -1673,7 +1680,7 @@ func setGPO(ctx *cli.Command, cfg *gaspricecfg.Config) {
 
 func setTxPool(ctx *cli.Command, dbDir string, fullCfg *ethconfig.Config) {
 	cfg := txpoolcfg.DefaultConfig
-	if ctx.IsSet(TxPoolDisableFlag.Name) || TxPoolDisableFlag.Value {
+	if ctx.Bool(TxPoolDisableFlag.Name) {
 		cfg.Disable = true
 	}
 	if ctx.IsSet(TxPoolPriceLimitFlag.Name) {
@@ -1758,7 +1765,7 @@ func setEthash(ctx *cli.Command, datadir string, cfg *ethconfig.Config) {
 	if ctx.IsSet(EthashCachesLockMmapFlag.Name) {
 		cfg.Ethash.CachesLockMmap = ctx.Bool(EthashCachesLockMmapFlag.Name)
 	}
-	if ctx.IsSet(FakePoWFlag.Name) {
+	if ctx.Bool(FakePoWFlag.Name) {
 		cfg.Ethash.PowMode = ethashcfg.ModeFake
 	}
 	if ctx.IsSet(EthashDatasetsLockMmapFlag.Name) {
@@ -1797,7 +1804,7 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *buildercfg.BuilderConfig) {
 }
 
 func setBuilder(ctx *cli.Command, cfg *buildercfg.BuilderConfig) {
-	cfg.EnabledPOS = !ctx.IsSet(ProposingDisableFlag.Name)
+	cfg.EnabledPOS = !ctx.Bool(ProposingDisableFlag.Name)
 
 	switch {
 	case ctx.IsSet(MinerExtraDataFlag.Name):
@@ -1869,6 +1876,7 @@ func setBeaconAPI(ctx *cli.Command, cfg *ethconfig.Config) error {
 	cfg.CaplinConfig.BeaconAPIRouter.AllowedOrigins = ctx.StringSlice(BeaconApiAllowOriginsFlag.Name)
 	cfg.CaplinConfig.BeaconAPIRouter.AllowCredentials = ctx.Bool(BeaconApiAllowCredentialsFlag.Name)
 	cfg.CaplinConfig.BeaconAPIRouter.PreserveGraffiti = ctx.Bool(BeaconApiPreserveGraffitiFlag.Name)
+	cfg.CaplinConfig.BeaconAPIRouter.DisablePayloadPreparation = ctx.Bool(CaplinPayloadPreparationDisableFlag.Name)
 	return nil
 }
 
@@ -2137,7 +2145,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	if ctx.IsSet(RPCGlobalTxFeeCapFlag.Name) {
 		cfg.RPCTxFeeCap = ctx.Float64(RPCGlobalTxFeeCapFlag.Name)
 	}
-	if ctx.IsSet(NoDiscoverFlag.Name) {
+	if ctx.Bool(NoDiscoverFlag.Name) {
 		cfg.EthDiscoveryURLs = []string{}
 	} else if ctx.IsSet(DNSDiscoveryFlag.Name) {
 		urls := ctx.String(DNSDiscoveryFlag.Name)

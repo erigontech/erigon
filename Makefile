@@ -60,7 +60,13 @@ ifeq ($(GOARCH),amd64)
 	CGO_MARCH := -march=$(strip $(if $(filter v1,$(GOAMD64_VERSION)),x86-64,x86-64-$(GOAMD64_VERSION)))
 endif
 
-CGO_CFLAGS += -Wno-unknown-warning-option -Wno-enum-int-mismatch -Wno-strict-prototypes -Wno-unused-but-set-variable -O3 -DNDEBUG $(CGO_MARCH)
+CGO_CFLAGS += -Wno-enum-int-mismatch -Wno-strict-prototypes -Wno-unused-but-set-variable -O3 -DNDEBUG $(CGO_MARCH)
+# Lets clang skip the gcc-only flag above. gcc does not know it and reports it next to any other warning, so leave it
+# out only for gcc; other or unknown compilers keep it. make < 4.4 does not pass a command-line CC to $(shell).
+CGO_CC := $(shell $(if $(filter command line,$(origin CC)),CC='$(CC)') $(GO) env CC 2>/dev/null)
+ifeq (,$(findstring Free Software Foundation,$(if $(CGO_CC),$(shell $(CGO_CC) --version 2>/dev/null))))
+	CGO_CFLAGS += -Wno-unknown-warning-option
+endif
 
 CGO_LDFLAGS := $(shell $(GO) env CGO_LDFLAGS 2> /dev/null)
 CGO_LDFLAGS += -O3 -g
@@ -71,8 +77,10 @@ ifeq ($(shell uname -s), Darwin)
 	endif
 endif
 
+# No -DNDEBUG: evmone's own build keeps assertions, and with gcc 13 -O2/-O3 NDEBUG
+# makes its generic MODEXP Montgomery loop 3-7x slower.
 ifeq ($(origin CGO_CXXFLAGS),undefined)
-	CGO_CXXFLAGS := -g -O3 -DNDEBUG
+	CGO_CXXFLAGS := -g -O3
 endif
 CGO_CXXFLAGS += $(CGO_MARCH)
 export CGO_CXXFLAGS

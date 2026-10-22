@@ -87,7 +87,6 @@ func testMainnetConfig(t *testing.T) {
 		"PROPOSER_REORG_CUTOFF_BPS":           {},
 		"REORG_MAX_EPOCHS_SINCE_FINALIZATION": {},
 		"CONFIRMATION_BYZANTINE_THRESHOLD":    {},
-		"MAX_PAYLOAD_SIZE":                    {}, // Caplin uses 15 MiB: https://github.com/erigontech/erigon/issues/24417
 		"ATTESTATION_SUBNET_EXTRA_BITS":       {},
 		"GAS_LIMIT_SCHEDULE":                  {},
 	}

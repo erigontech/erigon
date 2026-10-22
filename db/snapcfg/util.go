@@ -238,6 +238,10 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			drops.unparsableItem(p.Name)
 			continue
 		}
+		if dot < lastSep {
+			drops.unparsableItem(p.Name)
+			continue
+		}
 
 		//typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
 		typeName := name[lastSep+1 : dot]

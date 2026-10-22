@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"encoding/json"
 	"math/big"
 	"testing"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -206,7 +208,7 @@ func TestCallConstructorReturnsOverlayError(t *testing.T) {
 		NewOtterscanAPI(base, m.DB, 25),
 	)
 	code := hexutil.Bytes{byte(vm.INVALID)}
-	result, err := api.CallConstructor(m.Ctx, contractAddress, &code)
+	result, err := api.CallConstructor(m.Ctx, contractAddress, code)
 	require.Nil(t, result)
 	var invalidOpcode *vm.ErrInvalidOpCode
 	require.ErrorAs(t, err, &invalidOpcode)
@@ -223,8 +225,36 @@ func TestCallConstructorRejectsNonContract(t *testing.T) {
 	)
 	code := hexutil.Bytes{byte(vm.STOP)}
 	for _, addr := range []common.Address{bankAddress, common.HexToAddress("0xdead")} {
-		result, err := api.CallConstructor(m.Ctx, addr, &code)
+		result, err := api.CallConstructor(m.Ctx, addr, code)
 		require.Nil(t, result)
 		require.Error(t, err)
+	}
+}
+
+func TestCallConstructorRequiresCode(t *testing.T) {
+	m, _, contractAddress, _ := chainWithDeployedContract(t)
+	base := newBaseApiForTest(m)
+	api := NewOverlayAPI(
+		base,
+		m.DB,
+		&rpccfg.OverlayApiConfig{GasCap: 1_000_000},
+		NewOtterscanAPI(base, m.DB, 25),
+	)
+	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	require.NoError(t, server.RegisterName("overlay", api))
+	client := rpc.DialInProc(server, log.New())
+	t.Cleanup(func() { client.Close(); server.Stop() })
+
+	for name, params := range map[string][]any{
+		"omitted": {contractAddress},
+		"null":    {contractAddress, nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var result json.RawMessage
+			err := client.CallContext(t.Context(), &result, "overlay_callConstructor", params...)
+			var rpcErr rpc.Error
+			require.ErrorAs(t, err, &rpcErr)
+			require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+		})
 	}
 }

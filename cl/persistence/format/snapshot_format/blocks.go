@@ -29,13 +29,15 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
+var ErrExecutionBodyNotFound = errors.New("execution body not found")
+
 type ExecutionBlockReaderByNumber interface {
 	Transactions(number uint64, hash common.Hash) (*solid.TransactionsSSZ, error)
 	Withdrawals(number uint64, hash common.Hash) (*solid.ListSSZ[*cltypes.Withdrawal], error)
 	SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfig)
 	// CacheBody stores a recently produced block body for immediate retrieval.
 	// Implementations that don't support caching should no-op.
-	CacheBody(blockNumber uint64, transactions [][]byte, withdrawals []*types.Withdrawal)
+	CacheBody(blockNumber uint64, blockHash common.Hash, transactions [][]byte, withdrawals []*types.Withdrawal)
 }
 
 // WriteBlockForSnapshot writes a block to the given writer in the format expected by the snapshot.
