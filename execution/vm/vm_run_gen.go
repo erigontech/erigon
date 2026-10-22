@@ -421,6 +421,288 @@ run:
 					continue run
 				}
 			}
+			if isColdOp[op] {
+				switch op {
+				case SLT:
+					if sLen >= 2 && gasLeft >= GasFastestStep {
+						gasLeft -= GasFastestStep
+						x, y := callContext.Stack.pop1Peek1()
+						callContext.gas, callContext.savedPC = gasLeft, pc
+						if x.Slt(y) {
+							y.SetOne()
+						} else {
+							y.Clear()
+						}
+						gasLeft, pc = callContext.gas, callContext.savedPC
+						pc++
+						continue run
+					}
+				case SGT:
+					if sLen >= 2 && gasLeft >= GasFastestStep {
+						gasLeft -= GasFastestStep
+						x, y := callContext.Stack.pop1Peek1()
+						callContext.gas, callContext.savedPC = gasLeft, pc
+						if x.Sgt(y) {
+							y.SetOne()
+						} else {
+							y.Clear()
+						}
+						gasLeft, pc = callContext.gas, callContext.savedPC
+						pc++
+						continue run
+					}
+				case OR:
+					if sLen >= 2 && gasLeft >= GasFastestStep {
+						gasLeft -= GasFastestStep
+						x, y := callContext.Stack.pop1Peek1()
+						y.Or(x, y)
+						pc++
+						continue run
+					}
+				case XOR:
+					if sLen >= 2 && gasLeft >= GasFastestStep {
+						gasLeft -= GasFastestStep
+						x, y := callContext.Stack.pop1Peek1()
+						y.Xor(x, y)
+						pc++
+						continue run
+					}
+				case NOT:
+					if sLen >= 1 && gasLeft >= GasFastestStep {
+						gasLeft -= GasFastestStep
+						x := callContext.Stack.peek()
+						x.Not(x)
+						pc++
+						continue run
+					}
+				case BYTE:
+					if sLen >= 2 && gasLeft >= GasFastestStep {
+						gasLeft -= GasFastestStep
+						th, val := callContext.Stack.pop1Peek1()
+						callContext.gas, callContext.savedPC = gasLeft, pc
+						val.Byte(th)
+						gasLeft, pc = callContext.gas, callContext.savedPC
+						pc++
+						continue run
+					}
+				case SHL:
+					if jt[SHL].numPush != 0 && sLen >= 2 && gasLeft >= GasFastestStep {
+						gasLeft -= GasFastestStep
+						shift, value := callContext.Stack.pop1Peek1()
+						if shift.LtUint64(256) {
+							callContext.gas, callContext.savedPC = gasLeft, pc
+							value.Lsh(value, uint(shift.Uint64()))
+							gasLeft, pc = callContext.gas, callContext.savedPC
+						} else {
+							value.Clear()
+						}
+						pc++
+						continue run
+					}
+				case SHR:
+					if jt[SHR].numPush != 0 && sLen >= 2 && gasLeft >= GasFastestStep {
+						gasLeft -= GasFastestStep
+						shift, value := callContext.Stack.pop1Peek1()
+						if shift.LtUint64(256) {
+							callContext.gas, callContext.savedPC = gasLeft, pc
+							value.Rsh(value, uint(shift.Uint64()))
+							gasLeft, pc = callContext.gas, callContext.savedPC
+						} else {
+							value.Clear()
+						}
+						pc++
+						continue run
+					}
+				case SAR:
+					if jt[SAR].numPush != 0 && sLen >= 2 && gasLeft >= GasFastestStep {
+						gasLeft -= GasFastestStep
+						shift, value := callContext.Stack.pop1Peek1()
+						if shift.GtUint64(255) {
+							if value.Sign() >= 0 {
+								value.Clear()
+							} else {
+
+								value.SetAllOne()
+							}
+							pc++
+							continue run
+						}
+						n := uint(shift.Uint64())
+						callContext.gas, callContext.savedPC = gasLeft, pc
+						value.SRsh(value, n)
+						gasLeft, pc = callContext.gas, callContext.savedPC
+						pc++
+						continue run
+					}
+				case ADDRESS:
+					if sLen < stackLimit && gasLeft >= GasQuickStep {
+						gasLeft -= GasQuickStep
+						callContext.gas, callContext.savedPC = gasLeft, pc
+						callContext.Stack.pushRef().Set(callContext.addressWord(addressWordSelf, callContext.Contract.Address()))
+						gasLeft, pc = callContext.gas, callContext.savedPC
+						pc++
+						continue run
+					}
+				case ORIGIN:
+					if sLen < stackLimit && gasLeft >= GasQuickStep {
+						gasLeft -= GasQuickStep
+						callContext.gas, callContext.savedPC = gasLeft, pc
+						callContext.Stack.pushRef().Set(callContext.addressWord(addressWordOrigin, evm.Origin))
+						gasLeft, pc = callContext.gas, callContext.savedPC
+						pc++
+						continue run
+					}
+				case CALLER:
+					if sLen < stackLimit && gasLeft >= GasQuickStep {
+						gasLeft -= GasQuickStep
+						callContext.gas, callContext.savedPC = gasLeft, pc
+						callContext.Stack.pushRef().Set(callContext.addressWord(addressWordCaller, callContext.Contract.Caller()))
+						gasLeft, pc = callContext.gas, callContext.savedPC
+						pc++
+						continue run
+					}
+				case CALLDATASIZE:
+					if sLen < stackLimit && gasLeft >= GasQuickStep {
+						gasLeft -= GasQuickStep
+						callContext.Stack.pushRef().SetUint64(uint64(len(callContext.input)))
+						pc++
+						continue run
+					}
+				case CODESIZE:
+					if sLen < stackLimit && gasLeft >= GasQuickStep {
+						gasLeft -= GasQuickStep
+						callContext.Stack.pushRef().SetUint64(uint64(len(callContext.Contract.Code)))
+						pc++
+						continue run
+					}
+				case GASPRICE:
+					if sLen < stackLimit && gasLeft >= GasQuickStep {
+						gasLeft -= GasQuickStep
+						callContext.Stack.push(evm.GasPrice)
+						pc++
+						continue run
+					}
+				case RETURNDATASIZE:
+					if jt[RETURNDATASIZE].numPush != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
+						gasLeft -= GasQuickStep
+						callContext.Stack.pushRef().SetUint64(uint64(len(evm.returnData)))
+						pc++
+						continue run
+					}
+				case COINBASE:
+					if sLen < stackLimit && gasLeft >= GasQuickStep {
+						gasLeft -= GasQuickStep
+						callContext.gas, callContext.savedPC = gasLeft, pc
+						callContext.Stack.pushRef().Set(callContext.addressWord(addressWordCoinbase, evm.Context.Coinbase))
+						gasLeft, pc = callContext.gas, callContext.savedPC
+						pc++
+						continue run
+					}
+				case TIMESTAMP:
+					if sLen < stackLimit && gasLeft >= GasQuickStep {
+						gasLeft -= GasQuickStep
+						callContext.Stack.pushRef().SetUint64(evm.Context.Time)
+						pc++
+						continue run
+					}
+				case NUMBER:
+					if sLen < stackLimit && gasLeft >= GasQuickStep {
+						gasLeft -= GasQuickStep
+						callContext.Stack.pushRef().SetUint64(evm.Context.BlockNumber)
+						pc++
+						continue run
+					}
+				case DIFFICULTY:
+					if sLen < stackLimit && gasLeft >= GasQuickStep {
+						gasLeft -= GasQuickStep
+						if evm.Context.PrevRanDao != nil {
+
+							callContext.Stack.pushRef().SetBytes32(evm.Context.PrevRanDao[:])
+						} else {
+							*callContext.Stack.pushRef() = evm.Context.Difficulty
+						}
+						pc++
+						continue run
+					}
+				case GASLIMIT:
+					if sLen < stackLimit && gasLeft >= GasQuickStep {
+						gasLeft -= GasQuickStep
+						if evm.Context.MaxGasLimit {
+							callContext.Stack.pushRef().SetAllOne()
+						} else {
+							callContext.Stack.pushRef().SetUint64(evm.Context.GasLimit)
+						}
+						pc++
+						continue run
+					}
+				case CHAINID:
+					if jt[CHAINID].numPush != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
+						gasLeft -= GasQuickStep
+						chainId := evm.ChainRules().ChainID
+						callContext.Stack.pushRef().Set(chainId)
+						pc++
+						continue run
+					}
+				case BASEFEE:
+					if jt[BASEFEE].numPush != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
+						gasLeft -= GasQuickStep
+						baseFee := evm.Context.BaseFee
+						callContext.Stack.push(baseFee)
+						pc++
+						continue run
+					}
+				case BLOBBASEFEE:
+					if jt[BLOBBASEFEE].numPush != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
+						gasLeft -= GasQuickStep
+						blobBaseFee := evm.Context.BlobBaseFee
+						callContext.Stack.push(blobBaseFee)
+						pc++
+						continue run
+					}
+				case PUSH0:
+					if jt[PUSH0].numPush != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
+						gasLeft -= GasQuickStep
+						callContext.Stack.pushRef().Clear()
+						pc++
+						continue run
+					}
+				case PC:
+					if sLen < stackLimit && gasLeft >= GasQuickStep {
+						gasLeft -= GasQuickStep
+						callContext.Stack.pushRef().SetUint64(pc)
+						pc++
+						continue run
+					}
+				case MSIZE:
+					if sLen < stackLimit && gasLeft >= GasQuickStep {
+						gasLeft -= GasQuickStep
+						callContext.Stack.pushRef().SetUint64(uint64(callContext.Memory.Len()))
+						pc++
+						continue run
+					}
+				case GAS:
+					if sLen < stackLimit && gasLeft >= GasQuickStep {
+						gasLeft -= GasQuickStep
+						callContext.Stack.pushRef().SetUint64(gasLeft)
+						pc++
+						continue run
+					}
+				case DUP9, DUP10, DUP11, DUP12, DUP13, DUP14, DUP15, DUP16:
+					if sLen >= int(op-DUP1)+1 && sLen < stackLimit && gasLeft >= GasFastestStep {
+						gasLeft -= GasFastestStep
+						callContext.Stack.dup(int(op - DUP1))
+						pc++
+						continue run
+					}
+				case SWAP5, SWAP6, SWAP7, SWAP8, SWAP9, SWAP10, SWAP11, SWAP12, SWAP13, SWAP14, SWAP15, SWAP16:
+					if sLen >= int(op-SWAP1)+2 && gasLeft >= GasFastestStep {
+						gasLeft -= GasFastestStep
+						callContext.Stack.swap(int(op-SWAP1) + 1)
+						pc++
+						continue run
+					}
+				}
+			}
 			callContext.gas = gasLeft
 		}
 		callContext.cacheGen++
@@ -504,4 +786,56 @@ run:
 	}
 
 	return res, callContext.Gas(), mdgas.MdGasUsage{}, err
+}
+
+// isColdOp marks the ops of run's second fast-path switch.
+var isColdOp = [256]bool{
+	SLT:            true,
+	SGT:            true,
+	OR:             true,
+	XOR:            true,
+	NOT:            true,
+	BYTE:           true,
+	SHL:            true,
+	SHR:            true,
+	SAR:            true,
+	ADDRESS:        true,
+	ORIGIN:         true,
+	CALLER:         true,
+	CALLDATASIZE:   true,
+	CODESIZE:       true,
+	GASPRICE:       true,
+	RETURNDATASIZE: true,
+	COINBASE:       true,
+	TIMESTAMP:      true,
+	NUMBER:         true,
+	DIFFICULTY:     true,
+	GASLIMIT:       true,
+	CHAINID:        true,
+	BASEFEE:        true,
+	BLOBBASEFEE:    true,
+	PUSH0:          true,
+	PC:             true,
+	MSIZE:          true,
+	GAS:            true,
+	DUP9:           true,
+	DUP10:          true,
+	DUP11:          true,
+	DUP12:          true,
+	DUP13:          true,
+	DUP14:          true,
+	DUP15:          true,
+	DUP16:          true,
+	SWAP5:          true,
+	SWAP6:          true,
+	SWAP7:          true,
+	SWAP8:          true,
+	SWAP9:          true,
+	SWAP10:         true,
+	SWAP11:         true,
+	SWAP12:         true,
+	SWAP13:         true,
+	SWAP14:         true,
+	SWAP15:         true,
+	SWAP16:         true,
 }
