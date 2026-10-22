@@ -1354,7 +1354,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 				return err
 			}
 			addresses := make([]common.Address, 0, 2)
-			if txTask, ok := t.Task.(*exec.TxTask); ok && txTask.DefersSenderCharge(0) {
+			if txTask, ok := t.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(0) {
 				sender = accounts.NilAddress
 			}
 			if !sender.IsNil() {
@@ -2413,7 +2413,7 @@ func (result *execResult) runPostApplyMessageOnMinIBS(
 	return nil
 }
 
-// touchedSenderAccount reports whether a run with a deferred sender charge read or wrote the sender's nonce or balance.
+// touchedSenderAccount reports whether a run that charges the sender at validation read or wrote the sender's nonce or balance.
 func touchedSenderAccount(txTask *exec.TxTask, result *exec.TxResult) bool {
 	sender, err := txTask.TxSender()
 	if err != nil {
@@ -2426,8 +2426,8 @@ func touchedSenderAccount(txTask *exec.TxTask, result *exec.TxResult) bool {
 	return readBalance || readNonce || wroteBalance || wroteNonce
 }
 
-// applyDeferredSenderCharge returns the sender charge writes, or nil when the sender's nonce or balance after prior txs rejects the tx.
-func applyDeferredSenderCharge(txTask *exec.TxTask, result *execResult, version state.Version, vm *state.VersionMap, stateReader state.StateReader) (*state.WriteSet, error) {
+// chargeSenderAtValidation returns the sender charge writes, or nil when the sender's nonce or balance after prior txs rejects the tx.
+func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version state.Version, vm *state.VersionMap, stateReader state.StateReader) (*state.WriteSet, error) {
 	msg, err := txTask.TxMessage()
 	if err != nil {
 		return nil, err
@@ -2507,7 +2507,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 		return result
 	}
 
-	if txTask, ok := ev.Task.(*exec.TxTask); ok && txTask.DefersSenderCharge(ev.version.Incarnation) && touchedSenderAccount(txTask, result) {
+	if txTask, ok := ev.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(ev.version.Incarnation) && touchedSenderAccount(txTask, result) {
 		result.Err = protocol.ErrExecAbortError{DependencyTxIndex: ev.version.TxIndex - 1}
 		return result
 	}
@@ -3152,8 +3152,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		var senderWrites *state.WriteSet
 		if valid {
-			if txTask, ok := txTask.(*exec.TxTask); ok && txTask.DefersSenderCharge(txVersion.Incarnation) {
-				if senderWrites, err = applyDeferredSenderCharge(txTask, txResult, txVersion, be.versionMap, stateReader); err != nil {
+			if txTask, ok := txTask.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(txVersion.Incarnation) {
+				if senderWrites, err = chargeSenderAtValidation(txTask, txResult, txVersion, be.versionMap, stateReader); err != nil {
 					return nil, err
 				}
 				valid = senderWrites != nil

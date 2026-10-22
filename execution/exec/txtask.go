@@ -294,8 +294,8 @@ func (t *TxTask) TxSender() (accounts.Address, error) {
 	return t.sender, nil
 }
 
-// DefersSenderCharge reports whether this run leaves the sender charge (nonce, gas, value) to validation.
-func (t *TxTask) DefersSenderCharge(incarnation int) bool {
+// ChargesSenderAtValidation reports whether this run skips the sender charge (nonce, gas, value) and validation applies it.
+func (t *TxTask) ChargesSenderAtValidation(incarnation int) bool {
 	if incarnation != 0 || t.Config.Aura != nil || t.Rules().IsAmsterdam {
 		return false
 	}
@@ -594,8 +594,8 @@ func (t *TxTask) Execute(evm *vm.EVM,
 			var applyErr error
 
 			switch {
-			case !calcFees && t.DefersSenderCharge(ibs.Incarnation()):
-				applyRes, applyErr = protocol.ApplyMessageDeferSenderCharge(evm, message, t.GasPool(), engine)
+			case !calcFees && t.ChargesSenderAtValidation(ibs.Incarnation()):
+				applyRes, applyErr = protocol.ApplyMessageChargeSenderAtValidation(evm, message, t.GasPool(), engine)
 			case !calcFees:
 				applyRes, applyErr = protocol.ApplyMessageNoFeeBurnOrTip(evm, message, t.GasPool(), true, false, engine)
 			default:

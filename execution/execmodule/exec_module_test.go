@@ -3902,7 +3902,7 @@ func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
 
 // Same-sender txs that send value, revert with value and read the sender's
 // balance must reach the state root of serial execution when parallel exec
-// defers the sender charge to validation.
+// charges the sender at validation.
 func TestSameSenderSpeculationMatchesSerialExecution(t *testing.T) {
 	prevParallel := dbg.Exec3Parallel
 	dbg.Exec3Parallel = true
