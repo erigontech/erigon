@@ -42,6 +42,7 @@ import (
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/txtrace"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
@@ -148,6 +149,8 @@ type TxPool struct {
 	// admitted, discardCounts and discardUnderBuilder are the pool conservation check: in, out, why.
 	admitted              int
 	admittedBySender      map[uint64]admitCount
+	discardBySender       map[senderReason]int
+	discardHighNonce      map[senderReason]uint64
 	discardCounts         map[txpoolcfg.DiscardReason]int
 	discardUnderBuilder   int
 	highestStateNonce     map[uint64]uint64
@@ -1603,6 +1606,11 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 			a.maxNonce = mt.TxnSlot.Nonce
 		}
 		p.admittedBySender[mt.TxnSlot.SenderID] = a
+		if txtrace.On() {
+			if addr, ok := p.senders.senderID2Addr[mt.TxnSlot.SenderID]; ok && txtrace.Tracks(addr.String()) {
+				txtrace.Record(txtrace.PoolAdmitted, mt.TxnSlot.Nonce, mt.TxnSlot.IDHash, 0, 0)
+			}
+		}
 		if txn.Traced {
 			logger.Info(fmt.Sprintf("TX TRACING: schedule sendersWithChangedState idHash=%x senderId=%d", txn.IDHash, mt.TxnSlot.SenderID))
 		}
@@ -1627,6 +1635,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 		// how many the pool holds — are cheap. Report them and let the reader do the arithmetic.
 		logger.Warn("[sender-run] the busiest sender's sequence, as the pool holds it",
 			"run", p.busiestSenderRun(cacheView))
+		logger.Warn("[sender-exits] how the busiest sender's transactions left the pool", "exits", p.senderExits(cacheView))
 	}
 
 	for senderID := range sendersWithChangedState {
@@ -1911,6 +1920,32 @@ func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 		p.discardCounts = map[txpoolcfg.DiscardReason]int{}
 	}
 	p.discardCounts[reason]++
+	// ⚠ PER SENDER, BECAUSE POOL-WIDE TOTALS CANNOT ANSWER A PER-SENDER QUESTION. "4,800 submitted,
+	// 4,154 held, 544 canonical, so 102 left as Mined without being mined" subtracts one sender's
+	// counts from a pool-wide tally across 133 senders and is not a valid inference. If a transaction
+	// really does leave as Mined without its block becoming canonical that is a serious fault, so it
+	// is recorded directly: per sender, per reason, with the nonce, and never derived.
+	if p.discardBySender == nil {
+		p.discardBySender = map[senderReason]int{}
+	}
+	k := senderReason{sender: mt.TxnSlot.SenderID, reason: reason}
+	e := p.discardBySender[k]
+	if e == 0 || mt.TxnSlot.Nonce > p.discardHighNonce[k] {
+		if p.discardHighNonce == nil {
+			p.discardHighNonce = map[senderReason]uint64{}
+		}
+		p.discardHighNonce[k] = mt.TxnSlot.Nonce
+	}
+	p.discardBySender[k] = e + 1
+	// The in-process record of a transaction leaving, with the reason. A Mined exit here IS the
+	// record of canonicalisation — removeMined is reached only from OnNewBlock, which the import
+	// drives — so "did this nonce become canonical" is read from its own row rather than asked of
+	// the node over RPC, which is the mechanism under test.
+	if txtrace.On() {
+		if addr, ok := p.senders.senderID2Addr[mt.TxnSlot.SenderID]; ok && txtrace.Tracks(addr.String()) {
+			txtrace.Record(txtrace.PoolExit, mt.TxnSlot.Nonce, mt.TxnSlot.IDHash, uint64(reason), 3)
+		}
+	}
 	if reason != txpoolcfg.Mined {
 		if bn, held := p.builderNonce[mt.TxnSlot.SenderID]; held && mt.TxnSlot.Nonce <= bn {
 			p.discardUnderBuilder++
@@ -3242,9 +3277,14 @@ func (p *TxPool) busiestSenderRun(cacheView kvcache.CacheView) string {
 	}
 	held := p.all.senderIDTxnCount[best]
 	span := highest - lowest + 1
+	// ⚠ senders.info PANICS ("must not happen") for an id with no address mapping, and an id can be in
+	// admittedBySender while the mapping has gone. A diagnostic must never be able to stop the thing it
+	// is measuring: this crashed live403 outright. Resolve the address first and read nothing if absent.
 	chainNonce := uint64(0)
-	if n, _, err := p.senders.info(cacheView, best); err == nil {
-		chainNonce = n
+	if _, mapped := p.senders.senderID2Addr[best]; mapped {
+		if n, _, err := p.senders.info(cacheView, best); err == nil {
+			chainNonce = n
+		}
 	}
 	name := fmt.Sprintf("id%d", best)
 	if addr, ok := p.senders.senderID2Addr[best]; ok {
@@ -3252,4 +3292,53 @@ func (p *TxPool) busiestSenderRun(cacheView kvcache.CacheView) string {
 	}
 	return fmt.Sprintf("%s chainNext=%d poolLowest=%d poolHighest=%d held=%d span=%d holesInSpan=%d frontGap=%d",
 		name, chainNonce, lowest, highest, held, span, int(span)-held, int64(lowest)-int64(chainNonce))
+}
+
+// senderReason keys a removal by who it belonged to and why it left.
+type senderReason struct {
+	sender uint64
+	reason txpoolcfg.DiscardReason
+}
+
+// senderExits says how the busiest sender's transactions left this pool, by reason, with the highest
+// nonce seen for each. Read against that sender's canonical nonce: a Mined count whose highest nonce
+// is above the chain's next nonce means the pool was told a transaction mined that did not.
+func (p *TxPool) senderExits(cacheView kvcache.CacheView) string {
+	var best uint64
+	var bestN int
+	for id, a := range p.admittedBySender {
+		if a.n > bestN {
+			best, bestN = id, a.n
+		}
+	}
+	if bestN == 0 {
+		return "none"
+	}
+	// ⚠ senders.info PANICS ("must not happen") for an id with no address mapping, and an id can be in
+	// admittedBySender while the mapping has gone. A diagnostic must never be able to stop the thing it
+	// is measuring: this crashed live403 outright. Resolve the address first and read nothing if absent.
+	chainNonce := uint64(0)
+	if _, mapped := p.senders.senderID2Addr[best]; mapped {
+		if n, _, err := p.senders.info(cacheView, best); err == nil {
+			chainNonce = n
+		}
+	}
+	var b strings.Builder
+	name := fmt.Sprintf("id%d", best)
+	if addr, ok := p.senders.senderID2Addr[best]; ok {
+		name = addr.String()
+	}
+	fmt.Fprintf(&b, "%s chainNext=%d admitted=%d", name, chainNonce, bestN)
+	for k, n := range p.discardBySender {
+		if k.sender != best {
+			continue
+		}
+		hi := p.discardHighNonce[k]
+		flag := ""
+		if k.reason == txpoolcfg.Mined && hi >= chainNonce {
+			flag = " ⚠ABOVE-CHAIN"
+		}
+		fmt.Fprintf(&b, " | %s=%d highestNonce=%d%s", k.reason.String(), n, hi, flag)
+	}
+	return b.String()
 }

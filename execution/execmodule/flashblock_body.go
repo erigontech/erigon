@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/txtrace"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
@@ -399,6 +400,17 @@ func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs Flas
 		e.flash.receipts = vr.FlashblockReceiptCount
 	}
 	e.flash.mu.Unlock()
+	// ⚠ FILTER-KEPT IS NOT EXECUTED, AND THE DIFFERENCE IS WHERE A RE-OFFER COMES FROM. The filter's
+	// survivors join the maintained body BEFORE they run; a stopped round commits only a prefix and
+	// rollbackRound takes the rest back out, so those transactions return and are offered again.
+	// RoundKeptHashes is the prefix that actually applied, so this is the stage that means "executed".
+	if txtrace.On() {
+		for _, h := range vr.RoundKeptHashes {
+			if txtrace.Known(h) {
+				txtrace.Record(txtrace.ExecCommitted, 0, h, inputs.Number, 1)
+			}
+		}
+	}
 	committed = true
 	// The round succeeded AND was stopped: it committed the prefix it executed and the caller takes the
 	// rest back. The error says which, and how many — there is nothing for the caller to work out from a
@@ -581,8 +593,12 @@ func (e *ExecModule) filterStreamLocked(ctx context.Context, newTxRLPs [][]byte)
 	// reconsidered, so the caller must stop offering it; a FUTURE one has only been told to wait for its
 	// predecessor and must keep coming back. Collapsing the two either loses transactions or loops on them.
 	droppedHashes := make([]common.Hash, 0, 8)
+	traceOn := txtrace.On()
 	for _, c := range cands {
 		rlp, s := c.rlp, c.sender
+		if traceOn && txtrace.Tracks(s.Value().String()) {
+			txtrace.Record(txtrace.ExecOffered, c.nonce, c.hash, nextNonce(s), 2)
+		}
 		k := snKeyExec{addr: s, nonce: c.nonce}
 		if e.flash.seen[k] {
 			nSeen++
@@ -593,6 +609,9 @@ func (e *ExecModule) filterStreamLocked(ctx context.Context, newTxRLPs [][]byte)
 		if c.nonce < exp {
 			e.flash.seen[k] = true
 			nStale++
+			if traceOn && txtrace.Tracks(s.Value().String()) {
+				txtrace.Record(txtrace.ExecStale, c.nonce, c.hash, exp, 2)
+			}
 			srcKind, srcBlock := "canonical", uint64(0)
 			if _, n, sd := e.preExec.Active(); sd != nil {
 				srcKind, srcBlock = "preexec", n
@@ -620,6 +639,9 @@ func (e *ExecModule) filterStreamLocked(ctx context.Context, newTxRLPs [][]byte)
 			//
 			// Not marking it costs one map lookup and a nonce comparison per re-offer, and `seen`
 			// still stops anything DECIDED from being reconsidered.
+			if traceOn && txtrace.Tracks(s.Value().String()) {
+				txtrace.Record(txtrace.ExecFuture, c.nonce, c.hash, exp, 2)
+			}
 			nFuture++
 			continue
 		}
@@ -632,6 +654,9 @@ func (e *ExecModule) filterStreamLocked(ctx context.Context, newTxRLPs [][]byte)
 			e.logger.Error("[BODY-AUDIT] filter kept a tx that does not continue the body",
 				"block", e.flash.num, "sender", s, "lastInBody", prev, "keeping", c.nonce,
 				"stateNext", exp, "bodyLen", len(e.flash.body))
+		}
+		if traceOn && txtrace.Tracks(s.Value().String()) {
+			txtrace.Record(txtrace.ExecFiltered, c.nonce, c.hash, uint64(e.flash.num), 1)
 		}
 		e.flash.bodyNonce[s] = c.nonce
 		survivors = append(survivors, rlp)
