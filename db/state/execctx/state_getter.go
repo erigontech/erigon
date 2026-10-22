@@ -61,6 +61,26 @@ func (g *stateGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return g.tx.StepsInFiles(entitySet...)
 }
 
+// AsSnapshotGetter reads this SD over tx, with snapshot-bounded cache hits.
+// The SD's in-memory values must remain unchanged while the getter is in use.
+func (sd *SharedDomains) AsSnapshotGetter(tx kv.TemporalTx) kv.TemporalGetter {
+	return &snapshotGetter{sd: sd, TemporalGetter: NewCachedTemporalTxStateGetter(tx, sd.stateCache)}
+}
+
+type snapshotGetter struct {
+	kv.TemporalGetter
+	sd *SharedDomains
+}
+
+func (g *snapshotGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	v, step, maxStep, ok := g.sd.latestFromMem(name, k)
+	maxStep = min(maxStep, opts.MaxStep())
+	if ok && servableUnderBound(step, maxStep) {
+		return v, step, nil
+	}
+	return g.TemporalGetter.GetLatest(name, k, opts.WithMaxStep(maxStep))
+}
+
 // TemporalTxStateGetter exposes execution reads over a temporal transaction.
 type TemporalTxStateGetter struct {
 	kv.TemporalTx

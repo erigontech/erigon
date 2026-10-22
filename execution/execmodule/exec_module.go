@@ -144,13 +144,14 @@ func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, 
 		sd = c.publishedSD()
 	}
 
-	var view *CacheView
-	if sd != nil {
-		view = &CacheView{context: sd, getter: sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})}
-	} else {
-		view = &CacheView{getter: execctx.NewCachedTemporalTxStateGetter(tx, stateCache)}
+	switch {
+	case sd == nil:
+		return &CacheView{getter: execctx.NewCachedTemporalTxStateGetter(tx, stateCache)}, nil
+	case hasSelection:
+		return &CacheView{context: sd, getter: sd.AsSnapshotGetter(tx)}, nil
+	default:
+		return &CacheView{context: sd, getter: sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})}, nil
 	}
-	return view, nil
 }
 
 func selectedSharedDomains(tx kv.TemporalTx) (*execctx.SharedDomains, bool, error) {
@@ -176,7 +177,7 @@ type CacheView struct {
 	context *execctx.SharedDomains
 	// getter is built once per view: it carries the per-tx cache ReadView, so
 	// per-read getter construction would cost an allocation on every call.
-	getter execctxapi.StateGetter
+	getter kv.TemporalGetter
 }
 
 func (c *CacheView) Get(k []byte) ([]byte, error) {
