@@ -138,3 +138,42 @@ func TestTouchedEmptyAccountWithStorageIsWiped(t *testing.T) {
 		})
 	}
 }
+
+// CREATE2 onto an existing account without nonce and code, but with storage,
+// succeeds: the account gets the code and nonce 1, keeps its balance, and its
+// old storage is gone.
+func TestCreate2OntoAccountWithStorage(t *testing.T) {
+	initCode := program.New().ReturnData([]byte{1}).Bytes()
+	factory := common.HexToAddress("0xfac7")
+	target := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+	for _, balance := range []int64{0, 7} {
+		for _, amsterdam := range []bool{false, true} {
+			t.Run(fmt.Sprintf("balance=%d/amsterdam=%v", balance, amsterdam), func(t *testing.T) {
+				config := chain.TestChainOsakaConfig.Copy()
+				if amsterdam {
+					config.AmsterdamTime = common.NewUint64(0)
+				}
+				alloc := types.GenesisAlloc{
+					factory: {Code: program.New().Create2(initCode, 0).Push(0).Op(vm.SSTORE, vm.STOP).Bytes()},
+					target:  {Balance: big.NewInt(balance), Storage: map[common.Hash]common.Hash{common.BytesToHash([]byte{1}): common.BytesToHash([]byte{0x2a})}},
+				}
+				keys := revivalKeys(t, alloc, 1)
+				gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
+				chainPack := buildBlockSerially(t, gspec, keys, common.Address{1}, 10_000_000_000, []revivalCall{{to: factory}})
+				importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
+					require.Equal(t, *new(uint256.Int).SetBytes(target[:]), storageAt(t, st, factory, 0), "CREATE2 result")
+					require.Equal(t, uint256.Int{}, storageAt(t, st, target, 1))
+					code, err := st.GetCode(accounts.InternAddress(target))
+					require.NoError(t, err)
+					require.Equal(t, []byte{1}, code)
+					nonce, err := st.GetNonce(accounts.InternAddress(target))
+					require.NoError(t, err)
+					require.Equal(t, uint64(1), nonce)
+					got, err := st.GetBalance(accounts.InternAddress(target))
+					require.NoError(t, err)
+					require.Equal(t, *uint256.NewInt(uint64(balance)), got)
+				})
+			})
+		}
+	}
+}
