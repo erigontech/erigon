@@ -1261,6 +1261,7 @@ func TestForwardBeaconDownloaderP2PEmptyActiveSlotRemainsRequestable(t *testing.
 	})
 
 	var serveSuccessor atomic.Bool
+	var rangeCalls atomic.Int32
 	requestedRanges := make(chan cltypes.BeaconBlocksByRangeRequest, 64)
 	rpcClient, _ := newContextBlockingBeaconRPC(t.Context(), &immediateEnvelopeSentinel{empty: true})
 	downloader := &ForwardBeaconDownloader{
@@ -1273,7 +1274,7 @@ func TestForwardBeaconDownloaderP2PEmptyActiveSlotRemainsRequestable(t *testing.
 			if serveSuccessor.Load() {
 				return []*cltypes.SignedBeaconBlock{successor}, "block-peer", nil
 			}
-			return []*cltypes.SignedBeaconBlock{}, "block-peer", nil
+			return []*cltypes.SignedBeaconBlock{}, fmt.Sprintf("block-peer-%d", rangeCalls.Add(1)%2), nil
 		},
 	}
 	downloader.SetCurrentSlotSampler(func() uint64 { return frontier + 2 })
@@ -1381,6 +1382,7 @@ func TestForwardBeaconDownloaderRetriesCompletedGloasGapAfterEmptyResponse(t *te
 	})
 
 	var serveSuccessor atomic.Bool
+	var rangeCalls atomic.Int32
 	requestedRanges := make(chan [2]uint64, 64)
 	rpcClient, _ := newContextBlockingBeaconRPC(t.Context(), &immediateEnvelopeSentinel{empty: true})
 	downloader := &ForwardBeaconDownloader{
@@ -1393,7 +1395,7 @@ func TestForwardBeaconDownloaderRetriesCompletedGloasGapAfterEmptyResponse(t *te
 			if serveSuccessor.Load() && start <= successor.Block.Slot && successor.Block.Slot < start+count {
 				return []*cltypes.SignedBeaconBlock{successor}, "block-peer", nil
 			}
-			return []*cltypes.SignedBeaconBlock{}, "block-peer", nil
+			return []*cltypes.SignedBeaconBlock{}, fmt.Sprintf("block-peer-%d", rangeCalls.Add(1)%2), nil
 		},
 	}
 	downloader.SetCurrentSlotSampler(func() uint64 { return frontier + 6 })
