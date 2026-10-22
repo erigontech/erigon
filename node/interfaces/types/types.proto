@@ -172,28 +172,6 @@ message ExecutionPayloadBody {
   bytes block_access_list = 3;
 }
 
-message AccountAbstractionTransaction {
-  uint64 nonce = 1;
-  bytes chain_id = 2;
-  bytes tip = 3;
-  bytes fee_cap = 4;
-  uint64 gas = 5;
-
-  bytes sender_address = 6;
-  bytes sender_validation_data = 7;
-  bytes execution_data = 8;
-  bytes paymaster = 9;
-  bytes paymaster_data = 10;
-  bytes deployer = 11;
-  bytes deployer_data = 12;
-  bytes builder_fee = 13;
-  uint64 validation_gas_limit = 14;
-  uint64 paymaster_validation_gas_limit = 15;
-  uint64 post_op_gas_limit = 16;
-  bytes nonce_key = 17;
-  repeated Authorization authorizations = 18;
-}
-
 message Authorization {
   uint64 chain_id = 1;
   bytes address = 2;

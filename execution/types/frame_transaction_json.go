@@ -1,0 +1,142 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package types
+
+import (
+	"encoding/json"
+	"errors"
+
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/rpc/jsonstream"
+)
+
+type frameJSON struct {
+	Mode          hexutil.Uint64  `json:"mode"`
+	Flags         hexutil.Uint64  `json:"flags"`
+	Target        *common.Address `json:"target"`
+	GasLimit      hexutil.Uint64  `json:"gasLimit"`
+	StateGasLimit hexutil.Uint64  `json:"stateGasLimit"`
+	Value         hexutil.U256    `json:"value"`
+	Data          hexutil.Bytes   `json:"data"`
+}
+
+func (frame Frame) MarshalJSON() ([]byte, error) {
+	return json.Marshal(frameJSON{
+		hexutil.Uint64(frame.Mode), hexutil.Uint64(frame.Flags), frame.Target,
+		hexutil.Uint64(frame.Limits.Execution), hexutil.Uint64(frame.Limits.State), hexutil.U256(frame.Value), frame.Data,
+	})
+}
+
+func (frame *Frame) UnmarshalJSON(input []byte) error {
+	var dec frameJSON
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
+	}
+	if dec.Mode > FrameSender || dec.Flags >= 8 {
+		return errors.New("invalid frame mode or flags")
+	}
+	*frame = Frame{uint8(dec.Mode), uint8(dec.Flags), dec.Target, mdgas.MdGas{Execution: uint64(dec.GasLimit), State: uint64(dec.StateGasLimit)}, uint256.Int(dec.Value), dec.Data}
+	return nil
+}
+
+type frameSignatureJSON struct {
+	Scheme    hexutil.Uint64 `json:"scheme"`
+	Signer    hexutil.Bytes  `json:"signer"`
+	Message   hexutil.Bytes  `json:"msg"`
+	Signature hexutil.Bytes  `json:"signature"`
+}
+
+func (sig FrameSignature) MarshalJSON() ([]byte, error) {
+	return json.Marshal(frameSignatureJSON{hexutil.Uint64(sig.Scheme), sig.Signer, sig.Message, sig.Signature})
+}
+
+func (sig *FrameSignature) UnmarshalJSON(input []byte) error {
+	var dec frameSignatureJSON
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
+	}
+	if dec.Scheme > FrameSignatureP256 {
+		return errors.New("invalid frame signature scheme")
+	}
+	*sig = FrameSignature{uint8(dec.Scheme), dec.Signer, dec.Message, dec.Signature}
+	return nil
+}
+
+type frameTransactionJSON struct {
+	Type                 hexutil.Uint64   `json:"type"`
+	ChainID              *hexutil.U256    `json:"chainId"`
+	Nonce                *hexutil.Uint64  `json:"nonce"`
+	Sender               *common.Address  `json:"sender"`
+	Frames               []Frame          `json:"frames"`
+	Signatures           []FrameSignature `json:"signatures"`
+	MaxPriorityFeePerGas *hexutil.U256    `json:"maxPriorityFeePerGas"`
+	MaxFeePerGas         *hexutil.U256    `json:"maxFeePerGas"`
+	MaxFeePerBlobGas     *hexutil.U256    `json:"maxFeePerBlobGas"`
+	BlobVersionedHashes  []common.Hash    `json:"blobVersionedHashes"`
+	Hash                 common.Hash      `json:"hash"`
+}
+
+func (tx *FrameTransaction) MarshalJSON() ([]byte, error) {
+	return json.Marshal(frameTransactionJSON{
+		Type: FrameTxType, ChainID: (*hexutil.U256)(&tx.ChainID), Nonce: (*hexutil.Uint64)(&tx.Nonce), Sender: &tx.SenderAddress,
+		Frames: tx.Frames, Signatures: tx.Signatures, MaxPriorityFeePerGas: (*hexutil.U256)(&tx.Fees.TipCap),
+		MaxFeePerGas: (*hexutil.U256)(&tx.Fees.FeeCap), MaxFeePerBlobGas: (*hexutil.U256)(&tx.Fees.BlobFeeCap),
+		BlobVersionedHashes: tx.BlobVersionedHashes, Hash: tx.Hash(),
+	})
+}
+
+func (tx *FrameTransaction) UnmarshalJSON(input []byte) error {
+	var dec frameTransactionJSON
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
+	}
+	if dec.ChainID == nil || dec.Nonce == nil || dec.Sender == nil || dec.Frames == nil || dec.MaxFeePerGas == nil || dec.MaxPriorityFeePerGas == nil || dec.MaxFeePerBlobGas == nil {
+		return errors.New("missing required frame transaction field")
+	}
+	*tx = FrameTransaction{
+		ChainID: uint256.Int(*dec.ChainID), Nonce: uint64(*dec.Nonce), SenderAddress: *dec.Sender,
+		Frames: dec.Frames, Signatures: dec.Signatures, BlobVersionedHashes: dec.BlobVersionedHashes,
+		Fees: FrameFees{uint256.Int(*dec.MaxPriorityFeePerGas), uint256.Int(*dec.MaxFeePerGas), uint256.Int(*dec.MaxFeePerBlobGas)},
+	}
+	return tx.Validate()
+}
+
+type Frames []Frame
+
+type FrameSignatures []FrameSignature
+
+func (frames Frames) MarshalFastJSONTo(s *jsonstream.Stream) error {
+	data, err := json.Marshal(frames)
+	if err != nil {
+		return err
+	}
+	s.WriteRawBytes(data)
+	return nil
+}
+
+func (signatures FrameSignatures) MarshalFastJSONTo(s *jsonstream.Stream) error {
+	data, err := json.Marshal(signatures)
+	if err != nil {
+		return err
+	}
+	s.WriteRawBytes(data)
+	return nil
+}

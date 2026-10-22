@@ -43,6 +43,7 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 		return &Signer{}
 	}
 	return makeSigner(config.ChainID, signerForks{
+		bogota:         config.IsEIPEnabled(8141, blockTime),
 		prague:         config.IsPrague(blockTime),
 		cancun:         config.IsCancun(blockTime),
 		london:         config.IsLondon(blockNumber),
@@ -62,6 +63,7 @@ func MakeSignerFromRules(chainID *uint256.Int, rules *chain.Rules) *Signer {
 		chainID = rules.ChainID
 	}
 	return makeSigner(chainID, signerForks{
+		bogota:         rules.IsEIPEnabled(8141),
 		prague:         rules.IsPrague,
 		cancun:         rules.IsCancun,
 		london:         rules.IsLondon,
@@ -72,7 +74,7 @@ func MakeSignerFromRules(chainID *uint256.Int, rules *chain.Rules) *Signer {
 }
 
 type signerForks struct {
-	prague, cancun, london, berlin, spuriousDragon, homestead bool
+	bogota, prague, cancun, london, berlin, spuriousDragon, homestead bool
 }
 
 func makeSigner(chainID *uint256.Int, forks signerForks) *Signer {
@@ -82,8 +84,9 @@ func makeSigner(chainID *uint256.Int, forks signerForks) *Signer {
 		chainId.Set(chainID)
 	}
 	signer.unprotected = true
+	signer.frame = forks.bogota
 	switch {
-	case forks.prague:
+	case forks.prague || forks.bogota:
 		signer.protected = true
 		signer.accessList = true
 		signer.dynamicFee = true
@@ -154,6 +157,7 @@ func LatestSigner(config *chain.Config) *Signer {
 		if config.SpuriousDragonBlock != nil {
 			signer.protected = true
 		}
+		signer.frame = config.BogotaTime != nil && config.IsEIPEnabled(8141, *config.BogotaTime)
 		if config.PragueTime != nil {
 			signer.setCode = true
 		}
@@ -181,6 +185,7 @@ func LatestSignerForChainID(chainID *uint256.Int) *Signer {
 	signer.dynamicFee = true
 	signer.blob = true
 	signer.setCode = true
+	signer.frame = true
 	return &signer
 }
 
@@ -229,6 +234,7 @@ type Signer struct {
 	dynamicFee          bool // Whether this signer should allow transactions with base fee and tip (instead of gasprice), supersedes accessList
 	blob                bool // Whether this signer should allow blob transactions
 	setCode             bool // Whether this signer should allow set code transactions
+	frame               bool
 }
 
 func (sg Signer) String() string {
@@ -314,8 +320,17 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 		// id, add 27 to become equivalent to unprotected Homestead signatures.
 		V.Add(&t.V, &u256.Num27)
 		R, S = &t.R, &t.S
-	case *AccountAbstractionTransaction:
-		return txn.Sender(Signer{})
+	case *FrameTransaction:
+		if !sg.frame {
+			return accounts.NilAddress, ErrTxTypeNotSupported
+		}
+		if !t.ChainID.Eq(&sg.chainID) {
+			return accounts.NilAddress, ErrInvalidChainId
+		}
+		if err := t.Validate(); err != nil {
+			return accounts.NilAddress, err
+		}
+		return accounts.InternAddress(t.SenderAddress), nil
 	default:
 		if spec, ok := registeredTxType(txn.Type()); ok && spec.Sender != nil {
 			return spec.Sender(txn, sg)
@@ -385,7 +400,8 @@ func (sg Signer) Equal(other Signer) bool {
 		sg.accessList == other.accessList &&
 		sg.dynamicFee == other.dynamicFee &&
 		sg.blob == other.blob &&
-		sg.setCode == other.setCode
+		sg.setCode == other.setCode &&
+		sg.frame == other.frame
 }
 
 func decodeSignature(sig []byte) (r, s, v *uint256.Int, err error) {

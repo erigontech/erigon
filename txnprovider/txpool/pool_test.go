@@ -601,13 +601,12 @@ func TestProvideTxnsUsesRemainingGasForAdmission(t *testing.T) {
 	}
 }
 
-func TestProvideTxnsRejectsAAAboveExecutionGasTarget(t *testing.T) {
+func TestProvideTxnsRejectsFrameAboveExecutionGasTarget(t *testing.T) {
 	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 100_000)
-	aaTxn := &types.AccountAbstractionTransaction{
-		SenderAddress: accounts.InternAddress(common.Address{1}),
-		GasLimit:      100_000 - params.TxAAGas,
+	frameTxn := &types.FrameTransaction{
+		SenderAddress: common.Address{1}, Frames: []types.Frame{{Limits: mdgas.MdGas{Execution: 87_525}}},
 	}
-	pool.pending.best.ms[0].TxnSlot.Txn = aaTxn
+	pool.pending.best.ms[0].TxnSlot.Txn = frameTxn
 	txns, err := pool.ProvideTxns(t.Context(),
 		txnprovider.WithGasTarget(mdgas.NewFullMdGas(50_000, 100_000, 0)))
 	require.NoError(t, err)

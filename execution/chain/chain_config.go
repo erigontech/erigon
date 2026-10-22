@@ -131,9 +131,6 @@ type Config struct {
 	// their parent fork is active. Used for devnets where the reference
 	// client doesn't yet implement certain EIPs (e.g. [7708, 7778, 7928]).
 	DisabledEIPs []int `json:"disabledEIPs,omitempty"`
-
-	// Account Abstraction
-	AllowAA bool
 }
 
 // IsEIPEnabled reports whether the given EIP is active at the given block time:
@@ -144,6 +141,8 @@ func (c *Config) IsEIPEnabled(eip int, time uint64) bool {
 		return false
 	}
 	switch eip {
+	case 8141:
+		return c.IsBogota(time)
 	case 7708, 7928:
 		return c.IsAmsterdam(time)
 	default:
@@ -930,7 +929,7 @@ type Rules struct {
 	IsByzantium, IsConstantinople, IsPetersburg       bool
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
 	IsCancun                                          bool
-	IsPrague, IsOsaka, IsAmsterdam                    bool
+	IsPrague, IsOsaka, IsAmsterdam, IsBogota          bool
 	DisabledEIPs                                      []int
 	IsAura                                            bool
 
@@ -948,6 +947,8 @@ func (r *Rules) IsEIPEnabled(eip int) bool {
 		return false
 	}
 	switch eip {
+	case 8141:
+		return r.IsBogota
 	case 7708, 7928:
 		return r.IsAmsterdam
 	case 161, 170:

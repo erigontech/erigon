@@ -260,7 +260,6 @@ type Config struct {
 	KeepStoredChainConfig bool
 
 	// Account Abstraction
-	AllowAA bool
 
 	// fork choice update timeout
 	FcuTimeout         time.Duration

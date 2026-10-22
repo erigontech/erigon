@@ -3203,8 +3203,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 
 			if txn := txTask.Tx(); txn != nil {
-				executionContribution, stateContribution := protocol.InclusionContributions(txn.GetGasLimit(), txTask.Rules().IsAmsterdam, false)
-				if err := protocol.CheckBlockGasInclusion(be.gasPool, executionContribution, stateContribution, txn.GetBlobGas()); err != nil {
+				limits, err := protocol.TransactionGasLimits(txn, txTask.Rules().IsAmsterdam)
+				if err != nil {
+					return be.invalidBlockResult(fmt.Errorf("%w: invalid transaction gas limits: %w", rules.ErrInvalidBlock, err)), nil
+				}
+				if err := protocol.CheckBlockGasInclusion(be.gasPool, limits.Execution, limits.State, txn.GetBlobGas()); err != nil {
 					return be.invalidBlockResult(fmt.Errorf("%w: tx exceeds block gas budget at block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.number(), txVersion.TxIndex, err)), nil
 				}
 			}

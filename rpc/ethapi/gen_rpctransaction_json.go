@@ -26,6 +26,21 @@ func (x *RPCTransaction) MarshalFastJSONTo(s *jsonstream.Stream) error {
 
 // writeJSONFields writes those fields without the enclosing object, for a type another object inlines.
 func (x *RPCTransaction) writeJSONFields(s *jsonstream.Stream) error {
+	if x.Sender != nil {
+		ethjson.Data(s, "sender", x.Sender[:])
+	}
+	if len(x.Frames) > 0 {
+		s.Field("frames")
+		if err := x.Frames.MarshalFastJSONTo(s); err != nil {
+			return err
+		}
+	}
+	if x.Signatures != nil {
+		s.Field("signatures")
+		if err := x.Signatures.MarshalFastJSONTo(s); err != nil {
+			return err
+		}
+	}
 	if x.BlockHash == nil {
 		s.Field("blockHash").WriteNil()
 	} else {

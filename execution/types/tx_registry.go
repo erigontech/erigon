@@ -84,7 +84,7 @@ func registeredTxType(id byte) (TxTypeSpec, bool) {
 // itself, which an external type may not claim.
 func builtinTxType(id byte) bool {
 	switch id {
-	case LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType, AccountAbstractionTxType:
+	case LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType, FrameTxType:
 		return true
 	}
 	return false
@@ -95,9 +95,6 @@ func builtinTxType(id byte) bool {
 // leaves ReceiptPayload type-specific, so a built-in that adds a consensus
 // receipt field stays off this one. Legacy carries no type byte; a registered
 // type has to opt in.
-//
-// AccountAbstractionTxType is off it deliberately — it has never had a receipt
-// encoding, so giving it one moves the receipts root of an RIP-7560 block (#23569).
 func hasStandardReceiptPayload(id byte) bool {
 	switch id {
 	case AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType:

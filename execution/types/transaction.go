@@ -53,7 +53,7 @@ const (
 	DynamicFeeTxType
 	BlobTxType
 	SetCodeTxType
-	AccountAbstractionTxType
+	FrameTxType = 6
 )
 
 // Transaction is an Ethereum transaction.
@@ -253,8 +253,17 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		}
 	case SetCodeTxType:
 		t = &SetCodeTransaction{}
-	case AccountAbstractionTxType:
-		t = &AccountAbstractionTransaction{}
+	case FrameTxType:
+		t = &FrameTransaction{}
+		if blobTxnsAreWrappedWithBlobs {
+			content, _, err := rlp.SplitList(data[1:])
+			if err != nil {
+				return nil, err
+			}
+			if len(content) > 0 && content[0] >= 0xc0 {
+				t = &FrameTxWrapper{}
+			}
+		}
 	default:
 		if spec, ok := registeredTxType(data[0]); ok {
 			t = spec.New()
@@ -275,12 +284,12 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 	return t, nil
 }
 
-// Removes everything but the payload body from blob tx and prepends 0x3 at the beginning - no copy
-// Doesn't change non-blob tx
+// UnwrapTxPlayloadRlp removes the blob sidecar in place, preserving the transaction type.
 func UnwrapTxPlayloadRlp(blobTxRlp []byte) ([]byte, error) {
-	if blobTxRlp[0] != BlobTxType {
+	if len(blobTxRlp) == 0 || (blobTxRlp[0] != BlobTxType && blobTxRlp[0] != FrameTxType) {
 		return blobTxRlp, nil
 	}
+	txType := blobTxRlp[0]
 	dataposPrev, _, isList, err := rlp.Prefix(blobTxRlp[1:], 0)
 	if err != nil || dataposPrev < 1 {
 		return nil, err
@@ -289,6 +298,13 @@ func UnwrapTxPlayloadRlp(blobTxRlp []byte) ([]byte, error) {
 		return blobTxRlp, nil
 	}
 
+	_, _, isList, err = rlp.Prefix(blobTxRlp[1:], dataposPrev)
+	if err != nil {
+		return nil, err
+	}
+	if !isList {
+		return blobTxRlp, nil
+	}
 	blobTxRlp = blobTxRlp[1:]
 	// Get to the wrapper list
 	datapos, datalen, err := rlp.ParseList(blobTxRlp, dataposPrev)
@@ -296,7 +312,7 @@ func UnwrapTxPlayloadRlp(blobTxRlp []byte) ([]byte, error) {
 		return nil, err
 	}
 	blobTxRlp = blobTxRlp[dataposPrev-1 : datapos+datalen] // seekInFiles left an extra-bit
-	blobTxRlp[0] = 0x3
+	blobTxRlp[0] = txType
 	// Include the prefix part of the rlp
 	return blobTxRlp, nil
 }
@@ -414,6 +430,7 @@ type Message struct {
 	blobHashes       []common.Hash
 	authorizations   []Authorization
 	dynamicFeeArgs   bool
+	frameTransaction *FrameTransaction
 
 	skipExecutionGasCap bool
 }
@@ -521,3 +538,5 @@ func (m *Message) MaxFeePerBlobGas() *uint256.Int {
 }
 
 func (m *Message) BlobHashes() []common.Hash { return m.blobHashes }
+
+func (m *Message) FrameTransaction() *FrameTransaction { return m.frameTransaction }

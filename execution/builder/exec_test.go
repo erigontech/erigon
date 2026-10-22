@@ -18,7 +18,14 @@ package builder
 
 import (
 	"context"
+	"fmt"
 	"testing"
+
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/holiman/uint256"
 
 	"github.com/stretchr/testify/require"
 
@@ -85,4 +92,36 @@ func TestFakeTxnProviderDefaultAmount(t *testing.T) {
 	got, err := provider.ProvideTxns(context.Background())
 	require.NoError(t, err)
 	require.Len(t, got, 3)
+}
+
+type frameFilterState struct {
+	state.NoopReader
+	state.NoopWriter
+	account *accounts.Account
+}
+
+func (s *frameFilterState) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	return s.account, nil
+}
+
+func (s *frameFilterState) UpdateAccountData(_ accounts.Address, _, account *accounts.Account) error {
+	s.account = account
+	return nil
+}
+
+func TestFrameFilterAllowsSponsoredSender(t *testing.T) {
+	for _, deployed := range []bool{false, true} {
+		t.Run(fmt.Sprint(deployed), func(t *testing.T) {
+			sim := &frameFilterState{}
+			if deployed {
+				sim.account = &accounts.Account{CodeHash: accounts.InternCodeHash(common.Hash{1})}
+			}
+			tx := &types.FrameTransaction{ChainID: *uint256.NewInt(1), SenderAddress: common.Address{1}, Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth}}, Fees: types.FrameFees{FeeCap: *uint256.NewInt(1)}}
+			got, err := filterBadTransactions([]types.Transaction{tx}, uint256.NewInt(1), chain.AllProtocolChanges, 1, &types.Header{BaseFee: uint256.NewInt(0)}, sim, sim, log.New(), nil)
+			require.NoError(t, err)
+			require.Len(t, got, 1)
+			require.Equal(t, uint64(1), sim.account.Nonce)
+			require.True(t, sim.account.Balance.IsZero())
+		})
+	}
 }
