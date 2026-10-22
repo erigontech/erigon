@@ -385,7 +385,8 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetBuilderPendingPayments(builderPendingPayments)
 
 	ptcWindow := solid.NewUint64VectorOfVectors(int((2+r.cfg.MinSeedLookahead)*r.cfg.SlotsPerEpoch), int(r.cfg.PtcSize))
-	if err := readCompressedSSZ(kvGetter, slot, kv.PtcWindowTable, ptcWindow, int(ret.Version())); err != nil {
+	ptcWindowSlot := r.cfg.RoundSlotToEpoch(slot)
+	if err := readCompressedSSZ(kvGetter, ptcWindowSlot, kv.PtcWindowEpochTable, ptcWindow, int(ret.Version())); err != nil {
 		return nil, fmt.Errorf("failed to read ptc window: %w", err)
 	}
 	ret.SetPtcWindow(ptcWindow)
@@ -1140,6 +1141,7 @@ var ErrMissingHistoryVectorData = errors.New("missing block/state root history (
 // slot, which prevents callers from silently operating on zero-valued state.
 func readCompressedSSZ[T interface {
 	DecodeSSZ(buf []byte, version int) error
+	EncodingSizeSSZ() int
 }](kvGetter state_accessors.GetValFn, slot uint64, table string, out T, version int) error {
 	compressed, err := kvGetter(table, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
@@ -1157,6 +1159,11 @@ func readCompressedSSZ[T interface {
 	base_encoding.PutZstdReader(zstdReader)
 	if err != nil {
 		return err
+	}
+	if table == kv.PtcWindowEpochTable {
+		if expected := out.EncodingSizeSSZ(); len(sszEnc) != expected {
+			return fmt.Errorf("table %s slot %d: corrupt SSZ length %d, expected %d", table, slot, len(sszEnc), expected)
+		}
 	}
 	return out.DecodeSSZ(sszEnc, version)
 }
