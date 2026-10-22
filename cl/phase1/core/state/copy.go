@@ -23,6 +23,10 @@ import (
 var pubkeyIndexDeltaSize = metrics.GetOrCreateGauge("beacon_state_pubkey_index_delta_size")
 
 func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
+	return b.copyInto(bs, nil)
+}
+
+func (b *CachingBeaconState) copyInto(bs *CachingBeaconState, totalActiveBalance *uint64) (err error) {
 	err = b.BeaconState.CopyInto(bs.BeaconState)
 	if err != nil {
 		return err
@@ -30,7 +34,7 @@ func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
 
 	bs.publicKeyIndices = pubkeyIndexFromBase(b.publicKeyIndices.base, bs.ValidatorSet())
 	pubkeyIndexDeltaSize.SetInt(len(bs.publicKeyIndices.delta))
-	err = bs.reinitCaches()
+	err = bs.reinitCaches(totalActiveBalance)
 	if err != nil {
 		return err
 	}
@@ -43,8 +47,16 @@ func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
 }
 
 func (b *CachingBeaconState) Copy() (bs *CachingBeaconState, err error) {
+	return b.copy(nil)
+}
+
+func (b *CachingBeaconState) CopyWithTotalActiveBalance(total uint64) (*CachingBeaconState, error) {
+	return b.copy(&total)
+}
+
+func (b *CachingBeaconState) copy(totalActiveBalance *uint64) (bs *CachingBeaconState, err error) {
 	copied := New(b.BeaconConfig())
-	err = b.CopyInto(copied)
+	err = b.copyInto(copied, totalActiveBalance)
 	if err != nil {
 		return nil, err
 	}
