@@ -432,6 +432,13 @@ func writeSendersRecoveredByExec(ctx context.Context, tx kv.RwTx, cfg ExecuteBlo
 		if err != nil {
 			return err
 		}
+		header, err := cfg.blockReader.Header(ctx, tx, hash, blockNum)
+		if err != nil {
+			return err
+		}
+		if header == nil || !execRecoversSenders(header) {
+			continue
+		}
 		has, err := cfg.blockReader.HasSenders(ctx, tx, hash, blockNum)
 		if err != nil {
 			return err
@@ -439,13 +446,14 @@ func writeSendersRecoveredByExec(ctx context.Context, tx kv.RwTx, cfg ExecuteBlo
 		if has {
 			continue
 		}
-		header, err := cfg.blockReader.Header(ctx, tx, hash, blockNum)
-		if err != nil {
-			return err
-		}
 		body, ok := cfg.readAheader.ReadBodyWithTransactions(hash)
-		if header == nil || body == nil || !ok {
-			return fmt.Errorf("no senders for block %d %x", blockNum, hash)
+		if body == nil || !ok {
+			if body, err = cfg.blockReader.BodyWithTransactions(ctx, tx, hash, blockNum); err != nil {
+				return err
+			}
+			if body == nil {
+				return fmt.Errorf("no body for block %d %x", blockNum, hash)
+			}
 		}
 		signer := types.MakeSigner(cfg.chainConfig, blockNum, header.Time)
 		senders := make([]common.Address, len(body.Transactions))
