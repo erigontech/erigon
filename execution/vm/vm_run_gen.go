@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -540,7 +538,7 @@ run:
 					if sLen < stackLimit && gasLeft >= GasQuickStep {
 						gasLeft -= GasQuickStep
 						callContext.gas, callContext.savedPC = gasLeft, pc
-						*callContext.Stack.pushRef() = *callContext.addressWord(addressWordSelf, callContext.Contract.Address())
+						callContext.Stack.pushRef().Set(callContext.addressWord(addressWordSelf, callContext.Contract.Address()))
 						gasLeft, pc = callContext.gas, callContext.savedPC
 						pc++
 						continue run
@@ -549,7 +547,7 @@ run:
 					if sLen < stackLimit && gasLeft >= GasQuickStep {
 						gasLeft -= GasQuickStep
 						callContext.gas, callContext.savedPC = gasLeft, pc
-						*callContext.Stack.pushRef() = *callContext.addressWord(addressWordOrigin, evm.Origin)
+						callContext.Stack.pushRef().Set(callContext.addressWord(addressWordOrigin, evm.Origin))
 						gasLeft, pc = callContext.gas, callContext.savedPC
 						pc++
 						continue run
@@ -558,7 +556,7 @@ run:
 					if sLen < stackLimit && gasLeft >= GasQuickStep {
 						gasLeft -= GasQuickStep
 						callContext.gas, callContext.savedPC = gasLeft, pc
-						*callContext.Stack.pushRef() = *callContext.addressWord(addressWordCaller, callContext.Contract.Caller())
+						callContext.Stack.pushRef().Set(callContext.addressWord(addressWordCaller, callContext.Contract.Caller()))
 						gasLeft, pc = callContext.gas, callContext.savedPC
 						pc++
 						continue run
@@ -595,7 +593,7 @@ run:
 					if sLen < stackLimit && gasLeft >= GasQuickStep {
 						gasLeft -= GasQuickStep
 						callContext.gas, callContext.savedPC = gasLeft, pc
-						*callContext.Stack.pushRef() = *callContext.addressWord(addressWordCoinbase, evm.Context.Coinbase)
+						callContext.Stack.pushRef().Set(callContext.addressWord(addressWordCoinbase, evm.Context.Coinbase))
 						gasLeft, pc = callContext.gas, callContext.savedPC
 						pc++
 						continue run
@@ -617,14 +615,12 @@ run:
 				case DIFFICULTY:
 					if sLen < stackLimit && gasLeft >= GasQuickStep {
 						gasLeft -= GasQuickStep
-						var v uint256.Int
 						if evm.Context.PrevRanDao != nil {
 
-							v.SetBytes32(evm.Context.PrevRanDao[:])
+							callContext.Stack.pushRef().SetBytes32(evm.Context.PrevRanDao[:])
 						} else {
-							v = evm.Context.Difficulty
+							*callContext.Stack.pushRef() = evm.Context.Difficulty
 						}
-						callContext.Stack.push(v)
 						pc++
 						continue run
 					}
