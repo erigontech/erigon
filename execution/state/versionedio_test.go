@@ -1114,7 +1114,7 @@ func TestUpdateWrite_StorageReadThenWriteBackSameValue_StaysRead(t *testing.T) {
 	slot := accounts.InternKey(common.HexToHash("0x07"))
 	orig := *uint256.NewInt(42)
 
-	account := &accountState{changes: &types.AccountChanges{Address: addr.Value()}}
+	account := &accountState{changes: types.AccountChanges{Address: addr.Value()}}
 
 	account.updateReadStorage(slot, orig)
 	require.Contains(t, account.storageReads, slot, "the read must be recorded")
@@ -1135,7 +1135,7 @@ func TestUpdateWrite_StorageReadThenWriteDifferentValue_BecomesWrite(t *testing.
 	orig := *uint256.NewInt(42)
 	changed := *uint256.NewInt(99)
 
-	account := &accountState{changes: &types.AccountChanges{Address: addr.Value()}}
+	account := &accountState{changes: types.AccountChanges{Address: addr.Value()}}
 
 	account.updateReadStorage(slot, orig)
 
