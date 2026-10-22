@@ -550,13 +550,16 @@ func (bra *BlockReadAheader) ReadBlockWithSenders(blockHash common.Hash) (*types
 	}
 	senders, ok := bra.senders.Get(blockHash)
 	if len(senders) == 0 || !ok {
-		return nil, false
+		if dbg.IgnoreBAL || !header.HasNonEmptyBAL() {
+			return nil, false
+		}
+	} else {
+		sendersAddresses := make([]common.Address, 0, len(senders)/length.Addr)
+		for i := 0; i < len(senders); i += length.Addr {
+			sendersAddresses = append(sendersAddresses, common.BytesToAddress(senders[i:i+length.Addr]))
+		}
+		body.SendersToTxs(sendersAddresses)
 	}
-	sendersAddresses := make([]common.Address, 0, len(senders)/length.Addr)
-	for i := 0; i < len(senders); i += length.Addr {
-		sendersAddresses = append(sendersAddresses, common.BytesToAddress(senders[i:i+length.Addr]))
-	}
-	body.SendersToTxs(sendersAddresses)
 	bal, _ := bra.bals.Get(blockHash)
 	return types.NewBlockFromStorage(header.Hash(), header, body.Transactions, body.Uncles, body.Withdrawals, bal), true
 }
