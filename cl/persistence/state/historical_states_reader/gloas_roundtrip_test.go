@@ -584,7 +584,7 @@ func TestReadQueueSSZWrapsCorruptDiff(t *testing.T) {
 		{
 			name: "required dump",
 			read: func(out *solid.ListSSZ[*cltypes.Builder]) error {
-				return ReadRequiredQueueSSZ(getter, diffSlot, kv.BuildersDump, kv.Builders, out)
+				return ReadRequiredQueueSSZ(getter, diffSlot, 0, kv.BuildersDump, kv.Builders, out)
 			},
 		},
 	}
