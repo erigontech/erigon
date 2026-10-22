@@ -131,9 +131,7 @@ type TxnExecutor struct {
 	// This is useful during parallel txn execution, where the common account read/write should be minimized.
 	noFeeBurnAndTip bool
 
-	// Skips the sender nonce check and bump, gas debit/refund and value debit;
-	// the parallel executor applies them in tx order at validation.
-	chargeSenderAtValidation bool
+	skipSenderNonceAndBalance bool
 }
 
 // Message represents a message sent to a contract.
@@ -193,7 +191,7 @@ func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 	return applyMessage(evm, msg, gp, refunds, gasBailout, false, false, engine)
 }
 
-func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, noFeeBurnAndTip bool, chargeSenderAtValidation bool, engine rules.EngineReader) (
+func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, noFeeBurnAndTip bool, skipSenderNonceAndBalance bool, engine rules.EngineReader) (
 	*evmtypes.ExecutionResult, error,
 ) {
 	// Only zero-gas transactions may be service ones
@@ -208,7 +206,7 @@ func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 	}
 	st := NewTxnExecutor(evm, msg, gp)
 	st.noFeeBurnAndTip = noFeeBurnAndTip
-	st.chargeSenderAtValidation = chargeSenderAtValidation
+	st.skipSenderNonceAndBalance = skipSenderNonceAndBalance
 	return st.Execute(refunds, gasBailout)
 }
 
@@ -250,7 +248,7 @@ func (st *TxnExecutor) buyGas(fees upfrontTxnFees, gasBailout bool) error {
 		}
 	}
 
-	if !gasBailout && !st.chargeSenderAtValidation {
+	if !gasBailout && !st.skipSenderNonceAndBalance {
 		if err := st.state.SubBalance(st.msg.From(), fees.gasVal, tracing.BalanceDecreaseGasBuy); err != nil {
 			return err
 		}
@@ -288,7 +286,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 	}
 
 	// Make sure this transaction's nonce is correct.
-	if st.msg.CheckNonce() && !st.chargeSenderAtValidation {
+	if st.msg.CheckNonce() && !st.skipSenderNonceAndBalance {
 		stNonce, err := st.state.GetNonce(from)
 		if err != nil {
 			return upfrontTxnFees{}, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
@@ -410,7 +408,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	if !gasBailout && !st.chargeSenderAtValidation {
+	if !gasBailout && !st.skipSenderNonceAndBalance {
 		balanceCheck := fees.gasVal
 		if st.feeCap != nil {
 			balanceCheck, overflow = u256.MulOverflow(u256.U64(gas), *st.feeCap)
@@ -588,7 +586,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 
 	coinbase := st.evm.Context.Coinbase
 	var senderInitBalance uint256.Int
-	if !st.chargeSenderAtValidation {
+	if !st.skipSenderNonceAndBalance {
 		senderInitBalance, err = st.state.GetBalance(st.msg.From())
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
@@ -626,7 +624,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 
-	if !contractCreation && !st.chargeSenderAtValidation {
+	if !contractCreation && !st.skipSenderNonceAndBalance {
 		// Increment the nonce for the next transaction
 		nonce, err := st.state.GetNonce(sender)
 		if err != nil {
@@ -645,7 +643,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	}
 
 	// A deferred sender's value debit is charged at validation, like its gas.
-	bailout := st.chargeSenderAtValidation
+	bailout := st.skipSenderNonceAndBalance
 	// Gas bailout (for trace_call) should only be applied if there is not sufficient balance to perform value transfer
 	if gasBailout {
 		canTransfer, err := st.evm.Context.CanTransfer(st.state, msg.From(), *msg.Value())
@@ -770,7 +768,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		if !rules.IsAmsterdam {
 			st.blockExecutionGasUsed = st.txnGasUsed
 		}
-		if !st.chargeSenderAtValidation {
+		if !st.skipSenderNonceAndBalance {
 			if err := st.refundGas(gasLeft); err != nil {
 				return nil, err
 			}
