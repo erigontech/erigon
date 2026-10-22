@@ -220,51 +220,6 @@ func TestSAR(t *testing.T) {
 	testTwoOperandOp(t, tests, opSAR, "sar")
 }
 
-func TestMulModRepeatedAndAlternatingModuli(t *testing.T) {
-	t.Parallel()
-	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
-	callContext := &CallContext{}
-	moduli := []string{
-		"0", "1", "2", "3", "ffffffffffffffff",
-		"1000000000000000000000000000000000000000000000000",
-		"fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f",
-		"fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
-		"ffffffff00000001000000000000000000000000ffffffffffffffffffffffff",
-		"8000000000000000000000000000000000000000000000000000000000000000",
-		"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-	}
-	operands := []string{
-		"0", "1", "2", "fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2e",
-		"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", opTestArg,
-	}
-	var sequence []string
-	for _, m := range moduli {
-		sequence = append(sequence, m, m)
-	}
-	for i := range moduli {
-		sequence = append(sequence, moduli[i], moduli[len(moduli)-1-i])
-	}
-	for _, mHex := range sequence {
-		m, _ := new(big.Int).SetString(mHex, 16)
-		for _, xHex := range operands {
-			for _, yHex := range operands {
-				x, _ := new(big.Int).SetString(xHex, 16)
-				y, _ := new(big.Int).SetString(yHex, 16)
-				expected := new(big.Int)
-				if m.Sign() != 0 {
-					expected.Mod(expected.Mul(x, y), m)
-				}
-				callContext.Stack.push(*uint256.MustFromBig(m))
-				callContext.Stack.push(*uint256.MustFromBig(y))
-				callContext.Stack.push(*uint256.MustFromBig(x))
-				opMulmod(0, evm, callContext)
-				actual := callContext.Stack.popCopy()
-				require.Equal(t, expected.String(), actual.ToBig().String(), "mulmod(%s, %s, %s)", xHex, yHex, mHex)
-			}
-		}
-	}
-}
-
 func TestAddMod(t *testing.T) {
 	t.Parallel()
 	var (

@@ -116,7 +116,6 @@ type EVM struct {
 	// Pointers before counters: interleaving them adds a word of padding.
 	internCache *storageKeyCache
 	addrCache   *addressCache
-	mulmodCache *mulmodReciprocal
 	internOps   uint32
 	addrOps     uint32
 
