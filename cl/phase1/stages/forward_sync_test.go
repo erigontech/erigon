@@ -195,7 +195,7 @@ func newForwardSyncTipFixture(t *testing.T) (*Cfg, common.Hash, *cltypes.SignedB
 		envelopeResponse: envelopeResponse.Bytes(),
 	}
 	cfg.ethClock = clock
-	cfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg.beaconCfg, clock, nil)
+	cfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg.beaconCfg, clock)
 	return cfg, tipRoot, nextBlock, targetSlot, sentinel
 }
 
@@ -242,7 +242,7 @@ func TestForwardSyncRecordsTipSlotWhenEmptyScanCompletes(t *testing.T) {
 		currentSlot.Store(targetSlot + cfg.beaconCfg.SlotsPerEpoch)
 	}
 	cfg.ethClock = clock
-	cfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg.beaconCfg, clock, nil)
+	cfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg.beaconCfg, clock)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
