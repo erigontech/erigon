@@ -529,6 +529,47 @@ func TestAggregateAndProofElectraUsesCommitteeBitsIndexForTargetShuffling(t *tes
 	require.NoError(t, service.ProcessMessage(context.Background(), nil, aggregate))
 }
 
+func TestAggregateAndProofBuildsVotedBlockTargetBeforeRejectingMessageTarget(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = cfg.FarFutureEpoch
+	cfg.GloasForkEpoch = cfg.FarFutureEpoch
+	aggregate, s := getAggregateAndProofAndStateForVersion(t, clparams.ElectraVersion)
+	service, syncedDataManager, fc := setupAggregateAndProofTestWithConfig(t, &cfg)
+	require.NoError(t, syncedDataManager.OnHeadState(s))
+	data := aggregate.SignedAggregateAndProof.Message.Aggregate.Data
+	committeeIndex := uint64(aggregate.SignedAggregateAndProof.Message.Aggregate.CommitteeBits.GetOnIndices()[0])
+	headCommittee, err := s.GetBeaconCommitee(data.Slot, committeeIndex)
+	require.NoError(t, err)
+	targetCommittee := targetCommitteeOutsideHead(t, s, headCommittee, 2)
+	prepareTargetShufflingAggregate(t, s, fc, aggregate, targetCommittee, true)
+	derivedRoot := common.Hash{0x82}
+	fc.AncestorFn = func(root common.Hash, slot uint64) forkchoice.ForkChoiceNode {
+		if root == data.BeaconBlockRoot && slot == data.Target.Epoch*cfg.SlotsPerEpoch {
+			return forkchoice.ForkChoiceNode{Root: derivedRoot}
+		}
+		return fc.Ancestors[slot]
+	}
+	var gotTarget solid.Checkpoint
+	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, gotCommitteeIndex uint64) ([]uint64, uint64, error) {
+		gotTarget = target
+		require.Equal(t, data.Slot, slot)
+		require.Equal(t, committeeIndex, gotCommitteeIndex)
+		return targetCommittee, s.CommitteeCount(data.Target.Epoch), nil
+	}
+	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = targetCommittee[0]
+	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048)
+
+	err = service.ProcessMessage(context.Background(), nil, aggregate)
+	require.Equal(t, solid.Checkpoint{Epoch: data.Target.Epoch, Root: derivedRoot}, gotTarget)
+	require.ErrorContains(t, err, "invalid target block")
+	require.NotErrorIs(t, err, ErrIgnore)
+}
+
 func TestAggregateAndProofUnseenBlockIsIgnoredBeforeCommitteeRange(t *testing.T) {
 	aggregate, s := getAggregateAndProofAndState()
 	service, syncedDataManager, fc := setupAggregateAndProofTest(t)

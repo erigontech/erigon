@@ -232,7 +232,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		}
 		return fmt.Errorf("%w: block not seen: %v", ErrIgnore, aggregateData.BeaconBlockRoot)
 	}
-	committee, committeesPerSlot, err := beaconCommittee(a.forkchoiceStore, a.syncedDataManager, target, slot, committeeIndex, a.beaconCfg.SlotsPerEpoch)
+	committee, committeesPerSlot, err := beaconCommittee(a.forkchoiceStore, a.syncedDataManager, target, aggregateData.BeaconBlockRoot, slot, committeeIndex, a.beaconCfg.SlotsPerEpoch)
 	if err != nil {
 		return err
 	}
