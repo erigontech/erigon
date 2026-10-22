@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	network2 "github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/attestation_producer"
 	"github.com/erigontech/erigon/common"
@@ -202,8 +203,9 @@ func MetaCatchingUp(args Args) StageName {
 	return ""
 }
 
-// catchUpAfterImport is MetaCatchingUp for the stages that import blocks. Before going back to ChainTipSync, which can
-// wait a slot or longer for the next block, it publishes a newly imported head: validators attest to the served head.
+// catchUpAfterImport is MetaCatchingUp for the stages that import blocks or see the head move with the clock. Before
+// going back to ChainTipSync, which can wait a slot or longer for the next block, it publishes the fork choice head:
+// validators attest to and propose on the served head.
 func catchUpAfterImport(args Args) StageName {
 	next := MetaCatchingUp(args)
 	if next == ChainTipSync && args.headUnpublished {
@@ -284,6 +286,7 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 			args.seenSlot = cfg.forkChoice.HighestSeen()
 			args.seenEpoch = args.seenSlot / cfg.beaconCfg.SlotsPerEpoch
 			args.targetSlot = cfg.ethClock.GetCurrentSlot()
+			cfg.forkChoice.OnTick(utils.SecondsToMilliseconds(cfg.ethClock.GenesisTime() + args.targetSlot*cfg.beaconCfg.SecondsPerSlot))
 			if head, _, err := cfg.forkChoice.GetHead(nil); err == nil {
 				args.headUnpublished = head != cfg.syncedData.HeadRoot()
 			}
@@ -429,7 +432,7 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 			SleepForSlot: {
 				Description: `sleep until the next slot`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
-					if x := MetaCatchingUp(args); x != "" {
+					if x := catchUpAfterImport(args); x != "" {
 						return x
 					}
 					if cfg.sleepForSlotHeadChanged {
