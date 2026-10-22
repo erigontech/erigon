@@ -134,6 +134,61 @@ func (a *aggregateAndProofServiceImpl) DecodeGossipMessage(pid peer.ID, data []b
 	return obj, nil
 }
 
+func (a *aggregateAndProofServiceImpl) checkSeenAggregator(aggregateAndProof *SignedAggregateAndProofForGossip) (seenAggregateIndex, common.Hash, error) {
+	signedAggregate := aggregateAndProof.SignedAggregateAndProof
+	seenIndex := seenAggregateIndex{
+		epoch: signedAggregate.Message.Aggregate.Data.Target.Epoch,
+		index: signedAggregate.Message.AggregatorIndex,
+	}
+	var aggregateRoot common.Hash
+	if aggregateAndProof.ImmediateProcess {
+		root, err := signedAggregate.HashSSZ()
+		if err != nil {
+			return seenIndex, aggregateRoot, err
+		}
+		aggregateRoot = root
+	}
+	if seenRoot, ok := a.seenAggreatorIndexes.Peek(seenIndex); ok {
+		if aggregateAndProof.ImmediateProcess && seenRoot == aggregateRoot {
+			// ErrAggregatorAlreadySeen means this exact signed aggregate was validated before.
+			return seenIndex, aggregateRoot, fmt.Errorf("%w: %w", ErrIgnore, ErrAggregatorAlreadySeen)
+		}
+		return seenIndex, aggregateRoot, fmt.Errorf("%w: %w", ErrIgnore, ErrAggregatorAlreadyKnown)
+	}
+	return seenIndex, aggregateRoot, nil
+}
+
+func (a *aggregateAndProofServiceImpl) verifyAggregateBeforeBuild(aggregateAndProof *SignedAggregateAndProofForGossip) error {
+	if _, _, err := a.checkSeenAggregator(aggregateAndProof); err != nil {
+		return err
+	}
+	signedAggregate := aggregateAndProof.SignedAggregateAndProof
+	var signature1, signingRoot1, pubKey1, signature2, signingRoot2, pubKey2 []byte
+	if err := a.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		var err error
+		signature1, signingRoot1, pubKey1, err = AggregateAndProofSignature(headState, signedAggregate.Message)
+		if err != nil {
+			return err
+		}
+		signature2, signingRoot2, pubKey2, err = AggregatorSignature(headState, signedAggregate)
+		return err
+	}); err != nil {
+		return err
+	}
+	valid, err := blsVerifyMultipleSignatures(
+		[][]byte{signature1, signature2},
+		[][]byte{signingRoot1, signingRoot2},
+		[][]byte{pubKey1, pubKey2},
+	)
+	if err != nil {
+		return err
+	}
+	if !valid {
+		return ErrInvalidBlsSignature
+	}
+	return nil
+}
+
 func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	ctx context.Context,
 	subnet *uint64,
@@ -232,7 +287,10 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		}
 		return fmt.Errorf("%w: block not seen: %v", ErrIgnore, aggregateData.BeaconBlockRoot)
 	}
-	committee, committeesPerSlot, err := beaconCommittee(a.forkchoiceStore, a.syncedDataManager, target, aggregateData.BeaconBlockRoot, slot, committeeIndex, a.beaconCfg.SlotsPerEpoch)
+	committee, committeesPerSlot, err := beaconCommittee(
+		a.forkchoiceStore, a.syncedDataManager, target, aggregateData.BeaconBlockRoot, slot, committeeIndex,
+		a.beaconCfg.SlotsPerEpoch, func() error { return a.verifyAggregateBeforeBuild(aggregateAndProof) },
+	)
 	if err != nil {
 		return err
 	}
@@ -266,23 +324,9 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	}
 
 	// [IGNORE] The aggregate is the first valid aggregate received for the aggregator with index aggregate_and_proof.aggregator_index for the epoch aggregate.data.target.epoch
-	seenIndex = seenAggregateIndex{
-		epoch: target.Epoch,
-		index: aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex,
-	}
-	if aggregateAndProof.ImmediateProcess {
-		root, err := aggregateAndProof.SignedAggregateAndProof.HashSSZ()
-		if err != nil {
-			return err
-		}
-		aggregateRoot = root
-	}
-	if seenRoot, ok := a.seenAggreatorIndexes.Peek(seenIndex); ok {
-		if aggregateAndProof.ImmediateProcess && seenRoot == aggregateRoot {
-			// ErrAggregatorAlreadySeen means this exact signed aggregate was validated before.
-			return fmt.Errorf("%w: %w", ErrIgnore, ErrAggregatorAlreadySeen)
-		}
-		return fmt.Errorf("%w: %w", ErrIgnore, ErrAggregatorAlreadyKnown)
+	seenIndex, aggregateRoot, err = a.checkSeenAggregator(aggregateAndProof)
+	if err != nil {
+		return err
 	}
 
 	// [REJECT] The number of aggregation bits matches the committee size -- i.e. len(aggregation_bits) == len(get_beacon_committee(state, aggregate.data.slot, index)).

@@ -470,12 +470,19 @@ func validatorOutsideCommittee(t *testing.T, validatorCount int, committee []uin
 
 func (t *attestationTestSuite) TestElectraAttestationUsesTargetShuffling() {
 	headState, slot, epoch := t.setupTargetShufflingAttestation(clparams.ElectraVersion)
+	var callOrder []string
+	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) {
+		callOrder = append(callOrder, "bls")
+		return true, nil
+	}
 	data := t.targetShufflingAttestationData(slot, epoch)
 	headCommittee, err := headState.GetBeaconCommitee(slot, 0)
 	t.Require().NoError(err)
 	attester := validatorOutsideCommittee(t.T(), headState.ValidatorLength(), headCommittee)
 	singleAttestation := &solid.SingleAttestation{CommitteeIndex: 0, AttesterIndex: attester, Data: data}
 	t.mockForkChoice.TargetBeaconCommitteeFn = func(target solid.Checkpoint, gotSlot, committeeIndex uint64) ([]uint64, uint64, error) {
+		t.Require().Equal([]string{"bls"}, callOrder)
+		callOrder = append(callOrder, "target")
 		t.Require().Equal(data.Target, target)
 		t.Require().Equal(slot, gotSlot)
 		t.Require().Equal(singleAttestation.CommitteeIndex, committeeIndex)
@@ -489,6 +496,53 @@ func (t *attestationTestSuite) TestElectraAttestationUsesTargetShuffling() {
 		ImmediateProcess:  true,
 	})
 	t.Require().NoError(err)
+	t.Require().Equal([]string{"bls", "target", "bls"}, callOrder)
+}
+
+func (t *attestationTestSuite) TestElectraAttestationRejectsInvalidSignatureBeforeTargetShuffling() {
+	headState, slot, epoch := t.setupTargetShufflingAttestation(clparams.ElectraVersion)
+	data := t.targetShufflingAttestationData(slot, epoch)
+	headCommittee, err := headState.GetBeaconCommitee(slot, 0)
+	t.Require().NoError(err)
+	attester := validatorOutsideCommittee(t.T(), headState.ValidatorLength(), headCommittee)
+	targetCalls := 0
+	t.mockForkChoice.TargetBeaconCommitteeFn = func(solid.Checkpoint, uint64, uint64) ([]uint64, uint64, error) {
+		targetCalls++
+		return []uint64{attester}, headState.CommitteeCount(epoch), nil
+	}
+	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) { return false, nil }
+	t.addTargetShufflingAncestors(data)
+
+	err = t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
+		SingleAttestation: &solid.SingleAttestation{CommitteeIndex: 0, AttesterIndex: attester, Data: data},
+		ImmediateProcess:  true,
+	})
+	t.Require().ErrorIs(err, ErrInvalidBlsSignature)
+	t.Require().NotErrorIs(err, ErrIgnore)
+	t.Require().Zero(targetCalls)
+}
+
+func (t *attestationTestSuite) TestElectraAttestationAlreadySeenBeforeTargetShuffling() {
+	headState, slot, epoch := t.setupTargetShufflingAttestation(clparams.ElectraVersion)
+	data := t.targetShufflingAttestationData(slot, epoch)
+	headCommittee, err := headState.GetBeaconCommitee(slot, 0)
+	t.Require().NoError(err)
+	attester := validatorOutsideCommittee(t.T(), headState.ValidatorLength(), headCommittee)
+	targetCalls := 0
+	t.mockForkChoice.TargetBeaconCommitteeFn = func(solid.Checkpoint, uint64, uint64) ([]uint64, uint64, error) {
+		targetCalls++
+		return []uint64{attester}, headState.CommitteeCount(epoch), nil
+	}
+	t.addTargetShufflingAncestors(data)
+	t.attService.(*attestationService).validatorAttestationSeen.Add(attester, epoch)
+
+	err = t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
+		SingleAttestation: &solid.SingleAttestation{CommitteeIndex: 0, AttesterIndex: attester, Data: data},
+		ImmediateProcess:  true,
+	})
+	t.Require().ErrorIs(err, ErrIgnore)
+	t.Require().ErrorIs(err, ErrAttestationAlreadySeen)
+	t.Require().Zero(targetCalls)
 }
 
 func (t *attestationTestSuite) TestElectraAttestationRejectsNonMemberOfTargetCommittee() {
@@ -561,6 +615,7 @@ func (t *attestationTestSuite) TestElectraAttestationRejectsNonMemberBeforeFinal
 		return committee, headState.CommitteeCount(epoch), nil
 	}
 	t.mockForkChoice.Headers[data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{Slot: data.Slot}
+	t.mockForkChoice.Ancestors[data.Target.Epoch*t.beaconConfig.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: data.Target.Root}
 	finalized := solid.Checkpoint{Epoch: epoch - 1, Root: common.Hash{0x73}}
 	t.mockForkChoice.FinalizedCheckpointVal = finalized
 	t.mockForkChoice.Ancestors[finalized.Epoch*t.beaconConfig.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: common.Hash{0x74}}
@@ -604,12 +659,19 @@ func (t *attestationTestSuite) TestAttestationForUnseenBlockWithNilSubnetIsIgnor
 
 func (t *attestationTestSuite) TestAttestationIgnoresUnavailableTargetShuffling() {
 	headState, slot, epoch := t.setupTargetShufflingAttestation(clparams.ElectraVersion)
+	blsCalls := 0
+	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) {
+		blsCalls++
+		return true, nil
+	}
 	data := t.targetShufflingAttestationData(slot, epoch)
 	headCommittee, err := headState.GetBeaconCommitee(slot, 0)
 	t.Require().NoError(err)
 	attester := validatorOutsideCommittee(t.T(), headState.ValidatorLength(), headCommittee)
 	singleAttestation := &solid.SingleAttestation{CommitteeIndex: 0, AttesterIndex: attester, Data: data}
+	targetCalls := 0
 	t.mockForkChoice.TargetBeaconCommitteeFn = func(target solid.Checkpoint, gotSlot, committeeIndex uint64) ([]uint64, uint64, error) {
+		targetCalls++
 		t.Require().Equal(data.Target, target)
 		t.Require().Equal(slot, gotSlot)
 		t.Require().Equal(singleAttestation.CommitteeIndex, committeeIndex)
@@ -623,10 +685,16 @@ func (t *attestationTestSuite) TestAttestationIgnoresUnavailableTargetShuffling(
 		ImmediateProcess:  true,
 	})
 	t.Require().ErrorIs(err, ErrIgnore)
+	t.Require().Equal([]int{0, 0}, []int{blsCalls, targetCalls})
 }
 
 func (t *attestationTestSuite) TestAttestationKeepsHeadShufflingFastPath() {
 	headState, slot, epoch := t.setupTargetShufflingAttestation(clparams.ElectraVersion)
+	blsCalls := 0
+	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) {
+		blsCalls++
+		return true, nil
+	}
 	data := t.targetShufflingAttestationData(slot, epoch)
 	headCommittee, err := headState.GetBeaconCommitee(slot, 0)
 	t.Require().NoError(err)
@@ -643,6 +711,7 @@ func (t *attestationTestSuite) TestAttestationKeepsHeadShufflingFastPath() {
 		ImmediateProcess:  true,
 	})
 	t.Require().NoError(err)
+	t.Require().Equal(1, blsCalls)
 	t.Require().Equal(int64(2), t.mockForkChoice.AncestorCalls.Load())
 }
 

@@ -67,6 +67,7 @@ const (
 	checkpointsPerCache                = 1024
 	maxCheckpointStates                = 10
 	maxConcurrentTargetCommitteeBuilds = 2
+	maxTargetCheckpointBlockAge        = 4
 	allowedCachedStates                = 8
 	queueCacheSize                     = 128
 	pendingELPayloadsShrinkCap         = 256 // drain releases the backing array when cap exceeds this

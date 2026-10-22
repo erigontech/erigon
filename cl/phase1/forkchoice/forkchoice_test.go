@@ -1471,8 +1471,8 @@ type getFinalizedExecutionHashForkGraph struct {
 	blocks                map[common.Hash]*cltypes.SignedBeaconBlock
 	headers               map[common.Hash]*cltypes.BeaconBlockHeader
 	states                map[common.Hash]*state.CachingBeaconState
-	getHeaderCalls        atomic.Int64
-	getBlockCalls         atomic.Int64
+	getHeaderCalls        int
+	getBlockCalls         int
 	getStateMu            sync.Mutex
 	getStateRoots         []common.Hash
 	getStateAlwaysCopy    []bool
@@ -1515,13 +1515,17 @@ func (g *getFinalizedExecutionHashForkGraph) AddChainSegment(*cltypes.SignedBeac
 }
 
 func (g *getFinalizedExecutionHashForkGraph) GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool) {
-	g.getHeaderCalls.Add(1)
+	g.getStateMu.Lock()
+	g.getHeaderCalls++
+	g.getStateMu.Unlock()
 	header := g.headers[blockRoot]
 	return header, header != nil
 }
 
 func (g *getFinalizedExecutionHashForkGraph) GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool) {
-	g.getBlockCalls.Add(1)
+	g.getStateMu.Lock()
+	g.getBlockCalls++
+	g.getStateMu.Unlock()
 	block := g.blocks[blockRoot]
 	return block, block != nil
 }
@@ -1563,6 +1567,12 @@ func (g *getFinalizedExecutionHashForkGraph) stateCopyModes() []bool {
 	g.getStateMu.Lock()
 	defer g.getStateMu.Unlock()
 	return slices.Clone(g.getStateAlwaysCopy)
+}
+
+func (g *getFinalizedExecutionHashForkGraph) forkGraphCalls() (int, int) {
+	g.getStateMu.Lock()
+	defer g.getStateMu.Unlock()
+	return g.getHeaderCalls, g.getBlockCalls
 }
 
 func (g *getFinalizedExecutionHashForkGraph) GetCurrentJustifiedCheckpoint(common.Hash) (solid.Checkpoint, bool) {
