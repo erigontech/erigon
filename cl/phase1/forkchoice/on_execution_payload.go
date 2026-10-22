@@ -772,6 +772,11 @@ func (f *ForkChoiceStore) applyEnvelope(
 		log.Warn("[applyEnvelope] received signed envelope with nil message")
 		return false, fmt.Errorf("%w: signed envelope has nil message", ErrInvalidExecutionPayloadEnvelope)
 	}
+
+	if signedEnvelope.Message.Payload != nil && !f.forkGraph.HasEnvelope(signedEnvelope.Message.BeaconBlockRoot) {
+		// Warm the payload root caches outside f.mu.
+		_, _ = signedEnvelope.Message.Payload.HashSSZ()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
