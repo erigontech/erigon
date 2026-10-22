@@ -1081,6 +1081,32 @@ func TestValidateChainChecksNewInclusionListForValidatedSideFork(t *testing.T) {
 	require.False(t, *validation.InclusionListSatisfied)
 }
 
+func TestValidateChainKeepsInclusionListResultForValidatedSideFork(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	canonical, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{1})
+	})
+	require.NoError(t, err)
+	fork, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{2})
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks))
+
+	sideBlock := fork.TopBlock.WithInclusionList(types.Transactions{signedInclusionListTxn(t, m)})
+	for range 2 {
+		insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{sideBlock})
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+		validation, err := m.ValidateChain(t.Context(), sideBlock.Header())
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+		require.NotNil(t, validation.InclusionListSatisfied)
+		require.False(t, *validation.InclusionListSatisfied)
+	}
+}
+
 func TestValidateChainWithoutInclusionListReportsNothing(t *testing.T) {
 	t.Parallel()
 	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))

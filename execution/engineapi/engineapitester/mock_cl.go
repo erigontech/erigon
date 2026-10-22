@@ -262,7 +262,7 @@ func (cl *MockCl) InsertNewPayload(ctx context.Context, p *MockClPayload) (*engi
 			var r *enginetypes.PayloadStatus
 			var err error
 			switch {
-			case cl.chainConfig.BogotaTime != nil:
+			case cl.chainConfig.IsBogota(uint64(elPayload.Timestamp)):
 				var r6 *enginetypes.PayloadStatusV2
 				r6, err = cl.engineApiClient.NewPayloadV6(ctx, elPayload, []common.Hash{}, clParentBlockRoot, executionRequests, []hexutil.Bytes{})
 				if r6 != nil {

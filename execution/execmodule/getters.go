@@ -81,7 +81,11 @@ func (e *ExecModule) InclusionListSatisfied(ctx context.Context, blockHash commo
 	if err != nil {
 		return nil, err
 	}
-	if blockEndTxNum < state.StateHistoryStartTxNum(tx) {
+	historyStartTxNum, err := state.StateHistoryStartTxNum(tx)
+	if err != nil {
+		return nil, err
+	}
+	if blockEndTxNum < historyStartTxNum {
 		return nil, nil
 	}
 

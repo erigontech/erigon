@@ -580,11 +580,16 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			LatestValidHash:  common.Hash{},
 		}, nil
 	}
+	satisfied, ilPending := e.inclusionListResult(blockHash)
+	if ilPending {
+		e.forkValidator.ForgetValidHash(blockHash)
+	}
 	// Finality fixes canonical hashes even after their unwind history is pruned.
 	if payloadExecuted || (!canonical && e.forkValidator.IsValidated(blockHash)) {
 		return ValidationResult{
-			ValidationStatus: ExecutionStatusSuccess,
-			LatestValidHash:  blockHash,
+			ValidationStatus:       ExecutionStatusSuccess,
+			LatestValidHash:        blockHash,
+			InclusionListSatisfied: satisfied,
 		}, nil
 	}
 	// Use the overlay-as-rwTx pattern: the validation pipeline writes through
@@ -658,9 +663,6 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	if err := e.unwindToCommonCanonical(doms, tx, header, ensureReadAheadSuspended); err != nil {
 		doms.Close()
 		return ValidationResult{}, err
-	}
-	if _, pending := e.inclusionListResult(blockHash); pending {
-		e.forkValidator.ForgetValidHash(blockHash)
 	}
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), ensureReadAheadSuspended, e.logger)
 	if criticalError != nil {
