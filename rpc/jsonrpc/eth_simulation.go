@@ -39,7 +39,9 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
@@ -309,6 +311,13 @@ func (tx *simulationTemporalTx) GetLatest(domain kv.Domain, key []byte, opts kv.
 	}
 	value, _, err := tx.TemporalTx.GetAsOf(domain, key, tx.baseTxNum)
 	return value, kv.Step(tx.baseTxNum / tx.Debug().StepSize()), err
+}
+
+func (tx *simulationTemporalTx) BlockFilesRoTx() *blocksnapshots.View {
+	if p, ok := tx.TemporalTx.(membatchwithdb.HasBlockFilesRoTx); ok {
+		return p.BlockFilesRoTx()
+	}
+	return nil
 }
 
 type simulator struct {
