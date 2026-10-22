@@ -25,7 +25,10 @@ import (
 
 func (b *BeaconState) SetVersion(version clparams.StateVersion) {
 	if (b.version < clparams.GloasVersion) != (version < clparams.GloasVersion) {
-		b.validators.SetProgressiveHashing(version >= clparams.GloasVersion)
+		progressive := version >= clparams.GloasVersion
+		b.validators.SetProgressiveHashing(progressive)
+		setUint64ListProgressiveHashing(b.balances, progressive)
+		setUint64ListProgressiveHashing(b.inactivityScores, progressive)
 		b.markLeaf(
 			ValidatorsLeafIndex,
 			BalancesLeafIndex,

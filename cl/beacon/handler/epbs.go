@@ -191,7 +191,8 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 	)
 	if err := a.viewHeadStateWithIdentity(func(s *state.CachingBeaconState, headRoot common.Hash, headSlot uint64) error {
 		stateEpoch := state.Epoch(s)
-		nextEpoch := a.ethClock.GetCurrentEpoch() + 1
+		clockEpoch := a.ethClock.GetCurrentEpoch()
+		nextEpoch := clockEpoch + 1
 		if epoch < stateEpoch || epoch > nextEpoch {
 			return beaconhttp.NewEndpointError(http.StatusBadRequest,
 				fmt.Errorf("PTC duties only available for epochs %d to %d, requested %d", stateEpoch, nextEpoch, epoch))
@@ -200,12 +201,14 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 			return beaconhttp.NewEndpointError(http.StatusServiceUnavailable,
 				fmt.Errorf("PTC duties for epoch %d are not available while the head is in epoch %d", epoch, stateEpoch))
 		}
-		if epoch < stateEpoch+2 {
+		// upgrade_to_gloas computes the fork epoch's PTC after the last Fulu epoch processing has updated effective
+		// balances, so a pre-Gloas head serves it from a copy advanced into the fork, once the clock is there.
+		advanceIntoFork := s.Version() < clparams.GloasVersion && clockEpoch >= epoch
+		if epoch < stateEpoch+2 && !advanceIntoFork {
 			return fillDuties(s, headRoot, headSlot)
 		}
-		// The head has not crossed into the clock's epoch yet. The epoch transition computes the PTC of the requested
-		// epoch, and its dependent root (the last slot of the head's epoch) covers every input. The copy is advanced
-		// after the head-state view is released.
+		// The epoch transition computes the PTC of the requested epoch. The copy is advanced after the head-state view
+		// is released.
 		var err error
 		advanced, err = a.copyHeadStateForDuties(s)
 		advancedHeadRoot, advancedHeadSlot = headRoot, headSlot
@@ -690,6 +693,7 @@ func (a *ApiHandler) PostEthV1ValidatorProposerPreferences(w http.ResponseWriter
 	if !ok {
 		return
 	}
+	a.recordPreferredFeeRecipients(reqs)
 	a.postProposerPreferences(w, r, reqs)
 }
 
@@ -754,6 +758,31 @@ func decodeProposerPreferencesRequest(w http.ResponseWriter, r *http.Request, ca
 		beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType,
 			fmt.Errorf("unsupported content type: %s", r.Header.Get("Content-Type"))).WriteTo(w)
 		return nil, false
+	}
+}
+
+// recordPreferredFeeRecipients makes each correctly signed preference the fallback fee recipient
+// once Gloas is active, also when gossip validation ignores it. Before that, prepare_beacon_proposer
+// stays the only source.
+func (a *ApiHandler) recordPreferredFeeRecipients(reqs []*cltypes.SignedProposerPreferences) {
+	if a.beaconChainCfg.GetCurrentStateVersion(a.ethClock.GetCurrentEpoch()) < clparams.GloasVersion {
+		return
+	}
+	for _, req := range reqs {
+		if req == nil || req.Message == nil {
+			continue
+		}
+		var pubkey common.Bytes48
+		var genesisValidatorsRoot common.Hash
+		err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+			var err error
+			pubkey, err = headState.ValidatorPublicKey(int(req.Message.ValidatorIndex))
+			genesisValidatorsRoot = headState.GenesisValidatorsRoot()
+			return err
+		})
+		if err == nil && clservices.VerifyProposerPreferencesSignature(a.beaconChainCfg, req, pubkey, genesisValidatorsRoot) == nil {
+			a.validatorParams.SetFeeRecipient(req.Message.ValidatorIndex, req.Message.FeeRecipient)
+		}
 	}
 }
 

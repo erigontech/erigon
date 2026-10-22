@@ -304,7 +304,7 @@ func phantomReadFixture(tb testing.TB, workload string, workers int, scenario st
 		for slot := range uint64(phantomSlots) {
 			var key common.Hash
 			binary.BigEndian.PutUint64(key[24:], slot)
-			bal[idx].StorageReads = append(bal[idx].StorageReads, accounts.InternKey(key))
+			bal[idx].StorageReads = append(bal[idx].StorageReads, key)
 		}
 		require.NoError(tb, bal.Validate())
 		require.NoError(tb, bal.ValidateMaxItems(block.GasLimit()))
@@ -384,7 +384,7 @@ func TestBALSystemCallExternalReadAfterFullBlock(t *testing.T) {
 			require.NoError(t, bal.ValidateMaxItems(pack.TopBlock.GasLimit()))
 			idx := slices.IndexFunc(bal, func(ac types.AccountChanges) bool { return ac.Address == reader })
 			require.NotEqual(t, -1, idx)
-			require.Equal(t, []accounts.StorageKey{accounts.InternKey(common.Hash{})}, bal[idx].StorageReads)
+			require.Equal(t, []common.Hash{{}}, bal[idx].StorageReads)
 			require.NoError(t, m.InsertChain(pack))
 		})
 	}
@@ -405,7 +405,7 @@ func TestBALPhantomReadsAfterFullBlock(t *testing.T) {
 			bal := pack.TopBlock.BlockAccessList().Copy()
 			idx := slices.IndexFunc(bal, func(ac types.AccountChanges) bool { return ac.Address == addr })
 			require.NotEqual(t, -1, idx)
-			bal[idx].StorageReads = append(bal[idx].StorageReads, accounts.InternKey(common.HexToHash("0xffff")))
+			bal[idx].StorageReads = append(bal[idx].StorageReads, common.HexToHash("0xffff"))
 			require.NoError(t, bal.Validate())
 			require.NoError(t, bal.ValidateMaxItems(pack.TopBlock.GasLimit()))
 

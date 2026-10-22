@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_logs_spammer"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -282,6 +283,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, version clparams.StateVersion,
 ) (*engine_types.PayloadStatus, error) {
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
+	if req == nil {
+		return nil, &rpc.InvalidParamsError{Message: "missing payload"}
+	}
 	if !e.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
 	}
@@ -331,6 +335,11 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 				ValidationError: engine_types.NewStringifiedError(protocol.ErrGasLimitReached),
 			}
 		}
+	}
+
+	var sendersRecovery *exec.SendersRecovery
+	if invalidTransactionStatus == nil && len(transactions) > 0 {
+		sendersRecovery = exec.StartSendersRecovery(ctx, types.MakeSigner(e.config, req.BlockNumber.Uint64(), uint64(req.Timestamp)), transactions)
 	}
 
 	var baseFee *uint256.Int // a null baseFeePerGas stays nil and fails validation
@@ -478,6 +487,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			Status:          engine_types.InvalidStatus,
 			ValidationError: engine_types.NewStringifiedError(blockAccessListErr),
 		}, nil
+	}
+	if sendersRecovery != nil {
+		e.executionService.AddSendersRecovery(blockHash, sendersRecovery)
 	}
 	if blockAccessList != nil {
 		if err = blockAccessList.ValidateForBlock(header.GasLimit, len(transactions)); err != nil {
@@ -667,7 +679,9 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 	currentHeader := e.chainRW.CurrentHeader(ctx)
 	// If header is already validated or has a missing parent, you can either return VALID or SYNCING.
 	if newPayload {
-		if header != nil && isCanonical {
+		// A validated non-canonical payload is answered before InsertBlocks,
+		// whose ClearWithUnwind would drop the executed state FCU merges.
+		if header != nil && (isCanonical || e.chainRW.IsValidated(blockHash)) {
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 		if shouldWait, _ := waitForResponse(ctx, 50*time.Millisecond, func() (bool, error) {
@@ -798,6 +812,9 @@ func (e *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 func (e *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes, version clparams.StateVersion,
 ) (*engine_types.ForkChoiceUpdatedResponse, error) {
 	defer engineForkchoiceUpdatedDuration.ObserveDuration(time.Now())
+	if forkchoiceState == nil {
+		return nil, &rpc.InvalidParamsError{Message: "missing forkchoiceState"}
+	}
 	if !e.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
 	}

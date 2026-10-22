@@ -737,7 +737,7 @@ type selectedHeadEnvelopeStore interface {
 type anchorEnvelopeStore interface {
 	AnchorRoot() common.Hash
 	HasEnvelope(common.Hash) bool
-	GetStateAtBlockRoot(common.Hash, bool) (*state.CachingBeaconState, error)
+	GetStateAtBlockRoot(common.Hash) (*state.CachingBeaconState, error)
 }
 
 type anchorEnvelopeRecoverer func(context.Context) error
@@ -761,7 +761,7 @@ func ensureAnchorEnvelopeForChild(
 	if store.HasEnvelope(anchorRoot) {
 		return true
 	}
-	anchorState, err := store.GetStateAtBlockRoot(anchorRoot, true)
+	anchorState, err := store.GetStateAtBlockRoot(anchorRoot)
 	if err != nil || anchorState == nil {
 		return false
 	}
@@ -1429,7 +1429,7 @@ func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
 	if skipped := cfg.gloasSkippedAnchorValidation; skipped.root == anchorRoot && depth.keeps(skipped.blockNumber) {
 		return
 	}
-	anchorState, err := cfg.forkChoice.GetStateAtBlockRoot(anchorRoot, true)
+	anchorState, err := cfg.forkChoice.GetStateAtBlockRoot(anchorRoot)
 	if err != nil || anchorState == nil {
 		log.Debug("[chainTipSync] anchor state not available for payload retry", "anchorRoot", anchorRoot, "err", err)
 		return

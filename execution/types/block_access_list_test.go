@@ -25,7 +25,7 @@ func TestBlockAccessListCopy(t *testing.T) {
 			Slot:    accounts.InternKey(common.Hash{2}),
 			Changes: []*StorageChange{{Index: 1, Value: *uint256.NewInt(3)}},
 		}},
-		StorageReads:   []accounts.StorageKey{accounts.InternKey(common.Hash{4})},
+		StorageReads:   []common.Hash{{4}},
 		BalanceChanges: []*BalanceChange{{Index: 2, Value: *uint256.NewInt(5)}},
 		NonceChanges:   []*NonceChange{{Index: 3, Value: 6}},
 		CodeChanges:    []*CodeChange{{Index: 4, Bytecode: []byte{7}}},
@@ -44,7 +44,7 @@ func TestBlockAccessListCopy(t *testing.T) {
 	}
 
 	bal[0].StorageChanges[0].Changes[0].Index = 10
-	bal[0].StorageReads[0] = accounts.InternKey(common.Hash{11})
+	bal[0].StorageReads[0] = common.Hash{11}
 	bal[0].BalanceChanges[0].Index = 12
 	bal[0].NonceChanges[0].Index = 13
 	bal[0].CodeChanges[0].Bytecode[0] = 14
@@ -63,7 +63,7 @@ func TestDecodeBlockAccessListSidecarForHeaderRejectsDuplicateItems(t *testing.T
 			{Slot: accounts.ZeroKey, Changes: []*StorageChange{{}}},
 			{Slot: accounts.ZeroKey, Changes: []*StorageChange{{}}},
 		}}}},
-		{name: "storage reads", bal: BlockAccessList{{StorageReads: []accounts.StorageKey{accounts.ZeroKey, accounts.ZeroKey}}}},
+		{name: "storage reads", bal: BlockAccessList{{StorageReads: []common.Hash{{}, {}}}}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			raw, err := EncodeBlockAccessListBytes(tt.bal)
@@ -282,9 +282,9 @@ func TestBlockAccessListCodecLeavesSemanticValidationToValidateForBlock(t *testi
 			name: "storage read order",
 			bal: BlockAccessList{{
 				Address: common.Address{1},
-				StorageReads: []accounts.StorageKey{
-					accounts.InternKey(common.Hash{2}),
-					accounts.InternKey(common.Hash{1}),
+				StorageReads: []common.Hash{
+					{2},
+					{1},
 				},
 			}},
 			wantError: "storage reads must be strictly increasing",
@@ -417,8 +417,8 @@ func TestBlockAccessListRLPEncoding(t *testing.T) {
 					},
 				},
 			},
-			StorageReads: []accounts.StorageKey{
-				accounts.InternKey(common.HexToHash("0x02")),
+			StorageReads: []common.Hash{
+				common.HexToHash("0x02"),
 			},
 			BalanceChanges: []*BalanceChange{
 				{Index: 1, Value: *uint256.NewInt(4)},
@@ -508,11 +508,11 @@ func TestBlockAccessListLargeLists(t *testing.T) {
 		{
 			name: "storage reads",
 			bal: func() BlockAccessList {
-				reads := make([]accounts.StorageKey, 1<<18+1)
+				reads := make([]common.Hash, 1<<18+1)
 				for i := range reads {
 					key := common.Hash{0: 1}
 					binary.BigEndian.PutUint64(key[24:], uint64(i))
-					reads[i] = accounts.InternKey(key)
+					reads[i] = key
 				}
 				return BlockAccessList{{StorageReads: reads}}
 			},
@@ -612,7 +612,7 @@ func TestBlockAccessListValidateForHeaderRejectsOversizedEarly(t *testing.T) {
 			Changes: []*StorageChange{{Index: 1}},
 		}
 	}
-	bal := BlockAccessList{{StorageChanges: slots, StorageReads: []accounts.StorageKey{accounts.ZeroKey}}}
+	bal := BlockAccessList{{StorageChanges: slots, StorageReads: []common.Hash{{}}}}
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
 	err := bal.ValidateForHeader(BalItemCost)
@@ -632,12 +632,12 @@ func TestBlockAccessListValidateMaxItems(t *testing.T) {
 			var addr common.Address
 			addr[18] = byte(i >> 8)
 			addr[19] = byte(i)
-			reads := make([]accounts.StorageKey, slotsPerAccount)
+			reads := make([]common.Hash, slotsPerAccount)
 			for j := range reads {
 				var h common.Hash
 				h[30] = byte(j >> 8)
 				h[31] = byte(j)
-				reads[j] = accounts.InternKey(h)
+				reads[j] = h
 			}
 			bal[i] = AccountChanges{
 				Address:      addr,
@@ -677,7 +677,7 @@ func TestBlockAccessListSlotUniqueness(t *testing.T) {
 				Changes: []*StorageChange{{Index: 0, Value: *uint256.NewInt(1)}},
 			},
 		},
-		StorageReads: []accounts.StorageKey{accounts.InternKey(slot)},
+		StorageReads: []common.Hash{slot},
 	}
 	bal := BlockAccessList{*ac}
 	if err := bal.Validate(); err == nil {
