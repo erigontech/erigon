@@ -379,52 +379,52 @@ func makeBALWarmupPlan(bal types.BlockAccessList, workers int) ([]balWarmupTask,
 	return tasks, min(workers, len(tasks))
 }
 
-func uniqueTransactionDestinations(txns types.Transactions) map[accounts.Address]struct{} {
-	destinations := make(map[accounts.Address]struct{}, len(txns))
+func uniqueTransactionDestinations(txns types.Transactions) map[common.Address]struct{} {
+	destinations := make(map[common.Address]struct{}, len(txns))
 	for _, txn := range txns {
-		to := txn.GetTo()
-		if to == nil {
-			continue
+		if to := txn.GetTo(); to != nil {
+			destinations[*to] = struct{}{}
 		}
-		address := accounts.InternAddress(*to)
-		destinations[address] = struct{}{}
 	}
 	return destinations
 }
 
-func warmBALStateTask(stateReader *state.ReaderV3, account *types.AccountChanges, task balWarmupTask, codeMode balCodeWarmupMode, txCodeDestinations map[accounts.Address]struct{}) error {
-	address := accounts.InternAddress(account.Address)
-	var accountData *accounts.Account
+// warmBALStateTask reads by raw keys: interning every BAL key here costs more than the reads.
+func warmBALStateTask(getter execctxapi.StateGetter, account *types.AccountChanges, task balWarmupTask, codeMode balCodeWarmupMode, txCodeDestinations map[common.Address]struct{}) error {
+	address := account.Address
+	var enc []byte
 	if task.slotFrom == 0 {
 		var err error
-		accountData, err = stateReader.ReadAccountData(address)
-		if err != nil {
+		if enc, _, err = getter.GetLatest(kv.AccountsDomain, address[:], kv.GetLatestOptions{}); err != nil {
 			return err
 		}
 	}
+	var key [length.Addr + length.Hash]byte
+	copy(key[:], address[:])
 	storageChanges := uint32(len(account.StorageChanges))
 	for slotIndex := task.slotFrom; slotIndex < task.slotTo; slotIndex++ {
-		var slot accounts.StorageKey
 		if slotIndex < storageChanges {
-			slot = account.StorageChanges[slotIndex].Slot
+			slot := account.StorageChanges[slotIndex].Slot.Value()
+			copy(key[length.Addr:], slot[:])
 		} else {
-			slot = accounts.InternKey(account.StorageReads[slotIndex-storageChanges])
+			copy(key[length.Addr:], account.StorageReads[slotIndex-storageChanges][:])
 		}
-		if _, _, err := stateReader.ReadAccountStorage(address, slot); err != nil {
+		if _, _, err := getter.GetLatest(kv.StorageDomain, key[:], kv.GetLatestOptions{}); err != nil {
 			return err
 		}
 	}
 	if task.slotFrom != 0 || codeMode == balCodeWarmupNone {
 		return nil
 	}
+	hasCode := accounts.DeserialiseV3CodeHash(enc) != nil
 	warmCode := false
 	if codeMode == balCodeWarmupAll {
-		warmCode = len(account.CodeChanges) > 0 || (accountData != nil && !accountData.CodeHash.IsEmpty())
+		warmCode = len(account.CodeChanges) > 0 || hasCode
 	} else if _, ok := txCodeDestinations[address]; ok {
-		warmCode = accountData != nil && !accountData.CodeHash.IsEmpty()
+		warmCode = hasCode
 	}
 	if warmCode {
-		_, err := stateReader.ReadAccountCode(address)
+		_, _, err := getter.GetCode(address[:], 0)
 		return err
 	}
 	return nil
@@ -455,7 +455,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 }
 
 func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, txns types.Transactions, codeMode balCodeWarmupMode, workers int) error {
-	var txCodeDestinations map[accounts.Address]struct{}
+	var txCodeDestinations map[common.Address]struct{}
 	if codeMode == balCodeWarmupTxnDestinations {
 		txCodeDestinations = uniqueTransactionDestinations(txns)
 	}
@@ -472,7 +472,7 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 	return group.Wait()
 }
 
-func (bra *BlockReadAheader) warmBALState(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, tasks []balWarmupTask, codeMode balCodeWarmupMode, txCodeDestinations map[accounts.Address]struct{}, workers int) error {
+func (bra *BlockReadAheader) warmBALState(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, tasks []balWarmupTask, codeMode balCodeWarmupMode, txCodeDestinations map[common.Address]struct{}, workers int) error {
 	var nextTask atomic.Uint64
 	wg, workerCtx := errgroup.WithContext(ctx)
 	for w := range workers {
@@ -487,7 +487,7 @@ func (bra *BlockReadAheader) warmBALState(ctx context.Context, db kv.RoDB, bal t
 			if !ok {
 				return errors.New("BAL warmup requires a temporal read transaction")
 			}
-			stateReader := state.NewReaderV3(readAheadGetter(ttx, bra.stateCache))
+			getter := readAheadGetter(ttx, bra.stateCache)
 			tasksProcessed := 0
 			for {
 				select {
@@ -501,7 +501,7 @@ func (bra *BlockReadAheader) warmBALState(ctx context.Context, db kv.RoDB, bal t
 				}
 				task := tasks[taskIndex]
 				account := &bal[task.accountIndex]
-				if err := warmBALStateTask(stateReader, account, task, codeMode, txCodeDestinations); err != nil {
+				if err := warmBALStateTask(getter, account, task, codeMode, txCodeDestinations); err != nil {
 					log.Warn("[warmBAL] state task failed", "worker", w, "account", account.Address, "err", err)
 				}
 				tasksProcessed++
