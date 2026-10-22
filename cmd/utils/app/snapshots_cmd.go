@@ -2064,8 +2064,8 @@ func doVerifyHistory(ctx context.Context, cliCtx *cli.Command, logger log.Logger
 	return integrityErr
 }
 
-func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
-	stateSnapTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(nil, nil)
+func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool, beaconConfig *clparams.BeaconChainConfig) error {
+	stateSnapTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(nil, beaconConfig)
 	caplinSchema := caplinsnapschema.NewCaplinSchema(dirs, 1000, stateSnapTypes)
 
 	//to := int64(-1)
@@ -2086,8 +2086,10 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 	}
 
 	to := int64(-1)
-	ptcWindowEpochPresent := false
 	for table := range stateSnapTypes.KeyValueGetters {
+		if table == kv.PtcWindowEpochTable {
+			continue
+		}
 		uto, empty, err := CheckFilesForSchema(caplinSchema.GetState(table), CheckFilesParams{
 			checkLastFileTo: to,
 			emptyOk:         emptyOk,
@@ -2098,13 +2100,19 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 		if empty {
 			continue
 		}
-		if table == kv.PtcWindowEpochTable {
-			ptcWindowEpochPresent = true
-		}
 		to = int64(uto)
 	}
-	if to >= 0 && !ptcWindowEpochPresent {
-		return fmt.Errorf("no %s snapshot files found in %s", kv.PtcWindowEpochTable, dirs.SnapCaplin)
+
+	ptcWindowEpochRequired := to >= 0 && uint64(to) > stateSnapTypes.GloasForkSlot
+	ptcWindowEpochTo := int64(-1)
+	if ptcWindowEpochRequired {
+		ptcWindowEpochTo = to
+	}
+	if _, _, err := CheckFilesForSchema(caplinSchema.GetState(kv.PtcWindowEpochTable), CheckFilesParams{
+		checkLastFileTo: ptcWindowEpochTo,
+		emptyOk:         !ptcWindowEpochRequired,
+	}); err != nil {
+		return err
 	}
 
 	return nil
@@ -2634,7 +2642,7 @@ func doPublishable(ctx context.Context, dat datadir.Dirs, chainDB kv.RoDB) error
 		}
 	}
 
-	if err := checkIfCaplinSnapshotsPublishable(dat, true); err != nil {
+	if err := checkIfCaplinSnapshotsPublishable(dat, true, beaconConfig); err != nil {
 		return err
 	}
 	if beaconConfig != nil {

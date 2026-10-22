@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/bits"
 	"os"
 	"path"
 	"path/filepath"
@@ -109,6 +110,14 @@ func requirePtcWindowEpochRows(cfg *clparams.BeaconChainConfig, getter KeyValueG
 
 func MakeCaplinStateSnapshotsTypes(db kv.RoDB, cfg *clparams.BeaconChainConfig) SnapshotTypes {
 	ptcWindowEpochGetter := requirePtcWindowEpochRows(cfg, getKvGetterForStateTable(db, kv.PtcWindowEpochTable))
+	var gloasForkSlot uint64
+	if cfg != nil {
+		if hi, lo := bits.Mul64(cfg.GloasForkEpoch, cfg.SlotsPerEpoch); hi != 0 {
+			gloasForkSlot = math.MaxUint64
+		} else {
+			gloasForkSlot = lo
+		}
+	}
 	return SnapshotTypes{
 		KeyValueGetters: map[string]KeyValueGetter{
 			kv.ValidatorEffectiveBalance:     getKvGetterForStateTable(db, kv.ValidatorEffectiveBalance),
@@ -146,7 +155,8 @@ func MakeCaplinStateSnapshotsTypes(db kv.RoDB, cfg *clparams.BeaconChainConfig) 
 			kv.LatestExecutionPayloadBidTable:    getKvGetterForStateTable(db, kv.LatestExecutionPayloadBidTable),
 			kv.PtcWindowEpochTable:               ptcWindowEpochGetter,
 		},
-		Compression: map[string]bool{},
+		Compression:   map[string]bool{},
+		GloasForkSlot: gloasForkSlot,
 	}
 }
 
@@ -170,6 +180,7 @@ type KeyValueGetter func(numId uint64) ([]byte, []byte, error)
 type SnapshotTypes struct {
 	KeyValueGetters map[string]KeyValueGetter
 	Compression     map[string]bool
+	GloasForkSlot   uint64
 }
 
 // NewCaplinStateSnapshots - opens all snapshots. But to simplify everything:
@@ -276,10 +287,17 @@ func (s *CaplinStateSnapshots) IndicesMax() uint64 {
 	minTo := uint64(math.MaxUint64)
 	for _, typ := range s.Types() {
 		segs := vis.segments[typ.Enum()]
-		if len(segs) == 0 {
+		var to uint64
+		if len(segs) != 0 {
+			to = segs[len(segs)-1].to
+		}
+		if typ.Enum() == snaptype.PtcWindowEpoch.Enum() {
+			to = max(to, s.snapshotTypes.GloasForkSlot)
+		}
+		if to == 0 {
 			return 0
 		}
-		minTo = min(minTo, segs[len(segs)-1].to)
+		minTo = min(minTo, to)
 	}
 	if minTo == math.MaxUint64 {
 		return 0

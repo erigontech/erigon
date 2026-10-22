@@ -24,10 +24,10 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-// dbSchemaVersion8 triggers an exclusive database open so MDBX creates
+// createPtcWindowEpochTable triggers an exclusive database open so MDBX creates
 // PtcWindowEpoch in existing databases; it does not backfill data.
-var dbSchemaVersion8 = Migration{
-	Name: "db_schema_version8",
+var createPtcWindowEpochTable = Migration{
+	Name: "create_ptc_window_epoch_table",
 	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {
