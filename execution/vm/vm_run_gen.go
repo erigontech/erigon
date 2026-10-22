@@ -211,7 +211,9 @@ run:
 					x, y := callContext.Stack.pop1Peek1()
 					if y[0]&(y[0]-1) == 0 {
 						if n, ok := log2Exact(y); ok {
+							callContext.gas, callContext.savedPC = gasLeft, pc
 							y.Rsh(x, n)
+							gasLeft, pc = callContext.gas, callContext.savedPC
 							pc++
 							continue run
 						}
