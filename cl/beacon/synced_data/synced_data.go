@@ -116,6 +116,31 @@ func (s *SyncedDataManager) OnHeadStateWithBlockRoot(newState *state.CachingBeac
 	return s.publishHeadStateLocked(newState, blockRoot)
 }
 
+// OnOwnedHeadStateWithBlockRoot takes ownership of and publishes a state without copying it.
+func (s *SyncedDataManager) OnOwnedHeadStateWithBlockRoot(newState *state.CachingBeaconState, blockRoot common.Hash) error {
+	if !s.enabled {
+		return nil
+	}
+	s.writeLock.Lock()
+	defer s.writeLock.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.accessLock.Lock()
+	defer s.accessLock.Unlock()
+
+	if newState == nil {
+		return errors.New("owned head state is nil")
+	}
+	if newState == s.headState || newState == s.previousHeadState {
+		return errors.New("owned head state is already managed")
+	}
+
+	s.previousHeadState = s.headState
+	s.headState = newState
+	s.stateHead.Store(&headIdentity{root: blockRoot, slot: newState.Slot()})
+	return nil
+}
+
 // publishHeadStateLocked materializes newState into a standalone copy and
 // swaps it in as the head state, demoting the current head state to
 // previous. Callers must hold writeLock for the duration of whatever work
