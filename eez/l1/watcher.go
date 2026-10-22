@@ -89,10 +89,15 @@ func (w *Watcher) Seed(ctx context.Context, number uint64) error {
 func (w *Watcher) Tip() Header { return w.ring[len(w.ring)-1] }
 
 // ancestors returns head and up to depth-1 of its ancestors, oldest first.
+// The window ends early at an ancestor the source does not serve, as a
+// recording's first block.
 func (w *Watcher) ancestors(ctx context.Context, head Header) ([]Header, error) {
 	window := []Header{head}
 	for len(window) < w.depth && window[0].Number > 0 {
 		parent, err := w.reader.HeaderByHash(ctx, window[0].ParentHash)
+		if errors.Is(err, ErrNotFound) {
+			break
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -216,10 +221,11 @@ func (w *Watcher) PollFinalized(ctx context.Context) ([]Event, error) {
 	return []Event{Finalized{Head: *f}}, nil
 }
 
-// Run polls every interval and sends the events to out, reading finality
-// every finalityEvery polls, until ctx ends or a terminal error occurs.
-// Transient read errors are retried on the next poll.
-func (w *Watcher) Run(ctx context.Context, interval time.Duration, finalityEvery int, out chan<- Event) error {
+// Run polls every interval, and whenever heads delivers, and sends the
+// events to out, reading finality every finalityEvery polls, until ctx ends
+// or a terminal error occurs. Transient read errors are retried on the next
+// poll. heads may be nil.
+func (w *Watcher) Run(ctx context.Context, interval time.Duration, finalityEvery int, heads <-chan struct{}, out chan<- Event) error {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for n := 0; ; n++ {
@@ -241,6 +247,10 @@ func (w *Watcher) Run(ctx context.Context, interval time.Duration, finalityEvery
 		}
 		select {
 		case <-ticker.C:
+		case _, ok := <-heads:
+			if !ok {
+				heads = nil
+			}
 		case <-ctx.Done():
 			return ctx.Err()
 		}

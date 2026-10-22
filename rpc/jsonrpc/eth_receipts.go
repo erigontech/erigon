@@ -20,18 +20,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 
 	"github.com/RoaringBitmap/roaring/v2"
 
 	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/rpc/jsonrpc/logquery"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/order"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
@@ -271,223 +268,35 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	return api.getLogsV3(ctx, tx, begin, end, crit, api.BaseAPI.blockRangeLimit, api.BaseAPI.getLogsMaxResults)
 }
 
-func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, asc order.By) (out stream.U64, err error) {
-	//[from,to)
-	var fromTxNum, toTxNum uint64
-	c, err := tx.Cursor(kv.MaxTxNum)
-	if err != nil {
-		return out, err
-	}
-	defer c.Close()
-	if begin > 0 {
-		fromTxNum, err = txNumsReader.MinWithCursor(context.Background(), tx, c, begin)
-		if err != nil {
-			return out, err
-		}
-	}
-	toTxNum, err = txNumsReader.MaxWithCursor(context.Background(), tx, c, end)
-	if err != nil {
-		return out, err
-	}
-
-	if asc {
-		toTxNum++
-	} else {
-		toTxNum--
-	}
-
-	var topicsBitmap stream.U64
-
-	if asc {
-		topicsBitmap, err = getTopicsBitmapV3(tx, crit.Topics, fromTxNum, toTxNum, asc)
-	} else {
-		topicsBitmap, err = getTopicsBitmapV3(tx, crit.Topics, toTxNum, fromTxNum, asc)
-	}
-	if err != nil {
-		return out, err
-	}
-	if topicsBitmap != nil {
-		out = topicsBitmap
-	}
-
-	var addrBitmap stream.U64
-
-	if asc {
-		addrBitmap, err = getAddrsBitmapV3(tx, crit.Addresses, fromTxNum, toTxNum, asc)
-	} else {
-		addrBitmap, err = getAddrsBitmapV3(tx, crit.Addresses, toTxNum, fromTxNum, asc)
-	}
-	if err != nil {
-		return out, err
-	}
-	if addrBitmap != nil {
-		if out == nil {
-			out = addrBitmap
-		} else {
-			out = stream.Intersect[uint64](out, addrBitmap, asc, kv.Unlim)
-		}
-	}
-	if out == nil {
-		if asc == order.Asc {
-			out = stream.Range[uint64](fromTxNum, toTxNum)
-		} else {
-			out = stream.ReverseRange[uint64](toTxNum, fromTxNum)
-		}
-	}
-	return out, nil
-}
-
 func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, rangeLimit int, maxResults int) (types.Logs, error) {
-	logs := types.Logs{}
-
 	// Treat range-limit violations as invalid filter input to match eth_getLogs parameter validation.
 	if rangeLimit != 0 && (end-begin) > uint64(rangeLimit) {
 		return nil, &rpc.InvalidParamsError{
 			Message: fmt.Sprintf("%s: %d", errExceedBlockRange, rangeLimit),
 		}
 	}
-
-	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
-	for _, v := range crit.Addresses {
-		addrMap[v] = struct{}{}
-	}
-	topicMap := types.BuildTopicMap(crit.Topics)
-
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
-
-	var header *types.Header
-
-	txNumbers, err := applyFiltersV3(api._txNumReader, tx, begin, end, crit, order.Asc)
-	if err != nil {
-		return nil, err
-	}
-
-	it := rawdbv3.TxNums2BlockNums(ctx, tx, api._txNumReader, txNumbers, order.Asc)
-	defer it.Close()
-
-	for it.HasNext() {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := it.Next()
-		if err != nil {
-			return nil, err
-		}
-
-		// if block number changed, calculate all related field
-		if blockNumChanged {
-			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
-				return nil, err
-			}
-			if header == nil {
-				return nil, fmt.Errorf("header not found: %d", blockNum)
-			}
-		}
-
-		if isFinalTxn {
-			continue
-		}
-
-		if r, ok := api.receiptsGenerator.TryGetCachedReceipt(header.Hash(), txNum, txIndex); ok {
-			logs, err = appendRPCLogs(logs, r.Logs, addrMap, topicMap, header.Time, maxResults)
-			if err != nil {
-				return nil, err
-			}
-			continue
-		}
-
-		r, ok, err := api.receiptsGenerator.PersistedReceipt(ctx, tx, header, txIndex, txNum)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			var txn types.Transaction
-			if txn, ok, err = api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex); err != nil {
-				return nil, err
-			}
-			if !ok {
-				continue
-			}
-			if r, err = api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, header, txn, txIndex, txNum, nil); err != nil {
-				return nil, err
-			}
-		}
-		if r == nil {
-			return nil, err
-		}
-
-		logs, err = appendRPCLogs(logs, r.Logs, addrMap, topicMap, header.Time, maxResults)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return logs, nil
+	q := logquery.Query{TxNums: api._txNumReader, Headers: api._blockReader, Txns: api._txnReader, Receipts: api.receiptsGenerator}
+	logs, err := q.Logs(ctx, tx, chainConfig, begin, end, crit, maxResults)
+	return logs, exceedLogResults(err, maxResults)
 }
 
 func appendRPCLogs(logs types.Logs, receiptLogs types.Logs, addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}, blockTime uint64, maxResults int) (types.Logs, error) {
-	// One entry past the cap is enough to detect the overflow without converting the rest.
-	// At math.MaxInt there is no such entry, so the append stays unlimited.
-	var limit int
-	if maxResults != 0 && maxResults != math.MaxInt {
-		limit = maxResults + 1
-	}
-	logs = receiptLogs.AppendFilteredLogs(logs, addrMap, topicMap, blockTime, limit)
-	if maxResults != 0 && len(logs) > maxResults {
-		return nil, &rpc.InvalidParamsError{
+	logs, err := logquery.AppendLogs(logs, receiptLogs, addrMap, topicMap, blockTime, maxResults)
+	return logs, exceedLogResults(err, maxResults)
+}
+
+// exceedLogResults renders logquery.ErrTooManyLogs as eth_getLogs does.
+func exceedLogResults(err error, maxResults int) error {
+	if errors.Is(err, logquery.ErrTooManyLogs) {
+		return &rpc.InvalidParamsError{
 			Message: fmt.Sprintf("%s: %d", errExceedLogResults, maxResults),
 		}
 	}
-	return logs, nil
-}
-
-// The Topic list restricts matches to particular event topics. Each event has a list
-// of topics. Topics matches a prefix of that list. An empty element slice matches any
-// topic. Non-empty elements represent an alternative that matches any of the
-// contained topics.
-//
-// Examples:
-// {} or nil          matches any topic list
-// {{A}}              matches topic A in first position
-// {{}, {B}}          matches any topic in first position AND B in second position
-// {{A}, {B}}         matches topic A in first position AND B in second position
-// {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
-func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64, asc order.By) (res stream.U64, err error) {
-	for _, sub := range topics {
-		if len(sub) == 0 {
-			continue
-		}
-
-		var topicsUnion stream.U64
-		for _, topic := range sub {
-			it, err := tx.IndexRange(kv.LogTopicIdx, topic[:], int(from), int(to), asc, kv.Unlim)
-			if err != nil {
-				return nil, err
-			}
-			topicsUnion = stream.Union[uint64](topicsUnion, it, asc, kv.Unlim)
-		}
-
-		if res == nil {
-			res = topicsUnion
-			continue
-		}
-		res = stream.Intersect[uint64](res, topicsUnion, asc, kv.Unlim)
-	}
-	return res, nil
-}
-
-func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64, asc order.By) (res stream.U64, err error) {
-	for _, addr := range addrs {
-		it, err := tx.IndexRange(kv.LogAddrIdx, addr[:], int(from), int(to), asc, kv.Unlim)
-		if err != nil {
-			return nil, err
-		}
-		res = stream.Union[uint64](res, it, asc, kv.Unlim)
-	}
-	return res, nil
+	return err
 }
 
 // GetTransactionReceipt implements eth_getTransactionReceipt. Returns the receipt of a transaction given the transaction's hash.

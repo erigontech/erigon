@@ -57,6 +57,22 @@ func TestRPCConformance(t *testing.T) {
 	l1test.Conformance(t, r, model, l1test.SampleFilters)
 }
 
+// TestServerConformance is T-L1-1 for the rpc reader over l1test.NewServer,
+// which serves a reader the way an L1 node does.
+func TestServerConformance(t *testing.T) {
+	_, model := l1test.ErigonL1(t)
+	server, err := l1test.NewServer(model, log.New())
+	require.NoError(t, err)
+	t.Cleanup(server.Stop)
+	httpServer := httptest.NewServer(server)
+	t.Cleanup(httpServer.Close)
+
+	r, err := l1.DialRPC(context.Background(), httpServer.URL, log.New())
+	require.NoError(t, err)
+	t.Cleanup(r.Close)
+	l1test.Conformance(t, r, model, l1test.SampleFilters)
+}
+
 func TestRPCErrorMapping(t *testing.T) {
 	for _, tc := range []struct {
 		msg  string

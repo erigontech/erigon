@@ -68,10 +68,10 @@ var (
 type Merge struct {
 	eth1Engine rules.Engine // Original rules engine used in eth1, e.g. ethash
 
-	// AllowEmptyRequestContracts is for chains without a beacon chain: a
-	// request contract without code yields no requests instead of
-	// invalidating the block, and an unset deposit contract no deposits.
-	AllowEmptyRequestContracts bool
+	// SkipConsensusLayer is for chains without a beacon chain: no EIP-4788
+	// beacon-root update and no consensus-layer requests, whose system calls
+	// change state even when they yield none. EIP-2935 stays.
+	SkipConsensusLayer bool
 
 	// Reusable buffer for collecting logs in Finalize - protected by logsBufMu
 	logsBufMu sync.Mutex
@@ -229,7 +229,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 			allLogs = append(allLogs, rec.Logs...)
 		}
 		var depositReqs *types.FlatRequest
-		if !s.AllowEmptyRequestContracts || config.DepositContract != (common.Address{}) {
+		if !s.SkipConsensusLayer {
 			depositReqs, err = misc.ParseDepositLogs(allLogs, config.DepositContract)
 		}
 		if reuseBuffer {
@@ -290,14 +290,8 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 type requestDequeuer func(rules.SystemCall, *state.IntraBlockState, accounts.Address) (*types.FlatRequest, error)
 
 func (s *Merge) dequeueRequests(dequeue requestDequeuer, syscall rules.SystemCall, ibs *state.IntraBlockState, contract accounts.Address) (*types.FlatRequest, error) {
-	if s.AllowEmptyRequestContracts {
-		codeSize, err := ibs.GetCodeSize(contract)
-		if err != nil {
-			return nil, err
-		}
-		if codeSize == 0 {
-			return nil, nil
-		}
+	if s.SkipConsensusLayer {
+		return nil, nil
 	}
 	return dequeue(syscall, ibs, contract)
 }
@@ -497,7 +491,7 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 			Rules:           execCtx.Rules(config),
 		}
 	}
-	if config.IsCancun(header.Time) && header.ParentBeaconBlockRoot != nil {
+	if config.IsCancun(header.Time) && header.ParentBeaconBlockRoot != nil && !s.SkipConsensusLayer {
 		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr accounts.Address, data []byte) ([]byte, error) {
 			return syscall(addr, data, state, header, false /* constCall */)
 		}, tracer, vmContext)

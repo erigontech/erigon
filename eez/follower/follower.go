@@ -22,6 +22,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -46,11 +47,18 @@ type Config struct {
 	FinalityEvery int
 	// ReorgDepth is the deepest L1 reorg the follower survives.
 	ReorgDepth int
+	// LogChunk is the widest block range of one log query; zero is
+	// l1.LogChunk.
+	LogChunk uint64
 	// Retry and MaxRetry bound the pause before retrying a failed step,
 	// which doubles from Retry up to MaxRetry.
 	Retry, MaxRetry time.Duration
 	// BootAttempts is how many consecutive failures boot tolerates.
 	BootAttempts int
+	// Sequencer, when set, supplies the unsafe head: its latest block,
+	// read every SequencerPoll, while it descends from the safe block.
+	Sequencer     Sequencer
+	SequencerPoll time.Duration
 }
 
 // DefaultConfig is the reference client's tuning.
@@ -61,7 +69,11 @@ var DefaultConfig = Config{
 	Retry:         2 * time.Second,
 	MaxRetry:      30 * time.Second,
 	BootAttempts:  32,
+	SequencerPoll: time.Second,
 }
+
+// overlayLimit bounds the sequencer blocks one overlay step inserts.
+const overlayLimit = 256
 
 // Follower derives an EEZ chain from its settlements on L1.
 type Follower struct {
@@ -72,11 +84,60 @@ type Follower struct {
 	watcher *l1.Watcher
 	chain   deriver.Chain
 	deriver *deriver.Deriver
+	overlay *overlay
 	logger  log.Logger
 	// scanned is the last L1 block whose batches were reconciled, target
 	// the L1 head to scan to and l1Finalized the latest finalized L1 block.
 	scanned, target, l1Finalized uint64
 	resumed                      bool
+
+	statusMu sync.Mutex
+	status   Status
+}
+
+// Status is a snapshot of a follower's progress.
+type Status struct {
+	// L1Scanned is the last L1 block whose settlements are derived,
+	// L1Finalized the latest finalized L1 block seen.
+	L1Scanned, L1Finalized uint64
+	// Cursor is the L2 block the latest settlement ended at; Safe and
+	// Finalized are the safe and finalized L2 blocks.
+	Cursor, Safe, Finalized uint64
+	// Last is the latest derived settlement.
+	Last *deriver.Record
+}
+
+// Status returns the follower's progress as of its latest step. It is safe
+// to call concurrently with Run.
+func (f *Follower) Status() Status {
+	f.statusMu.Lock()
+	defer f.statusMu.Unlock()
+	return f.status
+}
+
+func (f *Follower) publish() {
+	s := Status{
+		L1Scanned:   f.scanned,
+		L1Finalized: f.l1Finalized,
+		Cursor:      f.deriver.Cursor(),
+		Safe:        f.deriver.Safe(),
+		Finalized:   f.deriver.Finalized(),
+	}
+	if r, ok := f.deriver.Last(); ok {
+		s.Last = &r
+	}
+	f.statusMu.Lock()
+	f.status = s
+	f.statusMu.Unlock()
+
+	m := loadMetrics()
+	m.l1Head.SetUint64(f.target)
+	m.l1Scanned.SetUint64(s.L1Scanned)
+	m.l1Finalized.SetUint64(s.L1Finalized)
+	m.l1Lag.SetUint64(f.target - min(f.target, s.L1Scanned))
+	m.l2Cursor.SetUint64(s.Cursor)
+	m.l2Safe.SetUint64(s.Safe)
+	m.l2Finalized.SetUint64(s.Finalized)
 }
 
 // New returns a follower of the EEZ chain cfg, local in chain, settled on
@@ -90,16 +151,33 @@ func New(reader l1.ChainReader, chain deriver.Chain, cfg *chain.Config, c Config
 	if err != nil {
 		return nil, err
 	}
-	return &Follower{
+	scanner := l1.NewScanner(reader, l2.Registry, l2.RollupID)
+	if c.LogChunk > 0 {
+		scanner.SetChunk(c.LogChunk)
+	}
+	f := &Follower{
 		cfg:     c,
 		l2:      l2,
 		reader:  reader,
-		scanner: l1.NewScanner(reader, l2.Registry, l2.RollupID),
+		scanner: scanner,
 		watcher: l1.NewWatcher(reader, c.ReorgDepth),
 		chain:   chain,
 		deriver: d,
 		logger:  logger,
-	}, nil
+	}
+	if c.Sequencer != nil {
+		f.overlay = &overlay{seq: c.Sequencer, chain: chain, deriver: d, limit: overlayLimit, logger: logger}
+	}
+	return f, nil
+}
+
+// StepOverlay moves the head toward the sequencer's latest block, when
+// the follower has a sequencer.
+func (f *Follower) StepOverlay(ctx context.Context) error {
+	if f.overlay == nil {
+		return nil
+	}
+	return f.overlay.step(ctx)
 }
 
 // Deriver is the follower's deriver.
@@ -116,8 +194,21 @@ func (f *Follower) Run(ctx context.Context) error {
 	defer cancel()
 	events := make(chan l1.Event, 64)
 	watched := make(chan error, 1)
-	go func() { watched <- f.watcher.Run(ctx, f.cfg.Poll, f.cfg.FinalityEvery, events) }()
+	var heads <-chan struct{}
+	if n, ok := f.reader.(l1.HeadNotifier); ok {
+		var err error
+		if heads, err = n.Heads(ctx); err != nil {
+			f.logger.Warn("[eez] L1 head notifications unavailable, polling", "err", err)
+		}
+	}
+	go func() { watched <- f.watcher.Run(ctx, f.cfg.Poll, f.cfg.FinalityEvery, heads, events) }()
 
+	var unsafeTick <-chan time.Time
+	if f.overlay != nil {
+		t := time.NewTicker(f.cfg.SequencerPoll)
+		defer t.Stop()
+		unsafeTick = t.C
+	}
 	var retry <-chan time.Time
 	pause := f.cfg.Retry
 	for {
@@ -131,15 +222,22 @@ func (f *Follower) Run(ctx context.Context) error {
 			err = f.Handle(ctx, e)
 		case <-retry:
 			err = f.Sync(ctx)
+		case <-unsafeTick:
+			if err := f.overlay.step(ctx); err != nil && ctx.Err() == nil {
+				f.logger.Warn("[eez] unsafe head step failed", "err", err)
+			}
+			continue
 		}
 		if err = f.recover(ctx, err); err != nil {
 			if halts(err) {
-				f.logger.Error("[eez] follower halted", "err", err)
 				return err
 			}
-			f.logger.Warn("[eez] follower step failed, retrying", "in", pause, "err", err)
+			f.logger.Warn("[eez] follower step failed, retrying", "event", "eez.deriver.resync.failed", "in", pause, "err", err)
 			retry, pause = time.After(pause), min(2*pause, f.cfg.MaxRetry)
 			continue
+		}
+		if retry != nil {
+			f.logger.Info("[eez] follower recovered", "event", "eez.deriver.resync.recovered", "l1Scanned", f.scanned)
 		}
 		retry, pause = nil, f.cfg.Retry
 	}
@@ -154,7 +252,7 @@ func (f *Follower) Boot(ctx context.Context) error {
 		if err == nil || halts(err) || attempt >= f.cfg.BootAttempts {
 			return err
 		}
-		f.logger.Warn("[eez] boot catch-up failed, retrying", "attempt", attempt, "in", pause, "err", err)
+		f.logger.Warn("[eez] boot catch-up failed, retrying", "event", "eez.node.deriver.boot_catch_up.failed", "attempt", attempt, "in", pause, "err", err)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -254,6 +352,7 @@ func (f *Follower) Handle(ctx context.Context, e l1.Event) error {
 	case l1.NewHead:
 		f.target = max(f.target, e.Head.Number)
 	case l1.Reorg:
+		f.logger.Info("[eez] L1 reorg", "event", "eez.l1_watcher.reorg.detected", "ancestor", e.Ancestor.Number, "oldHead", e.OldHead.Number)
 		if err := f.rewind(ctx, e.Ancestor.Number); err != nil {
 			return err
 		}
@@ -267,6 +366,8 @@ func (f *Follower) Handle(ctx context.Context, e l1.Event) error {
 // Sync reconciles the batches of the L1 blocks up to the target and applies
 // L1 finality.
 func (f *Follower) Sync(ctx context.Context) error {
+	defer f.publish()
+	defer loadMetrics().sync.ObserveDuration(time.Now())
 	if err := f.revalidate(ctx); err != nil {
 		return err
 	}
@@ -302,6 +403,8 @@ func (f *Follower) revalidate(ctx context.Context) error {
 
 // rewind drops what derivation took from the L1 blocks above ancestor.
 func (f *Follower) rewind(ctx context.Context, ancestor uint64) error {
+	defer f.publish()
+	loadMetrics().reorgs.Inc()
 	f.scanned = min(f.scanned, ancestor)
 	return f.deriver.OnReorg(ctx, ancestor)
 }
@@ -313,6 +416,7 @@ func (f *Follower) recover(ctx context.Context, err error) error {
 	if !errors.As(err, &div) {
 		return err
 	}
+	loadMetrics().divergences.Inc()
 	h, herr := f.reader.HeaderByNumber(ctx, div.L1Block)
 	if herr != nil && !errors.Is(herr, l1.ErrNotFound) {
 		// Canonicality unknown: retry rather than halt.
