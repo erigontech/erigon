@@ -441,7 +441,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	g.addToCacheReceipt(txNum, receipt)
 
 	if dbg.AssertEnabled && receiptFromDB != nil {
-		g.assertEqualReceipts(receipt, receiptFromDB)
+		g.assertEqualReceipts(receipt, receiptFromDB, txn)
 	}
 	return receipt, nil
 }
@@ -541,7 +541,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		if dbg.AssertEnabled && receiptsFromDB != nil {
 			for i, receipt := range receipts {
 				if i < len(receiptsFromDB) {
-					g.assertEqualReceipts(receipt, receiptsFromDB[i])
+					g.assertEqualReceipts(receipt, receiptsFromDB[i], block.Transactions()[i])
 				}
 			}
 		}
@@ -627,7 +627,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		if dbg.AssertEnabled && receiptsFromDB != nil {
 			for i, receipt := range receipts {
 				if i < len(receiptsFromDB) {
-					g.assertEqualReceipts(receipt, receiptsFromDB[i])
+					g.assertEqualReceipts(receipt, receiptsFromDB[i], block.Transactions()[i])
 				}
 			}
 		}
@@ -647,7 +647,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	return receipts, nil
 }
 
-func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
+func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt, txn types.Transaction) {
 	toJson := func(v any) string {
 		b, err := json.Marshal(v)
 		if err != nil {
@@ -657,6 +657,8 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
 	}
 
 	generated := fromExecution.Copy()
+	// Blob gas is derived from the transaction and is not stored in the receipt cache.
+	fromDB.BlobGasUsed = txn.GetBlobGas()
 	if generated.TransactionIndex != fromDB.TransactionIndex {
 		panic(fmt.Sprintf("assert: txn index mismatch: %d, %d", generated.TransactionIndex, fromDB.TransactionIndex))
 	}
