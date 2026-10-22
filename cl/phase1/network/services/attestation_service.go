@@ -68,6 +68,7 @@ func beaconCommittee(
 	fc forkchoice.ForkChoiceStorageReader,
 	syncedData synced_data.SyncedData,
 	target solid.Checkpoint,
+	blockRoot common.Hash,
 	slot,
 	committeeIndex,
 	slotsPerEpoch uint64,
@@ -95,6 +96,9 @@ func beaconCommittee(
 	}
 	if !useTargetState {
 		return committee, committeesPerSlot, nil
+	}
+	if derivedRoot := fc.Ancestor(blockRoot, target.Epoch*slotsPerEpoch).Root; derivedRoot != (common.Hash{}) {
+		target.Root = derivedRoot
 	}
 	committee, committeesPerSlot, err = fc.TargetBeaconCommittee(target, slot, committeeIndex)
 	if err != nil {
@@ -296,7 +300,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return fmt.Errorf("%w: %w: %v", ErrIgnore, ErrBlockNotSeen, root)
 	}
 
-	committee, committeesPerSlot, err := beaconCommittee(s.forkchoiceStore, s.syncedDataManager, data.Target, slot, committeeIndex, s.beaconCfg.SlotsPerEpoch)
+	committee, committeesPerSlot, err := beaconCommittee(s.forkchoiceStore, s.syncedDataManager, data.Target, root, slot, committeeIndex, s.beaconCfg.SlotsPerEpoch)
 	if err != nil {
 		return err
 	}

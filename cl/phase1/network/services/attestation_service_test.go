@@ -516,6 +516,37 @@ func (t *attestationTestSuite) TestElectraAttestationRejectsNonMemberOfTargetCom
 	t.Require().NotErrorIs(err, ErrIgnore)
 }
 
+func (t *attestationTestSuite) TestElectraAttestationBuildsVotedBlockTargetBeforeRejectingMessageTarget() {
+	headState, slot, epoch := t.setupTargetShufflingAttestation(clparams.ElectraVersion)
+	data := t.targetShufflingAttestationData(slot, epoch)
+	headCommittee, err := headState.GetBeaconCommitee(slot, 0)
+	t.Require().NoError(err)
+	attester := validatorOutsideCommittee(t.T(), headState.ValidatorLength(), headCommittee)
+	derivedRoot := common.Hash{0x82}
+	var gotTarget solid.Checkpoint
+	t.mockForkChoice.TargetBeaconCommitteeFn = func(target solid.Checkpoint, gotSlot, committeeIndex uint64) ([]uint64, uint64, error) {
+		gotTarget = target
+		t.Require().Equal(slot, gotSlot)
+		t.Require().Zero(committeeIndex)
+		return []uint64{attester}, headState.CommitteeCount(epoch), nil
+	}
+	t.addTargetShufflingAncestors(data)
+	t.mockForkChoice.AncestorFn = func(root common.Hash, gotSlot uint64) forkchoice.ForkChoiceNode {
+		if root == data.BeaconBlockRoot && gotSlot == epoch*t.beaconConfig.SlotsPerEpoch {
+			return forkchoice.ForkChoiceNode{Root: derivedRoot}
+		}
+		return t.mockForkChoice.Ancestors[gotSlot]
+	}
+
+	err = t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
+		SingleAttestation: &solid.SingleAttestation{CommitteeIndex: 0, AttesterIndex: attester, Data: data},
+		ImmediateProcess:  true,
+	})
+	t.Require().Equal(solid.Checkpoint{Epoch: epoch, Root: derivedRoot}, gotTarget)
+	t.Require().ErrorContains(err, "invalid target block")
+	t.Require().NotErrorIs(err, ErrIgnore)
+}
+
 func (t *attestationTestSuite) TestElectraAttestationRejectsNonMemberBeforeFinalizedAncestor() {
 	headState, slot, epoch := t.setupTargetShufflingAttestation(clparams.ElectraVersion)
 	data := t.targetShufflingAttestationData(slot, epoch)
@@ -585,6 +616,7 @@ func (t *attestationTestSuite) TestAttestationIgnoresUnavailableTargetShuffling(
 		return nil, 0, errors.New("target state unavailable")
 	}
 	t.addTargetShufflingAncestors(data)
+	delete(t.mockForkChoice.Ancestors, data.Target.Epoch*t.beaconConfig.SlotsPerEpoch)
 
 	err = t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
 		SingleAttestation: singleAttestation,
@@ -611,6 +643,7 @@ func (t *attestationTestSuite) TestAttestationKeepsHeadShufflingFastPath() {
 		ImmediateProcess:  true,
 	})
 	t.Require().NoError(err)
+	t.Require().Equal(int64(2), t.mockForkChoice.AncestorCalls.Load())
 }
 
 func (t *attestationTestSuite) TestElectraAttestationAlreadySeenBeforeTargetAncestor() {
