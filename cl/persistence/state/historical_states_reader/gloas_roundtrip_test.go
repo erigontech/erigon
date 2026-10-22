@@ -19,6 +19,8 @@ package historical_states_reader
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
+	"fmt"
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
@@ -552,6 +554,49 @@ func TestReadQueueSSZ_BuildersDumpWithDiffs(t *testing.T) {
 	require.Equal(t, common.Bytes48{0x02}, b1.Pubkey)
 	require.Equal(t, uint64(200), b1.Balance)
 	require.Equal(t, uint8(2), b1.Version)
+}
+
+func TestReadQueueSSZWrapsCorruptDiff(t *testing.T) {
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](1024, new(cltypes.Builder).EncodingSizeSSZ())
+	builders.Append(&cltypes.Builder{Balance: 100})
+	dump, err := builders.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	diff := make([]byte, 4)
+	binary.LittleEndian.PutUint32(diff, uint32(builders.Len()+1))
+	dumpSlot := uint64(clparams.SlotsPerDump)
+	diffSlot := dumpSlot + 1
+	getter := mockGetValFn(map[string]map[string][]byte{
+		kv.BuildersDump: {string(base_encoding.Encode64ToBytes4(dumpSlot)): compressRawSSZ(t, dump)},
+		kv.Builders:     {string(base_encoding.Encode64ToBytes4(diffSlot)): diff},
+	})
+
+	tests := []struct {
+		name string
+		read func(*solid.ListSSZ[*cltypes.Builder]) error
+	}{
+		{
+			name: "optional dump",
+			read: func(out *solid.ListSSZ[*cltypes.Builder]) error {
+				return ReadQueueSSZ(getter, diffSlot, kv.BuildersDump, kv.Builders, out)
+			},
+		},
+		{
+			name: "required dump",
+			read: func(out *solid.ListSSZ[*cltypes.Builder]) error {
+				return ReadRequiredQueueSSZ(getter, diffSlot, 0, kv.BuildersDump, kv.Builders, out)
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			out := solid.NewStaticListSSZ[*cltypes.Builder](1024, new(cltypes.Builder).EncodingSizeSSZ())
+			err := test.read(out)
+			require.ErrorIs(t, err, base_encoding.ErrCorruptQueueDiff)
+			require.ErrorContains(t, err, kv.Builders)
+			require.ErrorContains(t, err, fmt.Sprint(diffSlot))
+		})
+	}
 }
 
 // ---------------------------------------------------------------------------

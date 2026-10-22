@@ -1083,7 +1083,7 @@ func ReadQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValF
 		}
 
 		if err := base_encoding.ApplySSZQueueDiff(bytes.NewReader(v), out, 0); err != nil {
-			return err
+			return fmt.Errorf("apply queue diff from table %s at slot %d: %w", diffsTable, currSlot, err)
 		}
 	}
 	return nil
@@ -1131,7 +1131,7 @@ func ReadRequiredQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors
 			continue
 		}
 		if err := base_encoding.ApplySSZQueueDiff(bytes.NewReader(v), out, 0); err != nil {
-			return err
+			return fmt.Errorf("apply queue diff from table %s at slot %d: %w", diffsTable, currSlot, err)
 		}
 	}
 	return nil
