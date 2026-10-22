@@ -1289,6 +1289,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 
 			if !ok {
 				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.consumers, execRequest.profile, execRequest.exhausted)
+				executor.senders = execRequest.senders
 				// Set the coinbase once, before any worker runs, so self-loop workers
 				// can read it during validation without racing the exec loop.
 				if h := txTask.BlockHeader(); h != nil {
@@ -1911,6 +1912,11 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 				}
 				if be.runInc[tv.index].CompareAndSwap(last, int64(tv.version.Incarnation)) {
 					break
+				}
+			}
+			if txTask, ok := tv.Task.(*exec.TxTask); ok && be.senders != nil && tv.version.Incarnation == 0 {
+				if sender, ok := be.senders.TakeSender(txTask.TxIndex); ok {
+					txTask.Tx().SetSender(sender)
 				}
 			}
 			result := w.RunTxTask(tv)
@@ -2684,6 +2690,7 @@ type execRequest struct {
 	consumers  *resultStream
 	profile    bool
 	exhausted  *ErrLoopExhausted
+	senders    *exec.SendersRecovery
 }
 
 type blockExecutor struct {
@@ -2708,6 +2715,9 @@ type blockExecutor struct {
 
 	// Stores the inputs and outputs of the last incarnation of all transactions
 	blockIO *state.VersionedIO
+
+	// senders is the block's background sender recovery, nil when none runs.
+	senders *exec.SendersRecovery
 
 	// Time records when the parallel execution starts
 	begin time.Time
