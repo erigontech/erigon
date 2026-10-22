@@ -3076,7 +3076,7 @@ func TestPollAssembledPayloadStopsOnUnknownPayload(t *testing.T) {
 }
 
 func TestPollAssembledPayloadKeepsFailureBeforeUnknownPayload(t *testing.T) {
-	firstErr := errors.New("EL busy")
+	firstErr := fmt.Errorf("get payload: %w", chainreader.ErrExecutionBusy)
 	now := time.Now()
 	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
 	calls := 0
@@ -3095,6 +3095,41 @@ func TestPollAssembledPayloadKeepsFailureBeforeUnknownPayload(t *testing.T) {
 	require.ErrorContains(t, err, "2 attempts, 2 failed")
 	require.Nil(t, payload)
 	require.Equal(t, 2, calls)
+}
+
+func TestPollAssembledPayloadPrefersFailureOverBusy(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		failure error
+	}{
+		{name: "builder failure", failure: errors.New("payload finalization failed")},
+		{name: "builder cancellation", failure: context.Canceled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			responses := []error{
+				fmt.Errorf("get payload: %w", chainreader.ErrExecutionBusy),
+				tc.failure,
+				chainreader.ErrUnknownPayload,
+			}
+			now := time.Now()
+			window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
+			calls := 0
+
+			payload, _, _, _, err := pollAssembledPayload(t.Context(), window, time.Millisecond,
+				func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+					err := responses[calls]
+					calls++
+					return nil, nil, nil, nil, err
+				})
+
+			require.ErrorIs(t, err, tc.failure)
+			require.NotErrorIs(t, err, chainreader.ErrExecutionBusy)
+			require.False(t, execution_client.IsUnknownPayloadError(err))
+			require.ErrorContains(t, err, "3 attempts, 3 failed")
+			require.Nil(t, payload)
+			require.Equal(t, 3, calls)
+		})
+	}
 }
 
 func TestPollAssembledPayloadPreservesBuilderCancellationWhileRequestRemainsActive(t *testing.T) {
@@ -5291,6 +5326,7 @@ func TestProductionReportsActionableConcurrentFailure(t *testing.T) {
 	}{
 		{name: "canceled payload collection", collectionErr: context.Canceled},
 		{name: "unknown execution payload", collectionErr: &engine_helpers.UnknownPayloadErr},
+		{name: "busy execution module", collectionErr: fmt.Errorf("get payload: %w", chainreader.ErrExecutionBusy)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			logs := captureProductionLogs(t)

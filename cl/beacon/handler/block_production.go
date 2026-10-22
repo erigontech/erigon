@@ -73,6 +73,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
@@ -501,6 +502,7 @@ const (
 	productionErrorNone productionErrorSeverity = iota
 	productionErrorCanceled
 	productionErrorUnknownPayload
+	productionErrorBusy
 	productionErrorUnexpectedCancellation
 	productionErrorActionable
 )
@@ -530,6 +532,8 @@ func classifyProductionError(err error) productionErrorSeverity {
 		return productionErrorCanceled
 	case execution_client.IsUnknownPayloadError(err):
 		return productionErrorUnknownPayload
+	case errors.Is(err, chainreader.ErrExecutionBusy):
+		return productionErrorBusy
 	default:
 		return productionErrorActionable
 	}
@@ -554,7 +558,7 @@ func reportProductionFailure(err error, targetSlot uint64) {
 		log.Debug("BlockProduction: abandoned by its caller", "err", err, "slot", targetSlot)
 	case productionErrorUnknownPayload:
 		log.Warn("BlockProduction: execution payload is unknown", "err", err, "slot", targetSlot)
-	case productionErrorUnexpectedCancellation, productionErrorActionable:
+	case productionErrorBusy, productionErrorUnexpectedCancellation, productionErrorActionable:
 		log.Error("BlockProduction: failed to produce block", "err", err, "slot", targetSlot)
 	}
 }
