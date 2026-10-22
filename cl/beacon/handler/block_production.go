@@ -1877,7 +1877,7 @@ func (a *ApiHandler) produceBeaconBody(
 			stateVersion,
 		)
 		if err != nil {
-			executionErr = fmt.Errorf("produceBeaconBody: %w",
+			executionErr = fmt.Errorf("produceBeaconBody: forkchoice update: %w",
 				preserveProductionCancellation(ctx.Err(), "forkchoice update", err))
 			return
 		}

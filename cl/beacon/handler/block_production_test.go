@@ -5255,6 +5255,17 @@ func TestProductionReportsForkChoiceCancellationWhileRequestRemainsActive(t *tes
 	require.Contains(t, captured, "forkchoice update canceled while request remained active")
 }
 
+func TestProductionReportsForkChoiceFailureWithOperation(t *testing.T) {
+	logs := captureProductionLogs(t)
+	err := produceBlockWithForkChoiceResult(t, t.Context(), nil, chainreader.ErrExecutionBusy)
+	require.ErrorIs(t, err, chainreader.ErrExecutionBusy)
+	require.ErrorContains(t, err, "forkchoice update: execution module is busy")
+
+	captured := logs()
+	require.Equal(t, 1, strings.Count(captured, "lvl=eror"), "records:\n"+captured)
+	require.Contains(t, captured, "forkchoice update: execution module is busy")
+}
+
 func TestProductionReportsMissingPayloadIDExactlyOnce(t *testing.T) {
 	logs := captureProductionLogs(t)
 	err := produceBlockWithForkChoiceResult(t, t.Context(), nil, nil)
