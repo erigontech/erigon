@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/cache"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -612,4 +614,18 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 	_, _ = stateReader.ReadAccountData(accounts.InternAddress(block.Coinbase()))
 
 	return nil
+}
+
+// RecoverSendersAhead fills the txs' sender cache on GOMAXPROCS-1 goroutines, so exec workers seldom recover senders on the apply critical path.
+// Errors are left to execution, which rejects the block.
+func RecoverSendersAhead(config *chain.Config, header *types.Header, txs types.Transactions) {
+	signer := types.MakeSigner(config, header.Number.Uint64(), header.Time)
+	var next atomic.Int64
+	for range max(1, runtime.GOMAXPROCS(0)-1) {
+		go func() {
+			for i := next.Add(1) - 1; i < int64(len(txs)); i = next.Add(1) - 1 {
+				_, _ = txs[i].Sender(*signer)
+			}
+		}()
+	}
 }

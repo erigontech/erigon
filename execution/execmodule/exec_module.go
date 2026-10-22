@@ -587,6 +587,9 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			LatestValidHash:  blockHash,
 		}, nil
 	}
+	if dbg.SendersOverlap && !dbg.IgnoreBAL && header.HasNonEmptyBAL() {
+		go exec.RecoverSendersAhead(e.config, header, body.Transactions)
+	}
 	// Use the overlay-as-rwTx pattern: the validation pipeline writes through
 	// a fresh BlockOverlay on a new SharedDomains. This mirrors updateForkChoice
 	// (forkchoice.go:239-251) and is required by the parallel exec path —
