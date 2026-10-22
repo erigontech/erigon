@@ -143,6 +143,30 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 	}
 }
 
+func TestOpDivPowerOfTwo(t *testing.T) {
+	t.Parallel()
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+	callContext := &CallContext{}
+	xs := []*uint256.Int{
+		uint256.NewInt(0), uint256.NewInt(7), new(uint256.Int).SetAllOne(),
+		uint256.MustFromHex("0x87ffb8b26394face67d77fae3608d0891"),
+		uint256.MustFromHex("0x40cf02000000000000000000000000000000000000000000000000000000000"),
+	}
+	one := uint256.NewInt(1)
+	for n := uint(0); n < 256; n++ {
+		p := new(uint256.Int).Lsh(one, n)
+		for _, y := range []*uint256.Int{p, new(uint256.Int).AddUint64(p, 1), new(uint256.Int).Sub(p, one)} {
+			for _, x := range xs {
+				callContext.Stack.push(*y)
+				callContext.Stack.push(*x)
+				opDiv(0, evm, callContext)
+				got, want := callContext.Stack.popCopy(), new(uint256.Int).Div(x, y)
+				require.Equal(t, want, &got, "%x / %x", x, y)
+			}
+		}
+	}
+}
+
 func TestByteOp(t *testing.T) {
 	t.Parallel()
 	tests := []TwoOperandTestcase{
