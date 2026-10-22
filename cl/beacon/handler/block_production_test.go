@@ -64,6 +64,7 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon/cl/transition/machine"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -3655,7 +3656,7 @@ func TestProcessProducedBlockEvictsInvalidBidWhenSelfBuildFails(t *testing.T) {
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
 	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
 	handler.epbsPool.StoreHighestBid(fixture.bidKey, fixture.externalBid)
-	invalidBidErr := fmt.Errorf("%w: rejected candidate", eth2.ErrInvalidExecutionPayloadBid)
+	invalidBidErr := fmt.Errorf("%w: rejected candidate", machine.ErrInvalidExecutionPayloadBid)
 	selfBuildErr := errors.New("self-build failed")
 	processBlock := func(
 		_ *state.CachingBeaconState,
@@ -3679,6 +3680,94 @@ func TestProcessProducedBlockEvictsInvalidBidWhenSelfBuildFails(t *testing.T) {
 	require.ErrorContains(t, err, "bid evicted: true")
 	_, found := handler.epbsPool.GetHighestBid(fixture.bidKey)
 	require.False(t, found)
+}
+
+func TestProcessProducedBlockEvictsInvalidBidSignatureThroughMachine(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
+	selfBid := fixture.block.BeaconBody.SignedExecutionPayloadBid
+	wrongKey, err := bls.GenerateKey()
+	require.NoError(t, err)
+	domain, err := fixture.productionState.GetDomain(
+		fixture.productionState.BeaconConfig().DomainBeaconBuilder,
+		state.Epoch(fixture.productionState),
+	)
+	require.NoError(t, err)
+	signingRoot, err := fork.ComputeSigningRoot(fixture.externalBid.Message, domain)
+	require.NoError(t, err)
+	copy(fixture.externalBid.Signature[:], wrongKey.Sign(signingRoot[:]).Bytes())
+
+	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+	handler.epbsPool.StoreHighestBid(fixture.bidKey, fixture.externalBid)
+
+	selectedState, _, err := handler.processProducedBlock(fixture.productionState, fixture.block)
+
+	require.NoError(t, err)
+	require.Same(t, fixture.productionState, selectedState)
+	require.Same(t, selfBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
+	_, found := handler.epbsPool.GetHighestBid(fixture.bidKey)
+	require.False(t, found)
+}
+
+func TestProcessProducedBlockRetainsValidBidAfterInvalidPayloadAttestationSignature(t *testing.T) {
+	for _, test := range []struct {
+		name             string
+		invalidSignature bool
+	}{
+		{name: "valid"},
+		{name: "invalid", invalidSignature: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
+			fixture.productionState.BeaconConfig().GloasForkEpoch = 0
+			selfBid := fixture.block.BeaconBody.SignedExecutionPayloadBid
+			ptc, err := fixture.productionState.GetPTC(fixture.productionState.Slot() - 1)
+			require.NoError(t, err)
+			require.NotEmpty(t, ptc)
+			require.Equal(t, uint64(0), ptc[0])
+			attestation := &cltypes.PayloadAttestation{
+				AggregationBits: solid.NewBitVector(int(fixture.productionState.BeaconConfig().PtcSize)),
+				Data: &cltypes.PayloadAttestationData{
+					BeaconBlockRoot: fixture.block.ParentRoot,
+					Slot:            fixture.productionState.Slot() - 1,
+					PayloadPresent:  true,
+				},
+			}
+			require.NoError(t, attestation.AggregationBits.SetBitAt(0, true))
+			domain, err := fixture.productionState.GetDomain(
+				fixture.productionState.BeaconConfig().DomainPtcAttester,
+				state.GetEpochAtSlot(fixture.productionState.BeaconConfig(), attestation.Data.Slot),
+			)
+			require.NoError(t, err)
+			signingRoot, err := fork.ComputeSigningRoot(attestation.Data, domain)
+			require.NoError(t, err)
+			validatorKey := fixture.builderKey
+			signingKey := validatorKey
+			if test.invalidSignature {
+				signingKey, err = bls.GenerateKey()
+				require.NoError(t, err)
+			}
+			copy(attestation.Signature[:], signingKey.Sign(signingRoot[:]).Bytes())
+			fixture.block.BeaconBody.PayloadAttestations.Append(attestation)
+
+			handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+			handler.epbsPool.StoreHighestBid(fixture.bidKey, fixture.externalBid)
+
+			selectedState, _, err := handler.processProducedBlock(fixture.productionState, fixture.block)
+			storedBid, found := handler.epbsPool.GetHighestBid(fixture.bidKey)
+			require.True(t, found)
+			require.Same(t, fixture.externalBid, storedBid)
+			if !test.invalidSignature {
+				require.NoError(t, err)
+				require.NotSame(t, fixture.productionState, selectedState)
+				require.Same(t, fixture.externalBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
+				return
+			}
+			require.ErrorContains(t, err, "(bid evicted: false): block signature validation failed")
+			require.NotErrorIs(t, err, machine.ErrInvalidExecutionPayloadBid)
+			require.Same(t, fixture.productionState, selectedState)
+			require.Same(t, selfBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
+		})
+	}
 }
 
 func TestProcessProducedBlockSelectsExternalBidWithoutLegacyBuilderBoost(t *testing.T) {
