@@ -25,10 +25,10 @@ import (
 	"slices"
 
 	"github.com/c2h5oh/datasize"
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -382,7 +382,7 @@ func opKeccak256(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 	offset, size := scope.Stack.pop1Peek1()
 	data := scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
 
-	hash := crypto.Keccak256Hash(data)
+	hash := keccak.Sum256(data)
 	size.SetBytes(hash[:])
 	return pc, nil, nil
 }
