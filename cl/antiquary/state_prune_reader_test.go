@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"slices"
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
@@ -303,4 +304,113 @@ func TestPruneStateBalancesForwardAndReverseDumpPaths(t *testing.T) {
 	}
 	checkBalances(forwardSlot)
 	checkBalances(reverseSlot)
+}
+
+func TestPruneStateBuildersReplayAcrossSegmentAndDBBoundaries(t *testing.T) {
+	ctx := context.Background()
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	const snapshotBoundary = uint64(2_000)
+	const lastSlot = uint64(2_100)
+	targets := []uint64{1_200, 1_999, 2_050}
+	compressor, err := zstd.NewWriter(nil)
+	require.NoError(t, err)
+	defer compressor.Close()
+
+	expected := make(map[uint64][]byte, len(targets))
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		previous := newBuildersList()
+		current := []cltypes.Builder{{Balance: 1}, {Balance: 2}}
+		for slot := uint64(0); slot <= lastSlot; slot++ {
+			if slot > 0 && slot%257 == 0 {
+				current[0].Balance = slot
+			}
+			if slot == 800 || slot == 1_700 {
+				current = append(current, cltypes.Builder{Balance: slot + 10})
+			}
+			post := newBuildersList(slices.Clone(current)...)
+			writer := new(state_accessors.BuildersDiffWriter)
+			writer.Initialize(previous)
+			var row bytes.Buffer
+			if err := writer.WriteDiff(&row, post); err != nil {
+				return err
+			}
+			key := base_encoding.Encode64ToBytes4(slot)
+			if err := tx.Put(kv.Builders, key, row.Bytes()); err != nil {
+				return err
+			}
+			if err := tx.Put(kv.SlotData, key, []byte{1}); err != nil {
+				return err
+			}
+			if slices.Contains(targets, slot) {
+				encoded, err := post.EncodeSSZ(nil)
+				if err != nil {
+					return err
+				}
+				expected[slot] = encoded
+			}
+			if slot%clparams.SlotsPerDump == 0 {
+				encoded, err := post.EncodeSSZ(nil)
+				if err != nil {
+					return err
+				}
+				if err := tx.Put(kv.BuildersDump, key, compressor.EncodeAll(encoded, nil)); err != nil {
+					return err
+				}
+			}
+			previous = newBuildersList(slices.Clone(current)...)
+		}
+		for slot := range snapshotBoundary {
+			key := base_encoding.Encode64ToBytes4(slot)
+			root := common.Hash{byte(slot), byte(slot >> 8)}
+			if err := tx.Put(kv.BlockRoot, key, root[:]); err != nil {
+				return err
+			}
+			if err := tx.Put(kv.StateRoot, key, root[:]); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	readBuilders := func(snapshot *snapshotsync.CaplinStateSnapshots, slot uint64) []byte {
+		tx, err := db.BeginRo(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		var view *snapshotsync.CaplinStateView
+		if snapshot != nil {
+			view = snapshot.View()
+			defer view.Close()
+		}
+		builders := newBuildersList()
+		getter := state_accessors.GetValFnTxAndSnapshot(tx, view)
+		require.NoError(t, historical_states_reader.ReadBuildersSSZ(getter, slot, 0, clparams.MainnetBeaconConfig.BuilderRegistryLimit, builders))
+		encoded, err := builders.EncodeSSZ(nil)
+		require.NoError(t, err)
+		return encoded
+	}
+
+	for _, target := range targets {
+		require.Equal(t, expected[target], readBuilders(nil, target), "slot %d", target)
+	}
+
+	dirs := datadir.New(t.TempDir())
+	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())
+	t.Cleanup(stateSn.Close)
+	require.NoError(t, stateSn.DumpCaplinState(ctx, snapshotBoundary, statePruneTestFileSlots, 0, dirs, 1, log.LvlDebug, log.New()))
+	require.NoError(t, stateSn.OpenFolder())
+	require.Equal(t, snapshotBoundary, stateSn.ContiguousCoverageEnd(kv.Builders))
+	require.Equal(t, snapshotBoundary, stateSn.ContiguousCoverageEnd(kv.BuildersDump))
+
+	_, err = pruneStateTables(ctx, db, stateSn.TypeNames(), stateSn.ContiguousCoverageEnd, 0, 1000, log.New())
+	require.NoError(t, err)
+	require.NotContains(t, tableSlots(t, db, kv.Builders), uint64(1_999))
+	require.Contains(t, tableSlots(t, db, kv.Builders), uint64(2_000))
+	require.NotContains(t, tableSlots(t, db, kv.BuildersDump), uint64(clparams.SlotsPerDump))
+	frozenDump, err := stateSn.Get(kv.BuildersDump, clparams.SlotsPerDump)
+	require.NoError(t, err)
+	require.NotEmpty(t, frozenDump)
+
+	for _, target := range targets {
+		require.Equal(t, expected[target], readBuilders(stateSn, target), "slot %d", target)
+	}
 }
