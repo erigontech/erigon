@@ -589,12 +589,12 @@ func pollAssembledPayload(
 	var (
 		attempts int
 		failures int
-		firstErr error
+		bestErr  error
 	)
 	for {
 		// A collection attempt stops the builder; do not start one after the caller has gone.
 		if ctx.Err() != nil {
-			return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, firstErr)
+			return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, bestErr)
 		}
 		// Grab at least once, even past the deadline, so a late produce request still gets a payload.
 		payload, bundles, requestsBundle, blockValue, err := get()
@@ -604,25 +604,25 @@ func pollAssembledPayload(
 			if requestErr == nil || !errors.Is(err, requestErr) {
 				failures++
 				failure := preserveProductionCancellation(requestErr, "payload collection", err)
-				firstErr = mostActionableProductionError(firstErr, failure)
+				bestErr = mostActionableProductionError(bestErr, failure)
 			}
 			if execution_client.IsUnknownPayloadError(err) || errors.Is(err, execution_client.ErrInvalidGetPayloadResponse) {
-				return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, firstErr)
+				return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, bestErr)
 			}
 		} else if payload != nil {
 			return payload, bundles, requestsBundle, blockValue, nil
 		}
 		select {
 		case <-ctx.Done():
-			return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, firstErr)
+			return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, bestErr)
 		case <-deadlineTimer.C:
-			return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, firstErr)
+			return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, bestErr)
 		case <-retryTicker.C:
 		}
 		// Re-check here, not before get(): the select may pick the ticker after
 		// deadlineTimer fired, and get() stops the builder, so it must not run past pollUntil.
 		if !shouldRetryGetPayload(time.Now(), window.pollUntil) {
-			return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, firstErr)
+			return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, bestErr)
 		}
 	}
 }
@@ -630,12 +630,12 @@ func pollAssembledPayload(
 // terminalCause says why the window ended without a payload. A caller that went away with nothing
 // having failed took the slot with it, and there is nothing anyone can act on; anything that did
 // fail is worth reporting however the window ended, since giving up is often the consequence of it.
-func terminalCause(ctx context.Context, attempts, failures int, firstErr error) error {
+func terminalCause(ctx context.Context, attempts, failures int, bestErr error) error {
 	if failures == 0 && ctx.Err() != nil {
 		return ctx.Err()
 	}
-	if firstErr != nil {
-		return fmt.Errorf("no payload after %s, %d failed: %w", attemptsMade(attempts), failures, firstErr)
+	if bestErr != nil {
+		return fmt.Errorf("no payload after %s, %d failed: %w", attemptsMade(attempts), failures, bestErr)
 	}
 	return fmt.Errorf("no payload after %s", attemptsMade(attempts))
 }

@@ -3075,82 +3075,60 @@ func TestPollAssembledPayloadStopsOnUnknownPayload(t *testing.T) {
 	}
 }
 
-func TestPollAssembledPayloadKeepsFailureBeforeUnknownPayload(t *testing.T) {
-	firstErr := fmt.Errorf("get payload: %w", chainreader.ErrExecutionBusy)
-	now := time.Now()
-	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
-	calls := 0
-
-	payload, _, _, _, err := pollAssembledPayload(t.Context(), window, time.Millisecond,
-		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-			calls++
-			if calls == 1 {
-				return nil, nil, nil, nil, firstErr
-			}
-			return nil, nil, nil, nil, &engine_helpers.UnknownPayloadErr
-		})
-
-	require.ErrorIs(t, err, firstErr)
-	require.False(t, execution_client.IsUnknownPayloadError(err))
-	require.ErrorContains(t, err, "2 attempts, 2 failed")
-	require.Nil(t, payload)
-	require.Equal(t, 2, calls)
-}
-
-func TestPollAssembledPayloadPrefersFailureOverBusy(t *testing.T) {
+func TestPollAssembledPayloadKeepsMostActionableFailure(t *testing.T) {
+	busy := fmt.Errorf("get payload: %w", chainreader.ErrExecutionBusy)
+	failure := errors.New("payload finalization failed")
 	for _, tc := range []struct {
-		name    string
-		failure error
+		name      string
+		responses []error
+		want      error
 	}{
-		{name: "builder failure", failure: errors.New("payload finalization failed")},
-		{name: "builder cancellation", failure: context.Canceled},
+		{
+			name:      "busy before unknown payload",
+			responses: []error{busy, &engine_helpers.UnknownPayloadErr},
+			want:      busy,
+		},
+		{
+			name:      "builder failure after busy",
+			responses: []error{busy, failure, chainreader.ErrUnknownPayload},
+			want:      failure,
+		},
+		{
+			name:      "builder cancellation after busy",
+			responses: []error{busy, context.Canceled, chainreader.ErrUnknownPayload},
+			want:      context.Canceled,
+		},
+		{
+			name:      "builder cancellation before unknown payload",
+			responses: []error{context.Canceled, &engine_helpers.UnknownPayloadErr},
+			want:      context.Canceled,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			responses := []error{
-				fmt.Errorf("get payload: %w", chainreader.ErrExecutionBusy),
-				tc.failure,
-				chainreader.ErrUnknownPayload,
-			}
 			now := time.Now()
 			window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
 			calls := 0
 
 			payload, _, _, _, err := pollAssembledPayload(t.Context(), window, time.Millisecond,
 				func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-					err := responses[calls]
+					err := tc.responses[calls]
 					calls++
 					return nil, nil, nil, nil, err
 				})
 
-			require.ErrorIs(t, err, tc.failure)
-			require.NotErrorIs(t, err, chainreader.ErrExecutionBusy)
+			require.ErrorIs(t, err, tc.want)
+			if !errors.Is(tc.want, chainreader.ErrExecutionBusy) {
+				require.NotErrorIs(t, err, chainreader.ErrExecutionBusy)
+			}
+			if errors.Is(tc.want, context.Canceled) {
+				require.ErrorContains(t, err, "payload collection canceled while request remained active")
+			}
 			require.False(t, execution_client.IsUnknownPayloadError(err))
-			require.ErrorContains(t, err, "3 attempts, 3 failed")
+			require.ErrorContains(t, err, fmt.Sprintf("%d attempts, %d failed", len(tc.responses), len(tc.responses)))
 			require.Nil(t, payload)
-			require.Equal(t, 3, calls)
+			require.Equal(t, len(tc.responses), calls)
 		})
 	}
-}
-
-func TestPollAssembledPayloadPreservesBuilderCancellationWhileRequestRemainsActive(t *testing.T) {
-	now := time.Now()
-	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
-	calls := 0
-
-	// The request remains live while the builder's own operation is canceled.
-	_, _, _, _, err := pollAssembledPayload(t.Context(), window, time.Millisecond,
-		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-			calls++
-			if calls == 1 {
-				return nil, nil, nil, nil, context.Canceled
-			}
-			return nil, nil, nil, nil, &engine_helpers.UnknownPayloadErr
-		})
-
-	require.ErrorIs(t, err, context.Canceled)
-	require.False(t, execution_client.IsUnknownPayloadError(err))
-	require.ErrorContains(t, err, "payload collection canceled while request remained active")
-	require.Equal(t, 2, calls)
 }
 
 func TestProductionReportsBuilderCancellationAfterPollDeadline(t *testing.T) {
@@ -5260,7 +5238,7 @@ func TestProductionReportsAFailedCollectionExactlyOnce(t *testing.T) {
 	require.Contains(t, captured, "boom")
 }
 
-func produceBlockWithForkChoiceResult(t *testing.T, ctx context.Context, payloadID []byte, forkChoiceErr error) error {
+func produceBlockWithForkChoiceResult(t *testing.T, forkChoiceErr error) error {
 	t.Helper()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
@@ -5271,18 +5249,18 @@ func produceBlockWithForkChoiceResult(t *testing.T, ctx context.Context, payload
 
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(payloadID, forkChoiceErr).AnyTimes()
+		Return(nil, forkChoiceErr).AnyTimes()
 	engine.EXPECT().SupportInsertion().Return(true).AnyTimes()
 	handler.engine = engine
 
-	_, err = handler.produceBlock(ctx, 1, postState.Slot(), common.Hash{0x41}, postState,
+	_, err = handler.produceBlock(t.Context(), 1, postState.Slot(), common.Hash{0x41}, postState,
 		targetSlot, common.Bytes96{}, common.Hash{})
 	return err
 }
 
 func TestProductionReportsForkChoiceCancellationWhileRequestRemainsActive(t *testing.T) {
 	logs := captureProductionLogs(t)
-	err := produceBlockWithForkChoiceResult(t, t.Context(), nil, context.Canceled)
+	err := produceBlockWithForkChoiceResult(t, context.Canceled)
 	require.ErrorIs(t, err, context.Canceled)
 
 	captured := logs()
@@ -5292,7 +5270,7 @@ func TestProductionReportsForkChoiceCancellationWhileRequestRemainsActive(t *tes
 
 func TestProductionReportsForkChoiceFailureWithOperation(t *testing.T) {
 	logs := captureProductionLogs(t)
-	err := produceBlockWithForkChoiceResult(t, t.Context(), nil, chainreader.ErrExecutionBusy)
+	err := produceBlockWithForkChoiceResult(t, chainreader.ErrExecutionBusy)
 	require.ErrorIs(t, err, chainreader.ErrExecutionBusy)
 	require.ErrorContains(t, err, "forkchoice update: execution module is busy")
 
@@ -5303,7 +5281,7 @@ func TestProductionReportsForkChoiceFailureWithOperation(t *testing.T) {
 
 func TestProductionReportsMissingPayloadIDExactlyOnce(t *testing.T) {
 	logs := captureProductionLogs(t)
-	err := produceBlockWithForkChoiceResult(t, t.Context(), nil, nil)
+	err := produceBlockWithForkChoiceResult(t, nil)
 	require.ErrorContains(t, err, "forkchoice update returned no payload ID")
 
 	captured := logs()
