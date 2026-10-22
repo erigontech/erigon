@@ -199,6 +199,58 @@ func TestForwardBeaconDownloaderRequiresDistinctPeersForEmptyTipRange(t *testing
 	require.True(t, downloader.CaughtUpTo(12))
 }
 
+func TestForwardBeaconDownloaderRequiresMatchingEmptyTipRanges(t *testing.T) {
+	previousInterval := forwardBeaconRequestInterval
+	previousTipTimeout := forwardTipEnvelopeTimeout
+	forwardBeaconRequestInterval = time.Millisecond
+	forwardTipEnvelopeTimeout = 25 * time.Millisecond
+	t.Cleanup(func() {
+		forwardBeaconRequestInterval = previousInterval
+		forwardTipEnvelopeTimeout = previousTipTimeout
+	})
+
+	tip := makeGloasBlock(10, hash(0xaa), common.Hash{})
+	rpcClient, _ := newContextBlockingBeaconRPC(t.Context(), &immediateEnvelopeSentinel{empty: true})
+	downloader := NewForwardBeaconDownloader(t.Context(), rpcClient, gloasFromGenesisConfig())
+	downloader.SetHighestProcessedSlot(9)
+	downloader.gloasLookahead = tip
+	downloader.gloasLookaheadPeer = "tip-peer"
+	downloader.gloasNextUnscanned = 11
+	var currentSlot atomic.Uint64
+	currentSlot.Store(11)
+	downloader.SetCurrentSlotSampler(currentSlot.Load)
+	var peerStage atomic.Int32
+	downloader.requestBlocksByRange = func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+		if peerStage.Load() == 1 {
+			return []*cltypes.SignedBeaconBlock{}, "peer-b", nil
+		}
+		return []*cltypes.SignedBeaconBlock{}, "peer-a", nil
+	}
+	var processCalls atomic.Int32
+	downloader.SetProcessFunction(func(_ uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		processCalls.Add(1)
+		return blocks[len(blocks)-1].Block.Slot, nil
+	})
+
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	downloader.RequestMore(ctx)
+	cancel()
+	require.Zero(t, processCalls.Load())
+
+	currentSlot.Store(12)
+	peerStage.Store(1)
+	ctx, cancel = context.WithTimeout(t.Context(), 200*time.Millisecond)
+	downloader.RequestMore(ctx)
+	cancel()
+	require.Zero(t, processCalls.Load())
+	require.False(t, downloader.CaughtUpTo(12))
+
+	peerStage.Store(2)
+	downloader.RequestMore(t.Context())
+	require.Equal(t, int32(1), processCalls.Load())
+	require.True(t, downloader.CaughtUpTo(12))
+}
+
 func TestForwardBeaconDownloaderProcessesTipWithoutAvailableEnvelope(t *testing.T) {
 	previousInterval := forwardBeaconRequestInterval
 	previousTimeout := forwardTipEnvelopeTimeout
