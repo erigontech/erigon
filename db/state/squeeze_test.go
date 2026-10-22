@@ -498,10 +498,8 @@ func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
 }
 
 type runCfg struct {
-	aggStep      uint64
-	useBplus     bool
-	compressVals bool
-	largeVals    bool
+	aggStep  uint64
+	useBplus bool
 }
 
 // here we create a bunch of updates for further aggregation.

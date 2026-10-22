@@ -621,7 +621,7 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 	}
 
 	start := time.Now()
-	result, err := executeParallelWithCheck(tb, pe, tasks, false, validation, metadata)
+	result, err := executeParallelWithCheck(pe, tasks, false, validation, metadata)
 
 	assert.NoError(tb, err, "error occur during parallel execution")
 	if result != nil {
@@ -662,7 +662,7 @@ type propertyCheck func(*parallelExecutor) error
 // ParallelValidationsTotal exposes the parallel executor's validation count to stagedsync_test.
 func ParallelValidationsTotal() int64 { return validationsTotal.Load() }
 
-func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.Task, profile bool, check propertyCheck, metadata bool) (result *blockResult, err error) {
+func executeParallelWithCheck(pe *parallelExecutor, tasks []exec.Task, profile bool, check propertyCheck, metadata bool) (result *blockResult, err error) {
 	if len(tasks) == 0 {
 		return nil, nil
 	}
@@ -716,7 +716,7 @@ func TestExecuteParallelWithCheckCancelsBeforeWait(t *testing.T) {
 	task := NewTestExecTask(0, nil, accounts.InternAddress(common.Address{}), 0)
 	done := make(chan error, 1)
 	go func() {
-		_, err := executeParallelWithCheck(t, pe, []exec.Task{task}, false, nil, false)
+		_, err := executeParallelWithCheck(pe, []exec.Task{task}, false, nil, false)
 		done <- err
 	}()
 
@@ -809,7 +809,7 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 		task.ctx = executorContext //nolint:fatcontext
 	}
 
-	res, err := executeParallelWithCheck(tb, pe, tasks, true, validation, false)
+	res, err := executeParallelWithCheck(pe, tasks, true, validation, false)
 
 	assert.NoError(tb, err, "error occur during parallel execution")
 
@@ -867,7 +867,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 			task.ctx = executorCtx //nolint:fatcontext
 		}
 
-		res, err := executeParallelWithCheck(tb, pe, tasks, true, validation, false)
+		res, err := executeParallelWithCheck(pe, tasks, true, validation, false)
 		assert.NoError(tb, err, "error during profiling pass")
 		cleanup() // cleanup eagerly so pass 2 gets a clean slate
 		allDeps = res.AllDeps
@@ -887,7 +887,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 	}
 
 	start := time.Now()
-	_, err := executeParallelWithCheck(tb, pe, tasks, false, validation, true)
+	_, err := executeParallelWithCheck(pe, tasks, false, validation, true)
 	assert.NoError(tb, err, "error during metadata execution pass")
 
 	finalWriteSet := map[accounts.Address]map[state.AccountKey]time.Duration{}

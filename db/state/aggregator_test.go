@@ -75,33 +75,6 @@ func TestSetDomainStepsInFrozenFile(t *testing.T) {
 	}
 }
 
-// takes first 100k keys from file
-func pivotKeysFromKV(dataPath string) ([][]byte, error) {
-	decomp, err := seg.NewDecompressor(dataPath)
-	if err != nil {
-		return nil, err
-	}
-
-	getter := decomp.MakeGetter()
-	getter.Reset(0)
-
-	key := make([]byte, 0, 64)
-
-	listing := make([][]byte, 0, 1000)
-
-	for getter.HasNext() {
-		if len(listing) > 100000 {
-			break
-		}
-		key, _ := getter.Next(key[:0])
-		listing = append(listing, bytes.Clone(key))
-		getter.Skip()
-	}
-	decomp.Close()
-
-	return listing, nil
-}
-
 func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, logger log.Logger, compressFlags seg.FileCompression) string {
 	tb.Helper()
 
