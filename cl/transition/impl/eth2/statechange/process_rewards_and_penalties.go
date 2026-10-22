@@ -102,22 +102,27 @@ func processRewardsAndPenaltiesPostAltair(s abstract.BeaconState, eligibleValida
 	}
 	rewardDenominator := (totalActiveBalance / beaconConfig.EffectiveBalanceIncrement) * beaconConfig.WeightDenominator
 	inactivityLeaking := state.InactivityLeaking(s)
-	deltas := make([]int64, len(eligibleValidators))
+	balances := make([]uint64, len(eligibleValidators))
 
+	// Each penalty is clamped at zero before the next reward, as in the spec,
+	// so a single net delta would differ once a penalty exceeds the balance.
 	if err := threading.ParallellForLoop(runtime.NumCPU(), 0, len(eligibleValidators), func(i int) error {
 		index := eligibleValidators[i]
 		baseReward, err := s.BaseReward(index)
 		if err != nil {
 			return err
 		}
-		delta := int64(0)
+		balance, err := s.ValidatorBalance(int(index))
+		if err != nil {
+			return err
+		}
 		for flagIdx := range weights {
 			if flagsUnslashedIndiciesSet[flagIdx][index] {
 				if !inactivityLeaking {
-					delta += int64((baseReward * rewardMultipliers[flagIdx]) / rewardDenominator)
+					balance += (baseReward * rewardMultipliers[flagIdx]) / rewardDenominator
 				}
 			} else if flagIdx != int(beaconConfig.TimelyHeadFlagIndex) {
-				delta -= int64(baseReward * weights[flagIdx] / beaconConfig.WeightDenominator)
+				balance -= min(balance, baseReward*weights[flagIdx]/beaconConfig.WeightDenominator)
 			}
 		}
 		if !flagsUnslashedIndiciesSet[beaconConfig.TimelyTargetFlagIndex][index] {
@@ -130,21 +135,16 @@ func processRewardsAndPenaltiesPostAltair(s abstract.BeaconState, eligibleValida
 			if err != nil {
 				return err
 			}
-			delta -= int64((effectiveBalance * inactivityScore) / inactivityPenaltyDenominator)
+			balance -= min(balance, (effectiveBalance*inactivityScore)/inactivityPenaltyDenominator)
 		}
-		deltas[i] = delta
+		balances[i] = balance
 		return nil
 	}); err != nil {
 		return err
 	}
 
 	for i, index := range eligibleValidators {
-		delta := deltas[i]
-		if delta > 0 {
-			if err := state.IncreaseBalance(s, index, uint64(delta)); err != nil {
-				return err
-			}
-		} else if err := state.DecreaseBalance(s, index, uint64(-delta)); err != nil {
+		if err := s.SetValidatorBalance(int(index), balances[i]); err != nil {
 			return err
 		}
 	}

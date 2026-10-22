@@ -52,13 +52,12 @@ type ForkChoiceStorageReader interface {
 	HighestSeen() uint64
 	HasImportedDescendantAfter(root common.Hash, slot uint64) bool
 	BlockProcessing() bool
+	TryBeginPayloadPreparation(ctx context.Context, firstSlot, lastSlot uint64) (attemptCtx context.Context, finish func() bool, ok bool)
 	JustifiedCheckpoint() solid.Checkpoint
 	JustifiedSlot() uint64
 	ProposerBoostRoot() common.Hash
-	GetStateAtBlockRoot(
-		blockRoot common.Hash,
-		alwaysCopy bool,
-	) (*state.CachingBeaconState, error)
+	GetStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error)
+	// ViewStateAtBlockRoot callbacks must not call fork choice, mutate the state or keep it after returning.
 	ViewStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error
 	GetFinalityCheckpoints(
 		blockRoot common.Hash,
@@ -139,6 +138,8 @@ type ForkChoiceStorageReader interface {
 }
 
 type ForkChoiceStorageWriter interface {
+	BeginPayloadImport(uint64) func()
+	BeginPendingPayloadEnvelope(common.Hash) func()
 	OnAttestation(attestation *solid.Attestation, fromBlock, insert bool) error
 	OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, test bool) error
 	OnBlock(

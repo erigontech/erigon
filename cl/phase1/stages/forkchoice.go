@@ -418,7 +418,7 @@ func saveFinalizedStateOnDiskIfNeeded(fc forkchoice.ForkChoiceStorageReader, bea
 	if headSlot%(beaconCfg.SlotsPerEpoch*epochFrequency) != 0 {
 		return nil
 	}
-	st, err := fc.GetStateAtBlockRoot(fc.FinalizedCheckpoint().Root, true)
+	st, err := fc.GetStateAtBlockRoot(fc.FinalizedCheckpoint().Root)
 	if err != nil {
 		log.Debug("[Caplin] could not fetch finalized state to persist (non-fatal)", "err", err)
 		return nil
@@ -433,7 +433,7 @@ func saveFinalizedStateOnDiskIfNeeded(fc forkchoice.ForkChoiceStorageReader, bea
 // these sets of operations can take as long as they need to run, as by-now we are already synced.
 func postForkchoiceOperations(tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot uint64, headRoot common.Hash) error {
 	// Retrieve the head state.
-	headState, err := cfg.forkChoice.GetStateAtBlockRoot(headRoot, false)
+	headState, err := cfg.forkChoice.GetStateAtBlockRoot(headRoot)
 	if err != nil {
 		return fmt.Errorf("failed to get state at block root: %w", err)
 	}
@@ -612,17 +612,10 @@ func preCacheShuffledSet(in shuffleInput) {
 }
 
 func preCacheActiveValidatorsForEpoch(b *state.CachingBeaconState, epoch uint64, blockRoot common.Hash) {
-	// Skip if already fully cached (both active validators and total balance)
-	if indicies, totalBalance, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, blockRoot); ok && len(indicies) > 0 && totalBalance > 0 {
+	if indicies, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, blockRoot); ok && len(indicies) > 0 {
 		return
 	}
 
-	// GetActiveValidatorsIndices and GetTotalActiveBalance will compute and cache the results
 	indicies := b.GetActiveValidatorsIndices(epoch)
-	if epoch != state.Epoch(b) {
-		caches.ActiveValidatorsCacheGlobal.Put(epoch, blockRoot, indicies, 0)
-		return
-	}
-	totalBalance := b.GetTotalActiveBalance()
-	caches.ActiveValidatorsCacheGlobal.Put(epoch, blockRoot, indicies, totalBalance)
+	caches.ActiveValidatorsCacheGlobal.Put(epoch, blockRoot, indicies)
 }
