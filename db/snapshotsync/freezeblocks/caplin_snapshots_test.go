@@ -773,6 +773,48 @@ func TestRemoveOverlapsDefersCrossingBeaconBlocksHeldByView(t *testing.T) {
 	require.Equal(t, uint64(3*limit-1), sn.BlocksAvailable())
 }
 
+func TestRemoveOverlapsUnlinksCrossingIndexOfReplacedVersionHeldByView(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 3*limit, true)
+	files, err := filepath.Glob(filepath.Join(dirs.Snap, "v1.1-*-beaconblocks.*"))
+	require.NoError(t, err)
+	require.Len(t, files, 2)
+	for _, f := range files {
+		dir, name := filepath.Split(f)
+		require.NoError(t, os.Rename(f, filepath.Join(dir, "v1.0"+strings.TrimPrefix(name, "v1.1"))))
+	}
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	view := sn.View()
+	closeView := sync.OnceFunc(view.Close)
+	t.Cleanup(closeView)
+
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 3*limit, true)
+	require.NoError(t, sn.OpenFolder())
+	require.NoError(t, sn.RemoveOverlaps(nil))
+
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, 2*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 2*limit, 3*limit, true)
+	require.NoError(t, sn.OpenFolder())
+	var reported []string
+	require.NoError(t, sn.RemoveOverlaps(func(paths []string) error {
+		reported = append(reported, paths...)
+		return nil
+	}))
+	closeView()
+	sn.Close()
+
+	_, crossingRange, _ := strings.Cut(snaptype.BeaconBlocks.FileName(version.ZeroVersion, limit, 3*limit), "-")
+	left, err := filepath.Glob(filepath.Join(dirs.Snap, "*-"+strings.TrimSuffix(crossingRange, ".seg")+".*"))
+	require.NoError(t, err)
+	require.Empty(t, left, "no file of the crossing range may outlive its readers")
+	require.Contains(t, reported, "v1.0-"+strings.TrimSuffix(crossingRange, ".seg")+".idx")
+}
+
 func TestRemoveOverlapsKeepsUncoveredCrossingBeaconBlocks(t *testing.T) {
 	const limit = snaptype.CaplinMergeLimit
 

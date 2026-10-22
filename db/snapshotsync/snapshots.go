@@ -1729,6 +1729,9 @@ func (s *BaseRoSnapshots) removeUnheld(names []string) {
 	for _, name := range names {
 		if holder, ok := holders[name]; ok {
 			holder.canDelete.Store(true)
+			if name != holder.FileName() {
+				holder.keepIdxFiles.Store(false)
+			}
 			continue
 		}
 		unheld = append(unheld, filepath.Join(s.dir, name))
