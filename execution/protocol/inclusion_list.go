@@ -56,6 +56,10 @@ func CheckInclusionListTransactions(
 			continue
 		}
 
+		if tx.Type() == types.BlobTxType {
+			continue
+		}
+
 		msg, err := tx.AsMessage(signer, &baseFee, rules)
 		if err != nil {
 			continue

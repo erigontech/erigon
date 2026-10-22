@@ -189,6 +189,24 @@ func TestCheckInclusionListTransactions_MissingValidTxn(t *testing.T) {
 	})
 }
 
+func TestCheckInclusionListTransactions_MissingBlobTxnIsSkipped(t *testing.T) {
+	t.Parallel()
+
+	reader := newILStateReader()
+	reader.setBalance(ilSenderAddress, *uint256.NewInt(1_000_000_000_000_000_000))
+	blobTxn := ilSign(t, ilSenderKey, &types.BlobTx{
+		DynamicFeeTransaction: types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: 0, GasLimit: ilTxnGasLimit, To: &ilRecipient},
+			ChainID:  *uint256.NewInt(ilChainID),
+			FeeCap:   *uint256.NewInt(1_000_000_000),
+		},
+		MaxFeePerBlobGas:    *uint256.NewInt(1_000_000_000),
+		BlobVersionedHashes: []common.Hash{{0x01}},
+	})
+
+	require.True(t, ilCheck(t, reader, chain.AllProtocolChanges, ilGasPool(), nil, types.Transactions{blobTxn}))
+}
+
 func TestCheckInclusionListTransactions_MissingInvalidTxn(t *testing.T) {
 	t.Parallel()
 
