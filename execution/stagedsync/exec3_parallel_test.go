@@ -2408,7 +2408,7 @@ func TestProcessRequestSetsEIP8246FromBlockTime(t *testing.T) {
 		pe.blockExecutors = map[uint64]*blockExecutor{0: nil}
 		header := &types.Header{Number: *uint256.NewInt(1), Time: tc.time}
 		block := types.NewBlockFromStorage(common.Hash{}, header, nil, nil, nil, nil)
-		require.NoError(t, pe.processRequest(t.Context(), &execRequest{block: block, tasks: []exec.Task{&exec.TxTask{Header: header}}}))
+		require.NoError(t, pe.processRequest(t.Context(), &execRequest{block: block, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}))
 		vm := pe.blockExecutors[1].versionMap
 		vm.WriteBalance(addr, state.Version{TxIndex: 0}, *uint256.NewInt(100), true)
 		vm.WriteSelfDestruct(addr, state.Version{TxIndex: 0}, true, true)
