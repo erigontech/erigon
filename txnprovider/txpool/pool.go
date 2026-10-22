@@ -1646,6 +1646,9 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 		logger.Warn("[sender-run] the busiest sender's sequence, as the pool holds it",
 			"run", p.busiestSenderRun(cacheView))
 		logger.Warn("[sender-exits] how the busiest sender's transactions left the pool", "exits", p.senderExits(cacheView))
+		if r := p.residue(cacheView, 16); r != "" {
+			logger.Warn("[pool-residue] what the pool is still holding, named", "held", r)
+		}
 	}
 
 	for senderID := range sendersWithChangedState {
@@ -3061,6 +3064,14 @@ func (p *TxPool) logStats() {
 		ctx = append(ctx, "cache_keys", cacheKeys)
 	}
 	p.logger.Info("[txpool] stat", ctx...)
+	// ⚠ A RESIDUE OF TWO IS NOT A ROUNDING ERROR, IT IS A WEDGE. Every soak pass drained to exactly
+	// pending=2 and then sat there until the 2400s cap, which cost 40 minutes a pass and told us
+	// nothing about WHICH two. The census names them with the chain's nonce beside them, but it only
+	// fires on admission — in the idle window after a burst nothing admits, so nothing reports. This
+	// names them while the pool is idle, which is the only time the question is being asked.
+	if n := len(p.byHash); n > 0 && n <= 16 {
+		p.logger.Warn("[pool-residue] what the pool is still holding, named", "held", p.residueNames())
+	}
 	pendingSubCounter.SetInt(p.pending.Len())
 	basefeeSubCounter.SetInt(p.baseFee.Len())
 	queuedSubCounter.SetInt(p.queued.Len())
@@ -3377,4 +3388,52 @@ func (p *TxPool) senderExits(cacheView kvcache.CacheView) string {
 		fmt.Fprintf(&b, " | %s=%d highestNonce=%d%s", k.reason.String(), n, hi, flag)
 	}
 	return b.String()
+}
+
+// residue names every transaction the pool is still holding, with the chain's next nonce for its
+// sender beside it, when few enough are held for the list to be read rather than summarised.
+//
+// ⚠ THIS IS THE QUESTION A COUNT CANNOT ANSWER. "pending=2" is the same observation whether the two
+// are a sender whose front nonce already mined, a hole no one will fill, or work genuinely in
+// flight — and those have nothing in common but the number. frontGap below is the arithmetic that
+// separates them: a positive gap means the chain is BEHIND this transaction and something in front
+// of it is missing; zero means it is next and is simply not being taken.
+func (p *TxPool) residue(cacheView kvcache.CacheView, max int) string {
+	held := len(p.byHash)
+	if held == 0 || held > max {
+		return ""
+	}
+	out := make([]string, 0, held)
+	for _, mt := range p.byHash {
+		id := mt.TxnSlot.SenderID
+		name := fmt.Sprintf("id%d", id)
+		chainNonce := uint64(0)
+		if addr, mapped := p.senders.senderID2Addr[id]; mapped {
+			name = addr.String()
+			// ⚠ senders.info PANICS for an unmapped id — resolve the address first. See busiestSenderRun.
+			if n, _, err := p.senders.info(cacheView, id); err == nil {
+				chainNonce = n
+			}
+		}
+		out = append(out, fmt.Sprintf("%s nonce=%d chainNext=%d frontGap=%d subPool=%b",
+			name, mt.TxnSlot.Nonce, chainNonce, int64(mt.TxnSlot.Nonce)-int64(chainNonce), mt.subPool))
+	}
+	sort.Strings(out)
+	return strings.Join(out, " | ")
+}
+
+// residueNames is residue without a state read: who and which nonce, for the idle window where no
+// cacheView is to hand. It says what is held; residue says why it is still held.
+func (p *TxPool) residueNames() string {
+	out := make([]string, 0, len(p.byHash))
+	for _, mt := range p.byHash {
+		id := mt.TxnSlot.SenderID
+		name := fmt.Sprintf("id%d", id)
+		if addr, mapped := p.senders.senderID2Addr[id]; mapped {
+			name = addr.String()
+		}
+		out = append(out, fmt.Sprintf("%s nonce=%d subPool=%b", name, mt.TxnSlot.Nonce, mt.subPool))
+	}
+	sort.Strings(out)
+	return strings.Join(out, " | ")
 }
