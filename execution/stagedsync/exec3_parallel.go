@@ -1970,7 +1970,7 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			// Valid: wait for its dependencies to commit, then re-validate — a
 			// dependency may have re-executed to a new value, forcing a re-exec;
 			// otherwise the verdict is authoritative and we commit out of order.
-			if !be.versionMap.HasBAL && !waitTo(target) {
+			if !waitTo(target) {
 				return
 			}
 			if v, _, _ := be.selfLoopEvaluate(tv, result); v {
@@ -2885,8 +2885,6 @@ type blockExecutor struct {
 	// already owns: the worker owns all re-execution, so the scheduler dispatches
 	// each task exactly once. Touched only on the exec-loop goroutine.
 	selfLoopDispatched map[int]bool
-	// balStarted: the BAL workers of this block are running. Exec-loop only.
-	balStarted bool
 	// balEstimated[i]: task i's flush left Estimate cells. Set by its worker before
 	// the result send, read by the exec loop after the receive.
 	balEstimated []bool
@@ -2956,9 +2954,6 @@ func (be *blockExecutor) indexReads(taskIdx int, rs state.ReadSet) {
 	})
 }
 
-// balDispatchWindow bounds how far past the commit frontier a BAL block dispatches tasks.
-const balDispatchWindow = 32
-
 // insertSorted adds tx to the ascending, duplicate-free list l.
 func insertSorted(l []int, tx int) []int {
 	if n := len(l); n == 0 || l[n-1] < tx {
@@ -2969,11 +2964,6 @@ func insertSorted(l []int, tx int) []int {
 		return l
 	}
 	return slices.Insert(l, i, tx)
-}
-
-// balSeededPath reports whether a BAL pre-populates cells of path p.
-func balSeededPath(p state.AccountPath) bool {
-	return p == state.BalancePath || p == state.NoncePath || p == state.CodePath || p == state.StoragePath
 }
 
 // readersAbove returns the readers in the ascending list l that are > tx.
@@ -3439,18 +3429,12 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 // reverse index records for changedTx's changed keys (new ∪ old write-sets), sorted
 // ascending so the cascade order matches the scan.
 func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *state.WriteSet) []int {
-	// A BAL-seeded cell already holds its final value, so a reader of it stays valid; a
-	// wrong BAL fails the block, and the finalize re-validation still checks dirty readers.
-	skipBALSeeded := be.versionMap.HasBAL
 	set := map[int]struct{}{}
 	add := func(ws *state.WriteSet) {
 		if ws == nil {
 			return
 		}
 		for h := range ws.AllHeaders() {
-			if skipBALSeeded && balSeededPath(h.Path) {
-				continue
-			}
 			for _, tx := range readersAbove(be.readersOf(h), changedTx) {
 				set[tx] = struct{}{}
 			}
@@ -3911,8 +3895,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 	}
 
 	if be.versionMap.HasBAL {
-		if !be.balStarted {
-			be.balStarted = true
+		if be.balEstimated == nil {
 			be.balEstimated = make([]bool, len(be.tasks))
 			for be.execTasks.takeNextPending() >= 0 {
 			}
@@ -3930,15 +3913,9 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			return 0
 		}
 		budget := len(be.tasks)
-		// Dispatch at most window tasks past the commit frontier, so results arrive
-		// close to block order and the per-result reader scans stay short.
-		lastTx := len(be.tasks) - 1
-		if be.versionMap.HasBAL {
-			lastTx = min(lastTx, be.frontier()+balDispatchWindow)
-		}
 		for {
 			nextTx := be.execTasks.minPending()
-			if nextTx < 0 || nextTx > lastTx {
+			if nextTx < 0 {
 				break
 			}
 			// A tx needs a free input-channel slot. If none, leave it in pending
