@@ -82,7 +82,7 @@ type beaconStatesCollector struct {
 	ptcWindowEpochCollector                 *etl.Collector
 	latestExecutionPayloadBidCollector      *etl.Collector
 	// gloas -- diffs data structures
-	buildersWriter                   *base_encoding.SSZQueueEncoder[*cltypes.Builder]
+	buildersWriter                   *state_accessors.BuildersDiffWriter
 	builderPendingWithdrawalsWriter  *base_encoding.SSZQueueEncoder[*cltypes.BuilderPendingWithdrawal]
 	payloadExpectedWithdrawalsWriter *base_encoding.SSZQueueEncoder[*cltypes.Withdrawal]
 
@@ -143,7 +143,7 @@ func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir stri
 		ptcWindowEpochCollector:                 etl.NewCollectorWithAllocator(kv.PtcWindowEpochTable, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
 		latestExecutionPayloadBidCollector:      etl.NewCollectorWithAllocator(kv.LatestExecutionPayloadBidTable, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
 
-		buildersWriter:                   base_encoding.NewSSZQueueEncoder[*cltypes.Builder](func(a, b *cltypes.Builder) bool { return *a == *b }),
+		buildersWriter:                   new(state_accessors.BuildersDiffWriter),
 		builderPendingWithdrawalsWriter:  base_encoding.NewSSZQueueEncoder[*cltypes.BuilderPendingWithdrawal](func(a, b *cltypes.BuilderPendingWithdrawal) bool { return *a == *b }),
 		payloadExpectedWithdrawalsWriter: base_encoding.NewSSZQueueEncoder[*cltypes.Withdrawal](func(a, b *cltypes.Withdrawal) bool { return *a == *b }),
 
