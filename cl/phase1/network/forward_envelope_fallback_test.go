@@ -108,7 +108,7 @@ func TestForwardBeaconDownloaderProcessesTipEnvelopeAfterEmptyRange(t *testing.T
 			var wire bytes.Buffer
 			require.NoError(t, ssz_snappy.EncodeAndWrite(&wire, envelope, digest[:]...))
 			sentinel := &invalidEnvelopeSentinel{response: wire.Bytes()}
-			client := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock, nil)
+			client := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock)
 			downloader := NewForwardBeaconDownloader(t.Context(), client, cfg)
 			downloader.SetHighestProcessedSlot(9)
 			downloader.gloasLookahead = tip
@@ -333,7 +333,7 @@ func TestForwardBeaconDownloaderProcessesTipWithoutAvailableEnvelope(t *testing.
 	cfg.InitializeForkSchedule()
 	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
 	tip, _, _ := makeFullGloasBlockAndEnvelope(t, cfg, 10)
-	client := rpc.NewBeaconRpcP2P(t.Context(), &invalidEnvelopeSentinel{}, cfg, clock, nil)
+	client := rpc.NewBeaconRpcP2P(t.Context(), &invalidEnvelopeSentinel{}, cfg, clock)
 	downloader := NewForwardBeaconDownloader(t.Context(), client, cfg)
 	downloader.SetHighestProcessedSlot(9)
 	downloader.gloasLookahead = tip
@@ -390,7 +390,7 @@ func TestForwardBeaconDownloaderUsesHTTPForTipAfterP2PEnvelopeTimeout(t *testing
 	envelopeBytes, err := envelope.EncodeSSZ(nil)
 	require.NoError(t, err)
 	sentinel := &blockingEnvelopeSentinel{}
-	client := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock, nil)
+	client := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock)
 	var httpCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		httpCalls.Add(1)
@@ -509,7 +509,7 @@ func TestForwardBeaconDownloaderRetainsTipWhenProcessingDoesNotAdvance(t *testin
 	tip, envelope, _ := makeFullGloasBlockAndEnvelope(t, cfg, 10)
 	var wire bytes.Buffer
 	require.NoError(t, ssz_snappy.EncodeAndWrite(&wire, envelope, digest[:]...))
-	client := rpc.NewBeaconRpcP2P(t.Context(), &invalidEnvelopeSentinel{response: wire.Bytes()}, cfg, clock, nil)
+	client := rpc.NewBeaconRpcP2P(t.Context(), &invalidEnvelopeSentinel{response: wire.Bytes()}, cfg, clock)
 	downloader := NewForwardBeaconDownloader(t.Context(), client, cfg)
 	downloader.SetHighestProcessedSlot(9)
 	downloader.gloasLookahead = tip
