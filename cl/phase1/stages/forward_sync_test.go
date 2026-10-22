@@ -211,15 +211,23 @@ func TestForwardSyncRecordsTipRootAfterEmptySuccessorRange(t *testing.T) {
 	require.False(t, ConsensusClStages().ArgsFunc(ctx, cfg).atForwardSyncTip)
 }
 
-func TestForwardSyncDoesNotRecordTipRootAboveProcessedSlot(t *testing.T) {
+func TestForwardSyncRecordsHighestSeenRootAboveProcessedTip(t *testing.T) {
 	cfg, _, nextBlock, _ := newForwardSyncTipFixture(t)
 	cfg.forkChoice.OnTick((nextBlock.Block.Slot + 1) * cfg.beaconCfg.SecondsPerSlot * 1000)
 	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), nextBlock, false, false, false))
+	nextBlockRoot, err := nextBlock.Block.HashSSZ()
+	require.NoError(t, err)
+	highestSeenRoot := cfg.forkChoice.HighestSeenRoot()
+	require.NotZero(t, highestSeenRoot)
+	require.Equal(t, common.Hash(nextBlockRoot), highestSeenRoot)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	require.NoError(t, forwardSync(ctx, log.Root(), cfg, Args{}))
-	require.Zero(t, cfg.forwardSyncTipRoot)
+	require.Equal(t, highestSeenRoot, cfg.forwardSyncTipRoot)
+	cfg.hasDownloaded = true
+	cfg.syncedData = synced_data.NewSyncedDataManager(cfg.beaconCfg, true)
+	require.True(t, ConsensusClStages().ArgsFunc(ctx, cfg).atForwardSyncTip)
 }
 
 // Forward sync imports blocks without their columns, so it asks for a backfill of the range it
