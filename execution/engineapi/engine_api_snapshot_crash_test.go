@@ -129,10 +129,30 @@ func TestEngineApiSnapshotCrashRecovery(t *testing.T) {
 		reorgCommitted bool
 		pruneCommitted bool
 	}{
-		{"files_built", state.MaintenanceFilesBuilt, false, false},
-		{"files_published", state.MaintenanceFilesPublished, false, false},
-		{"prune_ready", state.MaintenancePruneReady, true, false},
-		{"prune_committed", state.MaintenancePruneCommitted, true, true},
+		{
+			name:           "files_built",
+			point:          state.MaintenanceFilesBuilt,
+			reorgCommitted: false,
+			pruneCommitted: false,
+		},
+		{
+			name:           "files_published",
+			point:          state.MaintenanceFilesPublished,
+			reorgCommitted: false,
+			pruneCommitted: false,
+		},
+		{
+			name:           "prune_ready",
+			point:          state.MaintenancePruneReady,
+			reorgCommitted: true,
+			pruneCommitted: false,
+		},
+		{
+			name:           "prune_committed",
+			point:          state.MaintenancePruneCommitted,
+			reorgCommitted: true,
+			pruneCommitted: true,
+		},
 	} {
 		t.Run(window.name, func(t *testing.T) {
 			request := snapshotCrashRequest{
@@ -278,7 +298,7 @@ func runSnapshotCrashChild(t *testing.T) {
 	var beforePrune map[string]uint64
 	var stepSize uint64
 	pruneWindow := request.Boundary == state.MaintenancePruneReady || request.Boundary == state.MaintenancePruneCommitted
-	observe := func(ctx context.Context, event state.MaintenanceEvent) {
+	observe := func(observerCtx context.Context, event state.MaintenanceEvent) {
 		point := event.Point
 		if point == state.MaintenanceBuildStarted {
 			firstBuild.Do(func() {
@@ -286,7 +306,7 @@ func runSnapshotCrashChild(t *testing.T) {
 				close(buildStarted)
 				select {
 				case <-buildAllowed:
-				case <-ctx.Done():
+				case <-observerCtx.Done():
 				}
 			})
 		}
@@ -311,7 +331,7 @@ func runSnapshotCrashChild(t *testing.T) {
 		}
 		firstCrash.Do(func() {
 			close(crashReached)
-			<-ctx.Done()
+			<-observerCtx.Done()
 		})
 	}
 	// Keep the node alive until process termination. An attempt timeout must
