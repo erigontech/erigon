@@ -5291,10 +5291,10 @@ func TestProductionReportsMissingPayloadIDExactlyOnce(t *testing.T) {
 	require.NotContains(t, captured, "failed to produce execution payload")
 }
 
-func TestProductionPrefersFirstOfConcurrentActionableFailures(t *testing.T) {
-	boom := errors.New("boom")
-	err := produceBlockWithFailingCollection(t, t.Context(), boom, errors.New("no aggregate"))
-	require.ErrorIs(t, err, boom)
+func TestProductionPrefersExecutionFailureOnEqualPriority(t *testing.T) {
+	executionErr := errors.New("boom")
+	err := produceBlockWithFailingCollection(t, t.Context(), executionErr, errors.New("no aggregate"))
+	require.ErrorIs(t, err, executionErr)
 }
 
 func TestProductionReportsActionableConcurrentFailure(t *testing.T) {
