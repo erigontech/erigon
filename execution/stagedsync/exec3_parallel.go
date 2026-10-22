@@ -313,8 +313,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 
 	// applyResults feeds the apply goroutine; commitResults feeds the commitment
 	// calculator. Both are fed by the fan-out in the execLoop's blockExecutor.
-	applyResults := make(chan applyResult, 2_048)
-	commitResults := make(chan applyResult, 2_048)
+	// Room for a whole 150M-gas block of transfers, so the exec loop does not stall
+	// on a consumer that folds each tx as it is published.
+	applyResults := make(chan applyResult, 16_384)
+	commitResults := make(chan applyResult, 16_384)
 	// Exec-only (DISCARD_COMMITMENT): nil the commit stream so no commitment work
 	// runs — fan-out and batch-commit trigger no-op on a nil channel, and the
 	// calculator exits immediately and closes rootResults.
