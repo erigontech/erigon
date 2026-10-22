@@ -416,6 +416,9 @@ func Rewrite(srcDir, patchDir, dstDir string) (patched int, err error) {
 		return 0, err
 	}
 	defer data.Unmap()
+	if err := mmap.MadviseSequential(data); err != nil {
+		return 0, err
+	}
 	w, err := NewWriter(dstDir)
 	if err != nil {
 		return 0, err
