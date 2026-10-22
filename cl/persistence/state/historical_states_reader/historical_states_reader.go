@@ -1150,6 +1150,18 @@ func ReadBuildersSSZ(kvGetter state_accessors.GetValFn, slot, forkSlot, registry
 	if err != nil {
 		return err
 	}
+	// The dump already includes its own slot's row; check its format anyway so legacy history is detected at dump slots.
+	if dumpSlot := slot - slot%clparams.SlotsPerDump; firstDiffSlot > dumpSlot {
+		row, err := kvGetter(kv.Builders, base_encoding.Encode64ToBytes4(dumpSlot))
+		if err != nil {
+			return err
+		}
+		if len(row) != 0 {
+			if err := state_accessors.CheckBuildersDiffRow(row); err != nil {
+				return fmt.Errorf("check builders diff from table %s at slot %d: %w", kv.Builders, dumpSlot, err)
+			}
+		}
+	}
 
 	for currSlot := firstDiffSlot; currSlot <= slot; currSlot++ {
 		key := base_encoding.Encode64ToBytes4(currSlot)

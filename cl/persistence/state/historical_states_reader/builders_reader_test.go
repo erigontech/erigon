@@ -110,6 +110,43 @@ func TestReadBuildersSSZDistinguishesHolesFromMissedSlots(t *testing.T) {
 	}
 }
 
+func TestReadBuildersSSZChecksTheRowAtTheDumpSlot(t *testing.T) {
+	dumpSlot := uint64(2 * clparams.SlotsPerDump)
+	dump := readerBuilders(10, 20)
+	legacyWriter := base_encoding.NewSSZQueueEncoder[*cltypes.Builder](func(a, b *cltypes.Builder) bool { return *a == *b })
+	var legacy bytes.Buffer
+	require.NoError(t, legacyWriter.WriteDiff(&legacy, dump))
+	tests := []struct {
+		name     string
+		forkSlot uint64
+		row      []byte
+		rebuild  bool
+	}{
+		{name: "legacy row after the fork", forkSlot: clparams.SlotsPerDump, row: legacy.Bytes(), rebuild: true},
+		{name: "legacy row at the fork slot", forkSlot: dumpSlot, row: legacy.Bytes(), rebuild: true},
+		{name: "current row is not applied twice", forkSlot: clparams.SlotsPerDump, row: encodeBuildersRow(t, readerBuilders(10), dump)},
+		{name: "no row", forkSlot: clparams.SlotsPerDump},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			getter := mockGetValFn(map[string]map[string][]byte{
+				kv.BuildersDump: {string(base_encoding.Encode64ToBytes4(dumpSlot)): compressSSZ(t, dump)},
+				kv.Builders:     {string(base_encoding.Encode64ToBytes4(dumpSlot)): test.row},
+				kv.SlotData:     {string(base_encoding.Encode64ToBytes4(dumpSlot)): {1}},
+			})
+			got := readerBuilders()
+			err := ReadBuildersSSZ(getter, dumpSlot, test.forkSlot, readerBuilderLimit, got)
+			if test.rebuild {
+				require.ErrorIs(t, err, state_accessors.ErrHistoryRebuildRequired)
+				require.ErrorContains(t, err, fmt.Sprintf("slot %d", dumpSlot))
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, []uint64{10, 20}, readerBuilderBalances(got))
+		})
+	}
+}
+
 func TestReadBuildersSSZRejectsLegacyRowWithContext(t *testing.T) {
 	slot := uint64(clparams.SlotsPerDump)
 	legacyWriter := base_encoding.NewSSZQueueEncoder[*cltypes.Builder](func(a, b *cltypes.Builder) bool { return *a == *b })

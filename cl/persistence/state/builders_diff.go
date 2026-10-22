@@ -79,7 +79,7 @@ func (w *BuildersDiffWriter) WriteDiff(dst io.Writer, post *solid.ListSSZ[*cltyp
 	return err
 }
 
-func ApplyBuildersDiff(row []byte, builders *solid.ListSSZ[*cltypes.Builder], registryLimit uint64) error {
+func CheckBuildersDiffRow(row []byte) error {
 	if len(row) < buildersDiffPreambleSize {
 		return rebuildRequired("row shorter than preamble")
 	}
@@ -99,12 +99,20 @@ func ApplyBuildersDiff(row []byte, builders *solid.ListSSZ[*cltypes.Builder], re
 		return rebuildRequired("truncated builders diff header")
 	}
 
-	newLength := binary.LittleEndian.Uint64(row[buildersDiffPreambleSize:])
 	count := binary.LittleEndian.Uint32(row[buildersDiffPreambleSize+8:])
 	expectedLength := uint64(buildersDiffHeaderSize) + uint64(count)*uint64(buildersDiffEntrySize)
 	if uint64(len(row)) != expectedLength {
 		return rebuildRequired("builders diff length is %d, want %d", len(row), expectedLength)
 	}
+	return nil
+}
+
+func ApplyBuildersDiff(row []byte, builders *solid.ListSSZ[*cltypes.Builder], registryLimit uint64) error {
+	if err := CheckBuildersDiffRow(row); err != nil {
+		return err
+	}
+	newLength := binary.LittleEndian.Uint64(row[buildersDiffPreambleSize:])
+	count := binary.LittleEndian.Uint32(row[buildersDiffPreambleSize+8:])
 	currentLength := uint64(builders.Len())
 	if newLength > registryLimit {
 		return rebuildRequired("builders length %d exceeds registry limit %d", newLength, registryLimit)
