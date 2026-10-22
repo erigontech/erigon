@@ -182,7 +182,7 @@ func TestSSZQueueDiffSharedPointersSkipEquality(t *testing.T) {
 		previousValues[i] = &solid.PendingPartialWithdrawal{ValidatorIndex: uint64(i)}
 	}
 	appended := []*solid.PendingPartialWithdrawal{{ValidatorIndex: 1000}, {ValidatorIndex: 1001}, {ValidatorIndex: 1002}, {ValidatorIndex: 1003}}
-	updatedValues := append(previousValues[16:len(previousValues):len(previousValues)], appended...)
+	updatedValues := slices.Concat(previousValues[16:], appended)
 	previous := pendingWithdrawalList(previousValues...)
 	updated := pendingWithdrawalList(updatedValues...)
 

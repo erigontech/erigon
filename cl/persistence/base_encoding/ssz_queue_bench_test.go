@@ -18,6 +18,7 @@ package base_encoding
 
 import (
 	"io"
+	"slices"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -57,8 +58,8 @@ func BenchmarkSSZQueueEncoderPendingDeposits(b *testing.B) {
 		updated []*solid.PendingDeposit
 	}{
 		{name: "unchanged", updated: previousValues},
-		{name: "append16", updated: append(previousValues[:len(previousValues):len(previousValues)], appended(16)...)},
-		{name: "pop16append4", updated: append(previousValues[16:len(previousValues):len(previousValues)], appended(4)...)},
+		{name: "append16", updated: slices.Concat(previousValues, appended(16))},
+		{name: "pop16append4", updated: slices.Concat(previousValues[16:], appended(4))},
 		{name: "setFirstFallback", updated: append([]*solid.PendingDeposit{&changedFirst}, previousValues[1:]...)},
 	}
 	previous := benchmarkPendingDepositList(previousValues)
