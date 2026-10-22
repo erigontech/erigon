@@ -314,6 +314,8 @@ func runSnapshotCrashChild(t *testing.T) {
 			<-ctx.Done()
 		})
 	}
+	// Keep the node alive until process termination. An attempt timeout must
+	// not release a pre-commit barrier and let persistence continue.
 	eat, err := engineapitester.InitialiseEngineApiTester(context.Background(), engineapitester.EngineApiTesterInitArgs{
 		Logger: testlog.Logger(t, log.LvlError), DataDir: request.DataDir,
 		Genesis: request.Genesis, CoinbaseKey: key, NoEmptyBlock1: true,
@@ -386,6 +388,8 @@ func continueSnapshotPruning(ctx context.Context, eat engineapitester.EngineApiT
 		return fmt.Errorf("snapshot pruning requires a writable temporal database")
 	}
 	for ctx.Err() == nil {
+		// Prune work may time out, but a reached commit barrier must stay held
+		// until process termination.
 		_, finished, err := db.CollateAndPrune(context.Background(), func(tx kv.TemporalRwTx) (kv.FinalityContext, error) {
 			finality, err := execfinality.Resolve(tx, snapshotCrashReorgDepth, false, rawdbv3.TxNums)
 			if err != nil {

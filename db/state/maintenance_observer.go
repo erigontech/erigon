@@ -27,9 +27,12 @@ type MaintenancePoint uint8
 const (
 	// MaintenanceBuildStarted marks an eligible collation attempt.
 	MaintenanceBuildStarted MaintenancePoint = iota
-	// MaintenanceFilesBuilt precedes integration after all builders for a step have succeeded.
+	// MaintenanceFilesBuilt means all builders for a step succeeded, before
+	// integration into in-process read views. Files already exist on disk and
+	// can be discovered after a restart.
 	MaintenanceFilesBuilt
-	// MaintenanceFilesPublished follows integration of that step into new read views.
+	// MaintenanceFilesPublished follows integration of that step's files into
+	// new in-process read views.
 	MaintenanceFilesPublished
 	// MaintenancePruneReady means CollateAndPrune has run its prune callback, before committing its transaction.
 	MaintenancePruneReady
@@ -39,8 +42,9 @@ const (
 
 type MaintenanceEvent struct {
 	Point MaintenancePoint
-	// FilesDone is set at BuildStarted for BuildFilesInBackground jobs.
-	// It closes after the job and its merge finish, including failure paths.
+	// FilesDone is set at BuildStarted for background jobs. It closes after
+	// that job's build and any merge it runs finish, including on failure;
+	// it does not wait for a merge already running in another job.
 	FilesDone <-chan struct{}
 	// PruneTx is a read-only view of the pending transaction at PruneReady.
 	// It is valid only during the observer call.
