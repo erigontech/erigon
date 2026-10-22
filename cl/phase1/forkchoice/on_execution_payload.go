@@ -1547,19 +1547,23 @@ func (f *ForkChoiceStore) emitExecutionPayloadIntegrationEvents(blockRoot common
 	if f.emitters == nil || signedEnvelope == nil || signedEnvelope.Message == nil || signedEnvelope.Message.Payload == nil {
 		return
 	}
+	block, ok := f.GetBlock(blockRoot)
+	if !ok || block == nil || block.Block == nil {
+		return
+	}
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	if bid == nil || bid.Message == nil {
+		return
+	}
 	envelope := signedEnvelope.Message
 	f.emitters.Operation().SendExecutionPayload(&beaconevents.ExecutionPayloadData{
-		Slot: envelope.Payload.SlotNumber, BuilderIndex: envelope.BuilderIndex, BlockHash: envelope.Payload.BlockHash, BlockRoot: blockRoot,
+		Slot: block.Block.Slot, BuilderIndex: bid.Message.BuilderIndex, BlockHash: envelope.Payload.BlockHash, BlockRoot: blockRoot,
 		ExecutionOptimistic: f.IsRootOptimistic(blockRoot),
 	})
 	f.emitters.Operation().SendExecutionPayloadAvailable(&beaconevents.ExecutionPayloadAvailableData{
-		Slot: envelope.Payload.SlotNumber, BlockRoot: blockRoot,
+		Slot: block.Block.Slot, BlockRoot: blockRoot,
 	})
 	if f.beaconCfg == nil {
-		return
-	}
-	block, ok := f.GetBlock(blockRoot)
-	if !ok || block == nil || block.Block == nil {
 		return
 	}
 	f.mu.RLock()

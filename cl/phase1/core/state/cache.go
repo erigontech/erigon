@@ -22,7 +22,6 @@ import (
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/phase1/core/caches"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
@@ -244,16 +243,6 @@ func (b *CachingBeaconState) _refreshActiveBalancesIfNeeded() {
 	epoch := Epoch(b)
 	b.totalActiveBalanceCache = new(uint64)
 	*b.totalActiveBalanceCache = 0
-
-	// Check global cache using block root at beginning of previous epoch
-	blockRootAtBegginingPrevEpoch, err := b.GetBlockRootAtSlot(((epoch - 1) * b.BeaconConfig().SlotsPerEpoch) - 1)
-	if err == nil {
-		if _, cachedBalance, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, blockRootAtBegginingPrevEpoch); ok && cachedBalance != 0 {
-			*b.totalActiveBalanceCache = cachedBalance
-			b.totalActiveBalanceRootCache = utils.IntegerSquareRoot(*b.totalActiveBalanceCache)
-			return
-		}
-	}
 
 	for i := 0; i < b.ValidatorSet().Length(); i++ {
 		validator := b.ValidatorSet().Get(i)
