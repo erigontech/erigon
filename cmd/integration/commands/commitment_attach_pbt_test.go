@@ -259,6 +259,30 @@ func TestAttachPBTResetsAndReopensAtPublishedRoot(t *testing.T) {
 	require.Equal(t, wantRoot[:], root)
 }
 
+func TestAttachPBTSkipVerifyAdoptsWithoutLeafPass(t *testing.T) {
+	commitmentflags.Restore(t)
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	statecfg.BinCommitmentHash = ""
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	source, wantRoot := newPBTConversionSource(t)
+	published := filepath.Join(t.TempDir(), "published")
+	require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
+	require.NoError(t, corruptPBTOutputRow(t.Context(), datadir.Open(published)))
+	setExecutionProgress(t, source.Chaindata, 1)
+	leafStamps := func(uint64, func(func(state.PBinLeaf) error) error) (common.Hash, error) {
+		return common.Hash{}, errors.New("leaf pass ran")
+	}
+	hooks := pbtAttachHooks{genesis: pbtAttachNoGenesis, leafStamps: leafStamps, skipVerify: true}
+	require.NoError(t, attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), hooks))
+	settings, err := state.ReadErigonDBSettings(datadir.Open(source.DataDir))
+	require.NoError(t, err)
+	require.Equal(t, state.TrieVariantHexBin, settings.TrieVariantName())
+	require.Zero(t, readExecutionStageProgress(t, source.Chaindata))
+	root, _ := reopenBinSource(t, source.DataDir, source.Chaindata)
+	require.Equal(t, wantRoot[:], root)
+}
+
 func TestAttachPBTRejectsDifferentStateSalt(t *testing.T) {
 	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true

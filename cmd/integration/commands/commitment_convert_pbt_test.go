@@ -712,6 +712,51 @@ func TestConvertPBTVerifiesCorruptedWrittenRows(t *testing.T) {
 	require.ErrorContains(t, err, "verify written rows")
 }
 
+func TestConvertPBTSkipVerifySkipsWrittenRowsCheck(t *testing.T) {
+	commitmentflags.Restore(t)
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	source, _ := newPBTConversionSource(t)
+	output := filepath.Join(t.TempDir(), "output")
+	hooks := pbtConvertHooks{skipVerify: true, standalone: func(dirs datadir.Dirs) error {
+		return corruptPBTOutputRow(t.Context(), dirs)
+	}}
+	require.NoError(t, convertPBTWithOptions(t.Context(), source.DataDir, output, true, "", log.New(), hooks))
+	settings, err := dbstate.ReadErigonDBSettings(datadir.Open(output))
+	require.NoError(t, err)
+	require.Equal(t, dbstate.TrieVariantHexBin, settings.TrieVariantName())
+}
+
+func TestConvertPBTSkipVerifyRejectsStateFilesPastPoint(t *testing.T) {
+	commitmentflags.Restore(t)
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	source, _ := newPBTConversionSource(t)
+	require.NoError(t, filepath.WalkDir(source.Snap, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || !strings.Contains(entry.Name(), "-accounts.0-1.") {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(strings.Replace(path, ".0-1.", ".1-2.", 1), data, 0o644)
+	}))
+	output := filepath.Join(t.TempDir(), "output")
+	err := convertPBTWithOptions(t.Context(), source.DataDir, output, true, "", log.New(), pbtConvertHooks{skipVerify: true})
+	require.ErrorContains(t, err, "state files from step 1 hold writes past conversion txNum 7")
+}
+
+func TestRequirePBinSourceFilesEnd(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.MkdirAll(dirs.SnapDomain, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-1.kv"), nil, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v1.0-receipt.1-2.kv"), nil, 0o644))
+	require.NoError(t, requirePBinSourceFilesEnd(dirs, 8, 7))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v1.0-storage.1-2.kv"), nil, 0o644))
+	require.ErrorContains(t, requirePBinSourceFilesEnd(dirs, 8, 7), "state files from step 1 hold writes past conversion txNum 7")
+}
+
 func corruptPBTOutputRow(ctx context.Context, dirs datadir.Dirs) error {
 	refs := false
 	variant := dbstate.TrieVariantHexBin

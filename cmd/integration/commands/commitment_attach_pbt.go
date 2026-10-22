@@ -54,13 +54,17 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-var attachPBTFrom string
+var (
+	attachPBTFrom       string
+	attachPBTSkipVerify bool
+)
 
 type pbtAttachHooks struct {
 	step       func(string) error
 	leafStamps func(uint64, func(func(dbstate.PBinLeaf) error) error) (common.Hash, error)
 	genesis    func(context.Context, datadir.Dirs, datadir.Dirs, log.Logger) error
 	hexRoot    func(context.Context, datadir.Dirs, *dbstate.ErigonDBSettings, uint64, uint64, log.Logger) (common.Hash, bool, error)
+	skipVerify bool
 }
 
 func init() {
@@ -69,6 +73,7 @@ func init() {
 	withConfig(cmdCommitmentAttachPBT)
 	withExperimentalCommitment(cmdCommitmentAttachPBT)
 	cmdCommitmentAttachPBT.Flags().StringVar(&attachPBTFrom, "from", "", "published datadir containing converted commitment files")
+	cmdCommitmentAttachPBT.Flags().BoolVar(&attachPBTSkipVerify, "skip-verify", false, "adopt a pre-fork point without the published leaf pass, bin row check or node PBT root; writes no shadow root")
 	must(cmdCommitmentAttachPBT.MarkFlagDirname("from"))
 	must(cmdCommitmentAttachPBT.MarkFlagRequired("from"))
 	commitmentCmd.AddCommand(cmdCommitmentAttachPBT)
@@ -80,7 +85,7 @@ var cmdCommitmentAttachPBT = &cobra.Command{
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		return attachPBT(ctx, datadirCli, attachPBTFrom, chain, logger)
+		return attachPBTWithHooks(ctx, datadirCli, attachPBTFrom, chain, logger, pbtAttachHooks{skipVerify: attachPBTSkipVerify})
 	},
 }
 
@@ -108,7 +113,9 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	if hooks.step == nil {
 		hooks.step = func(string) error { return nil }
 	}
-	if hooks.leafStamps == nil {
+	if hooks.skipVerify {
+		hooks.leafStamps = func(uint64, func(func(dbstate.PBinLeaf) error) error) (common.Hash, error) { return common.Hash{}, nil }
+	} else if hooks.leafStamps == nil {
 		hooks.leafStamps = validatePBTAttachLeafStamps
 	}
 	if hooks.genesis == nil {
@@ -234,6 +241,9 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	if err != nil {
 		return err
 	}
+	if hooks.skipVerify && afterFork {
+		return fmt.Errorf("commitment attach-pbt: --skip-verify needs a conversion point before the binary trie fork; block %d is after it", blockNum)
+	}
 	if marker == nil {
 		if nodeProgress > blockNum {
 			return pbtAttachNodePointError(nodeDirs.DataDir, chainName, nodeBlock, nodeTx, nodeProgress, blockNum, txNum, blockEnd)
@@ -246,7 +256,9 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	if err != nil {
 		return err
 	}
-	if err := verifyPBTAttachPublishedBin(ctx, publishedDirs, publishedSettings, pbinConversionPoint{BlockNum: blockNum, TxNum: txNum}, publishedPbtRoot, logger); err != nil {
+	if hooks.skipVerify {
+		logger.Info("commitment attach-pbt: published PBT verification skipped", "block", blockNum, "txNum", txNum)
+	} else if err := verifyPBTAttachPublishedBin(ctx, publishedDirs, publishedSettings, pbinConversionPoint{BlockNum: blockNum, TxNum: txNum}, publishedPbtRoot, logger); err != nil {
 		return err
 	}
 	var publishedHexRoot common.Hash
@@ -274,12 +286,14 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 		if err := hooks.genesis(ctx, nodeDirs, publishedDirs, logger); err != nil {
 			return err
 		}
-		nodePbtRoot, err := pbtAttachNodePbtRoot(ctx, nodeDirs, nodeSettings, nodeV3, publishedSettings.TrieHashName(), logger)
-		if err != nil {
-			return err
-		}
-		if nodePbtRoot != publishedPbtRoot {
-			return fmt.Errorf("commitment attach-pbt: node PBT root %s differs from published root %s at (%d, %d)", nodePbtRoot, publishedPbtRoot, blockNum, txNum)
+		if !hooks.skipVerify {
+			nodePbtRoot, err := pbtAttachNodePbtRoot(ctx, nodeDirs, nodeSettings, nodeV3, publishedSettings.TrieHashName(), logger)
+			if err != nil {
+				return err
+			}
+			if nodePbtRoot != publishedPbtRoot {
+				return fmt.Errorf("commitment attach-pbt: node PBT root %s differs from published root %s at (%d, %d)", nodePbtRoot, publishedPbtRoot, blockNum, txNum)
+			}
 		}
 	}
 	refs := publishedSettings.RefsInCommitmentBranches()
@@ -336,6 +350,8 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 			} else {
 				blockEnd = false
 			}
+		} else if hooks.skipVerify {
+			blockEnd = false
 		} else {
 			shadowRoot = publishedPbtRoot
 		}

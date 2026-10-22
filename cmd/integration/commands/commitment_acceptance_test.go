@@ -176,6 +176,74 @@ func TestPBTAttachAcceptanceAtConversionPoint(t *testing.T) {
 	merged.Close()
 }
 
+func TestPBTAttachSkipVerifyAcceptanceAtConversionPoint(t *testing.T) {
+	selectPBTHexCommandSuite(t)
+	node, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
+	require.NoError(t, err)
+	require.NoError(t, node.Tester.InsertChain(node.Chain))
+	require.NoError(t, rawdbreset.ResetExec(t.Context(), node.Tester.DB))
+	require.NoError(t, node.Tester.ReExecuteTo(t.Context(), 2))
+	buildPBTAcceptanceFilesAt(t, node, 7)
+	resetPBTAcceptanceExecution(t, node)
+	node.Tester.Close()
+
+	source, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
+	require.NoError(t, err)
+	copyPBTStateSalt(t, node, source)
+	require.NoError(t, source.Tester.InsertChain(source.Chain.Slice(0, 2)))
+	buildPBTAcceptanceFiles(t, source)
+	source.Tester.Close()
+	selectPBTCommandSuite(t)
+	published := filepath.Join(t.TempDir(), "published")
+	require.NoError(t, convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New(), pbtConvertHooks{skipVerify: true}))
+	publishedSettings, err := dbstate.ReadErigonDBSettings(datadir.Open(published))
+	require.NoError(t, err)
+	conversionBlock, _, ok, err := publishedSettings.ConversionPoint()
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NoError(t, attachPBTWithHooks(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New(), pbtAttachHooks{skipVerify: true}))
+	require.Zero(t, readExecutionStageProgress(t, node.Tester.Dirs.Chaindata))
+	require.Equal(t, readPBTFilesRoot(t, published), readPBTFilesRoot(t, node.Tester.Dirs.DataDir))
+	dual, err := execmoduletester.NewPBTAcceptanceChain(t, false, true)
+	require.NoError(t, err)
+	require.NoError(t, dual.Tester.InsertChain(dual.Chain))
+	selectPBTCommandSuite(t)
+	reopened := execmoduletester.New(t,
+		execmoduletester.WithExistingDataDir(datadir.Open(node.Tester.Dirs.DataDir)),
+		execmoduletester.WithGenesisSpec(node.Genesis),
+		execmoduletester.WithKey(node.Key),
+		execmoduletester.WithStepSize(1),
+		execmoduletester.WithoutGenesisCommit(),
+		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
+	)
+	attachedRaw := reopened.DB.(interface{ InternalDB() kv.RwDB }).InternalDB()
+	dualRaw := dual.Tester.DB.(interface{ InternalDB() kv.RwDB }).InternalDB()
+	var attachedAtConversion []byte
+	require.NoError(t, attachedRaw.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		attachedAtConversion, err = rawdb.ReadShadowStateRoot(tx, node.Chain.Blocks[conversionBlock-1].Hash(), conversionBlock)
+		return err
+	}))
+	require.Empty(t, attachedAtConversion)
+	for block := conversionBlock + 1; block <= node.Chain.TopBlock.NumberU64(); block++ {
+		require.NoError(t, reopened.ReExecuteTo(t.Context(), block))
+		var attachedRoot, dualRoot []byte
+		require.NoError(t, attachedRaw.View(t.Context(), func(tx kv.Tx) error {
+			var err error
+			attachedRoot, err = rawdb.ReadShadowStateRoot(tx, node.Chain.Blocks[block-1].Hash(), block)
+			return err
+		}))
+		require.NoError(t, dualRaw.View(t.Context(), func(tx kv.Tx) error {
+			var err error
+			dualRoot, err = rawdb.ReadShadowStateRoot(tx, dual.Chain.Blocks[block-1].Hash(), block)
+			return err
+		}))
+		require.NotEmpty(t, attachedRoot)
+		require.Equal(t, dualRoot, attachedRoot)
+	}
+	reopened.Close()
+}
+
 func TestPBTAttachPostForkBlockEndShadowRoot(t *testing.T) {
 	selectPBTCommandSuite(t)
 	node, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
@@ -247,6 +315,29 @@ func TestPBTAttachRejectsPublishedRootMismatchWithoutMutation(t *testing.T) {
 	before := snapshotTree(t, node.Tester.Dirs.DataDir)
 	err = attachPBTWithHooks(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New(), hooks)
 	require.ErrorContains(t, err, "published binary rows root")
+	require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
+}
+
+func TestPBTAttachSkipVerifyRefusesPostForkPoint(t *testing.T) {
+	selectPBTCommandSuite(t)
+	node, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
+	require.NoError(t, err)
+	require.NoError(t, node.Tester.InsertChain(node.Chain))
+	buildPBTAcceptanceFilesAt(t, node, 7)
+	resetPBTAcceptanceExecution(t, node)
+	node.Tester.Close()
+	source, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
+	require.NoError(t, err)
+	copyPBTStateSalt(t, node, source)
+	require.NoError(t, source.Tester.InsertChain(source.Chain.Slice(0, 2)))
+	buildPBTAcceptanceFiles(t, source)
+	source.Tester.Close()
+	selectPBTCommandSuite(t)
+	published := filepath.Join(t.TempDir(), "published")
+	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
+	before := snapshotTree(t, node.Tester.Dirs.DataDir)
+	err = attachPBTWithHooks(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New(), pbtAttachHooks{skipVerify: true})
+	require.ErrorContains(t, err, "--skip-verify needs a conversion point before the binary trie fork")
 	require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
 }
 

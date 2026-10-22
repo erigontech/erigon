@@ -53,6 +53,7 @@ import (
 var (
 	convertPBTKeepHex       bool
 	convertPBTOutputDatadir string
+	convertPBTSkipVerify    bool
 )
 
 type pbtConvertHooks struct {
@@ -61,6 +62,7 @@ type pbtConvertHooks struct {
 	rangeWriterLimits    *dbstate.PBinRangeWriterLimits
 	sequentialCommitment bool
 	workerViews          *atomic.Int32
+	skipVerify           bool
 }
 
 func init() {
@@ -70,6 +72,7 @@ func init() {
 	withExperimentalCommitment(cmdCommitmentConvertPBT)
 	cmdCommitmentConvertPBT.Flags().BoolVar(&convertPBTKeepHex, "keep-hex", false, "keep the source v3 hex commitment files")
 	cmdCommitmentConvertPBT.Flags().StringVar(&convertPBTOutputDatadir, "output.datadir", "", "new datadir for the converted commitment files")
+	cmdCommitmentConvertPBT.Flags().BoolVar(&convertPBTSkipVerify, "skip-verify", false, "build only: check the source end by file ranges instead of a leaf pass, and skip re-verifying the written rows and root")
 	must(cmdCommitmentConvertPBT.MarkFlagDirname("output.datadir"))
 	must(cmdCommitmentConvertPBT.MarkFlagRequired("output.datadir"))
 	commitmentCmd.AddCommand(cmdCommitmentConvertPBT)
@@ -81,7 +84,7 @@ var cmdCommitmentConvertPBT = &cobra.Command{
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		return convertPBT(ctx, datadirCli, convertPBTOutputDatadir, convertPBTKeepHex, chain, logger)
+		return convertPBTWithOptions(ctx, datadirCli, convertPBTOutputDatadir, convertPBTKeepHex, chain, logger, pbtConvertHooks{skipVerify: convertPBTSkipVerify})
 	},
 }
 
@@ -205,7 +208,11 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	if keepHex && variant == dbstate.TrieVariantBin {
 		return errors.New("commitment convert-pbt: --keep-hex needs a hex or hex+bin source")
 	}
-	if err := requirePBinSourceEnd(sourceAgg, point.TxNum); err != nil {
+	if hooks.skipVerify {
+		if err := requirePBinSourceFilesEnd(sourceDirs, sourceAgg.StepSize(), point.TxNum); err != nil {
+			return err
+		}
+	} else if err := requirePBinSourceEnd(sourceAgg, point.TxNum); err != nil {
 		return err
 	}
 	header, blockEnd, afterFork, err := readPBinForkPoint(ctx, pbtBlockFilesTx{Tx: sourceTx, view: blockView}, blockReader, point)
@@ -327,11 +334,15 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 			return err
 		}
 	}
-	if err := verifyPBTOutputRows(ctx, outputDirs, finalSettings, targetDomain, point, logger); err != nil {
-		return err
-	}
-	if err := verifyPBTOutputStandalone(ctx, outputDirs, finalSettings, point, root, logger); err != nil {
-		return err
+	if hooks.skipVerify {
+		logger.Info("PBT output verification skipped", "root", root, "block", point.BlockNum, "txNum", point.TxNum)
+	} else {
+		if err := verifyPBTOutputRows(ctx, outputDirs, finalSettings, targetDomain, point, logger); err != nil {
+			return err
+		}
+		if err := verifyPBTOutputStandalone(ctx, outputDirs, finalSettings, point, root, logger); err != nil {
+			return err
+		}
 	}
 	if err := dbstate.WriteErigonDBSettings(outputDirs, finalSettings); err != nil {
 		return err
@@ -559,6 +570,17 @@ func requirePBinSourceEnd(agg *dbstate.Aggregator, endTxNum uint64) error {
 		}
 		return nil
 	})
+}
+
+func requirePBinSourceFilesEnd(dirs datadir.Dirs, stepSize, endTxNum uint64) error {
+	files, err := pbtAttachFiles(dirs)
+	if err != nil {
+		return err
+	}
+	if step, past := pbtAttachFirstStepPastPoint(pbtAttachVisibleFiles(files), stepSize, endTxNum); past {
+		return fmt.Errorf("commitment convert-pbt: state files from step %d hold writes past conversion txNum %d; wait for the next step", step, endTxNum)
+	}
+	return nil
 }
 
 func readPBinForkPoint(ctx context.Context, tx kv.Tx, blockReader *freezeblocks.BlockReader, point pbinConversionPoint) (header *types.Header, blockEnd, afterFork bool, err error) {
