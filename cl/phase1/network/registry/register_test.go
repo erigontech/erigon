@@ -59,3 +59,27 @@ func TestProposerPreferencesRateLimiterAdmitsLookaheadWindowFromOnePeer(t *testi
 		})
 	}
 }
+
+// Aggregates for a slot are published at one point in the slot, so a single peer can forward
+// every committee's aggregators in one burst.
+func TestAggregateAndProofRateLimiterAdmitsSlotBurstFromOnePeer(t *testing.T) {
+	minimal := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&minimal)
+	for _, test := range []struct {
+		name  string
+		cfg   clparams.BeaconChainConfig
+		burst int
+	}{
+		{name: "mainnet", cfg: clparams.MainnetBeaconConfig, burst: 1024},
+		{name: "minimal", cfg: minimal, burst: 64},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			condition := withAggregateAndProofRateLimiter(&test.cfg)
+			pid := peer.ID("aggregate-peer")
+			for i := range test.burst {
+				require.True(t, condition(pid, nil, clparams.FuluVersion), "aggregate %d", i)
+			}
+			require.False(t, condition(pid, nil, clparams.FuluVersion), "the burst is bounded")
+		})
+	}
+}
