@@ -170,10 +170,8 @@ func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalT
 		return err
 	}
 	if ba.HasBAL() {
-		writes := ibs.FinalizedWrites(ba.blockRules)
-		// FinalizedWrites composes pre-tx state for EIP-161 and can hit a base-read
-		// failure; surface it before ResetVersionedIO clears it.
-		if err := ibs.StateReadError(); err != nil {
+		writes, err := ibs.FinalizedWrites(ba.blockRules)
+		if err != nil {
 			return err
 		}
 		ibs.MergeTxIOInto(ba.balIO, writes)
@@ -230,10 +228,8 @@ func (ba *BlockAssembler) AddTransactions(
 	writer := state.NewNoopWriter()
 	recordTxIO := func() error {
 		if ba.HasBAL() {
-			writes := ibs.FinalizedWrites(ba.blockRules)
-			// FinalizedWrites composes pre-tx state for EIP-161 and can hit a base-read
-			// failure; surface it before ResetVersionedIO clears it.
-			if err := ibs.StateReadError(); err != nil {
+			writes, err := ibs.FinalizedWrites(ba.blockRules)
+			if err != nil {
 				return err
 			}
 			ibs.MergeTxIOInto(ba.balIO, writes)
@@ -436,10 +432,8 @@ func (ba *BlockAssembler) AssembleBlock(ibs *state.IntraBlockState, tx kv.Tempor
 	// so we must modify the block's header directly, not ba.Header.
 	header := block.HeaderNoCopy()
 	if ba.HasBAL() {
-		writes := ibs.FinalizedWrites(ba.blockRules)
-		// FinalizedWrites composes pre-tx state for EIP-161 and can hit a base-read
-		// failure; surface it before ResetVersionedIO clears it.
-		if err := ibs.StateReadError(); err != nil {
+		writes, err := ibs.FinalizedWrites(ba.blockRules)
+		if err != nil {
 			return nil, err
 		}
 		// Record finalize system call I/O (EIP-7002, EIP-7251, etc.)

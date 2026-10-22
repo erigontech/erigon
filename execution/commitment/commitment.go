@@ -525,25 +525,16 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 // forwarded to PutBranch so the domain diff records the real previous branch and an
 // unwind across the destruct restores it rather than an empty tombstone.
 func (be *BranchEncoder) CollectTombstone(ctx PatriciaContext, prefix []byte, touchMap uint16, prev []byte) error {
+	if be.deferUpdates {
+		if err := be.CollectDeferredUpdate(ctx, prefix, 0, touchMap, 0, nil, prev); err != nil {
+			return err
+		}
+		be.deferred[len(be.deferred)-1].rawWrite = true
+		return nil
+	}
 	raw, err := be.EncodeBranch(0, touchMap, 0, nil)
 	if err != nil {
 		return err
-	}
-	if be.deferUpdates {
-		limit := be.maxDeferredUpdates
-		if limit == 0 {
-			limit = DefaultMaxDeferredUpdates
-		}
-		if !be.callerOwnsDeferred && len(be.deferred) >= limit {
-			if err := be.ApplyDeferredUpdates(16, ctx.PutBranch); err != nil {
-				return err
-			}
-			be.ClearDeferred()
-		}
-		upd := getDeferredUpdate(prefix, raw, prev)
-		upd.rawWrite = true
-		be.deferred = append(be.deferred, upd)
-		return nil
 	}
 	prefixCopy := bytes.Clone(prefix)
 	updateCopy := bytes.Clone(raw)

@@ -149,7 +149,10 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	}
 
 	if b.ibs.IsVersioned() {
-		writes := b.ibs.FinalizedWrites(b.blockRules())
+		writes, err := b.ibs.FinalizedWrites(b.blockRules())
+		if err != nil {
+			panic(err)
+		}
 		if b.blockIO != nil {
 			b.blockIO.RecordReads(txVersion, b.ibs.VersionedReads())
 			b.blockIO.RecordWrites(txVersion, writes)
@@ -191,7 +194,10 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 	// the same sender sees the advanced nonce. A truly invalid tx (err!=nil) bumps
 	// nothing, so its versioned writes are not flushed.
 	if err == nil && b.ibs.IsVersioned() {
-		writes := b.ibs.FinalizedWrites(b.blockRules())
+		writes, err := b.ibs.FinalizedWrites(b.blockRules())
+		if err != nil {
+			panic(err)
+		}
 		if b.blockIO != nil {
 			b.blockIO.RecordReads(txVersion, b.ibs.VersionedReads())
 			b.blockIO.RecordWrites(txVersion, writes)
@@ -539,10 +545,8 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			// Record system call I/O into blockIO for BAL computation
 			if ibs.IsVersioned() && b.blockIO != nil {
 				initVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: -1}
-				writes := ibs.FinalizedWrites(b.blockRules())
-				// FinalizedWrites composes pre-tx state for EIP-161 and can hit a
-				// base-read failure; surface it before ResetVersionedIO clears it.
-				if err := ibs.StateReadError(); err != nil {
+				writes, err := ibs.FinalizedWrites(b.blockRules())
+				if err != nil {
 					return nil, nil, err
 				}
 				b.blockIO.RecordReads(initVersion, ibs.VersionedReads())
@@ -583,10 +587,8 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			// Record finalize system call I/O into blockIO for BAL computation
 			if ibs.IsVersioned() && b.blockIO != nil {
 				finalizeVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: len(b.txs)}
-				writes := ibs.FinalizedWrites(b.blockRules())
-				// FinalizedWrites composes pre-tx state for EIP-161 and can hit a
-				// base-read failure; surface it before ResetVersionedIO clears it.
-				if err := ibs.StateReadError(); err != nil {
+				writes, err := ibs.FinalizedWrites(b.blockRules())
+				if err != nil {
 					return nil, nil, err
 				}
 				b.blockIO.RecordReads(finalizeVersion, ibs.VersionedReads())

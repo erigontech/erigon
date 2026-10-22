@@ -38,7 +38,7 @@ func TestFinalizedWritesWithholdCreatedEmptyAccount(t *testing.T) {
 
 	require.NoError(t, ibs.TouchAccount(addr))
 
-	writes := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+	writes := finalizedWrites(t, ibs, &chain.Rules{IsSpuriousDragon: true})
 	_, hasAddress := writes.GetAddress(addr)
 	require.False(t, hasAddress)
 	_, hasBalance := writes.GetBalance(addr)
@@ -79,7 +79,7 @@ func TestFinalizedWritesEmptyRemovalClearsWholeAccountCell(t *testing.T) {
 
 	require.NoError(t, ibs.CreateAccount(addr, false))
 
-	writes := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+	writes := finalizedWrites(t, ibs, &chain.Rules{IsSpuriousDragon: true})
 
 	_, hasDelete := writes.GetSelfDestruct(addr)
 	require.True(t, hasDelete, "empty removal must emit a SelfDestruct delete")
@@ -151,7 +151,7 @@ func TestFinalizedWritesLeavesVersionMapForApplyLoop(t *testing.T) {
 	require.NoError(t, ibs.TouchAccount(addr))
 	vm.FlushVersionedWrites(ibs.VersionedWrites(), false, "")
 
-	writes := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+	writes := finalizedWrites(t, ibs, &chain.Rules{IsSpuriousDragon: true})
 	_, hasAddress := writes.GetAddress(addr)
 	require.False(t, hasAddress)
 
@@ -247,7 +247,7 @@ func TestFinalizedWritesKeepCreatedEmptyBeforeEIP161(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xe1})
 	require.NoError(t, ibs.TouchAccount(addr))
 
-	writes := ibs.FinalizedWrites(&chain.Rules{})
+	writes := finalizedWrites(t, ibs, &chain.Rules{})
 	_, ok := writes.GetAddress(addr)
 	require.True(t, ok)
 }
@@ -261,7 +261,7 @@ func TestFinalizedWritesKeepCreatedEmptyAtGenesis(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xe1})
 	require.NoError(t, ibs.TouchAccount(addr))
 
-	writes := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+	writes := finalizedWrites(t, ibs, &chain.Rules{IsSpuriousDragon: true})
 	_, ok := writes.GetAddress(addr)
 	require.True(t, ok)
 }
@@ -274,7 +274,7 @@ func TestFinalizedWritesKeepCreatedEmptyAuraSystemAccount(t *testing.T) {
 
 	require.NoError(t, ibs.TouchAccount(params.SystemAddress))
 
-	writes := ibs.FinalizedWrites(&chain.Rules{
+	writes := finalizedWrites(t, ibs, &chain.Rules{
 		IsSpuriousDragon: true,
 		IsAura:           true,
 	})

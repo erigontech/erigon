@@ -34,7 +34,7 @@ func TestOldIncarnationStorageMaskedAfterRecreate(t *testing.T) {
 		ibs.SetVersion(0)
 		ibs.SetNoMaterialize(true)
 		f(ibs)
-		vm.FlushVersionedWrites(ibs.FinalizedWrites(&chain.Rules{}), true, "")
+		vm.FlushVersionedWrites(finalizedWrites(t, ibs, &chain.Rules{}), true, "")
 	}
 
 	runTx(0, func(ibs *IntraBlockState) {
@@ -66,7 +66,7 @@ func runRevivalTx(t *testing.T, vm *VersionMap, txIdx int, f func(ibs *IntraBloc
 	ibs.SetTxContext(100, txIdx)
 	ibs.SetNoMaterialize(true)
 	f(ibs)
-	writes := ibs.FinalizedWrites(&chain.Rules{})
+	writes := finalizedWrites(t, ibs, &chain.Rules{})
 	vm.FlushVersionedWrites(writes, true, "")
 	return writes
 }

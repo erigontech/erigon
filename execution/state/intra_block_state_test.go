@@ -1574,7 +1574,7 @@ func TestFinalizeTxKeepsTouchedThenCreditedAccount(t *testing.T) {
 	require.NoError(t, ibs.TouchAccount(addr))
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
 	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
-	vm.FlushVersionedWrites(ibs.FinalizedWrites(rules), true, "")
+	vm.FlushVersionedWrites(finalizedWrites(t, ibs, rules), true, "")
 	ibs.ResetVersionedIO()
 
 	ibs.SetTxContext(1, 1)
@@ -1645,4 +1645,11 @@ func TestSetStorageOnNoMaterialize_AppliesOverride(t *testing.T) {
 	got, err := ibs.GetState(addr, key)
 	require.NoError(t, err)
 	require.Equal(t, uint64(7), got.Uint64(), "the override must be recorded on the versioned path")
+}
+
+func finalizedWrites(t testing.TB, ibs *IntraBlockState, rules *chain.Rules) *WriteSet {
+	t.Helper()
+	writes, err := ibs.FinalizedWrites(rules)
+	require.NoError(t, err)
+	return writes
 }

@@ -575,7 +575,7 @@ func TestApplyWrites_TouchedEmptyAccountWithIncarnationDeletes(t *testing.T) {
 	ibs.SetTxContext(1, 0)
 	ibs.SetNoMaterialize(true)
 	require.NoError(t, ibs.TouchAccount(addr))
-	writes := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+	writes := finalizedWrites(t, ibs, &chain.Rules{IsSpuriousDragon: true})
 
 	cs := newTestCalcState()
 	cs.accounts[addr] = &calcAccountState{CodeHash: empty.CodeHash, Incarnation: 1}

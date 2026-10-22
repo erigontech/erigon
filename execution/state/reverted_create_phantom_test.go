@@ -34,7 +34,7 @@ func TestRevertedFreshCreate_NoPhantom(t *testing.T) {
 	require.NoError(t, ibs.SetCode(addr, code, 0))
 	ibs.RevertToSnapshot(snap, nil)
 
-	writes := ibs.FinalizedWrites(finalizedWritesRules())
+	writes := finalizedWrites(t, ibs, finalizedWritesRules())
 	_, hasNonce := writes.GetNonce(addr)
 	_, hasCode := writes.GetCode(addr)
 	_, hasCodeHash := writes.GetCodeHash(addr)
@@ -67,7 +67,7 @@ func TestRevertedRecreate_NoPhantom(t *testing.T) {
 	require.Equal(t, accounts.InternCodeHash(crypto.Keccak256Hash(code)), ch)
 	ibs.RevertToSnapshot(snap, nil)
 
-	writes := ibs.FinalizedWrites(finalizedWritesRules())
+	writes := finalizedWrites(t, ibs, finalizedWritesRules())
 	_, hasNonce := writes.GetNonce(addr)
 	_, hasCode := writes.GetCode(addr)
 	nonceVal := uint64(0)
