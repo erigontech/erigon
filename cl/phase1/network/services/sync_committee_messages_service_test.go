@@ -242,7 +242,7 @@ func TestSyncCommitteesChecksTheCommitteeOfTheMessageSlot(t *testing.T) {
 
 	tests := []struct {
 		name         string
-		headBehind   uint64 // slots between the last slot of the period and the head
+		headBehind   uint64 // slots before the first slot of the next period: 1 puts the head at the last slot
 		messageSlot  uint64 // slots before the first slot of the next period
 		inNext       bool
 		wantRejected bool
@@ -260,7 +260,9 @@ func TestSyncCommitteesChecksTheCommitteeOfTheMessageSlot(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			head, msg := getObjectsForSyncCommitteesServiceTest()
 			cfg := head.BeaconConfig()
-			nextPeriod := cfg.RoundSlotToSyncCommitteePeriod(head.Slot()) + cfg.SlotsPerEpoch*cfg.EpochsPerSyncCommitteePeriod
+			// Three periods after the fixture, so a head two periods behind the message stays above zero.
+			nextPeriod := cfg.RoundSlotToSyncCommitteePeriod(head.Slot()) + 3*cfg.SlotsPerEpoch*cfg.EpochsPerSyncCommitteePeriod
+			require.Greater(t, nextPeriod, tt.headBehind)
 			require.NoError(t, head.SetSlot(nextPeriod-tt.headBehind))
 
 			publicKey := common.Bytes48{0xaa}

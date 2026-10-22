@@ -5,10 +5,12 @@ import (
 	"context"
 	"errors"
 	"math"
+	"math/rand"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	"github.com/golang/snappy"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
@@ -479,7 +481,7 @@ func TestExecutionPayloadEnvelopesByRangeAllowsSpanAboveResponseLimit(t *testing
 	require.Len(t, envelopes, 1)
 	require.Equal(t, "malicious-peer", pid)
 	require.Empty(t, sentinel.bannedPeer)
-	require.Equal(t, []uint64{communication.MaxWireResponseBytes(int(clparams.MaxChunkSize), 1)}, sentinel.maxResponseBytes)
+	require.Equal(t, []uint64{communication.MaxWireResponseBytes(int(clparams.MaxPayloadSize), 1)}, sentinel.maxResponseBytes)
 	require.Len(t, sentinel.requestData, 1)
 
 	wireRequest := &cltypes.ExecutionPayloadEnvelopesByRangeRequest{}
@@ -613,7 +615,7 @@ func TestExecutionPayloadEnvelopeRequestsRejectOversizedDecompressedChunk(t *tes
 	require.NoError(t, err)
 
 	var response bytes.Buffer
-	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, rawSSZ(make([]byte, clparams.MaxChunkSize+1)), gloasDigest[:]...))
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, rawSSZ(make([]byte, clparams.MaxPayloadSize+1)), gloasDigest[:]...))
 
 	for _, request := range []func(*BeaconRpcP2P) ([]*cltypes.SignedExecutionPayloadEnvelope, string, error){
 		func(client *BeaconRpcP2P) ([]*cltypes.SignedExecutionPayloadEnvelope, string, error) {
@@ -630,10 +632,90 @@ func TestExecutionPayloadEnvelopeRequestsRejectOversizedDecompressedChunk(t *tes
 			ethClock:     clock,
 		}
 		envelopes, pid, err := request(client)
-		require.ErrorContains(t, err, "exceeds max chunk size")
+		require.ErrorContains(t, err, "received message too big")
 		require.Empty(t, envelopes)
 		require.Equal(t, "malicious-peer", pid)
 	}
+}
+
+func TestParseResponseDataRejectsOversizedCompressedChunk(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	digest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
+	require.NoError(t, err)
+	firstPayload := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	secondPayload := []byte{9, 10, 11, 12, 13, 14, 15, 16}
+
+	var encoded bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&encoded, rawSSZ(firstPayload), digest[:]...))
+	const prefixSize = 5
+	const streamIdentifierSize = 10
+	prefix, body := encoded.Bytes()[:prefixSize], encoded.Bytes()[prefixSize:]
+	maxCompressedSize := snappy.MaxEncodedLen(len(firstPayload))
+	for _, tc := range []struct {
+		name      string
+		extraByte int
+		wantError bool
+	}{
+		{name: "at limit"},
+		{name: "over limit", extraByte: 1, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			padding := make([]byte, maxCompressedSize-len(body)+tc.extraByte)
+			padding[0] = 0xfe
+			padding[1] = byte(len(padding) - 4)
+			response := append(append(append(append([]byte{}, prefix...), body[:streamIdentifierSize]...), padding...), body[streamIdentifierSize:]...)
+			require.Len(t, response, prefixSize+maxCompressedSize+tc.extraByte)
+			if !tc.wantError {
+				var second bytes.Buffer
+				require.NoError(t, ssz_snappy.EncodeAndWrite(&second, rawSSZ(secondPayload), digest[:]...))
+				response = append(response, 0)
+				response = append(response, second.Bytes()...)
+			}
+
+			client := &BeaconRpcP2P{ethClock: clock}
+			chunks, pid, err := client.parseResponseData(&sentinelproto.ResponseData{
+				Data: response,
+				Peer: &sentinelproto.Peer{Pid: "malicious-peer"},
+			}, nil)
+			if tc.wantError {
+				require.ErrorContains(t, err, "read error")
+				require.Empty(t, chunks)
+				require.Equal(t, "malicious-peer", pid)
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, chunks, 2)
+			require.Equal(t, firstPayload, chunks[0].raw)
+			require.Equal(t, secondPayload, chunks[1].raw)
+			require.Equal(t, "malicious-peer", pid)
+		})
+	}
+}
+
+func TestParseResponseDataAcceptsMaxPayloadSize(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	digest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
+	require.NoError(t, err)
+	payload := make([]byte, clparams.MaxPayloadSize)
+	_, err = rand.New(rand.NewSource(1)).Read(payload)
+	require.NoError(t, err)
+
+	var response bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, rawSSZ(payload), digest[:]...))
+	client := &BeaconRpcP2P{ethClock: clock}
+	chunks, pid, err := client.parseResponseData(&sentinelproto.ResponseData{
+		Data: response.Bytes(),
+		Peer: &sentinelproto.Peer{Pid: "peer"},
+	}, nil)
+	require.NoError(t, err)
+	require.Len(t, chunks, 1)
+	require.Len(t, chunks[0].raw, int(clparams.MaxPayloadSize))
+	require.Equal(t, payload, chunks[0].raw)
+	require.Equal(t, "peer", pid)
 }
 
 func TestExecutionPayloadEnvelopeRequestsRejectExcessResponseChunks(t *testing.T) {
@@ -862,6 +944,7 @@ func TestSendBeaconBlocksByRangeReqRejectsForkSchemaSlotMismatch(t *testing.T) {
 	require.Nil(t, blocks)
 	require.Equal(t, "malicious-peer", pid)
 	require.Equal(t, "malicious-peer", sentinel.bannedPeer)
+	require.Equal(t, []uint64{communication.MaxWireResponseBytes(int(clparams.MaxPayloadSize), 1)}, sentinel.maxResponseBytes)
 }
 
 func TestSendBeaconBlocksByRangeReqRejectsDanglingResponseCodeWithoutPartialResult(t *testing.T) {
@@ -900,7 +983,7 @@ func TestNewBeaconRpcP2PStopsPeerGoroutinesWhenContextEnds(t *testing.T) {
 	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, &cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	for range 4 {
-		NewBeaconRpcP2P(ctx, &emptyColumnResponseSentinel{}, &cfg, clock, nil)
+		NewBeaconRpcP2P(ctx, &emptyColumnResponseSentinel{}, &cfg, clock)
 	}
 	cancel()
 }

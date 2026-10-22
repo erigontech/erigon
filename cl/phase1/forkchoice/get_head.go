@@ -186,9 +186,10 @@ func (f *ForkChoiceStore) GetHeadNode() (ForkChoiceNode, uint64, error) {
 func (f *ForkChoiceStore) getHeadGloas() (ForkChoiceNode, uint64, error) {
 	for {
 		justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
-		// Fetch the checkpoint state before acquiring f.mu (it can read from disk);
-		// a nil state degrades to zero attestation weight, as before.
-		cs, _ := f.getCheckpointState(justifiedCheckpoint)
+		cs, err := f.gloasHeadCheckpointState(justifiedCheckpoint, f.getCheckpointState)
+		if err != nil {
+			return ForkChoiceNode{}, 0, err
+		}
 
 		head, headSlot, ok, err := func() (ForkChoiceNode, uint64, bool, error) {
 			f.mu.Lock()
@@ -222,6 +223,16 @@ func (f *ForkChoiceStore) getHeadGloas() (ForkChoiceNode, uint64, error) {
 	}
 }
 
+func (f *ForkChoiceStore) gloasHeadCheckpointState(justifiedCheckpoint solid.Checkpoint, getCheckpointState func(solid.Checkpoint) (*checkpointState, error)) (*checkpointState, error) {
+	cs, err := getCheckpointState(justifiedCheckpoint)
+	if err != nil {
+		if _, hasJustified := f.forkGraph.GetHeader(justifiedCheckpoint.Root); !hasJustified {
+			return nil, nil
+		}
+	}
+	return cs, err
+}
+
 func (f *ForkChoiceStore) computeHeadGloasWithAnchorFallback(justifiedCheckpoint solid.Checkpoint, cs *checkpointState) (ForkChoiceNode, uint64, error) {
 	if _, hasJustified := f.forkGraph.GetHeader(justifiedCheckpoint.Root); !hasJustified {
 		log.Debug("GetHead: justified root not in fork graph, using anchor as head",
@@ -240,6 +251,7 @@ func (f *ForkChoiceStore) computeHeadGloas(justifiedCheckpoint solid.Checkpoint,
 	currentSlot := f.Slot()
 	nodes, nodeChildren := f.getFilteredNodeTree(justifiedCheckpoint.Root, justifiedCheckpoint, currentSlot)
 	f.headIsFallback = len(nodes) == 0
+	ws := f.gloasWeightTree.prepare(justifiedCheckpoint, cs)
 	if len(nodes) == 0 {
 		header, hasHeader := f.forkGraph.GetHeader(justifiedCheckpoint.Root)
 		if !hasHeader {
@@ -256,8 +268,6 @@ func (f *ForkChoiceStore) computeHeadGloas(justifiedCheckpoint solid.Checkpoint,
 		Root:          justifiedCheckpoint.Root,
 		PayloadStatus: cltypes.PayloadStatusPending,
 	}
-
-	ws := f.gloasWeightTree.prepare(justifiedCheckpoint, cs)
 
 	for {
 		children := make([]ForkChoiceNode, 0, 2)

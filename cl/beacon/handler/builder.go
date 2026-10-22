@@ -365,7 +365,7 @@ func (a *ApiHandler) PostEthV1BuilderRegisterValidator(w http.ResponseWriter, r 
 // slot or state-root stateID it returns nil if that state was advanced past the
 // block's slot, as an anchor state can be; named ids get the state as it is.
 func (a *ApiHandler) forkchoiceStateAtBlockSlot(stateID *beaconhttp.SegmentID, blockRoot common.Hash, blockSlot uint64) (*state.CachingBeaconState, error) {
-	st, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, true)
+	st, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot)
 	if err != nil || st == nil {
 		return nil, err
 	}

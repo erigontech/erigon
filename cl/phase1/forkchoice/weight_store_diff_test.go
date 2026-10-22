@@ -70,7 +70,7 @@ func buildExAnteStore(tb testing.TB) *ForkChoiceStore {
 	store, bd4 := buildExAnteStorePendingLast(tb, nil)
 	require.NoError(tb, store.OnBlock(context.Background(), bd4, false, true, false))
 	store.SetSynced(true)
-	s0, err := store.GetStateAtBlockRoot(store.ProposerBoostRoot(), true)
+	s0, err := store.GetStateAtBlockRoot(store.ProposerBoostRoot())
 	require.NoError(tb, err)
 	require.NoError(tb, store.syncedDataManager.OnHeadState(s0))
 	att := &solid.Attestation{}
@@ -137,7 +137,7 @@ func TestGloasWeightTreeMatchesFullScan(t *testing.T) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	full := NewWeightStore(f)
+	full := newWeightStoreFromCheckpointState(f, cs)
 	tree := f.gloasWeightTree.prepare(justified, cs)
 
 	blocks := f.getFilteredBlockTree(justified.Root, justified, f.Slot())
@@ -170,7 +170,7 @@ func TestGloasWeightTreeDeltaMatchesFullScan(t *testing.T) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	full := NewWeightStore(f)
+	full := newWeightStoreFromCheckpointState(f, cs)
 	f.gloasWeightTree.prepare(justified, cs)
 
 	voters := make([]uint64, 0)

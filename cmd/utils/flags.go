@@ -1001,6 +1001,10 @@ var (
 		Usage: "Enable caplin validator monitoring metrics",
 		Value: false,
 	}
+	CaplinPayloadPreparationDisableFlag = cli.BoolFlag{
+		Name:  "caplin.payload-preparation.disable",
+		Usage: "disable speculative payload preparation while keeping the validator API and normal block production enabled",
+	}
 	CaplinMaxPeerCount = cli.Uint64Flag{
 		Name:  "caplin.max-peer-count",
 		Usage: "Max number of peers to connect",
@@ -1462,8 +1466,11 @@ func NewP2PConfig(
 		MetricsEnabled:  metricsEnabled,
 	}
 	if netRestrict != "" {
-		cfg.NetRestrict = new(netutil.Netlist)
-		cfg.NetRestrict.Add(netRestrict)
+		list, err := netutil.ParseNetlist(netRestrict)
+		if err != nil {
+			return nil, fmt.Errorf("bad option %s: %w", NetrestrictFlag.Name, err)
+		}
+		cfg.NetRestrict = list
 	}
 	if staticPeers != nil {
 		staticNodes, err := enode.ParseNodesFromURLs(staticPeers)
@@ -1869,6 +1876,7 @@ func setBeaconAPI(ctx *cli.Command, cfg *ethconfig.Config) error {
 	cfg.CaplinConfig.BeaconAPIRouter.AllowedOrigins = ctx.StringSlice(BeaconApiAllowOriginsFlag.Name)
 	cfg.CaplinConfig.BeaconAPIRouter.AllowCredentials = ctx.Bool(BeaconApiAllowCredentialsFlag.Name)
 	cfg.CaplinConfig.BeaconAPIRouter.PreserveGraffiti = ctx.Bool(BeaconApiPreserveGraffitiFlag.Name)
+	cfg.CaplinConfig.BeaconAPIRouter.DisablePayloadPreparation = ctx.Bool(CaplinPayloadPreparationDisableFlag.Name)
 	return nil
 }
 

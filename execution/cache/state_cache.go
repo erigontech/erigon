@@ -263,8 +263,6 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 	if cache == nil {
 		return
 	}
-	// Clone outside the lock so admission never waits on the copy.
-	cloned := bytes.Clone(value)
 	if len(value) == 0 {
 		readTxNum = 0
 		if visibleEnd > 0 {
@@ -278,7 +276,7 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 		visibleEnd < c.appliedEnd[domain] {
 		return
 	}
-	cache.PutIfAbsent(key, cloned, readTxNum)
+	cache.PutIfAbsent(key, bytes.Clone(value), readTxNum)
 }
 
 // fillCodeIfFresh is fillIfFresh for the code domain. An addr-keyed code entry

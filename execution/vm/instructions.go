@@ -139,6 +139,12 @@ func opExp(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		} else {
 			exponent.Clear()
 		}
+	case base[0]&base[1]&base[2]&base[3] == math.MaxUint64:
+		if exponent[0]&1 == 0 {
+			exponent.SetOne()
+		} else {
+			exponent.SetAllOne()
+		}
 	default:
 		if base.IsUint64() && exponent.LtUint64(64) && uint64(base.BitLen())*exponent.Uint64() <= 64 {
 			result, factor, power := uint64(1), base.Uint64(), exponent.Uint64()
@@ -381,9 +387,21 @@ func opKeccak256(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 	return pc, nil, nil
 }
 
+func (ctx *CallContext) addressWord(index addressWordIndex, address accounts.Address) *uint256.Int {
+	if !ctx.addressWordsSet[index] {
+		ctx.fillAddressWord(index, address)
+	}
+	return &ctx.addressWords[index]
+}
+
+func (ctx *CallContext) fillAddressWord(index addressWordIndex, address accounts.Address) {
+	value := address.Value()
+	ctx.addressWords[index].SetBytes(value[:])
+	ctx.addressWordsSet[index] = true
+}
+
 func opAddress(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	addrVal := scope.Contract.Address().Value()
-	scope.Stack.pushRef().SetBytes(addrVal[:])
+	scope.Stack.pushRef().Set(scope.addressWord(addressWordSelf, scope.Contract.Address()))
 	return pc, nil, nil
 }
 
@@ -401,22 +419,12 @@ func opBalance(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 }
 
 func opOrigin(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if origin := evm.Origin; origin.IsNil() {
-		scope.Stack.pushRef().Clear()
-	} else {
-		originVal := origin.Value()
-		scope.Stack.pushRef().SetBytes(originVal[:])
-	}
+	scope.Stack.pushRef().Set(scope.addressWord(addressWordOrigin, evm.Origin))
 	return pc, nil, nil
 }
 
 func opCaller(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if caller := scope.Contract.Caller(); caller.IsNil() {
-		scope.Stack.pushRef().Clear()
-	} else {
-		callerValue := caller.Value()
-		scope.Stack.pushRef().SetBytes(callerValue[:])
-	}
+	scope.Stack.pushRef().Set(scope.addressWord(addressWordCaller, scope.Contract.Caller()))
 	return pc, nil, nil
 }
 
@@ -694,12 +702,7 @@ func stBlockhash(_ uint64, scope *CallContext) string {
 }
 
 func opCoinbase(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if coinbase := evm.Context.Coinbase; coinbase.IsNil() {
-		scope.Stack.pushRef().Clear()
-	} else {
-		coinbaseValue := coinbase.Value()
-		scope.Stack.pushRef().SetBytes(coinbaseValue[:])
-	}
+	scope.Stack.pushRef().Set(scope.addressWord(addressWordCoinbase, evm.Context.Coinbase))
 	return pc, nil, nil
 }
 
@@ -719,14 +722,12 @@ func opSlotNum(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 }
 
 func opDifficulty(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	var v uint256.Int
 	if evm.Context.PrevRanDao != nil {
 		// EIP-4399: Supplant DIFFICULTY opcode with PREVRANDAO
-		v.SetBytes32(evm.Context.PrevRanDao[:])
+		scope.Stack.pushRef().SetBytes32(evm.Context.PrevRanDao[:])
 	} else {
-		v = evm.Context.Difficulty
+		*scope.Stack.pushRef() = evm.Context.Difficulty
 	}
-	scope.Stack.push(v)
 	return pc, nil, nil
 }
 
@@ -766,6 +767,15 @@ func opMstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 func stMstore(_ uint64, scope *CallContext) string {
 	mStart, val := scope.Stack.data[scope.Stack.top-1], scope.Stack.data[scope.Stack.top-2]
 	return fmt.Sprintf("%s %d %d", MSTORE, mStart.Uint64(), &val)
+}
+
+// opMcopy implements the MCOPY opcode (https://eips.ethereum.org/EIPS/eip-5656)
+func opMcopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	// These values are checked for overflow during memory expansion calculation
+	// (the memorySize function on the opcode).
+	dst, src, length := scope.Stack.pop3()
+	scope.Memory.Copy(dst.Uint64(), src.Uint64(), length.Uint64())
+	return pc, nil, nil
 }
 
 func opMstore8(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
@@ -1308,26 +1318,30 @@ func stStaticCall(_ uint64, scope *CallContext) string {
 }
 
 func (evm *EVM) output(mem *Memory, offset, size uint64) []byte {
-	if buf := evm.outputBuffer(size); buf != nil && size != 0 {
+	if buf := evm.outputBuffer(evm.depth, size); buf != nil && size != 0 {
 		*buf = append((*buf)[:0], mem.GetPtr(offset, size)...)
 		return slices.Clip(*buf)
 	}
 	return mem.GetCopy(offset, size)
 }
 
-// outputBuffer returns where the current frame's output goes, or nil for a fresh copy.
-// Tracers keep nested outputs, and a buffer that outgrows the cap is not kept.
-func (evm *EVM) outputBuffer(size uint64) *[]byte {
-	if evm.depth == 1 {
+// outputBuffer returns where the output of a frame at depth goes, or nil for a fresh copy.
+// Tracers that see outputs may keep them, and a buffer that outgrows the cap is not kept.
+// maxKeptCallOutput bounds each per-depth output buffer; an EVM keeps one per depth, up to 16.
+const maxKeptCallOutput = uint64(256 * datasize.KB)
+
+func (evm *EVM) outputBuffer(depth int, size uint64) *[]byte {
+	if depth == 1 {
 		return evm.txOutput
 	}
-	if evm.depth >= len(evm.outputs) || size > uint64(64*datasize.KB) || evm.config.Tracer != nil {
+	t := evm.config.Tracer
+	if depth >= len(evm.outputs) || size > maxKeptCallOutput || t.HasExitHook() || t.HasOpcodeHook() {
 		return nil
 	}
 	if evm.outputs == nil {
 		evm.outputs = new([16][]byte)
 	}
-	return &evm.outputs[evm.depth]
+	return &evm.outputs[depth]
 }
 
 func opReturn(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {

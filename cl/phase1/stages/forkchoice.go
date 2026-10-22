@@ -418,7 +418,7 @@ func saveFinalizedStateOnDiskIfNeeded(fc forkchoice.ForkChoiceStorageReader, bea
 	if headSlot%(beaconCfg.SlotsPerEpoch*epochFrequency) != 0 {
 		return nil
 	}
-	st, err := fc.GetStateAtBlockRoot(fc.FinalizedCheckpoint().Root, true)
+	st, err := fc.GetStateAtBlockRoot(fc.FinalizedCheckpoint().Root)
 	if err != nil {
 		log.Debug("[Caplin] could not fetch finalized state to persist (non-fatal)", "err", err)
 		return nil
@@ -433,7 +433,7 @@ func saveFinalizedStateOnDiskIfNeeded(fc forkchoice.ForkChoiceStorageReader, bea
 // these sets of operations can take as long as they need to run, as by-now we are already synced.
 func postForkchoiceOperations(tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot uint64, headRoot common.Hash) error {
 	// Retrieve the head state.
-	headState, err := cfg.forkChoice.GetStateAtBlockRoot(headRoot, false)
+	headState, err := cfg.forkChoice.GetStateAtBlockRoot(headRoot)
 	if err != nil {
 		return fmt.Errorf("failed to get state at block root: %w", err)
 	}
@@ -526,39 +526,53 @@ func preCacheNextShuffledValidatorSet(logger log.Logger, cfg *Cfg, b *state.Cach
 		return
 	}
 	workingPreCacheNextShuffledValidatorSet.Store(true)
+	currentEpoch := state.Epoch(b)
+	beaconConfig := cfg.beaconCfg
+
+	// Pre-cache shuffled sets for epochs: current-2, current-1, current, and next
+	epochsToCache := []uint64{currentEpoch + 1}
+	switch {
+	case currentEpoch >= 2:
+		epochsToCache = append(epochsToCache, currentEpoch-2, currentEpoch-1, currentEpoch)
+	case currentEpoch >= 1:
+		epochsToCache = append(epochsToCache, currentEpoch-1, currentEpoch)
+	default:
+		epochsToCache = append(epochsToCache, currentEpoch)
+	}
+
+	var inputs []shuffleInput
+	for _, epoch := range epochsToCache {
+		if in, ok := shuffleInputForEpoch(logger, beaconConfig, b, epoch); ok {
+			inputs = append(inputs, in)
+		}
+	}
 	go func() {
 		defer workingPreCacheNextShuffledValidatorSet.Store(false)
-		currentEpoch := state.Epoch(b)
-		beaconConfig := cfg.beaconCfg
-
-		// Pre-cache shuffled sets for epochs: current-2, current-1, current, and next
-		epochsToCache := []uint64{currentEpoch + 1}
-		switch {
-		case currentEpoch >= 2:
-			epochsToCache = append(epochsToCache, currentEpoch-2, currentEpoch-1, currentEpoch)
-		case currentEpoch >= 1:
-			epochsToCache = append(epochsToCache, currentEpoch-1, currentEpoch)
-		default:
-			epochsToCache = append(epochsToCache, currentEpoch)
-		}
-
-		for _, epoch := range epochsToCache {
-			preCacheShuffledSetForEpoch(logger, beaconConfig, b, epoch)
+		for _, in := range inputs {
+			preCacheShuffledSet(in)
 		}
 	}()
 }
 
-func preCacheShuffledSetForEpoch(logger log.Logger, beaconConfig *clparams.BeaconChainConfig, b *state.CachingBeaconState, epoch uint64) {
+type shuffleInput struct {
+	beaconConfig *clparams.BeaconChainConfig
+	epoch        uint64
+	blockRoot    common.Hash
+	indicies     []uint64
+	mix          common.Hash
+}
+
+func shuffleInputForEpoch(logger log.Logger, beaconConfig *clparams.BeaconChainConfig, b *state.CachingBeaconState, epoch uint64) (shuffleInput, bool) {
 	// Check if any action is needed
 	refSlot := ((epoch - 1) * b.BeaconConfig().SlotsPerEpoch) - 1
 	if epoch == 0 || refSlot >= b.Slot() {
-		return
+		return shuffleInput{}, false
 	}
 	// Get the block root at the beginning of the previous epoch
 	blockRootAtBegginingPrevEpoch, err := b.GetBlockRootAtSlot(refSlot)
 	if err != nil {
 		logger.Warn("failed to get block root at slot for pre-caching shuffled set", "err", err)
-		return
+		return shuffleInput{}, false
 	}
 
 	// Pre-cache active validators if not already cached
@@ -566,35 +580,42 @@ func preCacheShuffledSetForEpoch(logger log.Logger, beaconConfig *clparams.Beaco
 
 	// Skip if the shuffled set is already pre-cached
 	if _, ok := caches.ShuffledIndiciesCacheGlobal.Get(epoch, blockRootAtBegginingPrevEpoch); ok {
-		return
+		return shuffleInput{}, false
+	}
+	stateRoot := b.StateRoots().Get(int(refSlot % beaconConfig.SlotsPerHistoricalRoot))
+	if stateRoot != (common.Hash{}) {
+		if shuffledIndicies, ok := caches.LookaheadShuffledIndiciesCacheGlobal.Get(epoch, stateRoot); ok {
+			caches.ShuffledIndiciesCacheGlobal.Put(epoch, blockRootAtBegginingPrevEpoch, shuffledIndicies)
+			return shuffleInput{}, false
+		}
 	}
 
-	indicies := b.GetActiveValidatorsIndices(epoch)
-	shuffledIndicies := make([]uint64, len(indicies))
 	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
 		beaconConfig.EpochsPerHistoricalVector
-	// Input for the seed hash.
-	mix := b.GetRandaoMix(int(mixPosition))
+	return shuffleInput{
+		beaconConfig: b.BeaconConfig(),
+		epoch:        epoch,
+		blockRoot:    blockRootAtBegginingPrevEpoch,
+		indicies:     b.GetActiveValidatorsIndices(epoch),
+		mix:          b.GetRandaoMix(int(mixPosition)),
+	}, true
+}
+
+func preCacheShuffledSet(in shuffleInput) {
+	shuffledIndicies := make([]uint64, len(in.indicies))
 	start := time.Now()
-	shuffledIndicies = shuffling.ComputeShuffledIndicies(b.BeaconConfig(), mix, shuffledIndicies, indicies, epoch*beaconConfig.SlotsPerEpoch)
+	shuffledIndicies = shuffling.ComputeShuffledIndicies(in.beaconConfig, in.mix, shuffledIndicies, in.indicies, in.epoch*in.beaconConfig.SlotsPerEpoch)
 	shuffling_metrics.ObserveComputeShuffledIndiciesTime(start)
 
-	caches.ShuffledIndiciesCacheGlobal.Put(epoch, blockRootAtBegginingPrevEpoch, shuffledIndicies)
-	log.Info("[CL] pre-cached shuffled set", "epoch", epoch, "len", len(shuffledIndicies), "mix", common.Hash(mix))
+	caches.ShuffledIndiciesCacheGlobal.Put(in.epoch, in.blockRoot, shuffledIndicies)
+	log.Info("[CL] pre-cached shuffled set", "epoch", in.epoch, "len", len(shuffledIndicies), "mix", in.mix)
 }
 
 func preCacheActiveValidatorsForEpoch(b *state.CachingBeaconState, epoch uint64, blockRoot common.Hash) {
-	// Skip if already fully cached (both active validators and total balance)
-	if indicies, totalBalance, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, blockRoot); ok && len(indicies) > 0 && totalBalance > 0 {
+	if indicies, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, blockRoot); ok && len(indicies) > 0 {
 		return
 	}
 
-	// GetActiveValidatorsIndices and GetTotalActiveBalance will compute and cache the results
 	indicies := b.GetActiveValidatorsIndices(epoch)
-	if epoch != state.Epoch(b) {
-		caches.ActiveValidatorsCacheGlobal.Put(epoch, blockRoot, indicies, 0)
-		return
-	}
-	totalBalance := b.GetTotalActiveBalance()
-	caches.ActiveValidatorsCacheGlobal.Put(epoch, blockRoot, indicies, totalBalance)
+	caches.ActiveValidatorsCacheGlobal.Put(epoch, blockRoot, indicies)
 }
