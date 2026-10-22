@@ -299,6 +299,28 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 	return vm
 }
 
+// BALCreatedAccount returns the account an address absent before the block has
+// before txIdx under the BAL: its balance, nonce and code hash. Nil while they
+// leave it empty, since an empty account does not survive a tx (EIP-161).
+func (vm *VersionMap) BALCreatedAccount(addr accounts.Address, txIdx int) (*accounts.Account, Version) {
+	balance, br, _ := vm.ReadBalance(addr, txIdx)
+	nonce, nr, _ := vm.ReadNonce(addr, txIdx)
+	codeHash, cr, hasCode := vm.ReadCodeHash(addr, txIdx)
+	if !hasCode || codeHash.IsEmpty() {
+		codeHash = accounts.EmptyCodeHash
+	}
+	if balance.IsZero() && nonce == 0 && codeHash == accounts.EmptyCodeHash {
+		return nil, UnknownVersion
+	}
+	v := br.Version()
+	for _, r := range []ReadResult{nr, cr} {
+		if r.depIdx > v.TxIndex {
+			v = r.Version()
+		}
+	}
+	return &accounts.Account{Balance: balance, Nonce: nonce, CodeHash: codeHash}, v
+}
+
 // load returns the AddressEntry for addr, or nil when absent. Lock-free.
 func (vm *VersionMap) load(addr accounts.Address) *AddressEntry {
 	if !vm.nonEmpty.Load() {

@@ -1348,6 +1348,11 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 		if readStorage {
 			readAccount, err = ibs.committedAccount(addr)
 			source = StorageRead
+			if readAccount == nil && err == nil && ibs.versionMap.HasBAL {
+				if acc, v := ibs.versionMap.BALCreatedAccount(addr, ibs.txIndex); acc != nil {
+					return acc, MapRead, v, nil
+				}
+			}
 		}
 
 		if readAccount == nil || err != nil {
@@ -2043,6 +2048,10 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	if readAccount == nil {
 		if ibs.versionMap != nil {
 			readAccount, accountSource, accountVersion, err = refreshAccount(ibs, addr)
+			if readAccount == nil && err == nil && ibs.versionMap.HasBAL {
+				readAccount, accountVersion = ibs.versionMap.BALCreatedAccount(addr, ibs.txIndex)
+				accountSource = MapRead
+			}
 
 			if readAccount == nil || err != nil {
 				return nil, err
